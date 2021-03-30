@@ -18,7 +18,8 @@ EXPORT_SYMBOL(unblock_signals);
 /*
  * OK, we're invoking a handler
  */
-static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
+static void handle_signal(struct pt_regs *regs, unsigned long signr,
+			 struct k_sigaction *ka, siginfo_t *info)
 {
 	sigset_t *oldset = sigmask_to_save();
 	int singlestep = 0;
@@ -38,7 +39,7 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 			break;
 
 		case -ERESTARTSYS:
-			if (!(ksig->ka.sa.sa_flags & SA_RESTART)) {
+			if (!(ka->sa.sa_flags & SA_RESTART)) {
 				PT_REGS_SYSCALL_RET(regs) = -EINTR;
 				break;
 			}
@@ -51,28 +52,32 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 	}
 
 	sp = PT_REGS_SP(regs);
-	if ((ksig->ka.sa.sa_flags & SA_ONSTACK) && (sas_ss_flags(sp) == 0))
+	if ((ka->sa.sa_flags & SA_ONSTACK) && (sas_ss_flags(sp) == 0))
 		sp = current->sas_ss_sp + current->sas_ss_size;
 
 #ifdef CONFIG_ARCH_HAS_SC_SIGNALS
-	if (!(ksig->ka.sa.sa_flags & SA_SIGINFO))
-		err = setup_signal_stack_sc(sp, ksig, regs, oldset);
+	if (!(ka->sa.sa_flags & SA_SIGINFO))
+		err = setup_signal_stack_sc(sp, signr, ka, regs, oldset);
 	else
 #endif
-		err = setup_signal_stack_si(sp, ksig, regs, oldset);
+		err = setup_signal_stack_si(sp, signr, ka, regs, info, oldset);
 
-	signal_setup_done(err, ksig, singlestep);
+	if (err)
+		force_sigsegv(signr, current);
+	else
+		signal_delivered(signr, info, ka, regs, singlestep);
 }
 
-void do_signal(struct pt_regs *regs)
+static int kern_do_signal(struct pt_regs *regs)
 {
-	struct ksignal ksig;
-	int handled_sig = 0;
+	struct k_sigaction ka_copy;
+	siginfo_t info;
+	int sig, handled_sig = 0;
 
-	while (get_signal(&ksig)) {
+	while ((sig = get_signal_to_deliver(&info, &ka_copy, regs, NULL)) > 0) {
 		handled_sig = 1;
 		/* Whee!  Actually deliver the signal.  */
-		handle_signal(&ksig, regs);
+		handle_signal(regs, sig, &ka_copy, &info);
 	}
 
 	/* Did we come from a system call? */
@@ -110,4 +115,10 @@ void do_signal(struct pt_regs *regs)
 	 */
 	if (!handled_sig)
 		restore_saved_sigmask();
+	return handled_sig;
+}
+
+int do_signal(void)
+{
+	return kern_do_signal(&current->thread.regs);
 }

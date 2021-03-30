@@ -24,7 +24,6 @@
 #include <linux/time.h>
 #include <linux/string.h>
 #include <linux/module.h>
-#include <linux/compat.h>
 #include <sound/core.h>
 #include <sound/minors.h>
 #include <sound/control.h>
@@ -398,12 +397,7 @@ int snd_mixer_oss_ioctl_card(struct snd_card *card, unsigned int cmd, unsigned l
 
 #ifdef CONFIG_COMPAT
 /* all compatible */
-static long snd_mixer_oss_ioctl_compat(struct file *file, unsigned int cmd,
-				       unsigned long arg)
-{
-	return snd_mixer_oss_ioctl1(file->private_data, cmd,
-				    (unsigned long)compat_ptr(arg));
-}
+#define snd_mixer_oss_ioctl_compat	snd_mixer_oss_ioctl
 #else
 #define snd_mixer_oss_ioctl_compat	NULL
 #endif
@@ -1117,7 +1111,7 @@ static int snd_mixer_oss_build_input(struct snd_mixer_oss *mixer, struct snd_mix
 	return 0;
 }
 
-#ifdef CONFIG_SND_PROC_FS
+#ifdef CONFIG_PROC_FS
 /*
  */
 #define MIXER_VOL(name) [SOUND_MIXER_##name] = #name
@@ -1183,8 +1177,7 @@ static void snd_mixer_oss_proc_write(struct snd_info_entry *entry,
 	struct snd_mixer_oss *mixer = entry->private_data;
 	char line[128], str[32], idxstr[16];
 	const char *cptr;
-	unsigned int idx;
-	int ch;
+	int ch, idx;
 	struct snd_mixer_oss_assign_table *tbl;
 	struct slot *slot;
 
@@ -1194,8 +1187,7 @@ static void snd_mixer_oss_proc_write(struct snd_info_entry *entry,
 			if (oss_mixer_names[ch] && strcmp(oss_mixer_names[ch], str) == 0)
 				break;
 		if (ch >= SNDRV_OSS_MAX_MIXERS) {
-			pr_err("ALSA: mixer_oss: invalid OSS volume '%s'\n",
-			       str);
+			snd_printk(KERN_ERR "mixer_oss: invalid OSS volume '%s'\n", str);
 			continue;
 		}
 		cptr = snd_info_get_str(str, cptr, sizeof(str));
@@ -1209,7 +1201,7 @@ static void snd_mixer_oss_proc_write(struct snd_info_entry *entry,
 		snd_info_get_str(idxstr, cptr, sizeof(idxstr));
 		idx = simple_strtoul(idxstr, NULL, 10);
 		if (idx >= 0x4000) { /* too big */
-			pr_err("ALSA: mixer_oss: invalid index %d\n", idx);
+			snd_printk(KERN_ERR "mixer_oss: invalid index %d\n", idx);
 			continue;
 		}
 		mutex_lock(&mixer->reg_mutex);
@@ -1219,8 +1211,10 @@ static void snd_mixer_oss_proc_write(struct snd_info_entry *entry,
 			/* not changed */
 			goto __unlock;
 		tbl = kmalloc(sizeof(*tbl), GFP_KERNEL);
-		if (!tbl)
+		if (! tbl) {
+			snd_printk(KERN_ERR "mixer_oss: no memory\n");
 			goto __unlock;
+		}
 		tbl->oss_id = ch;
 		tbl->name = kstrdup(str, GFP_KERNEL);
 		if (! tbl->name) {
@@ -1262,10 +1256,10 @@ static void snd_mixer_oss_proc_done(struct snd_mixer_oss *mixer)
 	snd_info_free_entry(mixer->proc_entry);
 	mixer->proc_entry = NULL;
 }
-#else /* !CONFIG_SND_PROC_FS */
+#else /* !CONFIG_PROC_FS */
 #define snd_mixer_oss_proc_init(mix)
 #define snd_mixer_oss_proc_done(mix)
-#endif /* CONFIG_SND_PROC_FS */
+#endif /* CONFIG_PROC_FS */
 
 static void snd_mixer_oss_build(struct snd_mixer_oss *mixer)
 {
@@ -1349,18 +1343,20 @@ static int snd_mixer_oss_notify_handler(struct snd_card *card, int cmd)
 	struct snd_mixer_oss *mixer;
 
 	if (cmd == SND_MIXER_OSS_NOTIFY_REGISTER) {
+		char name[128];
 		int idx, err;
 
 		mixer = kcalloc(2, sizeof(*mixer), GFP_KERNEL);
 		if (mixer == NULL)
 			return -ENOMEM;
 		mutex_init(&mixer->reg_mutex);
+		sprintf(name, "mixer%i%i", card->number, 0);
 		if ((err = snd_register_oss_device(SNDRV_OSS_DEVICE_TYPE_MIXER,
 						   card, 0,
-						   &snd_mixer_oss_f_ops, card)) < 0) {
-			dev_err(card->dev,
-				"unable to register OSS mixer device %i:%i\n",
-				card->number, 0);
+						   &snd_mixer_oss_f_ops, card,
+						   name)) < 0) {
+			snd_printk(KERN_ERR "unable to register OSS mixer device %i:%i\n",
+				   card->number, 0);
 			kfree(mixer);
 			return err;
 		}
@@ -1369,8 +1365,7 @@ static int snd_mixer_oss_notify_handler(struct snd_card *card, int cmd)
 		if (*card->mixername)
 			strlcpy(mixer->name, card->mixername, sizeof(mixer->name));
 		else
-			snprintf(mixer->name, sizeof(mixer->name),
-				 "mixer%i", card->number);
+			strlcpy(mixer->name, name, sizeof(mixer->name));
 #ifdef SNDRV_OSS_INFO_DEV_MIXERS
 		snd_oss_info_register(SNDRV_OSS_INFO_DEV_MIXERS,
 				      card->number,

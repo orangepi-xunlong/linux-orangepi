@@ -13,6 +13,7 @@
 #include <linux/module.h>
 #include <linux/netdevice.h>
 #include <linux/if_ether.h>
+#include <linux/moduleparam.h>
 #include <linux/ip.h>
 #include <linux/sched.h>
 #include <linux/sockios.h>
@@ -284,7 +285,7 @@ static int chnl_net_open(struct net_device *dev)
 				goto error;
 		}
 
-		lldev = __dev_get_by_index(dev_net(dev), llifindex);
+		lldev = dev_get_by_index(dev_net(dev), llifindex);
 
 		if (lldev == NULL) {
 			pr_debug("no interface?\n");
@@ -306,6 +307,7 @@ static int chnl_net_open(struct net_device *dev)
 		mtu = min_t(int, dev->mtu, lldev->mtu - (headroom + tailroom));
 		mtu = min_t(int, GPRS_PDP_MTU, mtu);
 		dev_set_mtu(dev, mtu);
+		dev_put(lldev);
 
 		if (mtu < 100) {
 			pr_warn("CAIF Interface MTU too small (%d)\n", mtu);
@@ -469,6 +471,7 @@ static int ipcaif_newlink(struct net *src_net, struct net_device *dev,
 	ASSERT_RTNL();
 	caifdev = netdev_priv(dev);
 	caif_netlink_parms(data, &caifdev->conn_req);
+	dev_net_set(caifdev->netdev, src_net);
 
 	ret = register_netdevice(dev);
 	if (ret)

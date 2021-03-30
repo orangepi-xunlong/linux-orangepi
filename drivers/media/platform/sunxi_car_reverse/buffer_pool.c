@@ -14,28 +14,17 @@
 
 #include <linux/version.h>
 #include <linux/slab.h>
-
+#include <linux/dma-mapping.h>
 #include <linux/kernel.h>
 #include <linux/ion_sunxi.h>
 #include <linux/spinlock.h>
-#include <linux/dma-buf.h>
-#include <linux/module.h>
-#include <linux/scatterlist.h>
-#include <linux/sched.h>
-
 
 #include "car_reverse.h"
 
 #define SUNXI_MEM
 #ifdef SUNXI_MEM
-
-
-
 #include <linux/ion.h>
-#include <../drivers/staging/android/ion/ion_priv.h>
 #include <linux/ion_sunxi.h>
-#include <linux/dma-mapping.h>
-
 
 struct ion_private {
 	char *client_name;
@@ -45,6 +34,7 @@ struct ion_private {
 
 struct ion_memory {
 	struct buffer_node node;
+
 	struct list_head list;
 	int alloc_size;
 	struct ion_handle *handle;
@@ -68,8 +58,7 @@ static struct ion_private *get_ion_client(void)
 
 	INIT_LIST_HEAD(&__ion_private->handle_list);
 	__ion_private->client_name = (char *)client_name;
-	__ion_private->client =
-		(struct ion_client *)sunxi_ion_client_create(__ion_private->client_name);
+	__ion_private->client = sunxi_ion_client_create(__ion_private->client_name);
 	if (IS_ERR_OR_NULL(__ion_private->client)) {
 		logerror("%s: create ion client failed\n", __func__);
 
@@ -77,15 +66,16 @@ static struct ion_private *get_ion_client(void)
 		__ion_private = NULL;
 		return NULL;
 	}
+
 	return __ion_private;
 }
 
-struct buffer_node *__buffer_node_alloc(struct device *dev, int size, int flags)
+static struct buffer_node *__buffer_node_alloc(struct device *dev, int size)
 {
 	struct ion_memory *mem = NULL;
-	int ret	= 0;
 	int alloc_size = PAGE_ALIGN(size);
 	struct ion_private *ion = get_ion_client();
+
 	if (!ion || !size)
 		return NULL;
 
@@ -95,17 +85,8 @@ struct buffer_node *__buffer_node_alloc(struct device *dev, int size, int flags)
 		return NULL;
 	}
 
-#if defined CONFIG_SUNXI_IOMMU && defined CONFIG_VIN_IOMMU
-		/* IOMMU */
-		mem->handle = ion_alloc(ion->client, alloc_size, PAGE_SIZE,
-						ION_HEAP_SYSTEM_MASK, 0);
-#else
-		/* CMA or CARVEOUT */
-		mem->handle = ion_alloc(ion->client, alloc_size, PAGE_SIZE,
-					ION_HEAP_TYPE_DMA_MASK |
-					ION_HEAP_CARVEOUT_MASK, 0);
-
-#endif
+	mem->handle = ion_alloc(ion->client, alloc_size, PAGE_SIZE,
+						ION_HEAP_CARVEOUT_MASK|ION_HEAP_TYPE_DMA_MASK, 0);
 	if (IS_ERR_OR_NULL(mem->handle)) {
 		logerror("%s: ion alloc failed\n", __func__);
 		goto ion_alloc_err;
@@ -117,35 +98,18 @@ struct buffer_node *__buffer_node_alloc(struct device *dev, int size, int flags)
 		goto ion_map_err;
 	}
 
+	if (ion_phys(ion->client, mem->handle, (ion_phys_addr_t *)&mem->phy_address, &alloc_size)) {
+		logerror("%s: ion_phys failed\n", __func__);
+		goto ion_phys_err;
+	}
 
-#if defined CONFIG_SUNXI_IOMMU && defined CONFIG_VIN_IOMMU
-		/* IOMMU */
-		ret = dma_map_sg_attrs(dev,
-				mem->handle->buffer->sg_table->sgl,
-				mem->handle->buffer->sg_table->nents,
-				DMA_BIDIRECTIONAL,
-				DMA_ATTR_SKIP_CPU_SYNC);
-		if (ret != 1) {
-			dev_err(dev, "dma map sg fail!! ret id %d\n", ret);
-			goto ion_phys_err;
-		}
-		mem->phy_address = sg_dma_address(mem->handle->buffer->sg_table->sgl);
-#else
-		/* CMA or CARVEOUT */
-		ret = ion_phys(mem->client, mem->handle,
-				(ion_phys_addr_t *)&mem->dma_addr,
-				(size_t *)&mem->size);
-		if (ret) {
-			dev_err(mem->dev, "ion_phys failed!!\n");
-			goto ion_phys_err;
-				}
-#endif
 	mem->alloc_size = alloc_size;
 	list_add(&mem->list, &ion->handle_list);
 
 	mem->node.vir_address = mem->vir_address;
 	mem->node.phy_address = (void *)mem->phy_address;
 	mem->node.size = alloc_size;
+
 	return &mem->node;
 
 ion_phys_err:
@@ -166,21 +130,16 @@ static void try_release_ion_client(void)
 	}
 }
 
-void __buffer_node_free(struct device *dev, struct buffer_node *node)
+static void __buffer_node_free(struct device *dev, struct buffer_node *node)
 {
 	struct ion_memory *mem = container_of(node, struct ion_memory, node);
 	struct ion_private *ion = get_ion_client();
+
 	list_del(&mem->list);
-	#if defined CONFIG_SUNXI_IOMMU && defined CONFIG_VIN_IOMMU
-	dma_unmap_sg_attrs(dev,
-			mem->handle->buffer->sg_table->sgl,
-			mem->handle->buffer->sg_table->nents,
-			DMA_BIDIRECTIONAL,
-			DMA_ATTR_SKIP_CPU_SYNC);
-	#endif
 	ion_unmap_kernel(ion->client, mem->handle);
 	ion_free(ion->client, mem->handle);
 	kfree(mem);
+
 	try_release_ion_client();
 }
 
@@ -188,7 +147,7 @@ void __buffer_node_free(struct device *dev, struct buffer_node *node)
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 1, 0)
 #include <linux/ion_sunxi.h>
-struct buffer_node *__buffer_node_alloc(struct device *dev, int size, int flags)
+static struct buffer_node *__buffer_node_alloc(int size)
 {
 	struct buffer_node *node = NULL;
 	unsigned int phyaddr;
@@ -210,16 +169,19 @@ struct buffer_node *__buffer_node_alloc(struct device *dev, int size, int flags)
 	return node;
 }
 
-void __buffer_node_free(struct device *dev, struct buffer_node *node)
+static void __buffer_node_free(struct buffer_node *node)
 {
 	if (node && node->vir_address) {
 		sunxi_buf_free(node->vir_address,
 			(unsigned int)node->phy_address, node->size);
+
 		kfree(node);
 	}
 }
+
 #else
-struct buffer_node *__buffer_node_alloc(struct device *dev, int size, int flags)
+
+static struct buffer_node *__buffer_node_alloc(struct device *dev, int size)
 {
 	struct buffer_node *node = NULL;
 	unsigned long phyaddr;
@@ -229,6 +191,7 @@ struct buffer_node *__buffer_node_alloc(struct device *dev, int size, int flags)
 		logerror("%s: alloc failed\n", __func__);
 		return NULL;
 	}
+
 	node->size = PAGE_ALIGN(size);
 	node->vir_address = dma_alloc_coherent(dev, node->size,
 				(dma_addr_t *)&phyaddr, GFP_KERNEL);
@@ -241,7 +204,7 @@ struct buffer_node *__buffer_node_alloc(struct device *dev, int size, int flags)
 	return node;
 }
 
-void __buffer_node_free(struct device *dev, struct buffer_node *node, int flags)
+static void __buffer_node_free(struct device *dev, struct buffer_node *node)
 {
 	if (node && node->vir_address && node->phy_address) {
 		dma_free_coherent(dev, node->size,
@@ -263,8 +226,10 @@ static struct buffer_node *buffer_pool_dequeue(struct buffer_pool *bp)
 		list_del(&retval->list);
 	}
 	spin_unlock(&bp->lock);
+
 	return retval;
 }
+
 static void
 buffer_pool_queue(struct buffer_pool *bp, struct buffer_node *node)
 {
@@ -272,6 +237,7 @@ buffer_pool_queue(struct buffer_pool *bp, struct buffer_node *node)
 	list_add_tail(&node->list, &bp->head);
 	spin_unlock(&bp->lock);
 }
+
 
 struct buffer_pool *
 alloc_buffer_pool(struct device *dev, int depth, int buf_size)
@@ -294,6 +260,7 @@ alloc_buffer_pool(struct device *dev, int depth, int buf_size)
 		bp = NULL;
 		goto _out;
 	}
+
 	spin_lock_init(&bp->lock);
 
 	bp->queue_buffer   = buffer_pool_queue;
@@ -302,7 +269,7 @@ alloc_buffer_pool(struct device *dev, int depth, int buf_size)
 	/* alloc memory for buffer node */
 	INIT_LIST_HEAD(&bp->head);
 	for (i = 0; i < depth; i++) {
-		node = __buffer_node_alloc(dev, buf_size, 1);
+		node = __buffer_node_alloc(dev, buf_size);
 		if (node) {
 			list_add(&node->list, &bp->head);
 			bp->pool[i] = node;
@@ -327,7 +294,6 @@ void free_buffer_pool(struct device *dev, struct buffer_pool *bp)
 		logdebug("%s: free %p\n", __func__, node->phy_address);
 		__buffer_node_free(dev, node);
 	}
-
 	spin_unlock(&bp->lock);
 
 	kfree(bp);

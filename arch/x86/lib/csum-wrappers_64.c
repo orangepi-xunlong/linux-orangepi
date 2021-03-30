@@ -5,8 +5,7 @@
  * Wrappers of assembly checksum functions for x86-64.
  */
 #include <asm/checksum.h>
-#include <linux/export.h>
-#include <linux/uaccess.h>
+#include <linux/module.h>
 #include <asm/smap.h>
 
 /**
@@ -42,8 +41,9 @@ csum_partial_copy_from_user(const void __user *src, void *dst,
 		while (((unsigned long)src & 6) && len >= 2) {
 			__u16 val16;
 
-			if (__get_user(val16, (const __u16 __user *)src))
-				goto out_err;
+			*errp = __get_user(val16, (const __u16 __user *)src);
+			if (*errp)
+				return isum;
 
 			*(__u16 *)dst = val16;
 			isum = (__force __wsum)add32_with_carry(
@@ -136,7 +136,7 @@ EXPORT_SYMBOL(csum_partial_copy_nocheck);
 
 __sum16 csum_ipv6_magic(const struct in6_addr *saddr,
 			const struct in6_addr *daddr,
-			__u32 len, __u8 proto, __wsum sum)
+			__u32 len, unsigned short proto, __wsum sum)
 {
 	__u64 rest, sum64;
 

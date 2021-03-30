@@ -15,13 +15,13 @@
 #include <linux/module.h>
 #include <linux/ioport.h>
 #include <linux/slab.h>
+#include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/mii.h>
 #include <linux/platform_device.h>
 #include <linux/mdio-bitbang.h>
-#include <linux/of_address.h>
 #include <linux/of_mdio.h>
 #include <linux/of_platform.h>
 
@@ -172,16 +172,24 @@ static int fs_enet_mdio_probe(struct platform_device *ofdev)
 		goto out_free_bus;
 
 	new_bus->phy_mask = ~0;
+	new_bus->irq = kmalloc(sizeof(int) * PHY_MAX_ADDR, GFP_KERNEL);
+	if (!new_bus->irq) {
+		ret = -ENOMEM;
+		goto out_unmap_regs;
+	}
 
 	new_bus->parent = &ofdev->dev;
-	platform_set_drvdata(ofdev, new_bus);
+	dev_set_drvdata(&ofdev->dev, new_bus);
 
 	ret = of_mdiobus_register(new_bus, ofdev->dev.of_node);
 	if (ret)
-		goto out_unmap_regs;
+		goto out_free_irqs;
 
 	return 0;
 
+out_free_irqs:
+	dev_set_drvdata(&ofdev->dev, NULL);
+	kfree(new_bus->irq);
 out_unmap_regs:
 	iounmap(bitbang->dir);
 out_free_bus:
@@ -194,10 +202,12 @@ out:
 
 static int fs_enet_mdio_remove(struct platform_device *ofdev)
 {
-	struct mii_bus *bus = platform_get_drvdata(ofdev);
+	struct mii_bus *bus = dev_get_drvdata(&ofdev->dev);
 	struct bb_info *bitbang = bus->priv;
 
 	mdiobus_unregister(bus);
+	dev_set_drvdata(&ofdev->dev, NULL);
+	kfree(bus->irq);
 	free_mdio_bitbang(bus);
 	iounmap(bitbang->dir);
 	kfree(bitbang);
@@ -205,7 +215,7 @@ static int fs_enet_mdio_remove(struct platform_device *ofdev)
 	return 0;
 }
 
-static const struct of_device_id fs_enet_mdio_bb_match[] = {
+static struct of_device_id fs_enet_mdio_bb_match[] = {
 	{
 		.compatible = "fsl,cpm2-mdio-bitbang",
 	},
@@ -216,6 +226,7 @@ MODULE_DEVICE_TABLE(of, fs_enet_mdio_bb_match);
 static struct platform_driver fs_enet_bb_mdio_driver = {
 	.driver = {
 		.name = "fsl-bb-mdio",
+		.owner = THIS_MODULE,
 		.of_match_table = fs_enet_mdio_bb_match,
 	},
 	.probe = fs_enet_mdio_probe,

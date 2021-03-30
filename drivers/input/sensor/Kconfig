@@ -37,73 +37,12 @@ config SENSORS_MMA7660
           If you say yes here you get support for the Freescale 3-Axis
           Orientation/Motion Detection Sensor.
 
-config SENSORS_MIR3DA
-        tristate "MIR3DA 2-Axis Orientation/Motion Detection Sensor Support"
-	select I2C
-	depends on INPUT_SENSOR
-	default m
-	help
-	 If you say yes here you get support for the Freescale 3-Axis
-	 Orientation/Motion Detection Sensor.
-          
-config SENSORS_MXC622X
-        tristate "MXC622X 2-Axis Orientation/Motion Detection Sensor Support"
-        select I2C
-        depends on INPUT_SENSOR
-        default m
-        help
-          If you say yes here you get support for the MXC622X 2-Axis
-          Orientation/Motion Detection Sensor.
-
-config SENSORS_MMA8452
-        tristate "MMA8452 3-Axis Orientation/Motion Detection Sensor Support"
-        select I2C
-        depends on INPUT_SENSOR
-        default m
-        help
-          If you say yes here you get support for the Freescale 3-Axis
-          Orientation/Motion Detection Sensor.
-
-config SENSORS_MMA865X
-        tristate "MMA865X 3-Axis Orientation/Motion Detection Sensor Support"
-        select I2C
-        depends on INPUT_SENSOR
-        default m
-        help
-          If you say yes here you get support for the Freescale 3-Axis
-          Orientation/Motion Detection Sensor.			  
-
-config SENSORS_MC32X0
-        tristate "MC32X0 Orientation/Motion Detection Sensor Support"
-	select I2C
-	depends on INPUT_SENSOR
-	default m
-	help
-	 If you say yes here you get support for the Freescale 3-Axis
-	 Orientation/Motion Detection Sensor.
-
-config SENSORS_SC7660
-        tristate "SC7660 Orientation/Motion Detection Sensor Support"
-	select I2C
-	depends on INPUT_SENSOR
-	default n
-	help
-	 If you say yes here you get support for the Freescale 3-Axis
-	 Orientation/Motion Detection Sensor.
-
 config SENSORS_GPADC
         tristate "SUNXI GPADC"
         depends on INPUT_SENSOR
         default n
         help
           If you say yes here you get support for the gpadc collect analog input
-
-config SENSORS_TPADC
-        tristate "SUNXI TPADC"
-        depends on INPUT_SENSOR && ARCH_SUN8IW11P1
-        default n
-        help
-          If you say yes here you get support for the tpadc collect analog input
 
 config SENSORS_GPADC_TEST
         tristate "SUNXI GPADC test"
@@ -112,11 +51,5 @@ config SENSORS_GPADC_TEST
         help
           If you say yes here you get support for the gpadc test sample
 
-config KEY_GPIO
-	bool "allwinnner KEY GPIO support"
-	depends on SENSORS_GPADC
-	default n
-	help
-
+source "drivers/input/sensor/da380/Kconfig"
 endif
-source "drivers/input/sensor/bma253/Kconfig"

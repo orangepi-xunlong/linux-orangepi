@@ -1,5 +1,4 @@
 /*
- * Copyright (C) 2015 Thomas Meyer (thomas@m3y3r.de)
  * Copyright (C) 2002 - 2007 Jeff Dike (jdike@{addtoit,linux.intel}.com)
  * Licensed under the GPL
  */
@@ -17,6 +16,7 @@
 #include <init.h>
 #include <longjmp.h>
 #include <os.h>
+#include <skas_ptrace.h>
 
 #define ARBITRARY_ADDR -1
 #define FAILURE_PID    -1
@@ -90,11 +90,6 @@ int os_process_parent(int pid)
 	return parent;
 }
 
-void os_alarm_process(int pid)
-{
-	kill(pid, SIGALRM);
-}
-
 void os_stop_process(int pid)
 {
 	kill(pid, SIGSTOP);
@@ -105,6 +100,21 @@ void os_kill_process(int pid, int reap_child)
 	kill(pid, SIGKILL);
 	if (reap_child)
 		CATCH_EINTR(waitpid(pid, NULL, __WALL));
+}
+
+/* This is here uniquely to have access to the userspace errno, i.e. the one
+ * used by ptrace in case of error.
+ */
+
+long os_ptrace_ldt(long pid, long addr, long data)
+{
+	int ret;
+
+	ret = ptrace(PTRACE_LDT, pid, addr, data);
+
+	if (ret < 0)
+		return -errno;
+	return ret;
 }
 
 /* Kill off a ptraced child by all means available.  kill it normally first,
@@ -284,4 +294,5 @@ void init_new_thread_signals(void)
 	signal(SIGHUP, SIG_IGN);
 	set_handler(SIGIO);
 	signal(SIGWINCH, SIG_IGN);
+	signal(SIGTERM, SIG_DFL);
 }

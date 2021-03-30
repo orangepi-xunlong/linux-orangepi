@@ -17,6 +17,7 @@
  */
 
 #include <linux/irq.h>
+#include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/errno.h>
 #include <linux/input.h>
@@ -63,8 +64,7 @@ static int retu_pwrbutton_probe(struct platform_device *pdev)
 	input_set_drvdata(idev, rdev);
 
 	error = devm_request_threaded_irq(&pdev->dev, irq,
-					  NULL, retu_pwrbutton_irq,
-					  IRQF_ONESHOT,
+					  NULL, retu_pwrbutton_irq, 0,
 					  "retu-pwrbutton", idev);
 	if (error)
 		return error;
@@ -86,6 +86,7 @@ static struct platform_driver retu_pwrbutton_driver = {
 	.remove		= retu_pwrbutton_remove,
 	.driver		= {
 		.name	= "retu-pwrbutton",
+		.owner	= THIS_MODULE,
 	},
 };
 module_platform_driver(retu_pwrbutton_driver);

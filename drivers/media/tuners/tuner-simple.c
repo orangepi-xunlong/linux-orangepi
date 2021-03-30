@@ -1035,7 +1035,7 @@ static int simple_get_bandwidth(struct dvb_frontend *fe, u32 *bandwidth)
 	return 0;
 }
 
-static const struct dvb_tuner_ops simple_tuner_ops = {
+static struct dvb_tuner_ops simple_tuner_ops = {
 	.init              = simple_init,
 	.sleep             = simple_sleep,
 	.set_analog_params = simple_set_params,
@@ -1148,3 +1148,11 @@ EXPORT_SYMBOL_GPL(simple_tuner_attach);
 MODULE_DESCRIPTION("Simple 4-control-bytes style tuner driver");
 MODULE_AUTHOR("Ralph Metzler, Gerd Knorr, Gunther Mayer");
 MODULE_LICENSE("GPL");
+
+/*
+ * Overrides for Emacs so that we follow Linus's tabbing style.
+ * ---------------------------------------------------------------------------
+ * Local variables:
+ * c-basic-offset: 8
+ * End:
+ */

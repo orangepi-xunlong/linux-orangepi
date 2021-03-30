@@ -47,11 +47,10 @@
 #include <asm/netlogic/interrupt.h>
 #include <asm/netlogic/haldefs.h>
 #include <asm/netlogic/common.h>
-#include <asm/netlogic/mips-extns.h>
 
 #include <asm/netlogic/xlp-hal/iomap.h>
-#include <asm/netlogic/xlp-hal/xlp.h>
 #include <asm/netlogic/xlp-hal/pic.h>
+#include <asm/netlogic/xlp-hal/xlp.h>
 #include <asm/netlogic/xlp-hal/pcibus.h>
 #include <asm/netlogic/xlp-hal/bridge.h>
 
@@ -67,22 +66,9 @@ static inline u32 pci_cfg_read_32bit(struct pci_bus *bus, unsigned int devfn,
 	u32 *cfgaddr;
 
 	where &= ~3;
-	if (cpu_is_xlp9xx()) {
-		/* be very careful on SoC buses */
-		if (bus->number == 0) {
-			/* Scan only existing nodes - uboot bug? */
-			if (PCI_SLOT(devfn) != 0 ||
-					   !nlm_node_present(PCI_FUNC(devfn)))
-				return 0xffffffff;
-		} else if (bus->parent->number == 0) {	/* SoC bus */
-			if (PCI_SLOT(devfn) == 0)	/* b.0.0 hangs */
-				return 0xffffffff;
-			if (devfn == 44)		/* b.5.4 hangs */
-				return 0xffffffff;
-		}
-	} else if (bus->number == 0 && PCI_SLOT(devfn) == 1 && where == 0x954) {
+	if (bus->number == 0 && PCI_SLOT(devfn) == 1 && where == 0x954)
 		return 0xffffffff;
-	}
+
 	cfgaddr = (u32 *)(pci_config_base +
 			pci_cfg_addr(bus->number, devfn, where));
 	data = *cfgaddr;
@@ -176,39 +162,27 @@ struct pci_controller nlm_pci_controller = {
 	.io_offset	= 0x00000000UL,
 };
 
-struct pci_dev *xlp_get_pcie_link(const struct pci_dev *dev)
+static struct pci_dev *xlp_get_pcie_link(const struct pci_dev *dev)
 {
 	struct pci_bus *bus, *p;
 
+	/* Find the bridge on bus 0 */
 	bus = dev->bus;
+	for (p = bus->parent; p && p->number != 0; p = p->parent)
+		bus = p;
 
-	if (cpu_is_xlp9xx()) {
-		/* find bus with grand parent number == 0 */
-		for (p = bus->parent; p && p->parent && p->parent->number != 0;
-				p = p->parent)
-			bus = p;
-		return (p && p->parent) ? bus->self : NULL;
-	} else {
-		/* Find the bridge on bus 0 */
-		for (p = bus->parent; p && p->number != 0; p = p->parent)
-			bus = p;
-
-		return p ? bus->self : NULL;
-	}
+	return p ? bus->self : NULL;
 }
 
-int xlp_socdev_to_node(const struct pci_dev *lnkdev)
+static inline int nlm_pci_link_to_irq(int link)
 {
-	if (cpu_is_xlp9xx())
-		return PCI_FUNC(lnkdev->bus->self->devfn);
-	else
-		return PCI_SLOT(lnkdev->devfn) / 8;
+	return PIC_PCIE_LINK_0_IRQ + link;
 }
 
 int __init pcibios_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
 {
 	struct pci_dev *lnkdev;
-	int lnkfunc, node;
+	int lnkslot, lnkfunc;
 
 	/*
 	 * For XLP PCIe, there is an IRQ per Link, find out which
@@ -217,11 +191,9 @@ int __init pcibios_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
 	lnkdev = xlp_get_pcie_link(dev);
 	if (lnkdev == NULL)
 		return 0;
-
 	lnkfunc = PCI_FUNC(lnkdev->devfn);
-	node = xlp_socdev_to_node(lnkdev);
-
-	return nlm_irq_to_xirq(node, PIC_PCIE_LINK_LEGACY_IRQ(lnkfunc));
+	lnkslot = PCI_SLOT(lnkdev->devfn);
+	return nlm_irq_to_xirq(lnkslot / 8, nlm_pci_link_to_irq(lnkfunc));
 }
 
 /* Do platform specific device initialization at pci_enable_device() time */
@@ -248,38 +220,17 @@ static void xlp_config_pci_bswap(int node, int link)
 	 *  Enable byte swap in hardware. Program each link's PCIe SWAP regions
 	 * from the link's address ranges.
 	 */
-	if (cpu_is_xlp9xx()) {
-		reg = nlm_read_bridge_reg(nbubase,
-				BRIDGE_9XX_PCIEMEM_BASE0 + link);
-		nlm_write_pci_reg(lnkbase, PCIE_9XX_BYTE_SWAP_MEM_BASE, reg);
+	reg = nlm_read_bridge_reg(nbubase, BRIDGE_PCIEMEM_BASE0 + link);
+	nlm_write_pci_reg(lnkbase, PCIE_BYTE_SWAP_MEM_BASE, reg);
 
-		reg = nlm_read_bridge_reg(nbubase,
-				BRIDGE_9XX_PCIEMEM_LIMIT0 + link);
-		nlm_write_pci_reg(lnkbase,
-				PCIE_9XX_BYTE_SWAP_MEM_LIM, reg | 0xfff);
+	reg = nlm_read_bridge_reg(nbubase, BRIDGE_PCIEMEM_LIMIT0 + link);
+	nlm_write_pci_reg(lnkbase, PCIE_BYTE_SWAP_MEM_LIM, reg | 0xfff);
 
-		reg = nlm_read_bridge_reg(nbubase,
-				BRIDGE_9XX_PCIEIO_BASE0 + link);
-		nlm_write_pci_reg(lnkbase, PCIE_9XX_BYTE_SWAP_IO_BASE, reg);
+	reg = nlm_read_bridge_reg(nbubase, BRIDGE_PCIEIO_BASE0 + link);
+	nlm_write_pci_reg(lnkbase, PCIE_BYTE_SWAP_IO_BASE, reg);
 
-		reg = nlm_read_bridge_reg(nbubase,
-				BRIDGE_9XX_PCIEIO_LIMIT0 + link);
-		nlm_write_pci_reg(lnkbase,
-				PCIE_9XX_BYTE_SWAP_IO_LIM, reg | 0xfff);
-	} else {
-		reg = nlm_read_bridge_reg(nbubase, BRIDGE_PCIEMEM_BASE0 + link);
-		nlm_write_pci_reg(lnkbase, PCIE_BYTE_SWAP_MEM_BASE, reg);
-
-		reg = nlm_read_bridge_reg(nbubase,
-					BRIDGE_PCIEMEM_LIMIT0 + link);
-		nlm_write_pci_reg(lnkbase, PCIE_BYTE_SWAP_MEM_LIM, reg | 0xfff);
-
-		reg = nlm_read_bridge_reg(nbubase, BRIDGE_PCIEIO_BASE0 + link);
-		nlm_write_pci_reg(lnkbase, PCIE_BYTE_SWAP_IO_BASE, reg);
-
-		reg = nlm_read_bridge_reg(nbubase, BRIDGE_PCIEIO_LIMIT0 + link);
-		nlm_write_pci_reg(lnkbase, PCIE_BYTE_SWAP_IO_LIM, reg | 0xfff);
-	}
+	reg = nlm_read_bridge_reg(nbubase, BRIDGE_PCIEIO_LIMIT0 + link);
+	nlm_write_pci_reg(lnkbase, PCIE_BYTE_SWAP_IO_LIM, reg | 0xfff);
 }
 #else
 /* Swap configuration not needed in little-endian mode */
@@ -288,6 +239,7 @@ static inline void xlp_config_pci_bswap(int node, int link) {}
 
 static int __init pcibios_init(void)
 {
+	struct nlm_soc_info *nodep;
 	uint64_t pciebase;
 	int link, n;
 	u32 reg;
@@ -301,20 +253,20 @@ static int __init pcibios_init(void)
 	ioport_resource.end   = ~0;
 
 	for (n = 0; n < NLM_NR_NODES; n++) {
-		if (!nlm_node_present(n))
-			continue;
+		nodep = nlm_get_node(n);
+		if (!nodep->coremask)
+			continue;	/* node does not exist */
 
-		for (link = 0; link < PCIE_NLINKS; link++) {
+		for (link = 0; link < 4; link++) {
 			pciebase = nlm_get_pcie_base(n, link);
 			if (nlm_read_pci_reg(pciebase, 0) == 0xffffffff)
 				continue;
 			xlp_config_pci_bswap(n, link);
-			xlp_init_node_msi_irqs(n, link);
 
 			/* put in intpin and irq - u-boot does not */
 			reg = nlm_read_pci_reg(pciebase, 0xf);
-			reg &= ~0x1ffu;
-			reg |= (1 << 8) | PIC_PCIE_LINK_LEGACY_IRQ(link);
+			reg &= ~0x1fu;
+			reg |= (1 << 8) | nlm_pci_link_to_irq(link);
 			nlm_write_pci_reg(pciebase, 0xf, reg);
 			pr_info("XLP PCIe: Link %d-%d initialized.\n", n, link);
 		}

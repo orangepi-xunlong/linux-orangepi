@@ -2,9 +2,8 @@
  * Logging Support for MPT (Message Passing Technology) based controllers
  *
  * This code is based on drivers/scsi/mpt3sas/mpt3sas_debug.c
- * Copyright (C) 2012-2014  LSI Corporation
- * Copyright (C) 2013-2014 Avago Technologies
- *  (mailto: MPT-FusionLinux.pdl@avagotech.com)
+ * Copyright (C) 2012  LSI Corporation
+ *  (mailto:DL-MPTFusionLinux@lsi.com)
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -68,11 +67,20 @@
 #define MPT_DEBUG_TRIGGER_DIAG		0x00200000
 
 
+/*
+ * CONFIG_SCSI_MPT3SAS_LOGGING - enabled in Kconfig
+ */
+
+#ifdef CONFIG_SCSI_MPT3SAS_LOGGING
 #define MPT_CHECK_LOGGING(IOC, CMD, BITS)			\
 {								\
 	if (IOC->logging_level & BITS)				\
 		CMD;						\
 }
+#else
+#define MPT_CHECK_LOGGING(IOC, CMD, BITS)
+#endif /* CONFIG_SCSI_MPT3SAS_LOGGING */
+
 
 /*
  * debug macros
@@ -144,7 +152,7 @@
 
 
 /* inline functions for dumping debug data*/
-
+#ifdef CONFIG_SCSI_MPT3SAS_LOGGING
 /**
  * _debug_dump_mf - print message frame contents
  * @mpi_request: pointer to message frame
@@ -202,5 +210,10 @@ _debug_dump_config(void *mpi_request, int sz)
 	}
 	pr_info("\n");
 }
+#else
+#define _debug_dump_mf(mpi_request, sz)
+#define _debug_dump_reply(mpi_request, sz)
+#define _debug_dump_config(mpi_request, sz)
+#endif /* CONFIG_SCSI_MPT3SAS_LOGGING */
 
 #endif /* MPT3SAS_DEBUG_H_INCLUDED */

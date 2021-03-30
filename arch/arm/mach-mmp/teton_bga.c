@@ -23,11 +23,11 @@
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
-#include "addr-map.h"
-#include "mfp-pxa168.h"
-#include "pxa168.h"
-#include "teton_bga.h"
-#include "irqs.h"
+#include <mach/addr-map.h>
+#include <mach/mfp-pxa168.h>
+#include <mach/pxa168.h>
+#include <mach/teton_bga.h>
+#include <mach/irqs.h>
 
 #include "common.h"
 
@@ -61,15 +61,11 @@ static unsigned int teton_bga_matrix_key_map[] = {
 	KEY(1, 7, KEY_RIGHT),
 };
 
-static struct matrix_keymap_data teton_bga_matrix_keymap_data = {
-	.keymap			= teton_bga_matrix_key_map,
-	.keymap_size		= ARRAY_SIZE(teton_bga_matrix_key_map),
-};
-
 static struct pxa27x_keypad_platform_data teton_bga_keypad_info __initdata = {
 	.matrix_key_rows        = 2,
 	.matrix_key_cols        = 8,
-	.matrix_keymap_data	= &teton_bga_matrix_keymap_data,
+	.matrix_key_map         = teton_bga_matrix_key_map,
+	.matrix_key_map_size    = ARRAY_SIZE(teton_bga_matrix_key_map),
 	.debounce_interval      = 30,
 };
 

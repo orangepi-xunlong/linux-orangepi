@@ -1,41 +1,47 @@
 /*
- * include/linux/power/aw_pm.h
- * (C) Copyright 2010-2016
- * Allwinner Technology Co., Ltd. <www.allwinnertech.com>
- * Yanggq <yanggq@allwinnertech.com>
+ * Copyright (c) 2011-2020 yanggq.young@allwinnertech.com
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License version 2 as published by
+ * the Free Software Foundation.
  */
-
 #ifndef __AW_PM_H__
 #define __AW_PM_H__
 
-#include <linux/types.h>
 #include "axp_depend.h"
+#include <linux/types.h>
+#include "../../../drivers/soc/allwinner/pm/pm.h"
 
 #define BITMAP(bit) (0x1<<bit)
 
-/* max device number of pmu */
+/**max device number of pmu*/
 #define PMU_MAX_DEVS        2
 
+/**
+*@name PMU command
+*@{
+*/
 #define AW_PMU_SET          0x10
 #define AW_PMU_VALID        0x20
+/**
+*@}
+*/
 
-/* the wakeup source of main cpu: cpu0 */
+/*
+* the wakeup source of main cpu: cpu0
+*/
+/* external interrupt, pmu event for ex.    */
 #define CPU0_WAKEUP_MSGBOX      (1<<0)
+/* key event    */
 #define CPU0_WAKEUP_KEY         (1<<1)
-#define CPU0_WAKEUP_EXINT       (1<<2)
-#define CPU0_WAKEUP_IR          (1<<3)
-#define CPU0_WAKEUP_ALARM       (1<<4)
-#define CPU0_WAKEUP_USB         (1<<5)
-#define CPU0_WAKEUP_TIMEOUT     (1<<6)
-#define CPU0_WAKEUP_GPIO        (1<<7)
+#define CPU0_WAKEUP_EXINT	(1<<2)
+#define CPU0_WAKEUP_IR		(1<<3)
+#define CPU0_WAKEUP_ALARM	(1<<4)
+#define CPU0_WAKEUP_USB		(1<<5)
+#define CPU0_WAKEUP_TIMEOUT	(1<<6)
+#define CPU0_WAKEUP_GPIO	(1<<7)
 
 /* the wakeup source of assistant cpu: cpus */
-#define CPUS_WAKEUP_HDMI_CEC    (1<<11)
 #define CPUS_WAKEUP_LOWBATT     (1<<12)
 #define CPUS_WAKEUP_USB         (1<<13)
 #define CPUS_WAKEUP_AC          (1<<14)
@@ -59,17 +65,16 @@
 #define CPUS_WAKEUP_KEY         (CPUS_WAKEUP_SHORT_KEY | CPUS_WAKEUP_LONG_KEY)
 
 /* for format all the wakeup gpio into one word.*/
-#define GPIO_PL_MAX_NUM             (11)    /* 0-11 */
-#define GPIO_PM_MAX_NUM             (11)    /* 0-11 */
-#define GPIO_AXP_MAX_NUM            (7)     /* 0-7 */
+#define GPIO_PL_MAX_NUM		    (11)    /* 0-11 */
+#define GPIO_PM_MAX_NUM		    (11)    /* 0-11 */
+#define GPIO_AXP_MAX_NUM	    (7)	    /* 0-7 */
 
 #define WAKEUP_GPIO_PL(num)         (1 << (num))
 #define WAKEUP_GPIO_PM(num)         (1 << (num + 12))
 #define WAKEUP_GPIO_AXP(num)        (1 << (num + 24))
 #define WAKEUP_GPIO_GROUP(group)    (1 << (group - 'A'))
 
-#if defined(CONFIG_ARCH_SUN8IW6P1)         \
-	|| defined(CONFIG_ARCH_SUN8IW8P1)  \
+#if defined(CONFIG_ARCH_SUN8IW6P1) || defined(CONFIG_ARCH_SUN8IW8P1) \
 	|| defined(CONFIG_ARCH_SUN50IW1P1) \
 	|| defined(CONFIG_ARCH_SUN50IW2P1) \
 	|| defined(CONFIG_ARCH_SUN8IW10P1) \
@@ -79,9 +84,6 @@
 #define PLL_NUM (12)
 #define BUS_NUM (15)
 #define IO_NUM (2)
-#elif defined(CONFIG_ARCH_SUN8IW7P1)
-#define PLL_NUM (11)
-#define BUS_NUM (6)
 #else
 #define IO_NUM (2)
 #endif
@@ -93,27 +95,23 @@ typedef struct {
 	int divi; /* input_div */
 	int divo; /* output_div */
 } pll_para_t;
-
-#elif defined(CONFIG_ARCH_SUN8IW6P1)       \
-	|| defined(CONFIG_ARCH_SUN8IW8P1)  \
-	|| defined(CONFIG_ARCH_SUN8IW10P1) \
-	|| defined(CONFIG_ARCH_SUN8IW11P1) \
-	|| defined(CONFIG_ARCH_SUN8IW12P1) \
-	|| defined(CONFIG_ARCH_SUN50IW1P1) \
-	|| defined(CONFIG_ARCH_SUN50IW2P1) \
-	|| defined(CONFIG_ARCH_SUN50IW3P1)
+#elif defined(CONFIG_ARCH_SUN8IW6P1) || \
+	defined(CONFIG_ARCH_SUN8IW8P1) || \
+	defined(CONFIG_ARCH_SUN8IW10P1) || \
+	defined(CONFIG_ARCH_SUN8IW11P1)  || \
+	defined(CONFIG_ARCH_SUN50IW1P1) || \
+	defined(CONFIG_ARCH_SUN50IW2P1)
 typedef struct {
 	unsigned int factor1;
 	unsigned int factor2;
 	unsigned int factor3;
 	unsigned int factor4;
 } pll_para_t;
-
 #else
 typedef struct {
-	unsigned int n;
-	unsigned int k;
-	unsigned int m;
+	unsigned int n;	/* for a83, pll6, n*/
+	unsigned int k;			/* div1 */
+	unsigned int m;			/* div2 */
 	unsigned int p;
 } pll_para_t;
 #endif
@@ -126,38 +124,37 @@ typedef struct {
 	unsigned int m;
 } bus_para_t;
 
-#ifndef CONFIG_ARCH_SUN8IW7P1
 /* for bitmap macro definition */
-#define PM_PLL_C0       (0)
-#define PM_PLL_C1       (1)
-#define PM_PLL_AUDIO    (2)
-#define PM_PLL_VIDEO0   (3)
-#define PM_PLL_VE       (4)
-#define PM_PLL_DRAM     (5)
-#define PM_PLL_PERIPH   (6)
-#define PM_PLL_GPU      (7)
-#define PM_PLL_HSIC     (8)
-#define PM_PLL_DE       (9)
-#define PM_PLL_VIDEO1   (10)
-#define PLL_PERIPH1     (11)
-#define PLL_DRAM1       (12)
-#define PLL_MIPI        (13)
-#define PLL_NUM         (14)
+#define PM_PLL_C0	(0)
+#define PM_PLL_C1	(1)
+#define PM_PLL_AUDIO	(2)
+#define PM_PLL_VIDEO0	(3)
+#define PM_PLL_VE	(4)
+#define PM_PLL_DRAM	(5)
+#define PM_PLL_PERIPH	(6)
+#define PM_PLL_GPU	(7)
+#define PM_PLL_HSIC	(8)
+#define PM_PLL_DE	(9)
+#define PM_PLL_VIDEO1	(10)
+#define PLL_PERIPH1	(11)
+#define PLL_DRAM1	(12)
+#define PLL_MIPI	(13)
+#define PLL_NUM		(14)
 
-#define BUS_C0          (0)
-#define BUS_C1          (1)
-#define BUS_AXI0        (2)
-#define BUS_AXI1        (3)
-#define BUS_AHB1        (4)
-#define BUS_AHB2        (5)
-#define BUS_APB1        (6)
-#define BUS_APB2        (7)
-#define BUS_NUM	        (8)
+#define BUS_C0      (0)
+#define BUS_C1      (1)
+#define BUS_AXI0    (2)
+#define BUS_AXI1    (3)
+#define BUS_AHB1    (4)
+#define BUS_AHB2    (5)
+#define BUS_APB1    (6)
+#define BUS_APB2    (7)
+#define BUS_NUM	    (8)
 
-#define OSC_HOSC_BIT    (3)
-#define OSC_LOSC_BIT    (2)
-#define OSC_LDO1_BIT    (1)
-#define OSC_LDO0_BIT    (0)
+#define OSC_HOSC_BIT	    (3)
+#define OSC_LOSC_BIT	    (2)
+#define OSC_LDO1_BIT	    (1)
+#define OSC_LDO0_BIT	    (0)
 
 typedef enum {
 	CLK_SRC_NONE = 0x0, /* invalid source clock id */
@@ -198,22 +195,22 @@ typedef struct {
 	 * for state bitmap:
 	 * bitx = 1: keep state.
 	 * bitx = 0: mean close corresponding power src.
-	 */
+   */
 	unsigned int state;
 	/* bitx=1, the corresponding state is effect,
 	 * otherwise, the corresponding power is in charge in device driver.
-	 * sys_mask&state: bitx=1,
-	 * mean the power is on,
-	 * for the "on" state power,
-	 * u need care about the voltage.;
-	 * ((~sys_mask)|state): bitx=0, mean the power is close;
+	 *	sys_mask&state		: bitx=1,
+	 *			mean the power is on,
+	 *			for the "on" state power,
+	 *			u need care about the voltage.;
+	 *  ((~sys_mask)|state)	: bitx=0, mean the power is close;
 	 *
 	 * pwr_dm_state bitmap
 	 * actually: we care about the pwr_dm voltage,
-	 * such as: we want to keep the vdd_sys at 1.0v at standby period.
+	 *   such as: we want to keep the vdd_sys at 1.0v at standby period.
 	 * we actually do not care how to do it.
 	 * it can be sure that cpus can do it with the pmu's help.
-	 */
+   */
 	unsigned int sys_mask;
 	unsigned int volt[VCC_MAX_INDEX]; /* unsigned short is 16bit width. */
 } pwr_dm_state_t;
@@ -227,146 +224,155 @@ typedef struct pm_dram_para {
 } pm_dram_para_t;
 
 typedef struct cpus_clk_para {
-	unsigned int cpus_id;
+    unsigned int cpus_id;
 } cpus_para_t;
 
 typedef struct io_state_config {
-	unsigned int paddr;
-	unsigned int value_mask; /* specify the effect bit.*/
-	unsigned int value;
+    unsigned int paddr;
+    unsigned int value_mask; /* specify the effect bit.*/
+    unsigned int value;
 } io_state_config_t;
 
 typedef struct soc_io_para {
-	/*
-	 * hold: mean before power off vdd_sys, whether hold gpio pad or not.
-	 * this flag only effect: when vdd_sys is powered_off;
-	 * this flag only affect hold&unhold operation.
-	 * the recommended hold sequence is as follow:
-	 * backup_io_cfg -> cfg_io(enter_low_power_mode)
-	 * -> hold -> assert vdd_sys_reset -> poweroff vdd_sys.
-	 * the recommended unhold sequence is as follow:
-	 * poweron vdd_sys -> de_assert vdd_sys -> restore_io_cfg -> unhold.
-	 */
-	unsigned int hold_flag;
+    /*
+     *	hold: mean before power off vdd_sys, whether hold gpio pad or not.
+     *	this flag only effect: when vdd_sys is powered_off;
+     *	this flag only affect hold&unhold operation.
+     *	the recommended hold sequence is as follow:
+     *	backup_io_cfg -> cfg_io(enter_low_power_mode)
+     *  -> hold -> assert vdd_sys_reset -> poweroff vdd_sys.
+     *  the recommended unhold sequence is as follow:
+     *  poweron vdd_sys -> de_assert vdd_sys -> restore_io_cfg -> unhold.
+     * */
+    unsigned int hold_flag;
 
-	/*
-	 * note: only specific bit mark by value_mask is effect.
-	 * IO_NUM: only uart and jtag needed care.
-	 */
-	io_state_config_t io_state[IO_NUM];
+
+    /*
+     * note: only specific bit mark by value_mask is effect.
+     * IO_NUM: only uart and jtag needed care.
+     * */
+    io_state_config_t io_state[IO_NUM];
 } soc_io_para_t;
 
 typedef struct cpux_clk_para {
-	/*
-	 * Hosc: losc: ldo1: ldo0
-	 * the osc bit map is as follow:
-	 * bit3: bit2: bit1:bit0
-	 * Hosc: losc: ldo1: ldo0
-	 */
-	int osc_en;
+    /*
+     * Hosc: losc: ldo1: ldo0
+     * the osc bit map is as follow:
+     * bit3: bit2: bit1:bit0
+     * Hosc: losc: ldo1: ldo0
+     */
+    int osc_en;
 
-	/*
-	 * for a83, pll bitmap as follow:
-	 *
-	 * pll11(video1):	pll10(de):  pll9(hsic)
-	 * bit7:	    bit6:	bit5:	    bit4:
-	 * pll8(gpu): pll6(periph): pll5(dram): pll4(ve):
-	 * bit3:		bit2:		bit1:	    bit0
-	 * pll3(video):	pll2(audio):	c1cpux:	    c0cpux
-	 *
-	 */
+    /*
+     * for a83, pll bitmap as follow:
+     *
+     * pll11(video1):	pll10(de):  pll9(hsic)
+     * bit7:	    bit6:	bit5:	    bit4:
+     * pll8(gpu): pll6(periph): pll5(dram): pll4(ve):
+     * bit3:		bit2:		bit1:	    bit0
+     * pll3(video):	pll2(audio):	c1cpux:	    c0cpux
+     *
+     *
+     *
+     * */
 
-	/* for disable bitmap:
-	 * bitx = 0: close
-	 * bitx = 1: do not care.
-	 */
-	int init_pll_dis;
+    /* for disable bitmap:
+     * bitx = 0: close
+     * bitx = 1: do not care.
+     */
+    int init_pll_dis;
 
-	/* for enable bitmap:
-	 * bitx = 0: do not care.
-	 * bitx = 1: open
-	 */
-	int exit_pll_en;
+    /* for enable bitmap:
+     * bitx = 0: do not care.
+     * bitx = 1: open
+     */
+    int exit_pll_en;
 
-	/*
-	 * set corresponding bit if it's pll factors need to be set some value.
-	 */
-	int pll_change;
+    /*
+     * set corresponding bit if it's pll factors need to be set some value.
+     */
+    int pll_change;
 
-	/*
-	 * fill in the enabled pll freq factor sequently.
-	 * unit is khz pll6: 0x90041811
-	 * factor n/m/k/p already do the pretreatment of the minus one
-	 */
-	pll_para_t pll_factor[PLL_NUM];
+    /*
+     * fill in the enabled pll freq factor sequently.
+     * unit is khz pll6: 0x90041811
+     * factor n/m/k/p already do the pretreatment of the minus one
+     */
+    pll_para_t pll_factor[PLL_NUM];
 
-	/*
-	 * **********A31************
-	 * at a31 platform, the clk relationship is as follow:
-	 * pll1->cpu -> axi
-	 * -> atb/apb
-	 * ahb1 -> apb1
-	 * apb2
-	 * so, at a31, only cpu:ahb1:apb2 need be cared.
-	 *
-	 * *********A80************
-	 * at a83 platform, the clk relationship is as follow:
-	 * c1 -> axi1
-	 * c0 -> axi0
-	 * gtbus
-	 * ahb0
-	 * ahb1
-	 * ahb2
-	 * apb0
-	 * apb1
-	 * so, at a80, c1:c0:gtbus:ahb0:ahb1:ahb2:apb0:apb1 need be cared.
-	 *
-	 * *********A83************
-	 * at a83 platform, the clk relationship is as follow:
-	 * c1 -> axi1
-	 * c0 -> axi0
-	 * ahb1 -> apb1
-	 * apb2
-	 * ahb2
-	 * so, at a83, only c1:c0:ahb1:apb2:ahb2 need be cared.
-	 *
-	 * normally, only clk src need be cared.
-	 * the bus bitmap as follow:
-	 * for a83, bus_en:
-	 * bit4: bit3: bit2: bit1: bit0
-	 * ahb2: apb2: ahb1: c1:   c0
-	 *
-	 * for a31, bus_en:
-	 * bit2:bit1:bit0
-	 * cpu:ahb1:apb2
-	 *
-	 * for a80, bus_en:
-	 * bit7: bit6:  bit5:  bit4: bit3: bit2: bit1: bit0
-	 * c1:   c0:    gtbus: ahb0: ahb1: ahb2: apb0: apb1
-	 */
-	int bus_change;
+    /*
+     * **********A31************
+     * at a31 platform, the clk relationship is as follow:
+     * pll1->cpu -> axi
+     *	     -> atb/apb
+     * ahb1 -> apb1
+     * apb2
+     * so, at a31, only cpu:ahb1:apb2 need be cared.
+     *
+     * *********A80************
+     * at a83 platform, the clk relationship is as follow:
+     * c1 -> axi1
+     * c0 -> axi0
+     * gtbus
+     * ahb0
+     * ahb1
+     * ahb2
+     * apb0
+     * apb1
+     * so, at a80, c1:c0:gtbus:ahb0:ahb1:ahb2:apb0:apb1 need be cared.
+     *
+     * *********A83************
+     * at a83 platform, the clk relationship is as follow:
+     * c1 -> axi1
+     * c0 -> axi0
+     * ahb1 -> apb1
+     * apb2
+     * ahb2
+     * so, at a83, only c1:c0:ahb1:apb2:ahb2 need be cared.
+     *
+     * normally, only clk src need be cared.
+     * the bus bitmap as follow:
+     * for a83, bus_en:
+     * bit4: bit3: bit2: bit1: bit0
+     * ahb2: apb2: ahb1: c1:   c0
+     *
+     * for a31, bus_en:
+     * bit2:bit1:bit0
+     * cpu:ahb1:apb2
+     *
+     * for a80, bus_en:
+     * bit7: bit6:  bit5:  bit4: bit3: bit2: bit1: bit0
+     * c1:   c0:    gtbus: ahb0: ahb1: ahb2: apb0: apb1
+     */
+    int bus_change;
 
-	/*
-	 * bus_src: ahb1, apb2 src;
-	 * option:  pllx:axi:hosc:losc
-	 */
-	bus_para_t bus_factor[BUS_NUM];
+    /*
+     * bus_src: ahb1, apb2 src;
+     * option:  pllx:axi:hosc:losc
+     */
+    bus_para_t bus_factor[BUS_NUM];
+
 } cpux_clk_para_t;
 
 typedef struct soc_pwr_dep {
-	/* id of scene_lock */
-	unsigned int id;
+    /*
+     * id of scene_lock
+     */
+    unsigned int id;
 
-	pwr_dm_state_t  soc_pwr_dm_state;
-	pm_dram_para_t  soc_dram_state;
-	soc_io_para_t   soc_io_state;
-	cpux_clk_para_t cpux_clk_state;
+    pwr_dm_state_t soc_pwr_dm_state;
+    pm_dram_para_t soc_dram_state;
+    soc_io_para_t soc_io_state;
+    cpux_clk_para_t cpux_clk_state;
+
 } soc_pwr_dep_t;
 
 typedef struct extended_standby {
-	/* id of extended standby */
+	/*
+	 * id of extended standby
+	 */
 	unsigned int id;
-
+	unsigned int pmu_id;
 	/* for: 808 || 809+806 || 803 || 813
 	 * support 4 pmu: each pmu_id range is: 0-255;
 	 * pmu_id <--> pmu_name have directly mapping,
@@ -374,13 +380,13 @@ typedef struct extended_standby {
 	 * bitmap as follow:
 	 * pmu0: 0-7 bit; pmu1: 8-15 bit; pmu2: 16-23 bit; pmu3: 24-31 bit
 	 */
-	unsigned int pmu_id;
 
+
+	unsigned int soc_id;
 	/* a33, a80, a83,...,
 	 * for compatible reason, different soc,
 	 * each bit have different meaning.
 	 */
-	unsigned int soc_id;
 
 	pwr_dm_state_t soc_pwr_dm_state;
 	pm_dram_para_t soc_dram_state;
@@ -388,172 +394,11 @@ typedef struct extended_standby {
 	cpux_clk_para_t cpux_clk_state;
 } extended_standby_t;
 
-#else
 
-typedef struct extended_standby {
-	/*
-	 * id of extended standby
-	 */
-	unsigned long id;
-	/*
-	 * clk tree para description as follow:
-	 * vdd_dll : exdev : avcc : vcc_wifi : vcc_dram:
-	 * vdd_sys : vdd_cpux : vdd_gpu : vcc_io : vdd_cpus
-	 */
-	/* bitx = 1, mean power on when sys is in standby state.
-	 * otherwise, vice verse. */
-	int pwr_dm_en;
-
-	/*
-	 * Hosc: losc: ldo: ldo1
-	 */
-	int osc_en;
-
-	/*
-	 * pll_10: pll_9: pll_mipi: pll_8: pll_7: pll_6:
-	 * pll_5: pll_4: pll_3: pll_2: pll_1
-	 */
-	int init_pll_dis;
-
-	/*
-	 * pll_10: pll_9: pll_mipi: pll_8: pll_7: pll_6:
-	 * pll_5: pll_4: pll_3: pll_2: pll_1
-	 */
-	int exit_pll_en;
-
-	/*
-	 * set corresponding bit if it's pll factors
-	 * need to be set some value.
-	 * pll_10: pll_9: pll_mipi: pll_8: pll_7: pll_6:
-	 * pll_5: pll_4: pll_3: pll_2: pll_1
-	 */
-	int pll_change;
-
-	/*
-	 * fill in the enabled pll freq factor sequently.
-	 * unit is khz pll6: 0x90041811
-	 * factor n/m/k/p already do the pretreatment
-	 * of the minus one
-	 */
-	pll_para_t pll_factor[PLL_NUM];
-
-	/*
-	 * bus_en: cpu:axi:atb/apb:ahb1:apb1:apb2,
-	 * normally, only clk src need be cared.
-	 * so, at a31, only cpu:ahb1:apb2 need be cared.
-	 * pll1->cpu -> axi
-	 *	     -> atb/apb
-	 * ahb1 -> apb1
-	 * apb2
-	 */
-	int bus_change;
-
-	/*
-	 * bus_src: ahb1, apb2 src;
-	 * option:  pllx:axi:hosc:losc
-	 */
-	bus_para_t bus_factor[BUS_NUM];
-} extended_standby_t;
-#endif
 #define CPUS_ENABLE_POWER_EXP   (1<<31)
 #define CPUS_WAKEUP_POWER_STA   (1<<1)
 #define CPUS_WAKEUP_POWER_CSM   (1<<0)
-
-struct super_standby_para {
-	/* cpus wakeup event types */
-	unsigned int event;
-	/* cpux resume code src */
-	unsigned int resume_code_src;
-	/* cpux resume code length */
-	unsigned int resume_code_length;
-	/* cpux resume entry */
-	unsigned int resume_entry;
-#if (defined CONFIG_ARCH_SUN8IW12P1) ||\
-	(defined CONFIG_ARCH_SUN8IW15)
-	/* kernel cpu_resume entry */
-	unsigned int cpu_resume_entry;
-#endif
-	/* wakeup after timeout seconds */
-	unsigned int timeout;
-	unsigned int gpio_enable_bitmap;
-	unsigned int cpux_gpiog_bitmap;
-	unsigned int pextended_standby;
-};
-
-struct normal_standby_para {
-	/* cpus wakeup event types */
-	unsigned int event;
-	/* wakeup after timeout seconds */
-	unsigned int timeout;
-	unsigned int gpio_enable_bitmap;
-	unsigned int cpux_gpiog_bitmap;
-	unsigned int pextended_standby;
-};
-
-/* define cpus wakeup src */
-#define CPUS_MEM_WAKEUP          (CPUS_WAKEUP_LOWBATT  \
-				| CPUS_WAKEUP_USB      \
-				| CPUS_WAKEUP_AC       \
-				| CPUS_WAKEUP_DESCEND  \
-				| CPUS_WAKEUP_ASCEND   \
-				| CPUS_WAKEUP_ALM0     \
-				| CPUS_WAKEUP_GPIO     \
-				| CPUS_WAKEUP_IR)
-
-#define CPUS_BOOTFAST_WAKEUP     (CPUS_WAKEUP_LOWBATT  \
-				| CPUS_WAKEUP_LONG_KEY \
-				| CPUS_WAKEUP_ALM0     \
-				| CPUS_WAKEUP_USB      \
-				| CPUS_WAKEUP_AC)
-
-/* used in normal standby */
-#define CPU0_MEM_WAKEUP          (CPU0_WAKEUP_MSGBOX   \
-				| CPU0_WAKEUP_EXINT    \
-				| CPU0_WAKEUP_ALARM)
-
-#define CPU0_BOOTFAST_WAKEUP     (CPU0_WAKEUP_MSGBOX)
-
-
-/* struct of pmu device arg */
-struct aw_pmu_arg {
-	unsigned int  twi_port; /* twi port for pmu chip */
-	unsigned char dev_addr; /* address of pmu device */
-	unsigned int soc_power_tree[VCC_MAX_INDEX];
-	int axp_dev_count; /* axp devices online sum */
-};
-
-/**
- * @brief struct of standby
- * event: event type for system wakeup
- * axp_event: axp event type for system wakeup
- * debug_mask: debug mask
- * timeout: time to power off system from now, based on second
- */
-struct aw_standby_para {
-	unsigned int event;
-	unsigned int axp_event;
-	unsigned int debug_mask;
-	signed   int timeout;
-	unsigned int gpio_enable_bitmap;
-	unsigned int cpux_gpiog_bitmap;
-	unsigned int pextended_standby;
-};
-
-/* struct of power management info */
-struct aw_pm_info {
-	/* standby parameter */
-	struct aw_standby_para standby_para;
-	/* args used by main function  */
-	struct aw_pmu_arg      pmu_arg;
-
-#ifdef CONFIG_SUNXI_SUSPEND_NONARISC
-	struct __dram_para_t   dram_para;
-	unsigned long          resume_addr;
-#endif
-};
-
-/* used for arisc */
-struct sst_power_info_para {
+typedef struct sst_power_info_para {
 	/*
 	 * define for sun9iw1p1
 	 * power_reg bit0 ~ 7 AXP_main REG10, bit 8~15 AXP_main REG12
@@ -596,14 +441,103 @@ struct sst_power_info_para {
 	 */
 	/* enable bit */
 	/* registers of power state should be */
-	/* the max power of system, signed,
-	* power mabe negative when charge */
+	/* the max power of system, signed, power mabe negative when charge */
 	unsigned int enable;
 	unsigned int power_reg;
 	signed int system_power;
+} sst_power_info_para_t;
+
+/* cpus wakeup event types */
+/* cpux resume code src */
+/* cpux resume code length */
+/* cpux resume entry */
+/* wakeup after timeout seconds */
+typedef	struct super_standby_para {
+	unsigned int event;
+	unsigned int resume_code_src;
+	unsigned int resume_code_length;
+	unsigned int resume_entry;
+	unsigned int timeout;
+	unsigned int gpio_enable_bitmap;
+	unsigned int cpux_gpiog_bitmap;
+	unsigned int pextended_standby;
+} super_standby_para_t;
+
+/* cpus wakeup event types */
+/* wakeup after timeout seconds */
+typedef	struct normal_standby_para {
+	unsigned int event;
+	unsigned int timeout;
+	unsigned int gpio_enable_bitmap;
+	unsigned int cpux_gpiog_bitmap;
+	unsigned int pextended_standby;
+} normal_standby_para_t;
+
+
+/* define cpus wakeup src */
+#define CPUS_MEM_WAKEUP              (CPUS_WAKEUP_LOWBATT |\
+					CPUS_WAKEUP_USB |\
+					CPUS_WAKEUP_AC |\
+					CPUS_WAKEUP_DESCEND |\
+					CPUS_WAKEUP_ASCEND |\
+					CPUS_WAKEUP_ALM0 |\
+					CPUS_WAKEUP_GPIO |\
+					CPUS_WAKEUP_IR)
+
+#define CPUS_BOOTFAST_WAKEUP         (CPUS_WAKEUP_LOWBATT |\
+					CPUS_WAKEUP_LONG_KEY |\
+					CPUS_WAKEUP_ALM0 |\
+					CPUS_WAKEUP_USB |\
+					CPUS_WAKEUP_AC)
+
+/*used in normal standby*/
+#define CPU0_MEM_WAKEUP              (CPU0_WAKEUP_MSGBOX |\
+					CPU0_WAKEUP_EXINT |\
+					CPU0_WAKEUP_ALARM)
+#define CPU0_BOOTFAST_WAKEUP         (CPU0_WAKEUP_MSGBOX)
+
+
+/**
+*@brief struct of pmu device arg
+*/
+struct aw_pmu_arg {
+    unsigned int  twi_port;		/**<twi port for pmu chip   */
+    unsigned char dev_addr;		/**<address of pmu device   */
+    unsigned int soc_power_tree[VCC_MAX_INDEX];  /* power tree struct point */
 };
 
-/* used for arisc */
+
+/**
+ *@brief struct of standby
+ *event: <event type for system wakeup
+ *axp_event: <axp event type for system wakeup
+ *debug_mask: debug mask
+ *timeout: <time to power off system from now, based on second
+ */
+struct aw_standby_para {
+	unsigned int event;
+	unsigned int axp_event;
+	unsigned int debug_mask;
+	signed int   timeout;
+	unsigned int gpio_enable_bitmap;
+	unsigned int cpux_gpiog_bitmap;
+	unsigned int pextended_standby;
+};
+
+/**
+*@brief struct of power management info
+*/
+struct aw_pm_info {
+    /* standby parameter            */
+    struct aw_standby_para		standby_para;
+    /**<args used by main function  */
+    struct aw_pmu_arg			pmu_arg;
+#if defined(CONFIG_ARCH_SUN8IW10P1) || defined(CONFIG_ARCH_SUN8IW11P1)
+    dram_para_t                         dram_para;
+    unsigned long                       resume_addr;
+#endif
+};
+
 typedef struct sst_dram_info {
 	unsigned int dram_crc_enable;
 	unsigned int dram_crc_src;
@@ -613,29 +547,26 @@ typedef struct sst_dram_info {
 	unsigned int dram_crc_error_count;
 } sst_dram_info_t;
 
-/* used for arisc */
 typedef struct standby_info_para {
-	struct sst_power_info_para power_state; /* size 3W=12B */
+	sst_power_info_para_t power_state; /* size 3W=12B */
 	sst_dram_info_t dram_state; /*size 6W=24B */
 } standby_info_para_t;
 
 typedef enum event_cpu_id {
-	CPUS_ID,
-	CPU0_ID,
+    CPUS_ID,
+    CPU0_ID,
 } event_cpu_id_e;
 
 typedef struct standby_space_cfg {
-	struct device_node *np;
-	phys_addr_t standby_mem_base;
-	phys_addr_t extended_standby_mem_base;
-	phys_addr_t mem_offset;
-	size_t mem_size;
+    struct device_node *np;
+    phys_addr_t standby_mem_base;
+    phys_addr_t extended_standby_mem_base;
+    phys_addr_t mem_offset;
+    size_t mem_size;
 } standby_space_cfg_t;
 
-extern extended_standby_t temp_standby_data;
-
-extern unsigned int parse_wakeup_gpio_group_map(char *s,
-	unsigned int size, unsigned int gpio_map);
+extern unsigned int parse_wakeup_gpio_group_map(char *s, unsigned int size,
+					unsigned int gpio_map);
 
 extern unsigned int parse_wakeup_event(char *s, unsigned int size,
 				unsigned int event);
@@ -644,12 +575,5 @@ extern unsigned int parse_wakeup_gpio_map(char *s, unsigned int size,
 				unsigned int gpio_map);
 
 extern unsigned int show_gpio_config(char *s, unsigned int size);
-
-
-extern void  jump_to_cpu_resume(void *entry);
-#ifdef CONFIG_AW_AXP
-extern int config_pmux_para(int num, struct aw_pm_info *api,
-	int *pmu_id);
-#endif
 
 #endif /* __AW_PM_H__ */

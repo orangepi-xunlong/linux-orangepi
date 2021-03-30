@@ -53,7 +53,7 @@ struct gc_config {
 	unsigned int nargs;
 };
 
-static struct gc_config gc_cfg[GC_MAX_PORTS];
+static struct gc_config gc_cfg[GC_MAX_PORTS] __initdata;
 
 module_param_array_named(map, gc_cfg[0].args, int, &gc_cfg[0].nargs, 0);
 MODULE_PARM_DESC(map, "Describes first set of devices (<parport#>,<pad1>,<pad2>,..<pad5>)");
@@ -92,7 +92,6 @@ struct gc {
 	struct timer_list timer;
 	int pad_count[GC_MAX];
 	int used;
-	int parportno;
 	struct mutex mutex;
 };
 
@@ -305,7 +304,7 @@ static int gc_n64_play_effect(struct input_dev *dev, void *data,
 	return 0;
 }
 
-static int gc_n64_init_ff(struct input_dev *dev, int i)
+static int __init gc_n64_init_ff(struct input_dev *dev, int i)
 {
 	struct gc_subdev *sdev;
 	int err;
@@ -812,7 +811,7 @@ static void gc_close(struct input_dev *dev)
 	mutex_unlock(&gc->mutex);
 }
 
-static int gc_setup_pad(struct gc *gc, int idx, int pad_type)
+static int __init gc_setup_pad(struct gc *gc, int idx, int pad_type)
 {
 	struct gc_pad *pad = &gc->pads[idx];
 	struct input_dev *input_dev;
@@ -927,56 +926,46 @@ err_free_dev:
 	return err;
 }
 
-static void gc_attach(struct parport *pp)
+static struct gc __init *gc_probe(int parport, int *pads, int n_pads)
 {
 	struct gc *gc;
+	struct parport *pp;
 	struct pardevice *pd;
-	int i, port_idx;
+	int i;
 	int count = 0;
-	int *pads, n_pads;
-	struct pardev_cb gc_parport_cb;
+	int err;
 
-	for (port_idx = 0; port_idx < GC_MAX_PORTS; port_idx++) {
-		if (gc_cfg[port_idx].nargs == 0 || gc_cfg[port_idx].args[0] < 0)
-			continue;
-
-		if (gc_cfg[port_idx].args[0] == pp->number)
-			break;
+	pp = parport_find_number(parport);
+	if (!pp) {
+		pr_err("no such parport %d\n", parport);
+		err = -EINVAL;
+		goto err_out;
 	}
 
-	if (port_idx == GC_MAX_PORTS) {
-		pr_debug("Not using parport%d.\n", pp->number);
-		return;
-	}
-	pads = gc_cfg[port_idx].args + 1;
-	n_pads = gc_cfg[port_idx].nargs - 1;
-
-	memset(&gc_parport_cb, 0, sizeof(gc_parport_cb));
-	gc_parport_cb.flags = PARPORT_FLAG_EXCL;
-
-	pd = parport_register_dev_model(pp, "gamecon", &gc_parport_cb,
-					port_idx);
+	pd = parport_register_device(pp, "gamecon", NULL, NULL, NULL, PARPORT_DEV_EXCL, NULL);
 	if (!pd) {
 		pr_err("parport busy already - lp.o loaded?\n");
-		return;
+		err = -EBUSY;
+		goto err_put_pp;
 	}
 
 	gc = kzalloc(sizeof(struct gc), GFP_KERNEL);
 	if (!gc) {
 		pr_err("Not enough memory\n");
+		err = -ENOMEM;
 		goto err_unreg_pardev;
 	}
 
 	mutex_init(&gc->mutex);
 	gc->pd = pd;
-	gc->parportno = pp->number;
 	setup_timer(&gc->timer, gc_timer, (long) gc);
 
 	for (i = 0; i < n_pads && i < GC_MAX_DEVICES; i++) {
 		if (!pads[i])
 			continue;
 
-		if (gc_setup_pad(gc, i, pads[i]))
+		err = gc_setup_pad(gc, i, pads[i]);
+		if (err)
 			goto err_unreg_devs;
 
 		count++;
@@ -984,11 +973,12 @@ static void gc_attach(struct parport *pp)
 
 	if (count == 0) {
 		pr_err("No valid devices specified\n");
+		err = -EINVAL;
 		goto err_free_gc;
 	}
 
-	gc_base[port_idx] = gc;
-	return;
+	parport_put_port(pp);
+	return gc;
 
  err_unreg_devs:
 	while (--i >= 0)
@@ -998,23 +988,15 @@ static void gc_attach(struct parport *pp)
 	kfree(gc);
  err_unreg_pardev:
 	parport_unregister_device(pd);
+ err_put_pp:
+	parport_put_port(pp);
+ err_out:
+	return ERR_PTR(err);
 }
 
-static void gc_detach(struct parport *port)
+static void gc_remove(struct gc *gc)
 {
 	int i;
-	struct gc *gc;
-
-	for (i = 0; i < GC_MAX_PORTS; i++) {
-		if (gc_base[i] && gc_base[i]->parportno == port->number)
-			break;
-	}
-
-	if (i == GC_MAX_PORTS)
-		return;
-
-	gc = gc_base[i];
-	gc_base[i] = NULL;
 
 	for (i = 0; i < GC_MAX_DEVICES; i++)
 		if (gc->pads[i].dev)
@@ -1023,17 +1005,11 @@ static void gc_detach(struct parport *port)
 	kfree(gc);
 }
 
-static struct parport_driver gc_parport_driver = {
-	.name = "gamecon",
-	.match_port = gc_attach,
-	.detach = gc_detach,
-	.devmodel = true,
-};
-
 static int __init gc_init(void)
 {
 	int i;
 	int have_dev = 0;
+	int err = 0;
 
 	for (i = 0; i < GC_MAX_PORTS; i++) {
 		if (gc_cfg[i].nargs == 0 || gc_cfg[i].args[0] < 0)
@@ -1041,21 +1017,37 @@ static int __init gc_init(void)
 
 		if (gc_cfg[i].nargs < 2) {
 			pr_err("at least one device must be specified\n");
-			return -EINVAL;
+			err = -EINVAL;
+			break;
+		}
+
+		gc_base[i] = gc_probe(gc_cfg[i].args[0],
+				      gc_cfg[i].args + 1, gc_cfg[i].nargs - 1);
+		if (IS_ERR(gc_base[i])) {
+			err = PTR_ERR(gc_base[i]);
+			break;
 		}
 
 		have_dev = 1;
 	}
 
-	if (!have_dev)
-		return -ENODEV;
+	if (err) {
+		while (--i >= 0)
+			if (gc_base[i])
+				gc_remove(gc_base[i]);
+		return err;
+	}
 
-	return parport_register_driver(&gc_parport_driver);
+	return have_dev ? 0 : -ENODEV;
 }
 
 static void __exit gc_exit(void)
 {
-	parport_unregister_driver(&gc_parport_driver);
+	int i;
+
+	for (i = 0; i < GC_MAX_PORTS; i++)
+		if (gc_base[i])
+			gc_remove(gc_base[i]);
 }
 
 module_init(gc_init);

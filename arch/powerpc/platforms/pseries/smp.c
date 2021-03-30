@@ -38,13 +38,13 @@
 #include <asm/cputable.h>
 #include <asm/firmware.h>
 #include <asm/rtas.h>
+#include <asm/mpic.h>
 #include <asm/vdso_datapage.h>
 #include <asm/cputhreads.h>
 #include <asm/xics.h>
 #include <asm/dbell.h>
-#include <asm/plpar_wrappers.h>
-#include <asm/code-patching.h>
 
+#include "plpar_wrappers.h"
 #include "pseries.h"
 #include "offline_states.h"
 
@@ -96,8 +96,8 @@ int smp_query_cpu_stopped(unsigned int pcpu)
 static inline int smp_startup_cpu(unsigned int lcpu)
 {
 	int status;
-	unsigned long start_here =
-			__pa(ppc_function_entry(generic_secondary_smp_init));
+	unsigned long start_here = __pa((u32)*((unsigned long *)
+					       generic_secondary_smp_init));
 	unsigned int pcpu;
 	int start_cpu;
 
@@ -139,7 +139,7 @@ out:
 	return 1;
 }
 
-static void smp_setup_cpu(int cpu)
+static void smp_xics_setup_cpu(int cpu)
 {
 	if (cpu != boot_cpuid)
 		xics_setup_cpu();
@@ -187,6 +187,22 @@ static int smp_pSeries_kick_cpu(int nr)
 	return 0;
 }
 
+static int smp_pSeries_cpu_bootable(unsigned int nr)
+{
+	/* Special case - we inhibit secondary thread startup
+	 * during boot if the user requests it.
+	 */
+	if (system_state < SYSTEM_RUNNING && cpu_has_feature(CPU_FTR_SMT)) {
+		if (!smt_enabled_at_boot && cpu_thread_in_core(nr) != 0)
+			return 0;
+		if (smt_enabled_at_boot
+		    && cpu_thread_in_core(nr) >= smt_enabled_at_boot)
+			return 0;
+	}
+
+	return 1;
+}
+
 /* Only used on systems that support multiple IPI mechanisms */
 static void pSeries_cause_ipi_mux(int cpu, unsigned long data)
 {
@@ -196,52 +212,54 @@ static void pSeries_cause_ipi_mux(int cpu, unsigned long data)
 		xics_cause_ipi(cpu, data);
 }
 
-static __init void pSeries_smp_probe(void)
+static __init int pSeries_smp_probe(void)
 {
-	xics_smp_probe();
+	int ret = xics_smp_probe();
 
 	if (cpu_has_feature(CPU_FTR_DBELL)) {
 		xics_cause_ipi = smp_ops->cause_ipi;
 		smp_ops->cause_ipi = pSeries_cause_ipi_mux;
 	}
+
+	return ret;
 }
 
-static struct smp_ops_t pseries_smp_ops = {
+static struct smp_ops_t pSeries_mpic_smp_ops = {
+	.message_pass	= smp_mpic_message_pass,
+	.probe		= smp_mpic_probe,
+	.kick_cpu	= smp_pSeries_kick_cpu,
+	.setup_cpu	= smp_mpic_setup_cpu,
+};
+
+static struct smp_ops_t pSeries_xics_smp_ops = {
 	.message_pass	= NULL,	/* Use smp_muxed_ipi_message_pass */
 	.cause_ipi	= NULL,	/* Filled at runtime by pSeries_smp_probe() */
 	.probe		= pSeries_smp_probe,
 	.kick_cpu	= smp_pSeries_kick_cpu,
-	.setup_cpu	= smp_setup_cpu,
-	.cpu_bootable	= smp_generic_cpu_bootable,
+	.setup_cpu	= smp_xics_setup_cpu,
+	.cpu_bootable	= smp_pSeries_cpu_bootable,
 };
 
 /* This is called very early */
-void __init smp_init_pseries(void)
+static void __init smp_init_pseries(void)
 {
 	int i;
 
 	pr_debug(" -> smp_init_pSeries()\n");
-	smp_ops = &pseries_smp_ops;
 
 	alloc_bootmem_cpumask_var(&of_spin_mask);
 
-	/*
-	 * Mark threads which are still spinning in hold loops
-	 *
-	 * We know prom_init will not have started them if RTAS supports
-	 * query-cpu-stopped-state.
-	 */
-	if (rtas_token("query-cpu-stopped-state") == RTAS_UNKNOWN_SERVICE) {
-		if (cpu_has_feature(CPU_FTR_SMT)) {
-			for_each_present_cpu(i) {
-				if (cpu_thread_in_core(i) == 0)
-					cpumask_set_cpu(i, of_spin_mask);
-			}
-		} else
-			cpumask_copy(of_spin_mask, cpu_present_mask);
-
-		cpumask_clear_cpu(boot_cpuid, of_spin_mask);
+	/* Mark threads which are still spinning in hold loops. */
+	if (cpu_has_feature(CPU_FTR_SMT)) {
+		for_each_present_cpu(i) { 
+			if (cpu_thread_in_core(i) == 0)
+				cpumask_set_cpu(i, of_spin_mask);
+		}
+	} else {
+		cpumask_copy(of_spin_mask, cpu_present_mask);
 	}
+
+	cpumask_clear_cpu(boot_cpuid, of_spin_mask);
 
 	/* Non-lpar has additional take/give timebase */
 	if (rtas_token("freeze-time-base") != RTAS_UNKNOWN_SERVICE) {
@@ -250,4 +268,18 @@ void __init smp_init_pseries(void)
 	}
 
 	pr_debug(" <- smp_init_pSeries()\n");
+}
+
+void __init smp_init_pseries_mpic(void)
+{
+	smp_ops = &pSeries_mpic_smp_ops;
+
+	smp_init_pseries();
+}
+
+void __init smp_init_pseries_xics(void)
+{
+	smp_ops = &pSeries_xics_smp_ops;
+
+	smp_init_pseries();
 }

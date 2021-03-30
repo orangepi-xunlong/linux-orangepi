@@ -5,7 +5,7 @@
  ******************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2013, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -47,8 +47,7 @@
 
 #define _COMPONENT          ACPI_UTILITIES
 ACPI_MODULE_NAME("utresrc")
-
-#if defined(ACPI_DEBUG_OUTPUT) || defined (ACPI_DISASSEMBLER) || defined (ACPI_DEBUGGER)
+#if defined(ACPI_DISASSEMBLER) || defined (ACPI_DEBUGGER)
 /*
  * Strings used to decode resource descriptors.
  * Used by both the disassembler and the debugger resource dump routines
@@ -87,9 +86,7 @@ const char *acpi_gbl_io_decode[] = {
 
 const char *acpi_gbl_ll_decode[] = {
 	"ActiveHigh",
-	"ActiveLow",
-	"ActiveBoth",
-	"Reserved"
+	"ActiveLow"
 };
 
 const char *acpi_gbl_max_decode[] = {
@@ -263,7 +260,7 @@ const char *acpi_gbl_bpb_decode[] = {
 /* UART serial bus stop bits */
 
 const char *acpi_gbl_sb_decode[] = {
-	"StopBitsZero",
+	"StopBitsNone",
 	"StopBitsOne",
 	"StopBitsOnePlusHalf",
 	"StopBitsTwo"
@@ -441,8 +438,8 @@ acpi_ut_walk_aml_resources(struct acpi_walk_state *walk_state,
 		    acpi_ut_validate_resource(walk_state, aml, &resource_index);
 		if (ACPI_FAILURE(status)) {
 			/*
-			 * Exit on failure. Cannot continue because the descriptor
-			 * length may be bogus also.
+			 * Exit on failure. Cannot continue because the descriptor length
+			 * may be bogus also.
 			 */
 			return_ACPI_STATUS(status);
 		}
@@ -568,8 +565,8 @@ acpi_ut_validate_resource(struct acpi_walk_state *walk_state,
 	}
 
 	/*
-	 * Check validity of the resource type, via acpi_gbl_resource_types.
-	 * Zero indicates an invalid resource.
+	 * Check validity of the resource type, via acpi_gbl_resource_types. Zero
+	 * indicates an invalid resource.
 	 */
 	if (!acpi_gbl_resource_types[resource_index]) {
 		goto invalid_resource;
@@ -646,7 +643,7 @@ acpi_ut_validate_resource(struct acpi_walk_state *walk_state,
 
 	return (AE_OK);
 
-invalid_resource:
+      invalid_resource:
 
 	if (walk_state) {
 		ACPI_ERROR((AE_INFO,
@@ -655,7 +652,7 @@ invalid_resource:
 	}
 	return (AE_AML_INVALID_RESOURCE_TYPE);
 
-bad_resource_length:
+      bad_resource_length:
 
 	if (walk_state) {
 		ACPI_ERROR((AE_INFO,

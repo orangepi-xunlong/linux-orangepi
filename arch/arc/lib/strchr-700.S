@@ -11,9 +11,9 @@
    presence of the norm instruction makes it easier to operate on whole
    words branch-free.  */
 
-#include <linux/linkage.h>
+#include <asm/linkage.h>
 
-ENTRY_CFI(strchr)
+ARC_ENTRY strchr
 	extb_s	r1,r1
 	asl	r5,r1,8
 	bmsk	r2,r0,1
@@ -130,4 +130,4 @@ ENTRY_CFI(strchr)
 	j_s.d	[blink]
 	mov.mi	r0,0
 #endif /* ENDIAN */
-END_CFI(strchr)
+ARC_EXIT strchr

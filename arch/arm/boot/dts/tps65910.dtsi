@@ -82,10 +82,5 @@
 			reg = <12>;
 			regulator-compatible = "vmmc";
 		};
-
-		vbb_reg: regulator@13 {
-			reg = <13>;
-			regulator-compatible = "vbb";
-		};
 	};
 };

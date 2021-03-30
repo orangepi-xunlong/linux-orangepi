@@ -213,21 +213,13 @@ static int dib0700_i2c_xfer_new(struct i2c_adapter *adap, struct i2c_msg *msg,
 						 usb_rcvctrlpipe(d->udev, 0),
 						 REQUEST_NEW_I2C_READ,
 						 USB_TYPE_VENDOR | USB_DIR_IN,
-						 value, index, st->buf,
+						 value, index, msg[i].buf,
 						 msg[i].len,
 						 USB_CTRL_GET_TIMEOUT);
 			if (result < 0) {
 				deb_info("i2c read error (status = %d)\n", result);
 				break;
 			}
-
-			if (msg[i].len > sizeof(st->buf)) {
-				deb_info("buffer too small to fit %d bytes\n",
-					 msg[i].len);
-				return -EIO;
-			}
-
-			memcpy(msg[i].buf, st->buf, msg[i].len);
 
 			deb_data("<<< ");
 			debug_dump(msg[i].buf, msg[i].len, deb_data);
@@ -246,13 +238,6 @@ static int dib0700_i2c_xfer_new(struct i2c_adapter *adap, struct i2c_msg *msg,
 			/* I2C ctrl + FE bus; */
 			st->buf[3] = ((gen_mode << 6) & 0xC0) |
 				 ((bus_mode << 4) & 0x30);
-
-			if (msg[i].len > sizeof(st->buf) - 4) {
-				deb_info("i2c message to big: %d\n",
-					 msg[i].len);
-				return -EIO;
-			}
-
 			/* The Actual i2c payload */
 			memcpy(&st->buf[4], msg[i].buf, msg[i].len);
 
@@ -298,11 +283,6 @@ static int dib0700_i2c_xfer_legacy(struct i2c_adapter *adap,
 		/* fill in the address */
 		st->buf[1] = msg[i].addr << 1;
 		/* fill the buffer */
-		if (msg[i].len > sizeof(st->buf) - 2) {
-			deb_info("i2c xfer to big: %d\n",
-				msg[i].len);
-			return -EIO;
-		}
 		memcpy(&st->buf[2], msg[i].buf, msg[i].len);
 
 		/* write/read request */
@@ -312,19 +292,12 @@ static int dib0700_i2c_xfer_legacy(struct i2c_adapter *adap,
 
 			/* special thing in the current firmware: when length is zero the read-failed */
 			len = dib0700_ctrl_rd(d, st->buf, msg[i].len + 2,
-					      st->buf, msg[i + 1].len);
+					msg[i+1].buf, msg[i+1].len);
 			if (len <= 0) {
 				deb_info("I2C read failed on address 0x%02x\n",
 						msg[i].addr);
 				break;
 			}
-
-			if (msg[i + 1].len > sizeof(st->buf)) {
-				deb_info("i2c xfer buffer to small for %d\n",
-					msg[i].len);
-				return -EIO;
-			}
-			memcpy(msg[i + 1].buf, st->buf, msg[i + 1].len);
 
 			msg[i+1].len = len;
 
@@ -544,7 +517,7 @@ int dib0700_download_firmware(struct usb_device *udev, const struct firmware *fw
 	if (nb_packet_buffer_size < 1)
 		nb_packet_buffer_size = 1;
 
-	/* get the firmware version */
+	/* get the fimware version */
 	usb_control_msg(udev, usb_rcvctrlpipe(udev, 0),
 				  REQUEST_GET_VERSION,
 				  USB_TYPE_VENDOR | USB_DIR_IN, 0, 0,
@@ -678,24 +651,22 @@ out:
 	return ret;
 }
 
+/* Number of keypresses to ignore before start repeating */
+#define RC_REPEAT_DELAY_V1_20 10
+
 /* This is the structure of the RC response packet starting in firmware 1.20 */
 struct dib0700_rc_response {
 	u8 report_id;
 	u8 data_state;
 	union {
+		u16 system16;
 		struct {
-			u8 system;
 			u8 not_system;
-			u8 data;
-			u8 not_data;
-		} nec;
-		struct {
-			u8 not_used;
 			u8 system;
-			u8 data;
-			u8 not_data;
-		} rc5;
+		};
 	};
+	u8 data;
+	u8 not_data;
 };
 #define RC_MSG_SIZE_V1_20 6
 
@@ -703,8 +674,7 @@ static void dib0700_rc_urb_completion(struct urb *purb)
 {
 	struct dvb_usb_device *d = purb->context;
 	struct dib0700_rc_response *poll_reply;
-	enum rc_type protocol;
-	u32 keycode;
+	u32 uninitialized_var(keycode);
 	u8 toggle;
 
 	deb_info("%s()\n", __func__);
@@ -731,8 +701,8 @@ static void dib0700_rc_urb_completion(struct urb *purb)
 
 	deb_data("IR ID = %02X state = %02X System = %02X %02X Cmd = %02X %02X (len %d)\n",
 		 poll_reply->report_id, poll_reply->data_state,
-		 poll_reply->nec.system, poll_reply->nec.not_system,
-		 poll_reply->nec.data, poll_reply->nec.not_data,
+		 poll_reply->system, poll_reply->not_system,
+		 poll_reply->data, poll_reply->not_data,
 		 purb->actual_length);
 
 	switch (d->props.rc.core.protocol) {
@@ -740,55 +710,41 @@ static void dib0700_rc_urb_completion(struct urb *purb)
 		toggle = 0;
 
 		/* NEC protocol sends repeat code as 0 0 0 FF */
-		if (poll_reply->nec.system     == 0x00 &&
-		    poll_reply->nec.not_system == 0x00 &&
-		    poll_reply->nec.data       == 0x00 &&
-		    poll_reply->nec.not_data   == 0xff) {
+		if ((poll_reply->system == 0x00) && (poll_reply->data == 0x00)
+		    && (poll_reply->not_data == 0xff)) {
 			poll_reply->data_state = 2;
-			rc_repeat(d->rc_dev);
-			goto resubmit;
+			break;
 		}
 
-		if ((poll_reply->nec.data ^ poll_reply->nec.not_data) != 0xff) {
-			deb_data("NEC32 protocol\n");
-			keycode = RC_SCANCODE_NEC32(poll_reply->nec.system     << 24 |
-						     poll_reply->nec.not_system << 16 |
-						     poll_reply->nec.data       << 8  |
-						     poll_reply->nec.not_data);
-			protocol = RC_TYPE_NEC32;
-		} else if ((poll_reply->nec.system ^ poll_reply->nec.not_system) != 0xff) {
+		if ((poll_reply->system ^ poll_reply->not_system) != 0xff) {
 			deb_data("NEC extended protocol\n");
-			keycode = RC_SCANCODE_NECX(poll_reply->nec.system << 8 |
-						    poll_reply->nec.not_system,
-						    poll_reply->nec.data);
-
-			protocol = RC_TYPE_NECX;
+			/* NEC extended code - 24 bits */
+			keycode = be16_to_cpu(poll_reply->system16) << 8 | poll_reply->data;
 		} else {
 			deb_data("NEC normal protocol\n");
-			keycode = RC_SCANCODE_NEC(poll_reply->nec.system,
-						   poll_reply->nec.data);
-			protocol = RC_TYPE_NEC;
+			/* normal NEC code - 16 bits */
+			keycode = poll_reply->system << 8 | poll_reply->data;
 		}
 
 		break;
 	default:
 		deb_data("RC5 protocol\n");
-		protocol = RC_TYPE_RC5;
+		/* RC5 Protocol */
 		toggle = poll_reply->report_id;
-		keycode = RC_SCANCODE_RC5(poll_reply->rc5.system, poll_reply->rc5.data);
-
-		if ((poll_reply->rc5.data ^ poll_reply->rc5.not_data) != 0xff) {
-			/* Key failed integrity check */
-			err("key failed integrity check: %02x %02x %02x %02x",
-			    poll_reply->rc5.not_used, poll_reply->rc5.system,
-			    poll_reply->rc5.data, poll_reply->rc5.not_data);
-			goto resubmit;
-		}
+		keycode = poll_reply->system << 8 | poll_reply->data;
 
 		break;
 	}
 
-	rc_keydown(d->rc_dev, protocol, keycode, toggle);
+	if ((poll_reply->data + poll_reply->not_data) != 0xff) {
+		/* Key failed integrity check */
+		err("key failed integrity check: %04x %02x %02x",
+		    poll_reply->system,
+		    poll_reply->data, poll_reply->not_data);
+		goto resubmit;
+	}
+
+	rc_keydown(d->rc_dev, keycode, toggle);
 
 resubmit:
 	/* Clean the buffer before we requeue */
@@ -798,26 +754,22 @@ resubmit:
 	usb_submit_urb(purb, GFP_ATOMIC);
 }
 
-int dib0700_rc_setup(struct dvb_usb_device *d, struct usb_interface *intf)
+int dib0700_rc_setup(struct dvb_usb_device *d)
 {
 	struct dib0700_state *st = d->priv;
 	struct urb *purb;
-	const struct usb_endpoint_descriptor *e;
-	int ret, rc_ep = 1;
-	unsigned int pipe = 0;
+	int ret;
 
 	/* Poll-based. Don't initialize bulk mode */
-	if (st->fw_version < 0x10200 || !intf)
+	if (st->fw_version < 0x10200)
 		return 0;
 
 	/* Starting in firmware 1.20, the RC info is provided on a bulk pipe */
-
-	if (intf->altsetting[0].desc.bNumEndpoints < rc_ep + 1)
-		return -ENODEV;
-
 	purb = usb_alloc_urb(0, GFP_KERNEL);
-	if (purb == NULL)
+	if (purb == NULL) {
+		err("rc usb alloc urb failed");
 		return -ENOMEM;
+	}
 
 	purb->transfer_buffer = kzalloc(RC_MSG_SIZE_V1_20, GFP_KERNEL);
 	if (purb->transfer_buffer == NULL) {
@@ -827,35 +779,9 @@ int dib0700_rc_setup(struct dvb_usb_device *d, struct usb_interface *intf)
 	}
 
 	purb->status = -EINPROGRESS;
-
-	/*
-	 * Some devices like the Hauppauge NovaTD model 52009 use an interrupt
-	 * endpoint, while others use a bulk one.
-	 */
-	e = &intf->altsetting[0].endpoint[rc_ep].desc;
-	if (usb_endpoint_dir_in(e)) {
-		if (usb_endpoint_xfer_bulk(e)) {
-			pipe = usb_rcvbulkpipe(d->udev, rc_ep);
-			usb_fill_bulk_urb(purb, d->udev, pipe,
-					  purb->transfer_buffer,
-					  RC_MSG_SIZE_V1_20,
-					  dib0700_rc_urb_completion, d);
-
-		} else if (usb_endpoint_xfer_int(e)) {
-			pipe = usb_rcvintpipe(d->udev, rc_ep);
-			usb_fill_int_urb(purb, d->udev, pipe,
-					  purb->transfer_buffer,
-					  RC_MSG_SIZE_V1_20,
-					  dib0700_rc_urb_completion, d, 1);
-		}
-	}
-
-	if (!pipe) {
-		err("There's no endpoint for remote controller");
-		kfree(purb->transfer_buffer);
-		usb_free_urb(purb);
-		return 0;
-	}
+	usb_fill_bulk_urb(purb, d->udev, usb_rcvbulkpipe(d->udev, 1),
+			  purb->transfer_buffer, RC_MSG_SIZE_V1_20,
+			  dib0700_rc_urb_completion, d);
 
 	ret = usb_submit_urb(purb, GFP_ATOMIC);
 	if (ret) {
@@ -894,7 +820,7 @@ static int dib0700_probe(struct usb_interface *intf,
 			else
 				dev->props.rc.core.bulk_mode = false;
 
-			dib0700_rc_setup(dev, intf);
+			dib0700_rc_setup(dev);
 
 			return 0;
 		}
@@ -912,7 +838,7 @@ static struct usb_driver dib0700_driver = {
 module_usb_driver(dib0700_driver);
 
 MODULE_FIRMWARE("dvb-usb-dib0700-1.20.fw");
-MODULE_AUTHOR("Patrick Boettcher <patrick.boettcher@posteo.de>");
+MODULE_AUTHOR("Patrick Boettcher <pboettcher@dibcom.fr>");
 MODULE_DESCRIPTION("Driver for devices based on DiBcom DiB0700 - USB bridge");
 MODULE_VERSION("1.0");
 MODULE_LICENSE("GPL");

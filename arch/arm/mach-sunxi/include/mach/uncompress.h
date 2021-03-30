@@ -36,7 +36,7 @@
 static inline void putc(int c)
 {
 #if 0
-	while (!(UART_SR & TX_BUSY))
+	while(!(UART_SR & TX_BUSY))
 		cpu_relax();
 	UART_TF = c;
 #endif

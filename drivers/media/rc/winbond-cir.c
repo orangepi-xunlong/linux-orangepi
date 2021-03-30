@@ -213,11 +213,13 @@ struct wbcir_data {
 
 	/* RX state */
 	enum wbcir_rxstate rxstate;
+	struct led_trigger *rxtrigger;
 	int carrier_report_enabled;
 	u32 pulse_duration;
 
 	/* TX state */
 	enum wbcir_txstate txstate;
+	struct led_trigger *txtrigger;
 	u32 txlen;
 	u32 txoff;
 	u32 *txbuf;
@@ -364,11 +366,14 @@ wbcir_idle_rx(struct rc_dev *dev, bool idle)
 {
 	struct wbcir_data *data = dev->priv;
 
-	if (!idle && data->rxstate == WBCIR_RXSTATE_INACTIVE)
+	if (!idle && data->rxstate == WBCIR_RXSTATE_INACTIVE) {
 		data->rxstate = WBCIR_RXSTATE_ACTIVE;
+		led_trigger_event(data->rxtrigger, LED_FULL);
+	}
 
 	if (idle && data->rxstate != WBCIR_RXSTATE_INACTIVE) {
 		data->rxstate = WBCIR_RXSTATE_INACTIVE;
+		led_trigger_event(data->rxtrigger, LED_OFF);
 
 		if (data->carrier_report_enabled)
 			wbcir_carrier_report(data);
@@ -420,6 +425,7 @@ wbcir_irq_tx(struct wbcir_data *data)
 	case WBCIR_TXSTATE_INACTIVE:
 		/* TX FIFO empty */
 		space = 16;
+		led_trigger_event(data->txtrigger, LED_FULL);
 		break;
 	case WBCIR_TXSTATE_ACTIVE:
 		/* TX FIFO low (3 bytes or less) */
@@ -458,6 +464,7 @@ wbcir_irq_tx(struct wbcir_data *data)
 			/* Clear TX underrun bit */
 			outb(WBCIR_TX_UNDERRUN, data->sbase + WBCIR_REG_SP3_ASCR);
 		wbcir_set_irqmask(data, WBCIR_IRQ_RX | WBCIR_IRQ_ERR);
+		led_trigger_event(data->txtrigger, LED_OFF);
 		kfree(data->txbuf);
 		data->txbuf = NULL;
 		data->txstate = WBCIR_TXSTATE_INACTIVE;
@@ -614,10 +621,6 @@ wbcir_txmask(struct rc_dev *dev, u32 mask)
 	struct wbcir_data *data = dev->priv;
 	unsigned long flags;
 	u8 val;
-
-	/* return the number of transmitters */
-	if (mask > 15)
-		return 4;
 
 	/* Four outputs, only one output can be enabled at a time */
 	switch (mask) {
@@ -875,13 +878,15 @@ finish:
 	 */
 	wbcir_set_irqmask(data, WBCIR_IRQ_NONE);
 	disable_irq(data->irq);
+
+	/* Disable LED */
+	led_trigger_event(data->rxtrigger, LED_OFF);
+	led_trigger_event(data->txtrigger, LED_OFF);
 }
 
 static int
 wbcir_suspend(struct pnp_dev *device, pm_message_t state)
 {
-	struct wbcir_data *data = pnp_get_drvdata(device);
-	led_classdev_suspend(&data->led);
 	wbcir_shutdown(device);
 	return 0;
 }
@@ -1010,7 +1015,6 @@ wbcir_resume(struct pnp_dev *device)
 
 	wbcir_init_hw(data);
 	enable_irq(data->irq);
-	led_classdev_resume(&data->led);
 
 	return 0;
 }
@@ -1054,13 +1058,25 @@ wbcir_probe(struct pnp_dev *device, const struct pnp_device_id *dev_id)
 		"(w: 0x%lX, e: 0x%lX, s: 0x%lX, i: %u)\n",
 		data->wbase, data->ebase, data->sbase, data->irq);
 
+	led_trigger_register_simple("cir-tx", &data->txtrigger);
+	if (!data->txtrigger) {
+		err = -ENOMEM;
+		goto exit_free_data;
+	}
+
+	led_trigger_register_simple("cir-rx", &data->rxtrigger);
+	if (!data->rxtrigger) {
+		err = -ENOMEM;
+		goto exit_unregister_txtrigger;
+	}
+
 	data->led.name = "cir::activity";
-	data->led.default_trigger = "rc-feedback";
+	data->led.default_trigger = "cir-rx";
 	data->led.brightness_set = wbcir_led_brightness_set;
 	data->led.brightness_get = wbcir_led_brightness_get;
 	err = led_classdev_register(&device->dev, &data->led);
 	if (err)
-		goto exit_free_data;
+		goto exit_unregister_rxtrigger;
 
 	data->dev = rc_allocate_device();
 	if (!data->dev) {
@@ -1086,7 +1102,7 @@ wbcir_probe(struct pnp_dev *device, const struct pnp_device_id *dev_id)
 	data->dev->dev.parent = &device->dev;
 	data->dev->timeout = MS_TO_NS(100);
 	data->dev->rx_resolution = US_TO_NS(2);
-	data->dev->allowed_protocols = RC_BIT_ALL;
+	data->dev->allowed_protos = RC_BIT_ALL;
 
 	err = rc_register_device(data->dev);
 	if (err)
@@ -1114,7 +1130,7 @@ wbcir_probe(struct pnp_dev *device, const struct pnp_device_id *dev_id)
 	}
 
 	err = request_irq(data->irq, wbcir_irq_handler,
-			  0, DRVNAME, device);
+			  IRQF_DISABLED, DRVNAME, device);
 	if (err) {
 		dev_err(dev, "Failed to claim IRQ %u\n", data->irq);
 		err = -EBUSY;
@@ -1140,6 +1156,10 @@ exit_free_rc:
 	rc_free_device(data->dev);
 exit_unregister_led:
 	led_classdev_unregister(&data->led);
+exit_unregister_rxtrigger:
+	led_trigger_unregister_simple(data->rxtrigger);
+exit_unregister_txtrigger:
+	led_trigger_unregister_simple(data->txtrigger);
 exit_free_data:
 	kfree(data);
 	pnp_set_drvdata(device, NULL);
@@ -1167,6 +1187,8 @@ wbcir_remove(struct pnp_dev *device)
 
 	rc_unregister_device(data->dev);
 
+	led_trigger_unregister_simple(data->rxtrigger);
+	led_trigger_unregister_simple(data->txtrigger);
 	led_classdev_unregister(&data->led);
 
 	/* This is ok since &data->led isn't actually used */

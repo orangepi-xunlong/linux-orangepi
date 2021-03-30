@@ -59,6 +59,13 @@ static int encrypt(struct blkcipher_desc *desc,
 
 	salsa20_ivsetup(ctx, walk.iv);
 
+	if (likely(walk.nbytes == nbytes))
+	{
+		salsa20_encrypt_bytes(ctx, walk.src.virt.addr,
+				      walk.dst.virt.addr, nbytes);
+		return blkcipher_walk_done(desc, &walk, 0);
+	}
+
 	while (walk.nbytes >= 64) {
 		salsa20_encrypt_bytes(ctx, walk.src.virt.addr,
 				      walk.dst.virt.addr,
@@ -112,5 +119,5 @@ module_exit(fini);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION ("Salsa20 stream cipher algorithm (optimized assembly version)");
-MODULE_ALIAS_CRYPTO("salsa20");
-MODULE_ALIAS_CRYPTO("salsa20-asm");
+MODULE_ALIAS("salsa20");
+MODULE_ALIAS("salsa20-asm");

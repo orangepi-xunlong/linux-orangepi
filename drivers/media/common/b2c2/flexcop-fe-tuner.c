@@ -12,7 +12,6 @@
 #include "cx24113.h"
 #include "cx24123.h"
 #include "isl6421.h"
-#include "cx24120.h"
 #include "mt352.h"
 #include "bcm3510.h"
 #include "nxt200x.h"
@@ -27,20 +26,9 @@
 #define FE_SUPPORTED(fe) (defined(CONFIG_DVB_##fe) || \
 	(defined(CONFIG_DVB_##fe##_MODULE) && defined(MODULE)))
 
-#if FE_SUPPORTED(BCM3510) || (FE_SUPPORTED(CX24120) && FE_SUPPORTED(ISL6421))
-static int flexcop_fe_request_firmware(struct dvb_frontend *fe,
-	const struct firmware **fw, char *name)
-{
-	struct flexcop_device *fc = fe->dvb->priv;
-
-	return request_firmware(fw, name, fc->dev);
-}
-#endif
-
 /* lnb control */
-#if (FE_SUPPORTED(MT312) || FE_SUPPORTED(STV0299)) && FE_SUPPORTED(PLL)
-static int flexcop_set_voltage(struct dvb_frontend *fe,
-			       enum fe_sec_voltage voltage)
+#if FE_SUPPORTED(MT312) || FE_SUPPORTED(STV0299)
+static int flexcop_set_voltage(struct dvb_frontend *fe, fe_sec_voltage_t voltage)
 {
 	struct flexcop_device *fc = fe->dvb->priv;
 	flexcop_ibi_value v;
@@ -68,7 +56,7 @@ static int flexcop_set_voltage(struct dvb_frontend *fe,
 #endif
 
 #if FE_SUPPORTED(S5H1420) || FE_SUPPORTED(STV0299) || FE_SUPPORTED(MT312)
-static int __maybe_unused flexcop_sleep(struct dvb_frontend* fe)
+static int flexcop_sleep(struct dvb_frontend* fe)
 {
 	struct flexcop_device *fc = fe->dvb->priv;
 	if (fc->fe_sleep)
@@ -79,7 +67,7 @@ static int __maybe_unused flexcop_sleep(struct dvb_frontend* fe)
 
 /* SkyStar2 DVB-S rev 2.3 */
 #if FE_SUPPORTED(MT312) && FE_SUPPORTED(PLL)
-static int flexcop_set_tone(struct dvb_frontend *fe, enum fe_sec_tone_mode tone)
+static int flexcop_set_tone(struct dvb_frontend *fe, fe_sec_tone_mode_t tone)
 {
 /* u16 wz_half_period_for_45_mhz[] = { 0x01ff, 0x0154, 0x00ff, 0x00cc }; */
 	struct flexcop_device *fc = fe->dvb->priv;
@@ -158,7 +146,7 @@ static int flexcop_diseqc_send_master_cmd(struct dvb_frontend *fe,
 }
 
 static int flexcop_diseqc_send_burst(struct dvb_frontend *fe,
-				     enum fe_sec_mini_cmd minicmd)
+	fe_sec_mini_cmd_t minicmd)
 {
 	return flexcop_send_diseqc_msg(fe, 0, NULL, minicmd);
 }
@@ -457,6 +445,13 @@ static int airstar_dvbt_attach(struct flexcop_device *fc,
 
 /* AirStar ATSC 1st generation */
 #if FE_SUPPORTED(BCM3510)
+static int flexcop_fe_request_firmware(struct dvb_frontend *fe,
+	const struct firmware **fw, char* name)
+{
+	struct flexcop_device *fc = fe->dvb->priv;
+	return request_firmware(fw, name, fc->dev);
+}
+
 static struct bcm3510_config air2pc_atsc_first_gen_config = {
 	.demod_address    = 0x0f,
 	.request_firmware = flexcop_fe_request_firmware,
@@ -624,43 +619,6 @@ fail:
 #define cablestar2_attach NULL
 #endif
 
-/* SkyStar S2 PCI DVB-S/S2 card based on Conexant cx24120/cx24118 */
-#if FE_SUPPORTED(CX24120) && FE_SUPPORTED(ISL6421)
-static const struct cx24120_config skystar2_rev3_3_cx24120_config = {
-	.i2c_addr = 0x55,
-	.xtal_khz = 10111,
-	.initial_mpeg_config = { 0xa1, 0x76, 0x07 },
-	.request_firmware = flexcop_fe_request_firmware,
-	.i2c_wr_max = 4,
-};
-
-static int skystarS2_rev33_attach(struct flexcop_device *fc,
-	struct i2c_adapter *i2c)
-{
-	fc->fe = dvb_attach(cx24120_attach,
-			    &skystar2_rev3_3_cx24120_config, i2c);
-	if (!fc->fe)
-		return 0;
-
-	fc->dev_type = FC_SKYS2_REV33;
-	fc->fc_i2c_adap[2].no_base_addr = 1;
-	if (!dvb_attach(isl6421_attach, fc->fe, &fc->fc_i2c_adap[2].i2c_adap,
-			0x08, 0, 0, false)) {
-		err("ISL6421 could NOT be attached!");
-		fc->fc_i2c_adap[2].no_base_addr = 0;
-		return 0;
-	}
-	info("ISL6421 successfully attached.");
-
-	if (fc->has_32_hw_pid_filter)
-		fc->skip_6_hw_pid_filter = 1;
-
-	return 1;
-}
-#else
-#define skystarS2_rev33_attach NULL
-#endif
-
 static struct {
 	flexcop_device_type_t type;
 	int (*attach)(struct flexcop_device *, struct i2c_adapter *);
@@ -674,7 +632,6 @@ static struct {
 	{ FC_AIR_ATSC1, airstar_atsc1_attach },
 	{ FC_CABLE, cablestar2_attach },
 	{ FC_SKY_REV23, skystar2_rev23_attach },
-	{ FC_SKYS2_REV33, skystarS2_rev33_attach },
 };
 
 /* try to figure out the frontend */

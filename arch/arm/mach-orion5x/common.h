@@ -7,23 +7,6 @@ struct dsa_platform_data;
 struct mv643xx_eth_platform_data;
 struct mv_sata_platform_data;
 
-#define ORION_MBUS_PCIE_MEM_TARGET    0x04
-#define ORION_MBUS_PCIE_MEM_ATTR      0x59
-#define ORION_MBUS_PCIE_IO_TARGET     0x04
-#define ORION_MBUS_PCIE_IO_ATTR       0x51
-#define ORION_MBUS_PCIE_WA_TARGET     0x04
-#define ORION_MBUS_PCIE_WA_ATTR       0x79
-#define ORION_MBUS_PCI_MEM_TARGET     0x03
-#define ORION_MBUS_PCI_MEM_ATTR       0x59
-#define ORION_MBUS_PCI_IO_TARGET      0x03
-#define ORION_MBUS_PCI_IO_ATTR        0x51
-#define ORION_MBUS_DEVBUS_BOOT_TARGET 0x01
-#define ORION_MBUS_DEVBUS_BOOT_ATTR   0x0f
-#define ORION_MBUS_DEVBUS_TARGET(cs)  0x01
-#define ORION_MBUS_DEVBUS_ATTR(cs)    (~(1 << cs))
-#define ORION_MBUS_SRAM_TARGET        0x09
-#define ORION_MBUS_SRAM_ATTR          0x00
-
 /*
  * Basic Orion init functions used early by machine-setup.
  */
@@ -41,7 +24,7 @@ void orion5x_setup_wins(void);
 void orion5x_ehci0_init(void);
 void orion5x_ehci1_init(void);
 void orion5x_eth_init(struct mv643xx_eth_platform_data *eth_data);
-void orion5x_eth_switch_init(struct dsa_platform_data *d);
+void orion5x_eth_switch_init(struct dsa_platform_data *d, int irq);
 void orion5x_i2c_init(void);
 void orion5x_sata_init(struct mv_sata_platform_data *sata_data);
 void orion5x_spi_init(void);
@@ -64,14 +47,16 @@ int orion5x_pci_sys_setup(int nr, struct pci_sys_data *sys);
 struct pci_bus *orion5x_pci_sys_scan_bus(int nr, struct pci_sys_data *sys);
 int orion5x_pci_map_irq(const struct pci_dev *dev, u8 slot, u8 pin);
 
-struct tag;
-extern void __init tag_fixup_mem32(struct tag *, char **);
-
-#ifdef CONFIG_MACH_MSS2_DT
-extern void mss2_init(void);
+/* board init functions for boards not fully converted to fdt */
+#ifdef CONFIG_MACH_EDMINI_V2_DT
+void edmini_v2_init(void);
 #else
-static inline void mss2_init(void) {}
+static inline void edmini_v2_init(void) {};
 #endif
+
+struct meminfo;
+struct tag;
+extern void __init tag_fixup_mem32(struct tag *, char **, struct meminfo *);
 
 /*****************************************************************************
  * Helpers to access Orion registers

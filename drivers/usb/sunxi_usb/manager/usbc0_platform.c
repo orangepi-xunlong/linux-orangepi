@@ -36,14 +36,15 @@
 #include  "../include/sunxi_usb_config.h"
 #include  "usb_hw_scan.h"
 #include  "usb_msg_center.h"
-#include  "usbc_platform.h"
 
-int usb_hw_scan_debug;
+int usb_hw_scan_debug = 0;
 
-static ssize_t device_chose(struct device *dev,
-		struct device_attribute *attr, char *buf)
+extern struct usb_cfg g_usb_cfg;
+extern __u32 thread_run_flag;
+
+static ssize_t device_chose(struct device * dev,struct device_attribute * attr,char * buf)
 {
-	/* stop usb scan */
+	//stop usb scan
 	thread_run_flag = 0;
 
 	while (!thread_stopped_flag)
@@ -59,10 +60,9 @@ static ssize_t device_chose(struct device *dev,
 	return sprintf(buf, "%s\n", "device_chose finished!");
 }
 
-static ssize_t host_chose(struct device *dev,
-		struct device_attribute *attr, char *buf)
+static ssize_t host_chose(struct device * dev,struct device_attribute * attr,char * buf)
 {
-	/* stop usb scan */
+	//stop usb scan
 	thread_run_flag = 0;
 
 	while (!thread_stopped_flag)
@@ -80,10 +80,9 @@ static ssize_t host_chose(struct device *dev,
 	return sprintf(buf, "%s\n", "host_chose finished!");
 }
 
-static ssize_t null_chose(struct device *dev,
-		struct device_attribute *attr, char *buf)
+static ssize_t null_chose(struct device * dev,struct device_attribute * attr,char * buf)
 {
-	/* stop usb scan */
+	 //stop usb scan
 	thread_run_flag = 0;
 
 	while (!thread_stopped_flag)
@@ -97,69 +96,63 @@ static ssize_t null_chose(struct device *dev,
 }
 
 static ssize_t show_otg_role(struct device *dev,
-		struct device_attribute *attr, char *buf)
+                struct device_attribute *attr, char *buf)
 {
 	int value = 0;
 	char buf_role[16];
-
 	value = get_usb_role();
 
-	switch (value) {
-	case USB_ROLE_NULL:
-		strcpy(buf_role, "null");
+	switch(value){
+		case USB_ROLE_NULL:
+			strcpy(buf_role, "null");
 		break;
 
-	case USB_ROLE_DEVICE:
-		strcpy(buf_role, "usb_device");
+		case USB_ROLE_DEVICE:
+			strcpy(buf_role, "usb_device");
 		break;
 
-	case USB_ROLE_HOST:
-		strcpy(buf_role, "usb_host");
+		case USB_ROLE_HOST:
+			strcpy(buf_role, "usb_host");
 		break;
 
-	default:
-		DMSG_INFO("err: unknown otg role(%d)\n", value);
-		strcpy(buf_role, "unknown");
+		default:
+			DMSG_INFO("err: unkown otg role(%d)\n", value);
+			strcpy(buf_role, "unkown");
 	}
-
 	return sprintf(buf, "%s\n", buf_role);
 }
 
-static ssize_t set_otg_role(struct device *dev,
-		struct device_attribute *attr,
+static ssize_t set_otg_role(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	int value = 0;
-	int ret = 0;
+    	int value = 0;
 
-	if (strncmp(buf, "usb_host", 8) == 0) {
+	if(strncmp(buf, "usb_host", 8) == 0){
 		value = USB_ROLE_HOST;
-	} else if (strncmp(buf, "usb_device", 10) == 0) {
+	}else if(strncmp(buf, "usb_device", 10) == 0){
 		value = USB_ROLE_DEVICE;
-	} else if (strncmp(buf, "null", 4) == 0) {
+	}else if(strncmp(buf, "null", 4) == 0){
 		value = USB_ROLE_NULL;
-	} else {
-		ret = kstrtoint(buf, 0, &value);
-		if (ret != 0)
-			return ret;
+	}else{
+		sscanf(buf, "%d", &value);
 	}
 
-	switch (value) {
-	case USB_ROLE_NULL:
-		null_chose(dev, attr, (char *)buf);
+	switch(value){
+		case USB_ROLE_NULL:
+			null_chose(dev, attr, (char *)buf);
 		break;
 
-	case USB_ROLE_DEVICE:
-		device_chose(dev, attr, (char *)buf);
+		case USB_ROLE_DEVICE:
+			device_chose(dev, attr, (char *)buf);
 		break;
 
-	case USB_ROLE_HOST:
-		host_chose(dev, attr, (char *)buf);
+		case USB_ROLE_HOST:
+			host_chose(dev, attr, (char *)buf);
 		break;
 
-	default:
-		DMSG_INFO("err: unknown otg role(%d)\n", value);
-		null_chose(dev, attr, (char *)buf);
+		default:
+			DMSG_INFO("err: unkown otg role(%d)\n", value);
+			null_chose(dev, attr, (char *)buf);
 	}
 
 	return count;
@@ -172,31 +165,22 @@ static struct device_attribute chose_attrs[] = {
 	__ATTR(otg_role, 0644, show_otg_role, set_otg_role),
 };
 
-static ssize_t show_otg_hw_scan_debug(struct device *dev,
-		struct device_attribute *attr, char *buf)
+static ssize_t show_otg_hw_scan_debug(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	return sprintf(buf, "%u\n", usb_hw_scan_debug);
 }
 
-static ssize_t otg_hw_scan_debug(struct device *dev,
-		struct device_attribute *attr,
-		const char *buf, size_t count)
+static ssize_t otg_hw_scan_debug(struct device *dev, struct device_attribute *attr,
+							const char *buf, size_t count)
 {
 	int debug = 0;
-	int ret = 0;
 
-	ret = kstrtoint(buf, 0, &debug);
-	if (ret != 0)
-		return ret;
-
+	sscanf(buf, "%d", &debug);
 	usb_hw_scan_debug = debug;
 
 	return count;
 }
-static DEVICE_ATTR(hw_scan_debug,
-		0644,
-		show_otg_hw_scan_debug,
-		otg_hw_scan_debug);
+static DEVICE_ATTR(hw_scan_debug, 0644, show_otg_hw_scan_debug, otg_hw_scan_debug);
 
 __s32 create_node_file(struct platform_device *pdev)
 {
@@ -220,8 +204,9 @@ __s32 remove_node_file(struct platform_device *pdev)
 
 	device_remove_file(&pdev->dev, &dev_attr_hw_scan_debug);
 
-	for (i = 0; i < ARRAY_SIZE(chose_attrs); i++)
+	for (i = 0; i < ARRAY_SIZE(chose_attrs); i++) {
 		device_remove_file(&pdev->dev, &chose_attrs[i]);
+	}
 
 	return 0;
 }

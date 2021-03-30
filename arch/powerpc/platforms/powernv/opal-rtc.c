@@ -15,12 +15,9 @@
 #include <linux/bcd.h>
 #include <linux/rtc.h>
 #include <linux/delay.h>
-#include <linux/platform_device.h>
-#include <linux/of_platform.h>
 
 #include <asm/opal.h>
 #include <asm/firmware.h>
-#include <asm/machdep.h>
 
 static void opal_to_tm(u32 y_m_d, u64 h_m_s_ms, struct rtc_time *tm)
 {
@@ -31,7 +28,8 @@ static void opal_to_tm(u32 y_m_d, u64 h_m_s_ms, struct rtc_time *tm)
 	tm->tm_hour	= bcd2bin((h_m_s_ms >> 56) & 0xff);
 	tm->tm_min	= bcd2bin((h_m_s_ms >> 48) & 0xff);
 	tm->tm_sec	= bcd2bin((h_m_s_ms >> 40) & 0xff);
-	tm->tm_wday     = -1;
+
+        GregorianDay(tm);
 }
 
 unsigned long __init opal_get_boot_time(void)
@@ -39,50 +37,61 @@ unsigned long __init opal_get_boot_time(void)
 	struct rtc_time tm;
 	u32 y_m_d;
 	u64 h_m_s_ms;
-	__be32 __y_m_d;
-	__be64 __h_m_s_ms;
 	long rc = OPAL_BUSY;
 
-	if (!opal_check_token(OPAL_RTC_READ))
-		return 0;
-
 	while (rc == OPAL_BUSY || rc == OPAL_BUSY_EVENT) {
-		rc = opal_rtc_read(&__y_m_d, &__h_m_s_ms);
-		if (rc == OPAL_BUSY_EVENT) {
-			mdelay(OPAL_BUSY_DELAY_MS);
+		rc = opal_rtc_read(&y_m_d, &h_m_s_ms);
+		if (rc == OPAL_BUSY_EVENT)
 			opal_poll_events(NULL);
-		} else if (rc == OPAL_BUSY) {
-			mdelay(OPAL_BUSY_DELAY_MS);
-		}
+		else
+			mdelay(10);
 	}
 	if (rc != OPAL_SUCCESS)
 		return 0;
-
-	y_m_d = be32_to_cpu(__y_m_d);
-	h_m_s_ms = be64_to_cpu(__h_m_s_ms);
 	opal_to_tm(y_m_d, h_m_s_ms, &tm);
 	return mktime(tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
 		      tm.tm_hour, tm.tm_min, tm.tm_sec);
 }
 
-static __init int opal_time_init(void)
+void opal_get_rtc_time(struct rtc_time *tm)
 {
-	struct platform_device *pdev;
-	struct device_node *rtc;
+	long rc = OPAL_BUSY;
+	u32 y_m_d;
+	u64 h_m_s_ms;
 
-	rtc = of_find_node_by_path("/ibm,opal/rtc");
-	if (rtc) {
-		pdev = of_platform_device_create(rtc, "opal-rtc", NULL);
-		of_node_put(rtc);
-	} else {
-		if (opal_check_token(OPAL_RTC_READ) ||
-		    opal_check_token(OPAL_READ_TPO))
-			pdev = platform_device_register_simple("opal-rtc", -1,
-							       NULL, 0);
+	while (rc == OPAL_BUSY || rc == OPAL_BUSY_EVENT) {
+		rc = opal_rtc_read(&y_m_d, &h_m_s_ms);
+		if (rc == OPAL_BUSY_EVENT)
+			opal_poll_events(NULL);
 		else
-			return -ENODEV;
+			mdelay(10);
 	}
-
-	return PTR_ERR_OR_ZERO(pdev);
+	if (rc != OPAL_SUCCESS)
+		return;
+	opal_to_tm(y_m_d, h_m_s_ms, tm);
 }
-machine_subsys_initcall(powernv, opal_time_init);
+
+int opal_set_rtc_time(struct rtc_time *tm)
+{
+	long rc = OPAL_BUSY;
+	u32 y_m_d = 0;
+	u64 h_m_s_ms = 0;
+
+	y_m_d |= ((u32)bin2bcd((tm->tm_year + 1900) / 100)) << 24;
+	y_m_d |= ((u32)bin2bcd((tm->tm_year + 1900) % 100)) << 16;
+	y_m_d |= ((u32)bin2bcd((tm->tm_mon + 1))) << 8;
+	y_m_d |= ((u32)bin2bcd(tm->tm_mday));
+
+	h_m_s_ms |= ((u64)bin2bcd(tm->tm_hour)) << 56;
+	h_m_s_ms |= ((u64)bin2bcd(tm->tm_min)) << 48;
+	h_m_s_ms |= ((u64)bin2bcd(tm->tm_sec)) << 40;
+
+	while (rc == OPAL_BUSY || rc == OPAL_BUSY_EVENT) {
+		rc = opal_rtc_write(y_m_d, h_m_s_ms);
+		if (rc == OPAL_BUSY_EVENT)
+			opal_poll_events(NULL);
+		else
+			mdelay(10);
+	}
+	return rc == OPAL_SUCCESS ? 0 : -EIO;
+}

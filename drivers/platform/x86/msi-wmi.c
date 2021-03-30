@@ -29,7 +29,6 @@
 #include <linux/backlight.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <acpi/video.h>
 
 MODULE_AUTHOR("Thomas Renninger <trenn@suse.de>");
 MODULE_DESCRIPTION("MSI laptop WMI hotkeys driver");
@@ -321,8 +320,7 @@ static int __init msi_wmi_init(void)
 		break;
 	}
 
-	if (wmi_has_guid(MSIWMI_BIOS_GUID) &&
-	    acpi_video_get_backlight_type() == acpi_backlight_vendor) {
+	if (wmi_has_guid(MSIWMI_BIOS_GUID) && !acpi_video_backlight_support()) {
 		err = msi_wmi_backlight_setup();
 		if (err) {
 			pr_err("Unable to setup backlight device\n");
@@ -356,7 +354,8 @@ static void __exit msi_wmi_exit(void)
 		sparse_keymap_free(msi_wmi_input_dev);
 		input_unregister_device(msi_wmi_input_dev);
 	}
-	backlight_device_unregister(backlight);
+	if (backlight)
+		backlight_device_unregister(backlight);
 }
 
 module_init(msi_wmi_init);

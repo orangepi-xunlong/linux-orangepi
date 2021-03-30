@@ -27,27 +27,23 @@
 
 #include <asm/octeon/octeon.h>
 
-enum octeon_feature_bits __octeon_feature_bits __read_mostly;
-EXPORT_SYMBOL_GPL(__octeon_feature_bits);
-
 /**
- * Read a byte of fuse data
- * @byte_addr:	 address to read
+ * Given the chip processor ID from COP0, this function returns a
+ * string representing the chip model number. The string is of the
+ * form CNXXXXpX.X-FREQ-SUFFIX.
+ * - XXXX = The chip model number
+ * - X.X = Chip pass number
+ * - FREQ = Current frequency in Mhz
+ * - SUFFIX = NSP, EXP, SCP, SSP, or CP
  *
- * Returns fuse value: 0 or 1
+ * @chip_id: Chip ID
+ *
+ * Returns Model string
  */
-static uint8_t __init cvmx_fuse_read_byte(int byte_addr)
+const char *octeon_model_get_string(uint32_t chip_id)
 {
-	union cvmx_mio_fus_rcmd read_cmd;
-
-	read_cmd.u64 = 0;
-	read_cmd.s.addr = byte_addr;
-	read_cmd.s.pend = 1;
-	cvmx_write_csr(CVMX_MIO_FUS_RCMD, read_cmd.u64);
-	while ((read_cmd.u64 = cvmx_read_csr(CVMX_MIO_FUS_RCMD))
-	       && read_cmd.s.pend)
-		;
-	return read_cmd.s.dat;
+	static char buffer[32];
+	return octeon_model_get_string_buffer(chip_id, buffer);
 }
 
 /*
@@ -55,8 +51,7 @@ static uint8_t __init cvmx_fuse_read_byte(int byte_addr)
  * as running early in u-boot static/global variables don't work when
  * running from flash.
  */
-static const char *__init octeon_model_get_string_buffer(uint32_t chip_id,
-							 char *buffer)
+const char *octeon_model_get_string_buffer(uint32_t chip_id, char *buffer)
 {
 	const char *family;
 	const char *core_model;
@@ -71,11 +66,11 @@ static const char *__init octeon_model_get_string_buffer(uint32_t chip_id,
 	uint32_t fuse_data = 0;
 
 	fus3.u64 = 0;
-	if (OCTEON_IS_MODEL(OCTEON_CN3XXX) || OCTEON_IS_MODEL(OCTEON_CN5XXX))
+	if (!OCTEON_IS_MODEL(OCTEON_CN6XXX))
 		fus3.u64 = cvmx_read_csr(CVMX_L2D_FUS3);
 	fus_dat2.u64 = cvmx_read_csr(CVMX_MIO_FUS_DAT2);
 	fus_dat3.u64 = cvmx_read_csr(CVMX_MIO_FUS_DAT3);
-	num_cores = cvmx_octeon_num_cores();
+	num_cores = cvmx_pop(cvmx_read_csr(CVMX_CIU_FUSE));
 
 	/* Make sure the non existent devices look disabled */
 	switch ((chip_id >> 8) & 0xff) {
@@ -106,9 +101,6 @@ static const char *__init octeon_model_get_string_buffer(uint32_t chip_id,
 	else
 		suffix = "NSP";
 
-	if (!fus_dat2.s.nocrypto)
-		__octeon_feature_bits |= OCTEON_HAS_CRYPTO;
-
 	/*
 	 * Assume pass number is encoded using <5:3><2:0>. Exceptions
 	 * will be fixed later.
@@ -121,15 +113,6 @@ static const char *__init octeon_model_get_string_buffer(uint32_t chip_id,
 	 * later.
 	 */
 	switch (num_cores) {
-	case 48:
-		core_model = "90";
-		break;
-	case 44:
-		core_model = "88";
-		break;
-	case 40:
-		core_model = "85";
-		break;
 	case 32:
 		core_model = "80";
 		break;
@@ -306,7 +289,7 @@ static const char *__init octeon_model_get_string_buffer(uint32_t chip_id,
 				if (fus_dat3.s.nozip)
 					suffix = "SCP";
 
-				if (fus_dat3.cn56xx.bar2_en)
+				if (fus_dat3.s.bar2_en)
 					suffix = "NSPB2";
 			}
 			if (fus3.cn56xx.crip_1024k)
@@ -378,73 +361,6 @@ static const char *__init octeon_model_get_string_buffer(uint32_t chip_id,
 		else
 			suffix = "AAP";
 		break;
-	case 0x94:		/* CNF71XX */
-		family = "F71";
-		if (fus_dat3.cnf71xx.nozip)
-			suffix = "SCP";
-		else
-			suffix = "AAP";
-		break;
-	case 0x95:		/* CN78XX */
-		if (num_cores == 6)	/* Other core counts match generic */
-			core_model = "35";
-		if (OCTEON_IS_MODEL(OCTEON_CN76XX))
-			family = "76";
-		else
-			family = "78";
-		if (fus_dat3.cn78xx.l2c_crip == 2)
-			family = "77";
-		if (fus_dat3.cn78xx.nozip
-		    && fus_dat3.cn78xx.nodfa_dte
-		    && fus_dat3.cn78xx.nohna_dte) {
-			if (fus_dat3.cn78xx.nozip &&
-				!fus_dat2.cn78xx.raid_en &&
-				fus_dat3.cn78xx.nohna_dte) {
-				suffix = "CP";
-			} else {
-				suffix = "SCP";
-			}
-		} else if (fus_dat2.cn78xx.raid_en == 0)
-			suffix = "HCP";
-		else
-			suffix = "AAP";
-		break;
-	case 0x96:		/* CN70XX */
-		family = "70";
-		if (cvmx_read_csr(CVMX_MIO_FUS_PDF) & (0x1ULL << 32))
-			family = "71";
-		if (fus_dat2.cn70xx.nocrypto)
-			suffix = "CP";
-		else if (fus_dat3.cn70xx.nodfa_dte)
-			suffix = "SCP";
-		else
-			suffix = "AAP";
-		break;
-	case 0x97:		/* CN73XX */
-		if (num_cores == 6)	/* Other core counts match generic */
-			core_model = "35";
-		family = "73";
-		if (fus_dat3.cn73xx.l2c_crip == 2)
-			family = "72";
-		if (fus_dat3.cn73xx.nozip
-				&& fus_dat3.cn73xx.nodfa_dte
-				&& fus_dat3.cn73xx.nohna_dte) {
-			if (!fus_dat2.cn73xx.raid_en)
-				suffix = "CP";
-			else
-				suffix = "SCP";
-		} else
-			suffix = "AAP";
-		break;
-	case 0x98:		/* CN75XX */
-		family = "F75";
-		if (fus_dat3.cn78xx.nozip
-		    && fus_dat3.cn78xx.nodfa_dte
-		    && fus_dat3.cn78xx.nohna_dte)
-			suffix = "SCP";
-		else
-			suffix = "AAP";
-		break;
 	default:
 		family = "XX";
 		core_model = "XX";
@@ -490,23 +406,4 @@ static const char *__init octeon_model_get_string_buffer(uint32_t chip_id,
 	}
 	sprintf(buffer, "CN%s%sp%s-%d-%s", family, core_model, pass, clock_mhz, suffix);
 	return buffer;
-}
-
-/**
- * Given the chip processor ID from COP0, this function returns a
- * string representing the chip model number. The string is of the
- * form CNXXXXpX.X-FREQ-SUFFIX.
- * - XXXX = The chip model number
- * - X.X = Chip pass number
- * - FREQ = Current frequency in Mhz
- * - SUFFIX = NSP, EXP, SCP, SSP, or CP
- *
- * @chip_id: Chip ID
- *
- * Returns Model string
- */
-const char *__init octeon_model_get_string(uint32_t chip_id)
-{
-	static char buffer[32];
-	return octeon_model_get_string_buffer(chip_id, buffer);
 }

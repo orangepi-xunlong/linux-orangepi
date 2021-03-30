@@ -43,9 +43,9 @@
 #include "util.h"
 
 #ifdef DEBUG
-#define debug(...)	printf(__VA_ARGS__)
+#define debug(fmt,args...)	printf(fmt, ##args)
 #else
-#define debug(...)
+#define debug(fmt,args...)
 #endif
 
 
@@ -58,11 +58,7 @@ extern int quiet;		/* Level of quietness */
 extern int reservenum;		/* Number of memory reservation slots */
 extern int minsize;		/* Minimum blob size */
 extern int padsize;		/* Additional padding to blob */
-extern int alignsize;		/* Additional padding to blob accroding to the alignsize */
 extern int phandle_format;	/* Use linux,phandle or phandle properties */
-extern int generate_symbols;	/* generate symbols for nodes with labels */
-extern int generate_fixups;	/* generate fixups */
-extern int auto_label_aliases;	/* auto generate labels -> aliases */
 
 #define PHANDLE_LEGACY	0x1
 #define PHANDLE_EPAPR	0x2
@@ -75,6 +71,10 @@ typedef uint32_t cell_t;
 #define strneq(a, b, n)	(strncmp((a), (b), (n)) == 0)
 
 #define ALIGN(x, a)	(((x) + (a) - 1) & ~((a) - 1))
+
+#if 0
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#endif
 
 /* Data blobs */
 enum markertype {
@@ -97,7 +97,7 @@ struct data {
 };
 
 
-#define empty_data ((struct data){ 0 /* all .members = 0 or NULL */ })
+#define empty_data ((struct data){ /* all .members = 0 or NULL */ })
 
 #define for_each_marker(m) \
 	for (; (m); (m) = (m)->next)
@@ -127,7 +127,7 @@ struct data data_append_align(struct data d, int align);
 
 struct data data_add_marker(struct data d, enum markertype type, char *ref);
 
-bool data_is_one_string(struct data d);
+int data_is_one_string(struct data d);
 
 /* DT constraints */
 
@@ -136,13 +136,13 @@ bool data_is_one_string(struct data d);
 
 /* Live trees */
 struct label {
-	bool deleted;
+	int deleted;
 	char *label;
 	struct label *next;
 };
 
 struct property {
-	bool deleted;
+	int deleted;
 	char *name;
 	struct data val;
 
@@ -152,7 +152,7 @@ struct property {
 };
 
 struct node {
-	bool deleted;
+	int deleted;
 	char *name;
 	struct property *proplist;
 	struct node *children;
@@ -210,8 +210,6 @@ void delete_property(struct property *prop);
 void add_child(struct node *parent, struct node *child);
 void delete_node_by_name(struct node *parent, char *name);
 void delete_node(struct node *node);
-void append_to_property(struct node *node,
-			char *name, const void *data, int len);
 
 const char *get_unitname(struct node *node);
 struct property *get_property(struct node *node, const char *propname);
@@ -248,44 +246,34 @@ struct reserve_info *add_reserve_entry(struct reserve_info *list,
 				       struct reserve_info *new);
 
 
-struct dt_info {
-	unsigned int dtsflags;
+struct boot_info {
 	struct reserve_info *reservelist;
-	uint32_t boot_cpuid_phys;
 	struct node *dt;		/* the device tree */
+	uint32_t boot_cpuid_phys;
 };
 
-/* DTS version flags definitions */
-#define DTSF_V1		0x0001	/* /dts-v1/ */
-#define DTSF_PLUGIN	0x0002	/* /plugin/ */
-
-struct dt_info *build_dt_info(unsigned int dtsflags,
-			      struct reserve_info *reservelist,
-			      struct node *tree, uint32_t boot_cpuid_phys);
-void sort_tree(struct dt_info *dti);
-void generate_label_tree(struct dt_info *dti, char *name, bool allocph);
-void generate_fixups_tree(struct dt_info *dti, char *name);
-void generate_local_fixups_tree(struct dt_info *dti, char *name);
+struct boot_info *build_boot_info(struct reserve_info *reservelist,
+				  struct node *tree, uint32_t boot_cpuid_phys);
+void sort_tree(struct boot_info *bi);
 
 /* Checks */
 
-void parse_checks_option(bool warn, bool error, const char *arg);
-void dirty_checks(void);
-void process_checks(bool force, struct dt_info *dti);
+void parse_checks_option(bool warn, bool error, const char *optarg);
+void process_checks(int force, struct boot_info *bi);
 
 /* Flattened trees */
 
-void dt_to_blob(FILE *f, struct dt_info *dti, int version);
-void dt_to_asm(FILE *f, struct dt_info *dti, int version);
+void dt_to_blob(FILE *f, struct boot_info *bi, int version);
+void dt_to_asm(FILE *f, struct boot_info *bi, int version);
 
-struct dt_info *dt_from_blob(const char *fname);
+struct boot_info *dt_from_blob(const char *fname);
 
 /* Tree source */
-void dt_to_source(FILE *f, struct dt_info *dti);
-struct dt_info *dt_from_source(const char *f);
+void dt_to_source(FILE *f, struct boot_info *bi);
+struct boot_info *dt_from_source(const char *f);
 
 /* FS trees */
 
-struct dt_info *dt_from_fs(const char *dirname);
+struct boot_info *dt_from_fs(const char *dirname);
 
 #endif /* _DTC_H */

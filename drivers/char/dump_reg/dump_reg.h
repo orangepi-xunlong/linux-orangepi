@@ -17,8 +17,8 @@
 #ifndef _DUMP_REG_H_
 #define _DUMP_REG_H_
 
-#define MAX_COMPARE_ITEM	64
-#define MAX_WRITE_ITEM		64
+#define MAX_COMPARE_ITEM 	64
+#define MAX_WRITE_ITEM 		64
 
 /**
  * compare_item - reg compare item struct
@@ -35,7 +35,7 @@ struct compare_item {
 /**
  * compare_group - reg compare group struct
  * @num:	pitem element count. cannot exceed MAX_COMPARE_ITEM.
- * @pitem:	items that will be compared, provided by caller.
+ * @pitem: 	items that will be compared, provided by caller.
  */
 struct compare_group {
 	u32	num;
@@ -46,7 +46,7 @@ struct compare_group {
 /**
  * write_item - reg write item struct
  * @reg_addr:	reg address.
- * @val:	value to write
+ * @val: 	value to write
  */
 struct write_item {
 	unsigned long reg_addr;
@@ -57,7 +57,7 @@ struct write_item {
 /**
  * write_group - reg write group struct
  * @num:	pitem element count. cannot exceed MAX_WRITE_ITEM.
- * @pitem:	items that will be write, provided by caller.
+ * @pitem: 	items that will be write, provided by caller.
  */
 struct write_group {
 	u32	num;

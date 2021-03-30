@@ -13,10 +13,7 @@
  * If you want more physical memory than this then see the CONFIG_HIGHMEM4G
  * and CONFIG_HIGHMEM64G options in the kernel configuration.
  */
-#define __PAGE_OFFSET_BASE	_AC(CONFIG_PAGE_OFFSET, UL)
-#define __PAGE_OFFSET		__PAGE_OFFSET_BASE
-
-#define __START_KERNEL_map	__PAGE_OFFSET
+#define __PAGE_OFFSET		_AC(CONFIG_PAGE_OFFSET, UL)
 
 #define THREAD_SIZE_ORDER	1
 #define THREAD_SIZE		(PAGE_SIZE << THREAD_SIZE_ORDER)
@@ -28,13 +25,8 @@
 #define N_EXCEPTION_STACKS 1
 
 #ifdef CONFIG_X86_PAE
-/*
- * This is beyond the 44 bit limit imposed by the 32bit long pfns,
- * but we need the full mask to make sure inverted PROT_NONE
- * entries have all the host bits set in a guest.
- * The real limit is still 44 bits.
- */
-#define __PHYSICAL_MASK_SHIFT	52
+/* 44=32+12, the limit we can fit into an unsigned long pfn */
+#define __PHYSICAL_MASK_SHIFT	44
 #define __VIRTUAL_MASK_SHIFT	32
 
 #else  /* !CONFIG_X86_PAE */

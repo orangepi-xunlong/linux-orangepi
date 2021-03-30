@@ -19,7 +19,6 @@
 #ifndef __BTRFS_I__
 #define __BTRFS_I__
 
-#include <linux/hash.h>
 #include "extent_map.h"
 #include "extent_io.h"
 #include "ordered-data.h"
@@ -43,7 +42,6 @@
 #define BTRFS_INODE_COPY_EVERYTHING		8
 #define BTRFS_INODE_IN_DELALLOC_LIST		9
 #define BTRFS_INODE_READDIO_NEED_LOCK		10
-#define BTRFS_INODE_HAS_PROPS		        11
 
 /* in memory btrfs inode */
 struct btrfs_inode {
@@ -55,11 +53,7 @@ struct btrfs_inode {
 	 */
 	struct btrfs_key location;
 
-	/*
-	 * Lock for counters and all fields used to determine if the inode is in
-	 * the log or not (last_trans, last_sub_trans, last_log_commit,
-	 * logged_trans).
-	 */
+	/* Lock for counters */
 	spinlock_t lock;
 
 	/* the extent_tree has caches of all the extent mappings to disk */
@@ -88,6 +82,12 @@ struct btrfs_inode {
 	 */
 	struct list_head delalloc_inodes;
 
+	/*
+	 * list for tracking inodes that must be sent to disk before a
+	 * rename or truncate commit
+	 */
+	struct list_head ordered_operations;
+
 	/* node for the red-black tree that links inodes in subvolume root */
 	struct rb_node rb_node;
 
@@ -107,28 +107,19 @@ struct btrfs_inode {
 	u64 last_trans;
 
 	/*
+	 * log transid when this inode was last modified
+	 */
+	u64 last_sub_trans;
+
+	/*
 	 * transid that last logged this inode
 	 */
 	u64 logged_trans;
-
-	/*
-	 * log transid when this inode was last modified
-	 */
-	int last_sub_trans;
-
-	/* a local copy of root's last_log_commit */
-	int last_log_commit;
 
 	/* total number of bytes pending delalloc, used by stat to calc the
 	 * real block usage of the file
 	 */
 	u64 delalloc_bytes;
-
-	/*
-	 * total number of bytes pending defrag, used by stat to check whether
-	 * it needs COW.
-	 */
-	u64 defrag_bytes;
 
 	/*
 	 * the size of the file stored in the metadata on disk.  data=ordered
@@ -142,9 +133,6 @@ struct btrfs_inode {
 	 * number for new files that are created
 	 */
 	u64 index_cnt;
-
-	/* Cache the directory index number to speed the dir/file remove */
-	u64 dir_index;
 
 	/* the fsync log has some corner cases that mean we have to check
 	 * directories to see if any unlinks have been done before
@@ -162,6 +150,9 @@ struct btrfs_inode {
 	/* flags field from the on disk inode */
 	u32 flags;
 
+	/* a local copy of root's last_log_commit */
+	unsigned long last_log_commit;
+
 	/*
 	 * Counters to keep track of the number of extent item's we may use due
 	 * to delalloc and such.  outstanding_extents is the number of extent
@@ -178,23 +169,6 @@ struct btrfs_inode {
 
 	struct btrfs_delayed_node *delayed_node;
 
-	/* File creation time. */
-	struct timespec i_otime;
-
-	/* Hook into fs_info->delayed_iputs */
-	struct list_head delayed_iput;
-	long delayed_iput_count;
-
-	/*
-	 * To avoid races between lockless (i_mutex not held) direct IO writes
-	 * and concurrent fsync requests. Direct IO writes must acquire read
-	 * access on this semaphore for creating an extent map and its
-	 * corresponding ordered extent. The fast fsync path must acquire write
-	 * access on this semaphore before it collects ordered extents and
-	 * extent maps.
-	 */
-	struct rw_semaphore dio_sem;
-
 	struct inode vfs_inode;
 };
 
@@ -203,25 +177,6 @@ extern unsigned char btrfs_filetype_table[];
 static inline struct btrfs_inode *BTRFS_I(struct inode *inode)
 {
 	return container_of(inode, struct btrfs_inode, vfs_inode);
-}
-
-static inline unsigned long btrfs_inode_hash(u64 objectid,
-					     const struct btrfs_root *root)
-{
-	u64 h = objectid ^ (root->objectid * GOLDEN_RATIO_PRIME);
-
-#if BITS_PER_LONG == 32
-	h = (h >> 32) ^ (h & 0xffffffff);
-#endif
-
-	return (unsigned long)h;
-}
-
-static inline void btrfs_insert_inode_hash(struct inode *inode)
-{
-	unsigned long h = btrfs_inode_hash(inode->i_ino, BTRFS_I(inode)->root);
-
-	__insert_inode_hash(inode, h);
 }
 
 static inline u64 btrfs_ino(struct inode *inode)
@@ -257,56 +212,11 @@ static inline bool btrfs_is_free_space_inode(struct inode *inode)
 
 static inline int btrfs_inode_in_log(struct inode *inode, u64 generation)
 {
-	int ret = 0;
-
-	spin_lock(&BTRFS_I(inode)->lock);
 	if (BTRFS_I(inode)->logged_trans == generation &&
-	    BTRFS_I(inode)->last_sub_trans <=
-	    BTRFS_I(inode)->last_log_commit &&
-	    BTRFS_I(inode)->last_sub_trans <=
-	    BTRFS_I(inode)->root->last_log_commit) {
-		/*
-		 * After a ranged fsync we might have left some extent maps
-		 * (that fall outside the fsync's range). So return false
-		 * here if the list isn't empty, to make sure btrfs_log_inode()
-		 * will be called and process those extent maps.
-		 */
-		smp_mb();
-		if (list_empty(&BTRFS_I(inode)->extent_tree.modified_extents))
-			ret = 1;
-	}
-	spin_unlock(&BTRFS_I(inode)->lock);
-	return ret;
+	    BTRFS_I(inode)->last_sub_trans <= BTRFS_I(inode)->last_log_commit)
+		return 1;
+	return 0;
 }
-
-#define BTRFS_DIO_ORIG_BIO_SUBMITTED	0x1
-
-struct btrfs_dio_private {
-	struct inode *inode;
-	unsigned long flags;
-	u64 logical_offset;
-	u64 disk_bytenr;
-	u64 bytes;
-	void *private;
-
-	/* number of bios pending for this dio */
-	atomic_t pending_bios;
-
-	/* IO errors */
-	int errors;
-
-	/* orig_bio is our btrfs_io_bio */
-	struct bio *orig_bio;
-
-	/* dio_bio came from fs/direct-io.c */
-	struct bio *dio_bio;
-
-	/*
-	 * The original bio may be split to several sub-bios, this is
-	 * done during endio of sub-bios
-	 */
-	int (*subio_endio)(struct inode *, struct btrfs_io_bio *, int);
-};
 
 /*
  * Disable DIO read nolock optimization, so new dio readers will be forced
@@ -321,11 +231,9 @@ static inline void btrfs_inode_block_unlocked_dio(struct inode *inode)
 
 static inline void btrfs_inode_resume_unlocked_dio(struct inode *inode)
 {
-	smp_mb__before_atomic();
+	smp_mb__before_clear_bit();
 	clear_bit(BTRFS_INODE_READDIO_NEED_LOCK,
 		  &BTRFS_I(inode)->runtime_flags);
 }
-
-bool btrfs_page_exists_in_range(struct inode *inode, loff_t start, loff_t end);
 
 #endif

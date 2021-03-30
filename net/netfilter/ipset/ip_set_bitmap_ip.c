@@ -25,31 +25,30 @@
 #include <linux/netfilter/ipset/ip_set.h>
 #include <linux/netfilter/ipset/ip_set_bitmap.h>
 
-#define IPSET_TYPE_REV_MIN	0
-/*				1	   Counter support added */
-/*				2	   Comment support added */
-#define IPSET_TYPE_REV_MAX	3	/* skbinfo support added */
+#define REVISION_MIN	0
+#define REVISION_MAX	1	/* Counter support added */
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Jozsef Kadlecsik <kadlec@blackhole.kfki.hu>");
-IP_SET_MODULE_DESC("bitmap:ip", IPSET_TYPE_REV_MIN, IPSET_TYPE_REV_MAX);
+IP_SET_MODULE_DESC("bitmap:ip", REVISION_MIN, REVISION_MAX);
 MODULE_ALIAS("ip_set_bitmap:ip");
 
 #define MTYPE		bitmap_ip
-#define HOST_MASK	32
 
 /* Type structure */
 struct bitmap_ip {
 	void *members;		/* the set members */
+	void *extensions;	/* data extensions */
 	u32 first_ip;		/* host byte order, included in range */
 	u32 last_ip;		/* host byte order, included in range */
 	u32 elements;		/* number of max elements in the set */
 	u32 hosts;		/* number of hosts in a subnet */
 	size_t memsize;		/* members size */
+	size_t dsize;		/* extensions struct size */
+	size_t offset[IPSET_OFFSET_MAX]; /* Offsets to extensions */
 	u8 netmask;		/* subnet netmask */
+	u32 timeout;		/* timeout parameter */
 	struct timer_list gc;	/* garbage collection */
-	unsigned char extensions[0]	/* data extensions */
-		__aligned(__alignof__(u64));
 };
 
 /* ADT structure for generic function args */
@@ -60,29 +59,28 @@ struct bitmap_ip_adt_elem {
 static inline u32
 ip_to_id(const struct bitmap_ip *m, u32 ip)
 {
-	return ((ip & ip_set_hostmask(m->netmask)) - m->first_ip) / m->hosts;
+	return ((ip & ip_set_hostmask(m->netmask)) - m->first_ip)/m->hosts;
 }
 
 /* Common functions */
 
 static inline int
-bitmap_ip_do_test(const struct bitmap_ip_adt_elem *e,
-		  struct bitmap_ip *map, size_t dsize)
+bitmap_ip_do_test(const struct bitmap_ip_adt_elem *e, struct bitmap_ip *map)
 {
 	return !!test_bit(e->id, map->members);
 }
 
 static inline int
-bitmap_ip_gc_test(u16 id, const struct bitmap_ip *map, size_t dsize)
+bitmap_ip_gc_test(u16 id, const struct bitmap_ip *map)
 {
 	return !!test_bit(id, map->members);
 }
 
 static inline int
 bitmap_ip_do_add(const struct bitmap_ip_adt_elem *e, struct bitmap_ip *map,
-		 u32 flags, size_t dsize)
+		 u32 flags)
 {
-	return !!test_bit(e->id, map->members);
+	return !!test_and_set_bit(e->id, map->members);
 }
 
 static inline int
@@ -92,8 +90,7 @@ bitmap_ip_do_del(const struct bitmap_ip_adt_elem *e, struct bitmap_ip *map)
 }
 
 static inline int
-bitmap_ip_do_list(struct sk_buff *skb, const struct bitmap_ip *map, u32 id,
-		  size_t dsize)
+bitmap_ip_do_list(struct sk_buff *skb, const struct bitmap_ip *map, u32 id)
 {
 	return nla_put_ipaddr4(skb, IPSET_ATTR_IP,
 			htonl(map->first_ip + id * map->hosts));
@@ -115,8 +112,8 @@ bitmap_ip_kadt(struct ip_set *set, const struct sk_buff *skb,
 {
 	struct bitmap_ip *map = set->data;
 	ipset_adtfn adtfn = set->variant->adt[adt];
-	struct bitmap_ip_adt_elem e = { .id = 0 };
-	struct ip_set_ext ext = IP_SET_INIT_KEXT(skb, opt, set);
+	struct bitmap_ip_adt_elem e = { };
+	struct ip_set_ext ext = IP_SET_INIT_KEXT(skb, opt, map);
 	u32 ip;
 
 	ip = ntohl(ip4addr(skb, opt->flags & IPSET_DIM_ONE_SRC));
@@ -134,22 +131,22 @@ bitmap_ip_uadt(struct ip_set *set, struct nlattr *tb[],
 {
 	struct bitmap_ip *map = set->data;
 	ipset_adtfn adtfn = set->variant->adt[adt];
-	u32 ip = 0, ip_to = 0;
-	struct bitmap_ip_adt_elem e = { .id = 0 };
-	struct ip_set_ext ext = IP_SET_INIT_UEXT(set);
+	u32 ip, ip_to;
+	struct bitmap_ip_adt_elem e = { };
+	struct ip_set_ext ext = IP_SET_INIT_UEXT(map);
 	int ret = 0;
+
+	if (unlikely(!tb[IPSET_ATTR_IP] ||
+		     !ip_set_optattr_netorder(tb, IPSET_ATTR_TIMEOUT) ||
+		     !ip_set_optattr_netorder(tb, IPSET_ATTR_PACKETS) ||
+		     !ip_set_optattr_netorder(tb, IPSET_ATTR_BYTES)))
+		return -IPSET_ERR_PROTOCOL;
 
 	if (tb[IPSET_ATTR_LINENO])
 		*lineno = nla_get_u32(tb[IPSET_ATTR_LINENO]);
 
-	if (unlikely(!tb[IPSET_ATTR_IP]))
-		return -IPSET_ERR_PROTOCOL;
-
-	ret = ip_set_get_hostipaddr4(tb[IPSET_ATTR_IP], &ip);
-	if (ret)
-		return ret;
-
-	ret = ip_set_get_extensions(set, tb, &ext);
+	ret = ip_set_get_hostipaddr4(tb[IPSET_ATTR_IP], &ip) ||
+	      ip_set_get_extensions(set, tb, &ext);
 	if (ret)
 		return ret;
 
@@ -173,12 +170,11 @@ bitmap_ip_uadt(struct ip_set *set, struct nlattr *tb[],
 	} else if (tb[IPSET_ATTR_CIDR]) {
 		u8 cidr = nla_get_u8(tb[IPSET_ATTR_CIDR]);
 
-		if (!cidr || cidr > HOST_MASK)
+		if (!cidr || cidr > 32)
 			return -IPSET_ERR_INVALID_CIDR;
 		ip_set_mask_from_to(ip, ip_to, cidr);
-	} else {
+	} else
 		ip_to = ip;
-	}
 
 	if (ip_to > map->last_ip)
 		return -IPSET_ERR_BITMAP_RANGE;
@@ -189,8 +185,8 @@ bitmap_ip_uadt(struct ip_set *set, struct nlattr *tb[],
 
 		if (ret && !ip_set_eexist(ret, flags))
 			return ret;
-
-		ret = 0;
+		else
+			ret = 0;
 	}
 	return ret;
 }
@@ -204,13 +200,32 @@ bitmap_ip_same_set(const struct ip_set *a, const struct ip_set *b)
 	return x->first_ip == y->first_ip &&
 	       x->last_ip == y->last_ip &&
 	       x->netmask == y->netmask &&
-	       a->timeout == b->timeout &&
+	       x->timeout == y->timeout &&
 	       a->extensions == b->extensions;
 }
 
 /* Plain variant */
 
 struct bitmap_ip_elem {
+};
+
+/* Timeout variant */
+
+struct bitmap_ipt_elem {
+	unsigned long timeout;
+};
+
+/* Plain variant with counter */
+
+struct bitmap_ipc_elem {
+	struct ip_set_counter counter;
+};
+
+/* Timeout variant with counter */
+
+struct bitmap_ipct_elem {
+	unsigned long timeout;
+	struct ip_set_counter counter;
 };
 
 #include "ip_set_bitmap_gen.h"
@@ -225,12 +240,19 @@ init_map_ip(struct ip_set *set, struct bitmap_ip *map,
 	map->members = ip_set_alloc(map->memsize);
 	if (!map->members)
 		return false;
+	if (map->dsize) {
+		map->extensions = ip_set_alloc(map->dsize * elements);
+		if (!map->extensions) {
+			kfree(map->members);
+			return false;
+		}
+	}
 	map->first_ip = first_ip;
 	map->last_ip = last_ip;
 	map->elements = elements;
 	map->hosts = hosts;
 	map->netmask = netmask;
-	set->timeout = IPSET_NO_TIMEOUT;
+	map->timeout = IPSET_NO_TIMEOUT;
 
 	set->data = map;
 	set->family = NFPROTO_IPV4;
@@ -239,11 +261,10 @@ init_map_ip(struct ip_set *set, struct bitmap_ip *map,
 }
 
 static int
-bitmap_ip_create(struct net *net, struct ip_set *set, struct nlattr *tb[],
-		 u32 flags)
+bitmap_ip_create(struct ip_set *set, struct nlattr *tb[], u32 flags)
 {
 	struct bitmap_ip *map;
-	u32 first_ip = 0, last_ip = 0, hosts;
+	u32 first_ip, last_ip, hosts, cadt_flags = 0;
 	u64 elements;
 	u8 netmask = 32;
 	int ret;
@@ -270,17 +291,16 @@ bitmap_ip_create(struct net *net, struct ip_set *set, struct nlattr *tb[],
 	} else if (tb[IPSET_ATTR_CIDR]) {
 		u8 cidr = nla_get_u8(tb[IPSET_ATTR_CIDR]);
 
-		if (cidr >= HOST_MASK)
+		if (cidr >= 32)
 			return -IPSET_ERR_INVALID_CIDR;
 		ip_set_mask_from_to(first_ip, last_ip, cidr);
-	} else {
+	} else
 		return -IPSET_ERR_PROTOCOL;
-	}
 
 	if (tb[IPSET_ATTR_NETMASK]) {
 		netmask = nla_get_u8(tb[IPSET_ATTR_NETMASK]);
 
-		if (netmask > HOST_MASK)
+		if (netmask > 32)
 			return -IPSET_ERR_INVALID_NETMASK;
 
 		first_ip &= ip_set_hostmask(netmask);
@@ -310,21 +330,67 @@ bitmap_ip_create(struct net *net, struct ip_set *set, struct nlattr *tb[],
 	pr_debug("hosts %u, elements %llu\n",
 		 hosts, (unsigned long long)elements);
 
-	set->dsize = ip_set_elem_len(set, tb, 0, 0);
-	map = ip_set_alloc(sizeof(*map) + elements * set->dsize);
+	map = kzalloc(sizeof(*map), GFP_KERNEL);
 	if (!map)
 		return -ENOMEM;
 
 	map->memsize = bitmap_bytes(0, elements - 1);
 	set->variant = &bitmap_ip;
-	if (!init_map_ip(set, map, first_ip, last_ip,
-			 elements, hosts, netmask)) {
-		kfree(map);
-		return -ENOMEM;
-	}
-	if (tb[IPSET_ATTR_TIMEOUT]) {
-		set->timeout = ip_set_timeout_uget(tb[IPSET_ATTR_TIMEOUT]);
+	if (tb[IPSET_ATTR_CADT_FLAGS])
+		cadt_flags = ip_set_get_h32(tb[IPSET_ATTR_CADT_FLAGS]);
+	if (cadt_flags & IPSET_FLAG_WITH_COUNTERS) {
+		set->extensions |= IPSET_EXT_COUNTER;
+		if (tb[IPSET_ATTR_TIMEOUT]) {
+			map->dsize = sizeof(struct bitmap_ipct_elem);
+			map->offset[IPSET_OFFSET_TIMEOUT] =
+				offsetof(struct bitmap_ipct_elem, timeout);
+			map->offset[IPSET_OFFSET_COUNTER] =
+				offsetof(struct bitmap_ipct_elem, counter);
+
+			if (!init_map_ip(set, map, first_ip, last_ip,
+					 elements, hosts, netmask)) {
+				kfree(map);
+				return -ENOMEM;
+			}
+
+			map->timeout = ip_set_timeout_uget(
+				tb[IPSET_ATTR_TIMEOUT]);
+			set->extensions |= IPSET_EXT_TIMEOUT;
+
+			bitmap_ip_gc_init(set, bitmap_ip_gc);
+		} else {
+			map->dsize = sizeof(struct bitmap_ipc_elem);
+			map->offset[IPSET_OFFSET_COUNTER] =
+				offsetof(struct bitmap_ipc_elem, counter);
+
+			if (!init_map_ip(set, map, first_ip, last_ip,
+					 elements, hosts, netmask)) {
+				kfree(map);
+				return -ENOMEM;
+			}
+		}
+	} else if (tb[IPSET_ATTR_TIMEOUT]) {
+		map->dsize = sizeof(struct bitmap_ipt_elem);
+		map->offset[IPSET_OFFSET_TIMEOUT] =
+			offsetof(struct bitmap_ipt_elem, timeout);
+
+		if (!init_map_ip(set, map, first_ip, last_ip,
+				 elements, hosts, netmask)) {
+			kfree(map);
+			return -ENOMEM;
+		}
+
+		map->timeout = ip_set_timeout_uget(tb[IPSET_ATTR_TIMEOUT]);
+		set->extensions |= IPSET_EXT_TIMEOUT;
+
 		bitmap_ip_gc_init(set, bitmap_ip_gc);
+	} else {
+		map->dsize = 0;
+		if (!init_map_ip(set, map, first_ip, last_ip,
+				 elements, hosts, netmask)) {
+			kfree(map);
+			return -ENOMEM;
+		}
 	}
 	return 0;
 }
@@ -335,8 +401,8 @@ static struct ip_set_type bitmap_ip_type __read_mostly = {
 	.features	= IPSET_TYPE_IP,
 	.dimension	= IPSET_DIM_ONE,
 	.family		= NFPROTO_IPV4,
-	.revision_min	= IPSET_TYPE_REV_MIN,
-	.revision_max	= IPSET_TYPE_REV_MAX,
+	.revision_min	= REVISION_MIN,
+	.revision_max	= REVISION_MAX,
 	.create		= bitmap_ip_create,
 	.create_policy	= {
 		[IPSET_ATTR_IP]		= { .type = NLA_NESTED },
@@ -354,11 +420,6 @@ static struct ip_set_type bitmap_ip_type __read_mostly = {
 		[IPSET_ATTR_LINENO]	= { .type = NLA_U32 },
 		[IPSET_ATTR_BYTES]	= { .type = NLA_U64 },
 		[IPSET_ATTR_PACKETS]	= { .type = NLA_U64 },
-		[IPSET_ATTR_COMMENT]	= { .type = NLA_NUL_STRING,
-					    .len  = IPSET_MAX_COMMENT_SIZE },
-		[IPSET_ATTR_SKBMARK]	= { .type = NLA_U64 },
-		[IPSET_ATTR_SKBPRIO]	= { .type = NLA_U32 },
-		[IPSET_ATTR_SKBQUEUE]	= { .type = NLA_U16 },
 	},
 	.me		= THIS_MODULE,
 };
@@ -372,7 +433,6 @@ bitmap_ip_init(void)
 static void __exit
 bitmap_ip_fini(void)
 {
-	rcu_barrier();
 	ip_set_type_unregister(&bitmap_ip_type);
 }
 

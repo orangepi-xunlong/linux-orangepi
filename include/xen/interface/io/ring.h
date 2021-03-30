@@ -181,20 +181,6 @@ struct __name##_back_ring {						\
 #define RING_GET_REQUEST(_r, _idx)					\
     (&((_r)->sring->ring[((_idx) & (RING_SIZE(_r) - 1))].req))
 
-/*
- * Get a local copy of a request.
- *
- * Use this in preference to RING_GET_REQUEST() so all processing is
- * done on a local copy that cannot be modified by the other end.
- *
- * Note that https://gcc.gnu.org/bugzilla/show_bug.cgi?id=58145 may cause this
- * to be ineffective where _req is a struct which consists of only bitfields.
- */
-#define RING_COPY_REQUEST(_r, _idx, _req) do {				\
-	/* Use volatile to force the copy into _req. */			\
-	*(_req) = *(volatile typeof(_req))RING_GET_REQUEST(_r, _idx);	\
-} while (0)
-
 #define RING_GET_RESPONSE(_r, _idx)					\
     (&((_r)->sring->ring[((_idx) & (RING_SIZE(_r) - 1))].rsp))
 
@@ -202,18 +188,13 @@ struct __name##_back_ring {						\
 #define RING_REQUEST_CONS_OVERFLOW(_r, _cons)				\
     (((_cons) - (_r)->rsp_prod_pvt) >= RING_SIZE(_r))
 
-/* Ill-behaved frontend determination: Can there be this many requests? */
-#define RING_REQUEST_PROD_OVERFLOW(_r, _prod)               \
-    (((_prod) - (_r)->rsp_prod_pvt) > RING_SIZE(_r))
-
-
 #define RING_PUSH_REQUESTS(_r) do {					\
-    virt_wmb(); /* back sees requests /before/ updated producer index */	\
+    wmb(); /* back sees requests /before/ updated producer index */	\
     (_r)->sring->req_prod = (_r)->req_prod_pvt;				\
 } while (0)
 
 #define RING_PUSH_RESPONSES(_r) do {					\
-    virt_wmb(); /* front sees responses /before/ updated producer index */	\
+    wmb(); /* front sees responses /before/ updated producer index */	\
     (_r)->sring->rsp_prod = (_r)->rsp_prod_pvt;				\
 } while (0)
 
@@ -250,9 +231,9 @@ struct __name##_back_ring {						\
 #define RING_PUSH_REQUESTS_AND_CHECK_NOTIFY(_r, _notify) do {		\
     RING_IDX __old = (_r)->sring->req_prod;				\
     RING_IDX __new = (_r)->req_prod_pvt;				\
-    virt_wmb(); /* back sees requests /before/ updated producer index */	\
+    wmb(); /* back sees requests /before/ updated producer index */	\
     (_r)->sring->req_prod = __new;					\
-    virt_mb(); /* back sees new requests /before/ we check req_event */	\
+    mb(); /* back sees new requests /before/ we check req_event */	\
     (_notify) = ((RING_IDX)(__new - (_r)->sring->req_event) <		\
 		 (RING_IDX)(__new - __old));				\
 } while (0)
@@ -260,9 +241,9 @@ struct __name##_back_ring {						\
 #define RING_PUSH_RESPONSES_AND_CHECK_NOTIFY(_r, _notify) do {		\
     RING_IDX __old = (_r)->sring->rsp_prod;				\
     RING_IDX __new = (_r)->rsp_prod_pvt;				\
-    virt_wmb(); /* front sees responses /before/ updated producer index */	\
+    wmb(); /* front sees responses /before/ updated producer index */	\
     (_r)->sring->rsp_prod = __new;					\
-    virt_mb(); /* front sees new responses /before/ we check rsp_event */	\
+    mb(); /* front sees new responses /before/ we check rsp_event */	\
     (_notify) = ((RING_IDX)(__new - (_r)->sring->rsp_event) <		\
 		 (RING_IDX)(__new - __old));				\
 } while (0)
@@ -271,7 +252,7 @@ struct __name##_back_ring {						\
     (_work_to_do) = RING_HAS_UNCONSUMED_REQUESTS(_r);			\
     if (_work_to_do) break;						\
     (_r)->sring->req_event = (_r)->req_cons + 1;			\
-    virt_mb();								\
+    mb();								\
     (_work_to_do) = RING_HAS_UNCONSUMED_REQUESTS(_r);			\
 } while (0)
 
@@ -279,7 +260,7 @@ struct __name##_back_ring {						\
     (_work_to_do) = RING_HAS_UNCONSUMED_RESPONSES(_r);			\
     if (_work_to_do) break;						\
     (_r)->sring->rsp_event = (_r)->rsp_cons + 1;			\
-    virt_mb();								\
+    mb();								\
     (_work_to_do) = RING_HAS_UNCONSUMED_RESPONSES(_r);			\
 } while (0)
 

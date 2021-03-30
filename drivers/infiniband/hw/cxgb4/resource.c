@@ -179,12 +179,8 @@ u32 c4iw_get_qpid(struct c4iw_rdev *rdev, struct c4iw_dev_ucontext *uctx)
 		kfree(entry);
 	} else {
 		qid = c4iw_get_resource(&rdev->resource.qid_table);
-		if (!qid) {
-			mutex_lock(&rdev->stats.lock);
-			rdev->stats.qid.fail++;
-			mutex_unlock(&rdev->stats.lock);
+		if (!qid)
 			goto out;
-		}
 		mutex_lock(&rdev->stats.lock);
 		rdev->stats.qid.cur += rdev->qpmask + 1;
 		mutex_unlock(&rdev->stats.lock);
@@ -260,20 +256,10 @@ u32 c4iw_pblpool_alloc(struct c4iw_rdev *rdev, int size)
 		rdev->stats.pbl.cur += roundup(size, 1 << MIN_PBL_SHIFT);
 		if (rdev->stats.pbl.cur > rdev->stats.pbl.max)
 			rdev->stats.pbl.max = rdev->stats.pbl.cur;
-		kref_get(&rdev->pbl_kref);
 	} else
 		rdev->stats.pbl.fail++;
 	mutex_unlock(&rdev->stats.lock);
 	return (u32)addr;
-}
-
-static void destroy_pblpool(struct kref *kref)
-{
-	struct c4iw_rdev *rdev;
-
-	rdev = container_of(kref, struct c4iw_rdev, pbl_kref);
-	gen_pool_destroy(rdev->pbl_pool);
-	complete(&rdev->pbl_compl);
 }
 
 void c4iw_pblpool_free(struct c4iw_rdev *rdev, u32 addr, int size)
@@ -283,7 +269,6 @@ void c4iw_pblpool_free(struct c4iw_rdev *rdev, u32 addr, int size)
 	rdev->stats.pbl.cur -= roundup(size, 1 << MIN_PBL_SHIFT);
 	mutex_unlock(&rdev->stats.lock);
 	gen_pool_free(rdev->pbl_pool, (unsigned long)addr, size);
-	kref_put(&rdev->pbl_kref, destroy_pblpool);
 }
 
 int c4iw_pblpool_create(struct c4iw_rdev *rdev)
@@ -323,7 +308,7 @@ int c4iw_pblpool_create(struct c4iw_rdev *rdev)
 
 void c4iw_pblpool_destroy(struct c4iw_rdev *rdev)
 {
-	kref_put(&rdev->pbl_kref, destroy_pblpool);
+	gen_pool_destroy(rdev->pbl_pool);
 }
 
 /*
@@ -337,27 +322,17 @@ u32 c4iw_rqtpool_alloc(struct c4iw_rdev *rdev, int size)
 	unsigned long addr = gen_pool_alloc(rdev->rqt_pool, size << 6);
 	PDBG("%s addr 0x%x size %d\n", __func__, (u32)addr, size << 6);
 	if (!addr)
-		pr_warn_ratelimited(MOD "%s: Out of RQT memory\n",
-				    pci_name(rdev->lldi.pdev));
+		printk_ratelimited(KERN_WARNING MOD "%s: Out of RQT memory\n",
+		       pci_name(rdev->lldi.pdev));
 	mutex_lock(&rdev->stats.lock);
 	if (addr) {
 		rdev->stats.rqt.cur += roundup(size << 6, 1 << MIN_RQT_SHIFT);
 		if (rdev->stats.rqt.cur > rdev->stats.rqt.max)
 			rdev->stats.rqt.max = rdev->stats.rqt.cur;
-		kref_get(&rdev->rqt_kref);
 	} else
 		rdev->stats.rqt.fail++;
 	mutex_unlock(&rdev->stats.lock);
 	return (u32)addr;
-}
-
-static void destroy_rqtpool(struct kref *kref)
-{
-	struct c4iw_rdev *rdev;
-
-	rdev = container_of(kref, struct c4iw_rdev, rqt_kref);
-	gen_pool_destroy(rdev->rqt_pool);
-	complete(&rdev->rqt_compl);
 }
 
 void c4iw_rqtpool_free(struct c4iw_rdev *rdev, u32 addr, int size)
@@ -367,7 +342,6 @@ void c4iw_rqtpool_free(struct c4iw_rdev *rdev, u32 addr, int size)
 	rdev->stats.rqt.cur -= roundup(size << 6, 1 << MIN_RQT_SHIFT);
 	mutex_unlock(&rdev->stats.lock);
 	gen_pool_free(rdev->rqt_pool, (unsigned long)addr, size << 6);
-	kref_put(&rdev->rqt_kref, destroy_rqtpool);
 }
 
 int c4iw_rqtpool_create(struct c4iw_rdev *rdev)
@@ -405,7 +379,7 @@ int c4iw_rqtpool_create(struct c4iw_rdev *rdev)
 
 void c4iw_rqtpool_destroy(struct c4iw_rdev *rdev)
 {
-	kref_put(&rdev->rqt_kref, destroy_rqtpool);
+	gen_pool_destroy(rdev->rqt_pool);
 }
 
 /*

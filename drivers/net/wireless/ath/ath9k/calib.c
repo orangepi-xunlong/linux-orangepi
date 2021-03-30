@@ -63,13 +63,13 @@ static s16 ath9k_hw_get_default_nf(struct ath_hw *ah,
 	return ath9k_hw_get_nf_limits(ah, chan)->nominal;
 }
 
-s16 ath9k_hw_getchan_noise(struct ath_hw *ah, struct ath9k_channel *chan,
-			   s16 nf)
+s16 ath9k_hw_getchan_noise(struct ath_hw *ah, struct ath9k_channel *chan)
 {
 	s8 noise = ATH_DEFAULT_NOISE_FLOOR;
 
-	if (nf) {
-		s8 delta = nf - ATH9K_NF_CAL_NOISE_THRESH -
+	if (chan && chan->noisefloor) {
+		s8 delta = chan->noisefloor -
+			   ATH9K_NF_CAL_NOISE_THRESH -
 			   ath9k_hw_get_default_nf(ah, chan);
 		if (delta > 0)
 			noise += delta;
@@ -119,7 +119,7 @@ static void ath9k_hw_update_nfcal_hist_buffer(struct ath_hw *ah,
 			ath_dbg(common, CALIBRATE,
 				"NFmid[%d] (%d) > MAX (%d), %s\n",
 				i, h[i].privNF, limit->max,
-				(test_bit(NFCAL_INTF, &cal->cal_flags) ?
+				(cal->nfcal_interference ?
 				 "not corrected (due to interference)" :
 				 "correcting to MAX"));
 
@@ -130,7 +130,7 @@ static void ath9k_hw_update_nfcal_hist_buffer(struct ath_hw *ah,
 			 * we bypass this limit here in order to better deal
 			 * with our environment.
 			 */
-			if (!test_bit(NFCAL_INTF, &cal->cal_flags))
+			if (!cal->nfcal_interference)
 				h[i].privNF = limit->max;
 		}
 	}
@@ -141,18 +141,18 @@ static void ath9k_hw_update_nfcal_hist_buffer(struct ath_hw *ah,
 	 * Re-enable the enforcement of the NF maximum again.
 	 */
 	if (!high_nf_mid)
-		clear_bit(NFCAL_INTF, &cal->cal_flags);
+		cal->nfcal_interference = false;
 }
 
 static bool ath9k_hw_get_nf_thresh(struct ath_hw *ah,
-				   enum nl80211_band band,
+				   enum ieee80211_band band,
 				   int16_t *nft)
 {
 	switch (band) {
-	case NL80211_BAND_5GHZ:
+	case IEEE80211_BAND_5GHZ:
 		*nft = (int8_t)ah->eep_ops->get_eeprom(ah, EEP_NFTHRESH_5);
 		break;
-	case NL80211_BAND_2GHZ:
+	case IEEE80211_BAND_2GHZ:
 		*nft = (int8_t)ah->eep_ops->get_eeprom(ah, EEP_NFTHRESH_2);
 		break;
 	default:
@@ -186,6 +186,7 @@ void ath9k_hw_reset_calibration(struct ath_hw *ah,
 bool ath9k_hw_reset_calvalid(struct ath_hw *ah)
 {
 	struct ath_common *common = ath9k_hw_common(ah);
+	struct ieee80211_conf *conf = &common->hw->conf;
 	struct ath9k_cal_list *currCal = ah->cal_list_curr;
 
 	if (!ah->caldata)
@@ -207,7 +208,7 @@ bool ath9k_hw_reset_calvalid(struct ath_hw *ah)
 		return true;
 
 	ath_dbg(common, CALIBRATE, "Resetting Cal %d state for channel %u\n",
-		currCal->calData->calType, ah->curchan->chan->center_freq);
+		currCal->calData->calType, conf->chandef.chan->center_freq);
 
 	ah->caldata->CalValid &= ~currCal->calData->calType;
 	currCal->calState = CAL_WAITING;
@@ -219,7 +220,7 @@ EXPORT_SYMBOL(ath9k_hw_reset_calvalid);
 void ath9k_hw_start_nfcal(struct ath_hw *ah, bool update)
 {
 	if (ah->caldata)
-		set_bit(NFCAL_PENDING, &ah->caldata->cal_flags);
+		ah->caldata->nfcal_pending = true;
 
 	REG_SET_BIT(ah, AR_PHY_AGC_CONTROL,
 		    AR_PHY_AGC_CONTROL_ENABLE_NF);
@@ -234,24 +235,24 @@ void ath9k_hw_start_nfcal(struct ath_hw *ah, bool update)
 	REG_SET_BIT(ah, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NF);
 }
 
-int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
+void ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 {
 	struct ath9k_nfcal_hist *h = NULL;
 	unsigned i, j;
+	int32_t val;
 	u8 chainmask = (ah->rxchainmask << 3) | ah->rxchainmask;
 	struct ath_common *common = ath9k_hw_common(ah);
+	struct ieee80211_conf *conf = &common->hw->conf;
 	s16 default_nf = ath9k_hw_get_default_nf(ah, chan);
-	u32 bb_agc_ctl = REG_READ(ah, AR_PHY_AGC_CONTROL);
 
 	if (ah->caldata)
 		h = ah->caldata->nfCalHist;
 
-	ENABLE_REG_RMW_BUFFER(ah);
 	for (i = 0; i < NUM_NF_READINGS; i++) {
 		if (chainmask & (1 << i)) {
 			s16 nfval;
 
-			if ((i >= AR5416_MAX_CHAINS) && !IS_CHAN_HT40(chan))
+			if ((i >= AR5416_MAX_CHAINS) && !conf_is_ht40(conf))
 				continue;
 
 			if (h)
@@ -259,19 +260,11 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 			else
 				nfval = default_nf;
 
-			REG_RMW(ah, ah->nf_regs[i],
-				(((u32) nfval << 1) & 0x1ff), 0x1ff);
+			val = REG_READ(ah, ah->nf_regs[i]);
+			val &= 0xFFFFFE00;
+			val |= (((u32) nfval << 1) & 0x1ff);
+			REG_WRITE(ah, ah->nf_regs[i], val);
 		}
-	}
-
-	/*
-	 * stop NF cal if ongoing to ensure NF load completes immediately
-	 * (or after end rx/tx frame if ongoing)
-	 */
-	if (bb_agc_ctl & AR_PHY_AGC_CONTROL_NF) {
-		REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NF);
-		REG_RMW_BUFFER_FLUSH(ah);
-		ENABLE_REG_RMW_BUFFER(ah);
 	}
 
 	/*
@@ -283,34 +276,18 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL,
 		    AR_PHY_AGC_CONTROL_NO_UPDATE_NF);
 	REG_SET_BIT(ah, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NF);
-	REG_RMW_BUFFER_FLUSH(ah);
 
 	/*
 	 * Wait for load to complete, should be fast, a few 10s of us.
-	 * The max delay was changed from an original 250us to 22.2 msec.
-	 * This would increase timeout to the longest possible frame
-	 * (11n max length 22.1 msec)
+	 * The max delay was changed from an original 250us to 10000us
+	 * since 250us often results in NF load timeout and causes deaf
+	 * condition during stress testing 12/12/2009
 	 */
-	for (j = 0; j < 22200; j++) {
+	for (j = 0; j < 10000; j++) {
 		if ((REG_READ(ah, AR_PHY_AGC_CONTROL) &
-			      AR_PHY_AGC_CONTROL_NF) == 0)
+		     AR_PHY_AGC_CONTROL_NF) == 0)
 			break;
 		udelay(10);
-	}
-
-	/*
-	 * Restart NF so it can continue.
-	 */
-	if (bb_agc_ctl & AR_PHY_AGC_CONTROL_NF) {
-		ENABLE_REG_RMW_BUFFER(ah);
-		if (bb_agc_ctl & AR_PHY_AGC_CONTROL_ENABLE_NF)
-			REG_SET_BIT(ah, AR_PHY_AGC_CONTROL,
-				    AR_PHY_AGC_CONTROL_ENABLE_NF);
-		if (bb_agc_ctl & AR_PHY_AGC_CONTROL_NO_UPDATE_NF)
-			REG_SET_BIT(ah, AR_PHY_AGC_CONTROL,
-				    AR_PHY_AGC_CONTROL_NO_UPDATE_NF);
-		REG_SET_BIT(ah, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NF);
-		REG_RMW_BUFFER_FLUSH(ah);
 	}
 
 	/*
@@ -322,11 +299,11 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	 * here, the baseband nf cal will just be capped by our present
 	 * noisefloor until the next calibration timer.
 	 */
-	if (j == 22200) {
+	if (j == 10000) {
 		ath_dbg(common, ANY,
 			"Timeout while waiting for nf to load: AR_PHY_AGC_CONTROL=0x%x\n",
 			REG_READ(ah, AR_PHY_AGC_CONTROL));
-		return -ETIMEDOUT;
+		return;
 	}
 
 	/*
@@ -334,19 +311,19 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	 * by the median we just loaded.  This will be initial (and max) value
 	 * of next noise floor calibration the baseband does.
 	 */
-	ENABLE_REG_RMW_BUFFER(ah);
+	ENABLE_REGWRITE_BUFFER(ah);
 	for (i = 0; i < NUM_NF_READINGS; i++) {
 		if (chainmask & (1 << i)) {
-			if ((i >= AR5416_MAX_CHAINS) && !IS_CHAN_HT40(chan))
+			if ((i >= AR5416_MAX_CHAINS) && !conf_is_ht40(conf))
 				continue;
 
-			REG_RMW(ah, ah->nf_regs[i],
-					(((u32) (-50) << 1) & 0x1ff), 0x1ff);
+			val = REG_READ(ah, ah->nf_regs[i]);
+			val &= 0xFFFFFE00;
+			val |= (((u32) (-50) << 1) & 0x1ff);
+			REG_WRITE(ah, ah->nf_regs[i], val);
 		}
 	}
-	REG_RMW_BUFFER_FLUSH(ah);
-
-	return 0;
+	REGWRITE_BUFFER_FLUSH(ah);
 }
 
 
@@ -414,10 +391,10 @@ bool ath9k_hw_getnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	}
 
 	h = caldata->nfCalHist;
-	clear_bit(NFCAL_PENDING, &caldata->cal_flags);
+	caldata->nfcal_pending = false;
 	ath9k_hw_update_nfcal_hist_buffer(ah, caldata, nfarray);
 	chan->noisefloor = h[0].privNF;
-	ah->noise = ath9k_hw_getchan_noise(ah, chan, chan->noisefloor);
+	ah->noise = ath9k_hw_getchan_noise(ah, chan);
 	return true;
 }
 EXPORT_SYMBOL(ath9k_hw_getnf);
@@ -431,6 +408,7 @@ void ath9k_init_nfcal_hist_buffer(struct ath_hw *ah,
 
 	ah->caldata->channel = chan->channel;
 	ah->caldata->channelFlags = chan->channelFlags;
+	ah->caldata->chanmode = chan->chanmode;
 	h = ah->caldata->nfCalHist;
 	default_nf = ath9k_hw_get_default_nf(ah, chan);
 	for (i = 0; i < NUM_NF_READINGS; i++) {
@@ -459,12 +437,12 @@ void ath9k_hw_bstuck_nfcal(struct ath_hw *ah)
 	 * the baseband update the internal NF value itself, similar to
 	 * what is being done after a full reset.
 	 */
-	if (!test_bit(NFCAL_PENDING, &caldata->cal_flags))
+	if (!caldata->nfcal_pending)
 		ath9k_hw_start_nfcal(ah, true);
 	else if (!(REG_READ(ah, AR_PHY_AGC_CONTROL) & AR_PHY_AGC_CONTROL_NF))
 		ath9k_hw_getnf(ah, ah->curchan);
 
-	set_bit(NFCAL_INTF, &caldata->cal_flags);
+	caldata->nfcal_interference = true;
 }
 EXPORT_SYMBOL(ath9k_hw_bstuck_nfcal);
 

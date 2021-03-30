@@ -29,7 +29,7 @@
 #include <linux/kernel.h>
 #include <linux/kthread.h>
 #include <linux/list.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/major.h>
 #include <linux/atomic.h>
 #include <linux/sysrq.h>
@@ -319,8 +319,7 @@ static int hvc_install(struct tty_driver *driver, struct tty_struct *tty)
 	int rc;
 
 	/* Auto increments kref reference if found. */
-	hp = hvc_get_by_index(tty->index);
-	if (!hp)
+	if (!(hp = hvc_get_by_index(tty->index)))
 		return -ENODEV;
 
 	tty->driver_data = hp;
@@ -366,12 +365,7 @@ static int hvc_open(struct tty_struct *tty, struct file * filp)
 		tty->driver_data = NULL;
 		tty_port_put(&hp->port);
 		printk(KERN_ERR "hvc_open: request_irq failed with rc %d.\n", rc);
-	} else
-		/* We are ready... raise DTR/RTS */
-		if (C_BAUD(tty))
-			if (hp->ops->dtr_rts)
-				hp->ops->dtr_rts(hp, 1);
-
+	}
 	/* Force wakeup of the polling thread */
 	hvc_kick();
 
@@ -403,10 +397,6 @@ static void hvc_close(struct tty_struct *tty, struct file * filp)
 		/* We are done with the tty pointer now. */
 		tty_port_tty_set(&hp->port, NULL);
 
-		if (C_HUPCL(tty))
-			if (hp->ops->dtr_rts)
-				hp->ops->dtr_rts(hp, 0);
-
 		if (hp->ops->notifier_del)
 			hp->ops->notifier_del(hp, hp->data);
 
@@ -418,7 +408,7 @@ static void hvc_close(struct tty_struct *tty, struct file * filp)
 		 * there is no buffered data otherwise sleeps on a wait queue
 		 * waking periodically to check chars_in_buffer().
 		 */
-		tty_wait_until_sent(tty, HVC_CLOSE_WAIT);
+		tty_wait_until_sent_from_close(tty, HVC_CLOSE_WAIT);
 	} else {
 		if (hp->port.count < 0)
 			printk(KERN_ERR "hvc_close %X: oops, count is %d\n",
@@ -632,7 +622,7 @@ int hvc_poll(struct hvc_struct *hp)
 		goto bail;
 
 	/* Now check if we can get data (are we throttled ?) */
-	if (tty_throttled(tty))
+	if (test_bit(TTY_THROTTLED, &tty->flags))
 		goto throttled;
 
 	/* If we aren't notifier driven and aren't throttled, we always
@@ -761,17 +751,10 @@ static int khvcd(void *unused)
 			if (poll_mask == 0)
 				schedule();
 			else {
-				unsigned long j_timeout;
-
 				if (timeout < MAX_TIMEOUT)
 					timeout += (timeout >> 6) + 1;
 
-				/*
-				 * We don't use msleep_interruptible otherwise
-				 * "kick" will fail to wake us up
-				 */
-				j_timeout = msecs_to_jiffies(timeout) + 1;
-				schedule_timeout_interruptible(j_timeout);
+				msleep_interruptible(timeout);
 			}
 		}
 		__set_current_state(TASK_RUNNING);
@@ -800,7 +783,7 @@ static int hvc_tiocmset(struct tty_struct *tty,
 }
 
 #ifdef CONFIG_CONSOLE_POLL
-static int hvc_poll_init(struct tty_driver *driver, int line, char *options)
+int hvc_poll_init(struct tty_driver *driver, int line, char *options)
 {
 	return 0;
 }
@@ -814,7 +797,7 @@ static int hvc_poll_get_char(struct tty_driver *driver, int line)
 
 	n = hp->ops->get_chars(hp->vtermno, &ch, 1);
 
-	if (n <= 0)
+	if (n == 0)
 		return NO_POLL_CHAR;
 
 	return ch;
@@ -1005,3 +988,19 @@ put_tty:
 out:
 	return err;
 }
+
+/* This isn't particularly necessary due to this being a console driver
+ * but it is nice to be thorough.
+ */
+static void __exit hvc_exit(void)
+{
+	if (hvc_driver) {
+		kthread_stop(hvc_task);
+
+		tty_unregister_driver(hvc_driver);
+		/* return tty_struct instances allocated in hvc_init(). */
+		put_tty_driver(hvc_driver);
+		unregister_console(&hvc_console);
+	}
+}
+module_exit(hvc_exit);

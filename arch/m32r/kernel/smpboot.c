@@ -343,7 +343,7 @@ static void __init do_boot_cpu(int phys_id)
 	}
 }
 
-int __cpu_up(unsigned int cpu_id, struct task_struct *tidle)
+int __cpuinit __cpu_up(unsigned int cpu_id, struct task_struct *tidle)
 {
 	int timeout;
 
@@ -376,7 +376,7 @@ void __init smp_cpus_done(unsigned int max_cpus)
 	if (!cpumask_equal(&cpu_callin_map, cpu_online_mask))
 		BUG();
 
-	for_each_online_cpu(cpu_id)
+	for (cpu_id = 0 ; cpu_id < num_online_cpus() ; cpu_id++)
 		show_cpu_info(cpu_id);
 
 	/*
@@ -432,7 +432,7 @@ int __init start_secondary(void *unused)
 	 */
 	local_flush_tlb_all();
 
-	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
+	cpu_startup_entry(CPUHP_ONLINE);
 	return 0;
 }
 

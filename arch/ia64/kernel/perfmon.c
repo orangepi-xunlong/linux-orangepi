@@ -521,7 +521,7 @@ static pmu_config_t		*pmu_conf;
 pfm_sysctl_t pfm_sysctl;
 EXPORT_SYMBOL(pfm_sysctl);
 
-static struct ctl_table pfm_ctl_table[] = {
+static ctl_table pfm_ctl_table[]={
 	{
 		.procname	= "debug",
 		.data		= &pfm_sysctl.debug,
@@ -552,7 +552,7 @@ static struct ctl_table pfm_ctl_table[] = {
 	},
 	{}
 };
-static struct ctl_table pfm_sysctl_dir[] = {
+static ctl_table pfm_sysctl_dir[] = {
 	{
 		.procname	= "perfmon",
 		.mode		= 0555,
@@ -560,7 +560,7 @@ static struct ctl_table pfm_sysctl_dir[] = {
 	},
  	{}
 };
-static struct ctl_table pfm_sysctl_root[] = {
+static ctl_table pfm_sysctl_root[] = {
 	{
 		.procname	= "kernel",
 		.mode		= 0555,
@@ -2145,25 +2145,41 @@ doit:
 	return 0;
 }
 
+static int
+pfm_no_open(struct inode *irrelevant, struct file *dontcare)
+{
+	DPRINT(("pfm_no_open called\n"));
+	return -ENXIO;
+}
+
+
+
 static const struct file_operations pfm_file_ops = {
 	.llseek		= no_llseek,
 	.read		= pfm_read,
 	.write		= pfm_write,
 	.poll		= pfm_poll,
 	.unlocked_ioctl = pfm_ioctl,
+	.open		= pfm_no_open,	/* special open code to disallow open via /proc */
 	.fasync		= pfm_fasync,
 	.release	= pfm_close,
 	.flush		= pfm_flush
 };
 
+static int
+pfmfs_delete_dentry(const struct dentry *dentry)
+{
+	return 1;
+}
+
 static char *pfmfs_dname(struct dentry *dentry, char *buffer, int buflen)
 {
 	return dynamic_dname(dentry, buffer, buflen, "pfm:[%lu]",
-			     d_inode(dentry)->i_ino);
+			     dentry->d_inode->i_ino);
 }
 
 static const struct dentry_operations pfmfs_dentry_operations = {
-	.d_delete = always_delete_dentry,
+	.d_delete = pfmfs_delete_dentry,
 	.d_dname = pfmfs_dname,
 };
 
@@ -2332,7 +2348,8 @@ pfm_smpl_buffer_alloc(struct task_struct *task, struct file *filp, pfm_context_t
 	 */
 	insert_vm_struct(mm, vma);
 
-	vm_stat_account(vma->vm_mm, vma->vm_flags, vma_pages(vma));
+	vm_stat_account(vma->vm_mm, vma->vm_flags, vma->vm_file,
+							vma_pages(vma));
 	up_write(&task->mm->mmap_sem);
 
 	/*
@@ -2651,7 +2668,7 @@ pfm_context_create(pfm_context_t *ctx, void *arg, int count, struct pt_regs *reg
 
 	ret = -ENOMEM;
 
-	fd = get_unused_fd_flags(0);
+	fd = get_unused_fd();
 	if (fd < 0)
 		return fd;
 
@@ -4542,8 +4559,8 @@ pfm_context_unload(pfm_context_t *ctx, void *arg, int count, struct pt_regs *reg
 
 
 /*
- * called only from exit_thread()
- * we come here only if the task has a context attached (loaded or masked)
+ * called only from exit_thread(): task == current
+ * we come here only if current has a context attached (loaded or masked)
  */
 void
 pfm_exit_thread(struct task_struct *task)
@@ -5630,8 +5647,24 @@ pfm_proc_show_header(struct seq_file *m)
 
 	list_for_each(pos, &pfm_buffer_fmt_list) {
 		entry = list_entry(pos, pfm_buffer_fmt_t, fmt_list);
-		seq_printf(m, "format                    : %16phD %s\n",
-			   entry->fmt_uuid, entry->fmt_name);
+		seq_printf(m, "format                    : %02x-%02x-%02x-%02x-%02x-%02x-%02x-%02x-%02x-%02x-%02x-%02x-%02x-%02x-%02x-%02x %s\n",
+			entry->fmt_uuid[0],
+			entry->fmt_uuid[1],
+			entry->fmt_uuid[2],
+			entry->fmt_uuid[3],
+			entry->fmt_uuid[4],
+			entry->fmt_uuid[5],
+			entry->fmt_uuid[6],
+			entry->fmt_uuid[7],
+			entry->fmt_uuid[8],
+			entry->fmt_uuid[9],
+			entry->fmt_uuid[10],
+			entry->fmt_uuid[11],
+			entry->fmt_uuid[12],
+			entry->fmt_uuid[13],
+			entry->fmt_uuid[14],
+			entry->fmt_uuid[15],
+			entry->fmt_name);
 	}
 	spin_unlock(&pfm_buffer_fmt_lock);
 
@@ -6376,6 +6409,7 @@ pfm_flush_pmds(struct task_struct *task, pfm_context_t *ctx)
 
 static struct irqaction perfmon_irqaction = {
 	.handler = pfm_interrupt_handler,
+	.flags   = IRQF_DISABLED,
 	.name    = "perfmon"
 };
 

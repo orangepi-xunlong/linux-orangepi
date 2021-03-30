@@ -12,6 +12,8 @@
 #ifndef _ASM_ARC_CURRENT_H
 #define _ASM_ARC_CURRENT_H
 
+#ifdef __KERNEL__
+
 #ifndef __ASSEMBLY__
 
 #ifdef CONFIG_ARC_CURR_IN_REG
@@ -24,5 +26,7 @@ register struct task_struct *curr_arc asm("r25");
 #endif /* ! CONFIG_ARC_CURR_IN_REG */
 
 #endif /* ! __ASSEMBLY__ */
+
+#endif	/* __KERNEL__ */
 
 #endif /* _ASM_ARC_CURRENT_H */

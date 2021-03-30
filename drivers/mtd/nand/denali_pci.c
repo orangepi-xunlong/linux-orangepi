@@ -21,7 +21,7 @@
 #define DENALI_NAND_NAME    "denali-nand-pci"
 
 /* List of platforms this NAND controller has be integrated into */
-static const struct pci_device_id denali_pci_ids[] = {
+static DEFINE_PCI_DEVICE_TABLE(denali_pci_ids) = {
 	{ PCI_VDEVICE(INTEL, 0x0701), INTEL_CE4100 },
 	{ PCI_VDEVICE(INTEL, 0x0809), INTEL_MRST },
 	{ /* end: all zeroes */ }
@@ -30,19 +30,19 @@ MODULE_DEVICE_TABLE(pci, denali_pci_ids);
 
 static int denali_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
-	int ret;
+	int ret = -ENODEV;
 	resource_size_t csr_base, mem_base;
 	unsigned long csr_len, mem_len;
 	struct denali_nand_info *denali;
 
-	denali = devm_kzalloc(&dev->dev, sizeof(*denali), GFP_KERNEL);
+	denali = kzalloc(sizeof(*denali), GFP_KERNEL);
 	if (!denali)
 		return -ENOMEM;
 
-	ret = pcim_enable_device(dev);
+	ret = pci_enable_device(dev);
 	if (ret) {
-		dev_err(&dev->dev, "Spectra: pci_enable_device failed.\n");
-		return ret;
+		pr_err("Spectra: pci_enable_device failed.\n");
+		goto failed_alloc_memery;
 	}
 
 	if (id->driver_data == INTEL_CE4100) {
@@ -69,19 +69,20 @@ static int denali_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
 	ret = pci_request_regions(dev, DENALI_NAND_NAME);
 	if (ret) {
-		dev_err(&dev->dev, "Spectra: Unable to request memory regions\n");
-		return ret;
+		pr_err("Spectra: Unable to request memory regions\n");
+		goto failed_enable_dev;
 	}
 
 	denali->flash_reg = ioremap_nocache(csr_base, csr_len);
 	if (!denali->flash_reg) {
-		dev_err(&dev->dev, "Spectra: Unable to remap memory region\n");
-		return -ENOMEM;
+		pr_err("Spectra: Unable to remap memory region\n");
+		ret = -ENOMEM;
+		goto failed_req_regions;
 	}
 
 	denali->flash_mem = ioremap_nocache(mem_base, mem_len);
 	if (!denali->flash_mem) {
-		dev_err(&dev->dev, "Spectra: ioremap_nocache failed!");
+		pr_err("Spectra: ioremap_nocache failed!");
 		ret = -ENOMEM;
 		goto failed_remap_reg;
 	}
@@ -98,6 +99,13 @@ failed_remap_mem:
 	iounmap(denali->flash_mem);
 failed_remap_reg:
 	iounmap(denali->flash_reg);
+failed_req_regions:
+	pci_release_regions(dev);
+failed_enable_dev:
+	pci_disable_device(dev);
+failed_alloc_memery:
+	kfree(denali);
+
 	return ret;
 }
 
@@ -109,6 +117,10 @@ static void denali_pci_remove(struct pci_dev *dev)
 	denali_remove(denali);
 	iounmap(denali->flash_reg);
 	iounmap(denali->flash_mem);
+	pci_release_regions(dev);
+	pci_disable_device(dev);
+	pci_set_drvdata(dev, NULL);
+	kfree(denali);
 }
 
 static struct pci_driver denali_pci_driver = {
@@ -118,8 +130,15 @@ static struct pci_driver denali_pci_driver = {
 	.remove = denali_pci_remove,
 };
 
-module_pci_driver(denali_pci_driver);
+static int denali_init_pci(void)
+{
+	pr_info("Spectra MTD driver built on %s @ %s\n", __DATE__, __TIME__);
+	return pci_register_driver(&denali_pci_driver);
+}
+module_init(denali_init_pci);
 
-MODULE_DESCRIPTION("PCI driver for Denali NAND controller");
-MODULE_AUTHOR("Intel Corporation and its suppliers");
-MODULE_LICENSE("GPL v2");
+static void denali_exit_pci(void)
+{
+	pci_unregister_driver(&denali_pci_driver);
+}
+module_exit(denali_exit_pci);

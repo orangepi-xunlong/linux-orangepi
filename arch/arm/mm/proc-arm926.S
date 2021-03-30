@@ -55,7 +55,7 @@
  * cpu_arm926_proc_init()
  */
 ENTRY(cpu_arm926_proc_init)
-	ret	lr
+	mov	pc, lr
 
 /*
  * cpu_arm926_proc_fin()
@@ -65,7 +65,7 @@ ENTRY(cpu_arm926_proc_fin)
 	bic	r0, r0, #0x1000			@ ...i............
 	bic	r0, r0, #0x000e			@ ............wca.
 	mcr	p15, 0, r0, c1, c0, 0		@ disable caches
-	ret	lr
+	mov	pc, lr
 
 /*
  * cpu_arm926_reset(loc)
@@ -89,7 +89,7 @@ ENTRY(cpu_arm926_reset)
 	bic	ip, ip, #0x000f			@ ............wcam
 	bic	ip, ip, #0x1100			@ ...i...s........
 	mcr	p15, 0, ip, c1, c0, 0		@ ctrl register
-	ret	r0
+	mov	pc, r0
 ENDPROC(cpu_arm926_reset)
 	.popsection
 
@@ -111,7 +111,7 @@ ENTRY(cpu_arm926_do_idle)
 	mcr	p15, 0, r0, c7, c0, 4		@ Wait for interrupt
 	mcr	p15, 0, r1, c1, c0, 0		@ Restore ICache enable
 	msr	cpsr_c, r3			@ Restore FIQ state
-	ret	lr
+	mov	pc, lr
 
 /*
  *	flush_icache_all()
@@ -121,7 +121,7 @@ ENTRY(cpu_arm926_do_idle)
 ENTRY(arm926_flush_icache_all)
 	mov	r0, #0
 	mcr	p15, 0, r0, c7, c5, 0		@ invalidate I cache
-	ret	lr
+	mov	pc, lr
 ENDPROC(arm926_flush_icache_all)
 
 /*
@@ -151,7 +151,7 @@ __flush_whole_cache:
 	tst	r2, #VM_EXEC
 	mcrne	p15, 0, ip, c7, c5, 0		@ invalidate I cache
 	mcrne	p15, 0, ip, c7, c10, 4		@ drain WB
-	ret	lr
+	mov	pc, lr
 
 /*
  *	flush_user_cache_range(start, end, flags)
@@ -188,7 +188,7 @@ ENTRY(arm926_flush_user_cache_range)
 	blo	1b
 	tst	r2, #VM_EXEC
 	mcrne	p15, 0, ip, c7, c10, 4		@ drain WB
-	ret	lr
+	mov	pc, lr
 
 /*
  *	coherent_kern_range(start, end)
@@ -222,7 +222,7 @@ ENTRY(arm926_coherent_user_range)
 	blo	1b
 	mcr	p15, 0, r0, c7, c10, 4		@ drain WB
 	mov	r0, #0
-	ret	lr
+	mov	pc, lr
 
 /*
  *	flush_kern_dcache_area(void *addr, size_t size)
@@ -242,7 +242,7 @@ ENTRY(arm926_flush_kern_dcache_area)
 	mov	r0, #0
 	mcr	p15, 0, r0, c7, c5, 0		@ invalidate I cache
 	mcr	p15, 0, r0, c7, c10, 4		@ drain WB
-	ret	lr
+	mov	pc, lr
 
 /*
  *	dma_inv_range(start, end)
@@ -270,7 +270,7 @@ arm926_dma_inv_range:
 	cmp	r0, r1
 	blo	1b
 	mcr	p15, 0, r0, c7, c10, 4		@ drain WB
-	ret	lr
+	mov	pc, lr
 
 /*
  *	dma_clean_range(start, end)
@@ -291,7 +291,7 @@ arm926_dma_clean_range:
 	blo	1b
 #endif
 	mcr	p15, 0, r0, c7, c10, 4		@ drain WB
-	ret	lr
+	mov	pc, lr
 
 /*
  *	dma_flush_range(start, end)
@@ -313,7 +313,7 @@ ENTRY(arm926_dma_flush_range)
 	cmp	r0, r1
 	blo	1b
 	mcr	p15, 0, r0, c7, c10, 4		@ drain WB
-	ret	lr
+	mov	pc, lr
 
 /*
  *	dma_map_area(start, size, dir)
@@ -336,7 +336,7 @@ ENDPROC(arm926_dma_map_area)
  *	- dir	- DMA direction
  */
 ENTRY(arm926_dma_unmap_area)
-	ret	lr
+	mov	pc, lr
 ENDPROC(arm926_dma_unmap_area)
 
 	.globl	arm926_flush_kern_cache_louis
@@ -353,7 +353,7 @@ ENTRY(cpu_arm926_dcache_clean_area)
 	bhi	1b
 #endif
 	mcr	p15, 0, r0, c7, c10, 4		@ drain WB
-	ret	lr
+	mov	pc, lr
 
 /* =============================== PageTable ============================== */
 
@@ -380,7 +380,7 @@ ENTRY(cpu_arm926_switch_mm)
 	mcr	p15, 0, r0, c2, c0, 0		@ load page table pointer
 	mcr	p15, 0, ip, c8, c7, 0		@ invalidate I & D TLBs
 #endif
-	ret	lr
+	mov	pc, lr
 
 /*
  * cpu_arm926_set_pte_ext(ptep, pte, ext)
@@ -397,7 +397,7 @@ ENTRY(cpu_arm926_set_pte_ext)
 #endif
 	mcr	p15, 0, r0, c7, c10, 4		@ drain WB
 #endif
-	ret	lr
+	mov	pc, lr
 
 /* Suspend/resume support: taken from arch/arm/plat-s3c24xx/sleep.S */
 .globl	cpu_arm926_suspend_size
@@ -425,6 +425,8 @@ ENTRY(cpu_arm926_do_resume)
 ENDPROC(cpu_arm926_do_resume)
 #endif
 
+	__CPUINIT
+
 	.type	__arm926_setup, #function
 __arm926_setup:
 	mov	r0, #0
@@ -448,7 +450,7 @@ __arm926_setup:
 #ifdef CONFIG_CPU_CACHE_ROUND_ROBIN
 	orr	r0, r0, #0x4000			@ .1.. .... .... ....
 #endif
-	ret	lr
+	mov	pc, lr
 	.size	__arm926_setup, . - __arm926_setup
 
 	/*
@@ -474,7 +476,7 @@ arm926_crval:
 
 	.align
 
-	.section ".proc.info.init", #alloc
+	.section ".proc.info.init", #alloc, #execinstr
 
 	.type	__arm926_proc_info,#object
 __arm926_proc_info:
@@ -490,7 +492,7 @@ __arm926_proc_info:
 		PMD_BIT4 | \
 		PMD_SECT_AP_WRITE | \
 		PMD_SECT_AP_READ
-	initfn	__arm926_setup, __arm926_proc_info
+	b	__arm926_setup
 	.long	cpu_arch_name
 	.long	cpu_elf_name
 	.long	HWCAP_SWP|HWCAP_HALF|HWCAP_THUMB|HWCAP_FAST_MULT|HWCAP_EDSP|HWCAP_JAVA

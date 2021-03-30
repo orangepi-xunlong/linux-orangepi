@@ -44,7 +44,6 @@
 #define SMB2_OP_DELETE 7
 #define SMB2_OP_HARDLINK 8
 #define SMB2_OP_SET_EOF 9
-#define SMB2_OP_RMDIR 10
 
 /* Used when constructing chained read requests. */
 #define CHAINED_REQUEST 1
@@ -55,8 +54,6 @@
 #define SMB2_SIGNATURE_SIZE (16)
 #define SMB2_NTLMV2_SESSKEY_SIZE (16)
 #define SMB2_HMACSHA256_SIZE (32)
-#define SMB2_CMACAES_SIZE (16)
-#define SMB3_SIGNKEY_SIZE (16)
 
 /* Maximum buffer size value we can send with 1 credit */
 #define SMB2_MAX_BUFFER_SIZE 65536

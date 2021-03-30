@@ -175,9 +175,10 @@ static int ptp_ixp_adjtime(struct ptp_clock_info *ptp, s64 delta)
 	return 0;
 }
 
-static int ptp_ixp_gettime(struct ptp_clock_info *ptp, struct timespec64 *ts)
+static int ptp_ixp_gettime(struct ptp_clock_info *ptp, struct timespec *ts)
 {
 	u64 ns;
+	u32 remainder;
 	unsigned long flags;
 	struct ixp_clock *ixp_clock = container_of(ptp, struct ixp_clock, caps);
 	struct ixp46x_ts_regs *regs = ixp_clock->regs;
@@ -188,19 +189,21 @@ static int ptp_ixp_gettime(struct ptp_clock_info *ptp, struct timespec64 *ts)
 
 	spin_unlock_irqrestore(&register_lock, flags);
 
-	*ts = ns_to_timespec64(ns);
+	ts->tv_sec = div_u64_rem(ns, 1000000000, &remainder);
+	ts->tv_nsec = remainder;
 	return 0;
 }
 
 static int ptp_ixp_settime(struct ptp_clock_info *ptp,
-			   const struct timespec64 *ts)
+			   const struct timespec *ts)
 {
 	u64 ns;
 	unsigned long flags;
 	struct ixp_clock *ixp_clock = container_of(ptp, struct ixp_clock, caps);
 	struct ixp46x_ts_regs *regs = ixp_clock->regs;
 
-	ns = timespec64_to_ns(ts);
+	ns = ts->tv_sec * 1000000000ULL;
+	ns += ts->tv_nsec;
 
 	spin_lock_irqsave(&register_lock, flags);
 
@@ -241,12 +244,11 @@ static struct ptp_clock_info ptp_ixp_caps = {
 	.name		= "IXP46X timer",
 	.max_adj	= 66666655,
 	.n_ext_ts	= N_EXT_TS,
-	.n_pins		= 0,
 	.pps		= 0,
 	.adjfreq	= ptp_ixp_adjfreq,
 	.adjtime	= ptp_ixp_adjtime,
-	.gettime64	= ptp_ixp_gettime,
-	.settime64	= ptp_ixp_settime,
+	.gettime	= ptp_ixp_gettime,
+	.settime	= ptp_ixp_settime,
 	.enable		= ptp_ixp_enable,
 };
 
@@ -257,30 +259,22 @@ static struct ixp_clock ixp_clock;
 static int setup_interrupt(int gpio)
 {
 	int irq;
-	int err;
 
-	err = gpio_request(gpio, "ixp4-ptp");
-	if (err)
-		return err;
-
-	err = gpio_direction_input(gpio);
-	if (err)
-		return err;
+	gpio_line_config(gpio, IXP4XX_GPIO_IN);
 
 	irq = gpio_to_irq(gpio);
-	if (irq < 0)
-		return irq;
 
-	err = irq_set_irq_type(irq, IRQF_TRIGGER_FALLING);
-	if (err) {
+	if (NO_IRQ == irq)
+		return NO_IRQ;
+
+	if (irq_set_irq_type(irq, IRQF_TRIGGER_FALLING)) {
 		pr_err("cannot set trigger type for irq %d\n", irq);
-		return err;
+		return NO_IRQ;
 	}
 
-	err = request_irq(irq, isr, 0, DRIVER, &ixp_clock);
-	if (err) {
+	if (request_irq(irq, isr, 0, DRIVER, &ixp_clock)) {
 		pr_err("request_irq failed for irq %d\n", irq);
-		return err;
+		return NO_IRQ;
 	}
 
 	return irq;

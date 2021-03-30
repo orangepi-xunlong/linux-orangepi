@@ -14,8 +14,14 @@
 #ifdef __KERNEL__
 
 #include <linux/bitops.h>
+
 #include <asm/byteorder.h>
-#include <asm/barrier.h>
+
+/*
+ * clear_bit() doesn't provide any barrier for the compiler.
+ */
+#define smp_mb__before_clear_bit() barrier()
+#define smp_mb__after_clear_bit()  barrier()
 
 /*
  * We are lucky, DSP is perfect for bitops: do it in 3 cycles

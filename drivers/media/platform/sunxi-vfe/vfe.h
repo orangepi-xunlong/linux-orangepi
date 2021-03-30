@@ -1,20 +1,4 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vfe/vfe.h
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
-/*
  * sunxi Camera core header file
  * Author:raymonxiu
  */
@@ -27,7 +11,6 @@
 #include <linux/workqueue.h>
 #include <linux/pm_runtime.h>
 
-#include <media/videobuf2-v4l2.h>
 #include <media/sunxi_camera.h>
 #include <media/videobuf2-core.h>
 #include <media/v4l2-device.h>
@@ -46,12 +29,12 @@
 #include "vfe_os.h"
 
 struct vfe_fmt {
-	unsigned int		bus_pix_code;
-	unsigned char		name[32];
-	unsigned int		fourcc; /* v4l2 format id */
-	enum v4l2_field		field;
-	unsigned char		depth;
-	unsigned char		planes_cnt;
+	unsigned char               name[32];
+	enum v4l2_mbus_pixelcode    bus_pix_code;
+	unsigned int                fourcc;          /* v4l2 format id */
+	enum v4l2_field             field;
+	unsigned char               depth;
+	unsigned char               planes_cnt;
 };
 
 struct vfe_coor {
@@ -63,18 +46,9 @@ struct vfe_coor {
 
 /* buffer for one video frame */
 struct vfe_buffer {
-	struct vb2_v4l2_buffer vb;
+	struct vb2_buffer	vb;	
 	struct list_head	list;
 	struct vfe_fmt		*fmt;
-	enum vb2_buffer_state	state;
-	void *paddr;
-};
-
-struct vfe_fmt_code {
-	u32	*mbus_code;
-	char	*bus_name;
-	char	*pix_name;
-	unsigned char size;
 };
 
 struct vfe_dmaqueue {
@@ -88,8 +62,8 @@ struct vfe_isp_stat_buf {
 	unsigned int              id;
 	struct list_head          queue;
 	struct isp_stat_buffer    isp_stat_buf;
-	void                      *paddr;
-	void						*dma_addr;
+	void                      *paddr;  
+	void						*dma_addr;  
 };
 
 struct vfe_isp_stat_buf_queue {
@@ -99,17 +73,17 @@ struct vfe_isp_stat_buf_queue {
 };
 
 struct vfe_ctrl_para {
-	unsigned int  auto_wb;  /* bool */
-	enum  v4l2_exposure_auto_type  exp_auto_mode;
-	unsigned int  auto_focus; /* bool */
-	unsigned int  exp_bias; /* integer */
-	struct isp_h3a_coor_win		af_coor[MAX_AF_WIN_NUM];/* pointer */
-	struct isp_h3a_coor_win		ae_coor[MAX_AE_WIN_NUM];/* pointer */
-	unsigned int  gsensor_rot; /* integer */
-	unsigned int  prev_exp_line;
-	unsigned int  prev_ana_gain;
-	unsigned int  prev_focus_pos;
-	unsigned int  prev_exp_gain;
+	unsigned int                            auto_wb;  //bool
+	enum  v4l2_exposure_auto_type           exp_auto_mode;
+	unsigned int                            auto_focus; //bool
+	unsigned int                            exp_bias; //interger
+	struct isp_h3a_coor_win 				af_coor[MAX_AF_WIN_NUM];//pointer
+	struct isp_h3a_coor_win 				ae_coor[MAX_AE_WIN_NUM];//pointer
+	unsigned int                            gsensor_rot; //interger
+	unsigned int							prev_exp_line;
+	unsigned int			                prev_ana_gain;  
+	unsigned int			                prev_focus_pos;
+	unsigned int			                prev_exp_gain;
 };
 
 struct vfe_regs {
@@ -125,11 +99,13 @@ struct vfe_regs {
 	void              *isp_saved_regs_dma_addr;
 };
 
-enum vfe_regulator {
+enum vfe_regulator
+{
 	ENUM_ISP_REGULATOR,
 	ENUM_CSI_REGULATOR,
 };
-enum vfe_sub_device_regulator {
+enum vfe_sub_device_regulator
+{
 	ENUM_IOVDD,
 	ENUM_AVDD,
 	ENUM_DVDD,
@@ -140,28 +116,17 @@ enum vfe_sub_device_regulator {
 struct vfe_power {
 	/*power issue*/
 	enum standby_mode  stby_mode; /* standby mode */
-	/* interface voltage source of sensor module */
-	struct regulator   *iovdd;
-	/* analog voltage source of sensor module */
-	struct regulator   *avdd;
-	/* core voltage source of sensor module */
-	struct regulator   *dvdd;
-	/* vcm sink voltage source of sensor module */
-	struct regulator   *afvdd;
-	/* flash led voltage source of sensor module */
-	struct regulator   *flvdd;
-	/* voltage of sensor module for interface */
-	unsigned int		iovdd_vol;
-	/* voltage of sensor module for analog */
-	unsigned int		avdd_vol;
-	/* voltage of sensor module for core */
-	unsigned int		dvdd_vol;
-	/* voltage of sensor module for vcm sink */
-	unsigned int		afvdd_vol;
-	/* voltage of sensor module for flash led */
-	unsigned int		flvdd_vol;
+	struct regulator   *iovdd;    /* interface voltage source of sensor module */
+	struct regulator   *avdd;     /* analog voltage source of sensor module */
+	struct regulator   *dvdd;     /* core voltage source of sensor module */
+	struct regulator   *afvdd;    /* vcm sink voltage source of sensor module */
+	struct regulator   *flvdd;    /* flash led voltage source of sensor module */
+	unsigned int		iovdd_vol; /* voltage of sensor module for interface */
+	unsigned int		avdd_vol; /* voltage of sensor module for analog */
+	unsigned int		dvdd_vol; /* voltage of sensor module for core */
+	unsigned int		afvdd_vol; /* voltage of sensor module for vcm sink */	
+	unsigned int		flvdd_vol; /* voltage of sensor module for flash led */
 };
-
 struct camera_instance {
 	char name[I2C_NAME_SIZE];
 	int i2c_addr;
@@ -170,7 +135,7 @@ struct camera_instance {
 	int vflip;
 	int hflip;
 	char act_name[I2C_NAME_SIZE];
-	int act_i2c_addr;
+	int act_i2c_addr;	
 	char isp_cfg_name[I2C_NAME_SIZE];
 };
 
@@ -220,52 +185,54 @@ struct vfe_dev {
 	struct list_head        devlist;
 	struct v4l2_device      v4l2_dev;
 	struct v4l2_subdev      *sd;
-	struct v4l2_subdev		*sd_act;
-	struct v4l2_subdev		*isp_sd;
-	struct v4l2_subdev		*csi_sd;
-	struct v4l2_subdev		*mipi_sd;
-	struct v4l2_subdev		*flash_sd;
+	struct v4l2_subdev	  	*sd_act;
+	struct v4l2_subdev 		*isp_sd;
+	struct v4l2_subdev 		*csi_sd;
+	struct v4l2_subdev 		*mipi_sd;
+	struct v4l2_subdev 		*flash_sd;
 	int                     flash_used;
-	__flash_driver_ic_type	flash_type;
+	__flash_driver_ic_type 	flash_type;
 	int                     vip_define_sensor_list;
 	struct platform_device  *pdev;
-	int				id;
+	int            			id;
 	spinlock_t              slock;
 	struct mutex            stream_lock;
-	struct delayed_work	probe_work;
+	struct delayed_work 	probe_work;
 	/* various device info */
-	struct video_device     *vfd[MAX_CH_NUM];
-	struct vfe_dmaqueue     vidq[MAX_CH_NUM];
+	struct video_device     *vfd;
+	struct vfe_dmaqueue     vidq;
 	struct vfe_isp_stat_buf_queue  isp_stat_bq;
+	/* Several counters */
+	unsigned                ms;
+	unsigned long           jiffies;
 	/* video capture */
-	struct vb2_queue		vb_vidq[MAX_CH_NUM];
-	struct mutex            buf_lock;
-	struct device           *allocate_dev[MAX_CH_NUM];
+	struct vb2_queue		vb_vidq;	
+	struct mutex            buf_lock;	
+	struct vb2_alloc_ctx 	*alloc_ctx;
 	unsigned int            capture_mode;
 	/*working state*/
 	unsigned long           generating;
 	unsigned long           opened;
 	struct mutex            opened_lock;
 	/* about system resource */
-	int                     irq;
+	int                     irq;  
 #ifdef VFE_GPIO
-	struct pinctrl			*pctrl;
-	struct pinctrl_state	*pctrl_state;
-#endif
+	struct pinctrl		 	*pctrl;
+	struct pinctrl_state 	*pctrl_state;
+#endif  
 	struct vfe_regs         regs;
-	struct vfe_gpio_cfg		*gpio;
+	struct vfe_gpio_cfg	  	*gpio;
 
 	struct vfe_power        *power;
-	struct regulator		*vfe_system_power[3];
+	struct regulator   		*vfe_system_power[3];
 	int vfe_sensor_power_cnt;
-	/* about vfe channel */
+	/* about vfe channel */ 
 	unsigned int            cur_ch;
 	/* about some global info*/
-	unsigned int            first_flag[MAX_CH_NUM];
-	unsigned int long       sec, usec;
+	unsigned int            first_flag;       /* indicate the first time triggering irq */
+	long unsigned int       sec,usec;
 	unsigned int            dev_qty;
-	/* the modules connected on the same bus are the same modle */
-	unsigned int            is_same_module;
+	unsigned int            is_same_module;   /* the modules connected on the same bus are the same modle */
 	unsigned int            input;
 	enum v4l2_mbus_type     mbus_type;
 	unsigned int            flash_sel;
@@ -277,7 +244,7 @@ struct vfe_dev {
 	struct ccm_config       *ccm_cfg[MAX_INPUT_NUM];
 	struct i2c_board_info   dev_sensor[MAX_INPUT_NUM];
 	struct i2c_board_info   dev_act[MAX_INPUT_NUM];
-	unsigned int			device_valid_flag[MAX_INPUT_NUM];
+	unsigned int   	   		device_valid_flag[MAX_INPUT_NUM];
 	unsigned int            is_isp_used;
 	unsigned int            is_bayer_raw;
 	struct vfe_fmt          fmt;
@@ -285,18 +252,15 @@ struct vfe_dev {
 	unsigned int            height;
 	unsigned int            thumb_width;
 	unsigned int            thumb_height;
-	/* including main and thumb buffer */
-	unsigned int            buf_byte_size;
-	/* including main and thumb buffer */
-	unsigned int            buf_addr;
+	unsigned int            buf_byte_size;    /* including main and thumb buffer */
+	unsigned int            buf_addr;         /* including main and thumb buffer */
 	struct isp_init_para    isp_init_para;
 	struct isp_table_addr   isp_tbl_addr[MAX_INPUT_NUM];
-	struct vfe_mm			isp_lut_tbl_buf_mm[MAX_INPUT_NUM];
+	struct vfe_mm  			isp_lut_tbl_buf_mm[MAX_INPUT_NUM];
 	struct vfe_mm			isp_drc_tbl_buf_mm[MAX_INPUT_NUM];
 	struct vfe_mm			isp_stat_buf_mm[MAX_ISP_STAT_BUF];
-	struct vfe_mm		buf_ext[MAX_CH_NUM];
-	struct isp_gen_settings  *isp_gen_set[MAX_INPUT_NUM];
-	struct isp_gen_settings  *isp_gen_set_pt;
+	struct isp_gen_settings  isp_gen_set[MAX_INPUT_NUM];
+	struct isp_gen_settings  *isp_gen_set_pt; 
 	struct mutex            isp_3a_result_mutex;
 	struct isp_3a_result    isp_3a_result[MAX_INPUT_NUM];
 	struct isp_3a_result    *isp_3a_result_pt;
@@ -305,12 +269,8 @@ struct vfe_dev {
 	struct vfe_ctrl_para    ctrl_para;
 	struct flash_dev_info	*fl_dev_info;
 	unsigned int			platform_id;
-	unsigned int			vfe_s_input_flag;
+	unsigned int 			vfe_s_input_flag;
 	struct v4l2_ctrl_handler  ctrl_handler;
-	struct vfe_dmaqueue       vidq_special;
-	struct vfe_dmaqueue       done_special;
-	int special_active;
-	void (*vfe_buffer_process)(int id);
 };
 
 #endif  /* __VFE__H__ */

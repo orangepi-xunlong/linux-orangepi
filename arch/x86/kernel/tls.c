@@ -29,28 +29,7 @@ static int get_free_idx(void)
 
 static bool tls_desc_okay(const struct user_desc *info)
 {
-	/*
-	 * For historical reasons (i.e. no one ever documented how any
-	 * of the segmentation APIs work), user programs can and do
-	 * assume that a struct user_desc that's all zeros except for
-	 * entry_number means "no segment at all".  This never actually
-	 * worked.  In fact, up to Linux 3.19, a struct user_desc like
-	 * this would create a 16-bit read-write segment with base and
-	 * limit both equal to zero.
-	 *
-	 * That was close enough to "no segment at all" until we
-	 * hardened this function to disallow 16-bit TLS segments.  Fix
-	 * it up by interpreting these zeroed segments the way that they
-	 * were almost certainly intended to be interpreted.
-	 *
-	 * The correct way to ask for "no segment at all" is to specify
-	 * a user_desc that satisfies LDT_empty.  To keep everything
-	 * working, we accept both.
-	 *
-	 * Note that there's a similar kludge in modify_ldt -- look at
-	 * the distinction between modes 1 and 0x11.
-	 */
-	if (LDT_empty(info) || LDT_zero(info))
+	if (LDT_empty(info))
 		return true;
 
 	/*
@@ -92,7 +71,7 @@ static void set_tls_desc(struct task_struct *p, int idx,
 	cpu = get_cpu();
 
 	while (n-- > 0) {
-		if (LDT_empty(info) || LDT_zero(info))
+		if (LDT_empty(info))
 			desc->a = desc->b = 0;
 		else
 			fill_ldt(desc, info);
@@ -114,7 +93,6 @@ int do_set_thread_area(struct task_struct *p, int idx,
 		       int can_allocate)
 {
 	struct user_desc info;
-	unsigned short __maybe_unused sel, modified_sel;
 
 	if (copy_from_user(&info, u_info, sizeof(info)))
 		return -EFAULT;
@@ -141,47 +119,6 @@ int do_set_thread_area(struct task_struct *p, int idx,
 		return -EINVAL;
 
 	set_tls_desc(p, idx, &info, 1);
-
-	/*
-	 * If DS, ES, FS, or GS points to the modified segment, forcibly
-	 * refresh it.  Only needed on x86_64 because x86_32 reloads them
-	 * on return to user mode.
-	 */
-	modified_sel = (idx << 3) | 3;
-
-	if (p == current) {
-#ifdef CONFIG_X86_64
-		savesegment(ds, sel);
-		if (sel == modified_sel)
-			loadsegment(ds, sel);
-
-		savesegment(es, sel);
-		if (sel == modified_sel)
-			loadsegment(es, sel);
-
-		savesegment(fs, sel);
-		if (sel == modified_sel)
-			loadsegment(fs, sel);
-
-		savesegment(gs, sel);
-		if (sel == modified_sel)
-			load_gs_index(sel);
-#endif
-
-#ifdef CONFIG_X86_32_LAZY_GS
-		savesegment(gs, sel);
-		if (sel == modified_sel)
-			loadsegment(gs, sel);
-#endif
-	} else {
-#ifdef CONFIG_X86_64
-		if (p->thread.fsindex == modified_sel)
-			p->thread.fsbase = info.base_addr;
-
-		if (p->thread.gsindex == modified_sel)
-			p->thread.gsbase = info.base_addr;
-#endif
-	}
 
 	return 0;
 }

@@ -16,7 +16,6 @@
 #include <linux/gfp.h>
 #include <memory/jedec_ddr.h>
 #include <linux/export.h>
-#include "of_memory.h"
 
 /**
  * of_get_min_tck() - extract min timing values for ddr
@@ -110,7 +109,7 @@ const struct lpddr2_timings *of_get_ddr_timings(struct device_node *np_ddr,
 	struct lpddr2_timings	*timings = NULL;
 	u32			arr_sz = 0, i = 0;
 	struct device_node	*np_tim;
-	char			*tim_compat = NULL;
+	char			*tim_compat;
 
 	switch (device_type) {
 	case DDR_TYPE_LPDDR2_S2:

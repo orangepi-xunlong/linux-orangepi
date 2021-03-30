@@ -60,6 +60,7 @@
  * };
  *
  * static struct sccnxp_pdata sc2892_info = {
+ *	.frequency	= 3686400,
  *	.mctrl_cfg[0]	= MCTRL_SIG(DIR_OP, LINE_OP0),
  *	.mctrl_cfg[1]	= MCTRL_SIG(DIR_OP, LINE_OP1),
  * };
@@ -77,6 +78,8 @@
 
 /* SCCNXP platform data structure */
 struct sccnxp_pdata {
+	/* Frequency (extrenal clock or crystal) */
+	int			frequency;
 	/* Shift for A0 line */
 	const u8		reg_shift;
 	/* Modem control lines configuration */

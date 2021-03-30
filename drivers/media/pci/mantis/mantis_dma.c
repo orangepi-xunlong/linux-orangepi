@@ -130,20 +130,21 @@ err:
 
 int mantis_dma_init(struct mantis_pci *mantis)
 {
-	int err;
+	int err = 0;
 
 	dprintk(MANTIS_DEBUG, 1, "Mantis DMA init");
-	err = mantis_alloc_buffers(mantis);
-	if (err < 0) {
+	if (mantis_alloc_buffers(mantis) < 0) {
 		dprintk(MANTIS_ERROR, 1, "Error allocating DMA buffer");
 
 		/* Stop RISC Engine */
 		mmwrite(0, MANTIS_DMA_CTL);
 
-		return err;
+		goto err;
 	}
 
 	return 0;
+err:
+	return err;
 }
 EXPORT_SYMBOL_GPL(mantis_dma_init);
 
@@ -189,7 +190,7 @@ void mantis_dma_start(struct mantis_pci *mantis)
 	mmwrite(0, MANTIS_DMA_CTL);
 	mantis->last_block = mantis->busy_block = 0;
 
-	mantis_unmask_ints(mantis, MANTIS_INT_RISCI);
+	mmwrite(mmread(MANTIS_INT_MASK) | MANTIS_INT_RISCI, MANTIS_INT_MASK);
 
 	mmwrite(MANTIS_FIFO_EN | MANTIS_DCAP_EN
 			       | MANTIS_RISC_EN, MANTIS_DMA_CTL);
@@ -208,7 +209,8 @@ void mantis_dma_stop(struct mantis_pci *mantis)
 
 	mmwrite(mmread(MANTIS_INT_STAT), MANTIS_INT_STAT);
 
-	mantis_mask_ints(mantis, MANTIS_INT_RISCI | MANTIS_INT_RISCEN);
+	mmwrite(mmread(MANTIS_INT_MASK) & ~(MANTIS_INT_RISCI |
+					    MANTIS_INT_RISCEN), MANTIS_INT_MASK);
 }
 
 

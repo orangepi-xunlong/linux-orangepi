@@ -78,6 +78,7 @@
 	.macro mcount_get_lr reg
 	ldr	\reg, [x29]
 	ldr	\reg, [\reg, #8]
+	mcount_adjust_addr	\reg, \reg
 	.endm
 
 	.macro mcount_get_lr_addr reg
@@ -95,10 +96,15 @@
  *     - ftrace_graph_caller to set up an exit hook
  */
 ENTRY(_mcount)
+#ifdef CONFIG_HAVE_FUNCTION_TRACE_MCOUNT_TEST
+	ldr	x0, =ftrace_trace_stop
+	ldr	x0, [x0]		// if ftrace_trace_stop
+	ret				//   return;
+#endif
 	mcount_enter
 
-	adrp	x0, ftrace_trace_function
-	ldr	x2, [x0, #:lo12:ftrace_trace_function]
+	ldr	x0, =ftrace_trace_function
+	ldr	x2, [x0]
 	adr	x0, ftrace_stub
 	cmp	x0, x2			// if (ftrace_trace_function
 	b.eq	skip_ftrace_call	//     != ftrace_stub) {
@@ -114,15 +120,14 @@ skip_ftrace_call:			//   return;
 	mcount_exit			//   return;
 					// }
 skip_ftrace_call:
-	adrp	x1, ftrace_graph_return
-	ldr	x2, [x1, #:lo12:ftrace_graph_return]
-	cmp	x0, x2			//   if ((ftrace_graph_return
-	b.ne	ftrace_graph_caller	//        != ftrace_stub)
+	ldr	x1, =ftrace_graph_return
+	ldr	x2, [x1]		//   if ((ftrace_graph_return
+	cmp	x0, x2			//        != ftrace_stub)
+	b.ne	ftrace_graph_caller
 
-	adrp	x1, ftrace_graph_entry	//     || (ftrace_graph_entry
-	adrp	x0, ftrace_graph_entry_stub //     != ftrace_graph_entry_stub))
-	ldr	x2, [x1, #:lo12:ftrace_graph_entry]
-	add	x0, x0, #:lo12:ftrace_graph_entry_stub
+	ldr	x1, =ftrace_graph_entry	//     || (ftrace_graph_entry
+	ldr	x2, [x1]		//        != ftrace_graph_entry_stub))
+	ldr	x0, =ftrace_graph_entry_stub
 	cmp	x0, x2
 	b.ne	ftrace_graph_caller	//     ftrace_graph_caller();
 
@@ -177,24 +182,6 @@ ENTRY(ftrace_stub)
 ENDPROC(ftrace_stub)
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
-	/* save return value regs*/
-	.macro save_return_regs
-	sub sp, sp, #64
-	stp x0, x1, [sp]
-	stp x2, x3, [sp, #16]
-	stp x4, x5, [sp, #32]
-	stp x6, x7, [sp, #48]
-	.endm
-
-	/* restore return value regs*/
-	.macro restore_return_regs
-	ldp x0, x1, [sp]
-	ldp x2, x3, [sp, #16]
-	ldp x4, x5, [sp, #32]
-	ldp x6, x7, [sp, #48]
-	add sp, sp, #64
-	.endm
-
 /*
  * void ftrace_graph_caller(void)
  *
@@ -218,14 +205,14 @@ ENDPROC(ftrace_graph_caller)
  *
  * Run ftrace_return_to_handler() before going back to parent.
  * @fp is checked against the value passed by ftrace_graph_caller()
- * only when HAVE_FUNCTION_GRAPH_FP_TEST is enabled.
+ * only when CONFIG_FUNCTION_GRAPH_FP_TEST is enabled.
  */
 ENTRY(return_to_handler)
-	save_return_regs
+	str	x0, [sp, #-16]!
 	mov	x0, x29			//     parent's fp
 	bl	ftrace_return_to_handler// addr = ftrace_return_to_hander(fp);
 	mov	x30, x0			// restore the original return address
-	restore_return_regs
+	ldr	x0, [sp], #16
 	ret
 END(return_to_handler)
 #endif /* CONFIG_FUNCTION_GRAPH_TRACER */

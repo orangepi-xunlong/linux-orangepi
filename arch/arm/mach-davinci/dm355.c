@@ -13,21 +13,21 @@
 #include <linux/serial_8250.h>
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
-#include <linux/dmaengine.h>
+
 #include <linux/spi/spi.h>
-#include <linux/platform_data/edma.h>
-#include <linux/platform_data/gpio-davinci.h>
-#include <linux/platform_data/spi-davinci.h>
 
 #include <asm/mach/map.h>
 
 #include <mach/cputype.h>
-#include "psc.h"
+#include <mach/edma.h>
+#include <mach/psc.h>
 #include <mach/mux.h>
 #include <mach/irqs.h>
 #include <mach/time.h>
 #include <mach/serial.h>
 #include <mach/common.h>
+#include <linux/platform_data/spi-davinci.h>
+#include <mach/gpio-davinci.h>
 
 #include "davinci.h"
 #include "clock.h"
@@ -357,9 +357,9 @@ static struct clk_lookup dm355_clks[] = {
 	CLK(NULL, "clkout3", &clkout3_clk),
 	CLK(NULL, "arm", &arm_clk),
 	CLK(NULL, "mjcp", &mjcp_clk),
-	CLK("serial8250.0", NULL, &uart0_clk),
-	CLK("serial8250.1", NULL, &uart1_clk),
-	CLK("serial8250.2", NULL, &uart2_clk),
+	CLK(NULL, "uart0", &uart0_clk),
+	CLK(NULL, "uart1", &uart1_clk),
+	CLK(NULL, "uart2", &uart2_clk),
 	CLK("i2c_davinci.1", NULL, &i2c_clk),
 	CLK("davinci-mcbsp.0", NULL, &asp0_clk),
 	CLK("davinci-mcbsp.1", NULL, &asp1_clk),
@@ -376,7 +376,7 @@ static struct clk_lookup dm355_clks[] = {
 	CLK(NULL, "pwm3", &pwm3_clk),
 	CLK(NULL, "timer0", &timer0_clk),
 	CLK(NULL, "timer1", &timer1_clk),
-	CLK("davinci-wdt", NULL, &timer2_clk),
+	CLK("watchdog", NULL, &timer2_clk),
 	CLK(NULL, "timer3", &timer3_clk),
 	CLK(NULL, "rto", &rto_clk),
 	CLK(NULL, "usb", &usb_clk),
@@ -412,7 +412,6 @@ static struct davinci_spi_platform_data dm355_spi0_pdata = {
 	.num_chipselect = 2,
 	.cshold_bug	= true,
 	.dma_event_q	= EVENTQ_1,
-	.prescaler_limit = 1,
 };
 static struct platform_device dm355_spi0_device = {
 	.name = "spi_davinci",
@@ -570,82 +569,79 @@ static u8 dm355_default_priorities[DAVINCI_N_AINTC_IRQ] = {
 
 /*----------------------------------------------------------------------*/
 
-static s8 queue_priority_mapping[][2] = {
+static const s8
+queue_tc_mapping[][2] = {
+	/* {event queue no, TC no} */
+	{0, 0},
+	{1, 1},
+	{-1, -1},
+};
+
+static const s8
+queue_priority_mapping[][2] = {
 	/* {event queue no, Priority} */
 	{0, 3},
 	{1, 7},
 	{-1, -1},
 };
 
-static const struct dma_slave_map dm355_edma_map[] = {
-	{ "davinci-mcbsp.0", "tx", EDMA_FILTER_PARAM(0, 2) },
-	{ "davinci-mcbsp.0", "rx", EDMA_FILTER_PARAM(0, 3) },
-	{ "davinci-mcbsp.1", "tx", EDMA_FILTER_PARAM(0, 8) },
-	{ "davinci-mcbsp.1", "rx", EDMA_FILTER_PARAM(0, 9) },
-	{ "spi_davinci.2", "tx", EDMA_FILTER_PARAM(0, 10) },
-	{ "spi_davinci.2", "rx", EDMA_FILTER_PARAM(0, 11) },
-	{ "spi_davinci.1", "tx", EDMA_FILTER_PARAM(0, 14) },
-	{ "spi_davinci.1", "rx", EDMA_FILTER_PARAM(0, 15) },
-	{ "spi_davinci.0", "tx", EDMA_FILTER_PARAM(0, 16) },
-	{ "spi_davinci.0", "rx", EDMA_FILTER_PARAM(0, 17) },
-	{ "dm6441-mmc.0", "rx", EDMA_FILTER_PARAM(0, 26) },
-	{ "dm6441-mmc.0", "tx", EDMA_FILTER_PARAM(0, 27) },
-	{ "dm6441-mmc.1", "rx", EDMA_FILTER_PARAM(0, 30) },
-	{ "dm6441-mmc.1", "tx", EDMA_FILTER_PARAM(0, 31) },
-};
-
-static struct edma_soc_info dm355_edma_pdata = {
+static struct edma_soc_info edma_cc0_info = {
+	.n_channel		= 64,
+	.n_region		= 4,
+	.n_slot			= 128,
+	.n_tc			= 2,
+	.n_cc			= 1,
+	.queue_tc_mapping	= queue_tc_mapping,
 	.queue_priority_mapping	= queue_priority_mapping,
 	.default_queue		= EVENTQ_1,
-	.slave_map		= dm355_edma_map,
-	.slavecnt		= ARRAY_SIZE(dm355_edma_map),
+};
+
+static struct edma_soc_info *dm355_edma_info[EDMA_MAX_CC] = {
+       &edma_cc0_info,
 };
 
 static struct resource edma_resources[] = {
 	{
-		.name	= "edma3_cc",
+		.name	= "edma_cc0",
 		.start	= 0x01c00000,
 		.end	= 0x01c00000 + SZ_64K - 1,
 		.flags	= IORESOURCE_MEM,
 	},
 	{
-		.name	= "edma3_tc0",
+		.name	= "edma_tc0",
 		.start	= 0x01c10000,
 		.end	= 0x01c10000 + SZ_1K - 1,
 		.flags	= IORESOURCE_MEM,
 	},
 	{
-		.name	= "edma3_tc1",
+		.name	= "edma_tc1",
 		.start	= 0x01c10400,
 		.end	= 0x01c10400 + SZ_1K - 1,
 		.flags	= IORESOURCE_MEM,
 	},
 	{
-		.name	= "edma3_ccint",
+		.name	= "edma0",
 		.start	= IRQ_CCINT0,
 		.flags	= IORESOURCE_IRQ,
 	},
 	{
-		.name	= "edma3_ccerrint",
+		.name	= "edma0_err",
 		.start	= IRQ_CCERRINT,
 		.flags	= IORESOURCE_IRQ,
 	},
 	/* not using (or muxing) TC*_ERR */
 };
 
-static const struct platform_device_info dm355_edma_device __initconst = {
-	.name		= "edma",
-	.id		= 0,
-	.dma_mask	= DMA_BIT_MASK(32),
-	.res		= edma_resources,
-	.num_res	= ARRAY_SIZE(edma_resources),
-	.data		= &dm355_edma_pdata,
-	.size_data	= sizeof(dm355_edma_pdata),
+static struct platform_device dm355_edma_device = {
+	.name			= "edma",
+	.id			= 0,
+	.dev.platform_data	= dm355_edma_info,
+	.num_resources		= ARRAY_SIZE(edma_resources),
+	.resource		= edma_resources,
 };
 
 static struct resource dm355_asp1_resources[] = {
 	{
-		.name	= "mpu",
 		.start	= DAVINCI_ASP1_BASE,
 		.end	= DAVINCI_ASP1_BASE + SZ_8K - 1,
 		.flags	= IORESOURCE_MEM,
@@ -803,13 +799,14 @@ static struct resource dm355_v4l2_disp_resources[] = {
 	},
 };
 
-static int dm355_vpbe_setup_pinmux(u32 if_type, int field)
+static int dm355_vpbe_setup_pinmux(enum v4l2_mbus_pixelcode if_type,
+			    int field)
 {
 	switch (if_type) {
-	case MEDIA_BUS_FMT_SGRBG8_1X8:
+	case V4L2_MBUS_FMT_SGRBG8_1X8:
 		davinci_cfg_reg(DM355_VOUT_FIELD_G70);
 		break;
-	case MEDIA_BUS_FMT_YUYV10_1X20:
+	case V4L2_MBUS_FMT_YUYV10_1X20:
 		if (field)
 			davinci_cfg_reg(DM355_VOUT_FIELD);
 		else
@@ -863,7 +860,7 @@ static struct platform_device dm355_vpbe_display = {
 	},
 };
 
-static struct venc_platform_data dm355_venc_pdata = {
+struct venc_platform_data dm355_venc_pdata = {
 	.setup_pinmux	= dm355_vpbe_setup_pinmux,
 	.setup_clock	= dm355_venc_setup_clock,
 };
@@ -889,29 +886,6 @@ static struct platform_device dm355_vpbe_dev = {
 	},
 };
 
-static struct resource dm355_gpio_resources[] = {
-	{	/* registers */
-		.start	= DAVINCI_GPIO_BASE,
-		.end	= DAVINCI_GPIO_BASE + SZ_4K - 1,
-		.flags	= IORESOURCE_MEM,
-	},
-	{	/* interrupt */
-		.start	= IRQ_DM355_GPIOBNK0,
-		.end	= IRQ_DM355_GPIOBNK6,
-		.flags	= IORESOURCE_IRQ,
-	},
-};
-
-static struct davinci_gpio_platform_data dm355_gpio_platform_data = {
-	.ngpio		= 104,
-};
-
-int __init dm355_gpio_register(void)
-{
-	return davinci_gpio_register(dm355_gpio_resources,
-				     ARRAY_SIZE(dm355_gpio_resources),
-				     &dm355_gpio_platform_data);
-}
 /*----------------------------------------------------------------------*/
 
 static struct map_desc dm355_io_desc[] = {
@@ -948,7 +922,7 @@ static struct davinci_timer_info dm355_timer_info = {
 	.clocksource_id	= T0_TOP,
 };
 
-static struct plat_serial8250_port dm355_serial0_platform_data[] = {
+static struct plat_serial8250_port dm355_serial_platform_data[] = {
 	{
 		.mapbase	= DAVINCI_UART0_BASE,
 		.irq		= IRQ_UARTINT0,
@@ -958,11 +932,6 @@ static struct plat_serial8250_port dm355_serial0_platform_data[] = {
 		.regshift	= 2,
 	},
 	{
-		.flags	= 0,
-	}
-};
-static struct plat_serial8250_port dm355_serial1_platform_data[] = {
-	{
 		.mapbase	= DAVINCI_UART1_BASE,
 		.irq		= IRQ_UARTINT1,
 		.flags		= UPF_BOOT_AUTOCONF | UPF_SKIP_TEST |
@@ -970,11 +939,6 @@ static struct plat_serial8250_port dm355_serial1_platform_data[] = {
 		.iotype		= UPIO_MEM,
 		.regshift	= 2,
 	},
-	{
-		.flags	= 0,
-	}
-};
-static struct plat_serial8250_port dm355_serial2_platform_data[] = {
 	{
 		.mapbase	= DM355_UART2_BASE,
 		.irq		= IRQ_DM355_UARTINT2,
@@ -984,34 +948,16 @@ static struct plat_serial8250_port dm355_serial2_platform_data[] = {
 		.regshift	= 2,
 	},
 	{
-		.flags	= 0,
-	}
+		.flags		= 0
+	},
 };
 
-struct platform_device dm355_serial_device[] = {
-	{
-		.name			= "serial8250",
-		.id			= PLAT8250_DEV_PLATFORM,
-		.dev			= {
-			.platform_data	= dm355_serial0_platform_data,
-		}
+static struct platform_device dm355_serial_device = {
+	.name			= "serial8250",
+	.id			= PLAT8250_DEV_PLATFORM,
+	.dev			= {
+		.platform_data	= dm355_serial_platform_data,
 	},
-	{
-		.name			= "serial8250",
-		.id			= PLAT8250_DEV_PLATFORM1,
-		.dev			= {
-			.platform_data	= dm355_serial1_platform_data,
-		}
-	},
-	{
-		.name			= "serial8250",
-		.id			= PLAT8250_DEV_PLATFORM2,
-		.dev			= {
-			.platform_data	= dm355_serial2_platform_data,
-		}
-	},
-	{
-	}
 };
 
 static struct davinci_soc_info davinci_soc_info_dm355 = {
@@ -1031,11 +977,16 @@ static struct davinci_soc_info davinci_soc_info_dm355 = {
 	.intc_irq_prios		= dm355_default_priorities,
 	.intc_irq_num		= DAVINCI_N_AINTC_IRQ,
 	.timer_info		= &dm355_timer_info,
+	.gpio_type		= GPIO_TYPE_DAVINCI,
+	.gpio_base		= DAVINCI_GPIO_BASE,
+	.gpio_num		= 104,
+	.gpio_irq		= IRQ_DM355_GPIOBNK0,
+	.serial_dev		= &dm355_serial_device,
 	.sram_dma		= 0x00010000,
 	.sram_len		= SZ_32K,
 };
 
-void __init dm355_init_asp1(u32 evt_enable)
+void __init dm355_init_asp1(u32 evt_enable, struct snd_platform_data *pdata)
 {
 	/* we don't use ASP1 IRQs, or we'd need to mux them ... */
 	if (evt_enable & ASP1_TX_EVT_EN)
@@ -1044,6 +995,7 @@ void __init dm355_init_asp1(u32 evt_enable)
 	if (evt_enable & ASP1_RX_EVT_EN)
 		davinci_cfg_reg(DM355_EVT9_ASP1_RX);
 
+	dm355_asp1_device.dev.platform_data = pdata;
 	platform_device_register(&dm355_asp1_device);
 }
 
@@ -1051,7 +1003,6 @@ void __init dm355_init(void)
 {
 	davinci_common_init(&davinci_soc_info_dm355);
 	davinci_map_sysmod();
-	davinci_clk_init(davinci_soc_info_dm355.cpu_clks);
 }
 
 int __init dm355_init_video(struct vpfe_config *vpfe_cfg,
@@ -1079,23 +1030,12 @@ int __init dm355_init_video(struct vpfe_config *vpfe_cfg,
 
 static int __init dm355_init_devices(void)
 {
-	struct platform_device *edma_pdev;
-	int ret = 0;
-
 	if (!cpu_is_davinci_dm355())
 		return 0;
 
 	davinci_cfg_reg(DM355_INT_EDMA_CC);
-	edma_pdev = platform_device_register_full(&dm355_edma_device);
-	if (IS_ERR(edma_pdev)) {
-		pr_warn("%s: Failed to register eDMA\n", __func__);
-		return PTR_ERR(edma_pdev);
-	}
+	platform_device_register(&dm355_edma_device);
 
-	ret = davinci_init_wdt();
-	if (ret)
-		pr_warn("%s: watchdog init failed: %d\n", __func__, ret);
-
-	return ret;
+	return 0;
 }
 postcore_initcall(dm355_init_devices);

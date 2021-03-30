@@ -12,6 +12,8 @@ struct r0conf {
 	struct md_rdev		**devlist; /* lists of rdevs, pointed to
 					    * by strip_zone->dev */
 	int			nr_strip_zones;
+	int			has_merge_bvec;	/* at least one member has
+						 * a merge_bvec_fn */
 };
 
 #endif

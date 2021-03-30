@@ -17,6 +17,7 @@
  */
 #include <linux/kernel.h>
 #include <linux/errno.h>
+#include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/tty.h>
 #include <linux/tty_driver.h>
@@ -67,16 +68,6 @@ struct iuu_private {
 	u32 boost;
 	u32 clk;
 };
-
-static int iuu_attach(struct usb_serial *serial)
-{
-	unsigned char num_ports = serial->num_ports;
-
-	if (serial->num_bulk_in < num_ports || serial->num_bulk_out < num_ports)
-		return -ENODEV;
-
-	return 0;
-}
 
 static int iuu_port_probe(struct usb_serial_port *port)
 {
@@ -370,7 +361,7 @@ static void iuu_led_activity_on(struct urb *urb)
 	int result;
 	char *buf_ptr = port->write_urb->transfer_buffer;
 	*buf_ptr++ = IUU_SET_LED;
-	if (xmas) {
+	if (xmas == 1) {
 		get_random_bytes(buf_ptr, 6);
 		*(buf_ptr+7) = 1;
 	} else {
@@ -390,7 +381,7 @@ static void iuu_led_activity_off(struct urb *urb)
 	struct usb_serial_port *port = urb->context;
 	int result;
 	char *buf_ptr = port->write_urb->transfer_buffer;
-	if (xmas) {
+	if (xmas == 1) {
 		iuu_rxcmd(urb);
 		return;
 	} else {
@@ -779,7 +770,7 @@ uart_enable_failed:
 	return status;
 }
 
-/*  Disables the IUU UART (a.k.a. the Phoenix voiderface) */
+/*  Diables the IUU UART (a.k.a. the Phoenix voiderface) */
 static int iuu_uart_off(struct usb_serial_port *port)
 {
 	int status;
@@ -1139,7 +1130,7 @@ static int iuu_vcc_set(struct usb_serial_port *port, unsigned int vcc)
  * Sysfs Attributes
  */
 
-static ssize_t vcc_mode_show(struct device *dev,
+static ssize_t show_vcc_mode(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	struct usb_serial_port *port = to_usb_serial_port(dev);
@@ -1148,7 +1139,7 @@ static ssize_t vcc_mode_show(struct device *dev,
 	return sprintf(buf, "%d\n", priv->vcc);
 }
 
-static ssize_t vcc_mode_store(struct device *dev,
+static ssize_t store_vcc_mode(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct usb_serial_port *port = to_usb_serial_port(dev);
@@ -1161,7 +1152,7 @@ static ssize_t vcc_mode_store(struct device *dev,
 		goto fail_store_vcc_mode;
 	}
 
-	dev_dbg(dev, "%s: setting vcc_mode = %ld\n", __func__, v);
+	dev_dbg(dev, "%s: setting vcc_mode = %ld", __func__, v);
 
 	if ((v != 3) && (v != 5)) {
 		dev_err(dev, "%s - vcc_mode %ld is invalid\n", __func__, v);
@@ -1172,7 +1163,9 @@ static ssize_t vcc_mode_store(struct device *dev,
 fail_store_vcc_mode:
 	return count;
 }
-static DEVICE_ATTR_RW(vcc_mode);
+
+static DEVICE_ATTR(vcc_mode, S_IRUSR | S_IWUSR, show_vcc_mode,
+	store_vcc_mode);
 
 static int iuu_create_sysfs_attrs(struct usb_serial_port *port)
 {
@@ -1206,7 +1199,6 @@ static struct usb_serial_driver iuu_device = {
 	.tiocmset = iuu_tiocmset,
 	.set_termios = iuu_set_termios,
 	.init_termios = iuu_init_termios,
-	.attach = iuu_attach,
 	.port_probe = iuu_port_probe,
 	.port_remove = iuu_port_remove,
 };

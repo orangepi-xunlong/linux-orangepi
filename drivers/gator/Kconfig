@@ -3,6 +3,7 @@ config GATOR
 	default m if (ARM || ARM64)
 	depends on PROFILING
 	depends on HIGH_RES_TIMERS
+	depends on LOCAL_TIMERS || !(ARM && SMP)
 	depends on PERF_EVENTS
 	depends on HW_PERF_EVENTS || !(ARM || ARM64)
 	select TRACING
@@ -29,18 +30,10 @@ config GATOR_MALI_MIDGARD
 
 endchoice
 
-config GATOR_MALI_4XXMP_PATH
+config GATOR_MALI_PATH
 	string "Path to Mali driver"
-	depends on GATOR_MALI_4XXMP
+	depends on GATOR_WITH_MALI_SUPPORT
 	default "drivers/gpu/arm/mali400mp"
-	help
-	  The gator code adds this to its include path so it can get the Mali
-	  trace headers with: #include "linux/mali_linux_trace.h"
-
-config GATOR_MALI_MIDGARD_PATH
-	string "Path to Mali driver"
-	depends on GATOR_MALI_MIDGARD
-	default "drivers/gpu/arm/midgard"
 	help
 	  The gator code adds this to its include path so it can get the Mali
 	  trace headers with: #include "linux/mali_linux_trace.h"

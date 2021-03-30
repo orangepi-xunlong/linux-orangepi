@@ -34,6 +34,10 @@
 
 #include "sst_storage.h"
 
+#ifdef OEM_STORE_IN_FS
+#define EMMC_SEC_STORE	"/data/oem_secure_store"
+#endif
+
 #define SEC_BLK_SIZE						(4096)
 #define MAX_SECURE_STORAGE_MAX_ITEM          (32)
 static unsigned int  secure_storage_inited;
@@ -45,17 +49,11 @@ static unsigned int  secure_storage_inited;
 #define SDMMC_SECURE_STORAGE_START_ADD  (6*1024*1024/512)
 #define SDMMC_ITEM_SIZE               	(4*1024/512)
 static char *sd_oem_path = "/dev/block/mmcblk0";
-static char *sd_oem_path_for_linux = "/dev/mmcblk0";
 
 /*
  * Nand parameters
  */
-static char *nand_oem_path = "/dev/block/nand0";
-static char *nand_oem_path_for_linux = "/dev/nand0";
-
-static char *nand_oem_path2 = "/dev/block/nanda";
-static char *nand_oem_path2_for_linux = "/dev/nanda";
-
+static char *nand_oem_path = "/dev/block/by-name/bootloader";
 static struct secblc_op_t secblk_op;
 static fcry_pt nfcr;
 /*
@@ -84,7 +82,7 @@ static int flash_boot_type = FLASH_TYPE_UNKNOW;
 
 extern char *saved_command_line;
 
-void mem_dump(void *addr, unsigned int size)
+void sunxi_dump(void *addr, unsigned int size)
 {
 	int j;
 	char *buf = (char *)addr;
@@ -145,7 +143,6 @@ int _sst_user_read(char *filename, char *buf, ssize_t len, int offset)
 	struct file *fd;
 	int retLen = -1;
 	mm_segment_t old_fs;
-	loff_t pos = 0;
 
 	if (!filename || !buf) {
 		pr_err("- filename/buf NULL\n");
@@ -156,28 +153,35 @@ int _sst_user_read(char *filename, char *buf, ssize_t len, int offset)
 	set_fs(KERNEL_DS);
 
 	fd = filp_open(filename, O_RDONLY, 0);
+
 	if (IS_ERR(fd)) {
 		pr_err(" -file open fail\n");
 		return -1;
 	}
-	if (fd->f_op == NULL) {
-		pr_err("err: f_op is null!!\n");
-		goto err;
-	}
-	if (fd->f_op->llseek && fd->f_op->read) {
-		if (fd->f_op->llseek(fd, offset, 0) != offset) {
-			pr_err(" -failed to seek!!\n");
-			goto err;
+	do {
+		if ((fd->f_op == NULL) || (fd->f_op->read == NULL)) {
+			pr_err(" -file can't to open!!\n");
+			break;
 		}
-		retLen = fd->f_op->read(fd, buf, len, &fd->f_pos);
-	} else {
-		pos = offset;
-		if (vfs_read(fd, buf, len, &pos) < 0)
-			goto err;
-		retLen = len;
-	}
 
-err:
+		if (fd->f_pos != offset) {
+			if (fd->f_op->llseek) {
+				if (fd->f_op->llseek(fd, offset, 0) != offset) {
+					pr_err(" -failed to seek!!\n");
+					break;
+				}
+			} else {
+				fd->f_pos = offset;
+			}
+		}
+
+		retLen = fd->f_op->read(fd,
+				buf,
+				len,
+				&fd->f_pos);
+
+	} while (false);
+
 	filp_close(fd, NULL);
 	set_fs(old_fs);
 
@@ -189,7 +193,6 @@ int _sst_user_write(char *filename, char *buf, ssize_t len, int offset)
 	struct file *fd;
 	int retLen = -1;
 	mm_segment_t old_fs = get_fs();
-	loff_t pos = 0;
 
 	pr_info("Write to %s\n", filename);
 	if (!filename || !buf) {
@@ -201,26 +204,35 @@ int _sst_user_write(char *filename, char *buf, ssize_t len, int offset)
 	set_fs(KERNEL_DS);
 
 	fd = filp_open(filename, O_WRONLY|O_CREAT, 0666);
+
 	if (IS_ERR(fd)) {
 		pr_err(" -file open fail %s \n", filename);
 		return -1;
 	}
-	if (fd->f_op == NULL) {
-		pr_err("err: f_op is null!!\n");
-		goto err;
-	}
-	if (fd->f_op->llseek && fd->f_op->read) {
-		if (fd->f_op->llseek(fd, offset, 0) != offset) {
-			pr_err(" -failed to seek!!\n");
-			goto err;
+	do {
+		if ((fd->f_op == NULL) || (fd->f_op->write == NULL)) {
+			pr_err(" -file can't to write!!\n");
+			break;
 		}
-		retLen = fd->f_op->read(fd, buf, len, &fd->f_pos);
-	} else {
-		pos = offset;
-		retLen = vfs_write(fd, buf, len, &pos);
-	}
 
-err:
+		if (fd->f_pos != offset) {
+			if (fd->f_op->llseek) {
+				if (fd->f_op->llseek(fd, offset, 0) != offset) {
+					pr_err(" -failed to seek!!\n");
+					break;
+				}
+			} else {
+				fd->f_pos = offset;
+			}
+		}
+
+		retLen = fd->f_op->write(fd,
+				buf,
+				len,
+				&fd->f_pos);
+
+	} while (false);
+
 	vfs_fsync(fd, 0);
 	filp_close(fd, NULL);
 	set_fs(old_fs);
@@ -260,7 +272,7 @@ static int get_flash_type(void)
 	char ctype[16];
 
 	memset(ctype, 0, 16);
-	if (get_para_from_cmdline(saved_command_line, "boot_type",
+	if (get_para_from_cmdline(saved_command_line , "boot_type",
 	    ctype) <= 0) {
 		pr_err("Get boot type cmd line fail\n");
 		return -1;
@@ -274,8 +286,6 @@ static int get_flash_type(void)
 /*nand secure storage read/write*/
 static int _nand_read(int id, char *buf, ssize_t len)
 {
-	int ret;
-
 	if (!buf) {
 		pr_err("-buf NULL\n");
 		return -1;
@@ -288,22 +298,11 @@ static int _nand_read(int id, char *buf, ssize_t len)
 	secblk_op.buf = buf;
 	secblk_op.len = len;
 
-	ret = _sst_user_ioctl(nand_oem_path, SECBLK_READ, &secblk_op);
-	if (ret) {
-		ret = _sst_user_ioctl(nand_oem_path_for_linux, SECBLK_READ, &secblk_op);
-		if (ret) {
-			ret = _sst_user_ioctl(nand_oem_path2, SECBLK_READ, &secblk_op);
-			if (ret)
-				ret = _sst_user_ioctl(nand_oem_path2_for_linux, SECBLK_READ, &secblk_op);
-		}
-	}
-	return ret;
+	return  _sst_user_ioctl(nand_oem_path, SECBLK_READ, &secblk_op);
 }
 
 static int _nand_write(int	id, char *buf, ssize_t len)
 {
-	int ret;
-
 	if (!buf) {
 		pr_err("- buf NULL\n");
 		return -1;
@@ -317,16 +316,7 @@ static int _nand_write(int	id, char *buf, ssize_t len)
 	secblk_op.buf = buf;
 	secblk_op.len = len;
 
-	ret = _sst_user_ioctl(nand_oem_path, SECBLK_WRITE, &secblk_op);
-	if (ret) {
-		ret = _sst_user_ioctl(nand_oem_path_for_linux, SECBLK_WRITE, &secblk_op);
-		if (ret) {
-			ret = _sst_user_ioctl(nand_oem_path2, SECBLK_WRITE, &secblk_op);
-			if (ret)
-				ret = _sst_user_ioctl(nand_oem_path2_for_linux, SECBLK_WRITE, &secblk_op);
-		}
-	}
-	return ret;
+	return  _sst_user_ioctl(nand_oem_path, SECBLK_WRITE, &secblk_op);
 }
 
 /*emmc secure storage read/write*/
@@ -336,12 +326,9 @@ static int _sd_read(char *buf, int len, int offset)
 
 	ret =  _sst_user_read(sd_oem_path, buf, len, offset);
 	if (ret != len) {
-		ret =  _sst_user_read(sd_oem_path_for_linux, buf, len, offset);
-		if (ret != len) {
-			pr_err("_sst_user_read: read request len 0x%x, actual read 0x%x\n",
+		pr_err("_sst_user_read: read request len 0x%x, actual read 0x%x\n",
 				len, ret);
-			return -1;
-		}
+		return -1;
 	}
 	return 0 ;
 }
@@ -352,12 +339,9 @@ static int _sd_write(char *buf, int len, int offset)
 
 	ret =  _sst_user_write(sd_oem_path, buf, len, offset);
 	if (ret != len) {
-		ret =  _sst_user_write(sd_oem_path_for_linux, buf, len, offset);
-		if (ret != len) {
-			pr_err("_sst_user_write: write request len 0x%x, actual write 0x%x\n",
+		pr_err("_sst_user_write: write request len 0x%x, actual write 0x%x\n",
 				len, ret);
-			return -1;
-		}
+		return -1;
 	}
 	return 0 ;
 }
@@ -506,9 +490,13 @@ static void sst_storage_work(struct work_struct *data)
 
 static void __exit sunxi_secure_storage_exit(void)
 {
+	int ret;
 	pr_debug("sunxi secure storage driver exit\n");
 
-	misc_deregister(&sst_storage_device);
+	ret = misc_deregister(&sst_storage_device);
+	if (ret) {
+		pr_err("%s: cannot deregister miscdev.(return value-%d)\n", __func__, ret);
+	}
 	kfree(nfcr->temp_data);
 	kfree(nfcr);
 }

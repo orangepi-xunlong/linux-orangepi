@@ -425,8 +425,7 @@ static int dst_set_bandwidth(struct dst_state *state, u32 bandwidth)
 	return 0;
 }
 
-static int dst_set_inversion(struct dst_state *state,
-			     enum fe_spectral_inversion inversion)
+static int dst_set_inversion(struct dst_state *state, fe_spectral_inversion_t inversion)
 {
 	state->inversion = inversion;
 	switch (inversion) {
@@ -443,13 +442,13 @@ static int dst_set_inversion(struct dst_state *state,
 	return 0;
 }
 
-static int dst_set_fec(struct dst_state *state, enum fe_code_rate fec)
+static int dst_set_fec(struct dst_state *state, fe_code_rate_t fec)
 {
 	state->fec = fec;
 	return 0;
 }
 
-static enum fe_code_rate dst_get_fec(struct dst_state *state)
+static fe_code_rate_t dst_get_fec(struct dst_state *state)
 {
 	return state->fec;
 }
@@ -500,8 +499,7 @@ static int dst_set_symbolrate(struct dst_state *state, u32 srate)
 	return 0;
 }
 
-static int dst_set_modulation(struct dst_state *state,
-			      enum fe_modulation modulation)
+static int dst_set_modulation(struct dst_state *state, fe_modulation_t modulation)
 {
 	if (state->dst_type != DST_TYPE_IS_CABLE)
 		return -EOPNOTSUPP;
@@ -538,7 +536,7 @@ static int dst_set_modulation(struct dst_state *state,
 	return 0;
 }
 
-static enum fe_modulation dst_get_modulation(struct dst_state *state)
+static fe_modulation_t dst_get_modulation(struct dst_state *state)
 {
 	return state->modulation;
 }
@@ -1378,8 +1376,7 @@ static int dst_get_tuna(struct dst_state *state)
 	return 1;
 }
 
-static int dst_set_voltage(struct dvb_frontend *fe,
-			   enum fe_sec_voltage voltage);
+static int dst_set_voltage(struct dvb_frontend *fe, fe_sec_voltage_t voltage);
 
 static int dst_write_tuna(struct dvb_frontend *fe)
 {
@@ -1469,7 +1466,7 @@ static int dst_set_diseqc(struct dvb_frontend *fe, struct dvb_diseqc_master_cmd 
 	return dst_command(state, paket, 8);
 }
 
-static int dst_set_voltage(struct dvb_frontend *fe, enum fe_sec_voltage voltage)
+static int dst_set_voltage(struct dvb_frontend *fe, fe_sec_voltage_t voltage)
 {
 	int need_cmd, retval = 0;
 	struct dst_state *state = fe->demodulator_priv;
@@ -1503,7 +1500,7 @@ static int dst_set_voltage(struct dvb_frontend *fe, enum fe_sec_voltage voltage)
 	return retval;
 }
 
-static int dst_set_tone(struct dvb_frontend *fe, enum fe_sec_tone_mode tone)
+static int dst_set_tone(struct dvb_frontend *fe, fe_sec_tone_mode_t tone)
 {
 	struct dst_state *state = fe->demodulator_priv;
 
@@ -1528,7 +1525,7 @@ static int dst_set_tone(struct dvb_frontend *fe, enum fe_sec_tone_mode tone)
 	return dst_tone_power_cmd(state);
 }
 
-static int dst_send_burst(struct dvb_frontend *fe, enum fe_sec_mini_cmd minicmd)
+static int dst_send_burst(struct dvb_frontend *fe, fe_sec_mini_cmd_t minicmd)
 {
 	struct dst_state *state = fe->demodulator_priv;
 
@@ -1547,7 +1544,7 @@ static int dst_send_burst(struct dvb_frontend *fe, enum fe_sec_mini_cmd minicmd)
 }
 
 
-static int bt8xx_dst_init(struct dvb_frontend *fe)
+static int dst_init(struct dvb_frontend *fe)
 {
 	struct dst_state *state = fe->demodulator_priv;
 
@@ -1578,7 +1575,7 @@ static int bt8xx_dst_init(struct dvb_frontend *fe)
 	return 0;
 }
 
-static int dst_read_status(struct dvb_frontend *fe, enum fe_status *status)
+static int dst_read_status(struct dvb_frontend *fe, fe_status_t *status)
 {
 	struct dst_state *state = fe->demodulator_priv;
 
@@ -1649,7 +1646,7 @@ static int dst_tune_frontend(struct dvb_frontend* fe,
 			    bool re_tune,
 			    unsigned int mode_flags,
 			    unsigned int *delay,
-			    enum fe_status *status)
+			    fe_status_t *status)
 {
 	struct dst_state *state = fe->demodulator_priv;
 	struct dtv_frontend_properties *p = &fe->dtv_property_cache;
@@ -1688,9 +1685,9 @@ static int dst_get_tuning_algo(struct dvb_frontend *fe)
 	return dst_algo ? DVBFE_ALGO_HW : DVBFE_ALGO_SW;
 }
 
-static int dst_get_frontend(struct dvb_frontend *fe,
-			    struct dtv_frontend_properties *p)
+static int dst_get_frontend(struct dvb_frontend *fe)
 {
+	struct dtv_frontend_properties *p = &fe->dtv_property_cache;
 	struct dst_state *state = fe->demodulator_priv;
 
 	p->frequency = state->decode_freq;
@@ -1710,7 +1707,7 @@ static int dst_get_frontend(struct dvb_frontend *fe,
 	return 0;
 }
 
-static void bt8xx_dst_release(struct dvb_frontend *fe)
+static void dst_release(struct dvb_frontend *fe)
 {
 	struct dst_state *state = fe->demodulator_priv;
 	if (state->dst_ca) {
@@ -1779,8 +1776,8 @@ static struct dvb_frontend_ops dst_dvbt_ops = {
 			FE_CAN_GUARD_INTERVAL_AUTO
 	},
 
-	.release = bt8xx_dst_release,
-	.init = bt8xx_dst_init,
+	.release = dst_release,
+	.init = dst_init,
 	.tune = dst_tune_frontend,
 	.set_frontend = dst_set_frontend,
 	.get_frontend = dst_get_frontend,
@@ -1804,8 +1801,8 @@ static struct dvb_frontend_ops dst_dvbs_ops = {
 		.caps = FE_CAN_FEC_AUTO | FE_CAN_QPSK
 	},
 
-	.release = bt8xx_dst_release,
-	.init = bt8xx_dst_init,
+	.release = dst_release,
+	.init = dst_init,
 	.tune = dst_tune_frontend,
 	.set_frontend = dst_set_frontend,
 	.get_frontend = dst_get_frontend,
@@ -1837,8 +1834,8 @@ static struct dvb_frontend_ops dst_dvbc_ops = {
 			FE_CAN_QAM_256
 	},
 
-	.release = bt8xx_dst_release,
-	.init = bt8xx_dst_init,
+	.release = dst_release,
+	.init = dst_init,
 	.tune = dst_tune_frontend,
 	.set_frontend = dst_set_frontend,
 	.get_frontend = dst_get_frontend,
@@ -1860,8 +1857,8 @@ static struct dvb_frontend_ops dst_atsc_ops = {
 		.caps = FE_CAN_FEC_AUTO | FE_CAN_QAM_AUTO | FE_CAN_QAM_64 | FE_CAN_QAM_256 | FE_CAN_8VSB
 	},
 
-	.release = bt8xx_dst_release,
-	.init = bt8xx_dst_init,
+	.release = dst_release,
+	.init = dst_init,
 	.tune = dst_tune_frontend,
 	.set_frontend = dst_set_frontend,
 	.get_frontend = dst_get_frontend,

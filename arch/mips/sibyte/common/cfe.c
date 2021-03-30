@@ -38,7 +38,7 @@
 #define MAX_RAM_SIZE (~0ULL)
 #else
 #ifdef CONFIG_HIGHMEM
-#ifdef CONFIG_PHYS_ADDR_T_64BIT
+#ifdef CONFIG_64BIT_PHYS_ADDR
 #define MAX_RAM_SIZE (~0ULL)
 #else
 #define MAX_RAM_SIZE (0xffffffffULL)
@@ -49,8 +49,8 @@
 #endif
 
 #define SIBYTE_MAX_MEM_REGIONS 8
-phys_addr_t board_mem_region_addrs[SIBYTE_MAX_MEM_REGIONS];
-phys_addr_t board_mem_region_sizes[SIBYTE_MAX_MEM_REGIONS];
+phys_t board_mem_region_addrs[SIBYTE_MAX_MEM_REGIONS];
+phys_t board_mem_region_sizes[SIBYTE_MAX_MEM_REGIONS];
 unsigned int board_mem_region_count;
 
 int cfe_cons_handle;
@@ -96,7 +96,7 @@ static void __noreturn cfe_linux_halt(void)
 
 static __init void prom_meminit(void)
 {
-	u64 addr, size, type; /* regardless of PHYS_ADDR_T_64BIT */
+	u64 addr, size, type; /* regardless of 64BIT_PHYS_ADDR */
 	int mem_flags = 0;
 	unsigned int idx;
 	int rd_flag;

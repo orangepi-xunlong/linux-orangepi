@@ -20,7 +20,6 @@
 #include <asm/page.h>
 #include <asm/cacheasm.h>
 #include <asm/initialize_mmu.h>
-#include <asm/vectors.h>
 #include <linux/linkage.h>
 
 	.section	.ResetVector.text, "ax"
@@ -37,9 +36,9 @@ _ResetVector:
 RomInitAddr:
 #if defined(CONFIG_INITIALIZE_XTENSA_MMU_INSIDE_VMLINUX) && \
 	XCHAL_HAVE_PTP_MMU && XCHAL_HAVE_SPANNING_WAY
-	.word	CONFIG_KERNEL_LOAD_ADDRESS
+	.word 0x00003000
 #else
-	.word	KERNELOFFSET
+	.word 0xd0003000
 #endif
 RomBootParam:
 	.word _bootparam
@@ -63,6 +62,8 @@ _SetupMMU:
 	wsr	a0, ps
 	rsync
 
+	Offset = _SetupMMU - _ResetVector
+
 #ifndef CONFIG_INITIALIZE_XTENSA_MMU_INSIDE_VMLINUX
 	initialize_mmu
 #endif
@@ -77,3 +78,27 @@ reset:
 	movi	a3, 0
 	movi	a4, 0
 	jx      a0
+
+	.align 4
+
+	.section	.ResetVector.remapped_text, "x"
+	.global         _RemappedResetVector
+
+	/* Do org before literals */
+	.org 0
+
+_RemappedResetVector:
+	.begin  no-absolute-literals
+	.literal_position
+
+	_j	_RemappedSetupMMU
+
+	/* Position Remapped code at the same location as the original code */
+	. = _RemappedResetVector + Offset
+
+_RemappedSetupMMU:
+#ifndef CONFIG_INITIALIZE_XTENSA_MMU_INSIDE_VMLINUX
+	initialize_mmu
+#endif
+
+	.end    no-absolute-literals

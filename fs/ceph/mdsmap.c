@@ -54,21 +54,16 @@ struct ceph_mdsmap *ceph_mdsmap_decode(void **p, void *end)
 	const void *start = *p;
 	int i, j, n;
 	int err = -EINVAL;
-	u8 mdsmap_v, mdsmap_cv;
+	u16 version;
 
 	m = kzalloc(sizeof(*m), GFP_NOFS);
 	if (m == NULL)
 		return ERR_PTR(-ENOMEM);
 
-	ceph_decode_need(p, end, 1 + 1, bad);
-	mdsmap_v = ceph_decode_8(p);
-	mdsmap_cv = ceph_decode_8(p);
-	if (mdsmap_v >= 4) {
-	       u32 mdsmap_len;
-	       ceph_decode_32_safe(p, end, mdsmap_len, bad);
-	       if (end < *p + mdsmap_len)
-		       goto bad;
-	       end = *p + mdsmap_len;
+	ceph_decode_16_safe(p, end, version, bad);
+	if (version > 3) {
+		pr_warning("got mdsmap version %d > 3, failing", version);
+		goto bad;
 	}
 
 	ceph_decode_need(p, end, 8*sizeof(u32) + sizeof(u64), bad);
@@ -92,29 +87,15 @@ struct ceph_mdsmap *ceph_mdsmap_decode(void **p, void *end)
 		u32 namelen;
 		s32 mds, inc, state;
 		u64 state_seq;
-		u8 info_v;
-		void *info_end = NULL;
+		u8 infoversion;
 		struct ceph_entity_addr addr;
 		u32 num_export_targets;
 		void *pexport_targets = NULL;
 		struct ceph_timespec laggy_since;
-		struct ceph_mds_info *info;
 
-		ceph_decode_need(p, end, sizeof(u64) + 1, bad);
+		ceph_decode_need(p, end, sizeof(u64)*2 + 1 + sizeof(u32), bad);
 		global_id = ceph_decode_64(p);
-		info_v= ceph_decode_8(p);
-		if (info_v >= 4) {
-			u32 info_len;
-			u8 info_cv;
-			ceph_decode_need(p, end, 1 + sizeof(u32), bad);
-			info_cv = ceph_decode_8(p);
-			info_len = ceph_decode_32(p);
-			info_end = *p + info_len;
-			if (info_end > end)
-				goto bad;
-		}
-
-		ceph_decode_need(p, end, sizeof(u64) + sizeof(u32), bad);
+		infoversion = ceph_decode_8(p);
 		*p += sizeof(u64);
 		namelen = ceph_decode_32(p);  /* skip mds name */
 		*p += namelen;
@@ -133,7 +114,7 @@ struct ceph_mdsmap *ceph_mdsmap_decode(void **p, void *end)
 		*p += sizeof(u32);
 		ceph_decode_32_safe(p, end, namelen, bad);
 		*p += namelen;
-		if (info_v >= 2) {
+		if (infoversion >= 2) {
 			ceph_decode_32_safe(p, end, num_export_targets, bad);
 			pexport_targets = *p;
 			*p += num_export_targets * sizeof(u32);
@@ -141,37 +122,30 @@ struct ceph_mdsmap *ceph_mdsmap_decode(void **p, void *end)
 			num_export_targets = 0;
 		}
 
-		if (info_end && *p != info_end) {
-			if (*p > info_end)
-				goto bad;
-			*p = info_end;
-		}
-
 		dout("mdsmap_decode %d/%d %lld mds%d.%d %s %s\n",
 		     i+1, n, global_id, mds, inc,
 		     ceph_pr_addr(&addr.in_addr),
 		     ceph_mds_state_name(state));
-
-		if (mds < 0 || mds >= m->m_max_mds || state <= 0)
-			continue;
-
-		info = &m->m_info[mds];
-		info->global_id = global_id;
-		info->state = state;
-		info->addr = addr;
-		info->laggy = (laggy_since.tv_sec != 0 ||
-			       laggy_since.tv_nsec != 0);
-		info->num_export_targets = num_export_targets;
-		if (num_export_targets) {
-			info->export_targets = kcalloc(num_export_targets,
-						       sizeof(u32), GFP_NOFS);
-			if (info->export_targets == NULL)
-				goto badmem;
-			for (j = 0; j < num_export_targets; j++)
-				info->export_targets[j] =
-				       ceph_decode_32(&pexport_targets);
-		} else {
-			info->export_targets = NULL;
+		if (mds >= 0 && mds < m->m_max_mds && state > 0) {
+			m->m_info[mds].global_id = global_id;
+			m->m_info[mds].state = state;
+			m->m_info[mds].addr = addr;
+			m->m_info[mds].laggy =
+				(laggy_since.tv_sec != 0 ||
+				 laggy_since.tv_nsec != 0);
+			m->m_info[mds].num_export_targets = num_export_targets;
+			if (num_export_targets) {
+				m->m_info[mds].export_targets =
+					kcalloc(num_export_targets, sizeof(u32),
+						GFP_NOFS);
+				if (m->m_info[mds].export_targets == NULL)
+					goto badmem;
+				for (j = 0; j < num_export_targets; j++)
+					m->m_info[mds].export_targets[j] =
+					       ceph_decode_32(&pexport_targets);
+			} else {
+				m->m_info[mds].export_targets = NULL;
+			}
 		}
 	}
 
@@ -187,7 +161,6 @@ struct ceph_mdsmap *ceph_mdsmap_decode(void **p, void *end)
 	m->m_cas_pg_pool = ceph_decode_64(p);
 
 	/* ok, we don't care about the rest. */
-	*p = end;
 	dout("mdsmap_decode success epoch %u\n", m->m_epoch);
 	return m;
 

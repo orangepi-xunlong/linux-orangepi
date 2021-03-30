@@ -52,11 +52,6 @@ struct snd_dma_device {
 #else
 #define SNDRV_DMA_TYPE_DEV_SG	SNDRV_DMA_TYPE_DEV /* no SG-buf support */
 #endif
-#ifdef CONFIG_GENERIC_ALLOCATOR
-#define SNDRV_DMA_TYPE_DEV_IRAM		4	/* generic device iram-buffer */
-#else
-#define SNDRV_DMA_TYPE_DEV_IRAM	SNDRV_DMA_TYPE_DEV
-#endif
 
 /*
  * info for buffer allocation
@@ -148,6 +143,13 @@ int snd_dma_alloc_pages(int type, struct device *dev, size_t size,
 int snd_dma_alloc_pages_fallback(int type, struct device *dev, size_t size,
                                  struct snd_dma_buffer *dmab);
 void snd_dma_free_pages(struct snd_dma_buffer *dmab);
+
+/* buffer-preservation managements */
+
+#define snd_dma_pci_buf_id(pci)	(((unsigned int)(pci)->vendor << 16) | (pci)->device)
+
+size_t snd_dma_get_reserved_buf(struct snd_dma_buffer *dmab, unsigned int id);
+int snd_dma_reserve_buf(struct snd_dma_buffer *dmab, unsigned int id);
 
 /* basic memory allocation functions */
 void *snd_malloc_pages(size_t size, gfp_t gfp_flags);

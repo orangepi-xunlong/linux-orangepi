@@ -61,7 +61,9 @@ static void ltq_mm_apply(struct ltq_mm *chip)
  */
 static void ltq_mm_set(struct gpio_chip *gc, unsigned offset, int value)
 {
-	struct ltq_mm *chip = gpiochip_get_data(gc);
+	struct of_mm_gpio_chip *mm_gc = to_of_mm_gpio_chip(gc);
+	struct ltq_mm *chip =
+		container_of(mm_gc, struct ltq_mm, mmchip);
 
 	if (value)
 		chip->shadow |= (1 << offset);
@@ -102,34 +104,35 @@ static void ltq_mm_save_regs(struct of_mm_gpio_chip *mm_gc)
 
 static int ltq_mm_probe(struct platform_device *pdev)
 {
+	struct resource *res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	struct ltq_mm *chip;
-	u32 shadow;
+	const __be32 *shadow;
+	int ret = 0;
 
-	chip = devm_kzalloc(&pdev->dev, sizeof(*chip), GFP_KERNEL);
+	if (!res) {
+		dev_err(&pdev->dev, "failed to get memory resource\n");
+		return -ENOENT;
+	}
+
+	chip = kzalloc(sizeof(*chip), GFP_KERNEL);
 	if (!chip)
 		return -ENOMEM;
 
-	platform_set_drvdata(pdev, chip);
-
 	chip->mmchip.gc.ngpio = 16;
+	chip->mmchip.gc.label = "gpio-mm-ltq";
 	chip->mmchip.gc.direction_output = ltq_mm_dir_out;
 	chip->mmchip.gc.set = ltq_mm_set;
 	chip->mmchip.save_regs = ltq_mm_save_regs;
 
 	/* store the shadow value if one was passed by the devicetree */
-	if (!of_property_read_u32(pdev->dev.of_node, "lantiq,shadow", &shadow))
-		chip->shadow = shadow;
+	shadow = of_get_property(pdev->dev.of_node, "lantiq,shadow", NULL);
+	if (shadow)
+		chip->shadow = be32_to_cpu(*shadow);
 
-	return of_mm_gpiochip_add_data(pdev->dev.of_node, &chip->mmchip, chip);
-}
-
-static int ltq_mm_remove(struct platform_device *pdev)
-{
-	struct ltq_mm *chip = platform_get_drvdata(pdev);
-
-	of_mm_gpiochip_remove(&chip->mmchip);
-
-	return 0;
+	ret = of_mm_gpiochip_add(pdev->dev.of_node, &chip->mmchip);
+	if (ret)
+		kfree(chip);
+	return ret;
 }
 
 static const struct of_device_id ltq_mm_match[] = {
@@ -140,9 +143,9 @@ MODULE_DEVICE_TABLE(of, ltq_mm_match);
 
 static struct platform_driver ltq_mm_driver = {
 	.probe = ltq_mm_probe,
-	.remove = ltq_mm_remove,
 	.driver = {
 		.name = "gpio-mm-ltq",
+		.owner = THIS_MODULE,
 		.of_match_table = ltq_mm_match,
 	},
 };
@@ -153,9 +156,3 @@ static int __init ltq_mm_init(void)
 }
 
 subsys_initcall(ltq_mm_init);
-
-static void __exit ltq_mm_exit(void)
-{
-	platform_driver_unregister(&ltq_mm_driver);
-}
-module_exit(ltq_mm_exit);

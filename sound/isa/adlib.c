@@ -53,7 +53,7 @@ static int snd_adlib_probe(struct device *dev, unsigned int n)
 	struct snd_opl3 *opl3;
 	int error;
 
-	error = snd_card_new(dev, index[n], id[n], THIS_MODULE, 0, &card);
+	error = snd_card_create(index[n], id[n], THIS_MODULE, 0, &card);
 	if (error < 0) {
 		dev_err(dev, "could not create card\n");
 		return error;
@@ -83,6 +83,8 @@ static int snd_adlib_probe(struct device *dev, unsigned int n)
 		goto out;
 	}
 
+	snd_card_set_dev(card, dev);
+
 	error = snd_card_register(card);
 	if (error < 0) {
 		dev_err(dev, "could not register card\n");
@@ -99,6 +101,7 @@ out:	snd_card_free(card);
 static int snd_adlib_remove(struct device *dev, unsigned int n)
 {
 	snd_card_free(dev_get_drvdata(dev));
+	dev_set_drvdata(dev, NULL);
 	return 0;
 }
 
@@ -112,4 +115,15 @@ static struct isa_driver snd_adlib_driver = {
 	}
 };
 
-module_isa_driver(snd_adlib_driver, SNDRV_CARDS);
+static int __init alsa_card_adlib_init(void)
+{
+	return isa_register_driver(&snd_adlib_driver, SNDRV_CARDS);
+}
+
+static void __exit alsa_card_adlib_exit(void)
+{
+	isa_unregister_driver(&snd_adlib_driver);
+}
+
+module_init(alsa_card_adlib_init);
+module_exit(alsa_card_adlib_exit);

@@ -1,9 +1,11 @@
 /*
+ * arch/arm/plat-orion/include/plat/mv_xor.h
+ *
  * Marvell XOR platform device data definition file.
  */
 
-#ifndef __DMA_MV_XOR_H
-#define __DMA_MV_XOR_H
+#ifndef __PLAT_MV_XOR_H
+#define __PLAT_MV_XOR_H
 
 #include <linux/dmaengine.h>
 #include <linux/mbus.h>

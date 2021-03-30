@@ -1,18 +1,20 @@
 #
-# QLogic BR-series device configuration
+# Brocade device configuration
 #
 
 config NET_VENDOR_BROCADE
-	bool "QLogic BR-series devices"
+	bool "Brocade devices"
 	default y
 	depends on PCI
 	---help---
-	  If you have a network (Ethernet) card belonging to this class, say Y.
+	  If you have a network (Ethernet) card belonging to this class, say Y
+	  and read the Ethernet-HOWTO, available from
+	  <http://www.tldp.org/docs.html#howto>.
 
 	  Note that the answer to this question doesn't directly affect the
 	  kernel: saying N will just cause the configurator to skip all
-	  the questions about QLogic BR-series cards. If you say Y, you will be
-	  asked for your specific card in the following questions.
+	  the questions about Brocade cards. If you say Y, you will be asked for
+	  your specific card in the following questions.
 
 if NET_VENDOR_BROCADE
 

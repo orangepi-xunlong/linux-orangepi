@@ -19,7 +19,6 @@
 #include <linux/errno.h>
 #include <linux/io.h>
 #include <linux/module.h>
-#include <linux/string.h>
 
 #include <gxio/iorpc_globals.h>
 #include <gxio/iorpc_mpipe.h>
@@ -37,20 +36,16 @@ int gxio_mpipe_init(gxio_mpipe_context_t *context, unsigned int mpipe_index)
 	int fd;
 	int i;
 
-	if (mpipe_index >= GXIO_MPIPE_INSTANCE_MAX)
-		return -EINVAL;
-
 	snprintf(file, sizeof(file), "mpipe/%d/iorpc", mpipe_index);
 	fd = hv_dev_open((HV_VirtAddr) file, 0);
-
-	context->fd = fd;
-
 	if (fd < 0) {
 		if (fd >= GXIO_ERR_MIN && fd <= GXIO_ERR_MAX)
 			return fd;
 		else
 			return -ENODEV;
 	}
+
+	context->fd = fd;
 
 	/* Map in the MMIO space. */
 	context->mmio_cfg_base = (void __force *)
@@ -69,15 +64,12 @@ int gxio_mpipe_init(gxio_mpipe_context_t *context, unsigned int mpipe_index)
 	for (i = 0; i < 8; i++)
 		context->__stacks.stacks[i] = 255;
 
-	context->instance = mpipe_index;
-
 	return 0;
 
       fast_failed:
 	iounmap((void __force __iomem *)(context->mmio_cfg_base));
       cfg_failed:
 	hv_dev_close(context->fd);
-	context->fd = -1;
 	return -ENODEV;
 }
 
@@ -122,7 +114,7 @@ size_t gxio_mpipe_calc_buffer_stack_bytes(unsigned long buffers)
 {
 	const int BUFFERS_PER_LINE = 12;
 
-	/* Count the number of cachelines. */
+	/* Count the number of cachlines. */
 	unsigned long lines =
 		(buffers + BUFFERS_PER_LINE - 1) / BUFFERS_PER_LINE;
 
@@ -391,7 +383,7 @@ EXPORT_SYMBOL_GPL(gxio_mpipe_iqueue_init);
 
 int gxio_mpipe_equeue_init(gxio_mpipe_equeue_t *equeue,
 			   gxio_mpipe_context_t *context,
-			   unsigned int ering,
+			   unsigned int edma_ring_id,
 			   unsigned int channel,
 			   void *mem, unsigned int mem_size,
 			   unsigned int mem_flags)
@@ -402,7 +394,7 @@ int gxio_mpipe_equeue_init(gxio_mpipe_equeue_t *equeue,
 	/* Offset used to read number of completed commands. */
 	MPIPE_EDMA_POST_REGION_ADDR_t offset;
 
-	int result = gxio_mpipe_init_edma_ring(context, ering, channel,
+	int result = gxio_mpipe_init_edma_ring(context, edma_ring_id, channel,
 					       mem, mem_size, mem_flags);
 	if (result < 0)
 		return result;
@@ -413,7 +405,7 @@ int gxio_mpipe_equeue_init(gxio_mpipe_equeue_t *equeue,
 	offset.region =
 		MPIPE_MMIO_ADDR__REGION_VAL_EDMA -
 		MPIPE_MMIO_ADDR__REGION_VAL_IDMA;
-	offset.ring = ering;
+	offset.ring = edma_ring_id;
 
 	__gxio_dma_queue_init(&equeue->dma_queue,
 			      context->mmio_fast_base + offset.word,
@@ -421,9 +413,6 @@ int gxio_mpipe_equeue_init(gxio_mpipe_equeue_t *equeue,
 	equeue->edescs = mem;
 	equeue->mask_num_entries = num_entries - 1;
 	equeue->log2_num_entries = __builtin_ctz(num_entries);
-	equeue->context = context;
-	equeue->ering = ering;
-	equeue->channel = channel;
 
 	return 0;
 }
@@ -431,17 +420,16 @@ int gxio_mpipe_equeue_init(gxio_mpipe_equeue_t *equeue,
 EXPORT_SYMBOL_GPL(gxio_mpipe_equeue_init);
 
 int gxio_mpipe_set_timestamp(gxio_mpipe_context_t *context,
-			     const struct timespec64 *ts)
+			     const struct timespec *ts)
 {
 	cycles_t cycles = get_cycles();
 	return gxio_mpipe_set_timestamp_aux(context, (uint64_t)ts->tv_sec,
 					    (uint64_t)ts->tv_nsec,
 					    (uint64_t)cycles);
 }
-EXPORT_SYMBOL_GPL(gxio_mpipe_set_timestamp);
 
 int gxio_mpipe_get_timestamp(gxio_mpipe_context_t *context,
-			     struct timespec64 *ts)
+			     struct timespec *ts)
 {
 	int ret;
 	cycles_t cycles_prev, cycles_now, clock_rate;
@@ -461,13 +449,11 @@ int gxio_mpipe_get_timestamp(gxio_mpipe_context_t *context,
 	}
 	return ret;
 }
-EXPORT_SYMBOL_GPL(gxio_mpipe_get_timestamp);
 
 int gxio_mpipe_adjust_timestamp(gxio_mpipe_context_t *context, int64_t delta)
 {
 	return gxio_mpipe_adjust_timestamp_aux(context, delta);
 }
-EXPORT_SYMBOL_GPL(gxio_mpipe_adjust_timestamp);
 
 /* Get our internal context used for link name access.  This context is
  *  special in that it is not associated with an mPIPE service domain.
@@ -507,21 +493,6 @@ static gxio_mpipe_context_t *_gxio_get_link_context(void)
 	return contextp;
 }
 
-int gxio_mpipe_link_instance(const char *link_name)
-{
-	_gxio_mpipe_link_name_t name;
-	gxio_mpipe_context_t *context = _gxio_get_link_context();
-
-	if (!context)
-		return GXIO_ERR_NO_DEVICE;
-
-	if (strscpy(name.name, link_name, sizeof(name.name)) < 0)
-		return GXIO_ERR_NO_DEVICE;
-
-	return gxio_mpipe_info_instance_aux(context, name);
-}
-EXPORT_SYMBOL_GPL(gxio_mpipe_link_instance);
-
 int gxio_mpipe_link_enumerate_mac(int idx, char *link_name, uint8_t *link_mac)
 {
 	int rv;
@@ -534,8 +505,7 @@ int gxio_mpipe_link_enumerate_mac(int idx, char *link_name, uint8_t *link_mac)
 
 	rv = gxio_mpipe_info_enumerate_aux(context, idx, &name, &mac);
 	if (rv >= 0) {
-		if (strscpy(link_name, name.name, sizeof(name.name)) < 0)
-			return GXIO_ERR_INVAL_MEMORY_SIZE;
+		strncpy(link_name, name.name, sizeof(name.name));
 		memcpy(link_mac, mac.mac, sizeof(mac.mac));
 	}
 
@@ -551,8 +521,8 @@ int gxio_mpipe_link_open(gxio_mpipe_link_t *link,
 	_gxio_mpipe_link_name_t name;
 	int rv;
 
-	if (strscpy(name.name, link_name, sizeof(name.name)) < 0)
-		return GXIO_ERR_NO_DEVICE;
+	strncpy(name.name, link_name, sizeof(name.name));
+	name.name[GXIO_MPIPE_LINK_NAME_LEN - 1] = '\0';
 
 	rv = gxio_mpipe_link_open_aux(context, name, flags);
 	if (rv < 0)
@@ -573,12 +543,3 @@ int gxio_mpipe_link_close(gxio_mpipe_link_t *link)
 }
 
 EXPORT_SYMBOL_GPL(gxio_mpipe_link_close);
-
-int gxio_mpipe_link_set_attr(gxio_mpipe_link_t *link, uint32_t attr,
-			     int64_t val)
-{
-	return gxio_mpipe_link_set_attr_aux(link->context, link->mac, attr,
-					    val);
-}
-
-EXPORT_SYMBOL_GPL(gxio_mpipe_link_set_attr);

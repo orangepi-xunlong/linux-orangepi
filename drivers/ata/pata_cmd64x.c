@@ -26,6 +26,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <scsi/scsi_host.h>
@@ -487,10 +488,10 @@ static int cmd64x_init_one(struct pci_dev *pdev, const struct pci_device_id *id)
 	return ata_pci_bmdma_init_one(pdev, ppi, &cmd64x_sht, NULL, 0);
 }
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 static int cmd64x_reinit_one(struct pci_dev *pdev)
 {
-	struct ata_host *host = pci_get_drvdata(pdev);
+	struct ata_host *host = dev_get_drvdata(&pdev->dev);
 	int rc;
 
 	rc = ata_pci_device_do_resume(pdev);
@@ -518,7 +519,7 @@ static struct pci_driver cmd64x_pci_driver = {
 	.id_table	= cmd64x,
 	.probe 		= cmd64x_init_one,
 	.remove		= ata_pci_remove_one,
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 	.suspend	= ata_pci_device_suspend,
 	.resume		= cmd64x_reinit_one,
 #endif

@@ -89,7 +89,7 @@ static DEFINE_MUTEX(vmur_mutex);
  * urd references:
  * - ur_probe gets a urd reference, ur_remove drops the reference
  *   dev_get_drvdata(&cdev->dev)
- * - ur_open gets a urd reference, ur_release drops the reference
+ * - ur_open gets a urd reference, ur_relase drops the reference
  *   (urf->urd)
  *
  * cdev references:
@@ -306,11 +306,10 @@ static void ur_int_handler(struct ccw_device *cdev, unsigned long intparm,
 {
 	struct urdev *urd;
 
-	if (!IS_ERR(irb)) {
-		TRACE("ur_int_handler: intparm=0x%lx cstat=%02x dstat=%02x res=%u\n",
-		      intparm, irb->scsw.cmd.cstat, irb->scsw.cmd.dstat,
-		      irb->scsw.cmd.count);
-	}
+	TRACE("ur_int_handler: intparm=0x%lx cstat=%02x dstat=%02x res=%u\n",
+	      intparm, irb->scsw.cmd.cstat, irb->scsw.cmd.dstat,
+	      irb->scsw.cmd.count);
+
 	if (!intparm) {
 		TRACE("ur_int_handler: unsolicited interrupt\n");
 		return;
@@ -783,11 +782,24 @@ static int ur_release(struct inode *inode, struct file *file)
 
 static loff_t ur_llseek(struct file *file, loff_t offset, int whence)
 {
+	loff_t newpos;
+
 	if ((file->f_flags & O_ACCMODE) != O_RDONLY)
 		return -ESPIPE; /* seek allowed only for reader */
 	if (offset % PAGE_SIZE)
 		return -ESPIPE; /* only multiples of 4K allowed */
-	return no_seek_end_llseek(file, offset, whence);
+	switch (whence) {
+	case 0: /* SEEK_SET */
+		newpos = offset;
+		break;
+	case 1: /* SEEK_CUR */
+		newpos = file->f_pos + offset;
+		break;
+	default:
+		return -EINVAL;
+	}
+	file->f_pos = newpos;
+	return newpos;
 }
 
 static const struct file_operations ur_fops = {
@@ -910,8 +922,8 @@ static int ur_set_online(struct ccw_device *cdev)
 		goto fail_free_cdev;
 	}
 
-	urd->device = device_create(vmur_class, &cdev->dev,
-				    urd->char_device->dev, NULL, "%s", node_id);
+	urd->device = device_create(vmur_class, NULL, urd->char_device->dev,
+				    NULL, "%s", node_id);
 	if (IS_ERR(urd->device)) {
 		rc = PTR_ERR(urd->device);
 		TRACE("ur_set_online: device_create rc=%d\n", rc);

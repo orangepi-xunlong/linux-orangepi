@@ -14,121 +14,39 @@
 #ifndef __SUNXI_DRAMFREQ_H__
 #define __SUNXI_DRAMFREQ_H__
 
-#if defined(CONFIG_ARCH_SUN50IW3)
-#define SUNXI_DRAMFREQ_NORMAL       (552000)
-#else
 #define SUNXI_DRAMFREQ_NORMAL       (300000)
-#endif
 #define SUNXI_DRAMFREQ_IDLE         (168000)
 
-#if defined(CONFIG_ARCH_SUN50IW3) || defined(CONFIG_ARCH_SUN50IW6)
-#if defined(CONFIG_ARCH_SUN50IW6)
-#define SUNXI_DRAM_FREQ_GOVERNOR "performance"
-#else
-#define SUNXI_DRAM_FREQ_GOVERNOR "adaptive"
-#endif
-/* Master reg number depend on platform */
-#define MASTER_REG_NUM 2
-/* Dramc Common register define */
+/* register define */
 #define MC_WORK_MODE                (0x000)
-#define MC_TIME_MEASUREMENT         (0x00c)
 #define MC_MDFSCR                   (0x100)
 #define MC_MDFSMRMR                 (0x108)
-#define MDFS_BWC_PRD                (0x114)
-
-#define MDFS_MASTER_ENABLE(x)       (0x130 + 0x4 * (x))
-#define MDFS_MASTER_ENABLE0         (0x130)
-#define MDFS_MASTER_ENABLE1         (0x134)
-
-#define MDFS_IRQ_ACCESS_STATUS(x)   (0x140 + 0x4 * (x))
-#define MDFS_IRQ_ACCESS_STATUS0     (0x140)
-#define MDFS_IRQ_ACCESS_STATUS1     (0x144)
-
-#define MDFS_IRQ_IDLE_STATUS(x)     (0x148 + 0x4 * (x))
-#define MDFS_IRQ_IDLE_STATUS0       (0x148)
-#define MDFS_IRQ_IDLE_STATUS1       (0x14C)
-
-#define MDFS_IRQ_ACCESS_MASK_STA(x) (0x150 + 0x4 * (x))
-#define MDFS_IRQ_ACCESS_MASK_STA0   (0x150)
-#define MDFS_IRQ_ACCESS_MASK_STA1   (0x154)
-
-#define MDFS_IRQ_IDLE_MASK_STA(x)   (0x158 + 0x4 * (x))
-#define MDFS_IRQ_IDLE_MASK_STA0     (0x158)
-#define MDFS_IRQ_IDLE_MASK_STA1     (0x15C)
-/* Dram Controller register define */
-#define PTR2                        (0x04c)
-#define RFSHTMG                     (0x090)
-#define RFSHCTL1                    (0x094)
-#define VTFCR                       (0x0b8)
-#define PGCR0                       (0x100)
-#define ODTMAP                      (0x120)
-#define DXnGCR0(x)                  (0x344 + 0x80 * (x))
-/* CCMU register define */
-#define CCM_PLL_DDR1_REG            (0x18)
-#define CCM_DRAM_CFG_REG            (0x800)
-/* CCMU register define */
-#define CCM_DRAM_CFG_REG_PLL0_1_BIT (24)
-#else
-#define SUNXI_DRAM_FREQ_GOVERNOR "adaptive"
-
-/* Master reg number depend on platform */
-#define MASTER_REG_NUM 1
-/* Dramc Common register define */
-#define MC_WORK_MODE                (0x000)
-#define MC_TIME_MEASUREMENT         (0x00c)
-#define MC_MDFSCR                   (0x100)
-#define MC_MDFSMRMR                 (0x108)
-#define MDFS_IRQ_ACCESS_STATUS(x)   (0x114 + 0x4 * (x))
-#define MDFS_IRQ_ACCESS_STATUS0     (0x114)
-#define MDFS_IRQ_IDLE_STATUS(x)     (0x118 + 0x4 * (x))
-#define MDFS_IRQ_IDLE_STATUS0       (0x118)
-#define MDFS_IRQ_ACCESS_MASK_STA(x) (0x11C + 0x4 * (x))
-#define MDFS_IRQ_ACCESS_MASK_STA0   (0x11C)
-#define MDFS_IRQ_IDLE_MASK_STA(x)   (0x120 + 0x4 * (x))
-#define MDFS_IRQ_IDLE_MASK_STA0     (0x120)
+#define MDFS_IRQ_STATUS0            (0x114)
+#define MDFS_IRQ_STATUS1            (0x118)
+#define MDFS_IRQ_MASK_STATUS0       (0x11C)
+#define MDFS_IRQ_MASK_STATUS1       (0x120)
 #define MDFS_BWC_PRD                (0x124)
-#define MDFS_MASTER_ENABLE(x)       (0x134 + 0x4 * (x))
-#define MDFS_MASTER_ENABLE0         (0x134)
+#define MDFS_MASTER_ENABLE          (0x134)
 #define MDFS_MASTER_STATUS          (0x138)
-/* Dram Controller register define */
+
 #define PTR2                        (0x04c)
 #define RFSHTMG                     (0x090)
 #define VTFCR                       (0x0b8)
 #define PGCR0                       (0x100)
 #define ODTMAP                      (0x120)
 #define DXnGCR0(x)                  (0x344 + 0x80 * (x))
-/* CCMU register define */
+
 #define CCM_PLL_DDR1_REG            (0x4C)
 #define CCM_DRAM_CFG_REG            (0xF4)
-/* CCMU register define */
-#define CCM_DRAM_CFG_REG_PLL0_1_BIT (20)
-
-#endif
 
 #if defined(CONFIG_ARCH_SUN50I)
-#if defined(CONFIG_ARCH_SUN50IW6)
-enum DRAM_KEY_MASTER {
-	MASTER_NULL,
-	MASTER_GPU,
-	MASTER_CSI,
-	MASTER_DE,
-	MASTER_MAX,
-};
-#elif defined(CONFIG_ARCH_SUN50IW3)
-enum DRAM_KEY_MASTER {
-	MASTER_GPU,
-	MASTER_VE,
-	MASTER_DE,
-	MASTER_MAX,
-};
-#else
 enum DRAM_KEY_MASTER {
 	MASTER_GPU,
 	MASTER_CSI,
 	MASTER_DE,
 	MASTER_MAX,
 };
-#endif
+
 #elif defined(CONFIG_ARCH_SUN8IW10)
 enum DRAM_KEY_MASTER {
 #ifdef CONFIG_EINK_PANEL_USED
@@ -209,10 +127,6 @@ struct sunxi_dramfreq {
 	unsigned int min;
 #ifndef CONFIG_DEVFREQ_DRAM_FREQ_WITH_SOFT_NOTIFY
 	unsigned int irq;
-	unsigned int irq_access_status[MASTER_REG_NUM];
-	unsigned int irq_idle_status[MASTER_REG_NUM];
-	unsigned int irq_access_mask_sta[MASTER_REG_NUM];
-	unsigned int irq_idle_mask_sta[MASTER_REG_NUM];
 #endif
 	unsigned int pause;
 	unsigned int key_masters[MASTER_MAX];
@@ -226,7 +140,6 @@ struct sunxi_dramfreq {
 	struct mutex lock;
 	spinlock_t master_lock;
 	struct dram_para_t dram_para;
-	unsigned int master_reg_num;
 
 	struct devfreq *devfreq;
 

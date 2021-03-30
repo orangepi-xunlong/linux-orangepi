@@ -28,6 +28,7 @@
 #include <linux/gpio.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
+#include <linux/sys_config.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <asm/irq.h>
@@ -38,12 +39,12 @@
 #include "sunxi-scr.h"
 
 /* ====================  For debug  =============================== */
-#define SCR_ENTER()    pr_info("%s()%d - %s\n", __func__, __LINE__, "Enter ...")
-#define SCR_EXIT()	    pr_info("%s()%d - %s\n", __func__, __LINE__, "Exit")
-#define SCR_DBG(fmt, arg...) pr_debug("%s()%d - "fmt, __func__, __LINE__, ##arg)
-#define SCR_INFO(fmt, arg...) pr_info("%s()%d - "fmt, __func__, __LINE__, ##arg)
-#define SCR_WARN(fmt, arg...) pr_warn("%s()%d - "fmt, __func__, __LINE__, ##arg)
-#define SCR_ERR(fmt, arg...)   pr_err("%s()%d - "fmt, __func__, __LINE__, ##arg)
+#define SCR_ENTER()		pr_info("%s()%d - %s\n", __func__, __LINE__, "Enter ...")
+#define SCR_EXIT()		pr_info("%s()%d - %s\n", __func__, __LINE__, "Exit")
+#define SCR_DBG(fmt, arg...)	pr_debug("%s()%d - "fmt, __func__, __LINE__, ##arg)
+#define SCR_INFO(fmt, arg...)	pr_info("%s()%d - "fmt, __func__, __LINE__, ##arg)
+#define SCR_WARN(fmt, arg...)	pr_warn("%s()%d - "fmt, __func__, __LINE__, ##arg)
+#define SCR_ERR(fmt, arg...)	pr_err("%s()%d - "fmt, __func__, __LINE__, ##arg)
 
 static struct sunxi_scr *pscr;
 static int sunxi_scr_major;
@@ -57,7 +58,9 @@ struct scr_data {
 
 static struct scr_data scr_buf_rx, scr_buf_tx;
 
+
 static void sunxi_scr_do_atr(struct sunxi_scr *pscr);
+
 
 /* =================  smart card reader basic interface  =================== */
 /* clear control and status register */
@@ -115,7 +118,7 @@ static inline void scr_set_atr_flush(void __iomem *reg_base, uint8_t config)
 	writel(reg_val, reg_base + SCR_CSR_OFF);
 }
 
-/* when enable(1), TS character(first ATR character) will be stored in FIFO */
+/* when enable(1), TS charater(first ATR character) will be stored in FIFO */
 static inline void scr_set_ts_recv(void __iomem *reg_base, uint8_t config)
 {
 	uint32_t reg_val;
@@ -298,8 +301,7 @@ static inline void scr_set_interrupt_enable(void __iomem *reg_base, uint32_t bm)
 }
 
 /* disable interrupt bit mask */
-static inline void scr_set_interrupt_disable(void __iomem *reg_base,
-					     uint32_t bm)
+static inline void scr_set_interrupt_disable(void __iomem *reg_base, uint32_t bm)
 {
 	uint32_t reg_val;
 
@@ -315,8 +317,7 @@ static inline uint32_t scr_get_interrupt_status(void __iomem *reg_base)
 }
 
 /* write 1 to clear interrupt flag */
-static inline void scr_clear_interrupt_status(void __iomem *reg_base,
-					      uint32_t bm)
+static inline void scr_clear_interrupt_status(void __iomem *reg_base, uint32_t bm)
 {
 	writel(bm, reg_base + SCR_INTST_OFF);
 }
@@ -364,7 +365,6 @@ static inline bool scr_txfifo_is_empty(void __iomem *reg_base)
 static inline void scr_set_rxfifo_threshold(void __iomem *reg_base, uint8_t thh)
 {
 	uint32_t reg_val;
-
 	reg_val = readl(reg_base + SCR_FCNT_OFF);
 	reg_val &= ~(0xffU << 24);
 	reg_val |= thh << 24;
@@ -412,8 +412,7 @@ static inline void scr_set_tx_repeat(void __iomem *reg_base, uint8_t repeat)
 }
 
 /* baud = F_sysclk/(2*(BAUDDIV+1)), BAUDDIV=bit[31:16] */
-static inline void scr_set_baud_divisor(void __iomem *reg_base,
-		uint16_t divisor)
+static inline void scr_set_baud_divisor(void __iomem *reg_base, uint16_t divisor)
 {
 	uint32_t reg_val;
 
@@ -429,8 +428,7 @@ static inline uint16_t scr_get_baud_divisor(void __iomem *reg_base)
 }
 
 /* F_scclk = F_sysclk/(2*(SCCLK+1)), SCCLK=bit[15:0] */
-static inline void scr_set_scclk_divisor(void __iomem *reg_base,
-		uint16_t divisor)
+static inline void scr_set_scclk_divisor(void __iomem *reg_base, uint16_t divisor)
 {
 	uint32_t reg_val;
 
@@ -470,8 +468,7 @@ static inline void scr_set_reset_time(void __iomem *reg_base, uint8_t scclk)
 }
 
 /* reset duration, dura = 128*ACT*T_scclk, ACT=bit[7:0], T_scclk=1/F_scclk */
-static inline void scr_set_activation_time(void __iomem *reg_base,
-		uint8_t scclk)
+static inline void scr_set_activation_time(void __iomem *reg_base, uint8_t scclk)
 {
 	uint32_t reg_val;
 
@@ -600,8 +597,7 @@ static irqreturn_t sunxi_scr_interrupt(int irqno, void *dev_id)
 
 	if (irq_status & SCR_INTSTA_ATRDONE) {
 		SCR_DBG("SmartCard ATR Done!!\n");
-		memcpy(pscr->scr_atr_des.atr_data, scr_buf_rx.buf,
-				scr_buf_rx.cnt);
+		memcpy(pscr->scr_atr_des.atr_data, scr_buf_rx.buf, scr_buf_rx.cnt);
 		pscr->scr_atr_des.atr_len = scr_buf_rx.cnt;
 		pscr->atr_resp = SCR_ATR_RESP_OK;
 		/* parse ATR data to reconfig smart card */
@@ -612,17 +608,21 @@ static irqreturn_t sunxi_scr_interrupt(int irqno, void *dev_id)
 		pscr->rx_transmit_status = SCR_RX_TRANSMIT_TMOUT;
 	}
 
-	if (irq_status & SCR_INTSTA_TXFEMPTY)
+	if (irq_status & SCR_INTSTA_TXFEMPTY) {
 		SCR_DBG("SmartCard TX Empty!!\n");
+	}
 
-	if (irq_status & SCR_INTSTA_TXDONE)
+	if (irq_status & SCR_INTSTA_TXDONE) {
 		SCR_DBG("SmartCard TX Done!!\n");
+	}
 
-	if (irq_status & SCR_INTSTA_TXPERR)
+	if (irq_status & SCR_INTSTA_TXPERR) {
 		SCR_DBG("SmartCard TX Error!!\n");
+	}
 
-	if (irq_status & SCR_INTSTA_TXFDONE)
+	if (irq_status & SCR_INTSTA_TXFDONE) {
 		SCR_DBG("SmartCard TX FIFO Done!!\n");
+	}
 
 	return IRQ_HANDLED;
 }
@@ -638,8 +638,7 @@ static int scr_request_gpio(struct sunxi_scr *pscr)
 		return -EINVAL;
 	}
 
-	pctrl_state = pinctrl_lookup_state(pscr->scr_pinctrl,
-						PINCTRL_STATE_DEFAULT);
+	pctrl_state = pinctrl_lookup_state(pscr->scr_pinctrl, PINCTRL_STATE_DEFAULT);
 	if (IS_ERR(pctrl_state)) {
 		SCR_ERR("pinctrl_lookup_state fail! return %p\n", pctrl_state);
 		return -EINVAL;
@@ -657,6 +656,7 @@ static void scr_release_gpio(struct sunxi_scr *pscr)
 	if (!IS_ERR_OR_NULL(pscr->scr_pinctrl))
 		devm_pinctrl_put(pscr->scr_pinctrl);
 	pscr->scr_pinctrl = NULL;
+	return ;
 }
 
 static uint32_t scr_init_reg(struct sunxi_scr *pscr)
@@ -705,24 +705,20 @@ static void sunxi_scr_param_init(struct sunxi_scr *pscr)
 	pscr->rxfifo_thh = SCR_FIFO_DEPTH;
 	pscr->tx_repeat = 0x3;
 	pscr->rx_repeat = 0x3;
-	/* (APB1CLK/4000000) PCLK/14, <175, && SCCLK >= 1M && =<4M */
-	pscr->scclk_div = 0;
+	pscr->scclk_div = 0;	/* (APB1CLK/4000000) PCLK/14, <175, && SCCLK >= 1M && =<4M */
 	pscr->baud_div = 0;	/* ETU = 372*SCCLK */
 	pscr->act_time = 2;	/* =1*256, 100 */
 	pscr->rst_time = 0xff;	/* 2*256, >=400 */
-	/* scr.atr_time = (40000>>8)+1; //=256*256, 400~40000 */
-	pscr->atr_time = 0xff;
+	pscr->atr_time = 0xff;	/* scr.atr_time = (40000>>8)+1; //=256*256, 400~40000 */
 	pscr->guard_time = 2;	/* =2*ETUs */
-	/* interval time (400-1) characters */
-	pscr->chlimit_time = 100 * (10 + pscr->guard_time);
+	pscr->chlimit_time = 100 * (10 + pscr->guard_time); /* interval time (400-1) characters */
 	pscr->atr_resp = SCR_ATR_RESP_INVALID;
 	pscr->rx_transmit_status = SCR_RX_TRANSMIT_NOYET;
 
 	/* init card parameters */
 	pscr->card_para.f = 372;
 	pscr->card_para.d = 1;
-	/* 3.579MHz, unit is KHz, expect baud=9600bps*/
-	pscr->card_para.freq = 3579;
+	pscr->card_para.freq = 3579;	/* 3.579MHz, unit is KHz, expect baud=9600bps*/
 	pscr->card_para.recv_no_parity = 1;
 	pscr->card_para.protocol_type = 0;
 
@@ -740,14 +736,14 @@ static void sunxi_scr_param_init(struct sunxi_scr *pscr)
 
 	/* pscr->clk_freq'unit is hz but pscr->card_para.freq'unit is khz */
 	pscr->scclk_div = pscr->clk_freq / pscr->card_para.freq / 2000 - 1;
-	pscr->baud_div = (pscr->scclk_div + 1) *
-			 (pscr->card_para.f / pscr->card_para.d) - 1;
+	pscr->baud_div = (pscr->scclk_div + 1) * (pscr->card_para.f / pscr->card_para.d) - 1;
 
 	SCR_DBG("clk_freq=%d, scclk_div=%d, baud_div=%d\n",
 		pscr->clk_freq, pscr->scclk_div, pscr->baud_div);
 
 	/* init registers */
 	scr_init_reg(pscr);
+	return ;
 }
 
 /* use ATR data to reconfig smart card control register */
@@ -790,8 +786,7 @@ static void sunxi_scr_do_atr(struct sunxi_scr *pscr)
 	   pscr->card_para.freq = psmc_atr_para->FMAX * 1000;
 
 	   pscr->scclk_div = pscr->clk_freq/pscr->card_para.freq/2000-1;
-	   pscr->baud_div = (pscr->scclk_div + 1) *
-	   (pscr->card_para.f/pscr->card_para.d)-1;
+	   pscr->baud_div = (pscr->scclk_div + 1)*(pscr->card_para.f/pscr->card_para.d)-1;
 
 	   scr_set_scclk_divisor(pscr->reg_base, pscr->scclk_div);
 	   scr_set_baud_divisor(pscr->reg_base, pscr->baud_div);
@@ -804,6 +799,8 @@ static void sunxi_scr_do_atr(struct sunxi_scr *pscr)
 		scr_set_data_order(pscr->reg_base, 1);
 		scr_set_data_invert(pscr->reg_base, 1);
 	}
+
+	return ;
 }
 
 static uint32_t sunxi_scr_clk_init(struct sunxi_scr *pscr)
@@ -812,39 +809,39 @@ static uint32_t sunxi_scr_clk_init(struct sunxi_scr *pscr)
 	struct device_node *node = pdev->dev.of_node;
 
 	if (NULL == pdev || !of_device_is_available(node)) {
-		SCR_ERR("platform_device invalid!\n");
+		SCR_DBG("platform_device invalid!\n");
 		return -EINVAL;
 	}
 
 	pscr->scr_clk = of_clk_get(node, 0);
 	if (!pscr->scr_clk || IS_ERR(pscr->scr_clk)) {
-		SCR_ERR("try to get scr clock fail!\n");
+		SCR_DBG("try to get scr clock fail!\n");
 		return -EINVAL;
 	}
 
 	pscr->scr_clk_source = of_clk_get(node, 1);
 	if (!pscr->scr_clk_source || IS_ERR(pscr->scr_clk_source)) {
-		SCR_ERR("err: try to get scr_clk_source clock fail!\n");
-		return -EINVAL;
-	}
-
-	if (clk_set_parent(pscr->scr_clk, pscr->scr_clk_source)) {
-		SCR_ERR("set scr_clk parent to scr_clk_source fail!\n");
+		SCR_DBG("err: try to get scr_clk_source clock fail!\n");
 		return -EINVAL;
 	}
 
 	if (of_property_read_u32(node, "clock-frequency", &pscr->clk_freq)) {
-		SCR_INFO("get clock-frequency fail! use default 24Mhz\n");
+		SCR_DBG("get clock-frequency fail! use default 24Mhz\n");
 		pscr->clk_freq = 24000000;
 	}
 
+	if (clk_set_parent(pscr->scr_clk, pscr->scr_clk_source)) {
+		SCR_DBG("set scr_clk parent to scr_clk_source fail!\n");
+		return -EINVAL;
+	}
+
 	if (clk_set_rate(pscr->scr_clk, pscr->clk_freq)) {
-		SCR_ERR("set ir scr_clk freq  failed!\n");
+		SCR_DBG("set ir scr_clk freq  failed!\n");
 		return -EINVAL;
 	}
 
 	if (clk_prepare_enable(pscr->scr_clk)) {
-		SCR_ERR("try to enable scr_clk failed!\n");
+		SCR_DBG("try to enable scr_clk failed!\n");
 		return -EINVAL;
 	}
 
@@ -915,8 +912,9 @@ sunxi_scr_read(struct file *file, char __user *buf, size_t size, loff_t *ppos)
 	uint32_t rx_size = 0;
 	int try_num = 100;
 
-	while ((SCR_RX_TRANSMIT_NOYET == pscr->rx_transmit_status) && try_num--)
+	while ((SCR_RX_TRANSMIT_NOYET == pscr->rx_transmit_status) && try_num--) {
 		msleep(50);
+	};
 	if (try_num < 0) {
 		SCR_ERR("read timeout\n");
 		return -EAGAIN;
@@ -939,8 +937,9 @@ static int scr_write(struct sunxi_scr *pscr, char *buf, int size)
 	int i;
 
 	for (i = 0; i < size; i++) {
-		while (scr_txfifo_is_full(pscr->reg_base) && try_num--)
+		while (scr_txfifo_is_full(pscr->reg_base) && try_num--) {
 			msleep(50);
+		}
 		if (try_num < 0) {
 			SCR_ERR("TX FIFO full, write timeout\n");
 			break;
@@ -953,8 +952,8 @@ static int scr_write(struct sunxi_scr *pscr, char *buf, int size)
 	return i;
 }
 
-static ssize_t sunxi_scr_write(struct file *file, const char __user *buf,
-						size_t size, loff_t *ppos)
+static ssize_t
+sunxi_scr_write(struct file *file, const char __user *buf, size_t size, loff_t *ppos)
 {
 	struct sunxi_scr *pscr = file->private_data;
 
@@ -965,7 +964,7 @@ static ssize_t sunxi_scr_write(struct file *file, const char __user *buf,
 	memset(&scr_buf_rx, 0, sizeof(struct scr_data));
 	pscr->rx_transmit_status = SCR_RX_TRANSMIT_NOYET;
 
-	return scr_write(pscr, scr_buf_tx.buf, size);
+	return scr_write(pscr, (char *)buf, size);
 }
 
 static void scr_timer_handler(unsigned long data)
@@ -1044,16 +1043,12 @@ static long sunxi_scr_ioctl(struct file *file, uint32_t cmd, unsigned long arg)
 			ret = -EFAULT;
 			break;
 		}
-		pscr->scclk_div = pscr->clk_freq / pscr->card_para.freq / 2000
-			- 1;
-		pscr->baud_div = (pscr->scclk_div + 1) *
-			(pscr->card_para.f / pscr->card_para.d) - 1;
+		pscr->scclk_div = pscr->clk_freq / pscr->card_para.freq / 2000 - 1;
+		pscr->baud_div = (pscr->scclk_div + 1) * (pscr->card_para.f / pscr->card_para.d) - 1;
 		scr_set_scclk_divisor(pscr->reg_base, pscr->scclk_div);
 		scr_set_baud_divisor(pscr->reg_base, pscr->baud_div);
-		scr_set_recv_parity(pscr->reg_base,
-				pscr->card_para.recv_no_parity);
-		scr_set_t_protocol(pscr->reg_base,
-				pscr->card_para.protocol_type);
+		scr_set_recv_parity(pscr->reg_base, pscr->card_para.recv_no_parity);
+		scr_set_t_protocol(pscr->reg_base, pscr->card_para.protocol_type);
 		break;
 
 	/* get the parse parameters come from ATR data */
@@ -1072,16 +1067,13 @@ static long sunxi_scr_ioctl(struct file *file, uint32_t cmd, unsigned long arg)
 	case SCR_IOCWRDATA: {
 		int rtn_data_len;
 		struct scr_wr_data wr_data;
-
 		if (copy_from_user(&wr_data, (void __user *)arg,
 				   sizeof(struct scr_wr_data))) {
 			SCR_ERR("get wr_data from user error!\n");
 			ret = -EFAULT;
 			break;
 		}
-		if (copy_from_user(scr_buf_tx.buf,
-				  (void __user *)wr_data.cmd_buf,
-				  wr_data.cmd_len)) {
+		if (copy_from_user(scr_buf_tx.buf, (void __user *)wr_data.cmd_buf, wr_data.cmd_len)) {
 			SCR_ERR("get wr_data cmd_buf from user error!\n");
 			ret = -EFAULT;
 			break;
@@ -1096,9 +1088,7 @@ static long sunxi_scr_ioctl(struct file *file, uint32_t cmd, unsigned long arg)
 		/* type1: CLS + INS + P1 + P2 + le  -> only read, le=read size*/
 		if (5 == scr_buf_tx.cnt) {
 			scr_write(pscr, scr_buf_tx.buf, 5);
-			/* respond:
-			 * INS(=buf[1]) + valid_data(=buf[4]) + SW1 + SW2
-			 */
+			/* respond: INS(=buf[1]) + valid_data(=buf[4]) + SW1 + SW2 */
 			rtn_data_len = scr_buf_tx.buf[4] + 3;
 			while ((rtn_data_len > scr_buf_rx.cnt) && try_num--) {
 				msleep(10);
@@ -1109,18 +1099,12 @@ static long sunxi_scr_ioctl(struct file *file, uint32_t cmd, unsigned long arg)
 				ret = -EFAULT;
 				break;
 			}
-			ret = copy_to_user((void __user *)wr_data.rtn_data,
-				&scr_buf_rx.buf[1],
-				scr_buf_tx.buf[4]) ? -EFAULT : 0;
+			ret = copy_to_user((void __user *)wr_data.rtn_data, &scr_buf_rx.buf[1], scr_buf_tx.buf[4]) ? -EFAULT : 0;
 			put_user(scr_buf_tx.buf[4], wr_data.rtn_len);
-			put_user(scr_buf_rx.buf[rtn_data_len - 2],
-					wr_data.psw1);
-			put_user(scr_buf_rx.buf[rtn_data_len - 1],
-					wr_data.psw2);
+			put_user(scr_buf_rx.buf[rtn_data_len - 2], wr_data.psw1);
+			put_user(scr_buf_rx.buf[rtn_data_len - 1], wr_data.psw2);
 
-		/* type2: CLS + INS + P1 + P2 + lc + data
-		 * only lc, write data, lc=data size
-		 */
+		/* type2: CLS + INS + P1 + P2 + lc + data -> only lc, write data, lc=data size */
 		} else if (scr_buf_tx.buf[4]+5 == scr_buf_tx.cnt) {
 			scr_write(pscr, scr_buf_tx.buf, 5);
 			while ((0 == scr_buf_rx.cnt) && try_num--) {
@@ -1165,11 +1149,9 @@ static long sunxi_scr_ioctl(struct file *file, uint32_t cmd, unsigned long arg)
 				ret = -EFAULT;
 				break;
 			}
-			scr_write(pscr, &scr_buf_tx.buf[5],
-					scr_buf_tx.buf[4]+1);
+			scr_write(pscr, &scr_buf_tx.buf[5], scr_buf_tx.buf[4]+1);
 			try_num = 300;
-			/* respond: INS + valid_data + SW1 + SW2 */
-			rtn_data_len = scr_buf_tx.buf[scr_buf_tx.cnt-1] + 3;
+			rtn_data_len = scr_buf_tx.buf[scr_buf_tx.cnt-1] + 2;
 			while ((rtn_data_len > scr_buf_rx.cnt) && try_num--) {
 				msleep(10);
 			};
@@ -1180,15 +1162,10 @@ static long sunxi_scr_ioctl(struct file *file, uint32_t cmd, unsigned long arg)
 				break;
 			}
 
-			ret = copy_to_user((void __user *)wr_data.rtn_data,
-				&scr_buf_rx.buf[1],
-				scr_buf_tx.buf[scr_buf_tx.cnt-1]) ? -EFAULT : 0;
-			put_user(scr_buf_tx.buf[scr_buf_tx.cnt-1],
-					wr_data.rtn_len);
-			put_user(scr_buf_rx.buf[rtn_data_len - 2],
-					wr_data.psw1);
-			put_user(scr_buf_rx.buf[rtn_data_len - 1],
-					wr_data.psw2);
+			ret = copy_to_user((void __user *)wr_data.rtn_data, &scr_buf_rx.buf[1], scr_buf_tx.buf[scr_buf_tx.cnt-1]) ? -EFAULT : 0;
+			put_user(scr_buf_tx.buf[scr_buf_tx.cnt-1], wr_data.rtn_len);
+			put_user(scr_buf_rx.buf[rtn_data_len - 2], wr_data.psw1);
+			put_user(scr_buf_rx.buf[rtn_data_len - 1], wr_data.psw2);
 
 		} else {
 			SCR_ERR("invalid command format\n");
@@ -1307,8 +1284,7 @@ static int sunxi_scr_probe(struct platform_device *pdev)
 		ret = -ENODEV;
 		goto edev;
 	}
-	scr_device = device_create(scr_dev_class, NULL,
-			MKDEV(sunxi_scr_major, 0),
+	scr_device = device_create(scr_dev_class, NULL, MKDEV(sunxi_scr_major, 0),
 				   NULL, SCR_MODULE_NAME);
 	if (IS_ERR(scr_device)) {
 		SCR_ERR("device_create fail!\n");
@@ -1382,8 +1358,7 @@ static int sunxi_scr_suspend(struct device *dev)
 	}
 
 	if (!IS_ERR_OR_NULL(pscr->scr_pinctrl)) {
-		pctrl_state = pinctrl_lookup_state(pscr->scr_pinctrl,
-							PINCTRL_STATE_SLEEP);
+		pctrl_state = pinctrl_lookup_state(pscr->scr_pinctrl, PINCTRL_STATE_SLEEP);
 		if (IS_ERR(pctrl_state)) {
 			SCR_ERR("SCR pinctrl lookup sleep fail\n");
 			return -1;
@@ -1416,8 +1391,7 @@ static int sunxi_scr_resume(struct device *dev)
 	}
 
 	if (!IS_ERR_OR_NULL(pscr->scr_pinctrl)) {
-		pctrl_state = pinctrl_lookup_state(pscr->scr_pinctrl,
-							PINCTRL_STATE_DEFAULT);
+		pctrl_state = pinctrl_lookup_state(pscr->scr_pinctrl, PINCTRL_STATE_DEFAULT);
 		if (IS_ERR(pctrl_state)) {
 			SCR_ERR("SCR pinctrl lookup default fail\n");
 			return -1;

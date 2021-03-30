@@ -14,6 +14,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #ifndef	__ASM_ARCH_HWSPINLOCK_H
@@ -23,8 +26,8 @@
 #define	AW_AUDIO_HWSPINLOCK       (1)
 #define	AW_RTC_REG_HWSPINLOCK     (2)
 
-/* the taken ot not state of spinlock */
+//the taken ot not state of spinlock
 #define	AW_SPINLOCK_NOTTAKEN      (0)
 #define	AW_SPINLOCK_TAKEN         (1)
 
-#endif	/* __ASM_ARCH_HWSPINLOCK_H */
+#endif	//__ASM_ARCH_HWSPINLOCK_H

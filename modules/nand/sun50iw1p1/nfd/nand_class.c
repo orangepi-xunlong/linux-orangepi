@@ -23,8 +23,6 @@ extern int nand_dbg_zone_phy_write(void *zone, uint16 block, uint16 page);
 extern int nand_dbg_phy_write(unsigned short nDieNum, unsigned short nBlkNum,
 			      unsigned short nPage);
 extern int nand_dbg_phy_erase(unsigned short nDieNum, unsigned short nBlkNum);
-extern int nand_dbg_single_phy_erase(unsigned short nDieNum,
-				     unsigned short nBlkNum);
 extern int _dev_nand_read2(char *name, __u32 start_sector, __u32 len,
 			   unsigned char *buf);
 
@@ -224,12 +222,6 @@ static ssize_t nand_test_store(struct kobject *kobject, struct attribute *attr,
 		nand_dbg_err("nand erase2 cmd:\n");
 		nand_dbg_zone_erase(nand_kobj->nftl_blk->nftl_zone, param0,
 				    param1);
-		goto NAND_TEST_STORE_EXIT;
-	}
-
-	else if (strcmp(cmd, "erase3") == 0) {
-		nand_dbg_err("nand erase3 cmd:\n");
-		nand_dbg_single_phy_erase(param0, param1);
 		goto NAND_TEST_STORE_EXIT;
 	}
 

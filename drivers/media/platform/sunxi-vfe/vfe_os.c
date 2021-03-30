@@ -1,46 +1,30 @@
-/*
- * linux-4.9/drivers/media/platform/sunxi-vfe/vfe_os.c
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
 #include <linux/module.h>
 #include "vfe_os.h"
 
-unsigned int vfe_dbg_en;
+unsigned int vfe_dbg_en = 0;
 unsigned int vfe_dbg_lv = 1;
 EXPORT_SYMBOL_GPL(vfe_dbg_en);
 EXPORT_SYMBOL_GPL(vfe_dbg_lv);
 
 int os_gpio_request(struct vfe_gpio_cfg *gpio_list, __u32 group_count_max)
-{
+{    
 #ifdef VFE_GPIO
-	int ret = 0;
+	int ret = 0;  
 	struct gpio_config pin_cfg;
-
-	if (gpio_list == NULL)
+	if(gpio_list == NULL)
 		return -1;
-
-	if (gpio_list->gpio == GPIO_INDEX_INVALID)
+    
+	if(gpio_list->gpio == GPIO_INDEX_INVALID)
 		return -1;
-
+		
 	pin_cfg.gpio = gpio_list->gpio;
 	pin_cfg.mul_sel = gpio_list->mul_sel;
 	pin_cfg.pull = gpio_list->pull;
 	pin_cfg.drv_level = gpio_list->drv_level;
 	pin_cfg.data = gpio_list->data;
 	ret = gpio_request(pin_cfg.gpio, NULL);
-	if (ret != 0) {
+	if(0 != ret)
+	{
 		vfe_warn("os_gpio_request failed, gpio=%d, ret=0x%x, %d\n", gpio_list->gpio, ret, ret);
 		return -1;
 	}
@@ -50,19 +34,18 @@ int os_gpio_request(struct vfe_gpio_cfg *gpio_list, __u32 group_count_max)
 #endif
 }
 EXPORT_SYMBOL_GPL(os_gpio_request);
-
 int os_gpio_set(struct vfe_gpio_cfg *gpio_list, __u32 group_count_max)
-{
+{    
 #ifdef VFE_GPIO
 	struct gpio_config pin_cfg;
 	char pin_name[32];
 	__u32 config;
 
-	if (gpio_list == NULL)
+	if(gpio_list == NULL)
+		return -1;    
+	if(gpio_list->gpio == GPIO_INDEX_INVALID)
 		return -1;
-	if (gpio_list->gpio == GPIO_INDEX_INVALID)
-		return -1;
-
+		
 	pin_cfg.gpio = gpio_list->gpio;
 	pin_cfg.mul_sel = gpio_list->mul_sel;
 	pin_cfg.pull = gpio_list->pull;
@@ -70,7 +53,7 @@ int os_gpio_set(struct vfe_gpio_cfg *gpio_list, __u32 group_count_max)
 	pin_cfg.data = gpio_list->data;
 
 	if (!IS_AXP_PIN(pin_cfg.gpio)) {
-		/* valid pin of sunxi-pinctrl,
+		/* valid pin of sunxi-pinctrl, 
 		 * config pin attributes individually.
 		 */
 		sunxi_gpio_to_name(pin_cfg.gpio, pin_name);
@@ -89,7 +72,7 @@ int os_gpio_set(struct vfe_gpio_cfg *gpio_list, __u32 group_count_max)
 			pin_config_set(SUNXI_PINCTRL, pin_name, config);
 		}
 	} else if (IS_AXP_PIN(pin_cfg.gpio)) {
-		/* valid pin of axp-pinctrl,
+		/* valid pin of axp-pinctrl, 
 		 * config pin attributes individually.
 		 */
 		sunxi_gpio_to_name(pin_cfg.gpio, pin_name);
@@ -113,10 +96,14 @@ EXPORT_SYMBOL_GPL(os_gpio_set);
 int os_gpio_release(u32 p_handler, __s32 if_release_to_default_status)
 {
 #ifdef VFE_GPIO
-	if (p_handler != GPIO_INDEX_INVALID)
+	if(p_handler != GPIO_INDEX_INVALID)
+	{
 		gpio_free(p_handler);
+	}
 	else
+	{
 		vfe_dbg(0, "os_gpio_release, hdl is INVALID\n");
+	}
 #endif
 	return 0;
 }
@@ -125,20 +112,35 @@ EXPORT_SYMBOL_GPL(os_gpio_release);
 int os_gpio_write(u32 p_handler, __u32 value_to_gpio, const char *gpio_name, int force_value_flag)
 {
 #ifdef VFE_GPIO
-	if (force_value_flag == 1) {
-		if (p_handler != GPIO_INDEX_INVALID)
+	if(1 == force_value_flag)
+	{
+		if(p_handler != GPIO_INDEX_INVALID)
+		{
 			__gpio_set_value(p_handler, value_to_gpio);
+		}
 		else
-			vfe_dbg(0, "os_gpio_write, hdl is INVALID\n");
-	} else {
-		if (p_handler != GPIO_INDEX_INVALID) {
-			if (value_to_gpio == 0) {
+		{
+			vfe_dbg(0,"os_gpio_write, hdl is INVALID\n");
+		}
+	}
+	else
+	{
+		if(p_handler != GPIO_INDEX_INVALID)
+		{
+			if(value_to_gpio == 0)
+			{
 				os_gpio_set_status(p_handler, 1, gpio_name);
 				__gpio_set_value(p_handler, value_to_gpio);
-			} else
+			} 
+			else
+			{
 				os_gpio_set_status(p_handler, 0, gpio_name);
-		} else
-			vfe_dbg(0, "os_gpio_write, hdl is INVALID\n");
+			}
+		}
+		else
+		{
+			vfe_dbg(0,"os_gpio_write, hdl is INVALID\n");
+		}
 	}
 #endif
 	return 0;
@@ -150,17 +152,27 @@ int os_gpio_set_status(u32 p_handler, __u32 if_set_to_output_status, const char 
 {
 	int ret = 0;
 #ifdef VFE_GPIO
-	if (p_handler != GPIO_INDEX_INVALID) {
-		if (if_set_to_output_status) {
+	if(p_handler != GPIO_INDEX_INVALID)
+	{
+		if(if_set_to_output_status)
+		{
 			ret = gpio_direction_output(p_handler, 0);
-			if (ret != 0)
+			if(ret != 0)
+			{
 				vfe_warn("gpio_direction_output fail!\n");
-		} else {
-			ret = gpio_direction_input(p_handler);
-			if (ret != 0)
-				vfe_warn("gpio_direction_input fail!\n");
+			}
 		}
-	} else {
+		else
+		{
+			ret = gpio_direction_input(p_handler);
+			if(ret != 0)
+			{
+				vfe_warn("gpio_direction_input fail!\n");
+			}
+		}
+	}
+	else
+	{
 		vfe_warn("os_gpio_set_status, hdl is INVALID\n");
 		ret = -1;
 	}
@@ -169,25 +181,71 @@ int os_gpio_set_status(u32 p_handler, __u32 if_set_to_output_status, const char 
 }
 EXPORT_SYMBOL_GPL(os_gpio_set_status);
 
-int os_mem_alloc(struct device *dev, struct vfe_mm *mem_man)
+int os_mem_alloc(struct vfe_mm *mem_man)
 {
-	mem_man->vir_addr = dma_alloc_coherent(dev, (size_t)mem_man->size,
-			(dma_addr_t *)&mem_man->phy_addr, GFP_KERNEL);
-	if (!mem_man->vir_addr) {
-		vfe_err("dma_alloc_coherent memory alloc size %ld failed\n", mem_man->size);
-		return -ENOMEM;
+#ifdef SUNXI_MEM
+	int ret = -1;
+	char *ion_name = "ion_vfe";
+	mem_man->client = sunxi_ion_client_create(ion_name);
+	if (IS_ERR_OR_NULL(mem_man->client))
+	{
+		vfe_err("sunxi_ion_client_create failed!!");
+		goto err_client;
+	}
+	mem_man->handle = ion_alloc(mem_man->client, mem_man->size, PAGE_SIZE, 
+							/*ION_HEAP_CARVEOUT_MASK|*/ION_HEAP_TYPE_DMA_MASK, 0);
+	if (IS_ERR_OR_NULL(mem_man->handle))
+	{
+		vfe_err("ion_alloc failed!!");
+		goto err_alloc;
+	}
+	mem_man->vir_addr = ion_map_kernel( mem_man->client, mem_man->handle);
+	if (IS_ERR_OR_NULL(mem_man->vir_addr))
+	{
+		vfe_err("ion_map_kernel failed!!");
+		goto err_map_kernel;
+	}
+	ret = ion_phys( mem_man->client,  mem_man->handle, (ion_phys_addr_t *)&mem_man->phy_addr, &mem_man->size );
+	if( ret )
+	{
+		vfe_err("ion_phys failed!!");
+		goto err_phys;
 	}
 	mem_man->dma_addr = mem_man->phy_addr + HW_DMA_OFFSET-CPU_DRAM_PADDR_ORG;
-
 	return 0;
+err_phys:	
+	ion_unmap_kernel( mem_man->client, mem_man->handle);
+err_map_kernel:
+	ion_free(mem_man->client, mem_man->handle);
+err_alloc:
+	ion_client_destroy(mem_man->client);
+err_client:
+	return -1;	
+#else
+	mem_man->vir_addr = dma_alloc_coherent(NULL, (size_t)mem_man->size,
+			(dma_addr_t*)&mem_man->phy_addr, GFP_KERNEL);
+	if (!mem_man->vir_addr) {
+		vfe_err("dma_alloc_coherent memory alloc size %d failed\n", mem_man->size);
+		return -ENOMEM;
+	} 
+	mem_man->dma_addr = mem_man->phy_addr + HW_DMA_OFFSET-CPU_DRAM_PADDR_ORG;
+	return 0;
+#endif
 }
 EXPORT_SYMBOL_GPL(os_mem_alloc);
 
-void os_mem_free(struct device *dev, struct vfe_mm *mem_man)
+void os_mem_free(struct vfe_mm *mem_man)
 {
-	if (mem_man->vir_addr)
-		dma_free_coherent(dev, mem_man->size, mem_man->vir_addr, (dma_addr_t)mem_man->phy_addr);
-
+#ifdef SUNXI_MEM
+	if (IS_ERR_OR_NULL(mem_man->client)||IS_ERR_OR_NULL(mem_man->handle)||IS_ERR_OR_NULL(mem_man->vir_addr))
+		return ;
+	ion_unmap_kernel(mem_man->client, mem_man->handle);
+	ion_free(mem_man->client, mem_man->handle);
+	ion_client_destroy(mem_man->client);
+#else
+	if(mem_man->vir_addr)
+		dma_free_coherent(NULL, mem_man->size, mem_man->vir_addr, (dma_addr_t)mem_man->phy_addr);
+#endif
 	mem_man->phy_addr = NULL;
 	mem_man->dma_addr = NULL;
 	mem_man->vir_addr = NULL;
@@ -197,3 +255,5 @@ EXPORT_SYMBOL_GPL(os_mem_free);
 MODULE_AUTHOR("raymonxiu");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("Video front end OSAL for sunxi");
+
+

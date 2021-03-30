@@ -1,22 +1,15 @@
 #include <linux/module.h>
-#include <linux/moduleparam.h>
 #include <linux/rbtree_augmented.h>
 #include <linux/random.h>
-#include <linux/slab.h>
 #include <asm/timex.h>
 
-#define __param(type, name, init, msg)		\
-	static type name = init;		\
-	module_param(name, type, 0444);		\
-	MODULE_PARM_DESC(name, msg);
-
-__param(int, nnodes, 100, "Number of nodes in the rb-tree");
-__param(int, perf_loops, 1000, "Number of iterations modifying the rb-tree");
-__param(int, check_loops, 100, "Number of iterations modifying and verifying the rb-tree");
+#define NODES       100
+#define PERF_LOOPS  100000
+#define CHECK_LOOPS 100
 
 struct test_node {
-	u32 key;
 	struct rb_node rb;
+	u32 key;
 
 	/* following fields used for testing augmented rbtree functionality */
 	u32 val;
@@ -24,7 +17,7 @@ struct test_node {
 };
 
 static struct rb_root root = RB_ROOT;
-static struct test_node *nodes = NULL;
+static struct test_node nodes[NODES];
 
 static struct rnd_state rnd;
 
@@ -102,7 +95,7 @@ static void erase_augmented(struct test_node *node, struct rb_root *root)
 static void init(void)
 {
 	int i;
-	for (i = 0; i < nnodes; i++) {
+	for (i = 0; i < NODES; i++) {
 		nodes[i].key = prandom_u32_state(&rnd);
 		nodes[i].val = prandom_u32_state(&rnd);
 	}
@@ -119,26 +112,6 @@ static int black_path_count(struct rb_node *rb)
 	for (count = 0; rb; rb = rb_parent(rb))
 		count += !is_red(rb);
 	return count;
-}
-
-static void check_postorder_foreach(int nr_nodes)
-{
-	struct test_node *cur, *n;
-	int count = 0;
-	rbtree_postorder_for_each_entry_safe(cur, n, &root, rb)
-		count++;
-
-	WARN_ON_ONCE(count != nr_nodes);
-}
-
-static void check_postorder(int nr_nodes)
-{
-	struct rb_node *rb;
-	int count = 0;
-	for (rb = rb_first_postorder(&root); rb; rb = rb_next_postorder(rb))
-		count++;
-
-	WARN_ON_ONCE(count != nr_nodes);
 }
 
 static void check(int nr_nodes)
@@ -163,9 +136,6 @@ static void check(int nr_nodes)
 
 	WARN_ON_ONCE(count != nr_nodes);
 	WARN_ON_ONCE(count < (1 << black_path_count(rb_last(&root))) - 1);
-
-	check_postorder(nr_nodes);
-	check_postorder_foreach(nr_nodes);
 }
 
 static void check_augmented(int nr_nodes)
@@ -184,10 +154,6 @@ static int __init rbtree_test_init(void)
 	int i, j;
 	cycles_t time1, time2, time;
 
-	nodes = kmalloc(nnodes * sizeof(*nodes), GFP_KERNEL);
-	if (!nodes)
-		return -ENOMEM;
-
 	printk(KERN_ALERT "rbtree testing");
 
 	prandom_seed_state(&rnd, 3141592653589793238ULL);
@@ -195,27 +161,27 @@ static int __init rbtree_test_init(void)
 
 	time1 = get_cycles();
 
-	for (i = 0; i < perf_loops; i++) {
-		for (j = 0; j < nnodes; j++)
+	for (i = 0; i < PERF_LOOPS; i++) {
+		for (j = 0; j < NODES; j++)
 			insert(nodes + j, &root);
-		for (j = 0; j < nnodes; j++)
+		for (j = 0; j < NODES; j++)
 			erase(nodes + j, &root);
 	}
 
 	time2 = get_cycles();
 	time = time2 - time1;
 
-	time = div_u64(time, perf_loops);
+	time = div_u64(time, PERF_LOOPS);
 	printk(" -> %llu cycles\n", (unsigned long long)time);
 
-	for (i = 0; i < check_loops; i++) {
+	for (i = 0; i < CHECK_LOOPS; i++) {
 		init();
-		for (j = 0; j < nnodes; j++) {
+		for (j = 0; j < NODES; j++) {
 			check(j);
 			insert(nodes + j, &root);
 		}
-		for (j = 0; j < nnodes; j++) {
-			check(nnodes - j);
+		for (j = 0; j < NODES; j++) {
+			check(NODES - j);
 			erase(nodes + j, &root);
 		}
 		check(0);
@@ -227,33 +193,31 @@ static int __init rbtree_test_init(void)
 
 	time1 = get_cycles();
 
-	for (i = 0; i < perf_loops; i++) {
-		for (j = 0; j < nnodes; j++)
+	for (i = 0; i < PERF_LOOPS; i++) {
+		for (j = 0; j < NODES; j++)
 			insert_augmented(nodes + j, &root);
-		for (j = 0; j < nnodes; j++)
+		for (j = 0; j < NODES; j++)
 			erase_augmented(nodes + j, &root);
 	}
 
 	time2 = get_cycles();
 	time = time2 - time1;
 
-	time = div_u64(time, perf_loops);
+	time = div_u64(time, PERF_LOOPS);
 	printk(" -> %llu cycles\n", (unsigned long long)time);
 
-	for (i = 0; i < check_loops; i++) {
+	for (i = 0; i < CHECK_LOOPS; i++) {
 		init();
-		for (j = 0; j < nnodes; j++) {
+		for (j = 0; j < NODES; j++) {
 			check_augmented(j);
 			insert_augmented(nodes + j, &root);
 		}
-		for (j = 0; j < nnodes; j++) {
-			check_augmented(nnodes - j);
+		for (j = 0; j < NODES; j++) {
+			check_augmented(NODES - j);
 			erase_augmented(nodes + j, &root);
 		}
 		check_augmented(0);
 	}
-
-	kfree(nodes);
 
 	return -EAGAIN; /* Fail will directly unload the module */
 }

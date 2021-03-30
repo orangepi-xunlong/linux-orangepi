@@ -1,17 +1,18 @@
+
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-vipp/sunxi_scaler.h
+ ******************************************************************************
  *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
+ * sunxi_scaler.h
  *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
+ * Hawkview ISP - sunxi_scaler.h module
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Copyright (c) 2014 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
  *
+ * Version		  Author         Date		    Description
+ *
+ *   3.0		  Zhao Wei   	2014/12/11	ISP Tuning Tools Support
+ *
+ ******************************************************************************
  */
 
 #ifndef _SUNXI_SCALER_H_
@@ -19,7 +20,7 @@
 #include <linux/videodev2.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-subdev.h>
-#include "vipp_reg.h"
+#include "../vin-video/vin_core.h"
 
 enum scaler_pad {
 	SCALER_PAD_SINK,
@@ -27,35 +28,51 @@ enum scaler_pad {
 	SCALER_PAD_NUM,
 };
 
-struct scaler_para {
-	u32 xratio;
-	u32 yratio;
-	u32 w_shift;
-	u32 width;
-	u32 height;
+struct scaler_yuv_size_addr_info {
+	unsigned int isp_byte_size;
+	unsigned int line_stride_y;
+	unsigned int line_stride_c;
+	unsigned int buf_height_y;
+	unsigned int buf_height_cb;
+	unsigned int buf_height_cr;
+
+	unsigned int valid_height_y;
+	unsigned int valid_height_cb;
+	unsigned int valid_height_cr;
+	struct isp_yuv_channel_addr yuv_addr;
+};
+
+struct scaler_ratio {
+	u32 horz;
+	u32 vert;
 };
 
 struct scaler_dev {
+	int use_cnt;
 	struct v4l2_subdev subdev;
 	struct media_pad scaler_pads[SCALER_PAD_NUM];
+	struct v4l2_event event;
 	struct v4l2_mbus_framefmt formats[SCALER_PAD_NUM];
 	struct platform_device *pdev;
+	unsigned int id;
+	spinlock_t slock;
 	struct mutex subdev_lock;
-	struct vin_mm vipp_reg;
-	struct vin_mm osd_para;
-	struct vin_mm osd_stat;
+	wait_queue_head_t wait;
+	void __iomem *base;
+	struct resource *ioarea;
+
 	struct {
 		struct v4l2_rect request;
 		struct v4l2_rect active;
 	} crop;
-	struct scaler_para para;
-	void __iomem *base;
-	unsigned char is_empty;
-	unsigned char id;
+	struct scaler_ratio ratio;
+	struct list_head scaler_list;
 };
 
+unsigned int sunxi_scaler_set_size(unsigned int *fmt,
+				   struct isp_size_settings *size_settings);
+void sunxi_scaler_set_output_addr(unsigned long buf_base_addr);
 struct v4l2_subdev *sunxi_scaler_get_subdev(int id);
-int sunxi_vipp_get_osd_stat(int id, unsigned int *stat);
 int sunxi_scaler_platform_register(void);
 void sunxi_scaler_platform_unregister(void);
 

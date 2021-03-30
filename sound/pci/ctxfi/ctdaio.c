@@ -33,7 +33,7 @@ struct daio_rsc_idx {
 	unsigned short right;
 };
 
-static struct daio_rsc_idx idx_20k1[NUM_DAIOTYP] = {
+struct daio_rsc_idx idx_20k1[NUM_DAIOTYP] = {
 	[LINEO1] = {.left = 0x00, .right = 0x01},
 	[LINEO2] = {.left = 0x18, .right = 0x19},
 	[LINEO3] = {.left = 0x08, .right = 0x09},
@@ -44,7 +44,7 @@ static struct daio_rsc_idx idx_20k1[NUM_DAIOTYP] = {
 	[SPDIFI1] = {.left = 0x95, .right = 0x9d},
 };
 
-static struct daio_rsc_idx idx_20k2[NUM_DAIOTYP] = {
+struct daio_rsc_idx idx_20k2[NUM_DAIOTYP] = {
 	[LINEO1] = {.left = 0x40, .right = 0x41},
 	[LINEO2] = {.left = 0x60, .right = 0x61},
 	[LINEO3] = {.left = 0x50, .right = 0x51},
@@ -83,21 +83,21 @@ static int daio_in_next_conj_20k2(struct rsc *rsc)
 	return rsc->conj += 0x100;
 }
 
-static const struct rsc_ops daio_out_rsc_ops = {
+static struct rsc_ops daio_out_rsc_ops = {
 	.master		= daio_master,
 	.next_conj	= daio_out_next_conj,
 	.index		= daio_index,
 	.output_slot	= NULL,
 };
 
-static const struct rsc_ops daio_in_rsc_ops_20k1 = {
+static struct rsc_ops daio_in_rsc_ops_20k1 = {
 	.master		= daio_master,
 	.next_conj	= daio_in_next_conj_20k1,
 	.index		= NULL,
 	.output_slot	= daio_index,
 };
 
-static const struct rsc_ops daio_in_rsc_ops_20k2 = {
+static struct rsc_ops daio_in_rsc_ops_20k2 = {
 	.master		= daio_master,
 	.next_conj	= daio_in_next_conj_20k2,
 	.index		= NULL,
@@ -140,19 +140,19 @@ static int dao_rsc_reinit(struct dao *dao, const struct dao_desc *desc);
 
 static int dao_spdif_get_spos(struct dao *dao, unsigned int *spos)
 {
-	dao->hw->dao_get_spos(dao->ctrl_blk, spos);
+	((struct hw *)dao->hw)->dao_get_spos(dao->ctrl_blk, spos);
 	return 0;
 }
 
 static int dao_spdif_set_spos(struct dao *dao, unsigned int spos)
 {
-	dao->hw->dao_set_spos(dao->ctrl_blk, spos);
+	((struct hw *)dao->hw)->dao_set_spos(dao->ctrl_blk, spos);
 	return 0;
 }
 
 static int dao_commit_write(struct dao *dao)
 {
-	dao->hw->dao_commit_write(dao->hw,
+	((struct hw *)dao->hw)->dao_commit_write(dao->hw,
 		daio_device_index(dao->daio.type, dao->hw), dao->ctrl_blk);
 	return 0;
 }
@@ -263,7 +263,7 @@ static int dao_clear_right_input(struct dao *dao)
 	return 0;
 }
 
-static const struct dao_rsc_ops dao_ops = {
+static struct dao_rsc_ops dao_ops = {
 	.set_spos		= dao_spdif_set_spos,
 	.commit_write		= dao_commit_write,
 	.get_spos		= dao_spdif_get_spos,
@@ -277,14 +277,16 @@ static const struct dao_rsc_ops dao_ops = {
 static int dai_set_srt_srcl(struct dai *dai, struct rsc *src)
 {
 	src->ops->master(src);
-	dai->hw->dai_srt_set_srcm(dai->ctrl_blk, src->ops->index(src));
+	((struct hw *)dai->hw)->dai_srt_set_srcm(dai->ctrl_blk,
+						src->ops->index(src));
 	return 0;
 }
 
 static int dai_set_srt_srcr(struct dai *dai, struct rsc *src)
 {
 	src->ops->master(src);
-	dai->hw->dai_srt_set_srco(dai->ctrl_blk, src->ops->index(src));
+	((struct hw *)dai->hw)->dai_srt_set_srco(dai->ctrl_blk,
+						src->ops->index(src));
 	return 0;
 }
 
@@ -295,30 +297,30 @@ static int dai_set_srt_msr(struct dai *dai, unsigned int msr)
 	for (rsr = 0; msr > 1; msr >>= 1)
 		rsr++;
 
-	dai->hw->dai_srt_set_rsr(dai->ctrl_blk, rsr);
+	((struct hw *)dai->hw)->dai_srt_set_rsr(dai->ctrl_blk, rsr);
 	return 0;
 }
 
 static int dai_set_enb_src(struct dai *dai, unsigned int enb)
 {
-	dai->hw->dai_srt_set_ec(dai->ctrl_blk, enb);
+	((struct hw *)dai->hw)->dai_srt_set_ec(dai->ctrl_blk, enb);
 	return 0;
 }
 
 static int dai_set_enb_srt(struct dai *dai, unsigned int enb)
 {
-	dai->hw->dai_srt_set_et(dai->ctrl_blk, enb);
+	((struct hw *)dai->hw)->dai_srt_set_et(dai->ctrl_blk, enb);
 	return 0;
 }
 
 static int dai_commit_write(struct dai *dai)
 {
-	dai->hw->dai_commit_write(dai->hw,
+	((struct hw *)dai->hw)->dai_commit_write(dai->hw,
 		daio_device_index(dai->daio.type, dai->hw), dai->ctrl_blk);
 	return 0;
 }
 
-static const struct dai_rsc_ops dai_ops = {
+static struct dai_rsc_ops dai_ops = {
 	.set_srt_srcl		= dai_set_srt_srcl,
 	.set_srt_srcr		= dai_set_srt_srcr,
 	.set_srt_msr		= dai_set_srt_msr,
@@ -329,12 +331,12 @@ static const struct dai_rsc_ops dai_ops = {
 
 static int daio_rsc_init(struct daio *daio,
 			 const struct daio_desc *desc,
-			 struct hw *hw)
+			 void *hw)
 {
 	int err;
 	unsigned int idx_l, idx_r;
 
-	switch (hw->chip_type) {
+	switch (((struct hw *)hw)->chip_type) {
 	case ATC20K1:
 		idx_l = idx_20k1[desc->type].left;
 		idx_r = idx_20k1[desc->type].right;
@@ -358,7 +360,7 @@ static int daio_rsc_init(struct daio *daio,
 	if (desc->type <= DAIO_OUT_MAX) {
 		daio->rscl.ops = daio->rscr.ops = &daio_out_rsc_ops;
 	} else {
-		switch (hw->chip_type) {
+		switch (((struct hw *)hw)->chip_type) {
 		case ATC20K1:
 			daio->rscl.ops = daio->rscr.ops = &daio_in_rsc_ops_20k1;
 			break;
@@ -443,7 +445,7 @@ static int dao_rsc_uninit(struct dao *dao)
 		kfree(dao->imappers);
 		dao->imappers = NULL;
 	}
-	dao->hw->dao_put_ctrl_blk(dao->ctrl_blk);
+	((struct hw *)dao->hw)->dao_put_ctrl_blk(dao->ctrl_blk);
 	dao->hw = dao->ctrl_blk = NULL;
 	daio_rsc_uninit(&dao->daio);
 
@@ -500,7 +502,7 @@ error1:
 
 static int dai_rsc_uninit(struct dai *dai)
 {
-	dai->hw->dai_put_ctrl_blk(dai->ctrl_blk);
+	((struct hw *)dai->hw)->dai_put_ctrl_blk(dai->ctrl_blk);
 	dai->hw = dai->ctrl_blk = NULL;
 	daio_rsc_uninit(&dai->daio);
 	return 0;
@@ -528,6 +530,8 @@ static int get_daio_rsc(struct daio_mgr *mgr,
 			struct daio **rdaio)
 {
 	int err;
+	struct dai *dai = NULL;
+	struct dao *dao = NULL;
 	unsigned long flags;
 
 	*rdaio = NULL;
@@ -537,35 +541,31 @@ static int get_daio_rsc(struct daio_mgr *mgr,
 	err = daio_mgr_get_rsc(&mgr->mgr, desc->type);
 	spin_unlock_irqrestore(&mgr->mgr_lock, flags);
 	if (err) {
-		dev_err(mgr->card->dev,
-			"Can't meet DAIO resource request!\n");
+		printk(KERN_ERR "Can't meet DAIO resource request!\n");
 		return err;
 	}
 
-	err = -ENOMEM;
 	/* Allocate mem for daio resource */
 	if (desc->type <= DAIO_OUT_MAX) {
-		struct dao *dao = kzalloc(sizeof(*dao), GFP_KERNEL);
-		if (!dao)
-			goto error;
-
-		err = dao_rsc_init(dao, desc, mgr);
-		if (err) {
-			kfree(dao);
+		dao = kzalloc(sizeof(*dao), GFP_KERNEL);
+		if (!dao) {
+			err = -ENOMEM;
 			goto error;
 		}
+		err = dao_rsc_init(dao, desc, mgr);
+		if (err)
+			goto error;
 
 		*rdaio = &dao->daio;
 	} else {
-		struct dai *dai = kzalloc(sizeof(*dai), GFP_KERNEL);
-		if (!dai)
-			goto error;
-
-		err = dai_rsc_init(dai, desc, mgr);
-		if (err) {
-			kfree(dai);
+		dai = kzalloc(sizeof(*dai), GFP_KERNEL);
+		if (!dai) {
+			err = -ENOMEM;
 			goto error;
 		}
+		err = dai_rsc_init(dai, desc, mgr);
+		if (err)
+			goto error;
 
 		*rdaio = &dai->daio;
 	}
@@ -576,6 +576,11 @@ static int get_daio_rsc(struct daio_mgr *mgr,
 	return 0;
 
 error:
+	if (dao)
+		kfree(dao);
+	else if (dai)
+		kfree(dai);
+
 	spin_lock_irqsave(&mgr->mgr_lock, flags);
 	daio_mgr_put_rsc(&mgr->mgr, desc->type);
 	spin_unlock_irqrestore(&mgr->mgr_lock, flags);
@@ -687,7 +692,7 @@ static int daio_mgr_commit_write(struct daio_mgr *mgr)
 	return 0;
 }
 
-int daio_mgr_create(struct hw *hw, struct daio_mgr **rdaio_mgr)
+int daio_mgr_create(void *hw, struct daio_mgr **rdaio_mgr)
 {
 	int err, i;
 	struct daio_mgr *daio_mgr;
@@ -722,13 +727,12 @@ int daio_mgr_create(struct hw *hw, struct daio_mgr **rdaio_mgr)
 	daio_mgr->imap_add = daio_imap_add;
 	daio_mgr->imap_delete = daio_imap_delete;
 	daio_mgr->commit_write = daio_mgr_commit_write;
-	daio_mgr->card = hw->card;
 
 	for (i = 0; i < 8; i++) {
-		hw->daio_mgr_dsb_dao(daio_mgr->mgr.ctrl_blk, i);
-		hw->daio_mgr_dsb_dai(daio_mgr->mgr.ctrl_blk, i);
+		((struct hw *)hw)->daio_mgr_dsb_dao(daio_mgr->mgr.ctrl_blk, i);
+		((struct hw *)hw)->daio_mgr_dsb_dai(daio_mgr->mgr.ctrl_blk, i);
 	}
-	hw->daio_mgr_commit_write(hw, daio_mgr->mgr.ctrl_blk);
+	((struct hw *)hw)->daio_mgr_commit_write(hw, daio_mgr->mgr.ctrl_blk);
 
 	*rdaio_mgr = daio_mgr;
 

@@ -1,34 +1,40 @@
 /*
- * comedi/drivers/contec_pci_dio.c
- *
- * COMEDI - Linux Control and Measurement Device Interface
- * Copyright (C) 2000 David A. Schleef <ds@schleef.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
+    comedi/drivers/contec_pci_dio.c
 
+    COMEDI - Linux Control and Measurement Device Interface
+    Copyright (C) 2000 David A. Schleef <ds@schleef.org>
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+
+*/
 /*
- * Driver: contec_pci_dio
- * Description: Contec PIO1616L digital I/O board
- * Devices: [Contec] PIO1616L (contec_pci_dio)
- * Author: Stefano Rivoir <s.rivoir@gts.it>
- * Updated: Wed, 27 Jun 2007 13:00:06 +0100
- * Status: works
- *
- * Configuration Options: not applicable, uses comedi PCI auto config
- */
+Driver: contec_pci_dio
+Description: Contec PIO1616L digital I/O board
+Devices: [Contec] PIO1616L (contec_pci_dio)
+Author: Stefano Rivoir <s.rivoir@gts.it>
+Updated: Wed, 27 Jun 2007 13:00:06 +0100
+Status: works
 
-#include <linux/module.h>
+Configuration Options: not applicable, uses comedi PCI auto config
+*/
 
-#include "../comedi_pci.h"
+#include <linux/pci.h>
+
+#include "../comedidev.h"
+
+#define PCI_DEVICE_ID_PIO1616L 0x8172
 
 /*
  * Register map
@@ -38,11 +44,17 @@
 
 static int contec_do_insn_bits(struct comedi_device *dev,
 			       struct comedi_subdevice *s,
-			       struct comedi_insn *insn,
-			       unsigned int *data)
+			       struct comedi_insn *insn, unsigned int *data)
 {
-	if (comedi_dio_update_state(s, data))
+	unsigned int mask = data[0];
+	unsigned int bits = data[1];
+
+	if (mask) {
+		s->state &= ~mask;
+		s->state |= (bits & mask);
+
 		outw(s->state, dev->iobase + PIO1616L_DO_REG);
+	}
 
 	data[1] = s->state;
 
@@ -59,7 +71,7 @@ static int contec_di_insn_bits(struct comedi_device *dev,
 }
 
 static int contec_auto_attach(struct comedi_device *dev,
-			      unsigned long context_unused)
+					unsigned long context_unused)
 {
 	struct pci_dev *pcidev = comedi_to_pci_dev(dev);
 	struct comedi_subdevice *s;
@@ -90,6 +102,8 @@ static int contec_auto_attach(struct comedi_device *dev,
 	s->range_table	= &range_digital;
 	s->insn_bits	= contec_do_insn_bits;
 
+	dev_info(dev->class_dev, "%s attached\n", dev->board_name);
+
 	return 0;
 }
 
@@ -97,7 +111,7 @@ static struct comedi_driver contec_pci_dio_driver = {
 	.driver_name	= "contec_pci_dio",
 	.module		= THIS_MODULE,
 	.auto_attach	= contec_auto_attach,
-	.detach		= comedi_pci_detach,
+	.detach		= comedi_pci_disable,
 };
 
 static int contec_pci_dio_pci_probe(struct pci_dev *dev,
@@ -107,8 +121,8 @@ static int contec_pci_dio_pci_probe(struct pci_dev *dev,
 				      id->driver_data);
 }
 
-static const struct pci_device_id contec_pci_dio_pci_table[] = {
-	{ PCI_DEVICE(PCI_VENDOR_ID_CONTEC, 0x8172) },
+static DEFINE_PCI_DEVICE_TABLE(contec_pci_dio_pci_table) = {
+	{ PCI_DEVICE(PCI_VENDOR_ID_CONTEC, PCI_DEVICE_ID_PIO1616L) },
 	{ 0 }
 };
 MODULE_DEVICE_TABLE(pci, contec_pci_dio_pci_table);

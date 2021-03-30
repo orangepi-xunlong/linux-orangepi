@@ -1,16 +1,7 @@
 /*
- * A V4L2 driver for IMX214  Raw cameras.
+ * A V4L2 driver for IMX214 cameras.
  *
- * Copyright (c) 2017 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
- *
- * Authors:  Zhao Wei <zhaowei@allwinnertech.com>
- *    Yang Feng <yangfeng@allwinnertech.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
-
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -19,6 +10,7 @@
 #include <linux/videodev2.h>
 #include <linux/clk.h>
 #include <media/v4l2-device.h>
+#include <media/v4l2-chip-ident.h>
 #include <media/v4l2-mediabus.h>
 #include <linux/io.h>
 #include "camera.h"
@@ -48,12 +40,23 @@ MODULE_LICENSE("GPL");
 #define SENSOR_NAME "imx214"
 int imx214_sensor_vts;
 
+
+static struct v4l2_subdev *glb_sd;
+
+/*
+ * Information we maintain about a known sensor.
+ */
+struct sensor_format_struct;	/* coming later */
+
 struct cfg_array {		/* coming later */
 	struct regval_list *regs;
 	int size;
 };
 
-
+static inline struct sensor_info *to_state(struct v4l2_subdev *sd)
+{
+	return container_of(sd, struct sensor_info, sd);
+}
 
 /*
  * The default register settings
@@ -607,7 +610,7 @@ static int sensor_detect(struct v4l2_subdev *sd)
 
 	sensor_read(sd, 0x0000, &rdval);
 	sensor_read(sd, 0x0001, &rdval);
-	sensor_print("find the sony IMX214 ***********\n");
+	printk("find the sony IMX214 ***********\n");
 	return 0;
 }
 
@@ -641,11 +644,37 @@ static int sensor_init(struct v4l2_subdev *sd, u32 val)
 	return 0;
 }
 
+static void sensor_cfg_req(struct v4l2_subdev *sd,
+						struct sensor_config *cfg)
+{
+	struct sensor_info *info = to_state(sd);
+	if (info == NULL) {
+		sensor_err("sensor is not initialized.\n");
+		return;
+	}
+	if (info->current_wins == NULL) {
+		sensor_err("sensor format is not initialized.\n");
+		return;
+	}
+
+	cfg->width = info->current_wins->width;
+	cfg->height = info->current_wins->height;
+	cfg->hoffset = info->current_wins->hoffset;
+	cfg->voffset = info->current_wins->voffset;
+	cfg->hts = info->current_wins->hts;
+	cfg->vts = info->current_wins->vts;
+	cfg->pclk = info->current_wins->pclk;
+	cfg->bin_factor = info->current_wins->bin_factor;
+	cfg->intg_min = info->current_wins->intg_min;
+	cfg->intg_max = info->current_wins->intg_max;
+	cfg->gain_min = info->current_wins->gain_min;
+	cfg->gain_max = info->current_wins->gain_max;
+}
+
 static long sensor_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 {
 	int ret = 0;
 	struct sensor_info *info = to_state(sd);
-
 	switch (cmd) {
 	case GET_CURRENT_WIN_CFG:
 		if (info->current_wins != NULL) {
@@ -660,7 +689,7 @@ static long sensor_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		break;
 	case SET_FPS:
 		break;
-	case VIDIOC_VIN_SENSOR_EXP_GAIN:
+	case ISP_SET_EXP_GAIN:
 		ret = sensor_s_exp_gain(sd, (struct sensor_exp_gain *)arg);
 		break;
 	case VIDIOC_VIN_SENSOR_CFG_REQ:
@@ -675,10 +704,16 @@ static long sensor_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 /*
  * Store information about the video data format.
  */
-static struct sensor_format_struct sensor_formats[] = {
+static struct sensor_format_struct {
+	__u8 *desc;
+	enum v4l2_mbus_pixelcode mbus_code;
+	struct regval_list *regs;
+	int regs_size;
+	int bpp;		/* Bytes per pixel */
+} sensor_formats[] = {
 	{
 		.desc = "Raw RGB Bayer",
-		.mbus_code = MEDIA_BUS_FMT_SBGGR10_1X10,
+		.mbus_code = V4L2_MBUS_FMT_SBGGR10_1X10,
 		.regs = sensor_fmt_raw,
 		.regs_size = ARRAY_SIZE(sensor_fmt_raw),
 		.bpp = 1
@@ -783,6 +818,7 @@ static int sensor_reg_init(struct sensor_info *info)
 	if (wsize->set_size)
 		wsize->set_size(sd);
 
+	info->fmt = sensor_fmt;
 	info->width = wsize->width;
 	info->height = wsize->height;
 	imx214_sensor_vts = wsize->vts;
@@ -796,7 +832,6 @@ static int sensor_reg_init(struct sensor_info *info)
 static int sensor_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct sensor_info *info = to_state(sd);
-
 	sensor_print("%s on = %d, %d*%d %x\n", __func__, enable,
 		  info->current_wins->width,
 		  info->current_wins->height, info->fmt->mbus_code);
@@ -815,51 +850,115 @@ static int sensor_g_mbus_config(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int sensor_g_ctrl(struct v4l2_ctrl *ctrl)
+/*
+ * Implement G/S_PARM.  There is a "high quality" mode we could try
+ * to do someday; for now, we just do the frame rate tweak.
+ */
+static int sensor_g_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *parms)
 {
-	struct sensor_info *info =
-			container_of(ctrl->handler, struct sensor_info, handler);
-	struct v4l2_subdev *sd = &info->sd;
+	struct v4l2_captureparm *cp = &parms->parm.capture;
+	struct sensor_info *info = to_state(sd);
 
-	switch (ctrl->id) {
+	if (parms->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
+		return -EINVAL;
+
+	memset(cp, 0, sizeof(struct v4l2_captureparm));
+	cp->capability = V4L2_CAP_TIMEPERFRAME;
+	cp->capturemode = info->capture_mode;
+
+	return 0;
+}
+
+static int sensor_s_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *parms)
+{
+	struct v4l2_captureparm *cp = &parms->parm.capture;
+	struct sensor_info *info = to_state(sd);
+
+	sensor_dbg("sensor_s_parm\n");
+
+	if (parms->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
+		return -EINVAL;
+
+	if (info->tpf.numerator == 0)
+		return -EINVAL;
+
+	info->capture_mode = cp->capturemode;
+
+	return 0;
+}
+
+static int sensor_queryctrl(struct v4l2_subdev *sd, struct v4l2_queryctrl *qc)
+{
+	/* Fill in min, max, step and default value for these controls. */
+	/* see include/linux/videodev2.h for details */
+
+	switch (qc->id) {
 	case V4L2_CID_GAIN:
-		return sensor_g_gain(sd, &ctrl->val);
+		return v4l2_ctrl_query_fill(qc, 1 * 16, 64 * 16 - 1, 1, 1 * 16);
 	case V4L2_CID_EXPOSURE:
-		return sensor_g_exp(sd, &ctrl->val);
+		return v4l2_ctrl_query_fill(qc, 0, 65535 * 16, 1, 0);
+	case V4L2_CID_FRAME_RATE:
+		return v4l2_ctrl_query_fill(qc, 15, 120, 1, 120);
 	}
 	return -EINVAL;
 }
 
-static int sensor_s_ctrl(struct v4l2_ctrl *ctrl)
+static int sensor_g_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 {
-	struct sensor_info *info =
-			container_of(ctrl->handler, struct sensor_info, handler);
-	struct v4l2_subdev *sd = &info->sd;
+	switch (ctrl->id) {
+	case V4L2_CID_GAIN:
+		return sensor_g_gain(sd, &ctrl->value);
+	case V4L2_CID_EXPOSURE:
+		return sensor_g_exp(sd, &ctrl->value);
+	}
+	return -EINVAL;
+}
+
+static int sensor_s_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
+{
+	struct v4l2_queryctrl qc;
+	int ret;
+
+	qc.id = ctrl->id;
+	ret = sensor_queryctrl(sd, &qc);
+	if (ret < 0) {
+		return ret;
+	}
+
+	if (ctrl->value < qc.minimum || ctrl->value > qc.maximum) {
+		sensor_err("max gain qurery is %d,min gain qurey is %d\n",
+			    qc.maximum, qc.minimum);
+		return -ERANGE;
+	}
 
 	switch (ctrl->id) {
 	case V4L2_CID_GAIN:
-		return sensor_s_gain(sd, ctrl->val);
+		return sensor_s_gain(sd, ctrl->value);
 	case V4L2_CID_EXPOSURE:
-		return sensor_s_exp(sd, ctrl->val);
+		return sensor_s_exp(sd, ctrl->value);
 	}
 	return -EINVAL;
+}
+
+static int sensor_g_chip_ident(struct v4l2_subdev *sd,
+			       struct v4l2_dbg_chip_ident *chip)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+
+	return v4l2_chip_ident_i2c_client(client, chip, V4L2_IDENT_SENSOR, 0);
 }
 
 /* ----------------------------------------------------------------------- */
 
-static const struct v4l2_ctrl_ops sensor_ctrl_ops = {
-	.g_volatile_ctrl = sensor_g_ctrl,
-	.s_ctrl = sensor_s_ctrl,
-};
-
 static const struct v4l2_subdev_core_ops sensor_core_ops = {
+	.g_chip_ident = sensor_g_chip_ident,
+	.g_ctrl = sensor_g_ctrl,
+	.s_ctrl = sensor_s_ctrl,
+	.queryctrl = sensor_queryctrl,
 	.reset = sensor_reset,
 	.init = sensor_init,
 	.s_power = sensor_power,
 	.ioctl = sensor_ioctl,
-#ifdef CONFIG_COMPAT
-	.compat_ioctl32 = sensor_compat_ioctl32,
-#endif
 };
 
 static const struct v4l2_subdev_video_ops sensor_video_ops = {
@@ -868,6 +967,25 @@ static const struct v4l2_subdev_video_ops sensor_video_ops = {
 	.s_stream = sensor_s_stream,
 	.g_mbus_config = sensor_g_mbus_config,
 };
+
+static void sensor_fill_mbus_fmt(struct v4l2_mbus_framefmt *mf,
+				 const struct sensor_win_size *ws, u32 code)
+{
+	mf->width = ws->width;
+	mf->height = ws->height;
+	mf->code = code;
+	mf->colorspace = V4L2_COLORSPACE_JPEG;
+	mf->field = V4L2_FIELD_NONE;
+}
+
+
+SENSOR_ENUM_MBUS_CODE;
+SENSOR_ENUM_FRAME_SIZE;
+SENSOR_FIND_MBUS_CODE;
+SENSOR_FIND_FRAME_SIZE;
+SENSOR_TRY_FORMAT;
+SENSOR_GET_FMT;
+SENSOR_SET_FMT;
 
 static const struct v4l2_subdev_pad_ops sensor_pad_ops = {
 	.enum_mbus_code = sensor_enum_mbus_code,
@@ -889,68 +1007,19 @@ static struct cci_driver cci_drv = {
 	.data_width = CCI_BITS_8,
 };
 
-static const struct v4l2_ctrl_config sensor_custom_ctrls[] = {
-	{
-		.ops = &sensor_ctrl_ops,
-		.id = V4L2_CID_FRAME_RATE,
-		.name = "frame rate",
-		.type = V4L2_CTRL_TYPE_INTEGER,
-		.min = 15,
-		.max = 120,
-		.step = 1,
-		.def = 120,
-	},
-};
-
-static int sensor_init_controls(struct v4l2_subdev *sd, const struct v4l2_ctrl_ops *ops)
-{
-	struct sensor_info *info = to_state(sd);
-	struct v4l2_ctrl_handler *handler = &info->handler;
-	struct v4l2_ctrl *ctrl;
-	int i;
-	int ret = 0;
-
-	v4l2_ctrl_handler_init(handler, 2 + ARRAY_SIZE(sensor_custom_ctrls));
-
-	ctrl = v4l2_ctrl_new_std(handler, ops, V4L2_CID_EXPOSURE, 0,
-			      65536 * 16, 1, 0);
-	if (ctrl != NULL)
-		ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE;
-	v4l2_ctrl_new_std(handler, ops, V4L2_CID_GAIN, 1 * 1600,
-			      256 * 1600, 1, 1 * 1600);
-	for (i = 0; i < ARRAY_SIZE(sensor_custom_ctrls); i++)
-		v4l2_ctrl_new_custom(handler, &sensor_custom_ctrls[i], NULL);
-
-	if (handler->error) {
-		ret = handler->error;
-		v4l2_ctrl_handler_free(handler);
-	}
-
-	sd->ctrl_handler = handler;
-
-	return ret;
-}
-
 static int sensor_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
 	struct v4l2_subdev *sd;
 	struct sensor_info *info;
-
 	info = kzalloc(sizeof(struct sensor_info), GFP_KERNEL);
 	if (info == NULL)
 		return -ENOMEM;
 	sd = &info->sd;
+	glb_sd = sd;
 	cci_dev_probe_helper(sd, client, &sensor_ops, &cci_drv);
-	sensor_init_controls(sd, &sensor_ctrl_ops);
-	mutex_init(&info->lock);
 
 	info->fmt = &sensor_formats[0];
-	info->fmt_pt = &sensor_formats[0];
-	info->win_pt = &sensor_win_sizes[0];
-	info->fmt_num = N_FMTS;
-	info->win_size_num = N_WIN_SIZES;
-	info->sensor_field = V4L2_FIELD_NONE;
 	info->af_first_flag = 1;
 
 	return 0;
@@ -958,7 +1027,6 @@ static int sensor_probe(struct i2c_client *client,
 static int sensor_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd;
-
 	sd = cci_dev_remove_helper(client, &cci_drv);
 	kfree(to_state(sd));
 	return 0;

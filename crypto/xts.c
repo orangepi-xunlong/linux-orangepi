@@ -5,7 +5,7 @@
  *
  * Copyright (c) 2007 Rik Snel <rsnel@cube.dyndns.org>
  *
- * Based on ecb.c
+ * Based om ecb.c
  * Copyright (c) 2006 Herbert Xu <herbert@gondor.apana.org.au>
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -35,11 +35,16 @@ static int setkey(struct crypto_tfm *parent, const u8 *key,
 {
 	struct priv *ctx = crypto_tfm_ctx(parent);
 	struct crypto_cipher *child = ctx->tweak;
+	u32 *flags = &parent->crt_flags;
 	int err;
 
-	err = xts_check_key(parent, key, keylen);
-	if (err)
-		return err;
+	/* key consists of keys of equal size concatenated, therefore
+	 * the length must be even */
+	if (keylen % 2) {
+		/* tell the user why there was an error */
+		*flags |= CRYPTO_TFM_RES_BAD_KEY_LEN;
+		return -EINVAL;
+	}
 
 	/* we need two cipher instances: one to compute the initial 'tweak'
 	 * by encrypting the IV (usually the 'plain' iv) and the other
@@ -357,4 +362,3 @@ module_exit(crypto_module_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("XTS block cipher mode");
-MODULE_ALIAS_CRYPTO("xts");

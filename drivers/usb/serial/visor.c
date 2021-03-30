@@ -16,6 +16,7 @@
 
 #include <linux/kernel.h>
 #include <linux/errno.h>
+#include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/tty.h>
 #include <linux/tty_driver.h>
@@ -50,7 +51,7 @@ static int palm_os_3_probe(struct usb_serial *serial,
 static int palm_os_4_probe(struct usb_serial *serial,
 					const struct usb_device_id *id);
 
-static const struct usb_device_id id_table[] = {
+static struct usb_device_id id_table [] = {
 	{ USB_DEVICE(HANDSPRING_VENDOR_ID, HANDSPRING_VISOR_ID),
 		.driver_info = (kernel_ulong_t)&palm_os_3_probe },
 	{ USB_DEVICE(HANDSPRING_VENDOR_ID, HANDSPRING_TREO_ID),
@@ -95,7 +96,7 @@ static const struct usb_device_id id_table[] = {
 		.driver_info = (kernel_ulong_t)&palm_os_4_probe },
 	{ USB_DEVICE(ACER_VENDOR_ID, ACER_S10_ID),
 		.driver_info = (kernel_ulong_t)&palm_os_4_probe },
-	{ USB_DEVICE_INTERFACE_CLASS(SAMSUNG_VENDOR_ID, SAMSUNG_SCH_I330_ID, 0xff),
+	{ USB_DEVICE(SAMSUNG_VENDOR_ID, SAMSUNG_SCH_I330_ID),
 		.driver_info = (kernel_ulong_t)&palm_os_4_probe },
 	{ USB_DEVICE(SAMSUNG_VENDOR_ID, SAMSUNG_SPH_I500_ID),
 		.driver_info = (kernel_ulong_t)&palm_os_4_probe },
@@ -112,18 +113,18 @@ static const struct usb_device_id id_table[] = {
 	{ }					/* Terminating entry */
 };
 
-static const struct usb_device_id clie_id_5_table[] = {
+static struct usb_device_id clie_id_5_table [] = {
 	{ USB_DEVICE(SONY_VENDOR_ID, SONY_CLIE_UX50_ID),
 		.driver_info = (kernel_ulong_t)&palm_os_4_probe },
 	{ }					/* Terminating entry */
 };
 
-static const struct usb_device_id clie_id_3_5_table[] = {
+static struct usb_device_id clie_id_3_5_table [] = {
 	{ USB_DEVICE(SONY_VENDOR_ID, SONY_CLIE_3_5_ID) },
 	{ }					/* Terminating entry */
 };
 
-static const struct usb_device_id id_table_combined[] = {
+static struct usb_device_id id_table_combined [] = {
 	{ USB_DEVICE(HANDSPRING_VENDOR_ID, HANDSPRING_VISOR_ID) },
 	{ USB_DEVICE(HANDSPRING_VENDOR_ID, HANDSPRING_TREO_ID) },
 	{ USB_DEVICE(HANDSPRING_VENDOR_ID, HANDSPRING_TREO600_ID) },
@@ -323,8 +324,11 @@ static int palm_os_3_probe(struct usb_serial *serial,
 	int num_ports = 0;
 
 	transfer_buffer = kmalloc(sizeof(*connection_info), GFP_KERNEL);
-	if (!transfer_buffer)
+	if (!transfer_buffer) {
+		dev_err(dev, "%s - kmalloc(%Zd) failed.\n", __func__,
+			sizeof(*connection_info));
 		return -ENOMEM;
+	}
 
 	/* send a get connection info request */
 	retval = usb_control_msg(serial->dev,
@@ -338,48 +342,47 @@ static int palm_os_3_probe(struct usb_serial *serial,
 		goto exit;
 	}
 
-	if (retval != sizeof(*connection_info)) {
-		dev_err(dev, "Invalid connection information received from device\n");
-		retval = -ENODEV;
-		goto exit;
+	if (retval == sizeof(*connection_info)) {
+			connection_info = (struct visor_connection_info *)
+							transfer_buffer;
+
+		num_ports = le16_to_cpu(connection_info->num_ports);
+		for (i = 0; i < num_ports; ++i) {
+			switch (
+			   connection_info->connections[i].port_function_id) {
+			case VISOR_FUNCTION_GENERIC:
+				string = "Generic";
+				break;
+			case VISOR_FUNCTION_DEBUGGER:
+				string = "Debugger";
+				break;
+			case VISOR_FUNCTION_HOTSYNC:
+				string = "HotSync";
+				break;
+			case VISOR_FUNCTION_CONSOLE:
+				string = "Console";
+				break;
+			case VISOR_FUNCTION_REMOTE_FILE_SYS:
+				string = "Remote File System";
+				break;
+			default:
+				string = "unknown";
+				break;
+			}
+			dev_info(dev, "%s: port %d, is for %s use\n",
+				serial->type->description,
+				connection_info->connections[i].port, string);
+		}
 	}
-
-	connection_info = (struct visor_connection_info *)transfer_buffer;
-
-	num_ports = le16_to_cpu(connection_info->num_ports);
-
-	/* Handle devices that report invalid stuff here. */
+	/*
+	* Handle devices that report invalid stuff here.
+	*/
 	if (num_ports == 0 || num_ports > 2) {
 		dev_warn(dev, "%s: No valid connect info available\n",
 			serial->type->description);
 		num_ports = 2;
 	}
 
-	for (i = 0; i < num_ports; ++i) {
-		switch (connection_info->connections[i].port_function_id) {
-		case VISOR_FUNCTION_GENERIC:
-			string = "Generic";
-			break;
-		case VISOR_FUNCTION_DEBUGGER:
-			string = "Debugger";
-			break;
-		case VISOR_FUNCTION_HOTSYNC:
-			string = "HotSync";
-			break;
-		case VISOR_FUNCTION_CONSOLE:
-			string = "Console";
-			break;
-		case VISOR_FUNCTION_REMOTE_FILE_SYS:
-			string = "Remote File System";
-			break;
-		default:
-			string = "unknown";
-			break;
-		}
-		dev_info(dev, "%s: port %d, is for %s use\n",
-			serial->type->description,
-			connection_info->connections[i].port, string);
-	}
 	dev_info(dev, "%s: Number of ports: %d\n", serial->type->description,
 		num_ports);
 
@@ -416,8 +419,11 @@ static int palm_os_4_probe(struct usb_serial *serial,
 	int retval;
 
 	transfer_buffer =  kmalloc(sizeof(*connection_info), GFP_KERNEL);
-	if (!transfer_buffer)
+	if (!transfer_buffer) {
+		dev_err(dev, "%s - kmalloc(%Zd) failed.\n", __func__,
+			sizeof(*connection_info));
 		return -ENOMEM;
+	}
 
 	retval = usb_control_msg(serial->dev,
 				  usb_rcvctrlpipe(serial->dev, 0),
@@ -545,11 +551,6 @@ static int treo_attach(struct usb_serial *serial)
 		(serial->num_interrupt_in == 0))
 		return 0;
 
-	if (serial->num_bulk_in < 2 || serial->num_interrupt_in < 2) {
-		dev_err(&serial->interface->dev, "missing endpoints\n");
-		return -ENODEV;
-	}
-
 	/*
 	* It appears that Treos and Kyoceras want to use the
 	* 1st bulk in endpoint to communicate with the 2nd bulk out endpoint,
@@ -603,10 +604,8 @@ static int clie_5_attach(struct usb_serial *serial)
 	 */
 
 	/* some sanity check */
-	if (serial->num_bulk_out < 2) {
-		dev_err(&serial->interface->dev, "missing bulk out endpoints\n");
-		return -ENODEV;
-	}
+	if (serial->num_ports < 2)
+		return -1;
 
 	/* port 0 now uses the modified endpoint Address */
 	port = serial->port[0];

@@ -33,8 +33,9 @@
 #include <linux/i2c.h>
 #include <linux/videodev2.h>
 #include <media/v4l2-device.h>
+#include <media/v4l2-chip-ident.h>
 #include <media/v4l2-ctrls.h>
-#include <media/i2c/wm8775.h>
+#include <media/wm8775.h>
 
 MODULE_DESCRIPTION("wm8775 driver");
 MODULE_AUTHOR("Ulf Eklund, Hans Verkuil");
@@ -155,6 +156,13 @@ static int wm8775_s_ctrl(struct v4l2_ctrl *ctrl)
 	return -EINVAL;
 }
 
+static int wm8775_g_chip_ident(struct v4l2_subdev *sd, struct v4l2_dbg_chip_ident *chip)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+
+	return v4l2_chip_ident_i2c_client(client, chip, V4L2_IDENT_WM8775, 0);
+}
+
 static int wm8775_log_status(struct v4l2_subdev *sd)
 {
 	struct wm8775_state *state = to_state(sd);
@@ -178,6 +186,14 @@ static const struct v4l2_ctrl_ops wm8775_ctrl_ops = {
 
 static const struct v4l2_subdev_core_ops wm8775_core_ops = {
 	.log_status = wm8775_log_status,
+	.g_chip_ident = wm8775_g_chip_ident,
+	.g_ext_ctrls = v4l2_subdev_g_ext_ctrls,
+	.try_ext_ctrls = v4l2_subdev_try_ext_ctrls,
+	.s_ext_ctrls = v4l2_subdev_s_ext_ctrls,
+	.g_ctrl = v4l2_subdev_g_ctrl,
+	.s_ctrl = v4l2_subdev_s_ctrl,
+	.queryctrl = v4l2_subdev_queryctrl,
+	.querymenu = v4l2_subdev_querymenu,
 };
 
 static const struct v4l2_subdev_tuner_ops wm8775_tuner_ops = {
@@ -223,7 +239,7 @@ static int wm8775_probe(struct i2c_client *client,
 	v4l_info(client, "chip found @ 0x%02x (%s)\n",
 			client->addr << 1, client->adapter->name);
 
-	state = devm_kzalloc(&client->dev, sizeof(*state), GFP_KERNEL);
+	state = kzalloc(sizeof(struct wm8775_state), GFP_KERNEL);
 	if (state == NULL)
 		return -ENOMEM;
 	sd = &state->sd;
@@ -243,6 +259,7 @@ static int wm8775_probe(struct i2c_client *client,
 	err = state->hdl.error;
 	if (err) {
 		v4l2_ctrl_handler_free(&state->hdl);
+		kfree(state);
 		return err;
 	}
 
@@ -300,6 +317,7 @@ static int wm8775_remove(struct i2c_client *client)
 
 	v4l2_device_unregister_subdev(sd);
 	v4l2_ctrl_handler_free(&state->hdl);
+	kfree(state);
 	return 0;
 }
 
@@ -311,6 +329,7 @@ MODULE_DEVICE_TABLE(i2c, wm8775_id);
 
 static struct i2c_driver wm8775_driver = {
 	.driver = {
+		.owner	= THIS_MODULE,
 		.name	= "wm8775",
 	},
 	.probe		= wm8775_probe,

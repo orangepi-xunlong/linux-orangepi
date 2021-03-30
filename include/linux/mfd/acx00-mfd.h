@@ -25,7 +25,7 @@
 #define SYS_CONTROL			0x0002
 #define SYS_IRQ_ENABLE		0x0004
 #define SYS_IRQ_STATUS		0x0006
-/*#define SYS_CLK_CTL			0x0008*/
+//#define SYS_CLK_CTL			0x0008
 #define SYS_DLDO_OSC_CTL	0x000a
 #define SYS_PLL_CTL0		0x000c
 #define SYS_PLL_CTL1		0x000e
@@ -124,8 +124,7 @@ struct acx00 {
 
 /* Device I/O API */
 int acx00_reg_read(struct acx00 *acx00, unsigned short reg);
-int acx00_reg_write(struct acx00 *acx00, unsigned short reg,
-		    unsigned short val);
+int acx00_reg_write(struct acx00 *acx00, unsigned short reg, unsigned short val);
 int acx00_enable(void);
 int acx00_set_bits(struct acx00 *acx00, unsigned short reg,
 		    unsigned short mask, unsigned short val);

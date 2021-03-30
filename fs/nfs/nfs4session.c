@@ -23,15 +23,6 @@
 
 #define NFSDBG_FACILITY		NFSDBG_STATE
 
-static void nfs4_init_slot_table(struct nfs4_slot_table *tbl, const char *queue)
-{
-	tbl->highest_used_slotid = NFS4_NO_SLOT;
-	spin_lock_init(&tbl->slot_tbl_lock);
-	rpc_init_priority_wait_queue(&tbl->slot_tbl_waitq, queue);
-	init_waitqueue_head(&tbl->slot_waitq);
-	init_completion(&tbl->complete);
-}
-
 /*
  * nfs4_shrink_slot_table - free retired slots from the slot table
  */
@@ -51,17 +42,6 @@ static void nfs4_shrink_slot_table(struct nfs4_slot_table  *tbl, u32 newsize)
 		kfree(slot);
 		tbl->max_slots--;
 	}
-}
-
-/**
- * nfs4_slot_tbl_drain_complete - wake waiters when drain is complete
- * @tbl - controlling slot table
- *
- */
-void nfs4_slot_tbl_drain_complete(struct nfs4_slot_table *tbl)
-{
-	if (nfs4_slot_tbl_draining(tbl))
-		complete(&tbl->complete);
 }
 
 /*
@@ -96,7 +76,7 @@ void nfs4_free_slot(struct nfs4_slot_table *tbl, struct nfs4_slot *slot)
 			nfs4_slot_tbl_drain_complete(tbl);
 		}
 	}
-	dprintk("%s: slotid %u highest_used_slotid %u\n", __func__,
+	dprintk("%s: slotid %u highest_used_slotid %d\n", __func__,
 		slotid, tbl->highest_used_slotid);
 }
 
@@ -136,97 +116,6 @@ static struct nfs4_slot *nfs4_find_or_create_slot(struct nfs4_slot_table  *tbl,
 	return ERR_PTR(-ENOMEM);
 }
 
-static void nfs4_lock_slot(struct nfs4_slot_table *tbl,
-		struct nfs4_slot *slot)
-{
-	u32 slotid = slot->slot_nr;
-
-	__set_bit(slotid, tbl->used_slots);
-	if (slotid > tbl->highest_used_slotid ||
-	    tbl->highest_used_slotid == NFS4_NO_SLOT)
-		tbl->highest_used_slotid = slotid;
-	slot->generation = tbl->generation;
-}
-
-/*
- * nfs4_try_to_lock_slot - Given a slot try to allocate it
- *
- * Note: must be called with the slot_tbl_lock held.
- */
-bool nfs4_try_to_lock_slot(struct nfs4_slot_table *tbl, struct nfs4_slot *slot)
-{
-	if (nfs4_test_locked_slot(tbl, slot->slot_nr))
-		return false;
-	nfs4_lock_slot(tbl, slot);
-	return true;
-}
-
-/*
- * nfs4_lookup_slot - Find a slot but don't allocate it
- *
- * Note: must be called with the slot_tbl_lock held.
- */
-struct nfs4_slot *nfs4_lookup_slot(struct nfs4_slot_table *tbl, u32 slotid)
-{
-	if (slotid <= tbl->max_slotid)
-		return nfs4_find_or_create_slot(tbl, slotid, 1, GFP_NOWAIT);
-	return ERR_PTR(-E2BIG);
-}
-
-static int nfs4_slot_get_seqid(struct nfs4_slot_table  *tbl, u32 slotid,
-		u32 *seq_nr)
-	__must_hold(&tbl->slot_tbl_lock)
-{
-	struct nfs4_slot *slot;
-	int ret;
-
-	slot = nfs4_lookup_slot(tbl, slotid);
-	ret = PTR_ERR_OR_ZERO(slot);
-	if (!ret)
-		*seq_nr = slot->seq_nr;
-
-	return ret;
-}
-
-/*
- * nfs4_slot_seqid_in_use - test if a slot sequence id is still in use
- *
- * Given a slot table, slot id and sequence number, determine if the
- * RPC call in question is still in flight. This function is mainly
- * intended for use by the callback channel.
- */
-static bool nfs4_slot_seqid_in_use(struct nfs4_slot_table *tbl,
-		u32 slotid, u32 seq_nr)
-{
-	u32 cur_seq = 0;
-	bool ret = false;
-
-	spin_lock(&tbl->slot_tbl_lock);
-	if (nfs4_slot_get_seqid(tbl, slotid, &cur_seq) == 0 &&
-	    cur_seq == seq_nr && test_bit(slotid, tbl->used_slots))
-		ret = true;
-	spin_unlock(&tbl->slot_tbl_lock);
-	return ret;
-}
-
-/*
- * nfs4_slot_wait_on_seqid - wait until a slot sequence id is complete
- *
- * Given a slot table, slot id and sequence number, wait until the
- * corresponding RPC call completes. This function is mainly
- * intended for use by the callback channel.
- */
-int nfs4_slot_wait_on_seqid(struct nfs4_slot_table *tbl,
-		u32 slotid, u32 seq_nr,
-		unsigned long timeout)
-{
-	if (wait_event_timeout(tbl->slot_waitq,
-			!nfs4_slot_seqid_in_use(tbl, slotid, seq_nr),
-			timeout) == 0)
-		return -ETIMEDOUT;
-	return 0;
-}
-
 /*
  * nfs4_alloc_slot - efficiently look for a free slot
  *
@@ -245,14 +134,21 @@ struct nfs4_slot *nfs4_alloc_slot(struct nfs4_slot_table *tbl)
 		__func__, tbl->used_slots[0], tbl->highest_used_slotid,
 		tbl->max_slotid + 1);
 	slotid = find_first_zero_bit(tbl->used_slots, tbl->max_slotid + 1);
-	if (slotid <= tbl->max_slotid) {
-		ret = nfs4_find_or_create_slot(tbl, slotid, 1, GFP_NOWAIT);
-		if (!IS_ERR(ret))
-			nfs4_lock_slot(tbl, ret);
-	}
-	dprintk("<-- %s used_slots=%04lx highest_used=%u slotid=%u\n",
+	if (slotid > tbl->max_slotid)
+		goto out;
+	ret = nfs4_find_or_create_slot(tbl, slotid, 1, GFP_NOWAIT);
+	if (IS_ERR(ret))
+		goto out;
+	__set_bit(slotid, tbl->used_slots);
+	if (slotid > tbl->highest_used_slotid ||
+			tbl->highest_used_slotid == NFS4_NO_SLOT)
+		tbl->highest_used_slotid = slotid;
+	ret->generation = tbl->generation;
+
+out:
+	dprintk("<-- %s used_slots=%04lx highest_used=%d slotid=%d \n",
 		__func__, tbl->used_slots[0], tbl->highest_used_slotid,
-		!IS_ERR(ret) ? ret->slot_nr : NFS4_NO_SLOT);
+		!IS_ERR(ret) ? ret->slot_nr : -1);
 	return ret;
 }
 
@@ -295,7 +191,7 @@ static int nfs4_realloc_slot_table(struct nfs4_slot_table *tbl,
 {
 	int ret;
 
-	dprintk("--> %s: max_reqs=%u, tbl->max_slots %u\n", __func__,
+	dprintk("--> %s: max_reqs=%u, tbl->max_slots %d\n", __func__,
 		max_reqs, tbl->max_slots);
 
 	if (max_reqs > NFS4_MAX_SLOT_TABLE)
@@ -309,45 +205,18 @@ static int nfs4_realloc_slot_table(struct nfs4_slot_table *tbl,
 	nfs4_reset_slot_table(tbl, max_reqs - 1, ivalue);
 	spin_unlock(&tbl->slot_tbl_lock);
 
-	dprintk("%s: tbl=%p slots=%p max_slots=%u\n", __func__,
+	dprintk("%s: tbl=%p slots=%p max_slots=%d\n", __func__,
 		tbl, tbl->slots, tbl->max_slots);
 out:
 	dprintk("<-- %s: return %d\n", __func__, ret);
 	return ret;
 }
 
-/*
- * nfs4_release_slot_table - release all slot table entries
- */
-static void nfs4_release_slot_table(struct nfs4_slot_table *tbl)
+/* Destroy the slot table */
+static void nfs4_destroy_slot_tables(struct nfs4_session *session)
 {
-	nfs4_shrink_slot_table(tbl, 0);
-}
-
-/**
- * nfs4_shutdown_slot_table - release resources attached to a slot table
- * @tbl: slot table to shut down
- *
- */
-void nfs4_shutdown_slot_table(struct nfs4_slot_table *tbl)
-{
-	nfs4_release_slot_table(tbl);
-	rpc_destroy_wait_queue(&tbl->slot_tbl_waitq);
-}
-
-/**
- * nfs4_setup_slot_table - prepare a stand-alone slot table for use
- * @tbl: slot table to set up
- * @max_reqs: maximum number of requests allowed
- * @queue: name to give RPC wait queue
- *
- * Returns zero on success, or a negative errno.
- */
-int nfs4_setup_slot_table(struct nfs4_slot_table *tbl, unsigned int max_reqs,
-		const char *queue)
-{
-	nfs4_init_slot_table(tbl, queue);
-	return nfs4_realloc_slot_table(tbl, max_reqs, 0);
+	nfs4_shrink_slot_table(&session->fc_slot_table, 0);
+	nfs4_shrink_slot_table(&session->bc_slot_table, 0);
 }
 
 static bool nfs41_assign_slot(struct rpc_task *task, void *pslot)
@@ -403,8 +272,6 @@ void nfs41_wake_slot_table(struct nfs4_slot_table *tbl)
 			break;
 	}
 }
-
-#if defined(CONFIG_NFS_V4_1)
 
 static void nfs41_set_max_slotid_locked(struct nfs4_slot_table *tbl,
 		u32 target_highest_slotid)
@@ -516,12 +383,6 @@ void nfs41_update_target_slotid(struct nfs4_slot_table *tbl,
 	spin_unlock(&tbl->slot_tbl_lock);
 }
 
-static void nfs4_release_session_slot_tables(struct nfs4_session *session)
-{
-	nfs4_release_slot_table(&session->fc_slot_table);
-	nfs4_release_slot_table(&session->bc_slot_table);
-}
-
 /*
  * Initialize or reset the forechannel and backchannel tables
  */
@@ -535,7 +396,7 @@ int nfs4_setup_session_slot_tables(struct nfs4_session *ses)
 	tbl = &ses->fc_slot_table;
 	tbl->session = ses;
 	status = nfs4_realloc_slot_table(tbl, ses->fc_attrs.max_reqs, 1);
-	if (status || !(ses->flags & SESSION4_BACK_CHAN)) /* -ENOMEM */
+	if (status) /* -ENOMEM */
 		return status;
 	/* Back channel */
 	tbl = &ses->bc_slot_table;
@@ -544,30 +405,35 @@ int nfs4_setup_session_slot_tables(struct nfs4_session *ses)
 	if (status && tbl->slots == NULL)
 		/* Fore and back channel share a connection so get
 		 * both slot tables or neither */
-		nfs4_release_session_slot_tables(ses);
+		nfs4_destroy_slot_tables(ses);
 	return status;
 }
 
 struct nfs4_session *nfs4_alloc_session(struct nfs_client *clp)
 {
 	struct nfs4_session *session;
+	struct nfs4_slot_table *tbl;
 
 	session = kzalloc(sizeof(struct nfs4_session), GFP_NOFS);
 	if (!session)
 		return NULL;
 
-	nfs4_init_slot_table(&session->fc_slot_table, "ForeChannel Slot table");
-	nfs4_init_slot_table(&session->bc_slot_table, "BackChannel Slot table");
+	tbl = &session->fc_slot_table;
+	tbl->highest_used_slotid = NFS4_NO_SLOT;
+	spin_lock_init(&tbl->slot_tbl_lock);
+	rpc_init_priority_wait_queue(&tbl->slot_tbl_waitq, "ForeChannel Slot table");
+	init_completion(&tbl->complete);
+
+	tbl = &session->bc_slot_table;
+	tbl->highest_used_slotid = NFS4_NO_SLOT;
+	spin_lock_init(&tbl->slot_tbl_lock);
+	rpc_init_wait_queue(&tbl->slot_tbl_waitq, "BackChannel Slot table");
+	init_completion(&tbl->complete);
+
 	session->session_state = 1<<NFS4_SESSION_INITING;
 
 	session->clp = clp;
 	return session;
-}
-
-static void nfs4_destroy_session_slot_tables(struct nfs4_session *session)
-{
-	nfs4_shutdown_slot_table(&session->fc_slot_table);
-	nfs4_shutdown_slot_table(&session->bc_slot_table);
 }
 
 void nfs4_destroy_session(struct nfs4_session *session)
@@ -575,7 +441,7 @@ void nfs4_destroy_session(struct nfs4_session *session)
 	struct rpc_xprt *xprt;
 	struct rpc_cred *cred;
 
-	cred = nfs4_get_clid_cred(session->clp);
+	cred = nfs4_get_exchange_id_cred(session->clp);
 	nfs4_proc_destroy_session(session, cred);
 	if (cred)
 		put_rpccred(cred);
@@ -586,7 +452,7 @@ void nfs4_destroy_session(struct nfs4_session *session)
 	dprintk("%s Destroy backchannel for xprt %p\n",
 		__func__, xprt);
 	xprt_destroy_backchannel(xprt, NFS41_BC_MIN_CALLBACKS);
-	nfs4_destroy_session_slot_tables(session);
+	nfs4_destroy_slot_tables(session);
 	kfree(session);
 }
 
@@ -612,12 +478,48 @@ static int nfs41_check_session_ready(struct nfs_client *clp)
 	return 0;
 }
 
-int nfs4_init_session(struct nfs_client *clp)
+int nfs4_init_session(struct nfs_server *server)
 {
+	struct nfs_client *clp = server->nfs_client;
+	struct nfs4_session *session;
+	unsigned int target_max_rqst_sz = NFS_MAX_FILE_IO_SIZE;
+	unsigned int target_max_resp_sz = NFS_MAX_FILE_IO_SIZE;
+
 	if (!nfs4_has_session(clp))
 		return 0;
 
-	clear_bit(NFS4_SESSION_INITING, &clp->cl_session->session_state);
+	if (server->rsize != 0)
+		target_max_resp_sz = server->rsize;
+	target_max_resp_sz += nfs41_maxread_overhead;
+
+	if (server->wsize != 0)
+		target_max_rqst_sz = server->wsize;
+	target_max_rqst_sz += nfs41_maxwrite_overhead;
+
+	session = clp->cl_session;
+	spin_lock(&clp->cl_lock);
+	if (test_and_clear_bit(NFS4_SESSION_INITING, &session->session_state)) {
+		/* Initialise targets and channel attributes */
+		session->fc_target_max_rqst_sz = target_max_rqst_sz;
+		session->fc_attrs.max_rqst_sz = target_max_rqst_sz;
+		session->fc_target_max_resp_sz = target_max_resp_sz;
+		session->fc_attrs.max_resp_sz = target_max_resp_sz;
+	} else {
+		/* Just adjust the targets */
+		if (target_max_rqst_sz > session->fc_target_max_rqst_sz) {
+			session->fc_target_max_rqst_sz = target_max_rqst_sz;
+			set_bit(NFS4CLNT_SESSION_RESET, &clp->cl_state);
+		}
+		if (target_max_resp_sz > session->fc_target_max_resp_sz) {
+			session->fc_target_max_resp_sz = target_max_resp_sz;
+			set_bit(NFS4CLNT_SESSION_RESET, &clp->cl_state);
+		}
+	}
+	spin_unlock(&clp->cl_lock);
+
+	if (test_bit(NFS4CLNT_SESSION_RESET, &clp->cl_state))
+		nfs4_schedule_lease_recovery(clp);
+
 	return nfs41_check_session_ready(clp);
 }
 
@@ -647,4 +549,4 @@ int nfs4_init_ds_session(struct nfs_client *clp, unsigned long lease_time)
 }
 EXPORT_SYMBOL_GPL(nfs4_init_ds_session);
 
-#endif	/* defined(CONFIG_NFS_V4_1) */
+

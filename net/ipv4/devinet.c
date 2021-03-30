@@ -59,6 +59,7 @@
 
 #include <net/arp.h>
 #include <net/ip.h>
+#include <net/tcp.h>
 #include <net/route.h>
 #include <net/ip_fib.h>
 #include <net/rtnetlink.h>
@@ -73,8 +74,6 @@ static struct ipv4_devconf ipv4_devconf = {
 		[IPV4_DEVCONF_SEND_REDIRECTS - 1] = 1,
 		[IPV4_DEVCONF_SECURE_REDIRECTS - 1] = 1,
 		[IPV4_DEVCONF_SHARED_MEDIA - 1] = 1,
-		[IPV4_DEVCONF_IGMPV2_UNSOLICITED_REPORT_INTERVAL - 1] = 10000 /*ms*/,
-		[IPV4_DEVCONF_IGMPV3_UNSOLICITED_REPORT_INTERVAL - 1] =  1000 /*ms*/,
 	},
 };
 
@@ -85,8 +84,6 @@ static struct ipv4_devconf ipv4_devconf_dflt = {
 		[IPV4_DEVCONF_SECURE_REDIRECTS - 1] = 1,
 		[IPV4_DEVCONF_SHARED_MEDIA - 1] = 1,
 		[IPV4_DEVCONF_ACCEPT_SOURCE_ROUTE - 1] = 1,
-		[IPV4_DEVCONF_IGMPV2_UNSOLICITED_REPORT_INTERVAL - 1] = 10000 /*ms*/,
-		[IPV4_DEVCONF_IGMPV3_UNSOLICITED_REPORT_INTERVAL - 1] =  1000 /*ms*/,
 	},
 };
 
@@ -99,15 +96,15 @@ static const struct nla_policy ifa_ipv4_policy[IFA_MAX+1] = {
 	[IFA_BROADCAST] 	= { .type = NLA_U32 },
 	[IFA_LABEL]     	= { .type = NLA_STRING, .len = IFNAMSIZ - 1 },
 	[IFA_CACHEINFO]		= { .len = sizeof(struct ifa_cacheinfo) },
-	[IFA_FLAGS]		= { .type = NLA_U32 },
 };
 
 #define IN4_ADDR_HSIZE_SHIFT	8
 #define IN4_ADDR_HSIZE		(1U << IN4_ADDR_HSIZE_SHIFT)
 
 static struct hlist_head inet_addr_lst[IN4_ADDR_HSIZE];
+static DEFINE_SPINLOCK(inet_addr_hash_lock);
 
-static u32 inet_addr_hash(const struct net *net, __be32 addr)
+static u32 inet_addr_hash(struct net *net, __be32 addr)
 {
 	u32 val = (__force u32) addr ^ net_hash_mix(net);
 
@@ -118,14 +115,16 @@ static void inet_hash_insert(struct net *net, struct in_ifaddr *ifa)
 {
 	u32 hash = inet_addr_hash(net, ifa->ifa_local);
 
-	ASSERT_RTNL();
+	spin_lock(&inet_addr_hash_lock);
 	hlist_add_head_rcu(&ifa->hash, &inet_addr_lst[hash]);
+	spin_unlock(&inet_addr_hash_lock);
 }
 
 static void inet_hash_remove(struct in_ifaddr *ifa)
 {
-	ASSERT_RTNL();
+	spin_lock(&inet_addr_hash_lock);
 	hlist_del_init_rcu(&ifa->hash);
+	spin_unlock(&inet_addr_hash_lock);
 }
 
 /**
@@ -180,12 +179,11 @@ static BLOCKING_NOTIFIER_HEAD(inetaddr_chain);
 static void inet_del_ifa(struct in_device *in_dev, struct in_ifaddr **ifap,
 			 int destroy);
 #ifdef CONFIG_SYSCTL
-static int devinet_sysctl_register(struct in_device *idev);
+static void devinet_sysctl_register(struct in_device *idev);
 static void devinet_sysctl_unregister(struct in_device *idev);
 #else
-static int devinet_sysctl_register(struct in_device *idev)
+static void devinet_sysctl_register(struct in_device *idev)
 {
-	return 0;
 }
 static void devinet_sysctl_unregister(struct in_device *idev)
 {
@@ -218,7 +216,6 @@ void in_dev_finish_destroy(struct in_device *idev)
 
 	WARN_ON(idev->ifa_list);
 	WARN_ON(idev->mc_list);
-	kfree(rcu_dereference_protected(idev->mc_hash, 1));
 #ifdef NET_REFCNT_DEBUG
 	pr_debug("%s: %p=%s\n", __func__, idev, dev ? dev->name : "NIL");
 #endif
@@ -233,7 +230,6 @@ EXPORT_SYMBOL(in_dev_finish_destroy);
 static struct in_device *inetdev_init(struct net_device *dev)
 {
 	struct in_device *in_dev;
-	int err = -ENOMEM;
 
 	ASSERT_RTNL();
 
@@ -254,13 +250,7 @@ static struct in_device *inetdev_init(struct net_device *dev)
 	/* Account for reference dev->ip_ptr (below) */
 	in_dev_hold(in_dev);
 
-	err = devinet_sysctl_register(in_dev);
-	if (err) {
-		in_dev->dead = 1;
-		in_dev_put(in_dev);
-		in_dev = NULL;
-		goto out;
-	}
+	devinet_sysctl_register(in_dev);
 	ip_mc_init_dev(in_dev);
 	if (dev->flags & IFF_UP)
 		ip_mc_up(in_dev);
@@ -268,7 +258,7 @@ static struct in_device *inetdev_init(struct net_device *dev)
 	/* we can receive as soon as ip_ptr is set -- do this last */
 	rcu_assign_pointer(dev->ip_ptr, in_dev);
 out:
-	return in_dev ?: ERR_PTR(err);
+	return in_dev;
 out_kfree:
 	kfree(in_dev);
 	in_dev = NULL;
@@ -334,9 +324,6 @@ static void __inet_del_ifa(struct in_device *in_dev, struct in_ifaddr **ifap,
 
 	ASSERT_RTNL();
 
-	if (in_dev->dead)
-		goto no_promotions;
-
 	/* 1. Deleting primary ifaddr forces deletion all secondaries
 	 * unless alias promotion is set
 	 **/
@@ -383,7 +370,6 @@ static void __inet_del_ifa(struct in_device *in_dev, struct in_ifaddr **ifap,
 			fib_del_ifaddr(ifa, ifa1);
 	}
 
-no_promotions:
 	/* 2. Unlink it */
 
 	*ifap = ifa1->ifa_next;
@@ -473,7 +459,7 @@ static int __inet_insert_ifa(struct in_ifaddr *ifa, struct nlmsghdr *nlh,
 	}
 
 	if (!(ifa->ifa_flags & IFA_F_SECONDARY)) {
-		prandom_seed((__force u32) ifa->ifa_local);
+		net_srandom(ifa->ifa_local);
 		ifap = last_primary;
 	}
 
@@ -483,7 +469,7 @@ static int __inet_insert_ifa(struct in_ifaddr *ifa, struct nlmsghdr *nlh,
 	inet_hash_insert(dev_net(in_dev->dev), ifa);
 
 	cancel_delayed_work(&check_lifetime_work);
-	queue_delayed_work(system_power_efficient_wq, &check_lifetime_work, 0);
+	schedule_delayed_work(&check_lifetime_work, 0);
 
 	/* Send message first, then call notifier.
 	   Notifier will trigger FIB update, so that
@@ -510,7 +496,6 @@ static int inet_set_ifa(struct net_device *dev, struct in_ifaddr *ifa)
 		return -ENOBUFS;
 	}
 	ipv4_devconf_setall(in_dev);
-	neigh_parms_data_state_setall(in_dev->arp_parms);
 	if (ifa->ifa_dev != in_dev) {
 		WARN_ON(ifa->ifa_dev);
 		in_dev_hold(in_dev);
@@ -552,26 +537,6 @@ struct in_ifaddr *inet_ifa_byprefix(struct in_device *in_dev, __be32 prefix,
 	return NULL;
 }
 
-static int ip_mc_config(struct sock *sk, bool join, const struct in_ifaddr *ifa)
-{
-	struct ip_mreqn mreq = {
-		.imr_multiaddr.s_addr = ifa->ifa_address,
-		.imr_ifindex = ifa->ifa_dev->dev->ifindex,
-	};
-	int ret;
-
-	ASSERT_RTNL();
-
-	lock_sock(sk);
-	if (join)
-		ret = ip_mc_join_group(sk, &mreq);
-	else
-		ret = ip_mc_leave_group(sk, &mreq);
-	release_sock(sk);
-
-	return ret;
-}
-
 static int inet_rtm_deladdr(struct sk_buff *skb, struct nlmsghdr *nlh)
 {
 	struct net *net = sock_net(skb->sk);
@@ -589,7 +554,7 @@ static int inet_rtm_deladdr(struct sk_buff *skb, struct nlmsghdr *nlh)
 
 	ifm = nlmsg_data(nlh);
 	in_dev = inetdev_by_index(net, ifm->ifa_index);
-	if (!in_dev) {
+	if (in_dev == NULL) {
 		err = -ENODEV;
 		goto errout;
 	}
@@ -597,7 +562,7 @@ static int inet_rtm_deladdr(struct sk_buff *skb, struct nlmsghdr *nlh)
 	for (ifap = &in_dev->ifa_list; (ifa = *ifap) != NULL;
 	     ifap = &ifa->ifa_next) {
 		if (tb[IFA_LOCAL] &&
-		    ifa->ifa_local != nla_get_in_addr(tb[IFA_LOCAL]))
+		    ifa->ifa_local != nla_get_be32(tb[IFA_LOCAL]))
 			continue;
 
 		if (tb[IFA_LABEL] && nla_strcmp(tb[IFA_LABEL], ifa->ifa_label))
@@ -605,11 +570,9 @@ static int inet_rtm_deladdr(struct sk_buff *skb, struct nlmsghdr *nlh)
 
 		if (tb[IFA_ADDRESS] &&
 		    (ifm->ifa_prefixlen != ifa->ifa_prefixlen ||
-		    !inet_ifa_match(nla_get_in_addr(tb[IFA_ADDRESS]), ifa)))
+		    !inet_ifa_match(nla_get_be32(tb[IFA_ADDRESS]), ifa)))
 			continue;
 
-		if (ipv4_is_multicast(ifa->ifa_address))
-			ip_mc_config(net->ipv4.mc_autojoin_sk, false, ifa);
 		__inet_del_ifa(in_dev, ifap, 1, nlh, NETLINK_CB(skb).portid);
 		return 0;
 	}
@@ -715,8 +678,7 @@ static void check_lifetime(struct work_struct *work)
 	if (time_before(next_sched, now + ADDRCONF_TIMER_FUZZ_MAX))
 		next_sched = now + ADDRCONF_TIMER_FUZZ_MAX;
 
-	queue_delayed_work(system_power_efficient_wq, &check_lifetime_work,
-			next_sched - now);
+	schedule_delayed_work(&check_lifetime_work, next_sched - now);
 }
 
 static void set_ifa_lifetime(struct in_ifaddr *ifa, __u32 valid_lft,
@@ -759,21 +721,21 @@ static struct in_ifaddr *rtm_to_ifaddr(struct net *net, struct nlmsghdr *nlh,
 
 	ifm = nlmsg_data(nlh);
 	err = -EINVAL;
-	if (ifm->ifa_prefixlen > 32 || !tb[IFA_LOCAL])
+	if (ifm->ifa_prefixlen > 32 || tb[IFA_LOCAL] == NULL)
 		goto errout;
 
 	dev = __dev_get_by_index(net, ifm->ifa_index);
 	err = -ENODEV;
-	if (!dev)
+	if (dev == NULL)
 		goto errout;
 
 	in_dev = __in_dev_get_rtnl(dev);
 	err = -ENOBUFS;
-	if (!in_dev)
+	if (in_dev == NULL)
 		goto errout;
 
 	ifa = inet_alloc_ifa();
-	if (!ifa)
+	if (ifa == NULL)
 		/*
 		 * A potential indev allocation can be left alive, it stays
 		 * assigned to its device and is destroy with it.
@@ -781,25 +743,23 @@ static struct in_ifaddr *rtm_to_ifaddr(struct net *net, struct nlmsghdr *nlh,
 		goto errout;
 
 	ipv4_devconf_setall(in_dev);
-	neigh_parms_data_state_setall(in_dev->arp_parms);
 	in_dev_hold(in_dev);
 
-	if (!tb[IFA_ADDRESS])
+	if (tb[IFA_ADDRESS] == NULL)
 		tb[IFA_ADDRESS] = tb[IFA_LOCAL];
 
 	INIT_HLIST_NODE(&ifa->hash);
 	ifa->ifa_prefixlen = ifm->ifa_prefixlen;
 	ifa->ifa_mask = inet_make_mask(ifm->ifa_prefixlen);
-	ifa->ifa_flags = tb[IFA_FLAGS] ? nla_get_u32(tb[IFA_FLAGS]) :
-					 ifm->ifa_flags;
+	ifa->ifa_flags = ifm->ifa_flags;
 	ifa->ifa_scope = ifm->ifa_scope;
 	ifa->ifa_dev = in_dev;
 
-	ifa->ifa_local = nla_get_in_addr(tb[IFA_LOCAL]);
-	ifa->ifa_address = nla_get_in_addr(tb[IFA_ADDRESS]);
+	ifa->ifa_local = nla_get_be32(tb[IFA_LOCAL]);
+	ifa->ifa_address = nla_get_be32(tb[IFA_ADDRESS]);
 
 	if (tb[IFA_BROADCAST])
-		ifa->ifa_broadcast = nla_get_in_addr(tb[IFA_BROADCAST]);
+		ifa->ifa_broadcast = nla_get_be32(tb[IFA_BROADCAST]);
 
 	if (tb[IFA_LABEL])
 		nla_strlcpy(ifa->ifa_label, tb[IFA_LABEL], IFNAMSIZ);
@@ -861,18 +821,9 @@ static int inet_rtm_newaddr(struct sk_buff *skb, struct nlmsghdr *nlh)
 	ifa_existing = find_matching_ifa(ifa);
 	if (!ifa_existing) {
 		/* It would be best to check for !NLM_F_CREATE here but
-		 * userspace already relies on not having to provide this.
+		 * userspace alreay relies on not having to provide this.
 		 */
 		set_ifa_lifetime(ifa, valid_lft, prefered_lft);
-		if (ifa->ifa_flags & IFA_F_MCAUTOJOIN) {
-			int ret = ip_mc_config(net->ipv4.mc_autojoin_sk,
-					       true, ifa);
-
-			if (ret < 0) {
-				inet_free_ifa(ifa);
-				return ret;
-			}
-		}
 		return __inet_insert_ifa(ifa, nlh, NETLINK_CB(skb).portid);
 	} else {
 		inet_free_ifa(ifa);
@@ -883,9 +834,9 @@ static int inet_rtm_newaddr(struct sk_buff *skb, struct nlmsghdr *nlh)
 		ifa = ifa_existing;
 		set_ifa_lifetime(ifa, valid_lft, prefered_lft);
 		cancel_delayed_work(&check_lifetime_work);
-		queue_delayed_work(system_power_efficient_wq,
-				&check_lifetime_work, 0);
+		schedule_delayed_work(&check_lifetime_work, 0);
 		rtmsg_ifa(RTM_NEWADDR, ifa, nlh, NETLINK_CB(skb).portid);
+		blocking_notifier_call_chain(&inetaddr_chain, NETDEV_UP, ifa);
 	}
 	return 0;
 }
@@ -968,6 +919,7 @@ int devinet_ioctl(struct net *net, unsigned int cmd, void __user *arg)
 	case SIOCSIFBRDADDR:	/* Set the broadcast address */
 	case SIOCSIFDSTADDR:	/* Set the destination address */
 	case SIOCSIFNETMASK: 	/* Set the netmask for the interface */
+	case SIOCKILLADDR:	/* Nuke all sockets on this address */
 		ret = -EPERM;
 		if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
 			goto out;
@@ -1019,7 +971,8 @@ int devinet_ioctl(struct net *net, unsigned int cmd, void __user *arg)
 	}
 
 	ret = -EADDRNOTAVAIL;
-	if (!ifa && cmd != SIOCSIFADDR && cmd != SIOCSIFFLAGS)
+	if (!ifa && cmd != SIOCSIFADDR && cmd != SIOCSIFFLAGS
+	    && cmd != SIOCKILLADDR)
 		goto done;
 
 	switch (cmd) {
@@ -1146,6 +1099,9 @@ int devinet_ioctl(struct net *net, unsigned int cmd, void __user *arg)
 			inet_insert_ifa(ifa);
 		}
 		break;
+	case SIOCKILLADDR:	/* Nuke all connections on this address */
+		ret = tcp_nuke_addr(net, (struct sockaddr *) sin);
+		break;
 	}
 done:
 	rtnl_unlock();
@@ -1175,7 +1131,10 @@ static int inet_gifconf(struct net_device *dev, char __user *buf, int len)
 		if (len < (int) sizeof(ifr))
 			break;
 		memset(&ifr, 0, sizeof(struct ifreq));
-		strcpy(ifr.ifr_name, ifa->ifa_label);
+		if (ifa->ifa_label)
+			strcpy(ifr.ifr_name, ifa->ifa_label);
+		else
+			strcpy(ifr.ifr_name, dev->name);
 
 		(*(struct sockaddr_in *)&ifr.ifr_addr).sin_family = AF_INET;
 		(*(struct sockaddr_in *)&ifr.ifr_addr).sin_addr.s_addr =
@@ -1198,7 +1157,6 @@ __be32 inet_select_addr(const struct net_device *dev, __be32 dst, int scope)
 	__be32 addr = 0;
 	struct in_device *in_dev;
 	struct net *net = dev_net(dev);
-	int master_idx;
 
 	rcu_read_lock();
 	in_dev = __in_dev_get_rcu(dev);
@@ -1219,33 +1177,12 @@ __be32 inet_select_addr(const struct net_device *dev, __be32 dst, int scope)
 	if (addr)
 		goto out_unlock;
 no_in_dev:
-	master_idx = l3mdev_master_ifindex_rcu(dev);
-
-	/* For VRFs, the VRF device takes the place of the loopback device,
-	 * with addresses on it being preferred.  Note in such cases the
-	 * loopback device will be among the devices that fail the master_idx
-	 * equality check in the loop below.
-	 */
-	if (master_idx &&
-	    (dev = dev_get_by_index_rcu(net, master_idx)) &&
-	    (in_dev = __in_dev_get_rcu(dev))) {
-		for_primary_ifa(in_dev) {
-			if (ifa->ifa_scope != RT_SCOPE_LINK &&
-			    ifa->ifa_scope <= scope) {
-				addr = ifa->ifa_local;
-				goto out_unlock;
-			}
-		} endfor_ifa(in_dev);
-	}
 
 	/* Not loopback addresses on loopback should be preferred
-	   in this case. It is important that lo is the first interface
+	   in this case. It is importnat that lo is the first interface
 	   in dev_base list.
 	 */
 	for_each_netdev_rcu(net, dev) {
-		if (l3mdev_master_ifindex_rcu(dev) != master_idx)
-			continue;
-
 		in_dev = __in_dev_get_rcu(dev);
 		if (!in_dev)
 			continue;
@@ -1303,21 +1240,22 @@ static __be32 confirm_addr_indev(struct in_device *in_dev, __be32 dst,
 
 /*
  * Confirm that local IP address exists using wildcards:
- * - net: netns to check, cannot be NULL
- * - in_dev: only on this interface, NULL=any interface
+ * - in_dev: only on this interface, 0=any interface
  * - dst: only in the same subnet as dst, 0=any dst
  * - local: address, 0=autoselect the local address
  * - scope: maximum allowed scope value for the local address
  */
-__be32 inet_confirm_addr(struct net *net, struct in_device *in_dev,
+__be32 inet_confirm_addr(struct in_device *in_dev,
 			 __be32 dst, __be32 local, int scope)
 {
 	__be32 addr = 0;
 	struct net_device *dev;
+	struct net *net;
 
-	if (in_dev)
+	if (scope != RT_SCOPE_LINK)
 		return confirm_addr_indev(in_dev, dst, local, scope);
 
+	net = dev_net(in_dev->dev);
 	rcu_read_lock();
 	for_each_netdev_rcu(net, dev) {
 		in_dev = __in_dev_get_rcu(dev);
@@ -1365,7 +1303,7 @@ static void inetdev_changename(struct net_device *dev, struct in_device *in_dev)
 		if (named++ == 0)
 			goto skip;
 		dot = strchr(old, ':');
-		if (!dot) {
+		if (dot == NULL) {
 			sprintf(old, ":%d", named);
 			dot = old;
 		}
@@ -1380,7 +1318,7 @@ skip:
 
 static bool inetdev_valid_mtu(unsigned int mtu)
 {
-	return mtu >= IPV4_MIN_MTU;
+	return mtu >= 68;
 }
 
 static void inetdev_send_gratuitous_arp(struct net_device *dev,
@@ -1403,7 +1341,7 @@ static void inetdev_send_gratuitous_arp(struct net_device *dev,
 static int inetdev_event(struct notifier_block *this, unsigned long event,
 			 void *ptr)
 {
-	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
+	struct net_device *dev = ptr;
 	struct in_device *in_dev = __in_dev_get_rtnl(dev);
 
 	ASSERT_RTNL();
@@ -1411,8 +1349,8 @@ static int inetdev_event(struct notifier_block *this, unsigned long event,
 	if (!in_dev) {
 		if (event == NETDEV_REGISTER) {
 			in_dev = inetdev_init(dev);
-			if (IS_ERR(in_dev))
-				return notifier_from_errno(PTR_ERR(in_dev));
+			if (!in_dev)
+				return notifier_from_errno(-ENOMEM);
 			if (dev->flags & IFF_LOOPBACK) {
 				IN_DEV_CONF_SET(in_dev, NOXFRM, 1);
 				IN_DEV_CONF_SET(in_dev, NOPOLICY, 1);
@@ -1448,8 +1386,6 @@ static int inetdev_event(struct notifier_block *this, unsigned long event,
 				memcpy(ifa->ifa_label, dev->name, IFNAMSIZ);
 				set_ifa_lifetime(ifa, INFINITY_LIFE_TIME,
 						 INFINITY_LIFE_TIME);
-				ipv4_devconf_setall(in_dev);
-				neigh_parms_data_state_setall(in_dev->arp_parms);
 				inet_insert_ifa(ifa);
 			}
 		}
@@ -1504,7 +1440,6 @@ static size_t inet_nlmsg_size(void)
 	       + nla_total_size(4) /* IFA_LOCAL */
 	       + nla_total_size(4) /* IFA_BROADCAST */
 	       + nla_total_size(IFNAMSIZ) /* IFA_LABEL */
-	       + nla_total_size(4)  /* IFA_FLAGS */
 	       + nla_total_size(sizeof(struct ifa_cacheinfo)); /* IFA_CACHEINFO */
 }
 
@@ -1534,7 +1469,7 @@ static int inet_fill_ifaddr(struct sk_buff *skb, struct in_ifaddr *ifa,
 	u32 preferred, valid;
 
 	nlh = nlmsg_put(skb, portid, seq, event, sizeof(*ifm), flags);
-	if (!nlh)
+	if (nlh == NULL)
 		return -EMSGSIZE;
 
 	ifm = nlmsg_data(nlh);
@@ -1566,20 +1501,18 @@ static int inet_fill_ifaddr(struct sk_buff *skb, struct in_ifaddr *ifa,
 		valid = INFINITY_LIFE_TIME;
 	}
 	if ((ifa->ifa_address &&
-	     nla_put_in_addr(skb, IFA_ADDRESS, ifa->ifa_address)) ||
+	     nla_put_be32(skb, IFA_ADDRESS, ifa->ifa_address)) ||
 	    (ifa->ifa_local &&
-	     nla_put_in_addr(skb, IFA_LOCAL, ifa->ifa_local)) ||
+	     nla_put_be32(skb, IFA_LOCAL, ifa->ifa_local)) ||
 	    (ifa->ifa_broadcast &&
-	     nla_put_in_addr(skb, IFA_BROADCAST, ifa->ifa_broadcast)) ||
+	     nla_put_be32(skb, IFA_BROADCAST, ifa->ifa_broadcast)) ||
 	    (ifa->ifa_label[0] &&
 	     nla_put_string(skb, IFA_LABEL, ifa->ifa_label)) ||
-	    nla_put_u32(skb, IFA_FLAGS, ifa->ifa_flags) ||
 	    put_cacheinfo(skb, ifa->ifa_cstamp, ifa->ifa_tstamp,
 			  preferred, valid))
 		goto nla_put_failure;
 
-	nlmsg_end(skb, nlh);
-	return 0;
+	return nlmsg_end(skb, nlh);
 
 nla_put_failure:
 	nlmsg_cancel(skb, nlh);
@@ -1623,7 +1556,7 @@ static int inet_dump_ifaddr(struct sk_buff *skb, struct netlink_callback *cb)
 				if (inet_fill_ifaddr(skb, ifa,
 					     NETLINK_CB(cb->skb).portid,
 					     cb->nlh->nlmsg_seq,
-					     RTM_NEWADDR, NLM_F_MULTI) < 0) {
+					     RTM_NEWADDR, NLM_F_MULTI) <= 0) {
 					rcu_read_unlock();
 					goto done;
 				}
@@ -1653,7 +1586,7 @@ static void rtmsg_ifa(int event, struct in_ifaddr *ifa, struct nlmsghdr *nlh,
 
 	net = dev_net(ifa->ifa_dev->dev);
 	skb = nlmsg_new(inet_nlmsg_size(), GFP_KERNEL);
-	if (!skb)
+	if (skb == NULL)
 		goto errout;
 
 	err = inet_fill_ifaddr(skb, ifa, portid, seq, event, 0);
@@ -1670,8 +1603,7 @@ errout:
 		rtnl_set_sk_err(net, RTNLGRP_IPV4_IFADDR, err);
 }
 
-static size_t inet_get_link_af_size(const struct net_device *dev,
-				    u32 ext_filter_mask)
+static size_t inet_get_link_af_size(const struct net_device *dev)
 {
 	struct in_device *in_dev = rcu_dereference_rtnl(dev->ip_ptr);
 
@@ -1681,8 +1613,7 @@ static size_t inet_get_link_af_size(const struct net_device *dev,
 	return nla_total_size(IPV4_DEVCONF_MAX * 4); /* IFLA_INET_CONF */
 }
 
-static int inet_fill_link_af(struct sk_buff *skb, const struct net_device *dev,
-			     u32 ext_filter_mask)
+static int inet_fill_link_af(struct sk_buff *skb, const struct net_device *dev)
 {
 	struct in_device *in_dev = rcu_dereference_rtnl(dev->ip_ptr);
 	struct nlattr *nla;
@@ -1692,7 +1623,7 @@ static int inet_fill_link_af(struct sk_buff *skb, const struct net_device *dev,
 		return -ENODATA;
 
 	nla = nla_reserve(skb, IFLA_INET_CONF, IPV4_DEVCONF_MAX * 4);
-	if (!nla)
+	if (nla == NULL)
 		return -EMSGSIZE;
 
 	for (i = 0; i < IPV4_DEVCONF_MAX; i++)
@@ -1757,20 +1688,13 @@ static int inet_netconf_msgsize_devconf(int type)
 {
 	int size = NLMSG_ALIGN(sizeof(struct netconfmsg))
 		   + nla_total_size(4);	/* NETCONFA_IFINDEX */
-	bool all = false;
 
-	if (type == NETCONFA_ALL)
-		all = true;
-
-	if (all || type == NETCONFA_FORWARDING)
+	/* type -1 is used for ALL */
+	if (type == -1 || type == NETCONFA_FORWARDING)
 		size += nla_total_size(4);
-	if (all || type == NETCONFA_RP_FILTER)
+	if (type == -1 || type == NETCONFA_RP_FILTER)
 		size += nla_total_size(4);
-	if (all || type == NETCONFA_MC_FORWARDING)
-		size += nla_total_size(4);
-	if (all || type == NETCONFA_PROXY_NEIGH)
-		size += nla_total_size(4);
-	if (all || type == NETCONFA_IGNORE_ROUTES_WITH_LINKDOWN)
+	if (type == -1 || type == NETCONFA_MC_FORWARDING)
 		size += nla_total_size(4);
 
 	return size;
@@ -1783,15 +1707,11 @@ static int inet_netconf_fill_devconf(struct sk_buff *skb, int ifindex,
 {
 	struct nlmsghdr  *nlh;
 	struct netconfmsg *ncm;
-	bool all = false;
 
 	nlh = nlmsg_put(skb, portid, seq, event, sizeof(struct netconfmsg),
 			flags);
-	if (!nlh)
+	if (nlh == NULL)
 		return -EMSGSIZE;
-
-	if (type == NETCONFA_ALL)
-		all = true;
 
 	ncm = nlmsg_data(nlh);
 	ncm->ncm_family = AF_INET;
@@ -1799,29 +1719,21 @@ static int inet_netconf_fill_devconf(struct sk_buff *skb, int ifindex,
 	if (nla_put_s32(skb, NETCONFA_IFINDEX, ifindex) < 0)
 		goto nla_put_failure;
 
-	if ((all || type == NETCONFA_FORWARDING) &&
+	/* type -1 is used for ALL */
+	if ((type == -1 || type == NETCONFA_FORWARDING) &&
 	    nla_put_s32(skb, NETCONFA_FORWARDING,
 			IPV4_DEVCONF(*devconf, FORWARDING)) < 0)
 		goto nla_put_failure;
-	if ((all || type == NETCONFA_RP_FILTER) &&
+	if ((type == -1 || type == NETCONFA_RP_FILTER) &&
 	    nla_put_s32(skb, NETCONFA_RP_FILTER,
 			IPV4_DEVCONF(*devconf, RP_FILTER)) < 0)
 		goto nla_put_failure;
-	if ((all || type == NETCONFA_MC_FORWARDING) &&
+	if ((type == -1 || type == NETCONFA_MC_FORWARDING) &&
 	    nla_put_s32(skb, NETCONFA_MC_FORWARDING,
 			IPV4_DEVCONF(*devconf, MC_FORWARDING)) < 0)
 		goto nla_put_failure;
-	if ((all || type == NETCONFA_PROXY_NEIGH) &&
-	    nla_put_s32(skb, NETCONFA_PROXY_NEIGH,
-			IPV4_DEVCONF(*devconf, PROXY_ARP)) < 0)
-		goto nla_put_failure;
-	if ((all || type == NETCONFA_IGNORE_ROUTES_WITH_LINKDOWN) &&
-	    nla_put_s32(skb, NETCONFA_IGNORE_ROUTES_WITH_LINKDOWN,
-			IPV4_DEVCONF(*devconf, IGNORE_ROUTES_WITH_LINKDOWN)) < 0)
-		goto nla_put_failure;
 
-	nlmsg_end(skb, nlh);
-	return 0;
+	return nlmsg_end(skb, nlh);
 
 nla_put_failure:
 	nlmsg_cancel(skb, nlh);
@@ -1834,8 +1746,8 @@ void inet_netconf_notify_devconf(struct net *net, int type, int ifindex,
 	struct sk_buff *skb;
 	int err = -ENOBUFS;
 
-	skb = nlmsg_new(inet_netconf_msgsize_devconf(type), GFP_KERNEL);
-	if (!skb)
+	skb = nlmsg_new(inet_netconf_msgsize_devconf(type), GFP_ATOMIC);
+	if (skb == NULL)
 		goto errout;
 
 	err = inet_netconf_fill_devconf(skb, ifindex, devconf, 0, 0,
@@ -1846,7 +1758,7 @@ void inet_netconf_notify_devconf(struct net *net, int type, int ifindex,
 		kfree_skb(skb);
 		goto errout;
 	}
-	rtnl_notify(skb, net, 0, RTNLGRP_IPV4_NETCONF, NULL, GFP_KERNEL);
+	rtnl_notify(skb, net, 0, RTNLGRP_IPV4_NETCONF, NULL, GFP_ATOMIC);
 	return;
 errout:
 	if (err < 0)
@@ -1857,8 +1769,6 @@ static const struct nla_policy devconf_ipv4_policy[NETCONFA_MAX+1] = {
 	[NETCONFA_IFINDEX]	= { .len = sizeof(int) },
 	[NETCONFA_FORWARDING]	= { .len = sizeof(int) },
 	[NETCONFA_RP_FILTER]	= { .len = sizeof(int) },
-	[NETCONFA_PROXY_NEIGH]	= { .len = sizeof(int) },
-	[NETCONFA_IGNORE_ROUTES_WITH_LINKDOWN]	= { .len = sizeof(int) },
 };
 
 static int inet_netconf_get_devconf(struct sk_buff *in_skb,
@@ -1879,7 +1789,7 @@ static int inet_netconf_get_devconf(struct sk_buff *in_skb,
 	if (err < 0)
 		goto errout;
 
-	err = -EINVAL;
+	err = EINVAL;
 	if (!tb[NETCONFA_IFINDEX])
 		goto errout;
 
@@ -1893,24 +1803,24 @@ static int inet_netconf_get_devconf(struct sk_buff *in_skb,
 		break;
 	default:
 		dev = __dev_get_by_index(net, ifindex);
-		if (!dev)
+		if (dev == NULL)
 			goto errout;
 		in_dev = __in_dev_get_rtnl(dev);
-		if (!in_dev)
+		if (in_dev == NULL)
 			goto errout;
 		devconf = &in_dev->cnf;
 		break;
 	}
 
 	err = -ENOBUFS;
-	skb = nlmsg_new(inet_netconf_msgsize_devconf(NETCONFA_ALL), GFP_KERNEL);
-	if (!skb)
+	skb = nlmsg_new(inet_netconf_msgsize_devconf(-1), GFP_ATOMIC);
+	if (skb == NULL)
 		goto errout;
 
 	err = inet_netconf_fill_devconf(skb, ifindex, devconf,
 					NETLINK_CB(in_skb).portid,
 					nlh->nlmsg_seq, RTM_NEWNETCONF, 0,
-					NETCONFA_ALL);
+					-1);
 	if (err < 0) {
 		/* -EMSGSIZE implies BUG in inet_netconf_msgsize_devconf() */
 		WARN_ON(err == -EMSGSIZE);
@@ -1954,7 +1864,7 @@ static int inet_netconf_dump_devconf(struct sk_buff *skb,
 						      cb->nlh->nlmsg_seq,
 						      RTM_NEWNETCONF,
 						      NLM_F_MULTI,
-						      NETCONFA_ALL) < 0) {
+						      -1) <= 0) {
 				rcu_read_unlock();
 				goto done;
 			}
@@ -1970,7 +1880,7 @@ cont:
 					      NETLINK_CB(cb->skb).portid,
 					      cb->nlh->nlmsg_seq,
 					      RTM_NEWNETCONF, NLM_F_MULTI,
-					      NETCONFA_ALL) < 0)
+					      -1) <= 0)
 			goto done;
 		else
 			h++;
@@ -1981,7 +1891,7 @@ cont:
 					      NETLINK_CB(cb->skb).portid,
 					      cb->nlh->nlmsg_seq,
 					      RTM_NEWNETCONF, NLM_F_MULTI,
-					      NETCONFA_ALL) < 0)
+					      -1) <= 0)
 			goto done;
 		else
 			h++;
@@ -2027,33 +1937,20 @@ static void inet_forward_change(struct net *net)
 
 	for_each_netdev(net, dev) {
 		struct in_device *in_dev;
-
 		if (on)
 			dev_disable_lro(dev);
-
-		in_dev = __in_dev_get_rtnl(dev);
+		rcu_read_lock();
+		in_dev = __in_dev_get_rcu(dev);
 		if (in_dev) {
 			IN_DEV_CONF_SET(in_dev, FORWARDING, on);
 			inet_netconf_notify_devconf(net, NETCONFA_FORWARDING,
 						    dev->ifindex, &in_dev->cnf);
 		}
+		rcu_read_unlock();
 	}
 }
 
-static int devinet_conf_ifindex(struct net *net, struct ipv4_devconf *cnf)
-{
-	if (cnf == net->ipv4.devconf_dflt)
-		return NETCONFA_IFINDEX_DEFAULT;
-	else if (cnf == net->ipv4.devconf_all)
-		return NETCONFA_IFINDEX_ALL;
-	else {
-		struct in_device *idev
-			= container_of(cnf, struct in_device, cnf);
-		return idev->dev->ifindex;
-	}
-}
-
-static int devinet_conf_proc(struct ctl_table *ctl, int write,
+static int devinet_conf_proc(ctl_table *ctl, int write,
 			     void __user *buffer,
 			     size_t *lenp, loff_t *ppos)
 {
@@ -2065,7 +1962,6 @@ static int devinet_conf_proc(struct ctl_table *ctl, int write,
 		struct ipv4_devconf *cnf = ctl->extra1;
 		struct net *net = ctl->extra2;
 		int i = (int *)ctl->data - cnf->data;
-		int ifindex;
 
 		set_bit(i, cnf->state);
 
@@ -2075,23 +1971,21 @@ static int devinet_conf_proc(struct ctl_table *ctl, int write,
 		    i == IPV4_DEVCONF_ROUTE_LOCALNET - 1)
 			if ((new_value == 0) && (old_value != 0))
 				rt_cache_flush(net);
-
 		if (i == IPV4_DEVCONF_RP_FILTER - 1 &&
 		    new_value != old_value) {
-			ifindex = devinet_conf_ifindex(net, cnf);
+			int ifindex;
+
+			if (cnf == net->ipv4.devconf_dflt)
+				ifindex = NETCONFA_IFINDEX_DEFAULT;
+			else if (cnf == net->ipv4.devconf_all)
+				ifindex = NETCONFA_IFINDEX_ALL;
+			else {
+				struct in_device *idev =
+					container_of(cnf, struct in_device,
+						     cnf);
+				ifindex = idev->dev->ifindex;
+			}
 			inet_netconf_notify_devconf(net, NETCONFA_RP_FILTER,
-						    ifindex, cnf);
-		}
-		if (i == IPV4_DEVCONF_PROXY_ARP - 1 &&
-		    new_value != old_value) {
-			ifindex = devinet_conf_ifindex(net, cnf);
-			inet_netconf_notify_devconf(net, NETCONFA_PROXY_NEIGH,
-						    ifindex, cnf);
-		}
-		if (i == IPV4_DEVCONF_IGNORE_ROUTES_WITH_LINKDOWN - 1 &&
-		    new_value != old_value) {
-			ifindex = devinet_conf_ifindex(net, cnf);
-			inet_netconf_notify_devconf(net, NETCONFA_IGNORE_ROUTES_WITH_LINKDOWN,
 						    ifindex, cnf);
 		}
 	}
@@ -2099,7 +1993,7 @@ static int devinet_conf_proc(struct ctl_table *ctl, int write,
 	return ret;
 }
 
-static int devinet_sysctl_forward(struct ctl_table *ctl, int write,
+static int devinet_sysctl_forward(ctl_table *ctl, int write,
 				  void __user *buffer,
 				  size_t *lenp, loff_t *ppos)
 {
@@ -2142,7 +2036,7 @@ static int devinet_sysctl_forward(struct ctl_table *ctl, int write,
 	return ret;
 }
 
-static int ipv4_doint_and_flush(struct ctl_table *ctl, int write,
+static int ipv4_doint_and_flush(ctl_table *ctl, int write,
 				void __user *buffer,
 				size_t *lenp, loff_t *ppos)
 {
@@ -2209,30 +2103,20 @@ static struct devinet_sysctl_table {
 		DEVINET_SYSCTL_RW_ENTRY(ARP_ACCEPT, "arp_accept"),
 		DEVINET_SYSCTL_RW_ENTRY(ARP_NOTIFY, "arp_notify"),
 		DEVINET_SYSCTL_RW_ENTRY(PROXY_ARP_PVLAN, "proxy_arp_pvlan"),
-		DEVINET_SYSCTL_RW_ENTRY(FORCE_IGMP_VERSION,
-					"force_igmp_version"),
-		DEVINET_SYSCTL_RW_ENTRY(IGMPV2_UNSOLICITED_REPORT_INTERVAL,
-					"igmpv2_unsolicited_report_interval"),
-		DEVINET_SYSCTL_RW_ENTRY(IGMPV3_UNSOLICITED_REPORT_INTERVAL,
-					"igmpv3_unsolicited_report_interval"),
-		DEVINET_SYSCTL_RW_ENTRY(IGNORE_ROUTES_WITH_LINKDOWN,
-					"ignore_routes_with_linkdown"),
-		DEVINET_SYSCTL_RW_ENTRY(DROP_GRATUITOUS_ARP,
-					"drop_gratuitous_arp"),
 
 		DEVINET_SYSCTL_FLUSHING_ENTRY(NOXFRM, "disable_xfrm"),
 		DEVINET_SYSCTL_FLUSHING_ENTRY(NOPOLICY, "disable_policy"),
+		DEVINET_SYSCTL_FLUSHING_ENTRY(FORCE_IGMP_VERSION,
+					      "force_igmp_version"),
 		DEVINET_SYSCTL_FLUSHING_ENTRY(PROMOTE_SECONDARIES,
 					      "promote_secondaries"),
 		DEVINET_SYSCTL_FLUSHING_ENTRY(ROUTE_LOCALNET,
 					      "route_localnet"),
-		DEVINET_SYSCTL_FLUSHING_ENTRY(DROP_UNICAST_IN_L2_MULTICAST,
-					      "drop_unicast_in_l2_multicast"),
 	},
 };
 
 static int __devinet_sysctl_register(struct net *net, char *dev_name,
-				     int ifindex, struct ipv4_devconf *p)
+					struct ipv4_devconf *p)
 {
 	int i;
 	struct devinet_sysctl_table *t;
@@ -2255,8 +2139,6 @@ static int __devinet_sysctl_register(struct net *net, char *dev_name,
 		goto free;
 
 	p->sysctl = t;
-
-	inet_netconf_notify_devconf(net, NETCONFA_ALL, ifindex, p);
 	return 0;
 
 free:
@@ -2269,7 +2151,7 @@ static void __devinet_sysctl_unregister(struct ipv4_devconf *cnf)
 {
 	struct devinet_sysctl_table *t = cnf->sysctl;
 
-	if (!t)
+	if (t == NULL)
 		return;
 
 	cnf->sysctl = NULL;
@@ -2277,21 +2159,11 @@ static void __devinet_sysctl_unregister(struct ipv4_devconf *cnf)
 	kfree(t);
 }
 
-static int devinet_sysctl_register(struct in_device *idev)
+static void devinet_sysctl_register(struct in_device *idev)
 {
-	int err;
-
-	if (!sysctl_dev_name_is_allowed(idev->dev->name))
-		return -EINVAL;
-
-	err = neigh_sysctl_register(idev->dev, idev->arp_parms, NULL);
-	if (err)
-		return err;
-	err = __devinet_sysctl_register(dev_net(idev->dev), idev->dev->name,
-					idev->dev->ifindex, &idev->cnf);
-	if (err)
-		neigh_sysctl_unregister(idev->arp_parms);
-	return err;
+	neigh_sysctl_register(idev->dev, idev->arp_parms, "ipv4", NULL);
+	__devinet_sysctl_register(dev_net(idev->dev), idev->dev->name,
+					&idev->cnf);
 }
 
 static void devinet_sysctl_unregister(struct in_device *idev)
@@ -2330,16 +2202,16 @@ static __net_init int devinet_init_net(struct net *net)
 
 	if (!net_eq(net, &init_net)) {
 		all = kmemdup(all, sizeof(ipv4_devconf), GFP_KERNEL);
-		if (!all)
+		if (all == NULL)
 			goto err_alloc_all;
 
 		dflt = kmemdup(dflt, sizeof(ipv4_devconf_dflt), GFP_KERNEL);
-		if (!dflt)
+		if (dflt == NULL)
 			goto err_alloc_dflt;
 
 #ifdef CONFIG_SYSCTL
 		tbl = kmemdup(tbl, sizeof(ctl_forward_entry), GFP_KERNEL);
-		if (!tbl)
+		if (tbl == NULL)
 			goto err_alloc_ctl;
 
 		tbl[0].data = &all->data[IPV4_DEVCONF_FORWARDING - 1];
@@ -2349,18 +2221,17 @@ static __net_init int devinet_init_net(struct net *net)
 	}
 
 #ifdef CONFIG_SYSCTL
-	err = __devinet_sysctl_register(net, "all", NETCONFA_IFINDEX_ALL, all);
+	err = __devinet_sysctl_register(net, "all", all);
 	if (err < 0)
 		goto err_reg_all;
 
-	err = __devinet_sysctl_register(net, "default",
-					NETCONFA_IFINDEX_DEFAULT, dflt);
+	err = __devinet_sysctl_register(net, "default", dflt);
 	if (err < 0)
 		goto err_reg_dflt;
 
 	err = -ENOMEM;
 	forw_hdr = register_net_sysctl(net, "net/ipv4", tbl);
-	if (!forw_hdr)
+	if (forw_hdr == NULL)
 		goto err_reg_ctl;
 	net->ipv4.forw_hdr = forw_hdr;
 #endif
@@ -2408,7 +2279,7 @@ static __net_initdata struct pernet_operations devinet_ops = {
 	.exit = devinet_exit_net,
 };
 
-static struct rtnl_af_ops inet_af_ops __read_mostly = {
+static struct rtnl_af_ops inet_af_ops = {
 	.family		  = AF_INET,
 	.fill_link_af	  = inet_fill_link_af,
 	.get_link_af_size = inet_get_link_af_size,
@@ -2428,7 +2299,7 @@ void __init devinet_init(void)
 	register_gifconf(PF_INET, inet_gifconf);
 	register_netdevice_notifier(&ip_netdev_notifier);
 
-	queue_delayed_work(system_power_efficient_wq, &check_lifetime_work, 0);
+	schedule_delayed_work(&check_lifetime_work, 0);
 
 	rtnl_af_register(&inet_af_ops);
 
@@ -2438,3 +2309,4 @@ void __init devinet_init(void)
 	rtnl_register(PF_INET, RTM_GETNETCONF, inet_netconf_get_devconf,
 		      inet_netconf_dump_devconf, NULL);
 }
+

@@ -6,8 +6,8 @@
 #include "rdev-ops.h"
 
 
-int __cfg80211_stop_ap(struct cfg80211_registered_device *rdev,
-		       struct net_device *dev, bool notify)
+static int __cfg80211_stop_ap(struct cfg80211_registered_device *rdev,
+			      struct net_device *dev)
 {
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
 	int err;
@@ -27,24 +27,21 @@ int __cfg80211_stop_ap(struct cfg80211_registered_device *rdev,
 	err = rdev_stop_ap(rdev, dev);
 	if (!err) {
 		wdev->beacon_interval = 0;
-		memset(&wdev->chandef, 0, sizeof(wdev->chandef));
+		wdev->channel = NULL;
 		wdev->ssid_len = 0;
-		rdev_set_qos_map(rdev, dev, NULL);
-		if (notify)
-			nl80211_send_ap_stopped(wdev);
 	}
 
 	return err;
 }
 
 int cfg80211_stop_ap(struct cfg80211_registered_device *rdev,
-		     struct net_device *dev, bool notify)
+		     struct net_device *dev)
 {
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
 	int err;
 
 	wdev_lock(wdev);
-	err = __cfg80211_stop_ap(rdev, dev, notify);
+	err = __cfg80211_stop_ap(rdev, dev);
 	wdev_unlock(wdev);
 
 	return err;

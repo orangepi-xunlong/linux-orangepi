@@ -44,7 +44,7 @@ MODULE_PARM_DESC(enable, "Enable Creative X-Fi driver");
 module_param_array(subsystem, int, NULL, 0444);
 MODULE_PARM_DESC(subsystem, "Override subsystem ID for Creative X-Fi driver");
 
-static const struct pci_device_id ct_pci_dev_ids[] = {
+static DEFINE_PCI_DEVICE_TABLE(ct_pci_dev_ids) = {
 	/* only X-Fi is supported, so... */
 	{ PCI_DEVICE(PCI_VENDOR_ID_CREATIVE, PCI_DEVICE_ID_CREATIVE_20K1),
 	  .driver_data = ATC20K1,
@@ -71,23 +71,21 @@ ct_card_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 		dev++;
 		return -ENOENT;
 	}
-	err = snd_card_new(&pci->dev, index[dev], id[dev], THIS_MODULE,
-			   0, &card);
+	err = snd_card_create(index[dev], id[dev], THIS_MODULE, 0, &card);
 	if (err)
 		return err;
 	if ((reference_rate != 48000) && (reference_rate != 44100)) {
-		dev_err(card->dev,
-			"Invalid reference_rate value %u!!!\n",
-			reference_rate);
-		dev_err(card->dev,
-			"The valid values for reference_rate are 48000 and 44100, Value 48000 is assumed.\n");
+		printk(KERN_ERR "ctxfi: Invalid reference_rate value %u!!!\n",
+		       reference_rate);
+		printk(KERN_ERR "ctxfi: The valid values for reference_rate "
+		       "are 48000 and 44100, Value 48000 is assumed.\n");
 		reference_rate = 48000;
 	}
 	if ((multiple != 1) && (multiple != 2) && (multiple != 4)) {
-		dev_err(card->dev, "Invalid multiple value %u!!!\n",
-			multiple);
-		dev_err(card->dev,
-			"The valid values for multiple are 1, 2 and 4, Value 2 is assumed.\n");
+		printk(KERN_ERR "ctxfi: Invalid multiple value %u!!!\n",
+		       multiple);
+		printk(KERN_ERR "ctxfi: The valid values for multiple are "
+		       "1, 2 and 4, Value 2 is assumed.\n");
 		multiple = 2;
 	}
 	err = ct_atc_create(card, pci, reference_rate, multiple,
@@ -124,6 +122,7 @@ error:
 static void ct_card_remove(struct pci_dev *pci)
 {
 	snd_card_free(pci_get_drvdata(pci));
+	pci_set_drvdata(pci, NULL);
 }
 
 #ifdef CONFIG_PM_SLEEP

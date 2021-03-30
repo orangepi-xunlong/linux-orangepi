@@ -9,21 +9,12 @@ vfe_io-y					+= csi_cci/cci_platform_drv.o
 vfe_io-y					+= vfe_subdev.o
 vfe_io-y					+= vfe_os.o
 
-ifneq ($(strip $(CONFIG_ARCH_SUN3IW1P1)),)
-else
-obj-$(CONFIG_CSI_VFE) += vfe_sample.o
-vfe_sample-y					+= sample.o
-endif
-
 obj-$(CONFIG_CSI_VFE) += vfe_v4l2.o
 vfe_v4l2-y					:= csi/sunxi_csi.o
 vfe_v4l2-y					+= mipi_csi/sunxi_mipi.o
 vfe_v4l2-y					+= flash_light/flash.o
 vfe_v4l2-y					+= sunxi_isp.o
-
-ifneq ($(strip $(CONFIG_ARCH_SUN3IW1P1)),)
-vfe_v4l2-y                                      += csi/csi_reg_v1.o
-else ifneq ($(strip $(CONFIG_ARCH_SUN8IW11)),)
+ifneq ($(strip $(CONFIG_ARCH_SUN8IW11)),)
 vfe_v4l2-y					+= csi/csi_reg_v1.o
 else
 vfe_v4l2-y					+= csi/csi_reg.o
@@ -35,17 +26,13 @@ vfe_v4l2-y					+= utility/sensor_info.o
 vfe_v4l2-y					+= isp_cfg/isp_cfg.o
 vfe_v4l2-y					+= utility/cfg_op.o
 vfe_v4l2-y					+= vfe.o
-
-
-ifneq ($(strip $(CONFIG_ARCH_SUN3IW1P1)),)
+ifneq ($(strip $(CONFIG_ARCH_SUN8IW10)),)
 vfe_v4l2-y					+= lib/bsp_isp_null.o
-else ifneq ($(strip $(CONFIG_ARCH_SUN8IW10)),)
-vfe_v4l2-y                                      += lib/bsp_isp_null.o
 else ifneq ($(strip $(CONFIG_ARCH_SUN8IW11)),)
 vfe_v4l2-y					+= lib/bsp_isp_null.o
 else
 ifdef CONFIG_ARM
-$(shell cp $(obj)/lib/libisp_32 $(obj)/lib/libisp_32.a)
+$(shell cp $(obj)/lib/libisp_32 $(obj)s/lib/libisp_32.a)
 vfe_v4l2-y					+= lib/libisp_32.a
 endif
 ifdef CONFIG_ARM64

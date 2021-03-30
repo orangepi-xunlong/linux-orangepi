@@ -81,13 +81,13 @@ static int i2c_read_reg16(struct i2c_adapter *adapter, u8 adr,
 static int ddb_i2c_cmd(struct ddb_i2c *i2c, u32 adr, u32 cmd)
 {
 	struct ddb *dev = i2c->dev;
-	long stat;
+	int stat;
 	u32 val;
 
 	i2c->done = 0;
 	ddbwritel((adr << 9) | cmd, i2c->regs + I2C_COMMAND);
 	stat = wait_event_timeout(i2c->wq, i2c->done == 1, HZ);
-	if (stat == 0) {
+	if (stat <= 0) {
 		printk(KERN_ERR "I2C timeout\n");
 		{ /* MSI debugging*/
 			u32 istat = ddbreadl(INTERRUPT_STATUS);
@@ -149,7 +149,7 @@ static u32 ddb_i2c_functionality(struct i2c_adapter *adap)
 	return I2C_FUNC_SMBUS_EMUL;
 }
 
-static struct i2c_algorithm ddb_i2c_algo = {
+struct i2c_algorithm ddb_i2c_algo = {
 	.master_xfer   = ddb_i2c_master_xfer,
 	.functionality = ddb_i2c_functionality,
 };
@@ -266,7 +266,7 @@ static void io_free(struct pci_dev *pdev, u8 **vbuf,
 	for (i = 0; i < num; i++) {
 		if (vbuf[i]) {
 			pci_free_consistent(pdev, size, vbuf[i], pbuf[i]);
-			vbuf[i] = NULL;
+			vbuf[i] = 0;
 		}
 	}
 }
@@ -440,7 +440,7 @@ static u32 ddb_output_free(struct ddb_output *output)
 }
 
 static ssize_t ddb_output_write(struct ddb_output *output,
-				const __user u8 *buf, size_t count)
+				const u8 *buf, size_t count)
 {
 	struct ddb *dev = output->port->dev;
 	u32 idx, off, stat = output->stat;
@@ -506,7 +506,7 @@ static u32 ddb_input_avail(struct ddb_input *input)
 	return 0;
 }
 
-static ssize_t ddb_input_read(struct ddb_input *input, __user u8 *buf, size_t count)
+static ssize_t ddb_input_read(struct ddb_input *input, u8 *buf, size_t count)
 {
 	struct ddb *dev = input->port->dev;
 	u32 left = count;
@@ -690,7 +690,7 @@ static int tuner_attach_stv6110(struct ddb_input *input, int type)
 	struct stv090x_config *feconf = type ? &stv0900_aa : &stv0900;
 	struct stv6110x_config *tunerconf = (input->nr & 1) ?
 		&stv6110b : &stv6110a;
-	const struct stv6110x_devctl *ctl;
+	struct stv6110x_devctl *ctl;
 
 	ctl = dvb_attach(stv6110x_attach, input->fe, tunerconf, i2c);
 	if (!ctl) {
@@ -849,7 +849,7 @@ static int dvb_input_attach(struct ddb_input *input)
 		return ret;
 	input->attached = 4;
 
-	input->fe = NULL;
+	input->fe = 0;
 	switch (port->type) {
 	case DDB_TUNER_DVBS_ST:
 		if (demod_attach_stv0900(input, 0) < 0)
@@ -876,8 +876,10 @@ static int dvb_input_attach(struct ddb_input *input)
 			return -ENODEV;
 		if (tuner_attach_tda18271(input) < 0)
 			return -ENODEV;
-		if (dvb_register_frontend(adap, input->fe) < 0)
-			return -ENODEV;
+		if (input->fe) {
+			if (dvb_register_frontend(adap, input->fe) < 0)
+				return -ENODEV;
+		}
 		if (input->fe2) {
 			if (dvb_register_frontend(adap, input->fe2) < 0)
 				return -ENODEV;
@@ -895,7 +897,7 @@ static int dvb_input_attach(struct ddb_input *input)
 /****************************************************************************/
 /****************************************************************************/
 
-static ssize_t ts_write(struct file *file, const __user char *buf,
+static ssize_t ts_write(struct file *file, const char *buf,
 			size_t count, loff_t *ppos)
 {
 	struct dvb_device *dvbdev = file->private_data;
@@ -920,7 +922,7 @@ static ssize_t ts_write(struct file *file, const __user char *buf,
 	return (left == count) ? -EAGAIN : (count - left);
 }
 
-static ssize_t ts_read(struct file *file, __user char *buf,
+static ssize_t ts_read(struct file *file, char *buf,
 		       size_t count, loff_t *ppos)
 {
 	struct dvb_device *dvbdev = file->private_data;
@@ -975,9 +977,11 @@ static const struct file_operations ci_fops = {
 	.open    = dvb_generic_open,
 	.release = dvb_generic_release,
 	.poll    = ts_poll,
+	.mmap    = 0,
 };
 
 static struct dvb_device dvbdev_ci = {
+	.priv    = 0,
 	.readers = -1,
 	.writers = -1,
 	.users   = -1,
@@ -1036,7 +1040,7 @@ static void output_tasklet(unsigned long data)
 }
 
 
-static struct cxd2099_cfg cxd_cfg = {
+struct cxd2099_cfg cxd_cfg = {
 	.bitrate =  62000,
 	.adr     =  0x40,
 	.polarity = 1,
@@ -1065,7 +1069,7 @@ static int ddb_ci_attach(struct ddb_port *port)
 			    port->en, 0, 1);
 	ret = dvb_register_device(&port->output->adap, &port->output->dev,
 				  &dvbdev_ci, (void *) port->output,
-				  DVB_DEVICE_SEC, 0);
+				  DVB_DEVICE_SEC);
 	return ret;
 }
 
@@ -1118,13 +1122,14 @@ static void ddb_ports_detach(struct ddb *dev)
 			dvb_input_detach(port->input[1]);
 			break;
 		case DDB_PORT_CI:
-			dvb_unregister_device(port->output->dev);
+			if (port->output->dev)
+				dvb_unregister_device(port->output->dev);
 			if (port->en) {
 				ddb_input_stop(port->input[0]);
 				ddb_output_stop(port->output);
 				dvb_ca_en50221_release(port->en);
 				kfree(port->en);
-				port->en = NULL;
+				port->en = 0;
 				dvb_unregister_adapter(&port->output->adap);
 			}
 			break;
@@ -1410,9 +1415,9 @@ static int flashio(struct ddb *dev, u8 *wbuf, u32 wlen, u8 *rbuf, u32 rlen)
 #define DDB_MAGIC 'd'
 
 struct ddb_flashio {
-	__user __u8 *write_buf;
+	__u8 *write_buf;
 	__u32 write_len;
-	__user __u8 *read_buf;
+	__u8 *read_buf;
 	__u32 read_len;
 };
 
@@ -1436,7 +1441,7 @@ static int ddb_open(struct inode *inode, struct file *file)
 static long ddb_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct ddb *dev = file->private_data;
-	__user void *parg = (__user void *)arg;
+	void *parg = (void *)arg;
 	int res;
 
 	switch (cmd) {
@@ -1539,7 +1544,7 @@ static void ddb_unmap(struct ddb *dev)
 
 static void ddb_remove(struct pci_dev *pdev)
 {
-	struct ddb *dev = pci_get_drvdata(pdev);
+	struct ddb *dev = (struct ddb *) pci_get_drvdata(pdev);
 
 	ddb_ports_detach(dev);
 	ddb_i2c_release(dev);
@@ -1555,7 +1560,7 @@ static void ddb_remove(struct pci_dev *pdev)
 	ddb_device_destroy(dev);
 
 	ddb_unmap(dev);
-	pci_set_drvdata(pdev, NULL);
+	pci_set_drvdata(pdev, 0);
 	pci_disable_device(pdev);
 }
 
@@ -1569,9 +1574,10 @@ static int ddb_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (pci_enable_device(pdev) < 0)
 		return -ENODEV;
 
-	dev = vzalloc(sizeof(struct ddb));
+	dev = vmalloc(sizeof(struct ddb));
 	if (dev == NULL)
 		return -ENOMEM;
+	memset(dev, 0, sizeof(struct ddb));
 
 	dev->pdev = pdev;
 	pci_set_drvdata(pdev, dev);
@@ -1629,12 +1635,11 @@ fail1:
 	printk(KERN_ERR "fail1\n");
 	if (dev->msi)
 		pci_disable_msi(dev->pdev);
-	if (stat == 0)
-		free_irq(dev->pdev->irq, dev);
+	free_irq(dev->pdev->irq, dev);
 fail:
 	printk(KERN_ERR "fail\n");
 	ddb_unmap(dev);
-	pci_set_drvdata(pdev, NULL);
+	pci_set_drvdata(pdev, 0);
 	pci_disable_device(pdev);
 	return -1;
 }
@@ -1643,56 +1648,27 @@ fail:
 /******************************************************************************/
 /******************************************************************************/
 
-static const struct ddb_info ddb_none = {
+static struct ddb_info ddb_none = {
 	.type     = DDB_NONE,
 	.name     = "Digital Devices PCIe bridge",
 };
 
-static const struct ddb_info ddb_octopus = {
+static struct ddb_info ddb_octopus = {
 	.type     = DDB_OCTOPUS,
 	.name     = "Digital Devices Octopus DVB adapter",
 	.port_num = 4,
 };
 
-static const struct ddb_info ddb_octopus_le = {
+static struct ddb_info ddb_octopus_le = {
 	.type     = DDB_OCTOPUS,
 	.name     = "Digital Devices Octopus LE DVB adapter",
 	.port_num = 2,
 };
 
-static const struct ddb_info ddb_octopus_mini = {
-	.type     = DDB_OCTOPUS,
-	.name     = "Digital Devices Octopus Mini",
-	.port_num = 4,
-};
-
-static const struct ddb_info ddb_v6 = {
+static struct ddb_info ddb_v6 = {
 	.type     = DDB_OCTOPUS,
 	.name     = "Digital Devices Cine S2 V6 DVB adapter",
 	.port_num = 3,
-};
-static const struct ddb_info ddb_v6_5 = {
-	.type     = DDB_OCTOPUS,
-	.name     = "Digital Devices Cine S2 V6.5 DVB adapter",
-	.port_num = 4,
-};
-
-static const struct ddb_info ddb_dvbct = {
-	.type     = DDB_OCTOPUS,
-	.name     = "Digital Devices DVBCT V6.1 DVB adapter",
-	.port_num = 3,
-};
-
-static const struct ddb_info ddb_satixS2v3 = {
-	.type     = DDB_OCTOPUS,
-	.name     = "Mystique SaTiX-S2 V3 DVB adapter",
-	.port_num = 3,
-};
-
-static const struct ddb_info ddb_octopusv3 = {
-	.type     = DDB_OCTOPUS,
-	.name     = "Digital Devices Octopus V3 DVB adapter",
-	.port_num = 4,
 };
 
 #define DDVID 0xdd01 /* Digital Devices Vendor ID */
@@ -1706,12 +1682,8 @@ static const struct pci_device_id ddb_id_tbl[] = {
 	DDB_ID(DDVID, 0x0002, DDVID, 0x0001, ddb_octopus),
 	DDB_ID(DDVID, 0x0003, DDVID, 0x0001, ddb_octopus),
 	DDB_ID(DDVID, 0x0003, DDVID, 0x0002, ddb_octopus_le),
-	DDB_ID(DDVID, 0x0003, DDVID, 0x0010, ddb_octopus_mini),
+	DDB_ID(DDVID, 0x0003, DDVID, 0x0010, ddb_octopus),
 	DDB_ID(DDVID, 0x0003, DDVID, 0x0020, ddb_v6),
-	DDB_ID(DDVID, 0x0003, DDVID, 0x0021, ddb_v6_5),
-	DDB_ID(DDVID, 0x0003, DDVID, 0x0030, ddb_dvbct),
-	DDB_ID(DDVID, 0x0003, DDVID, 0xdb03, ddb_satixS2v3),
-	DDB_ID(DDVID, 0x0005, DDVID, 0x0004, ddb_octopusv3),
 	/* in case sub-ids got deleted in flash */
 	DDB_ID(DDVID, 0x0003, PCI_ANY_ID, PCI_ANY_ID, ddb_none),
 	{0}

@@ -33,8 +33,8 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/pci.h>
 #include <asm/system_info.h>
+#include <mach/orion5x.h>
 #include <plat/orion-gpio.h>
-#include "orion5x.h"
 #include "common.h"
 #include "mpp.h"
 
@@ -236,7 +236,9 @@ static int __init dns323_read_mac_addr(void)
 	}
 
 	iounmap(mac_page);
-	printk("DNS-323: Found ethernet MAC address: %pM\n", addr);
+	printk("DNS-323: Found ethernet MAC address: ");
+	for (i = 0; i < 6; i++)
+		printk("%.2x%s", addr[i], (i < 5) ? ":" : ".\n");
 
 	memcpy(dns323_eth_data.mac_addr, addr, 6);
 
@@ -548,7 +550,7 @@ static int __init dns323_identify_rev(void)
 			break;
 	}
 	if (i >= 1000) {
-		pr_warn("DNS-323: Timeout accessing PHY, assuming rev B1\n");
+		pr_warning("DNS-323: Timeout accessing PHY, assuming rev B1\n");
 		return DNS323_REV_B1;
 	}
 	writel((3 << 21)	/* phy ID reg */ |
@@ -560,7 +562,7 @@ static int __init dns323_identify_rev(void)
 			break;
 	}
 	if (i >= 1000) {
-		pr_warn("DNS-323: Timeout reading PHY, assuming rev B1\n");
+		pr_warning("DNS-323: Timeout reading PHY, assuming rev B1\n");
 		return DNS323_REV_B1;
 	}
 	pr_debug("DNS-323: Ethernet PHY ID 0x%x\n", reg & 0xffff);
@@ -575,8 +577,8 @@ static int __init dns323_identify_rev(void)
 	case 0x0e10: /* MV88E1118 */
 		return DNS323_REV_C1;
 	default:
-		pr_warn("DNS-323: Unknown PHY ID 0x%04x, assuming rev B1\n",
-			reg & 0xffff);
+		pr_warning("DNS-323: Unknown PHY ID 0x%04x, assuming rev B1\n",
+			   reg & 0xffff);
 	}
 	return DNS323_REV_B1;
 }
@@ -609,10 +611,8 @@ static void __init dns323_init(void)
 	/* setup flash mapping
 	 * CS3 holds a 8 MB Spansion S29GL064M90TFIR4
 	 */
-	mvebu_mbus_add_window_by_id(ORION_MBUS_DEVBUS_BOOT_TARGET,
-				    ORION_MBUS_DEVBUS_BOOT_ATTR,
-				    DNS323_NOR_BOOT_BASE,
-				    DNS323_NOR_BOOT_SIZE);
+	mvebu_mbus_add_window("devbus-boot", DNS323_NOR_BOOT_BASE,
+			      DNS323_NOR_BOOT_SIZE);
 	platform_device_register(&dns323_nor_flash);
 
 	/* Sort out LEDs, Buttons and i2c devices */
@@ -640,8 +640,6 @@ static void __init dns323_init(void)
 		platform_device_register_simple("dns323c-fan", 0, NULL, 0);
 
 		/* Register fixup for the PHY LEDs */
-		if (!IS_BUILTIN(CONFIG_PHYLIB))
-			break;
 		phy_register_fixup_for_uid(MARVELL_PHY_ID_88E1118,
 					   MARVELL_PHY_ID_MASK,
 					   dns323c_phy_fixup);
@@ -713,7 +711,6 @@ static void __init dns323_init(void)
 MACHINE_START(DNS323, "D-Link DNS-323")
 	/* Maintainer: Herbert Valerio Riedel <hvr@gnu.org> */
 	.atag_offset	= 0x100,
-	.nr_irqs	= ORION5X_NR_IRQS,
 	.init_machine	= dns323_init,
 	.map_io		= orion5x_map_io,
 	.init_early	= orion5x_init_early,

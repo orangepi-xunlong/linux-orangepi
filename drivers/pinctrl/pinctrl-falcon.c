@@ -75,7 +75,6 @@ enum falcon_mux {
 	FALCON_MUX_GPIO = 0,
 	FALCON_MUX_RST,
 	FALCON_MUX_NTR,
-	FALCON_MUX_PPS,
 	FALCON_MUX_MDIO,
 	FALCON_MUX_LED,
 	FALCON_MUX_SPI,
@@ -101,7 +100,6 @@ static void lantiq_load_pin_desc(struct pinctrl_pin_desc *d, int bank, int len)
 	for (i = 0; i < len; i++) {
 		/* strlen("ioXYZ") + 1 = 6 */
 		char *name = kzalloc(6, GFP_KERNEL);
-
 		snprintf(name, 6, "io%d", base + i);
 		d[i].number = base + i;
 		d[i].name = name;
@@ -116,7 +114,7 @@ static struct ltq_mfp_pin falcon_mfp[] = {
 	MFP_FALCON(GPIO2,	GPIO,	GPIO,   NONE,   NONE),
 	MFP_FALCON(GPIO3,	GPIO,	GPIO,   NONE,   NONE),
 	MFP_FALCON(GPIO4,	NTR,	GPIO,   NONE,   NONE),
-	MFP_FALCON(GPIO5,	NTR,	GPIO,   PPS,    NONE),
+	MFP_FALCON(GPIO5,	NTR,	GPIO,   NONE,   NONE),
 	MFP_FALCON(GPIO6,	RST,	GPIO,   NONE,   NONE),
 	MFP_FALCON(GPIO7,	MDIO,	GPIO,   NONE,   NONE),
 	MFP_FALCON(GPIO8,	MDIO,	GPIO,   NONE,   NONE),
@@ -170,7 +168,6 @@ static struct ltq_mfp_pin falcon_mfp[] = {
 static const unsigned pins_por[] = {GPIO0};
 static const unsigned pins_ntr[] = {GPIO4};
 static const unsigned pins_ntr8k[] = {GPIO5};
-static const unsigned pins_pps[] = {GPIO5};
 static const unsigned pins_hrst[] = {GPIO6};
 static const unsigned pins_mdio[] = {GPIO7, GPIO8};
 static const unsigned pins_bled[] = {GPIO9, GPIO10, GPIO11,
@@ -189,7 +186,6 @@ static struct ltq_pin_group falcon_grps[] = {
 	GRP_MUX("por", RST, pins_por),
 	GRP_MUX("ntr", NTR, pins_ntr),
 	GRP_MUX("ntr8k", NTR, pins_ntr8k),
-	GRP_MUX("pps", PPS, pins_pps),
 	GRP_MUX("hrst", RST, pins_hrst),
 	GRP_MUX("mdio", MDIO, pins_mdio),
 	GRP_MUX("bootled", LED, pins_bled),
@@ -205,7 +201,7 @@ static struct ltq_pin_group falcon_grps[] = {
 };
 
 static const char * const ltq_rst_grps[] = {"por", "hrst"};
-static const char * const ltq_ntr_grps[] = {"ntr", "ntr8k", "pps"};
+static const char * const ltq_ntr_grps[] = {"ntr", "ntr8k"};
 static const char * const ltq_mdio_grps[] = {"mdio"};
 static const char * const ltq_bled_grps[] = {"bootled"};
 static const char * const ltq_asc_grps[] = {"asc0", "asc1"};
@@ -239,8 +235,7 @@ static int falcon_pinconf_group_get(struct pinctrl_dev *pctrldev,
 }
 
 static int falcon_pinconf_group_set(struct pinctrl_dev *pctrldev,
-				unsigned group, unsigned long *configs,
-				unsigned num_configs)
+				unsigned group, unsigned long config)
 {
 	return -ENOTSUPP;
 }
@@ -281,47 +276,39 @@ static int falcon_pinconf_get(struct pinctrl_dev *pctrldev,
 }
 
 static int falcon_pinconf_set(struct pinctrl_dev *pctrldev,
-			unsigned pin, unsigned long *configs,
-			unsigned num_configs)
+			unsigned pin, unsigned long config)
 {
-	enum ltq_pinconf_param param;
-	int arg;
+	enum ltq_pinconf_param param = LTQ_PINCONF_UNPACK_PARAM(config);
+	int arg = LTQ_PINCONF_UNPACK_ARG(config);
 	struct ltq_pinmux_info *info = pinctrl_dev_get_drvdata(pctrldev);
 	void __iomem *mem = info->membase[PORT(pin)];
 	u32 reg;
-	int i;
 
-	for (i = 0; i < num_configs; i++) {
-		param = LTQ_PINCONF_UNPACK_PARAM(configs[i]);
-		arg = LTQ_PINCONF_UNPACK_ARG(configs[i]);
+	switch (param) {
+	case LTQ_PINCONF_PARAM_DRIVE_CURRENT:
+		reg = LTQ_PADC_DCC;
+		break;
 
-		switch (param) {
-		case LTQ_PINCONF_PARAM_DRIVE_CURRENT:
-			reg = LTQ_PADC_DCC;
-			break;
+	case LTQ_PINCONF_PARAM_SLEW_RATE:
+		reg = LTQ_PADC_SRC;
+		break;
 
-		case LTQ_PINCONF_PARAM_SLEW_RATE:
-			reg = LTQ_PADC_SRC;
-			break;
+	case LTQ_PINCONF_PARAM_PULL:
+		if (arg == 1)
+			reg = LTQ_PADC_PDEN;
+		else
+			reg = LTQ_PADC_PUEN;
+		break;
 
-		case LTQ_PINCONF_PARAM_PULL:
-			if (arg == 1)
-				reg = LTQ_PADC_PDEN;
-			else
-				reg = LTQ_PADC_PUEN;
-			break;
+	default:
+		pr_err("%s: Invalid config param %04x\n",
+		pinctrl_dev_get_name(pctrldev), param);
+		return -ENOTSUPP;
+	}
 
-		default:
-			pr_err("%s: Invalid config param %04x\n",
-			pinctrl_dev_get_name(pctrldev), param);
-			return -ENOTSUPP;
-		}
-
-		pad_w32(mem, BIT(PORT_PIN(pin)), reg);
-		if (!(pad_r32(mem, reg) & BIT(PORT_PIN(pin))))
-			return -ENOTSUPP;
-	} /* for each config */
-
+	pad_w32(mem, BIT(PORT_PIN(pin)), reg);
+	if (!(pad_r32(mem, reg) & BIT(PORT_PIN(pin))))
+		return -ENOTSUPP;
 	return 0;
 }
 
@@ -464,7 +451,7 @@ static int pinctrl_falcon_probe(struct platform_device *pdev)
 								   &res);
 		if (IS_ERR(falcon_info.membase[*bank]))
 			return PTR_ERR(falcon_info.membase[*bank]);
-
+		
 		avail = pad_r32(falcon_info.membase[*bank],
 					LTQ_PADC_AVAIL);
 		pins = fls(avail);
@@ -501,6 +488,7 @@ static struct platform_driver pinctrl_falcon_driver = {
 	.probe = pinctrl_falcon_probe,
 	.driver = {
 		.name = "pinctrl-falcon",
+		.owner = THIS_MODULE,
 		.of_match_table = falcon_match,
 	},
 };

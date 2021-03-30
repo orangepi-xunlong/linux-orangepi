@@ -14,7 +14,9 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston,
+ * MA  02111-1307, USA.
  *
  * The full GNU General Public License is included in this distribution
  * in the file called "COPYING".
@@ -129,12 +131,14 @@ netxen_get_minidump_template(struct netxen_adapter *adapter)
 		return NX_RCODE_INVALID_ARGS;
 	}
 
-	addr = pci_zalloc_consistent(adapter->pdev, size, &md_template_addr);
+	addr = pci_alloc_consistent(adapter->pdev, size, &md_template_addr);
+
 	if (!addr) {
 		dev_err(&adapter->pdev->dev, "Unable to allocate dmable memory for template.\n");
 		return -ENOMEM;
 	}
 
+	memset(addr, 0, size);
 	memset(&cmd, 0, sizeof(cmd));
 	memset(&cmd.rsp, 1, sizeof(struct _cdrp_cmd));
 	cmd.req.cmd = NX_CDRP_CMD_GET_TEMP_HDR;
@@ -247,7 +251,7 @@ nx_fw_cmd_set_mtu(struct netxen_adapter *adapter, int mtu)
 	cmd.req.arg3 = 0;
 
 	if (recv_ctx->state == NX_HOST_CTX_STATE_ACTIVE)
-		rcode = netxen_issue_cmd(adapter, &cmd);
+		netxen_issue_cmd(adapter, &cmd);
 
 	if (rcode != NX_RCODE_SUCCESS)
 		return -EIO;

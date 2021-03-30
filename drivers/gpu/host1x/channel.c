@@ -43,7 +43,6 @@ int host1x_job_submit(struct host1x_job *job)
 
 	return host1x_hw_channel_submit(host, job);
 }
-EXPORT_SYMBOL(host1x_job_submit);
 
 struct host1x_channel *host1x_channel_get(struct host1x_channel *channel)
 {
@@ -61,7 +60,6 @@ struct host1x_channel *host1x_channel_get(struct host1x_channel *channel)
 
 	return err ? NULL : channel;
 }
-EXPORT_SYMBOL(host1x_channel_get);
 
 void host1x_channel_put(struct host1x_channel *channel)
 {
@@ -78,15 +76,13 @@ void host1x_channel_put(struct host1x_channel *channel)
 
 	mutex_unlock(&channel->reflock);
 }
-EXPORT_SYMBOL(host1x_channel_put);
 
 struct host1x_channel *host1x_channel_request(struct device *dev)
 {
 	struct host1x *host = dev_get_drvdata(dev->parent);
-	unsigned int max_channels = host->info->nb_channels;
+	int max_channels = host->info->nb_channels;
 	struct host1x_channel *channel = NULL;
-	unsigned long index;
-	int err;
+	int index, err;
 
 	mutex_lock(&host->chlist_mutex);
 
@@ -119,7 +115,6 @@ fail:
 	mutex_unlock(&host->chlist_mutex);
 	return NULL;
 }
-EXPORT_SYMBOL(host1x_channel_request);
 
 void host1x_channel_free(struct host1x_channel *channel)
 {
@@ -129,4 +124,3 @@ void host1x_channel_free(struct host1x_channel *channel)
 	list_del(&channel->list);
 	kfree(channel);
 }
-EXPORT_SYMBOL(host1x_channel_free);

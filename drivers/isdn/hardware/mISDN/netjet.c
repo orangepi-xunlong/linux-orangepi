@@ -111,7 +111,7 @@ _set_debug(struct tiger_hw *card)
 }
 
 static int
-set_debug(const char *val, const struct kernel_param *kp)
+set_debug(const char *val, struct kernel_param *kp)
 {
 	int ret;
 	struct tiger_hw *card;
@@ -392,7 +392,7 @@ read_dma(struct tiger_ch *bc, u32 idx, int cnt)
 	}
 	stat = bchannel_get_rxbuf(&bc->bch, cnt);
 	/* only transparent use the count here, HDLC overun is detected later */
-	if (stat == -ENOMEM) {
+	if (stat == ENOMEM) {
 		pr_warning("%s.B%d: No memory for %d bytes\n",
 			   card->name, bc->bch.nr, cnt);
 		return;

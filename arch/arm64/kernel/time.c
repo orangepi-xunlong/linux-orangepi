@@ -34,14 +34,13 @@
 #include <linux/irq.h>
 #include <linux/delay.h>
 #include <linux/clocksource.h>
-#include <linux/clk-provider.h>
-#include <linux/acpi.h>
 
 #include <clocksource/arm_arch_timer.h>
 
 #include <asm/thread_info.h>
 #include <asm/stacktrace.h>
 
+#ifdef CONFIG_SMP
 unsigned long profile_pc(struct pt_regs *regs)
 {
 	struct stackframe frame;
@@ -52,11 +51,8 @@ unsigned long profile_pc(struct pt_regs *regs)
 	frame.fp = regs->regs[29];
 	frame.sp = regs->sp;
 	frame.pc = regs->pc;
-#ifdef CONFIG_FUNCTION_GRAPH_TRACER
-	frame.graph = current->curr_ret_stack;
-#endif
 	do {
-		int ret = unwind_frame(NULL, &frame);
+		int ret = unwind_frame(&frame);
 		if (ret < 0)
 			return 0;
 	} while (in_lock_functions(frame.pc));
@@ -64,19 +60,29 @@ unsigned long profile_pc(struct pt_regs *regs)
 	return frame.pc;
 }
 EXPORT_SYMBOL(profile_pc);
+#endif
+
+static u64 sched_clock_mult __read_mostly;
+
+unsigned long long notrace sched_clock(void)
+{
+	return arch_timer_read_counter() * sched_clock_mult;
+}
 
 void __init time_init(void)
 {
 	u32 arch_timer_rate;
 
-	of_clk_init(NULL);
-	clocksource_probe();
+	clocksource_of_init();
 
 	tick_setup_hrtimer_broadcast();
 
 	arch_timer_rate = arch_timer_get_rate();
 	if (!arch_timer_rate)
 		panic("Unable to initialise architected timer.\n");
+
+	/* Cache the sched_clock multiplier to save a divide in the hot path. */
+	sched_clock_mult = NSEC_PER_SEC / arch_timer_rate;
 
 	/* Calibrate the delay loop directly */
 	lpj_fine = arch_timer_rate / HZ;

@@ -40,7 +40,7 @@
 #include <net/ip_vs.h>
 
 
-static inline int
+static inline unsigned int
 ip_vs_nq_dest_overhead(struct ip_vs_dest *dest)
 {
 	/*
@@ -55,11 +55,10 @@ ip_vs_nq_dest_overhead(struct ip_vs_dest *dest)
  *	Weighted Least Connection scheduling
  */
 static struct ip_vs_dest *
-ip_vs_nq_schedule(struct ip_vs_service *svc, const struct sk_buff *skb,
-		  struct ip_vs_iphdr *iph)
+ip_vs_nq_schedule(struct ip_vs_service *svc, const struct sk_buff *skb)
 {
 	struct ip_vs_dest *dest, *least = NULL;
-	int loh = 0, doh;
+	unsigned int loh = 0, doh;
 
 	IP_VS_DBG(6, "%s(): Scheduling...\n", __func__);
 
@@ -92,8 +91,8 @@ ip_vs_nq_schedule(struct ip_vs_service *svc, const struct sk_buff *skb,
 		}
 
 		if (!least ||
-		    ((__s64)loh * atomic_read(&dest->weight) >
-		     (__s64)doh * atomic_read(&least->weight))) {
+		    (loh * atomic_read(&dest->weight) >
+		     doh * atomic_read(&least->weight))) {
 			least = dest;
 			loh = doh;
 		}
@@ -107,8 +106,7 @@ ip_vs_nq_schedule(struct ip_vs_service *svc, const struct sk_buff *skb,
   out:
 	IP_VS_DBG_BUF(6, "NQ: server %s:%u "
 		      "activeconns %d refcnt %d weight %d overhead %d\n",
-		      IP_VS_DBG_ADDR(least->af, &least->addr),
-		      ntohs(least->port),
+		      IP_VS_DBG_ADDR(svc->af, &least->addr), ntohs(least->port),
 		      atomic_read(&least->activeconns),
 		      atomic_read(&least->refcnt),
 		      atomic_read(&least->weight), loh);

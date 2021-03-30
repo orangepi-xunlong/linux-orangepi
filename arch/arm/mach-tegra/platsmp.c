@@ -11,32 +11,31 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-
-#include <linux/clk/tegra.h>
+#include <linux/init.h>
+#include <linux/errno.h>
 #include <linux/delay.h>
 #include <linux/device.h>
-#include <linux/errno.h>
-#include <linux/init.h>
-#include <linux/io.h>
 #include <linux/jiffies.h>
 #include <linux/smp.h>
-
-#include <soc/tegra/fuse.h>
-#include <soc/tegra/pmc.h>
+#include <linux/io.h>
+#include <linux/clk/tegra.h>
 
 #include <asm/cacheflush.h>
 #include <asm/mach-types.h>
-#include <asm/smp_plat.h>
 #include <asm/smp_scu.h>
+#include <asm/smp_plat.h>
+
+#include "fuse.h"
+#include "flowctrl.h"
+#include "reset.h"
+#include "pmc.h"
 
 #include "common.h"
-#include "flowctrl.h"
 #include "iomap.h"
-#include "reset.h"
 
 static cpumask_t tegra_cpu_init_mask;
 
-static void tegra_secondary_init(unsigned int cpu)
+static void __cpuinit tegra_secondary_init(unsigned int cpu)
 {
 	cpumask_set_cpu(cpu, &tegra_cpu_init_mask);
 }
@@ -108,9 +107,19 @@ static int tegra30_boot_secondary(unsigned int cpu, struct task_struct *idle)
 	 * be un-gated by un-toggling the power gate register
 	 * manually.
 	 */
-	ret = tegra_pmc_cpu_power_on(cpu);
-	if (ret)
-		return ret;
+	if (!tegra_pmc_cpu_is_powered(cpu)) {
+		ret = tegra_pmc_cpu_power_on(cpu);
+		if (ret)
+			return ret;
+
+		/* Wait for the power to come up. */
+		timeout = jiffies + msecs_to_jiffies(100);
+		while (tegra_pmc_cpu_is_powered(cpu)) {
+			if (time_after(jiffies, timeout))
+				return -ETIMEDOUT;
+			udelay(10);
+		}
+	}
 
 remove_clamps:
 	/* CPU partition is powered. Enable the CPU clock. */
@@ -131,43 +140,18 @@ remove_clamps:
 
 static int tegra114_boot_secondary(unsigned int cpu, struct task_struct *idle)
 {
-	int ret = 0;
-
 	cpu = cpu_logical_map(cpu);
-
-	if (cpumask_test_cpu(cpu, &tegra_cpu_init_mask)) {
-		/*
-		 * Warm boot flow
-		 * The flow controller in charge of the power state and
-		 * control for each CPU.
-		 */
-		/* set SCLK as event trigger for flow controller */
-		flowctrl_write_cpu_csr(cpu, 1);
-		flowctrl_write_cpu_halt(cpu,
-				FLOW_CTRL_WAITEVENT | FLOW_CTRL_SCLK_RESUME);
-	} else {
-		/*
-		 * Cold boot flow
-		 * The CPU is powered up by toggling PMC directly. It will
-		 * also initial power state in flow controller. After that,
-		 * the CPU's power state is maintained by flow controller.
-		 */
-		ret = tegra_pmc_cpu_power_on(cpu);
-	}
-
-	return ret;
+	return tegra_pmc_cpu_power_on(cpu);
 }
 
-static int tegra_boot_secondary(unsigned int cpu,
+static int __cpuinit tegra_boot_secondary(unsigned int cpu,
 					  struct task_struct *idle)
 {
-	if (IS_ENABLED(CONFIG_ARCH_TEGRA_2x_SOC) && tegra_get_chip_id() == TEGRA20)
+	if (IS_ENABLED(CONFIG_ARCH_TEGRA_2x_SOC) && tegra_chip_id == TEGRA20)
 		return tegra20_boot_secondary(cpu, idle);
-	if (IS_ENABLED(CONFIG_ARCH_TEGRA_3x_SOC) && tegra_get_chip_id() == TEGRA30)
+	if (IS_ENABLED(CONFIG_ARCH_TEGRA_3x_SOC) && tegra_chip_id == TEGRA30)
 		return tegra30_boot_secondary(cpu, idle);
-	if (IS_ENABLED(CONFIG_ARCH_TEGRA_114_SOC) && tegra_get_chip_id() == TEGRA114)
-		return tegra114_boot_secondary(cpu, idle);
-	if (IS_ENABLED(CONFIG_ARCH_TEGRA_124_SOC) && tegra_get_chip_id() == TEGRA124)
+	if (IS_ENABLED(CONFIG_ARCH_TEGRA_114_SOC) && tegra_chip_id == TEGRA114)
 		return tegra114_boot_secondary(cpu, idle);
 
 	return -EINVAL;
@@ -182,7 +166,7 @@ static void __init tegra_smp_prepare_cpus(unsigned int max_cpus)
 		scu_enable(IO_ADDRESS(scu_a9_get_base()));
 }
 
-const struct smp_operations tegra_smp_ops __initconst = {
+struct smp_operations tegra_smp_ops __initdata = {
 	.smp_prepare_cpus	= tegra_smp_prepare_cpus,
 	.smp_secondary_init	= tegra_secondary_init,
 	.smp_boot_secondary	= tegra_boot_secondary,

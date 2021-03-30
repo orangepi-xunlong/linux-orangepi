@@ -25,15 +25,11 @@
 
 #define ERROR(s, args...)	pr_err("SQUASHFS error: "s, ## args)
 
-#define WARNING(s, args...)	pr_warn("SQUASHFS: "s, ## args)
+#define WARNING(s, args...)	pr_warning("SQUASHFS: "s, ## args)
 
 /* block.c */
-extern int squashfs_init_read_wq(void);
-extern void squashfs_destroy_read_wq(void);
-extern int squashfs_read_data(struct super_block *, u64, int, u64 *,
-				struct squashfs_page_actor *);
-extern int squashfs_read_data_async(struct super_block *, u64, int, u64 *,
-				struct squashfs_page_actor *);
+extern int squashfs_read_data(struct super_block *, void **, u64, int, u64 *,
+				int, int);
 
 /* cache.c */
 extern struct squashfs_cache *squashfs_cache_init(char *, int, int);
@@ -52,14 +48,7 @@ extern void *squashfs_read_table(struct super_block *, u64, int);
 
 /* decompressor.c */
 extern const struct squashfs_decompressor *squashfs_lookup_decompressor(int);
-extern void *squashfs_decompressor_setup(struct super_block *, unsigned short);
-
-/* decompressor_xxx.c */
-extern void *squashfs_decompressor_create(struct squashfs_sb_info *, void *);
-extern void squashfs_decompressor_destroy(struct squashfs_sb_info *);
-extern int squashfs_decompress(struct squashfs_sb_info *, struct buffer_head **,
-	int, int, int, struct squashfs_page_actor *);
-extern int squashfs_max_decompressors(void);
+extern void *squashfs_decompressor_init(struct super_block *, unsigned short);
 
 /* export.c */
 extern __le64 *squashfs_read_inode_lookup_table(struct super_block *, u64, u64,
@@ -69,15 +58,6 @@ extern __le64 *squashfs_read_inode_lookup_table(struct super_block *, u64, u64,
 extern int squashfs_frag_lookup(struct super_block *, unsigned int, u64 *);
 extern __le64 *squashfs_read_fragment_index_table(struct super_block *,
 				u64, u64, unsigned int);
-
-/* file.c */
-void squashfs_fill_page(struct page *, struct squashfs_cache_entry *, int, int);
-void squashfs_copy_cache(struct page *, struct squashfs_cache_entry *, int,
-				int);
-
-/* file_direct.c */
-extern int squashfs_readpages_block(struct page *, struct list_head *,
-	unsigned int *, struct address_space *, int, u64, int);
 
 /* id.c */
 extern int squashfs_get_id(struct super_block *, unsigned int, unsigned int *);

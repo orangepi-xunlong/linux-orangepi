@@ -24,10 +24,30 @@
 static enum htc_phymode ath9k_htc_get_curmode(struct ath9k_htc_priv *priv,
 					      struct ath9k_channel *ichan)
 {
-	if (IS_CHAN_5GHZ(ichan))
-		return HTC_MODE_11NA;
+	enum htc_phymode mode;
 
-	return HTC_MODE_11NG;
+	mode = -EINVAL;
+
+	switch (ichan->chanmode) {
+	case CHANNEL_G:
+	case CHANNEL_G_HT20:
+	case CHANNEL_G_HT40PLUS:
+	case CHANNEL_G_HT40MINUS:
+		mode = HTC_MODE_11NG;
+		break;
+	case CHANNEL_A:
+	case CHANNEL_A_HT20:
+	case CHANNEL_A_HT40PLUS:
+	case CHANNEL_A_HT40MINUS:
+		mode = HTC_MODE_11NA;
+		break;
+	default:
+		break;
+	}
+
+	WARN_ON(mode < 0);
+
+	return mode;
 }
 
 bool ath9k_htc_setpower(struct ath9k_htc_priv *priv,
@@ -93,12 +113,8 @@ static void ath9k_htc_vif_iter(void *data, u8 *mac, struct ieee80211_vif *vif)
 	struct ath9k_htc_priv *priv = data;
 	struct ieee80211_bss_conf *bss_conf = &vif->bss_conf;
 
-	if ((vif->type == NL80211_IFTYPE_AP ||
-	     vif->type == NL80211_IFTYPE_MESH_POINT) &&
-	    bss_conf->enable_beacon) {
+	if ((vif->type == NL80211_IFTYPE_AP) && bss_conf->enable_beacon)
 		priv->reconfig_beacon = true;
-		priv->rearm_ani = true;
-	}
 
 	if (bss_conf->assoc) {
 		priv->rearm_ani = true;
@@ -149,7 +165,7 @@ static void ath9k_htc_set_mac_bssid_mask(struct ath9k_htc_priv *priv,
 	 * when matching addresses.
 	 */
 	iter_data.hw_macaddr = NULL;
-	eth_broadcast_addr(iter_data.mask);
+	memset(&iter_data.mask, 0xff, ETH_ALEN);
 
 	if (vif)
 		ath9k_htc_bssid_iter(&iter_data, vif->addr, vif);
@@ -173,8 +189,6 @@ static void ath9k_htc_set_opmode(struct ath9k_htc_priv *priv)
 		priv->ah->opmode = NL80211_IFTYPE_ADHOC;
 	else if (priv->num_ap_vif)
 		priv->ah->opmode = NL80211_IFTYPE_AP;
-	else if (priv->num_mbss_vif)
-		priv->ah->opmode = NL80211_IFTYPE_MESH_POINT;
 	else
 		priv->ah->opmode = NL80211_IFTYPE_STATION;
 
@@ -246,20 +260,19 @@ static int ath9k_htc_set_channel(struct ath9k_htc_priv *priv,
 	struct ieee80211_conf *conf = &common->hw->conf;
 	bool fastcc;
 	struct ieee80211_channel *channel = hw->conf.chandef.chan;
-	struct ath9k_hw_cal_data *caldata;
+	struct ath9k_hw_cal_data *caldata = NULL;
 	enum htc_phymode mode;
 	__be16 htc_mode;
 	u8 cmd_rsp;
 	int ret;
 
-	if (test_bit(ATH_OP_INVALID, &common->op_flags))
+	if (test_bit(OP_INVALID, &priv->op_flags))
 		return -EIO;
 
 	fastcc = !!(hw->conf.flags & IEEE80211_CONF_OFFCHANNEL);
 
 	ath9k_htc_ps_wakeup(priv);
 
-	ath9k_htc_stop_ani(priv);
 	del_timer_sync(&priv->tx.cleanup_timer);
 	ath9k_htc_tx_drain(priv);
 
@@ -274,7 +287,10 @@ static int ath9k_htc_set_channel(struct ath9k_htc_priv *priv,
 		priv->ah->curchan->channel,
 		channel->center_freq, conf_is_ht(conf), conf_is_ht40(conf),
 		fastcc);
-	caldata = fastcc ? NULL : &priv->caldata;
+
+	if (!fastcc)
+		caldata = &priv->caldata;
+
 	ret = ath9k_hw_reset(ah, hchan, caldata, fastcc);
 	if (ret) {
 		ath_err(common,
@@ -304,17 +320,13 @@ static int ath9k_htc_set_channel(struct ath9k_htc_priv *priv,
 
 	htc_start(priv->htc);
 
-	if (!test_bit(ATH_OP_SCANNING, &common->op_flags) &&
+	if (!test_bit(OP_SCANNING, &priv->op_flags) &&
 	    !(hw->conf.flags & IEEE80211_CONF_OFFCHANNEL))
 		ath9k_htc_vif_reconfig(priv);
 
 	mod_timer(&priv->tx.cleanup_timer,
 		  jiffies + msecs_to_jiffies(ATH9K_HTC_TX_CLEANUP_INTERVAL));
 
-	/* perform spectral scan if requested. */
-	if (test_bit(ATH_OP_SCANNING, &common->op_flags) &&
-		     priv->spec_priv.spectral_mode == SPECTRAL_CHANSCAN)
-		ath9k_cmn_spectral_scan_trigger(common, &priv->spec_priv);
 err:
 	ath9k_htc_ps_restore(priv);
 	return ret;
@@ -620,8 +632,6 @@ static void ath9k_htc_setup_rate(struct ath9k_htc_priv *priv,
 		trate->rates.ht_rates.rs_nrates = j;
 
 		caps = WLAN_RC_HT_FLAG;
-		if (sta->ht_cap.cap & IEEE80211_HT_CAP_RX_STBC)
-			caps |= ATH_RC_TX_STBC_FLAG;
 		if (sta->ht_cap.mcs.rx_mask[1])
 			caps |= WLAN_RC_DS_FLAG;
 		if ((sta->ht_cap.cap & IEEE80211_HT_CAP_SUP_WIDTH_20_40) &&
@@ -752,7 +762,7 @@ void ath9k_htc_start_ani(struct ath9k_htc_priv *priv)
 	common->ani.shortcal_timer = timestamp;
 	common->ani.checkani_timer = timestamp;
 
-	set_bit(ATH_OP_ANI_RUN, &common->op_flags);
+	set_bit(OP_ANI_RUNNING, &priv->op_flags);
 
 	ieee80211_queue_delayed_work(common->hw, &priv->ani_work,
 				     msecs_to_jiffies(ATH_ANI_POLLINTERVAL));
@@ -760,9 +770,8 @@ void ath9k_htc_start_ani(struct ath9k_htc_priv *priv)
 
 void ath9k_htc_stop_ani(struct ath9k_htc_priv *priv)
 {
-	struct ath_common *common = ath9k_hw_common(priv->ah);
 	cancel_delayed_work_sync(&priv->ani_work);
-	clear_bit(ATH_OP_ANI_RUN, &common->op_flags);
+	clear_bit(OP_ANI_RUNNING, &priv->op_flags);
 }
 
 void ath9k_htc_ani_work(struct work_struct *work)
@@ -791,11 +800,8 @@ void ath9k_htc_ani_work(struct work_struct *work)
 		common->ani.longcal_timer = timestamp;
 	}
 
-	/*
-	 * Short calibration applies only while caldone
-	 * is false or -ETIMEDOUT
-	 */
-	if (common->ani.caldone <= 0) {
+	/* Short calibration applies only while caldone is false */
+	if (!common->ani.caldone) {
 		if ((timestamp - common->ani.shortcal_timer) >=
 		    short_cal_interval) {
 			shortcal = true;
@@ -813,7 +819,8 @@ void ath9k_htc_ani_work(struct work_struct *work)
 	}
 
 	/* Verify whether we must check ANI */
-	if ((timestamp - common->ani.checkani_timer) >= ATH_ANI_POLLINTERVAL) {
+	if (ah->config.enable_ani &&
+	    (timestamp - common->ani.checkani_timer) >= ATH_ANI_POLLINTERVAL) {
 		aniflag = true;
 		common->ani.checkani_timer = timestamp;
 	}
@@ -831,7 +838,7 @@ void ath9k_htc_ani_work(struct work_struct *work)
 		if (longcal || shortcal)
 			common->ani.caldone =
 				ath9k_hw_calibrate(ah, ah->curchan,
-						ah->rxchainmask, longcal) > 0;
+						   ah->rxchainmask, longcal);
 
 		ath9k_htc_ps_restore(priv);
 	}
@@ -843,12 +850,9 @@ set_timer:
 	* short calibration and long calibration.
 	*/
 	cal_interval = ATH_LONG_CALINTERVAL;
-	cal_interval = min(cal_interval, (u32)ATH_ANI_POLLINTERVAL);
-	/*
-	 * Short calibration applies only while caldone
-	 * is false or -ETIMEDOUT
-	 */
-	if (common->ani.caldone <= 0)
+	if (ah->config.enable_ani)
+		cal_interval = min(cal_interval, (u32)ATH_ANI_POLLINTERVAL);
+	if (!common->ani.caldone)
 		cal_interval = min(cal_interval, (u32)short_cal_interval);
 
 	ieee80211_queue_delayed_work(common->hw, &priv->ani_work,
@@ -927,7 +931,7 @@ static int ath9k_htc_start(struct ieee80211_hw *hw)
 	WMI_CMD(WMI_FLUSH_RECV_CMDID);
 
 	/* setup initial channel */
-	init_channel = ath9k_cmn_get_channel(hw, ah, &hw->conf.chandef);
+	init_channel = ath9k_cmn_get_curchannel(hw, ah);
 
 	ret = ath9k_hw_reset(ah, init_channel, ah->caldata, false);
 	if (ret) {
@@ -954,7 +958,7 @@ static int ath9k_htc_start(struct ieee80211_hw *hw)
 		ath_dbg(common, CONFIG,
 			"Failed to update capability in target\n");
 
-	clear_bit(ATH_OP_INVALID, &common->op_flags);
+	clear_bit(OP_INVALID, &priv->op_flags);
 	htc_start(priv->htc);
 
 	spin_lock_bh(&priv->tx.tx_lock);
@@ -983,7 +987,7 @@ static void ath9k_htc_stop(struct ieee80211_hw *hw)
 
 	mutex_lock(&priv->mutex);
 
-	if (test_bit(ATH_OP_INVALID, &common->op_flags)) {
+	if (test_bit(OP_INVALID, &priv->op_flags)) {
 		ath_dbg(common, ANY, "Device not present\n");
 		mutex_unlock(&priv->mutex);
 		return;
@@ -1025,7 +1029,7 @@ static void ath9k_htc_stop(struct ieee80211_hw *hw)
 	ath9k_htc_ps_restore(priv);
 	ath9k_htc_setpower(priv, ATH9K_PM_FULL_SLEEP);
 
-	set_bit(ATH_OP_INVALID, &common->op_flags);
+	set_bit(OP_INVALID, &priv->op_flags);
 
 	ath_dbg(common, CONFIG, "Driver halt\n");
 	mutex_unlock(&priv->mutex);
@@ -1056,9 +1060,6 @@ static int ath9k_htc_add_interface(struct ieee80211_hw *hw,
 		break;
 	case NL80211_IFTYPE_AP:
 		hvif.opmode = HTC_M_HOSTAP;
-		break;
-	case NL80211_IFTYPE_MESH_POINT:
-		hvif.opmode = HTC_M_WDS;	/* close enough */
 		break;
 	default:
 		ath_err(common,
@@ -1092,14 +1093,13 @@ static int ath9k_htc_add_interface(struct ieee80211_hw *hw,
 	INC_VIF(priv, vif->type);
 
 	if ((vif->type == NL80211_IFTYPE_AP) ||
-	    (vif->type == NL80211_IFTYPE_MESH_POINT) ||
 	    (vif->type == NL80211_IFTYPE_ADHOC))
 		ath9k_htc_assign_bslot(priv, vif);
 
 	ath9k_htc_set_opmode(priv);
 
 	if ((priv->ah->opmode == NL80211_IFTYPE_AP) &&
-	    !test_bit(ATH_OP_ANI_RUN, &common->op_flags)) {
+	    !test_bit(OP_ANI_RUNNING, &priv->op_flags)) {
 		ath9k_hw_set_tsfadjust(priv->ah, true);
 		ath9k_htc_start_ani(priv);
 	}
@@ -1138,15 +1138,11 @@ static void ath9k_htc_remove_interface(struct ieee80211_hw *hw,
 	priv->nvifs--;
 	priv->vif_slot &= ~(1 << avp->index);
 
-	if (priv->csa_vif == vif)
-		priv->csa_vif = NULL;
-
 	ath9k_htc_remove_station(priv, vif, NULL);
 
 	DEC_VIF(priv, vif->type);
 
 	if ((vif->type == NL80211_IFTYPE_AP) ||
-	     vif->type == NL80211_IFTYPE_MESH_POINT ||
 	    (vif->type == NL80211_IFTYPE_ADHOC))
 		ath9k_htc_remove_bslot(priv, vif);
 
@@ -1207,12 +1203,17 @@ static int ath9k_htc_config(struct ieee80211_hw *hw, u32 changed)
 
 	if ((changed & IEEE80211_CONF_CHANGE_CHANNEL) || chip_reset) {
 		struct ieee80211_channel *curchan = hw->conf.chandef.chan;
+		enum nl80211_channel_type channel_type =
+			cfg80211_get_chandef_type(&hw->conf.chandef);
 		int pos = curchan->hw_value;
 
 		ath_dbg(common, CONFIG, "Set channel: %d MHz\n",
 			curchan->center_freq);
 
-		ath9k_cmn_get_channel(hw, priv->ah, &hw->conf.chandef);
+		ath9k_cmn_update_ichannel(&priv->ah->channels[pos],
+					  hw->conf.chandef.chan,
+					  channel_type);
+
 		if (ath9k_htc_set_channel(priv, hw, &priv->ah->channels[pos]) < 0) {
 			ath_err(common, "Unable to set channel\n");
 			ret = -EINVAL;
@@ -1245,7 +1246,8 @@ out:
 }
 
 #define SUPPORTED_FILTERS			\
-	(FIF_ALLMULTI |				\
+	(FIF_PROMISC_IN_BSS |			\
+	FIF_ALLMULTI |				\
 	FIF_CONTROL |				\
 	FIF_PSPOLL |				\
 	FIF_OTHER_BSS |				\
@@ -1259,14 +1261,13 @@ static void ath9k_htc_configure_filter(struct ieee80211_hw *hw,
 				       u64 multicast)
 {
 	struct ath9k_htc_priv *priv = hw->priv;
-	struct ath_common *common = ath9k_hw_common(priv->ah);
 	u32 rfilt;
 
 	mutex_lock(&priv->mutex);
 	changed_flags &= SUPPORTED_FILTERS;
 	*total_flags &= SUPPORTED_FILTERS;
 
-	if (test_bit(ATH_OP_INVALID, &common->op_flags)) {
+	if (test_bit(OP_INVALID, &priv->op_flags)) {
 		ath_dbg(ath9k_hw_common(priv->ah), ANY,
 			"Unable to configure filter on invalid state\n");
 		mutex_unlock(&priv->mutex);
@@ -1285,15 +1286,53 @@ static void ath9k_htc_configure_filter(struct ieee80211_hw *hw,
 	mutex_unlock(&priv->mutex);
 }
 
-static void ath9k_htc_sta_rc_update_work(struct work_struct *work)
+static int ath9k_htc_sta_add(struct ieee80211_hw *hw,
+			     struct ieee80211_vif *vif,
+			     struct ieee80211_sta *sta)
 {
-	struct ath9k_htc_sta *ista =
-	    container_of(work, struct ath9k_htc_sta, rc_update_work);
-	struct ieee80211_sta *sta =
-	    container_of((void *)ista, struct ieee80211_sta, drv_priv);
-	struct ath9k_htc_priv *priv = ista->htc_priv;
+	struct ath9k_htc_priv *priv = hw->priv;
+	int ret;
+
+	mutex_lock(&priv->mutex);
+	ath9k_htc_ps_wakeup(priv);
+	ret = ath9k_htc_add_station(priv, vif, sta);
+	if (!ret)
+		ath9k_htc_init_rate(priv, sta);
+	ath9k_htc_ps_restore(priv);
+	mutex_unlock(&priv->mutex);
+
+	return ret;
+}
+
+static int ath9k_htc_sta_remove(struct ieee80211_hw *hw,
+				struct ieee80211_vif *vif,
+				struct ieee80211_sta *sta)
+{
+	struct ath9k_htc_priv *priv = hw->priv;
+	struct ath9k_htc_sta *ista;
+	int ret;
+
+	mutex_lock(&priv->mutex);
+	ath9k_htc_ps_wakeup(priv);
+	ista = (struct ath9k_htc_sta *) sta->drv_priv;
+	htc_sta_drain(priv->htc, ista->index);
+	ret = ath9k_htc_remove_station(priv, vif, sta);
+	ath9k_htc_ps_restore(priv);
+	mutex_unlock(&priv->mutex);
+
+	return ret;
+}
+
+static void ath9k_htc_sta_rc_update(struct ieee80211_hw *hw,
+				    struct ieee80211_vif *vif,
+				    struct ieee80211_sta *sta, u32 changed)
+{
+	struct ath9k_htc_priv *priv = hw->priv;
 	struct ath_common *common = ath9k_hw_common(priv->ah);
 	struct ath9k_htc_target_rate trate;
+
+	if (!(changed & IEEE80211_RC_SUPP_RATES_CHANGED))
+		return;
 
 	mutex_lock(&priv->mutex);
 	ath9k_htc_ps_wakeup(priv);
@@ -1311,60 +1350,6 @@ static void ath9k_htc_sta_rc_update_work(struct work_struct *work)
 
 	ath9k_htc_ps_restore(priv);
 	mutex_unlock(&priv->mutex);
-}
-
-static int ath9k_htc_sta_add(struct ieee80211_hw *hw,
-			     struct ieee80211_vif *vif,
-			     struct ieee80211_sta *sta)
-{
-	struct ath9k_htc_priv *priv = hw->priv;
-	struct ath9k_htc_sta *ista = (struct ath9k_htc_sta *) sta->drv_priv;
-	int ret;
-
-	mutex_lock(&priv->mutex);
-	ath9k_htc_ps_wakeup(priv);
-	ret = ath9k_htc_add_station(priv, vif, sta);
-	if (!ret) {
-		INIT_WORK(&ista->rc_update_work, ath9k_htc_sta_rc_update_work);
-		ista->htc_priv = priv;
-		ath9k_htc_init_rate(priv, sta);
-	}
-	ath9k_htc_ps_restore(priv);
-	mutex_unlock(&priv->mutex);
-
-	return ret;
-}
-
-static int ath9k_htc_sta_remove(struct ieee80211_hw *hw,
-				struct ieee80211_vif *vif,
-				struct ieee80211_sta *sta)
-{
-	struct ath9k_htc_priv *priv = hw->priv;
-	struct ath9k_htc_sta *ista = (struct ath9k_htc_sta *) sta->drv_priv;
-	int ret;
-
-	cancel_work_sync(&ista->rc_update_work);
-
-	mutex_lock(&priv->mutex);
-	ath9k_htc_ps_wakeup(priv);
-	htc_sta_drain(priv->htc, ista->index);
-	ret = ath9k_htc_remove_station(priv, vif, sta);
-	ath9k_htc_ps_restore(priv);
-	mutex_unlock(&priv->mutex);
-
-	return ret;
-}
-
-static void ath9k_htc_sta_rc_update(struct ieee80211_hw *hw,
-				    struct ieee80211_vif *vif,
-				    struct ieee80211_sta *sta, u32 changed)
-{
-	struct ath9k_htc_sta *ista = (struct ath9k_htc_sta *) sta->drv_priv;
-
-	if (!(changed & IEEE80211_RC_SUPP_RATES_CHANGED))
-		return;
-
-	schedule_work(&ista->rc_update_work);
 }
 
 static int ath9k_htc_conf_tx(struct ieee80211_hw *hw,
@@ -1453,7 +1438,7 @@ static int ath9k_htc_set_key(struct ieee80211_hw *hw,
 			key->flags |= IEEE80211_KEY_FLAG_GENERATE_IV;
 			if (key->cipher == WLAN_CIPHER_SUITE_TKIP)
 				key->flags |= IEEE80211_KEY_FLAG_GENERATE_MMIC;
-			if (priv->ah->sw_mgmt_crypto_tx &&
+			if (priv->ah->sw_mgmt_crypto &&
 			    key->cipher == WLAN_CIPHER_SUITE_CCMP)
 				key->flags |= IEEE80211_KEY_FLAG_SW_MGMT_TX;
 			ret = 0;
@@ -1489,9 +1474,7 @@ static void ath9k_htc_bss_iter(void *data, u8 *mac, struct ieee80211_vif *vif)
 
 	if ((vif->type == NL80211_IFTYPE_STATION) && bss_conf->assoc) {
 		common->curaid = bss_conf->aid;
-		common->last_rssi = ATH_RSSI_DUMMY_MARKER;
 		memcpy(common->curbssid, bss_conf->bssid, ETH_ALEN);
-		set_bit(ATH_OP_PRIM_STA_VIF, &common->op_flags);
 	}
 }
 
@@ -1513,7 +1496,6 @@ static void ath9k_htc_bss_info_changed(struct ieee80211_hw *hw,
 	struct ath9k_htc_priv *priv = hw->priv;
 	struct ath_hw *ah = priv->ah;
 	struct ath_common *common = ath9k_hw_common(ah);
-	int slottime;
 
 	mutex_lock(&priv->mutex);
 	ath9k_htc_ps_wakeup(priv);
@@ -1524,9 +1506,6 @@ static void ath9k_htc_bss_info_changed(struct ieee80211_hw *hw,
 
 		bss_conf->assoc ?
 			priv->num_sta_assoc_vif++ : priv->num_sta_assoc_vif--;
-
-		if (!bss_conf->assoc)
-			clear_bit(ATH_OP_PRIM_STA_VIF, &common->op_flags);
 
 		if (priv->ah->opmode == NL80211_IFTYPE_STATION) {
 			ath9k_htc_choose_set_bssid(priv);
@@ -1549,36 +1528,32 @@ static void ath9k_htc_bss_info_changed(struct ieee80211_hw *hw,
 		ath_dbg(common, CONFIG, "Beacon enabled for BSS: %pM\n",
 			bss_conf->bssid);
 		ath9k_htc_set_tsfadjust(priv, vif);
-		priv->cur_beacon_conf.enable_beacon = 1;
+		set_bit(OP_ENABLE_BEACON, &priv->op_flags);
 		ath9k_htc_beacon_config(priv, vif);
 	}
 
 	if ((changed & BSS_CHANGED_BEACON_ENABLED) && !bss_conf->enable_beacon) {
 		/*
 		 * Disable SWBA interrupt only if there are no
-		 * concurrent AP/mesh or IBSS interfaces.
+		 * AP/IBSS interfaces.
 		 */
-		if ((priv->num_ap_vif + priv->num_mbss_vif <= 1) ||
-		     priv->num_ibss_vif) {
+		if ((priv->num_ap_vif <= 1) || priv->num_ibss_vif) {
 			ath_dbg(common, CONFIG,
 				"Beacon disabled for BSS: %pM\n",
 				bss_conf->bssid);
-			priv->cur_beacon_conf.enable_beacon = 0;
+			clear_bit(OP_ENABLE_BEACON, &priv->op_flags);
 			ath9k_htc_beacon_config(priv, vif);
 		}
 	}
 
 	if (changed & BSS_CHANGED_BEACON_INT) {
 		/*
-		 * Reset the HW TSF for the first AP or mesh interface.
+		 * Reset the HW TSF for the first AP interface.
 		 */
-		if (priv->nvifs == 1 &&
-		    ((priv->ah->opmode == NL80211_IFTYPE_AP &&
-		      vif->type == NL80211_IFTYPE_AP &&
-		      priv->num_ap_vif == 1) ||
-		    (priv->ah->opmode == NL80211_IFTYPE_MESH_POINT &&
-		      vif->type == NL80211_IFTYPE_MESH_POINT &&
-		      priv->num_mbss_vif == 1))) {
+		if ((priv->ah->opmode == NL80211_IFTYPE_AP) &&
+		    (priv->nvifs == 1) &&
+		    (priv->num_ap_vif == 1) &&
+		    (vif->type == NL80211_IFTYPE_AP)) {
 			set_bit(OP_TSF_RESET, &priv->op_flags);
 		}
 		ath_dbg(common, CONFIG,
@@ -1589,21 +1564,11 @@ static void ath9k_htc_bss_info_changed(struct ieee80211_hw *hw,
 
 	if (changed & BSS_CHANGED_ERP_SLOT) {
 		if (bss_conf->use_short_slot)
-			slottime = 9;
+			ah->slottime = 9;
 		else
-			slottime = 20;
-		if (vif->type == NL80211_IFTYPE_AP) {
-			/*
-			 * Defer update, so that connected stations can adjust
-			 * their settings at the same time.
-			 * See beacon.c for more details
-			 */
-			priv->beacon.slottime = slottime;
-			priv->beacon.updateslot = UPDATE;
-		} else {
-			ah->slottime = slottime;
-			ath9k_hw_init_global_settings(ah);
-		}
+			ah->slottime = 20;
+
+		ath9k_hw_init_global_settings(ah);
 	}
 
 	if (changed & BSS_CHANGED_HT)
@@ -1654,14 +1619,13 @@ static void ath9k_htc_reset_tsf(struct ieee80211_hw *hw,
 
 static int ath9k_htc_ampdu_action(struct ieee80211_hw *hw,
 				  struct ieee80211_vif *vif,
-				  struct ieee80211_ampdu_params *params)
+				  enum ieee80211_ampdu_mlme_action action,
+				  struct ieee80211_sta *sta,
+				  u16 tid, u16 *ssn, u8 buf_size)
 {
 	struct ath9k_htc_priv *priv = hw->priv;
 	struct ath9k_htc_sta *ista;
 	int ret = 0;
-	struct ieee80211_sta *sta = params->sta;
-	enum ieee80211_ampdu_mlme_action action = params->action;
-	u16 tid = params->tid;
 
 	mutex_lock(&priv->mutex);
 	ath9k_htc_ps_wakeup(priv);
@@ -1698,31 +1662,26 @@ static int ath9k_htc_ampdu_action(struct ieee80211_hw *hw,
 	return ret;
 }
 
-static void ath9k_htc_sw_scan_start(struct ieee80211_hw *hw,
-				    struct ieee80211_vif *vif,
-				    const u8 *mac_addr)
+static void ath9k_htc_sw_scan_start(struct ieee80211_hw *hw)
 {
 	struct ath9k_htc_priv *priv = hw->priv;
-	struct ath_common *common = ath9k_hw_common(priv->ah);
 
 	mutex_lock(&priv->mutex);
 	spin_lock_bh(&priv->beacon_lock);
-	set_bit(ATH_OP_SCANNING, &common->op_flags);
+	set_bit(OP_SCANNING, &priv->op_flags);
 	spin_unlock_bh(&priv->beacon_lock);
 	cancel_work_sync(&priv->ps_work);
 	ath9k_htc_stop_ani(priv);
 	mutex_unlock(&priv->mutex);
 }
 
-static void ath9k_htc_sw_scan_complete(struct ieee80211_hw *hw,
-				       struct ieee80211_vif *vif)
+static void ath9k_htc_sw_scan_complete(struct ieee80211_hw *hw)
 {
 	struct ath9k_htc_priv *priv = hw->priv;
-	struct ath_common *common = ath9k_hw_common(priv->ah);
 
 	mutex_lock(&priv->mutex);
 	spin_lock_bh(&priv->beacon_lock);
-	clear_bit(ATH_OP_SCANNING, &common->op_flags);
+	clear_bit(OP_SCANNING, &priv->op_flags);
 	spin_unlock_bh(&priv->beacon_lock);
 	ath9k_htc_ps_wakeup(priv);
 	ath9k_htc_vif_reconfig(priv);
@@ -1736,7 +1695,7 @@ static int ath9k_htc_set_rts_threshold(struct ieee80211_hw *hw, u32 value)
 }
 
 static void ath9k_htc_set_coverage_class(struct ieee80211_hw *hw,
-					 s16 coverage_class)
+					 u8 coverage_class)
 {
 	struct ath9k_htc_priv *priv = hw->priv;
 
@@ -1767,8 +1726,8 @@ static int ath9k_htc_set_bitrate_mask(struct ieee80211_hw *hw,
 	memset(&tmask, 0, sizeof(struct ath9k_htc_target_rate_mask));
 
 	tmask.vif_index = avp->index;
-	tmask.band = NL80211_BAND_2GHZ;
-	tmask.mask = cpu_to_be32(mask->control[NL80211_BAND_2GHZ].legacy);
+	tmask.band = IEEE80211_BAND_2GHZ;
+	tmask.mask = cpu_to_be32(mask->control[IEEE80211_BAND_2GHZ].legacy);
 
 	WMI_CMD_BUF(WMI_BITRATE_MASK_CMDID, &tmask);
 	if (ret) {
@@ -1778,8 +1737,8 @@ static int ath9k_htc_set_bitrate_mask(struct ieee80211_hw *hw,
 		goto out;
 	}
 
-	tmask.band = NL80211_BAND_5GHZ;
-	tmask.mask = cpu_to_be32(mask->control[NL80211_BAND_5GHZ].legacy);
+	tmask.band = IEEE80211_BAND_5GHZ;
+	tmask.mask = cpu_to_be32(mask->control[IEEE80211_BAND_5GHZ].legacy);
 
 	WMI_CMD_BUF(WMI_BITRATE_MASK_CMDID, &tmask);
 	if (ret) {
@@ -1790,8 +1749,8 @@ static int ath9k_htc_set_bitrate_mask(struct ieee80211_hw *hw,
 	}
 
 	ath_dbg(common, CONFIG, "Set bitrate masks: 0x%x, 0x%x\n",
-		mask->control[NL80211_BAND_2GHZ].legacy,
-		mask->control[NL80211_BAND_5GHZ].legacy);
+		mask->control[IEEE80211_BAND_2GHZ].legacy,
+		mask->control[IEEE80211_BAND_5GHZ].legacy);
 out:
 	return ret;
 }
@@ -1810,56 +1769,6 @@ static int ath9k_htc_get_stats(struct ieee80211_hw *hw,
 	stats->dot11RTSSuccessCount = mib_stats->rts_good;
 
 	return 0;
-}
-
-struct base_eep_header *ath9k_htc_get_eeprom_base(struct ath9k_htc_priv *priv)
-{
-	struct base_eep_header *pBase = NULL;
-	/*
-	 * This can be done since all the 3 EEPROM families have the
-	 * same base header upto a certain point, and we are interested in
-	 * the data only upto that point.
-	 */
-
-	if (AR_SREV_9271(priv->ah))
-		pBase = (struct base_eep_header *)
-			&priv->ah->eeprom.map4k.baseEepHeader;
-	else if (priv->ah->hw_version.usbdev == AR9280_USB)
-		pBase = (struct base_eep_header *)
-			&priv->ah->eeprom.def.baseEepHeader;
-	else if (priv->ah->hw_version.usbdev == AR9287_USB)
-		pBase = (struct base_eep_header *)
-			&priv->ah->eeprom.map9287.baseEepHeader;
-	return pBase;
-}
-
-
-static int ath9k_htc_get_antenna(struct ieee80211_hw *hw, u32 *tx_ant,
-				 u32 *rx_ant)
-{
-	struct ath9k_htc_priv *priv = hw->priv;
-	struct base_eep_header *pBase = ath9k_htc_get_eeprom_base(priv);
-	if (pBase) {
-		*tx_ant = pBase->txMask;
-		*rx_ant = pBase->rxMask;
-	} else {
-		*tx_ant = 0;
-		*rx_ant = 0;
-	}
-	return 0;
-}
-
-static void ath9k_htc_channel_switch_beacon(struct ieee80211_hw *hw,
-					    struct ieee80211_vif *vif,
-					    struct cfg80211_chan_def *chandef)
-{
-	struct ath9k_htc_priv *priv = hw->priv;
-
-	/* mac80211 does not support CSA in multi-if cases (yet) */
-	if (WARN_ON(priv->csa_vif))
-		return;
-
-	priv->csa_vif = vif;
 }
 
 struct ieee80211_ops ath9k_htc_ops = {
@@ -1887,12 +1796,4 @@ struct ieee80211_ops ath9k_htc_ops = {
 	.set_coverage_class = ath9k_htc_set_coverage_class,
 	.set_bitrate_mask   = ath9k_htc_set_bitrate_mask,
 	.get_stats	    = ath9k_htc_get_stats,
-	.get_antenna	    = ath9k_htc_get_antenna,
-	.channel_switch_beacon	= ath9k_htc_channel_switch_beacon,
-
-#ifdef CONFIG_ATH9K_HTC_DEBUGFS
-	.get_et_sset_count  = ath9k_htc_get_et_sset_count,
-	.get_et_stats       = ath9k_htc_get_et_stats,
-	.get_et_strings     = ath9k_htc_get_et_strings,
-#endif
 };

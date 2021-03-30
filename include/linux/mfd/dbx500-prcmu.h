@@ -12,8 +12,6 @@
 #include <linux/notifier.h>
 #include <linux/err.h>
 
-#include <dt-bindings/mfd/dbx500-prcmu.h> /* For clock identifiers */
-
 /* Offset for the firmware version within the TCPM */
 #define DB8500_PRCMU_FW_VERSION_OFFSET 0xA4
 #define DBX540_PRCMU_FW_VERSION_OFFSET 0xA8
@@ -96,6 +94,62 @@ enum prcmu_wakeup_index {
 #define PRCMU_CLKSRC_ARMCLKFIX		0x46
 #define PRCMU_CLKSRC_HDMICLK		0x47
 
+/*
+ * Clock identifiers.
+ */
+enum prcmu_clock {
+	PRCMU_SGACLK,
+	PRCMU_UARTCLK,
+	PRCMU_MSP02CLK,
+	PRCMU_MSP1CLK,
+	PRCMU_I2CCLK,
+	PRCMU_SDMMCCLK,
+	PRCMU_SPARE1CLK,
+	PRCMU_SLIMCLK,
+	PRCMU_PER1CLK,
+	PRCMU_PER2CLK,
+	PRCMU_PER3CLK,
+	PRCMU_PER5CLK,
+	PRCMU_PER6CLK,
+	PRCMU_PER7CLK,
+	PRCMU_LCDCLK,
+	PRCMU_BMLCLK,
+	PRCMU_HSITXCLK,
+	PRCMU_HSIRXCLK,
+	PRCMU_HDMICLK,
+	PRCMU_APEATCLK,
+	PRCMU_APETRACECLK,
+	PRCMU_MCDECLK,
+	PRCMU_IPI2CCLK,
+	PRCMU_DSIALTCLK,
+	PRCMU_DMACLK,
+	PRCMU_B2R2CLK,
+	PRCMU_TVCLK,
+	PRCMU_SSPCLK,
+	PRCMU_RNGCLK,
+	PRCMU_UICCCLK,
+	PRCMU_PWMCLK,
+	PRCMU_IRDACLK,
+	PRCMU_IRRCCLK,
+	PRCMU_SIACLK,
+	PRCMU_SVACLK,
+	PRCMU_ACLK,
+	PRCMU_NUM_REG_CLOCKS,
+	PRCMU_SYSCLK = PRCMU_NUM_REG_CLOCKS,
+	PRCMU_CDCLK,
+	PRCMU_TIMCLK,
+	PRCMU_PLLSOC0,
+	PRCMU_PLLSOC1,
+	PRCMU_ARMSS,
+	PRCMU_PLLDDR,
+	PRCMU_PLLDSI,
+	PRCMU_DSI0CLK,
+	PRCMU_DSI1CLK,
+	PRCMU_DSI0ESCCLK,
+	PRCMU_DSI1ESCCLK,
+	PRCMU_DSI2ESCCLK,
+};
+
 /**
  * enum prcmu_wdog_id - PRCMU watchdog IDs
  * @PRCMU_WDOG_ALL: use all timers
@@ -177,6 +231,18 @@ enum ddr_pwrst {
 };
 
 #define DB8500_PRCMU_LEGACY_OFFSET		0xDD4
+
+struct prcmu_pdata
+{
+	bool enable_set_ddr_opp;
+	bool enable_ape_opp_100_voltage;
+	struct ab8500_platform_data *ab_platdata;
+	int ab_irq;
+	int irq_base;
+	u32 version_offset;
+	u32 legacy_offset;
+	u32 adt_offset;
+};
 
 #define PRCMU_FW_PROJECT_U8500		2
 #define PRCMU_FW_PROJECT_U8400		3
@@ -269,6 +335,10 @@ unsigned long prcmu_clock_rate(u8 clock);
 long prcmu_round_clock_rate(u8 clock, unsigned long rate);
 int prcmu_set_clock_rate(u8 clock, unsigned long rate);
 
+static inline int prcmu_set_ddr_opp(u8 opp)
+{
+	return db8500_prcmu_set_ddr_opp(opp);
+}
 static inline int prcmu_get_ddr_opp(void)
 {
 	return db8500_prcmu_get_ddr_opp();
@@ -483,6 +553,11 @@ static inline int prcmu_set_arm_opp(u8 opp)
 static inline int prcmu_get_arm_opp(void)
 {
 	return ARM_100_OPP;
+}
+
+static inline int prcmu_set_ddr_opp(u8 opp)
+{
+	return 0;
 }
 
 static inline int prcmu_get_ddr_opp(void)

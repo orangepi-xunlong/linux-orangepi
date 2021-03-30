@@ -44,7 +44,7 @@ int prof_on __read_mostly;
 EXPORT_SYMBOL_GPL(prof_on);
 
 static cpumask_var_t prof_cpu_mask;
-#if defined(CONFIG_SMP) && defined(CONFIG_PROC_FS)
+#ifdef CONFIG_SMP
 static DEFINE_PER_CPU(struct profile_hit *[2], cpu_profile_hits);
 static DEFINE_PER_CPU(int, cpu_profile_flip);
 static DEFINE_MUTEX(profile_flip_mutex);
@@ -52,23 +52,24 @@ static DEFINE_MUTEX(profile_flip_mutex);
 
 int profile_setup(char *str)
 {
-	static const char schedstr[] = "schedule";
-	static const char sleepstr[] = "sleep";
-	static const char kvmstr[] = "kvm";
+	static char schedstr[] = "schedule";
+	static char sleepstr[] = "sleep";
+	static char kvmstr[] = "kvm";
 	int par;
 
 	if (!strncmp(str, sleepstr, strlen(sleepstr))) {
 #ifdef CONFIG_SCHEDSTATS
-		force_schedstat_enabled();
 		prof_on = SLEEP_PROFILING;
 		if (str[strlen(sleepstr)] == ',')
 			str += strlen(sleepstr) + 1;
 		if (get_option(&str, &par))
 			prof_shift = par;
-		pr_info("kernel sleep profiling enabled (shift: %ld)\n",
+		printk(KERN_INFO
+			"kernel sleep profiling enabled (shift: %ld)\n",
 			prof_shift);
 #else
-		pr_warn("kernel sleep profiling requires CONFIG_SCHEDSTATS\n");
+		printk(KERN_WARNING
+			"kernel sleep profiling requires CONFIG_SCHEDSTATS\n");
 #endif /* CONFIG_SCHEDSTATS */
 	} else if (!strncmp(str, schedstr, strlen(schedstr))) {
 		prof_on = SCHED_PROFILING;
@@ -76,7 +77,8 @@ int profile_setup(char *str)
 			str += strlen(schedstr) + 1;
 		if (get_option(&str, &par))
 			prof_shift = par;
-		pr_info("kernel schedule profiling enabled (shift: %ld)\n",
+		printk(KERN_INFO
+			"kernel schedule profiling enabled (shift: %ld)\n",
 			prof_shift);
 	} else if (!strncmp(str, kvmstr, strlen(kvmstr))) {
 		prof_on = KVM_PROFILING;
@@ -84,12 +86,13 @@ int profile_setup(char *str)
 			str += strlen(kvmstr) + 1;
 		if (get_option(&str, &par))
 			prof_shift = par;
-		pr_info("kernel KVM profiling enabled (shift: %ld)\n",
+		printk(KERN_INFO
+			"kernel KVM profiling enabled (shift: %ld)\n",
 			prof_shift);
 	} else if (get_option(&str, &par)) {
 		prof_shift = par;
 		prof_on = CPU_PROFILING;
-		pr_info("kernel profiling enabled (shift: %ld)\n",
+		printk(KERN_INFO "kernel profiling enabled (shift: %ld)\n",
 			prof_shift);
 	}
 	return 1;
@@ -202,7 +205,7 @@ int profile_event_unregister(enum profile_type type, struct notifier_block *n)
 }
 EXPORT_SYMBOL_GPL(profile_event_unregister);
 
-#if defined(CONFIG_SMP) && defined(CONFIG_PROC_FS)
+#ifdef CONFIG_SMP
 /*
  * Each cpu has a pair of open-addressed hashtables for pending
  * profile hits. read_profile() IPI's all cpus to request them
@@ -328,57 +331,68 @@ out:
 	put_cpu();
 }
 
-static int profile_dead_cpu(unsigned int cpu)
+static int __cpuinit profile_cpu_callback(struct notifier_block *info,
+					unsigned long action, void *__cpu)
 {
+	int node, cpu = (unsigned long)__cpu;
 	struct page *page;
-	int i;
 
-	if (prof_cpu_mask != NULL)
-		cpumask_clear_cpu(cpu, prof_cpu_mask);
-
-	for (i = 0; i < 2; i++) {
-		if (per_cpu(cpu_profile_hits, cpu)[i]) {
-			page = virt_to_page(per_cpu(cpu_profile_hits, cpu)[i]);
-			per_cpu(cpu_profile_hits, cpu)[i] = NULL;
+	switch (action) {
+	case CPU_UP_PREPARE:
+	case CPU_UP_PREPARE_FROZEN:
+		node = cpu_to_mem(cpu);
+		per_cpu(cpu_profile_flip, cpu) = 0;
+		if (!per_cpu(cpu_profile_hits, cpu)[1]) {
+			page = alloc_pages_exact_node(node,
+					GFP_KERNEL | __GFP_ZERO,
+					0);
+			if (!page)
+				return notifier_from_errno(-ENOMEM);
+			per_cpu(cpu_profile_hits, cpu)[1] = page_address(page);
+		}
+		if (!per_cpu(cpu_profile_hits, cpu)[0]) {
+			page = alloc_pages_exact_node(node,
+					GFP_KERNEL | __GFP_ZERO,
+					0);
+			if (!page)
+				goto out_free;
+			per_cpu(cpu_profile_hits, cpu)[0] = page_address(page);
+		}
+		break;
+out_free:
+		page = virt_to_page(per_cpu(cpu_profile_hits, cpu)[1]);
+		per_cpu(cpu_profile_hits, cpu)[1] = NULL;
+		__free_page(page);
+		return notifier_from_errno(-ENOMEM);
+	case CPU_ONLINE:
+	case CPU_ONLINE_FROZEN:
+		if (prof_cpu_mask != NULL)
+			cpumask_set_cpu(cpu, prof_cpu_mask);
+		break;
+	case CPU_UP_CANCELED:
+	case CPU_UP_CANCELED_FROZEN:
+	case CPU_DEAD:
+	case CPU_DEAD_FROZEN:
+		if (prof_cpu_mask != NULL)
+			cpumask_clear_cpu(cpu, prof_cpu_mask);
+		if (per_cpu(cpu_profile_hits, cpu)[0]) {
+			page = virt_to_page(per_cpu(cpu_profile_hits, cpu)[0]);
+			per_cpu(cpu_profile_hits, cpu)[0] = NULL;
 			__free_page(page);
 		}
-	}
-	return 0;
-}
-
-static int profile_prepare_cpu(unsigned int cpu)
-{
-	int i, node = cpu_to_mem(cpu);
-	struct page *page;
-
-	per_cpu(cpu_profile_flip, cpu) = 0;
-
-	for (i = 0; i < 2; i++) {
-		if (per_cpu(cpu_profile_hits, cpu)[i])
-			continue;
-
-		page = __alloc_pages_node(node, GFP_KERNEL | __GFP_ZERO, 0);
-		if (!page) {
-			profile_dead_cpu(cpu);
-			return -ENOMEM;
+		if (per_cpu(cpu_profile_hits, cpu)[1]) {
+			page = virt_to_page(per_cpu(cpu_profile_hits, cpu)[1]);
+			per_cpu(cpu_profile_hits, cpu)[1] = NULL;
+			__free_page(page);
 		}
-		per_cpu(cpu_profile_hits, cpu)[i] = page_address(page);
-
+		break;
 	}
-	return 0;
+	return NOTIFY_OK;
 }
-
-static int profile_online_cpu(unsigned int cpu)
-{
-	if (prof_cpu_mask != NULL)
-		cpumask_set_cpu(cpu, prof_cpu_mask);
-
-	return 0;
-}
-
 #else /* !CONFIG_SMP */
 #define profile_flip_buffers()		do { } while (0)
 #define profile_discard_flip_buffers()	do { } while (0)
+#define profile_cpu_callback		NULL
 
 static void do_profile_hits(int type, void *__pc, unsigned int nr_hits)
 {
@@ -412,7 +426,8 @@ void profile_tick(int type)
 
 static int prof_cpu_mask_proc_show(struct seq_file *m, void *v)
 {
-	seq_printf(m, "%*pb\n", cpumask_pr_args(prof_cpu_mask));
+	seq_cpumask(m, prof_cpu_mask);
+	seq_putc(m, '\n');
 	return 0;
 }
 
@@ -520,44 +535,74 @@ static const struct file_operations proc_profile_operations = {
 	.llseek		= default_llseek,
 };
 
-int __ref create_proc_profile(void)
-{
-	struct proc_dir_entry *entry;
 #ifdef CONFIG_SMP
-	enum cpuhp_state online_state;
+static void profile_nop(void *unused)
+{
+}
+
+static int create_hash_tables(void)
+{
+	int cpu;
+
+	for_each_online_cpu(cpu) {
+		int node = cpu_to_mem(cpu);
+		struct page *page;
+
+		page = alloc_pages_exact_node(node,
+				GFP_KERNEL | __GFP_ZERO | GFP_THISNODE,
+				0);
+		if (!page)
+			goto out_cleanup;
+		per_cpu(cpu_profile_hits, cpu)[1]
+				= (struct profile_hit *)page_address(page);
+		page = alloc_pages_exact_node(node,
+				GFP_KERNEL | __GFP_ZERO | GFP_THISNODE,
+				0);
+		if (!page)
+			goto out_cleanup;
+		per_cpu(cpu_profile_hits, cpu)[0]
+				= (struct profile_hit *)page_address(page);
+	}
+	return 0;
+out_cleanup:
+	prof_on = 0;
+	smp_mb();
+	on_each_cpu(profile_nop, NULL, 1);
+	for_each_online_cpu(cpu) {
+		struct page *page;
+
+		if (per_cpu(cpu_profile_hits, cpu)[0]) {
+			page = virt_to_page(per_cpu(cpu_profile_hits, cpu)[0]);
+			per_cpu(cpu_profile_hits, cpu)[0] = NULL;
+			__free_page(page);
+		}
+		if (per_cpu(cpu_profile_hits, cpu)[1]) {
+			page = virt_to_page(per_cpu(cpu_profile_hits, cpu)[1]);
+			per_cpu(cpu_profile_hits, cpu)[1] = NULL;
+			__free_page(page);
+		}
+	}
+	return -1;
+}
+#else
+#define create_hash_tables()			({ 0; })
 #endif
 
-	int err = 0;
+int __ref create_proc_profile(void) /* false positive from hotcpu_notifier */
+{
+	struct proc_dir_entry *entry;
 
 	if (!prof_on)
 		return 0;
-#ifdef CONFIG_SMP
-	err = cpuhp_setup_state(CPUHP_PROFILE_PREPARE, "PROFILE_PREPARE",
-				profile_prepare_cpu, profile_dead_cpu);
-	if (err)
-		return err;
-
-	err = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "AP_PROFILE_ONLINE",
-				profile_online_cpu, NULL);
-	if (err < 0)
-		goto err_state_prep;
-	online_state = err;
-	err = 0;
-#endif
+	if (create_hash_tables())
+		return -ENOMEM;
 	entry = proc_create("profile", S_IWUSR | S_IRUGO,
 			    NULL, &proc_profile_operations);
 	if (!entry)
-		goto err_state_onl;
+		return 0;
 	proc_set_size(entry, (1 + prof_len) * sizeof(atomic_t));
-
-	return err;
-err_state_onl:
-#ifdef CONFIG_SMP
-	cpuhp_remove_state(online_state);
-err_state_prep:
-	cpuhp_remove_state(CPUHP_PROFILE_PREPARE);
-#endif
-	return err;
+	hotcpu_notifier(profile_cpu_callback, 0);
+	return 0;
 }
-subsys_initcall(create_proc_profile);
+module_init(create_proc_profile);
 #endif /* CONFIG_PROC_FS */

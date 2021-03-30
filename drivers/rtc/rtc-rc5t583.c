@@ -128,7 +128,6 @@ static int rc5t583_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alm)
 		return ret;
 	}
 
-	alm->time.tm_sec = 0;
 	alm->time.tm_min = bcd2bin(alarm_data[0]);
 	alm->time.tm_hour = bcd2bin(alarm_data[1]);
 	alm->time.tm_mday = bcd2bin(alarm_data[2]);
@@ -274,7 +273,7 @@ static int rc5t583_rtc_probe(struct platform_device *pdev)
  */
 static int rc5t583_rtc_remove(struct platform_device *pdev)
 {
-	struct rc5t583_rtc *rc5t583_rtc = platform_get_drvdata(pdev);
+	struct rc5t583_rtc *rc5t583_rtc = dev_get_drvdata(&pdev->dev);
 
 	rc5t583_rtc_alarm_irq_enable(&rc5t583_rtc->rtc->dev, 0);
 	return 0;

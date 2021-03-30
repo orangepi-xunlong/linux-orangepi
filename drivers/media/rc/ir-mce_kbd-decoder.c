@@ -216,6 +216,9 @@ static int ir_mce_kbd_decode(struct rc_dev *dev, struct ir_raw_event ev)
 	u32 scancode;
 	unsigned long delay;
 
+	if (!(dev->enabled_protocols & RC_BIT_MCE_KBD))
+		return 0;
+
 	if (!is_timing_event(ev)) {
 		if (ev.reset)
 			data->state = STATE_INACTIVE;

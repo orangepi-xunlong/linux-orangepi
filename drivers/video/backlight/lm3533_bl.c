@@ -284,7 +284,7 @@ static int lm3533_bl_probe(struct platform_device *pdev)
 	if (!lm3533)
 		return -EINVAL;
 
-	pdata = dev_get_platdata(&pdev->dev);
+	pdata = pdev->dev.platform_data;
 	if (!pdata) {
 		dev_err(&pdev->dev, "no platform data\n");
 		return -EINVAL;
@@ -296,8 +296,11 @@ static int lm3533_bl_probe(struct platform_device *pdev)
 	}
 
 	bl = devm_kzalloc(&pdev->dev, sizeof(*bl), GFP_KERNEL);
-	if (!bl)
+	if (!bl) {
+		dev_err(&pdev->dev,
+				"failed to allocate memory for backlight\n");
 		return -ENOMEM;
+	}
 
 	bl->lm3533 = lm3533;
 	bl->id = pdev->id;
@@ -310,9 +313,8 @@ static int lm3533_bl_probe(struct platform_device *pdev)
 	props.type = BACKLIGHT_RAW;
 	props.max_brightness = LM3533_BL_MAX_BRIGHTNESS;
 	props.brightness = pdata->default_brightness;
-	bd = devm_backlight_device_register(&pdev->dev, pdata->name,
-					pdev->dev.parent, bl, &lm3533_bl_ops,
-					&props);
+	bd = backlight_device_register(pdata->name, pdev->dev.parent, bl,
+						&lm3533_bl_ops, &props);
 	if (IS_ERR(bd)) {
 		dev_err(&pdev->dev, "failed to register backlight device\n");
 		return PTR_ERR(bd);
@@ -326,7 +328,7 @@ static int lm3533_bl_probe(struct platform_device *pdev)
 	ret = sysfs_create_group(&bd->dev.kobj, &lm3533_bl_attribute_group);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to create sysfs attributes\n");
-		return ret;
+		goto err_unregister;
 	}
 
 	backlight_update_status(bd);
@@ -343,6 +345,8 @@ static int lm3533_bl_probe(struct platform_device *pdev)
 
 err_sysfs_remove:
 	sysfs_remove_group(&bd->dev.kobj, &lm3533_bl_attribute_group);
+err_unregister:
+	backlight_device_unregister(bd);
 
 	return ret;
 }
@@ -359,6 +363,7 @@ static int lm3533_bl_remove(struct platform_device *pdev)
 
 	lm3533_ctrlbank_disable(&bl->cb);
 	sysfs_remove_group(&bd->dev.kobj, &lm3533_bl_attribute_group);
+	backlight_device_unregister(bd);
 
 	return 0;
 }
@@ -397,6 +402,7 @@ static void lm3533_bl_shutdown(struct platform_device *pdev)
 static struct platform_driver lm3533_bl_driver = {
 	.driver = {
 		.name	= "lm3533-backlight",
+		.owner	= THIS_MODULE,
 		.pm	= &lm3533_bl_pm_ops,
 	},
 	.probe		= lm3533_bl_probe,

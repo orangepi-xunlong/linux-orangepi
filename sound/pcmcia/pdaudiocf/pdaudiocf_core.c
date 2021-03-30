@@ -162,8 +162,9 @@ struct snd_pdacf *snd_pdacf_create(struct snd_card *card)
 	if (chip == NULL)
 		return NULL;
 	chip->card = card;
-	mutex_init(&chip->reg_lock);
+	spin_lock_init(&chip->reg_lock);
 	spin_lock_init(&chip->ak4117_lock);
+	tasklet_init(&chip->tq, pdacf_tasklet, (unsigned long)chip);
 	card->private_data = chip;
 
 	pdacf_proc_init(chip);
@@ -173,18 +174,19 @@ struct snd_pdacf *snd_pdacf_create(struct snd_card *card)
 static void snd_pdacf_ak4117_change(struct ak4117 *ak4117, unsigned char c0, unsigned char c1)
 {
 	struct snd_pdacf *chip = ak4117->change_callback_private;
+	unsigned long flags;
 	u16 val;
 
 	if (!(c0 & AK4117_UNLCK))
 		return;
-	mutex_lock(&chip->reg_lock);
+	spin_lock_irqsave(&chip->reg_lock, flags);
 	val = chip->regmap[PDAUDIOCF_REG_SCR>>1];
 	if (ak4117->rcs0 & AK4117_UNLCK)
 		val |= PDAUDIOCF_BLUE_LED_OFF;
 	else
 		val &= ~PDAUDIOCF_BLUE_LED_OFF;
 	pdacf_reg_write(chip, PDAUDIOCF_REG_SCR, val);
-	mutex_unlock(&chip->reg_lock);
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
 }
 
 int snd_pdacf_ak4117_create(struct snd_pdacf *chip)

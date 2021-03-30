@@ -12,7 +12,7 @@
 #include <asm/thread_info.h>
 
 OUTPUT_ARCH(arc)
-ENTRY(res_service)
+ENTRY(_stext)
 
 #ifdef CONFIG_CPU_BIG_ENDIAN
 jiffies = jiffies_64 + 4;
@@ -82,6 +82,14 @@ SECTIONS
 
 	PERCPU_SECTION(L1_CACHE_BYTES)
 
+	/*
+	 * .exit.text is discard at runtime, not link time, to deal with
+	 * references from .debug_frame
+	 * It will be init freed, being inside [__init_start : __init_end]
+	 */
+	.exit.text : { EXIT_TEXT }
+	.exit.data : { EXIT_DATA }
+
 	. = ALIGN(PAGE_SIZE);
 	__init_end = .;
 
@@ -89,7 +97,6 @@ SECTIONS
 		_text = .;
 		TEXT_TEXT
 		SCHED_TEXT
-		CPUIDLE_TEXT
 		LOCK_TEXT
 		KPROBES_TEXT
 		*(.fixup)
@@ -109,17 +116,17 @@ SECTIONS
 
 	_edata = .;
 
-	BSS_SECTION(4, 4, 4)
+	BSS_SECTION(0, 0, 0)
 
 #ifdef CONFIG_ARC_DW2_UNWIND
 	. = ALIGN(PAGE_SIZE);
-	.eh_frame  : {
+	.debug_frame  : {
 		__start_unwind = .;
-		*(.eh_frame)
+		*(.debug_frame)
 		__end_unwind = .;
 	}
 #else
-	/DISCARD/ : {	*(.eh_frame) }
+	/DISCARD/ : {	*(.debug_frame) }
 #endif
 
 	NOTES
@@ -135,18 +142,15 @@ SECTIONS
 		*(.arcextmap.*)
 	}
 
-#ifndef CONFIG_DEBUG_INFO
-	/DISCARD/ : { *(.debug_frame) }
-	/DISCARD/ : { *(.debug_aranges) }
-	/DISCARD/ : { *(.debug_pubnames) }
-	/DISCARD/ : { *(.debug_info) }
-	/DISCARD/ : { *(.debug_abbrev) }
-	/DISCARD/ : { *(.debug_line) }
-	/DISCARD/ : { *(.debug_str) }
-	/DISCARD/ : { *(.debug_loc) }
-	/DISCARD/ : { *(.debug_macinfo) }
-	/DISCARD/ : { *(.debug_ranges) }
-#endif
+	/* open-coded because we need .debug_frame seperately for unwinding */
+	.debug_aranges 0 : { *(.debug_aranges) }
+	.debug_pubnames 0 : { *(.debug_pubnames) }
+	.debug_info 0 : { *(.debug_info) }
+	.debug_abbrev 0 : { *(.debug_abbrev) }
+	.debug_line 0 : { *(.debug_line) }
+	.debug_str 0 : { *(.debug_str) }
+	.debug_loc 0 : { *(.debug_loc) }
+	.debug_macinfo 0 : { *(.debug_macinfo) }
 
 #ifdef CONFIG_ARC_HAS_DCCM
 	. = CONFIG_ARC_DCCM_BASE;

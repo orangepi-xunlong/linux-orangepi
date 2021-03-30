@@ -162,8 +162,7 @@ static int ip_vs_wrr_dest_changed(struct ip_vs_service *svc,
  *    Weighted Round-Robin Scheduling
  */
 static struct ip_vs_dest *
-ip_vs_wrr_schedule(struct ip_vs_service *svc, const struct sk_buff *skb,
-		   struct ip_vs_iphdr *iph)
+ip_vs_wrr_schedule(struct ip_vs_service *svc, const struct sk_buff *skb)
 {
 	struct ip_vs_dest *dest, *last, *stop = NULL;
 	struct ip_vs_wrr_mark *mark = svc->sched_data;
@@ -216,7 +215,7 @@ ip_vs_wrr_schedule(struct ip_vs_service *svc, const struct sk_buff *skb,
 found:
 	IP_VS_DBG_BUF(6, "WRR: server %s:%u "
 		      "activeconns %d refcnt %d weight %d\n",
-		      IP_VS_DBG_ADDR(dest->af, &dest->addr), ntohs(dest->port),
+		      IP_VS_DBG_ADDR(svc->af, &dest->addr), ntohs(dest->port),
 		      atomic_read(&dest->activeconns),
 		      atomic_read(&dest->refcnt),
 		      atomic_read(&dest->weight));

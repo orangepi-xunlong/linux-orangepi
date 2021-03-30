@@ -25,7 +25,6 @@
 #endif
 
 #include <asm/bootinfo.h>
-#include <asm/cpu.h>
 #include <asm/io.h>
 #include <asm/reboot.h>
 #include <asm/sni.h>
@@ -174,7 +173,7 @@ void __init plat_mem_setup(void)
 		system_type = "RM300-Cxx";
 		break;
 	case SNI_BRD_PCI_DESKTOP:
-		switch (read_c0_prid() & PRID_IMP_MASK) {
+		switch (read_c0_prid() & 0xff00) {
 		case PRID_IMP_R4600:
 		case PRID_IMP_R4700:
 			system_type = "RM200-C20";

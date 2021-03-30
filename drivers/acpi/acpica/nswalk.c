@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2013, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -156,9 +156,9 @@ struct acpi_namespace_node *acpi_ns_get_next_node_typed(acpi_object_type type,
  *              max_depth           - Depth to which search is to reach
  *              flags               - Whether to unlock the NS before invoking
  *                                    the callback routine
- *              descending_callback - Called during tree descent
+ *              pre_order_visit     - Called during tree pre-order visit
  *                                    when an object of "Type" is found
- *              ascending_callback  - Called during tree ascent
+ *              post_order_visit    - Called during tree post-order visit
  *                                    when an object of "Type" is found
  *              context             - Passed to user function(s) above
  *              return_value        - from the user_function if terminated
@@ -185,8 +185,8 @@ acpi_ns_walk_namespace(acpi_object_type type,
 		       acpi_handle start_node,
 		       u32 max_depth,
 		       u32 flags,
-		       acpi_walk_callback descending_callback,
-		       acpi_walk_callback ascending_callback,
+		       acpi_walk_callback pre_order_visit,
+		       acpi_walk_callback post_order_visit,
 		       void *context, void **return_value)
 {
 	acpi_status status;
@@ -255,22 +255,22 @@ acpi_ns_walk_namespace(acpi_object_type type,
 			}
 
 			/*
-			 * Invoke the user function, either descending, ascending,
+			 * Invoke the user function, either pre-order or post-order
 			 * or both.
 			 */
 			if (!node_previously_visited) {
-				if (descending_callback) {
+				if (pre_order_visit) {
 					status =
-					    descending_callback(child_node,
-								level, context,
-								return_value);
+					    pre_order_visit(child_node, level,
+							    context,
+							    return_value);
 				}
 			} else {
-				if (ascending_callback) {
+				if (post_order_visit) {
 					status =
-					    ascending_callback(child_node,
-							       level, context,
-							       return_value);
+					    post_order_visit(child_node, level,
+							     context,
+							     return_value);
 				}
 			}
 

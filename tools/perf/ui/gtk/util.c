@@ -1,5 +1,4 @@
 #include "../util.h"
-#include "../../util/util.h"
 #include "../../util/debug.h"
 #include "gtk.h"
 
@@ -24,7 +23,8 @@ int perf_gtk__deactivate_context(struct perf_gtk_context **ctx)
 	if (!perf_gtk__is_active_context(*ctx))
 		return -1;
 
-	zfree(ctx);
+	free(*ctx);
+	*ctx = NULL;
 	return 0;
 }
 
@@ -53,7 +53,7 @@ static int perf_gtk__error(const char *format, va_list args)
 	return 0;
 }
 
-#ifdef HAVE_GTK_INFO_BAR_SUPPORT
+#ifdef HAVE_GTK_INFO_BAR
 static int perf_gtk__warning_info_bar(const char *format, va_list args)
 {
 	char *msg;
@@ -105,7 +105,7 @@ static int perf_gtk__warning_statusbar(const char *format, va_list args)
 
 struct perf_error_ops perf_gtk_eops = {
 	.error		= perf_gtk__error,
-#ifdef HAVE_GTK_INFO_BAR_SUPPORT
+#ifdef HAVE_GTK_INFO_BAR
 	.warning	= perf_gtk__warning_info_bar,
 #else
 	.warning	= perf_gtk__warning_statusbar,

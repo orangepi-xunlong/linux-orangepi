@@ -59,30 +59,50 @@ void rds_tcp_inc_free(struct rds_incoming *inc)
 /*
  * this is pretty lame, but, whatever.
  */
-int rds_tcp_inc_copy_to_user(struct rds_incoming *inc, struct iov_iter *to)
+int rds_tcp_inc_copy_to_user(struct rds_incoming *inc, struct iovec *first_iov,
+			     size_t size)
 {
 	struct rds_tcp_incoming *tinc;
+	struct iovec *iov, tmp;
 	struct sk_buff *skb;
+	unsigned long to_copy, skb_off;
 	int ret = 0;
 
-	if (!iov_iter_count(to))
+	if (size == 0)
 		goto out;
 
 	tinc = container_of(inc, struct rds_tcp_incoming, ti_inc);
+	iov = first_iov;
+	tmp = *iov;
 
 	skb_queue_walk(&tinc->ti_skb_list, skb) {
-		unsigned long to_copy, skb_off;
-		for (skb_off = 0; skb_off < skb->len; skb_off += to_copy) {
-			to_copy = iov_iter_count(to);
+		skb_off = 0;
+		while (skb_off < skb->len) {
+			while (tmp.iov_len == 0) {
+				iov++;
+				tmp = *iov;
+			}
+
+			to_copy = min(tmp.iov_len, size);
 			to_copy = min(to_copy, skb->len - skb_off);
 
-			if (skb_copy_datagram_iter(skb, skb_off, to, to_copy))
-				return -EFAULT;
+			rdsdebug("ret %d size %zu skb %p skb_off %lu "
+				 "skblen %d iov_base %p iov_len %zu cpy %lu\n",
+				 ret, size, skb, skb_off, skb->len,
+				 tmp.iov_base, tmp.iov_len, to_copy);
+
+			/* modifies tmp as it copies */
+			if (skb_copy_datagram_iovec(skb, skb_off, &tmp,
+						    to_copy)) {
+				ret = -EFAULT;
+				goto out;
+			}
 
 			rds_stats_add(s_copy_to_user, to_copy);
+			size -= to_copy;
 			ret += to_copy;
-
-			if (!iov_iter_count(to))
+			skb_off += to_copy;
+			if (size == 0)
 				goto out;
 		}
 	}
@@ -147,7 +167,7 @@ static void rds_tcp_cong_recv(struct rds_connection *conn,
 }
 
 struct rds_tcp_desc_arg {
-	struct rds_conn_path *conn_path;
+	struct rds_connection *conn;
 	gfp_t gfp;
 };
 
@@ -155,8 +175,8 @@ static int rds_tcp_data_recv(read_descriptor_t *desc, struct sk_buff *skb,
 			     unsigned int offset, size_t len)
 {
 	struct rds_tcp_desc_arg *arg = desc->arg.data;
-	struct rds_conn_path *cp = arg->conn_path;
-	struct rds_tcp_connection *tc = cp->cp_transport_data;
+	struct rds_connection *conn = arg->conn;
+	struct rds_tcp_connection *tc = conn->c_transport_data;
 	struct rds_tcp_incoming *tinc = tc->t_tinc;
 	struct sk_buff *clone;
 	size_t left = len, to_copy;
@@ -171,15 +191,14 @@ static int rds_tcp_data_recv(read_descriptor_t *desc, struct sk_buff *skb,
 	while (left) {
 		if (!tinc) {
 			tinc = kmem_cache_alloc(rds_tcp_incoming_slab,
-						arg->gfp);
+					        arg->gfp);
 			if (!tinc) {
 				desc->error = -ENOMEM;
 				goto out;
 			}
 			tc->t_tinc = tinc;
 			rdsdebug("alloced tinc %p\n", tinc);
-			rds_inc_path_init(&tinc->ti_inc, cp,
-					  cp->cp_conn->c_faddr);
+			rds_inc_init(&tinc->ti_inc, conn, conn->c_faddr);
 			/*
 			 * XXX * we might be able to use the __ variants when
 			 * we've already serialized at a higher level.
@@ -208,14 +227,15 @@ static int rds_tcp_data_recv(read_descriptor_t *desc, struct sk_buff *skb,
 		}
 
 		if (left && tc->t_tinc_data_rem) {
-			to_copy = min(tc->t_tinc_data_rem, left);
-
-			clone = pskb_extract(skb, offset, to_copy, arg->gfp);
+			clone = skb_clone(skb, arg->gfp);
 			if (!clone) {
 				desc->error = -ENOMEM;
 				goto out;
 			}
 
+			to_copy = min(tc->t_tinc_data_rem, left);
+			pskb_pull(clone, offset);
+			pskb_trim(clone, to_copy);
 			skb_queue_tail(&tinc->ti_skb_list, clone);
 
 			rdsdebug("skb %p data %p len %d off %u to_copy %zu -> "
@@ -229,8 +249,6 @@ static int rds_tcp_data_recv(read_descriptor_t *desc, struct sk_buff *skb,
 		}
 
 		if (tc->t_tinc_hdr_rem == 0 && tc->t_tinc_data_rem == 0) {
-			struct rds_connection *conn = cp->cp_conn;
-
 			if (tinc->ti_inc.i_hdr.h_flags == RDS_FLAG_CONG_BITMAP)
 				rds_tcp_cong_recv(conn, tinc);
 			else
@@ -253,15 +271,15 @@ out:
 }
 
 /* the caller has to hold the sock lock */
-static int rds_tcp_read_sock(struct rds_conn_path *cp, gfp_t gfp)
+static int rds_tcp_read_sock(struct rds_connection *conn, gfp_t gfp)
 {
-	struct rds_tcp_connection *tc = cp->cp_transport_data;
+	struct rds_tcp_connection *tc = conn->c_transport_data;
 	struct socket *sock = tc->t_sock;
 	read_descriptor_t desc;
 	struct rds_tcp_desc_arg arg;
 
 	/* It's like glib in the kernel! */
-	arg.conn_path = cp;
+	arg.conn = conn;
 	arg.gfp = gfp;
 	desc.arg.data = &arg;
 	desc.error = 0;
@@ -281,46 +299,45 @@ static int rds_tcp_read_sock(struct rds_conn_path *cp, gfp_t gfp)
  * if we fail to allocate we're in trouble.. blindly wait some time before
  * trying again to see if the VM can free up something for us.
  */
-int rds_tcp_recv_path(struct rds_conn_path *cp)
+int rds_tcp_recv(struct rds_connection *conn)
 {
-	struct rds_tcp_connection *tc = cp->cp_transport_data;
+	struct rds_tcp_connection *tc = conn->c_transport_data;
 	struct socket *sock = tc->t_sock;
 	int ret = 0;
 
-	rdsdebug("recv worker path [%d] tc %p sock %p\n",
-		 cp->cp_index, tc, sock);
+	rdsdebug("recv worker conn %p tc %p sock %p\n", conn, tc, sock);
 
 	lock_sock(sock->sk);
-	ret = rds_tcp_read_sock(cp, GFP_KERNEL);
+	ret = rds_tcp_read_sock(conn, GFP_KERNEL);
 	release_sock(sock->sk);
 
 	return ret;
 }
 
-void rds_tcp_data_ready(struct sock *sk)
+void rds_tcp_data_ready(struct sock *sk, int bytes)
 {
-	void (*ready)(struct sock *sk);
-	struct rds_conn_path *cp;
+	void (*ready)(struct sock *sk, int bytes);
+	struct rds_connection *conn;
 	struct rds_tcp_connection *tc;
 
-	rdsdebug("data ready sk %p\n", sk);
+	rdsdebug("data ready sk %p bytes %d\n", sk, bytes);
 
-	read_lock_bh(&sk->sk_callback_lock);
-	cp = sk->sk_user_data;
-	if (!cp) { /* check for teardown race */
+	read_lock(&sk->sk_callback_lock);
+	conn = sk->sk_user_data;
+	if (!conn) { /* check for teardown race */
 		ready = sk->sk_data_ready;
 		goto out;
 	}
 
-	tc = cp->cp_transport_data;
+	tc = conn->c_transport_data;
 	ready = tc->t_orig_data_ready;
 	rds_tcp_stats_inc(s_tcp_data_ready_calls);
 
-	if (rds_tcp_read_sock(cp, GFP_ATOMIC) == -ENOMEM)
-		queue_delayed_work(rds_wq, &cp->cp_recv_w, 0);
+	if (rds_tcp_read_sock(conn, GFP_ATOMIC) == -ENOMEM)
+		queue_delayed_work(rds_wq, &conn->c_recv_w, 0);
 out:
-	read_unlock_bh(&sk->sk_callback_lock);
-	ready(sk);
+	read_unlock(&sk->sk_callback_lock);
+	ready(sk, bytes);
 }
 
 int rds_tcp_recv_init(void)

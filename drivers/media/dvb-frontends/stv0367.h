@@ -26,6 +26,7 @@
 #ifndef STV0367_H
 #define STV0367_H
 
+#include <linux/kconfig.h>
 #include <linux/dvb/frontend.h>
 #include "dvb_frontend.h"
 
@@ -38,7 +39,7 @@ struct stv0367_config {
 	int clk_pol;
 };
 
-#if IS_REACHABLE(CONFIG_DVB_STV0367)
+#if IS_ENABLED(CONFIG_DVB_STV0367)
 extern struct
 dvb_frontend *stv0367ter_attach(const struct stv0367_config *config,
 					struct i2c_adapter *i2c);

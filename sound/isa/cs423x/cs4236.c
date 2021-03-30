@@ -364,14 +364,13 @@ static void snd_card_cs4236_free(struct snd_card *card)
 	release_and_free_resource(acard->res_sb_port);
 }
 
-static int snd_cs423x_card_new(struct device *pdev, int dev,
-			       struct snd_card **cardp)
+static int snd_cs423x_card_new(int dev, struct snd_card **cardp)
 {
 	struct snd_card *card;
 	int err;
 
-	err = snd_card_new(pdev, index[dev], id[dev], THIS_MODULE,
-			   sizeof(struct snd_card_cs4236), &card);
+	err = snd_card_create(index[dev], id[dev], THIS_MODULE,
+			      sizeof(struct snd_card_cs4236), &card);
 	if (err < 0)
 		return err;
 	card->private_free = snd_card_cs4236_free;
@@ -382,6 +381,7 @@ static int snd_cs423x_card_new(struct device *pdev, int dev,
 static int snd_cs423x_probe(struct snd_card *card, int dev)
 {
 	struct snd_card_cs4236 *acard;
+	struct snd_pcm *pcm;
 	struct snd_wss *chip;
 	struct snd_opl3 *opl3;
 	int err;
@@ -403,7 +403,7 @@ static int snd_cs423x_probe(struct snd_card *card, int dev)
 	acard->chip = chip;
 	if (chip->hardware & WSS_HW_CS4236B_MASK) {
 
-		err = snd_cs4236_pcm(chip, 0);
+		err = snd_cs4236_pcm(chip, 0, &pcm);
 		if (err < 0)
 			return err;
 
@@ -411,7 +411,7 @@ static int snd_cs423x_probe(struct snd_card *card, int dev)
 		if (err < 0)
 			return err;
 	} else {
-		err = snd_wss_pcm(chip, 0);
+		err = snd_wss_pcm(chip, 0, &pcm);
 		if (err < 0)
 			return err;
 
@@ -419,17 +419,17 @@ static int snd_cs423x_probe(struct snd_card *card, int dev)
 		if (err < 0)
 			return err;
 	}
-	strcpy(card->driver, chip->pcm->name);
-	strcpy(card->shortname, chip->pcm->name);
+	strcpy(card->driver, pcm->name);
+	strcpy(card->shortname, pcm->name);
 	sprintf(card->longname, "%s at 0x%lx, irq %i, dma %i",
-		chip->pcm->name,
+		pcm->name,
 		chip->port,
 		irq[dev],
 		dma1[dev]);
 	if (dma2[dev] >= 0)
 		sprintf(card->longname + strlen(card->longname), "&%d", dma2[dev]);
 
-	err = snd_wss_timer(chip, 0);
+	err = snd_wss_timer(chip, 0, NULL);
 	if (err < 0)
 		return err;
 
@@ -487,9 +487,10 @@ static int snd_cs423x_isa_probe(struct device *pdev,
 	struct snd_card *card;
 	int err;
 
-	err = snd_cs423x_card_new(pdev, dev, &card);
+	err = snd_cs423x_card_new(dev, &card);
 	if (err < 0)
 		return err;
+	snd_card_set_dev(card, pdev);
 	if ((err = snd_cs423x_probe(card, dev)) < 0) {
 		snd_card_free(card);
 		return err;
@@ -503,6 +504,7 @@ static int snd_cs423x_isa_remove(struct device *pdev,
 				 unsigned int dev)
 {
 	snd_card_free(dev_get_drvdata(pdev));
+	dev_set_drvdata(pdev, NULL);
 	return 0;
 }
 
@@ -576,7 +578,7 @@ static int snd_cs423x_pnpbios_detect(struct pnp_dev *pdev,
 		if (!strcmp(cdev->id[0].id, cid))
 			break;
 	}
-	err = snd_cs423x_card_new(&pdev->dev, dev, &card);
+	err = snd_cs423x_card_new(dev, &card);
 	if (err < 0)
 		return err;
 	err = snd_card_cs423x_pnp(dev, card->private_data, pdev, cdev);
@@ -585,6 +587,7 @@ static int snd_cs423x_pnpbios_detect(struct pnp_dev *pdev,
 		snd_card_free(card);
 		return err;
 	}
+	snd_card_set_dev(card, &pdev->dev);
 	if ((err = snd_cs423x_probe(card, dev)) < 0) {
 		snd_card_free(card);
 		return err;
@@ -597,6 +600,7 @@ static int snd_cs423x_pnpbios_detect(struct pnp_dev *pdev,
 static void snd_cs423x_pnp_remove(struct pnp_dev *pdev)
 {
 	snd_card_free(pnp_get_drvdata(pdev));
+	pnp_set_drvdata(pdev, NULL);
 }
 
 #ifdef CONFIG_PM
@@ -636,7 +640,7 @@ static int snd_cs423x_pnpc_detect(struct pnp_card_link *pcard,
 	if (dev >= SNDRV_CARDS)
 		return -ENODEV;
 
-	res = snd_cs423x_card_new(&pcard->card->dev, dev, &card);
+	res = snd_cs423x_card_new(dev, &card);
 	if (res < 0)
 		return res;
 	if ((res = snd_card_cs423x_pnpc(dev, card->private_data, pcard, pid)) < 0) {
@@ -645,6 +649,7 @@ static int snd_cs423x_pnpc_detect(struct pnp_card_link *pcard,
 		snd_card_free(card);
 		return res;
 	}
+	snd_card_set_dev(card, &pcard->card->dev);
 	if ((res = snd_cs423x_probe(card, dev)) < 0) {
 		snd_card_free(card);
 		return res;

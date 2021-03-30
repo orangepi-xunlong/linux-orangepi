@@ -8,7 +8,6 @@
  * published by the Free Software Foundation.
  */
 #include <linux/atomic.h>
-#include <linux/completion.h>
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/spinlock.h>
@@ -63,12 +62,10 @@ static DEFINE_PER_CPU(struct ipi_data, ipi_data) = {
 
 static DEFINE_SPINLOCK(boot_lock);
 
-static DECLARE_COMPLETION(cpu_running);
-
 /*
  * "thread" is assumed to be a valid Meta hardware thread ID.
  */
-static int boot_secondary(unsigned int thread, struct task_struct *idle)
+int __cpuinit boot_secondary(unsigned int thread, struct task_struct *idle)
 {
 	u32 val;
 
@@ -118,9 +115,11 @@ static int boot_secondary(unsigned int thread, struct task_struct *idle)
  * If the cache partition has changed, prints a message to the log describing
  * those changes.
  */
-static void describe_cachepart_change(unsigned int thread, const char *label,
-				      unsigned int sz, unsigned int old,
-				      unsigned int new)
+static __cpuinit void describe_cachepart_change(unsigned int thread,
+						const char *label,
+						unsigned int sz,
+						unsigned int old,
+						unsigned int new)
 {
 	unsigned int lor1, land1, gor1, gand1;
 	unsigned int lor2, land2, gor2, gand2;
@@ -168,7 +167,7 @@ static void describe_cachepart_change(unsigned int thread, const char *label,
  * Ensures that coherency is enabled and that the threads share the same cache
  * partitions.
  */
-static void setup_smp_cache(unsigned int thread)
+static __cpuinit void setup_smp_cache(unsigned int thread)
 {
 	unsigned int this_thread, lflags;
 	unsigned int dcsz, dcpart_this, dcpart_old, dcpart_new;
@@ -213,7 +212,7 @@ static void setup_smp_cache(unsigned int thread)
 				  icpart_old, icpart_new);
 }
 
-int __cpu_up(unsigned int cpu, struct task_struct *idle)
+int __cpuinit __cpu_up(unsigned int cpu, struct task_struct *idle)
 {
 	unsigned int thread = cpu_2_hwthread_id[cpu];
 	int ret;
@@ -236,12 +235,20 @@ int __cpu_up(unsigned int cpu, struct task_struct *idle)
 	 */
 	ret = boot_secondary(thread, idle);
 	if (ret == 0) {
+		unsigned long timeout;
+
 		/*
 		 * CPU was successfully started, wait for it
 		 * to come online or time out.
 		 */
-		wait_for_completion_timeout(&cpu_running,
-					    msecs_to_jiffies(1000));
+		timeout = jiffies + HZ;
+		while (time_before(jiffies, timeout)) {
+			if (cpu_online(cpu))
+				break;
+
+			udelay(10);
+			barrier();
+		}
 
 		if (!cpu_online(cpu))
 			ret = -EIO;
@@ -261,13 +268,15 @@ int __cpu_up(unsigned int cpu, struct task_struct *idle)
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
+static DECLARE_COMPLETION(cpu_killed);
 
 /*
  * __cpu_disable runs on the processor to be shutdown.
  */
-int __cpu_disable(void)
+int __cpuexit __cpu_disable(void)
 {
 	unsigned int cpu = smp_processor_id();
+	struct task_struct *p;
 
 	/*
 	 * Take this CPU offline.  Once we clear this, we can't return,
@@ -287,7 +296,12 @@ int __cpu_disable(void)
 	flush_cache_all();
 	local_flush_tlb_all();
 
-	clear_tasks_mm_cpumask(cpu);
+	read_lock(&tasklist_lock);
+	for_each_process(p) {
+		if (p->mm)
+			cpumask_clear_cpu(cpu, mm_cpumask(p->mm));
+	}
+	read_unlock(&tasklist_lock);
 
 	return 0;
 }
@@ -296,9 +310,9 @@ int __cpu_disable(void)
  * called on the thread which is asking for a CPU to be shutdown -
  * waits until shutdown has completed, or it is timed out.
  */
-void __cpu_die(unsigned int cpu)
+void __cpuexit __cpu_die(unsigned int cpu)
 {
-	if (!cpu_wait_death(cpu, 1))
+	if (!wait_for_completion_timeout(&cpu_killed, msecs_to_jiffies(1)))
 		pr_err("CPU%u: unable to kill\n", cpu);
 }
 
@@ -308,13 +322,12 @@ void __cpu_die(unsigned int cpu)
  * Note that we do not return from this function. If this cpu is
  * brought online again it will need to run secondary_startup().
  */
-void cpu_die(void)
+void __cpuexit cpu_die(void)
 {
 	local_irq_disable();
 	idle_task_exit();
-	irq_ctx_exit(smp_processor_id());
 
-	(void)cpu_report_death();
+	complete(&cpu_killed);
 
 	asm ("XOR	TXENABLE, D0Re0,D0Re0\n");
 }
@@ -324,7 +337,7 @@ void cpu_die(void)
  * Called by both boot and secondaries to move global data into
  * per-processor storage.
  */
-void smp_store_cpu_info(unsigned int cpuid)
+void __cpuinit smp_store_cpu_info(unsigned int cpuid)
 {
 	struct cpuinfo_metag *cpu_info = &per_cpu(cpu_data, cpuid);
 
@@ -367,13 +380,17 @@ asmlinkage void secondary_start_kernel(void)
 		panic("No TBI found!");
 
 	per_cpu_trap_init(cpu);
-	irq_ctx_init(cpu);
 
 	preempt_disable();
 
 	setup_priv();
 
+	/*
+	 * Enable local interrupts.
+	 */
+	tbi_startup_interrupt(TBID_SIGNUM_TRT);
 	notify_cpu_starting(cpu);
+	local_irq_enable();
 
 	pr_info("CPU%u (thread %u): Booted secondary processor\n",
 		cpu, cpu_2_hwthread_id[cpu]);
@@ -385,18 +402,17 @@ asmlinkage void secondary_start_kernel(void)
 	 * OK, now it's safe to let the boot CPU continue
 	 */
 	set_cpu_online(cpu, true);
-	complete(&cpu_running);
 
 	/*
-	 * Enable local interrupts.
+	 * Check for cache aliasing.
+	 * Preemption is disabled
 	 */
-	tbi_startup_interrupt(TBID_SIGNUM_TRT);
-	local_irq_enable();
+	check_for_cache_aliasing(cpu);
 
 	/*
 	 * OK, it's off to the idle thread for us
 	 */
-	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
+	cpu_startup_entry(CPUHP_ONLINE);
 }
 
 void __init smp_cpus_done(unsigned int max_cpus)
@@ -492,7 +508,7 @@ void arch_send_call_function_ipi_mask(const struct cpumask *mask)
 
 void arch_send_call_function_single_ipi(int cpu)
 {
-	send_ipi_message(cpumask_of(cpu), IPI_CALL_FUNC);
+	send_ipi_message(cpumask_of(cpu), IPI_CALL_FUNC_SINGLE);
 }
 
 void show_ipi_list(struct seq_file *p)
@@ -518,10 +534,11 @@ static DEFINE_SPINLOCK(stop_lock);
  *
  *  Bit 0 - Inter-processor function call
  */
-static int do_IPI(void)
+static int do_IPI(struct pt_regs *regs)
 {
 	unsigned int cpu = smp_processor_id();
 	struct ipi_data *ipi = &per_cpu(ipi_data, cpu);
+	struct pt_regs *old_regs = set_irq_regs(regs);
 	unsigned long msgs, nextmsg;
 	int handled = 0;
 
@@ -546,12 +563,18 @@ static int do_IPI(void)
 			generic_smp_call_function_interrupt();
 			break;
 
+		case IPI_CALL_FUNC_SINGLE:
+			generic_smp_call_function_single_interrupt();
+			break;
+
 		default:
 			pr_crit("CPU%u: Unknown IPI message 0x%lx\n",
 				cpu, nextmsg);
 			break;
 		}
 	}
+
+	set_irq_regs(old_regs);
 
 	return handled;
 }
@@ -618,7 +641,7 @@ static void kick_raise_softirq(cpumask_t callmap, unsigned int irq)
 static TBIRES ipi_handler(TBIRES State, int SigNum, int Triggers,
 		   int Inst, PTBI pTBI, int *handled)
 {
-	*handled = do_IPI();
+	*handled = do_IPI((struct pt_regs *)State.Sig.pCtx);
 
 	return State;
 }

@@ -28,57 +28,34 @@
  * it happens at most some bytes of the exceptions handlers will be copied.
  */
 
-	.macro __BUILD_STRNCPY_ASM func
-LEAF(__strncpy_from_\func\()_asm)
+LEAF(__strncpy_from_user_asm)
 	LONG_L		v0, TI_ADDR_LIMIT($28)	# pointer ok?
 	and		v0, a1
-	bnez		v0, .Lfault\@
+	bnez		v0, .Lfault
 
-FEXPORT(__strncpy_from_\func\()_nocheck_asm)
+FEXPORT(__strncpy_from_user_nocheck_asm)
+	.set		noreorder
 	move		t0, zero
 	move		v1, a1
-.ifeqs "\func","kernel"
-1:	EX(lbu, v0, (v1), .Lfault\@)
-.else
-1:	EX(lbue, v0, (v1), .Lfault\@)
-.endif
+1:	EX(lbu, v0, (v1), .Lfault)
 	PTR_ADDIU	v1, 1
 	R10KCBARRIER(0(ra))
-	sb		v0, (a0)
 	beqz		v0, 2f
+	 sb		v0, (a0)
 	PTR_ADDIU	t0, 1
-	PTR_ADDIU	a0, 1
 	bne		t0, a2, 1b
+	 PTR_ADDIU	a0, 1
 2:	PTR_ADDU	v0, a1, t0
 	xor		v0, a1
-	bltz		v0, .Lfault\@
-	move		v0, t0
+	bltz		v0, .Lfault
+	 nop
 	jr		ra			# return n
-	END(__strncpy_from_\func\()_asm)
+	 move		v0, t0
+	END(__strncpy_from_user_asm)
 
-.Lfault\@:
-	li		v0, -EFAULT
-	jr		ra
+.Lfault: jr		ra
+	  li		v0, -EFAULT
 
 	.section	__ex_table,"a"
-	PTR		1b, .Lfault\@
+	PTR		1b, .Lfault
 	.previous
-
-	.endm
-
-#ifndef CONFIG_EVA
-	/* Set aliases */
-	.global __strncpy_from_user_asm
-	.global __strncpy_from_user_nocheck_asm
-	.set __strncpy_from_user_asm, __strncpy_from_kernel_asm
-	.set __strncpy_from_user_nocheck_asm, __strncpy_from_kernel_nocheck_asm
-#endif
-
-__BUILD_STRNCPY_ASM kernel
-
-#ifdef CONFIG_EVA
-	.set push
-	.set eva
-__BUILD_STRNCPY_ASM user
-	.set pop
-#endif

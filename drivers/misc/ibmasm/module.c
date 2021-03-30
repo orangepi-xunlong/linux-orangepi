@@ -153,6 +153,7 @@ error_ioremap:
 error_heartbeat:
 	ibmasm_event_buffer_exit(sp);
 error_eventbuffer:
+	pci_set_drvdata(pdev, NULL);
 	kfree(sp);
 error_kmalloc:
         pci_release_regions(pdev);
@@ -164,7 +165,7 @@ error_resources:
 
 static void ibmasm_remove_one(struct pci_dev *pdev)
 {
-	struct service_processor *sp = pci_get_drvdata(pdev);
+	struct service_processor *sp = (struct service_processor *)pci_get_drvdata(pdev);
 
 	dbg("Unregistering UART\n");
 	ibmasm_unregister_uart(sp);
@@ -181,6 +182,7 @@ static void ibmasm_remove_one(struct pci_dev *pdev)
 	ibmasm_free_remote_input_dev(sp);
 	iounmap(sp->base_address);
 	ibmasm_event_buffer_exit(sp);
+	pci_set_drvdata(pdev, NULL);
 	kfree(sp);
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);

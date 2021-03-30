@@ -1,18 +1,8 @@
 /*
- * drivers/media/platform/sunxi-tvd/bsp_tvd/bsp_tvd.h
+ * bsp_tvd.h
  *
- * Copyright (c) 2007-2018 Allwinnertech Co., Ltd.
- * Author: zhengxiaobin <zhengxiaobin@allwinnertech.com>
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
+ *  Created on: 2015-9-6
+ *      Author: dlp
  */
 
 #ifndef BSP_TVD_H_
@@ -29,9 +19,9 @@
 #include <linux/vmalloc.h>
 #include <linux/fs.h>
 #include <linux/dma-mapping.h>
-#include <linux/sched.h>
-#include <linux/kthread.h>
-#include <linux/err.h>
+#include <linux/sched.h>   //wake_up_process()
+#include <linux/kthread.h> //kthread_create()??��|kthread_run()
+#include <linux/err.h> //IS_ERR()??��|PTR_ERR()
 #include <linux/platform_device.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
@@ -51,29 +41,26 @@
 
 #define FLITER_NUM 1
 #define TVD_3D_COMP_BUFFER_SIZE (0x400000)
-#define CVBS_INTERFACE 0
-#define YPBPRI_INTERFACE 1
-#define YPBPRP_INTERFACE 2
-#define NTSC 0
-#define PAL 1
-#define NONE 2
-
 
 //
 // detail information of registers
 //
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 tvd_adc_map                                              :  2 ;    // default: 0x0;
 		u32 res0                                                     : 30 ;    // default: ;
 	} bits;
 } tvd_top_map_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 tvd_en_3d_dma                                            :  1 ;    // default: 0x0;
 		u32 comb_3d_en                                               :  1 ;    // default: 0x1;
 		u32 res0                                                     :  2 ;    // default: ;
@@ -82,37 +69,47 @@ typedef union {
 	} bits;
 } tvd_3d_ctl1_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 dram_trig                                                     ;    // default: 0x0;
 	} bits;
 } tvd_3d_ctl2_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 comb_3d_addr0                                                 ;    // default: 0x0;
 	} bits;
 } tvd_3d_ctl3_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 comb_3d_addr1                                                 ;    // default: 0x0;
 	} bits;
 } tvd_3d_ctl4_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 comb_3d_size                                                  ;    // default: 0x0;
 	} bits;
 } tvd_3d_ctl5_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 res0:4;
 		u32 lpf_dig_en:1;
 		u32 res1:19;
@@ -121,9 +118,11 @@ typedef union {
 	} bits;
 } tvd_adc_dig_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 adc_en                                                   :  1 ;    // default: 0x0;
 		u32 afe_en                                                   :  1 ;    // default: 0x0;
 		u32 lpf_en                                                   :  1 ;    // default: 0x0;
@@ -132,9 +131,11 @@ typedef union {
 	} bits;
 } tvd_adc_ctl_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 stage1_ibias                                             :  2 ;    // default: 0x0;
 		u32 stage2_ibias                                             :  2 ;    // default: 0x0;
 		u32 stage3_ibias                                             :  2 ;    // default: 0x0;
@@ -151,9 +152,11 @@ typedef union {
 	} bits;
 } tvd_adc_cfg_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 adc_wb_length                                            : 23 ;    // default: 0x10000;
 		u32 res0                                                     :  1 ;    // default: ;
 		u32 adc_wb_start                                             :  1 ;    // default: 0x0;
@@ -165,9 +168,11 @@ typedef union {
 	} bits;
 } tvd_adc_dump_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 tvd_en_ch                                                :  1 ;    // default: 0x0;
 		u32 res0                                                     : 14 ;    // default: ;
 		u32 clr_rsmp_fifo                                            :  1 ;    // default: 0x0;
@@ -178,9 +183,11 @@ typedef union {
 	} bits;
 } tvd_en_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 ypbpr_mode                                               :  1 ;    // default: 0x0;
 		u32 svideo_mode                                              :  1 ;    // default: 0x0;
 		u32 progressive_mode                                         :  1 ;    // default: 0x0;
@@ -192,9 +199,11 @@ typedef union {
 	} bits;
 } tvd_mode_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 agc_en                                                   :  1 ;    // default: 0x1;
 		u32 agc_frequence                                            :  1 ;    // default: 0x0;
 		u32 res0                                                     :  6 ;    // default: ;
@@ -205,9 +214,11 @@ typedef union {
 	} bits;
 } tvd_clamp_agc1_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 agc_gate_width                                           :  7 ;    // default: 0x40;
 		u32 res0                                                     :  1 ;    // default: ;
 		u32 agc_backporch_delay                                      :  8 ;    // default: 0x64;
@@ -217,16 +228,20 @@ typedef union {
 	} bits;
 } tvd_clamp_agc2_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 h_sample_step                                                 ;    // default: 0x20000000;
 	} bits;
 } tvd_hlock1_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 htol                                                     :  4 ;    // default: 0x0;
 		u32 res0                                                     : 12 ;    // default: ;
 		u32 hsync_filter_gate_start_time                             :  8 ;    // default: 0xd6;
@@ -234,9 +249,11 @@ typedef union {
 	} bits;
 } tvd_hlock2_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 hsync_rising_detect_window_start_time                    :  8 ;    // default: 0x0;
 		u32 hsync_rising_detect_window_end_time                      :  8 ;    // default: 0x0;
 		u32 hsync_tip_detect_window_start_time                       :  8 ;    // default: 0x0;
@@ -244,9 +261,11 @@ typedef union {
 	} bits;
 } tvd_hlock3_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 hsync_detect_window_start_time_for_coarse_detection      :  8 ;    // default: 0x00;
 		u32 hsync_detect_window_end_time_for_corase_detect           :  8 ;    // default: 0x0;
 		u32 hsync_rising_time_for_fine_detect                        :  8 ;    // default: 0x0;
@@ -254,9 +273,11 @@ typedef union {
 	} bits;
 } tvd_hlock4_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 hactive_start                                            :  8 ;    // default: 0x0;
 		u32 hactive_width                                            :  8 ;    // default: 0x0;
 		u32 backporch_detect_window_start_time                       :  8 ;    // default: 0x0;
@@ -264,9 +285,11 @@ typedef union {
 	} bits;
 } tvd_hlock5_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 vtol                                                     :  3 ;    // default: 0x0;
 		u32 res0                                                     :  1 ;    // default: ;
 		u32 vactive_start                                            : 11 ;    // default: 0x22;
@@ -276,9 +299,11 @@ typedef union {
 	} bits;
 } tvd_vlock1_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 hsync_dectector_disable_start_line                       :  7 ;    // default: 0x0;
 		u32 res0                                                     :  9 ;    // default: ;
 		u32 hsync_detector_disable_end_line                          :  5 ;    // default: 0x0;
@@ -286,9 +311,11 @@ typedef union {
 	} bits;
 } tvd_vlock2_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 color_kill_en                                            :  1 ;    // default: 0x1;
 		u32 color_std                                                :  3 ;    // default: 0x0;
 		u32 res0                                                     :  4 ;    // default: ;
@@ -302,16 +329,20 @@ typedef union {
 	} bits;
 } tvd_clock1_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 c_sample_step                                                 ;    // default: 0x0;
 	} bits;
 } tvd_clock2_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 _3d_comb_filter_mode                                  	:  3 ;    // default: 0x1;
 		u32 _3d_comb_filter_dis                                   	:  1 ;    // default: 0x0;
 		u32 _2d_comb_filter_mode                                  	:  4 ;    // default: 0x0;
@@ -328,9 +359,11 @@ typedef union {
 	} bits;
 } tvd_yc_sep1_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 horizontal_luma_filter_gain                              :  2 ;    // default: 0x3;
 		u32 horizontal_chroma_filter_gain                            :  2 ;    // default: 0x3;
 		u32 luma_vertical_filter_gain                                :  2 ;    // default: 0x2;
@@ -346,9 +379,11 @@ typedef union {
 	} bits;
 } tvd_yc_sep2_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 yc_delay                                                 :  4 ;    // default: 0x0;
 		u32 res0                                                     :  4 ;    // default: ;
 		u32 contrast_gain                                            :  8 ;    // default: 0x80;
@@ -360,9 +395,11 @@ typedef union {
 	} bits;
 } tvd_enhance1_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 saturation_gain                                          :  8 ;    // default: 0x80;
 		u32 chroma_enhance_en                                        :  1 ;    // default: 0x0;
 		u32 chroma_enhance_strength                                  :  2 ;    // default: 0x3;
@@ -370,9 +407,11 @@ typedef union {
 	} bits;
 } tvd_enhance2_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 cb_gain                                                  : 12 ;    // default: 0x80;
 		u32 res0                                                     :  4 ;    // default: ;
 		u32 cr_gain                                                  : 12 ;    // default: 0x0;
@@ -381,9 +420,11 @@ typedef union {
 	} bits;
 } tvd_enhance3_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 wb_en:1;
 		u32 wb_format:1;
 		u32 field_sel:1;
@@ -395,16 +436,17 @@ typedef union {
 		u32 wb_addr_valid:1;
 		u32 res1:7;
 		u32 hactive_stride:12;
-		u32 yuv420_fil_en:1;
-		u32 res2:2;
+		u32 res2:3;
 		/* 0x0->nv12, 0x1->nv21 */
 		u32 wb_uv_swap:1;
 	} bits;
 } tvd_wb1_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 hactive_num                                              : 12 ;    // default: 0x0;
 		u32 res0                                                     :  4 ;    // default: ;
 		u32 vactive_num                                              : 11 ;    // default: 0x0;
@@ -412,23 +454,29 @@ typedef union {
 	} bits;
 } tvd_wb2_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 ch1_y_addr                                                    ;    // default: 0x0;
 	} bits;
 } tvd_wb3_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 ch1_c_addr                                                    ;    // default: 0x0;
 	} bits;
 } tvd_wb4_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 lock                                                     :  1 ;    // Default: 0x0;
 		u32 unlock                                                   :  1 ;    // Default: 0x0;
 		u32 res0                                                     :  2 ;    // Default: ;
@@ -449,9 +497,11 @@ typedef union {
 	} bits;
 } tvd_irq_ctl_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 lock                                                     :  1 ;    // Default: 0x0;
 		u32 unlock                                                   :  1 ;    // Default: 0x0;
 		u32 res0                                                     :  2 ;    // Default: ;
@@ -472,9 +522,11 @@ typedef union {
 	} bits;
 } tvd_irq_status_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 res0                                                     :  8 ;    // default: ;
 		u32 afe_gain_value                                           :  8 ;    // default: 0x0;
 		u32 tvin_lock_debug                                          :  1 ;    // default: 0x0;
@@ -490,9 +542,11 @@ typedef union {
 	} bits;
 } tvd_debug1_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 res0                                                     :  3 ;    // default;
 		u32 agc_gate_thresh                                          :  5 ;    // default: 0xa;
 		u32 ccir656_en                                               :  1 ;    // default: 0x0;
@@ -509,9 +563,11 @@ typedef union {
 	} bits;
 } tvd_debug2_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 res0                                                     : 20 ;    // default: ;
 		u32 noise_thresh                                             :  8 ;    // default: 0x32;
 		u32 ccir656_cbcr_write_back_sequence                         :  1 ;    // default: 0x0;
@@ -520,9 +576,11 @@ typedef union {
 	} bits;
 } tvd_debug3_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 fixed_burstgate                                          :  1 ;    // default: 0x1;
 		u32 cautopos                                                 :  5 ;    // default: 0xc;
 		u32 vnon_std_threshold                                       :  4 ;    // default: 0x0;
@@ -542,9 +600,11 @@ typedef union {
 	} bits;
 } tvd_debug4_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 vsync_clamp_mode                                         :  2 ;    // default: 0x2;
 		u32 vsync_vbi_lockout_start                                  :  7 ;    // default: 0x70;
 		u32 vsync_vbi_max                                            :  7 ;    // default: 0xe;
@@ -559,9 +619,11 @@ typedef union {
 	} bits;
 } tvd_debug5_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 cstate                                                   :  3 ;    // default: 0x5;
 		u32 lose_chromalock_level                                    :  3 ;    // default: 0x7;
 		u32 lose_chromalock_count                                    :  4 ;    // default: 0x6;
@@ -574,9 +636,11 @@ typedef union {
 	} bits;
 } tvd_debug6_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 hresampler_2up                                           :  1 ;    // default: 0x1;
 		u32 cpump_adjust_polarity                                    :  1 ;    // default: 0x0;
 		u32 cpump_adjust_delay                                       :  6 ;    // default: 0x28;
@@ -593,51 +657,65 @@ typedef union {
 	} bits;
 } tvd_debug7_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 chroma_step_ntsc                                              ;    // default: 0x0;
 	} bits;
 } tvd_debug8_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 chroma_step_paln                                              ;    // default: 0x0;
 	} bits;
 } tvd_debug9_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 chroma_step_palm                                              ;    // default: 0x0;
 	} bits;
 } tvd_debug10_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 chroma_step_pal                                               ;    // default: 0x0;
 	} bits;
 } tvd_debug11_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 y_wb_protect                                                  ;    // default: 0x0;
 	} bits;
 } tvd_debug12_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 uv_wb_protect                                                 ;    // default: 0x0;
 	} bits;
 } tvd_debug13_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 agc_peak_nominal                                         :  7 ;    // default: 0xa;
 		u32 agc_peak_cntl                                            :  3 ;    // default: 0x1;
 		u32 vsync_agc_lockout_start                                  :  7 ;    // default: 0x6c;
@@ -647,20 +725,11 @@ typedef union {
 	} bits;
 } tvd_debug14_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct { 	u32 adc_lock_mode:1;
-		u32 res0:3;			   /* default: 0x1; */
-		u32 adc_lock_interval_period:10; /* default: 0x6c; */
-		u32 res1:2;			   /* default: 0x10; */
-		u32 adc_lock_interval_low:10;    /* default: 0x0; */
-		u32 res2:6;			   /* default: ; */
-	} bits;
-} tvd_debug15_reg_t;
-
-typedef union {
-	u32 dwval;
-	struct {
+	struct
+	{
 		u32 agc_analog_gain_status                                   :  8 ;    // default: 0x4;
 		u32 agc_digital_gain_status                                  :  8 ;    // default: 0x0;
 		u32 chroma_magnitude_status                                  :  8 ;    // default: 0x0;
@@ -668,24 +737,30 @@ typedef union {
 	} bits;
 } tvd_status1_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 chroma_sync_dto_increment_status                              ;    // default: 0x21f07c1f;
 	} bits;
 } tvd_status2_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 horizontal_sync_dto_increment_status                     : 30 ;    // default: 0x20000000;
 		u32 res0                                                     :  2 ;    // default: ;
 	} bits;
 } tvd_status3_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 no_signal_detected                                       :  1 ;    // default: 0x0;
 		u32 h_locked     		                                     :  1 ;    // default: 0x0;
 		u32 v_locked                                                 :  1 ;    // default: 0x1;
@@ -708,19 +783,24 @@ typedef union {
 	} bits;
 } tvd_status4_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
-		u32 sync_level:11;
-		u32 res0:5;
-		u32 blank_level:11;
-		u32 res1:5;
+	struct
+	{
+		u32 adc_data_value                                           : 10 ;    // default: 0x0;
+		u32 res0                                                     :  1 ;    // default: ;
+		u32 adc_data_show                                            :  1 ;    // default: 0x0;
+		u32 sync_level                                               : 11 ;    // default: 0;
+		u32 blank_level                                              : 11 ;    // default: 0;
 	} bits;
 } tvd_status5_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 auto_detect_finish                                       :  1 ;    // default: 0x0;
 		u32 tv_standard                                              :  3 ;    // default: 0x0;
 		u32 auto_detect_en                                           :  1 ;    // default: 0x0;
@@ -734,9 +814,11 @@ typedef union {
 	} bits;
 } tvd_status6_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 teletext_vbi_frame_code_register1                        :  8 ;    // default: 0x0;
 		u32 teletext_vbi_frame_code_register2                        :  8 ;    // default: 0x0;
 		u32 data_high_level_register                                 :  8 ;    // default: 0x0;
@@ -744,9 +826,11 @@ typedef union {
 	} bits;
 } tvd_vbi1_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 vbi_data_type_configuration_register_for_line8           :  8 ;    // default: 0x0;
 		u32 vbi_data_type_configuration_register_for_line9           :  8 ;    // default: 0x0;
 		u32 vbi_data_type_configuration_register_for_line10          :  8 ;    // default: 0x0;
@@ -754,9 +838,11 @@ typedef union {
 	} bits;
 } tvd_vbi2_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 vbi_data_type_configuration_register_for_line12          :  8 ;    // default: 0x0;
 		u32 vbi_data_type_configuration_register_for_line13          :  8 ;    // default: 0x0;
 		u32 vbi_data_type_configuration_register_for_line14          :  8 ;    // default: 0x0;
@@ -764,9 +850,11 @@ typedef union {
 	} bits;
 } tvd_vbi3_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 vbi_data_type_configuration_register_for_line16          :  8 ;    // default: 0x0;
 		u32 vbi_data_type_configuration_register_for_line17          :  8 ;    // default: 0x0;
 		u32 vbi_data_type_configuration_register_for_line18          :  8 ;    // default: 0x0;
@@ -774,9 +862,11 @@ typedef union {
 	} bits;
 } tvd_vbi4_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 vbi_data_type_configuration_register_for_line20          :  8 ;    // default: 0x0;
 		u32 vbi_data_type_configuration_register_for_line21          :  8 ;    // default: 0x0;
 		u32 vbi_data_type_configuration_register_for_line22          :  8 ;    // default: 0x0;
@@ -784,9 +874,11 @@ typedef union {
 	} bits;
 } tvd_vbi5_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 vbi_data_type_configuration_register_for_remaining_lines :  8 ;    // default: 0x0;
 		u32 vbi_loop_filter_gain                                     :  8 ;    // default: 0x0;
 		u32 vbi_loop_filter_i_gain                                   :  8 ;    // default: 0x0;
@@ -794,9 +886,11 @@ typedef union {
 	} bits;
 } tvd_vbi6_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 upper_byte_vbi_close_caption_dto                         :  8 ;    // default: 0x0;
 		u32 lower_byte_vbi_close_caption_dto                         :  8 ;    // default: 0x0;
 		u32 upper_byte_vbi_teletext_dto                              :  8 ;    // default: 0x0;
@@ -804,9 +898,11 @@ typedef union {
 	} bits;
 } tvd_vbi7_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 upper_byte_vbi_wss625_dto                                :  8 ;    // default: 0x0;
 		u32 lower_byte_vbi_wss625_dto                                :  8 ;    // default: 0x0;
 		u32 vbi_close_caption_data_1_register1                       :  8 ;    // default: 0x0;
@@ -814,9 +910,11 @@ typedef union {
 	} bits;
 } tvd_vbi8_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 vbi_close_caption_data_1_register3                       :  8 ;    // default: 0x0;
 		u32 vbi_close_caption_data_1_register4                       :  8 ;    // default: 0x0;
 		u32 vbi_close_caption_data_2_register                        :  8 ;    // default: 0x0;
@@ -824,9 +922,11 @@ typedef union {
 	} bits;
 } tvd_vbi9_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 vbi_wss_data_2_register                                  :  8 ;    // default: 0x0;
 		u32 vbi_data_status_register                                 :  8 ;    // default: 0x0;
 		u32 vbi_caption_start_register                               :  8 ;    // default: 0x0;
@@ -834,9 +934,11 @@ typedef union {
 	} bits;
 } tvd_vbi10_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 vbi_teletext_start_register                              :  8 ;    // default: 0x0;
 		u32 res0                                                     :  8 ;    // default: 0x0;
 		u32 res1                                                     :  8 ;    // default: 0x0;
@@ -844,15 +946,18 @@ typedef union {
 	} bits;
 } tvd_vbi11_reg_t;
 
-typedef union {
+typedef union
+{
 	u32 dwval;
-	struct {
+	struct
+	{
 		u32 res0                       	  ;    // default: ;
 	} bits;
 } tvd_reservd_reg_t;
 
 //device define
-typedef struct {
+typedef struct
+{
 	tvd_top_map_reg_t 				tvd_top_map;				//0x000
 	tvd_reservd_reg_t				tvd_top_reg004;				//0x004
 	tvd_3d_ctl1_reg_t 				tvd_3d_ctl1;				//0x008
@@ -878,10 +983,11 @@ typedef struct {
 	tvd_adc_cfg_reg_t 				tvd_adc3_cfg;				//0x08c
 	tvd_reservd_reg_t				tvd_top_reg090[24];			//0x070~0x0ec
 	tvd_adc_dump_reg_t				tvd_adc_dump;				//0x0f0
-} __tvd_top_dev_t;
+}__tvd_top_dev_t;
 
 //device define
-typedef struct {
+typedef struct
+{
 	tvd_en_reg_t					tvd_en;						//0x000
 	tvd_mode_reg_t					tvd_mode;					//0x004
 	tvd_clamp_agc1_reg_t			tvd_clamp_agc1;				//0x008
@@ -927,8 +1033,7 @@ typedef struct {
 	tvd_debug12_reg_t				tvd_debug12;				//0x12c
 	tvd_debug13_reg_t				tvd_debug13;				//0x130
 	tvd_debug14_reg_t				tvd_debug14;				//0x134
-	tvd_debug15_reg_t				tvd_debug15;/*0x138 */
-	tvd_reservd_reg_t				tvd_reg13c[17];/*0x13c~0x17c */
+	tvd_reservd_reg_t				tvd_reg138[18];				//0x138~0x17c
 	tvd_status1_reg_t				tvd_status1;				//0x180
 	tvd_status2_reg_t				tvd_status2;				//0x184
 	tvd_status3_reg_t				tvd_status3;				//0x188
@@ -947,57 +1052,56 @@ typedef struct {
 	tvd_vbi9_reg_t					tvd_vbi9;					//0xfe0
 	tvd_vbi10_reg_t               	tvd_vbi10;					//0xfe4
 	tvd_vbi11_reg_t                	tvd_vbi11;					//0xfe8
-} __tvd_dev_t;
+}__tvd_dev_t;
 
 
-typedef enum {
-	TVD_IRQ_LOCK = 0,
-	TVD_IRQ_UNLOCK = 1,
-	TVD_IRQ_FIFO_C_O = 4,
-	TVD_IRQ_FIFO_Y_O = 5,
-	TVD_IRQ_FIFO_C_U = 7,
-	TVD_IRQ_FIFO_Y_U = 8,
-	TVD_IRQ_WB_ADDR_CHANGE_ERR = 16,
-	TVD_IRQ_FRAME_END = 24,
-	TVD_IRQ_FIFO_3D_RX_U = 28,
-	TVD_IRQ_FIFO_3D_RX_O = 29,
-	TVD_IRQ_FIFO_3D_TX_U = 30,
-	TVD_IRQ_FIFO_3D_TX_O = 31,
-} TVD_IRQ_T;
+typedef enum
+{
+	TVD_IRQ_LOCK     				=	0 ,
+	TVD_IRQ_UNLOCK 					=	1 ,
+	TVD_IRQ_FIFO_C_O 				=	4 ,
+	TVD_IRQ_FIFO_Y_O 				=	5 ,
+	TVD_IRQ_FIFO_C_U 				=	7 ,
+	TVD_IRQ_FIFO_Y_U				=	8 ,
+	TVD_IRQ_WB_ADDR_CHANGE_ERR  	=	16,
+	TVD_IRQ_FRAME_END 				=	24,
+	TVD_IRQ_FIFO_3D_RX_U    		=	28,
+	TVD_IRQ_FIFO_3D_RX_O   			=	29,
+	TVD_IRQ_FIFO_3D_TX_U      		=	30,
+	TVD_IRQ_FIFO_3D_TX_O  			=	31,
+}TVD_IRQ_T;
 
-typedef enum {
+typedef enum
+{
     TVD_PL_YUV420 					=	0,
     TVD_MB_YUV420					=	1,
     TVD_PL_YUV422					=	2,
-} TVD_FMT_T;
+}TVD_FMT_T;
 
 s32 tvd_top_set_reg_base(unsigned long base);
-s32 tvd_set_reg_base(u32 sel, unsigned long base);
-s32 tvd_init(u32 sel, u32 interface);
-s32 tvd_deinit(u32 sel, u32 interface);
-s32 tvd_get_status(u32 sel, u32 *locked, u32 *system);
-s32 tvd_config(u32 sel, u32 interface, u32 mode);
-s32 tvd_set_wb_width(u32 sel, u32 width);
-s32 tvd_set_wb_width_jump(u32 sel, u32 width_jump);
-s32 tvd_set_wb_height(u32 sel, u32 height);
-s32 tvd_set_wb_addr(u32 sel, u32 addr_y, u32 addr_c);
-s32 tvd_set_wb_fmt(u32 sel, TVD_FMT_T fmt);
+s32 tvd_set_reg_base(u32 sel,unsigned long base);
+s32 tvd_init(u32 sel,u32 interface);
+s32 tvd_get_status(u32 sel,u32* locked,u32* system);
+s32 tvd_config(u32 sel,u32 interface,u32 mode);
+s32 tvd_set_wb_width(u32 sel,u32 width);
+s32 tvd_set_wb_width_jump(u32 sel,u32 width_jump);
+s32 tvd_set_wb_height(u32 sel,u32 height);
+s32 tvd_set_wb_addr(u32 sel,u32 addr_y,u32 addr_c);
+s32 tvd_set_wb_fmt(u32 sel,TVD_FMT_T fmt);
 s32 tvd_set_wb_uv_swap(u32 sel, u32 swap);
-s32 tvd_set_wb_field(u32 sel, u32 is_field_mode, u32 is_field_even);
+s32 tvd_set_wb_field(u32 sel,u32 is_field_mode,u32 is_field_even);
 s32 tvd_capture_on(u32 sel);
 s32 tvd_capture_off(u32 sel);
-s32 tvd_irq_enable(u32 sel, TVD_IRQ_T irq_id);
-s32 tvd_irq_disable(u32 sel, TVD_IRQ_T irq_id);
-s32 tvd_irq_status_get(u32 sel, TVD_IRQ_T irq_id, u32 *irq_status);
-s32 tvd_irq_status_clear(u32 sel, TVD_IRQ_T irq_id);
+s32 tvd_irq_enable(u32 sel,TVD_IRQ_T irq_id);
+s32 tvd_irq_disable(u32 sel,TVD_IRQ_T irq_id);
+s32 tvd_irq_status_get(u32 sel,TVD_IRQ_T irq_id,u32* irq_status);
+s32 tvd_irq_status_clear(u32 sel,TVD_IRQ_T irq_id);
 s32 tvd_dma_irq_status_get(u32 sel, u32 *irq_status);
 s32 tvd_dma_irq_status_clear_err_flag(u32 sel, u32 irq_status);
 
-void tvd_enable_chanel(u32 sel, u32 en);
-
-s32 tvd_adc_config(u32 adc, u32 en);
+s32 tvd_adc_config(u32 adc);
 s32 tvd_set_saturation(u32 sel, u32 saturation);
-s32 tvd_set_luma(u32 sel, u32 luma);
+s32 tvd_set_luma(u32 sel,u32 luma);
 s32 tvd_set_contrast(u32 sel, u32 contrast);
 u32 tvd_get_saturation(u32 sel);
 u32 tvd_get_luma(u32 sel);
@@ -1008,7 +1112,4 @@ u32 tvd_dbgmode_dump_data(u32 chan_sel, u32 mode, uintptr_t dump_dst_addr,
 void tvd_agc_auto_config(u32 sel);
 void tvd_agc_manual_config(u32 sel, u32 agc_manual_val);
 void tvd_cagc_config(u32 sel, u32 enable);
-s32 tvd_get_lock(u32 sel);
-void tvd_blue_display_mode(u32 sel, u32 mode);
-void tvd_reset(u32 sel);
 #endif

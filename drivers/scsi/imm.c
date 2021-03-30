@@ -43,7 +43,6 @@ typedef struct {
 	unsigned dp:1;		/* Data phase present           */
 	unsigned rd:1;		/* Read data in data phase      */
 	unsigned wanted:1;	/* Parport sharing busy flag    */
-	unsigned int dev_no;	/* Device number		*/
 	wait_queue_head_t *waiting;
 	struct Scsi_Host *host;
 	struct list_head list;
@@ -77,10 +76,9 @@ static void imm_wakeup(void *ref)
 
 	spin_lock_irqsave(&arbitration_lock, flags);
 	if (dev->wanted) {
-		if (parport_claim(dev->dev) == 0) {
-			got_it(dev);
-			dev->wanted = 0;
-		}
+		parport_claim(dev->dev);
+		got_it(dev);
+		dev->wanted = 0;
 	}
 	spin_unlock_irqrestore(&arbitration_lock, flags);
 }
@@ -1111,6 +1109,7 @@ static struct scsi_host_template imm_template = {
 	.bios_param		= imm_biosparam,
 	.this_id		= 7,
 	.sg_tablesize		= SG_ALL,
+	.cmd_per_lun		= 1,
 	.use_clustering		= ENABLE_CLUSTERING,
 	.can_queue		= 1,
 	.slave_alloc		= imm_adjust_queue,
@@ -1122,40 +1121,15 @@ static struct scsi_host_template imm_template = {
 
 static LIST_HEAD(imm_hosts);
 
-/*
- * Finds the first available device number that can be alloted to the
- * new imm device and returns the address of the previous node so that
- * we can add to the tail and have a list in the ascending order.
- */
-
-static inline imm_struct *find_parent(void)
-{
-	imm_struct *dev, *par = NULL;
-	unsigned int cnt = 0;
-
-	if (list_empty(&imm_hosts))
-		return NULL;
-
-	list_for_each_entry(dev, &imm_hosts, list) {
-		if (dev->dev_no != cnt)
-			return par;
-		cnt++;
-		par = dev;
-	}
-
-	return par;
-}
-
 static int __imm_attach(struct parport *pb)
 {
 	struct Scsi_Host *host;
-	imm_struct *dev, *temp;
+	imm_struct *dev;
 	DECLARE_WAIT_QUEUE_HEAD_ONSTACK(waiting);
 	DEFINE_WAIT(wait);
 	int ports;
 	int modes, ppb;
 	int err = -ENOMEM;
-	struct pardev_cb imm_cb;
 
 	init_waitqueue_head(&waiting);
 
@@ -1168,15 +1142,9 @@ static int __imm_attach(struct parport *pb)
 	dev->mode = IMM_AUTODETECT;
 	INIT_LIST_HEAD(&dev->list);
 
-	temp = find_parent();
-	if (temp)
-		dev->dev_no = temp->dev_no + 1;
+	dev->dev = parport_register_device(pb, "imm", NULL, imm_wakeup,
+						NULL, 0, dev);
 
-	memset(&imm_cb, 0, sizeof(imm_cb));
-	imm_cb.private = dev;
-	imm_cb.wakeup = imm_wakeup;
-
-	dev->dev = parport_register_dev_model(pb, "imm", &imm_cb, dev->dev_no);
 	if (!dev->dev)
 		goto out;
 
@@ -1240,10 +1208,7 @@ static int __imm_attach(struct parport *pb)
 	host->unique_id = pb->number;
 	*(imm_struct **)&host->hostdata = dev;
 	dev->host = host;
-	if (!temp)
-		list_add_tail(&dev->list, &imm_hosts);
-	else
-		list_add_tail(&dev->list, &temp->list);
+	list_add_tail(&dev->list, &imm_hosts);
 	err = scsi_add_host(host, NULL);
 	if (err)
 		goto out2;
@@ -1281,10 +1246,9 @@ static void imm_detach(struct parport *pb)
 }
 
 static struct parport_driver imm_driver = {
-	.name		= "imm",
-	.match_port	= imm_attach,
-	.detach		= imm_detach,
-	.devmodel	= true,
+	.name	= "imm",
+	.attach	= imm_attach,
+	.detach	= imm_detach,
 };
 
 static int __init imm_driver_init(void)

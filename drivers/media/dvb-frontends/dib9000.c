@@ -225,7 +225,7 @@ static u16 to_fw_output_mode(u16 mode)
 	}
 }
 
-static int dib9000_read16_attr(struct dib9000_state *state, u16 reg, u8 *b, u32 len, u16 attribute)
+static u16 dib9000_read16_attr(struct dib9000_state *state, u16 reg, u8 * b, u32 len, u16 attribute)
 {
 	u32 chunk_size = 126;
 	u32 l;
@@ -309,7 +309,7 @@ static inline u16 dib9000_read_word_attr(struct dib9000_state *state, u16 reg, u
 
 #define dib9000_read16_noinc_attr(state, reg, b, len, attribute) dib9000_read16_attr(state, reg, b, len, (attribute) | DATA_BUS_ACCESS_MODE_NO_ADDRESS_INCREMENT)
 
-static int dib9000_write16_attr(struct dib9000_state *state, u16 reg, const u8 *buf, u32 len, u16 attribute)
+static u16 dib9000_write16_attr(struct dib9000_state *state, u16 reg, const u8 * buf, u32 len, u16 attribute)
 {
 	u32 chunk_size = 126;
 	u32 l;
@@ -649,9 +649,9 @@ static int dib9000_risc_debug_buf(struct dib9000_state *state, u16 * data, u8 si
 	b[2 * (size - 2) - 1] = '\0';	/* Bullet proof the buffer */
 	if (*b == '~') {
 		b++;
-		dprintk("%s", b);
+		dprintk(b);
 	} else
-		dprintk("RISC%d: %d.%04d %s", state->fe_id, ts / 10000, ts % 10000, *b ? b : "<empty>");
+		dprintk("RISC%d: %d.%04d %s", state->fe_id, ts / 10000, ts % 10000, *b ? b : "<emtpy>");
 	return 1;
 }
 
@@ -1040,18 +1040,13 @@ static int dib9000_risc_apb_access_write(struct dib9000_state *state, u32 addres
 	if (address >= 1024 || !state->platform.risc.fw_is_running)
 		return -EINVAL;
 
-	if (len > 18)
-		return -EINVAL;
-
 	/* dprintk( "APB access thru wr fw %d %x", address, attribute); */
 
-	mb[0] = (u16)address;
-	for (i = 0; i + 1 < len; i += 2)
-		mb[1 + i / 2] = b[i] << 8 | b[i + 1];
-	if (len & 1)
-		mb[1 + len / 2] = b[len - 1] << 8;
+	mb[0] = (unsigned short)address;
+	for (i = 0; i < len && i < 20; i += 2)
+		mb[1 + (i / 2)] = (b[i] << 8 | b[i + 1]);
 
-	dib9000_mbx_send_attr(state, OUT_MSG_BRIDGE_APB_W, mb, (3 + len) / 2, attribute);
+	dib9000_mbx_send_attr(state, OUT_MSG_BRIDGE_APB_W, mb, 1 + len / 2, attribute);
 	return dib9000_mbx_get_message_attr(state, IN_MSG_END_BRIDGE_APB_RW, mb, &s, attribute) == 1 ? 0 : -EINVAL;
 }
 
@@ -1889,12 +1884,11 @@ static int dib9000_fe_get_tune_settings(struct dvb_frontend *fe, struct dvb_fron
 	return 0;
 }
 
-static int dib9000_get_frontend(struct dvb_frontend *fe,
-				struct dtv_frontend_properties *c)
+static int dib9000_get_frontend(struct dvb_frontend *fe)
 {
 	struct dib9000_state *state = fe->demodulator_priv;
 	u8 index_frontend, sub_index_frontend;
-	enum fe_status stat;
+	fe_status_t stat;
 	int ret = 0;
 
 	if (state->get_frontend_internal == 0) {
@@ -1910,7 +1904,7 @@ static int dib9000_get_frontend(struct dvb_frontend *fe,
 			dprintk("TPS lock on the slave%i", index_frontend);
 
 			/* synchronize the cache with the other frontends */
-			state->fe[index_frontend]->ops.get_frontend(state->fe[index_frontend], c);
+			state->fe[index_frontend]->ops.get_frontend(state->fe[index_frontend]);
 			for (sub_index_frontend = 0; (sub_index_frontend < MAX_NUMBER_OF_FRONTENDS) && (state->fe[sub_index_frontend] != NULL);
 			     sub_index_frontend++) {
 				if (sub_index_frontend != index_frontend) {
@@ -1944,14 +1938,14 @@ static int dib9000_get_frontend(struct dvb_frontend *fe,
 
 	/* synchronize the cache with the other frontends */
 	for (index_frontend = 1; (index_frontend < MAX_NUMBER_OF_FRONTENDS) && (state->fe[index_frontend] != NULL); index_frontend++) {
-		state->fe[index_frontend]->dtv_property_cache.inversion = c->inversion;
-		state->fe[index_frontend]->dtv_property_cache.transmission_mode = c->transmission_mode;
-		state->fe[index_frontend]->dtv_property_cache.guard_interval = c->guard_interval;
-		state->fe[index_frontend]->dtv_property_cache.modulation = c->modulation;
-		state->fe[index_frontend]->dtv_property_cache.hierarchy = c->hierarchy;
-		state->fe[index_frontend]->dtv_property_cache.code_rate_HP = c->code_rate_HP;
-		state->fe[index_frontend]->dtv_property_cache.code_rate_LP = c->code_rate_LP;
-		state->fe[index_frontend]->dtv_property_cache.rolloff = c->rolloff;
+		state->fe[index_frontend]->dtv_property_cache.inversion = fe->dtv_property_cache.inversion;
+		state->fe[index_frontend]->dtv_property_cache.transmission_mode = fe->dtv_property_cache.transmission_mode;
+		state->fe[index_frontend]->dtv_property_cache.guard_interval = fe->dtv_property_cache.guard_interval;
+		state->fe[index_frontend]->dtv_property_cache.modulation = fe->dtv_property_cache.modulation;
+		state->fe[index_frontend]->dtv_property_cache.hierarchy = fe->dtv_property_cache.hierarchy;
+		state->fe[index_frontend]->dtv_property_cache.code_rate_HP = fe->dtv_property_cache.code_rate_HP;
+		state->fe[index_frontend]->dtv_property_cache.code_rate_LP = fe->dtv_property_cache.code_rate_LP;
+		state->fe[index_frontend]->dtv_property_cache.rolloff = fe->dtv_property_cache.rolloff;
 	}
 	ret = 0;
 
@@ -2084,7 +2078,7 @@ static int dib9000_set_frontend(struct dvb_frontend *fe)
 
 	/* synchronize all the channel cache */
 	state->get_frontend_internal = 1;
-	dib9000_get_frontend(state->fe[0], &state->fe[0]->dtv_property_cache);
+	dib9000_get_frontend(state->fe[0]);
 	state->get_frontend_internal = 0;
 
 	/* retune the other frontends with the found channel */
@@ -2162,7 +2156,7 @@ static u16 dib9000_read_lock(struct dvb_frontend *fe)
 	return dib9000_read_word(state, 535);
 }
 
-static int dib9000_read_status(struct dvb_frontend *fe, enum fe_status *stat)
+static int dib9000_read_status(struct dvb_frontend *fe, fe_status_t * stat)
 {
 	struct dib9000_state *state = fe->demodulator_priv;
 	u8 index_frontend;
@@ -2590,7 +2584,7 @@ static struct dvb_frontend_ops dib9000_ops = {
 	.read_ucblocks = dib9000_read_unc_blocks,
 };
 
-MODULE_AUTHOR("Patrick Boettcher <patrick.boettcher@posteo.de>");
-MODULE_AUTHOR("Olivier Grenie <olivier.grenie@parrot.com>");
+MODULE_AUTHOR("Patrick Boettcher <pboettcher@dibcom.fr>");
+MODULE_AUTHOR("Olivier Grenie <ogrenie@dibcom.fr>");
 MODULE_DESCRIPTION("Driver for the DiBcom 9000 COFDM demodulator");
 MODULE_LICENSE("GPL");

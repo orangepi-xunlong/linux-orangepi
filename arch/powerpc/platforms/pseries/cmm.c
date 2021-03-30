@@ -25,6 +25,7 @@
 #include <linux/errno.h>
 #include <linux/fs.h>
 #include <linux/gfp.h>
+#include <linux/init.h>
 #include <linux/kthread.h>
 #include <linux/module.h>
 #include <linux/oom.h>
@@ -39,7 +40,8 @@
 #include <asm/pgalloc.h>
 #include <asm/uaccess.h>
 #include <linux/memory.h>
-#include <asm/plpar_wrappers.h>
+
+#include "plpar_wrappers.h"
 
 #define CMM_DRIVER_VERSION	"1.0.0"
 #define CMM_DEFAULT_DELAY	1
@@ -555,6 +557,7 @@ static int cmm_mem_going_offline(void *arg)
 				pa_last = pa_last->next;
 				free_page((unsigned long)cmm_page_list);
 				cmm_page_list = pa_last;
+				continue;
 			}
 		}
 		pa_curr = pa_curr->next;
@@ -574,7 +577,7 @@ static int cmm_mem_going_offline(void *arg)
 				cmm_dbg("Failed to allocate memory for list "
 						"management. Memory hotplug "
 						"failed.\n");
-				return -ENOMEM;
+				return ENOMEM;
 			}
 			memcpy(npa, pa_curr, PAGE_SIZE);
 			if (pa_curr == cmm_page_list)
@@ -708,7 +711,7 @@ static void cmm_exit(void)
  * Return value:
  * 	0 on success / other on failure
  **/
-static int cmm_set_disable(const char *val, const struct kernel_param *kp)
+static int cmm_set_disable(const char *val, struct kernel_param *kp)
 {
 	int disable = simple_strtoul(val, NULL, 10);
 

@@ -2,7 +2,7 @@
  * Driver for the ST Microelectronics SPEAr1340 pinmux
  *
  * Copyright (C) 2012 ST Microelectronics
- * Viresh Kumar <vireshk@kernel.org>
+ * Viresh Kumar <viresh.linux@gmail.com>
  *
  * This file is licensed under the terms of the GNU General Public
  * License version 2. This program is licensed "as is" without any
@@ -2008,7 +2008,7 @@ static struct spear_pinctrl_machdata spear1340_machdata = {
 	.modes_supported = false,
 };
 
-static const struct of_device_id spear1340_pinctrl_of_match[] = {
+static struct of_device_id spear1340_pinctrl_of_match[] = {
 	{
 		.compatible = "st,spear1340-pinmux",
 	},
@@ -2020,12 +2020,19 @@ static int spear1340_pinctrl_probe(struct platform_device *pdev)
 	return spear_pinctrl_probe(pdev, &spear1340_machdata);
 }
 
+static int spear1340_pinctrl_remove(struct platform_device *pdev)
+{
+	return spear_pinctrl_remove(pdev);
+}
+
 static struct platform_driver spear1340_pinctrl_driver = {
 	.driver = {
 		.name = DRIVER_NAME,
+		.owner = THIS_MODULE,
 		.of_match_table = spear1340_pinctrl_of_match,
 	},
 	.probe = spear1340_pinctrl_probe,
+	.remove = spear1340_pinctrl_remove,
 };
 
 static int __init spear1340_pinctrl_init(void)
@@ -2040,7 +2047,7 @@ static void __exit spear1340_pinctrl_exit(void)
 }
 module_exit(spear1340_pinctrl_exit);
 
-MODULE_AUTHOR("Viresh Kumar <vireshk@kernel.org>");
+MODULE_AUTHOR("Viresh Kumar <viresh.linux@gmail.com>");
 MODULE_DESCRIPTION("ST Microelectronics SPEAr1340 pinctrl driver");
 MODULE_LICENSE("GPL v2");
 MODULE_DEVICE_TABLE(of, spear1340_pinctrl_of_match);

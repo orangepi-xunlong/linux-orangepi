@@ -95,8 +95,10 @@ static int sd_start(struct gspca_dev *gspca_dev)
 #define SD_NPKT 32
 	for (n = 0; n < 4; n++) {
 		urb = usb_alloc_urb(SD_NPKT, GFP_KERNEL);
-		if (!urb)
+		if (!urb) {
+			pr_err("usb_alloc_urb failed\n");
 			return -ENOMEM;
+		}
 		gspca_dev->urb[n] = urb;
 		urb->transfer_buffer = usb_alloc_coherent(gspca_dev->dev,
 						SD_PKT_SZ * SD_NPKT,
@@ -234,8 +236,8 @@ static void sd_isoc_irq(struct urb *urb)
 		}
 		data = (u8 *) urb->transfer_buffer
 					+ urb->iso_frame_desc[i].offset;
-		gspca_frame_add(gspca_dev, INTER_PACKET,
-				data, SD_PKT_SZ);
+			gspca_frame_add(gspca_dev, INTER_PACKET,
+					data, SD_PKT_SZ);
 	}
 
 	/* resubmit the URBs */

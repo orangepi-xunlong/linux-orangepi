@@ -25,7 +25,6 @@
 
 #include "vnic_dev.h"
 #include "vnic_intr.h"
-#include "enic.h"
 
 void vnic_intr_free(struct vnic_intr *intr)
 {
@@ -40,8 +39,7 @@ int vnic_intr_alloc(struct vnic_dev *vdev, struct vnic_intr *intr,
 
 	intr->ctrl = vnic_dev_get_res(vdev, RES_TYPE_INTR_CTRL, index);
 	if (!intr->ctrl) {
-		vdev_err(vdev, "Failed to hook INTR[%d].ctrl resource\n",
-			 index);
+		pr_err("Failed to hook INTR[%d].ctrl resource\n", index);
 		return -EINVAL;
 	}
 

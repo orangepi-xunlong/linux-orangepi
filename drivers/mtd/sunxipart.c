@@ -52,8 +52,10 @@ struct sunxi_mbr {
 	unsigned  char		res[MBR_RESERVED];
 } __packed;
 
-/* save partition's name */
-static char partition_name[MBR_MAX_PART_COUNT][16];
+struct sunxi_partition_name {
+	char name[16];
+};
+static struct sunxi_partition_name part_name[15];
 
 static void sunxipart_add_part(struct mtd_partition *part, char *name,
 				uint64_t size, uint64_t offset)
@@ -64,7 +66,7 @@ static void sunxipart_add_part(struct mtd_partition *part, char *name,
 }
 
 static int sunxipart_parse(struct mtd_info *master,
-				const struct mtd_partition **pparts,
+				struct mtd_partition **pparts,
 				struct mtd_part_parser_data *data)
 {
 	int i, ret, nrparts;
@@ -101,15 +103,11 @@ static int sunxipart_parse(struct mtd_info *master,
 		return -ENOMEM;
 	}
 
-	strncpy(partition_name[0], "uboot", 16);
-	sunxipart_add_part(&parts[0], partition_name[0],
-					MBR_OFFSET + MBR_SIZE, 0);
+	sunxipart_add_part(&parts[0], "uboot", MBR_OFFSET + MBR_SIZE, 0);
 	for (i = 0; i < nrparts; i++) {
-		strncpy(partition_name[i+1],
-			sunxi_mbr->array[i].name, 16);
-
+		memcpy(part_name[i].name, sunxi_mbr->array[i].name, strlen(sunxi_mbr->array[i].name));
 		sunxipart_add_part(&parts[i+1],
-			partition_name[i+1],
+			part_name[i].name,
 			sunxi_mbr->array[i].lenlo * NOR_BLK_SIZE,
 			sunxi_mbr->array[i].addrlo * NOR_BLK_SIZE + MBR_OFFSET);
 	}
@@ -127,9 +125,7 @@ static struct mtd_part_parser sunxipart_mtd_parser = {
 
 static int __init sunxipart_init(void)
 {
-	register_mtd_parser(&sunxipart_mtd_parser);
-
-	return 0;
+	return register_mtd_parser(&sunxipart_mtd_parser);
 }
 
 static void __exit sunxipart_exit(void)

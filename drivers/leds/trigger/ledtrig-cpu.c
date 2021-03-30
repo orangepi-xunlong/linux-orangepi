@@ -19,13 +19,13 @@
  *
  */
 
+#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/percpu.h>
 #include <linux/syscore_ops.h>
 #include <linux/rwsem.h>
-#include <linux/cpu.h>
 #include "../leds.h"
 
 #define MAX_NAME_LEN	8
@@ -46,7 +46,7 @@ static DEFINE_PER_CPU(struct led_trigger_cpu, cpu_trig);
  */
 void ledtrig_cpu(enum cpu_led_event ledevt)
 {
-	struct led_trigger_cpu *trig = this_cpu_ptr(&cpu_trig);
+	struct led_trigger_cpu *trig = &__get_cpu_var(cpu_trig);
 
 	/* Locate the correct CPU LED */
 	switch (ledevt) {
@@ -92,22 +92,9 @@ static struct syscore_ops ledtrig_cpu_syscore_ops = {
 	.resume		= ledtrig_cpu_syscore_resume,
 };
 
-static int ledtrig_online_cpu(unsigned int cpu)
-{
-	ledtrig_cpu(CPU_LED_START);
-	return 0;
-}
-
-static int ledtrig_prepare_down_cpu(unsigned int cpu)
-{
-	ledtrig_cpu(CPU_LED_STOP);
-	return 0;
-}
-
 static int __init ledtrig_cpu_init(void)
 {
 	int cpu;
-	int ret;
 
 	/* Supports up to 9999 cpu cores */
 	BUILD_BUG_ON(CONFIG_NR_CPUS > 9999);
@@ -127,14 +114,29 @@ static int __init ledtrig_cpu_init(void)
 
 	register_syscore_ops(&ledtrig_cpu_syscore_ops);
 
-	ret = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "AP_LEDTRIG_STARTING",
-				ledtrig_online_cpu, ledtrig_prepare_down_cpu);
-	if (ret < 0)
-		pr_err("CPU hotplug notifier for ledtrig-cpu could not be registered: %d\n",
-		       ret);
-
 	pr_info("ledtrig-cpu: registered to indicate activity on CPUs\n");
 
 	return 0;
 }
-device_initcall(ledtrig_cpu_init);
+module_init(ledtrig_cpu_init);
+
+static void __exit ledtrig_cpu_exit(void)
+{
+	int cpu;
+
+	for_each_possible_cpu(cpu) {
+		struct led_trigger_cpu *trig = &per_cpu(cpu_trig, cpu);
+
+		led_trigger_unregister_simple(trig->_trig);
+		trig->_trig = NULL;
+		memset(trig->name, 0, MAX_NAME_LEN);
+	}
+
+	unregister_syscore_ops(&ledtrig_cpu_syscore_ops);
+}
+module_exit(ledtrig_cpu_exit);
+
+MODULE_AUTHOR("Linus Walleij <linus.walleij@linaro.org>");
+MODULE_AUTHOR("Bryan Wu <bryan.wu@canonical.com>");
+MODULE_DESCRIPTION("CPU LED trigger");
+MODULE_LICENSE("GPL");

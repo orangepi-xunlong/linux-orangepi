@@ -1,4 +1,4 @@
-/**
+/*
  * drivers/usb/host/ehci_sunxi.c
  * (C) Copyright 2010-2015
  * Allwinner Technology Co., Ltd. <www.allwinnertech.com>
@@ -18,32 +18,40 @@
 #include <linux/platform_device.h>
 #include <linux/time.h>
 #include <linux/timer.h>
+
 #include <linux/clk.h>
+
+#ifdef CONFIG_PM
+#include <linux/arisc/arisc.h>
+#include <linux/power/aw_pm.h>
+#include <linux/power/scenelock.h>
+static struct scene_lock  ehci_standby_lock[4];
+#endif
 
 #include "sunxi_hci.h"
 
 #define  SUNXI_EHCI_NAME	"sunxi-ehci"
 static const char ehci_name[] = SUNXI_EHCI_NAME;
 
-#if IS_ENABLED(CONFIG_USB_SUNXI_EHCI0)
+#ifdef CONFIG_USB_SUNXI_EHCI0
 #define  SUNXI_EHCI0_OF_MATCH	"allwinner,sunxi-ehci0"
 #else
 #define  SUNXI_EHCI0_OF_MATCH   "null"
 #endif
 
-#if IS_ENABLED(CONFIG_USB_SUNXI_EHCI1)
+#ifdef CONFIG_USB_SUNXI_EHCI1
 #define  SUNXI_EHCI1_OF_MATCH	"allwinner,sunxi-ehci1"
 #else
 #define  SUNXI_EHCI1_OF_MATCH   "null"
 #endif
 
-#if IS_ENABLED(CONFIG_USB_SUNXI_EHCI2)
+#ifdef CONFIG_USB_SUNXI_EHCI2
 #define  SUNXI_EHCI2_OF_MATCH	"allwinner,sunxi-ehci2"
 #else
 #define  SUNXI_EHCI2_OF_MATCH   "null"
 #endif
 
-#if IS_ENABLED(CONFIG_USB_SUNXI_EHCI3)
+#ifdef CONFIG_USB_SUNXI_EHCI3
 #define  SUNXI_EHCI3_OF_MATCH	"allwinner,sunxi-ehci3"
 #else
 #define  SUNXI_EHCI3_OF_MATCH   "null"
@@ -53,67 +61,53 @@ static struct sunxi_hci_hcd *g_sunxi_ehci[4];
 static u32 ehci_first_probe[4] = {1, 1, 1, 1};
 static u32 ehci_enable[4] = {1, 1, 1, 1};
 
-#ifdef CONFIG_PM
-static void sunxi_ehci_resume_work(struct work_struct *work);
-#endif
-
+extern int usb_disabled(void);
 int sunxi_usb_disable_ehci(__u32 usbc_no);
 int sunxi_usb_enable_ehci(__u32 usbc_no);
 
-static void  ehci_set_interrupt_enable(const struct ehci_hcd *ehci,
-		void __iomem *regs, u32 enable)
+static void  ehci_set_interrupt_enable(const struct ehci_hcd *ehci, void __iomem *regs, u32 enable)
 {
 	ehci_writel(ehci, enable & 0x3f, (regs + EHCI_OPR_USBINTR));
 }
 
-static void ehci_disable_periodic_schedule(const struct ehci_hcd *ehci,
-		void __iomem *regs)
+static void ehci_disable_periodic_schedule(const struct ehci_hcd *ehci, void __iomem *regs)
 {
 	u32 reg_val = 0;
-
 	reg_val =  ehci_readl(ehci, (regs + EHCI_OPR_USBCMD));
 	reg_val	&= ~(0x1<<4);
 	ehci_writel(ehci, reg_val, (regs + EHCI_OPR_USBCMD));
 }
 
-static void ehci_disable_async_schedule(const struct ehci_hcd *ehci,
-		void __iomem *regs)
+static void ehci_disable_async_schedule(const struct ehci_hcd *ehci, void __iomem *regs)
 {
 	unsigned int reg_val = 0;
-
 	reg_val =  ehci_readl(ehci, (regs + EHCI_OPR_USBCMD));
 	reg_val &= ~(0x1<<5);
 	ehci_writel(ehci, reg_val, (regs + EHCI_OPR_USBCMD));
 }
 
-static void ehci_set_config_flag(const struct ehci_hcd *ehci,
-		void __iomem *regs)
+static void ehci_set_config_flag(const struct ehci_hcd *ehci, void __iomem *regs)
 {
 	ehci_writel(ehci, 0x1, (regs + EHCI_OPR_CFGFLAG));
 }
 
-static void ehci_test_stop(const struct ehci_hcd *ehci,
-		void __iomem *regs)
+static void ehci_test_stop(const struct ehci_hcd *ehci, void __iomem *regs)
 {
 	unsigned int reg_val = 0;
-
 	reg_val =  ehci_readl(ehci, (regs + EHCI_OPR_USBCMD));
 	reg_val &= (~0x1);
 	ehci_writel(ehci, reg_val, (regs + EHCI_OPR_USBCMD));
 }
 
-static void ehci_test_reset(const struct ehci_hcd *ehci,
-		void __iomem *regs)
+static void ehci_test_reset(const struct ehci_hcd *ehci, void __iomem *regs)
 {
 	u32 reg_val = 0;
-
 	reg_val =  ehci_readl(ehci, (regs + EHCI_OPR_USBCMD));
 	reg_val	|= (0x1<<1);
 	ehci_writel(ehci, reg_val, (regs + EHCI_OPR_USBCMD));
 }
 
-static unsigned int ehci_test_reset_complete(const struct ehci_hcd *ehci,
-		void __iomem *regs)
+static unsigned int ehci_test_reset_complete(const struct ehci_hcd *ehci, void __iomem *regs)
 {
 
 	unsigned int reg_val = 0;
@@ -127,51 +121,42 @@ static unsigned int ehci_test_reset_complete(const struct ehci_hcd *ehci,
 static void ehci_start(const struct ehci_hcd *ehci, void __iomem *regs)
 {
 	unsigned int reg_val = 0;
-
 	reg_val =  ehci_readl(ehci, (regs + EHCI_OPR_USBCMD));
 	reg_val	|= 0x1;
 	ehci_writel(ehci, reg_val, (regs + EHCI_OPR_USBCMD));
 }
 
-static unsigned int ehci_is_halt(const struct ehci_hcd *ehci,
-		void __iomem *regs)
+static unsigned int ehci_is_halt(const struct ehci_hcd *ehci, void __iomem *regs)
 {
-	unsigned int reg_val = 0;
 
+	unsigned int reg_val = 0;
 	reg_val = ehci_readl(ehci, (regs + EHCI_OPR_USBSTS))  >> 12;
 	reg_val &= 0x1;
 	return reg_val;
 }
 
-static void ehci_port_control(const struct ehci_hcd *ehci,
-		void __iomem *regs, u32 port_no, u32 control)
+static void ehci_port_control(const struct ehci_hcd *ehci, void __iomem *regs, u32 port_no, u32 control)
 {
 	ehci_writel(ehci, control, (regs + EHCI_OPR_USBCMD + (port_no<<2)));
 }
 
-static void  ehci_put_port_suspend(const struct ehci_hcd *ehci,
-		void __iomem *regs)
+static void  ehci_put_port_suspend(const struct ehci_hcd *ehci, void __iomem *regs)
 {
 	unsigned int reg_val = 0;
-
 	reg_val =  ehci_readl(ehci, (regs + EHCI_OPR_PORTSC));
 	reg_val	|= (0x01<<7);
 	ehci_writel(ehci, reg_val, (regs + EHCI_OPR_PORTSC));
 }
-
-static void ehci_test_mode(const struct ehci_hcd *ehci,
-		void __iomem *regs, u32 test_mode)
+static void ehci_test_mode(const struct ehci_hcd *ehci, void __iomem *regs, u32 test_mode)
 {
 	unsigned int reg_val = 0;
-
 	reg_val =  ehci_readl(ehci, (regs + EHCI_OPR_PORTSC));
 	reg_val &= ~(0x0f<<16);
 	reg_val |= test_mode;
 	ehci_writel(ehci, reg_val, (regs + EHCI_OPR_PORTSC));
 }
 
-static void __ehci_ed_test(const struct ehci_hcd *ehci,
-		void __iomem *regs, __u32 test_mode)
+static void __ehci_ed_test(const struct ehci_hcd *ehci, void __iomem *regs, __u32 test_mode)
 {
 	ehci_set_interrupt_enable(ehci, regs, 0x00);
 	ehci_disable_periodic_schedule(ehci, regs);
@@ -181,46 +166,39 @@ static void __ehci_ed_test(const struct ehci_hcd *ehci,
 
 	ehci_test_stop(ehci, regs);
 	ehci_test_reset(ehci, regs);
+	while(!ehci_test_reset_complete(ehci, regs));  //Wait until EHCI reset complete
 
-	/* Wait until EHCI reset complete. */
-	while (!ehci_test_reset_complete(ehci, regs))
-		;
-
-	if (!ehci_is_halt(ehci, regs))
+	if(!ehci_is_halt(ehci, regs))
+	{
 		DMSG_ERR("%s_%d\n", __func__, __LINE__);
+	}
 
 	ehci_start(ehci, regs);
-	/* Wait until EHCI to be not halt. */
-	while (ehci_is_halt(ehci, regs))
-		;
+	while(ehci_is_halt(ehci, regs));  //Wait until EHCI to be not halt
 
-	/* Ehci start, config to test. */
+	/*Ehci Start, Config to Test*/
 	ehci_set_config_flag(ehci, regs);
 	ehci_port_control(ehci, regs, 0, EHCI_PORTSC_POWER);
 
 	ehci_disable_periodic_schedule(ehci, regs);
 	ehci_disable_async_schedule(ehci, regs);
 
-	/* Put port suspend. */
+	//Put Port Suspend
 	ehci_put_port_suspend(ehci, regs);
 
 	ehci_test_stop(ehci, regs);
 
-	while ((!ehci_is_halt(ehci, regs)))
-		;
+	while((!ehci_is_halt(ehci, regs)));
 
-	/* Test pack. */
+	//Test Pack
 	DMSG_INFO("Start Host Test,mode:0x%x!\n", test_mode);
 	ehci_test_mode(ehci, regs, test_mode);
 	DMSG_INFO("End Host Test,mode:0x%x!\n", test_mode);
 }
 
-static ssize_t show_ed_test(struct device *dev,
-		struct device_attribute *attr, char *buf)
+static ssize_t show_ed_test(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "USB2.0 host test mode:\n"
-				"echo:\ntest_j_state\ntest_k_state\ntest_se0_nak\n"
-				"test_pack\ntest_force_enable\ntest_mask\n\n");
+	return 0;
 }
 
 static ssize_t ehci_ed_test(struct device *dev, struct device_attribute *attr,
@@ -230,19 +208,19 @@ static ssize_t ehci_ed_test(struct device *dev, struct device_attribute *attr,
 	struct usb_hcd *hcd = NULL;
 	struct ehci_hcd *ehci = NULL;
 
-	if (dev == NULL) {
+	if(dev == NULL){
 		DMSG_PANIC("ERR: Argment is invalid\n");
 		return 0;
 	}
 
 	hcd = dev_get_drvdata(dev);
-	if (hcd == NULL) {
+	if(hcd == NULL){
 		DMSG_PANIC("ERR: hcd is null\n");
 		return 0;
 	}
 
 	ehci = hcd_to_ehci(hcd);
-	if (ehci == NULL) {
+	if(ehci == NULL){
 		DMSG_PANIC("ERR: ehci is null\n");
 		return 0;
 	}
@@ -251,100 +229,83 @@ static ssize_t ehci_ed_test(struct device *dev, struct device_attribute *attr,
 
 	DMSG_INFO("ehci_ed_test:%s\n", buf);
 
-	if (!strncmp(buf, "test_not_operating", 18)) {
+	if(!strncmp(buf, "test_not_operating", 18)){
 		test_mode = EHCI_PORTSC_PTC_DIS;
 		DMSG_INFO("test_mode:0x%x\n", test_mode);
-	} else if (!strncmp(buf, "test_j_state", 12)) {
+	}else if(!strncmp(buf, "test_j_state", 12)){
 		test_mode = EHCI_PORTSC_PTC_J;
 		DMSG_INFO("test_mode:0x%x\n", test_mode);
-	} else if (!strncmp(buf, "test_k_state", 12)) {
+	}else if(!strncmp(buf, "test_k_state", 12)){
 		test_mode = EHCI_PORTSC_PTC_K;
 		DMSG_INFO("test_mode:0x%x\n", test_mode);
-	} else if (!strncmp(buf, "test_se0_nak", 12)) {
+	}else if(!strncmp(buf, "test_se0_nak", 12)){
 		test_mode = EHCI_PORTSC_PTC_SE0NAK;
 		DMSG_INFO("test_mode:0x%x\n", test_mode);
-	} else if (!strncmp(buf, "test_pack", 9)) {
+	}else if(!strncmp(buf, "test_pack", 9)){
 		test_mode = EHCI_PORTSC_PTC_PACKET;
 		DMSG_INFO("test_mode:0x%x\n", test_mode);
-	} else if (!strncmp(buf, "test_force_enable", 17)) {
+	}else if(!strncmp(buf, "test_force_enable", 17)){
 		test_mode = EHCI_PORTSC_PTC_FORCE;
 		DMSG_INFO("test_mode:0x%x\n", test_mode);
-	} else if (!strncmp(buf, "test_mask", 9)) {
+	}else if(!strncmp(buf, "test_mask", 9)){
 		test_mode = EHCI_PORTSC_PTC_MASK;
 		DMSG_INFO("test_mode:0x%x\n", test_mode);
-	} else {
+	}else {
 		DMSG_PANIC("ERR: test_mode Argment is invalid\n");
 		mutex_unlock(&dev->mutex);
 		return count;
 	}
 
-	DMSG_INFO("regs: 0x%p\n", hcd->regs);
+	DMSG_INFO("regs: 0x%p\n",hcd->regs);
 	__ehci_ed_test(ehci, hcd->regs, test_mode);
 
 	mutex_unlock(&dev->mutex);
 
 	return count;
 }
-
 static DEVICE_ATTR(ed_test, 0644, show_ed_test, ehci_ed_test);
 
-static ssize_t show_phy_threshold(struct device *dev,
-		struct device_attribute *attr, char *buf)
+static ssize_t show_phy_threshold(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct sunxi_hci_hcd *sunxi_ehci = NULL;
-
 	sunxi_ehci = dev->platform_data;
 
-	return sprintf(buf, "threshold:0x%x\n",
-			usb_phyx_tp_read(sunxi_ehci, 0x2a, 2));
+	return sprintf(buf, "threshold:0x%x\n", usb_phyx_tp_read(sunxi_ehci, 0x2a, 2));
 }
 
-static ssize_t ehci_phy_threshold(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
+static ssize_t ehci_phy_threshold(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
 {
 	struct sunxi_hci_hcd *sunxi_ehci = NULL;
 	int val = 0;
-	int err;
 
-	err = kstrtoint(buf, 16, &val);
-	if (err != 0)
-		return -EINVAL;
+	sscanf(buf, "%x", &val);
 
-	if (dev == NULL) {
+	if(dev == NULL){
 		DMSG_PANIC("ERR: Argment is invalid\n");
 		return 0;
 	}
 	sunxi_ehci = dev->platform_data;
 
-	if ((val >= 0) && (val <= 0x3)) {
+	if((0 <= val) && (val <= 0x3)){
 		usb_phyx_tp_write(sunxi_ehci, 0x2a, val, 2);
-	} else {
-		DMSG_PANIC("adjust disconnect threshold 0x%x is fail, value:0x0~0x3\n", val);
+	}else{
+		printk("adjust disconnect threshold 0x%x is fail, value:0x0~0x3\n", val);
 		return count;
 	}
 
-	DMSG_INFO("adjust succeed: threshold val:0x%x, no:%x\n",
-			usb_phyx_tp_read(sunxi_ehci, 0x2a, 2),
-			sunxi_ehci->usbc_no);
+	printk("adjust succeed: threshold val:0x%x, no:%x\n", usb_phyx_tp_read(sunxi_ehci, 0x2a, 2), sunxi_ehci->usbc_no);
 
 	return count;
 }
-
 static DEVICE_ATTR(phy_threshold, 0644, show_phy_threshold, ehci_phy_threshold);
 
-static ssize_t show_phy_range(struct device *dev,
-		struct device_attribute *attr, char *buf)
+static ssize_t show_phy_range(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct sunxi_hci_hcd *sunxi_ehci = NULL;
-
 	sunxi_ehci = dev->platform_data;
-#if defined(CONFIG_ARCH_SUN8IW17) | defined(CONFIG_ARCH_SUN8IW11)
-	return sprintf(buf, "rate:0x%x\n",
-		usb_phyx_tp_read(sunxi_ehci, 0x20, 5));
-#else
-	return sprintf(buf, "rate:0x%x\n",
-		usb_phyx_read(sunxi_ehci));
-#endif
+
+	return sprintf(buf, "rate:0x%x\n", usb_phyx_tp_read(sunxi_ehci, 0x20, 5));
 }
 
 static ssize_t ehci_phy_range(struct device *dev, struct device_attribute *attr,
@@ -352,114 +313,92 @@ static ssize_t ehci_phy_range(struct device *dev, struct device_attribute *attr,
 {
 	struct sunxi_hci_hcd *sunxi_ehci = NULL;
 	int val = 0;
-	int err;
 
-	if (dev == NULL) {
+	if(dev == NULL){
 		DMSG_PANIC("ERR: Argment is invalid\n");
 		return 0;
 	}
 
-	err = kstrtoint(buf, 16, &val);
-	if (err != 0)
-		return -EINVAL;
+	sscanf(buf, "%x", &val);
 
 	sunxi_ehci = dev->platform_data;
 
-	DMSG_INFO("adjust PHY's rate and range:0x0~0x1f\n");
+	printk("adjust PHY's rate and range:0x0~0x1f\n");
 
-#if defined(CONFIG_ARCH_SUN8IW17) || defined(CONFIG_ARCH_SUN8IW11)
-	DMSG_INFO("adjust PHY's rate and range:0x0~0x1f\n");
-	if ((val >= 0) && (val <= 0x1f)) {
+	if((0 <= val) && (val <= 0x1f)){
 		usb_phyx_tp_write(sunxi_ehci, 0x20, val, 5);
-	} else {
-		DMSG_PANIC("adjust PHY's rate and range 0x%x is fail, value:0x0~0x1f\n", val);
+	}else{
+		printk("adjust PHY's rate and range 0x%x is fail, value:0x0~0x1f\n" ,val);
 		return count;
 	}
 
-	DMSG_INFO("adjust succeed:,rate val:0x%x, no:%d\n",
-			usb_phyx_tp_read(sunxi_ehci, 0x20, 5),
-			sunxi_ehci->usbc_no);
-#else
-	DMSG_INFO("adjust PHY's rate and range:0x0~0x3ff\n");
-	if ((val >= 0x0) && (val <= 0x3ff)) {
-		usb_phyx_write(sunxi_ehci, val);
-	} else {
-		DMSG_PANIC("adjust PHY's paraments 0x%x is fail! value:0x0~0x3ff\n", val);
-		return count;
-	}
-
-	DMSG_INFO("adjust succeed:,PHY's paraments :0x%x, no:%d\n",
-		usb_phyx_read(sunxi_ehci), sunxi_ehci->usbc_no);
-#endif
+	printk("adjust succeed:,rate val:0x%x, no:%d\n", usb_phyx_tp_read(sunxi_ehci, 0x20, 5), sunxi_ehci->usbc_no);
 
 	return count;
 }
-
 static DEVICE_ATTR(phy_range, 0644, show_phy_range, ehci_phy_range);
-
-static ssize_t ehci_enable_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
+static ssize_t ehci_enable_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct sunxi_hci_hcd *sunxi_ehci = NULL;
 
-	if (dev == NULL) {
+	if(dev == NULL){
 		DMSG_PANIC("ERR: Argment is invalid\n");
 		return 0;
 	}
 
 	sunxi_ehci = dev->platform_data;
-	if (sunxi_ehci == NULL) {
+	if(sunxi_ehci == NULL){
 		DMSG_PANIC("ERR: sw_ehci is null\n");
 		return 0;
 	}
 
-	return sprintf(buf, "ehci:%d, probe:%u\n",
-			sunxi_ehci->usbc_no, sunxi_ehci->probe);
+	return sprintf(buf, "ehci:%d, probe:%u\n", sunxi_ehci->usbc_no, sunxi_ehci->probe);
 }
 
-static ssize_t ehci_enable_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
+static ssize_t ehci_enable_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
 {
 	struct sunxi_hci_hcd *sunxi_ehci = NULL;
 	int value = 0;
-	int err;
 
-	if (dev == NULL) {
+	if(dev == NULL){
 		DMSG_PANIC("ERR: Argment is invalid\n");
 		return 0;
 	}
 
 	sunxi_ehci = dev->platform_data;
-	if (sunxi_ehci == NULL) {
+	if(sunxi_ehci == NULL){
 		DMSG_PANIC("ERR: sw_ehci is null\n");
 		return 0;
 	}
 
+	sunxi_ehci->host_init_state = 0;
 	ehci_first_probe[sunxi_ehci->usbc_no] = 0;
 
-	err = kstrtoint(buf, 10, &value);
-	if (err != 0)
-		return -EINVAL;
-	if (value == 1) {
+	sscanf(buf, "%d", &value);
+	if(value == 1){
 		ehci_enable[sunxi_ehci->usbc_no] = 0;
 		sunxi_ehci->hsic_enable_flag = 1;
 		sunxi_usb_enable_ehci(sunxi_ehci->usbc_no);
 
-		if (sunxi_ehci->usbc_no == HCI0_USBC_NO)
+		if(sunxi_ehci->usbc_no == HCI0_USBC_NO){
 			sunxi_set_host_vbus(sunxi_ehci, 1);
+		}
 
-		if (sunxi_ehci->hsic_ctrl_flag)
+		if(sunxi_ehci->hsic_ctrl_flag){
 			sunxi_set_host_hisc_rdy(sunxi_ehci, 1);
-	} else if (value == 0) {
-		if (sunxi_ehci->hsic_ctrl_flag)
+		}
+	}else if(value == 0){
+		if(sunxi_ehci->hsic_ctrl_flag){
 			sunxi_set_host_hisc_rdy(sunxi_ehci, 0);
+		}
 
 		ehci_enable[sunxi_ehci->usbc_no] = 1;
 		sunxi_usb_disable_ehci(sunxi_ehci->usbc_no);
 		sunxi_ehci->hsic_enable_flag = 0;
 		ehci_enable[sunxi_ehci->usbc_no] = 0;
-	} else {
-		DMSG_INFO("unknown value (%d)\n", value);
+	}else{
+		DMSG_INFO("unkown value (%d)\n", value);
 	}
 
 	return count;
@@ -467,16 +406,11 @@ static ssize_t ehci_enable_store(struct device *dev,
 
 static DEVICE_ATTR(ehci_enable, 0664, ehci_enable_show, ehci_enable_store);
 
-static void sunxi_hcd_board_set_vbus(
-		struct sunxi_hci_hcd *sunxi_ehci, int is_on)
+static void sunxi_hcd_board_set_vbus(struct sunxi_hci_hcd *sunxi_ehci, int is_on)
 {
 	sunxi_ehci->set_power(sunxi_ehci, is_on);
-}
 
-static void sunxi_hcd_board_set_passby(struct sunxi_hci_hcd *sunxi_ehci,
-						int is_on)
-{
-	sunxi_ehci->usb_passby(sunxi_ehci, is_on);
+	return;
 }
 
 static int open_ehci_clock(struct sunxi_hci_hcd *sunxi_ehci)
@@ -492,14 +426,15 @@ static int close_ehci_clock(struct sunxi_hci_hcd *sunxi_ehci)
 static void sunxi_start_ehci(struct sunxi_hci_hcd *sunxi_ehci)
 {
 	open_ehci_clock(sunxi_ehci);
-	sunxi_hcd_board_set_passby(sunxi_ehci, 1);
+	sunxi_ehci->usb_passby(sunxi_ehci, 1);
+	//sunxi_ehci_port_configure(sunxi_ehci, 1);
 	sunxi_hcd_board_set_vbus(sunxi_ehci, 1);
 }
 
 static void sunxi_stop_ehci(struct sunxi_hci_hcd *sunxi_ehci)
 {
 	sunxi_hcd_board_set_vbus(sunxi_ehci, 0);
-	sunxi_hcd_board_set_passby(sunxi_ehci, 0);
+	sunxi_ehci->usb_passby(sunxi_ehci, 0);
 	close_ehci_clock(sunxi_ehci);
 }
 
@@ -518,13 +453,13 @@ static const struct hc_driver sunxi_ehci_hc_driver = {
 	.product_desc			= "SW USB2.0 'Enhanced' Host Controller (EHCI) Driver",
 	.hcd_priv_size			= sizeof(struct ehci_hcd),
 
-	/**
+	/*
 	 * generic hardware linkage
 	 */
 	.irq				=  ehci_irq,
-	.flags				=  HCD_MEMORY | HCD_USB2 | HCD_BH,
+	.flags				=  HCD_MEMORY | HCD_USB2,
 
-	/**
+	/*
 	 * basic lifecycle operations
 	 *
 	 * FIXME -- ehci_init() doesn't do enough here.
@@ -535,7 +470,7 @@ static const struct hc_driver sunxi_ehci_hc_driver = {
 	.stop				= ehci_stop,
 	.shutdown			= ehci_shutdown,
 
-	/**
+	/*
 	 * managing i/o requests and associated device resources
 	 */
 	.urb_enqueue			= ehci_urb_enqueue,
@@ -543,12 +478,12 @@ static const struct hc_driver sunxi_ehci_hc_driver = {
 	.endpoint_disable		= ehci_endpoint_disable,
 	.endpoint_reset			= ehci_endpoint_reset,
 
-	/**
+	/*
 	 * scheduling support
 	 */
 	.get_frame_number		= ehci_get_frame,
 
-	/**
+	/*
 	 * root hub support
 	 */
 	.hub_status_data		= ehci_hub_status_data,
@@ -563,13 +498,13 @@ static const struct hc_driver sunxi_ehci_hc_driver = {
 
 int sunxi_insmod_ehci(struct platform_device *pdev)
 {
-	struct usb_hcd *hcd	= NULL;
+	struct usb_hcd 	*hcd 	= NULL;
 	struct ehci_hcd *ehci	= NULL;
 	struct sunxi_hci_hcd *sunxi_ehci = NULL;
 	int ret = 0;
 
 	sunxi_ehci = pdev->dev.platform_data;
-	if (!sunxi_ehci) {
+	if(!sunxi_ehci){
 		DMSG_PANIC("ERR: sunxi_ehci is null\n");
 		ret = -ENOMEM;
 		goto ERR1;
@@ -579,28 +514,15 @@ int sunxi_insmod_ehci(struct platform_device *pdev)
 	g_sunxi_ehci[sunxi_ehci->usbc_no] = sunxi_ehci;
 
 	DMSG_INFO("[%s%d]: probe, pdev->name: %s, sunxi_ehci: 0x%p, 0x:%p, irq_no:%x\n",
-		ehci_name, sunxi_ehci->usbc_no, pdev->name,
-		sunxi_ehci, sunxi_ehci->usb_vbase, sunxi_ehci->irq_no);
+		ehci_name, sunxi_ehci->usbc_no, pdev->name, sunxi_ehci,sunxi_ehci->usb_vbase, sunxi_ehci->irq_no);
 
 	/* get io resource */
 	sunxi_ehci->ehci_base		= sunxi_ehci->usb_vbase;
 	sunxi_ehci->ehci_reg_length	= SUNXI_USB_EHCI_LEN;
 
-	/* not init ehci, when driver probe */
-	if (sunxi_ehci->usbc_no == HCI0_USBC_NO) {
-		if (sunxi_ehci->port_type != USB_PORT_TYPE_HOST) {
-			if (ehci_first_probe[sunxi_ehci->usbc_no]) {
-				ehci_first_probe[sunxi_ehci->usbc_no] = 0;
-				DMSG_INFO("[%s%d]: Not init ehci0\n",
-					  ehci_name, sunxi_ehci->usbc_no);
-				return 0;
-			}
-		}
-	}
-
 	/* creat a usb_hcd for the ehci controller */
 	hcd = usb_create_hcd(&sunxi_ehci_hc_driver, &pdev->dev, ehci_name);
-	if (!hcd) {
+	if (!hcd){
 		DMSG_PANIC("ERR: usb_create_hcd failed\n");
 		ret = -ENOMEM;
 		goto ERR2;
@@ -616,20 +538,18 @@ int sunxi_insmod_ehci(struct platform_device *pdev)
 
 	ehci = hcd_to_ehci(hcd);
 	ehci->caps = hcd->regs;
-	ehci->regs = hcd->regs +
-			HC_LENGTH(ehci, readl(&ehci->caps->hc_capbase));
+	ehci->regs = hcd->regs + HC_LENGTH(ehci, readl(&ehci->caps->hc_capbase));
 
 	/* cache this readonly data, minimize chip reads */
 	ehci->hcs_params = readl(&ehci->caps->hcs_params);
 
-	ret = usb_add_hcd(hcd, sunxi_ehci->irq_no, IRQF_SHARED);
+	ret = usb_add_hcd(hcd, sunxi_ehci->irq_no, IRQF_DISABLED | IRQF_SHARED);
 	if (ret != 0) {
 		DMSG_PANIC("ERR: usb_add_hcd failed\n");
 		ret = -ENOMEM;
 		goto ERR3;
 	}
 
-	device_wakeup_enable(hcd->self.controller);
 	platform_set_drvdata(pdev, hcd);
 
 	device_create_file(&pdev->dev, &dev_attr_ed_test);
@@ -641,12 +561,18 @@ int sunxi_insmod_ehci(struct platform_device *pdev)
 #endif
 
 	sunxi_ehci->probe = 1;
-
 #ifdef CONFIG_PM
-	if (!sunxi_ehci->wakeup_suspend)
-		INIT_WORK(&sunxi_ehci->resume_work, sunxi_ehci_resume_work);
+	if(sunxi_ehci->wakeup_suspend){
+		scene_lock_init(&ehci_standby_lock[sunxi_ehci->usbc_no], SCENE_USB_STANDBY,  "ehci_standby");
+	}
 #endif
-
+	/* Disable ehci, when driver probe */
+	if(sunxi_ehci->host_init_state == 0){
+		if(ehci_first_probe[sunxi_ehci->usbc_no]){
+			sunxi_usb_disable_ehci(sunxi_ehci->usbc_no);
+			ehci_first_probe[sunxi_ehci->usbc_no] = 0;
+		}
+	}
 
 	return 0;
 
@@ -668,19 +594,19 @@ int sunxi_rmmod_ehci(struct platform_device *pdev)
 	struct usb_hcd *hcd = NULL;
 	struct sunxi_hci_hcd *sunxi_ehci = NULL;
 
-	if (pdev == NULL) {
+	if(pdev == NULL){
 		DMSG_PANIC("ERR: Argment is invalid\n");
 		return -1;
 	}
 
 	hcd = platform_get_drvdata(pdev);
-	if (hcd == NULL) {
+	if(hcd == NULL){
 		DMSG_PANIC("ERR: hcd is null\n");
 		return -1;
 	}
 
 	sunxi_ehci = pdev->dev.platform_data;
-	if (sunxi_ehci == NULL) {
+	if(sunxi_ehci == NULL){
 		DMSG_PANIC("ERR: sunxi_ehci is null\n");
 		return -1;
 	}
@@ -691,6 +617,11 @@ int sunxi_rmmod_ehci(struct platform_device *pdev)
 	device_remove_file(&pdev->dev, &dev_attr_ed_test);
 	device_remove_file(&pdev->dev, &dev_attr_phy_threshold);
 	device_remove_file(&pdev->dev, &dev_attr_phy_range);
+#ifdef CONFIG_PM
+	if(sunxi_ehci->wakeup_suspend){
+		scene_lock_destroy(&ehci_standby_lock[sunxi_ehci->usbc_no]);
+	}
+#endif
 	usb_remove_hcd(hcd);
 
 	usb_put_hcd(hcd);
@@ -708,7 +639,7 @@ static int sunxi_ehci_hcd_probe(struct platform_device *pdev)
 	int ret = 0;
 	struct sunxi_hci_hcd *sunxi_ehci = NULL;
 
-	if (pdev == NULL) {
+	if(pdev == NULL){
 		DMSG_PANIC("ERR: %s, Argment is invalid\n", __func__);
 		return -1;
 	}
@@ -720,20 +651,20 @@ static int sunxi_ehci_hcd_probe(struct platform_device *pdev)
 	}
 
 	ret = init_sunxi_hci(pdev, SUNXI_USB_EHCI);
-	if (ret != 0) {
+	if(ret != 0){
 		dev_err(&pdev->dev, "init_sunxi_hci is fail\n");
-		return -1;
+		return 0;
 	}
 
 	sunxi_insmod_ehci(pdev);
 
 	sunxi_ehci = pdev->dev.platform_data;
-	if (sunxi_ehci == NULL) {
+	if(sunxi_ehci == NULL){
 		DMSG_PANIC("ERR: %s, sunxi_ehci is null\n", __func__);
 		return -1;
 	}
 
-	if (ehci_enable[sunxi_ehci->usbc_no]) {
+	if(ehci_enable[sunxi_ehci->usbc_no]){
 		device_create_file(&pdev->dev, &dev_attr_ehci_enable);
 		ehci_enable[sunxi_ehci->usbc_no] = 0;
 	}
@@ -745,70 +676,63 @@ static int sunxi_ehci_hcd_remove(struct platform_device *pdev)
 {
 	struct sunxi_hci_hcd *sunxi_ehci = NULL;
 
-	int ret = 0;
-
-	if (pdev == NULL) {
+	if(pdev == NULL){
 		DMSG_PANIC("ERR: %s, Argment is invalid\n", __func__);
 		return -1;
 	}
 
 	sunxi_ehci = pdev->dev.platform_data;
-	if (sunxi_ehci == NULL) {
+	if(sunxi_ehci == NULL){
 		DMSG_PANIC("ERR: %s, sunxi_ehci is null\n", __func__);
 		return -1;
 	}
 
-	if (ehci_enable[sunxi_ehci->usbc_no] == 0) {
+	if(ehci_enable[sunxi_ehci->usbc_no] == 0){
 		device_remove_file(&pdev->dev, &dev_attr_ehci_enable);
 		ehci_enable[sunxi_ehci->usbc_no] = 1;
 	}
 
-	if (sunxi_ehci->probe == 1) {
-		ret = sunxi_rmmod_ehci(pdev);
-		if (ret == 0)
-			exit_sunxi_hci(sunxi_ehci);
-
-		return ret;
-	} else
-		return 0;
-
+	return sunxi_rmmod_ehci(pdev);
 }
 
-static void sunxi_ehci_hcd_shutdown(struct platform_device *pdev)
+static void sunxi_ehci_hcd_shutdown(struct platform_device* pdev)
 {
 	struct sunxi_hci_hcd *sunxi_ehci = NULL;
 
-	if (pdev == NULL) {
+	if(pdev == NULL){
 		DMSG_PANIC("ERR: %s, Argment is invalid\n", __func__);
 		return;
 	}
 
 	sunxi_ehci = pdev->dev.platform_data;
-	if (sunxi_ehci == NULL) {
+	if(sunxi_ehci == NULL){
 		DMSG_PANIC("ERR: %s, is null\n", __func__);
 		return;
 	}
 
-	if (sunxi_ehci->probe == 0) {
-		DMSG_INFO("%s, %s is disable, need not shutdown\n",
-			 __func__, sunxi_ehci->hci_name);
+	if(sunxi_ehci->probe == 0){
+		DMSG_INFO("%s, %s is disable, need not shutdown\n",  __func__, sunxi_ehci->hci_name);
 		return;
 	}
 
-	pr_debug("[%s]: ehci shutdown start\n", sunxi_ehci->hci_name);
+	DMSG_INFO("[%s]: ehci shutdown start\n", sunxi_ehci->hci_name);
+#ifdef CONFIG_PM
+	if(sunxi_ehci->wakeup_suspend){
+		scene_lock_destroy(&ehci_standby_lock[sunxi_ehci->usbc_no]);
+	}
+#endif
 	usb_hcd_platform_shutdown(pdev);
 
-	/**
-	 * disable usb otg INTUSBE, to solve usb0 device mode
-	 * catch audio udev on reboot system is fail.
-	 */
-	if (sunxi_ehci->usbc_no == 0)
-		if (sunxi_ehci->otg_vbase) {
-			writel(0, (sunxi_ehci->otg_vbase
-						+ SUNXI_USBC_REG_INTUSBE));
-		}
+	/* disable usb otg INTUSBE, To solve usb0 device mode catch audio udev on reboot system is fail*/
+	if(sunxi_ehci->otg_vbase){
+		USBC_Writel(0, (sunxi_ehci->otg_vbase + SUNXI_USBC_REG_INTUSBE));
+	}
 
-	pr_debug("[%s]: ehci shutdown end\n", sunxi_ehci->hci_name);
+	sunxi_stop_ehci(sunxi_ehci);
+
+	DMSG_INFO("[%s]: ehci shutdown end\n", sunxi_ehci->hci_name);
+
+	return ;
 }
 
 #ifdef CONFIG_PM
@@ -820,86 +744,50 @@ static int sunxi_ehci_hcd_suspend(struct device *dev)
 	struct ehci_hcd *ehci = NULL;
 	int val = 0;
 
-	if (dev == NULL) {
+	if(dev == NULL){
 		DMSG_PANIC("ERR: %s, Argment is invalid\n", __func__);
 		return 0;
 	}
 
 	hcd = dev_get_drvdata(dev);
-	if (hcd == NULL) {
+	if(hcd == NULL){
 		DMSG_PANIC("ERR: hcd is null\n");
 		return 0;
 	}
 
 	sunxi_ehci = dev->platform_data;
-	if (sunxi_ehci == NULL) {
+	if(sunxi_ehci == NULL){
 		DMSG_PANIC("ERR: sunxi_ehci is null\n");
 		return 0;
 	}
 
-	if (sunxi_ehci->probe == 0) {
+	if(sunxi_ehci->probe == 0){
 		DMSG_INFO("[%s]: is disable, can not suspend\n",
 			sunxi_ehci->hci_name);
 		return 0;
 	}
 
 	ehci = hcd_to_ehci(hcd);
-	if (ehci == NULL) {
+	if(ehci == NULL){
 		DMSG_PANIC("ERR: ehci is null\n");
 		return 0;
 	}
 
-	if (sunxi_ehci->wakeup_suspend == USB_STANDBY) {
-		DMSG_INFO("[%s]: usb suspend\n", sunxi_ehci->hci_name);
-		val = ehci_readl(ehci, &ehci->regs->intr_enable);
-		val |= (0x7 << 0);
-		ehci_writel(ehci, val, &ehci->regs->intr_enable);
-
-#ifdef SUNXI_USB_STANDBY_LOW_POW_MODE
-		val = ehci_readl(ehci, &ehci->regs->command);
-		val &= ~(0x30);
-		ehci_writel(ehci, val, &ehci->regs->command);
-#ifdef SUNXI_USB_STANDBY_NEW_MODE
-		/*enable RC16M CLK*/
-		sunxi_hci_set_rc_clk(sunxi_ehci, 1);
-		/*enable standby irq*/
-		sunxi_hci_set_standby_irq(sunxi_ehci, 1);
-#endif
-		/*remote enable*/
-		sunxi_hci_set_wakeup_ctrl(sunxi_ehci, 1);
-		/*clean siddq*/
-		sunxi_hci_set_siddq(sunxi_ehci);
-#endif
-	} else if (sunxi_ehci->wakeup_suspend == NORMAL_STANDBY) {
+	if(sunxi_ehci->wakeup_suspend){
 		DMSG_INFO("[%s]: not suspend\n", sunxi_ehci->hci_name);
+		enable_wakeup_src(CPUS_USBMOUSE_SRC, 0);
+		scene_lock(&ehci_standby_lock[sunxi_ehci->usbc_no]);
 		val = ehci_readl(ehci, &ehci->regs->intr_enable);
 		val |= (0x7 << 0);
 		ehci_writel(ehci, val, &ehci->regs->intr_enable);
-	} else {
-		DMSG_INFO("[%s]: sunxi_ehci_hcd_suspend\n",
-			sunxi_ehci->hci_name);
-		atomic_add(1, &g_sunxi_usb_super_standby);
+	}else{
+		DMSG_INFO("[%s]: sunxi_ehci_hcd_suspend\n", sunxi_ehci->hci_name);
 
 		ehci_suspend(hcd, device_may_wakeup(dev));
 		sunxi_stop_ehci(sunxi_ehci);
-
-		cancel_work_sync(&sunxi_ehci->resume_work);
 	}
 
 	return 0;
-}
-
-static void sunxi_ehci_resume_work(struct work_struct *work)
-{
-	struct sunxi_hci_hcd *sunxi_ehci = NULL;
-
-	sunxi_ehci = container_of(work, struct sunxi_hci_hcd, resume_work);
-
-	/* Waiting hci to resume. */
-	msleep(5000);
-
-	sunxi_hcd_board_set_vbus(sunxi_ehci, 1);
-	atomic_sub(1, &g_sunxi_usb_super_standby);
 }
 
 static int sunxi_ehci_hcd_resume(struct device *dev)
@@ -907,72 +795,49 @@ static int sunxi_ehci_hcd_resume(struct device *dev)
 	struct sunxi_hci_hcd *sunxi_ehci = NULL;
 	struct usb_hcd *hcd = NULL;
 	struct ehci_hcd *ehci = NULL;
-#ifdef SUNXI_USB_STANDBY_LOW_POW_MODE
-	int val = 0;
-#endif
 
-	if (dev == NULL) {
+	if(dev == NULL){
 		DMSG_PANIC("ERR: Argment is invalid\n");
 		return 0;
 	}
 
 	hcd = dev_get_drvdata(dev);
-	if (hcd == NULL) {
+	if(hcd == NULL){
 		DMSG_PANIC("ERR: hcd is null\n");
 		return 0;
 	}
 
 	sunxi_ehci = dev->platform_data;
-	if (sunxi_ehci == NULL) {
+	if(sunxi_ehci == NULL){
 		DMSG_PANIC("ERR: sunxi_ehci is null\n");
 		return 0;
 	}
 
-	if (sunxi_ehci->probe == 0) {
+	if(sunxi_ehci->probe == 0){
 		DMSG_INFO("[%s]: is disable, can not resume\n",
 			sunxi_ehci->hci_name);
 		return 0;
 	}
 
 	ehci = hcd_to_ehci(hcd);
-	if (ehci == NULL) {
+	if(ehci == NULL){
 		DMSG_PANIC("ERR: ehci is null\n");
 		return 0;
 	}
 
-	if (sunxi_ehci->wakeup_suspend == USB_STANDBY) {
-		DMSG_INFO("[%s]: controller not suspend, need not resume\n",
-			sunxi_ehci->hci_name);
+	if(sunxi_ehci->wakeup_suspend){
+		DMSG_INFO("[%s]: controller not suspend, need not resume\n", sunxi_ehci->hci_name);
 
-#ifdef SUNXI_USB_STANDBY_LOW_POW_MODE
-#ifdef SUNXI_USB_STANDBY_NEW_MODE
-		/*clear standby irq status*/
-		sunxi_hci_clean_standby_irq(sunxi_ehci);
-		/*disable standby irq */
-		sunxi_hci_set_standby_irq(sunxi_ehci, 0);
-		/*remote disable*/
-		sunxi_hci_set_wakeup_ctrl(sunxi_ehci, 0);
-		/*disable rc clk*/
-		sunxi_hci_set_rc_clk(sunxi_ehci, 0);
+		scene_unlock(&ehci_standby_lock[sunxi_ehci->usbc_no]);
+		disable_wakeup_src(CPUS_USBMOUSE_SRC, 0);
+	}else{
+		DMSG_INFO("[%s]: sunxi_ehci_hcd_resume\n", sunxi_ehci->hci_name);
+#ifdef  SUNXI_USB_FPGA
+		fpga_config_use_hci(sunxi_ehci);
 #endif
+		sunxi_start_ehci(sunxi_ehci);
 
-		val = ehci_readl(ehci, &ehci->regs->command);
-		val |= 0x30;
-		ehci_writel(ehci, val, &ehci->regs->command);
-
-#endif
-	} else if (sunxi_ehci->wakeup_suspend == NORMAL_STANDBY) {
-		DMSG_INFO("[%s]:normal standby controller not suspend, need not resume\n",
-			sunxi_ehci->hci_name);
-	} else {
-		DMSG_INFO("[%s]: sunxi_ehci_hcd_resume\n",
-			sunxi_ehci->hci_name);
-
-		open_ehci_clock(sunxi_ehci);
-		sunxi_hcd_board_set_passby(sunxi_ehci, 1);
 		ehci_resume(hcd, false);
-
-		schedule_work(&sunxi_ehci->resume_work);
 	}
 
 	return 0;
@@ -983,14 +848,13 @@ static const struct dev_pm_ops  aw_ehci_pmops = {
 	.resume		= sunxi_ehci_hcd_resume,
 };
 
-#define SUNXI_EHCI_PMOPS	(&aw_ehci_pmops)
+#define SUNXI_EHCI_PMOPS 	&aw_ehci_pmops
 
 #else
 
-#define SUNXI_EHCI_PMOPS	NULL
+#define SUNXI_EHCI_PMOPS 	NULL
 
 #endif
-
 
 static const struct of_device_id sunxi_ehci_match[] = {
 	{.compatible = SUNXI_EHCI0_OF_MATCH, },
@@ -1001,12 +865,13 @@ static const struct of_device_id sunxi_ehci_match[] = {
 };
 MODULE_DEVICE_TABLE(of, sunxi_ehci_match);
 
-static struct platform_driver sunxi_ehci_hcd_driver = {
+static struct platform_driver sunxi_ehci_hcd_driver ={
 	.probe  = sunxi_ehci_hcd_probe,
 	.remove	= sunxi_ehci_hcd_remove,
 	.shutdown = sunxi_ehci_hcd_shutdown,
 	.driver = {
 			.name	= ehci_name,
+			.owner	= THIS_MODULE,
 			.pm	= SUNXI_EHCI_PMOPS,
 			.of_match_table = sunxi_ehci_match,
 		}
@@ -1017,12 +882,12 @@ int sunxi_usb_disable_ehci(__u32 usbc_no)
 	struct sunxi_hci_hcd *sunxi_ehci = NULL;
 
 	sunxi_ehci = g_sunxi_ehci[usbc_no];
-	if (sunxi_ehci == NULL) {
+	if(sunxi_ehci == NULL){
 		DMSG_PANIC("ERR: sunxi_ehci is null\n");
 		return -1;
 	}
 
-	if (sunxi_ehci->probe == 0) {
+	if(sunxi_ehci->probe == 0){
 		DMSG_PANIC("ERR: sunxi_ehci is disable, can not disable again\n");
 		return -1;
 	}
@@ -1042,12 +907,12 @@ int sunxi_usb_enable_ehci(__u32 usbc_no)
 	struct sunxi_hci_hcd *sunxi_ehci = NULL;
 
 	sunxi_ehci = g_sunxi_ehci[usbc_no];
-	if (sunxi_ehci == NULL) {
+	if(sunxi_ehci == NULL){
 		DMSG_PANIC("ERR: sunxi_ehci is null\n");
 		return -1;
 	}
 
-	if (sunxi_ehci->probe == 1) {
+	if(sunxi_ehci->probe == 1){
 		DMSG_PANIC("ERR: sunxi_ehci is already enable, can not enable again\n");
 		return -1;
 	}

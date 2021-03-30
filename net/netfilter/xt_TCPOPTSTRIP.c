@@ -38,7 +38,7 @@ tcpoptstrip_mangle_packet(struct sk_buff *skb,
 	struct tcphdr *tcph;
 	u_int16_t n, o;
 	u_int8_t *opt;
-	int len, tcp_hdrlen;
+	int len;
 
 	/* This is a fragment, no TCP header is available */
 	if (par->fragoff != 0)
@@ -52,9 +52,7 @@ tcpoptstrip_mangle_packet(struct sk_buff *skb,
 		return NF_DROP;
 
 	tcph = (struct tcphdr *)(skb_network_header(skb) + tcphoff);
-	tcp_hdrlen = tcph->doff * 4;
-
-	if (len < tcp_hdrlen)
+	if (tcph->doff * 4 > len)
 		return NF_DROP;
 
 	opt  = (u_int8_t *)tcph;
@@ -63,10 +61,10 @@ tcpoptstrip_mangle_packet(struct sk_buff *skb,
 	 * Walk through all TCP options - if we find some option to remove,
 	 * set all octets to %TCPOPT_NOP and adjust checksum.
 	 */
-	for (i = sizeof(struct tcphdr); i < tcp_hdrlen - 1; i += optl) {
+	for (i = sizeof(struct tcphdr); i < tcp_hdrlen(skb); i += optl) {
 		optl = optlen(opt, i);
 
-		if (i + optl > tcp_hdrlen)
+		if (i + optl > tcp_hdrlen(skb))
 			break;
 
 		if (!tcpoptstrip_test_bit(info->strip_bmap, opt[i]))
@@ -80,7 +78,7 @@ tcpoptstrip_mangle_packet(struct sk_buff *skb,
 				n <<= 8;
 			}
 			inet_proto_csum_replace2(&tcph->check, skb, htons(o),
-						 htons(n), false);
+						 htons(n), 0);
 		}
 		memset(opt + i, TCPOPT_NOP, optl);
 	}

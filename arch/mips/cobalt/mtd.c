@@ -57,4 +57,5 @@ static int __init cobalt_mtd_init(void)
 
 	return 0;
 }
-device_initcall(cobalt_mtd_init);
+
+module_init(cobalt_mtd_init);

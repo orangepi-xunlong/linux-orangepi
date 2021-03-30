@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Pengutronix, Wolfram Sang <kernel@pengutronix.de>
+ * Copyright (C) 2010 Pengutronix, Wolfram Sang <w.sang@pengutronix.de>
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License version 2 as published by the
@@ -43,6 +43,30 @@ imx35_sdhci_esdhc_imx_data[] __initconst = {
 };
 #endif /* ifdef CONFIG_SOC_IMX35 */
 
+#ifdef CONFIG_SOC_IMX51
+const struct imx_sdhci_esdhc_imx_data
+imx51_sdhci_esdhc_imx_data[] __initconst = {
+#define imx51_sdhci_esdhc_imx_data_entry(_id, _hwid)			\
+	imx_sdhci_esdhc_imx_data_entry(MX51, "sdhci-esdhc-imx51", _id, _hwid)
+	imx51_sdhci_esdhc_imx_data_entry(0, 1),
+	imx51_sdhci_esdhc_imx_data_entry(1, 2),
+	imx51_sdhci_esdhc_imx_data_entry(2, 3),
+	imx51_sdhci_esdhc_imx_data_entry(3, 4),
+};
+#endif /* ifdef CONFIG_SOC_IMX51 */
+
+#ifdef CONFIG_SOC_IMX53
+const struct imx_sdhci_esdhc_imx_data
+imx53_sdhci_esdhc_imx_data[] __initconst = {
+#define imx53_sdhci_esdhc_imx_data_entry(_id, _hwid)			\
+	imx_sdhci_esdhc_imx_data_entry(MX53, "sdhci-esdhc-imx53", _id, _hwid)
+	imx53_sdhci_esdhc_imx_data_entry(0, 1),
+	imx53_sdhci_esdhc_imx_data_entry(1, 2),
+	imx53_sdhci_esdhc_imx_data_entry(2, 3),
+	imx53_sdhci_esdhc_imx_data_entry(3, 4),
+};
+#endif /* ifdef CONFIG_SOC_IMX53 */
+
 static const struct esdhc_platform_data default_esdhc_pdata __initconst = {
 	.wp_type = ESDHC_WP_NONE,
 	.cd_type = ESDHC_CD_NONE,
@@ -71,7 +95,6 @@ struct platform_device *__init imx_add_sdhci_esdhc_imx(
 	if (!pdata)
 		pdata = &default_esdhc_pdata;
 
-	return imx_add_platform_device_dmamask(data->devid, data->id, res,
-			ARRAY_SIZE(res), pdata, sizeof(*pdata),
-			DMA_BIT_MASK(32));
+	return imx_add_platform_device(data->devid, data->id, res,
+			ARRAY_SIZE(res), pdata, sizeof(*pdata));
 }

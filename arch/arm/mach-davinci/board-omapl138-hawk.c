@@ -13,13 +13,11 @@
 #include <linux/init.h>
 #include <linux/console.h>
 #include <linux/gpio.h>
-#include <linux/platform_data/gpio-davinci.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
-#include <mach/common.h>
-#include "cp_intc.h"
+#include <mach/cp_intc.h>
 #include <mach/da8xx.h>
 #include <mach/mux.h>
 
@@ -213,7 +211,7 @@ static int hawk_usb_ocic_notify(da8xx_ocic_handler_t handler)
 		hawk_usb_ocic_handler = handler;
 
 		error = request_irq(irq, omapl138_hawk_usb_ocic_irq,
-					IRQF_TRIGGER_RISING |
+					IRQF_DISABLED | IRQF_TRIGGER_RISING |
 					IRQF_TRIGGER_FALLING,
 					"OHCI over-current indicator", NULL);
 		if (error)
@@ -288,15 +286,15 @@ usb11_setup_oc_fail:
 	gpio_free(DA850_USB1_VBUS_PIN);
 }
 
+static struct davinci_uart_config omapl138_hawk_uart_config __initdata = {
+	.enabled_uarts = 0x7,
+};
+
 static __init void omapl138_hawk_init(void)
 {
 	int ret;
 
-	ret = da850_register_gpio();
-	if (ret)
-		pr_warn("%s: GPIO init failed: %d\n", __func__, ret);
-
-	davinci_serial_init(da8xx_serial_device);
+	davinci_serial_init(&omapl138_hawk_uart_config);
 
 	omapl138_hawk_config_emac();
 

@@ -48,7 +48,7 @@ static unsigned int ixp4xx_mmio_data_xfer(struct ata_device *dev,
 	u16 *buf16 = (u16 *) buf;
 	struct ata_port *ap = dev->link->ap;
 	void __iomem *mmio = ap->ioaddr.data_addr;
-	struct ixp4xx_pata_data *data = dev_get_platdata(ap->host->dev);
+	struct ixp4xx_pata_data *data = ap->host->dev->platform_data;
 
 	/* set the expansion bus in 16bit mode and restore
 	 * 8 bit mode after the transaction.
@@ -143,8 +143,7 @@ static int ixp4xx_pata_probe(struct platform_device *pdev)
 	struct resource *cs0, *cs1;
 	struct ata_host *host;
 	struct ata_port *ap;
-	struct ixp4xx_pata_data *data = dev_get_platdata(&pdev->dev);
-	int ret;
+	struct ixp4xx_pata_data *data = pdev->dev.platform_data;
 
 	cs0 = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	cs1 = platform_get_resource(pdev, IORESOURCE_MEM, 1);
@@ -158,9 +157,7 @@ static int ixp4xx_pata_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	/* acquire resources and fill host */
-	ret = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
-	if (ret)
-		return ret;
+	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
 
 	data->cs0 = devm_ioremap(&pdev->dev, cs0->start, 0x1000);
 	data->cs1 = devm_ioremap(&pdev->dev, cs1->start, 0x1000);
@@ -193,6 +190,7 @@ static int ixp4xx_pata_probe(struct platform_device *pdev)
 static struct platform_driver ixp4xx_pata_platform_driver = {
 	.driver	 = {
 		.name   = DRV_NAME,
+		.owner  = THIS_MODULE,
 	},
 	.probe		= ixp4xx_pata_probe,
 	.remove		= ata_platform_remove_one,

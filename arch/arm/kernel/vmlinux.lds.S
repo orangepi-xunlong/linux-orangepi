@@ -3,34 +3,24 @@
  * Written by Martin Mares <mj@atrey.karlin.mff.cuni.cz>
  */
 
-#ifdef CONFIG_XIP_KERNEL
-#include "vmlinux-xip.lds.S"
-#else
-
 #include <asm-generic/vmlinux.lds.h>
 #include <asm/cache.h>
 #include <asm/thread_info.h>
 #include <asm/memory.h>
 #include <asm/page.h>
-#include <asm/pgtable.h>
-
+	
 #define PROC_INFO							\
 	. = ALIGN(4);							\
 	VMLINUX_SYMBOL(__proc_info_begin) = .;				\
 	*(.proc.info.init)						\
 	VMLINUX_SYMBOL(__proc_info_end) = .;
 
-#define HYPERVISOR_TEXT							\
-	VMLINUX_SYMBOL(__hyp_text_start) = .;				\
-	*(.hyp.text)							\
-	VMLINUX_SYMBOL(__hyp_text_end) = .;
-
 #define IDMAP_TEXT							\
 	ALIGN_FUNCTION();						\
 	VMLINUX_SYMBOL(__idmap_text_start) = .;				\
 	*(.idmap.text)							\
 	VMLINUX_SYMBOL(__idmap_text_end) = .;				\
-	. = ALIGN(PAGE_SIZE);						\
+	. = ALIGN(32);							\
 	VMLINUX_SYMBOL(__hyp_idmap_text_start) = .;			\
 	*(.hyp.idmap.text)						\
 	VMLINUX_SYMBOL(__hyp_idmap_text_end) = .;
@@ -44,7 +34,7 @@
 #endif
 
 #if (defined(CONFIG_SMP_ON_UP) && !defined(CONFIG_DEBUG_SPINLOCK)) || \
-	defined(CONFIG_GENERIC_BUG) || defined(CONFIG_JUMP_LABEL)
+	defined(CONFIG_GENERIC_BUG)
 #define ARM_EXIT_KEEP(x)	x
 #define ARM_EXIT_DISCARD(x)
 #else
@@ -80,8 +70,12 @@ SECTIONS
 		ARM_EXIT_DISCARD(EXIT_TEXT)
 		ARM_EXIT_DISCARD(EXIT_DATA)
 		EXIT_CALL
+#ifndef CONFIG_HOTPLUG
+		*(.ARM.exidx.devexit.text)
+		*(.ARM.extab.devexit.text)
+#endif
 #ifndef CONFIG_MMU
-		*(.text.fixup)
+		*(.fixup)
 		*(__ex_table)
 #endif
 #ifndef CONFIG_SMP_ON_UP
@@ -91,30 +85,29 @@ SECTIONS
 		*(.discard.*)
 	}
 
+#ifdef CONFIG_XIP_KERNEL
+	. = XIP_VIRT_ADDR(CONFIG_XIP_PHYS_ADDR);
+#else
 	. = PAGE_OFFSET + TEXT_OFFSET;
+#endif
 	.head.text : {
 		_text = .;
 		HEAD_TEXT
 	}
-
-#ifdef CONFIG_DEBUG_RODATA
-	. = ALIGN(1<<SECTION_SHIFT);
-#endif
-
 	.text : {			/* Real text segment		*/
 		_stext = .;		/* Text and read-only data	*/
-			IDMAP_TEXT
 			__exception_text_start = .;
 			*(.exception.text)
 			__exception_text_end = .;
 			IRQENTRY_TEXT
-			SOFTIRQENTRY_TEXT
 			TEXT_TEXT
 			SCHED_TEXT
-			CPUIDLE_TEXT
 			LOCK_TEXT
-			HYPERVISOR_TEXT
 			KPROBES_TEXT
+			IDMAP_TEXT
+#ifdef CONFIG_MMU
+			*(.fixup)
+#endif
 			*(.gnu.warning)
 			*(.glue_7)
 			*(.glue_7t)
@@ -122,11 +115,6 @@ SECTIONS
 		*(.got)			/* Global offset table		*/
 			ARM_CPU_KEEP(PROC_INFO)
 	}
-
-#ifdef CONFIG_DEBUG_ALIGN_RODATA
-	. = ALIGN(1<<SECTION_SHIFT);
-#endif
-	_etext = .;			/* End of text section */
 
 	RO_DATA(PAGE_SIZE)
 
@@ -158,32 +146,29 @@ SECTIONS
 
 	NOTES
 
-#ifdef CONFIG_DEBUG_RODATA
-	. = ALIGN(1<<SECTION_SHIFT);
-#else
-	. = ALIGN(PAGE_SIZE);
-#endif
-	__init_begin = .;
+	_etext = .;			/* End of text and rodata section */
 
+#ifndef CONFIG_XIP_KERNEL
+	. = ALIGN(PAGE_SIZE);
+	__init_begin = .;
+#endif
 	/*
 	 * The vectors and stubs are relocatable code, and the
 	 * only thing that matters is their relative offsets
 	 */
 	__vectors_start = .;
-	.vectors 0xffff0000 : AT(__vectors_start) {
+	.vectors 0 : AT(__vectors_start) {
 		*(.vectors)
 	}
 	. = __vectors_start + SIZEOF(.vectors);
 	__vectors_end = .;
 
 	__stubs_start = .;
-	.stubs ADDR(.vectors) + 0x1000 : AT(__stubs_start) {
+	.stubs 0x1000 : AT(__stubs_start) {
 		*(.stubs)
 	}
 	. = __stubs_start + SIZEOF(.stubs);
 	__stubs_end = .;
-
-	PROVIDE(vector_fiq_offset = vector_fiq - ADDR(.vectors));
 
 	INIT_TEXT_SECTION(8)
 	.exit.text : {
@@ -215,28 +200,33 @@ SECTIONS
 		__pv_table_end = .;
 	}
 	.init.data : {
+#ifndef CONFIG_XIP_KERNEL
 		INIT_DATA
+#endif
 		INIT_SETUP(16)
 		INIT_CALLS
 		CON_INITCALL
 		SECURITY_INITCALL
 		INIT_RAM_FS
 	}
+#ifndef CONFIG_XIP_KERNEL
 	.exit.data : {
 		ARM_EXIT_KEEP(EXIT_DATA)
 	}
+#endif
 
 #ifdef CONFIG_SMP
 	PERCPU_SECTION(L1_CACHE_BYTES)
 #endif
 
-#ifdef CONFIG_DEBUG_RODATA
-	. = ALIGN(1<<SECTION_SHIFT);
+#ifdef CONFIG_XIP_KERNEL
+	__data_loc = ALIGN(4);		/* location in binary */
+	. = PAGE_OFFSET + TEXT_OFFSET;
 #else
-	. = ALIGN(THREAD_SIZE);
-#endif
 	__init_end = .;
+	. = ALIGN(THREAD_SIZE);
 	__data_loc = .;
+#endif
 
 	.data : AT(__data_loc) {
 		_data = .;		/* address in memory */
@@ -247,6 +237,15 @@ SECTIONS
 		 * to an 8192 byte boundary.
 		 */
 		INIT_TASK_DATA(THREAD_SIZE)
+
+#ifdef CONFIG_XIP_KERNEL
+		. = ALIGN(PAGE_SIZE);
+		__init_begin = .;
+		INIT_DATA
+		ARM_EXIT_KEEP(EXIT_DATA)
+		. = ALIGN(PAGE_SIZE);
+		__init_end = .;
+#endif
 
 		NOSAVE_DATA
 		CACHELINE_ALIGNED_DATA(L1_CACHE_BYTES)
@@ -323,16 +322,8 @@ SECTIONS
 	_end = .;
 
 	STABS_DEBUG
+	.comment 0 : { *(.comment) }
 }
-
-#ifdef CONFIG_DEBUG_RODATA
-/*
- * Without CONFIG_DEBUG_ALIGN_RODATA, __start_rodata_section_aligned will
- * be the first section-aligned location after __start_rodata. Otherwise,
- * it will be equal to __start_rodata.
- */
-__start_rodata_section_aligned = ALIGN(__start_rodata, 1 << SECTION_SHIFT);
-#endif
 
 /*
  * These must never be empty
@@ -341,13 +332,8 @@ __start_rodata_section_aligned = ALIGN(__start_rodata, 1 << SECTION_SHIFT);
  */
 ASSERT((__proc_info_end - __proc_info_begin), "missing CPU support")
 ASSERT((__arch_info_end - __arch_info_begin), "no machine record defined")
-
 /*
- * The HYP init code can't be more than a page long,
- * and should not cross a page boundary.
+ * The HYP init code can't be more than a page long.
  * The above comment applies as well.
  */
-ASSERT(__hyp_idmap_text_end - (__hyp_idmap_text_start & PAGE_MASK) <= PAGE_SIZE,
-	"HYP init code too big or misaligned")
-
-#endif /* CONFIG_XIP_KERNEL */
+ASSERT(((__hyp_idmap_text_end - __hyp_idmap_text_start) <= PAGE_SIZE), "HYP init code too big")

@@ -28,21 +28,16 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
-#include <linux/sched_clock.h>
+
+#include <asm/sched_clock.h>
+#include <mach/addr-map.h>
+#include <mach/regs-timers.h>
+#include <mach/regs-apbc.h>
+#include <mach/irqs.h>
+#include <mach/cputype.h>
 #include <asm/mach/time.h>
 
-#include "addr-map.h"
-#include "regs-timers.h"
-#include "regs-apbc.h"
-#include "irqs.h"
-#include "cputype.h"
 #include "clock.h"
-
-#ifdef CONFIG_CPU_MMP2
-#define MMP_CLOCK_FREQ		6500000
-#else
-#define MMP_CLOCK_FREQ		3250000
-#endif
 
 #define TIMERS_VIRT_BASE	TIMERS1_VIRT_BASE
 
@@ -66,7 +61,7 @@ static inline uint32_t timer_read(void)
 	return __raw_readl(mmp_timer_base + TMR_CVWR(1));
 }
 
-static u64 notrace mmp_read_sched_clock(void)
+static u32 notrace mmp_read_sched_clock(void)
 {
 	return timer_read();
 }
@@ -123,25 +118,32 @@ static int timer_set_next_event(unsigned long delta,
 	return 0;
 }
 
-static int timer_set_shutdown(struct clock_event_device *evt)
+static void timer_set_mode(enum clock_event_mode mode,
+			   struct clock_event_device *dev)
 {
 	unsigned long flags;
 
 	local_irq_save(flags);
-	/* disable the matching interrupt */
-	__raw_writel(0x00, mmp_timer_base + TMR_IER(0));
+	switch (mode) {
+	case CLOCK_EVT_MODE_ONESHOT:
+	case CLOCK_EVT_MODE_UNUSED:
+	case CLOCK_EVT_MODE_SHUTDOWN:
+		/* disable the matching interrupt */
+		__raw_writel(0x00, mmp_timer_base + TMR_IER(0));
+		break;
+	case CLOCK_EVT_MODE_RESUME:
+	case CLOCK_EVT_MODE_PERIODIC:
+		break;
+	}
 	local_irq_restore(flags);
-
-	return 0;
 }
 
 static struct clock_event_device ckevt = {
-	.name			= "clockevent",
-	.features		= CLOCK_EVT_FEAT_ONESHOT,
-	.rating			= 200,
-	.set_next_event		= timer_set_next_event,
-	.set_state_shutdown	= timer_set_shutdown,
-	.set_state_oneshot	= timer_set_shutdown,
+	.name		= "clockevent",
+	.features	= CLOCK_EVT_FEAT_ONESHOT,
+	.rating		= 200,
+	.set_next_event	= timer_set_next_event,
+	.set_mode	= timer_set_mode,
 };
 
 static cycle_t clksrc_read(struct clocksource *cs)
@@ -184,7 +186,7 @@ static void __init timer_config(void)
 
 static struct irqaction timer_irq = {
 	.name		= "timer",
-	.flags		= IRQF_TIMER | IRQF_IRQPOLL,
+	.flags		= IRQF_DISABLED | IRQF_TIMER | IRQF_IRQPOLL,
 	.handler	= timer_interrupt,
 	.dev_id		= &ckevt,
 };
@@ -193,19 +195,19 @@ void __init timer_init(int irq)
 {
 	timer_config();
 
-	sched_clock_register(mmp_read_sched_clock, 32, MMP_CLOCK_FREQ);
+	setup_sched_clock(mmp_read_sched_clock, 32, CLOCK_TICK_RATE);
 
 	ckevt.cpumask = cpumask_of(0);
 
 	setup_irq(irq, &timer_irq);
 
-	clocksource_register_hz(&cksrc, MMP_CLOCK_FREQ);
-	clockevents_config_and_register(&ckevt, MMP_CLOCK_FREQ,
+	clocksource_register_hz(&cksrc, CLOCK_TICK_RATE);
+	clockevents_config_and_register(&ckevt, CLOCK_TICK_RATE,
 					MIN_DELTA, MAX_DELTA);
 }
 
 #ifdef CONFIG_OF
-static const struct of_device_id mmp_timer_dt_ids[] = {
+static struct of_device_id mmp_timer_dt_ids[] = {
 	{ .compatible = "mrvl,mmp-timer", },
 	{}
 };

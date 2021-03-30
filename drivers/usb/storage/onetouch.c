@@ -30,14 +30,12 @@
 
 #include <linux/kernel.h>
 #include <linux/input.h>
+#include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/usb/input.h>
 #include "usb.h"
 #include "debug.h"
-#include "scsiglue.h"
-
-#define DRV_NAME "ums-onetouch"
 
 MODULE_DESCRIPTION("Maxtor USB OneTouch hard drive button driver");
 MODULE_AUTHOR("Nick Sillik <n.sillik@temple.edu>");
@@ -286,8 +284,6 @@ static void onetouch_release_input(void *onetouch_)
 	}
 }
 
-static struct scsi_host_template onetouch_host_template;
-
 static int onetouch_probe(struct usb_interface *intf,
 			 const struct usb_device_id *id)
 {
@@ -295,8 +291,7 @@ static int onetouch_probe(struct usb_interface *intf,
 	int result;
 
 	result = usb_stor_probe1(&us, intf, id,
-			(id - onetouch_usb_ids) + onetouch_unusual_dev_list,
-			&onetouch_host_template);
+			(id - onetouch_usb_ids) + onetouch_unusual_dev_list);
 	if (result)
 		return result;
 
@@ -307,7 +302,7 @@ static int onetouch_probe(struct usb_interface *intf,
 }
 
 static struct usb_driver onetouch_driver = {
-	.name =		DRV_NAME,
+	.name =		"ums-onetouch",
 	.probe =	onetouch_probe,
 	.disconnect =	usb_stor_disconnect,
 	.suspend =	usb_stor_suspend,
@@ -320,4 +315,4 @@ static struct usb_driver onetouch_driver = {
 	.no_dynamic_id = 1,
 };
 
-module_usb_stor_driver(onetouch_driver, onetouch_host_template, DRV_NAME);
+module_usb_driver(onetouch_driver);

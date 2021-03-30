@@ -11,7 +11,6 @@
 #include <linux/errno.h>
 #include <linux/slab.h>
 #include <linux/init.h>
-#include <linux/of.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/map.h>
 
@@ -28,15 +27,6 @@ static struct mtd_chip_driver maprom_chipdrv = {
 	.name	= "map_rom",
 	.module	= THIS_MODULE
 };
-
-static unsigned int default_erasesize(struct map_info *map)
-{
-	const __be32 *erase_size = NULL;
-
-	erase_size = of_get_property(map->device_node, "erase-size", NULL);
-
-	return !erase_size ? map->size : be32_to_cpu(*erase_size);
-}
 
 static struct mtd_info *map_rom_probe(struct map_info *map)
 {
@@ -57,9 +47,8 @@ static struct mtd_info *map_rom_probe(struct map_info *map)
 	mtd->_sync = maprom_nop;
 	mtd->_erase = maprom_erase;
 	mtd->flags = MTD_CAP_ROM;
-	mtd->erasesize = default_erasesize(map);
+	mtd->erasesize = map->size;
 	mtd->writesize = 1;
-	mtd->writebufsize = 1;
 
 	__module_get(THIS_MODULE);
 	return mtd;

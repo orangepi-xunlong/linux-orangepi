@@ -12,6 +12,7 @@
 #include <linux/percpu.h>
 #include <linux/memblock.h>
 #include <linux/initrd.h>
+#include <linux/of_fdt.h>
 
 #include <asm/setup.h>
 #include <asm/page.h>
@@ -148,7 +149,7 @@ static void __init bootmem_init_one_node(unsigned int nid)
 	if (!p->node_spanned_pages)
 		return;
 
-	end_pfn = pgdat_end_pfn(p);
+	end_pfn = p->node_start_pfn + p->node_spanned_pages;
 #ifdef CONFIG_HIGHMEM
 	if (end_pfn > max_low_pfn)
 		end_pfn = max_low_pfn;
@@ -204,8 +205,7 @@ static void __init do_init_bootmem(void)
 		start_pfn = memblock_region_memory_base_pfn(reg);
 		end_pfn = memblock_region_memory_end_pfn(reg);
 		memblock_set_node(PFN_PHYS(start_pfn),
-				  PFN_PHYS(end_pfn - start_pfn),
-				  &memblock.memory, 0);
+				  PFN_PHYS(end_pfn - start_pfn), 0);
 	}
 
 	/* All of system RAM sits in node 0 for the non-NUMA case */
@@ -376,20 +376,34 @@ void __init paging_init(unsigned long mem_end)
 
 void __init mem_init(void)
 {
+	int nid;
+
 #ifdef CONFIG_HIGHMEM
 	unsigned long tmp;
-
-	/*
-	 * Explicitly reset zone->managed_pages because highmem pages are
-	 * freed before calling free_all_bootmem();
-	 */
-	reset_all_zones_managed_pages();
 	for (tmp = highstart_pfn; tmp < highend_pfn; tmp++)
 		free_highmem_page(pfn_to_page(tmp));
+	num_physpages += totalhigh_pages;
 #endif /* CONFIG_HIGHMEM */
 
-	free_all_bootmem();
-	mem_init_print_info(NULL);
+	for_each_online_node(nid) {
+		pg_data_t *pgdat = NODE_DATA(nid);
+		unsigned long node_pages = 0;
+
+		num_physpages += pgdat->node_present_pages;
+
+		if (pgdat->node_spanned_pages)
+			node_pages = free_all_bootmem_node(pgdat);
+
+		totalram_pages += node_pages;
+	}
+
+	pr_info("Memory: %luk/%luk available\n",
+		(unsigned long)nr_free_pages() << (PAGE_SHIFT - 10),
+		num_physpages << (PAGE_SHIFT - 10));
+
+	show_mem(0);
+
+	return;
 }
 
 void free_initmem(void)
@@ -400,7 +414,14 @@ void free_initmem(void)
 #ifdef CONFIG_BLK_DEV_INITRD
 void free_initrd_mem(unsigned long start, unsigned long end)
 {
-	free_reserved_area((void *)start, (void *)end, POISON_FREE_INITMEM,
-			   "initrd");
+	free_reserved_area(start, end, POISON_FREE_INITMEM, "initrd");
 }
 #endif
+
+#ifdef CONFIG_OF_FLATTREE
+void __init early_init_dt_setup_initrd_arch(u64 start, u64 end)
+{
+	pr_err("%s(%llx, %llx)\n",
+	       __func__, start, end);
+}
+#endif /* CONFIG_OF_FLATTREE */

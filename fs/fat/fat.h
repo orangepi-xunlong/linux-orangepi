@@ -2,8 +2,11 @@
 #define _FAT_H
 
 #include <linux/buffer_head.h>
+#include <linux/string.h>
 #include <linux/nls.h>
+#include <linux/fs.h>
 #include <linux/hash.h>
+#include <linux/mutex.h>
 #include <linux/ratelimit.h>
 #include <linux/msdos_fs.h>
 
@@ -49,8 +52,7 @@ struct fat_mount_options {
 		 usefree:1,	   /* Use free_clusters for FAT32 */
 		 tz_set:1,	   /* Filesystem timestamps' offset set */
 		 rodir:1,	   /* allow ATTR_RO for directory */
-		 discard:1,	   /* Issue discard requests on deletions */
-		 dos1xfloppy:1;	   /* Assume default BPB for DOS 1.x floppies */
+		 discard:1;	   /* Issue discard requests on deletions */
 };
 
 #define FAT_HASH_BITS	8
@@ -63,7 +65,7 @@ struct msdos_sb_info {
 	unsigned short sec_per_clus;  /* sectors/cluster */
 	unsigned short cluster_bits;  /* log2(cluster_size) */
 	unsigned int cluster_size;    /* cluster size */
-	unsigned char fats, fat_bits; /* number of FATs, FAT bits (12,16 or 32) */
+	unsigned char fats, fat_bits; /* number of FATs, FAT bits (12 or 16) */
 	unsigned short fat_start;
 	unsigned long fat_length;     /* FAT start & length (sec.) */
 	unsigned long dir_start;
@@ -84,10 +86,10 @@ struct msdos_sb_info {
 	const void *dir_ops;	      /* Opaque; default directory operations */
 	int dir_per_block;	      /* dir entries per block */
 	int dir_per_block_bits;	      /* log2(dir_per_block) */
-	unsigned int vol_id;		/*volume ID*/
+	unsigned long vol_id;         /* volume ID */
 
 	int fatent_shift;
-	const struct fatent_operations *fatent_ops;
+	struct fatent_operations *fatent_ops;
 	struct inode *fat_inode;
 	struct inode *fsinfo_inode;
 
@@ -100,7 +102,6 @@ struct msdos_sb_info {
 	struct hlist_head dir_hashtable[FAT_HASH_SIZE];
 
 	unsigned int dirty;           /* fs state before mount */
-	struct rcu_head rcu;
 };
 
 #define FAT_CACHE_VALID	0	/* special case for valid cache */
@@ -285,11 +286,8 @@ static inline void fatwchar_to16(__u8 *dst, const wchar_t *src, size_t len)
 extern void fat_cache_inval_inode(struct inode *inode);
 extern int fat_get_cluster(struct inode *inode, int cluster,
 			   int *fclus, int *dclus);
-extern int fat_get_mapped_cluster(struct inode *inode, sector_t sector,
-				  sector_t last_block,
-				  unsigned long *mapped_blocks, sector_t *bmap);
 extern int fat_bmap(struct inode *inode, sector_t sector, sector_t *phys,
-		    unsigned long *mapped_blocks, int create, bool from_bmap);
+		    unsigned long *mapped_blocks, int create);
 
 /* fat/dir.c */
 extern const struct file_operations fat_dir_operations;
@@ -347,11 +345,6 @@ static inline void fatent_brelse(struct fat_entry *fatent)
 	fatent->fat_inode = NULL;
 }
 
-static inline bool fat_valid_entry(struct msdos_sb_info *sbi, int entry)
-{
-	return FAT_START_ENT <= entry && entry < sbi->max_cluster;
-}
-
 extern void fat_ent_access_init(struct super_block *sb);
 extern int fat_ent_read(struct inode *inode, struct fat_entry *fatent,
 			int entry);
@@ -375,7 +368,6 @@ extern int fat_file_fsync(struct file *file, loff_t start, loff_t end,
 			  int datasync);
 
 /* fat/inode.c */
-extern int fat_block_truncate_page(struct inode *inode, loff_t from);
 extern void fat_attach(struct inode *inode, loff_t i_pos);
 extern void fat_detach(struct inode *inode);
 extern struct inode *fat_iget(struct super_block *sb, loff_t i_pos);
@@ -392,7 +384,6 @@ static inline unsigned long fat_dir_hash(int logstart)
 {
 	return hash_32(logstart, FAT_HASH_BITS);
 }
-extern int fat_add_cluster(struct inode *inode);
 
 /* fat/misc.c */
 extern __printf(3, 4) __cold

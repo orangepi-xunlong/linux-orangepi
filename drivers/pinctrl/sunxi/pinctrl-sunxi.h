@@ -25,31 +25,15 @@
 #define PG_BASE	192
 #define PH_BASE	224
 #define PI_BASE	256
-#define PJ_BASE	288
 #define PL_BASE	352
 #define PM_BASE	384
-#define PN_BASE	416
-
-#if defined(CONFIG_ARCH_SUN8IW12P1) \
-	|| defined(CONFIG_ARCH_SUN8IW15P1) \
-	|| defined(CONFIG_ARCH_SUN50IW6P1) \
-	|| defined(CONFIG_ARCH_SUN50IW9P1) \
-	|| defined(CONFIG_ARCH_SUN50IW3P1)
-#define CONFIG_SUNXI_PIO_POWER_MODE
-#define GPIO_POW_MODE_SEL  0x0340
-#define GPIO_POW_MODE_VAL  0x0348
-#define GPIO_POW_MODE_MASK  0xFFF
-#endif
-#if defined(CONFIG_ARCH_SUN8IW16P1) \
-	|| defined(CONFIG_ARCH_SUN8IW19P1) \
-	|| defined(CONFIG_ARCH_SUN50IW9P1)
-#define CONFIG_SUNXI_PIO_POWER_SEL
-#define GPIO_POW_VOL_SEL   0x0350
-#endif
-
 
 #define SUNXI_PINCTRL_PIN(bank, pin)		\
 	PINCTRL_PIN(P ## bank ## _BASE + (pin), "P" #bank #pin)
+
+#ifndef SUNXI_PIN_NAME_MAX_LEN
+#define SUNXI_PIN_NAME_MAX_LEN	5
+#endif
 
 #define BANK_MEM_SIZE		0x24
 #define MUX_REGS_OFFSET		0x0
@@ -88,24 +72,12 @@
 #define IRQ_DEBOUNCE_REG		0x218
 
 #define IRQ_MEM_SIZE		0x20
-#define IRQ_CFG_SIZE		0x10
 
 #define IRQ_EDGE_RISING		0x00
 #define IRQ_EDGE_FALLING	0x01
 #define IRQ_LEVEL_HIGH		0x02
 #define IRQ_LEVEL_LOW		0x03
 #define IRQ_EDGE_BOTH		0x04
-
-#define SUN4I_FUNC_INPUT	0
-#define SUN4I_FUNC_OUTPUT	1
-#define SUN4I_FUNC_IRQ		6
-
-#define SYSCFG_PROP_DEFAULT_VAL 0xFFFFFFFF
-
-#define SUNXI_PINCTRL_NO_PULL	0
-#define SUNXI_PINCTRL_PULL_UP	1
-#define SUNXI_PINCTRL_PULL_DOWN	2
-
 
 struct sunxi_desc_function {
 	const char	*name;
@@ -123,12 +95,7 @@ struct sunxi_pinctrl_desc {
 	const struct sunxi_desc_pin	*pins;
 	int				npins;
 	unsigned			pin_base;
-	unsigned int			banks;
-	const unsigned int		*bank_base;
 	unsigned			irq_banks;
-	const unsigned int		*irq_bank_base;
-	bool				irq_read_needs_mux;
-	bool				disable_strict_mode;
 };
 
 struct sunxi_pinctrl_function {
@@ -155,18 +122,9 @@ struct sunxi_pinctrl {
 	unsigned			ngroups;
 	int				*irq;
 	unsigned			*irq_array;
-	u32				*wake_mask;
-	u32				*cur_mask;
-	raw_spinlock_t			lock;
+	spinlock_t			lock;
 	struct pinctrl_dev		*pctl_dev;
-	u32				*regs_backup;
 };
-
-#define SUNXI_PIO_BANK_BASE(pin, irq_bank) \
-	((pin-PA_BASE)/PINS_PER_BANK - irq_bank)
-
-#define SUNXI_R_PIO_BANK_BASE(pin, irq_bank) \
-	((pin-PL_BASE)/PINS_PER_BANK - irq_bank)
 
 #define SUNXI_PIN(_pin, ...)					\
 	{							\
@@ -273,12 +231,12 @@ static inline u32 sunxi_pull_offset(u16 pin)
 	return pin_num * PULL_PINS_BITS;
 }
 
-static inline u32 sunxi_irq_cfg_reg(u16 irq, unsigned bank_base)
+static inline u32 sunxi_irq_cfg_reg(u16 irq)
 {
 	u8 bank = irq / IRQ_PER_BANK;
 	u8 reg = (irq % IRQ_PER_BANK) / IRQ_CFG_IRQ_PER_REG * 0x04;
 
-	return IRQ_CFG_REG + (bank_base + bank) * IRQ_MEM_SIZE + reg;
+	return IRQ_CFG_REG + bank * IRQ_MEM_SIZE + reg;
 }
 
 static inline u32 sunxi_irq_cfg_offset(u16 irq)
@@ -287,16 +245,16 @@ static inline u32 sunxi_irq_cfg_offset(u16 irq)
 	return irq_num * IRQ_CFG_IRQ_BITS;
 }
 
-static inline u32 sunxi_irq_ctrl_reg_from_bank(u8 bank, unsigned bank_base)
+static inline u32 sunxi_irq_ctrl_reg_from_bank(u8 bank)
 {
-	return IRQ_CTRL_REG + (bank_base + bank) * IRQ_MEM_SIZE;
+	return IRQ_CTRL_REG + bank * IRQ_MEM_SIZE;
 }
 
-static inline u32 sunxi_irq_ctrl_reg(u16 irq, unsigned bank_base)
+static inline u32 sunxi_irq_ctrl_reg(u16 irq)
 {
 	u8 bank = irq / IRQ_PER_BANK;
 
-	return sunxi_irq_ctrl_reg_from_bank(bank, bank_base);
+	return sunxi_irq_ctrl_reg_from_bank(bank);
 }
 
 static inline u32 sunxi_irq_ctrl_offset(u16 irq)
@@ -305,16 +263,16 @@ static inline u32 sunxi_irq_ctrl_offset(u16 irq)
 	return irq_num * IRQ_CTRL_IRQ_BITS;
 }
 
-static inline u32 sunxi_irq_status_reg_from_bank(u8 bank, unsigned bank_base)
+static inline u32 sunxi_irq_status_reg_from_bank(u8 bank)
 {
-	return IRQ_STATUS_REG + (bank_base + bank) * IRQ_MEM_SIZE;
+	return IRQ_STATUS_REG + bank * IRQ_MEM_SIZE;
 }
 
-static inline u32 sunxi_irq_status_reg(u16 irq, unsigned bank_base)
+static inline u32 sunxi_irq_status_reg(u16 irq)
 {
 	u8 bank = irq / IRQ_PER_BANK;
 
-	return sunxi_irq_status_reg_from_bank(bank, bank_base);
+	return sunxi_irq_status_reg_from_bank(bank);
 }
 
 static inline u32 sunxi_irq_status_offset(u16 irq)
@@ -323,21 +281,15 @@ static inline u32 sunxi_irq_status_offset(u16 irq)
 	return irq_num * IRQ_STATUS_IRQ_BITS;
 }
 
-static inline u32 sunxi_irq_debounce_reg_from_bank(u8 bank, unsigned bank_base)
+static inline u32 sunxi_irq_debounce_reg(u16 pin)
 {
-	return IRQ_DEBOUNCE_REG + (bank_base + bank) * IRQ_MEM_SIZE;
-}
-
-static inline u32 sunxi_irq_debounce_reg(u16 irq, unsigned bank_base)
-{
-	u8 bank = irq / IRQ_PER_BANK;
-
-	return sunxi_irq_debounce_reg_from_bank(bank, bank_base);
+	u8	bank = pin / PINS_PER_BANK;
+	u32	offset = bank * IRQ_MEM_SIZE;
+	offset += IRQ_DEBOUNCE_REG;
+	return round_down(offset, 4);
 }
 
 int sunxi_pinctrl_init(struct platform_device *pdev,
 		       const struct sunxi_pinctrl_desc *desc);
-
-extern const struct dev_pm_ops sunxi_pinctrl_pm_ops;
 
 #endif /* __PINCTRL_SUNXI_H */

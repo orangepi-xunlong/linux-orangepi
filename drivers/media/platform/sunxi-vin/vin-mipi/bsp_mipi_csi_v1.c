@@ -1,20 +1,4 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-mipi/bsp_mipi_csi_v1.c
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
-/*
  * sunxi mipi bsp interface
  * Author:raymonxiu
  */
@@ -47,12 +31,12 @@ void bsp_mipi_csi_dphy_exit(unsigned int sel)
 	dphy_ana_exit(sel);
 }
 
-void bsp_mipi_csi_dphy_enable(unsigned int sel, unsigned int flags)
+void bsp_mipi_csi_dphy_enable(unsigned int sel)
 {
 	dphy_enable(sel);
 }
 
-void bsp_mipi_csi_dphy_disable(unsigned int sel, unsigned int flags)
+void bsp_mipi_csi_dphy_disable(unsigned int sel)
 {
 	dphy_disable(sel);
 }
@@ -71,12 +55,6 @@ void bsp_mipi_csi_protocol_disable(unsigned int sel)
 {
 	ptcl_disable(sel);
 }
-
-void mipi_dphy_cfg_1data(unsigned int sel, unsigned int code, unsigned int data)
-{
-
-}
-
 
 void bsp_mipi_csi_det_mipi_clk(unsigned int sel, unsigned int *mipi_bps,
 			       unsigned int dphy_clk)
@@ -187,6 +165,4 @@ void bsp_mipi_csi_set_fmt(unsigned int sel, unsigned int total_rx_ch,
 		else
 			bsp_mipi_csi_set_src_type(sel, i, INTERLACED);
 	}
-
-	bsp_data_formats_enable(sel, fmt->fmt_type);
 }

@@ -23,7 +23,7 @@
 #include <asm/netlogic/xlr/pic.h>
 #include <asm/netlogic/xlr/xlr.h>
 
-static unsigned int nlm_xlr_uart_in(struct uart_port *p, int offset)
+unsigned int nlm_xlr_uart_in(struct uart_port *p, int offset)
 {
 	uint64_t uartbase;
 	unsigned int value;
@@ -41,7 +41,7 @@ static unsigned int nlm_xlr_uart_in(struct uart_port *p, int offset)
 	return value;
 }
 
-static void nlm_xlr_uart_out(struct uart_port *p, int offset, int value)
+void nlm_xlr_uart_out(struct uart_port *p, int offset, int value)
 {
 	uint64_t uartbase;
 

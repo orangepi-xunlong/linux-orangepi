@@ -13,19 +13,17 @@
  * The scheduling comments are according to the EV5 documentation (and done by 
  * hand, so they might well be incorrect, please do tell me about it..)
  */
-#include <asm/export.h>
+
 	.set noat
 	.set noreorder
 .text
 	.globl memset
 	.globl __memset
-	.globl ___memset
 	.globl __memsetw
 	.globl __constant_c_memset
-
-	.ent ___memset
+	.ent __memset
 .align 5
-___memset:
+__memset:
 	.frame $30,0,$26,0
 	.prologue 0
 
@@ -105,9 +103,7 @@ within_one_quad:
 
 end:
 	ret $31,($26),1		/* E1 */
-	.end ___memset
-EXPORT_SYMBOL(___memset)
-EXPORT_SYMBOL(__constant_c_memset)
+	.end __memset
 
 	.align 5
 	.ent __memsetw
@@ -124,9 +120,5 @@ __memsetw:
 	br __constant_c_memset	/* .. E1 */
 
 	.end __memsetw
-EXPORT_SYMBOL(__memsetw)
 
-memset = ___memset
-__memset = ___memset
-	EXPORT_SYMBOL(memset)
-	EXPORT_SYMBOL(__memset)
+memset = __memset

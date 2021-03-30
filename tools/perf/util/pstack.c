@@ -6,7 +6,6 @@
 
 #include "util.h"
 #include "pstack.h"
-#include "debug.h"
 #include <linux/kernel.h>
 #include <stdlib.h>
 
@@ -73,11 +72,4 @@ void *pstack__pop(struct pstack *pstack)
 	ret = pstack->entries[--pstack->top];
 	pstack->entries[pstack->top] = NULL;
 	return ret;
-}
-
-void *pstack__peek(struct pstack *pstack)
-{
-	if (pstack->top == 0)
-		return NULL;
-	return pstack->entries[pstack->top - 1];
 }

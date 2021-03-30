@@ -36,7 +36,7 @@
 
 struct phonet_routes {
 	struct mutex		lock;
-	struct net_device __rcu	*table[64];
+	struct net_device	*table[64];
 };
 
 struct phonet_net {
@@ -275,7 +275,7 @@ static void phonet_route_autodel(struct net_device *dev)
 	bitmap_zero(deleted, 64);
 	mutex_lock(&pnn->routes.lock);
 	for (i = 0; i < 64; i++)
-		if (rcu_access_pointer(pnn->routes.table[i]) == dev) {
+		if (dev == pnn->routes.table[i]) {
 			RCU_INIT_POINTER(pnn->routes.table[i], NULL);
 			set_bit(i, deleted);
 		}
@@ -292,9 +292,9 @@ static void phonet_route_autodel(struct net_device *dev)
 
 /* notify Phonet of device events */
 static int phonet_device_notify(struct notifier_block *me, unsigned long what,
-				void *ptr)
+				void *arg)
 {
-	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
+	struct net_device *dev = arg;
 
 	switch (what) {
 	case NETDEV_REGISTER:
@@ -388,7 +388,7 @@ int phonet_route_del(struct net_device *dev, u8 daddr)
 
 	daddr = daddr >> 2;
 	mutex_lock(&routes->lock);
-	if (rcu_access_pointer(routes->table[daddr]) == dev)
+	if (dev == routes->table[daddr])
 		RCU_INIT_POINTER(routes->table[daddr], NULL);
 	else
 		dev = NULL;

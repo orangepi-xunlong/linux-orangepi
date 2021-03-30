@@ -1,22 +1,6 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vfe/csi/csi_reg_v1.h
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
-/*
  * sunxi csi register read/write interface header file
- */
+*/
 
 #ifndef __CSI__REG__A20__H__
 #define __CSI__REG__A20__H__
@@ -247,7 +231,7 @@ struct csi_fmt_cfg {
  * csi mode configuration
  */
 struct csi_cfg {
-	enum csi_input_fmt	input_fmt;   /* input data format */
+	enum csi_input_fmt  	input_fmt;   /* input data format */
 	enum csi_output_fmt     output_fmt;  /* output data format */
 	enum csi_field_sel      field_sel;   /* input field selection */
 	enum csi_input_seq	seq;         /* input data sequence */
@@ -279,7 +263,7 @@ struct csi_capture_status {
 
 enum csi_cap_mode {
 	CSI_SCAP = 1,
-	CSI_VCAP,
+	CSI_VCAP    ,
 };
 
 /*

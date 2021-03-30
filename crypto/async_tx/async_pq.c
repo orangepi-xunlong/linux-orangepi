@@ -46,21 +46,49 @@ static struct page *pq_scribble_page;
  * do_async_gen_syndrome - asynchronously calculate P and/or Q
  */
 static __async_inline struct dma_async_tx_descriptor *
-do_async_gen_syndrome(struct dma_chan *chan,
-		      const unsigned char *scfs, int disks,
-		      struct dmaengine_unmap_data *unmap,
-		      enum dma_ctrl_flags dma_flags,
+do_async_gen_syndrome(struct dma_chan *chan, struct page **blocks,
+		      const unsigned char *scfs, unsigned int offset, int disks,
+		      size_t len, dma_addr_t *dma_src,
 		      struct async_submit_ctl *submit)
 {
 	struct dma_async_tx_descriptor *tx = NULL;
 	struct dma_device *dma = chan->device;
+	enum dma_ctrl_flags dma_flags = 0;
 	enum async_tx_flags flags_orig = submit->flags;
 	dma_async_tx_callback cb_fn_orig = submit->cb_fn;
 	dma_async_tx_callback cb_param_orig = submit->cb_param;
 	int src_cnt = disks - 2;
+	unsigned char coefs[src_cnt];
 	unsigned short pq_src_cnt;
 	dma_addr_t dma_dest[2];
 	int src_off = 0;
+	int idx;
+	int i;
+
+	/* DMAs use destinations as sources, so use BIDIRECTIONAL mapping */
+	if (P(blocks, disks))
+		dma_dest[0] = dma_map_page(dma->dev, P(blocks, disks), offset,
+					   len, DMA_BIDIRECTIONAL);
+	else
+		dma_flags |= DMA_PREP_PQ_DISABLE_P;
+	if (Q(blocks, disks))
+		dma_dest[1] = dma_map_page(dma->dev, Q(blocks, disks), offset,
+					   len, DMA_BIDIRECTIONAL);
+	else
+		dma_flags |= DMA_PREP_PQ_DISABLE_Q;
+
+	/* convert source addresses being careful to collapse 'empty'
+	 * sources and update the coefficients accordingly
+	 */
+	for (i = 0, idx = 0; i < src_cnt; i++) {
+		if (blocks[i] == NULL)
+			continue;
+		dma_src[idx] = dma_map_page(dma->dev, blocks[i], offset, len,
+					    DMA_TO_DEVICE);
+		coefs[idx] = scfs[i];
+		idx++;
+	}
+	src_cnt = idx;
 
 	while (src_cnt > 0) {
 		submit->flags = flags_orig;
@@ -72,9 +100,11 @@ do_async_gen_syndrome(struct dma_chan *chan,
 		if (src_cnt > pq_src_cnt) {
 			submit->flags &= ~ASYNC_TX_ACK;
 			submit->flags |= ASYNC_TX_FENCE;
+			dma_flags |= DMA_COMPL_SKIP_DEST_UNMAP;
 			submit->cb_fn = NULL;
 			submit->cb_param = NULL;
 		} else {
+			dma_flags &= ~DMA_COMPL_SKIP_DEST_UNMAP;
 			submit->cb_fn = cb_fn_orig;
 			submit->cb_param = cb_param_orig;
 			if (cb_fn_orig)
@@ -83,16 +113,15 @@ do_async_gen_syndrome(struct dma_chan *chan,
 		if (submit->flags & ASYNC_TX_FENCE)
 			dma_flags |= DMA_PREP_FENCE;
 
-		/* Drivers force forward progress in case they can not provide
-		 * a descriptor
+		/* Since we have clobbered the src_list we are committed
+		 * to doing this asynchronously.  Drivers force forward
+		 * progress in case they can not provide a descriptor
 		 */
 		for (;;) {
-			dma_dest[0] = unmap->addr[disks - 2];
-			dma_dest[1] = unmap->addr[disks - 1];
 			tx = dma->device_prep_dma_pq(chan, dma_dest,
-						     &unmap->addr[src_off],
+						     &dma_src[src_off],
 						     pq_src_cnt,
-						     &scfs[src_off], unmap->len,
+						     &coefs[src_off], len,
 						     dma_flags);
 			if (likely(tx))
 				break;
@@ -100,7 +129,6 @@ do_async_gen_syndrome(struct dma_chan *chan,
 			dma_async_issue_pending(chan);
 		}
 
-		dma_set_unmap(tx, unmap);
 		async_tx_submit(chan, tx, submit);
 		submit->depend_tx = tx;
 
@@ -123,7 +151,6 @@ do_sync_gen_syndrome(struct page **blocks, unsigned int offset, int disks,
 {
 	void **srcs;
 	int i;
-	int start = -1, stop = disks - 3;
 
 	if (submit->scribble)
 		srcs = submit->scribble;
@@ -134,21 +161,10 @@ do_sync_gen_syndrome(struct page **blocks, unsigned int offset, int disks,
 		if (blocks[i] == NULL) {
 			BUG_ON(i > disks - 3); /* P or Q can't be zero */
 			srcs[i] = (void*)raid6_empty_zero_page;
-		} else {
+		} else
 			srcs[i] = page_address(blocks[i]) + offset;
-			if (i < disks - 2) {
-				stop = i;
-				if (start == -1)
-					start = i;
-			}
-		}
 	}
-	if (submit->flags & ASYNC_TX_PQ_XOR_DST) {
-		BUG_ON(!raid6_call.xor_syndrome);
-		if (start >= 0)
-			raid6_call.xor_syndrome(disks, start, stop, len, srcs);
-	} else
-		raid6_call.gen_syndrome(disks, len, srcs);
+	raid6_call.gen_syndrome(disks, len, srcs);
 	async_tx_sync_epilog(submit);
 }
 
@@ -172,6 +188,10 @@ do_sync_gen_syndrome(struct page **blocks, unsigned int offset, int disks,
  * set to NULL those buffers will be replaced with the raid6_zero_page
  * in the synchronous path and omitted in the hardware-asynchronous
  * path.
+ *
+ * 'blocks' note: if submit->scribble is NULL then the contents of
+ * 'blocks' may be overwritten to perform address conversions
+ * (dma_map_page() or page_address()).
  */
 struct dma_async_tx_descriptor *
 async_gen_syndrome(struct page **blocks, unsigned int offset, int disks,
@@ -182,69 +202,25 @@ async_gen_syndrome(struct page **blocks, unsigned int offset, int disks,
 						      &P(blocks, disks), 2,
 						      blocks, src_cnt, len);
 	struct dma_device *device = chan ? chan->device : NULL;
-	struct dmaengine_unmap_data *unmap = NULL;
+	dma_addr_t *dma_src = NULL;
 
 	BUG_ON(disks > 255 || !(P(blocks, disks) || Q(blocks, disks)));
 
-	if (device)
-		unmap = dmaengine_get_unmap_data(device->dev, disks, GFP_NOWAIT);
+	if (submit->scribble)
+		dma_src = submit->scribble;
+	else if (sizeof(dma_addr_t) <= sizeof(struct page *))
+		dma_src = (dma_addr_t *) blocks;
 
-	/* XORing P/Q is only implemented in software */
-	if (unmap && !(submit->flags & ASYNC_TX_PQ_XOR_DST) &&
+	if (dma_src && device &&
 	    (src_cnt <= dma_maxpq(device, 0) ||
 	     dma_maxpq(device, DMA_PREP_CONTINUE) > 0) &&
 	    is_dma_pq_aligned(device, offset, 0, len)) {
-		struct dma_async_tx_descriptor *tx;
-		enum dma_ctrl_flags dma_flags = 0;
-		unsigned char coefs[src_cnt];
-		int i, j;
-
 		/* run the p+q asynchronously */
 		pr_debug("%s: (async) disks: %d len: %zu\n",
 			 __func__, disks, len);
-
-		/* convert source addresses being careful to collapse 'empty'
-		 * sources and update the coefficients accordingly
-		 */
-		unmap->len = len;
-		for (i = 0, j = 0; i < src_cnt; i++) {
-			if (blocks[i] == NULL)
-				continue;
-			unmap->addr[j] = dma_map_page(device->dev, blocks[i], offset,
-						      len, DMA_TO_DEVICE);
-			coefs[j] = raid6_gfexp[i];
-			unmap->to_cnt++;
-			j++;
-		}
-
-		/*
-		 * DMAs use destinations as sources,
-		 * so use BIDIRECTIONAL mapping
-		 */
-		unmap->bidi_cnt++;
-		if (P(blocks, disks))
-			unmap->addr[j++] = dma_map_page(device->dev, P(blocks, disks),
-							offset, len, DMA_BIDIRECTIONAL);
-		else {
-			unmap->addr[j++] = 0;
-			dma_flags |= DMA_PREP_PQ_DISABLE_P;
-		}
-
-		unmap->bidi_cnt++;
-		if (Q(blocks, disks))
-			unmap->addr[j++] = dma_map_page(device->dev, Q(blocks, disks),
-						       offset, len, DMA_BIDIRECTIONAL);
-		else {
-			unmap->addr[j++] = 0;
-			dma_flags |= DMA_PREP_PQ_DISABLE_Q;
-		}
-
-		tx = do_async_gen_syndrome(chan, coefs, j, unmap, dma_flags, submit);
-		dmaengine_unmap_put(unmap);
-		return tx;
+		return do_async_gen_syndrome(chan, blocks, raid6_gfexp, offset,
+					     disks, len, dma_src, submit);
 	}
-
-	dmaengine_unmap_put(unmap);
 
 	/* run the pq synchronously */
 	pr_debug("%s: (sync) disks: %d len: %zu\n", __func__, disks, len);
@@ -301,60 +277,50 @@ async_syndrome_val(struct page **blocks, unsigned int offset, int disks,
 	struct dma_async_tx_descriptor *tx;
 	unsigned char coefs[disks-2];
 	enum dma_ctrl_flags dma_flags = submit->cb_fn ? DMA_PREP_INTERRUPT : 0;
-	struct dmaengine_unmap_data *unmap = NULL;
+	dma_addr_t *dma_src = NULL;
+	int src_cnt = 0;
 
 	BUG_ON(disks < 4);
 
-	if (device)
-		unmap = dmaengine_get_unmap_data(device->dev, disks, GFP_NOWAIT);
+	if (submit->scribble)
+		dma_src = submit->scribble;
+	else if (sizeof(dma_addr_t) <= sizeof(struct page *))
+		dma_src = (dma_addr_t *) blocks;
 
-	if (unmap && disks <= dma_maxpq(device, 0) &&
+	if (dma_src && device && disks <= dma_maxpq(device, 0) &&
 	    is_dma_pq_aligned(device, offset, 0, len)) {
 		struct device *dev = device->dev;
-		dma_addr_t pq[2];
-		int i, j = 0, src_cnt = 0;
+		dma_addr_t *pq = &dma_src[disks-2];
+		int i;
 
 		pr_debug("%s: (async) disks: %d len: %zu\n",
 			 __func__, disks, len);
-
-		unmap->len = len;
-		for (i = 0; i < disks-2; i++)
-			if (likely(blocks[i])) {
-				unmap->addr[j] = dma_map_page(dev, blocks[i],
-							      offset, len,
-							      DMA_TO_DEVICE);
-				coefs[j] = raid6_gfexp[i];
-				unmap->to_cnt++;
-				src_cnt++;
-				j++;
-			}
-
-		if (!P(blocks, disks)) {
-			pq[0] = 0;
+		if (!P(blocks, disks))
 			dma_flags |= DMA_PREP_PQ_DISABLE_P;
-		} else {
+		else
 			pq[0] = dma_map_page(dev, P(blocks, disks),
 					     offset, len,
 					     DMA_TO_DEVICE);
-			unmap->addr[j++] = pq[0];
-			unmap->to_cnt++;
-		}
-		if (!Q(blocks, disks)) {
-			pq[1] = 0;
+		if (!Q(blocks, disks))
 			dma_flags |= DMA_PREP_PQ_DISABLE_Q;
-		} else {
+		else
 			pq[1] = dma_map_page(dev, Q(blocks, disks),
 					     offset, len,
 					     DMA_TO_DEVICE);
-			unmap->addr[j++] = pq[1];
-			unmap->to_cnt++;
-		}
 
 		if (submit->flags & ASYNC_TX_FENCE)
 			dma_flags |= DMA_PREP_FENCE;
+		for (i = 0; i < disks-2; i++)
+			if (likely(blocks[i])) {
+				dma_src[src_cnt] = dma_map_page(dev, blocks[i],
+								offset, len,
+								DMA_TO_DEVICE);
+				coefs[src_cnt] = raid6_gfexp[i];
+				src_cnt++;
+			}
+
 		for (;;) {
-			tx = device->device_prep_dma_pq_val(chan, pq,
-							    unmap->addr,
+			tx = device->device_prep_dma_pq_val(chan, pq, dma_src,
 							    src_cnt,
 							    coefs,
 							    len, pqres,
@@ -364,9 +330,9 @@ async_syndrome_val(struct page **blocks, unsigned int offset, int disks,
 			async_tx_quiesce(&submit->depend_tx);
 			dma_async_issue_pending(chan);
 		}
-
-		dma_set_unmap(tx, unmap);
 		async_tx_submit(chan, tx, submit);
+
+		return tx;
 	} else {
 		struct page *p_src = P(blocks, disks);
 		struct page *q_src = Q(blocks, disks);
@@ -421,11 +387,9 @@ async_syndrome_val(struct page **blocks, unsigned int offset, int disks,
 		submit->cb_param = cb_param_orig;
 		submit->flags = flags_orig;
 		async_tx_sync_epilog(submit);
-		tx = NULL;
-	}
-	dmaengine_unmap_put(unmap);
 
-	return tx;
+		return NULL;
+	}
 }
 EXPORT_SYMBOL_GPL(async_syndrome_val);
 
@@ -443,7 +407,7 @@ static int __init async_pq_init(void)
 
 static void __exit async_pq_exit(void)
 {
-	__free_page(pq_scribble_page);
+	put_page(pq_scribble_page);
 }
 
 module_init(async_pq_init);

@@ -11,6 +11,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/fs.h>
 #include <linux/string.h>
 #include <linux/slab.h>
@@ -247,6 +248,7 @@ static struct platform_driver pcap_ts_driver = {
 	.remove		= pcap_ts_remove,
 	.driver		= {
 		.name	= "pcap-ts",
+		.owner	= THIS_MODULE,
 		.pm	= PCAP_TS_PM_OPS,
 	},
 };

@@ -1,4 +1,6 @@
 /*
+ * arch/arm/mach-w90x900/include/mach/nuc900_spi.h
+ *
  * Copyright (c) 2009 Nuvoton technology corporation.
  *
  * Wan ZongShun <mcuos.com@gmail.com>
@@ -9,8 +11,8 @@
  *
  */
 
-#ifndef __SPI_NUC900_H
-#define __SPI_NUC900_H
+#ifndef __ASM_ARCH_SPI_H
+#define __ASM_ARCH_SPI_H
 
 extern void mfp_set_groupg(struct device *dev, const char *subname);
 
@@ -30,4 +32,4 @@ struct nuc900_spi_chip {
 	unsigned char bits_per_word;
 };
 
-#endif /* __SPI_NUC900_H */
+#endif /* __ASM_ARCH_SPI_H */

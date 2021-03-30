@@ -1,20 +1,4 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-mipi/bsp_mipi_csi.c
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
-/*
  * sunxi mipi bsp interface
  * Author:wangxuan
  */
@@ -144,18 +128,6 @@ int bsp_mipi_dphy_set_base_addr(unsigned int sel, unsigned long addr_base)
 	return 0;
 }
 
-void mipi_dphy_cfg_1data(unsigned int sel, unsigned int code, unsigned int data)
-{
-	vin_reg_writel(addr + 0x110, vin_reg_readl(addr + 0x110) | 0x10000000);
-	vin_reg_writel(addr + 0x110, vin_reg_readl(addr + 0x110) | 0x00010000);
-	vin_reg_writel(addr + 0x10c, code << 16);
-	vin_reg_writel(addr + 0x110, vin_reg_readl(addr + 0x110) & 0xfffeffff);
-	vin_reg_writel(addr + 0x110, vin_reg_readl(addr + 0x110) & 0xefffffff);
-	vin_reg_writel(addr + 0x10c, data << 16);
-	vin_reg_writel(addr + 0x110, vin_reg_readl(addr + 0x110) | 0x00010000);
-	vin_reg_writel(addr + 0x110, vin_reg_readl(addr + 0x110) & 0xfffeffff);
-}
-
 void bsp_mipi_csi_dphy_init(unsigned int sel)
 {
 	mipi_csi2_reg_default(sel);
@@ -167,15 +139,11 @@ void bsp_mipi_csi_dphy_exit(unsigned int sel)
 {
 }
 
-void bsp_mipi_csi_dphy_enable(unsigned int sel, unsigned int flags)
+void bsp_mipi_csi_dphy_enable(unsigned int sel)
 {
-	if (flags == 0)
-		vin_reg_writel(addr + 0x10, vin_reg_readl(addr + 0x10) | 0x3);
-	else
-		vin_reg_writel(addr + 0x10, vin_reg_readl(addr + 0x10) | 0x1);
 }
 
-void bsp_mipi_csi_dphy_disable(unsigned int sel,  unsigned int flags)
+void bsp_mipi_csi_dphy_disable(unsigned int sel)
 {
 }
 

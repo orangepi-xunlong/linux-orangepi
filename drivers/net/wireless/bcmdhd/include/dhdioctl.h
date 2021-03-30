@@ -5,30 +5,9 @@
  *
  * Definitions subject to change without notice.
  *
- * Copyright (C) 1999-2017, Broadcom Corporation
+ * $Copyright Open Broadcom Corporation$
  *
- *      Unless you and Broadcom execute a separate written software license
- * agreement governing use of this software, this software is licensed to you
- * under the terms of the GNU General Public License version 2 (the "GPL"),
- * available at http://www.broadcom.com/licenses/GPLv2.php, with the
- * following added to such license:
- *
- *      As a special exception, the copyright holders of this software give you
- * permission to link this software with independent modules, and to copy and
- * distribute the resulting executable under terms of your choice, provided that
- * you also meet, for each linked independent module, the terms and conditions of
- * the license of that module.  An independent module is a module which is not
- * derived from this software.  The special exception does not apply to any
- * modifications of the software.
- *
- *      Notwithstanding the above, under no circumstances may you combine this
- * software in any way with any other Broadcom software provided under a license
- * other than the GPL, without Broadcom's express prior written consent.
- *
- *
- * <<Broadcom-WL-IPTag/Open:>>
- *
- * $Id: dhdioctl.h 675190 2016-12-14 15:27:52Z $
+ * $Id: dhdioctl.h 438755 2013-11-22 23:20:40Z $
  */
 
 #ifndef _dhdioctl_h_
@@ -37,15 +16,20 @@
 #include <typedefs.h>
 
 
+/* require default structure packing */
+#define BWL_DEFAULT_PACKING
+#include <packed_section_start.h>
+
+
 /* Linux network driver ioctl encoding */
 typedef struct dhd_ioctl {
-	uint32 cmd;	/* common ioctl definition */
+	uint cmd;	/* common ioctl definition */
 	void *buf;	/* pointer to user buffer */
-	uint32 len;	/* length of user buffer */
-	uint32 set;	/* get or set request boolean (optional) */
-	uint32 used;	/* bytes read or written (optional) */
-	uint32 needed;	/* bytes needed (optional) */
-	uint32 driver;	/* to identify target driver */
+	uint len;	/* length of user buffer */
+	bool set;	/* get or set request (optional) */
+	uint used;	/* bytes read or written (optional) */
+	uint needed;	/* bytes needed (optional) */
+	uint driver;	/* to identify target driver */
 } dhd_ioctl_t;
 
 /* Underlying BUS definition */
@@ -55,23 +39,13 @@ enum {
 	BUS_TYPE_PCIE /* for PCIE dongles */
 };
 
-
 /* per-driver magic numbers */
 #define DHD_IOCTL_MAGIC		0x00444944
 
 /* bump this number if you change the ioctl interface */
 #define DHD_IOCTL_VERSION	1
 
-/*
- * Increase the DHD_IOCTL_MAXLEN to 16K for supporting download of NVRAM files of size
- * > 8K. In the existing implementation when NVRAM is to be downloaded via the "vars"
- * DHD IOVAR, the NVRAM is copied to the DHD Driver memory. Later on when "dwnldstate" is
- * invoked with FALSE option, the NVRAM gets copied from the DHD driver to the Dongle
- * memory. The simple way to support this feature without modifying the DHD application,
- * driver logic is to increase the DHD_IOCTL_MAXLEN size. This macro defines the "size"
- * of the buffer in which data is exchanged between the DHD App and DHD driver.
- */
-#define	DHD_IOCTL_MAXLEN	(16384)	/* max length ioctl buffer required */
+#define	DHD_IOCTL_MAXLEN	8192		/* max length ioctl buffer required */
 #define	DHD_IOCTL_SMLEN		256		/* "small" length ioctl buffer required */
 
 /* common ioctl definitions */
@@ -94,21 +68,15 @@ enum {
 #define DHD_GLOM_VAL	0x0400
 #define DHD_EVENT_VAL	0x0800
 #define DHD_BTA_VAL	0x1000
+#if 0 && (NDISVER >= 0x0630) && 1
+#define DHD_SCAN_VAL	0x2000
+#else
 #define DHD_ISCAN_VAL	0x2000
+#endif
 #define DHD_ARPOE_VAL	0x4000
 #define DHD_REORDER_VAL	0x8000
 #define DHD_NOCHECKDIED_VAL		0x20000 /* UTF WAR */
 #define DHD_PNO_VAL		0x80000
-#define DHD_RTT_VAL		0x100000
-#define DHD_MSGTRACE_VAL	0x200000
-#define DHD_FWLOG_VAL		0x400000
-#define DHD_DBGIF_VAL		0x800000
-#ifdef DHD_PCIE_NATIVE_RUNTIMEPM
-#define DHD_RPM_VAL		0x1000000
-#endif /* DHD_PCIE_NATIVE_RUNTIMEPM */
-#define DHD_PKT_MON_VAL		0x2000000
-#define DHD_PKT_MON_DUMP_VAL	0x4000000
-#define DHD_ERROR_MEM_VAL	0x8000000
 #define DHD_ANDROID_VAL	0x10000
 #define DHD_IW_VAL	0x20000
 #define DHD_CFG_VAL	0x40000
@@ -117,18 +85,18 @@ enum {
 #ifdef SDTEST
 /* For pktgen iovar */
 typedef struct dhd_pktgen {
-	uint32 version;		/* To allow structure change tracking */
-	uint32 freq;		/* Max ticks between tx/rx attempts */
-	uint32 count;		/* Test packets to send/rcv each attempt */
-	uint32 print;		/* Print counts every <print> attempts */
-	uint32 total;		/* Total packets (or bursts) */
-	uint32 minlen;		/* Minimum length of packets to send */
-	uint32 maxlen;		/* Maximum length of packets to send */
-	uint32 numsent;		/* Count of test packets sent */
-	uint32 numrcvd;		/* Count of test packets received */
-	uint32 numfail;		/* Count of test send failures */
-	uint32 mode;		/* Test mode (type of test packets) */
-	uint32 stop;		/* Stop after this many tx failures */
+	uint version;		/* To allow structure change tracking */
+	uint freq;		/* Max ticks between tx/rx attempts */
+	uint count;		/* Test packets to send/rcv each attempt */
+	uint print;		/* Print counts every <print> attempts */
+	uint total;		/* Total packets (or bursts) */
+	uint minlen;		/* Minimum length of packets to send */
+	uint maxlen;		/* Maximum length of packets to send */
+	uint numsent;		/* Count of test packets sent */
+	uint numrcvd;		/* Count of test packets received */
+	uint numfail;		/* Count of test send failures */
+	uint mode;		/* Test mode (type of test packets) */
+	uint stop;		/* Stop after this many tx failures */
 } dhd_pktgen_t;
 
 /* Version in case structure changes */
@@ -149,5 +117,7 @@ typedef struct dhd_pktgen {
 #define DHD_IDLE_STOP   (-1)	/* Request SD clock be stopped (and use SD1 mode) */
 
 
+/* require default structure packing */
+#include <packed_section_end.h>
 
 #endif /* _dhdioctl_h_ */

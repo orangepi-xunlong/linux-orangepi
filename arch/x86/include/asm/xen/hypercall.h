@@ -43,8 +43,6 @@
 
 #include <asm/page.h>
 #include <asm/pgtable.h>
-#include <asm/smap.h>
-#include <asm/nospec-branch.h>
 
 #include <xen/interface/xen.h>
 #include <xen/interface/sched.h>
@@ -114,7 +112,7 @@ extern struct { char _entry[32]; } hypercall_page[];
 	register unsigned long __arg4 asm(__HYPERCALL_ARG4REG) = __arg4; \
 	register unsigned long __arg5 asm(__HYPERCALL_ARG5REG) = __arg5;
 
-#define __HYPERCALL_0PARAM	"=r" (__res), ASM_CALL_CONSTRAINT
+#define __HYPERCALL_0PARAM	"=r" (__res)
 #define __HYPERCALL_1PARAM	__HYPERCALL_0PARAM, "+r" (__arg1)
 #define __HYPERCALL_2PARAM	__HYPERCALL_1PARAM, "+r" (__arg2)
 #define __HYPERCALL_3PARAM	__HYPERCALL_2PARAM, "+r" (__arg3)
@@ -215,15 +213,10 @@ privcmd_call(unsigned call,
 	__HYPERCALL_DECLS;
 	__HYPERCALL_5ARG(a1, a2, a3, a4, a5);
 
-	if (call >= PAGE_SIZE / sizeof(hypercall_page[0]))
-		return -EINVAL;
-
-	stac();
-	asm volatile(CALL_NOSPEC
+	asm volatile("call *%[call]"
 		     : __HYPERCALL_5PARAM
-		     : [thunk_target] "a" (&hypercall_page[call])
+		     : [call] "a" (&hypercall_page[call])
 		     : __HYPERCALL_CLOBBER5);
-	clac();
 
 	return (long)__res;
 }
@@ -317,10 +310,10 @@ HYPERVISOR_mca(struct xen_mc *mc_op)
 }
 
 static inline int
-HYPERVISOR_platform_op(struct xen_platform_op *op)
+HYPERVISOR_dom0_op(struct xen_platform_op *platform_op)
 {
-	op->interface_version = XENPF_INTERFACE_VERSION;
-	return _hypercall1(int, platform_op, op);
+	platform_op->interface_version = XENPF_INTERFACE_VERSION;
+	return _hypercall1(int, dom0_op, platform_op);
 }
 
 static inline int
@@ -343,14 +336,14 @@ HYPERVISOR_update_descriptor(u64 ma, u64 desc)
 	return _hypercall4(int, update_descriptor, ma, ma>>32, desc, desc>>32);
 }
 
-static inline long
+static inline int
 HYPERVISOR_memory_op(unsigned int cmd, void *arg)
 {
-	return _hypercall2(long, memory_op, cmd, arg);
+	return _hypercall2(int, memory_op, cmd, arg);
 }
 
 static inline int
-HYPERVISOR_multicall(void *call_list, uint32_t nr_calls)
+HYPERVISOR_multicall(void *call_list, int nr_calls)
 {
 	return _hypercall2(int, multicall, call_list, nr_calls);
 }
@@ -470,12 +463,6 @@ HYPERVISOR_tmem_op(
 	struct tmem_op *op)
 {
 	return _hypercall1(int, tmem_op, op);
-}
-
-static inline int
-HYPERVISOR_xenpmu_op(unsigned int op, void *arg)
-{
-	return _hypercall2(int, xenpmu_op, op, arg);
 }
 
 static inline void

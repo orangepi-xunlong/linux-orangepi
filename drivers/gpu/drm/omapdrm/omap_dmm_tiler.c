@@ -15,23 +15,20 @@
  * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-
-#include <linux/completion.h>
-#include <linux/delay.h>
-#include <linux/dma-mapping.h>
-#include <linux/errno.h>
 #include <linux/init.h>
-#include <linux/interrupt.h>
-#include <linux/list.h>
-#include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/platform_device.h> /* platform_device() */
+#include <linux/errno.h>
 #include <linux/sched.h>
-#include <linux/seq_file.h>
-#include <linux/slab.h>
-#include <linux/time.h>
-#include <linux/vmalloc.h>
 #include <linux/wait.h>
+#include <linux/interrupt.h>
+#include <linux/dma-mapping.h>
+#include <linux/slab.h>
+#include <linux/vmalloc.h>
+#include <linux/delay.h>
+#include <linux/mm.h>
+#include <linux/time.h>
+#include <linux/list.h>
 
 #include "omap_dmm_tiler.h"
 #include "omap_dmm_priv.h"
@@ -41,10 +38,6 @@
 /* mappings for associating views to luts */
 static struct tcm *containers[TILFMT_NFORMATS];
 static struct dmm *omap_dmm;
-
-#if defined(CONFIG_OF)
-static const struct of_device_id dmm_of_match[];
-#endif
 
 /* global spinlock for protecting lists */
 static DEFINE_SPINLOCK(list_lock);
@@ -65,30 +58,20 @@ static const struct {
 	uint32_t slot_w;	/* width of each slot (in pixels) */
 	uint32_t slot_h;	/* height of each slot (in pixels) */
 } geom[TILFMT_NFORMATS] = {
-	[TILFMT_8BIT]  = GEOM(0, 0, 1),
-	[TILFMT_16BIT] = GEOM(0, 1, 2),
-	[TILFMT_32BIT] = GEOM(1, 1, 4),
-	[TILFMT_PAGE]  = GEOM(SLOT_WIDTH_BITS, SLOT_HEIGHT_BITS, 1),
+		[TILFMT_8BIT]  = GEOM(0, 0, 1),
+		[TILFMT_16BIT] = GEOM(0, 1, 2),
+		[TILFMT_32BIT] = GEOM(1, 1, 4),
+		[TILFMT_PAGE]  = GEOM(SLOT_WIDTH_BITS, SLOT_HEIGHT_BITS, 1),
 };
 
 
 /* lookup table for registers w/ per-engine instances */
 static const uint32_t reg[][4] = {
-	[PAT_STATUS] = {DMM_PAT_STATUS__0, DMM_PAT_STATUS__1,
-			DMM_PAT_STATUS__2, DMM_PAT_STATUS__3},
-	[PAT_DESCR]  = {DMM_PAT_DESCR__0, DMM_PAT_DESCR__1,
-			DMM_PAT_DESCR__2, DMM_PAT_DESCR__3},
+		[PAT_STATUS] = {DMM_PAT_STATUS__0, DMM_PAT_STATUS__1,
+				DMM_PAT_STATUS__2, DMM_PAT_STATUS__3},
+		[PAT_DESCR]  = {DMM_PAT_DESCR__0, DMM_PAT_DESCR__1,
+				DMM_PAT_DESCR__2, DMM_PAT_DESCR__3},
 };
-
-static u32 dmm_read(struct dmm *dmm, u32 reg)
-{
-	return readl(dmm->base + reg);
-}
-
-static void dmm_write(struct dmm *dmm, u32 val, u32 reg)
-{
-	writel(val, dmm->base + reg);
-}
 
 /* simple allocator to grab next 16 byte aligned memory from txn */
 static void *alloc_dma(struct dmm_txn *txn, size_t sz, dma_addr_t *pa)
@@ -119,7 +102,7 @@ static int wait_status(struct refill_engine *engine, uint32_t wait_mask)
 
 	i = DMM_FIXED_RETRY_COUNT;
 	while (true) {
-		r = dmm_read(dmm, reg[PAT_STATUS][engine->id]);
+		r = readl(dmm->base + reg[PAT_STATUS][engine->id]);
 		err = r & DMM_PATSTATUS_ERR;
 		if (err)
 			return -EFAULT;
@@ -151,18 +134,18 @@ static void release_engine(struct refill_engine *engine)
 static irqreturn_t omap_dmm_irq_handler(int irq, void *arg)
 {
 	struct dmm *dmm = arg;
-	uint32_t status = dmm_read(dmm, DMM_PAT_IRQSTATUS);
+	uint32_t status = readl(dmm->base + DMM_PAT_IRQSTATUS);
 	int i;
 
 	/* ack IRQ */
-	dmm_write(dmm, status, DMM_PAT_IRQSTATUS);
+	writel(status, dmm->base + DMM_PAT_IRQSTATUS);
 
 	for (i = 0; i < dmm->num_engines; i++) {
 		if (status & DMM_IRQSTAT_LST) {
+			wake_up_interruptible(&dmm->engines[i].wait_for_refill);
+
 			if (dmm->engines[i].async)
 				release_engine(&dmm->engines[i]);
-
-			complete(&dmm->engines[i].compl);
 		}
 
 		status >>= 8;
@@ -273,20 +256,9 @@ static int dmm_txn_commit(struct dmm_txn *txn, bool wait)
 	}
 
 	txn->last_pat->next_pa = 0;
-	/* ensure that the written descriptors are visible to DMM */
-	wmb();
-
-	/*
-	 * NOTE: the wmb() above should be enough, but there seems to be a bug
-	 * in OMAP's memory barrier implementation, which in some rare cases may
-	 * cause the writes not to be observable after wmb().
-	 */
-
-	/* read back to ensure the data is in RAM */
-	readl(&txn->last_pat->next_pa);
 
 	/* write to PAT_DESCR to clear out any pending transaction */
-	dmm_write(dmm, 0x0, reg[PAT_DESCR][engine->id]);
+	writel(0x0, dmm->base + reg[PAT_DESCR][engine->id]);
 
 	/* wait for engine ready: */
 	ret = wait_status(engine, DMM_PATSTATUS_READY);
@@ -297,24 +269,18 @@ static int dmm_txn_commit(struct dmm_txn *txn, bool wait)
 
 	/* mark whether it is async to denote list management in IRQ handler */
 	engine->async = wait ? false : true;
-	reinit_completion(&engine->compl);
-	/* verify that the irq handler sees the 'async' and completion value */
-	smp_mb();
 
 	/* kick reload */
-	dmm_write(dmm, engine->refill_pa, reg[PAT_DESCR][engine->id]);
+	writel(engine->refill_pa,
+		dmm->base + reg[PAT_DESCR][engine->id]);
 
 	if (wait) {
-		if (!wait_for_completion_timeout(&engine->compl,
-				msecs_to_jiffies(100))) {
+		if (wait_event_interruptible_timeout(engine->wait_for_refill,
+				wait_status(engine, DMM_PATSTATUS_READY) == 0,
+				msecs_to_jiffies(1)) <= 0) {
 			dev_err(dmm->dev, "timed out waiting for done\n");
 			ret = -ETIMEDOUT;
-			goto cleanup;
 		}
-
-		/* Check the engine status before continue */
-		ret = wait_status(engine, DMM_PATSTATUS_READY |
-				  DMM_PATSTATUS_VALID | DMM_PATSTATUS_DONE);
 	}
 
 cleanup:
@@ -334,21 +300,6 @@ static int fill(struct tcm_area *area, struct page **pages,
 	int ret = 0;
 	struct tcm_area slice, area_s;
 	struct dmm_txn *txn;
-
-	/*
-	 * FIXME
-	 *
-	 * Asynchronous fill does not work reliably, as the driver does not
-	 * handle errors in the async code paths. The fill operation may
-	 * silently fail, leading to leaking DMM engines, which may eventually
-	 * lead to deadlock if we run out of DMM engines.
-	 *
-	 * For now, always set 'wait' so that we only use sync fills. Async
-	 * fills should be fixed, or alternatively we could decide to only
-	 * support sync fills and so the whole async code path could be removed.
-	 */
-
-	wait = true;
 
 	txn = dmm_txn_init(omap_dmm, area->tcm);
 	if (IS_ERR_OR_NULL(txn))
@@ -404,7 +355,6 @@ struct tiler_block *tiler_reserve_2d(enum tiler_fmt fmt, uint16_t w,
 	u32 min_align = 128;
 	int ret;
 	unsigned long flags;
-	size_t slot_bytes;
 
 	BUG_ON(!validfmt(fmt));
 
@@ -413,15 +363,13 @@ struct tiler_block *tiler_reserve_2d(enum tiler_fmt fmt, uint16_t w,
 	h = DIV_ROUND_UP(h, geom[fmt].slot_h);
 
 	/* convert alignment to slots */
-	slot_bytes = geom[fmt].slot_w * geom[fmt].cpp;
-	min_align = max(min_align, slot_bytes);
-	align = (align > min_align) ? ALIGN(align, min_align) : min_align;
-	align /= slot_bytes;
+	min_align = max(min_align, (geom[fmt].slot_w * geom[fmt].cpp));
+	align = ALIGN(align, min_align);
+	align /= geom[fmt].slot_w * geom[fmt].cpp;
 
 	block->fmt = fmt;
 
-	ret = tcm_reserve_2d(containers[fmt], w, h, align, -1, slot_bytes,
-			&block->area);
+	ret = tcm_reserve_2d(containers[fmt], w, h, align, &block->area);
 	if (ret) {
 		kfree(block);
 		return ERR_PTR(-ENOMEM);
@@ -581,11 +529,6 @@ size_t tiler_vsize(enum tiler_fmt fmt, uint16_t w, uint16_t h)
 	return round_up(geom[fmt].cpp * w, PAGE_SIZE) * h;
 }
 
-uint32_t tiler_get_cpu_cache_flags(void)
-{
-	return omap_dmm->plat_data->cpu_cache_flags;
-}
-
 bool dmm_is_available(void)
 {
 	return omap_dmm ? true : false;
@@ -614,9 +557,10 @@ static int omap_dmm_remove(struct platform_device *dev)
 
 		kfree(omap_dmm->engines);
 		if (omap_dmm->refill_va)
-			dma_free_wc(omap_dmm->dev,
-				    REFILL_BUFFER_SIZE * omap_dmm->num_engines,
-				    omap_dmm->refill_va, omap_dmm->refill_pa);
+			dma_free_writecombine(omap_dmm->dev,
+				REFILL_BUFFER_SIZE * omap_dmm->num_engines,
+				omap_dmm->refill_va,
+				omap_dmm->refill_pa);
 		if (omap_dmm->dummy_page)
 			__free_page(omap_dmm->dummy_page);
 
@@ -648,19 +592,6 @@ static int omap_dmm_probe(struct platform_device *dev)
 
 	init_waitqueue_head(&omap_dmm->engine_queue);
 
-	if (dev->dev.of_node) {
-		const struct of_device_id *match;
-
-		match = of_match_node(dmm_of_match, dev->dev.of_node);
-		if (!match) {
-			dev_err(&dev->dev, "failed to find matching device node\n");
-			ret = -ENODEV;
-			goto fail;
-		}
-
-		omap_dmm->plat_data = match->data;
-	}
-
 	/* lookup hwmod data - base address and irq */
 	mem = platform_get_resource(dev, IORESOURCE_MEM, 0);
 	if (!mem) {
@@ -683,7 +614,7 @@ static int omap_dmm_probe(struct platform_device *dev)
 
 	omap_dmm->dev = &dev->dev;
 
-	hwinfo = dmm_read(omap_dmm, DMM_PAT_HWINFO);
+	hwinfo = readl(omap_dmm->base + DMM_PAT_HWINFO);
 	omap_dmm->num_engines = (hwinfo >> 24) & 0x1F;
 	omap_dmm->num_lut = (hwinfo >> 16) & 0x1F;
 	omap_dmm->container_width = 256;
@@ -692,7 +623,7 @@ static int omap_dmm_probe(struct platform_device *dev)
 	atomic_set(&omap_dmm->engine_counter, omap_dmm->num_engines);
 
 	/* read out actual LUT width and height */
-	pat_geom = dmm_read(omap_dmm, DMM_PAT_GEOMETRY);
+	pat_geom = readl(omap_dmm->base + DMM_PAT_GEOMETRY);
 	omap_dmm->lut_width = ((pat_geom >> 16) & 0xF) << 5;
 	omap_dmm->lut_height = ((pat_geom >> 24) & 0xF) << 5;
 
@@ -702,12 +633,12 @@ static int omap_dmm_probe(struct platform_device *dev)
 		omap_dmm->num_lut++;
 
 	/* initialize DMM registers */
-	dmm_write(omap_dmm, 0x88888888, DMM_PAT_VIEW__0);
-	dmm_write(omap_dmm, 0x88888888, DMM_PAT_VIEW__1);
-	dmm_write(omap_dmm, 0x80808080, DMM_PAT_VIEW_MAP__0);
-	dmm_write(omap_dmm, 0x80000000, DMM_PAT_VIEW_MAP_BASE);
-	dmm_write(omap_dmm, 0x88888888, DMM_TILER_OR__0);
-	dmm_write(omap_dmm, 0x88888888, DMM_TILER_OR__1);
+	writel(0x88888888, omap_dmm->base + DMM_PAT_VIEW__0);
+	writel(0x88888888, omap_dmm->base + DMM_PAT_VIEW__1);
+	writel(0x80808080, omap_dmm->base + DMM_PAT_VIEW_MAP__0);
+	writel(0x80000000, omap_dmm->base + DMM_PAT_VIEW_MAP_BASE);
+	writel(0x88888888, omap_dmm->base + DMM_TILER_OR__0);
+	writel(0x88888888, omap_dmm->base + DMM_TILER_OR__1);
 
 	ret = request_irq(omap_dmm->irq, omap_dmm_irq_handler, IRQF_SHARED,
 				"omap_dmm_irq_handler", omap_dmm);
@@ -725,7 +656,7 @@ static int omap_dmm_probe(struct platform_device *dev)
 	 * buffers for accelerated pan/scroll) and FILL_DSC<n> which
 	 * we just generally don't care about.
 	 */
-	dmm_write(omap_dmm, 0x7e7e7e7e, DMM_PAT_IRQENABLE_SET);
+	writel(0x7e7e7e7e, omap_dmm->base + DMM_PAT_IRQENABLE_SET);
 
 	omap_dmm->dummy_page = alloc_page(GFP_KERNEL | __GFP_DMA32);
 	if (!omap_dmm->dummy_page) {
@@ -735,16 +666,15 @@ static int omap_dmm_probe(struct platform_device *dev)
 	}
 
 	/* set dma mask for device */
-	ret = dma_set_coherent_mask(&dev->dev, DMA_BIT_MASK(32));
-	if (ret)
-		goto fail;
+	/* NOTE: this is a workaround for the hwmod not initializing properly */
+	dev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
 
 	omap_dmm->dummy_pa = page_to_phys(omap_dmm->dummy_page);
 
 	/* alloc refill memory */
-	omap_dmm->refill_va = dma_alloc_wc(&dev->dev,
-					   REFILL_BUFFER_SIZE * omap_dmm->num_engines,
-					   &omap_dmm->refill_pa, GFP_KERNEL);
+	omap_dmm->refill_va = dma_alloc_writecombine(&dev->dev,
+				REFILL_BUFFER_SIZE * omap_dmm->num_engines,
+				&omap_dmm->refill_pa, GFP_KERNEL);
 	if (!omap_dmm->refill_va) {
 		dev_err(&dev->dev, "could not allocate refill memory\n");
 		goto fail;
@@ -765,7 +695,7 @@ static int omap_dmm_probe(struct platform_device *dev)
 						(REFILL_BUFFER_SIZE * i);
 		omap_dmm->engines[i].refill_pa = omap_dmm->refill_pa +
 						(REFILL_BUFFER_SIZE * i);
-		init_completion(&omap_dmm->engines[i].compl);
+		init_waitqueue_head(&omap_dmm->engines[i].wait_for_refill);
 
 		list_add(&omap_dmm->engines[i].idle_node, &omap_dmm->idle_head);
 	}
@@ -783,7 +713,8 @@ static int omap_dmm_probe(struct platform_device *dev)
 	   programming during reill operations */
 	for (i = 0; i < omap_dmm->num_lut; i++) {
 		omap_dmm->tcm[i] = sita_init(omap_dmm->container_width,
-						omap_dmm->container_height);
+						omap_dmm->container_height,
+						NULL);
 
 		if (!omap_dmm->tcm[i]) {
 			dev_err(&dev->dev, "failed to allocate container\n");
@@ -942,7 +873,7 @@ int tiler_map_show(struct seq_file *s, void *arg)
 		goto error;
 
 	for (lut_idx = 0; lut_idx < omap_dmm->num_lut; lut_idx++) {
-		memset(map, 0, h_adj * sizeof(*map));
+		memset(map, 0, sizeof(h_adj * sizeof(*map)));
 		memset(global_map, ' ', (w_adj + 1) * h_adj);
 
 		for (i = 0; i < omap_dmm->container_height; i++) {
@@ -1009,7 +940,7 @@ error:
 }
 #endif
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 static int omap_dmm_resume(struct device *dev)
 {
 	struct tcm_area area;
@@ -1033,29 +964,9 @@ static int omap_dmm_resume(struct device *dev)
 
 	return 0;
 }
-#endif
 
-static SIMPLE_DEV_PM_OPS(omap_dmm_pm_ops, NULL, omap_dmm_resume);
-
-#if defined(CONFIG_OF)
-static const struct dmm_platform_data dmm_omap4_platform_data = {
-	.cpu_cache_flags = OMAP_BO_WC,
-};
-
-static const struct dmm_platform_data dmm_omap5_platform_data = {
-	.cpu_cache_flags = OMAP_BO_UNCACHED,
-};
-
-static const struct of_device_id dmm_of_match[] = {
-	{
-		.compatible = "ti,omap4-dmm",
-		.data = &dmm_omap4_platform_data,
-	},
-	{
-		.compatible = "ti,omap5-dmm",
-		.data = &dmm_omap5_platform_data,
-	},
-	{},
+static const struct dev_pm_ops omap_dmm_pm_ops = {
+	.resume = omap_dmm_resume,
 };
 #endif
 
@@ -1065,11 +976,13 @@ struct platform_driver omap_dmm_driver = {
 	.driver = {
 		.owner = THIS_MODULE,
 		.name = DMM_DRIVER_NAME,
-		.of_match_table = of_match_ptr(dmm_of_match),
+#ifdef CONFIG_PM
 		.pm = &omap_dmm_pm_ops,
+#endif
 	},
 };
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Andy Gross <andy.gross@ti.com>");
 MODULE_DESCRIPTION("OMAP DMM/Tiler Driver");
+MODULE_ALIAS("platform:" DMM_DRIVER_NAME);

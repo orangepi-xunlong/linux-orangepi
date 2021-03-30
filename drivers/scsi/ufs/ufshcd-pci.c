@@ -35,7 +35,6 @@
 
 #include "ufshcd.h"
 #include <linux/pci.h>
-#include <linux/pm_runtime.h>
 
 #ifdef CONFIG_PM
 /**
@@ -43,44 +42,35 @@
  * @pdev: pointer to PCI device handle
  * @state: power state
  *
- * Returns 0 if successful
- * Returns non-zero otherwise
+ * Returns -ENOSYS
  */
-static int ufshcd_pci_suspend(struct device *dev)
+static int ufshcd_pci_suspend(struct pci_dev *pdev, pm_message_t state)
 {
-	return ufshcd_system_suspend(dev_get_drvdata(dev));
+	/*
+	 * TODO:
+	 * 1. Call ufshcd_suspend
+	 * 2. Do bus specific power management
+	 */
+
+	return -ENOSYS;
 }
 
 /**
  * ufshcd_pci_resume - resume power management function
  * @pdev: pointer to PCI device handle
  *
- * Returns 0 if successful
- * Returns non-zero otherwise
+ * Returns -ENOSYS
  */
-static int ufshcd_pci_resume(struct device *dev)
+static int ufshcd_pci_resume(struct pci_dev *pdev)
 {
-	return ufshcd_system_resume(dev_get_drvdata(dev));
-}
+	/*
+	 * TODO:
+	 * 1. Call ufshcd_resume.
+	 * 2. Do bus specific wake up
+	 */
 
-static int ufshcd_pci_runtime_suspend(struct device *dev)
-{
-	return ufshcd_runtime_suspend(dev_get_drvdata(dev));
+	return -ENOSYS;
 }
-static int ufshcd_pci_runtime_resume(struct device *dev)
-{
-	return ufshcd_runtime_resume(dev_get_drvdata(dev));
-}
-static int ufshcd_pci_runtime_idle(struct device *dev)
-{
-	return ufshcd_runtime_idle(dev_get_drvdata(dev));
-}
-#else /* !CONFIG_PM */
-#define ufshcd_pci_suspend	NULL
-#define ufshcd_pci_resume	NULL
-#define ufshcd_pci_runtime_suspend	NULL
-#define ufshcd_pci_runtime_resume	NULL
-#define ufshcd_pci_runtime_idle	NULL
 #endif /* CONFIG_PM */
 
 /**
@@ -89,7 +79,7 @@ static int ufshcd_pci_runtime_idle(struct device *dev)
  */
 static void ufshcd_pci_shutdown(struct pci_dev *pdev)
 {
-	ufshcd_shutdown((struct ufs_hba *)pci_get_drvdata(pdev));
+	ufshcd_hba_stop((struct ufs_hba *)pci_get_drvdata(pdev));
 }
 
 /**
@@ -101,10 +91,33 @@ static void ufshcd_pci_remove(struct pci_dev *pdev)
 {
 	struct ufs_hba *hba = pci_get_drvdata(pdev);
 
-	pm_runtime_forbid(&pdev->dev);
-	pm_runtime_get_noresume(&pdev->dev);
+	disable_irq(pdev->irq);
+	free_irq(pdev->irq, hba);
 	ufshcd_remove(hba);
-	ufshcd_dealloc_host(hba);
+	pci_release_regions(pdev);
+	pci_set_drvdata(pdev, NULL);
+	pci_clear_master(pdev);
+	pci_disable_device(pdev);
+}
+
+/**
+ * ufshcd_set_dma_mask - Set dma mask based on the controller
+ *			 addressing capability
+ * @pdev: PCI device structure
+ *
+ * Returns 0 for success, non-zero for failure
+ */
+static int ufshcd_set_dma_mask(struct pci_dev *pdev)
+{
+	int err;
+
+	if (!pci_set_dma_mask(pdev, DMA_BIT_MASK(64))
+		&& !pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(64)))
+		return 0;
+	err = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
+	if (!err)
+		err = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(32));
+	return err;
 }
 
 /**
@@ -121,53 +134,56 @@ ufshcd_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	void __iomem *mmio_base;
 	int err;
 
-	err = pcim_enable_device(pdev);
+	err = pci_enable_device(pdev);
 	if (err) {
-		dev_err(&pdev->dev, "pcim_enable_device failed\n");
-		return err;
+		dev_err(&pdev->dev, "pci_enable_device failed\n");
+		goto out_error;
 	}
 
 	pci_set_master(pdev);
 
-	err = pcim_iomap_regions(pdev, 1 << 0, UFSHCD);
+
+	err = pci_request_regions(pdev, UFSHCD);
 	if (err < 0) {
-		dev_err(&pdev->dev, "request and iomap failed\n");
-		return err;
+		dev_err(&pdev->dev, "request regions failed\n");
+		goto out_disable;
 	}
 
-	mmio_base = pcim_iomap_table(pdev)[0];
+	mmio_base = pci_ioremap_bar(pdev, 0);
+	if (!mmio_base) {
+		dev_err(&pdev->dev, "memory map failed\n");
+		err = -ENOMEM;
+		goto out_release_regions;
+	}
 
-	err = ufshcd_alloc_host(&pdev->dev, &hba);
+	err = ufshcd_set_dma_mask(pdev);
 	if (err) {
-		dev_err(&pdev->dev, "Allocation failed\n");
-		return err;
+		dev_err(&pdev->dev, "set dma mask failed\n");
+		goto out_iounmap;
 	}
 
-	INIT_LIST_HEAD(&hba->clk_list_head);
-
-	err = ufshcd_init(hba, mmio_base, pdev->irq);
+	err = ufshcd_init(&pdev->dev, &hba, mmio_base, pdev->irq);
 	if (err) {
 		dev_err(&pdev->dev, "Initialization failed\n");
-		ufshcd_dealloc_host(hba);
-		return err;
+		goto out_iounmap;
 	}
 
 	pci_set_drvdata(pdev, hba);
-	pm_runtime_put_noidle(&pdev->dev);
-	pm_runtime_allow(&pdev->dev);
 
 	return 0;
+
+out_iounmap:
+	iounmap(mmio_base);
+out_release_regions:
+	pci_release_regions(pdev);
+out_disable:
+	pci_clear_master(pdev);
+	pci_disable_device(pdev);
+out_error:
+	return err;
 }
 
-static const struct dev_pm_ops ufshcd_pci_pm_ops = {
-	.suspend	= ufshcd_pci_suspend,
-	.resume		= ufshcd_pci_resume,
-	.runtime_suspend = ufshcd_pci_runtime_suspend,
-	.runtime_resume  = ufshcd_pci_runtime_resume,
-	.runtime_idle    = ufshcd_pci_runtime_idle,
-};
-
-static const struct pci_device_id ufshcd_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(ufshcd_pci_tbl) = {
 	{ PCI_VENDOR_ID_SAMSUNG, 0xC00C, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
 	{ }	/* terminate list */
 };
@@ -180,9 +196,10 @@ static struct pci_driver ufshcd_pci_driver = {
 	.probe = ufshcd_pci_probe,
 	.remove = ufshcd_pci_remove,
 	.shutdown = ufshcd_pci_shutdown,
-	.driver = {
-		.pm = &ufshcd_pci_pm_ops
-	},
+#ifdef CONFIG_PM
+	.suspend = ufshcd_pci_suspend,
+	.resume = ufshcd_pci_resume,
+#endif
 };
 
 module_pci_driver(ufshcd_pci_driver);

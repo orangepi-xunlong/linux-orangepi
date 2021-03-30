@@ -18,7 +18,6 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/io.h>
-#include <linux/random.h>
 #include <linux/slab.h>
 
 #ifdef CONFIG_SOC_BUS
@@ -52,22 +51,17 @@ EXPORT_SYMBOL(omap_rev);
 
 int omap_type(void)
 {
-	static u32 val = OMAP2_DEVICETYPE_MASK;
+	u32 val = 0;
 
-	if (val < OMAP2_DEVICETYPE_MASK)
-		return val;
-
-	if (soc_is_omap24xx()) {
+	if (cpu_is_omap24xx()) {
 		val = omap_ctrl_readl(OMAP24XX_CONTROL_STATUS);
-	} else if (soc_is_ti81xx()) {
-		val = omap_ctrl_readl(TI81XX_CONTROL_STATUS);
-	} else if (soc_is_am33xx() || soc_is_am43xx()) {
+	} else if (soc_is_am33xx()) {
 		val = omap_ctrl_readl(AM33XX_CONTROL_STATUS);
-	} else if (soc_is_omap34xx()) {
+	} else if (cpu_is_omap34xx()) {
 		val = omap_ctrl_readl(OMAP343X_CONTROL_STATUS);
-	} else if (soc_is_omap44xx()) {
+	} else if (cpu_is_omap44xx()) {
 		val = omap_ctrl_readl(OMAP4_CTRL_MODULE_CORE_STATUS);
-	} else if (soc_is_omap54xx() || soc_is_dra7xx()) {
+	} else if (soc_is_omap54xx()) {
 		val = omap_ctrl_readl(OMAP5XXX_CONTROL_STATUS);
 		val &= OMAP5_DEVICETYPE_MASK;
 		val >>= 6;
@@ -99,7 +93,7 @@ EXPORT_SYMBOL(omap_type);
 #define OMAP_TAP_DIE_ID_44XX_2	0x020c
 #define OMAP_TAP_DIE_ID_44XX_3	0x0210
 
-#define read_tap_reg(reg)	readl_relaxed(tap_base  + (reg))
+#define read_tap_reg(reg)	__raw_readl(tap_base  + (reg))
 
 struct omap_id {
 	u16	hawkeye;	/* Silicon type (Hawkeye id) */
@@ -122,7 +116,7 @@ static u16 tap_prod_id;
 
 void omap_get_die_id(struct omap_die_id *odi)
 {
-	if (soc_is_omap44xx() || soc_is_omap54xx() || soc_is_dra7xx()) {
+	if (cpu_is_omap44xx() || soc_is_omap54xx()) {
 		odi->id_0 = read_tap_reg(OMAP_TAP_DIE_ID_44XX_0);
 		odi->id_1 = read_tap_reg(OMAP_TAP_DIE_ID_44XX_1);
 		odi->id_2 = read_tap_reg(OMAP_TAP_DIE_ID_44XX_2);
@@ -135,17 +129,6 @@ void omap_get_die_id(struct omap_die_id *odi)
 	odi->id_2 = read_tap_reg(OMAP_TAP_DIE_ID_2);
 	odi->id_3 = read_tap_reg(OMAP_TAP_DIE_ID_3);
 }
-
-static int __init omap_feed_randpool(void)
-{
-	struct omap_die_id odi;
-
-	/* Throw the die ID into the entropy pool at boot */
-	omap_get_die_id(&odi);
-	add_device_randomness(&odi, sizeof(odi));
-	return 0;
-}
-omap_device_initcall(omap_feed_randpool);
 
 void __init omap2xxx_check_revision(void)
 {
@@ -205,15 +188,11 @@ void __init omap2xxx_check_revision(void)
 
 #define OMAP3_SHOW_FEATURE(feat)		\
 	if (omap3_has_ ##feat())		\
-		n += scnprintf(buf + n, sizeof(buf) - n, #feat " ");
+		printk(#feat" ");
 
 static void __init omap3_cpuinfo(void)
 {
 	const char *cpu_name;
-	char buf[64];
-	int n = 0;
-
-	memset(buf, 0, sizeof(buf));
 
 	/*
 	 * OMAP3430 and OMAP3530 are assumed to be same.
@@ -222,17 +201,15 @@ static void __init omap3_cpuinfo(void)
 	 * on available features. Upon detection, update the CPU id
 	 * and CPU class bits.
 	 */
-	if (soc_is_omap3630()) {
+	if (cpu_is_omap3630()) {
 		cpu_name = "OMAP3630";
 	} else if (soc_is_am35xx()) {
 		cpu_name = (omap3_has_sgx()) ? "AM3517" : "AM3505";
-	} else if (soc_is_ti816x()) {
+	} else if (cpu_is_ti816x()) {
 		cpu_name = "TI816X";
 	} else if (soc_is_am335x()) {
 		cpu_name =  "AM335X";
-	} else if (soc_is_am437x()) {
-		cpu_name =  "AM437x";
-	} else if (soc_is_ti814x()) {
+	} else if (cpu_is_ti814x()) {
 		cpu_name = "TI814X";
 	} else if (omap3_has_iva() && omap3_has_sgx()) {
 		/* OMAP3430, OMAP3525, OMAP3515, OMAP3503 devices */
@@ -245,10 +222,10 @@ static void __init omap3_cpuinfo(void)
 		cpu_name = "OMAP3503";
 	}
 
-	scnprintf(soc_name, sizeof(soc_name), "%s", cpu_name);
+	sprintf(soc_name, "%s", cpu_name);
 
 	/* Print verbose information */
-	n += scnprintf(buf, sizeof(buf) - n, "%s %s (", soc_name, soc_rev);
+	pr_info("%s %s (", soc_name, soc_rev);
 
 	OMAP3_SHOW_FEATURE(l2cache);
 	OMAP3_SHOW_FEATURE(iva);
@@ -256,10 +233,8 @@ static void __init omap3_cpuinfo(void)
 	OMAP3_SHOW_FEATURE(neon);
 	OMAP3_SHOW_FEATURE(isp);
 	OMAP3_SHOW_FEATURE(192mhz_clk);
-	if (*(buf + n - 1) == ' ')
-		n--;
-	n += scnprintf(buf + n, sizeof(buf) - n, ")\n");
-	pr_info("%s", buf);
+
+	printk(")\n");
 }
 
 #define OMAP3_CHECK_FEATURE(status,feat)				\
@@ -281,11 +256,11 @@ void __init omap3xxx_check_features(void)
 	OMAP3_CHECK_FEATURE(status, SGX);
 	OMAP3_CHECK_FEATURE(status, NEON);
 	OMAP3_CHECK_FEATURE(status, ISP);
-	if (soc_is_omap3630())
+	if (cpu_is_omap3630())
 		omap_features |= OMAP3_HAS_192MHZ_CLK;
-	if (soc_is_omap3430() || soc_is_omap3630())
+	if (cpu_is_omap3430() || cpu_is_omap3630())
 		omap_features |= OMAP3_HAS_IO_WAKEUP;
-	if (soc_is_omap3630() || omap_rev() == OMAP3430_REV_ES3_1 ||
+	if (cpu_is_omap3630() || omap_rev() == OMAP3430_REV_ES3_1 ||
 	    omap_rev() == OMAP3430_REV_ES3_1_2)
 		omap_features |= OMAP3_HAS_IO_CHAIN_CTRL;
 
@@ -324,19 +299,6 @@ void __init omap4xxx_check_features(void)
 void __init ti81xx_check_features(void)
 {
 	omap_features = OMAP3_HAS_NEON;
-	omap3_cpuinfo();
-}
-
-void __init am33xx_check_features(void)
-{
-	u32 status;
-
-	omap_features = OMAP3_HAS_NEON;
-
-	status = omap_ctrl_readl(AM33XX_DEV_FEATURE);
-	if (status & AM33XX_SGX_MASK)
-		omap_features |= OMAP3_HAS_SGX;
-
 	omap3_cpuinfo();
 }
 
@@ -443,18 +405,11 @@ void __init omap3xxx_check_revision(void)
 			cpu_rev = "1.0";
 			break;
 		case 1:
+		/* FALLTHROUGH */
+		default:
 			omap_revision = TI8168_REV_ES1_1;
 			cpu_rev = "1.1";
 			break;
-		case 2:
-			omap_revision = TI8168_REV_ES2_0;
-			cpu_rev = "2.0";
-			break;
-		case 3:
-			/* FALLTHROUGH */
-		default:
-			omap_revision = TI8168_REV_ES2_1;
-			cpu_rev = "2.1";
 		}
 		break;
 	case 0xb944:
@@ -475,26 +430,7 @@ void __init omap3xxx_check_revision(void)
 			break;
 		}
 		break;
-	case 0xb98c:
-		switch (rev) {
-		case 0:
-			omap_revision = AM437X_REV_ES1_0;
-			cpu_rev = "1.0";
-			break;
-		case 1:
-			omap_revision = AM437X_REV_ES1_1;
-			cpu_rev = "1.1";
-			break;
-		case 2:
-		/* FALLTHROUGH */
-		default:
-			omap_revision = AM437X_REV_ES1_2;
-			cpu_rev = "1.2";
-			break;
-		}
-		break;
 	case 0xb8f2:
-	case 0xb968:
 		switch (rev) {
 		case 0:
 		/* FALLTHROUGH */
@@ -518,8 +454,7 @@ void __init omap3xxx_check_revision(void)
 		/* Unknown default to latest silicon rev as default */
 		omap_revision = OMAP3630_REV_ES1_2;
 		cpu_rev = "1.2";
-		pr_warn("Warning: unknown chip type: hawkeye %04x, assuming OMAP3630ES1.2\n",
-			hawkeye);
+		pr_warn("Warning: unknown chip type; assuming OMAP3630ES1.2\n");
 	}
 	sprintf(soc_rev, "ES%s", cpu_rev);
 }
@@ -615,8 +550,8 @@ void __init omap5xxx_check_revision(void)
 	case 0xb942:
 		switch (rev) {
 		case 0:
-			/* No support for ES1.0 Test chip */
-			BUG();
+			omap_revision = OMAP5430_REV_ES1_0;
+			break;
 		case 1:
 		default:
 			omap_revision = OMAP5430_REV_ES2_0;
@@ -626,8 +561,8 @@ void __init omap5xxx_check_revision(void)
 	case 0xb998:
 		switch (rev) {
 		case 0:
-			/* No support for ES1.0 Test chip */
-			BUG();
+			omap_revision = OMAP5432_REV_ES1_0;
+			break;
 		case 1:
 		default:
 			omap_revision = OMAP5432_REV_ES2_0;
@@ -645,57 +580,6 @@ void __init omap5xxx_check_revision(void)
 	pr_info("%s %s\n", soc_name, soc_rev);
 }
 
-void __init dra7xxx_check_revision(void)
-{
-	u32 idcode;
-	u16 hawkeye;
-	u8 rev;
-
-	idcode = read_tap_reg(OMAP_TAP_IDCODE);
-	hawkeye = (idcode >> 12) & 0xffff;
-	rev = (idcode >> 28) & 0xff;
-	switch (hawkeye) {
-	case 0xb990:
-		switch (rev) {
-		case 0:
-			omap_revision = DRA752_REV_ES1_0;
-			break;
-		case 1:
-			omap_revision = DRA752_REV_ES1_1;
-			break;
-		case 2:
-		default:
-			omap_revision = DRA752_REV_ES2_0;
-			break;
-		}
-		break;
-
-	case 0xb9bc:
-		switch (rev) {
-		case 0:
-			omap_revision = DRA722_REV_ES1_0;
-			break;
-		case 1:
-		default:
-			omap_revision = DRA722_REV_ES2_0;
-			break;
-		}
-		break;
-
-	default:
-		/* Unknown default to latest silicon rev as default*/
-		pr_warn("%s: unknown idcode=0x%08x (hawkeye=0x%08x,rev=0x%x)\n",
-			__func__, idcode, hawkeye, rev);
-		omap_revision = DRA752_REV_ES2_0;
-	}
-
-	sprintf(soc_name, "DRA%03x", omap_rev() >> 16);
-	sprintf(soc_rev, "ES%d.%d", (omap_rev() >> 12) & 0xf,
-		(omap_rev() >> 8) & 0xf);
-
-	pr_info("%s %s\n", soc_name, soc_rev);
-}
-
 /*
  * Set up things for map_io and processor detection later on. Gets called
  * pretty much first thing from board init. For multi-omap, this gets
@@ -709,7 +593,7 @@ void __init omap2_set_globals_tap(u32 class, void __iomem *tap)
 	tap_base = tap;
 
 	/* XXX What is this intended to do? */
-	if (soc_is_omap34xx())
+	if (cpu_is_omap34xx())
 		tap_prod_id = 0x0210;
 	else
 		tap_prod_id = 0x0208;
@@ -717,7 +601,7 @@ void __init omap2_set_globals_tap(u32 class, void __iomem *tap)
 
 #ifdef CONFIG_SOC_BUS
 
-static const char * const omap_types[] = {
+static const char const *omap_types[] = {
 	[OMAP2_DEVICE_TYPE_TEST]	= "TST",
 	[OMAP2_DEVICE_TYPE_EMU]		= "EMU",
 	[OMAP2_DEVICE_TYPE_SEC]		= "HS",
@@ -727,20 +611,14 @@ static const char * const omap_types[] = {
 
 static const char * __init omap_get_family(void)
 {
-	if (soc_is_omap24xx())
+	if (cpu_is_omap24xx())
 		return kasprintf(GFP_KERNEL, "OMAP2");
-	else if (soc_is_omap34xx())
+	else if (cpu_is_omap34xx())
 		return kasprintf(GFP_KERNEL, "OMAP3");
-	else if (soc_is_omap44xx())
+	else if (cpu_is_omap44xx())
 		return kasprintf(GFP_KERNEL, "OMAP4");
 	else if (soc_is_omap54xx())
 		return kasprintf(GFP_KERNEL, "OMAP5");
-	else if (soc_is_am33xx() || soc_is_am335x())
-		return kasprintf(GFP_KERNEL, "AM33xx");
-	else if (soc_is_am43xx())
-		return kasprintf(GFP_KERNEL, "AM43xx");
-	else if (soc_is_dra7xx())
-		return kasprintf(GFP_KERNEL, "DRA7");
 	else
 		return kasprintf(GFP_KERNEL, "Unknown");
 }

@@ -21,4 +21,4 @@ static int __init proc_cpuinfo_init(void)
 	proc_create("cpuinfo", 0, NULL, &proc_cpuinfo_operations);
 	return 0;
 }
-fs_initcall(proc_cpuinfo_init);
+module_init(proc_cpuinfo_init);

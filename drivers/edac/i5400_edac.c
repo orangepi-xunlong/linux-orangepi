@@ -6,7 +6,7 @@
  *
  * Copyright (c) 2008 by:
  *	 Ben Woodard <woodard@redhat.com>
- *	 Mauro Carvalho Chehab
+ *	 Mauro Carvalho Chehab <mchehab@redhat.com>
  *
  * Red Hat Inc. http://www.redhat.com
  *
@@ -368,7 +368,7 @@ struct i5400_error_info {
 
 	/* These registers are input ONLY if there was a Non-Rec Error */
 	u16 nrecmema;		/* Non-Recoverable Mem log A */
-	u32 nrecmemb;		/* Non-Recoverable Mem log B */
+	u16 nrecmemb;		/* Non-Recoverable Mem log B */
 
 };
 
@@ -458,7 +458,7 @@ static void i5400_get_error_info(struct mem_ctl_info *mci,
 				NERR_FAT_FBD, &info->nerr_fat_fbd);
 		pci_read_config_word(pvt->branchmap_werrors,
 				NRECMEMA, &info->nrecmema);
-		pci_read_config_dword(pvt->branchmap_werrors,
+		pci_read_config_word(pvt->branchmap_werrors,
 				NRECMEMB, &info->nrecmemb);
 
 		/* Clear the error bits, by writing them back */
@@ -1207,14 +1207,13 @@ static int i5400_init_dimms(struct mem_ctl_info *mci)
 
 			dimm->nr_pages = size_mb << 8;
 			dimm->grain = 8;
-			dimm->dtype = MTR_DRAM_WIDTH(mtr) == 8 ?
-				      DEV_X8 : DEV_X4;
+			dimm->dtype = MTR_DRAM_WIDTH(mtr) ? DEV_X8 : DEV_X4;
 			dimm->mtype = MEM_FB_DDR2;
 			/*
 			 * The eccc mechanism is SDDC (aka SECC), with
 			 * is similar to Chipkill.
 			 */
-			dimm->edac_mode = MTR_DRAM_WIDTH(mtr) == 8 ?
+			dimm->edac_mode = MTR_DRAM_WIDTH(mtr) ?
 					  EDAC_S8ECD8ED : EDAC_S4ECD4ED;
 			ndimms++;
 		}
@@ -1409,8 +1408,6 @@ static void i5400_remove_one(struct pci_dev *pdev)
 	/* retrieve references to resources, and free those resources */
 	i5400_put_devices(mci);
 
-	pci_disable_device(pdev);
-
 	edac_mc_free(mci);
 }
 
@@ -1419,7 +1416,7 @@ static void i5400_remove_one(struct pci_dev *pdev)
  *
  *	The "E500P" device is the first device supported.
  */
-static const struct pci_device_id i5400_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(i5400_pci_tbl) = {
 	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_5400_ERR)},
 	{0,}			/* 0 terminated list. */
 };
@@ -1470,7 +1467,7 @@ module_exit(i5400_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Ben Woodard <woodard@redhat.com>");
-MODULE_AUTHOR("Mauro Carvalho Chehab");
+MODULE_AUTHOR("Mauro Carvalho Chehab <mchehab@redhat.com>");
 MODULE_AUTHOR("Red Hat Inc. (http://www.redhat.com)");
 MODULE_DESCRIPTION("MC Driver for Intel I5400 memory controllers - "
 		   I5400_REVISION);

@@ -59,7 +59,7 @@ struct stack_trace;
  *
  * Return - Number of stack bytes the instruction reserves or reclaims
  */
-static inline long get_frame_size(unsigned long instr)
+inline long get_frame_size(unsigned long instr)
 {
 	return abs((s16)(instr & 0xFFFF));
 }

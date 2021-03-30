@@ -276,8 +276,8 @@ int btn_dialog(WINDOW *main_window, const char *msg, int btn_num, ...)
 
 	total_width = max(msg_width, btns_width);
 	/* place dialog in middle of screen */
-	y = (getmaxy(stdscr)-(msg_lines+4))/2;
-	x = (getmaxx(stdscr)-(total_width+4))/2;
+	y = (LINES-(msg_lines+4))/2;
+	x = (COLS-(total_width+4))/2;
 
 
 	/* create the windows */
@@ -364,13 +364,11 @@ int dialog_inputbox(WINDOW *main_window,
 	WINDOW *prompt_win;
 	WINDOW *form_win;
 	PANEL *panel;
-	int i, x, y, lines, columns, win_lines, win_cols;
+	int i, x, y;
 	int res = -1;
 	int cursor_position = strlen(init);
 	int cursor_form_win;
 	char *result = *resultp;
-
-	getmaxyx(stdscr, lines, columns);
 
 	if (strlen(init)+1 > *result_len) {
 		*result_len = strlen(init)+1;
@@ -388,19 +386,14 @@ int dialog_inputbox(WINDOW *main_window,
 	if (title)
 		prompt_width = max(prompt_width, strlen(title));
 
-	win_lines = min(prompt_lines+6, lines-2);
-	win_cols = min(prompt_width+7, columns-2);
-	prompt_lines = max(win_lines-6, 0);
-	prompt_width = max(win_cols-7, 0);
-
 	/* place dialog in middle of screen */
-	y = (lines-win_lines)/2;
-	x = (columns-win_cols)/2;
+	y = (LINES-(prompt_lines+4))/2;
+	x = (COLS-(prompt_width+4))/2;
 
 	strncpy(result, init, *result_len);
 
 	/* create the windows */
-	win = newwin(win_lines, win_cols, y, x);
+	win = newwin(prompt_lines+6, prompt_width+7, y, x);
 	prompt_win = derwin(win, prompt_lines+1, prompt_width, 2, 2);
 	form_win = derwin(win, 1, prompt_width, prompt_lines+3, 2);
 	keypad(form_win, TRUE);
@@ -552,7 +545,7 @@ void show_scroll_win(WINDOW *main_window,
 {
 	int res;
 	int total_lines = get_line_no(text);
-	int x, y, lines, columns;
+	int x, y;
 	int start_x = 0, start_y = 0;
 	int text_lines = 0, text_cols = 0;
 	int total_cols = 0;
@@ -562,8 +555,6 @@ void show_scroll_win(WINDOW *main_window,
 	WINDOW *win;
 	WINDOW *pad;
 	PANEL *panel;
-
-	getmaxyx(stdscr, lines, columns);
 
 	/* find the widest line of msg: */
 	total_lines = get_line_no(text);
@@ -578,14 +569,14 @@ void show_scroll_win(WINDOW *main_window,
 	(void) wattrset(pad, attributes[SCROLLWIN_TEXT]);
 	fill_window(pad, text);
 
-	win_lines = min(total_lines+4, lines-2);
-	win_cols = min(total_cols+2, columns-2);
+	win_lines = min(total_lines+4, LINES-2);
+	win_cols = min(total_cols+2, COLS-2);
 	text_lines = max(win_lines-4, 0);
 	text_cols = max(win_cols-2, 0);
 
 	/* place window in middle of screen */
-	y = (lines-win_lines)/2;
-	x = (columns-win_cols)/2;
+	y = (LINES-win_lines)/2;
+	x = (COLS-win_cols)/2;
 
 	win = newwin(win_lines, win_cols, y, x);
 	keypad(win, TRUE);

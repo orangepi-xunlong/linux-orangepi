@@ -18,7 +18,9 @@
 #define __ASM_BITOPS_H
 
 #include <asm/cpu-regs.h>
-#include <asm/barrier.h>
+
+#define smp_mb__before_clear_bit()	barrier()
+#define smp_mb__after_clear_bit()	barrier()
 
 /*
  * set bit

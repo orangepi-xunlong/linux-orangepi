@@ -1,16 +1,13 @@
-/*
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
+//*********************************************************************************************************************
+//  All Winner Tech, All Right Reserved. 2014-2015 Copyright (c)
+//
+//  File name   :	de_tr.c
+//
+//  Description :	display engine 2.0 transform processing base functions implement
+//
+//  History     :	2014/04/08  iptang  v0.1  Initial version
+//
+//*********************************************************************************************************************
 
 #include "transform.h"
 
@@ -83,7 +80,7 @@ int de_tr_irq_query(void)
 
 	reg_val = tr_readl(tr_base + TR_IRQ);
 	irq_flag = reg_val&0x1;
-	if (irq_flag == 0x1) {
+	if(0x1 == irq_flag) {
 		tr_writel(reg_val, tr_base + TR_IRQ);
 		return 0;
 	}
@@ -95,7 +92,7 @@ static int de_tr_clk_enable(void)
 {
 	uintptr_t base = tr_base - TR_OFFSET;
 	unsigned int reg_val = 0;
-	unsigned int offset = 3;/* bit 3 */
+	unsigned int offset = 3;//bit 3
 
 	/* clk div */
 	reg_val = tr_readl(base + 0xc);
@@ -125,7 +122,7 @@ static int de_tr_clk_disable(void)
 {
 	uintptr_t base = tr_base - TR_OFFSET;
 	unsigned int reg_val = 0;
-	unsigned int offset = 3;/* bit 3 */
+	unsigned int offset = 3;//bit 3
 
 	/* module */
 	reg_val = tr_readl(base + 0x0);
@@ -150,14 +147,14 @@ static int de_tr_set_enable(void)
 	unsigned int tmp;
 
 	tmp = tr_readl(tr_base + TR_CTL);
-	tr_writel((1<<31)|tmp, tr_base + TR_CTL);
+	tr_writel((1<<31)|tmp,tr_base + TR_CTL);
 
 	return 0;
 }
 
 static int de_tr_set_disable(void)
 {
-	/* when rst need read de top register */
+	//when rst need read de top register
 	tr_readl(tr_base - TR_OFFSET);
 	de_tr_irq_disable();
 
@@ -180,20 +177,20 @@ int de_tr_reset(void)
 {
 	uintptr_t base = tr_base - TR_OFFSET;
 	unsigned int reg_val = 0;
-	unsigned int offset = 3;/* bit 3 */
+	unsigned int offset = 3;//bit 3
 
 	tr_readl(tr_base - TR_OFFSET);
 
 	reg_val = tr_readl(tr_base + TR_CTL);
-	reg_val |= 0x1;/* enable bit */
-	tr_writel(reg_val, tr_base + TR_CTL);
+	reg_val |= 0x1;//enable bit
+	tr_writel(reg_val,tr_base + TR_CTL);
 
 	/* assert */
 	reg_val = tr_readl(base + 0x8);
 	reg_val &= ~(1<<offset);
 	tr_writel(reg_val, base + 0x8);
 
-	udelay(10);/* wait for reset finish */
+	udelay(10);//wait for reset finish
 
 	/* de-assert */
 	reg_val = tr_readl(base + 0x8);
@@ -205,36 +202,46 @@ int de_tr_reset(void)
 
 int de_tr_exception(void)
 {
-	mdelay(100);/* wait to finish */
+	mdelay(100);//wait to finish
 
 	return 0;
 }
 
 int de_tr_set_cfg(tr_info *info)
 {
-	int x0, x1, y0, y1;
-	unsigned char haddr[3], degree, hflip_en, vflip_en, burst;
+	int x0,x1,y0,y1;
+	unsigned char haddr[3],degree,hflip_en,vflip_en,burst;
 	unsigned int w, h, fmt, ycnt = 4, ucnt = 0, tmp, pitch[3] = {0};
 	long long addr[3] = {0};
 
 	de_tr_reset();
 
-	/* global */
+	//global
 	burst = 0x7;
 	degree = hflip_en = vflip_en = 0x0;
-	if (info->mode <= TR_ROT_270)
+	if (info->mode<=TR_ROT_270)
+	{
 		degree = info->mode;
+	}
 	else if ((info->mode == TR_HFLIP) || (info->mode == TR_HFLIP_ROT_90))
+	{
 		hflip_en = 0x1;
+	}
 	else if ((info->mode == TR_VFLIP) || (info->mode == TR_VFLIP_ROT_90))
+	{
 		vflip_en = 0x1;
+	}
+
 	if ((info->mode == TR_HFLIP_ROT_90) || (info->mode == TR_VFLIP_ROT_90))
+	{
 		degree = 0x1;
-	if ((info->mode == TR_ROT_0) || (info->mode == TR_ROT_180) ||
-			(info->mode == TR_HFLIP) || (info->mode == TR_VFLIP))
+	}
+	if((info->mode == TR_ROT_0) || (info->mode == TR_ROT_180) || (info->mode == TR_HFLIP) || (info->mode == TR_VFLIP))
+	{
 		burst = 0x3f;
+	}
 	tmp = (burst<<16)|(hflip_en<<7)|(vflip_en<<6)|(degree<<4)|(1<<0);
-	tr_writel(tmp, tr_base + TR_CTL);
+	tr_writel(tmp,tr_base + TR_CTL);
 
 	x0 = x1 = info->src_rect.x;
 	y0 = y1 = info->src_rect.y;
@@ -242,69 +249,17 @@ int de_tr_set_cfg(tr_info *info)
 	h  = info->src_rect.h;
 
 	fmt = info->src_frame.fmt;
-	if (fmt <= TR_FORMAT_BGRX_8888)
-		ycnt = 4;
-	else if	(fmt <= TR_FORMAT_BGR_888)
-		ycnt = 3;
-	else if	(fmt <= TR_FORMAT_BGR_888)
-		ycnt = 3;
-	else if	(fmt <= TR_FORMAT_BGRA_5551)
-		ycnt = 2;
-	else if	(fmt <= TR_FORMAT_BGRA_5551)
-		ycnt = 2;
-	else if (fmt <= TR_FORMAT_YUV422_I_VYUY) {
-		ycnt = 2;
-		ucnt = 0;
-	} else if (fmt <= TR_FORMAT_YUV422_I_VYUY) {
-		ycnt = 2;
-		ucnt = 0;
-	} else if (fmt == TR_FORMAT_YUV422_P) {
-		ycnt = 1;
-		ucnt = 1;
-		x1 = x0/2;
-		y1 = y0;
-	} else if (fmt == TR_FORMAT_YUV420_P) {
-		ycnt = 1;
-		ucnt = 1;
-		x1 = x0/2;
-		y1 = y0/2;
-	} else if (fmt == TR_FORMAT_YUV411_P) {
-		ycnt = 1;
-		ucnt = 1;
-		x1 = x0/4;
-		y1 = y0;
-	} else if (fmt == TR_FORMAT_YUV411_P) {
-		ycnt = 1;
-		ucnt = 1;
-		x1 = x0/4;
-		y1 = y0;
-	} else if (fmt <= TR_FORMAT_YUV422_SP_VUVU) {
-		ycnt = 1;
-		ucnt = 2;
-		x1 = x0/2;
-		y1 = y0;
-	} else if (fmt <= TR_FORMAT_YUV420_SP_VUVU) {
-		ycnt = 1;
-		ucnt = 2;
-		x1 = x0/2;
-		y1 = y0/2;
-	} else if (fmt <= TR_FORMAT_YUV420_SP_VUVU) {
-		ycnt = 1;
-		ucnt = 2;
-		x1 = x0/2;
-		y1 = y0/2;
-	} else if (fmt <= TR_FORMAT_YUV411_SP_VUVU) {
-		ycnt = 1;
-		ucnt = 2;
-		x1 = x0/4;
-		y1 = y0;
-	} else if (fmt <= TR_FORMAT_YUV411_SP_VUVU) {
-		ycnt = 1;
-		ucnt = 2;
-		x1 = x0/4;
-		y1 = y0;
-	} else
-		ycnt = 4;
+	if       (fmt<=TR_FORMAT_BGRX_8888)     {ycnt = 4;}
+	else if	 (fmt<=TR_FORMAT_BGR_888)       {ycnt = 3;}
+	else if	 (fmt<=TR_FORMAT_BGRA_5551)     {ycnt = 2;}
+	else if	 (fmt<=TR_FORMAT_YUV422_I_VYUY) {ycnt = 2;ucnt=0;}
+	else if	 (fmt==TR_FORMAT_YUV422_P)      {ycnt = 1;ucnt=1; x1=x0/2;y1=y0;}  //YUV422
+	else if	 (fmt==TR_FORMAT_YUV420_P)      {ycnt = 1;ucnt=1; x1=x0/2;y1=y0/2;}//YUV420
+	else if	 (fmt==TR_FORMAT_YUV411_P)      {ycnt = 1;ucnt=1; x1=x0/4;y1=y0;}  //YUV411
+	else if	 (fmt<=TR_FORMAT_YUV422_SP_VUVU){ycnt = 1;ucnt=2; x1=x0/2;y1=y0;}
+	else if	 (fmt<=TR_FORMAT_YUV420_SP_VUVU){ycnt = 1;ucnt=2; x1=x0/2;y1=y0/2;}
+	else if	 (fmt<=TR_FORMAT_YUV411_SP_VUVU){ycnt = 1;ucnt=2; x1=x0/4;y1=y0;}
+	else                                    {ycnt = 4;}
 
 	pitch[0] = info->src_frame.pitch[0] * ycnt;
 	addr[0] = info->src_frame.laddr[0] + pitch[0] * y0 + x0 * ycnt;
@@ -320,15 +275,14 @@ int de_tr_set_cfg(tr_info *info)
 		addr[2] = info->src_frame.laddr[2] + pitch[2] * y1 + x1 * ucnt;
 	}
 
-	if ((x0 != 0) || (y0 != 0)) {
-		pr_warn("In buffer coordinate is not original point[%d,%d].\n",
-			x0, y0);
+	if((0 != x0) ||(0 != y0)){
+		pr_warn("In buffer coordinate is not original point[%d,%d].\n",	x0, y0);
 		return -1;
 	}
 
-	if ((pitch[0]&0xf) || (pitch[1]&0xf) || (pitch[2]&0xf)) {
+	if((pitch[0]&0xf) ||(pitch[1]&0xf)||(pitch[2]&0xf)){
 		pr_warn("In buffer pitch is not 16 byte align[%x,%x,%x].\n",
-		pitch[0], pitch[1], pitch[2]);
+		pitch[0],pitch[1],pitch[2]);
 		return -1;
 	}
 
@@ -336,28 +290,28 @@ int de_tr_set_cfg(tr_info *info)
 	haddr[1] = ((addr[1]>>32)&0xff) + info->src_frame.haddr[1];
 	haddr[2] = ((addr[2]>>32)&0xff) + info->src_frame.haddr[2];
 
-	if (fmt >= TR_FORMAT_YUV444_I_AYUV) {
-		if ((addr[0]&0xf) || (addr[1]&0xf) || (addr[2]&0xf)) {
+	if(fmt >= TR_FORMAT_YUV444_I_AYUV) {
+		if((addr[0]&0xf) ||(addr[1]&0xf)||(addr[2]&0xf)){
 			pr_warn("Input address is not 16 byte align.\n");
 			return -1;
 		}
 	}
 
-	w = w == 0?0:w-1;
-	h = h == 0?0:h-1;
-	tr_writel((h<<16)|w, tr_base + TR_IN_SIZE);
+	w = w==0?0:w-1;
+	h = h==0?0:h-1;
+	tr_writel((h<<16)|w,tr_base + TR_IN_SIZE);
 
-	tr_writel(pitch[0], tr_base + TR_IN_PITCH0);
-	tr_writel(pitch[1], tr_base + TR_IN_PITCH1);
-	tr_writel(pitch[2], tr_base + TR_IN_PITCH2);
+	tr_writel(pitch[0],tr_base + TR_IN_PITCH0);
+	tr_writel(pitch[1],tr_base + TR_IN_PITCH1);
+	tr_writel(pitch[2],tr_base + TR_IN_PITCH2);
 
-	tr_writel(addr[0]&0xffffffff, tr_base + TR_IN_LADDR0);
-	tr_writel(addr[1]&0xffffffff, tr_base + TR_IN_LADDR1);
-	tr_writel(addr[2]&0xffffffff, tr_base + TR_IN_LADDR2);
+	tr_writel(addr[0]&0xffffffff,tr_base + TR_IN_LADDR0);
+	tr_writel(addr[1]&0xffffffff,tr_base + TR_IN_LADDR1);
+	tr_writel(addr[2]&0xffffffff,tr_base + TR_IN_LADDR2);
 
-	tr_writel(haddr[0], tr_base + TR_IN_HADDR0);
-	tr_writel(haddr[1], tr_base + TR_IN_HADDR1);
-	tr_writel(haddr[2], tr_base + TR_IN_HADDR2);
+	tr_writel(haddr[0],tr_base + TR_IN_HADDR0);
+	tr_writel(haddr[1],tr_base + TR_IN_HADDR1);
+	tr_writel(haddr[2],tr_base + TR_IN_HADDR2);
 
 	/* dst */
 	fmt = info->dst_frame.fmt;
@@ -366,9 +320,9 @@ int de_tr_set_cfg(tr_info *info)
 	w  = info->dst_rect.w;
 	h  = info->dst_rect.h;
 
-	/* for ycbcr format output only support yv12 */
-	if (fmt >= TR_FORMAT_YUV444_I_AYUV) {
-		ycnt = 1; ucnt = 1; x1 = x0/2; y1 = y0/2;
+	//for ycbcr format output only support yv12
+	if(fmt >= TR_FORMAT_YUV444_I_AYUV) {
+		ycnt = 1;ucnt=1; x1=x0/2;y1=y0/2;
 	}
 
 	pitch[0] = info->dst_frame.pitch[0] * ycnt;
@@ -385,17 +339,16 @@ int de_tr_set_cfg(tr_info *info)
 		addr[2] = info->dst_frame.laddr[2]+pitch[2]*y1+x1*ucnt;
 	}
 
-	if (fmt >= TR_FORMAT_YUV444_I_AYUV) {
-		if ((pitch[0]&0xf) || (pitch[1]&0xf) || (pitch[2]&0xf)) {
+	if(fmt >= TR_FORMAT_YUV444_I_AYUV) {
+		if((pitch[0]&0xf) ||(pitch[1]&0xf)||(pitch[2]&0xf)){
 			pr_warn("Out buffer pitch is not 16 byte align[%x,%x,%x].\n",
-			pitch[0], pitch[1], pitch[2]);
+			pitch[0],pitch[1],pitch[2]);
 			return -1;
 		}
 	}
 
-	if ((x0 != 0) || (y0 != 0)) {
-		pr_warn("Out buffer coordinate is not original point[%d,%d].\n",
-			x0, y0);
+	if((0 != x0) ||(0 != y0)){
+		pr_warn("Out buffer coordinate is not original point[%d,%d].\n", x0, y0);
 		return -1;
 	}
 
@@ -403,84 +356,46 @@ int de_tr_set_cfg(tr_info *info)
 	haddr[1] = ((addr[1]>>32)&0xff) + info->dst_frame.haddr[1];
 	haddr[2] = ((addr[2]>>32)&0xff) + info->dst_frame.haddr[2];
 
-	if (fmt >= TR_FORMAT_YUV444_I_AYUV) {
-		if ((addr[0]&0x1f) || (addr[1]&0x1f) || (addr[2]&0x1f)) {
+	if(fmt >= TR_FORMAT_YUV444_I_AYUV) {
+		if((addr[0]&0x1f) ||(addr[1]&0x1f)||(addr[2]&0x1f)){
 			pr_warn("Output address is not 32 byte align.\n");
 			return -1;
 		}
 	}
 
-	w = w == 0?0:w-1;
-	h = h == 0?0:h-1;
-	tr_writel((h<<16)|w, tr_base + TR_OUT_SIZE);
+	w = w==0?0:w-1;
+	h = h==0?0:h-1;
+	tr_writel((h<<16)|w,tr_base + TR_OUT_SIZE);
 
-	tr_writel(pitch[0], tr_base + TR_OUT_PITCH0);
-	tr_writel(pitch[1], tr_base + TR_OUT_PITCH1);
-	tr_writel(pitch[2], tr_base + TR_OUT_PITCH2);
+	tr_writel(pitch[0],tr_base + TR_OUT_PITCH0);
+	tr_writel(pitch[1],tr_base + TR_OUT_PITCH1);
+	tr_writel(pitch[2],tr_base + TR_OUT_PITCH2);
 
-	tr_writel(addr[0]&0xffffffff, tr_base + TR_OUT_LADDR0);
-	tr_writel(addr[1]&0xffffffff, tr_base + TR_OUT_LADDR1);
-	tr_writel(addr[2]&0xffffffff, tr_base + TR_OUT_LADDR2);
+	tr_writel(addr[0]&0xffffffff,tr_base + TR_OUT_LADDR0);
+	tr_writel(addr[1]&0xffffffff,tr_base + TR_OUT_LADDR1);
+	tr_writel(addr[2]&0xffffffff,tr_base + TR_OUT_LADDR2);
 
-	tr_writel(haddr[0], tr_base + TR_OUT_HADDR0);
-	tr_writel(haddr[1], tr_base + TR_OUT_HADDR1);
-	tr_writel(haddr[2], tr_base + TR_OUT_HADDR2);
+	tr_writel(haddr[0],tr_base + TR_OUT_HADDR0);
+	tr_writel(haddr[1],tr_base + TR_OUT_HADDR1);
+	tr_writel(haddr[2],tr_base + TR_OUT_HADDR2);
 
-	/* src */
-	if (info->src_frame.fmt == TR_FORMAT_YUV422_I_VYUY)
-		fmt = 0x20;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV422_I_YVYU)
-		fmt = 0x21;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV422_I_YVYU)
-		fmt = 0x21;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV422_I_UYVY)
-		fmt = 0x22;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV422_I_UYVY)
-		fmt = 0x22;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV422_I_YUYV)
-		fmt = 0x23;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV422_I_YUYV)
-		fmt = 0x23;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV422_SP_UVUV)
-		fmt = 0x24;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV422_SP_UVUV)
-		fmt = 0x24;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV422_SP_VUVU)
-		fmt = 0x25;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV422_SP_VUVU)
-		fmt = 0x25;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV422_P)
-		fmt = 0x26;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV422_P)
-		fmt = 0x26;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV420_SP_UVUV)
-		fmt = 0x28;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV420_SP_UVUV)
-		fmt = 0x28;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV420_SP_VUVU)
-		fmt = 0x29;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV420_SP_VUVU)
-		fmt = 0x29;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV420_P)
-		fmt = 0x2a;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV420_P)
-		fmt = 0x2a;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV411_SP_UVUV)
-		fmt = 0x2c;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV411_SP_UVUV)
-		fmt = 0x2c;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV411_SP_VUVU)
-		fmt = 0x2d;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV411_SP_VUVU)
-		fmt = 0x2d;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV411_P)
-		fmt = 0x2e;
-	else if (info->src_frame.fmt == TR_FORMAT_YUV411_P)
-		fmt = 0x2e;
-	else
-		fmt = info->src_frame.fmt;
-/* else {fmt = 0x0;} */
-	tr_writel(fmt, tr_base + TR_IN_FMT);
+	//src
+	if		(TR_FORMAT_YUV422_I_VYUY  == info->src_frame.fmt){fmt = 0x20;}
+	else if (TR_FORMAT_YUV422_I_YVYU  == info->src_frame.fmt){fmt = 0x21;}
+	else if (TR_FORMAT_YUV422_I_UYVY  == info->src_frame.fmt){fmt = 0x22;}
+	else if (TR_FORMAT_YUV422_I_YUYV  == info->src_frame.fmt){fmt = 0x23;}
+	else if (TR_FORMAT_YUV422_SP_UVUV == info->src_frame.fmt){fmt = 0x24;}
+	else if (TR_FORMAT_YUV422_SP_VUVU == info->src_frame.fmt){fmt = 0x25;}
+	else if (TR_FORMAT_YUV422_P       == info->src_frame.fmt){fmt = 0x26;}
+	else if (TR_FORMAT_YUV420_SP_UVUV == info->src_frame.fmt){fmt = 0x28;}
+	else if (TR_FORMAT_YUV420_SP_VUVU == info->src_frame.fmt){fmt = 0x29;}
+	else if (TR_FORMAT_YUV420_P       == info->src_frame.fmt){fmt = 0x2a;}
+	else if (TR_FORMAT_YUV411_SP_UVUV == info->src_frame.fmt){fmt = 0x2c;}
+	else if (TR_FORMAT_YUV411_SP_VUVU == info->src_frame.fmt){fmt = 0x2d;}
+	else if (TR_FORMAT_YUV411_P       == info->src_frame.fmt){fmt = 0x2e;}
+	else {fmt = info->src_frame.fmt;}
+//	else {fmt = 0x0;}
+	tr_writel(fmt,tr_base + TR_IN_FMT);
 
 	de_tr_irq_enable();
 	de_tr_set_enable();

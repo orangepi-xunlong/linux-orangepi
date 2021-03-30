@@ -155,7 +155,6 @@ int usb_choose_configuration(struct usb_device *udev)
 	}
 	return i;
 }
-EXPORT_SYMBOL_GPL(usb_choose_configuration);
 
 static int generic_probe(struct usb_device *udev)
 {
@@ -208,13 +207,8 @@ static int generic_suspend(struct usb_device *udev, pm_message_t msg)
 	if (!udev->parent)
 		rc = hcd_bus_suspend(udev, msg);
 
-	/*
-	 * Non-root USB2 devices don't need to do anything for FREEZE
-	 * or PRETHAW. USB3 devices don't support global suspend and
-	 * needs to be selectively suspended.
-	 */
-	else if ((msg.event == PM_EVENT_FREEZE || msg.event == PM_EVENT_PRETHAW)
-		 && (udev->speed < USB_SPEED_SUPER))
+	/* Non-root devices don't need to do anything for FREEZE or PRETHAW */
+	else if (msg.event == PM_EVENT_FREEZE || msg.event == PM_EVENT_PRETHAW)
 		rc = 0;
 	else
 		rc = usb_port_suspend(udev, msg);

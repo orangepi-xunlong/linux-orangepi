@@ -43,7 +43,7 @@ int adis_update_scan_mode(struct iio_dev *indio_dev,
 		return -ENOMEM;
 
 	rx = adis->buffer;
-	tx = rx + scan_count;
+	tx = rx + indio_dev->scan_bytes;
 
 	spi_message_init(&adis->msg);
 
@@ -102,8 +102,13 @@ static irqreturn_t adis_trigger_handler(int irq, void *p)
 		mutex_unlock(&adis->txrx_lock);
 	}
 
-	iio_push_to_buffers_with_timestamp(indio_dev, adis->buffer,
-		pf->timestamp);
+	/* Guaranteed to be aligned with 8 byte boundary */
+	if (indio_dev->scan_timestamp) {
+		void *b = adis->buffer + indio_dev->scan_bytes - sizeof(s64);
+		*(s64 *)b = pf->timestamp;
+	}
+
+	iio_push_to_buffers(indio_dev, adis->buffer);
 
 	iio_trigger_notify_done(indio_dev->trig);
 

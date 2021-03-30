@@ -50,11 +50,6 @@
 #define BCM2835_I2C_S_CLKT	BIT(9)
 #define BCM2835_I2C_S_LEN	BIT(10) /* Fake bit for SW error reporting */
 
-#define BCM2835_I2C_BITMSK_S	0x03FF
-
-#define BCM2835_I2C_CDIV_MIN	0x0002
-#define BCM2835_I2C_CDIV_MAX	0xFFFE
-
 #define BCM2835_I2C_TIMEOUT (msecs_to_jiffies(1000))
 
 struct bcm2835_i2c_dev {
@@ -64,7 +59,6 @@ struct bcm2835_i2c_dev {
 	int irq;
 	struct i2c_adapter adapter;
 	struct completion completion;
-	struct i2c_msg *curr_msg;
 	u32 msg_err;
 	u8 *msg_buf;
 	size_t msg_buf_remaining;
@@ -117,7 +111,6 @@ static irqreturn_t bcm2835_i2c_isr(int this_irq, void *data)
 	u32 val, err;
 
 	val = bcm2835_i2c_readl(i2c_dev, BCM2835_I2C_S);
-	val &= BCM2835_I2C_BITMSK_S;
 	bcm2835_i2c_writel(i2c_dev, BCM2835_I2C_S, val);
 
 	err = val & (BCM2835_I2C_S_CLKT | BCM2835_I2C_S_ERR);
@@ -127,15 +120,14 @@ static irqreturn_t bcm2835_i2c_isr(int this_irq, void *data)
 		return IRQ_HANDLED;
 	}
 
-	if (val & BCM2835_I2C_S_DONE) {
-		if (!i2c_dev->curr_msg) {
-			dev_err(i2c_dev->dev, "Got unexpected interrupt (from firmware?)\n");
-		} else if (i2c_dev->curr_msg->flags & I2C_M_RD) {
-			bcm2835_drain_rxfifo(i2c_dev);
-			val = bcm2835_i2c_readl(i2c_dev, BCM2835_I2C_S);
-		}
+	if (val & BCM2835_I2C_S_RXD) {
+		bcm2835_drain_rxfifo(i2c_dev);
+		if (!(val & BCM2835_I2C_S_DONE))
+			return IRQ_HANDLED;
+	}
 
-		if ((val & BCM2835_I2C_S_RXD) || i2c_dev->msg_buf_remaining)
+	if (val & BCM2835_I2C_S_DONE) {
+		if (i2c_dev->msg_buf_remaining)
 			i2c_dev->msg_err = BCM2835_I2C_S_LEN;
 		else
 			i2c_dev->msg_err = 0;
@@ -143,13 +135,8 @@ static irqreturn_t bcm2835_i2c_isr(int this_irq, void *data)
 		return IRQ_HANDLED;
 	}
 
-	if (val & BCM2835_I2C_S_TXW) {
+	if (val & BCM2835_I2C_S_TXD) {
 		bcm2835_fill_txfifo(i2c_dev);
-		return IRQ_HANDLED;
-	}
-
-	if (val & BCM2835_I2C_S_RXR) {
-		bcm2835_drain_rxfifo(i2c_dev);
 		return IRQ_HANDLED;
 	}
 
@@ -160,12 +147,11 @@ static int bcm2835_i2c_xfer_msg(struct bcm2835_i2c_dev *i2c_dev,
 				struct i2c_msg *msg)
 {
 	u32 c;
-	unsigned long time_left;
+	int time_left;
 
-	i2c_dev->curr_msg = msg;
 	i2c_dev->msg_buf = msg->buf;
 	i2c_dev->msg_buf_remaining = msg->len;
-	reinit_completion(&i2c_dev->completion);
+	INIT_COMPLETION(i2c_dev->completion);
 
 	bcm2835_i2c_writel(i2c_dev, BCM2835_I2C_C, BCM2835_I2C_C_CLEAR);
 
@@ -230,39 +216,47 @@ static const struct i2c_algorithm bcm2835_i2c_algo = {
 	.functionality	= bcm2835_i2c_func,
 };
 
-/*
- * This HW was reported to have problems with clock stretching:
- * http://www.advamation.com/knowhow/raspberrypi/rpi-i2c-bug.html
- * https://www.raspberrypi.org/forums/viewtopic.php?p=146272
- */
-static const struct i2c_adapter_quirks bcm2835_i2c_quirks = {
-	.flags = I2C_AQ_NO_CLK_STRETCH,
-};
-
 static int bcm2835_i2c_probe(struct platform_device *pdev)
 {
 	struct bcm2835_i2c_dev *i2c_dev;
-	struct resource *mem, *irq;
+	struct resource *mem, *requested, *irq;
 	u32 bus_clk_rate, divider;
 	int ret;
 	struct i2c_adapter *adap;
 
 	i2c_dev = devm_kzalloc(&pdev->dev, sizeof(*i2c_dev), GFP_KERNEL);
-	if (!i2c_dev)
+	if (!i2c_dev) {
+		dev_err(&pdev->dev, "Cannot allocate i2c_dev\n");
 		return -ENOMEM;
+	}
 	platform_set_drvdata(pdev, i2c_dev);
 	i2c_dev->dev = &pdev->dev;
 	init_completion(&i2c_dev->completion);
 
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	i2c_dev->regs = devm_ioremap_resource(&pdev->dev, mem);
-	if (IS_ERR(i2c_dev->regs))
-		return PTR_ERR(i2c_dev->regs);
+	if (!mem) {
+		dev_err(&pdev->dev, "No mem resource\n");
+		return -ENODEV;
+	}
+
+	requested = devm_request_mem_region(&pdev->dev, mem->start,
+					    resource_size(mem),
+					    dev_name(&pdev->dev));
+	if (!requested) {
+		dev_err(&pdev->dev, "Could not claim register region\n");
+		return -EBUSY;
+	}
+
+	i2c_dev->regs = devm_ioremap(&pdev->dev, mem->start,
+				     resource_size(mem));
+	if (!i2c_dev->regs) {
+		dev_err(&pdev->dev, "Could not map registers\n");
+		return -ENOMEM;
+	}
 
 	i2c_dev->clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(i2c_dev->clk)) {
-		if (PTR_ERR(i2c_dev->clk) != -EPROBE_DEFER)
-			dev_err(&pdev->dev, "Could not get clock\n");
+		dev_err(&pdev->dev, "Could not get clock\n");
 		return PTR_ERR(i2c_dev->clk);
 	}
 
@@ -282,11 +276,6 @@ static int bcm2835_i2c_probe(struct platform_device *pdev)
 	 */
 	if (divider & 1)
 		divider++;
-	if ((divider < BCM2835_I2C_CDIV_MIN) ||
-	    (divider > BCM2835_I2C_CDIV_MAX)) {
-		dev_err(&pdev->dev, "Invalid clock-frequency\n");
-		return -ENODEV;
-	}
 	bcm2835_i2c_writel(i2c_dev, BCM2835_I2C_DIV, divider);
 
 	irq = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
@@ -306,12 +295,10 @@ static int bcm2835_i2c_probe(struct platform_device *pdev)
 	adap = &i2c_dev->adapter;
 	i2c_set_adapdata(adap, i2c_dev);
 	adap->owner = THIS_MODULE;
-	adap->class = I2C_CLASS_DEPRECATED;
+	adap->class = I2C_CLASS_HWMON;
 	strlcpy(adap->name, "bcm2835 I2C adapter", sizeof(adap->name));
 	adap->algo = &bcm2835_i2c_algo;
 	adap->dev.parent = &pdev->dev;
-	adap->dev.of_node = pdev->dev.of_node;
-	adap->quirks = &bcm2835_i2c_quirks;
 
 	bcm2835_i2c_writel(i2c_dev, BCM2835_I2C_C, 0);
 
@@ -343,6 +330,7 @@ static struct platform_driver bcm2835_i2c_driver = {
 	.remove		= bcm2835_i2c_remove,
 	.driver		= {
 		.name	= "i2c-bcm2835",
+		.owner	= THIS_MODULE,
 		.of_match_table = bcm2835_i2c_of_match,
 	},
 };

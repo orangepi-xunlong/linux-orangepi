@@ -126,7 +126,6 @@ static void snd_cmi8328_cfg_write(u16 port, u8 reg, u8 val)
 	outb(val, port + 3);	/* yes, value goes to the same port as index */
 }
 
-#ifdef CONFIG_PM
 static void snd_cmi8328_cfg_save(u16 port, u8 cfg[])
 {
 	cfg[0] = snd_cmi8328_cfg_read(port, CFG1);
@@ -140,7 +139,6 @@ static void snd_cmi8328_cfg_restore(u16 port, u8 cfg[])
 	snd_cmi8328_cfg_write(port, CFG2, cfg[1]);
 	snd_cmi8328_cfg_write(port, CFG3, cfg[2]);
 }
-#endif /* CONFIG_PM */
 
 static int snd_cmi8328_mixer(struct snd_wss *chip)
 {
@@ -293,21 +291,22 @@ static int snd_cmi8328_probe(struct device *pdev, unsigned int ndev)
 	}
 	outb(val, port);
 
-	err = snd_card_new(pdev, index[ndev], id[ndev], THIS_MODULE,
-			   sizeof(struct snd_cmi8328), &card);
+	err = snd_card_create(index[ndev], id[ndev], THIS_MODULE,
+				sizeof(struct snd_cmi8328), &card);
 	if (err < 0)
 		return err;
 	cmi = card->private_data;
 	cmi->card = card;
 	cmi->port = port;
 	cmi->wss_cfg = val;
+	snd_card_set_dev(card, pdev);
 
 	err = snd_wss_create(card, port + 4, -1, irq[ndev], dma1[ndev],
 			dma2[ndev], WSS_HW_DETECT, 0, &cmi->wss);
 	if (err < 0)
 		goto error;
 
-	err = snd_wss_pcm(cmi->wss, 0);
+	err = snd_wss_pcm(cmi->wss, 0, NULL);
 	if (err < 0)
 		goto error;
 
@@ -318,7 +317,7 @@ static int snd_cmi8328_probe(struct device *pdev, unsigned int ndev)
 	if (err < 0)
 		goto error;
 
-	if (snd_wss_timer(cmi->wss, 0) < 0)
+	if (snd_wss_timer(cmi->wss, 0, NULL) < 0)
 		snd_printk(KERN_WARNING "error initializing WSS timer\n");
 
 	if (mpuport[ndev] == SNDRV_AUTO_PORT) {
@@ -419,6 +418,7 @@ static int snd_cmi8328_remove(struct device *pdev, unsigned int dev)
 	snd_cmi8328_cfg_write(cmi->port, CFG2, 0);
 	snd_cmi8328_cfg_write(cmi->port, CFG3, 0);
 	snd_card_free(card);
+	dev_set_drvdata(pdev, NULL);
 	return 0;
 }
 
@@ -469,4 +469,15 @@ static struct isa_driver snd_cmi8328_driver = {
 	},
 };
 
-module_isa_driver(snd_cmi8328_driver, CMI8328_MAX);
+static int __init alsa_card_cmi8328_init(void)
+{
+	return isa_register_driver(&snd_cmi8328_driver, CMI8328_MAX);
+}
+
+static void __exit alsa_card_cmi8328_exit(void)
+{
+	isa_unregister_driver(&snd_cmi8328_driver);
+}
+
+module_init(alsa_card_cmi8328_init)
+module_exit(alsa_card_cmi8328_exit)

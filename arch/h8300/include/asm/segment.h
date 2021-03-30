@@ -29,16 +29,20 @@ typedef struct {
 
 static inline mm_segment_t get_fs(void)
 {
-	return USER_DS;
+    return USER_DS;
 }
 
 static inline mm_segment_t get_ds(void)
 {
-	/* return the supervisor data space code */
-	return KERNEL_DS;
+    /* return the supervisor data space code */
+    return KERNEL_DS;
 }
 
-#define segment_eq(a, b)	((a).seg == (b).seg)
+static inline void set_fs(mm_segment_t val)
+{
+}
+
+#define segment_eq(a,b)	((a).seg == (b).seg)
 
 #endif /* __ASSEMBLY__ */
 

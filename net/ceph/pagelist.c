@@ -1,6 +1,5 @@
 #include <linux/module.h>
 #include <linux/gfp.h>
-#include <linux/slab.h>
 #include <linux/pagemap.h>
 #include <linux/highmem.h>
 #include <linux/ceph/pagelist.h>
@@ -14,10 +13,8 @@ static void ceph_pagelist_unmap_tail(struct ceph_pagelist *pl)
 	}
 }
 
-void ceph_pagelist_release(struct ceph_pagelist *pl)
+int ceph_pagelist_release(struct ceph_pagelist *pl)
 {
-	if (!atomic_dec_and_test(&pl->refcnt))
-		return;
 	ceph_pagelist_unmap_tail(pl);
 	while (!list_empty(&pl->head)) {
 		struct page *page = list_first_entry(&pl->head, struct page,
@@ -26,7 +23,7 @@ void ceph_pagelist_release(struct ceph_pagelist *pl)
 		__free_page(page);
 	}
 	ceph_pagelist_free_reserve(pl);
-	kfree(pl);
+	return 0;
 }
 EXPORT_SYMBOL(ceph_pagelist_release);
 
@@ -56,7 +53,7 @@ int ceph_pagelist_append(struct ceph_pagelist *pl, const void *buf, size_t len)
 		size_t bit = pl->room;
 		int ret;
 
-		memcpy(pl->mapped_tail + (pl->length & ~PAGE_MASK),
+		memcpy(pl->mapped_tail + (pl->length & ~PAGE_CACHE_MASK),
 		       buf, bit);
 		pl->length += bit;
 		pl->room -= bit;
@@ -67,7 +64,7 @@ int ceph_pagelist_append(struct ceph_pagelist *pl, const void *buf, size_t len)
 			return ret;
 	}
 
-	memcpy(pl->mapped_tail + (pl->length & ~PAGE_MASK), buf, len);
+	memcpy(pl->mapped_tail + (pl->length & ~PAGE_CACHE_MASK), buf, len);
 	pl->length += len;
 	pl->room -= len;
 	return 0;

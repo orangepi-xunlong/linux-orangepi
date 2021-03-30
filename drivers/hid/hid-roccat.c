@@ -366,7 +366,7 @@ void roccat_disconnect(int minor)
 	mutex_lock(&devices_lock);
 	devices[minor] = NULL;
 	mutex_unlock(&devices_lock);
-
+	
 	if (device->open) {
 		hid_hw_close(device->hid);
 		wake_up_interruptible(&device->wait);
@@ -421,27 +421,18 @@ static int __init roccat_init(void)
 
 	retval = alloc_chrdev_region(&dev_id, ROCCAT_FIRST_MINOR,
 			ROCCAT_MAX_DEVICES, "roccat");
-	if (retval < 0) {
-		pr_warn("can't get major number\n");
-		goto error;
-	}
 
 	roccat_major = MAJOR(dev_id);
 
-	cdev_init(&roccat_cdev, &roccat_ops);
-	retval = cdev_add(&roccat_cdev, dev_id, ROCCAT_MAX_DEVICES);
-
 	if (retval < 0) {
-		pr_warn("cannot add cdev\n");
-		goto cleanup_alloc_chrdev_region;
+		pr_warn("can't get major number\n");
+		return retval;
 	}
+
+	cdev_init(&roccat_cdev, &roccat_ops);
+	cdev_add(&roccat_cdev, dev_id, ROCCAT_MAX_DEVICES);
+
 	return 0;
-
-
- cleanup_alloc_chrdev_region:
-	unregister_chrdev_region(dev_id, ROCCAT_MAX_DEVICES);
- error:
-	return retval;
 }
 
 static void __exit roccat_exit(void)

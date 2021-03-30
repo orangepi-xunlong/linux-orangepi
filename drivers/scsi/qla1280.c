@@ -379,7 +379,14 @@
 #define  DEBUG_PRINT_NVRAM	0
 #define  DEBUG_QLA1280		0
 
+/*
+ * The SGI VISWS is broken and doesn't support MMIO ;-(
+ */
+#ifdef CONFIG_X86_VISWS
+#define	MEMORY_MAPPED_IO	0
+#else
 #define	MEMORY_MAPPED_IO	1
+#endif
 
 #include "qla1280.h"
 
@@ -1224,9 +1231,10 @@ qla1280_slave_configure(struct scsi_device *device)
 
 	if (device->tagged_supported &&
 	    (ha->bus_settings[bus].qtag_enables & (BIT_0 << target))) {
-		scsi_change_queue_depth(device, ha->bus_settings[bus].hiwat);
+		scsi_adjust_queue_depth(device, MSG_ORDERED_TAG,
+					ha->bus_settings[bus].hiwat);
 	} else {
-		scsi_change_queue_depth(device, default_depth);
+		scsi_adjust_queue_depth(device, 0, default_depth);
 	}
 
 	nv->bus[bus].target[target].parameter.enable_sync = device->sdtr;
@@ -2494,7 +2502,7 @@ qla1280_mailbox_command(struct scsi_qla_host *ha, uint8_t mr, uint16_t *mb)
 	/* Issue set host interrupt command. */
 
 	/* set up a timer just in case we're really jammed */
-	init_timer_on_stack(&timer);
+	init_timer(&timer);
 	timer.expires = jiffies + 20*HZ;
 	timer.data = (unsigned long)ha;
 	timer.function = qla1280_mailbox_timeout;
@@ -4214,9 +4222,10 @@ static struct scsi_host_template qla1280_driver_template = {
 	.eh_bus_reset_handler	= qla1280_eh_bus_reset,
 	.eh_host_reset_handler	= qla1280_eh_adapter_reset,
 	.bios_param		= qla1280_biosparam,
-	.can_queue		= MAX_OUTSTANDING_COMMANDS,
+	.can_queue		= 0xfffff,
 	.this_id		= -1,
 	.sg_tablesize		= SG_ALL,
+	.cmd_per_lun		= 1,
 	.use_clustering		= ENABLE_CLUSTERING,
 };
 

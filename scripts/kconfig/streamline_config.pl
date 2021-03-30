@@ -137,7 +137,7 @@ my $ksource = ($ARGV[0] ? $ARGV[0] : '.');
 my $kconfig = $ARGV[1];
 my $lsmod_file = $ENV{'LSMOD'};
 
-my @makefiles = `find $ksource -name Makefile -or -name Kbuild 2>/dev/null`;
+my @makefiles = `find $ksource -name Makefile 2>/dev/null`;
 chomp @makefiles;
 
 my %depends;
@@ -188,7 +188,7 @@ sub read_kconfig {
 	$cont = 0;
 
 	# collect any Kconfig sources
-	if (/^source\s+"?([^"]+)/) {
+	if (/^source\s*"(.*)"/) {
 	    my $kconfig = $1;
 	    # prevent reading twice.
 	    if (!defined($read_kconfigs{$kconfig})) {
@@ -219,13 +219,6 @@ sub read_kconfig {
 	    $depends{$config} = $1;
 	} elsif ($state eq "DEP" && /^\s*depends\s+on\s+(.*)$/) {
 	    $depends{$config} .= " " . $1;
-	} elsif ($state eq "DEP" && /^\s*def(_(bool|tristate)|ault)\s+(\S.*)$/) {
-	    my $dep = $3;
-	    if ($dep !~ /^\s*(y|m|n)\s*$/) {
-		$dep =~ s/.*\sif\s+//;
-		$depends{$config} .= " " . $dep;
-		dprint "Added default depends $dep to $config\n";
-	    }
 
 	# Get the configs that select this config
 	} elsif ($state ne "NONE" && /^\s*select\s+(\S+)/) {
@@ -237,7 +230,7 @@ sub read_kconfig {
 	    }
 
 	# configs without prompts must be selected
-	} elsif ($state ne "NONE" && /^\s*(tristate\s+\S|prompt\b)/) {
+	} elsif ($state ne "NONE" && /^\s*tristate\s\S/) {
 	    # note if the config has a prompt
 	    $prompts{$config} = 1;
 
@@ -256,8 +249,8 @@ sub read_kconfig {
 
 	    $iflevel-- if ($iflevel);
 
-	# stop on "help" and keywords that end a menu entry
-	} elsif (/^\s*(---)?help(---)?\s*$/ || /^(comment|choice|menu)\b/) {
+	# stop on "help"
+	} elsif (/^\s*help\s*$/) {
 	    $state = "NONE";
 	}
     }
@@ -454,7 +447,7 @@ sub parse_config_depends
 	    $p =~ s/^[^$valid]*[$valid]+//;
 
 	    # We only need to process if the depend config is a module
-	    if (!defined($orig_configs{$conf}) || $orig_configs{$conf} eq "y") {
+	    if (!defined($orig_configs{$conf}) || !$orig_configs{conf} eq "m") {
 		next;
 	    }
 
@@ -589,7 +582,7 @@ while ($repeat) {
 
     # Now we need to see if we have to check selects;
     loop_select;
-}
+}	    
 
 my %setconfigs;
 
@@ -608,40 +601,6 @@ foreach my $line (@config_file) {
 	    print;
 	}
 	next;
-    }
-
-    if (/CONFIG_MODULE_SIG_KEY="(.+)"/) {
-        my $orig_cert = $1;
-        my $default_cert = "certs/signing_key.pem";
-
-        # Check that the logic in this script still matches the one in Kconfig
-        if (!defined($depends{"MODULE_SIG_KEY"}) ||
-            $depends{"MODULE_SIG_KEY"} !~ /"\Q$default_cert\E"/) {
-            print STDERR "WARNING: MODULE_SIG_KEY assertion failure, ",
-                "update needed to ", __FILE__, " line ", __LINE__, "\n";
-            print;
-        } elsif ($orig_cert ne $default_cert && ! -f $orig_cert) {
-            print STDERR "Module signature verification enabled but ",
-                "module signing key \"$orig_cert\" not found. Resetting ",
-                "signing key to default value.\n";
-            print "CONFIG_MODULE_SIG_KEY=\"$default_cert\"\n";
-        } else {
-            print;
-        }
-        next;
-    }
-
-    if (/CONFIG_SYSTEM_TRUSTED_KEYS="(.+)"/) {
-        my $orig_keys = $1;
-
-        if (! -f $orig_keys) {
-            print STDERR "System keyring enabled but keys \"$orig_keys\" ",
-                "not found. Resetting keys to default value.\n";
-            print "CONFIG_SYSTEM_TRUSTED_KEYS=\"\"\n";
-        } else {
-            print;
-        }
-        next;
     }
 
     if (/^(CONFIG.*)=(m|y)/) {

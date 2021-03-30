@@ -56,8 +56,8 @@ static int vlan_validate(struct nlattr *tb[], struct nlattr *data[])
 
 	if (data[IFLA_VLAN_PROTOCOL]) {
 		switch (nla_get_be16(data[IFLA_VLAN_PROTOCOL])) {
-		case htons(ETH_P_8021Q):
-		case htons(ETH_P_8021AD):
+		case __constant_htons(ETH_P_8021Q):
+		case __constant_htons(ETH_P_8021AD):
 			break;
 		default:
 			return -EPROTONOSUPPORT;
@@ -118,7 +118,6 @@ static int vlan_newlink(struct net *src_net, struct net_device *dev,
 {
 	struct vlan_dev_priv *vlan = vlan_dev_priv(dev);
 	struct net_device *real_dev;
-	unsigned int max_mtu;
 	__be16 proto;
 	int err;
 
@@ -145,11 +144,9 @@ static int vlan_newlink(struct net *src_net, struct net_device *dev,
 	if (err < 0)
 		return err;
 
-	max_mtu = netif_reduces_vlan_mtu(real_dev) ? real_dev->mtu - VLAN_HLEN :
-						     real_dev->mtu;
 	if (!tb[IFLA_MTU])
-		dev->mtu = max_mtu;
-	else if (dev->mtu > max_mtu)
+		dev->mtu = real_dev->mtu;
+	else if (dev->mtu > real_dev->mtu)
 		return -EINVAL;
 
 	err = vlan_changelink(dev, tb, data);
@@ -241,13 +238,6 @@ nla_put_failure:
 	return -EMSGSIZE;
 }
 
-static struct net *vlan_get_link_net(const struct net_device *dev)
-{
-	struct net_device *real_dev = vlan_dev_priv(dev)->real_dev;
-
-	return dev_net(real_dev);
-}
-
 struct rtnl_link_ops vlan_link_ops __read_mostly = {
 	.kind		= "vlan",
 	.maxtype	= IFLA_VLAN_MAX,
@@ -260,7 +250,6 @@ struct rtnl_link_ops vlan_link_ops __read_mostly = {
 	.dellink	= unregister_vlan_dev,
 	.get_size	= vlan_get_size,
 	.fill_info	= vlan_fill_info,
-	.get_link_net	= vlan_get_link_net,
 };
 
 int __init vlan_netlink_init(void)

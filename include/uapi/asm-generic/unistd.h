@@ -127,11 +127,8 @@ __SYSCALL(__NR_unlinkat, sys_unlinkat)
 __SYSCALL(__NR_symlinkat, sys_symlinkat)
 #define __NR_linkat 37
 __SYSCALL(__NR_linkat, sys_linkat)
-#ifdef __ARCH_WANT_RENAMEAT
-/* renameat is superseded with flags by renameat2 */
 #define __NR_renameat 38
 __SYSCALL(__NR_renameat, sys_renameat)
-#endif /* __ARCH_WANT_RENAMEAT */
 
 /* fs/namespace.c */
 #define __NR_umount2 39
@@ -194,7 +191,6 @@ __SYSCALL(__NR_quotactl, sys_quotactl)
 
 /* fs/readdir.c */
 #define __NR_getdents64 61
-#define __ARCH_WANT_COMPAT_SYS_GETDENTS64
 __SC_COMP(__NR_getdents64, sys_getdents64, compat_sys_getdents64)
 
 /* fs/read_write.c */
@@ -365,7 +361,7 @@ __SYSCALL(__NR_syslog, sys_syslog)
 #define __NR_ptrace 117
 __SYSCALL(__NR_ptrace, sys_ptrace)
 
-/* kernel/sched/core.c */
+/* kernel/sched.c */
 #define __NR_sched_setparam 118
 __SYSCALL(__NR_sched_setparam, sys_sched_setparam)
 #define __NR_sched_setscheduler 119
@@ -696,49 +692,27 @@ __SC_COMP(__NR_process_vm_writev, sys_process_vm_writev, \
 __SYSCALL(__NR_kcmp, sys_kcmp)
 #define __NR_finit_module 273
 __SYSCALL(__NR_finit_module, sys_finit_module)
-#define __NR_sched_setattr 274
+/* Backporting seccomp, skip a few ...
+ * #define __NR_sched_setattr 274
 __SYSCALL(__NR_sched_setattr, sys_sched_setattr)
-#define __NR_sched_getattr 275
+ * #define __NR_sched_getattr 275
 __SYSCALL(__NR_sched_getattr, sys_sched_getattr)
-#define __NR_renameat2 276
+ * #define __NR_renameat2 276
 __SYSCALL(__NR_renameat2, sys_renameat2)
+ */
 #define __NR_seccomp 277
 __SYSCALL(__NR_seccomp, sys_seccomp)
 #define __NR_getrandom 278
 __SYSCALL(__NR_getrandom, sys_getrandom)
-#define __NR_memfd_create 279
-__SYSCALL(__NR_memfd_create, sys_memfd_create)
-#define __NR_bpf 280
-__SYSCALL(__NR_bpf, sys_bpf)
-#define __NR_execveat 281
-__SC_COMP(__NR_execveat, sys_execveat, compat_sys_execveat)
-#define __NR_userfaultfd 282
-__SYSCALL(__NR_userfaultfd, sys_userfaultfd)
-#define __NR_membarrier 283
-__SYSCALL(__NR_membarrier, sys_membarrier)
-#define __NR_mlock2 284
-__SYSCALL(__NR_mlock2, sys_mlock2)
-#define __NR_copy_file_range 285
-__SYSCALL(__NR_copy_file_range, sys_copy_file_range)
-#define __NR_preadv2 286
-__SC_COMP(__NR_preadv2, sys_preadv2, compat_sys_preadv2)
-#define __NR_pwritev2 287
-__SC_COMP(__NR_pwritev2, sys_pwritev2, compat_sys_pwritev2)
-#define __NR_pkey_mprotect 288
-__SYSCALL(__NR_pkey_mprotect, sys_pkey_mprotect)
-#define __NR_pkey_alloc 289
-__SYSCALL(__NR_pkey_alloc,    sys_pkey_alloc)
-#define __NR_pkey_free 290
-__SYSCALL(__NR_pkey_free,     sys_pkey_free)
 
 #undef __NR_syscalls
-#define __NR_syscalls 291
+#define __NR_syscalls 279
 
 /*
  * All syscalls below here should go away really,
  * these are provided for both review and as a porting
  * help for the C library version.
- *
+*
  * Last chance: are any of these important enough to
  * enable by default?
  */

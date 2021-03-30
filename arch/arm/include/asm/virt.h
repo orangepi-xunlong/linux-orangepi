@@ -29,7 +29,6 @@
 #define BOOT_CPU_MODE_MISMATCH	PSR_N_BIT
 
 #ifndef __ASSEMBLY__
-#include <asm/cacheflush.h>
 
 #ifdef CONFIG_ARM_VIRT_EXT
 /*
@@ -42,21 +41,10 @@
  */
 extern int __boot_cpu_mode;
 
-static inline void sync_boot_mode(void)
-{
-	/*
-	 * As secondaries write to __boot_cpu_mode with caches disabled, we
-	 * must flush the corresponding cache entries to ensure the visibility
-	 * of their writes.
-	 */
-	sync_cache_r(&__boot_cpu_mode);
-}
-
 void __hyp_set_vectors(unsigned long phys_vector_base);
 unsigned long __hyp_get_vectors(void);
 #else
 #define __boot_cpu_mode	(SVC_MODE)
-#define sync_boot_mode()
 #endif
 
 #ifndef ZIMAGE
@@ -74,19 +62,6 @@ static inline bool is_hyp_mode_mismatched(void)
 {
 	return !!(__boot_cpu_mode & BOOT_CPU_MODE_MISMATCH);
 }
-
-static inline bool is_kernel_in_hyp_mode(void)
-{
-	return false;
-}
-
-/* The section containing the hypervisor idmap text */
-extern char __hyp_idmap_text_start[];
-extern char __hyp_idmap_text_end[];
-
-/* The section containing the hypervisor text */
-extern char __hyp_text_start[];
-extern char __hyp_text_end[];
 #endif
 
 #endif /* __ASSEMBLY__ */

@@ -1,38 +1,34 @@
 config MICROBLAZE
 	def_bool y
-	select ARCH_HAS_GCOV_PROFILE_ALL
-	select ARCH_MIGHT_HAVE_PC_PARPORT
+	select HAVE_MEMBLOCK
+	select HAVE_MEMBLOCK_NODE_MAP
+	select HAVE_FUNCTION_TRACER
+	select HAVE_FUNCTION_TRACE_MCOUNT_TEST
+	select HAVE_FUNCTION_GRAPH_TRACER
+	select HAVE_DYNAMIC_FTRACE
+	select HAVE_FTRACE_MCOUNT_RECORD
+	select ARCH_WANT_OPTIONAL_GPIOLIB
+	select HAVE_OPROFILE
+	select HAVE_ARCH_KGDB
+	select HAVE_DMA_ATTRS
+	select HAVE_DMA_API_DEBUG
+	select TRACING_SUPPORT
+	select OF
+	select OF_EARLY_FLATTREE
 	select ARCH_WANT_IPC_PARSE_VERSION
-	select BUILDTIME_EXTABLE_SORT
-	select CLKSRC_OF
-	select CLONE_BACKWARDS3
-	select COMMON_CLK
-	select GENERIC_ATOMIC64
-	select GENERIC_CLOCKEVENTS
-	select GENERIC_CPU_DEVICES
-	select GENERIC_IDLE_POLL_SETUP
+	select HAVE_DEBUG_KMEMLEAK
+	select IRQ_DOMAIN
+	select HAVE_GENERIC_HARDIRQS
+	select VIRT_TO_BUS
 	select GENERIC_IRQ_PROBE
 	select GENERIC_IRQ_SHOW
 	select GENERIC_PCI_IOMAP
-	select GENERIC_SCHED_CLOCK
-	select HAVE_ARCH_HASH
-	select HAVE_ARCH_KGDB
-	select HAVE_DEBUG_KMEMLEAK
-	select HAVE_DMA_API_DEBUG
-	select HAVE_DYNAMIC_FTRACE
-	select HAVE_FTRACE_MCOUNT_RECORD
-	select HAVE_FUNCTION_GRAPH_TRACER
-	select HAVE_FUNCTION_TRACER
-	select HAVE_MEMBLOCK
-	select HAVE_MEMBLOCK_NODE_MAP
-	select HAVE_OPROFILE
-	select IRQ_DOMAIN
+	select GENERIC_CPU_DEVICES
+	select GENERIC_ATOMIC64
+	select GENERIC_CLOCKEVENTS
+	select GENERIC_IDLE_POLL_SETUP
 	select MODULES_USE_ELF_RELA
-	select OF
-	select OF_EARLY_FLATTREE
-	select TRACING_SUPPORT
-	select VIRT_TO_BUS
-	select CPU_NO_EFFICIENT_FFS
+	select CLONE_BACKWARDS3
 
 config SWAP
 	def_bool n
@@ -67,11 +63,14 @@ config STACKTRACE_SUPPORT
 config LOCKDEP_SUPPORT
 	def_bool y
 
+config HAVE_LATENCYTOP_SUPPORT
+	def_bool y
+
 source "init/Kconfig"
 
 source "kernel/Kconfig.freezer"
 
-source "arch/microblaze/Kconfig.platform"
+source "arch/microblaze/platform/Kconfig.platform"
 
 menu "Processor type and features"
 
@@ -82,6 +81,11 @@ source "kernel/Kconfig.hz"
 config MMU
 	bool "MMU support"
 	default n
+
+config NO_MMU
+	bool
+	depends on !MMU
+	default y
 
 comment "Boot options"
 
@@ -125,11 +129,7 @@ config SECCOMP
 
 endmenu
 
-menu "Kernel features"
-
-config NR_CPUS
-	int
-	default "1"
+menu "Advanced setup"
 
 config ADVANCED_OPTIONS
 	bool "Prompt for advanced kernel configuration options"
@@ -250,9 +250,13 @@ config MICROBLAZE_64K_PAGES
 
 endchoice
 
-source "mm/Kconfig"
+config KERNEL_PAD
+	hex "Kernel PAD for unpacking" if ADVANCED_OPTIONS
+	default "0x80000" if MMU
 
 endmenu
+
+source "mm/Kconfig"
 
 menu "Executable file formats"
 
@@ -267,9 +271,6 @@ config PCI
 
 config PCI_DOMAINS
 	def_bool PCI
-
-config PCI_DOMAINS_GENERIC
-	def_bool PCI_DOMAINS
 
 config PCI_SYSCALL
 	def_bool PCI

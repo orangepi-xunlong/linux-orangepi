@@ -19,18 +19,18 @@
  * more details.
  */
 
-#include <linux/clk/tegra.h>
-#include <linux/tick.h>
-#include <linux/cpuidle.h>
-#include <linux/cpu_pm.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/cpuidle.h>
+#include <linux/cpu_pm.h>
+#include <linux/clockchips.h>
+#include <linux/clk/tegra.h>
 
 #include <asm/cpuidle.h>
-#include <asm/smp_plat.h>
+#include <asm/proc-fns.h>
 #include <asm/suspend.h>
+#include <asm/smp_plat.h>
 
-#include "cpuidle.h"
 #include "pm.h"
 #include "sleep.h"
 
@@ -56,6 +56,7 @@ static struct cpuidle_driver tegra_idle_driver = {
 			.exit_latency		= 2000,
 			.target_residency	= 2200,
 			.power_usage		= 0,
+			.flags			= CPUIDLE_FLAG_TIME_VALID,
 			.name			= "powered-down",
 			.desc			= "CPU power gated",
 		},
@@ -76,11 +77,11 @@ static bool tegra30_cpu_cluster_power_down(struct cpuidle_device *dev,
 		return false;
 	}
 
-	tick_broadcast_enter();
+	clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_ENTER, &dev->cpu);
 
 	tegra_idle_lp2_last();
 
-	tick_broadcast_exit();
+	clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_EXIT, &dev->cpu);
 
 	return true;
 }
@@ -90,13 +91,13 @@ static bool tegra30_cpu_core_power_down(struct cpuidle_device *dev,
 					struct cpuidle_driver *drv,
 					int index)
 {
-	tick_broadcast_enter();
+	clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_ENTER, &dev->cpu);
 
 	smp_wmb();
 
 	cpu_suspend(0, tegra30_sleep_cpu_secondary_finish);
 
-	tick_broadcast_exit();
+	clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_EXIT, &dev->cpu);
 
 	return true;
 }
@@ -113,15 +114,16 @@ static int tegra30_idle_lp2(struct cpuidle_device *dev,
 			    struct cpuidle_driver *drv,
 			    int index)
 {
+	u32 cpu = is_smp() ? cpu_logical_map(dev->cpu) : dev->cpu;
 	bool entered_lp2 = false;
 	bool last_cpu;
 
 	local_fiq_disable();
 
-	last_cpu = tegra_set_cpu_in_lp2();
+	last_cpu = tegra_set_cpu_in_lp2(cpu);
 	cpu_pm_enter();
 
-	if (dev->cpu == 0) {
+	if (cpu == 0) {
 		if (last_cpu)
 			entered_lp2 = tegra30_cpu_cluster_power_down(dev, drv,
 								     index);
@@ -132,7 +134,7 @@ static int tegra30_idle_lp2(struct cpuidle_device *dev,
 	}
 
 	cpu_pm_exit();
-	tegra_clear_cpu_in_lp2();
+	tegra_clear_cpu_in_lp2(cpu);
 
 	local_fiq_enable();
 
@@ -144,5 +146,8 @@ static int tegra30_idle_lp2(struct cpuidle_device *dev,
 
 int __init tegra30_cpuidle_init(void)
 {
+#ifdef CONFIG_PM_SLEEP
+	tegra_tear_down_cpu = tegra30_tear_down_cpu;
+#endif
 	return cpuidle_register(&tegra_idle_driver, NULL);
 }

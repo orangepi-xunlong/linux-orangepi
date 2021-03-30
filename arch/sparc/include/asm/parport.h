@@ -238,6 +238,7 @@ static const struct of_device_id ecpp_match[] = {
 static struct platform_driver ecpp_driver = {
 	.driver = {
 		.name = "ecpp",
+		.owner = THIS_MODULE,
 		.of_match_table = ecpp_match,
 	},
 	.probe			= ecpp_probe,

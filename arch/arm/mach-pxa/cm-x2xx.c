@@ -13,7 +13,6 @@
 #include <linux/syscore_ops.h>
 #include <linux/irq.h>
 #include <linux/gpio.h>
-#include <linux/regulator/machine.h>
 
 #include <linux/dm9000.h>
 #include <linux/leds.h>
@@ -22,18 +21,9 @@
 #include <asm/mach-types.h>
 #include <asm/mach/map.h>
 
-#include "pxa25x.h"
+#include <mach/pxa25x.h>
 #undef GPIO24_SSP1_SFRM
-#undef GPIO86_GPIO
-#undef GPIO87_GPIO
-#undef GPIO88_GPIO
-#undef GPIO89_GPIO
-#include "pxa27x.h"
-#undef GPIO24_SSP1_SFRM
-#undef GPIO86_GPIO
-#undef GPIO87_GPIO
-#undef GPIO88_GPIO
-#undef GPIO89_GPIO
+#include <mach/pxa27x.h>
 #include <mach/audio.h>
 #include <linux/platform_data/video-pxafb.h>
 #include <mach/smemc.h>
@@ -476,8 +466,6 @@ static void __init cmx2xx_init(void)
 	cmx2xx_init_ac97();
 	cmx2xx_init_touchscreen();
 	cmx2xx_init_leds();
-
-	regulator_has_full_constraints();
 }
 
 static void __init cmx2xx_init_irq(void)

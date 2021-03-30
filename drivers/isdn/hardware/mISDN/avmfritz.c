@@ -156,7 +156,7 @@ _set_debug(struct fritzcard *card)
 }
 
 static int
-set_debug(const char *val, const struct kernel_param *kp)
+set_debug(const char *val, struct kernel_param *kp)
 {
 	int ret;
 	struct fritzcard *card;
@@ -284,7 +284,7 @@ __write_ctrl_pciv2(struct fritzcard *fc, struct hdlc_hw *hdlc, u32 channel) {
 					  AVM_HDLC_STATUS_1));
 }
 
-static void
+void
 write_ctrl(struct bchannel *bch, int which) {
 	struct fritzcard *fc = bch->hw;
 	struct hdlc_hw *hdlc;
@@ -741,7 +741,7 @@ inithdlc(struct fritzcard *fc)
 	modehdlc(&fc->bch[1], -1);
 }
 
-static void
+void
 clear_pending_hdlc_ints(struct fritzcard *fc)
 {
 	u32 val;
@@ -962,7 +962,7 @@ avm_dctrl(struct mISDNchannel *ch, u32 cmd, void *arg)
 	return err;
 }
 
-static int
+int
 setup_fritz(struct fritzcard *fc)
 {
 	u32 val, ver;

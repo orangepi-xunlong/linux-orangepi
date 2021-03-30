@@ -74,7 +74,6 @@ static int da9055_read_alarm(struct da9055 *da9055, struct rtc_time *rtc_tm)
 	rtc_tm->tm_mday = v[2] & DA9055_RTC_ALM_DAY;
 	rtc_tm->tm_hour = v[1] & DA9055_RTC_ALM_HOUR;
 	rtc_tm->tm_min  = v[0] & DA9055_RTC_ALM_MIN;
-	rtc_tm->tm_sec = 0;
 
 	return rtc_valid_tm(rtc_tm);
 }
@@ -279,7 +278,7 @@ static int da9055_rtc_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	rtc->da9055 = dev_get_drvdata(pdev->dev.parent);
-	pdata = dev_get_platdata(rtc->da9055->dev);
+	pdata = rtc->da9055->dev->platform_data;
 	platform_set_drvdata(pdev, rtc);
 
 	ret = da9055_rtc_device_init(rtc->da9055, pdata);
@@ -303,9 +302,7 @@ static int da9055_rtc_probe(struct platform_device *pdev)
 	}
 
 	alm_irq = platform_get_irq_byname(pdev, "ALM");
-	if (alm_irq < 0)
-		return alm_irq;
-
+	alm_irq = regmap_irq_get_virq(rtc->da9055->irq_data, alm_irq);
 	ret = devm_request_threaded_irq(&pdev->dev, alm_irq, NULL,
 					da9055_rtc_alm_irq,
 					IRQF_TRIGGER_HIGH | IRQF_ONESHOT,
@@ -316,6 +313,13 @@ static int da9055_rtc_probe(struct platform_device *pdev)
 err_rtc:
 	return ret;
 
+}
+
+static int da9055_rtc_remove(struct platform_device *pdev)
+{
+	platform_set_drvdata(pdev, NULL);
+
+	return 0;
 }
 
 #ifdef CONFIG_PM
@@ -390,6 +394,7 @@ static const struct dev_pm_ops da9055_rtc_pm_ops = {
 
 static struct platform_driver da9055_rtc_driver = {
 	.probe  = da9055_rtc_probe,
+	.remove = da9055_rtc_remove,
 	.driver = {
 		.name   = "da9055-rtc",
 		.pm = &da9055_rtc_pm_ops,

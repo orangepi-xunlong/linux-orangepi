@@ -88,8 +88,10 @@ static debug_info_t *lcs_dbf_trace;
 static void
 lcs_unregister_debug_facility(void)
 {
-	debug_unregister(lcs_dbf_setup);
-	debug_unregister(lcs_dbf_trace);
+	if (lcs_dbf_setup)
+		debug_unregister(lcs_dbf_setup);
+	if (lcs_dbf_trace)
+		debug_unregister(lcs_dbf_trace);
 }
 
 static int
@@ -897,7 +899,6 @@ lcs_send_lancmd(struct lcs_card *card, struct lcs_buffer *buffer,
 	add_timer(&timer);
 	wait_event(reply->wait_q, reply->received);
 	del_timer_sync(&timer);
-	destroy_timer_on_stack(&timer);
 	LCS_DBF_TEXT_(4, trace, "rc:%d",reply->rc);
 	rc = reply->rc;
 	lcs_put_reply(reply);
@@ -1761,8 +1762,8 @@ lcs_get_control(struct lcs_card *card, struct lcs_cmd *cmd)
 			lcs_schedule_recovery(card);
 			break;
 		case LCS_CMD_STOPLAN:
-			pr_warn("Stoplan for %s initiated by LGW\n",
-				card->dev->name);
+			pr_warning("Stoplan for %s initiated by LGW.\n",
+				   card->dev->name);
 			if (card->dev)
 				netif_carrier_off(card->dev);
 			break;
@@ -1941,17 +1942,14 @@ static ssize_t
 lcs_portno_store (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
         struct lcs_card *card;
-	int rc;
-	s16 value;
+        int value;
 
 	card = dev_get_drvdata(dev);
 
         if (!card)
                 return 0;
 
-	rc = kstrtos16(buf, 0, &value);
-	if (rc)
-		return -EINVAL;
+        sscanf(buf, "%u", &value);
         /* TODO: sanity checks */
         card->portno = value;
 
@@ -1998,17 +1996,14 @@ static ssize_t
 lcs_timeout_store (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
         struct lcs_card *card;
-	unsigned int value;
-	int rc;
+        int value;
 
 	card = dev_get_drvdata(dev);
 
         if (!card)
                 return 0;
 
-	rc = kstrtouint(buf, 0, &value);
-	if (rc)
-		return -EINVAL;
+        sscanf(buf, "%u", &value);
         /* TODO: sanity checks */
         card->lancmd_timeout = value;
 
@@ -2150,7 +2145,7 @@ lcs_new_device(struct ccwgroup_device *ccwgdev)
 	rc = lcs_detect(card);
 	if (rc) {
 		LCS_DBF_TEXT(2, setup, "dtctfail");
-		dev_err(&ccwgdev->dev,
+		dev_err(&card->dev->dev,
 			"Detecting a network adapter for LCS devices"
 			" failed with rc=%d (0x%x)\n", rc, rc);
 		lcs_stopcard(card);
@@ -2446,7 +2441,7 @@ __init lcs_init_module(void)
 	if (rc)
 		goto out_err;
 	lcs_root_dev = root_device_register("lcs");
-	rc = PTR_ERR_OR_ZERO(lcs_root_dev);
+	rc = IS_ERR(lcs_root_dev) ? PTR_ERR(lcs_root_dev) : 0;
 	if (rc)
 		goto register_err;
 	rc = ccw_driver_register(&lcs_ccw_driver);

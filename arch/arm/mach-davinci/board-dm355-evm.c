@@ -19,20 +19,18 @@
 #include <linux/gpio.h>
 #include <linux/clk.h>
 #include <linux/videodev2.h>
-#include <media/i2c/tvp514x.h>
+#include <media/tvp514x.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/eeprom.h>
-#include <linux/platform_data/gpio-davinci.h>
-#include <linux/platform_data/i2c-davinci.h>
-#include <linux/platform_data/mtd-davinci.h>
-#include <linux/platform_data/mmc-davinci.h>
-#include <linux/platform_data/usb-davinci.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
+#include <linux/platform_data/i2c-davinci.h>
 #include <mach/serial.h>
-#include <mach/common.h>
+#include <linux/platform_data/mtd-davinci.h>
+#include <linux/platform_data/mmc-davinci.h>
+#include <linux/platform_data/usb-davinci.h>
 
 #include "davinci.h"
 
@@ -114,6 +112,8 @@ static struct davinci_i2c_platform_data i2c_pdata = {
 	.sda_pin        = 15,
 	.scl_pin        = 14,
 };
+
+static struct snd_platform_data dm355_evm_snd_data;
 
 static int dm355evm_mmc_gpios = -EINVAL;
 
@@ -292,7 +292,7 @@ static struct vpbe_output dm355evm_vpbe_outputs[] = {
 		.default_mode	= "ntsc",
 		.num_modes	= ARRAY_SIZE(dm355evm_enc_preset_timing),
 		.modes		= dm355evm_enc_preset_timing,
-		.if_params	= MEDIA_BUS_FMT_FIXED,
+		.if_params	= V4L2_MBUS_FMT_FIXED,
 	},
 };
 
@@ -312,6 +312,10 @@ static struct vpbe_config dm355evm_display_cfg = {
 static struct platform_device *davinci_evm_devices[] __initdata = {
 	&dm355evm_dm9000,
 	&davinci_nand_device,
+};
+
+static struct davinci_uart_config uart_config __initdata = {
+	.enabled_uarts = (1 << 0),
 };
 
 static void __init dm355_evm_map_io(void)
@@ -348,7 +352,11 @@ static struct davinci_mmc_config dm355evm_mmc_config = {
  * you have proper Mini-B or Mini-A cables (or Mini-A adapters)
  * the ID pin won't need any help.
  */
+#ifdef CONFIG_USB_MUSB_PERIPHERAL
+#define USB_ID_VALUE	0	/* ID pulled high; *should* float */
+#else
 #define USB_ID_VALUE	1	/* ID pulled low */
+#endif
 
 static struct spi_eeprom at25640a = {
 	.byte_len	= SZ_64K / 8,
@@ -371,24 +379,21 @@ static struct spi_board_info dm355_evm_spi_info[] __initconst = {
 static __init void dm355_evm_init(void)
 {
 	struct clk *aemif;
-	int ret;
-
-	ret = dm355_gpio_register();
-	if (ret)
-		pr_warn("%s: GPIO init failed: %d\n", __func__, ret);
 
 	gpio_request(1, "dm9000");
 	gpio_direction_input(1);
 	dm355evm_dm9000_rsrc[2].start = gpio_to_irq(1);
 
 	aemif = clk_get(&dm355evm_dm9000.dev, "aemif");
-	if (!WARN(IS_ERR(aemif), "unable to get AEMIF clock\n"))
+	if (IS_ERR(aemif))
+		WARN("%s: unable to get AEMIF clock\n", __func__);
+	else
 		clk_prepare_enable(aemif);
 
 	platform_add_devices(davinci_evm_devices,
 			     ARRAY_SIZE(davinci_evm_devices));
 	evm_init_i2c();
-	davinci_serial_init(dm355_serial_device);
+	davinci_serial_init(&uart_config);
 
 	/* NOTE:  NAND flash timings set by the UBL are slower than
 	 * needed by MT29F16G08FAA chips ... EMIF.A1CR is 0x40400204
@@ -409,7 +414,7 @@ static __init void dm355_evm_init(void)
 			ARRAY_SIZE(dm355_evm_spi_info));
 
 	/* DM335 EVM uses ASP1; line-out is a stereo mini-jack */
-	dm355_init_asp1(ASP1_TX_EVT_EN | ASP1_RX_EVT_EN);
+	dm355_init_asp1(ASP1_TX_EVT_EN | ASP1_RX_EVT_EN, &dm355_evm_snd_data);
 }
 
 MACHINE_START(DAVINCI_DM355_EVM, "DaVinci DM355 EVM")

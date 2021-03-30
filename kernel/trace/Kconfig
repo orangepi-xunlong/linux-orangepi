@@ -24,6 +24,16 @@ config HAVE_FUNCTION_GRAPH_TRACER
 	help
 	  See Documentation/trace/ftrace-design.txt
 
+config HAVE_FUNCTION_GRAPH_FP_TEST
+	bool
+	help
+	  See Documentation/trace/ftrace-design.txt
+
+config HAVE_FUNCTION_TRACE_MCOUNT_TEST
+	bool
+	help
+	  See Documentation/trace/ftrace-design.txt
+
 config HAVE_DYNAMIC_FTRACE
 	bool
 	help
@@ -160,17 +170,6 @@ config FUNCTION_GRAPH_TRACER
 	  address on the current task structure into a stack of calls.
 
 
-config PREEMPTIRQ_EVENTS
-	bool "Enable trace events for preempt and irq disable/enable"
-	select TRACE_IRQFLAGS
-	depends on DEBUG_PREEMPT || !PROVE_LOCKING
-	default n
-	help
-	  Enable tracing of disable and enable events for preemption and irqs.
-	  For tracing preempt disable/enable events, DEBUG_PREEMPT must be
-	  enabled. For tracing irq disable/enable events, PROVE_LOCKING must
-	  be disabled.
-
 config IRQSOFF_TRACER
 	bool "Interrupts-off Latency Tracer"
 	default n
@@ -229,41 +228,6 @@ config SCHED_TRACER
 	help
 	  This tracer tracks the latency of the highest priority task
 	  to be scheduled in, starting from the point it has woken up.
-
-config HWLAT_TRACER
-	bool "Tracer to detect hardware latencies (like SMIs)"
-	select GENERIC_TRACER
-	help
-	 This tracer, when enabled will create one or more kernel threads,
-	 depening on what the cpumask file is set to, which each thread
-	 spinning in a loop looking for interruptions caused by
-	 something other than the kernel. For example, if a
-	 System Management Interrupt (SMI) takes a noticeable amount of
-	 time, this tracer will detect it. This is useful for testing
-	 if a system is reliable for Real Time tasks.
-
-	 Some files are created in the tracing directory when this
-	 is enabled:
-
-	   hwlat_detector/width   - time in usecs for how long to spin for
-	   hwlat_detector/window  - time in usecs between the start of each
-				     iteration
-
-	 A kernel thread is created that will spin with interrupts disabled
-	 for "width" microseconds in every "widow" cycle. It will not spin
-	 for "window - width" microseconds, where the system can
-	 continue to operate.
-
-	 The output will appear in the trace and trace_pipe files.
-
-	 When the tracer is not running, it has no affect on the system,
-	 but when it is running, it can cause the system to be
-	 periodically non responsive. Do not run this tracer on a
-	 production system.
-
-	 To enable this tracer, echo in "hwlat" into the current_tracer
-	 file. Every time a latency is greater than tracing_thresh, it will
-	 be recorded into the ring buffer.
 
 config ENABLE_DEFAULT_TRACERS
 	bool "Trace process context switches and events"
@@ -463,7 +427,6 @@ config UPROBE_EVENT
 	bool "Enable uprobes-based dynamic events"
 	depends on ARCH_SUPPORTS_UPROBES
 	depends on MMU
-	depends on PERF_EVENTS
 	select UPROBES
 	select PROBE_EVENTS
 	select TRACING
@@ -475,14 +438,6 @@ config UPROBE_EVENT
 	  can probe, and record various registers.
 	  This option is required if you plan to use perf-probe subcommand
 	  of perf tools on user space applications.
-
-config BPF_EVENTS
-	depends on BPF_SYSCALL
-	depends on (KPROBE_EVENT || UPROBE_EVENT) && PERF_EVENTS
-	bool
-	default y
-	help
-	  This allows the user to attach BPF programs to kprobe events.
 
 config PROBE_EVENTS
 	def_bool n
@@ -572,33 +527,6 @@ config MMIOTRACE
 	  See Documentation/trace/mmiotrace.txt.
 	  If you are not helping to develop drivers, say N.
 
-config TRACING_MAP
-	bool
-	depends on ARCH_HAVE_NMI_SAFE_CMPXCHG
-	help
-	  tracing_map is a special-purpose lock-free map for tracing,
-	  separated out as a stand-alone facility in order to allow it
-	  to be shared between multiple tracers.  It isn't meant to be
-	  generally used outside of that context, and is normally
-	  selected by tracers that use it.
-
-config HIST_TRIGGERS
-	bool "Histogram triggers"
-	depends on ARCH_HAVE_NMI_SAFE_CMPXCHG
-	select TRACING_MAP
-	select TRACING
-	default n
-	help
-	  Hist triggers allow one or more arbitrary trace event fields
-	  to be aggregated into hash tables and dumped to stdout by
-	  reading a debugfs/tracefs file.  They're useful for
-	  gathering quick and dirty (though precise) summaries of
-	  event activity as an initial guide for further investigation
-	  using more advanced tools.
-
-	  See Documentation/trace/events.txt.
-	  If in doubt, say N.
-
 config MMIOTRACE_TEST
 	tristate "Test module for mmiotrace"
 	depends on MMIOTRACE && m
@@ -608,36 +536,6 @@ config MMIOTRACE_TEST
 	  However, it should be safe to use on e.g. unused portion of VRAM.
 
 	  Say N, unless you absolutely know what you are doing.
-
-config TRACEPOINT_BENCHMARK
-        bool "Add tracepoint that benchmarks tracepoints"
-	help
-	 This option creates the tracepoint "benchmark:benchmark_event".
-	 When the tracepoint is enabled, it kicks off a kernel thread that
-	 goes into an infinite loop (calling cond_sched() to let other tasks
-	 run), and calls the tracepoint. Each iteration will record the time
-	 it took to write to the tracepoint and the next iteration that
-	 data will be passed to the tracepoint itself. That is, the tracepoint
-	 will report the time it took to do the previous tracepoint.
-	 The string written to the tracepoint is a static string of 128 bytes
-	 to keep the time the same. The initial string is simply a write of
-	 "START". The second string records the cold cache time of the first
-	 write which is not added to the rest of the calculations.
-
-	 As it is a tight loop, it benchmarks as hot cache. That's fine because
-	 we care most about hot paths that are probably in cache already.
-
-	 An example of the output:
-
-	      START
-	      first=3672 [COLD CACHED]
-	      last=632 first=3672 max=632 min=632 avg=316 std=446 std^2=199712
-	      last=278 first=3672 max=632 min=278 avg=303 std=316 std^2=100337
-	      last=277 first=3672 max=632 min=277 avg=296 std=258 std^2=67064
-	      last=273 first=3672 max=632 min=273 avg=292 std=224 std^2=50411
-	      last=273 first=3672 max=632 min=273 avg=288 std=200 std^2=40389
-	      last=281 first=3672 max=632 min=273 avg=287 std=183 std^2=33666
-
 
 config RING_BUFFER_BENCHMARK
 	tristate "Ring buffer benchmark stress tester"
@@ -677,41 +575,6 @@ config RING_BUFFER_STARTUP_TEST
 	 other similar details.
 
 	 If unsure, say N
-
-config TRACE_ENUM_MAP_FILE
-       bool "Show enum mappings for trace events"
-       depends on TRACING
-       help
-        The "print fmt" of the trace events will show the enum names instead
-	of their values. This can cause problems for user space tools that
-	use this string to parse the raw data as user space does not know
-	how to convert the string to its value.
-
-	To fix this, there's a special macro in the kernel that can be used
-	to convert the enum into its value. If this macro is used, then the
-	print fmt strings will have the enums converted to their values.
-
-	If something does not get converted properly, this option can be
-	used to show what enums the kernel tried to convert.
-
-	This option is for debugging the enum conversions. A file is created
-	in the tracing directory called "enum_map" that will show the enum
-	names matched with their values and what trace event system they
-	belong too.
-
-	Normally, the mapping of the strings to values will be freed after
-	boot up or module load. With this option, they will not be freed, as
-	they are needed for the "enum_map" file. Enabling this option will
-	increase the memory footprint of the running kernel.
-
-	If unsure, say N
-
-config TRACING_EVENTS_GPIO
-	bool "Trace gpio events"
-	depends on GPIOLIB
-	default y
-	help
-	  Enable tracing events for gpio subsystem
 
 endif # FTRACE
 

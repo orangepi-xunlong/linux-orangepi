@@ -66,26 +66,26 @@ struct xt_sctp_info {
 
 #define SCTP_CHUNKMAP_IS_CLEAR(chunkmap) \
 	__sctp_chunkmap_is_clear((chunkmap), ARRAY_SIZE(chunkmap))
-static inline _Bool
+static inline bool
 __sctp_chunkmap_is_clear(const __u32 *chunkmap, unsigned int n)
 {
 	unsigned int i;
 	for (i = 0; i < n; ++i)
 		if (chunkmap[i])
-			return 0;
-	return 1;
+			return false;
+	return true;
 }
 
 #define SCTP_CHUNKMAP_IS_ALL_SET(chunkmap) \
 	__sctp_chunkmap_is_all_set((chunkmap), ARRAY_SIZE(chunkmap))
-static inline _Bool
+static inline bool
 __sctp_chunkmap_is_all_set(const __u32 *chunkmap, unsigned int n)
 {
 	unsigned int i;
 	for (i = 0; i < n; ++i)
 		if (chunkmap[i] != ~0U)
-			return 0;
-	return 1;
+			return false;
+	return true;
 }
 
 #endif /* _XT_SCTP_H_ */

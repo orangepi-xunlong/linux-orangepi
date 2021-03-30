@@ -1,5 +1,4 @@
 #include <linux/linkage.h>
-#include <asm/export.h>
 
 	.text
 ENTRY(ip_fast_csum) /* %o0 = iph, %o1 = ihl */
@@ -32,4 +31,3 @@ ENTRY(ip_fast_csum) /* %o0 = iph, %o1 = ihl */
 	retl
 	 and	%o2, %o1, %o0
 ENDPROC(ip_fast_csum)
-EXPORT_SYMBOL(ip_fast_csum)

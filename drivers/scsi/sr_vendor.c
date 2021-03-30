@@ -123,7 +123,7 @@ int sr_set_blocklength(Scsi_CD *cd, int blocklength)
 		return -ENOMEM;
 
 #ifdef DEBUG
-	sr_printk(KERN_INFO, cd, "MODE SELECT 0x%x/%d\n", density, blocklength);
+	printk("%s: MODE SELECT 0x%x/%d\n", cd->cdi.name, density, blocklength);
 #endif
 	memset(&cgc, 0, sizeof(struct packet_command));
 	cgc.cmd[0] = MODE_SELECT;
@@ -144,9 +144,8 @@ int sr_set_blocklength(Scsi_CD *cd, int blocklength)
 	}
 #ifdef DEBUG
 	else
-		sr_printk(KERN_INFO, cd,
-			  "switching blocklength to %d bytes failed\n",
-			  blocklength);
+		printk("%s: switching blocklength to %d bytes failed\n",
+		       cd->cdi.name, blocklength);
 #endif
 	kfree(buffer);
 	return rc;
@@ -191,8 +190,8 @@ int sr_cd_check(struct cdrom_device_info *cdi)
 		if (rc != 0)
 			break;
 		if ((buffer[0] << 8) + buffer[1] < 0x0a) {
-			sr_printk(KERN_INFO, cd, "Hmm, seems the drive "
-			   "doesn't support multisession CD's\n");
+			printk(KERN_INFO "%s: Hmm, seems the drive "
+			   "doesn't support multisession CD's\n", cd->cdi.name);
 			no_multi = 1;
 			break;
 		}
@@ -219,9 +218,9 @@ int sr_cd_check(struct cdrom_device_info *cdi)
 			if (rc != 0)
 				break;
 			if (buffer[14] != 0 && buffer[14] != 0xb0) {
-				sr_printk(KERN_INFO, cd, "Hmm, seems the cdrom "
-					  "doesn't support multisession CD's\n");
-
+				printk(KERN_INFO "%s: Hmm, seems the cdrom "
+				       "doesn't support multisession CD's\n",
+				       cd->cdi.name);
 				no_multi = 1;
 				break;
 			}
@@ -246,8 +245,9 @@ int sr_cd_check(struct cdrom_device_info *cdi)
 			cgc.timeout = VENDOR_TIMEOUT;
 			rc = sr_do_ioctl(cd, &cgc);
 			if (rc == -EINVAL) {
-				sr_printk(KERN_INFO, cd, "Hmm, seems the drive "
-					  "doesn't support multisession CD's\n");
+				printk(KERN_INFO "%s: Hmm, seems the drive "
+				       "doesn't support multisession CD's\n",
+				       cd->cdi.name);
 				no_multi = 1;
 				break;
 			}
@@ -277,8 +277,8 @@ int sr_cd_check(struct cdrom_device_info *cdi)
 			break;
 		}
 		if ((rc = buffer[2]) == 0) {
-			sr_printk(KERN_WARNING, cd,
-				  "No finished session\n");
+			printk(KERN_WARNING
+			       "%s: No finished session\n", cd->cdi.name);
 			break;
 		}
 		cgc.cmd[0] = READ_TOC;	/* Read TOC */
@@ -301,9 +301,9 @@ int sr_cd_check(struct cdrom_device_info *cdi)
 
 	default:
 		/* should not happen */
-		sr_printk(KERN_WARNING, cd,
-			  "unknown vendor code (%i), not initialized ?\n",
-			  cd->vendor);
+		printk(KERN_WARNING
+		   "%s: unknown vendor code (%i), not initialized ?\n",
+		       cd->cdi.name, cd->vendor);
 		sector = 0;
 		no_multi = 1;
 		break;
@@ -321,8 +321,8 @@ int sr_cd_check(struct cdrom_device_info *cdi)
 
 #ifdef DEBUG
 	if (sector)
-		sr_printk(KERN_DEBUG, cd, "multisession offset=%lu\n",
-			  sector);
+		printk(KERN_DEBUG "%s: multisession offset=%lu\n",
+		       cd->cdi.name, sector);
 #endif
 	kfree(buffer);
 	return rc;

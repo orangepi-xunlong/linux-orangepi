@@ -100,20 +100,14 @@
  * likely result in a loop in one of the lists.  That's a sure-fire recipe for
  * an infinite loop in the code.
  */
-struct xfs_mru_cache {
-	struct radix_tree_root	store;     /* Core storage data structure.  */
-	struct list_head	*lists;    /* Array of lists, one per grp.  */
-	struct list_head	reap_list; /* Elements overdue for reaping. */
-	spinlock_t		lock;      /* Lock to protect this struct.  */
-	unsigned int		grp_count; /* Number of discrete groups.    */
-	unsigned int		grp_time;  /* Time period spanned by grps.  */
-	unsigned int		lru_grp;   /* Group containing time zero.   */
-	unsigned long		time_zero; /* Time first element was added. */
-	xfs_mru_cache_free_func_t free_func; /* Function pointer for freeing. */
-	struct delayed_work	work;      /* Workqueue data for reaping.   */
-	unsigned int		queued;	   /* work has been queued */
-};
+typedef struct xfs_mru_cache_elem
+{
+	struct list_head list_node;
+	unsigned long	key;
+	void		*value;
+} xfs_mru_cache_elem_t;
 
+static kmem_zone_t		*xfs_mru_elem_zone;
 static struct workqueue_struct	*xfs_mru_reap_wq;
 
 /*
@@ -135,12 +129,12 @@ static struct workqueue_struct	*xfs_mru_reap_wq;
  */
 STATIC unsigned long
 _xfs_mru_cache_migrate(
-	struct xfs_mru_cache	*mru,
-	unsigned long		now)
+	xfs_mru_cache_t	*mru,
+	unsigned long	now)
 {
-	unsigned int		grp;
-	unsigned int		migrated = 0;
-	struct list_head	*lru_list;
+	unsigned int	grp;
+	unsigned int	migrated = 0;
+	struct list_head *lru_list;
 
 	/* Nothing to do if the data store is empty. */
 	if (!mru->time_zero)
@@ -199,11 +193,11 @@ _xfs_mru_cache_migrate(
  */
 STATIC void
 _xfs_mru_cache_list_insert(
-	struct xfs_mru_cache	*mru,
-	struct xfs_mru_cache_elem *elem)
+	xfs_mru_cache_t		*mru,
+	xfs_mru_cache_elem_t	*elem)
 {
-	unsigned int		grp = 0;
-	unsigned long		now = jiffies;
+	unsigned int	grp = 0;
+	unsigned long	now = jiffies;
 
 	/*
 	 * If the data store is empty, initialise time zero, leave grp set to
@@ -237,10 +231,10 @@ _xfs_mru_cache_list_insert(
  */
 STATIC void
 _xfs_mru_cache_clear_reap_list(
-	struct xfs_mru_cache	*mru)
-		__releases(mru->lock) __acquires(mru->lock)
+	xfs_mru_cache_t		*mru) __releases(mru->lock) __acquires(mru->lock)
+
 {
-	struct xfs_mru_cache_elem *elem, *next;
+	xfs_mru_cache_elem_t	*elem, *next;
 	struct list_head	tmp;
 
 	INIT_LIST_HEAD(&tmp);
@@ -258,8 +252,15 @@ _xfs_mru_cache_clear_reap_list(
 	spin_unlock(&mru->lock);
 
 	list_for_each_entry_safe(elem, next, &tmp, list_node) {
+
+		/* Remove the element from the reap list. */
 		list_del_init(&elem->list_node);
-		mru->free_func(elem);
+
+		/* Call the client's free function with the key and value pointer. */
+		mru->free_func(elem->key, elem->value);
+
+		/* Free the element structure. */
+		kmem_zone_free(xfs_mru_elem_zone, elem);
 	}
 
 	spin_lock(&mru->lock);
@@ -276,8 +277,7 @@ STATIC void
 _xfs_mru_cache_reap(
 	struct work_struct	*work)
 {
-	struct xfs_mru_cache	*mru =
-		container_of(work, struct xfs_mru_cache, work.work);
+	xfs_mru_cache_t		*mru = container_of(work, xfs_mru_cache_t, work.work);
 	unsigned long		now, next;
 
 	ASSERT(mru && mru->lists);
@@ -304,17 +304,28 @@ _xfs_mru_cache_reap(
 int
 xfs_mru_cache_init(void)
 {
-	xfs_mru_reap_wq = alloc_workqueue("xfs_mru_cache",
-				WQ_MEM_RECLAIM|WQ_FREEZABLE, 1);
+	xfs_mru_elem_zone = kmem_zone_init(sizeof(xfs_mru_cache_elem_t),
+	                                 "xfs_mru_cache_elem");
+	if (!xfs_mru_elem_zone)
+		goto out;
+
+	xfs_mru_reap_wq = alloc_workqueue("xfs_mru_cache", WQ_MEM_RECLAIM, 1);
 	if (!xfs_mru_reap_wq)
-		return -ENOMEM;
+		goto out_destroy_mru_elem_zone;
+
 	return 0;
+
+ out_destroy_mru_elem_zone:
+	kmem_zone_destroy(xfs_mru_elem_zone);
+ out:
+	return -ENOMEM;
 }
 
 void
 xfs_mru_cache_uninit(void)
 {
 	destroy_workqueue(xfs_mru_reap_wq);
+	kmem_zone_destroy(xfs_mru_elem_zone);
 }
 
 /*
@@ -325,33 +336,33 @@ xfs_mru_cache_uninit(void)
  */
 int
 xfs_mru_cache_create(
-	struct xfs_mru_cache	**mrup,
+	xfs_mru_cache_t		**mrup,
 	unsigned int		lifetime_ms,
 	unsigned int		grp_count,
 	xfs_mru_cache_free_func_t free_func)
 {
-	struct xfs_mru_cache	*mru = NULL;
-	int			err = 0, grp;
-	unsigned int		grp_time;
+	xfs_mru_cache_t	*mru = NULL;
+	int		err = 0, grp;
+	unsigned int	grp_time;
 
 	if (mrup)
 		*mrup = NULL;
 
 	if (!mrup || !grp_count || !lifetime_ms || !free_func)
-		return -EINVAL;
+		return EINVAL;
 
 	if (!(grp_time = msecs_to_jiffies(lifetime_ms) / grp_count))
-		return -EINVAL;
+		return EINVAL;
 
 	if (!(mru = kmem_zalloc(sizeof(*mru), KM_SLEEP)))
-		return -ENOMEM;
+		return ENOMEM;
 
 	/* An extra list is needed to avoid reaping up to a grp_time early. */
 	mru->grp_count = grp_count + 1;
 	mru->lists = kmem_zalloc(mru->grp_count * sizeof(*mru->lists), KM_SLEEP);
 
 	if (!mru->lists) {
-		err = -ENOMEM;
+		err = ENOMEM;
 		goto exit;
 	}
 
@@ -389,7 +400,7 @@ exit:
  */
 static void
 xfs_mru_cache_flush(
-	struct xfs_mru_cache	*mru)
+	xfs_mru_cache_t		*mru)
 {
 	if (!mru || !mru->lists)
 		return;
@@ -409,7 +420,7 @@ xfs_mru_cache_flush(
 
 void
 xfs_mru_cache_destroy(
-	struct xfs_mru_cache	*mru)
+	xfs_mru_cache_t		*mru)
 {
 	if (!mru || !mru->lists)
 		return;
@@ -427,30 +438,38 @@ xfs_mru_cache_destroy(
  */
 int
 xfs_mru_cache_insert(
-	struct xfs_mru_cache	*mru,
-	unsigned long		key,
-	struct xfs_mru_cache_elem *elem)
+	xfs_mru_cache_t	*mru,
+	unsigned long	key,
+	void		*value)
 {
-	int			error;
+	xfs_mru_cache_elem_t *elem;
 
 	ASSERT(mru && mru->lists);
 	if (!mru || !mru->lists)
-		return -EINVAL;
+		return EINVAL;
 
-	if (radix_tree_preload(GFP_NOFS))
-		return -ENOMEM;
+	elem = kmem_zone_zalloc(xfs_mru_elem_zone, KM_SLEEP);
+	if (!elem)
+		return ENOMEM;
+
+	if (radix_tree_preload(GFP_KERNEL)) {
+		kmem_zone_free(xfs_mru_elem_zone, elem);
+		return ENOMEM;
+	}
 
 	INIT_LIST_HEAD(&elem->list_node);
 	elem->key = key;
+	elem->value = value;
 
 	spin_lock(&mru->lock);
-	error = radix_tree_insert(&mru->store, key, elem);
+
+	radix_tree_insert(&mru->store, key, elem);
 	radix_tree_preload_end();
-	if (!error)
-		_xfs_mru_cache_list_insert(mru, elem);
+	_xfs_mru_cache_list_insert(mru, elem);
+
 	spin_unlock(&mru->lock);
 
-	return error;
+	return 0;
 }
 
 /*
@@ -459,12 +478,13 @@ xfs_mru_cache_insert(
  * the client data pointer for the removed element is returned, otherwise this
  * function will return a NULL pointer.
  */
-struct xfs_mru_cache_elem *
+void *
 xfs_mru_cache_remove(
-	struct xfs_mru_cache	*mru,
-	unsigned long		key)
+	xfs_mru_cache_t	*mru,
+	unsigned long	key)
 {
-	struct xfs_mru_cache_elem *elem;
+	xfs_mru_cache_elem_t *elem;
+	void		*value = NULL;
 
 	ASSERT(mru && mru->lists);
 	if (!mru || !mru->lists)
@@ -472,11 +492,17 @@ xfs_mru_cache_remove(
 
 	spin_lock(&mru->lock);
 	elem = radix_tree_delete(&mru->store, key);
-	if (elem)
+	if (elem) {
+		value = elem->value;
 		list_del(&elem->list_node);
+	}
+
 	spin_unlock(&mru->lock);
 
-	return elem;
+	if (elem)
+		kmem_zone_free(xfs_mru_elem_zone, elem);
+
+	return value;
 }
 
 /*
@@ -485,14 +511,13 @@ xfs_mru_cache_remove(
  */
 void
 xfs_mru_cache_delete(
-	struct xfs_mru_cache	*mru,
-	unsigned long		key)
+	xfs_mru_cache_t	*mru,
+	unsigned long	key)
 {
-	struct xfs_mru_cache_elem *elem;
+	void		*value = xfs_mru_cache_remove(mru, key);
 
-	elem = xfs_mru_cache_remove(mru, key);
-	if (elem)
-		mru->free_func(elem);
+	if (value)
+		mru->free_func(key, value);
 }
 
 /*
@@ -515,12 +540,12 @@ xfs_mru_cache_delete(
  * status, we need to help it get it right by annotating the path that does
  * not release the lock.
  */
-struct xfs_mru_cache_elem *
+void *
 xfs_mru_cache_lookup(
-	struct xfs_mru_cache	*mru,
-	unsigned long		key)
+	xfs_mru_cache_t	*mru,
+	unsigned long	key)
 {
-	struct xfs_mru_cache_elem *elem;
+	xfs_mru_cache_elem_t *elem;
 
 	ASSERT(mru && mru->lists);
 	if (!mru || !mru->lists)
@@ -535,7 +560,7 @@ xfs_mru_cache_lookup(
 	} else
 		spin_unlock(&mru->lock);
 
-	return elem;
+	return elem ? elem->value : NULL;
 }
 
 /*
@@ -545,8 +570,7 @@ xfs_mru_cache_lookup(
  */
 void
 xfs_mru_cache_done(
-	struct xfs_mru_cache	*mru)
-		__releases(mru->lock)
+	xfs_mru_cache_t	*mru) __releases(mru->lock)
 {
 	spin_unlock(&mru->lock);
 }

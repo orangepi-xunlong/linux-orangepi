@@ -3,7 +3,7 @@
  *  under the terms of the GNU General Public License version 2 as published
  *  by the Free Software Foundation.
  *
- *  Copyright (C) 2010 John Crispin <john@phrozen.org>
+ *  Copyright (C) 2010 John Crispin <blogic@openwrt.org>
  */
 
 #include <linux/types.h>
@@ -13,12 +13,15 @@
 #include <linux/delay.h>
 #include <linux/mm.h>
 #include <linux/vmalloc.h>
+#include <linux/module.h>
 #include <linux/clk.h>
 #include <linux/of_platform.h>
 #include <linux/of_gpio.h>
 #include <linux/of_irq.h>
 #include <linux/of_pci.h>
 
+#include <asm/pci.h>
+#include <asm/gpio.h>
 #include <asm/addrspace.h>
 
 #include <lantiq_soc.h>
@@ -86,7 +89,7 @@ static inline u32 ltq_calc_bar11mask(void)
 	u32 mem, bar11mask;
 
 	/* BAR11MASK value depends on available memory on system. */
-	mem = get_num_physpages() * PAGE_SIZE;
+	mem = num_physpages * PAGE_SIZE;
 	bar11mask = (0x0ffffff0 & ~((1 << (fls(mem) - 1)) - 1)) | 8;
 
 	return bar11mask;
@@ -212,12 +215,17 @@ static int ltq_pci_probe(struct platform_device *pdev)
 
 	pci_clear_flags(PCI_PROBE_ONLY);
 
+	res_cfg = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	res_bridge = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+	if (!res_cfg || !res_bridge) {
+		dev_err(&pdev->dev, "missing memory reources\n");
+		return -EINVAL;
+	}
+
 	ltq_pci_membase = devm_ioremap_resource(&pdev->dev, res_bridge);
 	if (IS_ERR(ltq_pci_membase))
 		return PTR_ERR(ltq_pci_membase);
 
-	res_cfg = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	ltq_pci_mapped_cfg = devm_ioremap_resource(&pdev->dev, res_cfg);
 	if (IS_ERR(ltq_pci_mapped_cfg))
 		return PTR_ERR(ltq_pci_mapped_cfg);
@@ -233,11 +241,13 @@ static const struct of_device_id ltq_pci_match[] = {
 	{ .compatible = "lantiq,pci-xway" },
 	{},
 };
+MODULE_DEVICE_TABLE(of, ltq_pci_match);
 
 static struct platform_driver ltq_pci_driver = {
 	.probe = ltq_pci_probe,
 	.driver = {
 		.name = "pci-xway",
+		.owner = THIS_MODULE,
 		.of_match_table = ltq_pci_match,
 	},
 };

@@ -75,6 +75,8 @@
 
 #ifndef __ASSEMBLY__
 
+extern void __iomem *auxio_register;
+
 #define AUXIO_LTE_ON	1
 #define AUXIO_LTE_OFF	0
 
@@ -82,7 +84,7 @@
  *
  * on - AUXIO_LTE_ON or AUXIO_LTE_OFF
  */
-void auxio_set_lte(int on);
+extern void auxio_set_lte(int on);
 
 #define AUXIO_LED_ON	1
 #define AUXIO_LED_OFF	0
@@ -91,7 +93,7 @@ void auxio_set_lte(int on);
  *
  * on - AUXIO_LED_ON or AUXIO_LED_OFF
  */
-void auxio_set_led(int on);
+extern void auxio_set_led(int on);
 
 #endif /* ifndef __ASSEMBLY__ */
 

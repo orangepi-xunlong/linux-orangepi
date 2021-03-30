@@ -229,8 +229,8 @@ static int snd_jazz16_probe(struct device *devptr, unsigned int dev)
 	static int possible_dmas16[] = {5, 7, -1};
 	int err, xirq, xdma8, xdma16, xmpu_port, xmpu_irq;
 
-	err = snd_card_new(devptr, index[dev], id[dev], THIS_MODULE,
-			   sizeof(struct snd_card_jazz16), &card);
+	err = snd_card_create(index[dev], id[dev], THIS_MODULE,
+			      sizeof(struct snd_card_jazz16), &card);
 	if (err < 0)
 		return err;
 
@@ -297,7 +297,7 @@ static int snd_jazz16_probe(struct device *devptr, unsigned int dev)
 		"Media Vision Jazz16 at 0x%lx, irq %d, dma8 %d, dma16 %d",
 		port[dev], xirq, xdma8, xdma16);
 
-	err = snd_sb8dsp_pcm(chip, 0);
+	err = snd_sb8dsp_pcm(chip, 0, NULL);
 	if (err < 0)
 		goto err_free;
 	err = snd_sbmixer_new(chip);
@@ -327,6 +327,8 @@ static int snd_jazz16_probe(struct device *devptr, unsigned int dev)
 					mpu_port[dev]);
 	}
 
+	snd_card_set_dev(card, devptr);
+
 	err = snd_card_register(card);
 	if (err < 0)
 		goto err_free;
@@ -343,6 +345,7 @@ static int snd_jazz16_remove(struct device *devptr, unsigned int dev)
 {
 	struct snd_card *card = dev_get_drvdata(devptr);
 
+	dev_set_drvdata(devptr, NULL);
 	snd_card_free(card);
 	return 0;
 }
@@ -387,4 +390,15 @@ static struct isa_driver snd_jazz16_driver = {
 	},
 };
 
-module_isa_driver(snd_jazz16_driver, SNDRV_CARDS);
+static int __init alsa_card_jazz16_init(void)
+{
+	return isa_register_driver(&snd_jazz16_driver, SNDRV_CARDS);
+}
+
+static void __exit alsa_card_jazz16_exit(void)
+{
+	isa_unregister_driver(&snd_jazz16_driver);
+}
+
+module_init(alsa_card_jazz16_init)
+module_exit(alsa_card_jazz16_exit)

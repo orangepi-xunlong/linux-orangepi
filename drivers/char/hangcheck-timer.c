@@ -49,7 +49,7 @@
 #include <asm/uaccess.h>
 #include <linux/sysrq.h>
 #include <linux/timer.h>
-#include <linux/hrtimer.h>
+#include <linux/time.h>
 
 #define VERSION_STR "0.9.1"
 
@@ -117,7 +117,24 @@ __setup("hcheck_reboot", hangcheck_parse_reboot);
 __setup("hcheck_dump_tasks", hangcheck_parse_dump_tasks);
 #endif /* not MODULE */
 
-#define TIMER_FREQ 1000000000ULL
+#if defined(CONFIG_S390)
+# define HAVE_MONOTONIC
+# define TIMER_FREQ 1000000000ULL
+#else
+# define TIMER_FREQ 1000000000ULL
+#endif
+
+#ifdef HAVE_MONOTONIC
+extern unsigned long long monotonic_clock(void);
+#else
+static inline unsigned long long monotonic_clock(void)
+{
+	struct timespec ts;
+	getrawmonotonic(&ts);
+	return timespec_to_ns(&ts);
+}
+#endif  /* HAVE_MONOTONIC */
+
 
 /* Last time scheduled */
 static unsigned long long hangcheck_tsc, hangcheck_tsc_margin;
@@ -126,11 +143,12 @@ static void hangcheck_fire(unsigned long);
 
 static DEFINE_TIMER(hangcheck_ticktock, hangcheck_fire, 0, 0);
 
+
 static void hangcheck_fire(unsigned long data)
 {
 	unsigned long long cur_tsc, tsc_diff;
 
-	cur_tsc = ktime_get_ns();
+	cur_tsc = monotonic_clock();
 
 	if (cur_tsc > hangcheck_tsc)
 		tsc_diff = cur_tsc - hangcheck_tsc;
@@ -159,7 +177,7 @@ static void hangcheck_fire(unsigned long data)
 			tsc_diff, tsc_diff - hangcheck_tick*TIMER_FREQ);
 #endif
 	mod_timer(&hangcheck_ticktock, jiffies + (hangcheck_tick*HZ));
-	hangcheck_tsc = ktime_get_ns();
+	hangcheck_tsc = monotonic_clock();
 }
 
 
@@ -167,11 +185,16 @@ static int __init hangcheck_init(void)
 {
 	printk("Hangcheck: starting hangcheck timer %s (tick is %d seconds, margin is %d seconds).\n",
 	       VERSION_STR, hangcheck_tick, hangcheck_margin);
+#if defined (HAVE_MONOTONIC)
+	printk("Hangcheck: Using monotonic_clock().\n");
+#else
+	printk("Hangcheck: Using getrawmonotonic().\n");
+#endif  /* HAVE_MONOTONIC */
 	hangcheck_tsc_margin =
-		(unsigned long long)hangcheck_margin + hangcheck_tick;
-	hangcheck_tsc_margin *= TIMER_FREQ;
+		(unsigned long long)(hangcheck_margin + hangcheck_tick);
+	hangcheck_tsc_margin *= (unsigned long long)TIMER_FREQ;
 
-	hangcheck_tsc = ktime_get_ns();
+	hangcheck_tsc = monotonic_clock();
 	mod_timer(&hangcheck_ticktock, jiffies + (hangcheck_tick*HZ));
 
 	return 0;

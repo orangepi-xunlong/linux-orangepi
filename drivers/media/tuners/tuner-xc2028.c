@@ -134,6 +134,15 @@ struct xc2028_data {
 	_rc;								\
 })
 
+#define i2c_rcv(priv, buf, size) ({					\
+	int _rc;							\
+	_rc = tuner_i2c_xfer_recv(&priv->i2c_props, buf, size);		\
+	if (size != _rc)						\
+		tuner_err("i2c input error: rc = %d (should be %d)\n",	\
+			   _rc, (int)size); 				\
+	_rc;								\
+})
+
 #define i2c_send_recv(priv, obuf, osize, ibuf, isize) ({		\
 	int _rc;							\
 	_rc = tuner_i2c_xfer_send_recv(&priv->i2c_props, obuf, osize,	\
@@ -178,67 +187,67 @@ static int xc2028_get_reg(struct xc2028_data *priv, u16 reg, u16 *val)
 #define dump_firm_type(t) 	dump_firm_type_and_int_freq(t, 0)
 static void dump_firm_type_and_int_freq(unsigned int type, u16 int_freq)
 {
-	if (type & BASE)
+	 if (type & BASE)
 		printk("BASE ");
-	if (type & INIT1)
+	 if (type & INIT1)
 		printk("INIT1 ");
-	if (type & F8MHZ)
+	 if (type & F8MHZ)
 		printk("F8MHZ ");
-	if (type & MTS)
+	 if (type & MTS)
 		printk("MTS ");
-	if (type & D2620)
+	 if (type & D2620)
 		printk("D2620 ");
-	if (type & D2633)
+	 if (type & D2633)
 		printk("D2633 ");
-	if (type & DTV6)
+	 if (type & DTV6)
 		printk("DTV6 ");
-	if (type & QAM)
+	 if (type & QAM)
 		printk("QAM ");
-	if (type & DTV7)
+	 if (type & DTV7)
 		printk("DTV7 ");
-	if (type & DTV78)
+	 if (type & DTV78)
 		printk("DTV78 ");
-	if (type & DTV8)
+	 if (type & DTV8)
 		printk("DTV8 ");
-	if (type & FM)
+	 if (type & FM)
 		printk("FM ");
-	if (type & INPUT1)
+	 if (type & INPUT1)
 		printk("INPUT1 ");
-	if (type & LCD)
+	 if (type & LCD)
 		printk("LCD ");
-	if (type & NOGD)
+	 if (type & NOGD)
 		printk("NOGD ");
-	if (type & MONO)
+	 if (type & MONO)
 		printk("MONO ");
-	if (type & ATSC)
+	 if (type & ATSC)
 		printk("ATSC ");
-	if (type & IF)
+	 if (type & IF)
 		printk("IF ");
-	if (type & LG60)
+	 if (type & LG60)
 		printk("LG60 ");
-	if (type & ATI638)
+	 if (type & ATI638)
 		printk("ATI638 ");
-	if (type & OREN538)
+	 if (type & OREN538)
 		printk("OREN538 ");
-	if (type & OREN36)
+	 if (type & OREN36)
 		printk("OREN36 ");
-	if (type & TOYOTA388)
+	 if (type & TOYOTA388)
 		printk("TOYOTA388 ");
-	if (type & TOYOTA794)
+	 if (type & TOYOTA794)
 		printk("TOYOTA794 ");
-	if (type & DIBCOM52)
+	 if (type & DIBCOM52)
 		printk("DIBCOM52 ");
-	if (type & ZARLINK456)
+	 if (type & ZARLINK456)
 		printk("ZARLINK456 ");
-	if (type & CHINA)
+	 if (type & CHINA)
 		printk("CHINA ");
-	if (type & F6MHZ)
+	 if (type & F6MHZ)
 		printk("F6MHZ ");
-	if (type & INPUT2)
+	 if (type & INPUT2)
 		printk("INPUT2 ");
-	if (type & SCODE)
+	 if (type & SCODE)
 		printk("SCODE ");
-	if (type & HAS_IF)
+	 if (type & HAS_IF)
 		printk("HAS_IF_%d ", int_freq);
 }
 
@@ -267,7 +276,6 @@ static int check_device_status(struct xc2028_data *priv)
 	case XC2028_WAITING_FIRMWARE:
 		return -EAGAIN;
 	case XC2028_ACTIVE:
-		return 1;
 	case XC2028_SLEEP:
 		return 0;
 	case XC2028_NODEV:
@@ -281,14 +289,6 @@ static void free_firmware(struct xc2028_data *priv)
 	int i;
 	tuner_dbg("%s called\n", __func__);
 
-	/* free allocated f/w string */
-	if (priv->fname != firmware_name)
-		kfree(priv->fname);
-	priv->fname = NULL;
-
-	priv->state = XC2028_NO_FIRMWARE;
-	memset(&priv->cur_fw, 0, sizeof(priv->cur_fw));
-
 	if (!priv->firm)
 		return;
 
@@ -299,6 +299,9 @@ static void free_firmware(struct xc2028_data *priv)
 
 	priv->firm = NULL;
 	priv->firm_size = 0;
+	priv->state = XC2028_NO_FIRMWARE;
+
+	memset(&priv->cur_fw, 0, sizeof(priv->cur_fw));
 }
 
 static int load_all_firmwares(struct dvb_frontend *fe,
@@ -575,7 +578,7 @@ static int load_firmware(struct dvb_frontend *fe, unsigned int type,
 			return -EINVAL;
 		}
 
-		size = le16_to_cpu(*(__le16 *) p);
+		size = le16_to_cpu(*(__u16 *) p);
 		p += sizeof(size);
 
 		if (size == 0xffff)
@@ -686,7 +689,7 @@ static int load_scode(struct dvb_frontend *fe, unsigned int type,
 		/* 16 SCODE entries per file; each SCODE entry is 12 bytes and
 		 * has a 2-byte size header in the firmware format. */
 		if (priv->firm[pos].size != 14 * 16 || scode >= 16 ||
-		    le16_to_cpu(*(__le16 *)(p + 14 * scode)) != 12)
+		    le16_to_cpu(*(__u16 *)(p + 14 * scode)) != 12)
 			return -EINVAL;
 		p += 14 * scode + 2;
 	}
@@ -714,8 +717,6 @@ static int load_scode(struct dvb_frontend *fe, unsigned int type,
 
 	return 0;
 }
-
-static int xc2028_sleep(struct dvb_frontend *fe);
 
 static int check_firmware(struct dvb_frontend *fe, unsigned int type,
 			  v4l2_std_id std, __u16 int_freq)
@@ -889,17 +890,15 @@ read_not_reliable:
 	return 0;
 
 fail:
-	free_firmware(priv);
+	priv->state = XC2028_SLEEP;
 
+	memset(&priv->cur_fw, 0, sizeof(priv->cur_fw));
 	if (retry_count < 8) {
 		msleep(50);
 		retry_count++;
 		tuner_dbg("Retrying firmware load\n");
 		goto retry;
 	}
-
-	/* Firmware didn't load. Put the device to sleep */
-	xc2028_sleep(fe);
 
 	if (rc == -ENOENT)
 		rc = -EINVAL;
@@ -917,12 +916,6 @@ static int xc2028_signal(struct dvb_frontend *fe, u16 *strength)
 	rc = check_device_status(priv);
 	if (rc < 0)
 		return rc;
-
-	/* If the device is sleeping, no channel is tuned */
-	if (!rc) {
-		*strength = 0;
-		return 0;
-	}
 
 	mutex_lock(&priv->lock);
 
@@ -970,12 +963,6 @@ static int xc2028_get_afc(struct dvb_frontend *fe, s32 *afc)
 	rc = check_device_status(priv);
 	if (rc < 0)
 		return rc;
-
-	/* If the device is sleeping, no channel is tuned */
-	if (!rc) {
-		*afc = 0;
-		return 0;
-	}
 
 	mutex_lock(&priv->lock);
 
@@ -1098,7 +1085,7 @@ static int generic_set_freq(struct dvb_frontend *fe, u32 freq /* in HZ */,
 		 * Still need tests for XC3028L (firmware 3.2 or upper)
 		 * So, for now, let's just comment the per-firmware
 		 * version of this change. Reports with xc3028l working
-		 * with and without the lines below are welcome
+		 * with and without the lines bellow are welcome
 		 */
 
 		if (priv->firm_version < 0x0302) {
@@ -1111,10 +1098,6 @@ static int generic_set_freq(struct dvb_frontend *fe, u32 freq /* in HZ */,
 				offset += 200000;
 		}
 #endif
-		break;
-	default:
-		tuner_err("Unsupported tuner type %d.\n", new_type);
-		break;
 	}
 
 	div = (freq - offset + DIV / 2) / DIV;
@@ -1298,10 +1281,6 @@ static int xc2028_sleep(struct dvb_frontend *fe)
 	if (rc < 0)
 		return rc;
 
-	/* Device is already in sleep mode */
-	if (!rc)
-		return 0;
-
 	/* Avoid firmware reload on slow devices or if PM disabled */
 	if (no_poweroff || priv->ctrl.disable_power_mgmt)
 		return 0;
@@ -1319,8 +1298,7 @@ static int xc2028_sleep(struct dvb_frontend *fe)
 	else
 		rc = send_seq(priv, {0x80, XREG_POWER_DOWN, 0x00, 0x00});
 
-	if (rc >= 0)
-		priv->state = XC2028_SLEEP;
+	priv->state = XC2028_SLEEP;
 
 	mutex_unlock(&priv->lock);
 
@@ -1336,8 +1314,11 @@ static int xc2028_dvb_release(struct dvb_frontend *fe)
 	mutex_lock(&xc2028_list_mutex);
 
 	/* only perform final cleanup if this is the last instance */
-	if (hybrid_tuner_report_instance_count(priv) == 1)
+	if (hybrid_tuner_report_instance_count(priv) == 1) {
 		free_firmware(priv);
+		kfree(priv->ctrl.fname);
+		priv->ctrl.fname = NULL;
+	}
 
 	if (priv)
 		hybrid_tuner_release_state(priv);
@@ -1385,7 +1366,7 @@ static void load_firmware_cb(const struct firmware *fw,
 
 	if (rc < 0)
 		return;
-	priv->state = XC2028_ACTIVE;
+	priv->state = XC2028_SLEEP;
 }
 
 static int xc2028_set_config(struct dvb_frontend *fe, void *priv_cfg)
@@ -1400,8 +1381,16 @@ static int xc2028_set_config(struct dvb_frontend *fe, void *priv_cfg)
 
 	/*
 	 * Copy the config data.
+	 * For the firmware name, keep a local copy of the string,
+	 * in order to avoid troubles during device release.
 	 */
+	kfree(priv->ctrl.fname);
 	memcpy(&priv->ctrl, p, sizeof(priv->ctrl));
+	if (p->fname) {
+		priv->ctrl.fname = kstrdup(p->fname, GFP_KERNEL);
+		if (priv->ctrl.fname == NULL)
+			rc = -ENOMEM;
+	}
 
 	/*
 	 * If firmware name changed, frees firmware. As free_firmware will
@@ -1416,14 +1405,9 @@ static int xc2028_set_config(struct dvb_frontend *fe, void *priv_cfg)
 
 	if (priv->state == XC2028_NO_FIRMWARE) {
 		if (!firmware_name[0])
-			priv->fname = kstrdup(p->fname, GFP_KERNEL);
+			priv->fname = priv->ctrl.fname;
 		else
 			priv->fname = firmware_name;
-
-		if (!priv->fname) {
-			rc = -ENOMEM;
-			goto unlock;
-		}
 
 		rc = request_firmware_nowait(THIS_MODULE, 1,
 					     priv->fname,
@@ -1437,7 +1421,6 @@ static int xc2028_set_config(struct dvb_frontend *fe, void *priv_cfg)
 		} else
 			priv->state = XC2028_WAITING_FIRMWARE;
 	}
-unlock:
 	mutex_unlock(&priv->lock);
 
 	return rc;
@@ -1488,6 +1471,7 @@ struct dvb_frontend *xc2028_attach(struct dvb_frontend *fe,
 	case 0:
 		/* memory allocation failure */
 		goto fail;
+		break;
 	case 1:
 		/* new tuner instance */
 		priv->ctrl.max_len = 13;

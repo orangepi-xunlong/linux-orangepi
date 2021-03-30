@@ -33,35 +33,22 @@ static void stmmac_config_hw_tstamping(void __iomem *ioaddr, u32 data)
 	writel(data, ioaddr + PTP_TCR);
 }
 
-static u32 stmmac_config_sub_second_increment(void __iomem *ioaddr,
-					      u32 ptp_clock, int gmac4)
+static void stmmac_config_sub_second_increment(void __iomem *ioaddr)
 {
 	u32 value = readl(ioaddr + PTP_TCR);
 	unsigned long data;
-	u32 reg_value;
 
-	/* For GMAC3.x, 4.x versions, convert the ptp_clock to nano second
-	 *	formula = (1/ptp_clock) * 1000000000
-	 * where ptp_clock is 50MHz if fine method is used to update system
+	/* Convert the ptp_clock to nano second
+	 * formula = (1/ptp_clock) * 1000000000
+	 * where, ptp_clock = 50MHz.
 	 */
-	if (value & PTP_TCR_TSCFUPDT)
-		data = (1000000000ULL / 50000000);
-	else
-		data = (1000000000ULL / ptp_clock);
+	data = (1000000000ULL / 50000000);
 
 	/* 0.465ns accuracy */
-	if (!(value & PTP_TCR_TSCTRLSSR))
-		data = (data * 1000) / 465;
+	if (value & PTP_TCR_TSCTRLSSR)
+		data = (data * 100) / 465;
 
-	data &= PTP_SSIR_SSINC_MASK;
-
-	reg_value = data;
-	if (gmac4)
-		reg_value <<= GMAC4_PTP_SSIR_SSINC_SHIFT;
-
-	writel(reg_value, ioaddr + PTP_SSIR);
-
-	return data;
+	writel(data, ioaddr + PTP_SSIR);
 }
 
 static int stmmac_init_systime(void __iomem *ioaddr, u32 sec, u32 nsec)
@@ -114,30 +101,14 @@ static int stmmac_config_addend(void __iomem *ioaddr, u32 addend)
 }
 
 static int stmmac_adjust_systime(void __iomem *ioaddr, u32 sec, u32 nsec,
-				 int add_sub, int gmac4)
+				 int add_sub)
 {
 	u32 value;
 	int limit;
 
-	if (add_sub) {
-		/* If the new sec value needs to be subtracted with
-		 * the system time, then MAC_STSUR reg should be
-		 * programmed with (2^32 – <new_sec_value>)
-		 */
-		if (gmac4)
-			sec = (100000000ULL - sec);
-
-		value = readl(ioaddr + PTP_TCR);
-		if (value & PTP_TCR_TSCTRLSSR)
-			nsec = (PTP_DIGITAL_ROLLOVER_MODE - nsec);
-		else
-			nsec = (PTP_BINARY_ROLLOVER_MODE - nsec);
-	}
-
 	writel(sec, ioaddr + PTP_STSUR);
-	value = (add_sub << PTP_STNSUR_ADDSUB_SHIFT) | nsec;
-	writel(value, ioaddr + PTP_STNSUR);
-
+	writel(((add_sub << PTP_STNSUR_ADDSUB_SHIFT) | nsec),
+		ioaddr + PTP_STNSUR);
 	/* issue command to initialize the system time value */
 	value = readl(ioaddr + PTP_TCR);
 	value |= PTP_TCR_TSUPDT;
@@ -160,9 +131,8 @@ static u64 stmmac_get_systime(void __iomem *ioaddr)
 {
 	u64 ns;
 
-	/* Get the TSSS value */
 	ns = readl(ioaddr + PTP_STNSR);
-	/* Get the TSS and convert sec time value to nanosecond */
+	/* convert sec time value to nanosecond */
 	ns += readl(ioaddr + PTP_STSR) * 1000000000ULL;
 
 	return ns;

@@ -93,6 +93,14 @@ static int irq_status[NR_IRQS] = {
 	[0 ... NR_IRQS -1] = IRQ_UNUSED
 };
 
+int check_irq_used(int irq)
+{
+	if (irq_status[irq] == IRQ_USED)
+		return 1;
+
+	return -1;
+}
+
 static inline int find_unassigned_irq(void)
 {
 	int irq;
@@ -109,13 +117,13 @@ static inline int find_unassigned_vector(cpumask_t domain)
 	int pos, vector;
 
 	cpumask_and(&mask, &domain, cpu_online_mask);
-	if (cpumask_empty(&mask))
+	if (cpus_empty(mask))
 		return -EINVAL;
 
 	for (pos = 0; pos < IA64_NUM_DEVICE_VECTORS; pos++) {
 		vector = IA64_FIRST_DEVICE_VECTOR + pos;
-		cpumask_and(&mask, &domain, &vector_table[vector]);
-		if (!cpumask_empty(&mask))
+		cpus_and(mask, domain, vector_table[vector]);
+		if (!cpus_empty(mask))
 			continue;
 		return vector;
 	}
@@ -132,18 +140,18 @@ static int __bind_irq_vector(int irq, int vector, cpumask_t domain)
 	BUG_ON((unsigned)vector >= IA64_NUM_VECTORS);
 
 	cpumask_and(&mask, &domain, cpu_online_mask);
-	if (cpumask_empty(&mask))
+	if (cpus_empty(mask))
 		return -EINVAL;
-	if ((cfg->vector == vector) && cpumask_equal(&cfg->domain, &domain))
+	if ((cfg->vector == vector) && cpus_equal(cfg->domain, domain))
 		return 0;
 	if (cfg->vector != IRQ_VECTOR_UNASSIGNED)
 		return -EBUSY;
-	for_each_cpu(cpu, &mask)
+	for_each_cpu_mask(cpu, mask)
 		per_cpu(vector_irq, cpu)[vector] = irq;
 	cfg->vector = vector;
 	cfg->domain = domain;
 	irq_status[irq] = IRQ_USED;
-	cpumask_or(&vector_table[vector], &vector_table[vector], &domain);
+	cpus_or(vector_table[vector], vector_table[vector], domain);
 	return 0;
 }
 
@@ -161,6 +169,7 @@ int bind_irq_vector(int irq, int vector, cpumask_t domain)
 static void __clear_irq_vector(int irq)
 {
 	int vector, cpu;
+	cpumask_t mask;
 	cpumask_t domain;
 	struct irq_cfg *cfg = &irq_cfg[irq];
 
@@ -168,12 +177,13 @@ static void __clear_irq_vector(int irq)
 	BUG_ON(cfg->vector == IRQ_VECTOR_UNASSIGNED);
 	vector = cfg->vector;
 	domain = cfg->domain;
-	for_each_cpu_and(cpu, &cfg->domain, cpu_online_mask)
+	cpumask_and(&mask, &cfg->domain, cpu_online_mask);
+	for_each_cpu_mask(cpu, mask)
 		per_cpu(vector_irq, cpu)[vector] = -1;
 	cfg->vector = IRQ_VECTOR_UNASSIGNED;
 	cfg->domain = CPU_MASK_NONE;
 	irq_status[irq] = IRQ_UNUSED;
-	cpumask_andnot(&vector_table[vector], &vector_table[vector], &domain);
+	cpus_andnot(vector_table[vector], vector_table[vector], domain);
 }
 
 static void clear_irq_vector(int irq)
@@ -242,7 +252,7 @@ void __setup_vector_irq(int cpu)
 		per_cpu(vector_irq, cpu)[vector] = -1;
 	/* Mark the inuse vectors */
 	for (irq = 0; irq < NR_IRQS; ++irq) {
-		if (!cpumask_test_cpu(cpu, &irq_cfg[irq].domain))
+		if (!cpu_isset(cpu, irq_cfg[irq].domain))
 			continue;
 		vector = irq_to_vector(irq);
 		per_cpu(vector_irq, cpu)[vector] = irq;
@@ -259,7 +269,7 @@ static enum vector_domain_type {
 static cpumask_t vector_allocation_domain(int cpu)
 {
 	if (vector_domain_type == VECTOR_DOMAIN_PERCPU)
-		return *cpumask_of(cpu);
+		return cpumask_of_cpu(cpu);
 	return CPU_MASK_ALL;
 }
 
@@ -273,7 +283,7 @@ static int __irq_prepare_move(int irq, int cpu)
 		return -EBUSY;
 	if (cfg->vector == IRQ_VECTOR_UNASSIGNED || !cpu_online(cpu))
 		return -EINVAL;
-	if (cpumask_test_cpu(cpu, &cfg->domain))
+	if (cpu_isset(cpu, cfg->domain))
 		return 0;
 	domain = vector_allocation_domain(cpu);
 	vector = find_unassigned_vector(domain);
@@ -307,12 +317,12 @@ void irq_complete_move(unsigned irq)
 	if (likely(!cfg->move_in_progress))
 		return;
 
-	if (unlikely(cpumask_test_cpu(smp_processor_id(), &cfg->old_domain)))
+	if (unlikely(cpu_isset(smp_processor_id(), cfg->old_domain)))
 		return;
 
 	cpumask_and(&cleanup_mask, &cfg->old_domain, cpu_online_mask);
-	cfg->move_cleanup_count = cpumask_weight(&cleanup_mask);
-	for_each_cpu(i, &cleanup_mask)
+	cfg->move_cleanup_count = cpus_weight(cleanup_mask);
+	for_each_cpu_mask(i, cleanup_mask)
 		platform_send_ipi(i, IA64_IRQ_MOVE_VECTOR, IA64_IPI_DM_INT, 0);
 	cfg->move_in_progress = 0;
 }
@@ -328,7 +338,7 @@ static irqreturn_t smp_irq_move_cleanup_interrupt(int irq, void *dev_id)
 		int irq;
 		struct irq_desc *desc;
 		struct irq_cfg *cfg;
-		irq = __this_cpu_read(vector_irq[vector]);
+		irq = __get_cpu_var(vector_irq)[vector];
 		if (irq < 0)
 			continue;
 
@@ -338,12 +348,12 @@ static irqreturn_t smp_irq_move_cleanup_interrupt(int irq, void *dev_id)
 		if (!cfg->move_cleanup_count)
 			goto unlock;
 
-		if (!cpumask_test_cpu(me, &cfg->old_domain))
+		if (!cpu_isset(me, cfg->old_domain))
 			goto unlock;
 
 		spin_lock_irqsave(&vector_lock, flags);
-		__this_cpu_write(vector_irq[vector], -1);
-		cpumask_clear_cpu(me, &vector_table[vector]);
+		__get_cpu_var(vector_irq)[vector] = -1;
+		cpu_clear(me, vector_table[vector]);
 		spin_unlock_irqrestore(&vector_lock, flags);
 		cfg->move_cleanup_count--;
 	unlock:
@@ -354,6 +364,7 @@ static irqreturn_t smp_irq_move_cleanup_interrupt(int irq, void *dev_id)
 
 static struct irqaction irq_move_irqaction = {
 	.handler =	smp_irq_move_cleanup_interrupt,
+	.flags =	IRQF_DISABLED,
 	.name =		"irq_move"
 };
 
@@ -380,7 +391,8 @@ void destroy_and_reserve_irq(unsigned int irq)
 {
 	unsigned long flags;
 
-	irq_init_desc(irq);
+	dynamic_irq_cleanup(irq);
+
 	spin_lock_irqsave(&vector_lock, flags);
 	__clear_irq_vector(irq);
 	irq_status[irq] = IRQ_RSVD;
@@ -413,13 +425,13 @@ int create_irq(void)
  out:
 	spin_unlock_irqrestore(&vector_lock, flags);
 	if (irq >= 0)
-		irq_init_desc(irq);
+		dynamic_irq_init(irq);
 	return irq;
 }
 
 void destroy_irq(unsigned int irq)
 {
-	irq_init_desc(irq);
+	dynamic_irq_cleanup(irq);
 	clear_irq_vector(irq);
 }
 
@@ -477,13 +489,14 @@ ia64_handle_irq (ia64_vector vector, struct pt_regs *regs)
 	ia64_srlz_d();
 	while (vector != IA64_SPURIOUS_INT_VECTOR) {
 		int irq = local_vector_to_irq(vector);
+		struct irq_desc *desc = irq_to_desc(irq);
 
 		if (unlikely(IS_LOCAL_TLB_FLUSH(vector))) {
 			smp_local_flush_tlb();
-			kstat_incr_irq_this_cpu(irq);
+			kstat_incr_irqs_this_cpu(irq, desc);
 		} else if (unlikely(IS_RESCHEDULE(vector))) {
 			scheduler_ipi();
-			kstat_incr_irq_this_cpu(irq);
+			kstat_incr_irqs_this_cpu(irq, desc);
 		} else {
 			ia64_setreg(_IA64_REG_CR_TPR, vector);
 			ia64_srlz_d();
@@ -536,12 +549,13 @@ void ia64_process_pending_intr(void)
 	  */
 	while (vector != IA64_SPURIOUS_INT_VECTOR) {
 		int irq = local_vector_to_irq(vector);
+		struct irq_desc *desc = irq_to_desc(irq);
 
 		if (unlikely(IS_LOCAL_TLB_FLUSH(vector))) {
 			smp_local_flush_tlb();
-			kstat_incr_irq_this_cpu(irq);
+			kstat_incr_irqs_this_cpu(irq, desc);
 		} else if (unlikely(IS_RESCHEDULE(vector))) {
-			kstat_incr_irq_this_cpu(irq);
+			kstat_incr_irqs_this_cpu(irq, desc);
 		} else {
 			struct pt_regs *old_regs = set_irq_regs(NULL);
 
@@ -588,6 +602,7 @@ static irqreturn_t dummy_handler (int irq, void *dev_id)
 
 static struct irqaction ipi_irqaction = {
 	.handler =	handle_IPI,
+	.flags =	IRQF_DISABLED,
 	.name =		"IPI"
 };
 
@@ -596,11 +611,13 @@ static struct irqaction ipi_irqaction = {
  */
 static struct irqaction resched_irqaction = {
 	.handler =	dummy_handler,
+	.flags =	IRQF_DISABLED,
 	.name =		"resched"
 };
 
 static struct irqaction tlb_irqaction = {
 	.handler =	dummy_handler,
+	.flags =	IRQF_DISABLED,
 	.name =		"tlb_flush"
 };
 

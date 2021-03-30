@@ -55,8 +55,8 @@
 #define ENTRY_COMP(_name_) .word sys_##_name_
 #endif
 
-90:	ENTRY_SAME(restart_syscall)	/* 0 */
-91:	ENTRY_SAME(exit)
+	ENTRY_SAME(restart_syscall)	/* 0 */
+	ENTRY_SAME(exit)
 	ENTRY_SAME(fork_wrapper)
 	ENTRY_SAME(read)
 	ENTRY_SAME(write)
@@ -315,8 +315,8 @@
 	ENTRY_COMP(io_getevents)
 	ENTRY_COMP(io_submit)
 	ENTRY_SAME(io_cancel)
-	ENTRY_SAME(ni_syscall)		/* 220: was alloc_hugepages */
-	ENTRY_SAME(ni_syscall)		/* was free_hugepages */
+	ENTRY_SAME(alloc_hugepages)	/* 220 */
+	ENTRY_SAME(free_hugepages)
 	ENTRY_SAME(exit_group)
 	ENTRY_COMP(lookup_dcookie)
 	ENTRY_SAME(epoll_create)
@@ -361,7 +361,7 @@
 	ENTRY_SAME(ni_syscall)	/* 263: reserved for vserver */
 	ENTRY_SAME(add_key)
 	ENTRY_SAME(request_key)		/* 265 */
-	ENTRY_COMP(keyctl)
+	ENTRY_SAME(keyctl)
 	ENTRY_SAME(ioprio_set)
 	ENTRY_SAME(ioprio_get)
 	ENTRY_SAME(inotify_init)
@@ -418,7 +418,7 @@
 	ENTRY_SAME(accept4)		/* 320 */
 	ENTRY_SAME(prlimit64)
 	ENTRY_SAME(fanotify_init)
-	ENTRY_DIFF(fanotify_mark)
+	ENTRY_COMP(fanotify_mark)
 	ENTRY_COMP(clock_adjtime)
 	ENTRY_SAME(name_to_handle_at)	/* 325 */
 	ENTRY_COMP(open_by_handle_at)
@@ -429,26 +429,8 @@
 	ENTRY_COMP(process_vm_writev)
 	ENTRY_SAME(kcmp)
 	ENTRY_SAME(finit_module)
-	ENTRY_SAME(sched_setattr)
-	ENTRY_SAME(sched_getattr)	/* 335 */
-	ENTRY_COMP(utimes)
-	ENTRY_SAME(renameat2)
-	ENTRY_SAME(seccomp)
-	ENTRY_SAME(getrandom)
-	ENTRY_SAME(memfd_create)	/* 340 */
-	ENTRY_SAME(bpf)
-	ENTRY_COMP(execveat)
-	ENTRY_SAME(membarrier)
-	ENTRY_SAME(userfaultfd)
-	ENTRY_SAME(mlock2)		/* 345 */
-	ENTRY_SAME(copy_file_range)
-	ENTRY_COMP(preadv2)
-	ENTRY_COMP(pwritev2)
 
-
-.ifne (. - 90b) - (__NR_Linux_syscalls * (91b - 90b))
-.error "size of syscall table does not fit value of __NR_Linux_syscalls"
-.endif
+	/* Nothing yet */
 
 #undef ENTRY_SAME
 #undef ENTRY_DIFF

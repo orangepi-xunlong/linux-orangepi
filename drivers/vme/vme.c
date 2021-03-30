@@ -13,8 +13,8 @@
  * option) any later version.
  */
 
-#include <linux/init.h>
-#include <linux/export.h>
+#include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/mm.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -39,6 +39,7 @@ static unsigned int vme_bus_numbers;
 static LIST_HEAD(vme_bus_list);
 static DEFINE_MUTEX(vme_buses_lock);
 
+static void __exit vme_exit(void);
 static int __init vme_init(void);
 
 static struct vme_dev *dev_to_vme_dev(struct device *dev)
@@ -156,16 +157,12 @@ size_t vme_get_size(struct vme_resource *resource)
 	case VME_MASTER:
 		retval = vme_master_get(resource, &enabled, &base, &size,
 			&aspace, &cycle, &dwidth);
-		if (retval)
-			return 0;
 
 		return size;
 		break;
 	case VME_SLAVE:
 		retval = vme_slave_get(resource, &enabled, &base, &size,
 			&buf_base, &aspace, &cycle);
-		if (retval)
-			return 0;
 
 		return size;
 		break;
@@ -180,8 +177,8 @@ size_t vme_get_size(struct vme_resource *resource)
 }
 EXPORT_SYMBOL(vme_get_size);
 
-int vme_check_window(u32 aspace, unsigned long long vme_base,
-		     unsigned long long size)
+static int vme_check_window(u32 aspace, unsigned long long vme_base,
+	unsigned long long size)
 {
 	int retval = 0;
 
@@ -202,8 +199,10 @@ int vme_check_window(u32 aspace, unsigned long long vme_base,
 			retval = -EFAULT;
 		break;
 	case VME_A64:
-		if ((size != 0) && (vme_base > U64_MAX + 1 - size))
-			retval = -EFAULT;
+		/*
+		 * Any value held in an unsigned long long can be used as the
+		 * base
+		 */
 		break;
 	case VME_CRCSR:
 		if (((vme_base + size) > VME_CRCSR_MAX) ||
@@ -223,40 +222,6 @@ int vme_check_window(u32 aspace, unsigned long long vme_base,
 	}
 
 	return retval;
-}
-EXPORT_SYMBOL(vme_check_window);
-
-static u32 vme_get_aspace(int am)
-{
-	switch (am) {
-	case 0x29:
-	case 0x2D:
-		return VME_A16;
-	case 0x38:
-	case 0x39:
-	case 0x3A:
-	case 0x3B:
-	case 0x3C:
-	case 0x3D:
-	case 0x3E:
-	case 0x3F:
-		return VME_A24;
-	case 0x8:
-	case 0x9:
-	case 0xA:
-	case 0xB:
-	case 0xC:
-	case 0xD:
-	case 0xE:
-	case 0xF:
-		return VME_A32;
-	case 0x0:
-	case 0x1:
-	case 0x3:
-		return VME_A64;
-	}
-
-	return 0;
 }
 
 /*
@@ -537,7 +502,7 @@ int vme_master_get(struct vme_resource *resource, int *enabled,
 	image = list_entry(resource->entry, struct vme_master_resource, list);
 
 	if (bridge->master_get == NULL) {
-		printk(KERN_WARNING "%s not supported\n", __func__);
+		printk(KERN_WARNING "vme_master_set not supported\n");
 		return -EINVAL;
 	}
 
@@ -643,32 +608,6 @@ unsigned int vme_master_rmw(struct vme_resource *resource, unsigned int mask,
 	return bridge->master_rmw(image, mask, compare, swap, offset);
 }
 EXPORT_SYMBOL(vme_master_rmw);
-
-int vme_master_mmap(struct vme_resource *resource, struct vm_area_struct *vma)
-{
-	struct vme_master_resource *image;
-	phys_addr_t phys_addr;
-	unsigned long vma_size;
-
-	if (resource->type != VME_MASTER) {
-		pr_err("Not a master resource\n");
-		return -EINVAL;
-	}
-
-	image = list_entry(resource->entry, struct vme_master_resource, list);
-	phys_addr = image->bus_resource.start + (vma->vm_pgoff << PAGE_SHIFT);
-	vma_size = vma->vm_end - vma->vm_start;
-
-	if (phys_addr + vma_size > image->bus_resource.end + 1) {
-		pr_err("Map size cannot exceed the window size\n");
-		return -EFAULT;
-	}
-
-	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-
-	return vm_iomap_memory(vma, phys_addr, vma->vm_end - vma->vm_start);
-}
-EXPORT_SYMBOL(vme_master_mmap);
 
 void vme_master_free(struct vme_resource *resource)
 {
@@ -785,7 +724,7 @@ struct vme_dma_list *vme_new_dma_list(struct vme_resource *resource)
 
 	dma_list = kmalloc(sizeof(struct vme_dma_list), GFP_KERNEL);
 	if (dma_list == NULL) {
-		printk(KERN_ERR "Unable to allocate memory for new DMA list\n");
+		printk(KERN_ERR "Unable to allocate memory for new dma list\n");
 		return NULL;
 	}
 	INIT_LIST_HEAD(&dma_list->entries);
@@ -849,7 +788,7 @@ struct vme_dma_attr *vme_dma_pci_attribute(dma_addr_t address)
 
 	pci_attr = kmalloc(sizeof(struct vme_dma_pci), GFP_KERNEL);
 	if (pci_attr == NULL) {
-		printk(KERN_ERR "Unable to allocate memory for PCI attributes\n");
+		printk(KERN_ERR "Unable to allocate memory for pci attributes\n");
 		goto err_pci;
 	}
 
@@ -887,7 +826,7 @@ struct vme_dma_attr *vme_dma_vme_attribute(unsigned long long address,
 
 	vme_attr = kmalloc(sizeof(struct vme_dma_vme), GFP_KERNEL);
 	if (vme_attr == NULL) {
-		printk(KERN_ERR "Unable to allocate memory for VME attributes\n");
+		printk(KERN_ERR "Unable to allocate memory for vme attributes\n");
 		goto err_vme;
 	}
 
@@ -978,8 +917,8 @@ int vme_dma_list_free(struct vme_dma_list *list)
 	}
 
 	/*
-	 * Empty out all of the entries from the DMA list. We need to go to the
-	 * low level driver as DMA entries are driver specific.
+	 * Empty out all of the entries from the dma list. We need to go to the
+	 * low level driver as dma entries are driver specific.
 	 */
 	retval = bridge->dma_list_empty(list);
 	if (retval) {
@@ -1020,68 +959,9 @@ int vme_dma_free(struct vme_resource *resource)
 
 	mutex_unlock(&ctrlr->mtx);
 
-	kfree(resource);
-
 	return 0;
 }
 EXPORT_SYMBOL(vme_dma_free);
-
-void vme_bus_error_handler(struct vme_bridge *bridge,
-			   unsigned long long address, int am)
-{
-	struct list_head *handler_pos = NULL;
-	struct vme_error_handler *handler;
-	int handler_triggered = 0;
-	u32 aspace = vme_get_aspace(am);
-
-	list_for_each(handler_pos, &bridge->vme_error_handlers) {
-		handler = list_entry(handler_pos, struct vme_error_handler,
-				     list);
-		if ((aspace == handler->aspace) &&
-		    (address >= handler->start) &&
-		    (address < handler->end)) {
-			if (!handler->num_errors)
-				handler->first_error = address;
-			if (handler->num_errors != UINT_MAX)
-				handler->num_errors++;
-			handler_triggered = 1;
-		}
-	}
-
-	if (!handler_triggered)
-		dev_err(bridge->parent,
-			"Unhandled VME access error at address 0x%llx\n",
-			address);
-}
-EXPORT_SYMBOL(vme_bus_error_handler);
-
-struct vme_error_handler *vme_register_error_handler(
-	struct vme_bridge *bridge, u32 aspace,
-	unsigned long long address, size_t len)
-{
-	struct vme_error_handler *handler;
-
-	handler = kmalloc(sizeof(*handler), GFP_KERNEL);
-	if (!handler)
-		return NULL;
-
-	handler->aspace = aspace;
-	handler->start = address;
-	handler->end = address + len;
-	handler->num_errors = 0;
-	handler->first_error = 0;
-	list_add_tail(&handler->list, &bridge->vme_error_handlers);
-
-	return handler;
-}
-EXPORT_SYMBOL(vme_register_error_handler);
-
-void vme_unregister_error_handler(struct vme_error_handler *handler)
-{
-	list_del(&handler->list);
-	kfree(handler);
-}
-EXPORT_SYMBOL(vme_unregister_error_handler);
 
 void vme_irq_handler(struct vme_bridge *bridge, int level, int statid)
 {
@@ -1094,7 +974,7 @@ void vme_irq_handler(struct vme_bridge *bridge, int level, int statid)
 	if (call != NULL)
 		call(level, statid, priv_data);
 	else
-		printk(KERN_WARNING "Spurious VME interrupt, level:%x, vector:%x\n",
+		printk(KERN_WARNING "Spurilous VME interrupt, level:%x, vector:%x\n",
 		       level, statid);
 }
 EXPORT_SYMBOL(vme_irq_handler);
@@ -1324,7 +1204,7 @@ int vme_lm_get(struct vme_resource *resource, unsigned long long *lm_base,
 EXPORT_SYMBOL(vme_lm_get);
 
 int vme_lm_attach(struct vme_resource *resource, int monitor,
-	void (*callback)(void *), void *data)
+	void (*callback)(int))
 {
 	struct vme_bridge *bridge = find_bridge(resource);
 	struct vme_lm_resource *lm;
@@ -1341,7 +1221,7 @@ int vme_lm_attach(struct vme_resource *resource, int monitor,
 		return -EINVAL;
 	}
 
-	return bridge->lm_attach(lm, monitor, callback, data);
+	return bridge->lm_attach(lm, monitor, callback);
 }
 EXPORT_SYMBOL(vme_lm_attach);
 
@@ -1392,7 +1272,7 @@ void vme_lm_free(struct vme_resource *resource)
 }
 EXPORT_SYMBOL(vme_lm_free);
 
-int vme_slot_num(struct vme_dev *vdev)
+int vme_slot_get(struct vme_dev *vdev)
 {
 	struct vme_bridge *bridge;
 
@@ -1403,27 +1283,14 @@ int vme_slot_num(struct vme_dev *vdev)
 	}
 
 	if (bridge->slot_get == NULL) {
-		printk(KERN_WARNING "vme_slot_num not supported\n");
+		printk(KERN_WARNING "vme_slot_get not supported\n");
 		return -EINVAL;
 	}
 
 	return bridge->slot_get(bridge);
 }
-EXPORT_SYMBOL(vme_slot_num);
+EXPORT_SYMBOL(vme_slot_get);
 
-int vme_bus_num(struct vme_dev *vdev)
-{
-	struct vme_bridge *bridge;
-
-	bridge = vdev->bridge;
-	if (bridge == NULL) {
-		pr_err("Can't find VME bus\n");
-		return -EINVAL;
-	}
-
-	return bridge->num;
-}
-EXPORT_SYMBOL(vme_bus_num);
 
 /* - Bridge Registration --------------------------------------------------- */
 
@@ -1431,20 +1298,6 @@ static void vme_dev_release(struct device *dev)
 {
 	kfree(dev_to_vme_dev(dev));
 }
-
-/* Common bridge initialization */
-struct vme_bridge *vme_init_bridge(struct vme_bridge *bridge)
-{
-	INIT_LIST_HEAD(&bridge->vme_error_handlers);
-	INIT_LIST_HEAD(&bridge->master_resources);
-	INIT_LIST_HEAD(&bridge->slave_resources);
-	INIT_LIST_HEAD(&bridge->dma_resources);
-	INIT_LIST_HEAD(&bridge->lm_resources);
-	mutex_init(&bridge->irq_mtx);
-
-	return bridge;
-}
-EXPORT_SYMBOL(vme_init_bridge);
 
 int vme_register_bridge(struct vme_bridge *bridge)
 {
@@ -1651,4 +1504,15 @@ static int __init vme_init(void)
 {
 	return bus_register(&vme_bus_type);
 }
-subsys_initcall(vme_init);
+
+static void __exit vme_exit(void)
+{
+	bus_unregister(&vme_bus_type);
+}
+
+MODULE_DESCRIPTION("VME bridge driver framework");
+MODULE_AUTHOR("Martyn Welch <martyn.welch@ge.com");
+MODULE_LICENSE("GPL");
+
+module_init(vme_init);
+module_exit(vme_exit);

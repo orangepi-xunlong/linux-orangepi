@@ -1,19 +1,3 @@
-/*
- * linux-4.9/drivers/media/platform/sunxi-vfe/lib/bsp_isp.h
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
 
 /*
  ***************************************************************************************
@@ -26,7 +10,7 @@
  *
  * Version		  Author         Date		    Description
  *
- *   1.0		Yang Feng	2013/12/25	    First Version
+ *   1.0		Yang Feng   	2013/12/25	    First Version
  *
  ****************************************************************************************
  */
@@ -39,12 +23,14 @@
 #define MAX_ISP_SRC_CH_NUM 3
 
 
-enum isp_src_ch_mode {
+enum isp_src_ch_mode
+{
 	ISP_SINGLE_CH,
 	ISP_DUAL_CH,
 };
 
-struct isp_frame_info {
+struct isp_frame_info
+{
 	unsigned int            byte_size;
 	struct isp_size         pixel_size[ISP_MAX_CH_NUM];
 	unsigned int            scale_ratio;
@@ -52,21 +38,21 @@ struct isp_frame_info {
 	enum pixel_fmt          pixel_fmt[ISP_MAX_CH_NUM];
 };
 
-struct isp_init_para {
+struct isp_init_para
+{
 	enum isp_src_ch_mode    isp_src_ch_mode;
 	unsigned int            isp_src_ch_en[MAX_ISP_SRC_CH_NUM];
-	/*
-	*void                    *isp_reg_vaddr;
-	*void                    *isp_load_vaddr;
-	*void                    *isp_load_paddr;
-	*void                    *isp_load_dma_addr;
-	*void                    *isp_save_vaddr;
-	*void                    *isp_save_paddr;
-	*void                    *isp_save_dma_addr;
-	*/
+	//  void                    *isp_reg_vaddr;
+	//  void                    *isp_load_vaddr;
+	//  void                    *isp_load_paddr;
+	//  void                    *isp_load_dma_addr;
+	//  void                    *isp_save_vaddr;
+	//  void                    *isp_save_paddr;
+	//  void                    *isp_save_dma_addr;
 };
 
-struct isp_table_addr {
+struct isp_table_addr
+{
 	void            *isp_def_lut_tbl_vaddr;
 	void            *isp_def_lut_tbl_paddr;
 	void            *isp_def_lut_tbl_dma_addr;
@@ -130,14 +116,14 @@ void bsp_isp_set_mirror(enum isp_channel ch, enum enable_flag on_off);
 void bsp_isp_set_input_fmt(enum isp_input_fmt fmt, enum isp_input_seq seq_t);
 
 void bsp_isp_set_output_fmt(enum isp_output_fmt isp_fmt, enum isp_output_seq seq_t, enum isp_channel ch);
-void bsp_isp_set_rot(enum isp_channel ch, enum isp_rot_angle angle);
+void bsp_isp_set_rot(enum isp_channel ch,enum isp_rot_angle angle);
 int min_scale_w_shift(int x_ratio, int y_ratio);
 void bsp_isp_set_ob_zone(struct isp_size *black, struct isp_size *valid, struct coor *xy, enum isp_src obc_valid_src);
 
-void bsp_isp_set_output_size(enum isp_channel ch, struct isp_size *size);
-void bsp_isp_scale_cfg(enum isp_channel ch, int x_ratio, int y_ratio, int weight_shift);
-void bsp_isp_set_stride_y(unsigned int stride_val, enum isp_channel ch);
-void bsp_isp_set_stride_uv(unsigned int stride_val, enum isp_channel ch);
+void bsp_isp_set_output_size(enum isp_channel ch,struct isp_size *size) ;
+void bsp_isp_scale_cfg(enum isp_channel ch,int x_ratio,int y_ratio,int weight_shift) ;
+void bsp_isp_set_stride_y(unsigned int stride_val, enum isp_channel ch) ;
+void bsp_isp_set_stride_uv(unsigned int stride_val, enum isp_channel ch) ;
 void bsp_isp_set_yuv_addr(struct isp_yuv_channel_addr *addr, enum isp_channel ch, enum isp_src channel_src);
 
 
@@ -157,15 +143,15 @@ void bsp_isp_module_enable(unsigned int module);
 void bsp_isp_module_disable(unsigned int module);
 
 
-unsigned int   bsp_isp_get_saved_cfa_min_rgb(void);
-unsigned int   bsp_isp_get_saved_cfa_pic_tex(void);
-void           bsp_isp_get_saved_wb_gain(struct isp_white_balance_gain *wb_gain_saved);
-void           bsp_isp_get_saved_awb_avp(struct isp_awb_avp_stat *awb_avp_saved);
-void           bsp_isp_get_saved_awb_diff_thresh(struct isp_wb_diff_threshold *awb_avp_saved);
-unsigned short bsp_isp_get_saved_awb_sum_thresh(void);
-void           bsp_isp_get_saved_ae_win_reg(struct isp_h3a_reg_win *ae_reg_win_saved);
+unsigned int   bsp_isp_get_saved_cfa_min_rgb       (void);
+unsigned int   bsp_isp_get_saved_cfa_pic_tex       (void);
+void           bsp_isp_get_saved_wb_gain           (struct isp_white_balance_gain *);
+void           bsp_isp_get_saved_awb_avp           (struct isp_awb_avp_stat *);
+void           bsp_isp_get_saved_awb_diff_thresh   (struct isp_wb_diff_threshold *);
+unsigned short bsp_isp_get_saved_awb_sum_thresh    (void);
+void           bsp_isp_get_saved_ae_win_reg        (struct isp_h3a_reg_win *);
 int bsp_isp_get_saved_cnr_noise(void);
 void bsp_isp_print_reg_saved(void);
 
 
-#endif /* __BSP__ISP__H */
+#endif //__BSP__ISP__H

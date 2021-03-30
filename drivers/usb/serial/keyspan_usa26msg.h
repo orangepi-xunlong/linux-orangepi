@@ -62,7 +62,7 @@
 	or:
 
 		(b)	0x80 bit set
-			indicates that the bytes following alternate data and
+			indiates that the bytes following alternate data and
 			status bytes:
 
 				STAT DATA STAT DATA STAT DATA STAT DATA ...

@@ -147,7 +147,8 @@ error:
 	return err;
 }
 
-static int ssb_pcmcia_switch_core(struct ssb_bus *bus, struct ssb_device *dev)
+int ssb_pcmcia_switch_core(struct ssb_bus *bus,
+			   struct ssb_device *dev)
 {
 	int err;
 

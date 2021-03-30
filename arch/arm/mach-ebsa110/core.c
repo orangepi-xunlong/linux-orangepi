@@ -65,7 +65,7 @@ static void __init ebsa110_init_irq(void)
 	for (irq = 0; irq < NR_IRQS; irq++) {
 		irq_set_chip_and_handler(irq, &ebsa110_irq_chip,
 					 handle_level_irq);
-		irq_clear_status_flags(irq, IRQ_NOREQUEST | IRQ_NOPROBE);
+		set_irq_flags(irq, IRQF_VALID | IRQF_PROBE);
 	}
 }
 
@@ -206,7 +206,7 @@ ebsa110_timer_interrupt(int irq, void *dev_id)
 
 static struct irqaction ebsa110_timer_irq = {
 	.name		= "EBSA110 Timer Tick",
-	.flags		= IRQF_TIMER | IRQF_IRQPOLL,
+	.flags		= IRQF_DISABLED | IRQF_TIMER | IRQF_IRQPOLL,
 	.handler	= ebsa110_timer_interrupt,
 };
 
@@ -321,6 +321,7 @@ MACHINE_START(EBSA110, "EBSA110")
 	.atag_offset	= 0x400,
 	.reserve_lp0	= 1,
 	.reserve_lp2	= 1,
+	.restart_mode	= 's',
 	.map_io		= ebsa110_map_io,
 	.init_early	= ebsa110_init_early,
 	.init_irq	= ebsa110_init_irq,

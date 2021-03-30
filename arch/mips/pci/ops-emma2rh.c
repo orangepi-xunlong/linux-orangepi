@@ -25,6 +25,7 @@
 #include <linux/types.h>
 
 #include <asm/addrspace.h>
+#include <asm/debug.h>
 
 #include <asm/emma/emma2rh.h>
 
@@ -39,9 +40,10 @@
 static int check_args(struct pci_bus *bus, u32 devfn, u32 * bus_num)
 {
 	/* check if the bus is top-level */
-	if (bus->parent != NULL)
+	if (bus->parent != NULL) {
 		*bus_num = bus->number;
-	else
+		db_assert(bus_num != NULL);
+	} else
 		*bus_num = 0;
 
 	if (*bus_num == 0) {

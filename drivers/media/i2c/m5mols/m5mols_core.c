@@ -25,7 +25,7 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-subdev.h>
-#include <media/i2c/m5mols.h>
+#include <media/m5mols.h>
 
 #include "m5mols.h"
 #include "m5mols_reg.h"
@@ -57,14 +57,14 @@ static struct v4l2_mbus_framefmt m5mols_default_ffmt[M5MOLS_RESTYPE_MAX] = {
 	[M5MOLS_RESTYPE_MONITOR] = {
 		.width		= 1920,
 		.height		= 1080,
-		.code		= MEDIA_BUS_FMT_VYUY8_2X8,
+		.code		= V4L2_MBUS_FMT_VYUY8_2X8,
 		.field		= V4L2_FIELD_NONE,
 		.colorspace	= V4L2_COLORSPACE_JPEG,
 	},
 	[M5MOLS_RESTYPE_CAPTURE] = {
 		.width		= 1920,
 		.height		= 1080,
-		.code		= MEDIA_BUS_FMT_JPEG_1X8,
+		.code		= V4L2_MBUS_FMT_JPEG_1X8,
 		.field		= V4L2_FIELD_NONE,
 		.colorspace	= V4L2_COLORSPACE_JPEG,
 	},
@@ -125,9 +125,9 @@ static u32 m5mols_swap_byte(u8 *data, u8 length)
 	if (length == 1)
 		return *data;
 	else if (length == 2)
-		return be16_to_cpu(*((__be16 *)data));
+		return be16_to_cpu(*((u16 *)data));
 	else
-		return be32_to_cpu(*((__be32 *)data));
+		return be32_to_cpu(*((u32 *)data));
 }
 
 /**
@@ -454,6 +454,11 @@ static int m5mols_get_version(struct v4l2_subdev *sd)
 			return ret;
 	}
 
+	ver->fw = be16_to_cpu(ver->fw);
+	ver->hw = be16_to_cpu(ver->hw);
+	ver->param = be16_to_cpu(ver->param);
+	ver->awb = be16_to_cpu(ver->awb);
+
 	v4l2_info(sd, "Manufacturer\t[%s]\n",
 			is_manufacturer(info, REG_SAMSUNG_ELECTRO) ?
 			"Samsung Electro-Machanics" :
@@ -474,7 +479,7 @@ static int m5mols_get_version(struct v4l2_subdev *sd)
  * __find_restype - Lookup M-5MOLS resolution type according to pixel code
  * @code: pixel code
  */
-static enum m5mols_restype __find_restype(u32 code)
+static enum m5mols_restype __find_restype(enum v4l2_mbus_pixelcode code)
 {
 	enum m5mols_restype type = M5MOLS_RESTYPE_MONITOR;
 
@@ -531,17 +536,17 @@ static int __find_resolution(struct v4l2_subdev *sd,
 }
 
 static struct v4l2_mbus_framefmt *__find_format(struct m5mols_info *info,
-				struct v4l2_subdev_pad_config *cfg,
+				struct v4l2_subdev_fh *fh,
 				enum v4l2_subdev_format_whence which,
 				enum m5mols_restype type)
 {
 	if (which == V4L2_SUBDEV_FORMAT_TRY)
-		return cfg ? v4l2_subdev_get_try_format(&info->sd, cfg, 0) : NULL;
+		return fh ? v4l2_subdev_get_try_format(fh, 0) : NULL;
 
 	return &info->ffmt[type];
 }
 
-static int m5mols_get_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config *cfg,
+static int m5mols_get_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh,
 			  struct v4l2_subdev_format *fmt)
 {
 	struct m5mols_info *info = to_m5mols(sd);
@@ -550,7 +555,7 @@ static int m5mols_get_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config 
 
 	mutex_lock(&info->lock);
 
-	format = __find_format(info, cfg, fmt->which, info->res_type);
+	format = __find_format(info, fh, fmt->which, info->res_type);
 	if (format)
 		fmt->format = *format;
 	else
@@ -560,7 +565,7 @@ static int m5mols_get_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config 
 	return ret;
 }
 
-static int m5mols_set_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config *cfg,
+static int m5mols_set_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh,
 			  struct v4l2_subdev_format *fmt)
 {
 	struct m5mols_info *info = to_m5mols(sd);
@@ -574,7 +579,7 @@ static int m5mols_set_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config 
 	if (ret < 0)
 		return ret;
 
-	sfmt = __find_format(info, cfg, fmt->which, type);
+	sfmt = __find_format(info, fh, fmt->which, type);
 	if (!sfmt)
 		return 0;
 
@@ -640,7 +645,7 @@ static int m5mols_set_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 
 
 static int m5mols_enum_mbus_code(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_pad_config *cfg,
+				 struct v4l2_subdev_fh *fh,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
 	if (!code || code->index >= SIZE_DEFAULT_FFMT)
@@ -895,7 +900,7 @@ static const struct v4l2_subdev_core_ops m5mols_core_ops = {
  */
 static int m5mols_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 {
-	struct v4l2_mbus_framefmt *format = v4l2_subdev_get_try_format(sd, fh->pad, 0);
+	struct v4l2_mbus_framefmt *format = v4l2_subdev_get_try_format(fh, 0);
 
 	*format = m5mols_default_ffmt[0];
 	return 0;
@@ -925,7 +930,6 @@ static int m5mols_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
 	const struct m5mols_platform_data *pdata = client->dev.platform_data;
-	unsigned long gpio_flags;
 	struct m5mols_info *info;
 	struct v4l2_subdev *sd;
 	int ret;
@@ -945,27 +949,24 @@ static int m5mols_probe(struct i2c_client *client,
 		return -EINVAL;
 	}
 
-	info = devm_kzalloc(&client->dev, sizeof(*info), GFP_KERNEL);
+	info = kzalloc(sizeof(struct m5mols_info), GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
 
 	info->pdata = pdata;
 	info->set_power	= pdata->set_power;
 
-	gpio_flags = pdata->reset_polarity
-		   ? GPIOF_OUT_INIT_HIGH : GPIOF_OUT_INIT_LOW;
-	ret = devm_gpio_request_one(&client->dev, pdata->gpio_reset, gpio_flags,
-				    "M5MOLS_NRST");
+	ret = gpio_request(pdata->gpio_reset, "M5MOLS_NRST");
 	if (ret) {
 		dev_err(&client->dev, "Failed to request gpio: %d\n", ret);
-		return ret;
+		goto out_free;
 	}
+	gpio_direction_output(pdata->gpio_reset, pdata->reset_polarity);
 
-	ret = devm_regulator_bulk_get(&client->dev, ARRAY_SIZE(supplies),
-				      supplies);
+	ret = regulator_bulk_get(&client->dev, ARRAY_SIZE(supplies), supplies);
 	if (ret) {
 		dev_err(&client->dev, "Failed to get regulators: %d\n", ret);
-		return ret;
+		goto out_gpio;
 	}
 
 	sd = &info->sd;
@@ -975,19 +976,19 @@ static int m5mols_probe(struct i2c_client *client,
 
 	sd->internal_ops = &m5mols_subdev_internal_ops;
 	info->pad.flags = MEDIA_PAD_FL_SOURCE;
-	ret = media_entity_pads_init(&sd->entity, 1, &info->pad);
+	ret = media_entity_init(&sd->entity, 1, &info->pad, 0);
 	if (ret < 0)
-		return ret;
-	sd->entity.function = MEDIA_ENT_F_CAM_SENSOR;
+		goto out_reg;
+	sd->entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
 
 	init_waitqueue_head(&info->irq_waitq);
 	mutex_init(&info->lock);
 
-	ret = devm_request_irq(&client->dev, client->irq, m5mols_irq_handler,
-			       IRQF_TRIGGER_RISING, MODULE_NAME, sd);
+	ret = request_irq(client->irq, m5mols_irq_handler,
+			  IRQF_TRIGGER_RISING, MODULE_NAME, sd);
 	if (ret) {
 		dev_err(&client->dev, "Interrupt request failed: %d\n", ret);
-		goto error;
+		goto out_me;
 	}
 	info->res_type = M5MOLS_RESTYPE_MONITOR;
 	info->ffmt[0] = m5mols_default_ffmt[0];
@@ -995,7 +996,7 @@ static int m5mols_probe(struct i2c_client *client,
 
 	ret = m5mols_sensor_power(info, true);
 	if (ret)
-		goto error;
+		goto out_irq;
 
 	ret = m5mols_fw_start(sd);
 	if (!ret)
@@ -1004,19 +1005,32 @@ static int m5mols_probe(struct i2c_client *client,
 	ret = m5mols_sensor_power(info, false);
 	if (!ret)
 		return 0;
-error:
+out_irq:
+	free_irq(client->irq, sd);
+out_me:
 	media_entity_cleanup(&sd->entity);
+out_reg:
+	regulator_bulk_free(ARRAY_SIZE(supplies), supplies);
+out_gpio:
+	gpio_free(pdata->gpio_reset);
+out_free:
+	kfree(info);
 	return ret;
 }
 
 static int m5mols_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct m5mols_info *info = to_m5mols(sd);
 
 	v4l2_device_unregister_subdev(sd);
 	v4l2_ctrl_handler_free(sd->ctrl_handler);
-	media_entity_cleanup(&sd->entity);
+	free_irq(client->irq, sd);
 
+	regulator_bulk_free(ARRAY_SIZE(supplies), supplies);
+	gpio_free(info->pdata->gpio_reset);
+	media_entity_cleanup(&sd->entity);
+	kfree(info);
 	return 0;
 }
 

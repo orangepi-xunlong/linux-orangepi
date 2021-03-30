@@ -5,7 +5,7 @@
  ******************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2013, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -41,9 +41,8 @@
  * POSSIBILITY OF SUCH DAMAGES.
  */
 
-#define EXPORT_ACPI_INTERFACES
-
 #define ACPI_DEFINE_EXCEPTION_TABLE
+#include <linux/export.h>
 #include <acpi/acpi.h>
 #include "accommon.h"
 
@@ -147,7 +146,6 @@ const struct acpi_exception_info *acpi_ut_validate_exception(acpi_status status)
 		break;
 
 	default:
-
 		break;
 	}
 

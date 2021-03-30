@@ -15,7 +15,7 @@
 #include "types.h"
 #include "string.h"
 
-#define	BOOT_COMMAND_LINE_SIZE	2048
+#define	COMMAND_LINE_SIZE	512
 #define	MAX_PATH_LEN		256
 #define	MAX_PROP_LEN		256 /* What should this be? */
 
@@ -30,7 +30,6 @@ struct platform_ops {
 	void *	(*realloc)(void *ptr, unsigned long size);
 	void	(*exit)(void);
 	void *	(*vmlinux_alloc)(unsigned long size);
-	void  	(*kentry)(unsigned long fdt_addr, void *vmlinux_addr);
 };
 extern struct platform_ops platform_ops;
 
@@ -59,7 +58,7 @@ extern struct dt_ops dt_ops;
 struct console_ops {
 	int	(*open)(void);
 	void	(*write)(const char *buf, int len);
-	void	(*edit_cmdline)(char *buf, int len, unsigned int getline_timeout);
+	void	(*edit_cmdline)(char *buf, int len);
 	void	(*close)(void);
 	void	*data;
 };
@@ -90,7 +89,6 @@ int mpsc_console_init(void *devp, struct serial_console_data *scdp);
 int cpm_console_init(void *devp, struct serial_console_data *scdp);
 int mpc5200_psc_console_init(void *devp, struct serial_console_data *scdp);
 int uartlite_console_init(void *devp, struct serial_console_data *scdp);
-int opal_console_init(void *devp, struct serial_console_data *scdp);
 void *simple_alloc_init(char *base, unsigned long heap_size,
 			unsigned long granularity, unsigned long max_allocs);
 extern void flush_cache(void *, unsigned long);
@@ -260,8 +258,5 @@ int __ilog2_u32(u32 n)
 	asm ("cntlzw %0,%1" : "=r" (bit) : "r" (n));
 	return 31 - bit;
 }
-
-long partial_decompress(void *inbuf, unsigned long input_size, void *outbuf,
-	unsigned long output_size, unsigned long skip);
 
 #endif /* _PPC_BOOT_OPS_H_ */

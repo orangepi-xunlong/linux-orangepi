@@ -354,10 +354,8 @@ static int do_rx_dma(struct atm_vcc *vcc,struct sk_buff *skb,
 	eni_vcc = ENI_VCC(vcc);
 	paddr = 0; /* GCC, shut up */
 	if (skb) {
-		paddr = dma_map_single(&eni_dev->pci_dev->dev,skb->data,skb->len,
-				       DMA_FROM_DEVICE);
-		if (dma_mapping_error(&eni_dev->pci_dev->dev, paddr))
-			goto dma_map_error;
+		paddr = pci_map_single(eni_dev->pci_dev,skb->data,skb->len,
+		    PCI_DMA_FROMDEVICE);
 		ENI_PRV_PADDR(skb) = paddr;
 		if (paddr & 3)
 			printk(KERN_CRIT DEV_LABEL "(itf %d): VCI %d has "
@@ -481,9 +479,8 @@ rx_enqueued++;
 
 trouble:
 	if (paddr)
-		dma_unmap_single(&eni_dev->pci_dev->dev,paddr,skb->len,
-				 DMA_FROM_DEVICE);
-dma_map_error:
+		pci_unmap_single(eni_dev->pci_dev,paddr,skb->len,
+		    PCI_DMA_FROMDEVICE);
 	if (skb) dev_kfree_skb_irq(skb);
 	return -1;
 }
@@ -758,8 +755,8 @@ rx_dequeued++;
 		}
 		eni_vcc->rxing--;
 		eni_vcc->rx_pos = ENI_PRV_POS(skb) & (eni_vcc->words-1);
-		dma_unmap_single(&eni_dev->pci_dev->dev,ENI_PRV_PADDR(skb),skb->len,
-			         DMA_TO_DEVICE);
+		pci_unmap_single(eni_dev->pci_dev,ENI_PRV_PADDR(skb),skb->len,
+		    PCI_DMA_TODEVICE);
 		if (!skb->len) dev_kfree_skb_irq(skb);
 		else {
 			EVENT("pushing (len=%ld)\n",skb->len,0);
@@ -1112,8 +1109,8 @@ DPRINTK("iovcnt = %d\n",skb_shinfo(skb)->nr_frags);
 		    vcc->dev->number);
 		return enq_jam;
 	}
-	paddr = dma_map_single(&eni_dev->pci_dev->dev,skb->data,skb->len,
-			       DMA_TO_DEVICE);
+	paddr = pci_map_single(eni_dev->pci_dev,skb->data,skb->len,
+	    PCI_DMA_TODEVICE);
 	ENI_PRV_PADDR(skb) = paddr;
 	/* prepare DMA queue entries */
 	j = 0;
@@ -1226,8 +1223,8 @@ static void dequeue_tx(struct atm_dev *dev)
 			break;
 		}
 		ENI_VCC(vcc)->txing -= ENI_PRV_SIZE(skb);
-		dma_unmap_single(&eni_dev->pci_dev->dev,ENI_PRV_PADDR(skb),skb->len,
-				 DMA_TO_DEVICE);
+		pci_unmap_single(eni_dev->pci_dev,ENI_PRV_PADDR(skb),skb->len,
+		    PCI_DMA_TODEVICE);
 		if (vcc->pop) vcc->pop(vcc,skb);
 		else dev_kfree_skb_irq(skb);
 		atomic_inc(&vcc->stats->tx);
@@ -1727,7 +1724,7 @@ static int eni_do_init(struct atm_dev *dev)
 		printk("\n");
 		printk(KERN_ERR DEV_LABEL "(itf %d): can't set up page "
 		    "mapping\n",dev->number);
-		return -ENOMEM;
+		return error;
 	}
 	eni_dev->ioaddr = base;
 	eni_dev->base_diff = real_base - (unsigned long) base;
@@ -1845,9 +1842,8 @@ static int eni_start(struct atm_dev *dev)
 	/* initialize memory management */
 	buffer_mem = eni_dev->mem - (buf - eni_dev->ram);
 	eni_dev->free_list_size = buffer_mem/MID_MIN_BUF_SIZE/2;
-	eni_dev->free_list = kmalloc_array(eni_dev->free_list_size + 1,
-					   sizeof(*eni_dev->free_list),
-					   GFP_KERNEL);
+	eni_dev->free_list = kmalloc(
+	    sizeof(struct eni_free)*(eni_dev->free_list_size+1),GFP_KERNEL);
 	if (!eni_dev->free_list) {
 		printk(KERN_ERR DEV_LABEL "(itf %d): couldn't get free page\n",
 		    dev->number);
@@ -2159,7 +2155,7 @@ static int eni_proc_read(struct atm_dev *dev,loff_t *pos,char *page)
 
 		if (!tx->send) continue;
 		if (!--left) {
-			return sprintf(page, "tx[%d]:    0x%lx-0x%lx "
+			return sprintf(page,"tx[%d]:    0x%ld-0x%ld "
 			    "(%6ld bytes), rsv %d cps, shp %d cps%s\n",i,
 			    (unsigned long) (tx->send - eni_dev->ram),
 			    tx->send-eni_dev->ram+tx->words*4-1,tx->words*4,
@@ -2185,7 +2181,7 @@ static int eni_proc_read(struct atm_dev *dev,loff_t *pos,char *page)
 			if (--left) continue;
 			length = sprintf(page,"vcc %4d: ",vcc->vci);
 			if (eni_vcc->rx) {
-				length += sprintf(page+length, "0x%lx-0x%lx "
+				length += sprintf(page+length,"0x%ld-0x%ld "
 				    "(%6ld bytes)",
 				    (unsigned long) (eni_vcc->recv - eni_dev->ram),
 				    eni_vcc->recv-eni_dev->ram+eni_vcc->words*4-1,
@@ -2241,18 +2237,13 @@ static int eni_init_one(struct pci_dev *pci_dev,
 	if (rc < 0)
 		goto out;
 
-	rc = dma_set_mask_and_coherent(&pci_dev->dev, DMA_BIT_MASK(32));
-	if (rc < 0)
-		goto out;
-
 	rc = -ENOMEM;
 	eni_dev = kmalloc(sizeof(struct eni_dev), GFP_KERNEL);
 	if (!eni_dev)
 		goto err_disable;
 
 	zero = &eni_dev->zero;
-	zero->addr = dma_alloc_coherent(&pci_dev->dev,
-					ENI_ZEROES_SIZE, &zero->dma, GFP_KERNEL);
+	zero->addr = pci_alloc_consistent(pci_dev, ENI_ZEROES_SIZE, &zero->dma);
 	if (!zero->addr)
 		goto err_kfree;
 
@@ -2283,7 +2274,7 @@ err_eni_release:
 err_unregister:
 	atm_dev_deregister(dev);
 err_free_consistent:
-	dma_free_coherent(&pci_dev->dev, ENI_ZEROES_SIZE, zero->addr, zero->dma);
+	pci_free_consistent(pci_dev, ENI_ZEROES_SIZE, zero->addr, zero->dma);
 err_kfree:
 	kfree(eni_dev);
 err_disable:
@@ -2308,7 +2299,7 @@ static void eni_remove_one(struct pci_dev *pdev)
 
 	eni_do_release(dev);
 	atm_dev_deregister(dev);
-	dma_free_coherent(&pdev->dev, ENI_ZEROES_SIZE, zero->addr, zero->dma);
+	pci_free_consistent(pdev, ENI_ZEROES_SIZE, zero->addr, zero->dma);
 	kfree(ed);
 	pci_disable_device(pdev);
 }

@@ -55,6 +55,7 @@ static struct clk *ocpi_ck;
 
 /*
  * Enables device access to OMAP buses via the OCPI bridge
+ * FIXME: Add locking
  */
 int ocpi_enable(void)
 {

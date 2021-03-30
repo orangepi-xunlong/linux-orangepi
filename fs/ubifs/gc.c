@@ -100,6 +100,10 @@ static int switch_gc_head(struct ubifs_info *c)
 	if (err)
 		return err;
 
+	err = ubifs_wbuf_sync_nolock(wbuf);
+	if (err)
+		return err;
+
 	err = ubifs_add_bud_to_log(c, GCHD, gc_lnum, 0);
 	if (err)
 		return err;
@@ -113,7 +117,7 @@ static int switch_gc_head(struct ubifs_info *c)
  * data_nodes_cmp - compare 2 data nodes.
  * @priv: UBIFS file-system description object
  * @a: first data node
- * @b: second data node
+ * @a: second data node
  *
  * This function compares data nodes @a and @b. Returns %1 if @a has greater
  * inode or block number, and %-1 otherwise.
@@ -664,7 +668,8 @@ int ubifs_garbage_collect(struct ubifs_info *c, int anyway)
 	ubifs_assert(!wbuf->used);
 
 	for (i = 0; ; i++) {
-		int space_before, space_after;
+		int space_before = c->leb_size - wbuf->offs - wbuf->used;
+		int space_after;
 
 		cond_resched();
 

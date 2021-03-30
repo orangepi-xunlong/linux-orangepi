@@ -15,11 +15,7 @@
 #ifndef _UAPI_EXYNOS_DRM_H_
 #define _UAPI_EXYNOS_DRM_H_
 
-#include "drm.h"
-
-#if defined(__cplusplus)
-extern "C" {
-#endif
+#include <drm/drm.h>
 
 /**
  * User-desired buffer creation information structure.
@@ -31,22 +27,41 @@ extern "C" {
  *	- this handle will be set by gem module of kernel side.
  */
 struct drm_exynos_gem_create {
-	__u64 size;
-	__u32 flags;
-	__u32 handle;
+	uint64_t size;
+	unsigned int flags;
+	unsigned int handle;
 };
 
 /**
- * A structure for getting a fake-offset that can be used with mmap.
+ * A structure for getting buffer offset.
  *
- * @handle: handle of gem object.
- * @reserved: just padding to be 64-bit aligned.
- * @offset: a fake-offset of gem object.
+ * @handle: a pointer to gem object created.
+ * @pad: just padding to be 64-bit aligned.
+ * @offset: relatived offset value of the memory region allocated.
+ *	- this value should be set by user.
  */
-struct drm_exynos_gem_map {
-	__u32 handle;
-	__u32 reserved;
-	__u64 offset;
+struct drm_exynos_gem_map_off {
+	unsigned int handle;
+	unsigned int pad;
+	uint64_t offset;
+};
+
+/**
+ * A structure for mapping buffer.
+ *
+ * @handle: a handle to gem object created.
+ * @pad: just padding to be 64-bit aligned.
+ * @size: memory size to be mapped.
+ * @mapped: having user virtual address mmaped.
+ *	- this variable would be filled by exynos gem module
+ *	of kernel side with user virtual address which is allocated
+ *	by do_mmap().
+ */
+struct drm_exynos_gem_mmap {
+	unsigned int handle;
+	unsigned int pad;
+	uint64_t size;
+	uint64_t mapped;
 };
 
 /**
@@ -59,9 +74,9 @@ struct drm_exynos_gem_map {
  *	be set by driver.
  */
 struct drm_exynos_gem_info {
-	__u32 handle;
-	__u32 flags;
-	__u64 size;
+	unsigned int handle;
+	unsigned int flags;
+	uint64_t size;
 };
 
 /**
@@ -73,9 +88,9 @@ struct drm_exynos_gem_info {
  * @edid: the edid data pointer from user side.
  */
 struct drm_exynos_vidi_connection {
-	__u32 connection;
-	__u32 extensions;
-	__u64 edid;
+	unsigned int connection;
+	unsigned int extensions;
+	uint64_t edid;
 };
 
 /* memory type definitions. */
@@ -223,9 +238,9 @@ struct drm_exynos_ipp_prop_list {
  * @pos: property of image position(src-cropped,dst-scaler).
  */
 struct drm_exynos_ipp_config {
-	__u32 ops_id;
-	__u32 flip;
-	__u32 degree;
+	enum drm_exynos_ops_id ops_id;
+	enum drm_exynos_flip	flip;
+	enum drm_exynos_degree	degree;
 	__u32	fmt;
 	struct drm_exynos_sz	sz;
 	struct drm_exynos_pos	pos;
@@ -250,7 +265,7 @@ enum drm_exynos_ipp_cmd {
  */
 struct drm_exynos_ipp_property {
 	struct drm_exynos_ipp_config config[EXYNOS_DRM_OPS_MAX];
-	__u32	cmd;
+	enum drm_exynos_ipp_cmd	cmd;
 	__u32	ipp_id;
 	__u32	prop_id;
 	__u32	refresh_rate;
@@ -272,8 +287,8 @@ enum drm_exynos_ipp_buf_type {
  * @user_data: user data.
  */
 struct drm_exynos_ipp_queue_buf {
-	__u32	ops_id;
-	__u32	buf_type;
+	enum drm_exynos_ops_id	ops_id;
+	enum drm_exynos_ipp_buf_type	buf_type;
 	__u32	prop_id;
 	__u32	buf_id;
 	__u32	handle[EXYNOS_DRM_PLANAR_MAX];
@@ -297,11 +312,12 @@ enum drm_exynos_ipp_ctrl {
  */
 struct drm_exynos_ipp_cmd_ctrl {
 	__u32	prop_id;
-	__u32	ctrl;
+	enum drm_exynos_ipp_ctrl	ctrl;
 };
 
 #define DRM_EXYNOS_GEM_CREATE		0x00
-#define DRM_EXYNOS_GEM_MAP		0x01
+#define DRM_EXYNOS_GEM_MAP_OFFSET	0x01
+#define DRM_EXYNOS_GEM_MMAP		0x02
 /* Reserved 0x03 ~ 0x05 for exynos specific gem ioctl */
 #define DRM_EXYNOS_GEM_GET		0x04
 #define DRM_EXYNOS_VIDI_CONNECTION	0x07
@@ -319,8 +335,13 @@ struct drm_exynos_ipp_cmd_ctrl {
 
 #define DRM_IOCTL_EXYNOS_GEM_CREATE		DRM_IOWR(DRM_COMMAND_BASE + \
 		DRM_EXYNOS_GEM_CREATE, struct drm_exynos_gem_create)
-#define DRM_IOCTL_EXYNOS_GEM_MAP		DRM_IOWR(DRM_COMMAND_BASE + \
-		DRM_EXYNOS_GEM_MAP, struct drm_exynos_gem_map)
+
+#define DRM_IOCTL_EXYNOS_GEM_MAP_OFFSET	DRM_IOWR(DRM_COMMAND_BASE + \
+		DRM_EXYNOS_GEM_MAP_OFFSET, struct drm_exynos_gem_map_off)
+
+#define DRM_IOCTL_EXYNOS_GEM_MMAP	DRM_IOWR(DRM_COMMAND_BASE + \
+		DRM_EXYNOS_GEM_MMAP, struct drm_exynos_gem_mmap)
+
 #define DRM_IOCTL_EXYNOS_GEM_GET	DRM_IOWR(DRM_COMMAND_BASE + \
 		DRM_EXYNOS_GEM_GET,	struct drm_exynos_gem_info)
 
@@ -365,9 +386,5 @@ struct drm_exynos_ipp_event {
 	__u32			reserved;
 	__u32			buf_id[EXYNOS_DRM_OPS_MAX];
 };
-
-#if defined(__cplusplus)
-}
-#endif
 
 #endif /* _UAPI_EXYNOS_DRM_H_ */

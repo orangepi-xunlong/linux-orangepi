@@ -15,10 +15,10 @@
 #include <linux/videodev2.h>
 #include <linux/module.h>
 
-#include <media/i2c/rj54n1cb0c.h>
+#include <media/rj54n1cb0c.h>
 #include <media/soc_camera.h>
-#include <media/v4l2-clk.h>
 #include <media/v4l2-subdev.h>
+#include <media/v4l2-chip-ident.h>
 #include <media/v4l2-ctrls.h>
 
 #define RJ54N1_DEV_CODE			0x0400
@@ -111,13 +111,13 @@
 
 /* RJ54N1CB0C has only one fixed colorspace per pixelcode */
 struct rj54n1_datafmt {
-	u32	code;
+	enum v4l2_mbus_pixelcode	code;
 	enum v4l2_colorspace		colorspace;
 };
 
 /* Find a data format by a pixel code in an array */
 static const struct rj54n1_datafmt *rj54n1_find_datafmt(
-	u32 code, const struct rj54n1_datafmt *fmt,
+	enum v4l2_mbus_pixelcode code, const struct rj54n1_datafmt *fmt,
 	int n)
 {
 	int i;
@@ -129,15 +129,15 @@ static const struct rj54n1_datafmt *rj54n1_find_datafmt(
 }
 
 static const struct rj54n1_datafmt rj54n1_colour_fmts[] = {
-	{MEDIA_BUS_FMT_YUYV8_2X8, V4L2_COLORSPACE_JPEG},
-	{MEDIA_BUS_FMT_YVYU8_2X8, V4L2_COLORSPACE_JPEG},
-	{MEDIA_BUS_FMT_RGB565_2X8_LE, V4L2_COLORSPACE_SRGB},
-	{MEDIA_BUS_FMT_RGB565_2X8_BE, V4L2_COLORSPACE_SRGB},
-	{MEDIA_BUS_FMT_SBGGR10_2X8_PADHI_LE, V4L2_COLORSPACE_SRGB},
-	{MEDIA_BUS_FMT_SBGGR10_2X8_PADLO_LE, V4L2_COLORSPACE_SRGB},
-	{MEDIA_BUS_FMT_SBGGR10_2X8_PADHI_BE, V4L2_COLORSPACE_SRGB},
-	{MEDIA_BUS_FMT_SBGGR10_2X8_PADLO_BE, V4L2_COLORSPACE_SRGB},
-	{MEDIA_BUS_FMT_SBGGR10_1X10, V4L2_COLORSPACE_SRGB},
+	{V4L2_MBUS_FMT_YUYV8_2X8, V4L2_COLORSPACE_JPEG},
+	{V4L2_MBUS_FMT_YVYU8_2X8, V4L2_COLORSPACE_JPEG},
+	{V4L2_MBUS_FMT_RGB565_2X8_LE, V4L2_COLORSPACE_SRGB},
+	{V4L2_MBUS_FMT_RGB565_2X8_BE, V4L2_COLORSPACE_SRGB},
+	{V4L2_MBUS_FMT_SBGGR10_2X8_PADHI_LE, V4L2_COLORSPACE_SRGB},
+	{V4L2_MBUS_FMT_SBGGR10_2X8_PADLO_LE, V4L2_COLORSPACE_SRGB},
+	{V4L2_MBUS_FMT_SBGGR10_2X8_PADHI_BE, V4L2_COLORSPACE_SRGB},
+	{V4L2_MBUS_FMT_SBGGR10_2X8_PADLO_BE, V4L2_COLORSPACE_SRGB},
+	{V4L2_MBUS_FMT_SBGGR10_1X10, V4L2_COLORSPACE_SRGB},
 };
 
 struct rj54n1_clock_div {
@@ -151,7 +151,6 @@ struct rj54n1_clock_div {
 struct rj54n1 {
 	struct v4l2_subdev subdev;
 	struct v4l2_ctrl_handler hdl;
-	struct v4l2_clk *clk;
 	struct rj54n1_clock_div clk_div;
 	const struct rj54n1_datafmt *fmt;
 	struct v4l2_rect rect;	/* Sensor window */
@@ -485,14 +484,13 @@ static int reg_write_multiple(struct i2c_client *client,
 	return 0;
 }
 
-static int rj54n1_enum_mbus_code(struct v4l2_subdev *sd,
-		struct v4l2_subdev_pad_config *cfg,
-		struct v4l2_subdev_mbus_code_enum *code)
+static int rj54n1_enum_fmt(struct v4l2_subdev *sd, unsigned int index,
+			   enum v4l2_mbus_pixelcode *code)
 {
-	if (code->pad || code->index >= ARRAY_SIZE(rj54n1_colour_fmts))
+	if (index >= ARRAY_SIZE(rj54n1_colour_fmts))
 		return -EINVAL;
 
-	code->code = rj54n1_colour_fmts[code->index].code;
+	*code = rj54n1_colour_fmts[index].code;
 	return 0;
 }
 
@@ -538,20 +536,14 @@ static int rj54n1_commit(struct i2c_client *client)
 static int rj54n1_sensor_scale(struct v4l2_subdev *sd, s32 *in_w, s32 *in_h,
 			       s32 *out_w, s32 *out_h);
 
-static int rj54n1_set_selection(struct v4l2_subdev *sd,
-				struct v4l2_subdev_pad_config *cfg,
-				struct v4l2_subdev_selection *sel)
+static int rj54n1_s_crop(struct v4l2_subdev *sd, const struct v4l2_crop *a)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct rj54n1 *rj54n1 = to_rj54n1(client);
-	const struct v4l2_rect *rect = &sel->r;
+	const struct v4l2_rect *rect = &a->c;
 	int dummy = 0, output_w, output_h,
 		input_w = rect->width, input_h = rect->height;
 	int ret;
-
-	if (sel->which != V4L2_SUBDEV_FORMAT_ACTIVE ||
-	    sel->target != V4L2_SEL_TGT_CROP)
-		return -EINVAL;
 
 	/* arbitrary minimum width and height, edges unimportant */
 	soc_camera_limit_side(&dummy, &input_w,
@@ -579,42 +571,36 @@ static int rj54n1_set_selection(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int rj54n1_get_selection(struct v4l2_subdev *sd,
-				struct v4l2_subdev_pad_config *cfg,
-				struct v4l2_subdev_selection *sel)
+static int rj54n1_g_crop(struct v4l2_subdev *sd, struct v4l2_crop *a)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct rj54n1 *rj54n1 = to_rj54n1(client);
 
-	if (sel->which != V4L2_SUBDEV_FORMAT_ACTIVE)
-		return -EINVAL;
+	a->c	= rj54n1->rect;
+	a->type	= V4L2_BUF_TYPE_VIDEO_CAPTURE;
 
-	switch (sel->target) {
-	case V4L2_SEL_TGT_CROP_BOUNDS:
-	case V4L2_SEL_TGT_CROP_DEFAULT:
-		sel->r.left = RJ54N1_COLUMN_SKIP;
-		sel->r.top = RJ54N1_ROW_SKIP;
-		sel->r.width = RJ54N1_MAX_WIDTH;
-		sel->r.height = RJ54N1_MAX_HEIGHT;
-		return 0;
-	case V4L2_SEL_TGT_CROP:
-		sel->r = rj54n1->rect;
-		return 0;
-	default:
-		return -EINVAL;
-	}
+	return 0;
 }
 
-static int rj54n1_get_fmt(struct v4l2_subdev *sd,
-		struct v4l2_subdev_pad_config *cfg,
-		struct v4l2_subdev_format *format)
+static int rj54n1_cropcap(struct v4l2_subdev *sd, struct v4l2_cropcap *a)
 {
-	struct v4l2_mbus_framefmt *mf = &format->format;
+	a->bounds.left			= RJ54N1_COLUMN_SKIP;
+	a->bounds.top			= RJ54N1_ROW_SKIP;
+	a->bounds.width			= RJ54N1_MAX_WIDTH;
+	a->bounds.height		= RJ54N1_MAX_HEIGHT;
+	a->defrect			= a->bounds;
+	a->type				= V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	a->pixelaspect.numerator	= 1;
+	a->pixelaspect.denominator	= 1;
+
+	return 0;
+}
+
+static int rj54n1_g_fmt(struct v4l2_subdev *sd,
+			struct v4l2_mbus_framefmt *mf)
+{
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct rj54n1 *rj54n1 = to_rj54n1(client);
-
-	if (format->pad)
-		return -EINVAL;
 
 	mf->code	= rj54n1->fmt->code;
 	mf->colorspace	= rj54n1->fmt->colorspace;
@@ -972,25 +958,17 @@ static int rj54n1_reg_init(struct i2c_client *client)
 	return ret;
 }
 
-static int rj54n1_set_fmt(struct v4l2_subdev *sd,
-		struct v4l2_subdev_pad_config *cfg,
-		struct v4l2_subdev_format *format)
+static int rj54n1_try_fmt(struct v4l2_subdev *sd,
+			  struct v4l2_mbus_framefmt *mf)
 {
-	struct v4l2_mbus_framefmt *mf = &format->format;
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct rj54n1 *rj54n1 = to_rj54n1(client);
 	const struct rj54n1_datafmt *fmt;
-	int output_w, output_h, max_w, max_h,
-		input_w = rj54n1->rect.width, input_h = rj54n1->rect.height;
-	int align = mf->code == MEDIA_BUS_FMT_SBGGR10_1X10 ||
-		mf->code == MEDIA_BUS_FMT_SBGGR10_2X8_PADHI_BE ||
-		mf->code == MEDIA_BUS_FMT_SBGGR10_2X8_PADLO_BE ||
-		mf->code == MEDIA_BUS_FMT_SBGGR10_2X8_PADHI_LE ||
-		mf->code == MEDIA_BUS_FMT_SBGGR10_2X8_PADLO_LE;
-	int ret;
-
-	if (format->pad)
-		return -EINVAL;
+	int align = mf->code == V4L2_MBUS_FMT_SBGGR10_1X10 ||
+		mf->code == V4L2_MBUS_FMT_SBGGR10_2X8_PADHI_BE ||
+		mf->code == V4L2_MBUS_FMT_SBGGR10_2X8_PADLO_BE ||
+		mf->code == V4L2_MBUS_FMT_SBGGR10_2X8_PADHI_LE ||
+		mf->code == V4L2_MBUS_FMT_SBGGR10_2X8_PADLO_LE;
 
 	dev_dbg(&client->dev, "%s: code = %d, width = %u, height = %u\n",
 		__func__, mf->code, mf->width, mf->height);
@@ -1008,10 +986,24 @@ static int rj54n1_set_fmt(struct v4l2_subdev *sd,
 	v4l_bound_align_image(&mf->width, 112, RJ54N1_MAX_WIDTH, align,
 			      &mf->height, 84, RJ54N1_MAX_HEIGHT, align, 0);
 
-	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
-		cfg->try_fmt = *mf;
-		return 0;
-	}
+	return 0;
+}
+
+static int rj54n1_s_fmt(struct v4l2_subdev *sd,
+			struct v4l2_mbus_framefmt *mf)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct rj54n1 *rj54n1 = to_rj54n1(client);
+	const struct rj54n1_datafmt *fmt;
+	int output_w, output_h, max_w, max_h,
+		input_w = rj54n1->rect.width, input_h = rj54n1->rect.height;
+	int ret;
+
+	/*
+	 * The host driver can call us without .try_fmt(), so, we have to take
+	 * care ourseleves
+	 */
+	rj54n1_try_fmt(sd, mf);
 
 	/*
 	 * Verify if the sensor has just been powered on. TODO: replace this
@@ -1027,57 +1019,60 @@ static int rj54n1_set_fmt(struct v4l2_subdev *sd,
 			return ret;
 	}
 
+	dev_dbg(&client->dev, "%s: code = %d, width = %u, height = %u\n",
+		__func__, mf->code, mf->width, mf->height);
+
 	/* RA_SEL_UL is only relevant for raw modes, ignored otherwise. */
 	switch (mf->code) {
-	case MEDIA_BUS_FMT_YUYV8_2X8:
+	case V4L2_MBUS_FMT_YUYV8_2X8:
 		ret = reg_write(client, RJ54N1_OUT_SEL, 0);
 		if (!ret)
 			ret = reg_set(client, RJ54N1_BYTE_SWAP, 8, 8);
 		break;
-	case MEDIA_BUS_FMT_YVYU8_2X8:
+	case V4L2_MBUS_FMT_YVYU8_2X8:
 		ret = reg_write(client, RJ54N1_OUT_SEL, 0);
 		if (!ret)
 			ret = reg_set(client, RJ54N1_BYTE_SWAP, 0, 8);
 		break;
-	case MEDIA_BUS_FMT_RGB565_2X8_LE:
+	case V4L2_MBUS_FMT_RGB565_2X8_LE:
 		ret = reg_write(client, RJ54N1_OUT_SEL, 0x11);
 		if (!ret)
 			ret = reg_set(client, RJ54N1_BYTE_SWAP, 8, 8);
 		break;
-	case MEDIA_BUS_FMT_RGB565_2X8_BE:
+	case V4L2_MBUS_FMT_RGB565_2X8_BE:
 		ret = reg_write(client, RJ54N1_OUT_SEL, 0x11);
 		if (!ret)
 			ret = reg_set(client, RJ54N1_BYTE_SWAP, 0, 8);
 		break;
-	case MEDIA_BUS_FMT_SBGGR10_2X8_PADLO_LE:
+	case V4L2_MBUS_FMT_SBGGR10_2X8_PADLO_LE:
 		ret = reg_write(client, RJ54N1_OUT_SEL, 4);
 		if (!ret)
 			ret = reg_set(client, RJ54N1_BYTE_SWAP, 8, 8);
 		if (!ret)
 			ret = reg_write(client, RJ54N1_RA_SEL_UL, 0);
 		break;
-	case MEDIA_BUS_FMT_SBGGR10_2X8_PADHI_LE:
+	case V4L2_MBUS_FMT_SBGGR10_2X8_PADHI_LE:
 		ret = reg_write(client, RJ54N1_OUT_SEL, 4);
 		if (!ret)
 			ret = reg_set(client, RJ54N1_BYTE_SWAP, 8, 8);
 		if (!ret)
 			ret = reg_write(client, RJ54N1_RA_SEL_UL, 8);
 		break;
-	case MEDIA_BUS_FMT_SBGGR10_2X8_PADLO_BE:
+	case V4L2_MBUS_FMT_SBGGR10_2X8_PADLO_BE:
 		ret = reg_write(client, RJ54N1_OUT_SEL, 4);
 		if (!ret)
 			ret = reg_set(client, RJ54N1_BYTE_SWAP, 0, 8);
 		if (!ret)
 			ret = reg_write(client, RJ54N1_RA_SEL_UL, 0);
 		break;
-	case MEDIA_BUS_FMT_SBGGR10_2X8_PADHI_BE:
+	case V4L2_MBUS_FMT_SBGGR10_2X8_PADHI_BE:
 		ret = reg_write(client, RJ54N1_OUT_SEL, 4);
 		if (!ret)
 			ret = reg_set(client, RJ54N1_BYTE_SWAP, 0, 8);
 		if (!ret)
 			ret = reg_write(client, RJ54N1_RA_SEL_UL, 8);
 		break;
-	case MEDIA_BUS_FMT_SBGGR10_1X10:
+	case V4L2_MBUS_FMT_SBGGR10_1X10:
 		ret = reg_write(client, RJ54N1_OUT_SEL, 5);
 		break;
 	default:
@@ -1087,7 +1082,7 @@ static int rj54n1_set_fmt(struct v4l2_subdev *sd,
 	/* Special case: a raw mode with 10 bits of data per clock tick */
 	if (!ret)
 		ret = reg_set(client, RJ54N1_OCLK_SEL_EN,
-			      (mf->code == MEDIA_BUS_FMT_SBGGR10_1X10) << 1, 2);
+			      (mf->code == V4L2_MBUS_FMT_SBGGR10_1X10) << 1, 2);
 
 	if (ret < 0)
 		return ret;
@@ -1125,15 +1120,36 @@ static int rj54n1_set_fmt(struct v4l2_subdev *sd,
 	return 0;
 }
 
+static int rj54n1_g_chip_ident(struct v4l2_subdev *sd,
+			       struct v4l2_dbg_chip_ident *id)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+
+	if (id->match.type != V4L2_CHIP_MATCH_I2C_ADDR)
+		return -EINVAL;
+
+	if (id->match.addr != client->addr)
+		return -ENODEV;
+
+	id->ident	= V4L2_IDENT_RJ54N1CB0C;
+	id->revision	= 0;
+
+	return 0;
+}
+
 #ifdef CONFIG_VIDEO_ADV_DEBUG
 static int rj54n1_g_register(struct v4l2_subdev *sd,
 			     struct v4l2_dbg_register *reg)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 
-	if (reg->reg < 0x400 || reg->reg > 0x1fff)
+	if (reg->match.type != V4L2_CHIP_MATCH_I2C_ADDR ||
+	    reg->reg < 0x400 || reg->reg > 0x1fff)
 		/* Registers > 0x0800 are only available from Sharp support */
 		return -EINVAL;
+
+	if (reg->match.addr != client->addr)
+		return -ENODEV;
 
 	reg->size = 1;
 	reg->val = reg_read(client, reg->reg);
@@ -1149,9 +1165,13 @@ static int rj54n1_s_register(struct v4l2_subdev *sd,
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 
-	if (reg->reg < 0x400 || reg->reg > 0x1fff)
+	if (reg->match.type != V4L2_CHIP_MATCH_I2C_ADDR ||
+	    reg->reg < 0x400 || reg->reg > 0x1fff)
 		/* Registers >= 0x0800 are only available from Sharp support */
 		return -EINVAL;
+
+	if (reg->match.addr != client->addr)
+		return -ENODEV;
 
 	if (reg_write(client, reg->reg, reg->val) < 0)
 		return -EIO;
@@ -1164,9 +1184,8 @@ static int rj54n1_s_power(struct v4l2_subdev *sd, int on)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct soc_camera_subdev_desc *ssdd = soc_camera_i2c_to_desc(client);
-	struct rj54n1 *rj54n1 = to_rj54n1(client);
 
-	return soc_camera_set_power(&client->dev, ssdd, rj54n1->clk, on);
+	return soc_camera_set_power(&client->dev, ssdd, on);
 }
 
 static int rj54n1_s_ctrl(struct v4l2_ctrl *ctrl)
@@ -1214,6 +1233,7 @@ static const struct v4l2_ctrl_ops rj54n1_ctrl_ops = {
 };
 
 static struct v4l2_subdev_core_ops rj54n1_subdev_core_ops = {
+	.g_chip_ident	= rj54n1_g_chip_ident,
 #ifdef CONFIG_VIDEO_ADV_DEBUG
 	.g_register	= rj54n1_g_register,
 	.s_register	= rj54n1_s_register,
@@ -1253,22 +1273,20 @@ static int rj54n1_s_mbus_config(struct v4l2_subdev *sd,
 
 static struct v4l2_subdev_video_ops rj54n1_subdev_video_ops = {
 	.s_stream	= rj54n1_s_stream,
+	.s_mbus_fmt	= rj54n1_s_fmt,
+	.g_mbus_fmt	= rj54n1_g_fmt,
+	.try_mbus_fmt	= rj54n1_try_fmt,
+	.enum_mbus_fmt	= rj54n1_enum_fmt,
+	.g_crop		= rj54n1_g_crop,
+	.s_crop		= rj54n1_s_crop,
+	.cropcap	= rj54n1_cropcap,
 	.g_mbus_config	= rj54n1_g_mbus_config,
 	.s_mbus_config	= rj54n1_s_mbus_config,
-};
-
-static const struct v4l2_subdev_pad_ops rj54n1_subdev_pad_ops = {
-	.enum_mbus_code = rj54n1_enum_mbus_code,
-	.get_selection	= rj54n1_get_selection,
-	.set_selection	= rj54n1_set_selection,
-	.get_fmt	= rj54n1_get_fmt,
-	.set_fmt	= rj54n1_set_fmt,
 };
 
 static struct v4l2_subdev_ops rj54n1_subdev_ops = {
 	.core	= &rj54n1_subdev_core_ops,
 	.video	= &rj54n1_subdev_video_ops,
-	.pad	= &rj54n1_subdev_pad_ops,
 };
 
 /*
@@ -1364,18 +1382,9 @@ static int rj54n1_probe(struct i2c_client *client,
 	rj54n1->tgclk_mhz	= (rj54n1_priv->mclk_freq / PLL_L * PLL_N) /
 		(clk_div.ratio_tg + 1) / (clk_div.ratio_t + 1);
 
-	rj54n1->clk = v4l2_clk_get(&client->dev, "mclk");
-	if (IS_ERR(rj54n1->clk)) {
-		ret = PTR_ERR(rj54n1->clk);
-		goto eclkget;
-	}
-
 	ret = rj54n1_video_probe(client, rj54n1_priv);
-	if (ret < 0) {
-		v4l2_clk_put(rj54n1->clk);
-eclkget:
+	if (ret < 0)
 		v4l2_ctrl_handler_free(&rj54n1->hdl);
-	}
 
 	return ret;
 }
@@ -1385,7 +1394,6 @@ static int rj54n1_remove(struct i2c_client *client)
 	struct rj54n1 *rj54n1 = to_rj54n1(client);
 	struct soc_camera_subdev_desc *ssdd = soc_camera_i2c_to_desc(client);
 
-	v4l2_clk_put(rj54n1->clk);
 	v4l2_device_unregister_subdev(&rj54n1->subdev);
 	if (ssdd->free_bus)
 		ssdd->free_bus(ssdd);

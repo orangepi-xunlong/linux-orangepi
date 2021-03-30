@@ -667,6 +667,12 @@ static const struct mmc_host_ops cb710_mmc_host = {
 static int cb710_mmc_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	struct cb710_slot *slot = cb710_pdev_to_slot(pdev);
+	struct mmc_host *mmc = cb710_slot_to_mmc(slot);
+	int err;
+
+	err = mmc_suspend_host(mmc);
+	if (err)
+		return err;
 
 	cb710_mmc_enable_irq(slot, 0, ~0);
 	return 0;
@@ -675,9 +681,11 @@ static int cb710_mmc_suspend(struct platform_device *pdev, pm_message_t state)
 static int cb710_mmc_resume(struct platform_device *pdev)
 {
 	struct cb710_slot *slot = cb710_pdev_to_slot(pdev);
+	struct mmc_host *mmc = cb710_slot_to_mmc(slot);
 
 	cb710_mmc_enable_irq(slot, 0, ~0);
-	return 0;
+
+	return mmc_resume_host(mmc);
 }
 
 #endif /* CONFIG_PM */
@@ -695,7 +703,7 @@ static int cb710_mmc_init(struct platform_device *pdev)
 	if (!mmc)
 		return -ENOMEM;
 
-	platform_set_drvdata(pdev, mmc);
+	dev_set_drvdata(&pdev->dev, mmc);
 
 	/* harmless (maybe) magic */
 	pci_read_config_dword(chip->pdev, 0x48, &val);

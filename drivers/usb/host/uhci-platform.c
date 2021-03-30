@@ -8,7 +8,6 @@
  */
 
 #include <linux/of.h>
-#include <linux/device.h>
 #include <linux/platform_device.h>
 
 static int uhci_platform_init(struct usb_hcd *hcd)
@@ -76,9 +75,10 @@ static int uhci_hcd_platform_probe(struct platform_device *pdev)
 	 * Since shared usb code relies on it, set it here for now.
 	 * Once we have dma capability bindings this can go away.
 	 */
-	ret = dma_coerce_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
-	if (ret)
-		return ret;
+	if (!pdev->dev.dma_mask)
+		pdev->dev.dma_mask = &pdev->dev.coherent_dma_mask;
+	if (!pdev->dev.coherent_dma_mask)
+		pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
 
 	hcd = usb_create_hcd(&uhci_platform_hc_driver, &pdev->dev,
 			pdev->name);
@@ -86,25 +86,36 @@ static int uhci_hcd_platform_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	hcd->regs = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(hcd->regs)) {
-		ret = PTR_ERR(hcd->regs);
-		goto err_rmr;
-	}
 	hcd->rsrc_start = res->start;
 	hcd->rsrc_len = resource_size(res);
 
+	if (!request_mem_region(hcd->rsrc_start, hcd->rsrc_len, hcd_name)) {
+		pr_err("%s: request_mem_region failed\n", __func__);
+		ret = -EBUSY;
+		goto err_rmr;
+	}
+
+	hcd->regs = ioremap(hcd->rsrc_start, hcd->rsrc_len);
+	if (!hcd->regs) {
+		pr_err("%s: ioremap failed\n", __func__);
+		ret = -ENOMEM;
+		goto err_irq;
+	}
 	uhci = hcd_to_uhci(hcd);
 
 	uhci->regs = hcd->regs;
 
-	ret = usb_add_hcd(hcd, pdev->resource[1].start, IRQF_SHARED);
+	ret = usb_add_hcd(hcd, pdev->resource[1].start, IRQF_DISABLED |
+								IRQF_SHARED);
 	if (ret)
-		goto err_rmr;
+		goto err_uhci;
 
-	device_wakeup_enable(hcd->self.controller);
 	return 0;
 
+err_uhci:
+	iounmap(hcd->regs);
+err_irq:
+	release_mem_region(hcd->rsrc_start, hcd->rsrc_len);
 err_rmr:
 	usb_put_hcd(hcd);
 
@@ -116,7 +127,10 @@ static int uhci_hcd_platform_remove(struct platform_device *pdev)
 	struct usb_hcd *hcd = platform_get_drvdata(pdev);
 
 	usb_remove_hcd(hcd);
+	iounmap(hcd->regs);
+	release_mem_region(hcd->rsrc_start, hcd->rsrc_len);
 	usb_put_hcd(hcd);
+	platform_set_drvdata(pdev, NULL);
 
 	return 0;
 }
@@ -130,17 +144,15 @@ static int uhci_hcd_platform_remove(struct platform_device *pdev)
  */
 static void uhci_hcd_platform_shutdown(struct platform_device *op)
 {
-	struct usb_hcd *hcd = platform_get_drvdata(op);
+	struct usb_hcd *hcd = dev_get_drvdata(&op->dev);
 
 	uhci_hc_died(hcd_to_uhci(hcd));
 }
 
 static const struct of_device_id platform_uhci_ids[] = {
-	{ .compatible = "generic-uhci", },
 	{ .compatible = "platform-uhci", },
 	{}
 };
-MODULE_DEVICE_TABLE(of, platform_uhci_ids);
 
 static struct platform_driver uhci_platform_driver = {
 	.probe		= uhci_hcd_platform_probe,
@@ -148,6 +160,7 @@ static struct platform_driver uhci_platform_driver = {
 	.shutdown	= uhci_hcd_platform_shutdown,
 	.driver = {
 		.name = "platform-uhci",
-		.of_match_table = platform_uhci_ids,
+		.owner = THIS_MODULE,
+		.of_match_table = of_match_ptr(platform_uhci_ids),
 	},
 };

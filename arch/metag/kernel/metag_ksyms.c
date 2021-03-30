@@ -1,7 +1,5 @@
 #include <linux/export.h>
-#include <linux/types.h>
 
-#include <asm/checksum.h>
 #include <asm/div64.h>
 #include <asm/ftrace.h>
 #include <asm/page.h>
@@ -16,9 +14,6 @@ EXPORT_SYMBOL(copy_page);
 EXPORT_SYMBOL(max_pfn);
 EXPORT_SYMBOL(min_low_pfn);
 #endif
-
-/* Network checksum functions */
-EXPORT_SYMBOL(csum_partial);
 
 /* TBI symbols */
 EXPORT_SYMBOL(__TBI);

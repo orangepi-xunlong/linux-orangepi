@@ -233,6 +233,8 @@ static __u32 hash( const char* name)
 static void enqueue_first(irda_queue_t **queue, irda_queue_t* element)
 {
 
+	IRDA_DEBUG( 4, "%s()\n", __func__);
+
 	/*
 	 * Check if queue is empty.
 	 */
@@ -265,7 +267,7 @@ static irda_queue_t *dequeue_first(irda_queue_t **queue)
 {
 	irda_queue_t *ret;
 
-	pr_debug("dequeue_first()\n");
+	IRDA_DEBUG( 4, "dequeue_first()\n");
 
 	/*
 	 * Set return value
@@ -306,7 +308,7 @@ static irda_queue_t *dequeue_general(irda_queue_t **queue, irda_queue_t* element
 {
 	irda_queue_t *ret;
 
-	pr_debug("dequeue_general()\n");
+	IRDA_DEBUG( 4, "dequeue_general()\n");
 
 	/*
 	 * Set return value
@@ -383,6 +385,9 @@ EXPORT_SYMBOL(hashbin_new);
  *    for deallocating this structure if it's complex. If not the user can
  *    just supply kfree, which should take care of the job.
  */
+#ifdef CONFIG_LOCKDEP
+static int hashbin_lock_depth = 0;
+#endif
 int hashbin_delete( hashbin_t* hashbin, FREE_FUNC free_func)
 {
 	irda_queue_t* queue;
@@ -393,27 +398,22 @@ int hashbin_delete( hashbin_t* hashbin, FREE_FUNC free_func)
 	IRDA_ASSERT(hashbin->magic == HB_MAGIC, return -1;);
 
 	/* Synchronize */
-	if (hashbin->hb_type & HB_LOCK)
-		spin_lock_irqsave(&hashbin->hb_spinlock, flags);
+	if ( hashbin->hb_type & HB_LOCK ) {
+		spin_lock_irqsave_nested(&hashbin->hb_spinlock, flags,
+					 hashbin_lock_depth++);
+	}
 
 	/*
 	 *  Free the entries in the hashbin, TODO: use hashbin_clear when
 	 *  it has been shown to work
 	 */
 	for (i = 0; i < HASHBIN_SIZE; i ++ ) {
-		while (1) {
-			queue = dequeue_first((irda_queue_t**) &hashbin->hb_queue[i]);
-
-			if (!queue)
-				break;
-
-			if (free_func) {
-				if (hashbin->hb_type & HB_LOCK)
-					spin_unlock_irqrestore(&hashbin->hb_spinlock, flags);
-				free_func(queue);
-				if (hashbin->hb_type & HB_LOCK)
-					spin_lock_irqsave(&hashbin->hb_spinlock, flags);
-			}
+		queue = dequeue_first((irda_queue_t**) &hashbin->hb_queue[i]);
+		while (queue ) {
+			if (free_func)
+				(*free_func)(queue);
+			queue = dequeue_first(
+				(irda_queue_t**) &hashbin->hb_queue[i]);
 		}
 	}
 
@@ -422,8 +422,12 @@ int hashbin_delete( hashbin_t* hashbin, FREE_FUNC free_func)
 	hashbin->magic = ~HB_MAGIC;
 
 	/* Release lock */
-	if (hashbin->hb_type & HB_LOCK)
+	if ( hashbin->hb_type & HB_LOCK) {
 		spin_unlock_irqrestore(&hashbin->hb_spinlock, flags);
+#ifdef CONFIG_LOCKDEP
+		hashbin_lock_depth--;
+#endif
+	}
 
 	/*
 	 *  Free the hashbin structure
@@ -447,6 +451,8 @@ void hashbin_insert(hashbin_t* hashbin, irda_queue_t* entry, long hashv,
 {
 	unsigned long flags = 0;
 	int bin;
+
+	IRDA_DEBUG( 4, "%s()\n", __func__);
 
 	IRDA_ASSERT( hashbin != NULL, return;);
 	IRDA_ASSERT( hashbin->magic == HB_MAGIC, return;);
@@ -559,6 +565,8 @@ void* hashbin_remove( hashbin_t* hashbin, long hashv, const char* name)
 	unsigned long flags = 0;
 	irda_queue_t* entry;
 
+	IRDA_DEBUG( 4, "%s()\n", __func__);
+
 	IRDA_ASSERT( hashbin != NULL, return NULL;);
 	IRDA_ASSERT( hashbin->magic == HB_MAGIC, return NULL;);
 
@@ -650,6 +658,8 @@ void* hashbin_remove_this( hashbin_t* hashbin, irda_queue_t* entry)
 	int	bin;
 	long	hashv;
 
+	IRDA_DEBUG( 4, "%s()\n", __func__);
+
 	IRDA_ASSERT( hashbin != NULL, return NULL;);
 	IRDA_ASSERT( hashbin->magic == HB_MAGIC, return NULL;);
 	IRDA_ASSERT( entry != NULL, return NULL;);
@@ -709,7 +719,7 @@ void* hashbin_find( hashbin_t* hashbin, long hashv, const char* name )
 	int bin;
 	irda_queue_t* entry;
 
-	pr_debug("hashbin_find()\n");
+	IRDA_DEBUG( 4, "hashbin_find()\n");
 
 	IRDA_ASSERT( hashbin != NULL, return NULL;);
 	IRDA_ASSERT( hashbin->magic == HB_MAGIC, return NULL;);

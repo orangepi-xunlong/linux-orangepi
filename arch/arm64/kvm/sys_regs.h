@@ -28,7 +28,7 @@ struct sys_reg_params {
 	u8	CRn;
 	u8	CRm;
 	u8	Op2;
-	u64	regval;
+	u8	Rt;
 	bool	is_write;
 	bool	is_aarch32;
 	bool	is_32bit;	/* Only valid if is_aarch32 is true */
@@ -44,7 +44,7 @@ struct sys_reg_desc {
 
 	/* Trapped access from guest, if non-NULL. */
 	bool (*access)(struct kvm_vcpu *,
-		       struct sys_reg_params *,
+		       const struct sys_reg_params *,
 		       const struct sys_reg_desc *);
 
 	/* Initialization for vcpu. */
@@ -55,12 +55,6 @@ struct sys_reg_desc {
 
 	/* Value (usually reset value) */
 	u64 val;
-
-	/* Custom get/set_user functions, fallback to generic if NULL */
-	int (*get_user)(struct kvm_vcpu *vcpu, const struct sys_reg_desc *rd,
-			const struct kvm_one_reg *reg, void __user *uaddr);
-	int (*set_user)(struct kvm_vcpu *vcpu, const struct sys_reg_desc *rd,
-			const struct kvm_one_reg *reg, void __user *uaddr);
 };
 
 static inline void print_sys_reg_instr(const struct sys_reg_params *p)
@@ -77,9 +71,9 @@ static inline bool ignore_write(struct kvm_vcpu *vcpu,
 }
 
 static inline bool read_zero(struct kvm_vcpu *vcpu,
-			     struct sys_reg_params *p)
+			     const struct sys_reg_params *p)
 {
-	p->regval = 0;
+	*vcpu_reg(vcpu, p->Rt) = 0;
 	return true;
 }
 

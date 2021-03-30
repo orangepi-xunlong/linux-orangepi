@@ -33,17 +33,12 @@ extern int NAND_PhysicUnLock(void);
 
 extern int nand_get_param(boot_nand_para_t *nand_param);
 
-extern int nand_read_nboot_data(unsigned char *buf, unsigned int len);
-extern int nand_read_uboot_data(unsigned char *buf, unsigned int len);
-extern int nand_write_nboot_data(unsigned char *buf, unsigned int len);
-extern int nand_write_uboot_data(unsigned char *buf, unsigned int len);
+extern int nand_read_nboot_data(void *buf, unsigned int length);
+extern int nand_write_nboot_data(void *buf, unsigned int length);
+extern int nand_write_uboot_data(void *buf, unsigned int length);
 extern int nand_dragonborad_test_one(unsigned char *buf, unsigned char *oob,
 				     unsigned int blk_num);
 extern int NAND_IS_Secure_sys(void);
-extern int nand_check_uboot(unsigned char *buf, unsigned int len);
-extern int nand_get_uboot_total_len(void);
-
-int NAND_CheckBoot(void);
 
 /*****************************************************************************
 *Name         :
@@ -157,8 +152,7 @@ int get_nand_para(void *boot_buf)
 	sbrom_toc0_config_t *secure_toc0_buf;
 
 	if (1 == NAND_IS_Secure_sys()) {	/*secure*/
-		secure_toc0_buf =
-		    (sbrom_toc0_config_t *) (boot_buf + SBROM_TOC0_HEAD_SPACE);
+		secure_toc0_buf = (sbrom_toc0_config_t *) (boot_buf + SBROM_TOC0_HEAD_SPACE);
 		data_buf = secure_toc0_buf->storage_data;
 		nand_para = (boot_nand_para_t *) data_buf;
 	} else {			/*nonsecure*/
@@ -185,7 +179,7 @@ int get_dram_para(void *boot_buf)
 	sbrom_toc0_config_t *secure_dst_toc0;
 	char *buffer = NULL;
 
-	buffer = kmalloc(32 * 1024, GFP_KERNEL);
+	buffer = (char *)kmalloc(32 * 1024, GFP_KERNEL);
 	if (buffer == NULL) {
 		NAND_Print("get_dram_para, kmalloc failed!\n");
 		return -1;
@@ -235,93 +229,6 @@ int get_nand_para_for_boot1(void *boot_buf)
 
 	boot1_buf = (boot1_file_head_t *) boot_buf;
 	nand_para = (boot_nand_para_t *) boot1_buf->prvt_head.nand_spare_data;
-
-	return 0;
-}
-
-/*****************************************************************************
-*Name         :
-*Description  :
-*Parameter    :
-*Return       : 0:ok  -1:fail
-*Note         :
-*****************************************************************************/
-int NAND_ReadBoot0(unsigned int length, void *buf)
-{
-	void *buffer;
-	__u32 ret;
-
-	NAND_PhysicLock();
-
-	buffer = vmalloc(length);
-	if (buffer == NULL) {
-		NAND_Print("read boot0 malloc failed!\n");
-		NAND_PhysicUnLock();
-		return -1;
-	}
-
-	if (nand_read_nboot_data(buffer, length) != 0) {
-		vfree(buffer);
-		NAND_Print("read boot0 failed\n");
-		NAND_PhysicUnLock();
-		return -1;
-	}
-
-	ret = copy_to_user(buf, buffer, length);
-	if (ret != 0) {
-		vfree(buffer);
-		NAND_Print("copy_to_user failed\n");
-		NAND_PhysicUnLock();
-		return -1;
-	}
-
-	vfree(buffer);
-	NAND_Print("read boot0 success\n");
-	NAND_PhysicUnLock();
-
-	return 0;
-}
-
-
-/*****************************************************************************
-*Name         :
-*Description  :
-*Parameter    :
-*Return       : 0:ok  -1:fail
-*Note         :
-*****************************************************************************/
-int NAND_ReadBoot1(unsigned int length, void *buf)
-{
-	void *buffer;
-	__u32 ret;
-
-	NAND_PhysicLock();
-
-	buffer = vmalloc(length);
-	if (buffer == NULL) {
-		NAND_Print("read boot1 malloc failed!\n\n");
-		NAND_PhysicUnLock();
-		return -1;
-	}
-
-	if (nand_read_uboot_data(buffer, length) != 0) {
-		vfree(buffer);
-		NAND_Print("read boot1 failed\n");
-		NAND_PhysicUnLock();
-		return -1;
-	}
-
-	ret = copy_to_user(buf, buffer, length);
-	if (ret != 0) {
-		vfree(buffer);
-		NAND_Print("copy_to_user failed\n");
-		NAND_PhysicUnLock();
-		return -1;
-	}
-
-	vfree(buffer);
-	NAND_Print("read boot1 success\n");
-	NAND_PhysicUnLock();
 
 	return 0;
 }
@@ -418,72 +325,6 @@ int NAND_BurnBoot1(unsigned int length, void *buf)
 	}
 }
 
-/*****************************************************************************
-*Name         :
-*Description  :
-*Parameter    :
-*Return       : 0:ok  -1:fail
-*Note         :
-*****************************************************************************/
-int NAND_CheckBoot(void)
-{
-	unsigned int len;
-	unsigned char *buf;
-	int ret;
-
-	NAND_Print(" check boot start.\n");
-	NAND_PhysicLock();
-
-	len = nand_get_uboot_total_len();
-	if (len == 0) {
-		NAND_Print("not uboot\n");
-		NAND_PhysicUnLock();
-		return -1;
-	}
-
-	buf = vmalloc(len + 32 * 1024);
-	if (buf == NULL) {
-		NAND_Print("check uboot no memory\n");
-		NAND_PhysicUnLock();
-		return -1;
-	}
-
-	ret = nand_check_uboot(buf, len);
-	if (ret != 0) {
-		NAND_Print("check uboot fail\n");
-		vfree(buf);
-		NAND_PhysicUnLock();
-		return -1;
-	}
-
-/*
-	len = nand_get_nboot_total_len();
-	if(len == 0)
-	{
-		NAND_Print("not nboot\n");
-		vfree(buf);
-		NAND_PhysicUnLock();
-		return -1;
-	}
-
-	nand_check_nboot(buf,len);
-*/
-
-    vfree(buf);
-    NAND_PhysicUnLock();
-
-	NAND_Print(" check boot  end.\n");
-
-	return 0;
-}
-
-/*****************************************************************************
-*Name         :
-*Description  :
-*Parameter    :
-*Return       : 0:ok  -1:fail
-*Note         :
-*****************************************************************************/
 __s32 NAND_DragonboardTest(void)
 {
 	__u32 i, blk_ok;

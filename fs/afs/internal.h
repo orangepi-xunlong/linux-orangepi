@@ -11,16 +11,15 @@
 
 #include <linux/compiler.h>
 #include <linux/kernel.h>
-#include <linux/ktime.h>
 #include <linux/fs.h>
 #include <linux/pagemap.h>
+#include <linux/skbuff.h>
 #include <linux/rxrpc.h>
 #include <linux/key.h>
 #include <linux/workqueue.h>
 #include <linux/sched.h>
 #include <linux/fscache.h>
 #include <linux/backing-dev.h>
-#include <net/af_rxrpc.h>
 
 #include "afs.h"
 #include "afs_vl.h"
@@ -57,7 +56,7 @@ struct afs_mount_params {
  */
 struct afs_wait_mode {
 	/* RxRPC received message notification */
-	rxrpc_notify_rx_t notify_rx;
+	void (*rx_wakeup)(struct afs_call *call);
 
 	/* synchronous call waiter and call dispatched notification */
 	int (*wait)(struct afs_call *call);
@@ -78,6 +77,7 @@ struct afs_call {
 	wait_queue_head_t	waitq;		/* processes awaiting completion */
 	struct work_struct	async_work;	/* asynchronous work processor */
 	struct work_struct	work;		/* actual work processor */
+	struct sk_buff_head	rx_queue;	/* received packets */
 	struct rxrpc_call	*rxcall;	/* RxRPC call handle */
 	struct key		*key;		/* security for this call */
 	struct afs_server	*server;	/* server affected by incoming CM call */
@@ -91,7 +91,6 @@ struct afs_call {
 	void			*reply4;	/* reply buffer (fourth part) */
 	pgoff_t			first;		/* first page in mapping to deal with */
 	pgoff_t			last;		/* last page in mapping to deal with */
-	size_t			offset;		/* offset into received data store */
 	enum {					/* call state */
 		AFS_CALL_REQUESTING,	/* request is being sent for outgoing call */
 		AFS_CALL_AWAIT_REPLY,	/* awaiting reply to outgoing call */
@@ -99,24 +98,24 @@ struct afs_call {
 		AFS_CALL_AWAIT_REQUEST,	/* awaiting request data on incoming call */
 		AFS_CALL_REPLYING,	/* replying to incoming call */
 		AFS_CALL_AWAIT_ACK,	/* awaiting final ACK of incoming call */
-		AFS_CALL_COMPLETE,	/* Completed or failed */
+		AFS_CALL_COMPLETE,	/* successfully completed */
+		AFS_CALL_BUSY,		/* server was busy */
+		AFS_CALL_ABORTED,	/* call was aborted */
+		AFS_CALL_ERROR,		/* call failed due to error */
 	}			state;
 	int			error;		/* error code */
-	u32			abort_code;	/* Remote abort ID or 0 */
 	unsigned		request_size;	/* size of request data */
 	unsigned		reply_max;	/* maximum size of reply */
+	unsigned		reply_size;	/* current size of reply */
 	unsigned		first_offset;	/* offset into mapping[first] */
-	union {
-		unsigned	last_to;	/* amount of mapping[last] */
-		unsigned	count2;		/* count used in unmarshalling */
-	};
+	unsigned		last_to;	/* amount of mapping[last] */
+	unsigned		offset;		/* offset into received data store */
 	unsigned char		unmarshall;	/* unmarshalling phase */
 	bool			incoming;	/* T if incoming call */
 	bool			send_pages;	/* T if data from mapping should be sent */
-	bool			need_attention;	/* T if RxRPC poked us */
 	u16			service_id;	/* RxRPC service ID to call */
 	__be16			port;		/* target UDP port */
-	u32			operation_ID;	/* operation ID for an incoming call */
+	__be32			operation_ID;	/* operation ID for an incoming call */
 	u32			count;		/* count for use in unmarshalling */
 	__be32			tmp;		/* place to extract temporary data */
 	afs_dataversion_t	store_version;	/* updated version expected from store */
@@ -128,7 +127,8 @@ struct afs_call_type {
 	/* deliver request or reply data to an call
 	 * - returning an error will cause the call to be aborted
 	 */
-	int (*deliver)(struct afs_call *call);
+	int (*deliver)(struct afs_call *call, struct sk_buff *skb,
+		       bool last);
 
 	/* map an abort code to an error number */
 	int (*abort_to_error)(u32 abort_code);
@@ -195,6 +195,7 @@ struct afs_cell {
 	struct list_head	link;		/* main cell list link */
 	struct key		*anonymous_key;	/* anonymous user key for this cell */
 	struct list_head	proc_link;	/* /proc cell list link */
+	struct proc_dir_entry	*proc_dir;	/* /proc dir for this cell */
 #ifdef CONFIG_AFS_FSCACHE
 	struct fscache_cookie	*cache;		/* caching cookie */
 #endif
@@ -246,7 +247,7 @@ struct afs_cache_vhash {
  */
 struct afs_vlocation {
 	atomic_t		usage;
-	time64_t		time_of_death;	/* time at which put reduced usage to 0 */
+	time_t			time_of_death;	/* time at which put reduced usage to 0 */
 	struct list_head	link;		/* link in cell volume location list */
 	struct list_head	grave;		/* link in master graveyard list */
 	struct list_head	update;		/* link in master update list */
@@ -257,7 +258,7 @@ struct afs_vlocation {
 	struct afs_cache_vlocation vldb;	/* volume information DB record */
 	struct afs_volume	*vols[3];	/* volume access record pointer (index by type) */
 	wait_queue_head_t	waitq;		/* status change waitqueue */
-	time64_t		update_at;	/* time at which record should be updated */
+	time_t			update_at;	/* time at which record should be updated */
 	spinlock_t		lock;		/* access lock */
 	afs_vlocation_state_t	state;		/* volume location state */
 	unsigned short		upd_rej_cnt;	/* ENOMEDIUM count during update */
@@ -270,7 +271,7 @@ struct afs_vlocation {
  */
 struct afs_server {
 	atomic_t		usage;
-	time64_t		time_of_death;	/* time at which put reduced usage to 0 */
+	time_t			time_of_death;	/* time at which put reduced usage to 0 */
 	struct in_addr		addr;		/* server address */
 	struct afs_cell		*cell;		/* cell in which server resides */
 	struct list_head	link;		/* link in cell's server list */
@@ -373,8 +374,8 @@ struct afs_vnode {
 	struct rb_node		server_rb;	/* link in server->fs_vnodes */
 	struct rb_node		cb_promise;	/* link in server->cb_promises */
 	struct work_struct	cb_broken_work;	/* work to be done on callback break */
-	time64_t		cb_expires;	/* time at which callback expires */
-	time64_t		cb_expires_at;	/* time used to order cb_promise */
+	time_t			cb_expires;	/* time at which callback expires */
+	time_t			cb_expires_at;	/* time used to order cb_promise */
 	unsigned		cb_version;	/* callback version */
 	unsigned		cb_expiry;	/* callback expiry time */
 	afs_callback_type_t	cb_type;	/* type of callback */
@@ -497,7 +498,7 @@ extern const struct file_operations afs_file_operations;
 
 extern int afs_open(struct inode *, struct file *);
 extern int afs_release(struct inode *, struct file *);
-extern int afs_page_filler(struct file *, struct page *);
+extern int afs_page_filler(void *, struct page *);
 
 /*
  * flock.c
@@ -606,8 +607,6 @@ extern void afs_proc_cell_remove(struct afs_cell *);
 /*
  * rxrpc.c
  */
-extern struct socket *afs_socket;
-
 extern int afs_open_socket(void);
 extern void afs_close_socket(void);
 extern int afs_make_call(struct in_addr *, struct afs_call *, gfp_t,
@@ -615,14 +614,11 @@ extern int afs_make_call(struct in_addr *, struct afs_call *, gfp_t,
 extern struct afs_call *afs_alloc_flat_call(const struct afs_call_type *,
 					    size_t, size_t);
 extern void afs_flat_call_destructor(struct afs_call *);
+extern void afs_transfer_reply(struct afs_call *, struct sk_buff *);
 extern void afs_send_empty_reply(struct afs_call *);
 extern void afs_send_simple_reply(struct afs_call *, const void *, size_t);
-extern int afs_extract_data(struct afs_call *, void *, size_t, bool);
-
-static inline int afs_transfer_reply(struct afs_call *call)
-{
-	return afs_extract_data(call, call->buffer, call->reply_max, false);
-}
+extern int afs_extract_data(struct afs_call *, struct sk_buff *, bool, void *,
+			    size_t);
 
 /*
  * security.c
@@ -646,7 +642,7 @@ do {								\
 
 extern struct afs_server *afs_lookup_server(struct afs_cell *,
 					    const struct in_addr *);
-extern struct afs_server *afs_find_server(const struct sockaddr_rxrpc *);
+extern struct afs_server *afs_find_server(const struct in_addr *);
 extern void afs_put_server(struct afs_server *);
 extern void __exit afs_purge_servers(void);
 
@@ -751,9 +747,9 @@ extern int afs_write_end(struct file *file, struct address_space *mapping,
 extern int afs_writepage(struct page *, struct writeback_control *);
 extern int afs_writepages(struct address_space *, struct writeback_control *);
 extern void afs_pages_written_back(struct afs_vnode *, struct afs_call *);
-extern ssize_t afs_file_write(struct kiocb *, struct iov_iter *);
+extern ssize_t afs_file_write(struct kiocb *, const struct iovec *,
+			      unsigned long, loff_t);
 extern int afs_writeback_all(struct afs_vnode *);
-extern int afs_flush(struct file *, fl_owner_t);
 extern int afs_fsync(struct file *, loff_t, loff_t, int);
 
 

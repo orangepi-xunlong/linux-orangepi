@@ -105,7 +105,7 @@ int do_page_fault(struct pt_regs *regs, unsigned long address,
 
 	mm = tsk->mm;
 
-	if (faulthandler_disabled() || !mm)
+	if (in_atomic() || !mm)
 		goto no_context;
 
 	if (user_mode(regs))
@@ -133,7 +133,7 @@ good_area:
 	 * make sure we exit gracefully rather than endlessly redo
 	 * the fault.
 	 */
-	fault = handle_mm_fault(vma, address, flags);
+	fault = handle_mm_fault(mm, vma, address, flags);
 
 	if ((fault & VM_FAULT_RETRY) && fatal_signal_pending(current))
 		return 0;
@@ -141,8 +141,6 @@ good_area:
 	if (unlikely(fault & VM_FAULT_ERROR)) {
 		if (fault & VM_FAULT_OOM)
 			goto out_of_memory;
-		else if (fault & VM_FAULT_SIGSEGV)
-			goto bad_area;
 		else if (fault & VM_FAULT_SIGBUS)
 			goto do_sigbus;
 		BUG();
@@ -187,7 +185,7 @@ bad_area_nosemaphore:
 
 		if (show_unhandled_signals && unhandled_signal(tsk, SIGSEGV) &&
 		    printk_ratelimit()) {
-			printk("%s%s[%d]: segfault at %lx pc %08x sp %08x write %d trap %#x (%s)",
+			pr_info("%s%s[%d]: segfault at %lx pc %08x sp %08x write %d trap %#x (%s)",
 			       task_pid_nr(tsk) > 1 ? KERN_INFO : KERN_EMERG,
 			       tsk->comm, task_pid_nr(tsk), address,
 			       regs->ctx.CurrPC, regs->ctx.AX[0].U0,

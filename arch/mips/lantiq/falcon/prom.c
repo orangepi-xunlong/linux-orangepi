@@ -4,7 +4,7 @@
  * by the Free Software Foundation.
  *
  * Copyright (C) 2012 Thomas Langer <thomas.langer@lantiq.com>
- * Copyright (C) 2012 John Crispin <john@phrozen.org>
+ * Copyright (C) 2012 John Crispin <blogic@openwrt.org>
  */
 
 #include <linux/kernel.h>

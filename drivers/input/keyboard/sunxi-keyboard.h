@@ -1,22 +1,6 @@
-/*
- * Based on drivers/input/keyboard/sunxi-keyboard.h
- *
- * Copyright (C) 2015 Allwinnertech Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- */
 #ifndef SUNXI_KEYBOARD_H
 #define SUNXI_KEYBOARD_H
+/* just for test */
 
 #define INPUT_DEV_NAME          ("sunxi-keyboard")
 
@@ -33,9 +17,8 @@
 #define ADC_CHAN_SELECT         (CHAN<<22)
 #define LRADC_KEY_MODE          (0)
 #define KEY_MODE_SELECT         (LRADC_KEY_MODE<<12)
-#define LRADC_HOLD_KEY_EN	(0<<7)
-#define LRADC_HOLD_EN        (1<<6)
 #define LEVELB_VOL              (0<<4)
+#define LRADC_HOLD_EN           (1<<6)
 #define LRADC_SAMPLE_32HZ       (3<<2)
 #define LRADC_SAMPLE_62HZ       (2<<2)
 #define LRADC_SAMPLE_125HZ      (1<<2)
@@ -59,18 +42,34 @@
 #define LRADC_ADC0_DOWNPEND     (1<<1)
 #define LRADC_ADC0_DATAPEND     (1<<0)
 
+#define EVB
+//#define CUSTUM
 #define ONE_CHANNEL
 #define MODE_0V2
-
+//#define MODE_0V15
+//#define TWO_CHANNEL
 #ifdef MODE_0V2
 /* standard of key maping
  * 0.2V mode
  */
+#define REPORT_START_NUM            (2)
 #define REPORT_KEY_LOW_LIMIT_COUNT  (1)
-
+#define MAX_CYCLE_COUNTER           (100)
+//#define REPORT_REPEAT_KEY_BY_INPUT_CORE
+//#define REPORT_REPEAT_KEY_FROM_HW
+#define INITIAL_VALUE               (0Xff)
 #endif
 
-struct sunxi_adc_disc {
+struct sunxi_key_data{
+	struct platform_device	*pdev;
+	struct clk *mclk;
+	struct clk *pclk;
+	struct input_dev *input_dev;
+	void __iomem 	*reg_base;
+	int	irq_num;
+};
+
+struct sunxi_adc_disc{
 	u32 measure;
 	u32 resol;
 };

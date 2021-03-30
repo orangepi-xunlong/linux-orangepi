@@ -43,7 +43,7 @@
 #define PMD_SECT_BUFFERABLE	(_AT(pmdval_t, 1) << 2)
 #define PMD_SECT_CACHEABLE	(_AT(pmdval_t, 1) << 3)
 #define PMD_SECT_USER		(_AT(pmdval_t, 1) << 6)		/* AP[1] */
-#define PMD_SECT_AP2		(_AT(pmdval_t, 1) << 7)		/* read only */
+#define PMD_SECT_RDONLY		(_AT(pmdval_t, 1) << 7)		/* AP[2] */
 #define PMD_SECT_S		(_AT(pmdval_t, 3) << 8)
 #define PMD_SECT_AF		(_AT(pmdval_t, 1) << 10)
 #define PMD_SECT_nG		(_AT(pmdval_t, 1) << 11)
@@ -62,7 +62,6 @@
 #define PMD_SECT_WT		(_AT(pmdval_t, 2) << 2)	/* normal inner write-through */
 #define PMD_SECT_WB		(_AT(pmdval_t, 3) << 2)	/* normal inner write-back */
 #define PMD_SECT_WBWA		(_AT(pmdval_t, 7) << 2)	/* normal inner write-alloc */
-#define PMD_SECT_CACHE_MASK	(_AT(pmdval_t, 7) << 2)
 
 /*
  * + Level 3 descriptor (PTE)
@@ -73,11 +72,9 @@
 #define PTE_TABLE_BIT		(_AT(pteval_t, 1) << 1)
 #define PTE_BUFFERABLE		(_AT(pteval_t, 1) << 2)		/* AttrIndx[0] */
 #define PTE_CACHEABLE		(_AT(pteval_t, 1) << 3)		/* AttrIndx[1] */
-#define PTE_AP2			(_AT(pteval_t, 1) << 7)		/* AP[2] */
 #define PTE_EXT_SHARED		(_AT(pteval_t, 3) << 8)		/* SH[1:0], inner shareable */
 #define PTE_EXT_AF		(_AT(pteval_t, 1) << 10)	/* Access Flag */
 #define PTE_EXT_NG		(_AT(pteval_t, 1) << 11)	/* nG */
-#define PTE_EXT_PXN		(_AT(pteval_t, 1) << 53)	/* PXN */
 #define PTE_EXT_XN		(_AT(pteval_t, 1) << 54)	/* XN */
 
 /*
@@ -85,25 +82,5 @@
  */
 #define PHYS_MASK_SHIFT		(40)
 #define PHYS_MASK		((1ULL << PHYS_MASK_SHIFT) - 1)
-
-/*
- * TTBR0/TTBR1 split (PAGE_OFFSET):
- *   0x40000000: T0SZ = 2, T1SZ = 0 (not used)
- *   0x80000000: T0SZ = 0, T1SZ = 1
- *   0xc0000000: T0SZ = 0, T1SZ = 2
- *
- * Only use this feature if PHYS_OFFSET <= PAGE_OFFSET, otherwise
- * booting secondary CPUs would end up using TTBR1 for the identity
- * mapping set up in TTBR0.
- */
-#if defined CONFIG_VMSPLIT_2G
-#define TTBR1_OFFSET	16			/* skip two L1 entries */
-#elif defined CONFIG_VMSPLIT_3G
-#define TTBR1_OFFSET	(4096 * (1 + 3))	/* only L2, skip pgd + 3*pmd */
-#else
-#define TTBR1_OFFSET	0
-#endif
-
-#define TTBR1_SIZE	(((PAGE_OFFSET >> 30) - 1) << 16)
 
 #endif

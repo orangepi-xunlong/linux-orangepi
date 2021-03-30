@@ -1,20 +1,19 @@
-/*
- * linux-4.9/drivers/media/platform/sunxi-vin/utility/cfg_op.c
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
 
-#ifdef CONFIG_SENSOR_LIST_MODULE
+/*
+ ******************************************************************************
+ *
+ * cfg_op.c
+ *
+ * Hawkview ISP - cfg_op.c module
+ *
+ * Copyright (c) 2015 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ *
+ * Version		  Author         Date		    Description
+ *
+ *   3.0		  Yang Feng   	2015/12/16	VIDEO INPUT
+ *
+ *****************************************************************************
+ */
 
 #include <linux/kernel.h>
 #include <linux/fs.h>
@@ -34,21 +33,20 @@
 #define CFG_ERR_FMT -30
 #define CFG_ERR_NOT_INIT -40
 
-static char sct_pre = '[', sct_post = ']'; /* Section Symbol */
-static char kv_iso = '='; /* isolator between key and value */
-static char comment_pre = '#'; /* comment prefix */
+static char sct_pre = '[', sct_post = ']';	/* Section Symbol */
+static char kv_iso = '=';	/* isolator between key and value */
+static char comment_pre = '#';	/* comment prefix */
 
 /*
  * name:    strim_char
  * func:    trim a specific charator at front and end of a string
- * input:  char *s(string that should be trimed) char *c(specific charator)
+ * input:	char *s(string that should be trimed) char *c(specific charator)
  * output:
- * return: the string
+ * return:	the string
  */
 static char *strim_char(char *s, char c)
 {
 	int i, k, n;
-
 	n = strlen((char *)s);
 	if (n < 1)
 		return s;
@@ -72,9 +70,9 @@ static char *strim_char(char *s, char c)
 /*
  * name:    get_one_line
  * func:    get one line string from buffer to line_buf
- * input:   char *buffer, int maxlen,
- * output:  char *line_buf
- * return:  the actual length of buffer which has been read
+ * input:	char *buffer, int maxlen,
+ * output:	char *line_buf
+ * return:	the actual length of buffer which has been read
  */
 static int get_one_line(char *buffer, char *line_buf, int maxlen)
 {
@@ -84,14 +82,14 @@ static int get_one_line(char *buffer, char *line_buf, int maxlen)
 	for (i = 0; i < maxlen;) {
 		buf = *buffer;
 
-		if (buf == '\n' || buf == 0x00) /* new line */
+		if (buf == '\n' || buf == 0x00)	/* new line */
 			break;
-		if (buf == '\f' || buf == 0x1A) { /* '\f':new page */
+		if (buf == '\f' || buf == 0x1A) {	/* '\f':new page */
 			line_buf[i++] = buf;
 			break;
 		}
 		if (buf != '\r')
-			line_buf[i++] = buf; /* ignore enter */
+			line_buf[i++] = buf;	/* ignore enter */
 
 		buffer++;
 	}
@@ -102,9 +100,9 @@ static int get_one_line(char *buffer, char *line_buf, int maxlen)
 /*
  * name:    split_key_value
  * func:    split key and value from buf
- * input:   char *buf
- * output:  char *key, char *val
- * return:  1 --- ok
+ * input:	char *buf
+ * output:	char *key, char *val
+ * return:	1 --- ok
  *          0 --- blank line
  *         -1 --- no key, "=value"
  *         -2 --- only key, no '='
@@ -112,7 +110,6 @@ static int get_one_line(char *buffer, char *line_buf, int maxlen)
 static int split_key_value(char *buf, char *key, char *val)
 {
 	int i, k1, k2, n;
-
 	n = strlen((char *)buf);
 	if (n < 1)
 		return 0;
@@ -155,9 +152,9 @@ static int split_key_value(char *buf, char *key, char *val)
 /*
  * name:    get_one_key_value
  * func:    get a key value in the specific section from buffer
- * input:   char *buffer, void *section,void *key
- * output:  void *value
- * return:  error number
+ * input:	char *buffer, void *section,void *key
+ * output:	void *value
+ * return:	error number
  */
 static int get_one_key_value(char *buffer, void *section, void *key,
 			     void *value)
@@ -167,11 +164,10 @@ static int get_one_key_value(char *buffer, void *section, void *key,
 	0};
 	int n, ret;
 	unsigned int i, buf_len;
-
 	buf_len = strlen((char *)buffer);
 	if (buf_len < 1)
 		return CFG_ERR;
-	for (i = 0; i < buf_len;) { /* search for section */
+	for (i = 0; i < buf_len;) {	/* search for section */
 		ret = CFG_ERR_RD;
 		n = get_one_line(buffer, buf, LINE_MAX_CHAR_NUM);
 		buffer += n;
@@ -179,22 +175,22 @@ static int get_one_key_value(char *buffer, void *section, void *key,
 
 		ret = CFG_NOT_FOUND;
 		if (n < 0)
-			goto g_one_key_end; /* end of file */
+			goto g_one_key_end;	/* end of file */
 
 		n = strlen(strim(buf));
 		if (n == 0 || buf[0] == comment_pre)
-			continue;  /* null line or comment line */
+			continue;	/* null line or comment line */
 		ret = CFG_ERR_FMT;
 		if (n > 2 && ((buf[0] == sct_pre && buf[n - 1] != sct_post)))
 			goto g_one_key_end;
 		if (buf[0] == sct_pre) {
 			buf[n - 1] = 0x00;
 			if (strcmp(buf + 1, section) == 0)
-				break;  /* section found */
+				break;	/* section found */
 		}
 	}
 
-	for (; i < buf_len;) { /* search for key */
+	for (; i < buf_len;) {	/* search for key */
 		ret = CFG_ERR_RD;
 		n = get_one_line(buffer, buf, LINE_MAX_CHAR_NUM);
 		buffer += n;
@@ -202,11 +198,11 @@ static int get_one_key_value(char *buffer, void *section, void *key,
 
 		ret = CFG_NOT_FOUND;
 		if (n < 0)
-			goto g_one_key_end; /* end of file */
+			goto g_one_key_end;	/* end of file */
 
 		n = strlen(strim(buf));
 		if (n == 0 || buf[0] == comment_pre)
-			continue; /* null line or comment line */
+			continue;	/* null line or comment line */
 		ret = CFG_NOT_FOUND;
 		if (buf[0] == sct_pre)
 			goto g_one_key_end;
@@ -216,7 +212,7 @@ static int get_one_key_value(char *buffer, void *section, void *key,
 			goto g_one_key_end;
 		strim(key_ptr);
 		if (strcmp(key_ptr, key) != 0)
-			continue; /* not match */
+			continue;	/* not match */
 		strcpy(value, val_ptr);
 		break;
 	}
@@ -228,9 +224,9 @@ g_one_key_end:
 /*
  * name:    get_all_keys_value
  * func:    get all key values in the specific section from buffer
- * input:   char *buffer, void *section
- * output:  char *keys[],void *value[]
- * return:  if correct, return keys number else return error number
+ * input:	char *buffer, void *section
+ * output:	char *keys[],void *value[]
+ * return:	if correct, return keys number else return error number
  */
 static int get_all_keys_value(char *buffer, void *section, char *keys[],
 			      void *value[])
@@ -239,11 +235,10 @@ static int get_all_keys_value(char *buffer, void *section, char *keys[],
 	char key_ptr[MAX_NAME_LEN], val_ptr[MAX_VALUE_LEN];
 	int n, n_keys = 0, ret;
 	unsigned int i, buf_len;
-
 	buf_len = strlen((char *)buffer);
 	if (buf_len < 1)
 		return CFG_ERR;
-	for (i = 0; i < buf_len;) { /* search for section */
+	for (i = 0; i < buf_len;) {	/* search for section */
 		ret = CFG_ERR_RD;
 		n = get_one_line(buffer, buf, LINE_MAX_CHAR_NUM);
 		buffer += n;
@@ -251,33 +246,33 @@ static int get_all_keys_value(char *buffer, void *section, char *keys[],
 
 		ret = CFG_NOT_FOUND;
 		if (n < 0)
-			goto g_all_keys_end; /* end of file */
+			goto g_all_keys_end;	/* end of file */
 		n = strlen(strim(buf));
 		if (n == 0 || buf[0] == comment_pre)
-			continue; /* null line or comment line */
+			continue;	/* null line or comment line */
 		ret = CFG_ERR_FMT;
 		if (n > 2 && ((buf[0] == sct_pre && buf[n - 1] != sct_post)))
 			goto g_all_keys_end;
 		if (buf[0] == sct_pre) {
 			buf[n - 1] = 0x00;
 			if (strcmp(buf + 1, section) == 0)
-				break; /* section found */
+				break;	/* section found */
 		}
 	}
-	for (; i < buf_len;) { /* search for keys */
+	for (; i < buf_len;) {	/* search for keys */
 		ret = CFG_ERR_RD;
 		n = get_one_line(buffer, buf, LINE_MAX_CHAR_NUM);
 		buffer += n;
 		i += n;
 
 		if (n < 0)
-			break; /* end of file */
+			break;	/* end of file */
 		n = strlen(strim(buf));
 		if (n == 0 || buf[0] == comment_pre)
-			continue; /* null line or comment line */
+			continue;	/* null line or comment line */
 		ret = CFG_NOT_FOUND;
 		if (buf[0] == sct_pre)
-			break; /* another section */
+			break;	/* another section */
 		ret = CFG_ERR_FMT;
 		if (split_key_value(buf, key_ptr, val_ptr) != 1)
 			goto g_all_keys_end;
@@ -297,32 +292,31 @@ g_all_keys_end:
 /*
  * name:    get_sections
  * func:    API: get all mainkey from buffer to *sections[]
- * input:   struct file *buffer
- * output:  char *sections[]
- * return:  number of sections or error number (negative)
+ * input:	struct file *buffer
+ * output:	char *sections[]
+ * return:	number of sections or error number (negative)
  */
 int cfg_get_sections(char *buffer, char *sections[])
 {
 	char buf[LINE_MAX_CHAR_NUM + 1];
 	int n, n_sections = 0, ret;
 	unsigned int i, buf_len;
-
 	buf_len = strlen((char *)buffer);
 	if (buf_len < 1)
 		return CFG_ERR;
 
-	for (i = 0; i < buf_len;) { /* search for section */
+	for (i = 0; i < buf_len;) {	/* search for section */
 		ret = CFG_ERR_RD;
 		n = get_one_line(buffer, buf, LINE_MAX_CHAR_NUM);
 		buffer += n;
 		i += n;
 
 		if (n < 0)
-			break; /* end of file */
+			break;	/* end of file */
 
 		n = strlen(strim(buf));
 		if (n == 0 || buf[0] == comment_pre)
-			continue; /* null line or comment line */
+			continue;	/* null line or comment line */
 		ret = CFG_ERR_FMT;
 		if (n > 2 && ((buf[0] == sct_pre && buf[n - 1] != sct_post)))
 			goto get_scts_end;
@@ -340,9 +334,9 @@ get_scts_end:
 /*
  * name:    cfg_get_one_key_value
  * func:    API: get a key value in the specific section from buffer
- * input:   char *buffer, struct cfg_mainkey *scts
- * output:  struct cfg_subkey *subkey
- * return:  error number
+ * input:	char *buffer, struct cfg_mainkey *scts
+ * output:	struct cfg_subkey *subkey
+ * return:	error number
  */
 int cfg_get_one_key_value(char *buffer, struct cfg_mainkey *scts,
 			  struct cfg_subkey *subkey)
@@ -384,9 +378,9 @@ int cfg_get_one_key_value(char *buffer, struct cfg_mainkey *scts,
 /*
  * name:    cfg_get_all_keys_value
  * func:    API: get all key values in the specific section from buffer
- * input:   char *buffer, struct cfg_mainkey *scts
- * output:  struct cfg_mainkey *scts
- * return:  error number
+ * input:	char *buffer, struct cfg_mainkey *scts
+ * output:	struct cfg_mainkey *scts
+ * return:	error number
  */
 int cfg_get_all_keys_value(char *buffer, struct cfg_mainkey *scts)
 {
@@ -404,8 +398,9 @@ int cfg_get_all_keys_value(char *buffer, struct cfg_mainkey *scts)
 	    get_all_keys_value(buffer, scts->name, scts->subkey_name,
 			       (void *)scts->subkey_value);
 
-	if (scts->subkey_cnt <= 0)
+	if (scts->subkey_cnt <= 0) {
 		return 0;
+	}
 
 	for (i = 0; i < scts->subkey_cnt; i++) {
 		len = strlen(scts->subkey[i].value.str);
@@ -433,9 +428,9 @@ int cfg_get_all_keys_value(char *buffer, struct cfg_mainkey *scts)
 /*
  * name:    cfg_mainkey_init
  * func:    API: init resource before using mainkey
- * input:   struct cfg_mainkey **mainkey
+ * input:	struct cfg_mainkey **mainkey
  * output:
- * return:  error number
+ * return:	error number
  */
 void cfg_mainkey_init(struct cfg_mainkey **mainkey, char **mainkey_name)
 {
@@ -453,9 +448,9 @@ void cfg_mainkey_init(struct cfg_mainkey **mainkey, char **mainkey_name)
 /*
  * name:    cfg_mainkey_release
  * func:    API: release resource after using mainkey
- * input:   struct cfg_mainkey **mainkey
+ * input:	struct cfg_mainkey **mainkey
  * output:
- * return:  error number
+ * return:	error number
  */
 void cfg_mainkey_release(struct cfg_mainkey **mainkey, char **mainkey_name)
 {
@@ -467,9 +462,9 @@ void cfg_mainkey_release(struct cfg_mainkey **mainkey, char **mainkey_name)
 /*
  * name:    cfg_section_init
  * func:    API: init resource before using cfg_section
- * input:   struct cfg_section **cfg_sct
+ * input:	struct cfg_section **cfg_sct
  * output:
- * return:  error number
+ * return:	error number
  */
 void cfg_section_init(struct cfg_section **cfg_sct)
 {
@@ -487,9 +482,9 @@ void cfg_section_init(struct cfg_section **cfg_sct)
 /*
  * name:    cfg_section_release
  * func:    API: release resource after using cfg_section
- * input:   struct cfg_section **cfg_sct
+ * input:	struct cfg_section **cfg_sct
  * output:
- * return:  error number
+ * return:	error number
  */
 void cfg_section_release(struct cfg_section **cfg_sct)
 {
@@ -506,10 +501,9 @@ void cfg_section_release(struct cfg_section **cfg_sct)
 struct file *cfg_open_file(char *file_path)
 {
 	struct file *fp;
-
 	fp = filp_open(file_path, O_RDWR | O_APPEND | O_CREAT, 0644);
 	if (IS_ERR(fp)) {
-		pr_info("[vin_warn]open %s failed!, ERR NO is %ld.\n", file_path,
+		printk("[vin_warn]open %s failed!, ERR NO is %ld.\n", file_path,
 		       (long)fp);
 	}
 	return fp;
@@ -517,7 +511,7 @@ struct file *cfg_open_file(char *file_path)
 int cfg_close_file(struct file *fp)
 {
 	if (IS_ERR(fp)) {
-		pr_info("[vin_warn]colse file failed,fp is invaild!\n");
+		printk("[vin_warn]colse file failed,fp is invaild!\n");
 		return -1;
 	} else {
 		filp_close(fp, NULL);
@@ -528,9 +522,9 @@ int cfg_close_file(struct file *fp)
 /*
  * name:    cfg_read_file
  * func:    API: read from file to buf
- * input:   char *file_path,size_t len
- * output:  char *buf
- * return:  the actual length has been read
+ * input:	char *file_path,size_t len
+ * output:	char *buf
+ * return:	the actual length has been read
  */
 int cfg_read_file(char *file_path, char *buf, size_t len)
 {
@@ -541,7 +535,7 @@ int cfg_read_file(char *file_path, char *buf, size_t len)
 
 	fp = filp_open(file_path, O_RDONLY, 0);
 	if (IS_ERR(fp)) {
-		pr_info("[vin_warn]open file failed!\n");
+		printk("[vin_warn]open file failed!\n");
 		return -EFAULT;
 	}
 
@@ -564,9 +558,8 @@ int cfg_write_file(struct file *fp, char *buf, size_t len)
 	mm_segment_t old_fs;
 	loff_t pos = 0;
 	int buf_len;
-
 	if (IS_ERR_OR_NULL(fp)) {
-		pr_info("cfg write file error, fp is null!");
+		printk("cfg write file error, fp is null!");
 		return -1;
 	}
 	old_fs = get_fs();
@@ -577,16 +570,16 @@ int cfg_write_file(struct file *fp, char *buf, size_t len)
 	if (buf_len < 0)
 		return -1;
 	if (buf_len != len)
-		pr_info("buf_len = %x, len = %pa\n", buf_len, &len);
+		printk("buf_len = %x, len = %pa\n", buf_len, &len);
 	return buf_len;
 }
 
 /*
  * name:    cfg_read_ini
  * func:    API: read from file, parse mainkey and sunkey value,save to cfg_setction
- * input:   char *file_path
- * output:  struct cfg_section **cfg_section
- * return:  error number
+ * input:	char *file_path
+ * output:	struct cfg_section **cfg_section
+ * return:	error number
  */
 int cfg_read_ini(char *file_path, struct cfg_section **cfg_section)
 {
@@ -622,15 +615,14 @@ rd_ini_end:
 /*
  * name:    cfg_get_ini_item
  * func:    API: read from cfg_setction, parse mainkey and sunkey value,save to cfg_setction
- * input:   struct cfg_section *cfg_section, char *main, char *sub
- * output:  struct cfg_subkey *subkey
- * return:  error number
+ * input:	struct cfg_section *cfg_section, char *main, char *sub
+ * output:	struct cfg_subkey *subkey
+ * return:	error number
  */
 int cfg_get_one_subkey(struct cfg_section *cs, char *main, char *sub,
 		       struct cfg_subkey *subkey)
 {
 	int i, j, ret;
-
 	for (i = 0; i < cs->mainkey_cnt; i++) {
 		if (strcmp(cs->mainkey_name[i], main) != 0)
 			continue;
@@ -646,5 +638,4 @@ int cfg_get_one_subkey(struct cfg_section *cs, char *main, char *sub,
 	}
 	return -1;
 }
-#endif
 

@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2013, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -41,8 +41,7 @@
  * POSSIBILITY OF SUCH DAMAGES.
  */
 
-#define EXPORT_ACPI_INTERFACES
-
+#include <linux/export.h>
 #include <acpi/acpi.h>
 #include "accommon.h"
 #include "actables.h"
@@ -98,8 +97,8 @@ acpi_status acpi_allocate_root_table(u32 initial_table_count)
  *
  ******************************************************************************/
 
-acpi_status ACPI_INIT_FUNCTION
-acpi_initialize_tables(struct acpi_table_desc *initial_table_array,
+acpi_status __init
+acpi_initialize_tables(struct acpi_table_desc * initial_table_array,
 		       u32 initial_table_count, u8 allow_resize)
 {
 	acpi_physical_address rsdp_address;
@@ -119,9 +118,9 @@ acpi_initialize_tables(struct acpi_table_desc *initial_table_array,
 	} else {
 		/* Root Table Array has been statically allocated by the host */
 
-		memset(initial_table_array, 0,
-		       (acpi_size)initial_table_count *
-		       sizeof(struct acpi_table_desc));
+		ACPI_MEMSET(initial_table_array, 0,
+			    (acpi_size) initial_table_count *
+			    sizeof(struct acpi_table_desc));
 
 		acpi_gbl_root_table_list.tables = initial_table_array;
 		acpi_gbl_root_table_list.max_table_count = initial_table_count;
@@ -148,8 +147,6 @@ acpi_initialize_tables(struct acpi_table_desc *initial_table_array,
 	return_ACPI_STATUS(status);
 }
 
-ACPI_EXPORT_SYMBOL_INIT(acpi_initialize_tables)
-
 /*******************************************************************************
  *
  * FUNCTION:    acpi_reallocate_root_table
@@ -164,7 +161,7 @@ ACPI_EXPORT_SYMBOL_INIT(acpi_initialize_tables)
  *              kernel.
  *
  ******************************************************************************/
-acpi_status ACPI_INIT_FUNCTION acpi_reallocate_root_table(void)
+acpi_status acpi_reallocate_root_table(void)
 {
 	acpi_status status;
 
@@ -183,8 +180,6 @@ acpi_status ACPI_INIT_FUNCTION acpi_reallocate_root_table(void)
 	status = acpi_tb_resize_root_table_list();
 	return_ACPI_STATUS(status);
 }
-
-ACPI_EXPORT_SYMBOL_INIT(acpi_reallocate_root_table)
 
 /*******************************************************************************
  *
@@ -206,8 +201,8 @@ acpi_status
 acpi_get_table_header(char *signature,
 		      u32 instance, struct acpi_table_header *out_table_header)
 {
-	u32 i;
-	u32 j;
+       u32 i;
+       u32 j;
 	struct acpi_table_header *header;
 
 	/* Parameter validation */
@@ -233,7 +228,7 @@ acpi_get_table_header(char *signature,
 		if (!acpi_gbl_root_table_list.tables[i].pointer) {
 			if ((acpi_gbl_root_table_list.tables[i].flags &
 			     ACPI_TABLE_ORIGIN_MASK) ==
-			    ACPI_TABLE_ORIGIN_INTERNAL_PHYSICAL) {
+			    ACPI_TABLE_ORIGIN_MAPPED) {
 				header =
 				    acpi_os_map_memory(acpi_gbl_root_table_list.
 						       tables[i].address,
@@ -242,9 +237,8 @@ acpi_get_table_header(char *signature,
 				if (!header) {
 					return (AE_NO_MEMORY);
 				}
-
-				memcpy(out_table_header, header,
-				       sizeof(struct acpi_table_header));
+				ACPI_MEMCPY(out_table_header, header,
+					    sizeof(struct acpi_table_header));
 				acpi_os_unmap_memory(header,
 						     sizeof(struct
 							    acpi_table_header));
@@ -252,9 +246,9 @@ acpi_get_table_header(char *signature,
 				return (AE_NOT_FOUND);
 			}
 		} else {
-			memcpy(out_table_header,
-			       acpi_gbl_root_table_list.tables[i].pointer,
-			       sizeof(struct acpi_table_header));
+			ACPI_MEMCPY(out_table_header,
+				    acpi_gbl_root_table_list.tables[i].pointer,
+				    sizeof(struct acpi_table_header));
 		}
 		return (AE_OK);
 	}
@@ -263,6 +257,45 @@ acpi_get_table_header(char *signature,
 }
 
 ACPI_EXPORT_SYMBOL(acpi_get_table_header)
+
+/*******************************************************************************
+ *
+ * FUNCTION:    acpi_unload_table_id
+ *
+ * PARAMETERS:  id            - Owner ID of the table to be removed.
+ *
+ * RETURN:      Status
+ *
+ * DESCRIPTION: This routine is used to force the unload of a table (by id)
+ *
+ ******************************************************************************/
+acpi_status acpi_unload_table_id(acpi_owner_id id)
+{
+	int i;
+	acpi_status status = AE_NOT_EXIST;
+
+	ACPI_FUNCTION_TRACE(acpi_unload_table_id);
+
+	/* Find table in the global table list */
+	for (i = 0; i < acpi_gbl_root_table_list.current_table_count; ++i) {
+		if (id != acpi_gbl_root_table_list.tables[i].owner_id) {
+			continue;
+		}
+		/*
+		 * Delete all namespace objects owned by this table. Note that these
+		 * objects can appear anywhere in the namespace by virtue of the AML
+		 * "Scope" operator. Thus, we need to track ownership by an ID, not
+		 * simply a position within the hierarchy
+		 */
+		acpi_tb_delete_namespace_by_owner(i);
+		status = acpi_tb_release_owner_id(i);
+		acpi_tb_set_table_loaded_flag(i, FALSE);
+		break;
+	}
+	return_ACPI_STATUS(status);
+}
+
+ACPI_EXPORT_SYMBOL(acpi_unload_table_id)
 
 /*******************************************************************************
  *
@@ -283,8 +316,8 @@ acpi_get_table_with_size(char *signature,
 	       u32 instance, struct acpi_table_header **out_table,
 	       acpi_size *tbl_size)
 {
-	u32 i;
-	u32 j;
+       u32 i;
+       u32 j;
 	acpi_status status;
 
 	/* Parameter validation */
@@ -308,7 +341,7 @@ acpi_get_table_with_size(char *signature,
 		}
 
 		status =
-		    acpi_tb_validate_table(&acpi_gbl_root_table_list.tables[i]);
+		    acpi_tb_verify_table(&acpi_gbl_root_table_list.tables[i]);
 		if (ACPI_SUCCESS(status)) {
 			*out_table = acpi_gbl_root_table_list.tables[i].pointer;
 			*tbl_size = acpi_gbl_root_table_list.tables[i].length;
@@ -323,7 +356,6 @@ acpi_get_table_with_size(char *signature,
 
 	return (AE_NOT_FOUND);
 }
-
 ACPI_EXPORT_SYMBOL(acpi_get_table_with_size)
 
 acpi_status
@@ -335,7 +367,6 @@ acpi_get_table(char *signature,
 	return acpi_get_table_with_size(signature,
 		       instance, out_table, &tbl_size);
 }
-
 ACPI_EXPORT_SYMBOL(acpi_get_table)
 
 /*******************************************************************************
@@ -378,8 +409,8 @@ acpi_get_table_by_index(u32 table_index, struct acpi_table_header **table)
 		/* Table is not mapped, map it */
 
 		status =
-		    acpi_tb_validate_table(&acpi_gbl_root_table_list.
-					   tables[table_index]);
+		    acpi_tb_verify_table(&acpi_gbl_root_table_list.
+					 tables[table_index]);
 		if (ACPI_FAILURE(status)) {
 			(void)acpi_ut_release_mutex(ACPI_MTX_TABLES);
 			return_ACPI_STATUS(status);
@@ -392,6 +423,7 @@ acpi_get_table_by_index(u32 table_index, struct acpi_table_header **table)
 }
 
 ACPI_EXPORT_SYMBOL(acpi_get_table_by_index)
+
 
 /*******************************************************************************
  *
@@ -433,7 +465,7 @@ acpi_install_table_handler(acpi_table_handler handler, void *context)
 	acpi_gbl_table_handler = handler;
 	acpi_gbl_table_handler_context = context;
 
-cleanup:
+      cleanup:
 	(void)acpi_ut_release_mutex(ACPI_MTX_EVENTS);
 	return_ACPI_STATUS(status);
 }
@@ -474,7 +506,7 @@ acpi_status acpi_remove_table_handler(acpi_table_handler handler)
 
 	acpi_gbl_table_handler = NULL;
 
-cleanup:
+      cleanup:
 	(void)acpi_ut_release_mutex(ACPI_MTX_EVENTS);
 	return_ACPI_STATUS(status);
 }

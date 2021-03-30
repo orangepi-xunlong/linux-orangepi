@@ -21,26 +21,23 @@
 #include <linux/sched.h>
 #include <linux/ioport.h>
 #include <linux/irq.h>
-#include <linux/of_fdt.h>
 #include <linux/pci.h>
 #include <linux/screen_info.h>
 #include <linux/time.h>
 
 #include <asm/fw/fw.h>
-#include <asm/mach-malta/malta-dtshim.h>
-#include <asm/mips-cm.h>
 #include <asm/mips-boards/generic.h>
 #include <asm/mips-boards/malta.h>
 #include <asm/mips-boards/maltaint.h>
 #include <asm/dma.h>
-#include <asm/prom.h>
 #include <asm/traps.h>
+#include <asm/gcmpregs.h>
 #ifdef CONFIG_VT
 #include <linux/console.h>
 #endif
 
-#define ROCIT_CONFIG_GEN0		0x1f403000
-#define  ROCIT_CONFIG_GEN0_PCI_IOCU	BIT(7)
+extern void malta_be_init(void);
+extern int malta_be_handler(struct pt_regs *regs, int is_fixup);
 
 static struct resource standard_io_resources[] = {
 	{
@@ -80,7 +77,11 @@ const char *get_system_type(void)
 	return "MIPS Malta";
 }
 
+#if defined(CONFIG_MIPS_MT_SMTC)
+const char display_string[] = "	      SMTC LINUX ON MALTA	";
+#else
 const char display_string[] = "	       LINUX ON MALTA	    ";
+#endif /* CONFIG_MIPS_MT_SMTC */
 
 #ifdef CONFIG_BLK_DEV_FD
 static void __init fd_activate(void)
@@ -107,8 +108,6 @@ static void __init fd_activate(void)
 static int __init plat_enable_iocoherency(void)
 {
 	int supported = 0;
-	u32 cfg;
-
 	if (mips_revision_sconid == MIPS_REVISION_SCON_BONITO) {
 		if (BONITO_PCICACHECTRL & BONITO_PCICACHECTRL_CPUCOH_PRES) {
 			BONITO_PCICACHECTRL |= BONITO_PCICACHECTRL_CPUCOH_EN;
@@ -128,11 +127,10 @@ static int __init plat_enable_iocoherency(void)
 				 BONITO_PCIMEMBASECFG_MEMBASE1_CACHED);
 			pr_info("Enabled Bonito IOBC coherency\n");
 		}
-	} else if (mips_cm_numiocu() != 0) {
+	} else if (gcmp_niocu() != 0) {
 		/* Nothing special needs to be done to enable coherency */
 		pr_info("CMP IOCU detected\n");
-		cfg = __raw_readl((u32 *)CKSEG1ADDR(ROCIT_CONFIG_GEN0));
-		if (!(cfg & ROCIT_CONFIG_GEN0_PCI_IOCU)) {
+		if ((*(unsigned int *)0xbf403000 & 0x81) != 0x81) {
 			pr_crit("IOCU OPERATION DISABLED BY SWITCH - DEFAULTING TO SW IO COHERENCY\n");
 			return 0;
 		}
@@ -151,12 +149,12 @@ static void __init plat_setup_iocoherency(void)
 	 * coherency instead.
 	 */
 	if (plat_enable_iocoherency()) {
-		if (coherentio == IO_COHERENCE_DISABLED)
+		if (coherentio == 0)
 			pr_info("Hardware DMA cache coherency disabled\n");
 		else
 			pr_info("Hardware DMA cache coherency enabled\n");
 	} else {
-		if (coherentio == IO_COHERENCE_ENABLED)
+		if (coherentio == 1)
 			pr_info("Hardware DMA cache coherency unsupported, but enabled from command line!\n");
 		else
 			pr_info("Software DMA cache coherency enabled\n");
@@ -167,6 +165,7 @@ static void __init plat_setup_iocoherency(void)
 #endif
 }
 
+#ifdef CONFIG_BLK_DEV_IDE
 static void __init pci_clock_check(void)
 {
 	unsigned int __iomem *jmpr_p =
@@ -176,25 +175,18 @@ static void __init pci_clock_check(void)
 		33, 20, 25, 30, 12, 16, 37, 10
 	};
 	int pciclock = pciclocks[jmpr];
-	char *optptr, *argptr = fw_getcmdline();
+	char *argptr = fw_getcmdline();
 
-	/*
-	 * If user passed a pci_clock= option, don't tack on another one
-	 */
-	optptr = strstr(argptr, "pci_clock=");
-	if (optptr && (optptr == argptr || optptr[-1] == ' '))
-		return;
-
-	if (pciclock != 33) {
-		pr_warn("WARNING: PCI clock is %dMHz, setting pci_clock\n",
+	if (pciclock != 33 && !strstr(argptr, "idebus=")) {
+		pr_warn("WARNING: PCI clock is %dMHz, setting idebus\n",
 			pciclock);
 		argptr += strlen(argptr);
-		sprintf(argptr, " pci_clock=%d", pciclock);
+		sprintf(argptr, " idebus=%d", pciclock);
 		if (pciclock < 20 || pciclock > 66)
-			pr_warn("WARNING: IDE timing calculations will be "
-			        "incorrect\n");
+			pr_warn("WARNING: IDE timing calculations will be incorrect\n");
 	}
 }
+#endif
 
 #if defined(CONFIG_VT) && defined(CONFIG_VGA_CONSOLE)
 static void __init screen_info_setup(void)
@@ -251,22 +243,9 @@ static void __init bonito_quirks_setup(void)
 #endif
 }
 
-void __init *plat_get_fdt(void)
-{
-	return (void *)__dtb_start;
-}
-
 void __init plat_mem_setup(void)
 {
 	unsigned int i;
-	void *fdt = plat_get_fdt();
-
-	fdt = malta_dt_shim(fdt);
-	__dt_setup_arch(fdt);
-
-	if (IS_ENABLED(CONFIG_EVA))
-		/* EVA has already been configured in mach-malta/kernel-init.h */
-		pr_info("Enhanced Virtual Addressing (EVA) activated\n");
 
 	mips_pcibios_init();
 
@@ -289,7 +268,9 @@ void __init plat_mem_setup(void)
 
 	plat_setup_iocoherency();
 
+#ifdef CONFIG_BLK_DEV_IDE
 	pci_clock_check();
+#endif
 
 #ifdef CONFIG_BLK_DEV_FD
 	fd_activate();
@@ -298,4 +279,7 @@ void __init plat_mem_setup(void)
 #if defined(CONFIG_VT) && defined(CONFIG_VGA_CONSOLE)
 	screen_info_setup();
 #endif
+
+	board_be_init = malta_be_init;
+	board_be_handler = malta_be_handler;
 }

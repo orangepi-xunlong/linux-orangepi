@@ -18,6 +18,9 @@
 #include <linux/err.h>
 #include <linux/io.h>
 
+#include "soc.h"
+#include "iomap.h"
+#include "common.h"
 #include "prm2xxx_3xxx.h"
 #include "cm.h"
 #include "cm3xxx.h"
@@ -42,7 +45,7 @@ static void _write_clktrctrl(u8 c, s16 module, u32 mask)
 	omap2_cm_write_mod_reg(v, module, OMAP2_CM_CLKSTCTRL);
 }
 
-static bool omap3xxx_cm_is_clkdm_in_hwsup(s16 module, u32 mask)
+bool omap3xxx_cm_is_clkdm_in_hwsup(s16 module, u32 mask)
 {
 	u32 v;
 
@@ -53,22 +56,22 @@ static bool omap3xxx_cm_is_clkdm_in_hwsup(s16 module, u32 mask)
 	return (v == OMAP34XX_CLKSTCTRL_ENABLE_AUTO) ? 1 : 0;
 }
 
-static void omap3xxx_cm_clkdm_enable_hwsup(s16 module, u32 mask)
+void omap3xxx_cm_clkdm_enable_hwsup(s16 module, u32 mask)
 {
 	_write_clktrctrl(OMAP34XX_CLKSTCTRL_ENABLE_AUTO, module, mask);
 }
 
-static void omap3xxx_cm_clkdm_disable_hwsup(s16 module, u32 mask)
+void omap3xxx_cm_clkdm_disable_hwsup(s16 module, u32 mask)
 {
 	_write_clktrctrl(OMAP34XX_CLKSTCTRL_DISABLE_AUTO, module, mask);
 }
 
-static void omap3xxx_cm_clkdm_force_sleep(s16 module, u32 mask)
+void omap3xxx_cm_clkdm_force_sleep(s16 module, u32 mask)
 {
 	_write_clktrctrl(OMAP34XX_CLKSTCTRL_FORCE_SLEEP, module, mask);
 }
 
-static void omap3xxx_cm_clkdm_force_wakeup(s16 module, u32 mask)
+void omap3xxx_cm_clkdm_force_wakeup(s16 module, u32 mask)
 {
 	_write_clktrctrl(OMAP34XX_CLKSTCTRL_FORCE_WAKEUP, module, mask);
 }
@@ -79,7 +82,6 @@ static void omap3xxx_cm_clkdm_force_wakeup(s16 module, u32 mask)
 
 /**
  * omap3xxx_cm_wait_module_ready - wait for a module to leave idle or standby
- * @part: PRCM partition, ignored for OMAP3
  * @prcm_mod: PRCM module offset
  * @idlest_id: CM_IDLESTx register ID (i.e., x = 1, 2, 3)
  * @idlest_shift: shift of the bit in the CM_IDLEST* register to check
@@ -88,8 +90,7 @@ static void omap3xxx_cm_clkdm_force_wakeup(s16 module, u32 mask)
  * (@prcm_mod, @idlest_id, @idlest_shift) is clocked.  Return 0 upon
  * success or -EBUSY if the module doesn't enable in time.
  */
-static int omap3xxx_cm_wait_module_ready(u8 part, s16 prcm_mod, u16 idlest_id,
-					 u8 idlest_shift)
+int omap3xxx_cm_wait_module_ready(s16 prcm_mod, u8 idlest_id, u8 idlest_shift)
 {
 	int ena = 0, i = 0;
 	u8 cm_idlest_reg;
@@ -118,9 +119,8 @@ static int omap3xxx_cm_wait_module_ready(u8 part, s16 prcm_mod, u16 idlest_id,
  * XXX This function is only needed until absolute register addresses are
  * removed from the OMAP struct clk records.
  */
-static int omap3xxx_cm_split_idlest_reg(void __iomem *idlest_reg,
-					s16 *prcm_inst,
-					u8 *idlest_reg_id)
+int omap3xxx_cm_split_idlest_reg(void __iomem *idlest_reg, s16 *prcm_inst,
+				 u8 *idlest_reg_id)
 {
 	unsigned long offs;
 	u8 idlest_offs;
@@ -388,8 +388,7 @@ void omap3_cm_save_context(void)
 		omap2_cm_read_mod_reg(OMAP3430_IVA2_MOD, CM_CLKSEL1);
 	cm_context.iva2_cm_clksel2 =
 		omap2_cm_read_mod_reg(OMAP3430_IVA2_MOD, CM_CLKSEL2);
-	cm_context.cm_sysconfig =
-		omap2_cm_read_mod_reg(OCP_MOD, OMAP3430_CM_SYSCONFIG);
+	cm_context.cm_sysconfig = __raw_readl(OMAP3430_CM_SYSCONFIG);
 	cm_context.sgx_cm_clksel =
 		omap2_cm_read_mod_reg(OMAP3430ES2_SGX_MOD, CM_CLKSEL);
 	cm_context.dss_cm_clksel =
@@ -419,8 +418,7 @@ void omap3_cm_save_context(void)
 		omap2_cm_read_mod_reg(PLL_MOD, OMAP3430ES2_CM_CLKSEL5);
 	cm_context.pll_cm_clken2 =
 		omap2_cm_read_mod_reg(PLL_MOD, OMAP3430ES2_CM_CLKEN2);
-	cm_context.cm_polctrl =
-		omap2_cm_read_mod_reg(OCP_MOD, OMAP3430_CM_POLCTRL);
+	cm_context.cm_polctrl = __raw_readl(OMAP3430_CM_POLCTRL);
 	cm_context.iva2_cm_fclken =
 		omap2_cm_read_mod_reg(OMAP3430_IVA2_MOD, CM_FCLKEN);
 	cm_context.iva2_cm_clken_pll =
@@ -521,8 +519,7 @@ void omap3_cm_restore_context(void)
 			       CM_CLKSEL1);
 	omap2_cm_write_mod_reg(cm_context.iva2_cm_clksel2, OMAP3430_IVA2_MOD,
 			       CM_CLKSEL2);
-	omap2_cm_write_mod_reg(cm_context.cm_sysconfig, OCP_MOD,
-			       OMAP3430_CM_SYSCONFIG);
+	__raw_writel(cm_context.cm_sysconfig, OMAP3430_CM_SYSCONFIG);
 	omap2_cm_write_mod_reg(cm_context.sgx_cm_clksel, OMAP3430ES2_SGX_MOD,
 			       CM_CLKSEL);
 	omap2_cm_write_mod_reg(cm_context.dss_cm_clksel, OMAP3430_DSS_MOD,
@@ -550,8 +547,7 @@ void omap3_cm_restore_context(void)
 			       OMAP3430ES2_CM_CLKSEL5);
 	omap2_cm_write_mod_reg(cm_context.pll_cm_clken2, PLL_MOD,
 			       OMAP3430ES2_CM_CLKEN2);
-	omap2_cm_write_mod_reg(cm_context.cm_polctrl, OCP_MOD,
-			       OMAP3430_CM_POLCTRL);
+	__raw_writel(cm_context.cm_polctrl, OMAP3430_CM_POLCTRL);
 	omap2_cm_write_mod_reg(cm_context.iva2_cm_fclken, OMAP3430_IVA2_MOD,
 			       CM_FCLKEN);
 	omap2_cm_write_mod_reg(cm_context.iva2_cm_clken_pll, OMAP3430_IVA2_MOD,
@@ -640,28 +636,6 @@ void omap3_cm_restore_context(void)
 			       OMAP3_CM_CLKOUT_CTRL_OFFSET);
 }
 
-void omap3_cm_save_scratchpad_contents(u32 *ptr)
-{
-	*ptr++ = omap2_cm_read_mod_reg(CORE_MOD, CM_CLKSEL);
-	*ptr++ = omap2_cm_read_mod_reg(WKUP_MOD, CM_CLKSEL);
-	*ptr++ = omap2_cm_read_mod_reg(PLL_MOD, CM_CLKEN);
-
-	/*
-	 * As per erratum i671, ROM code does not respect the PER DPLL
-	 * programming scheme if CM_AUTOIDLE_PLL..AUTO_PERIPH_DPLL == 1.
-	 * Then,  in any case, clear these bits to avoid extra latencies.
-	 */
-	*ptr++ = omap2_cm_read_mod_reg(PLL_MOD, CM_AUTOIDLE) &
-		~OMAP3430_AUTO_PERIPH_DPLL_MASK;
-	*ptr++ = omap2_cm_read_mod_reg(PLL_MOD, OMAP3430_CM_CLKSEL1_PLL);
-	*ptr++ = omap2_cm_read_mod_reg(PLL_MOD, OMAP3430_CM_CLKSEL2_PLL);
-	*ptr++ = omap2_cm_read_mod_reg(PLL_MOD, OMAP3430_CM_CLKSEL3);
-	*ptr++ = omap2_cm_read_mod_reg(MPU_MOD, OMAP3430_CM_CLKEN_PLL);
-	*ptr++ = omap2_cm_read_mod_reg(MPU_MOD, OMAP3430_CM_AUTOIDLE_PLL);
-	*ptr++ = omap2_cm_read_mod_reg(MPU_MOD, OMAP3430_CM_CLKSEL1_PLL);
-	*ptr++ = omap2_cm_read_mod_reg(MPU_MOD, OMAP3430_CM_CLKSEL2_PLL);
-}
-
 /*
  *
  */
@@ -671,14 +645,21 @@ static struct cm_ll_data omap3xxx_cm_ll_data = {
 	.wait_module_ready	= &omap3xxx_cm_wait_module_ready,
 };
 
-int __init omap3xxx_cm_init(const struct omap_prcm_init_data *data)
+int __init omap3xxx_cm_init(void)
 {
-	omap2_clk_legacy_provider_init(TI_CLKM_CM, cm_base + OMAP3430_IVA2_MOD);
+	if (!cpu_is_omap34xx())
+		return 0;
+
 	return cm_register(&omap3xxx_cm_ll_data);
 }
 
 static void __exit omap3xxx_cm_exit(void)
 {
-	cm_unregister(&omap3xxx_cm_ll_data);
+	if (!cpu_is_omap34xx())
+		return;
+
+	/* Should never happen */
+	WARN(cm_unregister(&omap3xxx_cm_ll_data),
+	     "%s: cm_ll_data function pointer mismatch\n", __func__);
 }
 __exitcall(omap3xxx_cm_exit);

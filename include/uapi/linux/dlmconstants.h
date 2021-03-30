@@ -114,7 +114,7 @@
  *
  * DLM_LKF_ORPHAN
  *
- * Acquire an orphan lock.
+ * not yet implemented
  *
  * DLM_LKF_ALTPR
  *

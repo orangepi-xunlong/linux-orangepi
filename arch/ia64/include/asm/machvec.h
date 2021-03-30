@@ -22,6 +22,7 @@ struct pci_bus;
 struct task_struct;
 struct pci_dev;
 struct msi_desc;
+struct dma_attrs;
 
 typedef void ia64_mv_setup_t (char **);
 typedef void ia64_mv_cpu_init_t (void);
@@ -112,6 +113,8 @@ extern void machvec_tlb_migrate_finish (struct mm_struct *);
 #  include <asm/machvec_sn2.h>
 # elif defined (CONFIG_IA64_SGI_UV)
 #  include <asm/machvec_uv.h>
+# elif defined (CONFIG_IA64_XEN_GUEST)
+#  include <asm/machvec_xen.h>
 # elif defined (CONFIG_IA64_GENERIC)
 
 # ifdef MACHVEC_PLATFORM_HEADER

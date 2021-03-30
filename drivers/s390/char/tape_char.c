@@ -402,9 +402,7 @@ __tapechar_ioctl(struct tape_device *device,
 		memset(&get, 0, sizeof(get));
 		get.mt_type = MT_ISUNKNOWN;
 		get.mt_resid = 0 /* device->devstat.rescnt */;
-		get.mt_dsreg =
-			((device->char_data.block_size << MT_ST_BLKSIZE_SHIFT)
-			 & MT_ST_BLKSIZE_MASK);
+		get.mt_dsreg = device->tape_state;
 		/* FIXME: mt_gstat, mt_erreg, mt_fileno */
 		get.mt_gstat = 0;
 		get.mt_erreg = 0;

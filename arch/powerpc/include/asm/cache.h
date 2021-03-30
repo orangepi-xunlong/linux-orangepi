@@ -41,20 +41,8 @@ struct ppc64_caches {
 extern struct ppc64_caches ppc64_caches;
 #endif /* __powerpc64__ && ! __ASSEMBLY__ */
 
-#if defined(__ASSEMBLY__)
-/*
- * For a snooping icache, we still need a dummy icbi to purge all the
- * prefetched instructions from the ifetch buffers. We also need a sync
- * before the icbi to order the the actual stores to memory that might
- * have modified instructions with the icbi.
- */
-#define PURGE_PREFETCHED_INS	\
-	sync;			\
-	icbi	0,r3;		\
-	sync;			\
-	isync
+#if !defined(__ASSEMBLY__)
 
-#else
 #define __read_mostly __attribute__((__section__(".data..read_mostly")))
 
 #ifdef CONFIG_6xx
@@ -69,25 +57,9 @@ extern void _set_L3CR(unsigned long);
 #define _set_L3CR(val)	do { } while(0)
 #endif
 
-static inline void dcbz(void *addr)
-{
-	__asm__ __volatile__ ("dcbz 0, %0" : : "r"(addr) : "memory");
-}
+extern void cacheable_memzero(void *p, unsigned int nb);
+extern void *cacheable_memcpy(void *, const void *, unsigned int);
 
-static inline void dcbi(void *addr)
-{
-	__asm__ __volatile__ ("dcbi 0, %0" : : "r"(addr) : "memory");
-}
-
-static inline void dcbf(void *addr)
-{
-	__asm__ __volatile__ ("dcbf 0, %0" : : "r"(addr) : "memory");
-}
-
-static inline void dcbst(void *addr)
-{
-	__asm__ __volatile__ ("dcbst 0, %0" : : "r"(addr) : "memory");
-}
 #endif /* !__ASSEMBLY__ */
 #endif /* __KERNEL__ */
 #endif /* _ASM_POWERPC_CACHE_H */

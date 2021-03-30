@@ -65,7 +65,7 @@ int dm_bitset_flush(struct dm_disk_bitset *info, dm_block_t root,
 	int r;
 	__le64 value;
 
-	if (!info->current_index_set || !info->dirty)
+	if (!info->current_index_set)
 		return 0;
 
 	value = cpu_to_le64(info->current_bits);
@@ -77,8 +77,6 @@ int dm_bitset_flush(struct dm_disk_bitset *info, dm_block_t root,
 		return r;
 
 	info->current_index_set = false;
-	info->dirty = false;
-
 	return 0;
 }
 EXPORT_SYMBOL_GPL(dm_bitset_flush);
@@ -96,8 +94,6 @@ static int read_bits(struct dm_disk_bitset *info, dm_block_t root,
 	info->current_bits = le64_to_cpu(value);
 	info->current_index_set = true;
 	info->current_index = array_index;
-	info->dirty = false;
-
 	return 0;
 }
 
@@ -130,8 +126,6 @@ int dm_bitset_set_bit(struct dm_disk_bitset *info, dm_block_t root,
 		return r;
 
 	set_bit(b, (unsigned long *) &info->current_bits);
-	info->dirty = true;
-
 	return 0;
 }
 EXPORT_SYMBOL_GPL(dm_bitset_set_bit);
@@ -147,8 +141,6 @@ int dm_bitset_clear_bit(struct dm_disk_bitset *info, dm_block_t root,
 		return r;
 
 	clear_bit(b, (unsigned long *) &info->current_bits);
-	info->dirty = true;
-
 	return 0;
 }
 EXPORT_SYMBOL_GPL(dm_bitset_clear_bit);

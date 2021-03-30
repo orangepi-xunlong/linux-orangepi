@@ -37,12 +37,10 @@
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/sched.h>
+#include <linux/init.h>
 #include <linux/miscdevice.h>
-#include <linux/kthread.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
-#include <linux/random.h>
-#include <linux/err.h>
 #include <asm/uaccess.h>
 
 
@@ -52,142 +50,27 @@
 
 
 static struct hwrng *current_rng;
-static struct task_struct *hwrng_fill;
 static LIST_HEAD(rng_list);
-/* Protects rng_list and current_rng */
 static DEFINE_MUTEX(rng_mutex);
-/* Protects rng read functions, data_avail, rng_buffer and rng_fillbuf */
-static DEFINE_MUTEX(reading_mutex);
 static int data_avail;
-static u8 *rng_buffer, *rng_fillbuf;
-static unsigned short current_quality;
-static unsigned short default_quality; /* = 0; default to "off" */
-
-module_param(current_quality, ushort, 0644);
-MODULE_PARM_DESC(current_quality,
-		 "current hwrng entropy estimation per mill");
-module_param(default_quality, ushort, 0644);
-MODULE_PARM_DESC(default_quality,
-		 "default entropy content of hwrng per mill");
-
-static void drop_current_rng(void);
-static int hwrng_init(struct hwrng *rng);
-static void start_khwrngd(void);
-
-static inline int rng_get_data(struct hwrng *rng, u8 *buffer, size_t size,
-			       int wait);
+static u8 *rng_buffer;
 
 static size_t rng_buffer_size(void)
 {
 	return SMP_CACHE_BYTES < 32 ? 32 : SMP_CACHE_BYTES;
 }
 
-static void add_early_randomness(struct hwrng *rng)
+static inline int hwrng_init(struct hwrng *rng)
 {
-	int bytes_read;
-	size_t size = min_t(size_t, 16, rng_buffer_size());
-
-	mutex_lock(&reading_mutex);
-	bytes_read = rng_get_data(rng, rng_buffer, size, 1);
-	mutex_unlock(&reading_mutex);
-	if (bytes_read > 0)
-		add_device_randomness(rng_buffer, bytes_read);
+	if (!rng->init)
+		return 0;
+	return rng->init(rng);
 }
 
-static inline void cleanup_rng(struct kref *kref)
+static inline void hwrng_cleanup(struct hwrng *rng)
 {
-	struct hwrng *rng = container_of(kref, struct hwrng, ref);
-
-	if (rng->cleanup)
+	if (rng && rng->cleanup)
 		rng->cleanup(rng);
-
-	complete(&rng->cleanup_done);
-}
-
-static int set_current_rng(struct hwrng *rng)
-{
-	int err;
-
-	BUG_ON(!mutex_is_locked(&rng_mutex));
-
-	err = hwrng_init(rng);
-	if (err)
-		return err;
-
-	drop_current_rng();
-	current_rng = rng;
-
-	return 0;
-}
-
-static void drop_current_rng(void)
-{
-	BUG_ON(!mutex_is_locked(&rng_mutex));
-	if (!current_rng)
-		return;
-
-	/* decrease last reference for triggering the cleanup */
-	kref_put(&current_rng->ref, cleanup_rng);
-	current_rng = NULL;
-}
-
-/* Returns ERR_PTR(), NULL or refcounted hwrng */
-static struct hwrng *get_current_rng(void)
-{
-	struct hwrng *rng;
-
-	if (mutex_lock_interruptible(&rng_mutex))
-		return ERR_PTR(-ERESTARTSYS);
-
-	rng = current_rng;
-	if (rng)
-		kref_get(&rng->ref);
-
-	mutex_unlock(&rng_mutex);
-	return rng;
-}
-
-static void put_rng(struct hwrng *rng)
-{
-	/*
-	 * Hold rng_mutex here so we serialize in case they set_current_rng
-	 * on rng again immediately.
-	 */
-	mutex_lock(&rng_mutex);
-	if (rng)
-		kref_put(&rng->ref, cleanup_rng);
-	mutex_unlock(&rng_mutex);
-}
-
-static int hwrng_init(struct hwrng *rng)
-{
-	if (kref_get_unless_zero(&rng->ref))
-		goto skip_init;
-
-	if (rng->init) {
-		int ret;
-
-		ret =  rng->init(rng);
-		if (ret)
-			return ret;
-	}
-
-	kref_init(&rng->ref);
-	reinit_completion(&rng->cleanup_done);
-
-skip_init:
-	add_early_randomness(rng);
-
-	current_quality = rng->quality ? : default_quality;
-	if (current_quality > 1024)
-		current_quality = 1024;
-
-	if (current_quality == 0 && hwrng_fill)
-		kthread_stop(hwrng_fill);
-	if (current_quality > 0 && !hwrng_fill)
-		start_khwrngd();
-
-	return 0;
 }
 
 static int rng_dev_open(struct inode *inode, struct file *filp)
@@ -204,7 +87,6 @@ static inline int rng_get_data(struct hwrng *rng, u8 *buffer, size_t size,
 			int wait) {
 	int present;
 
-	BUG_ON(!mutex_is_locked(&reading_mutex));
 	if (rng->read)
 		return rng->read(rng, (void *)buffer, size, wait);
 
@@ -225,30 +107,25 @@ static ssize_t rng_dev_read(struct file *filp, char __user *buf,
 	ssize_t ret = 0;
 	int err = 0;
 	int bytes_read, len;
-	struct hwrng *rng;
 
 	while (size) {
-		rng = get_current_rng();
-		if (IS_ERR(rng)) {
-			err = PTR_ERR(rng);
-			goto out;
-		}
-		if (!rng) {
-			err = -ENODEV;
+		if (mutex_lock_interruptible(&rng_mutex)) {
+			err = -ERESTARTSYS;
 			goto out;
 		}
 
-		if (mutex_lock_interruptible(&reading_mutex)) {
-			err = -ERESTARTSYS;
-			goto out_put;
+		if (!current_rng) {
+			err = -ENODEV;
+			goto out_unlock;
 		}
+
 		if (!data_avail) {
-			bytes_read = rng_get_data(rng, rng_buffer,
+			bytes_read = rng_get_data(current_rng, rng_buffer,
 				rng_buffer_size(),
 				!(filp->f_flags & O_NONBLOCK));
 			if (bytes_read < 0) {
 				err = bytes_read;
-				goto out_unlock_reading;
+				goto out_unlock;
 			}
 			data_avail = bytes_read;
 		}
@@ -256,7 +133,7 @@ static ssize_t rng_dev_read(struct file *filp, char __user *buf,
 		if (!data_avail) {
 			if (filp->f_flags & O_NONBLOCK) {
 				err = -EAGAIN;
-				goto out_unlock_reading;
+				goto out_unlock;
 			}
 		} else {
 			len = data_avail;
@@ -268,15 +145,14 @@ static ssize_t rng_dev_read(struct file *filp, char __user *buf,
 			if (copy_to_user(buf + ret, rng_buffer + data_avail,
 								len)) {
 				err = -EFAULT;
-				goto out_unlock_reading;
+				goto out_unlock;
 			}
 
 			size -= len;
 			ret += len;
 		}
 
-		mutex_unlock(&reading_mutex);
-		put_rng(rng);
+		mutex_unlock(&rng_mutex);
 
 		if (need_resched())
 			schedule_timeout_interruptible(1);
@@ -288,11 +164,8 @@ static ssize_t rng_dev_read(struct file *filp, char __user *buf,
 	}
 out:
 	return ret ? : err;
-
-out_unlock_reading:
-	mutex_unlock(&reading_mutex);
-out_put:
-	put_rng(rng);
+out_unlock:
+	mutex_unlock(&rng_mutex);
 	goto out;
 }
 
@@ -304,14 +177,11 @@ static const struct file_operations rng_chrdev_ops = {
 	.llseek		= noop_llseek,
 };
 
-static const struct attribute_group *rng_dev_groups[];
-
 static struct miscdevice rng_miscdev = {
 	.minor		= RNG_MISCDEV_MINOR,
 	.name		= RNG_MODULE_NAME,
 	.nodename	= "hwrng",
 	.fops		= &rng_chrdev_ops,
-	.groups		= rng_dev_groups,
 };
 
 
@@ -327,10 +197,17 @@ static ssize_t hwrng_attr_current_store(struct device *dev,
 		return -ERESTARTSYS;
 	err = -ENODEV;
 	list_for_each_entry(rng, &rng_list, list) {
-		if (sysfs_streq(rng->name, buf)) {
+		if (strcmp(rng->name, buf) == 0) {
+			if (rng == current_rng) {
+				err = 0;
+				break;
+			}
+			err = hwrng_init(rng);
+			if (err)
+				break;
+			hwrng_cleanup(current_rng);
+			current_rng = rng;
 			err = 0;
-			if (rng != current_rng)
-				err = set_current_rng(rng);
 			break;
 		}
 	}
@@ -343,15 +220,17 @@ static ssize_t hwrng_attr_current_show(struct device *dev,
 				       struct device_attribute *attr,
 				       char *buf)
 {
+	int err;
 	ssize_t ret;
-	struct hwrng *rng;
+	const char *name = "none";
 
-	rng = get_current_rng();
-	if (IS_ERR(rng))
-		return PTR_ERR(rng);
-
-	ret = snprintf(buf, PAGE_SIZE, "%s\n", rng ? rng->name : "none");
-	put_rng(rng);
+	err = mutex_lock_interruptible(&rng_mutex);
+	if (err)
+		return -ERESTARTSYS;
+	if (current_rng)
+		name = current_rng->name;
+	ret = snprintf(buf, PAGE_SIZE, "%s\n", name);
+	mutex_unlock(&rng_mutex);
 
 	return ret;
 }
@@ -361,6 +240,7 @@ static ssize_t hwrng_attr_available_show(struct device *dev,
 					 char *buf)
 {
 	int err;
+	ssize_t ret = 0;
 	struct hwrng *rng;
 
 	err = mutex_lock_interruptible(&rng_mutex);
@@ -368,13 +248,16 @@ static ssize_t hwrng_attr_available_show(struct device *dev,
 		return -ERESTARTSYS;
 	buf[0] = '\0';
 	list_for_each_entry(rng, &rng_list, list) {
-		strlcat(buf, rng->name, PAGE_SIZE);
-		strlcat(buf, " ", PAGE_SIZE);
+		strncat(buf, rng->name, PAGE_SIZE - ret - 1);
+		ret += strlen(rng->name);
+		strncat(buf, " ", PAGE_SIZE - ret - 1);
+		ret++;
 	}
-	strlcat(buf, "\n", PAGE_SIZE);
+	strncat(buf, "\n", PAGE_SIZE - ret - 1);
+	ret++;
 	mutex_unlock(&rng_mutex);
 
-	return strlen(buf);
+	return ret;
 }
 
 static DEVICE_ATTR(rng_current, S_IRUGO | S_IWUSR,
@@ -384,63 +267,42 @@ static DEVICE_ATTR(rng_available, S_IRUGO,
 		   hwrng_attr_available_show,
 		   NULL);
 
-static struct attribute *rng_dev_attrs[] = {
-	&dev_attr_rng_current.attr,
-	&dev_attr_rng_available.attr,
-	NULL
-};
 
-ATTRIBUTE_GROUPS(rng_dev);
-
-static void __exit unregister_miscdev(void)
+static void unregister_miscdev(void)
 {
+	device_remove_file(rng_miscdev.this_device, &dev_attr_rng_available);
+	device_remove_file(rng_miscdev.this_device, &dev_attr_rng_current);
 	misc_deregister(&rng_miscdev);
 }
 
-static int __init register_miscdev(void)
+static int register_miscdev(void)
 {
-	return misc_register(&rng_miscdev);
-}
+	int err;
 
-static int hwrng_fillfn(void *unused)
-{
-	long rc;
+	err = misc_register(&rng_miscdev);
+	if (err)
+		goto out;
+	err = device_create_file(rng_miscdev.this_device,
+				 &dev_attr_rng_current);
+	if (err)
+		goto err_misc_dereg;
+	err = device_create_file(rng_miscdev.this_device,
+				 &dev_attr_rng_available);
+	if (err)
+		goto err_remove_current;
+out:
+	return err;
 
-	while (!kthread_should_stop()) {
-		struct hwrng *rng;
-
-		rng = get_current_rng();
-		if (IS_ERR(rng) || !rng)
-			break;
-		mutex_lock(&reading_mutex);
-		rc = rng_get_data(rng, rng_fillbuf,
-				  rng_buffer_size(), 1);
-		mutex_unlock(&reading_mutex);
-		put_rng(rng);
-		if (rc <= 0) {
-			pr_warn("hwrng: no data available\n");
-			msleep_interruptible(10000);
-			continue;
-		}
-		/* Outside lock, sure, but y'know: randomness. */
-		add_hwgenerator_randomness((void *)rng_fillbuf, rc,
-					   rc * current_quality * 8 >> 10);
-	}
-	hwrng_fill = NULL;
-	return 0;
-}
-
-static void start_khwrngd(void)
-{
-	hwrng_fill = kthread_run(hwrng_fillfn, NULL, "hwrng");
-	if (IS_ERR(hwrng_fill)) {
-		pr_err("hwrng_fill thread creation failed");
-		hwrng_fill = NULL;
-	}
+err_remove_current:
+	device_remove_file(rng_miscdev.this_device, &dev_attr_rng_current);
+err_misc_dereg:
+	misc_deregister(&rng_miscdev);
+	goto out;
 }
 
 int hwrng_register(struct hwrng *rng)
 {
+	int must_register_misc;
 	int err = -EINVAL;
 	struct hwrng *old_rng, *tmp;
 
@@ -449,6 +311,15 @@ int hwrng_register(struct hwrng *rng)
 		goto out;
 
 	mutex_lock(&rng_mutex);
+
+	/* kmalloc makes this safe for virt_to_page() in virtio_rng.c */
+	err = -ENOMEM;
+	if (!rng_buffer) {
+		rng_buffer = kmalloc(rng_buffer_size(), GFP_KERNEL);
+		if (!rng_buffer)
+			goto out_unlock;
+	}
+
 	/* Must not register two RNGs with the same name. */
 	err = -EEXIST;
 	list_for_each_entry(tmp, &rng_list, list) {
@@ -456,29 +327,27 @@ int hwrng_register(struct hwrng *rng)
 			goto out_unlock;
 	}
 
-	init_completion(&rng->cleanup_done);
-	complete(&rng->cleanup_done);
-
+	must_register_misc = (current_rng == NULL);
 	old_rng = current_rng;
-	err = 0;
 	if (!old_rng) {
-		err = set_current_rng(rng);
+		err = hwrng_init(rng);
 		if (err)
 			goto out_unlock;
+		current_rng = rng;
 	}
+	err = 0;
+	if (must_register_misc) {
+		err = register_miscdev();
+		if (err) {
+			if (!old_rng) {
+				hwrng_cleanup(rng);
+				current_rng = NULL;
+			}
+			goto out_unlock;
+		}
+	}
+	INIT_LIST_HEAD(&rng->list);
 	list_add_tail(&rng->list, &rng_list);
-
-	if (old_rng && !rng->init) {
-		/*
-		 * Use a new device's input to add some randomness to
-		 * the system.  If this rng device isn't going to be
-		 * used right away, its init function hasn't been
-		 * called yet; so only use the randomness from devices
-		 * that don't need an init callback.
-		 */
-		add_early_randomness(rng);
-	}
-
 out_unlock:
 	mutex_unlock(&rng_mutex);
 out:
@@ -488,110 +357,38 @@ EXPORT_SYMBOL_GPL(hwrng_register);
 
 void hwrng_unregister(struct hwrng *rng)
 {
+	int err;
+
 	mutex_lock(&rng_mutex);
 
 	list_del(&rng->list);
 	if (current_rng == rng) {
-		drop_current_rng();
-		if (!list_empty(&rng_list)) {
-			struct hwrng *tail;
-
-			tail = list_entry(rng_list.prev, struct hwrng, list);
-
-			set_current_rng(tail);
+		hwrng_cleanup(rng);
+		if (list_empty(&rng_list)) {
+			current_rng = NULL;
+		} else {
+			current_rng = list_entry(rng_list.prev, struct hwrng, list);
+			err = hwrng_init(current_rng);
+			if (err)
+				current_rng = NULL;
 		}
 	}
+	if (list_empty(&rng_list))
+		unregister_miscdev();
 
-	if (list_empty(&rng_list)) {
-		mutex_unlock(&rng_mutex);
-		if (hwrng_fill)
-			kthread_stop(hwrng_fill);
-	} else
-		mutex_unlock(&rng_mutex);
-
-	wait_for_completion(&rng->cleanup_done);
+	mutex_unlock(&rng_mutex);
 }
 EXPORT_SYMBOL_GPL(hwrng_unregister);
 
-static void devm_hwrng_release(struct device *dev, void *res)
-{
-	hwrng_unregister(*(struct hwrng **)res);
-}
-
-static int devm_hwrng_match(struct device *dev, void *res, void *data)
-{
-	struct hwrng **r = res;
-
-	if (WARN_ON(!r || !*r))
-		return 0;
-
-	return *r == data;
-}
-
-int devm_hwrng_register(struct device *dev, struct hwrng *rng)
-{
-	struct hwrng **ptr;
-	int error;
-
-	ptr = devres_alloc(devm_hwrng_release, sizeof(*ptr), GFP_KERNEL);
-	if (!ptr)
-		return -ENOMEM;
-
-	error = hwrng_register(rng);
-	if (error) {
-		devres_free(ptr);
-		return error;
-	}
-
-	*ptr = rng;
-	devres_add(dev, ptr);
-	return 0;
-}
-EXPORT_SYMBOL_GPL(devm_hwrng_register);
-
-void devm_hwrng_unregister(struct device *dev, struct hwrng *rng)
-{
-	devres_release(dev, devm_hwrng_release, devm_hwrng_match, rng);
-}
-EXPORT_SYMBOL_GPL(devm_hwrng_unregister);
-
-static int __init hwrng_modinit(void)
-{
-	int ret = -ENOMEM;
-
-	/* kmalloc makes this safe for virt_to_page() in virtio_rng.c */
-	rng_buffer = kmalloc(rng_buffer_size(), GFP_KERNEL);
-	if (!rng_buffer)
-		return -ENOMEM;
-
-	rng_fillbuf = kmalloc(rng_buffer_size(), GFP_KERNEL);
-	if (!rng_fillbuf) {
-		kfree(rng_buffer);
-		return -ENOMEM;
-	}
-
-	ret = register_miscdev();
-	if (ret) {
-		kfree(rng_fillbuf);
-		kfree(rng_buffer);
-	}
-
-	return ret;
-}
-
-static void __exit hwrng_modexit(void)
+static void __exit hwrng_exit(void)
 {
 	mutex_lock(&rng_mutex);
 	BUG_ON(current_rng);
 	kfree(rng_buffer);
-	kfree(rng_fillbuf);
 	mutex_unlock(&rng_mutex);
-
-	unregister_miscdev();
 }
 
-module_init(hwrng_modinit);
-module_exit(hwrng_modexit);
+module_exit(hwrng_exit);
 
 MODULE_DESCRIPTION("H/W Random Number Generator (RNG) driver");
 MODULE_LICENSE("GPL");

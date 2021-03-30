@@ -21,7 +21,6 @@
 #include <linux/rcupdate.h>
 #include <linux/pid_namespace.h>
 #include <linux/user_namespace.h>
-#include <linux/shmem_fs.h>
 
 #include <asm/poll.h>
 #include <asm/siginfo.h>
@@ -51,14 +50,13 @@ static int setfl(int fd, struct file * filp, unsigned long arg)
 	       if (arg & O_NDELAY)
 		   arg |= O_NONBLOCK;
 
-	/* Pipe packetized mode is controlled by O_DIRECT flag */
-	if (!S_ISFIFO(filp->f_inode->i_mode) && (arg & O_DIRECT)) {
+	if (arg & O_DIRECT) {
 		if (!filp->f_mapping || !filp->f_mapping->a_ops ||
 			!filp->f_mapping->a_ops->direct_IO)
 				return -EINVAL;
 	}
 
-	if (filp->f_op->check_flags)
+	if (filp->f_op && filp->f_op->check_flags)
 		error = filp->f_op->check_flags(arg);
 	if (error)
 		return error;
@@ -66,7 +64,8 @@ static int setfl(int fd, struct file * filp, unsigned long arg)
 	/*
 	 * ->fasync() is responsible for setting the FASYNC bit.
 	 */
-	if (((arg ^ filp->f_flags) & FASYNC) && filp->f_op->fasync) {
+	if (((arg ^ filp->f_flags) & FASYNC) && filp->f_op &&
+			filp->f_op->fasync) {
 		error = filp->f_op->fasync(fd, filp, (arg & FASYNC) != 0);
 		if (error < 0)
 			goto out;
@@ -99,32 +98,36 @@ static void f_modown(struct file *filp, struct pid *pid, enum pid_type type,
 	write_unlock_irq(&filp->f_owner.lock);
 }
 
-void __f_setown(struct file *filp, struct pid *pid, enum pid_type type,
+int __f_setown(struct file *filp, struct pid *pid, enum pid_type type,
 		int force)
 {
-	security_file_set_fowner(filp);
+	int err;
+
+	err = security_file_set_fowner(filp);
+	if (err)
+		return err;
+
 	f_modown(filp, pid, type, force);
+	return 0;
 }
 EXPORT_SYMBOL(__f_setown);
 
-void f_setown(struct file *filp, unsigned long arg, int force)
+int f_setown(struct file *filp, unsigned long arg, int force)
 {
 	enum pid_type type;
 	struct pid *pid;
 	int who = arg;
+	int result;
 	type = PIDTYPE_PID;
 	if (who < 0) {
-		/* avoid overflow below */
-		if (who == INT_MIN)
-			return;
-
 		type = PIDTYPE_PGID;
 		who = -who;
 	}
 	rcu_read_lock();
 	pid = find_vpid(who);
-	__f_setown(filp, pid, type, force);
+	result = __f_setown(filp, pid, type, force);
 	rcu_read_unlock();
+	return result;
 }
 EXPORT_SYMBOL(f_setown);
 
@@ -178,7 +181,7 @@ static int f_setown_ex(struct file *filp, unsigned long arg)
 	if (owner.pid && !pid)
 		ret = -ESRCH;
 	else
-		 __f_setown(filp, pid, type, 1);
+		ret = __f_setown(filp, pid, type, 1);
 	rcu_read_unlock();
 
 	return ret;
@@ -270,19 +273,9 @@ static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
 	case F_SETFL:
 		err = setfl(fd, filp, arg);
 		break;
-#if BITS_PER_LONG != 32
-	/* 32-bit arches must use fcntl64() */
-	case F_OFD_GETLK:
-#endif
 	case F_GETLK:
-		err = fcntl_getlk(filp, cmd, (struct flock __user *) arg);
+		err = fcntl_getlk(filp, (struct flock __user *) arg);
 		break;
-#if BITS_PER_LONG != 32
-	/* 32-bit arches must use fcntl64() */
-	case F_OFD_SETLK:
-	case F_OFD_SETLKW:
-#endif
-		/* Fallthrough */
 	case F_SETLK:
 	case F_SETLKW:
 		err = fcntl_setlk(fd, filp, cmd, (struct flock __user *) arg);
@@ -299,8 +292,7 @@ static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
 		force_successful_syscall_return();
 		break;
 	case F_SETOWN:
-		f_setown(filp, arg, 1);
-		err = 0;
+		err = f_setown(filp, arg, 1);
 		break;
 	case F_GETOWN_EX:
 		err = f_getown_ex(filp, arg);
@@ -334,10 +326,6 @@ static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
 	case F_SETPIPE_SZ:
 	case F_GETPIPE_SZ:
 		err = pipe_fcntl(filp, cmd, arg);
-		break;
-	case F_ADD_SEALS:
-	case F_GET_SEALS:
-		err = shmem_fcntl(filp, cmd, arg);
 		break;
 	default:
 		break;
@@ -401,20 +389,17 @@ SYSCALL_DEFINE3(fcntl64, unsigned int, fd, unsigned int, cmd,
 		goto out1;
 	
 	switch (cmd) {
-	case F_GETLK64:
-	case F_OFD_GETLK:
-		err = fcntl_getlk64(f.file, cmd, (struct flock64 __user *) arg);
-		break;
-	case F_SETLK64:
-	case F_SETLKW64:
-	case F_OFD_SETLK:
-	case F_OFD_SETLKW:
-		err = fcntl_setlk64(fd, f.file, cmd,
-				(struct flock64 __user *) arg);
-		break;
-	default:
-		err = do_fcntl(fd, cmd, arg, f.file);
-		break;
+		case F_GETLK64:
+			err = fcntl_getlk64(f.file, (struct flock64 __user *) arg);
+			break;
+		case F_SETLK64:
+		case F_SETLKW64:
+			err = fcntl_setlk64(fd, f.file, cmd,
+					(struct flock64 __user *) arg);
+			break;
+		default:
+			err = do_fcntl(fd, cmd, arg, f.file);
+			break;
 	}
 out1:
 	fdput(f);
@@ -745,10 +730,15 @@ static int __init fcntl_init(void)
 	 * Exceptions: O_NONBLOCK is a two bit define on parisc; O_NDELAY
 	 * is defined as O_NONBLOCK on some platforms and not on others.
 	 */
-	BUILD_BUG_ON(21 - 1 /* for O_RDONLY being 0 */ !=
-		HWEIGHT32(
-			(VALID_OPEN_FLAGS & ~(O_NONBLOCK | O_NDELAY)) |
-			__FMODE_EXEC | __FMODE_NONOTIFY));
+	BUILD_BUG_ON(19 - 1 /* for O_RDONLY being 0 */ != HWEIGHT32(
+		O_RDONLY	| O_WRONLY	| O_RDWR	|
+		O_CREAT		| O_EXCL	| O_NOCTTY	|
+		O_TRUNC		| O_APPEND	| /* O_NONBLOCK	| */
+		__O_SYNC	| O_DSYNC	| FASYNC	|
+		O_DIRECT	| O_LARGEFILE	| O_DIRECTORY	|
+		O_NOFOLLOW	| O_NOATIME	| O_CLOEXEC	|
+		__FMODE_EXEC	| O_PATH
+		));
 
 	fasync_cache = kmem_cache_create("fasync_cache",
 		sizeof(struct fasync_struct), 0, SLAB_PANIC, NULL);

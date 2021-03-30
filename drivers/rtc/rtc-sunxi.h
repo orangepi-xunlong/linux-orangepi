@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2016 Allwinner.
  *
- * Matteo <duanmintao@allwinnertech.com>
+ * Mintow <duanmintao@allwinnertech.com>
  *
  * This file is licensed under the terms of the GNU General Public
  * License version 2.  This program is licensed "as is" without any
@@ -14,48 +14,26 @@
 #define _RTC_SUNXI_H_
 
 #define SUNXI_LOSC_CTRL				0x0000
-#define SUNXI_LOSC_CTRL_RTC_ALARM_ACC		BIT(9)
 #define SUNXI_LOSC_CTRL_RTC_HMS_ACC		BIT(8)
 #define SUNXI_LOSC_CTRL_RTC_YMD_ACC		BIT(7)
 #define REG_LOSCCTRL_MAGIC			0x16aa0000
 #define REG_CLK32K_AUTO_SWT_EN			BIT(14)
-#define REG_CLK32K_AUTO_SWT_BYPASS		BIT(15)
 #define RTC_SOURCE_EXTERNAL			0x00000001
 #define EXT_LOSC_GSM				0x00000008
 #define SUNXI_ALARM_CONFIG                      0x0050
 #define SUNXI_ALRM_WAKEUP_OUTPUT_EN             BIT(0)
+#define SUNXI_GP_DATA_REG2			(0x100 + 0x04 * 2)
 
 /* alarm0 which based on seconds can power on system,
  * while alarm1 can't, so alarm1 is not used.
  */
 /* #define SUNXI_ALARM1_USED */
-#if (defined CONFIG_ARCH_SUN8IW16) \
-	|| (defined CONFIG_ARCH_SUN50IW9) \
-	|| (defined CONFIG_ARCH_SUN50IW10)
-#define SUNXI_SIMPLIFIED_TIMER
-#endif
 
-#if defined CONFIG_ARCH_SUN8IW15 || (defined CONFIG_ARCH_SUN50IW9)
-#define SUNXI_RTC_CALI_REG		0x0c
-#define REG_CLK32K_CALI_FUNC_EN		BIT(0)
-#define REG_CLK32K_CALI_EN		BIT(1)
-#define SUNXI_RTC_XO_CTRL		0x160
-#define REG_DC_XO_EN			BIT(1)
-#define SUNXI_RTC_VDD_REG		0x190
-#define REG_V_SEL			BIT(4)
-#endif	/*end of CONFIG_ARCH_SUN8IW15 || CONFIG_ARCH_SUN50IW9 */
-
-#if (defined CONFIG_ARCH_SUN8IW7) || (defined CONFIG_ARCH_SUN8IW11) \
-				|| (defined CONFIG_ARCH_SUN8IW12) \
-				|| (defined CONFIG_ARCH_SUN8IW15) \
-				|| (defined CONFIG_ARCH_SUN8IW16) \
-				|| (defined CONFIG_ARCH_SUN8IW17) \
-				|| (defined CONFIG_ARCH_SUN50IW1) \
-				|| (defined CONFIG_ARCH_SUN50IW3) \
-				|| (defined CONFIG_ARCH_SUN50IW6) \
-				|| (defined CONFIG_ARCH_SUN50IW8) \
-				|| (defined CONFIG_ARCH_SUN50IW9) \
-				|| (defined CONFIG_ARCH_SUN50IW10)
+#if (defined CONFIG_ARCH_SUN50IW1P1) \
+	|| (defined CONFIG_ARCH_SUN50IW2P1) \
+	|| (defined CONFIG_ARCH_SUN50IW6P1) \
+	|| (defined CONFIG_ARCH_SUN8IW10P1) \
+	|| (defined CONFIG_ARCH_SUN8IW11P1)
 #define SUNXI_RTC_YMD				0x0010
 
 #define SUNXI_RTC_HMS				0x0014
@@ -75,10 +53,8 @@
 
 #else
 
-#define SUNXI_ALRM_DAY				0X0020
 #define SUNXI_ALRM_COUNTER                      0x0020
 #define SUNXI_ALRM_CURRENT                      0x0024
-#define SUNXI_ALRM_HMS				0X0024
 
 #define SUNXI_ALRM_EN                           0x0028
 #define SUNXI_ALRM_EN_CNT_EN                    BIT(0)
@@ -108,29 +84,6 @@
 #define SUNXI_ALRM_IRQ_STA			0x001c
 #define SUNXI_ALRM_IRQ_STA_CNT_IRQ_PEND		BIT(0)
 
-#endif
-
-/* debug */
-#define SUNXI_DEBUG_MODE_FLAG           (0x59)
-/* efex */
-#define SUNXI_EFEX_CMD_FLAG             (0x5A)
-/* boot-resignature */
-#define SUNXI_BOOT_RESIGNATURE_FLAG     (0x5B)
-/* recovery or boot-recovery */
-#define SUNXI_BOOT_RECOVERY_FLAG        (0x5C)
-/* sysrecovery */
-#define SUNXI_SYS_RECOVERY_FLAG         (0x5D)
-/* usb-recovery*/
-#define SUNXI_USB_RECOVERY_FLAG         (0x5E)
-/* bootloader */
-#define SUNXI_FASTBOOT_FLAG             (0x5F)
-/* uboot */
-#define SUNXI_UBOOT_FLAG                (0x60)
-
-#if defined(CONFIG_ARCH_SUN8IW12)
-#define SUNXI_RTC_COMP_CTRL 0x11b0
-#define SUNXI_COMP_ENABLE BIT(31)
-#define SUNXI_ADC_VDD_ON_DISABLE  BIT(29)
 #endif
 
 #define SUNXI_MASK_DH				0x0000001f
@@ -201,6 +154,10 @@
  * relative to the minimum year allowed by the hardware.
  */
 #define SUNXI_YEAR_OFF(x)			((x)->min - 1900)
+
+#ifdef CONFIG_ARCH_SUN50IW2
+#define SUNXI_RTC_DYNAMIC_YEAR_RANGE	1
+#endif
 
 /*
  * min and max year are arbitrary set considering the limited range of the

@@ -7,7 +7,6 @@
  */
 
 #include <linux/device.h>
-#include <linux/delay.h>
 #include <linux/platform_device.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
@@ -15,10 +14,9 @@
 #include <linux/spi/spi.h>
 #include <linux/spi/flash.h>
 #include <linux/spi/mmc_spi.h>
-#if IS_ENABLED(CONFIG_USB_ISP1362_HCD)
+#if defined(CONFIG_USB_ISP1362_HCD) || defined(CONFIG_USB_ISP1362_HCD_MODULE)
 #include <linux/usb/isp1362.h>
 #endif
-#include <linux/gpio.h>
 #include <linux/irq.h>
 #include <linux/i2c.h>
 #include <asm/dma.h>
@@ -32,7 +30,7 @@
  */
 const char bfin_board_name[] = "ADI BF533-STAMP";
 
-#if IS_ENABLED(CONFIG_RTC_DRV_BFIN)
+#if defined(CONFIG_RTC_DRV_BFIN) || defined(CONFIG_RTC_DRV_BFIN_MODULE)
 static struct platform_device rtc_device = {
 	.name = "rtc-bfin",
 	.id   = -1,
@@ -42,7 +40,7 @@ static struct platform_device rtc_device = {
 /*
  *  Driver needs to know address, irq and flag pin.
  */
-#if IS_ENABLED(CONFIG_SMC91X)
+#if defined(CONFIG_SMC91X) || defined(CONFIG_SMC91X_MODULE)
 #include <linux/smc91x.h>
 
 static struct smc91x_platdata smc91x_info = {
@@ -75,7 +73,7 @@ static struct platform_device smc91x_device = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_USB_NET2272)
+#if defined(CONFIG_USB_NET2272) || defined(CONFIG_USB_NET2272_MODULE)
 static struct resource net2272_bfin_resources[] = {
 	{
 		.start = 0x20300000,
@@ -99,7 +97,7 @@ static struct platform_device net2272_bfin_device = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_MTD_BFIN_ASYNC)
+#if defined(CONFIG_MTD_BFIN_ASYNC) || defined(CONFIG_MTD_BFIN_ASYNC_MODULE)
 static struct mtd_partition stamp_partitions[] = {
 	{
 		.name   = "bootloader(nor)",
@@ -149,7 +147,7 @@ static struct platform_device stamp_flash_device = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_MTD_M25P80)
+#if defined(CONFIG_MTD_M25P80) || defined(CONFIG_MTD_M25P80_MODULE)
 static struct mtd_partition bfin_spi_flash_partitions[] = {
 	{
 		.name = "bootloader(spi)",
@@ -180,7 +178,7 @@ static struct bfin5xx_spi_chip spi_flash_chip_info = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_MMC_SPI)
+#if defined(CONFIG_MMC_SPI) || defined(CONFIG_MMC_SPI_MODULE)
 #define MMC_SPI_CARD_DETECT_INT IRQ_PF5
 static int bfin_mmc_spi_init(struct device *dev,
 	irqreturn_t (*detect_int)(int, void *), void *data)
@@ -208,7 +206,7 @@ static struct bfin5xx_spi_chip  mmc_spi_chip_info = {
 #endif
 
 static struct spi_board_info bfin_spi_board_info[] __initdata = {
-#if IS_ENABLED(CONFIG_MTD_M25P80)
+#if defined(CONFIG_MTD_M25P80) || defined(CONFIG_MTD_M25P80_MODULE)
 	{
 		/* the modalias must be the same as spi device driver name */
 		.modalias = "m25p80", /* Name of spi_driver for this device */
@@ -221,7 +219,8 @@ static struct spi_board_info bfin_spi_board_info[] __initdata = {
 	},
 #endif
 
-#if IS_ENABLED(CONFIG_SND_BF5XX_SOC_AD1836)
+#if defined(CONFIG_SND_BF5XX_SOC_AD1836) || \
+	defined(CONFIG_SND_BF5XX_SOC_AD1836_MODULE)
 	{
 		.modalias = "ad1836",
 		.max_speed_hz = 3125000,     /* max spi clock (SCK) speed in HZ */
@@ -232,7 +231,7 @@ static struct spi_board_info bfin_spi_board_info[] __initdata = {
 	},
 #endif
 
-#if IS_ENABLED(CONFIG_SPI_SPIDEV)
+#if defined(CONFIG_SPI_SPIDEV) || defined(CONFIG_SPI_SPIDEV_MODULE)
 	{
 		.modalias = "spidev",
 		.max_speed_hz = 3125000,     /* max spi clock (SCK) speed in HZ */
@@ -240,7 +239,7 @@ static struct spi_board_info bfin_spi_board_info[] __initdata = {
 		.chip_select = 1,
 	},
 #endif
-#if IS_ENABLED(CONFIG_MMC_SPI)
+#if defined(CONFIG_MMC_SPI) || defined(CONFIG_MMC_SPI_MODULE)
 	{
 		.modalias = "mmc_spi",
 		.max_speed_hz = 20000000,     /* max spi clock (SCK) speed in HZ */
@@ -253,7 +252,7 @@ static struct spi_board_info bfin_spi_board_info[] __initdata = {
 #endif
 };
 
-#if IS_ENABLED(CONFIG_SPI_BFIN5XX)
+#if defined(CONFIG_SPI_BFIN5XX) || defined(CONFIG_SPI_BFIN5XX_MODULE)
 /* SPI (0) */
 static struct resource bfin_spi0_resource[] = {
 	[0] = {
@@ -291,7 +290,7 @@ static struct platform_device bfin_spi0_device = {
 };
 #endif  /* spi master and devices */
 
-#if IS_ENABLED(CONFIG_SERIAL_BFIN)
+#if defined(CONFIG_SERIAL_BFIN) || defined(CONFIG_SERIAL_BFIN_MODULE)
 #ifdef CONFIG_SERIAL_BFIN_UART0
 static struct resource bfin_uart0_resources[] = {
 	{
@@ -342,7 +341,7 @@ static struct platform_device bfin_uart0_device = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_BFIN_SIR)
+#if defined(CONFIG_BFIN_SIR) || defined(CONFIG_BFIN_SIR_MODULE)
 #ifdef CONFIG_BFIN_SIR0
 static struct resource bfin_sir0_resources[] = {
 	{
@@ -371,7 +370,7 @@ static struct platform_device bfin_sir0_device = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_SERIAL_BFIN_SPORT)
+#if defined(CONFIG_SERIAL_BFIN_SPORT) || defined(CONFIG_SERIAL_BFIN_SPORT_MODULE)
 #ifdef CONFIG_SERIAL_BFIN_SPORT0_UART
 static struct resource bfin_sport0_uart_resources[] = {
 	{
@@ -442,51 +441,7 @@ static struct platform_device bfin_sport1_uart_device = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_BFIN_SPORT)
-static struct resource bfin_sport0_resources[] = {
-	{
-		.start = SPORT0_TCR1,
-		.end = SPORT0_MRCS3+4,
-		.flags = IORESOURCE_MEM,
-	},
-	{
-		.start = IRQ_SPORT0_TX,
-		.end = IRQ_SPORT0_TX+1,
-		.flags = IORESOURCE_IRQ,
-	},
-	{
-		.start = IRQ_SPORT0_RX,
-		.end = IRQ_SPORT0_RX+1,
-		.flags = IORESOURCE_IRQ,
-	},
-	{
-		.start = IRQ_SPORT0_ERROR,
-		.end = IRQ_SPORT0_ERROR,
-		.flags = IORESOURCE_IRQ,
-	},
-	{
-		.start = CH_SPORT0_TX,
-		.end = CH_SPORT0_TX,
-		.flags = IORESOURCE_DMA,
-	},
-	{
-		.start = CH_SPORT0_RX,
-		.end = CH_SPORT0_RX,
-		.flags = IORESOURCE_DMA,
-	},
-};
-static struct platform_device bfin_sport0_device = {
-	.name = "bfin_sport_raw",
-	.id = 0,
-	.num_resources = ARRAY_SIZE(bfin_sport0_resources),
-	.resource = bfin_sport0_resources,
-	.dev = {
-		.platform_data = &bfin_sport0_peripherals,
-	},
-};
-#endif
-
-#if IS_ENABLED(CONFIG_KEYBOARD_GPIO)
+#if defined(CONFIG_KEYBOARD_GPIO) || defined(CONFIG_KEYBOARD_GPIO_MODULE)
 #include <linux/input.h>
 #include <linux/gpio_keys.h>
 
@@ -509,7 +464,7 @@ static struct platform_device bfin_device_gpiokeys = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_I2C_GPIO)
+#if defined(CONFIG_I2C_GPIO) || defined(CONFIG_I2C_GPIO_MODULE)
 #include <linux/i2c-gpio.h>
 
 static struct i2c_gpio_platform_data i2c_gpio_data = {
@@ -530,29 +485,29 @@ static struct platform_device i2c_gpio_device = {
 #endif
 
 static struct i2c_board_info __initdata bfin_i2c_board_info[] = {
-#if IS_ENABLED(CONFIG_JOYSTICK_AD7142)
+#if defined(CONFIG_JOYSTICK_AD7142) || defined(CONFIG_JOYSTICK_AD7142_MODULE)
 	{
 		I2C_BOARD_INFO("ad7142_joystick", 0x2C),
 		.irq = 39,
 	},
 #endif
-#if IS_ENABLED(CONFIG_BFIN_TWI_LCD)
+#if defined(CONFIG_BFIN_TWI_LCD) || defined(CONFIG_BFIN_TWI_LCD_MODULE)
 	{
 		I2C_BOARD_INFO("pcf8574_lcd", 0x22),
 	},
 #endif
-#if IS_ENABLED(CONFIG_INPUT_PCF8574)
+#if defined(CONFIG_INPUT_PCF8574) || defined(CONFIG_INPUT_PCF8574_MODULE)
 	{
 		I2C_BOARD_INFO("pcf8574_keypad", 0x27),
 		.irq = 39,
 	},
 #endif
-#if IS_ENABLED(CONFIG_FB_BFIN_7393)
+#if defined(CONFIG_FB_BFIN_7393) || defined(CONFIG_FB_BFIN_7393_MODULE)
 	{
 		I2C_BOARD_INFO("bfin-adv7393", 0x2B),
 	},
 #endif
-#if IS_ENABLED(CONFIG_BFIN_TWI_LCD)
+#if defined(CONFIG_BFIN_TWI_LCD) || defined(CONFIG_BFIN_TWI_LCD_MODULE)
 	{
 		I2C_BOARD_INFO("ad5252", 0x2f),
 	},
@@ -586,8 +541,10 @@ static struct platform_device bfin_dpmc = {
 	},
 };
 
-#if IS_ENABLED(CONFIG_SND_BF5XX_I2S) || \
-	IS_ENABLED(CONFIG_SND_BF5XX_AC97)
+#if defined(CONFIG_SND_BF5XX_I2S) || defined(CONFIG_SND_BF5XX_I2S_MODULE) || \
+	defined(CONFIG_SND_BF5XX_TDM) || defined(CONFIG_SND_BF5XX_TDM_MODULE) \
+	|| defined(CONFIG_SND_BF5XX_AC97) || \
+	defined(CONFIG_SND_BF5XX_AC97_MODULE)
 
 #include <asm/bfin_sport.h>
 
@@ -639,23 +596,31 @@ static struct resource bfin_snd_resources[][4] = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_SND_BF5XX_I2S)
+#if defined(CONFIG_SND_BF5XX_I2S) || defined(CONFIG_SND_BF5XX_I2S_MODULE)
 static struct platform_device bfin_i2s_pcm = {
 	.name = "bfin-i2s-pcm-audio",
 	.id = -1,
 };
 #endif
 
-#if IS_ENABLED(CONFIG_SND_BF5XX_AC97)
+#if defined(CONFIG_SND_BF5XX_TDM) || defined(CONFIG_SND_BF5XX_TDM_MODULE)
+static struct platform_device bfin_tdm_pcm = {
+	.name = "bfin-tdm-pcm-audio",
+	.id = -1,
+};
+#endif
+
+#if defined(CONFIG_SND_BF5XX_AC97) || defined(CONFIG_SND_BF5XX_AC97_MODULE)
 static struct platform_device bfin_ac97_pcm = {
 	.name = "bfin-ac97-pcm-audio",
 	.id = -1,
 };
 #endif
 
-#if IS_ENABLED(CONFIG_SND_BF5XX_SOC_AD1836)
+#if defined(CONFIG_SND_BF5XX_SOC_AD1836) \
+	        || defined(CONFIG_SND_BF5XX_SOC_AD1836_MODULE)
 static const char * const ad1836_link[] = {
-	"bfin-i2s.0",
+	"bfin-tdm.0",
 	"spi0.4",
 };
 static struct platform_device bfin_ad1836_machine = {
@@ -667,7 +632,8 @@ static struct platform_device bfin_ad1836_machine = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_SND_BF5XX_SOC_AD73311)
+#if defined(CONFIG_SND_BF5XX_SOC_AD73311) || \
+	defined(CONFIG_SND_BF5XX_SOC_AD73311_MODULE)
 static const unsigned ad73311_gpio[] = {
 	GPIO_PF4,
 };
@@ -681,21 +647,22 @@ static struct platform_device bfin_ad73311_machine = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_SND_SOC_AD73311)
+#if defined(CONFIG_SND_SOC_AD73311) || defined(CONFIG_SND_SOC_AD73311_MODULE)
 static struct platform_device bfin_ad73311_codec_device = {
 	.name = "ad73311",
 	.id = -1,
 };
 #endif
 
-#if IS_ENABLED(CONFIG_SND_SOC_AD74111)
+#if defined(CONFIG_SND_SOC_AD74111) || defined(CONFIG_SND_SOC_AD74111_MODULE)
 static struct platform_device bfin_ad74111_codec_device = {
 	.name = "ad74111",
 	.id = -1,
 };
 #endif
 
-#if IS_ENABLED(CONFIG_SND_BF5XX_SOC_I2S)
+#if defined(CONFIG_SND_BF5XX_SOC_I2S) || \
+	defined(CONFIG_SND_BF5XX_SOC_I2S_MODULE)
 static struct platform_device bfin_i2s = {
 	.name = "bfin-i2s",
 	.id = CONFIG_SND_BF5XX_SPORT_NUM,
@@ -708,7 +675,22 @@ static struct platform_device bfin_i2s = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_SND_BF5XX_SOC_AC97)
+#if defined(CONFIG_SND_BF5XX_SOC_TDM) || \
+	defined(CONFIG_SND_BF5XX_SOC_TDM_MODULE)
+static struct platform_device bfin_tdm = {
+	.name = "bfin-tdm",
+	.id = CONFIG_SND_BF5XX_SPORT_NUM,
+	.num_resources =
+		ARRAY_SIZE(bfin_snd_resources[CONFIG_SND_BF5XX_SPORT_NUM]),
+	.resource = bfin_snd_resources[CONFIG_SND_BF5XX_SPORT_NUM],
+	.dev = {
+		.platform_data = &bfin_snd_data[CONFIG_SND_BF5XX_SPORT_NUM],
+	},
+};
+#endif
+
+#if defined(CONFIG_SND_BF5XX_SOC_AC97) || \
+	defined(CONFIG_SND_BF5XX_SOC_AC97_MODULE)
 static struct platform_device bfin_ac97 = {
 	.name = "bfin-ac97",
 	.id = CONFIG_SND_BF5XX_SPORT_NUM,
@@ -725,35 +707,36 @@ static struct platform_device *stamp_devices[] __initdata = {
 
 	&bfin_dpmc,
 
-#if IS_ENABLED(CONFIG_RTC_DRV_BFIN)
+#if defined(CONFIG_RTC_DRV_BFIN) || defined(CONFIG_RTC_DRV_BFIN_MODULE)
 	&rtc_device,
 #endif
 
-#if IS_ENABLED(CONFIG_SMC91X)
+#if defined(CONFIG_SMC91X) || defined(CONFIG_SMC91X_MODULE)
 	&smc91x_device,
 #endif
 
-#if IS_ENABLED(CONFIG_USB_NET2272)
+#if defined(CONFIG_USB_NET2272) || defined(CONFIG_USB_NET2272_MODULE)
 	&net2272_bfin_device,
 #endif
 
-#if IS_ENABLED(CONFIG_SPI_BFIN5XX)
+#if defined(CONFIG_SPI_BFIN5XX) || defined(CONFIG_SPI_BFIN5XX_MODULE)
 	&bfin_spi0_device,
 #endif
 
-#if IS_ENABLED(CONFIG_SERIAL_BFIN)
+#if defined(CONFIG_SERIAL_BFIN) || defined(CONFIG_SERIAL_BFIN_MODULE)
 #ifdef CONFIG_SERIAL_BFIN_UART0
 	&bfin_uart0_device,
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_BFIN_SIR)
+#if defined(CONFIG_BFIN_SIR) || defined(CONFIG_BFIN_SIR_MODULE)
 #ifdef CONFIG_BFIN_SIR0
 	&bfin_sir0_device,
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_SERIAL_BFIN_SPORT)
+#if defined(CONFIG_SERIAL_BFIN_SPORT) || \
+	defined(CONFIG_SERIAL_BFIN_SPORT_MODULE)
 #ifdef CONFIG_SERIAL_BFIN_SPORT0_UART
 	&bfin_sport0_uart_device,
 #endif
@@ -762,54 +745,67 @@ static struct platform_device *stamp_devices[] __initdata = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_KEYBOARD_GPIO)
+#if defined(CONFIG_KEYBOARD_GPIO) || defined(CONFIG_KEYBOARD_GPIO_MODULE)
 	&bfin_device_gpiokeys,
 #endif
 
-#if IS_ENABLED(CONFIG_I2C_GPIO)
+#if defined(CONFIG_I2C_GPIO) || defined(CONFIG_I2C_GPIO_MODULE)
 	&i2c_gpio_device,
 #endif
 
-#if IS_ENABLED(CONFIG_MTD_BFIN_ASYNC)
+#if defined(CONFIG_MTD_BFIN_ASYNC) || defined(CONFIG_MTD_BFIN_ASYNC_MODULE)
 	&stamp_flash_device,
 #endif
 
-#if IS_ENABLED(CONFIG_SND_BF5XX_I2S)
+#if defined(CONFIG_SND_BF5XX_I2S) || defined(CONFIG_SND_BF5XX_I2S_MODULE)
 	&bfin_i2s_pcm,
 #endif
 
-#if IS_ENABLED(CONFIG_SND_BF5XX_AC97)
+#if defined(CONFIG_SND_BF5XX_TDM) || defined(CONFIG_SND_BF5XX_TDM_MODULE)
+	&bfin_tdm_pcm,
+#endif
+
+#if defined(CONFIG_SND_BF5XX_AC97) || defined(CONFIG_SND_BF5XX_AC97_MODULE)
 	&bfin_ac97_pcm,
 #endif
 
-#if IS_ENABLED(CONFIG_SND_BF5XX_SOC_AD1836)
+#if defined(CONFIG_SND_BF5XX_SOC_AD1836) || \
+	defined(CONFIG_SND_BF5XX_SOC_AD1836_MODULE)
 	&bfin_ad1836_machine,
 #endif
 
-#if IS_ENABLED(CONFIG_SND_BF5XX_SOC_AD73311)
+#if defined(CONFIG_SND_BF5XX_SOC_AD73311) || \
+	defined(CONFIG_SND_BF5XX_SOC_AD73311_MODULE)
 	&bfin_ad73311_machine,
 #endif
 
-#if IS_ENABLED(CONFIG_SND_SOC_AD73311)
+#if defined(CONFIG_SND_SOC_AD73311) || defined(CONFIG_SND_SOC_AD73311_MODULE)
 	&bfin_ad73311_codec_device,
 #endif
 
-#if IS_ENABLED(CONFIG_SND_SOC_AD74111)
+#if defined(CONFIG_SND_SOC_AD74111) || defined(CONFIG_SND_SOC_AD74111_MODULE)
 	&bfin_ad74111_codec_device,
 #endif
 
-#if IS_ENABLED(CONFIG_SND_BF5XX_SOC_I2S)
+#if defined(CONFIG_SND_BF5XX_SOC_I2S) || \
+	defined(CONFIG_SND_BF5XX_SOC_I2S_MODULE)
 	&bfin_i2s,
 #endif
 
-#if IS_ENABLED(CONFIG_SND_BF5XX_SOC_AC97)
+#if defined(CONFIG_SND_BF5XX_SOC_TDM) || \
+	defined(CONFIG_SND_BF5XX_SOC_TDM_MODULE)
+	&bfin_tdm,
+#endif
+
+#if defined(CONFIG_SND_BF5XX_SOC_AC97) || \
+	defined(CONFIG_SND_BF5XX_SOC_AC97_MODULE)
 	&bfin_ac97,
 #endif
 };
 
 static int __init net2272_init(void)
 {
-#if IS_ENABLED(CONFIG_USB_NET2272)
+#if defined(CONFIG_USB_NET2272) || defined(CONFIG_USB_NET2272_MODULE)
 	int ret;
 
 	/* Set PF0 to 0, PF1 to 1 make /AMS3 work properly */
@@ -855,7 +851,7 @@ static int __init stamp_init(void)
 	if (ret < 0)
 		return ret;
 
-#if IS_ENABLED(CONFIG_SMC91X)
+#if defined(CONFIG_SMC91X) || defined(CONFIG_SMC91X_MODULE)
 	/*
 	 * setup BF533_STAMP CPLD to route AMS3 to Ethernet MAC.
 	 * the bfin-async-map driver takes care of flipping between

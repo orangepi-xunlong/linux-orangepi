@@ -69,7 +69,7 @@ one, this value should be decreased relative to fifo_expire_async.
 group_idle
 -----------
 This parameter forces idling at the CFQ group level instead of CFQ
-queue level. This was introduced after a bottleneck was observed
+queue level. This was introduced after after a bottleneck was observed
 in higher end storage due to idle on sequential queue and allow dispatch
 from a single queue. The idea with this parameter is that it can be run with
 slice_idle=0 and group_idle=8, so that idling does not happen on individual
@@ -81,13 +81,14 @@ on higher end storage.
 
 Default value for this parameter is 8ms.
 
-low_latency
------------
-This parameter is used to enable/disable the low latency mode of the CFQ
-scheduler. If enabled, CFQ tries to recompute the slice time for each process
-based on the target_latency set for the system. This favors fairness over
-throughput. Disabling low latency (setting it to 0) ignores target latency,
-allowing each process in the system to get a full time slice.
+latency
+-------
+This parameter is used to enable/disable the latency mode of the CFQ
+scheduler. If latency mode (called low_latency) is enabled, CFQ tries
+to recompute the slice time for each process based on the target_latency set
+for the system. This favors fairness over throughput. Disabling low
+latency (setting it to 0) ignores target latency, allowing each process in the
+system to get a full time slice.
 
 By default low latency mode is enabled.
 

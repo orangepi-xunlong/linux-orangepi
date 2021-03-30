@@ -13,10 +13,12 @@
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include <asm/mmzone.h>
-#include <asm/sections.h>
 
 /* Defined in hibernate_asm_32.S */
 extern int restore_image(void);
+
+/* References to section boundaries */
+extern const void __nosave_begin, __nosave_end;
 
 /* Pointer to the temporary resume page tables */
 pgd_t *resume_pg_dir;
@@ -106,7 +108,7 @@ static int resume_physical_mapping_init(pgd_t *pgd_base)
 			 * normal page tables.
 			 * NOTE: We can mark everything as executable here
 			 */
-			if (boot_cpu_has(X86_FEATURE_PSE)) {
+			if (cpu_has_pse) {
 				set_pmd(pmd, pfn_pmd(pfn, PAGE_KERNEL_LARGE_EXEC));
 				pfn += PTRS_PER_PTE;
 			} else {
@@ -142,7 +144,7 @@ static inline void resume_init_first_level_page_table(pgd_t *pg_dir)
 #endif
 }
 
-asmlinkage int swsusp_arch_resume(void)
+int swsusp_arch_resume(void)
 {
 	int error;
 

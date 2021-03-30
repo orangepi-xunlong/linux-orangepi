@@ -9,9 +9,6 @@
  *
  */
 
-#ifndef _RING_HW_H_
-#define _RING_HW_H_
-
 /**
  * struct iio_hw_ring_buffer- hardware ring buffer
  * @buf:	generic ring buffer elements
@@ -23,5 +20,3 @@ struct iio_hw_buffer {
 };
 
 #define iio_to_hw_buf(r) container_of(r, struct iio_hw_buffer, buf)
-
-#endif /* _RING_HW_H_ */

@@ -1,40 +1,26 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vfe/csi_cci/bsp_cci.h
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
-/*
  * csi cci header
  * included by bsp_cci.c
  * Author:raymonxiu
  */
-
+ 
 #ifndef __BSP_CCI__H__
 #define __BSP_CCI__H__
 
 #include "csi_cci_reg.h"
 #define CCI_IRQ
-struct cci_tx_mode {
-	struct cci_tx_buf tx_buf_mode;
-	struct cci_tx_trig tx_trig_mode;
-	unsigned int tx_trig_line_cnt;
+struct cci_tx_mode
+{
+	struct cci_tx_buf			tx_buf_mode;
+	struct cci_tx_trig		tx_trig_mode;
+	unsigned int					tx_trig_line_cnt;
 };
 
-struct cci_msg {
-	struct cci_bus_fmt bus_fmt;
-	unsigned char *pkt_buf;
-	unsigned char pkt_num;
+struct cci_msg
+{
+	struct cci_bus_fmt 		bus_fmt;		
+	unsigned char 		 		*pkt_buf;
+	unsigned char					pkt_num;
 };
 
 int bsp_csi_cci_set_base_addr(unsigned int sel, unsigned long addr);
@@ -68,4 +54,4 @@ int cci_rd_8_16(unsigned int sel, unsigned char reg, unsigned short *data, unsig
 int cci_rd_0_16(unsigned int sel, unsigned short *data, unsigned char slv);
 int cci_wr_a16_d8_continuous(unsigned int sel, unsigned short reg, unsigned char *data, unsigned char slv, int size);
 
-#endif /* __BSP_CCI__H__ */
+#endif //__BSP_CCI__H__

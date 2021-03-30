@@ -13,7 +13,6 @@
 
 #include <asm/bootinfo.h>
 #include <asm/cpu.h>
-#include <asm/cpu-type.h>
 #include <asm/processor.h>
 
 #include <asm/dec/prom.h>
@@ -104,7 +103,7 @@ void __init prom_init(void)
 	if (prom_is_rex(magic))
 		rex_clear_cache();
 
-	/* Register the early console.  */
+	/* Register the early console.	*/
 	register_prom_console();
 
 	/* Were we compiled with the right CPU option? */

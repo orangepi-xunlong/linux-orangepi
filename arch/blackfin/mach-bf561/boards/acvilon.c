@@ -44,7 +44,6 @@
 #include <linux/spi/flash.h>
 #include <linux/irq.h>
 #include <linux/interrupt.h>
-#include <linux/gpio.h>
 #include <linux/jiffies.h>
 #include <linux/i2c-pca-platform.h>
 #include <linux/delay.h>
@@ -61,7 +60,7 @@
  */
 const char bfin_board_name[] = "Acvilon board";
 
-#if IS_ENABLED(CONFIG_USB_ISP1760_HCD)
+#if defined(CONFIG_USB_ISP1760_HCD) || defined(CONFIG_USB_ISP1760_HCD_MODULE)
 #include <linux/usb/isp1760.h>
 static struct resource bfin_isp1760_resources[] = {
 	[0] = {
@@ -138,7 +137,7 @@ static struct i2c_board_info acvilon_i2c_devs[] __initdata = {
 	 },
 };
 
-#if IS_ENABLED(CONFIG_MTD_PLATRAM)
+#if defined(CONFIG_MTD_PLATRAM) || defined(CONFIG_MTD_PLATRAM_MODULE)
 static struct platdata_mtd_ram mtd_ram_data = {
 	.mapname = "rootfs(RAM)",
 	.bankwidth = 4,
@@ -161,7 +160,7 @@ static struct platform_device mtd_ram_device = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_SMSC911X)
+#if defined(CONFIG_SMSC911X) || defined(CONFIG_SMSC911X_MODULE)
 #include <linux/smsc911x.h>
 static struct resource smsc911x_resources[] = {
 	{
@@ -195,7 +194,7 @@ static struct platform_device smsc911x_device = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_SERIAL_BFIN)
+#if defined(CONFIG_SERIAL_BFIN) || defined(CONFIG_SERIAL_BFIN_MODULE)
 #ifdef CONFIG_SERIAL_BFIN_UART0
 static struct resource bfin_uart0_resources[] = {
 	{
@@ -247,7 +246,7 @@ static struct platform_device bfin_uart0_device = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_MTD_NAND_PLATFORM)
+#if defined(CONFIG_MTD_NAND_PLATFORM) || defined(CONFIG_MTD_NAND_PLATFORM_MODULE)
 
 static struct mtd_partition bfin_plat_nand_partitions[] = {
 	{
@@ -267,7 +266,7 @@ static struct mtd_partition bfin_plat_nand_partitions[] = {
 static void bfin_plat_nand_cmd_ctrl(struct mtd_info *mtd, int cmd,
 				    unsigned int ctrl)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 
 	if (cmd == NAND_CMD_NONE)
 		return;
@@ -324,7 +323,7 @@ static void bfin_plat_nand_init(void)
 }
 #endif
 
-#if IS_ENABLED(CONFIG_MTD_DATAFLASH)
+#if defined(CONFIG_MTD_DATAFLASH) || defined(CONFIG_MTD_DATAFLASH_MODULE)
 static struct mtd_partition bfin_spi_dataflash_partitions[] = {
 	{
 	 .name = "bootloader",
@@ -370,7 +369,7 @@ static struct bfin5xx_spi_chip data_flash_chip_info = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_SPI_BFIN5XX)
+#if defined(CONFIG_SPI_BFIN5XX) || defined(CONFIG_SPI_BFIN5XX_MODULE)
 /* SPI (0) */
 static struct resource bfin_spi0_resource[] = {
 	[0] = {
@@ -409,7 +408,7 @@ static struct platform_device bfin_spi0_device = {
 #endif
 
 static struct spi_board_info bfin_spi_board_info[] __initdata = {
-#if IS_ENABLED(CONFIG_SPI_SPIDEV)
+#if defined(CONFIG_SPI_SPIDEV) || defined(CONFIG_SPI_SPIDEV_MODULE)
 	{
 	 .modalias = "spidev",
 	 .max_speed_hz = 3125000,	/* max spi clock (SCK) speed in HZ */
@@ -417,7 +416,7 @@ static struct spi_board_info bfin_spi_board_info[] __initdata = {
 	 .chip_select = 3,
 	 },
 #endif
-#if IS_ENABLED(CONFIG_MTD_DATAFLASH)
+#if defined(CONFIG_MTD_DATAFLASH) || defined(CONFIG_MTD_DATAFLASH_MODULE)
 	{			/* DataFlash chip */
 	 .modalias = "mtd_dataflash",
 	 .max_speed_hz = 33250000,	/* max spi clock (SCK) speed in HZ */
@@ -473,11 +472,11 @@ static struct platform_device bfin_dpmc = {
 static struct platform_device *acvilon_devices[] __initdata = {
 	&bfin_dpmc,
 
-#if IS_ENABLED(CONFIG_SPI_BFIN5XX)
+#if defined(CONFIG_SPI_BFIN5XX) || defined(CONFIG_SPI_BFIN5XX_MODULE)
 	&bfin_spi0_device,
 #endif
 
-#if IS_ENABLED(CONFIG_SERIAL_BFIN)
+#if defined(CONFIG_SERIAL_BFIN) || defined(CONFIG_SERIAL_BFIN_MODULE)
 #ifdef CONFIG_SERIAL_BFIN_UART0
 	&bfin_uart0_device,
 #endif
@@ -485,17 +484,17 @@ static struct platform_device *acvilon_devices[] __initdata = {
 
 	&bfin_gpios_device,
 
-#if IS_ENABLED(CONFIG_SMSC911X)
+#if defined(CONFIG_SMSC911X) || defined(CONFIG_SMSC911X_MODULE)
 	&smsc911x_device,
 #endif
 
 	&bfin_i2c_pca_device,
 
-#if IS_ENABLED(CONFIG_MTD_NAND_PLATFORM)
+#if defined(CONFIG_MTD_NAND_PLATFORM) || defined(CONFIG_MTD_NAND_PLATFORM_MODULE)
 	&bfin_async_nand_device,
 #endif
 
-#if IS_ENABLED(CONFIG_MTD_PLATRAM)
+#if defined(CONFIG_MTD_PLATRAM) || defined(CONFIG_MTD_PLATRAM_MODULE)
 	&mtd_ram_device,
 #endif
 

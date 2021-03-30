@@ -30,6 +30,9 @@
 
 MODULE_LICENSE("GPL");
 
+EXPORT_SYMBOL_GPL(nfsacl_encode);
+EXPORT_SYMBOL_GPL(nfsacl_decode);
+
 struct nfsacl_encode_desc {
 	struct xdr_array2_desc desc;
 	unsigned int count;
@@ -133,7 +136,6 @@ int nfsacl_encode(struct xdr_buf *buf, unsigned int base, struct inode *inode,
 			  nfsacl_desc.desc.array_len;
 	return err;
 }
-EXPORT_SYMBOL_GPL(nfsacl_encode);
 
 struct nfsacl_decode_desc {
 	struct xdr_array2_desc desc;
@@ -293,4 +295,3 @@ int nfsacl_decode(struct xdr_buf *buf, unsigned int base, unsigned int *aclcnt,
 	return 8 + nfsacl_desc.desc.elem_size *
 		   nfsacl_desc.desc.array_len;
 }
-EXPORT_SYMBOL_GPL(nfsacl_decode);

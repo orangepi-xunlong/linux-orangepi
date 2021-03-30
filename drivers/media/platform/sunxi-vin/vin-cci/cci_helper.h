@@ -1,20 +1,4 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-cci/cci_helper.h
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
-/*
  ******************************************************************************
  *
  * cci_helper.h
@@ -23,9 +7,9 @@
  *
  * Copyright (c) 2014 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
  *
- * Version         Author         Date          Description
+ * Version		  Author         Date		    Description
  *
- *   2.0         Yang Feng     2014/06/06      Second Version
+ *   2.0		  Yang Feng   	2014/06/06	      Second Version
  *
  ******************************************************************************
  */
@@ -117,9 +101,13 @@ extern int cci_write_a16_d8_continuous_helper(struct v4l2_subdev *sd,
 extern int cci_read(struct v4l2_subdev *sd, addr_type addr, data_type *value);
 extern int cci_write(struct v4l2_subdev *sd, addr_type addr, data_type value);
 
+extern void cci_subdev_init(struct v4l2_subdev *sd,
+			    struct cci_driver *drv_data,
+			    const struct v4l2_subdev_ops *ops);
 extern struct v4l2_subdev *cci_bus_match(char *name, unsigned short cci_id,
 					 unsigned short cci_saddr);
 extern void cci_bus_match_cancel(struct cci_driver *cci_drv_p);
+extern void csi_cci_bus_unmatch_helper(unsigned int sel);
 
 extern void cci_lock(struct v4l2_subdev *sd);
 extern void cci_unlock(struct v4l2_subdev *sd);

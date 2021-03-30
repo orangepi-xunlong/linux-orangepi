@@ -46,9 +46,11 @@ void __init udbg_early_init(void)
 #elif defined(CONFIG_PPC_EARLY_DEBUG_MAPLE)
 	/* Maple real mode debug */
 	udbg_init_maple_realmode();
+#elif defined(CONFIG_PPC_EARLY_DEBUG_BEAT)
+	udbg_init_debug_beat();
 #elif defined(CONFIG_PPC_EARLY_DEBUG_PAS_REALMODE)
 	udbg_init_pas_realmode();
-#elif defined(CONFIG_PPC_EARLY_DEBUG_BOOTX)
+#elif defined(CONFIG_BOOTX_TEXT)
 	udbg_init_btext();
 #elif defined(CONFIG_PPC_EARLY_DEBUG_44x)
 	/* PPC44x debug */
@@ -60,6 +62,8 @@ void __init udbg_early_init(void)
 	udbg_init_cpm();
 #elif defined(CONFIG_PPC_EARLY_DEBUG_USBGECKO)
 	udbg_init_usbgecko();
+#elif defined(CONFIG_PPC_EARLY_DEBUG_WSP)
+	udbg_init_wsp();
 #elif defined(CONFIG_PPC_EARLY_DEBUG_MEMCONS)
 	/* In memory console */
 	udbg_init_memcons();

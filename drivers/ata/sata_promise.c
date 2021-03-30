@@ -2,7 +2,7 @@
  *  sata_promise.c - Promise SATA
  *
  *  Maintained by:  Tejun Heo <tj@kernel.org>
- *		    Mikael Pettersson
+ *		    Mikael Pettersson <mikpe@it.uu.se>
  *  		    Please ALWAYS copy linux-ide@vger.kernel.org
  *		    on emails.
  *
@@ -35,6 +35,7 @@
 #include <linux/module.h>
 #include <linux/gfp.h>
 #include <linux/pci.h>
+#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
@@ -1246,10 +1247,10 @@ static int pdc_ata_init_one(struct pci_dev *pdev,
 	/* initialize adapter */
 	pdc_host_init(host);
 
-	rc = dma_set_mask(&pdev->dev, ATA_DMA_MASK);
+	rc = pci_set_dma_mask(pdev, ATA_DMA_MASK);
 	if (rc)
 		return rc;
-	rc = dma_set_coherent_mask(&pdev->dev, ATA_DMA_MASK);
+	rc = pci_set_consistent_dma_mask(pdev, ATA_DMA_MASK);
 	if (rc)
 		return rc;
 

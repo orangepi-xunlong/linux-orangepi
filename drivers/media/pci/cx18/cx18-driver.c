@@ -560,7 +560,7 @@ static void cx18_process_options(struct cx18 *cx)
 	cx->stream_buf_size[CX18_ENC_STREAM_TYPE_MPG] = enc_mpg_bufsize;
 	cx->stream_buf_size[CX18_ENC_STREAM_TYPE_IDX] = enc_idx_bufsize;
 	cx->stream_buf_size[CX18_ENC_STREAM_TYPE_YUV] = enc_yuv_bufsize;
-	cx->stream_buf_size[CX18_ENC_STREAM_TYPE_VBI] = VBI_ACTIVE_SAMPLES * 36;
+	cx->stream_buf_size[CX18_ENC_STREAM_TYPE_VBI] = vbi_active_samples * 36;
 	cx->stream_buf_size[CX18_ENC_STREAM_TYPE_PCM] = enc_pcm_bufsize;
 	cx->stream_buf_size[CX18_ENC_STREAM_TYPE_RAD] = 0; /* control no data */
 
@@ -702,7 +702,7 @@ static int cx18_create_in_workq(struct cx18 *cx)
 {
 	snprintf(cx->in_workq_name, sizeof(cx->in_workq_name), "%s-in",
 		 cx->v4l2_dev.name);
-	cx->in_work_queue = alloc_ordered_workqueue("%s", 0, cx->in_workq_name);
+	cx->in_work_queue = alloc_ordered_workqueue(cx->in_workq_name, 0);
 	if (cx->in_work_queue == NULL) {
 		CX18_ERR("Unable to create incoming mailbox handler thread\n");
 		return -ENOMEM;
@@ -786,11 +786,11 @@ static void cx18_init_struct2(struct cx18 *cx)
 {
 	int i;
 
-	for (i = 0; i < CX18_CARD_MAX_VIDEO_INPUTS - 1; i++)
+	for (i = 0; i < CX18_CARD_MAX_VIDEO_INPUTS; i++)
 		if (cx->card->video_inputs[i].video_type == 0)
 			break;
 	cx->nof_inputs = i;
-	for (i = 0; i < CX18_CARD_MAX_AUDIO_INPUTS - 1; i++)
+	for (i = 0; i < CX18_CARD_MAX_AUDIO_INPUTS; i++)
 		if (cx->card->audio_inputs[i].audio_type == 0)
 			break;
 	cx->nof_audio_inputs = i;
@@ -1038,7 +1038,8 @@ static int cx18_probe(struct pci_dev *pci_dev,
 
 	/* Register IRQ */
 	retval = request_irq(cx->pci_dev->irq, cx18_irq_handler,
-			     IRQF_SHARED, cx->v4l2_dev.name, (void *)cx);
+			     IRQF_SHARED | IRQF_DISABLED,
+			     cx->v4l2_dev.name, (void *)cx);
 	if (retval) {
 		CX18_ERR("Failed to register irq %d\n", retval);
 		goto free_i2c;

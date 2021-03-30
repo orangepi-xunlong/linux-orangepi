@@ -35,6 +35,20 @@ check_events:
 	ret
 
 /*
+ * We can't use sysexit directly, because we're not running in ring0.
+ * But we can easily fake it up using iret.  Assuming xen_sysexit is
+ * jumped to with a standard stack frame, we can just strip it back to
+ * a standard iret frame and use iret.
+ */
+ENTRY(xen_sysexit)
+	movl PT_EAX(%esp), %eax			/* Shouldn't be necessary? */
+	orl $X86_EFLAGS_IF, PT_EFLAGS(%esp)
+	lea PT_EIP(%esp), %esp
+
+	jmp xen_iret
+ENDPROC(xen_sysexit)
+
+/*
  * This is run where a normal iret would be run, with the same stack setup:
  *	8: eflags
  *	4: cs
@@ -61,17 +75,6 @@ check_events:
  * stack state in whatever form its in, we keep things simple by only
  * using a single register which is pushed/popped on the stack.
  */
-
-.macro POP_FS
-1:
-	popw %fs
-.pushsection .fixup, "ax"
-2:	movw $0, (%esp)
-	jmp 1b
-.popsection
-	_ASM_EXTABLE(1b,2b)
-.endm
-
 ENTRY(xen_iret)
 	/* test eflags for special cases */
 	testl $(X86_EFLAGS_VM | XEN_EFLAGS_NMI), 8(%esp)
@@ -80,13 +83,15 @@ ENTRY(xen_iret)
 	push %eax
 	ESP_OFFSET=4	# bytes pushed onto stack
 
-	/* Store vcpu_info pointer for easy access */
+	/*
+	 * Store vcpu_info pointer for easy access.  Do it this way to
+	 * avoid having to reload %fs
+	 */
 #ifdef CONFIG_SMP
-	pushw %fs
-	movl $(__KERNEL_PERCPU), %eax
-	movl %eax, %fs
-	movl %fs:xen_vcpu, %eax
-	POP_FS
+	GET_THREAD_INFO(%eax)
+	movl %ss:TI_cpu(%eax), %eax
+	movl %ss:__per_cpu_offset(,%eax,4), %eax
+	mov %ss:xen_vcpu(%eax), %eax
 #else
 	movl %ss:xen_vcpu, %eax
 #endif

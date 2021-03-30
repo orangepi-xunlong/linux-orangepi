@@ -66,7 +66,7 @@
  */
 #define ZEROCOPY
 
-#if IS_ENABLED(CONFIG_VLAN_8021Q)
+#if defined(CONFIG_VLAN_8021Q) || defined(CONFIG_VLAN_8021Q_MODULE)
 #define VLAN_SUPPORT
 #endif
 
@@ -285,7 +285,7 @@ enum chipset {
 	CH_6915 = 0,
 };
 
-static const struct pci_device_id starfire_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(starfire_pci_tbl) = {
 	{ PCI_VDEVICE(ADAPTEC, 0x6915), CH_6915 },
 	{ 0, }
 };
@@ -784,7 +784,7 @@ static int starfire_init_one(struct pci_dev *pdev,
 
 	dev->netdev_ops = &netdev_ops;
 	dev->watchdog_timeo = TX_TIMEOUT;
-	dev->ethtool_ops = &ethtool_ops;
+	SET_ETHTOOL_OPS(dev, &ethtool_ops);
 
 	netif_napi_add(dev, &np->napi, netdev_poll, max_interrupt_work);
 
@@ -835,6 +835,7 @@ static int starfire_init_one(struct pci_dev *pdev,
 	return 0;
 
 err_out_cleardev:
+	pci_set_drvdata(pdev, NULL);
 	iounmap(base);
 err_out_free_res:
 	pci_release_regions (pdev);
@@ -1129,7 +1130,7 @@ static void tx_timeout(struct net_device *dev)
 
 	/* Trigger an immediate transmit demand. */
 
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	dev->stats.tx_errors++;
 	netif_wake_queue(dev);
 }
@@ -1153,12 +1154,6 @@ static void init_ring(struct net_device *dev)
 		if (skb == NULL)
 			break;
 		np->rx_info[i].mapping = pci_map_single(np->pci_dev, skb->data, np->rx_buf_sz, PCI_DMA_FROMDEVICE);
-		if (pci_dma_mapping_error(np->pci_dev,
-					  np->rx_info[i].mapping)) {
-			dev_kfree_skb(skb);
-			np->rx_info[i].skb = NULL;
-			break;
-		}
 		/* Grrr, we cannot offset to correctly align the IP header. */
 		np->rx_ring[i].rxaddr = cpu_to_dma(np->rx_info[i].mapping | RxDescValid);
 	}
@@ -1189,9 +1184,8 @@ static netdev_tx_t start_tx(struct sk_buff *skb, struct net_device *dev)
 {
 	struct netdev_private *np = netdev_priv(dev);
 	unsigned int entry;
-	unsigned int prev_tx;
 	u32 status;
-	int i, j;
+	int i;
 
 	/*
 	 * be cautious here, wrapping the queue has weird semantics
@@ -1209,7 +1203,6 @@ static netdev_tx_t start_tx(struct sk_buff *skb, struct net_device *dev)
 	}
 #endif /* ZEROCOPY && HAS_BROKEN_FIRMWARE */
 
-	prev_tx = np->cur_tx;
 	entry = np->cur_tx % TX_RING_SIZE;
 	for (i = 0; i < skb_num_frags(skb); i++) {
 		int wrap_ring = 0;
@@ -1242,11 +1235,6 @@ static netdev_tx_t start_tx(struct sk_buff *skb, struct net_device *dev)
 					       skb_frag_address(this_frag),
 					       skb_frag_size(this_frag),
 					       PCI_DMA_TODEVICE);
-		}
-		if (pci_dma_mapping_error(np->pci_dev,
-					  np->tx_info[entry].mapping)) {
-			dev->stats.tx_dropped++;
-			goto err_out;
 		}
 
 		np->tx_ring[entry].addr = cpu_to_dma(np->tx_info[entry].mapping);
@@ -1282,30 +1270,8 @@ static netdev_tx_t start_tx(struct sk_buff *skb, struct net_device *dev)
 		netif_stop_queue(dev);
 
 	return NETDEV_TX_OK;
-
-err_out:
-	entry = prev_tx % TX_RING_SIZE;
-	np->tx_info[entry].skb = NULL;
-	if (i > 0) {
-		pci_unmap_single(np->pci_dev,
-				 np->tx_info[entry].mapping,
-				 skb_first_frag_len(skb),
-				 PCI_DMA_TODEVICE);
-		np->tx_info[entry].mapping = 0;
-		entry = (entry + np->tx_info[entry].used_slots) % TX_RING_SIZE;
-		for (j = 1; j < i; j++) {
-			pci_unmap_single(np->pci_dev,
-					 np->tx_info[entry].mapping,
-					 skb_frag_size(
-						&skb_shinfo(skb)->frags[j-1]),
-					 PCI_DMA_TODEVICE);
-			entry++;
-		}
-	}
-	dev_kfree_skb_any(skb);
-	np->cur_tx = prev_tx;
-	return NETDEV_TX_OK;
 }
+
 
 /* The interrupt handler does all of the Rx thread work and cleans up
    after the Tx thread. */
@@ -1605,12 +1571,6 @@ static void refill_rx_ring(struct net_device *dev)
 				break;	/* Better luck next round. */
 			np->rx_info[entry].mapping =
 				pci_map_single(np->pci_dev, skb->data, np->rx_buf_sz, PCI_DMA_FROMDEVICE);
-			if (pci_dma_mapping_error(np->pci_dev,
-						np->rx_info[entry].mapping)) {
-				dev_kfree_skb(skb);
-				np->rx_info[entry].skb = NULL;
-				break;
-			}
 			np->rx_ring[entry].rxaddr =
 				cpu_to_dma(np->rx_info[entry].mapping | RxDescValid);
 		}
@@ -2052,6 +2012,7 @@ static void starfire_remove_one(struct pci_dev *pdev)
 	iounmap(np->base);
 	pci_release_regions(pdev);
 
+	pci_set_drvdata(pdev, NULL);
 	free_netdev(dev);			/* Will also free np!! */
 }
 

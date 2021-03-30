@@ -111,7 +111,6 @@ static int wm831x_backlight_update_status(struct backlight_device *bl)
 static int wm831x_backlight_get_brightness(struct backlight_device *bl)
 {
 	struct wm831x_backlight_data *data = bl_get_data(bl);
-
 	return data->current_brightness;
 }
 
@@ -124,7 +123,7 @@ static const struct backlight_ops wm831x_backlight_ops = {
 static int wm831x_backlight_probe(struct platform_device *pdev)
 {
 	struct wm831x *wm831x = dev_get_drvdata(pdev->dev.parent);
-	struct wm831x_pdata *wm831x_pdata = dev_get_platdata(pdev->dev.parent);
+	struct wm831x_pdata *wm831x_pdata;
 	struct wm831x_backlight_pdata *pdata;
 	struct wm831x_backlight_data *data;
 	struct backlight_device *bl;
@@ -132,10 +131,12 @@ static int wm831x_backlight_probe(struct platform_device *pdev)
 	int ret, i, max_isel, isink_reg, dcdc_cfg;
 
 	/* We need platform data */
-	if (wm831x_pdata)
+	if (pdev->dev.parent->platform_data) {
+		wm831x_pdata = pdev->dev.parent->platform_data;
 		pdata = wm831x_pdata->backlight;
-	else
+	} else {
 		pdata = NULL;
+	}
 
 	if (!pdata) {
 		dev_err(&pdev->dev, "No platform data supplied\n");
@@ -196,8 +197,8 @@ static int wm831x_backlight_probe(struct platform_device *pdev)
 	memset(&props, 0, sizeof(props));
 	props.type = BACKLIGHT_RAW;
 	props.max_brightness = max_isel;
-	bl = devm_backlight_device_register(&pdev->dev, "wm831x", &pdev->dev,
-					data, &wm831x_backlight_ops, &props);
+	bl = backlight_device_register("wm831x", &pdev->dev, data,
+				       &wm831x_backlight_ops, &props);
 	if (IS_ERR(bl)) {
 		dev_err(&pdev->dev, "failed to register backlight\n");
 		return PTR_ERR(bl);
@@ -215,11 +216,21 @@ static int wm831x_backlight_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static int wm831x_backlight_remove(struct platform_device *pdev)
+{
+	struct backlight_device *bl = platform_get_drvdata(pdev);
+
+	backlight_device_unregister(bl);
+	return 0;
+}
+
 static struct platform_driver wm831x_backlight_driver = {
 	.driver		= {
 		.name	= "wm831x-backlight",
+		.owner	= THIS_MODULE,
 	},
 	.probe		= wm831x_backlight_probe,
+	.remove		= wm831x_backlight_remove,
 };
 
 module_platform_driver(wm831x_backlight_driver);

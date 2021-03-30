@@ -163,8 +163,7 @@ static int snd_ice1712_ews88mt_chip_select(struct snd_ice1712 *ice, int chip_mas
 
      __error:
 	snd_i2c_unlock(ice->i2c);
-	dev_err(ice->card->dev,
-		"AK4524 chip select failed, check cable to the front module\n");
+	snd_printk(KERN_ERR "AK4524 chip select failed, check cable to the front module\n");
 	return -EIO;
 }
 
@@ -175,7 +174,7 @@ static void ews88mt_ak4524_lock(struct snd_akm4xxx *ak, int chip)
 	unsigned char tmp;
 	/* assert AK4524 CS */
 	if (snd_ice1712_ews88mt_chip_select(ice, ~(1 << chip) & 0x0f) < 0)
-		dev_err(ice->card->dev, "fatal error (ews88mt chip select)\n");
+		snd_printk(KERN_ERR "fatal error (ews88mt chip select)\n");
 	snd_ice1712_save_gpio_status(ice);
 	tmp = ICE1712_EWS88_SERIAL_DATA |
 		ICE1712_EWS88_SERIAL_CLOCK |
@@ -457,7 +456,7 @@ static int snd_ice1712_ews_init(struct snd_ice1712 *ice)
 
 	/* create i2c */
 	if ((err = snd_i2c_bus_create(ice->card, "ICE1712 GPIO 1", NULL, &ice->i2c)) < 0) {
-		dev_err(ice->card->dev, "unable to create I2C bus\n");
+		snd_printk(KERN_ERR "unable to create I2C bus\n");
 		return err;
 	}
 	ice->i2c->private_data = ice;
@@ -470,8 +469,7 @@ static int snd_ice1712_ews_init(struct snd_ice1712 *ice)
 					    ICE1712_6FIRE_PCF9554_ADDR,
 					    &spec->i2cdevs[EWS_I2C_6FIRE]);
 		if (err < 0) {
-			dev_err(ice->card->dev,
-				"PCF9554 initialization failed\n");
+			snd_printk(KERN_ERR "PCF9554 initialization failed\n");
 			return err;
 		}
 		snd_ice1712_6fire_write_pca(ice, PCF9554_REG_CONFIG, 0x80);
@@ -580,7 +578,13 @@ static int snd_ice1712_ewx_io_sense_info(struct snd_kcontrol *kcontrol, struct s
 	static const char * const texts[2] = {
 		"+4dBu", "-10dBV",
 	};
-	return snd_ctl_enum_info(uinfo, 1, 2, texts);
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
+	uinfo->count = 1;
+	uinfo->value.enumerated.items = 2;
+	if (uinfo->value.enumerated.item >= 2)
+		uinfo->value.enumerated.item = 1;
+	strcpy(uinfo->value.enumerated.name, texts[uinfo->value.enumerated.item]);
+	return 0;
 }
 
 static int snd_ice1712_ewx_io_sense_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
@@ -830,7 +834,7 @@ static int snd_ice1712_6fire_read_pca(struct snd_ice1712 *ice, unsigned char reg
 	byte = 0;
 	if (snd_i2c_readbytes(spec->i2cdevs[EWS_I2C_6FIRE], &byte, 1) != 1) {
 		snd_i2c_unlock(ice->i2c);
-		dev_err(ice->card->dev, "cannot read pca\n");
+		printk(KERN_ERR "cannot read pca\n");
 		return -EIO;
 	}
 	snd_i2c_unlock(ice->i2c);
@@ -897,7 +901,13 @@ static int snd_ice1712_6fire_select_input_info(struct snd_kcontrol *kcontrol, st
 	static const char * const texts[4] = {
 		"Internal", "Front Input", "Rear Input", "Wave Table"
 	};
-	return snd_ctl_enum_info(uinfo, 1, 4, texts);
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
+	uinfo->count = 1;
+	uinfo->value.enumerated.items = 4;
+	if (uinfo->value.enumerated.item >= 4)
+		uinfo->value.enumerated.item = 1;
+	strcpy(uinfo->value.enumerated.name, texts[uinfo->value.enumerated.item]);
+	return 0;
 }
      
 static int snd_ice1712_6fire_select_input_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)

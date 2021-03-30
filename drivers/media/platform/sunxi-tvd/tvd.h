@@ -1,18 +1,6 @@
 /*
- * drivers/media/platform/sunxi-tvd/tvd/tvd.h
- *
- * Copyright (c) 2007-2018 Allwinnertech Co., Ltd.
- * Author: zhengxiaobin <zhengxiaobin@allwinnertech.com>
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
+ * sunxi tvd core header file
+ * Author:zengqi
  */
 #ifndef __TVD__H__
 #define __TVD__H__
@@ -26,13 +14,9 @@
 #include <media/sunxi_camera.h>
 #include <media/videobuf2-core.h>
 #include <media/v4l2-device.h>
-#include <linux/media-bus-format.h>
+#include <media/v4l2-mediabus.h>
 #include <media/v4l2-ctrls.h>
-#include <media/videobuf2-v4l2.h>
 #include "bsp_tvd.h"
-#include <linux/clk-provider.h>
-
-#define TVD_MAX 4
 
 static LIST_HEAD(devlist);
 
@@ -47,12 +31,11 @@ struct tvd_fmt {
 	TVD_FMT_T    	output_fmt;
 	int   	        depth;
 	enum v4l2_field field;
-	int    bus_pix_code;
+	enum v4l2_mbus_pixelcode    bus_pix_code;
 	unsigned char   planes_cnt;
 };
 
 enum tvd_interface {
-	CVBS,
 	YPBPRI,
 	YPBPRP,
 };
@@ -65,14 +48,6 @@ struct tvd_buffer {
 	enum vb2_buffer_state	state;
 	void *paddr;
 };
-
-struct vin_buffer {
-	struct vb2_v4l2_buffer vb;
-	struct list_head list;
-	void *paddr;
-	enum vb2_buffer_state	state;
-};
-
 
 struct tvd_dmaqueue {
 	struct list_head  active;
@@ -88,12 +63,8 @@ struct writeback_addr {
 
 struct tvd_status {
 	int tvd_used;
-	int tvd_opened;
 	int tvd_if;
 	int tvd_3d_used;
-	int locked;
-	int tvd_system;
-	int tvd_clk_enabled;
 };
 
 struct tvd_3d_fliter {
@@ -130,20 +101,16 @@ struct tvd_dev {
 	unsigned int            height;
 	unsigned int		frame_size;
 	unsigned int            capture_mode;
+	struct vb2_alloc_ctx 	*alloc_ctx;
 	struct vb2_queue   	vb_vidq;
 
 	unsigned int            interface; /*0 cvbs,1 ypbprI,2 ypbprP*/
 	unsigned int            system;	/*0 ntsc, 1 pal*/
-	unsigned int		row;
-	unsigned int		column;
 
 	unsigned int            locked;	/* signal is stable or not */
 	unsigned int            format;
-	unsigned int            channel_index[TVD_MAX];
-	unsigned int            channel_offset_y[TVD_MAX];
-	unsigned int            channel_offset_c[TVD_MAX];
+	unsigned int            channel_index[4];
 	int			irq;
-	char			name[10];
 
 	/* working state */
 	unsigned long 	        generating;
@@ -176,26 +143,7 @@ struct tvd_dev {
 	struct tvd_dmaqueue       vidq_special;
 	struct tvd_dmaqueue       done_special;
 	int special_active;
-	int mulit_channel_mode;
 };
-
-#define SUNXI_TVD_DEBUG_LEVEL 0
-
-#define tvd_wrn(fmt, ...)                                                     \
-	pr_warn("[tvd] %s:%d " fmt "", __func__, __LINE__, ##__VA_ARGS__)
-
-#if SUNXI_TVD_DEBUG_LEVEL == 2
-#define tvd_here pr_warn("[tvd] %s:%d\n", __func__, __LINE__)
-#else
-#define tvd_here
-#endif /*endif EDP_DEBUG */
-
-#if SUNXI_TVD_DEBUG_LEVEL >= 1
-#define tvd_dbg(fmt, ...)                                                     \
-	pr_warn("[tvd] %s:%d " fmt "", __func__, __LINE__, ##__VA_ARGS__)
-#else
-#define tvd_dbg(fmt, ...)
-#endif /*endif EDP_DEBUG */
 
 #endif /* __TVD__H__ */
 

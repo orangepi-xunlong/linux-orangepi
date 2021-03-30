@@ -48,22 +48,24 @@ static int fivm_close(struct inode *i, struct file *f)
 }
 
 extern int fivm_init(void);
-static long fivm_ioctl (
+static long fivm_ioctl(
 		struct file *file,
 		unsigned int cmd,
-		unsigned long arg)
+		unsigned long arg
+		)
 {
 	int rc = 0;
 	switch (cmd) {
 	case CMD_FIVM_ENABLE:
-		rc = fivm_enable();
-		break;
+			rc = fivm_enable();
+			break;
 	case CMD_FIVM_SET:
-		rc = fivm_set((void *)arg);
-		break;
+			rc = fivm_set((void *)arg);
+			break;
 	default:
-		rc = -EINVAL;
-		break;
+			rc = -EINVAL;
+			break;
+
 	}
 	return rc;
 }
@@ -153,7 +155,7 @@ static int __init fivm_dev_init(void) /* Constructor */
 		return -1;
 	}
 
-	pr_info("FIVM device register ok \n");
+	pr_info("FIVM device register ok\n");
 	return 0;
 }
 

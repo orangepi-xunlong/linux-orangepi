@@ -318,7 +318,7 @@ static int microtune_mt7202dtf_request_firmware(struct dvb_frontend* fe, const s
 	return request_firmware(fw, name, &bt->bt->dev->dev);
 }
 
-static const struct sp887x_config microtune_mt7202dtf_config = {
+static struct sp887x_config microtune_mt7202dtf_config = {
 	.demod_address = 0x70,
 	.request_firmware = microtune_mt7202dtf_request_firmware,
 };
@@ -458,7 +458,7 @@ static void or51211_sleep(struct dvb_frontend * fe)
 	bttv_write_gpio(bt->bttv_nr, 0x0001, 0x0000);
 }
 
-static const struct or51211_config or51211_config = {
+static struct or51211_config or51211_config = {
 	.demod_address = 0x15,
 	.request_firmware = or51211_request_firmware,
 	.setmode = or51211_setmode,
@@ -680,7 +680,6 @@ static void frontend_init(struct dvb_bt8xx_card *card, u32 type)
 		/*	DST is not a frontend, attaching the ASIC	*/
 		if (dvb_attach(dst_attach, state, &card->dvb_adapter) == NULL) {
 			pr_err("%s: Could not find a Twinhan DST\n", __func__);
-			kfree(state);
 			break;
 		}
 		/*	Attach other DST peripherals if any		*/

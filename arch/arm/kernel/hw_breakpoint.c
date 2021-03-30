@@ -35,6 +35,7 @@
 #include <asm/cputype.h>
 #include <asm/current.h>
 #include <asm/hw_breakpoint.h>
+#include <asm/kdebug.h>
 #include <asm/traps.h>
 
 /* Breakpoint currently in use for each BRP. */
@@ -112,8 +113,8 @@ static u32 read_wb_reg(int n)
 	GEN_READ_WB_REG_CASES(ARM_OP2_WVR, val);
 	GEN_READ_WB_REG_CASES(ARM_OP2_WCR, val);
 	default:
-		pr_warn("attempt to read from unknown breakpoint register %d\n",
-			n);
+		pr_warning("attempt to read from unknown breakpoint "
+				"register %d\n", n);
 	}
 
 	return val;
@@ -127,8 +128,8 @@ static void write_wb_reg(int n, u32 val)
 	GEN_WRITE_WB_REG_CASES(ARM_OP2_WVR, val);
 	GEN_WRITE_WB_REG_CASES(ARM_OP2_WCR, val);
 	default:
-		pr_warn("attempt to write to unknown breakpoint register %d\n",
-			n);
+		pr_warning("attempt to write to unknown breakpoint "
+				"register %d\n", n);
 	}
 	isb();
 }
@@ -166,7 +167,7 @@ static int debug_arch_supported(void)
 /* Can we determine the watchpoint access type from the fsr? */
 static int debug_exception_updates_fsr(void)
 {
-	return get_debug_arch() >= ARM_DEBUG_ARCH_V8;
+	return 0;
 }
 
 /* Determine number of WRP registers available. */
@@ -256,7 +257,6 @@ static int enable_monitor_mode(void)
 		break;
 	case ARM_DEBUG_ARCH_V7_ECP14:
 	case ARM_DEBUG_ARCH_V7_1:
-	case ARM_DEBUG_ARCH_V8:
 		ARM_DBG_WRITE(c0, c2, 2, (dscr | ARM_DSCR_MDBGEN));
 		isb();
 		break;
@@ -291,7 +291,7 @@ int hw_breakpoint_slots(int type)
 	case TYPE_DATA:
 		return get_num_wrps();
 	default:
-		pr_warn("unknown slot type: %d\n", type);
+		pr_warning("unknown slot type: %d\n", type);
 		return 0;
 	}
 }
@@ -344,13 +344,13 @@ int arch_install_hw_breakpoint(struct perf_event *bp)
 		/* Breakpoint */
 		ctrl_base = ARM_BASE_BCR;
 		val_base = ARM_BASE_BVR;
-		slots = this_cpu_ptr(bp_on_reg);
+		slots = (struct perf_event **)__get_cpu_var(bp_on_reg);
 		max_slots = core_num_brps;
 	} else {
 		/* Watchpoint */
 		ctrl_base = ARM_BASE_WCR;
 		val_base = ARM_BASE_WVR;
-		slots = this_cpu_ptr(wp_on_reg);
+		slots = (struct perf_event **)__get_cpu_var(wp_on_reg);
 		max_slots = core_num_wrps;
 	}
 
@@ -364,7 +364,7 @@ int arch_install_hw_breakpoint(struct perf_event *bp)
 	}
 
 	if (i == max_slots) {
-		pr_warn("Can't find any breakpoint slot\n");
+		pr_warning("Can't find any breakpoint slot\n");
 		return -EBUSY;
 	}
 
@@ -396,12 +396,12 @@ void arch_uninstall_hw_breakpoint(struct perf_event *bp)
 	if (info->ctrl.type == ARM_BREAKPOINT_EXECUTE) {
 		/* Breakpoint */
 		base = ARM_BASE_BCR;
-		slots = this_cpu_ptr(bp_on_reg);
+		slots = (struct perf_event **)__get_cpu_var(bp_on_reg);
 		max_slots = core_num_brps;
 	} else {
 		/* Watchpoint */
 		base = ARM_BASE_WCR;
-		slots = this_cpu_ptr(wp_on_reg);
+		slots = (struct perf_event **)__get_cpu_var(wp_on_reg);
 		max_slots = core_num_wrps;
 	}
 
@@ -416,7 +416,7 @@ void arch_uninstall_hw_breakpoint(struct perf_event *bp)
 	}
 
 	if (i == max_slots) {
-		pr_warn("Can't find any breakpoint slot\n");
+		pr_warning("Can't find any breakpoint slot\n");
 		return;
 	}
 
@@ -631,7 +631,7 @@ int arch_validate_hwbkpt_settings(struct perf_event *bp)
 	info->address &= ~alignment_mask;
 	info->ctrl.len <<= offset;
 
-	if (is_default_overflow_handler(bp)) {
+	if (!bp->overflow_handler) {
 		/*
 		 * Mismatch breakpoints are required for single-stepping
 		 * breakpoints.
@@ -647,7 +647,7 @@ int arch_validate_hwbkpt_settings(struct perf_event *bp)
 		 * Per-cpu breakpoints are not supported by our stepping
 		 * mechanism.
 		 */
-		if (!bp->hw.target)
+		if (!bp->hw.bp_target)
 			return -EINVAL;
 
 		/*
@@ -697,7 +697,7 @@ static void watchpoint_handler(unsigned long addr, unsigned int fsr,
 	struct arch_hw_breakpoint *info;
 	struct arch_hw_breakpoint_ctrl ctrl;
 
-	slots = this_cpu_ptr(wp_on_reg);
+	slots = (struct perf_event **)__get_cpu_var(wp_on_reg);
 
 	for (i = 0; i < core_num_wrps; ++i) {
 		rcu_read_lock();
@@ -754,7 +754,7 @@ static void watchpoint_handler(unsigned long addr, unsigned int fsr,
 		 * mismatch breakpoint so we can single-step over the
 		 * watchpoint trigger.
 		 */
-		if (is_default_overflow_handler(wp))
+		if (!wp->overflow_handler)
 			enable_single_step(wp, instruction_pointer(regs));
 
 unlock:
@@ -768,7 +768,7 @@ static void watchpoint_single_step_handler(unsigned long pc)
 	struct perf_event *wp, **slots;
 	struct arch_hw_breakpoint *info;
 
-	slots = this_cpu_ptr(wp_on_reg);
+	slots = (struct perf_event **)__get_cpu_var(wp_on_reg);
 
 	for (i = 0; i < core_num_wrps; ++i) {
 		rcu_read_lock();
@@ -802,7 +802,7 @@ static void breakpoint_handler(unsigned long unknown, struct pt_regs *regs)
 	struct arch_hw_breakpoint *info;
 	struct arch_hw_breakpoint_ctrl ctrl;
 
-	slots = this_cpu_ptr(bp_on_reg);
+	slots = (struct perf_event **)__get_cpu_var(bp_on_reg);
 
 	/* The exception entry code places the amended lr in the PC. */
 	addr = regs->ARM_pc;
@@ -893,8 +893,8 @@ static int debug_reg_trap(struct pt_regs *regs, unsigned int instr)
 {
 	int cpu = smp_processor_id();
 
-	pr_warn("Debug register access (0x%x) caused undefined instruction on CPU %d\n",
-		instr, cpu);
+	pr_warning("Debug register access (0x%x) caused undefined instruction on CPU %d\n",
+		   instr, cpu);
 
 	/* Set the error flag for this CPU and skip the faulting instruction. */
 	cpumask_set_cpu(cpu, &debug_err_mask);
@@ -1020,7 +1020,7 @@ out_mdbgen:
 		cpumask_or(&debug_err_mask, &debug_err_mask, cpumask_of(cpu));
 }
 
-static int dbg_reset_notify(struct notifier_block *self,
+static int __cpuinit dbg_reset_notify(struct notifier_block *self,
 				      unsigned long action, void *cpu)
 {
 	if ((action & ~CPU_TASKS_FROZEN) == CPU_ONLINE)
@@ -1029,7 +1029,7 @@ static int dbg_reset_notify(struct notifier_block *self,
 	return NOTIFY_OK;
 }
 
-static struct notifier_block dbg_reset_nb = {
+static struct notifier_block __cpuinitdata dbg_reset_nb = {
 	.notifier_call = dbg_reset_notify,
 };
 
@@ -1049,7 +1049,8 @@ static struct notifier_block dbg_cpu_pm_nb = {
 
 static void __init pm_init(void)
 {
-	cpu_pm_register_notifier(&dbg_cpu_pm_nb);
+	if (has_ossr)
+		cpu_pm_register_notifier(&dbg_cpu_pm_nb);
 }
 #else
 static inline void pm_init(void)
@@ -1066,29 +1067,11 @@ static int __init arch_hw_breakpoint_init(void)
 		return 0;
 	}
 
-	/*
-	 * Scorpion CPUs (at least those in APQ8060) seem to set DBGPRSR.SPD
-	 * whenever a WFI is issued, even if the core is not powered down, in
-	 * violation of the architecture.  When DBGPRSR.SPD is set, accesses to
-	 * breakpoint and watchpoint registers are treated as undefined, so
-	 * this results in boot time and runtime failures when these are
-	 * accessed and we unexpectedly take a trap.
-	 *
-	 * It's not clear if/how this can be worked around, so we blacklist
-	 * Scorpion CPUs to avoid these issues.
-	*/
-	if (read_cpuid_part() == ARM_CPU_PART_SCORPION) {
-		pr_info("Scorpion CPU detected. Hardware breakpoints and watchpoints disabled\n");
-		return 0;
-	}
-
 	has_ossr = core_has_os_save_restore();
 
 	/* Determine how many BRPs/WRPs are available. */
 	core_num_brps = get_num_brps();
 	core_num_wrps = get_num_wrps();
-
-	cpu_notifier_register_begin();
 
 	/*
 	 * We need to tread carefully here because DBGSWENABLE may be
@@ -1106,7 +1089,6 @@ static int __init arch_hw_breakpoint_init(void)
 	if (!cpumask_empty(&debug_err_mask)) {
 		core_num_brps = 0;
 		core_num_wrps = 0;
-		cpu_notifier_register_done();
 		return 0;
 	}
 
@@ -1126,10 +1108,7 @@ static int __init arch_hw_breakpoint_init(void)
 			TRAP_HWBKPT, "breakpoint debug exception");
 
 	/* Register hotplug and PM notifiers. */
-	__register_cpu_notifier(&dbg_reset_nb);
-
-	cpu_notifier_register_done();
-
+	register_cpu_notifier(&dbg_reset_nb);
 	pm_init();
 	return 0;
 }

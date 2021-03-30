@@ -26,7 +26,7 @@
 
 ENTRY(__raw_readsw)
 		teq	r2, #0
-		reteq	lr
+		moveq	pc, lr
 		tst	r1, #3
 		bne	.Linsw_align
 

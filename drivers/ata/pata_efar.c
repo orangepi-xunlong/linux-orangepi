@@ -14,6 +14,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <linux/device.h>
@@ -288,7 +289,7 @@ static struct pci_driver efar_pci_driver = {
 	.id_table		= efar_pci_tbl,
 	.probe			= efar_init_one,
 	.remove			= ata_pci_remove_one,
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 	.suspend		= ata_pci_device_suspend,
 	.resume			= ata_pci_device_resume,
 #endif

@@ -184,7 +184,7 @@ do {								\
 	 */
 #define emit_alu_K(OPCODE, K)					\
 do {								\
-	if (K || OPCODE == AND || OPCODE == MUL) {		\
+	if (K) {						\
 		unsigned int _insn = OPCODE;			\
 		_insn |= RS1(r_A) | RD(r_A);			\
 		if (is_simm13(K)) {				\
@@ -234,18 +234,12 @@ do {	BUILD_BUG_ON(FIELD_SIZEOF(STRUCT, FIELD) != sizeof(u8));	\
 	__emit_load8(BASE, STRUCT, FIELD, DEST);			\
 } while (0)
 
-#ifdef CONFIG_SPARC64
-#define BIAS (STACK_BIAS - 4)
-#else
-#define BIAS (-4)
-#endif
-
-#define emit_ldmem(OFF, DEST)						\
-do {	*prog++ = LD32I | RS1(SP) | S13(BIAS - (OFF)) | RD(DEST);	\
+#define emit_ldmem(OFF, DEST)					\
+do {	*prog++ = LD32I | RS1(FP) | S13(-(OFF)) | RD(DEST);	\
 } while (0)
 
-#define emit_stmem(OFF, SRC)						\
-do {	*prog++ = ST32I | RS1(SP) | S13(BIAS - (OFF)) | RD(SRC);	\
+#define emit_stmem(OFF, SRC)					\
+do {	*prog++ = LD32I | RS1(FP) | S13(-(OFF)) | RD(SRC);	\
 } while (0)
 
 #ifdef CONFIG_SMP
@@ -351,7 +345,7 @@ do {	*prog++ = BR_OPC | WDISP22(OFF);		\
  *
  * Sometimes we need to emit a branch earlier in the code
  * sequence.  And in these situations we adjust "destination"
- * to accommodate this difference.  For example, if we needed
+ * to accomodate this difference.  For example, if we needed
  * to emit a branch (and it's delay slot) right before the
  * final instruction emitted for a BPF opcode, we'd use
  * "destination + 4" instead of just plain "destination" above.
@@ -360,7 +354,7 @@ do {	*prog++ = BR_OPC | WDISP22(OFF);		\
  * emit_jump() calls with adjusted offsets.
  */
 
-void bpf_jit_compile(struct bpf_prog *fp)
+void bpf_jit_compile(struct sk_filter *fp)
 {
 	unsigned int cleanup_addr, proglen, oldproglen = 0;
 	u32 temp[8], *prog, *func, seen = 0, pass;
@@ -420,69 +414,90 @@ void bpf_jit_compile(struct bpf_prog *fp)
 		}
 		emit_reg_move(O7, r_saved_O7);
 
-		/* Make sure we dont leak kernel information to the user. */
-		if (bpf_needs_clear_a(&filter[0]))
+		switch (filter[0].code) {
+		case BPF_S_RET_K:
+		case BPF_S_LD_W_LEN:
+		case BPF_S_ANC_PROTOCOL:
+		case BPF_S_ANC_PKTTYPE:
+		case BPF_S_ANC_IFINDEX:
+		case BPF_S_ANC_MARK:
+		case BPF_S_ANC_RXHASH:
+		case BPF_S_ANC_VLAN_TAG:
+		case BPF_S_ANC_VLAN_TAG_PRESENT:
+		case BPF_S_ANC_CPU:
+		case BPF_S_ANC_QUEUE:
+		case BPF_S_LD_W_ABS:
+		case BPF_S_LD_H_ABS:
+		case BPF_S_LD_B_ABS:
+			/* The first instruction sets the A register (or is
+			 * a "RET 'constant'")
+			 */
+			break;
+		default:
+			/* Make sure we dont leak kernel information to the
+			 * user.
+			 */
 			emit_clear(r_A); /* A = 0 */
+		}
 
 		for (i = 0; i < flen; i++) {
 			unsigned int K = filter[i].k;
 			unsigned int t_offset;
 			unsigned int f_offset;
 			u32 t_op, f_op;
-			u16 code = bpf_anc_helper(&filter[i]);
 			int ilen;
 
-			switch (code) {
-			case BPF_ALU | BPF_ADD | BPF_X:	/* A += X; */
+			switch (filter[i].code) {
+			case BPF_S_ALU_ADD_X:	/* A += X; */
 				emit_alu_X(ADD);
 				break;
-			case BPF_ALU | BPF_ADD | BPF_K:	/* A += K; */
+			case BPF_S_ALU_ADD_K:	/* A += K; */
 				emit_alu_K(ADD, K);
 				break;
-			case BPF_ALU | BPF_SUB | BPF_X:	/* A -= X; */
+			case BPF_S_ALU_SUB_X:	/* A -= X; */
 				emit_alu_X(SUB);
 				break;
-			case BPF_ALU | BPF_SUB | BPF_K:	/* A -= K */
+			case BPF_S_ALU_SUB_K:	/* A -= K */
 				emit_alu_K(SUB, K);
 				break;
-			case BPF_ALU | BPF_AND | BPF_X:	/* A &= X */
+			case BPF_S_ALU_AND_X:	/* A &= X */
 				emit_alu_X(AND);
 				break;
-			case BPF_ALU | BPF_AND | BPF_K:	/* A &= K */
+			case BPF_S_ALU_AND_K:	/* A &= K */
 				emit_alu_K(AND, K);
 				break;
-			case BPF_ALU | BPF_OR | BPF_X:	/* A |= X */
+			case BPF_S_ALU_OR_X:	/* A |= X */
 				emit_alu_X(OR);
 				break;
-			case BPF_ALU | BPF_OR | BPF_K:	/* A |= K */
+			case BPF_S_ALU_OR_K:	/* A |= K */
 				emit_alu_K(OR, K);
 				break;
-			case BPF_ANC | SKF_AD_ALU_XOR_X: /* A ^= X; */
-			case BPF_ALU | BPF_XOR | BPF_X:
+			case BPF_S_ANC_ALU_XOR_X: /* A ^= X; */
+			case BPF_S_ALU_XOR_X:
 				emit_alu_X(XOR);
 				break;
-			case BPF_ALU | BPF_XOR | BPF_K:	/* A ^= K */
+			case BPF_S_ALU_XOR_K:	/* A ^= K */
 				emit_alu_K(XOR, K);
 				break;
-			case BPF_ALU | BPF_LSH | BPF_X:	/* A <<= X */
+			case BPF_S_ALU_LSH_X:	/* A <<= X */
 				emit_alu_X(SLL);
 				break;
-			case BPF_ALU | BPF_LSH | BPF_K:	/* A <<= K */
+			case BPF_S_ALU_LSH_K:	/* A <<= K */
 				emit_alu_K(SLL, K);
 				break;
-			case BPF_ALU | BPF_RSH | BPF_X:	/* A >>= X */
+			case BPF_S_ALU_RSH_X:	/* A >>= X */
 				emit_alu_X(SRL);
 				break;
-			case BPF_ALU | BPF_RSH | BPF_K:	/* A >>= K */
+			case BPF_S_ALU_RSH_K:	/* A >>= K */
 				emit_alu_K(SRL, K);
 				break;
-			case BPF_ALU | BPF_MUL | BPF_X:	/* A *= X; */
+			case BPF_S_ALU_MUL_X:	/* A *= X; */
 				emit_alu_X(MUL);
 				break;
-			case BPF_ALU | BPF_MUL | BPF_K:	/* A *= K */
+			case BPF_S_ALU_MUL_K:	/* A *= K */
 				emit_alu_K(MUL, K);
 				break;
-			case BPF_ALU | BPF_DIV | BPF_K:	/* A /= K with K != 0*/
+			case BPF_S_ALU_DIV_K:	/* A /= K with K != 0*/
 				if (K == 1)
 					break;
 				emit_write_y(G0);
@@ -497,7 +512,7 @@ void bpf_jit_compile(struct bpf_prog *fp)
 #endif
 				emit_alu_K(DIV, K);
 				break;
-			case BPF_ALU | BPF_DIV | BPF_X:	/* A /= X; */
+			case BPF_S_ALU_DIV_X:	/* A /= X; */
 				emit_cmpi(r_X, 0);
 				if (pc_ret0 > 0) {
 					t_offset = addrs[pc_ret0 - 1];
@@ -529,10 +544,10 @@ void bpf_jit_compile(struct bpf_prog *fp)
 #endif
 				emit_alu_X(DIV);
 				break;
-			case BPF_ALU | BPF_NEG:
+			case BPF_S_ALU_NEG:
 				emit_neg();
 				break;
-			case BPF_RET | BPF_K:
+			case BPF_S_RET_K:
 				if (!K) {
 					if (pc_ret0 == -1)
 						pc_ret0 = i;
@@ -541,7 +556,7 @@ void bpf_jit_compile(struct bpf_prog *fp)
 					emit_loadimm(K, r_A);
 				}
 				/* Fallthrough */
-			case BPF_RET | BPF_A:
+			case BPF_S_RET_A:
 				if (seen_or_pass0) {
 					if (i != flen - 1) {
 						emit_jump(cleanup_addr);
@@ -558,107 +573,102 @@ void bpf_jit_compile(struct bpf_prog *fp)
 				emit_jmpl(r_saved_O7, 8, G0);
 				emit_reg_move(r_A, O0); /* delay slot */
 				break;
-			case BPF_MISC | BPF_TAX:
+			case BPF_S_MISC_TAX:
 				seen |= SEEN_XREG;
 				emit_reg_move(r_A, r_X);
 				break;
-			case BPF_MISC | BPF_TXA:
+			case BPF_S_MISC_TXA:
 				seen |= SEEN_XREG;
 				emit_reg_move(r_X, r_A);
 				break;
-			case BPF_ANC | SKF_AD_CPU:
+			case BPF_S_ANC_CPU:
 				emit_load_cpu(r_A);
 				break;
-			case BPF_ANC | SKF_AD_PROTOCOL:
+			case BPF_S_ANC_PROTOCOL:
 				emit_skb_load16(protocol, r_A);
 				break;
-			case BPF_ANC | SKF_AD_PKTTYPE:
-				__emit_skb_load8(__pkt_type_offset, r_A);
-				emit_andi(r_A, PKT_TYPE_MAX, r_A);
+#if 0
+				/* GCC won't let us take the address of
+				 * a bit field even though we very much
+				 * know what we are doing here.
+				 */
+			case BPF_S_ANC_PKTTYPE:
+				__emit_skb_load8(pkt_type, r_A);
 				emit_alu_K(SRL, 5);
 				break;
-			case BPF_ANC | SKF_AD_IFINDEX:
+#endif
+			case BPF_S_ANC_IFINDEX:
 				emit_skb_loadptr(dev, r_A);
 				emit_cmpi(r_A, 0);
 				emit_branch(BE_PTR, cleanup_addr + 4);
 				emit_nop();
 				emit_load32(r_A, struct net_device, ifindex, r_A);
 				break;
-			case BPF_ANC | SKF_AD_MARK:
+			case BPF_S_ANC_MARK:
 				emit_skb_load32(mark, r_A);
 				break;
-			case BPF_ANC | SKF_AD_QUEUE:
+			case BPF_S_ANC_QUEUE:
 				emit_skb_load16(queue_mapping, r_A);
 				break;
-			case BPF_ANC | SKF_AD_HATYPE:
+			case BPF_S_ANC_HATYPE:
 				emit_skb_loadptr(dev, r_A);
 				emit_cmpi(r_A, 0);
 				emit_branch(BE_PTR, cleanup_addr + 4);
 				emit_nop();
 				emit_load16(r_A, struct net_device, type, r_A);
 				break;
-			case BPF_ANC | SKF_AD_RXHASH:
-				emit_skb_load32(hash, r_A);
+			case BPF_S_ANC_RXHASH:
+				emit_skb_load32(rxhash, r_A);
 				break;
-			case BPF_ANC | SKF_AD_VLAN_TAG:
-			case BPF_ANC | SKF_AD_VLAN_TAG_PRESENT:
+			case BPF_S_ANC_VLAN_TAG:
+			case BPF_S_ANC_VLAN_TAG_PRESENT:
 				emit_skb_load16(vlan_tci, r_A);
-				if (code != (BPF_ANC | SKF_AD_VLAN_TAG)) {
-					emit_alu_K(SRL, 12);
-					emit_andi(r_A, 1, r_A);
+				if (filter[i].code == BPF_S_ANC_VLAN_TAG) {
+					emit_andi(r_A, VLAN_VID_MASK, r_A);
 				} else {
-					emit_loadimm(~VLAN_TAG_PRESENT, r_TMP);
+					emit_loadimm(VLAN_TAG_PRESENT, r_TMP);
 					emit_and(r_A, r_TMP, r_A);
 				}
 				break;
-			case BPF_LD | BPF_W | BPF_LEN:
-				emit_skb_load32(len, r_A);
-				break;
-			case BPF_LDX | BPF_W | BPF_LEN:
-				emit_skb_load32(len, r_X);
-				break;
-			case BPF_LD | BPF_IMM:
+
+			case BPF_S_LD_IMM:
 				emit_loadimm(K, r_A);
 				break;
-			case BPF_LDX | BPF_IMM:
+			case BPF_S_LDX_IMM:
 				emit_loadimm(K, r_X);
 				break;
-			case BPF_LD | BPF_MEM:
-				seen |= SEEN_MEM;
+			case BPF_S_LD_MEM:
 				emit_ldmem(K * 4, r_A);
 				break;
-			case BPF_LDX | BPF_MEM:
-				seen |= SEEN_MEM | SEEN_XREG;
+			case BPF_S_LDX_MEM:
 				emit_ldmem(K * 4, r_X);
 				break;
-			case BPF_ST:
-				seen |= SEEN_MEM;
+			case BPF_S_ST:
 				emit_stmem(K * 4, r_A);
 				break;
-			case BPF_STX:
-				seen |= SEEN_MEM | SEEN_XREG;
+			case BPF_S_STX:
 				emit_stmem(K * 4, r_X);
 				break;
 
 #define CHOOSE_LOAD_FUNC(K, func) \
 	((int)K < 0 ? ((int)K >= SKF_LL_OFF ? func##_negative_offset : func) : func##_positive_offset)
 
-			case BPF_LD | BPF_W | BPF_ABS:
+			case BPF_S_LD_W_ABS:
 				func = CHOOSE_LOAD_FUNC(K, bpf_jit_load_word);
 common_load:			seen |= SEEN_DATAREF;
 				emit_loadimm(K, r_OFF);
 				emit_call(func);
 				break;
-			case BPF_LD | BPF_H | BPF_ABS:
+			case BPF_S_LD_H_ABS:
 				func = CHOOSE_LOAD_FUNC(K, bpf_jit_load_half);
 				goto common_load;
-			case BPF_LD | BPF_B | BPF_ABS:
+			case BPF_S_LD_B_ABS:
 				func = CHOOSE_LOAD_FUNC(K, bpf_jit_load_byte);
 				goto common_load;
-			case BPF_LDX | BPF_B | BPF_MSH:
+			case BPF_S_LDX_B_MSH:
 				func = CHOOSE_LOAD_FUNC(K, bpf_jit_load_byte_msh);
 				goto common_load;
-			case BPF_LD | BPF_W | BPF_IND:
+			case BPF_S_LD_W_IND:
 				func = bpf_jit_load_word;
 common_load_ind:		seen |= SEEN_DATAREF | SEEN_XREG;
 				if (K) {
@@ -673,13 +683,13 @@ common_load_ind:		seen |= SEEN_DATAREF | SEEN_XREG;
 				}
 				emit_call(func);
 				break;
-			case BPF_LD | BPF_H | BPF_IND:
+			case BPF_S_LD_H_IND:
 				func = bpf_jit_load_half;
 				goto common_load_ind;
-			case BPF_LD | BPF_B | BPF_IND:
+			case BPF_S_LD_B_IND:
 				func = bpf_jit_load_byte;
 				goto common_load_ind;
-			case BPF_JMP | BPF_JA:
+			case BPF_S_JMP_JA:
 				emit_jump(addrs[i + K]);
 				emit_nop();
 				break;
@@ -690,14 +700,14 @@ common_load_ind:		seen |= SEEN_DATAREF | SEEN_XREG;
 		f_op = FOP;		\
 		goto cond_branch
 
-			COND_SEL(BPF_JMP | BPF_JGT | BPF_K, BGU, BLEU);
-			COND_SEL(BPF_JMP | BPF_JGE | BPF_K, BGEU, BLU);
-			COND_SEL(BPF_JMP | BPF_JEQ | BPF_K, BE, BNE);
-			COND_SEL(BPF_JMP | BPF_JSET | BPF_K, BNE, BE);
-			COND_SEL(BPF_JMP | BPF_JGT | BPF_X, BGU, BLEU);
-			COND_SEL(BPF_JMP | BPF_JGE | BPF_X, BGEU, BLU);
-			COND_SEL(BPF_JMP | BPF_JEQ | BPF_X, BE, BNE);
-			COND_SEL(BPF_JMP | BPF_JSET | BPF_X, BNE, BE);
+			COND_SEL(BPF_S_JMP_JGT_K, BGU, BLEU);
+			COND_SEL(BPF_S_JMP_JGE_K, BGEU, BLU);
+			COND_SEL(BPF_S_JMP_JEQ_K, BE, BNE);
+			COND_SEL(BPF_S_JMP_JSET_K, BNE, BE);
+			COND_SEL(BPF_S_JMP_JGT_X, BGU, BLEU);
+			COND_SEL(BPF_S_JMP_JGE_X, BGEU, BLU);
+			COND_SEL(BPF_S_JMP_JEQ_X, BE, BNE);
+			COND_SEL(BPF_S_JMP_JSET_X, BNE, BE);
 
 cond_branch:			f_offset = addrs[i + filter[i].jf];
 				t_offset = addrs[i + filter[i].jt];
@@ -709,20 +719,20 @@ cond_branch:			f_offset = addrs[i + filter[i].jf];
 					break;
 				}
 
-				switch (code) {
-				case BPF_JMP | BPF_JGT | BPF_X:
-				case BPF_JMP | BPF_JGE | BPF_X:
-				case BPF_JMP | BPF_JEQ | BPF_X:
+				switch (filter[i].code) {
+				case BPF_S_JMP_JGT_X:
+				case BPF_S_JMP_JGE_X:
+				case BPF_S_JMP_JEQ_X:
 					seen |= SEEN_XREG;
 					emit_cmp(r_A, r_X);
 					break;
-				case BPF_JMP | BPF_JSET | BPF_X:
+				case BPF_S_JMP_JSET_X:
 					seen |= SEEN_XREG;
 					emit_btst(r_A, r_X);
 					break;
-				case BPF_JMP | BPF_JEQ | BPF_K:
-				case BPF_JMP | BPF_JGT | BPF_K:
-				case BPF_JMP | BPF_JGE | BPF_K:
+				case BPF_S_JMP_JEQ_K:
+				case BPF_S_JMP_JGT_K:
+				case BPF_S_JMP_JGE_K:
 					if (is_simm13(K)) {
 						emit_cmpi(r_A, K);
 					} else {
@@ -730,7 +740,7 @@ cond_branch:			f_offset = addrs[i + filter[i].jf];
 						emit_cmp(r_A, r_TMP);
 					}
 					break;
-				case BPF_JMP | BPF_JSET | BPF_K:
+				case BPF_S_JMP_JSET_K:
 					if (is_simm13(K)) {
 						emit_btsti(r_A, K);
 					} else {
@@ -763,7 +773,7 @@ cond_branch:			f_offset = addrs[i + filter[i].jf];
 				if (unlikely(proglen + ilen > oldproglen)) {
 					pr_err("bpb_jit_compile fatal error\n");
 					kfree(addrs);
-					module_memfree(image);
+					module_free(NULL, image);
 					return;
 				}
 				memcpy(image + proglen, temp, ilen);
@@ -786,7 +796,9 @@ cond_branch:			f_offset = addrs[i + filter[i].jf];
 			break;
 		}
 		if (proglen == oldproglen) {
-			image = module_alloc(proglen);
+			image = module_alloc(max_t(unsigned int,
+						   proglen,
+						   sizeof(struct work_struct)));
 			if (!image)
 				goto out;
 		}
@@ -794,22 +806,31 @@ cond_branch:			f_offset = addrs[i + filter[i].jf];
 	}
 
 	if (bpf_jit_enable > 1)
-		bpf_jit_dump(flen, proglen, pass + 1, image);
+		bpf_jit_dump(flen, proglen, pass, image);
 
 	if (image) {
 		bpf_flush_icache(image, image + proglen);
 		fp->bpf_func = (void *)image;
-		fp->jited = 1;
 	}
 out:
 	kfree(addrs);
 	return;
 }
 
-void bpf_jit_free(struct bpf_prog *fp)
+static void jit_free_defer(struct work_struct *arg)
 {
-	if (fp->jited)
-		module_memfree(fp->bpf_func);
+	module_free(NULL, arg);
+}
 
-	bpf_prog_unlock_free(fp);
+/* run from softirq, we must use a work_struct to call
+ * module_free() from process context
+ */
+void bpf_jit_free(struct sk_filter *fp)
+{
+	if (fp->bpf_func != sk_run_filter) {
+		struct work_struct *work = (struct work_struct *)fp->bpf_func;
+
+		INIT_WORK(work, jit_free_defer);
+		schedule_work(work);
+	}
 }

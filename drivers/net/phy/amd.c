@@ -61,7 +61,7 @@ static int am79c_config_intr(struct phy_device *phydev)
 	return err;
 }
 
-static struct phy_driver am79c_driver[] = { {
+static struct phy_driver am79c_driver = {
 	.phy_id		= PHY_ID_AM79C874,
 	.name		= "AM79C874",
 	.phy_id_mask	= 0xfffffff0,
@@ -72,9 +72,21 @@ static struct phy_driver am79c_driver[] = { {
 	.read_status	= genphy_read_status,
 	.ack_interrupt	= am79c_ack_interrupt,
 	.config_intr	= am79c_config_intr,
-} };
+	.driver		= { .owner = THIS_MODULE,},
+};
 
-module_phy_driver(am79c_driver);
+static int __init am79c_init(void)
+{
+	return phy_driver_register(&am79c_driver);
+}
+
+static void __exit am79c_exit(void)
+{
+	phy_driver_unregister(&am79c_driver);
+}
+
+module_init(am79c_init);
+module_exit(am79c_exit);
 
 static struct mdio_device_id __maybe_unused amd_tbl[] = {
 	{ PHY_ID_AM79C874, 0xfffffff0 },

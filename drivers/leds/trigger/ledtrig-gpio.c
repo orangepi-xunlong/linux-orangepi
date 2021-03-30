@@ -48,18 +48,18 @@ static void gpio_trig_work(struct work_struct *work)
 	if (!gpio_data->gpio)
 		return;
 
-	tmp = gpio_get_value_cansleep(gpio_data->gpio);
+	tmp = gpio_get_value(gpio_data->gpio);
 	if (gpio_data->inverted)
 		tmp = !tmp;
 
 	if (tmp) {
 		if (gpio_data->desired_brightness)
-			led_set_brightness_nosleep(gpio_data->led,
+			__led_set_brightness(gpio_data->led,
 					   gpio_data->desired_brightness);
 		else
-			led_set_brightness_nosleep(gpio_data->led, LED_FULL);
+			__led_set_brightness(gpio_data->led, LED_FULL);
 	} else {
-		led_set_brightness_nosleep(gpio_data->led, LED_OFF);
+		__led_set_brightness(gpio_data->led, LED_OFF);
 	}
 }
 

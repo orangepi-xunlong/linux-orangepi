@@ -143,7 +143,7 @@ static struct irqaction call_function_ipi = {
 static irqreturn_t smp_ipi_timer_interrupt(int irq, void *dev_id);
 static struct irqaction local_timer_ipi = {
 	.handler	= smp_ipi_timer_interrupt,
-	.flags		= IRQF_NOBALANCING,
+	.flags		= IRQF_DISABLED | IRQF_NOBALANCING,
 	.name		= "smp local timer IPI"
 };
 #endif
@@ -675,7 +675,7 @@ int __init start_secondary(void *unused)
 #ifdef CONFIG_GENERIC_CLOCKEVENTS
 	init_clockevents();
 #endif
-	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
+	cpu_startup_entry(CPUHP_ONLINE);
 	return 0;
 }
 

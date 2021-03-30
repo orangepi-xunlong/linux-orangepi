@@ -4,7 +4,7 @@
  * Copyright (C) 2005 Ralph Metzler <rjkm@metzlerbros.de>
  *                    Metzler Brothers Systementwicklung GbR
  *
- * Copyright (C) 2005 Patrick Boettcher <patrick.boettcher@posteo.de>
+ * Copyright (C) 2005 Patrick Boettcher <patrick.boettcher@desy.de>
  *
  * Thanks to Twinhan who kindly provided hardware and information.
  *
@@ -26,8 +26,8 @@ struct vp702x_fe_state {
 
 	struct dvb_frontend_ops ops;
 
-	enum fe_sec_voltage voltage;
-	enum fe_sec_tone_mode tone_mode;
+	fe_sec_voltage_t voltage;
+	fe_sec_tone_mode_t tone_mode;
 
 	u8 lnb_buf[8];
 
@@ -72,8 +72,7 @@ static u8 vp702x_chksum(u8 *buf,int f, int count)
 	return ~s+1;
 }
 
-static int vp702x_fe_read_status(struct dvb_frontend *fe,
-				 enum fe_status *status)
+static int vp702x_fe_read_status(struct dvb_frontend* fe, fe_status_t *status)
 {
 	struct vp702x_fe_state *st = fe->demodulator_priv;
 	vp702x_fe_refresh_state(st);
@@ -244,15 +243,13 @@ static int vp702x_fe_send_diseqc_msg (struct dvb_frontend* fe,
 	return 0;
 }
 
-static int vp702x_fe_send_diseqc_burst(struct dvb_frontend *fe,
-				       enum fe_sec_mini_cmd burst)
+static int vp702x_fe_send_diseqc_burst (struct dvb_frontend* fe, fe_sec_mini_cmd_t burst)
 {
 	deb_fe("%s\n",__func__);
 	return 0;
 }
 
-static int vp702x_fe_set_tone(struct dvb_frontend *fe,
-			      enum fe_sec_tone_mode tone)
+static int vp702x_fe_set_tone(struct dvb_frontend* fe, fe_sec_tone_mode_t tone)
 {
 	struct vp702x_fe_state *st = fe->demodulator_priv;
 	struct vp702x_device_state *dst = st->d->priv;
@@ -285,8 +282,8 @@ static int vp702x_fe_set_tone(struct dvb_frontend *fe,
 	return 0;
 }
 
-static int vp702x_fe_set_voltage(struct dvb_frontend *fe,
-				 enum fe_sec_voltage voltage)
+static int vp702x_fe_set_voltage (struct dvb_frontend* fe, fe_sec_voltage_t
+		voltage)
 {
 	struct vp702x_fe_state *st = fe->demodulator_priv;
 	struct vp702x_device_state *dst = st->d->priv;

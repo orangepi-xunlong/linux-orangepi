@@ -25,12 +25,8 @@
 
 #ifndef __ASSEMBLY__
 
-#ifndef CONFIG_PINCTRL
-
 #include <linux/compiler.h>
-#include <asm/blackfin.h>
-#include <asm/portmux.h>
-#include <asm/irq_handler.h>
+#include <linux/gpio.h>
 
 /***********************************************************
 *
@@ -49,6 +45,7 @@
 * MODIFICATION HISTORY :
 **************************************************************/
 
+#if !BFIN_GPIO_PINT
 void set_gpio_dir(unsigned, unsigned short);
 void set_gpio_inen(unsigned, unsigned short);
 void set_gpio_polar(unsigned, unsigned short);
@@ -118,6 +115,7 @@ struct gpio_port_t {
 	unsigned short dummy16;
 	unsigned short inen;
 };
+#endif
 
 #ifdef BFIN_SPECIAL_GPIO_BANKS
 void bfin_special_gpio_free(unsigned gpio);
@@ -129,21 +127,25 @@ void bfin_special_gpio_pm_hibernate_suspend(void);
 #endif
 
 #ifdef CONFIG_PM
-void bfin_gpio_pm_hibernate_restore(void);
-void bfin_gpio_pm_hibernate_suspend(void);
-int bfin_gpio_pm_wakeup_ctrl(unsigned gpio, unsigned ctrl);
-int bfin_gpio_pm_standby_ctrl(unsigned ctrl);
+int bfin_pm_standby_ctrl(unsigned ctrl);
 
 static inline int bfin_pm_standby_setup(void)
 {
-	return bfin_gpio_pm_standby_ctrl(1);
+	return bfin_pm_standby_ctrl(1);
 }
 
 static inline void bfin_pm_standby_restore(void)
 {
-	bfin_gpio_pm_standby_ctrl(0);
+	bfin_pm_standby_ctrl(0);
 }
 
+void bfin_gpio_pm_hibernate_restore(void);
+void bfin_gpio_pm_hibernate_suspend(void);
+void bfin_pint_suspend(void);
+void bfin_pint_resume(void);
+
+# if !BFIN_GPIO_PINT
+int gpio_pm_wakeup_ctrl(unsigned gpio, unsigned ctrl);
 
 struct gpio_port_s {
 	unsigned short data;
@@ -159,6 +161,7 @@ struct gpio_port_s {
 	unsigned short reserved;
 	unsigned short mux;
 };
+# endif
 #endif /*CONFIG_PM*/
 
 /***********************************************************
@@ -175,29 +178,36 @@ struct gpio_port_s {
 *************************************************************
 * MODIFICATION HISTORY :
 **************************************************************/
+
+int bfin_gpio_request(unsigned gpio, const char *label);
+void bfin_gpio_free(unsigned gpio);
 int bfin_gpio_irq_request(unsigned gpio, const char *label);
 void bfin_gpio_irq_free(unsigned gpio);
-void bfin_gpio_irq_prepare(unsigned gpio);
-
-static inline int irq_to_gpio(unsigned irq)
-{
-	return irq - GPIO_IRQ_BASE;
-}
-#endif /* CONFIG_PINCTRL */
+int bfin_gpio_direction_input(unsigned gpio);
+int bfin_gpio_direction_output(unsigned gpio, int value);
+int bfin_gpio_get_value(unsigned gpio);
+void bfin_gpio_set_value(unsigned gpio, int value);
 
 #include <asm/irq.h>
 #include <asm/errno.h>
 
+#ifdef CONFIG_GPIOLIB
 #include <asm-generic/gpio.h>		/* cansleep wrappers */
 
 static inline int gpio_get_value(unsigned int gpio)
 {
-	return __gpio_get_value(gpio);
+	if (gpio < MAX_BLACKFIN_GPIOS)
+		return bfin_gpio_get_value(gpio);
+	else
+		return __gpio_get_value(gpio);
 }
 
 static inline void gpio_set_value(unsigned int gpio, int value)
 {
-	__gpio_set_value(gpio, value);
+	if (gpio < MAX_BLACKFIN_GPIOS)
+		bfin_gpio_set_value(gpio, value);
+	else
+		__gpio_set_value(gpio, value);
 }
 
 static inline int gpio_cansleep(unsigned int gpio)
@@ -209,6 +219,113 @@ static inline int gpio_to_irq(unsigned gpio)
 {
 	return __gpio_to_irq(gpio);
 }
+
+#else /* !CONFIG_GPIOLIB */
+
+static inline int gpio_request(unsigned gpio, const char *label)
+{
+	return bfin_gpio_request(gpio, label);
+}
+
+static inline void gpio_free(unsigned gpio)
+{
+	return bfin_gpio_free(gpio);
+}
+
+static inline int gpio_direction_input(unsigned gpio)
+{
+	return bfin_gpio_direction_input(gpio);
+}
+
+static inline int gpio_direction_output(unsigned gpio, int value)
+{
+	return bfin_gpio_direction_output(gpio, value);
+}
+
+static inline int gpio_set_debounce(unsigned gpio, unsigned debounce)
+{
+	return -EINVAL;
+}
+
+static inline int gpio_request_one(unsigned gpio, unsigned long flags, const char *label)
+{
+	int err;
+
+	err = bfin_gpio_request(gpio, label);
+	if (err)
+		return err;
+
+	if (flags & GPIOF_DIR_IN)
+		err = bfin_gpio_direction_input(gpio);
+	else
+		err = bfin_gpio_direction_output(gpio,
+			(flags & GPIOF_INIT_HIGH) ? 1 : 0);
+
+	if (err)
+		bfin_gpio_free(gpio);
+
+	return err;
+}
+
+static inline int gpio_request_array(const struct gpio *array, size_t num)
+{
+	int i, err;
+
+	for (i = 0; i < num; i++, array++) {
+		err = gpio_request_one(array->gpio, array->flags, array->label);
+		if (err)
+			goto err_free;
+	}
+	return 0;
+
+err_free:
+	while (i--)
+		bfin_gpio_free((--array)->gpio);
+	return err;
+}
+
+static inline void gpio_free_array(const struct gpio *array, size_t num)
+{
+	while (num--)
+		bfin_gpio_free((array++)->gpio);
+}
+
+static inline int __gpio_get_value(unsigned gpio)
+{
+	return bfin_gpio_get_value(gpio);
+}
+
+static inline void __gpio_set_value(unsigned gpio, int value)
+{
+	return bfin_gpio_set_value(gpio, value);
+}
+
+static inline int gpio_get_value(unsigned gpio)
+{
+	return __gpio_get_value(gpio);
+}
+
+static inline void gpio_set_value(unsigned gpio, int value)
+{
+	return __gpio_set_value(gpio, value);
+}
+
+static inline int gpio_to_irq(unsigned gpio)
+{
+	if (likely(gpio < MAX_BLACKFIN_GPIOS))
+		return gpio + GPIO_IRQ_BASE;
+
+	return -EINVAL;
+}
+
+#include <asm-generic/gpio.h>		/* cansleep wrappers */
+#endif	/* !CONFIG_GPIOLIB */
+
+static inline int irq_to_gpio(unsigned irq)
+{
+	return (irq - GPIO_IRQ_BASE);
+}
+
 #endif /* __ASSEMBLY__ */
 
 #endif /* __ARCH_BLACKFIN_GPIO_H__ */

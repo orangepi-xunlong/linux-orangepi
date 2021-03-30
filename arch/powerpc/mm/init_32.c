@@ -26,6 +26,7 @@
 #include <linux/mm.h>
 #include <linux/stddef.h>
 #include <linux/init.h>
+#include <linux/bootmem.h>
 #include <linux/highmem.h>
 #include <linux/initrd.h>
 #include <linux/pagemap.h>
@@ -51,7 +52,7 @@
 #if defined(CONFIG_KERNEL_START_BOOL) || defined(CONFIG_LOWMEM_SIZE_BOOL)
 /* The amount of lowmem must be within 0xF0000000 - KERNELBASE. */
 #if (CONFIG_LOWMEM_SIZE > (0xF0000000 - PAGE_OFFSET))
-#error "You must adjust CONFIG_LOWMEM_SIZE or CONFIG_KERNEL_START"
+#error "You must adjust CONFIG_LOWMEM_SIZE or CONFIG_START_KERNEL"
 #endif
 #endif
 #define MAX_LOW_MEM	CONFIG_LOWMEM_SIZE
@@ -64,7 +65,7 @@ EXPORT_SYMBOL(memstart_addr);
 phys_addr_t kernstart_addr;
 EXPORT_SYMBOL(kernstart_addr);
 
-#ifdef CONFIG_RELOCATABLE
+#ifdef CONFIG_RELOCATABLE_PPC32
 /* Used in __va()/__pa() */
 long long virt_phys_offset;
 EXPORT_SYMBOL(virt_phys_offset);
@@ -79,6 +80,9 @@ EXPORT_SYMBOL(agp_special_page);
 #endif
 
 void MMU_init(void);
+
+/* XXX should be in current.h  -- paulus */
+extern struct task_struct *current_set[NR_CPUS];
 
 /*
  * this tells the system to map all of ram with the segregs
@@ -99,20 +103,20 @@ unsigned long __max_low_memory = MAX_LOW_MEM;
 /*
  * Check for command-line options that affect what MMU_init will do.
  */
-void __init MMU_setup(void)
+void MMU_setup(void)
 {
 	/* Check for nobats option (used in mapin_ram). */
-	if (strstr(boot_command_line, "nobats")) {
+	if (strstr(cmd_line, "nobats")) {
 		__map_without_bats = 1;
 	}
 
-	if (strstr(boot_command_line, "noltlbs")) {
+	if (strstr(cmd_line, "noltlbs")) {
 		__map_without_ltlbs = 1;
 	}
-	if (debug_pagealloc_enabled()) {
-		__map_without_bats = 1;
-		__map_without_ltlbs = 1;
-	}
+#ifdef CONFIG_DEBUG_PAGEALLOC
+	__map_without_bats = 1;
+	__map_without_ltlbs = 1;
+#endif
 }
 
 /*
@@ -137,7 +141,7 @@ void __init MMU_init(void)
 	if (memblock.memory.cnt > 1) {
 #ifndef CONFIG_WII
 		memblock_enforce_memory_limit(memblock.memory.regions[0].size);
-		pr_warn("Only using first contiguous memory region\n");
+		printk(KERN_WARNING "Only using first contiguous memory region");
 #else
 		wii_memory_fixups();
 #endif
@@ -175,6 +179,10 @@ void __init MMU_init(void)
 	/* Initialize early top-down ioremap allocator */
 	ioremap_bot = IOREMAP_TOP;
 
+	/* Map in I/O resources */
+	if (ppc_md.progress)
+		ppc_md.progress("MMU:setio", 0x302);
+
 	if (ppc_md.progress)
 		ppc_md.progress("MMU:exit", 0x211);
 
@@ -186,3 +194,26 @@ void __init MMU_init(void)
 	/* Shortly after that, the entire linear mapping will be available */
 	memblock_set_current_limit(lowmem_end_addr);
 }
+
+/* This is only called until mem_init is done. */
+void __init *early_get_page(void)
+{
+	if (init_bootmem_done)
+		return alloc_bootmem_pages(PAGE_SIZE);
+	else
+		return __va(memblock_alloc(PAGE_SIZE, PAGE_SIZE));
+}
+
+#ifdef CONFIG_8xx /* No 8xx specific .c file to put that in ... */
+void setup_initial_memory_limit(phys_addr_t first_memblock_base,
+				phys_addr_t first_memblock_size)
+{
+	/* We don't currently support the first MEMBLOCK not mapping 0
+	 * physical on those processors
+	 */
+	BUG_ON(first_memblock_base != 0);
+
+	/* 8xx can only access 8MB at the moment */
+	memblock_set_current_limit(min_t(u64, first_memblock_size, 0x00800000));
+}
+#endif /* CONFIG_8xx */

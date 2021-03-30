@@ -11,7 +11,7 @@
  */
 
 #ifndef __DA732X_H_
-#define __DA732X_H_
+#define __DA732X_H
 
 #include <sound/soc.h>
 
@@ -112,6 +112,9 @@
 #define DA732X_ADC_VOL_DB_INC		-1
 #define	DA732X_EQ_OVERALL_VOL_DB_MIN	-1800
 #define	DA732X_EQ_OVERALL_VOL_DB_INC	600
+
+#define DA732X_SOC_ENUM_DOUBLE_R(xreg, xrreg, xmax, xtext) \
+	{.reg = xreg, .reg2 = xrreg, .max = xmax, .texts = xtext}
 
 enum da732x_sysctl {
 	DA732X_SR_8KHZ		= 0x1,

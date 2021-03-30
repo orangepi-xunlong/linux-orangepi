@@ -7,6 +7,7 @@
 */
 
 #include <linux/kernel.h>
+#include <linux/init.h>
 #include <linux/tty.h>
 #include <linux/module.h>
 #include <linux/usb.h>
@@ -42,10 +43,9 @@ struct metrousb_private {
 };
 
 /* Device table list. */
-static const struct usb_device_id id_table[] = {
+static struct usb_device_id id_table[] = {
 	{ USB_DEVICE(FOCUS_VENDOR_ID, FOCUS_PRODUCT_ID_BI) },
 	{ USB_DEVICE(FOCUS_VENDOR_ID, FOCUS_PRODUCT_ID_UNI) },
-	{ USB_DEVICE_INTERFACE_CLASS(0x0c2e, 0x0730, 0xff) },	/* MS7820 */
 	{ }, /* Terminating entry. */
 };
 MODULE_DEVICE_TABLE(usb, id_table);
@@ -54,7 +54,7 @@ MODULE_DEVICE_TABLE(usb, id_table);
 #define UNI_CMD_OPEN	0x80
 #define UNI_CMD_CLOSE	0xFF
 
-static inline int metrousb_is_unidirectional_mode(struct usb_serial_port *port)
+inline int metrousb_is_unidirectional_mode(struct usb_serial_port *port)
 {
 	__u16 product_id = le16_to_cpu(
 		port->serial->dev->descriptor.idProduct);
@@ -224,8 +224,8 @@ static int metrousb_open(struct tty_struct *tty, struct usb_serial_port *port)
 	result = metrousb_send_unidirectional_cmd(UNI_CMD_OPEN, port);
 	if (result) {
 		dev_err(&port->dev,
-			"%s - failed to configure device, error code=%d\n",
-			__func__, result);
+			"%s - failed to configure device for port number=%d, error code=%d\n",
+			__func__, port->number, result);
 		goto exit;
 	}
 

@@ -42,7 +42,7 @@
 #include "atlx.h"
 
 #ifdef ETHTOOL_OPS_COMPAT
-int ethtool_ioctl(struct ifreq *ifr);
+extern int ethtool_ioctl(struct ifreq *ifr);
 #endif
 
 #define PCI_COMMAND_REGISTER	PCI_COMMAND

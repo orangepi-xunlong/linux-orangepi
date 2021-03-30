@@ -16,6 +16,7 @@
 #include <linux/thread_info.h>
 #include <linux/irqflags.h>
 #include <linux/smp.h>
+#include <linux/cpuidle.h>
 #include <linux/atomic.h>
 #include <asm/pgalloc.h>
 #include <asm/smp.h>
@@ -39,7 +40,8 @@ void arch_cpu_idle_dead(void)
 
 void arch_cpu_idle(void)
 {
-	sh_idle();
+	if (cpuidle_idle_call())
+		sh_idle();
 }
 
 void __init select_idle_routine(void)

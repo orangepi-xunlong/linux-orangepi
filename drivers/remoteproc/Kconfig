@@ -14,10 +14,9 @@ config OMAP_REMOTEPROC
 	depends on HAS_DMA
 	depends on ARCH_OMAP4 || SOC_OMAP5
 	depends on OMAP_IOMMU
+	depends on OMAP_MBOX_FWK
 	select REMOTEPROC
-	select MAILBOX
-	select OMAP2PLUS_MBOX
-	select RPMSG_VIRTIO
+	select RPMSG
 	help
 	  Say y here to support OMAP's remote processors (dual M3
 	  and DSP on OMAP4) via the remote processor framework.
@@ -41,25 +40,12 @@ config STE_MODEM_RPROC
 	  This can be either built-in or a loadable module.
 	  If unsure say N.
 
-config WKUP_M3_RPROC
-	tristate "AMx3xx Wakeup M3 remoteproc support"
-	depends on SOC_AM33XX || SOC_AM43XX
-	select REMOTEPROC
-	help
-	  Say y here to support Wakeup M3 remote processor on TI AM33xx
-	  and AM43xx family of SoCs.
-
-	  Required for Suspend-to-RAM on AM33xx and AM43xx SoCs. Also needed
-	  for deep CPUIdle states on AM33xx SoCs. Allows for loading of the
-	  firmware onto these remote processors.
-	  If unsure say N.
-
 config DA8XX_REMOTEPROC
 	tristate "DA8xx/OMAP-L13x remoteproc support"
 	depends on ARCH_DAVINCI_DA8XX
-	select CMA if MMU
+	select CMA
 	select REMOTEPROC
-	select RPMSG_VIRTIO
+	select RPMSG
 	help
 	  Say y here to support DA8xx/OMAP-L13x remote processors via the
 	  remote processor framework.
@@ -76,39 +62,5 @@ config DA8XX_REMOTEPROC
 
 	  It's safe to say n here if you're not interested in multimedia
 	  offloading.
-
-config QCOM_MDT_LOADER
-	tristate
-
-config QCOM_Q6V5_PIL
-	tristate "Qualcomm Hexagon V5 Peripherial Image Loader"
-	depends on OF && ARCH_QCOM
-	depends on QCOM_SMEM
-	select MFD_SYSCON
-	select QCOM_MDT_LOADER
-	select REMOTEPROC
-	help
-	  Say y here to support the Qualcomm Peripherial Image Loader for the
-	  Hexagon V5 based remote processors.
-
-config QCOM_WCNSS_PIL
-	tristate "Qualcomm WCNSS Peripheral Image Loader"
-	depends on OF && ARCH_QCOM
-	depends on QCOM_SMEM
-	select QCOM_MDT_LOADER
-	select QCOM_SCM
-	select REMOTEPROC
-	help
-	  Say y here to support the Peripheral Image Loader for the Qualcomm
-	  Wireless Connectivity Subsystem.
-
-config ST_REMOTEPROC
-	tristate "ST remoteproc support"
-	depends on ARCH_STI
-	select REMOTEPROC
-	help
-	  Say y here to support ST's adjunct processors via the remote
-	  processor framework.
-	  This can be either built-in or a loadable module.
 
 endmenu

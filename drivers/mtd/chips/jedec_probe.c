@@ -120,7 +120,7 @@
 #define PM49FL008	0x006A
 
 /* Sharp */
-#define LH28F640BF	0x00B0
+#define LH28F640BF	0x00b0
 
 /* ST - www.st.com */
 #define M29F800AB	0x0058
@@ -1299,14 +1299,13 @@ static const struct amd_flash_info jedec_table[] = {
 		.mfr_id		= CFI_MFR_SHARP,
 		.dev_id		= LH28F640BF,
 		.name		= "LH28F640BF",
-		.devtypes	= CFI_DEVICETYPE_X16,
+		.devtypes	= CFI_DEVICETYPE_X8,
 		.uaddr		= MTD_UADDR_UNNECESSARY,
-		.dev_size	= SIZE_8MiB,
-		.cmd_set	= P_ID_INTEL_EXT,
-		.nr_regions	= 2,
+		.dev_size	= SIZE_4MiB,
+		.cmd_set	= P_ID_INTEL_STD,
+		.nr_regions	= 1,
 		.regions	= {
-			ERASEINFO(0x10000, 127),
-			ERASEINFO(0x02000, 8),
+			ERASEINFO(0x40000,16),
 		}
 	}, {
 		.mfr_id		= CFI_MFR_SST,
@@ -1889,8 +1888,6 @@ static inline u32 jedec_read_mfr(struct map_info *map, uint32_t base,
 	do {
 		uint32_t ofs = cfi_build_cmd_addr(0 + (bank << 8), map, cfi);
 		mask = (1 << (cfi->device_type * 8)) - 1;
-		if (ofs >= map->size)
-			return 0;
 		result = map_read(map, base + ofs);
 		bank++;
 	} while ((result.x[0] & mask) == CFI_MFR_CONTINUATION);

@@ -34,17 +34,6 @@
 #ifndef _PAGE_PSIZE
 #define _PAGE_PSIZE		0
 #endif
-/* _PAGE_RO and _PAGE_RW shall not be defined at the same time */
-#ifndef _PAGE_RO
-#define _PAGE_RO 0
-#else
-#define _PAGE_RW 0
-#endif
-
-#ifndef _PAGE_PTE
-#define _PAGE_PTE 0
-#endif
-
 #ifndef _PMD_PRESENT_MASK
 #define _PMD_PRESENT_MASK	_PMD_PRESENT
 #endif
@@ -53,10 +42,10 @@
 #define PMD_PAGE_SIZE(pmd)	bad_call_to_PMD_PAGE_SIZE()
 #endif
 #ifndef _PAGE_KERNEL_RO
-#define _PAGE_KERNEL_RO		(_PAGE_RO)
+#define _PAGE_KERNEL_RO		0
 #endif
 #ifndef _PAGE_KERNEL_ROX
-#define _PAGE_KERNEL_ROX	(_PAGE_EXEC | _PAGE_RO)
+#define _PAGE_KERNEL_ROX	(_PAGE_EXEC)
 #endif
 #ifndef _PAGE_KERNEL_RW
 #define _PAGE_KERNEL_RW		(_PAGE_DIRTY | _PAGE_RW | _PAGE_HWWRITE)
@@ -76,16 +65,6 @@
  */
 #ifndef __ASSEMBLY__
 extern unsigned long bad_call_to_PMD_PAGE_SIZE(void);
-
-/*
- * Don't just check for any non zero bits in __PAGE_USER, since for book3e
- * and PTE_64BIT, PAGE_KERNEL_X contains _PAGE_BAP_SR which is also in
- * _PAGE_USER.  Need to explicitly match _PAGE_BAP_UR bit in that case too.
- */
-static inline bool pte_user(pte_t pte)
-{
-	return (pte_val(pte) & _PAGE_USER) == _PAGE_USER;
-}
 #endif /* __ASSEMBLY__ */
 
 /* Location of the PFN in the PTE. Most 32-bit platforms use the same
@@ -96,12 +75,14 @@ static inline bool pte_user(pte_t pte)
 #define PTE_RPN_SHIFT	(PAGE_SHIFT)
 #endif
 
-/* The mask covered by the RPN must be a ULL on 32-bit platforms with
+/* The mask convered by the RPN must be a ULL on 32-bit platforms with
  * 64-bit PTEs
  */
 #if defined(CONFIG_PPC32) && defined(CONFIG_PTE_64BIT)
+#define PTE_RPN_MAX	(1ULL << (64 - PTE_RPN_SHIFT))
 #define PTE_RPN_MASK	(~((1ULL<<PTE_RPN_SHIFT)-1))
 #else
+#define PTE_RPN_MAX	(1UL << (32 - PTE_RPN_SHIFT))
 #define PTE_RPN_MASK	(~((1UL<<PTE_RPN_SHIFT)-1))
 #endif
 
@@ -114,7 +95,7 @@ static inline bool pte_user(pte_t pte)
 /* Mask of bits returned by pte_pgprot() */
 #define PAGE_PROT_BITS	(_PAGE_GUARDED | _PAGE_COHERENT | _PAGE_NO_CACHE | \
 			 _PAGE_WRITETHRU | _PAGE_ENDIAN | _PAGE_4K_PFN | \
-			 _PAGE_USER | _PAGE_ACCESSED | _PAGE_RO | \
+			 _PAGE_USER | _PAGE_ACCESSED | \
 			 _PAGE_RW | _PAGE_HWWRITE | _PAGE_DIRTY | _PAGE_EXEC)
 
 /*
@@ -124,8 +105,7 @@ static inline bool pte_user(pte_t pte)
  * the processor might need it for DMA coherency.
  */
 #define _PAGE_BASE_NC	(_PAGE_PRESENT | _PAGE_ACCESSED | _PAGE_PSIZE)
-#if defined(CONFIG_SMP) || defined(CONFIG_PPC_STD_MMU) || \
-	defined(CONFIG_PPC_E500MC)
+#if defined(CONFIG_SMP) || defined(CONFIG_PPC_STD_MMU)
 #define _PAGE_BASE	(_PAGE_BASE_NC | _PAGE_COHERENT)
 #else
 #define _PAGE_BASE	(_PAGE_BASE_NC)
@@ -143,14 +123,11 @@ static inline bool pte_user(pte_t pte)
  */
 #define PAGE_NONE	__pgprot(_PAGE_BASE)
 #define PAGE_SHARED	__pgprot(_PAGE_BASE | _PAGE_USER | _PAGE_RW)
-#define PAGE_SHARED_X	__pgprot(_PAGE_BASE | _PAGE_USER | _PAGE_RW | \
-				 _PAGE_EXEC)
-#define PAGE_COPY	__pgprot(_PAGE_BASE | _PAGE_USER | _PAGE_RO)
-#define PAGE_COPY_X	__pgprot(_PAGE_BASE | _PAGE_USER | _PAGE_RO | \
-				 _PAGE_EXEC)
-#define PAGE_READONLY	__pgprot(_PAGE_BASE | _PAGE_USER | _PAGE_RO)
-#define PAGE_READONLY_X	__pgprot(_PAGE_BASE | _PAGE_USER | _PAGE_RO | \
-				 _PAGE_EXEC)
+#define PAGE_SHARED_X	__pgprot(_PAGE_BASE | _PAGE_USER | _PAGE_RW | _PAGE_EXEC)
+#define PAGE_COPY	__pgprot(_PAGE_BASE | _PAGE_USER)
+#define PAGE_COPY_X	__pgprot(_PAGE_BASE | _PAGE_USER | _PAGE_EXEC)
+#define PAGE_READONLY	__pgprot(_PAGE_BASE | _PAGE_USER)
+#define PAGE_READONLY_X	__pgprot(_PAGE_BASE | _PAGE_USER | _PAGE_EXEC)
 
 #define __P000	PAGE_NONE
 #define __P001	PAGE_READONLY
@@ -194,6 +171,13 @@ static inline bool pte_user(pte_t pte)
 /* Make modules code happy. We don't set RO yet */
 #define PAGE_KERNEL_EXEC	PAGE_KERNEL_X
 
+/*
+ * Don't just check for any non zero bits in __PAGE_USER, since for book3e
+ * and PTE_64BIT, PAGE_KERNEL_X contains _PAGE_BAP_SR which is also in
+ * _PAGE_USER.  Need to explicitly match _PAGE_BAP_UR bit in that case too.
+ */
+#define pte_user(val)		((val & _PAGE_USER) == _PAGE_USER)
+
 /* Advertise special mapping type for AGP */
 #define PAGE_AGP		(PAGE_KERNEL_NC)
 #define HAVE_PAGE_AGP
@@ -201,12 +185,3 @@ static inline bool pte_user(pte_t pte)
 /* Advertise support for _PAGE_SPECIAL */
 #define __HAVE_ARCH_PTE_SPECIAL
 
-#ifndef _PAGE_READ
-/* if not defined, we should not find _PAGE_WRITE too */
-#define _PAGE_READ 0
-#define _PAGE_WRITE _PAGE_RW
-#endif
-
-#ifndef H_PAGE_4K_PFN
-#define H_PAGE_4K_PFN 0
-#endif

@@ -36,16 +36,16 @@
  *
  *	It is assumed that:
  *	- we are not using split page tables
- *
- *	Note that we always need to flush BTAC/BTB if IBE is set
- *	even on Cortex-A8 revisions not affected by 430973.
- *	If IBE is not set, the flush BTAC/BTB won't do anything.
  */
 ENTRY(cpu_v7_switch_mm)
 #ifdef CONFIG_MMU
+	mov	r2, #0
 	mmid	r1, r1				@ get mm->context.id
 	ALT_SMP(orr	r0, r0, #TTB_FLAGS_SMP)
 	ALT_UP(orr	r0, r0, #TTB_FLAGS_UP)
+#ifdef CONFIG_ARM_ERRATA_430973
+	mcr	p15, 0, r2, c7, c5, 6		@ flush BTAC/BTB
+#endif
 #ifdef CONFIG_PID_IN_CONTEXTIDR
 	mrc	p15, 0, r2, c13, c0, 1		@ read current context ID
 	lsr	r2, r2, #8			@ extract the PID
@@ -59,7 +59,7 @@ ENTRY(cpu_v7_switch_mm)
 	mcr	p15, 0, r0, c2, c0, 0		@ set TTB 0
 	isb
 #endif
-	bx	lr
+	mov	pc, lr
 ENDPROC(cpu_v7_switch_mm)
 
 /*
@@ -106,7 +106,7 @@ ENTRY(cpu_v7_set_pte_ext)
 	ALT_SMP(W(nop))
 	ALT_UP (mcr	p15, 0, r0, c7, c10, 1)		@ flush_pte
 #endif
-	bx	lr
+	mov	pc, lr
 ENDPROC(cpu_v7_set_pte_ext)
 
 	/*
@@ -144,14 +144,16 @@ ENDPROC(cpu_v7_set_pte_ext)
 	 * Macro for setting up the TTBRx and TTBCR registers.
 	 * - \ttb0 and \ttb1 updated with the corresponding flags.
 	 */
-	.macro	v7_ttb_setup, zero, ttbr0l, ttbr0h, ttbr1, tmp
+	.macro	v7_ttb_setup, zero, ttbr0, ttbr1, tmp
 	mcr	p15, 0, \zero, c2, c0, 2	@ TTB control register
-	ALT_SMP(orr	\ttbr0l, \ttbr0l, #TTB_FLAGS_SMP)
-	ALT_UP(orr	\ttbr0l, \ttbr0l, #TTB_FLAGS_UP)
+	ALT_SMP(orr	\ttbr0, \ttbr0, #TTB_FLAGS_SMP)
+	ALT_UP(orr	\ttbr0, \ttbr0, #TTB_FLAGS_UP)
 	ALT_SMP(orr	\ttbr1, \ttbr1, #TTB_FLAGS_SMP)
 	ALT_UP(orr	\ttbr1, \ttbr1, #TTB_FLAGS_UP)
 	mcr	p15, 0, \ttbr1, c2, c0, 1	@ load TTB1
 	.endm
+
+	__CPUINIT
 
 	/*   AT
 	 *  TFR   EV X F   I D LR    S
@@ -163,3 +165,5 @@ ENDPROC(cpu_v7_set_pte_ext)
 	.type	v7_crval, #object
 v7_crval:
 	crval	clear=0x2120c302, mmuset=0x10c03c7d, ucset=0x00c01c7c
+
+	.previous

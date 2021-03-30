@@ -111,10 +111,8 @@ static u32 lba_t32;
 
 
 /* Looks nice and keeps the compiler happy */
-#define LBA_DEV(d) ({				\
-	void *__pdata = d;			\
-	BUG_ON(!__pdata);			\
-	(struct lba_device *)__pdata; })
+#define LBA_DEV(d) ((struct lba_device *) (d))
+
 
 /*
 ** Only allow 8 subsidiary busses per LBA
@@ -626,10 +624,6 @@ extend_lmmio_len(unsigned long start, unsigned long end, unsigned long lba_len)
 {
 	struct resource *tmp;
 
-	/* exit if not a C8000 */
-	if (boot_cpu_data.cpu_type < mako)
-		return end;
-
 	pr_debug("LMMIO mismatch: PAT length = 0x%lx, MASK register = 0x%lx\n",
 		end - start, lba_len);
 
@@ -637,6 +631,10 @@ extend_lmmio_len(unsigned long start, unsigned long end, unsigned long lba_len)
 
 	pr_debug("LBA: lmmio_space [0x%lx-0x%lx] - original\n", start, end);
 
+	if (boot_cpu_data.cpu_type < mako) {
+		pr_info("LBA: Not a C8000 system - not extending LMMIO range.\n");
+		return end;
+	}
 
 	end += lba_len;
 	if (end < start) /* fix overflow */
@@ -696,8 +694,9 @@ lba_fixup_bus(struct pci_bus *bus)
 		int i;
 		/* PCI-PCI Bridge */
 		pci_read_bridge_bases(bus);
-		for (i = PCI_BRIDGE_RESOURCES; i < PCI_NUM_RESOURCES; i++)
-			pci_claim_bridge_resource(bus->self, i);
+		for (i = PCI_BRIDGE_RESOURCES; i < PCI_NUM_RESOURCES; i++) {
+			pci_claim_resource(bus->self, i);
+		}
 	} else {
 		/* Host-PCI Bridge */
 		int err;
@@ -792,10 +791,8 @@ lba_fixup_bus(struct pci_bus *bus)
                 /*
 		** P2PB's have no IRQs. ignore them.
 		*/
-		if ((dev->class >> 8) == PCI_CLASS_BRIDGE_PCI) {
-			pcibios_init_bridge(dev);
+		if ((dev->class >> 8) == PCI_CLASS_BRIDGE_PCI)
 			continue;
-		}
 
 		/* Adjust INTERRUPT_LINE for this dev */
 		iosapic_fixup_irq(ldev->iosapic_obj, dev);
@@ -1367,27 +1364,9 @@ lba_hw_init(struct lba_device *d)
 		WRITE_REG32(stat, d->hba.base_addr + LBA_ERROR_CONFIG);
 	}
 
-
-	/*
-	 * Hard Fail vs. Soft Fail on PCI "Master Abort".
-	 *
-	 * "Master Abort" means the MMIO transaction timed out - usually due to
-	 * the device not responding to an MMIO read. We would like HF to be
-	 * enabled to find driver problems, though it means the system will
-	 * crash with a HPMC.
-	 *
-	 * In SoftFail mode "~0L" is returned as a result of a timeout on the
-	 * pci bus. This is like how PCI busses on x86 and most other
-	 * architectures behave.  In order to increase compatibility with
-	 * existing (x86) PCI hardware and existing Linux drivers we enable
-	 * Soft Faul mode on PA-RISC now too.
-	 */
+	/* Set HF mode as the default (vs. -1 mode). */
         stat = READ_REG32(d->hba.base_addr + LBA_STAT_CTL);
-#if defined(ENABLE_HARDFAIL)
 	WRITE_REG32(stat | HF_ENABLE, d->hba.base_addr + LBA_STAT_CTL);
-#else
-	WRITE_REG32(stat & ~HF_ENABLE, d->hba.base_addr + LBA_STAT_CTL);
-#endif
 
 	/*
 	** Writing a zero to STAT_CTL.rf (bit 0) will clear reset signal
@@ -1578,11 +1557,8 @@ lba_driver_probe(struct parisc_device *dev)
 	if (lba_dev->hba.lmmio_space.flags)
 		pci_add_resource_offset(&resources, &lba_dev->hba.lmmio_space,
 					lba_dev->hba.lmmio_space_offset);
-	if (lba_dev->hba.gmmio_space.flags) {
-		/* Not registering GMMIO space - according to docs it's not
-		 * even used on HP-UX. */
-		/* pci_add_resource(&resources, &lba_dev->hba.gmmio_space); */
-	}
+	if (lba_dev->hba.gmmio_space.flags)
+		pci_add_resource(&resources, &lba_dev->hba.gmmio_space);
 
 	pci_add_resource(&resources, &lba_dev->hba.bus_num);
 
@@ -1614,6 +1590,7 @@ lba_driver_probe(struct parisc_device *dev)
 		lba_dump_res(&lba_dev->hba.lmmio_space, 2);
 #endif
 	}
+	pci_enable_bridges(lba_bus);
 
 	/*
 	** Once PCI register ops has walked the bus, access to config
@@ -1674,36 +1651,3 @@ void lba_set_iregs(struct parisc_device *lba, u32 ibase, u32 imask)
 	iounmap(base_addr);
 }
 
-
-/*
- * The design of the Diva management card in rp34x0 machines (rp3410, rp3440)
- * seems rushed, so that many built-in components simply don't work.
- * The following quirks disable the serial AUX port and the built-in ATI RV100
- * Radeon 7000 graphics card which both don't have any external connectors and
- * thus are useless, and even worse, e.g. the AUX port occupies ttyS0 and as
- * such makes those machines the only PARISC machines on which we can't use
- * ttyS0 as boot console.
- */
-static void quirk_diva_ati_card(struct pci_dev *dev)
-{
-	if (dev->subsystem_vendor != PCI_VENDOR_ID_HP ||
-	    dev->subsystem_device != 0x1292)
-		return;
-
-	dev_info(&dev->dev, "Hiding Diva built-in ATI card");
-	dev->device = 0;
-}
-DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, PCI_DEVICE_ID_ATI_RADEON_QY,
-	quirk_diva_ati_card);
-
-static void quirk_diva_aux_disable(struct pci_dev *dev)
-{
-	if (dev->subsystem_vendor != PCI_VENDOR_ID_HP ||
-	    dev->subsystem_device != 0x1291)
-		return;
-
-	dev_info(&dev->dev, "Hiding Diva built-in AUX serial device");
-	dev->device = 0;
-}
-DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_DIVA_AUX,
-	quirk_diva_aux_disable);

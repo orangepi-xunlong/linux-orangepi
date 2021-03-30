@@ -17,7 +17,7 @@
 
 #include <media/v4l2-device.h>
 #include <media/v4l2-ctrls.h>
-#include <media/i2c/ir-kbd-i2c.h>
+#include <media/ir-kbd-i2c.h>
 
 #define HDPVR_MAX 8
 #define HDPVR_I2C_MAX_SIZE 128
@@ -66,7 +66,7 @@ struct hdpvr_options {
 /* Structure to hold all of our device specific stuff */
 struct hdpvr_device {
 	/* the v4l device for this device */
-	struct video_device	video_dev;
+	struct video_device	*video_dev;
 	/* the control handler for this device */
 	struct v4l2_ctrl_handler hdl;
 	/* the usb device for this device */
@@ -106,6 +106,8 @@ struct hdpvr_device {
 	wait_queue_head_t	wait_buffer;
 	/* waitqueue for data */
 	wait_queue_head_t	wait_data;
+	/**/
+	struct workqueue_struct	*workqueue;
 	/**/
 	struct work_struct	worker;
 	/* current stream owner */
@@ -152,7 +154,6 @@ struct hdpvr_video_info {
 	u16	width;
 	u16	height;
 	u8	fps;
-	bool	valid;
 };
 
 enum {
@@ -302,7 +303,7 @@ int hdpvr_set_audio(struct hdpvr_device *dev, u8 input,
 int hdpvr_config_call(struct hdpvr_device *dev, uint value,
 		      unsigned char valbuf);
 
-int get_video_info(struct hdpvr_device *dev, struct hdpvr_video_info *vid_info);
+struct hdpvr_video_info *get_video_info(struct hdpvr_device *dev);
 
 /* :0 s b8 81 1800 0003 0003 3 < */
 /* :0 0 3 = 0301ff */

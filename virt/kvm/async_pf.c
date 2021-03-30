@@ -57,7 +57,8 @@ int kvm_async_pf_init(void)
 
 void kvm_async_pf_deinit(void)
 {
-	kmem_cache_destroy(async_pf_cache);
+	if (async_pf_cache)
+		kmem_cache_destroy(async_pf_cache);
 	async_pf_cache = NULL;
 }
 
@@ -79,19 +80,13 @@ static void async_pf_execute(struct work_struct *work)
 
 	might_sleep();
 
-	/*
-	 * This work is run asynchromously to the task which owns
-	 * mm and might be done in another context, so we must
-	 * use FOLL_REMOTE.
-	 */
-	__get_user_pages_unlocked(NULL, mm, addr, 1, NULL,
-			FOLL_WRITE | FOLL_REMOTE);
-
+	down_read(&mm->mmap_sem);
+	get_user_pages(NULL, mm, addr, 1, 1, 0, NULL, NULL);
+	up_read(&mm->mmap_sem);
 	kvm_async_page_present_sync(vcpu, apf);
 
 	spin_lock(&vcpu->async_pf.lock);
 	list_add_tail(&apf->link, &vcpu->async_pf.done);
-	apf->vcpu = NULL;
 	spin_unlock(&vcpu->async_pf.lock);
 
 	/*
@@ -101,12 +96,8 @@ static void async_pf_execute(struct work_struct *work)
 
 	trace_kvm_async_pf_completed(addr, gva);
 
-	/*
-	 * This memory barrier pairs with prepare_to_wait's set_current_state()
-	 */
-	smp_mb();
-	if (swait_active(&vcpu->wq))
-		swake_up(&vcpu->wq);
+	if (waitqueue_active(&vcpu->wq))
+		wake_up_interruptible(&vcpu->wq);
 
 	mmput(mm);
 	kvm_put_kvm(vcpu->kvm);
@@ -114,23 +105,13 @@ static void async_pf_execute(struct work_struct *work)
 
 void kvm_clear_async_pf_completion_queue(struct kvm_vcpu *vcpu)
 {
-	spin_lock(&vcpu->async_pf.lock);
-
 	/* cancel outstanding work queue item */
 	while (!list_empty(&vcpu->async_pf.queue)) {
 		struct kvm_async_pf *work =
-			list_first_entry(&vcpu->async_pf.queue,
-					 typeof(*work), queue);
+			list_entry(vcpu->async_pf.queue.next,
+				   typeof(*work), queue);
 		list_del(&work->queue);
 
-		/*
-		 * We know it's present in vcpu->async_pf.done, do
-		 * nothing here.
-		 */
-		if (!work->vcpu)
-			continue;
-
-		spin_unlock(&vcpu->async_pf.lock);
 #ifdef CONFIG_KVM_ASYNC_PF_SYNC
 		flush_work(&work->work);
 #else
@@ -140,13 +121,13 @@ void kvm_clear_async_pf_completion_queue(struct kvm_vcpu *vcpu)
 			kmem_cache_free(async_pf_cache, work);
 		}
 #endif
-		spin_lock(&vcpu->async_pf.lock);
 	}
 
+	spin_lock(&vcpu->async_pf.lock);
 	while (!list_empty(&vcpu->async_pf.done)) {
 		struct kvm_async_pf *work =
-			list_first_entry(&vcpu->async_pf.done,
-					 typeof(*work), link);
+			list_entry(vcpu->async_pf.done.next,
+				   typeof(*work), link);
 		list_del(&work->link);
 		kmem_cache_free(async_pf_cache, work);
 	}
@@ -190,7 +171,7 @@ int kvm_setup_async_pf(struct kvm_vcpu *vcpu, gva_t gva, unsigned long hva,
 	 * do alloc nowait since if we are going to sleep anyway we
 	 * may as well sleep faulting in page
 	 */
-	work = kmem_cache_zalloc(async_pf_cache, GFP_NOWAIT | __GFP_NOWARN);
+	work = kmem_cache_zalloc(async_pf_cache, GFP_NOWAIT);
 	if (!work)
 		return 0;
 

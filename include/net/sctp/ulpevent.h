@@ -25,18 +25,25 @@
  * See the GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with GNU CC; see the file COPYING.  If not, see
- * <http://www.gnu.org/licenses/>.
+ * along with GNU CC; see the file COPYING.  If not, write to
+ * the Free Software Foundation, 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  * Please send any bug reports or fixes you make to the
  * email address(es):
- *    lksctp developers <linux-sctp@vger.kernel.org>
+ *    lksctp developers <lksctp-developers@lists.sourceforge.net>
+ *
+ * Or submit a bug report through the following website:
+ *    http://www.sf.net/projects/lksctp
  *
  * Written or modified by:
  *   Jon Grimm             <jgrimm@us.ibm.com>
  *   La Monte H.P. Yarroll <piggy@acm.org>
  *   Karl Knutson          <karl@athena.chicago.il.us>
  *   Sridhar Samudrala     <sri@us.ibm.com>
+ *
+ * Any bugs reported given to us we will try to fix... any fixes shared will
+ * be incorporated into the next SCTP release.
  */
 
 #ifndef __sctp_ulpevent_h__
@@ -48,15 +55,15 @@
  */
 struct sctp_ulpevent {
 	struct sctp_association *asoc;
-	struct sctp_chunk *chunk;
-	unsigned int rmem_len;
-	__u32 ppid;
-	__u32 tsn;
-	__u32 cumtsn;
 	__u16 stream;
 	__u16 ssn;
 	__u16 flags;
-	__u16 msg_flags;
+	__u32 ppid;
+	__u32 tsn;
+	__u32 cumtsn;
+	int msg_flags;
+	int iif;
+	unsigned int rmem_len;
 };
 
 /* Retrieve the skb this event sits inside of. */
@@ -129,24 +136,15 @@ struct sctp_ulpevent *sctp_ulpevent_make_sender_dry_event(
 	const struct sctp_association *asoc, gfp_t gfp);
 
 void sctp_ulpevent_read_sndrcvinfo(const struct sctp_ulpevent *event,
-				   struct msghdr *);
-void sctp_ulpevent_read_rcvinfo(const struct sctp_ulpevent *event,
-				struct msghdr *);
-void sctp_ulpevent_read_nxtinfo(const struct sctp_ulpevent *event,
-				struct msghdr *, struct sock *sk);
-
+	struct msghdr *);
 __u16 sctp_ulpevent_get_notification_type(const struct sctp_ulpevent *event);
 
 /* Is this event type enabled? */
 static inline int sctp_ulpevent_type_enabled(__u16 sn_type,
 					     struct sctp_event_subscribe *mask)
 {
-	int offset = sn_type - SCTP_SN_TYPE_BASE;
 	char *amask = (char *) mask;
-
-	if (offset >= sizeof(struct sctp_event_subscribe))
-		return 0;
-	return amask[offset];
+	return amask[sn_type - SCTP_SN_TYPE_BASE];
 }
 
 /* Given an event subscription, is this event enabled? */
@@ -164,3 +162,10 @@ static inline int sctp_ulpevent_is_enabled(const struct sctp_ulpevent *event,
 }
 
 #endif /* __sctp_ulpevent_h__ */
+
+
+
+
+
+
+

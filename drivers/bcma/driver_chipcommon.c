@@ -34,31 +34,12 @@ u32 bcma_chipco_get_alp_clock(struct bcma_drv_cc *cc)
 }
 EXPORT_SYMBOL_GPL(bcma_chipco_get_alp_clock);
 
-static bool bcma_core_cc_has_pmu_watchdog(struct bcma_drv_cc *cc)
-{
-	struct bcma_bus *bus = cc->core->bus;
-
-	if (cc->capabilities & BCMA_CC_CAP_PMU) {
-		if (bus->chipinfo.id == BCMA_CHIP_ID_BCM53573) {
-			WARN(bus->chipinfo.rev <= 1, "No watchdog available\n");
-			/* 53573B0 and 53573B1 have bugged PMU watchdog. It can
-			 * be enabled but timer can't be bumped. Use CC one
-			 * instead.
-			 */
-			return false;
-		}
-		return true;
-	} else {
-		return false;
-	}
-}
-
 static u32 bcma_chipco_watchdog_get_max_timer(struct bcma_drv_cc *cc)
 {
 	struct bcma_bus *bus = cc->core->bus;
 	u32 nb;
 
-	if (bcma_core_cc_has_pmu_watchdog(cc)) {
+	if (cc->capabilities & BCMA_CC_CAP_PMU) {
 		if (bus->chipinfo.id == BCMA_CHIP_ID_BCM4706)
 			nb = 32;
 		else if (cc->core->id.rev < 26)
@@ -98,9 +79,7 @@ static int bcma_chipco_watchdog_ticks_per_ms(struct bcma_drv_cc *cc)
 
 	if (cc->capabilities & BCMA_CC_CAP_PMU) {
 		if (bus->chipinfo.id == BCMA_CHIP_ID_BCM4706)
-			/* 4706 CC and PMU watchdogs are clocked at 1/4 of ALP
-			 * clock
-			 */
+			/* 4706 CC and PMU watchdogs are clocked at 1/4 of ALP clock */
 			return bcma_chipco_get_alp_clock(cc) / 4000;
 		else
 			/* based on 32KHz ILP clock */
@@ -112,24 +91,16 @@ static int bcma_chipco_watchdog_ticks_per_ms(struct bcma_drv_cc *cc)
 
 int bcma_chipco_watchdog_register(struct bcma_drv_cc *cc)
 {
-	struct bcma_bus *bus = cc->core->bus;
 	struct bcm47xx_wdt wdt = {};
 	struct platform_device *pdev;
-
-	if (bus->chipinfo.id == BCMA_CHIP_ID_BCM53573 &&
-	    bus->chipinfo.rev <= 1) {
-		pr_debug("No watchdog on 53573A0 / 53573A1\n");
-		return 0;
-	}
 
 	wdt.driver_data = cc;
 	wdt.timer_set = bcma_chipco_watchdog_timer_set_wdt;
 	wdt.timer_set_ms = bcma_chipco_watchdog_timer_set_ms_wdt;
-	wdt.max_timer_ms =
-		bcma_chipco_watchdog_get_max_timer(cc) / cc->ticks_per_ms;
+	wdt.max_timer_ms = bcma_chipco_watchdog_get_max_timer(cc) / cc->ticks_per_ms;
 
 	pdev = platform_device_register_data(NULL, "bcm47xx-wdt",
-					     bus->num, &wdt,
+					     cc->core->bus->num, &wdt,
 					     sizeof(wdt));
 	if (IS_ERR(pdev))
 		return PTR_ERR(pdev);
@@ -139,37 +110,8 @@ int bcma_chipco_watchdog_register(struct bcma_drv_cc *cc)
 	return 0;
 }
 
-static void bcma_core_chipcommon_flash_detect(struct bcma_drv_cc *cc)
-{
-	struct bcma_bus *bus = cc->core->bus;
-
-	switch (cc->capabilities & BCMA_CC_CAP_FLASHT) {
-	case BCMA_CC_FLASHT_STSER:
-	case BCMA_CC_FLASHT_ATSER:
-		bcma_debug(bus, "Found serial flash\n");
-		bcma_sflash_init(cc);
-		break;
-	case BCMA_CC_FLASHT_PARA:
-		bcma_debug(bus, "Found parallel flash\n");
-		bcma_pflash_init(cc);
-		break;
-	default:
-		bcma_err(bus, "Flash type not supported\n");
-	}
-
-	if (cc->core->id.rev == 38 ||
-	    bus->chipinfo.id == BCMA_CHIP_ID_BCM4706) {
-		if (cc->capabilities & BCMA_CC_CAP_NFLASH) {
-			bcma_debug(bus, "Found NAND flash\n");
-			bcma_nflash_init(cc);
-		}
-	}
-}
-
 void bcma_core_chipcommon_early_init(struct bcma_drv_cc *cc)
 {
-	struct bcma_bus *bus = cc->core->bus;
-
 	if (cc->early_setup_done)
 		return;
 
@@ -183,9 +125,6 @@ void bcma_core_chipcommon_early_init(struct bcma_drv_cc *cc)
 
 	if (cc->capabilities & BCMA_CC_CAP_PMU)
 		bcma_pmu_early_init(cc);
-
-	if (bus->hosttype == BCMA_HOSTTYPE_SOC)
-		bcma_core_chipcommon_flash_detect(cc);
 
 	cc->early_setup_done = true;
 }
@@ -201,15 +140,8 @@ void bcma_core_chipcommon_init(struct bcma_drv_cc *cc)
 	bcma_core_chipcommon_early_init(cc);
 
 	if (cc->core->id.rev >= 20) {
-		u32 pullup = 0, pulldown = 0;
-
-		if (cc->core->bus->chipinfo.id == BCMA_CHIP_ID_BCM43142) {
-			pullup = 0x402e0;
-			pulldown = 0x20500;
-		}
-
-		bcma_cc_write32(cc, BCMA_CC_GPIOPULLUP, pullup);
-		bcma_cc_write32(cc, BCMA_CC_GPIOPULLDOWN, pulldown);
+		bcma_cc_write32(cc, BCMA_CC_GPIOPULLUP, 0);
+		bcma_cc_write32(cc, BCMA_CC_GPIOPULLDOWN, 0);
 	}
 
 	if (cc->capabilities & BCMA_CC_CAP_PMU)
@@ -236,23 +168,18 @@ void bcma_core_chipcommon_init(struct bcma_drv_cc *cc)
 u32 bcma_chipco_watchdog_timer_set(struct bcma_drv_cc *cc, u32 ticks)
 {
 	u32 maxt;
+	enum bcma_clkmode clkmode;
 
 	maxt = bcma_chipco_watchdog_get_max_timer(cc);
-	if (bcma_core_cc_has_pmu_watchdog(cc)) {
+	if (cc->capabilities & BCMA_CC_CAP_PMU) {
 		if (ticks == 1)
 			ticks = 2;
 		else if (ticks > maxt)
 			ticks = maxt;
-		bcma_pmu_write32(cc, BCMA_CC_PMU_WATCHDOG, ticks);
+		bcma_cc_write32(cc, BCMA_CC_PMU_WATCHDOG, ticks);
 	} else {
-		struct bcma_bus *bus = cc->core->bus;
-
-		if (bus->chipinfo.id != BCMA_CHIP_ID_BCM4707 &&
-		    bus->chipinfo.id != BCMA_CHIP_ID_BCM47094 &&
-		    bus->chipinfo.id != BCMA_CHIP_ID_BCM53018)
-			bcma_core_set_clockmode(cc->core,
-						ticks ? BCMA_CLKMODE_FAST : BCMA_CLKMODE_DYNAMIC);
-
+		clkmode = ticks ? BCMA_CLKMODE_FAST : BCMA_CLKMODE_DYNAMIC;
+		bcma_core_set_clockmode(cc->core, clkmode);
 		if (ticks > maxt)
 			ticks = maxt;
 		/* instant NMI */
@@ -401,12 +328,11 @@ void bcma_chipco_serial_init(struct bcma_drv_cc *cc)
 				       | BCMA_CC_CORECTL_UARTCLKEN);
 		}
 	} else {
-		bcma_err(cc->core->bus, "serial not supported on this device ccrev: 0x%x\n",
-			 ccrev);
+		bcma_err(cc->core->bus, "serial not supported on this device ccrev: 0x%x\n", ccrev);
 		return;
 	}
 
-	irq = bcma_core_irq(cc->core, 0);
+	irq = bcma_core_irq(cc->core);
 
 	/* Determine the registers of the UARTs */
 	cc->nr_serial_ports = (cc->capabilities & BCMA_CC_CAP_NRUART);

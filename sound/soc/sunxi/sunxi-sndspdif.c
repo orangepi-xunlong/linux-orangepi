@@ -22,7 +22,8 @@
 #include <sound/soc-dapm.h>
 #include <linux/io.h>
 #include <linux/of.h>
-#include "sunxi-spdif.h"
+#include "sunxi_spdif.h"
+#include "codec-utils.h"
 
 static int sunxi_sndspdif_hw_params(struct snd_pcm_substream *substream,
 					struct snd_pcm_hw_params *params)
@@ -32,70 +33,57 @@ static int sunxi_sndspdif_hw_params(struct snd_pcm_substream *substream,
 	int ret, clk_div;
 	unsigned int freq;
 
-	switch (params_rate(params)) {
+	switch(params_rate(params)) {
 	case	24000:
 	case	32000:
 	case	48000:
 	case	96000:
 	case	192000:
-#ifdef CONFIG_AHUB_FREQ_REQ
-		freq = 98304000;
-#else
 		freq = 24576000;
-#endif
 		break;
 	case	22050:
 	case	44100:
 	case	176400:
-#ifdef CONFIG_AHUB_FREQ_REQ
-		freq = 90316800;
-#else
 		freq = 22579200;
-#endif
 		break;
 	default:
 		pr_debug("[sunxi spdif]Invalid rate\n");
 		return -EINVAL;
 	}
 
-	ret = snd_soc_dai_set_sysclk(cpu_dai, 0, freq, 0);
+	ret = snd_soc_dai_set_sysclk(cpu_dai, 0 , freq, 0);
 	if (ret < 0)
 		return ret;
 
 	clk_div = freq/params_rate(params);
-#ifdef SPDIF_PLL_AUDIO_X4
-/* clk_source -> pll_audiox4: 90/98M, moduleclk: 20/24M */
-	clk_div = clk_div>>9;
-#else
 	clk_div = clk_div>>7;
-#endif
 
 	ret = snd_soc_dai_set_clkdiv(cpu_dai, 0, clk_div);
-	if (ret < 0)
+	if(ret < 0)
 		return ret;
 
 	return 0;
 }
 
 static struct snd_soc_ops sunxi_sndspdif_ops = {
-	.hw_params	= sunxi_sndspdif_hw_params,
+	.hw_params 	= sunxi_sndspdif_hw_params,
 };
 
 static struct snd_soc_dai_link sunxi_sndspdif_dai_link = {
-	.name		= "SPDIF",
-	.stream_name	= "SUNXI-SPDIF",
-	.cpu_dai_name	= "sunxi-spdif",
-	.platform_name	= "sunxi-spdif",
-	.codec_dai_name	= "spdif-hifi",
+	.name 			= "SPDIF",
+	.stream_name 	= "SUNXI-SPDIF",
+	.cpu_dai_name 	= "sunxi-spdif",
+	.platform_name 	= "sunxi-spdif",
+	.codec_dai_name = "spdif-hifi",
 	.codec_name	= "spdif-utils",
-	.ops		= &sunxi_sndspdif_ops,
+	.ops 		= &sunxi_sndspdif_ops,
 };
 
 static struct snd_soc_card snd_soc_sunxi_sndspdif = {
-	.name		= "sndspdif",
-	.owner		= THIS_MODULE,
-	.dai_link	= &sunxi_sndspdif_dai_link,
-	.num_links	= 1,
+	.name 		= "sndspdif",
+	.owner 		= THIS_MODULE,
+	.dai_link 	= &sunxi_sndspdif_dai_link,
+	.num_links 	= 1,
 };
 
 static int sunxi_sndspdif_dev_probe(struct platform_device *pdev)
@@ -111,29 +99,28 @@ static int sunxi_sndspdif_dev_probe(struct platform_device *pdev)
 				"sunxi,spdif-controller", 0);
 	if (!sunxi_sndspdif_dai_link.cpu_of_node) {
 		dev_err(&pdev->dev,
-			"Property 'sunxi,spdif-controller' missing\n");
+			"Property 'sunxi,spdif-controller' missing or invalid\n");
 			ret = -EINVAL;
 	}
 	sunxi_sndspdif_dai_link.platform_name = NULL;
-	sunxi_sndspdif_dai_link.platform_of_node =
-				sunxi_sndspdif_dai_link.cpu_of_node;
+	sunxi_sndspdif_dai_link.platform_of_node = sunxi_sndspdif_dai_link.cpu_of_node;
 
 	sunxi_snd_spdif_utils_device = platform_device_alloc("spdif-utils", -1);
-	if (sunxi_snd_spdif_utils_device == NULL) {
+	if(sunxi_snd_spdif_utils_device == NULL) {
 		dev_err(&pdev->dev, "spdif utils alloc failed\n");
 		return -ENOMEM;
 	}
 
 	ret = platform_device_add(sunxi_snd_spdif_utils_device);
-	if (ret) {
+	if(ret) {
 		dev_err(&pdev->dev, "spdif utils add failed\n");
 		ret = -EBUSY;
 		goto err_utils_put;
 	}
-
+	
 	ret = snd_soc_register_card(card);
 	if (ret) {
-		dev_err(&pdev->dev, "snd_soc_register_card failed: %d\n", ret);
+		dev_err(&pdev->dev, "snd_soc_register_card() failed: %d\n", ret);
 		ret = -EBUSY;
 		goto err_utils_del;
 	}
@@ -149,7 +136,6 @@ err_utils_put:
 static int sunxi_sndspdif_dev_remove(struct platform_device *pdev)
 {
 	struct snd_soc_card *card = platform_get_drvdata(pdev);
-
 	snd_soc_unregister_card(card);
 	return 0;
 }

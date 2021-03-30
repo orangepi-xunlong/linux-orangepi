@@ -97,9 +97,7 @@ static int stv6110x_write_regs(struct stv6110x_state *stv6110x, int start, u8 da
 
 static int stv6110x_write_reg(struct stv6110x_state *stv6110x, u8 reg, u8 data)
 {
-	u8 tmp = data; /* see gcc.gnu.org/bugzilla/show_bug.cgi?id=81715 */
-
-	return stv6110x_write_regs(stv6110x, reg, &tmp, 1);
+	return stv6110x_write_regs(stv6110x, reg, &data, 1);
 }
 
 static int stv6110x_init(struct dvb_frontend *fe)
@@ -347,7 +345,7 @@ static int stv6110x_release(struct dvb_frontend *fe)
 	return 0;
 }
 
-static const struct dvb_tuner_ops stv6110x_ops = {
+static struct dvb_tuner_ops stv6110x_ops = {
 	.info = {
 		.name		= "STV6110(A) Silicon Tuner",
 		.frequency_min	=  950000,
@@ -357,7 +355,7 @@ static const struct dvb_tuner_ops stv6110x_ops = {
 	.release		= stv6110x_release
 };
 
-static const struct stv6110x_devctl stv6110x_ctl = {
+static struct stv6110x_devctl stv6110x_ctl = {
 	.tuner_init		= stv6110x_init,
 	.tuner_sleep		= stv6110x_sleep,
 	.tuner_set_mode		= stv6110x_set_mode,
@@ -371,7 +369,7 @@ static const struct stv6110x_devctl stv6110x_ctl = {
 	.tuner_get_status	= stv6110x_get_status,
 };
 
-const struct stv6110x_devctl *stv6110x_attach(struct dvb_frontend *fe,
+struct stv6110x_devctl *stv6110x_attach(struct dvb_frontend *fe,
 					const struct stv6110x_config *config,
 					struct i2c_adapter *i2c)
 {

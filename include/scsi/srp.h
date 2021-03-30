@@ -42,7 +42,6 @@
  */
 
 #include <linux/types.h>
-#include <scsi/scsi.h>
 
 enum {
 	SRP_LOGIN_REQ	= 0x00,
@@ -180,7 +179,7 @@ struct srp_tsk_mgmt {
 	u8	reserved1[6];
 	u64	tag;
 	u8	reserved2[4];
-	struct scsi_lun	lun;
+	__be64	lun __attribute__((packed));
 	u8	reserved3[2];
 	u8	tsk_mgmt_func;
 	u8	reserved4;
@@ -201,7 +200,7 @@ struct srp_cmd {
 	u8	data_in_desc_cnt;
 	u64	tag;
 	u8	reserved2[4];
-	struct scsi_lun	lun;
+	__be64	lun __attribute__((packed));
 	u8	reserved3;
 	u8	task_attr;
 	u8	reserved4;
@@ -266,7 +265,7 @@ struct srp_aer_req {
 	__be32	req_lim_delta;
 	u64	tag;
 	u32	reserved2;
-	struct scsi_lun	lun;
+	__be64	lun;
 	__be32	sense_data_len;
 	u32	reserved3;
 	u8	sense_data[0];

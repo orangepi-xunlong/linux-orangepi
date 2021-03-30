@@ -11,6 +11,17 @@
 
 #include <linux/linkage.h>
 #include <asm/alternative-asm.h>
+#include <asm/dwarf2.h>
+
+.macro SAVE reg
+	pushl_cfi %\reg
+	CFI_REL_OFFSET \reg, 0
+.endm
+
+.macro RESTORE reg
+	popl_cfi %\reg
+	CFI_RESTORE \reg
+.endm
 
 .macro read64 reg
 	movl %ebx, %eax
@@ -21,11 +32,16 @@
 .endm
 
 ENTRY(atomic64_read_cx8)
+	CFI_STARTPROC
+
 	read64 %ecx
 	ret
+	CFI_ENDPROC
 ENDPROC(atomic64_read_cx8)
 
 ENTRY(atomic64_set_cx8)
+	CFI_STARTPROC
+
 1:
 /* we don't need LOCK_PREFIX since aligned 64-bit writes
  * are atomic on 586 and newer */
@@ -33,23 +49,28 @@ ENTRY(atomic64_set_cx8)
 	jne 1b
 
 	ret
+	CFI_ENDPROC
 ENDPROC(atomic64_set_cx8)
 
 ENTRY(atomic64_xchg_cx8)
+	CFI_STARTPROC
+
 1:
 	LOCK_PREFIX
 	cmpxchg8b (%esi)
 	jne 1b
 
 	ret
+	CFI_ENDPROC
 ENDPROC(atomic64_xchg_cx8)
 
 .macro addsub_return func ins insc
 ENTRY(atomic64_\func\()_return_cx8)
-	pushl %ebp
-	pushl %ebx
-	pushl %esi
-	pushl %edi
+	CFI_STARTPROC
+	SAVE ebp
+	SAVE ebx
+	SAVE esi
+	SAVE edi
 
 	movl %eax, %esi
 	movl %edx, %edi
@@ -68,11 +89,12 @@ ENTRY(atomic64_\func\()_return_cx8)
 10:
 	movl %ebx, %eax
 	movl %ecx, %edx
-	popl %edi
-	popl %esi
-	popl %ebx
-	popl %ebp
+	RESTORE edi
+	RESTORE esi
+	RESTORE ebx
+	RESTORE ebp
 	ret
+	CFI_ENDPROC
 ENDPROC(atomic64_\func\()_return_cx8)
 .endm
 
@@ -81,7 +103,8 @@ addsub_return sub sub sbb
 
 .macro incdec_return func ins insc
 ENTRY(atomic64_\func\()_return_cx8)
-	pushl %ebx
+	CFI_STARTPROC
+	SAVE ebx
 
 	read64 %esi
 1:
@@ -96,8 +119,9 @@ ENTRY(atomic64_\func\()_return_cx8)
 10:
 	movl %ebx, %eax
 	movl %ecx, %edx
-	popl %ebx
+	RESTORE ebx
 	ret
+	CFI_ENDPROC
 ENDPROC(atomic64_\func\()_return_cx8)
 .endm
 
@@ -105,7 +129,8 @@ incdec_return inc add adc
 incdec_return dec sub sbb
 
 ENTRY(atomic64_dec_if_positive_cx8)
-	pushl %ebx
+	CFI_STARTPROC
+	SAVE ebx
 
 	read64 %esi
 1:
@@ -121,16 +146,18 @@ ENTRY(atomic64_dec_if_positive_cx8)
 2:
 	movl %ebx, %eax
 	movl %ecx, %edx
-	popl %ebx
+	RESTORE ebx
 	ret
+	CFI_ENDPROC
 ENDPROC(atomic64_dec_if_positive_cx8)
 
 ENTRY(atomic64_add_unless_cx8)
-	pushl %ebp
-	pushl %ebx
+	CFI_STARTPROC
+	SAVE ebp
+	SAVE ebx
 /* these just push these two parameters on the stack */
-	pushl %edi
-	pushl %ecx
+	SAVE edi
+	SAVE ecx
 
 	movl %eax, %ebp
 	movl %edx, %edi
@@ -151,18 +178,21 @@ ENTRY(atomic64_add_unless_cx8)
 	movl $1, %eax
 3:
 	addl $8, %esp
-	popl %ebx
-	popl %ebp
+	CFI_ADJUST_CFA_OFFSET -8
+	RESTORE ebx
+	RESTORE ebp
 	ret
 4:
 	cmpl %edx, 4(%esp)
 	jne 2b
 	xorl %eax, %eax
 	jmp 3b
+	CFI_ENDPROC
 ENDPROC(atomic64_add_unless_cx8)
 
 ENTRY(atomic64_inc_not_zero_cx8)
-	pushl %ebx
+	CFI_STARTPROC
+	SAVE ebx
 
 	read64 %esi
 1:
@@ -179,6 +209,7 @@ ENTRY(atomic64_inc_not_zero_cx8)
 
 	movl $1, %eax
 3:
-	popl %ebx
+	RESTORE ebx
 	ret
+	CFI_ENDPROC
 ENDPROC(atomic64_inc_not_zero_cx8)

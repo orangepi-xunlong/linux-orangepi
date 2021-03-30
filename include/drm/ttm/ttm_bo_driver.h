@@ -33,14 +33,11 @@
 #include <ttm/ttm_bo_api.h>
 #include <ttm/ttm_memory.h>
 #include <ttm/ttm_module.h>
-#include <ttm/ttm_placement.h>
 #include <drm/drm_mm.h>
 #include <drm/drm_global.h>
-#include <drm/drm_vma_manager.h>
 #include <linux/workqueue.h>
 #include <linux/fs.h>
 #include <linux/spinlock.h>
-#include <linux/reservation.h>
 
 struct ttm_backend_func {
 	/**
@@ -182,7 +179,6 @@ struct ttm_mem_type_manager_func {
 	 * @man: Pointer to a memory type manager.
 	 * @bo: Pointer to the buffer object we're allocating space for.
 	 * @placement: Placement details.
-	 * @flags: Additional placement flags.
 	 * @mem: Pointer to a struct ttm_mem_reg to be filled in.
 	 *
 	 * This function should allocate space in the memory type managed
@@ -206,7 +202,7 @@ struct ttm_mem_type_manager_func {
 	 */
 	int  (*get_node)(struct ttm_mem_type_manager *man,
 			 struct ttm_buffer_object *bo,
-			 const struct ttm_place *place,
+			 struct ttm_placement *placement,
 			 struct ttm_mem_reg *mem);
 
 	/**
@@ -256,10 +252,8 @@ struct ttm_mem_type_manager_func {
  * reserved by the TTM vm system.
  * @io_reserve_lru: Optional lru list for unreserving io mem regions.
  * @io_reserve_fastpath: Only use bdev::driver::io_mem_reserve to obtain
- * @move_lock: lock for move fence
  * static information. bdev::driver::io_mem_free is never used.
  * @lru: The lru list for this memory type.
- * @move: The fence of the last pipelined move operation.
  *
  * This structure is used to identify and manage memory types for a device.
  * It's set up by the ttm_bo_driver::init_mem_type method.
@@ -277,7 +271,7 @@ struct ttm_mem_type_manager {
 	bool has_type;
 	bool use_type;
 	uint32_t flags;
-	uint64_t gpu_offset; /* GPU address space is independent of CPU word size */
+	unsigned long gpu_offset;
 	uint64_t size;
 	uint32_t available_caching;
 	uint32_t default_caching;
@@ -286,7 +280,6 @@ struct ttm_mem_type_manager {
 	struct mutex io_reserve_mutex;
 	bool use_io_reserve_lru;
 	bool io_reserve_fastpath;
-	spinlock_t move_lock;
 
 	/*
 	 * Protected by @io_reserve_mutex:
@@ -299,11 +292,6 @@ struct ttm_mem_type_manager {
 	 */
 
 	struct list_head lru;
-
-	/*
-	 * Protected by @move_lock.
-	 */
-	struct fence *move;
 };
 
 /**
@@ -318,6 +306,11 @@ struct ttm_mem_type_manager {
  * @move: Callback for a driver to hook in accelerated functions to
  * move a buffer.
  * If set to NULL, a potentially slow memcpy() move is used.
+ * @sync_obj_signaled: See ttm_fence_api.h
+ * @sync_obj_wait: See ttm_fence_api.h
+ * @sync_obj_flush: See ttm_fence_api.h
+ * @sync_obj_unref: See ttm_fence_api.h
+ * @sync_obj_ref: See ttm_fence_api.h
  */
 
 struct ttm_bo_driver {
@@ -419,6 +412,23 @@ struct ttm_bo_driver {
 	int (*verify_access) (struct ttm_buffer_object *bo,
 			      struct file *filp);
 
+	/**
+	 * In case a driver writer dislikes the TTM fence objects,
+	 * the driver writer can replace those with sync objects of
+	 * his / her own. If it turns out that no driver writer is
+	 * using these. I suggest we remove these hooks and plug in
+	 * fences directly. The bo driver needs the following functionality:
+	 * See the corresponding functions in the fence object API
+	 * documentation.
+	 */
+
+	bool (*sync_obj_signaled) (void *sync_obj);
+	int (*sync_obj_wait) (void *sync_obj,
+			      bool lazy, bool interruptible);
+	int (*sync_obj_flush) (void *sync_obj);
+	void (*sync_obj_unref) (void **sync_obj);
+	void *(*sync_obj_ref) (void *sync_obj);
+
 	/* hook to notify driver about a driver move so it
 	 * can do tiling things */
 	void (*move_notify)(struct ttm_buffer_object *bo,
@@ -440,18 +450,6 @@ struct ttm_bo_driver {
 	 */
 	int (*io_mem_reserve)(struct ttm_bo_device *bdev, struct ttm_mem_reg *mem);
 	void (*io_mem_free)(struct ttm_bo_device *bdev, struct ttm_mem_reg *mem);
-
-	/**
-	 * Optional driver callback for when BO is removed from the LRU.
-	 * Called with LRU lock held immediately before the removal.
-	 */
-	void (*lru_removal)(struct ttm_buffer_object *bo);
-
-	/**
-	 * Return the list_head after which a BO should be inserted in the LRU.
-	 */
-	struct list_head *(*lru_tail)(struct ttm_buffer_object *bo);
-	struct list_head *(*swap_lru_tail)(struct ttm_buffer_object *bo);
 };
 
 /**
@@ -509,14 +507,20 @@ struct ttm_bo_global {
 
 #define TTM_NUM_MEM_TYPES 8
 
+#define TTM_BO_PRIV_FLAG_MOVING  0	/* Buffer object is moving and needs
+					   idling before CPU mapping */
+#define TTM_BO_PRIV_FLAG_MAX 1
 /**
  * struct ttm_bo_device - Buffer object driver device-specific data.
  *
  * @driver: Pointer to a struct ttm_bo_driver struct setup by the driver.
  * @man: An array of mem_type_managers.
- * @vma_manager: Address space manager
+ * @fence_lock: Protects the synchronizing members on *all* bos belonging
+ * to this device.
+ * @addr_space_mm: Range manager for the device address space.
  * lru_lock: Spinlock that protects the buffer+device lru lists and
  * ddestroy lists.
+ * @val_seq: Current validation sequence.
  * @dev_mapping: A pointer to the struct address_space representing the
  * device address space.
  * @wq: Work queue structure for the delayed delete workqueue.
@@ -531,17 +535,20 @@ struct ttm_bo_device {
 	struct list_head device_list;
 	struct ttm_bo_global *glob;
 	struct ttm_bo_driver *driver;
+	rwlock_t vm_lock;
 	struct ttm_mem_type_manager man[TTM_NUM_MEM_TYPES];
-
+	spinlock_t fence_lock;
 	/*
-	 * Protected by internal locks.
+	 * Protected by the vm lock.
 	 */
-	struct drm_vma_offset_manager vma_manager;
+	struct rb_root addr_space_rb;
+	struct drm_mm addr_space_mm;
 
 	/*
 	 * Protected by the global:lru lock.
 	 */
 	struct list_head ddestroy;
+	uint32_t val_seq;
 
 	/*
 	 * Protected by load / firstopen / lastclose /unload sync.
@@ -644,6 +651,18 @@ extern void ttm_tt_unbind(struct ttm_tt *ttm);
 extern int ttm_tt_swapin(struct ttm_tt *ttm);
 
 /**
+ * ttm_tt_cache_flush:
+ *
+ * @pages: An array of pointers to struct page:s to flush.
+ * @num_pages: Number of pages to flush.
+ *
+ * Flush the data of the indicated pages from the cpu caches.
+ * This is used when changing caching attributes of the pages from
+ * cache-coherent.
+ */
+extern void ttm_tt_cache_flush(struct page *pages[], unsigned long num_pages);
+
+/**
  * ttm_tt_set_placement_caching:
  *
  * @ttm A struct ttm_tt the backing pages of which will change caching policy.
@@ -659,15 +678,6 @@ extern int ttm_tt_swapin(struct ttm_tt *ttm);
 extern int ttm_tt_set_placement_caching(struct ttm_tt *ttm, uint32_t placement);
 extern int ttm_tt_swapout(struct ttm_tt *ttm,
 			  struct file *persistent_swap_storage);
-
-/**
- * ttm_tt_unpopulate - free pages from a ttm
- *
- * @ttm: Pointer to the ttm_tt structure
- *
- * Calls the driver method to free all pages from a ttm
- */
-extern void ttm_tt_unpopulate(struct ttm_tt *ttm);
 
 /*
  * ttm_bo.c
@@ -726,7 +736,6 @@ extern int ttm_bo_device_release(struct ttm_bo_device *bdev);
  * @bdev: A pointer to a struct ttm_bo_device to initialize.
  * @glob: A pointer to an initialized struct ttm_bo_global.
  * @driver: A pointer to a struct ttm_bo_driver set up by the caller.
- * @mapping: The address space to use for this bo.
  * @file_page_offset: Offset into the device address space that is available
  * for buffer data. This ensures compatibility with other users of the
  * address space.
@@ -738,7 +747,6 @@ extern int ttm_bo_device_release(struct ttm_bo_device *bdev);
 extern int ttm_bo_device_init(struct ttm_bo_device *bdev,
 			      struct ttm_bo_global *glob,
 			      struct ttm_bo_driver *driver,
-			      struct address_space *mapping,
 			      uint64_t file_page_offset, bool need_dma32);
 
 /**
@@ -763,56 +771,6 @@ extern int ttm_mem_io_lock(struct ttm_mem_type_manager *man,
 			   bool interruptible);
 extern void ttm_mem_io_unlock(struct ttm_mem_type_manager *man);
 
-extern void ttm_bo_del_sub_from_lru(struct ttm_buffer_object *bo);
-extern void ttm_bo_add_to_lru(struct ttm_buffer_object *bo);
-
-struct list_head *ttm_bo_default_lru_tail(struct ttm_buffer_object *bo);
-struct list_head *ttm_bo_default_swap_lru_tail(struct ttm_buffer_object *bo);
-
-/**
- * __ttm_bo_reserve:
- *
- * @bo: A pointer to a struct ttm_buffer_object.
- * @interruptible: Sleep interruptible if waiting.
- * @no_wait: Don't sleep while trying to reserve, rather return -EBUSY.
- * @ticket: ticket used to acquire the ww_mutex.
- *
- * Will not remove reserved buffers from the lru lists.
- * Otherwise identical to ttm_bo_reserve.
- *
- * Returns:
- * -EDEADLK: The reservation may cause a deadlock.
- * Release all buffer reservations, wait for @bo to become unreserved and
- * try again. (only if use_sequence == 1).
- * -ERESTARTSYS: A wait for the buffer to become unreserved was interrupted by
- * a signal. Release all buffer reservations and return to user-space.
- * -EBUSY: The function needed to sleep, but @no_wait was true
- * -EALREADY: Bo already reserved using @ticket. This error code will only
- * be returned if @use_ticket is set to true.
- */
-static inline int __ttm_bo_reserve(struct ttm_buffer_object *bo,
-				   bool interruptible, bool no_wait,
-				   struct ww_acquire_ctx *ticket)
-{
-	int ret = 0;
-
-	if (no_wait) {
-		bool success;
-		if (WARN_ON(ticket))
-			return -EBUSY;
-
-		success = ww_mutex_trylock(&bo->resv->lock);
-		return success ? 0 : -EBUSY;
-	}
-
-	if (interruptible)
-		ret = ww_mutex_lock_interruptible(&bo->resv->lock, ticket);
-	else
-		ret = ww_mutex_lock(&bo->resv->lock, ticket);
-	if (ret == -EINTR)
-		return -ERESTARTSYS;
-	return ret;
-}
 
 /**
  * ttm_bo_reserve:
@@ -820,7 +778,8 @@ static inline int __ttm_bo_reserve(struct ttm_buffer_object *bo,
  * @bo: A pointer to a struct ttm_buffer_object.
  * @interruptible: Sleep interruptible if waiting.
  * @no_wait: Don't sleep while trying to reserve, rather return -EBUSY.
- * @ticket: ticket used to acquire the ww_mutex.
+ * @use_sequence: If @bo is already reserved, Only sleep waiting for
+ * it to become unreserved if @sequence < (@bo)->sequence.
  *
  * Locks a buffer object for validation. (Or prevents other processes from
  * locking it for validation) and removes it from lru lists, while taking
@@ -834,44 +793,51 @@ static inline int __ttm_bo_reserve(struct ttm_buffer_object *bo,
  * Processes attempting to reserve multiple buffers other than for eviction,
  * (typically execbuf), should first obtain a unique 32-bit
  * validation sequence number,
- * and call this function with @use_ticket == 1 and @ticket->stamp == the unique
+ * and call this function with @use_sequence == 1 and @sequence == the unique
  * sequence number. If upon call of this function, the buffer object is already
  * reserved, the validation sequence is checked against the validation
  * sequence of the process currently reserving the buffer,
  * and if the current validation sequence is greater than that of the process
- * holding the reservation, the function returns -EDEADLK. Otherwise it sleeps
+ * holding the reservation, the function returns -EAGAIN. Otherwise it sleeps
  * waiting for the buffer to become unreserved, after which it retries
  * reserving.
- * The caller should, when receiving an -EDEADLK error
+ * The caller should, when receiving an -EAGAIN error
  * release all its buffer reservations, wait for @bo to become unreserved, and
  * then rerun the validation with the same validation sequence. This procedure
  * will always guarantee that the process with the lowest validation sequence
  * will eventually succeed, preventing both deadlocks and starvation.
  *
  * Returns:
- * -EDEADLK: The reservation may cause a deadlock.
+ * -EAGAIN: The reservation may cause a deadlock.
  * Release all buffer reservations, wait for @bo to become unreserved and
  * try again. (only if use_sequence == 1).
  * -ERESTARTSYS: A wait for the buffer to become unreserved was interrupted by
  * a signal. Release all buffer reservations and return to user-space.
  * -EBUSY: The function needed to sleep, but @no_wait was true
- * -EALREADY: Bo already reserved using @ticket. This error code will only
- * be returned if @use_ticket is set to true.
+ * -EDEADLK: Bo already reserved using @sequence. This error code will only
+ * be returned if @use_sequence is set to true.
  */
-static inline int ttm_bo_reserve(struct ttm_buffer_object *bo,
-				 bool interruptible, bool no_wait,
-				 struct ww_acquire_ctx *ticket)
-{
-	int ret;
+extern int ttm_bo_reserve(struct ttm_buffer_object *bo,
+			  bool interruptible,
+			  bool no_wait, bool use_sequence, uint32_t sequence);
 
-	WARN_ON(!atomic_read(&bo->kref.refcount));
+/**
+ * ttm_bo_reserve_slowpath_nolru:
+ * @bo: A pointer to a struct ttm_buffer_object.
+ * @interruptible: Sleep interruptible if waiting.
+ * @sequence: Set (@bo)->sequence to this value after lock
+ *
+ * This is called after ttm_bo_reserve returns -EAGAIN and we backed off
+ * from all our other reservations. Because there are no other reservations
+ * held by us, this function cannot deadlock any more.
+ *
+ * Will not remove reserved buffers from the lru lists.
+ * Otherwise identical to ttm_bo_reserve_slowpath.
+ */
+extern int ttm_bo_reserve_slowpath_nolru(struct ttm_buffer_object *bo,
+					 bool interruptible,
+					 uint32_t sequence);
 
-	ret = __ttm_bo_reserve(bo, interruptible, no_wait, ticket);
-	if (likely(ret == 0))
-		ttm_bo_del_sub_from_lru(bo);
-
-	return ret;
-}
 
 /**
  * ttm_bo_reserve_slowpath:
@@ -883,39 +849,35 @@ static inline int ttm_bo_reserve(struct ttm_buffer_object *bo,
  * from all our other reservations. Because there are no other reservations
  * held by us, this function cannot deadlock any more.
  */
-static inline int ttm_bo_reserve_slowpath(struct ttm_buffer_object *bo,
-					  bool interruptible,
-					  struct ww_acquire_ctx *ticket)
-{
-	int ret = 0;
-
-	WARN_ON(!atomic_read(&bo->kref.refcount));
-
-	if (interruptible)
-		ret = ww_mutex_lock_slow_interruptible(&bo->resv->lock,
-						       ticket);
-	else
-		ww_mutex_lock_slow(&bo->resv->lock, ticket);
-
-	if (likely(ret == 0))
-		ttm_bo_del_sub_from_lru(bo);
-	else if (ret == -EINTR)
-		ret = -ERESTARTSYS;
-
-	return ret;
-}
+extern int ttm_bo_reserve_slowpath(struct ttm_buffer_object *bo,
+				   bool interruptible, uint32_t sequence);
 
 /**
- * __ttm_bo_unreserve
- * @bo: A pointer to a struct ttm_buffer_object.
+ * ttm_bo_reserve_nolru:
  *
- * Unreserve a previous reservation of @bo where the buffer object is
- * already on lru lists.
+ * @bo: A pointer to a struct ttm_buffer_object.
+ * @interruptible: Sleep interruptible if waiting.
+ * @no_wait: Don't sleep while trying to reserve, rather return -EBUSY.
+ * @use_sequence: If @bo is already reserved, Only sleep waiting for
+ * it to become unreserved if @sequence < (@bo)->sequence.
+ *
+ * Will not remove reserved buffers from the lru lists.
+ * Otherwise identical to ttm_bo_reserve.
+ *
+ * Returns:
+ * -EAGAIN: The reservation may cause a deadlock.
+ * Release all buffer reservations, wait for @bo to become unreserved and
+ * try again. (only if use_sequence == 1).
+ * -ERESTARTSYS: A wait for the buffer to become unreserved was interrupted by
+ * a signal. Release all buffer reservations and return to user-space.
+ * -EBUSY: The function needed to sleep, but @no_wait was true
+ * -EDEADLK: Bo already reserved using @sequence. This error code will only
+ * be returned if @use_sequence is set to true.
  */
-static inline void __ttm_bo_unreserve(struct ttm_buffer_object *bo)
-{
-	ww_mutex_unlock(&bo->resv->lock);
-}
+extern int ttm_bo_reserve_nolru(struct ttm_buffer_object *bo,
+				 bool interruptible,
+				 bool no_wait, bool use_sequence,
+				 uint32_t sequence);
 
 /**
  * ttm_bo_unreserve
@@ -924,28 +886,17 @@ static inline void __ttm_bo_unreserve(struct ttm_buffer_object *bo)
  *
  * Unreserve a previous reservation of @bo.
  */
-static inline void ttm_bo_unreserve(struct ttm_buffer_object *bo)
-{
-	if (!(bo->mem.placement & TTM_PL_FLAG_NO_EVICT)) {
-		spin_lock(&bo->glob->lru_lock);
-		ttm_bo_add_to_lru(bo);
-		spin_unlock(&bo->glob->lru_lock);
-	}
-	__ttm_bo_unreserve(bo);
-}
+extern void ttm_bo_unreserve(struct ttm_buffer_object *bo);
 
 /**
- * ttm_bo_unreserve_ticket
- * @bo: A pointer to a struct ttm_buffer_object.
- * @ticket: ww_acquire_ctx used for reserving
+ * ttm_bo_unreserve_locked
  *
- * Unreserve a previous reservation of @bo made with @ticket.
+ * @bo: A pointer to a struct ttm_buffer_object.
+ *
+ * Unreserve a previous reservation of @bo.
+ * Needs to be called with struct ttm_bo_global::lru_lock held.
  */
-static inline void ttm_bo_unreserve_ticket(struct ttm_buffer_object *bo,
-					   struct ww_acquire_ctx *t)
-{
-	ttm_bo_unreserve(bo);
-}
+extern void ttm_bo_unreserve_locked(struct ttm_buffer_object *bo);
 
 /*
  * ttm_bo_util.c
@@ -959,7 +910,7 @@ void ttm_mem_io_free(struct ttm_bo_device *bdev,
  * ttm_bo_move_ttm
  *
  * @bo: A pointer to a struct ttm_buffer_object.
- * @interruptible: Sleep interruptible if waiting.
+ * @evict: 1: This is an eviction. Don't try to pipeline.
  * @no_wait_gpu: Return immediately if the GPU is busy.
  * @new_mem: struct ttm_mem_reg indicating where to move.
  *
@@ -974,14 +925,14 @@ void ttm_mem_io_free(struct ttm_bo_device *bdev,
  */
 
 extern int ttm_bo_move_ttm(struct ttm_buffer_object *bo,
-			   bool interruptible, bool no_wait_gpu,
+			   bool evict, bool no_wait_gpu,
 			   struct ttm_mem_reg *new_mem);
 
 /**
  * ttm_bo_move_memcpy
  *
  * @bo: A pointer to a struct ttm_buffer_object.
- * @interruptible: Sleep interruptible if waiting.
+ * @evict: 1: This is an eviction. Don't try to pipeline.
  * @no_wait_gpu: Return immediately if the GPU is busy.
  * @new_mem: struct ttm_mem_reg indicating where to move.
  *
@@ -996,7 +947,7 @@ extern int ttm_bo_move_ttm(struct ttm_buffer_object *bo,
  */
 
 extern int ttm_bo_move_memcpy(struct ttm_buffer_object *bo,
-			      bool interruptible, bool no_wait_gpu,
+			      bool evict, bool no_wait_gpu,
 			      struct ttm_mem_reg *new_mem);
 
 /**
@@ -1012,8 +963,9 @@ extern void ttm_bo_free_old_node(struct ttm_buffer_object *bo);
  * ttm_bo_move_accel_cleanup.
  *
  * @bo: A pointer to a struct ttm_buffer_object.
- * @fence: A fence object that signals when moving is complete.
+ * @sync_obj: A sync object that signals when moving is complete.
  * @evict: This is an evict move. Don't return until the buffer is idle.
+ * @no_wait_gpu: Return immediately if the GPU is busy.
  * @new_mem: struct ttm_mem_reg indicating where to move.
  *
  * Accelerated move function to be called when an accelerated move
@@ -1025,24 +977,9 @@ extern void ttm_bo_free_old_node(struct ttm_buffer_object *bo);
  */
 
 extern int ttm_bo_move_accel_cleanup(struct ttm_buffer_object *bo,
-				     struct fence *fence, bool evict,
+				     void *sync_obj,
+				     bool evict, bool no_wait_gpu,
 				     struct ttm_mem_reg *new_mem);
-
-/**
- * ttm_bo_pipeline_move.
- *
- * @bo: A pointer to a struct ttm_buffer_object.
- * @fence: A fence object that signals when moving is complete.
- * @evict: This is an evict move. Don't return until the buffer is idle.
- * @new_mem: struct ttm_mem_reg indicating where to move.
- *
- * Function for pipelining accelerated moves. Either free the memory
- * immediately or hang it on a temporary buffer object.
- */
-int ttm_bo_pipeline_move(struct ttm_buffer_object *bo,
-			 struct fence *fence, bool evict,
-			 struct ttm_mem_reg *new_mem);
-
 /**
  * ttm_io_prot
  *
@@ -1056,7 +993,8 @@ extern pgprot_t ttm_io_prot(uint32_t caching_flags, pgprot_t tmp);
 
 extern const struct ttm_mem_type_manager_func ttm_bo_manager_func;
 
-#if IS_ENABLED(CONFIG_AGP)
+#if (defined(CONFIG_AGP) || (defined(CONFIG_AGP_MODULE) && defined(MODULE)))
+#define TTM_HAS_AGP
 #include <linux/agp_backend.h>
 
 /**

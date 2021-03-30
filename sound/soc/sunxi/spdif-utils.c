@@ -23,17 +23,17 @@
 
 #define DRV_NAME "spdif-utils"
 
-#define STUB_RATES	(SNDRV_PCM_RATE_8000_192000 | SNDRV_PCM_RATE_KNOT)
-#define STUB_FORMATS	(SNDRV_PCM_FMTBIT_S16_LE | \
+#define STUB_RATES	SNDRV_PCM_RATE_8000_192000 | SNDRV_PCM_RATE_KNOT
+#define STUB_FORMATS	SNDRV_PCM_FMTBIT_S16_LE | \
 			SNDRV_PCM_FMTBIT_S20_3LE | \
 			SNDRV_PCM_FMTBIT_S24_LE | \
-			SNDRV_PCM_FMTBIT_IEC958_SUBFRAME_LE)
+			SNDRV_PCM_FMTBIT_IEC958_SUBFRAME_LE
 
 static struct snd_soc_codec_driver soc_codec_spdif_utils;
 
 static struct snd_soc_dai_driver spdif_stub_dai = {
 	.name		= "spdif-hifi",
-	.playback	= {
+	.playback 	= {
 		.stream_name	= "Playback",
 		.channels_min	= 1,
 		.channels_max	= 384,

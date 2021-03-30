@@ -75,7 +75,7 @@ int hfsplus_parse_options_remount(char *input, int *force)
 	int token;
 
 	if (!input)
-		return 1;
+		return 0;
 
 	while ((p = strsep(&input, ",")) != NULL) {
 		if (!*p)
@@ -173,8 +173,9 @@ int hfsplus_parse_options(char *input, struct hfsplus_sb_info *sbi)
 			if (p)
 				sbi->nls = load_nls(p);
 			if (!sbi->nls) {
-				pr_err("unable to load nls mapping \"%s\"\n",
-				       p);
+				pr_err("unable to load "
+						"nls mapping \"%s\"\n",
+					p);
 				kfree(p);
 				return 0;
 			}
@@ -218,9 +219,9 @@ int hfsplus_show_options(struct seq_file *seq, struct dentry *root)
 	struct hfsplus_sb_info *sbi = HFSPLUS_SB(root->d_sb);
 
 	if (sbi->creator != HFSPLUS_DEF_CR_TYPE)
-		seq_show_option_n(seq, "creator", (char *)&sbi->creator, 4);
+		seq_printf(seq, ",creator=%.4s", (char *)&sbi->creator);
 	if (sbi->type != HFSPLUS_DEF_CR_TYPE)
-		seq_show_option_n(seq, "type", (char *)&sbi->type, 4);
+		seq_printf(seq, ",type=%.4s", (char *)&sbi->type);
 	seq_printf(seq, ",umask=%o,uid=%u,gid=%u", sbi->umask,
 			from_kuid_munged(&init_user_ns, sbi->uid),
 			from_kgid_munged(&init_user_ns, sbi->gid));
@@ -231,8 +232,8 @@ int hfsplus_show_options(struct seq_file *seq, struct dentry *root)
 	if (sbi->nls)
 		seq_printf(seq, ",nls=%s", sbi->nls->charset);
 	if (test_bit(HFSPLUS_SB_NODECOMPOSE, &sbi->flags))
-		seq_puts(seq, ",nodecompose");
+		seq_printf(seq, ",nodecompose");
 	if (test_bit(HFSPLUS_SB_NOBARRIER, &sbi->flags))
-		seq_puts(seq, ",nobarrier");
+		seq_printf(seq, ",nobarrier");
 	return 0;
 }

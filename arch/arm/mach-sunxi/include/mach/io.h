@@ -31,28 +31,11 @@
 
 #if !defined(SUNXI_IO_PBASE)
 #define SUNXI_IO_PBASE		UL(0x01000000)
-
-#if defined(CONFIG_ARCH_SUN8IW11)
 #define SUNXI_IO_SIZE		SZ_16M
-#elif defined (CONFIG_ARCH_SUN8IW7) || defined (CONFIG_ARCH_SUN8IW6)
-#define SUNXI_IO_SIZE		UL(0x01000000)
-#else
-#define SUNXI_IO_SIZE		UL(0x0a000000 - 0x01000000)
 #endif
 
-#endif
-
-#if !defined(SUNXI_UART_PBASE)
-#if defined(CONFIG_ARCH_SUN8IW11) || defined(CONFIG_ARCH_SUN8IW7)
-#define SUNXI_UART_PBASE		UL(0x01c28000)
-#else
-#define SUNXI_UART_PBASE		UL(0x05000000)
-#endif
-#define SUNXI_UART_SIZE			UL(0x2000)
-#endif
-
-#if !defined(UARTIO_ADDRESS)
-#define UARTIO_ADDRESS(x)  IOMEM((x) + 0xf0000000)
+#if !defined(IO_ADDRESS)
+#define IO_ADDRESS(x)  IOMEM((x) + 0xf0000000)
 #endif
 
 #endif /* __ASM_ARM_ARCH_IO_H */

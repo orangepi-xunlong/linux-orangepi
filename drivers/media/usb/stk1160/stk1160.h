@@ -23,7 +23,7 @@
 #include <linux/i2c.h>
 #include <sound/core.h>
 #include <sound/ac97_codec.h>
-#include <media/videobuf2-v4l2.h>
+#include <media/videobuf2-core.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-ctrls.h>
 
@@ -58,6 +58,7 @@
  * new drivers should use.
  *
  */
+#define DEBUG
 #ifdef DEBUG
 #define stk1160_dbg(fmt, args...) \
 	printk(KERN_DEBUG "stk1160: " fmt,  ## args)
@@ -77,7 +78,7 @@
 /* Buffer for one video frame */
 struct stk1160_buffer {
 	/* common v4l buffer stuff -- must be first */
-	struct vb2_v4l2_buffer vb;
+	struct vb2_buffer vb;
 	struct list_head list;
 
 	void *mem;
@@ -150,7 +151,8 @@ struct stk1160 {
 	v4l2_std_id norm;	  /* current norm */
 	struct stk1160_fmt *fmt;  /* selected format */
 
-	unsigned int sequence;
+	unsigned int field_count; /* not sure ??? */
+	enum v4l2_field field;    /* also not sure :/ */
 
 	/* i2c i/o */
 	struct i2c_adapter i2c_adap;

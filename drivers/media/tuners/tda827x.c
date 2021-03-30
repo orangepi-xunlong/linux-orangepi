@@ -818,7 +818,7 @@ static int tda827x_initial_sleep(struct dvb_frontend *fe)
 	return fe->ops.tuner_ops.sleep(fe);
 }
 
-static const struct dvb_tuner_ops tda827xo_tuner_ops = {
+static struct dvb_tuner_ops tda827xo_tuner_ops = {
 	.info = {
 		.name = "Philips TDA827X",
 		.frequency_min  =  55000000,
@@ -834,7 +834,7 @@ static const struct dvb_tuner_ops tda827xo_tuner_ops = {
 	.get_bandwidth = tda827x_get_bandwidth,
 };
 
-static const struct dvb_tuner_ops tda827xa_tuner_ops = {
+static struct dvb_tuner_ops tda827xa_tuner_ops = {
 	.info = {
 		.name = "Philips TDA827XA",
 		.frequency_min  =  44000000,
@@ -907,3 +907,11 @@ MODULE_DESCRIPTION("DVB TDA827x driver");
 MODULE_AUTHOR("Hartmut Hackmann <hartmut.hackmann@t-online.de>");
 MODULE_AUTHOR("Michael Krufky <mkrufky@linuxtv.org>");
 MODULE_LICENSE("GPL");
+
+/*
+ * Overrides for Emacs so that we follow Linus's tabbing style.
+ * ---------------------------------------------------------------------------
+ * Local variables:
+ * c-basic-offset: 8
+ * End:
+ */

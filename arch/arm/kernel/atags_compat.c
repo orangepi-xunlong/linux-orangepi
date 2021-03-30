@@ -97,7 +97,8 @@ static void __init build_tag_list(struct param_struct *params, void *taglist)
 	struct tag *tag = taglist;
 
 	if (params->u1.s.page_size != PAGE_SIZE) {
-		pr_warn("Warning: bad configuration page, trying to continue\n");
+		printk(KERN_WARNING "Warning: bad configuration page, "
+		       "trying to continue\n");
 		return;
 	}
 
@@ -108,7 +109,8 @@ static void __init build_tag_list(struct param_struct *params, void *taglist)
 	    params->u1.s.nr_pages != 0x04000 &&
 	    params->u1.s.nr_pages != 0x08000 &&
 	    params->u1.s.nr_pages != 0x10000) {
-		pr_warn("Warning: bad NeTTrom parameters detected, using defaults\n");
+		printk(KERN_WARNING "Warning: bad NeTTrom parameters "
+		       "detected, using defaults\n");
 
 		params->u1.s.nr_pages = 0x1000;	/* 16MB */
 		params->u1.s.ramdisk_size = 0;

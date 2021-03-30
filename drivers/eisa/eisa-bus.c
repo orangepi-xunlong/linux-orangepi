@@ -232,10 +232,8 @@ static int __init eisa_init_device(struct eisa_root_device *root,
 static int __init eisa_register_device(struct eisa_device *edev)
 {
 	int rc = device_register(&edev->dev);
-	if (rc) {
-		put_device(&edev->dev);
+	if (rc)
 		return rc;
-	}
 
 	rc = device_create_file(&edev->dev, &dev_attr_signature);
 	if (rc)
@@ -290,6 +288,7 @@ static int __init eisa_request_resources(struct eisa_root_device *root,
 			edev->res[i].flags = IORESOURCE_IO | IORESOURCE_BUSY;
 		}
 
+		dev_printk(KERN_DEBUG, &edev->dev, "%pR\n", &edev->res[i]);
 		if (request_resource(root->res, &edev->res[i]))
 			goto failed;
 	}

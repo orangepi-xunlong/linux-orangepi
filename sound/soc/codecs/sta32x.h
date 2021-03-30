@@ -67,8 +67,7 @@
 #define STA32X_Reserved 0x2a
 #define STA32X_FDRC1    0x2b
 #define STA32X_FDRC2    0x2c
-/* Reserved 0x2d */
-
+#define STA32X_STATUS   0x2d
 
 /* STA326 register field definitions */
 
@@ -131,7 +130,7 @@
 #define STA32X_CONFF_OCFG_MASK	0x03
 #define STA32X_CONFF_OCFG_SHIFT	0
 #define STA32X_CONFF_IDE	0x04
-#define STA32X_CONFF_IDE_SHIFT	2
+#define STA32X_CONFF_IDE_SHIFT	3
 #define STA32X_CONFF_BCLE	0x08
 #define STA32X_CONFF_ECLE	0x20
 #define STA32X_CONFF_PWDN	0x40

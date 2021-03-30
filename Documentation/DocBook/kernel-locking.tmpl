@@ -1760,7 +1760,7 @@ as it would be on UP.
 </para>
 
 <para>
-There is a further optimization possible here: remember our original
+There is a furthur optimization possible here: remember our original
 cache code, where there were no reference counts and the caller simply
 held the lock whenever using the object?  This is still possible: if
 you hold the lock, no one can delete the object, so you don't need to
@@ -1955,15 +1955,10 @@ machines due to caching.
    </sect1>
   </chapter>
 
-  <chapter id="apiref-mutex">
+  <chapter id="apiref">
    <title>Mutex API reference</title>
 !Iinclude/linux/mutex.h
-!Ekernel/locking/mutex.c
-  </chapter>
-
-  <chapter id="apiref-futex">
-   <title>Futex API reference</title>
-!Ikernel/futex.c
+!Ekernel/mutex.c
   </chapter>
 
   <chapter id="references">
@@ -1972,7 +1967,7 @@ machines due to caching.
    <itemizedlist>
     <listitem>
      <para>
-       <filename>Documentation/locking/spinlocks.txt</filename>:
+       <filename>Documentation/spinlocks.txt</filename>: 
        Linus Torvalds' spinlocking tutorial in the kernel sources.
      </para>
     </listitem>

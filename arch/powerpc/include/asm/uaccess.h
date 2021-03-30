@@ -59,7 +59,7 @@
 #endif
 
 #define access_ok(type, addr, size)		\
-	(__chk_user_ptr(addr), (void)(type),		\
+	(__chk_user_ptr(addr),			\
 	 __access_ok((__force unsigned long)(addr), (size), get_fs()))
 
 /*
@@ -178,7 +178,7 @@ do {								\
 	long __pu_err;						\
 	__typeof__(*(ptr)) __user *__pu_addr = (ptr);		\
 	if (!is_kernel_addr((unsigned long)__pu_addr))		\
-		might_fault();					\
+		might_sleep();					\
 	__chk_user_ptr(ptr);					\
 	__put_user_size((x), __pu_addr, (size), __pu_err);	\
 	__pu_err;						\
@@ -188,7 +188,7 @@ do {								\
 ({									\
 	long __pu_err = -EFAULT;					\
 	__typeof__(*(ptr)) __user *__pu_addr = (ptr);			\
-	might_fault();							\
+	might_sleep();							\
 	if (access_ok(VERIFY_WRITE, __pu_addr, size))			\
 		__put_user_size((x), __pu_addr, (size), __pu_err);	\
 	__pu_err;							\
@@ -265,27 +265,39 @@ do {								\
 ({								\
 	long __gu_err;						\
 	unsigned long __gu_val;					\
-	__typeof__(*(ptr)) __user *__gu_addr = (ptr);	\
+	const __typeof__(*(ptr)) __user *__gu_addr = (ptr);	\
 	__chk_user_ptr(ptr);					\
 	if (!is_kernel_addr((unsigned long)__gu_addr))		\
-		might_fault();					\
-	barrier_nospec();					\
+		might_sleep();					\
 	__get_user_size(__gu_val, __gu_addr, (size), __gu_err);	\
 	(x) = (__typeof__(*(ptr)))__gu_val;			\
 	__gu_err;						\
 })
 
+#ifndef __powerpc64__
+#define __get_user64_nocheck(x, ptr, size)			\
+({								\
+	long __gu_err;						\
+	long long __gu_val;					\
+	const __typeof__(*(ptr)) __user *__gu_addr = (ptr);	\
+	__chk_user_ptr(ptr);					\
+	if (!is_kernel_addr((unsigned long)__gu_addr))		\
+		might_sleep();					\
+	__get_user_size(__gu_val, __gu_addr, (size), __gu_err);	\
+	(x) = (__typeof__(*(ptr)))__gu_val;			\
+	__gu_err;						\
+})
+#endif /* __powerpc64__ */
+
 #define __get_user_check(x, ptr, size)					\
 ({									\
 	long __gu_err = -EFAULT;					\
 	unsigned long  __gu_val = 0;					\
-	__typeof__(*(ptr)) __user *__gu_addr = (ptr);		\
-	might_fault();							\
-	if (access_ok(VERIFY_READ, __gu_addr, (size))) {		\
-		barrier_nospec();					\
+	const __typeof__(*(ptr)) __user *__gu_addr = (ptr);		\
+	might_sleep();							\
+	if (access_ok(VERIFY_READ, __gu_addr, (size)))			\
 		__get_user_size(__gu_val, __gu_addr, (size), __gu_err);	\
-	}								\
-	(x) = (__force __typeof__(*(ptr)))__gu_val;				\
+	(x) = (__typeof__(*(ptr)))__gu_val;				\
 	__gu_err;							\
 })
 
@@ -293,11 +305,10 @@ do {								\
 ({								\
 	long __gu_err;						\
 	unsigned long __gu_val;					\
-	__typeof__(*(ptr)) __user *__gu_addr = (ptr);	\
+	const __typeof__(*(ptr)) __user *__gu_addr = (ptr);	\
 	__chk_user_ptr(ptr);					\
-	barrier_nospec();					\
 	__get_user_size(__gu_val, __gu_addr, (size), __gu_err);	\
-	(x) = (__force __typeof__(*(ptr)))__gu_val;			\
+	(x) = (__typeof__(*(ptr)))__gu_val;			\
 	__gu_err;						\
 })
 
@@ -312,20 +323,29 @@ extern unsigned long __copy_tofrom_user(void __user *to,
 static inline unsigned long copy_from_user(void *to,
 		const void __user *from, unsigned long n)
 {
-	if (likely(access_ok(VERIFY_READ, from, n))) {
-		check_object_size(to, n, false);
+	unsigned long over;
+
+	if (access_ok(VERIFY_READ, from, n))
 		return __copy_tofrom_user((__force void __user *)to, from, n);
+	if ((unsigned long)from < TASK_SIZE) {
+		over = (unsigned long)from + n - TASK_SIZE;
+		return __copy_tofrom_user((__force void __user *)to, from,
+				n - over) + over;
 	}
-	memset(to, 0, n);
 	return n;
 }
 
 static inline unsigned long copy_to_user(void __user *to,
 		const void *from, unsigned long n)
 {
-	if (access_ok(VERIFY_WRITE, to, n)) {
-		check_object_size(from, n, true);
+	unsigned long over;
+
+	if (access_ok(VERIFY_WRITE, to, n))
 		return __copy_tofrom_user(to, (__force void __user *)from, n);
+	if ((unsigned long)to < TASK_SIZE) {
+		over = (unsigned long)to + n - TASK_SIZE;
+		return __copy_tofrom_user(to, (__force void __user *)from,
+				n - over) + over;
 	}
 	return n;
 }
@@ -352,29 +372,21 @@ static inline unsigned long __copy_from_user_inatomic(void *to,
 
 		switch (n) {
 		case 1:
-			barrier_nospec();
 			__get_user_size(*(u8 *)to, from, 1, ret);
 			break;
 		case 2:
-			barrier_nospec();
 			__get_user_size(*(u16 *)to, from, 2, ret);
 			break;
 		case 4:
-			barrier_nospec();
 			__get_user_size(*(u32 *)to, from, 4, ret);
 			break;
 		case 8:
-			barrier_nospec();
 			__get_user_size(*(u64 *)to, from, 8, ret);
 			break;
 		}
 		if (ret == 0)
 			return 0;
 	}
-
-	check_object_size(to, n, false);
-
-	barrier_nospec();
 	return __copy_tofrom_user((__force void __user *)to, from, n);
 }
 
@@ -401,23 +413,20 @@ static inline unsigned long __copy_to_user_inatomic(void __user *to,
 		if (ret == 0)
 			return 0;
 	}
-
-	check_object_size(from, n, true);
-
 	return __copy_tofrom_user(to, (__force const void __user *)from, n);
 }
 
 static inline unsigned long __copy_from_user(void *to,
 		const void __user *from, unsigned long size)
 {
-	might_fault();
+	might_sleep();
 	return __copy_from_user_inatomic(to, from, size);
 }
 
 static inline unsigned long __copy_to_user(void __user *to,
 		const void *from, unsigned long size)
 {
-	might_fault();
+	might_sleep();
 	return __copy_to_user_inatomic(to, from, size);
 }
 
@@ -425,9 +434,13 @@ extern unsigned long __clear_user(void __user *addr, unsigned long size);
 
 static inline unsigned long clear_user(void __user *addr, unsigned long size)
 {
-	might_fault();
+	might_sleep();
 	if (likely(access_ok(VERIFY_WRITE, addr, size)))
 		return __clear_user(addr, size);
+	if ((unsigned long)addr < TASK_SIZE) {
+		unsigned long over = (unsigned long)addr + size - TASK_SIZE;
+		return __clear_user(addr, size - over) + over;
+	}
 	return size;
 }
 

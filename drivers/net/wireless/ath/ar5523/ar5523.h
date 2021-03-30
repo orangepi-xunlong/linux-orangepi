@@ -74,6 +74,7 @@ struct ar5523_tx_cmd {
 struct ar5523_tx_data {
 	struct list_head	list;
 	struct ar5523		*ar;
+	struct sk_buff		*skb;
 	struct urb		*urb;
 };
 

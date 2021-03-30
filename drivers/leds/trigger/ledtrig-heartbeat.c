@@ -17,7 +17,6 @@
 #include <linux/slab.h>
 #include <linux/timer.h>
 #include <linux/sched.h>
-#include <linux/sched/loadavg.h>
 #include <linux/leds.h>
 #include <linux/reboot.h>
 #include "../leds.h"
@@ -28,7 +27,6 @@ struct heartbeat_trig_data {
 	unsigned int phase;
 	unsigned int period;
 	struct timer_list timer;
-	unsigned int invert;
 };
 
 static void led_heartbeat_function(unsigned long data)
@@ -39,7 +37,7 @@ static void led_heartbeat_function(unsigned long data)
 	unsigned long delay = 0;
 
 	if (unlikely(panic_heartbeats)) {
-		led_set_brightness_nosleep(led_cdev, LED_OFF);
+		led_set_brightness(led_cdev, LED_OFF);
 		return;
 	}
 
@@ -58,78 +56,37 @@ static void led_heartbeat_function(unsigned long data)
 			msecs_to_jiffies(heartbeat_data->period);
 		delay = msecs_to_jiffies(70);
 		heartbeat_data->phase++;
-		if (!heartbeat_data->invert)
-			brightness = led_cdev->max_brightness;
+		brightness = led_cdev->max_brightness;
 		break;
 	case 1:
 		delay = heartbeat_data->period / 4 - msecs_to_jiffies(70);
 		heartbeat_data->phase++;
-		if (heartbeat_data->invert)
-			brightness = led_cdev->max_brightness;
 		break;
 	case 2:
 		delay = msecs_to_jiffies(70);
 		heartbeat_data->phase++;
-		if (!heartbeat_data->invert)
-			brightness = led_cdev->max_brightness;
+		brightness = led_cdev->max_brightness;
 		break;
 	default:
 		delay = heartbeat_data->period - heartbeat_data->period / 4 -
 			msecs_to_jiffies(70);
 		heartbeat_data->phase = 0;
-		if (heartbeat_data->invert)
-			brightness = led_cdev->max_brightness;
 		break;
 	}
 
-	led_set_brightness_nosleep(led_cdev, brightness);
+	__led_set_brightness(led_cdev, brightness);
 	mod_timer(&heartbeat_data->timer, jiffies + delay);
 }
-
-static ssize_t led_invert_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	struct led_classdev *led_cdev = dev_get_drvdata(dev);
-	struct heartbeat_trig_data *heartbeat_data = led_cdev->trigger_data;
-
-	return sprintf(buf, "%u\n", heartbeat_data->invert);
-}
-
-static ssize_t led_invert_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t size)
-{
-	struct led_classdev *led_cdev = dev_get_drvdata(dev);
-	struct heartbeat_trig_data *heartbeat_data = led_cdev->trigger_data;
-	unsigned long state;
-	int ret;
-
-	ret = kstrtoul(buf, 0, &state);
-	if (ret)
-		return ret;
-
-	heartbeat_data->invert = !!state;
-
-	return size;
-}
-
-static DEVICE_ATTR(invert, 0644, led_invert_show, led_invert_store);
 
 static void heartbeat_trig_activate(struct led_classdev *led_cdev)
 {
 	struct heartbeat_trig_data *heartbeat_data;
-	int rc;
 
 	heartbeat_data = kzalloc(sizeof(*heartbeat_data), GFP_KERNEL);
 	if (!heartbeat_data)
 		return;
 
 	led_cdev->trigger_data = heartbeat_data;
-	rc = device_create_file(led_cdev->dev, &dev_attr_invert);
-	if (rc) {
-		kfree(led_cdev->trigger_data);
-		return;
-	}
-
 	setup_timer(&heartbeat_data->timer,
 		    led_heartbeat_function, (unsigned long) led_cdev);
 	heartbeat_data->phase = 0;
@@ -143,7 +100,6 @@ static void heartbeat_trig_deactivate(struct led_classdev *led_cdev)
 
 	if (led_cdev->activated) {
 		del_timer_sync(&heartbeat_data->timer);
-		device_remove_file(led_cdev->dev, &dev_attr_invert);
 		kfree(heartbeat_data);
 		led_cdev->activated = false;
 	}

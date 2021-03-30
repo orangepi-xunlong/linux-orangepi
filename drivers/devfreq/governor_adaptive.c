@@ -15,8 +15,6 @@
 #include <linux/sunxi_dramfreq.h>
 #include "governor.h"
 
-extern struct sunxi_dramfreq *dramfreq;
-
 static ssize_t show_pause(struct device *dev, struct device_attribute *attr,
 			char *buf)
 {
@@ -37,8 +35,8 @@ static ssize_t store_pause(struct device *dev, struct device_attribute *attr,
 		goto out;
 	}
 
-	ret = kstrtouint(buf, 0, &value);
-	if (ret != 0)
+	ret = sscanf(buf, "%u", &value);
+	if (ret != 1)
 		goto out;
 
 	if (value && (!dramfreq->pause))
@@ -72,8 +70,7 @@ static int devfreq_adaptive_func(struct devfreq *df, unsigned long *freq)
 	}
 
 	if (!dramfreq->pause) {
-#if defined(CONFIG_ARCH_SUN50IW1) || defined(CONFIG_ARCH_SUN50IW2) || \
-	defined(CONFIG_ARCH_SUN8IW11)
+#if defined(CONFIG_ARCH_SUN50I) || defined(CONFIG_ARCH_SUN8IW11)
 		if (dramfreq->key_masters[MASTER_DE] == 0 &&
 			dramfreq->key_masters[MASTER_GPU] == 0 &&
 			dramfreq->key_masters[MASTER_CSI] == 0) {
@@ -85,15 +82,6 @@ static int devfreq_adaptive_func(struct devfreq *df, unsigned long *freq)
 		} else {
 			*freq = df->max_freq;
 		}
-#elif defined(CONFIG_ARCH_SUN50IW3)
-		if (dramfreq->key_masters[MASTER_DE] == 0)
-			*freq = SUNXI_DRAMFREQ_IDLE;
-		else if (dramfreq->key_masters[MASTER_DE] == 1 &&
-			dramfreq->key_masters[MASTER_GPU] == 0  &&
-			dramfreq->key_masters[MASTER_VE] == 0)
-			*freq = SUNXI_DRAMFREQ_NORMAL;
-		else
-			*freq = df->max_freq;
 #elif defined(CONFIG_ARCH_SUN8IW10)
 #ifdef CONFIG_EINK_PANEL_USED
 		if (dramfreq->key_masters[MASTER_EINK0] == 0
@@ -193,6 +181,8 @@ static void __exit devfreq_adaptive_exit(void)
 {
 	if (devfreq_remove_governor(&devfreq_adaptive))
 		pr_err("%s: failed remove governor\n", __func__);
+
+	return;
 }
 module_exit(devfreq_adaptive_exit);
 MODULE_LICENSE("GPL");

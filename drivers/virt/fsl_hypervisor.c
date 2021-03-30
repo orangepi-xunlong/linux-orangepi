@@ -34,7 +34,6 @@
 #include <linux/slab.h>
 #include <linux/poll.h>
 #include <linux/of.h>
-#include <linux/of_irq.h>
 #include <linux/reboot.h>
 #include <linux/uaccess.h>
 #include <linux/notifier.h>
@@ -244,9 +243,10 @@ static long ioctl_memcpy(struct fsl_hv_ioctl_memcpy __user *p)
 
 	/* Get the physical addresses of the source buffer */
 	down_read(&current->mm->mmap_sem);
-	num_pinned = get_user_pages(param.local_vaddr - lb_offset,
-		num_pages, (param.source == -1) ? 0 : FOLL_WRITE,
-		pages, NULL);
+	num_pinned = get_user_pages(current, current->mm,
+		param.local_vaddr - lb_offset, num_pages,
+		(param.source == -1) ? READ : WRITE,
+		0, pages, NULL);
 	up_read(&current->mm->mmap_sem);
 
 	if (num_pinned != num_pages) {

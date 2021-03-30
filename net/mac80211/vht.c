@@ -1,9 +1,6 @@
 /*
  * VHT handling
  *
- * Portions of this file
- * Copyright(c) 2015 - 2016 Intel Deutschland GmbH
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
@@ -123,7 +120,6 @@ ieee80211_vht_cap_ie_to_sta_vht_cap(struct ieee80211_sub_if_data *sdata,
 	struct ieee80211_sta_vht_cap *vht_cap = &sta->sta.vht_cap;
 	struct ieee80211_sta_vht_cap own_cap;
 	u32 cap_info, i;
-	bool have_80mhz;
 
 	memset(vht_cap, 0, sizeof(*vht_cap));
 
@@ -133,26 +129,9 @@ ieee80211_vht_cap_ie_to_sta_vht_cap(struct ieee80211_sub_if_data *sdata,
 	if (!vht_cap_ie || !sband->vht_cap.vht_supported)
 		return;
 
-	/* Allow VHT if at least one channel on the sband supports 80 MHz */
-	have_80mhz = false;
-	for (i = 0; i < sband->n_channels; i++) {
-		if (sband->channels[i].flags & (IEEE80211_CHAN_DISABLED |
-						IEEE80211_CHAN_NO_80MHZ))
-			continue;
-
-		have_80mhz = true;
-		break;
-	}
-
-	if (!have_80mhz)
+	/* A VHT STA must support 40 MHz */
+	if (!(sta->sta.ht_cap.cap & IEEE80211_HT_CAP_SUP_WIDTH_20_40))
 		return;
-
-	/*
-	 * A VHT STA must support 40 MHz, but if we verify that here
-	 * then we break a few things - some APs (e.g. Netgear R6300v2
-	 * and others based on the BCM4360 chipset) will unset this
-	 * capability bit when operating in 20 MHz.
-	 */
 
 	vht_cap->vht_supported = true;
 
@@ -203,15 +182,16 @@ ieee80211_vht_cap_ie_to_sta_vht_cap(struct ieee80211_sub_if_data *sdata,
 			 IEEE80211_VHT_CAP_SHORT_GI_160);
 
 	/* remaining ones */
-	if (own_cap.cap & IEEE80211_VHT_CAP_SU_BEAMFORMEE_CAPABLE)
+	if (own_cap.cap & IEEE80211_VHT_CAP_SU_BEAMFORMEE_CAPABLE) {
 		vht_cap->cap |= cap_info &
 				(IEEE80211_VHT_CAP_SU_BEAMFORMER_CAPABLE |
-				 IEEE80211_VHT_CAP_SOUNDING_DIMENSIONS_MASK);
+				 IEEE80211_VHT_CAP_BEAMFORMER_ANTENNAS_MAX |
+				 IEEE80211_VHT_CAP_SOUNDING_DIMENSIONS_MAX);
+	}
 
 	if (own_cap.cap & IEEE80211_VHT_CAP_SU_BEAMFORMER_CAPABLE)
 		vht_cap->cap |= cap_info &
-				(IEEE80211_VHT_CAP_SU_BEAMFORMEE_CAPABLE |
-				 IEEE80211_VHT_CAP_BEAMFORMEE_STS_MASK);
+				IEEE80211_VHT_CAP_SU_BEAMFORMEE_CAPABLE;
 
 	if (own_cap.cap & IEEE80211_VHT_CAP_MU_BEAMFORMER_CAPABLE)
 		vht_cap->cap |= cap_info &
@@ -270,22 +250,6 @@ ieee80211_vht_cap_ie_to_sta_vht_cap(struct ieee80211_sub_if_data *sdata,
 		vht_cap->vht_mcs.tx_mcs_map |= cpu_to_le16(peer_tx << i * 2);
 	}
 
-	/*
-	 * This is a workaround for VHT-enabled STAs which break the spec
-	 * and have the VHT-MCS Rx map filled in with value 3 for all eight
-	 * spacial streams, an example is AR9462.
-	 *
-	 * As per spec, in section 22.1.1 Introduction to the VHT PHY
-	 * A VHT STA shall support at least single spactial stream VHT-MCSs
-	 * 0 to 7 (transmit and receive) in all supported channel widths.
-	 */
-	if (vht_cap->vht_mcs.rx_mcs_map == cpu_to_le16(0xFFFF)) {
-		vht_cap->vht_supported = false;
-		sdata_info(sdata, "Ignoring VHT IE from %pM due to invalid rx_mcs_map\n",
-			   sta->addr);
-		return;
-	}
-
 	/* finally set up the bandwidth */
 	switch (vht_cap->cap & IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_MASK) {
 	case IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_160MHZ:
@@ -297,97 +261,51 @@ ieee80211_vht_cap_ie_to_sta_vht_cap(struct ieee80211_sub_if_data *sdata,
 	}
 
 	sta->sta.bandwidth = ieee80211_sta_cur_vht_bw(sta);
-
-	/* If HT IE reported 3839 bytes only, stay with that size. */
-	if (sta->sta.max_amsdu_len == IEEE80211_MAX_MPDU_LEN_HT_3839)
-		return;
-
-	switch (vht_cap->cap & IEEE80211_VHT_CAP_MAX_MPDU_MASK) {
-	case IEEE80211_VHT_CAP_MAX_MPDU_LENGTH_11454:
-		sta->sta.max_amsdu_len = IEEE80211_MAX_MPDU_LEN_VHT_11454;
-		break;
-	case IEEE80211_VHT_CAP_MAX_MPDU_LENGTH_7991:
-		sta->sta.max_amsdu_len = IEEE80211_MAX_MPDU_LEN_VHT_7991;
-		break;
-	case IEEE80211_VHT_CAP_MAX_MPDU_LENGTH_3895:
-	default:
-		sta->sta.max_amsdu_len = IEEE80211_MAX_MPDU_LEN_VHT_3895;
-		break;
-	}
-}
-
-enum ieee80211_sta_rx_bandwidth ieee80211_sta_cap_rx_bw(struct sta_info *sta)
-{
-	struct ieee80211_sta_vht_cap *vht_cap = &sta->sta.vht_cap;
-	u32 cap_width;
-
-	if (!vht_cap->vht_supported)
-		return sta->sta.ht_cap.cap & IEEE80211_HT_CAP_SUP_WIDTH_20_40 ?
-				IEEE80211_STA_RX_BW_40 :
-				IEEE80211_STA_RX_BW_20;
-
-	cap_width = vht_cap->cap & IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_MASK;
-
-	if (cap_width == IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_160MHZ ||
-	    cap_width == IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_160_80PLUS80MHZ)
-		return IEEE80211_STA_RX_BW_160;
-
-	return IEEE80211_STA_RX_BW_80;
-}
-
-enum nl80211_chan_width ieee80211_sta_cap_chan_bw(struct sta_info *sta)
-{
-	struct ieee80211_sta_vht_cap *vht_cap = &sta->sta.vht_cap;
-	u32 cap_width;
-
-	if (!vht_cap->vht_supported) {
-		if (!sta->sta.ht_cap.ht_supported)
-			return NL80211_CHAN_WIDTH_20_NOHT;
-
-		return sta->sta.ht_cap.cap & IEEE80211_HT_CAP_SUP_WIDTH_20_40 ?
-				NL80211_CHAN_WIDTH_40 : NL80211_CHAN_WIDTH_20;
-	}
-
-	cap_width = vht_cap->cap & IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_MASK;
-
-	if (cap_width == IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_160MHZ)
-		return NL80211_CHAN_WIDTH_160;
-	else if (cap_width == IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_160_80PLUS80MHZ)
-		return NL80211_CHAN_WIDTH_80P80;
-
-	return NL80211_CHAN_WIDTH_80;
-}
-
-enum ieee80211_sta_rx_bandwidth
-ieee80211_chan_width_to_rx_bw(enum nl80211_chan_width width)
-{
-	switch (width) {
-	case NL80211_CHAN_WIDTH_20_NOHT:
-	case NL80211_CHAN_WIDTH_20:
-		return IEEE80211_STA_RX_BW_20;
-	case NL80211_CHAN_WIDTH_40:
-		return IEEE80211_STA_RX_BW_40;
-	case NL80211_CHAN_WIDTH_80:
-		return IEEE80211_STA_RX_BW_80;
-	case NL80211_CHAN_WIDTH_160:
-	case NL80211_CHAN_WIDTH_80P80:
-		return IEEE80211_STA_RX_BW_160;
-	default:
-		WARN_ON_ONCE(1);
-		return IEEE80211_STA_RX_BW_20;
-	}
 }
 
 enum ieee80211_sta_rx_bandwidth ieee80211_sta_cur_vht_bw(struct sta_info *sta)
 {
 	struct ieee80211_sub_if_data *sdata = sta->sdata;
+	u32 cap = sta->sta.vht_cap.cap;
 	enum ieee80211_sta_rx_bandwidth bw;
-	enum nl80211_chan_width bss_width = sdata->vif.bss_conf.chandef.width;
 
-	bw = ieee80211_sta_cap_rx_bw(sta);
-	bw = min(bw, sta->cur_max_bandwidth);
-	bw = min(bw, ieee80211_chan_width_to_rx_bw(bss_width));
+	if (!sta->sta.vht_cap.vht_supported) {
+		bw = sta->sta.ht_cap.cap & IEEE80211_HT_CAP_SUP_WIDTH_20_40 ?
+				IEEE80211_STA_RX_BW_40 : IEEE80211_STA_RX_BW_20;
+		goto check_max;
+	}
 
+	switch (sdata->vif.bss_conf.chandef.width) {
+	default:
+		WARN_ON_ONCE(1);
+		/* fall through */
+	case NL80211_CHAN_WIDTH_20_NOHT:
+	case NL80211_CHAN_WIDTH_20:
+	case NL80211_CHAN_WIDTH_40:
+		bw = sta->sta.ht_cap.cap & IEEE80211_HT_CAP_SUP_WIDTH_20_40 ?
+				IEEE80211_STA_RX_BW_40 : IEEE80211_STA_RX_BW_20;
+		break;
+	case NL80211_CHAN_WIDTH_160:
+		if ((cap & IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_MASK) ==
+				IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_160MHZ) {
+			bw = IEEE80211_STA_RX_BW_160;
+			break;
+		}
+		/* fall through */
+	case NL80211_CHAN_WIDTH_80P80:
+		if ((cap & IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_MASK) ==
+				IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_160_80PLUS80MHZ) {
+			bw = IEEE80211_STA_RX_BW_160;
+			break;
+		}
+		/* fall through */
+	case NL80211_CHAN_WIDTH_80:
+		bw = IEEE80211_STA_RX_BW_80;
+	}
+
+ check_max:
+	if (bw > sta->cur_max_bandwidth)
+		bw = sta->cur_max_bandwidth;
 	return bw;
 }
 
@@ -432,9 +350,9 @@ void ieee80211_sta_set_rx_nss(struct sta_info *sta)
 	sta->sta.rx_nss = max_t(u8, 1, ht_rx_nss);
 }
 
-u32 __ieee80211_vht_handle_opmode(struct ieee80211_sub_if_data *sdata,
-				  struct sta_info *sta, u8 opmode,
-				  enum nl80211_band band)
+void ieee80211_vht_handle_opmode(struct ieee80211_sub_if_data *sdata,
+				 struct sta_info *sta, u8 opmode,
+				 enum ieee80211_band band, bool nss_only)
 {
 	struct ieee80211_local *local = sdata->local;
 	struct ieee80211_supported_band *sband;
@@ -446,7 +364,7 @@ u32 __ieee80211_vht_handle_opmode(struct ieee80211_sub_if_data *sdata,
 
 	/* ignore - no support for BF yet */
 	if (opmode & IEEE80211_OPMODE_NOTIF_RX_NSS_TYPE_BF)
-		return 0;
+		return;
 
 	nss = opmode & IEEE80211_OPMODE_NOTIF_RX_NSS_MASK;
 	nss >>= IEEE80211_OPMODE_NOTIF_RX_NSS_SHIFT;
@@ -456,6 +374,9 @@ u32 __ieee80211_vht_handle_opmode(struct ieee80211_sub_if_data *sdata,
 		sta->sta.rx_nss = nss;
 		changed |= IEEE80211_RC_NSS_CHANGED;
 	}
+
+	if (nss_only)
+		goto change;
 
 	switch (opmode & IEEE80211_OPMODE_NOTIF_CHANWIDTH_MASK) {
 	case IEEE80211_OPMODE_NOTIF_CHANWIDTH_20MHZ:
@@ -475,86 +396,10 @@ u32 __ieee80211_vht_handle_opmode(struct ieee80211_sub_if_data *sdata,
 	new_bw = ieee80211_sta_cur_vht_bw(sta);
 	if (new_bw != sta->sta.bandwidth) {
 		sta->sta.bandwidth = new_bw;
-		changed |= IEEE80211_RC_BW_CHANGED;
+		changed |= IEEE80211_RC_NSS_CHANGED;
 	}
 
-	return changed;
-}
-
-void ieee80211_process_mu_groups(struct ieee80211_sub_if_data *sdata,
-				 struct ieee80211_mgmt *mgmt)
-{
-	struct ieee80211_bss_conf *bss_conf = &sdata->vif.bss_conf;
-
-	if (!sdata->vif.mu_mimo_owner)
-		return;
-
-	if (!memcmp(mgmt->u.action.u.vht_group_notif.position,
-		    bss_conf->mu_group.position, WLAN_USER_POSITION_LEN) &&
-	    !memcmp(mgmt->u.action.u.vht_group_notif.membership,
-		    bss_conf->mu_group.membership, WLAN_MEMBERSHIP_LEN))
-		return;
-
-	memcpy(bss_conf->mu_group.membership,
-	       mgmt->u.action.u.vht_group_notif.membership,
-	       WLAN_MEMBERSHIP_LEN);
-	memcpy(bss_conf->mu_group.position,
-	       mgmt->u.action.u.vht_group_notif.position,
-	       WLAN_USER_POSITION_LEN);
-
-	ieee80211_bss_info_change_notify(sdata, BSS_CHANGED_MU_GROUPS);
-}
-
-void ieee80211_update_mu_groups(struct ieee80211_vif *vif,
-				const u8 *membership, const u8 *position)
-{
-	struct ieee80211_bss_conf *bss_conf = &vif->bss_conf;
-
-	if (WARN_ON_ONCE(!vif->mu_mimo_owner))
-		return;
-
-	memcpy(bss_conf->mu_group.membership, membership, WLAN_MEMBERSHIP_LEN);
-	memcpy(bss_conf->mu_group.position, position, WLAN_USER_POSITION_LEN);
-}
-EXPORT_SYMBOL_GPL(ieee80211_update_mu_groups);
-
-void ieee80211_vht_handle_opmode(struct ieee80211_sub_if_data *sdata,
-				 struct sta_info *sta, u8 opmode,
-				 enum nl80211_band band)
-{
-	struct ieee80211_local *local = sdata->local;
-	struct ieee80211_supported_band *sband = local->hw.wiphy->bands[band];
-
-	u32 changed = __ieee80211_vht_handle_opmode(sdata, sta, opmode, band);
-
-	if (changed > 0) {
-		ieee80211_recalc_min_chandef(sdata);
+ change:
+	if (changed)
 		rate_control_rate_update(local, sband, sta, changed);
-	}
-}
-
-void ieee80211_get_vht_mask_from_cap(__le16 vht_cap,
-				     u16 vht_mask[NL80211_VHT_NSS_MAX])
-{
-	int i;
-	u16 mask, cap = le16_to_cpu(vht_cap);
-
-	for (i = 0; i < NL80211_VHT_NSS_MAX; i++) {
-		mask = (cap >> i * 2) & IEEE80211_VHT_MCS_NOT_SUPPORTED;
-		switch (mask) {
-		case IEEE80211_VHT_MCS_SUPPORT_0_7:
-			vht_mask[i] = 0x00FF;
-			break;
-		case IEEE80211_VHT_MCS_SUPPORT_0_8:
-			vht_mask[i] = 0x01FF;
-			break;
-		case IEEE80211_VHT_MCS_SUPPORT_0_9:
-			vht_mask[i] = 0x03FF;
-			break;
-		case IEEE80211_VHT_MCS_NOT_SUPPORTED:
-		default:
-			vht_mask[i] = 0;
-			break;
-		}
-	}
 }

@@ -10,7 +10,6 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-#include <linux/compiler.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
 #include <linux/dma-mapping.h>
@@ -24,8 +23,6 @@
 #include <asm/thread_info.h>
 #include <asm/memory.h>
 #include <asm/procinfo.h>
-#include <asm/suspend.h>
-#include <asm/vdso_datapage.h>
 #include <asm/hardware/cache-l2x0.h>
 #include <linux/kbuild.h>
 
@@ -41,19 +38,10 @@
  * GCC 3.2.x: miscompiles NEW_AUX_ENT in fs/binfmt_elf.c
  *            (http://gcc.gnu.org/PR8896) and incorrect structure
  *	      initialisation in fs/jffs2/erase.c
- * GCC 4.8.0-4.8.2: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=58854
- *	      miscompiles find_get_entry(), and can result in EXT3 and EXT4
- *	      filesystem corruption (possibly other FS too).
  */
-#ifdef __GNUC__
 #if (__GNUC__ == 3 && __GNUC_MINOR__ < 3)
 #error Your compiler is too buggy; it is known to miscompile kernels.
-#error    Known good compilers: 3.3, 4.x
-#endif
-#if GCC_VERSION >= 40800 && GCC_VERSION < 40803
-#error Your compiler is too buggy; it is known to miscompile kernels
-#error and result in filesystem corruption and oopses.
-#endif
+#error    Known good compilers: 3.3
 #endif
 
 int main(void)
@@ -67,6 +55,7 @@ int main(void)
   DEFINE(TI_PREEMPT,		offsetof(struct thread_info, preempt_count));
   DEFINE(TI_ADDR_LIMIT,		offsetof(struct thread_info, addr_limit));
   DEFINE(TI_TASK,		offsetof(struct thread_info, task));
+  DEFINE(TI_EXEC_DOMAIN,	offsetof(struct thread_info, exec_domain));
   DEFINE(TI_CPU,		offsetof(struct thread_info, cpu));
   DEFINE(TI_CPU_DOMAIN,		offsetof(struct thread_info, cpu_domain));
   DEFINE(TI_CPU_SAVE,		offsetof(struct thread_info, cpu_context));
@@ -107,10 +96,7 @@ int main(void)
   DEFINE(S_PC,			offsetof(struct pt_regs, ARM_pc));
   DEFINE(S_PSR,			offsetof(struct pt_regs, ARM_cpsr));
   DEFINE(S_OLD_R0,		offsetof(struct pt_regs, ARM_ORIG_r0));
-  DEFINE(PT_REGS_SIZE,		sizeof(struct pt_regs));
-  DEFINE(SVC_DACR,		offsetof(struct svc_pt_regs, dacr));
-  DEFINE(SVC_ADDR_LIMIT,	offsetof(struct svc_pt_regs, addr_limit));
-  DEFINE(SVC_REGS_SIZE,		sizeof(struct svc_pt_regs));
+  DEFINE(S_FRAME_SIZE,		sizeof(struct pt_regs));
   BLANK();
 #ifdef CONFIG_CACHE_L2X0
   DEFINE(L2X0_R_PHY_BASE,	offsetof(struct l2x0_regs, phy_base));
@@ -159,11 +145,6 @@ int main(void)
 #ifdef MULTI_CACHE
   DEFINE(CACHE_FLUSH_KERN_ALL,	offsetof(struct cpu_cache_fns, flush_kern_all));
 #endif
-#ifdef CONFIG_ARM_CPU_SUSPEND
-  DEFINE(SLEEP_SAVE_SP_SZ,	sizeof(struct sleep_save_sp));
-  DEFINE(SLEEP_SAVE_SP_PHYS,	offsetof(struct sleep_save_sp, save_ptr_stash_phys));
-  DEFINE(SLEEP_SAVE_SP_VIRT,	offsetof(struct sleep_save_sp, save_ptr_stash));
-#endif
   BLANK();
   DEFINE(DMA_BIDIRECTIONAL,	DMA_BIDIRECTIONAL);
   DEFINE(DMA_TO_DEVICE,		DMA_TO_DEVICE);
@@ -173,15 +154,45 @@ int main(void)
   DEFINE(CACHE_WRITEBACK_GRANULE, __CACHE_WRITEBACK_GRANULE);
   BLANK();
 #ifdef CONFIG_KVM_ARM_HOST
-  DEFINE(VCPU_GUEST_CTXT,	offsetof(struct kvm_vcpu, arch.ctxt));
-  DEFINE(VCPU_HOST_CTXT,	offsetof(struct kvm_vcpu, arch.host_cpu_context));
-  DEFINE(CPU_CTXT_VFP,		offsetof(struct kvm_cpu_context, vfp));
-  DEFINE(CPU_CTXT_GP_REGS,	offsetof(struct kvm_cpu_context, gp_regs));
-  DEFINE(GP_REGS_USR,		offsetof(struct kvm_regs, usr_regs));
+  DEFINE(VCPU_KVM,		offsetof(struct kvm_vcpu, kvm));
+  DEFINE(VCPU_MIDR,		offsetof(struct kvm_vcpu, arch.midr));
+  DEFINE(VCPU_CP15,		offsetof(struct kvm_vcpu, arch.cp15));
+  DEFINE(VCPU_VFP_GUEST,	offsetof(struct kvm_vcpu, arch.vfp_guest));
+  DEFINE(VCPU_VFP_HOST,		offsetof(struct kvm_vcpu, arch.host_cpu_context));
+  DEFINE(VCPU_REGS,		offsetof(struct kvm_vcpu, arch.regs));
+  DEFINE(VCPU_USR_REGS,		offsetof(struct kvm_vcpu, arch.regs.usr_regs));
+  DEFINE(VCPU_SVC_REGS,		offsetof(struct kvm_vcpu, arch.regs.svc_regs));
+  DEFINE(VCPU_ABT_REGS,		offsetof(struct kvm_vcpu, arch.regs.abt_regs));
+  DEFINE(VCPU_UND_REGS,		offsetof(struct kvm_vcpu, arch.regs.und_regs));
+  DEFINE(VCPU_IRQ_REGS,		offsetof(struct kvm_vcpu, arch.regs.irq_regs));
+  DEFINE(VCPU_FIQ_REGS,		offsetof(struct kvm_vcpu, arch.regs.fiq_regs));
+  DEFINE(VCPU_PC,		offsetof(struct kvm_vcpu, arch.regs.usr_regs.ARM_pc));
+  DEFINE(VCPU_CPSR,		offsetof(struct kvm_vcpu, arch.regs.usr_regs.ARM_cpsr));
+  DEFINE(VCPU_HCR,		offsetof(struct kvm_vcpu, arch.hcr));
+  DEFINE(VCPU_IRQ_LINES,	offsetof(struct kvm_vcpu, arch.irq_lines));
+  DEFINE(VCPU_HSR,		offsetof(struct kvm_vcpu, arch.fault.hsr));
+  DEFINE(VCPU_HxFAR,		offsetof(struct kvm_vcpu, arch.fault.hxfar));
+  DEFINE(VCPU_HPFAR,		offsetof(struct kvm_vcpu, arch.fault.hpfar));
+  DEFINE(VCPU_HYP_PC,		offsetof(struct kvm_vcpu, arch.fault.hyp_pc));
+#ifdef CONFIG_KVM_ARM_VGIC
+  DEFINE(VCPU_VGIC_CPU,		offsetof(struct kvm_vcpu, arch.vgic_cpu));
+  DEFINE(VGIC_V2_CPU_HCR,	offsetof(struct vgic_cpu, vgic_v2.vgic_hcr));
+  DEFINE(VGIC_V2_CPU_VMCR,	offsetof(struct vgic_cpu, vgic_v2.vgic_vmcr));
+  DEFINE(VGIC_V2_CPU_MISR,	offsetof(struct vgic_cpu, vgic_v2.vgic_misr));
+  DEFINE(VGIC_V2_CPU_EISR,	offsetof(struct vgic_cpu, vgic_v2.vgic_eisr));
+  DEFINE(VGIC_V2_CPU_ELRSR,	offsetof(struct vgic_cpu, vgic_v2.vgic_elrsr));
+  DEFINE(VGIC_V2_CPU_APR,	offsetof(struct vgic_cpu, vgic_v2.vgic_apr));
+  DEFINE(VGIC_V2_CPU_LR,	offsetof(struct vgic_cpu, vgic_v2.vgic_lr));
+  DEFINE(VGIC_CPU_NR_LR,	offsetof(struct vgic_cpu, nr_lr));
+#ifdef CONFIG_KVM_ARM_TIMER
+  DEFINE(VCPU_TIMER_CNTV_CTL,	offsetof(struct kvm_vcpu, arch.timer_cpu.cntv_ctl));
+  DEFINE(VCPU_TIMER_CNTV_CVAL,	offsetof(struct kvm_vcpu, arch.timer_cpu.cntv_cval));
+  DEFINE(KVM_TIMER_CNTVOFF,	offsetof(struct kvm, arch.timer.cntvoff));
+  DEFINE(KVM_TIMER_ENABLED,	offsetof(struct kvm, arch.timer.enabled));
 #endif
-  BLANK();
-#ifdef CONFIG_VDSO
-  DEFINE(VDSO_DATA_SIZE,	sizeof(union vdso_data_store));
+  DEFINE(KVM_VGIC_VCTRL,	offsetof(struct kvm, arch.vgic.vctrl_base));
+#endif
+  DEFINE(KVM_VTTBR,		offsetof(struct kvm, arch.vttbr));
 #endif
   return 0; 
 }

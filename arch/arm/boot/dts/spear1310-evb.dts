@@ -1,7 +1,7 @@
 /*
  * DTS file for SPEAr1310 Evaluation Baord
  *
- * Copyright 2012 Viresh Kumar <vireshk@kernel.org>
+ * Copyright 2012 Viresh Kumar <viresh.linux@gmail.com>
  *
  * The code contained herein is licensed under the GNU General Public
  * License. You may obtain a copy of the GNU General Public License
@@ -106,10 +106,6 @@
 			status = "okay";
 		};
 
-		miphy@eb800000 {
-			status = "okay";
-		};
-
 		cf@b2800000 {
 			status = "okay";
 		};
@@ -161,7 +157,7 @@
 				linux,code = <0x100>;
 				gpios = <&gpio0 7 0x4>;
 				debounce-interval = <20>;
-				wakeup-source;
+				gpio-key,wakeup = <1>;
 			};
 		};
 
@@ -349,7 +345,7 @@
 			spi0: spi@e0100000 {
 				status = "okay";
 				num-cs = <3>;
-				cs-gpios = <&gpio1 7 0>, <&spics 0 0>, <&spics 1 0>;
+				cs-gpios = <&gpio1 7 0>, <&spics 0>, <&spics 1>;
 
 				stmpe610@0 {
 					compatible = "st,stmpe610";

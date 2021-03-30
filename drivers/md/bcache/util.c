@@ -73,44 +73,24 @@ STRTO_H(strtouint, unsigned int)
 STRTO_H(strtoll, long long)
 STRTO_H(strtoull, unsigned long long)
 
-/**
- * bch_hprint() - formats @v to human readable string for sysfs.
- *
- * @v - signed 64 bit integer
- * @buf - the (at least 8 byte) buffer to format the result into.
- *
- * Returns the number of bytes used by format.
- */
 ssize_t bch_hprint(char *buf, int64_t v)
 {
 	static const char units[] = "?kMGTPEZY";
-	int u = 0, t;
+	char dec[4] = "";
+	int u, t = 0;
 
-	uint64_t q;
+	for (u = 0; v >= 1024 || v <= -1024; u++) {
+		t = v & ~(~0 << 10);
+		v >>= 10;
+	}
 
-	if (v < 0)
-		q = -v;
-	else
-		q = v;
+	if (!u)
+		return sprintf(buf, "%llu", v);
 
-	/* For as long as the number is more than 3 digits, but at least
-	 * once, shift right / divide by 1024.  Keep the remainder for
-	 * a digit after the decimal point.
-	 */
-	do {
-		u++;
+	if (v < 100 && v > -100)
+		snprintf(dec, sizeof(dec), ".%i", t / 100);
 
-		t = q & ~(~0 << 10);
-		q >>= 10;
-	} while (q >= 1000);
-
-	if (v < 0)
-		/* '-', up to 3 digits, '.', 1 digit, 1 character, null;
-		 * yields 8 bytes.
-		 */
-		return sprintf(buf, "-%llu.%i%c", q, t * 10 / 1024, units[u]);
-	else
-		return sprintf(buf, "%llu.%i%c", q, t * 10 / 1024, units[u]);
+	return sprintf(buf, "%lli%s%c", v, dec, units[u]);
 }
 
 ssize_t bch_snprint_string_list(char *buf, size_t size, const char * const list[],
@@ -188,14 +168,10 @@ int bch_parse_uuid(const char *s, char *uuid)
 
 void bch_time_stats_update(struct time_stats *stats, uint64_t start_time)
 {
-	uint64_t now, duration, last;
-
-	spin_lock(&stats->lock);
-
-	now		= local_clock();
-	duration	= time_after64(now, start_time)
+	uint64_t now		= local_clock();
+	uint64_t duration	= time_after64(now, start_time)
 		? now - start_time : 0;
-	last		= time_after64(now, stats->last)
+	uint64_t last		= time_after64(now, stats->last)
 		? now - stats->last : 0;
 
 	stats->max_duration = max(stats->max_duration, duration);
@@ -212,8 +188,6 @@ void bch_time_stats_update(struct time_stats *stats, uint64_t start_time)
 	}
 
 	stats->last = now ?: 1;
-
-	spin_unlock(&stats->lock);
 }
 
 /**
@@ -229,13 +203,7 @@ uint64_t bch_next_delay(struct bch_ratelimit *d, uint64_t done)
 {
 	uint64_t now = local_clock();
 
-	d->next += div_u64(done * NSEC_PER_SEC, d->rate);
-
-	if (time_before64(now + NSEC_PER_SEC, d->next))
-		d->next = now + NSEC_PER_SEC;
-
-	if (time_after64(now - NSEC_PER_SEC * 2, d->next))
-		d->next = now - NSEC_PER_SEC * 2;
+	d->next += div_u64(done, d->rate);
 
 	return time_after64(d->next, now)
 		? div_u64(d->next - now, NSEC_PER_SEC / HZ)
@@ -244,13 +212,13 @@ uint64_t bch_next_delay(struct bch_ratelimit *d, uint64_t done)
 
 void bch_bio_map(struct bio *bio, void *base)
 {
-	size_t size = bio->bi_iter.bi_size;
+	size_t size = bio->bi_size;
 	struct bio_vec *bv = bio->bi_io_vec;
 
-	BUG_ON(!bio->bi_iter.bi_size);
+	BUG_ON(!bio->bi_size);
 	BUG_ON(bio->bi_vcnt);
 
-	bv->bv_offset = base ? offset_in_page(base) : 0;
+	bv->bv_offset = base ? ((unsigned long) base) % PAGE_SIZE : 0;
 	goto start;
 
 	for (; size; bio->bi_vcnt++, bv++) {
@@ -267,6 +235,23 @@ start:		bv->bv_len	= min_t(size_t, PAGE_SIZE - bv->bv_offset,
 
 		size -= bv->bv_len;
 	}
+}
+
+int bch_bio_alloc_pages(struct bio *bio, gfp_t gfp)
+{
+	int i;
+	struct bio_vec *bv;
+
+	bio_for_each_segment(bv, bio, i) {
+		bv->bv_page = alloc_page(gfp);
+		if (!bv->bv_page) {
+			while (bv-- != bio->bi_io_vec + bio->bi_idx)
+				__free_page(bv->bv_page);
+			return -ENOMEM;
+		}
+	}
+
+	return 0;
 }
 
 /*

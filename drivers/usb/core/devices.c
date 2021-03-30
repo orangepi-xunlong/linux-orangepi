@@ -110,6 +110,13 @@ static const char format_endpt[] =
 /* E:  Ad=xx(s) Atr=xx(ssss) MxPS=dddd Ivl=D?s */
   "E:  Ad=%02x(%c) Atr=%02x(%-4s) MxPS=%4d Ivl=%d%cs\n";
 
+
+/*
+ * Need access to the driver and USB bus lists.
+ * extern struct list_head usb_bus_list;
+ * However, these will come from functions that return ptrs to each of them.
+ */
+
 /*
  * Wait for an connect/disconnect event to happen. We initialize
  * the event counter with an odd number, and each event will increment
@@ -214,7 +221,7 @@ static char *usb_dump_endpoint_descriptor(int speed, char *start, char *end,
 		break;
 	case USB_ENDPOINT_XFER_INT:
 		type = "Int.";
-		if (speed == USB_SPEED_HIGH || speed >= USB_SPEED_SUPER)
+		if (speed == USB_SPEED_HIGH || speed == USB_SPEED_SUPER)
 			interval = 1 << (desc->bInterval - 1);
 		else
 			interval = desc->bInterval;
@@ -223,7 +230,7 @@ static char *usb_dump_endpoint_descriptor(int speed, char *start, char *end,
 		return start;
 	}
 	interval *= (speed == USB_SPEED_HIGH ||
-		     speed >= USB_SPEED_SUPER) ? 125 : 1000;
+		     speed == USB_SPEED_SUPER) ? 125 : 1000;
 	if (interval % 1000)
 		unit = 'u';
 	else {
@@ -315,7 +322,7 @@ static char *usb_dump_config_descriptor(char *start, char *end,
 
 	if (start > end)
 		return start;
-	if (speed >= USB_SPEED_SUPER)
+	if (speed == USB_SPEED_SUPER)
 		mul = 8;
 	else
 		mul = 2;
@@ -527,8 +534,6 @@ static ssize_t usb_device_dump(char __user **buffer, size_t *nbytes,
 		speed = "480"; break;
 	case USB_SPEED_SUPER:
 		speed = "5000"; break;
-	case USB_SPEED_SUPER_PLUS:
-		speed = "10000"; break;
 	default:
 		speed = "??";
 	}
@@ -548,7 +553,7 @@ static ssize_t usb_device_dump(char __user **buffer, size_t *nbytes,
 
 		/* super/high speed reserves 80%, full/low reserves 90% */
 		if (usbdev->speed == USB_SPEED_HIGH ||
-		    usbdev->speed >= USB_SPEED_SUPER)
+		    usbdev->speed == USB_SPEED_SUPER)
 			max = 800;
 		else
 			max = FRAME_TIME_MAX_USECS_ALLOC;
@@ -611,7 +616,6 @@ static ssize_t usb_device_read(struct file *file, char __user *buf,
 	struct usb_bus *bus;
 	ssize_t ret, total_written = 0;
 	loff_t skip_bytes = *ppos;
-	int id;
 
 	if (*ppos < 0)
 		return -EINVAL;
@@ -620,9 +624,9 @@ static ssize_t usb_device_read(struct file *file, char __user *buf,
 	if (!access_ok(VERIFY_WRITE, buf, nbytes))
 		return -EFAULT;
 
-	mutex_lock(&usb_bus_idr_lock);
+	mutex_lock(&usb_bus_list_lock);
 	/* print devices for all busses */
-	idr_for_each_entry(&usb_bus_idr, bus, id) {
+	list_for_each_entry(bus, &usb_bus_list, bus_list) {
 		/* recurse through all children of the root hub */
 		if (!bus_to_hcd(bus)->rh_registered)
 			continue;
@@ -631,12 +635,12 @@ static ssize_t usb_device_read(struct file *file, char __user *buf,
 				      bus->root_hub, bus, 0, 0, 0);
 		usb_unlock_device(bus->root_hub);
 		if (ret < 0) {
-			mutex_unlock(&usb_bus_idr_lock);
+			mutex_unlock(&usb_bus_list_lock);
 			return ret;
 		}
 		total_written += ret;
 	}
-	mutex_unlock(&usb_bus_idr_lock);
+	mutex_unlock(&usb_bus_list_lock);
 	return total_written;
 }
 
@@ -657,8 +661,32 @@ static unsigned int usb_device_poll(struct file *file,
 	return 0;
 }
 
+static loff_t usb_device_lseek(struct file *file, loff_t offset, int orig)
+{
+	loff_t ret;
+
+	mutex_lock(&file_inode(file)->i_mutex);
+
+	switch (orig) {
+	case 0:
+		file->f_pos = offset;
+		ret = file->f_pos;
+		break;
+	case 1:
+		file->f_pos += offset;
+		ret = file->f_pos;
+		break;
+	case 2:
+	default:
+		ret = -EINVAL;
+	}
+
+	mutex_unlock(&file_inode(file)->i_mutex);
+	return ret;
+}
+
 const struct file_operations usbfs_devices_fops = {
-	.llseek =	no_seek_end_llseek,
+	.llseek =	usb_device_lseek,
 	.read =		usb_device_read,
 	.poll =		usb_device_poll,
 };

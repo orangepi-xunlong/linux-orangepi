@@ -35,7 +35,7 @@
 #include <linux/i2c/max6639.h>
 
 /* Addresses to scan */
-static const unsigned short normal_i2c[] = { 0x2c, 0x2e, 0x2f, I2C_CLIENT_END };
+static unsigned short normal_i2c[] = { 0x2c, 0x2e, 0x2f, I2C_CLIENT_END };
 
 /* The MAX6639 registers, valid channel numbers: 0, 1 */
 #define MAX6639_REG_TEMP(ch)			(0x00 + (ch))
@@ -80,7 +80,7 @@ static const int rpm_ranges[] = { 2000, 4000, 8000, 16000 };
  * Client data (each client gets its own)
  */
 struct max6639_data {
-	struct i2c_client *client;
+	struct device *hwmon_dev;
 	struct mutex update_lock;
 	char valid;		/* !=0 if following fields are valid */
 	unsigned long last_updated;	/* In jiffies */
@@ -104,8 +104,8 @@ struct max6639_data {
 
 static struct max6639_data *max6639_update_device(struct device *dev)
 {
-	struct max6639_data *data = dev_get_drvdata(dev);
-	struct i2c_client *client = data->client;
+	struct i2c_client *client = to_i2c_client(dev);
+	struct max6639_data *data = i2c_get_clientdata(client);
 	struct max6639_data *ret = data;
 	int i;
 	int status_reg;
@@ -191,8 +191,9 @@ static ssize_t show_temp_fault(struct device *dev,
 static ssize_t show_temp_max(struct device *dev,
 			     struct device_attribute *dev_attr, char *buf)
 {
+	struct i2c_client *client = to_i2c_client(dev);
+	struct max6639_data *data = i2c_get_clientdata(client);
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(dev_attr);
-	struct max6639_data *data = dev_get_drvdata(dev);
 
 	return sprintf(buf, "%d\n", (data->temp_therm[attr->index] * 1000));
 }
@@ -201,9 +202,9 @@ static ssize_t set_temp_max(struct device *dev,
 			    struct device_attribute *dev_attr,
 			    const char *buf, size_t count)
 {
+	struct i2c_client *client = to_i2c_client(dev);
+	struct max6639_data *data = i2c_get_clientdata(client);
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(dev_attr);
-	struct max6639_data *data = dev_get_drvdata(dev);
-	struct i2c_client *client = data->client;
 	unsigned long val;
 	int res;
 
@@ -223,8 +224,9 @@ static ssize_t set_temp_max(struct device *dev,
 static ssize_t show_temp_crit(struct device *dev,
 			      struct device_attribute *dev_attr, char *buf)
 {
+	struct i2c_client *client = to_i2c_client(dev);
+	struct max6639_data *data = i2c_get_clientdata(client);
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(dev_attr);
-	struct max6639_data *data = dev_get_drvdata(dev);
 
 	return sprintf(buf, "%d\n", (data->temp_alert[attr->index] * 1000));
 }
@@ -233,9 +235,9 @@ static ssize_t set_temp_crit(struct device *dev,
 			     struct device_attribute *dev_attr,
 			     const char *buf, size_t count)
 {
+	struct i2c_client *client = to_i2c_client(dev);
+	struct max6639_data *data = i2c_get_clientdata(client);
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(dev_attr);
-	struct max6639_data *data = dev_get_drvdata(dev);
-	struct i2c_client *client = data->client;
 	unsigned long val;
 	int res;
 
@@ -256,8 +258,9 @@ static ssize_t show_temp_emergency(struct device *dev,
 				   struct device_attribute *dev_attr,
 				   char *buf)
 {
+	struct i2c_client *client = to_i2c_client(dev);
+	struct max6639_data *data = i2c_get_clientdata(client);
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(dev_attr);
-	struct max6639_data *data = dev_get_drvdata(dev);
 
 	return sprintf(buf, "%d\n", (data->temp_ot[attr->index] * 1000));
 }
@@ -266,9 +269,9 @@ static ssize_t set_temp_emergency(struct device *dev,
 				  struct device_attribute *dev_attr,
 				  const char *buf, size_t count)
 {
+	struct i2c_client *client = to_i2c_client(dev);
+	struct max6639_data *data = i2c_get_clientdata(client);
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(dev_attr);
-	struct max6639_data *data = dev_get_drvdata(dev);
-	struct i2c_client *client = data->client;
 	unsigned long val;
 	int res;
 
@@ -288,8 +291,9 @@ static ssize_t set_temp_emergency(struct device *dev,
 static ssize_t show_pwm(struct device *dev,
 			struct device_attribute *dev_attr, char *buf)
 {
+	struct i2c_client *client = to_i2c_client(dev);
+	struct max6639_data *data = i2c_get_clientdata(client);
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(dev_attr);
-	struct max6639_data *data = dev_get_drvdata(dev);
 
 	return sprintf(buf, "%d\n", data->pwm[attr->index] * 255 / 120);
 }
@@ -298,9 +302,9 @@ static ssize_t set_pwm(struct device *dev,
 		       struct device_attribute *dev_attr,
 		       const char *buf, size_t count)
 {
+	struct i2c_client *client = to_i2c_client(dev);
+	struct max6639_data *data = i2c_get_clientdata(client);
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(dev_attr);
-	struct max6639_data *data = dev_get_drvdata(dev);
-	struct i2c_client *client = data->client;
 	unsigned long val;
 	int res;
 
@@ -374,7 +378,7 @@ static SENSOR_DEVICE_ATTR(temp1_emergency_alarm, S_IRUGO, show_alarm, NULL, 5);
 static SENSOR_DEVICE_ATTR(temp2_emergency_alarm, S_IRUGO, show_alarm, NULL, 4);
 
 
-static struct attribute *max6639_attrs[] = {
+static struct attribute *max6639_attributes[] = {
 	&sensor_dev_attr_temp1_input.dev_attr.attr,
 	&sensor_dev_attr_temp2_input.dev_attr.attr,
 	&sensor_dev_attr_temp1_fault.dev_attr.attr,
@@ -399,7 +403,10 @@ static struct attribute *max6639_attrs[] = {
 	&sensor_dev_attr_temp2_emergency_alarm.dev_attr.attr,
 	NULL
 };
-ATTRIBUTE_GROUPS(max6639);
+
+static const struct attribute_group max6639_group = {
+	.attrs = max6639_attributes,
+};
 
 /*
  *  returns respective index in rpm_ranges table
@@ -417,11 +424,11 @@ static int rpm_range_to_reg(int range)
 	return 1; /* default: 4000 RPM */
 }
 
-static int max6639_init_client(struct i2c_client *client,
-			       struct max6639_data *data)
+static int max6639_init_client(struct i2c_client *client)
 {
+	struct max6639_data *data = i2c_get_clientdata(client);
 	struct max6639_platform_data *max6639_info =
-		dev_get_platdata(&client->dev);
+		client->dev.platform_data;
 	int i;
 	int rpm_range = 1; /* default: 4000 RPM */
 	int err;
@@ -538,27 +545,50 @@ static int max6639_detect(struct i2c_client *client,
 static int max6639_probe(struct i2c_client *client,
 			 const struct i2c_device_id *id)
 {
-	struct device *dev = &client->dev;
 	struct max6639_data *data;
-	struct device *hwmon_dev;
 	int err;
 
-	data = devm_kzalloc(dev, sizeof(struct max6639_data), GFP_KERNEL);
+	data = devm_kzalloc(&client->dev, sizeof(struct max6639_data),
+			    GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 
-	data->client = client;
+	i2c_set_clientdata(client, data);
 	mutex_init(&data->update_lock);
 
 	/* Initialize the max6639 chip */
-	err = max6639_init_client(client, data);
+	err = max6639_init_client(client);
 	if (err < 0)
 		return err;
 
-	hwmon_dev = devm_hwmon_device_register_with_groups(dev, client->name,
-							   data,
-							   max6639_groups);
-	return PTR_ERR_OR_ZERO(hwmon_dev);
+	/* Register sysfs hooks */
+	err = sysfs_create_group(&client->dev.kobj, &max6639_group);
+	if (err)
+		return err;
+
+	data->hwmon_dev = hwmon_device_register(&client->dev);
+	if (IS_ERR(data->hwmon_dev)) {
+		err = PTR_ERR(data->hwmon_dev);
+		goto error_remove;
+	}
+
+	dev_info(&client->dev, "temperature sensor and fan control found\n");
+
+	return 0;
+
+error_remove:
+	sysfs_remove_group(&client->dev.kobj, &max6639_group);
+	return err;
+}
+
+static int max6639_remove(struct i2c_client *client)
+{
+	struct max6639_data *data = i2c_get_clientdata(client);
+
+	hwmon_device_unregister(data->hwmon_dev);
+	sysfs_remove_group(&client->dev.kobj, &max6639_group);
+
+	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -592,7 +622,9 @@ static const struct i2c_device_id max6639_id[] = {
 
 MODULE_DEVICE_TABLE(i2c, max6639_id);
 
-static SIMPLE_DEV_PM_OPS(max6639_pm_ops, max6639_suspend, max6639_resume);
+static const struct dev_pm_ops max6639_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(max6639_suspend, max6639_resume)
+};
 
 static struct i2c_driver max6639_driver = {
 	.class = I2C_CLASS_HWMON,
@@ -601,6 +633,7 @@ static struct i2c_driver max6639_driver = {
 		   .pm = &max6639_pm_ops,
 		   },
 	.probe = max6639_probe,
+	.remove = max6639_remove,
 	.id_table = max6639_id,
 	.detect = max6639_detect,
 	.address_list = normal_i2c,

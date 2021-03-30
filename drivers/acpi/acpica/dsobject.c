@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2013, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -240,7 +240,7 @@ acpi_ds_build_internal_object(struct acpi_walk_state *walk_state,
 		return_ACPI_STATUS(status);
 	}
 
-exit:
+      exit:
 	*obj_desc_ptr = obj_desc;
 	return_ACPI_STATUS(status);
 }
@@ -339,8 +339,8 @@ acpi_ds_build_internal_buffer_obj(struct acpi_walk_state *walk_state,
 		/* Initialize buffer from the byte_list (if present) */
 
 		if (byte_list) {
-			memcpy(obj_desc->buffer.pointer, byte_list->named.data,
-			       byte_list_length);
+			ACPI_MEMCPY(obj_desc->buffer.pointer,
+				    byte_list->named.data, byte_list_length);
 		}
 	}
 
@@ -463,10 +463,10 @@ acpi_ds_build_internal_package_obj(struct acpi_walk_state *walk_state,
 						  arg->common.node);
 			}
 		} else {
-			status =
-			    acpi_ds_build_internal_object(walk_state, arg,
-							  &obj_desc->package.
-							  elements[i]);
+			status = acpi_ds_build_internal_object(walk_state, arg,
+							       &obj_desc->
+							       package.
+							       elements[i]);
 		}
 
 		if (*obj_desc_ptr) {
@@ -524,8 +524,8 @@ acpi_ds_build_internal_package_obj(struct acpi_walk_state *walk_state,
 			arg = arg->common.next;
 		}
 
-		ACPI_INFO(("Actual Package length (%u) is larger than "
-			   "NumElements field (%u), truncated",
+		ACPI_INFO((AE_INFO,
+			   "Actual Package length (%u) is larger than NumElements field (%u), truncated",
 			   i, element_count));
 	} else if (i < element_count) {
 		/*
@@ -533,8 +533,7 @@ acpi_ds_build_internal_package_obj(struct acpi_walk_state *walk_state,
 		 * Note: this is not an error, the package is padded out with NULLs.
 		 */
 		ACPI_DEBUG_PRINT((ACPI_DB_INFO,
-				  "Package List length (%u) smaller than NumElements "
-				  "count (%u), padded with null elements\n",
+				  "Package List length (%u) smaller than NumElements count (%u), padded with null elements\n",
 				  i, element_count));
 	}
 
@@ -585,9 +584,8 @@ acpi_ds_create_node(struct acpi_walk_state *walk_state,
 
 	/* Build an internal object for the argument(s) */
 
-	status =
-	    acpi_ds_build_internal_object(walk_state, op->common.value.arg,
-					  &obj_desc);
+	status = acpi_ds_build_internal_object(walk_state, op->common.value.arg,
+					       &obj_desc);
 	if (ACPI_FAILURE(status)) {
 		return_ACPI_STATUS(status);
 	}
@@ -650,6 +648,7 @@ acpi_ds_init_object_from_op(struct acpi_walk_state *walk_state,
 
 	switch (obj_desc->common.type) {
 	case ACPI_TYPE_BUFFER:
+
 		/*
 		 * Defer evaluation of Buffer term_arg operand
 		 */
@@ -661,6 +660,7 @@ acpi_ds_init_object_from_op(struct acpi_walk_state *walk_state,
 		break;
 
 	case ACPI_TYPE_PACKAGE:
+
 		/*
 		 * Defer evaluation of Package term_arg operand
 		 */
@@ -741,7 +741,6 @@ acpi_ds_init_object_from_op(struct acpi_walk_state *walk_state,
 			break;
 
 		default:
-
 			ACPI_ERROR((AE_INFO, "Unknown Integer type 0x%X",
 				    op_info->type));
 			status = AE_AML_OPERAND_TYPE;
@@ -752,7 +751,8 @@ acpi_ds_init_object_from_op(struct acpi_walk_state *walk_state,
 	case ACPI_TYPE_STRING:
 
 		obj_desc->string.pointer = op->common.value.string;
-		obj_desc->string.length = (u32)strlen(op->common.value.string);
+		obj_desc->string.length =
+		    (u32) ACPI_STRLEN(op->common.value.string);
 
 		/*
 		 * The string is contained in the ACPI table, don't ever try

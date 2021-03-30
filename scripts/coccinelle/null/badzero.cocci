@@ -10,7 +10,7 @@
 // Copyright: (C) 2012 Julia Lawall, INRIA/LIP6.  GPLv2.
 // Copyright: (C) 2012 Gilles Muller, INRIA/LiP6.  GPLv2.
 // URL: http://coccinelle.lip6.fr/
-// Comments: Requires Coccinelle version 1.0.0-rc20 or later
+// Comments:
 // Options:
 
 virtual patch
@@ -19,7 +19,6 @@ virtual org
 virtual report
 
 @initialize:ocaml@
-@@
 let negtable = Hashtbl.create 101
 
 @depends on patch@

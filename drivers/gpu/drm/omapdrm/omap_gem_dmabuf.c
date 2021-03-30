@@ -17,13 +17,9 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <linux/dma-buf.h>
-
 #include "omap_drv.h"
 
-/* -----------------------------------------------------------------------------
- * DMABUF Export
- */
+#include <linux/dma-buf.h>
 
 static struct sg_table *omap_gem_map_dma_buf(
 		struct dma_buf_attachment *attachment,
@@ -83,7 +79,7 @@ static void omap_gem_dmabuf_release(struct dma_buf *buffer)
 
 
 static int omap_gem_dmabuf_begin_cpu_access(struct dma_buf *buffer,
-		enum dma_data_direction dir)
+		size_t start, size_t len, enum dma_data_direction dir)
 {
 	struct drm_gem_object *obj = buffer->priv;
 	struct page **pages;
@@ -97,12 +93,11 @@ static int omap_gem_dmabuf_begin_cpu_access(struct dma_buf *buffer,
 	return omap_gem_get_pages(obj, &pages, true);
 }
 
-static int omap_gem_dmabuf_end_cpu_access(struct dma_buf *buffer,
-					  enum dma_data_direction dir)
+static void omap_gem_dmabuf_end_cpu_access(struct dma_buf *buffer,
+		size_t start, size_t len, enum dma_data_direction dir)
 {
 	struct drm_gem_object *obj = buffer->priv;
 	omap_gem_put_pages(obj);
-	return 0;
 }
 
 
@@ -141,59 +136,76 @@ static void omap_gem_dmabuf_kunmap(struct dma_buf *buffer,
 	kunmap(pages[page_num]);
 }
 
+/*
+ * TODO maybe we can split up drm_gem_mmap to avoid duplicating
+ * some here.. or at least have a drm_dmabuf_mmap helper.
+ */
 static int omap_gem_dmabuf_mmap(struct dma_buf *buffer,
 		struct vm_area_struct *vma)
 {
 	struct drm_gem_object *obj = buffer->priv;
 	int ret = 0;
 
-	ret = drm_gem_mmap_obj(obj, omap_gem_mmap_size(obj), vma);
-	if (ret < 0)
-		return ret;
+	if (WARN_ON(!obj->filp))
+		return -EINVAL;
+
+	/* Check for valid size. */
+	if (omap_gem_mmap_size(obj) < vma->vm_end - vma->vm_start) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	if (!obj->dev->driver->gem_vm_ops) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	vma->vm_flags |= VM_IO | VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP;
+	vma->vm_ops = obj->dev->driver->gem_vm_ops;
+	vma->vm_private_data = obj;
+	vma->vm_page_prot =  pgprot_writecombine(vm_get_page_prot(vma->vm_flags));
+
+	/* Take a ref for this mapping of the object, so that the fault
+	 * handler can dereference the mmap offset's pointer to the object.
+	 * This reference is cleaned up by the corresponding vm_close
+	 * (which should happen whether the vma was created by this call, or
+	 * by a vm_open due to mremap or partial unmap or whatever).
+	 */
+	vma->vm_ops->open(vma);
+
+out_unlock:
 
 	return omap_gem_mmap_obj(obj, vma);
 }
 
 static struct dma_buf_ops omap_dmabuf_ops = {
-	.map_dma_buf = omap_gem_map_dma_buf,
-	.unmap_dma_buf = omap_gem_unmap_dma_buf,
-	.release = omap_gem_dmabuf_release,
-	.begin_cpu_access = omap_gem_dmabuf_begin_cpu_access,
-	.end_cpu_access = omap_gem_dmabuf_end_cpu_access,
-	.kmap_atomic = omap_gem_dmabuf_kmap_atomic,
-	.kunmap_atomic = omap_gem_dmabuf_kunmap_atomic,
-	.kmap = omap_gem_dmabuf_kmap,
-	.kunmap = omap_gem_dmabuf_kunmap,
-	.mmap = omap_gem_dmabuf_mmap,
+		.map_dma_buf = omap_gem_map_dma_buf,
+		.unmap_dma_buf = omap_gem_unmap_dma_buf,
+		.release = omap_gem_dmabuf_release,
+		.begin_cpu_access = omap_gem_dmabuf_begin_cpu_access,
+		.end_cpu_access = omap_gem_dmabuf_end_cpu_access,
+		.kmap_atomic = omap_gem_dmabuf_kmap_atomic,
+		.kunmap_atomic = omap_gem_dmabuf_kunmap_atomic,
+		.kmap = omap_gem_dmabuf_kmap,
+		.kunmap = omap_gem_dmabuf_kunmap,
+		.mmap = omap_gem_dmabuf_mmap,
 };
 
 struct dma_buf *omap_gem_prime_export(struct drm_device *dev,
 		struct drm_gem_object *obj, int flags)
 {
-	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
-
-	exp_info.ops = &omap_dmabuf_ops;
-	exp_info.size = obj->size;
-	exp_info.flags = flags;
-	exp_info.priv = obj;
-
-	return dma_buf_export(&exp_info);
+	return dma_buf_export(obj, &omap_dmabuf_ops, obj->size, flags);
 }
 
-/* -----------------------------------------------------------------------------
- * DMABUF Import
- */
-
 struct drm_gem_object *omap_gem_prime_import(struct drm_device *dev,
-					     struct dma_buf *dma_buf)
+		struct dma_buf *buffer)
 {
-	struct dma_buf_attachment *attach;
 	struct drm_gem_object *obj;
-	struct sg_table *sgt;
-	int ret;
 
-	if (dma_buf->ops == &omap_dmabuf_ops) {
-		obj = dma_buf->priv;
+	/* is this one of own objects? */
+	if (buffer->ops == &omap_dmabuf_ops) {
+		obj = buffer->priv;
+		/* is it from our device? */
 		if (obj->dev == dev) {
 			/*
 			 * Importing dmabuf exported from out own gem increases
@@ -204,33 +216,9 @@ struct drm_gem_object *omap_gem_prime_import(struct drm_device *dev,
 		}
 	}
 
-	attach = dma_buf_attach(dma_buf, dev->dev);
-	if (IS_ERR(attach))
-		return ERR_CAST(attach);
-
-	get_dma_buf(dma_buf);
-
-	sgt = dma_buf_map_attachment(attach, DMA_BIDIRECTIONAL);
-	if (IS_ERR(sgt)) {
-		ret = PTR_ERR(sgt);
-		goto fail_detach;
-	}
-
-	obj = omap_gem_new_dmabuf(dev, dma_buf->size, sgt);
-	if (IS_ERR(obj)) {
-		ret = PTR_ERR(obj);
-		goto fail_unmap;
-	}
-
-	obj->import_attach = attach;
-
-	return obj;
-
-fail_unmap:
-	dma_buf_unmap_attachment(attach, sgt, DMA_BIDIRECTIONAL);
-fail_detach:
-	dma_buf_detach(dma_buf, attach);
-	dma_buf_put(dma_buf);
-
-	return ERR_PTR(ret);
+	/*
+	 * TODO add support for importing buffers from other devices..
+	 * for now we don't need this but would be nice to add eventually
+	 */
+	return ERR_PTR(-EINVAL);
 }

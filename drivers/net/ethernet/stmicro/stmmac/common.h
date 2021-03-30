@@ -27,10 +27,10 @@
 
 #include <linux/etherdevice.h>
 #include <linux/netdevice.h>
-#include <linux/stmmac.h>
 #include <linux/phy.h>
 #include <linux/module.h>
-#if IS_ENABLED(CONFIG_VLAN_8021Q)
+#include <linux/init.h>
+#if defined(CONFIG_VLAN_8021Q) || defined(CONFIG_VLAN_8021Q_MODULE)
 #define STMMAC_VLAN_TAG_USED
 #include <linux/if_vlan.h>
 #endif
@@ -38,20 +38,23 @@
 #include "descs.h"
 #include "mmc.h"
 
+#undef CHIP_DEBUG_PRINT
+/* Turn-on extra printk debug for MAC core, dma and descriptors */
+/* #define CHIP_DEBUG_PRINT */
+
+#ifdef CHIP_DEBUG_PRINT
+#define CHIP_DBG(fmt, args...)  printk(fmt, ## args)
+#else
+#define CHIP_DBG(fmt, args...)  do { } while (0)
+#endif
+
 /* Synopsys Core versions */
 #define	DWMAC_CORE_3_40	0x34
 #define	DWMAC_CORE_3_50	0x35
-#define	DWMAC_CORE_4_00	0x40
-#define STMMAC_CHAN0	0	/* Always supported and default for all chips */
-
-#define DMA_TX_SIZE 512
-#define DMA_RX_SIZE 512
-#define STMMAC_GET_ENTRY(x, size)	((x + 1) & (size - 1))
 
 #undef FRAME_FILTER_DEBUG
 /* #define FRAME_FILTER_DEBUG */
 
-/* Extra statistic and debug information exposed by ethtool */
 struct stmmac_extra_stats {
 	/* Transmit errors */
 	unsigned long tx_underflow ____cacheline_aligned;
@@ -102,7 +105,7 @@ struct stmmac_extra_stats {
 	unsigned long napi_poll;
 	unsigned long tx_normal_irq_n;
 	unsigned long tx_clean;
-	unsigned long tx_set_ic_bit;
+	unsigned long tx_reset_ic_bit;
 	unsigned long irq_receive_pmt_irq_n;
 	/* MMC info */
 	unsigned long mmc_tx_irq_n;
@@ -120,17 +123,14 @@ struct stmmac_extra_stats {
 	unsigned long ip_csum_bypassed;
 	unsigned long ipv4_pkt_rcvd;
 	unsigned long ipv6_pkt_rcvd;
-	unsigned long no_ptp_rx_msg_type_ext;
-	unsigned long ptp_rx_msg_type_sync;
-	unsigned long ptp_rx_msg_type_follow_up;
-	unsigned long ptp_rx_msg_type_delay_req;
-	unsigned long ptp_rx_msg_type_delay_resp;
-	unsigned long ptp_rx_msg_type_pdelay_req;
-	unsigned long ptp_rx_msg_type_pdelay_resp;
-	unsigned long ptp_rx_msg_type_pdelay_follow_up;
-	unsigned long ptp_rx_msg_type_announce;
-	unsigned long ptp_rx_msg_type_management;
-	unsigned long ptp_rx_msg_pkt_reserved_type;
+	unsigned long rx_msg_type_ext_no_ptp;
+	unsigned long rx_msg_type_sync;
+	unsigned long rx_msg_type_follow_up;
+	unsigned long rx_msg_type_delay_req;
+	unsigned long rx_msg_type_delay_resp;
+	unsigned long rx_msg_type_pdelay_req;
+	unsigned long rx_msg_type_pdelay_resp;
+	unsigned long rx_msg_type_pdelay_follow_up;
 	unsigned long ptp_frame_type;
 	unsigned long ptp_ver;
 	unsigned long timestamp_dropped;
@@ -147,34 +147,6 @@ struct stmmac_extra_stats {
 	unsigned long pcs_link;
 	unsigned long pcs_duplex;
 	unsigned long pcs_speed;
-	/* debug register */
-	unsigned long mtl_tx_status_fifo_full;
-	unsigned long mtl_tx_fifo_not_empty;
-	unsigned long mmtl_fifo_ctrl;
-	unsigned long mtl_tx_fifo_read_ctrl_write;
-	unsigned long mtl_tx_fifo_read_ctrl_wait;
-	unsigned long mtl_tx_fifo_read_ctrl_read;
-	unsigned long mtl_tx_fifo_read_ctrl_idle;
-	unsigned long mac_tx_in_pause;
-	unsigned long mac_tx_frame_ctrl_xfer;
-	unsigned long mac_tx_frame_ctrl_idle;
-	unsigned long mac_tx_frame_ctrl_wait;
-	unsigned long mac_tx_frame_ctrl_pause;
-	unsigned long mac_gmii_tx_proto_engine;
-	unsigned long mtl_rx_fifo_fill_level_full;
-	unsigned long mtl_rx_fifo_fill_above_thresh;
-	unsigned long mtl_rx_fifo_fill_below_thresh;
-	unsigned long mtl_rx_fifo_fill_level_empty;
-	unsigned long mtl_rx_fifo_read_ctrl_flush;
-	unsigned long mtl_rx_fifo_read_ctrl_read_data;
-	unsigned long mtl_rx_fifo_read_ctrl_status;
-	unsigned long mtl_rx_fifo_read_ctrl_idle;
-	unsigned long mtl_rx_fifo_ctrl_active;
-	unsigned long mac_rx_frame_ctrl_fifo;
-	unsigned long mac_gmii_rx_proto_engine;
-	/* TSO */
-	unsigned long tx_tso_frames;
-	unsigned long tx_tso_nfrags;
 };
 
 /* CSR Frequency Access Defines*/
@@ -188,7 +160,7 @@ struct stmmac_extra_stats {
 #define	MAC_CSR_H_FRQ_MASK	0x20
 
 #define HASH_TABLE_SIZE 64
-#define PAUSE_TIME 0xffff
+#define PAUSE_TIME 0x200
 
 /* Flow Control defines */
 #define FLOW_OFF	0
@@ -235,11 +207,6 @@ struct stmmac_extra_stats {
 #define DMA_HW_FEAT_ACTPHYIF	0x70000000	/* Active/selected PHY iface */
 #define DEFAULT_DMA_PBL		8
 
-/* PCS status and mask defines */
-#define	PCS_ANE_IRQ		BIT(2)	/* PCS Auto-Negotiation */
-#define	PCS_LINK_IRQ		BIT(1)	/* PCS Link */
-#define	PCS_RGSMIIIS_IRQ	BIT(0)	/* RGMII or SMII Interrupt */
-
 /* Max/Min RI Watchdog Timer count value */
 #define MAX_DMA_RIWT		0xff
 #define MIN_DMA_RIWT		0x20
@@ -251,20 +218,10 @@ struct stmmac_extra_stats {
 
 /* Rx IPC status */
 enum rx_frame_status {
-	good_frame = 0x0,
-	discard_frame = 0x1,
-	csum_none = 0x2,
-	llc_snap = 0x4,
-	dma_own = 0x8,
-	rx_not_ls = 0x10,
-};
-
-/* Tx status */
-enum tx_frame_status {
-	tx_done = 0x0,
-	tx_not_ls = 0x1,
-	tx_err = 0x2,
-	tx_dma_own = 0x4,
+	good_frame = 0,
+	discard_frame = 1,
+	csum_none = 2,
+	llc_snap = 4,
 };
 
 enum dma_irq_status {
@@ -274,15 +231,15 @@ enum dma_irq_status {
 	handle_tx = 0x8,
 };
 
-/* EEE and LPI defines */
-#define	CORE_IRQ_TX_PATH_IN_LPI_MODE	(1 << 0)
-#define	CORE_IRQ_TX_PATH_EXIT_LPI_MODE	(1 << 1)
-#define	CORE_IRQ_RX_PATH_IN_LPI_MODE	(1 << 2)
-#define	CORE_IRQ_RX_PATH_EXIT_LPI_MODE	(1 << 3)
+#define	CORE_IRQ_TX_PATH_IN_LPI_MODE	(1 << 1)
+#define	CORE_IRQ_TX_PATH_EXIT_LPI_MODE	(1 << 2)
+#define	CORE_IRQ_RX_PATH_IN_LPI_MODE	(1 << 3)
+#define	CORE_IRQ_RX_PATH_EXIT_LPI_MODE	(1 << 4)
 
-#define CORE_IRQ_MTL_RX_OVERFLOW	BIT(8)
+#define	CORE_PCS_ANE_COMPLETE		(1 << 5)
+#define	CORE_PCS_LINK_STATUS		(1 << 6)
+#define	CORE_RGMII_IRQ			(1 << 7)
 
-/* Physical Coding Sublayer */
 struct rgmii_adv {
 	unsigned int pause;
 	unsigned int duplex;
@@ -312,10 +269,8 @@ struct dma_features {
 	/* 802.3az - Energy-Efficient Ethernet (EEE) */
 	unsigned int eee;
 	unsigned int av;
-	unsigned int tsoen;
 	/* TX and RX csum */
 	unsigned int tx_coe;
-	unsigned int rx_coe;
 	unsigned int rx_coe_type1;
 	unsigned int rx_coe_type2;
 	unsigned int rxfifo_over_2048;
@@ -343,14 +298,11 @@ struct dma_features {
 
 /* Default LPI timers */
 #define STMMAC_DEFAULT_LIT_LS	0x3E8
-#define STMMAC_DEFAULT_TWT_LS	0x1E
+#define STMMAC_DEFAULT_TWT_LS	0x0
 
 #define STMMAC_CHAIN_MODE	0x1
 #define STMMAC_RING_MODE	0x2
 
-#define JUMBO_LEN		9000
-
-/* Descriptors helpers */
 struct stmmac_desc_ops {
 	/* DMA RX descriptor ring initialization */
 	void (*init_rx_desc) (struct dma_desc *p, int disable_rx_ic, int mode,
@@ -360,20 +312,17 @@ struct stmmac_desc_ops {
 
 	/* Invoked by the xmit function to prepare the tx descriptor */
 	void (*prepare_tx_desc) (struct dma_desc *p, int is_fs, int len,
-				 bool csum_flag, int mode, bool tx_own,
-				 bool ls);
-	void (*prepare_tso_tx_desc)(struct dma_desc *p, int is_fs, int len1,
-				    int len2, bool tx_own, bool ls,
-				    unsigned int tcphdrlen,
-				    unsigned int tcppayloadlen);
+				 int csum_flag, int mode);
 	/* Set/get the owner of the descriptor */
 	void (*set_tx_owner) (struct dma_desc *p);
 	int (*get_tx_owner) (struct dma_desc *p);
+	/* Invoked by the xmit function to close the tx descriptor */
+	void (*close_tx_desc) (struct dma_desc *p);
 	/* Clean the tx descriptor as soon as the tx irq is received */
 	void (*release_tx_desc) (struct dma_desc *p, int mode);
 	/* Clear interrupt on tx frame completion. When this bit is
 	 * set an interrupt happens as soon as the frame is transmitted */
-	void (*set_tx_ic)(struct dma_desc *p);
+	void (*clear_tx_ic) (struct dma_desc *p);
 	/* Last tx segment reports the transmit status */
 	int (*get_tx_ls) (struct dma_desc *p);
 	/* Return the transmit status looking at the TDES1 */
@@ -382,6 +331,7 @@ struct stmmac_desc_ops {
 	/* Get the buffer size from the descriptor */
 	int (*get_tx_len) (struct dma_desc *p);
 	/* Handle extra events on specific interrupts hw dependent */
+	int (*get_rx_owner) (struct dma_desc *p);
 	void (*set_rx_owner) (struct dma_desc *p);
 	/* Get the receive frame size */
 	int (*get_rx_frame_len) (struct dma_desc *p, int rx_coe_type);
@@ -398,29 +348,17 @@ struct stmmac_desc_ops {
 	 u64(*get_timestamp) (void *desc, u32 ats);
 	/* get rx timestamp status */
 	int (*get_rx_timestamp_status) (void *desc, u32 ats);
-	/* Display ring */
-	void (*display_ring)(void *head, unsigned int size, bool rx);
-	/* set MSS via context descriptor */
-	void (*set_mss)(struct dma_desc *p, unsigned int mss);
 };
 
-extern const struct stmmac_desc_ops enh_desc_ops;
-extern const struct stmmac_desc_ops ndesc_ops;
-
-/* Specific DMA helpers */
 struct stmmac_dma_ops {
 	/* DMA core initialization */
-	int (*reset)(void __iomem *ioaddr);
-	void (*init)(void __iomem *ioaddr, int pbl, int fb, int mb,
-		     int aal, u32 dma_tx, u32 dma_rx, int atds);
-	/* Configure the AXI Bus Mode Register */
-	void (*axi)(void __iomem *ioaddr, struct stmmac_axi *axi);
+	int (*init) (void __iomem *ioaddr, int pbl, int fb, int mb,
+		     int burst_len, u32 dma_tx, u32 dma_rx, int atds);
 	/* Dump DMA registers */
 	void (*dump_regs) (void __iomem *ioaddr);
 	/* Set tx/rx threshold in the csr6 register
 	 * An invalid value enables the store-and-forward mode */
-	void (*dma_mode)(void __iomem *ioaddr, int txmode, int rxmode,
-			 int rxfifosz);
+	void (*dma_mode) (void __iomem *ioaddr, int txmode, int rxmode);
 	/* To track extra statistic (if supported) */
 	void (*dma_diagnostic_fr) (void *data, struct stmmac_extra_stats *x,
 				   void __iomem *ioaddr);
@@ -434,68 +372,50 @@ struct stmmac_dma_ops {
 	int (*dma_interrupt) (void __iomem *ioaddr,
 			      struct stmmac_extra_stats *x);
 	/* If supported then get the optional core features */
-	void (*get_hw_feature)(void __iomem *ioaddr,
-			       struct dma_features *dma_cap);
+	unsigned int (*get_hw_feature) (void __iomem *ioaddr);
 	/* Program the HW RX Watchdog */
 	void (*rx_watchdog) (void __iomem *ioaddr, u32 riwt);
-	void (*set_tx_ring_len)(void __iomem *ioaddr, u32 len);
-	void (*set_rx_ring_len)(void __iomem *ioaddr, u32 len);
-	void (*set_rx_tail_ptr)(void __iomem *ioaddr, u32 tail_ptr, u32 chan);
-	void (*set_tx_tail_ptr)(void __iomem *ioaddr, u32 tail_ptr, u32 chan);
-	void (*enable_tso)(void __iomem *ioaddr, bool en, u32 chan);
 };
 
-struct mac_device_info;
-
-/* Helpers to program the MAC core */
 struct stmmac_ops {
 	/* MAC core initialization */
-	void (*core_init)(struct mac_device_info *hw, int mtu);
+	void (*core_init) (void __iomem *ioaddr);
 	/* Enable and verify that the IPC module is supported */
-	int (*rx_ipc)(struct mac_device_info *hw);
+	int (*rx_ipc) (void __iomem *ioaddr);
 	/* Dump MAC registers */
-	void (*dump_regs)(struct mac_device_info *hw);
+	void (*dump_regs) (void __iomem *ioaddr);
 	/* Handle extra events on specific interrupts hw dependent */
-	int (*host_irq_status)(struct mac_device_info *hw,
-			       struct stmmac_extra_stats *x);
+	int (*host_irq_status) (void __iomem *ioaddr,
+				struct stmmac_extra_stats *x);
 	/* Multicast filter setting */
-	void (*set_filter)(struct mac_device_info *hw, struct net_device *dev);
+	void (*set_filter) (struct net_device *dev, int id);
 	/* Flow control setting */
-	void (*flow_ctrl)(struct mac_device_info *hw, unsigned int duplex,
-			  unsigned int fc, unsigned int pause_time);
+	void (*flow_ctrl) (void __iomem *ioaddr, unsigned int duplex,
+			   unsigned int fc, unsigned int pause_time);
 	/* Set power management mode (e.g. magic frame) */
-	void (*pmt)(struct mac_device_info *hw, unsigned long mode);
+	void (*pmt) (void __iomem *ioaddr, unsigned long mode);
 	/* Set/Get Unicast MAC addresses */
-	void (*set_umac_addr)(struct mac_device_info *hw, unsigned char *addr,
-			      unsigned int reg_n);
-	void (*get_umac_addr)(struct mac_device_info *hw, unsigned char *addr,
-			      unsigned int reg_n);
-	void (*set_eee_mode)(struct mac_device_info *hw);
-	void (*reset_eee_mode)(struct mac_device_info *hw);
-	void (*set_eee_timer)(struct mac_device_info *hw, int ls, int tw);
-	void (*set_eee_pls)(struct mac_device_info *hw, int link);
-	void (*debug)(void __iomem *ioaddr, struct stmmac_extra_stats *x);
-	/* PCS calls */
-	void (*pcs_ctrl_ane)(void __iomem *ioaddr, bool ane, bool srgmi_ral,
-			     bool loopback);
-	void (*pcs_rane)(void __iomem *ioaddr, bool restart);
-	void (*pcs_get_adv_lp)(void __iomem *ioaddr, struct rgmii_adv *adv);
+	void (*set_umac_addr) (void __iomem *ioaddr, unsigned char *addr,
+			       unsigned int reg_n);
+	void (*get_umac_addr) (void __iomem *ioaddr, unsigned char *addr,
+			       unsigned int reg_n);
+	void (*set_eee_mode) (void __iomem *ioaddr);
+	void (*reset_eee_mode) (void __iomem *ioaddr);
+	void (*set_eee_timer) (void __iomem *ioaddr, int ls, int tw);
+	void (*set_eee_pls) (void __iomem *ioaddr, int link);
+	void (*ctrl_ane) (void __iomem *ioaddr, bool restart);
+	void (*get_adv) (void __iomem *ioaddr, struct rgmii_adv *adv);
 };
 
-/* PTP and HW Timer helpers */
 struct stmmac_hwtimestamp {
 	void (*config_hw_tstamping) (void __iomem *ioaddr, u32 data);
-	u32 (*config_sub_second_increment)(void __iomem *ioaddr, u32 ptp_clock,
-					   int gmac4);
+	void (*config_sub_second_increment) (void __iomem *ioaddr);
 	int (*init_systime) (void __iomem *ioaddr, u32 sec, u32 nsec);
 	int (*config_addend) (void __iomem *ioaddr, u32 addend);
 	int (*adjust_systime) (void __iomem *ioaddr, u32 sec, u32 nsec,
-			       int add_sub, int gmac4);
+			       int add_sub);
 	 u64(*get_systime) (void __iomem *ioaddr);
 };
-
-extern const struct stmmac_hwtimestamp stmmac_ptp;
-extern const struct stmmac_mode_ops dwmac4_ring_mode_ops;
 
 struct mac_link {
 	int port;
@@ -508,14 +428,20 @@ struct mii_regs {
 	unsigned int data;	/* MII Data */
 };
 
-/* Helpers to manage the descriptors for chain and ring modes */
-struct stmmac_mode_ops {
+struct stmmac_ring_mode_ops {
+	unsigned int (*is_jumbo_frm) (int len, int ehn_desc);
+	unsigned int (*jumbo_frm) (void *priv, struct sk_buff *skb, int csum);
+	void (*refill_desc3) (void *priv, struct dma_desc *p);
+	void (*init_desc3) (struct dma_desc *p);
+	void (*clean_desc3) (void *priv, struct dma_desc *p);
+	int (*set_16kib_bfsize) (int mtu);
+};
+
+struct stmmac_chain_mode_ops {
 	void (*init) (void *des, dma_addr_t phy_addr, unsigned int size,
 		      unsigned int extend_desc);
 	unsigned int (*is_jumbo_frm) (int len, int ehn_desc);
-	int (*jumbo_frm)(void *priv, struct sk_buff *skb, int csum);
-	int (*set_16kib_bfsize)(int mtu);
-	void (*init_desc3)(struct dma_desc *p);
+	unsigned int (*jumbo_frm) (void *priv, struct sk_buff *skb, int csum);
 	void (*refill_desc3) (void *priv, struct dma_desc *p);
 	void (*clean_desc3) (void *priv, struct dma_desc *p);
 };
@@ -524,63 +450,26 @@ struct mac_device_info {
 	const struct stmmac_ops *mac;
 	const struct stmmac_desc_ops *desc;
 	const struct stmmac_dma_ops *dma;
-	const struct stmmac_mode_ops *mode;
+	const struct stmmac_ring_mode_ops *ring;
+	const struct stmmac_chain_mode_ops *chain;
 	const struct stmmac_hwtimestamp *ptp;
 	struct mii_regs mii;	/* MII register Addresses */
 	struct mac_link link;
-	void __iomem *pcsr;     /* vpointer to device CSRs */
-	int multicast_filter_bins;
-	int unicast_filter_entries;
-	int mcast_bits_log2;
-	unsigned int rx_csum;
-	unsigned int pcs;
-	unsigned int pmt;
-	unsigned int ps;
+	unsigned int synopsys_uid;
 };
 
-struct mac_device_info *dwmac1000_setup(void __iomem *ioaddr, int mcbins,
-					int perfect_uc_entries,
-					int *synopsys_id);
-struct mac_device_info *dwmac100_setup(void __iomem *ioaddr, int *synopsys_id);
-struct mac_device_info *dwmac4_setup(void __iomem *ioaddr, int mcbins,
-				     int perfect_uc_entries, int *synopsys_id);
+struct mac_device_info *dwmac1000_setup(void __iomem *ioaddr);
+struct mac_device_info *dwmac100_setup(void __iomem *ioaddr);
 
-void stmmac_set_mac_addr(void __iomem *ioaddr, u8 addr[6],
-			 unsigned int high, unsigned int low);
-void stmmac_get_mac_addr(void __iomem *ioaddr, unsigned char *addr,
-			 unsigned int high, unsigned int low);
-void stmmac_set_mac(void __iomem *ioaddr, bool enable);
-
-void stmmac_dwmac4_set_mac_addr(void __iomem *ioaddr, u8 addr[6],
+extern void stmmac_set_mac_addr(void __iomem *ioaddr, u8 addr[6],
 				unsigned int high, unsigned int low);
-void stmmac_dwmac4_get_mac_addr(void __iomem *ioaddr, unsigned char *addr,
+extern void stmmac_get_mac_addr(void __iomem *ioaddr, unsigned char *addr,
 				unsigned int high, unsigned int low);
-void stmmac_dwmac4_set_mac(void __iomem *ioaddr, bool enable);
 
-void dwmac_dma_flush_tx_fifo(void __iomem *ioaddr);
+extern void stmmac_set_mac(void __iomem *ioaddr, bool enable);
 
-extern const struct stmmac_mode_ops ring_mode_ops;
-extern const struct stmmac_mode_ops chain_mode_ops;
-extern const struct stmmac_desc_ops dwmac4_desc_ops;
+extern void dwmac_dma_flush_tx_fifo(void __iomem *ioaddr);
+extern const struct stmmac_ring_mode_ops ring_mode_ops;
+extern const struct stmmac_chain_mode_ops chain_mode_ops;
 
-/**
- * stmmac_get_synopsys_id - return the SYINID.
- * @priv: driver private structure
- * Description: this simple function is to decode and return the SYINID
- * starting from the HW core register.
- */
-static inline u32 stmmac_get_synopsys_id(u32 hwid)
-{
-	/* Check Synopsys Id (not available on old chips) */
-	if (likely(hwid)) {
-		u32 uid = ((hwid & 0x0000ff00) >> 8);
-		u32 synid = (hwid & 0x000000ff);
-
-		pr_info("stmmac - user ID: 0x%x, Synopsys ID: 0x%x\n",
-			uid, synid);
-
-		return synid;
-	}
-	return 0;
-}
 #endif /* __COMMON_H__ */

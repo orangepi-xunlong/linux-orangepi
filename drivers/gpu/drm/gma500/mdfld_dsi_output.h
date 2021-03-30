@@ -39,7 +39,7 @@
 #include "psb_intel_reg.h"
 #include "mdfld_output.h"
 
-#include <asm/intel-mid.h>
+#include <asm/mrst.h>
 
 #define FLD_MASK(start, end)	(((1 << ((start) - (end) + 1)) - 1) << (end))
 #define FLD_VAL(val, start, end) (((val) << (end)) & FLD_MASK(start, end))
@@ -227,7 +227,7 @@ enum {
 #define DSI_DPI_DISABLE_BTA					BIT(3)
 
 struct mdfld_dsi_connector {
-	struct gma_connector base;
+	struct psb_intel_connector base;
 
 	int pipe;
 	void *private;
@@ -238,7 +238,7 @@ struct mdfld_dsi_connector {
 };
 
 struct mdfld_dsi_encoder {
-	struct gma_encoder base;
+	struct psb_intel_encoder base;
 	void *private;
 };
 
@@ -269,21 +269,21 @@ struct mdfld_dsi_config {
 static inline struct mdfld_dsi_connector *mdfld_dsi_connector(
 		struct drm_connector *connector)
 {
-	struct gma_connector *gma_connector;
+	struct psb_intel_connector *psb_connector;
 
-	gma_connector = to_gma_connector(connector);
+	psb_connector = to_psb_intel_connector(connector);
 
-	return container_of(gma_connector, struct mdfld_dsi_connector, base);
+	return container_of(psb_connector, struct mdfld_dsi_connector, base);
 }
 
 static inline struct mdfld_dsi_encoder *mdfld_dsi_encoder(
 		struct drm_encoder *encoder)
 {
-	struct gma_encoder *gma_encoder;
+	struct psb_intel_encoder *psb_encoder;
 
-	gma_encoder = to_gma_encoder(encoder);
+	psb_encoder = to_psb_intel_encoder(encoder);
 
-	return container_of(gma_encoder, struct mdfld_dsi_encoder, base);
+	return container_of(psb_encoder, struct mdfld_dsi_encoder, base);
 }
 
 static inline struct mdfld_dsi_config *

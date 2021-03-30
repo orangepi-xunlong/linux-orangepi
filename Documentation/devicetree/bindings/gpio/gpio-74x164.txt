@@ -1,9 +1,7 @@
 * Generic 8-bits shift register GPIO driver
 
 Required properties:
-- compatible: Should contain one of the following:
-    "fairchild,74hc595"
-    "nxp,74lvc594"
+- compatible : Should be "fairchild,74hc595"
 - reg : chip select number
 - gpio-controller : Marks the device node as a gpio controller.
 - #gpio-cells : Should be two.  The first cell is the pin number and

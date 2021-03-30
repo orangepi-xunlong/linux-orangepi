@@ -13,6 +13,7 @@
 #include <linux/platform_device.h>
 #include <linux/mfd/abx500/ab8500.h>
 #include <linux/mfd/abx500/ab8500-sysctrl.h>
+#include <linux/clk.h>
 #include <linux/clkdev.h>
 #include <linux/clk-provider.h>
 #include <linux/mfd/dbx500-prcmu.h>
@@ -40,10 +41,11 @@ static int ab8500_reg_clks(struct device *dev)
 		return ret;
 
 	/* ab8500_sysclk */
-	clk = clk_reg_prcmu_gate("ab8500_sysclk", NULL, PRCMU_SYSCLK, 0);
+	clk = clk_reg_prcmu_gate("ab8500_sysclk", NULL, PRCMU_SYSCLK,
+				CLK_IS_ROOT);
 	clk_register_clkdev(clk, "sysclk", "ab8500-usb.0");
 	clk_register_clkdev(clk, "sysclk", "ab-iddet.0");
-	clk_register_clkdev(clk, "sysclk", "snd-soc-mop500.0");
+	clk_register_clkdev(clk, "sysclk", "ab85xx-codec.0");
 	clk_register_clkdev(clk, "sysclk", "shrm_bus");
 
 	/* ab8500_sysclk2 */
@@ -67,20 +69,20 @@ static int ab8500_reg_clks(struct device *dev)
 	clk = clk_reg_sysctrl_gate_fixed_rate(dev, "ulpclk", NULL,
 		AB8500_SYSULPCLKCTRL1, AB8500_SYSULPCLKCTRL1_ULPCLKREQ,
 		AB8500_SYSULPCLKCTRL1_ULPCLKREQ,
-		38400000, 9000, 0);
-	clk_register_clkdev(clk, "ulpclk", "snd-soc-mop500.0");
+		38400000, 9000, CLK_IS_ROOT);
+	clk_register_clkdev(clk, "ulpclk", "ab85xx-codec.0");
 
 	/* ab8500_intclk */
 	clk = clk_reg_sysctrl_set_parent(dev , "intclk", intclk_parents, 2,
 		intclk_reg_sel, intclk_reg_mask, intclk_reg_bits, 0);
-	clk_register_clkdev(clk, "intclk", "snd-soc-mop500.0");
+	clk_register_clkdev(clk, "intclk", "ab85xx-codec.0");
 	clk_register_clkdev(clk, NULL, "ab8500-pwm.1");
 
 	/* ab8500_audioclk */
 	clk = clk_reg_sysctrl_gate(dev , "audioclk", "intclk",
 		AB8500_SYSULPCLKCTRL1, AB8500_SYSULPCLKCTRL1_AUDIOCLKENA,
 		AB8500_SYSULPCLKCTRL1_AUDIOCLKENA, 0, 0);
-	clk_register_clkdev(clk, "audioclk", "ab8500-codec.0");
+	clk_register_clkdev(clk, "audioclk", "ab85xx-codec.0");
 
 	return 0;
 }
@@ -119,6 +121,7 @@ static int abx500_clk_probe(struct platform_device *pdev)
 static struct platform_driver abx500_clk_driver = {
 	.driver = {
 		.name = "abx500-clk",
+		.owner = THIS_MODULE,
 	},
 	.probe	= abx500_clk_probe,
 };

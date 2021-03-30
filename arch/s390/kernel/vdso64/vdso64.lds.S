@@ -132,7 +132,6 @@ VERSION
 		__kernel_gettimeofday;
 		__kernel_clock_gettime;
 		__kernel_clock_getres;
-		__kernel_getcpu;
 
 	local: *;
 	};

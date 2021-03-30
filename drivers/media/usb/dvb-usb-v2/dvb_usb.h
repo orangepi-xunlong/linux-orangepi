@@ -1,7 +1,7 @@
 /*
  * DVB USB framework
  *
- * Copyright (C) 2004-6 Patrick Boettcher <patrick.boettcher@posteo.de>
+ * Copyright (C) 2004-6 Patrick Boettcher <patrick.boettcher@desy.de>
  * Copyright (C) 2012 Antti Palosaari <crope@iki.fi>
  *
  *    This program is free software; you can redistribute it and/or modify
@@ -25,7 +25,6 @@
 #include <linux/usb/input.h>
 #include <linux/firmware.h>
 #include <media/rc-core.h>
-#include <media/media-device.h>
 
 #include "dvb_frontend.h"
 #include "dvb_demux.h"
@@ -141,7 +140,7 @@ struct dvb_usb_rc {
 	int (*change_protocol)(struct rc_dev *dev, u64 *rc_type);
 	int (*query) (struct dvb_usb_device *d);
 	unsigned int interval;
-	enum rc_driver_type driver_type;
+	const enum rc_driver_type driver_type;
 	bool bulk_mode;
 };
 
@@ -215,7 +214,6 @@ struct dvb_usb_adapter_properties {
  * @read_config: called to resolve device configuration
  * @read_mac_address: called to resolve adapter mac-address
  * @frontend_attach: called to attach the possible frontends
- * @frontend_detach: called to detach the possible frontends
  * @tuner_attach: called to attach the possible tuners
  * @frontend_ctrl: called to power on/off active frontend
  * @streaming_ctrl: called to start/stop the usb streaming of adapter
@@ -256,9 +254,7 @@ struct dvb_usb_device_properties {
 	int (*read_config) (struct dvb_usb_device *d);
 	int (*read_mac_address) (struct dvb_usb_adapter *, u8 []);
 	int (*frontend_attach) (struct dvb_usb_adapter *);
-	int (*frontend_detach)(struct dvb_usb_adapter *);
 	int (*tuner_attach) (struct dvb_usb_adapter *);
-	int (*tuner_detach)(struct dvb_usb_adapter *);
 	int (*frontend_ctrl) (struct dvb_frontend *, int);
 	int (*streaming_ctrl) (struct dvb_frontend *, int);
 	int (*init) (struct dvb_usb_device *);
@@ -355,9 +351,10 @@ struct dvb_usb_adapter {
  * @name: device name
  * @rc_map: name of rc codes table
  * @rc_polling_active: set when RC polling is active
- * @intf: pointer to the device's struct usb_interface
  * @udev: pointer to the device's struct usb_device
+ * @intf: pointer to the device's usb interface
  * @rc: remote controller configuration
+ * @probe_work: work to defer .probe()
  * @powered: indicated whether the device is power or not
  * @usb_mutex: mutex for usb control messages
  * @i2c_mutex: mutex for i2c-transfers
@@ -372,9 +369,11 @@ struct dvb_usb_device {
 	const char *name;
 	const char *rc_map;
 	bool rc_polling_active;
-	struct usb_interface *intf;
 	struct usb_device *udev;
+	struct usb_interface *intf;
 	struct dvb_usb_rc rc;
+	struct work_struct probe_work;
+	pid_t work_pid;
 	int powered;
 
 	/* locking */

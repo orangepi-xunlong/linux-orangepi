@@ -106,7 +106,7 @@ static void __init __fb_init_irq(void)
 
 	for (irq = _DC21285_IRQ(0); irq < _DC21285_IRQ(20); irq++) {
 		irq_set_chip_and_handler(irq, &fb_chip, handle_level_irq);
-		irq_clear_status_flags(irq, IRQ_NOREQUEST | IRQ_NOPROBE);
+		set_irq_flags(irq, IRQF_VALID | IRQF_PROBE);
 	}
 }
 
@@ -142,6 +142,11 @@ static struct map_desc fb_common_io_desc[] __initdata = {
 		.virtual	= ARMCSR_BASE,
 		.pfn		= __phys_to_pfn(DC21285_ARMCSR_BASE),
 		.length		= ARMCSR_SIZE,
+		.type		= MT_DEVICE,
+	}, {
+		.virtual	= XBUS_BASE,
+		.pfn		= __phys_to_pfn(0x40000000),
+		.length		= XBUS_SIZE,
 		.type		= MT_DEVICE,
 	}
 };
@@ -198,7 +203,7 @@ void __init footbridge_map_io(void)
 
 void footbridge_restart(enum reboot_mode mode, const char *cmd)
 {
-	if (mode == REBOOT_SOFT) {
+	if (mode == 's') {
 		/* Jump into the ROM */
 		soft_restart(0x41000000);
 	} else {

@@ -11,10 +11,10 @@
 #include <linux/kprobes.h>
 #include <linux/kdebug.h>
 #include <linux/prefetch.h>
-#include <linux/uaccess.h>
 
 #include <asm/pgtable.h>
 #include <asm/processor.h>
+#include <asm/uaccess.h>
 
 extern int die(char *, struct pt_regs *, long);
 
@@ -96,7 +96,7 @@ ia64_do_page_fault (unsigned long address, unsigned long isr, struct pt_regs *re
 	/*
 	 * If we're in an interrupt or have no user context, we must not take the fault..
 	 */
-	if (faulthandler_disabled() || !mm)
+	if (in_atomic() || !mm)
 		goto no_context;
 
 #ifdef CONFIG_VIRTUAL_MEM_MAP
@@ -159,7 +159,7 @@ retry:
 	 * sure we exit gracefully rather than endlessly redo the
 	 * fault.
 	 */
-	fault = handle_mm_fault(vma, address, flags);
+	fault = handle_mm_fault(mm, vma, address, flags);
 
 	if ((fault & VM_FAULT_RETRY) && fatal_signal_pending(current))
 		return;
@@ -172,8 +172,6 @@ retry:
 		 */
 		if (fault & VM_FAULT_OOM) {
 			goto out_of_memory;
-		} else if (fault & VM_FAULT_SIGSEGV) {
-			goto bad_area;
 		} else if (fault & VM_FAULT_SIGBUS) {
 			signal = SIGBUS;
 			goto bad_area;

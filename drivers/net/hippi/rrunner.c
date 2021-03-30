@@ -37,6 +37,7 @@
 #include <linux/netdevice.h>
 #include <linux/hippidevice.h>
 #include <linux/skbuff.h>
+#include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
@@ -212,8 +213,10 @@ static int rr_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 				    rrpriv->tx_ring_dma);
 	if (rrpriv->regs)
 		pci_iounmap(pdev, rrpriv->regs);
-	if (pdev)
+	if (pdev) {
 		pci_release_regions(pdev);
+		pci_set_drvdata(pdev, NULL);
+	}
  out2:
 	free_netdev(dev);
  out3:
@@ -241,6 +244,7 @@ static void rr_remove_one(struct pci_dev *pdev)
 	pci_iounmap(pdev, rr->regs);
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
+	pci_set_drvdata(pdev, NULL);
 	free_netdev(dev);
 }
 
@@ -1381,8 +1385,8 @@ static int rr_close(struct net_device *dev)
 			    rrpriv->info_dma);
 	rrpriv->info = NULL;
 
-	spin_unlock_irqrestore(&rrpriv->lock, flags);
 	free_irq(pdev->irq, dev);
+	spin_unlock_irqrestore(&rrpriv->lock, flags);
 
 	return 0;
 }
@@ -1668,7 +1672,7 @@ static int rr_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	}
 }
 
-static const struct pci_device_id rr_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(rr_pci_tbl) = {
 	{ PCI_VENDOR_ID_ESSENTIAL, PCI_DEVICE_ID_ESSENTIAL_ROADRUNNER,
 		PCI_ANY_ID, PCI_ANY_ID, },
 	{ 0,}
@@ -1682,4 +1686,15 @@ static struct pci_driver rr_driver = {
 	.remove		= rr_remove_one,
 };
 
-module_pci_driver(rr_driver);
+static int __init rr_init_module(void)
+{
+	return pci_register_driver(&rr_driver);
+}
+
+static void __exit rr_cleanup_module(void)
+{
+	pci_unregister_driver(&rr_driver);
+}
+
+module_init(rr_init_module);
+module_exit(rr_cleanup_module);

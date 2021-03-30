@@ -78,12 +78,10 @@ enum fip_state {
  * The mode is the state that is to be entered after link up.
  * It must not change after fcoe_ctlr_init() sets it.
  */
-enum fip_mode {
-	FIP_MODE_AUTO = FIP_ST_AUTO,
-	FIP_MODE_NON_FIP,
-	FIP_MODE_FABRIC,
-	FIP_MODE_VN2VN,
-};
+#define FIP_MODE_AUTO		FIP_ST_AUTO
+#define FIP_MODE_NON_FIP	FIP_ST_NON_FIP
+#define FIP_MODE_FABRIC		FIP_ST_ENABLED
+#define FIP_MODE_VN2VN		FIP_ST_VNMP_START
 
 /**
  * struct fcoe_ctlr - FCoE Controller and FIP state
@@ -92,7 +90,6 @@ enum fip_mode {
  * @lp:		   &fc_lport: libfc local port.
  * @sel_fcf:	   currently selected FCF, or NULL.
  * @fcfs:	   list of discovered FCFs.
- * @cdev:          (Optional) pointer to sysfs fcoe_ctlr_device.
  * @fcf_count:	   number of discovered FCF entries.
  * @sol_time:	   time when a multicast solicitation was last sent.
  * @sel_time:	   time after which to select an FCF.
@@ -110,10 +107,8 @@ enum fip_mode {
  * @flogi_req_send: send of FLOGI requested
  * @flogi_count:   number of FLOGI attempts in AUTO mode.
  * @map_dest:	   use the FC_MAP mode for destination MAC addresses.
- * @fip_resp:	   start FIP VLAN discovery responder
  * @spma:	   supports SPMA server-provided MACs mode
  * @probe_tries:   number of FC_IDs probed
- * @priority:      DCBx FCoE APP priority
  * @dest_addr:	   MAC address of the selected FC forwarder.
  * @ctl_src_addr:  the native MAC address of our local port.
  * @send:	   LLD-supplied function to handle sending FIP Ethernet frames
@@ -128,11 +123,10 @@ enum fip_mode {
  */
 struct fcoe_ctlr {
 	enum fip_state state;
-	enum fip_mode mode;
+	enum fip_state mode;
 	struct fc_lport *lp;
 	struct fcoe_fcf *sel_fcf;
 	struct list_head fcfs;
-	struct fcoe_ctlr_device *cdev;
 	u16 fcf_count;
 	unsigned long sol_time;
 	unsigned long sel_time;
@@ -151,8 +145,7 @@ struct fcoe_ctlr {
 	u16 flogi_oxid;
 	u8 flogi_req_send;
 	u8 flogi_count;
-	bool map_dest;
-	bool fip_resp;
+	u8 map_dest;
 	u8 spma;
 	u8 probe_tries;
 	u8 priority;
@@ -175,11 +168,8 @@ static inline void *fcoe_ctlr_priv(const struct fcoe_ctlr *ctlr)
 	return (void *)(ctlr + 1);
 }
 
-/*
- * This assumes that the fcoe_ctlr (x) is allocated with the fcoe_ctlr_device.
- */
 #define fcoe_ctlr_to_ctlr_dev(x)					\
-	(x)->cdev
+	(struct fcoe_ctlr_device *)(((struct fcoe_ctlr_device *)(x)) - 1)
 
 /**
  * struct fcoe_fcf - Fibre-Channel Forwarder
@@ -316,7 +306,7 @@ struct fcoe_transport {
 	struct list_head list;
 	bool (*match) (struct net_device *device);
 	int (*alloc) (struct net_device *device);
-	int (*create) (struct net_device *device, enum fip_mode fip_mode);
+	int (*create) (struct net_device *device, enum fip_state fip_mode);
 	int (*destroy) (struct net_device *device);
 	int (*enable) (struct net_device *device);
 	int (*disable) (struct net_device *device);
@@ -324,16 +314,14 @@ struct fcoe_transport {
 
 /**
  * struct fcoe_percpu_s - The context for FCoE receive thread(s)
- * @kthread:	    The thread context (used by bnx2fc)
- * @work:	    The work item (used by fcoe)
+ * @thread:	    The thread context
  * @fcoe_rx_list:   The queue of pending packets to process
  * @page:	    The memory page for calculating frame trailer CRCs
  * @crc_eof_offset: The offset into the CRC page pointing to available
  *		    memory for a new trailer
  */
 struct fcoe_percpu_s {
-	struct task_struct *kthread;
-	struct work_struct work;
+	struct task_struct *thread;
 	struct sk_buff_head fcoe_rx_list;
 	struct page *crc_eof_page;
 	int crc_eof_offset;

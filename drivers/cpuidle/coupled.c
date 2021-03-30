@@ -119,6 +119,7 @@ struct cpuidle_coupled {
 
 #define CPUIDLE_COUPLED_NOT_IDLE	(-1)
 
+static DEFINE_MUTEX(cpuidle_coupled_lock);
 static DEFINE_PER_CPU(struct call_single_data, cpuidle_coupled_poke_cb);
 
 /*
@@ -146,7 +147,7 @@ static cpumask_t cpuidle_coupled_poked;
  * has returned from this function, the barrier is immediately available for
  * reuse.
  *
- * The atomic variable must be initialized to 0 before any cpu calls
+ * The atomic variable a must be initialized to 0 before any cpu calls
  * this function, will be reset to 0 before any cpu returns from this function.
  *
  * Must only be called from within a coupled idle state handler
@@ -158,7 +159,7 @@ void cpuidle_coupled_parallel_barrier(struct cpuidle_device *dev, atomic_t *a)
 {
 	int n = dev->coupled->online_count;
 
-	smp_mb__before_atomic();
+	smp_mb__before_atomic_inc();
 	atomic_inc(a);
 
 	while (atomic_read(a) < n)
@@ -175,36 +176,16 @@ void cpuidle_coupled_parallel_barrier(struct cpuidle_device *dev, atomic_t *a)
 
 /**
  * cpuidle_state_is_coupled - check if a state is part of a coupled set
+ * @dev: struct cpuidle_device for the current cpu
  * @drv: struct cpuidle_driver for the platform
  * @state: index of the target state in drv->states
  *
  * Returns true if the target state is coupled with cpus besides this one
  */
-bool cpuidle_state_is_coupled(struct cpuidle_driver *drv, int state)
+bool cpuidle_state_is_coupled(struct cpuidle_device *dev,
+	struct cpuidle_driver *drv, int state)
 {
 	return drv->states[state].flags & CPUIDLE_FLAG_COUPLED;
-}
-
-/**
- * cpuidle_coupled_state_verify - check if the coupled states are correctly set.
- * @drv: struct cpuidle_driver for the platform
- *
- * Returns 0 for valid state values, a negative error code otherwise:
- *  * -EINVAL if any coupled state(safe_state_index) is wrongly set.
- */
-int cpuidle_coupled_state_verify(struct cpuidle_driver *drv)
-{
-	int i;
-
-	for (i = drv->state_count - 1; i >= 0; i--) {
-		if (cpuidle_state_is_coupled(drv, i) &&
-		    (drv->safe_state_index == i ||
-		     drv->safe_state_index < 0 ||
-		     drv->safe_state_index >= drv->state_count))
-			return -EINVAL;
-	}
-
-	return 0;
 }
 
 /**
@@ -311,7 +292,7 @@ static inline int cpuidle_coupled_get_state(struct cpuidle_device *dev,
 	 */
 	smp_rmb();
 
-	for_each_cpu(i, &coupled->coupled_cpus)
+	for_each_cpu_mask(i, coupled->coupled_cpus)
 		if (cpu_online(i) && coupled->requested_state[i] < state)
 			state = coupled->requested_state[i];
 
@@ -342,7 +323,7 @@ static void cpuidle_coupled_poke(int cpu)
 	struct call_single_data *csd = &per_cpu(cpuidle_coupled_poke_cb, cpu);
 
 	if (!cpumask_test_and_set_cpu(cpu, &cpuidle_coupled_poke_pending))
-		smp_call_function_single_async(cpu, csd);
+		__smp_call_function_single(cpu, csd, 0);
 }
 
 /**
@@ -357,7 +338,7 @@ static void cpuidle_coupled_poke_others(int this_cpu,
 {
 	int cpu;
 
-	for_each_cpu(cpu, &coupled->coupled_cpus)
+	for_each_cpu_mask(cpu, coupled->coupled_cpus)
 		if (cpu != this_cpu && cpu_online(cpu))
 			cpuidle_coupled_poke(cpu);
 }
@@ -492,8 +473,7 @@ int cpuidle_enter_state_coupled(struct cpuidle_device *dev,
 			return entered_state;
 		}
 		entered_state = cpuidle_enter_state(dev, drv,
-			drv->safe_state_index);
-		local_irq_disable();
+			dev->safe_state_index);
 	}
 
 	/* Read barrier ensures online_count is read after prevent is cleared */
@@ -540,8 +520,7 @@ retry:
 		}
 
 		entered_state = cpuidle_enter_state(dev, drv,
-			drv->safe_state_index);
-		local_irq_disable();
+			dev->safe_state_index);
 	}
 
 	cpuidle_coupled_clear_pokes(dev->cpu);
@@ -657,7 +636,7 @@ int cpuidle_coupled_register_device(struct cpuidle_device *dev)
 	if (cpumask_empty(&dev->coupled_cpus))
 		return 0;
 
-	for_each_cpu(cpu, &dev->coupled_cpus) {
+	for_each_cpu_mask(cpu, dev->coupled_cpus) {
 		other_dev = per_cpu(cpuidle_devices, cpu);
 		if (other_dev && other_dev->coupled) {
 			coupled = other_dev->coupled;
@@ -749,52 +728,65 @@ static void cpuidle_coupled_allow_idle(struct cpuidle_coupled *coupled)
 	put_cpu();
 }
 
-static int coupled_cpu_online(unsigned int cpu)
+/**
+ * cpuidle_coupled_cpu_notify - notifier called during hotplug transitions
+ * @nb: notifier block
+ * @action: hotplug transition
+ * @hcpu: target cpu number
+ *
+ * Called when a cpu is brought on or offline using hotplug.  Updates the
+ * coupled cpu set appropriately
+ */
+static int cpuidle_coupled_cpu_notify(struct notifier_block *nb,
+		unsigned long action, void *hcpu)
 {
+	int cpu = (unsigned long)hcpu;
 	struct cpuidle_device *dev;
 
-	mutex_lock(&cpuidle_lock);
-
-	dev = per_cpu(cpuidle_devices, cpu);
-	if (dev && dev->coupled) {
-		cpuidle_coupled_update_online_cpus(dev->coupled);
-		cpuidle_coupled_allow_idle(dev->coupled);
+	switch (action & ~CPU_TASKS_FROZEN) {
+	case CPU_UP_PREPARE:
+	case CPU_DOWN_PREPARE:
+	case CPU_ONLINE:
+	case CPU_DEAD:
+	case CPU_UP_CANCELED:
+	case CPU_DOWN_FAILED:
+		break;
+	default:
+		return NOTIFY_OK;
 	}
 
-	mutex_unlock(&cpuidle_lock);
-	return 0;
-}
-
-static int coupled_cpu_up_prepare(unsigned int cpu)
-{
-	struct cpuidle_device *dev;
-
 	mutex_lock(&cpuidle_lock);
 
 	dev = per_cpu(cpuidle_devices, cpu);
-	if (dev && dev->coupled)
-		cpuidle_coupled_prevent_idle(dev->coupled);
+	if (!dev || !dev->coupled)
+		goto out;
 
+	switch (action & ~CPU_TASKS_FROZEN) {
+	case CPU_UP_PREPARE:
+	case CPU_DOWN_PREPARE:
+		cpuidle_coupled_prevent_idle(dev->coupled);
+		break;
+	case CPU_ONLINE:
+	case CPU_DEAD:
+		cpuidle_coupled_update_online_cpus(dev->coupled);
+		/* Fall through */
+	case CPU_UP_CANCELED:
+	case CPU_DOWN_FAILED:
+		cpuidle_coupled_allow_idle(dev->coupled);
+		break;
+	}
+
+out:
 	mutex_unlock(&cpuidle_lock);
-	return 0;
+	return NOTIFY_OK;
 }
+
+static struct notifier_block cpuidle_coupled_cpu_notifier = {
+	.notifier_call = cpuidle_coupled_cpu_notify,
+};
 
 static int __init cpuidle_coupled_init(void)
 {
-	int ret;
-
-	ret = cpuhp_setup_state_nocalls(CPUHP_CPUIDLE_COUPLED_PREPARE,
-					"cpuidle/coupled:prepare",
-					coupled_cpu_up_prepare,
-					coupled_cpu_online);
-	if (ret)
-		return ret;
-	ret = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
-					"cpuidle/coupled:online",
-					coupled_cpu_online,
-					coupled_cpu_up_prepare);
-	if (ret < 0)
-		cpuhp_remove_state_nocalls(CPUHP_CPUIDLE_COUPLED_PREPARE);
-	return ret;
+	return register_cpu_notifier(&cpuidle_coupled_cpu_notifier);
 }
 core_initcall(cpuidle_coupled_init);

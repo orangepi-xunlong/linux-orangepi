@@ -47,17 +47,13 @@ struct fib4_rule {
 #endif
 };
 
-int __fib_lookup(struct net *net, struct flowi4 *flp,
-		 struct fib_result *res, unsigned int flags)
+int __fib_lookup(struct net *net, struct flowi4 *flp, struct fib_result *res)
 {
 	struct fib_lookup_arg arg = {
 		.result = res,
-		.flags = flags,
+		.flags = FIB_LOOKUP_NOREF,
 	};
 	int err;
-
-	/* update flow if oif or iif point to device enslaved to l3mdev */
-	l3mdev_update_flow(net, flowi4_to_flowi(flp));
 
 	err = fib_rules_lookup(net->ipv4.rules_ops, flowi4_to_flowi(flp), 0, &arg);
 #ifdef CONFIG_IP_ROUTE_CLASSID
@@ -79,63 +75,36 @@ static int fib4_rule_action(struct fib_rule *rule, struct flowi *flp,
 {
 	int err = -EAGAIN;
 	struct fib_table *tbl;
-	u32 tb_id;
 
 	switch (rule->action) {
 	case FR_ACT_TO_TBL:
 		break;
 
 	case FR_ACT_UNREACHABLE:
-		return -ENETUNREACH;
+		err = -ENETUNREACH;
+		goto errout;
 
 	case FR_ACT_PROHIBIT:
-		return -EACCES;
+		err = -EACCES;
+		goto errout;
 
 	case FR_ACT_BLACKHOLE:
 	default:
-		return -EINVAL;
+		err = -EINVAL;
+		goto errout;
 	}
 
-	rcu_read_lock();
+	tbl = fib_get_table(rule->fr_net, rule->table);
+	if (!tbl)
+		goto errout;
 
-	tb_id = fib_rule_get_table(rule, arg);
-	tbl = fib_get_table(rule->fr_net, tb_id);
-	if (tbl)
-		err = fib_table_lookup(tbl, &flp->u.ip4,
-				       (struct fib_result *)arg->result,
-				       arg->flags);
-
-	rcu_read_unlock();
+	err = fib_table_lookup(tbl, &flp->u.ip4, (struct fib_result *) arg->result, arg->flags);
+	if (err > 0)
+		err = -EAGAIN;
+errout:
 	return err;
 }
 
-static bool fib4_rule_suppress(struct fib_rule *rule, struct fib_lookup_arg *arg)
-{
-	struct fib_result *result = (struct fib_result *) arg->result;
-	struct net_device *dev = NULL;
-
-	if (result->fi)
-		dev = result->fi->fib_dev;
-
-	/* do not accept result if the route does
-	 * not meet the required prefix length
-	 */
-	if (result->prefixlen <= rule->suppress_prefixlen)
-		goto suppress_route;
-
-	/* do not accept result if the route uses a device
-	 * belonging to a forbidden interface group
-	 */
-	if (rule->suppress_ifgroup != -1 && dev && dev->group == rule->suppress_ifgroup)
-		goto suppress_route;
-
-	return false;
-
-suppress_route:
-	if (!(arg->flags & FIB_LOOKUP_NOREF))
-		fib_info_put(result->fi);
-	return true;
-}
 
 static int fib4_rule_match(struct fib_rule *rule, struct flowi *fl, int flags)
 {
@@ -159,17 +128,9 @@ static struct fib_table *fib_empty_table(struct net *net)
 	u32 id;
 
 	for (id = 1; id <= RT_TABLE_MAX; id++)
-		if (!fib_get_table(net, id))
+		if (fib_get_table(net, id) == NULL)
 			return fib_new_table(net, id);
 	return NULL;
-}
-
-static int call_fib_rule_notifiers(struct net *net,
-				   enum fib_event_type event_type)
-{
-	struct fib_notifier_info info;
-
-	return call_fib_notifiers(net, event_type, &info);
 }
 
 static const struct nla_policy fib4_rule_policy[FRA_MAX+1] = {
@@ -188,17 +149,12 @@ static int fib4_rule_configure(struct fib_rule *rule, struct sk_buff *skb,
 	if (frh->tos & ~IPTOS_TOS_MASK)
 		goto errout;
 
-	/* split local/main if they are not already split */
-	err = fib_unmerge(net);
-	if (err)
-		goto errout;
-
-	if (rule->table == RT_TABLE_UNSPEC && !rule->l3mdev) {
+	if (rule->table == RT_TABLE_UNSPEC) {
 		if (rule->action == FR_ACT_TO_TBL) {
 			struct fib_table *table;
 
 			table = fib_empty_table(net);
-			if (!table) {
+			if (table == NULL) {
 				err = -ENOBUFS;
 				goto errout;
 			}
@@ -208,10 +164,10 @@ static int fib4_rule_configure(struct fib_rule *rule, struct sk_buff *skb,
 	}
 
 	if (frh->src_len)
-		rule4->src = nla_get_in_addr(tb[FRA_SRC]);
+		rule4->src = nla_get_be32(tb[FRA_SRC]);
 
 	if (frh->dst_len)
-		rule4->dst = nla_get_in_addr(tb[FRA_DST]);
+		rule4->dst = nla_get_be32(tb[FRA_DST]);
 
 #ifdef CONFIG_IP_ROUTE_CLASSID
 	if (tb[FRA_FLOW]) {
@@ -228,31 +184,21 @@ static int fib4_rule_configure(struct fib_rule *rule, struct sk_buff *skb,
 	rule4->tos = frh->tos;
 
 	net->ipv4.fib_has_custom_rules = true;
-	call_fib_rule_notifiers(net, FIB_EVENT_RULE_ADD);
-
 	err = 0;
 errout:
 	return err;
 }
 
-static int fib4_rule_delete(struct fib_rule *rule)
+static void fib4_rule_delete(struct fib_rule *rule)
 {
 	struct net *net = rule->fr_net;
-	int err;
-
-	/* split local/main if they are not already split */
-	err = fib_unmerge(net);
-	if (err)
-		goto errout;
-
 #ifdef CONFIG_IP_ROUTE_CLASSID
-	if (((struct fib4_rule *)rule)->tclassid)
+	struct fib4_rule *rule4 = (struct fib4_rule *) rule;
+
+	if (rule4->tclassid)
 		net->ipv4.fib_num_tclassid_users--;
 #endif
 	net->ipv4.fib_has_custom_rules = true;
-	call_fib_rule_notifiers(net, FIB_EVENT_RULE_DEL);
-errout:
-	return err;
 }
 
 static int fib4_rule_compare(struct fib_rule *rule, struct fib_rule_hdr *frh,
@@ -274,10 +220,10 @@ static int fib4_rule_compare(struct fib_rule *rule, struct fib_rule_hdr *frh,
 		return 0;
 #endif
 
-	if (frh->src_len && (rule4->src != nla_get_in_addr(tb[FRA_SRC])))
+	if (frh->src_len && (rule4->src != nla_get_be32(tb[FRA_SRC])))
 		return 0;
 
-	if (frh->dst_len && (rule4->dst != nla_get_in_addr(tb[FRA_DST])))
+	if (frh->dst_len && (rule4->dst != nla_get_be32(tb[FRA_DST])))
 		return 0;
 
 	return 1;
@@ -293,9 +239,9 @@ static int fib4_rule_fill(struct fib_rule *rule, struct sk_buff *skb,
 	frh->tos = rule4->tos;
 
 	if ((rule4->dst_len &&
-	     nla_put_in_addr(skb, FRA_DST, rule4->dst)) ||
+	     nla_put_be32(skb, FRA_DST, rule4->dst)) ||
 	    (rule4->src_len &&
-	     nla_put_in_addr(skb, FRA_SRC, rule4->src)))
+	     nla_put_be32(skb, FRA_SRC, rule4->src)))
 		goto nla_put_failure;
 #ifdef CONFIG_IP_ROUTE_CLASSID
 	if (rule4->tclassid &&
@@ -325,12 +271,12 @@ static const struct fib_rules_ops __net_initconst fib4_rules_ops_template = {
 	.rule_size	= sizeof(struct fib4_rule),
 	.addr_size	= sizeof(u32),
 	.action		= fib4_rule_action,
-	.suppress	= fib4_rule_suppress,
 	.match		= fib4_rule_match,
 	.configure	= fib4_rule_configure,
 	.delete		= fib4_rule_delete,
 	.compare	= fib4_rule_compare,
 	.fill		= fib4_rule_fill,
+	.default_pref	= fib_default_rule_pref,
 	.nlmsg_payload	= fib4_rule_nlmsg_payload,
 	.flush_cache	= fib4_rule_flush_cache,
 	.nlgroup	= RTNLGRP_IPV4_RULE,

@@ -32,7 +32,7 @@
 
 #define DMX_FILTER_SIZE 16
 
-enum dmx_output
+typedef enum
 {
 	DMX_OUT_DECODER, /* Streaming directly to decoder. */
 	DMX_OUT_TAP,     /* Output going to a memory buffer */
@@ -41,11 +41,10 @@ enum dmx_output
 			 /* (to be retrieved by reading from the */
 			 /* logical DVR device).                 */
 	DMX_OUT_TSDEMUX_TAP /* Like TS_TAP but retrieved from the DMX device */
-};
+} dmx_output_t;
 
-typedef enum dmx_output dmx_output_t;
 
-typedef enum dmx_input
+typedef enum
 {
 	DMX_IN_FRONTEND, /* Input from a front-end device.  */
 	DMX_IN_DVR       /* Input from the logical DVR device.  */
@@ -123,7 +122,7 @@ typedef struct dmx_caps {
 	int num_decoders;
 } dmx_caps_t;
 
-typedef enum dmx_source {
+typedef enum {
 	DMX_SOURCE_FRONT0 = 0,
 	DMX_SOURCE_FRONT1,
 	DMX_SOURCE_FRONT2,
@@ -139,6 +138,7 @@ struct dmx_stc {
 	unsigned int base;	/* output: divisor for stc to get 90 kHz clock */
 	__u64 stc;		/* output: stc in 'base'*90 kHz units */
 };
+
 
 #define DMX_START                _IO('o', 41)
 #define DMX_STOP                 _IO('o', 42)

@@ -100,5 +100,4 @@ Description:
 
 Users:		libraw1394
 		libdc1394
-		libhinawa
-		tools like linux-firewire-utils, fwhack, ...
+		tools like jujuutils, fwhack, ...

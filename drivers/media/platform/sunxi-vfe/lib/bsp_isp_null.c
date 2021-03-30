@@ -1,19 +1,3 @@
-/*
- * linux-4.9/drivers/media/platform/sunxi-vfe/lib/bsp_isp_null.c
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
 #include "bsp_isp.h"
 #include "bsp_isp_comm.h"
 #include "isp_module_cfg.h"
@@ -155,7 +139,7 @@ void bsp_isp_s_scene_mode(struct isp_gen_settings *isp_gen, int value)
 {
 }
 void bsp_isp_s_auto_focus_start(struct isp_gen_settings *isp_gen, int value)
-{
+{  
 }
 
 void bsp_isp_s_auto_focus_stop(struct isp_gen_settings *isp_gen, int value)
@@ -264,7 +248,7 @@ void bsp_isp_clr_irq_status(unsigned int irq)
 {
 }
 
-int bsp_isp_int_get_enable(void)
+int bsp_isp_int_get_enable()
 {
 	return 0;
 }
@@ -318,16 +302,16 @@ void bsp_isp_set_ob_zone(struct isp_size *black, struct isp_size *valid, struct 
 {
 }
 
-void bsp_isp_set_output_size(enum isp_channel ch, struct isp_size *size)
+void bsp_isp_set_output_size(enum isp_channel ch,struct isp_size *size) 
 {
 }
-void bsp_isp_scale_cfg(enum isp_channel ch, int x_ratio, int y_ratio, int weight_shift)
+void bsp_isp_scale_cfg(enum isp_channel ch,int x_ratio,int y_ratio,int weight_shift) 
 {
 }
-void bsp_isp_set_stride_y(unsigned int stride_val, enum isp_channel ch)
+void bsp_isp_set_stride_y(unsigned int stride_val, enum isp_channel ch) 
 {
 }
-void bsp_isp_set_stride_uv(unsigned int stride_val, enum isp_channel ch)
+void bsp_isp_set_stride_uv(unsigned int stride_val, enum isp_channel ch) 
 {
 }
 void bsp_isp_set_yuv_addr(struct isp_yuv_channel_addr *addr, enum isp_channel ch, enum isp_src channel_src)
@@ -354,7 +338,7 @@ void bsp_isp_exit(void)
 }
 
 unsigned int bsp_isp_get_saved_cfa_min_rgb(void)
-{
+{	
 	return 0;
 }
 unsigned int bsp_isp_get_saved_cfa_pic_tex(void)
@@ -382,7 +366,7 @@ int bsp_isp_get_saved_cnr_noise(void)
 {
 	return 0;
 }
-void bsp_isp_print_reg_saved(void)
+void bsp_isp_print_reg_saved()
 {
 }
 
@@ -402,16 +386,16 @@ void isp_config_init(struct isp_gen_settings *isp_gen)
 {
 }
 
-int isp_module_init(struct isp_gen_settings *isp_gen, struct isp_3a_result *isp_result)/* after csi read ini */
+int isp_module_init(struct isp_gen_settings *isp_gen, struct isp_3a_result *isp_result)//after csi read ini
 {
 	return 0;
 }
 
-int get_pre_ev_cumul(struct isp_gen_settings *isp_gen, struct isp_3a_result *isp_result)
+int get_pre_ev_cumul(struct isp_gen_settings *isp_gen,struct isp_3a_result *isp_result)
 {
 	return 0;
 }
-void config_sensor_next_exposure(struct isp_gen_settings *isp_gen, struct isp_3a_result *isp_result)
+void config_sensor_next_exposure(struct isp_gen_settings *isp_gen,struct isp_3a_result *isp_result)
 {
 }
 

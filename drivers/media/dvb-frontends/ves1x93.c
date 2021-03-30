@@ -41,7 +41,7 @@ struct ves1x93_state {
 	struct dvb_frontend frontend;
 
 	/* previous uncorrected block counter */
-	enum fe_spectral_inversion inversion;
+	fe_spectral_inversion_t inversion;
 	u8 *init_1x93_tab;
 	u8 *init_1x93_wtab;
 	u8 tab_size;
@@ -130,8 +130,7 @@ static int ves1x93_clr_bit (struct ves1x93_state* state)
 	return 0;
 }
 
-static int ves1x93_set_inversion(struct ves1x93_state *state,
-				 enum fe_spectral_inversion inversion)
+static int ves1x93_set_inversion (struct ves1x93_state* state, fe_spectral_inversion_t inversion)
 {
 	u8 val;
 
@@ -157,7 +156,7 @@ static int ves1x93_set_inversion(struct ves1x93_state *state,
 	return ves1x93_writereg (state, 0x0c, (state->init_1x93_tab[0x0c] & 0x3f) | val);
 }
 
-static int ves1x93_set_fec(struct ves1x93_state *state, enum fe_code_rate fec)
+static int ves1x93_set_fec (struct ves1x93_state* state, fe_code_rate_t fec)
 {
 	if (fec == FEC_AUTO)
 		return ves1x93_writereg (state, 0x0d, 0x08);
@@ -167,7 +166,7 @@ static int ves1x93_set_fec(struct ves1x93_state *state, enum fe_code_rate fec)
 		return ves1x93_writereg (state, 0x0d, fec - FEC_1_2);
 }
 
-static enum fe_code_rate ves1x93_get_fec(struct ves1x93_state *state)
+static fe_code_rate_t ves1x93_get_fec (struct ves1x93_state* state)
 {
 	return FEC_1_2 + ((ves1x93_readreg (state, 0x0d) >> 4) & 0x7);
 }
@@ -282,8 +281,7 @@ static int ves1x93_init (struct dvb_frontend* fe)
 	return 0;
 }
 
-static int ves1x93_set_voltage(struct dvb_frontend *fe,
-			       enum fe_sec_voltage voltage)
+static int ves1x93_set_voltage (struct dvb_frontend* fe, fe_sec_voltage_t voltage)
 {
 	struct ves1x93_state* state = fe->demodulator_priv;
 
@@ -299,8 +297,7 @@ static int ves1x93_set_voltage(struct dvb_frontend *fe,
 	}
 }
 
-static int ves1x93_read_status(struct dvb_frontend *fe,
-			       enum fe_status *status)
+static int ves1x93_read_status(struct dvb_frontend* fe, fe_status_t* status)
 {
 	struct ves1x93_state* state = fe->demodulator_priv;
 
@@ -406,9 +403,9 @@ static int ves1x93_set_frontend(struct dvb_frontend *fe)
 	return 0;
 }
 
-static int ves1x93_get_frontend(struct dvb_frontend *fe,
-				struct dtv_frontend_properties *p)
+static int ves1x93_get_frontend(struct dvb_frontend *fe)
 {
+	struct dtv_frontend_properties *p = &fe->dtv_property_cache;
 	struct ves1x93_state* state = fe->demodulator_priv;
 	int afc;
 

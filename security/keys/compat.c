@@ -31,21 +31,30 @@ static long compat_keyctl_instantiate_key_iov(
 	key_serial_t ringid)
 {
 	struct iovec iovstack[UIO_FASTIOV], *iov = iovstack;
-	struct iov_iter from;
 	long ret;
 
-	if (!_payload_iov)
-		ioc = 0;
+	if (!_payload_iov || !ioc)
+		goto no_payload;
 
-	ret = compat_import_iovec(WRITE, _payload_iov, ioc,
-				  ARRAY_SIZE(iovstack), &iov,
-				  &from);
+	ret = compat_rw_copy_check_uvector(WRITE, _payload_iov, ioc,
+					   ARRAY_SIZE(iovstack),
+					   iovstack, &iov);
 	if (ret < 0)
-		return ret;
+		goto err;
+	if (ret == 0)
+		goto no_payload_free;
 
-	ret = keyctl_instantiate_key_common(id, &from, ringid);
-	kfree(iov);
+	ret = keyctl_instantiate_key_common(id, iov, ioc, ret, ringid);
+err:
+	if (iov != iovstack)
+		kfree(iov);
 	return ret;
+
+no_payload_free:
+	if (iov != iovstack)
+		kfree(iov);
+no_payload:
+	return keyctl_instantiate_key_common(id, NULL, 0, 0, ringid);
 }
 
 /*
@@ -56,8 +65,8 @@ static long compat_keyctl_instantiate_key_iov(
  * taking a 32-bit syscall are zero.  If you can, you should call sys_keyctl()
  * directly.
  */
-COMPAT_SYSCALL_DEFINE5(keyctl, u32, option,
-		       u32, arg2, u32, arg3, u32, arg4, u32, arg5)
+asmlinkage long compat_sys_keyctl(u32 option,
+				  u32 arg2, u32 arg3, u32 arg4, u32 arg5)
 {
 	switch (option) {
 	case KEYCTL_GET_KEYRING_ID:
@@ -128,13 +137,6 @@ COMPAT_SYSCALL_DEFINE5(keyctl, u32, option,
 
 	case KEYCTL_INVALIDATE:
 		return keyctl_invalidate_key(arg2);
-
-	case KEYCTL_GET_PERSISTENT:
-		return keyctl_get_persistent(arg2, arg3);
-
-	case KEYCTL_DH_COMPUTE:
-		return keyctl_dh_compute(compat_ptr(arg2), compat_ptr(arg3),
-					 arg4, compat_ptr(arg5));
 
 	default:
 		return -EOPNOTSUPP;

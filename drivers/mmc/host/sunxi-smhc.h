@@ -1,20 +1,3 @@
-/*
-* Sunxi SD/MMC host driver
-*
-* Copyright (C) 2015 AllWinnertech Ltd.
-* Author: lixiang <lixiang@allwinnertech>
-*
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License version 2 as
-* published by the Free Software Foundation.
-*
-* This program is distributed "as is" WITHOUT ANY WARRANTY of any
-* kind, whether express or implied; without even the implied warranty
-* of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-* GNU General Public License for more details.
-*/
-
-
 #include <linux/clk.h>
 #include <linux/clk/sunxi.h>
 
@@ -41,25 +24,33 @@
 #ifndef __SUNXI_MMC_H__
 #define __SUNXI_MMC_H__
 
+
 #define DRIVER_NAME "sunxi-smhc"
 #define DRIVER_RIVISION "v0.6 2016-4-29 16:53"
-#define DRIVER_VERSION "SD/MMC/SDIO Host Controller Driver(" DRIVER_RIVISION ")"
+#define DRIVER_VERSION "SD/MMC/SDIO Host Controller Driver(" DRIVER_RIVISION ")" \
+			" Compiled in " __DATE__ " at " __TIME__""
+
 
 #if defined CONFIG_FPGA_V4_PLATFORM || defined CONFIG_FPGA_V7_PLATFORM
 #define MMC_FPGA
 #endif
+//#define USE_OLD_SYS_CLK_INTERFACE
 
 
-#define SMHC_DEVICE_ID			(2)	/*number of id in multi device*/
-/*max blk count and size is limited by the SMHC_BLK_CFG register's max value*/
+#define SMHC_DEVICE_ID			(2) //number of id in multi device
+//max blk count and size is limited by the SMHC_BLK_CFG register's max value
 #define MAX_BLK_COUNT		(0xFFFF)
 #define MAX_BLK_SIZE		(0x800)
-/*#define MAX_DES_SIZE          PAGE_SIZE*/
+//#define MAX_DES_SIZE		PAGE_SIZE
 #define SUNXI_REQ_PAGE_SIZE			(PAGE_SIZE*4)
 
-/*---------------------------------------------*/
+
+
+
+
+//-------------------------------------------------------------------------------------
 /* registers define */
-/*---------------------------------------------*/
+//--------------------------------------------------------------------------------------
 #define SMHC_CMD_ARG2          (0x00)
 #define SMHC_BLK_CFG           (0x04)
 #define SMHC_CMD_ARG1          (0x08)
@@ -76,14 +67,14 @@
 #define SMHC_INT_STA_EN        (0x34)
 #define SMHC_INT_SIG_EN        (0x38)
 #define SMHC_ACMD_ERR_CTRL2    (0x3C)
-#define SMHC_SET_ERR           (0x50)
+#define SMHC_SET_ERR           (0x50) 
 #define SMHC_ADMA_ERR          (0x54)
 #define SMHC_ADMA_ADDR         (0x58)
 
 #define SMHC_CTRL3             (0x200)
 #define SMHC_CMD_ATTR          (0x204)
 #define SMHC_TO_CTRL2          (0x208)
-#define SMHC_ATC               (0x210)
+#define SMHC_ATC               (0x210) 
 #define SMHC_RTC               (0x214)
 #define SMHC_DITC0             (0x218)
 #define SMHC_DITC1             (0x21C)
@@ -95,7 +86,7 @@
 #define SMHC_TBC1              (0x248)
 #define SMHC_BL                (0x24C)
 #define SMHC_CEDBN             (0x250)
-/*----------------------------------------*/
+//--------------------------------------------------------------------------------------
 
 #define smhc_readl(host, reg) \
 	__raw_readl((host)->reg_base + reg)
@@ -106,36 +97,39 @@
 #define smhc_writew(host, reg, value) \
 	__raw_writew((value), (host)->reg_base + reg)
 #define smhc_clr_bit(host, reg, bitmap) \
-	do {							\
-		u32 tmp = smhc_readl(host, reg);	\
+	do{									\
+		u32 tmp = smhc_readl(host,reg);	\
 		tmp &= ~(bitmap);				\
-		smhc_writel(host, reg, tmp);		\
-	} while (0)
+		smhc_writel(host,reg,tmp);		\
+	}while(0)
 
 #define smhc_set_bit(host, reg, bitmap) \
-	do {								\
-		u32 tmp = smhc_readl(host, reg); \
+	do{ 								\
+		u32 tmp = smhc_readl(host,reg); \
 		tmp |= (bitmap);				\
-		smhc_writel(host, reg, tmp);		\
-	} while (0)
+		smhc_writel(host,reg,tmp);		\
+	}while(0)
+
+
 
 	/* control register bit field */
-	/*0x2c */
+	/*0x2c*/
 #define ResetAll            (0x1U<<24)
 #define ResetCmd            (0x1U<<25)
 #define ResetDat            (0x1U<<26)
 #define SdclkEn	            (0x1U<<2)
-
-	/*0x200 */
+	
+	/*0x200*/
 #define CPUAcessBuffEn      (0x1U<<31)
 #define StopReadClkAtBlkGap (0x1U<<8)
 #define SWDebounceMode      (0x1U<<5)
 #define DebounceEnb         (0x1U<<4)
 #define CdDat3En            (0x1U<<3)
 #define SdclkIdleCtrl       (0x1U<<2)
-
+	
+	
 	/* Struct for SMC Commands */
-	/*0x18 */
+	/*0x18*/
 #define CMDType         (0x3U<<22)
 #define DataExp         (0x1U<<21)
 #define CheckRspIdx     (0x1U<<20)
@@ -152,20 +146,20 @@
 #define AutoCmd23       (0x2U<<2)
 #define BlkCntEn        (0x1U<<1)
 #define DMAEn           (0x1U<<0)
-
-	/*0x204 */
+	
+	/*0x204*/
 #define SendInitSeq     (0x1U<<4)
 #define DisableBoot     (0x1U<<3)
 #define BootACKExp      (0x1U<<2)
 #define AltBootMode     (0x2U<<0)
 #define MandBootMode    (0x1U<<0)
-
-	/*0x03C */
+	
+	/*0x03C*/
 #define Switch3v3To1v8  (0x1U<<19)
 #define DdrType         (0x7<<16)
 #define DDR_SHIFT       (16)
-
-	/*0x24 */
+	
+	/*0x24*/
 #define CmdLineSta      (0x1U<<24)
 #define Dat3LineSta     (0x1U<<23)
 #define Dat2LineSta     (0x1U<<22)
@@ -182,9 +176,11 @@
 #define DatLineActive   (0x1U<<2)
 #define CmdInhibitDat   (0x1U<<1)
 #define CmdInhibitCmd   (0x1U<<0)
-
+	
+	
 #define BootDataStart     (0x1U<<29)
 #define BootAckRcv        (0x1U<<28)
+	//
 #define DSFOInt		        (0x1U<<30)
 #define DmaErrInt         (0x1U<<25)
 #define AcmdErrInt        (0x1U<<24)
@@ -202,21 +198,22 @@
 #define BuffRDRdyInt      (0x1U<<5)
 #define BuffWRRdyInt      (0x1U<<4)
 #define DmaInt            (0x1U<<3)
-	/*#define BlkGapEvtInt          (0x1U<<2)*/
+	//#define BlkGapEvtInt		(0x1U<<2)
 #define TransOverInt      (0x1U<<1)
 #define CmdOverInt        (0x1U<<0)
-#define TxDatIntBit       (DmaInt | TransOverInt | DmaErrInt | ErrInt)
-#define RxDatIntBit       (DmaInt | TransOverInt | DmaErrInt | ErrInt)
+#define TxDatIntBit       ( DmaInt | TransOverInt | DmaErrInt | ErrInt)
+#define RxDatIntBit       ( DmaInt | TransOverInt | DmaErrInt | ErrInt)
 #define DmaIntBit         (DmaInt | DmaErrInt)
-#define ErrIntBit         (0x437F0000)	/*(0x1ff<<16)*/
+#define ErrIntBit         (0x437F0000)//(0x1ff<<16)
 #define DoneIntBit		  (TransOverInt|CmdOverInt)
-
-	/*0x28 SMHC_CTRL1 bit field*/
+	
+	//0x28 SMHC_CTRL1 bit field
 #define Dma32BitSel       (0x3<<3)
 #define DmaSel            (0x3<<3)
 #define BusWidth          (0x1<<1)
 #define ExtBusWidth       (0x1<<5)
-
+	
+	
 	/*0x3C Auto CMD Error Status */
 #define NoAcmd12          (0x1U<<7)
 #define AcmdIdxErr        (0x1U<<4)
@@ -224,49 +221,40 @@
 #define AcmdCRCErr        (0x1U<<2)
 #define AcmdTimeoutErr    (0x1U<<1)
 #define NotIssueAcmd      (0x0<<0)
+	
+	
 
-enum {
+	
+enum
+{
 	ACT_NOP = 0,
 	ACT_RSV,
 	ACT_TRANS,
 	ACT_LINK,
 };
-
-enum {
+	
+enum
+{
 	MAN_BOOT_MD = 0,
 	ALT_BOOT_MD,
 };
-
-struct sdhc_idma_des {
-/*=1: indicates this line of descriptor is effective.
- *=0: generate ADMA Error interrupt and stop ADMA to prevent runaway.
- */
-	u32 valid:1,
-/*=1: indicates end of descriptor.
- *The Transfer Complete Interrupt is generated
- *when the operation of the descriptor line is completed.
- */
-		end:1,
-/*
- *=1: generates DMA Interrupt
- *when the operation of the descriptor line is completed.
- */
-			int_en:1,
-		: 1,
-/*00b: Nop, No Operation, Do not execute current line and go to next line.*/
-act:2,
-/*01b: rsv, reserved, (Same as Nop. Do not execute current line
- *and go to next line.)
- */
-/*10b: Tran, transfer data, Transfer data of one descriptor
- *line Transfer data of one descriptor line
- */
-/*11b: Link, Link Descriptor, Link to another descriptor*/
-		: 10,
-	length:16;
-	u32 addr;
+	
+	
+struct sdhc_idma_des{
+	u32 valid			:1, //=1: indicates this line of descriptor is effective. =0: generate ADMA Error interrupt and stop ADMA to prevent runaway.
+		end 			:1, //=1: indicates end of descriptor. The Transfer Complete Interrupt is generated when the operation of the descriptor line is completed.
+		int_en			:1, //=1: generates DMA Interrupt when the operation of the descriptor line is completed.
+						:1,
+		act 			:2, //00b: Nop, No Operation, Do not execute current line and go to next line.
+							//01b: rsv, reserved, (Same as Nop. Do not execute current line and go to next line.)
+							//10b: Tran, transfer data, Transfer data of one descriptor line Transfer data of one descriptor line
+							//11b: Link, Link Descriptor, Link to another descriptor
+						:10,
+		length			:16;
+		u32 addr;
 };
-
+	
+	
 struct sunxi_mmc_ctrl_regs {
 	u32 rst_clk_ctrl;
 	u32 int_sta_en;
@@ -278,52 +266,52 @@ struct sunxi_mmc_ctrl_regs {
 	u32 atc;
 };
 
+
+
 struct sunxi_mmc_host {
-	struct mmc_host *mmc;
+	struct mmc_host	*mmc;
 	struct reset_control *reset;
 
 	/* IO mapping base */
-	void __iomem *reg_base;
+	void __iomem	*reg_base;
 
 	/* clock management */
-	struct clk *clk_ahb;
-	struct clk *clk_mmc;
-	struct clk *clk_rst;
-
-	int (*sunxi_mmc_clk_set_rate)(struct sunxi_mmc_host *host,
-				       struct mmc_ios *ios);
+	struct clk	*clk_ahb;
+	struct clk	*clk_mmc;
+	struct clk	*clk_rst;
+	
+	int (*sunxi_mmc_clk_set_rate)(struct sunxi_mmc_host *host, struct mmc_ios *ios);
 
 	/* irq */
-	spinlock_t lock;
-	int irq;
-	u32 int_sum;
-	u32 sdio_imask;
+	spinlock_t	lock;
+	int		irq;
+	u32		int_sum;
+	u32		sdio_imask;
 
 	/* dma */
-	u32 idma_des_size_bits;
-	dma_addr_t sg_dma;
-	void *sg_cpu;
-	bool wait_dma;
-	u32 dma_tl;
-	u64 dma_mask;
+	u32		idma_des_size_bits;
+	dma_addr_t	sg_dma;
+	void		*sg_cpu;
+	bool		wait_dma;
+	u32		dma_tl;
+	u64 	dma_mask;
 
-	void (*sunxi_mmc_thld_ctl)(struct sunxi_mmc_host *host,
-				    struct mmc_ios *ios,
-				    struct mmc_data *data);
+	void (*sunxi_mmc_thld_ctl )(struct sunxi_mmc_host *host,
+				  struct mmc_ios *ios, struct mmc_data *data);
 
 	struct mmc_request *mrq;
 	struct mmc_request *mrq_busy;
 	struct mmc_request *manual_stop_mrq;
-	int ferror;
+	int		ferror;
 
-	u32 power_on;
+	u32 	power_on;
 
 	/* pinctrl handles */
-	struct pinctrl *pinctrl;
-	struct pinctrl_state *pins_default;
-	struct pinctrl_state *pins_sleep;
+	struct pinctrl		*pinctrl;
+	struct pinctrl_state	*pins_default;
+	struct pinctrl_state	*pins_sleep;
 
-	/*sys node */
+	/*sys node*/
 	struct device_attribute maual_insert;
 	struct device_attribute *dump_register;
 	struct device_attribute dump_clk_dly;
@@ -336,18 +324,18 @@ struct sunxi_mmc_host {
 
 	void (*sunxi_mmc_set_acmda)(struct sunxi_mmc_host *host);
 
-	void (*sunxi_mmc_shutdown)(struct platform_device *pdev);
+	void (*sunxi_mmc_shutdown)(struct platform_device * pdev);
 
-	/*really controller id,no logic id */
+	/*really controller id,no logic id*/
 	int phy_index;
 
-	u32 dat3_imask;
+	u32  dat3_imask;
 
-	/*no wait busy if wrtie end, only for customer need */
-#define NO_MANUAL_WAIT_BUSY_WRITE_END  0x1
-#define NO_REINIT_SHUTDOWN			   0x2
-#define CARD_PWR_GPIO_HIGH_ACTIVE	   0x4
-	/*control specal function control,for customer need */
+	/*no wait busy if wrtie end, only for customer need*/
+	#define NO_MANUAL_WAIT_BUSY_WRITE_END  0x1
+	#define NO_REINIT_SHUTDOWN			   0x2
+	#define CARD_PWR_GPIO_HIGH_ACTIVE	   0x4
+	/*control specal function control,for customer need*/
 	u32 ctl_spec_cap;
 
 	int card_pwr_gpio;
@@ -355,8 +343,5 @@ struct sunxi_mmc_host {
 	void *version_priv_dat;
 };
 
-/*use to check ddr mode,not include hs400*/
-#define sunxi_mmc_ddr_timing(it)	\
-	(((it) == MMC_TIMING_UHS_DDR50) || ((it) == MMC_TIMING_MMC_DDR52))
 
 #endif

@@ -236,7 +236,7 @@ STUB_GET_NEXT_HIGH_MONO_COUNT(virt, id)
 STUB_RESET_SYSTEM(virt, id)
 
 void
-efi_gettimeofday (struct timespec64 *ts)
+efi_gettimeofday (struct timespec *ts)
 {
 	efi_time_t tm;
 
@@ -245,7 +245,7 @@ efi_gettimeofday (struct timespec64 *ts)
 		return;
 	}
 
-	ts->tv_sec = mktime64(tm.year, tm.month, tm.day,
+	ts->tv_sec = mktime(tm.year, tm.month, tm.day,
 			    tm.hour, tm.minute, tm.second);
 	ts->tv_nsec = tm.nanosecond;
 }
@@ -464,6 +464,7 @@ efi_map_pal_code (void)
 		 GRANULEROUNDDOWN((unsigned long) pal_vaddr),
 		 pte_val(pfn_pte(__pa(pal_vaddr) >> PAGE_SHIFT, PAGE_KERNEL)),
 		 IA64_GRANULE_SHIFT);
+	paravirt_dv_serialize_data();
 	ia64_set_psr(psr);		/* restore psr */
 }
 
@@ -531,6 +532,8 @@ efi_init (void)
 	       efi.systab->hdr.revision >> 16,
 	       efi.systab->hdr.revision & 0xffff, vendor);
 
+	set_bit(EFI_SYSTEM_TABLES, &efi.flags);
+
 	palo_phys      = EFI_INVALID_TABLE_ADDR;
 
 	if (efi_config_init(arch_tables) != 0)
@@ -565,7 +568,6 @@ efi_init (void)
 		{
 			const char *unit;
 			unsigned long size;
-			char buf[64];
 
 			md = p;
 			size = md->num_pages << EFI_PAGE_SHIFT;
@@ -584,10 +586,9 @@ efi_init (void)
 				unit = "KB";
 			}
 
-			printk("mem%02d: %s "
+			printk("mem%02d: type=%2u, attr=0x%016lx, "
 			       "range=[0x%016lx-0x%016lx) (%4lu%s)\n",
-			       i, efi_md_typeattr_format(buf, sizeof(buf), md),
-			       md->phys_addr,
+			       i, md->type, md->attribute, md->phys_addr,
 			       md->phys_addr + efi_md_size(md), size, unit);
 		}
 	}
@@ -964,7 +965,7 @@ efi_uart_console_only(void)
 /*
  * Look for the first granule aligned memory descriptor memory
  * that is big enough to hold EFI memory map. Make sure this
- * descriptor is at least granule sized so it does not get trimmed
+ * descriptor is atleast granule sized so it does not get trimmed
  */
 struct kern_memdesc *
 find_memmap_space (void)
@@ -1090,6 +1091,11 @@ efi_memmap_init(u64 *s, u64 *e)
 		if (!is_memory_available(md))
 			continue;
 
+#ifdef CONFIG_CRASH_DUMP
+		/* saved_max_pfn should ignore max_addr= command line arg */
+		if (saved_max_pfn < (efi_md_end(md) >> PAGE_SHIFT))
+			saved_max_pfn = (efi_md_end(md) >> PAGE_SHIFT);
+#endif
 		/*
 		 * Round ends inward to granule boundaries
 		 * Give trimmings to uncached allocator
@@ -1176,7 +1182,7 @@ efi_initialize_iomem_resources(struct resource *code_resource,
 	efi_memory_desc_t *md;
 	u64 efi_desc_size;
 	char *name;
-	unsigned long flags, desc;
+	unsigned long flags;
 
 	efi_map_start = __va(ia64_boot_param->efi_memmap);
 	efi_map_end   = efi_map_start + ia64_boot_param->efi_memmap_size;
@@ -1191,8 +1197,6 @@ efi_initialize_iomem_resources(struct resource *code_resource,
 			continue;
 
 		flags = IORESOURCE_MEM | IORESOURCE_BUSY;
-		desc = IORES_DESC_NONE;
-
 		switch (md->type) {
 
 			case EFI_MEMORY_MAPPED_IO:
@@ -1207,27 +1211,19 @@ efi_initialize_iomem_resources(struct resource *code_resource,
 				if (md->attribute & EFI_MEMORY_WP) {
 					name = "System ROM";
 					flags |= IORESOURCE_READONLY;
-				} else if (md->attribute == EFI_MEMORY_UC) {
+				} else if (md->attribute == EFI_MEMORY_UC)
 					name = "Uncached RAM";
-				} else {
+				else
 					name = "System RAM";
-					flags |= IORESOURCE_SYSRAM;
-				}
 				break;
 
 			case EFI_ACPI_MEMORY_NVS:
 				name = "ACPI Non-volatile Storage";
-				desc = IORES_DESC_ACPI_NV_STORAGE;
 				break;
 
 			case EFI_UNUSABLE_MEMORY:
 				name = "reserved";
 				flags |= IORESOURCE_DISABLED;
-				break;
-
-			case EFI_PERSISTENT_MEMORY:
-				name = "Persistent Memory";
-				desc = IORES_DESC_PERSISTENT_MEMORY;
 				break;
 
 			case EFI_RESERVED_TYPE:
@@ -1250,7 +1246,6 @@ efi_initialize_iomem_resources(struct resource *code_resource,
 		res->start = md->phys_addr;
 		res->end = md->phys_addr + efi_md_size(md) - 1;
 		res->flags = flags;
-		res->desc = desc;
 
 		if (insert_resource(&iomem_resource, res) < 0)
 			kfree(res);

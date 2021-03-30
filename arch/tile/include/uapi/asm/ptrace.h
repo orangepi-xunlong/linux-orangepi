@@ -52,16 +52,12 @@ typedef uint_reg_t pt_reg_t;
  * system call or exception.  "struct sigcontext" has the same shape.
  */
 struct pt_regs {
-	union {
-		/* Saved main processor registers; 56..63 are special. */
-		pt_reg_t regs[56];
-		struct {
-			pt_reg_t __regs[53];
-			pt_reg_t tp;		/* aliases regs[TREG_TP] */
-			pt_reg_t sp;		/* aliases regs[TREG_SP] */
-			pt_reg_t lr;		/* aliases regs[TREG_LR] */
-		};
-	};
+	/* Saved main processor registers; 56..63 are special. */
+	/* tp, sp, and lr must immediately follow regs[] for aliasing. */
+	pt_reg_t regs[53];
+	pt_reg_t tp;		/* aliases regs[TREG_TP] */
+	pt_reg_t sp;		/* aliases regs[TREG_SP] */
+	pt_reg_t lr;		/* aliases regs[TREG_LR] */
 
 	/* Saved special registers. */
 	pt_reg_t pc;		/* stored in EX_CONTEXT_K_0 */

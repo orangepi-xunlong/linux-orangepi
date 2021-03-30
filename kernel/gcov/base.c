@@ -18,9 +18,9 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
-#include <linux/sched.h>
 #include "gcov.h"
 
+static struct gcov_info *gcov_info_head;
 static int gcov_events_enabled;
 static DEFINE_MUTEX(gcov_lock);
 
@@ -34,7 +34,7 @@ void __gcov_init(struct gcov_info *info)
 
 	mutex_lock(&gcov_lock);
 	if (gcov_version == 0) {
-		gcov_version = gcov_info_version(info);
+		gcov_version = info->version;
 		/*
 		 * Printing gcc's version magic may prove useful for debugging
 		 * incompatibility reports.
@@ -45,7 +45,8 @@ void __gcov_init(struct gcov_info *info)
 	 * Add new profiling data structure to list and inform event
 	 * listener.
 	 */
-	gcov_info_link(info);
+	info->next = gcov_info_head;
+	gcov_info_head = info;
 	if (gcov_events_enabled)
 		gcov_event(GCOV_ADD, info);
 	mutex_unlock(&gcov_lock);
@@ -80,30 +81,6 @@ void __gcov_merge_delta(gcov_type *counters, unsigned int n_counters)
 }
 EXPORT_SYMBOL(__gcov_merge_delta);
 
-void __gcov_merge_ior(gcov_type *counters, unsigned int n_counters)
-{
-	/* Unused. */
-}
-EXPORT_SYMBOL(__gcov_merge_ior);
-
-void __gcov_merge_time_profile(gcov_type *counters, unsigned int n_counters)
-{
-	/* Unused. */
-}
-EXPORT_SYMBOL(__gcov_merge_time_profile);
-
-void __gcov_merge_icall_topn(gcov_type *counters, unsigned int n_counters)
-{
-	/* Unused. */
-}
-EXPORT_SYMBOL(__gcov_merge_icall_topn);
-
-void __gcov_exit(void)
-{
-	/* Unused. */
-}
-EXPORT_SYMBOL(__gcov_exit);
-
 /**
  * gcov_enable_events - enable event reporting through gcov_event()
  *
@@ -114,43 +91,46 @@ EXPORT_SYMBOL(__gcov_exit);
  */
 void gcov_enable_events(void)
 {
-	struct gcov_info *info = NULL;
+	struct gcov_info *info;
 
 	mutex_lock(&gcov_lock);
 	gcov_events_enabled = 1;
-
 	/* Perform event callback for previously registered entries. */
-	while ((info = gcov_info_next(info))) {
+	for (info = gcov_info_head; info; info = info->next)
 		gcov_event(GCOV_ADD, info);
-		cond_resched();
-	}
-
 	mutex_unlock(&gcov_lock);
 }
 
 #ifdef CONFIG_MODULES
+static inline int within(void *addr, void *start, unsigned long size)
+{
+	return ((addr >= start) && (addr < start + size));
+}
+
 /* Update list and generate events when modules are unloaded. */
 static int gcov_module_notifier(struct notifier_block *nb, unsigned long event,
 				void *data)
 {
 	struct module *mod = data;
-	struct gcov_info *info = NULL;
-	struct gcov_info *prev = NULL;
+	struct gcov_info *info;
+	struct gcov_info *prev;
 
 	if (event != MODULE_STATE_GOING)
 		return NOTIFY_OK;
 	mutex_lock(&gcov_lock);
-
+	prev = NULL;
 	/* Remove entries located in module from linked list. */
-	while ((info = gcov_info_next(info))) {
-		if (within_module((unsigned long)info, mod)) {
-			gcov_info_unlink(prev, info);
+	for (info = gcov_info_head; info; info = info->next) {
+		if (within(info, mod->module_core, mod->core_size)) {
+			if (prev)
+				prev->next = info->next;
+			else
+				gcov_info_head = info->next;
 			if (gcov_events_enabled)
 				gcov_event(GCOV_REMOVE, info);
 		} else
 			prev = info;
 	}
-
 	mutex_unlock(&gcov_lock);
 
 	return NOTIFY_OK;

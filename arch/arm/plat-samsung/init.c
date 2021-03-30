@@ -11,25 +11,23 @@
  * published by the Free Software Foundation.
 */
 
-/*
- * NOTE: Code in this file is not used on S3C64xx when booting with
- * Device Tree support.
- */
-
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
 #include <linux/serial_core.h>
-#include <linux/serial_s3c.h>
 #include <linux/platform_device.h>
-#include <linux/of.h>
+
+#include <mach/hardware.h>
 
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 
 #include <plat/cpu.h>
 #include <plat/devs.h>
+#include <plat/clock.h>
+
+#include <plat/regs-serial.h>
 
 static struct cpu_table *cpu;
 
@@ -57,13 +55,12 @@ void __init s3c_init_cpu(unsigned long idcode,
 
 	printk("CPU %s (id 0x%08lx)\n", cpu->name, idcode);
 
-	if (cpu->init == NULL) {
+	if (cpu->map_io == NULL || cpu->init == NULL) {
 		printk(KERN_ERR "CPU %s support not enabled\n", cpu->name);
 		panic("Unsupported Samsung CPU");
 	}
 
-	if (cpu->map_io)
-		cpu->map_io();
+	cpu->map_io();
 }
 
 /* s3c24xx_init_clocks
@@ -90,12 +87,10 @@ void __init s3c24xx_init_clocks(int xtal)
 }
 
 /* uart management */
-#if IS_ENABLED(CONFIG_SAMSUNG_ATAGS)
+
 static int nr_uarts __initdata = 0;
 
-#ifdef CONFIG_SERIAL_SAMSUNG_UARTS
 static struct s3c2410_uartcfg uart_cfgs[CONFIG_SERIAL_SAMSUNG_UARTS];
-#endif
 
 /* s3c24xx_init_uartdevs
  *
@@ -110,7 +105,6 @@ void __init s3c24xx_init_uartdevs(char *name,
 				  struct s3c24xx_uart_resources *res,
 				  struct s3c2410_uartcfg *cfg, int no)
 {
-#ifdef CONFIG_SERIAL_SAMSUNG_UARTS
 	struct platform_device *platdev;
 	struct s3c2410_uartcfg *cfgptr = uart_cfgs;
 	struct s3c24xx_uart_resources *resp;
@@ -133,7 +127,6 @@ void __init s3c24xx_init_uartdevs(char *name,
 	}
 
 	nr_uarts = no;
-#endif
 }
 
 void __init s3c24xx_init_uarts(struct s3c2410_uartcfg *cfg, int no)
@@ -141,37 +134,26 @@ void __init s3c24xx_init_uarts(struct s3c2410_uartcfg *cfg, int no)
 	if (cpu == NULL)
 		return;
 
-	if (cpu->init_uarts == NULL && IS_ENABLED(CONFIG_SAMSUNG_ATAGS)) {
+	if (cpu->init_uarts == NULL) {
 		printk(KERN_ERR "s3c24xx_init_uarts: cpu has no uart init\n");
 	} else
 		(cpu->init_uarts)(cfg, no);
 }
-#endif
 
 static int __init s3c_arch_init(void)
 {
 	int ret;
 
-	/* init is only needed for ATAGS based platforms */
-	if (!IS_ENABLED(CONFIG_ATAGS) ||
-	    (!soc_is_s3c24xx() && !soc_is_s3c64xx()))
-		return 0;
-
 	// do the correct init for cpu
 
-	if (cpu == NULL) {
-		/* Not needed when booting with device tree. */
-		if (of_have_populated_dt())
-			return 0;
+	if (cpu == NULL)
 		panic("s3c_arch_init: NULL cpu\n");
-	}
 
 	ret = (cpu->init)();
 	if (ret != 0)
 		return ret;
-#if IS_ENABLED(CONFIG_SAMSUNG_ATAGS)
+
 	ret = platform_add_devices(s3c24xx_uart_devs, nr_uarts);
-#endif
 	return ret;
 }
 

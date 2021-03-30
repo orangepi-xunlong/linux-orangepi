@@ -131,7 +131,6 @@ struct physdev_irq {
 #define MAP_PIRQ_TYPE_GSI		0x1
 #define MAP_PIRQ_TYPE_UNKNOWN		0x2
 #define MAP_PIRQ_TYPE_MSI_SEG		0x3
-#define MAP_PIRQ_TYPE_MULTI_MSI		0x4
 
 #define PHYSDEVOP_map_pirq		13
 struct physdev_map_pirq {
@@ -142,16 +141,11 @@ struct physdev_map_pirq {
     int index;
     /* IN or OUT */
     int pirq;
-    /* IN - high 16 bits hold segment for ..._MSI_SEG and ..._MULTI_MSI */
+    /* IN - high 16 bits hold segment for MAP_PIRQ_TYPE_MSI_SEG */
     int bus;
     /* IN */
     int devfn;
-    /* IN
-     * - For MSI-X contains entry number.
-     * - For MSI with ..._MULTI_MSI contains number of vectors.
-     * OUT (..._MULTI_MSI only)
-     * - Number of vectors allocated.
-     */
+    /* IN */
     int entry_nr;
     /* IN */
     uint64_t table_base;
@@ -236,17 +230,6 @@ struct physdev_get_free_pirq {
 #define XEN_PCI_DEV_EXTFN              0x1
 #define XEN_PCI_DEV_VIRTFN             0x2
 #define XEN_PCI_DEV_PXM                0x4
-
-#define XEN_PCI_MMCFG_RESERVED         0x1
-
-#define PHYSDEVOP_pci_mmcfg_reserved    24
-struct physdev_pci_mmcfg_reserved {
-    uint64_t address;
-    uint16_t segment;
-    uint8_t start_bus;
-    uint8_t end_bus;
-    uint32_t flags;
-};
 
 #define PHYSDEVOP_pci_device_add        25
 struct physdev_pci_device_add {

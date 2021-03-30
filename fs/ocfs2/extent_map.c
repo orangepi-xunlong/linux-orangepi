@@ -305,8 +305,8 @@ static int ocfs2_last_eb_is_empty(struct inode *inode,
 
 	if (el->l_tree_depth) {
 		ocfs2_error(inode->i_sb,
-			    "Inode %lu has non zero tree depth in leaf block %llu\n",
-			    inode->i_ino,
+			    "Inode %lu has non zero tree depth in "
+			    "leaf block %llu\n", inode->i_ino,
 			    (unsigned long long)eb_bh->b_blocknr);
 		ret = -EROFS;
 		goto out;
@@ -441,8 +441,8 @@ static int ocfs2_get_clusters_nocache(struct inode *inode,
 
 		if (el->l_tree_depth) {
 			ocfs2_error(inode->i_sb,
-				    "Inode %lu has non zero tree depth in leaf block %llu\n",
-				    inode->i_ino,
+				    "Inode %lu has non zero tree depth in "
+				    "leaf block %llu\n", inode->i_ino,
 				    (unsigned long long)eb_bh->b_blocknr);
 			ret = -EROFS;
 			goto out;
@@ -475,9 +475,8 @@ static int ocfs2_get_clusters_nocache(struct inode *inode,
 	BUG_ON(v_cluster < le32_to_cpu(rec->e_cpos));
 
 	if (!rec->e_blkno) {
-		ocfs2_error(inode->i_sb,
-			    "Inode %lu has bad extent record (%u, %u, 0)\n",
-			    inode->i_ino,
+		ocfs2_error(inode->i_sb, "Inode %lu has bad extent "
+			    "record (%u, %u, 0)", inode->i_ino,
 			    le32_to_cpu(rec->e_cpos),
 			    ocfs2_rec_clusters(el, rec));
 		ret = -EROFS;
@@ -565,8 +564,8 @@ int ocfs2_xattr_get_clusters(struct inode *inode, u32 v_cluster,
 
 		if (el->l_tree_depth) {
 			ocfs2_error(inode->i_sb,
-				    "Inode %lu has non zero tree depth in xattr leaf block %llu\n",
-				    inode->i_ino,
+				    "Inode %lu has non zero tree depth in "
+				    "xattr leaf block %llu\n", inode->i_ino,
 				    (unsigned long long)eb_bh->b_blocknr);
 			ret = -EROFS;
 			goto out;
@@ -583,9 +582,8 @@ int ocfs2_xattr_get_clusters(struct inode *inode, u32 v_cluster,
 		BUG_ON(v_cluster < le32_to_cpu(rec->e_cpos));
 
 		if (!rec->e_blkno) {
-			ocfs2_error(inode->i_sb,
-				    "Inode %lu has bad extent record (%u, %u, 0) in xattr\n",
-				    inode->i_ino,
+			ocfs2_error(inode->i_sb, "Inode %lu has bad extent "
+				    "record (%u, %u, 0) in xattr", inode->i_ino,
 				    le32_to_cpu(rec->e_cpos),
 				    ocfs2_rec_clusters(el, rec));
 			ret = -EROFS;
@@ -853,20 +851,20 @@ int ocfs2_seek_data_hole_offset(struct file *file, loff_t *offset, int whence)
 
 	down_read(&OCFS2_I(inode)->ip_alloc_sem);
 
-	if (*offset >= i_size_read(inode)) {
+	if (*offset >= inode->i_size) {
 		ret = -ENXIO;
 		goto out_unlock;
 	}
 
 	if (OCFS2_I(inode)->ip_dyn_features & OCFS2_INLINE_DATA_FL) {
 		if (whence == SEEK_HOLE)
-			*offset = i_size_read(inode);
+			*offset = inode->i_size;
 		goto out_unlock;
 	}
 
 	clen = 0;
 	cpos = *offset >> cs_bits;
-	cend = ocfs2_clusters_for_bytes(inode->i_sb, i_size_read(inode));
+	cend = ocfs2_clusters_for_bytes(inode->i_sb, inode->i_size);
 
 	while (cpos < cend && !is_last) {
 		ret = ocfs2_get_clusters_nocache(inode, di_bh, cpos, &hole_size,
@@ -905,8 +903,8 @@ int ocfs2_seek_data_hole_offset(struct file *file, loff_t *offset, int whence)
 		extlen = clen;
 		extlen <<=  cs_bits;
 
-		if ((extoff + extlen) > i_size_read(inode))
-			extlen = i_size_read(inode) - extoff;
+		if ((extoff + extlen) > inode->i_size)
+			extlen = inode->i_size - extoff;
 		extoff += extlen;
 		if (extoff > *offset)
 			*offset = extoff;

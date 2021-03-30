@@ -1,13 +1,3 @@
-/*
- * nand_dev.h for  SUNXI NAND .
- *
- * Copyright (C) 2016 Allwinner.
- *
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2.  This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
- */
 #ifndef __NAND_BLK_H__
 #define __NAND_BLK_H__
 
@@ -46,7 +36,7 @@
 #include <linux/kthread.h>
 #include "nand_type.h"
 #include "nand_lib.h"
-/*#include <linux/sys_config.h>*/
+#include <linux/sys_config.h>
 #include <linux/scatterlist.h>
 #include <linux/vmalloc.h>
 #include <linux/freezer.h>
@@ -98,10 +88,6 @@
 #else
 #define nand_dbg_inf(fmt, ...)  ({})
 #endif
-extern int nand_gpt_enable;
-extern struct device *ndfc_dev;
-#define NAND_SUPPORT_GPT (nand_gpt_enable)
-
 
 struct nand_blk_ops;
 struct list_head;
@@ -129,12 +115,11 @@ struct nand_blk_dev {
 	int devnum;
 	unsigned long size;
 	unsigned long off_size;
-    int readonly;
-    int writeonly;
-    int disable_access;
-    int bg_stop;
-    int rq_null;
-    /*void *blkcore_priv;*/
+	int readonly;
+	int writeonly;
+	int disable_access;
+	int bg_stop;
+	int rq_null;
 	char name[32];
 };
 
@@ -163,11 +148,10 @@ struct _nand_dev {
 struct nand_blk_ops {
 	/* blk device ID */
 	char name[32];
-    int major;
-    int minorbits;
-    int blksize;
+	int major;
+	int minorbits;
+	int blksize;
 	int blkshift;
-
 	/* add/remove nandflash devparts,use gendisk */
 	int (*add_dev) (struct nand_blk_ops *tr,
 			struct _nand_phy_partition *phy_partition);
@@ -190,7 +174,7 @@ struct nand_blk_ops {
 	int quit;
 	wait_queue_head_t thread_wq;
 	struct semaphore nand_ops_mutex;
-    struct list_head devs;
+	struct list_head devs;
 
 	struct module *owner;
 };

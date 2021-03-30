@@ -585,6 +585,7 @@ out:
 static __inline__ int dn_queue_skb(struct sock *sk, struct sk_buff *skb, int sig, struct sk_buff_head *queue)
 {
 	int err;
+	int skb_len;
 
 	/* Cast skb->rcvbuf to unsigned... It's pointless, but reduces
 	   number of warnings when compiling with -W --ANK
@@ -599,11 +600,12 @@ static __inline__ int dn_queue_skb(struct sock *sk, struct sk_buff *skb, int sig
 	if (err)
 		goto out;
 
+	skb_len = skb->len;
 	skb_set_owner_r(skb, sk);
 	skb_queue_tail(queue, skb);
 
 	if (!sock_flag(sk, SOCK_DEAD))
-		sk->sk_data_ready(sk);
+		sk->sk_data_ready(sk, skb_len);
 out:
 	return err;
 }
@@ -714,8 +716,7 @@ out:
 	return ret;
 }
 
-static int dn_nsp_rx_packet(struct net *net, struct sock *sk2,
-			    struct sk_buff *skb)
+static int dn_nsp_rx_packet(struct sk_buff *skb)
 {
 	struct dn_skb_cb *cb = DN_SKB_CB(skb);
 	struct sock *sk = NULL;
@@ -815,8 +816,7 @@ free_out:
 
 int dn_nsp_rx(struct sk_buff *skb)
 {
-	return NF_HOOK(NFPROTO_DECNET, NF_DN_LOCAL_IN,
-		       &init_net, NULL, skb, skb->dev, NULL,
+	return NF_HOOK(NFPROTO_DECNET, NF_DN_LOCAL_IN, skb, skb->dev, NULL,
 		       dn_nsp_rx_packet);
 }
 

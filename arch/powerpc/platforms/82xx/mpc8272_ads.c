@@ -16,8 +16,6 @@
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/fsl_devices.h>
-#include <linux/of_address.h>
-#include <linux/of_fdt.h>
 #include <linux/of_platform.h>
 #include <linux/io.h>
 
@@ -181,7 +179,7 @@ static void __init mpc8272_ads_setup_arch(void)
 		ppc_md.progress("mpc8272_ads_setup_arch(), finish", 0);
 }
 
-static const struct of_device_id of_bus_ids[] __initconst = {
+static struct of_device_id __initdata of_bus_ids[] = {
 	{ .name = "soc", },
 	{ .name = "cpm", },
 	{ .name = "localbus", },
@@ -201,7 +199,8 @@ machine_device_initcall(mpc8272_ads, declare_of_platform_devices);
  */
 static int __init mpc8272_ads_probe(void)
 {
-	return of_machine_is_compatible("fsl,mpc8272ads");
+	unsigned long root = of_get_flat_dt_root();
+	return of_flat_dt_is_compatible(root, "fsl,mpc8272ads");
 }
 
 define_machine(mpc8272_ads)

@@ -67,7 +67,8 @@ static int sproc_load_segments(struct rproc *rproc, const struct firmware *fw)
 static const struct ste_toc_entry *sproc_find_rsc_entry(const void *data)
 {
 	int i;
-	const struct ste_toc *toc = data;
+	const struct ste_toc *toc;
+	toc = data;
 
 	/* Search the table for the resource table */
 	for (i = 0; i < SPROC_MAX_TOC_ENTRIES &&
@@ -163,7 +164,7 @@ sproc_find_loaded_rsc_table(struct rproc *rproc, const struct firmware *fw)
 }
 
 /* STE modem firmware handler operations */
-static const struct rproc_fw_ops sproc_fw_ops = {
+const struct rproc_fw_ops sproc_fw_ops = {
 	.load = sproc_load_segments,
 	.find_rsc_table = sproc_find_rsc_table,
 	.find_loaded_rsc_table = sproc_find_loaded_rsc_table,
@@ -192,7 +193,7 @@ static void sproc_kick_callback(struct ste_modem_device *mdev, int vqid)
 		sproc_dbg(sproc, "no message was found in vqid %d\n", vqid);
 }
 
-static struct ste_modem_dev_cb sproc_dev_cb = {
+struct ste_modem_dev_cb sproc_dev_cb = {
 	.kick = sproc_kick_callback,
 };
 
@@ -229,7 +230,6 @@ static int sproc_start(struct rproc *rproc)
 static int sproc_stop(struct rproc *rproc)
 {
 	struct sproc *sproc = rproc->priv;
-
 	sproc_dbg(sproc, "stop ste-modem\n");
 
 	return sproc->mdev->ops.power(sproc->mdev, false);
@@ -257,7 +257,7 @@ static int sproc_drv_remove(struct platform_device *pdev)
 	rproc_del(sproc->rproc);
 	dma_free_coherent(sproc->rproc->dev.parent, SPROC_FW_SIZE,
 			  sproc->fw_addr, sproc->fw_dma_addr);
-	rproc_free(sproc->rproc);
+	rproc_put(sproc->rproc);
 
 	mdev->drv_data = NULL;
 
@@ -289,7 +289,6 @@ static int sproc_probe(struct platform_device *pdev)
 	sproc = rproc->priv;
 	sproc->mdev = mdev;
 	sproc->rproc = rproc;
-	rproc->has_iommu = false;
 	mdev->drv_data = sproc;
 
 	/* Provide callback functions to modem device */
@@ -325,13 +324,14 @@ free_mem:
 free_rproc:
 	/* Reset device data upon error */
 	mdev->drv_data = NULL;
-	rproc_free(rproc);
+	rproc_put(rproc);
 	return err;
 }
 
 static struct platform_driver sproc_driver = {
 	.driver	= {
 		.name	= SPROC_MODEM_NAME,
+		.owner	= THIS_MODULE,
 	},
 	.probe	= sproc_probe,
 	.remove	= sproc_drv_remove,

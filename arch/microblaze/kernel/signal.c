@@ -89,7 +89,7 @@ asmlinkage long sys_rt_sigreturn(struct pt_regs *regs)
 	int rval;
 
 	/* Always make any pending restarted system calls return -EINTR */
-	current->restart_block.fn = do_no_restart_syscall;
+	current_thread_info()->restart_block.fn = do_no_restart_syscall;
 
 	if (!access_ok(VERIFY_READ, frame, sizeof(*frame)))
 		goto badframe;
@@ -145,32 +145,42 @@ setup_sigcontext(struct sigcontext __user *sc, struct pt_regs *regs,
  * Determine which stack to use..
  */
 static inline void __user *
-get_sigframe(struct ksignal *ksig, struct pt_regs *regs, size_t frame_size)
+get_sigframe(struct k_sigaction *ka, struct pt_regs *regs, size_t frame_size)
 {
 	/* Default to using normal stack */
-	unsigned long sp = sigsp(regs->r1, ksig);
+	unsigned long sp = regs->r1;
+
+	if ((ka->sa.sa_flags & SA_ONSTACK) != 0 && !on_sig_stack(sp))
+		sp = current->sas_ss_sp + current->sas_ss_size;
 
 	return (void __user *)((sp - frame_size) & -8UL);
 }
 
-static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
-			  struct pt_regs *regs)
+static int setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
+			sigset_t *set, struct pt_regs *regs)
 {
 	struct rt_sigframe __user *frame;
-	int err = 0, sig = ksig->sig;
+	int err = 0;
+	int signal;
 	unsigned long address = 0;
 #ifdef CONFIG_MMU
 	pmd_t *pmdp;
 	pte_t *ptep;
 #endif
 
-	frame = get_sigframe(ksig, regs, sizeof(*frame));
+	frame = get_sigframe(ka, regs, sizeof(*frame));
 
 	if (!access_ok(VERIFY_WRITE, frame, sizeof(*frame)))
-		return -EFAULT;
+		goto give_sigsegv;
 
-	if (ksig->ka.sa.sa_flags & SA_SIGINFO)
-		err |= copy_siginfo_to_user(&frame->info, &ksig->info);
+	signal = current_thread_info()->exec_domain
+		&& current_thread_info()->exec_domain->signal_invmap
+		&& sig < 32
+		? current_thread_info()->exec_domain->signal_invmap[sig]
+		: sig;
+
+	if (info)
+		err |= copy_siginfo_to_user(&frame->info, info);
 
 	/* Create the ucontext. */
 	err |= __put_user(0, &frame->uc.uc_flags);
@@ -206,7 +216,7 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 		/* MS: I need add offset in page */
 		address += ((unsigned long)frame->tramp) & ~PAGE_MASK;
 		/* MS address is virtual */
-		address = __virt_to_phys(address);
+		address = virt_to_phys(address);
 		invalidate_icache_range(address, address + 8);
 		flush_dcache_range(address, address + 8);
 	}
@@ -217,17 +227,19 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 	flush_dcache_range(address, address + 8);
 #endif
 	if (err)
-		return -EFAULT;
+		goto give_sigsegv;
 
 	/* Set up registers for signal handler */
 	regs->r1 = (unsigned long) frame;
 
 	/* Signal handler args: */
-	regs->r5 = sig; /* arg 0: signum */
+	regs->r5 = signal; /* arg 0: signum */
 	regs->r6 = (unsigned long) &frame->info; /* arg 1: siginfo */
 	regs->r7 = (unsigned long) &frame->uc; /* arg2: ucontext */
 	/* Offset to handle microblaze rtid r14, 0 */
-	regs->pc = (unsigned long)ksig->ka.sa.sa_handler;
+	regs->pc = (unsigned long)ka->sa.sa_handler;
+
+	set_fs(USER_DS);
 
 #ifdef DEBUG_SIG
 	pr_info("SIG deliver (%s:%d): sp=%p pc=%08lx\n",
@@ -235,6 +247,10 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 #endif
 
 	return 0;
+
+give_sigsegv:
+	force_sigsegv(sig, current);
+	return -EFAULT;
 }
 
 /* Handle restarting system calls */
@@ -267,15 +283,23 @@ do_restart:
  */
 
 static void
-handle_signal(struct ksignal *ksig, struct pt_regs *regs)
+handle_signal(unsigned long sig, struct k_sigaction *ka,
+		siginfo_t *info, struct pt_regs *regs)
 {
 	sigset_t *oldset = sigmask_to_save();
 	int ret;
 
 	/* Set up the stack frame */
-	ret = setup_rt_frame(ksig, oldset, regs);
+	if (ka->sa.sa_flags & SA_SIGINFO)
+		ret = setup_rt_frame(sig, ka, info, oldset, regs);
+	else
+		ret = setup_rt_frame(sig, ka, NULL, oldset, regs);
 
-	signal_setup_done(ret, ksig, test_thread_flag(TIF_SINGLESTEP));
+	if (ret)
+		return;
+
+	signal_delivered(sig, info, ka, regs,
+			test_thread_flag(TIF_SINGLESTEP));
 }
 
 /*
@@ -289,19 +313,21 @@ handle_signal(struct ksignal *ksig, struct pt_regs *regs)
  */
 static void do_signal(struct pt_regs *regs, int in_syscall)
 {
-	struct ksignal ksig;
-
+	siginfo_t info;
+	int signr;
+	struct k_sigaction ka;
 #ifdef DEBUG_SIG
 	pr_info("do signal: %p %d\n", regs, in_syscall);
 	pr_info("do signal2: %lx %lx %ld [%lx]\n", regs->pc, regs->r1,
 			regs->r12, current_thread_info()->flags);
 #endif
 
-	if (get_signal(&ksig)) {
+	signr = get_signal_to_deliver(&info, &ka, regs, NULL);
+	if (signr > 0) {
 		/* Whee! Actually deliver the signal. */
 		if (in_syscall)
-			handle_restart(regs, &ksig.ka, 1);
-		handle_signal(&ksig, regs);
+			handle_restart(regs, &ka, 1);
+		handle_signal(signr, &ka, &info, regs);
 		return;
 	}
 

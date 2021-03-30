@@ -34,30 +34,21 @@
 #include <asm/processor.h>
 #include <asm/page.h>
 #include <asm/cacheflush.h>
-#include <asm/hvcall.h>
 
 #define KVM_MAX_VCPUS		NR_CPUS
 #define KVM_MAX_VCORES		NR_CPUS
-#define KVM_USER_MEM_SLOTS	512
-
-#include <asm/cputhreads.h>
-#define KVM_MAX_VCPU_ID                (threads_per_subcore * KVM_MAX_VCORES)
-
-#define __KVM_HAVE_ARCH_INTC_INITIALIZED
+#define KVM_USER_MEM_SLOTS 32
+#define KVM_MEM_SLOTS_NUM KVM_USER_MEM_SLOTS
 
 #ifdef CONFIG_KVM_MMIO
 #define KVM_COALESCED_MMIO_PAGE_OFFSET 1
 #endif
-#define KVM_HALT_POLL_NS_DEFAULT 500000
 
 /* These values are internal and can be increased later */
 #define KVM_NR_IRQCHIPS          1
 #define KVM_IRQCHIP_NUM_PINS     256
 
-/* PPC-specific vcpu->requests bit members */
-#define KVM_REQ_WATCHDOG           8
-#define KVM_REQ_EPR_EXIT           9
-
+#if !defined(CONFIG_KVM_440)
 #include <linux/mmu_notifier.h>
 
 #define KVM_ARCH_WANT_MMU_NOTIFIER
@@ -65,26 +56,26 @@
 extern int kvm_unmap_hva(struct kvm *kvm, unsigned long hva);
 extern int kvm_unmap_hva_range(struct kvm *kvm,
 			       unsigned long start, unsigned long end);
-extern int kvm_age_hva(struct kvm *kvm, unsigned long start, unsigned long end);
+extern int kvm_age_hva(struct kvm *kvm, unsigned long hva);
 extern int kvm_test_age_hva(struct kvm *kvm, unsigned long hva);
 extern void kvm_set_spte_hva(struct kvm *kvm, unsigned long hva, pte_t pte);
 
-static inline void kvm_arch_mmu_notifier_invalidate_page(struct kvm *kvm,
-							 unsigned long address)
-{
-}
+#endif
+
+/* We don't currently support large pages. */
+#define KVM_HPAGE_GFN_SHIFT(x)	0
+#define KVM_NR_PAGE_SIZES	1
+#define KVM_PAGES_PER_HPAGE(x)	(1UL<<31)
 
 #define HPTEG_CACHE_NUM			(1 << 15)
 #define HPTEG_HASH_BITS_PTE		13
 #define HPTEG_HASH_BITS_PTE_LONG	12
 #define HPTEG_HASH_BITS_VPTE		13
 #define HPTEG_HASH_BITS_VPTE_LONG	5
-#define HPTEG_HASH_BITS_VPTE_64K	11
 #define HPTEG_HASH_NUM_PTE		(1 << HPTEG_HASH_BITS_PTE)
 #define HPTEG_HASH_NUM_PTE_LONG		(1 << HPTEG_HASH_BITS_PTE_LONG)
 #define HPTEG_HASH_NUM_VPTE		(1 << HPTEG_HASH_BITS_VPTE)
 #define HPTEG_HASH_NUM_VPTE_LONG	(1 << HPTEG_HASH_BITS_VPTE_LONG)
-#define HPTEG_HASH_NUM_VPTE_64K		(1 << HPTEG_HASH_BITS_VPTE_64K)
 
 /* Physical Address Mask - allowed range of real mode RAM access */
 #define KVM_PAM			0x0fffffffffffffffULL
@@ -93,57 +84,46 @@ struct lppaca;
 struct slb_shadow;
 struct dtl_entry;
 
-struct kvmppc_vcpu_book3s;
-struct kvmppc_book3s_shadow_vcpu;
-
 struct kvm_vm_stat {
-	ulong remote_tlb_flush;
+	u32 remote_tlb_flush;
 };
 
 struct kvm_vcpu_stat {
-	u64 sum_exits;
-	u64 mmio_exits;
-	u64 signal_exits;
-	u64 light_exits;
+	u32 sum_exits;
+	u32 mmio_exits;
+	u32 dcr_exits;
+	u32 signal_exits;
+	u32 light_exits;
 	/* Account for special types of light exits: */
-	u64 itlb_real_miss_exits;
-	u64 itlb_virt_miss_exits;
-	u64 dtlb_real_miss_exits;
-	u64 dtlb_virt_miss_exits;
-	u64 syscall_exits;
-	u64 isi_exits;
-	u64 dsi_exits;
-	u64 emulated_inst_exits;
-	u64 dec_exits;
-	u64 ext_intr_exits;
-	u64 halt_poll_success_ns;
-	u64 halt_poll_fail_ns;
-	u64 halt_wait_ns;
-	u64 halt_successful_poll;
-	u64 halt_attempted_poll;
-	u64 halt_successful_wait;
-	u64 halt_poll_invalid;
-	u64 halt_wakeup;
-	u64 dbell_exits;
-	u64 gdbell_exits;
-	u64 ld;
-	u64 st;
+	u32 itlb_real_miss_exits;
+	u32 itlb_virt_miss_exits;
+	u32 dtlb_real_miss_exits;
+	u32 dtlb_virt_miss_exits;
+	u32 syscall_exits;
+	u32 isi_exits;
+	u32 dsi_exits;
+	u32 emulated_inst_exits;
+	u32 dec_exits;
+	u32 ext_intr_exits;
+	u32 halt_wakeup;
+	u32 dbell_exits;
+	u32 gdbell_exits;
 #ifdef CONFIG_PPC_BOOK3S
-	u64 pf_storage;
-	u64 pf_instruc;
-	u64 sp_storage;
-	u64 sp_instruc;
-	u64 queue_intr;
-	u64 ld_slow;
-	u64 st_slow;
+	u32 pf_storage;
+	u32 pf_instruc;
+	u32 sp_storage;
+	u32 sp_instruc;
+	u32 queue_intr;
+	u32 ld;
+	u32 ld_slow;
+	u32 st;
+	u32 st_slow;
 #endif
-	u64 pthru_all;
-	u64 pthru_host;
-	u64 pthru_bad_aff;
 };
 
 enum kvm_exit_types {
 	MMIO_EXITS,
+	DCR_EXITS,
 	SIGNAL_EXITS,
 	ITLB_REAL_MISS_EXITS,
 	ITLB_VIRT_MISS_EXITS,
@@ -163,7 +143,6 @@ enum kvm_exit_types {
 	EMULATED_TLBWE_EXITS,
 	EMULATED_RFI_EXITS,
 	EMULATED_RFCI_EXITS,
-	EMULATED_RFDI_EXITS,
 	DEC_EXITS,
 	EXT_INTR_EXITS,
 	HALT_WAKEUP,
@@ -195,18 +174,22 @@ struct kvmppc_spapr_tce_table {
 	struct list_head list;
 	struct kvm *kvm;
 	u64 liobn;
-	struct rcu_head rcu;
-	u32 page_shift;
-	u64 offset;		/* in pages */
-	u64 size;		/* window size in pages */
+	u32 window_size;
 	struct page *pages[0];
+};
+
+struct kvmppc_linear_info {
+	void		*base_virt;
+	unsigned long	 base_pfn;
+	unsigned long	 npages;
+	struct list_head list;
+	atomic_t	 use_count;
+	int		 type;
 };
 
 /* XICS components, defined in book3s_xics.c */
 struct kvmppc_xics;
 struct kvmppc_icp;
-
-struct kvmppc_passthru_irqmap;
 
 /*
  * The reverse mapping array has one entry for each HPTE,
@@ -228,22 +211,27 @@ struct revmap_entry {
  */
 #define KVMPPC_RMAP_LOCK_BIT	63
 #define KVMPPC_RMAP_RC_SHIFT	32
-#define KVMPPC_RMAP_CHG_SHIFT	48
 #define KVMPPC_RMAP_REFERENCED	(HPTE_R_R << KVMPPC_RMAP_RC_SHIFT)
 #define KVMPPC_RMAP_CHANGED	(HPTE_R_C << KVMPPC_RMAP_RC_SHIFT)
-#define KVMPPC_RMAP_CHG_ORDER	(0x3ful << KVMPPC_RMAP_CHG_SHIFT)
 #define KVMPPC_RMAP_PRESENT	0x100000000ul
 #define KVMPPC_RMAP_INDEX	0xfffffffful
 
+/* Low-order bits in memslot->arch.slot_phys[] */
+#define KVMPPC_PAGE_ORDER_MASK	0x1f
+#define KVMPPC_PAGE_NO_CACHE	HPTE_R_I	/* 0x20 */
+#define KVMPPC_PAGE_WRITETHRU	HPTE_R_W	/* 0x40 */
+#define KVMPPC_GOT_PAGE		0x80
+
 struct kvm_arch_memory_slot {
-#ifdef CONFIG_KVM_BOOK3S_HV_POSSIBLE
+#ifdef CONFIG_KVM_BOOK3S_64_HV
 	unsigned long *rmap;
-#endif /* CONFIG_KVM_BOOK3S_HV_POSSIBLE */
+	unsigned long *slot_phys;
+#endif /* CONFIG_KVM_BOOK3S_64_HV */
 };
 
 struct kvm_arch {
 	unsigned int lpid;
-#ifdef CONFIG_KVM_BOOK3S_HV_POSSIBLE
+#ifdef CONFIG_KVM_BOOK3S_64_HV
 	unsigned long hpt_virt;
 	struct revmap_entry *revmap;
 	unsigned int host_lpid;
@@ -252,61 +240,70 @@ struct kvm_arch {
 	unsigned long host_sdr1;
 	int tlbie_lock;
 	unsigned long lpcr;
+	unsigned long rmor;
+	struct kvmppc_linear_info *rma;
 	unsigned long vrma_slb_v;
-	int hpte_setup_done;
+	int rma_setup_done;
+	int using_mmu_notifiers;
 	u32 hpt_order;
 	atomic_t vcpus_running;
 	u32 online_vcores;
 	unsigned long hpt_npte;
 	unsigned long hpt_mask;
 	atomic_t hpte_mod_interest;
+	spinlock_t slot_phys_lock;
 	cpumask_t need_tlb_flush;
-	int hpt_cma_alloc;
-	struct dentry *debugfs_dir;
-	struct dentry *htab_dentry;
-#endif /* CONFIG_KVM_BOOK3S_HV_POSSIBLE */
-#ifdef CONFIG_KVM_BOOK3S_PR_POSSIBLE
-	struct mutex hpt_mutex;
-#endif
+	struct kvmppc_vcore *vcores[KVM_MAX_VCORES];
+	struct kvmppc_linear_info *hpt_li;
+#endif /* CONFIG_KVM_BOOK3S_64_HV */
 #ifdef CONFIG_PPC_BOOK3S_64
 	struct list_head spapr_tce_tables;
 	struct list_head rtas_tokens;
-	DECLARE_BITMAP(enabled_hcalls, MAX_HCALL_OPCODE/4 + 1);
 #endif
 #ifdef CONFIG_KVM_MPIC
 	struct openpic *mpic;
 #endif
 #ifdef CONFIG_KVM_XICS
 	struct kvmppc_xics *xics;
-	struct kvmppc_passthru_irqmap *pimap;
-#endif
-	struct kvmppc_ops *kvm_ops;
-#ifdef CONFIG_KVM_BOOK3S_HV_POSSIBLE
-	/* This array can grow quite large, keep it at the end */
-	struct kvmppc_vcore *vcores[KVM_MAX_VCORES];
 #endif
 };
 
-#define VCORE_ENTRY_MAP(vc)	((vc)->entry_exit_map & 0xff)
-#define VCORE_EXIT_MAP(vc)	((vc)->entry_exit_map >> 8)
-#define VCORE_IS_EXITING(vc)	(VCORE_EXIT_MAP(vc) != 0)
-
-/* This bit is used when a vcore exit is triggered from outside the vcore */
-#define VCORE_EXIT_REQ		0x10000
-
 /*
- * Values for vcore_state.
- * Note that these are arranged such that lower values
- * (< VCORE_SLEEPING) don't require stolen time accounting
- * on load/unload, and higher values do.
+ * Struct for a virtual core.
+ * Note: entry_exit_count combines an entry count in the bottom 8 bits
+ * and an exit count in the next 8 bits.  This is so that we can
+ * atomically increment the entry count iff the exit count is 0
+ * without taking the lock.
  */
+struct kvmppc_vcore {
+	int n_runnable;
+	int n_busy;
+	int num_threads;
+	int entry_exit_count;
+	int n_woken;
+	int nap_count;
+	int napping_threads;
+	u16 pcpu;
+	u16 last_cpu;
+	u8 vcore_state;
+	u8 in_guest;
+	struct list_head runnable_threads;
+	spinlock_t lock;
+	wait_queue_head_t wq;
+	u64 stolen_tb;
+	u64 preempt_tb;
+	struct kvm_vcpu *runner;
+};
+
+#define VCORE_ENTRY_COUNT(vc)	((vc)->entry_exit_count & 0xff)
+#define VCORE_EXIT_COUNT(vc)	((vc)->entry_exit_count >> 8)
+
+/* Values for vcore_state */
 #define VCORE_INACTIVE	0
-#define VCORE_PREEMPT	1
-#define VCORE_PIGGYBACK	2
-#define VCORE_SLEEPING	3
-#define VCORE_RUNNING	4
-#define VCORE_EXITING	5
-#define VCORE_POLLING	6
+#define VCORE_SLEEPING	1
+#define VCORE_STARTING	2
+#define VCORE_RUNNING	3
+#define VCORE_EXITING	4
 
 /*
  * Struct used to manage memory for a virtual processor area
@@ -330,7 +327,6 @@ struct kvmppc_pte {
 	bool may_read		: 1;
 	bool may_write		: 1;
 	bool may_execute	: 1;
-	u8 page_size;		/* MMU_PAGE_xxx */
 };
 
 struct kvmppc_mmu {
@@ -343,8 +339,7 @@ struct kvmppc_mmu {
 	/* book3s */
 	void (*mtsrin)(struct kvm_vcpu *vcpu, u32 srnum, ulong value);
 	u32  (*mfsrin)(struct kvm_vcpu *vcpu, u32 srnum);
-	int  (*xlate)(struct kvm_vcpu *vcpu, gva_t eaddr,
-		      struct kvmppc_pte *pte, bool data, bool iswrite);
+	int  (*xlate)(struct kvm_vcpu *vcpu, gva_t eaddr, struct kvmppc_pte *pte, bool data);
 	void (*reset_msr)(struct kvm_vcpu *vcpu);
 	void (*tlbie)(struct kvm_vcpu *vcpu, ulong addr, bool large);
 	int  (*esid_to_vsid)(struct kvm_vcpu *vcpu, ulong esid, u64 *vsid);
@@ -364,30 +359,7 @@ struct kvmppc_slb {
 	bool large	: 1;	/* PTEs are 16MB */
 	bool tb		: 1;	/* 1TB segment */
 	bool class	: 1;
-	u8 base_page_size;	/* MMU_PAGE_xxx */
 };
-
-/* Struct used to accumulate timing information in HV real mode code */
-struct kvmhv_tb_accumulator {
-	u64	seqcount;	/* used to synchronize access, also count * 2 */
-	u64	tb_total;	/* total time in timebase ticks */
-	u64	tb_min;		/* min time */
-	u64	tb_max;		/* max time */
-};
-
-#ifdef CONFIG_PPC_BOOK3S_64
-struct kvmppc_irq_map {
-	u32	r_hwirq;
-	u32	v_hwirq;
-	struct irq_desc *desc;
-};
-
-#define	KVMPPC_PIRQ_MAPPED	1024
-struct kvmppc_passthru_irqmap {
-	int n_mapped;
-	struct kvmppc_irq_map mapped[KVMPPC_PIRQ_MAPPED];
-};
-#endif
 
 # ifdef CONFIG_PPC_FSL_BOOK3E
 #define KVMPPC_BOOKE_IAC_NUM	2
@@ -404,6 +376,17 @@ struct kvmppc_passthru_irqmap {
 #define KVMPPC_EPR_USER		1 /* exit to userspace to fill EPR */
 #define KVMPPC_EPR_KERNEL	2 /* in-kernel irqchip */
 
+struct kvmppc_booke_debug_reg {
+	u32 dbcr0;
+	u32 dbcr1;
+	u32 dbcr2;
+#ifdef CONFIG_KVM_E500MC
+	u32 dbcr4;
+#endif
+	u64 iac[KVMPPC_BOOKE_MAX_IAC];
+	u64 dac[KVMPPC_BOOKE_MAX_DAC];
+};
+
 #define KVMPPC_IRQ_DEFAULT	0
 #define KVMPPC_IRQ_MPIC		1
 #define KVMPPC_IRQ_XICS		2
@@ -418,15 +401,12 @@ struct kvm_vcpu_arch {
 	int slb_max;		/* 1 + index of last valid entry in slb[] */
 	int slb_nr;		/* total number of entries in SLB */
 	struct kvmppc_mmu mmu;
-	struct kvmppc_vcpu_book3s *book3s;
-#endif
-#ifdef CONFIG_PPC_BOOK3S_32
-	struct kvmppc_book3s_shadow_vcpu *shadow_vcpu;
 #endif
 
 	ulong gpr[32];
 
-	struct thread_fp_state fp;
+	u64 fpr[32];
+	u64 fpscr;
 
 #ifdef CONFIG_SPE
 	ulong evr[32];
@@ -435,7 +415,12 @@ struct kvm_vcpu_arch {
 	u64 acc;
 #endif
 #ifdef CONFIG_ALTIVEC
-	struct thread_vr_state vr;
+	vector128 vr[32];
+	vector128 vscr;
+#endif
+
+#ifdef CONFIG_VSX
+	u64 vsr[64];
 #endif
 
 #ifdef CONFIG_KVM_BOOKE_HV
@@ -462,9 +447,6 @@ struct kvm_vcpu_arch {
 	ulong pc;
 	ulong ctr;
 	ulong lr;
-#ifdef CONFIG_PPC_BOOK3S
-	ulong tar;
-#endif
 
 	ulong xer;
 	u32 cr;
@@ -474,31 +456,12 @@ struct kvm_vcpu_arch {
 	ulong guest_owned_ext;
 	ulong purr;
 	ulong spurr;
-	ulong ic;
 	ulong dscr;
 	ulong amr;
 	ulong uamor;
-	ulong iamr;
 	u32 ctrl;
-	u32 dabrx;
 	ulong dabr;
-	ulong dawr;
-	ulong dawrx;
-	ulong ciabr;
 	ulong cfar;
-	ulong ppr;
-	u32 pspb;
-	ulong fscr;
-	ulong shadow_fscr;
-	ulong ebbhr;
-	ulong ebbrr;
-	ulong bescr;
-	ulong csigr;
-	ulong tacr;
-	ulong tcscr;
-	ulong acop;
-	ulong wort;
-	ulong shadow_srr1;
 #endif
 	u32 vrsave; /* also USPRG0 */
 	u32 mmucr;
@@ -515,10 +478,8 @@ struct kvm_vcpu_arch {
 #ifdef CONFIG_BOOKE
 	u32 decar;
 #endif
-	/* Time base value when we entered the guest */
-	u64 entry_tb;
-	u64 entry_vtb;
-	u64 entry_ic;
+	u32 tbl;
+	u32 tbu;
 	u32 tcr;
 	ulong tsr; /* we need to perform set/clr_bits() which requires ulong */
 	u32 ivor[64];
@@ -534,34 +495,8 @@ struct kvm_vcpu_arch {
 	u32 ccr1;
 	u32 dbsr;
 
-	u64 mmcr[5];
+	u64 mmcr[3];
 	u32 pmc[8];
-	u32 spmc[2];
-	u64 siar;
-	u64 sdar;
-	u64 sier;
-#ifdef CONFIG_PPC_TRANSACTIONAL_MEM
-	u64 tfhar;
-	u64 texasr;
-	u64 tfiar;
-
-	u32 cr_tm;
-	u64 xer_tm;
-	u64 lr_tm;
-	u64 ctr_tm;
-	u64 amr_tm;
-	u64 ppr_tm;
-	u64 dscr_tm;
-	u64 tar_tm;
-
-	ulong gpr_tm[32];
-
-	struct thread_fp_state fp_tm;
-
-	struct thread_vr_state vr_tm;
-	u32 vrsave_tm; /* also USPRG0 */
-
-#endif
 
 #ifdef CONFIG_KVM_EXIT_TIMING
 	struct mutex exit_timing_lock;
@@ -580,7 +515,6 @@ struct kvm_vcpu_arch {
 #ifdef CONFIG_PPC_BOOK3S
 	ulong fault_dar;
 	u32 fault_dsisr;
-	unsigned long intr_msr;
 #endif
 
 #ifdef CONFIG_BOOKE
@@ -595,19 +529,17 @@ struct kvm_vcpu_arch {
 	u32 mmucfg;
 	u32 eptcfg;
 	u32 epr;
-	u64 sprg9;
-	u32 pwrmgtcr0;
 	u32 crit_save;
-	/* guest debug registers*/
-	struct debug_reg dbg_reg;
+	struct kvmppc_booke_debug_reg dbg_reg;
 #endif
 	gpa_t paddr_accessed;
 	gva_t vaddr_accessed;
-	pgd_t *pgdir;
 
 	u8 io_gpr; /* GPR used as IO source/target */
-	u8 mmio_host_swabbed;
+	u8 mmio_is_bigendian;
 	u8 mmio_sign_extend;
+	u8 dcr_needed;
+	u8 dcr_is_write;
 	u8 osi_needed;
 	u8 osi_enabled;
 	u8 papr_enabled;
@@ -621,6 +553,7 @@ struct kvm_vcpu_arch {
 	u32 cpr0_cfgaddr; /* holds the last set cpr0_cfgaddr */
 
 	struct hrtimer dec_timer;
+	struct tasklet_struct tasklet;
 	u64 dec_jiffies;
 	u64 dec_expires;
 	unsigned long pending_exceptions;
@@ -628,23 +561,18 @@ struct kvm_vcpu_arch {
 	u8 prodded;
 	u32 last_inst;
 
-	struct swait_queue_head *wqp;
+	wait_queue_head_t *wqp;
 	struct kvmppc_vcore *vcore;
 	int ret;
 	int trap;
 	int state;
 	int ptid;
-	int thread_cpu;
 	bool timer_running;
 	wait_queue_head_t cpu_run;
 
 	struct kvm_vcpu_arch_shared *shared;
-#if defined(CONFIG_PPC_BOOK3S_64) && defined(CONFIG_KVM_BOOK3S_PR_POSSIBLE)
-	bool shared_big_endian;
-#endif
 	unsigned long magic_page_pa; /* phys addr to map the magic page to */
 	unsigned long magic_page_ea; /* effect. addr to map the magic page to */
-	bool disable_kernel_nx;
 
 	int irq_type;		/* one of KVM_IRQ_* */
 	int irq_cpu_id;
@@ -653,15 +581,17 @@ struct kvm_vcpu_arch {
 	struct kvmppc_icp *icp; /* XICS presentation controller */
 #endif
 
-#ifdef CONFIG_KVM_BOOK3S_HV_POSSIBLE
+#ifdef CONFIG_KVM_BOOK3S_64_HV
 	struct kvm_vcpu_arch_shared shregs;
 
 	unsigned long pgfault_addr;
 	long pgfault_index;
 	unsigned long pgfault_hpte[2];
 
+	struct list_head run_list;
 	struct task_struct *run_task;
 	struct kvm_run *kvm_run;
+	pgd_t *pgdir;
 
 	spinlock_t vpa_update_lock;
 	struct kvmppc_vpa vpa;
@@ -674,25 +604,8 @@ struct kvm_vcpu_arch {
 	spinlock_t tbacct_lock;
 	u64 busy_stolen;
 	u64 busy_preempt;
-
-	u32 emul_inst;
 #endif
-
-#ifdef CONFIG_KVM_BOOK3S_HV_EXIT_TIMING
-	struct kvmhv_tb_accumulator *cur_activity;	/* What we're timing */
-	u64	cur_tb_start;			/* when it started */
-	struct kvmhv_tb_accumulator rm_entry;	/* real-mode entry code */
-	struct kvmhv_tb_accumulator rm_intr;	/* real-mode intr handling */
-	struct kvmhv_tb_accumulator rm_exit;	/* real-mode exit code */
-	struct kvmhv_tb_accumulator guest_time;	/* guest execution */
-	struct kvmhv_tb_accumulator cede_time;	/* time napping inside guest */
-
-	struct dentry *debugfs_dir;
-	struct dentry *debugfs_timings;
-#endif /* CONFIG_KVM_BOOK3S_HV_EXIT_TIMING */
 };
-
-#define VCPU_FPR(vcpu, i)	(vcpu)->arch.fp.fpr[i][TS_FPROFFSET]
 
 /* Values for vcpu->arch.state */
 #define KVMPPC_VCPU_NOTREADY		0
@@ -713,12 +626,9 @@ struct kvm_vcpu_arch {
 static inline void kvm_arch_hardware_disable(void) {}
 static inline void kvm_arch_hardware_unsetup(void) {}
 static inline void kvm_arch_sync_events(struct kvm *kvm) {}
-static inline void kvm_arch_memslots_updated(struct kvm *kvm, struct kvm_memslots *slots) {}
+static inline void kvm_arch_memslots_updated(struct kvm *kvm) {}
 static inline void kvm_arch_flush_shadow_all(struct kvm *kvm) {}
 static inline void kvm_arch_sched_in(struct kvm_vcpu *vcpu, int cpu) {}
 static inline void kvm_arch_exit(void) {}
-static inline void kvm_arch_vcpu_blocking(struct kvm_vcpu *vcpu) {}
-static inline void kvm_arch_vcpu_unblocking(struct kvm_vcpu *vcpu) {}
-static inline void kvm_arch_vcpu_block_finish(struct kvm_vcpu *vcpu) {}
 
 #endif /* __POWERPC_KVM_HOST_H__ */

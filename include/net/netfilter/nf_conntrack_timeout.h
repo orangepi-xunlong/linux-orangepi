@@ -20,20 +20,10 @@ struct ctnl_timeout {
 };
 
 struct nf_conn_timeout {
-	struct ctnl_timeout __rcu *timeout;
+	struct ctnl_timeout	*timeout;
 };
 
-static inline unsigned int *
-nf_ct_timeout_data(struct nf_conn_timeout *t)
-{
-	struct ctnl_timeout *timeout;
-
-	timeout = rcu_dereference(t->timeout);
-	if (timeout == NULL)
-		return NULL;
-
-	return (unsigned int *)timeout->data;
-}
+#define NF_CT_TIMEOUT_EXT_DATA(__t) (unsigned int *) &((__t)->timeout->data)
 
 static inline
 struct nf_conn_timeout *nf_ct_timeout_find(const struct nf_conn *ct)
@@ -57,7 +47,7 @@ struct nf_conn_timeout *nf_ct_timeout_ext_add(struct nf_conn *ct,
 	if (timeout_ext == NULL)
 		return NULL;
 
-	rcu_assign_pointer(timeout_ext->timeout, timeout);
+	timeout_ext->timeout = timeout;
 
 	return timeout_ext;
 #else
@@ -74,13 +64,10 @@ nf_ct_timeout_lookup(struct net *net, struct nf_conn *ct,
 	unsigned int *timeouts;
 
 	timeout_ext = nf_ct_timeout_find(ct);
-	if (timeout_ext) {
-		timeouts = nf_ct_timeout_data(timeout_ext);
-		if (unlikely(!timeouts))
-			timeouts = l4proto->get_timeouts(net);
-	} else {
+	if (timeout_ext)
+		timeouts = NF_CT_TIMEOUT_EXT_DATA(timeout_ext);
+	else
 		timeouts = l4proto->get_timeouts(net);
-	}
 
 	return timeouts;
 #else
@@ -89,8 +76,8 @@ nf_ct_timeout_lookup(struct net *net, struct nf_conn *ct,
 }
 
 #ifdef CONFIG_NF_CONNTRACK_TIMEOUT
-int nf_conntrack_timeout_init(void);
-void nf_conntrack_timeout_fini(void);
+extern int nf_conntrack_timeout_init(void);
+extern void nf_conntrack_timeout_fini(void);
 #else
 static inline int nf_conntrack_timeout_init(void)
 {
@@ -104,7 +91,7 @@ static inline void nf_conntrack_timeout_fini(void)
 #endif /* CONFIG_NF_CONNTRACK_TIMEOUT */
 
 #ifdef CONFIG_NF_CONNTRACK_TIMEOUT
-extern struct ctnl_timeout *(*nf_ct_timeout_find_get_hook)(struct net *net, const char *name);
+extern struct ctnl_timeout *(*nf_ct_timeout_find_get_hook)(const char *name);
 extern void (*nf_ct_timeout_put_hook)(struct ctnl_timeout *timeout);
 #endif
 

@@ -531,7 +531,6 @@ static int apm_suspend_notifier(struct notifier_block *nb,
 {
 	struct apm_user *as;
 	int err;
-	unsigned long apm_event;
 
 	/* short-cut emergency suspends */
 	if (atomic_read(&userspace_notification_inhibit))
@@ -539,9 +538,6 @@ static int apm_suspend_notifier(struct notifier_block *nb,
 
 	switch (event) {
 	case PM_SUSPEND_PREPARE:
-	case PM_HIBERNATION_PREPARE:
-		apm_event = (event == PM_SUSPEND_PREPARE) ?
-			APM_USER_SUSPEND : APM_USER_HIBERNATION;
 		/*
 		 * Queue an event to all "writer" users that we want
 		 * to suspend and need their ack.
@@ -554,7 +550,7 @@ static int apm_suspend_notifier(struct notifier_block *nb,
 			    as->writer && as->suser) {
 				as->suspend_state = SUSPEND_PENDING;
 				atomic_inc(&suspend_acks_pending);
-				queue_add_event(&as->queue, apm_event);
+				queue_add_event(&as->queue, APM_USER_SUSPEND);
 			}
 		}
 
@@ -605,14 +601,11 @@ static int apm_suspend_notifier(struct notifier_block *nb,
 		return notifier_from_errno(err);
 
 	case PM_POST_SUSPEND:
-	case PM_POST_HIBERNATION:
-		apm_event = (event == PM_POST_SUSPEND) ?
-			APM_NORMAL_RESUME : APM_HIBERNATION_RESUME;
 		/*
 		 * Anyone on the APM queues will think we're still suspended.
 		 * Send a message so everyone knows we're now awake again.
 		 */
-		queue_event(apm_event);
+		queue_event(APM_NORMAL_RESUME);
 
 		/*
 		 * Finally, wake up anyone who is sleeping on the suspend.

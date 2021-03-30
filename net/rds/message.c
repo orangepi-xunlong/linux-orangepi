@@ -41,7 +41,6 @@ static unsigned int	rds_exthdr_size[__RDS_EXTHDR_MAX] = {
 [RDS_EXTHDR_VERSION]	= sizeof(struct rds_ext_header_version),
 [RDS_EXTHDR_RDMA]	= sizeof(struct rds_ext_header_rdma),
 [RDS_EXTHDR_RDMA_DEST]	= sizeof(struct rds_ext_header_rdma_dest),
-[RDS_EXTHDR_NPATHS]	= sizeof(u16),
 };
 
 
@@ -265,54 +264,75 @@ struct rds_message *rds_message_map_pages(unsigned long *page_addrs, unsigned in
 	return rm;
 }
 
-int rds_message_copy_from_user(struct rds_message *rm, struct iov_iter *from)
+int rds_message_copy_from_user(struct rds_message *rm, struct iovec *first_iov,
+					       size_t total_len)
 {
-	unsigned long to_copy, nbytes;
+	unsigned long to_copy;
+	unsigned long iov_off;
 	unsigned long sg_off;
+	struct iovec *iov;
 	struct scatterlist *sg;
 	int ret = 0;
 
-	rm->m_inc.i_hdr.h_len = cpu_to_be32(iov_iter_count(from));
+	rm->m_inc.i_hdr.h_len = cpu_to_be32(total_len);
 
 	/*
 	 * now allocate and copy in the data payload.
 	 */
 	sg = rm->data.op_sg;
+	iov = first_iov;
+	iov_off = 0;
 	sg_off = 0; /* Dear gcc, sg->page will be null from kzalloc. */
 
-	while (iov_iter_count(from)) {
+	while (total_len) {
 		if (!sg_page(sg)) {
-			ret = rds_page_remainder_alloc(sg, iov_iter_count(from),
+			ret = rds_page_remainder_alloc(sg, total_len,
 						       GFP_HIGHUSER);
 			if (ret)
-				return ret;
+				goto out;
 			rm->data.op_nents++;
 			sg_off = 0;
 		}
 
-		to_copy = min_t(unsigned long, iov_iter_count(from),
-				sg->length - sg_off);
+		while (iov_off == iov->iov_len) {
+			iov_off = 0;
+			iov++;
+		}
 
-		rds_stats_add(s_copy_from_user, to_copy);
-		nbytes = copy_page_from_iter(sg_page(sg), sg->offset + sg_off,
-					     to_copy, from);
-		if (nbytes != to_copy)
-			return -EFAULT;
+		to_copy = min(iov->iov_len - iov_off, sg->length - sg_off);
+		to_copy = min_t(size_t, to_copy, total_len);
 
+		rdsdebug("copying %lu bytes from user iov [%p, %zu] + %lu to "
+			 "sg [%p, %u, %u] + %lu\n",
+			 to_copy, iov->iov_base, iov->iov_len, iov_off,
+			 (void *)sg_page(sg), sg->offset, sg->length, sg_off);
+
+		ret = rds_page_copy_from_user(sg_page(sg), sg->offset + sg_off,
+					      iov->iov_base + iov_off,
+					      to_copy);
+		if (ret)
+			goto out;
+
+		iov_off += to_copy;
+		total_len -= to_copy;
 		sg_off += to_copy;
 
 		if (sg_off == sg->length)
 			sg++;
 	}
 
+out:
 	return ret;
 }
 
-int rds_message_inc_copy_to_user(struct rds_incoming *inc, struct iov_iter *to)
+int rds_message_inc_copy_to_user(struct rds_incoming *inc,
+				 struct iovec *first_iov, size_t size)
 {
 	struct rds_message *rm;
+	struct iovec *iov;
 	struct scatterlist *sg;
 	unsigned long to_copy;
+	unsigned long iov_off;
 	unsigned long vec_off;
 	int copied;
 	int ret;
@@ -321,21 +341,36 @@ int rds_message_inc_copy_to_user(struct rds_incoming *inc, struct iov_iter *to)
 	rm = container_of(inc, struct rds_message, m_inc);
 	len = be32_to_cpu(rm->m_inc.i_hdr.h_len);
 
+	iov = first_iov;
+	iov_off = 0;
 	sg = rm->data.op_sg;
 	vec_off = 0;
 	copied = 0;
 
-	while (iov_iter_count(to) && copied < len) {
-		to_copy = min_t(unsigned long, iov_iter_count(to),
-				sg->length - vec_off);
+	while (copied < size && copied < len) {
+		while (iov_off == iov->iov_len) {
+			iov_off = 0;
+			iov++;
+		}
+
+		to_copy = min(iov->iov_len - iov_off, sg->length - vec_off);
+		to_copy = min_t(size_t, to_copy, size - copied);
 		to_copy = min_t(unsigned long, to_copy, len - copied);
 
-		rds_stats_add(s_copy_to_user, to_copy);
-		ret = copy_page_to_iter(sg_page(sg), sg->offset + vec_off,
-					to_copy, to);
-		if (ret != to_copy)
-			return -EFAULT;
+		rdsdebug("copying %lu bytes to user iov [%p, %zu] + %lu to "
+			 "sg [%p, %u, %u] + %lu\n",
+			 to_copy, iov->iov_base, iov->iov_len, iov_off,
+			 sg_page(sg), sg->offset, sg->length, vec_off);
 
+		ret = rds_page_copy_to_user(sg_page(sg), sg->offset + vec_off,
+					    iov->iov_base + iov_off,
+					    to_copy);
+		if (ret) {
+			copied = ret;
+			break;
+		}
+
+		iov_off += to_copy;
 		vec_off += to_copy;
 		copied += to_copy;
 

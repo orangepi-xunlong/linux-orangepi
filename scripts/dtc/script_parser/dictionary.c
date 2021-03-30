@@ -240,17 +240,11 @@ int dictionary_set(dictionary *d, const char *key, const char *val)
 			if (hash == d->hash[i]) { /* Same hash value */
 				if (!strcmp(key, d->key[i])) {   /* Same key */
 					/* Found a value: modify and return */
-#if 0
 					if (d->val[i] != NULL)
 						free(d->val[i]);
 					d->val[i] = val ? aw_strdup(val) : NULL;
 					/* Value has been modified: return */
 					return 0;
-#endif
-					fprintf(stderr,
-						"sys_to_dts: duplicated section name in sys_config.fex: %s\n",
-						key);
-					return -1;
 				}
 			}
 		}

@@ -28,6 +28,7 @@
 #include <linux/i2c.h>
 #include <linux/videodev2.h>
 #include <media/v4l2-device.h>
+#include <media/v4l2-chip-ident.h>
 #include <media/v4l2-ctrls.h>
 
 MODULE_DESCRIPTION("i2c device driver for cs53l32a Audio ADC");
@@ -103,6 +104,14 @@ static int cs53l32a_s_ctrl(struct v4l2_ctrl *ctrl)
 	return -EINVAL;
 }
 
+static int cs53l32a_g_chip_ident(struct v4l2_subdev *sd, struct v4l2_dbg_chip_ident *chip)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+
+	return v4l2_chip_ident_i2c_client(client,
+			chip, V4L2_IDENT_CS53l32A, 0);
+}
+
 static int cs53l32a_log_status(struct v4l2_subdev *sd)
 {
 	struct cs53l32a_state *state = to_state(sd);
@@ -121,6 +130,14 @@ static const struct v4l2_ctrl_ops cs53l32a_ctrl_ops = {
 
 static const struct v4l2_subdev_core_ops cs53l32a_core_ops = {
 	.log_status = cs53l32a_log_status,
+	.g_chip_ident = cs53l32a_g_chip_ident,
+	.g_ext_ctrls = v4l2_subdev_g_ext_ctrls,
+	.try_ext_ctrls = v4l2_subdev_try_ext_ctrls,
+	.s_ext_ctrls = v4l2_subdev_s_ext_ctrls,
+	.g_ctrl = v4l2_subdev_g_ctrl,
+	.s_ctrl = v4l2_subdev_s_ctrl,
+	.queryctrl = v4l2_subdev_queryctrl,
+	.querymenu = v4l2_subdev_querymenu,
 };
 
 static const struct v4l2_subdev_audio_ops cs53l32a_audio_ops = {
@@ -158,7 +175,7 @@ static int cs53l32a_probe(struct i2c_client *client,
 	v4l_info(client, "chip found @ 0x%x (%s)\n",
 			client->addr << 1, client->adapter->name);
 
-	state = devm_kzalloc(&client->dev, sizeof(*state), GFP_KERNEL);
+	state = kzalloc(sizeof(struct cs53l32a_state), GFP_KERNEL);
 	if (state == NULL)
 		return -ENOMEM;
 	sd = &state->sd;
@@ -180,6 +197,7 @@ static int cs53l32a_probe(struct i2c_client *client,
 		int err = state->hdl.error;
 
 		v4l2_ctrl_handler_free(&state->hdl);
+		kfree(state);
 		return err;
 	}
 
@@ -210,6 +228,7 @@ static int cs53l32a_remove(struct i2c_client *client)
 
 	v4l2_device_unregister_subdev(sd);
 	v4l2_ctrl_handler_free(&state->hdl);
+	kfree(state);
 	return 0;
 }
 
@@ -221,6 +240,7 @@ MODULE_DEVICE_TABLE(i2c, cs53l32a_id);
 
 static struct i2c_driver cs53l32a_driver = {
 	.driver = {
+		.owner	= THIS_MODULE,
 		.name	= "cs53l32a",
 	},
 	.probe		= cs53l32a_probe,

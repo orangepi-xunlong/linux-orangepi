@@ -17,13 +17,11 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <linux/seq_file.h>
-
-#include <drm/drm_crtc.h>
-#include <drm/drm_crtc_helper.h>
-
-#include "omap_dmm_tiler.h"
 #include "omap_drv.h"
+#include "omap_dmm_tiler.h"
+
+#include "drm_crtc.h"
+#include "drm_crtc_helper.h"
 
 /*
  * framebuffer funcs
@@ -88,11 +86,8 @@ struct plane {
 
 struct omap_framebuffer {
 	struct drm_framebuffer base;
-	int pin_count;
 	const struct format *format;
 	struct plane planes[4];
-	/* lock for pinning (pin_count and planes.paddr) */
-	struct mutex lock;
 };
 
 static int omap_framebuffer_create_handle(struct drm_framebuffer *fb,
@@ -115,16 +110,32 @@ static void omap_framebuffer_destroy(struct drm_framebuffer *fb)
 
 	for (i = 0; i < n; i++) {
 		struct plane *plane = &omap_fb->planes[i];
-
-		drm_gem_object_unreference_unlocked(plane->bo);
+		if (plane->bo)
+			drm_gem_object_unreference_unlocked(plane->bo);
 	}
 
 	kfree(omap_fb);
 }
 
+static int omap_framebuffer_dirty(struct drm_framebuffer *fb,
+		struct drm_file *file_priv, unsigned flags, unsigned color,
+		struct drm_clip_rect *clips, unsigned num_clips)
+{
+	int i;
+
+	for (i = 0; i < num_clips; i++) {
+		omap_framebuffer_flush(fb, clips[i].x1, clips[i].y1,
+					clips[i].x2 - clips[i].x1,
+					clips[i].y2 - clips[i].y1);
+	}
+
+	return 0;
+}
+
 static const struct drm_framebuffer_funcs omap_framebuffer_funcs = {
 	.create_handle = omap_framebuffer_create_handle,
 	.destroy = omap_framebuffer_destroy,
+	.dirty = omap_framebuffer_dirty,
 };
 
 static uint32_t get_linear_addr(struct plane *plane,
@@ -137,14 +148,6 @@ static uint32_t get_linear_addr(struct plane *plane,
 			(y * plane->pitch / format->planes[n].sub_y);
 
 	return plane->paddr + offset;
-}
-
-bool omap_framebuffer_supports_rotation(struct drm_framebuffer *fb)
-{
-	struct omap_framebuffer *omap_fb = to_omap_framebuffer(fb);
-	struct plane *plane = &omap_fb->planes[0];
-
-	return omap_gem_flags(plane->bo) & OMAP_BO_TILED;
 }
 
 /* update ovl info for scanout, handles cases of multi-planar fb's, etc.
@@ -173,30 +176,30 @@ void omap_framebuffer_update_scanout(struct drm_framebuffer *fb,
 		uint32_t w = win->src_w;
 		uint32_t h = win->src_h;
 
-		switch (win->rotation & DRM_ROTATE_MASK) {
+		switch (win->rotation & 0xf) {
 		default:
 			dev_err(fb->dev->dev, "invalid rotation: %02x",
 					(uint32_t)win->rotation);
 			/* fallthru to default to no rotation */
 		case 0:
-		case DRM_ROTATE_0:
+		case BIT(DRM_ROTATE_0):
 			orient = 0;
 			break;
-		case DRM_ROTATE_90:
+		case BIT(DRM_ROTATE_90):
 			orient = MASK_XY_FLIP | MASK_X_INVERT;
 			break;
-		case DRM_ROTATE_180:
+		case BIT(DRM_ROTATE_180):
 			orient = MASK_X_INVERT | MASK_Y_INVERT;
 			break;
-		case DRM_ROTATE_270:
+		case BIT(DRM_ROTATE_270):
 			orient = MASK_XY_FLIP | MASK_Y_INVERT;
 			break;
 		}
 
-		if (win->rotation & DRM_REFLECT_X)
+		if (win->rotation & BIT(DRM_REFLECT_X))
 			orient ^= MASK_X_INVERT;
 
-		if (win->rotation & DRM_REFLECT_Y)
+		if (win->rotation & BIT(DRM_REFLECT_Y))
 			orient ^= MASK_Y_INVERT;
 
 		/* adjust x,y offset for flip/invert: */
@@ -211,20 +214,6 @@ void omap_framebuffer_update_scanout(struct drm_framebuffer *fb,
 		info->rotation_type = OMAP_DSS_ROT_TILER;
 		info->screen_width  = omap_gem_tiled_stride(plane->bo, orient);
 	} else {
-		switch (win->rotation & DRM_ROTATE_MASK) {
-		case 0:
-		case DRM_ROTATE_0:
-			/* OK */
-			break;
-
-		default:
-			dev_warn(fb->dev->dev,
-				"rotation '%d' ignored for non-tiled fb\n",
-				win->rotation);
-			win->rotation = 0;
-			break;
-		}
-
 		info->paddr         = get_linear_addr(plane, format, 0, x, y);
 		info->rotation_type = OMAP_DSS_ROT_DMA;
 		info->screen_width  = plane->pitch;
@@ -248,68 +237,64 @@ void omap_framebuffer_update_scanout(struct drm_framebuffer *fb,
 	}
 }
 
-/* pin, prepare for scanout: */
-int omap_framebuffer_pin(struct drm_framebuffer *fb)
+/* Call for unpin 'a' (if not NULL), and pin 'b' (if not NULL).  Although
+ * buffers to unpin are just pushed to the unpin fifo so that the
+ * caller can defer unpin until vblank.
+ *
+ * Note if this fails (ie. something went very wrong!), all buffers are
+ * unpinned, and the caller disables the overlay.  We could have tried
+ * to revert back to the previous set of pinned buffers but if things are
+ * hosed there is no guarantee that would succeed.
+ */
+int omap_framebuffer_replace(struct drm_framebuffer *a,
+		struct drm_framebuffer *b, void *arg,
+		void (*unpin)(void *arg, struct drm_gem_object *bo))
 {
-	struct omap_framebuffer *omap_fb = to_omap_framebuffer(fb);
-	int ret, i, n = drm_format_num_planes(fb->pixel_format);
+	int ret = 0, i, na, nb;
+	struct omap_framebuffer *ofba = to_omap_framebuffer(a);
+	struct omap_framebuffer *ofbb = to_omap_framebuffer(b);
+	uint32_t pinned_mask = 0;
 
-	mutex_lock(&omap_fb->lock);
+	na = a ? drm_format_num_planes(a->pixel_format) : 0;
+	nb = b ? drm_format_num_planes(b->pixel_format) : 0;
 
-	if (omap_fb->pin_count > 0) {
-		omap_fb->pin_count++;
-		mutex_unlock(&omap_fb->lock);
-		return 0;
+	for (i = 0; i < max(na, nb); i++) {
+		struct plane *pa, *pb;
+
+		pa = (i < na) ? &ofba->planes[i] : NULL;
+		pb = (i < nb) ? &ofbb->planes[i] : NULL;
+
+		if (pa)
+			unpin(arg, pa->bo);
+
+		if (pb && !ret) {
+			ret = omap_gem_get_paddr(pb->bo, &pb->paddr, true);
+			if (!ret) {
+				omap_gem_dma_sync(pb->bo, DMA_TO_DEVICE);
+				pinned_mask |= (1 << i);
+			}
+		}
 	}
 
-	for (i = 0; i < n; i++) {
-		struct plane *plane = &omap_fb->planes[i];
-		ret = omap_gem_get_paddr(plane->bo, &plane->paddr, true);
-		if (ret)
-			goto fail;
-		omap_gem_dma_sync(plane->bo, DMA_TO_DEVICE);
+	if (ret) {
+		/* something went wrong.. unpin what has been pinned */
+		for (i = 0; i < nb; i++) {
+			if (pinned_mask & (1 << i)) {
+				struct plane *pb = &ofba->planes[i];
+				unpin(arg, pb->bo);
+			}
+		}
 	}
-
-	omap_fb->pin_count++;
-
-	mutex_unlock(&omap_fb->lock);
-
-	return 0;
-
-fail:
-	for (i--; i >= 0; i--) {
-		struct plane *plane = &omap_fb->planes[i];
-		omap_gem_put_paddr(plane->bo);
-		plane->paddr = 0;
-	}
-
-	mutex_unlock(&omap_fb->lock);
 
 	return ret;
 }
 
-/* unpin, no longer being scanned out: */
-void omap_framebuffer_unpin(struct drm_framebuffer *fb)
+struct drm_gem_object *omap_framebuffer_bo(struct drm_framebuffer *fb, int p)
 {
 	struct omap_framebuffer *omap_fb = to_omap_framebuffer(fb);
-	int i, n = drm_format_num_planes(fb->pixel_format);
-
-	mutex_lock(&omap_fb->lock);
-
-	omap_fb->pin_count--;
-
-	if (omap_fb->pin_count > 0) {
-		mutex_unlock(&omap_fb->lock);
-		return;
-	}
-
-	for (i = 0; i < n; i++) {
-		struct plane *plane = &omap_fb->planes[i];
-		omap_gem_put_paddr(plane->bo);
-		plane->paddr = 0;
-	}
-
-	mutex_unlock(&omap_fb->lock);
+	if (p >= drm_format_num_planes(fb->pixel_format))
+		return NULL;
+	return omap_fb->planes[p].bo;
 }
 
 /* iterate thru all the connectors, returning ones that are attached
@@ -323,20 +308,46 @@ struct drm_connector *omap_framebuffer_get_next_connector(
 	struct drm_connector *connector = from;
 
 	if (!from)
-		return list_first_entry_or_null(connector_list, typeof(*from),
-						head);
+		return list_first_entry(connector_list, typeof(*from), head);
 
 	list_for_each_entry_from(connector, connector_list, head) {
 		if (connector != from) {
 			struct drm_encoder *encoder = connector->encoder;
 			struct drm_crtc *crtc = encoder ? encoder->crtc : NULL;
-			if (crtc && crtc->primary->fb == fb)
+			if (crtc && crtc->fb == fb)
 				return connector;
 
 		}
 	}
 
 	return NULL;
+}
+
+/* flush an area of the framebuffer (in case of manual update display that
+ * is not automatically flushed)
+ */
+void omap_framebuffer_flush(struct drm_framebuffer *fb,
+		int x, int y, int w, int h)
+{
+	struct drm_connector *connector = NULL;
+
+	VERB("flush: %d,%d %dx%d, fb=%p", x, y, w, h, fb);
+
+	while ((connector = omap_framebuffer_get_next_connector(fb, connector))) {
+		/* only consider connectors that are part of a chain */
+		if (connector->encoder && connector->encoder->crtc) {
+			/* TODO: maybe this should propagate thru the crtc who
+			 * could do the coordinate translation..
+			 */
+			struct drm_crtc *crtc = connector->encoder->crtc;
+			int cx = max(0, x - crtc->x);
+			int cy = max(0, y - crtc->y);
+			int cw = w + (x - crtc->x) - cx;
+			int ch = h + (y - crtc->y) - cy;
+
+			omap_connector_flush(connector, cx, cy, cw, ch);
+		}
+	}
 }
 
 #ifdef CONFIG_DEBUG_FS
@@ -358,13 +369,13 @@ void omap_framebuffer_describe(struct drm_framebuffer *fb, struct seq_file *m)
 #endif
 
 struct drm_framebuffer *omap_framebuffer_create(struct drm_device *dev,
-		struct drm_file *file, const struct drm_mode_fb_cmd2 *mode_cmd)
+		struct drm_file *file, struct drm_mode_fb_cmd2 *mode_cmd)
 {
 	struct drm_gem_object *bos[4];
 	struct drm_framebuffer *fb;
 	int ret;
 
-	ret = objects_lookup(file, mode_cmd->pixel_format,
+	ret = objects_lookup(dev, file, mode_cmd->pixel_format,
 			bos, mode_cmd->handles);
 	if (ret)
 		return ERR_PTR(ret);
@@ -380,9 +391,9 @@ struct drm_framebuffer *omap_framebuffer_create(struct drm_device *dev,
 }
 
 struct drm_framebuffer *omap_framebuffer_init(struct drm_device *dev,
-		const struct drm_mode_fb_cmd2 *mode_cmd, struct drm_gem_object **bos)
+		struct drm_mode_fb_cmd2 *mode_cmd, struct drm_gem_object **bos)
 {
-	struct omap_framebuffer *omap_fb = NULL;
+	struct omap_framebuffer *omap_fb;
 	struct drm_framebuffer *fb = NULL;
 	const struct format *format = NULL;
 	int ret, i, n = drm_format_num_planes(mode_cmd->pixel_format);
@@ -413,7 +424,6 @@ struct drm_framebuffer *omap_framebuffer_init(struct drm_device *dev,
 
 	fb = &omap_fb->base;
 	omap_fb->format = format;
-	mutex_init(&omap_fb->lock);
 
 	for (i = 0; i < n; i++) {
 		struct plane *plane = &omap_fb->planes[i];
@@ -426,27 +436,11 @@ struct drm_framebuffer *omap_framebuffer_init(struct drm_device *dev,
 			goto fail;
 		}
 
-		if (pitch % format->planes[i].stride_bpp != 0) {
-			dev_err(dev->dev,
-				"buffer pitch (%d bytes) is not a multiple of pixel size (%d bytes)\n",
-				pitch, format->planes[i].stride_bpp);
-			ret = -EINVAL;
-			goto fail;
-		}
-
 		size = pitch * mode_cmd->height / format->planes[i].sub_y;
 
 		if (size > (omap_gem_mmap_size(bos[i]) - mode_cmd->offsets[i])) {
 			dev_err(dev->dev, "provided buffer object is too small! %d < %d\n",
 					bos[i]->size - mode_cmd->offsets[i], size);
-			ret = -EINVAL;
-			goto fail;
-		}
-
-		if (i > 0 && pitch != mode_cmd->pitches[i - 1]) {
-			dev_err(dev->dev,
-				"pitches are not the same between framebuffer planes %d != %d\n",
-				pitch, mode_cmd->pitches[i - 1]);
 			ret = -EINVAL;
 			goto fail;
 		}
@@ -470,7 +464,8 @@ struct drm_framebuffer *omap_framebuffer_init(struct drm_device *dev,
 	return fb;
 
 fail:
-	kfree(omap_fb);
+	if (fb)
+		omap_framebuffer_destroy(fb);
 
 	return ERR_PTR(ret);
 }

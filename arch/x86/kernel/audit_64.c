@@ -50,7 +50,6 @@ int audit_classify_syscall(int abi, unsigned syscall)
 	case __NR_openat:
 		return 3;
 	case __NR_execve:
-	case __NR_execveat:
 		return 5;
 	default:
 		return 0;

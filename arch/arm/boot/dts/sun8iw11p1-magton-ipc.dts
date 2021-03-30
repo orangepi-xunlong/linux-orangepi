@@ -1,0 +1,53 @@
+/*
+ * Allwinner Technology CO., Ltd. sun8iw11p1 soc board.
+ *
+ */
+
+/dts-v1/;
+
+#include "sun8iw11p1_ext.dtsi"
+
+/{
+
+	soc@01c00000 {
+	};
+
+	wlan:wlan {
+		compatible = "allwinner,sunxi-wlan";
+		clocks = <&clk_outa>;
+		wlan_power = "vcc-wifi";
+		wlan_io_regulator = "vcc-io-wifi";
+		wlan_busnum = <1>;
+		wlan_usbnum = <3>;
+		wlan_regon = <&pio PH 0 1 1 1 0>;
+		wlan_hostwake = <&pio PH 1 6 0 0 0>;
+		wlan_clk_gpio = <&pio PI 12 4 0 0 0>;
+		status = "okay";
+	};
+
+	bt:bt {
+		compatible = "allwinner,sunxi-bt";
+		clocks = <&clk_outa>;
+		bt_power = "vcc-wifi";
+		bt_io_regulator = "vcc-io-wifi";
+		bt_rst_n = <&pio PH 3 1 1 1 0>;
+		status = "okay";
+	};
+
+	btlpm:btlpm {
+		compatible = "allwinner,sunxi-btlpm";
+		uart_index = <1>;
+		bt_wake = <&pio PH 4 1 1 1 1>;
+		bt_hostwake = <&pio PH 2 6 0 0 0>;
+		status = "okay";
+	};
+
+        gps:gps {
+                compatible = "allwinner,sunxi-gps";
+                clocks = <&clk_outb>;
+                gps_power = "vcc-gps";
+                gps_nstandby = <&pio PI 15 1 1 1 0>;
+                gps_clk_gpio = <&pio PI 13 4 0 0 0>;
+                status = "disabled";
+        };
+};

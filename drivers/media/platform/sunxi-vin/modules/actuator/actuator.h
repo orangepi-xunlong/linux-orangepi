@@ -1,19 +1,3 @@
-/*
- * linux-4.9/drivers/media/platform/sunxi-vin/modules/actuator/actuator.h
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
 
 /*
  ******************************************************************************
@@ -24,9 +8,9 @@
  *
  * Copyright (c) 2015 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
  *
- * Version        Author         Date            Description
+ * Version		  Author         Date		    Description
  *
- *   3.0          Yang Feng     2015/12/02  ISP Tuning Tools Support
+ *   3.0		  Yang Feng   	2015/12/02	ISP Tuning Tools Support
  *
  ******************************************************************************
  */
@@ -62,13 +46,13 @@ struct actuator_ctrl_t;
 #define ACT_DEV_MIN_CODE 0
 #define ACT_DEV_MAX_CODE 1023
 
-#define MOVE_NEAR   0
-#define MOVE_FAR    1
+#define MOVE_NEAR	0
+#define MOVE_FAR	1
 
 #define ACT_DEV_DBG_EN 0
-#define act_err(x, arg...) pr_err("[%s] error, "x, SUNXI_ACT_NAME, ##arg)
+#define act_err(x, arg...) printk(KERN_ERR "[%s] error, "x, SUNXI_ACT_NAME, ##arg)
 #if ACT_DEV_DBG_EN
-#define act_dbg(x, arg...) printk(KERN_DEBUG"[%s]"x, SUNXI_ACT_NAME, ##arg)
+#define act_dbg(x, arg...) printk(KERN_INFO "[%s]"x, SUNXI_ACT_NAME, ##arg)
 #else
 #define act_dbg(x, arg...)
 #endif
@@ -98,7 +82,7 @@ typedef enum tag_ACT_SUBDEV_CMD {
 struct actuator_para_t {
 	unsigned short active_min;
 	unsigned short active_max;
-	unsigned short ext_tbl_en;  /*0-disable 1- en*/
+	unsigned short ext_tbl_en;	/*0-disable 1- en*/
 	unsigned short ext_tbl_steps;
 	unsigned short *ext_tbl;
 };
@@ -151,21 +135,21 @@ struct actuator_cfg_data {
 };
 
 struct actuator_func_tbl {
-	int (*actuator_init)(struct actuator_ctrl_t *,
-				struct actuator_para_t *);
-	int (*actuator_pwdn)(struct actuator_ctrl_t *, unsigned short);
-	int (*actuator_init_table)(struct actuator_ctrl_t *,
-				unsigned short,
-				unsigned short, unsigned short *);
-	int (*actuator_release)(struct actuator_ctrl_t *,
-				struct actuator_ctrl_word_t *);
-	int (*actuator_move_pos)(struct actuator_ctrl_t *,
-				unsigned short, unsigned short);
-	int (*actuator_set_pos)(struct actuator_ctrl_t *, unsigned short);
-	int (*actuator_set_code)(struct actuator_ctrl_t *,
-				unsigned short, unsigned short);
-	int (*actuator_i2c_write)(struct actuator_ctrl_t *,
-				unsigned short, void *);
+	int (*actuator_init) (struct actuator_ctrl_t *,
+			      struct actuator_para_t *);
+	int (*actuator_pwdn) (struct actuator_ctrl_t *, unsigned short);
+	int (*actuator_init_table) (struct actuator_ctrl_t *,
+				    unsigned short,
+				    unsigned short, unsigned short *);
+	int (*actuator_release) (struct actuator_ctrl_t *,
+				 struct actuator_ctrl_word_t *);
+	int (*actuator_move_pos) (struct actuator_ctrl_t *,
+				  unsigned short, unsigned short);
+	int (*actuator_set_pos) (struct actuator_ctrl_t *, unsigned short);
+	int (*actuator_set_code) (struct actuator_ctrl_t *,
+				  unsigned short, unsigned short);
+	int (*actuator_i2c_write) (struct actuator_ctrl_t *,
+				   unsigned short, void *);
 };
 
 typedef enum tag_ACT_STA {
@@ -175,7 +159,7 @@ typedef enum tag_ACT_STA {
 	ACT_STA_BUSY,
 	ACT_STA_ERR,
 	ACT_STA_SCANNING,
-	ACT_STA_HALT, /*paused to specific pos*/
+	ACT_STA_HALT,		/*paused to specific pos*/
 } __act_sta_t;
 
 struct actuator_ctrl_t {
@@ -210,4 +194,4 @@ int actuator_write_focus(struct actuator_ctrl_t *a_ctrl,
 long sunxi_actuator_ioctl(struct v4l2_subdev *sd,
 			unsigned int cmd, void *arg);
 
-#endif /*__ACTUATOR__H__*/
+#endif	/*__ACTUATOR__H__*/

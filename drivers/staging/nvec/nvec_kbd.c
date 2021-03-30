@@ -126,7 +126,7 @@ static int nvec_kbd_probe(struct platform_device *pdev)
 	for (i = 0; i < ARRAY_SIZE(extcode_tab_us102); ++i)
 		keycodes[j++] = extcode_tab_us102[i];
 
-	idev = devm_input_allocate_device(&pdev->dev);
+	idev = input_allocate_device();
 	idev->name = "nvec keyboard";
 	idev->phys = "nvec";
 	idev->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_REP) | BIT_MASK(EV_LED);
@@ -142,7 +142,7 @@ static int nvec_kbd_probe(struct platform_device *pdev)
 	clear_bit(0, idev->keybit);
 	err = input_register_device(idev);
 	if (err)
-		return err;
+		goto fail;
 
 	keys_dev.input = idev;
 	keys_dev.notifier.notifier_call = nvec_keys_notifier;
@@ -161,6 +161,10 @@ static int nvec_kbd_probe(struct platform_device *pdev)
 	nvec_write_async(nvec, clear_leds, sizeof(clear_leds));
 
 	return 0;
+
+fail:
+	input_free_device(idev);
+	return err;
 }
 
 static int nvec_kbd_remove(struct platform_device *pdev)
@@ -173,6 +177,8 @@ static int nvec_kbd_remove(struct platform_device *pdev)
 	nvec_write_async(nvec, disable_kbd, 2);
 	nvec_unregister_notifier(nvec, &keys_dev.notifier);
 
+	input_unregister_device(keys_dev.input);
+
 	return 0;
 }
 
@@ -181,6 +187,7 @@ static struct platform_driver nvec_kbd_driver = {
 	.remove = nvec_kbd_remove,
 	.driver = {
 		.name = "nvec-kbd",
+		.owner = THIS_MODULE,
 	},
 };
 

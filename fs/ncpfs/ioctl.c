@@ -41,7 +41,7 @@ ncp_get_fs_info(struct ncp_server * server, struct inode *inode,
 		return -EFAULT;
 
 	if (info.version != NCP_GET_FS_INFO_VERSION) {
-		ncp_dbg(1, "info.version invalid: %d\n", info.version);
+		DPRINTK("info.version invalid: %d\n", info.version);
 		return -EINVAL;
 	}
 	/* TODO: info.addr = server->m.serv_addr; */
@@ -66,7 +66,7 @@ ncp_get_fs_info_v2(struct ncp_server * server, struct inode *inode,
 		return -EFAULT;
 
 	if (info2.version != NCP_GET_FS_INFO_VERSION_V2) {
-		ncp_dbg(1, "info.version invalid: %d\n", info2.version);
+		DPRINTK("info.version invalid: %d\n", info2.version);
 		return -EINVAL;
 	}
 	info2.mounted_uid   = from_kuid_munged(current_user_ns(), server->m.mounted_uid);
@@ -132,7 +132,7 @@ ncp_get_compat_fs_info_v2(struct ncp_server * server, struct inode *inode,
 		return -EFAULT;
 
 	if (info2.version != NCP_GET_FS_INFO_VERSION_V2) {
-		ncp_dbg(1, "info.version invalid: %d\n", info2.version);
+		DPRINTK("info.version invalid: %d\n", info2.version);
 		return -EINVAL;
 	}
 	info2.mounted_uid   = from_kuid_munged(current_user_ns(), server->m.mounted_uid);
@@ -233,7 +233,7 @@ ncp_get_charsets(struct ncp_server* server, struct ncp_nls_ioctl __user *arg)
 		len = strlen(server->nls_vol->charset);
 		if (len > NCP_IOCSNAME_LEN)
 			len = NCP_IOCSNAME_LEN;
-		strscpy(user.codepage, server->nls_vol->charset, NCP_IOCSNAME_LEN);
+		strncpy(user.codepage, server->nls_vol->charset, len);
 		user.codepage[len] = 0;
 	}
 
@@ -243,7 +243,7 @@ ncp_get_charsets(struct ncp_server* server, struct ncp_nls_ioctl __user *arg)
 		len = strlen(server->nls_io->charset);
 		if (len > NCP_IOCSNAME_LEN)
 			len = NCP_IOCSNAME_LEN;
-		strscpy(user.iocharset,	server->nls_io->charset, NCP_IOCSNAME_LEN);
+		strncpy(user.iocharset,	server->nls_io->charset, len);
 		user.iocharset[len] = 0;
 	}
 	mutex_unlock(&server->root_setup_lock);
@@ -308,7 +308,8 @@ static long __ncp_ioctl(struct inode *inode, unsigned int cmd, unsigned long arg
 		else
 			result = server->reply_size;
 		ncp_unlock_server(server);
-		ncp_dbg(1, "copy %d bytes\n", result);
+		DPRINTK("ncp_ioctl: copy %d bytes\n",
+			result);
 		if (result >= 0)
 			if (copy_to_user(request.data, bouncebuffer, result))
 				result = -EFAULT;
@@ -376,7 +377,7 @@ static long __ncp_ioctl(struct inode *inode, unsigned int cmd, unsigned long arg
 				struct dentry* dentry = inode->i_sb->s_root;
 
 				if (dentry) {
-					struct inode* s_inode = d_inode(dentry);
+					struct inode* s_inode = dentry->d_inode;
 
 					if (s_inode) {
 						sr.volNumber = NCP_FINFO(s_inode)->volNumber;
@@ -384,9 +385,9 @@ static long __ncp_ioctl(struct inode *inode, unsigned int cmd, unsigned long arg
 						sr.namespace = server->name_space[sr.volNumber];
 						result = 0;
 					} else
-						ncp_dbg(1, "d_inode(s_root)==NULL\n");
+						DPRINTK("ncpfs: s_root->d_inode==NULL\n");
 				} else
-					ncp_dbg(1, "s_root==NULL\n");
+					DPRINTK("ncpfs: s_root==NULL\n");
 			} else {
 				sr.volNumber = -1;
 				sr.namespace = 0;
@@ -431,7 +432,7 @@ static long __ncp_ioctl(struct inode *inode, unsigned int cmd, unsigned long arg
 				if (result == 0) {
 					dentry = inode->i_sb->s_root;
 					if (dentry) {
-						struct inode* s_inode = d_inode(dentry);
+						struct inode* s_inode = dentry->d_inode;
 
 						if (s_inode) {
 							NCP_FINFO(s_inode)->volNumber = vnum;
@@ -439,11 +440,11 @@ static long __ncp_ioctl(struct inode *inode, unsigned int cmd, unsigned long arg
 							NCP_FINFO(s_inode)->DosDirNum = dosde;
 							server->root_setuped = 1;
 						} else {
-							ncp_dbg(1, "d_inode(s_root)==NULL\n");
+							DPRINTK("ncpfs: s_root->d_inode==NULL\n");
 							result = -EIO;
 						}
 					} else {
-						ncp_dbg(1, "s_root==NULL\n");
+						DPRINTK("ncpfs: s_root==NULL\n");
 						result = -EIO;
 					}
 				}
@@ -525,8 +526,6 @@ static long __ncp_ioctl(struct inode *inode, unsigned int cmd, unsigned long arg
 			switch (rqdata.cmd) {
 				case NCP_LOCK_EX:
 				case NCP_LOCK_SH:
-						if (rqdata.timeout < 0)
-							return -EINVAL;
 						if (rqdata.timeout == 0)
 							rqdata.timeout = NCP_LOCK_DEFAULT_TIMEOUT;
 						else if (rqdata.timeout > NCP_LOCK_MAX_TIMEOUT)

@@ -46,8 +46,6 @@
 #define CPU_BLOCKID_FPU		9
 #define CPU_BLOCKID_MAP		10
 
-#define IFU_BRUB_RESERVE	0x007
-
 #define ICU_DEFEATURE		0x100
 
 #define LSU_DEFEATURE		0x304

@@ -71,6 +71,21 @@ u32 arch_timer_reg_read_cp15(int access, enum arch_timer_reg reg)
 	return val;
 }
 
+static __always_inline
+u64 arch_timer_reg_read_cval(int access)
+{
+	u64 cval;
+
+	if (access == ARCH_TIMER_PHYS_ACCESS)
+		asm volatile("mrrc p15, 2, %Q0, %R0, c14" : "=r" (cval));
+	else if (access == ARCH_TIMER_VIRT_ACCESS)
+		asm volatile("mrrc p15, 3, %Q0, %R0, c14" : "=r" (cval));
+	else
+		cval = 0;
+
+	return cval;
+}
+
 static inline u32 arch_timer_get_cntfrq(void)
 {
 	u32 val;
@@ -78,6 +93,38 @@ static inline u32 arch_timer_get_cntfrq(void)
 	return val;
 }
 
+#ifdef CONFIG_ARCH_SUN50I
+#define ARCH_PCNT_TRY_MAX_TIME (12)
+#define ARCH_PCNT_MAX_DELTA    (8)
+static inline u64 arch_counter_get_cntpct(void)
+{
+	u64 pct0;
+	u64 pct1;
+	u64 delta;
+	u32 retry = 0;
+
+	/* sun50i vcnt maybe imprecise,
+	 * we should try to fix this.
+	 */
+	while (retry < ARCH_PCNT_TRY_MAX_TIME) {
+		isb();
+		asm volatile("mrrc p15, 0, %Q0, %R0, c14" : "=r" (pct0));
+		isb();
+		asm volatile("mrrc p15, 0, %Q0, %R0, c14" : "=r" (pct1));
+		delta = pct1 - pct0;
+		if ((pct1 >= pct0) && (delta < ARCH_PCNT_MAX_DELTA)) {
+			/* read valid vcnt */
+			return pct1;
+		}
+		/* vcnt value error, try again */
+		retry++;
+	}
+	/* Do not warry for this, just return the last time vcnt.
+	 * arm64 have enabled CONFIG_CLOCKSOURCE_VALIDATE_LAST_CYCLE.
+	 */
+	return pct1;
+}
+#else
 static inline u64 arch_counter_get_cntpct(void)
 {
 	u64 cval;
@@ -86,7 +133,40 @@ static inline u64 arch_counter_get_cntpct(void)
 	asm volatile("mrrc p15, 0, %Q0, %R0, c14" : "=r" (cval));
 	return cval;
 }
+#endif /* CONFIG_ARCH_SUN50I */
 
+#ifdef CONFIG_ARCH_SUN50I
+#define ARCH_VCNT_TRY_MAX_TIME (12)
+#define ARCH_VCNT_MAX_DELTA    (8)
+static inline u64 arch_counter_get_cntvct(void)
+{
+	u64 vct0;
+	u64 vct1;
+	u64 delta;
+	u32 retry = 0;
+
+	/* sun50i vcnt maybe imprecise,
+	 * we should try to fix this.
+	 */
+	while (retry < ARCH_VCNT_TRY_MAX_TIME) {
+		isb();
+		asm volatile("mrrc p15, 1, %Q0, %R0, c14" : "=r" (vct0));
+		isb();
+		asm volatile("mrrc p15, 1, %Q0, %R0, c14" : "=r" (vct1));
+		delta = vct1 - vct0;
+		if ((vct1 >= vct0) && (delta < ARCH_VCNT_MAX_DELTA)) {
+			/* read valid vcnt */
+			return vct1;
+		}
+		/* vcnt value error, try again */
+		retry++;
+	}
+	/* Do not warry for this, just return the last time vcnt.
+	 * arm64 have enabled CONFIG_CLOCKSOURCE_VALIDATE_LAST_CYCLE.
+	 */
+	return vct1;
+}
+#else
 static inline u64 arch_counter_get_cntvct(void)
 {
 	u64 cval;
@@ -95,6 +175,7 @@ static inline u64 arch_counter_get_cntvct(void)
 	asm volatile("mrrc p15, 1, %Q0, %R0, c14" : "=r" (cval));
 	return cval;
 }
+#endif /* CONFIG_ARCH_SUN50I */
 
 static inline u32 arch_timer_get_cntkctl(void)
 {
@@ -106,6 +187,31 @@ static inline u32 arch_timer_get_cntkctl(void)
 static inline void arch_timer_set_cntkctl(u32 cntkctl)
 {
 	asm volatile("mcr p15, 0, %0, c14, c1, 0" : : "r" (cntkctl));
+}
+
+static inline void __cpuinit arch_counter_set_user_access(void)
+{
+	u32 cntkctl = arch_timer_get_cntkctl();
+
+	/* Disable user access to both physical/virtual counters/timers */
+	/* Also disable virtual event stream */
+	cntkctl &= ~(ARCH_TIMER_USR_PT_ACCESS_EN
+			| ARCH_TIMER_USR_VT_ACCESS_EN
+			| ARCH_TIMER_VIRT_EVT_EN
+			| ARCH_TIMER_USR_VCT_ACCESS_EN
+			| ARCH_TIMER_USR_PCT_ACCESS_EN);
+	arch_timer_set_cntkctl(cntkctl);
+}
+
+static inline void arch_timer_evtstrm_enable(int divider)
+{
+	u32 cntkctl = arch_timer_get_cntkctl();
+	cntkctl &= ~ARCH_TIMER_EVT_TRIGGER_MASK;
+	/* Set the divider and enable virtual event stream */
+	cntkctl |= (divider << ARCH_TIMER_EVT_TRIGGER_SHIFT)
+			| ARCH_TIMER_VIRT_EVT_EN;
+	arch_timer_set_cntkctl(cntkctl);
+	elf_hwcap |= HWCAP_EVTSTRM;
 }
 
 #endif

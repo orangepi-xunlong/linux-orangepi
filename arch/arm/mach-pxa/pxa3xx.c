@@ -19,7 +19,6 @@
 #include <linux/pm.h>
 #include <linux/platform_device.h>
 #include <linux/irq.h>
-#include <linux/irqchip.h>
 #include <linux/io.h>
 #include <linux/of.h>
 #include <linux/syscore_ops.h>
@@ -31,25 +30,73 @@
 #include <mach/pxa3xx-regs.h>
 #include <mach/reset.h>
 #include <linux/platform_data/usb-ohci-pxa27x.h>
-#include "pm.h"
+#include <mach/pm.h>
 #include <mach/dma.h>
 #include <mach/smemc.h>
 #include <mach/irqs.h>
 
 #include "generic.h"
 #include "devices.h"
+#include "clock.h"
 
 #define PECR_IE(n)	((1 << ((n) * 2)) << 28)
 #define PECR_IS(n)	((1 << ((n) * 2)) << 29)
 
 extern void __init pxa_dt_irq_init(int (*fn)(struct irq_data *, unsigned int));
 
-/*
- * NAND NFC: DFI bus arbitration subset
- */
-#define NDCR			(*(volatile u32 __iomem*)(NAND_VIRT + 0))
-#define NDCR_ND_ARB_EN		(1 << 12)
-#define NDCR_ND_ARB_CNTL	(1 << 19)
+static DEFINE_PXA3_CKEN(pxa3xx_ffuart, FFUART, 14857000, 1);
+static DEFINE_PXA3_CKEN(pxa3xx_btuart, BTUART, 14857000, 1);
+static DEFINE_PXA3_CKEN(pxa3xx_stuart, STUART, 14857000, 1);
+static DEFINE_PXA3_CKEN(pxa3xx_i2c, I2C, 32842000, 0);
+static DEFINE_PXA3_CKEN(pxa3xx_udc, UDC, 48000000, 5);
+static DEFINE_PXA3_CKEN(pxa3xx_usbh, USBH, 48000000, 0);
+static DEFINE_PXA3_CKEN(pxa3xx_u2d, USB2, 48000000, 0);
+static DEFINE_PXA3_CKEN(pxa3xx_keypad, KEYPAD, 32768, 0);
+static DEFINE_PXA3_CKEN(pxa3xx_ssp1, SSP1, 13000000, 0);
+static DEFINE_PXA3_CKEN(pxa3xx_ssp2, SSP2, 13000000, 0);
+static DEFINE_PXA3_CKEN(pxa3xx_ssp3, SSP3, 13000000, 0);
+static DEFINE_PXA3_CKEN(pxa3xx_ssp4, SSP4, 13000000, 0);
+static DEFINE_PXA3_CKEN(pxa3xx_pwm0, PWM0, 13000000, 0);
+static DEFINE_PXA3_CKEN(pxa3xx_pwm1, PWM1, 13000000, 0);
+static DEFINE_PXA3_CKEN(pxa3xx_mmc1, MMC1, 19500000, 0);
+static DEFINE_PXA3_CKEN(pxa3xx_mmc2, MMC2, 19500000, 0);
+static DEFINE_PXA3_CKEN(pxa3xx_gpio, GPIO, 13000000, 0);
+
+static DEFINE_CK(pxa3xx_lcd, LCD, &clk_pxa3xx_hsio_ops);
+static DEFINE_CK(pxa3xx_smemc, SMC, &clk_pxa3xx_smemc_ops);
+static DEFINE_CK(pxa3xx_camera, CAMERA, &clk_pxa3xx_hsio_ops);
+static DEFINE_CK(pxa3xx_ac97, AC97, &clk_pxa3xx_ac97_ops);
+static DEFINE_CLK(pxa3xx_pout, &clk_pxa3xx_pout_ops, 13000000, 70);
+
+static struct clk_lookup pxa3xx_clkregs[] = {
+	INIT_CLKREG(&clk_pxa3xx_pout, NULL, "CLK_POUT"),
+	/* Power I2C clock is always on */
+	INIT_CLKREG(&clk_dummy, "pxa3xx-pwri2c.1", NULL),
+	INIT_CLKREG(&clk_pxa3xx_lcd, "pxa2xx-fb", NULL),
+	INIT_CLKREG(&clk_pxa3xx_camera, NULL, "CAMCLK"),
+	INIT_CLKREG(&clk_pxa3xx_ac97, NULL, "AC97CLK"),
+	INIT_CLKREG(&clk_pxa3xx_ffuart, "pxa2xx-uart.0", NULL),
+	INIT_CLKREG(&clk_pxa3xx_btuart, "pxa2xx-uart.1", NULL),
+	INIT_CLKREG(&clk_pxa3xx_stuart, "pxa2xx-uart.2", NULL),
+	INIT_CLKREG(&clk_pxa3xx_stuart, "pxa2xx-ir", "UARTCLK"),
+	INIT_CLKREG(&clk_pxa3xx_i2c, "pxa2xx-i2c.0", NULL),
+	INIT_CLKREG(&clk_pxa3xx_udc, "pxa27x-udc", NULL),
+	INIT_CLKREG(&clk_pxa3xx_usbh, "pxa27x-ohci", NULL),
+	INIT_CLKREG(&clk_pxa3xx_u2d, "pxa3xx-u2d", NULL),
+	INIT_CLKREG(&clk_pxa3xx_keypad, "pxa27x-keypad", NULL),
+	INIT_CLKREG(&clk_pxa3xx_ssp1, "pxa27x-ssp.0", NULL),
+	INIT_CLKREG(&clk_pxa3xx_ssp2, "pxa27x-ssp.1", NULL),
+	INIT_CLKREG(&clk_pxa3xx_ssp3, "pxa27x-ssp.2", NULL),
+	INIT_CLKREG(&clk_pxa3xx_ssp4, "pxa27x-ssp.3", NULL),
+	INIT_CLKREG(&clk_pxa3xx_pwm0, "pxa27x-pwm.0", NULL),
+	INIT_CLKREG(&clk_pxa3xx_pwm1, "pxa27x-pwm.1", NULL),
+	INIT_CLKREG(&clk_pxa3xx_mmc1, "pxa2xx-mci.0", NULL),
+	INIT_CLKREG(&clk_pxa3xx_mmc2, "pxa2xx-mci.1", NULL),
+	INIT_CLKREG(&clk_pxa3xx_smemc, "pxa2xx-pcmcia", NULL),
+	INIT_CLKREG(&clk_pxa3xx_gpio, "pxa3xx-gpio", NULL),
+	INIT_CLKREG(&clk_pxa3xx_gpio, "pxa93x-gpio", NULL),
+	INIT_CLKREG(&clk_dummy, "sa1100-rtc", NULL),
+};
 
 #ifdef CONFIG_PM
 
@@ -69,6 +116,7 @@ static unsigned long wakeup_src;
  */
 static void pxa3xx_cpu_standby(unsigned int pwrmode)
 {
+	extern const char pm_enter_standby_start[], pm_enter_standby_end[];
 	void (*fn)(unsigned int) = (void __force *)(sram + 0x8000);
 
 	memcpy_toio(sram + 0x8000, pm_enter_standby_start,
@@ -103,9 +151,10 @@ static void pxa3xx_cpu_pm_suspend(void)
 #ifndef CONFIG_IWMMXT
 	u64 acc0;
 
-	asm volatile(".arch_extension xscale\n\t"
-		     "mra %Q0, %R0, acc0" : "=r" (acc0));
+	asm volatile("mra %Q0, %R0, acc0" : "=r" (acc0));
 #endif
+
+	extern int pxa3xx_finish_suspend(unsigned long);
 
 	/* resuming from D2 requires the HSIO2/BOOT/TPM clocks enabled */
 	CKENA |= (1 << CKEN_BOOT) | (1 << CKEN_TPM);
@@ -132,8 +181,7 @@ static void pxa3xx_cpu_pm_suspend(void)
 	AD3ER = 0;
 
 #ifndef CONFIG_IWMMXT
-	asm volatile(".arch_extension xscale\n\t"
-		     "mar acc0, %Q0, %R0" : "=r" (acc0));
+	asm volatile("mar acc0, %Q0, %R0" : "=r" (acc0));
 #endif
 }
 
@@ -333,7 +381,7 @@ static void __init pxa_init_ext_wakeup_irq(int (*fn)(struct irq_data *,
 	for (irq = IRQ_WAKEUP0; irq <= IRQ_WAKEUP1; irq++) {
 		irq_set_chip_and_handler(irq, &pxa_ext_wakeup_chip,
 					 handle_edge_irq);
-		irq_clear_status_flags(irq, IRQ_NOREQUEST);
+		set_irq_flags(irq, IRQF_VALID);
 	}
 
 	pxa_ext_wakeup_chip.irq_set_wake = fn;
@@ -357,30 +405,20 @@ void __init pxa3xx_init_irq(void)
 }
 
 #ifdef CONFIG_OF
-static int __init __init
-pxa3xx_dt_init_irq(struct device_node *node, struct device_node *parent)
+void __init pxa3xx_dt_init_irq(void)
 {
 	__pxa3xx_init_irq();
 	pxa_dt_irq_init(pxa3xx_set_wake);
-	set_handle_irq(ichp_handle_irq);
-
-	return 0;
 }
-IRQCHIP_DECLARE(pxa3xx_intc, "marvell,pxa-intc", pxa3xx_dt_init_irq);
 #endif	/* CONFIG_OF */
 
 static struct map_desc pxa3xx_io_desc[] __initdata = {
 	{	/* Mem Ctl */
 		.virtual	= (unsigned long)SMEMC_VIRT,
 		.pfn		= __phys_to_pfn(PXA3XX_SMEMC_BASE),
-		.length		= SMEMC_SIZE,
+		.length		= 0x00200000,
 		.type		= MT_DEVICE
-	}, {
-		.virtual	= (unsigned long)NAND_VIRT,
-		.pfn		= __phys_to_pfn(NAND_PHYS),
-		.length		= NAND_SIZE,
-		.type		= MT_DEVICE
-	},
+	}
 };
 
 void __init pxa3xx_map_io(void)
@@ -412,10 +450,11 @@ static struct platform_device *devices[] __initdata = {
 	&pxa_device_asoc_ssp3,
 	&pxa_device_asoc_ssp4,
 	&pxa_device_asoc_platform,
+	&sa1100_device_rtc,
 	&pxa_device_rtc,
-	&pxa3xx_device_ssp1,
-	&pxa3xx_device_ssp2,
-	&pxa3xx_device_ssp3,
+	&pxa27x_device_ssp1,
+	&pxa27x_device_ssp2,
+	&pxa27x_device_ssp3,
 	&pxa3xx_device_ssp4,
 	&pxa27x_device_pwm0,
 	&pxa27x_device_pwm1,
@@ -437,22 +476,20 @@ static int __init pxa3xx_init(void)
 		 */
 		ASCR &= ~(ASCR_RDH | ASCR_D1S | ASCR_D2S | ASCR_D3S);
 
-		/*
-		 * Disable DFI bus arbitration, to prevent a system bus lock if
-		 * somebody disables the NAND clock (unused clock) while this
-		 * bit remains set.
-		 */
-		NDCR = (NDCR & ~NDCR_ND_ARB_EN) | NDCR_ND_ARB_CNTL;
+		clkdev_add_table(pxa3xx_clkregs, ARRAY_SIZE(pxa3xx_clkregs));
+
+		if ((ret = pxa_init_dma(IRQ_DMA, 32)))
+			return ret;
 
 		pxa3xx_init_pm();
 
 		register_syscore_ops(&pxa_irq_syscore_ops);
 		register_syscore_ops(&pxa3xx_mfp_syscore_ops);
+		register_syscore_ops(&pxa3xx_clock_syscore_ops);
 
 		if (of_have_populated_dt())
 			return 0;
 
-		pxa2xx_set_dmac_info(32, 100);
 		ret = platform_add_devices(devices, ARRAY_SIZE(devices));
 		if (ret)
 			return ret;

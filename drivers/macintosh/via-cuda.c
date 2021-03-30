@@ -209,7 +209,7 @@ static int __init via_cuda_start(void)
     cuda_irq = IRQ_MAC_ADB;
 #else
     cuda_irq = irq_of_parse_and_map(vias, 0);
-    if (!cuda_irq) {
+    if (cuda_irq == NO_IRQ) {
 	printk(KERN_ERR "via-cuda: can't map interrupts for %s\n",
 	       vias->full_name);
 	return -ENODEV;
@@ -259,7 +259,7 @@ cuda_probe(void)
     } while (0)
 
 static int
-__init cuda_init_via(void)
+cuda_init_via(void)
 {
     out_8(&via[DIRB], (in_8(&via[DIRB]) | TACK | TIP) & ~TREQ);	/* TACK & TIP out */
     out_8(&via[B], in_8(&via[B]) | TACK | TIP);			/* negate them */
@@ -379,7 +379,6 @@ cuda_request(struct adb_request *req, void (*done)(struct adb_request *),
     req->reply_expected = 1;
     return cuda_write(req);
 }
-EXPORT_SYMBOL(cuda_request);
 
 static int
 cuda_write(struct adb_request *req)
@@ -442,7 +441,6 @@ cuda_poll(void)
     if (cuda_irq)
 	enable_irq(cuda_irq);
 }
-EXPORT_SYMBOL(cuda_poll);
 
 static irqreturn_t
 cuda_interrupt(int irq, void *arg)

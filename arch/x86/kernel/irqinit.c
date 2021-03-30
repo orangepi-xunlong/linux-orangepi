@@ -51,8 +51,8 @@ static struct irqaction irq2 = {
 	.flags = IRQF_NO_THREAD,
 };
 
-DEFINE_PER_CPU_USER_MAPPED(vector_irq_t, vector_irq) = {
-	[0 ... NR_VECTORS - 1] = VECTOR_UNUSED,
+DEFINE_PER_CPU(vector_irq_t, vector_irq) = {
+	[0 ... NR_VECTORS - 1] = -1,
 };
 
 int vector_used_by_percpu_irq(unsigned int vector)
@@ -60,7 +60,7 @@ int vector_used_by_percpu_irq(unsigned int vector)
 	int cpu;
 
 	for_each_online_cpu(cpu) {
-		if (!IS_ERR_OR_NULL(per_cpu(vector_irq, cpu)[vector]))
+		if (per_cpu(vector_irq, cpu)[vector] != -1)
 			return 1;
 	}
 
@@ -70,6 +70,7 @@ int vector_used_by_percpu_irq(unsigned int vector)
 void __init init_ISA_irqs(void)
 {
 	struct irq_chip *chip = legacy_pic->chip;
+	const char *name = chip->name;
 	int i;
 
 #if defined(CONFIG_X86_64) || defined(CONFIG_X86_LOCAL_APIC)
@@ -77,8 +78,8 @@ void __init init_ISA_irqs(void)
 #endif
 	legacy_pic->init(0);
 
-	for (i = 0; i < nr_legacy_irqs(); i++)
-		irq_set_chip_and_handler(i, chip, handle_level_irq);
+	for (i = 0; i < legacy_pic->nr_legacy_irqs; i++)
+		irq_set_chip_and_handler_name(i, chip, handle_level_irq, name);
 }
 
 void __init init_IRQ(void)
@@ -86,22 +87,51 @@ void __init init_IRQ(void)
 	int i;
 
 	/*
-	 * On cpu 0, Assign ISA_IRQ_VECTOR(irq) to IRQ 0..15.
+	 * We probably need a better place for this, but it works for
+	 * now ...
+	 */
+	x86_add_irq_domains();
+
+	/*
+	 * On cpu 0, Assign IRQ0_VECTOR..IRQ15_VECTOR's to IRQ 0..15.
 	 * If these IRQ's are handled by legacy interrupt-controllers like PIC,
 	 * then this configuration will likely be static after the boot. If
 	 * these IRQ's are handled by more mordern controllers like IO-APIC,
 	 * then this vector space can be freed and re-used dynamically as the
 	 * irq's migrate etc.
 	 */
-	for (i = 0; i < nr_legacy_irqs(); i++)
-		per_cpu(vector_irq, 0)[ISA_IRQ_VECTOR(i)] = irq_to_desc(i);
+	for (i = 0; i < legacy_pic->nr_legacy_irqs; i++)
+		per_cpu(vector_irq, 0)[IRQ0_VECTOR + i] = i;
 
 	x86_init.irqs.intr_init();
+}
+
+/*
+ * Setup the vector to irq mappings.
+ */
+void setup_vector_irq(int cpu)
+{
+#ifndef CONFIG_X86_IO_APIC
+	int irq;
+
+	/*
+	 * On most of the platforms, legacy PIC delivers the interrupts on the
+	 * boot cpu. But there are certain platforms where PIC interrupts are
+	 * delivered to multiple cpu's. If the legacy IRQ is handled by the
+	 * legacy PIC, for the new cpu that is coming online, setup the static
+	 * legacy vector to irq mapping:
+	 */
+	for (irq = 0; irq < legacy_pic->nr_legacy_irqs; irq++)
+		per_cpu(vector_irq, cpu)[IRQ0_VECTOR + irq] = irq;
+#endif
+
+	__setup_vector_irq(cpu);
 }
 
 static void __init smp_intr_init(void)
 {
 #ifdef CONFIG_SMP
+#if defined(CONFIG_X86_64) || defined(CONFIG_X86_LOCAL_APIC)
 	/*
 	 * The reschedule interrupt is a CPU-to-CPU reschedule-helper
 	 * IPI, driven by wakeup.
@@ -121,6 +151,7 @@ static void __init smp_intr_init(void)
 
 	/* IPI used for rebooting/stopping */
 	alloc_intr_gate(REBOOT_VECTOR, reboot_interrupt);
+#endif
 #endif /* CONFIG_SMP */
 }
 
@@ -135,11 +166,7 @@ static void __init apic_intr_init(void)
 	alloc_intr_gate(THRESHOLD_APIC_VECTOR, threshold_interrupt);
 #endif
 
-#ifdef CONFIG_X86_MCE_AMD
-	alloc_intr_gate(DEFERRED_ERROR_VECTOR, deferred_error_interrupt);
-#endif
-
-#ifdef CONFIG_X86_LOCAL_APIC
+#if defined(CONFIG_X86_64) || defined(CONFIG_X86_LOCAL_APIC)
 	/* self generated IPI for local APIC timer */
 	alloc_intr_gate(LOCAL_TIMER_VECTOR, apic_timer_interrupt);
 
@@ -148,8 +175,6 @@ static void __init apic_intr_init(void)
 #ifdef CONFIG_HAVE_KVM
 	/* IPI for KVM to deliver posted interrupt */
 	alloc_intr_gate(POSTED_INTR_VECTOR, kvm_posted_intr_ipi);
-	/* IPI for KVM to deliver interrupt to wake up tasks */
-	alloc_intr_gate(POSTED_INTR_WAKEUP_VECTOR, kvm_posted_intr_wakeup_ipi);
 #endif
 
 	/* IPI vectors for APIC spurious and error interrupts */
@@ -179,20 +204,12 @@ void __init native_init_IRQ(void)
 	 * 'special' SMP interrupts)
 	 */
 	i = FIRST_EXTERNAL_VECTOR;
-#ifndef CONFIG_X86_LOCAL_APIC
-#define first_system_vector NR_VECTORS
-#endif
-	for_each_clear_bit_from(i, used_vectors, first_system_vector) {
+	for_each_clear_bit_from(i, used_vectors, NR_VECTORS) {
 		/* IA32_SYSCALL_VECTOR could be used in trap_init already. */
-		set_intr_gate(i, irq_entries_start +
-				8 * (i - FIRST_EXTERNAL_VECTOR));
+		set_intr_gate(i, interrupt[i - FIRST_EXTERNAL_VECTOR]);
 	}
-#ifdef CONFIG_X86_LOCAL_APIC
-	for_each_clear_bit_from(i, used_vectors, NR_VECTORS)
-		set_intr_gate(i, spurious_interrupt);
-#endif
 
-	if (!acpi_ioapic && !of_ioapic && nr_legacy_irqs())
+	if (!acpi_ioapic && !of_ioapic)
 		setup_irq(2, &irq2);
 
 #ifdef CONFIG_X86_32

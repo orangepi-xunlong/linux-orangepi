@@ -7,7 +7,6 @@
  *
  * Adjustable factor-based clock implementation
  */
-
 #ifndef __MACH_SUNXI_CLK_SUN8IW11_H
 #define __MACH_SUNXI_CLK_SUN8IW11_H
 
@@ -15,10 +14,6 @@
 #include <linux/clkdev.h>
 #include <linux/io.h>
 #include "clk-factors.h"
-
-#define IO_ADDRESS(x) (void __iomem *)(((x) & 0x0fffffff) + \
-					(((x) >> 4) & 0x0f000000) + \
-					0xf0000000)
 
 /* register list */
 #define PLL_CPU             0x0000
@@ -34,6 +29,7 @@
 #define MIPI_PLL            0x0040
 #define PLL_DE              0x0048
 #define PLL_DDR1            0x004c
+
 
 #define CPU_CFG             0x0050
 #define AHB1_CFG            0x0054
@@ -121,18 +117,31 @@
 #define BUS_RST4            0x02D8
 
 #define LOSC_CFG            0x0310
+
 #define SUNXI_CLK_MAX_REG   0x0320
 
-#define PLLCPU(n, k, m, p, freq)  {F_N8X5_K4X2_M0X2_P16x2(n, k, m, p),  freq}
-#define PLLVIDEO0(n, m, freq)     {F_N8X7_M0X4(n, m),  freq}
-#define PLLVE(n, m, freq)         {F_N8X7_M0X4(n, m),  freq}
-#define PLLDDR0(n, k, m, freq)    {F_N8X5_K4X2_M0X2(n, k, m),  freq}
-#define PLLPERIPH0(n, k, m, freq) {F_N8X5_K4X2_M0X2(n, k, m),  freq}
-#define PLLPERIPH1(n, k, m, freq) {F_N8X5_K4X2_M0X2(n, k, m),  freq}
-#define PLLVIDEO1(n, m, freq)     {F_N8X7_M0X4(n, m),  freq}
-#define PLLSATA(n, k, m, freq)    {F_N8X5_K4X2_M0X2(n, k, m),  freq}
-#define PLLGPU(n, m, freq)        {F_N8X7_M0X4(n, m),  freq}
-#define PLLDE(n, m, freq)         {F_N8X7_M0X4(n, m),  freq}
-#define PLLDDR1(n, m, freq)       {F_N8X7_M0X2(n, m),  freq}
+
+#define F_N8X7_M0X4(nv,mv) FACTOR_ALL(nv,8,7,0,0,0,mv,0,4,0,0,0,0,0,0,0,0,0)
+#define F_N8X5_K4X2(nv,kv) FACTOR_ALL(nv,8,5,kv,4,2,0,0,0,0,0,0,0,0,0,0,0,0)
+#define F_N8X7_M0X2(nv,mv) FACTOR_ALL(nv,8,7,0,0,0,mv,0,2,0,0,0,0,0,0,0,0,0)
+#define F_N8X5_K4X2_M0X2(nv,kv,mv) FACTOR_ALL(nv,8,5,kv,4,2,mv,0,2,0,0,0,0,0,0,0,0,0)
+#define F_N8X5_K4X2_M0X2_P16x2(nv,kv,mv,pv) \
+               FACTOR_ALL(nv,8,5, \
+                          kv,4,2, \
+                          mv,0,2, \
+                          pv,16,2, \
+                          0,0,0,0,0,0)
+
+#define PLLCPU(n,k,m,p,freq)    {F_N8X5_K4X2_M0X2_P16x2(n, k, m, p),  freq}
+#define PLLVIDEO0(n,m,freq)     {F_N8X7_M0X4( n, m),  freq}
+#define PLLVE(n,m,freq)         {F_N8X7_M0X4( n, m),  freq}
+#define PLLDDR0(n,k,m,freq)     {F_N8X5_K4X2_M0X2( n, k, m),  freq}
+#define PLLPERIPH0(n,k,m,freq)  {F_N8X5_K4X2_M0X2( n, k, m),  freq}
+#define PLLPERIPH1(n,k,m,freq)  {F_N8X5_K4X2_M0X2( n, k, m),  freq}
+#define PLLVIDEO1(n,m,freq)     {F_N8X7_M0X4( n, m),  freq}
+#define PLLSATA(n,k,m,freq)     {F_N8X5_K4X2_M0X2( n, k, m),  freq}
+#define PLLGPU(n,m,freq)        {F_N8X7_M0X4( n, m),  freq}
+#define PLLDE(n,m,freq)         {F_N8X7_M0X4( n, m),  freq}
+#define PLLDDR1(n,m,freq)       {F_N8X7_M0X2(n,m),  freq}
 
 #endif

@@ -19,7 +19,12 @@ distribution when not linked into another program.)
 This file is distributed in the hope that it will be useful, but
 WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-General Public License for more details. */
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; see the file COPYING.  If not, write to
+the Free Software Foundation, 59 Temple Place - Suite 330,
+Boston, MA 02111-1307, USA.  */
 
 /* As a special exception, if you link this library with files
    compiled with GCC to produce an executable, this does not cause
@@ -32,8 +37,6 @@ General Public License for more details. */
    Some of this code comes from MINIX, via the folks at ericsson.
    D. V. Henkel-Wallace (gumby@cygnus.com) Fete Bastille, 1992
 */
-
-#include <asm/export.h>
 
 /* These are predefined by new versions of GNU cpp.  */
 
@@ -120,4 +123,3 @@ L2:	movel	d1, sp@-
 L3:	movel	sp@+, d2
 	rts
 
-	EXPORT_SYMBOL(__divsi3)

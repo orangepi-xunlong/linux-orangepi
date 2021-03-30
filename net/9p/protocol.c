@@ -33,7 +33,6 @@
 #include <linux/sched.h>
 #include <linux/stddef.h>
 #include <linux/types.h>
-#include <linux/uio.h>
 #include <net/9p/9p.h>
 #include <net/9p/client.h>
 #include "protocol.h"
@@ -46,15 +45,10 @@ p9pdu_writef(struct p9_fcall *pdu, int proto_version, const char *fmt, ...);
 void p9stat_free(struct p9_wstat *stbuf)
 {
 	kfree(stbuf->name);
-	stbuf->name = NULL;
 	kfree(stbuf->uid);
-	stbuf->uid = NULL;
 	kfree(stbuf->gid);
-	stbuf->gid = NULL;
 	kfree(stbuf->muid);
-	stbuf->muid = NULL;
 	kfree(stbuf->extension);
-	stbuf->extension = NULL;
 }
 EXPORT_SYMBOL(p9stat_free);
 
@@ -75,11 +69,10 @@ static size_t pdu_write(struct p9_fcall *pdu, const void *data, size_t size)
 }
 
 static size_t
-pdu_write_u(struct p9_fcall *pdu, struct iov_iter *from, size_t size)
+pdu_write_u(struct p9_fcall *pdu, const char __user *udata, size_t size)
 {
 	size_t len = min(pdu->capacity - pdu->size, size);
-	struct iov_iter i = *from;
-	if (copy_from_iter(&pdu->sdata[pdu->size], len, &i) != len)
+	if (copy_from_user(&pdu->sdata[pdu->size], udata, len))
 		len = 0;
 
 	pdu->size += len;
@@ -280,7 +273,7 @@ p9pdu_vreadf(struct p9_fcall *pdu, int proto_version, const char *fmt,
 			}
 			break;
 		case 'R':{
-				uint16_t *nwqid = va_arg(ap, uint16_t *);
+				int16_t *nwqid = va_arg(ap, int16_t *);
 				struct p9_qid **wqids =
 				    va_arg(ap, struct p9_qid **);
 
@@ -444,13 +437,23 @@ p9pdu_vwritef(struct p9_fcall *pdu, int proto_version, const char *fmt,
 						 stbuf->extension, stbuf->n_uid,
 						 stbuf->n_gid, stbuf->n_muid);
 			} break;
-		case 'V':{
+		case 'D':{
 				uint32_t count = va_arg(ap, uint32_t);
-				struct iov_iter *from =
-						va_arg(ap, struct iov_iter *);
+				const void *data = va_arg(ap, const void *);
+
 				errcode = p9pdu_writef(pdu, proto_version, "d",
 									count);
-				if (!errcode && pdu_write_u(pdu, from, count))
+				if (!errcode && pdu_write(pdu, data, count))
+					errcode = -EFAULT;
+			}
+			break;
+		case 'U':{
+				int32_t count = va_arg(ap, int32_t);
+				const char __user *udata =
+						va_arg(ap, const void __user *);
+				errcode = p9pdu_writef(pdu, proto_version, "d",
+									count);
+				if (!errcode && pdu_write_u(pdu, udata, count))
 					errcode = -EFAULT;
 			}
 			break;
@@ -476,7 +479,7 @@ p9pdu_vwritef(struct p9_fcall *pdu, int proto_version, const char *fmt,
 			}
 			break;
 		case 'R':{
-				uint16_t nwqid = va_arg(ap, int);
+				int16_t nwqid = va_arg(ap, int);
 				struct p9_qid *wqids =
 				    va_arg(ap, struct p9_qid *);
 
@@ -570,10 +573,9 @@ int p9stat_read(struct p9_client *clnt, char *buf, int len, struct p9_wstat *st)
 	if (ret) {
 		p9_debug(P9_DEBUG_9P, "<<< p9stat_read failed: %d\n", ret);
 		trace_9p_protocol_dump(clnt, &fake_pdu);
-		return ret;
 	}
 
-	return fake_pdu.offset;
+	return ret;
 }
 EXPORT_SYMBOL(p9stat_read);
 

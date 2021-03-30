@@ -25,7 +25,7 @@ static int max7301_spi_write(struct device *dev, unsigned int reg,
 	struct spi_device *spi = to_spi_device(dev);
 	u16 word = ((reg & 0x7F) << 8) | (val & 0xFF);
 
-	return spi_write_then_read(spi, &word, sizeof(word), NULL, 0);
+	return spi_write(spi, (const u8 *)&word, sizeof(word));
 }
 
 /* A read from the MAX7301 means two transfers; here, one message each */
@@ -37,8 +37,14 @@ static int max7301_spi_read(struct device *dev, unsigned int reg)
 	struct spi_device *spi = to_spi_device(dev);
 
 	word = 0x8000 | (reg << 8);
-	ret = spi_write_then_read(spi, &word, sizeof(word), &word,
-				  sizeof(word));
+	ret = spi_write(spi, (const u8 *)&word, sizeof(word));
+	if (ret)
+		return ret;
+	/*
+	 * This relies on the fact, that a transfer with NULL tx_buf shifts out
+	 * zero bytes (=NOOP for MAX7301)
+	 */
+	ret = spi_read(spi, (u8 *)&word, sizeof(word));
 	if (ret)
 		return ret;
 	return word & 0xff;
@@ -50,7 +56,8 @@ static int max7301_probe(struct spi_device *spi)
 	int ret;
 
 	/* bits_per_word cannot be configured in platform data */
-	spi->bits_per_word = 16;
+	if (spi->dev.platform_data)
+		spi->bits_per_word = 16;
 	ret = spi_setup(spi);
 	if (ret < 0)
 		return ret;
@@ -81,6 +88,7 @@ MODULE_DEVICE_TABLE(spi, max7301_id);
 static struct spi_driver max7301_driver = {
 	.driver = {
 		.name = "max7301",
+		.owner = THIS_MODULE,
 	},
 	.probe = max7301_probe,
 	.remove = max7301_remove,

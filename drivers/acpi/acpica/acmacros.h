@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2013, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -63,11 +63,18 @@
 #define ACPI_SET64(ptr, val)            (*ACPI_CAST64 (ptr) = (u64) (val))
 
 /*
- * printf() format helper. This macros is a workaround for the difficulties
- * with emitting 64-bit integers and 64-bit pointers with the same code
- * for both 32-bit and 64-bit hosts.
+ * printf() format helpers
  */
+
+/* Split 64-bit integer into two 32-bit values. Use with %8.8X%8.8X */
+
 #define ACPI_FORMAT_UINT64(i)           ACPI_HIDWORD(i), ACPI_LODWORD(i)
+
+#if ACPI_MACHINE_WIDTH == 64
+#define ACPI_FORMAT_NATIVE_UINT(i)      ACPI_FORMAT_UINT64(i)
+#else
+#define ACPI_FORMAT_NATIVE_UINT(i)      0, (i)
+#endif
 
 /*
  * Macros for moving data around to/from buffers that are possibly unaligned.
@@ -220,15 +227,6 @@
 #define ACPI_MUL_32(a)                  _ACPI_MUL(a, 5)
 #define ACPI_MOD_32(a)                  _ACPI_MOD(a, 32)
 
-/* Test for ASCII character */
-
-#define ACPI_IS_ASCII(c)                ((c) < 0x80)
-
-/* Signed integers */
-
-#define ACPI_SIGN_POSITIVE              0
-#define ACPI_SIGN_NEGATIVE              1
-
 /*
  * Rounding macros (Power of two boundaries only)
  */
@@ -260,31 +258,14 @@
 
 #define ACPI_IS_MISALIGNED(value)           (((acpi_size) value) & (sizeof(acpi_size)-1))
 
-/* Generic (power-of-two) rounding */
-
-#define ACPI_IS_ALIGNED(a, s)               (((a) & ((s) - 1)) == 0)
-#define ACPI_IS_POWER_OF_TWO(a)             ACPI_IS_ALIGNED(a, a)
-
 /*
  * Bitmask creation
  * Bit positions start at zero.
  * MASK_BITS_ABOVE creates a mask starting AT the position and above
  * MASK_BITS_BELOW creates a mask starting one bit BELOW the position
- * MASK_BITS_ABOVE/BELOW accpets a bit offset to create a mask
- * MASK_BITS_ABOVE/BELOW_32/64 accpets a bit width to create a mask
- * Note: The ACPI_INTEGER_BIT_SIZE check is used to bypass compiler
- * differences with the shift operator
  */
 #define ACPI_MASK_BITS_ABOVE(position)      (~((ACPI_UINT64_MAX) << ((u32) (position))))
 #define ACPI_MASK_BITS_BELOW(position)      ((ACPI_UINT64_MAX) << ((u32) (position)))
-#define ACPI_MASK_BITS_ABOVE_32(width)      ((u32) ACPI_MASK_BITS_ABOVE(width))
-#define ACPI_MASK_BITS_BELOW_32(width)      ((u32) ACPI_MASK_BITS_BELOW(width))
-#define ACPI_MASK_BITS_ABOVE_64(width)      ((width) == ACPI_INTEGER_BIT_SIZE ? \
-												ACPI_UINT64_MAX : \
-												ACPI_MASK_BITS_ABOVE(width))
-#define ACPI_MASK_BITS_BELOW_64(width)      ((width) == ACPI_INTEGER_BIT_SIZE ? \
-												(u64) 0 : \
-												ACPI_MASK_BITS_BELOW(width))
 
 /* Bitfields within ACPI registers */
 
@@ -300,10 +281,10 @@
 /* Generic bitfield macros and masks */
 
 #define ACPI_GET_BITS(source_ptr, position, mask) \
-	((*(source_ptr) >> (position)) & (mask))
+	((*source_ptr >> position) & mask)
 
 #define ACPI_SET_BITS(target_ptr, position, mask, value) \
-	(*(target_ptr) |= (((value) & (mask)) << (position)))
+	(*target_ptr |= ((value & mask) << position))
 
 #define ACPI_1BIT_MASK      0x00000001
 #define ACPI_2BIT_MASK      0x00000003
@@ -393,11 +374,10 @@
  * the plist contains a set of parens to allow variable-length lists.
  * These macros are used for both the debug and non-debug versions of the code.
  */
-#define ACPI_ERROR_NAMESPACE(s, e)          acpi_ut_namespace_error (AE_INFO, s, e);
-#define ACPI_ERROR_METHOD(s, n, p, e)       acpi_ut_method_error (AE_INFO, s, n, p, e);
-#define ACPI_WARN_PREDEFINED(plist)         acpi_ut_predefined_warning plist
-#define ACPI_INFO_PREDEFINED(plist)         acpi_ut_predefined_info plist
-#define ACPI_BIOS_ERROR_PREDEFINED(plist)   acpi_ut_predefined_bios_error plist
+#define ACPI_ERROR_NAMESPACE(s, e)      acpi_ut_namespace_error (AE_INFO, s, e);
+#define ACPI_ERROR_METHOD(s, n, p, e)   acpi_ut_method_error (AE_INFO, s, n, p, e);
+#define ACPI_WARN_PREDEFINED(plist)     acpi_ut_predefined_warning plist
+#define ACPI_INFO_PREDEFINED(plist)     acpi_ut_predefined_info plist
 
 #else
 
@@ -407,7 +387,6 @@
 #define ACPI_ERROR_METHOD(s, n, p, e)
 #define ACPI_WARN_PREDEFINED(plist)
 #define ACPI_INFO_PREDEFINED(plist)
-#define ACPI_BIOS_ERROR_PREDEFINED(plist)
 
 #endif				/* ACPI_NO_ERROR_MESSAGES */
 
@@ -416,6 +395,48 @@
 #else
 #define ACPI_HW_OPTIONAL_FUNCTION(addr)     NULL
 #endif
+
+/*
+ * Some code only gets executed when the debugger is built in.
+ * Note that this is entirely independent of whether the
+ * DEBUG_PRINT stuff (set by ACPI_DEBUG_OUTPUT) is on, or not.
+ */
+#ifdef ACPI_DEBUGGER
+#define ACPI_DEBUGGER_EXEC(a)           a
+#else
+#define ACPI_DEBUGGER_EXEC(a)
+#endif
+
+/*
+ * Memory allocation tracking (DEBUG ONLY)
+ */
+#define ACPI_MEM_PARAMETERS         _COMPONENT, _acpi_module_name, __LINE__
+
+#ifndef ACPI_DBG_TRACK_ALLOCATIONS
+
+/* Memory allocation */
+
+#ifndef ACPI_ALLOCATE
+#define ACPI_ALLOCATE(a)            acpi_ut_allocate((acpi_size) (a), ACPI_MEM_PARAMETERS)
+#endif
+#ifndef ACPI_ALLOCATE_ZEROED
+#define ACPI_ALLOCATE_ZEROED(a)     acpi_ut_allocate_zeroed((acpi_size) (a), ACPI_MEM_PARAMETERS)
+#endif
+#ifndef ACPI_FREE
+#define ACPI_FREE(a)                acpi_os_free(a)
+#endif
+#define ACPI_MEM_TRACKING(a)
+
+#else
+
+/* Memory allocation */
+
+#define ACPI_ALLOCATE(a)            acpi_ut_allocate_and_track((acpi_size) (a), ACPI_MEM_PARAMETERS)
+#define ACPI_ALLOCATE_ZEROED(a)     acpi_ut_allocate_zeroed_and_track((acpi_size) (a), ACPI_MEM_PARAMETERS)
+#define ACPI_FREE(a)                acpi_ut_free_and_track(a, ACPI_MEM_PARAMETERS)
+#define ACPI_MEM_TRACKING(a)        a
+
+#endif				/* ACPI_DBG_TRACK_ALLOCATIONS */
 
 /*
  * Macros used for ACPICA utilities only

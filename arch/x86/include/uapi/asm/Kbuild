@@ -22,7 +22,6 @@ header-y += ipcbuf.h
 header-y += ist.h
 header-y += kvm.h
 header-y += kvm_para.h
-header-y += kvm_perf.h
 header-y += ldt.h
 header-y += mce.h
 header-y += mman.h

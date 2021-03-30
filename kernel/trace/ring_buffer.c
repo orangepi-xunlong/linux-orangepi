@@ -3,12 +3,13 @@
  *
  * Copyright (C) 2008 Steven Rostedt <srostedt@redhat.com>
  */
-#include <linux/trace_events.h>
+#include <linux/ftrace_event.h>
 #include <linux/ring_buffer.h>
 #include <linux/trace_clock.h>
 #include <linux/trace_seq.h>
 #include <linux/spinlock.h>
 #include <linux/irq_work.h>
+#include <linux/debugfs.h>
 #include <linux/uaccess.h>
 #include <linux/hardirq.h>
 #include <linux/kthread.h>	/* for self test */
@@ -22,6 +23,7 @@
 #include <linux/hash.h>
 #include <linux/list.h>
 #include <linux/cpu.h>
+#include <linux/fs.h>
 
 #include <asm/local.h>
 
@@ -32,19 +34,21 @@ static void update_pages_handler(struct work_struct *work);
  */
 int ring_buffer_print_entry_header(struct trace_seq *s)
 {
-	trace_seq_puts(s, "# compressed entry header\n");
-	trace_seq_puts(s, "\ttype_len    :    5 bits\n");
-	trace_seq_puts(s, "\ttime_delta  :   27 bits\n");
-	trace_seq_puts(s, "\tarray       :   32 bits\n");
-	trace_seq_putc(s, '\n');
-	trace_seq_printf(s, "\tpadding     : type == %d\n",
-			 RINGBUF_TYPE_PADDING);
-	trace_seq_printf(s, "\ttime_extend : type == %d\n",
-			 RINGBUF_TYPE_TIME_EXTEND);
-	trace_seq_printf(s, "\tdata max type_len  == %d\n",
-			 RINGBUF_TYPE_DATA_TYPE_LEN_MAX);
+	int ret;
 
-	return !trace_seq_has_overflowed(s);
+	ret = trace_seq_printf(s, "# compressed entry header\n");
+	ret = trace_seq_printf(s, "\ttype_len    :    5 bits\n");
+	ret = trace_seq_printf(s, "\ttime_delta  :   27 bits\n");
+	ret = trace_seq_printf(s, "\tarray       :   32 bits\n");
+	ret = trace_seq_printf(s, "\n");
+	ret = trace_seq_printf(s, "\tpadding     : type == %d\n",
+			       RINGBUF_TYPE_PADDING);
+	ret = trace_seq_printf(s, "\ttime_extend : type == %d\n",
+			       RINGBUF_TYPE_TIME_EXTEND);
+	ret = trace_seq_printf(s, "\tdata max type_len  == %d\n",
+			       RINGBUF_TYPE_DATA_TYPE_LEN_MAX);
+
+	return ret;
 }
 
 /*
@@ -115,10 +119,62 @@ int ring_buffer_print_entry_header(struct trace_seq *s)
  *
  */
 
+/*
+ * A fast way to enable or disable all ring buffers is to
+ * call tracing_on or tracing_off. Turning off the ring buffers
+ * prevents all ring buffers from being recorded to.
+ * Turning this switch on, makes it OK to write to the
+ * ring buffer, if the ring buffer is enabled itself.
+ *
+ * There's three layers that must be on in order to write
+ * to the ring buffer.
+ *
+ * 1) This global flag must be set.
+ * 2) The ring buffer must be enabled for recording.
+ * 3) The per cpu buffer must be enabled for recording.
+ *
+ * In case of an anomaly, this global flag has a bit set that
+ * will permantly disable all ring buffers.
+ */
+
+/*
+ * Global flag to disable all recording to ring buffers
+ *  This has two bits: ON, DISABLED
+ *
+ *  ON   DISABLED
+ * ---- ----------
+ *   0      0        : ring buffers are off
+ *   1      0        : ring buffers are on
+ *   X      1        : ring buffers are permanently disabled
+ */
+
+enum {
+	RB_BUFFERS_ON_BIT	= 0,
+	RB_BUFFERS_DISABLED_BIT	= 1,
+};
+
+enum {
+	RB_BUFFERS_ON		= 1 << RB_BUFFERS_ON_BIT,
+	RB_BUFFERS_DISABLED	= 1 << RB_BUFFERS_DISABLED_BIT,
+};
+
+static unsigned long ring_buffer_flags __read_mostly = RB_BUFFERS_ON;
+
 /* Used for individual buffers (after the counter) */
 #define RB_BUFFER_OFF		(1 << 20)
 
 #define BUF_PAGE_HDR_SIZE offsetof(struct buffer_data_page, data)
+
+/**
+ * tracing_off_permanent - permanently disable ring buffers
+ *
+ * This function, once called, will disable all ring buffers
+ * permanently.
+ */
+void tracing_off_permanent(void)
+{
+	set_bit(RB_BUFFERS_DISABLED_BIT, &ring_buffer_flags);
+}
 
 #define RB_EVNT_HDR_SIZE (offsetof(struct ring_buffer_event, array))
 #define RB_ALIGNMENT		4U
@@ -280,8 +336,6 @@ EXPORT_SYMBOL_GPL(ring_buffer_event_data);
 /* Missed count stored at end */
 #define RB_MISSED_STORED	(1 << 30)
 
-#define RB_MISSED_FLAGS		(RB_MISSED_EVENTS|RB_MISSED_STORED)
-
 struct buffer_data_page {
 	u64		 time_stamp;	/* page time stamp */
 	local_t		 commit;	/* write committed index */
@@ -333,9 +387,7 @@ static void rb_init_page(struct buffer_data_page *bpage)
  */
 size_t ring_buffer_page_len(void *page)
 {
-	struct buffer_data_page *bpage = page;
-
-	return (local_read(&bpage->commit) & ~RB_MISSED_FLAGS)
+	return local_read(&((struct buffer_data_page *)page)->commit)
 		+ BUF_PAGE_HDR_SIZE;
 }
 
@@ -367,68 +419,38 @@ static inline int test_time_stamp(u64 delta)
 int ring_buffer_print_page_header(struct trace_seq *s)
 {
 	struct buffer_data_page field;
+	int ret;
 
-	trace_seq_printf(s, "\tfield: u64 timestamp;\t"
-			 "offset:0;\tsize:%u;\tsigned:%u;\n",
-			 (unsigned int)sizeof(field.time_stamp),
-			 (unsigned int)is_signed_type(u64));
+	ret = trace_seq_printf(s, "\tfield: u64 timestamp;\t"
+			       "offset:0;\tsize:%u;\tsigned:%u;\n",
+			       (unsigned int)sizeof(field.time_stamp),
+			       (unsigned int)is_signed_type(u64));
 
-	trace_seq_printf(s, "\tfield: local_t commit;\t"
-			 "offset:%u;\tsize:%u;\tsigned:%u;\n",
-			 (unsigned int)offsetof(typeof(field), commit),
-			 (unsigned int)sizeof(field.commit),
-			 (unsigned int)is_signed_type(long));
+	ret = trace_seq_printf(s, "\tfield: local_t commit;\t"
+			       "offset:%u;\tsize:%u;\tsigned:%u;\n",
+			       (unsigned int)offsetof(typeof(field), commit),
+			       (unsigned int)sizeof(field.commit),
+			       (unsigned int)is_signed_type(long));
 
-	trace_seq_printf(s, "\tfield: int overwrite;\t"
-			 "offset:%u;\tsize:%u;\tsigned:%u;\n",
-			 (unsigned int)offsetof(typeof(field), commit),
-			 1,
-			 (unsigned int)is_signed_type(long));
+	ret = trace_seq_printf(s, "\tfield: int overwrite;\t"
+			       "offset:%u;\tsize:%u;\tsigned:%u;\n",
+			       (unsigned int)offsetof(typeof(field), commit),
+			       1,
+			       (unsigned int)is_signed_type(long));
 
-	trace_seq_printf(s, "\tfield: char data;\t"
-			 "offset:%u;\tsize:%u;\tsigned:%u;\n",
-			 (unsigned int)offsetof(typeof(field), data),
-			 (unsigned int)BUF_PAGE_SIZE,
-			 (unsigned int)is_signed_type(char));
+	ret = trace_seq_printf(s, "\tfield: char data;\t"
+			       "offset:%u;\tsize:%u;\tsigned:%u;\n",
+			       (unsigned int)offsetof(typeof(field), data),
+			       (unsigned int)BUF_PAGE_SIZE,
+			       (unsigned int)is_signed_type(char));
 
-	return !trace_seq_has_overflowed(s);
+	return ret;
 }
 
 struct rb_irq_work {
 	struct irq_work			work;
 	wait_queue_head_t		waiters;
-	wait_queue_head_t		full_waiters;
 	bool				waiters_pending;
-	bool				full_waiters_pending;
-	bool				wakeup_full;
-};
-
-/*
- * Structure to hold event state and handle nested events.
- */
-struct rb_event_info {
-	u64			ts;
-	u64			delta;
-	unsigned long		length;
-	struct buffer_page	*tail_page;
-	int			add_timestamp;
-};
-
-/*
- * Used for which event context the event is in.
- *  NMI     = 0
- *  IRQ     = 1
- *  SOFTIRQ = 2
- *  NORMAL  = 3
- *
- * See trace_recursive_lock() comment below for more details.
- */
-enum {
-	RB_CTX_NMI,
-	RB_CTX_IRQ,
-	RB_CTX_SOFTIRQ,
-	RB_CTX_NORMAL,
-	RB_CTX_MAX
 };
 
 /*
@@ -441,8 +463,7 @@ struct ring_buffer_per_cpu {
 	raw_spinlock_t			reader_lock;	/* serialize readers */
 	arch_spinlock_t			lock;
 	struct lock_class_key		lock_key;
-	unsigned long			nr_pages;
-	unsigned int			current_context;
+	unsigned int			nr_pages;
 	struct list_head		*pages;
 	struct buffer_page		*head_page;	/* read from head */
 	struct buffer_page		*tail_page;	/* write to tail */
@@ -462,7 +483,7 @@ struct ring_buffer_per_cpu {
 	u64				write_stamp;
 	u64				read_stamp;
 	/* ring buffer pages to update, > 0 to add, < 0 to remove */
-	long				nr_pages_to_update;
+	int				nr_pages_to_update;
 	struct list_head		new_pages; /* new pages to add */
 	struct work_struct		update_pages_work;
 	struct completion		update_done;
@@ -511,39 +532,31 @@ static void rb_wake_up_waiters(struct irq_work *work)
 	struct rb_irq_work *rbwork = container_of(work, struct rb_irq_work, work);
 
 	wake_up_all(&rbwork->waiters);
-	if (rbwork->wakeup_full) {
-		rbwork->wakeup_full = false;
-		wake_up_all(&rbwork->full_waiters);
-	}
 }
 
 /**
  * ring_buffer_wait - wait for input to the ring buffer
  * @buffer: buffer to wait on
  * @cpu: the cpu buffer to wait on
- * @full: wait until a full page is available, if @cpu != RING_BUFFER_ALL_CPUS
  *
  * If @cpu == RING_BUFFER_ALL_CPUS then the task will wake up as soon
  * as data is added to any of the @buffer's cpu buffers. Otherwise
  * it will wait for data to be added to a specific cpu buffer.
  */
-int ring_buffer_wait(struct ring_buffer *buffer, int cpu, bool full)
+int ring_buffer_wait(struct ring_buffer *buffer, int cpu)
 {
-	struct ring_buffer_per_cpu *uninitialized_var(cpu_buffer);
+	struct ring_buffer_per_cpu *cpu_buffer;
 	DEFINE_WAIT(wait);
 	struct rb_irq_work *work;
-	int ret = 0;
 
 	/*
 	 * Depending on what the caller is waiting for, either any
 	 * data in any cpu buffer, or a specific buffer, put the
 	 * caller on the appropriate wait queue.
 	 */
-	if (cpu == RING_BUFFER_ALL_CPUS) {
+	if (cpu == RING_BUFFER_ALL_CPUS)
 		work = &buffer->irq_work;
-		/* Full only makes sense on per cpu reads */
-		full = false;
-	} else {
+	else {
 		if (!cpumask_test_cpu(cpu, buffer->cpumask))
 			return -ENODEV;
 		cpu_buffer = buffer->buffers[cpu];
@@ -551,70 +564,36 @@ int ring_buffer_wait(struct ring_buffer *buffer, int cpu, bool full)
 	}
 
 
-	while (true) {
-		if (full)
-			prepare_to_wait(&work->full_waiters, &wait, TASK_INTERRUPTIBLE);
-		else
-			prepare_to_wait(&work->waiters, &wait, TASK_INTERRUPTIBLE);
+	prepare_to_wait(&work->waiters, &wait, TASK_INTERRUPTIBLE);
 
-		/*
-		 * The events can happen in critical sections where
-		 * checking a work queue can cause deadlocks.
-		 * After adding a task to the queue, this flag is set
-		 * only to notify events to try to wake up the queue
-		 * using irq_work.
-		 *
-		 * We don't clear it even if the buffer is no longer
-		 * empty. The flag only causes the next event to run
-		 * irq_work to do the work queue wake up. The worse
-		 * that can happen if we race with !trace_empty() is that
-		 * an event will cause an irq_work to try to wake up
-		 * an empty queue.
-		 *
-		 * There's no reason to protect this flag either, as
-		 * the work queue and irq_work logic will do the necessary
-		 * synchronization for the wake ups. The only thing
-		 * that is necessary is that the wake up happens after
-		 * a task has been queued. It's OK for spurious wake ups.
-		 */
-		if (full)
-			work->full_waiters_pending = true;
-		else
-			work->waiters_pending = true;
+	/*
+	 * The events can happen in critical sections where
+	 * checking a work queue can cause deadlocks.
+	 * After adding a task to the queue, this flag is set
+	 * only to notify events to try to wake up the queue
+	 * using irq_work.
+	 *
+	 * We don't clear it even if the buffer is no longer
+	 * empty. The flag only causes the next event to run
+	 * irq_work to do the work queue wake up. The worse
+	 * that can happen if we race with !trace_empty() is that
+	 * an event will cause an irq_work to try to wake up
+	 * an empty queue.
+	 *
+	 * There's no reason to protect this flag either, as
+	 * the work queue and irq_work logic will do the necessary
+	 * synchronization for the wake ups. The only thing
+	 * that is necessary is that the wake up happens after
+	 * a task has been queued. It's OK for spurious wake ups.
+	 */
+	work->waiters_pending = true;
 
-		if (signal_pending(current)) {
-			ret = -EINTR;
-			break;
-		}
-
-		if (cpu == RING_BUFFER_ALL_CPUS && !ring_buffer_empty(buffer))
-			break;
-
-		if (cpu != RING_BUFFER_ALL_CPUS &&
-		    !ring_buffer_empty_cpu(buffer, cpu)) {
-			unsigned long flags;
-			bool pagebusy;
-
-			if (!full)
-				break;
-
-			raw_spin_lock_irqsave(&cpu_buffer->reader_lock, flags);
-			pagebusy = cpu_buffer->reader_page == cpu_buffer->commit_page;
-			raw_spin_unlock_irqrestore(&cpu_buffer->reader_lock, flags);
-
-			if (!pagebusy)
-				break;
-		}
-
+	if ((cpu == RING_BUFFER_ALL_CPUS && ring_buffer_empty(buffer)) ||
+	    (cpu != RING_BUFFER_ALL_CPUS && ring_buffer_empty_cpu(buffer, cpu)))
 		schedule();
-	}
 
-	if (full)
-		finish_wait(&work->full_waiters, &wait);
-	else
-		finish_wait(&work->waiters, &wait);
-
-	return ret;
+	finish_wait(&work->waiters, &wait);
+	return 0;
 }
 
 /**
@@ -833,7 +812,7 @@ rb_is_head_page(struct ring_buffer_per_cpu *cpu_buffer,
  * writer is ever on it, the previous pointer never points
  * back to the reader page.
  */
-static bool rb_is_reader_page(struct buffer_page *page)
+static int rb_is_reader_page(struct buffer_page *page)
 {
 	struct list_head *list = page->list.prev;
 
@@ -1005,13 +984,17 @@ static int rb_head_page_replace(struct buffer_page *old,
 
 /*
  * rb_tail_page_update - move the tail page forward
+ *
+ * Returns 1 if moved tail page, 0 if someone else did.
  */
-static void rb_tail_page_update(struct ring_buffer_per_cpu *cpu_buffer,
+static int rb_tail_page_update(struct ring_buffer_per_cpu *cpu_buffer,
 			       struct buffer_page *tail_page,
 			       struct buffer_page *next_page)
 {
+	struct buffer_page *old_tail;
 	unsigned long old_entries;
 	unsigned long old_write;
+	int ret = 0;
 
 	/*
 	 * The tail page now needs to be moved forward.
@@ -1036,7 +1019,7 @@ static void rb_tail_page_update(struct ring_buffer_per_cpu *cpu_buffer,
 	 * it is, then it is up to us to update the tail
 	 * pointer.
 	 */
-	if (tail_page == READ_ONCE(cpu_buffer->tail_page)) {
+	if (tail_page == cpu_buffer->tail_page) {
 		/* Zero the write counter */
 		unsigned long val = old_write & ~RB_WRITE_MASK;
 		unsigned long eval = old_entries & ~RB_WRITE_MASK;
@@ -1061,9 +1044,14 @@ static void rb_tail_page_update(struct ring_buffer_per_cpu *cpu_buffer,
 		 */
 		local_set(&next_page->page->commit, 0);
 
-		/* Again, either we update tail_page or an interrupt does */
-		(void)cmpxchg(&cpu_buffer->tail_page, tail_page, next_page);
+		old_tail = cmpxchg(&cpu_buffer->tail_page,
+				   tail_page, next_page);
+
+		if (old_tail == tail_page)
+			ret = 1;
 	}
+
+	return ret;
 }
 
 static int rb_check_bpage(struct ring_buffer_per_cpu *cpu_buffer,
@@ -1091,7 +1079,7 @@ static int rb_check_list(struct ring_buffer_per_cpu *cpu_buffer,
 }
 
 /**
- * rb_check_pages - integrity check of buffer pages
+ * check_pages - integrity check of buffer pages
  * @cpu_buffer: CPU buffer with pages to test
  *
  * As a safety measure we check to make sure the data pages have not
@@ -1132,10 +1120,10 @@ static int rb_check_pages(struct ring_buffer_per_cpu *cpu_buffer)
 	return 0;
 }
 
-static int __rb_allocate_pages(long nr_pages, struct list_head *pages, int cpu)
+static int __rb_allocate_pages(int nr_pages, struct list_head *pages, int cpu)
 {
+	int i;
 	struct buffer_page *bpage, *tmp;
-	long i;
 
 	for (i = 0; i < nr_pages; i++) {
 		struct page *page;
@@ -1172,7 +1160,7 @@ free_pages:
 }
 
 static int rb_allocate_pages(struct ring_buffer_per_cpu *cpu_buffer,
-			     unsigned long nr_pages)
+			     unsigned nr_pages)
 {
 	LIST_HEAD(pages);
 
@@ -1197,7 +1185,7 @@ static int rb_allocate_pages(struct ring_buffer_per_cpu *cpu_buffer,
 }
 
 static struct ring_buffer_per_cpu *
-rb_allocate_cpu_buffer(struct ring_buffer *buffer, long nr_pages, int cpu)
+rb_allocate_cpu_buffer(struct ring_buffer *buffer, int nr_pages, int cpu)
 {
 	struct ring_buffer_per_cpu *cpu_buffer;
 	struct buffer_page *bpage;
@@ -1218,7 +1206,6 @@ rb_allocate_cpu_buffer(struct ring_buffer *buffer, long nr_pages, int cpu)
 	init_completion(&cpu_buffer->update_done);
 	init_irq_work(&cpu_buffer->irq_work.work, rb_wake_up_waiters);
 	init_waitqueue_head(&cpu_buffer->irq_work.waiters);
-	init_waitqueue_head(&cpu_buffer->irq_work.full_waiters);
 
 	bpage = kzalloc_node(ALIGN(sizeof(*bpage), cache_line_size()),
 			    GFP_KERNEL, cpu_to_node(cpu));
@@ -1284,7 +1271,7 @@ static int rb_cpu_notify(struct notifier_block *self,
 #endif
 
 /**
- * __ring_buffer_alloc - allocate a new ring_buffer
+ * ring_buffer_alloc - allocate a new ring_buffer
  * @size: the size in bytes per cpu that is needed.
  * @flags: attributes to set for the ring buffer.
  *
@@ -1297,9 +1284,8 @@ struct ring_buffer *__ring_buffer_alloc(unsigned long size, unsigned flags,
 					struct lock_class_key *key)
 {
 	struct ring_buffer *buffer;
-	long nr_pages;
 	int bsize;
-	int cpu;
+	int cpu, nr_pages;
 
 	/* keep it in its own cache line */
 	buffer = kzalloc(ALIGN(sizeof(*buffer), cache_line_size()),
@@ -1328,7 +1314,7 @@ struct ring_buffer *__ring_buffer_alloc(unsigned long size, unsigned flags,
 	 * In that off case, we need to allocate for all possible cpus.
 	 */
 #ifdef CONFIG_HOTPLUG_CPU
-	cpu_notifier_register_begin();
+	get_online_cpus();
 	cpumask_copy(buffer->cpumask, cpu_online_mask);
 #else
 	cpumask_copy(buffer->cpumask, cpu_possible_mask);
@@ -1351,10 +1337,10 @@ struct ring_buffer *__ring_buffer_alloc(unsigned long size, unsigned flags,
 #ifdef CONFIG_HOTPLUG_CPU
 	buffer->cpu_notify.notifier_call = rb_cpu_notify;
 	buffer->cpu_notify.priority = 0;
-	__register_cpu_notifier(&buffer->cpu_notify);
-	cpu_notifier_register_done();
+	register_cpu_notifier(&buffer->cpu_notify);
 #endif
 
+	put_online_cpus();
 	mutex_init(&buffer->mutex);
 
 	return buffer;
@@ -1368,9 +1354,7 @@ struct ring_buffer *__ring_buffer_alloc(unsigned long size, unsigned flags,
 
  fail_free_cpumask:
 	free_cpumask_var(buffer->cpumask);
-#ifdef CONFIG_HOTPLUG_CPU
-	cpu_notifier_register_done();
-#endif
+	put_online_cpus();
 
  fail_free_buffer:
 	kfree(buffer);
@@ -1387,17 +1371,16 @@ ring_buffer_free(struct ring_buffer *buffer)
 {
 	int cpu;
 
+	get_online_cpus();
+
 #ifdef CONFIG_HOTPLUG_CPU
-	cpu_notifier_register_begin();
-	__unregister_cpu_notifier(&buffer->cpu_notify);
+	unregister_cpu_notifier(&buffer->cpu_notify);
 #endif
 
 	for_each_buffer_cpu(buffer, cpu)
 		rb_free_cpu_buffer(buffer->buffers[cpu]);
 
-#ifdef CONFIG_HOTPLUG_CPU
-	cpu_notifier_register_done();
-#endif
+	put_online_cpus();
 
 	kfree(buffer->buffers);
 	free_cpumask_var(buffer->cpumask);
@@ -1425,12 +1408,12 @@ static inline unsigned long rb_page_write(struct buffer_page *bpage)
 }
 
 static int
-rb_remove_pages(struct ring_buffer_per_cpu *cpu_buffer, unsigned long nr_pages)
+rb_remove_pages(struct ring_buffer_per_cpu *cpu_buffer, unsigned int nr_pages)
 {
 	struct list_head *tail_page, *to_remove, *next_page;
 	struct buffer_page *to_remove_page, *tmp_iter_page;
 	struct buffer_page *last_page, *first_page;
-	unsigned long nr_removed;
+	unsigned int nr_removed;
 	unsigned long head_bit;
 	int page_entries;
 
@@ -1504,8 +1487,6 @@ rb_remove_pages(struct ring_buffer_per_cpu *cpu_buffer, unsigned long nr_pages)
 	tmp_iter_page = first_page;
 
 	do {
-		cond_resched();
-
 		to_remove_page = tmp_iter_page;
 		rb_inc_page(cpu_buffer, &tmp_iter_page);
 
@@ -1639,7 +1620,6 @@ static void update_pages_handler(struct work_struct *work)
  * ring_buffer_resize - resize the ring buffer
  * @buffer: the buffer to resize.
  * @size: the new size.
- * @cpu_id: the cpu buffer to resize
  *
  * Minimum size is 2 * BUF_PAGE_SIZE.
  *
@@ -1649,7 +1629,7 @@ int ring_buffer_resize(struct ring_buffer *buffer, unsigned long size,
 			int cpu_id)
 {
 	struct ring_buffer_per_cpu *cpu_buffer;
-	unsigned long nr_pages;
+	unsigned nr_pages;
 	int cpu, err = 0;
 
 	/*
@@ -1663,13 +1643,14 @@ int ring_buffer_resize(struct ring_buffer *buffer, unsigned long size,
 	    !cpumask_test_cpu(cpu_id, buffer->cpumask))
 		return size;
 
-	nr_pages = DIV_ROUND_UP(size, BUF_PAGE_SIZE);
+	size = DIV_ROUND_UP(size, BUF_PAGE_SIZE);
+	size *= BUF_PAGE_SIZE;
 
 	/* we need a minimum of two pages */
-	if (nr_pages < 2)
-		nr_pages = 2;
+	if (size < BUF_PAGE_SIZE * 2)
+		size = BUF_PAGE_SIZE * 2;
 
-	size = nr_pages * BUF_PAGE_SIZE;
+	nr_pages = DIV_ROUND_UP(size, BUF_PAGE_SIZE);
 
 	/*
 	 * Don't succeed if resizing is disabled, as a reader might be
@@ -1718,14 +1699,22 @@ int ring_buffer_resize(struct ring_buffer *buffer, unsigned long size,
 			if (!cpu_buffer->nr_pages_to_update)
 				continue;
 
-			/* Can't run something on an offline CPU. */
-			if (!cpu_online(cpu)) {
+			/* The update must run on the CPU that is being updated. */
+			preempt_disable();
+			if (cpu == smp_processor_id() || !cpu_online(cpu)) {
 				rb_update_pages(cpu_buffer);
 				cpu_buffer->nr_pages_to_update = 0;
 			} else {
+				/*
+				 * Can not disable preemption for schedule_work_on()
+				 * on PREEMPT_RT.
+				 */
+				preempt_enable();
 				schedule_work_on(cpu,
 						&cpu_buffer->update_pages_work);
+				preempt_disable();
 			}
+			preempt_enable();
 		}
 
 		/* wait for all the updates to complete */
@@ -1763,14 +1752,22 @@ int ring_buffer_resize(struct ring_buffer *buffer, unsigned long size,
 
 		get_online_cpus();
 
-		/* Can't run something on an offline CPU. */
-		if (!cpu_online(cpu_id))
+		preempt_disable();
+		/* The update must run on the CPU that is being updated. */
+		if (cpu_id == smp_processor_id() || !cpu_online(cpu_id))
 			rb_update_pages(cpu_buffer);
 		else {
+			/*
+			 * Can not disable preemption for schedule_work_on()
+			 * on PREEMPT_RT.
+			 */
+			preempt_enable();
 			schedule_work_on(cpu_id,
 					 &cpu_buffer->update_pages_work);
 			wait_for_completion(&cpu_buffer->update_done);
+			preempt_disable();
 		}
+		preempt_enable();
 
 		cpu_buffer->nr_pages_to_update = 0;
 		put_online_cpus();
@@ -1884,6 +1881,79 @@ rb_event_index(struct ring_buffer_event *event)
 	return (addr & ~PAGE_MASK) - BUF_PAGE_HDR_SIZE;
 }
 
+static inline int
+rb_event_is_commit(struct ring_buffer_per_cpu *cpu_buffer,
+		   struct ring_buffer_event *event)
+{
+	unsigned long addr = (unsigned long)event;
+	unsigned long index;
+
+	index = rb_event_index(event);
+	addr &= PAGE_MASK;
+
+	return cpu_buffer->commit_page->page == (void *)addr &&
+		rb_commit_index(cpu_buffer) == index;
+}
+
+static void
+rb_set_commit_to_write(struct ring_buffer_per_cpu *cpu_buffer)
+{
+	unsigned long max_count;
+
+	/*
+	 * We only race with interrupts and NMIs on this CPU.
+	 * If we own the commit event, then we can commit
+	 * all others that interrupted us, since the interruptions
+	 * are in stack format (they finish before they come
+	 * back to us). This allows us to do a simple loop to
+	 * assign the commit to the tail.
+	 */
+ again:
+	max_count = cpu_buffer->nr_pages * 100;
+
+	while (cpu_buffer->commit_page != cpu_buffer->tail_page) {
+		if (RB_WARN_ON(cpu_buffer, !(--max_count)))
+			return;
+		if (RB_WARN_ON(cpu_buffer,
+			       rb_is_reader_page(cpu_buffer->tail_page)))
+			return;
+		local_set(&cpu_buffer->commit_page->page->commit,
+			  rb_page_write(cpu_buffer->commit_page));
+		rb_inc_page(cpu_buffer, &cpu_buffer->commit_page);
+		cpu_buffer->write_stamp =
+			cpu_buffer->commit_page->page->time_stamp;
+		/* add barrier to keep gcc from optimizing too much */
+		barrier();
+	}
+	while (rb_commit_index(cpu_buffer) !=
+	       rb_page_write(cpu_buffer->commit_page)) {
+
+		local_set(&cpu_buffer->commit_page->page->commit,
+			  rb_page_write(cpu_buffer->commit_page));
+		RB_WARN_ON(cpu_buffer,
+			   local_read(&cpu_buffer->commit_page->page->commit) &
+			   ~RB_WRITE_MASK);
+		barrier();
+	}
+
+	/* again, keep gcc from optimizing */
+	barrier();
+
+	/*
+	 * If an interrupt came in just after the first while loop
+	 * and pushed the tail page forward, we will be left with
+	 * a dangling commit that will never go forward.
+	 */
+	if (unlikely(cpu_buffer->commit_page != cpu_buffer->tail_page))
+		goto again;
+}
+
+static void rb_reset_reader_page(struct ring_buffer_per_cpu *cpu_buffer)
+{
+	cpu_buffer->read_stamp = cpu_buffer->reader_page->page->time_stamp;
+	cpu_buffer->reader_page->read = 0;
+}
+
 static void rb_inc_iter(struct ring_buffer_iter *iter)
 {
 	struct ring_buffer_per_cpu *cpu_buffer = iter->cpu_buffer;
@@ -1901,6 +1971,64 @@ static void rb_inc_iter(struct ring_buffer_iter *iter)
 
 	iter->read_stamp = iter->head_page->page->time_stamp;
 	iter->head = 0;
+}
+
+/* Slow path, do not inline */
+static noinline struct ring_buffer_event *
+rb_add_time_stamp(struct ring_buffer_event *event, u64 delta)
+{
+	event->type_len = RINGBUF_TYPE_TIME_EXTEND;
+
+	/* Not the first event on the page? */
+	if (rb_event_index(event)) {
+		event->time_delta = delta & TS_MASK;
+		event->array[0] = delta >> TS_SHIFT;
+	} else {
+		/* nope, just zero it */
+		event->time_delta = 0;
+		event->array[0] = 0;
+	}
+
+	return skip_time_extend(event);
+}
+
+/**
+ * rb_update_event - update event type and data
+ * @event: the event to update
+ * @type: the type of event
+ * @length: the size of the event field in the ring buffer
+ *
+ * Update the type and data fields of the event. The length
+ * is the actual size that is written to the ring buffer,
+ * and with this, we can determine what to place into the
+ * data field.
+ */
+static void
+rb_update_event(struct ring_buffer_per_cpu *cpu_buffer,
+		struct ring_buffer_event *event, unsigned length,
+		int add_timestamp, u64 delta)
+{
+	/* Only a commit updates the timestamp */
+	if (unlikely(!rb_event_is_commit(cpu_buffer, event)))
+		delta = 0;
+
+	/*
+	 * If we need to add a timestamp, then we
+	 * add it to the start of the resevered space.
+	 */
+	if (unlikely(add_timestamp)) {
+		event = rb_add_time_stamp(event, delta);
+		length -= RB_LEN_TIME_EXTEND;
+		delta = 0;
+	}
+
+	event->time_delta = delta;
+	length -= RB_EVNT_HDR_SIZE;
+	if (length > RB_MAX_SMALL_DATA || RB_FORCE_8BYTE_ALIGNMENT) {
+		event->type_len = 0;
+		event->array[0] = length;
+	} else
+		event->type_len = DIV_ROUND_UP(length, RB_ALIGNMENT);
 }
 
 /*
@@ -2033,15 +2161,12 @@ rb_handle_head_page(struct ring_buffer_per_cpu *cpu_buffer,
 	 * the tail page would have moved.
 	 */
 	if (ret == RB_PAGE_NORMAL) {
-		struct buffer_page *buffer_tail_page;
-
-		buffer_tail_page = READ_ONCE(cpu_buffer->tail_page);
 		/*
 		 * If the tail had moved passed next, then we need
 		 * to reset the pointer.
 		 */
-		if (buffer_tail_page != tail_page &&
-		    buffer_tail_page != next_page)
+		if (cpu_buffer->tail_page != tail_page &&
+		    cpu_buffer->tail_page != next_page)
 			rb_head_page_set_normal(cpu_buffer, new_head,
 						next_page,
 						RB_PAGE_HEAD);
@@ -2064,13 +2189,29 @@ rb_handle_head_page(struct ring_buffer_per_cpu *cpu_buffer,
 	return 0;
 }
 
+static unsigned rb_calculate_event_length(unsigned length)
+{
+	struct ring_buffer_event event; /* Used only for sizeof array */
+
+	/* zero length can cause confusions */
+	if (!length)
+		length = 1;
+
+	if (length > RB_MAX_SMALL_DATA || RB_FORCE_8BYTE_ALIGNMENT)
+		length += sizeof(event.array[0]);
+
+	length += RB_EVNT_HDR_SIZE;
+	length = ALIGN(length, RB_ARCH_ALIGNMENT);
+
+	return length;
+}
+
 static inline void
 rb_reset_tail(struct ring_buffer_per_cpu *cpu_buffer,
-	      unsigned long tail, struct rb_event_info *info)
+	      struct buffer_page *tail_page,
+	      unsigned long tail, unsigned long length)
 {
-	struct buffer_page *tail_page = info->tail_page;
 	struct ring_buffer_event *event;
-	unsigned long length = info->length;
 
 	/*
 	 * Only the event that crossed the page boundary
@@ -2135,16 +2276,14 @@ rb_reset_tail(struct ring_buffer_per_cpu *cpu_buffer,
 	local_sub(length, &tail_page->write);
 }
 
-static inline void rb_end_commit(struct ring_buffer_per_cpu *cpu_buffer);
-
 /*
  * This is the slow path, force gcc not to inline it.
  */
 static noinline struct ring_buffer_event *
 rb_move_tail(struct ring_buffer_per_cpu *cpu_buffer,
-	     unsigned long tail, struct rb_event_info *info)
+	     unsigned long length, unsigned long tail,
+	     struct buffer_page *tail_page, u64 ts)
 {
-	struct buffer_page *tail_page = info->tail_page;
 	struct buffer_page *commit_page = cpu_buffer->commit_page;
 	struct ring_buffer *buffer = cpu_buffer->buffer;
 	struct buffer_page *next_page;
@@ -2222,129 +2361,86 @@ rb_move_tail(struct ring_buffer_per_cpu *cpu_buffer,
 		}
 	}
 
-	rb_tail_page_update(cpu_buffer, tail_page, next_page);
+	ret = rb_tail_page_update(cpu_buffer, tail_page, next_page);
+	if (ret) {
+		/*
+		 * Nested commits always have zero deltas, so
+		 * just reread the time stamp
+		 */
+		ts = rb_time_stamp(buffer);
+		next_page->page->time_stamp = ts;
+	}
 
  out_again:
 
-	rb_reset_tail(cpu_buffer, tail, info);
-
-	/* Commit what we have for now. */
-	rb_end_commit(cpu_buffer);
-	/* rb_end_commit() decs committing */
-	local_inc(&cpu_buffer->committing);
+	rb_reset_tail(cpu_buffer, tail_page, tail, length);
 
 	/* fail and let the caller try again */
 	return ERR_PTR(-EAGAIN);
 
  out_reset:
 	/* reset write */
-	rb_reset_tail(cpu_buffer, tail, info);
+	rb_reset_tail(cpu_buffer, tail_page, tail, length);
 
 	return NULL;
 }
 
-/* Slow path, do not inline */
-static noinline struct ring_buffer_event *
-rb_add_time_stamp(struct ring_buffer_event *event, u64 delta)
+static struct ring_buffer_event *
+__rb_reserve_next(struct ring_buffer_per_cpu *cpu_buffer,
+		  unsigned long length, u64 ts,
+		  u64 delta, int add_timestamp)
 {
-	event->type_len = RINGBUF_TYPE_TIME_EXTEND;
-
-	/* Not the first event on the page? */
-	if (rb_event_index(event)) {
-		event->time_delta = delta & TS_MASK;
-		event->array[0] = delta >> TS_SHIFT;
-	} else {
-		/* nope, just zero it */
-		event->time_delta = 0;
-		event->array[0] = 0;
-	}
-
-	return skip_time_extend(event);
-}
-
-static inline bool rb_event_is_commit(struct ring_buffer_per_cpu *cpu_buffer,
-				     struct ring_buffer_event *event);
-
-/**
- * rb_update_event - update event type and data
- * @event: the event to update
- * @type: the type of event
- * @length: the size of the event field in the ring buffer
- *
- * Update the type and data fields of the event. The length
- * is the actual size that is written to the ring buffer,
- * and with this, we can determine what to place into the
- * data field.
- */
-static void
-rb_update_event(struct ring_buffer_per_cpu *cpu_buffer,
-		struct ring_buffer_event *event,
-		struct rb_event_info *info)
-{
-	unsigned length = info->length;
-	u64 delta = info->delta;
-
-	/* Only a commit updates the timestamp */
-	if (unlikely(!rb_event_is_commit(cpu_buffer, event)))
-		delta = 0;
+	struct buffer_page *tail_page;
+	struct ring_buffer_event *event;
+	unsigned long tail, write;
 
 	/*
-	 * If we need to add a timestamp, then we
-	 * add it to the start of the resevered space.
+	 * If the time delta since the last event is too big to
+	 * hold in the time field of the event, then we append a
+	 * TIME EXTEND event ahead of the data event.
 	 */
-	if (unlikely(info->add_timestamp)) {
-		event = rb_add_time_stamp(event, delta);
-		length -= RB_LEN_TIME_EXTEND;
-		delta = 0;
-	}
+	if (unlikely(add_timestamp))
+		length += RB_LEN_TIME_EXTEND;
 
-	event->time_delta = delta;
-	length -= RB_EVNT_HDR_SIZE;
-	if (length > RB_MAX_SMALL_DATA || RB_FORCE_8BYTE_ALIGNMENT) {
-		event->type_len = 0;
-		event->array[0] = length;
-	} else
-		event->type_len = DIV_ROUND_UP(length, RB_ALIGNMENT);
-}
+	tail_page = cpu_buffer->tail_page;
+	write = local_add_return(length, &tail_page->write);
 
-static unsigned rb_calculate_event_length(unsigned length)
-{
-	struct ring_buffer_event event; /* Used only for sizeof array */
-
-	/* zero length can cause confusions */
-	if (!length)
-		length++;
-
-	if (length > RB_MAX_SMALL_DATA || RB_FORCE_8BYTE_ALIGNMENT)
-		length += sizeof(event.array[0]);
-
-	length += RB_EVNT_HDR_SIZE;
-	length = ALIGN(length, RB_ARCH_ALIGNMENT);
+	/* set write to only the index of the write */
+	write &= RB_WRITE_MASK;
+	tail = write - length;
 
 	/*
-	 * In case the time delta is larger than the 27 bits for it
-	 * in the header, we need to add a timestamp. If another
-	 * event comes in when trying to discard this one to increase
-	 * the length, then the timestamp will be added in the allocated
-	 * space of this event. If length is bigger than the size needed
-	 * for the TIME_EXTEND, then padding has to be used. The events
-	 * length must be either RB_LEN_TIME_EXTEND, or greater than or equal
-	 * to RB_LEN_TIME_EXTEND + 8, as 8 is the minimum size for padding.
-	 * As length is a multiple of 4, we only need to worry if it
-	 * is 12 (RB_LEN_TIME_EXTEND + 4).
+	 * If this is the first commit on the page, then it has the same
+	 * timestamp as the page itself.
 	 */
-	if (length == RB_LEN_TIME_EXTEND + RB_ALIGNMENT)
-		length += RB_ALIGNMENT;
+	if (!tail)
+		delta = 0;
 
-	return length;
-}
+	/* See if we shot pass the end of this buffer page */
+	if (unlikely(write > BUF_PAGE_SIZE))
+		return rb_move_tail(cpu_buffer, length, tail,
+				    tail_page, ts);
 
-#ifndef CONFIG_HAVE_UNSTABLE_SCHED_CLOCK
-static inline bool sched_clock_stable(void)
-{
-	return true;
+	/* We reserved something on the buffer */
+
+	event = __rb_page_index(tail_page, tail);
+	kmemcheck_annotate_bitfield(event, bitfield);
+	rb_update_event(cpu_buffer, event, length, add_timestamp, delta);
+
+	local_inc(&tail_page->entries);
+
+	/*
+	 * If this is the first commit on the page, then update
+	 * its timestamp.
+	 */
+	if (!tail)
+		tail_page->page->time_stamp = ts;
+
+	/* account for these added bytes */
+	local_add(length, &cpu_buffer->entries_bytes);
+
+	return event;
 }
-#endif
 
 static inline int
 rb_try_to_discard(struct ring_buffer_per_cpu *cpu_buffer,
@@ -2360,7 +2456,7 @@ rb_try_to_discard(struct ring_buffer_per_cpu *cpu_buffer,
 	addr = (unsigned long)event;
 	addr &= PAGE_MASK;
 
-	bpage = READ_ONCE(cpu_buffer->tail_page);
+	bpage = cpu_buffer->tail_page;
 
 	if (bpage->page == (void *)addr && rb_page_write(bpage) == old_index) {
 		unsigned long write_mask =
@@ -2390,61 +2486,6 @@ static void rb_start_commit(struct ring_buffer_per_cpu *cpu_buffer)
 {
 	local_inc(&cpu_buffer->committing);
 	local_inc(&cpu_buffer->commits);
-}
-
-static void
-rb_set_commit_to_write(struct ring_buffer_per_cpu *cpu_buffer)
-{
-	unsigned long max_count;
-
-	/*
-	 * We only race with interrupts and NMIs on this CPU.
-	 * If we own the commit event, then we can commit
-	 * all others that interrupted us, since the interruptions
-	 * are in stack format (they finish before they come
-	 * back to us). This allows us to do a simple loop to
-	 * assign the commit to the tail.
-	 */
- again:
-	max_count = cpu_buffer->nr_pages * 100;
-
-	while (cpu_buffer->commit_page != READ_ONCE(cpu_buffer->tail_page)) {
-		if (RB_WARN_ON(cpu_buffer, !(--max_count)))
-			return;
-		if (RB_WARN_ON(cpu_buffer,
-			       rb_is_reader_page(cpu_buffer->tail_page)))
-			return;
-		local_set(&cpu_buffer->commit_page->page->commit,
-			  rb_page_write(cpu_buffer->commit_page));
-		rb_inc_page(cpu_buffer, &cpu_buffer->commit_page);
-		/* Only update the write stamp if the page has an event */
-		if (rb_page_write(cpu_buffer->commit_page))
-			cpu_buffer->write_stamp =
-				cpu_buffer->commit_page->page->time_stamp;
-		/* add barrier to keep gcc from optimizing too much */
-		barrier();
-	}
-	while (rb_commit_index(cpu_buffer) !=
-	       rb_page_write(cpu_buffer->commit_page)) {
-
-		local_set(&cpu_buffer->commit_page->page->commit,
-			  rb_page_write(cpu_buffer->commit_page));
-		RB_WARN_ON(cpu_buffer,
-			   local_read(&cpu_buffer->commit_page->page->commit) &
-			   ~RB_WRITE_MASK);
-		barrier();
-	}
-
-	/* again, keep gcc from optimizing */
-	barrier();
-
-	/*
-	 * If an interrupt came in just after the first while loop
-	 * and pushed the tail page forward, we will be left with
-	 * a dangling commit that will never go forward.
-	 */
-	if (unlikely(cpu_buffer->commit_page != READ_ONCE(cpu_buffer->tail_page)))
-		goto again;
 }
 
 static inline void rb_end_commit(struct ring_buffer_per_cpu *cpu_buffer)
@@ -2479,32 +2520,235 @@ static inline void rb_end_commit(struct ring_buffer_per_cpu *cpu_buffer)
 	}
 }
 
-static inline void rb_event_discard(struct ring_buffer_event *event)
+static struct ring_buffer_event *
+rb_reserve_next_event(struct ring_buffer *buffer,
+		      struct ring_buffer_per_cpu *cpu_buffer,
+		      unsigned long length)
 {
-	if (event->type_len == RINGBUF_TYPE_TIME_EXTEND)
-		event = skip_time_extend(event);
+	struct ring_buffer_event *event;
+	u64 ts, delta;
+	int nr_loops = 0;
+	int add_timestamp;
+	u64 diff;
 
-	/* array[0] holds the actual length for the discarded event */
-	event->array[0] = rb_event_data_length(event) - RB_EVNT_HDR_SIZE;
-	event->type_len = RINGBUF_TYPE_PADDING;
-	/* time delta must be non zero */
-	if (!event->time_delta)
-		event->time_delta = 1;
+	rb_start_commit(cpu_buffer);
+
+#ifdef CONFIG_RING_BUFFER_ALLOW_SWAP
+	/*
+	 * Due to the ability to swap a cpu buffer from a buffer
+	 * it is possible it was swapped before we committed.
+	 * (committing stops a swap). We check for it here and
+	 * if it happened, we have to fail the write.
+	 */
+	barrier();
+	if (unlikely(ACCESS_ONCE(cpu_buffer->buffer) != buffer)) {
+		local_dec(&cpu_buffer->committing);
+		local_dec(&cpu_buffer->commits);
+		return NULL;
+	}
+#endif
+
+	length = rb_calculate_event_length(length);
+ again:
+	add_timestamp = 0;
+	delta = 0;
+
+	/*
+	 * We allow for interrupts to reenter here and do a trace.
+	 * If one does, it will cause this original code to loop
+	 * back here. Even with heavy interrupts happening, this
+	 * should only happen a few times in a row. If this happens
+	 * 1000 times in a row, there must be either an interrupt
+	 * storm or we have something buggy.
+	 * Bail!
+	 */
+	if (RB_WARN_ON(cpu_buffer, ++nr_loops > 1000))
+		goto out_fail;
+
+	ts = rb_time_stamp(cpu_buffer->buffer);
+	diff = ts - cpu_buffer->write_stamp;
+
+	/* make sure this diff is calculated here */
+	barrier();
+
+	/* Did the write stamp get updated already? */
+	if (likely(ts >= cpu_buffer->write_stamp)) {
+		delta = diff;
+		if (unlikely(test_time_stamp(delta))) {
+			int local_clock_stable = 1;
+#ifdef CONFIG_HAVE_UNSTABLE_SCHED_CLOCK
+			local_clock_stable = sched_clock_stable;
+#endif
+			WARN_ONCE(delta > (1ULL << 59),
+				  KERN_WARNING "Delta way too big! %llu ts=%llu write stamp = %llu\n%s",
+				  (unsigned long long)delta,
+				  (unsigned long long)ts,
+				  (unsigned long long)cpu_buffer->write_stamp,
+				  local_clock_stable ? "" :
+				  "If you just came from a suspend/resume,\n"
+				  "please switch to the trace global clock:\n"
+				  "  echo global > /sys/kernel/debug/tracing/trace_clock\n");
+			add_timestamp = 1;
+		}
+	}
+
+	event = __rb_reserve_next(cpu_buffer, length, ts,
+				  delta, add_timestamp);
+	if (unlikely(PTR_ERR(event) == -EAGAIN))
+		goto again;
+
+	if (!event)
+		goto out_fail;
+
+	return event;
+
+ out_fail:
+	rb_end_commit(cpu_buffer);
+	return NULL;
 }
 
-static inline bool
-rb_event_is_commit(struct ring_buffer_per_cpu *cpu_buffer,
-		   struct ring_buffer_event *event)
+#ifdef CONFIG_TRACING
+
+/*
+ * The lock and unlock are done within a preempt disable section.
+ * The current_context per_cpu variable can only be modified
+ * by the current task between lock and unlock. But it can
+ * be modified more than once via an interrupt. To pass this
+ * information from the lock to the unlock without having to
+ * access the 'in_interrupt()' functions again (which do show
+ * a bit of overhead in something as critical as function tracing,
+ * we use a bitmask trick.
+ *
+ *  bit 0 =  NMI context
+ *  bit 1 =  IRQ context
+ *  bit 2 =  SoftIRQ context
+ *  bit 3 =  normal context.
+ *
+ * This works because this is the order of contexts that can
+ * preempt other contexts. A SoftIRQ never preempts an IRQ
+ * context.
+ *
+ * When the context is determined, the corresponding bit is
+ * checked and set (if it was set, then a recursion of that context
+ * happened).
+ *
+ * On unlock, we need to clear this bit. To do so, just subtract
+ * 1 from the current_context and AND it to itself.
+ *
+ * (binary)
+ *  101 - 1 = 100
+ *  101 & 100 = 100 (clearing bit zero)
+ *
+ *  1010 - 1 = 1001
+ *  1010 & 1001 = 1000 (clearing bit 1)
+ *
+ * The least significant bit can be cleared this way, and it
+ * just so happens that it is the same bit corresponding to
+ * the current context.
+ */
+static DEFINE_PER_CPU(unsigned int, current_context);
+
+static __always_inline int trace_recursive_lock(void)
 {
-	unsigned long addr = (unsigned long)event;
-	unsigned long index;
+	unsigned int val = this_cpu_read(current_context);
+	int bit;
 
-	index = rb_event_index(event);
-	addr &= PAGE_MASK;
+	if (in_interrupt()) {
+		if (in_nmi())
+			bit = 0;
+		else if (in_irq())
+			bit = 1;
+		else
+			bit = 2;
+	} else
+		bit = 3;
 
-	return cpu_buffer->commit_page->page == (void *)addr &&
-		rb_commit_index(cpu_buffer) == index;
+	if (unlikely(val & (1 << bit)))
+		return 1;
+
+	val |= (1 << bit);
+	this_cpu_write(current_context, val);
+
+	return 0;
 }
+
+static __always_inline void trace_recursive_unlock(void)
+{
+	unsigned int val = this_cpu_read(current_context);
+
+	val--;
+	val &= this_cpu_read(current_context);
+	this_cpu_write(current_context, val);
+}
+
+#else
+
+#define trace_recursive_lock()		(0)
+#define trace_recursive_unlock()	do { } while (0)
+
+#endif
+
+/**
+ * ring_buffer_lock_reserve - reserve a part of the buffer
+ * @buffer: the ring buffer to reserve from
+ * @length: the length of the data to reserve (excluding event header)
+ *
+ * Returns a reseverd event on the ring buffer to copy directly to.
+ * The user of this interface will need to get the body to write into
+ * and can use the ring_buffer_event_data() interface.
+ *
+ * The length is the length of the data needed, not the event length
+ * which also includes the event header.
+ *
+ * Must be paired with ring_buffer_unlock_commit, unless NULL is returned.
+ * If NULL is returned, then nothing has been allocated or locked.
+ */
+struct ring_buffer_event *
+ring_buffer_lock_reserve(struct ring_buffer *buffer, unsigned long length)
+{
+	struct ring_buffer_per_cpu *cpu_buffer;
+	struct ring_buffer_event *event;
+	int cpu;
+
+	if (ring_buffer_flags != RB_BUFFERS_ON)
+		return NULL;
+
+	/* If we are tracing schedule, we don't want to recurse */
+	preempt_disable_notrace();
+
+	if (atomic_read(&buffer->record_disabled))
+		goto out_nocheck;
+
+	if (trace_recursive_lock())
+		goto out_nocheck;
+
+	cpu = raw_smp_processor_id();
+
+	if (!cpumask_test_cpu(cpu, buffer->cpumask))
+		goto out;
+
+	cpu_buffer = buffer->buffers[cpu];
+
+	if (atomic_read(&cpu_buffer->record_disabled))
+		goto out;
+
+	if (length > BUF_MAX_DATA_SIZE)
+		goto out;
+
+	event = rb_reserve_next_event(buffer, cpu_buffer, length);
+	if (!event)
+		goto out;
+
+	return event;
+
+ out:
+	trace_recursive_unlock();
+
+ out_nocheck:
+	preempt_enable_notrace();
+	return NULL;
+}
+EXPORT_SYMBOL_GPL(ring_buffer_lock_reserve);
 
 static void
 rb_update_write_stamp(struct ring_buffer_per_cpu *cpu_buffer,
@@ -2545,8 +2789,6 @@ static void rb_commit(struct ring_buffer_per_cpu *cpu_buffer,
 static __always_inline void
 rb_wakeups(struct ring_buffer *buffer, struct ring_buffer_per_cpu *cpu_buffer)
 {
-	bool pagebusy;
-
 	if (buffer->irq_work.waiters_pending) {
 		buffer->irq_work.waiters_pending = false;
 		/* irq_work_queue() supplies it's own memory barriers */
@@ -2558,84 +2800,6 @@ rb_wakeups(struct ring_buffer *buffer, struct ring_buffer_per_cpu *cpu_buffer)
 		/* irq_work_queue() supplies it's own memory barriers */
 		irq_work_queue(&cpu_buffer->irq_work.work);
 	}
-
-	pagebusy = cpu_buffer->reader_page == cpu_buffer->commit_page;
-
-	if (!pagebusy && cpu_buffer->irq_work.full_waiters_pending) {
-		cpu_buffer->irq_work.wakeup_full = true;
-		cpu_buffer->irq_work.full_waiters_pending = false;
-		/* irq_work_queue() supplies it's own memory barriers */
-		irq_work_queue(&cpu_buffer->irq_work.work);
-	}
-}
-
-/*
- * The lock and unlock are done within a preempt disable section.
- * The current_context per_cpu variable can only be modified
- * by the current task between lock and unlock. But it can
- * be modified more than once via an interrupt. To pass this
- * information from the lock to the unlock without having to
- * access the 'in_interrupt()' functions again (which do show
- * a bit of overhead in something as critical as function tracing,
- * we use a bitmask trick.
- *
- *  bit 0 =  NMI context
- *  bit 1 =  IRQ context
- *  bit 2 =  SoftIRQ context
- *  bit 3 =  normal context.
- *
- * This works because this is the order of contexts that can
- * preempt other contexts. A SoftIRQ never preempts an IRQ
- * context.
- *
- * When the context is determined, the corresponding bit is
- * checked and set (if it was set, then a recursion of that context
- * happened).
- *
- * On unlock, we need to clear this bit. To do so, just subtract
- * 1 from the current_context and AND it to itself.
- *
- * (binary)
- *  101 - 1 = 100
- *  101 & 100 = 100 (clearing bit zero)
- *
- *  1010 - 1 = 1001
- *  1010 & 1001 = 1000 (clearing bit 1)
- *
- * The least significant bit can be cleared this way, and it
- * just so happens that it is the same bit corresponding to
- * the current context.
- */
-
-static __always_inline int
-trace_recursive_lock(struct ring_buffer_per_cpu *cpu_buffer)
-{
-	unsigned int val = cpu_buffer->current_context;
-	int bit;
-
-	if (in_interrupt()) {
-		if (in_nmi())
-			bit = RB_CTX_NMI;
-		else if (in_irq())
-			bit = RB_CTX_IRQ;
-		else
-			bit = RB_CTX_SOFTIRQ;
-	} else
-		bit = RB_CTX_NORMAL;
-
-	if (unlikely(val & (1 << bit)))
-		return 1;
-
-	val |= (1 << bit);
-	cpu_buffer->current_context = val;
-
-	return 0;
-}
-
-static __always_inline void
-trace_recursive_unlock(struct ring_buffer_per_cpu *cpu_buffer)
-{
-	cpu_buffer->current_context &= cpu_buffer->current_context - 1;
 }
 
 /**
@@ -2659,7 +2823,7 @@ int ring_buffer_unlock_commit(struct ring_buffer *buffer,
 
 	rb_wakeups(buffer, cpu_buffer);
 
-	trace_recursive_unlock(cpu_buffer);
+	trace_recursive_unlock();
 
 	preempt_enable_notrace();
 
@@ -2667,210 +2831,18 @@ int ring_buffer_unlock_commit(struct ring_buffer *buffer,
 }
 EXPORT_SYMBOL_GPL(ring_buffer_unlock_commit);
 
-static noinline void
-rb_handle_timestamp(struct ring_buffer_per_cpu *cpu_buffer,
-		    struct rb_event_info *info)
+static inline void rb_event_discard(struct ring_buffer_event *event)
 {
-	WARN_ONCE(info->delta > (1ULL << 59),
-		  KERN_WARNING "Delta way too big! %llu ts=%llu write stamp = %llu\n%s",
-		  (unsigned long long)info->delta,
-		  (unsigned long long)info->ts,
-		  (unsigned long long)cpu_buffer->write_stamp,
-		  sched_clock_stable() ? "" :
-		  "If you just came from a suspend/resume,\n"
-		  "please switch to the trace global clock:\n"
-		  "  echo global > /sys/kernel/debug/tracing/trace_clock\n");
-	info->add_timestamp = 1;
+	if (event->type_len == RINGBUF_TYPE_TIME_EXTEND)
+		event = skip_time_extend(event);
+
+	/* array[0] holds the actual length for the discarded event */
+	event->array[0] = rb_event_data_length(event) - RB_EVNT_HDR_SIZE;
+	event->type_len = RINGBUF_TYPE_PADDING;
+	/* time delta must be non zero */
+	if (!event->time_delta)
+		event->time_delta = 1;
 }
-
-static struct ring_buffer_event *
-__rb_reserve_next(struct ring_buffer_per_cpu *cpu_buffer,
-		  struct rb_event_info *info)
-{
-	struct ring_buffer_event *event;
-	struct buffer_page *tail_page;
-	unsigned long tail, write;
-
-	/*
-	 * If the time delta since the last event is too big to
-	 * hold in the time field of the event, then we append a
-	 * TIME EXTEND event ahead of the data event.
-	 */
-	if (unlikely(info->add_timestamp))
-		info->length += RB_LEN_TIME_EXTEND;
-
-	/* Don't let the compiler play games with cpu_buffer->tail_page */
-	tail_page = info->tail_page = READ_ONCE(cpu_buffer->tail_page);
-	write = local_add_return(info->length, &tail_page->write);
-
-	/* set write to only the index of the write */
-	write &= RB_WRITE_MASK;
-	tail = write - info->length;
-
-	/*
-	 * If this is the first commit on the page, then it has the same
-	 * timestamp as the page itself.
-	 */
-	if (!tail)
-		info->delta = 0;
-
-	/* See if we shot pass the end of this buffer page */
-	if (unlikely(write > BUF_PAGE_SIZE))
-		return rb_move_tail(cpu_buffer, tail, info);
-
-	/* We reserved something on the buffer */
-
-	event = __rb_page_index(tail_page, tail);
-	kmemcheck_annotate_bitfield(event, bitfield);
-	rb_update_event(cpu_buffer, event, info);
-
-	local_inc(&tail_page->entries);
-
-	/*
-	 * If this is the first commit on the page, then update
-	 * its timestamp.
-	 */
-	if (!tail)
-		tail_page->page->time_stamp = info->ts;
-
-	/* account for these added bytes */
-	local_add(info->length, &cpu_buffer->entries_bytes);
-
-	return event;
-}
-
-static struct ring_buffer_event *
-rb_reserve_next_event(struct ring_buffer *buffer,
-		      struct ring_buffer_per_cpu *cpu_buffer,
-		      unsigned long length)
-{
-	struct ring_buffer_event *event;
-	struct rb_event_info info;
-	int nr_loops = 0;
-	u64 diff;
-
-	rb_start_commit(cpu_buffer);
-
-#ifdef CONFIG_RING_BUFFER_ALLOW_SWAP
-	/*
-	 * Due to the ability to swap a cpu buffer from a buffer
-	 * it is possible it was swapped before we committed.
-	 * (committing stops a swap). We check for it here and
-	 * if it happened, we have to fail the write.
-	 */
-	barrier();
-	if (unlikely(ACCESS_ONCE(cpu_buffer->buffer) != buffer)) {
-		local_dec(&cpu_buffer->committing);
-		local_dec(&cpu_buffer->commits);
-		return NULL;
-	}
-#endif
-
-	info.length = rb_calculate_event_length(length);
- again:
-	info.add_timestamp = 0;
-	info.delta = 0;
-
-	/*
-	 * We allow for interrupts to reenter here and do a trace.
-	 * If one does, it will cause this original code to loop
-	 * back here. Even with heavy interrupts happening, this
-	 * should only happen a few times in a row. If this happens
-	 * 1000 times in a row, there must be either an interrupt
-	 * storm or we have something buggy.
-	 * Bail!
-	 */
-	if (RB_WARN_ON(cpu_buffer, ++nr_loops > 1000))
-		goto out_fail;
-
-	info.ts = rb_time_stamp(cpu_buffer->buffer);
-	diff = info.ts - cpu_buffer->write_stamp;
-
-	/* make sure this diff is calculated here */
-	barrier();
-
-	/* Did the write stamp get updated already? */
-	if (likely(info.ts >= cpu_buffer->write_stamp)) {
-		info.delta = diff;
-		if (unlikely(test_time_stamp(info.delta)))
-			rb_handle_timestamp(cpu_buffer, &info);
-	}
-
-	event = __rb_reserve_next(cpu_buffer, &info);
-
-	if (unlikely(PTR_ERR(event) == -EAGAIN)) {
-		if (info.add_timestamp)
-			info.length -= RB_LEN_TIME_EXTEND;
-		goto again;
-	}
-
-	if (!event)
-		goto out_fail;
-
-	return event;
-
- out_fail:
-	rb_end_commit(cpu_buffer);
-	return NULL;
-}
-
-/**
- * ring_buffer_lock_reserve - reserve a part of the buffer
- * @buffer: the ring buffer to reserve from
- * @length: the length of the data to reserve (excluding event header)
- *
- * Returns a reseverd event on the ring buffer to copy directly to.
- * The user of this interface will need to get the body to write into
- * and can use the ring_buffer_event_data() interface.
- *
- * The length is the length of the data needed, not the event length
- * which also includes the event header.
- *
- * Must be paired with ring_buffer_unlock_commit, unless NULL is returned.
- * If NULL is returned, then nothing has been allocated or locked.
- */
-struct ring_buffer_event *
-ring_buffer_lock_reserve(struct ring_buffer *buffer, unsigned long length)
-{
-	struct ring_buffer_per_cpu *cpu_buffer;
-	struct ring_buffer_event *event;
-	int cpu;
-
-	/* If we are tracing schedule, we don't want to recurse */
-	preempt_disable_notrace();
-
-	if (unlikely(atomic_read(&buffer->record_disabled)))
-		goto out;
-
-	cpu = raw_smp_processor_id();
-
-	if (unlikely(!cpumask_test_cpu(cpu, buffer->cpumask)))
-		goto out;
-
-	cpu_buffer = buffer->buffers[cpu];
-
-	if (unlikely(atomic_read(&cpu_buffer->record_disabled)))
-		goto out;
-
-	if (unlikely(length > BUF_MAX_DATA_SIZE))
-		goto out;
-
-	if (unlikely(trace_recursive_lock(cpu_buffer)))
-		goto out;
-
-	event = rb_reserve_next_event(buffer, cpu_buffer, length);
-	if (!event)
-		goto out_unlock;
-
-	return event;
-
- out_unlock:
-	trace_recursive_unlock(cpu_buffer);
- out:
-	preempt_enable_notrace();
-	return NULL;
-}
-EXPORT_SYMBOL_GPL(ring_buffer_lock_reserve);
 
 /*
  * Decrement the entries to the page that an event is on.
@@ -2962,7 +2934,7 @@ void ring_buffer_discard_commit(struct ring_buffer *buffer,
  out:
 	rb_end_commit(cpu_buffer);
 
-	trace_recursive_unlock(cpu_buffer);
+	trace_recursive_unlock();
 
 	preempt_enable_notrace();
 
@@ -2992,6 +2964,9 @@ int ring_buffer_write(struct ring_buffer *buffer,
 	int ret = -EBUSY;
 	int cpu;
 
+	if (ring_buffer_flags != RB_BUFFERS_ON)
+		return -EBUSY;
+
 	preempt_disable_notrace();
 
 	if (atomic_read(&buffer->record_disabled))
@@ -3010,12 +2985,9 @@ int ring_buffer_write(struct ring_buffer *buffer,
 	if (length > BUF_MAX_DATA_SIZE)
 		goto out;
 
-	if (unlikely(trace_recursive_lock(cpu_buffer)))
-		goto out;
-
 	event = rb_reserve_next_event(buffer, cpu_buffer, length);
 	if (!event)
-		goto out_unlock;
+		goto out;
 
 	body = rb_event_data(event);
 
@@ -3026,10 +2998,6 @@ int ring_buffer_write(struct ring_buffer *buffer,
 	rb_wakeups(buffer, cpu_buffer);
 
 	ret = 0;
-
- out_unlock:
-	trace_recursive_unlock(cpu_buffer);
-
  out:
 	preempt_enable_notrace();
 
@@ -3037,7 +3005,7 @@ int ring_buffer_write(struct ring_buffer *buffer,
 }
 EXPORT_SYMBOL_GPL(ring_buffer_write);
 
-static bool rb_per_cpu_empty(struct ring_buffer_per_cpu *cpu_buffer)
+static int rb_per_cpu_empty(struct ring_buffer_per_cpu *cpu_buffer)
 {
 	struct buffer_page *reader = cpu_buffer->reader_page;
 	struct buffer_page *head = rb_set_head_page(cpu_buffer);
@@ -3045,7 +3013,7 @@ static bool rb_per_cpu_empty(struct ring_buffer_per_cpu *cpu_buffer)
 
 	/* In case of error, head will be NULL */
 	if (unlikely(!head))
-		return true;
+		return 1;
 
 	return reader->read == rb_page_commit(reader) &&
 		(commit == reader ||
@@ -3136,22 +3104,6 @@ EXPORT_SYMBOL_GPL(ring_buffer_record_on);
 int ring_buffer_record_is_on(struct ring_buffer *buffer)
 {
 	return !atomic_read(&buffer->record_disabled);
-}
-
-/**
- * ring_buffer_record_is_set_on - return true if the ring buffer is set writable
- * @buffer: The ring buffer to see if write is set enabled
- *
- * Returns true if the ring buffer is set writable by ring_buffer_record_on().
- * Note that this does NOT mean it is in a writable state.
- *
- * It may return true when the ring buffer has been disabled by
- * ring_buffer_record_disable(), as that is a temporary disabling of
- * the ring buffer.
- */
-int ring_buffer_record_is_set_on(struct ring_buffer *buffer)
-{
-	return !(atomic_read(&buffer->record_disabled) & RB_BUFFER_OFF);
 }
 
 /**
@@ -3457,23 +3409,11 @@ EXPORT_SYMBOL_GPL(ring_buffer_iter_reset);
 int ring_buffer_iter_empty(struct ring_buffer_iter *iter)
 {
 	struct ring_buffer_per_cpu *cpu_buffer;
-	struct buffer_page *reader;
-	struct buffer_page *head_page;
-	struct buffer_page *commit_page;
-	unsigned commit;
 
 	cpu_buffer = iter->cpu_buffer;
 
-	/* Remember, trace recording is off when iterator is in use */
-	reader = cpu_buffer->reader_page;
-	head_page = cpu_buffer->head_page;
-	commit_page = cpu_buffer->commit_page;
-	commit = rb_page_commit(commit_page);
-
-	return ((iter->head_page == commit_page && iter->head == commit) ||
-		(iter->head_page == reader && commit_page == head_page &&
-		 head_page->read == commit &&
-		 iter->head == rb_page_commit(cpu_buffer->reader_page)));
+	return iter->head_page == cpu_buffer->commit_page &&
+		iter->head == rb_commit_index(cpu_buffer);
 }
 EXPORT_SYMBOL_GPL(ring_buffer_iter_empty);
 
@@ -3652,7 +3592,7 @@ rb_get_reader_page(struct ring_buffer_per_cpu *cpu_buffer)
 
 	/* Finally update the reader page to the new head */
 	cpu_buffer->reader_page = reader;
-	cpu_buffer->reader_page->read = 0;
+	rb_reset_reader_page(cpu_buffer);
 
 	if (overwrite != cpu_buffer->last_overrun) {
 		cpu_buffer->lost_events = overwrite - cpu_buffer->last_overrun;
@@ -3662,10 +3602,6 @@ rb_get_reader_page(struct ring_buffer_per_cpu *cpu_buffer)
 	goto again;
 
  out:
-	/* Update the read_stamp on the first event */
-	if (reader && reader->read == 0)
-		cpu_buffer->read_stamp = reader->page->time_stamp;
-
 	arch_spin_unlock(&cpu_buffer->lock);
 	local_irq_restore(flags);
 
@@ -3846,7 +3782,7 @@ rb_iter_peek(struct ring_buffer_iter *iter, u64 *ts)
 	if (rb_per_cpu_empty(cpu_buffer))
 		return NULL;
 
-	if (iter->head >= rb_page_size(iter->head_page)) {
+	if (iter->head >= local_read(&iter->head_page->page->commit)) {
 		rb_inc_iter(iter);
 		goto again;
 	}
@@ -3888,36 +3824,19 @@ rb_iter_peek(struct ring_buffer_iter *iter, u64 *ts)
 }
 EXPORT_SYMBOL_GPL(ring_buffer_iter_peek);
 
-static inline bool rb_reader_lock(struct ring_buffer_per_cpu *cpu_buffer)
+static inline int rb_ok_to_lock(void)
 {
-	if (likely(!in_nmi())) {
-		raw_spin_lock(&cpu_buffer->reader_lock);
-		return true;
-	}
-
 	/*
 	 * If an NMI die dumps out the content of the ring buffer
-	 * trylock must be used to prevent a deadlock if the NMI
-	 * preempted a task that holds the ring buffer locks. If
-	 * we get the lock then all is fine, if not, then continue
-	 * to do the read, but this can corrupt the ring buffer,
-	 * so it must be permanently disabled from future writes.
-	 * Reading from NMI is a oneshot deal.
+	 * do not grab locks. We also permanently disable the ring
+	 * buffer too. A one time deal is all you get from reading
+	 * the ring buffer from an NMI.
 	 */
-	if (raw_spin_trylock(&cpu_buffer->reader_lock))
-		return true;
+	if (likely(!in_nmi()))
+		return 1;
 
-	/* Continue without locking, but disable the ring buffer */
-	atomic_inc(&cpu_buffer->record_disabled);
-	return false;
-}
-
-static inline void
-rb_reader_unlock(struct ring_buffer_per_cpu *cpu_buffer, bool locked)
-{
-	if (likely(locked))
-		raw_spin_unlock(&cpu_buffer->reader_lock);
-	return;
+	tracing_off_permanent();
+	return 0;
 }
 
 /**
@@ -3937,18 +3856,21 @@ ring_buffer_peek(struct ring_buffer *buffer, int cpu, u64 *ts,
 	struct ring_buffer_per_cpu *cpu_buffer = buffer->buffers[cpu];
 	struct ring_buffer_event *event;
 	unsigned long flags;
-	bool dolock;
+	int dolock;
 
 	if (!cpumask_test_cpu(cpu, buffer->cpumask))
 		return NULL;
 
+	dolock = rb_ok_to_lock();
  again:
 	local_irq_save(flags);
-	dolock = rb_reader_lock(cpu_buffer);
+	if (dolock)
+		raw_spin_lock(&cpu_buffer->reader_lock);
 	event = rb_buffer_peek(cpu_buffer, ts, lost_events);
 	if (event && event->type_len == RINGBUF_TYPE_PADDING)
 		rb_advance_reader(cpu_buffer);
-	rb_reader_unlock(cpu_buffer, dolock);
+	if (dolock)
+		raw_spin_unlock(&cpu_buffer->reader_lock);
 	local_irq_restore(flags);
 
 	if (event && event->type_len == RINGBUF_TYPE_PADDING)
@@ -4001,7 +3923,9 @@ ring_buffer_consume(struct ring_buffer *buffer, int cpu, u64 *ts,
 	struct ring_buffer_per_cpu *cpu_buffer;
 	struct ring_buffer_event *event = NULL;
 	unsigned long flags;
-	bool dolock;
+	int dolock;
+
+	dolock = rb_ok_to_lock();
 
  again:
 	/* might be called in atomic */
@@ -4012,7 +3936,8 @@ ring_buffer_consume(struct ring_buffer *buffer, int cpu, u64 *ts,
 
 	cpu_buffer = buffer->buffers[cpu];
 	local_irq_save(flags);
-	dolock = rb_reader_lock(cpu_buffer);
+	if (dolock)
+		raw_spin_lock(&cpu_buffer->reader_lock);
 
 	event = rb_buffer_peek(cpu_buffer, ts, lost_events);
 	if (event) {
@@ -4020,7 +3945,8 @@ ring_buffer_consume(struct ring_buffer *buffer, int cpu, u64 *ts,
 		rb_advance_reader(cpu_buffer);
 	}
 
-	rb_reader_unlock(cpu_buffer, dolock);
+	if (dolock)
+		raw_spin_unlock(&cpu_buffer->reader_lock);
 	local_irq_restore(flags);
 
  out:
@@ -4037,7 +3963,6 @@ EXPORT_SYMBOL_GPL(ring_buffer_consume);
  * ring_buffer_read_prepare - Prepare for a non consuming read of the buffer
  * @buffer: The ring buffer to read from
  * @cpu: The cpu buffer to iterate over
- * @flags: gfp flags to use for memory allocation
  *
  * This performs the initial preparations necessary to iterate
  * through the buffer.  Memory is allocated, buffer recording
@@ -4048,14 +3973,14 @@ EXPORT_SYMBOL_GPL(ring_buffer_consume);
  * expected.
  *
  * After a sequence of ring_buffer_read_prepare calls, the user is
- * expected to make at least one call to ring_buffer_read_prepare_sync.
+ * expected to make at least one call to ring_buffer_prepare_sync.
  * Afterwards, ring_buffer_read_start is invoked to get things going
  * for real.
  *
- * This overall must be paired with ring_buffer_read_finish.
+ * This overall must be paired with ring_buffer_finish.
  */
 struct ring_buffer_iter *
-ring_buffer_read_prepare(struct ring_buffer *buffer, int cpu, gfp_t flags)
+ring_buffer_read_prepare(struct ring_buffer *buffer, int cpu)
 {
 	struct ring_buffer_per_cpu *cpu_buffer;
 	struct ring_buffer_iter *iter;
@@ -4063,7 +3988,7 @@ ring_buffer_read_prepare(struct ring_buffer *buffer, int cpu, gfp_t flags)
 	if (!cpumask_test_cpu(cpu, buffer->cpumask))
 		return NULL;
 
-	iter = kmalloc(sizeof(*iter), flags);
+	iter = kmalloc(sizeof(*iter), GFP_KERNEL);
 	if (!iter)
 		return NULL;
 
@@ -4101,7 +4026,7 @@ EXPORT_SYMBOL_GPL(ring_buffer_read_prepare_sync);
  * an intervening ring_buffer_read_prepare_sync must have been
  * performed.
  *
- * Must be paired with ring_buffer_read_finish.
+ * Must be paired with ring_buffer_finish.
  */
 void
 ring_buffer_read_start(struct ring_buffer_iter *iter)
@@ -4123,7 +4048,7 @@ ring_buffer_read_start(struct ring_buffer_iter *iter)
 EXPORT_SYMBOL_GPL(ring_buffer_read_start);
 
 /**
- * ring_buffer_read_finish - finish reading the iterator of the buffer
+ * ring_buffer_finish - finish reading the iterator of the buffer
  * @iter: The iterator retrieved by ring_buffer_start
  *
  * This re-enables the recording to the buffer, and frees the
@@ -4298,28 +4223,32 @@ EXPORT_SYMBOL_GPL(ring_buffer_reset);
  * rind_buffer_empty - is the ring buffer empty?
  * @buffer: The ring buffer to test
  */
-bool ring_buffer_empty(struct ring_buffer *buffer)
+int ring_buffer_empty(struct ring_buffer *buffer)
 {
 	struct ring_buffer_per_cpu *cpu_buffer;
 	unsigned long flags;
-	bool dolock;
+	int dolock;
 	int cpu;
 	int ret;
+
+	dolock = rb_ok_to_lock();
 
 	/* yes this is racy, but if you don't like the race, lock the buffer */
 	for_each_buffer_cpu(buffer, cpu) {
 		cpu_buffer = buffer->buffers[cpu];
 		local_irq_save(flags);
-		dolock = rb_reader_lock(cpu_buffer);
+		if (dolock)
+			raw_spin_lock(&cpu_buffer->reader_lock);
 		ret = rb_per_cpu_empty(cpu_buffer);
-		rb_reader_unlock(cpu_buffer, dolock);
+		if (dolock)
+			raw_spin_unlock(&cpu_buffer->reader_lock);
 		local_irq_restore(flags);
 
 		if (!ret)
-			return false;
+			return 0;
 	}
 
-	return true;
+	return 1;
 }
 EXPORT_SYMBOL_GPL(ring_buffer_empty);
 
@@ -4328,21 +4257,25 @@ EXPORT_SYMBOL_GPL(ring_buffer_empty);
  * @buffer: The ring buffer
  * @cpu: The CPU buffer to test
  */
-bool ring_buffer_empty_cpu(struct ring_buffer *buffer, int cpu)
+int ring_buffer_empty_cpu(struct ring_buffer *buffer, int cpu)
 {
 	struct ring_buffer_per_cpu *cpu_buffer;
 	unsigned long flags;
-	bool dolock;
+	int dolock;
 	int ret;
 
 	if (!cpumask_test_cpu(cpu, buffer->cpumask))
-		return true;
+		return 1;
+
+	dolock = rb_ok_to_lock();
 
 	cpu_buffer = buffer->buffers[cpu];
 	local_irq_save(flags);
-	dolock = rb_reader_lock(cpu_buffer);
+	if (dolock)
+		raw_spin_lock(&cpu_buffer->reader_lock);
 	ret = rb_per_cpu_empty(cpu_buffer);
-	rb_reader_unlock(cpu_buffer, dolock);
+	if (dolock)
+		raw_spin_unlock(&cpu_buffer->reader_lock);
 	local_irq_restore(flags);
 
 	return ret;
@@ -4379,6 +4312,9 @@ int ring_buffer_swap_cpu(struct ring_buffer *buffer_a,
 		goto out;
 
 	ret = -EAGAIN;
+
+	if (ring_buffer_flags != RB_BUFFERS_ON)
+		goto out;
 
 	if (atomic_read(&buffer_a->record_disabled))
 		goto out;
@@ -4427,7 +4363,6 @@ EXPORT_SYMBOL_GPL(ring_buffer_swap_cpu);
 /**
  * ring_buffer_alloc_read_page - allocate a page to read from buffer
  * @buffer: the buffer to allocate for.
- * @cpu: the cpu buffer to allocate.
  *
  * This function is used in conjunction with ring_buffer_read_page.
  * When reading a full page from the ring buffer, these functions
@@ -4485,7 +4420,7 @@ EXPORT_SYMBOL_GPL(ring_buffer_free_read_page);
  * to swap with a page in the ring buffer.
  *
  * for example:
- *	rpage = ring_buffer_alloc_read_page(buffer, cpu);
+ *	rpage = ring_buffer_alloc_read_page(buffer);
  *	if (!rpage)
  *		return error;
  *	ret = ring_buffer_read_page(buffer, &rpage, len, cpu, 0);
@@ -4675,9 +4610,8 @@ static int rb_cpu_notify(struct notifier_block *self,
 	struct ring_buffer *buffer =
 		container_of(self, struct ring_buffer, cpu_notify);
 	long cpu = (long)hcpu;
-	long nr_pages_same;
-	int cpu_i;
-	unsigned long nr_pages;
+	int cpu_i, nr_pages_same;
+	unsigned int nr_pages;
 
 	switch (action) {
 	case CPU_UP_PREPARE:
@@ -4905,9 +4839,9 @@ static __init int test_ringbuffer(void)
 		rb_data[cpu].cnt = cpu;
 		rb_threads[cpu] = kthread_create(rb_test, &rb_data[cpu],
 						 "rbtester/%d", cpu);
-		if (WARN_ON(IS_ERR(rb_threads[cpu]))) {
+		if (WARN_ON(!rb_threads[cpu])) {
 			pr_cont("FAILED\n");
-			ret = PTR_ERR(rb_threads[cpu]);
+			ret = -1;
 			goto out_free;
 		}
 
@@ -4917,9 +4851,9 @@ static __init int test_ringbuffer(void)
 
 	/* Now create the rb hammer! */
 	rb_hammer = kthread_run(rb_hammer_test, NULL, "rbhammer");
-	if (WARN_ON(IS_ERR(rb_hammer))) {
+	if (WARN_ON(!rb_hammer)) {
 		pr_cont("FAILED\n");
-		ret = PTR_ERR(rb_hammer);
+		ret = -1;
 		goto out_free;
 	}
 

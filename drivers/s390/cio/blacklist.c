@@ -51,8 +51,9 @@ static int blacklist_range(range_action action, unsigned int from_ssid,
 {
 	if ((from_ssid > to_ssid) || ((from_ssid == to_ssid) && (from > to))) {
 		if (msgtrigger)
-			pr_warn("0.%x.%04x to 0.%x.%04x is not a valid range for cio_ignore\n",
-				from_ssid, from, to_ssid, to);
+			pr_warning("0.%x.%04x to 0.%x.%04x is not a valid "
+				   "range for cio_ignore\n", from_ssid, from,
+				   to_ssid, to);
 
 		return 1;
 	}
@@ -139,8 +140,8 @@ static int parse_busid(char *str, unsigned int *cssid, unsigned int *ssid,
 	rc = 0;
 out:
 	if (rc && msgtrigger)
-		pr_warn("%s is not a valid device for the cio_ignore kernel parameter\n",
-			str);
+		pr_warning("%s is not a valid device for the cio_ignore "
+			   "kernel parameter\n", str);
 
 	return rc;
 }
@@ -259,16 +260,16 @@ static int blacklist_parse_proc_parameters(char *buf)
 
 	parm = strsep(&buf, " ");
 
-	if (strcmp("free", parm) == 0) {
+	if (strcmp("free", parm) == 0)
 		rc = blacklist_parse_parameters(buf, free, 0);
-		css_schedule_eval_all_unreg(0);
-	} else if (strcmp("add", parm) == 0)
+	else if (strcmp("add", parm) == 0)
 		rc = blacklist_parse_parameters(buf, add, 0);
 	else if (strcmp("purge", parm) == 0)
 		return ccw_purge_blacklisted();
 	else
 		return -EINVAL;
 
+	css_schedule_reprobe();
 
 	return rc;
 }
@@ -329,20 +330,18 @@ cio_ignore_proc_seq_show(struct seq_file *s, void *it)
 	if (!iter->in_range) {
 		/* First device in range. */
 		if ((iter->devno == __MAX_SUBCHANNEL) ||
-		    !is_blacklisted(iter->ssid, iter->devno + 1)) {
+		    !is_blacklisted(iter->ssid, iter->devno + 1))
 			/* Singular device. */
-			seq_printf(s, "0.%x.%04x\n", iter->ssid, iter->devno);
-			return 0;
-		}
+			return seq_printf(s, "0.%x.%04x\n",
+					  iter->ssid, iter->devno);
 		iter->in_range = 1;
-		seq_printf(s, "0.%x.%04x-", iter->ssid, iter->devno);
-		return 0;
+		return seq_printf(s, "0.%x.%04x-", iter->ssid, iter->devno);
 	}
 	if ((iter->devno == __MAX_SUBCHANNEL) ||
 	    !is_blacklisted(iter->ssid, iter->devno + 1)) {
 		/* Last device in range. */
 		iter->in_range = 0;
-		seq_printf(s, "0.%x.%04x\n", iter->ssid, iter->devno);
+		return seq_printf(s, "0.%x.%04x\n", iter->ssid, iter->devno);
 	}
 	return 0;
 }

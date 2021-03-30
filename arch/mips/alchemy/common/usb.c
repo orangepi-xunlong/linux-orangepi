@@ -9,13 +9,11 @@
  *
  */
 
-#include <linux/clk.h>
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/spinlock.h>
 #include <linux/syscore_ops.h>
-#include <asm/cpu.h>
 #include <asm/mach-au1x00/au1000.h>
 
 /* control register offsets */
@@ -356,25 +354,47 @@ static inline void __au1200_udc_control(void __iomem *base, int enable)
 	}
 }
 
+static inline int au1200_coherency_bug(void)
+{
+#if defined(CONFIG_DMA_COHERENT)
+	/* Au1200 AB USB does not support coherent memory */
+	if (!(read_c0_prid() & 0xff)) {
+		printk(KERN_INFO "Au1200 USB: this is chip revision AB !!\n");
+		printk(KERN_INFO "Au1200 USB: update your board or re-configure"
+				 " the kernel\n");
+		return -ENODEV;
+	}
+#endif
+	return 0;
+}
+
 static inline int au1200_usb_control(int block, int enable)
 {
 	void __iomem *base =
 			(void __iomem *)KSEG1ADDR(AU1200_USB_CTL_PHYS_ADDR);
+	int ret = 0;
 
 	switch (block) {
 	case ALCHEMY_USB_OHCI0:
+		ret = au1200_coherency_bug();
+		if (ret && enable)
+			goto out;
 		__au1200_ohci_control(base, enable);
 		break;
 	case ALCHEMY_USB_UDC0:
 		__au1200_udc_control(base, enable);
 		break;
 	case ALCHEMY_USB_EHCI0:
+		ret = au1200_coherency_bug();
+		if (ret && enable)
+			goto out;
 		__au1200_ehci_control(base, enable);
 		break;
 	default:
-		return -ENODEV;
+		ret = -ENODEV;
 	}
-	return 0;
+out:
+	return ret;
 }
 
 
@@ -388,25 +408,10 @@ static inline void au1200_usb_init(void)
 	udelay(1000);
 }
 
-static inline int au1000_usb_init(unsigned long rb, int reg)
+static inline void au1000_usb_init(unsigned long rb, int reg)
 {
 	void __iomem *base = (void __iomem *)KSEG1ADDR(rb + reg);
 	unsigned long r = __raw_readl(base);
-	struct clk *c;
-
-	/* 48MHz check. Don't init if no one can provide it */
-	c = clk_get(NULL, "usbh_clk");
-	if (IS_ERR(c))
-		return -ENODEV;
-	if (clk_round_rate(c, 48000000) != 48000000) {
-		clk_put(c);
-		return -ENODEV;
-	}
-	if (clk_set_rate(c, 48000000)) {
-		clk_put(c);
-		return -ENODEV;
-	}
-	clk_put(c);
 
 #if defined(__BIG_ENDIAN)
 	r |= USBHEN_BE;
@@ -416,8 +421,6 @@ static inline int au1000_usb_init(unsigned long rb, int reg)
 	__raw_writel(r, base);
 	wmb();
 	udelay(1000);
-
-	return 0;
 }
 
 
@@ -425,15 +428,8 @@ static inline void __au1xx0_ohci_control(int enable, unsigned long rb, int creg)
 {
 	void __iomem *base = (void __iomem *)KSEG1ADDR(rb);
 	unsigned long r = __raw_readl(base + creg);
-	struct clk *c = clk_get(NULL, "usbh_clk");
-
-	if (IS_ERR(c))
-		return;
 
 	if (enable) {
-		if (clk_prepare_enable(c))
-			goto out;
-
 		__raw_writel(r | USBHEN_CE, base + creg);
 		wmb();
 		udelay(1000);
@@ -448,10 +444,7 @@ static inline void __au1xx0_ohci_control(int enable, unsigned long rb, int creg)
 	} else {
 		__raw_writel(r & ~(USBHEN_CE | USBHEN_E), base + creg);
 		wmb();
-		clk_disable_unprepare(c);
 	}
-out:
-	clk_put(c);
 }
 
 static inline int au1000_usb_control(int block, int enable, unsigned long rb,
@@ -485,11 +478,11 @@ int alchemy_usb_control(int block, int enable)
 	case ALCHEMY_CPU_AU1500:
 	case ALCHEMY_CPU_AU1100:
 		ret = au1000_usb_control(block, enable,
-			AU1000_USB_OHCI_PHYS_ADDR, AU1000_OHCICFG);
+				AU1000_USB_OHCI_PHYS_ADDR, AU1000_OHCICFG);
 		break;
 	case ALCHEMY_CPU_AU1550:
 		ret = au1000_usb_control(block, enable,
-			AU1550_USB_OHCI_PHYS_ADDR, AU1550_OHCICFG);
+				AU1550_USB_OHCI_PHYS_ADDR, AU1550_OHCICFG);
 		break;
 	case ALCHEMY_CPU_AU1200:
 		ret = au1200_usb_control(block, enable);
@@ -597,18 +590,14 @@ static struct syscore_ops alchemy_usb_pm_ops = {
 
 static int __init alchemy_usb_init(void)
 {
-	int ret = 0;
-
 	switch (alchemy_get_cputype()) {
 	case ALCHEMY_CPU_AU1000:
 	case ALCHEMY_CPU_AU1500:
 	case ALCHEMY_CPU_AU1100:
-		ret = au1000_usb_init(AU1000_USB_OHCI_PHYS_ADDR,
-				      AU1000_OHCICFG);
+		au1000_usb_init(AU1000_USB_OHCI_PHYS_ADDR, AU1000_OHCICFG);
 		break;
 	case ALCHEMY_CPU_AU1550:
-		ret = au1000_usb_init(AU1550_USB_OHCI_PHYS_ADDR,
-				      AU1550_OHCICFG);
+		au1000_usb_init(AU1550_USB_OHCI_PHYS_ADDR, AU1550_OHCICFG);
 		break;
 	case ALCHEMY_CPU_AU1200:
 		au1200_usb_init();
@@ -618,9 +607,8 @@ static int __init alchemy_usb_init(void)
 		break;
 	}
 
-	if (!ret)
-		register_syscore_ops(&alchemy_usb_pm_ops);
+	register_syscore_ops(&alchemy_usb_pm_ops);
 
-	return ret;
+	return 0;
 }
 arch_initcall(alchemy_usb_init);

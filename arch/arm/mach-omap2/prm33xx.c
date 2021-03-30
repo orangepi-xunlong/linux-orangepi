@@ -19,28 +19,25 @@
 #include <linux/err.h>
 #include <linux/io.h>
 
+#include "common.h"
 #include "powerdomain.h"
 #include "prm33xx.h"
 #include "prm-regbits-33xx.h"
 
-#define AM33XX_PRM_RSTCTRL_OFFSET		0x0000
-
-#define AM33XX_RST_GLOBAL_WARM_SW_MASK		(1 << 0)
-
 /* Read a register in a PRM instance */
-static u32 am33xx_prm_read_reg(s16 inst, u16 idx)
+u32 am33xx_prm_read_reg(s16 inst, u16 idx)
 {
-	return readl_relaxed(prm_base + inst + idx);
+	return __raw_readl(prm_base + inst + idx);
 }
 
 /* Write into a register in a PRM instance */
-static void am33xx_prm_write_reg(u32 val, s16 inst, u16 idx)
+void am33xx_prm_write_reg(u32 val, s16 inst, u16 idx)
 {
-	writel_relaxed(val, prm_base + inst + idx);
+	__raw_writel(val, prm_base + inst + idx);
 }
 
 /* Read-modify-write a register in PRM. Caller must lock */
-static u32 am33xx_prm_rmw_reg_bits(u32 mask, u32 bits, s16 inst, s16 idx)
+u32 am33xx_prm_rmw_reg_bits(u32 mask, u32 bits, s16 inst, s16 idx)
 {
 	u32 v;
 
@@ -56,7 +53,6 @@ static u32 am33xx_prm_rmw_reg_bits(u32 mask, u32 bits, s16 inst, s16 idx)
  * am33xx_prm_is_hardreset_asserted - read the HW reset line state of
  * submodules contained in the hwmod module
  * @shift: register bit shift corresponding to the reset line to check
- * @part: PRM partition, ignored for AM33xx
  * @inst: CM instance register offset (*_INST macro)
  * @rstctrl_offs: RM_RSTCTRL register address offset for this module
  *
@@ -64,8 +60,7 @@ static u32 am33xx_prm_rmw_reg_bits(u32 mask, u32 bits, s16 inst, s16 idx)
  * 0 if the (sub)module hardreset line is not currently asserted, or
  * -EINVAL upon parameter error.
  */
-static int am33xx_prm_is_hardreset_asserted(u8 shift, u8 part, s16 inst,
-					    u16 rstctrl_offs)
+int am33xx_prm_is_hardreset_asserted(u8 shift, s16 inst, u16 rstctrl_offs)
 {
 	u32 v;
 
@@ -79,7 +74,6 @@ static int am33xx_prm_is_hardreset_asserted(u8 shift, u8 part, s16 inst,
 /**
  * am33xx_prm_assert_hardreset - assert the HW reset line of a submodule
  * @shift: register bit shift corresponding to the reset line to assert
- * @part: CM partition, ignored for AM33xx
  * @inst: CM instance register offset (*_INST macro)
  * @rstctrl_reg: RM_RSTCTRL register address for this module
  *
@@ -90,8 +84,7 @@ static int am33xx_prm_is_hardreset_asserted(u8 shift, u8 part, s16 inst,
  * place the submodule into reset.  Returns 0 upon success or -EINVAL
  * upon an argument error.
  */
-static int am33xx_prm_assert_hardreset(u8 shift, u8 part, s16 inst,
-				       u16 rstctrl_offs)
+int am33xx_prm_assert_hardreset(u8 shift, s16 inst, u16 rstctrl_offs)
 {
 	u32 mask = 1 << shift;
 
@@ -104,8 +97,6 @@ static int am33xx_prm_assert_hardreset(u8 shift, u8 part, s16 inst,
  * am33xx_prm_deassert_hardreset - deassert a submodule hardreset line and
  * wait
  * @shift: register bit shift corresponding to the reset line to deassert
- * @st_shift: reset status register bit shift corresponding to the reset line
- * @part: PRM partition, not used for AM33xx
  * @inst: CM instance register offset (*_INST macro)
  * @rstctrl_reg: RM_RSTCTRL register address for this module
  * @rstst_reg: RM_RSTST register address for this module
@@ -119,15 +110,14 @@ static int am33xx_prm_assert_hardreset(u8 shift, u8 part, s16 inst,
  * -EINVAL upon an argument error, -EEXIST if the submodule was already out
  * of reset, or -EBUSY if the submodule did not exit reset promptly.
  */
-static int am33xx_prm_deassert_hardreset(u8 shift, u8 st_shift, u8 part,
-					 s16 inst, u16 rstctrl_offs,
-					 u16 rstst_offs)
+int am33xx_prm_deassert_hardreset(u8 shift, u8 st_shift, s16 inst,
+		u16 rstctrl_offs, u16 rstst_offs)
 {
 	int c;
 	u32 mask = 1 << st_shift;
 
 	/* Check the current status to avoid  de-asserting the line twice */
-	if (am33xx_prm_is_hardreset_asserted(shift, 0, inst, rstctrl_offs) == 0)
+	if (am33xx_prm_is_hardreset_asserted(shift, inst, rstctrl_offs) == 0)
 		return -EEXIST;
 
 	/* Clear the reset status by writing 1 to the status bit */
@@ -139,7 +129,7 @@ static int am33xx_prm_deassert_hardreset(u8 shift, u8 st_shift, u8 part,
 	am33xx_prm_rmw_reg_bits(mask, 0, inst, rstctrl_offs);
 
 	/* wait the status to be set */
-	omap_test_timeout(am33xx_prm_is_hardreset_asserted(st_shift, 0, inst,
+	omap_test_timeout(am33xx_prm_is_hardreset_asserted(st_shift, inst,
 							   rstst_offs),
 			  MAX_MODULE_HARDRESET_WAIT, c);
 
@@ -172,6 +162,17 @@ static int am33xx_pwrdm_read_pwrst(struct powerdomain *pwrdm)
 	v = am33xx_prm_read_reg(pwrdm->prcm_offs, pwrdm->pwrstst_offs);
 	v &= OMAP_POWERSTATEST_MASK;
 	v >>= OMAP_POWERSTATEST_SHIFT;
+
+	return v;
+}
+
+static int am33xx_pwrdm_read_prev_pwrst(struct powerdomain *pwrdm)
+{
+	u32 v;
+
+	v = am33xx_prm_read_reg(pwrdm->prcm_offs, pwrdm->pwrstst_offs);
+	v &= AM33XX_LASTPOWERSTATEENTERED_MASK;
+	v >>= AM33XX_LASTPOWERSTATEENTERED_SHIFT;
 
 	return v;
 }
@@ -319,33 +320,11 @@ static int am33xx_pwrdm_wait_transition(struct powerdomain *pwrdm)
 	return 0;
 }
 
-static int am33xx_check_vcvp(void)
-{
-	/* No VC/VP on am33xx devices */
-	return 0;
-}
-
-/**
- * am33xx_prm_global_warm_sw_reset - reboot the device via warm reset
- *
- * Immediately reboots the device through warm reset.
- */
-static void am33xx_prm_global_warm_sw_reset(void)
-{
-	am33xx_prm_rmw_reg_bits(AM33XX_RST_GLOBAL_WARM_SW_MASK,
-				AM33XX_RST_GLOBAL_WARM_SW_MASK,
-				AM33XX_PRM_DEVICE_MOD,
-				AM33XX_PRM_RSTCTRL_OFFSET);
-
-	/* OCP barrier */
-	(void)am33xx_prm_read_reg(AM33XX_PRM_DEVICE_MOD,
-				  AM33XX_PRM_RSTCTRL_OFFSET);
-}
-
 struct pwrdm_ops am33xx_pwrdm_operations = {
 	.pwrdm_set_next_pwrst		= am33xx_pwrdm_set_next_pwrst,
 	.pwrdm_read_next_pwrst		= am33xx_pwrdm_read_next_pwrst,
 	.pwrdm_read_pwrst		= am33xx_pwrdm_read_pwrst,
+	.pwrdm_read_prev_pwrst		= am33xx_pwrdm_read_prev_pwrst,
 	.pwrdm_set_logic_retst		= am33xx_pwrdm_set_logic_retst,
 	.pwrdm_read_logic_pwrst		= am33xx_pwrdm_read_logic_pwrst,
 	.pwrdm_read_logic_retst		= am33xx_pwrdm_read_logic_retst,
@@ -356,23 +335,4 @@ struct pwrdm_ops am33xx_pwrdm_operations = {
 	.pwrdm_set_mem_onst		= am33xx_pwrdm_set_mem_onst,
 	.pwrdm_set_mem_retst		= am33xx_pwrdm_set_mem_retst,
 	.pwrdm_wait_transition		= am33xx_pwrdm_wait_transition,
-	.pwrdm_has_voltdm		= am33xx_check_vcvp,
 };
-
-static struct prm_ll_data am33xx_prm_ll_data = {
-	.assert_hardreset		= am33xx_prm_assert_hardreset,
-	.deassert_hardreset		= am33xx_prm_deassert_hardreset,
-	.is_hardreset_asserted		= am33xx_prm_is_hardreset_asserted,
-	.reset_system			= am33xx_prm_global_warm_sw_reset,
-};
-
-int __init am33xx_prm_init(const struct omap_prcm_init_data *data)
-{
-	return prm_register(&am33xx_prm_ll_data);
-}
-
-static void __exit am33xx_prm_exit(void)
-{
-	prm_unregister(&am33xx_prm_ll_data);
-}
-__exitcall(am33xx_prm_exit);

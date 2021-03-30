@@ -1,6 +1,6 @@
 /* dvb-usb-remote.c is part of the DVB USB library.
  *
- * Copyright (C) 2004-6 Patrick Boettcher (patrick.boettcher@posteo.de)
+ * Copyright (C) 2004-6 Patrick Boettcher (patrick.boettcher@desy.de)
  * see dvb-usb-init.c for copyright information.
  *
  * This file contains functions for initializing the input-device and for handling remote-control-queries.
@@ -272,7 +272,7 @@ static int rc_core_dvb_usb_remote_init(struct dvb_usb_device *d)
 	dev->driver_name = d->props.rc.core.module_name;
 	dev->map_name = d->props.rc.core.rc_codes;
 	dev->change_protocol = d->props.rc.core.change_protocol;
-	dev->allowed_protocols = d->props.rc.core.allowed_protos;
+	dev->allowed_protos = d->props.rc.core.allowed_protos;
 	dev->driver_type = d->props.rc.core.driver_type;
 	usb_to_input_id(d->udev, &dev->input_id);
 	dev->input_name = "IR-receiver inside an USB DVB receiver";

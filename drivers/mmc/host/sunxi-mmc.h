@@ -1,20 +1,3 @@
-/*
-* Sunxi SD/MMC host driver
-*
-* Copyright (C) 2015 AllWinnertech Ltd.
-* Author: lixiang <lixiang@allwinnertech>
-*
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License version 2 as
-* published by the Free Software Foundation.
-*
-* This program is distributed "as is" WITHOUT ANY WARRANTY of any
-* kind, whether express or implied; without even the implied warranty
-* of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-* GNU General Public License for more details.
-*/
-
-
 #include <linux/clk.h>
 #include <linux/clk/sunxi.h>
 
@@ -41,48 +24,49 @@
 #ifndef __SUNXI_MMC_H__
 #define __SUNXI_MMC_H__
 
+
 #define DRIVER_NAME "sunxi-mmc"
-#define DRIVER_RIVISION "v3.35 2019-12-11 14:29"
-#define DRIVER_VERSION "SD/MMC/SDIO Host Controller Driver(" DRIVER_RIVISION ")"
+#define DRIVER_RIVISION "v0.54 2016-05-11 21:04"
+#define DRIVER_VERSION "SD/MMC/SDIO Host Controller Driver(" DRIVER_RIVISION ")" \
+			" Compiled in " __DATE__ " at " __TIME__""
+
 
 #if defined CONFIG_FPGA_V4_PLATFORM || defined CONFIG_FPGA_V7_PLATFORM
 #define MMC_FPGA
 #endif
+//#define USE_OLD_SYS_CLK_INTERFACE
 
 
 /* register offset definitions */
-#define SDXC_REG_GCTRL	(0x00)	/* SMC Global Control Register */
-#define SDXC_REG_CLKCR	(0x04)	/* SMC Clock Control Register */
-#define SDXC_REG_TMOUT	(0x08)	/* SMC Time Out Register */
-#define SDXC_REG_WIDTH	(0x0C)	/* SMC Bus Width Register */
-#define SDXC_REG_BLKSZ	(0x10)	/* SMC Block Size Register */
-#define SDXC_REG_BCNTR	(0x14)	/* SMC Byte Count Register */
-#define SDXC_REG_CMDR	(0x18)	/* SMC Command Register */
-#define SDXC_REG_CARG	(0x1C)	/* SMC Argument Register */
-#define SDXC_REG_RESP0	(0x20)	/* SMC Response Register 0 */
-#define SDXC_REG_RESP1	(0x24)	/* SMC Response Register 1 */
-#define SDXC_REG_RESP2	(0x28)	/* SMC Response Register 2 */
-#define SDXC_REG_RESP3	(0x2C)	/* SMC Response Register 3 */
-#define SDXC_REG_IMASK	(0x30)	/* SMC Interrupt Mask Register */
-#define SDXC_REG_MISTA	(0x34)	/* SMC Masked Interrupt Status Register */
-#define SDXC_REG_RINTR	(0x38)	/* SMC Raw Interrupt Status Register */
-#define SDXC_REG_STAS	(0x3C)	/* SMC Status Register */
-#define SDXC_REG_FTRGL	(0x40)	/* SMC FIFO Threshold Watermark Registe */
-#define SDXC_REG_FUNS	(0x44)	/* SMC Function Select Register */
-#define SDXC_REG_CBCR	(0x48)	/* SMC CIU Byte Count Register */
-#define SDXC_REG_BBCR	(0x4C)	/* SMC BIU Byte Count Register */
-#define SDXC_REG_DBGC	(0x50)	/* SMC Debug Enable Register */
-#define SDXC_REG_A12A	(0x58)	/*auto cmd12 arg*/
-#define SDXC_REG_HWRST	(0x78)	/* SMC Card Hardware Reset for Register */
-#define SDXC_REG_DMAC	(0x80)	/* SMC IDMAC Control Register */
-#define SDXC_REG_DLBA	(0x84)	/* SMC IDMAC Descriptor List Base Addre */
-#define SDXC_REG_IDST	(0x88)	/* SMC IDMAC Status Register */
-#define SDXC_REG_IDIE	(0x8C)	/* SMC IDMAC Interrupt Enable Register */
+#define SDXC_REG_GCTRL	(0x00) /* SMC Global Control Register */
+#define SDXC_REG_CLKCR	(0x04) /* SMC Clock Control Register */
+#define SDXC_REG_TMOUT	(0x08) /* SMC Time Out Register */
+#define SDXC_REG_WIDTH	(0x0C) /* SMC Bus Width Register */
+#define SDXC_REG_BLKSZ	(0x10) /* SMC Block Size Register */
+#define SDXC_REG_BCNTR	(0x14) /* SMC Byte Count Register */
+#define SDXC_REG_CMDR	(0x18) /* SMC Command Register */
+#define SDXC_REG_CARG	(0x1C) /* SMC Argument Register */
+#define SDXC_REG_RESP0	(0x20) /* SMC Response Register 0 */
+#define SDXC_REG_RESP1	(0x24) /* SMC Response Register 1 */
+#define SDXC_REG_RESP2	(0x28) /* SMC Response Register 2 */
+#define SDXC_REG_RESP3	(0x2C) /* SMC Response Register 3 */
+#define SDXC_REG_IMASK	(0x30) /* SMC Interrupt Mask Register */
+#define SDXC_REG_MISTA	(0x34) /* SMC Masked Interrupt Status Register */
+#define SDXC_REG_RINTR	(0x38) /* SMC Raw Interrupt Status Register */
+#define SDXC_REG_STAS	(0x3C) /* SMC Status Register */
+#define SDXC_REG_FTRGL	(0x40) /* SMC FIFO Threshold Watermark Registe */
+#define SDXC_REG_FUNS	(0x44) /* SMC Function Select Register */
+#define SDXC_REG_CBCR	(0x48) /* SMC CIU Byte Count Register */
+#define SDXC_REG_BBCR	(0x4C) /* SMC BIU Byte Count Register */
+#define SDXC_REG_DBGC	(0x50) /* SMC Debug Enable Register */
+#define SDXC_REG_A12A		(0x58 )		//auto cmd12 arg
+#define SDXC_REG_HWRST	(0x78) /* SMC Card Hardware Reset for Register */
+#define SDXC_REG_DMAC	(0x80) /* SMC IDMAC Control Register */
+#define SDXC_REG_DLBA	(0x84) /* SMC IDMAC Descriptor List Base Addre */
+#define SDXC_REG_IDST	(0x88) /* SMC IDMAC Status Register */
+#define SDXC_REG_IDIE	(0x8C) /* SMC IDMAC Interrupt Enable Register */
 #define SDXC_REG_CHDA	(0x90)
 #define SDXC_REG_CBDA	(0x94)
-
-
-#define SDXC_REG_FIFO	(0x200)
 
 #define mmc_readl(host, reg) \
 	readl((host)->reg_base + SDXC_##reg)
@@ -109,6 +93,7 @@
 #define SDXC_CARD_CLOCK_ON		BIT(16)
 #define SDXC_LOW_POWER_ON		BIT(17)
 #define SDXC_MASK_DATA0			BIT(31)
+
 
 /* bus width */
 #define SDXC_WIDTH1			0
@@ -163,9 +148,6 @@
 #define SDXC_INTERRUPT_DONE_BIT \
 	(SDXC_AUTO_COMMAND_DONE | SDXC_DATA_OVER | \
 	 SDXC_COMMAND_DONE | SDXC_VOLTAGE_CHANGE_DONE)
-#define SDXC_INTERRUPT_DDONE_BIT \
-	(SDXC_AUTO_COMMAND_DONE | SDXC_DATA_OVER)
-
 
 /* status */
 #define SDXC_RXWL_FLAG			BIT(0)
@@ -212,6 +194,7 @@
 #define SDXC_IDMAC_WRITE			(7 << 13)
 #define SDXC_IDMAC_DESC_CLOSE			(8 << 13)
 
+
 /*When one dma des transfer 4k,PAGE_SIZE*4 can transfer max 4M data */
 #define SUNXI_REQ_PAGE_SIZE			(PAGE_SIZE*4)
 
@@ -222,20 +205,21 @@
 *  Bits 26-31: not used
 * Since we only ever set buf1 size, we can simply store it directly.
 */
-#define SDXC_IDMAC_DES0_DIC	BIT(1)	/* disable interrupt on completion */
-#define SDXC_IDMAC_DES0_LD	BIT(2)	/* last descriptor */
-#define SDXC_IDMAC_DES0_FD	BIT(3)	/* first descriptor */
-#define SDXC_IDMAC_DES0_CH	BIT(4)	/* chain mode */
-#define SDXC_IDMAC_DES0_ER	BIT(5)	/* end of ring */
-#define SDXC_IDMAC_DES0_CES	BIT(30)	/* card error summary */
-#define SDXC_IDMAC_DES0_OWN	BIT(31)	/* 1-idma owns it, 0-host owns it */
+#define SDXC_IDMAC_DES0_DIC	BIT(1)  /* disable interrupt on completion */
+#define SDXC_IDMAC_DES0_LD	BIT(2)  /* last descriptor */
+#define SDXC_IDMAC_DES0_FD	BIT(3)  /* first descriptor */
+#define SDXC_IDMAC_DES0_CH	BIT(4)  /* chain mode */
+#define SDXC_IDMAC_DES0_ER	BIT(5)  /* end of ring */
+#define SDXC_IDMAC_DES0_CES	BIT(30) /* card error summary */
+#define SDXC_IDMAC_DES0_OWN	BIT(31) /* 1-idma owns it, 0-host owns it */
 
 struct sunxi_idma_des {
-	u32 config;
-	u32 buf_size;
-	u32 buf_addr_ptr1;
-	u32 buf_addr_ptr2;
+	u32	config;
+	u32	buf_size;
+	u32	buf_addr_ptr1;
+	u32	buf_addr_ptr2;
 };
+
 
 struct sunxi_mmc_ctrl_regs {
 	u32 gctrl;
@@ -250,66 +234,52 @@ struct sunxi_mmc_ctrl_regs {
 	u32 imask;
 };
 
-struct sunxi_mmc_host_perf{
-	ktime_t start;
-	int64_t rbytes;
-	int64_t wbytes;
-	ktime_t rtime;
-	ktime_t wtime;
-
-	/***use to compute the time no include busy***/
-	int64_t wbytestran;
-	ktime_t wtimetran;
-};
 
 struct sunxi_mmc_host {
-	struct mmc_host *mmc;
+	struct mmc_host	*mmc;
 	struct reset_control *reset;
 
 	/* IO mapping base */
-	void __iomem *reg_base;
+	void __iomem	*reg_base;
 
 	/* clock management */
-	struct clk *clk_ahb;
-	struct clk *clk_mmc;
-	struct clk *clk_rst;
-
-	int (*sunxi_mmc_clk_set_rate)(struct sunxi_mmc_host *host,
-				struct mmc_ios *ios);
-	int crypt_flag;
+	struct clk	*clk_ahb;
+	struct clk	*clk_mmc;
+	struct clk	*clk_rst;
+	
+	int (*sunxi_mmc_clk_set_rate)(struct sunxi_mmc_host *host, struct mmc_ios *ios);
 
 	/* irq */
-	spinlock_t lock;
-	int irq;
-	u32 int_sum;
-	u32 sdio_imask;
+	spinlock_t	lock;
+	int		irq;
+	u32		int_sum;
+	u32		sdio_imask;
 
 	/* dma */
-	u32 idma_des_size_bits;
-	dma_addr_t sg_dma;
-	void *sg_cpu;
-	bool wait_dma;
-	u32 dma_tl;
-	u64 dma_mask;
+	u32		idma_des_size_bits;
+	dma_addr_t	sg_dma;
+	void		*sg_cpu;
+	bool		wait_dma;
+	u32		dma_tl;
+	u64 	dma_mask;
 
-	void (*sunxi_mmc_thld_ctl)(struct sunxi_mmc_host *host,
-				 struct mmc_ios *ios,
-				    struct mmc_data *data);
+	void (*sunxi_mmc_thld_ctl )(struct sunxi_mmc_host *host,
+				  struct mmc_ios *ios, struct mmc_data *data);
 
 	struct mmc_request *mrq;
 	struct mmc_request *mrq_busy;
 	struct mmc_request *mrq_retry;
 	struct mmc_request *manual_stop_mrq;
-	int ferror;
+	int		ferror;
 
-	u32 power_on;
+	u32 	power_on;
 
 	/* pinctrl handles */
-	struct pinctrl *pinctrl;
-	struct pinctrl_state *pins_default;
-	struct pinctrl_state *pins_sleep;
+	struct pinctrl		*pinctrl;
+	struct pinctrl_state	*pins_default;
+	struct pinctrl_state	*pins_sleep;
 
-	/*sys node */
+	/*sys node*/
 	struct device_attribute maual_insert;
 	struct device_attribute *dump_register;
 	struct device_attribute dump_clk_dly;
@@ -319,105 +289,34 @@ struct sunxi_mmc_host {
 	struct sunxi_mmc_ctrl_regs bak_regs;
 	void (*sunxi_mmc_save_spec_reg)(struct sunxi_mmc_host *host);
 	void (*sunxi_mmc_restore_spec_reg)(struct sunxi_mmc_host *host);
-	void (*sunxi_mmc_set_acmda)(struct sunxi_mmc_host *host);
-	void (*sunxi_mmc_shutdown)(struct platform_device *pdev);
-	int (*sunxi_mmc_oclk_en)(struct sunxi_mmc_host *host, u32 oclk_en);
-	int (*sunxi_mmc_updata_pha)(struct sunxi_mmc_host *host,
-			struct mmc_command *cmd, struct mmc_data *data);
-	void (*sunxi_mmc_on_off_emce)(struct sunxi_mmc_host *host,
-			u32 en_crypt, u32 ac_mode, u32 en_emce, int data_len,
-			int bypass, int task_load);
-	bool (*sunxi_mmc_hw_busy)(struct sunxi_mmc_host *host);
 
-	/*really controller id,no logic id */
+	void (*sunxi_mmc_set_acmda)(struct sunxi_mmc_host *host);
+
+	void (*sunxi_mmc_shutdown)(struct platform_device * pdev);
+	int (*sunxi_mmc_oclk_en)(struct sunxi_mmc_host *host , u32 oclk_en);
+
+	/*really controller id,no logic id*/
 	int phy_index;
 
-	u32 dat3_imask;
+	u32  dat3_imask;
 
-	/*no wait busy if wrtie end, only for customer need */
-#define NO_WBUSY_WR_END  0x1
-#define NO_REINIT_SHUTDOWN			   0x2
-#define CARD_PWR_GPIO_HIGH_ACTIVE	   0x4
-#define SUNXI_SC_EN_RETRY					0x8
-	/**If set this bit,when use sunxi_check_r1_ready_may_sleep,
-	*we will wait 0xFFFFFFFF ms, for debug use
-	*it is no meant on linux4.4
-	*/
-#define SUNXI_R1B_WAIT_MAX					0x10
 
-/*#define SUNXI_MANUAL_READ_DATA_TIMEOUT      0x20*/
-/*
-*Disable linux kernel native broken cd function,use host  defined.
-*Host defined cd function only report true when it detect cd pin change.
-*If not detect cd pin change,it return false.
-*We use it to deal with some bad card which cannot init at all
-*But host defined cd function has a disadvantage that it may not detect card
-*If card is inserted too often.
-*/
-#define SUNXI_DIS_KER_NAT_CD			0x40
-
-/*#define SUNXI_NO_ERASE				0x80*/
-/*control specal function control,for customer need*/
-	u32 ctl_spec_cap;
+	/*no wait busy if wrtie end, only for customer need*/
+	#define NO_MANUAL_WAIT_BUSY_WRITE_END  0x1
+	#define NO_REINIT_SHUTDOWN			   0x2
+	#define CARD_PWR_GPIO_HIGH_ACTIVE	   0x4
+	#define SUNXI_SC_EN_RETRY					0x8
+	u32 ctl_spec_cap;//control specal function control,for customer need
 
 	int card_pwr_gpio;
 
 	u32 retry_cnt;
 	u32 errno_retry;
-	int (*sunxi_mmc_judge_retry)(struct sunxi_mmc_host *host,
-				      struct mmc_command *cmd, u32 rcnt,
-				      u32 errno, void *other);
-	int sunxi_retry_samp_dl;
-	int sunxi_retry_ds_dl;
-	/*only use for MMC_CAP_NEEDS_POLL and SUNXI_DIS_KER_NAT_CD is on*/
-	u32 present;
-
-	bool perf_enable;
-	struct device_attribute host_perf;
-	struct sunxi_mmc_host_perf perf;
-	struct device_attribute filter_sector_perf;
-	struct device_attribute filter_speed_perf;
-	unsigned int filter_sector;
-	unsigned int filter_speed;
-	struct device_attribute host_mwr;
+	int (*sunxi_mmc_judge_retry)(struct sunxi_mmc_host *host , struct mmc_command *cmd , u32 rcnt , u32 errno , void *other);
 
 	void *version_priv_dat;
-
-	/*auto command 23 operate*/
-	/*set auto cmd 23 val and enable bit,or get respose*/
-	bool (*sunxi_mmc_opacmd23)(struct sunxi_mmc_host *host, bool set, u32 arg, u32 *rep);
-	/*sample fifo contral */
-	bool sfc_dis;
-
-	/*des phy address shift,use for over 4G phy ddrest*/
-	size_t des_addr_shift;
-	char name[32];
 };
-
-/*the struct as the the kernel version changes,which copy form core/slot-gpio.c*/
-struct mmc_gpio {
-	struct gpio_desc *ro_gpio;
-	struct gpio_desc *cd_gpio;
-	bool override_ro_active_level;
-	bool override_cd_active_level;
-	irqreturn_t (*cd_gpio_isr)(int irq, void *dev_id);
-	char *ro_label;
-	char cd_label[0];
-};
-
-/*use to check ddr mode,not include hs400*/
-#define sunxi_mmc_ddr_timing(it)	\
-	(((it) == MMC_TIMING_UHS_DDR50) || ((it) == MMC_TIMING_MMC_DDR52))
-
 
 void sunxi_mmc_set_a12a(struct sunxi_mmc_host *host);
 void sunxi_mmc_do_shutdown_com(struct platform_device *pdev);
-extern int mmc_go_idle(struct mmc_host *host);
-extern int mmc_send_op_cond(struct mmc_host *host, u32 ocr, u32 *rocr);
-extern int mmc_send_status(struct mmc_card *card, u32 *status);
-extern void mmc_set_clock(struct mmc_host *host, unsigned int hz);
-extern void mmc_set_timing(struct mmc_host *host, unsigned int timing);
-extern void mmc_set_bus_width(struct mmc_host *host, unsigned int width);
-extern int sunxi_sel_pio_mode(struct pinctrl *pinctrl, u32 pm_sel);
-
 #endif

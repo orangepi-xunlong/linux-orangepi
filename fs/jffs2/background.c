@@ -75,12 +75,10 @@ void jffs2_stop_garbage_collect_thread(struct jffs2_sb_info *c)
 static int jffs2_garbage_collect_thread(void *_c)
 {
 	struct jffs2_sb_info *c = _c;
-	sigset_t hupmask;
 
-	siginitset(&hupmask, sigmask(SIGHUP));
 	allow_signal(SIGKILL);
 	allow_signal(SIGSTOP);
-	allow_signal(SIGHUP);
+	allow_signal(SIGCONT);
 
 	c->gc_task = current;
 	complete(&c->gc_thread_start);
@@ -89,7 +87,7 @@ static int jffs2_garbage_collect_thread(void *_c)
 
 	set_freezable();
 	for (;;) {
-		sigprocmask(SIG_UNBLOCK, &hupmask, NULL);
+		allow_signal(SIGHUP);
 	again:
 		spin_lock(&c->erase_completion_lock);
 		if (!jffs2_thread_should_wake(c)) {
@@ -97,9 +95,10 @@ static int jffs2_garbage_collect_thread(void *_c)
 			spin_unlock(&c->erase_completion_lock);
 			jffs2_dbg(1, "%s(): sleeping...\n", __func__);
 			schedule();
-		} else {
+		} else
 			spin_unlock(&c->erase_completion_lock);
-		}
+			
+
 		/* Problem - immediately after bootup, the GCD spends a lot
 		 * of time in places like jffs2_kill_fragtree(); so much so
 		 * that userspace processes (like gdm and X) are starved
@@ -120,18 +119,20 @@ static int jffs2_garbage_collect_thread(void *_c)
 		/* Put_super will send a SIGKILL and then wait on the sem.
 		 */
 		while (signal_pending(current) || freezing(current)) {
+			siginfo_t info;
 			unsigned long signr;
 
 			if (try_to_freeze())
 				goto again;
 
-			signr = kernel_dequeue_signal(NULL);
+			signr = dequeue_signal_lock(current, &current->blocked, &info);
 
 			switch(signr) {
 			case SIGSTOP:
 				jffs2_dbg(1, "%s(): SIGSTOP received\n",
 					  __func__);
-				kernel_signal_stop();
+				set_current_state(TASK_STOPPED);
+				schedule();
 				break;
 
 			case SIGKILL:
@@ -149,7 +150,7 @@ static int jffs2_garbage_collect_thread(void *_c)
 			}
 		}
 		/* We don't want SIGHUP to interrupt us. STOP and KILL are OK though. */
-		sigprocmask(SIG_BLOCK, &hupmask, NULL);
+		disallow_signal(SIGHUP);
 
 		jffs2_dbg(1, "%s(): pass\n", __func__);
 		if (jffs2_garbage_collect_pass(c) == -ENOSPC) {

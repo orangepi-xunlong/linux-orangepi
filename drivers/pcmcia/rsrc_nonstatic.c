@@ -191,13 +191,15 @@ static void do_io_probe(struct pcmcia_socket *s, unsigned int base,
 	int any;
 	u_char *b, hole, most;
 
-	dev_info(&s->dev, "cs: IO port probe %#x-%#x:", base, base+num-1);
+	dev_printk(KERN_INFO, &s->dev, "cs: IO port probe %#x-%#x:",
+		base, base+num-1);
 
 	/* First, what does a floating port look like? */
 	b = kzalloc(256, GFP_KERNEL);
 	if (!b) {
-		pr_cont("\n");
-		dev_err(&s->dev, "do_io_probe: unable to kmalloc 256 bytes\n");
+		printk("\n");
+		dev_printk(KERN_ERR, &s->dev,
+			"do_io_probe: unable to kmalloc 256 bytes");
 		return;
 	}
 	for (i = base, most = 0; i < base+num; i += 8) {
@@ -221,7 +223,7 @@ static void do_io_probe(struct pcmcia_socket *s, unsigned int base,
 		res = claim_region(s, i, 8, IORESOURCE_IO, "PCMCIA ioprobe");
 		if (!res) {
 			if (!any)
-				pr_cont(" excluding");
+				printk(" excluding");
 			if (!bad)
 				bad = any = i;
 			continue;
@@ -232,13 +234,13 @@ static void do_io_probe(struct pcmcia_socket *s, unsigned int base,
 		free_region(res);
 		if (j < 8) {
 			if (!any)
-				pr_cont(" excluding");
+				printk(" excluding");
 			if (!bad)
 				bad = any = i;
 		} else {
 			if (bad) {
 				sub_interval(&s_data->io_db, bad, i-bad);
-				pr_cont(" %#x-%#x", bad, i-1);
+				printk(" %#x-%#x", bad, i-1);
 				bad = 0;
 			}
 		}
@@ -246,15 +248,15 @@ static void do_io_probe(struct pcmcia_socket *s, unsigned int base,
 	if (bad) {
 		if ((num > 16) && (bad == base) && (i == base+num)) {
 			sub_interval(&s_data->io_db, bad, i-bad);
-			pr_cont(" nothing: probe failed.\n");
+			printk(" nothing: probe failed.\n");
 			return;
 		} else {
 			sub_interval(&s_data->io_db, bad, i-bad);
-			pr_cont(" %#x-%#x", bad, i-1);
+			printk(" %#x-%#x", bad, i-1);
 		}
 	}
 
-	pr_cont("%s\n", !any ? " clean" : "");
+	printk(any ? "\n" : " clean.\n");
 }
 #endif
 
@@ -411,8 +413,8 @@ static int do_mem_probe(struct pcmcia_socket *s, u_long base, u_long num,
 	struct socket_data *s_data = s->resource_data;
 	u_long i, j, bad, fail, step;
 
-	dev_info(&s->dev, "cs: memory probe 0x%06lx-0x%06lx:",
-		 base, base+num-1);
+	dev_printk(KERN_INFO, &s->dev, "cs: memory probe 0x%06lx-0x%06lx:",
+		base, base+num-1);
 	bad = fail = 0;
 	step = (num < 0x20000) ? 0x2000 : ((num>>4) & ~0x1fff);
 	/* don't allow too large steps */
@@ -436,13 +438,13 @@ static int do_mem_probe(struct pcmcia_socket *s, u_long base, u_long num,
 		}
 		if (i != j) {
 			if (!bad)
-				pr_cont(" excluding");
-			pr_cont(" %#05lx-%#05lx", i, j-1);
+				printk(" excluding");
+			printk(" %#05lx-%#05lx", i, j-1);
 			sub_interval(&s_data->mem_db, i, j-i);
 			bad += j-i;
 		}
 	}
-	pr_cont("%s\n", !bad ? " clean" : "");
+	printk(bad ? "\n" : " clean.\n");
 	return num - bad;
 }
 
@@ -493,7 +495,7 @@ static int validate_mem(struct pcmcia_socket *s, unsigned int probe_mask)
 			return 0;
 		if (s_data->mem_db_valid.next != &s_data->mem_db_valid)
 			return 0;
-		dev_notice(&s->dev,
+		dev_printk(KERN_NOTICE, &s->dev,
 			   "cs: warning: no high memory space available!\n");
 		return -ENODEV;
 	}
@@ -973,9 +975,9 @@ static int nonstatic_autoadd_resources(struct pcmcia_socket *s)
 			if (res == &ioport_resource)
 				continue;
 
-			dev_info(&s->cb_dev->dev,
-				 "pcmcia: parent PCI bridge window: %pR\n",
-				 res);
+			dev_printk(KERN_INFO, &s->cb_dev->dev,
+				   "pcmcia: parent PCI bridge window: %pR\n",
+				   res);
 			if (!adjust_io(s, ADD_MANAGED_RESOURCE, res->start, res->end))
 				done |= IORESOURCE_IO;
 
@@ -988,9 +990,9 @@ static int nonstatic_autoadd_resources(struct pcmcia_socket *s)
 			if (res == &iomem_resource)
 				continue;
 
-			dev_info(&s->cb_dev->dev,
-				 "pcmcia: parent PCI bridge window: %pR\n",
-				 res);
+			dev_printk(KERN_INFO, &s->cb_dev->dev,
+				   "pcmcia: parent PCI bridge window: %pR\n",
+				   res);
 			if (!adjust_memory(s, ADD_MANAGED_RESOURCE, res->start, res->end))
 				done |= IORESOURCE_MEM;
 		}

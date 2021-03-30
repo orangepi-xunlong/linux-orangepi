@@ -10,8 +10,6 @@
 #ifndef _MACH_DAVINCI_AEMIF_H
 #define _MACH_DAVINCI_AEMIF_H
 
-#include <linux/platform_device.h>
-
 #define NRCSR_OFFSET		0x00
 #define AWCCR_OFFSET		0x04
 #define A1CR_OFFSET		0x10
@@ -33,5 +31,6 @@ struct davinci_aemif_timing {
 	u8	ta;
 };
 
-int davinci_aemif_setup(struct platform_device *pdev);
+int davinci_aemif_setup_timing(struct davinci_aemif_timing *t,
+					void __iomem *base, unsigned cs);
 #endif

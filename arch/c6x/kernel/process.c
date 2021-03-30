@@ -82,6 +82,10 @@ void flush_thread(void)
 {
 }
 
+void exit_thread(void)
+{
+}
+
 /*
  * Do necessary setup to start up a newly executed thread.
  */
@@ -97,6 +101,7 @@ void start_thread(struct pt_regs *regs, unsigned int pc, unsigned long usp)
 	 */
 	usp -= 8;
 
+	set_fs(USER_DS);
 	regs->pc  = pc;
 	regs->sp  = usp;
 	regs->tsr |= 0x40; /* set user mode */

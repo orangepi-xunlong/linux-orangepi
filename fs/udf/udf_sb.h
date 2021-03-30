@@ -3,7 +3,9 @@
 
 #include <linux/mutex.h>
 #include <linux/bitops.h>
-#include <linux/magic.h>
+
+/* Since UDF 2.01 is ISO 13346 based... */
+#define UDF_SUPER_MAGIC			0x15013346
 
 #define UDF_MAX_READ_VERSION		0x0250
 #define UDF_MAX_WRITE_VERSION		0x0201
@@ -61,11 +63,6 @@ struct udf_meta_data {
 	__u32	s_bitmap_file_loc;
 	__u32	s_alloc_unit_size;
 	__u16	s_align_unit_size;
-	/*
-	 * Partition Reference Number of the associated physical / sparable
-	 * partition
-	 */
-	__u16   s_phys_partition_ref;
 	int	s_flags;
 	struct inode *s_metadata_fe;
 	struct inode *s_mirror_fe;
@@ -165,7 +162,7 @@ static inline struct udf_sb_info *UDF_SB(struct super_block *sb)
 	return sb->s_fs_info;
 }
 
-struct logicalVolIntegrityDescImpUse *udf_sb_lvidiu(struct super_block *sb);
+struct logicalVolIntegrityDescImpUse *udf_sb_lvidiu(struct udf_sb_info *sbi);
 
 int udf_compute_nr_groups(struct super_block *sb, u32 partition);
 

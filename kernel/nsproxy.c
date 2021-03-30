@@ -25,23 +25,19 @@
 #include <linux/proc_ns.h>
 #include <linux/file.h>
 #include <linux/syscalls.h>
-#include <linux/cgroup.h>
 
 static struct kmem_cache *nsproxy_cachep;
 
 struct nsproxy init_nsproxy = {
-	.count			= ATOMIC_INIT(1),
-	.uts_ns			= &init_uts_ns,
+	.count	= ATOMIC_INIT(1),
+	.uts_ns	= &init_uts_ns,
 #if defined(CONFIG_POSIX_MQUEUE) || defined(CONFIG_SYSVIPC)
-	.ipc_ns			= &init_ipc_ns,
+	.ipc_ns	= &init_ipc_ns,
 #endif
-	.mnt_ns			= NULL,
-	.pid_ns_for_children	= &init_pid_ns,
+	.mnt_ns	= NULL,
+	.pid_ns	= &init_pid_ns,
 #ifdef CONFIG_NET
-	.net_ns			= &init_net,
-#endif
-#ifdef CONFIG_CGROUPS
-	.cgroup_ns		= &init_cgroup_ns,
+	.net_ns	= &init_net,
 #endif
 };
 
@@ -89,18 +85,10 @@ static struct nsproxy *create_new_namespaces(unsigned long flags,
 		goto out_ipc;
 	}
 
-	new_nsp->pid_ns_for_children =
-		copy_pid_ns(flags, user_ns, tsk->nsproxy->pid_ns_for_children);
-	if (IS_ERR(new_nsp->pid_ns_for_children)) {
-		err = PTR_ERR(new_nsp->pid_ns_for_children);
+	new_nsp->pid_ns = copy_pid_ns(flags, user_ns, tsk->nsproxy->pid_ns);
+	if (IS_ERR(new_nsp->pid_ns)) {
+		err = PTR_ERR(new_nsp->pid_ns);
 		goto out_pid;
-	}
-
-	new_nsp->cgroup_ns = copy_cgroup_ns(flags, user_ns,
-					    tsk->nsproxy->cgroup_ns);
-	if (IS_ERR(new_nsp->cgroup_ns)) {
-		err = PTR_ERR(new_nsp->cgroup_ns);
-		goto out_cgroup;
 	}
 
 	new_nsp->net_ns = copy_net_ns(flags, user_ns, tsk->nsproxy->net_ns);
@@ -112,10 +100,8 @@ static struct nsproxy *create_new_namespaces(unsigned long flags,
 	return new_nsp;
 
 out_net:
-	put_cgroup_ns(new_nsp->cgroup_ns);
-out_cgroup:
-	if (new_nsp->pid_ns_for_children)
-		put_pid_ns(new_nsp->pid_ns_for_children);
+	if (new_nsp->pid_ns)
+		put_pid_ns(new_nsp->pid_ns);
 out_pid:
 	if (new_nsp->ipc_ns)
 		put_ipc_ns(new_nsp->ipc_ns);
@@ -139,16 +125,21 @@ int copy_namespaces(unsigned long flags, struct task_struct *tsk)
 	struct nsproxy *old_ns = tsk->nsproxy;
 	struct user_namespace *user_ns = task_cred_xxx(tsk, user_ns);
 	struct nsproxy *new_ns;
+	int err = 0;
 
-	if (likely(!(flags & (CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC |
-			      CLONE_NEWPID | CLONE_NEWNET |
-			      CLONE_NEWCGROUP)))) {
-		get_nsproxy(old_ns);
+	if (!old_ns)
 		return 0;
-	}
 
-	if (!ns_capable(user_ns, CAP_SYS_ADMIN))
-		return -EPERM;
+	get_nsproxy(old_ns);
+
+	if (!(flags & (CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC |
+				CLONE_NEWPID | CLONE_NEWNET)))
+		return 0;
+
+	if (!ns_capable(user_ns, CAP_SYS_ADMIN)) {
+		err = -EPERM;
+		goto out;
+	}
 
 	/*
 	 * CLONE_NEWIPC must detach from the undolist: after switching
@@ -157,16 +148,22 @@ int copy_namespaces(unsigned long flags, struct task_struct *tsk)
 	 * means share undolist with parent, so we must forbid using
 	 * it along with CLONE_NEWIPC.
 	 */
-	if ((flags & (CLONE_NEWIPC | CLONE_SYSVSEM)) ==
-		(CLONE_NEWIPC | CLONE_SYSVSEM)) 
-		return -EINVAL;
+	if ((flags & CLONE_NEWIPC) && (flags & CLONE_SYSVSEM)) {
+		err = -EINVAL;
+		goto out;
+	}
 
 	new_ns = create_new_namespaces(flags, tsk, user_ns, tsk->fs);
-	if (IS_ERR(new_ns))
-		return  PTR_ERR(new_ns);
+	if (IS_ERR(new_ns)) {
+		err = PTR_ERR(new_ns);
+		goto out;
+	}
 
 	tsk->nsproxy = new_ns;
-	return 0;
+
+out:
+	put_nsproxy(old_ns);
+	return err;
 }
 
 void free_nsproxy(struct nsproxy *ns)
@@ -177,9 +174,8 @@ void free_nsproxy(struct nsproxy *ns)
 		put_uts_ns(ns->uts_ns);
 	if (ns->ipc_ns)
 		put_ipc_ns(ns->ipc_ns);
-	if (ns->pid_ns_for_children)
-		put_pid_ns(ns->pid_ns_for_children);
-	put_cgroup_ns(ns->cgroup_ns);
+	if (ns->pid_ns)
+		put_pid_ns(ns->pid_ns);
 	put_net(ns->net_ns);
 	kmem_cache_free(nsproxy_cachep, ns);
 }
@@ -195,7 +191,7 @@ int unshare_nsproxy_namespaces(unsigned long unshare_flags,
 	int err = 0;
 
 	if (!(unshare_flags & (CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC |
-			       CLONE_NEWNET | CLONE_NEWPID | CLONE_NEWCGROUP)))
+			       CLONE_NEWNET | CLONE_NEWPID)))
 		return 0;
 
 	user_ns = new_cred ? new_cred->user_ns : current_user_ns();
@@ -219,13 +215,20 @@ void switch_task_namespaces(struct task_struct *p, struct nsproxy *new)
 
 	might_sleep();
 
-	task_lock(p);
 	ns = p->nsproxy;
-	p->nsproxy = new;
-	task_unlock(p);
 
-	if (ns && atomic_dec_and_test(&ns->count))
+	rcu_assign_pointer(p->nsproxy, new);
+
+	if (ns && atomic_dec_and_test(&ns->count)) {
+		/*
+		 * wait for others to get what they want from this nsproxy.
+		 *
+		 * cannot release this nsproxy via the call_rcu() since
+		 * put_mnt_ns() will want to sleep
+		 */
+		synchronize_rcu();
 		free_nsproxy(ns);
+	}
 }
 
 void exit_task_namespaces(struct task_struct *p)
@@ -235,10 +238,11 @@ void exit_task_namespaces(struct task_struct *p)
 
 SYSCALL_DEFINE2(setns, int, fd, int, nstype)
 {
+	const struct proc_ns_operations *ops;
 	struct task_struct *tsk = current;
 	struct nsproxy *new_nsproxy;
+	struct proc_ns *ei;
 	struct file *file;
-	struct ns_common *ns;
 	int err;
 
 	file = proc_ns_fget(fd);
@@ -246,8 +250,9 @@ SYSCALL_DEFINE2(setns, int, fd, int, nstype)
 		return PTR_ERR(file);
 
 	err = -EINVAL;
-	ns = get_proc_ns(file_inode(file));
-	if (nstype && (ns->ops->type != nstype))
+	ei = get_proc_ns(file_inode(file));
+	ops = ei->ns_ops;
+	if (nstype && (ops->type != nstype))
 		goto out;
 
 	new_nsproxy = create_new_namespaces(0, tsk, current_user_ns(), tsk->fs);
@@ -256,7 +261,7 @@ SYSCALL_DEFINE2(setns, int, fd, int, nstype)
 		goto out;
 	}
 
-	err = ns->ops->install(new_nsproxy, ns);
+	err = ops->install(new_nsproxy, ei->ns);
 	if (err) {
 		free_nsproxy(new_nsproxy);
 		goto out;

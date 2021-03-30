@@ -22,7 +22,6 @@
 #include <net/pkt_sched.h>
 #include <net/caif/caif_device.h>
 #include <net/caif/caif_layer.h>
-#include <net/caif/caif_dev.h>
 #include <net/caif/cfpkt.h>
 #include <net/caif/cfcnfg.h>
 #include <net/caif/cfserl.h>
@@ -131,10 +130,8 @@ static void caif_flow_cb(struct sk_buff *skb)
 	caifd = caif_get(skb->dev);
 
 	WARN_ON(caifd == NULL);
-	if (!caifd) {
-		rcu_read_unlock();
+	if (caifd == NULL)
 		return;
-	}
 
 	caifd_hold(caifd);
 	rcu_read_unlock();
@@ -179,7 +176,7 @@ static int transmit(struct cflayer *layer, struct cfpkt *pkt)
 	skb->protocol = htons(ETH_P_CAIF);
 
 	/* Check if we need to handle xoff */
-	if (likely(caifd->netdev->priv_flags & IFF_NO_QUEUE))
+	if (likely(caifd->netdev->tx_queue_len == 0))
 		goto noxoff;
 
 	if (unlikely(caifd->xoff))
@@ -355,9 +352,9 @@ EXPORT_SYMBOL(caif_enroll_dev);
 
 /* notify Caif of device events */
 static int caif_device_notify(struct notifier_block *me, unsigned long what,
-			      void *ptr)
+			      void *arg)
 {
-	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
+	struct net_device *dev = arg;
 	struct caif_device_entry *caifd = NULL;
 	struct caif_dev_common *caifdev;
 	struct cfcnfg *cfg;

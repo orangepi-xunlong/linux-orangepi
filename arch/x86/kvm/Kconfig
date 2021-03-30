@@ -22,17 +22,15 @@ config KVM
 	depends on HAVE_KVM
 	depends on HIGH_RES_TIMERS
 	# for TASKSTATS/TASK_DELAY_ACCT:
-	depends on NET && MULTIUSER
-	depends on X86_LOCAL_APIC
+	depends on NET
 	select PREEMPT_NOTIFIERS
 	select MMU_NOTIFIER
 	select ANON_INODES
 	select HAVE_KVM_IRQCHIP
 	select HAVE_KVM_IRQFD
-	select IRQ_BYPASS_MANAGER
-	select HAVE_KVM_IRQ_BYPASS
 	select HAVE_KVM_IRQ_ROUTING
 	select HAVE_KVM_EVENTFD
+	select KVM_APIC_ARCHITECTURE
 	select KVM_ASYNC_PF
 	select USER_RETURN_NOTIFIER
 	select KVM_MMIO
@@ -41,9 +39,7 @@ config KVM
 	select PERF_EVENTS
 	select HAVE_KVM_MSI
 	select HAVE_KVM_CPU_RELAX_INTERCEPT
-	select KVM_GENERIC_DIRTYLOG_READ_PROTECT
 	select KVM_VFIO
-	select SRCU
 	---help---
 	  Support hosting fully virtualized guest machines using hardware
 	  virtualization extensions.  You will need a fairly recent
@@ -85,19 +81,18 @@ config KVM_MMU_AUDIT
 	depends on KVM && TRACEPOINTS
 	---help---
 	 This option adds a R/W kVM module parameter 'mmu_audit', which allows
-	 auditing of KVM MMU events at runtime.
+	 audit  KVM MMU at runtime.
 
 config KVM_DEVICE_ASSIGNMENT
-	bool "KVM legacy PCI device assignment support (DEPRECATED)"
+	bool "KVM legacy PCI device assignment support"
 	depends on KVM && PCI && IOMMU_API
-	default n
+	default y
 	---help---
 	  Provide support for legacy PCI device assignment through KVM.  The
 	  kernel now also supports a full featured userspace device driver
-	  framework through VFIO, which supersedes this support and provides
-	  better security.
+	  framework through VFIO, which supersedes much of this support.
 
-	  If unsure, say N.
+	  If unsure, say Y.
 
 # OK, it's a little counter-intuitive to do this, but it puts it neatly under
 # the virtualization menu.

@@ -20,54 +20,11 @@
 #define __ASM_ARCH_TIMER_H
 
 #include <asm/barrier.h>
-#include <asm/sysreg.h>
 
-#include <linux/bug.h>
 #include <linux/init.h>
-#include <linux/jump_label.h>
 #include <linux/types.h>
 
 #include <clocksource/arm_arch_timer.h>
-
-#if IS_ENABLED(CONFIG_FSL_ERRATUM_A008585)
-extern struct static_key_false arch_timer_read_ool_enabled;
-#define needs_fsl_a008585_workaround() \
-	static_branch_unlikely(&arch_timer_read_ool_enabled)
-#else
-#define needs_fsl_a008585_workaround()  false
-#endif
-
-u32 __fsl_a008585_read_cntp_tval_el0(void);
-u32 __fsl_a008585_read_cntv_tval_el0(void);
-u64 __fsl_a008585_read_cntvct_el0(void);
-
-/*
- * The number of retries is an arbitrary value well beyond the highest number
- * of iterations the loop has been observed to take.
- */
-#define __fsl_a008585_read_reg(reg) ({			\
-	u64 _old, _new;					\
-	int _retries = 200;				\
-							\
-	do {						\
-		_old = read_sysreg(reg);		\
-		_new = read_sysreg(reg);		\
-		_retries--;				\
-	} while (unlikely(_old != _new) && _retries);	\
-							\
-	WARN_ON_ONCE(!_retries);			\
-	_new;						\
-})
-
-#define arch_timer_reg_read_stable(reg) 		\
-({							\
-	u64 _val;					\
-	if (needs_fsl_a008585_workaround())		\
-		_val = __fsl_a008585_read_##reg();	\
-	else						\
-		_val = read_sysreg(reg);		\
-	_val;						\
-})
 
 /*
  * These register accessors are marked inline so the compiler can
@@ -80,19 +37,19 @@ void arch_timer_reg_write_cp15(int access, enum arch_timer_reg reg, u32 val)
 	if (access == ARCH_TIMER_PHYS_ACCESS) {
 		switch (reg) {
 		case ARCH_TIMER_REG_CTRL:
-			write_sysreg(val, cntp_ctl_el0);
+			asm volatile("msr cntp_ctl_el0,  %0" : : "r" (val));
 			break;
 		case ARCH_TIMER_REG_TVAL:
-			write_sysreg(val, cntp_tval_el0);
+			asm volatile("msr cntp_tval_el0, %0" : : "r" (val));
 			break;
 		}
 	} else if (access == ARCH_TIMER_VIRT_ACCESS) {
 		switch (reg) {
 		case ARCH_TIMER_REG_CTRL:
-			write_sysreg(val, cntv_ctl_el0);
+			asm volatile("msr cntv_ctl_el0,  %0" : : "r" (val));
 			break;
 		case ARCH_TIMER_REG_TVAL:
-			write_sysreg(val, cntv_tval_el0);
+			asm volatile("msr cntv_tval_el0, %0" : : "r" (val));
 			break;
 		}
 	}
@@ -103,23 +60,29 @@ void arch_timer_reg_write_cp15(int access, enum arch_timer_reg reg, u32 val)
 static __always_inline
 u32 arch_timer_reg_read_cp15(int access, enum arch_timer_reg reg)
 {
+	u32 val;
+
 	if (access == ARCH_TIMER_PHYS_ACCESS) {
 		switch (reg) {
 		case ARCH_TIMER_REG_CTRL:
-			return read_sysreg(cntp_ctl_el0);
+			asm volatile("mrs %0,  cntp_ctl_el0" : "=r" (val));
+			break;
 		case ARCH_TIMER_REG_TVAL:
-			return arch_timer_reg_read_stable(cntp_tval_el0);
+			asm volatile("mrs %0, cntp_tval_el0" : "=r" (val));
+			break;
 		}
 	} else if (access == ARCH_TIMER_VIRT_ACCESS) {
 		switch (reg) {
 		case ARCH_TIMER_REG_CTRL:
-			return read_sysreg(cntv_ctl_el0);
+			asm volatile("mrs %0,  cntv_ctl_el0" : "=r" (val));
+			break;
 		case ARCH_TIMER_REG_TVAL:
-			return arch_timer_reg_read_stable(cntv_tval_el0);
+			asm volatile("mrs %0, cntv_tval_el0" : "=r" (val));
+			break;
 		}
 	}
 
-	BUG();
+	return val;
 }
 
 static __always_inline
@@ -139,64 +102,55 @@ u64 arch_timer_reg_read_cval(int access)
 
 static inline u32 arch_timer_get_cntfrq(void)
 {
-	return read_sysreg(cntfrq_el0);
+	u32 val;
+	asm volatile("mrs %0,   cntfrq_el0" : "=r" (val));
+	return val;
 }
 
 static inline u32 arch_timer_get_cntkctl(void)
 {
-	return read_sysreg(cntkctl_el1);
+	u32 cntkctl;
+	asm volatile("mrs	%0, cntkctl_el1" : "=r" (cntkctl));
+	return cntkctl;
 }
 
 static inline void arch_timer_set_cntkctl(u32 cntkctl)
 {
-	write_sysreg(cntkctl, cntkctl_el1);
+	asm volatile("msr	cntkctl_el1, %0" : : "r" (cntkctl));
 }
 
-#if defined(CONFIG_ARCH_SUN50IW1P1) \
-	|| defined(CONFIG_ARCH_SUN50IW2P1)
-#define ARCH_PCNT_TRY_MAX_TIME (12)
-#define ARCH_PCNT_MAX_DELTA    (8)
-static inline u64 arch_counter_get_cntpct(void)
+static inline void __cpuinit arch_counter_set_user_access(void)
 {
-	u64 pct0;
-	u64 pct1;
-	u64 delta;
-	u32 retry = 0;
+	u32 cntkctl = arch_timer_get_cntkctl();
 
-	/* sun50i vcnt maybe imprecise,
-	 * we should try to fix this.
-	 */
-	while (retry < ARCH_PCNT_TRY_MAX_TIME) {
-		isb();
-		asm volatile("mrs %0, cntvct_el0" : "=r" (pct0));
-		isb();
-		asm volatile("mrs %0, cntvct_el0" : "=r" (pct1));
-		delta = pct1 - pct0;
-		if ((pct1 >= pct0) && (delta < ARCH_PCNT_MAX_DELTA)) {
-			/* read valid vcnt */
-			return pct1;
-		}
-		/* vcnt value error, try again */
-		retry++;
-	}
-	/* Do not warry for this, just return the last time vcnt.
-	 * arm64 have enabled CONFIG_CLOCKSOURCE_VALIDATE_LAST_CYCLE.
-	 */
-	return pct1;
+	/* Disable user access to the timers and the physical counter */
+	/* Also disable virtual event stream */
+	cntkctl &= ~(ARCH_TIMER_USR_PT_ACCESS_EN
+			| ARCH_TIMER_USR_VT_ACCESS_EN
+			| ARCH_TIMER_VIRT_EVT_EN
+			| ARCH_TIMER_USR_PCT_ACCESS_EN);
+
+	/* Enable user access to the virtual counter */
+	cntkctl |= ARCH_TIMER_USR_VCT_ACCESS_EN;
+
+	arch_timer_set_cntkctl(cntkctl);
 }
-#else
-static inline u64 arch_counter_get_cntpct(void)
+
+static inline void arch_timer_evtstrm_enable(int divider)
 {
-	/*
-	 * AArch64 kernel and user space mandate the use of CNTVCT.
-	 */
-	BUG();
-	return 0;
-}
+	u32 cntkctl = arch_timer_get_cntkctl();
+	cntkctl &= ~ARCH_TIMER_EVT_TRIGGER_MASK;
+	/* Set the divider and enable virtual event stream */
+	cntkctl |= (divider << ARCH_TIMER_EVT_TRIGGER_SHIFT)
+			| ARCH_TIMER_VIRT_EVT_EN;
+	arch_timer_set_cntkctl(cntkctl);
+	elf_hwcap |= HWCAP_EVTSTRM;
+#ifdef CONFIG_COMPAT
+	compat_elf_hwcap |= COMPAT_HWCAP_EVTSTRM;
 #endif
+}
 
-#if defined(CONFIG_ARCH_SUN50IW1P1) \
-	|| defined(CONFIG_ARCH_SUN50IW2P1)
+#ifdef  CONFIG_ARCH_SUN50I
 #define ARCH_VCNT_TRY_MAX_TIME (12)
 #define ARCH_VCNT_MAX_DELTA    (8)
 static inline u64 arch_counter_get_cntvct(void)
@@ -230,10 +184,58 @@ static inline u64 arch_counter_get_cntvct(void)
 #else
 static inline u64 arch_counter_get_cntvct(void)
 {
+	u64 vct;
+
 	isb();
-	return arch_timer_reg_read_stable(cntvct_el0);
+	asm volatile("mrs %0, cntvct_el0" : "=r" (vct));
+
+	return vct;
 }
-#endif
+#endif /* CONFIG_ARCH_SUN50I */
+
+#ifdef  CONFIG_ARCH_SUN50I
+#define ARCH_PCNT_TRY_MAX_TIME (12)
+#define ARCH_PCNT_MAX_DELTA    (8)
+static inline u64 arch_counter_get_cntpct(void)
+{
+	u64 pct0;
+	u64 pct1;
+	u64 delta;
+	u32 retry = 0;
+
+	/* sun50i vcnt maybe imprecise,
+	 * we should try to fix this.
+	 */
+	while (retry < ARCH_PCNT_TRY_MAX_TIME) {
+		isb();
+		asm volatile("mrs %0, cntvct_el0" : "=r" (pct0));
+		isb();
+		asm volatile("mrs %0, cntvct_el0" : "=r" (pct1));
+		delta = pct1 - pct0;
+		if ((pct1 >= pct0) && (delta < ARCH_PCNT_MAX_DELTA)) {
+			/* read valid vcnt */
+			return pct1;
+		}
+		/* vcnt value error, try again */
+		retry++;
+	}
+	/* Do not warry for this, just return the last time vcnt.
+	 * arm64 have enabled CONFIG_CLOCKSOURCE_VALIDATE_LAST_CYCLE.
+	 */
+	return pct1;
+}
+#else
+static inline u64 arch_counter_get_cntpct(void)
+{
+	u64 pct;
+
+	isb();
+	asm volatile("mrs %0, cntvct_el0" : "=r" (pct));
+
+	return pct;
+}
+#endif /* CONFIG_ARCH_SUN50I */
+
 
 static inline int arch_timer_arch_init(void)
 {

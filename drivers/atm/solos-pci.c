@@ -347,8 +347,8 @@ static char *next_string(struct sk_buff *skb)
  */       
 static int process_status(struct solos_card *card, int port, struct sk_buff *skb)
 {
-	char *str, *state_str, *snr, *attn;
-	int ver, rate_up, rate_down, err;
+	char *str, *end, *state_str, *snr, *attn;
+	int ver, rate_up, rate_down;
 
 	if (!card->atmdev[port])
 		return -ENODEV;
@@ -357,11 +357,7 @@ static int process_status(struct solos_card *card, int port, struct sk_buff *skb
 	if (!str)
 		return -EIO;
 
-	err = kstrtoint(str, 10, &ver);
-	if (err) {
-		dev_warn(&card->dev->dev, "Unexpected status interrupt version\n");
-		return err;
-	}
+	ver = simple_strtol(str, NULL, 10);
 	if (ver < 1) {
 		dev_warn(&card->dev->dev, "Unexpected status interrupt version %d\n",
 			 ver);
@@ -377,16 +373,16 @@ static int process_status(struct solos_card *card, int port, struct sk_buff *skb
 		return 0;
 	}
 
-	err = kstrtoint(str, 10, &rate_down);
-	if (err)
-		return err;
+	rate_down = simple_strtol(str, &end, 10);
+	if (*end)
+		return -EIO;
 
 	str = next_string(skb);
 	if (!str)
 		return -EIO;
-	err = kstrtoint(str, 10, &rate_up);
-	if (err)
-		return err;
+	rate_up = simple_strtol(str, &end, 10);
+	if (*end)
+		return -EIO;
 
 	state_str = next_string(skb);
 	if (!state_str)
@@ -421,7 +417,7 @@ static int process_command(struct solos_card *card, int port, struct sk_buff *sk
 	struct solos_param *prm;
 	unsigned long flags;
 	int cmdpid;
-	int found = 0, err;
+	int found = 0;
 
 	if (skb->len < 7)
 		return 0;
@@ -432,9 +428,7 @@ static int process_command(struct solos_card *card, int port, struct sk_buff *sk
 	    skb->data[6] != '\n')
 		return 0;
 
-	err = kstrtoint(&skb->data[1], 10, &cmdpid);
-	if (err)
-		return err;
+	cmdpid = simple_strtol(&skb->data[1], NULL, 10);
 
 	spin_lock_irqsave(&card->param_queue_lock, flags);
 	list_for_each_entry(prm, &card->param_queue, list) {
@@ -525,7 +519,7 @@ struct geos_gpio_attr {
 static ssize_t geos_gpio_store(struct device *dev, struct device_attribute *attr,
 			       const char *buf, size_t count)
 {
-	struct pci_dev *pdev = to_pci_dev(dev);
+	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
 	struct geos_gpio_attr *gattr = container_of(attr, struct geos_gpio_attr, attr);
 	struct solos_card *card = pci_get_drvdata(pdev);
 	uint32_t data32;
@@ -551,7 +545,7 @@ static ssize_t geos_gpio_store(struct device *dev, struct device_attribute *attr
 static ssize_t geos_gpio_show(struct device *dev, struct device_attribute *attr,
 			      char *buf)
 {
-	struct pci_dev *pdev = to_pci_dev(dev);
+	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
 	struct geos_gpio_attr *gattr = container_of(attr, struct geos_gpio_attr, attr);
 	struct solos_card *card = pci_get_drvdata(pdev);
 	uint32_t data32;
@@ -565,7 +559,7 @@ static ssize_t geos_gpio_show(struct device *dev, struct device_attribute *attr,
 static ssize_t hardware_show(struct device *dev, struct device_attribute *attr,
 			     char *buf)
 {
-	struct pci_dev *pdev = to_pci_dev(dev);
+	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
 	struct geos_gpio_attr *gattr = container_of(attr, struct geos_gpio_attr, attr);
 	struct solos_card *card = pci_get_drvdata(pdev);
 	uint32_t data32;
@@ -766,7 +760,7 @@ static irqreturn_t solos_irq(int irq, void *dev_id)
 	return IRQ_RETVAL(handled);
 }
 
-static void solos_bh(unsigned long card_arg)
+void solos_bh(unsigned long card_arg)
 {
 	struct solos_card *card = (void *)card_arg;
 	uint32_t card_flags;
@@ -791,8 +785,8 @@ static void solos_bh(unsigned long card_arg)
 				skb = card->rx_skb[port];
 				card->rx_skb[port] = NULL;
 
-				dma_unmap_single(&card->dev->dev, SKB_CB(skb)->dma_addr,
-						 RX_DMA_SIZE, DMA_FROM_DEVICE);
+				pci_unmap_single(card->dev, SKB_CB(skb)->dma_addr,
+						 RX_DMA_SIZE, PCI_DMA_FROMDEVICE);
 
 				header = (void *)skb->data;
 				size = le16_to_cpu(header->size);
@@ -811,12 +805,7 @@ static void solos_bh(unsigned long card_arg)
 					continue;
 				}
 
-				/* Use netdev_alloc_skb() because it adds NET_SKB_PAD of
-				 * headroom, and ensures we can route packets back out an
-				 * Ethernet interface (for example) without having to
-				 * reallocate. Adding NET_IP_ALIGN also ensures that both
-				 * PPPoATM and PPPoEoBR2684 packets end up aligned. */
-				skb = netdev_alloc_skb_ip_align(NULL, size + 1);
+				skb = alloc_skb(size + 1, GFP_ATOMIC);
 				if (!skb) {
 					if (net_ratelimit())
 						dev_warn(&card->dev->dev, "Failed to allocate sk_buff for RX\n");
@@ -880,14 +869,11 @@ static void solos_bh(unsigned long card_arg)
 		/* Allocate RX skbs for any ports which need them */
 		if (card->using_dma && card->atmdev[port] &&
 		    !card->rx_skb[port]) {
-			/* Unlike the MMIO case (qv) we can't add NET_IP_ALIGN
-			 * here; the FPGA can only DMA to addresses which are
-			 * aligned to 4 bytes. */
-			struct sk_buff *skb = dev_alloc_skb(RX_DMA_SIZE);
+			struct sk_buff *skb = alloc_skb(RX_DMA_SIZE, GFP_ATOMIC);
 			if (skb) {
 				SKB_CB(skb)->dma_addr =
-					dma_map_single(&card->dev->dev, skb->data,
-						       RX_DMA_SIZE, DMA_FROM_DEVICE);
+					pci_map_single(card->dev, skb->data,
+						       RX_DMA_SIZE, PCI_DMA_FROMDEVICE);
 				iowrite32(SKB_CB(skb)->dma_addr,
 					  card->config_regs + RX_DMA_ADDR(port));
 				card->rx_skb[port] = skb;
@@ -1083,8 +1069,8 @@ static uint32_t fpga_tx(struct solos_card *card)
 		if (tx_pending & 1) {
 			struct sk_buff *oldskb = card->tx_skb[port];
 			if (oldskb) {
-				dma_unmap_single(&card->dev->dev, SKB_CB(oldskb)->dma_addr,
-						 oldskb->len, DMA_TO_DEVICE);
+				pci_unmap_single(card->dev, SKB_CB(oldskb)->dma_addr,
+						 oldskb->len, PCI_DMA_TODEVICE);
 				card->tx_skb[port] = NULL;
 			}
 			spin_lock(&card->tx_queue_lock);
@@ -1103,8 +1089,8 @@ static uint32_t fpga_tx(struct solos_card *card)
 					data = card->dma_bounce + (BUF_SIZE * port);
 					memcpy(data, skb->data, skb->len);
 				}
-				SKB_CB(skb)->dma_addr = dma_map_single(&card->dev->dev, data,
-								       skb->len, DMA_TO_DEVICE);
+				SKB_CB(skb)->dma_addr = pci_map_single(card->dev, data,
+								       skb->len, PCI_DMA_TODEVICE);
 				card->tx_skb[port] = skb;
 				iowrite32(SKB_CB(skb)->dma_addr,
 					  card->config_regs + TX_DMA_ADDR(port));
@@ -1224,7 +1210,7 @@ static int fpga_probe(struct pci_dev *dev, const struct pci_device_id *id)
 		goto out;
 	}
 
-	err = dma_set_mask_and_coherent(&dev->dev, DMA_BIT_MASK(32));
+	err = pci_set_dma_mask(dev, DMA_BIT_MASK(32));
 	if (err) {
 		dev_warn(&dev->dev, "Failed to set 32-bit DMA mask\n");
 		goto out;
@@ -1239,13 +1225,11 @@ static int fpga_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	card->config_regs = pci_iomap(dev, 0, CONFIG_RAM_SIZE);
 	if (!card->config_regs) {
 		dev_warn(&dev->dev, "Failed to ioremap config registers\n");
-		err = -ENOMEM;
 		goto out_release_regions;
 	}
 	card->buffers = pci_iomap(dev, 1, DATA_RAM_SIZE);
 	if (!card->buffers) {
 		dev_warn(&dev->dev, "Failed to ioremap data buffers\n");
-		err = -ENOMEM;
 		goto out_unmap_config;
 	}
 
@@ -1294,7 +1278,6 @@ static int fpga_probe(struct pci_dev *dev, const struct pci_device_id *id)
 			card->dma_bounce = kmalloc(card->nr_ports * BUF_SIZE, GFP_KERNEL);
 			if (!card->dma_bounce) {
 				dev_warn(&card->dev->dev, "Failed to allocate DMA bounce buffers\n");
-				err = -ENOMEM;
 				/* Fallback to MMIO doesn't work */
 				goto out_unmap_both;
 			}
@@ -1352,6 +1335,7 @@ static int fpga_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	
  out_unmap_both:
 	kfree(card->dma_bounce);
+	pci_set_drvdata(dev, NULL);
 	pci_iounmap(dev, card->buffers);
  out_unmap_config:
 	pci_iounmap(dev, card->config_regs);
@@ -1425,14 +1409,14 @@ static void atm_remove(struct solos_card *card)
 
 			skb = card->rx_skb[i];
 			if (skb) {
-				dma_unmap_single(&card->dev->dev, SKB_CB(skb)->dma_addr,
-						 RX_DMA_SIZE, DMA_FROM_DEVICE);
+				pci_unmap_single(card->dev, SKB_CB(skb)->dma_addr,
+						 RX_DMA_SIZE, PCI_DMA_FROMDEVICE);
 				dev_kfree_skb(skb);
 			}
 			skb = card->tx_skb[i];
 			if (skb) {
-				dma_unmap_single(&card->dev->dev, SKB_CB(skb)->dma_addr,
-						 skb->len, DMA_TO_DEVICE);
+				pci_unmap_single(card->dev, SKB_CB(skb)->dma_addr,
+						 skb->len, PCI_DMA_TODEVICE);
 				dev_kfree_skb(skb);
 			}
 			while ((skb = skb_dequeue(&card->tx_queue[i])))
@@ -1473,6 +1457,7 @@ static void fpga_remove(struct pci_dev *dev)
 	pci_release_regions(dev);
 	pci_disable_device(dev);
 
+	pci_set_drvdata(dev, NULL);
 	kfree(card);
 }
 

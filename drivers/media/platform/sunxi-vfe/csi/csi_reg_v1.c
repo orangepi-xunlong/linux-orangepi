@@ -1,33 +1,13 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vfe/csi/csi_reg_v1.c
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
-/*
  * sunxi csi register read/write interface
- */
+*/
 
 #include "csi_reg_v1.h"
 #include "../utility/vfe_io.h"
 
-#ifndef CONFIG_ARCH_SUN3IW1P1
 #define ADDR_BIT_R_SHIFT 0
 #define CLK_POL 0	/*0:RISING, 1:FAILING*/
-#else
-#define ADDR_BIT_R_SHIFT 2
-#define CLK_POL 1	/*0:RISING, 1:FAILING*/
-#endif
+
 volatile void __iomem *csi_base_addr[2];
 enum csi_input_fmt input_fmt;
 
@@ -54,16 +34,18 @@ void csi_disable(unsigned int sel)
 /* configure */
 void csi_if_cfg(unsigned int sel, struct csi_if_cfg *csi_if_cfg)
 {
-	if (csi_if_cfg->interface == CSI_IF_CCIR656_16BIT)
+	if (csi_if_cfg->interface == CSI_IF_CCIR656_16BIT) {
 		input_fmt = CSI_YUV422_16;
-	else if (csi_if_cfg->interface == CSI_IF_CCIR656_1CH)
+	} else if (csi_if_cfg->interface == CSI_IF_CCIR656_1CH) {
 		input_fmt = CSI_CCIR656;
-	else if (csi_if_cfg->interface == CSI_IF_CCIR656_2CH)
+	} else if (csi_if_cfg->interface == CSI_IF_CCIR656_2CH) {
 		input_fmt = CSI_CCIR656_2CH;
-	else if (csi_if_cfg->interface == CSI_IF_CCIR656_4CH)
+	} else if (csi_if_cfg->interface == CSI_IF_CCIR656_4CH) {
 		input_fmt = CSI_CCIR656_4CH;
-	vfe_reg_clr_set(csi_base_addr[sel] + CSI_REG_CONF, 0x7 << 20,
-						input_fmt << 20);/*[22:20]*/
+	}
+	vfe_reg_clr_set(csi_base_addr[sel] + CSI_REG_CONF,
+				0x7 << 20,
+				input_fmt << 20);/*[22:20]*/
 }
 
 void csi_timing_cfg(unsigned int sel, struct csi_timing_cfg *csi_tmg_cfg)
@@ -98,7 +80,6 @@ u64 csi_get_buffer_address(unsigned int sel, unsigned int ch,
 			enum csi_buf_sel buf)
 {
 	u32 t;
-
 	t = vfe_reg_readl(csi_base_addr[sel] + CSI_REG_BUF_0_A + ch * CSI_CH_OFF + (buf << 2));
 	return t;
 }
@@ -107,7 +88,7 @@ u64 csi_get_buffer_address(unsigned int sel, unsigned int ch,
 void csi_capture_start(unsigned int sel, unsigned int ch_total_num,
 		enum csi_cap_mode csi_cap_mode)
 {
-	if (csi_cap_mode == CSI_VCAP)
+	if (CSI_VCAP == csi_cap_mode)
 		vfe_reg_set(csi_base_addr[sel] + CSI_REG_CTRL, 0X1 << 1);
 	else
 		vfe_reg_set(csi_base_addr[sel] + CSI_REG_CTRL, 0X1 << 0);
@@ -123,7 +104,6 @@ void csi_capture_get_status(unsigned int sel, unsigned int ch,
 		struct csi_capture_status *status)
 {
 	u32 t;
-
 	t = vfe_reg_readl(csi_base_addr[sel] + CSI_REG_STATUS + ch * CSI_CH_OFF);
 	status->picture_in_progress = t & 0x1;
 	status->video_in_progress = (t >> 1) & 0x1;
@@ -188,7 +168,6 @@ void csi_int_disable(unsigned int sel, unsigned int ch, enum csi_int_sel interru
 inline void csi_int_get_status(unsigned int sel, unsigned int ch, struct csi_int_status *status)
 {
 	u32 t;
-
 	t = vfe_reg_readl(csi_base_addr[sel] + CSI_REG_INT_STATUS + ch * CSI_CH_OFF);
 
 	status->capture_done     = t & CSI_INT_CAPTURE_DONE;

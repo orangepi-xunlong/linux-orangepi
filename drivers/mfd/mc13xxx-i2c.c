@@ -10,6 +10,7 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/mutex.h>
 #include <linux/mfd/core.h>
 #include <linux/mfd/mc13xxx.h>
 #include <linux/of.h>
@@ -46,7 +47,7 @@ static const struct of_device_id mc13xxx_dt_ids[] = {
 };
 MODULE_DEVICE_TABLE(of, mc13xxx_dt_ids);
 
-static const struct regmap_config mc13xxx_regmap_i2c_config = {
+static struct regmap_config mc13xxx_regmap_i2c_config = {
 	.reg_bits = 8,
 	.val_bits = 24,
 
@@ -59,6 +60,7 @@ static int mc13xxx_i2c_probe(struct i2c_client *client,
 		const struct i2c_device_id *id)
 {
 	struct mc13xxx *mc13xxx;
+	struct mc13xxx_platform_data *pdata = dev_get_platdata(&client->dev);
 	int ret;
 
 	mc13xxx = devm_kzalloc(&client->dev, sizeof(*mc13xxx), GFP_KERNEL);
@@ -67,13 +69,16 @@ static int mc13xxx_i2c_probe(struct i2c_client *client,
 
 	dev_set_drvdata(&client->dev, mc13xxx);
 
-	mc13xxx->irq = client->irq;
+	mc13xxx->dev = &client->dev;
+	mutex_init(&mc13xxx->lock);
 
 	mc13xxx->regmap = devm_regmap_init_i2c(client,
 					       &mc13xxx_regmap_i2c_config);
 	if (IS_ERR(mc13xxx->regmap)) {
 		ret = PTR_ERR(mc13xxx->regmap);
-		dev_err(&client->dev, "Failed to initialize regmap: %d\n", ret);
+		dev_err(mc13xxx->dev, "Failed to initialize register map: %d\n",
+				ret);
+		dev_set_drvdata(&client->dev, NULL);
 		return ret;
 	}
 
@@ -85,17 +90,24 @@ static int mc13xxx_i2c_probe(struct i2c_client *client,
 		mc13xxx->variant = (void *)id->driver_data;
 	}
 
-	return mc13xxx_common_init(&client->dev);
+	ret = mc13xxx_common_init(mc13xxx, pdata, client->irq);
+
+	return ret;
 }
 
 static int mc13xxx_i2c_remove(struct i2c_client *client)
 {
-	return mc13xxx_common_exit(&client->dev);
+	struct mc13xxx *mc13xxx = dev_get_drvdata(&client->dev);
+
+	mc13xxx_common_cleanup(mc13xxx);
+
+	return 0;
 }
 
 static struct i2c_driver mc13xxx_i2c_driver = {
 	.id_table = mc13xxx_i2c_device_id,
 	.driver = {
+		.owner = THIS_MODULE,
 		.name = "mc13xxx",
 		.of_match_table = mc13xxx_dt_ids,
 	},

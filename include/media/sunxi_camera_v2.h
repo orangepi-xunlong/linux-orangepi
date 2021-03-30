@@ -1,5 +1,5 @@
 /*
- * include/media/sunxi_camera_v2.h -- Ctrl IDs definitions for sunxi-vin
+ * include/media/sunxi_camera.h -- Ctrl IDs definitions for sunxi-vin
  *
  * Copyright (C) 2014 Allwinnertech Co., Ltd.
  * Copyright (C) 2015 Yang Feng
@@ -27,13 +27,6 @@
 #define V4L2_MODE_VIDEO			0x0002
 #define V4L2_MODE_IMAGE			0x0003
 #define V4L2_MODE_PREVIEW		0x0004
-
-/*  for yuv420 FBC mode*/
-#define V4L2_PIX_FMT_FBC           v4l2_fourcc('F', 'C', '2', '1')
-#define V4L2_PIX_FMT_LBC_2_0X      v4l2_fourcc('L', 'C', '2', '1')
-#define V4L2_PIX_FMT_LBC_2_5X      v4l2_fourcc('L', 'C', '2', '2')
-#define V4L2_PIX_FMT_LBC_1_0X      v4l2_fourcc('L', 'C', '2', '3')
-
 /*
  *	USER CIDS
  */
@@ -44,13 +37,6 @@ struct v4l2_win_coordinate {
 	__s32 y2;
 };
 
-/*
- *enum v4l2_flash_led_mode {
- *	V4L2_FLASH_LED_MODE_NONE,
- *	V4L2_FLASH_LED_MODE_FLASH,
- *	V4L2_FLASH_LED_MODE_TORCH,
- *};
- */
 #define V4L2_FLASH_LED_MODE_AUTO		(V4L2_FLASH_LED_MODE_TORCH + 1)
 #define V4L2_FLASH_LED_MODE_RED_EYE		(V4L2_FLASH_LED_MODE_TORCH + 2)
 
@@ -91,27 +77,6 @@ struct isp_hdr_setting_t {
 	__s32 frames_count;
 	__s32 total_frames;
 	__s32 values[MAX_EXP_FRAMES];
-};
-struct csi_sync_ctrl {
-	__s32 type;
-	__s32 prs_sync_en;
-	__s32 prs_sync_scr_sel;
-	__s32 prs_sync_bench_sel;
-	__s32 prs_sync_input_vsync_en;
-	__s32 prs_sync_singal_via_by;
-	__s32 prs_sync_singal_scr_sel;
-	__s32 prs_sync_pulse_cfg;
-	__s32 prs_sync_dist;
-	__s32 prs_sync_wait_n;
-	__s32 prs_sync_wait_m;
-	__s32 dma_clr_dist;
-
-	__s32 prs_xvs_out_en;
-	__s32 prs_xhs_out_en;
-	__s32 prs_xvs_t;
-	__s32 prs_xhs_t;
-	__s32 prs_xvs_len;
-	__s32 prs_xhs_len;
 };
 
 #define HDR_CTRL_GET    0
@@ -181,43 +146,6 @@ struct isp_exif_attribute {
 	__s32 reserved[16];
 };
 
-struct vin_top_clk {
-	__u32 clk_rate;
-};
-
-struct vin_fps_ds {
-	__u32 fps_ds;
-};
-
-struct isp_debug_mode {
-	__u32 debug_en;
-	__u32 debug_sel;
-};
-
-struct vin_pattern_config {
-	__u32 ptn_en;
-	void __user *ptn_addr;
-	void __user *drc_tab;
-	void __user *gamma_tab;
-	void __user *isp_reg;
-	__u32 ptn_size;
-	__u32 ptn_w;
-	__u32 ptn_h;
-	__u32 ptn_fmt;
-	__u32 ptn_type;
-};
-
-struct vin_reset_time {
-	__u32 reset_time;
-};
-
-struct parser_fps_ds {
-	__u32 ch0_fps_ds;
-	__u32 ch1_fps_ds;
-	__u32 ch2_fps_ds;
-	__u32 ch3_fps_ds;
-};
-
 #define VIDIOC_ISP_AE_STAT_REQ \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 1, struct isp_stat_buf)
 #define VIDIOC_ISP_HIST_STAT_REQ \
@@ -228,38 +156,37 @@ struct parser_fps_ds {
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 4, struct isp_exif_attribute)
 #define VIDIOC_ISP_GAMMA_REQ \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 5, struct isp_stat_buf)
-#define VIDIOC_SET_TOP_CLK \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 6, struct vin_top_clk)
-#define VIDIOC_SET_FPS_DS \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 7, struct vin_fps_ds)
 #define VIDIOC_HDR_CTRL \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 8, struct isp_hdr_ctrl)
-#define VIDIOC_SYNC_CTRL \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 9, struct csi_sync_ctrl)
-#define VIDIOC_ISP_DEBUG \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 10, struct isp_debug_mode)
-#define VIDIOC_VIN_PTN_CFG \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 11, struct vin_pattern_config)
-#define VIDIOC_VIN_RESET_TIME \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 12, struct vin_reset_time)
-#define VIDIOC_SET_PARSER_FPS \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 13, struct parser_fps_ds)
 
 /*
  * Events
  *
  * V4L2_EVENT_VIN_H3A: Histogram and AWB AE AF statistics data ready
- * V4L2_EVENT_VIN_ISP_OFF: ISP stream off
  */
 
 #define V4L2_EVENT_VIN_CLASS		(V4L2_EVENT_PRIVATE_START | 0x100)
 #define V4L2_EVENT_VIN_H3A		(V4L2_EVENT_VIN_CLASS | 0x1)
 #define V4L2_EVENT_VIN_HDR		(V4L2_EVENT_VIN_CLASS | 0x2)
-#define V4L2_EVENT_VIN_ISP_OFF		(V4L2_EVENT_VIN_CLASS | 0x3)
 
 struct vin_isp_h3a_config {
+
 	__u32 buf_size;
-	__u32 config_counter;
+	__u16 config_counter;
+
+	/* Private fields */
+	__u16 saturation_limit;
+	__u16 win_height;
+	__u16 win_width;
+	__u16 ver_win_count;
+	__u16 hor_win_count;
+	__u16 ver_win_start;
+	__u16 hor_win_start;
+	__u16 blk_ver_win_start;
+	__u16 blk_win_height;
+	__u16 subsample_ver_inc;
+	__u16 subsample_hor_inc;
+	__u8 alaw_enable;
 };
 
 /**
@@ -271,10 +198,12 @@ struct vin_isp_h3a_config {
  * @config_counter: Number of the configuration associated with the data.
  */
 struct vin_isp_stat_data {
+	struct timeval ts;
 	void __user *buf;
 	__u32 buf_size;
-	__u32 frame_number;
-	__u32 config_counter;
+	__u16 frame_number;
+	__u16 cur_frame;
+	__u16 config_counter;
 };
 
 struct vin_isp_stat_event_status {
@@ -286,10 +215,6 @@ struct vin_isp_stat_event_status {
 struct vin_isp_hdr_event_data {
 	__u32			cmd;
 	struct isp_hdr_ctrl	hdr;
-};
-
-struct vin_vsync_event_data {
-	__u64 frame_number;
 };
 
 /*
@@ -305,7 +230,323 @@ struct vin_vsync_event_data {
 #define VIDIOC_VIN_ISP_STAT_REQ \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 32, struct vin_isp_stat_data)
 #define VIDIOC_VIN_ISP_STAT_EN \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 33, unsigned int)
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 33, unsigned long)
+
+/*
+ * CSI configure
+ */
+
+/*
+ * if format
+ */
+enum csi_if {
+	CSI_IF_INTLV = 0x00,	/* 1SEG DATA in one channel */
+	CSI_IF_SPL = 0x01,	/* 2SEG Y in one ch, UV in second ch */
+	CSI_IF_PL = 0x02,	/* 3SEG YUV444 */
+	CSI_IF_PL_SPL = 0x03,	/* 3SEG YUV444 to 2SEG YUV422 */
+
+	CSI_IF_CCIR656_1CH = 0x04,	/* 1SEG ccir656 1ch */
+	CSI_IF_CCIR656_1CH_SPL = 0x05,	/* 2SEG ccir656 1ch */
+	CSI_IF_CCIR656_1CH_PL = 0x06,	/* 3SEG ccir656 1ch */
+	CSI_IF_CCIR656_1CH_PL_SPL = 0x07,	/* 3SEG to 2SEG ccir656 1ch */
+	CSI_IF_CCIR656_16BIT = 0x08,	/* 16BIT ccir656 1ch */
+
+	CSI_IF_CCIR656_2CH = 0x0c,	/* D7~D0:ccir656 2ch */
+	CSI_IF_CCIR656_4CH = 0x0d,	/* D7~D0:ccir656 4ch */
+
+	CSI_IF_MIPI = 0x80,	/* MIPI CSI */
+};
+
+/*
+ *  data width
+ */
+enum csi_data_width {
+	CSI_8BIT = 0,
+	CSI_10BIT = 1,
+	CSI_12BIT = 2,
+};
+
+/*
+ * input data format
+ */
+enum csi_input_fmt {
+	CSI_RAW = 0,		/* raw stream  */
+	CSI_BAYER,		/* byer rgb242 */
+	CSI_CCIR656,		/* ccir656     */
+	CSI_YUV422,		/* yuv422      */
+	CSI_YUV422_16 = 4,	/* yuv422 16 bit */
+	CSI_YUV444 = 4,		/* yuv444 24 bit */
+	CSI_YUV420 = 4,		/* yuv420 */
+	CSI_CCIR656_2CH	= 5,	/* ccir656 2 channel */
+	CSI_CCIR656_4CH	= 7,	/* ccir656 4 channel */
+};
+
+/*
+ * output data format
+ */
+enum csi_output_fmt {
+	/* only when input is raw */
+	CSI_FIELD_RAW_8 = 0,
+	CSI_FIELD_RAW_10 = 1,
+	CSI_FIELD_RAW_12 = 2,
+	CSI_FIELD_RGB565 = 4,
+	CSI_FIELD_RGB888 = 5,
+	CSI_FIELD_PRGB888 = 6,
+	CSI_FRAME_RAW_8 = 8,
+	CSI_FRAME_RAW_10 = 9,
+	CSI_FRAME_RAW_12 = 10,
+	CSI_FRAME_RGB565 = 12,
+	CSI_FRAME_RGB888 = 13,
+	CSI_FRAME_PRGB888 = 14,
+
+	/* only when input is bayer */
+
+	/* only when input is yuv422/yuv420 */
+	CSI_FIELD_PLANAR_YUV422 = 0, /* parse 1 field (odd or even) */
+	CSI_FIELD_PLANAR_YUV420 = 1,
+	CSI_FRAME_PLANAR_YUV420 = 2, /* parse 2 fields (odd and even) */
+	CSI_FRAME_PLANAR_YUV422 = 3,
+	CSI_FIELD_UV_CB_YUV422 = 4,
+	CSI_FIELD_UV_CB_YUV420 = 5,
+	CSI_FRAME_UV_CB_YUV420 = 6,
+	CSI_FRAME_UV_CB_YUV422 = 7,
+	CSI_FIELD_MB_YUV422 = 8,
+	CSI_FIELD_MB_YUV420 = 9,
+	CSI_FRAME_MB_YUV420 = 10,
+	CSI_FRAME_MB_YUV422 = 11,
+	CSI_FIELD_UV_CB_YUV422_10 = 12,
+	CSI_FIELD_UV_CB_YUV420_10 = 13,
+};
+
+/*
+ * field sequenc or polarity
+ */
+
+enum csi_field {
+	/* For Embedded Sync timing */
+	CSI_FIELD_TF = 0,	/* top filed first */
+	CSI_FIELD_BF = 1,	/* bottom field first */
+
+	/* For External Sync timing */
+	CSI_FIELD_NEG = 0,	/* field negtive indicates odd field */
+	CSI_FIELD_POS = 1,	/* field postive indicates odd field */
+};
+
+/*
+ * input field selection, only when input is ccir656
+ */
+enum csi_field_sel {
+	CSI_ODD,		/* odd field */
+	CSI_EVEN,		/* even field */
+	CSI_EITHER,		/* either field */
+};
+
+/*
+ * input source type
+ */
+enum csi_src_type {
+	CSI_PROGRESSIVE = 0,	/* progressive */
+	CSI_INTERLACE = 1,	/* interlace */
+};
+
+/*
+ * input data sequence
+ */
+enum csi_input_seq {
+	/* only when input is yuv422 */
+	CSI_YUYV = 0,
+	CSI_YVYU,
+	CSI_UYVY,
+	CSI_VYUY,
+
+	/* only when input is byer */
+	CSI_RGRG = 0,		/* first line sequence is RGRG... */
+	CSI_GRGR,		/* first line sequence is GRGR... */
+	CSI_BGBG,		/* first line sequence is BGBG... */
+	CSI_GBGB,		/* first line sequence is GBGB... */
+};
+
+/*
+ * input reference signal polarity
+ */
+enum csi_ref_pol {
+	CSI_LOW,		/* active low */
+	CSI_HIGH,		/* active high */
+};
+
+/*
+ * input data valid of the input clock edge type
+ */
+enum csi_edge_pol {
+	CSI_FALLING,		/* active falling */
+	CSI_RISING,		/* active rising */
+};
+
+/*
+ * csi interface configuration
+ */
+struct csi_if_cfg {
+	enum csi_src_type src_type;	/* interlaced or progressive */
+	enum csi_data_width data_width;	/* csi data width */
+	enum csi_if interface;	/* csi interface */
+};
+
+/*
+ * csi timing configuration
+ */
+struct csi_timing_cfg {
+	enum csi_field field;	/* top or bottom field first / field polarity */
+	enum csi_ref_pol vref;	/* input vref signal polarity */
+	enum csi_ref_pol href;	/* input href signal polarity */
+	enum csi_edge_pol sample; /* the valid input clock edge */
+};
+
+/*
+ * csi size and offset configuration
+ */
+struct csi_size_offset_cfg {
+    unsigned int length_h;
+    unsigned int length_v;
+    unsigned int length_y;
+    unsigned int length_c;
+    unsigned int start_h;
+    unsigned int start_v;
+};
+
+/*
+ * csi mode configuration
+ */
+struct csi_fmt_cfg {
+	enum csi_input_fmt input_fmt;	/* input data format */
+	enum csi_output_fmt output_fmt;	/* output data format */
+	enum csi_field_sel field_sel;	/* input field selection */
+	enum csi_input_seq input_seq;	/* input data sequence */
+	enum csi_data_width data_width;	/* csi data width */
+};
+
+/*
+ * csi buffer
+ */
+
+enum csi_buf_sel {
+	CSI_BUF_0_A = 0,	/* FIFO for Y address A */
+	CSI_BUF_0_B,		/* FIFO for Y address B */
+	CSI_BUF_1_A,		/* FIFO for Cb address A */
+	CSI_BUF_1_B,		/* FIFO for Cb address B */
+	CSI_BUF_2_A,		/* FIFO for Cr address A */
+	CSI_BUF_2_B,		/* FIFO for Cr address B */
+};
+
+/*
+ * csi buffer configs
+ */
+
+struct csi_buf_cfg {
+	enum csi_buf_sel buf_sel;
+	unsigned long addr;
+};
+
+/*
+ * csi capture status
+ */
+struct csi_capture_status {
+	_Bool picture_in_progress;
+	_Bool video_in_progress;
+};
+
+enum csi_cap_mode {
+	CSI_SCAP = 1,
+	CSI_VCAP,
+};
+
+/*
+ * csi interrupt
+ */
+enum csi_int_sel {
+	CSI_INT_CAPTURE_DONE = 0X1,
+	CSI_INT_FRAME_DONE = 0X2,
+	CSI_INT_BUF_0_OVERFLOW = 0X4,
+	CSI_INT_BUF_1_OVERFLOW = 0X8,
+	CSI_INT_BUF_2_OVERFLOW = 0X10,
+	CSI_INT_PROTECTION_ERROR = 0X20,
+	CSI_INT_HBLANK_OVERFLOW = 0X40,
+	CSI_INT_VSYNC_TRIG = 0X80,
+	CSI_INT_ALL = 0XFF,
+};
+
+/*
+ * csi interrupt status
+ */
+struct csi_int_status {
+	_Bool capture_done;
+	_Bool frame_done;
+	_Bool buf_0_overflow;
+	_Bool buf_1_overflow;
+	_Bool buf_2_overflow;
+	_Bool protection_error;
+	_Bool hblank_overflow;
+	_Bool vsync_trig;
+};
+
+struct vin_csi_fmt_cfg {
+	unsigned long ch;
+	struct csi_fmt_cfg fmt;
+	struct csi_size_offset_cfg so;
+};
+
+struct vin_csi_buf_cfg {
+	unsigned long ch;
+	unsigned long set;
+	struct csi_buf_cfg buf;
+};
+
+struct vin_csi_cap_mode {
+	unsigned long total_ch;
+	unsigned long on;
+	enum csi_cap_mode mode;
+};
+
+struct vin_csi_cap_status {
+	unsigned long ch;
+	struct csi_capture_status status;
+};
+
+struct vin_csi_int_cfg {
+	unsigned long ch;
+	unsigned long en;
+	enum csi_int_sel sel;
+};
+
+/*
+ * CSI Bsp IOCTLs
+ *
+ * VIDIOC_VIN_CSI_ONOFF: Enable/disable CSI module
+ * VIDIOC_VIN_CSI_IF_CFG: Configure CSI interface
+ * VIDIOC_VIN_CSI_TIMING_CFG: Configure CSI timing
+ * VIDIOC_VIN_CSI_FMT_CFG: Configure CSI format
+ * VIDIOC_VIN_CSI_BUF_ADDR_CFG: Set/Get CSI buffer address
+ * VIDIOC_VIN_CSI_CAP_MODE_CFG: Start/Stop CSI video or still capture mode
+ * VIDIOC_VIN_CSI_CAP_STATUS: Get CSI capture status
+ * VIDIOC_VIN_CSI_INT_CFG: Enable/Disable CSI interrupts
+ */
+
+#define VIDIOC_VIN_CSI_ONOFF \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 41, unsigned long)
+#define VIDIOC_VIN_CSI_IF_CFG \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 42, struct csi_if_cfg)
+#define VIDIOC_VIN_CSI_TIMING_CFG \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 43, struct csi_timing_cfg)
+#define VIDIOC_VIN_CSI_FMT_CFG \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 44, struct vin_csi_fmt_cfg)
+#define VIDIOC_VIN_CSI_BUF_ADDR_CFG \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 45, struct vin_csi_buf_cfg)
+#define VIDIOC_VIN_CSI_CAP_MODE_CFG \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 46, struct vin_csi_cap_mode)
+#define VIDIOC_VIN_CSI_CAP_STATUS \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 47, struct vin_csi_cap_status)
+#define VIDIOC_VIN_CSI_INT_CFG \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 48, struct vin_csi_int_cfg)
+
 
 struct sensor_config {
 	int width;
@@ -315,42 +556,11 @@ struct sensor_config {
 	unsigned int hts;	/*h size of timing, unit: pclk      */
 	unsigned int vts;	/*v size of timing, unit: line      */
 	unsigned int pclk;	/*pixel clock in Hz                 */
-	unsigned int fps_fixed;	/*sensor fps            */
 	unsigned int bin_factor;/*binning factor                    */
 	unsigned int intg_min;	/*integration min, unit: line, Q4   */
 	unsigned int intg_max;	/*integration max, unit: line, Q4   */
 	unsigned int gain_min;	/*sensor gain min, Q4               */
 	unsigned int gain_max;	/*sensor gain max, Q4               */
-	unsigned int mbus_code;	/*media bus code                    */
-	unsigned int wdr_mode;	/*isp wdr mode                    */
-};
-
-struct sensor_exp_gain {
-	int exp_val;
-	int gain_val;
-	int r_gain;
-	int b_gain;
-};
-
-struct sensor_fps {
-	int fps;
-};
-struct sensor_temp {
-	int temp;
-};
-
-struct isp_table_reg_map {
-	void __user *addr;
-	unsigned int size;
-};
-
-struct actuator_ctrl {
-	unsigned int code;
-};
-
-struct actuator_para {
-	unsigned short code_min;
-	unsigned short code_max;
 };
 
 /*
@@ -360,29 +570,6 @@ struct actuator_para {
 #define VIDIOC_VIN_SENSOR_CFG_REQ \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 60, struct sensor_config)
 
-#define VIDIOC_VIN_SENSOR_EXP_GAIN \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 61, struct sensor_exp_gain)
-#define VIDIOC_VIN_SENSOR_SET_FPS \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 62, struct sensor_fps)
-#define VIDIOC_VIN_SENSOR_GET_TEMP \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 63, struct sensor_temp)
-
-#define VIDIOC_VIN_ACT_SET_CODE \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 64, struct actuator_ctrl)
-#define VIDIOC_VIN_ACT_INIT \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 65, struct actuator_para)
-
-#define VIDIOC_VIN_ISP_LOAD_REG \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 70, struct isp_table_reg_map)
-
-#define VIDIOC_VIN_ISP_TABLE1_MAP \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 71, struct isp_table_reg_map)
-
-#define VIDIOC_VIN_ISP_TABLE2_MAP \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 72, struct isp_table_reg_map)
-
-#define VIDIOC_VIN_GET_SENSOR_CODE \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 73, int)
 
 #endif /*_SUNXI_CAMERA_H_*/
 

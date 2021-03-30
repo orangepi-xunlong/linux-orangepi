@@ -363,7 +363,7 @@ static int mt2032_set_params(struct dvb_frontend *fe,
 	return ret;
 }
 
-static const struct dvb_tuner_ops mt2032_tuner_ops = {
+static struct dvb_tuner_ops mt2032_tuner_ops = {
 	.set_analog_params = mt2032_set_params,
 	.release           = microtune_release,
 	.get_frequency     = microtune_get_frequency,
@@ -563,7 +563,7 @@ static int mt2050_set_params(struct dvb_frontend *fe,
 	return ret;
 }
 
-static const struct dvb_tuner_ops mt2050_tuner_ops = {
+static struct dvb_tuner_ops mt2050_tuner_ops = {
 	.set_analog_params = mt2050_set_params,
 	.release           = microtune_release,
 	.get_frequency     = microtune_get_frequency,
@@ -660,3 +660,11 @@ EXPORT_SYMBOL_GPL(microtune_attach);
 MODULE_DESCRIPTION("Microtune tuner driver");
 MODULE_AUTHOR("Ralph Metzler, Gerd Knorr, Gunther Mayer");
 MODULE_LICENSE("GPL");
+
+/*
+ * Overrides for Emacs so that we follow Linus's tabbing style.
+ * ---------------------------------------------------------------------------
+ * Local variables:
+ * c-basic-offset: 8
+ * End:
+ */

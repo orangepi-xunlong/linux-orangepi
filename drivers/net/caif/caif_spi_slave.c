@@ -3,6 +3,7 @@
  * Author:  Daniel Martensson
  * License terms: GNU General Public License (GPL) version 2.
  */
+#include <linux/init.h>
 #include <linux/module.h>
 #include <linux/device.h>
 #include <linux/platform_device.h>

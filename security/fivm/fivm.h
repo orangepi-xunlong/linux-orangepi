@@ -21,31 +21,30 @@
 #include <linux/security.h>
 #include <linux/hash.h>
 
-/*FIMV LKM debug mode
-*#define FIVM_LKM_DEBUG
-*#define FIVM_DEBUG_TIMMNG
-*/
+/*FIMV LKM debug mode*/
+/*#define FIVM_LKM_DEBUG*/
+/*#define FIVM_DEBUG_TIMMNG *//*To summary the time consume*/
 
 extern int fivm_debug;
 #undef dprintk
 #define dprintk(format, arg...)        \
-	do {\
+	do { \
 		if (fivm_debug) \
-		printk(KERN_DEBUG "%s: " format,\
-				__func__, ##arg);\
+		printk(KERN_DEBUG "%s:" format, \
+				__func__, ## arg);  \
 	} while (0)
 
-#define fprintk(format, arg...)   \
-	do {\
-		if (fivm_debug)\
-		printk(format, ##arg);    \
+#define fprintk(format, arg...)        \
+	do { \
+		if (fivm_debug) \
+		printk(format, ## arg);    \
 	} while (0)
 
-#define derr(format, arg...)      \
-	do {\
-		printk(KERN_ERR "%s: " format,\
-				__func__, ## arg);\
-	} while (0)
+
+#define derr(format, arg...)        \
+		printk(KERN_ERR "%s: " format, \
+				__func__, ## arg);
+
 
 #define SHA256_DIGEST_LENGTH	32
 #define SHA512_DIGEST_LENGTH	64
@@ -57,7 +56,7 @@ extern int fivm_debug;
 
 #define FILE_NAME_LEN			512
 #define DIR_MAX_FILE_NUM		10000
-#define DIR_BITMAP_BYTES		(DIR_MAX_FILE_NUM / 8)
+#define DIR_BITMAP_BYTES		(DIR_MAX_FILE_NUM/8)
 #define  BLK_SIZE				4096
 #define FILE_SIG_MAGIC          0x78381729
 
@@ -82,7 +81,7 @@ struct FILE_SIG_HEAD {
 	unsigned int actual_cnt; /*actual file count*/
 };
 struct FILE_SIG {
-	unsigned int crc;/*name crc*/
+	unsigned int crc; /*name crc*/
 	unsigned int flag;
 	unsigned char sha[SHA_DIG_MAX];
 	unsigned int  name_len;
@@ -108,7 +107,7 @@ struct fivm_param {
 enum {
 	FIVM_FULL_PATH = 1,
 	FIVM_PART_PATH,
-	FIVM_FAIL_PATH
+	FIVM_FAIL_PATH,
 };
 
 struct fivm_path {
@@ -117,6 +116,7 @@ struct fivm_path {
 };
 
 #define MAX_NAME_LEN 64
+
 int fivm_init(void);
 int fivm_cleanup(void);
 int fivm_enable(void);

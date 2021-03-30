@@ -5,6 +5,8 @@
  * MIPS floating point support
  * Copyright (C) 1994-2000 Algorithmics Ltd.
  *
+ * ########################################################################
+ *
  *  This program is free software; you can distribute it and/or modify it
  *  under the terms of the GNU General Public License (Version 2) as
  *  published by the Free Software Foundation.
@@ -16,18 +18,21 @@
  *
  *  You should have received a copy of the GNU General Public License along
  *  with this program; if not, write to the Free Software Foundation, Inc.,
- *  51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA.
+ *  59 Temple Place - Suite 330, Boston MA 02111-1307, USA.
+ *
+ * ########################################################################
  */
+
 
 #include "ieee754sp.h"
 
-union ieee754sp ieee754sp_flong(s64 x)
+ieee754sp ieee754sp_flong(s64 x)
 {
 	u64 xm;		/* <--- need 64-bit mantissa temp */
 	int xe;
 	int xs;
 
-	ieee754_clearcx();
+	CLEARCX;
 
 	if (x == 0)
 		return ieee754sp_zero(0);
@@ -45,20 +50,29 @@ union ieee754sp ieee754sp_flong(s64 x)
 	} else {
 		xm = x;
 	}
-	xe = SP_FBITS + 3;
+	xe = SP_MBITS + 3;
 
-	if (xm >> (SP_FBITS + 1 + 3)) {
+	if (xm >> (SP_MBITS + 1 + 3)) {
 		/* shunt out overflow bits
 		 */
-		while (xm >> (SP_FBITS + 1 + 3)) {
+		while (xm >> (SP_MBITS + 1 + 3)) {
 			SPXSRSX1();
 		}
 	} else {
 		/* normalize in grs extended single precision */
-		while ((xm >> (SP_FBITS + 3)) == 0) {
+		while ((xm >> (SP_MBITS + 3)) == 0) {
 			xm <<= 1;
 			xe--;
 		}
 	}
-	return ieee754sp_format(xs, xe, xm);
+	SPNORMRET1(xs, xe, xm, "sp_flong", x);
+}
+
+
+ieee754sp ieee754sp_fulong(u64 u)
+{
+	if ((s64) u < 0)
+		return ieee754sp_add(ieee754sp_1e63(),
+				     ieee754sp_flong(u & ~(1ULL << 63)));
+	return ieee754sp_flong(u);
 }

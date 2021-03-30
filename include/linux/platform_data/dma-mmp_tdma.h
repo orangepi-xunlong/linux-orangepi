@@ -1,4 +1,6 @@
 /*
+ *  linux/arch/arm/mach-mmp/include/mach/sram.h
+ *
  *  SRAM Memory Management
  *
  *  Copyright (c) 2011 Marvell Semiconductors Inc.
@@ -9,8 +11,8 @@
  *
  */
 
-#ifndef __DMA_MMP_TDMA_H
-#define __DMA_MMP_TDMA_H
+#ifndef __ASM_ARCH_SRAM_H
+#define __ASM_ARCH_SRAM_H
 
 #include <linux/genalloc.h>
 
@@ -28,13 +30,6 @@ struct sram_platdata {
 	int granularity;
 };
 
-#ifdef CONFIG_MMP_SRAM
 extern struct gen_pool *sram_get_gpool(char *pool_name);
-#else
-static inline struct gen_pool *sram_get_gpool(char *pool_name)
-{
-	return NULL;
-}
-#endif
 
-#endif /* __DMA_MMP_TDMA_H */
+#endif /* __ASM_ARCH_SRAM_H */

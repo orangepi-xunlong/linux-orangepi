@@ -21,9 +21,8 @@ int speakup_thread(void *data)
 	mutex_lock(&spk_mutex);
 	while (1) {
 		DEFINE_WAIT(wait);
-
 		while (1) {
-			spin_lock_irqsave(&speakup_info.spinlock, flags);
+			spk_lock(flags);
 			our_sound = spk_unprocessed_sound;
 			spk_unprocessed_sound.active = 0;
 			prepare_to_wait(&speakup_event, &wait,
@@ -33,7 +32,7 @@ int speakup_thread(void *data)
 				(synth && synth->catch_up && synth->alive &&
 					(speakup_info.flushing ||
 					!synth_buffer_empty()));
-			spin_unlock_irqrestore(&speakup_info.spinlock, flags);
+			spk_unlock(flags);
 			if (should_break)
 				break;
 			mutex_unlock(&spk_mutex);
@@ -48,8 +47,7 @@ int speakup_thread(void *data)
 			kd_mksound(our_sound.freq, our_sound.jiffies);
 		if (synth && synth->catch_up && synth->alive) {
 			/* It is up to the callee to take the lock, so that it
-			 * can sleep whenever it likes
-			 */
+			 * can sleep whenever it likes */
 			synth->catch_up(synth);
 		}
 

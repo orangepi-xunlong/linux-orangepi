@@ -37,7 +37,7 @@
 #include <linux/cdev.h>
 #include <linux/platform_device.h>
 
-#include <linux/io.h>
+#include <asm/io.h>
 
 struct hwicap_drvdata {
 	u32 write_buffer_in_use;  /* Always in [0,3] */
@@ -85,13 +85,7 @@ struct hwicap_driver_config {
 	void (*reset)(struct hwicap_drvdata *drvdata);
 };
 
-/* Number of times to poll the done register. This has to be large
- * enough to allow an entire configuration to complete. If an entire
- * page (4kb) is configured at once, that could take up to 4k cycles
- * with a byte-wide icap interface. In most cases, this driver is
- * used with a much smaller fifo, but this should be sufficient in the
- * worst case.
- */
+/* Number of times to poll the done regsiter */
 #define XHI_MAX_RETRIES     5000
 
 /************ Constant Definitions *************/

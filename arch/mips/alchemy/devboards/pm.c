@@ -9,7 +9,7 @@
 #include <linux/suspend.h>
 #include <linux/sysfs.h>
 #include <asm/mach-au1x00/au1000.h>
-#include <asm/mach-au1x00/gpio-au1000.h>
+#include <asm/mach-au1x00/gpio.h>
 #include <asm/mach-db1x00/bcsr.h>
 
 /*
@@ -45,20 +45,23 @@ static int db1x_pm_enter(suspend_state_t state)
 	alchemy_gpio1_input_enable();
 
 	/* clear and setup wake cause and source */
-	alchemy_wrsys(0, AU1000_SYS_WAKEMSK);
-	alchemy_wrsys(0, AU1000_SYS_WAKESRC);
+	au_writel(0, SYS_WAKEMSK);
+	au_sync();
+	au_writel(0, SYS_WAKESRC);
+	au_sync();
 
-	alchemy_wrsys(db1x_pm_wakemsk, AU1000_SYS_WAKEMSK);
+	au_writel(db1x_pm_wakemsk, SYS_WAKEMSK);
+	au_sync();
 
 	/* setup 1Hz-timer-based wakeup: wait for reg access */
-	while (alchemy_rdsys(AU1000_SYS_CNTRCTRL) & SYS_CNTRL_M20)
+	while (au_readl(SYS_COUNTER_CNTRL) & SYS_CNTRL_M20)
 		asm volatile ("nop");
 
-	alchemy_wrsys(alchemy_rdsys(AU1000_SYS_TOYREAD) + db1x_pm_sleep_secs,
-		      AU1000_SYS_TOYMATCH2);
+	au_writel(au_readl(SYS_TOYREAD) + db1x_pm_sleep_secs, SYS_TOYMATCH2);
+	au_sync();
 
 	/* wait for value to really hit the register */
-	while (alchemy_rdsys(AU1000_SYS_CNTRCTRL) & SYS_CNTRL_M20)
+	while (au_readl(SYS_COUNTER_CNTRL) & SYS_CNTRL_M20)
 		asm volatile ("nop");
 
 	/* ...and now the sandman can come! */
@@ -99,10 +102,12 @@ static void db1x_pm_end(void)
 	/* read and store wakeup source, the clear the register. To
 	 * be able to clear it, WAKEMSK must be cleared first.
 	 */
-	db1x_pm_last_wakesrc = alchemy_rdsys(AU1000_SYS_WAKESRC);
+	db1x_pm_last_wakesrc = au_readl(SYS_WAKESRC);
 
-	alchemy_wrsys(0, AU1000_SYS_WAKEMSK);
-	alchemy_wrsys(0, AU1000_SYS_WAKESRC);
+	au_writel(0, SYS_WAKEMSK);
+	au_writel(0, SYS_WAKESRC);
+	au_sync();
+
 }
 
 static const struct platform_suspend_ops db1x_pm_ops = {
@@ -153,7 +158,7 @@ static ssize_t db1x_pmattr_store(struct kobject *kobj,
 	int tmp;
 
 	if (ATTRCMP(timer_timeout)) {
-		tmp = kstrtoul(instr, 0, &l);
+		tmp = strict_strtoul(instr, 0, &l);
 		if (tmp)
 			return tmp;
 
@@ -176,7 +181,7 @@ static ssize_t db1x_pmattr_store(struct kobject *kobj,
 		}
 
 	} else if (ATTRCMP(wakemsk)) {
-		tmp = kstrtoul(instr, 0, &l);
+		tmp = strict_strtoul(instr, 0, &l);
 		if (tmp)
 			return tmp;
 
@@ -237,13 +242,17 @@ static int __init pm_init(void)
 	 * for confirmation since there's plenty of time from here to
 	 * the next suspend cycle.
 	 */
-	if (alchemy_rdsys(AU1000_SYS_TOYTRIM) != 32767)
-		alchemy_wrsys(32767, AU1000_SYS_TOYTRIM);
+	if (au_readl(SYS_TOYTRIM) != 32767) {
+		au_writel(32767, SYS_TOYTRIM);
+		au_sync();
+	}
 
-	db1x_pm_last_wakesrc = alchemy_rdsys(AU1000_SYS_WAKESRC);
+	db1x_pm_last_wakesrc = au_readl(SYS_WAKESRC);
 
-	alchemy_wrsys(0, AU1000_SYS_WAKESRC);
-	alchemy_wrsys(0, AU1000_SYS_WAKEMSK);
+	au_writel(0, SYS_WAKESRC);
+	au_sync();
+	au_writel(0, SYS_WAKEMSK);
+	au_sync();
 
 	suspend_set_ops(&db1x_pm_ops);
 

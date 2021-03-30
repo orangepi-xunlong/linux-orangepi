@@ -2,7 +2,7 @@
  * arch/arm/common/bL_switcher_dummy_if.c -- b.L switcher dummy interface
  *
  * Created by:	Nicolas Pitre, November 2012
- * Copyright:	(C) 2012-2013  Linaro Limited
+ * Copyright:	(C) 2012  Linaro Limited
  *
  * Dummy interface to user space for debugging purpose only.
  *
@@ -34,7 +34,7 @@ static ssize_t bL_switcher_write(struct file *file, const char __user *buf,
 		return -EFAULT;
 
 	/* format: <cpu#>,<cluster#> */
-	if (val[0] < '0' || val[0] > '9' ||
+	if (val[0] < '0' || val[0] > '4' ||
 	    val[1] != ',' ||
 	    val[2] < '0' || val[2] > '1')
 		return -EINVAL;
@@ -52,12 +52,20 @@ static const struct file_operations bL_switcher_fops = {
 };
 
 static struct miscdevice bL_switcher_device = {
-	MISC_DYNAMIC_MINOR,
-	"b.L_switcher",
-	&bL_switcher_fops
+        MISC_DYNAMIC_MINOR,
+        "b.L_switcher",
+        &bL_switcher_fops
 };
-module_misc_device(bL_switcher_device);
 
-MODULE_AUTHOR("Nicolas Pitre <nico@linaro.org>");
-MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("big.LITTLE switcher dummy user interface");
+static int __init bL_switcher_dummy_if_init(void)
+{
+	return misc_register(&bL_switcher_device);
+}
+
+static void __exit bL_switcher_dummy_if_exit(void)
+{
+	misc_deregister(&bL_switcher_device);
+}
+
+module_init(bL_switcher_dummy_if_init);
+module_exit(bL_switcher_dummy_if_exit);

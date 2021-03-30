@@ -28,6 +28,7 @@
  */
 struct thread_info {
 	struct task_struct	*task;		/* main task structure */
+	struct exec_domain	*exec_domain;	/* execution domain */
 	unsigned long		flags;		/* low level flags */
 	unsigned long		tp_value;	/* thread pointer */
 	__u32			cpu;		/* current CPU */
@@ -41,6 +42,7 @@ struct thread_info {
 	 * 0-0xFFFFFFFF for kernel-thread
 	 */
 	mm_segment_t		addr_limit;
+	struct restart_block	restart_block;
 	struct pt_regs		*regs;
 };
 
@@ -52,9 +54,13 @@ struct thread_info {
 #define INIT_THREAD_INFO(tsk)			\
 {						\
 	.task		= &tsk,			\
+	.exec_domain	= &default_exec_domain,	\
 	.cpu		= 0,			\
 	.preempt_count	= 1,			\
 	.addr_limit	= KERNEL_DS,		\
+	.restart_block	= {			\
+		.fn = do_no_restart_syscall,	\
+	},					\
 }
 
 #define init_thread_info	(init_thread_union.thread_info)
@@ -65,6 +71,8 @@ register struct thread_info *__current_thread_info __asm__("r28");
 #define current_thread_info()	__current_thread_info
 
 #endif /* !__ASSEMBLY__ */
+
+#define PREEMPT_ACTIVE		0x10000000
 
 /*
  * thread information flags

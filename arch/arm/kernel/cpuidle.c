@@ -19,7 +19,7 @@ extern struct of_cpuidle_method __cpuidle_method_of_table[];
 static const struct of_cpuidle_method __cpuidle_method_of_table_sentinel
 	__used __section(__cpuidle_method_of_table_end);
 
-static struct cpuidle_ops cpuidle_ops[NR_CPUS] __ro_after_init;
+static struct cpuidle_ops cpuidle_ops[NR_CPUS];
 
 /**
  * arm_cpuidle_simple_enter() - a wrapper to cpu_do_idle()
@@ -47,13 +47,18 @@ int arm_cpuidle_simple_enter(struct cpuidle_device *dev,
  * This function calls the underlying arch specific low level PM code as
  * registered at the init time.
  *
- * Returns the result of the suspend callback.
+ * Returns -EOPNOTSUPP if no suspend callback is defined, the result of the
+ * callback otherwise.
  */
 int arm_cpuidle_suspend(int index)
 {
+	int ret = -EOPNOTSUPP;
 	int cpu = smp_processor_id();
 
-	return cpuidle_ops[cpu].suspend(index);
+	if (cpuidle_ops[cpu].suspend)
+		ret = cpuidle_ops[cpu].suspend(cpu, index);
+
+	return ret;
 }
 
 /**
@@ -65,7 +70,7 @@ int arm_cpuidle_suspend(int index)
  *
  * Returns a struct cpuidle_ops pointer, NULL if not found.
  */
-static const struct cpuidle_ops *__init arm_cpuidle_get_ops(const char *method)
+static struct cpuidle_ops *__init arm_cpuidle_get_ops(const char *method)
 {
 	struct of_cpuidle_method *m = __cpuidle_method_of_table;
 
@@ -83,17 +88,16 @@ static const struct cpuidle_ops *__init arm_cpuidle_get_ops(const char *method)
  *
  * Get the method name defined in the 'enable-method' property, retrieve the
  * associated cpuidle_ops and do a struct copy. This copy is needed because all
- * cpuidle_ops are tagged __initconst and will be unloaded after the init
+ * cpuidle_ops are tagged __initdata and will be unloaded after the init
  * process.
  *
  * Return 0 on sucess, -ENOENT if no 'enable-method' is defined, -EOPNOTSUPP if
- * no cpuidle_ops is registered for the 'enable-method', or if either init or
- * suspend callback isn't defined.
+ * no cpuidle_ops is registered for the 'enable-method'.
  */
 static int __init arm_cpuidle_read_ops(struct device_node *dn, int cpu)
 {
 	const char *enable_method;
-	const struct cpuidle_ops *ops;
+	struct cpuidle_ops *ops;
 
 	enable_method = of_get_property(dn, "enable-method", NULL);
 	if (!enable_method)
@@ -103,12 +107,6 @@ static int __init arm_cpuidle_read_ops(struct device_node *dn, int cpu)
 	if (!ops) {
 		pr_warn("%s: unsupported enable-method property: %s\n",
 			dn->full_name, enable_method);
-		return -EOPNOTSUPP;
-	}
-
-	if (!ops->init || !ops->suspend) {
-		pr_warn("cpuidle_ops '%s': no init or suspend callback\n",
-			enable_method);
 		return -EOPNOTSUPP;
 	}
 
@@ -131,11 +129,10 @@ static int __init arm_cpuidle_read_ops(struct device_node *dn, int cpu)
  * Returns:
  *  0 on success,
  *  -ENODEV if it fails to find the cpu node in the device tree,
- *  -EOPNOTSUPP if it does not find a registered and valid cpuidle_ops for
- *  this cpu,
+ *  -EOPNOTSUPP if it does not find a registered cpuidle_ops for this cpu,
  *  -ENOENT if it fails to find an 'enable-method' property,
  *  -ENXIO if the HW reports a failure or a misconfiguration,
- *  -ENOMEM if the HW report an memory allocation failure 
+ *  -ENOMEM if the HW report an memory allocation failure
  */
 int __init arm_cpuidle_init(int cpu)
 {
@@ -146,7 +143,7 @@ int __init arm_cpuidle_init(int cpu)
 		return -ENODEV;
 
 	ret = arm_cpuidle_read_ops(cpu_node, cpu);
-	if (!ret)
+	if (!ret && cpuidle_ops[cpu].init)
 		ret = cpuidle_ops[cpu].init(cpu_node, cpu);
 
 	of_node_put(cpu_node);

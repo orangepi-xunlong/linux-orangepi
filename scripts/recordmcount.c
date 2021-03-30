@@ -33,39 +33,26 @@
 #include <string.h>
 #include <unistd.h>
 
-/*
- * glibc synced up and added the metag number but didn't add the relocations.
- * Work around this in a crude manner for now.
- */
 #ifndef EM_METAG
+/* Remove this when these make it to the standard system elf.h. */
 #define EM_METAG      174
-#endif
-#ifndef R_METAG_ADDR32
 #define R_METAG_ADDR32                   2
-#endif
-#ifndef R_METAG_NONE
 #define R_METAG_NONE                     3
 #endif
 
 #ifndef EM_AARCH64
 #define EM_AARCH64	183
-#define R_AARCH64_NONE		0
 #define R_AARCH64_ABS64	257
 #endif
 
 static int fd_map;	/* File descriptor for file being modified. */
 static int mmap_failed; /* Boolean flag. */
+static void *ehdr_curr; /* current ElfXX_Ehdr *  for resource cleanup */
 static char gpfx;	/* prefix for global symbol name (sometimes '_') */
 static struct stat sb;	/* Remember .st_size, etc. */
 static jmp_buf jmpenv;	/* setjmp/longjmp per-file error escape */
 static const char *altmcount;	/* alternate mcount symbol name */
 static int warn_on_notrace_sect; /* warn when section has mcount not being recorded */
-static void *file_map;	/* pointer of the mapped file */
-static void *file_end;	/* pointer to the end of the mapped file */
-static int file_updated; /* flag to state file was changed */
-static void *file_ptr;	/* current file pointer location */
-static void *file_append; /* added to the end of the file */
-static size_t file_append_size; /* how much is added to end of file */
 
 /* setjmp() return values */
 enum {
@@ -79,14 +66,10 @@ static void
 cleanup(void)
 {
 	if (!mmap_failed)
-		munmap(file_map, sb.st_size);
+		munmap(ehdr_curr, sb.st_size);
 	else
-		free(file_map);
-	file_map = NULL;
-	free(file_append);
-	file_append = NULL;
-	file_append_size = 0;
-	file_updated = 0;
+		free(ehdr_curr);
+	close(fd_map);
 }
 
 static void __attribute__((noreturn))
@@ -108,22 +91,12 @@ succeed_file(void)
 static off_t
 ulseek(int const fd, off_t const offset, int const whence)
 {
-	switch (whence) {
-	case SEEK_SET:
-		file_ptr = file_map + offset;
-		break;
-	case SEEK_CUR:
-		file_ptr += offset;
-		break;
-	case SEEK_END:
-		file_ptr = file_map + (sb.st_size - offset);
-		break;
-	}
-	if (file_ptr < file_map) {
-		fprintf(stderr, "lseek: seek before file\n");
+	off_t const w = lseek(fd, offset, whence);
+	if (w == (off_t)-1) {
+		perror("lseek");
 		fail_file();
 	}
-	return file_ptr - file_map;
+	return w;
 }
 
 static size_t
@@ -140,38 +113,12 @@ uread(int const fd, void *const buf, size_t const count)
 static size_t
 uwrite(int const fd, void const *const buf, size_t const count)
 {
-	size_t cnt = count;
-	off_t idx = 0;
-
-	file_updated = 1;
-
-	if (file_ptr + count >= file_end) {
-		off_t aoffset = (file_ptr + count) - file_end;
-
-		if (aoffset > file_append_size) {
-			file_append = realloc(file_append, aoffset);
-			file_append_size = aoffset;
-		}
-		if (!file_append) {
-			perror("write");
-			fail_file();
-		}
-		if (file_ptr < file_end) {
-			cnt = file_end - file_ptr;
-		} else {
-			cnt = 0;
-			idx = aoffset - count;
-		}
+	size_t const n = write(fd, buf, count);
+	if (n != count) {
+		perror("write");
+		fail_file();
 	}
-
-	if (cnt)
-		memcpy(file_ptr, buf, cnt);
-
-	if (cnt < count)
-		memcpy(file_append + idx, buf + cnt, count - cnt);
-
-	file_ptr += count;
-	return count;
+	return n;
 }
 
 static void *
@@ -213,22 +160,6 @@ static int make_nop_x86(void *map, size_t const offset)
 	return 0;
 }
 
-static unsigned char ideal_nop4_arm64[4] = {0x1f, 0x20, 0x03, 0xd5};
-static int make_nop_arm64(void *map, size_t const offset)
-{
-	uint32_t *ptr;
-
-	ptr = map + offset;
-	/* bl <_mcount> is 0x94000000 before relocation */
-	if (*ptr != 0x94000000)
-		return -1;
-
-	/* Convert to nop */
-	ulseek(fd_map, offset, SEEK_SET);
-	uwrite(fd_map, ideal_nop, 4);
-	return 0;
-}
-
 /*
  * Get the whole file as a programming convenience in order to avoid
  * malloc+lseek+read+free of many pieces.  If successful, then mmap
@@ -244,7 +175,9 @@ static int make_nop_arm64(void *map, size_t const offset)
  */
 static void *mmap_file(char const *fname)
 {
-	fd_map = open(fname, O_RDONLY);
+	void *addr;
+
+	fd_map = open(fname, O_RDWR);
 	if (fd_map < 0 || fstat(fd_map, &sb) < 0) {
 		perror(fname);
 		fail_file();
@@ -253,58 +186,15 @@ static void *mmap_file(char const *fname)
 		fprintf(stderr, "not a regular file: %s\n", fname);
 		fail_file();
 	}
-	file_map = mmap(0, sb.st_size, PROT_READ|PROT_WRITE, MAP_PRIVATE,
-			fd_map, 0);
+	addr = mmap(0, sb.st_size, PROT_READ|PROT_WRITE, MAP_PRIVATE,
+		    fd_map, 0);
 	mmap_failed = 0;
-	if (file_map == MAP_FAILED) {
+	if (addr == MAP_FAILED) {
 		mmap_failed = 1;
-		file_map = umalloc(sb.st_size);
-		uread(fd_map, file_map, sb.st_size);
+		addr = umalloc(sb.st_size);
+		uread(fd_map, addr, sb.st_size);
 	}
-	close(fd_map);
-
-	file_end = file_map + sb.st_size;
-
-	return file_map;
-}
-
-static void write_file(const char *fname)
-{
-	char tmp_file[strlen(fname) + 4];
-	size_t n;
-
-	if (!file_updated)
-		return;
-
-	sprintf(tmp_file, "%s.rc", fname);
-
-	/*
-	 * After reading the entire file into memory, delete it
-	 * and write it back, to prevent weird side effects of modifying
-	 * an object file in place.
-	 */
-	fd_map = open(tmp_file, O_WRONLY | O_TRUNC | O_CREAT, sb.st_mode);
-	if (fd_map < 0) {
-		perror(fname);
-		fail_file();
-	}
-	n = write(fd_map, file_map, sb.st_size);
-	if (n != sb.st_size) {
-		perror("write");
-		fail_file();
-	}
-	if (file_append_size) {
-		n = write(fd_map, file_append, file_append_size);
-		if (n != file_append_size) {
-			perror("write");
-			fail_file();
-		}
-	}
-	close(fd_map);
-	if (rename(tmp_file, fname) < 0) {
-		perror(fname);
-		fail_file();
-	}
+	return addr;
 }
 
 /* w8rev, w8nat, ...: Handle endianness. */
@@ -363,11 +253,8 @@ is_mcounted_section_name(char const *const txtname)
 		strcmp(".sched.text",    txtname) == 0 ||
 		strcmp(".spinlock.text", txtname) == 0 ||
 		strcmp(".irqentry.text", txtname) == 0 ||
-		strcmp(".softirqentry.text", txtname) == 0 ||
 		strcmp(".kprobes.text", txtname) == 0 ||
-		strcmp(".cpuidle.text", txtname) == 0 ||
-		(strncmp(".text.",       txtname, 6) == 0 &&
-		 strcmp(".text..ftrace", txtname) != 0);
+		strcmp(".text.unlikely", txtname) == 0;
 }
 
 /* 32 bit and 64 bit are very similar */
@@ -414,6 +301,7 @@ do_file(char const *const fname)
 	Elf32_Ehdr *const ehdr = mmap_file(fname);
 	unsigned int reltype = 0;
 
+	ehdr_curr = ehdr;
 	w = w4nat;
 	w2 = w2nat;
 	w8 = w8nat;
@@ -457,7 +345,6 @@ do_file(char const *const fname)
 		break;
 	case EM_386:
 		reltype = R_386_32;
-		rel_type_nop = R_386_NONE;
 		make_nop = make_nop_x86;
 		ideal_nop = ideal_nop5_x86_32;
 		mcount_adjust_32 = -1;
@@ -466,12 +353,7 @@ do_file(char const *const fname)
 			 altmcount = "__gnu_mcount_nc";
 			 break;
 	case EM_AARCH64:
-			reltype = R_AARCH64_ABS64;
-			make_nop = make_nop_arm64;
-			rel_type_nop = R_AARCH64_NONE;
-			ideal_nop = ideal_nop4_arm64;
-			gpfx = '_';
-			break;
+			 reltype = R_AARCH64_ABS64; gpfx = '_'; break;
 	case EM_IA_64:	 reltype = R_IA64_IMM64;   gpfx = '_'; break;
 	case EM_METAG:	 reltype = R_METAG_ADDR32;
 			 altmcount = "_mcount_wrapper";
@@ -489,7 +371,6 @@ do_file(char const *const fname)
 		make_nop = make_nop_x86;
 		ideal_nop = ideal_nop5_x86_64;
 		reltype = R_X86_64_64;
-		rel_type_nop = R_X86_64_NONE;
 		mcount_adjust_64 = -1;
 		break;
 	}  /* end switch */
@@ -507,6 +388,10 @@ do_file(char const *const fname)
 				"unrecognized ET_REL file: %s\n", fname);
 			fail_file();
 		}
+		if (w2(ehdr->e_machine) == EM_S390) {
+			reltype = R_390_32;
+			mcount_adjust_32 = -4;
+		}
 		if (w2(ehdr->e_machine) == EM_MIPS) {
 			reltype = R_MIPS_32;
 			is_fake_mcount32 = MIPS32_is_fake_mcount;
@@ -523,7 +408,7 @@ do_file(char const *const fname)
 		}
 		if (w2(ghdr->e_machine) == EM_S390) {
 			reltype = R_390_64;
-			mcount_adjust_64 = -14;
+			mcount_adjust_64 = -8;
 		}
 		if (w2(ghdr->e_machine) == EM_MIPS) {
 			reltype = R_MIPS_64;
@@ -536,7 +421,6 @@ do_file(char const *const fname)
 	}
 	}  /* end switch */
 
-	write_file(fname);
 	cleanup();
 }
 
@@ -589,14 +473,11 @@ main(int argc, char *argv[])
 		case SJ_SETJMP:    /* normal sequence */
 			/* Avoid problems if early cleanup() */
 			fd_map = -1;
+			ehdr_curr = NULL;
 			mmap_failed = 1;
-			file_map = NULL;
-			file_ptr = NULL;
-			file_updated = 0;
 			do_file(file);
 			break;
 		case SJ_FAIL:    /* error in do_file or below */
-			fprintf(stderr, "%s: failed\n", file);
 			++n_error;
 			break;
 		case SJ_SUCCEED:    /* premature success */
@@ -606,3 +487,5 @@ main(int argc, char *argv[])
 	}
 	return !!n_error;
 }
+
+

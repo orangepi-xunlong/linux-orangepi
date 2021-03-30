@@ -4,7 +4,7 @@
  * Copyright 2005 Alessandro Zummo
  *
  * please send all reports to:
- *	Karen Spearel <kas111 at gmail dot com>
+ * 	Karen Spearel <kas111 at gmail dot com>
  *	Alessandro Zummo <a.zummo@towertech.it>
  *
  * based on a lot of other RTC drivers.
@@ -22,7 +22,8 @@
 #include <linux/rtc.h>
 #include <linux/delay.h>
 #include <linux/module.h>
-#include <linux/bitops.h>
+
+#define DRV_VERSION "1.0.8"
 
 /* offsets into CCR area */
 
@@ -214,14 +215,12 @@ static int x1205_set_datetime(struct i2c_client *client, struct rtc_time *tm,
 			buf[i] |= 0x80;
 
 	/* this sequence is required to unlock the chip */
-	xfer = i2c_master_send(client, wel, 3);
-	if (xfer != 3) {
+	if ((xfer = i2c_master_send(client, wel, 3)) != 3) {
 		dev_err(&client->dev, "%s: wel - %d\n", __func__, xfer);
 		return -EIO;
 	}
 
-	xfer = i2c_master_send(client, rwel, 3);
-	if (xfer != 3) {
+	if ((xfer = i2c_master_send(client, rwel, 3)) != 3) {
 		dev_err(&client->dev, "%s: rwel - %d\n", __func__, xfer);
 		return -EIO;
 	}
@@ -270,8 +269,7 @@ static int x1205_set_datetime(struct i2c_client *client, struct rtc_time *tm,
 	}
 
 	/* disable further writes */
-	xfer = i2c_master_send(client, diswe, 3);
-	if (xfer != 3) {
+	if ((xfer = i2c_master_send(client, diswe, 3)) != 3) {
 		dev_err(&client->dev, "%s: diswe - %d\n", __func__, xfer);
 		return -EIO;
 	}
@@ -365,7 +363,8 @@ static int x1205_get_atrim(struct i2c_client *client, int *trim)
 	 * perform sign extension. The formula is
 	 * Catr = (atr * 0.25pF) + 11.00pF.
 	 */
-	atr = sign_extend32(atr, 5);
+	if (atr & 0x20)
+		atr |= 0xC0;
 
 	dev_dbg(&client->dev, "%s: raw atr=%x (%d)\n", __func__, atr, atr);
 
@@ -376,7 +375,8 @@ static int x1205_get_atrim(struct i2c_client *client, int *trim)
 	return 0;
 }
 
-struct x1205_limit {
+struct x1205_limit
+{
 	unsigned char reg, mask, min, max;
 };
 
@@ -430,8 +430,7 @@ static int x1205_validate_client(struct i2c_client *client)
 			},
 		};
 
-		xfer = i2c_transfer(client->adapter, msgs, 2);
-		if (xfer != 2) {
+		if ((xfer = i2c_transfer(client->adapter, msgs, 2)) != 2) {
 			dev_err(&client->dev,
 				"%s: could not read register %x\n",
 				__func__, probe_zero_pattern[i]);
@@ -468,8 +467,7 @@ static int x1205_validate_client(struct i2c_client *client)
 			},
 		};
 
-		xfer = i2c_transfer(client->adapter, msgs, 2);
-		if (xfer != 2) {
+		if ((xfer = i2c_transfer(client->adapter, msgs, 2)) != 2) {
 			dev_err(&client->dev,
 				"%s: could not read register %x\n",
 				__func__, probe_limits_pattern[i].reg);
@@ -550,12 +548,10 @@ static int x1205_rtc_proc(struct device *dev, struct seq_file *seq)
 {
 	int err, dtrim, atrim;
 
-	err = x1205_get_dtrim(to_i2c_client(dev), &dtrim);
-	if (!err)
+	if ((err = x1205_get_dtrim(to_i2c_client(dev), &dtrim)) == 0)
 		seq_printf(seq, "digital_trim\t: %d ppm\n", dtrim);
 
-	err = x1205_get_atrim(to_i2c_client(dev), &atrim);
-	if (!err)
+	if ((err = x1205_get_atrim(to_i2c_client(dev), &atrim)) == 0)
 		seq_printf(seq, "analog_trim\t: %d.%02d pF\n",
 			atrim / 1000, atrim % 1000);
 	return 0;
@@ -632,6 +628,8 @@ static int x1205_probe(struct i2c_client *client,
 	if (x1205_validate_client(client) < 0)
 		return -ENODEV;
 
+	dev_info(&client->dev, "chip found, driver version " DRV_VERSION "\n");
+
 	rtc = devm_rtc_device_register(&client->dev, x1205_driver.driver.name,
 					&x1205_rtc_ops, THIS_MODULE);
 
@@ -641,8 +639,7 @@ static int x1205_probe(struct i2c_client *client,
 	i2c_set_clientdata(client, rtc);
 
 	/* Check for power failures and eventually enable the osc */
-	err = x1205_get_status(client, &sr);
-	if (!err) {
+	if ((err = x1205_get_status(client, &sr)) == 0) {
 		if (sr & X1205_SR_RTCF) {
 			dev_err(&client->dev,
 				"power failure detected, "
@@ -650,13 +647,13 @@ static int x1205_probe(struct i2c_client *client,
 			udelay(50);
 			x1205_fix_osc(client);
 		}
-	} else {
-		dev_err(&client->dev, "couldn't read status\n");
 	}
+	else
+		dev_err(&client->dev, "couldn't read status\n");
 
 	err = x1205_sysfs_register(&client->dev);
 	if (err)
-		dev_err(&client->dev, "Unable to create sysfs entries\n");
+		return err;
 
 	return 0;
 }
@@ -689,3 +686,4 @@ MODULE_AUTHOR(
 	"Alessandro Zummo <a.zummo@towertech.it>");
 MODULE_DESCRIPTION("Xicor/Intersil X1205 RTC driver");
 MODULE_LICENSE("GPL");
+MODULE_VERSION(DRV_VERSION);

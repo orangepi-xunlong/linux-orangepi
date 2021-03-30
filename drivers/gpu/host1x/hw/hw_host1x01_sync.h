@@ -131,12 +131,12 @@ static inline u32 host1x_sync_mlock_owner_r(unsigned int id)
 }
 #define HOST1X_SYNC_MLOCK_OWNER(id) \
 	host1x_sync_mlock_owner_r(id)
-static inline u32 host1x_sync_mlock_owner_chid_v(u32 v)
+static inline u32 host1x_sync_mlock_owner_chid_f(u32 v)
 {
-	return (v >> 8) & 0xf;
+	return (v & 0xf) << 8;
 }
-#define HOST1X_SYNC_MLOCK_OWNER_CHID_V(v) \
-	host1x_sync_mlock_owner_chid_v(v)
+#define HOST1X_SYNC_MLOCK_OWNER_CHID_F(v) \
+	host1x_sync_mlock_owner_chid_f(v)
 static inline u32 host1x_sync_mlock_owner_cpu_owns_v(u32 r)
 {
 	return (r >> 1) & 0x1;

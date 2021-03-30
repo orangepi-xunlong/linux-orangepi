@@ -1,7 +1,7 @@
 /*
  * shmob_drm_backlight.c  --  SH Mobile DRM Backlight
  *
- * Copyright (C) 2012 Renesas Electronics Corporation
+ * Copyright (C) 2012 Renesas Corporation
  *
  * Laurent Pinchart (laurent.pinchart@ideasonboard.com)
  *

@@ -29,6 +29,17 @@
 #include <linux/mfd/wm831x/core.h>
 #include <linux/mfd/wm831x/auxadc.h>
 
+struct wm831x_hwmon {
+	struct wm831x *wm831x;
+	struct device *classdev;
+};
+
+static ssize_t show_name(struct device *dev,
+			 struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "wm831x\n");
+}
+
 static const char * const input_names[] = {
 	[WM831X_AUX_SYSVDD]    = "SYSVDD",
 	[WM831X_AUX_USB]       = "USB",
@@ -39,14 +50,15 @@ static const char * const input_names[] = {
 	[WM831X_AUX_BATT_TEMP] = "Battery",
 };
 
+
 static ssize_t show_voltage(struct device *dev,
 			    struct device_attribute *attr, char *buf)
 {
-	struct wm831x *wm831x = dev_get_drvdata(dev);
+	struct wm831x_hwmon *hwmon = dev_get_drvdata(dev);
 	int channel = to_sensor_dev_attr(attr)->index;
 	int ret;
 
-	ret = wm831x_auxadc_read_uv(wm831x, channel);
+	ret = wm831x_auxadc_read_uv(hwmon->wm831x, channel);
 	if (ret < 0)
 		return ret;
 
@@ -56,11 +68,11 @@ static ssize_t show_voltage(struct device *dev,
 static ssize_t show_chip_temp(struct device *dev,
 			      struct device_attribute *attr, char *buf)
 {
-	struct wm831x *wm831x = dev_get_drvdata(dev);
+	struct wm831x_hwmon *hwmon = dev_get_drvdata(dev);
 	int channel = to_sensor_dev_attr(attr)->index;
 	int ret;
 
-	ret = wm831x_auxadc_read(wm831x, channel);
+	ret = wm831x_auxadc_read(hwmon->wm831x, channel);
 	if (ret < 0)
 		return ret;
 
@@ -88,6 +100,8 @@ static ssize_t show_label(struct device *dev,
 	static SENSOR_DEVICE_ATTR(in##id##_label, S_IRUGO, show_label,	\
 				  NULL, name)
 
+static DEVICE_ATTR(name, S_IRUGO, show_name, NULL);
+
 WM831X_VOLTAGE(0, WM831X_AUX_AUX1);
 WM831X_VOLTAGE(1, WM831X_AUX_AUX2);
 WM831X_VOLTAGE(2, WM831X_AUX_AUX3);
@@ -112,7 +126,9 @@ static SENSOR_DEVICE_ATTR(temp2_input, S_IRUGO, show_voltage, NULL,
 static SENSOR_DEVICE_ATTR(temp2_label, S_IRUGO, show_label, NULL,
 			  WM831X_AUX_BATT_TEMP);
 
-static struct attribute *wm831x_attrs[] = {
+static struct attribute *wm831x_attributes[] = {
+	&dev_attr_name.attr,
+
 	&sensor_dev_attr_in0_input.dev_attr.attr,
 	&sensor_dev_attr_in1_input.dev_attr.attr,
 	&sensor_dev_attr_in2_input.dev_attr.attr,
@@ -137,23 +153,58 @@ static struct attribute *wm831x_attrs[] = {
 	NULL
 };
 
-ATTRIBUTE_GROUPS(wm831x);
+static const struct attribute_group wm831x_attr_group = {
+	.attrs	= wm831x_attributes,
+};
 
 static int wm831x_hwmon_probe(struct platform_device *pdev)
 {
 	struct wm831x *wm831x = dev_get_drvdata(pdev->dev.parent);
-	struct device *hwmon_dev;
+	struct wm831x_hwmon *hwmon;
+	int ret;
 
-	hwmon_dev = devm_hwmon_device_register_with_groups(&pdev->dev, "wm831x",
-							   wm831x,
-							   wm831x_groups);
-	return PTR_ERR_OR_ZERO(hwmon_dev);
+	hwmon = devm_kzalloc(&pdev->dev, sizeof(struct wm831x_hwmon),
+			     GFP_KERNEL);
+	if (!hwmon)
+		return -ENOMEM;
+
+	hwmon->wm831x = wm831x;
+
+	ret = sysfs_create_group(&pdev->dev.kobj, &wm831x_attr_group);
+	if (ret)
+		return ret;
+
+	hwmon->classdev = hwmon_device_register(&pdev->dev);
+	if (IS_ERR(hwmon->classdev)) {
+		ret = PTR_ERR(hwmon->classdev);
+		goto err_sysfs;
+	}
+
+	platform_set_drvdata(pdev, hwmon);
+
+	return 0;
+
+err_sysfs:
+	sysfs_remove_group(&pdev->dev.kobj, &wm831x_attr_group);
+	return ret;
+}
+
+static int wm831x_hwmon_remove(struct platform_device *pdev)
+{
+	struct wm831x_hwmon *hwmon = platform_get_drvdata(pdev);
+
+	hwmon_device_unregister(hwmon->classdev);
+	sysfs_remove_group(&pdev->dev.kobj, &wm831x_attr_group);
+
+	return 0;
 }
 
 static struct platform_driver wm831x_hwmon_driver = {
 	.probe = wm831x_hwmon_probe,
+	.remove = wm831x_hwmon_remove,
 	.driver = {
 		.name = "wm831x-hwmon",
+		.owner = THIS_MODULE,
 	},
 };
 

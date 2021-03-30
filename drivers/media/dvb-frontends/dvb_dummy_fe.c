@@ -33,8 +33,7 @@ struct dvb_dummy_fe_state {
 };
 
 
-static int dvb_dummy_fe_read_status(struct dvb_frontend *fe,
-				    enum fe_status *status)
+static int dvb_dummy_fe_read_status(struct dvb_frontend* fe, fe_status_t* status)
 {
 	*status = FE_HAS_SIGNAL
 		| FE_HAS_CARRIER
@@ -70,12 +69,9 @@ static int dvb_dummy_fe_read_ucblocks(struct dvb_frontend* fe, u32* ucblocks)
 }
 
 /*
- * Should only be implemented if it actually reads something from the hardware.
- * Also, it should check for the locks, in order to avoid report wrong data
- * to userspace.
+ * Only needed if it actually reads something from the hardware
  */
-static int dvb_dummy_fe_get_frontend(struct dvb_frontend *fe,
-				     struct dtv_frontend_properties *p)
+static int dvb_dummy_fe_get_frontend(struct dvb_frontend *fe)
 {
 	return 0;
 }
@@ -101,14 +97,12 @@ static int dvb_dummy_fe_init(struct dvb_frontend* fe)
 	return 0;
 }
 
-static int dvb_dummy_fe_set_tone(struct dvb_frontend *fe,
-				 enum fe_sec_tone_mode tone)
+static int dvb_dummy_fe_set_tone(struct dvb_frontend* fe, fe_sec_tone_mode_t tone)
 {
 	return 0;
 }
 
-static int dvb_dummy_fe_set_voltage(struct dvb_frontend *fe,
-				    enum fe_sec_voltage voltage)
+static int dvb_dummy_fe_set_voltage(struct dvb_frontend* fe, fe_sec_voltage_t voltage)
 {
 	return 0;
 }

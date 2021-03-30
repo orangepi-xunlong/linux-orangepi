@@ -194,7 +194,7 @@ static int lp8788_adc_probe(struct platform_device *pdev)
 	struct lp8788_adc *adc;
 	int ret;
 
-	indio_dev = devm_iio_device_alloc(&pdev->dev, sizeof(*adc));
+	indio_dev = iio_device_alloc(sizeof(*adc));
 	if (!indio_dev)
 		return -ENOMEM;
 
@@ -205,7 +205,7 @@ static int lp8788_adc_probe(struct platform_device *pdev)
 	indio_dev->dev.of_node = pdev->dev.of_node;
 	ret = lp8788_iio_map_register(indio_dev, lp->pdata, adc);
 	if (ret)
-		return ret;
+		goto err_iio_map;
 
 	mutex_init(&adc->lock);
 
@@ -226,6 +226,8 @@ static int lp8788_adc_probe(struct platform_device *pdev)
 
 err_iio_device:
 	iio_map_array_unregister(indio_dev);
+err_iio_map:
+	iio_device_free(indio_dev);
 	return ret;
 }
 
@@ -235,6 +237,7 @@ static int lp8788_adc_remove(struct platform_device *pdev)
 
 	iio_device_unregister(indio_dev);
 	iio_map_array_unregister(indio_dev);
+	iio_device_free(indio_dev);
 
 	return 0;
 }
@@ -244,6 +247,7 @@ static struct platform_driver lp8788_adc_driver = {
 	.remove = lp8788_adc_remove,
 	.driver = {
 		.name = LP8788_DEV_ADC,
+		.owner = THIS_MODULE,
 	},
 };
 module_platform_driver(lp8788_adc_driver);

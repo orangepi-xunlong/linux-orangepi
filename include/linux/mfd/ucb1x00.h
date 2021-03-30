@@ -10,7 +10,6 @@
 #ifndef UCB1200_H
 #define UCB1200_H
 
-#include <linux/device.h>
 #include <linux/mfd/mcp.h>
 #include <linux/gpio.h>
 #include <linux/mutex.h>

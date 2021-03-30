@@ -12,7 +12,7 @@
 #include <linux/kernel.h>
 
 #include <linux/uaccess.h>
-#include "../init-input.h"
+#include<linux/init-input.h>
 
 #define ALLWINNER_PLATFORM
 //#define ACTIONS_PLATFORM
@@ -969,17 +969,17 @@ static void SC7A30_work_func(struct work_struct *work)
     unsigned long delay = msecs_to_jiffies(atomic_read(&SC7A30->delay));
     
     SC7A30_load_user_calibration(SC7A30->SC7A30_client);
-	
+
     result = SC7A30_read_data(SC7A30->SC7A30_client, &acc);
 	acc.x-=SC7A30->offset[0];
 	acc.y-=SC7A30->offset[1];
 	acc.z-=SC7A30->offset[2];
-    if (result == 0) {		
+    if (result == 0) {
         SC7A30_axis_remap(SC7A30->SC7A30_client, &acc);
         
         input_report_abs(SC7A30->input, ABS_X, acc.x);
         input_report_abs(SC7A30->input, ABS_Y, -acc.y);
-        input_report_abs(SC7A30->input, ABS_Z, acc.z);		
+        input_report_abs(SC7A30->input, ABS_Z, acc.z);
         input_sync(SC7A30->input);
     }
 
@@ -993,8 +993,8 @@ static int SC7A30_probe(struct i2c_client *client,
     struct SC7A30_data *data;
     struct input_dev *dev;
     int cfg_position;
-    int cfg_calibration[3];	
-	
+    int cfg_calibration[3];
+
     if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
         printk(KERN_INFO "i2c_check_functionality error\n");
         goto exit;
@@ -1007,26 +1007,6 @@ static int SC7A30_probe(struct i2c_client *client,
     i2c_set_clientdata(client, data);
     data->SC7A30_client = client;
     mutex_init(&data->enable_mutex);
-
-    dev = input_allocate_device();
-    if (!dev)
-        return -ENOMEM;
-    dev->name = SENSOR_NAME;
-    dev->id.bustype = BUS_I2C;
-
-    input_set_capability(dev, EV_ABS, ABS_MISC);
-    input_set_abs_params(dev, ABS_X, ABSMIN, ABSMAX, FUZZ, 0);
-    input_set_abs_params(dev, ABS_Y, ABSMIN, ABSMAX, FUZZ, 0);
-    input_set_abs_params(dev, ABS_Z, ABSMIN, ABSMAX, FUZZ, 0);
-    input_set_drvdata(dev, data);
-
-    err = input_register_device(dev);
-    if (err < 0) {
-        input_free_device(dev);
-        goto kfree_exit;
-    }
-
-    data->input = dev;
 
     INIT_DELAYED_WORK(&data->work, SC7A30_work_func);
     atomic_set(&data->delay, MAX_DELAY);
@@ -1065,12 +1045,32 @@ static int SC7A30_probe(struct i2c_client *client,
         goto kfree_exit;
     }
 
+    dev = input_allocate_device();
+    if (!dev)
+        return -ENOMEM;
+    dev->name = SENSOR_NAME;
+    dev->id.bustype = BUS_I2C;
+
+    input_set_capability(dev, EV_ABS, ABS_MISC);
+    input_set_abs_params(dev, ABS_X, ABSMIN, ABSMAX, FUZZ, 0);
+    input_set_abs_params(dev, ABS_Y, ABSMIN, ABSMAX, FUZZ, 0);
+    input_set_abs_params(dev, ABS_Z, ABSMIN, ABSMAX, FUZZ, 0);
+    input_set_drvdata(dev, data);
+
+    err = input_register_device(dev);
+    if (err < 0) {
+        input_free_device(dev);
+        goto kfree_exit;
+    }
+
+    data->input = dev;
+
     err = sysfs_create_group(&data->input->dev.kobj,
             &SC7A30_attribute_group);
     if (err < 0)
         goto error_sysfs;
 
-//#ifdef CONFIG_HAS_EARLYSUSPEND	
+//#ifdef CONFIG_HAS_EARLYSUSPEND
 //    data->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
 //    data->early_suspend.suspend = SC7A30_early_suspend;
 //    data->early_suspend.resume = SC7A30_early_resume;
@@ -1110,20 +1110,20 @@ exit:
 /*#ifdef CONFIG_HAS_EARLYSUSPEND
 static void SC7A30_early_suspend(struct early_suspend *h)
 {
-    // sensor hal will disable when early suspend   
+    // sensor hal will disable when early suspend
 }
 
 
 static void SC7A30_early_resume(struct early_suspend *h)
 {
-    // sensor hal will enable when early resume   
+    // sensor hal will enable when early resume
 }
 #endif
 */
 static int SC7A30_remove(struct i2c_client *client)
 {
     struct SC7A30_data *data = i2c_get_clientdata(client);
-	
+
     SC7A30_set_enable(&client->dev, 0);
 //#ifdef CONFIG_HAS_EARLYSUSPEND
 //    unregister_early_suspend(&data->early_suspend);
@@ -1193,13 +1193,13 @@ static struct i2c_driver SC7A30_driver = {
         .owner    = THIS_MODULE,
         .name    = SENSOR_NAME,
         .pm    = &SC7A30_pm_ops,
-        .of_match_table = "allwinner,sun50i-gsensor-para",
+        .of_match_table = sc7a30_of_id,
     },
     .class        = I2C_CLASS_HWMON,
     .address_list    = SC7A30_addresses,
     .id_table    = SC7A30_id,
-    .probe        = SC7A30_probe, 
-    .remove        = SC7A30_remove,   
+    .probe        = SC7A30_probe,
+    .remove        = SC7A30_remove,
     
 //  #ifdef ALLWINNER_PLATFORM
 //  .address_list	= u_i2c_addr.normal_i2c,

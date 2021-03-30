@@ -311,7 +311,7 @@ static void omfs_write_failed(struct address_space *mapping, loff_t to)
 	struct inode *inode = mapping->host;
 
 	if (to > inode->i_size) {
-		truncate_pagecache(inode, inode->i_size);
+		truncate_pagecache(inode, to, inode->i_size);
 		omfs_truncate(inode);
 	}
 }
@@ -337,8 +337,10 @@ static sector_t omfs_bmap(struct address_space *mapping, sector_t block)
 
 const struct file_operations omfs_file_operations = {
 	.llseek = generic_file_llseek,
-	.read_iter = generic_file_read_iter,
-	.write_iter = generic_file_write_iter,
+	.read = do_sync_read,
+	.write = do_sync_write,
+	.aio_read = generic_file_aio_read,
+	.aio_write = generic_file_aio_write,
 	.mmap = generic_file_mmap,
 	.fsync = generic_file_fsync,
 	.splice_read = generic_file_splice_read,
@@ -346,10 +348,10 @@ const struct file_operations omfs_file_operations = {
 
 static int omfs_setattr(struct dentry *dentry, struct iattr *attr)
 {
-	struct inode *inode = d_inode(dentry);
+	struct inode *inode = dentry->d_inode;
 	int error;
 
-	error = setattr_prepare(dentry, attr);
+	error = inode_change_ok(inode, attr);
 	if (error)
 		return error;
 

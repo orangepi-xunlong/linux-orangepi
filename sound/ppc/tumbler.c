@@ -31,9 +31,8 @@
 #include <linux/slab.h>
 #include <linux/interrupt.h>
 #include <linux/string.h>
-#include <linux/of_irq.h>
-#include <linux/io.h>
 #include <sound/core.h>
+#include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/machdep.h>
 #include <asm/pmac_feature.h>
@@ -795,11 +794,16 @@ static int snapper_set_capture_source(struct pmac_tumbler *mix)
 static int snapper_info_capture_source(struct snd_kcontrol *kcontrol,
 				       struct snd_ctl_elem_info *uinfo)
 {
-	static const char * const texts[2] = {
+	static char *texts[2] = {
 		"Line", "Mic"
 	};
-
-	return snd_ctl_enum_info(uinfo, 1, 2, texts);
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
+	uinfo->count = 1;
+	uinfo->value.enumerated.items = 2;
+	if (uinfo->value.enumerated.item > 1)
+		uinfo->value.enumerated.item = 1;
+	strcpy(uinfo->value.enumerated.name, texts[uinfo->value.enumerated.item]);
+	return 0;
 }
 
 static int snapper_get_capture_source(struct snd_kcontrol *kcontrol,
@@ -1303,19 +1307,19 @@ static int tumbler_init(struct snd_pmac *chip)
 				    &mix->line_mute, 1);
 	irq = tumbler_find_device("headphone-detect",
 				  NULL, &mix->hp_detect, 0);
-	if (irq <= 0)
+	if (irq <= NO_IRQ)
 		irq = tumbler_find_device("headphone-detect",
 					  NULL, &mix->hp_detect, 1);
-	if (irq <= 0)
+	if (irq <= NO_IRQ)
 		irq = tumbler_find_device("keywest-gpio15",
 					  NULL, &mix->hp_detect, 1);
 	mix->headphone_irq = irq;
  	irq = tumbler_find_device("line-output-detect",
 				  NULL, &mix->line_detect, 0);
-	if (irq <= 0)
+ 	if (irq <= NO_IRQ)
 		irq = tumbler_find_device("line-output-detect",
 					  NULL, &mix->line_detect, 1);
-	if (IS_G4DA && irq <= 0)
+	if (IS_G4DA && irq <= NO_IRQ)
 		irq = tumbler_find_device("keywest-gpio16",
 					  NULL, &mix->line_detect, 1);
 	mix->lineout_irq = irq;

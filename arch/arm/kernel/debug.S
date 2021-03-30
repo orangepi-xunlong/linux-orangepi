@@ -35,7 +35,7 @@
 
 #else /* !CONFIG_MMU */
 		.macro	addruart_current, rx, tmp1, tmp2
-		addruart	\rx, \tmp1, \tmp2
+		addruart	\rx, \tmp1
 		.endm
 
 #endif /* CONFIG_MMU */
@@ -90,7 +90,7 @@ ENTRY(printascii)
 		ldrneb	r1, [r0], #1
 		teqne	r1, #0
 		bne	1b
-		ret	lr
+		mov	pc, lr
 ENDPROC(printascii)
 
 ENTRY(printch)
@@ -105,7 +105,7 @@ ENTRY(debug_ll_addr)
 		addruart r2, r3, ip
 		str	r2, [r0]
 		str	r3, [r1]
-		ret	lr
+		mov	pc, lr
 ENDPROC(debug_ll_addr)
 #endif
 
@@ -116,7 +116,7 @@ ENTRY(printascii)
 		mov	r0, #0x04		@ SYS_WRITE0
 	ARM(	svc	#0x123456	)
 	THUMB(	svc	#0xab		)
-		ret	lr
+		mov	pc, lr
 ENDPROC(printascii)
 
 ENTRY(printch)
@@ -125,14 +125,14 @@ ENTRY(printch)
 		mov	r0, #0x03		@ SYS_WRITEC
 	ARM(	svc	#0x123456	)
 	THUMB(	svc	#0xab		)
-		ret	lr
+		mov	pc, lr
 ENDPROC(printch)
 
 ENTRY(debug_ll_addr)
 		mov	r2, #0
 		str	r2, [r0]
 		str	r2, [r1]
-		ret	lr
+		mov	pc, lr
 ENDPROC(debug_ll_addr)
 
 #endif

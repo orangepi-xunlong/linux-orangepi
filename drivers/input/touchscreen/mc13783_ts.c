@@ -233,6 +233,8 @@ static int mc13783_ts_remove(struct platform_device *pdev)
 {
 	struct mc13783_ts_priv *priv = platform_get_drvdata(pdev);
 
+	platform_set_drvdata(pdev, NULL);
+
 	destroy_workqueue(priv->workq);
 	input_unregister_device(priv->idev);
 	kfree(priv);
@@ -243,6 +245,7 @@ static int mc13783_ts_remove(struct platform_device *pdev)
 static struct platform_driver mc13783_ts_driver = {
 	.remove		= mc13783_ts_remove,
 	.driver		= {
+		.owner	= THIS_MODULE,
 		.name	= MC13783_TS_NAME,
 	},
 };

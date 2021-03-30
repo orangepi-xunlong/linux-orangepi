@@ -25,13 +25,26 @@
  */
 
 #include <linux/freezer.h>
-#include <video/mipi_display.h>
 
 #include "mdfld_dsi_output.h"
 #include "mdfld_dsi_pkg_sender.h"
 #include "mdfld_dsi_dpi.h"
 
 #define MDFLD_DSI_READ_MAX_COUNT		5000
+
+enum data_type {
+	DSI_DT_GENERIC_SHORT_WRITE_0	= 0x03,
+	DSI_DT_GENERIC_SHORT_WRITE_1	= 0x13,
+	DSI_DT_GENERIC_SHORT_WRITE_2	= 0x23,
+	DSI_DT_GENERIC_READ_0		= 0x04,
+	DSI_DT_GENERIC_READ_1		= 0x14,
+	DSI_DT_GENERIC_READ_2		= 0x24,
+	DSI_DT_GENERIC_LONG_WRITE	= 0x29,
+	DSI_DT_DCS_SHORT_WRITE_0	= 0x05,
+	DSI_DT_DCS_SHORT_WRITE_1	= 0x15,
+	DSI_DT_DCS_READ			= 0x06,
+	DSI_DT_DCS_LONG_WRITE		= 0x39,
+};
 
 enum {
 	MDFLD_DSI_PANEL_MODE_SLEEP = 0x1,
@@ -72,7 +85,7 @@ static const char *const dsi_errors[] = {
 	"RX Prot Violation",
 	"HS Generic Write FIFO Full",
 	"LP Generic Write FIFO Full",
-	"Generic Read Data Avail",
+	"Generic Read Data Avail"
 	"Special Packet Sent",
 	"Tearing Effect",
 };
@@ -135,7 +148,7 @@ static int handle_dsi_error(struct mdfld_dsi_pkg_sender *sender, u32 mask)
 		break;
 	case BIT(14):
 		/*wait for all fifo empty*/
-		/*wait_for_all_fifos_empty(sender)*/
+		/*wait_for_all_fifos_empty(sender)*/;
 		break;
 	case BIT(15):
 		dev_dbg(sender->dev->dev, "No Action required\n");
@@ -308,9 +321,9 @@ static int send_pkg_prepare(struct mdfld_dsi_pkg_sender *sender, u8 data_type,
 	u8 cmd;
 
 	switch (data_type) {
-	case MIPI_DSI_DCS_SHORT_WRITE:
-	case MIPI_DSI_DCS_SHORT_WRITE_PARAM:
-	case MIPI_DSI_DCS_LONG_WRITE:
+	case DSI_DT_DCS_SHORT_WRITE_0:
+	case DSI_DT_DCS_SHORT_WRITE_1:
+	case DSI_DT_DCS_LONG_WRITE:
 		cmd = *data;
 		break;
 	default:
@@ -321,12 +334,12 @@ static int send_pkg_prepare(struct mdfld_dsi_pkg_sender *sender, u8 data_type,
 	sender->status = MDFLD_DSI_PKG_SENDER_BUSY;
 
 	/*wait for 120 milliseconds in case exit_sleep_mode just be sent*/
-	if (unlikely(cmd == MIPI_DCS_ENTER_SLEEP_MODE)) {
+	if (unlikely(cmd == DCS_ENTER_SLEEP_MODE)) {
 		/*TODO: replace it with msleep later*/
 		mdelay(120);
 	}
 
-	if (unlikely(cmd == MIPI_DCS_EXIT_SLEEP_MODE)) {
+	if (unlikely(cmd == DCS_EXIT_SLEEP_MODE)) {
 		/*TODO: replace it with msleep later*/
 		mdelay(120);
 	}
@@ -339,9 +352,9 @@ static int send_pkg_done(struct mdfld_dsi_pkg_sender *sender, u8 data_type,
 	u8 cmd;
 
 	switch (data_type) {
-	case MIPI_DSI_DCS_SHORT_WRITE:
-	case MIPI_DSI_DCS_SHORT_WRITE_PARAM:
-	case MIPI_DSI_DCS_LONG_WRITE:
+	case DSI_DT_DCS_SHORT_WRITE_0:
+	case DSI_DT_DCS_SHORT_WRITE_1:
+	case DSI_DT_DCS_LONG_WRITE:
 		cmd = *data;
 		break;
 	default:
@@ -349,15 +362,15 @@ static int send_pkg_done(struct mdfld_dsi_pkg_sender *sender, u8 data_type,
 	}
 
 	/*update panel status*/
-	if (unlikely(cmd == MIPI_DCS_ENTER_SLEEP_MODE)) {
+	if (unlikely(cmd == DCS_ENTER_SLEEP_MODE)) {
 		sender->panel_mode |= MDFLD_DSI_PANEL_MODE_SLEEP;
 		/*TODO: replace it with msleep later*/
 		mdelay(120);
-	} else if (unlikely(cmd == MIPI_DCS_EXIT_SLEEP_MODE)) {
+	} else if (unlikely(cmd == DCS_EXIT_SLEEP_MODE)) {
 		sender->panel_mode &= ~MDFLD_DSI_PANEL_MODE_SLEEP;
 		/*TODO: replace it with msleep later*/
 		mdelay(120);
-	} else if (unlikely(cmd == MIPI_DCS_SOFT_RESET)) {
+	} else if (unlikely(cmd == DCS_SOFT_RESET)) {
 		/*TODO: replace it with msleep later*/
 		mdelay(5);
 	}
@@ -392,19 +405,19 @@ static int send_pkg(struct mdfld_dsi_pkg_sender *sender, u8 data_type,
 	}
 
 	switch (data_type) {
-	case MIPI_DSI_GENERIC_SHORT_WRITE_0_PARAM:
-	case MIPI_DSI_GENERIC_SHORT_WRITE_1_PARAM:
-	case MIPI_DSI_GENERIC_SHORT_WRITE_2_PARAM:
-	case MIPI_DSI_GENERIC_READ_REQUEST_0_PARAM:
-	case MIPI_DSI_GENERIC_READ_REQUEST_1_PARAM:
-	case MIPI_DSI_GENERIC_READ_REQUEST_2_PARAM:
-	case MIPI_DSI_DCS_SHORT_WRITE:
-	case MIPI_DSI_DCS_SHORT_WRITE_PARAM:
-	case MIPI_DSI_DCS_READ:
+	case DSI_DT_GENERIC_SHORT_WRITE_0:
+	case DSI_DT_GENERIC_SHORT_WRITE_1:
+	case DSI_DT_GENERIC_SHORT_WRITE_2:
+	case DSI_DT_GENERIC_READ_0:
+	case DSI_DT_GENERIC_READ_1:
+	case DSI_DT_GENERIC_READ_2:
+	case DSI_DT_DCS_SHORT_WRITE_0:
+	case DSI_DT_DCS_SHORT_WRITE_1:
+	case DSI_DT_DCS_READ:
 		ret = send_short_pkg(sender, data_type, data[0], data[1], hs);
 		break;
-	case MIPI_DSI_GENERIC_LONG_WRITE:
-	case MIPI_DSI_DCS_LONG_WRITE:
+	case DSI_DT_GENERIC_LONG_WRITE:
+	case DSI_DT_DCS_LONG_WRITE:
 		ret = send_long_pkg(sender, data_type, data, len, hs);
 		break;
 	}
@@ -427,7 +440,7 @@ int mdfld_dsi_send_mcs_long(struct mdfld_dsi_pkg_sender *sender, u8 *data,
 	}
 
 	spin_lock_irqsave(&sender->lock, flags);
-	send_pkg(sender, MIPI_DSI_DCS_LONG_WRITE, data, len, hs);
+	send_pkg(sender, DSI_DT_DCS_LONG_WRITE, data, len, hs);
 	spin_unlock_irqrestore(&sender->lock, flags);
 
 	return 0;
@@ -448,10 +461,10 @@ int mdfld_dsi_send_mcs_short(struct mdfld_dsi_pkg_sender *sender, u8 cmd,
 	data[0] = cmd;
 
 	if (param_num) {
-		data_type = MIPI_DSI_DCS_SHORT_WRITE_PARAM;
+		data_type = DSI_DT_DCS_SHORT_WRITE_1;
 		data[1] = param;
 	} else {
-		data_type = MIPI_DSI_DCS_SHORT_WRITE;
+		data_type = DSI_DT_DCS_SHORT_WRITE_0;
 		data[1] = 0;
 	}
 
@@ -476,17 +489,17 @@ int mdfld_dsi_send_gen_short(struct mdfld_dsi_pkg_sender *sender, u8 param0,
 
 	switch (param_num) {
 	case 0:
-		data_type = MIPI_DSI_GENERIC_SHORT_WRITE_0_PARAM;
+		data_type = DSI_DT_GENERIC_SHORT_WRITE_0;
 		data[0] = 0;
 		data[1] = 0;
 		break;
 	case 1:
-		data_type = MIPI_DSI_GENERIC_SHORT_WRITE_1_PARAM;
+		data_type = DSI_DT_GENERIC_SHORT_WRITE_1;
 		data[0] = param0;
 		data[1] = 0;
 		break;
 	case 2:
-		data_type = MIPI_DSI_GENERIC_SHORT_WRITE_2_PARAM;
+		data_type = DSI_DT_GENERIC_SHORT_WRITE_2;
 		data[0] = param0;
 		data[1] = param1;
 		break;
@@ -510,7 +523,7 @@ int mdfld_dsi_send_gen_long(struct mdfld_dsi_pkg_sender *sender, u8 *data,
 	}
 
 	spin_lock_irqsave(&sender->lock, flags);
-	send_pkg(sender, MIPI_DSI_GENERIC_LONG_WRITE, data, len, hs);
+	send_pkg(sender, DSI_DT_GENERIC_LONG_WRITE, data, len, hs);
 	spin_unlock_irqrestore(&sender->lock, flags);
 
 	return 0;
@@ -581,7 +594,7 @@ int mdfld_dsi_read_mcs(struct mdfld_dsi_pkg_sender *sender, u8 cmd,
 		return -EINVAL;
 	}
 
-	return __read_panel_data(sender, MIPI_DSI_DCS_READ, &cmd, 1,
+	return __read_panel_data(sender, DSI_DT_DCS_READ, &cmd, 1,
 				data, len, hs);
 }
 

@@ -49,8 +49,8 @@ extern __printf(3, 4) void _udf_warn(struct super_block *sb,
 #define UDF_EXTENT_FLAG_MASK	0xC0000000
 
 #define UDF_NAME_PAD		4
-#define UDF_NAME_LEN		254
-#define UDF_NAME_LEN_CS0	255
+#define UDF_NAME_LEN		256
+#define UDF_PATH_LEN		1023
 
 static inline size_t udf_file_entry_alloc_offset(struct inode *inode)
 {
@@ -85,6 +85,7 @@ extern const struct inode_operations udf_dir_inode_operations;
 extern const struct file_operations udf_dir_operations;
 extern const struct inode_operations udf_file_inode_operations;
 extern const struct file_operations udf_file_operations;
+extern const struct inode_operations udf_symlink_inode_operations;
 extern const struct address_space_operations udf_aops;
 extern const struct address_space_operations udf_adinicb_aops;
 extern const struct address_space_operations udf_symlink_aops;
@@ -104,6 +105,12 @@ struct udf_vds_record {
 struct generic_desc {
 	struct tag	descTag;
 	__le32		volDescSeqNum;
+};
+
+struct ustr {
+	uint8_t u_cmpID;
+	uint8_t u_name[UDF_NAME_LEN - 2];
+	uint8_t u_len;
 };
 
 
@@ -131,31 +138,17 @@ extern int udf_write_fi(struct inode *inode, struct fileIdentDesc *,
 /* file.c */
 extern long udf_ioctl(struct file *, unsigned int, unsigned long);
 /* inode.c */
-extern struct inode *__udf_iget(struct super_block *, struct kernel_lb_addr *,
-				bool hidden_inode);
-static inline struct inode *udf_iget_special(struct super_block *sb,
-					     struct kernel_lb_addr *ino)
-{
-	return __udf_iget(sb, ino, true);
-}
-static inline struct inode *udf_iget(struct super_block *sb,
-				     struct kernel_lb_addr *ino)
-{
-	return __udf_iget(sb, ino, false);
-}
+extern struct inode *udf_iget(struct super_block *, struct kernel_lb_addr *);
 extern int udf_expand_file_adinicb(struct inode *);
 extern struct buffer_head *udf_expand_dir_adinicb(struct inode *, int *, int *);
 extern struct buffer_head *udf_bread(struct inode *, int, int, int *);
 extern int udf_setsize(struct inode *, loff_t);
+extern void udf_read_inode(struct inode *);
 extern void udf_evict_inode(struct inode *);
 extern int udf_write_inode(struct inode *, struct writeback_control *wbc);
 extern long udf_block_map(struct inode *, sector_t);
 extern int8_t inode_bmap(struct inode *, sector_t, struct extent_position *,
 			 struct kernel_lb_addr *, uint32_t *, sector_t *);
-extern int udf_setup_indirect_aext(struct inode *inode, int block,
-				   struct extent_position *epos);
-extern int __udf_add_aext(struct inode *inode, struct extent_position *epos,
-			  struct kernel_lb_addr *eloc, uint32_t elen, int inc);
 extern int udf_add_aext(struct inode *, struct extent_position *,
 			struct kernel_lb_addr *, uint32_t, int);
 extern void udf_write_aext(struct inode *, struct extent_position *,
@@ -208,15 +201,15 @@ udf_get_lb_pblock(struct super_block *sb, struct kernel_lb_addr *loc,
 }
 
 /* unicode.c */
-extern int udf_get_filename(struct super_block *, const uint8_t *, int,
-			    uint8_t *, int);
-extern int udf_put_filename(struct super_block *, const uint8_t *, int,
-			    uint8_t *, int);
-extern int udf_dstrCS0toUTF8(uint8_t *, int, const uint8_t *, int);
+extern int udf_get_filename(struct super_block *, uint8_t *, uint8_t *, int);
+extern int udf_put_filename(struct super_block *, const uint8_t *, uint8_t *,
+			    int);
+extern int udf_build_ustr(struct ustr *, dstring *, int);
+extern int udf_CS0toUTF8(struct ustr *, const struct ustr *);
 
 /* ialloc.c */
 extern void udf_free_inode(struct inode *);
-extern struct inode *udf_new_inode(struct inode *, umode_t);
+extern struct inode *udf_new_inode(struct inode *, umode_t, int *);
 
 /* truncate.c */
 extern void udf_truncate_tail_extent(struct inode *);

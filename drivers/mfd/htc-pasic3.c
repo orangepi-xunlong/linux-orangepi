@@ -114,7 +114,7 @@ static struct resource ds1wm_resources[] __initdata = {
 	},
 };
 
-static const struct mfd_cell ds1wm_cell __initconst = {
+static struct mfd_cell ds1wm_cell __initdata = {
 	.name          = "ds1wm",
 	.enable        = ds1wm_enable,
 	.disable       = ds1wm_disable,
@@ -126,7 +126,7 @@ static const struct mfd_cell ds1wm_cell __initconst = {
 
 static int __init pasic3_probe(struct platform_device *pdev)
 {
-	struct pasic3_platform_data *pdata = dev_get_platdata(&pdev->dev);
+	struct pasic3_platform_data *pdata = pdev->dev.platform_data;
 	struct device *dev = &pdev->dev;
 	struct pasic3_data *asic;
 	struct resource *r;
@@ -147,7 +147,7 @@ static int __init pasic3_probe(struct platform_device *pdev)
 	if (!request_mem_region(r->start, resource_size(r), "pasic3"))
 		return -EBUSY;
 
-	asic = devm_kzalloc(dev, sizeof(struct pasic3_data), GFP_KERNEL);
+	asic = kzalloc(sizeof(struct pasic3_data), GFP_KERNEL);
 	if (!asic)
 		return -ENOMEM;
 
@@ -156,6 +156,7 @@ static int __init pasic3_probe(struct platform_device *pdev)
 	asic->mapping = ioremap(r->start, resource_size(r));
 	if (!asic->mapping) {
 		dev_err(dev, "couldn't ioremap PASIC3\n");
+		kfree(asic);
 		return -ENOMEM;
 	}
 
@@ -194,6 +195,7 @@ static int pasic3_remove(struct platform_device *pdev)
 	iounmap(asic->mapping);
 	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	release_mem_region(r->start, resource_size(r));
+	kfree(asic);
 	return 0;
 }
 

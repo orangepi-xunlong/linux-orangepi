@@ -13,7 +13,7 @@
 #include <linux/mtd/partitions.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/flash.h>
-#if IS_ENABLED(CONFIG_USB_ISP1362_HCD)
+#if defined(CONFIG_USB_ISP1362_HCD) || defined(CONFIG_USB_ISP1362_HCD_MODULE)
 #include <linux/usb/isp1362.h>
 #endif
 #include <linux/ata_platform.h>
@@ -31,7 +31,7 @@
  */
 const char bfin_board_name[] = "CamSig Minotaur BF537";
 
-#if IS_ENABLED(CONFIG_BFIN_CFPCMCIA)
+#if defined(CONFIG_BFIN_CFPCMCIA) || defined(CONFIG_BFIN_CFPCMCIA_MODULE)
 static struct resource bfin_pcmcia_cf_resources[] = {
 	{
 		.start = 0x20310000, /* IO PORT */
@@ -60,14 +60,14 @@ static struct platform_device bfin_pcmcia_cf_device = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_RTC_DRV_BFIN)
+#if defined(CONFIG_RTC_DRV_BFIN) || defined(CONFIG_RTC_DRV_BFIN_MODULE)
 static struct platform_device rtc_device = {
 	.name = "rtc-bfin",
 	.id   = -1,
 };
 #endif
 
-#if IS_ENABLED(CONFIG_BFIN_MAC)
+#if defined(CONFIG_BFIN_MAC) || defined(CONFIG_BFIN_MAC_MODULE)
 #include <linux/bfin_mac.h>
 static const unsigned short bfin_mac_peripherals[] = P_MII0;
 
@@ -100,7 +100,7 @@ static struct platform_device bfin_mac_device = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_USB_NET2272)
+#if defined(CONFIG_USB_NET2272) || defined(CONFIG_USB_NET2272_MODULE)
 static struct resource net2272_bfin_resources[] = {
 	{
 		.start = 0x20300000,
@@ -121,10 +121,11 @@ static struct platform_device net2272_bfin_device = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_SPI_BFIN5XX)
+#if defined(CONFIG_SPI_BFIN5XX) || defined(CONFIG_SPI_BFIN5XX_MODULE)
 /* all SPI peripherals info goes here */
 
-#if IS_ENABLED(CONFIG_MTD_M25P80)
+#if defined(CONFIG_MTD_M25P80) \
+	|| defined(CONFIG_MTD_M25P80_MODULE)
 
 /* Partition sizes */
 #define FLASH_SIZE       0x00400000
@@ -161,14 +162,15 @@ static struct bfin5xx_spi_chip spi_flash_chip_info = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_MMC_SPI)
+#if defined(CONFIG_MMC_SPI) || defined(CONFIG_MMC_SPI_MODULE)
 static struct bfin5xx_spi_chip mmc_spi_chip_info = {
 	.enable_dma = 0,
 };
 #endif
 
 static struct spi_board_info bfin_spi_board_info[] __initdata = {
-#if IS_ENABLED(CONFIG_MTD_M25P80)
+#if defined(CONFIG_MTD_M25P80) \
+	|| defined(CONFIG_MTD_M25P80_MODULE)
 	{
 		/* the modalias must be the same as spi device driver name */
 		.modalias = "m25p80", /* Name of spi_driver for this device */
@@ -181,7 +183,7 @@ static struct spi_board_info bfin_spi_board_info[] __initdata = {
 	},
 #endif
 
-#if IS_ENABLED(CONFIG_MMC_SPI)
+#if defined(CONFIG_MMC_SPI) || defined(CONFIG_MMC_SPI_MODULE)
 	{
 		.modalias = "mmc_spi",
 		.max_speed_hz = 5000000,     /* max spi clock (SCK) speed in HZ */
@@ -229,7 +231,7 @@ static struct platform_device bfin_spi0_device = {
 };
 #endif  /* spi master and devices */
 
-#if IS_ENABLED(CONFIG_SERIAL_BFIN)
+#if defined(CONFIG_SERIAL_BFIN) || defined(CONFIG_SERIAL_BFIN_MODULE)
 #ifdef CONFIG_SERIAL_BFIN_UART0
 static struct resource bfin_uart0_resources[] = {
 	{
@@ -328,7 +330,7 @@ static struct platform_device bfin_uart1_device = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_BFIN_SIR)
+#if defined(CONFIG_BFIN_SIR) || defined(CONFIG_BFIN_SIR_MODULE)
 #ifdef CONFIG_BFIN_SIR0
 static struct resource bfin_sir0_resources[] = {
 	{
@@ -383,7 +385,7 @@ static struct platform_device bfin_sir1_device = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_I2C_BLACKFIN_TWI)
+#if defined(CONFIG_I2C_BLACKFIN_TWI) || defined(CONFIG_I2C_BLACKFIN_TWI_MODULE)
 static const u16 bfin_twi0_pins[] = {P_TWI0_SCL, P_TWI0_SDA, 0};
 
 static struct resource bfin_twi0_resource[] = {
@@ -410,7 +412,7 @@ static struct platform_device i2c_bfin_twi_device = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_SERIAL_BFIN_SPORT)
+#if defined(CONFIG_SERIAL_BFIN_SPORT) || defined(CONFIG_SERIAL_BFIN_SPORT_MODULE)
 #ifdef CONFIG_SERIAL_BFIN_SPORT0_UART
 static struct resource bfin_sport0_uart_resources[] = {
 	{
@@ -482,28 +484,28 @@ static struct platform_device bfin_sport1_uart_device = {
 #endif
 
 static struct platform_device *minotaur_devices[] __initdata = {
-#if IS_ENABLED(CONFIG_BFIN_CFPCMCIA)
+#if defined(CONFIG_BFIN_CFPCMCIA) || defined(CONFIG_BFIN_CFPCMCIA_MODULE)
 	&bfin_pcmcia_cf_device,
 #endif
 
-#if IS_ENABLED(CONFIG_RTC_DRV_BFIN)
+#if defined(CONFIG_RTC_DRV_BFIN) || defined(CONFIG_RTC_DRV_BFIN_MODULE)
 	&rtc_device,
 #endif
 
-#if IS_ENABLED(CONFIG_BFIN_MAC)
+#if defined(CONFIG_BFIN_MAC) || defined(CONFIG_BFIN_MAC_MODULE)
 	&bfin_mii_bus,
 	&bfin_mac_device,
 #endif
 
-#if IS_ENABLED(CONFIG_USB_NET2272)
+#if defined(CONFIG_USB_NET2272) || defined(CONFIG_USB_NET2272_MODULE)
 	&net2272_bfin_device,
 #endif
 
-#if IS_ENABLED(CONFIG_SPI_BFIN5XX)
+#if defined(CONFIG_SPI_BFIN5XX) || defined(CONFIG_SPI_BFIN5XX_MODULE)
 	&bfin_spi0_device,
 #endif
 
-#if IS_ENABLED(CONFIG_SERIAL_BFIN)
+#if defined(CONFIG_SERIAL_BFIN) || defined(CONFIG_SERIAL_BFIN_MODULE)
 #ifdef CONFIG_SERIAL_BFIN_UART0
 	&bfin_uart0_device,
 #endif
@@ -512,7 +514,7 @@ static struct platform_device *minotaur_devices[] __initdata = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_BFIN_SIR)
+#if defined(CONFIG_BFIN_SIR) || defined(CONFIG_BFIN_SIR_MODULE)
 #ifdef CONFIG_BFIN_SIR0
 	&bfin_sir0_device,
 #endif
@@ -521,11 +523,11 @@ static struct platform_device *minotaur_devices[] __initdata = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_I2C_BLACKFIN_TWI)
+#if defined(CONFIG_I2C_BLACKFIN_TWI) || defined(CONFIG_I2C_BLACKFIN_TWI_MODULE)
 	&i2c_bfin_twi_device,
 #endif
 
-#if IS_ENABLED(CONFIG_SERIAL_BFIN_SPORT)
+#if defined(CONFIG_SERIAL_BFIN_SPORT) || defined(CONFIG_SERIAL_BFIN_SPORT_MODULE)
 #ifdef CONFIG_SERIAL_BFIN_SPORT0_UART
 	&bfin_sport0_uart_device,
 #endif
@@ -540,7 +542,7 @@ static int __init minotaur_init(void)
 {
 	printk(KERN_INFO "%s(): registering device resources\n", __func__);
 	platform_add_devices(minotaur_devices, ARRAY_SIZE(minotaur_devices));
-#if IS_ENABLED(CONFIG_SPI_BFIN5XX)
+#if defined(CONFIG_SPI_BFIN5XX) || defined(CONFIG_SPI_BFIN5XX_MODULE)
 	spi_register_board_info(bfin_spi_board_info,
 				ARRAY_SIZE(bfin_spi_board_info));
 #endif

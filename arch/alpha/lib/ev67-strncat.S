@@ -20,7 +20,7 @@
  * Try not to change the actual algorithm if possible for consistency.
  */
 
-#include <asm/export.h>
+
 	.text
 
 	.align 4
@@ -92,4 +92,3 @@ $zerocount:
 	ret			# L0 :
 
 	.end strncat
-	EXPORT_SYMBOL(strncat)

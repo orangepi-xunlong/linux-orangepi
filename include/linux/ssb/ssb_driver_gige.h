@@ -108,16 +108,6 @@ static inline int ssb_gige_get_macaddr(struct pci_dev *pdev, u8 *macaddr)
 	return 0;
 }
 
-/* Get the device phy address */
-static inline int ssb_gige_get_phyaddr(struct pci_dev *pdev)
-{
-	struct ssb_gige *dev = pdev_to_ssb_gige(pdev);
-	if (!dev)
-		return -ENODEV;
-
-	return dev->dev->bus->sprom.et0phyaddr;
-}
-
 extern int ssb_gige_pcibios_plat_dev_init(struct ssb_device *sdev,
 					  struct pci_dev *pdev);
 extern int ssb_gige_map_irq(struct ssb_device *sdev,
@@ -181,10 +171,6 @@ static inline bool ssb_gige_must_flush_posted_writes(struct pci_dev *pdev)
 	return 0;
 }
 static inline int ssb_gige_get_macaddr(struct pci_dev *pdev, u8 *macaddr)
-{
-	return -ENODEV;
-}
-static inline int ssb_gige_get_phyaddr(struct pci_dev *pdev)
 {
 	return -ENODEV;
 }

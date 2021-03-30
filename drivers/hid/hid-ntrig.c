@@ -173,7 +173,7 @@ static ssize_t show_phys_width(struct device *dev,
 			       struct device_attribute *attr,
 			       char *buf)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct ntrig_data *nd = hid_get_drvdata(hdev);
 
 	return sprintf(buf, "%d\n", nd->sensor_physical_width);
@@ -185,7 +185,7 @@ static ssize_t show_phys_height(struct device *dev,
 				struct device_attribute *attr,
 				char *buf)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct ntrig_data *nd = hid_get_drvdata(hdev);
 
 	return sprintf(buf, "%d\n", nd->sensor_physical_height);
@@ -197,7 +197,7 @@ static ssize_t show_log_width(struct device *dev,
 			      struct device_attribute *attr,
 			      char *buf)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct ntrig_data *nd = hid_get_drvdata(hdev);
 
 	return sprintf(buf, "%d\n", nd->sensor_logical_width);
@@ -209,7 +209,7 @@ static ssize_t show_log_height(struct device *dev,
 			       struct device_attribute *attr,
 			       char *buf)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct ntrig_data *nd = hid_get_drvdata(hdev);
 
 	return sprintf(buf, "%d\n", nd->sensor_logical_height);
@@ -221,7 +221,7 @@ static ssize_t show_min_width(struct device *dev,
 			      struct device_attribute *attr,
 			      char *buf)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct ntrig_data *nd = hid_get_drvdata(hdev);
 
 	return sprintf(buf, "%d\n", nd->min_width *
@@ -233,12 +233,12 @@ static ssize_t set_min_width(struct device *dev,
 			     struct device_attribute *attr,
 			     const char *buf, size_t count)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct ntrig_data *nd = hid_get_drvdata(hdev);
 
 	unsigned long val;
 
-	if (kstrtoul(buf, 0, &val))
+	if (strict_strtoul(buf, 0, &val))
 		return -EINVAL;
 
 	if (val > nd->sensor_physical_width)
@@ -256,7 +256,7 @@ static ssize_t show_min_height(struct device *dev,
 			       struct device_attribute *attr,
 			       char *buf)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct ntrig_data *nd = hid_get_drvdata(hdev);
 
 	return sprintf(buf, "%d\n", nd->min_height *
@@ -268,12 +268,12 @@ static ssize_t set_min_height(struct device *dev,
 			      struct device_attribute *attr,
 			      const char *buf, size_t count)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct ntrig_data *nd = hid_get_drvdata(hdev);
 
 	unsigned long val;
 
-	if (kstrtoul(buf, 0, &val))
+	if (strict_strtoul(buf, 0, &val))
 		return -EINVAL;
 
 	if (val > nd->sensor_physical_height)
@@ -292,7 +292,7 @@ static ssize_t show_activate_slack(struct device *dev,
 				   struct device_attribute *attr,
 				   char *buf)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct ntrig_data *nd = hid_get_drvdata(hdev);
 
 	return sprintf(buf, "%d\n", nd->activate_slack);
@@ -302,12 +302,12 @@ static ssize_t set_activate_slack(struct device *dev,
 				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct ntrig_data *nd = hid_get_drvdata(hdev);
 
 	unsigned long val;
 
-	if (kstrtoul(buf, 0, &val))
+	if (strict_strtoul(buf, 0, &val))
 		return -EINVAL;
 
 	if (val > 0x7f)
@@ -325,7 +325,7 @@ static ssize_t show_activation_width(struct device *dev,
 				     struct device_attribute *attr,
 				     char *buf)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct ntrig_data *nd = hid_get_drvdata(hdev);
 
 	return sprintf(buf, "%d\n", nd->activation_width *
@@ -337,12 +337,12 @@ static ssize_t set_activation_width(struct device *dev,
 				    struct device_attribute *attr,
 				    const char *buf, size_t count)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct ntrig_data *nd = hid_get_drvdata(hdev);
 
 	unsigned long val;
 
-	if (kstrtoul(buf, 0, &val))
+	if (strict_strtoul(buf, 0, &val))
 		return -EINVAL;
 
 	if (val > nd->sensor_physical_width)
@@ -361,7 +361,7 @@ static ssize_t show_activation_height(struct device *dev,
 				      struct device_attribute *attr,
 				      char *buf)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct ntrig_data *nd = hid_get_drvdata(hdev);
 
 	return sprintf(buf, "%d\n", nd->activation_height *
@@ -373,12 +373,12 @@ static ssize_t set_activation_height(struct device *dev,
 				     struct device_attribute *attr,
 				     const char *buf, size_t count)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct ntrig_data *nd = hid_get_drvdata(hdev);
 
 	unsigned long val;
 
-	if (kstrtoul(buf, 0, &val))
+	if (strict_strtoul(buf, 0, &val))
 		return -EINVAL;
 
 	if (val > nd->sensor_physical_height)
@@ -397,7 +397,7 @@ static ssize_t show_deactivate_slack(struct device *dev,
 				     struct device_attribute *attr,
 				     char *buf)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct ntrig_data *nd = hid_get_drvdata(hdev);
 
 	return sprintf(buf, "%d\n", -nd->deactivate_slack);
@@ -407,12 +407,12 @@ static ssize_t set_deactivate_slack(struct device *dev,
 				    struct device_attribute *attr,
 				    const char *buf, size_t count)
 {
-	struct hid_device *hdev = to_hid_device(dev);
+	struct hid_device *hdev = container_of(dev, struct hid_device, dev);
 	struct ntrig_data *nd = hid_get_drvdata(hdev);
 
 	unsigned long val;
 
-	if (kstrtoul(buf, 0, &val))
+	if (strict_strtoul(buf, 0, &val))
 		return -EINVAL;
 
 	/*
@@ -866,7 +866,7 @@ static int ntrig_input_configured(struct hid_device *hid,
 	struct input_dev *input = hidinput->input;
 
 	if (hidinput->report->maxfield < 1)
-		return 0;
+		return -1;
 
 	switch (hidinput->report->field[0]->application) {
 	case HID_DG_PEN:
@@ -890,7 +890,6 @@ static int ntrig_input_configured(struct hid_device *hid,
 							"N-Trig MultiTouch";
 		break;
 	}
-
 	return 0;
 }
 
@@ -955,8 +954,6 @@ static int ntrig_probe(struct hid_device *hdev, const struct hid_device_id *id)
 
 	ret = sysfs_create_group(&hdev->dev.kobj,
 			&ntrig_attribute_group);
-	if (ret)
-		hid_err(hdev, "cannot create sysfs group\n");
 
 	return 0;
 err_free:

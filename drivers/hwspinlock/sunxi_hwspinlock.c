@@ -90,9 +90,7 @@ static int sunxi_hwspinlock_probe(struct platform_device *pdev)
 	void __iomem *iobase;
 	int num_locks, i, ret;
 	struct resource res;
-	/*
-	 *struct clk *hwspinlock_rst, *hwspinlock_bus;
-	 */
+	//struct clk *hwspinlock_rst, *hwspinlock_bus;
 	struct device_node *node = pdev->dev.of_node;
 
 	ret = of_address_to_resource(node, 0, &res);
@@ -104,6 +102,34 @@ static int sunxi_hwspinlock_probe(struct platform_device *pdev)
 	iobase = of_iomap(node, 0);
 	if (IS_ERR(iobase))
 		return PTR_ERR(iobase);
+
+#if 0
+	hwspinlock_bus = of_clk_get_by_name(node, "clk_hwspinlock_bus");
+	if(!hwspinlock_bus || IS_ERR(hwspinlock_bus)){
+		pr_err("try to get clk_spinlock failed!\n");
+		return -EINVAL;
+	}
+
+	ret = clk_prepare(hwspinlock_bus);
+	if (ret)
+		return ret;
+	ret = clk_enable(hwspinlock_bus);
+	if (ret)
+		clk_unprepare(hwspinlock_bus);
+
+	hwspinlock_rst = of_clk_get_by_name(node, "clk_hwspinlock_rst");
+	if(!hwspinlock_rst || IS_ERR(hwspinlock_rst)){
+		pr_err("try to get clk_spinlock failed!\n");
+		return -EINVAL;
+	}
+
+	ret = clk_prepare(hwspinlock_rst);
+	if (ret)
+		return ret;
+	ret = clk_enable(hwspinlock_rst);
+	if (ret)
+		clk_unprepare(hwspinlock_rst);
+#endif
 
 	ret = of_property_read_u32(node, "num-locks", &num_locks);
 	if (ret || (num_locks == 0))
@@ -127,7 +153,7 @@ static int sunxi_hwspinlock_probe(struct platform_device *pdev)
 	pm_runtime_enable(&pdev->dev);
 
 	ret = hwspin_lock_register(bank, &pdev->dev, &sunxi_hwspinlock_ops,
-			LOCK_BASE_ID, num_locks);
+	                           LOCK_BASE_ID, num_locks);
 	if (ret)
 		goto reg_fail;
 

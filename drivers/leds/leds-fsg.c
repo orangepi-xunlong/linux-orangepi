@@ -16,6 +16,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/leds.h>
 #include <linux/module.h>
@@ -156,35 +157,63 @@ static int fsg_led_probe(struct platform_device *pdev)
 	latch_value = 0xffff;
 	*latch_address = latch_value;
 
-	ret = devm_led_classdev_register(&pdev->dev, &fsg_wlan_led);
+	ret = led_classdev_register(&pdev->dev, &fsg_wlan_led);
 	if (ret < 0)
-		return ret;
+		goto failwlan;
 
-	ret = devm_led_classdev_register(&pdev->dev, &fsg_wan_led);
+	ret = led_classdev_register(&pdev->dev, &fsg_wan_led);
 	if (ret < 0)
-		return ret;
+		goto failwan;
 
-	ret = devm_led_classdev_register(&pdev->dev, &fsg_sata_led);
+	ret = led_classdev_register(&pdev->dev, &fsg_sata_led);
 	if (ret < 0)
-		return ret;
+		goto failsata;
 
-	ret = devm_led_classdev_register(&pdev->dev, &fsg_usb_led);
+	ret = led_classdev_register(&pdev->dev, &fsg_usb_led);
 	if (ret < 0)
-		return ret;
+		goto failusb;
 
-	ret = devm_led_classdev_register(&pdev->dev, &fsg_sync_led);
+	ret = led_classdev_register(&pdev->dev, &fsg_sync_led);
 	if (ret < 0)
-		return ret;
+		goto failsync;
 
-	ret = devm_led_classdev_register(&pdev->dev, &fsg_ring_led);
+	ret = led_classdev_register(&pdev->dev, &fsg_ring_led);
 	if (ret < 0)
-		return ret;
+		goto failring;
+
+	return ret;
+
+ failring:
+	led_classdev_unregister(&fsg_sync_led);
+ failsync:
+	led_classdev_unregister(&fsg_usb_led);
+ failusb:
+	led_classdev_unregister(&fsg_sata_led);
+ failsata:
+	led_classdev_unregister(&fsg_wan_led);
+ failwan:
+	led_classdev_unregister(&fsg_wlan_led);
+ failwlan:
 
 	return ret;
 }
 
+static int fsg_led_remove(struct platform_device *pdev)
+{
+	led_classdev_unregister(&fsg_wlan_led);
+	led_classdev_unregister(&fsg_wan_led);
+	led_classdev_unregister(&fsg_sata_led);
+	led_classdev_unregister(&fsg_usb_led);
+	led_classdev_unregister(&fsg_sync_led);
+	led_classdev_unregister(&fsg_ring_led);
+
+	return 0;
+}
+
+
 static struct platform_driver fsg_led_driver = {
 	.probe		= fsg_led_probe,
+	.remove		= fsg_led_remove,
 	.driver		= {
 		.name		= "fsg-led",
 	},

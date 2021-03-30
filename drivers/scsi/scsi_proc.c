@@ -185,40 +185,40 @@ static int proc_print_scsidevice(struct device *dev, void *data)
 
 	sdev = to_scsi_device(dev);
 	seq_printf(s,
-		"Host: scsi%d Channel: %02d Id: %02d Lun: %02llu\n  Vendor: ",
+		"Host: scsi%d Channel: %02d Id: %02d Lun: %02d\n  Vendor: ",
 		sdev->host->host_no, sdev->channel, sdev->id, sdev->lun);
 	for (i = 0; i < 8; i++) {
 		if (sdev->vendor[i] >= 0x20)
-			seq_putc(s, sdev->vendor[i]);
+			seq_printf(s, "%c", sdev->vendor[i]);
 		else
-			seq_putc(s, ' ');
+			seq_printf(s, " ");
 	}
 
-	seq_puts(s, " Model: ");
+	seq_printf(s, " Model: ");
 	for (i = 0; i < 16; i++) {
 		if (sdev->model[i] >= 0x20)
-			seq_putc(s, sdev->model[i]);
+			seq_printf(s, "%c", sdev->model[i]);
 		else
-			seq_putc(s, ' ');
+			seq_printf(s, " ");
 	}
 
-	seq_puts(s, " Rev: ");
+	seq_printf(s, " Rev: ");
 	for (i = 0; i < 4; i++) {
 		if (sdev->rev[i] >= 0x20)
-			seq_putc(s, sdev->rev[i]);
+			seq_printf(s, "%c", sdev->rev[i]);
 		else
-			seq_putc(s, ' ');
+			seq_printf(s, " ");
 	}
 
-	seq_putc(s, '\n');
+	seq_printf(s, "\n");
 
 	seq_printf(s, "  Type:   %s ", scsi_device_type(sdev->type));
 	seq_printf(s, "               ANSI  SCSI revision: %02x",
 			sdev->scsi_level - (sdev->scsi_level > 1));
 	if (sdev->scsi_level == 2)
-		seq_puts(s, " CCS\n");
+		seq_printf(s, " CCS\n");
 	else
-		seq_putc(s, '\n');
+		seq_printf(s, "\n");
 
 out:
 	return 0;
@@ -251,8 +251,7 @@ static int scsi_add_single_device(uint host, uint channel, uint id, uint lun)
 	if (shost->transportt->user_scan)
 		error = shost->transportt->user_scan(shost, channel, id, lun);
 	else
-		error = scsi_scan_host_selected(shost, channel, id, lun,
-						SCSI_SCAN_MANUAL);
+		error = scsi_scan_host_selected(shost, channel, id, lun, 1);
 	scsi_host_put(shost);
 	return error;
 }

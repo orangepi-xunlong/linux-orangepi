@@ -12,11 +12,13 @@
  *   more details.
  */
 
+#include <arch/chip.h>
+
 #include <linux/types.h>
 #include <linux/string.h>
 #include <linux/module.h>
-#include <arch/chip.h>
-#include "string-endian.h"
+
+#undef memset
 
 void *memset(void *s, int c, size_t n)
 {
@@ -68,7 +70,8 @@ void *memset(void *s, int c, size_t n)
 	n64 = n >> 3;
 
 	/* Tile input byte out to 64 bits. */
-	v64 = copy_byte(c);
+	/* KLUDGE */
+	v64 = 0x0101010101010101ULL * (uint8_t)c;
 
 	/* This must be at least 8 or the following loop doesn't work. */
 #define CACHE_LINE_SIZE_IN_DOUBLEWORDS (CHIP_L2_LINE_SIZE() / 8)

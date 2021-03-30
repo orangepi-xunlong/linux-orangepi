@@ -25,7 +25,6 @@
 #include <linux/uaccess.h>
 #include <linux/tracehook.h>
 #include <linux/ratelimit.h>
-#include <linux/syscalls.h>
 
 #include <asm/debug-monitors.h>
 #include <asm/elf.h>
@@ -116,7 +115,7 @@ static int restore_sigframe(struct pt_regs *regs,
 	 */
 	regs->syscallno = ~0UL;
 
-	err |= !valid_user_regs(&regs->user_regs, current);
+	err |= !valid_user_regs(&regs->user_regs);
 
 	if (err == 0) {
 		struct fpsimd_context *fpsimd_ctx =
@@ -132,7 +131,7 @@ asmlinkage long sys_rt_sigreturn(struct pt_regs *regs)
 	struct rt_sigframe __user *frame;
 
 	/* Always make any pending restarted system calls return -EINTR */
-	current->restart_block.fn = do_no_restart_syscall;
+	current_thread_info()->restart_block.fn = do_no_restart_syscall;
 
 	/*
 	 * Since we stacked the signal on a 128-bit boundary, then 'sp' should
@@ -192,16 +191,6 @@ static int setup_sigframe(struct rt_sigframe __user *sf,
 		aux += sizeof(*fpsimd_ctx);
 	}
 
-	/* fault information, if valid */
-	if (current->thread.fault_code) {
-		struct esr_context *esr_ctx =
-			container_of(aux, struct esr_context, head);
-		__put_user_error(ESR_MAGIC, &esr_ctx->head.magic, err);
-		__put_user_error(sizeof(*esr_ctx), &esr_ctx->head.size, err);
-		__put_user_error(current->thread.fault_code, &esr_ctx->esr, err);
-		aux += sizeof(*esr_ctx);
-	}
-
 	/* set the "end" magic */
 	end = aux;
 	__put_user_error(0, &end->magic, err);
@@ -210,13 +199,19 @@ static int setup_sigframe(struct rt_sigframe __user *sf,
 	return err;
 }
 
-static struct rt_sigframe __user *get_sigframe(struct ksignal *ksig,
+static struct rt_sigframe __user *get_sigframe(struct k_sigaction *ka,
 					       struct pt_regs *regs)
 {
 	unsigned long sp, sp_top;
 	struct rt_sigframe __user *frame;
 
-	sp = sp_top = sigsp(regs->sp, ksig);
+	sp = sp_top = regs->sp;
+
+	/*
+	 * This is the X/Open sanctioned signal stack switching.
+	 */
+	if ((ka->sa.sa_flags & SA_ONSTACK) && !sas_ss_flags(sp))
+		sp = sp_top = current->sas_ss_sp + current->sas_ss_size;
 
 	sp = (sp - sizeof(struct rt_sigframe)) & ~15;
 	frame = (struct rt_sigframe __user *)sp;
@@ -248,13 +243,13 @@ static void setup_return(struct pt_regs *regs, struct k_sigaction *ka,
 	regs->regs[30] = (unsigned long)sigtramp;
 }
 
-static int setup_rt_frame(int usig, struct ksignal *ksig, sigset_t *set,
-			  struct pt_regs *regs)
+static int setup_rt_frame(int usig, struct k_sigaction *ka, siginfo_t *info,
+			  sigset_t *set, struct pt_regs *regs)
 {
 	struct rt_sigframe __user *frame;
 	int err = 0;
 
-	frame = get_sigframe(ksig, regs);
+	frame = get_sigframe(ka, regs);
 	if (!frame)
 		return 1;
 
@@ -264,9 +259,9 @@ static int setup_rt_frame(int usig, struct ksignal *ksig, sigset_t *set,
 	err |= __save_altstack(&frame->uc.uc_stack, regs->sp);
 	err |= setup_sigframe(frame, regs, set);
 	if (err == 0) {
-		setup_return(regs, &ksig->ka, frame, usig);
-		if (ksig->ka.sa.sa_flags & SA_SIGINFO) {
-			err |= copy_siginfo_to_user(&frame->info, &ksig->info);
+		setup_return(regs, ka, frame, usig);
+		if (ka->sa.sa_flags & SA_SIGINFO) {
+			err |= copy_siginfo_to_user(&frame->info, info);
 			regs->regs[1] = (unsigned long)&frame->info;
 			regs->regs[2] = (unsigned long)&frame->uc;
 		}
@@ -286,38 +281,51 @@ static void setup_restart_syscall(struct pt_regs *regs)
 /*
  * OK, we're invoking a handler
  */
-static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
+static void handle_signal(unsigned long sig, struct k_sigaction *ka,
+			  siginfo_t *info, struct pt_regs *regs)
 {
+	struct thread_info *thread = current_thread_info();
 	struct task_struct *tsk = current;
 	sigset_t *oldset = sigmask_to_save();
-	int usig = ksig->sig;
+	int usig = sig;
 	int ret;
+
+	/*
+	 * translate the signal
+	 */
+	if (usig < 32 && thread->exec_domain && thread->exec_domain->signal_invmap)
+		usig = thread->exec_domain->signal_invmap[usig];
 
 	/*
 	 * Set up the stack frame
 	 */
 	if (is_compat_task()) {
-		if (ksig->ka.sa.sa_flags & SA_SIGINFO)
-			ret = compat_setup_rt_frame(usig, ksig, oldset, regs);
+		if (ka->sa.sa_flags & SA_SIGINFO)
+			ret = compat_setup_rt_frame(usig, ka, info, oldset,
+						    regs);
 		else
-			ret = compat_setup_frame(usig, ksig, oldset, regs);
+			ret = compat_setup_frame(usig, ka, oldset, regs);
 	} else {
-		ret = setup_rt_frame(usig, ksig, oldset, regs);
+		ret = setup_rt_frame(usig, ka, info, oldset, regs);
 	}
 
 	/*
 	 * Check that the resulting registers are actually sane.
 	 */
-	ret |= !valid_user_regs(&regs->user_regs, current);
+	ret |= !valid_user_regs(&regs->user_regs);
+
+	if (ret != 0) {
+		force_sigsegv(sig, tsk);
+		return;
+	}
 
 	/*
 	 * Fast forward the stepping logic so we step into the signal
 	 * handler.
 	 */
-	if (!ret)
-		user_fastforward_single_step(tsk);
+	user_fastforward_single_step(tsk);
 
-	signal_setup_done(ret, ksig, 0);
+	signal_delivered(sig, info, ka, regs, 0);
 }
 
 /*
@@ -332,9 +340,10 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 static void do_signal(struct pt_regs *regs)
 {
 	unsigned long continue_addr = 0, restart_addr = 0;
-	int retval = 0;
+	struct k_sigaction ka;
+	siginfo_t info;
+	int signr, retval = 0;
 	int syscall = (int)regs->syscallno;
-	struct ksignal ksig;
 
 	/*
 	 * If we were from a system call, check for system call restarting...
@@ -368,7 +377,8 @@ static void do_signal(struct pt_regs *regs)
 	 * Get the signal to deliver. When running under ptrace, at this point
 	 * the debugger may change all of our registers.
 	 */
-	if (get_signal(&ksig)) {
+	signr = get_signal_to_deliver(&info, &ka, regs, NULL);
+	if (signr > 0) {
 		/*
 		 * Depending on the signal settings, we may need to revert the
 		 * decision to restart the system call, but skip this if a
@@ -378,12 +388,12 @@ static void do_signal(struct pt_regs *regs)
 		    (retval == -ERESTARTNOHAND ||
 		     retval == -ERESTART_RESTARTBLOCK ||
 		     (retval == -ERESTARTSYS &&
-		      !(ksig.ka.sa.sa_flags & SA_RESTART)))) {
+		      !(ka.sa.sa_flags & SA_RESTART)))) {
 			regs->regs[0] = -EINTR;
 			regs->pc = continue_addr;
 		}
 
-		handle_signal(&ksig, regs);
+		handle_signal(signr, &ka, &info, regs);
 		return;
 	}
 
@@ -403,35 +413,11 @@ static void do_signal(struct pt_regs *regs)
 asmlinkage void do_notify_resume(struct pt_regs *regs,
 				 unsigned int thread_flags)
 {
-	/*
-	 * The assembly code enters us with IRQs off, but it hasn't
-	 * informed the tracing code of that for efficiency reasons.
-	 * Update the trace code with the current status.
-	 */
-	trace_hardirqs_off();
+	if (thread_flags & _TIF_SIGPENDING)
+		do_signal(regs);
 
-	do {
-		/* Check valid user FS if needed */
-		addr_limit_user_check();
-
-		if (thread_flags & _TIF_NEED_RESCHED) {
-			schedule();
-		} else {
-			local_irq_enable();
-
-			if (thread_flags & _TIF_SIGPENDING)
-				do_signal(regs);
-
-			if (thread_flags & _TIF_NOTIFY_RESUME) {
-				clear_thread_flag(TIF_NOTIFY_RESUME);
-				tracehook_notify_resume(regs);
-			}
-
-			if (thread_flags & _TIF_FOREIGN_FPSTATE)
-				fpsimd_restore_current_state();
-		}
-
-		local_irq_disable();
-		thread_flags = READ_ONCE(current_thread_info()->flags);
-	} while (thread_flags & _TIF_WORK_MASK);
+	if (thread_flags & _TIF_NOTIFY_RESUME) {
+		clear_thread_flag(TIF_NOTIFY_RESUME);
+		tracehook_notify_resume(regs);
+	}
 }

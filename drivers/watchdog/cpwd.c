@@ -21,6 +21,7 @@
 #include <linux/fs.h>
 #include <linux/errno.h>
 #include <linux/major.h>
+#include <linux/init.h>
 #include <linux/miscdevice.h>
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
@@ -611,14 +612,16 @@ static int cpwd_probe(struct platform_device *op)
 	}
 
 	if (p->broken) {
-		setup_timer(&cpwd_timer, cpwd_brokentimer, (unsigned long)p);
+		init_timer(&cpwd_timer);
+		cpwd_timer.function	= cpwd_brokentimer;
+		cpwd_timer.data		= (unsigned long) p;
 		cpwd_timer.expires	= WD_BTIMEOUT;
 
 		pr_info("PLD defect workaround enabled for model %s\n",
 			WD_BADMODEL);
 	}
 
-	platform_set_drvdata(op, p);
+	dev_set_drvdata(&op->dev, p);
 	cpwd_device = p;
 	err = 0;
 
@@ -639,7 +642,7 @@ out_free:
 
 static int cpwd_remove(struct platform_device *op)
 {
-	struct cpwd *p = platform_get_drvdata(op);
+	struct cpwd *p = dev_get_drvdata(&op->dev);
 	int i;
 
 	for (i = 0; i < WD_NUMDEVS; i++) {
@@ -677,6 +680,7 @@ MODULE_DEVICE_TABLE(of, cpwd_match);
 static struct platform_driver cpwd_driver = {
 	.driver = {
 		.name = DRIVER_NAME,
+		.owner = THIS_MODULE,
 		.of_match_table = cpwd_match,
 	},
 	.probe		= cpwd_probe,

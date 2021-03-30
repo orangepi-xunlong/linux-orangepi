@@ -194,16 +194,22 @@ static struct clk_lookup lookups[] = {
 	/* MSTP32 clocks */
 	CLKDEV_DEV_ID("i2c-sh7734.0", &mstp_clks[MSTP030]),
 	CLKDEV_DEV_ID("i2c-sh7734.1", &mstp_clks[MSTP029]),
-	CLKDEV_ICK_ID("fck", "sh-sci.0", &mstp_clks[MSTP026]),
-	CLKDEV_ICK_ID("fck", "sh-sci.1", &mstp_clks[MSTP025]),
-	CLKDEV_ICK_ID("fck", "sh-sci.2", &mstp_clks[MSTP024]),
-	CLKDEV_ICK_ID("fck", "sh-sci.3", &mstp_clks[MSTP023]),
-	CLKDEV_ICK_ID("fck", "sh-sci.4", &mstp_clks[MSTP022]),
-	CLKDEV_ICK_ID("fck", "sh-sci.5", &mstp_clks[MSTP021]),
+	CLKDEV_ICK_ID("sci_fck", "sh-sci.0", &mstp_clks[MSTP026]),
+	CLKDEV_ICK_ID("sci_fck", "sh-sci.1", &mstp_clks[MSTP025]),
+	CLKDEV_ICK_ID("sci_fck", "sh-sci.2", &mstp_clks[MSTP024]),
+	CLKDEV_ICK_ID("sci_fck", "sh-sci.3", &mstp_clks[MSTP023]),
+	CLKDEV_ICK_ID("sci_fck", "sh-sci.4", &mstp_clks[MSTP022]),
+	CLKDEV_ICK_ID("sci_fck", "sh-sci.5", &mstp_clks[MSTP021]),
 	CLKDEV_CON_ID("hscif", &mstp_clks[MSTP019]),
-	CLKDEV_ICK_ID("fck", "sh-tmu.0", &mstp_clks[MSTP016]),
-	CLKDEV_ICK_ID("fck", "sh-tmu.1", &mstp_clks[MSTP015]),
-	CLKDEV_ICK_ID("fck", "sh-tmu.2", &mstp_clks[MSTP014]),
+	CLKDEV_ICK_ID("tmu_fck", "sh_tmu.0", &mstp_clks[MSTP016]),
+	CLKDEV_ICK_ID("tmu_fck", "sh_tmu.1", &mstp_clks[MSTP016]),
+	CLKDEV_ICK_ID("tmu_fck", "sh_tmu.2", &mstp_clks[MSTP016]),
+	CLKDEV_ICK_ID("tmu_fck", "sh_tmu.3", &mstp_clks[MSTP015]),
+	CLKDEV_ICK_ID("tmu_fck", "sh_tmu.4", &mstp_clks[MSTP015]),
+	CLKDEV_ICK_ID("tmu_fck", "sh_tmu.5", &mstp_clks[MSTP015]),
+	CLKDEV_ICK_ID("tmu_fck", "sh_tmu.6", &mstp_clks[MSTP014]),
+	CLKDEV_ICK_ID("tmu_fck", "sh_tmu.7", &mstp_clks[MSTP014]),
+	CLKDEV_ICK_ID("tmu_fck", "sh_tmu.8", &mstp_clks[MSTP014]),
 	CLKDEV_CON_ID("ssi0", &mstp_clks[MSTP012]),
 	CLKDEV_CON_ID("ssi1", &mstp_clks[MSTP011]),
 	CLKDEV_CON_ID("ssi2", &mstp_clks[MSTP010]),
@@ -232,7 +238,7 @@ static struct clk_lookup lookups[] = {
 	CLKDEV_CON_ID("adc0", &mstp_clks[MSTP313]),
 	CLKDEV_CON_ID("mtu0", &mstp_clks[MSTP312]),
 	CLKDEV_CON_ID("iebus0", &mstp_clks[MSTP304]),
-	CLKDEV_DEV_ID("sh7734-gether.0", &mstp_clks[MSTP114]),
+	CLKDEV_DEV_ID("sh-eth.0", &mstp_clks[MSTP114]),
 	CLKDEV_CON_ID("rtc0", &mstp_clks[MSTP303]),
 	CLKDEV_CON_ID("hif0", &mstp_clks[MSTP302]),
 	CLKDEV_CON_ID("stif0", &mstp_clks[MSTP301]),
@@ -246,7 +252,8 @@ int __init arch_clk_init(void)
 	for (i = 0; i < ARRAY_SIZE(main_clks); i++)
 		ret |= clk_register(main_clks[i]);
 
-	clkdev_add_table(lookups, ARRAY_SIZE(lookups));
+	for (i = 0; i < ARRAY_SIZE(lookups); i++)
+		clkdev_add(&lookups[i]);
 
 	if (!ret)
 		ret = sh_clk_div4_register(div4_clks, ARRAY_SIZE(div4_clks),

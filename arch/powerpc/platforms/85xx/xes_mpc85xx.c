@@ -144,17 +144,23 @@ machine_arch_initcall(xes_mpc8540, mpc85xx_common_publish_devices);
  */
 static int __init xes_mpc8572_probe(void)
 {
-	return of_machine_is_compatible("xes,MPC8572");
+	unsigned long root = of_get_flat_dt_root();
+
+	return of_flat_dt_is_compatible(root, "xes,MPC8572");
 }
 
 static int __init xes_mpc8548_probe(void)
 {
-	return of_machine_is_compatible("xes,MPC8548");
+	unsigned long root = of_get_flat_dt_root();
+
+	return of_flat_dt_is_compatible(root, "xes,MPC8548");
 }
 
 static int __init xes_mpc8540_probe(void)
 {
-	return of_machine_is_compatible("xes,MPC8540");
+	unsigned long root = of_get_flat_dt_root();
+
+	return of_flat_dt_is_compatible(root, "xes,MPC8540");
 }
 
 define_machine(xes_mpc8572) {
@@ -164,9 +170,9 @@ define_machine(xes_mpc8572) {
 	.init_IRQ		= xes_mpc85xx_pic_init,
 #ifdef CONFIG_PCI
 	.pcibios_fixup_bus	= fsl_pcibios_fixup_bus,
-	.pcibios_fixup_phb      = fsl_pcibios_fixup_phb,
 #endif
 	.get_irq		= mpic_get_irq,
+	.restart		= fsl_rstcr_restart,
 	.calibrate_decr		= generic_calibrate_decr,
 	.progress		= udbg_progress,
 };
@@ -178,9 +184,9 @@ define_machine(xes_mpc8548) {
 	.init_IRQ		= xes_mpc85xx_pic_init,
 #ifdef CONFIG_PCI
 	.pcibios_fixup_bus	= fsl_pcibios_fixup_bus,
-	.pcibios_fixup_phb      = fsl_pcibios_fixup_phb,
 #endif
 	.get_irq		= mpic_get_irq,
+	.restart		= fsl_rstcr_restart,
 	.calibrate_decr		= generic_calibrate_decr,
 	.progress		= udbg_progress,
 };
@@ -192,9 +198,9 @@ define_machine(xes_mpc8540) {
 	.init_IRQ		= xes_mpc85xx_pic_init,
 #ifdef CONFIG_PCI
 	.pcibios_fixup_bus	= fsl_pcibios_fixup_bus,
-	.pcibios_fixup_phb      = fsl_pcibios_fixup_phb,
 #endif
 	.get_irq		= mpic_get_irq,
+	.restart		= fsl_rstcr_restart,
 	.calibrate_decr		= generic_calibrate_decr,
 	.progress		= udbg_progress,
 };

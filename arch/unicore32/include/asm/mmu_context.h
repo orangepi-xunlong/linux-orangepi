@@ -14,8 +14,6 @@
 
 #include <linux/compiler.h>
 #include <linux/sched.h>
-#include <linux/mm.h>
-#include <linux/vmacache.h>
 #include <linux/io.h>
 
 #include <asm/cacheflush.h>
@@ -75,7 +73,7 @@ do { \
 		else \
 			mm->mmap = NULL; \
 		rb_erase(&high_vma->vm_rb, &mm->mm_rb); \
-		vmacache_invalidate(mm); \
+		mm->mmap_cache = NULL; \
 		mm->map_count--; \
 		remove_vma(high_vma); \
 	} \
@@ -86,27 +84,4 @@ static inline void arch_dup_mmap(struct mm_struct *oldmm,
 {
 }
 
-static inline void arch_unmap(struct mm_struct *mm,
-			struct vm_area_struct *vma,
-			unsigned long start, unsigned long end)
-{
-}
-
-static inline void arch_bprm_mm_init(struct mm_struct *mm,
-				     struct vm_area_struct *vma)
-{
-}
-
-static inline bool arch_vma_access_permitted(struct vm_area_struct *vma,
-		bool write, bool execute, bool foreign)
-{
-	/* by default, allow everything */
-	return true;
-}
-
-static inline bool arch_pte_access_permitted(pte_t pte, bool write)
-{
-	/* by default, allow everything */
-	return true;
-}
 #endif

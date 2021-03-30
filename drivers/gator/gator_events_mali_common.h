@@ -1,5 +1,5 @@
 /**
- * Copyright (C) ARM Limited 2012-2016. All rights reserved.
+ * Copyright (C) ARM Limited 2012-2014. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -31,12 +31,12 @@
  * Runtime state information for a counter.
  */
 struct mali_counter {
-    /* 'key' (a unique id set by gatord and returned by gator.ko) */
-    unsigned long key;
-    /* counter enable state */
-    unsigned long enabled;
-    /* for activity counters, the number of cores, otherwise -1 */
-    unsigned long cores;
+	/* 'key' (a unique id set by gatord and returned by gator.ko) */
+	unsigned long key;
+	/* counter enable state */
+	unsigned long enabled;
+	/* for activity counters, the number of cores, otherwise -1 */
+	unsigned long cores;
 };
 
 /*

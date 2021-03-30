@@ -29,6 +29,7 @@
  */
 
 _F(void, setup, (char** cmd), { });
+_F(void, init_irq, (void), { });
 _F(void, restart, (void), { while(1); });
 _F(void, halt, (void), { while(1); });
 _F(void, power_off, (void), { while(1); });
@@ -41,6 +42,6 @@ _F(void, pcibios_init, (void), { });
 _F(void, calibrate_ccount, (void),
 {
 	pr_err("ERROR: Cannot calibrate cpu frequency! Assuming 10MHz.\n");
-	ccount_freq = 10 * 1000000UL;
+	ccount_per_jiffy = 10 * (1000000UL/HZ);
 });
 #endif

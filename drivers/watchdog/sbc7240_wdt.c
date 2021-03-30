@@ -309,3 +309,5 @@ MODULE_AUTHOR("Gilles Gigan");
 MODULE_DESCRIPTION("Watchdog device driver for single board"
 		   " computers EPIC Nano 7240 from iEi");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);
+

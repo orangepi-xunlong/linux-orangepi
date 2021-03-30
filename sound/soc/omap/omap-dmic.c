@@ -40,7 +40,6 @@
 #include <sound/initval.h>
 #include <sound/soc.h>
 #include <sound/dmaengine_pcm.h>
-#include <sound/omap-pcm.h>
 
 #include "omap-dmic.h"
 
@@ -48,8 +47,6 @@ struct omap_dmic {
 	struct device *dev;
 	void __iomem *io_base;
 	struct clk *fclk;
-	struct pm_qos_request pm_qos_req;
-	int latency;
 	int fclk_freq;
 	int out_freq;
 	int clk_div;
@@ -60,16 +57,17 @@ struct omap_dmic {
 	struct mutex mutex;
 
 	struct snd_dmaengine_dai_dma_data dma_data;
+	unsigned int dma_req;
 };
 
 static inline void omap_dmic_write(struct omap_dmic *dmic, u16 reg, u32 val)
 {
-	writel_relaxed(val, dmic->io_base + reg);
+	__raw_writel(val, dmic->io_base + reg);
 }
 
 static inline int omap_dmic_read(struct omap_dmic *dmic, u16 reg)
 {
-	return readl_relaxed(dmic->io_base + reg);
+	return __raw_readl(dmic->io_base + reg);
 }
 
 static inline void omap_dmic_start(struct omap_dmic *dmic)
@@ -116,6 +114,7 @@ static int omap_dmic_dai_startup(struct snd_pcm_substream *substream,
 
 	mutex_unlock(&dmic->mutex);
 
+	snd_soc_dai_set_dma_data(dai, substream, &dmic->dma_data);
 	return ret;
 }
 
@@ -125,8 +124,6 @@ static void omap_dmic_dai_shutdown(struct snd_pcm_substream *substream,
 	struct omap_dmic *dmic = snd_soc_dai_get_drvdata(dai);
 
 	mutex_lock(&dmic->mutex);
-
-	pm_qos_remove_request(&dmic->pm_qos_req);
 
 	if (!dai->active)
 		dmic->active = 0;
@@ -230,8 +227,6 @@ static int omap_dmic_dai_hw_params(struct snd_pcm_substream *substream,
 	/* packet size is threshold * channels */
 	dma_data = snd_soc_dai_get_dma_data(dai, substream);
 	dma_data->maxburst = dmic->threshold * channels;
-	dmic->latency = (OMAP_DMIC_THRES_MAX - dmic->threshold) * USEC_PER_SEC /
-			params_rate(params);
 
 	return 0;
 }
@@ -241,9 +236,6 @@ static int omap_dmic_dai_prepare(struct snd_pcm_substream *substream,
 {
 	struct omap_dmic *dmic = snd_soc_dai_get_drvdata(dai);
 	u32 ctrl;
-
-	if (pm_qos_request_active(&dmic->pm_qos_req))
-		pm_qos_update_request(&dmic->pm_qos_req, dmic->latency);
 
 	/* Configure uplink threshold */
 	omap_dmic_write(dmic, OMAP_DMIC_FIFO_CTRL_REG, dmic->threshold);
@@ -426,9 +418,6 @@ static int omap_dmic_probe(struct snd_soc_dai *dai)
 
 	/* Configure DMIC threshold value */
 	dmic->threshold = OMAP_DMIC_THRES_MAX - 3;
-
-	snd_soc_dai_init_dma_data(dai, NULL, &dmic->dma_data);
-
 	return 0;
 }
 
@@ -475,7 +464,7 @@ static int asoc_dmic_probe(struct platform_device *pdev)
 
 	mutex_init(&dmic->mutex);
 
-	dmic->fclk = devm_clk_get(dmic->dev, "fck");
+	dmic->fclk = clk_get(dmic->dev, "fck");
 	if (IS_ERR(dmic->fclk)) {
 		dev_err(dmic->dev, "cant get fck\n");
 		return -ENODEV;
@@ -484,27 +473,50 @@ static int asoc_dmic_probe(struct platform_device *pdev)
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "dma");
 	if (!res) {
 		dev_err(dmic->dev, "invalid dma memory resource\n");
-		return -ENODEV;
+		ret = -ENODEV;
+		goto err_put_clk;
 	}
 	dmic->dma_data.addr = res->start + OMAP_DMIC_DATA_REG;
 
-	dmic->dma_data.filter_data = "up_link";
+	res = platform_get_resource(pdev, IORESOURCE_DMA, 0);
+	if (!res) {
+		dev_err(dmic->dev, "invalid dma resource\n");
+		ret = -ENODEV;
+		goto err_put_clk;
+	}
+
+	dmic->dma_req = res->start;
+	dmic->dma_data.filter_data = &dmic->dma_req;
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "mpu");
+	if (!res) {
+		dev_err(dmic->dev, "invalid memory resource\n");
+		ret = -ENODEV;
+		goto err_put_clk;
+	}
+
 	dmic->io_base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(dmic->io_base))
 		return PTR_ERR(dmic->io_base);
 
-
-	ret = devm_snd_soc_register_component(&pdev->dev,
-					      &omap_dmic_component,
-					      &omap_dmic_dai, 1);
+	ret = snd_soc_register_component(&pdev->dev, &omap_dmic_component,
+					 &omap_dmic_dai, 1);
 	if (ret)
-		return ret;
+		goto err_put_clk;
 
-	ret = omap_pcm_platform_register(&pdev->dev);
-	if (ret)
-		return ret;
+	return 0;
+
+err_put_clk:
+	clk_put(dmic->fclk);
+	return ret;
+}
+
+static int asoc_dmic_remove(struct platform_device *pdev)
+{
+	struct omap_dmic *dmic = platform_get_drvdata(pdev);
+
+	snd_soc_unregister_component(&pdev->dev);
+	clk_put(dmic->fclk);
 
 	return 0;
 }
@@ -518,9 +530,11 @@ MODULE_DEVICE_TABLE(of, omap_dmic_of_match);
 static struct platform_driver asoc_dmic_driver = {
 	.driver = {
 		.name = "omap-dmic",
+		.owner = THIS_MODULE,
 		.of_match_table = omap_dmic_of_match,
 	},
 	.probe = asoc_dmic_probe,
+	.remove = asoc_dmic_remove,
 };
 
 module_platform_driver(asoc_dmic_driver);

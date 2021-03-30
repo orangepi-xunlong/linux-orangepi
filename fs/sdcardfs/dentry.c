@@ -34,8 +34,6 @@ static int sdcardfs_d_revalidate(struct dentry *dentry, unsigned int flags)
 	struct dentry *parent_lower_dentry = NULL;
 	struct dentry *lower_cur_parent_dentry = NULL;
 	struct dentry *lower_dentry = NULL;
-	struct inode *inode;
-	struct sdcardfs_inode_data *data;
 
 	if (flags & LOOKUP_RCU)
 		return -ECHILD;
@@ -48,9 +46,9 @@ static int sdcardfs_d_revalidate(struct dentry *dentry, unsigned int flags)
 	spin_unlock(&dentry->d_lock);
 
 	/* check uninitialized obb_dentry and
-	 * whether the base obbpath has been changed or not
-	 */
+	 * whether the base obbpath has been changed or not */
 	if (is_obbpath_invalid(dentry)) {
+		d_drop(dentry);
 		return 0;
 	}
 
@@ -61,35 +59,41 @@ static int sdcardfs_d_revalidate(struct dentry *dentry, unsigned int flags)
 	lower_dentry = lower_path.dentry;
 	lower_cur_parent_dentry = dget_parent(lower_dentry);
 
-	if ((lower_dentry->d_flags & DCACHE_OP_REVALIDATE)) {
-		err = lower_dentry->d_op->d_revalidate(lower_dentry, flags);
-		if (err == 0) {
-			goto out;
-		}
-	}
-
 	spin_lock(&lower_dentry->d_lock);
 	if (d_unhashed(lower_dentry)) {
 		spin_unlock(&lower_dentry->d_lock);
+		d_drop(dentry);
 		err = 0;
 		goto out;
 	}
 	spin_unlock(&lower_dentry->d_lock);
 
 	if (parent_lower_dentry != lower_cur_parent_dentry) {
+		d_drop(dentry);
 		err = 0;
+		goto out;
+	}
+
+	if (dentry == lower_dentry) {
+		err = 0;
+		panic("sdcardfs: dentry is equal to lower_dentry\n");
 		goto out;
 	}
 
 	if (dentry < lower_dentry) {
 		spin_lock(&dentry->d_lock);
-		spin_lock_nested(&lower_dentry->d_lock, DENTRY_D_LOCK_NESTED);
+		spin_lock(&lower_dentry->d_lock);
 	} else {
 		spin_lock(&lower_dentry->d_lock);
-		spin_lock_nested(&dentry->d_lock, DENTRY_D_LOCK_NESTED);
+		spin_lock(&dentry->d_lock);
 	}
 
-	if (!qstr_case_eq(&dentry->d_name, &lower_dentry->d_name)) {
+	if (dentry->d_name.len != lower_dentry->d_name.len) {
+		__d_drop(dentry);
+		err = 0;
+	} else if (strncasecmp(dentry->d_name.name, lower_dentry->d_name.name,
+				dentry->d_name.len) != 0) {
+		__d_drop(dentry);
 		err = 0;
 	}
 
@@ -99,20 +103,6 @@ static int sdcardfs_d_revalidate(struct dentry *dentry, unsigned int flags)
 	} else {
 		spin_unlock(&dentry->d_lock);
 		spin_unlock(&lower_dentry->d_lock);
-	}
-	if (!err)
-		goto out;
-
-	/* If our top's inode is gone, we may be out of date */
-	inode = igrab(d_inode(dentry));
-	if (inode) {
-		data = top_data_get(SDCARDFS_I(inode));
-		if (!data || data->abandoned) {
-			err = 0;
-		}
-		if (data)
-			data_put(data);
-		iput(inode);
 	}
 
 out:
@@ -123,25 +113,19 @@ out:
 	return err;
 }
 
-/* 1 = delete, 0 = cache */
-static int sdcardfs_d_delete(const struct dentry *d)
-{
-	return SDCARDFS_SB(d->d_sb)->options.nocache ? 1 : 0;
-}
-
 static void sdcardfs_d_release(struct dentry *dentry)
 {
-	if (!dentry || !dentry->d_fsdata)
-		return;
 	/* release and reset the lower paths */
-	if (has_graft_path(dentry))
+	if(has_graft_path(dentry)) {
 		sdcardfs_put_reset_orig_path(dentry);
+	}
 	sdcardfs_put_reset_lower_path(dentry);
 	free_dentry_private_data(dentry);
+	return;
 }
 
 static int sdcardfs_hash_ci(const struct dentry *dentry,
-				struct qstr *qstr)
+				const struct inode *inode, struct qstr *qstr)
 {
 	/*
 	 * This function is copy of vfat_hashi.
@@ -154,10 +138,12 @@ static int sdcardfs_hash_ci(const struct dentry *dentry,
 	unsigned long hash;
 
 	name = qstr->name;
+	//len = vfat_striptail_len(qstr);
 	len = qstr->len;
 
-	hash = init_name_hash(dentry);
+	hash = init_name_hash();
 	while (len--)
+		//hash = partial_name_hash(nls_tolower(t, *name++), hash);
 		hash = partial_name_hash(tolower(*name++), hash);
 	qstr->hash = end_name_hash(hash);
 
@@ -167,30 +153,36 @@ static int sdcardfs_hash_ci(const struct dentry *dentry,
 /*
  * Case insensitive compare of two vfat names.
  */
-static int sdcardfs_cmp_ci(const struct dentry *dentry,
+static int sdcardfs_cmp_ci(const struct dentry *parent,
+		const struct inode *pinode,
+		const struct dentry *dentry, const struct inode *inode,
 		unsigned int len, const char *str, const struct qstr *name)
 {
-	/* FIXME Should we support national language? */
+	/* This function is copy of vfat_cmpi */
+	// FIXME Should we support national language?
+	//struct nls_table *t = MSDOS_SB(parent->d_sb)->nls_io;
+	//unsigned int alen, blen;
 
+	/* A filename cannot end in '.' or we treat it like it has none */
+	/*
+	alen = vfat_striptail_len(name);
+	blen = __vfat_striptail_len(len, str);
+	if (alen == blen) {
+		if (nls_strnicmp(t, name->name, str, alen) == 0)
+			return 0;
+	}
+	*/
 	if (name->len == len) {
-		if (str_n_case_eq(name->name, str, len))
+		if (strncasecmp(name->name, str, len) == 0)
 			return 0;
 	}
 	return 1;
 }
 
-static void sdcardfs_canonical_path(const struct path *path,
-				struct path *actual_path)
-{
-	sdcardfs_get_real_lower(path->dentry, actual_path);
-}
-
 const struct dentry_operations sdcardfs_ci_dops = {
 	.d_revalidate	= sdcardfs_d_revalidate,
-	.d_delete	= sdcardfs_d_delete,
 	.d_release	= sdcardfs_d_release,
-	.d_hash	= sdcardfs_hash_ci,
+	.d_hash 	= sdcardfs_hash_ci,
 	.d_compare	= sdcardfs_cmp_ci,
-	.d_canonical_path = sdcardfs_canonical_path,
 };
 

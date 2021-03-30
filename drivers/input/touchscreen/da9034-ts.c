@@ -13,6 +13,7 @@
 
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/platform_device.h>
 #include <linux/input.h>
@@ -298,14 +299,13 @@ static void da9034_touch_close(struct input_dev *dev)
 
 static int da9034_touch_probe(struct platform_device *pdev)
 {
-	struct da9034_touch_pdata *pdata = dev_get_platdata(&pdev->dev);
+	struct da9034_touch_pdata *pdata = pdev->dev.platform_data;
 	struct da9034_touch *touch;
 	struct input_dev *input_dev;
-	int error;
+	int ret;
 
-	touch = devm_kzalloc(&pdev->dev, sizeof(struct da9034_touch),
-			     GFP_KERNEL);
-	if (!touch) {
+	touch = kzalloc(sizeof(struct da9034_touch), GFP_KERNEL);
+	if (touch == NULL) {
 		dev_err(&pdev->dev, "failed to allocate driver data\n");
 		return -ENOMEM;
 	}
@@ -316,18 +316,18 @@ static int da9034_touch_probe(struct platform_device *pdev)
 		touch->interval_ms	= pdata->interval_ms;
 		touch->x_inverted	= pdata->x_inverted;
 		touch->y_inverted	= pdata->y_inverted;
-	} else {
+	} else
 		/* fallback into default */
 		touch->interval_ms	= 10;
-	}
 
 	INIT_DELAYED_WORK(&touch->tsi_work, da9034_tsi_work);
 	touch->notifier.notifier_call = da9034_touch_notifier;
 
-	input_dev = devm_input_allocate_device(&pdev->dev);
+	input_dev = input_allocate_device();
 	if (!input_dev) {
 		dev_err(&pdev->dev, "failed to allocate input device\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto err_free_touch;
 	}
 
 	input_dev->name		= pdev->name;
@@ -347,9 +347,26 @@ static int da9034_touch_probe(struct platform_device *pdev)
 	touch->input_dev = input_dev;
 	input_set_drvdata(input_dev, touch);
 
-	error = input_register_device(input_dev);
-	if (error)
-		return error;
+	ret = input_register_device(input_dev);
+	if (ret)
+		goto err_free_input;
+
+	platform_set_drvdata(pdev, touch);
+	return 0;
+
+err_free_input:
+	input_free_device(input_dev);
+err_free_touch:
+	kfree(touch);
+	return ret;
+}
+
+static int da9034_touch_remove(struct platform_device *pdev)
+{
+	struct da9034_touch *touch = platform_get_drvdata(pdev);
+
+	input_unregister_device(touch->input_dev);
+	kfree(touch);
 
 	return 0;
 }
@@ -357,8 +374,10 @@ static int da9034_touch_probe(struct platform_device *pdev)
 static struct platform_driver da9034_touch_driver = {
 	.driver	= {
 		.name	= "da9034-touch",
+		.owner	= THIS_MODULE,
 	},
 	.probe		= da9034_touch_probe,
+	.remove		= da9034_touch_remove,
 };
 module_platform_driver(da9034_touch_driver);
 

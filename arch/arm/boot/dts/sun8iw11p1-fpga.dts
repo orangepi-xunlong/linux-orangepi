@@ -1,0 +1,222 @@
+/*
+ * Allwinner Technology CO., Ltd. sun8iw11p1 fpga board.
+ *
+ * fpga board support.
+ */
+
+/dts-v1/;
+#include "sun8iw11p1.dtsi"
+
+/{
+
+	soc@01c00000 {
+
+		pio: pinctrl@01c20800 {
+			interrupts = <GIC_SPI 2 IRQ_TYPE_LEVEL_HIGH>;		/* gpio is IRQ34 on fpga (conflict with twi0) */
+		};
+
+		soc_timer0: timer@1c20c00 {
+			interrupts = <GIC_SPI 4 IRQ_TYPE_EDGE_RISING>;
+		};
+
+		dma0:dma-controller@01c02000 {
+			interrupts = <GIC_SPI 7 4>;
+		};
+
+		uart0: uart@01c28000 {
+			interrupts = <GIC_SPI 1 IRQ_TYPE_LEVEL_HIGH>;           /* uart0 is IRQ33 on fpga */
+			status = "okay";
+		};
+
+		twi0: twi@0x01c2ac00 {
+			interrupts = <GIC_SPI 2 IRQ_TYPE_LEVEL_HIGH>;           /* twi0 is IRQ34 on fpga (conflict with gpio) */
+			status = "disabled";
+
+			eeprom@50 {
+				compatible = "atmel,24c16";
+				reg = <0x50>;
+			};
+
+			pmic0: pmic@0x00000034{
+				compatible = "allwinner,axp20";
+				reg = <0x34>;
+				interrupts = <GIC_SPI 0 IRQ_TYPE_LEVEL_HIGH>;
+			};
+		};
+		udc:udc-controller@0x01c13000 {
+			interrupts = <GIC_SPI 12 IRQ_TYPE_LEVEL_HIGH>; /* udc is IRQ49 on fpga */
+		};
+		twi1: twi@0x01c2b000 {
+			interrupts = <GIC_SPI 3 IRQ_TYPE_LEVEL_HIGH>;           /* twi1 is IRQ35 on fpga */
+			status = "okay";
+		};
+
+		ehci0:ehci0-controller@0x01c14000 {
+			interrupts = <GIC_SPI 13 IRQ_TYPE_LEVEL_HIGH>; /* ehci0 is IRQ50 on fpga */
+		};
+
+		ohci0:ohci0-controller@0x01c14400 {
+			interrupts = <GIC_SPI 14 IRQ_TYPE_LEVEL_HIGH>; /* ohci0 is IRQ51 on fpga */
+		};
+		spi0: spi@01c05000 {
+			interrupts = <GIC_SPI 15 IRQ_TYPE_LEVEL_HIGH>;          /* spi0 is IRQ47 on fpga */
+			status = "disabled";
+
+			nor_flash@0 {
+				#address-cells = <1>;
+				#size-cells = <1>;
+				compatible = "atmel,at25df641";
+				spi-max-frequency = <50000000>;
+				reg = <0>;	/* Chip select 0 */
+
+				partition@0 {
+					label = "NorFlash part0";
+					reg = <0x00000000 0x00800000>;
+				};
+			};
+		};
+
+		g2d: g2d@01e80000 {
+			interrupts = <GIC_SPI 19 0x0104>;
+			status = "ok";
+		};
+
+		tvd: tvd@01c30000 {
+			interrupts = <GIC_SPI 14 0x0104>;
+		};
+
+		disp: disp@01000000 {
+			interrupts = <GIC_SPI 17 0x0104>, <GIC_SPI 18 0x0104>,
+				<GIC_SPI 51 0x0104>, <GIC_SPI 52 0x0104>,
+				<GIC_SPI 89 0x0104>;/* for dsi */
+			disp_init_enable = <1>;
+			disp_mode = <0>;
+			screen0_output_type = <1>;
+			screen0_output_mode = <4>;
+
+			screen1_output_type = <3>;
+			screen1_output_mode = <4>;
+			fb0_format = <0>;
+			fb0_width = <0>;
+			fb0_height = <0>;
+			fb1_format = <0>;
+			fb1_width = <0>;
+			fb1_height = <0>;
+			status = "okay";
+		};
+
+		soc_lcd0: lcd0@01c0c000 {
+			compatible = "allwinner,sunxi-lcd0";
+			lcd_driver_name = "default_lcd";
+			lcd_used = <1>;
+			lcd_if = <0>;
+			lcd_x = <800>;
+			lcd_y = <480>;
+			lcd_width = <150>;
+			lcd_height = <94>;
+			lcd_dclk_freq = <33>;
+			lcd_pwm_used = <1>;
+			lcd_pwm_ch = <0>;
+			lcd_pwm_freq = <5000>;
+			lcd_pwm_pol = <0>;
+			lcd_pwm_max_limit = <255>;
+			lcd_hbp = <46>;
+			lcd_ht = <1055>;
+			lcd_hspw = <0>;
+			lcd_vbp = <23>;
+			lcd_vt = <525>;
+			lcd_vspw = <0>;
+			lcd_lvds_if = <0>;
+			lcd_lvds_colordepth = <0>;
+			lcd_lvds_mode = <0>;
+			lcd_frm = <0>;
+			lcd_hv_clk_phase = <0>;
+			lcd_hv_sync_polarity = <0>;
+			lcd_dsi_if = <0>;
+			lcd_dsi_lane = <0>;
+			lcd_dsi_format = <0>;
+			lcd_dsi_te = <0>;
+			lcd_gamma_en = <0>;
+			lcd_bright_curve_en = <0>;
+			lcd_cmap_en = <0>;
+
+			lcd_power = "vcc-lcd-0";
+			lcd_bl_en = <&pio PD 29 1 0 0 1>;
+			lcd_bl_en_power = "none";/* power for lcd_bl_en pin */
+			lcd_fix_power = "vcc-dsi-33";/* power for lcd controler */
+			lcd_gpio_0 = <&pio PH 1 1 0 0 1>;
+
+			pinctrl-names = "active","sleep";
+			pinctrl-0 = <&lcd_pins_a>;
+			pinctrl-1 = <&lcd_pins_b>;
+			lcd_pin_power = "vcc-pd";/* power for pinctrl-0/1..*/
+
+			lcd_backlight = <50>;
+
+			status = "okay";
+		};
+
+		pwm0: pwm0@01c23400 {
+			pinctrl-0 = <&pwm_pins_a>;
+			pinctrl-1 = <&pwm_pins_b>;
+		};
+
+		pio: pinctrl@01c20800 {
+			lcd_pins_a: lcd_pin0@0 {
+					allwinner,pins = "PD0", "PD1", "PD2", "PD3", "PD4", "PD6", "PD6", "PD7",
+														"PD8", "PD9", "PD10", "PD11", "PD12", "PD13", "PD14", "PD15",
+														"PD16", "PD17", "PD18", "PD19", "PD20", "PD21", "PD22", "PD23",
+														"PD24", "PD25", "PD26", "PD27";
+					allwinner,function = "lcd0";
+					allwinner,muxsel = <2>;
+					allwinner,drive = <1>;
+					allwinner,pull = <1>;
+				};
+
+				lcd_pins_b: lcd_pin1@1 {
+					allwinner,pins = "PD0", "PD1", "PD2", "PD3", "PD4", "PD6", "PD6", "PD7",
+														"PD8", "PD9", "PD10", "PD11", "PD12", "PD13", "PD14", "PD15",
+														"PD16", "PD17", "PD18", "PD19", "PD20", "PD21", "PD22", "PD23",
+														"PD24", "PD25", "PD26", "PD27";
+					allwinner,function = "io_disabled";
+					allwinner,muxsel = <7>;
+					allwinner,drive = <1>;
+					allwinner,pull = <1>;
+				};
+
+				pwm_pins_a: pwm_pin0@0 {
+					allwinner,pins = "PD28";
+					allwinner,function = "pwm0";
+					allwinner,muxsel = <2>;
+					allwinner,drive = <1>;
+					allwinner,pull = <1>;
+				};
+
+				pwm_pins_b: pwm_pin1@1 {
+					allwinner,pins = "PD28";
+					allwinner,function = "io_disabled";
+					allwinner,muxsel = <7>;
+					allwinner,drive = <1>;
+					allwinner,pull = <1>;
+				};
+
+				uart0_pins_a: uart0@0 {
+					allwinner,pins = "PB22", "PB23";
+					allwinner,muxsel = <2>;
+				};
+
+				uart0_pins_b: uart0@1 {
+					allwinner,pins = "PB22", "PB23";
+					allwinner,muxsel = <7>;
+				};
+		};
+
+		csi0:vfe@0 {
+			interrupts = <GIC_SPI 16 4>;/*SUNXI_IRQ_CSI0 (SUNXI_GIC_START + 16 ) = 48 on fpga*/
+		};
+
+		sata:sata@01c18000{
+			interrupts = <GIC_SPI 22 IRQ_TYPE_LEVEL_HIGH>; /* sata is IRQ54 on fpga */
+		};
+	};
+};

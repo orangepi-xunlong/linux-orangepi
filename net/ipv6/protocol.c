@@ -36,6 +36,10 @@ int inet6_add_protocol(const struct inet6_protocol *prot, unsigned char protocol
 }
 EXPORT_SYMBOL(inet6_add_protocol);
 
+/*
+ *	Remove a protocol from the hash tables.
+ */
+
 int inet6_del_protocol(const struct inet6_protocol *prot, unsigned char protocol)
 {
 	int ret;
@@ -51,7 +55,6 @@ EXPORT_SYMBOL(inet6_del_protocol);
 #endif
 
 const struct net_offload __rcu *inet6_offloads[MAX_INET_PROTOS] __read_mostly;
-EXPORT_SYMBOL(inet6_offloads);
 
 int inet6_add_offload(const struct net_offload *prot, unsigned char protocol)
 {

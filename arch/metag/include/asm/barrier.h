@@ -4,6 +4,8 @@
 #include <asm/metag_mem.h>
 
 #define nop()		asm volatile ("NOP")
+#define mb()		wmb()
+#define rmb()		barrier()
 
 #ifdef CONFIG_METAG_META21
 
@@ -39,10 +41,20 @@ static inline void wr_fence(void)
 
 #endif /* !CONFIG_METAG_META21 */
 
-/* flush writes through the write combiner */
-#define mb()		wr_fence()
-#define rmb()		barrier()
-#define wmb()		mb()
+static inline void wmb(void)
+{
+	/* flush writes through the write combiner */
+	wr_fence();
+}
+
+#define read_barrier_depends()  do { } while (0)
+
+#ifndef CONFIG_SMP
+#define fence()		do { } while (0)
+#define smp_mb()        barrier()
+#define smp_rmb()       barrier()
+#define smp_wmb()       barrier()
+#else
 
 #ifdef CONFIG_METAG_SMP_WRITE_REORDERING
 /*
@@ -53,32 +65,39 @@ static inline void wr_fence(void)
  * incoherence). It is therefore ineffective if used after and on the same
  * thread as a write.
  */
-static inline void metag_fence(void)
+static inline void fence(void)
 {
 	volatile int *flushptr = (volatile int *) LINSYSEVENT_WR_ATOMIC_UNLOCK;
 	barrier();
 	*flushptr = 0;
 	barrier();
 }
-#define __smp_mb()	metag_fence()
-#define __smp_rmb()	metag_fence()
-#define __smp_wmb()	barrier()
-#else
-#define metag_fence()	do { } while (0)
-#define __smp_mb()	barrier()
-#define __smp_rmb()	barrier()
-#define __smp_wmb()	barrier()
-#endif
-
-#ifdef CONFIG_SMP
-#define fence()		metag_fence()
+#define smp_mb()        fence()
+#define smp_rmb()       fence()
+#define smp_wmb()       barrier()
 #else
 #define fence()		do { } while (0)
+#define smp_mb()        barrier()
+#define smp_rmb()       barrier()
+#define smp_wmb()       barrier()
 #endif
+#endif
+#define smp_read_barrier_depends()     do { } while (0)
+#define set_mb(var, value) do { var = value; smp_mb(); } while (0)
 
-#define __smp_mb__before_atomic()	barrier()
-#define __smp_mb__after_atomic()	barrier()
+#define smp_store_release(p, v)						\
+do {									\
+	compiletime_assert_atomic_type(*p);				\
+	smp_mb();							\
+	ACCESS_ONCE(*p) = (v);						\
+} while (0)
 
-#include <asm-generic/barrier.h>
+#define smp_load_acquire(p)						\
+({									\
+	typeof(*p) ___p1 = ACCESS_ONCE(*p);				\
+	compiletime_assert_atomic_type(*p);				\
+	smp_mb();							\
+	___p1;								\
+})
 
 #endif /* _ASM_METAG_BARRIER_H */

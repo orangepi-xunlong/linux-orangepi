@@ -21,6 +21,7 @@
 #ifndef R820T_H
 #define R820T_H
 
+#include <linux/kconfig.h>
 #include "dvb_frontend.h"
 
 enum r820t_chip {
@@ -41,7 +42,7 @@ struct r820t_config {
 	bool use_predetect;
 };
 
-#if IS_REACHABLE(CONFIG_MEDIA_TUNER_R820T)
+#if IS_ENABLED(CONFIG_MEDIA_TUNER_R820T)
 struct dvb_frontend *r820t_attach(struct dvb_frontend *fe,
 				  struct i2c_adapter *i2c,
 				  const struct r820t_config *cfg);

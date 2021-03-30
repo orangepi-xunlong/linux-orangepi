@@ -461,7 +461,8 @@ static int mptspi_target_alloc(struct scsi_target *starget)
 static void
 mptspi_target_destroy(struct scsi_target *starget)
 {
-	kfree(starget->hostdata);
+	if (starget->hostdata)
+		kfree(starget->hostdata);
 	starget->hostdata = NULL;
 }
 
@@ -619,7 +620,7 @@ static void mptspi_read_parameters(struct scsi_target *starget)
 	spi_width(starget) = (nego & MPI_SCSIDEVPAGE0_NP_WIDE) ? 1 : 0;
 }
 
-static int
+int
 mptscsih_quiesce_raid(MPT_SCSI_HOST *hd, int quiesce, u8 channel, u8 id)
 {
 	MPT_ADAPTER	*ioc = hd->ioc;
@@ -779,30 +780,32 @@ static int mptspi_slave_configure(struct scsi_device *sdev)
 }
 
 static int
-mptspi_qcmd(struct Scsi_Host *shost, struct scsi_cmnd *SCpnt)
+mptspi_qcmd_lck(struct scsi_cmnd *SCpnt, void (*done)(struct scsi_cmnd *))
 {
-	struct _MPT_SCSI_HOST *hd = shost_priv(shost);
+	struct _MPT_SCSI_HOST *hd = shost_priv(SCpnt->device->host);
 	VirtDevice	*vdevice = SCpnt->device->hostdata;
 	MPT_ADAPTER *ioc = hd->ioc;
 
 	if (!vdevice || !vdevice->vtarget) {
 		SCpnt->result = DID_NO_CONNECT << 16;
-		SCpnt->scsi_done(SCpnt);
+		done(SCpnt);
 		return 0;
 	}
 
 	if (SCpnt->device->channel == 1 &&
 		mptscsih_is_phys_disk(ioc, 0, SCpnt->device->id) == 0) {
 		SCpnt->result = DID_NO_CONNECT << 16;
-		SCpnt->scsi_done(SCpnt);
+		done(SCpnt);
 		return 0;
 	}
 
 	if (spi_dv_pending(scsi_target(SCpnt->device)))
 		ddvprintk(ioc, scsi_print_command(SCpnt));
 
-	return mptscsih_qcmd(SCpnt);
+	return mptscsih_qcmd(SCpnt,done);
 }
+
+static DEF_SCSI_QCMD(mptspi_qcmd)
 
 static void mptspi_slave_destroy(struct scsi_device *sdev)
 {
@@ -1150,7 +1153,7 @@ static void mpt_work_wrapper(struct work_struct *work)
 	}
 	shost_printk(KERN_INFO, shost, MYIOC_s_FMT
 	    "Integrated RAID detects new device %d\n", ioc->name, disk);
-	scsi_scan_target(&ioc->sh->shost_gendev, 1, disk, 0, SCSI_SCAN_RESCAN);
+	scsi_scan_target(&ioc->sh->shost_gendev, 1, disk, 0, 1);
 }
 
 

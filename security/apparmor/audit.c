@@ -88,7 +88,7 @@ static const char *const aa_audit_type[] = {
 	"HINT",
 	"STATUS",
 	"ERROR",
-	"KILLED",
+	"KILLED"
 	"AUTO"
 };
 
@@ -111,6 +111,7 @@ static const char *const aa_audit_type[] = {
 static void audit_pre(struct audit_buffer *ab, void *ca)
 {
 	struct common_audit_data *sa = ca;
+	struct task_struct *tsk = sa->aad->tsk ? sa->aad->tsk : current;
 
 	if (aa_g_audit_header) {
 		audit_log_format(ab, "apparmor=");
@@ -131,6 +132,11 @@ static void audit_pre(struct audit_buffer *ab, void *ca)
 
 	if (sa->aad->profile) {
 		struct aa_profile *profile = sa->aad->profile;
+		pid_t pid;
+		rcu_read_lock();
+		pid = rcu_dereference(tsk->real_parent)->pid;
+		rcu_read_unlock();
+		audit_log_format(ab, " parent=%d", pid);
 		if (profile->ns != root_ns) {
 			audit_log_format(ab, " namespace=");
 			audit_log_untrustedstring(ab, profile->ns->base.hname);
@@ -143,6 +149,12 @@ static void audit_pre(struct audit_buffer *ab, void *ca)
 		audit_log_format(ab, " name=");
 		audit_log_untrustedstring(ab, sa->aad->name);
 	}
+
+	if (sa->aad->tsk) {
+		audit_log_format(ab, " pid=%d comm=", tsk->pid);
+		audit_log_untrustedstring(ab, tsk->comm);
+	}
+
 }
 
 /**
@@ -200,8 +212,7 @@ int aa_audit(int type, struct aa_profile *profile, gfp_t gfp,
 
 	if (sa->aad->type == AUDIT_APPARMOR_KILL)
 		(void)send_sig_info(SIGKILL, NULL,
-			sa->type == LSM_AUDIT_DATA_TASK && sa->u.tsk ?
-				    sa->u.tsk : current);
+				    sa->aad->tsk ?  sa->aad->tsk : current);
 
 	if (sa->aad->type == AUDIT_APPARMOR_ALLOWED)
 		return complain_error(sa->aad->error);

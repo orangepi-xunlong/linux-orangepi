@@ -10,6 +10,10 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 #ifndef __linux_pxa2xx_spi_h
 #define __linux_pxa2xx_spi_h
@@ -19,17 +23,17 @@
 #define PXA2XX_CS_ASSERT (0x01)
 #define PXA2XX_CS_DEASSERT (0x02)
 
-struct dma_chan;
-
 /* device.platform_data for SSP controller devices */
 struct pxa2xx_spi_master {
+	u32 clock_enable;
 	u16 num_chipselect;
 	u8 enable_dma;
 
 	/* DMA engine specific config */
-	bool (*dma_filter)(struct dma_chan *chan, void *param);
-	void *tx_param;
-	void *rx_param;
+	int rx_chan_id;
+	int tx_chan_id;
+	int rx_slave_id;
+	int tx_slave_id;
 
 	/* For non-PXA arches */
 	struct ssp_device ssp;
@@ -52,6 +56,7 @@ struct pxa2xx_spi_chip {
 #if defined(CONFIG_ARCH_PXA) || defined(CONFIG_ARCH_MMP)
 
 #include <linux/clk.h>
+#include <mach/dma.h>
 
 extern void pxa2xx_set_spi_info(unsigned id, struct pxa2xx_spi_master *info);
 

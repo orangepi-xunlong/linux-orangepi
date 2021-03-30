@@ -128,12 +128,12 @@ static const struct regmap_config tegra20_das_regmap_config = {
 	.max_register = LAST_REG(DAC_INPUT_DATA_CLK_SEL),
 	.writeable_reg = tegra20_das_wr_rd_reg,
 	.readable_reg = tegra20_das_wr_rd_reg,
-	.cache_type = REGCACHE_FLAT,
+	.cache_type = REGCACHE_RBTREE,
 };
 
 static int tegra20_das_probe(struct platform_device *pdev)
 {
-	struct resource *res;
+	struct resource *res, *region;
 	void __iomem *regs;
 	int ret = 0;
 
@@ -149,9 +149,24 @@ static int tegra20_das_probe(struct platform_device *pdev)
 	das->dev = &pdev->dev;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	regs = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(regs)) {
-		ret = PTR_ERR(regs);
+	if (!res) {
+		dev_err(&pdev->dev, "No memory resource\n");
+		ret = -ENODEV;
+		goto err;
+	}
+
+	region = devm_request_mem_region(&pdev->dev, res->start,
+					 resource_size(res), pdev->name);
+	if (!region) {
+		dev_err(&pdev->dev, "Memory region already claimed\n");
+		ret = -EBUSY;
+		goto err;
+	}
+
+	regs = devm_ioremap(&pdev->dev, res->start, resource_size(res));
+	if (!regs) {
+		dev_err(&pdev->dev, "ioremap failed\n");
+		ret = -ENOMEM;
 		goto err;
 	}
 
@@ -218,6 +233,7 @@ static struct platform_driver tegra20_das_driver = {
 	.remove = tegra20_das_remove,
 	.driver = {
 		.name = DRV_NAME,
+		.owner = THIS_MODULE,
 		.of_match_table = tegra20_das_of_match,
 	},
 };

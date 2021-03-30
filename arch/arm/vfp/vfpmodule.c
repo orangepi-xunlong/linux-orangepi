@@ -20,7 +20,6 @@
 #include <linux/init.h>
 #include <linux/uaccess.h>
 #include <linux/user.h>
-#include <linux/export.h>
 
 #include <asm/cp15.h>
 #include <asm/cputype.h>
@@ -156,6 +155,10 @@ static void vfp_thread_copy(struct thread_info *thread)
  *   - we could be preempted if tree preempt rcu is enabled, so
  *	it is unsafe to use thread->cpu.
  *  THREAD_NOTIFY_EXIT
+ *   - the thread (v) will be running on the local CPU, so
+ *	v === current_thread_info()
+ *   - thread->cpu is the local CPU number at the time it is accessed,
+ *	but may change at any time.
  *   - we could be preempted if tree preempt rcu is enabled, so
  *	it is unsafe to use thread->cpu.
  */
@@ -441,19 +444,6 @@ static void vfp_enable(void *unused)
 	set_copro_access(access | CPACC_FULL(10) | CPACC_FULL(11));
 }
 
-/* Called by platforms on which we want to disable VFP because it may not be
- * present on all CPUs within a SMP complex. Needs to be called prior to
- * vfp_init().
- */
-void vfp_disable(void)
-{
-	if (VFP_arch) {
-		pr_debug("%s: should be called prior to vfp_init\n", __func__);
-		return;
-	}
-	VFP_arch = 1;
-}
-
 #ifdef CONFIG_CPU_PM
 static int vfp_pm_suspend(void)
 {
@@ -554,11 +544,12 @@ void vfp_flush_hwstate(struct thread_info *thread)
  * Save the current VFP state into the provided structures and prepare
  * for entry into a new function (signal handler).
  */
-int vfp_preserve_user_clear_hwstate(struct user_vfp *ufp,
-				    struct user_vfp_exc *ufp_exc)
+int vfp_preserve_user_clear_hwstate(struct user_vfp __user *ufp,
+				    struct user_vfp_exc __user *ufp_exc)
 {
 	struct thread_info *thread = current_thread_info();
 	struct vfp_hard_struct *hwstate = &thread->vfpstate.hard;
+	int err = 0;
 
 	/* Ensure that the saved hwstate is up-to-date. */
 	vfp_sync_hwstate(thread);
@@ -567,19 +558,22 @@ int vfp_preserve_user_clear_hwstate(struct user_vfp *ufp,
 	 * Copy the floating point registers. There can be unused
 	 * registers see asm/hwcap.h for details.
 	 */
-	memcpy(&ufp->fpregs, &hwstate->fpregs, sizeof(hwstate->fpregs));
-
+	err |= __copy_to_user(&ufp->fpregs, &hwstate->fpregs,
+			      sizeof(hwstate->fpregs));
 	/*
 	 * Copy the status and control register.
 	 */
-	ufp->fpscr = hwstate->fpscr;
+	__put_user_error(hwstate->fpscr, &ufp->fpscr, err);
 
 	/*
 	 * Copy the exception registers.
 	 */
-	ufp_exc->fpexc = hwstate->fpexc;
-	ufp_exc->fpinst = hwstate->fpinst;
-	ufp_exc->fpinst2 = hwstate->fpinst2;
+	__put_user_error(hwstate->fpexc, &ufp_exc->fpexc, err);
+	__put_user_error(hwstate->fpinst, &ufp_exc->fpinst, err);
+	__put_user_error(hwstate->fpinst2, &ufp_exc->fpinst2, err);
+
+	if (err)
+		return -EFAULT;
 
 	/* Ensure that VFP is disabled. */
 	vfp_flush_hwstate(thread);
@@ -593,11 +587,13 @@ int vfp_preserve_user_clear_hwstate(struct user_vfp *ufp,
 }
 
 /* Sanitise and restore the current VFP state from the provided structures. */
-int vfp_restore_user_hwstate(struct user_vfp *ufp, struct user_vfp_exc *ufp_exc)
+int vfp_restore_user_hwstate(struct user_vfp __user *ufp,
+			     struct user_vfp_exc __user *ufp_exc)
 {
 	struct thread_info *thread = current_thread_info();
 	struct vfp_hard_struct *hwstate = &thread->vfpstate.hard;
 	unsigned long fpexc;
+	int err = 0;
 
 	/* Disable VFP to avoid corrupting the new thread state. */
 	vfp_flush_hwstate(thread);
@@ -606,16 +602,17 @@ int vfp_restore_user_hwstate(struct user_vfp *ufp, struct user_vfp_exc *ufp_exc)
 	 * Copy the floating point registers. There can be unused
 	 * registers see asm/hwcap.h for details.
 	 */
-	memcpy(&hwstate->fpregs, &ufp->fpregs, sizeof(hwstate->fpregs));
+	err |= __copy_from_user(&hwstate->fpregs, &ufp->fpregs,
+				sizeof(hwstate->fpregs));
 	/*
 	 * Copy the status and control register.
 	 */
-	hwstate->fpscr = ufp->fpscr;
+	__get_user_error(hwstate->fpscr, &ufp->fpscr, err);
 
 	/*
 	 * Sanitise and restore the exception registers.
 	 */
-	fpexc = ufp_exc->fpexc;
+	__get_user_error(fpexc, &ufp_exc->fpexc, err);
 
 	/* Ensure the VFP is enabled. */
 	fpexc |= FPEXC_EN;
@@ -624,10 +621,10 @@ int vfp_restore_user_hwstate(struct user_vfp *ufp, struct user_vfp_exc *ufp_exc)
 	fpexc &= ~(FPEXC_EX | FPEXC_FP2V);
 	hwstate->fpexc = fpexc;
 
-	hwstate->fpinst = ufp_exc->fpinst;
-	hwstate->fpinst2 = ufp_exc->fpinst2;
+	__get_user_error(hwstate->fpinst, &ufp_exc->fpinst, err);
+	__get_user_error(hwstate->fpinst2, &ufp_exc->fpinst2, err);
 
-	return 0;
+	return err ? -EFAULT : 0;
 }
 
 /*
@@ -636,86 +633,20 @@ int vfp_restore_user_hwstate(struct user_vfp *ufp, struct user_vfp_exc *ufp_exc)
  * hardware state at every thread switch.  We clear our held state when
  * a CPU has been killed, indicating that the VFP hardware doesn't contain
  * a threads VFP state.  When a CPU starts up, we re-enable access to the
- * VFP hardware. The callbacks below are called on the CPU which
+ * VFP hardware.
+ *
+ * Both CPU_DYING and CPU_STARTING are called on the CPU which
  * is being offlined/onlined.
  */
-static int vfp_dying_cpu(unsigned int cpu)
+static int vfp_hotplug(struct notifier_block *b, unsigned long action,
+	void *hcpu)
 {
-	vfp_current_hw_state[cpu] = NULL;
-	return 0;
+	if (action == CPU_DYING || action == CPU_DYING_FROZEN) {
+		vfp_force_reload((long)hcpu, current_thread_info());
+	} else if (action == CPU_STARTING || action == CPU_STARTING_FROZEN)
+		vfp_enable(NULL);
+	return NOTIFY_OK;
 }
-
-static int vfp_starting_cpu(unsigned int unused)
-{
-	vfp_enable(NULL);
-	return 0;
-}
-
-void vfp_kmode_exception(void)
-{
-	/*
-	 * If we reach this point, a floating point exception has been raised
-	 * while running in kernel mode. If the NEON/VFP unit was enabled at the
-	 * time, it means a VFP instruction has been issued that requires
-	 * software assistance to complete, something which is not currently
-	 * supported in kernel mode.
-	 * If the NEON/VFP unit was disabled, and the location pointed to below
-	 * is properly preceded by a call to kernel_neon_begin(), something has
-	 * caused the task to be scheduled out and back in again. In this case,
-	 * rebuilding and running with CONFIG_DEBUG_ATOMIC_SLEEP enabled should
-	 * be helpful in localizing the problem.
-	 */
-	if (fmrx(FPEXC) & FPEXC_EN)
-		pr_crit("BUG: unsupported FP instruction in kernel mode\n");
-	else
-		pr_crit("BUG: FP instruction issued in kernel mode with FP unit disabled\n");
-}
-
-#ifdef CONFIG_KERNEL_MODE_NEON
-
-/*
- * Kernel-side NEON support functions
- */
-void kernel_neon_begin(void)
-{
-	struct thread_info *thread = current_thread_info();
-	unsigned int cpu;
-	u32 fpexc;
-
-	/*
-	 * Kernel mode NEON is only allowed outside of interrupt context
-	 * with preemption disabled. This will make sure that the kernel
-	 * mode NEON register contents never need to be preserved.
-	 */
-	BUG_ON(in_interrupt());
-	cpu = get_cpu();
-
-	fpexc = fmrx(FPEXC) | FPEXC_EN;
-	fmxr(FPEXC, fpexc);
-
-	/*
-	 * Save the userland NEON/VFP state. Under UP,
-	 * the owner could be a task other than 'current'
-	 */
-	if (vfp_state_in_hw(cpu, thread))
-		vfp_save_state(&thread->vfpstate, fpexc);
-#ifndef CONFIG_SMP
-	else if (vfp_current_hw_state[cpu] != NULL)
-		vfp_save_state(vfp_current_hw_state[cpu], fpexc);
-#endif
-	vfp_current_hw_state[cpu] = NULL;
-}
-EXPORT_SYMBOL(kernel_neon_begin);
-
-void kernel_neon_end(void)
-{
-	/* Disable the NEON/VFP unit. */
-	fmxr(FPEXC, fmrx(FPEXC) & ~FPEXC_EN);
-	put_cpu();
-}
-EXPORT_SYMBOL(kernel_neon_end);
-
-#endif /* CONFIG_KERNEL_MODE_NEON */
 
 /*
  * VFP support code initialisation.
@@ -725,10 +656,6 @@ static int __init vfp_init(void)
 	unsigned int vfpsid;
 	unsigned int cpu_arch = cpu_architecture();
 
-	/*
-	 * Enable the access to the VFP on all online CPUs so the
-	 * following test on FPSID will succeed.
-	 */
 	if (cpu_arch >= CPU_ARCH_ARMv6)
 		on_each_cpu(vfp_enable, NULL, 1);
 
@@ -744,76 +671,64 @@ static int __init vfp_init(void)
 	vfp_vector = vfp_null_entry;
 
 	pr_info("VFP support v0.3: ");
-	if (VFP_arch) {
+	if (VFP_arch)
 		pr_cont("not present\n");
-		return 0;
-	/* Extract the architecture on CPUID scheme */
-	} else if ((read_cpuid_id() & 0x000f0000) == 0x000f0000) {
-		VFP_arch = vfpsid & FPSID_CPUID_ARCH_MASK;
-		VFP_arch >>= FPSID_ARCH_BIT;
+	else if (vfpsid & FPSID_NODOUBLE) {
+		pr_cont("no double precision support\n");
+	} else {
+		hotcpu_notifier(vfp_hotplug, 0);
+
+		VFP_arch = (vfpsid & FPSID_ARCH_MASK) >> FPSID_ARCH_BIT;  /* Extract the architecture version */
+		pr_cont("implementor %02x architecture %d part %02x variant %x rev %x\n",
+			(vfpsid & FPSID_IMPLEMENTER_MASK) >> FPSID_IMPLEMENTER_BIT,
+			(vfpsid & FPSID_ARCH_MASK) >> FPSID_ARCH_BIT,
+			(vfpsid & FPSID_PART_MASK) >> FPSID_PART_BIT,
+			(vfpsid & FPSID_VARIANT_MASK) >> FPSID_VARIANT_BIT,
+			(vfpsid & FPSID_REV_MASK) >> FPSID_REV_BIT);
+
+		vfp_vector = vfp_support_entry;
+
+		thread_register_notifier(&vfp_notifier_block);
+		vfp_pm_init();
+
+		/*
+		 * We detected VFP, and the support code is
+		 * in place; report VFP support to userspace.
+		 */
+		elf_hwcap |= HWCAP_VFP;
+#ifdef CONFIG_VFPv3
+		if (VFP_arch >= 2) {
+			elf_hwcap |= HWCAP_VFPv3;
+
+			/*
+			 * Check for VFPv3 D16 and VFPv4 D16.  CPUs in
+			 * this configuration only have 16 x 64bit
+			 * registers.
+			 */
+			if (((fmrx(MVFR0) & MVFR0_A_SIMD_MASK)) == 1)
+				elf_hwcap |= HWCAP_VFPv3D16; /* also v4-D16 */
+			else
+				elf_hwcap |= HWCAP_VFPD32;
+		}
+#endif
 		/*
 		 * Check for the presence of the Advanced SIMD
 		 * load/store instructions, integer and single
 		 * precision floating point operations. Only check
 		 * for NEON if the hardware has the MVFR registers.
 		 */
-		if (IS_ENABLED(CONFIG_NEON) &&
-		   (fmrx(MVFR1) & 0x000fff00) == 0x00011100)
-			elf_hwcap |= HWCAP_NEON;
-
-		if (IS_ENABLED(CONFIG_VFPv3)) {
-			u32 mvfr0 = fmrx(MVFR0);
-			if (((mvfr0 & MVFR0_DP_MASK) >> MVFR0_DP_BIT) == 0x2 ||
-			    ((mvfr0 & MVFR0_SP_MASK) >> MVFR0_SP_BIT) == 0x2) {
-				elf_hwcap |= HWCAP_VFPv3;
-				/*
-				 * Check for VFPv3 D16 and VFPv4 D16.  CPUs in
-				 * this configuration only have 16 x 64bit
-				 * registers.
-				 */
-				if ((mvfr0 & MVFR0_A_SIMD_MASK) == 1)
-					/* also v4-D16 */
-					elf_hwcap |= HWCAP_VFPv3D16;
-				else
-					elf_hwcap |= HWCAP_VFPD32;
-			}
-
+		if ((read_cpuid_id() & 0x000f0000) == 0x000f0000) {
+#ifdef CONFIG_NEON
+			if ((fmrx(MVFR1) & 0x000fff00) == 0x00011100)
+				elf_hwcap |= HWCAP_NEON;
+#endif
+#ifdef CONFIG_VFPv3
 			if ((fmrx(MVFR1) & 0xf0000000) == 0x10000000)
 				elf_hwcap |= HWCAP_VFPv4;
+#endif
 		}
-	/* Extract the architecture version on pre-cpuid scheme */
-	} else {
-		if (vfpsid & FPSID_NODOUBLE) {
-			pr_cont("no double precision support\n");
-			return 0;
-		}
-
-		VFP_arch = (vfpsid & FPSID_ARCH_MASK) >> FPSID_ARCH_BIT;
 	}
-
-	cpuhp_setup_state_nocalls(CPUHP_AP_ARM_VFP_STARTING,
-				  "AP_ARM_VFP_STARTING", vfp_starting_cpu,
-				  vfp_dying_cpu);
-
-	vfp_vector = vfp_support_entry;
-
-	thread_register_notifier(&vfp_notifier_block);
-	vfp_pm_init();
-
-	/*
-	 * We detected VFP, and the support code is
-	 * in place; report VFP support to userspace.
-	 */
-	elf_hwcap |= HWCAP_VFP;
-
-	pr_cont("implementor %02x architecture %d part %02x variant %x rev %x\n",
-		(vfpsid & FPSID_IMPLEMENTER_MASK) >> FPSID_IMPLEMENTER_BIT,
-		VFP_arch,
-		(vfpsid & FPSID_PART_MASK) >> FPSID_PART_BIT,
-		(vfpsid & FPSID_VARIANT_MASK) >> FPSID_VARIANT_BIT,
-		(vfpsid & FPSID_REV_MASK) >> FPSID_REV_BIT);
-
 	return 0;
 }
 
-core_initcall(vfp_init);
+late_initcall(vfp_init);

@@ -19,9 +19,8 @@
 #include <asm/smp.h>
 #include <asm/cpudata.h>
 #include <asm/cpu_type.h>
-#include <asm/setup.h>
 
-#include "kernel.h"
+extern void clock_stop_probe(void); /* tadpole.c */
 
 static char *cpu_mid_prop(void)
 {
@@ -132,6 +131,11 @@ void __init device_scan(void)
 	}
 #endif /* !CONFIG_SMP */
 
-	auxio_probe();
-	auxio_power_probe();
+	{
+		extern void auxio_probe(void);
+		extern void auxio_power_probe(void);
+		auxio_probe();
+		auxio_power_probe();
+	}
+	clock_stop_probe();
 }

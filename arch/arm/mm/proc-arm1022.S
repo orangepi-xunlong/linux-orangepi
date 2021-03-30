@@ -62,7 +62,7 @@
  * cpu_arm1022_proc_init()
  */
 ENTRY(cpu_arm1022_proc_init)
-	ret	lr
+	mov	pc, lr
 
 /*
  * cpu_arm1022_proc_fin()
@@ -72,7 +72,7 @@ ENTRY(cpu_arm1022_proc_fin)
 	bic	r0, r0, #0x1000 		@ ...i............
 	bic	r0, r0, #0x000e 		@ ............wca.
 	mcr	p15, 0, r0, c1, c0, 0		@ disable caches
-	ret	lr
+	mov	pc, lr
 
 /*
  * cpu_arm1022_reset(loc)
@@ -96,7 +96,7 @@ ENTRY(cpu_arm1022_reset)
 	bic	ip, ip, #0x000f 		@ ............wcam
 	bic	ip, ip, #0x1100 		@ ...i...s........
 	mcr	p15, 0, ip, c1, c0, 0		@ ctrl register
-	ret	r0
+	mov	pc, r0
 ENDPROC(cpu_arm1022_reset)
 	.popsection
 
@@ -106,7 +106,7 @@ ENDPROC(cpu_arm1022_reset)
 	.align	5
 ENTRY(cpu_arm1022_do_idle)
 	mcr	p15, 0, r0, c7, c0, 4		@ Wait for interrupt
-	ret	lr
+	mov	pc, lr
 
 /* ================================= CACHE ================================ */
 
@@ -122,7 +122,7 @@ ENTRY(arm1022_flush_icache_all)
 	mov	r0, #0
 	mcr	p15, 0, r0, c7, c5, 0		@ invalidate I cache
 #endif
-	ret	lr
+	mov	pc, lr
 ENDPROC(arm1022_flush_icache_all)
 
 /*
@@ -156,7 +156,7 @@ __flush_whole_cache:
 	mcrne	p15, 0, ip, c7, c5, 0		@ invalidate I cache
 #endif
 	mcrne	p15, 0, ip, c7, c10, 4		@ drain WB
-	ret	lr
+	mov	pc, lr
 
 /*
  *	flush_user_cache_range(start, end, flags)
@@ -185,7 +185,7 @@ ENTRY(arm1022_flush_user_cache_range)
 	mcrne	p15, 0, ip, c7, c5, 0		@ invalidate I cache
 #endif
 	mcrne	p15, 0, ip, c7, c10, 4		@ drain WB
-	ret	lr
+	mov	pc, lr
 
 /*
  *	coherent_kern_range(start, end)
@@ -225,7 +225,7 @@ ENTRY(arm1022_coherent_user_range)
 	blo	1b
 	mcr	p15, 0, ip, c7, c10, 4		@ drain WB
 	mov	r0, #0
-	ret	lr
+	mov	pc, lr
 
 /*
  *	flush_kern_dcache_area(void *addr, size_t size)
@@ -246,7 +246,7 @@ ENTRY(arm1022_flush_kern_dcache_area)
 	blo	1b
 #endif
 	mcr	p15, 0, ip, c7, c10, 4		@ drain WB
-	ret	lr
+	mov	pc, lr
 
 /*
  *	dma_inv_range(start, end)
@@ -275,7 +275,7 @@ arm1022_dma_inv_range:
 	blo	1b
 #endif
 	mcr	p15, 0, ip, c7, c10, 4		@ drain WB
-	ret	lr
+	mov	pc, lr
 
 /*
  *	dma_clean_range(start, end)
@@ -297,7 +297,7 @@ arm1022_dma_clean_range:
 	blo	1b
 #endif
 	mcr	p15, 0, ip, c7, c10, 4		@ drain WB
-	ret	lr
+	mov	pc, lr
 
 /*
  *	dma_flush_range(start, end)
@@ -317,7 +317,7 @@ ENTRY(arm1022_dma_flush_range)
 	blo	1b
 #endif
 	mcr	p15, 0, ip, c7, c10, 4		@ drain WB
-	ret	lr
+	mov	pc, lr
 
 /*
  *	dma_map_area(start, size, dir)
@@ -340,7 +340,7 @@ ENDPROC(arm1022_dma_map_area)
  *	- dir	- DMA direction
  */
 ENTRY(arm1022_dma_unmap_area)
-	ret	lr
+	mov	pc, lr
 ENDPROC(arm1022_dma_unmap_area)
 
 	.globl	arm1022_flush_kern_cache_louis
@@ -358,7 +358,7 @@ ENTRY(cpu_arm1022_dcache_clean_area)
 	subs	r1, r1, #CACHE_DLINESIZE
 	bhi	1b
 #endif
-	ret	lr
+	mov	pc, lr
 
 /* =============================== PageTable ============================== */
 
@@ -389,7 +389,7 @@ ENTRY(cpu_arm1022_switch_mm)
 	mcr	p15, 0, r0, c2, c0, 0		@ load page table pointer
 	mcr	p15, 0, r1, c8, c7, 0		@ invalidate I & D TLBs
 #endif
-	ret	lr
+	mov	pc, lr
         
 /*
  * cpu_arm1022_set_pte_ext(ptep, pte, ext)
@@ -405,7 +405,9 @@ ENTRY(cpu_arm1022_set_pte_ext)
 	mcr	p15, 0, r0, c7, c10, 1		@ clean D entry
 #endif
 #endif /* CONFIG_MMU */
-	ret	lr
+	mov	pc, lr
+
+	__CPUINIT
 
 	.type	__arm1022_setup, #function
 __arm1022_setup:
@@ -423,7 +425,7 @@ __arm1022_setup:
 #ifdef CONFIG_CPU_CACHE_ROUND_ROBIN
 	orr	r0, r0, #0x4000 		@ .R..............
 #endif
-	ret	lr
+	mov	pc, lr
 	.size	__arm1022_setup, . - __arm1022_setup
 
 	/*
@@ -448,7 +450,7 @@ arm1022_crval:
 
 	.align
 
-	.section ".proc.info.init", #alloc
+	.section ".proc.info.init", #alloc, #execinstr
 
 	.type	__arm1022_proc_info,#object
 __arm1022_proc_info:
@@ -462,7 +464,7 @@ __arm1022_proc_info:
 		PMD_BIT4 | \
 		PMD_SECT_AP_WRITE | \
 		PMD_SECT_AP_READ
-	initfn	__arm1022_setup, __arm1022_proc_info
+	b	__arm1022_setup
 	.long	cpu_arch_name
 	.long	cpu_elf_name
 	.long	HWCAP_SWP | HWCAP_HALF | HWCAP_THUMB | HWCAP_EDSP

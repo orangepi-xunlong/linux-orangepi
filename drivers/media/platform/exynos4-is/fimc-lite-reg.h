@@ -120,9 +120,6 @@
 /* b0: 1 - camera B, 0 - camera A */
 #define FLITE_REG_CIGENERAL_CAM_B		(1 << 0)
 
-#define FLITE_REG_CIFCNTSEQ			0x100
-#define FLITE_REG_CIOSAN(x)			(0x200 + (4 * (x)))
-
 /* ----------------------------------------------------------------------------
  * Function declarations
  */
@@ -145,12 +142,9 @@ void flite_hw_set_output_dma(struct fimc_lite *dev, struct flite_frame *f,
 void flite_hw_set_dma_window(struct fimc_lite *dev, struct flite_frame *f);
 void flite_hw_set_test_pattern(struct fimc_lite *dev, bool on);
 void flite_hw_dump_regs(struct fimc_lite *dev, const char *label);
-void flite_hw_set_dma_buffer(struct fimc_lite *dev, struct flite_buffer *buf);
-void flite_hw_mask_dma_buffer(struct fimc_lite *dev, u32 index);
 
-static inline void flite_hw_set_dma_buf_mask(struct fimc_lite *dev, u32 mask)
+static inline void flite_hw_set_output_addr(struct fimc_lite *dev, u32 paddr)
 {
-	writel(mask, dev->regs + FLITE_REG_CIFCNTSEQ);
+	writel(paddr, dev->regs + FLITE_REG_CIOSA);
 }
-
 #endif /* FIMC_LITE_REG_H */

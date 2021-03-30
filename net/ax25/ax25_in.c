@@ -23,6 +23,7 @@
 #include <linux/inet.h>
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>
+#include <linux/netfilter.h>
 #include <net/sock.h>
 #include <net/tcp_states.h>
 #include <asm/uaccess.h>
@@ -353,7 +354,7 @@ static int ax25_rcv(struct sk_buff *skb, struct net_device *dev,
 			return 0;
 		}
 
-		ax25 = sk_to_ax25(make);
+		ax25 = ax25_sk(make);
 		skb_set_owner_r(skb, make);
 		skb_queue_head(&sk->sk_receive_queue, skb);
 
@@ -421,7 +422,7 @@ static int ax25_rcv(struct sk_buff *skb, struct net_device *dev,
 
 	if (sk) {
 		if (!sock_flag(sk, SOCK_DEAD))
-			sk->sk_data_ready(sk);
+			sk->sk_data_ready(sk, skb->len);
 		sock_put(sk);
 	} else {
 free:

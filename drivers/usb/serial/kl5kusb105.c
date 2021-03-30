@@ -37,6 +37,7 @@
 
 #include <linux/kernel.h>
 #include <linux/errno.h>
+#include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/tty.h>
 #include <linux/tty_driver.h>
@@ -62,6 +63,8 @@ static void klsi_105_close(struct usb_serial_port *port);
 static void klsi_105_set_termios(struct tty_struct *tty,
 			struct usb_serial_port *port, struct ktermios *old);
 static int  klsi_105_tiocmget(struct tty_struct *tty);
+static int  klsi_105_tiocmset(struct tty_struct *tty,
+			unsigned int set, unsigned int clear);
 static void klsi_105_process_read_urb(struct urb *urb);
 static int klsi_105_prepare_write_buffer(struct usb_serial_port *port,
 						void *dest, size_t size);
@@ -91,6 +94,7 @@ static struct usb_serial_driver kl5kusb105d_device = {
 	.set_termios =		klsi_105_set_termios,
 	/*.break_ctl =		klsi_105_break_ctl,*/
 	.tiocmget =		klsi_105_tiocmget,
+	.tiocmset =		klsi_105_tiocmset,
 	.port_probe =		klsi_105_port_probe,
 	.port_remove =		klsi_105_port_remove,
 	.throttle =		usb_serial_generic_throttle,
@@ -178,9 +182,11 @@ static int klsi_105_get_line_state(struct usb_serial_port *port,
 	dev_info(&port->serial->dev->dev, "sending SIO Poll request\n");
 
 	status_buf = kmalloc(KLSI_STATUSBUF_LEN, GFP_KERNEL);
-	if (!status_buf)
+	if (!status_buf) {
+		dev_err(&port->dev, "%s - out of memory for status buffer.\n",
+				__func__);
 		return -ENOMEM;
-
+	}
 	status_buf[0] = 0xff;
 	status_buf[1] = 0xff;
 	rc = usb_control_msg(port->serial->dev,
@@ -192,14 +198,13 @@ static int klsi_105_get_line_state(struct usb_serial_port *port,
 			     status_buf, KLSI_STATUSBUF_LEN,
 			     10000
 			     );
-	if (rc != KLSI_STATUSBUF_LEN) {
-		dev_err(&port->dev, "reading line status failed: %d\n", rc);
-		if (rc >= 0)
-			rc = -EIO;
-	} else {
+	if (rc < 0)
+		dev_err(&port->dev, "Reading line status failed (error = %d)\n",
+			rc);
+	else {
 		status = get_unaligned_le16(status_buf);
 
-		dev_info(&port->serial->dev->dev, "read status %x %x\n",
+		dev_info(&port->serial->dev->dev, "read status %x %x",
 			 status_buf[0], status_buf[1]);
 
 		*line_state_p = klsi_105_status2linestate(status);
@@ -268,9 +273,11 @@ static int  klsi_105_open(struct tty_struct *tty, struct usb_serial_port *port)
 	 * priv->line_state.
 	 */
 	cfg = kmalloc(sizeof(*cfg), GFP_KERNEL);
-	if (!cfg)
+	if (!cfg) {
+		dev_err(&port->dev, "%s - out of memory for config buffer.\n",
+				__func__);
 		return -ENOMEM;
-
+	}
 	cfg->pktlen   = 5;
 	cfg->baudrate = kl5kusb105a_sio_b9600;
 	cfg->databits = kl5kusb105a_dtb_8;
@@ -297,7 +304,7 @@ static int  klsi_105_open(struct tty_struct *tty, struct usb_serial_port *port)
 	rc = usb_serial_generic_open(tty, port);
 	if (rc) {
 		retval = rc;
-		goto err_free_cfg;
+		goto exit;
 	}
 
 	rc = usb_control_msg(port->serial->dev,
@@ -312,38 +319,21 @@ static int  klsi_105_open(struct tty_struct *tty, struct usb_serial_port *port)
 	if (rc < 0) {
 		dev_err(&port->dev, "Enabling read failed (error = %d)\n", rc);
 		retval = rc;
-		goto err_generic_close;
 	} else
 		dev_dbg(&port->dev, "%s - enabled reading\n", __func__);
 
 	rc = klsi_105_get_line_state(port, &line_state);
-	if (rc < 0) {
+	if (rc >= 0) {
+		spin_lock_irqsave(&priv->lock, flags);
+		priv->line_state = line_state;
+		spin_unlock_irqrestore(&priv->lock, flags);
+		dev_dbg(&port->dev, "%s - read line state 0x%lx\n", __func__, line_state);
+		retval = 0;
+	} else
 		retval = rc;
-		goto err_disable_read;
-	}
 
-	spin_lock_irqsave(&priv->lock, flags);
-	priv->line_state = line_state;
-	spin_unlock_irqrestore(&priv->lock, flags);
-	dev_dbg(&port->dev, "%s - read line state 0x%lx\n", __func__,
-			line_state);
-
-	return 0;
-
-err_disable_read:
-	usb_control_msg(port->serial->dev,
-			     usb_sndctrlpipe(port->serial->dev, 0),
-			     KL5KUSB105A_SIO_CONFIGURE,
-			     USB_TYPE_VENDOR | USB_DIR_OUT,
-			     KL5KUSB105A_SIO_CONFIGURE_READ_OFF,
-			     0, /* index */
-			     NULL, 0,
-			     KLSI_TIMEOUT);
-err_generic_close:
-	usb_serial_generic_close(port);
-err_free_cfg:
+exit:
 	kfree(cfg);
-
 	return retval;
 }
 
@@ -427,8 +417,10 @@ static void klsi_105_set_termios(struct tty_struct *tty,
 	speed_t baud;
 
 	cfg = kmalloc(sizeof(*cfg), GFP_KERNEL);
-	if (!cfg)
+	if (!cfg) {
+		dev_err(dev, "%s - out of memory for config buffer.\n", __func__);
 		return;
+	}
 
 	/* lock while we are modifying the settings */
 	spin_lock_irqsave(&priv->lock, flags);
@@ -479,7 +471,7 @@ static void klsi_105_set_termios(struct tty_struct *tty,
 		priv->cfg.baudrate = kl5kusb105a_sio_b115200;
 		break;
 	default:
-		dev_dbg(dev, "unsupported baudrate, using 9600\n");
+		dev_dbg(dev, "KLSI USB->Serial converter: unsupported baudrate request, using default of 9600");
 		priv->cfg.baudrate = kl5kusb105a_sio_b9600;
 		baud = 9600;
 		break;
@@ -490,6 +482,7 @@ static void klsi_105_set_termios(struct tty_struct *tty,
 		/* maybe this should be simulated by sending read
 		 * disable and read enable messages?
 		 */
+		;
 #if 0
 		priv->control_state &= ~(TIOCM_DTR | TIOCM_RTS);
 		mct_u232_set_modem_ctrl(serial, priv->control_state);
@@ -544,6 +537,7 @@ static void klsi_105_set_termios(struct tty_struct *tty,
 
 		mct_u232_set_line_ctrl(serial, priv->last_lcr);
 #endif
+		;
 	}
 	/*
 	 * Set flow control: well, I do not really now how to handle DTR/RTS.
@@ -562,6 +556,7 @@ static void klsi_105_set_termios(struct tty_struct *tty,
 			priv->control_state &= ~(TIOCM_DTR | TIOCM_RTS);
 		mct_u232_set_modem_ctrl(serial, priv->control_state);
 #endif
+		;
 	}
 	memcpy(cfg, &priv->cfg, sizeof(*cfg));
 	spin_unlock_irqrestore(&priv->lock, flags);
@@ -612,6 +607,33 @@ static int klsi_105_tiocmget(struct tty_struct *tty)
 	spin_unlock_irqrestore(&priv->lock, flags);
 	dev_dbg(&port->dev, "%s - read line state 0x%lx\n", __func__, line_state);
 	return (int)line_state;
+}
+
+static int klsi_105_tiocmset(struct tty_struct *tty,
+			     unsigned int set, unsigned int clear)
+{
+	int retval = -EINVAL;
+
+/* if this ever gets implemented, it should be done something like this:
+	struct usb_serial *serial = port->serial;
+	struct klsi_105_private *priv = usb_get_serial_port_data(port);
+	unsigned long flags;
+	int control;
+
+	spin_lock_irqsave (&priv->lock, flags);
+	if (set & TIOCM_RTS)
+		priv->control_state |= TIOCM_RTS;
+	if (set & TIOCM_DTR)
+		priv->control_state |= TIOCM_DTR;
+	if (clear & TIOCM_RTS)
+		priv->control_state &= ~TIOCM_RTS;
+	if (clear & TIOCM_DTR)
+		priv->control_state &= ~TIOCM_DTR;
+	control = priv->control_state;
+	spin_unlock_irqrestore (&priv->lock, flags);
+	retval = mct_u232_set_modem_ctrl(serial, control);
+*/
+	return retval;
 }
 
 module_usb_serial_driver(serial_drivers, id_table);

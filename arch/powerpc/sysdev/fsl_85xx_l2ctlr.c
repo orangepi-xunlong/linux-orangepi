@@ -90,8 +90,12 @@ static int mpc85xx_l2ctlr_of_probe(struct platform_device *dev)
 	}
 	l2cache_size = *prop;
 
-	if (get_cache_sram_params(&sram_params))
-		return 0; /* fall back to L2 cache only */
+	if (get_cache_sram_params(&sram_params)) {
+		dev_err(&dev->dev,
+			"Entire L2 as cache, provide valid sram offset and size\n");
+		return -EINVAL;
+	}
+
 
 	rem = l2cache_size % sram_params.sram_size;
 	ways = LOCK_WAYS_FULL * sram_params.sram_size / l2cache_size;
@@ -167,7 +171,7 @@ static int mpc85xx_l2ctlr_of_remove(struct platform_device *dev)
 	return 0;
 }
 
-static const struct of_device_id mpc85xx_l2ctlr_of_match[] = {
+static struct of_device_id mpc85xx_l2ctlr_of_match[] = {
 	{
 		.compatible = "fsl,p2020-l2-cache-controller",
 	},
@@ -206,6 +210,7 @@ static const struct of_device_id mpc85xx_l2ctlr_of_match[] = {
 static struct platform_driver mpc85xx_l2ctlr_of_platform_driver = {
 	.driver	= {
 		.name		= "fsl-l2ctlr",
+		.owner		= THIS_MODULE,
 		.of_match_table	= mpc85xx_l2ctlr_of_match,
 	},
 	.probe		= mpc85xx_l2ctlr_of_probe,

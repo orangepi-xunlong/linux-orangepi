@@ -23,42 +23,42 @@
 #include "vpfe_mc_capture.h"
 
 static const unsigned int ipipeif_input_fmts[] = {
-	MEDIA_BUS_FMT_UYVY8_2X8,
-	MEDIA_BUS_FMT_SGRBG12_1X12,
-	MEDIA_BUS_FMT_Y8_1X8,
-	MEDIA_BUS_FMT_UV8_1X8,
-	MEDIA_BUS_FMT_YDYUYDYV8_1X16,
-	MEDIA_BUS_FMT_SBGGR8_1X8,
+	V4L2_MBUS_FMT_UYVY8_2X8,
+	V4L2_MBUS_FMT_SGRBG12_1X12,
+	V4L2_MBUS_FMT_Y8_1X8,
+	V4L2_MBUS_FMT_UV8_1X8,
+	V4L2_MBUS_FMT_YDYUYDYV8_1X16,
+	V4L2_MBUS_FMT_SBGGR8_1X8,
 };
 
 static const unsigned int ipipeif_output_fmts[] = {
-	MEDIA_BUS_FMT_UYVY8_2X8,
-	MEDIA_BUS_FMT_SGRBG12_1X12,
-	MEDIA_BUS_FMT_Y8_1X8,
-	MEDIA_BUS_FMT_UV8_1X8,
-	MEDIA_BUS_FMT_YDYUYDYV8_1X16,
-	MEDIA_BUS_FMT_SBGGR8_1X8,
-	MEDIA_BUS_FMT_SGRBG10_DPCM8_1X8,
-	MEDIA_BUS_FMT_SGRBG10_ALAW8_1X8,
+	V4L2_MBUS_FMT_UYVY8_2X8,
+	V4L2_MBUS_FMT_SGRBG12_1X12,
+	V4L2_MBUS_FMT_Y8_1X8,
+	V4L2_MBUS_FMT_UV8_1X8,
+	V4L2_MBUS_FMT_YDYUYDYV8_1X16,
+	V4L2_MBUS_FMT_SBGGR8_1X8,
+	V4L2_MBUS_FMT_SGRBG10_DPCM8_1X8,
+	V4L2_MBUS_FMT_SGRBG10_ALAW8_1X8,
 };
 
 static int
-ipipeif_get_pack_mode(u32 in_pix_fmt)
+ipipeif_get_pack_mode(enum v4l2_mbus_pixelcode in_pix_fmt)
 {
 	switch (in_pix_fmt) {
-	case MEDIA_BUS_FMT_SBGGR8_1X8:
-	case MEDIA_BUS_FMT_Y8_1X8:
-	case MEDIA_BUS_FMT_SGRBG10_DPCM8_1X8:
-	case MEDIA_BUS_FMT_UV8_1X8:
+	case V4L2_MBUS_FMT_SBGGR8_1X8:
+	case V4L2_MBUS_FMT_Y8_1X8:
+	case V4L2_MBUS_FMT_SGRBG10_DPCM8_1X8:
+	case V4L2_MBUS_FMT_UV8_1X8:
 		return IPIPEIF_5_1_PACK_8_BIT;
 
-	case MEDIA_BUS_FMT_SGRBG10_ALAW8_1X8:
+	case V4L2_MBUS_FMT_SGRBG10_ALAW8_1X8:
 		return IPIPEIF_5_1_PACK_8_BIT_A_LAW;
 
-	case MEDIA_BUS_FMT_SGRBG12_1X12:
+	case V4L2_MBUS_FMT_SGRBG12_1X12:
 		return IPIPEIF_5_1_PACK_16_BIT;
 
-	case MEDIA_BUS_FMT_SBGGR12_1X12:
+	case V4L2_MBUS_FMT_SBGGR12_1X12:
 		return IPIPEIF_5_1_PACK_12_BIT;
 
 	default:
@@ -94,7 +94,7 @@ static int get_oneshot_mode(enum ipipeif_input_entity input)
 {
 	if (input == IPIPEIF_INPUT_MEMORY)
 		return IPIPEIF_MODE_ONE_SHOT;
-	if (input == IPIPEIF_INPUT_ISIF)
+	else if (input == IPIPEIF_INPUT_ISIF)
 		return IPIPEIF_MODE_CONTINUOUS;
 
 	return -EINVAL;
@@ -107,8 +107,8 @@ ipipeif_get_cfg_src1(struct vpfe_ipipeif_device *ipipeif)
 
 	informat = &ipipeif->formats[IPIPEIF_PAD_SINK];
 	if (ipipeif->input == IPIPEIF_INPUT_MEMORY &&
-	   (informat->code == MEDIA_BUS_FMT_Y8_1X8 ||
-	    informat->code == MEDIA_BUS_FMT_UV8_1X8))
+	   (informat->code == V4L2_MBUS_FMT_Y8_1X8 ||
+	    informat->code == V4L2_MBUS_FMT_UV8_1X8))
 		return IPIPEIF_CCDC;
 
 	return IPIPEIF_SRC1_PARALLEL_PORT;
@@ -122,11 +122,11 @@ ipipeif_get_data_shift(struct vpfe_ipipeif_device *ipipeif)
 	informat = &ipipeif->formats[IPIPEIF_PAD_SINK];
 
 	switch (informat->code) {
-	case MEDIA_BUS_FMT_SGRBG12_1X12:
+	case V4L2_MBUS_FMT_SGRBG12_1X12:
 		return IPIPEIF_5_1_BITS11_0;
 
-	case MEDIA_BUS_FMT_Y8_1X8:
-	case MEDIA_BUS_FMT_UV8_1X8:
+	case V4L2_MBUS_FMT_Y8_1X8:
+	case V4L2_MBUS_FMT_UV8_1X8:
 		return IPIPEIF_5_1_BITS11_0;
 
 	default:
@@ -143,7 +143,7 @@ ipipeif_get_source(struct vpfe_ipipeif_device *ipipeif)
 	if (ipipeif->input == IPIPEIF_INPUT_ISIF)
 		return IPIPEIF_CCDC;
 
-	if (informat->code == MEDIA_BUS_FMT_UYVY8_2X8)
+	if (informat->code == V4L2_MBUS_FMT_UYVY8_2X8)
 		return IPIPEIF_SDRAM_YUV;
 
 	return IPIPEIF_SDRAM_RAW;
@@ -190,13 +190,12 @@ static int ipipeif_hw_setup(struct v4l2_subdev *sd)
 	struct v4l2_mbus_framefmt *informat, *outformat;
 	struct ipipeif_params params = ipipeif->config;
 	enum ipipeif_input_source ipipeif_source;
-	u32 isif_port_if;
+	enum v4l2_mbus_pixelcode isif_port_if;
 	void *ipipeif_base_addr;
 	unsigned int val;
 	int data_shift;
 	int pack_mode;
 	int source1;
-	int tmp;
 
 	ipipeif_base_addr = ipipeif->ipipeif_base_addr;
 
@@ -207,12 +206,12 @@ static int ipipeif_hw_setup(struct v4l2_subdev *sd)
 	outformat = &ipipeif->formats[IPIPEIF_PAD_SOURCE];
 
 	/* Combine all the fields to make CFG1 register of IPIPEIF */
-	tmp = val = get_oneshot_mode(ipipeif->input);
-	if (tmp < 0) {
-		dev_err(&sd->devnode->dev, "ipipeif: links setup required");
+	val = get_oneshot_mode(ipipeif->input);
+	if (val < 0) {
+		pr_err("ipipeif: links setup required");
 		return -EINVAL;
 	}
-	val <<= ONESHOT_SHIFT;
+	val = val << ONESHOT_SHIFT;
 
 	ipipeif_source = ipipeif_get_source(ipipeif);
 	val |= ipipeif_source << INPSRC_SHIFT;
@@ -268,16 +267,16 @@ static int ipipeif_hw_setup(struct v4l2_subdev *sd)
 	ipipeif_write(val, ipipeif_base_addr, IPIPEIF_INIRSZ);
 	isif_port_if = informat->code;
 
-	if (isif_port_if == MEDIA_BUS_FMT_Y8_1X8)
-		isif_port_if = MEDIA_BUS_FMT_YUYV8_1X16;
-	else if (isif_port_if == MEDIA_BUS_FMT_UV8_1X8)
-		isif_port_if = MEDIA_BUS_FMT_SGRBG12_1X12;
+	if (isif_port_if == V4L2_MBUS_FMT_Y8_1X8)
+		isif_port_if = V4L2_MBUS_FMT_YUYV8_1X16;
+	else if (isif_port_if == V4L2_MBUS_FMT_UV8_1X8)
+		isif_port_if = V4L2_MBUS_FMT_SGRBG12_1X12;
 
 	/* Enable DPCM decompression */
 	switch (ipipeif_source) {
 	case IPIPEIF_SDRAM_RAW:
 		val = 0;
-		if (outformat->code == MEDIA_BUS_FMT_SGRBG10_DPCM8_1X8) {
+		if (outformat->code == V4L2_MBUS_FMT_SGRBG10_DPCM8_1X8) {
 			val = 1;
 			val |= (IPIPEIF_DPCM_8BIT_10BIT & 1) <<
 				IPIPEIF_DPCM_BITS_SHIFT;
@@ -296,9 +295,9 @@ static int ipipeif_hw_setup(struct v4l2_subdev *sd)
 		/* configure CFG2 */
 		val = ipipeif_read(ipipeif_base_addr, IPIPEIF_CFG2);
 		switch (isif_port_if) {
-		case MEDIA_BUS_FMT_YUYV8_1X16:
-		case MEDIA_BUS_FMT_UYVY8_2X8:
-		case MEDIA_BUS_FMT_Y8_1X8:
+		case V4L2_MBUS_FMT_YUYV8_1X16:
+		case V4L2_MBUS_FMT_UYVY8_2X8:
+		case V4L2_MBUS_FMT_Y8_1X8:
 			RESETBIT(val, IPIPEIF_CFG2_YUV8_SHIFT);
 			SETBIT(val, IPIPEIF_CFG2_YUV16_SHIFT);
 			ipipeif_write(val, ipipeif_base_addr, IPIPEIF_CFG2);
@@ -344,16 +343,16 @@ static int ipipeif_hw_setup(struct v4l2_subdev *sd)
 		val |= VPFE_PINPOL_POSITIVE << IPIPEIF_CFG2_VDPOL_SHIFT;
 
 		switch (isif_port_if) {
-		case MEDIA_BUS_FMT_YUYV8_1X16:
-		case MEDIA_BUS_FMT_YUYV10_1X20:
+		case V4L2_MBUS_FMT_YUYV8_1X16:
+		case V4L2_MBUS_FMT_YUYV10_1X20:
 			RESETBIT(val, IPIPEIF_CFG2_YUV8_SHIFT);
 			SETBIT(val, IPIPEIF_CFG2_YUV16_SHIFT);
 			break;
 
-		case MEDIA_BUS_FMT_YUYV8_2X8:
-		case MEDIA_BUS_FMT_UYVY8_2X8:
-		case MEDIA_BUS_FMT_Y8_1X8:
-		case MEDIA_BUS_FMT_YUYV10_2X10:
+		case V4L2_MBUS_FMT_YUYV8_2X8:
+		case V4L2_MBUS_FMT_UYVY8_2X8:
+		case V4L2_MBUS_FMT_Y8_1X8:
+		case V4L2_MBUS_FMT_YUYV10_2X10:
 			SETBIT(val, IPIPEIF_CFG2_YUV8_SHIFT);
 			SETBIT(val, IPIPEIF_CFG2_YUV16_SHIFT);
 			val |= IPIPEIF_CBCR_Y << IPIPEIF_CFG2_YUV8P_SHIFT;
@@ -421,7 +420,7 @@ static int
 ipipeif_get_config(struct v4l2_subdev *sd, void __user *arg)
 {
 	struct vpfe_ipipeif_device *ipipeif = v4l2_get_subdevdata(sd);
-	struct ipipeif_params *config = arg;
+	struct ipipeif_params *config = (struct ipipeif_params *)arg;
 	struct device *dev = ipipeif->subdev.v4l2_dev->dev;
 
 	if (!arg) {
@@ -462,7 +461,7 @@ ipipeif_get_config(struct v4l2_subdev *sd, void __user *arg)
 static long ipipeif_ioctl(struct v4l2_subdev *sd,
 			  unsigned int cmd, void *arg)
 {
-	struct ipipeif_params *config = arg;
+	struct ipipeif_params *config = (struct ipipeif_params *)arg;
 	int ret = -ENOIOCTLCMD;
 
 	switch (cmd) {
@@ -544,12 +543,12 @@ static int ipipeif_set_stream(struct v4l2_subdev *sd, int enable)
 /*
  * ipipeif_enum_mbus_code() - Handle pixel format enumeration
  * @sd: pointer to v4l2 subdev structure
- * @cfg: V4L2 subdev pad config
+ * @fh: V4L2 subdev file handle
  * @code: pointer to v4l2_subdev_mbus_code_enum structure
  * return -EINVAL or zero on success
  */
 static int ipipeif_enum_mbus_code(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_pad_config *cfg,
+				  struct v4l2_subdev_fh *fh,
 			struct v4l2_subdev_mbus_code_enum *code)
 {
 	switch (code->pad) {
@@ -577,11 +576,11 @@ static int ipipeif_enum_mbus_code(struct v4l2_subdev *sd,
 /*
  * ipipeif_get_format() - Handle get format by pads subdev method
  * @sd: pointer to v4l2 subdev structure
- * @cfg: V4L2 subdev pad config
+ * @fh: V4L2 subdev file handle
  * @fmt: pointer to v4l2 subdev format structure
  */
 static int
-ipipeif_get_format(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config *cfg,
+ipipeif_get_format(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh,
 		struct v4l2_subdev_format *fmt)
 {
 	struct vpfe_ipipeif_device *ipipeif = v4l2_get_subdevdata(sd);
@@ -589,7 +588,7 @@ ipipeif_get_format(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config *cfg,
 	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
 		fmt->format = ipipeif->formats[fmt->pad];
 	else
-		fmt->format = *(v4l2_subdev_get_try_format(sd, cfg, fmt->pad));
+		fmt->format = *(v4l2_subdev_get_try_format(fh, fmt->pad));
 
 	return 0;
 }
@@ -600,14 +599,14 @@ ipipeif_get_format(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config *cfg,
 /*
  * ipipeif_try_format() - Handle try format by pad subdev method
  * @ipipeif: VPFE ipipeif device.
- * @cfg: V4L2 subdev pad config
+ * @fh: V4L2 subdev file handle.
  * @pad: pad num.
  * @fmt: pointer to v4l2 format structure.
  * @which : wanted subdev format
  */
 static void
 ipipeif_try_format(struct vpfe_ipipeif_device *ipipeif,
-		   struct v4l2_subdev_pad_config *cfg, unsigned int pad,
+		   struct v4l2_subdev_fh *fh, unsigned int pad,
 		   struct v4l2_mbus_framefmt *fmt,
 		   enum v4l2_subdev_format_whence which)
 {
@@ -625,7 +624,7 @@ ipipeif_try_format(struct vpfe_ipipeif_device *ipipeif,
 
 		/* If not found, use SBGGR10 as default */
 		if (i >= ARRAY_SIZE(ipipeif_input_fmts))
-			fmt->code = MEDIA_BUS_FMT_SGRBG12_1X12;
+			fmt->code = V4L2_MBUS_FMT_SGRBG12_1X12;
 	} else if (pad == IPIPEIF_PAD_SOURCE) {
 		for (i = 0; i < ARRAY_SIZE(ipipeif_output_fmts); i++)
 			if (fmt->code == ipipeif_output_fmts[i])
@@ -633,7 +632,7 @@ ipipeif_try_format(struct vpfe_ipipeif_device *ipipeif,
 
 		/* If not found, use UYVY as default */
 		if (i >= ARRAY_SIZE(ipipeif_output_fmts))
-			fmt->code = MEDIA_BUS_FMT_UYVY8_2X8;
+			fmt->code = V4L2_MBUS_FMT_UYVY8_2X8;
 	}
 
 	fmt->width = clamp_t(u32, fmt->width, MIN_OUT_HEIGHT, max_out_width);
@@ -641,9 +640,8 @@ ipipeif_try_format(struct vpfe_ipipeif_device *ipipeif,
 }
 
 static int
-ipipeif_enum_frame_size(struct v4l2_subdev *sd,
-			struct v4l2_subdev_pad_config *cfg,
-			struct v4l2_subdev_frame_size_enum *fse)
+ipipeif_enum_frame_size(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh,
+		     struct v4l2_subdev_frame_size_enum *fse)
 {
 	struct vpfe_ipipeif_device *ipipeif = v4l2_get_subdevdata(sd);
 	struct v4l2_mbus_framefmt format;
@@ -654,7 +652,8 @@ ipipeif_enum_frame_size(struct v4l2_subdev *sd,
 	format.code = fse->code;
 	format.width = 1;
 	format.height = 1;
-	ipipeif_try_format(ipipeif, cfg, fse->pad, &format, fse->which);
+	ipipeif_try_format(ipipeif, fh, fse->pad, &format,
+			   V4L2_SUBDEV_FORMAT_TRY);
 	fse->min_width = format.width;
 	fse->min_height = format.height;
 
@@ -664,7 +663,8 @@ ipipeif_enum_frame_size(struct v4l2_subdev *sd,
 	format.code = fse->code;
 	format.width = -1;
 	format.height = -1;
-	ipipeif_try_format(ipipeif, cfg, fse->pad, &format, fse->which);
+	ipipeif_try_format(ipipeif, fh, fse->pad, &format,
+			   V4L2_SUBDEV_FORMAT_TRY);
 	fse->max_width = format.width;
 	fse->max_height = format.height;
 
@@ -674,18 +674,18 @@ ipipeif_enum_frame_size(struct v4l2_subdev *sd,
 /*
  * __ipipeif_get_format() - helper function for getting ipipeif format
  * @ipipeif: pointer to ipipeif private structure.
- * @cfg: V4L2 subdev pad config
  * @pad: pad number.
+ * @fh: V4L2 subdev file handle.
  * @which: wanted subdev format.
  *
  */
 static struct v4l2_mbus_framefmt *
 __ipipeif_get_format(struct vpfe_ipipeif_device *ipipeif,
-		       struct v4l2_subdev_pad_config *cfg, unsigned int pad,
+		       struct v4l2_subdev_fh *fh, unsigned int pad,
 		       enum v4l2_subdev_format_whence which)
 {
 	if (which == V4L2_SUBDEV_FORMAT_TRY)
-		return v4l2_subdev_get_try_format(&ipipeif->subdev, cfg, pad);
+		return v4l2_subdev_get_try_format(fh, pad);
 
 	return &ipipeif->formats[pad];
 }
@@ -693,22 +693,22 @@ __ipipeif_get_format(struct vpfe_ipipeif_device *ipipeif,
 /*
  * ipipeif_set_format() - Handle set format by pads subdev method
  * @sd: pointer to v4l2 subdev structure
- * @cfg: V4L2 subdev pad config
+ * @fh: V4L2 subdev file handle
  * @fmt: pointer to v4l2 subdev format structure
  * return -EINVAL or zero on success
  */
 static int
-ipipeif_set_format(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config *cfg,
+ipipeif_set_format(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh,
 		struct v4l2_subdev_format *fmt)
 {
 	struct vpfe_ipipeif_device *ipipeif = v4l2_get_subdevdata(sd);
 	struct v4l2_mbus_framefmt *format;
 
-	format = __ipipeif_get_format(ipipeif, cfg, fmt->pad, fmt->which);
+	format = __ipipeif_get_format(ipipeif, fh, fmt->pad, fmt->which);
 	if (format == NULL)
 		return -EINVAL;
 
-	ipipeif_try_format(ipipeif, cfg, fmt->pad, &fmt->format, fmt->which);
+	ipipeif_try_format(ipipeif, fh, fmt->pad, &fmt->format, fmt->which);
 	*format = fmt->format;
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY)
@@ -746,6 +746,7 @@ static void ipipeif_set_default_config(struct vpfe_ipipeif_device *ipipeif)
 			.clip = 4095,
 		},
 	};
+	memset(&ipipeif->config, 0, sizeof(struct ipipeif_params));
 	memcpy(&ipipeif->config, &ipipeif_defaults,
 	       sizeof(struct ipipeif_params));
 }
@@ -755,8 +756,9 @@ static void ipipeif_set_default_config(struct vpfe_ipipeif_device *ipipeif)
  * @sd: VPFE ipipeif V4L2 subdevice
  * @fh: V4L2 subdev file handle
  *
- * Initialize all pad formats with default values. Try formats are initialized
- * on the file handle.
+ * Initialize all pad formats with default values. If fh is not NULL, try
+ * formats are initialized on the file handle. Otherwise active formats are
+ * initialized on the device.
  */
 static int
 ipipeif_init_formats(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
@@ -766,19 +768,19 @@ ipipeif_init_formats(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 
 	memset(&format, 0, sizeof(format));
 	format.pad = IPIPEIF_PAD_SINK;
-	format.which = V4L2_SUBDEV_FORMAT_TRY;
-	format.format.code = MEDIA_BUS_FMT_SGRBG12_1X12;
+	format.which = fh ? V4L2_SUBDEV_FORMAT_TRY : V4L2_SUBDEV_FORMAT_ACTIVE;
+	format.format.code = V4L2_MBUS_FMT_SGRBG12_1X12;
 	format.format.width = IPIPE_MAX_OUTPUT_WIDTH_A;
 	format.format.height = IPIPE_MAX_OUTPUT_HEIGHT_A;
-	ipipeif_set_format(sd, fh->pad, &format);
+	ipipeif_set_format(sd, fh, &format);
 
 	memset(&format, 0, sizeof(format));
 	format.pad = IPIPEIF_PAD_SOURCE;
-	format.which = V4L2_SUBDEV_FORMAT_TRY;
-	format.format.code = MEDIA_BUS_FMT_UYVY8_2X8;
+	format.which = fh ? V4L2_SUBDEV_FORMAT_TRY : V4L2_SUBDEV_FORMAT_ACTIVE;
+	format.format.code = V4L2_MBUS_FMT_UYVY8_2X8;
 	format.format.width = IPIPE_MAX_OUTPUT_WIDTH_A;
 	format.format.height = IPIPE_MAX_OUTPUT_HEIGHT_A;
-	ipipeif_set_format(sd, fh->pad, &format);
+	ipipeif_set_format(sd, fh, &format);
 
 	ipipeif_set_default_config(ipipeif);
 
@@ -802,9 +804,9 @@ ipipeif_video_in_queue(struct vpfe_device *vpfe_dev, unsigned long addr)
 		return -EINVAL;
 
 	switch (ipipeif->formats[IPIPEIF_PAD_SINK].code) {
-	case MEDIA_BUS_FMT_Y8_1X8:
-	case MEDIA_BUS_FMT_UV8_1X8:
-	case MEDIA_BUS_FMT_YDYUYDYV8_1X16:
+	case V4L2_MBUS_FMT_Y8_1X8:
+	case V4L2_MBUS_FMT_UV8_1X8:
+	case V4L2_MBUS_FMT_YDYUYDYV8_1X16:
 		adofs = ipipeif->formats[IPIPEIF_PAD_SINK].width;
 		break;
 
@@ -886,14 +888,9 @@ ipipeif_link_setup(struct media_entity *entity, const struct media_pad *local,
 	struct v4l2_subdev *sd = media_entity_to_v4l2_subdev(entity);
 	struct vpfe_ipipeif_device *ipipeif = v4l2_get_subdevdata(sd);
 	struct vpfe_device *vpfe = to_vpfe_device(ipipeif);
-	unsigned int index = local->index;
 
-	/* FIXME: this is actually a hack! */
-	if (is_media_entity_v4l2_subdev(remote->entity))
-		index |= 2 << 16;
-
-	switch (index) {
-	case IPIPEIF_PAD_SINK:
+	switch (local->index | media_entity_type(remote->entity)) {
+	case IPIPEIF_PAD_SINK | MEDIA_ENT_T_DEVNODE:
 		/* Single shot mode */
 		if (!(flags & MEDIA_LNK_FL_ENABLED)) {
 			ipipeif->input = IPIPEIF_INPUT_NONE;
@@ -902,7 +899,7 @@ ipipeif_link_setup(struct media_entity *entity, const struct media_pad *local,
 		ipipeif->input = IPIPEIF_INPUT_MEMORY;
 		break;
 
-	case IPIPEIF_PAD_SINK | 2 << 16:
+	case IPIPEIF_PAD_SINK | MEDIA_ENT_T_V4L2_SUBDEV:
 		/* read from isif */
 		if (!(flags & MEDIA_LNK_FL_ENABLED)) {
 			ipipeif->input = IPIPEIF_INPUT_NONE;
@@ -914,7 +911,7 @@ ipipeif_link_setup(struct media_entity *entity, const struct media_pad *local,
 		ipipeif->input = IPIPEIF_INPUT_ISIF;
 		break;
 
-	case IPIPEIF_PAD_SOURCE | 2 << 16:
+	case IPIPEIF_PAD_SOURCE | MEDIA_ENT_T_V4L2_SUBDEV:
 		if (!(flags & MEDIA_LNK_FL_ENABLED)) {
 			ipipeif->output = IPIPEIF_OUTPUT_NONE;
 			break;
@@ -950,10 +947,10 @@ void vpfe_ipipeif_unregister_entities(struct vpfe_ipipeif_device *ipipeif)
 	/* unregister video device */
 	vpfe_video_unregister(&ipipeif->video_in);
 
-	/* unregister subdev */
-	v4l2_device_unregister_subdev(&ipipeif->subdev);
 	/* cleanup entity */
 	media_entity_cleanup(&ipipeif->subdev.entity);
+	/* unregister subdev */
+	v4l2_device_unregister_subdev(&ipipeif->subdev);
 }
 
 int
@@ -977,7 +974,7 @@ vpfe_ipipeif_register_entities(struct vpfe_ipipeif_device *ipipeif,
 	ipipeif->video_in.vpfe_dev = vpfe_dev;
 
 	flags = 0;
-	ret = media_create_pad_link(&ipipeif->video_in.video_dev.entity, 0,
+	ret = media_entity_create_link(&ipipeif->video_in.video_dev.entity, 0,
 					&ipipeif->subdev.entity, 0, flags);
 	if (ret < 0)
 		goto fail;
@@ -1032,7 +1029,7 @@ int vpfe_ipipeif_init(struct vpfe_ipipeif_device *ipipeif,
 	ipipeif->output = IPIPEIF_OUTPUT_NONE;
 	me->ops = &ipipeif_media_ops;
 
-	ret = media_entity_pads_init(me, IPIPEIF_NUM_PADS, pads);
+	ret = media_entity_init(me, IPIPEIF_NUM_PADS, pads, 0);
 	if (ret)
 		goto fail;
 

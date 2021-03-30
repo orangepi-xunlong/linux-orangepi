@@ -1,20 +1,3 @@
-/*
- * include/trace/events/autohotplug.h
- *
- * Copyright (C) 2016-2020 Allwinnertech.
- * East Yang <yangdong@allwinnertech.com>
-
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
-
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM autohotplug
 
@@ -58,8 +41,7 @@ TRACE_EVENT(autohotplug_under,
 		__entry->count  = count;
 	),
 
-	TP_printk("under load %d%% count is %d", __entry->load_level,
-						__entry->count)
+	TP_printk("under load %d%% count is %d", __entry->load_level, __entry->count)
 );
 
 TRACE_EVENT(autohotplug_stable,
@@ -132,9 +114,8 @@ TRACE_EVENT(autohotplug_roomage,
 		__entry->limit_online = limit_online;
 	),
 
-	TP_printk("cluser%d current online is %d, %s limit is %d",
-			__entry->cluster, __entry->cur_online,
-			__entry->str, __entry->limit_online)
+	TP_printk("cluser%d current online is %d, %s limit is %d", __entry->cluster,
+				__entry->cur_online, __entry->str, __entry->limit_online)
 );
 #endif
 

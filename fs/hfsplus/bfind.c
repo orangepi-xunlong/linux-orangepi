@@ -118,7 +118,9 @@ int __hfs_brec_find(struct hfs_bnode *bnode, struct hfs_find_data *fd,
 	int b, e;
 	int res;
 
-	BUG_ON(!rec_found);
+	if (!rec_found)
+		BUG();
+
 	b = 0;
 	e = bnode->num_recs - 1;
 	res = -ENOENT;

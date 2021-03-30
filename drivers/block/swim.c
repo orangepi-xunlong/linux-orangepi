@@ -549,7 +549,7 @@ static void redo_fd_request(struct request_queue *q)
 		case READ:
 			err = floppy_read_sectors(fs, blk_rq_pos(req),
 						  blk_rq_cur_sectors(req),
-						  bio_data(req->bio));
+						  req->buffer);
 			break;
 		}
 	done:
@@ -868,17 +868,8 @@ static int swim_floppy_init(struct swim_priv *swd)
 
 exit_put_disks:
 	unregister_blkdev(FLOPPY_MAJOR, "fd");
-	do {
-		struct gendisk *disk = swd->unit[drive].disk;
-
-		if (disk) {
-			if (disk->queue) {
-				blk_cleanup_queue(disk->queue);
-				disk->queue = NULL;
-			}
-			put_disk(disk);
-		}
-	} while (drive--);
+	while (drive--)
+		put_disk(swd->unit[drive].disk);
 	return err;
 }
 
@@ -902,7 +893,7 @@ static int swim_probe(struct platform_device *dev)
 
 	swim_base = ioremap(res->start, resource_size(res));
 	if (!swim_base) {
-		ret = -ENOMEM;
+		return -ENOMEM;
 		goto out_release_io;
 	}
 
@@ -933,6 +924,7 @@ static int swim_probe(struct platform_device *dev)
 	return 0;
 
 out_kfree:
+	platform_set_drvdata(dev, NULL);
 	kfree(swd);
 out_iounmap:
 	iounmap(swim_base);
@@ -970,6 +962,7 @@ static int swim_remove(struct platform_device *dev)
 	if (res)
 		release_mem_region(res->start, resource_size(res));
 
+	platform_set_drvdata(dev, NULL);
 	kfree(swd);
 
 	return 0;
@@ -980,6 +973,7 @@ static struct platform_driver swim_driver = {
 	.remove = swim_remove,
 	.driver   = {
 		.name	= CARDNAME,
+		.owner	= THIS_MODULE,
 	},
 };
 

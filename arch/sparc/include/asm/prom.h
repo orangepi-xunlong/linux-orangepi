@@ -36,28 +36,40 @@ struct of_irq_controller {
 	void		*data;
 };
 
-struct device_node *of_find_node_by_cpuid(int cpuid);
-int of_set_property(struct device_node *node, const char *name, void *val, int len);
+extern struct device_node *of_find_node_by_cpuid(int cpuid);
+extern int of_set_property(struct device_node *node, const char *name, void *val, int len);
 extern struct mutex of_set_property_mutex;
-int of_getintprop_default(struct device_node *np,
-			  const char *name,
+extern int of_getintprop_default(struct device_node *np,
+				 const char *name,
 				 int def);
-int of_find_in_proplist(const char *list, const char *match, int len);
+extern int of_find_in_proplist(const char *list, const char *match, int len);
+#ifdef CONFIG_NUMA
+extern int of_node_to_nid(struct device_node *dp);
+#define of_node_to_nid of_node_to_nid
+#endif
 
-void prom_build_devicetree(void);
-void of_populate_present_mask(void);
-void of_fill_in_cpu_data(void);
+extern void prom_build_devicetree(void);
+extern void of_populate_present_mask(void);
+extern void of_fill_in_cpu_data(void);
 
 struct resource;
-void __iomem *of_ioremap(struct resource *res, unsigned long offset, unsigned long size, char *name);
-void of_iounmap(struct resource *res, void __iomem *base, unsigned long size);
+extern void __iomem *of_ioremap(struct resource *res, unsigned long offset, unsigned long size, char *name);
+extern void of_iounmap(struct resource *res, void __iomem *base, unsigned long size);
 
 extern struct device_node *of_console_device;
 extern char *of_console_path;
 extern char *of_console_options;
 
-void irq_trans_init(struct device_node *dp);
-char *build_path_component(struct device_node *dp);
+extern void irq_trans_init(struct device_node *dp);
+extern char *build_path_component(struct device_node *dp);
+
+/* SPARC has local implementations */
+extern int of_address_to_resource(struct device_node *dev, int index,
+				  struct resource *r);
+#define of_address_to_resource of_address_to_resource
+
+void __iomem *of_iomap(struct device_node *node, int index);
+#define of_iomap of_iomap
 
 #endif /* __KERNEL__ */
 #endif /* _SPARC_PROM_H */

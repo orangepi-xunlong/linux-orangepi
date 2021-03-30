@@ -36,7 +36,7 @@ const char bfin_board_name[] = "ADI BF518F-EZBRD";
  *  Driver needs to know address, irq and flag pin.
  */
 
-#if IS_ENABLED(CONFIG_MTD_PHYSMAP)
+#if defined(CONFIG_MTD_PHYSMAP) || defined(CONFIG_MTD_PHYSMAP_MODULE)
 static struct mtd_partition ezbrd_partitions[] = {
 	{
 		.name       = "bootloader(nor)",
@@ -61,7 +61,7 @@ static struct physmap_flash_data ezbrd_flash_data = {
 
 static struct resource ezbrd_flash_resource = {
 	.start = 0x20000000,
-#if IS_ENABLED(CONFIG_SPI_BFIN5XX)
+#if defined(CONFIG_SPI_BFIN5XX) || defined(CONFIG_SPI_BFIN5XX_MODULE)
 	.end   = 0x202fffff,
 #else
 	.end   = 0x203fffff,
@@ -80,14 +80,14 @@ static struct platform_device ezbrd_flash_device = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_RTC_DRV_BFIN)
+#if defined(CONFIG_RTC_DRV_BFIN) || defined(CONFIG_RTC_DRV_BFIN_MODULE)
 static struct platform_device rtc_device = {
 	.name = "rtc-bfin",
 	.id   = -1,
 };
 #endif
 
-#if IS_ENABLED(CONFIG_BFIN_MAC)
+#if defined(CONFIG_BFIN_MAC) || defined(CONFIG_BFIN_MAC_MODULE)
 #include <linux/bfin_mac.h>
 static const unsigned short bfin_mac_peripherals[] = {
 	P_MII0_ETxD0,
@@ -105,7 +105,7 @@ static const unsigned short bfin_mac_peripherals[] = {
 
 static struct bfin_phydev_platform_data bfin_phydev_data[] = {
 	{
-#if IS_ENABLED(CONFIG_NET_DSA_KSZ8893M)
+#if defined(CONFIG_NET_DSA_KSZ8893M) || defined(CONFIG_NET_DSA_KSZ8893M_MODULE)
 		.addr = 3,
 #else
 		.addr = 1,
@@ -119,7 +119,7 @@ static struct bfin_mii_bus_platform_data bfin_mii_bus_data = {
 	.phydev_data = bfin_phydev_data,
 	.phy_mode = PHY_INTERFACE_MODE_MII,
 	.mac_peripherals = bfin_mac_peripherals,
-#if IS_ENABLED(CONFIG_NET_DSA_KSZ8893M)
+#if defined(CONFIG_NET_DSA_KSZ8893M) || defined(CONFIG_NET_DSA_KSZ8893M_MODULE)
 	.phy_mask = 0xfff7, /* Only probe the port phy connect to the on chip MAC */
 #endif
 	.vlan1_mask = 1,
@@ -140,7 +140,7 @@ static struct platform_device bfin_mac_device = {
 	}
 };
 
-#if IS_ENABLED(CONFIG_NET_DSA_KSZ8893M)
+#if defined(CONFIG_NET_DSA_KSZ8893M) || defined(CONFIG_NET_DSA_KSZ8893M_MODULE)
 static struct dsa_chip_data ksz8893m_switch_chip_data = {
 	.mii_bus = &bfin_mii_bus.dev,
 	.port_names = {
@@ -165,7 +165,8 @@ static struct platform_device ksz8893m_switch_device = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_MTD_M25P80)
+#if defined(CONFIG_MTD_M25P80) \
+	|| defined(CONFIG_MTD_M25P80_MODULE)
 static struct mtd_partition bfin_spi_flash_partitions[] = {
 	{
 		.name = "bootloader(spi)",
@@ -192,13 +193,13 @@ static struct bfin5xx_spi_chip spi_flash_chip_info = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_MMC_SPI)
+#if defined(CONFIG_MMC_SPI) || defined(CONFIG_MMC_SPI_MODULE)
 static struct bfin5xx_spi_chip mmc_spi_chip_info = {
 	.enable_dma = 0,
 };
 #endif
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_AD7877)
+#if defined(CONFIG_TOUCHSCREEN_AD7877) || defined(CONFIG_TOUCHSCREEN_AD7877_MODULE)
 static const struct ad7877_platform_data bfin_ad7877_ts_info = {
 	.model			= 7877,
 	.vref_delay_usecs	= 50,	/* internal, no capacitor */
@@ -215,7 +216,8 @@ static const struct ad7877_platform_data bfin_ad7877_ts_info = {
 #endif
 
 static struct spi_board_info bfin_spi_board_info[] __initdata = {
-#if IS_ENABLED(CONFIG_MTD_M25P80)
+#if defined(CONFIG_MTD_M25P80) \
+	|| defined(CONFIG_MTD_M25P80_MODULE)
 	{
 		/* the modalias must be the same as spi device driver name */
 		.modalias = "m25p80", /* Name of spi_driver for this device */
@@ -228,8 +230,9 @@ static struct spi_board_info bfin_spi_board_info[] __initdata = {
 	},
 #endif
 
-#if IS_ENABLED(CONFIG_BFIN_MAC)
-#if IS_ENABLED(CONFIG_NET_DSA_KSZ8893M)
+#if defined(CONFIG_BFIN_MAC) || defined(CONFIG_BFIN_MAC_MODULE)
+#if defined(CONFIG_NET_DSA_KSZ8893M) \
+	|| defined(CONFIG_NET_DSA_KSZ8893M_MODULE)
 	{
 		.modalias = "ksz8893m",
 		.max_speed_hz = 5000000,
@@ -241,7 +244,7 @@ static struct spi_board_info bfin_spi_board_info[] __initdata = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_MMC_SPI)
+#if defined(CONFIG_MMC_SPI) || defined(CONFIG_MMC_SPI_MODULE)
 	{
 		.modalias = "mmc_spi",
 		.max_speed_hz = 25000000,     /* max spi clock (SCK) speed in HZ */
@@ -251,7 +254,7 @@ static struct spi_board_info bfin_spi_board_info[] __initdata = {
 		.mode = SPI_MODE_3,
 	},
 #endif
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_AD7877)
+#if defined(CONFIG_TOUCHSCREEN_AD7877) || defined(CONFIG_TOUCHSCREEN_AD7877_MODULE)
 	{
 		.modalias		= "ad7877",
 		.platform_data		= &bfin_ad7877_ts_info,
@@ -261,7 +264,7 @@ static struct spi_board_info bfin_spi_board_info[] __initdata = {
 		.chip_select  = 2,
 	},
 #endif
-#if IS_ENABLED(CONFIG_SND_SOC_WM8731) \
+#if defined(CONFIG_SND_SOC_WM8731) || defined(CONFIG_SND_SOC_WM8731_MODULE) \
 	 && defined(CONFIG_SND_SOC_WM8731_SPI)
 	{
 		.modalias	= "wm8731",
@@ -271,7 +274,7 @@ static struct spi_board_info bfin_spi_board_info[] __initdata = {
 		.mode = SPI_MODE_0,
 	},
 #endif
-#if IS_ENABLED(CONFIG_SPI_SPIDEV)
+#if defined(CONFIG_SPI_SPIDEV) || defined(CONFIG_SPI_SPIDEV_MODULE)
 	{
 		.modalias = "spidev",
 		.max_speed_hz = 3125000,     /* max spi clock (SCK) speed in HZ */
@@ -279,7 +282,7 @@ static struct spi_board_info bfin_spi_board_info[] __initdata = {
 		.chip_select = 1,
 	},
 #endif
-#if IS_ENABLED(CONFIG_FB_BFIN_LQ035Q1)
+#if defined(CONFIG_FB_BFIN_LQ035Q1) || defined(CONFIG_FB_BFIN_LQ035Q1_MODULE)
 	{
 		.modalias = "bfin-lq035q1-spi",
 		.max_speed_hz = 20000000,     /* max spi clock (SCK) speed in HZ */
@@ -291,7 +294,7 @@ static struct spi_board_info bfin_spi_board_info[] __initdata = {
 };
 
 /* SPI controller data */
-#if IS_ENABLED(CONFIG_SPI_BFIN5XX)
+#if defined(CONFIG_SPI_BFIN5XX) || defined(CONFIG_SPI_BFIN5XX_MODULE)
 /* SPI (0) */
 static struct bfin5xx_spi_master bfin_spi0_info = {
 	.num_chipselect = 6,
@@ -363,7 +366,7 @@ static struct platform_device bfin_spi1_device = {
 };
 #endif  /* spi master and devices */
 
-#if IS_ENABLED(CONFIG_SERIAL_BFIN)
+#if defined(CONFIG_SERIAL_BFIN) || defined(CONFIG_SERIAL_BFIN_MODULE)
 #ifdef CONFIG_SERIAL_BFIN_UART0
 static struct resource bfin_uart0_resources[] = {
 	{
@@ -462,7 +465,7 @@ static struct platform_device bfin_uart1_device = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_BFIN_SIR)
+#if defined(CONFIG_BFIN_SIR) || defined(CONFIG_BFIN_SIR_MODULE)
 #ifdef CONFIG_BFIN_SIR0
 static struct resource bfin_sir0_resources[] = {
 	{
@@ -517,7 +520,7 @@ static struct platform_device bfin_sir1_device = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_SND_BF5XX_I2S)
+#if defined(CONFIG_SND_BF5XX_I2S) || defined(CONFIG_SND_BF5XX_I2S_MODULE)
 static struct platform_device bfin_i2s = {
 	.name = "bfin-i2s",
 	.id = CONFIG_SND_BF5XX_SPORT_NUM,
@@ -525,7 +528,7 @@ static struct platform_device bfin_i2s = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_I2C_BLACKFIN_TWI)
+#if defined(CONFIG_I2C_BLACKFIN_TWI) || defined(CONFIG_I2C_BLACKFIN_TWI_MODULE)
 static const u16 bfin_twi0_pins[] = {P_TWI0_SCL, P_TWI0_SDA, 0};
 
 static struct resource bfin_twi0_resource[] = {
@@ -553,25 +556,25 @@ static struct platform_device i2c_bfin_twi_device = {
 #endif
 
 static struct i2c_board_info __initdata bfin_i2c_board_info[] = {
-#if IS_ENABLED(CONFIG_BFIN_TWI_LCD)
+#if defined(CONFIG_BFIN_TWI_LCD) || defined(CONFIG_BFIN_TWI_LCD_MODULE)
 	{
 		I2C_BOARD_INFO("pcf8574_lcd", 0x22),
 	},
 #endif
-#if IS_ENABLED(CONFIG_INPUT_PCF8574)
+#if defined(CONFIG_INPUT_PCF8574) || defined(CONFIG_INPUT_PCF8574_MODULE)
 	{
 		I2C_BOARD_INFO("pcf8574_keypad", 0x27),
 		.irq = IRQ_PF8,
 	},
 #endif
-#if IS_ENABLED(CONFIG_SND_SOC_SSM2602)
+#if defined(CONFIG_SND_SOC_SSM2602) || defined(CONFIG_SND_SOC_SSM2602_MODULE)
 	{
 		I2C_BOARD_INFO("ssm2602", 0x1b),
 	},
 #endif
 };
 
-#if IS_ENABLED(CONFIG_SERIAL_BFIN_SPORT)
+#if defined(CONFIG_SERIAL_BFIN_SPORT) || defined(CONFIG_SERIAL_BFIN_SPORT_MODULE)
 #ifdef CONFIG_SERIAL_BFIN_SPORT0_UART
 static struct resource bfin_sport0_uart_resources[] = {
 	{
@@ -642,7 +645,7 @@ static struct platform_device bfin_sport1_uart_device = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_KEYBOARD_GPIO)
+#if defined(CONFIG_KEYBOARD_GPIO) || defined(CONFIG_KEYBOARD_GPIO_MODULE)
 #include <linux/input.h>
 #include <linux/gpio_keys.h>
 
@@ -664,7 +667,7 @@ static struct platform_device bfin_device_gpiokeys = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_SDH_BFIN)
+#if defined(CONFIG_SDH_BFIN) || defined(CONFIG_SDH_BFIN_MODULE)
 
 static struct bfin_sd_host bfin_sdh_data = {
 	.dma_chan = CH_RSI,
@@ -707,24 +710,24 @@ static struct platform_device *stamp_devices[] __initdata = {
 
 	&bfin_dpmc,
 
-#if IS_ENABLED(CONFIG_RTC_DRV_BFIN)
+#if defined(CONFIG_RTC_DRV_BFIN) || defined(CONFIG_RTC_DRV_BFIN_MODULE)
 	&rtc_device,
 #endif
 
-#if IS_ENABLED(CONFIG_BFIN_MAC)
+#if defined(CONFIG_BFIN_MAC) || defined(CONFIG_BFIN_MAC_MODULE)
 	&bfin_mii_bus,
 	&bfin_mac_device,
-#if IS_ENABLED(CONFIG_NET_DSA_KSZ8893M)
+#if defined(CONFIG_NET_DSA_KSZ8893M) || defined(CONFIG_NET_DSA_KSZ8893M_MODULE)
 	&ksz8893m_switch_device,
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_SPI_BFIN5XX)
+#if defined(CONFIG_SPI_BFIN5XX) || defined(CONFIG_SPI_BFIN5XX_MODULE)
 	&bfin_spi0_device,
 	&bfin_spi1_device,
 #endif
 
-#if IS_ENABLED(CONFIG_SERIAL_BFIN)
+#if defined(CONFIG_SERIAL_BFIN) || defined(CONFIG_SERIAL_BFIN_MODULE)
 #ifdef CONFIG_SERIAL_BFIN_UART0
 	&bfin_uart0_device,
 #endif
@@ -733,7 +736,7 @@ static struct platform_device *stamp_devices[] __initdata = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_BFIN_SIR)
+#if defined(CONFIG_BFIN_SIR) || defined(CONFIG_BFIN_SIR_MODULE)
 #ifdef CONFIG_BFIN_SIR0
 	&bfin_sir0_device,
 #endif
@@ -742,15 +745,15 @@ static struct platform_device *stamp_devices[] __initdata = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_I2C_BLACKFIN_TWI)
+#if defined(CONFIG_I2C_BLACKFIN_TWI) || defined(CONFIG_I2C_BLACKFIN_TWI_MODULE)
 	&i2c_bfin_twi_device,
 #endif
 
-#if IS_ENABLED(CONFIG_SND_BF5XX_I2S)
+#if defined(CONFIG_SND_BF5XX_I2S) || defined(CONFIG_SND_BF5XX_I2S_MODULE)
 	&bfin_i2s,
 #endif
 
-#if IS_ENABLED(CONFIG_SERIAL_BFIN_SPORT)
+#if defined(CONFIG_SERIAL_BFIN_SPORT) || defined(CONFIG_SERIAL_BFIN_SPORT_MODULE)
 #ifdef CONFIG_SERIAL_BFIN_SPORT0_UART
 	&bfin_sport0_uart_device,
 #endif
@@ -759,15 +762,15 @@ static struct platform_device *stamp_devices[] __initdata = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_KEYBOARD_GPIO)
+#if defined(CONFIG_KEYBOARD_GPIO) || defined(CONFIG_KEYBOARD_GPIO_MODULE)
 	&bfin_device_gpiokeys,
 #endif
 
-#if IS_ENABLED(CONFIG_SDH_BFIN)
+#if defined(CONFIG_SDH_BFIN) || defined(CONFIG_SDH_BFIN_MODULE)
 	&bf51x_sdh_device,
 #endif
 
-#if IS_ENABLED(CONFIG_MTD_PHYSMAP)
+#if defined(CONFIG_MTD_PHYSMAP) || defined(CONFIG_MTD_PHYSMAP_MODULE)
 	&ezbrd_flash_device,
 #endif
 };
@@ -781,7 +784,7 @@ static int __init ezbrd_init(void)
 	spi_register_board_info(bfin_spi_board_info, ARRAY_SIZE(bfin_spi_board_info));
 	/* setup BF518-EZBRD GPIO pin PG11 to AMS2, PG15 to AMS3. */
 	peripheral_request(P_AMS2, "ParaFlash");
-#if !IS_ENABLED(CONFIG_SPI_BFIN5XX)
+#if !defined(CONFIG_SPI_BFIN5XX) && !defined(CONFIG_SPI_BFIN5XX_MODULE)
 	peripheral_request(P_AMS3, "ParaFlash");
 #endif
 	return 0;

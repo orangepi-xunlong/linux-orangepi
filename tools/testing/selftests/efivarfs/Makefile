@@ -1,13 +1,12 @@
+CC = $(CROSS_COMPILE)gcc
 CFLAGS = -Wall
 
 test_objs = open-unlink create-read
 
 all: $(test_objs)
 
-TEST_PROGS := efivarfs.sh
-TEST_FILES := $(test_objs)
-
-include ../lib.mk
+run_tests: all
+	@/bin/bash ./efivarfs.sh || echo "efivarfs selftests: [FAIL]"
 
 clean:
 	rm -f $(test_objs)

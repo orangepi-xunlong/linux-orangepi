@@ -80,6 +80,7 @@ static const char rx_list_name[][8] = {
 	[RX_ALL] = "rx_all",
 	[RX_FIL] = "rx_fil",
 	[RX_INV] = "rx_inv",
+	[RX_EFF] = "rx_eff",
 };
 
 /*
@@ -388,26 +389,25 @@ static const struct file_operations can_rcvlist_proc_fops = {
 	.release	= single_release,
 };
 
-static inline void can_rcvlist_proc_show_array(struct seq_file *m,
-					       struct net_device *dev,
-					       struct hlist_head *rcv_array,
-					       unsigned int rcv_array_sz)
+static inline void can_rcvlist_sff_proc_show_one(struct seq_file *m,
+						 struct net_device *dev,
+						 struct dev_rcv_lists *d)
 {
-	unsigned int i;
+	int i;
 	int all_empty = 1;
 
 	/* check whether at least one list is non-empty */
-	for (i = 0; i < rcv_array_sz; i++)
-		if (!hlist_empty(&rcv_array[i])) {
+	for (i = 0; i < 0x800; i++)
+		if (!hlist_empty(&d->rx_sff[i])) {
 			all_empty = 0;
 			break;
 		}
 
 	if (!all_empty) {
 		can_print_recv_banner(m);
-		for (i = 0; i < rcv_array_sz; i++) {
-			if (!hlist_empty(&rcv_array[i]))
-				can_print_rcvlist(m, &rcv_array[i], dev);
+		for (i = 0; i < 0x800; i++) {
+			if (!hlist_empty(&d->rx_sff[i]))
+				can_print_rcvlist(m, &d->rx_sff[i], dev);
 		}
 	} else
 		seq_printf(m, "  (%s: no entry)\n", DNAME(dev));
@@ -425,15 +425,12 @@ static int can_rcvlist_sff_proc_show(struct seq_file *m, void *v)
 
 	/* sff receive list for 'all' CAN devices (dev == NULL) */
 	d = &can_rx_alldev_list;
-	can_rcvlist_proc_show_array(m, NULL, d->rx_sff, ARRAY_SIZE(d->rx_sff));
+	can_rcvlist_sff_proc_show_one(m, NULL, d);
 
 	/* sff receive list for registered CAN devices */
 	for_each_netdev_rcu(&init_net, dev) {
-		if (dev->type == ARPHRD_CAN && dev->ml_priv) {
-			d = dev->ml_priv;
-			can_rcvlist_proc_show_array(m, dev, d->rx_sff,
-						    ARRAY_SIZE(d->rx_sff));
-		}
+		if (dev->type == ARPHRD_CAN && dev->ml_priv)
+			can_rcvlist_sff_proc_show_one(m, dev, dev->ml_priv);
 	}
 
 	rcu_read_unlock();
@@ -450,49 +447,6 @@ static int can_rcvlist_sff_proc_open(struct inode *inode, struct file *file)
 static const struct file_operations can_rcvlist_sff_proc_fops = {
 	.owner		= THIS_MODULE,
 	.open		= can_rcvlist_sff_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-
-static int can_rcvlist_eff_proc_show(struct seq_file *m, void *v)
-{
-	struct net_device *dev;
-	struct dev_rcv_lists *d;
-
-	/* RX_EFF */
-	seq_puts(m, "\nreceive list 'rx_eff':\n");
-
-	rcu_read_lock();
-
-	/* eff receive list for 'all' CAN devices (dev == NULL) */
-	d = &can_rx_alldev_list;
-	can_rcvlist_proc_show_array(m, NULL, d->rx_eff, ARRAY_SIZE(d->rx_eff));
-
-	/* eff receive list for registered CAN devices */
-	for_each_netdev_rcu(&init_net, dev) {
-		if (dev->type == ARPHRD_CAN && dev->ml_priv) {
-			d = dev->ml_priv;
-			can_rcvlist_proc_show_array(m, dev, d->rx_eff,
-						    ARRAY_SIZE(d->rx_eff));
-		}
-	}
-
-	rcu_read_unlock();
-
-	seq_putc(m, '\n');
-	return 0;
-}
-
-static int can_rcvlist_eff_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, can_rcvlist_eff_proc_show, NULL);
-}
-
-static const struct file_operations can_rcvlist_eff_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= can_rcvlist_eff_proc_open,
 	.read		= seq_read,
 	.llseek		= seq_lseek,
 	.release	= single_release,
@@ -517,7 +471,8 @@ void can_init_proc(void)
 	can_dir = proc_mkdir("can", init_net.proc_net);
 
 	if (!can_dir) {
-		pr_info("can: failed to create /proc/net/can.\n");
+		printk(KERN_INFO "can: failed to create /proc/net/can . "
+		       "CONFIG_PROC_FS missing?\n");
 		return;
 	}
 
@@ -536,8 +491,8 @@ void can_init_proc(void)
 					   &can_rcvlist_proc_fops, (void *)RX_FIL);
 	pde_rcvlist_inv = proc_create_data(CAN_PROC_RCVLIST_INV, 0644, can_dir,
 					   &can_rcvlist_proc_fops, (void *)RX_INV);
-	pde_rcvlist_eff = proc_create(CAN_PROC_RCVLIST_EFF, 0644, can_dir,
-				      &can_rcvlist_eff_proc_fops);
+	pde_rcvlist_eff = proc_create_data(CAN_PROC_RCVLIST_EFF, 0644, can_dir,
+					   &can_rcvlist_proc_fops, (void *)RX_EFF);
 	pde_rcvlist_sff = proc_create(CAN_PROC_RCVLIST_SFF, 0644, can_dir,
 				      &can_rcvlist_sff_proc_fops);
 }

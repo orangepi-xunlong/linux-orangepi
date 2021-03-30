@@ -15,13 +15,13 @@
 #ifdef __KERNEL__
 /*
  * the rw-semaphore definition
- * - if count is 0 then there are no active readers or writers
- * - if count is +ve then that is the number of active readers
- * - if count is -1 then there is one active writer
+ * - if activity is 0 then there are no active readers or writers
+ * - if activity is +ve then that is the number of active readers
+ * - if activity is -1 then there is one active writer
  * - if wait_list is not empty, then there are processes waiting for the semaphore
  */
 struct rw_semaphore {
-	__s32			count;
+	__s32			activity;
 	raw_spinlock_t		wait_lock;
 	struct list_head	wait_list;
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
@@ -34,7 +34,7 @@ struct rw_semaphore {
 extern void __down_read(struct rw_semaphore *sem);
 extern int __down_read_trylock(struct rw_semaphore *sem);
 extern void __down_write(struct rw_semaphore *sem);
-extern int __must_check __down_write_killable(struct rw_semaphore *sem);
+extern void __down_write_nested(struct rw_semaphore *sem, int subclass);
 extern int __down_write_trylock(struct rw_semaphore *sem);
 extern void __up_read(struct rw_semaphore *sem);
 extern void __up_write(struct rw_semaphore *sem);

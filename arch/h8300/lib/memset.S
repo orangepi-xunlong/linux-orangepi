@@ -2,22 +2,21 @@
 
 #include <asm/linkage.h>
 
-#if defined(CONFIG_CPU_H8300H)
+#if defined(__H8300H__) 
 	.h8300h
 #endif
-#if defined(CONFIG_CPU_H8S)
+#if defined(__H8300S__) 
 	.h8300s
 #endif
 	.text
 
-.global	memset
-.global	clear_user
+.global	SYMBOL_NAME(memset)
 
 ;;void *memset(*ptr, int c, size_t count)
 ;; ptr = er0
 ;; c   = er1(r1l)
 ;; count = er2
-memset:
+SYMBOL_NAME_LABEL(memset)
 	btst	#0,r0l
 	beq	2f
 
@@ -34,11 +33,11 @@ memset:
 	cmp.l	#4,er2
 	blo	4f
 	;; count>=4 -> count/4
-#if defined(CONFIG_CPU_H8300H)
+#if defined(__H8300H__)
 	shlr.l	er2
 	shlr.l	er2
 #endif
-#if defined(CONFIG_CPU_H8S)
+#if defined(__H8300S__)
 	shlr.l	#2,er2
 #endif
 	;; byte -> long
@@ -60,10 +59,3 @@ memset:
 	bne	5b
 6:
 	rts
-
-clear_user:
-	mov.l	er1, er2
-	sub.l	er1, er1
-	bra	memset
-
-	.end

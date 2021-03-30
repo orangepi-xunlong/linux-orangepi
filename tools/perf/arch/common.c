@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <sys/utsname.h>
 #include "common.h"
-#include "../util/util.h"
 #include "../util/debug.h"
 
 const char *const arm_triplets[] = {
@@ -10,44 +9,29 @@ const char *const arm_triplets[] = {
 	"arm-unknown-linux-",
 	"arm-unknown-linux-gnu-",
 	"arm-unknown-linux-gnueabi-",
-	"arm-linux-gnu-",
-	"arm-linux-gnueabihf-",
-	"arm-none-eabi-",
-	NULL
-};
-
-const char *const arm64_triplets[] = {
-	"aarch64-linux-android-",
-	"aarch64-linux-gnu-",
 	NULL
 };
 
 const char *const powerpc_triplets[] = {
 	"powerpc-unknown-linux-gnu-",
 	"powerpc64-unknown-linux-gnu-",
-	"powerpc64-linux-gnu-",
-	"powerpc64le-linux-gnu-",
 	NULL
 };
 
 const char *const s390_triplets[] = {
 	"s390-ibm-linux-",
-	"s390x-linux-gnu-",
 	NULL
 };
 
 const char *const sh_triplets[] = {
 	"sh-unknown-linux-gnu-",
 	"sh64-unknown-linux-gnu-",
-	"sh-linux-gnu-",
-	"sh64-linux-gnu-",
 	NULL
 };
 
 const char *const sparc_triplets[] = {
 	"sparc-unknown-linux-gnu-",
 	"sparc64-unknown-linux-gnu-",
-	"sparc64-linux-gnu-",
 	NULL
 };
 
@@ -60,26 +44,19 @@ const char *const x86_triplets[] = {
 	"i386-pc-linux-gnu-",
 	"i686-linux-android-",
 	"i686-android-linux-",
-	"x86_64-linux-gnu-",
-	"i586-linux-gnu-",
 	NULL
 };
 
 const char *const mips_triplets[] = {
 	"mips-unknown-linux-gnu-",
 	"mipsel-linux-android-",
-	"mips-linux-gnu-",
-	"mips64-linux-gnu-",
-	"mips64el-linux-gnuabi64-",
-	"mips64-linux-gnuabi64-",
-	"mipsel-linux-gnu-",
 	NULL
 };
 
 static bool lookup_path(char *name)
 {
 	bool found = false;
-	char *path, *tmp = NULL;
+	char *path, *tmp;
 	char buf[PATH_MAX];
 	char *env = getenv("PATH");
 
@@ -120,7 +97,7 @@ static int lookup_triplets(const char *const *triplets, const char *name)
  * Return architecture name in a normalized form.
  * The conversion logic comes from the Makefile.
  */
-const char *normalize_arch(char *arch)
+static const char *normalize_arch(char *arch)
 {
 	if (!strcmp(arch, "x86_64"))
 		return "x86";
@@ -128,8 +105,6 @@ const char *normalize_arch(char *arch)
 		return "x86";
 	if (!strcmp(arch, "sun4u") || !strncmp(arch, "sparc", 5))
 		return "sparc";
-	if (!strcmp(arch, "aarch64") || !strcmp(arch, "arm64"))
-		return "arm64";
 	if (!strncmp(arch, "arm", 3) || !strcmp(arch, "sa110"))
 		return "arm";
 	if (!strncmp(arch, "s390", 4))
@@ -146,8 +121,9 @@ const char *normalize_arch(char *arch)
 	return arch;
 }
 
-static int perf_env__lookup_binutils_path(struct perf_env *env,
-					  const char *name, const char **path)
+static int perf_session_env__lookup_binutils_path(struct perf_session_env *env,
+						  const char *name,
+						  const char **path)
 {
 	int idx;
 	const char *arch, *cross_env;
@@ -178,13 +154,12 @@ static int perf_env__lookup_binutils_path(struct perf_env *env,
 		}
 		if (lookup_path(buf))
 			goto out;
-		zfree(&buf);
+		free(buf);
+		buf = NULL;
 	}
 
 	if (!strcmp(arch, "arm"))
 		path_list = arm_triplets;
-	else if (!strcmp(arch, "arm64"))
-		path_list = arm64_triplets;
 	else if (!strcmp(arch, "powerpc"))
 		path_list = powerpc_triplets;
 	else if (!strcmp(arch, "sh"))
@@ -223,7 +198,7 @@ out_error:
 	return -1;
 }
 
-int perf_env__lookup_objdump(struct perf_env *env)
+int perf_session_env__lookup_objdump(struct perf_session_env *env)
 {
 	/*
 	 * For live mode, env->arch will be NULL and we can use
@@ -232,5 +207,6 @@ int perf_env__lookup_objdump(struct perf_env *env)
 	if (env->arch == NULL)
 		return 0;
 
-	return perf_env__lookup_binutils_path(env, "objdump", &objdump_path);
+	return perf_session_env__lookup_binutils_path(env, "objdump",
+						      &objdump_path);
 }

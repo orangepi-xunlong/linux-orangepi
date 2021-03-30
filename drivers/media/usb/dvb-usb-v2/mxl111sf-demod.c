@@ -1,7 +1,7 @@
 /*
  *  mxl111sf-demod.c - driver for the MaxLinear MXL111SF DVB-T demodulator
  *
- *  Copyright (C) 2010-2014 Michael Krufky <mkrufky@linuxtv.org>
+ *  Copyright (C) 2010 Michael Krufky <mkrufky@kernellabs.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -35,7 +35,7 @@ MODULE_PARM_DESC(debug, "set debugging level (1=info (or-able)).");
 struct mxl111sf_demod_state {
 	struct mxl111sf_state *mxl_state;
 
-	const struct mxl111sf_demod_config *cfg;
+	struct mxl111sf_demod_config *cfg;
 
 	struct dvb_frontend fe;
 };
@@ -72,7 +72,7 @@ int mxl111sf_demod_program_regs(struct mxl111sf_demod_state *state,
 
 static
 int mxl1x1sf_demod_get_tps_code_rate(struct mxl111sf_demod_state *state,
-				     enum fe_code_rate *code_rate)
+				     fe_code_rate_t *code_rate)
 {
 	u8 val;
 	int ret = mxl111sf_demod_read_reg(state, V6_CODE_RATE_TPS_REG, &val);
@@ -103,7 +103,7 @@ fail:
 
 static
 int mxl1x1sf_demod_get_tps_modulation(struct mxl111sf_demod_state *state,
-				      enum fe_modulation *modulation)
+					 fe_modulation_t *modulation)
 {
 	u8 val;
 	int ret = mxl111sf_demod_read_reg(state, V6_MODORDER_TPS_REG, &val);
@@ -128,7 +128,7 @@ fail:
 
 static
 int mxl1x1sf_demod_get_tps_guard_fft_mode(struct mxl111sf_demod_state *state,
-					  enum fe_transmit_mode *fft_mode)
+					  fe_transmit_mode_t *fft_mode)
 {
 	u8 val;
 	int ret = mxl111sf_demod_read_reg(state, V6_MODE_TPS_REG, &val);
@@ -153,7 +153,7 @@ fail:
 
 static
 int mxl1x1sf_demod_get_tps_guard_interval(struct mxl111sf_demod_state *state,
-					  enum fe_guard_interval *guard)
+					  fe_guard_interval_t *guard)
 {
 	u8 val;
 	int ret = mxl111sf_demod_read_reg(state, V6_CP_TPS_REG, &val);
@@ -181,7 +181,7 @@ fail:
 
 static
 int mxl1x1sf_demod_get_tps_hierarchy(struct mxl111sf_demod_state *state,
-				     enum fe_hierarchy *hierarchy)
+				     fe_hierarchy_t *hierarchy)
 {
 	u8 val;
 	int ret = mxl111sf_demod_read_reg(state, V6_TPS_HIERACHY_REG, &val);
@@ -441,7 +441,7 @@ fail:
 }
 
 static int mxl111sf_demod_read_status(struct dvb_frontend *fe,
-				      enum fe_status *status)
+				      fe_status_t *status)
 {
 	struct mxl111sf_demod_state *state = fe->demodulator_priv;
 	int ret, locked, cr_lock, sync_lock, fec_lock;
@@ -480,7 +480,7 @@ static int mxl111sf_demod_read_signal_strength(struct dvb_frontend *fe,
 					       u16 *signal_strength)
 {
 	struct mxl111sf_demod_state *state = fe->demodulator_priv;
-	enum fe_modulation modulation;
+	fe_modulation_t modulation;
 	u16 snr;
 
 	mxl111sf_demod_calc_snr(state, &snr);
@@ -507,9 +507,9 @@ static int mxl111sf_demod_read_signal_strength(struct dvb_frontend *fe,
 	return 0;
 }
 
-static int mxl111sf_demod_get_frontend(struct dvb_frontend *fe,
-				       struct dtv_frontend_properties *p)
+static int mxl111sf_demod_get_frontend(struct dvb_frontend *fe)
 {
+	struct dtv_frontend_properties *p = &fe->dtv_property_cache;
 	struct mxl111sf_demod_state *state = fe->demodulator_priv;
 
 	mxl_dbg("()");
@@ -579,7 +579,7 @@ static struct dvb_frontend_ops mxl111sf_demod_ops = {
 };
 
 struct dvb_frontend *mxl111sf_demod_attach(struct mxl111sf_state *mxl_state,
-				   const struct mxl111sf_demod_config *cfg)
+					   struct mxl111sf_demod_config *cfg)
 {
 	struct mxl111sf_demod_state *state = NULL;
 
@@ -601,6 +601,12 @@ struct dvb_frontend *mxl111sf_demod_attach(struct mxl111sf_state *mxl_state,
 EXPORT_SYMBOL_GPL(mxl111sf_demod_attach);
 
 MODULE_DESCRIPTION("MaxLinear MxL111SF DVB-T demodulator driver");
-MODULE_AUTHOR("Michael Krufky <mkrufky@linuxtv.org>");
+MODULE_AUTHOR("Michael Krufky <mkrufky@kernellabs.com>");
 MODULE_LICENSE("GPL");
 MODULE_VERSION("0.1");
+
+/*
+ * Local variables:
+ * c-basic-offset: 8
+ * End:
+ */

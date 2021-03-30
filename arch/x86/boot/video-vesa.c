@@ -16,7 +16,6 @@
 #include "boot.h"
 #include "video.h"
 #include "vesa.h"
-#include "string.h"
 
 /* VESA information */
 static struct vesa_general_info vginfo;

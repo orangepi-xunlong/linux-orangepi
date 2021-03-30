@@ -13,11 +13,8 @@
  *
  */
 
-#ifndef __USBC_PLATFORM_H__
-#define __USBC_PLATFORM_H__
+#ifndef  __USBC_PLATFORM_H__
+#define  __USBC_PLATFORM_H__
 
-extern struct usb_cfg g_usb_cfg;
-extern __u32 thread_run_flag;
-
-#endif /* __USBC_PLATFORM_H__ */
+#endif   //__USBC_PLATFORM_H__
 

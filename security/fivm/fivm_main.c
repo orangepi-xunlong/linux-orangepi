@@ -26,8 +26,10 @@
 #include <linux/spinlock.h>
 #include <linux/fivm.h>
 
-int fivm_debug;
 #include "fivm.h"
+
+int fivm_debug;
+
 static int fivm_initialized;
 static struct FILE_SIG *file_sig_table;
 static struct FILE_SIG_HEAD *file_sig_head;
@@ -39,9 +41,9 @@ DEFINE_MUTEX(_fid_mutex);
 #include <linux/time.h>
 static void fivm_gettime(const char *str)
 {
-	struct timeval t;
+	struct timeval	t;
 	do_gettimeofday(&t);
-	printk("[FIVM timer]%s: %lu.%lu\n", str, t.tv_sec, t.tv_usec);
+	dprintk("[FIVM timer]%s: %lu.%lu\n", str, t.tv_sec, t.tv_usec);
 }
 #else
 static void fivm_gettime(const char *str)
@@ -55,29 +57,32 @@ static int __walk_to_root(struct file *file, char *pathname,
 			struct fivm_path *search_fp)
 {
 	struct dentry *p;
-	char *start, *f_path;
-	int rc = -1 ;
+	char *start,
+		 *f_path;
+	int rc = -1;
 	int loop, len;
 
 	mutex_lock(&_fid_mutex);
-	p = file->f_path.dentry;
+	p = file->f_dentry;
 
-	start = _p_dir + sizeof(_p_dir) - 1;/*Reserved a null for string end*/
+	start = _p_dir + sizeof(_p_dir) - 1; /*Reserved a null for string end*/
 	memset(_p_dir, 0, sizeof(_p_dir));
-	for (loop = 0; loop < 16 && p; loop++, p = p->d_parent) {
+	for (loop = 0; loop < 16 && p; loop ++, p = p->d_parent) {
 		if (*(p->d_name.name) == '/')
 			break;
-		else {
+		else{
 			len = strnlen(p->d_name.name, MAX_NAME_LEN);
 			start -= len;
 			memcpy(start, p->d_name.name, len);
 			*(--start) = '/';
 		}
+
 	}
 
 	dprintk("FIVM find root path : %s\n", start);
 
-	if (!memcmp(start, ROOT, sizeof(ROOT) - 1)) {
+	if (!memcmp(start, ROOT, sizeof(ROOT)-1)) {
+		/*full file path name*/
 		len = strnlen(start, FILE_NAME_LEN);
 		f_path = kmalloc(len, GFP_KERNEL);
 		if (!f_path) {
@@ -86,34 +91,41 @@ static int __walk_to_root(struct file *file, char *pathname,
 		}
 		memcpy(f_path, start, len);
 		search_fp->path = f_path;
-		search_fp->flag = FIVM_PART_PATH ;
+		search_fp->flag = FIVM_PART_PATH;
 		rc = 0;
 	}
+
 out:
 	mutex_unlock(&_fid_mutex);
 	return rc;
+
 }
 
+/*
+ *
+ */
 static int _find_dir(struct file *file, char *pathname,
 		struct fivm_path *search_fp)
 {
+
 	if (unlikely(!pathname)) {
-		printk("Null file path\n");
+		dprintk("Null file path\n");
 		return -1;
 	}
 
 	if (likely(*pathname == '/'))
 		do {
-			if (!memcmp(pathname, ROOT, sizeof(ROOT) - 1)) {
+			if (!memcmp(pathname, ROOT, sizeof(ROOT)-1)) {
+				/*full file path name*/
 				search_fp->path = pathname;
 				search_fp->flag = FIVM_FULL_PATH;
 				dprintk("Root File path: %s\n", pathname);
 				return 0;
 			}
 		} while (0);
-	else {
+	else
 		return __walk_to_root(file, pathname, search_fp);
-	}
+
 	return -1;
 }
 
@@ -138,7 +150,7 @@ static struct FILE_SIG *_find_file(char *file_name)
 	void *base;
 
 	base = file_sig_table;
-	num = file_sig_head->actual_cnt ;
+	num = file_sig_head->actual_cnt;
 	size = sizeof(struct FILE_SIG);
 
 	slen = strnlen(file_name, FILE_NAME_LEN);
@@ -168,21 +180,22 @@ static void rel_fivm_path(struct fivm_path *fp)
 
 static int process_verify(struct file *file,  char *pathname)
 {
-	struct inode *inode = file->f_path.dentry->d_inode;
+	struct inode *inode = file->f_dentry->d_inode;
 	struct FILE_SIG *fs;
 	int rc = 0;
 	char digest[SHA_DIG_MAX];
 
-	struct fivm_path search_fp = {NULL, 0};
+	struct fivm_path search_fp = { NULL, 0};
+
 	fivm_gettime("Enter process verication");
 
 	if (!fivm_initialized || !S_ISREG(inode->i_mode))
 		return 0;
 
 	rc = _find_dir(file, pathname, &search_fp);
-	if (rc != 0) {
-		return 0; /*Nothing to do, Just go on */
-	}
+	if (rc != 0)
+		/*Nothing to do, Just go on */
+		return 0;
 
 	fivm_gettime("Find directory name ");
 	fs = _find_file(search_fp.path);
@@ -190,17 +203,19 @@ static int process_verify(struct file *file,  char *pathname)
 		derr("Can't find file %s in sha table\n", search_fp.path);
 		goto out;
 	}
+
 	if (fs->flag) {
 		dprintk("Had verified\n");
 		goto out;
 	}
 
 	fivm_gettime("Find file name ");
+
 	memset(digest, 0, SHA_DIG_MAX);
 	rc = fivm_calc_hash(file, digest);
 	if (rc) {
 		derr("fivm_calc_hash fail\n");
-		goto out ;
+		goto out;
 	}
 
 	fivm_gettime("Calc file digest ");
@@ -233,10 +248,11 @@ out:
 static int _fivm_mmap_verify(struct file *file, unsigned long prot)
 {
 	int rc;
+
 	if (!file)
 		return 0;
 
-	rc = process_verify(file, (char *)file->f_path.dentry->d_name.name);
+	rc = process_verify(file, (char *)file->f_dentry->d_name.name);
 	return rc;
 }
 
@@ -271,19 +287,19 @@ static int _file_meta_read(
 
 	if (!filename || !buf) {
 		derr("- filename/buf NULL\n");
-		return (-EINVAL);
+		return -EINVAL;
 	}
 
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
 	fd = filp_open(filename, O_RDONLY, 0);
-
 	if (IS_ERR(fd)) {
 		derr(" -file open fail\n");
 		return -1;
 	}
-	do {if ((fd->f_op == NULL) || (fd->f_op->read == NULL)) {
+	do {
+		if ((fd->f_op == NULL) || (fd->f_op->read == NULL)) {
 			derr(" -file can't to open!!\n");
 			break;
 		}
@@ -299,11 +315,15 @@ static int _file_meta_read(
 			}
 		}
 
-		retLen = fd->f_op->read(fd, buf, len, &fd->f_pos);
+		retlen = fd->f_op->read(fd,
+				buf,
+				len,
+				&fd->f_pos);
 	} while (false);
 
 	filp_close(fd, NULL);
 	set_fs(old_fs);
+
 	return retlen;
 }
 
@@ -314,7 +334,8 @@ static int read_file_hash_table(void)
 		rc = -1,
 		offset;
 
-	file_sig_head = kzalloc(sizeof(*file_sig_head), GFP_KERNEL);
+	file_sig_head = kzalloc(sizeof(*file_sig_head),
+			GFP_KERNEL);
 	if (!file_sig_head) {
 		derr(" out of memory\n");
 		return -ENOMEM;
@@ -327,13 +348,13 @@ static int read_file_hash_table(void)
 			(char *)file_sig_head,
 			rlen,
 			offset);
-	if (rc != rlen  || file_sig_head->magic != FILE_SIG_MAGIC) {
+	if (rc != rlen || file_sig_head->magic != FILE_SIG_MAGIC) {
 		derr("Read file %s fail\n", sig_table);
 		rc = -EIO;
 		goto out;
 	}
 
-    cnt = file_sig_head->actual_cnt;
+	cnt = file_sig_head->actual_cnt;
 	if (cnt > DIR_MAX_FILE_NUM) {
 		derr("out of files count 0x%x\n", cnt);
 		rc = -1;
@@ -344,9 +365,10 @@ static int read_file_hash_table(void)
 	file_sig_table = kzalloc(rlen, GFP_KERNEL);
 	if (!file_sig_table) {
 		derr(" out of memory\n");
-		rc = -ENOMEM ;
+		rc = -ENOMEM;
 		goto out;
 	}
+
 	offset += sizeof(*file_sig_head);
 	rc = _file_meta_read(
 			(char *)sig_table,
@@ -367,14 +389,15 @@ out:
 		kfree(file_sig_table);
 	if (file_sig_head)
 		kfree(file_sig_head);
-	return rc;
 
+	return rc;
 }
 #endif
 
 extern int fivm_register_func(
 		int (*mmap_verify)(struct file *, unsigned long),
-		int (*open_verify)(struct file *, const char *, int));
+		int (*open_verify)(struct file *, const char *, int)
+		);
 extern int fivm_unregister_func(void);
 
 raw_spinlock_t fivm_hook_lock;
@@ -403,7 +426,7 @@ int  fivm_disable(void)
 	fivm_unregister_func();
 	fivm_initialized = 0;
 	raw_spin_unlock(&fivm_hook_lock);
-	return 0 ;
+	return 0;
 }
 
 /*Get fivm table from user*/
@@ -413,17 +436,12 @@ int fivm_set(void *arg)
 	void *sh, *st;
 	unsigned int sh_size, st_size;
 
-	derr("fivm_set trace arg: %p\n", arg);
-
 	if (!access_ok(VERIFY_READ, arg, sizeof(param))) {
 		derr("fivm param error\n");
 		return -EFAULT;
 	}
 
-	if (copy_from_user(&param, (void __user *)arg, sizeof(param))) {
-		derr("fivm_set get param failed\n");
-		return -EFAULT;
-	}
+	memcpy(&param, (void *)arg, sizeof(param));
 
 	sh = param.sig_head;
 	sh_size = param.sig_head_size;
@@ -439,11 +457,11 @@ int fivm_set(void *arg)
 
 	file_sig_head = kzalloc(sh_size, GFP_KERNEL);
 	if (!file_sig_head || file_sig_table) {
-		derr("out of memory \n");
+		derr("out of memory\n");
 		return -EFAULT;
 	}
 
-	if (copy_from_user(file_sig_head, (void __user *)sh, sh_size)) {
+	if (copy_from_user(file_sig_head, (void __user *) sh, sh_size)) {
 		derr("fivm sig head buffer from user fail\n");
 		kfree(file_sig_head);
 		return -EFAULT;
@@ -491,5 +509,7 @@ int fivm_cleanup(void)
 		kfree(file_sig_head);
 	if (file_sig_table)
 		kfree(file_sig_table);
-	return 0 ;
+	return 0;
 }
+
+

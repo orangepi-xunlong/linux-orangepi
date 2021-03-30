@@ -7,8 +7,8 @@
  * Licensed under the GPL-2 or later.
  */
 
-#ifndef _UAPI_ASM_CACHECTL
-#define _UAPI_ASM_CACHECTL
+#ifndef	_ASM_CACHECTL
+#define	_ASM_CACHECTL
 
 /*
  * Options for cacheflush system call
@@ -17,4 +17,4 @@
 #define	DCACHE	(1<<1)		/* writeback and flush data cache */
 #define	BCACHE	(ICACHE|DCACHE)	/* flush both caches              */
 
-#endif /* _UAPI_ASM_CACHECTL */
+#endif	/* _ASM_CACHECTL */

@@ -304,12 +304,12 @@ static long rtc_dev_ioctl(struct file *file,
 		 * Not supported here.
 		 */
 		{
-			time64_t now, then;
+			unsigned long now, then;
 
 			err = rtc_read_time(rtc, &tm);
 			if (err < 0)
 				return err;
-			now = rtc_tm_to_time64(&tm);
+			rtc_tm_to_time(&tm, &now);
 
 			alarm.time.tm_mday = tm.tm_mday;
 			alarm.time.tm_mon = tm.tm_mon;
@@ -317,11 +317,11 @@ static long rtc_dev_ioctl(struct file *file,
 			err  = rtc_valid_tm(&alarm.time);
 			if (err < 0)
 				return err;
-			then = rtc_tm_to_time64(&alarm.time);
+			rtc_tm_to_time(&alarm.time, &then);
 
 			/* alarm may need to wrap into tomorrow */
 			if (then < now) {
-				rtc_time64_to_tm(now + 24 * 60 * 60, &tm);
+				rtc_time_to_tm(now + 24 * 60 * 60, &tm);
 				alarm.time.tm_mday = tm.tm_mday;
 				alarm.time.tm_mon = tm.tm_mon;
 				alarm.time.tm_year = tm.tm_year;
@@ -477,7 +477,6 @@ void rtc_dev_prepare(struct rtc_device *rtc)
 
 	cdev_init(&rtc->char_dev, &rtc_dev_fops);
 	rtc->char_dev.owner = rtc->owner;
-	rtc->char_dev.kobj.parent = &rtc->dev.kobj;
 }
 
 void rtc_dev_add_device(struct rtc_device *rtc)

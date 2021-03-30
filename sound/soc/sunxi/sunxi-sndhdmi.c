@@ -1,8 +1,8 @@
 /*
  * sound\soc\sunxi\sunxi-sndhdmi.c
  * (C) Copyright 2014-2016
- * Allwinner Technology Co., Ltd. <www.allwinnertech.com>
- * huangxin <huangxin@allwinnertech.com>
+ * Reuuimlla Technology Co., Ltd. <www.reuuimllatech.com>
+ * huangxin <huangxin@Reuuimllatech.com>
  *
  * some simple description for this code
  *
@@ -24,15 +24,9 @@
 #include <linux/io.h>
 #include <linux/of.h>
 
-#include "sunxi-pcm.h"
+#include "sunxi_dma.h"
 
-static struct sndhdmi_priv sunxi_tdmhdmi;
-
-/*
- * sun8iw6 sound machine:
- * i2s0 -> sndi2s0, i2s1 -> snddi2s1,
- * i2s2 -> sndhdmi, tdm -> snddaudio0.
- */
+static struct sunxi_hdmi_priv sunxi_tdmhdmi;
 
 static int sunxi_hdmiaudio_set_audio_mode(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
@@ -48,10 +42,7 @@ static int sunxi_hdmiaudio_get_audio_mode(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static const char *hdmiaudio_format_function[] = {"null", "pcm", "AC3",
-		"MPEG1", "MP3", "MPEG2", "AAC", "DTS", "ATRAC", "ONE_BIT_AUDIO",
-		"DOLBY_DIGITAL_PLUS", "DTS_HD", "MAT", "WMAPRO"};
-
+static const char *hdmiaudio_format_function[] = {"null", "pcm", "AC3", "MPEG1", "MP3", "MPEG2", "AAC", "DTS", "ATRAC", "ONE_BIT_AUDIO", "DOLBY_DIGITAL_PLUS", "DTS_HD", "MAT", "WMAPRO"};
 static const struct soc_enum hdmiaudio_format_enum[] = {
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(hdmiaudio_format_function),
 			hdmiaudio_format_function),
@@ -72,9 +63,7 @@ static int sunxi_sndhdmi_hw_params(struct snd_pcm_substream *substream,
 	unsigned int freq;
 	unsigned int clk_div;
 	int ret;
-#ifdef CONFIG_ARCH_SUN8IW6
-	unsigned long sample_rate = params_rate(params);
-#endif
+
 	switch (params_rate(params)) {
 	case 8000:
 	case 16000:
@@ -86,22 +75,14 @@ static int sunxi_sndhdmi_hw_params(struct snd_pcm_substream *substream,
 	case 48000:
 	case 96000:
 	case 192000:
-#ifdef CONFIG_AHUB_FREQ_REQ
-		freq = 98304000;
-#else
 		freq = 24576000;
-#endif
 		break;
 	case	11025:
 	case	22050:
 	case	44100:
 	case	88200:
 	case	176400:
-#ifdef CONFIG_AHUB_FREQ_REQ
-		freq = 90316800;
-#else
 		freq = 22579200;
-#endif
 		break;
 	default:
 		dev_err(card->dev, "unsupport freq\n");
@@ -109,32 +90,29 @@ static int sunxi_sndhdmi_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	/*set system clock source freq and set the mode as i2s0 or pcm*/
-	ret = snd_soc_dai_set_sysclk(cpu_dai, 0, freq, 0);
-	if (ret < 0)
+	ret = snd_soc_dai_set_sysclk(cpu_dai, 0 , freq, 0);
+	if (ret < 0) {
 		return ret;
+	}
 
 	/*
-	 * I2S mode normal bit clock + frame\codec clk & FRM slave
-	 */
-	ret = snd_soc_dai_set_fmt(cpu_dai, SND_SOC_DAIFMT_I2S |
-			SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBS_CFS);
-	if (ret < 0)
+	* I2S mode \normal bit clock + frame\codec clk & FRM slave
+	*/
+	ret = snd_soc_dai_set_fmt(cpu_dai, SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBS_CFS);
+	if (ret < 0) {
 		return ret;
+	}
 
 	clk_div = freq / params_rate(params);
-#ifdef CONFIG_ARCH_SUN8IW6
-	ret = snd_soc_dai_set_clkdiv(cpu_dai, 0, sample_rate);
-#else
 	ret = snd_soc_dai_set_clkdiv(cpu_dai, 0, clk_div);
-#endif
-	if (ret < 0)
+	if (ret < 0) {
 		return ret;
-
+	}
 	return 0;
 }
 
 static struct snd_soc_ops sunxi_sndhdmi_ops = {
-	.hw_params	= sunxi_sndhdmi_hw_params,
+	.hw_params 	= sunxi_sndhdmi_hw_params,
 };
 
 static int sunxi_sndhdmi_probe(struct snd_soc_card *card)
@@ -144,27 +122,26 @@ static int sunxi_sndhdmi_probe(struct snd_soc_card *card)
 	ret = snd_soc_add_card_controls(card, sunxi_hdmiaudio_controls,
 				ARRAY_SIZE(sunxi_hdmiaudio_controls));
 	if (ret)
-		dev_warn(card->dev,
-			"Failed to register audio mode control.\n");
+		dev_warn(card->dev, "Failed to register audio mode control, will continue without it.\n");
 	return 0;
 }
 
 static struct snd_soc_dai_link sunxi_sndhdmi_dai_link = {
-	.name		= "HDMIAUDIO",
+	.name	= "HDMIAUDIO",
 	.stream_name	= "SUNXI-HDMIAUDIO",
 	.cpu_dai_name	= "sunxi-hdmiaudio.0",
-	.codec_dai_name	= "audiohdmi-dai",
+	.codec_dai_name	= "sndhdmi",
 	.platform_name	= "sunxi-hdmiaudio-pcm-audio.0",
 	.codec_name	= "sunxi-hdmiaudio-codec.0",
 	.ops		= &sunxi_sndhdmi_ops,
 };
 
 static struct snd_soc_card snd_soc_sunxi_sndhdmi = {
-	.name		= "sndhdmi",
-	.owner		= THIS_MODULE,
+	.name 		= "sndhdmi",
+	.owner 		= THIS_MODULE,
 	.probe		= sunxi_sndhdmi_probe,
-	.dai_link	= &sunxi_sndhdmi_dai_link,
-	.num_links	= 1,
+	.dai_link 	= &sunxi_sndhdmi_dai_link,
+	.num_links 	= 1,
 };
 
 static int sunxi_sndhdmi_dev_probe(struct platform_device *pdev)
@@ -175,34 +152,22 @@ static int sunxi_sndhdmi_dev_probe(struct platform_device *pdev)
 
 	card->dev = &pdev->dev;
 	sunxi_tdmhdmi.hdmi_format = 1;
-
-#ifdef CONFIG_SND_SUNXI_SOC_AHUB
-	sunxi_sndhdmi_dai_link.cpu_dai_name = NULL;
-	sunxi_sndhdmi_dai_link.cpu_of_node = of_parse_phandle(np,
-					"sunxi,cpudai-controller", 0);
-	if (!sunxi_sndhdmi_dai_link.cpu_of_node) {
-		dev_err(&pdev->dev, "Property 'sunxi,cpudai-controller' missing or invalid\n");
-		return -EINVAL;
-	}
-	sunxi_sndhdmi_dai_link.platform_name = "snd-soc-dummy";
-#else
 	if (np) {
 		sunxi_sndhdmi_dai_link.cpu_dai_name = NULL;
 		sunxi_sndhdmi_dai_link.cpu_of_node = of_parse_phandle(np,
 					"sunxi,hdmi-controller", 0);
 		if (!sunxi_sndhdmi_dai_link.cpu_of_node) {
 			dev_err(&pdev->dev,
-				"Property 'sunxi,hdmi-controller' missing\n");
+				"Property 'sunxi,hdmi-controller' missing or invalid\n");
 			ret = -EINVAL;
 		}
 		sunxi_sndhdmi_dai_link.platform_name = NULL;
-		sunxi_sndhdmi_dai_link.platform_of_node =
-				sunxi_sndhdmi_dai_link.cpu_of_node;
+		sunxi_sndhdmi_dai_link.platform_of_node = sunxi_sndhdmi_dai_link.cpu_of_node;
 	} else {
-		dev_err(&pdev->dev, "hdmi dt node missing or invalid\n");
+		dev_err(&pdev->dev,"hdmi dt node missing or invalid\n");
 		ret = -EINVAL;
 	}
-#endif
+
 	snd_soc_card_set_drvdata(card, &sunxi_tdmhdmi);
 	ret = snd_soc_register_card(card);
 	if (ret) {
@@ -236,22 +201,7 @@ static struct platform_driver sunxi_hdmiaudio_driver = {
 	.remove = __exit_p(sunxi_sndhdmi_dev_remove),
 };
 
-#ifdef CONFIG_ARCH_SUN50IW6
-static int __init sunxi_hdmiaudio_driver_init(void)
-{
-	return platform_driver_register(&sunxi_hdmiaudio_driver);
-}
-
-static void __exit sunxi_hdmiaudio_driver_exit(void)
-{
-	platform_driver_unregister(&sunxi_hdmiaudio_driver);
-}
-
-late_initcall(sunxi_hdmiaudio_driver_init);
-module_exit(sunxi_hdmiaudio_driver_exit);
-#else
 module_platform_driver(sunxi_hdmiaudio_driver);
-#endif
 
 MODULE_AUTHOR("wolfgang huang <huangjinhui@allwinnertech.com>");
 MODULE_DESCRIPTION("SUNXI HDMI ASoC Machine driver");

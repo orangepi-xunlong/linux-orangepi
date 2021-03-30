@@ -10,9 +10,12 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  */
 #include <linux/clocksource.h>
-#include <linux/sched_clock.h>
 
 #include <asm/addrspace.h>
 #include <asm/io.h>
@@ -30,20 +33,13 @@
  * The HPT is free running from SB1250_HPT_VALUE down to 0 then starts over
  * again.
  */
-static inline cycle_t sb1250_hpt_get_cycles(void)
-{
-	unsigned int count;
-	void __iomem *addr;
-
-	addr = IOADDR(A_SCD_TIMER_REGISTER(SB1250_HPT_NUM, R_SCD_TIMER_CNT));
-	count = G_SCD_TIMER_CNT(__raw_readq(addr));
-
-	return SB1250_HPT_VALUE - count;
-}
-
 static cycle_t sb1250_hpt_read(struct clocksource *cs)
 {
-	return sb1250_hpt_get_cycles();
+	unsigned int count;
+
+	count = G_SCD_TIMER_CNT(__raw_readq(IOADDR(A_SCD_TIMER_REGISTER(SB1250_HPT_NUM, R_SCD_TIMER_CNT))));
+
+	return SB1250_HPT_VALUE - count;
 }
 
 struct clocksource bcm1250_clocksource = {
@@ -53,11 +49,6 @@ struct clocksource bcm1250_clocksource = {
 	.mask	= CLOCKSOURCE_MASK(23),
 	.flags	= CLOCK_SOURCE_IS_CONTINUOUS,
 };
-
-static u64 notrace sb1250_read_sched_clock(void)
-{
-	return sb1250_hpt_get_cycles();
-}
 
 void __init sb1250_clocksource_init(void)
 {
@@ -75,6 +66,4 @@ void __init sb1250_clocksource_init(void)
 						 R_SCD_TIMER_CFG)));
 
 	clocksource_register_hz(cs, V_SCD_TIMER_FREQ);
-
-	sched_clock_register(sb1250_read_sched_clock, 23, V_SCD_TIMER_FREQ);
 }

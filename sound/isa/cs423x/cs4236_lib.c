@@ -79,7 +79,7 @@
  *
  */
 
-#include <linux/io.h>
+#include <asm/io.h>
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/time.h>
@@ -376,14 +376,17 @@ int snd_cs4236_create(struct snd_card *card,
 	return 0;
 }
 
-int snd_cs4236_pcm(struct snd_wss *chip, int device)
+int snd_cs4236_pcm(struct snd_wss *chip, int device, struct snd_pcm **rpcm)
 {
+	struct snd_pcm *pcm;
 	int err;
 	
-	err = snd_wss_pcm(chip, device);
+	err = snd_wss_pcm(chip, device, &pcm);
 	if (err < 0)
 		return err;
-	chip->pcm->info_flags &= ~SNDRV_PCM_INFO_JOINT_DUPLEX;
+	pcm->info_flags &= ~SNDRV_PCM_INFO_JOINT_DUPLEX;
+	if (rpcm)
+		*rpcm = pcm;
 	return 0;
 }
 

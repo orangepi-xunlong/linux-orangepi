@@ -14,6 +14,10 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #include <linux/delay.h>
@@ -34,10 +38,11 @@ int sunxi_cpu_kill(unsigned int cpu)
 	for (k = 0; k < 1000; k++) {
 		if (cpumask_test_cpu(cpu, &dead_cpus)) {
 			if (sunxi_is_wfi_mode(cpu)) {
+#ifndef CONFIG_ARCH_SUN8IW10
 				sunxi_disable_cpu(cpu);
-				pr_debug("%s: cpu%d is killed!\n",
-						__func__, cpu);
-#ifdef CONFIG_ARM_SUNXI_CPUIDLE
+#endif
+				pr_debug("%s: cpu%d is killed!\n", __func__, cpu);
+#ifdef CONFIG_CPU_IDLE_SUNXI
 				sunxi_idle_cpux_flag_valid(cpu, 1);
 #endif
 				return 1;
@@ -63,12 +68,12 @@ void sunxi_cpu_die(unsigned int cpu)
 
 	cpumask_set_cpu(cpu, &dead_cpus);
 
-#ifdef CONFIG_ARM_SUNXI_CPUIDLE
+#ifdef CONFIG_CPU_IDLE_SUNXI
 	sunxi_idle_cpux_flag_set(cpu, 1);
 #endif
 
 	/* step1: disable the data cache */
-	asm("mrc p15, 0, %0, c1, c0, 0" : "=r" (actlr));
+	asm("mrc p15, 0, %0, c1, c0, 0" : "=r" (actlr) );
 	actlr &= ~(1<<2);
 	asm volatile("mcr p15, 0, %0, c1, c0, 0\n" : : "r" (actlr));
 
@@ -78,10 +83,8 @@ void sunxi_cpu_die(unsigned int cpu)
 	/* step3: execute a CLREX instruction */
 	asm("clrex" : : : "memory", "cc");
 
-	/* step4: switch cpu from SMP mode to AMP mode,
-	 * aim is to disable cache coherency
-	 */
-	asm("mrc p15, 0, %0, c1, c0, 1" : "=r" (actlr));
+	/* step4: switch cpu from SMP mode to AMP mode, aim is to disable cache coherency */
+	asm("mrc p15, 0, %0, c1, c0, 1" : "=r" (actlr) );
 	actlr &= ~(1<<6);
 	asm volatile("mcr p15, 0, %0, c1, c0, 1\n" : : "r" (actlr));
 
@@ -92,6 +95,7 @@ void sunxi_cpu_die(unsigned int cpu)
 	dsb();
 
 	/* step7: execute a WFI instruction */
-	while (1)
+	while (1) {
 		asm("wfi" : : : "memory", "cc");
+	}
 }

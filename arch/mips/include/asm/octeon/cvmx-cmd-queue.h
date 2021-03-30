@@ -76,8 +76,6 @@
 
 #include <linux/prefetch.h>
 
-#include <asm/compiler.h>
-
 #include <asm/octeon/cvmx-fpa.h>
 /**
  * By default we disable the max depth support. Most programs
@@ -146,7 +144,7 @@ typedef struct {
  * This structure contains the global state of all command queues.
  * It is stored in a bootmem named block and shared by all
  * applications running on Octeon. Tickets are stored in a differnet
- * cache line that queue information to reduce the contention on the
+ * cahce line that queue information to reduce the contention on the
  * ll/sc used to get a ticket. If this is not the case, the update
  * of queue state causes the ll/sc to fail quite often.
  */
@@ -275,7 +273,7 @@ static inline void __cvmx_cmd_queue_lock(cvmx_cmd_queue_id_t queue_id,
 		" lbu	%[ticket], %[now_serving]\n"
 		"4:\n"
 		".set pop\n" :
-		[ticket_ptr] "=" GCC_OFF_SMALL_ASM()(__cvmx_cmd_queue_state_ptr->ticket[__cvmx_cmd_queue_get_index(queue_id)]),
+		[ticket_ptr] "=m"(__cvmx_cmd_queue_state_ptr->ticket[__cvmx_cmd_queue_get_index(queue_id)]),
 		[now_serving] "=m"(qptr->now_serving), [ticket] "=r"(tmp),
 		[my_ticket] "=r"(my_ticket)
 	    );

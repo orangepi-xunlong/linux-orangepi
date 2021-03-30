@@ -19,7 +19,6 @@
 #include <linux/errno.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
-#include <linux/of_irq.h>
 #include <linux/of_platform.h>
 
 #include <asm/dcr.h>
@@ -109,7 +108,7 @@ static int __init ppc4xx_l2c_probe(void)
 
 	/* Get and map irq number from device tree */
 	irq = irq_of_parse_and_map(np, 0);
-	if (!irq) {
+	if (irq == NO_IRQ) {
 		printk(KERN_ERR "irq_of_parse_and_map failed\n");
 		of_node_put(np);
 		return -ENODEV;

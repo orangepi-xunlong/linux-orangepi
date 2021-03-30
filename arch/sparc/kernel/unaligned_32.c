@@ -16,10 +16,6 @@
 #include <linux/smp.h>
 #include <linux/perf_event.h>
 
-#include <asm/setup.h>
-
-#include "kernel.h"
-
 enum direction {
 	load,    /* ld, ldd, ldh, ldsh */
 	store,   /* st, std, sth, stsh */
@@ -166,7 +162,7 @@ unsigned long safe_compute_effective_address(struct pt_regs *regs,
 /* This is just to make gcc think panic does return... */
 static void unaligned_panic(char *str)
 {
-	panic("%s", str);
+	panic(str);
 }
 
 /* una_asm.S */

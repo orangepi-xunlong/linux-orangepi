@@ -1,17 +1,18 @@
+
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/modules/flash/flash.h
+ ******************************************************************************
  *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
+ * flash.h
  *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
+ * Hawkview ISP - flash.h module
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Copyright (c) 2015 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
  *
+ * Version		  Author         Date		    Description
+ *
+ *   3.0		  Zhao Wei   	2015/12/02	ISP Tuning Tools Support
+ *
+ ******************************************************************************
  */
 
 #ifndef __FLASH_H__
@@ -20,7 +21,6 @@
 #include <linux/module.h>
 #include <media/v4l2-subdev.h>
 #include <media/v4l2-dev.h>
-#include <media/v4l2-ctrls.h>
 
 #include "../../utility/vin_os.h"
 
@@ -83,7 +83,6 @@ struct flash_dev {
 	struct platform_device *pdev;
 	unsigned int id;
 	struct flash_dev_info fl_info;
-	struct v4l2_ctrl_handler handler;
 	struct list_head flash_list;
 };
 

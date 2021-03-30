@@ -3,7 +3,7 @@
 
 #include <linux/list.h>
 #include <linux/elf.h>
-#include <asm/extable.h>
+#include <asm/uaccess.h>
 
 struct mod_arch_specific {
 	/* Data Bus Error exception tables */
@@ -88,14 +88,10 @@ search_module_dbetables(unsigned long addr)
 #define MODULE_PROC_FAMILY "MIPS32_R1 "
 #elif defined CONFIG_CPU_MIPS32_R2
 #define MODULE_PROC_FAMILY "MIPS32_R2 "
-#elif defined CONFIG_CPU_MIPS32_R6
-#define MODULE_PROC_FAMILY "MIPS32_R6 "
 #elif defined CONFIG_CPU_MIPS64_R1
 #define MODULE_PROC_FAMILY "MIPS64_R1 "
 #elif defined CONFIG_CPU_MIPS64_R2
 #define MODULE_PROC_FAMILY "MIPS64_R2 "
-#elif defined CONFIG_CPU_MIPS64_R6
-#define MODULE_PROC_FAMILY "MIPS64_R6 "
 #elif defined CONFIG_CPU_R3000
 #define MODULE_PROC_FAMILY "R3000 "
 #elif defined CONFIG_CPU_TX39XX
@@ -130,8 +126,6 @@ search_module_dbetables(unsigned long addr)
 #define MODULE_PROC_FAMILY "LOONGSON1 "
 #elif defined CONFIG_CPU_LOONGSON2
 #define MODULE_PROC_FAMILY "LOONGSON2 "
-#elif defined CONFIG_CPU_LOONGSON3
-#define MODULE_PROC_FAMILY "LOONGSON3 "
 #elif defined CONFIG_CPU_CAVIUM_OCTEON
 #define MODULE_PROC_FAMILY "OCTEON "
 #elif defined CONFIG_CPU_XLR
@@ -148,7 +142,13 @@ search_module_dbetables(unsigned long addr)
 #define MODULE_KERNEL_TYPE "64BIT "
 #endif
 
+#ifdef CONFIG_MIPS_MT_SMTC
+#define MODULE_KERNEL_SMTC "MT_SMTC "
+#else
+#define MODULE_KERNEL_SMTC ""
+#endif
+
 #define MODULE_ARCH_VERMAGIC \
-	MODULE_PROC_FAMILY MODULE_KERNEL_TYPE
+	MODULE_PROC_FAMILY MODULE_KERNEL_TYPE MODULE_KERNEL_SMTC
 
 #endif /* _ASM_MODULE_H */

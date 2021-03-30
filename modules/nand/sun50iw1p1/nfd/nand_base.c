@@ -17,11 +17,9 @@ extern __u32 nand_wait_rb_mode(void);
 extern __u32 nand_wait_dma_mode(void);
 extern void do_nand_interrupt(unsigned int no);
 extern void print_nftl_zone(void *zone);
-extern int nand_before_shutdown(void *zone);
 extern int NAND_get_storagetype(void);
 extern int NAND_Get_Dragonboard_Flag(void);
 extern int nand_thread(void *arg);
-extern int NAND_CheckBoot(void);
 
 int test_mbr(uchar *data);
 extern int NAND_Print_DBG(const char *fmt, ...);
@@ -184,7 +182,7 @@ static int nand_probe(struct platform_device *plat_dev)
 
 		irq = irq_of_parse_and_map(ndfc_dev->of_node, 0);
 		if (request_irq
-		    (irq, nand_interrupt, 0, dev_name, &channel0)) {
+		    (irq, nand_interrupt, IRQF_DISABLED, dev_name, &channel0)) {
 			nand_dbg_err
 			    ("nand interrupte ch0 irqno: %d register error\n",
 			     irq);
@@ -257,7 +255,6 @@ uint32 shutdown_flush_write_cache(void)
 		nftl_blk->flush_write_cache(nftl_blk, 0xffff);
 
 		print_nftl_zone(nftl_blk->nftl_zone);
-		nand_before_shutdown(nftl_blk->nftl_zone);
 
 		nftl_blk = nftl_blk->nftl_blk_next;
 
@@ -279,7 +276,8 @@ void nand_shutdown(struct platform_device *plat_dev)
 	struct nand_blk_ops *tr = &mytr;
 
 	nand_dbg_err("[NAND]shutdown first\n");
-	list_for_each_entry(dev, &tr->devs, list) {
+	list_for_each_entry(dev, &tr->devs, list)
+	{
 		while (blk_fetch_request(dev->rq) != NULL) {
 			nand_dbg_err("nand_shutdown wait dev %d\n",
 			    dev->devnum);
@@ -289,7 +287,8 @@ void nand_shutdown(struct platform_device *plat_dev)
 	}
 
 	nand_dbg_err("[NAND]shutdown second\n");
-	list_for_each_entry(dev, &tr->devs, list) {
+	list_for_each_entry(dev, &tr->devs, list)
+	{
 		while (blk_fetch_request(dev->rq) != NULL) {
 			nand_dbg_err("nand_shutdown wait dev %d\n",
 			    dev->devnum);
@@ -364,8 +363,6 @@ int __init nand_init(void)
 
 	if (exit_probe_flag == 0) {
 		nand_dbg_err("Failed to insmod nand!!!\n");
-		if (data != NULL)
-			 kfree(data);
 		return 0;
 	}
 
@@ -426,17 +423,12 @@ int __init nand_init(void)
 			return ret;
 		}
 
-		if (NAND_CheckBoot() != 0) {
-			nand_dbg_err("nand CheckBoot error\n");
-		}
-
 		init_blklayer();
 	} else {
 		nand_dbg_err
 		    ("dragonboard_flag=%d,run nand test for dragonboard\n",
 		     dragonboard_flag);
 		init_blklayer_for_dragonboard();
-		return 0;
 	}
 
 	kthread_run(nand_thread, &mytr, "%sd", "nand_rc");

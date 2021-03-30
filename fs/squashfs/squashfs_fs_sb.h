@@ -49,8 +49,7 @@ struct squashfs_cache_entry {
 	int			num_waiters;
 	wait_queue_head_t	wait_queue;
 	struct squashfs_cache	*cache;
-	struct page		**page;
-	struct squashfs_page_actor	*actor;
+	void			**data;
 };
 
 struct squashfs_sb_info {
@@ -64,9 +63,10 @@ struct squashfs_sb_info {
 	__le64					*id_table;
 	__le64					*fragment_index;
 	__le64					*xattr_id_table;
+	struct mutex				read_data_mutex;
 	struct mutex				meta_index_mutex;
 	struct meta_index			*meta_index;
-	struct squashfs_stream			*stream;
+	void					*stream;
 	__le64					*inode_lookup_table;
 	u64					inode_table;
 	u64					directory_table;
@@ -75,7 +75,6 @@ struct squashfs_sb_info {
 	unsigned short				block_log;
 	long long				bytes_used;
 	unsigned int				inodes;
-	unsigned int				fragments;
 	int					xattr_ids;
 };
 #endif

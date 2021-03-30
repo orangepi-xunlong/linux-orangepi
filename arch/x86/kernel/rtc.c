@@ -12,8 +12,8 @@
 #include <asm/vsyscall.h>
 #include <asm/x86_init.h>
 #include <asm/time.h>
-#include <asm/intel-mid.h>
-#include <asm/setup.h>
+#include <asm/mrst.h>
+#include <asm/rtc.h>
 
 #ifdef CONFIG_X86_32
 /*
@@ -38,28 +38,27 @@ EXPORT_SYMBOL(rtc_lock);
  * jump to the next second precisely 500 ms later. Check the Motorola
  * MC146818A or Dallas DS12887 data sheet for details.
  */
-int mach_set_rtc_mmss(const struct timespec *now)
+int mach_set_rtc_mmss(unsigned long nowtime)
 {
-	unsigned long nowtime = now->tv_sec;
 	struct rtc_time tm;
 	int retval = 0;
 
 	rtc_time_to_tm(nowtime, &tm);
 	if (!rtc_valid_tm(&tm)) {
-		retval = mc146818_set_time(&tm);
+		retval = set_rtc_time(&tm);
 		if (retval)
 			printk(KERN_ERR "%s: RTC write failed with error %d\n",
-			       __func__, retval);
+			       __FUNCTION__, retval);
 	} else {
 		printk(KERN_ERR
 		       "%s: Invalid RTC value: write of %lx to RTC failed\n",
-			__func__, nowtime);
+			__FUNCTION__, nowtime);
 		retval = -EINVAL;
 	}
 	return retval;
 }
 
-void mach_get_cmos_time(struct timespec *now)
+unsigned long mach_get_cmos_time(void)
 {
 	unsigned int status, year, mon, day, hour, min, sec, century = 0;
 	unsigned long flags;
@@ -108,8 +107,7 @@ void mach_get_cmos_time(struct timespec *now)
 	} else
 		year += CMOS_YEARS_OFFS;
 
-	now->tv_sec = mktime(year, mon, day, hour, min, sec);
-	now->tv_nsec = 0;
+	return mktime(year, mon, day, hour, min, sec);
 }
 
 /* Routines for accessing the CMOS RAM/RTC. */
@@ -137,13 +135,18 @@ EXPORT_SYMBOL(rtc_cmos_write);
 
 int update_persistent_clock(struct timespec now)
 {
-	return x86_platform.set_wallclock(&now);
+	return x86_platform.set_wallclock(now.tv_sec);
 }
 
 /* not static: needed by APM */
 void read_persistent_clock(struct timespec *ts)
 {
-	x86_platform.get_wallclock(ts);
+	unsigned long retval;
+
+	retval = x86_platform.get_wallclock();
+
+	ts->tv_sec = retval;
+	ts->tv_nsec = 0;
 }
 
 
@@ -170,7 +173,7 @@ static struct platform_device rtc_device = {
 static __init int add_rtc_cmos(void)
 {
 #ifdef CONFIG_PNP
-	static const char * const ids[] __initconst =
+	static const char * const  const ids[] __initconst =
 	    { "PNP0b00", "PNP0b01", "PNP0b02", };
 	struct pnp_dev *dev;
 	struct pnp_id *id;
@@ -185,7 +188,11 @@ static __init int add_rtc_cmos(void)
 		}
 	}
 #endif
-	if (!x86_platform.legacy.rtc)
+	if (of_have_populated_dt())
+		return 0;
+
+	/* Intel MID platforms don't have ioport rtc */
+	if (mrst_identify_cpu())
 		return -ENODEV;
 
 	platform_device_register(&rtc_device);

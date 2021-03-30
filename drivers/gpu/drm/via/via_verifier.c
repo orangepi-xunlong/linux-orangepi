@@ -31,7 +31,6 @@
 #include "via_3d_reg.h"
 #include <drm/drmP.h>
 #include <drm/via_drm.h>
-#include <drm/drm_legacy.h>
 #include "via_verifier.h"
 #include "via_drv.h"
 

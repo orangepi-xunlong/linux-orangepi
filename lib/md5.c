@@ -1,4 +1,4 @@
-#include <linux/compiler.h>
+#include <linux/kernel.h>
 #include <linux/export.h>
 #include <linux/cryptohash.h>
 

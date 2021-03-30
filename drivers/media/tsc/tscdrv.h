@@ -15,6 +15,9 @@
 #define __TSC_DRV_H__
 
 #define DRV_VERSION                 "0.01alpha"
+#define SUNXI_IRQ_TS                 (32 + 81)
+#define TS_IRQ_NO                   (SUNXI_IRQ_TS)
+#define NEW
 
 #ifndef TSCDEV_MAJOR
 #define TSCDEV_MAJOR                (225)
@@ -24,16 +27,18 @@
 #define TSCDEV_MINOR                (0)
 #endif
 
+#ifdef NEW
 struct tsc_port_config {
 	unsigned int port0config:1;
 	unsigned int port1config:1;
 	unsigned int port2config:1;
 	unsigned int port3config:1;
 };
+#endif
 
 struct iomap_para {
-	void __iomem *regs_macc;
-	void __iomem *regs_ccmu;
+	volatile char *regs_macc;
+	volatile char *regs_ccmu;
 };
 
 struct tsc_dev {
@@ -46,18 +51,27 @@ struct tsc_dev {
 	char   name[16];
 
 	struct iomap_para iomap_addrs;   /* io remap addrs                     */
+	volatile unsigned int *clk_base_vir ;
 
 	unsigned int irq;               /* tsc driver irq number */
 	unsigned int irq_flag;          /* flag of tsc driver irq generated */
-	int major;
-	int minor;
 	unsigned int ref_count;
-	resource_size_t	mapbase;	/* physical moudle address */
-	struct clk *pclk;
-	struct clk *mclk;		/* ts  clock */
+	struct clk *tsc_parent_pll_clk;
+	struct clk *tsc_clk;            /* ts  clock */
 	struct intrstatus intstatus;    /* save interrupt status */
 	struct pinctrl *pinctrl;
+#ifdef NEW
+	struct pinctrl_state  *ts0_pinstate;
+	struct pinctrl_state  *ts1_pinstate;
+	struct pinctrl_state  *ts2_pinstate;
+	struct pinctrl_state  *ts3_pinstate;
+	/* for sleep */
+	struct pinctrl_state  *ts0sleep_pinstate;
+	struct pinctrl_state  *ts1sleep_pinstate;
+	struct pinctrl_state  *ts2sleep_pinstate;
+	struct pinctrl_state  *ts3sleep_pinstate;
 	struct tsc_port_config port_config;
+#endif
 };
 
 #endif

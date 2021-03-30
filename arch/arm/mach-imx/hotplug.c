@@ -52,9 +52,7 @@ void imx_cpu_die(unsigned int cpu)
 	 * the register being cleared to kill the cpu.
 	 */
 	imx_set_cpu_arg(cpu, ~0);
-
-	while (1)
-		cpu_do_idle();
+	cpu_do_idle();
 }
 
 int imx_cpu_kill(unsigned int cpu)

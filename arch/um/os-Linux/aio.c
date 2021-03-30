@@ -104,7 +104,8 @@ static int aio_thread(void *arg)
 	struct io_event event;
 	int err, n, reply_fd;
 
-	os_fix_helper_signals();
+	signal(SIGWINCH, SIG_IGN);
+
 	while (1) {
 		n = io_getevents(ctx, 1, 1, &event, NULL);
 		if (n < 0) {
@@ -172,7 +173,7 @@ static int not_aio_thread(void *arg)
 	struct aio_thread_reply reply;
 	int err;
 
-	os_fix_helper_signals();
+	signal(SIGWINCH, SIG_IGN);
 	while (1) {
 		err = read(aio_req_fd_r, &req, sizeof(req));
 		if (err != sizeof(req)) {

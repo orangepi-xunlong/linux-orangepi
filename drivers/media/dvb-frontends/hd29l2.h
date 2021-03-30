@@ -23,6 +23,7 @@
 #ifndef HD29L2_H
 #define HD29L2_H
 
+#include <linux/kconfig.h>
 #include <linux/dvb/frontend.h>
 
 struct hd29l2_config {
@@ -50,7 +51,7 @@ struct hd29l2_config {
 };
 
 
-#if IS_REACHABLE(CONFIG_DVB_HD29L2)
+#if IS_ENABLED(CONFIG_DVB_HD29L2)
 extern struct dvb_frontend *hd29l2_attach(const struct hd29l2_config *config,
 	struct i2c_adapter *i2c);
 #else

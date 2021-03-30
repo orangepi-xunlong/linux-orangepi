@@ -48,7 +48,6 @@ static bool
 ipvs_mt(const struct sk_buff *skb, struct xt_action_param *par)
 {
 	const struct xt_ipvs_mtinfo *data = par->matchinfo;
-	struct netns_ipvs *ipvs = net_ipvs(par->net);
 	/* ipvs_mt_check ensures that family is only NFPROTO_IPV[46]. */
 	const u_int8_t family = par->family;
 	struct ip_vs_iphdr iph;
@@ -68,7 +67,7 @@ ipvs_mt(const struct sk_buff *skb, struct xt_action_param *par)
 		goto out;
 	}
 
-	ip_vs_fill_iph_skb(family, skb, true, &iph);
+	ip_vs_fill_iph_skb(family, skb, &iph);
 
 	if (data->bitmask & XT_IPVS_PROTO)
 		if ((iph.protocol == data->l4proto) ^
@@ -86,7 +85,7 @@ ipvs_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	/*
 	 * Check if the packet belongs to an existing entry
 	 */
-	cp = pp->conn_out_get(ipvs, family, skb, &iph);
+	cp = pp->conn_out_get(family, skb, &iph, 1 /* inverse */);
 	if (unlikely(cp == NULL)) {
 		match = false;
 		goto out;

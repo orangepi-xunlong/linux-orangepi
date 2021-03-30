@@ -24,7 +24,7 @@
 #include <linux/slab.h>
 #include <linux/kfifo.h>
 #include <linux/module.h>
-#include <media/drv-intf/cx25840.h>
+#include <media/cx25840.h>
 #include <media/rc-core.h>
 
 #include "cx25840-core.h"
@@ -224,7 +224,7 @@ static inline unsigned int lpf_count_to_us(unsigned int count)
 }
 
 /*
- * FIFO register pulse width count computations
+ * FIFO register pulse width count compuations
  */
 static u32 clock_divider_to_resolution(u16 divider)
 {
@@ -1230,14 +1230,16 @@ int cx25840_ir_probe(struct v4l2_subdev *sd)
 	if (!(is_cx23885(state) || is_cx23887(state)))
 		return 0;
 
-	ir_state = devm_kzalloc(&state->c->dev, sizeof(*ir_state), GFP_KERNEL);
+	ir_state = kzalloc(sizeof(struct cx25840_ir_state), GFP_KERNEL);
 	if (ir_state == NULL)
 		return -ENOMEM;
 
 	spin_lock_init(&ir_state->rx_kfifo_lock);
 	if (kfifo_alloc(&ir_state->rx_kfifo,
-			CX25840_IR_RX_KFIFO_SIZE, GFP_KERNEL))
+			CX25840_IR_RX_KFIFO_SIZE, GFP_KERNEL)) {
+		kfree(ir_state);
 		return -ENOMEM;
+	}
 
 	ir_state->c = state->c;
 	state->ir_state = ir_state;
@@ -1271,6 +1273,7 @@ int cx25840_ir_remove(struct v4l2_subdev *sd)
 	cx25840_ir_tx_shutdown(sd);
 
 	kfifo_free(&ir_state->rx_kfifo);
+	kfree(ir_state);
 	state->ir_state = NULL;
 	return 0;
 }

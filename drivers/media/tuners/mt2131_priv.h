@@ -41,3 +41,8 @@ struct mt2131_priv {
 };
 
 #endif /* __MT2131_PRIV_H__ */
+
+/*
+ * Local variables:
+ * c-basic-offset: 8
+ */

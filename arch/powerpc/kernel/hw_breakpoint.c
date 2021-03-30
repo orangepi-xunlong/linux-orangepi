@@ -28,6 +28,7 @@
 #include <linux/percpu.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
+#include <linux/init.h>
 #include <linux/smp.h>
 
 #include <asm/hw_breakpoint.h>
@@ -63,7 +64,7 @@ int hw_breakpoint_slots(int type)
 int arch_install_hw_breakpoint(struct perf_event *bp)
 {
 	struct arch_hw_breakpoint *info = counter_arch_bp(bp);
-	struct perf_event **slot = this_cpu_ptr(&bp_per_reg);
+	struct perf_event **slot = &__get_cpu_var(bp_per_reg);
 
 	*slot = bp;
 
@@ -72,7 +73,7 @@ int arch_install_hw_breakpoint(struct perf_event *bp)
 	 * If so, DABR will be populated in single_step_dabr_instruction().
 	 */
 	if (current->thread.last_hit_ubp != bp)
-		__set_breakpoint(info);
+		set_breakpoint(info);
 
 	return 0;
 }
@@ -88,7 +89,7 @@ int arch_install_hw_breakpoint(struct perf_event *bp)
  */
 void arch_uninstall_hw_breakpoint(struct perf_event *bp)
 {
-	struct perf_event **slot = this_cpu_ptr(&bp_per_reg);
+	struct perf_event **slot = &__get_cpu_var(bp_per_reg);
 
 	if (*slot != bp) {
 		WARN_ONCE(1, "Can't find the breakpoint");
@@ -109,9 +110,8 @@ void arch_unregister_hw_breakpoint(struct perf_event *bp)
 	 * If the breakpoint is unregistered between a hw_breakpoint_handler()
 	 * and the single_step_dabr_instruction(), then cleanup the breakpoint
 	 * restoration variables to prevent dangling pointers.
-	 * FIXME, this should not be using bp->ctx at all! Sayeth peterz.
 	 */
-	if (bp->ctx && bp->ctx->task && bp->ctx->task != ((void *)-1L))
+	if (bp->ctx && bp->ctx->task)
 		bp->ctx->task->thread.last_hit_ubp = NULL;
 }
 
@@ -175,8 +175,8 @@ int arch_validate_hwbkpt_settings(struct perf_event *bp)
 	if (cpu_has_feature(CPU_FTR_DAWR)) {
 		length_max = 512 ; /* 64 doublewords */
 		/* DAWR region can't cross 512 boundary */
-		if ((bp->attr.bp_addr >> 9) !=
-		    ((bp->attr.bp_addr + bp->attr.bp_len - 1) >> 9))
+		if ((bp->attr.bp_addr >> 10) != 
+		    ((bp->attr.bp_addr + bp->attr.bp_len - 1) >> 10))
 			return -EINVAL;
 	}
 	if (info->len >
@@ -199,14 +199,14 @@ void thread_change_pc(struct task_struct *tsk, struct pt_regs *regs)
 
 	info = counter_arch_bp(tsk->thread.last_hit_ubp);
 	regs->msr &= ~MSR_SE;
-	__set_breakpoint(info);
+	set_breakpoint(info);
 	tsk->thread.last_hit_ubp = NULL;
 }
 
 /*
  * Handle debug exception notifications.
  */
-int hw_breakpoint_handler(struct die_args *args)
+int __kprobes hw_breakpoint_handler(struct die_args *args)
 {
 	int rc = NOTIFY_STOP;
 	struct perf_event *bp;
@@ -227,11 +227,9 @@ int hw_breakpoint_handler(struct die_args *args)
 	 */
 	rcu_read_lock();
 
-	bp = __this_cpu_read(bp_per_reg);
-	if (!bp) {
-		rc = NOTIFY_DONE;
+	bp = __get_cpu_var(bp_per_reg);
+	if (!bp)
 		goto out;
-	}
 	info = counter_arch_bp(bp);
 
 	/*
@@ -277,7 +275,7 @@ int hw_breakpoint_handler(struct die_args *args)
 	if (!stepped) {
 		WARN(1, "Unable to handle hardware breakpoint. Breakpoint at "
 			"0x%lx will be disabled.", info->address);
-		perf_event_disable_inatomic(bp);
+		perf_event_disable(bp);
 		goto out;
 	}
 	/*
@@ -287,17 +285,16 @@ int hw_breakpoint_handler(struct die_args *args)
 	if (!(info->type & HW_BRK_TYPE_EXTRANEOUS_IRQ))
 		perf_bp_event(bp, regs);
 
-	__set_breakpoint(info);
+	set_breakpoint(info);
 out:
 	rcu_read_unlock();
 	return rc;
 }
-NOKPROBE_SYMBOL(hw_breakpoint_handler);
 
 /*
  * Handle single-step exceptions following a DABR hit.
  */
-static int single_step_dabr_instruction(struct die_args *args)
+int __kprobes single_step_dabr_instruction(struct die_args *args)
 {
 	struct pt_regs *regs = args->regs;
 	struct perf_event *bp = NULL;
@@ -320,7 +317,7 @@ static int single_step_dabr_instruction(struct die_args *args)
 	if (!(info->type & HW_BRK_TYPE_EXTRANEOUS_IRQ))
 		perf_bp_event(bp, regs);
 
-	__set_breakpoint(info);
+	set_breakpoint(info);
 	current->thread.last_hit_ubp = NULL;
 
 	/*
@@ -332,12 +329,11 @@ static int single_step_dabr_instruction(struct die_args *args)
 
 	return NOTIFY_STOP;
 }
-NOKPROBE_SYMBOL(single_step_dabr_instruction);
 
 /*
  * Handle debug exception notifications.
  */
-int hw_breakpoint_exceptions_notify(
+int __kprobes hw_breakpoint_exceptions_notify(
 		struct notifier_block *unused, unsigned long val, void *data)
 {
 	int ret = NOTIFY_DONE;
@@ -353,7 +349,6 @@ int hw_breakpoint_exceptions_notify(
 
 	return ret;
 }
-NOKPROBE_SYMBOL(hw_breakpoint_exceptions_notify);
 
 /*
  * Release the user breakpoints used by ptrace

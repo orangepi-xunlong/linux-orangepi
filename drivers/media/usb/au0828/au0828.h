@@ -19,9 +19,6 @@
  *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
-#include <linux/bitops.h>
 #include <linux/usb.h>
 #include <linux/i2c.h>
 #include <linux/i2c-algo-bit.h>
@@ -29,12 +26,10 @@
 
 /* Analog */
 #include <linux/videodev2.h>
-#include <media/videobuf2-v4l2.h>
-#include <media/videobuf2-vmalloc.h>
+#include <media/videobuf-vmalloc.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-fh.h>
-#include <media/media-device.h>
 
 /* DVB */
 #include "demux.h"
@@ -47,6 +42,7 @@
 #include "au0828-reg.h"
 #include "au0828-cards.h"
 
+#define DRIVER_NAME "au0828"
 #define URB_COUNT   16
 #define URB_BUFSIZE (0xe522)
 
@@ -55,6 +51,7 @@
 #define NTSC_STD_H      480
 
 #define AU0828_INTERLACED_DEFAULT       1
+#define V4L2_CID_PRIVATE_SHARPNESS  (V4L2_CID_PRIVATE_BASE + 0)
 
 /* Defination for AU0828 USB transfer */
 #define AU0828_MAX_ISO_BUFS    12  /* maybe resize this value in the future */
@@ -76,6 +73,7 @@ enum au0828_itype {
 	AU0828_VMUX_CABLE,
 	AU0828_VMUX_TELEVISION,
 	AU0828_VMUX_DVB,
+	AU0828_VMUX_DEBUG
 };
 
 struct au0828_input {
@@ -90,9 +88,8 @@ struct au0828_board {
 	unsigned int tuner_type;
 	unsigned char tuner_addr;
 	unsigned char i2c_clk_divider;
-	unsigned char has_ir_i2c:1;
-	unsigned char has_analog:1;
 	struct au0828_input input[AU0828_MAX_INPUT];
+
 };
 
 struct au0828_dvb {
@@ -105,10 +102,6 @@ struct au0828_dvb {
 	struct dmx_frontend fe_mem;
 	struct dvb_net net;
 	int feeding;
-	int start_count;
-	int stop_count;
-
-	int (*set_frontend)(struct dvb_frontend *fe);
 };
 
 enum au0828_stream_state {
@@ -121,12 +114,22 @@ enum au0828_stream_state {
 
 /* device state */
 enum au0828_dev_state {
-	DEV_INITIALIZED = 0,
-	DEV_DISCONNECTED = 1,
-	DEV_MISCONFIGURED = 2
+	DEV_INITIALIZED = 0x01,
+	DEV_DISCONNECTED = 0x02,
+	DEV_MISCONFIGURED = 0x04
 };
 
-struct au0828_dev;
+struct au0828_fh {
+	/* must be the first field of this struct! */
+	struct v4l2_fh fh;
+
+	struct au0828_dev *dev;
+	unsigned int  resources;
+
+	struct videobuf_queue        vb_vidq;
+	struct videobuf_queue        vb_vbiq;
+	enum v4l2_buf_type           type;
+};
 
 struct au0828_usb_isoc_ctl {
 		/* max packet size of isoc transaction */
@@ -167,20 +170,21 @@ struct au0828_usb_isoc_ctl {
 /* buffer for one video frame */
 struct au0828_buffer {
 	/* common v4l buffer stuff -- must be first */
-	struct vb2_v4l2_buffer vb;
-	struct list_head list;
+	struct videobuf_buffer vb;
 
-	void *mem;
-	unsigned long length;
+	struct list_head frame;
 	int top_field;
-	/* pointer to vmalloc memory address in vb */
-	char *vb_buf;
+	int receiving;
 };
 
 struct au0828_dmaqueue {
 	struct list_head       active;
+	struct list_head       queued;
+
+	wait_queue_head_t          wq;
+
 	/* Counters to control buffer fill */
-	int                    pos;
+	int                        pos;
 };
 
 struct au0828_dev {
@@ -205,30 +209,14 @@ struct au0828_dev {
 	struct v4l2_device v4l2_dev;
 	struct v4l2_ctrl_handler v4l2_ctrl_hdl;
 #endif
-#ifdef CONFIG_VIDEO_AU0828_RC
-	struct au0828_rc *ir;
-#endif
-
-	struct video_device vdev;
-	struct video_device vbi_dev;
-
-	/* Videobuf2 */
-	struct vb2_queue vb_vidq;
-	struct vb2_queue vb_vbiq;
-	struct mutex vb_queue_lock;
-	struct mutex vb_vbi_queue_lock;
-
-	unsigned int frame_count;
-	unsigned int vbi_frame_count;
-
+	int users;
+	unsigned int resources;	/* resources in use */
+	struct video_device *vdev;
+	struct video_device *vbi_dev;
 	struct timer_list vid_timeout;
 	int vid_timeout_running;
 	struct timer_list vbi_timeout;
 	int vbi_timeout_running;
-
-	int users;
-	int streaming_users;
-
 	int width;
 	int height;
 	int vbi_width;
@@ -243,11 +231,12 @@ struct au0828_dev {
 	__u8 isoc_in_endpointaddr;
 	u8 isoc_init_ok;
 	int greenscreen_detected;
+	unsigned int frame_count;
 	int ctrl_freq;
 	int input_type;
 	int std_set_in_tuner_core;
 	unsigned int ctrl_input;
-	long unsigned int dev_state; /* defined at enum au0828_dev_state */;
+	enum au0828_dev_state dev_state;
 	enum au0828_stream_state stream_state;
 	wait_queue_head_t open;
 
@@ -268,29 +257,10 @@ struct au0828_dev {
 	char *transfer_buffer[AU0828_MAX_ISO_BUFS];/* transfer buffers for isoc
 						   transfer */
 
-	/* DVB USB / URB Related */
-	bool		urb_streaming, need_urb_start;
+	/* USB / URB Related */
+	int		urb_streaming;
 	struct urb	*urbs[URB_COUNT];
-
-	/* Preallocated transfer digital transfer buffers */
-
-	char *dig_transfer_buffer[URB_COUNT];
-
-#ifdef CONFIG_MEDIA_CONTROLLER
-	struct media_device *media_dev;
-	struct media_pad video_pad, vbi_pad;
-	struct media_entity *decoder;
-	struct media_entity input_ent[AU0828_MAX_INPUT];
-	struct media_pad input_pad[AU0828_MAX_INPUT];
-	struct media_entity_notify entity_notify;
-	struct media_entity *tuner;
-	struct media_link *active_link;
-	struct media_entity *active_link_owner;
-	struct media_entity *active_source;
-	struct media_entity *active_sink;
-#endif
 };
-
 
 /* ----------------------------------------------------------- */
 #define au0828_read(dev, reg) au0828_readreg(dev, reg)
@@ -306,7 +276,6 @@ struct au0828_dev {
 /* au0828-core.c */
 extern u32 au0828_read(struct au0828_dev *dev, u16 reg);
 extern u32 au0828_write(struct au0828_dev *dev, u16 reg, u32 val);
-extern void au0828_usb_release(struct au0828_dev *dev);
 extern int au0828_debug;
 
 /* ----------------------------------------------------------- */
@@ -325,57 +294,20 @@ extern int au0828_i2c_unregister(struct au0828_dev *dev);
 
 /* ----------------------------------------------------------- */
 /* au0828-video.c */
-extern int au0828_start_analog_streaming(struct vb2_queue *vq,
-						unsigned int count);
-extern void au0828_stop_vbi_streaming(struct vb2_queue *vq);
-#ifdef CONFIG_VIDEO_AU0828_V4L2
-extern int au0828_v4l2_device_register(struct usb_interface *interface,
-				      struct au0828_dev *dev);
-
-extern int au0828_analog_register(struct au0828_dev *dev,
+int au0828_analog_register(struct au0828_dev *dev,
 			   struct usb_interface *interface);
-extern int au0828_analog_unregister(struct au0828_dev *dev);
-extern void au0828_usb_v4l2_media_release(struct au0828_dev *dev);
-extern void au0828_v4l2_suspend(struct au0828_dev *dev);
-extern void au0828_v4l2_resume(struct au0828_dev *dev);
-#else
-static inline int au0828_v4l2_device_register(struct usb_interface *interface,
-					      struct au0828_dev *dev)
-{ return 0; };
-static inline int au0828_analog_register(struct au0828_dev *dev,
-				     struct usb_interface *interface)
-{ return 0; };
-static inline int au0828_analog_unregister(struct au0828_dev *dev)
-{ return 0; };
-static inline void au0828_usb_v4l2_media_release(struct au0828_dev *dev) { };
-static inline void au0828_v4l2_suspend(struct au0828_dev *dev) { };
-static inline void au0828_v4l2_resume(struct au0828_dev *dev) { };
-#endif
+int au0828_analog_stream_disable(struct au0828_dev *d);
+void au0828_analog_unregister(struct au0828_dev *dev);
 
 /* ----------------------------------------------------------- */
 /* au0828-dvb.c */
 extern int au0828_dvb_register(struct au0828_dev *dev);
 extern void au0828_dvb_unregister(struct au0828_dev *dev);
-void au0828_dvb_suspend(struct au0828_dev *dev);
-void au0828_dvb_resume(struct au0828_dev *dev);
 
 /* au0828-vbi.c */
-extern struct vb2_ops au0828_vbi_qops;
+extern struct videobuf_queue_ops au0828_vbi_qops;
 
 #define dprintk(level, fmt, arg...)\
 	do { if (au0828_debug & level)\
-		printk(KERN_DEBUG pr_fmt(fmt), ## arg);\
+		printk(KERN_DEBUG DRIVER_NAME "/0: " fmt, ## arg);\
 	} while (0)
-
-/* au0828-input.c */
-#ifdef CONFIG_VIDEO_AU0828_RC
-extern int au0828_rc_register(struct au0828_dev *dev);
-extern void au0828_rc_unregister(struct au0828_dev *dev);
-extern int au0828_rc_suspend(struct au0828_dev *dev);
-extern int au0828_rc_resume(struct au0828_dev *dev);
-#else
-static inline int au0828_rc_register(struct au0828_dev *dev) { return 0; }
-static inline void au0828_rc_unregister(struct au0828_dev *dev) { }
-static inline int au0828_rc_suspend(struct au0828_dev *dev) { return 0; }
-static inline int au0828_rc_resume(struct au0828_dev *dev) { return 0; }
-#endif

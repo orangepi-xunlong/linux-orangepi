@@ -84,9 +84,8 @@ static long decode(unsigned char **cpp);
 static unsigned char * put16(unsigned char *cp, unsigned short x);
 static unsigned short pull16(unsigned char **cpp);
 
-/* Allocate compression data structure
+/* Initialize compression data structure
  *	slots must be in range 0 to 255 (zero meaning no compression)
- * Returns pointer to structure or ERR_PTR() on error.
  */
 struct slcompress *
 slhc_init(int rslots, int tslots)
@@ -95,14 +94,11 @@ slhc_init(int rslots, int tslots)
 	register struct cstate *ts;
 	struct slcompress *comp;
 
-	if (rslots < 0 || rslots > 255 || tslots < 0 || tslots > 255)
-		return ERR_PTR(-EINVAL);
-
 	comp = kzalloc(sizeof(struct slcompress), GFP_KERNEL);
 	if (! comp)
 		goto out_fail;
 
-	if (rslots > 0) {
+	if ( rslots > 0  &&  rslots < 256 ) {
 		size_t rsize = rslots * sizeof(struct cstate);
 		comp->rstate = kzalloc(rsize, GFP_KERNEL);
 		if (! comp->rstate)
@@ -110,7 +106,7 @@ slhc_init(int rslots, int tslots)
 		comp->rslot_limit = rslots - 1;
 	}
 
-	if (tslots > 0) {
+	if ( tslots > 0  &&  tslots < 256 ) {
 		size_t tsize = tslots * sizeof(struct cstate);
 		comp->tstate = kzalloc(tsize, GFP_KERNEL);
 		if (! comp->tstate)
@@ -145,7 +141,7 @@ out_free2:
 out_free:
 	kfree(comp);
 out_fail:
-	return ERR_PTR(-ENOMEM);
+	return NULL;
 }
 
 
@@ -400,6 +396,7 @@ found:
 		   ntohs(cs->cs_ip.tot_len) == hlen)
 			break;
 		goto uncompressed;
+		break;
 	case SPECIAL_I:
 	case SPECIAL_D:
 		/* actual changes match one of our special case encodings --
@@ -507,10 +504,6 @@ slhc_uncompress(struct slcompress *comp, unsigned char *icp, int isize)
 		 */
 		x = *cp++;	/* Read conn index */
 		if(x < 0 || x > comp->rslot_limit)
-			goto bad;
-
-		/* Check if the cstate is initialized */
-		if (!comp->rstate[x].initialized)
 			goto bad;
 
 		comp->flags &=~ SLF_TOSS;
@@ -677,7 +670,6 @@ slhc_remember(struct slcompress *comp, unsigned char *icp, int isize)
 	if (cs->cs_tcp.doff > 5)
 	  memcpy(cs->cs_tcpopt, icp + ihl*4 + sizeof(struct tcphdr), (cs->cs_tcp.doff - 5) * 4);
 	cs->cs_hsize = ihl*2 + cs->cs_tcp.doff*2;
-	cs->initialized = true;
 	/* Put headers back on packet
 	 * Neither header checksum is recalculated
 	 */

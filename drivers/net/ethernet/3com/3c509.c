@@ -252,7 +252,8 @@ static int el3_isa_id_sequence(__be16 *phys_addr)
 		for (i = 0; i < el3_cards; i++) {
 			struct el3_private *lp = netdev_priv(el3_devs[i]);
 			if (lp->type == EL3_PNP &&
-			    ether_addr_equal((u8 *)phys_addr, el3_devs[i]->dev_addr)) {
+			    !memcmp(phys_addr, el3_devs[i]->dev_addr,
+				    ETH_ALEN)) {
 				if (el3_debug > 3)
 					pr_debug("3c509 with address %02x %02x %02x %02x %02x %02x was found by ISAPnP\n",
 						phys_addr[0] & 0xff, phys_addr[0] >> 8,
@@ -534,7 +535,7 @@ static int el3_common_init(struct net_device *dev)
 	/* The EL3-specific entries in the device structure. */
 	dev->netdev_ops = &netdev_ops;
 	dev->watchdog_timeo = TX_TIMEOUT;
-	dev->ethtool_ops = &ethtool_ops;
+	SET_ETHTOOL_OPS(dev, &ethtool_ops);
 
 	err = register_netdev(dev);
 	if (err) {
@@ -562,7 +563,7 @@ static void el3_common_remove (struct net_device *dev)
 }
 
 #ifdef CONFIG_EISA
-static int el3_eisa_probe(struct device *device)
+static int __init el3_eisa_probe (struct device *device)
 {
 	short i;
 	int ioaddr, irq, if_port;
@@ -695,11 +696,11 @@ el3_tx_timeout (struct net_device *dev)
 	int ioaddr = dev->base_addr;
 
 	/* Transmitter timeout, serious problems. */
-	pr_warn("%s: transmit timed out, Tx_status %2.2x status %4.4x Tx FIFO room %d\n",
-		dev->name, inb(ioaddr + TX_STATUS), inw(ioaddr + EL3_STATUS),
-		inw(ioaddr + TX_FREE));
+	pr_warning("%s: transmit timed out, Tx_status %2.2x status %4.4x Tx FIFO room %d.\n",
+		   dev->name, inb(ioaddr + TX_STATUS), inw(ioaddr + EL3_STATUS),
+		   inw(ioaddr + TX_FREE));
 	dev->stats.tx_errors++;
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	/* Issue TX_RESET and TX_START commands. */
 	outw(TxReset, ioaddr + EL3_CMD);
 	outw(TxEnable, ioaddr + EL3_CMD);
@@ -722,6 +723,25 @@ el3_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		pr_debug("%s: el3_start_xmit(length = %u) called, status %4.4x.\n",
 			   dev->name, skb->len, inw(ioaddr + EL3_STATUS));
 	}
+#if 0
+#ifndef final_version
+	{	/* Error-checking code, delete someday. */
+		ushort status = inw(ioaddr + EL3_STATUS);
+		if (status & 0x0001 && 		/* IRQ line active, missed one. */
+		    inw(ioaddr + EL3_STATUS) & 1) { 			/* Make sure. */
+			pr_debug("%s: Missed interrupt, status then %04x now %04x"
+				   "  Tx %2.2x Rx %4.4x.\n", dev->name, status,
+				   inw(ioaddr + EL3_STATUS), inb(ioaddr + TX_STATUS),
+				   inw(ioaddr + RX_STATUS));
+			/* Fake interrupt trigger by masking, acknowledge interrupts. */
+			outw(SetStatusEnb | 0x00, ioaddr + EL3_CMD);
+			outw(AckIntr | IntLatch | TxAvailable | RxEarly | IntReq,
+				 ioaddr + EL3_CMD);
+			outw(SetStatusEnb | 0xff, ioaddr + EL3_CMD);
+		}
+	}
+#endif
+#endif
 	/*
 	 *	We lock the driver against other processors. Note
 	 *	we don't need to lock versus the IRQ as we suspended
@@ -749,7 +769,7 @@ el3_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	spin_unlock_irqrestore(&lp->lock, flags);
 
-	dev_consume_skb_any (skb);
+	dev_kfree_skb (skb);
 
 	/* Clear the Tx status stack. */
 	{

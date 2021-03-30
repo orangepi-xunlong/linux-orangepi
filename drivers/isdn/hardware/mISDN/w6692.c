@@ -101,7 +101,7 @@ _set_debug(struct w6692_hw *card)
 }
 
 static int
-set_debug(const char *val, const struct kernel_param *kp)
+set_debug(const char *val, struct kernel_param *kp)
 {
 	int ret;
 	struct w6692_hw *card;
@@ -848,7 +848,7 @@ dbusy_timer_handler(struct dchannel *dch)
 	}
 }
 
-static void initW6692(struct w6692_hw *card)
+void initW6692(struct w6692_hw *card)
 {
 	u8	val;
 
@@ -1176,10 +1176,10 @@ w6692_l1callback(struct dchannel *dch, u32 cmd)
 }
 
 static int
-open_dchannel(struct w6692_hw *card, struct channel_req *rq, void *caller)
+open_dchannel(struct w6692_hw *card, struct channel_req *rq)
 {
 	pr_debug("%s: %s dev(%d) open from %p\n", card->name, __func__,
-		 card->dch.dev.id, caller);
+		 card->dch.dev.id, __builtin_return_address(1));
 	if (rq->protocol != ISDN_P_TE_S0)
 		return -EINVAL;
 	if (rq->adr.channel == 1)
@@ -1207,7 +1207,7 @@ w6692_dctrl(struct mISDNchannel *ch, u32 cmd, void *arg)
 	case OPEN_CHANNEL:
 		rq = arg;
 		if (rq->protocol == ISDN_P_TE_S0)
-			err = open_dchannel(card, rq, __builtin_return_address(0));
+			err = open_dchannel(card, rq);
 		else
 			err = open_bchannel(card, rq);
 		if (err)

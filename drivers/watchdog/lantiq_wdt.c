@@ -192,6 +192,11 @@ ltq_wdt_probe(struct platform_device *pdev)
 	struct resource *res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	struct clk *clk;
 
+	if (!res) {
+		dev_err(&pdev->dev, "cannot obtain I/O memory region");
+		return -ENOENT;
+	}
+
 	ltq_wdt_membase = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(ltq_wdt_membase))
 		return PTR_ERR(ltq_wdt_membase);
@@ -232,6 +237,7 @@ static struct platform_driver ltq_wdt_driver = {
 	.remove = ltq_wdt_remove,
 	.driver = {
 		.name = "wdt",
+		.owner = THIS_MODULE,
 		.of_match_table = ltq_wdt_match,
 	},
 };
@@ -243,3 +249,4 @@ MODULE_PARM_DESC(nowayout, "Watchdog cannot be stopped once started");
 MODULE_AUTHOR("John Crispin <blogic@openwrt.org>");
 MODULE_DESCRIPTION("Lantiq SoC Watchdog");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);

@@ -335,7 +335,7 @@ static int src_default_config_arcrw(struct src *src)
 	return 0;
 }
 
-static const struct src_rsc_ops src_rsc_ops = {
+static struct src_rsc_ops src_rsc_ops = {
 	.set_state		= src_set_state,
 	.set_bm			= src_set_bm,
 	.set_sf			= src_set_sf,
@@ -431,8 +431,7 @@ get_src_rsc(struct src_mgr *mgr, const struct src_desc *desc, struct src **rsrc)
 
 	spin_unlock_irqrestore(&mgr->mgr_lock, flags);
 	if (err) {
-		dev_err(mgr->card->dev,
-			"Can't meet SRC resource request!\n");
+		printk(KERN_ERR "ctxfi: Can't meet SRC resource request!\n");
 		return err;
 	}
 
@@ -544,7 +543,7 @@ static int src_mgr_commit_write(struct src_mgr *mgr)
 	return 0;
 }
 
-int src_mgr_create(struct hw *hw, struct src_mgr **rsrc_mgr)
+int src_mgr_create(void *hw, struct src_mgr **rsrc_mgr)
 {
 	int err, i;
 	struct src_mgr *src_mgr;
@@ -559,7 +558,7 @@ int src_mgr_create(struct hw *hw, struct src_mgr **rsrc_mgr)
 		goto error1;
 
 	spin_lock_init(&src_mgr->mgr_lock);
-	conj_mask = hw->src_dirty_conj_mask();
+	conj_mask = ((struct hw *)hw)->src_dirty_conj_mask();
 
 	src_mgr->get_src = get_src_rsc;
 	src_mgr->put_src = put_src_rsc;
@@ -567,13 +566,12 @@ int src_mgr_create(struct hw *hw, struct src_mgr **rsrc_mgr)
 	src_mgr->src_enable = src_enable;
 	src_mgr->src_disable = src_disable;
 	src_mgr->commit_write = src_mgr_commit_write;
-	src_mgr->card = hw->card;
 
 	/* Disable all SRC resources. */
 	for (i = 0; i < 256; i++)
-		hw->src_mgr_dsb_src(src_mgr->mgr.ctrl_blk, i);
+		((struct hw *)hw)->src_mgr_dsb_src(src_mgr->mgr.ctrl_blk, i);
 
-	hw->src_mgr_commit_write(hw, src_mgr->mgr.ctrl_blk);
+	((struct hw *)hw)->src_mgr_commit_write(hw, src_mgr->mgr.ctrl_blk);
 
 	*rsrc_mgr = src_mgr;
 
@@ -611,7 +609,7 @@ static int srcimp_index(const struct rsc *rsc)
 	return container_of(rsc, struct srcimp, rsc)->idx[rsc->conj];
 }
 
-static const struct rsc_ops srcimp_basic_rsc_ops = {
+static struct rsc_ops srcimp_basic_rsc_ops = {
 	.master		= srcimp_master,
 	.next_conj	= srcimp_next_conj,
 	.index		= srcimp_index,
@@ -662,7 +660,7 @@ static int srcimp_unmap(struct srcimp *srcimp)
 	return 0;
 }
 
-static const struct srcimp_rsc_ops srcimp_ops = {
+static struct srcimp_rsc_ops srcimp_ops = {
 	.map = srcimp_map,
 	.unmap = srcimp_unmap
 };
@@ -741,8 +739,7 @@ static int get_srcimp_rsc(struct srcimp_mgr *mgr,
 	}
 	spin_unlock_irqrestore(&mgr->mgr_lock, flags);
 	if (err) {
-		dev_err(mgr->card->dev,
-			"Can't meet SRCIMP resource request!\n");
+		printk(KERN_ERR "ctxfi: Can't meet SRCIMP resource request!\n");
 		goto error1;
 	}
 
@@ -828,7 +825,7 @@ static int srcimp_imap_delete(struct srcimp_mgr *mgr, struct imapper *entry)
 	return err;
 }
 
-int srcimp_mgr_create(struct hw *hw, struct srcimp_mgr **rsrcimp_mgr)
+int srcimp_mgr_create(void *hw, struct srcimp_mgr **rsrcimp_mgr)
 {
 	int err;
 	struct srcimp_mgr *srcimp_mgr;
@@ -860,7 +857,6 @@ int srcimp_mgr_create(struct hw *hw, struct srcimp_mgr **rsrcimp_mgr)
 	srcimp_mgr->put_srcimp = put_srcimp_rsc;
 	srcimp_mgr->imap_add = srcimp_imap_add;
 	srcimp_mgr->imap_delete = srcimp_imap_delete;
-	srcimp_mgr->card = hw->card;
 
 	*rsrcimp_mgr = srcimp_mgr;
 

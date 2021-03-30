@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * fs/f2fs/hash.c
  *
@@ -8,6 +7,10 @@
  * Portions of this code from linux/fs/ext3/hash.c
  *
  * Copyright (C) 2002 by Theodore Ts'o
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 #include <linux/types.h>
 #include <linux/fs.h>
@@ -39,8 +42,7 @@ static void TEA_transform(unsigned int buf[4], unsigned int const in[])
 	buf[1] += b1;
 }
 
-static void str2hashbuf(const unsigned char *msg, size_t len,
-				unsigned int *buf, int num)
+static void str2hashbuf(const char *msg, size_t len, unsigned int *buf, int num)
 {
 	unsigned pad, val;
 	int i;
@@ -67,21 +69,15 @@ static void str2hashbuf(const unsigned char *msg, size_t len,
 		*buf++ = pad;
 }
 
-f2fs_hash_t f2fs_dentry_hash(const struct qstr *name_info,
-				struct fscrypt_name *fname)
+f2fs_hash_t f2fs_dentry_hash(const char *name, size_t len)
 {
 	__u32 hash;
 	f2fs_hash_t f2fs_hash;
-	const unsigned char *p;
+	const char *p;
 	__u32 in[8], buf[4];
-	const unsigned char *name = name_info->name;
-	size_t len = name_info->len;
 
-	/* encrypted bigname case */
-	if (fname && !fname->disk_name.name)
-		return cpu_to_le32(fname->hash);
-
-	if (is_dot_dotdot(name_info))
+	if ((len <= 2) && (name[0] == '.') &&
+		(name[1] == '.' || name[1] == '\0'))
 		return 0;
 
 	/* Initialize the default seed for the hash checksum functions */

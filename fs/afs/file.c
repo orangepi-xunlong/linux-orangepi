@@ -19,8 +19,7 @@
 #include "internal.h"
 
 static int afs_readpage(struct file *file, struct page *page);
-static void afs_invalidatepage(struct page *page, unsigned int offset,
-			       unsigned int length);
+static void afs_invalidatepage(struct page *page, unsigned long offset);
 static int afs_releasepage(struct page *page, gfp_t gfp_flags);
 static int afs_launder_page(struct page *page);
 
@@ -29,11 +28,12 @@ static int afs_readpages(struct file *filp, struct address_space *mapping,
 
 const struct file_operations afs_file_operations = {
 	.open		= afs_open,
-	.flush		= afs_flush,
 	.release	= afs_release,
 	.llseek		= generic_file_llseek,
-	.read_iter	= generic_file_read_iter,
-	.write_iter	= afs_file_write,
+	.read		= do_sync_read,
+	.write		= do_sync_write,
+	.aio_read	= generic_file_aio_read,
+	.aio_write	= afs_file_write,
 	.mmap		= generic_file_readonly_mmap,
 	.splice_read	= generic_file_splice_read,
 	.fsync		= afs_fsync,
@@ -123,10 +123,11 @@ static void afs_file_readpage_read_complete(struct page *page,
 /*
  * read page from file, directory or symlink, given a key to use
  */
-static int __afs_page_filler(struct key *key, struct page *page)
+int afs_page_filler(void *data, struct page *page)
 {
 	struct inode *inode = page->mapping->host;
 	struct afs_vnode *vnode = AFS_FS_I(inode);
+	struct key *key = data;
 	size_t len;
 	off_t offset;
 	int ret;
@@ -164,7 +165,7 @@ static int __afs_page_filler(struct key *key, struct page *page)
 		_debug("cache said ENOBUFS");
 	default:
 	go_on:
-		offset = page->index << PAGE_SHIFT;
+		offset = page->index << PAGE_CACHE_SHIFT;
 		len = min_t(size_t, i_size_read(inode) - offset, PAGE_SIZE);
 
 		/* read the contents of the file from the server into the
@@ -208,13 +209,6 @@ error:
 	return ret;
 }
 
-int afs_page_filler(struct file *data, struct page *page)
-{
-	struct key *key = (struct key *)data;
-
-	return __afs_page_filler(key, page);
-}
-
 /*
  * read page from file, directory or symlink, given a file to nominate the key
  * to be used
@@ -227,14 +221,14 @@ static int afs_readpage(struct file *file, struct page *page)
 	if (file) {
 		key = file->private_data;
 		ASSERT(key != NULL);
-		ret = __afs_page_filler(key, page);
+		ret = afs_page_filler(key, page);
 	} else {
 		struct inode *inode = page->mapping->host;
 		key = afs_request_key(AFS_FS_S(inode->i_sb)->volume->cell);
 		if (IS_ERR(key)) {
 			ret = PTR_ERR(key);
 		} else {
-			ret = __afs_page_filler(key, page);
+			ret = afs_page_filler(key, page);
 			key_put(key);
 		}
 	}
@@ -316,17 +310,16 @@ static int afs_launder_page(struct page *page)
  * - release a page and clean up its private data if offset is 0 (indicating
  *   the entire page)
  */
-static void afs_invalidatepage(struct page *page, unsigned int offset,
-			       unsigned int length)
+static void afs_invalidatepage(struct page *page, unsigned long offset)
 {
 	struct afs_writeback *wb = (struct afs_writeback *) page_private(page);
 
-	_enter("{%lu},%u,%u", page->index, offset, length);
+	_enter("{%lu},%lu", page->index, offset);
 
 	BUG_ON(!PageLocked(page));
 
 	/* we clean up only if the entire page is being invalidated */
-	if (offset == 0 && length == PAGE_SIZE) {
+	if (offset == 0) {
 #ifdef CONFIG_AFS_FSCACHE
 		if (PageFsCache(page)) {
 			struct afs_vnode *vnode = AFS_FS_I(page->mapping->host);

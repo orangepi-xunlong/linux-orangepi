@@ -21,7 +21,6 @@
 #include <linux/spinlock.h>
 #include <linux/platform_device.h>
 #include "sunxi_tvd.h"
-#define CAR_MAX_CH 4
 
 #undef		_VIRTUAL_DEBUG_
 #undef		_REVERSE_DEBUG_
@@ -44,17 +43,16 @@ enum car_reverse_status {
 	CAR_REVERSE_STOP  = 2,
 };
 
-
-
-
 struct preview_params {
 	struct device *dev;
-	struct platform_device *pdev;
+
 	int tvd_id;
 	int src_width;
 	int src_height;
+
 	int screen_width;
 	int screen_height;
+
 	/*
 	 * tv decode input interface
 	 *  - 0: CVBS_INTERFACE
@@ -62,12 +60,14 @@ struct preview_params {
 	 *  - 2: YPBPRP_INTERFACE
 	 */
 	int interface;
+
 	/*
 	 * resolution quality
 	 *  - 0: NTSC
 	 *  - 1: PAL
 	 */
 	int system;
+
 	/*
 	 * yuv format
 	 *  - 0: TVD_PL_YUV420
@@ -75,14 +75,8 @@ struct preview_params {
 	 *  - 2: TVD_PL_YUV422
 	 */
 	int format;
+
 	int rotation;
-	int car_direct;
-	int lr_direct;
-	int pr_mirror;
-	int input_src;
-	int car_oview_mode;
-	int viewthread;
-	int locked;  /*1 locked, 0 unlocked*/
 };
 
 struct buffer_node {
@@ -91,13 +85,8 @@ struct buffer_node {
 	int size;
 	void *phy_address;
 	void *vir_address;
-    struct ion_handle *handle;
-	union{
-		#ifdef CONFIG_VIDEO_SUNXI_TVD
-		struct tvd_buffer handler;
-		#endif
-		struct vin_buffer handler_vin;
-	};
+
+	struct tvd_buffer handler;
 };
 
 struct buffer_pool {

@@ -1,4 +1,4 @@
-/* Copyright (C) 2011-2016  B.A.T.M.A.N. contributors:
+/* Copyright (C) 2011-2013 B.A.T.M.A.N. contributors:
  *
  * Antonio Quartulli
  *
@@ -12,30 +12,23 @@
  * General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA
  */
 
-#ifndef _NET_BATMAN_ADV_DISTRIBUTED_ARP_TABLE_H_
-#define _NET_BATMAN_ADV_DISTRIBUTED_ARP_TABLE_H_
-
-#include "main.h"
-
-#include <linux/compiler.h>
-#include <linux/netdevice.h>
-#include <linux/types.h>
-
-#include "originator.h"
-#include "packet.h"
-
-struct seq_file;
-struct sk_buff;
+#ifndef _NET_BATMAN_ADV_ARP_H_
+#define _NET_BATMAN_ADV_ARP_H_
 
 #ifdef CONFIG_BATMAN_ADV_DAT
 
-/* BATADV_DAT_ADDR_MAX - maximum address value in the DHT space */
+#include "types.h"
+#include "originator.h"
+
+#include <linux/if_arp.h>
+
 #define BATADV_DAT_ADDR_MAX ((batadv_dat_addr_t)~(batadv_dat_addr_t)0)
 
-void batadv_dat_status_update(struct net_device *net_dev);
 bool batadv_dat_snoop_outgoing_arp_request(struct batadv_priv *bat_priv,
 					   struct sk_buff *skb);
 bool batadv_dat_snoop_incoming_arp_request(struct batadv_priv *bat_priv,
@@ -54,7 +47,7 @@ bool batadv_dat_drop_broadcast_packet(struct batadv_priv *bat_priv,
 static inline void
 batadv_dat_init_orig_node_addr(struct batadv_orig_node *orig_node)
 {
-	u32 addr;
+	uint32_t addr;
 
 	addr = batadv_choose_orig(orig_node->orig, BATADV_DAT_ADDR_MAX);
 	orig_node->dat_addr = (batadv_dat_addr_t)addr;
@@ -69,7 +62,7 @@ static inline void
 batadv_dat_init_own_addr(struct batadv_priv *bat_priv,
 			 struct batadv_hard_iface *primary_if)
 {
-	u32 addr;
+	uint32_t addr;
 
 	addr = batadv_choose_orig(primary_if->net_dev->dev_addr,
 				  BATADV_DAT_ADDR_MAX);
@@ -89,7 +82,7 @@ int batadv_dat_cache_seq_print_text(struct seq_file *seq, void *offset);
  * Updates the ethtool statistics for the received packet if it is a DAT subtype
  */
 static inline void batadv_dat_inc_counter(struct batadv_priv *bat_priv,
-					  u8 subtype)
+					  uint8_t subtype)
 {
 	switch (subtype) {
 	case BATADV_P_DAT_DHT_GET:
@@ -104,10 +97,6 @@ static inline void batadv_dat_inc_counter(struct batadv_priv *bat_priv,
 }
 
 #else
-
-static inline void batadv_dat_status_update(struct net_device *net_dev)
-{
-}
 
 static inline bool
 batadv_dat_snoop_outgoing_arp_request(struct batadv_priv *bat_priv,
@@ -169,10 +158,10 @@ static inline void batadv_dat_free(struct batadv_priv *bat_priv)
 }
 
 static inline void batadv_dat_inc_counter(struct batadv_priv *bat_priv,
-					  u8 subtype)
+					  uint8_t subtype)
 {
 }
 
 #endif /* CONFIG_BATMAN_ADV_DAT */
 
-#endif /* _NET_BATMAN_ADV_DISTRIBUTED_ARP_TABLE_H_ */
+#endif /* _NET_BATMAN_ADV_ARP_H_ */

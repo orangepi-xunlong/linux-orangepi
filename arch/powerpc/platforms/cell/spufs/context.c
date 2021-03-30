@@ -36,6 +36,7 @@ atomic_t nr_spu_contexts = ATOMIC_INIT(0);
 struct spu_context *alloc_spu_context(struct spu_gang *gang)
 {
 	struct spu_context *ctx;
+	struct timespec ts;
 
 	ctx = kzalloc(sizeof *ctx, GFP_KERNEL);
 	if (!ctx)
@@ -66,7 +67,8 @@ struct spu_context *alloc_spu_context(struct spu_gang *gang)
 	__spu_update_sched_info(ctx);
 	spu_set_timeslice(ctx);
 	ctx->stats.util_state = SPU_UTIL_IDLE_LOADED;
-	ctx->stats.tstamp = ktime_get_ns();
+	ktime_get_ts(&ts);
+	ctx->stats.tstamp = timespec_to_ns(&ts);
 
 	atomic_inc(&nr_spu_contexts);
 	goto out;

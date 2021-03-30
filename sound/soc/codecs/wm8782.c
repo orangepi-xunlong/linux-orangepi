@@ -26,16 +26,6 @@
 #include <sound/initval.h>
 #include <sound/soc.h>
 
-static const struct snd_soc_dapm_widget wm8782_dapm_widgets[] = {
-SND_SOC_DAPM_INPUT("AINL"),
-SND_SOC_DAPM_INPUT("AINR"),
-};
-
-static const struct snd_soc_dapm_route wm8782_dapm_routes[] = {
-	{ "Capture", NULL, "AINL" },
-	{ "Capture", NULL, "AINR" },
-};
-
 static struct snd_soc_dai_driver wm8782_dai = {
 	.name = "wm8782",
 	.capture = {
@@ -50,14 +40,7 @@ static struct snd_soc_dai_driver wm8782_dai = {
 	},
 };
 
-static const struct snd_soc_codec_driver soc_codec_dev_wm8782 = {
-	.component_driver = {
-		.dapm_widgets		= wm8782_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(wm8782_dapm_widgets),
-		.dapm_routes		= wm8782_dapm_routes,
-		.num_dapm_routes	= ARRAY_SIZE(wm8782_dapm_routes),
-	},
-};
+static struct snd_soc_codec_driver soc_codec_dev_wm8782;
 
 static int wm8782_probe(struct platform_device *pdev)
 {
@@ -74,6 +57,7 @@ static int wm8782_remove(struct platform_device *pdev)
 static struct platform_driver wm8782_codec_driver = {
 	.driver = {
 		.name = "wm8782",
+		.owner = THIS_MODULE,
 	},
 	.probe = wm8782_probe,
 	.remove = wm8782_remove,

@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2013, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -119,6 +119,7 @@ acpi_ex_do_match(u32 match_op,
 		break;
 
 	case MATCH_MEQ:
+
 		/*
 		 * True if equal: (P[i] == M)
 		 * Change to:     (M == P[i])
@@ -132,6 +133,7 @@ acpi_ex_do_match(u32 match_op,
 		break;
 
 	case MATCH_MLE:
+
 		/*
 		 * True if less than or equal: (P[i] <= M) (P[i] not_greater than M)
 		 * Change to:                  (M >= P[i]) (M not_less than P[i])
@@ -146,6 +148,7 @@ acpi_ex_do_match(u32 match_op,
 		break;
 
 	case MATCH_MLT:
+
 		/*
 		 * True if less than: (P[i] < M)
 		 * Change to:         (M > P[i])
@@ -159,6 +162,7 @@ acpi_ex_do_match(u32 match_op,
 		break;
 
 	case MATCH_MGE:
+
 		/*
 		 * True if greater than or equal: (P[i] >= M) (P[i] not_less than M)
 		 * Change to:                     (M <= P[i]) (M not_greater than P[i])
@@ -173,6 +177,7 @@ acpi_ex_do_match(u32 match_op,
 		break;
 
 	case MATCH_MGT:
+
 		/*
 		 * True if greater than: (P[i] > M)
 		 * Change to:            (M < P[i])
@@ -207,7 +212,7 @@ acpi_ex_do_match(u32 match_op,
  *
  ******************************************************************************/
 
-acpi_status acpi_ex_opcode_6A_0T_1R(struct acpi_walk_state *walk_state)
+acpi_status acpi_ex_opcode_6A_0T_1R(struct acpi_walk_state * walk_state)
 {
 	union acpi_operand_object **operand = &walk_state->operands[0];
 	union acpi_operand_object *return_desc = NULL;
@@ -310,12 +315,11 @@ acpi_status acpi_ex_opcode_6A_0T_1R(struct acpi_walk_state *walk_state)
 
 		ACPI_ERROR((AE_INFO, "Unknown AML opcode 0x%X",
 			    walk_state->opcode));
-
 		status = AE_AML_BAD_OPCODE;
 		goto cleanup;
 	}
 
-cleanup:
+      cleanup:
 
 	/* Delete return object on error */
 

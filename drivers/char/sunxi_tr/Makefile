@@ -5,6 +5,5 @@
 obj-$(CONFIG_SUNXI_TRANSFORM) += sunxi_tr.o
 
 sunxi_tr-y := sunxi_transform.o
-sunxi_tr-$(CONFIG_ARCH_SUN50IW1) += sun50iw1_transform.o
+sunxi_tr-$(CONFIG_ARCH_SUN50I) += sun50iw1_transform.o
 sunxi_tr-$(CONFIG_ARCH_SUN8IW11) += sun8iw11_transform.o
-sunxi_tr-$(CONFIG_ARCH_SUN50IW3) += sun8iw11_transform.o

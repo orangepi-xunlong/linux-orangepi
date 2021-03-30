@@ -523,7 +523,7 @@ void die_if_kernel(const char *str, ...)
 		return;
 
 	va_start(va, str);
-	vsnprintf(buffer, sizeof(buffer), str, va);
+	vsprintf(buffer, str, va);
 	va_end(va);
 
 	console_verbose();

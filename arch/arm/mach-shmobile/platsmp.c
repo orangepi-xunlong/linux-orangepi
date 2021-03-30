@@ -11,37 +11,18 @@
  * published by the Free Software Foundation.
  */
 #include <linux/init.h>
-#include <asm/cacheflush.h>
-#include <asm/smp_plat.h>
-#include "common.h"
+#include <linux/smp.h>
 
-extern unsigned long shmobile_smp_fn[];
-extern unsigned long shmobile_smp_arg[];
-extern unsigned long shmobile_smp_mpidr[];
-
-void shmobile_smp_hook(unsigned int cpu, unsigned long fn, unsigned long arg)
+void __init shmobile_smp_init_cpus(unsigned int ncores)
 {
-	shmobile_smp_fn[cpu] = 0;
-	flush_cache_all();
+	unsigned int i;
 
-	shmobile_smp_mpidr[cpu] = cpu_logical_map(cpu);
-	shmobile_smp_fn[cpu] = fn;
-	shmobile_smp_arg[cpu] = arg;
-	flush_cache_all();
-}
+	if (ncores > nr_cpu_ids) {
+		pr_warn("SMP: %u cores greater than maximum (%u), clipping\n",
+			ncores, nr_cpu_ids);
+		ncores = nr_cpu_ids;
+	}
 
-#ifdef CONFIG_HOTPLUG_CPU
-bool shmobile_smp_cpu_can_disable(unsigned int cpu)
-{
-	return true; /* Hotplug of any CPU is supported */
-}
-#endif
-
-bool __init shmobile_smp_init_fallback_ops(void)
-{
-	/* fallback on PSCI/smp_ops if no other DT based method is detected */
-	if (!IS_ENABLED(CONFIG_SMP))
-		return false;
-
-	return platform_can_secondary_boot() ? true : false;
+	for (i = 0; i < ncores; i++)
+		set_cpu_possible(i, true);
 }

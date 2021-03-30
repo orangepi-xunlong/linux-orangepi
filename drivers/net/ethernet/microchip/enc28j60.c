@@ -28,12 +28,11 @@
 #include <linux/skbuff.h>
 #include <linux/delay.h>
 #include <linux/spi/spi.h>
-#include <linux/of_net.h>
 
 #include "enc28j60_hw.h"
 
 #define DRV_NAME	"enc28j60"
-#define DRV_VERSION	"1.02"
+#define DRV_VERSION	"1.01"
 
 #define SPI_OPLEN	1
 
@@ -90,26 +89,22 @@ spi_read_buf(struct enc28j60_net *priv, int len, u8 *data)
 {
 	u8 *rx_buf = priv->spi_transfer_buf + 4;
 	u8 *tx_buf = priv->spi_transfer_buf;
-	struct spi_transfer tx = {
+	struct spi_transfer t = {
 		.tx_buf = tx_buf,
-		.len = SPI_OPLEN,
-	};
-	struct spi_transfer rx = {
 		.rx_buf = rx_buf,
-		.len = len,
+		.len = SPI_OPLEN + len,
 	};
 	struct spi_message msg;
 	int ret;
 
 	tx_buf[0] = ENC28J60_READ_BUF_MEM;
+	tx_buf[1] = tx_buf[2] = tx_buf[3] = 0;	/* don't care */
 
 	spi_message_init(&msg);
-	spi_message_add_tail(&tx, &msg);
-	spi_message_add_tail(&rx, &msg);
-
+	spi_message_add_tail(&t, &msg);
 	ret = spi_sync(priv->spi, &msg);
 	if (ret == 0) {
-		memcpy(data, rx_buf, len);
+		memcpy(data, &rx_buf[SPI_OPLEN], len);
 		ret = msg.status;
 	}
 	if (ret && netif_msg_drv(priv))
@@ -1151,8 +1146,7 @@ static void enc28j60_irq_work_handler(struct work_struct *work)
 			enc28j60_phy_read(priv, PHIR);
 		}
 		/* TX complete handler */
-		if (((intflags & EIR_TXIF) != 0) &&
-		    ((intflags & EIR_TXERIF) == 0)) {
+		if ((intflags & EIR_TXIF) != 0) {
 			bool err = false;
 			loop++;
 			if (netif_msg_intr(priv))
@@ -1204,7 +1198,7 @@ static void enc28j60_irq_work_handler(struct work_struct *work)
 					enc28j60_tx_clear(ndev, true);
 			} else
 				enc28j60_tx_clear(ndev, true);
-			locked_reg_bfclr(priv, EIR, EIR_TXERIF | EIR_TXIF);
+			locked_reg_bfclr(priv, EIR, EIR_TXERIF);
 		}
 		/* RX Error handler */
 		if ((intflags & EIR_RXERIF) != 0) {
@@ -1239,8 +1233,6 @@ static void enc28j60_irq_work_handler(struct work_struct *work)
  */
 static void enc28j60_hw_tx(struct enc28j60_net *priv)
 {
-	BUG_ON(!priv->tx_skb);
-
 	if (netif_msg_tx_queued(priv))
 		printk(KERN_DEBUG DRV_NAME
 			": Tx Packet Len:%d\n", priv->tx_skb->len);
@@ -1552,7 +1544,6 @@ static int enc28j60_probe(struct spi_device *spi)
 {
 	struct net_device *dev;
 	struct enc28j60_net *priv;
-	const void *macaddr;
 	int ret = 0;
 
 	if (netif_msg_drv(&debug))
@@ -1584,12 +1575,7 @@ static int enc28j60_probe(struct spi_device *spi)
 		ret = -EIO;
 		goto error_irq;
 	}
-
-	macaddr = of_get_mac_address(spi->dev.of_node);
-	if (macaddr)
-		ether_addr_copy(dev->dev_addr, macaddr);
-	else
-		eth_hw_addr_random(dev);
+	eth_hw_addr_random(dev);
 	enc28j60_set_hw_macaddr(dev);
 
 	/* Board setup must set the relevant edge trigger type;
@@ -1607,7 +1593,7 @@ static int enc28j60_probe(struct spi_device *spi)
 	dev->irq = spi->irq;
 	dev->netdev_ops = &enc28j60_netdev_ops;
 	dev->watchdog_timeo = TX_TIMEOUT;
-	dev->ethtool_ops = &enc28j60_ethtool_ops;
+	SET_ETHTOOL_OPS(dev, &enc28j60_ethtool_ops);
 
 	enc28j60_lowpower(priv, true);
 
@@ -1644,16 +1630,10 @@ static int enc28j60_remove(struct spi_device *spi)
 	return 0;
 }
 
-static const struct of_device_id enc28j60_dt_ids[] = {
-	{ .compatible = "microchip,enc28j60" },
-	{ /* sentinel */ }
-};
-MODULE_DEVICE_TABLE(of, enc28j60_dt_ids);
-
 static struct spi_driver enc28j60_driver = {
 	.driver = {
-		.name = DRV_NAME,
-		.of_match_table = enc28j60_dt_ids,
+		   .name = DRV_NAME,
+		   .owner = THIS_MODULE,
 	 },
 	.probe = enc28j60_probe,
 	.remove = enc28j60_remove,

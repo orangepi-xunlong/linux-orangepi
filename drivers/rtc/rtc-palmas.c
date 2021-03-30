@@ -45,42 +45,6 @@ struct palmas_rtc {
 /* Total number of RTC registers needed to set time*/
 #define PALMAS_NUM_TIME_REGS	(PALMAS_YEARS_REG - PALMAS_SECONDS_REG + 1)
 
-/*
- * Special bin2bcd mapping to deal with bcd storage of year.
- *
- *   0-69                -> 0xD0
- *  70-99  (1970 - 1999) -> 0xD0 - 0xF9 (correctly rolls to 0x00)
- * 100-199 (2000 - 2099) -> 0x00 - 0x99 (does not roll to 0xA0 :-( )
- * 200-229 (2100 - 2129) -> 0xA0 - 0xC9 (really for completeness)
- * 230-                  -> 0xC9
- *
- * Confirmed: the only transition that does not work correctly for this rtc
- * clock is the transition from 2099 to 2100, it proceeds to 2000. We will
- * accept this issue since the clock retains and transitions the year correctly
- * in all other conditions.
- */
-static unsigned char year_bin2bcd(int val)
-{
-	if (val < 70)
-		return 0xD0;
-	if (val < 100)
-		return bin2bcd(val - 20) | 0x80; /* KISS leverage of bin2bcd */
-	if (val >= 230)
-		return 0xC9;
-	if (val >= 200)
-		return bin2bcd(val - 180) | 0x80;
-	return bin2bcd(val - 100);
-}
-
-static int year_bcd2bin(unsigned char val)
-{
-	if (val >= 0xD0)
-		return bcd2bin(val & 0x7F) + 20;
-	if (val >= 0xA0)
-		return bcd2bin(val & 0x7F) + 180;
-	return bcd2bin(val) + 100;
-}
-
 static int palmas_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
 	unsigned char rtc_data[PALMAS_NUM_TIME_REGS];
@@ -107,7 +71,7 @@ static int palmas_rtc_read_time(struct device *dev, struct rtc_time *tm)
 	tm->tm_hour = bcd2bin(rtc_data[2]);
 	tm->tm_mday = bcd2bin(rtc_data[3]);
 	tm->tm_mon = bcd2bin(rtc_data[4]) - 1;
-	tm->tm_year = year_bcd2bin(rtc_data[5]);
+	tm->tm_year = bcd2bin(rtc_data[5]) + 100;
 
 	return ret;
 }
@@ -123,7 +87,7 @@ static int palmas_rtc_set_time(struct device *dev, struct rtc_time *tm)
 	rtc_data[2] = bin2bcd(tm->tm_hour);
 	rtc_data[3] = bin2bcd(tm->tm_mday);
 	rtc_data[4] = bin2bcd(tm->tm_mon + 1);
-	rtc_data[5] = year_bin2bcd(tm->tm_year);
+	rtc_data[5] = bin2bcd(tm->tm_year - 100);
 
 	/* Stop RTC while updating the RTC time registers */
 	ret = palmas_update_bits(palmas, PALMAS_RTC_BASE, PALMAS_RTC_CTRL_REG,
@@ -178,7 +142,7 @@ static int palmas_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alm)
 	alm->time.tm_hour = bcd2bin(alarm_data[2]);
 	alm->time.tm_mday = bcd2bin(alarm_data[3]);
 	alm->time.tm_mon = bcd2bin(alarm_data[4]) - 1;
-	alm->time.tm_year = year_bcd2bin(alarm_data[5]);
+	alm->time.tm_year = bcd2bin(alarm_data[5]) + 100;
 
 	ret = palmas_read(palmas, PALMAS_RTC_BASE, PALMAS_RTC_INTERRUPTS_REG,
 			&int_val);
@@ -209,7 +173,7 @@ static int palmas_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alm)
 	alarm_data[2] = bin2bcd(alm->time.tm_hour);
 	alarm_data[3] = bin2bcd(alm->time.tm_mday);
 	alarm_data[4] = bin2bcd(alm->time.tm_mon + 1);
-	alarm_data[5] = year_bin2bcd(alm->time.tm_year);
+	alarm_data[5] = bin2bcd(alm->time.tm_year - 100);
 
 	ret = palmas_bulk_write(palmas, PALMAS_RTC_BASE,
 		PALMAS_ALARM_SECONDS_REG, alarm_data, PALMAS_NUM_TIME_REGS);
@@ -261,7 +225,7 @@ static irqreturn_t palmas_rtc_interrupt(int irq, void *context)
 	return IRQ_HANDLED;
 }
 
-static const struct rtc_class_ops palmas_rtc_ops = {
+static struct rtc_class_ops palmas_rtc_ops = {
 	.read_time	= palmas_rtc_read_time,
 	.set_time	= palmas_rtc_set_time,
 	.read_alarm	= palmas_rtc_read_alarm,
@@ -274,15 +238,6 @@ static int palmas_rtc_probe(struct platform_device *pdev)
 	struct palmas *palmas = dev_get_drvdata(pdev->dev.parent);
 	struct palmas_rtc *palmas_rtc = NULL;
 	int ret;
-	bool enable_bb_charging = false;
-	bool high_bb_charging = false;
-
-	if (pdev->dev.of_node) {
-		enable_bb_charging = of_property_read_bool(pdev->dev.of_node,
-					"ti,backup-battery-chargeable");
-		high_bb_charging = of_property_read_bool(pdev->dev.of_node,
-					"ti,backup-battery-charge-high-current");
-	}
 
 	palmas_rtc = devm_kzalloc(&pdev->dev, sizeof(struct palmas_rtc),
 			GFP_KERNEL);
@@ -299,32 +254,6 @@ static int palmas_rtc_probe(struct platform_device *pdev)
 	palmas_rtc->dev = &pdev->dev;
 	platform_set_drvdata(pdev, palmas_rtc);
 
-	if (enable_bb_charging) {
-		unsigned reg = PALMAS_BACKUP_BATTERY_CTRL_BBS_BBC_LOW_ICHRG;
-
-		if (high_bb_charging)
-			reg = 0;
-
-		ret = palmas_update_bits(palmas, PALMAS_PMU_CONTROL_BASE,
-			PALMAS_BACKUP_BATTERY_CTRL,
-			PALMAS_BACKUP_BATTERY_CTRL_BBS_BBC_LOW_ICHRG, reg);
-		if (ret < 0) {
-			dev_err(&pdev->dev,
-				"BACKUP_BATTERY_CTRL update failed, %d\n", ret);
-			return ret;
-		}
-
-		ret = palmas_update_bits(palmas, PALMAS_PMU_CONTROL_BASE,
-			PALMAS_BACKUP_BATTERY_CTRL,
-			PALMAS_BACKUP_BATTERY_CTRL_BB_CHG_EN,
-			PALMAS_BACKUP_BATTERY_CTRL_BB_CHG_EN);
-		if (ret < 0) {
-			dev_err(&pdev->dev,
-				"BACKUP_BATTERY_CTRL update failed, %d\n", ret);
-			return ret;
-		}
-	}
-
 	/* Start RTC */
 	ret = palmas_update_bits(palmas, PALMAS_RTC_BASE, PALMAS_RTC_CTRL_REG,
 			PALMAS_RTC_CTRL_REG_STOP_RTC,
@@ -336,7 +265,6 @@ static int palmas_rtc_probe(struct platform_device *pdev)
 
 	palmas_rtc->irq = platform_get_irq(pdev, 0);
 
-	device_init_wakeup(&pdev->dev, 1);
 	palmas_rtc->rtc = devm_rtc_device_register(&pdev->dev, pdev->name,
 				&palmas_rtc_ops, THIS_MODULE);
 	if (IS_ERR(palmas_rtc->rtc)) {
@@ -347,13 +275,15 @@ static int palmas_rtc_probe(struct platform_device *pdev)
 
 	ret = devm_request_threaded_irq(&pdev->dev, palmas_rtc->irq, NULL,
 			palmas_rtc_interrupt,
-			IRQF_TRIGGER_LOW | IRQF_ONESHOT,
+			IRQF_TRIGGER_LOW | IRQF_ONESHOT |
+			IRQF_EARLY_RESUME,
 			dev_name(&pdev->dev), palmas_rtc);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "IRQ request failed, err = %d\n", ret);
 		return ret;
 	}
 
+	device_set_wakeup_capable(&pdev->dev, 1);
 	return 0;
 }
 
@@ -383,11 +313,12 @@ static int palmas_rtc_resume(struct device *dev)
 }
 #endif
 
-static SIMPLE_DEV_PM_OPS(palmas_rtc_pm_ops, palmas_rtc_suspend,
-			 palmas_rtc_resume);
+static const struct dev_pm_ops palmas_rtc_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(palmas_rtc_suspend, palmas_rtc_resume)
+};
 
 #ifdef CONFIG_OF
-static const struct of_device_id of_palmas_rtc_match[] = {
+static struct of_device_id of_palmas_rtc_match[] = {
 	{ .compatible = "ti,palmas-rtc"},
 	{ },
 };

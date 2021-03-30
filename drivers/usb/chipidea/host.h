@@ -3,25 +3,13 @@
 
 #ifdef CONFIG_USB_CHIPIDEA_HOST
 
-int ci_hdrc_host_init(struct ci_hdrc *ci);
-void ci_hdrc_host_destroy(struct ci_hdrc *ci);
-void ci_hdrc_host_driver_init(void);
+int ci_hdrc_host_init(struct ci13xxx *ci);
 
 #else
 
-static inline int ci_hdrc_host_init(struct ci_hdrc *ci)
+static inline int ci_hdrc_host_init(struct ci13xxx *ci)
 {
 	return -ENXIO;
-}
-
-static inline void ci_hdrc_host_destroy(struct ci_hdrc *ci)
-{
-
-}
-
-static void ci_hdrc_host_driver_init(void)
-{
-
 }
 
 #endif

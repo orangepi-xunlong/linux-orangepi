@@ -61,9 +61,9 @@ static void xfrm_replay_notify(struct xfrm_state *x, int event)
 
 	switch (event) {
 	case XFRM_REPLAY_UPDATE:
-		if (!x->replay_maxdiff ||
-		    ((x->replay.seq - x->preplay.seq < x->replay_maxdiff) &&
-		    (x->replay.oseq - x->preplay.oseq < x->replay_maxdiff))) {
+		if (x->replay_maxdiff &&
+		    (x->replay.seq - x->preplay.seq < x->replay_maxdiff) &&
+		    (x->replay.oseq - x->preplay.oseq < x->replay_maxdiff)) {
 			if (x->xflags & XFRM_TIME_DEFER)
 				event = XFRM_REPLAY_TIMEOUT;
 			else
@@ -99,7 +99,6 @@ static int xfrm_replay_overflow(struct xfrm_state *x, struct sk_buff *skb)
 
 	if (x->type->flags & XFRM_TYPE_REPLAY_PROT) {
 		XFRM_SKB_CB(skb)->seq.output.low = ++x->replay.oseq;
-		XFRM_SKB_CB(skb)->seq.output.hi = 0;
 		if (unlikely(x->replay.oseq == 0)) {
 			x->replay.oseq--;
 			xfrm_audit_state_replay_overflow(x, skb);
@@ -130,7 +129,8 @@ static int xfrm_replay_check(struct xfrm_state *x,
 		return 0;
 
 	diff = x->replay.seq - seq;
-	if (diff >= x->props.replay_window) {
+	if (diff >= min_t(unsigned int, x->props.replay_window,
+			  sizeof(x->replay.bitmap) * 8)) {
 		x->stats.replay_window++;
 		goto err;
 	}
@@ -178,7 +178,6 @@ static int xfrm_replay_overflow_bmp(struct xfrm_state *x, struct sk_buff *skb)
 
 	if (x->type->flags & XFRM_TYPE_REPLAY_PROT) {
 		XFRM_SKB_CB(skb)->seq.output.low = ++replay_esn->oseq;
-		XFRM_SKB_CB(skb)->seq.output.hi = 0;
 		if (unlikely(replay_esn->oseq == 0)) {
 			replay_esn->oseq--;
 			xfrm_audit_state_replay_overflow(x, skb);
@@ -303,10 +302,9 @@ static void xfrm_replay_notify_bmp(struct xfrm_state *x, int event)
 
 	switch (event) {
 	case XFRM_REPLAY_UPDATE:
-		if (!x->replay_maxdiff ||
-		    ((replay_esn->seq - preplay_esn->seq < x->replay_maxdiff) &&
-		    (replay_esn->oseq - preplay_esn->oseq
-		     < x->replay_maxdiff))) {
+		if (x->replay_maxdiff &&
+		    (replay_esn->seq - preplay_esn->seq < x->replay_maxdiff) &&
+		    (replay_esn->oseq - preplay_esn->oseq < x->replay_maxdiff)) {
 			if (x->xflags & XFRM_TIME_DEFER)
 				event = XFRM_REPLAY_TIMEOUT;
 			else
@@ -355,29 +353,27 @@ static void xfrm_replay_notify_esn(struct xfrm_state *x, int event)
 
 	switch (event) {
 	case XFRM_REPLAY_UPDATE:
-		if (x->replay_maxdiff) {
-			if (replay_esn->seq_hi == preplay_esn->seq_hi)
-				seq_diff = replay_esn->seq - preplay_esn->seq;
-			else
-				seq_diff = ~preplay_esn->seq + replay_esn->seq
-					   + 1;
+		if (!x->replay_maxdiff)
+			break;
 
-			if (replay_esn->oseq_hi == preplay_esn->oseq_hi)
-				oseq_diff = replay_esn->oseq
-					    - preplay_esn->oseq;
-			else
-				oseq_diff = ~preplay_esn->oseq
-					    + replay_esn->oseq + 1;
-
-			if (seq_diff >= x->replay_maxdiff ||
-			    oseq_diff >= x->replay_maxdiff)
-				break;
-		}
-
-		if (x->xflags & XFRM_TIME_DEFER)
-			event = XFRM_REPLAY_TIMEOUT;
+		if (replay_esn->seq_hi == preplay_esn->seq_hi)
+			seq_diff = replay_esn->seq - preplay_esn->seq;
 		else
-			return;
+			seq_diff = ~preplay_esn->seq + replay_esn->seq + 1;
+
+		if (replay_esn->oseq_hi == preplay_esn->oseq_hi)
+			oseq_diff = replay_esn->oseq - preplay_esn->oseq;
+		else
+			oseq_diff = ~preplay_esn->oseq + replay_esn->oseq + 1;
+
+		if (seq_diff < x->replay_maxdiff &&
+		    oseq_diff < x->replay_maxdiff) {
+
+			if (x->xflags & XFRM_TIME_DEFER)
+				event = XFRM_REPLAY_TIMEOUT;
+			else
+				return;
+		}
 
 		break;
 
@@ -558,7 +554,7 @@ static void xfrm_replay_advance_esn(struct xfrm_state *x, __be32 net_seq)
 		x->repl->notify(x, XFRM_REPLAY_UPDATE);
 }
 
-static const struct xfrm_replay xfrm_replay_legacy = {
+static struct xfrm_replay xfrm_replay_legacy = {
 	.advance	= xfrm_replay_advance,
 	.check		= xfrm_replay_check,
 	.recheck	= xfrm_replay_check,
@@ -566,7 +562,7 @@ static const struct xfrm_replay xfrm_replay_legacy = {
 	.overflow	= xfrm_replay_overflow,
 };
 
-static const struct xfrm_replay xfrm_replay_bmp = {
+static struct xfrm_replay xfrm_replay_bmp = {
 	.advance	= xfrm_replay_advance_bmp,
 	.check		= xfrm_replay_check_bmp,
 	.recheck	= xfrm_replay_check_bmp,
@@ -574,7 +570,7 @@ static const struct xfrm_replay xfrm_replay_bmp = {
 	.overflow	= xfrm_replay_overflow_bmp,
 };
 
-static const struct xfrm_replay xfrm_replay_esn = {
+static struct xfrm_replay xfrm_replay_esn = {
 	.advance	= xfrm_replay_advance_esn,
 	.check		= xfrm_replay_check_esn,
 	.recheck	= xfrm_replay_recheck_esn,

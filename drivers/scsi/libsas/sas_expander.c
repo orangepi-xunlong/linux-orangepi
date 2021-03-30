@@ -96,7 +96,7 @@ static int smp_execute_task(struct domain_device *dev, void *req, int req_size,
 		task->slow_task->timer.expires = jiffies + SMP_TIMEOUT*HZ;
 		add_timer(&task->slow_task->timer);
 
-		res = i->dft->lldd_execute_task(task, GFP_KERNEL);
+		res = i->dft->lldd_execute_task(task, 1, GFP_KERNEL);
 
 		if (res) {
 			del_timer(&task->slow_task->timer);
@@ -282,7 +282,6 @@ static void sas_set_ex_phy(struct domain_device *dev, int phy_id, void *rsp)
 	phy->phy->minimum_linkrate = dr->pmin_linkrate;
 	phy->phy->maximum_linkrate = dr->pmax_linkrate;
 	phy->phy->negotiated_linkrate = phy->linkrate;
-	phy->phy->enabled = (phy->linkrate != SAS_PHY_DISABLED);
 
  skip:
 	if (new_phy)
@@ -676,7 +675,7 @@ int sas_smp_get_phy_events(struct sas_phy *phy)
 	res = smp_execute_task(dev, req, RPEL_REQ_SIZE,
 			            resp, RPEL_RESP_SIZE);
 
-	if (res)
+	if (!res)
 		goto out;
 
 	phy->invalid_dword_count = scsi_to_u32(&resp[12]);
@@ -685,7 +684,6 @@ int sas_smp_get_phy_events(struct sas_phy *phy)
 	phy->phy_reset_problem_count = scsi_to_u32(&resp[24]);
 
  out:
-	kfree(req);
 	kfree(resp);
 	return res;
 
@@ -818,7 +816,6 @@ static struct domain_device *sas_ex_discover_end_dev(
 		rphy = sas_end_device_alloc(phy->port);
 		if (!rphy)
 			goto out_free;
-		rphy->identify.phy_identifier = phy_id;
 
 		child->rphy = rphy;
 		get_device(&rphy->dev);
@@ -846,7 +843,6 @@ static struct domain_device *sas_ex_discover_end_dev(
 
 		child->rphy = rphy;
 		get_device(&rphy->dev);
-		rphy->identify.phy_identifier = phy_id;
 		sas_fill_in_rphy(child, rphy);
 
 		list_add_tail(&child->disco_list_node, &parent->port->disco_list);
@@ -2167,10 +2163,10 @@ int sas_smp_handler(struct Scsi_Host *shost, struct sas_rphy *rphy,
 	}
 
 	/* do we need to support multiple segments? */
-	if (bio_multiple_segments(req->bio) ||
-	    bio_multiple_segments(rsp->bio)) {
-		printk("%s: multiple segments req %u, rsp %u\n",
-		       __func__, blk_rq_bytes(req), blk_rq_bytes(rsp));
+	if (bio_segments(req->bio) > 1 || bio_segments(rsp->bio) > 1) {
+		printk("%s: multiple segments req %u %u, rsp %u %u\n",
+		       __func__, bio_segments(req->bio), blk_rq_bytes(req),
+		       bio_segments(rsp->bio), blk_rq_bytes(rsp));
 		return -EINVAL;
 	}
 

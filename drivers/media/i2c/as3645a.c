@@ -31,7 +31,7 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 
-#include <media/i2c/as3645a.h>
+#include <media/as3645a.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 
@@ -813,7 +813,7 @@ static int as3645a_probe(struct i2c_client *client,
 	if (client->dev.platform_data == NULL)
 		return -ENODEV;
 
-	flash = devm_kzalloc(&client->dev, sizeof(*flash), GFP_KERNEL);
+	flash = kzalloc(sizeof(*flash), GFP_KERNEL);
 	if (flash == NULL)
 		return -ENOMEM;
 
@@ -827,19 +827,21 @@ static int as3645a_probe(struct i2c_client *client,
 	if (ret < 0)
 		goto done;
 
-	ret = media_entity_pads_init(&flash->subdev.entity, 0, NULL);
+	ret = media_entity_init(&flash->subdev.entity, 0, NULL, 0);
 	if (ret < 0)
 		goto done;
 
-	flash->subdev.entity.function = MEDIA_ENT_F_FLASH;
+	flash->subdev.entity.type = MEDIA_ENT_T_V4L2_SUBDEV_FLASH;
 
 	mutex_init(&flash->power_lock);
 
 	flash->led_mode = V4L2_FLASH_LED_MODE_NONE;
 
 done:
-	if (ret < 0)
+	if (ret < 0) {
 		v4l2_ctrl_handler_free(&flash->ctrls);
+		kfree(flash);
+	}
 
 	return ret;
 }
@@ -853,6 +855,7 @@ static int as3645a_remove(struct i2c_client *client)
 	v4l2_ctrl_handler_free(&flash->ctrls);
 	media_entity_cleanup(&flash->subdev.entity);
 	mutex_destroy(&flash->power_lock);
+	kfree(flash);
 
 	return 0;
 }

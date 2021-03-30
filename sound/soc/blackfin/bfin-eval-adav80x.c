@@ -119,7 +119,16 @@ static int bfin_eval_adav80x_probe(struct platform_device *pdev)
 
 	card->dev = &pdev->dev;
 
-	return devm_snd_soc_register_card(&pdev->dev, &bfin_eval_adav80x);
+	return snd_soc_register_card(&bfin_eval_adav80x);
+}
+
+static int bfin_eval_adav80x_remove(struct platform_device *pdev)
+{
+	struct snd_soc_card *card = platform_get_drvdata(pdev);
+
+	snd_soc_unregister_card(card);
+
+	return 0;
 }
 
 static const struct platform_device_id bfin_eval_adav80x_ids[] = {
@@ -132,9 +141,11 @@ MODULE_DEVICE_TABLE(platform, bfin_eval_adav80x_ids);
 static struct platform_driver bfin_eval_adav80x_driver = {
 	.driver = {
 		.name = "bfin-eval-adav80x",
+		.owner = THIS_MODULE,
 		.pm = &snd_soc_pm_ops,
 	},
 	.probe = bfin_eval_adav80x_probe,
+	.remove = bfin_eval_adav80x_remove,
 	.id_table = bfin_eval_adav80x_ids,
 };
 

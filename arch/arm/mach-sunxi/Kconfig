@@ -12,23 +12,49 @@ config ARCH_SUN8I
 	bool "Allwinner A7 smp SoCs"
 	select ARM_GIC
 	select CPU_V7
-	select HAVE_SMP
-	select HAVE_ARM_ARCH_TIMER
-	select SUN4I_TIMER
+	select HAVE_SMP if !ARCH_SUN8IW8
+	select SUNXI_TIMER
+	select COMMON_CLK
+	select CLKDEV_LOOKUP
+	select NEED_MACH_IO_H
 	select MIGHT_HAVE_CACHE_L2X0
 	select PINCTRL
 	select PINCTRL_SUNXI
 	select ARCH_REQUIRE_GPIOLIB
-	select COMMON_CLK
-	select CLKDEV_LOOKUP
 	select CLKSRC_MMIO
 	select CLKSRC_OF
 	select GENERIC_CLOCKEVENTS
 	select GENERIC_IRQ_CHIP
 	select SPARSE_IRQ
+	select SUN4I_TIMER
+	select HAVE_UNSTABLE_SCHED_CLOCK
 	select GENERIC_ALLOCATOR
 	help
 	  Allwinner A7 smp SoCs(sun8i)
+
+config ARCH_SUN50I
+	bool "Allwinner A53 smp SoCs"
+	select ARM_GIC
+	select CPU_V7
+	select HAVE_SMP if !ARCH_SUN8IW8
+	select SUNXI_TIMER
+	select COMMON_CLK
+	select CLKDEV_LOOKUP
+	select NEED_MACH_IO_H
+	select MIGHT_HAVE_CACHE_L2X0
+	select PINCTRL
+	select PINCTRL_SUNXI
+	select ARCH_REQUIRE_GPIOLIB
+	select CLKSRC_MMIO
+	select CLKSRC_OF
+	select GENERIC_CLOCKEVENTS
+	select GENERIC_IRQ_CHIP
+	select SPARSE_IRQ
+	select SUN4I_TIMER
+	select HAVE_UNSTABLE_SCHED_CLOCK
+	select GENERIC_ALLOCATOR
+	help
+	  Allwinner A53 smp SoCs(sun50i)
 endchoice
 
 # Select the wafer with sun8i
@@ -36,44 +62,37 @@ endchoice
 if ARCH_SUN8I
 choice
 	prompt "Select the wafer with arch sun8i"
-	default ARCH_SUN8IW11
+	default ARCH_SUN8IW10
 	help
 	  Select the wafer with arch sun8i
 
+config ARCH_SUN8IW10
+        bool "Allwinner sun8iw10 SoCs"
+        help
+          Allwinner sun8iw10 SoCs
+
 config ARCH_SUN8IW11
         bool "Allwinner sun8iw11 SoCs"
-	select HAVE_UNSTABLE_SCHED_CLOCK
         help
           Allwinner sun8iw11 SoCs
-
-config ARCH_SUN8IW12
-        bool "Allwinner sun8iw12 SoCs"
-        help
-          Allwinner sun8iw12 SoCs
-config ARCH_SUN8IW15
-        bool "Allwinner sun8iw15 SoCs"
-        help
-          Allwinner sun8iw15 SoCs
-config ARCH_SUN8IW17
-        bool "Allwinner sun8iw17 SoCs"
-        help
-          Allwinner sun8iw17 SoCs
-config ARCH_SUN8IW7
-        bool "Allwinner sun8iw7 SoCs"
-        help
-          Allwinner sun8iw7 SoCs
-config ARCH_SUN8IW6
-        bool "Allwinner sun8iw6 SoCs"
-        help
-          Allwinner sun8iw6 SoCs
-config ARCH_SUN8IW18
-        bool "Allwinner sun8iw18 SoCs"
-        help
-          Allwinner sun8iw18 SoCs
 endchoice
 endif
 
 # Select the SoC with specific arch and wafer
+
+if ARCH_SUN8IW10
+choice
+       prompt "Select the SoC with wafer sun8iw10"
+       default ARCH_SUN8IW10P1
+       help
+        Select the SoC with wafer sun8iw10
+
+config ARCH_SUN8IW10P1
+       bool "Allwinner sun8iw10p1 SoC"
+       help
+         Allwinner sun8iw10p1 SoC
+endchoice
+endif
 
 if ARCH_SUN8IW11
 choice
@@ -88,105 +107,6 @@ config ARCH_SUN8IW11P1
 	  Allwinner sun8iw11p1 SoC
 endchoice
 endif
-
-if ARCH_SUN8IW12
-choice
-	prompt "Select the SoC with wafer sun8iw12"
-	default ARCH_SUN8IW12P1
-	help
-	 Select the SoC with wafer sun8iw12
-
-config ARCH_SUN8IW12P1
-	bool "Allwinner sun8iw12p1 SoC"
-	help
-	  Allwinner sun8iw12p1 SoC
-endchoice
-endif
-
-if ARCH_SUN8IW15
-choice
-	prompt "Select the SoC with wafer sun8iw15"
-	default ARCH_SUN8IW15P1
-	help
-	 Select the SoC with wafer sun8iw15
-
-config ARCH_SUN8IW15P1
-	bool "Allwinner sun8iw15p1 SoC"
-	help
-	  Allwinner sun8iw15p1 SoC
-endchoice
-endif
-
-if ARCH_SUN8IW17
-choice
-	prompt "Select the SoC with wafer sun8iw17"
-	default ARCH_SUN8IW17P1
-	help
-	 Select the SoC with wafer sun8iw17
-
-config ARCH_SUN8IW17P1
-	bool "Allwinner sun8iw17p1 SoC"
-	help
-	  Allwinner sun8iw17p1 SoC
-endchoice
-endif
-
-if ARCH_SUN8IW7
-choice
-	prompt "Select the SoC with wafer sun8iw7"
-	default ARCH_SUN8IW7P1
-	help
-	 Select the SoC with wafer sun8iw7
-
-config ARCH_SUN8IW7P1
-	bool "Allwinner sun8iw7p1 SoC"
-	help
-	  Allwinner sun8iw7p1 SoC
-endchoice
-endif
-
-if ARCH_SUN8IW6
-choice
-	prompt "Select the SoC with wafer sun8iw6"
-	default ARCH_SUN8IW6P1
-	help
-	 Select the SoC with wafer sun8iw7
-
-config ARCH_SUN8IW6P1
-	bool "Allwinner sun8iw6p1 SoC"
-	help
-	  Allwinner sun8iw6p1 SoC
-endchoice
-endif
-
-if ARCH_SUN8IW18
-choice
-	prompt "Select the SoC with wafer sun8iw18"
-	default ARCH_SUN8IW18P1
-	help
-	 Select the SoC with wafer sun8iw18
-
-config ARCH_SUN8IW18P1
-	bool "Allwinner sun8iw18p1 SoC"
-	help
-	  Allwinner sun8iw18p1 SoC
-endchoice
-endif
-
-
-config SUNXI_GIC_ACCESS_SS
-    bool "Enable Sunxi GIC Access SS Protect"
-    depends on ARCH_SUN8IW6
-    default n
-    help
-        Support for Sunxi GIC Access SS Protect
-
-config SUN8I_CCI
-	bool "Cache Coherent Interconnect support"
-	depends on ARCH_SUN8IW6 || ARCH_SUN8IW17
-	default n
-	help
-	  Enable Cache Coherent Interconnect support
 
 # Select the board between FPGA and EVB
 
@@ -211,10 +131,81 @@ config EVB_PLATFORM
          Support for Allwinner's EVB board
 endchoice
 
+# Select the wafer with sun50i
+
+if ARCH_SUN50I
+choice
+	prompt "Select the wafer with arch sun50i"
+	default ARCH_SUN50IW1
+	help
+	  Select the wafer with arch sun50i
+
+config ARCH_SUN50IW1
+        bool "Allwinner sun50iw1 SoCs"
+        help
+          Allwinner sun50iw1 SoCs
+
+config ARCH_SUN50IW2
+        bool "Allwinner sun50iw2 SoCs"
+        help
+          Allwinner sun50iw2 SoCs
+endchoice
+endif
+
+# Select the SoC with specific arch and wafer
+
+if ARCH_SUN50IW1
+choice
+       prompt "Select the SoC with wafer sun50iw1"
+       default ARCH_SUN50IW1P1
+       help
+        Select the SoC with wafer sun50iw1
+
+config ARCH_SUN50IW1P1
+       bool "Allwinner sun50iw1p1 SoC"
+       help
+         Allwinner sun50iw1p1 SoC
+endchoice
+endif
+
+if ARCH_SUN50IW2
+choice
+	prompt "Select the SoC with wafer sun50iw2"
+	default ARCH_SUN50IW2P1
+	help
+	 Select the SoC with wafer sun50iw2
+
+config ARCH_SUN50IW2P1
+	bool "Allwinner sun50iw2p1 SoC"
+	help
+	  Allwinner sun50iw2p1 SoC
+endchoice
+endif
+
+config SUNXI_TRUSTZONE
+       bool "SUNXI trustzone security"
+       default n
+    help
+        Support for SUNXI trustzone security
+
+config HOMLET_PLATFORM
+       bool "Homlet platform Features"
+       default n
+       help
+         Enable special features for box then select Yes,
+         For example, fsync & sync immediatetly to nand disk.
+
+config SUNXI_BOOTUP_EXTEND
+        bool "Homlet platform bootup extend"
+        depends on HOMLET_PLATFORM
+        default n
+    help
+        Support system bootup triggered by ir, when system is poweroff.
+
 config SUNXI_SOC_NAME
-	string "The name of Sunxi SoC"
+	string "The name of SUNXI SoC"
 	default ""
 	help
-	  Used for /proc/cpuinfo and /sys/.../sysinfo.
+	  Used for /proc/cpuinfo and /sysfs/.../sysinfo.
 
 endif

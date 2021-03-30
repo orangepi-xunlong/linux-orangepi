@@ -2,30 +2,9 @@
  * SDIO spec header file
  * Protocol and standard (common) device definitions
  *
- * Copyright (C) 1999-2017, Broadcom Corporation
+ * $Copyright Open Broadcom Corporation$
  *
- *      Unless you and Broadcom execute a separate written software license
- * agreement governing use of this software, this software is licensed to you
- * under the terms of the GNU General Public License version 2 (the "GPL"),
- * available at http://www.broadcom.com/licenses/GPLv2.php, with the
- * following added to such license:
- *
- *      As a special exception, the copyright holders of this software give you
- * permission to link this software with independent modules, and to copy and
- * distribute the resulting executable under terms of your choice, provided that
- * you also meet, for each linked independent module, the terms and conditions of
- * the license of that module.  An independent module is a module which is not
- * derived from this software.  The special exception does not apply to any
- * modifications of the software.
- *
- *      Notwithstanding the above, under no circumstances may you combine this
- * software in any way with any other Broadcom software provided under a license
- * other than the GPL, without Broadcom's express prior written consent.
- *
- *
- * <<Broadcom-WL-IPTag/Open:>>
- *
- * $Id: sdio.h 644725 2016-06-21 12:26:04Z $
+ * $Id: sdio.h 416730 2013-08-06 09:33:19Z $
  */
 
 #ifndef	_SDIO_H
@@ -106,10 +85,6 @@ typedef volatile struct {
 /* io_en */
 #define SDIO_FUNC_ENABLE_1	0x02	/* function 1 I/O enable */
 #define SDIO_FUNC_ENABLE_2	0x04	/* function 2 I/O enable */
-#if defined(BT_OVER_SDIO)
-#define SDIO_FUNC_ENABLE_3	0x08	/* function 2 I/O enable */
-#define SDIO_FUNC_DISABLE_3	0xF0	/* function 2 I/O enable */
-#endif /* defined (BT_OVER_SDIO) */
 
 /* io_rdys */
 #define SDIO_FUNC_READY_1	0x02	/* function 1 I/O ready */
@@ -119,9 +94,7 @@ typedef volatile struct {
 #define INTR_CTL_MASTER_EN	0x1	/* interrupt enable master */
 #define INTR_CTL_FUNC1_EN	0x2	/* interrupt enable for function 1 */
 #define INTR_CTL_FUNC2_EN	0x4	/* interrupt enable for function 2 */
-#if defined(BT_OVER_SDIO)
-#define INTR_CTL_FUNC3_EN	0x8	/* interrupt enable for function 3 */
-#endif /* defined (BT_OVER_SDIO) */
+
 /* intr_status */
 #define INTR_STATUS_FUNC1	0x2	/* interrupt pending for function 1 */
 #define INTR_STATUS_FUNC2	0x4	/* interrupt pending for function 2 */
@@ -260,6 +233,7 @@ typedef volatile struct {
 #define SDIO_FUNC_0		0
 #define SDIO_FUNC_1		1
 #define SDIO_FUNC_2		2
+#define SDIO_FUNC_3		3
 #define SDIO_FUNC_4		4
 #define SDIO_FUNC_5		5
 #define SDIO_FUNC_6		6

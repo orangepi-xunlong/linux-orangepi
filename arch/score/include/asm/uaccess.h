@@ -4,7 +4,6 @@
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/thread_info.h>
-#include <asm/extable.h>
 
 #define VERIFY_READ		0
 #define VERIFY_WRITE		1
@@ -37,8 +36,7 @@
  * @addr: User space pointer to start of block to check
  * @size: Size of block to check
  *
- * Context: User context only. This function may sleep if pagefaults are
- *          enabled.
+ * Context: User context only.  This function may sleep.
  *
  * Checks if a pointer to a block of memory in user space is valid.
  *
@@ -63,8 +61,7 @@
  * @x:   Value to copy to user space.
  * @ptr: Destination address, in user space.
  *
- * Context: User context only. This function may sleep if pagefaults are
- *          enabled.
+ * Context: User context only.  This function may sleep.
  *
  * This macro copies a single simple value from kernel space to user
  * space.  It supports simple types like char and int, but not larger
@@ -82,8 +79,7 @@
  * @x:   Variable to store result.
  * @ptr: Source address, in user space.
  *
- * Context: User context only. This function may sleep if pagefaults are
- *          enabled.
+ * Context: User context only.  This function may sleep.
  *
  * This macro copies a single simple variable from user space to kernel
  * space.  It supports simple types like char and int, but not larger
@@ -102,8 +98,7 @@
  * @x:   Value to copy to user space.
  * @ptr: Destination address, in user space.
  *
- * Context: User context only. This function may sleep if pagefaults are
- *          enabled.
+ * Context: User context only.  This function may sleep.
  *
  * This macro copies a single simple value from kernel space to user
  * space.  It supports simple types like char and int, but not larger
@@ -124,8 +119,7 @@
  * @x:   Variable to store result.
  * @ptr: Source address, in user space.
  *
- * Context: User context only. This function may sleep if pagefaults are
- *          enabled.
+ * Context: User context only.  This function may sleep.
  *
  * This macro copies a single simple variable from user space to kernel
  * space.  It supports simple types like char and int, but not larger
@@ -164,7 +158,7 @@ do {									\
 		__get_user_asm(val, "lw", ptr);				\
 		 break;							\
 	case 8: 							\
-		if (__copy_from_user((void *)&val, ptr, 8) == 0)	\
+		if ((copy_from_user((void *)&val, ptr, 8)) == 0)	\
 			__gu_err = 0;					\
 		else							\
 			__gu_err = -EFAULT;				\
@@ -189,8 +183,6 @@ do {									\
 									\
 	if (likely(access_ok(VERIFY_READ, __gu_ptr, size)))		\
 		__get_user_common((x), size, __gu_ptr);			\
-	else								\
-		(x) = 0;						\
 									\
 	__gu_err;							\
 })
@@ -204,7 +196,6 @@ do {									\
 		"2:\n"							\
 		".section .fixup,\"ax\"\n"				\
 		"3:li	%0, %4\n"					\
-		"li	%1, 0\n"					\
 		"j	2b\n"						\
 		".previous\n"						\
 		".section __ex_table,\"a\"\n"				\
@@ -302,34 +293,35 @@ extern int __copy_tofrom_user(void *to, const void *from, unsigned long len);
 static inline unsigned long
 copy_from_user(void *to, const void *from, unsigned long len)
 {
-	unsigned long res = len;
+	unsigned long over;
 
-	if (likely(access_ok(VERIFY_READ, from, len)))
-		res = __copy_tofrom_user(to, from, len);
+	if (access_ok(VERIFY_READ, from, len))
+		return __copy_tofrom_user(to, from, len);
 
-	if (unlikely(res))
-		memset(to + (len - res), 0, res);
-
-	return res;
+	if ((unsigned long)from < TASK_SIZE) {
+		over = (unsigned long)from + len - TASK_SIZE;
+		return __copy_tofrom_user(to, from, len - over) + over;
+	}
+	return len;
 }
 
 static inline unsigned long
 copy_to_user(void *to, const void *from, unsigned long len)
 {
-	if (likely(access_ok(VERIFY_WRITE, to, len)))
-		len = __copy_tofrom_user(to, from, len);
+	unsigned long over;
 
+	if (access_ok(VERIFY_WRITE, to, len))
+		return __copy_tofrom_user(to, from, len);
+
+	if ((unsigned long)to < TASK_SIZE) {
+		over = (unsigned long)to + len - TASK_SIZE;
+		return __copy_tofrom_user(to, from, len - over) + over;
+	}
 	return len;
 }
 
-static inline unsigned long
-__copy_from_user(void *to, const void *from, unsigned long len)
-{
-	unsigned long left = __copy_tofrom_user(to, from, len);
-	if (unlikely(left))
-		memset(to + (len - left), 0, left);
-	return left;
-}
+#define __copy_from_user(to, from, len)	\
+		__copy_tofrom_user((to), (from), (len))
 
 #define __copy_to_user(to, from, len)		\
 		__copy_tofrom_user((to), (from), (len))
@@ -343,17 +335,17 @@ __copy_to_user_inatomic(void *to, const void *from, unsigned long len)
 static inline unsigned long
 __copy_from_user_inatomic(void *to, const void *from, unsigned long len)
 {
-	return __copy_tofrom_user(to, from, len);
+	return __copy_from_user(to, from, len);
 }
 
-#define __copy_in_user(to, from, len)	__copy_tofrom_user(to, from, len)
+#define __copy_in_user(to, from, len)	__copy_from_user(to, from, len)
 
 static inline unsigned long
 copy_in_user(void *to, const void *from, unsigned long len)
 {
 	if (access_ok(VERIFY_READ, from, len) &&
 		      access_ok(VERFITY_WRITE, to, len))
-		return __copy_tofrom_user(to, from, len);
+		return copy_from_user(to, from, len);
 }
 
 /*
@@ -420,6 +412,13 @@ static inline long strnlen_user(const char __user *str, long len)
 	else		
 		return __strnlen_user(str, len);
 }
+
+struct exception_table_entry {
+	unsigned long insn;
+	unsigned long fixup;
+};
+
+extern int fixup_exception(struct pt_regs *regs);
 
 #endif /* __SCORE_UACCESS_H */
 

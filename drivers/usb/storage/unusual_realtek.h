@@ -1,5 +1,4 @@
-/*
- * Driver for Realtek RTS51xx USB card reader
+/* Driver for Realtek RTS51xx USB card reader
  *
  * Copyright(c) 2009 Realtek Semiconductor Corp. All rights reserved.
  *
@@ -35,16 +34,6 @@ UNUSUAL_DEV(0x0bda, 0x0158, 0x0000, 0x9999,
 		USB_SC_DEVICE, USB_PR_DEVICE, init_realtek_cr, 0),
 
 UNUSUAL_DEV(0x0bda, 0x0159, 0x0000, 0x9999,
-		"Realtek",
-		"USB Card Reader",
-		USB_SC_DEVICE, USB_PR_DEVICE, init_realtek_cr, 0),
-
-UNUSUAL_DEV(0x0bda, 0x0177, 0x0000, 0x9999,
-		"Realtek",
-		"USB Card Reader",
-		USB_SC_DEVICE, USB_PR_DEVICE, init_realtek_cr, 0),
-
-UNUSUAL_DEV(0x0bda, 0x0184, 0x0000, 0x9999,
 		"Realtek",
 		"USB Card Reader",
 		USB_SC_DEVICE, USB_PR_DEVICE, init_realtek_cr, 0),

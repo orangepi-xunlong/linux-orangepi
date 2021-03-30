@@ -115,11 +115,15 @@ static int iwch_poll_cq_one(struct iwch_dev *rhp, struct iwch_cq *chp,
 		case T3_SEND_WITH_SE_INV:
 			wc->opcode = IB_WC_SEND;
 			break;
+		case T3_BIND_MW:
+			wc->opcode = IB_WC_BIND_MW;
+			break;
+
 		case T3_LOCAL_INV:
 			wc->opcode = IB_WC_LOCAL_INV;
 			break;
 		case T3_FAST_REGISTER:
-			wc->opcode = IB_WC_REG_MR;
+			wc->opcode = IB_WC_FAST_REG_MR;
 			break;
 		default:
 			printk(KERN_ERR MOD "Unexpected opcode %d "

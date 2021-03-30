@@ -602,7 +602,8 @@ static int mark_sector_deleted(struct partition *part, u_long old_addr)
 	if (rc) {
 		printk(KERN_ERR PREFIX "error writing '%s' at "
 			"0x%lx\n", part->mbd.mtd->name, addr);
-		goto err;
+		if (rc)
+			goto err;
 	}
 	if (block == part->current_block)
 		part->header_cache[offset + HEADER_MAP_OFFSET] = del;
@@ -674,7 +675,8 @@ static int do_writesect(struct mtd_blktrans_dev *dev, u_long sector, char *buf, 
 	if (rc) {
 		printk(KERN_ERR PREFIX "error writing '%s' at 0x%lx\n",
 				part->mbd.mtd->name, addr);
-		goto err;
+		if (rc)
+			goto err;
 	}
 
 	part->sector_map[sector] = addr;
@@ -693,7 +695,8 @@ static int do_writesect(struct mtd_blktrans_dev *dev, u_long sector, char *buf, 
 	if (rc) {
 		printk(KERN_ERR PREFIX "error writing '%s' at 0x%lx\n",
 				part->mbd.mtd->name, addr);
-		goto err;
+		if (rc)
+			goto err;
 	}
 	block->used_sectors++;
 	block->free_sectors--;

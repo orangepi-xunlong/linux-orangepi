@@ -2,7 +2,7 @@
  * arch/arm/include/asm/bL_switcher.h
  *
  * Created by:  Nicolas Pitre, April 2012
- * Copyright:   (C) 2012-2013  Linaro Limited
+ * Copyright:   (C) 2012  Linaro Limited
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -40,6 +40,9 @@ static inline int bL_switch_request(unsigned int cpu, unsigned int new_cluster_i
 
 #ifdef CONFIG_BL_SWITCHER
 
+void bL_switch_request_detach(unsigned int cpu,
+			      bL_switch_completion_handler completer);
+
 int bL_switcher_register_notifier(struct notifier_block *nb);
 int bL_switcher_unregister_notifier(struct notifier_block *nb);
 
@@ -58,6 +61,9 @@ int bL_switcher_trace_trigger(void);
 int bL_switcher_get_logical_index(u32 mpidr);
 
 #else
+static void bL_switch_request_detach(unsigned int cpu,
+				     bL_switch_completion_handler completer) { }
+
 static inline int bL_switcher_register_notifier(struct notifier_block *nb)
 {
 	return 0;

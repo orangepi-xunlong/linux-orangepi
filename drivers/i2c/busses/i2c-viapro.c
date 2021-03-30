@@ -2,7 +2,7 @@
     Copyright (c) 1998 - 2002  Frodo Looijaard <frodol@dds.nl>,
     Philip Edelbrock <phil@netroedge.com>, Kyösti Mälkki <kmalkki@cc.hut.fi>,
     Mark D. Studebaker <mdsxyz123@yahoo.com>
-    Copyright (C) 2005 - 2008  Jean Delvare <jdelvare@suse.de>
+    Copyright (C) 2005 - 2008  Jean Delvare <khali@linux-fr.org>
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -13,6 +13,10 @@
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
 /*
@@ -438,7 +442,7 @@ release_region:
 	return error;
 }
 
-static const struct pci_device_id vt596_ids[] = {
+static DEFINE_PCI_DEVICE_TABLE(vt596_ids) = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_82C596_3),
 	  .driver_data = SMBBA1 },
 	{ PCI_DEVICE(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_82C596B_3),
@@ -499,7 +503,7 @@ static void __exit i2c_vt596_exit(void)
 
 MODULE_AUTHOR("Kyosti Malkki <kmalkki@cc.hut.fi>, "
 	      "Mark D. Studebaker <mdsxyz123@yahoo.com> and "
-	      "Jean Delvare <jdelvare@suse.de>");
+	      "Jean Delvare <khali@linux-fr.org>");
 MODULE_DESCRIPTION("vt82c596 SMBus driver");
 MODULE_LICENSE("GPL");
 

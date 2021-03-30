@@ -1,21 +1,4 @@
 /*
- * drivers/media/platform/sunxi-vin/modules/actuator/ov8825_act.c
- *
- * Copyright (c) 2014 softwinner.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
-/*
  * sunxi actuator driver
  */
 
@@ -32,8 +15,8 @@ DEFINE_MUTEX(act_mutex);
 static struct actuator_ctrl_t act_t;
 
 /*
- *Please implement this for each actuator device!!!
- */
+ Please implement this for each actuator device!!!
+*/
 
 static int subdev_i2c_tx(struct actuator_ctrl_t *act_ctrl, unsigned short reg,
 			 unsigned char val)
@@ -134,7 +117,6 @@ static int subdev_move_pos(struct actuator_ctrl_t *act_ctrl,
 	unsigned short target_pos = 0;
 	short dest_pos = 0;
 	unsigned short curr_code = 0;
-
 	act_dbg("%s called, dir %d, num_steps %d\n", __func__, dir, num_steps);
 
 	/* Determine sign direction */
@@ -176,7 +158,7 @@ static int subdev_move_pos(struct actuator_ctrl_t *act_ctrl,
 								  target_pos],
 				    SLEWRATE);
 		if (ret == 0) {
-			usleep_range(1000, 1200);
+			usleep_range(1000, 1200);;
 			act_ctrl->curr_pos = target_pos;
 		} else {
 			break;
@@ -209,7 +191,7 @@ static int subdev_set_pos(struct actuator_ctrl_t *act_ctrl, unsigned short pos)
 			    act_ctrl->step_position_table[2 * target_pos],
 			    SLEWRATE);
 	if (ret == 0) {
-		usleep_range(1000, 1200);
+		usleep_range(1000, 1200);;
 		act_ctrl->curr_pos = target_pos;
 	} else {
 		act_err("act set pos err!");
@@ -223,7 +205,6 @@ static int subdev_init(struct actuator_ctrl_t *act_ctrl,
 {
 	int ret = 0;
 	struct actuator_para_t *para = a_para;
-
 	if (para == NULL) {
 		act_err("subdev_init para error\n");
 		ret = -1;
@@ -247,7 +228,7 @@ static int subdev_init(struct actuator_ctrl_t *act_ctrl,
 	else
 		act_ctrl->work_status = ACT_STA_ERR;
 
-subdev_init_end:
+      subdev_init_end:
 	return ret;
 }
 

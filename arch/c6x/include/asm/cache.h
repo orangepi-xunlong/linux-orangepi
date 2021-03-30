@@ -12,7 +12,6 @@
 #define _ASM_C6X_CACHE_H
 
 #include <linux/irqflags.h>
-#include <linux/init.h>
 
 /*
  * Cache line size

@@ -66,7 +66,7 @@ MODULE_PARM_DESC(joystick_port, "Joystick port address");
 module_param_array(rear_switch, bool, NULL, 0444);
 MODULE_PARM_DESC(rear_switch, "Enable shared rear/line-in switch");
 
-static const struct pci_device_id snd_ymfpci_ids[] = {
+static DEFINE_PCI_DEVICE_TABLE(snd_ymfpci_ids) = {
 	{ PCI_VDEVICE(YAMAHA, 0x0004), 0, },   /* YMF724 */
 	{ PCI_VDEVICE(YAMAHA, 0x000d), 0, },   /* YMF724F */
 	{ PCI_VDEVICE(YAMAHA, 0x000a), 0, },   /* YMF740 */
@@ -106,8 +106,7 @@ static int snd_ymfpci_create_gameport(struct snd_ymfpci *chip, int dev,
 					break;
 			}
 			if (!r) {
-				dev_err(chip->card->dev,
-					"no gameport ports available\n");
+				printk(KERN_ERR "ymfpci: no gameport ports available\n");
 				return -EBUSY;
 			}
 		}
@@ -117,22 +116,19 @@ static int snd_ymfpci_create_gameport(struct snd_ymfpci *chip, int dev,
 		case 0x204: legacy_ctrl2 |= 2 << 6; break;
 		case 0x205: legacy_ctrl2 |= 3 << 6; break;
 		default:
-			dev_err(chip->card->dev,
-				"invalid joystick port %#x", io_port);
+			printk(KERN_ERR "ymfpci: invalid joystick port %#x", io_port);
 			return -EINVAL;
 		}
 	}
 
 	if (!r && !(r = request_region(io_port, 1, "YMFPCI gameport"))) {
-		dev_err(chip->card->dev,
-			"joystick port %#x is in use.\n", io_port);
+		printk(KERN_ERR "ymfpci: joystick port %#x is in use.\n", io_port);
 		return -EBUSY;
 	}
 
 	chip->gameport = gp = gameport_allocate_port();
 	if (!gp) {
-		dev_err(chip->card->dev,
-			"cannot allocate memory for gameport\n");
+		printk(KERN_ERR "ymfpci: cannot allocate memory for gameport\n");
 		release_and_free_resource(r);
 		return -ENOMEM;
 	}
@@ -191,8 +187,7 @@ static int snd_card_ymfpci_probe(struct pci_dev *pci,
 		return -ENOENT;
 	}
 
-	err = snd_card_new(&pci->dev, index[dev], id[dev], THIS_MODULE,
-			   0, &card);
+	err = snd_card_create(index[dev], id[dev], THIS_MODULE, 0, &card);
 	if (err < 0)
 		return err;
 
@@ -283,11 +278,11 @@ static int snd_card_ymfpci_probe(struct pci_dev *pci,
 		card->shortname,
 		chip->reg_area_phys,
 		chip->irq);
-	if ((err = snd_ymfpci_pcm(chip, 0)) < 0) {
+	if ((err = snd_ymfpci_pcm(chip, 0, NULL)) < 0) {
 		snd_card_free(card);
 		return err;
 	}
-	if ((err = snd_ymfpci_pcm_spdif(chip, 1)) < 0) {
+	if ((err = snd_ymfpci_pcm_spdif(chip, 1, NULL)) < 0) {
 		snd_card_free(card);
 		return err;
 	}
@@ -297,12 +292,12 @@ static int snd_card_ymfpci_probe(struct pci_dev *pci,
 		return err;
 	}
 	if (chip->ac97->ext_id & AC97_EI_SDAC) {
-		err = snd_ymfpci_pcm_4ch(chip, 2);
+		err = snd_ymfpci_pcm_4ch(chip, 2, NULL);
 		if (err < 0) {
 			snd_card_free(card);
 			return err;
 		}
-		err = snd_ymfpci_pcm2(chip, 3);
+		err = snd_ymfpci_pcm2(chip, 3, NULL);
 		if (err < 0) {
 			snd_card_free(card);
 			return err;
@@ -318,9 +313,7 @@ static int snd_card_ymfpci_probe(struct pci_dev *pci,
 					       MPU401_INFO_INTEGRATED |
 					       MPU401_INFO_IRQ_HOOK,
 					       -1, &chip->rawmidi)) < 0) {
-			dev_warn(card->dev,
-				 "cannot initialize MPU401 at 0x%lx, skipping...\n",
-				 mpu_port[dev]);
+			printk(KERN_WARNING "ymfpci: cannot initialize MPU401 at 0x%lx, skipping...\n", mpu_port[dev]);
 			legacy_ctrl &= ~YMFPCI_LEGACY_MIEN; /* disable MPU401 irq */
 			pci_write_config_word(pci, PCIR_DSXG_LEGACY, legacy_ctrl);
 		}
@@ -330,14 +323,12 @@ static int snd_card_ymfpci_probe(struct pci_dev *pci,
 					   fm_port[dev],
 					   fm_port[dev] + 2,
 					   OPL3_HW_OPL3, 1, &opl3)) < 0) {
-			dev_warn(card->dev,
-				 "cannot initialize FM OPL3 at 0x%lx, skipping...\n",
-				 fm_port[dev]);
+			printk(KERN_WARNING "ymfpci: cannot initialize FM OPL3 at 0x%lx, skipping...\n", fm_port[dev]);
 			legacy_ctrl &= ~YMFPCI_LEGACY_FMEN;
 			pci_write_config_word(pci, PCIR_DSXG_LEGACY, legacy_ctrl);
 		} else if ((err = snd_opl3_hwdep_new(opl3, 0, 1, NULL)) < 0) {
 			snd_card_free(card);
-			dev_err(card->dev, "cannot create opl3 hwdep\n");
+			snd_printk(KERN_ERR "cannot create opl3 hwdep\n");
 			return err;
 		}
 	}
@@ -356,6 +347,7 @@ static int snd_card_ymfpci_probe(struct pci_dev *pci,
 static void snd_card_ymfpci_remove(struct pci_dev *pci)
 {
 	snd_card_free(pci_get_drvdata(pci));
+	pci_set_drvdata(pci, NULL);
 }
 
 static struct pci_driver ymfpci_driver = {

@@ -1,18 +1,3 @@
-/*
- * linux-4.9/drivers/media/platform/sunxi-vin/top_reg.h
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
 
 #ifndef __CSIC__TOP__REG__H__
 #define __CSIC__TOP__REG__H__
@@ -20,10 +5,109 @@
 #include <linux/types.h>
 
 #define MAX_CSIC_TOP_NUM 2
+#define ISP_INPUT(x, y, i, j) ISP##x##_INPUT##y##_PARSER##i##_CH##j
+#define VIPP_INPUT(x, i, j) VIPP##x##_INPUT_ISP##i##_CH##j
+
+#define ISP_VIPP_SEL_SEPARATE
 
 /*register value*/
 
+/*
+ * isp0 input0 source
+ */
+enum isp0_input0 {
+	ISP_INPUT(0, 0, 0, 0),/*ISP0_INPUT0_PARSER0_CH0*/
+	ISP_INPUT(0, 0, 1, 0),/*ISP0_INPUT0_PARSER1_CH0*/
+	ISP_INPUT(0, 0, 1, 1),/*ISP0_INPUT0_PARSER1_CH1*/
+};
+
+enum isp0_input1 {
+	ISP_INPUT(0, 1, 0, 1),
+	ISP_INPUT(0, 1, 1, 1),
+};
+
+enum isp0_input2 {
+	ISP_INPUT(0, 2, 0, 2),
+	ISP_INPUT(0, 2, 1, 2),
+};
+
+enum isp0_input3 {
+	ISP_INPUT(0, 3, 0, 3),
+	ISP_INPUT(0, 3, 1, 3),
+};
+
+enum isp1_input0 {
+	ISP_INPUT(1, 0, 1, 0),/*ISP1_INPUT0_PARSER1_CH0*/
+	ISP_INPUT(1, 0, 0, 0),/*ISP1_INPUT0_PARSER0_CH0*/
+	ISP_INPUT(1, 0, 0, 1),/*ISP1_INPUT0_PARSER0_CH1*/
+};
+
+enum isp1_input1 {
+	ISP_INPUT(1, 1, 0, 1),
+	ISP_INPUT(1, 1, 1, 1),
+};
+
+enum isp1_input2 {
+	ISP_INPUT(1, 2, 0, 2),
+	ISP_INPUT(1, 2, 1, 2),
+};
+
+enum isp1_input3 {
+	ISP_INPUT(1, 3, 0, 3),
+	ISP_INPUT(1, 3, 1, 3),
+};
+
+/*
+ * vipp0 input source
+ */
+enum vipp0_input {
+	VIPP_INPUT(0, 0, 0),/*VIPP0_INPUT_ISP0_CH0*/
+	VIPP_INPUT(0, 1, 0),/*VIPP0_INPUT_ISP1_CH0*/
+};
+
+enum vipp1_input {
+	VIPP_INPUT(1, 0, 0),
+	VIPP_INPUT(1, 1, 0),
+	VIPP_INPUT(1, 0, 1),
+	VIPP_INPUT(1, 1, 1),
+};
+
+enum vipp2_input {
+	VIPP_INPUT(2, 0, 0),
+	VIPP_INPUT(2, 1, 0),
+	VIPP_INPUT(2, 0, 2),
+	VIPP_INPUT(2, 1, 2),
+};
+
+enum vipp3_input {
+	VIPP_INPUT(3, 0, 0),
+	VIPP_INPUT(3, 1, 0),
+	VIPP_INPUT(3, 0, 3),
+	VIPP_INPUT(3, 1, 3),
+	VIPP_INPUT(3, 1, 1),
+};
+
 /*register data struct*/
+
+#ifdef ISP_VIPP_SEL_SEPARATE
+union csic_isp_input {
+	enum isp0_input0 isp0_in0;
+	enum isp0_input1 isp0_in1;
+	enum isp0_input2 isp0_in2;
+	enum isp0_input3 isp0_in3;
+	enum isp1_input0 isp1_in0;
+	enum isp1_input1 isp1_in1;
+	enum isp1_input2 isp1_in2;
+	enum isp1_input3 isp1_in3;
+};
+#else
+union csic_vipp_input {
+	enum vipp0_input vipp0_in;
+	enum vipp1_input vipp1_in;
+	enum vipp2_input vipp2_in;
+	enum vipp3_input vipp3_in;
+};
+#endif
 
 struct csic_feature_list {
 	unsigned int dma_num;
@@ -39,74 +123,36 @@ struct csic_version {
 	unsigned int ver_small;
 };
 
-enum  csic_mulp_cs {
-	CSIC_MULF_DMA0_CS = 0x1,
-	CSIC_MULF_DMA1_CS = 0x2,
-	CSIC_MULF_DMA2_CS = 0x4,
-	CSIC_MULF_DMA3_CS = 0x8,
-	CSIC_MULF_DMA4_CS = 0x10,
-	CSIC_MULF_DMA5_CS = 0x20,
-	CSIC_MULF_DMA6_CS = 0x40,
-	CSIC_MULF_DMA7_CS = 0x80,
-	CSIC_MULF_ALL_CS = 0xFF,
-};
-
-enum csis_mulp_int {
-	MULF_DONE = 0X1,
-	MULF_ERR = 0x2,
-	MULF_ALL = 0x3,
-};
-
-struct cisc_mulp_int_status {
-	bool mulf_done;
-	bool mulf_err;
-};
-
-/*
- * functions about top register
- */
 int csic_top_set_base_addr(unsigned int sel, unsigned long addr);
 void csic_top_enable(unsigned int sel);
 void csic_top_disable(unsigned int sel);
-void csic_isp_bridge_enable(unsigned int sel);
-void csic_isp_bridge_disable(unsigned int sel);
+void csic_top_wdr_mode(unsigned int sel, unsigned int en);
 void csic_top_sram_pwdn(unsigned int sel, unsigned int en);
+void csic_top_switch_ncsi(unsigned int sel, unsigned int en);
 void csic_top_version_read_en(unsigned int sel, unsigned int en);
-void csic_isp_input_select(unsigned int sel, unsigned int isp, unsigned int in,
-				unsigned int psr, unsigned int ch);
-void csic_vipp_input_select(unsigned int sel, unsigned int vipp,
-				unsigned int isp, unsigned int ch);
-void csic_dma_input_select(unsigned int sel, unsigned int dma,
-				unsigned int parser, unsigned int ch);
+#ifdef ISP_VIPP_SEL_SEPARATE
+void csic_isp0_input0_select(unsigned int sel, enum isp0_input0 isp0_in0);
+void csic_isp0_input1_select(unsigned int sel, enum isp0_input1 isp0_in1);
+void csic_isp0_input2_select(unsigned int sel, enum isp0_input2 isp0_in2);
+void csic_isp0_input3_select(unsigned int sel, enum isp0_input3 isp0_in3);
+
+void csic_isp1_input0_select(unsigned int sel, enum isp1_input0 isp1_in0);
+void csic_isp1_input1_select(unsigned int sel, enum isp1_input1 isp1_in1);
+void csic_isp1_input2_select(unsigned int sel, enum isp1_input2 isp1_in2);
+void csic_isp1_input3_select(unsigned int sel, enum isp1_input3 isp1_in3);
+
+void csic_vipp0_input_select(unsigned int sel, enum vipp0_input vipp0_in);
+void csic_vipp1_input_select(unsigned int sel, enum vipp1_input vipp1_in);
+void csic_vipp2_input_select(unsigned int sel, enum vipp2_input vipp2_in);
+void csic_vipp3_input_select(unsigned int sel, enum vipp3_input vipp3_in);
+#else
+void csic_isp_input_select(unsigned int sel, unsigned int x, unsigned int y,
+				union csic_isp_input isp_in);
+void csic_vipp_input_select(unsigned int sel, unsigned int x,
+				union csic_vipp_input vipp_in);
+#endif
+
 void csic_feature_list_get(unsigned int sel, struct csic_feature_list *fl);
 void csic_version_get(unsigned int sel, struct csic_version *v);
-void csic_mbus_req_mex_set(unsigned int sel);
-void csic_mulp_mode_en(unsigned int sel, unsigned int en);
-void csic_mulp_dma_cs(unsigned int sel, enum csic_mulp_cs cs);
-void csic_mulp_int_enable(unsigned int sel, enum csis_mulp_int interrupt);
-void csic_mulp_int_disable(unsigned int sel, enum csis_mulp_int interrupt);
-void csic_mulp_int_get_status(unsigned int sel, struct cisc_mulp_int_status *status);
-void csic_mulp_int_clear_status(unsigned int sel, enum csis_mulp_int interrupt);
-void csic_ptn_generation_en(unsigned int sel, unsigned int en);
-void csic_ptn_control(unsigned int sel, int mode, int dw, int port);
-void csic_ptn_length(unsigned int sel, unsigned int len);
-void csic_ptn_addr(unsigned int sel, unsigned long dma_addr);
-void csic_ptn_size(unsigned int sel, unsigned int w, unsigned int h);
-
-/*
- * functions about ccu register
- */
-int csic_ccu_set_base_addr(unsigned long addr);
-void csic_ccu_clk_gating_enable(void);
-void csic_ccu_clk_gating_disable(void);
-void csic_ccu_mcsi_clk_mode(unsigned int mode);
-void csic_ccu_mcsi_combo_clk_en(unsigned int sel, unsigned int en);
-void csic_ccu_mcsi_mipi_clk_en(unsigned int sel, unsigned int en);
-void csic_ccu_mcsi_parser_clk_en(unsigned int sel, unsigned int en);
-void csic_ccu_misp_isp_clk_en(unsigned int sel, unsigned int en);
-void csic_ccu_mcsi_post_clk_enable(unsigned int sel);
-void csic_ccu_mcsi_post_clk_disable(unsigned int sel);
-void csic_ccu_bk_clk_en(unsigned int sel, unsigned int en);
-void csic_ccu_vipp_clk_en(unsigned int sel, unsigned int en);
 
 #endif /* __CSIC__TOP__REG__H__ */

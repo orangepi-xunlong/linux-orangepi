@@ -40,78 +40,19 @@
 
 struct usb_cfg g_usb_cfg;
 int thread_id_irq_run_flag;
-int thread_device_run_flag;
-int thread_host_run_flag;
+int thread_device_run_flag = 0;
+int thread_host_run_flag = 0;
 
 __u32 thread_run_flag = 1;
 int thread_stopped_flag = 1;
 atomic_t thread_suspend_flag;
 
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
-static enum dual_role_property sunxi_usb_dr_properties[] = {
-	DUAL_ROLE_PROP_SUPPORTED_MODES,
-	DUAL_ROLE_PROP_MODE,
-	DUAL_ROLE_PROP_PR,
-	DUAL_ROLE_PROP_DR,
-};
-
-static int sunxi_dr_get_property(struct dual_role_phy_instance *dual_role,
-			enum dual_role_property prop, unsigned int *val)
-{
-	enum usb_role role = USB_ROLE_NULL;
-	int mode, pr, dr;
-
-	/*
-	 * FIXME: e.g
-	 * 1.mutex_lock is needed ?
-	 * 2.synchronize current status before updated role ?
-	 * ...
-	 */
-
-	role = get_usb_role();
-
-	if (role == USB_ROLE_HOST) {
-		DMSG_DEBUG("mode is HOST(DFP)\n");
-		mode = DUAL_ROLE_PROP_MODE_DFP;
-		pr = DUAL_ROLE_PROP_PR_SRC;
-		dr = DUAL_ROLE_PROP_DR_HOST;
-	} else if (role == USB_ROLE_DEVICE) {
-		DMSG_DEBUG("mode is DEVICE(UFP)\n");
-		mode = DUAL_ROLE_PROP_MODE_UFP;
-		pr = DUAL_ROLE_PROP_PR_SNK;
-		dr = DUAL_ROLE_PROP_DR_DEVICE;
-	} else {
-		DMSG_DEBUG("mode is NULL(NONE)\n");
-		mode = DUAL_ROLE_PROP_MODE_NONE;
-		pr = DUAL_ROLE_PROP_PR_NONE;
-		dr = DUAL_ROLE_PROP_DR_NONE;
-	}
-
-	switch (prop) {
-	case DUAL_ROLE_PROP_MODE:
-		*val = mode;
-		break;
-	case DUAL_ROLE_PROP_PR:
-		*val = pr;
-		break;
-	case DUAL_ROLE_PROP_DR:
-		*val = dr;
-		break;
-	default:
-		DMSG_PANIC("unsupported property %d\n", prop);
-		return -EINVAL;
-	}
-
-	return 0;
-}
-#endif
-
-static int usb_device_scan_thread(void *pArg)
+static int usb_device_scan_thread(void * pArg)
 {
 	/* delay for udc & hcd ready */
 	msleep(3000);
 
-	while (thread_device_run_flag) {
+	while(thread_device_run_flag) {
 
 		msleep(1000);  /* 1s */
 		hw_rmmod_usb_host();
@@ -121,18 +62,19 @@ static int usb_device_scan_thread(void *pArg)
 		hw_insmod_usb_device();
 		usb_msg_center(&g_usb_cfg);
 		thread_device_run_flag = 0;
-		DMSG_INFO("device_chose finished %d!\n", __LINE__);
+		DMSG_INFO("device_chose finished %d!\n",__LINE__);
 	}
 
 	return 0;
 }
 
-static int usb_host_scan_thread(void *pArg)
+ static int usb_host_scan_thread(void * pArg)
 {
+
 	/* delay for udc & hcd ready */
 	msleep(3000);
 
-	while (thread_host_run_flag) {
+	while(thread_host_run_flag) {
 
 		msleep(1000);  /* 1s */
 		hw_rmmod_usb_host();
@@ -142,20 +84,21 @@ static int usb_host_scan_thread(void *pArg)
 		hw_insmod_usb_host();
 		usb_msg_center(&g_usb_cfg);
 		thread_host_run_flag = 0;
-		DMSG_INFO("host_chose finished %d!\n", __LINE__);
+		DMSG_INFO("host_chose finished %d!\n",__LINE__);
 	}
 
 	return 0;
 }
 
-static int usb_hardware_scan_thread(void *pArg)
+static int usb_hardware_scan_thread(void * pArg)
 {
 	struct usb_cfg *cfg = pArg;
 
 	/* delay for udc & hcd ready */
+
 	msleep(3000);
 
-	while (thread_run_flag) {
+	while(thread_run_flag) {
 		msleep(1000);  /* 1s */
 
 		if (atomic_read(&thread_suspend_flag))
@@ -174,9 +117,8 @@ static irqreturn_t usb_id_irq(int irq, void *parg)
 
 	mdelay(1000);
 
-	/**
-	 * rmmod usb device/host driver first,
-	 * then insmod usb host/device driver.
+	/*
+	 * rmmod usb device/host driver first, then insmod usb host/device driver.
 	 */
 	usb_hw_scan(cfg);
 	usb_msg_center(cfg);
@@ -207,8 +149,8 @@ static int usb_id_irq_thread(void *parg)
 		usb_msg_center(cfg);
 
 		if (cfg->port.id.valid) {
-			id_irq_num = gpio_to_irq(cfg->port.id.gpio_set.gpio);
-			if (IS_ERR_VALUE((unsigned long)id_irq_num)) {
+			id_irq_num = gpio_to_irq(cfg->port.id.gpio_set.gpio.gpio);
+			if (IS_ERR_VALUE(id_irq_num)) {
 				DMSG_PANIC("ERR: map usb id gpio to virq failed, err %d\n",
 					   id_irq_num);
 				return -EINVAL;
@@ -218,7 +160,7 @@ static int usb_id_irq_thread(void *parg)
 				    IRQF_ONESHOT;
 			ret = request_threaded_irq(id_irq_num, NULL, usb_id_irq,
 						   irq_flags, "usb_id", cfg);
-			if (IS_ERR_VALUE((unsigned long)ret)) {
+			if (IS_ERR_VALUE(ret)) {
 				DMSG_PANIC("ERR: request usb id virq %d failed, err %d\n",
 					 id_irq_num, ret);
 				return -EINVAL;
@@ -234,6 +176,7 @@ static int usb_id_irq_thread(void *parg)
 
 static __s32 usb_script_parse(struct device_node *np, struct usb_cfg *cfg)
 {
+#ifdef CONFIG_OF
 	struct device_node *usbc_np = NULL;
 	int ret = -1;
 	const char  *used_status;
@@ -245,72 +188,126 @@ static __s32 usb_script_parse(struct device_node *np, struct usb_cfg *cfg)
 	if (ret) {
 		DMSG_INFO("get usb_used is fail, %d\n", -ret);
 		cfg->port.enable = 0;
-	} else if (!strcmp(used_status, "okay")) {
+	}else if (!strcmp(used_status, "okay")) {
 		cfg->port.enable = 1;
-	} else {
+	}else {
 		cfg->port.enable = 0;
 	}
 
 	/* usbc port type */
-	ret = of_property_read_u32(usbc_np,
-					KEY_USB_PORT_TYPE,
-					&cfg->port.port_type);
+	ret = of_property_read_u32(usbc_np, KEY_USB_PORT_TYPE, &cfg->port.port_type);
 	if (ret)
 		DMSG_INFO("get usb_port_type is fail, %d\n", -ret);
 
 	/* usbc det mode */
-	ret = of_property_read_u32(usbc_np,
-					KEY_USB_DET_MODE,
-					&cfg->port.detect_mode);
+	ret = of_property_read_u32(usbc_np, KEY_USB_DET_MODE, &cfg->port.detect_mode);
 	if (ret)
 		DMSG_INFO("get usb_detect_mode is fail, %d\n", -ret);
 
 	/* usbc det_vbus */
-	ret = of_property_read_string(usbc_np,
-					KEY_USB_DETVBUS_GPIO,
-					&cfg->port.det_vbus_name);
+	ret = of_property_read_string(usbc_np, KEY_USB_DETVBUS_GPIO, &cfg->port.det_vbus_name);
 	if (ret) {
 		DMSG_INFO("get det_vbus is fail, %d\n", -ret);
 		cfg->port.det_vbus.valid = 0;
-	} else {
+	}else{
 		if (strncmp(cfg->port.det_vbus_name, "axp_ctrl", 8) == 0) {
 			cfg->port.det_vbus_type = USB_DET_VBUS_TYPE_AXP;
 			cfg->port.det_vbus.valid = 0;
 		} else {
-			/*get det vbus gpio */
-			cfg->port.det_vbus.gpio_set.gpio = of_get_named_gpio(usbc_np, KEY_USB_DETVBUS_GPIO, 0);
-			if (gpio_is_valid(cfg->port.det_vbus.gpio_set.gpio)) {
+			/*get det vbus gpio*/
+			cfg->port.det_vbus.gpio_set.gpio.gpio = of_get_named_gpio(usbc_np, KEY_USB_DETVBUS_GPIO, 0);
+			if (gpio_is_valid(cfg->port.det_vbus.gpio_set.gpio.gpio)) {
 				cfg->port.det_vbus.valid = 1;
-				cfg->port.det_vbus_type = USB_DET_VBUS_TYPE_GPIO;
-			} else {
+				cfg->port.det_vbus_type = USB_DET_VBUS_TYPE_GIPO;
+			}else{
 				cfg->port.det_vbus.valid = 0;
 			}
 		}
 	}
 
-	/* usbc id  */
-	ret = of_property_read_string(usbc_np,
-					KEY_USB_ID_GPIO,
-					&cfg->port.id_name);
-	if (ret) {
-		DMSG_INFO("get id is fail, %d\n", -ret);
+	/* usbc id gpio*/
+	cfg->port.id.gpio_set.gpio.gpio = of_get_named_gpio(usbc_np, KEY_USB_ID_GPIO, 0);
+	if (gpio_is_valid(cfg->port.id.gpio_set.gpio.gpio)) {
+		cfg->port.id.valid = 1;
+	}else{
 		cfg->port.id.valid = 0;
+	}
+
+#else
+        script_item_value_type_e type = 0;
+	script_item_u item_temp;
+
+	/* usbc enable */
+	type = script_get_item(SET_USB0, KEY_USB_ENABLE, &item_temp);
+	if(type == SCIRPT_ITEM_VALUE_TYPE_INT){
+		cfg->port.enable = item_temp.val;
+	}else{
+		DMSG_PANIC("ERR: get usbc enable failed\n");
+		cfg->port.enable = 0;
+	}
+
+	/* usbc port type */
+	type = script_get_item(SET_USB0, KEY_USB_PORT_TYPE, &item_temp);
+	if(type == SCIRPT_ITEM_VALUE_TYPE_INT){
+		cfg->port.port_type = item_temp.val;
+	}else{
+		DMSG_PANIC("ERR: get usbc port type failed\n");
+		cfg->port.port_type = 0;
+	}
+
+	/* usbc det mode */
+	type = script_get_item(SET_USB0, KEY_USB_DET_MODE, &item_temp);
+	if (type == SCIRPT_ITEM_VALUE_TYPE_INT) {
+		cfg->port.detect_mode = item_temp.val;
 	} else {
-		if (strncmp(cfg->port.id_name, "axp_ctrl", 8) == 0) {
-			cfg->port.id_type = USB_ID_TYPE_AXP;
-			cfg->port.id.valid = 0;
-		} else {
-			/*get id gpio */
-			cfg->port.id.gpio_set.gpio = of_get_named_gpio(usbc_np, KEY_USB_ID_GPIO, 0);
-			if (gpio_is_valid(cfg->port.id.gpio_set.gpio)) {
-				cfg->port.id.valid = 1;
-				cfg->port.id_type = USB_ID_TYPE_GPIO;
-			} else {
-				cfg->port.id.valid = 0;
+		DMSG_PANIC("ERR: get usbc port type failed\n");
+		cfg->port.detect_mode = 0;
+	}
+
+	/* usbc id */
+	type = script_get_item(SET_USB0, KEY_USB_ID_GPIO, &(cfg->port.id.gpio_set));
+	if(type == SCIRPT_ITEM_VALUE_TYPE_PIO){
+		cfg->port.id.valid = 1;
+	}else{
+		cfg->port.id.valid = 0;
+		DMSG_PANIC("ERR: get usbc id failed\n");
+	}
+
+	/* usbc det_vbus */
+	type = script_get_item(SET_USB0, KEY_USB_DETVBUS_GPIO, &(cfg->port.det_vbus.gpio_set));
+	if(type == SCIRPT_ITEM_VALUE_TYPE_PIO){
+		cfg->port.det_vbus.valid = 1;
+		cfg->port.det_vbus_type = USB_DET_VBUS_TYPE_GIPO;
+	}else{
+		cfg->port.det_vbus.valid = 0;
+		cfg->port.det_vbus_type = USB_DET_VBUS_TYPE_NULL;
+		DMSG_PANIC("ERR: get usbc det_vbus gpio failed\n");
+	}
+
+	if(cfg->port.det_vbus.valid == 0){
+		type = script_get_item(set_usbc, KEY_USB_DETVBUS_GPIO, &item_temp);
+		if(type == SCIRPT_ITEM_VALUE_TYPE_STR){
+			if(strncmp(item_temp.str, "axp_ctrl", 8) == 0){
+				cfg->port.det_vbus_type = USB_DET_VBUS_TYPE_AXP;
+			}else{
+				cfg->port.det_vbus_type = USB_DET_VBUS_TYPE_NULL;
 			}
+		}else{
+				DMSG_PANIC("ERR: get usbc det_vbus axp failed\n");
+				cfg->port.det_vbus_type = USB_DET_VBUS_TYPE_NULL;
 		}
 	}
 
+	/* usbc drv_vbus */
+	type = script_get_item(set_usbc, KEY_USB_DRVVBUS_GPIO, &(cfg->port.drv_vbus.gpio_set));
+	if(type == SCIRPT_ITEM_VALUE_TYPE_PIO){
+		cfg->port.drv_vbus.valid = 1;
+	}else{
+		cfg->port.drv_vbus.valid = 0;
+		DMSG_PANIC("ERR: get usbc det_vbus failed\n");
+	}
+
+#endif
 	return 0;
 }
 
@@ -320,16 +317,18 @@ int usb_otg_id_status(void)
 	int id_status = -1;
 
 	cfg = &g_usb_cfg;
-	if (cfg == NULL)
+	if(cfg == NULL){
 		return -1;
+	}
 
-	if (cfg->port.port_type == USB_PORT_TYPE_DEVICE)
+	if(cfg->port.port_type == USB_PORT_TYPE_DEVICE){
 		return 1;
+	}
 
-	if (cfg->port.port_type == USB_PORT_TYPE_OTG) {
-		if (cfg->port.id.valid)
-			id_status = __gpio_get_value(
-						cfg->port.id.gpio_set.gpio);
+	if(cfg->port.port_type == USB_PORT_TYPE_OTG) {
+		if(cfg->port.id.valid){
+			id_status = __gpio_get_value(cfg->port.id.gpio_set.gpio.gpio);
+		}
 	}
 
 	return id_status;
@@ -363,10 +362,9 @@ static int sunxi_otg_manager_probe(struct platform_device *pdev)
 	create_node_file(pdev);
 
 	if (g_usb_cfg.port.port_type == USB_PORT_TYPE_DEVICE) {
+
 		thread_device_run_flag = 1;
-		device_th = kthread_create(usb_device_scan_thread,
-						NULL,
-						"usb_device_chose");
+		device_th = kthread_create(usb_device_scan_thread, NULL, "usb_device_chose");
 		if (IS_ERR(device_th)) {
 			DMSG_PANIC("ERR: device kthread_create failed\n");
 			return -1;
@@ -379,10 +377,8 @@ static int sunxi_otg_manager_probe(struct platform_device *pdev)
 
 		set_usb_role_ex(USB_ROLE_HOST);
 
-		thread_host_run_flag = 0;
-		host_th = kthread_create(usb_host_scan_thread,
-						NULL,
-						"usb_host_chose");
+		thread_host_run_flag = 1;
+		host_th = kthread_create(usb_host_scan_thread, NULL, "usb_host_chose");
 		if (IS_ERR(host_th)) {
 			DMSG_PANIC("ERR: host kthread_create failed\n");
 			return -1;
@@ -399,9 +395,8 @@ static int sunxi_otg_manager_probe(struct platform_device *pdev)
 			thread_run_flag = 1;
 			thread_stopped_flag = 0;
 
-			th = kthread_create(usb_hardware_scan_thread,
-						&g_usb_cfg,
-						"usb-hardware-scan");
+			th = kthread_create(usb_hardware_scan_thread, &g_usb_cfg,
+					    "usb-hardware-scan");
 			if (IS_ERR(th)) {
 				DMSG_PANIC("ERR: kthread_create failed\n");
 				return -1;
@@ -410,9 +405,8 @@ static int sunxi_otg_manager_probe(struct platform_device *pdev)
 			wake_up_process(th);
 		} else if (g_usb_cfg.port.detect_mode == USB_DETECT_MODE_INTR) {
 			thread_id_irq_run_flag = 1;
-			id_irq_th = kthread_create(usb_id_irq_thread,
-							&g_usb_cfg,
-							"usb_id_irq");
+			id_irq_th = kthread_create(usb_id_irq_thread, &g_usb_cfg,
+						   "usb_id_irq");
 			if (IS_ERR(id_irq_th)) {
 				DMSG_PANIC("ERR: id_irq kthread_create failed\n");
 				return -1;
@@ -423,20 +417,6 @@ static int sunxi_otg_manager_probe(struct platform_device *pdev)
 			DMSG_PANIC("ERR: usb detect mode isn't supported\n");
 			return -1;
 		}
-
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
-		g_usb_cfg.port.dr_desc.name = "dr_usbc0";
-		g_usb_cfg.port.dr_desc.supported_modes = DUAL_ROLE_SUPPORTED_MODES_DFP_AND_UFP;
-		g_usb_cfg.port.dr_desc.properties = sunxi_usb_dr_properties;
-		g_usb_cfg.port.dr_desc.num_properties = ARRAY_SIZE(sunxi_usb_dr_properties);
-		g_usb_cfg.port.dr_desc.get_property = sunxi_dr_get_property;
-		g_usb_cfg.port.dr_desc.set_property = NULL;
-		g_usb_cfg.port.dr_desc.property_is_writeable = NULL;
-
-		g_usb_cfg.port.dual_role = devm_dual_role_instance_register(&pdev->dev, &g_usb_cfg.port.dr_desc);
-		if (IS_ERR(g_usb_cfg.port.dual_role))
-			DMSG_PANIC("ERR: failed to register dual_role_class device\n");
-#endif
 	}
 
 	return 0;
@@ -444,11 +424,6 @@ static int sunxi_otg_manager_probe(struct platform_device *pdev)
 
 static int sunxi_otg_manager_remove(struct platform_device *pdev)
 {
-
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
-	struct dual_role_phy_instance *dual_role = g_usb_cfg.port.dual_role;
-#endif
-
 	if (g_usb_cfg.port.enable == 0) {
 		DMSG_PANIC("wrn: usb0 is disable\n");
 		return 0;
@@ -457,25 +432,16 @@ static int sunxi_otg_manager_remove(struct platform_device *pdev)
 	remove_node_file(pdev);
 	if (g_usb_cfg.port.port_type == USB_PORT_TYPE_OTG) {
 		thread_run_flag = 0;
-		while (!thread_stopped_flag) {
+		while(!thread_stopped_flag) {
 			DMSG_INFO("waitting for usb_hardware_scan_thread stop\n");
-			msleep(20);
+			msleep(10);
 		}
 		if (g_usb_cfg.port.detect_mode == USB_DETECT_MODE_INTR)
-			if (g_usb_cfg.port.id.valid
-					&& g_usb_cfg.port.id_irq_num)
-				free_irq(g_usb_cfg.port.id_irq_num, &g_usb_cfg);
+			if (g_usb_cfg.port.id.valid && g_usb_cfg.port.id_irq_num)
+					free_irq(g_usb_cfg.port.id_irq_num,
+						 &g_usb_cfg);
 		usb_hw_scan_exit(&g_usb_cfg);
 	}
-
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
-	devm_dual_role_instance_unregister(&pdev->dev, dual_role);
-	dual_role = NULL;
-#endif
-	/* Remove host and device driver before manager exit. */
-	hw_rmmod_usb_host();
-	hw_rmmod_usb_device();
-	usb_msg_center(&g_usb_cfg);
 
 	return 0;
 }
@@ -483,14 +449,12 @@ static int sunxi_otg_manager_remove(struct platform_device *pdev)
 #ifdef CONFIG_PM
 static int sunxi_otg_manager_suspend(struct device *dev)
 {
-	device_insmod_delay = 0;
 	atomic_set(&thread_suspend_flag, 1);
 	return 0;
 }
 
 static int sunxi_otg_manager_resume(struct device *dev)
 {
-	device_insmod_delay = 0;
 	atomic_set(&thread_suspend_flag, 0);
 	return 0;
 }
@@ -533,9 +497,10 @@ static void __exit usb_manager_exit(void)
 	return platform_driver_unregister(&sunxi_otg_manager_platform_driver);
 }
 
-late_initcall(usb_manager_init);
+fs_initcall(usb_manager_init);
 module_exit(usb_manager_exit);
 
 MODULE_AUTHOR("wangjx<wangjx@allwinnertech.com>");
 MODULE_DESCRIPTION("Driver for Allwinner usb otg manager");
 MODULE_LICENSE("GPL");
+

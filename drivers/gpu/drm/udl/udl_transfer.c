@@ -82,14 +82,12 @@ static inline u16 pixel32_to_be16(const uint32_t pixel)
 		((pixel >> 8) & 0xf800));
 }
 
-static inline u16 get_pixel_val16(const uint8_t *pixel, int bpp)
+static bool pixel_repeats(const void *pixel, const uint32_t repeat, int bpp)
 {
-	u16 pixel_val16 = 0;
 	if (bpp == 2)
-		pixel_val16 = *(const uint16_t *)pixel;
-	else if (bpp == 4)
-		pixel_val16 = pixel32_to_be16(*(const uint32_t *)pixel);
-	return pixel_val16;
+		return *(const uint16_t *)pixel == repeat;
+	else
+		return *(const uint32_t *)pixel == repeat;
 }
 
 /*
@@ -136,7 +134,6 @@ static void udl_compress_hline16(
 		uint8_t *cmd_pixels_count_byte = NULL;
 		const u8 *raw_pixel_start = NULL;
 		const u8 *cmd_pixel_start, *cmd_pixel_end = NULL;
-		uint16_t pixel_val16;
 
 		prefetchw((void *) cmd); /* pull in one cache line at least */
 
@@ -152,33 +149,37 @@ static void udl_compress_hline16(
 		raw_pixels_count_byte = cmd++; /*  we'll know this later */
 		raw_pixel_start = pixel;
 
-		cmd_pixel_end = pixel + min3(MAX_CMD_PIXELS + 1UL,
-					(unsigned long)(pixel_end - pixel) / bpp,
-					(unsigned long)(cmd_buffer_end - 1 - cmd) / 2) * bpp;
+		cmd_pixel_end = pixel + (min(MAX_CMD_PIXELS + 1,
+			min((int)(pixel_end - pixel) / bpp,
+			    (int)(cmd_buffer_end - cmd) / 2))) * bpp;
 
-		prefetch_range((void *) pixel, cmd_pixel_end - pixel);
-		pixel_val16 = get_pixel_val16(pixel, bpp);
+		prefetch_range((void *) pixel, (cmd_pixel_end - pixel) * bpp);
 
 		while (pixel < cmd_pixel_end) {
 			const u8 *const start = pixel;
-			const uint16_t repeating_pixel_val16 = pixel_val16;
+			u32 repeating_pixel;
 
-			*(uint16_t *)cmd = cpu_to_be16(pixel_val16);
+			if (bpp == 2) {
+				repeating_pixel = *(uint16_t *)pixel;
+				*(uint16_t *)cmd = cpu_to_be16(repeating_pixel);
+			} else {
+				repeating_pixel = *(uint32_t *)pixel;
+				*(uint16_t *)cmd = cpu_to_be16(pixel32_to_be16(repeating_pixel));
+			}
 
 			cmd += 2;
 			pixel += bpp;
 
-			while (pixel < cmd_pixel_end) {
-				pixel_val16 = get_pixel_val16(pixel, bpp);
-				if (pixel_val16 != repeating_pixel_val16)
-					break;
-				pixel += bpp;
-			}
-
-			if (unlikely(pixel > start + bpp)) {
+			if (unlikely((pixel < cmd_pixel_end) &&
+				     (pixel_repeats(pixel, repeating_pixel, bpp)))) {
 				/* go back and fill in raw pixel count */
 				*raw_pixels_count_byte = (((start -
 						raw_pixel_start) / bpp) + 1) & 0xFF;
+
+				while ((pixel < cmd_pixel_end) &&
+				       (pixel_repeats(pixel, repeating_pixel, bpp))) {
+					pixel += bpp;
+				}
 
 				/* immediately after raw data is repeat byte */
 				*cmd++ = (((pixel - start) / bpp) - 1) & 0xFF;
@@ -192,9 +193,6 @@ static void udl_compress_hline16(
 		if (pixel > raw_pixel_start) {
 			/* finalize last RAW span */
 			*raw_pixels_count_byte = ((pixel-raw_pixel_start) / bpp) & 0xFF;
-		} else {
-			/* undo unused byte */
-			cmd--;
 		}
 
 		*cmd_pixels_count_byte = ((pixel - cmd_pixel_start) / bpp) & 0xFF;

@@ -10,8 +10,6 @@
  * published by the Free Software Foundation.
  */
 
-#include <mach/irqs.h>
-
 #define LUBBOCK_ETH_PHYS	PXA_CS3_PHYS
 
 #define LUBBOCK_FPGA_PHYS	PXA_CS2_PHYS
@@ -37,9 +35,7 @@
 #define LUB_GP			__LUB_REG(LUBBOCK_FPGA_PHYS + 0x100)
 
 /* Board specific IRQs */
-#define LUBBOCK_NR_IRQS		IRQ_BOARD_START
-
-#define LUBBOCK_IRQ(x)		(LUBBOCK_NR_IRQS + (x))
+#define LUBBOCK_IRQ(x)		(IRQ_BOARD_START + (x))
 #define LUBBOCK_SD_IRQ		LUBBOCK_IRQ(0)
 #define LUBBOCK_SA1111_IRQ	LUBBOCK_IRQ(1)
 #define LUBBOCK_USB_IRQ		LUBBOCK_IRQ(2)  /* usb connect */
@@ -49,7 +45,8 @@
 #define LUBBOCK_USB_DISC_IRQ	LUBBOCK_IRQ(6)  /* usb disconnect */
 #define LUBBOCK_LAST_IRQ	LUBBOCK_IRQ(6)
 
-#define LUBBOCK_SA1111_IRQ_BASE	(LUBBOCK_NR_IRQS + 32)
+#define LUBBOCK_SA1111_IRQ_BASE	(IRQ_BOARD_START + 16)
+#define LUBBOCK_NR_IRQS		(IRQ_BOARD_START + 16 + 55)
 
 #ifndef __ASSEMBLY__
 extern void lubbock_set_misc_wr(unsigned int mask, unsigned int set);

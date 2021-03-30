@@ -7,7 +7,7 @@
  * Licensed under GPLv2 or later.
  */
 /dts-v1/;
-#include "at91sam9g25.dtsi"
+/include/ "at91sam9g25.dtsi"
 
 / {
 	model = "Acme Systems Aria G25";
@@ -21,7 +21,6 @@
 		serial3 = &usart2;
 		serial4 = &usart3;
 		serial5 = &uart0;
-		serial6 = &uart1;
 	};
 
 	chosen {
@@ -34,11 +33,12 @@
 	};
 
 	clocks {
-		slow_xtal {
-			clock-frequency = <32768>;
-		};
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
 
-		main_xtal {
+		main_clock: clock@0 {
+			compatible = "atmel,osc", "fixed-clock";
 			clock-frequency = <12000000>;
 		};
 	};
@@ -112,22 +112,19 @@
 				status = "okay";
 			};
 
-			/*
-			 * UART0/1 pins are marked as GPIO on
-			 * Aria documentation.
-			 * Change to "okay" if you need additional serial ports
-			 */
 			uart0: serial@f8040000 {
-				status = "disabled";
-			};
-
-			uart1: serial@f8044000 {
-				status = "disabled";
+				compatible = "atmel,at91sam9260-usart";
+				reg = <0xf8040000 0x200>;
+				interrupts = <15 4 5>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&pinctrl_uart0>;
+				status = "okay";
 			};
 
 			adc0: adc@f804c000 {
 				status = "okay";
 				atmel,adc-channels-used = <0xf>;
+				atmel,adc-num-channels = <4>;
 			};
 
 			dbgu: serial@fffff200 {
@@ -140,10 +137,6 @@
 						atmel,pins = <0 21 0x0 0x1>; /* PA21 PIO, pull-up */
 					};
 				};
-			};
-
-			rtc@fffffeb0 {
-				status = "okay";
 			};
 		};
 
@@ -163,15 +156,15 @@
 		/* little green LED in middle of Aria G25 module */
 		aria_led {
 			label = "aria_led";
-			gpios = <&pioB 8 GPIO_ACTIVE_HIGH>; /* PB8 */
+			gpios = <&pioB 8 0>; /* PB8 */
 			linux,default-trigger = "heartbeat";
 		};
 
 	};
 
-	onewire {
+	onewire@0 {
 		compatible = "w1-gpio";
-		gpios = <&pioA 21 GPIO_ACTIVE_LOW>;
+		gpios = <&pioA 21 1>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_w1_0>;
 	};

@@ -1,15 +1,3 @@
-/*
-* Copyright (C) 2013 Allwinnertech
-*
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License version 2 as
-* published by the Free Software Foundation.
-*
-* This program is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-* GNU General Public License for more details.
-*/
 #include "clk-sun8iw11.h"
 /*
  * freq table from hardware, need follow rules
@@ -1560,23 +1548,16 @@ PLLDDR1(126,	0,	3048000000U),
 PLLDDR1(127,	0,	3072000000U),
 };
 
-static unsigned int pllcpu_max, pllvideo0_max, pllve_max, pllddr0_max,
-			pllperiph0_max, pllperiph1_max, pllvideo1_max,
-			pllgpu_max, pllsata_max, pllde_max, pllddr1_max;
 
-#define PLL_MAX_ASSIGN(name)	(pll##name##_max = factor_pll##name##_tbl[ARRAY_SIZE(factor_pll##name##_tbl)-1].freq)
+static unsigned int pllcpu_max,pllvideo0_max,pllve_max,pllddr0_max ,
+					pllperiph0_max,pllperiph1_max ,pllvideo1_max,
+					pllgpu_max,pllsata_max,pllde_max,pllddr1_max;
+
+#define PLL_MAX_ASSIGN(name)	pll##name##_max=factor_pll##name##_tbl[ARRAY_SIZE(factor_pll##name##_tbl)-1].freq
 
 void sunxi_clk_factor_initlimits(void)
 {
-	PLL_MAX_ASSIGN(cpu);
-	PLL_MAX_ASSIGN(video0);
-	PLL_MAX_ASSIGN(ve);
-	PLL_MAX_ASSIGN(ddr0);
-	PLL_MAX_ASSIGN(periph0);
-	PLL_MAX_ASSIGN(periph1);
-	PLL_MAX_ASSIGN(video1);
-	PLL_MAX_ASSIGN(gpu);
-	PLL_MAX_ASSIGN(sata);
-	PLL_MAX_ASSIGN(de);
-	PLL_MAX_ASSIGN(ddr1);
+	PLL_MAX_ASSIGN(cpu);PLL_MAX_ASSIGN(video0);PLL_MAX_ASSIGN(ve);PLL_MAX_ASSIGN(ddr0);
+	PLL_MAX_ASSIGN(periph0);PLL_MAX_ASSIGN(periph1);PLL_MAX_ASSIGN(video1);
+	PLL_MAX_ASSIGN(gpu);PLL_MAX_ASSIGN(sata);PLL_MAX_ASSIGN(de);PLL_MAX_ASSIGN(ddr1);
 }

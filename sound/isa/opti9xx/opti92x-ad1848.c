@@ -29,7 +29,7 @@
 #include <linux/delay.h>
 #include <linux/pnp.h>
 #include <linux/module.h>
-#include <linux/io.h>
+#include <asm/io.h>
 #include <asm/dma.h>
 #include <sound/core.h>
 #include <sound/tlv.h>
@@ -820,6 +820,10 @@ static int snd_opti9xx_probe(struct snd_card *card)
 	int xdma2;
 	struct snd_opti9xx *chip = card->private_data;
 	struct snd_wss *codec;
+#ifdef CS4231
+	struct snd_timer *timer;
+#endif
+	struct snd_pcm *pcm;
 	struct snd_rawmidi *rmidi;
 	struct snd_hwdep *synth;
 
@@ -851,7 +855,7 @@ static int snd_opti9xx_probe(struct snd_card *card)
 	if (error < 0)
 		return error;
 	chip->codec = codec;
-	error = snd_wss_pcm(codec, 0);
+	error = snd_wss_pcm(codec, 0, &pcm);
 	if (error < 0)
 		return error;
 	error = snd_wss_mixer(codec);
@@ -863,7 +867,7 @@ static int snd_opti9xx_probe(struct snd_card *card)
 		return error;
 #endif
 #ifdef CS4231
-	error = snd_wss_timer(codec, 0);
+	error = snd_wss_timer(codec, 0, &timer);
 	if (error < 0)
 		return error;
 #endif
@@ -880,12 +884,11 @@ static int snd_opti9xx_probe(struct snd_card *card)
 	sprintf(card->shortname, "OPTi %s", card->driver);
 #if defined(CS4231) || defined(OPTi93X)
 	sprintf(card->longname, "%s, %s at 0x%lx, irq %d, dma %d&%d",
-		card->shortname, codec->pcm->name,
+		card->shortname, pcm->name,
 		chip->wss_base + 4, irq, dma1, xdma2);
 #else
 	sprintf(card->longname, "%s, %s at 0x%lx, irq %d, dma %d",
-		card->shortname, codec->pcm->name, chip->wss_base + 4, irq,
-		dma1);
+		card->shortname, pcm->name, chip->wss_base + 4, irq, dma1);
 #endif	/* CS4231 || OPTi93X */
 
 	if (mpu_port <= 0 || mpu_port == SNDRV_AUTO_PORT)
@@ -931,13 +934,13 @@ static int snd_opti9xx_probe(struct snd_card *card)
 	return snd_card_register(card);
 }
 
-static int snd_opti9xx_card_new(struct device *pdev, struct snd_card **cardp)
+static int snd_opti9xx_card_new(struct snd_card **cardp)
 {
 	struct snd_card *card;
 	int err;
 
-	err = snd_card_new(pdev, index, id, THIS_MODULE,
-			   sizeof(struct snd_opti9xx), &card);
+	err = snd_card_create(index, id, THIS_MODULE,
+			      sizeof(struct snd_opti9xx), &card);
 	if (err < 0)
 		return err;
 	card->private_free = snd_card_opti9xx_free;
@@ -1007,7 +1010,7 @@ static int snd_opti9xx_isa_probe(struct device *devptr,
 	}
 #endif
 
-	error = snd_opti9xx_card_new(devptr, &card);
+	error = snd_opti9xx_card_new(&card);
 	if (error < 0)
 		return error;
 
@@ -1015,6 +1018,7 @@ static int snd_opti9xx_isa_probe(struct device *devptr,
 		snd_card_free(card);
 		return error;
 	}
+	snd_card_set_dev(card, devptr);
 	if ((error = snd_opti9xx_probe(card)) < 0) {
 		snd_card_free(card);
 		return error;
@@ -1027,6 +1031,7 @@ static int snd_opti9xx_isa_remove(struct device *devptr,
 				  unsigned int dev)
 {
 	snd_card_free(dev_get_drvdata(devptr));
+	dev_set_drvdata(devptr, NULL);
 	return 0;
 }
 
@@ -1096,7 +1101,7 @@ static int snd_opti9xx_pnp_probe(struct pnp_card_link *pcard,
 		return -EBUSY;
 	if (! isapnp)
 		return -ENODEV;
-	error = snd_opti9xx_card_new(&pcard->card->dev, &card);
+	error = snd_opti9xx_card_new(&card);
 	if (error < 0)
 		return error;
 	chip = card->private_data;
@@ -1127,6 +1132,7 @@ static int snd_opti9xx_pnp_probe(struct pnp_card_link *pcard,
 		snd_card_free(card);
 		return error;
 	}
+	snd_card_set_dev(card, &pcard->card->dev);
 	if ((error = snd_opti9xx_probe(card)) < 0) {
 		snd_card_free(card);
 		return error;

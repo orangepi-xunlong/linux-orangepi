@@ -22,6 +22,7 @@
 #ifndef _LGDT3305_H_
 #define _LGDT3305_H_
 
+#include <linux/kconfig.h>
 #include <linux/i2c.h>
 #include "dvb_frontend.h"
 
@@ -34,11 +35,6 @@ enum lgdt3305_mpeg_mode {
 enum lgdt3305_tp_clock_edge {
 	LGDT3305_TPCLK_RISING_EDGE = 0,
 	LGDT3305_TPCLK_FALLING_EDGE = 1,
-};
-
-enum lgdt3305_tp_clock_mode {
-	LGDT3305_TPCLK_GATED = 0,
-	LGDT3305_TPCLK_FIXED = 1,
 };
 
 enum lgdt3305_tp_valid_polarity {
@@ -74,12 +70,11 @@ struct lgdt3305_config {
 
 	enum lgdt3305_mpeg_mode mpeg_mode;
 	enum lgdt3305_tp_clock_edge tpclk_edge;
-	enum lgdt3305_tp_clock_mode tpclk_mode;
 	enum lgdt3305_tp_valid_polarity tpvalid_polarity;
 	enum lgdt_demod_chip_type demod_chip;
 };
 
-#if IS_REACHABLE(CONFIG_DVB_LGDT3305)
+#if IS_ENABLED(CONFIG_DVB_LGDT3305)
 extern
 struct dvb_frontend *lgdt3305_attach(const struct lgdt3305_config *config,
 				     struct i2c_adapter *i2c_adap);

@@ -22,11 +22,14 @@
 #ifndef AF9033_H
 #define AF9033_H
 
-/*
- * I2C address (TODO: are these in 8-bit format?)
- * 0x38, 0x3a, 0x3c, 0x3e
- */
+#include <linux/kconfig.h>
+
 struct af9033_config {
+	/*
+	 * I2C address
+	 */
+	u8 i2c_addr;
+
 	/*
 	 * clock Hz
 	 * 12000000, 22000000, 24000000, 34000000, 32000000, 28000000, 26000000,
@@ -72,28 +75,19 @@ struct af9033_config {
 	 * input spectrum inversion
 	 */
 	bool spec_inv;
-
-	/*
-	 *
-	 */
-	bool dyn0_clk;
-
-	/*
-	 * PID filter ops
-	 */
-	struct af9033_ops *ops;
-
-	/*
-	 * frontend
-	 * returned by that driver
-	 */
-	struct dvb_frontend **fe;
 };
 
-struct af9033_ops {
-	int (*pid_filter_ctrl)(struct dvb_frontend *fe, int onoff);
-	int (*pid_filter)(struct dvb_frontend *fe, int index, u16 pid,
-			  int onoff);
-};
+
+#if IS_ENABLED(CONFIG_DVB_AF9033)
+extern struct dvb_frontend *af9033_attach(const struct af9033_config *config,
+	struct i2c_adapter *i2c);
+#else
+static inline struct dvb_frontend *af9033_attach(
+	const struct af9033_config *config, struct i2c_adapter *i2c)
+{
+	pr_warn("%s: driver disabled by Kconfig\n", __func__);
+	return NULL;
+}
+#endif
 
 #endif /* AF9033_H */

@@ -4,7 +4,6 @@
 #include <linux/pkt_cls.h>
 
 #define TCA_ACT_IPT 6
-#define TCA_ACT_XT 10
 
 enum {
 	TCA_IPT_UNSPEC,
@@ -14,7 +13,6 @@ enum {
 	TCA_IPT_CNT,
 	TCA_IPT_TM,
 	TCA_IPT_TARG,
-	TCA_IPT_PAD,
 	__TCA_IPT_MAX
 };
 #define TCA_IPT_MAX (__TCA_IPT_MAX - 1)

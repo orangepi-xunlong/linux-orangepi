@@ -24,6 +24,8 @@
  *
  */
 
+#include <asm/mach-types.h>
+
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
@@ -50,7 +52,8 @@ static int trimslice_asoc_hw_params(struct snd_pcm_substream *substream,
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai *codec_dai = rtd->codec_dai;
-	struct snd_soc_card *card = rtd->card;
+	struct snd_soc_codec *codec = codec_dai->codec;
+	struct snd_soc_card *card = codec->card;
 	struct tegra_trimslice *trimslice = snd_soc_card_get_drvdata(card);
 	int srate, mclk;
 	int err;
@@ -193,6 +196,7 @@ MODULE_DEVICE_TABLE(of, trimslice_of_match);
 static struct platform_driver tegra_snd_trimslice_driver = {
 	.driver = {
 		.name = DRV_NAME,
+		.owner = THIS_MODULE,
 		.of_match_table = trimslice_of_match,
 	},
 	.probe = tegra_snd_trimslice_probe,

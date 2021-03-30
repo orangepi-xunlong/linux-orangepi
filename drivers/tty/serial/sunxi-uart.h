@@ -19,7 +19,6 @@
 #define _SUNXI_UART_H_
 
 #include <linux/regulator/consumer.h>
-#include <linux/dmaengine.h>
 
 struct sw_uart_pdata {
 	unsigned int used;
@@ -29,46 +28,10 @@ struct sw_uart_pdata {
 	struct regulator *regulator;
 };
 
-#ifdef CONFIG_SERIAL_SUNXI_DMA
-struct sw_uart_dma {
-	u32 use_dma; /* 1:used */
-
-	/* receive and transfer buffer */
-	char *rx_buffer; /* visual memory */
-	char *tx_buffer;
-	dma_addr_t rx_phy_addr; /* physical memory */
-	dma_addr_t tx_phy_addr;
-	u32 rb_size; /* buffer size */
-	u32 tb_size;
-
-	/* regard the rx buffer as a circular buffer */
-	u32 rb_head;
-	u32 rb_tail;
-	u32 rx_size;
-
-	dma_cookie_t rx_cookie;
-
-	char tx_dma_inited; /* 1:dma tx channel has been init */
-	char rx_dma_inited; /* 1:dma rx channel has been init */
-	char tx_dma_used;   /* 1:dma tx is working */
-	char rx_dma_used;   /* 1:dma rx is working */
-
-	/* timer to poll activity on rx dma */
-	char use_timer;
-	int rx_timeout;
-
-	struct dma_chan *dma_chan_rx, *dma_chan_tx;
-	struct scatterlist rx_sgl, tx_sgl;
-	unsigned int		rx_bytes, tx_bytes;
-};
-#endif
-
 struct sw_uart_port {
 	struct uart_port port;
 	char   name[16];
 	struct clk *mclk;
-	struct clk *sclk;
-	struct clk *pclk;
 	unsigned char id;
 	unsigned char ier;
 	unsigned char lcr;
@@ -80,24 +43,16 @@ struct sw_uart_port {
 	unsigned char msr_saved_flags;
 	unsigned int lsr_break_flag;
 	struct sw_uart_pdata *pdata;
-#ifdef CONFIG_SERIAL_SUNXI_DMA
-	struct sw_uart_dma *dma;
-	struct hrtimer rx_hrtimer;
-	u32 rx_last_pos;
-#define SUNXI_UART_DRQ_RX(ch)		(DRQSRC_UART0_RX + ch)
-#define SUNXI_UART_DRQ_TX(ch)		(DRQDST_UART0_TX + ch)
-#endif
 
 	/* for debug */
 #define MAX_DUMP_SIZE	1024
 	unsigned int dump_len;
-	char *dump_buff;
+	char* dump_buff;
 	struct proc_dir_entry *proc_root;
 	struct proc_dir_entry *proc_info;
 
 	struct pinctrl *pctrl;
 	struct serial_rs485 rs485conf;
-	bool card_print;
 };
 
 /* register offset define */
@@ -210,36 +165,14 @@ struct sw_uart_port {
 
 /* The global infor of UART channel. */
 
-#if defined(CONFIG_ARCH_SUN8IW5) || defined(CONFIG_ARCH_SUN8IW17)
-#define SUNXI_UART_NUM			5
-#endif
-
-#if defined(CONFIG_ARCH_SUN8IW8)
-#define SUNXI_UART_NUM			3
-#endif
-
-#if defined(CONFIG_ARCH_SUN8IW11) || defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_ARCH_SUN8IW11)
 #define SUNXI_UART_NUM			8
 #endif
-#if defined(CONFIG_ARCH_SUN8IW10) || defined(CONFIG_ARCH_SUN50IW1) \
-	|| defined(CONFIG_ARCH_SUN50IW9)
+#if defined(CONFIG_ARCH_SUN8IW10) || defined(CONFIG_ARCH_SUN50IW1)
 #define SUNXI_UART_NUM			6
 #endif
-#if defined(CONFIG_ARCH_SUN8IW12) \
-	|| defined(CONFIG_ARCH_SUN8IW15) \
-	|| defined(CONFIG_ARCH_SUN8IW6)  \
-	|| defined(CONFIG_ARCH_SUN50IW8)
-#define SUNXI_UART_NUM			5
-#endif
-#if defined(CONFIG_ARCH_SUN50IW2) \
-	|| defined(CONFIG_ARCH_SUN50IW3) \
-	|| defined(CONFIG_ARCH_SUN50IW6) \
-	|| defined(CONFIG_ARCH_SUN8IW7)  \
-	|| defined(CONFIG_ARCH_SUN8IW18)
+#if defined(CONFIG_ARCH_SUN50IW2) || defined(CONFIG_ARCH_SUN50IW6)
 #define SUNXI_UART_NUM			4
-#endif
-#if defined(CONFIG_ARCH_SUN3IW1)
-#define SUNXI_UART_NUM			3
 #endif
 
 #ifndef SUNXI_UART_NUM
@@ -253,23 +186,9 @@ struct sw_uart_port {
 #define SUNXI_UART_NUM			1
 #endif
 
-#if defined(CONFIG_ARCH_SUN8IW12) \
-	|| defined(CONFIG_ARCH_SUN8IW15) \
-	|| defined(CONFIG_ARCH_SUN8IW18) \
-	|| defined(CONFIG_ARCH_SUN50IW3) \
-	|| defined(CONFIG_ARCH_SUN50IW6) \
-	|| defined(CONFIG_ARCH_SUN50IW8) \
-	|| defined(CONFIG_ARCH_SUN8IW17) \
-	|| defined(CONFIG_ARCH_SUN50IW9)
-#define SUNXI_UART_FIFO_SIZE		256
-#elif defined(CONFIG_ARCH_SUN3IW1)
-#define SUNXI_UART_FIFO_SIZE		32
-#else
-#define SUNXI_UART_FIFO_SIZE		64
-#endif
-
 #define SUNXI_UART_DEV_NAME			"uart"
 
 struct platform_device *sw_uart_get_pdev(int uart_id);
 
 #endif /* end of _SUNXI_UART_H_ */
+

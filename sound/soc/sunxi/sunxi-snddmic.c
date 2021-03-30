@@ -1,10 +1,9 @@
 /*
- * sound\soc\sunxi\sunxi-snddmic.c
- * (C) Copyright 2010-2018
+ * sound\soc\sunxi\sunxi_snddmic.c
+ * (C) Copyright 2010-2016
  * Allwinner Technology Co., Ltd. <www.allwinnertech.com>
  * huangxin <huangxin@allwinnertech.com>
  * wolfgang huang <huangjinhui@allwinnertech.com>
- * yumingfeng <yumingfeng@allwinnertech.com>
  *
  * some simple description for this code
  *
@@ -25,12 +24,6 @@
 #include <linux/io.h>
 #include <linux/of.h>
 
-#ifdef CONFIG_SND_SUNXI_MAD
-#include "sunxi-mad.h"
-#endif
-
-#include "sunxi-snddmic.h"
-
 static int sunxi_snddmic_hw_params(struct snd_pcm_substream *substream,
 					struct snd_pcm_hw_params *params)
 {
@@ -48,103 +41,30 @@ static int sunxi_snddmic_hw_params(struct snd_pcm_substream *substream,
 	case	48000:
 	case	96000:
 	case	192000:
-#if defined(CONFIG_AHUB_FREQ_REQ)
-		freq = 98304000;
-#else
 		freq = 24576000;
-#endif
 		break;
 	case	11025:
 	case	22050:
 	case	44100:
 	case	88200:
 	case	176400:
-#if defined(CONFIG_AHUB_FREQ_REQ)
-		freq = 90316800;
-#else
 		freq = 22579200;
-#endif
 		break;
 	default:
 		pr_debug("invalid rate setting\n");
 		return -EINVAL;
+		break;
 	}
 
-	ret = snd_soc_dai_set_sysclk(cpu_dai, 0, freq, 0);
+	ret = snd_soc_dai_set_sysclk(cpu_dai, 0 , freq, 0);
 	if (ret < 0)
 		return ret;
 
 	return 0;
 }
 
-#ifdef CONFIG_SND_SUNXI_MAD
-/*enable the snddmic suspend */
-static int sunxi_snddmic_startup(struct snd_pcm_substream *substream)
-{
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct sunxi_snddmic_priv *snddmic_priv =
-				snd_soc_card_get_drvdata(rtd->card);
-
-	if (snddmic_priv->mad_priv.mad_bind == 1)
-		rtd->dai_link->ignore_suspend = 1;
-
-	return 0;
-}
-
-/*disable the snddmic suspend */
-static void sunxi_snddmic_shutdown(struct snd_pcm_substream *substream)
-{
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct sunxi_snddmic_priv *snddmic_priv =
-				snd_soc_card_get_drvdata(rtd->card);
-
-	if (snddmic_priv->mad_priv.mad_bind == 1)
-		rtd->dai_link->ignore_suspend = 0;
-}
-
-/*mad_bind config*/
-static int sunxi_dmic_set_mad_bind(struct snd_kcontrol *kcontrol,
-	struct snd_ctl_elem_value *ucontrol)
-{
-	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
-	struct sunxi_snddmic_priv *snddmic_priv =
-				snd_soc_card_get_drvdata(card);
-
-	snddmic_priv->mad_priv.mad_bind = ucontrol->value.integer.value[0];
-	return 0;
-}
-
-static int sunxi_dmic_get_mad_bind(struct snd_kcontrol *kcontrol,
-	struct snd_ctl_elem_value *ucontrol)
-{
-	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
-	struct sunxi_snddmic_priv *snddmic_priv =
-				snd_soc_card_get_drvdata(card);
-
-	ucontrol->value.integer.value[0] = snddmic_priv->mad_priv.mad_bind;
-	return 0;
-}
-
-static const char *mad_bind_function[] = {"mad_unbind", "mad_bind"};
-
-static const struct soc_enum mad_bind_enum[] = {
-	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(mad_bind_function),
-			mad_bind_function),
-};
-
-/* dmic machine kcontrols */
-static const struct snd_kcontrol_new sunxi_snddmic_controls[] = {
-	SOC_ENUM_EXT("dmic bind mad function", mad_bind_enum[0],
-		sunxi_dmic_get_mad_bind, sunxi_dmic_set_mad_bind),
-};
-#endif
-
 static struct snd_soc_ops sunxi_snddmic_ops = {
-	.hw_params	= sunxi_snddmic_hw_params,
-#ifdef CONFIG_SND_SUNXI_MAD
-	.startup = sunxi_snddmic_startup,
-	.shutdown = sunxi_snddmic_shutdown,
-#endif
+	.hw_params 	= sunxi_snddmic_hw_params,
 };
 
 static struct snd_soc_dai_link sunxi_snddmic_dai_link = {
@@ -158,14 +78,10 @@ static struct snd_soc_dai_link sunxi_snddmic_dai_link = {
 };
 
 static struct snd_soc_card snd_soc_sunxi_snddmic = {
-	.name		= "snddmic",
-	.owner		= THIS_MODULE,
-	.dai_link	= &sunxi_snddmic_dai_link,
-	.num_links	= 1,
-#ifdef CONFIG_SND_SUNXI_MAD
-	.controls = sunxi_snddmic_controls,
-	.num_controls = ARRAY_SIZE(sunxi_snddmic_controls),
-#endif
+	.name 		= "snddmic",
+	.owner 		= THIS_MODULE,
+	.dai_link 	= &sunxi_snddmic_dai_link,
+	.num_links 	= 1,
 };
 
 static int sunxi_snddmic_dev_probe(struct platform_device *pdev)
@@ -173,15 +89,7 @@ static int sunxi_snddmic_dev_probe(struct platform_device *pdev)
 	int ret = 0;
 	struct snd_soc_card *card = &snd_soc_sunxi_snddmic;
 	struct device_node *np = pdev->dev.of_node;
-	struct sunxi_snddmic_priv *snddmic_priv;
-
-	snddmic_priv = devm_kzalloc(&pdev->dev,
-			sizeof(struct sunxi_snddmic_priv), GFP_KERNEL);
-	if (!snddmic_priv) {
-		dev_err(card->dev, "Can't malloc the sunxi_snddmic_priv!\n");
-		return -ENOMEM;
-	}
-	snddmic_priv->card = card;
+	struct platform_device *sunxi_snd_dmic_codec_device;
 	card->dev = &pdev->dev;
 
 	sunxi_snddmic_dai_link.cpu_dai_name = NULL;
@@ -190,59 +98,44 @@ static int sunxi_snddmic_dev_probe(struct platform_device *pdev)
 	if (!sunxi_snddmic_dai_link.cpu_of_node) {
 		dev_err(&pdev->dev, "Property 'sunxi,dmic-controller' missing or invalid\n");
 		ret = -EINVAL;
-		goto err_kfree_snddmic_priv;
+		return ret;
 	}
 	sunxi_snddmic_dai_link.platform_name = NULL;
-	sunxi_snddmic_dai_link.platform_of_node =
-				sunxi_snddmic_dai_link.cpu_of_node;
+	sunxi_snddmic_dai_link.platform_of_node = sunxi_snddmic_dai_link.cpu_of_node;
 
-	snddmic_priv->codec_device = platform_device_alloc("dmic-codec", -1);
-	if (!snddmic_priv->codec_device) {
+	sunxi_snd_dmic_codec_device = platform_device_alloc("dmic-codec", -1);
+	if (!sunxi_snd_dmic_codec_device) {
 		dev_err(&pdev->dev, "dmic codec alloc failed\n");
 		ret = -ENOMEM;
-		goto err_kfree_snddmic_priv;
+		return ret;
 	}
 
-	ret = platform_device_add(snddmic_priv->codec_device);
+	ret = platform_device_add(sunxi_snd_dmic_codec_device);
 	if (ret) {
 		dev_err(&pdev->dev, "dmic codec add failed\n");
 		ret = -EBUSY;
 		goto err_dmic_put;
 	}
 
-#ifdef CONFIG_SND_SUNXI_MAD
-	snddmic_priv->mad_priv.mad_bind = 0;
-#endif
-
-	snd_soc_card_set_drvdata(card, snddmic_priv);
-
 	ret = snd_soc_register_card(card);
 	if (ret) {
-		dev_err(&pdev->dev, "snd_soc_register_card() fail: %d\n", ret);
+		dev_err(&pdev->dev, "snd_soc_register_card() failed: %d\n", ret);
 		ret = -EBUSY;
 		goto err_dmic_del;
 	}
 	return ret;
 
 err_dmic_del:
-	platform_device_del(snddmic_priv->codec_device);
+	platform_device_del(sunxi_snd_dmic_codec_device);
 err_dmic_put:
-	platform_device_put(snddmic_priv->codec_device);
-err_kfree_snddmic_priv:
-	devm_kfree(&pdev->dev, snddmic_priv);
+	platform_device_put(sunxi_snd_dmic_codec_device);
 	return ret;
 }
 
 static int sunxi_snddmic_dev_remove(struct platform_device *pdev)
 {
 	struct snd_soc_card *card = platform_get_drvdata(pdev);
-	struct sunxi_snddmic_priv *snddmic_priv =
-				snd_soc_card_get_drvdata(card);
-
 	snd_soc_unregister_card(card);
-	platform_device_del(snddmic_priv->codec_device);
-	platform_device_put(snddmic_priv->codec_device);
-	devm_kfree(&pdev->dev, snddmic_priv);
 	return 0;
 }
 

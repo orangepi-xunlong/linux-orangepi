@@ -28,7 +28,6 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/firmware.h>
-#include <linux/io.h>
 
 #include <sound/core.h>
 #include <sound/info.h>
@@ -36,6 +35,8 @@
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/initval.h>
+
+#include <asm/io.h>
 
 // ----------------------------------------------------------------------------
 // Debug Stuff
@@ -417,7 +418,7 @@ module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable Korg 1212 soundcard.");
 MODULE_AUTHOR("Haroldo Gamal <gamal@alternex.com.br>");
 
-static const struct pci_device_id snd_korg1212_ids[] = {
+static DEFINE_PCI_DEVICE_TABLE(snd_korg1212_ids) = {
 	{
 		.vendor	   = 0x10b5,
 		.device	   = 0x906d,
@@ -443,9 +444,9 @@ static char *stateName[] = {
 	"Invalid"
 };
 
-static const char * const clockSourceTypeName[] = { "ADAT", "S/PDIF", "local" };
+static char *clockSourceTypeName[] = { "ADAT", "S/PDIF", "local" };
 
-static const char * const clockSourceName[] = {
+static char *clockSourceName[] = {
 	"ADAT at 44.1 kHz",
 	"ADAT at 48 kHz",
 	"S/PDIF at 44.1 kHz",
@@ -454,7 +455,7 @@ static const char * const clockSourceName[] = {
 	"local clock at 48 kHz"
 };
 
-static const char * const channelName[] = {
+static char *channelName[] = {
 	"ADAT-1",
 	"ADAT-2",
 	"ADAT-3",
@@ -584,7 +585,8 @@ static void snd_korg1212_SendStop(struct snd_korg1212 *korg1212)
 		korg1212->sharedBufferPtr->cardCommand = 0xffffffff;
 		/* program the timer */
 		korg1212->stop_pending_cnt = HZ;
-		mod_timer(&korg1212->timer, jiffies + 1);
+		korg1212->timer.expires = jiffies + 1;
+		add_timer(&korg1212->timer);
 	}
 }
 
@@ -615,7 +617,8 @@ static void snd_korg1212_timer_func(unsigned long data)
 	} else {
 		if (--korg1212->stop_pending_cnt > 0) {
 			/* reprogram timer */
-			mod_timer(&korg1212->timer, jiffies + 1);
+			korg1212->timer.expires = jiffies + 1;
+			add_timer(&korg1212->timer);
 		} else {
 			snd_printd("korg1212_timer_func timeout\n");
 			korg1212->sharedBufferPtr->cardCommand = 0;
@@ -1394,9 +1397,7 @@ static int snd_korg1212_playback_open(struct snd_pcm_substream *substream)
 
         spin_unlock_irqrestore(&korg1212->lock, flags);
 
-	snd_pcm_hw_constraint_single(runtime, SNDRV_PCM_HW_PARAM_PERIOD_SIZE,
-				     kPlayBufferFrames);
-
+        snd_pcm_hw_constraint_minmax(runtime, SNDRV_PCM_HW_PARAM_PERIOD_SIZE, kPlayBufferFrames, kPlayBufferFrames);
         return 0;
 }
 
@@ -1424,8 +1425,8 @@ static int snd_korg1212_capture_open(struct snd_pcm_substream *substream)
 
         spin_unlock_irqrestore(&korg1212->lock, flags);
 
-	snd_pcm_hw_constraint_single(runtime, SNDRV_PCM_HW_PARAM_PERIOD_SIZE,
-				     kPlayBufferFrames);
+        snd_pcm_hw_constraint_minmax(runtime, SNDRV_PCM_HW_PARAM_PERIOD_SIZE,
+				     kPlayBufferFrames, kPlayBufferFrames);
         return 0;
 }
 
@@ -1681,7 +1682,7 @@ static int snd_korg1212_capture_copy(struct snd_pcm_substream *substream,
 	return snd_korg1212_copy_to(korg1212, dst, pos, count, 0, korg1212->channels * 2);
 }
 
-static const struct snd_pcm_ops snd_korg1212_playback_ops = {
+static struct snd_pcm_ops snd_korg1212_playback_ops = {
         .open =		snd_korg1212_playback_open,
         .close =	snd_korg1212_playback_close,
         .ioctl =	snd_korg1212_ioctl,
@@ -1693,7 +1694,7 @@ static const struct snd_pcm_ops snd_korg1212_playback_ops = {
         .silence =	snd_korg1212_playback_silence,
 };
 
-static const struct snd_pcm_ops snd_korg1212_capture_ops = {
+static struct snd_pcm_ops snd_korg1212_capture_ops = {
 	.open =		snd_korg1212_capture_open,
 	.close =	snd_korg1212_capture_close,
 	.ioctl =	snd_korg1212_ioctl,
@@ -1843,9 +1844,14 @@ static int snd_korg1212_control_volume_put(struct snd_kcontrol *kcontrol,
 static int snd_korg1212_control_route_info(struct snd_kcontrol *kcontrol,
 					   struct snd_ctl_elem_info *uinfo)
 {
-	return snd_ctl_enum_info(uinfo,
-				 (kcontrol->private_value >= 8) ? 2 : 1,
-				 kAudioChannels, channelName);
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
+	uinfo->count = (kcontrol->private_value >= 8) ? 2 : 1;
+	uinfo->value.enumerated.items = kAudioChannels;
+	if (uinfo->value.enumerated.item > kAudioChannels-1) {
+		uinfo->value.enumerated.item = kAudioChannels-1;
+	}
+	strcpy(uinfo->value.enumerated.name, channelName[uinfo->value.enumerated.item]);
+	return 0;
 }
 
 static int snd_korg1212_control_route_get(struct snd_kcontrol *kcontrol,
@@ -1955,7 +1961,14 @@ static int snd_korg1212_control_put(struct snd_kcontrol *kcontrol,
 static int snd_korg1212_control_sync_info(struct snd_kcontrol *kcontrol,
 					  struct snd_ctl_elem_info *uinfo)
 {
-	return snd_ctl_enum_info(uinfo, 1, 3, clockSourceTypeName);
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
+	uinfo->count = 1;
+	uinfo->value.enumerated.items = 3;
+	if (uinfo->value.enumerated.item > 2) {
+		uinfo->value.enumerated.item = 2;
+	}
+	strcpy(uinfo->value.enumerated.name, clockSourceTypeName[uinfo->value.enumerated.item]);
+	return 0;
 }
 
 static int snd_korg1212_control_sync_get(struct snd_kcontrol *kcontrol,
@@ -2171,8 +2184,9 @@ static int snd_korg1212_create(struct snd_card *card, struct pci_dev *pci,
         init_waitqueue_head(&korg1212->wait);
         spin_lock_init(&korg1212->lock);
 	mutex_init(&korg1212->open_mutex);
-	setup_timer(&korg1212->timer, snd_korg1212_timer_func,
-		    (unsigned long)korg1212);
+	init_timer(&korg1212->timer);
+	korg1212->timer.function = snd_korg1212_timer_func;
+	korg1212->timer.data = (unsigned long)korg1212;
 
         korg1212->irq = -1;
         korg1212->clkSource = K1212_CLKIDX_Local;
@@ -2404,6 +2418,8 @@ static int snd_korg1212_create(struct snd_card *card, struct pci_dev *pci,
 
         snd_korg1212_proc_init(korg1212);
         
+	snd_card_set_dev(card, &pci->dev);
+
         * rchip = korg1212;
 	return 0;
 
@@ -2429,8 +2445,7 @@ snd_korg1212_probe(struct pci_dev *pci,
 		dev++;
 		return -ENOENT;
 	}
-	err = snd_card_new(&pci->dev, index[dev], id[dev], THIS_MODULE,
-			   0, &card);
+	err = snd_card_create(index[dev], id[dev], THIS_MODULE, 0, &card);
 	if (err < 0)
 		return err;
 
@@ -2458,6 +2473,7 @@ snd_korg1212_probe(struct pci_dev *pci,
 static void snd_korg1212_remove(struct pci_dev *pci)
 {
 	snd_card_free(pci_get_drvdata(pci));
+	pci_set_drvdata(pci, NULL);
 }
 
 static struct pci_driver korg1212_driver = {

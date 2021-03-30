@@ -71,7 +71,7 @@ struct st_proto_s {
 	enum proto_type type;
 	long (*recv) (void *, struct sk_buff *);
 	unsigned char (*match_packet) (const unsigned char *data);
-	void (*reg_complete_cb) (void *, int data);
+	void (*reg_complete_cb) (void *, char data);
 	long (*write) (struct sk_buff *skb);
 	void *priv_data;
 
@@ -158,7 +158,6 @@ struct st_data_s {
 	unsigned long ll_state;
 	void *kim_data;
 	struct tty_struct *tty;
-	struct work_struct work_write_wakeup;
 };
 
 /*
@@ -262,16 +261,16 @@ struct kim_data_s {
 	struct completion kim_rcvd, ldisc_installed;
 	char resp_buffer[30];
 	const struct firmware *fw_entry;
-	unsigned nshutdown;
+	long nshutdown;
 	unsigned long rx_state;
 	unsigned long rx_count;
 	struct sk_buff *rx_skb;
 	struct st_data_s *core_data;
 	struct chip_version version;
 	unsigned char ldisc_install;
-	unsigned char dev_name[UART_DEV_NAME_LEN + 1];
-	unsigned flow_cntrl;
-	unsigned baud_rate;
+	unsigned char dev_name[UART_DEV_NAME_LEN];
+	unsigned char flow_cntrl;
+	unsigned long baud_rate;
 };
 
 /**
@@ -437,10 +436,10 @@ struct gps_event_hdr {
  *
  */
 struct ti_st_plat_data {
-	u32 nshutdown_gpio;
+	long nshutdown_gpio;
 	unsigned char dev_name[UART_DEV_NAME_LEN]; /* uart name */
-	u32 flow_cntrl; /* flow control flag */
-	u32 baud_rate;
+	unsigned char flow_cntrl; /* flow control flag */
+	unsigned long baud_rate;
 	int (*suspend)(struct platform_device *, pm_message_t);
 	int (*resume)(struct platform_device *);
 	int (*chip_enable) (struct kim_data_s *);

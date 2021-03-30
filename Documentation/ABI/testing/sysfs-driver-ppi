@@ -1,4 +1,4 @@
-What:		/sys/class/tpm/tpmX/ppi/
+What:		/sys/devices/pnp0/<bus-num>/ppi/
 Date:		August 2012
 Kernel Version:	3.6
 Contact:	xiaoyan.zhang@intel.com
@@ -8,14 +8,9 @@ Description:
 		folder makes sense. The folder path can be got by command
 		'find /sys/ -name 'pcrs''. For the detail information of PPI,
 		please refer to the PPI specification from
-
 		http://www.trustedcomputinggroup.org/
 
-		In Linux 4.2 ppi was moved to the character device directory.
-		A symlink from tpmX/device/ppi to tpmX/ppi to provide backwards
-		compatibility.
-
-What:		/sys/class/tpm/tpmX/ppi/version
+What:		/sys/devices/pnp0/<bus-num>/ppi/version
 Date:		August 2012
 Contact:	xiaoyan.zhang@intel.com
 Description:
@@ -23,7 +18,7 @@ Description:
 		platform.
 		This file is readonly.
 
-What:		/sys/class/tpm/tpmX/ppi/request
+What:		/sys/devices/pnp0/<bus-num>/ppi/request
 Date:		August 2012
 Contact:	xiaoyan.zhang@intel.com
 Description:
@@ -33,7 +28,7 @@ Description:
 		integer value range from 1 to 160, and 0 means no request.
 		This file can be read and written.
 
-What:		/sys/class/tpm/tpmX/ppi/response
+What:		/sys/devices/pnp0/00:<bus-num>/ppi/response
 Date:		August 2012
 Contact:	xiaoyan.zhang@intel.com
 Description:
@@ -42,7 +37,7 @@ Description:
 		: <response description>".
 		This file is readonly.
 
-What:		/sys/class/tpm/tpmX/ppi/transition_action
+What:		/sys/devices/pnp0/<bus-num>/ppi/transition_action
 Date:		August 2012
 Contact:	xiaoyan.zhang@intel.com
 Description:
@@ -52,7 +47,7 @@ Description:
 		description>".
 		This file is readonly.
 
-What:		/sys/class/tpm/tpmX/ppi/tcg_operations
+What:		/sys/devices/pnp0/<bus-num>/ppi/tcg_operations
 Date:		August 2012
 Contact:	xiaoyan.zhang@intel.com
 Description:
@@ -63,7 +58,7 @@ Description:
 		This attribute is only supported by PPI version 1.2+.
 		This file is readonly.
 
-What:		/sys/class/tpm/tpmX/ppi/vs_operations
+What:		/sys/devices/pnp0/<bus-num>/ppi/vs_operations
 Date:		August 2012
 Contact:	xiaoyan.zhang@intel.com
 Description:

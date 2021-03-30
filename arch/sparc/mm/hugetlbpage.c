@@ -4,6 +4,7 @@
  * Copyright (C) 2002, 2003, 2006 David S. Miller (davem@davemloft.net)
  */
 
+#include <linux/init.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
 #include <linux/hugetlb.h>
@@ -12,7 +13,6 @@
 
 #include <asm/mman.h>
 #include <asm/pgalloc.h>
-#include <asm/pgtable.h>
 #include <asm/tlb.h>
 #include <asm/tlbflush.h>
 #include <asm/cacheflush.h>
@@ -21,6 +21,8 @@
 /* Slightly simplified from the non-hugepage variant because by
  * definition we don't have to worry about any page coloring stuff
  */
+#define VA_EXCLUDE_START (0x0000080000000000UL - (1UL << 32UL))
+#define VA_EXCLUDE_END   (0xfffff80000000000UL + (1UL << 32UL))
 
 static unsigned long hugetlb_get_unmapped_area_bottomup(struct file *filp,
 							unsigned long addr,
@@ -116,7 +118,7 @@ hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 		addr = ALIGN(addr, HPAGE_SIZE);
 		vma = find_vma(mm, addr);
 		if (task_size - len >= addr &&
-		    (!vma || addr + len <= vm_start_gap(vma)))
+		    (!vma || addr + len <= vma->vm_start))
 			return addr;
 	}
 	if (mm->get_unmapped_area == arch_get_unmapped_area)
@@ -132,13 +134,23 @@ pte_t *huge_pte_alloc(struct mm_struct *mm,
 {
 	pgd_t *pgd;
 	pud_t *pud;
+	pmd_t *pmd;
 	pte_t *pte = NULL;
+
+	/* We must align the address, because our caller will run
+	 * set_huge_pte_at() on whatever we return, which writes out
+	 * all of the sub-ptes for the hugepage range.  So we have
+	 * to give it the first such sub-pte.
+	 */
+	addr &= HPAGE_MASK;
 
 	pgd = pgd_offset(mm, addr);
 	pud = pud_alloc(mm, pgd, addr);
-	if (pud)
-		pte = (pte_t *)pmd_alloc(mm, pud, addr);
-
+	if (pud) {
+		pmd = pmd_alloc(mm, pud, addr);
+		if (pmd)
+			pte = pte_alloc_map(mm, NULL, pmd, addr);
+	}
 	return pte;
 }
 
@@ -146,57 +158,75 @@ pte_t *huge_pte_offset(struct mm_struct *mm, unsigned long addr)
 {
 	pgd_t *pgd;
 	pud_t *pud;
+	pmd_t *pmd;
 	pte_t *pte = NULL;
+
+	addr &= HPAGE_MASK;
 
 	pgd = pgd_offset(mm, addr);
 	if (!pgd_none(*pgd)) {
 		pud = pud_offset(pgd, addr);
-		if (!pud_none(*pud))
-			pte = (pte_t *)pmd_offset(pud, addr);
+		if (!pud_none(*pud)) {
+			pmd = pmd_offset(pud, addr);
+			if (!pmd_none(*pmd))
+				pte = pte_offset_map(pmd, addr);
+		}
 	}
 	return pte;
+}
+
+int huge_pmd_unshare(struct mm_struct *mm, unsigned long *addr, pte_t *ptep)
+{
+	return 0;
 }
 
 void set_huge_pte_at(struct mm_struct *mm, unsigned long addr,
 		     pte_t *ptep, pte_t entry)
 {
-	pte_t orig;
+	int i;
 
 	if (!pte_present(*ptep) && pte_present(entry))
-		mm->context.hugetlb_pte_count++;
+		mm->context.huge_pte_count++;
 
 	addr &= HPAGE_MASK;
-	orig = *ptep;
-	*ptep = entry;
-
-	/* Issue TLB flush at REAL_HPAGE_SIZE boundaries */
-	maybe_tlb_batch_add(mm, addr, ptep, orig, 0);
-	maybe_tlb_batch_add(mm, addr + REAL_HPAGE_SIZE, ptep, orig, 0);
+	for (i = 0; i < (1 << HUGETLB_PAGE_ORDER); i++) {
+		set_pte_at(mm, addr, ptep, entry);
+		ptep++;
+		addr += PAGE_SIZE;
+		pte_val(entry) += PAGE_SIZE;
+	}
 }
 
 pte_t huge_ptep_get_and_clear(struct mm_struct *mm, unsigned long addr,
 			      pte_t *ptep)
 {
 	pte_t entry;
+	int i;
 
 	entry = *ptep;
 	if (pte_present(entry))
-		mm->context.hugetlb_pte_count--;
+		mm->context.huge_pte_count--;
 
 	addr &= HPAGE_MASK;
-	*ptep = __pte(0UL);
 
-	/* Issue TLB flush at REAL_HPAGE_SIZE boundaries */
-	maybe_tlb_batch_add(mm, addr, ptep, entry, 0);
-	maybe_tlb_batch_add(mm, addr + REAL_HPAGE_SIZE, ptep, entry, 0);
+	for (i = 0; i < (1 << HUGETLB_PAGE_ORDER); i++) {
+		pte_clear(mm, addr, ptep);
+		addr += PAGE_SIZE;
+		ptep++;
+	}
 
 	return entry;
 }
 
+struct page *follow_huge_addr(struct mm_struct *mm,
+			      unsigned long address, int write)
+{
+	return ERR_PTR(-EINVAL);
+}
+
 int pmd_huge(pmd_t pmd)
 {
-	return !pmd_none(pmd) &&
-		(pmd_val(pmd) & (_PAGE_VALID|_PAGE_PMD_HUGE)) != _PAGE_VALID;
+	return 0;
 }
 
 int pud_huge(pud_t pud)
@@ -204,99 +234,8 @@ int pud_huge(pud_t pud)
 	return 0;
 }
 
-static void hugetlb_free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
-			   unsigned long addr)
+struct page *follow_huge_pmd(struct mm_struct *mm, unsigned long address,
+			     pmd_t *pmd, int write)
 {
-	pgtable_t token = pmd_pgtable(*pmd);
-
-	pmd_clear(pmd);
-	pte_free_tlb(tlb, token, addr);
-	atomic_long_dec(&tlb->mm->nr_ptes);
-}
-
-static void hugetlb_free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
-				   unsigned long addr, unsigned long end,
-				   unsigned long floor, unsigned long ceiling)
-{
-	pmd_t *pmd;
-	unsigned long next;
-	unsigned long start;
-
-	start = addr;
-	pmd = pmd_offset(pud, addr);
-	do {
-		next = pmd_addr_end(addr, end);
-		if (pmd_none(*pmd))
-			continue;
-		if (is_hugetlb_pmd(*pmd))
-			pmd_clear(pmd);
-		else
-			hugetlb_free_pte_range(tlb, pmd, addr);
-	} while (pmd++, addr = next, addr != end);
-
-	start &= PUD_MASK;
-	if (start < floor)
-		return;
-	if (ceiling) {
-		ceiling &= PUD_MASK;
-		if (!ceiling)
-			return;
-	}
-	if (end - 1 > ceiling - 1)
-		return;
-
-	pmd = pmd_offset(pud, start);
-	pud_clear(pud);
-	pmd_free_tlb(tlb, pmd, start);
-	mm_dec_nr_pmds(tlb->mm);
-}
-
-static void hugetlb_free_pud_range(struct mmu_gather *tlb, pgd_t *pgd,
-				   unsigned long addr, unsigned long end,
-				   unsigned long floor, unsigned long ceiling)
-{
-	pud_t *pud;
-	unsigned long next;
-	unsigned long start;
-
-	start = addr;
-	pud = pud_offset(pgd, addr);
-	do {
-		next = pud_addr_end(addr, end);
-		if (pud_none_or_clear_bad(pud))
-			continue;
-		hugetlb_free_pmd_range(tlb, pud, addr, next, floor,
-				       ceiling);
-	} while (pud++, addr = next, addr != end);
-
-	start &= PGDIR_MASK;
-	if (start < floor)
-		return;
-	if (ceiling) {
-		ceiling &= PGDIR_MASK;
-		if (!ceiling)
-			return;
-	}
-	if (end - 1 > ceiling - 1)
-		return;
-
-	pud = pud_offset(pgd, start);
-	pgd_clear(pgd);
-	pud_free_tlb(tlb, pud, start);
-}
-
-void hugetlb_free_pgd_range(struct mmu_gather *tlb,
-			    unsigned long addr, unsigned long end,
-			    unsigned long floor, unsigned long ceiling)
-{
-	pgd_t *pgd;
-	unsigned long next;
-
-	pgd = pgd_offset(tlb->mm, addr);
-	do {
-		next = pgd_addr_end(addr, end);
-		if (pgd_none_or_clear_bad(pgd))
-			continue;
-		hugetlb_free_pud_range(tlb, pgd, addr, next, floor, ceiling);
-	} while (pgd++, addr = next, addr != end);
+	return NULL;
 }

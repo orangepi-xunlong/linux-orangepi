@@ -6,16 +6,7 @@
 #define	EDEADLK		35	/* Resource deadlock would occur */
 #define	ENAMETOOLONG	36	/* File name too long */
 #define	ENOLCK		37	/* No record locks available */
-
-/*
- * This error code is special: arch syscall entry code will return
- * -ENOSYS if users try to call a syscall that doesn't exist.  To keep
- * failures of syscalls that really do exist distinguishable from
- * failures due to attempts to use a nonexistent syscall, syscall
- * implementations should refrain from returning -ENOSYS.
- */
-#define	ENOSYS		38	/* Invalid system call number */
-
+#define	ENOSYS		38	/* Function not implemented */
 #define	ENOTEMPTY	39	/* Directory not empty */
 #define	ELOOP		40	/* Too many symbolic links encountered */
 #define	EWOULDBLOCK	EAGAIN	/* Operation would block */
@@ -95,7 +86,7 @@
 #define	EHOSTUNREACH	113	/* No route to host */
 #define	EALREADY	114	/* Operation already in progress */
 #define	EINPROGRESS	115	/* Operation now in progress */
-#define	ESTALE		116	/* Stale file handle */
+#define	ESTALE		116	/* Stale NFS file handle */
 #define	EUCLEAN		117	/* Structure needs cleaning */
 #define	ENOTNAM		118	/* Not a XENIX named type file */
 #define	ENAVAIL		119	/* No XENIX semaphores available */

@@ -44,24 +44,18 @@ static const struct snmp_mib xfrm_mib_list[] = {
 	SNMP_MIB_ITEM("XfrmOutPolError", LINUX_MIB_XFRMOUTPOLERROR),
 	SNMP_MIB_ITEM("XfrmFwdHdrError", LINUX_MIB_XFRMFWDHDRERROR),
 	SNMP_MIB_ITEM("XfrmOutStateInvalid", LINUX_MIB_XFRMOUTSTATEINVALID),
-	SNMP_MIB_ITEM("XfrmAcquireError", LINUX_MIB_XFRMACQUIREERROR),
 	SNMP_MIB_SENTINEL
 };
 
 static int xfrm_statistics_seq_show(struct seq_file *seq, void *v)
 {
-	unsigned long buff[LINUX_MIB_XFRMMAX];
 	struct net *net = seq->private;
 	int i;
-
-	memset(buff, 0, sizeof(unsigned long) * LINUX_MIB_XFRMMAX);
-
-	snmp_get_cpu_field_batch(buff, xfrm_mib_list,
-				 net->mib.xfrm_statistics);
-	for (i = 0; xfrm_mib_list[i].name; i++)
+	for (i=0; xfrm_mib_list[i].name; i++)
 		seq_printf(seq, "%-24s\t%lu\n", xfrm_mib_list[i].name,
-						buff[i]);
-
+			   snmp_fold_field((void __percpu **)
+					   net->mib.xfrm_statistics,
+					   xfrm_mib_list[i].entry));
 	return 0;
 }
 

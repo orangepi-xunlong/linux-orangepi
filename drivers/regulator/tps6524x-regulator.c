@@ -577,6 +577,21 @@ static struct regulator_ops regulator_ops = {
 	.get_current_limit	= get_current_limit,
 };
 
+static int pmic_remove(struct spi_device *spi)
+{
+	struct tps6524x *hw = spi_get_drvdata(spi);
+	int i;
+
+	if (!hw)
+		return 0;
+	for (i = 0; i < N_REGULATORS; i++) {
+		regulator_unregister(hw->rdev[i]);
+		hw->rdev[i] = NULL;
+	}
+	spi_set_drvdata(spi, NULL);
+	return 0;
+}
+
 static int pmic_probe(struct spi_device *spi)
 {
 	struct tps6524x *hw;
@@ -584,23 +599,24 @@ static int pmic_probe(struct spi_device *spi)
 	const struct supply_info *info = supply_info;
 	struct regulator_init_data *init_data;
 	struct regulator_config config = { };
-	int i;
+	int ret = 0, i;
 
-	init_data = dev_get_platdata(dev);
+	init_data = dev->platform_data;
 	if (!init_data) {
 		dev_err(dev, "could not find regulator platform data\n");
 		return -EINVAL;
 	}
 
 	hw = devm_kzalloc(&spi->dev, sizeof(struct tps6524x), GFP_KERNEL);
-	if (!hw)
+	if (!hw) {
+		dev_err(dev, "cannot allocate regulator private data\n");
 		return -ENOMEM;
-
+	}
 	spi_set_drvdata(spi, hw);
 
 	memset(hw, 0, sizeof(struct tps6524x));
 	hw->dev = dev;
-	hw->spi = spi;
+	hw->spi = spi_dev_get(spi);
 	mutex_init(&hw->lock);
 
 	for (i = 0; i < N_REGULATORS; i++, info++, init_data++) {
@@ -616,19 +632,27 @@ static int pmic_probe(struct spi_device *spi)
 		config.init_data = init_data;
 		config.driver_data = hw;
 
-		hw->rdev[i] = devm_regulator_register(dev, &hw->desc[i],
-						      &config);
-		if (IS_ERR(hw->rdev[i]))
-			return PTR_ERR(hw->rdev[i]);
+		hw->rdev[i] = regulator_register(&hw->desc[i], &config);
+		if (IS_ERR(hw->rdev[i])) {
+			ret = PTR_ERR(hw->rdev[i]);
+			hw->rdev[i] = NULL;
+			goto fail;
+		}
 	}
 
 	return 0;
+
+fail:
+	pmic_remove(spi);
+	return ret;
 }
 
 static struct spi_driver pmic_driver = {
 	.probe		= pmic_probe,
+	.remove		= pmic_remove,
 	.driver		= {
 		.name	= "tps6524x",
+		.owner	= THIS_MODULE,
 	},
 };
 

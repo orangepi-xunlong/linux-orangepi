@@ -14,5 +14,6 @@ header-y += ebt_nflog.h
 header-y += ebt_pkttype.h
 header-y += ebt_redirect.h
 header-y += ebt_stp.h
+header-y += ebt_ulog.h
 header-y += ebt_vlan.h
 header-y += ebtables.h

@@ -48,8 +48,8 @@ static char *print_lockmode(int mode)
 	}
 }
 
-static void print_format1_lock(struct seq_file *s, struct dlm_lkb *lkb,
-			       struct dlm_rsb *res)
+static int print_format1_lock(struct seq_file *s, struct dlm_lkb *lkb,
+			      struct dlm_rsb *res)
 {
 	seq_printf(s, "%08x %s", lkb->lkb_id, print_lockmode(lkb->lkb_grmode));
 
@@ -68,17 +68,21 @@ static void print_format1_lock(struct seq_file *s, struct dlm_lkb *lkb,
 	if (lkb->lkb_wait_type)
 		seq_printf(s, " wait_type: %d", lkb->lkb_wait_type);
 
-	seq_puts(s, "\n");
+	return seq_printf(s, "\n");
 }
 
-static void print_format1(struct dlm_rsb *res, struct seq_file *s)
+static int print_format1(struct dlm_rsb *res, struct seq_file *s)
 {
 	struct dlm_lkb *lkb;
 	int i, lvblen = res->res_ls->ls_lvblen, recover_list, root_list;
+	int rv;
 
 	lock_rsb(res);
 
-	seq_printf(s, "\nResource %p Name (len=%d) \"", res, res->res_length);
+	rv = seq_printf(s, "\nResource %p Name (len=%d) \"",
+			res, res->res_length);
+	if (rv)
+		goto out;
 
 	for (i = 0; i < res->res_length; i++) {
 		if (isprint(res->res_name[i]))
@@ -88,31 +92,32 @@ static void print_format1(struct dlm_rsb *res, struct seq_file *s)
 	}
 
 	if (res->res_nodeid > 0)
-		seq_printf(s, "\"\nLocal Copy, Master is node %d\n",
-			   res->res_nodeid);
+		rv = seq_printf(s, "\"  \nLocal Copy, Master is node %d\n",
+				res->res_nodeid);
 	else if (res->res_nodeid == 0)
-		seq_puts(s, "\"\nMaster Copy\n");
+		rv = seq_printf(s, "\"  \nMaster Copy\n");
 	else if (res->res_nodeid == -1)
-		seq_printf(s, "\"\nLooking up master (lkid %x)\n",
-			   res->res_first_lkid);
+		rv = seq_printf(s, "\"  \nLooking up master (lkid %x)\n",
+			   	res->res_first_lkid);
 	else
-		seq_printf(s, "\"\nInvalid master %d\n", res->res_nodeid);
-	if (seq_has_overflowed(s))
+		rv = seq_printf(s, "\"  \nInvalid master %d\n",
+				res->res_nodeid);
+	if (rv)
 		goto out;
 
 	/* Print the LVB: */
 	if (res->res_lvbptr) {
-		seq_puts(s, "LVB: ");
+		seq_printf(s, "LVB: ");
 		for (i = 0; i < lvblen; i++) {
 			if (i == lvblen / 2)
-				seq_puts(s, "\n     ");
+				seq_printf(s, "\n     ");
 			seq_printf(s, "%02x ",
 				   (unsigned char) res->res_lvbptr[i]);
 		}
 		if (rsb_flag(res, RSB_VALNOTVALID))
-			seq_puts(s, " (INVALID)");
-		seq_puts(s, "\n");
-		if (seq_has_overflowed(s))
+			seq_printf(s, " (INVALID)");
+		rv = seq_printf(s, "\n");
+		if (rv)
 			goto out;
 	}
 
@@ -120,55 +125,57 @@ static void print_format1(struct dlm_rsb *res, struct seq_file *s)
 	recover_list = !list_empty(&res->res_recover_list);
 
 	if (root_list || recover_list) {
-		seq_printf(s, "Recovery: root %d recover %d flags %lx count %d\n",
-			   root_list, recover_list,
-			   res->res_flags, res->res_recover_locks_count);
+		rv = seq_printf(s, "Recovery: root %d recover %d flags %lx "
+				"count %d\n", root_list, recover_list,
+			   	res->res_flags, res->res_recover_locks_count);
+		if (rv)
+			goto out;
 	}
 
 	/* Print the locks attached to this resource */
-	seq_puts(s, "Granted Queue\n");
+	seq_printf(s, "Granted Queue\n");
 	list_for_each_entry(lkb, &res->res_grantqueue, lkb_statequeue) {
-		print_format1_lock(s, lkb, res);
-		if (seq_has_overflowed(s))
+		rv = print_format1_lock(s, lkb, res);
+		if (rv)
 			goto out;
 	}
 
-	seq_puts(s, "Conversion Queue\n");
+	seq_printf(s, "Conversion Queue\n");
 	list_for_each_entry(lkb, &res->res_convertqueue, lkb_statequeue) {
-		print_format1_lock(s, lkb, res);
-		if (seq_has_overflowed(s))
+		rv = print_format1_lock(s, lkb, res);
+		if (rv)
 			goto out;
 	}
 
-	seq_puts(s, "Waiting Queue\n");
+	seq_printf(s, "Waiting Queue\n");
 	list_for_each_entry(lkb, &res->res_waitqueue, lkb_statequeue) {
-		print_format1_lock(s, lkb, res);
-		if (seq_has_overflowed(s))
+		rv = print_format1_lock(s, lkb, res);
+		if (rv)
 			goto out;
 	}
 
 	if (list_empty(&res->res_lookup))
 		goto out;
 
-	seq_puts(s, "Lookup Queue\n");
+	seq_printf(s, "Lookup Queue\n");
 	list_for_each_entry(lkb, &res->res_lookup, lkb_rsb_lookup) {
-		seq_printf(s, "%08x %s",
-			   lkb->lkb_id, print_lockmode(lkb->lkb_rqmode));
+		rv = seq_printf(s, "%08x %s", lkb->lkb_id,
+				print_lockmode(lkb->lkb_rqmode));
 		if (lkb->lkb_wait_type)
 			seq_printf(s, " wait_type: %d", lkb->lkb_wait_type);
-		seq_puts(s, "\n");
-		if (seq_has_overflowed(s))
-			goto out;
+		rv = seq_printf(s, "\n");
 	}
  out:
 	unlock_rsb(res);
+	return rv;
 }
 
-static void print_format2_lock(struct seq_file *s, struct dlm_lkb *lkb,
-			       struct dlm_rsb *r)
+static int print_format2_lock(struct seq_file *s, struct dlm_lkb *lkb,
+			      struct dlm_rsb *r)
 {
 	u64 xid = 0;
 	u64 us;
+	int rv;
 
 	if (lkb->lkb_flags & DLM_IFL_USER) {
 		if (lkb->lkb_ua)
@@ -181,97 +188,103 @@ static void print_format2_lock(struct seq_file *s, struct dlm_lkb *lkb,
 	/* id nodeid remid pid xid exflags flags sts grmode rqmode time_us
 	   r_nodeid r_len r_name */
 
-	seq_printf(s, "%x %d %x %u %llu %x %x %d %d %d %llu %u %d \"%s\"\n",
-		   lkb->lkb_id,
-		   lkb->lkb_nodeid,
-		   lkb->lkb_remid,
-		   lkb->lkb_ownpid,
-		   (unsigned long long)xid,
-		   lkb->lkb_exflags,
-		   lkb->lkb_flags,
-		   lkb->lkb_status,
-		   lkb->lkb_grmode,
-		   lkb->lkb_rqmode,
-		   (unsigned long long)us,
-		   r->res_nodeid,
-		   r->res_length,
-		   r->res_name);
+	rv = seq_printf(s, "%x %d %x %u %llu %x %x %d %d %d %llu %u %d \"%s\"\n",
+			lkb->lkb_id,
+			lkb->lkb_nodeid,
+			lkb->lkb_remid,
+			lkb->lkb_ownpid,
+			(unsigned long long)xid,
+			lkb->lkb_exflags,
+			lkb->lkb_flags,
+			lkb->lkb_status,
+			lkb->lkb_grmode,
+			lkb->lkb_rqmode,
+			(unsigned long long)us,
+			r->res_nodeid,
+			r->res_length,
+			r->res_name);
+	return rv;
 }
 
-static void print_format2(struct dlm_rsb *r, struct seq_file *s)
+static int print_format2(struct dlm_rsb *r, struct seq_file *s)
 {
 	struct dlm_lkb *lkb;
+	int rv = 0;
 
 	lock_rsb(r);
 
 	list_for_each_entry(lkb, &r->res_grantqueue, lkb_statequeue) {
-		print_format2_lock(s, lkb, r);
-		if (seq_has_overflowed(s))
+		rv = print_format2_lock(s, lkb, r);
+		if (rv)
 			goto out;
 	}
 
 	list_for_each_entry(lkb, &r->res_convertqueue, lkb_statequeue) {
-		print_format2_lock(s, lkb, r);
-		if (seq_has_overflowed(s))
+		rv = print_format2_lock(s, lkb, r);
+		if (rv)
 			goto out;
 	}
 
 	list_for_each_entry(lkb, &r->res_waitqueue, lkb_statequeue) {
-		print_format2_lock(s, lkb, r);
-		if (seq_has_overflowed(s))
+		rv = print_format2_lock(s, lkb, r);
+		if (rv)
 			goto out;
 	}
  out:
 	unlock_rsb(r);
+	return rv;
 }
 
-static void print_format3_lock(struct seq_file *s, struct dlm_lkb *lkb,
+static int print_format3_lock(struct seq_file *s, struct dlm_lkb *lkb,
 			      int rsb_lookup)
 {
 	u64 xid = 0;
+	int rv;
 
 	if (lkb->lkb_flags & DLM_IFL_USER) {
 		if (lkb->lkb_ua)
 			xid = lkb->lkb_ua->xid;
 	}
 
-	seq_printf(s, "lkb %x %d %x %u %llu %x %x %d %d %d %d %d %d %u %llu %llu\n",
-		   lkb->lkb_id,
-		   lkb->lkb_nodeid,
-		   lkb->lkb_remid,
-		   lkb->lkb_ownpid,
-		   (unsigned long long)xid,
-		   lkb->lkb_exflags,
-		   lkb->lkb_flags,
-		   lkb->lkb_status,
-		   lkb->lkb_grmode,
-		   lkb->lkb_rqmode,
-		   lkb->lkb_last_bast.mode,
-		   rsb_lookup,
-		   lkb->lkb_wait_type,
-		   lkb->lkb_lvbseq,
-		   (unsigned long long)ktime_to_ns(lkb->lkb_timestamp),
-		   (unsigned long long)ktime_to_ns(lkb->lkb_last_bast_time));
+	rv = seq_printf(s, "lkb %x %d %x %u %llu %x %x %d %d %d %d %d %d %u %llu %llu\n",
+			lkb->lkb_id,
+			lkb->lkb_nodeid,
+			lkb->lkb_remid,
+			lkb->lkb_ownpid,
+			(unsigned long long)xid,
+			lkb->lkb_exflags,
+			lkb->lkb_flags,
+			lkb->lkb_status,
+			lkb->lkb_grmode,
+			lkb->lkb_rqmode,
+			lkb->lkb_last_bast.mode,
+			rsb_lookup,
+			lkb->lkb_wait_type,
+			lkb->lkb_lvbseq,
+			(unsigned long long)ktime_to_ns(lkb->lkb_timestamp),
+			(unsigned long long)ktime_to_ns(lkb->lkb_last_bast_time));
+	return rv;
 }
 
-static void print_format3(struct dlm_rsb *r, struct seq_file *s)
+static int print_format3(struct dlm_rsb *r, struct seq_file *s)
 {
 	struct dlm_lkb *lkb;
 	int i, lvblen = r->res_ls->ls_lvblen;
 	int print_name = 1;
+	int rv;
 
 	lock_rsb(r);
 
-	seq_printf(s, "rsb %p %d %x %lx %d %d %u %d ",
-		   r,
-		   r->res_nodeid,
-		   r->res_first_lkid,
-		   r->res_flags,
-		   !list_empty(&r->res_root_list),
-		   !list_empty(&r->res_recover_list),
-		   r->res_recover_locks_count,
-		   r->res_length);
-	if (seq_has_overflowed(s))
+	rv = seq_printf(s, "rsb %p %d %x %lx %d %d %u %d ",
+			r,
+			r->res_nodeid,
+			r->res_first_lkid,
+			r->res_flags,
+			!list_empty(&r->res_root_list),
+			!list_empty(&r->res_recover_list),
+			r->res_recover_locks_count,
+			r->res_length);
+	if (rv)
 		goto out;
 
 	for (i = 0; i < r->res_length; i++) {
@@ -279,7 +292,7 @@ static void print_format3(struct dlm_rsb *r, struct seq_file *s)
 			print_name = 0;
 	}
 
-	seq_puts(s, print_name ? "str " : "hex");
+	seq_printf(s, "%s", print_name ? "str " : "hex");
 
 	for (i = 0; i < r->res_length; i++) {
 		if (print_name)
@@ -287,8 +300,8 @@ static void print_format3(struct dlm_rsb *r, struct seq_file *s)
 		else
 			seq_printf(s, " %02x", (unsigned char)r->res_name[i]);
 	}
-	seq_puts(s, "\n");
-	if (seq_has_overflowed(s))
+	rv = seq_printf(s, "\n");
+	if (rv)
 		goto out;
 
 	if (!r->res_lvbptr)
@@ -298,62 +311,65 @@ static void print_format3(struct dlm_rsb *r, struct seq_file *s)
 
 	for (i = 0; i < lvblen; i++)
 		seq_printf(s, " %02x", (unsigned char)r->res_lvbptr[i]);
-	seq_puts(s, "\n");
-	if (seq_has_overflowed(s))
+	rv = seq_printf(s, "\n");
+	if (rv)
 		goto out;
 
  do_locks:
 	list_for_each_entry(lkb, &r->res_grantqueue, lkb_statequeue) {
-		print_format3_lock(s, lkb, 0);
-		if (seq_has_overflowed(s))
+		rv = print_format3_lock(s, lkb, 0);
+		if (rv)
 			goto out;
 	}
 
 	list_for_each_entry(lkb, &r->res_convertqueue, lkb_statequeue) {
-		print_format3_lock(s, lkb, 0);
-		if (seq_has_overflowed(s))
+		rv = print_format3_lock(s, lkb, 0);
+		if (rv)
 			goto out;
 	}
 
 	list_for_each_entry(lkb, &r->res_waitqueue, lkb_statequeue) {
-		print_format3_lock(s, lkb, 0);
-		if (seq_has_overflowed(s))
+		rv = print_format3_lock(s, lkb, 0);
+		if (rv)
 			goto out;
 	}
 
 	list_for_each_entry(lkb, &r->res_lookup, lkb_rsb_lookup) {
-		print_format3_lock(s, lkb, 1);
-		if (seq_has_overflowed(s))
+		rv = print_format3_lock(s, lkb, 1);
+		if (rv)
 			goto out;
 	}
  out:
 	unlock_rsb(r);
+	return rv;
 }
 
-static void print_format4(struct dlm_rsb *r, struct seq_file *s)
+static int print_format4(struct dlm_rsb *r, struct seq_file *s)
 {
 	int our_nodeid = dlm_our_nodeid();
 	int print_name = 1;
-	int i;
+	int i, rv;
 
 	lock_rsb(r);
 
-	seq_printf(s, "rsb %p %d %d %d %d %lu %lx %d ",
-		   r,
-		   r->res_nodeid,
-		   r->res_master_nodeid,
-		   r->res_dir_nodeid,
-		   our_nodeid,
-		   r->res_toss_time,
-		   r->res_flags,
-		   r->res_length);
+	rv = seq_printf(s, "rsb %p %d %d %d %d %lu %lx %d ",
+			r,
+			r->res_nodeid,
+			r->res_master_nodeid,
+			r->res_dir_nodeid,
+			our_nodeid,
+			r->res_toss_time,
+			r->res_flags,
+			r->res_length);
+	if (rv)
+		goto out;
 
 	for (i = 0; i < r->res_length; i++) {
 		if (!isascii(r->res_name[i]) || !isprint(r->res_name[i]))
 			print_name = 0;
 	}
 
-	seq_puts(s, print_name ? "str " : "hex");
+	seq_printf(s, "%s", print_name ? "str " : "hex");
 
 	for (i = 0; i < r->res_length; i++) {
 		if (print_name)
@@ -361,9 +377,10 @@ static void print_format4(struct dlm_rsb *r, struct seq_file *s)
 		else
 			seq_printf(s, " %02x", (unsigned char)r->res_name[i]);
 	}
-	seq_puts(s, "\n");
-
+	rv = seq_printf(s, "\n");
+ out:
 	unlock_rsb(r);
+	return rv;
 }
 
 struct rsbtbl_iter {
@@ -373,45 +390,47 @@ struct rsbtbl_iter {
 	int header;
 };
 
-/*
- * If the buffer is full, seq_printf can be called again, but it
- * does nothing.  So, the these printing routines periodically check
- * seq_has_overflowed to avoid wasting too much time trying to print to
- * a full buffer.
- */
+/* seq_printf returns -1 if the buffer is full, and 0 otherwise.
+   If the buffer is full, seq_printf can be called again, but it
+   does nothing and just returns -1.  So, the these printing routines
+   periodically check the return value to avoid wasting too much time
+   trying to print to a full buffer. */
 
 static int table_seq_show(struct seq_file *seq, void *iter_ptr)
 {
 	struct rsbtbl_iter *ri = iter_ptr;
+	int rv = 0;
 
 	switch (ri->format) {
 	case 1:
-		print_format1(ri->rsb, seq);
+		rv = print_format1(ri->rsb, seq);
 		break;
 	case 2:
 		if (ri->header) {
-			seq_puts(seq, "id nodeid remid pid xid exflags flags sts grmode rqmode time_ms r_nodeid r_len r_name\n");
+			seq_printf(seq, "id nodeid remid pid xid exflags "
+					"flags sts grmode rqmode time_ms "
+					"r_nodeid r_len r_name\n");
 			ri->header = 0;
 		}
-		print_format2(ri->rsb, seq);
+		rv = print_format2(ri->rsb, seq);
 		break;
 	case 3:
 		if (ri->header) {
-			seq_puts(seq, "version rsb 1.1 lvb 1.1 lkb 1.1\n");
+			seq_printf(seq, "version rsb 1.1 lvb 1.1 lkb 1.1\n");
 			ri->header = 0;
 		}
-		print_format3(ri->rsb, seq);
+		rv = print_format3(ri->rsb, seq);
 		break;
 	case 4:
 		if (ri->header) {
-			seq_puts(seq, "version 4 rsb 2\n");
+			seq_printf(seq, "version 4 rsb 2\n");
 			ri->header = 0;
 		}
-		print_format4(ri->rsb, seq);
+		rv = print_format4(ri->rsb, seq);
 		break;
 	}
 
-	return 0;
+	return rv;
 }
 
 static const struct seq_operations format1_seq_ops;
@@ -607,54 +626,20 @@ static const struct file_operations format2_fops;
 static const struct file_operations format3_fops;
 static const struct file_operations format4_fops;
 
-static int table_open1(struct inode *inode, struct file *file)
+static int table_open(struct inode *inode, struct file *file)
 {
 	struct seq_file *seq;
-	int ret;
+	int ret = -1;
 
-	ret = seq_open(file, &format1_seq_ops);
-	if (ret)
-		return ret;
+	if (file->f_op == &format1_fops)
+		ret = seq_open(file, &format1_seq_ops);
+	else if (file->f_op == &format2_fops)
+		ret = seq_open(file, &format2_seq_ops);
+	else if (file->f_op == &format3_fops)
+		ret = seq_open(file, &format3_seq_ops);
+	else if (file->f_op == &format4_fops)
+		ret = seq_open(file, &format4_seq_ops);
 
-	seq = file->private_data;
-	seq->private = inode->i_private; /* the dlm_ls */
-	return 0;
-}
-
-static int table_open2(struct inode *inode, struct file *file)
-{
-	struct seq_file *seq;
-	int ret;
-
-	ret = seq_open(file, &format2_seq_ops);
-	if (ret)
-		return ret;
-
-	seq = file->private_data;
-	seq->private = inode->i_private; /* the dlm_ls */
-	return 0;
-}
-
-static int table_open3(struct inode *inode, struct file *file)
-{
-	struct seq_file *seq;
-	int ret;
-
-	ret = seq_open(file, &format3_seq_ops);
-	if (ret)
-		return ret;
-
-	seq = file->private_data;
-	seq->private = inode->i_private; /* the dlm_ls */
-	return 0;
-}
-
-static int table_open4(struct inode *inode, struct file *file)
-{
-	struct seq_file *seq;
-	int ret;
-
-	ret = seq_open(file, &format4_seq_ops);
 	if (ret)
 		return ret;
 
@@ -665,7 +650,7 @@ static int table_open4(struct inode *inode, struct file *file)
 
 static const struct file_operations format1_fops = {
 	.owner   = THIS_MODULE,
-	.open    = table_open1,
+	.open    = table_open,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
 	.release = seq_release
@@ -673,7 +658,7 @@ static const struct file_operations format1_fops = {
 
 static const struct file_operations format2_fops = {
 	.owner   = THIS_MODULE,
-	.open    = table_open2,
+	.open    = table_open,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
 	.release = seq_release
@@ -681,7 +666,7 @@ static const struct file_operations format2_fops = {
 
 static const struct file_operations format3_fops = {
 	.owner   = THIS_MODULE,
-	.open    = table_open3,
+	.open    = table_open,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
 	.release = seq_release
@@ -689,7 +674,7 @@ static const struct file_operations format3_fops = {
 
 static const struct file_operations format4_fops = {
 	.owner   = THIS_MODULE,
-	.open    = table_open4,
+	.open    = table_open,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
 	.release = seq_release
@@ -733,11 +718,16 @@ static const struct file_operations waiters_fops = {
 
 void dlm_delete_debug_file(struct dlm_ls *ls)
 {
-	debugfs_remove(ls->ls_debug_rsb_dentry);
-	debugfs_remove(ls->ls_debug_waiters_dentry);
-	debugfs_remove(ls->ls_debug_locks_dentry);
-	debugfs_remove(ls->ls_debug_all_dentry);
-	debugfs_remove(ls->ls_debug_toss_dentry);
+	if (ls->ls_debug_rsb_dentry)
+		debugfs_remove(ls->ls_debug_rsb_dentry);
+	if (ls->ls_debug_waiters_dentry)
+		debugfs_remove(ls->ls_debug_waiters_dentry);
+	if (ls->ls_debug_locks_dentry)
+		debugfs_remove(ls->ls_debug_locks_dentry);
+	if (ls->ls_debug_all_dentry)
+		debugfs_remove(ls->ls_debug_all_dentry);
+	if (ls->ls_debug_toss_dentry)
+		debugfs_remove(ls->ls_debug_toss_dentry);
 }
 
 int dlm_create_debug_file(struct dlm_ls *ls)

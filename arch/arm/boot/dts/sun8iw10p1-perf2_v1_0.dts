@@ -1,0 +1,39 @@
+/*
+ * Allwinner Technology CO., Ltd. sun50iw2p1 pro board.
+ *
+ * pro board support.
+ */
+
+/dts-v1/;
+
+#include "sun8iw10p1.dtsi"
+
+/{
+
+	soc@01c00000 {
+		uart0: uart@01c28000 {
+			status = "okay";
+		};
+
+		twi0: twi@0x01c2ac00 {
+			status = "okay";
+		};
+
+		twi1: twi@0x01c2b000 {
+			status = "okay";
+			cx2081x@35{
+				compatible = "cx,cx2081x_0";
+				reg = <0x35>;
+			};
+			cx2081x@3b{
+				compatible = "cx,cx2081x_1";
+				reg = <0x3b>;
+				voltage_enable = "audio-3v3";
+			};
+
+		};
+		sndcodec:sound@0{
+				#gpio-hp = <&pio PB 3 6 1 1 1 >;
+		};
+	};
+};

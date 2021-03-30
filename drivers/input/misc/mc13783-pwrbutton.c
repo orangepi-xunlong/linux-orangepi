@@ -20,6 +20,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/input.h>
@@ -249,6 +250,7 @@ static int mc13783_pwrbutton_remove(struct platform_device *pdev)
 
 	input_unregister_device(priv->pwr);
 	kfree(priv);
+	platform_set_drvdata(pdev, NULL);
 
 	return 0;
 }
@@ -258,6 +260,7 @@ static struct platform_driver mc13783_pwrbutton_driver = {
 	.remove		= mc13783_pwrbutton_remove,
 	.driver		= {
 		.name	= "mc13783-pwrbutton",
+		.owner	= THIS_MODULE,
 	},
 };
 

@@ -43,7 +43,7 @@ _cpus_boot_entry:
 	.long .
 	.long cpus_boot_entry
 
-#ifdef CONFIG_ARM_SUNXI_CPUIDLE
+#ifdef CONFIG_CPU_IDLE_SUNXI
 	.text
 	.align 4
 

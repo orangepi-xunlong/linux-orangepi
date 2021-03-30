@@ -27,6 +27,7 @@ struct aa_profile;
 
 extern const char *const audit_mode_names[];
 #define AUDIT_MAX_INDEX 5
+
 enum audit_mode {
 	AUDIT_NORMAL,		/* follow normal auditing of accesses */
 	AUDIT_QUIET_DENIED,	/* quiet all denied access messages */
@@ -109,6 +110,7 @@ struct apparmor_audit_data {
 	void *profile;
 	const char *name;
 	const char *info;
+	struct task_struct *tsk;
 	union {
 		void *target;
 		struct {

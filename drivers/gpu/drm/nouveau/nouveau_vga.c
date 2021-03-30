@@ -4,7 +4,7 @@
 #include <drm/drmP.h>
 #include <drm/drm_crtc_helper.h>
 
-#include "nouveau_drv.h"
+#include "nouveau_drm.h"
 #include "nouveau_acpi.h"
 #include "nouveau_fbcon.h"
 #include "nouveau_vga.h"
@@ -12,17 +12,12 @@
 static unsigned int
 nouveau_vga_set_decode(void *priv, bool state)
 {
-	struct nouveau_drm *drm = nouveau_drm(priv);
-	struct nvif_object *device = &drm->device.object;
+	struct nouveau_device *device = nouveau_dev(priv);
 
-	if (drm->device.info.family == NV_DEVICE_INFO_V0_CURIE &&
-	    drm->device.info.chipset >= 0x4c)
-		nvif_wr32(device, 0x088060, state);
+	if (device->chipset >= 0x40)
+		nv_wr32(device, 0x088054, state);
 	else
-	if (drm->device.info.chipset >= 0x40)
-		nvif_wr32(device, 0x088054, state);
-	else
-		nvif_wr32(device, 0x001854, state);
+		nv_wr32(device, 0x001854, state);
 
 	if (state)
 		return VGA_RSRC_LEGACY_IO | VGA_RSRC_LEGACY_MEM |
@@ -36,9 +31,6 @@ nouveau_switcheroo_set_state(struct pci_dev *pdev,
 			     enum vga_switcheroo_state state)
 {
 	struct drm_device *dev = pci_get_drvdata(pdev);
-
-	if ((nouveau_is_optimus() || nouveau_is_v1_dsm()) && state == VGA_SWITCHEROO_OFF)
-		return;
 
 	if (state == VGA_SWITCHEROO_ON) {
 		printk(KERN_ERR "VGA switcheroo: switched nouveau on\n");
@@ -67,13 +59,12 @@ static bool
 nouveau_switcheroo_can_switch(struct pci_dev *pdev)
 {
 	struct drm_device *dev = pci_get_drvdata(pdev);
+	bool can_switch;
 
-	/*
-	 * FIXME: open_count is protected by drm_global_mutex but that would lead to
-	 * locking inversion with the driver load path. And the access here is
-	 * completely racy anyway. So don't bother with locking for now.
-	 */
-	return dev->open_count == 0;
+	spin_lock(&dev->count_lock);
+	can_switch = (dev->open_count == 0);
+	spin_unlock(&dev->count_lock);
+	return can_switch;
 }
 
 static const struct vga_switcheroo_client_ops
@@ -87,38 +78,15 @@ void
 nouveau_vga_init(struct nouveau_drm *drm)
 {
 	struct drm_device *dev = drm->dev;
-	bool runtime = false;
-
-	/* only relevant for PCI devices */
-	if (!dev->pdev)
-		return;
-
 	vga_client_register(dev->pdev, dev, NULL, nouveau_vga_set_decode);
-
-	if (nouveau_runtime_pm == 1)
-		runtime = true;
-	if ((nouveau_runtime_pm == -1) && (nouveau_is_optimus() || nouveau_is_v1_dsm()))
-		runtime = true;
-	vga_switcheroo_register_client(dev->pdev, &nouveau_switcheroo_ops, runtime);
-
-	if (runtime && nouveau_is_v1_dsm() && !nouveau_is_optimus())
-		vga_switcheroo_init_domain_pm_ops(drm->dev->dev, &drm->vga_pm_domain);
+	vga_switcheroo_register_client(dev->pdev, &nouveau_switcheroo_ops);
 }
 
 void
 nouveau_vga_fini(struct nouveau_drm *drm)
 {
 	struct drm_device *dev = drm->dev;
-	bool runtime = false;
-
-	if (nouveau_runtime_pm == 1)
-		runtime = true;
-	if ((nouveau_runtime_pm == -1) && (nouveau_is_optimus() || nouveau_is_v1_dsm()))
-		runtime = true;
-
 	vga_switcheroo_unregister_client(dev->pdev);
-	if (runtime && nouveau_is_v1_dsm() && !nouveau_is_optimus())
-		vga_switcheroo_fini_domain_pm_ops(drm->dev->dev);
 	vga_client_register(dev->pdev, NULL, NULL, NULL);
 }
 

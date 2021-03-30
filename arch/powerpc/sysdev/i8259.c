@@ -8,6 +8,7 @@
  */
 #undef DEBUG
 
+#include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
@@ -68,9 +69,9 @@ unsigned int i8259_irq(void)
 		if (!pci_intack)
 			outb(0x0B, 0x20);	/* ISR register */
 		if(~inb(0x20) & 0x80)
-			irq = 0;
+			irq = NO_IRQ;
 	} else if (irq == 0xff)
-		irq = 0;
+		irq = NO_IRQ;
 
 	if (lock)
 		raw_spin_unlock(&i8259_lock);
@@ -162,11 +163,9 @@ static struct resource pic_edgectrl_iores = {
 	.flags = IORESOURCE_BUSY,
 };
 
-static int i8259_host_match(struct irq_domain *h, struct device_node *node,
-			    enum irq_domain_bus_token bus_token)
+static int i8259_host_match(struct irq_domain *h, struct device_node *node)
 {
-	struct device_node *of_node = irq_domain_get_of_node(h);
-	return of_node == NULL || of_node == node;
+	return h->of_node == NULL || h->of_node == node;
 }
 
 static int i8259_host_map(struct irq_domain *h, unsigned int virq,
@@ -206,7 +205,7 @@ static int i8259_host_xlate(struct irq_domain *h, struct device_node *ct,
 	return 0;
 }
 
-static const struct irq_domain_ops i8259_host_ops = {
+static struct irq_domain_ops i8259_host_ops = {
 	.match = i8259_host_match,
 	.map = i8259_host_map,
 	.xlate = i8259_host_xlate,
@@ -238,7 +237,7 @@ void i8259_init(struct device_node *node, unsigned long intack_addr)
 	/* init master interrupt controller */
 	outb(0x11, 0x20); /* Start init sequence */
 	outb(0x00, 0x21); /* Vector base */
-	outb(0x04, 0x21); /* edge triggered, Cascade (slave) on IRQ2 */
+	outb(0x04, 0x21); /* edge tiggered, Cascade (slave) on IRQ2 */
 	outb(0x01, 0x21); /* Select 8086 mode */
 
 	/* init slave interrupt controller */

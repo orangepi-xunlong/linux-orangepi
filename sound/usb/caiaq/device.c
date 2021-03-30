@@ -39,24 +39,25 @@
 MODULE_AUTHOR("Daniel Mack <daniel@caiaq.de>");
 MODULE_DESCRIPTION("caiaq USB audio");
 MODULE_LICENSE("GPL");
-MODULE_SUPPORTED_DEVICE("{{Native Instruments,RigKontrol2},"
-			 "{Native Instruments,RigKontrol3},"
-			 "{Native Instruments,Kore Controller},"
-			 "{Native Instruments,Kore Controller 2},"
-			 "{Native Instruments,Audio Kontrol 1},"
-			 "{Native Instruments,Audio 2 DJ},"
-			 "{Native Instruments,Audio 4 DJ},"
-			 "{Native Instruments,Audio 8 DJ},"
-			 "{Native Instruments,Traktor Audio 2},"
-			 "{Native Instruments,Session I/O},"
-			 "{Native Instruments,GuitarRig mobile},"
-			 "{Native Instruments,Traktor Kontrol X1},"
-			 "{Native Instruments,Traktor Kontrol S4},"
-			 "{Native Instruments,Maschine Controller}}");
+MODULE_SUPPORTED_DEVICE("{{Native Instruments, RigKontrol2},"
+			 "{Native Instruments, RigKontrol3},"
+			 "{Native Instruments, Kore Controller},"
+			 "{Native Instruments, Kore Controller 2},"
+			 "{Native Instruments, Audio Kontrol 1},"
+			 "{Native Instruments, Audio 2 DJ},"
+			 "{Native Instruments, Audio 4 DJ},"
+			 "{Native Instruments, Audio 8 DJ},"
+			 "{Native Instruments, Traktor Audio 2},"
+			 "{Native Instruments, Session I/O},"
+			 "{Native Instruments, GuitarRig mobile},"
+			 "{Native Instruments, Traktor Kontrol X1},"
+			 "{Native Instruments, Traktor Kontrol S4},"
+			 "{Native Instruments, Maschine Controller}}");
 
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX; /* Index 0-max */
 static char* id[SNDRV_CARDS] = SNDRV_DEFAULT_STR; /* Id for this card */
 static bool enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP; /* Enable this card */
+static int snd_card_used[SNDRV_CARDS];
 
 module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for the caiaq sound device");
@@ -235,31 +236,6 @@ int snd_usb_caiaq_send_command(struct snd_usb_caiaqdev *cdev,
 			   cdev->ep1_out_buf, len+1, &actual_len, 200);
 }
 
-int snd_usb_caiaq_send_command_bank(struct snd_usb_caiaqdev *cdev,
-			       unsigned char command,
-			       unsigned char bank,
-			       const unsigned char *buffer,
-			       int len)
-{
-	int actual_len;
-	struct usb_device *usb_dev = cdev->chip.dev;
-
-	if (!usb_dev)
-		return -EIO;
-
-	if (len > EP1_BUFSIZE - 2)
-		len = EP1_BUFSIZE - 2;
-
-	if (buffer && len > 0)
-		memcpy(cdev->ep1_out_buf+2, buffer, len);
-
-	cdev->ep1_out_buf[0] = command;
-	cdev->ep1_out_buf[1] = bank;
-
-	return usb_bulk_msg(usb_dev, usb_sndbulkpipe(usb_dev, 1),
-			   cdev->ep1_out_buf, len+2, &actual_len, 200);
-}
-
 int snd_usb_caiaq_set_audio_params (struct snd_usb_caiaqdev *cdev,
 		   		    int rate, int depth, int bpp)
 {
@@ -412,15 +388,14 @@ static int create_card(struct usb_device *usb_dev,
 	struct snd_usb_caiaqdev *cdev;
 
 	for (devnum = 0; devnum < SNDRV_CARDS; devnum++)
-		if (enable[devnum])
+		if (enable[devnum] && !snd_card_used[devnum])
 			break;
 
 	if (devnum >= SNDRV_CARDS)
 		return -ENODEV;
 
-	err = snd_card_new(&intf->dev,
-			   index[devnum], id[devnum], THIS_MODULE,
-			   sizeof(struct snd_usb_caiaqdev), &card);
+	err = snd_card_create(index[devnum], id[devnum], THIS_MODULE,
+			      sizeof(struct snd_usb_caiaqdev), &card);
 	if (err < 0)
 		return err;
 
@@ -430,6 +405,7 @@ static int create_card(struct usb_device *usb_dev,
 	cdev->chip.usb_id = USB_ID(le16_to_cpu(usb_dev->descriptor.idVendor),
 				  le16_to_cpu(usb_dev->descriptor.idProduct));
 	spin_lock_init(&cdev->spinlock);
+	snd_card_set_dev(card, &intf->dev);
 
 	*cardp = card;
 	return 0;
@@ -469,12 +445,10 @@ static int init_card(struct snd_usb_caiaqdev *cdev)
 
 	err = snd_usb_caiaq_send_command(cdev, EP1_CMD_GET_DEVICE_INFO, NULL, 0);
 	if (err)
-		goto err_kill_urb;
+		return err;
 
-	if (!wait_event_timeout(cdev->ep1_wait_queue, cdev->spec_received, HZ)) {
-		err = -ENODEV;
-		goto err_kill_urb;
-	}
+	if (!wait_event_timeout(cdev->ep1_wait_queue, cdev->spec_received, HZ))
+		return -ENODEV;
 
 	usb_string(usb_dev, usb_dev->descriptor.iManufacturer,
 		   cdev->vendor_name, CAIAQ_USB_STR_LEN);
@@ -509,10 +483,6 @@ static int init_card(struct snd_usb_caiaqdev *cdev)
 
 	setup_card(cdev);
 	return 0;
-
- err_kill_urb:
-	usb_kill_urb(&cdev->ep1_in_urb);
-	return err;
 }
 
 static int snd_probe(struct usb_interface *intf,

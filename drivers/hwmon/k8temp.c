@@ -135,7 +135,7 @@ static SENSOR_DEVICE_ATTR_2(temp3_input, S_IRUGO, show_temp, NULL, 1, 0);
 static SENSOR_DEVICE_ATTR_2(temp4_input, S_IRUGO, show_temp, NULL, 1, 1);
 static DEVICE_ATTR(name, S_IRUGO, show_name, NULL);
 
-static const struct pci_device_id k8temp_ids[] = {
+static DEFINE_PCI_DEVICE_TABLE(k8temp_ids) = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, PCI_DEVICE_ID_AMD_K8_NB_MISC) },
 	{ 0 },
 };
@@ -187,7 +187,7 @@ static int k8temp_probe(struct pci_dev *pdev,
 		return -ENOMEM;
 
 	model = boot_cpu_data.x86_model;
-	stepping = boot_cpu_data.x86_stepping;
+	stepping = boot_cpu_data.x86_mask;
 
 	/* feature available since SH-C0, exclude older revisions */
 	if ((model == 4 && stepping == 0) ||

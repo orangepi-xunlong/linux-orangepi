@@ -15,30 +15,30 @@
 #define TCP_SCALABLE_AI_CNT	50U
 #define TCP_SCALABLE_MD_SCALE	3
 
-static void tcp_scalable_cong_avoid(struct sock *sk, u32 ack, u32 acked)
+static void tcp_scalable_cong_avoid(struct sock *sk, u32 ack, u32 in_flight)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 
-	if (!tcp_is_cwnd_limited(sk))
+	if (!tcp_is_cwnd_limited(sk, in_flight))
 		return;
 
-	if (tcp_in_slow_start(tp))
-		tcp_slow_start(tp, acked);
+	if (tp->snd_cwnd <= tp->snd_ssthresh)
+		tcp_slow_start(tp);
 	else
-		tcp_cong_avoid_ai(tp, min(tp->snd_cwnd, TCP_SCALABLE_AI_CNT),
-				  1);
+		tcp_cong_avoid_ai(tp, min(tp->snd_cwnd, TCP_SCALABLE_AI_CNT));
 }
 
 static u32 tcp_scalable_ssthresh(struct sock *sk)
 {
 	const struct tcp_sock *tp = tcp_sk(sk);
-
 	return max(tp->snd_cwnd - (tp->snd_cwnd>>TCP_SCALABLE_MD_SCALE), 2U);
 }
+
 
 static struct tcp_congestion_ops tcp_scalable __read_mostly = {
 	.ssthresh	= tcp_scalable_ssthresh,
 	.cong_avoid	= tcp_scalable_cong_avoid,
+	.min_cwnd	= tcp_reno_min_cwnd,
 
 	.owner		= THIS_MODULE,
 	.name		= "scalable",

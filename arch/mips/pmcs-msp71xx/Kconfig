@@ -6,7 +6,6 @@ config PMC_MSP4200_EVAL
 	bool "PMC-Sierra MSP4200 Eval Board"
 	select IRQ_MSP_SLP
 	select HW_HAS_PCI
-	select MIPS_L1_CACHE_SHIFT_4
 
 config PMC_MSP4200_GW
 	bool "PMC-Sierra MSP4200 VoIP Gateway"
@@ -36,14 +35,14 @@ config PMC_MSP7120_FPGA
 endchoice
 
 config MSP_HAS_USB
-	bool
+	boolean
 	depends on PMC_MSP
 
 config MSP_ETH
-	bool
+	boolean
 	select MSP_HAS_MAC
 	depends on PMC_MSP
 
 config MSP_HAS_MAC
-	bool
+	boolean
 	depends on PMC_MSP

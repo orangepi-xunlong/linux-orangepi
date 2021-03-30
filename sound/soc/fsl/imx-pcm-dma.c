@@ -14,7 +14,6 @@
 #include <linux/platform_device.h>
 #include <linux/dmaengine.h>
 #include <linux/types.h>
-#include <linux/module.h>
 
 #include <sound/core.h>
 #include <sound/pcm.h>
@@ -25,10 +24,12 @@
 
 static bool filter(struct dma_chan *chan, void *param)
 {
+	struct snd_dmaengine_dai_dma_data *dma_data = param;
+
 	if (!imx_dma_is_general_purpose(chan))
 		return false;
 
-	chan->private = param;
+	chan->private = dma_data->filter_data;
 
 	return true;
 }
@@ -40,7 +41,11 @@ static const struct snd_pcm_hardware imx_pcm_hardware = {
 		SNDRV_PCM_INFO_MMAP_VALID |
 		SNDRV_PCM_INFO_PAUSE |
 		SNDRV_PCM_INFO_RESUME,
-	.buffer_bytes_max = IMX_DEFAULT_DMABUF_SIZE,
+	.formats = SNDRV_PCM_FMTBIT_S16_LE,
+	.rate_min = 8000,
+	.channels_min = 2,
+	.channels_max = 2,
+	.buffer_bytes_max = IMX_SSI_DMABUF_SIZE,
 	.period_bytes_min = 128,
 	.period_bytes_max = 65535, /* Limited by SDMA engine */
 	.periods_min = 2,
@@ -52,34 +57,18 @@ static const struct snd_dmaengine_pcm_config imx_dmaengine_pcm_config = {
 	.pcm_hardware = &imx_pcm_hardware,
 	.prepare_slave_config = snd_dmaengine_pcm_prepare_slave_config,
 	.compat_filter_fn = filter,
-	.prealloc_buffer_size = IMX_DEFAULT_DMABUF_SIZE,
+	.prealloc_buffer_size = IMX_SSI_DMABUF_SIZE,
 };
 
-int imx_pcm_dma_init(struct platform_device *pdev, size_t size)
+int imx_pcm_dma_init(struct platform_device *pdev)
 {
-	struct snd_dmaengine_pcm_config *config;
-	struct snd_pcm_hardware *pcm_hardware;
-
-	config = devm_kzalloc(&pdev->dev,
-			sizeof(struct snd_dmaengine_pcm_config), GFP_KERNEL);
-	if (!config)
-		return -ENOMEM;
-	*config = imx_dmaengine_pcm_config;
-	if (size)
-		config->prealloc_buffer_size = size;
-
-	pcm_hardware = devm_kzalloc(&pdev->dev,
-			sizeof(struct snd_pcm_hardware), GFP_KERNEL);
-	*pcm_hardware = imx_pcm_hardware;
-	if (size)
-		pcm_hardware->buffer_bytes_max = size;
-
-	config->pcm_hardware = pcm_hardware;
-
-	return devm_snd_dmaengine_pcm_register(&pdev->dev,
-		config,
+	return snd_dmaengine_pcm_register(&pdev->dev, &imx_dmaengine_pcm_config,
+		SND_DMAENGINE_PCM_FLAG_NO_RESIDUE |
+		SND_DMAENGINE_PCM_FLAG_NO_DT |
 		SND_DMAENGINE_PCM_FLAG_COMPAT);
 }
-EXPORT_SYMBOL_GPL(imx_pcm_dma_init);
 
-MODULE_LICENSE("GPL");
+void imx_pcm_dma_exit(struct platform_device *pdev)
+{
+	snd_dmaengine_pcm_unregister(&pdev->dev);
+}

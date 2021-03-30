@@ -246,7 +246,7 @@ static struct vrm_model vrm_models[] = {
  */
 static u8 get_via_model_d_vrm(void)
 {
-	unsigned int vid, brand, __maybe_unused dummy;
+	unsigned int vid, brand, dummy;
 	static const char *brands[4] = {
 		"C7-M", "C7", "Eden", "C7-D"
 	};
@@ -293,7 +293,7 @@ u8 vid_which_vrm(void)
 	if (c->x86 < 6)		/* Any CPU with family lower than 6 */
 		return 0;	/* doesn't have VID */
 
-	vrm_ret = find_vrm(c->x86, c->x86_model, c->x86_stepping, c->x86_vendor);
+	vrm_ret = find_vrm(c->x86, c->x86_model, c->x86_mask, c->x86_vendor);
 	if (vrm_ret == 134)
 		vrm_ret = get_via_model_d_vrm();
 	if (vrm_ret == 0)

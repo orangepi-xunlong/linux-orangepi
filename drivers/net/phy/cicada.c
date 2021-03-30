@@ -30,9 +30,9 @@
 #include <linux/ethtool.h>
 #include <linux/phy.h>
 
-#include <linux/io.h>
+#include <asm/io.h>
 #include <asm/irq.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 /* Cicada Extended Control Register 1 */
 #define MII_CIS8201_EXT_CON1           0x17
@@ -92,8 +92,8 @@ static int cis820x_config_intr(struct phy_device *phydev)
 {
 	int err;
 
-	if (phydev->interrupts == PHY_INTERRUPT_ENABLED)
-		err = phy_write(phydev, MII_CIS8201_IMASK,
+	if(phydev->interrupts == PHY_INTERRUPT_ENABLED)
+		err = phy_write(phydev, MII_CIS8201_IMASK, 
 				MII_CIS8201_IMASK_MASK);
 	else
 		err = phy_write(phydev, MII_CIS8201_IMASK, 0);
@@ -114,6 +114,7 @@ static struct phy_driver cis820x_driver[] = {
 	.read_status	= &genphy_read_status,
 	.ack_interrupt	= &cis820x_ack_interrupt,
 	.config_intr	= &cis820x_config_intr,
+	.driver		= { .owner = THIS_MODULE,},
 }, {
 	.phy_id		= 0x000fc440,
 	.name		= "Cicada Cis8204",
@@ -125,9 +126,23 @@ static struct phy_driver cis820x_driver[] = {
 	.read_status	= &genphy_read_status,
 	.ack_interrupt	= &cis820x_ack_interrupt,
 	.config_intr	= &cis820x_config_intr,
+	.driver		= { .owner = THIS_MODULE,},
 } };
 
-module_phy_driver(cis820x_driver);
+static int __init cicada_init(void)
+{
+	return phy_drivers_register(cis820x_driver,
+		ARRAY_SIZE(cis820x_driver));
+}
+
+static void __exit cicada_exit(void)
+{
+	phy_drivers_unregister(cis820x_driver,
+		ARRAY_SIZE(cis820x_driver));
+}
+
+module_init(cicada_init);
+module_exit(cicada_exit);
 
 static struct mdio_device_id __maybe_unused cicada_tbl[] = {
 	{ 0x000fc410, 0x000ffff0 },

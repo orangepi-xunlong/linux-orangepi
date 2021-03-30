@@ -81,7 +81,6 @@ static DEFINE_SPINLOCK(giu_lock);
 static unsigned long giu_flags;
 
 static void __iomem *giu_base;
-static struct gpio_chip vr41xx_gpio_chip;
 
 #define giu_read(offset)		readw(giu_base + (offset))
 #define giu_write(offset, value)	writew((value), giu_base + (offset))
@@ -136,31 +135,12 @@ static void unmask_giuint_low(struct irq_data *d)
 	giu_set(GIUINTENL, 1 << GPIO_PIN_OF_IRQ(d->irq));
 }
 
-static unsigned int startup_giuint(struct irq_data *data)
-{
-	if (gpiochip_lock_as_irq(&vr41xx_gpio_chip, data->hwirq))
-		dev_err(vr41xx_gpio_chip.parent,
-			"unable to lock HW IRQ %lu for IRQ\n",
-			data->hwirq);
-	/* Satisfy the .enable semantics by unmasking the line */
-	unmask_giuint_low(data);
-	return 0;
-}
-
-static void shutdown_giuint(struct irq_data *data)
-{
-	mask_giuint_low(data);
-	gpiochip_unlock_as_irq(&vr41xx_gpio_chip, data->hwirq);
-}
-
 static struct irq_chip giuint_low_irq_chip = {
 	.name		= "GIUINTL",
 	.irq_ack	= ack_giuint_low,
 	.irq_mask	= mask_giuint_low,
 	.irq_mask_ack	= mask_ack_giuint_low,
 	.irq_unmask	= unmask_giuint_low,
-	.irq_startup	= startup_giuint,
-	.irq_shutdown	= shutdown_giuint,
 };
 
 static void ack_giuint_high(struct irq_data *d)
@@ -515,7 +495,7 @@ static int giu_probe(struct platform_device *pdev)
 	struct resource *res;
 	unsigned int trigger, i, pin;
 	struct irq_chip *chip;
-	int irq, ret;
+	int irq, retval;
 
 	switch (pdev->id) {
 	case GPIO_50PINS_PULLUPDOWN:
@@ -542,13 +522,9 @@ static int giu_probe(struct platform_device *pdev)
 	if (!giu_base)
 		return -ENOMEM;
 
-	vr41xx_gpio_chip.parent = &pdev->dev;
+	vr41xx_gpio_chip.dev = &pdev->dev;
 
-	ret = gpiochip_add_data(&vr41xx_gpio_chip, NULL);
-	if (!ret) {
-		iounmap(giu_base);
-		return -ENODEV;
-	}
+	retval = gpiochip_add(&vr41xx_gpio_chip);
 
 	giu_write(GIUINTENL, 0);
 	giu_write(GIUINTENH, 0);
@@ -591,6 +567,7 @@ static struct platform_driver giu_device_driver = {
 	.remove		= giu_remove,
 	.driver		= {
 		.name	= "GIU",
+		.owner	= THIS_MODULE,
 	},
 };
 

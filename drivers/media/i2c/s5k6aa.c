@@ -28,7 +28,7 @@
 #include <media/v4l2-device.h>
 #include <media/v4l2-subdev.h>
 #include <media/v4l2-mediabus.h>
-#include <media/i2c/s5k6aa.h>
+#include <media/s5k6aa.h>
 
 static int debug;
 module_param(debug, int, 0644);
@@ -191,7 +191,7 @@ struct s5k6aa_regval {
 };
 
 struct s5k6aa_pixfmt {
-	u32 code;
+	enum v4l2_mbus_pixelcode code;
 	u32 colorspace;
 	/* REG_P_FMT(x) register value */
 	u16 reg_p_fmt;
@@ -285,10 +285,10 @@ static struct s5k6aa_regval s5k6aa_analog_config[] = {
 
 /* TODO: Add RGB888 and Bayer format */
 static const struct s5k6aa_pixfmt s5k6aa_formats[] = {
-	{ MEDIA_BUS_FMT_YUYV8_2X8,	V4L2_COLORSPACE_JPEG,	5 },
+	{ V4L2_MBUS_FMT_YUYV8_2X8,	V4L2_COLORSPACE_JPEG,	5 },
 	/* range 16-240 */
-	{ MEDIA_BUS_FMT_YUYV8_2X8,	V4L2_COLORSPACE_REC709,	6 },
-	{ MEDIA_BUS_FMT_RGB565_2X8_BE,	V4L2_COLORSPACE_JPEG,	0 },
+	{ V4L2_MBUS_FMT_YUYV8_2X8,	V4L2_COLORSPACE_REC709,	6 },
+	{ V4L2_MBUS_FMT_RGB565_2X8_BE,	V4L2_COLORSPACE_JPEG,	0 },
 };
 
 static const struct s5k6aa_interval s5k6aa_intervals[] = {
@@ -348,7 +348,7 @@ static int s5k6aa_i2c_read(struct i2c_client *client, u16 addr, u16 *val)
 	msg[1].buf = rbuf;
 
 	ret = i2c_transfer(client->adapter, msg, 2);
-	*val = be16_to_cpu(*((__be16 *)rbuf));
+	*val = be16_to_cpu(*((u16 *)rbuf));
 
 	v4l2_dbg(3, debug, client, "i2c_read: 0x%04X : 0x%04x\n", addr, *val);
 
@@ -421,7 +421,6 @@ static int s5k6aa_set_ahb_address(struct i2c_client *client)
 
 /**
  * s5k6aa_configure_pixel_clock - apply ISP main clock/PLL configuration
- * @s5k6aa: pointer to &struct s5k6aa describing the device
  *
  * Configure the internal ISP PLL for the required output frequency.
  * Locking: called with s5k6aa.lock mutex held.
@@ -670,7 +669,6 @@ static int s5k6aa_set_input_params(struct s5k6aa *s5k6aa)
 
 /**
  * s5k6aa_configure_video_bus - configure the video output interface
- * @s5k6aa: pointer to &struct s5k6aa describing the device
  * @bus_type: video bus type: parallel or MIPI-CSI
  * @nlanes: number of MIPI lanes to be used (MIPI-CSI only)
  *
@@ -726,8 +724,6 @@ static int s5k6aa_new_config_sync(struct i2c_client *client, int timeout,
 
 /**
  * s5k6aa_set_prev_config - write user preview register set
- * @s5k6aa: pointer to &struct s5k6aa describing the device
- * @preset: s5kaa preset to be applied
  *
  * Configure output resolution and color fromat, pixel clock
  * frequency range, device frame rate type and frame period range.
@@ -781,7 +777,6 @@ static int s5k6aa_set_prev_config(struct s5k6aa *s5k6aa,
 
 /**
  * s5k6aa_initialize_isp - basic ISP MCU initialization
- * @sd: pointer to V4L2 sub-device descriptor
  *
  * Configure AHB addresses for registers read/write; configure PLLs for
  * required output pixel clock. The ISP power supply needs to be already
@@ -880,7 +875,7 @@ static int s5k6aa_set_power(struct v4l2_subdev *sd, int on)
 
 	mutex_lock(&s5k6aa->lock);
 
-	if (s5k6aa->power == !on) {
+	if (!on == s5k6aa->power) {
 		if (on) {
 			ret = __s5k6aa_power_on(s5k6aa);
 			if (!ret)
@@ -1001,14 +996,14 @@ static int s5k6aa_s_frame_interval(struct v4l2_subdev *sd,
  * V4L2 subdev pad level and video operations
  */
 static int s5k6aa_enum_frame_interval(struct v4l2_subdev *sd,
-			      struct v4l2_subdev_pad_config *cfg,
+			      struct v4l2_subdev_fh *fh,
 			      struct v4l2_subdev_frame_interval_enum *fie)
 {
 	struct s5k6aa *s5k6aa = to_s5k6aa(sd);
 	const struct s5k6aa_interval *fi;
 	int ret = 0;
 
-	if (fie->index >= ARRAY_SIZE(s5k6aa_intervals))
+	if (fie->index > ARRAY_SIZE(s5k6aa_intervals))
 		return -EINVAL;
 
 	v4l_bound_align_image(&fie->width, S5K6AA_WIN_WIDTH_MIN,
@@ -1028,7 +1023,7 @@ static int s5k6aa_enum_frame_interval(struct v4l2_subdev *sd,
 }
 
 static int s5k6aa_enum_mbus_code(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_pad_config *cfg,
+				 struct v4l2_subdev_fh *fh,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
 	if (code->index >= ARRAY_SIZE(s5k6aa_formats))
@@ -1039,7 +1034,7 @@ static int s5k6aa_enum_mbus_code(struct v4l2_subdev *sd,
 }
 
 static int s5k6aa_enum_frame_size(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_pad_config *cfg,
+				  struct v4l2_subdev_fh *fh,
 				  struct v4l2_subdev_frame_size_enum *fse)
 {
 	int i = ARRAY_SIZE(s5k6aa_formats);
@@ -1061,14 +1056,14 @@ static int s5k6aa_enum_frame_size(struct v4l2_subdev *sd,
 }
 
 static struct v4l2_rect *
-__s5k6aa_get_crop_rect(struct s5k6aa *s5k6aa, struct v4l2_subdev_pad_config *cfg,
+__s5k6aa_get_crop_rect(struct s5k6aa *s5k6aa, struct v4l2_subdev_fh *fh,
 		       enum v4l2_subdev_format_whence which)
 {
 	if (which == V4L2_SUBDEV_FORMAT_ACTIVE)
 		return &s5k6aa->ccd_rect;
 
 	WARN_ON(which != V4L2_SUBDEV_FORMAT_TRY);
-	return v4l2_subdev_get_try_crop(&s5k6aa->sd, cfg, 0);
+	return v4l2_subdev_get_try_crop(fh, 0);
 }
 
 static void s5k6aa_try_format(struct s5k6aa *s5k6aa,
@@ -1092,7 +1087,7 @@ static void s5k6aa_try_format(struct s5k6aa *s5k6aa,
 	mf->field	= V4L2_FIELD_NONE;
 }
 
-static int s5k6aa_get_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config *cfg,
+static int s5k6aa_get_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh,
 			  struct v4l2_subdev_format *fmt)
 {
 	struct s5k6aa *s5k6aa = to_s5k6aa(sd);
@@ -1101,7 +1096,7 @@ static int s5k6aa_get_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config 
 	memset(fmt->reserved, 0, sizeof(fmt->reserved));
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-		mf = v4l2_subdev_get_try_format(sd, cfg, 0);
+		mf = v4l2_subdev_get_try_format(fh, 0);
 		fmt->format = *mf;
 		return 0;
 	}
@@ -1113,7 +1108,7 @@ static int s5k6aa_get_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config 
 	return 0;
 }
 
-static int s5k6aa_set_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config *cfg,
+static int s5k6aa_set_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh,
 			  struct v4l2_subdev_format *fmt)
 {
 	struct s5k6aa *s5k6aa = to_s5k6aa(sd);
@@ -1126,8 +1121,8 @@ static int s5k6aa_set_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config 
 	s5k6aa_try_format(s5k6aa, &fmt->format);
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-		mf = v4l2_subdev_get_try_format(sd, cfg, fmt->pad);
-		crop = v4l2_subdev_get_try_crop(sd, cfg, 0);
+		mf = v4l2_subdev_get_try_format(fh, fmt->pad);
+		crop = v4l2_subdev_get_try_crop(fh, 0);
 	} else {
 		if (s5k6aa->streaming) {
 			ret = -EBUSY;
@@ -1166,21 +1161,17 @@ static int s5k6aa_set_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config 
 	return ret;
 }
 
-static int s5k6aa_get_selection(struct v4l2_subdev *sd,
-				struct v4l2_subdev_pad_config *cfg,
-				struct v4l2_subdev_selection *sel)
+static int s5k6aa_get_crop(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh,
+			   struct v4l2_subdev_crop *crop)
 {
 	struct s5k6aa *s5k6aa = to_s5k6aa(sd);
 	struct v4l2_rect *rect;
 
-	if (sel->target != V4L2_SEL_TGT_CROP)
-		return -EINVAL;
-
-	memset(sel->reserved, 0, sizeof(sel->reserved));
+	memset(crop->reserved, 0, sizeof(crop->reserved));
 
 	mutex_lock(&s5k6aa->lock);
-	rect = __s5k6aa_get_crop_rect(s5k6aa, cfg, sel->which);
-	sel->r = *rect;
+	rect = __s5k6aa_get_crop_rect(s5k6aa, fh, crop->which);
+	crop->rect = *rect;
 	mutex_unlock(&s5k6aa->lock);
 
 	v4l2_dbg(1, debug, sd, "Current crop rectangle: (%d,%d)/%dx%d\n",
@@ -1189,39 +1180,35 @@ static int s5k6aa_get_selection(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int s5k6aa_set_selection(struct v4l2_subdev *sd,
-				struct v4l2_subdev_pad_config *cfg,
-				struct v4l2_subdev_selection *sel)
+static int s5k6aa_set_crop(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh,
+			   struct v4l2_subdev_crop *crop)
 {
 	struct s5k6aa *s5k6aa = to_s5k6aa(sd);
 	struct v4l2_mbus_framefmt *mf;
 	unsigned int max_x, max_y;
 	struct v4l2_rect *crop_r;
 
-	if (sel->target != V4L2_SEL_TGT_CROP)
-		return -EINVAL;
-
 	mutex_lock(&s5k6aa->lock);
-	crop_r = __s5k6aa_get_crop_rect(s5k6aa, cfg, sel->which);
+	crop_r = __s5k6aa_get_crop_rect(s5k6aa, fh, crop->which);
 
-	if (sel->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
+	if (crop->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
 		mf = &s5k6aa->preset->mbus_fmt;
 		s5k6aa->apply_crop = 1;
 	} else {
-		mf = v4l2_subdev_get_try_format(sd, cfg, 0);
+		mf = v4l2_subdev_get_try_format(fh, 0);
 	}
-	v4l_bound_align_image(&sel->r.width, mf->width,
+	v4l_bound_align_image(&crop->rect.width, mf->width,
 			      S5K6AA_WIN_WIDTH_MAX, 1,
-			      &sel->r.height, mf->height,
+			      &crop->rect.height, mf->height,
 			      S5K6AA_WIN_HEIGHT_MAX, 1, 0);
 
-	max_x = (S5K6AA_WIN_WIDTH_MAX - sel->r.width) & ~1;
-	max_y = (S5K6AA_WIN_HEIGHT_MAX - sel->r.height) & ~1;
+	max_x = (S5K6AA_WIN_WIDTH_MAX - crop->rect.width) & ~1;
+	max_y = (S5K6AA_WIN_HEIGHT_MAX - crop->rect.height) & ~1;
 
-	sel->r.left = clamp_t(unsigned int, sel->r.left, 0, max_x);
-	sel->r.top  = clamp_t(unsigned int, sel->r.top, 0, max_y);
+	crop->rect.left = clamp_t(unsigned int, crop->rect.left, 0, max_x);
+	crop->rect.top  = clamp_t(unsigned int, crop->rect.top, 0, max_y);
 
-	*crop_r = sel->r;
+	*crop_r = crop->rect;
 
 	mutex_unlock(&s5k6aa->lock);
 
@@ -1237,8 +1224,8 @@ static const struct v4l2_subdev_pad_ops s5k6aa_pad_ops = {
 	.enum_frame_interval	= s5k6aa_enum_frame_interval,
 	.get_fmt		= s5k6aa_get_fmt,
 	.set_fmt		= s5k6aa_set_fmt,
-	.get_selection		= s5k6aa_get_selection,
-	.set_selection		= s5k6aa_set_selection,
+	.get_crop		= s5k6aa_get_crop,
+	.set_crop		= s5k6aa_set_crop,
 };
 
 static const struct v4l2_subdev_video_ops s5k6aa_video_ops = {
@@ -1429,8 +1416,8 @@ static int s5k6aa_initialize_ctrls(struct s5k6aa *s5k6aa)
  */
 static int s5k6aa_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 {
-	struct v4l2_mbus_framefmt *format = v4l2_subdev_get_try_format(sd, fh->pad, 0);
-	struct v4l2_rect *crop = v4l2_subdev_get_try_crop(sd, fh->pad, 0);
+	struct v4l2_mbus_framefmt *format = v4l2_subdev_get_try_format(fh, 0);
+	struct v4l2_rect *crop = v4l2_subdev_get_try_crop(fh, 0);
 
 	format->colorspace = s5k6aa_formats[0].colorspace;
 	format->code = s5k6aa_formats[0].code;
@@ -1504,41 +1491,58 @@ static const struct v4l2_subdev_ops s5k6aa_subdev_ops = {
 /*
  * GPIO setup
  */
+static int s5k6aa_configure_gpio(int nr, int val, const char *name)
+{
+	unsigned long flags = val ? GPIOF_OUT_INIT_HIGH : GPIOF_OUT_INIT_LOW;
+	int ret;
+
+	if (!gpio_is_valid(nr))
+		return 0;
+	ret = gpio_request_one(nr, flags, name);
+	if (!ret)
+		gpio_export(nr, 0);
+	return ret;
+}
+
+static void s5k6aa_free_gpios(struct s5k6aa *s5k6aa)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(s5k6aa->gpio); i++) {
+		if (!gpio_is_valid(s5k6aa->gpio[i].gpio))
+			continue;
+		gpio_free(s5k6aa->gpio[i].gpio);
+		s5k6aa->gpio[i].gpio = -EINVAL;
+	}
+}
 
 static int s5k6aa_configure_gpios(struct s5k6aa *s5k6aa,
 				  const struct s5k6aa_platform_data *pdata)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(&s5k6aa->sd);
-	const struct s5k6aa_gpio *gpio;
-	unsigned long flags;
+	const struct s5k6aa_gpio *gpio = &pdata->gpio_stby;
 	int ret;
 
 	s5k6aa->gpio[STBY].gpio = -EINVAL;
 	s5k6aa->gpio[RST].gpio  = -EINVAL;
 
-	gpio = &pdata->gpio_stby;
-	if (gpio_is_valid(gpio->gpio)) {
-		flags = (gpio->level ? GPIOF_OUT_INIT_HIGH : GPIOF_OUT_INIT_LOW)
-		      | GPIOF_EXPORT;
-		ret = devm_gpio_request_one(&client->dev, gpio->gpio, flags,
-					    "S5K6AA_STBY");
-		if (ret < 0)
-			return ret;
-
-		s5k6aa->gpio[STBY] = *gpio;
+	ret = s5k6aa_configure_gpio(gpio->gpio, gpio->level, "S5K6AA_STBY");
+	if (ret) {
+		s5k6aa_free_gpios(s5k6aa);
+		return ret;
 	}
+	s5k6aa->gpio[STBY] = *gpio;
+	if (gpio_is_valid(gpio->gpio))
+		gpio_set_value(gpio->gpio, 0);
 
 	gpio = &pdata->gpio_reset;
-	if (gpio_is_valid(gpio->gpio)) {
-		flags = (gpio->level ? GPIOF_OUT_INIT_HIGH : GPIOF_OUT_INIT_LOW)
-		      | GPIOF_EXPORT;
-		ret = devm_gpio_request_one(&client->dev, gpio->gpio, flags,
-					    "S5K6AA_RST");
-		if (ret < 0)
-			return ret;
-
-		s5k6aa->gpio[RST] = *gpio;
+	ret = s5k6aa_configure_gpio(gpio->gpio, gpio->level, "S5K6AA_RST");
+	if (ret) {
+		s5k6aa_free_gpios(s5k6aa);
+		return ret;
 	}
+	s5k6aa->gpio[RST] = *gpio;
+	if (gpio_is_valid(gpio->gpio))
+		gpio_set_value(gpio->gpio, 0);
 
 	return 0;
 }
@@ -1582,14 +1586,14 @@ static int s5k6aa_probe(struct i2c_client *client,
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 
 	s5k6aa->pad.flags = MEDIA_PAD_FL_SOURCE;
-	sd->entity.function = MEDIA_ENT_F_CAM_SENSOR;
-	ret = media_entity_pads_init(&sd->entity, 1, &s5k6aa->pad);
+	sd->entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
+	ret = media_entity_init(&sd->entity, 1, &s5k6aa->pad, 0);
 	if (ret)
 		return ret;
 
 	ret = s5k6aa_configure_gpios(s5k6aa, pdata);
 	if (ret)
-		goto out_err;
+		goto out_err2;
 
 	for (i = 0; i < S5K6AA_NUM_SUPPLIES; i++)
 		s5k6aa->supplies[i].supply = s5k6aa_supply_names[i];
@@ -1598,12 +1602,12 @@ static int s5k6aa_probe(struct i2c_client *client,
 				 s5k6aa->supplies);
 	if (ret) {
 		dev_err(&client->dev, "Failed to get regulators\n");
-		goto out_err;
+		goto out_err3;
 	}
 
 	ret = s5k6aa_initialize_ctrls(s5k6aa);
 	if (ret)
-		goto out_err;
+		goto out_err3;
 
 	s5k6aa_presets_data_init(s5k6aa);
 
@@ -1614,7 +1618,9 @@ static int s5k6aa_probe(struct i2c_client *client,
 
 	return 0;
 
-out_err:
+out_err3:
+	s5k6aa_free_gpios(s5k6aa);
+out_err2:
 	media_entity_cleanup(&s5k6aa->sd.entity);
 	return ret;
 }
@@ -1622,10 +1628,12 @@ out_err:
 static int s5k6aa_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct s5k6aa *s5k6aa = to_s5k6aa(sd);
 
 	v4l2_device_unregister_subdev(sd);
 	v4l2_ctrl_handler_free(sd->ctrl_handler);
 	media_entity_cleanup(&sd->entity);
+	s5k6aa_free_gpios(s5k6aa);
 
 	return 0;
 }

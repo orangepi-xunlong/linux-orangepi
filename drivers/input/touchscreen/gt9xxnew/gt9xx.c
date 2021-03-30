@@ -137,8 +137,6 @@ static bool gtp_gesture_wakeup;
 static bool gtp_power_ctrl_sleep;
 static bool g_suspend_flag;
 
-struct work_struct  init_work;
-
 typedef enum {
     DOZE_DISABLED = 0,
     DOZE_ENABLED = 1,
@@ -164,8 +162,7 @@ static int revert_y_flag;
 static int exchange_x_y_flag;
 static __u32 twi_id;
 static char irq_pin_name[8];
-//static u32 debug_mask = 0x1;
-static u32 debug_mask;
+static u32 debug_mask = 0x1;
 enum {
 	DEBUG_INIT = 1U << 0,
 	DEBUG_SUSPEND = 1U << 1,
@@ -175,10 +172,10 @@ enum {
 	DEBUG_WAKEUP_INFO = 1U << 5,
 	DEBUG_OTHERS_INFO = 1U << 6,
 };
-#define dprintk(level_mask, fmt, arg...)	if(unlikely(debug_mask & level_mask)) \
+#define dprintk(level_mask, fmt, arg...)    if(unlikely(debug_mask & level_mask)) \
         printk("***CTP***"fmt, ## arg)
 module_param_named(debug_mask, debug_mask, int, S_IRUGO | S_IWUSR | S_IWGRP);
-static const unsigned short normal_i2c[3] = {0x14,0x5d, I2C_CLIENT_END};
+static const unsigned short normal_i2c[2] = {0x5d, I2C_CLIENT_END};
 struct ctp_config_info config_info = {
 	.input_type = CTP_TYPE,
 	.name = NULL,
@@ -316,9 +313,14 @@ void gtp_io_init(int ms)
 static ssize_t gtp_gesture_enable_store(struct device *dev,struct device_attribute *attr,const char *buf, size_t count)
 {
 	unsigned long data;
+	int error;
 	/*struct input_dev *input = dev_get_drvdata(dev);*/
 	/*struct goodix_ts_data *ts = container_of(&input, struct goodix_ts_data, input_dev);*/
-    data = simple_strtoul(buf, NULL, 10);
+    error = strict_strtoul(buf, 10, &data);
+    if (error) {
+          printk("%s strict_strtoul error\n", __FUNCTION__);
+          goto exit;
+    }
 	dprintk(DEBUG_INIT,"%s g_suspend_flag=%d,gtp_gesture_wakeup=%d,enable=%ld\n",__func__,g_suspend_flag,gtp_gesture_wakeup,data);
     if (!g_suspend_flag) {
 		if(data) {
@@ -334,6 +336,8 @@ static ssize_t gtp_gesture_enable_store(struct device *dev,struct device_attribu
 	else
 	    dprintk(DEBUG_INIT,"%s gtp is suspend!!!! gtp_gesture_wakeup cann't be set!! gtp_gesture_wakeup=%d,enable=%ld\n", __func__, gtp_gesture_wakeup, data);
         return count;
+exit:
+        return error;
 }
 static ssize_t gtp_gesture_enable_show(struct device *dev,
                                    struct device_attribute *attr, char *buf)
@@ -1572,6 +1576,7 @@ static s8 gtp_wakeup_sleep(struct goodix_ts_data * ts)
         return ret;
     }
 #endif
+
 //#if GTP_POWER_CTRL_SLEEP
 if(gtp_power_ctrl_sleep)
     while(retry++ < 5)
@@ -1633,8 +1638,6 @@ else {
     GTP_ERROR("GTP wakeup sleep failed.");
     return ret;
 }
-
-
 #if GTP_DRIVER_SEND_CFG
 static s32 gtp_get_info(struct goodix_ts_data *ts)
 {
@@ -1994,11 +1997,11 @@ static ssize_t gt91xx_config_write_proc(struct file *filp, const char __user *bu
 {
     s32 ret = 0;
 
-    GTP_DEBUG("write count %u\n", count);
+    GTP_DEBUG("write count %d\n", count);
 
     if (count > GTP_CONFIG_MAX_LENGTH)
     {
-        GTP_ERROR("size not match [%d:%u]\n", GTP_CONFIG_MAX_LENGTH, count);
+        GTP_ERROR("size not match [%d:%d]\n", GTP_CONFIG_MAX_LENGTH, count);
         return -EFAULT;
     }
 
@@ -2668,6 +2671,7 @@ static int goodix_ts_probe(struct i2c_client *client, const struct i2c_device_id
 
     //do NOT remove these logs
     dprintk(DEBUG_INIT,"GTP Driver Version: %s", GTP_DRIVER_VERSION);
+    dprintk(DEBUG_INIT,"GTP Driver Built@%s, %s", __TIME__, __DATE__);
     dprintk(DEBUG_INIT,"GTP I2C Address: 0x%02x", client->addr);
 
     i2c_connect_client = client;
@@ -2712,13 +2716,13 @@ static int goodix_ts_probe(struct i2c_client *client, const struct i2c_device_id
         }
     }
 #endif
-#if GTP_I2C_TEST
+
     ret = gtp_i2c_test(client);
     if (ret < 0)
     {
         printk("I2C communication ERROR!");
     }
-#endif
+
     ret = gtp_read_version(client, &version_info);
     if (ret < 0)
     {
@@ -3380,15 +3384,6 @@ static int ctp_get_system_config(void)
         return 1;
 }
 
-static void goodix_ts_init_work(struct work_struct *work)
-{
-	sunxi_gpio_to_name(CTP_IRQ_NUMBER, irq_pin_name);
-	gtp_io_init(20);
-
-	goodix_ts_driver.detect = ctp_detect;
-	i2c_add_driver(&goodix_ts_driver);
-}
-
 /*******************************************************
 Function:
     Driver Install function.
@@ -3400,26 +3395,38 @@ Output:
 static int goodix_ts_init(void)
 {
     s32 ret = -1;
+	int val = 0;
+    struct device_node *np = NULL;
 
     dprintk(DEBUG_INIT,"GTP driver init\n");
-	if (!input_sensor_startup(&(config_info.input_type))) {
-			ret = input_sensor_init(&(config_info.input_type));
-			if (ret != 0) {
-						pr_err("%s:ctp_ops.input_sensor_init err.\n", __func__);
-						return ret;
-					}
-			input_set_power_enable(&(config_info.input_type), 1);
-		} else {
-				pr_err("%s: input_ctp_startup err.\n", __func__);
-				return 0;
+    if (input_fetch_sysconfig_para(&(config_info.input_type))) {
+		printk("%s: ctp_fetch_sysconfig_para err.\n", __func__);
+		return 0;
+	} else {
+		ret = input_init_platform_resource(&(config_info.input_type));
+		if (0 != ret) {
+			printk("%s:ctp_ops.init_platform_resource err. \n", __func__);
+		}
 	}
-    if (config_info.ctp_used == 0) {
+
+    if(config_info.ctp_used == 0){
         printk("*** ctp_used set to 0 !\n");
         printk("*** if use ctp,please put the sys_config.fex ctp_used set to 1. \n");
         return 0;
 	}
 
-    if (config_info.ctp_gesture_wakeup == 1) {
+	np = of_find_node_by_name(NULL, "ctp");
+	if (!np) {
+		 pr_err("ERROR! get ctp node failed, func:%s, line:%d\n",__FUNCTION__, __LINE__);
+		 return -1;
+	}
+
+	ret = of_property_read_u32(np, "ctp_gesture_wakeup", &val);
+	if (ret) {
+		 pr_err("get ctp_screen_max_x is fail, %d\n", ret);
+	}
+
+    if (val == 1){
 		gtp_gesture_wakeup = 1;
         dprintk(DEBUG_INIT,"GTP driver gesture wakeup is used!\n");
 	}
@@ -3427,10 +3434,16 @@ static int goodix_ts_init(void)
     if(!gtp_gesture_wakeup)
 		gtp_power_ctrl_sleep = 1;
 
+    input_set_power_enable(&(config_info.input_type), 1);
+    msleep(10);
+
     if(!ctp_get_system_config()){
             printk("%s:read config fail!\n",__func__);
             return ret;
     }
+
+    sunxi_gpio_to_name(CTP_IRQ_NUMBER,irq_pin_name);
+    gtp_io_init(20);
 
     goodix_wq = create_singlethread_workqueue("goodix_wq");
     if (!goodix_wq)
@@ -3442,9 +3455,8 @@ static int goodix_ts_init(void)
     INIT_DELAYED_WORK(&gtp_esd_check_work, gtp_esd_check_func);
     gtp_esd_check_workqueue = create_workqueue("gtp_esd_check");
 #endif
-    INIT_WORK(&init_work, goodix_ts_init_work);
-    queue_work(goodix_wq, &init_work);
-
+	goodix_ts_driver.detect = ctp_detect;
+    ret = i2c_add_driver(&goodix_ts_driver);
     return ret;
 }
 
@@ -3464,8 +3476,7 @@ static void __exit goodix_ts_exit(void)
     {
         destroy_workqueue(goodix_wq);
     }
-	input_set_power_enable(&(config_info.input_type), 0);
-	input_sensor_free(&(config_info.input_type));
+	input_free_platform_resource(&(config_info.input_type));
 }
 
 late_initcall(goodix_ts_init);

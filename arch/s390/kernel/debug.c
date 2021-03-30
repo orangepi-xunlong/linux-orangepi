@@ -699,7 +699,8 @@ debug_info_t *debug_register_mode(const char *name, int pages_per_area,
 	/* Since debugfs currently does not support uid/gid other than root, */
 	/* we do not allow gid/uid != 0 until we get support for that. */
 	if ((uid != 0) || (gid != 0))
-		pr_warn("Root becomes the owner of all s390dbf files in sysfs\n");
+		pr_warning("Root becomes the owner of all s390dbf files "
+			   "in sysfs\n");
 	BUG_ON(!initialized);
 	mutex_lock(&debug_mutex);
 
@@ -866,7 +867,7 @@ static inline void
 debug_finish_entry(debug_info_t * id, debug_entry_t* active, int level,
 			int exception)
 {
-	active->id.stck = get_tod_clock_fast();
+	active->id.stck = get_tod_clock();
 	active->id.fields.cpuid = smp_processor_id();
 	active->caller = __builtin_return_address(0);
 	active->id.fields.exception = exception;
@@ -888,7 +889,7 @@ static int debug_active=1;
  * if debug_active is already off
  */
 static int
-s390dbf_procactive(struct ctl_table *table, int write,
+s390dbf_procactive(ctl_table *table, int write,
                      void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	if (!write || debug_stoppable || !debug_active)
@@ -1018,7 +1019,7 @@ debug_count_numargs(char *string)
  */
 
 debug_entry_t*
-__debug_sprintf_event(debug_info_t *id, int level, char *string, ...)
+debug_sprintf_event(debug_info_t* id, int level,char *string,...)
 {
 	va_list   ap;
 	int numargs,idx;
@@ -1026,6 +1027,8 @@ __debug_sprintf_event(debug_info_t *id, int level, char *string, ...)
 	debug_sprintf_entry_t *curr_event;
 	debug_entry_t *active;
 
+	if((!id) || (level > id->level))
+		return NULL;
 	if (!debug_active || !id->areas)
 		return NULL;
 	numargs=debug_count_numargs(string);
@@ -1047,14 +1050,14 @@ __debug_sprintf_event(debug_info_t *id, int level, char *string, ...)
 
 	return active;
 }
-EXPORT_SYMBOL(__debug_sprintf_event);
+EXPORT_SYMBOL(debug_sprintf_event);
 
 /*
  * debug_sprintf_exception:
  */
 
 debug_entry_t*
-__debug_sprintf_exception(debug_info_t *id, int level, char *string, ...)
+debug_sprintf_exception(debug_info_t* id, int level,char *string,...)
 {
 	va_list   ap;
 	int numargs,idx;
@@ -1062,6 +1065,8 @@ __debug_sprintf_exception(debug_info_t *id, int level, char *string, ...)
 	debug_sprintf_entry_t *curr_event;
 	debug_entry_t *active;
 
+	if((!id) || (level > id->level))
+		return NULL;
 	if (!debug_active || !id->areas)
 		return NULL;
 
@@ -1084,7 +1089,7 @@ __debug_sprintf_exception(debug_info_t *id, int level, char *string, ...)
 
 	return active;
 }
-EXPORT_SYMBOL(__debug_sprintf_exception);
+EXPORT_SYMBOL(debug_sprintf_exception);
 
 /*
  * debug_register_view:
@@ -1306,7 +1311,8 @@ debug_input_level_fn(debug_info_t * id, struct debug_view *view,
 		new_level = debug_get_uint(str);
 	}
 	if(new_level < 0) {
-		pr_warn("%s is not a valid level for a debug feature\n", str);
+		pr_warning("%s is not a valid level for a debug "
+			   "feature\n", str);
 		rc = -EINVAL;
 	} else {
 		debug_set_level(id, new_level);
@@ -1455,24 +1461,23 @@ int
 debug_dflt_header_fn(debug_info_t * id, struct debug_view *view,
 			 int area, debug_entry_t * entry, char *out_buf)
 {
-	struct timespec64 time_spec;
+	struct timespec time_spec;
 	char *except_str;
 	unsigned long caller;
 	int rc = 0;
 	unsigned int level;
 
 	level = entry->id.fields.level;
-	stck_to_timespec64(entry->id.stck, &time_spec);
+	stck_to_timespec(entry->id.stck, &time_spec);
 
 	if (entry->id.fields.exception)
 		except_str = "*";
 	else
 		except_str = "-";
-	caller = (unsigned long) entry->caller;
-	rc += sprintf(out_buf, "%02i %011lld:%06lu %1u %1s %02i %p  ",
-		      area, (long long)time_spec.tv_sec,
-		      time_spec.tv_nsec / 1000, level, except_str,
-		      entry->id.fields.cpuid, (void *)caller);
+	caller = ((unsigned long) entry->caller) & PSW_ADDR_INSN;
+	rc += sprintf(out_buf, "%02i %011lu:%06lu %1u %1s %02i %p  ",
+		      area, time_spec.tv_sec, time_spec.tv_nsec / 1000, level,
+		      except_str, entry->id.fields.cpuid, (void *) caller);
 	return rc;
 }
 EXPORT_SYMBOL(debug_dflt_header_fn);

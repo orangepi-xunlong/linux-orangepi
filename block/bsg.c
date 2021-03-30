@@ -136,6 +136,42 @@ static inline struct hlist_head *bsg_dev_idx_hash(int index)
 	return &bsg_device_list[index & (BSG_LIST_ARRAY_SIZE - 1)];
 }
 
+static int bsg_io_schedule(struct bsg_device *bd)
+{
+	DEFINE_WAIT(wait);
+	int ret = 0;
+
+	spin_lock_irq(&bd->lock);
+
+	BUG_ON(bd->done_cmds > bd->queued_cmds);
+
+	/*
+	 * -ENOSPC or -ENODATA?  I'm going for -ENODATA, meaning "I have no
+	 * work to do", even though we return -ENOSPC after this same test
+	 * during bsg_write() -- there, it means our buffer can't have more
+	 * bsg_commands added to it, thus has no space left.
+	 */
+	if (bd->done_cmds == bd->queued_cmds) {
+		ret = -ENODATA;
+		goto unlock;
+	}
+
+	if (!test_bit(BSG_F_BLOCK, &bd->flags)) {
+		ret = -EAGAIN;
+		goto unlock;
+	}
+
+	prepare_to_wait(&bd->wq_done, &wait, TASK_UNINTERRUPTIBLE);
+	spin_unlock_irq(&bd->lock);
+	io_schedule();
+	finish_wait(&bd->wq_done, &wait);
+
+	return ret;
+unlock:
+	spin_unlock_irq(&bd->lock);
+	return ret;
+}
+
 static int blk_fill_sgv4_hdr_rq(struct request_queue *q, struct request *rq,
 				struct sg_io_v4 *hdr, struct bsg_device *bd,
 				fmode_t has_write_perm)
@@ -160,6 +196,7 @@ static int blk_fill_sgv4_hdr_rq(struct request_queue *q, struct request *rq,
 	 * fill in request structure
 	 */
 	rq->cmd_len = hdr->request_len;
+	rq->cmd_type = REQ_TYPE_BLOCK_PC;
 
 	rq->timeout = msecs_to_jiffies(hdr->timeout);
 	if (!rq->timeout)
@@ -234,10 +271,8 @@ bsg_map_hdr(struct bsg_device *bd, struct sg_io_v4 *hdr, fmode_t has_write_perm,
 	 * map scatter-gather elements separately and string them to request
 	 */
 	rq = blk_get_request(q, rw, GFP_KERNEL);
-	if (IS_ERR(rq))
-		return rq;
-	blk_rq_set_block_pc(rq);
-
+	if (!rq)
+		return ERR_PTR(-ENOMEM);
 	ret = blk_fill_sgv4_hdr_rq(q, rq, hdr, bd, has_write_perm);
 	if (ret)
 		goto out;
@@ -249,9 +284,8 @@ bsg_map_hdr(struct bsg_device *bd, struct sg_io_v4 *hdr, fmode_t has_write_perm,
 		}
 
 		next_rq = blk_get_request(q, READ, GFP_KERNEL);
-		if (IS_ERR(next_rq)) {
-			ret = PTR_ERR(next_rq);
-			next_rq = NULL;
+		if (!next_rq) {
+			ret = -ENOMEM;
 			goto out;
 		}
 		rq->next_rq = next_rq;
@@ -446,30 +480,6 @@ static int blk_complete_sgv4_hdr_rq(struct request *rq, struct sg_io_v4 *hdr,
 	return ret;
 }
 
-static bool bsg_complete(struct bsg_device *bd)
-{
-	bool ret = false;
-	bool spin;
-
-	do {
-		spin_lock_irq(&bd->lock);
-
-		BUG_ON(bd->done_cmds > bd->queued_cmds);
-
-		/*
-		 * All commands consumed.
-		 */
-		if (bd->done_cmds == bd->queued_cmds)
-			ret = true;
-
-		spin = !test_bit(BSG_F_BLOCK, &bd->flags);
-
-		spin_unlock_irq(&bd->lock);
-	} while (!ret && spin);
-
-	return ret;
-}
-
 static int bsg_complete_all_commands(struct bsg_device *bd)
 {
 	struct bsg_command *bc;
@@ -480,7 +490,17 @@ static int bsg_complete_all_commands(struct bsg_device *bd)
 	/*
 	 * wait for all commands to complete
 	 */
-	io_wait_event(bd->wq_done, bsg_complete(bd));
+	ret = 0;
+	do {
+		ret = bsg_io_schedule(bd);
+		/*
+		 * look for -ENODATA specifically -- we'll sometimes get
+		 * -ERESTARTSYS when we've taken a signal, but we can't
+		 * return until we're done freeing the queue, so ignore
+		 * it.  The signal will get handled when we're done freeing
+		 * the bsg_device.
+		 */
+	} while (ret != -ENODATA);
 
 	/*
 	 * discard done commands
@@ -654,9 +674,6 @@ bsg_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
 	int ret;
 
 	dprintk("%s: write %Zd bytes\n", bd->name, count);
-
-	if (unlikely(segment_eq(get_fs(), KERNEL_DS)))
-		return -EINVAL;
 
 	bsg_set_block(bd, file);
 
@@ -991,7 +1008,7 @@ int bsg_register_queue(struct request_queue *q, struct device *parent,
 	/*
 	 * we need a proper transport to send commands, not a stacked device
 	 */
-	if (!queue_is_rq_based(q))
+	if (!q->request_fn)
 		return 0;
 
 	bcd = &q->bsg_dev;

@@ -451,7 +451,7 @@ static const struct net_device_ops scc_netdev_ops = {
 
 static int __init setup_adapter(int card_base, int type, int n)
 {
-	int i, irq, chip, err;
+	int i, irq, chip;
 	struct scc_info *info;
 	struct net_device *dev;
 	struct scc_priv *priv;
@@ -463,26 +463,22 @@ static int __init setup_adapter(int card_base, int type, int n)
 
 	/* Initialize what is necessary for write_scc and write_scc_data */
 	info = kzalloc(sizeof(struct scc_info), GFP_KERNEL | GFP_DMA);
-	if (!info) {
-		err = -ENOMEM;
+	if (!info)
 		goto out;
-	}
 
-	info->dev[0] = alloc_netdev(0, "", NET_NAME_UNKNOWN, dev_setup);
+	info->dev[0] = alloc_netdev(0, "", dev_setup);
 	if (!info->dev[0]) {
 		printk(KERN_ERR "dmascc: "
 		       "could not allocate memory for %s at %#3x\n",
 		       hw[type].name, card_base);
-		err = -ENOMEM;
 		goto out1;
 	}
 
-	info->dev[1] = alloc_netdev(0, "", NET_NAME_UNKNOWN, dev_setup);
+	info->dev[1] = alloc_netdev(0, "", dev_setup);
 	if (!info->dev[1]) {
 		printk(KERN_ERR "dmascc: "
 		       "could not allocate memory for %s at %#3x\n",
 		       hw[type].name, card_base);
-		err = -ENOMEM;
 		goto out2;
 	}
 	spin_lock_init(&info->register_lock);
@@ -553,7 +549,6 @@ static int __init setup_adapter(int card_base, int type, int n)
 		printk(KERN_ERR
 		       "dmascc: could not find irq of %s at %#3x (irq=%d)\n",
 		       hw[type].name, card_base, irq);
-		err = -ENODEV;
 		goto out3;
 	}
 
@@ -590,13 +585,11 @@ static int __init setup_adapter(int card_base, int type, int n)
 	if (register_netdev(info->dev[0])) {
 		printk(KERN_ERR "dmascc: could not register %s\n",
 		       info->dev[0]->name);
-		err = -ENODEV;
 		goto out3;
 	}
 	if (register_netdev(info->dev[1])) {
 		printk(KERN_ERR "dmascc: could not register %s\n",
 		       info->dev[1]->name);
-		err = -ENODEV;
 		goto out4;
 	}
 
@@ -619,7 +612,7 @@ static int __init setup_adapter(int card_base, int type, int n)
       out1:
 	kfree(info);
       out:
-	return err;
+	return -1;
 }
 
 
@@ -926,9 +919,6 @@ static int scc_send_packet(struct sk_buff *skb, struct net_device *dev)
 	struct scc_priv *priv = dev->ml_priv;
 	unsigned long flags;
 	int i;
-
-	if (skb->protocol == htons(ETH_P_IP))
-		return ax25_ip_xmit(skb);
 
 	/* Temporarily stop the scheduler feeding us packets */
 	netif_stop_queue(dev);

@@ -60,14 +60,17 @@ void dlm_slots_copy_out(struct dlm_ls *ls, struct dlm_rcom *rc)
 
 #define SLOT_DEBUG_LINE 128
 
-static void log_slots(struct dlm_ls *ls, uint32_t gen, int num_slots,
-		      struct rcom_slot *ro0, struct dlm_slot *array,
-		      int array_size)
+static void log_debug_slots(struct dlm_ls *ls, uint32_t gen, int num_slots,
+			    struct rcom_slot *ro0, struct dlm_slot *array,
+			    int array_size)
 {
 	char line[SLOT_DEBUG_LINE];
 	int len = SLOT_DEBUG_LINE - 1;
 	int pos = 0;
 	int ret, i;
+
+	if (!dlm_config.ci_log_debug)
+		return;
 
 	memset(line, 0, sizeof(line));
 
@@ -92,7 +95,7 @@ static void log_slots(struct dlm_ls *ls, uint32_t gen, int num_slots,
 		}
 	}
 
-	log_rinfo(ls, "generation %u slots %d%s", gen, num_slots, line);
+	log_debug(ls, "generation %u slots %d%s", gen, num_slots, line);
 }
 
 int dlm_slots_copy_in(struct dlm_ls *ls)
@@ -126,7 +129,7 @@ int dlm_slots_copy_in(struct dlm_ls *ls)
 		ro->ro_slot = le16_to_cpu(ro->ro_slot);
 	}
 
-	log_slots(ls, gen, num_slots, ro0, NULL, 0);
+	log_debug_slots(ls, gen, num_slots, ro0, NULL, 0);
 
 	list_for_each_entry(memb, &ls->ls_nodes, list) {
 		for (i = 0, ro = ro0; i < num_slots; i++, ro++) {
@@ -271,7 +274,7 @@ int dlm_slots_assign(struct dlm_ls *ls, int *num_slots, int *slots_size,
 
 	gen++;
 
-	log_slots(ls, gen, num, NULL, array, array_size);
+	log_debug_slots(ls, gen, num, NULL, array, array_size);
 
 	max_slots = (dlm_config.ci_buffer_size - sizeof(struct dlm_rcom) -
 		     sizeof(struct rcom_config)) / sizeof(struct rcom_slot);
@@ -444,7 +447,7 @@ static int ping_members(struct dlm_ls *ls)
 			break;
 	}
 	if (error)
-		log_rinfo(ls, "ping_members aborted %d last nodeid %d",
+		log_debug(ls, "ping_members aborted %d last nodeid %d",
 			  error, ls->ls_recover_nodeid);
 	return error;
 }
@@ -536,7 +539,7 @@ int dlm_recover_members(struct dlm_ls *ls, struct dlm_recover *rv, int *neg_out)
 	   count as a negative change so the "neg" recovery steps will happen */
 
 	list_for_each_entry(memb, &ls->ls_nodes_gone, list) {
-		log_rinfo(ls, "prev removed member %d", memb->nodeid);
+		log_debug(ls, "prev removed member %d", memb->nodeid);
 		neg++;
 	}
 
@@ -548,10 +551,10 @@ int dlm_recover_members(struct dlm_ls *ls, struct dlm_recover *rv, int *neg_out)
 			continue;
 
 		if (!node) {
-			log_rinfo(ls, "remove member %d", memb->nodeid);
+			log_debug(ls, "remove member %d", memb->nodeid);
 		} else {
 			/* removed and re-added */
-			log_rinfo(ls, "remove member %d comm_seq %u %u",
+			log_debug(ls, "remove member %d comm_seq %u %u",
 				  memb->nodeid, memb->comm_seq, node->comm_seq);
 		}
 
@@ -568,7 +571,7 @@ int dlm_recover_members(struct dlm_ls *ls, struct dlm_recover *rv, int *neg_out)
 		if (dlm_is_member(ls, node->nodeid))
 			continue;
 		dlm_add_member(ls, node);
-		log_rinfo(ls, "add member %d", node->nodeid);
+		log_debug(ls, "add member %d", node->nodeid);
 	}
 
 	list_for_each_entry(memb, &ls->ls_nodes, list) {
@@ -588,7 +591,7 @@ int dlm_recover_members(struct dlm_ls *ls, struct dlm_recover *rv, int *neg_out)
 		complete(&ls->ls_members_done);
 	}
 
-	log_rinfo(ls, "dlm_recover_members %d nodes", ls->ls_num_nodes);
+	log_debug(ls, "dlm_recover_members %d nodes", ls->ls_num_nodes);
 	return error;
 }
 

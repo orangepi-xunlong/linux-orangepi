@@ -193,18 +193,18 @@ static int ppc4xx_edac_remove(struct platform_device *device);
  * Device tree node type and compatible tuples this driver can match
  * on.
  */
-static const struct of_device_id ppc4xx_edac_match[] = {
+static struct of_device_id ppc4xx_edac_match[] = {
 	{
 		.compatible	= "ibm,sdram-4xx-ddr2"
 	},
 	{ }
 };
-MODULE_DEVICE_TABLE(of, ppc4xx_edac_match);
 
 static struct platform_driver ppc4xx_edac_driver = {
 	.probe			= ppc4xx_edac_probe,
 	.remove			= ppc4xx_edac_remove,
 	.driver = {
+		.owner = THIS_MODULE,
 		.name = PPC4XX_EDAC_MODULE_NAME,
 		.of_match_table = ppc4xx_edac_match,
 	},
@@ -921,7 +921,7 @@ static int ppc4xx_edac_init_csrows(struct mem_ctl_info *mci, u32 mcopt1)
 	 */
 
 	for (row = 0; row < mci->nr_csrows; row++) {
-		struct csrow_info *csi = mci->csrows[row];
+		struct csrow_info *csi = &mci->csrows[row];
 
 		/*
 		 * Get the configuration settings for this
@@ -974,7 +974,7 @@ static int ppc4xx_edac_init_csrows(struct mem_ctl_info *mci, u32 mcopt1)
 		 * page size (PAGE_SIZE) or the memory width (2 or 4).
 		 */
 		for (j = 0; j < csi->nr_channels; j++) {
-			struct dimm_info *dimm = csi->channels[j]->dimm;
+			struct dimm_info *dimm = csi->channels[j].dimm;
 
 			dimm->nr_pages  = nr_pages / csi->nr_channels;
 			dimm->grain	= 1;
@@ -1029,6 +1029,8 @@ static int ppc4xx_edac_mc_init(struct mem_ctl_info *mci,
 	pdata			= mci->pvt_info;
 
 	pdata->dcr_host		= *dcr_host;
+	pdata->irqs.sec		= NO_IRQ;
+	pdata->irqs.ded		= NO_IRQ;
 
 	/* Initialize controller capabilities and configuration */
 
@@ -1109,7 +1111,7 @@ static int ppc4xx_edac_register_irq(struct platform_device *op,
 	ded_irq = irq_of_parse_and_map(np, INTMAP_ECCDED_INDEX);
 	sec_irq = irq_of_parse_and_map(np, INTMAP_ECCSEC_INDEX);
 
-	if (!ded_irq || !sec_irq) {
+	if (ded_irq == NO_IRQ || sec_irq == NO_IRQ) {
 		ppc4xx_edac_mc_printk(KERN_ERR, mci,
 				      "Unable to map interrupts.\n");
 		status = -ENODEV;
@@ -1118,7 +1120,7 @@ static int ppc4xx_edac_register_irq(struct platform_device *op,
 
 	status = request_irq(ded_irq,
 			     ppc4xx_edac_isr,
-			     0,
+			     IRQF_DISABLED,
 			     "[EDAC] MC ECCDED",
 			     mci);
 
@@ -1132,7 +1134,7 @@ static int ppc4xx_edac_register_irq(struct platform_device *op,
 
 	status = request_irq(sec_irq,
 			     ppc4xx_edac_isr,
-			     0,
+			     IRQF_DISABLED,
 			     "[EDAC] MC ECCSEC",
 			     mci);
 

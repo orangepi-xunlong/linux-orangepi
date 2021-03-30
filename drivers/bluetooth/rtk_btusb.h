@@ -13,6 +13,10 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
  *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *
  */
 #include <linux/interrupt.h>
 #include <linux/module.h>
@@ -32,8 +36,24 @@
 #include <linux/suspend.h>
 
 #define CONFIG_BLUEDROID        1 /* bleuz 0, bluedroid 1 */
+#define USE_CONTROLLER_BDADDR  1  /* 1:use efuse or bt config, 0:use external file */
 
+#if USE_CONTROLLER_BDADDR
+#else
+#define BDADDR_FILE "/data/misc/bluetooth/bdaddr"
+#define FACTORY_BT_BDADDR_STORAGE_LEN 17
+struct rtk_bt_vendor_config_entry{
+    uint16_t offset;
+    uint8_t entry_len;
+    uint8_t entry_data[0];
+} __attribute__ ((packed));
 
+struct rtk_bt_vendor_config{
+    uint32_t signature;
+    uint16_t data_len;
+    struct rtk_bt_vendor_config_entry entry[0];
+} __attribute__ ((packed));
+#endif
 /* Some Android system may use standard Linux kernel, while
  * standard Linux may also implement early suspend feature.
  * So exclude earysuspend.h from CONFIG_BLUEDROID.
@@ -57,28 +77,16 @@
 /* when OS suspended, module is still powered,usb is not powered,
  * this may set to 1, and must comply with special patch code.
  */
-#define CONFIG_RESET_RESUME     1
-#define PRINT_CMD_EVENT         0
-#define PRINT_ACL_DATA          0
-#define PRINT_SCO_DATA          0
-
-#define RTKBT_DBG_FLAG          0
-
-#if RTKBT_DBG_FLAG
-#define RTKBT_DBG(fmt, arg...) printk(KERN_INFO "rtk_btusb: " fmt "\n", ## arg)
-#else
-#define RTKBT_DBG(fmt, arg...)
-#endif
-#define RTKBT_INFO(fmt, arg...) printk(KERN_INFO "rtk_btusb: " fmt "\n", ## arg)
-#define RTKBT_WARN(fmt, arg...) printk(KERN_WARNING "rtk_btusb: " fmt "\n", ## arg)
-#define RTKBT_ERR(fmt, arg...) printk(KERN_ERR "rtk_btusb: " fmt "\n", ## arg)
-
+#define CONFIG_RESET_RESUME        1
+#define PRINT_CMD_EVENT            0
+#define PRINT_ACL_DATA            0
+#define PRINT_SCO_DATA            0
 
 #if LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 33)
-#define HDEV_BUS        (hdev->bus)
+#define HDEV_BUS        hdev->bus
 #define USB_RPM            1
 #else
-#define HDEV_BUS        (hdev->type)
+#define HDEV_BUS        hdev->type
 #define USB_RPM            0
 #endif
 
@@ -89,10 +97,10 @@
 #if LINUX_VERSION_CODE > KERNEL_VERSION(3, 4, 0)
 #define GET_DRV_DATA(x)        hci_get_drvdata(x)
 #else
-#define GET_DRV_DATA(x)        (x->driver_data)
+#define GET_DRV_DATA(x)        x->driver_data
 #endif
 
-#define SCO_NUM    (hdev->conn_hash.sco_num)
+#define SCO_NUM    hdev->conn_hash.sco_num
 
 
 #define BTUSB_RPM        (0 * USB_RPM) /* 1 SS enable; 0 SS disable */
@@ -110,17 +118,11 @@
 #define HCI_VENDOR_READ_LMP_VERISION 0x1001
 #define HCI_VENDOR_FORCE_RESET_AND_PATCHABLE 0xfc66
 #define HCI_VENDOR_RESET                       0x0C03
-#define HCI_VENDOR_ADD_WAKE_UP_DEVICE       0xfc7b
-#define HCI_VENDOR_REMOVE_WAKE_UP_DEVICE    0xfc7c
-#define HCI_VENDOR_CLEAR_POWERON_LIST       0xfc7d
 
-#define HCI_VENDOR_USB_DISC_HARDWARE_ERROR   0xFF
-
-#define SET_WAKEUP_DEVICE_CONF      "/data/misc/bluedroid/rtkbt_wakeup_ble.conf"
 
 #define DRV_NORMAL_MODE 0
 #define DRV_MP_MODE 1
-int mp_drv_mode; /* 1 Mptool Fw; 0 Normal Fw */
+int mp_drv_mode = 0; /* 1 Mptool Fw; 0 Normal Fw */
 
 #define ROM_LMP_NONE                0x0000
 #define ROM_LMP_8723a               0x1200
@@ -129,85 +131,61 @@ int mp_drv_mode; /* 1 Mptool Fw; 0 Normal Fw */
 #define ROM_LMP_8761a               0X8761
 #define ROM_LMP_8703a               0x8723
 #define ROM_LMP_8763a               0x8763
-#define ROM_LMP_8703b               0x8703
-#define ROM_LMP_8723c               0x8703
+#define ROM_LMP_8703b               0x8703//???????
+#define ROM_LMP_8723c               0x87c3//???????
 #define ROM_LMP_8822b               0x8822
 #define ROM_LMP_8723d               0x8723
-#define ROM_LMP_8821c               0x8821
 
 /* signature: Realtek */
-const uint8_t RTK_EPATCH_SIGNATURE[8] = {0x52, 0x65, 0x61, 0x6C, 0x74, 0x65, 0x63, 0x68};
+const uint8_t RTK_EPATCH_SIGNATURE[8] = {0x52,0x65,0x61,0x6C,0x74,0x65,0x63,0x68};
 /* Extension Section IGNATURE:0x77FD0451 */
-const uint8_t EXTENSION_SECTION_SIGNATURE[4] = {0x51, 0x04, 0xFD, 0x77};
+const uint8_t EXTENSION_SECTION_SIGNATURE[4] = {0x51,0x04,0xFD,0x77};
 
 uint16_t project_id[] = {
-	ROM_LMP_8723a,
-	ROM_LMP_8723b,
-	ROM_LMP_8821a,
-	ROM_LMP_8761a,
-	ROM_LMP_8703a,
-	ROM_LMP_8763a,
-	ROM_LMP_8703b,
-	ROM_LMP_8723c,
-	ROM_LMP_8822b,
-	ROM_LMP_8723d,
-	ROM_LMP_8821c,
-	ROM_LMP_NONE
+    ROM_LMP_8723a,
+    ROM_LMP_8723b,
+    ROM_LMP_8821a,
+    ROM_LMP_8761a,
+    ROM_LMP_8703a,
+    ROM_LMP_8763a,
+    ROM_LMP_8703b,
+    ROM_LMP_8723c,
+    ROM_LMP_8822b,
+    ROM_LMP_8723d,
+    ROM_LMP_NONE
 };
 struct rtk_eversion_evt {
-	uint8_t status;
-	uint8_t version;
+    uint8_t status;
+    uint8_t version;
 } __attribute__ ((packed));
 
 /*modified by lamparten 1020*/
 struct rtk_reset_evt {
-	uint8_t status;
+    uint8_t status;
 } __attribute__ ((packed));
 /*modified by lamparten 1020*/
 
-struct rtk_localversion_evt {
-	uint8_t status;
-	uint8_t hci_version;
-	uint16_t hci_revision;
-	uint8_t lmp_version;
-	uint16_t lmp_manufacture;
-	uint16_t lmp_subversion;
-} __attribute__ ((packed));
-
 struct rtk_epatch_entry {
-	uint16_t chip_id;
-	uint16_t patch_length;
-	uint32_t start_offset;
-	uint32_t coex_version;
-	uint32_t svn_version;
-	uint32_t fw_version;
+    uint16_t chip_id;
+    uint16_t patch_length;
+    uint32_t start_offset;
+    uint32_t coex_version;
+    uint32_t svn_version;
+    uint32_t fw_version;
 } __attribute__ ((packed));
 
 struct rtk_epatch {
-	uint8_t signature[8];
-	uint32_t fw_version;
-	uint16_t number_of_total_patch;
-	struct rtk_epatch_entry entry[0];
+    uint8_t signature[8];
+    uint32_t fw_version;
+    uint16_t number_of_total_patch;
+    struct rtk_epatch_entry entry[0];
 } __attribute__ ((packed));
 
 struct rtk_extension_entry {
-	uint8_t opcode;
-	uint8_t length;
-	uint8_t *data;
+    uint8_t opcode;
+    uint8_t length;
+    uint8_t *data;
 } __attribute__ ((packed));
-
-struct rtk_bt_vendor_config_entry{
-	uint16_t offset;
-	uint8_t entry_len;
-	uint8_t entry_data[0];
-} __attribute__ ((packed));
-
-struct rtk_bt_vendor_config{
-	uint32_t signature;
-	uint16_t data_len;
-	struct rtk_bt_vendor_config_entry entry[0];
-} __attribute__ ((packed));
-
 /* Realtek - For rtk_btusb driver end */
 
 #if CONFIG_BLUEDROID
@@ -221,31 +199,31 @@ struct rtk_bt_vendor_config{
 
 /* BD Address */
 typedef struct {
-	__u8 b[6];
+    __u8 b[6];
 } __packed bdaddr_t;
 
 /* Skb helpers */
 struct bt_skb_cb {
-	__u8 pkt_type;
-	__u8 incoming;
-	__u16 expect;
-	__u16 tx_seq;
-	__u8 retries;
-	__u8 sar;
-	__u8 force_active;
+    __u8 pkt_type;
+    __u8 incoming;
+    __u16 expect;
+    __u16 tx_seq;
+    __u8 retries;
+    __u8 sar;
+    __u8 force_active;
 };
 
 #define bt_cb(skb) ((struct bt_skb_cb *)((skb)->cb))
 
 static inline struct sk_buff *bt_skb_alloc(unsigned int len, gfp_t how)
 {
-	struct sk_buff *skb;
-	skb = alloc_skb(len + BT_SKB_RESERVE, how);
-	if (skb) {
-		skb_reserve(skb, BT_SKB_RESERVE);
-		bt_cb(skb)->incoming  = 0;
-	}
-	return skb;
+    struct sk_buff *skb;
+
+    if ((skb = alloc_skb(len + BT_SKB_RESERVE, how))) {
+        skb_reserve(skb, BT_SKB_RESERVE);
+        bt_cb(skb)->incoming  = 0;
+    }
+    return skb;
 }
 /* Realtek - Integrate from bluetooth.h end */
 
@@ -272,19 +250,19 @@ static inline struct sk_buff *bt_skb_alloc(unsigned int len, gfp_t how)
 
 /* HCI device flags */
 enum {
-	HCI_UP,
-	HCI_INIT,
-	HCI_RUNNING,
+    HCI_UP,
+    HCI_INIT,
+    HCI_RUNNING,
 
-	HCI_PSCAN,
-	HCI_ISCAN,
-	HCI_AUTH,
-	HCI_ENCRYPT,
-	HCI_INQUIRY,
+    HCI_PSCAN,
+    HCI_ISCAN,
+    HCI_AUTH,
+    HCI_ENCRYPT,
+    HCI_INQUIRY,
 
-	HCI_RAW,
+    HCI_RAW,
 
-	HCI_RESET,
+    HCI_RESET,
 };
 
 /*
@@ -292,23 +270,23 @@ enum {
  * states from the controller.
  */
 enum {
-	HCI_SETUP,
-	HCI_AUTO_OFF,
-	HCI_MGMT,
-	HCI_PAIRABLE,
-	HCI_SERVICE_CACHE,
-	HCI_LINK_KEYS,
-	HCI_DEBUG_KEYS,
-	HCI_UNREGISTER,
+    HCI_SETUP,
+    HCI_AUTO_OFF,
+    HCI_MGMT,
+    HCI_PAIRABLE,
+    HCI_SERVICE_CACHE,
+    HCI_LINK_KEYS,
+    HCI_DEBUG_KEYS,
+    HCI_UNREGISTER,
 
-	HCI_LE_SCAN,
-	HCI_SSP_ENABLED,
-	HCI_HS_ENABLED,
-	HCI_LE_ENABLED,
-	HCI_CONNECTABLE,
-	HCI_DISCOVERABLE,
-	HCI_LINK_SECURITY,
-	HCI_PENDING_CLASS,
+    HCI_LE_SCAN,
+    HCI_SSP_ENABLED,
+    HCI_HS_ENABLED,
+    HCI_LE_ENABLED,
+    HCI_CONNECTABLE,
+    HCI_DISCOVERABLE,
+    HCI_LINK_SECURITY,
+    HCI_PENDING_CLASS,
 };
 
 /* HCI data types */
@@ -323,18 +301,18 @@ enum {
 
 #define HCI_OP_READ_LOCAL_VERSION    0x1001
 struct hci_rp_read_local_version {
-	__u8     status;
-	__u8     hci_ver;
-	__le16   hci_rev;
-	__u8     lmp_ver;
-	__le16   manufacturer;
-	__le16   lmp_subver;
+    __u8     status;
+    __u8     hci_ver;
+    __le16   hci_rev;
+    __u8     lmp_ver;
+    __le16   manufacturer;
+    __le16   lmp_subver;
 } __packed;
 
 #define HCI_EV_CMD_COMPLETE        0x0e
 struct hci_ev_cmd_complete {
-	__u8     ncmd;
-	__le16   opcode;
+    __u8     ncmd;
+    __le16   opcode;
 } __packed;
 
 /* ---- HCI Packet structures ---- */
@@ -344,52 +322,52 @@ struct hci_ev_cmd_complete {
 #define HCI_SCO_HDR_SIZE     3
 
 struct hci_command_hdr {
-	__le16    opcode;        /* OCF & OGF */
-	__u8    plen;
+    __le16    opcode;        /* OCF & OGF */
+    __u8    plen;
 } __packed;
 
 struct hci_event_hdr {
-	__u8    evt;
-	__u8    plen;
+    __u8    evt;
+    __u8    plen;
 } __packed;
 
 struct hci_acl_hdr {
-	__le16    handle;        /* Handle & Flags(PB, BC) */
-	__le16    dlen;
+    __le16    handle;        /* Handle & Flags(PB, BC) */
+    __le16    dlen;
 } __packed;
 
 struct hci_sco_hdr {
-	__le16    handle;
-	__u8    dlen;
+    __le16    handle;
+    __u8    dlen;
 } __packed;
 
 static inline struct hci_event_hdr *hci_event_hdr(const struct sk_buff *skb)
 {
-	return (struct hci_event_hdr *) skb->data;
+    return (struct hci_event_hdr *) skb->data;
 }
 
 static inline struct hci_acl_hdr *hci_acl_hdr(const struct sk_buff *skb)
 {
-	return (struct hci_acl_hdr *) skb->data;
+    return (struct hci_acl_hdr *) skb->data;
 }
 
 static inline struct hci_sco_hdr *hci_sco_hdr(const struct sk_buff *skb)
 {
-	return (struct hci_sco_hdr *) skb->data;
+    return (struct hci_sco_hdr *) skb->data;
 }
 
 /* ---- HCI Ioctl requests structures ---- */
 struct hci_dev_stats {
-	__u32 err_rx;
-	__u32 err_tx;
-	__u32 cmd_tx;
-	__u32 evt_rx;
-	__u32 acl_tx;
-	__u32 acl_rx;
-	__u32 sco_tx;
-	__u32 sco_rx;
-	__u32 byte_rx;
-	__u32 byte_tx;
+    __u32 err_rx;
+    __u32 err_tx;
+    __u32 cmd_tx;
+    __u32 evt_rx;
+    __u32 acl_tx;
+    __u32 acl_rx;
+    __u32 sco_tx;
+    __u32 sco_rx;
+    __u32 byte_rx;
+    __u32 byte_tx;
 };
 /* Realtek - Integrate from hci.h end */
 
@@ -397,79 +375,79 @@ struct hci_dev_stats {
 ** Realtek - Integrate from hci_core.h  **
 *****************************************/
 struct hci_conn_hash {
-	struct list_head list;
-	unsigned int     acl_num;
-	unsigned int     sco_num;
-	unsigned int     le_num;
+    struct list_head list;
+    unsigned int     acl_num;
+    unsigned int     sco_num;
+    unsigned int     le_num;
 };
 
 #define HCI_MAX_SHORT_NAME_LENGTH    10
 
 #define NUM_REASSEMBLY 4
 struct hci_dev {
-	struct mutex    lock;
+    struct mutex    lock;
 
-	char        name[8];
-	unsigned long    flags;
-	__u16        id;
-	__u8        bus;
-	__u8        dev_type;
+    char        name[8];
+    unsigned long    flags;
+    __u16        id;
+    __u8        bus;
+    __u8        dev_type;
 
-	struct sk_buff        *reassembly[NUM_REASSEMBLY];
+    struct sk_buff        *reassembly[NUM_REASSEMBLY];
 
-	struct hci_conn_hash    conn_hash;
+    struct hci_conn_hash    conn_hash;
 
-	struct hci_dev_stats    stat;
+    struct hci_dev_stats    stat;
 
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(3, 4, 0)
-	atomic_t        refcnt;
-	struct module           *owner;
-	void                    *driver_data;
+    atomic_t        refcnt;
+    struct module           *owner;
+    void                    *driver_data;
 #endif
 
-	atomic_t        promisc;
+    atomic_t        promisc;
 
-	struct device        *parent;
-	struct device        dev;
+    struct device        *parent;
+    struct device        dev;
 
-	unsigned long        dev_flags;
+    unsigned long        dev_flags;
 
-	int (*open)(struct hci_dev *hdev);
-	int (*close)(struct hci_dev *hdev);
-	int (*flush)(struct hci_dev *hdev);
-	int (*send)(struct sk_buff *skb);
+    int (*open)(struct hci_dev *hdev);
+    int (*close)(struct hci_dev *hdev);
+    int (*flush)(struct hci_dev *hdev);
+    int (*send)(struct sk_buff *skb);
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(3, 4, 0)
-	void (*destruct)(struct hci_dev *hdev);
+    void (*destruct)(struct hci_dev *hdev);
 #endif
 #if LINUX_VERSION_CODE > KERNEL_VERSION(3, 7, 1)
-	__u16               voice_setting;
+    __u16               voice_setting;
 #endif
-	void (*notify)(struct hci_dev *hdev, unsigned int evt);
-	int (*ioctl)(struct hci_dev *hdev, unsigned int cmd, unsigned long arg);
+    void (*notify)(struct hci_dev *hdev, unsigned int evt);
+    int (*ioctl)(struct hci_dev *hdev, unsigned int cmd, unsigned long arg);
 };
 
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(3, 4, 0)
 static inline struct hci_dev *__hci_dev_hold(struct hci_dev *d)
 {
-	atomic_inc(&d->refcnt);
-	return d;
+    atomic_inc(&d->refcnt);
+    return d;
 }
 
 static inline void __hci_dev_put(struct hci_dev *d)
 {
-	if (atomic_dec_and_test(&d->refcnt))
-		d->destruct(d);
+    if (atomic_dec_and_test(&d->refcnt))
+        d->destruct(d);
 }
 #endif
 
 static inline void *hci_get_drvdata(struct hci_dev *hdev)
 {
-	return dev_get_drvdata(&hdev->dev);
+    return dev_get_drvdata(&hdev->dev);
 }
 
 static inline void hci_set_drvdata(struct hci_dev *hdev, void *data)
 {
-	dev_set_drvdata(&hdev->dev, data);
+    dev_set_drvdata(&hdev->dev, data);
 }
 
 #define SET_HCIDEV_DEV(hdev, pdev) ((hdev)->parent = (pdev))
@@ -553,158 +531,7 @@ static inline void hci_set_drvdata(struct hci_dev *hdev, void *data)
 #define HCI_EV_SIMPLE_PAIR_COMPLETE    0x36
 #define HCI_EV_REMOTE_HOST_FEATURES    0x3d
 
-#define CONFIG_MAC_OFFSET_GEN_1_2       (0x3C)      /* MAC's OFFSET in config/efuse for realtek generation 1~2 bluetooth chip */
-#define CONFIG_MAC_OFFSET_GEN_3PLUS     (0x44)      /* MAC's OFFSET in config/efuse for rtk generation 3+ bluetooth chip */
-
-/*******************************
-**    Reasil patch code
-********************************/
-#define CMD_CMP_EVT        0x0e
-#define PKT_LEN            300
-#define MSG_TO            1000
-#define PATCH_SEG_MAX    252
-#define DATA_END        0x80
-#define DOWNLOAD_OPCODE    0xfc20
-#define BTOFF_OPCODE    0xfc28
-#define TRUE            1
-#define FALSE            0
-#define CMD_HDR_LEN        sizeof(struct hci_command_hdr)
-#define EVT_HDR_LEN        sizeof(struct hci_event_hdr)
-#define CMD_CMP_LEN        sizeof(struct hci_ev_cmd_complete)
-#define MAX_PATCH_SIZE_24K (1024*24)
-#define MAX_PATCH_SIZE_40K (1024*40)
-
-enum rtk_endpoit {
-	CTRL_EP = 0,
-	INTR_EP = 1,
-	BULK_EP = 2,
-	ISOC_EP = 3
-};
-
-typedef struct {
-	uint16_t    vid;
-	uint16_t    pid;
-	uint16_t    lmp_sub_default;
-	uint16_t    lmp_sub;
-	uint16_t    eversion;
-	char        *mp_patch_name;
-	char        *patch_name;
-	char        *config_name;
-	uint8_t     *fw_cache;
-	int         fw_len;
-	uint16_t    mac_offset;
-	uint32_t    max_patch_size;
-} patch_info;
-
-typedef struct {
-	struct usb_interface    *intf;
-	struct usb_device        *udev;
-	patch_info *patch_entry;
-	int            pipe_in, pipe_out;
-	uint8_t        *send_pkt;
-	uint8_t        *rcv_pkt;
-	struct hci_command_hdr        *cmd_hdr;
-	struct hci_event_hdr        *evt_hdr;
-	struct hci_ev_cmd_complete    *cmd_cmp;
-	uint8_t        *req_para,    *rsp_para;
-	uint8_t        *fw_data;
-	int            pkt_len;
-	int            fw_len;
-} firmware_info;
-
-typedef struct {
-	uint8_t index;
-	uint8_t data[PATCH_SEG_MAX];
-} __attribute__((packed)) download_cp;
-
-typedef struct {
-	uint8_t status;
-	uint8_t index;
-} __attribute__((packed)) download_rp;
-
-
-
-/* Define ioctl cmd the same as HCIDEVUP in the kernel */
-#define DOWN_FW_CFG  _IOW('H', 201, int)
-
-
-/*  for altsettings*/
-#include <linux/fs.h>
-#define BDADDR_FILE "/data/misc/bluetooth/bdaddr"
-#define FACTORY_BT_BDADDR_STORAGE_LEN 17
-
-static inline int getmacaddr(uint8_t *vnd_local_bd_addr)
-{
-	struct file  *bdaddr_file;
-	mm_segment_t oldfs;
-	char buf[FACTORY_BT_BDADDR_STORAGE_LEN];
-	int32_t i = 0;
-	memset(buf, 0, FACTORY_BT_BDADDR_STORAGE_LEN);
-	bdaddr_file = filp_open(BDADDR_FILE, O_RDONLY, 0);
-	if (IS_ERR(bdaddr_file)) {
-		RTKBT_INFO("No Mac Config for BT\n");
-		return -1;
-	}
-	oldfs = get_fs(); set_fs(KERNEL_DS);
-	bdaddr_file->f_op->llseek(bdaddr_file, 0, 0);
-	bdaddr_file->f_op->read(bdaddr_file, buf, FACTORY_BT_BDADDR_STORAGE_LEN, &bdaddr_file->f_pos);
-	for (i = 0; i < 6; i++) {
-		if (buf[3*i] > '9') {
-			if (buf[3*i] > 'Z')
-				buf[3*i] -= ('a'-'A'); /* change  a to A */
-			buf[3*i] -= ('A' - '9' - 1);
-		}
-		if (buf[3*i+1] > '9') {
-			if (buf[3*i+1] > 'Z')
-				buf[3*i+1] -= ('a'-'A'); /* change  a to A */
-			buf[3*i+1] -= ('A' - '9' - 1);
-		}
-		vnd_local_bd_addr[5-i] = ((uint8_t)buf[3*i] - '0') * 16 + ((uint8_t)buf[3*i+1] - '0');
-	}
-	set_fs(oldfs);
-	filp_close(bdaddr_file, NULL);
-	return 0;
-}
-
-static inline int getAltSettings(patch_info *patch_entry, unsigned short *offset, int max_group_cnt)
-{
-	int n = 0;
-	if (patch_entry)
-		offset[n++] = patch_entry->mac_offset;
-/*
-//sample code, add special settings
-
-	offset[n++] = 0x15B;
-*/
-	return n;
-}
-static inline int getAltSettingVal(patch_info *patch_entry, unsigned short offset, unsigned char *val)
-{
-	int res = 0;
-
-	switch (offset) {
-/*
-//sample code, add special settings
-	case 0x15B:
-		val[0] = 0x0B;
-		val[1] = 0x0B;
-		val[2] = 0x0B;
-		val[3] = 0x0B;
-		res = 4;
-		break;
-*/
-	default:
-		res = 0;
-		break;
-	}
-
-	if ((patch_entry) && (offset == patch_entry->mac_offset) && (res == 0)) {
-		if (getmacaddr(val) == 0) {
-			RTKBT_INFO("MAC: %02x:%02x:%02x:%02x:%02x:%02x", val[5], val[4], val[3], val[2], val[1], val[0]);
-			res = 6;
-		}
-	}
-	return res;
-}
+#define CONFIG_MAC_OFFSET_GEN_1_2       (0x3C)      //MAC's OFFSET in config/efuse for realtek generation 1~2 bluetooth chip
+#define CONFIG_MAC_OFFSET_GEN_3PLUS     (0x44)      //MAC's OFFSET in config/efuse for rtk generation 3+ bluetooth chip
 
 #endif /* CONFIG_BLUEDROID */

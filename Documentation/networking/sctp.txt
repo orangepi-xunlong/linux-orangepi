@@ -19,6 +19,7 @@ of SCTP that is RFC 2960 compliant and provides an programming interface
 referred to as the  UDP-style API of the Sockets Extensions for SCTP, as 
 proposed in IETF Internet-Drafts.    
 
+
 Caveats:  
 
 -lksctp can be built as statically or as a module.  However, be aware that 
@@ -32,4 +33,6 @@ For more information, please visit the lksctp project website:
    http://www.sf.net/projects/lksctp
 
 Or contact the lksctp developers through the mailing list:
-   <linux-sctp@vger.kernel.org>
+   <lksctp-developers@lists.sourceforge.net> 
+
+

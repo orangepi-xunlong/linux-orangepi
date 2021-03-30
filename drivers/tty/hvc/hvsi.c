@@ -240,9 +240,9 @@ static void hvsi_recv_control(struct hvsi_struct *hp, uint8_t *packet,
 {
 	struct hvsi_control *header = (struct hvsi_control *)packet;
 
-	switch (be16_to_cpu(header->verb)) {
+	switch (header->verb) {
 		case VSV_MODEM_CTL_UPDATE:
-			if ((be32_to_cpu(header->word) & HVSI_TSCD) == 0) {
+			if ((header->word & HVSI_TSCD) == 0) {
 				/* CD went away; no more connection */
 				pr_debug("hvsi%i: CD dropped\n", hp->index);
 				hp->mctrl &= TIOCM_CD;
@@ -267,7 +267,6 @@ static void hvsi_recv_control(struct hvsi_struct *hp, uint8_t *packet,
 static void hvsi_recv_response(struct hvsi_struct *hp, uint8_t *packet)
 {
 	struct hvsi_query_response *resp = (struct hvsi_query_response *)packet;
-	uint32_t mctrl_word;
 
 	switch (hp->state) {
 		case HVSI_WAIT_FOR_VER_RESPONSE:
@@ -275,10 +274,9 @@ static void hvsi_recv_response(struct hvsi_struct *hp, uint8_t *packet)
 			break;
 		case HVSI_WAIT_FOR_MCTRL_RESPONSE:
 			hp->mctrl = 0;
-			mctrl_word = be32_to_cpu(resp->u.mctrl_word);
-			if (mctrl_word & HVSI_TSDTR)
+			if (resp->u.mctrl_word & HVSI_TSDTR)
 				hp->mctrl |= TIOCM_DTR;
-			if (mctrl_word & HVSI_TSCD)
+			if (resp->u.mctrl_word & HVSI_TSCD)
 				hp->mctrl |= TIOCM_CD;
 			__set_state(hp, HVSI_OPEN);
 			break;
@@ -297,10 +295,10 @@ static int hvsi_version_respond(struct hvsi_struct *hp, uint16_t query_seqno)
 
 	packet.hdr.type = VS_QUERY_RESPONSE_PACKET_HEADER;
 	packet.hdr.len = sizeof(struct hvsi_query_response);
-	packet.hdr.seqno = cpu_to_be16(atomic_inc_return(&hp->seqno));
-	packet.verb = cpu_to_be16(VSV_SEND_VERSION_NUMBER);
+	packet.hdr.seqno = atomic_inc_return(&hp->seqno);
+	packet.verb = VSV_SEND_VERSION_NUMBER;
 	packet.u.version = HVSI_VERSION;
-	packet.query_seqno = cpu_to_be16(query_seqno+1);
+	packet.query_seqno = query_seqno+1;
 
 	pr_debug("%s: sending %i bytes\n", __func__, packet.hdr.len);
 	dbg_dump_hex((uint8_t*)&packet, packet.hdr.len);
@@ -321,7 +319,7 @@ static void hvsi_recv_query(struct hvsi_struct *hp, uint8_t *packet)
 
 	switch (hp->state) {
 		case HVSI_WAIT_FOR_VER_QUERY:
-			hvsi_version_respond(hp, be16_to_cpu(query->hdr.seqno));
+			hvsi_version_respond(hp, query->hdr.seqno);
 			__set_state(hp, HVSI_OPEN);
 			break;
 		default:
@@ -509,7 +507,7 @@ static irqreturn_t hvsi_interrupt(int irq, void *arg)
 	}
 
 	spin_lock_irqsave(&hp->lock, flags);
-	if (tty && hp->n_throttle && !tty_throttled(tty)) {
+	if (tty && hp->n_throttle && !test_bit(TTY_THROTTLED, &tty->flags)) {
 		/* we weren't hung up and we weren't throttled, so we can
 		 * deliver the rest now */
 		hvsi_send_overflow(hp);
@@ -557,8 +555,8 @@ static int hvsi_query(struct hvsi_struct *hp, uint16_t verb)
 
 	packet.hdr.type = VS_QUERY_PACKET_HEADER;
 	packet.hdr.len = sizeof(struct hvsi_query);
-	packet.hdr.seqno = cpu_to_be16(atomic_inc_return(&hp->seqno));
-	packet.verb = cpu_to_be16(verb);
+	packet.hdr.seqno = atomic_inc_return(&hp->seqno);
+	packet.verb = verb;
 
 	pr_debug("%s: sending %i bytes\n", __func__, packet.hdr.len);
 	dbg_dump_hex((uint8_t*)&packet, packet.hdr.len);
@@ -598,14 +596,14 @@ static int hvsi_set_mctrl(struct hvsi_struct *hp, uint16_t mctrl)
 	struct hvsi_control packet __ALIGNED__;
 	int wrote;
 
-	packet.hdr.type = VS_CONTROL_PACKET_HEADER;
-	packet.hdr.seqno = cpu_to_be16(atomic_inc_return(&hp->seqno));
+	packet.hdr.type = VS_CONTROL_PACKET_HEADER,
+	packet.hdr.seqno = atomic_inc_return(&hp->seqno);
 	packet.hdr.len = sizeof(struct hvsi_control);
-	packet.verb = cpu_to_be16(VSV_SET_MODEM_CTL);
-	packet.mask = cpu_to_be32(HVSI_TSDTR);
+	packet.verb = VSV_SET_MODEM_CTL;
+	packet.mask = HVSI_TSDTR;
 
 	if (mctrl & TIOCM_DTR)
-		packet.word = cpu_to_be32(HVSI_TSDTR);
+		packet.word = HVSI_TSDTR;
 
 	pr_debug("%s: sending %i bytes\n", __func__, packet.hdr.len);
 	dbg_dump_hex((uint8_t*)&packet, packet.hdr.len);
@@ -682,7 +680,7 @@ static int hvsi_put_chars(struct hvsi_struct *hp, const char *buf, int count)
 	BUG_ON(count > HVSI_MAX_OUTGOING_DATA);
 
 	packet.hdr.type = VS_DATA_PACKET_HEADER;
-	packet.hdr.seqno = cpu_to_be16(atomic_inc_return(&hp->seqno));
+	packet.hdr.seqno = atomic_inc_return(&hp->seqno);
 	packet.hdr.len = count + sizeof(struct hvsi_header);
 	memcpy(&packet.data, buf, count);
 
@@ -699,9 +697,9 @@ static void hvsi_close_protocol(struct hvsi_struct *hp)
 	struct hvsi_control packet __ALIGNED__;
 
 	packet.hdr.type = VS_CONTROL_PACKET_HEADER;
-	packet.hdr.seqno = cpu_to_be16(atomic_inc_return(&hp->seqno));
+	packet.hdr.seqno = atomic_inc_return(&hp->seqno);
 	packet.hdr.len = 6;
-	packet.verb = cpu_to_be16(VSV_CLOSE_PROTOCOL);
+	packet.verb = VSV_CLOSE_PROTOCOL;
 
 	pr_debug("%s: sending %i bytes\n", __func__, packet.hdr.len);
 	dbg_dump_hex((uint8_t*)&packet, packet.hdr.len);
@@ -1182,7 +1180,7 @@ static int __init hvsi_console_init(void)
 	/* search device tree for vty nodes */
 	for_each_compatible_node(vty, "serial", "hvterm-protocol") {
 		struct hvsi_struct *hp;
-		const __be32 *vtermno, *irq;
+		const uint32_t *vtermno, *irq;
 
 		vtermno = of_get_property(vty, "reg", NULL);
 		irq = of_get_property(vty, "interrupts", NULL);
@@ -1204,11 +1202,11 @@ static int __init hvsi_console_init(void)
 		hp->index = hvsi_count;
 		hp->inbuf_end = hp->inbuf;
 		hp->state = HVSI_CLOSED;
-		hp->vtermno = be32_to_cpup(vtermno);
-		hp->virq = irq_create_mapping(NULL, be32_to_cpup(irq));
+		hp->vtermno = *vtermno;
+		hp->virq = irq_create_mapping(NULL, irq[0]);
 		if (hp->virq == 0) {
 			printk(KERN_ERR "%s: couldn't create irq mapping for 0x%x\n",
-			       __func__, be32_to_cpup(irq));
+				__func__, irq[0]);
 			tty_port_destroy(&hp->port);
 			continue;
 		}

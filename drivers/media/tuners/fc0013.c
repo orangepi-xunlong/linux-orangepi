@@ -217,6 +217,8 @@ static int fc0013_set_vhf_track(struct fc0013_priv *priv, u32 freq)
 	} else {			/* UHF and GPS */
 		ret = fc0013_writereg(priv, 0x1d, tmp | 0x1c);
 	}
+	if (ret)
+		goto error_out;
 error_out:
 	return ret;
 }
@@ -231,7 +233,7 @@ static int fc0013_set_params(struct dvb_frontend *fe)
 	unsigned char reg[7], am, pm, multi, tmp;
 	unsigned long f_vco;
 	unsigned short xtal_freq_khz_2, xin, xdiv;
-	bool vco_select = false;
+	int vco_select = false;
 
 	if (fe->callback) {
 		ret = fe->callback(priv->i2c, DVB_FRONTEND_COMPONENT_TUNER,

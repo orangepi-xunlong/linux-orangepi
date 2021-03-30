@@ -28,9 +28,6 @@
 
 #include <asm/fixmap.h>
 
-#define UART_USR       31      /* I/O: uart status Register */
-#define UART_USR_NF    0x02    /* Tansmit fifo not full */
-
 static void __iomem *early_base;
 static void (*printch)(char ch);
 
@@ -82,10 +79,8 @@ static void uart8250_32bit_printch(char ch)
  */
 static void sunxi_uart_printch(char ch)
 {
-
 	while (!(readl_relaxed(early_base + (UART_USR << 2)) & UART_USR_NF))
 		;
-
 	writel_relaxed(ch, early_base + (UART_TX << 2));
 }
 
@@ -161,9 +156,9 @@ static int __init setup_early_printk(char *buf)
 
 	if (paddr) {
 		set_fixmap_io(FIX_EARLYCON_MEM_BASE, paddr);
-		early_base = (void __iomem *)(fix_to_virt(FIX_EARLYCON_MEM_BASE)
-						|(paddr & (PAGE_SIZE - 1)));
+		early_base = (void __iomem *)fix_to_virt(FIX_EARLYCON_MEM_BASE);
 	}
+
 	printch = match->printch;
 	early_console = &early_console_dev;
 	register_console(&early_console_dev);

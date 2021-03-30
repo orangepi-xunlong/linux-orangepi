@@ -32,7 +32,8 @@
  *   the GNU Lesser General Public License for more details.
  *
  *   You should have received a copy of the GNU Lesser General Public License
- *   along with this library; if not, see <http://www.gnu.org/licenses/>.
+ *   along with this library; if not, write to the Free Software
+ *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #include <linux/module.h>
@@ -67,7 +68,7 @@
  * Returns the size of the result on success, -ve error code otherwise.
  */
 int dns_query(const char *type, const char *name, size_t namelen,
-	      const char *options, char **_result, time64_t *_expiry)
+	      const char *options, char **_result, time_t *_expiry)
 {
 	struct key *rkey;
 	struct user_key_payload *upayload;
@@ -93,8 +94,8 @@ int dns_query(const char *type, const char *name, size_t namelen,
 	}
 
 	if (!namelen)
-		namelen = strnlen(name, 256);
-	if (namelen < 3 || namelen > 255)
+		namelen = strlen(name);
+	if (namelen < 3)
 		return -EINVAL;
 	desclen += namelen + 1;
 
@@ -129,7 +130,6 @@ int dns_query(const char *type, const char *name, size_t namelen,
 	}
 
 	down_read(&rkey->sem);
-	set_bit(KEY_FLAG_ROOT_CAN_INVAL, &rkey->flags);
 	rkey->perm |= KEY_USR_VIEW;
 
 	ret = key_validate(rkey);
@@ -137,11 +137,12 @@ int dns_query(const char *type, const char *name, size_t namelen,
 		goto put;
 
 	/* If the DNS server gave an error, return that to the caller */
-	ret = PTR_ERR(rkey->payload.data[dns_key_error]);
+	ret = rkey->type_data.x[0];
 	if (ret)
 		goto put;
 
-	upayload = user_key_payload_locked(rkey);
+	upayload = rcu_dereference_protected(rkey->payload.data,
+					     lockdep_is_held(&rkey->sem));
 	len = upayload->datalen;
 
 	ret = -ENOMEM;

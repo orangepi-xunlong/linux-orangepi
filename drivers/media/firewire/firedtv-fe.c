@@ -61,12 +61,12 @@ static int fdtv_diseqc_send_master_cmd(struct dvb_frontend *fe,
 }
 
 static int fdtv_diseqc_send_burst(struct dvb_frontend *fe,
-				  enum fe_sec_mini_cmd minicmd)
+				  fe_sec_mini_cmd_t minicmd)
 {
 	return 0;
 }
 
-static int fdtv_set_tone(struct dvb_frontend *fe, enum fe_sec_tone_mode tone)
+static int fdtv_set_tone(struct dvb_frontend *fe, fe_sec_tone_mode_t tone)
 {
 	struct firedtv *fdtv = fe->sec_priv;
 
@@ -75,7 +75,7 @@ static int fdtv_set_tone(struct dvb_frontend *fe, enum fe_sec_tone_mode tone)
 }
 
 static int fdtv_set_voltage(struct dvb_frontend *fe,
-			    enum fe_sec_voltage voltage)
+			    fe_sec_voltage_t voltage)
 {
 	struct firedtv *fdtv = fe->sec_priv;
 
@@ -83,7 +83,7 @@ static int fdtv_set_voltage(struct dvb_frontend *fe,
 	return 0;
 }
 
-static int fdtv_read_status(struct dvb_frontend *fe, enum fe_status *status)
+static int fdtv_read_status(struct dvb_frontend *fe, fe_status_t *status)
 {
 	struct firedtv *fdtv = fe->sec_priv;
 	struct firedtv_tuner_status stat;

@@ -22,13 +22,72 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <media/videobuf-dma-contig.h>
+#define SUNXI_MEM
 
+#ifdef SUNXI_MEM
+#include <linux/ion.h>          //for all "ion api"
+#include <linux/ion_sunxi.h>    //for import global variable "sunxi_ion_client_create"
+#include <linux/dma-mapping.h>  //just include"PAGE_SIZE" macro
+char *ion_name = "ion_video_buf";
+struct videobuf_dma_contig_memory {
+	u32 magic;
+	void *vaddr;
+	dma_addr_t dma_handle;
+	unsigned long size;
+	struct ion_client *client;
+	struct ion_handle *handle;
+};
+static int ion_alloc_coherent(struct videobuf_dma_contig_memory *mem)
+{
+	mem->client = sunxi_ion_client_create(ion_name);
+	if (IS_ERR_OR_NULL(mem->client))
+	{
+		printk("sunxi_ion_client_create failed!!");
+	}
+	mem->handle = ion_alloc(mem->client, mem->size, PAGE_SIZE,
+							ION_HEAP_CARVEOUT_MASK|ION_HEAP_TYPE_DMA_MASK, 0);
+	if (IS_ERR_OR_NULL(mem->handle))
+	{
+		printk("ion_alloc failed!!\n");
+		goto err_alloc;
+	}
+	mem->vaddr = ion_map_kernel( mem->client, mem->handle);
+	if (IS_ERR_OR_NULL(mem->vaddr))
+	{
+		printk("ion_map_kernel failed!!\n");
+		goto err_map_kernel;
+	}
+	if(ion_phys(mem->client, mem->handle, (ion_phys_addr_t *)&mem->dma_handle, &mem->size ))
+	{
+		printk("ion_phys failed!!\n");
+		goto err_phys;
+	}
+	return 0;
+err_phys:	
+	ion_unmap_kernel( mem->client, mem->handle);
+err_map_kernel:
+	ion_free(mem->client, mem->handle);
+err_alloc:
+	ion_client_destroy(mem->client);
+	return -ENOMEM;	
+}
+static int ion_free_coherent(struct videobuf_dma_contig_memory *mem)
+{
+	if (IS_ERR_OR_NULL(mem->client )||IS_ERR_OR_NULL(mem->handle)||IS_ERR_OR_NULL(mem->vaddr))
+		return -1;
+	ion_unmap_kernel(mem->client , mem->handle);
+	ion_free(mem->client , mem->handle);
+	ion_client_destroy(mem->client );
+	return 0;
+}
+#else
 struct videobuf_dma_contig_memory {
 	u32 magic;
 	void *vaddr;
 	dma_addr_t dma_handle;
 	unsigned long size;
 };
+#endif
 
 #define MAGIC_DC_MEM 0x0733ac61
 #define MAGIC_CHECK(is, should)						    \
@@ -42,6 +101,10 @@ static int __videobuf_dc_alloc(struct device *dev,
 			       unsigned long size, gfp_t flags)
 {
 	mem->size = size;
+
+#ifdef SUNXI_MEM
+	return ion_alloc_coherent(mem);
+#else
 	mem->vaddr = dma_alloc_coherent(dev, mem->size,
 					&mem->dma_handle, flags);
 
@@ -53,12 +116,20 @@ static int __videobuf_dc_alloc(struct device *dev,
 	dev_dbg(dev, "dma mapped data is at %p (%ld)\n", mem->vaddr, mem->size);
 
 	return 0;
+
+#endif
+
 }
 
 static void __videobuf_dc_free(struct device *dev,
 			       struct videobuf_dma_contig_memory *mem)
 {
+	
+#ifdef SUNXI_MEM
+	ion_free_coherent(mem);
+#else
 	dma_free_coherent(dev, mem->size, mem->vaddr, mem->dma_handle);
+#endif
 
 	mem->vaddr = NULL;
 }
@@ -303,18 +374,14 @@ static int __videobuf_mmap_mapper(struct videobuf_queue *q,
 		goto error;
 
 	/* Try to remap memory */
+
 	size = vma->vm_end - vma->vm_start;
+	size = (size < mem->size) ? size : mem->size;
+
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-
-	/* the "vm_pgoff" is just used in v4l2 to find the
-	 * corresponding buffer data structure which is allocated
-	 * earlier and it does not mean the offset from the physical
-	 * buffer start address as usual. So set it to 0 to pass
-	 * the sanity check in vm_iomap_memory().
-	 */
-	vma->vm_pgoff = 0;
-
-	retval = vm_iomap_memory(vma, mem->dma_handle, size);
+	retval = remap_pfn_range(vma, vma->vm_start,
+				 mem->dma_handle >> PAGE_SHIFT,
+				 size, vma->vm_page_prot);
 	if (retval) {
 		dev_err(q->dev, "mmap: remap failed with error %d. ",
 			retval);

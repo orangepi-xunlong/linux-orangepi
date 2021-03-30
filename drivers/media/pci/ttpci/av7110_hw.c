@@ -22,7 +22,7 @@
  * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  * Or, point your browser to http://www.gnu.org/copyleft/gpl.html
  *
- * the project's page is at https://linuxtv.org
+ * the project's page is at http://www.linuxtv.org/
  */
 
 /* for debugging ARM communication: */
@@ -56,11 +56,11 @@
    by Nathan Laredo <laredo@gnu.org> */
 
 int av7110_debiwrite(struct av7110 *av7110, u32 config,
-		     int addr, u32 val, unsigned int count)
+		     int addr, u32 val, int count)
 {
 	struct saa7146_dev *dev = av7110->dev;
 
-	if (count > 32764) {
+	if (count <= 0 || count > 32764) {
 		printk("%s: invalid count %d\n", __func__, count);
 		return -1;
 	}
@@ -78,12 +78,12 @@ int av7110_debiwrite(struct av7110 *av7110, u32 config,
 	return 0;
 }
 
-u32 av7110_debiread(struct av7110 *av7110, u32 config, int addr, unsigned int count)
+u32 av7110_debiread(struct av7110 *av7110, u32 config, int addr, int count)
 {
 	struct saa7146_dev *dev = av7110->dev;
 	u32 result = 0;
 
-	if (count > 32764) {
+	if (count > 32764 || count <= 0) {
 		printk("%s: invalid count %d\n", __func__, count);
 		return 0;
 	}
@@ -501,7 +501,7 @@ int av7110_fw_cmd(struct av7110 *av7110, int type, int com, int num, ...)
 
 //	dprintk(4, "%p\n", av7110);
 
-	if (2 + num > ARRAY_SIZE(buf)) {
+	if (2 + num > sizeof(buf)) {
 		printk(KERN_WARNING
 		       "%s: %s len=%d is too big!\n",
 		       KBUILD_MODNAME, __func__, num);

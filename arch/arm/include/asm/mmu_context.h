@@ -15,11 +15,9 @@
 
 #include <linux/compiler.h>
 #include <linux/sched.h>
-#include <linux/preempt.h>
 #include <asm/cacheflush.h>
 #include <asm/cachetype.h>
 #include <asm/proc-fns.h>
-#include <asm/smp_plat.h>
 #include <asm-generic/mm_hooks.h>
 
 void __check_vmalloc_seq(struct mm_struct *mm);
@@ -27,12 +25,7 @@ void __check_vmalloc_seq(struct mm_struct *mm);
 #ifdef CONFIG_CPU_HAS_ASID
 
 void check_and_switch_context(struct mm_struct *mm, struct task_struct *tsk);
-static inline int
-init_new_context(struct task_struct *tsk, struct mm_struct *mm)
-{
-	atomic64_set(&mm->context.id, 0);
-	return 0;
-}
+#define init_new_context(tsk,mm)	({ atomic64_set(&mm->context.id, 0); 0; })
 
 #ifdef CONFIG_ARM_ERRATA_798181
 void a15_erratum_get_cpumask(int this_cpu, struct mm_struct *mm,
@@ -67,7 +60,6 @@ static inline void check_and_switch_context(struct mm_struct *mm,
 		cpu_switch_mm(mm->pgd, mm);
 }
 
-#ifndef MODULE
 #define finish_arch_post_lock_switch \
 	finish_arch_post_lock_switch
 static inline void finish_arch_post_lock_switch(void)
@@ -89,16 +81,10 @@ static inline void finish_arch_post_lock_switch(void)
 		preempt_enable_no_resched();
 	}
 }
-#endif /* !MODULE */
 
 #endif	/* CONFIG_MMU */
 
-static inline int
-init_new_context(struct task_struct *tsk, struct mm_struct *mm)
-{
-	return 0;
-}
-
+#define init_new_context(tsk,mm)	0
 
 #endif	/* CONFIG_CPU_HAS_ASID */
 
@@ -132,16 +118,12 @@ switch_mm(struct mm_struct *prev, struct mm_struct *next,
 #ifdef CONFIG_MMU
 	unsigned int cpu = smp_processor_id();
 
-	/*
-	 * __sync_icache_dcache doesn't broadcast the I-cache invalidation,
-	 * so check for possible thread migration and invalidate the I-cache
-	 * if we're new to this CPU.
-	 */
-	if (cache_ops_need_broadcast() &&
-	    !cpumask_empty(mm_cpumask(next)) &&
+#ifdef CONFIG_SMP
+	/* check for possible thread migration */
+	if (!cpumask_empty(mm_cpumask(next)) &&
 	    !cpumask_test_cpu(cpu, mm_cpumask(next)))
 		__flush_icache_all();
-
+#endif
 	if (!cpumask_test_and_set_cpu(cpu, mm_cpumask(next)) || prev != next) {
 		check_and_switch_context(next, tsk);
 		if (cache_is_vivt())

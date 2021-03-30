@@ -5,15 +5,21 @@
 #error SMP not supported on pre-ARMv6 CPUs
 #endif
 
-#include <linux/prefetch.h>
-#include <asm/barrier.h>
 #include <asm/processor.h>
 
 /*
  * sev and wfe are ARMv6K extensions.  Uniprocessor ARMv6 may not have the K
  * extensions, so when running on UP, we have to patch these instructions away.
  */
+#define ALT_SMP(smp, up)					\
+	"9998:	" smp "\n"					\
+	"	.pushsection \".alt.smp.init\", \"a\"\n"	\
+	"	.long	9998b\n"				\
+	"	" up "\n"					\
+	"	.popsection\n"
+
 #ifdef CONFIG_THUMB2_KERNEL
+#define SEV		ALT_SMP("sev.w", "nop.w")
 /*
  * For Thumb-2, special care is needed to ensure that the conditional WFE
  * instruction really does assemble to exactly 4 bytes (as required by
@@ -25,23 +31,31 @@
  * the assembler won't change IT instructions which are explicitly present
  * in the input.
  */
-#define WFE(cond)	__ALT_SMP_ASM(		\
+#define WFE(cond)	ALT_SMP(		\
 	"it " cond "\n\t"			\
 	"wfe" cond ".n",			\
 						\
 	"nop.w"					\
 )
 #else
-#define WFE(cond)	__ALT_SMP_ASM("wfe" cond, "nop")
+#define SEV		ALT_SMP("sev", "nop")
+#define WFE(cond)	ALT_SMP("wfe" cond, "nop")
 #endif
-
-#define SEV		__ALT_SMP_ASM(WASM(sev), WASM(nop))
 
 static inline void dsb_sev(void)
 {
-
-	dsb(ishst);
-	__asm__(SEV);
+#if __LINUX_ARM_ARCH__ >= 7
+	__asm__ __volatile__ (
+		"dsb\n"
+		SEV
+	);
+#else
+	__asm__ __volatile__ (
+		"mcr p15, 0, %0, c7, c10, 4\n"
+		SEV
+		: : "r" (0)
+	);
+#endif
 }
 
 /*
@@ -52,21 +66,8 @@ static inline void dsb_sev(void)
  * memory.
  */
 
-static inline void arch_spin_unlock_wait(arch_spinlock_t *lock)
-{
-	u16 owner = READ_ONCE(lock->tickets.owner);
-
-	for (;;) {
-		arch_spinlock_t tmp = READ_ONCE(*lock);
-
-		if (tmp.tickets.owner == tmp.tickets.next ||
-		    tmp.tickets.owner != owner)
-			break;
-
-		wfe();
-	}
-	smp_acquire__after_ctrl_dep();
-}
+#define arch_spin_unlock_wait(lock) \
+	do { while (arch_spin_is_locked(lock)) cpu_relax(); } while (0)
 
 #define arch_spin_lock_flags(lock, flags) arch_spin_lock(lock)
 
@@ -76,7 +77,6 @@ static inline void arch_spin_lock(arch_spinlock_t *lock)
 	u32 newval;
 	arch_spinlock_t lockval;
 
-	prefetchw(&lock->slock);
 	__asm__ __volatile__(
 "1:	ldrex	%0, [%3]\n"
 "	add	%1, %0, %4\n"
@@ -100,7 +100,6 @@ static inline int arch_spin_trylock(arch_spinlock_t *lock)
 	unsigned long contended, res;
 	u32 slock;
 
-	prefetchw(&lock->slock);
 	do {
 		__asm__ __volatile__(
 		"	ldrex	%0, [%3]\n"
@@ -128,19 +127,15 @@ static inline void arch_spin_unlock(arch_spinlock_t *lock)
 	dsb_sev();
 }
 
-static inline int arch_spin_value_unlocked(arch_spinlock_t lock)
-{
-	return lock.tickets.owner == lock.tickets.next;
-}
-
 static inline int arch_spin_is_locked(arch_spinlock_t *lock)
 {
-	return !arch_spin_value_unlocked(READ_ONCE(*lock));
+	struct __raw_tickets tickets = ACCESS_ONCE(lock->tickets);
+	return tickets.owner != tickets.next;
 }
 
 static inline int arch_spin_is_contended(arch_spinlock_t *lock)
 {
-	struct __raw_tickets tickets = READ_ONCE(lock->tickets);
+	struct __raw_tickets tickets = ACCESS_ONCE(lock->tickets);
 	return (tickets.next - tickets.owner) > 1;
 }
 #define arch_spin_is_contended	arch_spin_is_contended
@@ -157,7 +152,6 @@ static inline void arch_write_lock(arch_rwlock_t *rw)
 {
 	unsigned long tmp;
 
-	prefetchw(&rw->lock);
 	__asm__ __volatile__(
 "1:	ldrex	%0, [%1]\n"
 "	teq	%0, #0\n"
@@ -176,7 +170,6 @@ static inline int arch_write_trylock(arch_rwlock_t *rw)
 {
 	unsigned long contended, res;
 
-	prefetchw(&rw->lock);
 	do {
 		__asm__ __volatile__(
 		"	ldrex	%0, [%2]\n"
@@ -210,7 +203,7 @@ static inline void arch_write_unlock(arch_rwlock_t *rw)
 }
 
 /* write_can_lock - would write_trylock() succeed? */
-#define arch_write_can_lock(x)		(ACCESS_ONCE((x)->lock) == 0)
+#define arch_write_can_lock(x)		((x)->lock == 0)
 
 /*
  * Read locks are a bit more hairy:
@@ -228,7 +221,6 @@ static inline void arch_read_lock(arch_rwlock_t *rw)
 {
 	unsigned long tmp, tmp2;
 
-	prefetchw(&rw->lock);
 	__asm__ __volatile__(
 "1:	ldrex	%0, [%2]\n"
 "	adds	%0, %0, #1\n"
@@ -249,7 +241,6 @@ static inline void arch_read_unlock(arch_rwlock_t *rw)
 
 	smp_mb();
 
-	prefetchw(&rw->lock);
 	__asm__ __volatile__(
 "1:	ldrex	%0, [%2]\n"
 "	sub	%0, %0, #1\n"
@@ -268,7 +259,6 @@ static inline int arch_read_trylock(arch_rwlock_t *rw)
 {
 	unsigned long contended, res;
 
-	prefetchw(&rw->lock);
 	do {
 		__asm__ __volatile__(
 		"	ldrex	%0, [%2]\n"
@@ -290,7 +280,7 @@ static inline int arch_read_trylock(arch_rwlock_t *rw)
 }
 
 /* read_can_lock - would read_trylock() succeed? */
-#define arch_read_can_lock(x)		(ACCESS_ONCE((x)->lock) < 0x80000000)
+#define arch_read_can_lock(x)		((x)->lock < 0x80000000)
 
 #define arch_read_lock_flags(lock, flags) arch_read_lock(lock)
 #define arch_write_lock_flags(lock, flags) arch_write_lock(lock)

@@ -18,25 +18,6 @@
 #include <linux/uaccess.h>
 #include <linux/err.h>
 
-/* 88pm80x chips have same definition for chip id register. */
-#define PM80X_CHIP_ID			(0x00)
-#define PM80X_CHIP_ID_NUM(x)		(((x) >> 5) & 0x7)
-#define PM80X_CHIP_ID_REVISION(x)	((x) & 0x1F)
-
-struct pm80x_chip_mapping {
-	unsigned int	id;
-	int		type;
-};
-
-static struct pm80x_chip_mapping chip_mapping[] = {
-	/* 88PM800 chip id number */
-	{0x3,	CHIP_PM800},
-	/* 88PM805 chip id number */
-	{0x0,	CHIP_PM805},
-	/* 88PM860 chip id number */
-	{0x4,	CHIP_PM860},
-};
-
 /*
  * workaround: some registers needed by pm805 are defined in pm800, so
  * need to use this global variable to maintain the relation between
@@ -50,13 +31,12 @@ const struct regmap_config pm80x_regmap_config = {
 };
 EXPORT_SYMBOL_GPL(pm80x_regmap_config);
 
-
-int pm80x_init(struct i2c_client *client)
+int pm80x_init(struct i2c_client *client,
+				 const struct i2c_device_id *id)
 {
 	struct pm80x_chip *chip;
 	struct regmap *map;
-	unsigned int val;
-	int i, ret = 0;
+	int ret = 0;
 
 	chip =
 	    devm_kzalloc(&client->dev, sizeof(struct pm80x_chip), GFP_KERNEL);
@@ -71,6 +51,10 @@ int pm80x_init(struct i2c_client *client)
 		return ret;
 	}
 
+	chip->id = id->driver_data;
+	if (chip->id < CHIP_PM800 || chip->id > CHIP_PM805)
+		return -EINVAL;
+
 	chip->client = client;
 	chip->regmap = map;
 
@@ -79,25 +63,6 @@ int pm80x_init(struct i2c_client *client)
 	chip->dev = &client->dev;
 	dev_set_drvdata(chip->dev, chip);
 	i2c_set_clientdata(chip->client, chip);
-
-	ret = regmap_read(chip->regmap, PM80X_CHIP_ID, &val);
-	if (ret < 0) {
-		dev_err(chip->dev, "Failed to read CHIP ID: %d\n", ret);
-		return ret;
-	}
-
-	for (i = 0; i < ARRAY_SIZE(chip_mapping); i++) {
-		if (chip_mapping[i].id == PM80X_CHIP_ID_NUM(val)) {
-			chip->type = chip_mapping[i].type;
-			break;
-		}
-	}
-
-	if (i == ARRAY_SIZE(chip_mapping)) {
-		dev_err(chip->dev,
-			"Failed to detect Marvell 88PM800:ChipID[0x%x]\n", val);
-		return -EINVAL;
-	}
 
 	device_init_wakeup(&client->dev, 1);
 
@@ -135,7 +100,7 @@ EXPORT_SYMBOL_GPL(pm80x_deinit);
 #ifdef CONFIG_PM_SLEEP
 static int pm80x_suspend(struct device *dev)
 {
-	struct i2c_client *client = to_i2c_client(dev);
+	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
 	struct pm80x_chip *chip = i2c_get_clientdata(client);
 
 	if (chip && chip->wu_flag)
@@ -147,7 +112,7 @@ static int pm80x_suspend(struct device *dev)
 
 static int pm80x_resume(struct device *dev)
 {
-	struct i2c_client *client = to_i2c_client(dev);
+	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
 	struct pm80x_chip *chip = i2c_get_clientdata(client);
 
 	if (chip && chip->wu_flag)

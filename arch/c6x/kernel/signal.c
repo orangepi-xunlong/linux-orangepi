@@ -68,7 +68,7 @@ asmlinkage int do_rt_sigreturn(struct pt_regs *regs)
 	sigset_t set;
 
 	/* Always make any pending restarted system calls return -EINTR */
-	current->restart_block.fn = do_no_restart_syscall;
+	current_thread_info()->restart_block.fn = do_no_restart_syscall;
 
 	/*
 	 * Since we stacked the signal on a dword boundary,
@@ -127,11 +127,17 @@ static int setup_sigcontext(struct sigcontext __user *sc, struct pt_regs *regs,
 	return err;
 }
 
-static inline void __user *get_sigframe(struct ksignal *ksig,
+static inline void __user *get_sigframe(struct k_sigaction *ka,
 					struct pt_regs *regs,
 					unsigned long framesize)
 {
-	unsigned long sp = sigsp(regs->sp, ksig);
+	unsigned long sp = regs->sp;
+
+	/*
+	 * This is the X/Open sanctioned signal stack switching.
+	 */
+	if ((ka->sa.sa_flags & SA_ONSTACK) && sas_ss_flags(sp) == 0)
+		sp = current->sas_ss_sp + current->sas_ss_size;
 
 	/*
 	 * No matter what happens, 'sp' must be dword
@@ -140,21 +146,21 @@ static inline void __user *get_sigframe(struct ksignal *ksig,
 	return (void __user *)((sp - framesize) & ~7);
 }
 
-static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
-			  struct pt_regs *regs)
+static int setup_rt_frame(int signr, struct k_sigaction *ka, siginfo_t *info,
+			   sigset_t *set, struct pt_regs *regs)
 {
 	struct rt_sigframe __user *frame;
 	unsigned long __user *retcode;
 	int err = 0;
 
-	frame = get_sigframe(ksig, regs, sizeof(*frame));
+	frame = get_sigframe(ka, regs, sizeof(*frame));
 
 	if (!access_ok(VERIFY_WRITE, frame, sizeof(*frame)))
-		return -EFAULT;
+		goto segv_and_exit;
 
 	err |= __put_user(&frame->info, &frame->pinfo);
 	err |= __put_user(&frame->uc, &frame->puc);
-	err |= copy_siginfo_to_user(&frame->info, &ksig->info);
+	err |= copy_siginfo_to_user(&frame->info, info);
 
 	/* Clear all the bits of the ucontext we don't use.  */
 	err |= __clear_user(&frame->uc, offsetof(struct ucontext, uc_mcontext));
@@ -182,7 +188,7 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 #undef COPY
 
 	if (err)
-		return -EFAULT;
+		goto segv_and_exit;
 
 	flush_icache_range((unsigned long) &frame->retcode,
 			   (unsigned long) &frame->retcode + RETCODE_SIZE);
@@ -192,10 +198,10 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 	/* Change user context to branch to signal handler */
 	regs->sp = (unsigned long) frame - 8;
 	regs->b3 = (unsigned long) retcode;
-	regs->pc = (unsigned long) ksig->ka.sa.sa_handler;
+	regs->pc = (unsigned long) ka->sa.sa_handler;
 
 	/* Give the signal number to the handler */
-	regs->a4 = ksig->sig;
+	regs->a4 = signr;
 
 	/*
 	 * For realtime signals we must also set the second and third
@@ -206,6 +212,10 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 	regs->a6 = (unsigned long)&frame->uc;
 
 	return 0;
+
+segv_and_exit:
+	force_sigsegv(signr, current);
+	return -EFAULT;
 }
 
 static inline void
@@ -235,11 +245,10 @@ do_restart:
 /*
  * handle the actual delivery of a signal to userspace
  */
-static void handle_signal(struct ksignal *ksig, struct pt_regs *regs,
-			  int syscall)
+static void handle_signal(int sig,
+			 siginfo_t *info, struct k_sigaction *ka,
+			 struct pt_regs *regs, int syscall)
 {
-	int ret;
-
 	/* Are we from a system call? */
 	if (syscall) {
 		/* If so, check system call restarting.. */
@@ -250,7 +259,7 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs,
 			break;
 
 		case -ERESTARTSYS:
-			if (!(ksig->ka.sa.sa_flags & SA_RESTART)) {
+			if (!(ka->sa.sa_flags & SA_RESTART)) {
 				regs->a4 = -EINTR;
 				break;
 			}
@@ -263,8 +272,9 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs,
 	}
 
 	/* Set up the stack frame */
-	ret = setup_rt_frame(ksig, sigmask_to_save(), regs);
-	signal_setup_done(ret, ksig, 0);
+	if (setup_rt_frame(sig, ka, info, sigmask_to_save(), regs) < 0)
+		return;
+	signal_delivered(sig, info, ka, regs, 0);
 }
 
 /*
@@ -272,15 +282,18 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs,
  */
 static void do_signal(struct pt_regs *regs, int syscall)
 {
-	struct ksignal ksig;
+	struct k_sigaction ka;
+	siginfo_t info;
+	int signr;
 
 	/* we want the common case to go fast, which is why we may in certain
 	 * cases get here from kernel mode */
 	if (!user_mode(regs))
 		return;
 
-	if (get_signal(&ksig)) {
-		handle_signal(&ksig, regs, syscall);
+	signr = get_signal_to_deliver(&info, &ka, regs, NULL);
+	if (signr > 0) {
+		handle_signal(signr, &info, &ka, regs, syscall);
 		return;
 	}
 

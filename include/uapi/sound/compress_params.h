@@ -73,8 +73,7 @@
 #define SND_AUDIOCODEC_IEC61937              ((__u32) 0x0000000B)
 #define SND_AUDIOCODEC_G723_1                ((__u32) 0x0000000C)
 #define SND_AUDIOCODEC_G729                  ((__u32) 0x0000000D)
-#define SND_AUDIOCODEC_BESPOKE               ((__u32) 0x0000000E)
-#define SND_AUDIOCODEC_MAX                   SND_AUDIOCODEC_BESPOKE
+#define SND_AUDIOCODEC_MAX                   SND_AUDIOCODEC_G729
 
 /*
  * Profile and modes are listed with bit masks. This allows for a
@@ -269,7 +268,7 @@ struct snd_enc_vorbis {
 	__u32 max_bit_rate;
 	__u32 min_bit_rate;
 	__u32 downmix;
-} __attribute__((packed, aligned(4)));
+};
 
 
 /**
@@ -285,7 +284,7 @@ struct snd_enc_real {
 	__u32 quant_bits;
 	__u32 start_region;
 	__u32 num_regions;
-} __attribute__((packed, aligned(4)));
+};
 
 /**
  * struct snd_enc_flac
@@ -309,12 +308,12 @@ struct snd_enc_real {
 struct snd_enc_flac {
 	__u32 num;
 	__u32 gain;
-} __attribute__((packed, aligned(4)));
+};
 
 struct snd_enc_generic {
 	__u32 bw;	/* encoder bandwidth */
-	__s32 reserved[15];	/* Can be used for SND_AUDIOCODEC_BESPOKE */
-} __attribute__((packed, aligned(4)));
+	__s32 reserved[15];
+};
 
 union snd_codec_options {
 	struct snd_enc_wma wma;
@@ -322,7 +321,7 @@ union snd_codec_options {
 	struct snd_enc_real real;
 	struct snd_enc_flac flac;
 	struct snd_enc_generic generic;
-} __attribute__((packed, aligned(4)));
+};
 
 /** struct snd_codec_desc - description of codec capabilities
  * @max_ch: Maximum number of audio channels
@@ -359,7 +358,7 @@ struct snd_codec_desc {
 	__u32 formats;
 	__u32 min_buffer;
 	__u32 reserved[15];
-} __attribute__((packed, aligned(4)));
+};
 
 /** struct snd_codec
  * @id: Identifies the supported audio encoder/decoder.
@@ -400,6 +399,6 @@ struct snd_codec {
 	__u32 align;
 	union snd_codec_options options;
 	__u32 reserved[3];
-} __attribute__((packed, aligned(4)));
+};
 
 #endif

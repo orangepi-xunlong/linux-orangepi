@@ -48,11 +48,11 @@ static struct resource tc6387xb_mmc_resources[] = {
 static int tc6387xb_suspend(struct platform_device *dev, pm_message_t state)
 {
 	struct tc6387xb *tc6387xb = platform_get_drvdata(dev);
-	struct tc6387xb_platform_data *pdata = dev_get_platdata(&dev->dev);
+	struct tc6387xb_platform_data *pdata = dev->dev.platform_data;
 
 	if (pdata && pdata->suspend)
 		pdata->suspend(dev);
-	clk_disable_unprepare(tc6387xb->clk32k);
+	clk_disable(tc6387xb->clk32k);
 
 	return 0;
 }
@@ -60,9 +60,9 @@ static int tc6387xb_suspend(struct platform_device *dev, pm_message_t state)
 static int tc6387xb_resume(struct platform_device *dev)
 {
 	struct tc6387xb *tc6387xb = platform_get_drvdata(dev);
-	struct tc6387xb_platform_data *pdata = dev_get_platdata(&dev->dev);
+	struct tc6387xb_platform_data *pdata = dev->dev.platform_data;
 
-	clk_prepare_enable(tc6387xb->clk32k);
+	clk_enable(tc6387xb->clk32k);
 	if (pdata && pdata->resume)
 		pdata->resume(dev);
 
@@ -100,7 +100,7 @@ static int tc6387xb_mmc_enable(struct platform_device *mmc)
 	struct platform_device *dev      = to_platform_device(mmc->dev.parent);
 	struct tc6387xb *tc6387xb = platform_get_drvdata(dev);
 
-	clk_prepare_enable(tc6387xb->clk32k);
+	clk_enable(tc6387xb->clk32k);
 
 	tmio_core_mmc_enable(tc6387xb->scr + 0x200, 0,
 		tc6387xb_mmc_resources[0].start & 0xfffe);
@@ -113,7 +113,7 @@ static int tc6387xb_mmc_disable(struct platform_device *mmc)
 	struct platform_device *dev      = to_platform_device(mmc->dev.parent);
 	struct tc6387xb *tc6387xb = platform_get_drvdata(dev);
 
-	clk_disable_unprepare(tc6387xb->clk32k);
+	clk_disable(tc6387xb->clk32k);
 
 	return 0;
 }
@@ -126,7 +126,7 @@ static struct tmio_mmc_data tc6387xb_mmc_data = {
 
 /*--------------------------------------------------------------------------*/
 
-static const struct mfd_cell tc6387xb_cells[] = {
+static struct mfd_cell tc6387xb_cells[] = {
 	[TC6387XB_CELL_MMC] = {
 		.name = "tmio-mmc",
 		.enable = tc6387xb_mmc_enable,
@@ -140,17 +140,18 @@ static const struct mfd_cell tc6387xb_cells[] = {
 
 static int tc6387xb_probe(struct platform_device *dev)
 {
-	struct tc6387xb_platform_data *pdata = dev_get_platdata(&dev->dev);
+	struct tc6387xb_platform_data *pdata = dev->dev.platform_data;
 	struct resource *iomem, *rscr;
 	struct clk *clk32k;
 	struct tc6387xb *tc6387xb;
 	int irq, ret;
 
 	iomem = platform_get_resource(dev, IORESOURCE_MEM, 0);
-	if (!iomem)
+	if (!iomem) {
 		return -EINVAL;
+	}
 
-	tc6387xb = kzalloc(sizeof(*tc6387xb), GFP_KERNEL);
+	tc6387xb = kzalloc(sizeof *tc6387xb, GFP_KERNEL);
 	if (!tc6387xb)
 		return -ENOMEM;
 
@@ -188,7 +189,7 @@ static int tc6387xb_probe(struct platform_device *dev)
 	if (pdata && pdata->enable)
 		pdata->enable(dev);
 
-	dev_info(&dev->dev, "Toshiba tc6387xb initialised\n");
+	printk(KERN_INFO "Toshiba tc6387xb initialised\n");
 
 	ret = mfd_add_devices(&dev->dev, dev->id, tc6387xb_cells,
 			      ARRAY_SIZE(tc6387xb_cells), iomem, irq, NULL);
@@ -214,8 +215,9 @@ static int tc6387xb_remove(struct platform_device *dev)
 	mfd_remove_devices(&dev->dev);
 	iounmap(tc6387xb->scr);
 	release_resource(&tc6387xb->rscr);
-	clk_disable_unprepare(tc6387xb->clk32k);
+	clk_disable(tc6387xb->clk32k);
 	clk_put(tc6387xb->clk32k);
+	platform_set_drvdata(dev, NULL);
 	kfree(tc6387xb);
 
 	return 0;

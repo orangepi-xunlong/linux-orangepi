@@ -1,17 +1,18 @@
+
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/utility/bsp_common.h
+ ******************************************************************************
  *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
+ * bsp_common.h
  *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
+ * Hawkview ISP - bsp_common.h module
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Copyright (c) 2015 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
  *
+ * Version		  Author         Date		    Description
+ *
+ *   3.0		  Yang Feng   	2015/12/02	ISP Tuning Tools Support
+ *
+ ******************************************************************************
  */
 
 #ifndef __BSP_COMMON__H__
@@ -67,9 +68,9 @@ enum bit_width {
 	W_32BIT,
 };
 
-extern enum bus_pixeltype find_bus_type(u32 code);
-extern enum bit_width find_bus_width(u32 code);
-extern enum bit_width find_bus_precision(u32 code);
+extern enum bus_pixeltype find_bus_type(enum v4l2_mbus_pixelcode code);
+extern enum bit_width find_bus_width(enum v4l2_mbus_pixelcode code);
+extern enum bit_width find_bus_precision(enum v4l2_mbus_pixelcode code);
 extern enum pixel_fmt_type find_pixel_fmt_type(unsigned int pix_fmt);
 
 #endif /*__BSP_COMMON__H__*/

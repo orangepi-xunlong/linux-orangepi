@@ -26,10 +26,15 @@ struct inode;
 /*
  * COW Supplementary groups list
  */
+#define NGROUPS_SMALL		32
+#define NGROUPS_PER_BLOCK	((unsigned int)(PAGE_SIZE / sizeof(kgid_t)))
+
 struct group_info {
 	atomic_t	usage;
 	int		ngroups;
-	kgid_t		gid[0];
+	int		nblocks;
+	kgid_t		small_block[NGROUPS_SMALL];
+	kgid_t		*blocks[0];
 };
 
 /**
@@ -57,32 +62,20 @@ do {							\
 		groups_free(group_info);		\
 } while (0)
 
-extern struct group_info init_groups;
-#ifdef CONFIG_MULTIUSER
 extern struct group_info *groups_alloc(int);
+extern struct group_info init_groups;
 extern void groups_free(struct group_info *);
+extern int set_current_groups(struct group_info *);
+extern int set_groups(struct cred *, struct group_info *);
+extern int groups_search(const struct group_info *, kgid_t);
+extern bool may_setgroups(void);
+
+/* access the groups "array" with this macro */
+#define GROUP_AT(gi, i) \
+	((gi)->blocks[(i) / NGROUPS_PER_BLOCK][(i) % NGROUPS_PER_BLOCK])
 
 extern int in_group_p(kgid_t);
 extern int in_egroup_p(kgid_t);
-#else
-static inline void groups_free(struct group_info *group_info)
-{
-}
-
-static inline int in_group_p(kgid_t grp)
-{
-        return 1;
-}
-static inline int in_egroup_p(kgid_t grp)
-{
-        return 1;
-}
-#endif
-extern int set_current_groups(struct group_info *);
-extern void set_groups(struct cred *, struct group_info *);
-extern int groups_search(const struct group_info *, kgid_t);
-extern bool may_setgroups(void);
-extern void groups_sort(struct group_info *);
 
 /*
  * The security context of a task
@@ -129,7 +122,6 @@ struct cred {
 	kernel_cap_t	cap_permitted;	/* caps we're permitted */
 	kernel_cap_t	cap_effective;	/* caps we can actually use */
 	kernel_cap_t	cap_bset;	/* capability bounding set */
-	kernel_cap_t	cap_ambient;	/* Ambient capability set */
 #ifdef CONFIG_KEYS
 	unsigned char	jit_keyring;	/* default keyring to attach requested
 					 * keys to */
@@ -205,13 +197,6 @@ static inline void validate_process_creds(void)
 }
 #endif
 
-static inline bool cap_ambient_invariant_ok(const struct cred *cred)
-{
-	return cap_issubset(cred->cap_ambient,
-			    cap_intersect(cred->cap_permitted,
-					  cred->cap_inheritable));
-}
-
 /**
  * get_new_cred - Get a reference on a new set of credentials
  * @cred: The new credentials to reference
@@ -273,15 +258,6 @@ static inline void put_cred(const struct cred *_cred)
  */
 #define current_cred() \
 	rcu_dereference_protected(current->cred, 1)
-
-/**
- * current_real_cred - Access the current task's objective credentials
- *
- * Access the objective credentials of the current task.  RCU-safe,
- * since nobody else can modify it.
- */
-#define current_real_cred() \
-	rcu_dereference_protected(current->real_cred, 1)
 
 /**
  * __task_cred - Access a task's objective credentials
@@ -369,10 +345,7 @@ extern struct user_namespace init_user_ns;
 #ifdef CONFIG_USER_NS
 #define current_user_ns()	(current_cred_xxx(user_ns))
 #else
-static inline struct user_namespace *current_user_ns(void)
-{
-	return &init_user_ns;
-}
+#define current_user_ns()	(&init_user_ns)
 #endif
 
 

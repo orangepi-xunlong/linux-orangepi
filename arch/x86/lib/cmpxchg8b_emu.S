@@ -7,7 +7,10 @@
  */
 
 #include <linux/linkage.h>
-#include <asm/export.h>
+#include <asm/alternative-asm.h>
+#include <asm/frame.h>
+#include <asm/dwarf2.h>
+
 
 .text
 
@@ -20,19 +23,21 @@
  * %ecx : high 32 bits of new value
  */
 ENTRY(cmpxchg8b_emu)
+CFI_STARTPROC
 
 #
 # Emulate 'cmpxchg8b (%esi)' on UP except we don't
 # set the whole ZF thing (caller will just compare
 # eax:edx with the expected value)
 #
+cmpxchg8b_emu:
 	pushfl
 	cli
 
 	cmpl  (%esi), %eax
-	jne .Lnot_same
+	jne not_same
 	cmpl 4(%esi), %edx
-	jne .Lhalf_same
+	jne half_same
 
 	movl %ebx,  (%esi)
 	movl %ecx, 4(%esi)
@@ -40,13 +45,13 @@ ENTRY(cmpxchg8b_emu)
 	popfl
 	ret
 
-.Lnot_same:
+ not_same:
 	movl  (%esi), %eax
-.Lhalf_same:
+ half_same:
 	movl 4(%esi), %edx
 
 	popfl
 	ret
 
+CFI_ENDPROC
 ENDPROC(cmpxchg8b_emu)
-EXPORT_SYMBOL(cmpxchg8b_emu)

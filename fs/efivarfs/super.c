@@ -45,7 +45,8 @@ static struct super_block *efivarfs_sb;
  * So we need to perform a case-sensitive match on part 1 and a
  * case-insensitive match on part 2.
  */
-static int efivarfs_d_compare(const struct dentry *dentry,
+static int efivarfs_d_compare(const struct dentry *parent, const struct inode *pinode,
+			      const struct dentry *dentry, const struct inode *inode,
 			      unsigned int len, const char *str,
 			      const struct qstr *name)
 {
@@ -62,9 +63,10 @@ static int efivarfs_d_compare(const struct dentry *dentry,
 	return strncasecmp(name->name + guid, str + guid, EFI_VARIABLE_GUID_LEN);
 }
 
-static int efivarfs_d_hash(const struct dentry *dentry, struct qstr *qstr)
+static int efivarfs_d_hash(const struct dentry *dentry,
+			   const struct inode *inode, struct qstr *qstr)
 {
-	unsigned long hash = init_name_hash(dentry);
+	unsigned long hash = init_name_hash();
 	const unsigned char *s = qstr->name;
 	unsigned int len = qstr->len;
 
@@ -82,10 +84,19 @@ static int efivarfs_d_hash(const struct dentry *dentry, struct qstr *qstr)
 	return 0;
 }
 
-static const struct dentry_operations efivarfs_d_ops = {
+/*
+ * Retaining negative dentries for an in-memory filesystem just wastes
+ * memory and lookup time: arrange for them to be deleted immediately.
+ */
+static int efivarfs_delete_dentry(const struct dentry *dentry)
+{
+	return 1;
+}
+
+static struct dentry_operations efivarfs_d_ops = {
 	.d_compare = efivarfs_d_compare,
 	.d_hash = efivarfs_d_hash,
-	.d_delete = always_delete_dentry,
+	.d_delete = efivarfs_delete_dentry,
 };
 
 static struct dentry *efivarfs_alloc_dentry(struct dentry *parent, char *name)
@@ -97,7 +108,7 @@ static struct dentry *efivarfs_alloc_dentry(struct dentry *parent, char *name)
 	q.name = name;
 	q.len = strlen(name);
 
-	err = efivarfs_d_hash(parent, &q);
+	err = efivarfs_d_hash(NULL, NULL, &q);
 	if (err)
 		return ERR_PTR(err);
 
@@ -117,37 +128,33 @@ static int efivarfs_callback(efi_char16_t *name16, efi_guid_t vendor,
 	struct dentry *dentry, *root = sb->s_root;
 	unsigned long size = 0;
 	char *name;
-	int len;
+	int len, i;
 	int err = -ENOMEM;
-	bool is_removable = false;
 
-	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
+	entry = kmalloc(sizeof(*entry), GFP_KERNEL);
 	if (!entry)
 		return err;
 
 	memcpy(entry->var.VariableName, name16, name_size);
 	memcpy(&(entry->var.VendorGuid), &vendor, sizeof(efi_guid_t));
 
-	len = ucs2_utf8size(entry->var.VariableName);
+	len = ucs2_strlen(entry->var.VariableName);
 
 	/* name, plus '-', plus GUID, plus NUL*/
 	name = kmalloc(len + 1 + EFI_VARIABLE_GUID_LEN + 1, GFP_KERNEL);
 	if (!name)
 		goto fail;
 
-	ucs2_as_utf8(name, entry->var.VariableName, len);
-
-	if (efivar_variable_is_removable(entry->var.VendorGuid, name, len))
-		is_removable = true;
+	for (i = 0; i < len; i++)
+		name[i] = entry->var.VariableName[i] & 0xFF;
 
 	name[len] = '-';
 
-	efi_guid_to_str(&entry->var.VendorGuid, name + len + 1);
+	efi_guid_unparse(&entry->var.VendorGuid, name + len + 1);
 
 	name[len + EFI_VARIABLE_GUID_LEN+1] = '\0';
 
-	inode = efivarfs_get_inode(sb, d_inode(root), S_IFREG | 0644, 0,
-				   is_removable);
+	inode = efivarfs_get_inode(sb, root->d_inode, S_IFREG | 0644, 0);
 	if (!inode)
 		goto fail_name;
 
@@ -157,18 +164,16 @@ static int efivarfs_callback(efi_char16_t *name16, efi_guid_t vendor,
 		goto fail_inode;
 	}
 
-	efivar_entry_size(entry, &size);
-	err = efivar_entry_add(entry, &efivarfs_list);
-	if (err)
-		goto fail_inode;
-
 	/* copied by the above to local storage in the dentry. */
 	kfree(name);
 
-	inode_lock(inode);
+	efivar_entry_size(entry, &size);
+	efivar_entry_add(entry, &efivarfs_list);
+
+	mutex_lock(&inode->i_mutex);
 	inode->i_private = entry;
 	i_size_write(inode, size + sizeof(entry->var.Attributes));
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 	d_add(dentry, inode);
 
 	return 0;
@@ -184,10 +189,7 @@ fail:
 
 static int efivarfs_destroy(struct efivar_entry *entry, void *data)
 {
-	int err = efivar_entry_remove(entry);
-
-	if (err)
-		return err;
+	efivar_entry_remove(entry);
 	kfree(entry);
 	return 0;
 }
@@ -201,14 +203,14 @@ static int efivarfs_fill_super(struct super_block *sb, void *data, int silent)
 	efivarfs_sb = sb;
 
 	sb->s_maxbytes          = MAX_LFS_FILESIZE;
-	sb->s_blocksize         = PAGE_SIZE;
-	sb->s_blocksize_bits    = PAGE_SHIFT;
+	sb->s_blocksize         = PAGE_CACHE_SIZE;
+	sb->s_blocksize_bits    = PAGE_CACHE_SHIFT;
 	sb->s_magic             = EFIVARFS_MAGIC;
 	sb->s_op                = &efivarfs_ops;
 	sb->s_d_op		= &efivarfs_d_ops;
 	sb->s_time_gran         = 1;
 
-	inode = efivarfs_get_inode(sb, NULL, S_IFDIR | 0755, 0, true);
+	inode = efivarfs_get_inode(sb, NULL, S_IFDIR | 0755, 0);
 	if (!inode)
 		return -ENOMEM;
 	inode->i_op = &efivarfs_dir_inode_operations;
@@ -220,7 +222,8 @@ static int efivarfs_fill_super(struct super_block *sb, void *data, int silent)
 
 	INIT_LIST_HEAD(&efivarfs_list);
 
-	err = efivar_init(efivarfs_callback, (void *)sb, true, &efivarfs_list);
+	err = efivar_init(efivarfs_callback, (void *)sb, false,
+			  true, &efivarfs_list);
 	if (err)
 		__efivar_entry_iter(efivarfs_destroy, &efivarfs_list, NULL, NULL);
 
@@ -243,7 +246,6 @@ static void efivarfs_kill_sb(struct super_block *sb)
 }
 
 static struct file_system_type efivarfs_type = {
-	.owner   = THIS_MODULE,
 	.name    = "efivarfs",
 	.mount   = efivarfs_mount,
 	.kill_sb = efivarfs_kill_sb,
@@ -252,17 +254,12 @@ static struct file_system_type efivarfs_type = {
 static __init int efivarfs_init(void)
 {
 	if (!efi_enabled(EFI_RUNTIME_SERVICES))
-		return -ENODEV;
+		return 0;
 
 	if (!efivars_kobject())
-		return -ENODEV;
+		return 0;
 
 	return register_filesystem(&efivarfs_type);
-}
-
-static __exit void efivarfs_exit(void)
-{
-	unregister_filesystem(&efivarfs_type);
 }
 
 MODULE_AUTHOR("Matthew Garrett, Jeremy Kerr");
@@ -271,4 +268,3 @@ MODULE_LICENSE("GPL");
 MODULE_ALIAS_FS("efivarfs");
 
 module_init(efivarfs_init);
-module_exit(efivarfs_exit);

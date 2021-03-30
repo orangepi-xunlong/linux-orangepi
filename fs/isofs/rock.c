@@ -203,8 +203,6 @@ int get_rock_ridge_filename(struct iso_directory_record *de,
 	int retnamlen = 0;
 	int truncate = 0;
 	int ret = 0;
-	char *p;
-	int len;
 
 	if (!ISOFS_SB(inode->i_sb)->s_rock)
 		return 0;
@@ -269,17 +267,12 @@ repeat:
 					rr->u.NM.flags);
 				break;
 			}
-			len = rr->len - 5;
-			if (retnamlen + len >= 254) {
+			if ((strlen(retname) + rr->len - 5) >= 254) {
 				truncate = 1;
 				break;
 			}
-			p = memchr(rr->u.NM.name, '\0', len);
-			if (unlikely(p))
-				len = p - rr->u.NM.name;
-			memcpy(retname + retnamlen, rr->u.NM.name, len);
-			retnamlen += len;
-			retname[retnamlen] = '\0';
+			strncat(retname, rr->u.NM.name, rr->len - 5);
+			retnamlen += rr->len - 5;
 			break;
 		case SIG('R', 'E'):
 			kfree(rs.buffer);
@@ -377,9 +370,9 @@ repeat:
 			{
 				int p;
 				for (p = 0; p < rr->u.ER.len_id; p++)
-					printk(KERN_CONT "%c", rr->u.ER.data[p]);
+					printk("%c", rr->u.ER.data[p]);
 			}
-			printk(KERN_CONT "\n");
+			printk("\n");
 			break;
 		case SIG('P', 'X'):
 			inode->i_mode = isonum_733(rr->u.PX.mode);
@@ -694,7 +687,7 @@ static int rock_ridge_symlink_readpage(struct file *file, struct page *page)
 	struct inode *inode = page->mapping->host;
 	struct iso_inode_info *ei = ISOFS_I(inode);
 	struct isofs_sb_info *sbi = ISOFS_SB(inode->i_sb);
-	char *link = page_address(page);
+	char *link = kmap(page);
 	unsigned long bufsize = ISOFS_BUFFER_SIZE(inode);
 	struct buffer_head *bh;
 	char *rpnt = link;
@@ -781,6 +774,7 @@ repeat:
 	brelse(bh);
 	*rpnt = '\0';
 	SetPageUptodate(page);
+	kunmap(page);
 	unlock_page(page);
 	return 0;
 
@@ -797,6 +791,7 @@ fail:
 	brelse(bh);
 error:
 	SetPageError(page);
+	kunmap(page);
 	unlock_page(page);
 	return -EIO;
 }

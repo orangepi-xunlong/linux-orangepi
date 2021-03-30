@@ -41,7 +41,6 @@
 #include <net/dn_fib.h>
 #include <net/dn_neigh.h>
 #include <net/dn_dev.h>
-#include <net/nexthop.h>
 
 #define RT_MIN_TABLE 1
 
@@ -151,13 +150,14 @@ static int dn_fib_count_nhs(const struct nlattr *attr)
 	struct rtnexthop *nhp = nla_data(attr);
 	int nhs = 0, nhlen = nla_len(attr);
 
-	while (rtnh_ok(nhp, nhlen)) {
+	while(nhlen >= (int)sizeof(struct rtnexthop)) {
+		if ((nhlen -= nhp->rtnh_len) < 0)
+			return 0;
 		nhs++;
-		nhp = rtnh_next(nhp, &nhlen);
+		nhp = RTNH_NEXT(nhp);
 	}
 
-	/* leftover implies invalid nexthop configuration, discard it */
-	return nhlen > 0 ? 0 : nhs;
+	return nhs;
 }
 
 static int dn_fib_get_nhs(struct dn_fib_info *fi, const struct nlattr *attr,
@@ -167,24 +167,21 @@ static int dn_fib_get_nhs(struct dn_fib_info *fi, const struct nlattr *attr,
 	int nhlen = nla_len(attr);
 
 	change_nexthops(fi) {
-		int attrlen;
-
-		if (!rtnh_ok(nhp, nhlen))
+		int attrlen = nhlen - sizeof(struct rtnexthop);
+		if (attrlen < 0 || (nhlen -= nhp->rtnh_len) < 0)
 			return -EINVAL;
 
 		nh->nh_flags  = (r->rtm_flags&~0xFF) | nhp->rtnh_flags;
 		nh->nh_oif    = nhp->rtnh_ifindex;
 		nh->nh_weight = nhp->rtnh_hops + 1;
 
-		attrlen = rtnh_attrlen(nhp);
-		if (attrlen > 0) {
+		if (attrlen) {
 			struct nlattr *gw_attr;
 
 			gw_attr = nla_find((struct nlattr *) (nhp + 1), attrlen, RTA_GATEWAY);
 			nh->nh_gw = gw_attr ? nla_get_le16(gw_attr) : 0;
 		}
-
-		nhp = rtnh_next(nhp, &nhlen);
+		nhp = RTNH_NEXT(nhp);
 	} endfor_nexthops(fi);
 
 	return 0;
@@ -301,8 +298,7 @@ struct dn_fib_info *dn_fib_create_info(const struct rtmsg *r, struct nlattr *att
 			int type = nla_type(attr);
 
 			if (type) {
-				if (type > RTAX_MAX || type == RTAX_CC_ALGO ||
-				    nla_len(attr) < 4)
+				if (type > RTAX_MAX || nla_len(attr) < 4)
 					goto err_inval;
 
 				fi->fib_metrics[type-1] = nla_get_u32(attr);

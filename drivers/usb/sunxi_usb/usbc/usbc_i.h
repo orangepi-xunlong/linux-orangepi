@@ -13,8 +13,8 @@
  *
  */
 
-#ifndef __USBC_I_H__
-#define __USBC_I_H__
+#ifndef  __USBC_I_H__
+#define  __USBC_I_H__
 
 #include "../include/sunxi_usb_config.h"
 
@@ -23,7 +23,7 @@
 void __iomem *get_otgc_vbase(void);
 
 /* record USB common info */
-typedef struct __fifo_info {
+typedef struct __fifo_info{
 	void __iomem *port0_fifo_addr;
 	__u32 port0_fifo_size;
 
@@ -32,16 +32,16 @@ typedef struct __fifo_info {
 
 	void __iomem *port2_fifo_addr;
 	__u32 port2_fifo_size;
-} __fifo_info_t;
+}__fifo_info_t;
 
 /* record current USB port's all hardware info */
-typedef struct __usbc_otg {
+typedef struct __usbc_otg{
 	__u32 port_num;
-	void __iomem *base_addr;	/* usb base address */
+	void __iomem *base_addr;        /* usb base address 		*/
 
-	__u32 used;			/* is used or not */
-	__u32 no;			/* index in manager table */
-} __usbc_otg_t;
+	__u32 used;             /* is used or not   		*/
+	__u32 no;               /* index in manager table	*/
+}__usbc_otg_t;
 
-#endif /* __USBC_I_H__ */
+#endif   //__USBC_I_H__
 

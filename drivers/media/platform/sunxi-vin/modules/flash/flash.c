@@ -1,20 +1,18 @@
 /*
- * flash subdev driver module
+ *****************************************************************************
  *
- * Copyright (c) 2017 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ * sunxi_flash.c
  *
- * Authors:  Zhao Wei <zhaowei@allwinnertech.com>
+ * Hawkview ISP - sunxi_flash.c module
  *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
+ * Copyright (c) 2015 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Version        Author                 Date                   Description
+ *
+ *   3.0                  Zhao Wei      2015/02/27  ISP Tuning Tools Support
+ *
+ *****************************************************************************
  */
-
 #include <linux/platform_device.h>
 #include <linux/delay.h>
 #include <linux/kernel.h>
@@ -29,7 +27,6 @@
 
 #include "flash.h"
 
-#ifdef CONFIG_FLASH_MODULE
 static LIST_HEAD(flash_drv_list);
 
 #define FLASH_MODULE_NAME "vin_flash"
@@ -56,7 +53,7 @@ int io_set_flash_ctrl(struct v4l2_subdev *sd, enum sunxi_flash_ctrl ctrl)
 	flash_mode = (fls_info->fl_mode_pol != 0) ? 1 : 0;
 	torch_mode = !flash_mode;
 
-	if (fls_info->flash_driver_ic == FLASH_RELATING) {
+	if (FLASH_RELATING == fls_info->flash_driver_ic) {
 		switch (ctrl) {
 		case SW_CTRL_FLASH_OFF:
 			vin_log(VIN_LOG_FLASH, "FLASH_RELATING SW_CTRL_FLASH_OFF\n");
@@ -82,7 +79,7 @@ int io_set_flash_ctrl(struct v4l2_subdev *sd, enum sunxi_flash_ctrl ctrl)
 		default:
 			return -EINVAL;
 		}
-	} else if (fls_info->flash_driver_ic == FLASH_EN_INDEPEND) {
+	} else if (FLASH_EN_INDEPEND == fls_info->flash_driver_ic) {
 		switch (ctrl) {
 		case SW_CTRL_FLASH_OFF:
 			vin_log(VIN_LOG_FLASH, "FLASH_EN_INDEPEND SW_CTRL_FLASH_OFF\n");
@@ -113,21 +110,21 @@ int io_set_flash_ctrl(struct v4l2_subdev *sd, enum sunxi_flash_ctrl ctrl)
 		switch (ctrl) {
 		case SW_CTRL_FLASH_OFF:
 			vin_log(VIN_LOG_FLASH, "FLASH_POWER SW_CTRL_FLASH_OFF\n");
-			if (flash_power_flag == 1) {
+			if (1 == flash_power_flag) {
 				vin_set_pmu_channel(sd, FLVDD, OFF);
 				flash_power_flag--;
 			}
 			break;
 		case SW_CTRL_FLASH_ON:
 			vin_log(VIN_LOG_FLASH, "FLASH_POWER SW_CTRL_FLASH_ON\n");
-			if (flash_power_flag == 0) {
+			if (0 == flash_power_flag) {
 				vin_set_pmu_channel(sd, FLVDD, ON);
 				flash_power_flag++;
 			}
 			break;
 		case SW_CTRL_TORCH_ON:
 			vin_log(VIN_LOG_FLASH, "FLASH_POWER SW_CTRL_TORCH_ON\n");
-			if (flash_power_flag == 0) {
+			if (0 == flash_power_flag) {
 				vin_set_pmu_channel(sd, FLVDD, ON);
 				flash_power_flag++;
 			}
@@ -147,9 +144,8 @@ int io_set_flash_ctrl(struct v4l2_subdev *sd, enum sunxi_flash_ctrl ctrl)
 int sunxi_flash_check_to_start(struct v4l2_subdev *sd,
 			       enum sunxi_flash_ctrl ctrl)
 {
-	struct modules_config *modules = sd ? sd_to_modules(sd) : NULL;
-	struct flash_dev *flash = sd ? v4l2_get_subdevdata(sd) : NULL;
-	struct v4l2_subdev *sensor = NULL;
+	struct vin_core *vinc = (sd == NULL) ? NULL : sd_to_vin_core(sd);
+	struct flash_dev *flash = (sd == NULL) ? NULL : v4l2_get_subdevdata(sd);
 	unsigned int flag, to_flash;
 
 	if (!flash)
@@ -158,10 +154,8 @@ int sunxi_flash_check_to_start(struct v4l2_subdev *sd,
 	if (flash->fl_info.flash_mode == V4L2_FLASH_LED_MODE_FLASH) {
 		to_flash = 1;
 	} else if (flash->fl_info.flash_mode == V4L2_FLASH_LED_MODE_AUTO) {
-		if (!modules)
-			return 0;
-		sensor = modules->modules.sensor[modules->sensors.valid_idx].sd;
-		v4l2_subdev_call(sensor, core, ioctl, GET_FLASH_FLAG, &flag);
+		v4l2_subdev_call(vinc->vid_cap.pipe.sd[VIN_IND_SENSOR], core,
+				 ioctl, GET_FLASH_FLAG, &flag);
 		if (flag)
 			to_flash = 1;
 		else
@@ -202,25 +196,36 @@ static int config_flash_mode(struct v4l2_subdev *sd,
 		fls_info->light_src = 0x01;
 	}
 	fls_info->flash_mode = mode;
-	if (mode == V4L2_FLASH_LED_MODE_TORCH)
+	if (mode == V4L2_FLASH_LED_MODE_TORCH) {
 		io_set_flash_ctrl(sd, SW_CTRL_TORCH_ON);
-	else if (mode == V4L2_FLASH_LED_MODE_NONE)
+	} else if (mode == V4L2_FLASH_LED_MODE_NONE) {
 		io_set_flash_ctrl(sd, SW_CTRL_FLASH_OFF);
-
+	}
 	return 0;
 }
 
-static int sunxi_flash_g_ctrl(struct v4l2_ctrl *ctrl)
+static int sunxi_flash_queryctrl(struct v4l2_subdev *sd,
+				 struct v4l2_queryctrl *qc)
 {
-	struct flash_dev *flash =
-			container_of(ctrl->handler, struct flash_dev, handler);
+	switch (qc->id) {
+	case V4L2_CID_FLASH_LED_MODE:
+		return v4l2_ctrl_query_fill(qc, 0, 5, 1, 0);
+	default:
+		break;
+	}
+	return -EINVAL;
+}
+
+static int sunxi_flash_g_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
+{
+	struct flash_dev *flash = (sd == NULL) ? NULL : v4l2_get_subdevdata(sd);
 
 	if (!flash)
 		return 0;
 
 	switch (ctrl->id) {
 	case V4L2_CID_FLASH_LED_MODE:
-		ctrl->val = flash->fl_info.flash_mode;
+		ctrl->value = flash->fl_info.flash_mode;
 		return 0;
 	default:
 		break;
@@ -228,56 +233,47 @@ static int sunxi_flash_g_ctrl(struct v4l2_ctrl *ctrl)
 	return -EINVAL;
 }
 
-static int sunxi_flash_s_ctrl(struct v4l2_ctrl *ctrl)
+static int sunxi_flash_s_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 {
-	struct flash_dev *flash =
-			container_of(ctrl->handler, struct flash_dev, handler);
-	struct v4l2_subdev *sd = &flash->subdev;
-
+	struct v4l2_queryctrl qc;
+	int ret;
+	struct flash_dev *flash = (sd == NULL) ? NULL : v4l2_get_subdevdata(sd);
 
 	if (!flash)
 		return 0;
 
+	qc.id = ctrl->id;
+	ret = sunxi_flash_queryctrl(sd, &qc);
+	if (ret < 0) {
+		return ret;
+	}
+	if (ctrl->value < qc.minimum || ctrl->value > qc.maximum) {
+		return -ERANGE;
+	}
+
 	switch (ctrl->id) {
 	case V4L2_CID_FLASH_LED_MODE:
-		return config_flash_mode(sd, ctrl->val, &flash->fl_info);
+		return config_flash_mode(sd, ctrl->value, &flash->fl_info);
 	default:
 		break;
 	}
 	return -EINVAL;
 }
-static const struct v4l2_ctrl_ops sunxi_flash_ctrl_ops = {
-	.g_volatile_ctrl = sunxi_flash_g_ctrl,
+static const struct v4l2_subdev_core_ops sunxi_flash_core_ops = {
+	.g_ctrl = sunxi_flash_g_ctrl,
 	.s_ctrl = sunxi_flash_s_ctrl,
 };
 
-static int sunxi_flash_controls_init(struct v4l2_subdev *sd)
-{
-	struct flash_dev *flash = container_of(sd, struct flash_dev, subdev);
-	struct v4l2_ctrl_handler *handler = &flash->handler;
-	int ret = 0;
+static struct v4l2_subdev_ops sunxi_flash_subdev_ops = {
+	.core = &sunxi_flash_core_ops,
+};
 
-	v4l2_ctrl_handler_init(handler, 1);
-	v4l2_ctrl_new_std_menu(handler, &sunxi_flash_ctrl_ops,
-					V4L2_CID_FLASH_LED_MODE, V4L2_FLASH_LED_MODE_RED_EYE,
-					0, V4L2_FLASH_LED_MODE_NONE);
-
-	if (handler->error) {
-		ret =  handler->error;
-		v4l2_ctrl_handler_free(handler);
-	}
-
-	sd->ctrl_handler = handler;
-
-	return ret;
-}
 static int sunxi_flash_subdev_init(struct flash_dev *flash)
 {
 	struct v4l2_subdev *sd = &flash->subdev;
+	v4l2_subdev_init(sd, &sunxi_flash_subdev_ops);
+	snprintf(sd->name, sizeof(sd->name), "sunxi_flash.%d", flash->id);
 
-	snprintf(sd->name, sizeof(sd->name), "sunxi_flash.%u", flash->id);
-
-	sunxi_flash_controls_init(sd);
 	flash->fl_info.dev_if = 0;
 	flash->fl_info.en_pol = FLASH_EN_POL;
 	flash->fl_info.fl_mode_pol = FLASH_MODE_POL;
@@ -292,8 +288,8 @@ static int sunxi_flash_subdev_init(struct flash_dev *flash)
 
 	v4l2_set_subdevdata(sd, flash);
 
-	media_entity_pads_init(&sd->entity, 0, NULL);
-	sd->entity.function = MEDIA_ENT_F_FLASH;
+	media_entity_init(&sd->entity, 0, NULL, 0);
+	sd->entity.type = MEDIA_ENT_T_V4L2_SUBDEV_FLASH;
 
 	return 0;
 }
@@ -317,9 +313,9 @@ static int flash_probe(struct platform_device *pdev)
 		goto ekzalloc;
 	}
 
-	of_property_read_u32(np, "device_id", &pdev->id);
+	pdev->id = of_alias_get_id(np, "flash");
 	if (pdev->id < 0) {
-		vin_err("flash failed to get device id\n");
+		vin_err("flash failed to get alias id\n");
 		ret = -EINVAL;
 		goto freedev;
 	}
@@ -338,13 +334,13 @@ static int flash_probe(struct platform_device *pdev)
 
 	sunxi_flash_subdev_init(flash);
 	platform_set_drvdata(pdev, flash);
-	vin_log(VIN_LOG_FLASH, "flash%d probe end!\n", flash->id);
+	vin_print("flash%d probe end!\n", flash->id);
 
 	return 0;
 freedev:
 	kfree(flash);
 ekzalloc:
-	vin_err("flash probe err!\n");
+	vin_print("flash probe err!\n");
 	return ret;
 }
 
@@ -374,12 +370,11 @@ static struct platform_driver flash_platform_driver = {
 		   .name = FLASH_MODULE_NAME,
 		   .owner = THIS_MODULE,
 		   .of_match_table = sunxi_flash_match,
-		   },
+		   }
 };
 struct v4l2_subdev *sunxi_flash_get_subdev(int id)
 {
 	struct flash_dev *flash;
-
 	list_for_each_entry(flash, &flash_drv_list, flash_list) {
 		if (flash->id == id) {
 			flash->use_cnt++;
@@ -397,36 +392,5 @@ int sunxi_flash_platform_register(void)
 void sunxi_flash_platform_unregister(void)
 {
 	platform_driver_unregister(&flash_platform_driver);
-	vin_log(VIN_LOG_FLASH, "flash_exit end\n");
+	vin_print("flash_exit end\n");
 }
-#else
-int io_set_flash_ctrl(struct v4l2_subdev *sd, enum sunxi_flash_ctrl ctrl)
-{
-	return 0;
-}
-
-int sunxi_flash_check_to_start(struct v4l2_subdev *sd,
-			       enum sunxi_flash_ctrl ctrl)
-{
-	return 0;
-}
-
-int sunxi_flash_stop(struct v4l2_subdev *sd)
-{
-	return 0;
-}
-
-struct v4l2_subdev *sunxi_flash_get_subdev(int id)
-{
-	return NULL;
-}
-
-int sunxi_flash_platform_register(void)
-{
-	return 0;
-}
-
-void sunxi_flash_platform_unregister(void)
-{
-}
-#endif

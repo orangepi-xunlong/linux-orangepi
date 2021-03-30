@@ -172,6 +172,6 @@ void __init ks8695_init_irq(void)
 							 handle_edge_irq);
 		}
 
-		irq_clear_status_flags(irq, IRQ_NOREQUEST);
+		set_irq_flags(irq, IRQF_VALID);
 	}
 }

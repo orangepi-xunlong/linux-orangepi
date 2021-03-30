@@ -82,6 +82,7 @@ static struct dentry *ocfs2_get_dentry(struct super_block *sb,
 	}
 
 	status = ocfs2_test_inode_bit(osb, blkno, &set);
+	trace_ocfs2_get_dentry_test_bit(status, set);
 	if (status < 0) {
 		if (status == -EINVAL) {
 			/*
@@ -95,7 +96,6 @@ static struct dentry *ocfs2_get_dentry(struct super_block *sb,
 		goto unlock_nfs_sync;
 	}
 
-	trace_ocfs2_get_dentry_test_bit(status, set);
 	/* If the inode allocator bit is clear, this inode must be stale */
 	if (!set) {
 		status = -ESTALE;
@@ -125,10 +125,10 @@ check_err:
 
 check_gen:
 	if (handle->ih_generation != inode->i_generation) {
+		iput(inode);
 		trace_ocfs2_get_dentry_generation((unsigned long long)blkno,
 						  handle->ih_generation,
 						  inode->i_generation);
-		iput(inode);
 		result = ERR_PTR(-ESTALE);
 		goto bail;
 	}
@@ -147,7 +147,7 @@ static struct dentry *ocfs2_get_parent(struct dentry *child)
 	int status;
 	u64 blkno;
 	struct dentry *parent;
-	struct inode *dir = d_inode(child);
+	struct inode *dir = child->d_inode;
 
 	trace_ocfs2_get_parent(child, child->d_name.len, child->d_name.name,
 			       (unsigned long long)OCFS2_I(dir)->ip_blkno);

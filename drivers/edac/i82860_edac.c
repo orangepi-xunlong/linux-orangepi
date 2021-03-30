@@ -288,7 +288,7 @@ static void i82860_remove_one(struct pci_dev *pdev)
 	edac_mc_free(mci);
 }
 
-static const struct pci_device_id i82860_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(i82860_pci_tbl) = {
 	{
 	 PCI_VEND_DEV(INTEL, 82860_0), PCI_ANY_ID, PCI_ANY_ID, 0, 0,
 	 I82860},
@@ -343,15 +343,20 @@ fail1:
 	pci_unregister_driver(&i82860_driver);
 
 fail0:
-	pci_dev_put(mci_pdev);
+	if (mci_pdev != NULL)
+		pci_dev_put(mci_pdev);
+
 	return pci_rc;
 }
 
 static void __exit i82860_exit(void)
 {
 	edac_dbg(3, "\n");
+
 	pci_unregister_driver(&i82860_driver);
-	pci_dev_put(mci_pdev);
+
+	if (mci_pdev != NULL)
+		pci_dev_put(mci_pdev);
 }
 
 module_init(i82860_init);

@@ -65,11 +65,10 @@ struct insn {
 	unsigned char x86_64;
 
 	const insn_byte_t *kaddr;	/* kernel address of insn to analyze */
-	const insn_byte_t *end_kaddr;	/* kernel address of last insn in buffer */
 	const insn_byte_t *next_byte;
 };
 
-#define MAX_INSN_SIZE	15
+#define MAX_INSN_SIZE	16
 
 #define X86_MODRM_MOD(modrm) (((modrm) & 0xc0) >> 6)
 #define X86_MODRM_REG(modrm) (((modrm) & 0x38) >> 3)
@@ -91,14 +90,13 @@ struct insn {
 #define X86_VEX_B(vex)	((vex) & 0x20)	/* VEX3 Byte1 */
 #define X86_VEX_L(vex)	((vex) & 0x04)	/* VEX3 Byte2, VEX2 Byte1 */
 /* VEX bit fields */
-#define X86_EVEX_M(vex)	((vex) & 0x03)		/* EVEX Byte1 */
 #define X86_VEX3_M(vex)	((vex) & 0x1f)		/* VEX3 Byte1 */
 #define X86_VEX2_M	1			/* VEX2.M always 1 */
 #define X86_VEX_V(vex)	(((vex) & 0x78) >> 3)	/* VEX3 Byte2, VEX2 Byte1 */
 #define X86_VEX_P(vex)	((vex) & 0x03)		/* VEX3 Byte2, VEX2 Byte1 */
 #define X86_VEX_M_MAX	0x1f			/* VEX3.M Maximum value */
 
-extern void insn_init(struct insn *insn, const void *kaddr, int buf_len, int x86_64);
+extern void insn_init(struct insn *insn, const void *kaddr, int x86_64);
 extern void insn_get_prefixes(struct insn *insn);
 extern void insn_get_opcode(struct insn *insn);
 extern void insn_get_modrm(struct insn *insn);
@@ -117,13 +115,12 @@ static inline void insn_get_attribute(struct insn *insn)
 extern int insn_rip_relative(struct insn *insn);
 
 /* Init insn for kernel text */
-static inline void kernel_insn_init(struct insn *insn,
-				    const void *kaddr, int buf_len)
+static inline void kernel_insn_init(struct insn *insn, const void *kaddr)
 {
 #ifdef CONFIG_X86_64
-	insn_init(insn, kaddr, buf_len, 1);
+	insn_init(insn, kaddr, 1);
 #else /* CONFIG_X86_32 */
-	insn_init(insn, kaddr, buf_len, 0);
+	insn_init(insn, kaddr, 0);
 #endif
 }
 
@@ -132,13 +129,6 @@ static inline int insn_is_avx(struct insn *insn)
 	if (!insn->prefixes.got)
 		insn_get_prefixes(insn);
 	return (insn->vex_prefix.value != 0);
-}
-
-static inline int insn_is_evex(struct insn *insn)
-{
-	if (!insn->prefixes.got)
-		insn_get_prefixes(insn);
-	return (insn->vex_prefix.nbytes == 4);
 }
 
 /* Ensure this instruction is decoded completely */
@@ -152,10 +142,8 @@ static inline insn_byte_t insn_vex_m_bits(struct insn *insn)
 {
 	if (insn->vex_prefix.nbytes == 2)	/* 2 bytes VEX */
 		return X86_VEX2_M;
-	else if (insn->vex_prefix.nbytes == 3)	/* 3 bytes VEX */
+	else
 		return X86_VEX3_M(insn->vex_prefix.bytes[1]);
-	else					/* EVEX */
-		return X86_EVEX_M(insn->vex_prefix.bytes[1]);
 }
 
 static inline insn_byte_t insn_vex_p_bits(struct insn *insn)

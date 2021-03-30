@@ -121,13 +121,13 @@ static void caif_flow_ctrl(struct sock *sk, int mode)
  * Copied from sock.c:sock_queue_rcv_skb(), but changed so packets are
  * not dropped, but CAIF is sending flow off instead.
  */
-static void caif_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
+static int caif_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 {
 	int err;
+	int skb_len;
 	unsigned long flags;
 	struct sk_buff_head *list = &sk->sk_receive_queue;
 	struct caifsock *cf_sk = container_of(sk, struct caifsock, sk);
-	bool queued = false;
 
 	if (atomic_read(&sk->sk_rmem_alloc) + skb->truesize >=
 		(unsigned int)sk->sk_rcvbuf && rx_flow_is_on(cf_sk)) {
@@ -140,8 +140,7 @@ static void caif_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 
 	err = sk_filter(sk, skb);
 	if (err)
-		goto out;
-
+		return err;
 	if (!sk_rmem_schedule(sk, skb, skb->truesize) && rx_flow_is_on(cf_sk)) {
 		set_rx_flow_off(cf_sk);
 		net_dbg_ratelimited("sending flow OFF due to rmem_schedule\n");
@@ -149,16 +148,22 @@ static void caif_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	}
 	skb->dev = NULL;
 	skb_set_owner_r(skb, sk);
+	/* Cache the SKB length before we tack it onto the receive
+	 * queue. Once it is added it no longer belongs to us and
+	 * may be freed by other threads of control pulling packets
+	 * from the queue.
+	 */
+	skb_len = skb->len;
 	spin_lock_irqsave(&list->lock, flags);
-	queued = !sock_flag(sk, SOCK_DEAD);
-	if (queued)
+	if (!sock_flag(sk, SOCK_DEAD))
 		__skb_queue_tail(list, skb);
 	spin_unlock_irqrestore(&list->lock, flags);
-out:
-	if (queued)
-		sk->sk_data_ready(sk);
+
+	if (!sock_flag(sk, SOCK_DEAD))
+		sk->sk_data_ready(sk, skb_len);
 	else
 		kfree_skb(skb);
+	return 0;
 }
 
 /* Packet Receive Callback function called from CAIF Stack */
@@ -268,8 +273,8 @@ static void caif_check_flow_release(struct sock *sk)
  * Copied from unix_dgram_recvmsg, but removed credit checks,
  * changed locking, address handling and added MSG_TRUNC.
  */
-static int caif_seqpkt_recvmsg(struct socket *sock, struct msghdr *m,
-			       size_t len, int flags)
+static int caif_seqpkt_recvmsg(struct kiocb *iocb, struct socket *sock,
+			       struct msghdr *m, size_t len, int flags)
 
 {
 	struct sock *sk = sock->sk;
@@ -278,7 +283,7 @@ static int caif_seqpkt_recvmsg(struct socket *sock, struct msghdr *m,
 	int copylen;
 
 	ret = -EOPNOTSUPP;
-	if (flags & MSG_OOB)
+	if (m->msg_flags&MSG_OOB)
 		goto read_error;
 
 	skb = skb_recv_datagram(sk, flags, 0 , &ret);
@@ -290,7 +295,7 @@ static int caif_seqpkt_recvmsg(struct socket *sock, struct msghdr *m,
 		copylen = len;
 	}
 
-	ret = skb_copy_datagram_msg(skb, 0, m, copylen);
+	ret = skb_copy_datagram_iovec(skb, 0, m->msg_iov, copylen);
 	if (ret)
 		goto out_free;
 
@@ -323,15 +328,11 @@ static long caif_stream_data_wait(struct sock *sk, long timeo)
 			!timeo)
 			break;
 
-		sk_set_bit(SOCKWQ_ASYNC_WAITDATA, sk);
+		set_bit(SOCK_ASYNC_WAITDATA, &sk->sk_socket->flags);
 		release_sock(sk);
 		timeo = schedule_timeout(timeo);
 		lock_sock(sk);
-
-		if (sock_flag(sk, SOCK_DEAD))
-			break;
-
-		sk_clear_bit(SOCKWQ_ASYNC_WAITDATA, sk);
+		clear_bit(SOCK_ASYNC_WAITDATA, &sk->sk_socket->flags);
 	}
 
 	finish_wait(sk_sleep(sk), &wait);
@@ -344,8 +345,9 @@ static long caif_stream_data_wait(struct sock *sk, long timeo)
  * Copied from unix_stream_recvmsg, but removed credit checks,
  * changed locking calls, changed address handling.
  */
-static int caif_stream_recvmsg(struct socket *sock, struct msghdr *msg,
-			       size_t size, int flags)
+static int caif_stream_recvmsg(struct kiocb *iocb, struct socket *sock,
+			       struct msghdr *msg, size_t size,
+			       int flags)
 {
 	struct sock *sk = sock->sk;
 	int copied = 0;
@@ -374,10 +376,6 @@ static int caif_stream_recvmsg(struct socket *sock, struct msghdr *msg,
 		struct sk_buff *skb;
 
 		lock_sock(sk);
-		if (sock_flag(sk, SOCK_DEAD)) {
-			err = -ECONNRESET;
-			goto unlock;
-		}
 		skb = skb_dequeue(&sk->sk_receive_queue);
 		caif_check_flow_release(sk);
 
@@ -422,7 +420,7 @@ unlock:
 		}
 		release_sock(sk);
 		chunk = min_t(unsigned int, skb->len, size);
-		if (memcpy_to_msg(msg, skb->data, chunk)) {
+		if (memcpy_toiovec(msg->msg_iov, skb->data, chunk)) {
 			skb_queue_head(&sk->sk_receive_queue, skb);
 			if (copied == 0)
 				copied = -EFAULT;
@@ -515,8 +513,8 @@ static int transmit_skb(struct sk_buff *skb, struct caifsock *cf_sk,
 }
 
 /* Copied from af_unix:unix_dgram_sendmsg, and adapted to CAIF */
-static int caif_seqpkt_sendmsg(struct socket *sock, struct msghdr *msg,
-			       size_t len)
+static int caif_seqpkt_sendmsg(struct kiocb *kiocb, struct socket *sock,
+			       struct msghdr *msg, size_t len)
 {
 	struct sock *sk = sock->sk;
 	struct caifsock *cf_sk = container_of(sk, struct caifsock, sk);
@@ -539,7 +537,7 @@ static int caif_seqpkt_sendmsg(struct socket *sock, struct msghdr *msg,
 		goto err;
 
 	ret = -EINVAL;
-	if (unlikely(msg->msg_iter.iov->iov_base == NULL))
+	if (unlikely(msg->msg_iov->iov_base == NULL))
 		goto err;
 	noblock = msg->msg_flags & MSG_DONTWAIT;
 
@@ -570,7 +568,7 @@ static int caif_seqpkt_sendmsg(struct socket *sock, struct msghdr *msg,
 
 	skb_reserve(skb, cf_sk->headroom);
 
-	ret = memcpy_from_msg(skb_put(skb, len), msg, len);
+	ret = memcpy_fromiovec(skb_put(skb, len), msg->msg_iov, len);
 
 	if (ret)
 		goto err;
@@ -590,8 +588,8 @@ err:
  * Changed removed permission handling and added waiting for flow on
  * and other minor adaptations.
  */
-static int caif_stream_sendmsg(struct socket *sock, struct msghdr *msg,
-			       size_t len)
+static int caif_stream_sendmsg(struct kiocb *kiocb, struct socket *sock,
+			       struct msghdr *msg, size_t len)
 {
 	struct sock *sk = sock->sk;
 	struct caifsock *cf_sk = container_of(sk, struct caifsock, sk);
@@ -645,7 +643,7 @@ static int caif_stream_sendmsg(struct socket *sock, struct msghdr *msg,
 		 */
 		size = min_t(int, size, skb_tailroom(skb));
 
-		err = memcpy_from_msg(skb_put(skb, size), msg, size);
+		err = memcpy_fromiovec(skb_put(skb, size), msg->msg_iov, size);
 		if (err) {
 			kfree_skb(skb);
 			goto out_err;
@@ -912,7 +910,8 @@ static int caif_release(struct socket *sock)
 	sock->sk = NULL;
 
 	WARN_ON(IS_ERR(cf_sk->debugfs_socket_dir));
-	debugfs_remove_recursive(cf_sk->debugfs_socket_dir);
+	if (cf_sk->debugfs_socket_dir != NULL)
+		debugfs_remove_recursive(cf_sk->debugfs_socket_dir);
 
 	lock_sock(&(cf_sk->sk));
 	sk->sk_state = CAIF_DISCONNECTED;
@@ -1052,7 +1051,7 @@ static int caif_create(struct net *net, struct socket *sock, int protocol,
 	 * is really not used at all in the net/core or socket.c but the
 	 * initialization makes sure that sock->state is not uninitialized.
 	 */
-	sk = sk_alloc(net, PF_CAIF, GFP_KERNEL, &prot, kern);
+	sk = sk_alloc(net, PF_CAIF, GFP_KERNEL, &prot);
 	if (!sk)
 		return -ENOMEM;
 
@@ -1107,7 +1106,10 @@ static struct net_proto_family caif_family_ops = {
 
 static int __init caif_sktinit_module(void)
 {
-	return sock_register(&caif_family_ops);
+	int err = sock_register(&caif_family_ops);
+	if (!err)
+		return err;
+	return 0;
 }
 
 static void __exit caif_sktexit_module(void)

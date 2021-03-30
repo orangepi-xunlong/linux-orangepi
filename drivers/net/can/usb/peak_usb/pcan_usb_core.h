@@ -25,9 +25,6 @@
 /* supported device ids. */
 #define PCAN_USB_PRODUCT_ID		0x000c
 #define PCAN_USBPRO_PRODUCT_ID		0x000d
-#define PCAN_USBPROFD_PRODUCT_ID	0x0011
-#define PCAN_USBFD_PRODUCT_ID		0x0012
-#define PCAN_USBX6_PRODUCT_ID		0x0014
 
 #define PCAN_USB_DRIVER_NAME		"peak_usb"
 
@@ -47,10 +44,8 @@ struct peak_usb_device;
 struct peak_usb_adapter {
 	char *name;
 	u32 device_id;
-	u32 ctrlmode_supported;
 	struct can_clock clock;
-	const struct can_bittiming_const * const bittiming_const;
-	const struct can_bittiming_const * const data_bittiming_const;
+	const struct can_bittiming_const bittiming_const;
 	unsigned int ctrl_count;
 
 	int (*intf_probe)(struct usb_interface *intf);
@@ -62,8 +57,6 @@ struct peak_usb_adapter {
 	int (*dev_close)(struct peak_usb_device *dev);
 	int (*dev_set_bittiming)(struct peak_usb_device *dev,
 					struct can_bittiming *bt);
-	int (*dev_set_data_bittiming)(struct peak_usb_device *dev,
-				      struct can_bittiming *bt);
 	int (*dev_set_bus)(struct peak_usb_device *dev, u8 onoff);
 	int (*dev_get_device_id)(struct peak_usb_device *dev, u32 *device_id);
 	int (*dev_decode_buf)(struct peak_usb_device *dev, struct urb *urb);
@@ -73,8 +66,6 @@ struct peak_usb_adapter {
 	int (*dev_stop)(struct peak_usb_device *dev);
 	int (*dev_restart_async)(struct peak_usb_device *dev, struct urb *urb,
 					u8 *buf);
-	int (*do_get_berr_counter)(const struct net_device *netdev,
-				   struct can_berr_counter *bec);
 	u8 ep_msg_in;
 	u8 ep_msg_out[PCAN_USB_MAX_CHANNEL];
 	u8 ts_used_bits;
@@ -87,24 +78,21 @@ struct peak_usb_adapter {
 	int sizeof_dev_private;
 };
 
-extern const struct peak_usb_adapter pcan_usb;
-extern const struct peak_usb_adapter pcan_usb_pro;
-extern const struct peak_usb_adapter pcan_usb_fd;
-extern const struct peak_usb_adapter pcan_usb_pro_fd;
-extern const struct peak_usb_adapter pcan_usb_x6;
+extern struct peak_usb_adapter pcan_usb;
+extern struct peak_usb_adapter pcan_usb_pro;
 
 struct peak_time_ref {
 	struct timeval tv_host_0, tv_host;
 	u32 ts_dev_1, ts_dev_2;
 	u64 ts_total;
 	u32 tick_count;
-	const struct peak_usb_adapter *adapter;
+	struct peak_usb_adapter *adapter;
 };
 
 struct peak_tx_urb_context {
 	struct peak_usb_device *dev;
 	u32 echo_index;
-	u8 data_len;
+	u8 dlc;
 	struct urb *urb;
 };
 
@@ -114,7 +102,7 @@ struct peak_tx_urb_context {
 /* PEAK-System USB device */
 struct peak_usb_device {
 	struct can_priv can;
-	const struct peak_usb_adapter *adapter;
+	struct peak_usb_adapter *adapter;
 	unsigned int ctrl_idx;
 	u32 state;
 
@@ -146,14 +134,12 @@ void pcan_dump_mem(char *prompt, void *p, int l);
 
 /* common timestamp management */
 void peak_usb_init_time_ref(struct peak_time_ref *time_ref,
-			    const struct peak_usb_adapter *adapter);
+			    struct peak_usb_adapter *adapter);
 void peak_usb_update_ts_now(struct peak_time_ref *time_ref, u32 ts_now);
 void peak_usb_set_ts_now(struct peak_time_ref *time_ref, u32 ts_now);
 void peak_usb_get_ts_tv(struct peak_time_ref *time_ref, u32 ts,
 			struct timeval *tv);
-int peak_usb_netif_rx(struct sk_buff *skb,
-		      struct peak_time_ref *time_ref, u32 ts_low, u32 ts_high);
+
 void peak_usb_async_complete(struct urb *urb);
 void peak_usb_restart_complete(struct peak_usb_device *dev);
-
 #endif

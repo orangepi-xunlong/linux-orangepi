@@ -44,13 +44,12 @@ static long soc_info_ioctl(struct file *file, unsigned int ioctl_num,
 		unsigned long ioctl_param)
 {
 	int ret = 0;
-	char id[17] = "";
-
-	memset(id, 0, sizeof(id));
+	char id[8] = "";
 
 	pr_debug("IOCTRL cmd: %#x, param: %#lx\n", ioctl_num, ioctl_param);
 	switch (ioctl_num) {
 	case CHECK_SOC_SECURE_ATTR:
+	case CHECK_SECURE_BOOT_ATTR:
 		ret = sunxi_soc_is_secure();
 		if (ret)
 			pr_debug("soc is secure. return value: %d\n", ret);
@@ -66,21 +65,6 @@ static long soc_info_ioctl(struct file *file, unsigned int ioctl_num,
 		ret = copy_to_user((void __user *)ioctl_param, id, 8);
 		pr_debug("soc id:%s\n", id);
 		break;
-	case CHECK_SOC_CHIPID:
-		sunxi_get_soc_chipid_str(id);
-		ret = copy_to_user((void __user *)ioctl_param, id, 16);
-		pr_debug("soc chipid:%s\n", id);
-		break;
-	case CHECK_SOC_FT_ZONE:
-		sunxi_get_soc_ft_zone_str(id);
-		ret = copy_to_user((void __user *)ioctl_param, id, 8);
-		pr_debug("ft zone:%s\n", id);
-		break;
-	case CHECK_SOC_ROTPK_STATUS:
-		sunxi_get_soc_rotpk_status_str(id);
-		ret = copy_to_user((void __user *)ioctl_param, id, 8);
-		pr_debug("rotpk status:%s\n", id);
-		break;
 	default:
 		pr_err("Unsupported cmd:%d\n", ioctl_num);
 		ret = -EINVAL;
@@ -88,14 +72,11 @@ static long soc_info_ioctl(struct file *file, unsigned int ioctl_num,
 	}
 	return ret;
 }
-
 #ifdef CONFIG_COMPAT
-static long soc_info_compat_ioctl(struct file *filp, unsigned int cmd,
-		unsigned long arg)
+static long soc_info_compat_ioctl(struct file *file,
+		unsigned int ioctl, unsigned long param)
 {
-	unsigned long translated_arg = (unsigned long)compat_ptr(arg);
-
-	return soc_info_ioctl(filp, cmd, translated_arg);
+	return soc_info_ioctl(file, ioctl, param);
 }
 #endif
 
@@ -103,10 +84,10 @@ static const struct file_operations soc_info_ops = {
 	.owner   = THIS_MODULE,
 	.open    = soc_info_open,
 	.release = soc_info_release,
-#ifdef CONFIG_COMPAT
-	.compat_ioctl   = soc_info_compat_ioctl,
-#endif
 	.unlocked_ioctl = soc_info_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl = soc_info_compat_ioctl,
+#endif
 };
 
 struct miscdevice soc_info_device = {
@@ -129,30 +110,17 @@ static ssize_t sys_info_show(struct class *class,
 
 	/* secure */
 	size += sprintf(buf + size, "sunxi_secure      : ");
-	if (sunxi_soc_is_secure()) {
+	if (sunxi_soc_is_secure())
 		size += sprintf(buf + size, "%s\n", "secure");
-		/* rotpk status */
-		memset(tmpbuf, 0x0, sizeof(tmpbuf));
-		sunxi_get_soc_rotpk_status_str(tmpbuf);
-		size += sprintf(buf + size, "sunxi_rotpk       : %s\n", tmpbuf);
-	} else
+	else
 		size += sprintf(buf + size, "%s\n", "normal");
 
-#ifdef CONFIG_SUNXI_QA_TEST
 	/* chipid */
-	sunxi_get_soc_chipid((u8 *)databuf);
-
-	for (i = 0; i < 4; i++)
-		sprintf(tmpbuf + i*8, "%08x", databuf[i]);
-	tmpbuf[128] = 0;
-	size += sprintf(buf + size, "sunxi_chipid      : %s\n", tmpbuf);
-#endif
-	/* serial */
 	sunxi_get_serial((u8 *)databuf);
 	for (i = 0; i < 4; i++)
 		sprintf(tmpbuf + i*8, "%08x", databuf[i]);
 	tmpbuf[128] = 0;
-	size += sprintf(buf + size, "sunxi_serial      : %s\n", tmpbuf);
+	size += sprintf(buf + size, "sunxi_chipid      : %s\n", tmpbuf);
 
 	/* chiptype */
 	sunxi_get_soc_chipid_str(tmpbuf);
@@ -162,6 +130,9 @@ static ssize_t sys_info_show(struct class *class,
 	size += sprintf(buf + size, "sunxi_batchno     : %#x\n",
 			sunxi_get_soc_ver()&0x0ffff);
 
+	*(u32 *)(&tmpbuf[0]) = sunxi_get_soc_customerid();
+	size += sprintf(buf + size, "sunxi_customerid  : %x\n",
+				*(u32 *)(&tmpbuf[0]));
 	return size;
 }
 
@@ -177,7 +148,7 @@ static ssize_t key_info_show(struct class *class,
 		return -ENOMEM;
 
 	memset(key_data, 0, 256*4);
-	sunxi_efuse_readn(key_name, key_data, 256);
+	sunxi_efuse_read(key_name, key_data);
 	for (i = 0; i < 256; i++) {
 		if ((i > 0) && (key_data[i] == 0))
 			break;
@@ -234,7 +205,8 @@ static int __init sunxi_sys_info_init(void)
 
 static void __exit sunxi_sys_info_exit(void)
 {
-	misc_deregister(&soc_info_device);
+	if (misc_deregister(&soc_info_device))
+		pr_err("misc_deregister() failed!\n");
 	class_unregister(&info_class);
 }
 

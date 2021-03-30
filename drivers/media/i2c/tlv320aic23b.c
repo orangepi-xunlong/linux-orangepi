@@ -122,6 +122,13 @@ static const struct v4l2_ctrl_ops tlv320aic23b_ctrl_ops = {
 
 static const struct v4l2_subdev_core_ops tlv320aic23b_core_ops = {
 	.log_status = tlv320aic23b_log_status,
+	.g_ext_ctrls = v4l2_subdev_g_ext_ctrls,
+	.try_ext_ctrls = v4l2_subdev_try_ext_ctrls,
+	.s_ext_ctrls = v4l2_subdev_s_ext_ctrls,
+	.g_ctrl = v4l2_subdev_g_ctrl,
+	.s_ctrl = v4l2_subdev_s_ctrl,
+	.queryctrl = v4l2_subdev_queryctrl,
+	.querymenu = v4l2_subdev_querymenu,
 };
 
 static const struct v4l2_subdev_audio_ops tlv320aic23b_audio_ops = {
@@ -155,7 +162,7 @@ static int tlv320aic23b_probe(struct i2c_client *client,
 	v4l_info(client, "chip found @ 0x%x (%s)\n",
 			client->addr << 1, client->adapter->name);
 
-	state = devm_kzalloc(&client->dev, sizeof(*state), GFP_KERNEL);
+	state = kzalloc(sizeof(struct tlv320aic23b_state), GFP_KERNEL);
 	if (state == NULL)
 		return -ENOMEM;
 	sd = &state->sd;
@@ -184,6 +191,7 @@ static int tlv320aic23b_probe(struct i2c_client *client,
 		int err = state->hdl.error;
 
 		v4l2_ctrl_handler_free(&state->hdl);
+		kfree(state);
 		return err;
 	}
 	v4l2_ctrl_handler_setup(&state->hdl);
@@ -197,6 +205,7 @@ static int tlv320aic23b_remove(struct i2c_client *client)
 
 	v4l2_device_unregister_subdev(sd);
 	v4l2_ctrl_handler_free(&state->hdl);
+	kfree(state);
 	return 0;
 }
 
@@ -210,6 +219,7 @@ MODULE_DEVICE_TABLE(i2c, tlv320aic23b_id);
 
 static struct i2c_driver tlv320aic23b_driver = {
 	.driver = {
+		.owner	= THIS_MODULE,
 		.name	= "tlv320aic23b",
 	},
 	.probe		= tlv320aic23b_probe,

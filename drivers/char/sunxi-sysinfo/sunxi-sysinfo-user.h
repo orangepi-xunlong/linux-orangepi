@@ -16,9 +16,7 @@
 #define CHECK_SOC_SECURE_ATTR 0x00
 #define CHECK_SOC_VERSION     0x01
 #define CHECK_SOC_BONDING     0x03
-#define CHECK_SOC_CHIPID      0x04
-#define CHECK_SOC_FT_ZONE     0x05
-#define CHECK_SOC_ROTPK_STATUS     0x06
+#define CHECK_SECURE_BOOT_ATTR	0x04
 
 #endif /* end of __SUNXI_SYSINFO_USER_H__ */
 

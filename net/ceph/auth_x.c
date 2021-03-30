@@ -8,9 +8,6 @@
 
 #include <linux/ceph/decode.h>
 #include <linux/ceph/auth.h>
-#include <linux/ceph/ceph_features.h>
-#include <linux/ceph/libceph.h>
-#include <linux/ceph/messenger.h>
 
 #include "crypto.h"
 #include "auth_x.h"
@@ -40,73 +37,56 @@ static int ceph_x_should_authenticate(struct ceph_auth_client *ac)
 	return need != 0;
 }
 
-static int ceph_x_encrypt_offset(void)
-{
-	return sizeof(u32) + sizeof(struct ceph_x_encrypt_header);
-}
-
 static int ceph_x_encrypt_buflen(int ilen)
 {
-	return ceph_x_encrypt_offset() + ilen + 16;
+	return sizeof(struct ceph_x_encrypt_header) + ilen + 16 +
+		sizeof(u32);
 }
 
-static int ceph_x_encrypt(struct ceph_crypto_key *secret, void *buf,
-			  int buf_len, int plaintext_len)
+static int ceph_x_encrypt(struct ceph_crypto_key *secret,
+			  void *ibuf, int ilen, void *obuf, size_t olen)
 {
-	struct ceph_x_encrypt_header *hdr = buf + sizeof(u32);
-	int ciphertext_len;
+	struct ceph_x_encrypt_header head = {
+		.struct_v = 1,
+		.magic = cpu_to_le64(CEPHX_ENC_MAGIC)
+	};
+	size_t len = olen - sizeof(u32);
 	int ret;
 
-	hdr->struct_v = 1;
-	hdr->magic = cpu_to_le64(CEPHX_ENC_MAGIC);
-
-	ret = ceph_crypt(secret, true, buf + sizeof(u32), buf_len - sizeof(u32),
-			 plaintext_len + sizeof(struct ceph_x_encrypt_header),
-			 &ciphertext_len);
+	ret = ceph_encrypt2(secret, obuf + sizeof(u32), &len,
+			    &head, sizeof(head), ibuf, ilen);
 	if (ret)
 		return ret;
-
-	ceph_encode_32(&buf, ciphertext_len);
-	return sizeof(u32) + ciphertext_len;
+	ceph_encode_32(&obuf, len);
+	return len + sizeof(u32);
 }
 
-static int __ceph_x_decrypt(struct ceph_crypto_key *secret, void *p,
-			    int ciphertext_len)
+static int ceph_x_decrypt(struct ceph_crypto_key *secret,
+			  void **p, void *end, void **obuf, size_t olen)
 {
-	struct ceph_x_encrypt_header *hdr = p;
-	int plaintext_len;
-	int ret;
+	struct ceph_x_encrypt_header head;
+	size_t head_len = sizeof(head);
+	int len, ret;
 
-	ret = ceph_crypt(secret, false, p, ciphertext_len, ciphertext_len,
-			 &plaintext_len);
-	if (ret)
-		return ret;
-
-	if (le64_to_cpu(hdr->magic) != CEPHX_ENC_MAGIC) {
-		pr_err("%s bad magic\n", __func__);
+	len = ceph_decode_32(p);
+	if (*p + len > end)
 		return -EINVAL;
+
+	dout("ceph_x_decrypt len %d\n", len);
+	if (*obuf == NULL) {
+		*obuf = kmalloc(len, GFP_NOFS);
+		if (!*obuf)
+			return -ENOMEM;
+		olen = len;
 	}
 
-	return plaintext_len - sizeof(*hdr);
-}
-
-static int ceph_x_decrypt(struct ceph_crypto_key *secret, void **p, void *end)
-{
-	int ciphertext_len;
-	int ret;
-
-	ceph_decode_32_safe(p, end, ciphertext_len, e_inval);
-	ceph_decode_need(p, end, ciphertext_len, e_inval);
-
-	ret = __ceph_x_decrypt(secret, *p, ciphertext_len);
-	if (ret < 0)
+	ret = ceph_decrypt2(secret, &head, &head_len, *obuf, &olen, *p, len);
+	if (ret)
 		return ret;
-
-	*p += ciphertext_len;
-	return ret;
-
-e_inval:
-	return -EINVAL;
+	if (head.struct_v != 1 || le64_to_cpu(head.magic) != CEPHX_ENC_MAGIC)
+		return -EPERM;
+	*p += len;
+	return olen;
 }
 
 /*
@@ -161,12 +141,15 @@ static int process_one_ticket(struct ceph_auth_client *ac,
 	int type;
 	u8 tkt_struct_v, blob_struct_v;
 	struct ceph_x_ticket_handler *th;
+	void *dbuf = NULL;
 	void *dp, *dend;
 	int dlen;
 	char is_enc;
 	struct timespec validity;
+	struct ceph_crypto_key old_key;
+	void *ticket_buf = NULL;
 	void *tp, *tpend;
-	void **ptp;
+	struct ceph_timespec new_validity;
 	struct ceph_crypto_key new_session_key;
 	struct ceph_buffer *new_ticket_blob;
 	unsigned long new_expires, new_renew_after;
@@ -189,23 +172,26 @@ static int process_one_ticket(struct ceph_auth_client *ac,
 	}
 
 	/* blob for me */
-	dp = *p + ceph_x_encrypt_offset();
-	ret = ceph_x_decrypt(secret, p, end);
-	if (ret < 0)
+	dlen = ceph_x_decrypt(secret, p, end, &dbuf, 0);
+	if (dlen <= 0) {
+		ret = dlen;
 		goto out;
-	dout(" decrypted %d bytes\n", ret);
-	dend = dp + ret;
+	}
+	dout(" decrypted %d bytes\n", dlen);
+	dp = dbuf;
+	dend = dp + dlen;
 
 	tkt_struct_v = ceph_decode_8(&dp);
 	if (tkt_struct_v != 1)
 		goto bad;
 
+	memcpy(&old_key, &th->session_key, sizeof(old_key));
 	ret = ceph_crypto_key_decode(&new_session_key, &dp, dend);
 	if (ret)
 		goto out;
 
-	ceph_decode_timespec(&validity, dp);
-	dp += sizeof(struct ceph_timespec);
+	ceph_decode_copy(&dp, &new_validity, sizeof(new_validity));
+	ceph_decode_timespec(&validity, &new_validity);
 	new_expires = get_seconds() + validity.tv_sec;
 	new_renew_after = new_expires - (validity.tv_sec / 4);
 	dout(" expires=%lu renew_after=%lu\n", new_expires,
@@ -215,24 +201,32 @@ static int process_one_ticket(struct ceph_auth_client *ac,
 	ceph_decode_8_safe(p, end, is_enc, bad);
 	if (is_enc) {
 		/* encrypted */
-		tp = *p + ceph_x_encrypt_offset();
-		ret = ceph_x_decrypt(&th->session_key, p, end);
-		if (ret < 0)
+		dout(" encrypted ticket\n");
+		dlen = ceph_x_decrypt(&old_key, p, end, &ticket_buf, 0);
+		if (dlen < 0) {
+			ret = dlen;
 			goto out;
-		dout(" encrypted ticket, decrypted %d bytes\n", ret);
-		ptp = &tp;
-		tpend = tp + ret;
+		}
+		tp = ticket_buf;
+		dlen = ceph_decode_32(&tp);
 	} else {
 		/* unencrypted */
-		ptp = p;
-		tpend = end;
+		ceph_decode_32_safe(p, end, dlen, bad);
+		ticket_buf = kmalloc(dlen, GFP_NOFS);
+		if (!ticket_buf) {
+			ret = -ENOMEM;
+			goto out;
+		}
+		tp = ticket_buf;
+		ceph_decode_need(p, end, dlen, bad);
+		ceph_decode_copy(p, ticket_buf, dlen);
 	}
-	ceph_decode_32_safe(ptp, tpend, dlen, bad);
+	tpend = tp + dlen;
 	dout(" ticket blob is %d bytes\n", dlen);
-	ceph_decode_need(ptp, tpend, 1 + sizeof(u64), bad);
-	blob_struct_v = ceph_decode_8(ptp);
-	new_secret_id = ceph_decode_64(ptp);
-	ret = ceph_decode_buffer(&new_ticket_blob, ptp, tpend);
+	ceph_decode_need(&tp, tpend, 1 + sizeof(u64), bad);
+	blob_struct_v = ceph_decode_8(&tp);
+	new_secret_id = ceph_decode_64(&tp);
+	ret = ceph_decode_buffer(&new_ticket_blob, &tp, tpend);
 	if (ret)
 		goto out;
 
@@ -242,16 +236,18 @@ static int process_one_ticket(struct ceph_auth_client *ac,
 		ceph_buffer_put(th->ticket_blob);
 	th->session_key = new_session_key;
 	th->ticket_blob = new_ticket_blob;
+	th->validity = new_validity;
 	th->secret_id = new_secret_id;
 	th->expires = new_expires;
 	th->renew_after = new_renew_after;
-	th->have_key = true;
 	dout(" got ticket service %d (%s) secret_id %lld len %d\n",
 	     type, ceph_entity_type_name(type), th->secret_id,
 	     (int)th->ticket_blob->vec.iov_len);
 	xi->have_keys |= th->service;
 
 out:
+	kfree(ticket_buf);
+	kfree(dbuf);
 	return ret;
 
 bad:
@@ -287,67 +283,14 @@ bad:
 	return -EINVAL;
 }
 
-/*
- * Encode and encrypt the second part (ceph_x_authorize_b) of the
- * authorizer.  The first part (ceph_x_authorize_a) should already be
- * encoded.
- */
-static int encrypt_authorizer(struct ceph_x_authorizer *au,
-			      u64 *server_challenge)
-{
-	struct ceph_x_authorize_a *msg_a;
-	struct ceph_x_authorize_b *msg_b;
-	void *p, *end;
-	int ret;
-
-	msg_a = au->buf->vec.iov_base;
-	WARN_ON(msg_a->ticket_blob.secret_id != cpu_to_le64(au->secret_id));
-	p = (void *)(msg_a + 1) + le32_to_cpu(msg_a->ticket_blob.blob_len);
-	end = au->buf->vec.iov_base + au->buf->vec.iov_len;
-
-	msg_b = p + ceph_x_encrypt_offset();
-	msg_b->struct_v = 2;
-	msg_b->nonce = cpu_to_le64(au->nonce);
-	if (server_challenge) {
-		msg_b->have_challenge = 1;
-		msg_b->server_challenge_plus_one =
-		    cpu_to_le64(*server_challenge + 1);
-	} else {
-		msg_b->have_challenge = 0;
-		msg_b->server_challenge_plus_one = 0;
-	}
-
-	ret = ceph_x_encrypt(&au->session_key, p, end - p, sizeof(*msg_b));
-	if (ret < 0)
-		return ret;
-
-	p += ret;
-	if (server_challenge) {
-		WARN_ON(p != end);
-	} else {
-		WARN_ON(p > end);
-		au->buf->vec.iov_len = p - au->buf->vec.iov_base;
-	}
-
-	return 0;
-}
-
-static void ceph_x_authorizer_cleanup(struct ceph_x_authorizer *au)
-{
-	ceph_crypto_key_destroy(&au->session_key);
-	if (au->buf) {
-		ceph_buffer_put(au->buf);
-		au->buf = NULL;
-	}
-}
-
 static int ceph_x_build_authorizer(struct ceph_auth_client *ac,
 				   struct ceph_x_ticket_handler *th,
 				   struct ceph_x_authorizer *au)
 {
 	int maxlen;
 	struct ceph_x_authorize_a *msg_a;
-	struct ceph_x_authorize_b *msg_b;
+	struct ceph_x_authorize_b msg_b;
+	void *p, *end;
 	int ret;
 	int ticket_blob_len =
 		(th->ticket_blob ? th->ticket_blob->vec.iov_len : 0);
@@ -355,13 +298,8 @@ static int ceph_x_build_authorizer(struct ceph_auth_client *ac,
 	dout("build_authorizer for %s %p\n",
 	     ceph_entity_type_name(th->service), au);
 
-	ceph_crypto_key_destroy(&au->session_key);
-	ret = ceph_crypto_key_clone(&au->session_key, &th->session_key);
-	if (ret)
-		goto out_au;
-
-	maxlen = sizeof(*msg_a) + ticket_blob_len +
-		ceph_x_encrypt_buflen(sizeof(*msg_b));
+	maxlen = sizeof(*msg_a) + sizeof(msg_b) +
+		ceph_x_encrypt_buflen(ticket_blob_len);
 	dout("  need len %d\n", maxlen);
 	if (au->buf && au->buf->alloc_len < maxlen) {
 		ceph_buffer_put(au->buf);
@@ -369,10 +307,8 @@ static int ceph_x_build_authorizer(struct ceph_auth_client *ac,
 	}
 	if (!au->buf) {
 		au->buf = ceph_buffer_new(maxlen, GFP_NOFS);
-		if (!au->buf) {
-			ret = -ENOMEM;
-			goto out_au;
-		}
+		if (!au->buf)
+			return -ENOMEM;
 	}
 	au->service = th->service;
 	au->secret_id = th->secret_id;
@@ -391,19 +327,27 @@ static int ceph_x_build_authorizer(struct ceph_auth_client *ac,
 	dout(" th %p secret_id %lld %lld\n", th, th->secret_id,
 	     le64_to_cpu(msg_a->ticket_blob.secret_id));
 
-	get_random_bytes(&au->nonce, sizeof(au->nonce));
-	ret = encrypt_authorizer(au, NULL);
-	if (ret) {
-		pr_err("failed to encrypt authorizer: %d", ret);
-		goto out_au;
-	}
+	p = msg_a + 1;
+	p += ticket_blob_len;
+	end = au->buf->vec.iov_base + au->buf->vec.iov_len;
 
+	get_random_bytes(&au->nonce, sizeof(au->nonce));
+	msg_b.struct_v = 1;
+	msg_b.nonce = cpu_to_le64(au->nonce);
+	ret = ceph_x_encrypt(&th->session_key, &msg_b, sizeof(msg_b),
+			     p, end - p);
+	if (ret < 0)
+		goto out_buf;
+	p += ret;
+	au->buf->vec.iov_len = p - au->buf->vec.iov_base;
 	dout(" built authorizer nonce %llx len %d\n", au->nonce,
 	     (int)au->buf->vec.iov_len);
+	BUG_ON(au->buf->vec.iov_len > maxlen);
 	return 0;
 
-out_au:
-	ceph_x_authorizer_cleanup(au);
+out_buf:
+	ceph_buffer_put(au->buf);
+	au->buf = NULL;
 	return ret;
 }
 
@@ -428,24 +372,6 @@ bad:
 	return -ERANGE;
 }
 
-static bool need_key(struct ceph_x_ticket_handler *th)
-{
-	if (!th->have_key)
-		return true;
-
-	return get_seconds() >= th->renew_after;
-}
-
-static bool have_key(struct ceph_x_ticket_handler *th)
-{
-	if (th->have_key) {
-		if (get_seconds() >= th->expires)
-			th->have_key = false;
-	}
-
-	return th->have_key;
-}
-
 static void ceph_x_validate_tickets(struct ceph_auth_client *ac, int *pneed)
 {
 	int want = ac->want_keys;
@@ -464,17 +390,19 @@ static void ceph_x_validate_tickets(struct ceph_auth_client *ac, int *pneed)
 			continue;
 
 		th = get_ticket_handler(ac, service);
+
 		if (IS_ERR(th)) {
 			*pneed |= service;
 			continue;
 		}
 
-		if (need_key(th))
+		if (get_seconds() >= th->renew_after)
 			*pneed |= service;
-		if (!have_key(th))
+		if (get_seconds() >= th->expires)
 			xi->have_keys &= ~service;
 	}
 }
+
 
 static int ceph_x_build_request(struct ceph_auth_client *ac,
 				void *buf, void *end)
@@ -497,9 +425,8 @@ static int ceph_x_build_request(struct ceph_auth_client *ac,
 	if (need & CEPH_ENTITY_TYPE_AUTH) {
 		struct ceph_x_authenticate *auth = (void *)(head + 1);
 		void *p = auth + 1;
-		void *enc_buf = xi->auth_authorizer.enc_buf;
-		struct ceph_x_challenge_blob *blob = enc_buf +
-							ceph_x_encrypt_offset();
+		struct ceph_x_challenge_blob tmp;
+		char tmp_enc[40];
 		u64 *u;
 
 		if (p > end)
@@ -510,16 +437,16 @@ static int ceph_x_build_request(struct ceph_auth_client *ac,
 
 		/* encrypt and hash */
 		get_random_bytes(&auth->client_challenge, sizeof(u64));
-		blob->client_challenge = auth->client_challenge;
-		blob->server_challenge = cpu_to_le64(xi->server_challenge);
-		ret = ceph_x_encrypt(&xi->secret, enc_buf, CEPHX_AU_ENC_BUF_LEN,
-				     sizeof(*blob));
+		tmp.client_challenge = auth->client_challenge;
+		tmp.server_challenge = cpu_to_le64(xi->server_challenge);
+		ret = ceph_x_encrypt(&xi->secret, &tmp, sizeof(tmp),
+				     tmp_enc, sizeof(tmp_enc));
 		if (ret < 0)
 			return ret;
 
 		auth->struct_v = 1;
 		auth->key = 0;
-		for (u = (u64 *)enc_buf; u + 1 <= (u64 *)(enc_buf + ret); u++)
+		for (u = (u64 *)tmp_enc; u + 1 <= (u64 *)(tmp_enc + ret); u++)
 			auth->key ^= *(__le64 *)u;
 		dout(" server_challenge %llx client_challenge %llx key %llx\n",
 		     xi->server_challenge, le64_to_cpu(auth->client_challenge),
@@ -611,14 +538,6 @@ static int ceph_x_handle_reply(struct ceph_auth_client *ac, int result,
 	return -EAGAIN;
 }
 
-static void ceph_x_destroy_authorizer(struct ceph_authorizer *a)
-{
-	struct ceph_x_authorizer *au = (void *)a;
-
-	ceph_x_authorizer_cleanup(au);
-	kfree(au);
-}
-
 static int ceph_x_create_authorizer(
 	struct ceph_auth_client *ac, int peer_type,
 	struct ceph_auth_handshake *auth)
@@ -635,8 +554,6 @@ static int ceph_x_create_authorizer(
 	if (!au)
 		return -ENOMEM;
 
-	au->base.destroy = ceph_x_destroy_authorizer;
-
 	ret = ceph_x_build_authorizer(ac, th, au);
 	if (ret) {
 		kfree(au);
@@ -646,10 +563,8 @@ static int ceph_x_create_authorizer(
 	auth->authorizer = (struct ceph_authorizer *) au;
 	auth->authorizer_buf = au->buf->vec.iov_base;
 	auth->authorizer_buf_len = au->buf->vec.iov_len;
-	auth->authorizer_reply_buf = au->enc_buf;
-	auth->authorizer_reply_buf_len = CEPHX_AU_ENC_BUF_LEN;
-	auth->sign_message = ac->ops->sign_message;
-	auth->check_message_signature = ac->ops->check_message_signature;
+	auth->authorizer_reply_buf = au->reply_buf;
+	auth->authorizer_reply_buf_len = sizeof (au->reply_buf);
 
 	return 0;
 }
@@ -674,78 +589,44 @@ static int ceph_x_update_authorizer(
 	return 0;
 }
 
-static int decrypt_authorize_challenge(struct ceph_x_authorizer *au,
-				       void *challenge_buf,
-				       int challenge_buf_len,
-				       u64 *server_challenge)
-{
-	struct ceph_x_authorize_challenge *ch =
-	    challenge_buf + sizeof(struct ceph_x_encrypt_header);
-	int ret;
-
-	/* no leading len */
-	ret = __ceph_x_decrypt(&au->session_key, challenge_buf,
-			       challenge_buf_len);
-	if (ret < 0)
-		return ret;
-	if (ret < sizeof(*ch)) {
-		pr_err("bad size %d for ceph_x_authorize_challenge\n", ret);
-		return -EINVAL;
-	}
-
-	*server_challenge = le64_to_cpu(ch->server_challenge);
-	return 0;
-}
-
-static int ceph_x_add_authorizer_challenge(struct ceph_auth_client *ac,
-					   struct ceph_authorizer *a,
-					   void *challenge_buf,
-					   int challenge_buf_len)
-{
-	struct ceph_x_authorizer *au = (void *)a;
-	u64 server_challenge;
-	int ret;
-
-	ret = decrypt_authorize_challenge(au, challenge_buf, challenge_buf_len,
-					  &server_challenge);
-	if (ret) {
-		pr_err("failed to decrypt authorize challenge: %d", ret);
-		return ret;
-	}
-
-	ret = encrypt_authorizer(au, &server_challenge);
-	if (ret) {
-		pr_err("failed to encrypt authorizer w/ challenge: %d", ret);
-		return ret;
-	}
-
-	return 0;
-}
-
 static int ceph_x_verify_authorizer_reply(struct ceph_auth_client *ac,
-					  struct ceph_authorizer *a)
+					  struct ceph_authorizer *a, size_t len)
 {
 	struct ceph_x_authorizer *au = (void *)a;
-	void *p = au->enc_buf;
-	struct ceph_x_authorize_reply *reply = p + ceph_x_encrypt_offset();
-	int ret;
+	struct ceph_x_ticket_handler *th;
+	int ret = 0;
+	struct ceph_x_authorize_reply reply;
+	void *preply = &reply;
+	void *p = au->reply_buf;
+	void *end = p + sizeof(au->reply_buf);
 
-	ret = ceph_x_decrypt(&au->session_key, &p, p + CEPHX_AU_ENC_BUF_LEN);
+	th = get_ticket_handler(ac, au->service);
+	if (IS_ERR(th))
+		return PTR_ERR(th);
+	ret = ceph_x_decrypt(&th->session_key, &p, end, &preply, sizeof(reply));
 	if (ret < 0)
 		return ret;
-	if (ret < sizeof(*reply)) {
-		pr_err("bad size %d for ceph_x_authorize_reply\n", ret);
-		return -EINVAL;
-	}
+	if (ret != sizeof(reply))
+		return -EPERM;
 
-	if (au->nonce + 1 != le64_to_cpu(reply->nonce_plus_one))
+	if (au->nonce + 1 != le64_to_cpu(reply.nonce_plus_one))
 		ret = -EPERM;
 	else
 		ret = 0;
 	dout("verify_authorizer_reply nonce %llx got %llx ret %d\n",
-	     au->nonce, le64_to_cpu(reply->nonce_plus_one), ret);
+	     au->nonce, le64_to_cpu(reply.nonce_plus_one), ret);
 	return ret;
 }
+
+static void ceph_x_destroy_authorizer(struct ceph_auth_client *ac,
+				      struct ceph_authorizer *a)
+{
+	struct ceph_x_authorizer *au = (void *)a;
+
+	ceph_buffer_put(au->buf);
+	kfree(au);
+}
+
 
 static void ceph_x_reset(struct ceph_auth_client *ac)
 {
@@ -770,141 +651,23 @@ static void ceph_x_destroy(struct ceph_auth_client *ac)
 		remove_ticket_handler(ac, th);
 	}
 
-	ceph_x_authorizer_cleanup(&xi->auth_authorizer);
+	if (xi->auth_authorizer.buf)
+		ceph_buffer_put(xi->auth_authorizer.buf);
 
 	kfree(ac->private);
 	ac->private = NULL;
 }
 
-static void invalidate_ticket(struct ceph_auth_client *ac, int peer_type)
+static void ceph_x_invalidate_authorizer(struct ceph_auth_client *ac,
+				   int peer_type)
 {
 	struct ceph_x_ticket_handler *th;
 
 	th = get_ticket_handler(ac, peer_type);
 	if (!IS_ERR(th))
-		th->have_key = false;
+		memset(&th->validity, 0, sizeof(th->validity));
 }
 
-static void ceph_x_invalidate_authorizer(struct ceph_auth_client *ac,
-					 int peer_type)
-{
-	/*
-	 * We are to invalidate a service ticket in the hopes of
-	 * getting a new, hopefully more valid, one.  But, we won't get
-	 * it unless our AUTH ticket is good, so invalidate AUTH ticket
-	 * as well, just in case.
-	 */
-	invalidate_ticket(ac, peer_type);
-	invalidate_ticket(ac, CEPH_ENTITY_TYPE_AUTH);
-}
-
-static int calc_signature(struct ceph_x_authorizer *au, struct ceph_msg *msg,
-			  __le64 *psig)
-{
-	void *enc_buf = au->enc_buf;
-	int ret;
-
-	if (!(msg->con->peer_features & CEPH_FEATURE_CEPHX_V2)) {
-		struct {
-			__le32 len;
-			__le32 header_crc;
-			__le32 front_crc;
-			__le32 middle_crc;
-			__le32 data_crc;
-		} __packed *sigblock = enc_buf + ceph_x_encrypt_offset();
-
-		sigblock->len = cpu_to_le32(4*sizeof(u32));
-		sigblock->header_crc = msg->hdr.crc;
-		sigblock->front_crc = msg->footer.front_crc;
-		sigblock->middle_crc = msg->footer.middle_crc;
-		sigblock->data_crc =  msg->footer.data_crc;
-
-		ret = ceph_x_encrypt(&au->session_key, enc_buf,
-				     CEPHX_AU_ENC_BUF_LEN, sizeof(*sigblock));
-		if (ret < 0)
-			return ret;
-
-		*psig = *(__le64 *)(enc_buf + sizeof(u32));
-	} else {
-		struct {
-			__le32 header_crc;
-			__le32 front_crc;
-			__le32 front_len;
-			__le32 middle_crc;
-			__le32 middle_len;
-			__le32 data_crc;
-			__le32 data_len;
-			__le32 seq_lower_word;
-		} __packed *sigblock = enc_buf;
-		struct {
-			__le64 a, b, c, d;
-		} __packed *penc = enc_buf;
-		int ciphertext_len;
-
-		sigblock->header_crc = msg->hdr.crc;
-		sigblock->front_crc = msg->footer.front_crc;
-		sigblock->front_len = msg->hdr.front_len;
-		sigblock->middle_crc = msg->footer.middle_crc;
-		sigblock->middle_len = msg->hdr.middle_len;
-		sigblock->data_crc =  msg->footer.data_crc;
-		sigblock->data_len = msg->hdr.data_len;
-		sigblock->seq_lower_word = *(__le32 *)&msg->hdr.seq;
-
-		/* no leading len, no ceph_x_encrypt_header */
-		ret = ceph_crypt(&au->session_key, true, enc_buf,
-				 CEPHX_AU_ENC_BUF_LEN, sizeof(*sigblock),
-				 &ciphertext_len);
-		if (ret)
-			return ret;
-
-		*psig = penc->a ^ penc->b ^ penc->c ^ penc->d;
-	}
-
-	return 0;
-}
-
-static int ceph_x_sign_message(struct ceph_auth_handshake *auth,
-			       struct ceph_msg *msg)
-{
-	__le64 sig;
-	int ret;
-
-	if (ceph_test_opt(from_msgr(msg->con->msgr), NOMSGSIGN))
-		return 0;
-
-	ret = calc_signature((struct ceph_x_authorizer *)auth->authorizer,
-			     msg, &sig);
-	if (ret)
-		return ret;
-
-	msg->footer.sig = sig;
-	msg->footer.flags |= CEPH_MSG_FOOTER_SIGNED;
-	return 0;
-}
-
-static int ceph_x_check_message_signature(struct ceph_auth_handshake *auth,
-					  struct ceph_msg *msg)
-{
-	__le64 sig_check;
-	int ret;
-
-	if (ceph_test_opt(from_msgr(msg->con->msgr), NOMSGSIGN))
-		return 0;
-
-	ret = calc_signature((struct ceph_x_authorizer *)auth->authorizer,
-			     msg, &sig_check);
-	if (ret)
-		return ret;
-	if (sig_check == msg->footer.sig)
-		return 0;
-	if (msg->footer.flags & CEPH_MSG_FOOTER_SIGNED)
-		dout("ceph_x_check_message_signature %p has signature %llx "
-		     "expect %llx\n", msg, msg->footer.sig, sig_check);
-	else
-		dout("ceph_x_check_message_signature %p sender did not set "
-		     "CEPH_MSG_FOOTER_SIGNED\n", msg);
-	return -EBADMSG;
-}
 
 static const struct ceph_auth_client_ops ceph_x_ops = {
 	.name = "x",
@@ -914,13 +677,11 @@ static const struct ceph_auth_client_ops ceph_x_ops = {
 	.handle_reply = ceph_x_handle_reply,
 	.create_authorizer = ceph_x_create_authorizer,
 	.update_authorizer = ceph_x_update_authorizer,
-	.add_authorizer_challenge = ceph_x_add_authorizer_challenge,
 	.verify_authorizer_reply = ceph_x_verify_authorizer_reply,
+	.destroy_authorizer = ceph_x_destroy_authorizer,
 	.invalidate_authorizer = ceph_x_invalidate_authorizer,
 	.reset =  ceph_x_reset,
 	.destroy = ceph_x_destroy,
-	.sign_message = ceph_x_sign_message,
-	.check_message_signature = ceph_x_check_message_signature,
 };
 
 

@@ -2,7 +2,7 @@
 
 #include <linux/pci.h>
 #include <linux/cache.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/swiotlb.h>
 #include <linux/bootmem.h>
 #include <linux/dma-mapping.h>
@@ -14,18 +14,11 @@
 #include <asm/iommu_table.h>
 int swiotlb __read_mostly;
 
-void *x86_swiotlb_alloc_coherent(struct device *hwdev, size_t size,
+static void *x86_swiotlb_alloc_coherent(struct device *hwdev, size_t size,
 					dma_addr_t *dma_handle, gfp_t flags,
-					unsigned long attrs)
+					struct dma_attrs *attrs)
 {
 	void *vaddr;
-
-	/*
-	 * Don't print a warning when the first allocation attempt fails.
-	 * swiotlb_alloc_coherent() will print a warning when the DMA
-	 * memory allocation ultimately failed.
-	 */
-	flags |= __GFP_NOWARN;
 
 	vaddr = dma_generic_alloc_coherent(hwdev, size, dma_handle, flags,
 					   attrs);
@@ -35,14 +28,11 @@ void *x86_swiotlb_alloc_coherent(struct device *hwdev, size_t size,
 	return swiotlb_alloc_coherent(hwdev, size, dma_handle, flags);
 }
 
-void x86_swiotlb_free_coherent(struct device *dev, size_t size,
+static void x86_swiotlb_free_coherent(struct device *dev, size_t size,
 				      void *vaddr, dma_addr_t dma_addr,
-				      unsigned long attrs)
+				      struct dma_attrs *attrs)
 {
-	if (is_swiotlb_buffer(dma_to_phys(dev, dma_addr)))
-		swiotlb_free_coherent(dev, size, vaddr, dma_addr);
-	else
-		dma_generic_free_coherent(dev, size, vaddr, dma_addr, attrs);
+	swiotlb_free_coherent(dev, size, vaddr, dma_addr);
 }
 
 static struct dma_map_ops swiotlb_dma_ops = {
@@ -70,7 +60,7 @@ int __init pci_swiotlb_detect_override(void)
 {
 	int use_swiotlb = swiotlb | swiotlb_force;
 
-	if (swiotlb_force == SWIOTLB_FORCE)
+	if (swiotlb_force)
 		swiotlb = 1;
 
 	return use_swiotlb;
@@ -88,7 +78,7 @@ int __init pci_swiotlb_detect_4gb(void)
 {
 	/* don't initialize swiotlb if iommu=off (no_iommu=1) */
 #ifdef CONFIG_X86_64
-	if (!no_iommu && max_possible_pfn > MAX_DMA32_PFN)
+	if (!no_iommu && max_pfn > MAX_DMA32_PFN)
 		swiotlb = 1;
 #endif
 	return swiotlb;

@@ -1764,11 +1764,12 @@ struct scsi_host_template fdomain_driver_template = {
 	.can_queue		= 1,
 	.this_id		= 6,
 	.sg_tablesize		= 64,
+	.cmd_per_lun		= 1,
 	.use_clustering		= DISABLE_CLUSTERING,
 };
 
 #ifndef PCMCIA
-#if defined(CONFIG_PCI) && defined(MODULE)
+#ifdef CONFIG_PCI
 
 static struct pci_device_id fdomain_pci_tbl[] = {
 	{ PCI_VENDOR_ID_FD, PCI_DEVICE_ID_FD_36C70,

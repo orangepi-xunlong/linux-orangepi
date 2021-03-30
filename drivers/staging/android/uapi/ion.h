@@ -27,12 +27,12 @@ typedef int ion_user_handle_t;
  * @ION_HEAP_TYPE_SYSTEM:	 memory allocated via vmalloc
  * @ION_HEAP_TYPE_SYSTEM_CONTIG: memory allocated via kmalloc
  * @ION_HEAP_TYPE_CARVEOUT:	 memory allocated from a prereserved
- *				 carveout heap, allocations are physically
- *				 contiguous
+ * 				 carveout heap, allocations are physically
+ * 				 contiguous
  * @ION_HEAP_TYPE_DMA:		 memory allocated via DMA API
  * @ION_NUM_HEAPS:		 helper for iterating over heaps, a bit mask
- *				 is used to identify the heaps, so only 32
- *				 total heap types are supported
+ * 				 is used to identify the heaps, so only 32
+ * 				 total heap types are supported
  */
 enum ion_heap_type {
 	ION_HEAP_TYPE_SYSTEM,
@@ -40,36 +40,30 @@ enum ion_heap_type {
 	ION_HEAP_TYPE_CARVEOUT,
 	ION_HEAP_TYPE_CHUNK,
 	ION_HEAP_TYPE_DMA,
-	ION_HEAP_TYPE_CUSTOM,
-	ION_HEAP_TYPE_SECURE, /* allwinner add */
-			       /*
-			       * must be last so device specific heaps always
-			       * are at the end of this enum
-			       */
+	ION_HEAP_TYPE_SECURE = 6,	/* to match the value in linux-3.4 */
+	ION_HEAP_TYPE_CUSTOM, /* must be last so device specific heaps always
+				 are at the end of this enum */
+	ION_NUM_HEAPS = 16,
 };
 
 #define ION_HEAP_SYSTEM_MASK		(1 << ION_HEAP_TYPE_SYSTEM)
 #define ION_HEAP_SYSTEM_CONTIG_MASK	(1 << ION_HEAP_TYPE_SYSTEM_CONTIG)
 #define ION_HEAP_CARVEOUT_MASK		(1 << ION_HEAP_TYPE_CARVEOUT)
 #define ION_HEAP_TYPE_DMA_MASK		(1 << ION_HEAP_TYPE_DMA)
-#define ION_NUM_HEAP_IDS		(sizeof(unsigned int) * 8)
+
+#define ION_NUM_HEAP_IDS		sizeof(unsigned int) * 8
 
 /**
  * allocation flags - the lower 16 bits are used by core ion, the upper 16
  * bits are reserved for use by the heaps themselves.
  */
-
-/*
- * mappings of this buffer should be cached, ion will do cache maintenance
- * when the buffer is mapped for dma
- */
-#define ION_FLAG_CACHED 1
-
-/*
- * mappings of this buffer will created at mmap time, if this is set
- * caches must be managed manually
- */
-#define ION_FLAG_CACHED_NEEDS_SYNC 2
+#define ION_FLAG_CACHED 1		/* mappings of this buffer should be
+					   cached, ion will do cache
+					   maintenance when the buffer is
+					   mapped for dma */
+#define ION_FLAG_CACHED_NEEDS_SYNC 2	/* mappings of this buffer will created
+					   at mmap time, if this is set
+					   caches must be managed manually */
 
 /**
  * DOC: Ion Userspace API
@@ -85,7 +79,7 @@ enum ion_heap_type {
  * @align:		required alignment of the allocation
  * @heap_id_mask:	mask of heap ids to allocate from
  * @flags:		flags passed to heap
- * @handle:		pointer that will be populated with a cookie to use to
+ * @handle:		pointer that will be populated with a cookie to use to 
  *			refer to this allocation
  *
  * Provided by userspace as an argument to the ioctl
@@ -132,36 +126,6 @@ struct ion_handle_data {
 struct ion_custom_data {
 	unsigned int cmd;
 	unsigned long arg;
-};
-
-#define MAX_HEAP_NAME			32
-
-/**
- * struct ion_heap_data - data about a heap
- * @name - first 32 characters of the heap name
- * @type - heap type
- * @heap_id - heap id for the heap
- */
-struct ion_heap_data {
-	char name[MAX_HEAP_NAME];
-	__u32 type;
-	__u32 heap_id;
-	__u32 reserved0;
-	__u32 reserved1;
-	__u32 reserved2;
-};
-
-/**
- * struct ion_heap_query - collection of data about all heaps
- * @cnt - total number of heaps to be copied
- * @heaps - buffer to copy heap data
- */
-struct ion_heap_query {
-	__u32 cnt; /* Total number of heaps to be copied */
-	__u32 reserved0; /* align to 64bits */
-	__u64 heaps; /* buffer to be populated */
-	__u32 reserved1;
-	__u32 reserved2;
 };
 
 #define ION_IOC_MAGIC		'I'
@@ -216,7 +180,7 @@ struct ion_heap_query {
  * DOC: ION_IOC_SYNC - syncs a shared file descriptors to memory
  *
  * Deprecated in favor of using the dma_buf api's correctly (syncing
- * will happen automatically when the buffer is mapped to a device).
+ * will happend automatically when the buffer is mapped to a device).
  * If necessary should be used after touching a cached buffer from the cpu,
  * this will make the buffer in memory coherent.
  */
@@ -229,14 +193,5 @@ struct ion_heap_query {
  * passes appropriate userdata for that ioctl
  */
 #define ION_IOC_CUSTOM		_IOWR(ION_IOC_MAGIC, 6, struct ion_custom_data)
-
-/**
- * DOC: ION_IOC_HEAP_QUERY - information about available heaps
- *
- * Takes an ion_heap_query structure and populates information about
- * available Ion heaps.
- */
-#define ION_IOC_HEAP_QUERY     _IOWR(ION_IOC_MAGIC, 8, \
-					struct ion_heap_query)
 
 #endif /* _UAPI_LINUX_ION_H */

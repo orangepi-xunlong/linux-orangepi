@@ -36,13 +36,12 @@
 #include <asm/assembly.h>
 #include <asm/pgtable.h>
 #include <asm/cache.h>
-#include <asm/ldcw.h>
 #include <linux/linkage.h>
 
 	.text
 	.align	128
 
-ENTRY_CFI(flush_tlb_all_local)
+ENTRY(flush_tlb_all_local)
 	.proc
 	.callinfo NO_CALLS
 	.entry
@@ -97,7 +96,7 @@ fitmanyloop:					/* Loop if LOOP >= 2 */
 
 fitmanymiddle:					/* Loop if LOOP >= 2 */
 	addib,COND(>)		-1, %r31, fitmanymiddle	/* Adjusted inner loop decr */
-	pitlbe		%r0(%sr1, %r28)
+	pitlbe		0(%sr1, %r28)
 	pitlbe,m	%arg1(%sr1, %r28)	/* Last pitlbe and addr adjust */
 	addib,COND(>)		-1, %r29, fitmanymiddle	/* Middle loop decr */
 	copy		%arg3, %r31		/* Re-init inner loop count */
@@ -140,7 +139,7 @@ fdtmanyloop:					/* Loop if LOOP >= 2 */
 
 fdtmanymiddle:					/* Loop if LOOP >= 2 */
 	addib,COND(>)		-1, %r31, fdtmanymiddle	/* Adjusted inner loop decr */
-	pdtlbe		%r0(%sr1, %r28)
+	pdtlbe		0(%sr1, %r28)
 	pdtlbe,m	%arg1(%sr1, %r28)	/* Last pdtlbe and addr adjust */
 	addib,COND(>)		-1, %r29, fdtmanymiddle	/* Middle loop decr */
 	copy		%arg3, %r31		/* Re-init inner loop count */
@@ -191,11 +190,11 @@ fdtdone:
 
 	.exit
 	.procend
-ENDPROC_CFI(flush_tlb_all_local)
+ENDPROC(flush_tlb_all_local)
 
 	.import cache_info,data
 
-ENTRY_CFI(flush_instruction_cache_local)
+ENTRY(flush_instruction_cache_local)
 	.proc
 	.callinfo NO_CALLS
 	.entry
@@ -258,11 +257,11 @@ fisync:
 	.exit
 
 	.procend
-ENDPROC_CFI(flush_instruction_cache_local)
+ENDPROC(flush_instruction_cache_local)
 
 
 	.import cache_info, data
-ENTRY_CFI(flush_data_cache_local)
+ENTRY(flush_data_cache_local)
 	.proc
 	.callinfo NO_CALLS
 	.entry
@@ -326,7 +325,7 @@ fdsync:
 	.exit
 
 	.procend
-ENDPROC_CFI(flush_data_cache_local)
+ENDPROC(flush_data_cache_local)
 
 	.align	16
 
@@ -334,12 +333,8 @@ ENDPROC_CFI(flush_data_cache_local)
 
 	.macro	tlb_lock	la,flags,tmp
 #ifdef CONFIG_SMP
-#if __PA_LDCW_ALIGNMENT > 4
-	load32		pa_tlb_lock + __PA_LDCW_ALIGNMENT-1, \la
-	depi		0,31,__PA_LDCW_ALIGN_ORDER, \la
-#else
-	load32		pa_tlb_lock, \la
-#endif
+	ldil		L%pa_tlb_lock,%r1
+	ldo		R%pa_tlb_lock(%r1),\la
 	rsm		PSW_SM_I,\flags
 1:	LDCW		0(\la),\tmp
 	cmpib,<>,n	0,\tmp,3f
@@ -354,7 +349,6 @@ ENDPROC_CFI(flush_data_cache_local)
 	.macro	tlb_unlock	la,flags,tmp
 #ifdef CONFIG_SMP
 	ldi		1,\tmp
-	sync
 	stw		\tmp,0(\la)
 	mtsm		\flags
 #endif
@@ -362,7 +356,7 @@ ENDPROC_CFI(flush_data_cache_local)
 
 /* Clear page using kernel mapping.  */
 
-ENTRY_CFI(clear_page_asm)
+ENTRY(clear_page_asm)
 	.proc
 	.callinfo NO_CALLS
 	.entry
@@ -428,11 +422,11 @@ ENTRY_CFI(clear_page_asm)
 	.exit
 
 	.procend
-ENDPROC_CFI(clear_page_asm)
+ENDPROC(clear_page_asm)
 
 /* Copy page using kernel mapping.  */
 
-ENTRY_CFI(copy_page_asm)
+ENTRY(copy_page_asm)
 	.proc
 	.callinfo NO_CALLS
 	.entry
@@ -546,7 +540,7 @@ ENTRY_CFI(copy_page_asm)
 	.exit
 
 	.procend
-ENDPROC_CFI(copy_page_asm)
+ENDPROC(copy_page_asm)
 
 /*
  * NOTE: Code in clear_user_page has a hard coded dependency on the
@@ -579,17 +573,11 @@ ENDPROC_CFI(copy_page_asm)
 	.endm
 
 	/*
-	 * copy_user_page_asm() performs a page copy using mappings
-	 * equivalent to the user page mappings.  It can be used to
-	 * implement copy_user_page() but unfortunately both the `from'
-	 * and `to' pages need to be flushed through mappings equivalent
-	 * to the user mappings after the copy because the kernel accesses
-	 * the `from' page through the kmap kernel mapping and the `to'
-	 * page needs to be flushed since code can be copied.  As a
-	 * result, this implementation is less efficient than the simpler
-	 * copy using the kernel mapping.  It only needs the `from' page
-	 * to flushed via the user mapping.  The kunmap routines handle
-	 * the flushes needed for the kernel mapping.
+	 * We can't do this since copy_user_page is used to bring in
+	 * file data that might have instructions. Since the data would
+	 * then need to be flushed out so the i-fetch can see it, it
+	 * makes more sense to just copy through the kernel translation
+	 * and flush it.
 	 *
 	 * I'm still keeping this around because it may be possible to
 	 * use it if more information is passed into copy_user_page().
@@ -598,7 +586,7 @@ ENDPROC_CFI(copy_page_asm)
 	 *
 	 */
 
-ENTRY_CFI(copy_user_page_asm)
+ENTRY(copy_user_page_asm)
 	.proc
 	.callinfo NO_CALLS
 	.entry
@@ -632,12 +620,12 @@ ENTRY_CFI(copy_user_page_asm)
 	/* Purge any old translations */
 
 #ifdef CONFIG_PA20
-	pdtlb,l		%r0(%r28)
-	pdtlb,l		%r0(%r29)
+	pdtlb,l		0(%r28)
+	pdtlb,l		0(%r29)
 #else
 	tlb_lock	%r20,%r21,%r22
-	pdtlb		%r0(%r28)
-	pdtlb		%r0(%r29)
+	pdtlb		0(%r28)
+	pdtlb		0(%r29)
 	tlb_unlock	%r20,%r21,%r22
 #endif
 
@@ -754,9 +742,9 @@ ENTRY_CFI(copy_user_page_asm)
 	.exit
 
 	.procend
-ENDPROC_CFI(copy_user_page_asm)
+ENDPROC(copy_user_page_asm)
 
-ENTRY_CFI(clear_user_page_asm)
+ENTRY(clear_user_page_asm)
 	.proc
 	.callinfo NO_CALLS
 	.entry
@@ -780,10 +768,10 @@ ENTRY_CFI(clear_user_page_asm)
 	/* Purge any old translation */
 
 #ifdef CONFIG_PA20
-	pdtlb,l		%r0(%r28)
+	pdtlb,l		0(%r28)
 #else
 	tlb_lock	%r20,%r21,%r22
-	pdtlb		%r0(%r28)
+	pdtlb		0(%r28)
 	tlb_unlock	%r20,%r21,%r22
 #endif
 
@@ -840,9 +828,9 @@ ENTRY_CFI(clear_user_page_asm)
 	.exit
 
 	.procend
-ENDPROC_CFI(clear_user_page_asm)
+ENDPROC(clear_user_page_asm)
 
-ENTRY_CFI(flush_dcache_page_asm)
+ENTRY(flush_dcache_page_asm)
 	.proc
 	.callinfo NO_CALLS
 	.entry
@@ -864,10 +852,10 @@ ENTRY_CFI(flush_dcache_page_asm)
 	/* Purge any old translation */
 
 #ifdef CONFIG_PA20
-	pdtlb,l		%r0(%r28)
+	pdtlb,l		0(%r28)
 #else
 	tlb_lock	%r20,%r21,%r22
-	pdtlb		%r0(%r28)
+	pdtlb		0(%r28)
 	tlb_unlock	%r20,%r21,%r22
 #endif
 
@@ -898,18 +886,27 @@ ENTRY_CFI(flush_dcache_page_asm)
 	fdc,m		r31(%r28)
 	fdc,m		r31(%r28)
 	fdc,m		r31(%r28)
-	cmpb,COND(<<)	%r28, %r25,1b
+	cmpb,COND(<<)		%r28, %r25,1b
 	fdc,m		r31(%r28)
 
 	sync
+
+#ifdef CONFIG_PA20
+	pdtlb,l		0(%r25)
+#else
+	tlb_lock	%r20,%r21,%r22
+	pdtlb		0(%r25)
+	tlb_unlock	%r20,%r21,%r22
+#endif
+
 	bv		%r0(%r2)
 	nop
 	.exit
 
 	.procend
-ENDPROC_CFI(flush_dcache_page_asm)
+ENDPROC(flush_dcache_page_asm)
 
-ENTRY_CFI(flush_icache_page_asm)
+ENTRY(flush_icache_page_asm)
 	.proc
 	.callinfo NO_CALLS
 	.entry
@@ -928,18 +925,13 @@ ENTRY_CFI(flush_icache_page_asm)
 	depwi		0, 31,PAGE_SHIFT, %r28	/* Clear any offset bits */
 #endif
 
-	/* Purge any old translation.  Note that the FIC instruction
-	 * may use either the instruction or data TLB.  Given that we
-	 * have a flat address space, it's not clear which TLB will be
-	 * used.  So, we purge both entries.  */
+	/* Purge any old translation */
 
 #ifdef CONFIG_PA20
-	pdtlb,l		%r0(%r28)
 	pitlb,l         %r0(%sr4,%r28)
 #else
 	tlb_lock        %r20,%r21,%r22
-	pdtlb		%r0(%r28)
-	pitlb           %r0(%sr4,%r28)
+	pitlb           (%sr4,%r28)
 	tlb_unlock      %r20,%r21,%r22
 #endif
 
@@ -976,14 +968,23 @@ ENTRY_CFI(flush_icache_page_asm)
 	fic,m		%r31(%sr4,%r28)
 
 	sync
+
+#ifdef CONFIG_PA20
+	pitlb,l         %r0(%sr4,%r25)
+#else
+	tlb_lock        %r20,%r21,%r22
+	pitlb           (%sr4,%r25)
+	tlb_unlock      %r20,%r21,%r22
+#endif
+
 	bv		%r0(%r2)
 	nop
 	.exit
 
 	.procend
-ENDPROC_CFI(flush_icache_page_asm)
+ENDPROC(flush_icache_page_asm)
 
-ENTRY_CFI(flush_kernel_dcache_page_asm)
+ENTRY(flush_kernel_dcache_page_asm)
 	.proc
 	.callinfo NO_CALLS
 	.entry
@@ -1024,9 +1025,9 @@ ENTRY_CFI(flush_kernel_dcache_page_asm)
 	.exit
 
 	.procend
-ENDPROC_CFI(flush_kernel_dcache_page_asm)
+ENDPROC(flush_kernel_dcache_page_asm)
 
-ENTRY_CFI(purge_kernel_dcache_page_asm)
+ENTRY(purge_kernel_dcache_page_asm)
 	.proc
 	.callinfo NO_CALLS
 	.entry
@@ -1066,9 +1067,9 @@ ENTRY_CFI(purge_kernel_dcache_page_asm)
 	.exit
 
 	.procend
-ENDPROC_CFI(purge_kernel_dcache_page_asm)
+ENDPROC(purge_kernel_dcache_page_asm)
 
-ENTRY_CFI(flush_user_dcache_range_asm)
+ENTRY(flush_user_dcache_range_asm)
 	.proc
 	.callinfo NO_CALLS
 	.entry
@@ -1087,9 +1088,9 @@ ENTRY_CFI(flush_user_dcache_range_asm)
 	.exit
 
 	.procend
-ENDPROC_CFI(flush_user_dcache_range_asm)
+ENDPROC(flush_user_dcache_range_asm)
 
-ENTRY_CFI(flush_kernel_dcache_range_asm)
+ENTRY(flush_kernel_dcache_range_asm)
 	.proc
 	.callinfo NO_CALLS
 	.entry
@@ -1109,31 +1110,9 @@ ENTRY_CFI(flush_kernel_dcache_range_asm)
 	.exit
 
 	.procend
-ENDPROC_CFI(flush_kernel_dcache_range_asm)
+ENDPROC(flush_kernel_dcache_range_asm)
 
-ENTRY_CFI(purge_kernel_dcache_range_asm)
-	.proc
-	.callinfo NO_CALLS
-	.entry
-
-	ldil		L%dcache_stride, %r1
-	ldw		R%dcache_stride(%r1), %r23
-	ldo		-1(%r23), %r21
-	ANDCM		%r26, %r21, %r26
-
-1:      cmpb,COND(<<),n	%r26, %r25,1b
-	pdc,m		%r23(%r26)
-
-	sync
-	syncdma
-	bv		%r0(%r2)
-	nop
-	.exit
-
-	.procend
-ENDPROC_CFI(purge_kernel_dcache_range_asm)
-
-ENTRY_CFI(flush_user_icache_range_asm)
+ENTRY(flush_user_icache_range_asm)
 	.proc
 	.callinfo NO_CALLS
 	.entry
@@ -1152,9 +1131,9 @@ ENTRY_CFI(flush_user_icache_range_asm)
 	.exit
 
 	.procend
-ENDPROC_CFI(flush_user_icache_range_asm)
+ENDPROC(flush_user_icache_range_asm)
 
-ENTRY_CFI(flush_kernel_icache_page)
+ENTRY(flush_kernel_icache_page)
 	.proc
 	.callinfo NO_CALLS
 	.entry
@@ -1195,9 +1174,9 @@ ENTRY_CFI(flush_kernel_icache_page)
 	.exit
 
 	.procend
-ENDPROC_CFI(flush_kernel_icache_page)
+ENDPROC(flush_kernel_icache_page)
 
-ENTRY_CFI(flush_kernel_icache_range_asm)
+ENTRY(flush_kernel_icache_range_asm)
 	.proc
 	.callinfo NO_CALLS
 	.entry
@@ -1215,13 +1194,13 @@ ENTRY_CFI(flush_kernel_icache_range_asm)
 	nop
 	.exit
 	.procend
-ENDPROC_CFI(flush_kernel_icache_range_asm)
+ENDPROC(flush_kernel_icache_range_asm)
 
 	/* align should cover use of rfi in disable_sr_hashing_asm and
 	 * srdis_done.
 	 */
 	.align	256
-ENTRY_CFI(disable_sr_hashing_asm)
+ENTRY(disable_sr_hashing_asm)
 	.proc
 	.callinfo NO_CALLS
 	.entry
@@ -1310,6 +1289,6 @@ srdis_done:
 	.exit
 
 	.procend
-ENDPROC_CFI(disable_sr_hashing_asm)
+ENDPROC(disable_sr_hashing_asm)
 
 	.end

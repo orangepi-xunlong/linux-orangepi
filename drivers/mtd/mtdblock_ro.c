@@ -24,7 +24,6 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/blktrans.h>
 #include <linux/module.h>
-#include <linux/major.h>
 
 static int mtdblock_readsect(struct mtd_blktrans_dev *dev,
 			      unsigned long block, char *buf)
@@ -71,7 +70,7 @@ static void mtdblock_remove_dev(struct mtd_blktrans_dev *dev)
 
 static struct mtd_blktrans_ops mtdblock_tr = {
 	.name		= "mtdblock",
-	.major		= MTD_BLOCK_MAJOR,
+	.major		= 31,
 	.part_bits	= 0,
 	.blksize 	= 512,
 	.readsect	= mtdblock_readsect,

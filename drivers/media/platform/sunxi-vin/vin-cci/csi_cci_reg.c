@@ -1,18 +1,3 @@
-/*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-cci/csi_cci_reg.c
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
 
 /*
  ******************************************************************************
@@ -23,9 +8,9 @@
  *
  * Copyright (c) 2015 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
  *
- * Version         Author         Date          Description
+ * Version		  Author         Date		    Description
  *
- *   3.0         Yang Feng    2015/12/02    ISP Tuning Tools Support
+ *   3.0		  Yang Feng   	2015/12/02	ISP Tuning Tools Support
  *
  ******************************************************************************
  */
@@ -34,13 +19,12 @@
 #include "csi_cci_reg.h"
 
 #include "../utility/vin_io.h"
-
-unsigned int fifo_last_pt[MAX_CSIC_CCI_NUM];
-volatile void __iomem *csi_cci_base_addr[MAX_CSIC_CCI_NUM];
+unsigned int fifo_last_pt[MAX_CSI];
+volatile void __iomem *csi_cci_base_addr[2];
 
 int csi_cci_set_base_addr(unsigned int sel, unsigned long addr)
 {
-	if (sel >= MAX_CSIC_CCI_NUM)
+	if (sel >= MAX_CSI)
 		return -1;
 	csi_cci_base_addr[sel] = (volatile void __iomem *)addr;
 	return 0;
@@ -133,7 +117,6 @@ void csi_cci_trans_start(unsigned int sel, enum cci_trans_mode trans_mode)
 unsigned int csi_cci_get_trans_done(unsigned int sel)
 {
 	unsigned int reg_val, single_tran;
-
 	reg_val = vin_reg_readl(csi_cci_base_addr[sel] + CCI_CTRL_OFF);
 	single_tran = (reg_val & (1 << CCI_CTRL_SINGLE_TRAN));
 	if (single_tran == 0)
@@ -144,14 +127,14 @@ unsigned int csi_cci_get_trans_done(unsigned int sel)
 
 void csi_cci_set_bus_fmt(unsigned int sel, struct cci_bus_fmt *bus_fmt)
 {
-	if (bus_fmt->rs_mode == 0)
+	if (0 == bus_fmt->rs_mode)
 		vin_reg_clr(csi_cci_base_addr[sel] + CCI_CTRL_OFF,
 			    1 << CCI_CTRL_RESTART_MODE);
 	else
 		vin_reg_set(csi_cci_base_addr[sel] + CCI_CTRL_OFF,
 			    1 << CCI_CTRL_RESTART_MODE);
 
-	if (bus_fmt->rs_start == 0)
+	if (0 == bus_fmt->rs_start)
 		vin_reg_clr(csi_cci_base_addr[sel] + CCI_CTRL_OFF,
 			    1 << CCI_CTRL_READ_TRAN_MODE);
 	else
@@ -203,7 +186,6 @@ static void cci_wr_tx_buf(unsigned int sel, unsigned int byte_index,
 			  unsigned char value)
 {
 	unsigned int index_remain, index_dw_align, tmp;
-
 	index_remain = (byte_index) % 4;
 	index_dw_align = (byte_index) / 4;
 
@@ -220,7 +202,6 @@ static void cci_rd_tx_buf(unsigned int sel, unsigned int byte_index,
 			  unsigned char *value)
 {
 	unsigned int index_remain, index_dw_align, tmp;
-
 	index_remain = (byte_index) % 4;
 	index_dw_align = (byte_index) / 4;
 	tmp =
@@ -233,18 +214,18 @@ void csi_cci_wr_tx_buf(unsigned int sel, unsigned char *buf,
 		       unsigned int byte_cnt)
 {
 	unsigned int i;
-
-	for (i = 0; i < byte_cnt; i++, fifo_last_pt[sel]++)
+	for (i = 0; i < byte_cnt; i++, fifo_last_pt[sel]++) {
 		cci_wr_tx_buf(sel, fifo_last_pt[sel], buf[i]);
+	}
 }
 
 void csi_cci_rd_tx_buf(unsigned int sel, unsigned char *buf,
 		       unsigned int byte_cnt)
 {
 	unsigned int i;
-
-	for (i = 0; i < byte_cnt; i++, fifo_last_pt[sel]++)
+	for (i = 0; i < byte_cnt; i++, fifo_last_pt[sel]++) {
 		cci_rd_tx_buf(sel, fifo_last_pt[sel], &buf[i]);
+	}
 }
 
 void csi_cci_set_trig_mode(unsigned int sel, struct cci_tx_trig *tx_trig_mode)
@@ -357,18 +338,17 @@ void cci_sck_cycles(unsigned int sel, unsigned int cycle_times)
 void cci_print_info(unsigned int sel)
 {
 	unsigned int reg_val = 0, i;
-
-	pr_info("Print cci regs:\n");
+	printk("Print cci regs: \n");
 	for (i = 0; i < 32; i += 4) {
 		reg_val = vin_reg_readl(csi_cci_base_addr[sel] + i);
-		pr_info("0x%lx = 0x%x\n",
-		       (unsigned long int)csi_cci_base_addr[sel] + i, reg_val);
+		printk("0x%lx = 0x%x\n",\
+		       (long unsigned int)csi_cci_base_addr[sel] + i, reg_val);
 	}
 
 	for (i = 0; i < 12; i += 4) {
 		reg_val = vin_reg_readl(csi_cci_base_addr[sel] + 0x100 + i);
-		pr_info("0x%lx = 0x%x\n",
-		       (unsigned long int)csi_cci_base_addr[sel] + 0x100 + i,
+		printk("0x%lx = 0x%x\n",\
+		       (long unsigned int)csi_cci_base_addr[sel] + 0x100 + i,
 		       reg_val);
 	}
 }

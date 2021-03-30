@@ -22,29 +22,28 @@
 #include <linux/gpio.h>
 #include <linux/platform_device.h>
 #include <linux/i2c.h>
-#include <linux/platform_data/at24.h>
+#include <linux/i2c/at24.h>
 #include <linux/i2c/pcf857x.h>
 
-#include <media/i2c/tvp514x.h>
-#include <media/i2c/adv7343.h>
+#include <media/tvp514x.h>
+#include <media/adv7343.h>
 
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/nand.h>
 #include <linux/mtd/partitions.h>
 #include <linux/clk.h>
 #include <linux/export.h>
-#include <linux/platform_data/gpio-davinci.h>
-#include <linux/platform_data/i2c-davinci.h>
-#include <linux/platform_data/mtd-davinci.h>
-#include <linux/platform_data/mtd-davinci-aemif.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
 #include <mach/common.h>
-#include <mach/irqs.h>
 #include <mach/serial.h>
+#include <linux/platform_data/i2c-davinci.h>
+#include <linux/platform_data/mtd-davinci.h>
 #include <mach/clock.h>
+#include <mach/cdce949.h>
+#include <linux/platform_data/mtd-davinci-aemif.h>
 
 #include "davinci.h"
 #include "clock.h"
@@ -121,7 +120,6 @@ static struct platform_device davinci_nand_device = {
 
 #define HAS_ATA		IS_ENABLED(CONFIG_BLK_DEV_PALMCHIP_BK3710)
 
-#ifdef CONFIG_I2C
 /* CPLD Register 0 bits to control ATA */
 #define DM646X_EVM_ATA_RST		BIT(0)
 #define DM646X_EVM_ATA_PWD		BIT(1)
@@ -317,7 +315,6 @@ static struct at24_platform_data eeprom_info = {
 	.setup          = davinci_get_mac_addr,
 	.context	= (void *)0x7f00,
 };
-#endif
 
 static u8 dm646x_iis_serializer_direction[] = {
        TX_MODE, RX_MODE, INACTIVE_MODE, INACTIVE_MODE,
@@ -348,7 +345,6 @@ static struct snd_platform_data dm646x_evm_snd_data[] = {
 	},
 };
 
-#ifdef CONFIG_I2C
 static struct i2c_client *cpld_client;
 
 static int cpld_video_probe(struct i2c_client *client,
@@ -400,6 +396,9 @@ static struct i2c_board_info __initdata i2c_info[] =  {
 	},
 	{
 		I2C_BOARD_INFO("cpld_video", 0x3b),
+	},
+	{
+		I2C_BOARD_INFO("cdce949", 0x6c),
 	},
 };
 
@@ -713,7 +712,31 @@ static void __init evm_init_i2c(void)
 	evm_init_cpld();
 	evm_init_video();
 }
-#endif
+
+#define CDCE949_XIN_RATE	27000000
+
+/* CDCE949 support - "lpsc" field is overridden to work as clock number */
+static struct clk cdce_clk_in = {
+	.name	= "cdce_xin",
+	.rate	= CDCE949_XIN_RATE,
+};
+
+static struct clk_lookup cdce_clks[] = {
+	CLK(NULL, "xin", &cdce_clk_in),
+	CLK(NULL, NULL, NULL),
+};
+
+static void __init cdce_clk_init(void)
+{
+	struct clk_lookup *c;
+	struct clk *clk;
+
+	for (c = cdce_clks; c->clk; c++) {
+		clk = c->clk;
+		clkdev_add(c);
+		clk_register(clk);
+	}
+}
 
 #define DM6467T_EVM_REF_FREQ		33000000
 
@@ -723,7 +746,13 @@ static void __init davinci_map_io(void)
 
 	if (machine_is_davinci_dm6467tevm())
 		davinci_set_refclk_rate(DM6467T_EVM_REF_FREQ);
+
+	cdce_clk_init();
 }
+
+static struct davinci_uart_config uart_config __initdata = {
+	.enabled_uarts = (1 << 0),
+};
 
 #define DM646X_EVM_PHY_ID		"davinci_mdio-0:01"
 /*
@@ -761,18 +790,10 @@ static struct edma_rsv_info dm646x_edma_rsv[] = {
 
 static __init void evm_init(void)
 {
-	int ret;
 	struct davinci_soc_info *soc_info = &davinci_soc_info;
 
-	ret = dm646x_gpio_register();
-	if (ret)
-		pr_warn("%s: GPIO init failed: %d\n", __func__, ret);
-
-#ifdef CONFIG_I2C
 	evm_init_i2c();
-#endif
-
-	davinci_serial_init(dm646x_serial_device);
+	davinci_serial_init(&uart_config);
 	dm646x_init_mcasp0(&dm646x_evm_snd_data[0]);
 	dm646x_init_mcasp1(&dm646x_evm_snd_data[1]);
 
@@ -780,9 +801,6 @@ static __init void evm_init(void)
 		davinci_nand_data.timing = &dm6467tevm_nandflash_timing;
 
 	platform_device_register(&davinci_nand_device);
-
-	if (davinci_aemif_setup(&davinci_nand_device))
-		pr_warn("%s: Cannot configure AEMIF.\n", __func__);
 
 	dm646x_init_edma(dm646x_edma_rsv);
 

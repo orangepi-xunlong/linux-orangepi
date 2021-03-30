@@ -57,6 +57,7 @@
 
 #include <linux/module.h>
 #include <linux/moduleparam.h>
+#include <linux/init.h>
 #include <linux/crc32.h>
 #include <linux/usb.h>
 #include <linux/firmware.h>
@@ -173,10 +174,10 @@ struct uea_softc {
 	const struct firmware *dsp_firm;
 	struct urb *urb_int;
 
-	void (*dispatch_cmv)(struct uea_softc *, struct intr_pkt *);
-	void (*schedule_load_page)(struct uea_softc *, struct intr_pkt *);
-	int (*stat)(struct uea_softc *);
-	int (*send_cmvs)(struct uea_softc *);
+	void (*dispatch_cmv) (struct uea_softc *, struct intr_pkt *);
+	void (*schedule_load_page) (struct uea_softc *, struct intr_pkt *);
+	int (*stat) (struct uea_softc *);
+	int (*send_cmvs) (struct uea_softc *);
 
 	/* keep in sync with eaglectl */
 	struct uea_stats {
@@ -952,7 +953,7 @@ static void uea_load_page_e1(struct work_struct *work)
 	int i;
 
 	/* reload firmware when reboot start and it's loaded already */
-	if (ovl == 0 && pageno == 0) {
+	if (ovl == 0 && pageno == 0 && sc->dsp_firm) {
 		release_firmware(sc->dsp_firm);
 		sc->dsp_firm = NULL;
 	}
@@ -1074,7 +1075,7 @@ static void uea_load_page_e4(struct work_struct *work)
 	uea_dbg(INS_TO_USBDEV(sc), "sending DSP page %u\n", pageno);
 
 	/* reload firmware when reboot start and it's loaded already */
-	if (pageno == 0) {
+	if (pageno == 0 && sc->dsp_firm) {
 		release_firmware(sc->dsp_firm);
 		sc->dsp_firm = NULL;
 	}
@@ -1599,7 +1600,7 @@ static void cmvs_file_name(struct uea_softc *sc, char *const cmv_name, int ver)
 	char file_arr[] = "CMVxy.bin";
 	char *file;
 
-	kernel_param_lock(THIS_MODULE);
+	kparam_block_sysfs_write(cmv_file);
 	/* set proper name corresponding modem version and line type */
 	if (cmv_file[sc->modem_index] == NULL) {
 		if (UEA_CHIP_VERSION(sc) == ADI930)
@@ -1618,7 +1619,7 @@ static void cmvs_file_name(struct uea_softc *sc, char *const cmv_name, int ver)
 	strlcat(cmv_name, file, UEA_FW_NAME_MAX);
 	if (ver == 2)
 		strlcat(cmv_name, ".v2", UEA_FW_NAME_MAX);
-	kernel_param_unlock(THIS_MODULE);
+	kparam_unblock_sysfs_write(cmv_file);
 }
 
 static int request_cmvs_old(struct uea_softc *sc,
@@ -2196,12 +2197,17 @@ static int uea_boot(struct uea_softc *sc)
 		load_XILINX_firmware(sc);
 
 	intr = kmalloc(size, GFP_KERNEL);
-	if (!intr)
+	if (!intr) {
+		uea_err(INS_TO_USBDEV(sc),
+		       "cannot allocate interrupt package\n");
 		goto err0;
+	}
 
 	sc->urb_int = usb_alloc_urb(0, GFP_KERNEL);
-	if (!sc->urb_int)
+	if (!sc->urb_int) {
+		uea_err(INS_TO_USBDEV(sc), "cannot allocate interrupt URB\n");
 		goto err1;
+	}
 
 	usb_fill_int_urb(sc->urb_int, sc->usb_dev,
 			 usb_rcvintpipe(sc->usb_dev, UEA_INTR_PIPE),
@@ -2449,7 +2455,7 @@ UEA_ATTR(firmid, 0);
 
 /* Retrieve the device End System Identifier (MAC) */
 
-static int uea_getesi(struct uea_softc *sc, u_char *esi)
+static int uea_getesi(struct uea_softc *sc, u_char * esi)
 {
 	unsigned char mac_str[2 * ETH_ALEN + 1];
 	int i;
@@ -2556,8 +2562,10 @@ static int uea_bind(struct usbatm_data *usbatm, struct usb_interface *intf,
 	}
 
 	sc = kzalloc(sizeof(struct uea_softc), GFP_KERNEL);
-	if (!sc)
+	if (!sc) {
+		uea_err(usb, "uea_init: not enough memory !\n");
 		return -ENOMEM;
+	}
 
 	sc->usb_dev = usb;
 	usbatm->driver_data = sc;

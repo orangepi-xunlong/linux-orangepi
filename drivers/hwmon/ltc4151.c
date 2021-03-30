@@ -30,7 +30,6 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/of.h>
 #include <linux/init.h>
 #include <linux/err.h>
 #include <linux/slab.h>
@@ -48,12 +47,11 @@
 #define LTC4151_ADIN_L	0x05
 
 struct ltc4151_data {
-	struct i2c_client *client;
+	struct device *hwmon_dev;
 
 	struct mutex update_lock;
 	bool valid;
 	unsigned long last_updated; /* in jiffies */
-	unsigned int shunt; /* in micro ohms */
 
 	/* Registers */
 	u8 regs[6];
@@ -61,8 +59,8 @@ struct ltc4151_data {
 
 static struct ltc4151_data *ltc4151_update_device(struct device *dev)
 {
-	struct ltc4151_data *data = dev_get_drvdata(dev);
-	struct i2c_client *client = data->client;
+	struct i2c_client *client = to_i2c_client(dev);
+	struct ltc4151_data *data = i2c_get_clientdata(client);
 	struct ltc4151_data *ret = data;
 
 	mutex_lock(&data->update_lock);
@@ -113,9 +111,9 @@ static int ltc4151_get_value(struct ltc4151_data *data, u8 reg)
 	case LTC4151_SENSE_H:
 		/*
 		 * 20uV resolution. Convert to current as measured with
-		 * a given sense resistor, in mA.
+		 * an 1 mOhm sense resistor, in mA.
 		 */
-		val = val * 20 * 1000 / data->shunt;
+		val = val * 20;
 		break;
 	case LTC4151_VIN_H:
 		/* 25 mV per increment */
@@ -161,7 +159,7 @@ static SENSOR_DEVICE_ATTR(curr1_input, S_IRUGO, ltc4151_show_value, NULL,
  * Finally, construct an array of pointers to members of the above objects,
  * as required for sysfs_create_group()
  */
-static struct attribute *ltc4151_attrs[] = {
+static struct attribute *ltc4151_attributes[] = {
 	&sensor_dev_attr_in1_input.dev_attr.attr,
 	&sensor_dev_attr_in2_input.dev_attr.attr,
 
@@ -169,40 +167,54 @@ static struct attribute *ltc4151_attrs[] = {
 
 	NULL,
 };
-ATTRIBUTE_GROUPS(ltc4151);
+
+static const struct attribute_group ltc4151_group = {
+	.attrs = ltc4151_attributes,
+};
 
 static int ltc4151_probe(struct i2c_client *client,
 			 const struct i2c_device_id *id)
 {
 	struct i2c_adapter *adapter = client->adapter;
-	struct device *dev = &client->dev;
 	struct ltc4151_data *data;
-	struct device *hwmon_dev;
-	u32 shunt;
+	int ret;
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA))
 		return -ENODEV;
 
-	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
+	data = devm_kzalloc(&client->dev, sizeof(*data), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 
-	if (of_property_read_u32(client->dev.of_node,
-				 "shunt-resistor-micro-ohms", &shunt))
-		shunt = 1000; /* 1 mOhm if not set via DT */
-
-	if (shunt == 0)
-		return -EINVAL;
-
-	data->shunt = shunt;
-
-	data->client = client;
+	i2c_set_clientdata(client, data);
 	mutex_init(&data->update_lock);
 
-	hwmon_dev = devm_hwmon_device_register_with_groups(dev, client->name,
-							   data,
-							   ltc4151_groups);
-	return PTR_ERR_OR_ZERO(hwmon_dev);
+	/* Register sysfs hooks */
+	ret = sysfs_create_group(&client->dev.kobj, &ltc4151_group);
+	if (ret)
+		return ret;
+
+	data->hwmon_dev = hwmon_device_register(&client->dev);
+	if (IS_ERR(data->hwmon_dev)) {
+		ret = PTR_ERR(data->hwmon_dev);
+		goto out_hwmon_device_register;
+	}
+
+	return 0;
+
+out_hwmon_device_register:
+	sysfs_remove_group(&client->dev.kobj, &ltc4151_group);
+	return ret;
+}
+
+static int ltc4151_remove(struct i2c_client *client)
+{
+	struct ltc4151_data *data = i2c_get_clientdata(client);
+
+	hwmon_device_unregister(data->hwmon_dev);
+	sysfs_remove_group(&client->dev.kobj, &ltc4151_group);
+
+	return 0;
 }
 
 static const struct i2c_device_id ltc4151_id[] = {
@@ -211,18 +223,13 @@ static const struct i2c_device_id ltc4151_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, ltc4151_id);
 
-static const struct of_device_id ltc4151_match[] = {
-	{ .compatible = "lltc,ltc4151" },
-	{},
-};
-
 /* This is the driver that will be inserted */
 static struct i2c_driver ltc4151_driver = {
 	.driver = {
 		.name	= "ltc4151",
-		.of_match_table = of_match_ptr(ltc4151_match),
 	},
 	.probe		= ltc4151_probe,
+	.remove		= ltc4151_remove,
 	.id_table	= ltc4151_id,
 };
 

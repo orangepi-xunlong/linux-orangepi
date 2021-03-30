@@ -12,6 +12,7 @@
  *
  */
 
+#include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/delay.h>
 #include <linux/module.h>
@@ -24,10 +25,13 @@ struct wm831x_clk {
 	struct clk_hw xtal_hw;
 	struct clk_hw fll_hw;
 	struct clk_hw clkout_hw;
+	struct clk *xtal;
+	struct clk *fll;
+	struct clk *clkout;
 	bool xtal_ena;
 };
 
-static int wm831x_xtal_is_prepared(struct clk_hw *hw)
+static int wm831x_xtal_is_enabled(struct clk_hw *hw)
 {
 	struct wm831x_clk *clkdata = container_of(hw, struct wm831x_clk,
 						  xtal_hw);
@@ -48,13 +52,14 @@ static unsigned long wm831x_xtal_recalc_rate(struct clk_hw *hw,
 }
 
 static const struct clk_ops wm831x_xtal_ops = {
-	.is_prepared = wm831x_xtal_is_prepared,
+	.is_enabled = wm831x_xtal_is_enabled,
 	.recalc_rate = wm831x_xtal_recalc_rate,
 };
 
 static struct clk_init_data wm831x_xtal_init = {
 	.name = "xtal",
 	.ops = &wm831x_xtal_ops,
+	.flags = CLK_IS_ROOT,
 };
 
 static const unsigned long wm831x_fll_auto_rates[] = {
@@ -68,7 +73,7 @@ static const unsigned long wm831x_fll_auto_rates[] = {
 	24576000,
 };
 
-static int wm831x_fll_is_prepared(struct clk_hw *hw)
+static int wm831x_fll_is_enabled(struct clk_hw *hw)
 {
 	struct wm831x_clk *clkdata = container_of(hw, struct wm831x_clk,
 						  fll_hw);
@@ -92,7 +97,7 @@ static int wm831x_fll_prepare(struct clk_hw *hw)
 	struct wm831x *wm831x = clkdata->wm831x;
 	int ret;
 
-	ret = wm831x_set_bits(wm831x, WM831X_FLL_CONTROL_1,
+	ret = wm831x_set_bits(wm831x, WM831X_FLL_CONTROL_2,
 			      WM831X_FLL_ENA, WM831X_FLL_ENA);
 	if (ret != 0)
 		dev_crit(wm831x->dev, "Failed to enable FLL: %d\n", ret);
@@ -109,9 +114,9 @@ static void wm831x_fll_unprepare(struct clk_hw *hw)
 	struct wm831x *wm831x = clkdata->wm831x;
 	int ret;
 
-	ret = wm831x_set_bits(wm831x, WM831X_FLL_CONTROL_1, WM831X_FLL_ENA, 0);
+	ret = wm831x_set_bits(wm831x, WM831X_FLL_CONTROL_2, WM831X_FLL_ENA, 0);
 	if (ret != 0)
-		dev_crit(wm831x->dev, "Failed to disable FLL: %d\n", ret);
+		dev_crit(wm831x->dev, "Failed to disaable FLL: %d\n", ret);
 }
 
 static unsigned long wm831x_fll_recalc_rate(struct clk_hw *hw,
@@ -165,7 +170,7 @@ static int wm831x_fll_set_rate(struct clk_hw *hw, unsigned long rate,
 	if (i == ARRAY_SIZE(wm831x_fll_auto_rates))
 		return -EINVAL;
 
-	if (wm831x_fll_is_prepared(hw))
+	if (wm831x_fll_is_enabled(hw))
 		return -EPERM;
 
 	return wm831x_set_bits(wm831x, WM831X_CLOCK_CONTROL_2,
@@ -215,7 +220,7 @@ static u8 wm831x_fll_get_parent(struct clk_hw *hw)
 }
 
 static const struct clk_ops wm831x_fll_ops = {
-	.is_prepared = wm831x_fll_is_prepared,
+	.is_enabled = wm831x_fll_is_enabled,
 	.prepare = wm831x_fll_prepare,
 	.unprepare = wm831x_fll_unprepare,
 	.round_rate = wm831x_fll_round_rate,
@@ -232,7 +237,7 @@ static struct clk_init_data wm831x_fll_init = {
 	.flags = CLK_SET_RATE_GATE,
 };
 
-static int wm831x_clkout_is_prepared(struct clk_hw *hw)
+static int wm831x_clkout_is_enabled(struct clk_hw *hw)
 {
 	struct wm831x_clk *clkdata = container_of(hw, struct wm831x_clk,
 						  clkout_hw);
@@ -243,7 +248,7 @@ static int wm831x_clkout_is_prepared(struct clk_hw *hw)
 	if (ret < 0) {
 		dev_err(wm831x->dev, "Unable to read CLOCK_CONTROL_1: %d\n",
 			ret);
-		return false;
+		return true;
 	}
 
 	return (ret & WM831X_CLKOUT_ENA) != 0;
@@ -294,8 +299,8 @@ static void wm831x_clkout_unprepare(struct clk_hw *hw)
 }
 
 static const char *wm831x_clkout_parents[] = {
-	"fll",
 	"xtal",
+	"fll",
 };
 
 static u8 wm831x_clkout_get_parent(struct clk_hw *hw)
@@ -313,9 +318,9 @@ static u8 wm831x_clkout_get_parent(struct clk_hw *hw)
 	}
 
 	if (ret & WM831X_CLKOUT_SRC)
-		return 1;
-	else
 		return 0;
+	else
+		return 1;
 }
 
 static int wm831x_clkout_set_parent(struct clk_hw *hw, u8 parent)
@@ -330,7 +335,7 @@ static int wm831x_clkout_set_parent(struct clk_hw *hw, u8 parent)
 }
 
 static const struct clk_ops wm831x_clkout_ops = {
-	.is_prepared = wm831x_clkout_is_prepared,
+	.is_enabled = wm831x_clkout_is_enabled,
 	.prepare = wm831x_clkout_prepare,
 	.unprepare = wm831x_clkout_unprepare,
 	.get_parent = wm831x_clkout_get_parent,
@@ -367,29 +372,36 @@ static int wm831x_clk_probe(struct platform_device *pdev)
 	clkdata->xtal_ena = ret & WM831X_XTAL_ENA;
 
 	clkdata->xtal_hw.init = &wm831x_xtal_init;
-	ret = devm_clk_hw_register(&pdev->dev, &clkdata->xtal_hw);
-	if (ret)
-		return ret;
+	clkdata->xtal = devm_clk_register(&pdev->dev, &clkdata->xtal_hw);
+	if (IS_ERR(clkdata->xtal))
+		return PTR_ERR(clkdata->xtal);
 
 	clkdata->fll_hw.init = &wm831x_fll_init;
-	ret = devm_clk_hw_register(&pdev->dev, &clkdata->fll_hw);
-	if (ret)
-		return ret;
+	clkdata->fll = devm_clk_register(&pdev->dev, &clkdata->fll_hw);
+	if (IS_ERR(clkdata->fll))
+		return PTR_ERR(clkdata->fll);
 
 	clkdata->clkout_hw.init = &wm831x_clkout_init;
-	ret = devm_clk_hw_register(&pdev->dev, &clkdata->clkout_hw);
-	if (ret)
-		return ret;
+	clkdata->clkout = devm_clk_register(&pdev->dev, &clkdata->clkout_hw);
+	if (IS_ERR(clkdata->clkout))
+		return PTR_ERR(clkdata->clkout);
 
-	platform_set_drvdata(pdev, clkdata);
+	dev_set_drvdata(&pdev->dev, clkdata);
 
+	return 0;
+}
+
+static int wm831x_clk_remove(struct platform_device *pdev)
+{
 	return 0;
 }
 
 static struct platform_driver wm831x_clk_driver = {
 	.probe = wm831x_clk_probe,
+	.remove = wm831x_clk_remove,
 	.driver		= {
 		.name	= "wm831x-clk",
+		.owner	= THIS_MODULE,
 	},
 };
 

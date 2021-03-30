@@ -12,10 +12,10 @@
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
+#include <linux/init.h>
 #include <linux/spi/spi.h>
 #include <linux/platform_device.h>
 #include <linux/delay.h>
-#include <asm/unaligned.h>
 
 #define FIRMWARE_NAME	"lattice-ecp3.bit"
 
@@ -79,11 +79,6 @@ static void firmware_load(const struct firmware *fw, void *context)
 	u32 jedec_id;
 	u32 status;
 
-	if (fw == NULL) {
-		dev_err(&spi->dev, "Cannot load firmware, aborting\n");
-		return;
-	}
-
 	if (fw->size == 0) {
 		dev_err(&spi->dev, "Error: Firmware size is 0!\n");
 		return;
@@ -97,8 +92,8 @@ static void firmware_load(const struct firmware *fw, void *context)
 	/* Trying to speak with the FPGA via SPI... */
 	txbuf[0] = FPGA_CMD_READ_ID;
 	ret = spi_write_then_read(spi, txbuf, 8, rxbuf, rx_len);
-	jedec_id = get_unaligned_be32(&rxbuf[4]);
-	dev_dbg(&spi->dev, "FPGA JTAG ID=%08x\n", jedec_id);
+	dev_dbg(&spi->dev, "FPGA JTAG ID=%08x\n", *(u32 *)&rxbuf[4]);
+	jedec_id = *(u32 *)&rxbuf[4];
 
 	for (i = 0; i < ARRAY_SIZE(ecp3_dev); i++) {
 		if (jedec_id == ecp3_dev[i].jedec_id)
@@ -115,8 +110,7 @@ static void firmware_load(const struct firmware *fw, void *context)
 
 	txbuf[0] = FPGA_CMD_READ_STATUS;
 	ret = spi_write_then_read(spi, txbuf, 8, rxbuf, rx_len);
-	status = get_unaligned_be32(&rxbuf[4]);
-	dev_dbg(&spi->dev, "FPGA Status=%08x\n", status);
+	dev_dbg(&spi->dev, "FPGA Status=%08x\n", *(u32 *)&rxbuf[4]);
 
 	buffer = kzalloc(fw->size + 8, GFP_KERNEL);
 	if (!buffer) {
@@ -148,7 +142,7 @@ static void firmware_load(const struct firmware *fw, void *context)
 	for (i = 0; i < FPGA_CLEAR_LOOP_COUNT; i++) {
 		txbuf[0] = FPGA_CMD_READ_STATUS;
 		ret = spi_write_then_read(spi, txbuf, 8, rxbuf, rx_len);
-		status = get_unaligned_be32(&rxbuf[4]);
+		status = *(u32 *)&rxbuf[4];
 		if (status == FPGA_STATUS_CLEARED)
 			break;
 
@@ -171,12 +165,12 @@ static void firmware_load(const struct firmware *fw, void *context)
 
 	txbuf[0] = FPGA_CMD_READ_STATUS;
 	ret = spi_write_then_read(spi, txbuf, 8, rxbuf, rx_len);
-	status = get_unaligned_be32(&rxbuf[4]);
-	dev_dbg(&spi->dev, "FPGA Status=%08x\n", status);
+	dev_dbg(&spi->dev, "FPGA Status=%08x\n", *(u32 *)&rxbuf[4]);
+	status = *(u32 *)&rxbuf[4];
 
 	/* Check result */
 	if (status & FPGA_STATUS_DONE)
-		dev_info(&spi->dev, "FPGA successfully configured!\n");
+		dev_info(&spi->dev, "FPGA succesfully configured!\n");
 	else
 		dev_info(&spi->dev, "FPGA not configured (DONE not set)\n");
 
@@ -203,7 +197,7 @@ static int lattice_ecp3_probe(struct spi_device *spi)
 	spi_set_drvdata(spi, data);
 
 	init_completion(&data->fw_loaded);
-	err = request_firmware_nowait(THIS_MODULE, FW_ACTION_HOTPLUG,
+	err = request_firmware_nowait(THIS_MODULE, FW_ACTION_NOHOTPLUG,
 				      FIRMWARE_NAME, &spi->dev,
 				      GFP_KERNEL, spi, firmware_load);
 	if (err) {
@@ -235,6 +229,7 @@ MODULE_DEVICE_TABLE(spi, lattice_ecp3_id);
 static struct spi_driver lattice_ecp3_driver = {
 	.driver = {
 		.name = "lattice-ecp3",
+		.owner = THIS_MODULE,
 	},
 	.probe = lattice_ecp3_probe,
 	.remove = lattice_ecp3_remove,
@@ -246,4 +241,3 @@ module_spi_driver(lattice_ecp3_driver);
 MODULE_AUTHOR("Stefan Roese <sr@denx.de>");
 MODULE_DESCRIPTION("Lattice ECP3 FPGA configuration via SPI");
 MODULE_LICENSE("GPL");
-MODULE_FIRMWARE(FIRMWARE_NAME);

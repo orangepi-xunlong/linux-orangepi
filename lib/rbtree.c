@@ -44,30 +44,6 @@
  *  parentheses and have some accompanying text comment.
  */
 
-/*
- * Notes on lockless lookups:
- *
- * All stores to the tree structure (rb_left and rb_right) must be done using
- * WRITE_ONCE(). And we must not inadvertently cause (temporary) loops in the
- * tree structure as seen in program order.
- *
- * These two requirements will allow lockless iteration of the tree -- not
- * correct iteration mind you, tree rotations are not atomic so a lookup might
- * miss entire subtrees.
- *
- * But they do guarantee that any such traversal will only see valid elements
- * and that it will indeed complete -- does not get stuck in a loop.
- *
- * It also guarantees that if the lookup returns an element it is the 'correct'
- * one. But not returning an element does _NOT_ mean it's not present.
- *
- * NOTE:
- *
- * Stores to __rb_parent_color are not important for simple lookups so those
- * are left undone as of now. Nor did I check for loops involving parent
- * pointers.
- */
-
 static inline void rb_set_black(struct rb_node *rb)
 {
 	rb->__rb_parent_color |= RB_BLACK;
@@ -125,7 +101,7 @@ __rb_insert(struct rb_node *node, struct rb_root *root,
 				 *      / \          / \
 				 *     p   u  -->   P   U
 				 *    /            /
-				 *   n            n
+				 *   n            N
 				 *
 				 * However, since g's parent might be red, and
 				 * 4) does not allow this, we need to recurse
@@ -153,9 +129,8 @@ __rb_insert(struct rb_node *node, struct rb_root *root,
 				 * This still leaves us in violation of 4), the
 				 * continuation into Case 3 will fix that.
 				 */
-				tmp = node->rb_left;
-				WRITE_ONCE(parent->rb_right, tmp);
-				WRITE_ONCE(node->rb_left, parent);
+				parent->rb_right = tmp = node->rb_left;
+				node->rb_left = parent;
 				if (tmp)
 					rb_set_parent_color(tmp, parent,
 							    RB_BLACK);
@@ -174,8 +149,8 @@ __rb_insert(struct rb_node *node, struct rb_root *root,
 			 *     /                 \
 			 *    n                   U
 			 */
-			WRITE_ONCE(gparent->rb_left, tmp); /* == parent->rb_right */
-			WRITE_ONCE(parent->rb_right, gparent);
+			gparent->rb_left = tmp;  /* == parent->rb_right */
+			parent->rb_right = gparent;
 			if (tmp)
 				rb_set_parent_color(tmp, gparent, RB_BLACK);
 			__rb_rotate_set_parents(gparent, parent, root, RB_RED);
@@ -196,9 +171,8 @@ __rb_insert(struct rb_node *node, struct rb_root *root,
 			tmp = parent->rb_left;
 			if (node == tmp) {
 				/* Case 2 - right rotate at parent */
-				tmp = node->rb_right;
-				WRITE_ONCE(parent->rb_left, tmp);
-				WRITE_ONCE(node->rb_right, parent);
+				parent->rb_left = tmp = node->rb_right;
+				node->rb_right = parent;
 				if (tmp)
 					rb_set_parent_color(tmp, parent,
 							    RB_BLACK);
@@ -209,8 +183,8 @@ __rb_insert(struct rb_node *node, struct rb_root *root,
 			}
 
 			/* Case 3 - left rotate at gparent */
-			WRITE_ONCE(gparent->rb_right, tmp); /* == parent->rb_left */
-			WRITE_ONCE(parent->rb_left, gparent);
+			gparent->rb_right = tmp;  /* == parent->rb_left */
+			parent->rb_left = gparent;
 			if (tmp)
 				rb_set_parent_color(tmp, gparent, RB_BLACK);
 			__rb_rotate_set_parents(gparent, parent, root, RB_RED);
@@ -250,9 +224,8 @@ ____rb_erase_color(struct rb_node *parent, struct rb_root *root,
 				 *      / \         / \
 				 *     Sl  Sr      N   Sl
 				 */
-				tmp1 = sibling->rb_left;
-				WRITE_ONCE(parent->rb_right, tmp1);
-				WRITE_ONCE(sibling->rb_left, parent);
+				parent->rb_right = tmp1 = sibling->rb_left;
+				sibling->rb_left = parent;
 				rb_set_parent_color(tmp1, parent, RB_BLACK);
 				__rb_rotate_set_parents(parent, sibling, root,
 							RB_RED);
@@ -302,10 +275,9 @@ ____rb_erase_color(struct rb_node *parent, struct rb_root *root,
 				 *                       \
 				 *                        Sr
 				 */
-				tmp1 = tmp2->rb_right;
-				WRITE_ONCE(sibling->rb_left, tmp1);
-				WRITE_ONCE(tmp2->rb_right, sibling);
-				WRITE_ONCE(parent->rb_right, tmp2);
+				sibling->rb_left = tmp1 = tmp2->rb_right;
+				tmp2->rb_right = sibling;
+				parent->rb_right = tmp2;
 				if (tmp1)
 					rb_set_parent_color(tmp1, sibling,
 							    RB_BLACK);
@@ -325,9 +297,8 @@ ____rb_erase_color(struct rb_node *parent, struct rb_root *root,
 			 *        / \         / \
 			 *      (sl) sr      N  (sl)
 			 */
-			tmp2 = sibling->rb_left;
-			WRITE_ONCE(parent->rb_right, tmp2);
-			WRITE_ONCE(sibling->rb_left, parent);
+			parent->rb_right = tmp2 = sibling->rb_left;
+			sibling->rb_left = parent;
 			rb_set_parent_color(tmp1, sibling, RB_BLACK);
 			if (tmp2)
 				rb_set_parent(tmp2, parent);
@@ -339,9 +310,8 @@ ____rb_erase_color(struct rb_node *parent, struct rb_root *root,
 			sibling = parent->rb_left;
 			if (rb_is_red(sibling)) {
 				/* Case 1 - right rotate at parent */
-				tmp1 = sibling->rb_right;
-				WRITE_ONCE(parent->rb_left, tmp1);
-				WRITE_ONCE(sibling->rb_right, parent);
+				parent->rb_left = tmp1 = sibling->rb_right;
+				sibling->rb_right = parent;
 				rb_set_parent_color(tmp1, parent, RB_BLACK);
 				__rb_rotate_set_parents(parent, sibling, root,
 							RB_RED);
@@ -366,10 +336,9 @@ ____rb_erase_color(struct rb_node *parent, struct rb_root *root,
 					break;
 				}
 				/* Case 3 - right rotate at sibling */
-				tmp1 = tmp2->rb_left;
-				WRITE_ONCE(sibling->rb_right, tmp1);
-				WRITE_ONCE(tmp2->rb_left, sibling);
-				WRITE_ONCE(parent->rb_left, tmp2);
+				sibling->rb_right = tmp1 = tmp2->rb_left;
+				tmp2->rb_left = sibling;
+				parent->rb_left = tmp2;
 				if (tmp1)
 					rb_set_parent_color(tmp1, sibling,
 							    RB_BLACK);
@@ -378,9 +347,8 @@ ____rb_erase_color(struct rb_node *parent, struct rb_root *root,
 				sibling = tmp2;
 			}
 			/* Case 4 - left rotate at parent + color flips */
-			tmp2 = sibling->rb_right;
-			WRITE_ONCE(parent->rb_left, tmp2);
-			WRITE_ONCE(sibling->rb_right, parent);
+			parent->rb_left = tmp2 = sibling->rb_right;
+			sibling->rb_right = parent;
 			rb_set_parent_color(tmp1, sibling, RB_BLACK);
 			if (tmp2)
 				rb_set_parent(tmp2, parent);
@@ -539,76 +507,14 @@ void rb_replace_node(struct rb_node *victim, struct rb_node *new,
 {
 	struct rb_node *parent = rb_parent(victim);
 
-	/* Copy the pointers/colour from the victim to the replacement */
-	*new = *victim;
-
 	/* Set the surrounding nodes to point to the replacement */
+	__rb_change_child(victim, new, parent, root);
 	if (victim->rb_left)
 		rb_set_parent(victim->rb_left, new);
 	if (victim->rb_right)
 		rb_set_parent(victim->rb_right, new);
-	__rb_change_child(victim, new, parent, root);
+
+	/* Copy the pointers/colour from the victim to the replacement */
+	*new = *victim;
 }
 EXPORT_SYMBOL(rb_replace_node);
-
-void rb_replace_node_rcu(struct rb_node *victim, struct rb_node *new,
-			 struct rb_root *root)
-{
-	struct rb_node *parent = rb_parent(victim);
-
-	/* Copy the pointers/colour from the victim to the replacement */
-	*new = *victim;
-
-	/* Set the surrounding nodes to point to the replacement */
-	if (victim->rb_left)
-		rb_set_parent(victim->rb_left, new);
-	if (victim->rb_right)
-		rb_set_parent(victim->rb_right, new);
-
-	/* Set the parent's pointer to the new node last after an RCU barrier
-	 * so that the pointers onwards are seen to be set correctly when doing
-	 * an RCU walk over the tree.
-	 */
-	__rb_change_child_rcu(victim, new, parent, root);
-}
-EXPORT_SYMBOL(rb_replace_node_rcu);
-
-static struct rb_node *rb_left_deepest_node(const struct rb_node *node)
-{
-	for (;;) {
-		if (node->rb_left)
-			node = node->rb_left;
-		else if (node->rb_right)
-			node = node->rb_right;
-		else
-			return (struct rb_node *)node;
-	}
-}
-
-struct rb_node *rb_next_postorder(const struct rb_node *node)
-{
-	const struct rb_node *parent;
-	if (!node)
-		return NULL;
-	parent = rb_parent(node);
-
-	/* If we're sitting on node, we've already seen our children */
-	if (parent && node == parent->rb_left && parent->rb_right) {
-		/* If we are the parent's left node, go to the parent's right
-		 * node then all the way down to the left */
-		return rb_left_deepest_node(parent->rb_right);
-	} else
-		/* Otherwise we are the parent's right node, and the parent
-		 * should be next */
-		return (struct rb_node *)parent;
-}
-EXPORT_SYMBOL(rb_next_postorder);
-
-struct rb_node *rb_first_postorder(const struct rb_root *root)
-{
-	if (!root->rb_node)
-		return NULL;
-
-	return rb_left_deepest_node(root->rb_node);
-}
-EXPORT_SYMBOL(rb_first_postorder);

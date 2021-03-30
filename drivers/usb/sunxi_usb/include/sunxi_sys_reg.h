@@ -13,10 +13,11 @@
  *
  */
 
-#ifndef __SUNXI_SYS_REG_H__
-#define __SUNXI_SYS_REG_H__
+#ifndef  __SUNXI_SYS_REG_H__
+#define  __SUNXI_SYS_REG_H__
 
 
-#define SRAMC_BASE	            0x01c00000
+#define  SRAMC_BASE	            0x01c00000
 
-#endif /* __SUNXI_SYS_REG_H__ */
+#endif   //__SUNXI_SYS_REG_H__
+

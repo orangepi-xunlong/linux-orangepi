@@ -244,7 +244,7 @@ _set_debug(struct inf_hw *card)
 }
 
 static int
-set_debug(const char *val, const struct kernel_param *kp)
+set_debug(const char *val, struct kernel_param *kp)
 {
 	int ret;
 	struct inf_hw *card;
@@ -1092,7 +1092,7 @@ inf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 	card->ci = get_card_info(ent->driver_data);
 	if (!card->ci) {
-		pr_info("mISDN: do not have information about adapter at %s\n",
+		pr_info("mISDN: do not have informations about adapter at %s\n",
 			pci_name(pdev));
 		kfree(card);
 		pci_disable_device(pdev);

@@ -100,7 +100,9 @@ static struct irq_chip  bast_pc104_chip = {
 	.irq_ack	= bast_pc104_maskack
 };
 
-static void bast_irq_pc104_demux(struct irq_desc *desc)
+static void
+bast_irq_pc104_demux(unsigned int irq,
+		     struct irq_desc *desc)
 {
 	unsigned int stat;
 	unsigned int irqno;
@@ -145,7 +147,7 @@ static __init int bast_irq_init(void)
 
 			irq_set_chip_and_handler(irqno, &bast_pc104_chip,
 						 handle_level_irq);
-			irq_clear_status_flags(irqno, IRQ_NOREQUEST);
+			set_irq_flags(irqno, IRQF_VALID);
 		}
 	}
 

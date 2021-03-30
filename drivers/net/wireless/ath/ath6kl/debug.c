@@ -37,93 +37,78 @@ struct ath6kl_fwlog_slot {
 
 #define ATH6KL_FWLOG_VALID_MASK 0x1ffff
 
-void ath6kl_printk(const char *level, const char *fmt, ...)
+int ath6kl_printk(const char *level, const char *fmt, ...)
 {
 	struct va_format vaf;
 	va_list args;
+	int rtn;
 
 	va_start(args, fmt);
 
 	vaf.fmt = fmt;
 	vaf.va = &args;
 
-	printk("%sath6kl: %pV", level, &vaf);
+	rtn = printk("%sath6kl: %pV", level, &vaf);
 
 	va_end(args);
+
+	return rtn;
 }
 EXPORT_SYMBOL(ath6kl_printk);
 
-void ath6kl_info(const char *fmt, ...)
+int ath6kl_info(const char *fmt, ...)
 {
 	struct va_format vaf = {
 		.fmt = fmt,
 	};
 	va_list args;
+	int ret;
 
 	va_start(args, fmt);
 	vaf.va = &args;
-	ath6kl_printk(KERN_INFO, "%pV", &vaf);
+	ret = ath6kl_printk(KERN_INFO, "%pV", &vaf);
 	trace_ath6kl_log_info(&vaf);
 	va_end(args);
+
+	return ret;
 }
 EXPORT_SYMBOL(ath6kl_info);
 
-void ath6kl_err(const char *fmt, ...)
+int ath6kl_err(const char *fmt, ...)
 {
 	struct va_format vaf = {
 		.fmt = fmt,
 	};
 	va_list args;
+	int ret;
 
 	va_start(args, fmt);
 	vaf.va = &args;
-	ath6kl_printk(KERN_ERR, "%pV", &vaf);
+	ret = ath6kl_printk(KERN_ERR, "%pV", &vaf);
 	trace_ath6kl_log_err(&vaf);
 	va_end(args);
+
+	return ret;
 }
 EXPORT_SYMBOL(ath6kl_err);
 
-void ath6kl_warn(const char *fmt, ...)
+int ath6kl_warn(const char *fmt, ...)
 {
 	struct va_format vaf = {
 		.fmt = fmt,
 	};
 	va_list args;
+	int ret;
 
 	va_start(args, fmt);
 	vaf.va = &args;
-	ath6kl_printk(KERN_WARNING, "%pV", &vaf);
+	ret = ath6kl_printk(KERN_WARNING, "%pV", &vaf);
 	trace_ath6kl_log_warn(&vaf);
 	va_end(args);
+
+	return ret;
 }
 EXPORT_SYMBOL(ath6kl_warn);
-
-int ath6kl_read_tgt_stats(struct ath6kl *ar, struct ath6kl_vif *vif)
-{
-	long left;
-
-	if (down_interruptible(&ar->sem))
-		return -EBUSY;
-
-	set_bit(STATS_UPDATE_PEND, &vif->flags);
-
-	if (ath6kl_wmi_get_stats_cmd(ar->wmi, 0)) {
-		up(&ar->sem);
-		return -EIO;
-	}
-
-	left = wait_event_interruptible_timeout(ar->event_wq,
-						!test_bit(STATS_UPDATE_PEND,
-						&vif->flags), WMI_TIMEOUT);
-
-	up(&ar->sem);
-
-	if (left <= 0)
-		return -ETIMEDOUT;
-
-	return 0;
-}
-EXPORT_SYMBOL(ath6kl_read_tgt_stats);
 
 #ifdef CONFIG_ATH6KL_DEBUG
 
@@ -187,6 +172,7 @@ void ath6kl_dump_registers(struct ath6kl_device *dev,
 			   struct ath6kl_irq_proc_registers *irq_proc_reg,
 			   struct ath6kl_irq_enable_reg *irq_enable_reg)
 {
+
 	ath6kl_dbg(ATH6KL_DBG_IRQ, ("<------- Register Table -------->\n"));
 
 	if (irq_proc_reg != NULL) {
@@ -233,6 +219,7 @@ void ath6kl_dump_registers(struct ath6kl_device *dev,
 				   "GMBOX lookahead alias 1:   0x%x\n",
 				   irq_proc_reg->rx_gmbox_lkahd_alias[1]);
 		}
+
 	}
 
 	if (irq_enable_reg != NULL) {
@@ -571,24 +558,42 @@ static ssize_t read_file_tgt_stats(struct file *file, char __user *user_buf,
 	char *buf;
 	unsigned int len = 0, buf_len = 1500;
 	int i;
+	long left;
 	ssize_t ret_cnt;
-	int rv;
 
 	vif = ath6kl_vif_first(ar);
 	if (!vif)
 		return -EIO;
 
+	tgt_stats = &vif->target_stats;
+
 	buf = kzalloc(buf_len, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 
-	rv = ath6kl_read_tgt_stats(ar, vif);
-	if (rv < 0) {
+	if (down_interruptible(&ar->sem)) {
 		kfree(buf);
-		return rv;
+		return -EBUSY;
 	}
 
-	tgt_stats = &vif->target_stats;
+	set_bit(STATS_UPDATE_PEND, &vif->flags);
+
+	if (ath6kl_wmi_get_stats_cmd(ar->wmi, 0)) {
+		up(&ar->sem);
+		kfree(buf);
+		return -EIO;
+	}
+
+	left = wait_event_interruptible_timeout(ar->event_wq,
+						!test_bit(STATS_UPDATE_PEND,
+						&vif->flags), WMI_TIMEOUT);
+
+	up(&ar->sem);
+
+	if (left <= 0) {
+		kfree(buf);
+		return -ETIMEDOUT;
+	}
 
 	len += scnprintf(buf + len, buf_len - len, "\n");
 	len += scnprintf(buf + len, buf_len - len, "%25s\n",
@@ -1235,14 +1240,20 @@ static ssize_t ath6kl_force_roam_write(struct file *file,
 	char buf[20];
 	size_t len;
 	u8 bssid[ETH_ALEN];
+	int i;
+	int addr[ETH_ALEN];
 
 	len = min(count, sizeof(buf) - 1);
 	if (copy_from_user(buf, user_buf, len))
 		return -EFAULT;
 	buf[len] = '\0';
 
-	if (!mac_pton(buf, bssid))
+	if (sscanf(buf, "%02x:%02x:%02x:%02x:%02x:%02x",
+		   &addr[0], &addr[1], &addr[2], &addr[3], &addr[4], &addr[5])
+	    != ETH_ALEN)
 		return -EINVAL;
+	for (i = 0; i < ETH_ALEN; i++)
+		bssid[i] = addr[i];
 
 	ret = ath6kl_wmi_force_roam_cmd(ar->wmi, bssid);
 	if (ret)
@@ -1391,6 +1402,7 @@ static ssize_t ath6kl_create_qos_write(struct file *file,
 						const char __user *user_buf,
 						size_t count, loff_t *ppos)
 {
+
 	struct ath6kl *ar = file->private_data;
 	struct ath6kl_vif *vif;
 	char buf[200];
@@ -1569,6 +1581,7 @@ static ssize_t ath6kl_delete_qos_write(struct file *file,
 				const char __user *user_buf,
 				size_t count, loff_t *ppos)
 {
+
 	struct ath6kl *ar = file->private_data;
 	struct ath6kl_vif *vif;
 	char buf[100];

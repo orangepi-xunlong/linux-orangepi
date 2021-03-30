@@ -101,13 +101,16 @@ struct pt1_adapter {
 	struct dmxdev dmxdev;
 	struct dvb_frontend *fe;
 	int (*orig_set_voltage)(struct dvb_frontend *fe,
-				enum fe_sec_voltage voltage);
+				fe_sec_voltage_t voltage);
 	int (*orig_sleep)(struct dvb_frontend *fe);
 	int (*orig_init)(struct dvb_frontend *fe);
 
-	enum fe_sec_voltage voltage;
+	fe_sec_voltage_t voltage;
 	int sleep;
 };
+
+#define pt1_printk(level, pt1, format, arg...)	\
+	dev_printk(level, &(pt1)->pdev->dev, format, ##arg)
 
 static void pt1_write_reg(struct pt1 *pt1, int reg, u32 data)
 {
@@ -151,7 +154,7 @@ static int pt1_sync(struct pt1 *pt1)
 			return 0;
 		pt1_write_reg(pt1, 0, 0x00000008);
 	}
-	dev_err(&pt1->pdev->dev, "could not sync\n");
+	pt1_printk(KERN_ERR, pt1, "could not sync\n");
 	return -EIO;
 }
 
@@ -176,7 +179,7 @@ static int pt1_unlock(struct pt1 *pt1)
 			return 0;
 		schedule_timeout_uninterruptible((HZ + 999) / 1000);
 	}
-	dev_err(&pt1->pdev->dev, "could not unlock\n");
+	pt1_printk(KERN_ERR, pt1, "could not unlock\n");
 	return -EIO;
 }
 
@@ -190,7 +193,7 @@ static int pt1_reset_pci(struct pt1 *pt1)
 			return 0;
 		schedule_timeout_uninterruptible((HZ + 999) / 1000);
 	}
-	dev_err(&pt1->pdev->dev, "could not reset PCI\n");
+	pt1_printk(KERN_ERR, pt1, "could not reset PCI\n");
 	return -EIO;
 }
 
@@ -204,7 +207,7 @@ static int pt1_reset_ram(struct pt1 *pt1)
 			return 0;
 		schedule_timeout_uninterruptible((HZ + 999) / 1000);
 	}
-	dev_err(&pt1->pdev->dev, "could not reset RAM\n");
+	pt1_printk(KERN_ERR, pt1, "could not reset RAM\n");
 	return -EIO;
 }
 
@@ -221,7 +224,7 @@ static int pt1_do_enable_ram(struct pt1 *pt1)
 		}
 		schedule_timeout_uninterruptible((HZ + 999) / 1000);
 	}
-	dev_err(&pt1->pdev->dev, "could not enable RAM\n");
+	pt1_printk(KERN_ERR, pt1, "could not enable RAM\n");
 	return -EIO;
 }
 
@@ -575,7 +578,7 @@ pt1_update_power(struct pt1 *pt1)
 	mutex_unlock(&pt1->lock);
 }
 
-static int pt1_set_voltage(struct dvb_frontend *fe, enum fe_sec_voltage voltage)
+static int pt1_set_voltage(struct dvb_frontend *fe, fe_sec_voltage_t voltage)
 {
 	struct pt1_adapter *adap;
 
@@ -1073,6 +1076,7 @@ static void pt1_remove(struct pci_dev *pdev)
 	pt1_update_power(pt1);
 	pt1_cleanup_adapters(pt1);
 	i2c_del_adapter(&pt1->i2c_adap);
+	pci_set_drvdata(pdev, NULL);
 	kfree(pt1);
 	pci_iounmap(pdev, regs);
 	pci_release_regions(pdev);
@@ -1194,6 +1198,7 @@ err_i2c_del_adapter:
 err_pt1_cleanup_adapters:
 	pt1_cleanup_adapters(pt1);
 err_kfree:
+	pci_set_drvdata(pdev, NULL);
 	kfree(pt1);
 err_pci_iounmap:
 	pci_iounmap(pdev, regs);
@@ -1220,7 +1225,20 @@ static struct pci_driver pt1_driver = {
 	.id_table	= pt1_id_table,
 };
 
-module_pci_driver(pt1_driver);
+
+static int __init pt1_init(void)
+{
+	return pci_register_driver(&pt1_driver);
+}
+
+
+static void __exit pt1_cleanup(void)
+{
+	pci_unregister_driver(&pt1_driver);
+}
+
+module_init(pt1_init);
+module_exit(pt1_cleanup);
 
 MODULE_AUTHOR("Takahito HIRANO <hiranotaka@zng.info>");
 MODULE_DESCRIPTION("Earthsoft PT1/PT2 Driver");

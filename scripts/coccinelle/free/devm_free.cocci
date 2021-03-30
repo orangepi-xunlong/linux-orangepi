@@ -18,7 +18,7 @@
 // Copyright: (C) 2011 Gilles Muller, INRIA/LiP6.  GPLv2.
 // URL: http://coccinelle.lip6.fr/
 // Comments:
-// Options: --no-includes --include-headers
+// Options: -no_includes -include_headers
 
 virtual org
 virtual report
@@ -29,23 +29,7 @@ expression x;
 @@
 
 (
- x = devm_kmalloc(...)
-|
- x = devm_kvasprintf(...)
-|
- x = devm_kasprintf(...)
-|
  x = devm_kzalloc(...)
-|
- x = devm_kmalloc_array(...)
-|
- x = devm_kcalloc(...)
-|
- x = devm_kstrdup(...)
-|
- x = devm_kmemdup(...)
-|
- x = devm_get_free_pages(...)
 |
  x = devm_request_irq(...)
 |
@@ -63,16 +47,6 @@ position p;
 
 (
 * kfree@p(x)
-|
-* kzfree@p(x)
-|
-* __krealloc@p(x, ...)
-|
-* krealloc@p(x, ...)
-|
-* free_pages@p(x, ...)
-|
-* free_page@p(x)
 |
 * free_irq@p(x)
 |

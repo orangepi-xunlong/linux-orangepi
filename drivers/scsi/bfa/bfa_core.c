@@ -1,10 +1,9 @@
 /*
- * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
- * Copyright (c) 2014- QLogic Corporation.
+ * Copyright (c) 2005-2010 Brocade Communications Systems, Inc.
  * All rights reserved
- * www.qlogic.com
+ * www.brocade.com
  *
- * Linux driver for QLogic BR-series Fibre Channel Host Bus Adapter.
+ * Linux driver for Brocade Fibre Channel Host Bus Adapter.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License (GPL) Version 2 as
@@ -90,25 +89,6 @@ static bfa_ioc_mbox_mcfunc_t  bfa_mbox_isrs[BFI_MC_MAX] = {
 };
 
 
-
-void
-__bfa_trc(struct bfa_trc_mod_s *trcm, int fileno, int line, u64 data)
-{
-	int		tail = trcm->tail;
-	struct bfa_trc_s	*trc = &trcm->trc[tail];
-
-	if (trcm->stopped)
-		return;
-
-	trc->fileno = (u16) fileno;
-	trc->line = (u16) line;
-	trc->data.u64 = data;
-	trc->timestamp = BFA_TRC_TS(trcm);
-
-	trcm->tail = (trcm->tail + 1) & (BFA_TRC_MAX - 1);
-	if (trcm->tail == trcm->head)
-		trcm->head = (trcm->head + 1) & (BFA_TRC_MAX - 1);
-}
 
 static void
 bfa_com_port_attach(struct bfa_s *bfa)
@@ -1387,16 +1367,16 @@ bfa_faa_query(struct bfa_s *bfa, struct bfa_faa_attr_s *attr,
 	struct bfa_iocfc_s      *iocfc = &bfa->iocfc;
 	bfa_status_t            status;
 
+	iocfc->faa_args.faa_attr = attr;
+	iocfc->faa_args.faa_cb.faa_cbfn = cbfn;
+	iocfc->faa_args.faa_cb.faa_cbarg = cbarg;
+
 	status = bfa_faa_validate_request(bfa);
 	if (status != BFA_STATUS_OK)
 		return status;
 
 	if (iocfc->faa_args.busy == BFA_TRUE)
 		return BFA_STATUS_DEVBUSY;
-
-	iocfc->faa_args.faa_attr = attr;
-	iocfc->faa_args.faa_cb.faa_cbfn = cbfn;
-	iocfc->faa_args.faa_cb.faa_cbarg = cbarg;
 
 	iocfc->faa_args.busy = BFA_TRUE;
 	memset(&faa_attr_req, 0, sizeof(struct bfi_faa_query_s));
@@ -1452,7 +1432,6 @@ bfa_iocfc_disable_cbfn(void *bfa_arg)
 {
 	struct bfa_s	*bfa = bfa_arg;
 
-	bfa->queue_process = BFA_FALSE;
 	bfa_fsm_send_event(&bfa->iocfc, IOCFC_E_IOC_DISABLED);
 }
 
@@ -1588,6 +1567,7 @@ bfa_iocfc_start(struct bfa_s *bfa)
 void
 bfa_iocfc_stop(struct bfa_s *bfa)
 {
+	bfa->queue_process = BFA_FALSE;
 	bfa_fsm_send_event(&bfa->iocfc, IOCFC_E_STOP);
 }
 
@@ -1694,6 +1674,7 @@ bfa_iocfc_disable(struct bfa_s *bfa)
 	bfa_plog_str(bfa->plog, BFA_PL_MID_HAL, BFA_PL_EID_MISC, 0,
 		     "IOC Disable");
 
+	bfa->queue_process = BFA_FALSE;
 	bfa_fsm_send_event(&bfa->iocfc, IOCFC_E_DISABLE);
 }
 

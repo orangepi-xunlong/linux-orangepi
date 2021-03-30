@@ -1,10 +1,9 @@
 /*
- * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
- * Copyright (c) 2014- QLogic Corporation.
+ * Copyright (c) 2005-2010 Brocade Communications Systems, Inc.
  * All rights reserved
- * www.qlogic.com
+ * www.brocade.com
  *
- * Linux driver for QLogic BR-series Fibre Channel Host Bus Adapter.
+ * Linux driver for Brocade Fibre Channel Host Bus Adapter.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License (GPL) Version 2 as
@@ -82,7 +81,7 @@ bfa_fcs_attach(struct bfa_fcs_s *fcs, struct bfa_s *bfa, struct bfad_s *bfad,
 	bfa->fcs = BFA_TRUE;
 	fcbuild_init();
 
-	for (i = 0; i < ARRAY_SIZE(fcs_modules); i++) {
+	for (i = 0; i < sizeof(fcs_modules) / sizeof(fcs_modules[0]); i++) {
 		mod = &fcs_modules[i];
 		if (mod->attach)
 			mod->attach(fcs);
@@ -98,7 +97,7 @@ bfa_fcs_init(struct bfa_fcs_s *fcs)
 	int	i;
 	struct bfa_fcs_mod_s  *mod;
 
-	for (i = 0; i < ARRAY_SIZE(fcs_modules); i++) {
+	for (i = 0; i < sizeof(fcs_modules) / sizeof(fcs_modules[0]); i++) {
 		mod = &fcs_modules[i];
 		if (mod->modinit)
 			mod->modinit(fcs);
@@ -185,7 +184,7 @@ bfa_fcs_exit(struct bfa_fcs_s *fcs)
 
 	bfa_wc_init(&fcs->wc, bfa_fcs_exit_comp, fcs);
 
-	nmods = ARRAY_SIZE(fcs_modules);
+	nmods = sizeof(fcs_modules) / sizeof(fcs_modules[0]);
 
 	for (i = 0; i < nmods; i++) {
 
@@ -241,6 +240,9 @@ static void bfa_fcs_fabric_flogiacc_comp(void *fcsarg,
 					 u32 rsp_len,
 					 u32 resid_len,
 					 struct fchs_s *rspfchs);
+static u8 bfa_fcs_fabric_oper_bbscn(struct bfa_fcs_fabric_s *fabric);
+static bfa_boolean_t bfa_fcs_fabric_is_bbscn_enabled(
+				struct bfa_fcs_fabric_s *fabric);
 
 static void	bfa_fcs_fabric_sm_uninit(struct bfa_fcs_fabric_s *fabric,
 					 enum bfa_fcs_fabric_event event);
@@ -402,7 +404,8 @@ bfa_fcs_fabric_sm_flogi(struct bfa_fcs_fabric_s *fabric,
 	case BFA_FCS_FABRIC_SM_CONT_OP:
 
 		bfa_fcport_set_tx_bbcredit(fabric->fcs->bfa,
-					   fabric->bb_credit);
+					   fabric->bb_credit,
+					   bfa_fcs_fabric_oper_bbscn(fabric));
 		fabric->fab_type = BFA_FCS_FABRIC_SWITCHED;
 
 		if (fabric->auth_reqd && fabric->is_auth) {
@@ -430,7 +433,8 @@ bfa_fcs_fabric_sm_flogi(struct bfa_fcs_fabric_s *fabric,
 	case BFA_FCS_FABRIC_SM_NO_FABRIC:
 		fabric->fab_type = BFA_FCS_FABRIC_N2N;
 		bfa_fcport_set_tx_bbcredit(fabric->fcs->bfa,
-					   fabric->bb_credit);
+					   fabric->bb_credit,
+					   bfa_fcs_fabric_oper_bbscn(fabric));
 		bfa_fcs_fabric_notify_online(fabric);
 		bfa_sm_set_state(fabric, bfa_fcs_fabric_sm_nofabric);
 		break;
@@ -598,7 +602,8 @@ bfa_fcs_fabric_sm_nofabric(struct bfa_fcs_fabric_s *fabric,
 	case BFA_FCS_FABRIC_SM_NO_FABRIC:
 		bfa_trc(fabric->fcs, fabric->bb_credit);
 		bfa_fcport_set_tx_bbcredit(fabric->fcs->bfa,
-					   fabric->bb_credit);
+					   fabric->bb_credit,
+					   bfa_fcs_fabric_oper_bbscn(fabric));
 		break;
 
 	case BFA_FCS_FABRIC_SM_RETRY_OP:
@@ -832,23 +837,23 @@ bfa_fcs_fabric_psymb_init(struct bfa_fcs_fabric_s *fabric)
 	bfa_ioc_get_adapter_model(&fabric->fcs->bfa->ioc, model);
 
 	/* Model name/number */
-	strlcpy(port_cfg->sym_name.symname, model,
-		BFA_SYMNAME_MAXLEN);
-	strlcat(port_cfg->sym_name.symname, BFA_FCS_PORT_SYMBNAME_SEPARATOR,
-		BFA_SYMNAME_MAXLEN);
+	strncpy((char *)&port_cfg->sym_name, model,
+		BFA_FCS_PORT_SYMBNAME_MODEL_SZ);
+	strncat((char *)&port_cfg->sym_name, BFA_FCS_PORT_SYMBNAME_SEPARATOR,
+		sizeof(BFA_FCS_PORT_SYMBNAME_SEPARATOR));
 
 	/* Driver Version */
-	strlcat(port_cfg->sym_name.symname, driver_info->version,
-		BFA_SYMNAME_MAXLEN);
-	strlcat(port_cfg->sym_name.symname, BFA_FCS_PORT_SYMBNAME_SEPARATOR,
-		BFA_SYMNAME_MAXLEN);
+	strncat((char *)&port_cfg->sym_name, (char *)driver_info->version,
+		BFA_FCS_PORT_SYMBNAME_VERSION_SZ);
+	strncat((char *)&port_cfg->sym_name, BFA_FCS_PORT_SYMBNAME_SEPARATOR,
+		sizeof(BFA_FCS_PORT_SYMBNAME_SEPARATOR));
 
 	/* Host machine name */
-	strlcat(port_cfg->sym_name.symname,
-		driver_info->host_machine_name,
-		BFA_SYMNAME_MAXLEN);
-	strlcat(port_cfg->sym_name.symname, BFA_FCS_PORT_SYMBNAME_SEPARATOR,
-		BFA_SYMNAME_MAXLEN);
+	strncat((char *)&port_cfg->sym_name,
+		(char *)driver_info->host_machine_name,
+		BFA_FCS_PORT_SYMBNAME_MACHINENAME_SZ);
+	strncat((char *)&port_cfg->sym_name, BFA_FCS_PORT_SYMBNAME_SEPARATOR,
+		sizeof(BFA_FCS_PORT_SYMBNAME_SEPARATOR));
 
 	/*
 	 * Host OS Info :
@@ -856,24 +861,24 @@ bfa_fcs_fabric_psymb_init(struct bfa_fcs_fabric_s *fabric)
 	 * OS name string and instead copy the entire OS info string (64 bytes).
 	 */
 	if (driver_info->host_os_patch[0] == '\0') {
-		strlcat(port_cfg->sym_name.symname,
-			driver_info->host_os_name,
-			BFA_SYMNAME_MAXLEN);
-		strlcat(port_cfg->sym_name.symname,
+		strncat((char *)&port_cfg->sym_name,
+			(char *)driver_info->host_os_name,
+			BFA_FCS_OS_STR_LEN);
+		strncat((char *)&port_cfg->sym_name,
 			BFA_FCS_PORT_SYMBNAME_SEPARATOR,
-			BFA_SYMNAME_MAXLEN);
+			sizeof(BFA_FCS_PORT_SYMBNAME_SEPARATOR));
 	} else {
-		strlcat(port_cfg->sym_name.symname,
-			driver_info->host_os_name,
-			BFA_SYMNAME_MAXLEN);
-		strlcat(port_cfg->sym_name.symname,
+		strncat((char *)&port_cfg->sym_name,
+			(char *)driver_info->host_os_name,
+			BFA_FCS_PORT_SYMBNAME_OSINFO_SZ);
+		strncat((char *)&port_cfg->sym_name,
 			BFA_FCS_PORT_SYMBNAME_SEPARATOR,
-			BFA_SYMNAME_MAXLEN);
+			sizeof(BFA_FCS_PORT_SYMBNAME_SEPARATOR));
 
 		/* Append host OS Patch Info */
-		strlcat(port_cfg->sym_name.symname,
-			driver_info->host_os_patch,
-			BFA_SYMNAME_MAXLEN);
+		strncat((char *)&port_cfg->sym_name,
+			(char *)driver_info->host_os_patch,
+			BFA_FCS_PORT_SYMBNAME_OSPATCH_SZ);
 	}
 
 	/* null terminate */
@@ -893,26 +898,26 @@ bfa_fcs_fabric_nsymb_init(struct bfa_fcs_fabric_s *fabric)
 	bfa_ioc_get_adapter_model(&fabric->fcs->bfa->ioc, model);
 
 	/* Model name/number */
-	strlcpy(port_cfg->node_sym_name.symname, model,
-		BFA_SYMNAME_MAXLEN);
-	strlcat(port_cfg->node_sym_name.symname,
+	strncpy((char *)&port_cfg->node_sym_name, model,
+		BFA_FCS_PORT_SYMBNAME_MODEL_SZ);
+	strncat((char *)&port_cfg->node_sym_name,
 			BFA_FCS_PORT_SYMBNAME_SEPARATOR,
-			BFA_SYMNAME_MAXLEN);
+			sizeof(BFA_FCS_PORT_SYMBNAME_SEPARATOR));
 
 	/* Driver Version */
-	strlcat(port_cfg->node_sym_name.symname, (char *)driver_info->version,
-		BFA_SYMNAME_MAXLEN);
-	strlcat(port_cfg->node_sym_name.symname,
+	strncat((char *)&port_cfg->node_sym_name, (char *)driver_info->version,
+		BFA_FCS_PORT_SYMBNAME_VERSION_SZ);
+	strncat((char *)&port_cfg->node_sym_name,
 			BFA_FCS_PORT_SYMBNAME_SEPARATOR,
-			BFA_SYMNAME_MAXLEN);
+			sizeof(BFA_FCS_PORT_SYMBNAME_SEPARATOR));
 
 	/* Host machine name */
-	strlcat(port_cfg->node_sym_name.symname,
-		driver_info->host_machine_name,
-		BFA_SYMNAME_MAXLEN);
-	strlcat(port_cfg->node_sym_name.symname,
+	strncat((char *)&port_cfg->node_sym_name,
+		(char *)driver_info->host_machine_name,
+		BFA_FCS_PORT_SYMBNAME_MACHINENAME_SZ);
+	strncat((char *)&port_cfg->node_sym_name,
 			BFA_FCS_PORT_SYMBNAME_SEPARATOR,
-			BFA_SYMNAME_MAXLEN);
+			sizeof(BFA_FCS_PORT_SYMBNAME_SEPARATOR));
 
 	/* null terminate */
 	port_cfg->node_sym_name.symname[BFA_SYMNAME_MAXLEN - 1] = 0;
@@ -960,6 +965,10 @@ bfa_cb_lps_flogi_comp(void *bfad, void *uarg, bfa_status_t status)
 
 	case BFA_STATUS_FABRIC_RJT:
 		fabric->stats.flogi_rejects++;
+		if (fabric->lps->lsrjt_rsn == FC_LS_RJT_RSN_LOGICAL_ERROR &&
+		    fabric->lps->lsrjt_expl == FC_LS_RJT_EXP_NO_ADDL_INFO)
+			fabric->fcs->bbscn_flogi_rjt = BFA_TRUE;
+
 		bfa_sm_send_event(fabric, BFA_FCS_FABRIC_SM_RETRY_OP);
 		return;
 
@@ -1005,11 +1014,14 @@ bfa_fcs_fabric_login(struct bfa_fcs_fabric_s *fabric)
 {
 	struct bfa_s		*bfa = fabric->fcs->bfa;
 	struct bfa_lport_cfg_s	*pcfg = &fabric->bport.port_cfg;
-	u8			alpa = 0;
+	u8			alpa = 0, bb_scn = 0;
 
+	if (bfa_fcs_fabric_is_bbscn_enabled(fabric) &&
+	    (!fabric->fcs->bbscn_flogi_rjt))
+		bb_scn = BFA_FCS_PORT_DEF_BB_SCN;
 
 	bfa_lps_flogi(fabric->lps, fabric, alpa, bfa_fcport_get_maxfrsize(bfa),
-		      pcfg->pwwn, pcfg->nwwn, fabric->auth_reqd);
+		      pcfg->pwwn, pcfg->nwwn, fabric->auth_reqd, bb_scn);
 
 	fabric->stats.flogi_sent++;
 }
@@ -1087,6 +1099,40 @@ bfa_fcs_fabric_stop(struct bfa_fcs_fabric_s *fabric)
 	bfa_wc_up(&fabric->stop_wc);
 	bfa_fcs_lport_stop(&fabric->bport);
 	bfa_wc_wait(&fabric->stop_wc);
+}
+
+/*
+ * Computes operating BB_SCN value
+ */
+static u8
+bfa_fcs_fabric_oper_bbscn(struct bfa_fcs_fabric_s *fabric)
+{
+	u8	pr_bbscn = fabric->lps->pr_bbscn;
+	struct bfa_fcport_s *fcport = BFA_FCPORT_MOD(fabric->fcs->bfa);
+
+	if (!(fcport->cfg.bb_scn_state && pr_bbscn))
+		return 0;
+
+	/* return max of local/remote bb_scn values */
+	return ((pr_bbscn > BFA_FCS_PORT_DEF_BB_SCN) ?
+		pr_bbscn : BFA_FCS_PORT_DEF_BB_SCN);
+}
+
+/*
+ * Check if BB_SCN can be enabled.
+ */
+static bfa_boolean_t
+bfa_fcs_fabric_is_bbscn_enabled(struct bfa_fcs_fabric_s *fabric)
+{
+	struct bfa_fcport_s *fcport = BFA_FCPORT_MOD(fabric->fcs->bfa);
+
+	if (bfa_ioc_get_fcmode(&fabric->fcs->bfa->ioc) &&
+			fcport->cfg.bb_scn_state &&
+			!bfa_fcport_is_qos_enabled(fabric->fcs->bfa) &&
+			!bfa_fcport_is_trunk_enabled(fabric->fcs->bfa))
+		return BFA_TRUE;
+	else
+		return BFA_FALSE;
 }
 
 /*
@@ -1227,6 +1273,7 @@ void
 bfa_fcs_fabric_link_down(struct bfa_fcs_fabric_s *fabric)
 {
 	bfa_trc(fabric->fcs, fabric->bport.port_cfg.pwwn);
+	fabric->fcs->bbscn_flogi_rjt = BFA_FALSE;
 	bfa_sm_send_event(fabric, BFA_FCS_FABRIC_SM_LINK_DOWN);
 }
 
@@ -1433,6 +1480,7 @@ bfa_fcs_fabric_process_flogi(struct bfa_fcs_fabric_s *fabric,
 	}
 
 	fabric->bb_credit = be16_to_cpu(flogi->csp.bbcred);
+	fabric->lps->pr_bbscn = (be16_to_cpu(flogi->csp.rxsz) >> 12);
 	bport->port_topo.pn2n.rem_port_wwn = flogi->port_name;
 	bport->port_topo.pn2n.reply_oxid = fchs->ox_id;
 
@@ -1465,7 +1513,8 @@ bfa_fcs_fabric_send_flogi_acc(struct bfa_fcs_fabric_s *fabric)
 				    n2n_port->reply_oxid, pcfg->pwwn,
 				    pcfg->nwwn,
 				    bfa_fcport_get_maxfrsize(bfa),
-				    bfa_fcport_get_rx_bbcredit(bfa), 0);
+				    bfa_fcport_get_rx_bbcredit(bfa),
+				    bfa_fcs_fabric_oper_bbscn(fabric));
 
 	bfa_fcxp_send(fcxp, NULL, fabric->vf_id, fabric->lps->bfa_tag,
 		      BFA_FALSE, FC_CLASS_3,

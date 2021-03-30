@@ -1,14 +1,18 @@
+
 /*
- * for modules (sensor/actuator/flash) power supply helper.
+ ******************************************************************************
  *
- * Copyright (c) 2017 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ * vin_subdev.c
  *
- * Authors:  Zhao Wei <zhaowei@allwinnertech.com>
- *	Yang Feng <yangfeng@allwinnertech.com>
+ * Hawkview ISP - vin_subdev.c module
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * Copyright (c) 2015 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ *
+ * Version		  Author         Date		    Description
+ *
+ *   3.0		  Yang Feng   	2015/12/02	ISP Tuning Tools Support
+ *
+ ******************************************************************************
  */
 
 #include <linux/device.h>
@@ -19,113 +23,110 @@
 #include "vin_supply.h"
 #include "../platform/platform_cfg.h"
 #include "../vin-csi/sunxi_csi.h"
-#include "../vin-cci/cci_helper.h"
-#include "../modules/sensor/sensor_helper.h"
 #include "../vin.h"
-
-extern struct sensor_helper_dev *glb_sensor_helper[VIN_MAX_CSI];
 
 /*
  * called by subdev in power on/off sequency
  */
-struct modules_config *sd_to_modules(struct v4l2_subdev *sd)
+struct vin_core *sd_to_vin_core(struct v4l2_subdev *sd)
 {
-	struct vin_md *vind = dev_get_drvdata(sd->v4l2_dev->dev);
-	struct modules_config *module = NULL;
+	struct vin_md *vind =
+	    (struct vin_md *)dev_get_drvdata(sd->v4l2_dev->dev);
+	struct vin_core *vinc = NULL;
+	struct vin_pipeline *pipe = NULL;
+	struct vin_vid_cap *cap = NULL;
 	int i, j;
 
+	if (NULL != sd->entity.pipe) {
+		pipe = to_vin_pipeline(&sd->entity);
+		cap = pipe_to_vin_video(pipe);
+		return cap->vinc;
+	}
 	for (i = 0; i < VIN_MAX_DEV; i++) {
-		module = &vind->modules[i];
-
-		for (j = 0; j < MAX_DETECT_NUM; j++) {
-			if (!strcmp(module->sensors.inst[j].cam_name, sd->name))
-				return module;
-
-			if ((sd == module->modules.sensor[j].sd) ||
-			    (sd == module->modules.act[j].sd) ||
-			    (sd == module->modules.flash.sd))
-				return module;
+		vinc = vind->vinc[i];
+		if (NULL == vinc)
+			continue;
+		for (j = 0; j < VIN_IND_MAX; j++) {
+			if (sd == vinc->vid_cap.pipe.sd[j])
+				return vinc;
 		}
 	}
-	vin_err("%s cannot find the match modules\n", sd->name);
+	for (i = 0; i < VIN_MAX_DEV; i++) {
+		vinc = vind->vinc[i];
+		if (NULL == vinc)
+			continue;
+		for (j = 0; j < MAX_DETECT_NUM; j++) {
+			if ((sd == vinc->modu_cfg.modules.sensor[j].sd) ||
+			    (sd == vinc->modu_cfg.modules.act[j].sd) ||
+			    (sd == vinc->modu_cfg.modules.flash.sd))
+				return vinc;
+		}
+	}
+	vin_err("%s cannot find the vin core\n", sd->name);
 	return NULL;
 }
-EXPORT_SYMBOL_GPL(sd_to_modules);
 
-#ifdef CONFIG_SUNXI_REGULATOR_DT
-static int find_power_pmic(struct v4l2_subdev *sd, struct vin_power *power, enum pmic_channel pmic_ch)
-{
-	int i;
+EXPORT_SYMBOL_GPL(sd_to_vin_core);
 
-	for (i = 0; i < VIN_MAX_CSI; i++) {
-		if (glb_sensor_helper[i] && (!strcmp(glb_sensor_helper[i]->name, sd->name))) {
-			if (glb_sensor_helper[i]->pmic[pmic_ch] == NULL)
-				return -1;
-			power[pmic_ch].pmic = glb_sensor_helper[i]->pmic[pmic_ch];
-			return 0;
-		}
-	}
-
-	power[pmic_ch].pmic = NULL;
-	vin_err("%s cannot find the match sensor_helper\n", sd->name);
-	return -1;
-}
-#endif
 /*
  *enable/disable pmic channel
  */
 int vin_set_pmu_channel(struct v4l2_subdev *sd, enum pmic_channel pmic_ch,
 			enum on_off on_off)
 {
-	int ret = 0;
-#ifndef FPGA_VER
-	struct modules_config *modules = sd_to_modules(sd);
+#ifdef VIN_PMU
+	struct vin_core *vinc = sd_to_vin_core(sd);
 	static int def_vol[MAX_POW_NUM] = {3300000, 3300000, 1800000,
-					3300000, 3300000, 3300000};
+					3300000, 3300000};
 	struct vin_power *power = NULL;
-
-	if (modules == NULL)
+	int ret = 0;
+	if (NULL == vinc) {
+		vin_err("cannot find the vin_core is %s in\n", sd->name);
 		return -1;
-
-	power = &modules->sensors.power[0];
+	}
+	power = &vinc->modu_cfg.sensors.power[0];
 	if (on_off == OFF) {
-		if (power[pmic_ch].pmic == NULL)
+		if (NULL == power[pmic_ch].pmic)
 			return 0;
 		ret = regulator_disable(power[pmic_ch].pmic);
-#ifndef CONFIG_SUNXI_REGULATOR_DT
-		regulator_put(power[pmic_ch].pmic);
-#endif
-		power[pmic_ch].pmic = NULL;
-		vin_log(VIN_LOG_POWER, "regulator_is already disabled\n");
-	} else {
-#ifndef CONFIG_SUNXI_REGULATOR_DT
-		if (strcmp(power[pmic_ch].power_str, "")) {
-			power[pmic_ch].pmic = regulator_get(NULL,
-						  power[pmic_ch].power_str);
-			if (IS_ERR_OR_NULL(power[pmic_ch].pmic)) {
-				vin_err("get regulator %s error!\n", power[pmic_ch].power_str);
-				power[pmic_ch].pmic = NULL;
-				return -1;
-			}
-		} else {
+		if (!regulator_is_enabled(power[pmic_ch].pmic)) {
+			vin_log(VIN_LOG_POWER, "regulator_is already disabled\n");
+			regulator_put(power[pmic_ch].pmic);
 			power[pmic_ch].pmic = NULL;
-			return 0;
 		}
-#else
-		ret = find_power_pmic(sd, power, pmic_ch);
-		if (ret)
-			return ret;
-#endif
-		ret = regulator_set_voltage(power[pmic_ch].pmic,
+	} else {
+		if (power[pmic_ch].pmic
+		    && regulator_is_enabled(power[pmic_ch].pmic)) {
+			vin_log(VIN_LOG_POWER, "regulator_is already enabled\n");
+		} else {
+			if (strcmp(power[pmic_ch].power_str, "")) {
+				power[pmic_ch].pmic =
+				    regulator_get(NULL,
+						  power[pmic_ch].power_str);
+				if (IS_ERR_OR_NULL(power[pmic_ch].pmic)) {
+					vin_err("get regulator %s error!\n",
+						power[pmic_ch].power_str);
+					power[pmic_ch].pmic = NULL;
+					return -1;
+				}
+			} else {
+				power[pmic_ch].pmic = NULL;
+				return 0;
+			}
+		}
+		ret =
+		    regulator_set_voltage(power[pmic_ch].pmic,
 					  power[pmic_ch].power_vol,
 					  def_vol[pmic_ch]);
 		vin_log(VIN_LOG_POWER, "set regulator %s = %d,return %x\n",
-			power[pmic_ch].power_str, power[pmic_ch].power_vol, ret);
+			power[pmic_ch].power_str, power[pmic_ch].power_vol,
+			ret);
 		ret = regulator_enable(power[pmic_ch].pmic);
 	}
 #endif
 	return ret;
 }
+
 EXPORT_SYMBOL_GPL(vin_set_pmu_channel);
 
 /*
@@ -133,79 +134,49 @@ EXPORT_SYMBOL_GPL(vin_set_pmu_channel);
  */
 int vin_set_mclk(struct v4l2_subdev *sd, enum on_off on_off)
 {
-	struct vin_md *vind = dev_get_drvdata(sd->v4l2_dev->dev);
-	struct modules_config *modules = sd_to_modules(sd);
-	struct vin_mclk_info *mclk = NULL;
-	char pin_name[20] = "";
-	int mclk_id = 0;
-
-	if (modules == NULL)
-		return -1;
-
-	if (modules->sensors.mclk_id == -1)
-		mclk_id = modules->sensors.csi_sel;
-	else
-		mclk_id = modules->sensors.mclk_id;
-	if (mclk_id < 0) {
-		vin_err("get mclk id failed\n");
+#ifdef VIN_CLK
+	struct vin_core *vinc = sd_to_vin_core(sd);
+	struct csi_dev *csi = NULL;
+	if (NULL == vinc) {
+		vin_err("cannot find the vin_core is %s in\n", sd->name);
 		return -1;
 	}
-
-	mclk = &vind->mclk[mclk_id];
-
-	switch (on_off) {
-	case ON:
-		csi_cci_init_helper(modules->sensors.sensor_bus_sel);
-		sprintf(pin_name, "mclk%d-default", mclk_id);
-		break;
-	case OFF:
-		csi_cci_exit_helper(modules->sensors.sensor_bus_sel);
-		sprintf(pin_name, "mclk%d-sleep", mclk_id);
-		break;
-	default:
+	if (NULL == vinc->csi_sd) {
+		vin_err("cannot find the csi connected with %s\n", sd->name);
 		return -1;
 	}
-#ifndef FPGA_VER
-
-	if (on_off && mclk->use_count++ > 0)
-		return 0;
-	else if (!on_off && (mclk->use_count == 0 || --mclk->use_count > 0))
-		return 0;
-
+	csi = v4l2_get_subdevdata(vinc->csi_sd);
 	switch (on_off) {
 	case ON:
-		vin_log(VIN_LOG_POWER, "sensor mclk on, use_count %d!\n", mclk->use_count);
-		if (mclk->mclk) {
-			if (clk_prepare_enable(mclk->mclk)) {
-				vin_err("csi master clock enable error\n");
+		vin_print("mclk on\n");
+		if (csi->clock[CSI_MASTER_CLK]) {
+			if (clk_prepare_enable(csi->clock[CSI_MASTER_CLK])) {
+				vin_err("csi%d master clock enable error\n",
+					csi->id);
 				return -1;
 			}
 		} else {
-			vin_err("csi master%d clock is null\n", mclk_id);
+			vin_err("csi%d master clock is null\n", csi->id);
 			return -1;
 		}
 		break;
 	case OFF:
-		vin_log(VIN_LOG_POWER, "sensor mclk off, use_count %d!\n", mclk->use_count);
-		if (mclk->mclk) {
-			clk_disable_unprepare(mclk->mclk);
+		vin_print("mclk off\n");
+		if (csi->clock[CSI_MASTER_CLK]) {
+			clk_disable_unprepare(csi->clock[CSI_MASTER_CLK]);
 		} else {
-			vin_err("csi master%d clock is null\n", mclk_id);
+			vin_err("csi%d master clock is null\n", csi->id);
 			return -1;
 		}
+		usleep_range(10000, 12000);
 		break;
 	default:
 		return -1;
-	}
-
-	mclk->pin = devm_pinctrl_get_select(&vind->pdev->dev, pin_name);
-	if (IS_ERR_OR_NULL(mclk->pin)) {
-		vin_err("mclk%d request pin handle failed!\n", mclk_id);
-		return -EINVAL;
 	}
 #endif
 	return 0;
 }
+
 EXPORT_SYMBOL_GPL(vin_set_mclk);
 
 /*
@@ -213,51 +184,47 @@ EXPORT_SYMBOL_GPL(vin_set_mclk);
  */
 int vin_set_mclk_freq(struct v4l2_subdev *sd, unsigned long freq)
 {
-#ifndef FPGA_VER
-	struct vin_md *vind = dev_get_drvdata(sd->v4l2_dev->dev);
-	struct modules_config *modules = sd_to_modules(sd);
-	struct clk *mclk_src = NULL;
-	int mclk_id = 0;
-
-	if (modules == NULL)
-		return -1;
-
-	if (modules->sensors.mclk_id == -1)
-		mclk_id = modules->sensors.csi_sel;
-	else
-		mclk_id = modules->sensors.mclk_id;
-	if (mclk_id < 0) {
-		vin_err("get mclk id failed\n");
+#ifdef VIN_CLK
+	struct vin_core *vinc = sd_to_vin_core(sd);
+	struct csi_dev *csi = NULL;
+	struct clk *mclk_src;
+	if (NULL == vinc) {
+		vin_err("cannot find the vin_core is %s in\n", sd->name);
 		return -1;
 	}
-
+	csi = v4l2_get_subdevdata(vinc->csi_sd);
 	if (freq == 24000000 || freq == 12000000 || freq == 6000000) {
-		if (vind->mclk[mclk_id].clk_24m) {
-			mclk_src = vind->mclk[mclk_id].clk_24m;
+		if (csi->clock[CSI_MASTER_CLK_24M_SRC]) {
+			mclk_src = csi->clock[CSI_MASTER_CLK_24M_SRC];
 		} else {
 			vin_err("csi master clock 24M source is null\n");
 			return -1;
 		}
 	} else {
-		if (vind->mclk[mclk_id].clk_pll) {
-			mclk_src = vind->mclk[mclk_id].clk_pll;
+		if (csi->clock[CSI_MASTER_CLK_PLL_SRC]) {
+			mclk_src = csi->clock[CSI_MASTER_CLK_PLL_SRC];
 		} else {
 			vin_err("csi master clock pll source is null\n");
 			return -1;
 		}
 	}
 
-	if (vind->mclk[mclk_id].mclk) {
-		if (clk_set_parent(vind->mclk[mclk_id].mclk, mclk_src)) {
-			vin_err("set mclk%d source failed!\n", mclk_id);
+	if (csi->clock[CSI_MASTER_CLK]) {
+		if (clk_set_parent(csi->clock[CSI_MASTER_CLK], mclk_src)) {
+			vin_err("mclk src = %s, set mclk source failed!\n",
+			     mclk_src->name);
 			return -1;
 		}
-		if (clk_set_rate(vind->mclk[mclk_id].mclk, freq)) {
-			vin_err("set csi master%d clock error\n", mclk_id);
+	} else {
+		vin_err("csi master clock is null\n");
+		return -1;
+	}
+
+	if (csi->clock[CSI_MASTER_CLK]) {
+		if (clk_set_rate(csi->clock[CSI_MASTER_CLK], freq)) {
+			vin_err("set csi%d master clock error\n", csi->id);
 			return -1;
 		}
-		vin_log(VIN_LOG_POWER, "mclk%d set rate %ld, get rate %ld\n", mclk_id,
-			freq, clk_get_rate(vind->mclk[mclk_id].mclk));
 	} else {
 		vin_err("csi master clock is null\n");
 		return -1;
@@ -265,150 +232,53 @@ int vin_set_mclk_freq(struct v4l2_subdev *sd, unsigned long freq)
 #endif
 	return 0;
 }
+
 EXPORT_SYMBOL_GPL(vin_set_mclk_freq);
-
-int vin_set_sync_mclk(struct v4l2_subdev *sd, int id, unsigned long freq, enum on_off on_off)
-{
-	struct vin_md *vind = dev_get_drvdata(sd->v4l2_dev->dev);
-	struct modules_config *modules = sd_to_modules(sd);
-	struct vin_mclk_info *mclk = NULL;
-	struct clk *mclk_src = NULL;
-
-	if (modules == NULL)
-		return -1;
-
-	if (id < 0) {
-		vin_err("get mclk id failed\n");
-		return -1;
-	}
-
-	mclk = &vind->mclk[id];
-
-	if (on_off && mclk->use_count++ > 0)
-		return 0;
-	else if (!on_off && (mclk->use_count == 0 || --mclk->use_count > 0))
-		return 0;
-
-	switch (on_off) {
-	case ON:
-		vin_log(VIN_LOG_POWER, "sensor mclk on, use_count %d!\n", mclk->use_count);
-		if (freq == 24000000 || freq == 12000000 || freq == 6000000) {
-			if (mclk->clk_24m) {
-				mclk_src = mclk->clk_24m;
-			} else {
-				vin_err("mclk%d 24M source is null\n", id);
-				return -1;
-			}
-		} else {
-			if (mclk->clk_pll) {
-				mclk_src =  mclk->clk_pll;
-			} else {
-				vin_err("mclk%d pll source is null\n", id);
-				return -1;
-			}
-		}
-
-		if (mclk->mclk) {
-			if (clk_set_parent(mclk->mclk, mclk_src)) {
-				vin_err("set mclk%d source failed!\n", id);
-				return -1;
-			}
-			if (clk_set_rate(mclk->mclk, freq)) {
-				vin_err("set mclk%d error\n", id);
-				return -1;
-			}
-			vin_log(VIN_LOG_POWER, "mclk%d set rate %ld, get rate %ld\n", id,
-				freq, clk_get_rate(vind->mclk[id].mclk));
-			if (clk_prepare_enable(mclk->mclk)) {
-				vin_err("mclk%d enable error\n", id);
-				return -1;
-			}
-		} else {
-			vin_err("mclk%d is null\n", id);
-			return -1;
-		}
-		break;
-	case OFF:
-		vin_log(VIN_LOG_POWER, "sensor mclk off, use_count %d!\n", mclk->use_count);
-		if (mclk->mclk) {
-			clk_disable_unprepare(mclk->mclk);
-		} else {
-			vin_err("mclk%d is null\n", id);
-			return -1;
-		}
-		break;
-	default:
-		return -1;
-	}
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(vin_set_sync_mclk);
 
 /*
  *set the gpio io status
  */
-int vin_gpio_write(struct v4l2_subdev *sd, enum gpio_type gpio_id,
-		   unsigned int out_value)
+int vin_gpio_write(struct v4l2_subdev *sd, enum gpio_type gpio_type,
+		   unsigned int status)
 {
-#ifndef FPGA_VER
+#ifdef VIN_GPIO
 	int force_value_flag = 1;
-	struct modules_config *modules = sd_to_modules(sd);
-	struct gpio_config *gc = NULL;
-
-	if (modules == NULL)
+	struct vin_core *vinc = sd_to_vin_core(sd);
+	struct gpio_config *gpio = NULL;
+	if (NULL == vinc) {
+		vin_err("cannot find the vin_core is %s in\n", sd->name);
 		return -1;
-
-	gc = &modules->sensors.gpio[gpio_id];
-
-/*
-#ifndef CONFIG_ARCH_SUN8IW17P1
-	if ((gpio_id == PWDN) || (gpio_id == RESET))
+	}
+	gpio = &vinc->modu_cfg.sensors.gpio[0];
+	if ((gpio_type == PWDN) || (gpio_type == RESET))
 		force_value_flag = 0;
-#endif
-*/
-
-	return os_gpio_write(gc->gpio, out_value, force_value_flag);
+	return os_gpio_write(gpio[gpio_type].gpio, status, NULL,
+			     force_value_flag);
 #endif
 	return 0;
 }
+
 EXPORT_SYMBOL_GPL(vin_gpio_write);
 
 /*
  *set the gpio io status
  */
-int vin_gpio_set_status(struct v4l2_subdev *sd, enum gpio_type gpio_id,
+int vin_gpio_set_status(struct v4l2_subdev *sd, enum gpio_type gpio_type,
 			unsigned int status)
 {
-#ifndef FPGA_VER
-	struct modules_config *modules = sd_to_modules(sd);
-	struct gpio_config gc_def;
-	struct gpio_config *gc = NULL;
-
-	if (modules == NULL)
+#ifdef VIN_GPIO
+	struct vin_core *vinc = sd_to_vin_core(sd);
+	struct gpio_config *gpio = NULL;
+	if (NULL == vinc) {
+		vin_err("cannot find the vin_core is %s in\n", sd->name);
 		return -1;
-
-	gc = &modules->sensors.gpio[gpio_id];
-
-	memcpy(&gc_def, gc, sizeof(struct gpio_config));
-
-	if (status == 0)
-		gc_def.mul_sel = GPIO_DISABLE;
-	if (status == 3)
-		gc_def.mul_sel = 3;
-	if (os_gpio_set(&gc_def) < 0)
-		return -1;
-	if (status == 3)
-		return 0;
-
-	if (status == 1)
-		gpio_direction_output(gc->gpio, 0);
-	else
-		gpio_direction_input(gc->gpio);
-
+	}
+	gpio = &vinc->modu_cfg.sensors.gpio[0];
+	return os_gpio_set_status(gpio[gpio_type].gpio, status, NULL);
 #endif
 	return 0;
 }
+
 EXPORT_SYMBOL_GPL(vin_gpio_set_status);
 
 MODULE_AUTHOR("raymonxiu");

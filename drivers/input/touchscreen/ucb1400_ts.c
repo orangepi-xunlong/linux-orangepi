@@ -19,6 +19,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/sched.h>
 #include <linux/wait.h>
@@ -319,7 +320,7 @@ static int ucb1400_ts_detect_irq(struct ucb1400_ts *ucb,
 
 static int ucb1400_ts_probe(struct platform_device *pdev)
 {
-	struct ucb1400_ts *ucb = dev_get_platdata(&pdev->dev);
+	struct ucb1400_ts *ucb = pdev->dev.platform_data;
 	int error, x_res, y_res;
 	u16 fcsr;
 
@@ -398,7 +399,7 @@ err:
 
 static int ucb1400_ts_remove(struct platform_device *pdev)
 {
-	struct ucb1400_ts *ucb = dev_get_platdata(&pdev->dev);
+	struct ucb1400_ts *ucb = pdev->dev.platform_data;
 
 	free_irq(ucb->irq, ucb);
 	input_unregister_device(ucb->ts_idev);
@@ -406,9 +407,10 @@ static int ucb1400_ts_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static int __maybe_unused ucb1400_ts_suspend(struct device *dev)
+#ifdef CONFIG_PM_SLEEP
+static int ucb1400_ts_suspend(struct device *dev)
 {
-	struct ucb1400_ts *ucb = dev_get_platdata(dev);
+	struct ucb1400_ts *ucb = dev->platform_data;
 	struct input_dev *idev = ucb->ts_idev;
 
 	mutex_lock(&idev->mutex);
@@ -420,9 +422,9 @@ static int __maybe_unused ucb1400_ts_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused ucb1400_ts_resume(struct device *dev)
+static int ucb1400_ts_resume(struct device *dev)
 {
-	struct ucb1400_ts *ucb = dev_get_platdata(dev);
+	struct ucb1400_ts *ucb = dev->platform_data;
 	struct input_dev *idev = ucb->ts_idev;
 
 	mutex_lock(&idev->mutex);
@@ -433,6 +435,7 @@ static int __maybe_unused ucb1400_ts_resume(struct device *dev)
 	mutex_unlock(&idev->mutex);
 	return 0;
 }
+#endif
 
 static SIMPLE_DEV_PM_OPS(ucb1400_ts_pm_ops,
 			 ucb1400_ts_suspend, ucb1400_ts_resume);
@@ -442,6 +445,7 @@ static struct platform_driver ucb1400_ts_driver = {
 	.remove	= ucb1400_ts_remove,
 	.driver	= {
 		.name	= "ucb1400_ts",
+		.owner	= THIS_MODULE,
 		.pm	= &ucb1400_ts_pm_ops,
 	},
 };

@@ -1,20 +1,4 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-mipi/protocol/protocol_reg.c
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
-/*
  * sunxi mipi protocol low-level interface
  * Author:raymonxiu
  */
@@ -40,7 +24,7 @@ MIPI_CSI2_CH_LINE_NUM_t *mipi_csi2_ch_line_num[MAX_MIPI_PTL];
 
 int ptcl_reg_map(unsigned int sel, unsigned long addr_base)
 {
-	if (sel >= MAX_MIPI_PTL)
+	if (sel > MAX_MIPI_PTL)
 		return -1;
 
 	mipi_csi2_ctl[sel] =
@@ -298,121 +282,6 @@ void ptcl_int_enable(unsigned int sel, unsigned char ch,
 		break;
 	}
 }
-
-void bsp_data_formats_enable(unsigned int sel, unsigned char type)
-{
-	switch (type) {
-	case 0x0:
-		mipi_csi2_ch_dt_trm[sel]->bits.fs = 1;
-		break;
-	case 0x1:
-		mipi_csi2_ch_dt_trm[sel]->bits.fe = 1;
-		break;
-	case 0x2:
-		mipi_csi2_ch_dt_trm[sel]->bits.ls = 1;
-		break;
-	case 0x3:
-		mipi_csi2_ch_dt_trm[sel]->bits.le = 1;
-		break;
-	case 0x8:
-		mipi_csi2_ch_dt_trm[sel]->bits.gs0 = 1;
-		break;
-	case 0x9:
-		mipi_csi2_ch_dt_trm[sel]->bits.gs1 = 1;
-		break;
-	case 0xa:
-		mipi_csi2_ch_dt_trm[sel]->bits.gs2 = 1;
-		break;
-	case 0xb:
-		mipi_csi2_ch_dt_trm[sel]->bits.gs3 = 1;
-		break;
-	case 0xc:
-		mipi_csi2_ch_dt_trm[sel]->bits.gs4 = 1;
-		break;
-	case 0xd:
-		mipi_csi2_ch_dt_trm[sel]->bits.gs5 = 1;
-		break;
-	case 0xe:
-		mipi_csi2_ch_dt_trm[sel]->bits.gs6 = 1;
-		break;
-	case 0xf:
-		mipi_csi2_ch_dt_trm[sel]->bits.gs7 = 1;
-		break;
-	case 0x10:
-		mipi_csi2_ch_dt_trm[sel]->bits.gl = 1;
-		break;
-	case 0x11:
-		mipi_csi2_ch_dt_trm[sel]->bits.yuv = 1;
-		break;
-	case 0x12:
-		mipi_csi2_ch_dt_trm[sel]->bits.rgb = 1;
-		break;
-	case 0x13:
-		mipi_csi2_ch_dt_trm[sel]->bits.raw = 1;
-		break;
-	default:
-		mipi_csi2_ch_dt_trm[sel]->bits.raw = 1;
-		break;
-	}
-}
-
-void bsp_data_formats_disable(unsigned int sel, unsigned char type)
-{
-	switch (type) {
-	case 0x0:
-		mipi_csi2_ch_dt_trm[sel]->bits.fs = 0;
-		break;
-	case 0x1:
-		mipi_csi2_ch_dt_trm[sel]->bits.fe = 0;
-		break;
-	case 0x2:
-		mipi_csi2_ch_dt_trm[sel]->bits.ls = 0;
-		break;
-	case 0x3:
-		mipi_csi2_ch_dt_trm[sel]->bits.le = 0;
-		break;
-	case 0x8:
-		mipi_csi2_ch_dt_trm[sel]->bits.gs0 = 0;
-		break;
-	case 0x9:
-		mipi_csi2_ch_dt_trm[sel]->bits.gs1 = 0;
-		break;
-	case 0xa:
-		mipi_csi2_ch_dt_trm[sel]->bits.gs2 = 0;
-		break;
-	case 0xb:
-		mipi_csi2_ch_dt_trm[sel]->bits.gs3 = 0;
-		break;
-	case 0xc:
-		mipi_csi2_ch_dt_trm[sel]->bits.gs4 = 0;
-		break;
-	case 0xd:
-		mipi_csi2_ch_dt_trm[sel]->bits.gs5 = 0;
-		break;
-	case 0xe:
-		mipi_csi2_ch_dt_trm[sel]->bits.gs6 = 0;
-		break;
-	case 0xf:
-		mipi_csi2_ch_dt_trm[sel]->bits.gs7 = 0;
-		break;
-	case 0x10:
-		mipi_csi2_ch_dt_trm[sel]->bits.gl = 0;
-		break;
-	case 0x11:
-		mipi_csi2_ch_dt_trm[sel]->bits.yuv = 0;
-		break;
-	case 0x12:
-		mipi_csi2_ch_dt_trm[sel]->bits.rgb = 0;
-		break;
-	case 0x13:
-		mipi_csi2_ch_dt_trm[sel]->bits.raw = 0;
-		break;
-	default:
-		mipi_csi2_ch_dt_trm[sel]->bits.raw = 0;
-		break;
-	}
-}
-
 
 void ptcl_int_disable(unsigned int sel, unsigned char ch,
 		      enum protocol_int int_flag)

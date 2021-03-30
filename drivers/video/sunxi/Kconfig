@@ -1,0 +1,64 @@
+#
+# Video configuration for sunxi platform
+#
+
+menu "Video support for sunxi"
+	depends on FB
+
+config FB_CONSOLE_SUNXI
+  bool "Framebuffer Console Support(sunxi)"
+  select FB_CFB_FILLRECT
+  select FB_CFB_COPYAREA
+  select FB_CFB_IMAGEBLIT
+  default n
+  ---help---
+
+config DISP2_SUNXI
+  tristate "DISP Driver Support(sunxi-disp2)"
+  depends on (ARCH_SUNXI)
+  default n
+  ---help---
+
+config HDMI_DISP2_SUNXI
+	tristate "HDMI Driver Support(sunxi-disp2)"
+	depends on (DISP2_SUNXI)
+	default n
+	---help---
+
+config TV_DISP2_SUNXI
+  tristate "TV Driver Support(sunxi-disp2)"
+  depends on (DISP2_SUNXI)
+  default n
+  ---help---
+
+config DISP2_TV_GM7121
+  tristate "GM7121 TV module Support(sunxi-disp2)"
+  depends on (DISP2_SUNXI && TV_DISP2_SUNXI)
+  default n
+  ---help---
+
+config DISP2_TV_AC200
+  tristate "AC200 TV module Support(sunxi-disp2)"
+  depends on (DISP2_SUNXI && TV_DISP2_SUNXI && MFD_ACX00)
+	default n
+	---help---
+
+config EINK_PANEL_USED
+  bool "Eink panel used"
+  depends on (DISP2_SUNXI && ARCH_SUN8IW10)
+	default n
+	---help---
+
+config DISP2_SUNXI_BOOT_COLORBAR
+  bool "boot colorbar for disp driver(sunxi-disp2)"
+  depends on DISP2_SUNXI
+  default n
+  ---help---
+
+config DISP2_SUNXI_DEBUG
+  bool "debugfs for disp driver(sunxi-disp2)"
+  depends on DISP2_SUNXI
+  default n
+  ---help---
+
+endmenu

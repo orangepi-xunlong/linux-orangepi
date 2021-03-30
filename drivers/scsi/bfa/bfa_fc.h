@@ -1,10 +1,9 @@
 /*
- * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
- * Copyright (c) 2014- QLogic Corporation.
+ * Copyright (c) 2005-2010 Brocade Communications Systems, Inc.
  * All rights reserved
- * www.qlogic.com
+ * www.brocade.com
  *
- * Linux driver for QLogic BR-series Fibre Channel Host Bus Adapter.
+ * Linux driver for Brocade Fibre Channel Host Bus Adapter.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License (GPL) Version 2 as
@@ -1027,7 +1026,7 @@ struct fc_alpabm_s {
 #define FC_ED_TOV	2
 #define FC_REC_TOV	(FC_ED_TOV + 1)
 #define FC_RA_TOV	10
-#define FC_ELS_TOV	(2 * FC_RA_TOV)
+#define FC_ELS_TOV	((2 * FC_RA_TOV) + 1)
 #define FC_FCCT_TOV	(3 * FC_RA_TOV)
 
 /*
@@ -1532,12 +1531,6 @@ enum fdmi_hba_attribute_type {
 	FDMI_HBA_ATTRIB_FW_VERSION,	/* 0x0009 */
 	FDMI_HBA_ATTRIB_OS_NAME,	/* 0x000A */
 	FDMI_HBA_ATTRIB_MAX_CT,		/* 0x000B */
-	FDMI_HBA_ATTRIB_NODE_SYM_NAME,  /* 0x000C */
-	FDMI_HBA_ATTRIB_VENDOR_INFO,    /* 0x000D */
-	FDMI_HBA_ATTRIB_NUM_PORTS,  /* 0x000E */
-	FDMI_HBA_ATTRIB_FABRIC_NAME,    /* 0x000F */
-	FDMI_HBA_ATTRIB_BIOS_VER,   /* 0x0010 */
-	FDMI_HBA_ATTRIB_VENDOR_ID = 0x00E0,
 
 	FDMI_HBA_ATTRIB_MAX_TYPE
 };
@@ -1552,15 +1545,6 @@ enum fdmi_port_attribute_type {
 	FDMI_PORT_ATTRIB_FRAME_SIZE,	/* 0x0004 */
 	FDMI_PORT_ATTRIB_DEV_NAME,	/* 0x0005 */
 	FDMI_PORT_ATTRIB_HOST_NAME,	/* 0x0006 */
-	FDMI_PORT_ATTRIB_NODE_NAME,     /* 0x0007 */
-	FDMI_PORT_ATTRIB_PORT_NAME,     /* 0x0008 */
-	FDMI_PORT_ATTRIB_PORT_SYM_NAME, /* 0x0009 */
-	FDMI_PORT_ATTRIB_PORT_TYPE,     /* 0x000A */
-	FDMI_PORT_ATTRIB_SUPP_COS,      /* 0x000B */
-	FDMI_PORT_ATTRIB_PORT_FAB_NAME, /* 0x000C */
-	FDMI_PORT_ATTRIB_PORT_FC4_TYPE, /* 0x000D */
-	FDMI_PORT_ATTRIB_PORT_STATE = 0x101,    /* 0x0101 */
-	FDMI_PORT_ATTRIB_PORT_NUM_RPRT = 0x102, /* 0x0102 */
 
 	FDMI_PORT_ATTR_MAX_TYPE
 };

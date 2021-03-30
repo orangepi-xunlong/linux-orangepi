@@ -5,10 +5,11 @@
 #include <net/act_api.h>
 
 struct tcf_csum {
-	struct tc_action common;
+	struct tcf_common common;
 
 	u32 update_flags;
 };
-#define to_tcf_csum(a) ((struct tcf_csum *)a)
+#define to_tcf_csum(pc) \
+	container_of(pc,struct tcf_csum,common)
 
 #endif /* __NET_TC_CSUM_H */

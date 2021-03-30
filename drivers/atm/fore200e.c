@@ -425,7 +425,7 @@ static void fore200e_pca_write(u32 val, volatile u32 __iomem *addr)
 static u32
 fore200e_pca_dma_map(struct fore200e* fore200e, void* virt_addr, int size, int direction)
 {
-    u32 dma_addr = dma_map_single(&((struct pci_dev *) fore200e->bus_dev)->dev, virt_addr, size, direction);
+    u32 dma_addr = pci_map_single((struct pci_dev*)fore200e->bus_dev, virt_addr, size, direction);
 
     DPRINTK(3, "PCI DVMA mapping: virt_addr = 0x%p, size = %d, direction = %d,  --> dma_addr = 0x%08x\n",
 	    virt_addr, size, direction, dma_addr);
@@ -440,7 +440,7 @@ fore200e_pca_dma_unmap(struct fore200e* fore200e, u32 dma_addr, int size, int di
     DPRINTK(3, "PCI DVMA unmapping: dma_addr = 0x%08x, size = %d, direction = %d\n",
 	    dma_addr, size, direction);
 
-    dma_unmap_single(&((struct pci_dev *) fore200e->bus_dev)->dev, dma_addr, size, direction);
+    pci_unmap_single((struct pci_dev*)fore200e->bus_dev, dma_addr, size, direction);
 }
 
 
@@ -449,7 +449,7 @@ fore200e_pca_dma_sync_for_cpu(struct fore200e* fore200e, u32 dma_addr, int size,
 {
     DPRINTK(3, "PCI DVMA sync: dma_addr = 0x%08x, size = %d, direction = %d\n", dma_addr, size, direction);
 
-    dma_sync_single_for_cpu(&((struct pci_dev *) fore200e->bus_dev)->dev, dma_addr, size, direction);
+    pci_dma_sync_single_for_cpu((struct pci_dev*)fore200e->bus_dev, dma_addr, size, direction);
 }
 
 static void
@@ -457,7 +457,7 @@ fore200e_pca_dma_sync_for_device(struct fore200e* fore200e, u32 dma_addr, int si
 {
     DPRINTK(3, "PCI DVMA sync: dma_addr = 0x%08x, size = %d, direction = %d\n", dma_addr, size, direction);
 
-    dma_sync_single_for_device(&((struct pci_dev *) fore200e->bus_dev)->dev, dma_addr, size, direction);
+    pci_dma_sync_single_for_device((struct pci_dev*)fore200e->bus_dev, dma_addr, size, direction);
 }
 
 
@@ -470,10 +470,9 @@ fore200e_pca_dma_chunk_alloc(struct fore200e* fore200e, struct chunk* chunk,
 {
     /* returned chunks are page-aligned */
     chunk->alloc_size = size * nbr;
-    chunk->alloc_addr = dma_alloc_coherent(&((struct pci_dev *) fore200e->bus_dev)->dev,
-					   chunk->alloc_size,
-					   &chunk->dma_addr,
-					   GFP_KERNEL);
+    chunk->alloc_addr = pci_alloc_consistent((struct pci_dev*)fore200e->bus_dev,
+					     chunk->alloc_size,
+					     &chunk->dma_addr);
     
     if ((chunk->alloc_addr == NULL) || (chunk->dma_addr == 0))
 	return -ENOMEM;
@@ -489,7 +488,7 @@ fore200e_pca_dma_chunk_alloc(struct fore200e* fore200e, struct chunk* chunk,
 static void
 fore200e_pca_dma_chunk_free(struct fore200e* fore200e, struct chunk* chunk)
 {
-    dma_free_coherent(&((struct pci_dev *) fore200e->bus_dev)->dev,
+    pci_free_consistent((struct pci_dev*)fore200e->bus_dev,
 			chunk->alloc_size,
 			chunk->alloc_addr,
 			chunk->dma_addr);
@@ -2489,7 +2488,7 @@ static int fore200e_load_and_start_fw(struct fore200e *fore200e)
 {
     const struct firmware *firmware;
     struct device *device;
-    const struct fw_header *fw_header;
+    struct fw_header *fw_header;
     const __le32 *fw_data;
     u32 fw_size;
     u32 __iomem *load_addr;
@@ -2511,9 +2510,9 @@ static int fore200e_load_and_start_fw(struct fore200e *fore200e)
 	return err;
     }
 
-    fw_data = (const __le32 *)firmware->data;
+    fw_data = (__le32 *) firmware->data;
     fw_size = firmware->size / sizeof(u32);
-    fw_header = (const struct fw_header *)firmware->data;
+    fw_header = (struct fw_header *) firmware->data;
     load_addr = fore200e->virt_base + le32_to_cpu(fw_header->load_offset);
 
     DPRINTK(2, "device %s firmware being loaded at 0x%p (%d words)\n",
@@ -2688,6 +2687,7 @@ MODULE_DEVICE_TABLE(of, fore200e_sba_match);
 static struct platform_driver fore200e_sba_driver = {
 	.driver = {
 		.name = "fore_200e",
+		.owner = THIS_MODULE,
 		.of_match_table = fore200e_sba_match,
 	},
 	.probe		= fore200e_sba_probe,
@@ -2705,11 +2705,6 @@ static int fore200e_pca_detect(struct pci_dev *pci_dev,
     static int index = 0;
 
     if (pci_enable_device(pci_dev)) {
-	err = -EINVAL;
-	goto out;
-    }
-
-    if (dma_set_mask_and_coherent(&pci_dev->dev, DMA_BIT_MASK(32))) {
 	err = -EINVAL;
 	goto out;
     }
@@ -2785,7 +2780,7 @@ static struct pci_driver fore200e_pca_driver = {
 
 static int __init fore200e_module_init(void)
 {
-	int err = 0;
+	int err;
 
 	printk(FORE200E "FORE Systems 200E-series ATM driver - version " FORE200E_VERSION "\n");
 

@@ -71,6 +71,7 @@ static int xo1_rfkill_remove(struct platform_device *pdev)
 static struct platform_driver xo1_rfkill_driver = {
 	.driver = {
 		.name = "xo1-rfkill",
+		.owner = THIS_MODULE,
 	},
 	.probe		= xo1_rfkill_probe,
 	.remove		= xo1_rfkill_remove,

@@ -1,7 +1,5 @@
+#include "cache.h"
 #include "levenshtein.h"
-#include <errno.h>
-#include <stdlib.h>
-#include <string.h>
 
 /*
  * This function implements the Damerau-Levenshtein algorithm to

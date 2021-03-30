@@ -22,7 +22,6 @@
 #define __LINUX_SMSC911X_H__
 
 #include <linux/phy.h>
-#include <linux/if_ether.h>
 
 /* platform_device configuration data, should be assigned to
  * the platform_device's dev.platform_data */
@@ -32,7 +31,7 @@ struct smsc911x_platform_config {
 	unsigned int flags;
 	unsigned int shift;
 	phy_interface_t phy_interface;
-	unsigned char mac[ETH_ALEN];
+	unsigned char mac[6];
 };
 
 /* Constants for platform_device irq polarity configuration */

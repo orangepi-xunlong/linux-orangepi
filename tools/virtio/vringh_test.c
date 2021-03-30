@@ -7,7 +7,6 @@
 #include <linux/virtio.h>
 #include <linux/vringh.h>
 #include <linux/virtio_ring.h>
-#include <linux/virtio_config.h>
 #include <linux/uaccess.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -23,7 +22,7 @@ static u64 user_addr_offset;
 #define RINGSIZE 256
 #define ALIGN 4096
 
-static bool never_notify_host(struct virtqueue *vq)
+static void never_notify_host(struct virtqueue *vq)
 {
 	abort();
 }
@@ -66,22 +65,17 @@ struct guest_virtio_device {
 	unsigned long notifies;
 };
 
-static bool parallel_notify_host(struct virtqueue *vq)
+static void parallel_notify_host(struct virtqueue *vq)
 {
-	int rc;
 	struct guest_virtio_device *gvdev;
 
 	gvdev = container_of(vq->vdev, struct guest_virtio_device, vdev);
-	rc = write(gvdev->to_host_fd, "", 1);
-	if (rc < 0)
-		return false;
+	write(gvdev->to_host_fd, "", 1);
 	gvdev->notifies++;
-	return true;
 }
 
-static bool no_notify_host(struct virtqueue *vq)
+static void no_notify_host(struct virtqueue *vq)
 {
-	return true;
 }
 
 #define NUM_XFERS (10000000)
@@ -132,7 +126,7 @@ static inline int vringh_get_head(struct vringh *vrh, u16 *head)
 	return 1;
 }
 
-static int parallel_test(u64 features,
+static int parallel_test(unsigned long features,
 			 bool (*getrange)(struct vringh *vrh,
 					  u64 addr, struct vringh_range *r),
 			 bool fast_vringh)
@@ -305,7 +299,7 @@ static int parallel_test(u64 features,
 		close(to_guest[1]);
 		close(to_host[0]);
 
-		gvdev.vdev.features = features;
+		gvdev.vdev.features[0] = features;
 		gvdev.to_host_fd = to_host[1];
 		gvdev.notifies = 0;
 
@@ -450,15 +444,13 @@ int main(int argc, char *argv[])
 	bool fast_vringh = false, parallel = false;
 
 	getrange = getrange_iov;
-	vdev.features = 0;
+	vdev.features[0] = 0;
 
 	while (argv[1]) {
 		if (strcmp(argv[1], "--indirect") == 0)
-			__virtio_set_bit(&vdev, VIRTIO_RING_F_INDIRECT_DESC);
+			vdev.features[0] |= (1 << VIRTIO_RING_F_INDIRECT_DESC);
 		else if (strcmp(argv[1], "--eventidx") == 0)
-			__virtio_set_bit(&vdev, VIRTIO_RING_F_EVENT_IDX);
-		else if (strcmp(argv[1], "--virtio-1") == 0)
-			__virtio_set_bit(&vdev, VIRTIO_F_VERSION_1);
+			vdev.features[0] |= (1 << VIRTIO_RING_F_EVENT_IDX);
 		else if (strcmp(argv[1], "--slow-range") == 0)
 			getrange = getrange_slow;
 		else if (strcmp(argv[1], "--fast-vringh") == 0)
@@ -471,7 +463,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (parallel)
-		return parallel_test(vdev.features, getrange, fast_vringh);
+		return parallel_test(vdev.features[0], getrange, fast_vringh);
 
 	if (posix_memalign(&__user_addr_min, PAGE_SIZE, USER_MEM) != 0)
 		abort();
@@ -486,7 +478,7 @@ int main(int argc, char *argv[])
 
 	/* Set up host side. */
 	vring_init(&vrh.vring, RINGSIZE, __user_addr_min, ALIGN);
-	vringh_init_user(&vrh, vdev.features, RINGSIZE, true,
+	vringh_init_user(&vrh, vdev.features[0], RINGSIZE, true,
 			 vrh.vring.desc, vrh.vring.avail, vrh.vring.used);
 
 	/* No descriptor to get yet... */
@@ -655,13 +647,13 @@ int main(int argc, char *argv[])
 	}
 
 	/* Test weird (but legal!) indirect. */
-	if (__virtio_test_bit(&vdev, VIRTIO_RING_F_INDIRECT_DESC)) {
+	if (vdev.features[0] & (1 << VIRTIO_RING_F_INDIRECT_DESC)) {
 		char *data = __user_addr_max - USER_MEM/4;
 		struct vring_desc *d = __user_addr_max - USER_MEM/2;
 		struct vring vring;
 
 		/* Force creation of direct, which we modify. */
-		__virtio_clear_bit(&vdev, VIRTIO_RING_F_INDIRECT_DESC);
+		vdev.features[0] &= ~(1 << VIRTIO_RING_F_INDIRECT_DESC);
 		vq = vring_new_virtqueue(0, RINGSIZE, ALIGN, &vdev, true,
 					 __user_addr_min,
 					 never_notify_host,

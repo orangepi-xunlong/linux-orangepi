@@ -24,6 +24,7 @@
  *     David Airlie
  */
 #include <linux/module.h>
+#include <linux/fb.h>
 
 #include "drmP.h"
 #include "drm/drm.h"
@@ -39,12 +40,21 @@
 struct qxl_fbdev {
 	struct drm_fb_helper helper;
 	struct qxl_framebuffer	qfb;
+	struct list_head	fbdev_list;
 	struct qxl_device	*qdev;
 
-	spinlock_t delayed_ops_lock;
-	struct list_head delayed_ops;
 	void *shadow;
 	int size;
+
+	/* dirty memory logging */
+	struct {
+		spinlock_t lock;
+		bool active;
+		unsigned x1;
+		unsigned y1;
+		unsigned x2;
+		unsigned y2;
+	} dirty;
 };
 
 static void qxl_fb_image_init(struct qxl_fb_image *qxl_fb_image,
@@ -72,20 +82,188 @@ static void qxl_fb_image_init(struct qxl_fb_image *qxl_fb_image,
 	}
 }
 
-#ifdef CONFIG_DRM_FBDEV_EMULATION
+static void qxl_fb_dirty_flush(struct fb_info *info)
+{
+	struct qxl_fbdev *qfbdev = info->par;
+	struct qxl_device *qdev = qfbdev->qdev;
+	struct qxl_fb_image qxl_fb_image;
+	struct fb_image *image = &qxl_fb_image.fb_image;
+	u32 x1, x2, y1, y2;
+
+	/* TODO: hard coding 32 bpp */
+	int stride = qfbdev->qfb.base.pitches[0];
+
+	x1 = qfbdev->dirty.x1;
+	x2 = qfbdev->dirty.x2;
+	y1 = qfbdev->dirty.y1;
+	y2 = qfbdev->dirty.y2;
+	/*
+	 * we are using a shadow draw buffer, at qdev->surface0_shadow
+	 */
+	qxl_io_log(qdev, "dirty x[%d, %d], y[%d, %d]", x1, x2, y1, y2);
+	image->dx = x1;
+	image->dy = y1;
+	image->width = x2 - x1;
+	image->height = y2 - y1;
+	image->fg_color = 0xffffffff; /* unused, just to avoid uninitialized
+					 warnings */
+	image->bg_color = 0;
+	image->depth = 32;	     /* TODO: take from somewhere? */
+	image->cmap.start = 0;
+	image->cmap.len = 0;
+	image->cmap.red = NULL;
+	image->cmap.green = NULL;
+	image->cmap.blue = NULL;
+	image->cmap.transp = NULL;
+	image->data = qfbdev->shadow + (x1 * 4) + (stride * y1);
+
+	qxl_fb_image_init(&qxl_fb_image, qdev, info, NULL);
+	qxl_draw_opaque_fb(&qxl_fb_image, stride);
+	qfbdev->dirty.x1 = 0;
+	qfbdev->dirty.x2 = 0;
+	qfbdev->dirty.y1 = 0;
+	qfbdev->dirty.y2 = 0;
+}
+
+static void qxl_deferred_io(struct fb_info *info,
+			    struct list_head *pagelist)
+{
+	struct qxl_fbdev *qfbdev = info->par;
+	unsigned long start, end, min, max;
+	struct page *page;
+	int y1, y2;
+
+	min = ULONG_MAX;
+	max = 0;
+	list_for_each_entry(page, pagelist, lru) {
+		start = page->index << PAGE_SHIFT;
+		end = start + PAGE_SIZE - 1;
+		min = min(min, start);
+		max = max(max, end);
+	}
+
+	if (min < max) {
+		y1 = min / info->fix.line_length;
+		y2 = (max / info->fix.line_length) + 1;
+
+		/* TODO: add spin lock? */
+		/* spin_lock_irqsave(&qfbdev->dirty.lock, flags); */
+		qfbdev->dirty.x1 = 0;
+		qfbdev->dirty.y1 = y1;
+		qfbdev->dirty.x2 = info->var.xres;
+		qfbdev->dirty.y2 = y2;
+		/* spin_unlock_irqrestore(&qfbdev->dirty.lock, flags); */
+	}
+
+	qxl_fb_dirty_flush(info);
+};
+
+
 static struct fb_deferred_io qxl_defio = {
 	.delay		= QXL_DIRTY_DELAY,
-	.deferred_io	= drm_fb_helper_deferred_io,
+	.deferred_io	= qxl_deferred_io,
 };
-#endif
+
+static void qxl_fb_fillrect(struct fb_info *info,
+			    const struct fb_fillrect *fb_rect)
+{
+	struct qxl_fbdev *qfbdev = info->par;
+	struct qxl_device *qdev = qfbdev->qdev;
+	struct qxl_rect rect;
+	uint32_t color;
+	int x = fb_rect->dx;
+	int y = fb_rect->dy;
+	int width = fb_rect->width;
+	int height = fb_rect->height;
+	uint16_t rop;
+	struct qxl_draw_fill qxl_draw_fill_rec;
+
+	if (info->fix.visual == FB_VISUAL_TRUECOLOR ||
+	    info->fix.visual == FB_VISUAL_DIRECTCOLOR)
+		color = ((u32 *) (info->pseudo_palette))[fb_rect->color];
+	else
+		color = fb_rect->color;
+	rect.left = x;
+	rect.right = x + width;
+	rect.top = y;
+	rect.bottom = y + height;
+	switch (fb_rect->rop) {
+	case ROP_XOR:
+		rop = SPICE_ROPD_OP_XOR;
+		break;
+	case ROP_COPY:
+		rop = SPICE_ROPD_OP_PUT;
+		break;
+	default:
+		pr_err("qxl_fb_fillrect(): unknown rop, "
+		       "defaulting to SPICE_ROPD_OP_PUT\n");
+		rop = SPICE_ROPD_OP_PUT;
+	}
+	qxl_draw_fill_rec.qdev = qdev;
+	qxl_draw_fill_rec.rect = rect;
+	qxl_draw_fill_rec.color = color;
+	qxl_draw_fill_rec.rop = rop;
+	if (!drm_can_sleep()) {
+		qxl_io_log(qdev,
+			"%s: TODO use RCU, mysterious locks with spin_lock\n",
+			__func__);
+		return;
+	}
+	qxl_draw_fill(&qxl_draw_fill_rec);
+}
+
+static void qxl_fb_copyarea(struct fb_info *info,
+			    const struct fb_copyarea *region)
+{
+	struct qxl_fbdev *qfbdev = info->par;
+
+	qxl_draw_copyarea(qfbdev->qdev,
+			  region->width, region->height,
+			  region->sx, region->sy,
+			  region->dx, region->dy);
+}
+
+static void qxl_fb_imageblit_safe(struct qxl_fb_image *qxl_fb_image)
+{
+	qxl_draw_opaque_fb(qxl_fb_image, 0);
+}
+
+static void qxl_fb_imageblit(struct fb_info *info,
+			     const struct fb_image *image)
+{
+	struct qxl_fbdev *qfbdev = info->par;
+	struct qxl_device *qdev = qfbdev->qdev;
+	struct qxl_fb_image qxl_fb_image;
+
+	if (!drm_can_sleep()) {
+		/* we cannot do any ttm_bo allocation since that will fail on
+		 * ioremap_wc..__get_vm_area_node, so queue the work item
+		 * instead This can happen from printk inside an interrupt
+		 * context, i.e.: smp_apic_timer_interrupt..check_cpu_stall */
+		qxl_io_log(qdev,
+			"%s: TODO use RCU, mysterious locks with spin_lock\n",
+			   __func__);
+		return;
+	}
+
+	/* ensure proper order of rendering operations - TODO: must do this
+	 * for everything. */
+	qxl_fb_image_init(&qxl_fb_image, qfbdev->qdev, info, image);
+	qxl_fb_imageblit_safe(&qxl_fb_image);
+}
+
+int qxl_fb_init(struct qxl_device *qdev)
+{
+	return 0;
+}
 
 static struct fb_ops qxlfb_ops = {
 	.owner = THIS_MODULE,
 	.fb_check_var = drm_fb_helper_check_var,
 	.fb_set_par = drm_fb_helper_set_par, /* TODO: copy vmwgfx */
-	.fb_fillrect = drm_fb_helper_sys_fillrect,
-	.fb_copyarea = drm_fb_helper_sys_copyarea,
-	.fb_imageblit = drm_fb_helper_sys_imageblit,
+	.fb_fillrect = qxl_fb_fillrect,
+	.fb_copyarea = qxl_fb_copyarea,
+	.fb_imageblit = qxl_fb_imageblit,
 	.fb_pan_display = drm_fb_helper_pan_display,
 	.fb_blank = drm_fb_helper_blank,
 	.fb_setcmap = drm_fb_helper_setcmap,
@@ -123,7 +301,7 @@ int qxl_get_handle_for_primary_fb(struct qxl_device *qdev,
 }
 
 static int qxlfb_create_pinned_object(struct qxl_fbdev *qfbdev,
-				      const struct drm_mode_fb_cmd2 *mode_cmd,
+				      struct drm_mode_fb_cmd2 *mode_cmd,
 				      struct drm_gem_object **gobj_p)
 {
 	struct qxl_device *qdev = qfbdev->qdev;
@@ -132,6 +310,10 @@ static int qxlfb_create_pinned_object(struct qxl_fbdev *qfbdev,
 	int ret;
 	int aligned_size, size;
 	int height = mode_cmd->height;
+	int bpp;
+	int depth;
+
+	drm_fb_get_bpp_depth(mode_cmd->pixel_format, &bpp, &depth);
 
 	size = mode_cmd->pitches[0] * height;
 	aligned_size = ALIGN(size, PAGE_SIZE);
@@ -175,57 +357,6 @@ out_unref:
 	return ret;
 }
 
-/*
- * FIXME
- * It should not be necessary to have a special dirty() callback for fbdev.
- */
-static int qxlfb_framebuffer_dirty(struct drm_framebuffer *fb,
-				   struct drm_file *file_priv,
-				   unsigned flags, unsigned color,
-				   struct drm_clip_rect *clips,
-				   unsigned num_clips)
-{
-	struct qxl_device *qdev = fb->dev->dev_private;
-	struct fb_info *info = qdev->fbdev_info;
-	struct qxl_fbdev *qfbdev = info->par;
-	struct qxl_fb_image qxl_fb_image;
-	struct fb_image *image = &qxl_fb_image.fb_image;
-
-	/* TODO: hard coding 32 bpp */
-	int stride = qfbdev->qfb.base.pitches[0];
-
-	/*
-	 * we are using a shadow draw buffer, at qdev->surface0_shadow
-	 */
-	qxl_io_log(qdev, "dirty x[%d, %d], y[%d, %d]", clips->x1, clips->x2,
-		   clips->y1, clips->y2);
-	image->dx = clips->x1;
-	image->dy = clips->y1;
-	image->width = clips->x2 - clips->x1;
-	image->height = clips->y2 - clips->y1;
-	image->fg_color = 0xffffffff; /* unused, just to avoid uninitialized
-					 warnings */
-	image->bg_color = 0;
-	image->depth = 32;	     /* TODO: take from somewhere? */
-	image->cmap.start = 0;
-	image->cmap.len = 0;
-	image->cmap.red = NULL;
-	image->cmap.green = NULL;
-	image->cmap.blue = NULL;
-	image->cmap.transp = NULL;
-	image->data = qfbdev->shadow + (clips->x1 * 4) + (stride * clips->y1);
-
-	qxl_fb_image_init(&qxl_fb_image, qdev, info, NULL);
-	qxl_draw_opaque_fb(&qxl_fb_image, stride);
-
-	return 0;
-}
-
-static const struct drm_framebuffer_funcs qxlfb_fb_funcs = {
-	.destroy = qxl_user_framebuffer_destroy,
-	.dirty = qxlfb_framebuffer_dirty,
-};
-
 static int qxlfb_create(struct qxl_fbdev *qfbdev,
 			struct drm_fb_helper_surface_size *sizes)
 {
@@ -235,6 +366,7 @@ static int qxlfb_create(struct qxl_fbdev *qfbdev,
 	struct drm_mode_fb_cmd2 mode_cmd;
 	struct drm_gem_object *gobj = NULL;
 	struct qxl_bo *qbo = NULL;
+	struct device *device = &qdev->pdev->dev;
 	int ret;
 	int size;
 	int bpp = sizes->surface_bpp;
@@ -248,9 +380,6 @@ static int qxlfb_create(struct qxl_fbdev *qfbdev,
 	mode_cmd.pixel_format = drm_mode_legacy_fb_format(bpp, depth);
 
 	ret = qxlfb_create_pinned_object(qfbdev, &mode_cmd, &gobj);
-	if (ret < 0)
-		return ret;
-
 	qbo = gem_to_qxl_bo(gobj);
 	QXL_INFO(qdev, "%s: %dx%d %d\n", __func__, mode_cmd.width,
 		 mode_cmd.height, mode_cmd.pitches[0]);
@@ -266,22 +395,21 @@ static int qxlfb_create(struct qxl_fbdev *qfbdev,
 		 shadow);
 	size = mode_cmd.pitches[0] * mode_cmd.height;
 
-	info = drm_fb_helper_alloc_fbi(&qfbdev->helper);
-	if (IS_ERR(info)) {
-		ret = PTR_ERR(info);
+	info = framebuffer_alloc(0, device);
+	if (info == NULL) {
+		ret = -ENOMEM;
 		goto out_unref;
 	}
 
 	info->par = qfbdev;
 
-	qxl_framebuffer_init(qdev->ddev, &qfbdev->qfb, &mode_cmd, gobj,
-			     &qxlfb_fb_funcs);
+	qxl_framebuffer_init(qdev->ddev, &qfbdev->qfb, &mode_cmd, gobj);
 
 	fb = &qfbdev->qfb.base;
 
 	/* setup helper with fb data */
 	qfbdev->helper.fb = fb;
-
+	qfbdev->helper.fbdev = info;
 	qfbdev->shadow = shadow;
 	strcpy(info->fix.id, "qxldrmfb");
 
@@ -303,6 +431,11 @@ static int qxlfb_create(struct qxl_fbdev *qfbdev,
 			       sizes->fb_height);
 
 	/* setup aperture base/size for vesafb takeover */
+	info->apertures = alloc_apertures(1);
+	if (!info->apertures) {
+		ret = -ENOMEM;
+		goto out_unref;
+	}
 	info->apertures->ranges[0].base = qdev->ddev->mode_config.fb_base;
 	info->apertures->ranges[0].size = qdev->vram_size;
 
@@ -311,13 +444,17 @@ static int qxlfb_create(struct qxl_fbdev *qfbdev,
 
 	if (info->screen_base == NULL) {
 		ret = -ENOSPC;
-		goto out_destroy_fbi;
+		goto out_unref;
 	}
 
-#ifdef CONFIG_DRM_FBDEV_EMULATION
+	ret = fb_alloc_cmap(&info->cmap, 256, 0);
+	if (ret) {
+		ret = -ENOMEM;
+		goto out_unref;
+	}
+
 	info->fbdefio = &qxl_defio;
 	fb_deferred_io_init(info);
-#endif
 
 	qdev->fbdev_info = info;
 	qdev->fbdev_qfb = &qfbdev->qfb;
@@ -325,8 +462,6 @@ static int qxlfb_create(struct qxl_fbdev *qfbdev,
 	DRM_INFO("fb: depth %d, pitch %d, width %d, height %d\n", fb->depth, fb->pitches[0], fb->width, fb->height);
 	return 0;
 
-out_destroy_fbi:
-	drm_fb_helper_release_fbi(&qfbdev->helper);
 out_unref:
 	if (qbo) {
 		ret = qxl_bo_reserve(qbo, false);
@@ -337,11 +472,11 @@ out_unref:
 		}
 	}
 	if (fb && ret) {
-		drm_gem_object_unreference_unlocked(gobj);
+		drm_gem_object_unreference(gobj);
 		drm_framebuffer_cleanup(fb);
 		kfree(fb);
 	}
-	drm_gem_object_unreference_unlocked(gobj);
+	drm_gem_object_unreference(gobj);
 	return ret;
 }
 
@@ -349,8 +484,7 @@ static int qxl_fb_find_or_create_single(
 		struct drm_fb_helper *helper,
 		struct drm_fb_helper_surface_size *sizes)
 {
-	struct qxl_fbdev *qfbdev =
-		container_of(helper, struct qxl_fbdev, helper);
+	struct qxl_fbdev *qfbdev = (struct qxl_fbdev *)helper;
 	int new_fb = 0;
 	int ret;
 
@@ -365,11 +499,15 @@ static int qxl_fb_find_or_create_single(
 
 static int qxl_fbdev_destroy(struct drm_device *dev, struct qxl_fbdev *qfbdev)
 {
+	struct fb_info *info;
 	struct qxl_framebuffer *qfb = &qfbdev->qfb;
 
-	drm_fb_helper_unregister_fbi(&qfbdev->helper);
-	drm_fb_helper_release_fbi(&qfbdev->helper);
+	if (qfbdev->helper.fbdev) {
+		info = qfbdev->helper.fbdev;
 
+		unregister_framebuffer(info);
+		framebuffer_release(info);
+	}
 	if (qfb->obj) {
 		qxlfb_destroy_pinned_object(qfb->obj);
 		qfb->obj = NULL;
@@ -381,17 +519,19 @@ static int qxl_fbdev_destroy(struct drm_device *dev, struct qxl_fbdev *qfbdev)
 	return 0;
 }
 
-static const struct drm_fb_helper_funcs qxl_fb_helper_funcs = {
+static struct drm_fb_helper_funcs qxl_fb_helper_funcs = {
+	/* TODO
+	.gamma_set = qxl_crtc_fb_gamma_set,
+	.gamma_get = qxl_crtc_fb_gamma_get,
+	*/
 	.fb_probe = qxl_fb_find_or_create_single,
 };
 
 int qxl_fbdev_init(struct qxl_device *qdev)
 {
-	int ret = 0;
-
-#ifdef CONFIG_DRM_FBDEV_EMULATION
 	struct qxl_fbdev *qfbdev;
 	int bpp_sel = 32; /* TODO: parameter from somewhere? */
+	int ret;
 
 	qfbdev = kzalloc(sizeof(struct qxl_fbdev), GFP_KERNEL);
 	if (!qfbdev)
@@ -399,35 +539,19 @@ int qxl_fbdev_init(struct qxl_device *qdev)
 
 	qfbdev->qdev = qdev;
 	qdev->mode_info.qfbdev = qfbdev;
-	spin_lock_init(&qfbdev->delayed_ops_lock);
-	INIT_LIST_HEAD(&qfbdev->delayed_ops);
-
-	drm_fb_helper_prepare(qdev->ddev, &qfbdev->helper,
-			      &qxl_fb_helper_funcs);
+	qfbdev->helper.funcs = &qxl_fb_helper_funcs;
 
 	ret = drm_fb_helper_init(qdev->ddev, &qfbdev->helper,
-				 qxl_num_crtc /* num_crtc - QXL supports just 1 */,
+				 1 /* num_crtc - QXL supports just 1 */,
 				 QXLFB_CONN_LIMIT);
-	if (ret)
-		goto free;
+	if (ret) {
+		kfree(qfbdev);
+		return ret;
+	}
 
-	ret = drm_fb_helper_single_add_all_connectors(&qfbdev->helper);
-	if (ret)
-		goto fini;
-
-	ret = drm_fb_helper_initial_config(&qfbdev->helper, bpp_sel);
-	if (ret)
-		goto fini;
-
+	drm_fb_helper_single_add_all_connectors(&qfbdev->helper);
+	drm_fb_helper_initial_config(&qfbdev->helper, bpp_sel);
 	return 0;
-
-fini:
-	drm_fb_helper_fini(&qfbdev->helper);
-free:
-	kfree(qfbdev);
-#endif
-
-	return ret;
 }
 
 void qxl_fbdev_fini(struct qxl_device *qdev)
@@ -440,17 +564,4 @@ void qxl_fbdev_fini(struct qxl_device *qdev)
 	qdev->mode_info.qfbdev = NULL;
 }
 
-void qxl_fbdev_set_suspend(struct qxl_device *qdev, int state)
-{
-	if (!qdev->mode_info.qfbdev)
-		return;
 
-	drm_fb_helper_set_suspend(&qdev->mode_info.qfbdev->helper, state);
-}
-
-bool qxl_fbdev_qobj_is_fb(struct qxl_device *qdev, struct qxl_bo *qobj)
-{
-	if (qobj == gem_to_qxl_bo(qdev->mode_info.qfbdev->qfb.obj))
-		return true;
-	return false;
-}

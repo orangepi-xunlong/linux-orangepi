@@ -23,8 +23,8 @@
 /* Set is defined with timeout support: timeout value may be 0 */
 #define IPSET_NO_TIMEOUT	UINT_MAX
 
-#define ip_set_adt_opt_timeout(opt, set)	\
-((opt)->ext.timeout != IPSET_NO_TIMEOUT ? (opt)->ext.timeout : (set)->timeout)
+#define ip_set_adt_opt_timeout(opt, map)	\
+((opt)->ext.timeout != IPSET_NO_TIMEOUT ? (opt)->ext.timeout : (map)->timeout)
 
 static inline unsigned int
 ip_set_timeout_uget(struct nlattr *tb)
@@ -40,39 +40,38 @@ ip_set_timeout_uget(struct nlattr *tb)
 }
 
 static inline bool
-ip_set_timeout_expired(unsigned long *t)
+ip_set_timeout_test(unsigned long timeout)
 {
-	return *t != IPSET_ELEM_PERMANENT && time_is_before_jiffies(*t);
+	return timeout == IPSET_ELEM_PERMANENT ||
+	       time_is_after_jiffies(timeout);
+}
+
+static inline bool
+ip_set_timeout_expired(unsigned long *timeout)
+{
+	return *timeout != IPSET_ELEM_PERMANENT &&
+	       time_is_before_jiffies(*timeout);
 }
 
 static inline void
-ip_set_timeout_set(unsigned long *timeout, u32 value)
+ip_set_timeout_set(unsigned long *timeout, u32 t)
 {
-	unsigned long t;
-
-	if (!value) {
+	if (!t) {
 		*timeout = IPSET_ELEM_PERMANENT;
 		return;
 	}
 
-	t = msecs_to_jiffies(value * MSEC_PER_SEC) + jiffies;
-	if (t == IPSET_ELEM_PERMANENT)
+	*timeout = msecs_to_jiffies(t * 1000) + jiffies;
+	if (*timeout == IPSET_ELEM_PERMANENT)
 		/* Bingo! :-) */
-		t--;
-	*timeout = t;
+		(*timeout)--;
 }
 
 static inline u32
 ip_set_timeout_get(unsigned long *timeout)
 {
-	u32 t;
-
-	if (*timeout == IPSET_ELEM_PERMANENT)
-		return 0;
-
-	t = jiffies_to_msecs(*timeout - jiffies)/MSEC_PER_SEC;
-	/* Zero value in userspace means no timeout */
-	return t == 0 ? 1 : t;
+	return *timeout == IPSET_ELEM_PERMANENT ? 0 :
+		jiffies_to_msecs(*timeout - jiffies)/1000;
 }
 
 #endif	/* __KERNEL__ */

@@ -48,14 +48,12 @@ static inline struct udplite_net *udplite_pernet(struct net *net)
 
 static bool udplite_pkt_to_tuple(const struct sk_buff *skb,
 				 unsigned int dataoff,
-				 struct net *net,
 				 struct nf_conntrack_tuple *tuple)
 {
 	const struct udphdr *hp;
 	struct udphdr _hdr;
 
-	/* Actually only need first 4 bytes to get ports. */
-	hp = skb_header_pointer(skb, dataoff, 4, &_hdr);
+	hp = skb_header_pointer(skb, dataoff, sizeof(_hdr), &_hdr);
 	if (hp == NULL)
 		return false;
 
@@ -73,12 +71,12 @@ static bool udplite_invert_tuple(struct nf_conntrack_tuple *tuple,
 }
 
 /* Print out the per-protocol part of the tuple. */
-static void udplite_print_tuple(struct seq_file *s,
-				const struct nf_conntrack_tuple *tuple)
+static int udplite_print_tuple(struct seq_file *s,
+			       const struct nf_conntrack_tuple *tuple)
 {
-	seq_printf(s, "sport=%hu dport=%hu ",
-		   ntohs(tuple->src.u.udp.port),
-		   ntohs(tuple->dst.u.udp.port));
+	return seq_printf(s, "sport=%hu dport=%hu ",
+			  ntohs(tuple->src.u.udp.port),
+			  ntohs(tuple->dst.u.udp.port));
 }
 
 static unsigned int *udplite_get_timeouts(struct net *net)
@@ -275,7 +273,6 @@ static struct nf_conntrack_l4proto nf_conntrack_l4proto_udplite4 __read_mostly =
 	.l3proto		= PF_INET,
 	.l4proto		= IPPROTO_UDPLITE,
 	.name			= "udplite",
-	.allow_clash		= true,
 	.pkt_to_tuple		= udplite_pkt_to_tuple,
 	.invert_tuple		= udplite_invert_tuple,
 	.print_tuple		= udplite_print_tuple,
@@ -308,7 +305,6 @@ static struct nf_conntrack_l4proto nf_conntrack_l4proto_udplite6 __read_mostly =
 	.l3proto		= PF_INET6,
 	.l4proto		= IPPROTO_UDPLITE,
 	.name			= "udplite",
-	.allow_clash		= true,
 	.pkt_to_tuple		= udplite_pkt_to_tuple,
 	.invert_tuple		= udplite_invert_tuple,
 	.print_tuple		= udplite_print_tuple,

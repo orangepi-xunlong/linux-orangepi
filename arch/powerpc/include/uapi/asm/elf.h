@@ -91,11 +91,6 @@
 
 #define ELF_NGREG	48	/* includes nip, msr, lr, etc. */
 #define ELF_NFPREG	33	/* includes fpscr */
-#define ELF_NVMX	34	/* includes all vector registers */
-#define ELF_NVSX	32	/* includes all VSX registers */
-#define ELF_NTMSPRREG	3	/* include tfhar, tfiar, texasr */
-#define ELF_NEBB	3	/* includes ebbrr, ebbhr, bescr */
-#define ELF_NPMU	5	/* includes siar, sdar, sier, mmcr2, mmcr0 */
 
 typedef unsigned long elf_greg_t64;
 typedef elf_greg_t64 elf_gregset_t64[ELF_NGREG];
@@ -112,25 +107,26 @@ typedef elf_gregset_t32 compat_elf_gregset_t;
 # define ELF_NVRREG	34	/* includes vscr & vrsave in split vectors */
 # define ELF_NVSRHALFREG 32	/* Half the vsx registers */
 # define ELF_GREG_TYPE	elf_greg_t64
-# define ELF_ARCH	EM_PPC64
-# define ELF_CLASS	ELFCLASS64
-typedef elf_greg_t64 elf_greg_t;
-typedef elf_gregset_t64 elf_gregset_t;
 #else
 # define ELF_NEVRREG	34	/* includes acc (as 2) */
 # define ELF_NVRREG	33	/* includes vscr */
 # define ELF_GREG_TYPE	elf_greg_t32
 # define ELF_ARCH	EM_PPC
 # define ELF_CLASS	ELFCLASS32
-typedef elf_greg_t32 elf_greg_t;
-typedef elf_gregset_t32 elf_gregset_t;
+# define ELF_DATA	ELFDATA2MSB
 #endif /* __powerpc64__ */
 
-#ifdef __BIG_ENDIAN__
-#define ELF_DATA	ELFDATA2MSB
+#ifndef ELF_ARCH
+# define ELF_ARCH	EM_PPC64
+# define ELF_CLASS	ELFCLASS64
+# define ELF_DATA	ELFDATA2MSB
+  typedef elf_greg_t64 elf_greg_t;
+  typedef elf_gregset_t64 elf_gregset_t;
 #else
-#define ELF_DATA	ELFDATA2LSB
-#endif
+  /* Assumption: ELF_ARCH == EM_PPC and ELF_CLASS == ELFCLASS32 */
+  typedef elf_greg_t32 elf_greg_t;
+  typedef elf_gregset_t32 elf_gregset_t;
+#endif /* ELF_ARCH */
 
 /* Floating point registers */
 typedef double elf_fpreg_t;
@@ -296,19 +292,9 @@ do {									\
 #define R_PPC64_DTPREL16_HIGHERA 104 /* half16	(sym+add)@dtprel@highera */
 #define R_PPC64_DTPREL16_HIGHEST 105 /* half16	(sym+add)@dtprel@highest */
 #define R_PPC64_DTPREL16_HIGHESTA 106 /* half16	(sym+add)@dtprel@highesta */
-#define R_PPC64_TLSGD		107
-#define R_PPC64_TLSLD		108
-#define R_PPC64_TOCSAVE		109
-
-#define R_PPC64_ENTRY		118
-
-#define R_PPC64_REL16		249
-#define R_PPC64_REL16_LO	250
-#define R_PPC64_REL16_HI	251
-#define R_PPC64_REL16_HA	252
 
 /* Keep this the last entry.  */
-#define R_PPC64_NUM		253
+#define R_PPC64_NUM		107
 
 /* There's actually a third entry here, but it's unused */
 struct ppc64_opd_entry

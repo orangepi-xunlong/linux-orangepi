@@ -31,8 +31,9 @@
 #include <linux/wait.h>
 #include <asm/uaccess.h>
 
-#include <media/i2c/saa6588.h>
+#include <media/saa6588.h>
 #include <media/v4l2-device.h>
+#include <media/v4l2-chip-ident.h>
 
 
 /* insmod options */
@@ -150,14 +151,14 @@ static inline struct saa6588 *to_saa6588(struct v4l2_subdev *sd)
 
 /* ---------------------------------------------------------------------- */
 
-static bool block_from_buf(struct saa6588 *s, unsigned char *buf)
+static int block_to_user_buf(struct saa6588 *s, unsigned char __user *user_buf)
 {
 	int i;
 
 	if (s->rd_index == s->wr_index) {
 		if (debug > 2)
 			dprintk(PREFIX "Read: buffer empty.\n");
-		return false;
+		return 0;
 	}
 
 	if (debug > 2) {
@@ -166,7 +167,8 @@ static bool block_from_buf(struct saa6588 *s, unsigned char *buf)
 			dprintk("0x%02x ", s->buffer[i]);
 	}
 
-	memcpy(buf, &s->buffer[s->rd_index], 3);
+	if (copy_to_user(user_buf, &s->buffer[s->rd_index], 3))
+		return -EFAULT;
 
 	s->rd_index += 3;
 	if (s->rd_index >= s->buf_size)
@@ -176,22 +178,22 @@ static bool block_from_buf(struct saa6588 *s, unsigned char *buf)
 	if (debug > 2)
 		dprintk("%d blocks total.\n", s->block_count);
 
-	return true;
+	return 1;
 }
 
 static void read_from_buf(struct saa6588 *s, struct saa6588_command *a)
 {
-	unsigned char __user *buf_ptr = a->buffer;
-	unsigned char buf[3];
 	unsigned long flags;
-	unsigned int rd_blocks;
+
+	unsigned char __user *buf_ptr = a->buffer;
 	unsigned int i;
+	unsigned int rd_blocks;
 
 	a->result = 0;
 	if (!a->buffer)
 		return;
 
-	while (!a->nonblocking && !s->data_available_for_read) {
+	while (!s->data_available_for_read) {
 		int ret = wait_event_interruptible(s->read_queue,
 					     s->data_available_for_read);
 		if (ret == -ERESTARTSYS) {
@@ -200,31 +202,24 @@ static void read_from_buf(struct saa6588 *s, struct saa6588_command *a)
 		}
 	}
 
-	rd_blocks = a->block_count;
 	spin_lock_irqsave(&s->lock, flags);
+	rd_blocks = a->block_count;
 	if (rd_blocks > s->block_count)
 		rd_blocks = s->block_count;
-	spin_unlock_irqrestore(&s->lock, flags);
 
-	if (!rd_blocks)
+	if (!rd_blocks) {
+		spin_unlock_irqrestore(&s->lock, flags);
 		return;
+	}
 
 	for (i = 0; i < rd_blocks; i++) {
-		bool got_block;
-
-		spin_lock_irqsave(&s->lock, flags);
-		got_block = block_from_buf(s, buf);
-		spin_unlock_irqrestore(&s->lock, flags);
-		if (!got_block)
+		if (block_to_user_buf(s, buf_ptr)) {
+			buf_ptr += 3;
+			a->result++;
+		} else
 			break;
-		if (copy_to_user(buf_ptr, buf, 3)) {
-			a->result = -EFAULT;
-			return;
-		}
-		buf_ptr += 3;
-		a->result += 3;
 	}
-	spin_lock_irqsave(&s->lock, flags);
+	a->result *= 3;
 	s->data_available_for_read = (s->block_count > 0);
 	spin_unlock_irqrestore(&s->lock, flags);
 }
@@ -301,7 +296,9 @@ static void saa6588_i2c_poll(struct saa6588 *s)
 	   first and the last of the 3 bytes block.
 	 */
 
-	swap(tmpbuf[2], tmpbuf[0]);
+	tmp = tmpbuf[2];
+	tmpbuf[2] = tmpbuf[0];
+	tmpbuf[0] = tmp;
 
 	/* Map 'Invalid block E' to 'Invalid Block' */
 	if (blocknum == 6)
@@ -398,11 +395,14 @@ static long saa6588_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	struct saa6588_command *a = arg;
 
 	switch (cmd) {
+		/* --- open() for /dev/radio --- */
+	case SAA6588_CMD_OPEN:
+		a->result = 0;	/* return error if chip doesn't work ??? */
+		break;
 		/* --- close() for /dev/radio --- */
 	case SAA6588_CMD_CLOSE:
 		s->data_available_for_read = 1;
 		wake_up_interruptible(&s->read_queue);
-		s->data_available_for_read = 0;
 		a->result = 0;
 		break;
 		/* --- read() for /dev/radio --- */
@@ -412,8 +412,9 @@ static long saa6588_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		/* --- poll() for /dev/radio --- */
 	case SAA6588_CMD_POLL:
 		a->result = 0;
-		if (s->data_available_for_read)
+		if (s->data_available_for_read) {
 			a->result |= POLLIN | POLLRDNORM;
+		}
 		poll_wait(a->instance, &s->read_queue, a->event_list);
 		break;
 
@@ -442,9 +443,17 @@ static int saa6588_s_tuner(struct v4l2_subdev *sd, const struct v4l2_tuner *vt)
 	return 0;
 }
 
+static int saa6588_g_chip_ident(struct v4l2_subdev *sd, struct v4l2_dbg_chip_ident *chip)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+
+	return v4l2_chip_ident_i2c_client(client, chip, V4L2_IDENT_SAA6588, 0);
+}
+
 /* ----------------------------------------------------------------------- */
 
 static const struct v4l2_subdev_core_ops saa6588_core_ops = {
+	.g_chip_ident = saa6588_g_chip_ident,
 	.ioctl = saa6588_ioctl,
 };
 
@@ -469,15 +478,17 @@ static int saa6588_probe(struct i2c_client *client,
 	v4l_info(client, "saa6588 found @ 0x%x (%s)\n",
 			client->addr << 1, client->adapter->name);
 
-	s = devm_kzalloc(&client->dev, sizeof(*s), GFP_KERNEL);
+	s = kzalloc(sizeof(*s), GFP_KERNEL);
 	if (s == NULL)
 		return -ENOMEM;
 
 	s->buf_size = bufblocks * 3;
 
-	s->buffer = devm_kzalloc(&client->dev, s->buf_size, GFP_KERNEL);
-	if (s->buffer == NULL)
+	s->buffer = kmalloc(s->buf_size, GFP_KERNEL);
+	if (s->buffer == NULL) {
+		kfree(s);
 		return -ENOMEM;
+	}
 	sd = &s->sd;
 	v4l2_i2c_subdev_init(sd, client, &saa6588_ops);
 	spin_lock_init(&s->lock);
@@ -505,6 +516,8 @@ static int saa6588_remove(struct i2c_client *client)
 
 	cancel_delayed_work_sync(&s->work);
 
+	kfree(s->buffer);
+	kfree(s);
 	return 0;
 }
 
@@ -518,6 +531,7 @@ MODULE_DEVICE_TABLE(i2c, saa6588_id);
 
 static struct i2c_driver saa6588_driver = {
 	.driver = {
+		.owner	= THIS_MODULE,
 		.name	= "saa6588",
 	},
 	.probe		= saa6588_probe,

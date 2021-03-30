@@ -22,6 +22,7 @@
 #ifndef EC100_H
 #define EC100_H
 
+#include <linux/kconfig.h>
 #include <linux/dvb/frontend.h>
 
 struct ec100_config {
@@ -30,7 +31,7 @@ struct ec100_config {
 };
 
 
-#if IS_REACHABLE(CONFIG_DVB_EC100)
+#if IS_ENABLED(CONFIG_DVB_EC100)
 extern struct dvb_frontend *ec100_attach(const struct ec100_config *config,
 	struct i2c_adapter *i2c);
 #else

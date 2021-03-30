@@ -107,15 +107,11 @@ static const struct sunxi_desc_pin sun50iw1p1_r_pins[] = {
 		  SUNXI_FUNCTION_IRQ_BANK(0x6, 0, 12)),	/* PL_EINT12 */
 };
 
-#define IRQ_BANK_NUM 1
-static const unsigned sun50iw1p1_r_irq_bank_base[IRQ_BANK_NUM] = {0};
-
 static const struct sunxi_pinctrl_desc sun50iw1p1_r_pinctrl_data = {
 	.pins = sun50iw1p1_r_pins,
 	.npins = ARRAY_SIZE(sun50iw1p1_r_pins),
 	.pin_base = PL_BASE,
-	.irq_banks = IRQ_BANK_NUM,
-	.irq_bank_base = sun50iw1p1_r_irq_bank_base,
+	.irq_banks = 1,
 };
 
 static int sun50iw1p1_r_pinctrl_probe(struct platform_device *pdev)
@@ -142,14 +138,13 @@ static int __init sun50iw1p1_r_pio_init(void)
 {
 	int ret;
 	ret = platform_driver_register(&sun50iw1p1_r_pinctrl_driver);
-	if (ret) {
-		pr_debug("register sun50iw1p1 r-pio controller failed\n");
+	if (IS_ERR_VALUE(ret)) {
+		pr_debug("register sun50i r-pio controller failed\n");
 		return -EINVAL;
 	}
 	return 0;
 }
 postcore_initcall(sun50iw1p1_r_pio_init);
-
 
 MODULE_AUTHOR("Jackie Hwang <huangshr@allwinnertech.com>");
 MODULE_AUTHOR("Chen-Yu Tsai <wens@csie.org>");

@@ -22,7 +22,7 @@
 #ifndef ALI_IRCC_H
 #define ALI_IRCC_H
 
-#include <linux/ktime.h>
+#include <linux/time.h>
 
 #include <linux/spinlock.h>
 #include <linux/pm.h>
@@ -209,7 +209,8 @@ struct ali_ircc_cb {
 	
 	unsigned char rcvFramesOverflow;
 		
-	ktime_t stamp;
+	struct timeval stamp;
+	struct timeval now;
 
 	spinlock_t lock;           /* For serializing operations */
 	

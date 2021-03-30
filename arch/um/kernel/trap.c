@@ -7,7 +7,6 @@
 #include <linux/sched.h>
 #include <linux/hardirq.h>
 #include <linux/module.h>
-#include <linux/uaccess.h>
 #include <asm/current.h>
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
@@ -36,10 +35,10 @@ int handle_page_fault(unsigned long address, unsigned long ip,
 	*code_out = SEGV_MAPERR;
 
 	/*
-	 * If the fault was with pagefaults disabled, don't take the fault, just
+	 * If the fault was during atomic operation, don't take the fault, just
 	 * fail.
 	 */
-	if (faulthandler_disabled())
+	if (in_atomic())
 		goto out_nosemaphore;
 
 	if (is_user)
@@ -73,7 +72,7 @@ good_area:
 	do {
 		int fault;
 
-		fault = handle_mm_fault(vma, address, flags);
+		fault = handle_mm_fault(mm, vma, address, flags);
 
 		if ((fault & VM_FAULT_RETRY) && fatal_signal_pending(current))
 			goto out_nosemaphore;
@@ -81,8 +80,6 @@ good_area:
 		if (unlikely(fault & VM_FAULT_ERROR)) {
 			if (fault & VM_FAULT_OOM) {
 				goto out_of_memory;
-			} else if (fault & VM_FAULT_SIGSEGV) {
-				goto out;
 			} else if (fault & VM_FAULT_SIGBUS) {
 				err = -EACCES;
 				goto out;
@@ -149,7 +146,7 @@ static void show_segv_info(struct uml_pt_regs *regs)
 	if (!printk_ratelimit())
 		return;
 
-	printk("%s%s[%d]: segfault at %lx ip %px sp %px error %x",
+	printk("%s%s[%d]: segfault at %lx ip %p sp %p error %x",
 		task_pid_nr(tsk) > 1 ? KERN_INFO : KERN_EMERG,
 		tsk->comm, task_pid_nr(tsk), FAULT_ADDRESS(*fi),
 		(void *)UPT_IP(regs), (void *)UPT_SP(regs),
@@ -173,7 +170,7 @@ static void bad_segv(struct faultinfo fi, unsigned long ip)
 void fatal_sigsegv(void)
 {
 	force_sigsegv(SIGSEGV, current);
-	do_signal(&current->thread.regs);
+	do_signal();
 	/*
 	 * This is to tell gcc that we're not returning - do_signal
 	 * can, in general, return, but in this case, it's not, since
@@ -209,24 +206,16 @@ unsigned long segv(struct faultinfo fi, unsigned long ip, int is_user,
 	int is_write = FAULT_WRITE(fi);
 	unsigned long address = FAULT_ADDRESS(fi);
 
-	if (!is_user && regs)
-		current->thread.segv_regs = container_of(regs, struct pt_regs, regs);
-
 	if (!is_user && (address >= start_vm) && (address < end_vm)) {
 		flush_tlb_kernel_vm();
-		goto out;
+		return 0;
 	}
 	else if (current->mm == NULL) {
 		show_regs(container_of(regs, struct pt_regs, regs));
 		panic("Segfault with no mm");
 	}
-	else if (!is_user && address > PAGE_SIZE && address < TASK_SIZE) {
-		show_regs(container_of(regs, struct pt_regs, regs));
-		panic("Kernel tried to access user memory at addr 0x%lx, ip 0x%lx",
-		       address, ip);
-	}
 
-	if (SEGV_IS_FIXABLE(&fi))
+	if (SEGV_IS_FIXABLE(&fi) || SEGV_MAYBE_FIXABLE(&fi))
 		err = handle_page_fault(address, ip, is_write, is_user,
 					&si.si_code);
 	else {
@@ -241,7 +230,7 @@ unsigned long segv(struct faultinfo fi, unsigned long ip, int is_user,
 
 	catcher = current->thread.fault_catcher;
 	if (!err)
-		goto out;
+		return 0;
 	else if (catcher != NULL) {
 		current->thread.fault_addr = (void *) address;
 		UML_LONGJMP(catcher, 1);
@@ -249,7 +238,7 @@ unsigned long segv(struct faultinfo fi, unsigned long ip, int is_user,
 	else if (current->thread.fault_addr != NULL)
 		panic("fault_addr set but no fault catcher");
 	else if (!is_user && arch_fixup(ip, regs))
-		goto out;
+		return 0;
 
 	if (!is_user) {
 		show_regs(container_of(regs, struct pt_regs, regs));
@@ -273,11 +262,6 @@ unsigned long segv(struct faultinfo fi, unsigned long ip, int is_user,
 		current->thread.arch.faultinfo = fi;
 		force_sig_info(SIGSEGV, &si, current);
 	}
-
-out:
-	if (regs)
-		current->thread.segv_regs = NULL;
-
 	return 0;
 }
 

@@ -28,7 +28,6 @@
 #include <linux/mm.h>
 #include <linux/gfp.h>
 #include "sound_config.h"
-#include "sleep.h"
 
 #define DMAP_FREE_ON_CLOSE      0
 #define DMAP_KEEP_ON_CLOSE      1
@@ -352,7 +351,8 @@ static void dma_reset_output(int dev)
 	if (!signal_pending(current) && adev->dmap_out->qlen && 
 	    adev->dmap_out->underrun_count == 0){
 		spin_unlock_irqrestore(&dmap->lock,flags);
-		oss_broken_sleep_on(&adev->out_sleeper, dmabuf_timeout(dmap));
+		interruptible_sleep_on_timeout(&adev->out_sleeper,
+					       dmabuf_timeout(dmap));
 		spin_lock_irqsave(&dmap->lock,flags);
 	}
 	adev->dmap_out->flags &= ~(DMA_SYNCING | DMA_ACTIVE);
@@ -446,7 +446,7 @@ int DMAbuf_sync(int dev)
 			long t = dmabuf_timeout(dmap);
 			spin_unlock_irqrestore(&dmap->lock,flags);
 			/* FIXME: not safe may miss events */
-			t = oss_broken_sleep_on(&adev->out_sleeper, t);
+			t = interruptible_sleep_on_timeout(&adev->out_sleeper, t);
 			spin_lock_irqsave(&dmap->lock,flags);
 			if (!t) {
 				adev->dmap_out->flags &= ~DMA_SYNCING;
@@ -466,7 +466,7 @@ int DMAbuf_sync(int dev)
 			while (!signal_pending(current) &&
 			       adev->d->local_qlen(dev)){
 				spin_unlock_irqrestore(&dmap->lock,flags);
-				oss_broken_sleep_on(&adev->out_sleeper,
+				interruptible_sleep_on_timeout(&adev->out_sleeper,
 							       dmabuf_timeout(dmap));
 				spin_lock_irqsave(&dmap->lock,flags);
 			}
@@ -557,6 +557,7 @@ int DMAbuf_getrdbuffer(int dev, char **buf, int *len, int dontblock)
 	unsigned long flags;
 	int err = 0, n = 0;
 	struct dma_buffparms *dmap = adev->dmap_in;
+	int go;
 
 	if (!(adev->open_mode & OPEN_READ))
 		return -EIO;
@@ -583,11 +584,12 @@ int DMAbuf_getrdbuffer(int dev, char **buf, int *len, int dontblock)
 			spin_unlock_irqrestore(&dmap->lock,flags);
 			return -EAGAIN;
 		}
-		if (adev->go)
+		if ((go = adev->go))
 			timeout = dmabuf_timeout(dmap);
 
 		spin_unlock_irqrestore(&dmap->lock,flags);
-		timeout = oss_broken_sleep_on(&adev->in_sleeper, timeout);
+		timeout = interruptible_sleep_on_timeout(&adev->in_sleeper,
+							 timeout);
 		if (!timeout) {
 			/* FIXME: include device name */
 			err = -EIO;
@@ -767,7 +769,8 @@ static int output_sleep(int dev, int dontblock)
 		timeout_value = dmabuf_timeout(dmap);
 	else
 		timeout_value = MAX_SCHEDULE_TIMEOUT;
-	timeout_value = oss_broken_sleep_on(&adev->out_sleeper, timeout_value);
+	timeout_value = interruptible_sleep_on_timeout(&adev->out_sleeper,
+						       timeout_value);
 	if (timeout != MAX_SCHEDULE_TIMEOUT && !timeout_value) {
 		printk(KERN_WARNING "Sound: DMA (output) timed out - IRQ/DRQ config error?\n");
 		dma_reset_output(dev);

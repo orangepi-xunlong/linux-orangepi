@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2013, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -108,6 +108,7 @@ acpi_status acpi_hw_set_mode(u32 mode)
 		break;
 
 	case ACPI_SYS_MODE_LEGACY:
+
 		/*
 		 * BIOS should clear all fixed status bits and restore fixed event
 		 * enable bits to default
@@ -119,7 +120,6 @@ acpi_status acpi_hw_set_mode(u32 mode)
 		break;
 
 	default:
-
 		return_ACPI_STATUS(AE_BAD_PARAMETER);
 	}
 

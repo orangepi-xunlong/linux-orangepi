@@ -13,12 +13,11 @@
 #include <linux/mtd/partitions.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/flash.h>
-#if IS_ENABLED(CONFIG_USB_ISP1362_HCD)
+#if defined(CONFIG_USB_ISP1362_HCD) || defined(CONFIG_USB_ISP1362_HCD_MODULE)
 #include <linux/usb/isp1362.h>
 #endif
 #include <linux/ata_platform.h>
 #include <linux/irq.h>
-#include <linux/gpio.h>
 #include <asm/dma.h>
 #include <asm/bfin5xx_spi.h>
 #include <asm/portmux.h>
@@ -30,10 +29,10 @@
  */
 const char bfin_board_name[] = "Bluetechnix CM BF561";
 
-#if IS_ENABLED(CONFIG_SPI_BFIN5XX)
+#if defined(CONFIG_SPI_BFIN5XX) || defined(CONFIG_SPI_BFIN5XX_MODULE)
 /* all SPI peripherals info goes here */
 
-#if IS_ENABLED(CONFIG_MTD_M25P80)
+#if defined(CONFIG_MTD_M25P80) || defined(CONFIG_MTD_M25P80_MODULE)
 static struct mtd_partition bfin_spi_flash_partitions[] = {
 	{
 		.name = "bootloader(spi)",
@@ -65,7 +64,7 @@ static struct bfin5xx_spi_chip spi_flash_chip_info = {
 #endif
 
 static struct spi_board_info bfin_spi_board_info[] __initdata = {
-#if IS_ENABLED(CONFIG_MTD_M25P80)
+#if defined(CONFIG_MTD_M25P80) || defined(CONFIG_MTD_M25P80_MODULE)
 	{
 		/* the modalias must be the same as spi device driver name */
 		.modalias = "m25p80", /* Name of spi_driver for this device */
@@ -78,7 +77,7 @@ static struct spi_board_info bfin_spi_board_info[] __initdata = {
 	},
 #endif
 
-#if IS_ENABLED(CONFIG_SND_BF5XX_SOC_AD183X)
+#if defined(CONFIG_SND_BF5XX_SOC_AD183X) || defined(CONFIG_SND_BF5XX_SOC_AD183X_MODULE)
 	{
 		.modalias = "ad183x",
 		.max_speed_hz = 3125000,     /* max spi clock (SCK) speed in HZ */
@@ -86,7 +85,7 @@ static struct spi_board_info bfin_spi_board_info[] __initdata = {
 		.chip_select = 4,
 	},
 #endif
-#if IS_ENABLED(CONFIG_MMC_SPI)
+#if defined(CONFIG_MMC_SPI) || defined(CONFIG_MMC_SPI_MODULE)
 	{
 		.modalias = "mmc_spi",
 		.max_speed_hz = 20000000,     /* max spi clock (SCK) speed in HZ */
@@ -135,19 +134,18 @@ static struct platform_device bfin_spi0_device = {
 #endif  /* spi master and devices */
 
 
-#if IS_ENABLED(CONFIG_FB_HITACHI_TX09)
+#if defined(CONFIG_FB_HITACHI_TX09) || defined(CONFIG_FB_HITACHI_TX09_MODULE)
 static struct platform_device hitachi_fb_device = {
 	.name = "hitachi-tx09",
 };
 #endif
 
 
-#if IS_ENABLED(CONFIG_SMC91X)
+#if defined(CONFIG_SMC91X) || defined(CONFIG_SMC91X_MODULE)
 #include <linux/smc91x.h>
 
 static struct smc91x_platdata smc91x_info = {
-	.flags = SMC91X_USE_8BIT | SMC91X_USE_16BIT | SMC91X_USE_32BIT |
-		 SMC91X_NOWAIT,
+	.flags = SMC91X_USE_32BIT | SMC91X_NOWAIT,
 	.leda = RPC_LED_100_10,
 	.ledb = RPC_LED_TX_RX,
 };
@@ -175,7 +173,7 @@ static struct platform_device smc91x_device = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_SMSC911X)
+#if defined(CONFIG_SMSC911X) || defined(CONFIG_SMSC911X_MODULE)
 #include <linux/smsc911x.h>
 
 static struct resource smsc911x_resources[] = {
@@ -210,7 +208,7 @@ static struct platform_device smsc911x_device = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_USB_NET2272)
+#if defined(CONFIG_USB_NET2272) || defined(CONFIG_USB_NET2272_MODULE)
 static struct resource net2272_bfin_resources[] = {
 	{
 		.start = 0x24000000,
@@ -231,7 +229,7 @@ static struct platform_device net2272_bfin_device = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_USB_ISP1362_HCD)
+#if defined(CONFIG_USB_ISP1362_HCD) || defined(CONFIG_USB_ISP1362_HCD_MODULE)
 static struct resource isp1362_hcd_resources[] = {
 	{
 		.start = 0x24008000,
@@ -270,7 +268,7 @@ static struct platform_device isp1362_hcd_device = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_SERIAL_BFIN)
+#if defined(CONFIG_SERIAL_BFIN) || defined(CONFIG_SERIAL_BFIN_MODULE)
 #ifdef CONFIG_SERIAL_BFIN_UART0
 static struct resource bfin_uart0_resources[] = {
 	{
@@ -321,7 +319,7 @@ static struct platform_device bfin_uart0_device = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_BFIN_SIR)
+#if defined(CONFIG_BFIN_SIR) || defined(CONFIG_BFIN_SIR_MODULE)
 #ifdef CONFIG_BFIN_SIR0
 static struct resource bfin_sir0_resources[] = {
 	{
@@ -350,11 +348,12 @@ static struct platform_device bfin_sir0_device = {
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_PATA_PLATFORM)
+#if defined(CONFIG_PATA_PLATFORM) || defined(CONFIG_PATA_PLATFORM_MODULE)
 #define PATA_INT	IRQ_PF46
 
 static struct pata_platform_info bfin_pata_platform_data = {
 	.ioport_shift = 2,
+	.irq_type = IRQF_TRIGGER_HIGH,
 };
 
 static struct resource bfin_pata_resources[] = {
@@ -371,7 +370,7 @@ static struct resource bfin_pata_resources[] = {
 	{
 		.start = PATA_INT,
 		.end = PATA_INT,
-		.flags = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHLEVEL,
+		.flags = IORESOURCE_IRQ,
 	},
 };
 
@@ -386,7 +385,7 @@ static struct platform_device bfin_pata_device = {
 };
 #endif
 
-#if IS_ENABLED(CONFIG_MTD_PHYSMAP)
+#if defined(CONFIG_MTD_PHYSMAP) || defined(CONFIG_MTD_PHYSMAP_MODULE)
 static struct mtd_partition para_partitions[] = {
 	{
 		.name       = "bootloader(nor)",
@@ -457,54 +456,54 @@ static struct platform_device *cm_bf561_devices[] __initdata = {
 
 	&bfin_dpmc,
 
-#if IS_ENABLED(CONFIG_FB_HITACHI_TX09)
+#if defined(CONFIG_FB_HITACHI_TX09) || defined(CONFIG_FB_HITACHI_TX09_MODULE)
 	&hitachi_fb_device,
 #endif
 
-#if IS_ENABLED(CONFIG_SERIAL_BFIN)
+#if defined(CONFIG_SERIAL_BFIN) || defined(CONFIG_SERIAL_BFIN_MODULE)
 #ifdef CONFIG_SERIAL_BFIN_UART0
 	&bfin_uart0_device,
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_BFIN_SIR)
+#if defined(CONFIG_BFIN_SIR) || defined(CONFIG_BFIN_SIR_MODULE)
 #ifdef CONFIG_BFIN_SIR0
 	&bfin_sir0_device,
 #endif
 #endif
 
-#if IS_ENABLED(CONFIG_USB_ISP1362_HCD)
+#if defined(CONFIG_USB_ISP1362_HCD) || defined(CONFIG_USB_ISP1362_HCD_MODULE)
 	&isp1362_hcd_device,
 #endif
 
-#if IS_ENABLED(CONFIG_SMC91X)
+#if defined(CONFIG_SMC91X) || defined(CONFIG_SMC91X_MODULE)
 	&smc91x_device,
 #endif
 
-#if IS_ENABLED(CONFIG_SMSC911X)
+#if defined(CONFIG_SMSC911X) || defined(CONFIG_SMSC911X_MODULE)
 	&smsc911x_device,
 #endif
 
-#if IS_ENABLED(CONFIG_USB_NET2272)
+#if defined(CONFIG_USB_NET2272) || defined(CONFIG_USB_NET2272_MODULE)
 	&net2272_bfin_device,
 #endif
 
-#if IS_ENABLED(CONFIG_SPI_BFIN5XX)
+#if defined(CONFIG_SPI_BFIN5XX) || defined(CONFIG_SPI_BFIN5XX_MODULE)
 	&bfin_spi0_device,
 #endif
 
-#if IS_ENABLED(CONFIG_PATA_PLATFORM)
+#if defined(CONFIG_PATA_PLATFORM) || defined(CONFIG_PATA_PLATFORM_MODULE)
 	&bfin_pata_device,
 #endif
 
-#if IS_ENABLED(CONFIG_MTD_PHYSMAP)
+#if defined(CONFIG_MTD_PHYSMAP) || defined(CONFIG_MTD_PHYSMAP_MODULE)
 	&para_flash_device,
 #endif
 };
 
 static int __init net2272_init(void)
 {
-#if IS_ENABLED(CONFIG_USB_NET2272)
+#if defined(CONFIG_USB_NET2272) || defined(CONFIG_USB_NET2272_MODULE)
 	int ret;
 
 	ret = gpio_request(GPIO_PF46, "net2272");
@@ -524,11 +523,11 @@ static int __init cm_bf561_init(void)
 {
 	printk(KERN_INFO "%s(): registering device resources\n", __func__);
 	platform_add_devices(cm_bf561_devices, ARRAY_SIZE(cm_bf561_devices));
-#if IS_ENABLED(CONFIG_SPI_BFIN5XX)
+#if defined(CONFIG_SPI_BFIN5XX) || defined(CONFIG_SPI_BFIN5XX_MODULE)
 	spi_register_board_info(bfin_spi_board_info, ARRAY_SIZE(bfin_spi_board_info));
 #endif
 
-#if IS_ENABLED(CONFIG_PATA_PLATFORM)
+#if defined(CONFIG_PATA_PLATFORM) || defined(CONFIG_PATA_PLATFORM_MODULE)
 	irq_set_status_flags(PATA_INT, IRQ_NOAUTOEN);
 #endif
 

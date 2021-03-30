@@ -1,0 +1,24 @@
+config MSDCARD_FS
+	tristate "msdcard file system"
+	default y
+	help
+	  Sdcardfs is based on Wrapfs file system.
+
+config SDCARD_FS_FADV_NOACTIVE
+	bool "msdcardfs fadvise noactive support"
+	depends on FADV_NOACTIVE
+	default y
+	help
+	  Sdcardfs supports fadvise noactive mode.
+
+config SDCARD_FS_CI_SEARCH
+	tristate "msdcardfs case-insensitive search support"
+	depends on MSDCARD_FS
+	default y
+
+config SDCARD_FS_XATTR
+	bool "mSdcardfs extended attribute"
+	default y
+	depends on MSDCARD_FS
+	help
+	  Modification of sdcard file system for xattr

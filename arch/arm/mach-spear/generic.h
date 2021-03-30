@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2009-2012 ST Microelectronics
  * Rajeev Kumar <rajeev-dlh.kumar@st.com>
- * Viresh Kumar <vireshk@kernel.org>
+ * Viresh Kumar <viresh.linux@gmail.com>
  *
  * This file is licensed under the terms of the GNU General Public
  * License version 2. This program is licensed "as is" without any
@@ -37,9 +37,9 @@ void __init spear13xx_l2x0_init(void);
 void spear_restart(enum reboot_mode, const char *);
 
 void spear13xx_secondary_startup(void);
-void spear13xx_cpu_die(unsigned int cpu);
+void __cpuinit spear13xx_cpu_die(unsigned int cpu);
 
-extern const struct smp_operations spear13xx_smp_ops;
+extern struct smp_operations spear13xx_smp_ops;
 
 #ifdef CONFIG_MACH_SPEAR1310
 void __init spear1310_clk_init(void __iomem *misc_base, void __iomem *ras_base);

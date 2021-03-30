@@ -28,7 +28,7 @@
 #include "mb86a16.h"
 #include "mb86a16_priv.h"
 
-static unsigned int verbose = 5;
+unsigned int verbose = 5;
 module_param(verbose, int, 0644);
 
 #define ABS(x)		((x) < 0 ? (-x) : (x))
@@ -115,11 +115,9 @@ static int mb86a16_read(struct mb86a16_state *state, u8 reg, u8 *val)
 	};
 	ret = i2c_transfer(state->i2c_adap, msg, 2);
 	if (ret != 2) {
-		dprintk(verbose, MB86A16_ERROR, 1, "read error(reg=0x%02x, ret=%i)",
+		dprintk(verbose, MB86A16_ERROR, 1, "read error(reg=0x%02x, ret=0x%i)",
 			reg, ret);
 
-		if (ret < 0)
-			return ret;
 		return -EREMOTEIO;
 	}
 	*val = b1[0];
@@ -593,7 +591,7 @@ err:
 	return -EREMOTEIO;
 }
 
-static int mb86a16_read_status(struct dvb_frontend *fe, enum fe_status *status)
+static int mb86a16_read_status(struct dvb_frontend *fe, fe_status_t *status)
 {
 	u8 stat, stat2;
 	struct mb86a16_state *state = fe->demodulator_priv;
@@ -1562,8 +1560,7 @@ err:
 	return -EREMOTEIO;
 }
 
-static int mb86a16_send_diseqc_burst(struct dvb_frontend *fe,
-				     enum fe_sec_mini_cmd burst)
+static int mb86a16_send_diseqc_burst(struct dvb_frontend *fe, fe_sec_mini_cmd_t burst)
 {
 	struct mb86a16_state *state = fe->demodulator_priv;
 
@@ -1591,7 +1588,7 @@ err:
 	return -EREMOTEIO;
 }
 
-static int mb86a16_set_tone(struct dvb_frontend *fe, enum fe_sec_tone_mode tone)
+static int mb86a16_set_tone(struct dvb_frontend *fe, fe_sec_tone_mode_t tone)
 {
 	struct mb86a16_state *state = fe->demodulator_priv;
 

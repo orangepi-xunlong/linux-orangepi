@@ -23,7 +23,6 @@
 #include <linux/kbuild.h>
 
 #include <asm/ptrace.h>
-#include <asm/traps.h>
 #include <asm/uaccess.h>
 
 int main(void)
@@ -78,27 +77,19 @@ int main(void)
 	DEFINE(TASK_THREAD_INFO, offsetof (struct task_struct, stack));
 	DEFINE(TASK_STRUCT_SIZE, sizeof (struct task_struct));
 
-	/* offsets in thread_info struct */
-	OFFSET(TI_TASK, thread_info, task);
-	OFFSET(TI_FLAGS, thread_info, flags);
-	OFFSET(TI_STSTUS, thread_info, status);
-	OFFSET(TI_CPU, thread_info, cpu);
-	OFFSET(TI_PRE_COUNT, thread_info, preempt_count);
-	OFFSET(TI_ADDR_LIMIT, thread_info, addr_limit);
-
 	/* struct thread_info (offset from start_struct) */
 	DEFINE(THREAD_RA, offsetof (struct task_struct, thread.ra));
 	DEFINE(THREAD_SP, offsetof (struct task_struct, thread.sp));
 	DEFINE(THREAD_CPENABLE, offsetof (struct thread_info, cpenable));
 #if XTENSA_HAVE_COPROCESSORS
-	DEFINE(THREAD_XTREGS_CP0, offsetof(struct thread_info, xtregs_cp.cp0));
-	DEFINE(THREAD_XTREGS_CP1, offsetof(struct thread_info, xtregs_cp.cp1));
-	DEFINE(THREAD_XTREGS_CP2, offsetof(struct thread_info, xtregs_cp.cp2));
-	DEFINE(THREAD_XTREGS_CP3, offsetof(struct thread_info, xtregs_cp.cp3));
-	DEFINE(THREAD_XTREGS_CP4, offsetof(struct thread_info, xtregs_cp.cp4));
-	DEFINE(THREAD_XTREGS_CP5, offsetof(struct thread_info, xtregs_cp.cp5));
-	DEFINE(THREAD_XTREGS_CP6, offsetof(struct thread_info, xtregs_cp.cp6));
-	DEFINE(THREAD_XTREGS_CP7, offsetof(struct thread_info, xtregs_cp.cp7));
+	DEFINE(THREAD_XTREGS_CP0, offsetof (struct thread_info, xtregs_cp));
+	DEFINE(THREAD_XTREGS_CP1, offsetof (struct thread_info, xtregs_cp));
+	DEFINE(THREAD_XTREGS_CP2, offsetof (struct thread_info, xtregs_cp));
+	DEFINE(THREAD_XTREGS_CP3, offsetof (struct thread_info, xtregs_cp));
+	DEFINE(THREAD_XTREGS_CP4, offsetof (struct thread_info, xtregs_cp));
+	DEFINE(THREAD_XTREGS_CP5, offsetof (struct thread_info, xtregs_cp));
+	DEFINE(THREAD_XTREGS_CP6, offsetof (struct thread_info, xtregs_cp));
+	DEFINE(THREAD_XTREGS_CP7, offsetof (struct thread_info, xtregs_cp));
 #endif
 	DEFINE(THREAD_XTREGS_USER, offsetof (struct thread_info, xtregs_user));
 	DEFINE(XTREGS_USER_SIZE, sizeof(xtregs_user_t));
@@ -117,17 +108,6 @@ int main(void)
 	DEFINE(_CLONE_VM, CLONE_VM);
 	DEFINE(_CLONE_UNTRACED, CLONE_UNTRACED);
 	DEFINE(PG_ARCH_1, PG_arch_1);
-
-	/* struct debug_table */
-	DEFINE(DT_DEBUG_EXCEPTION,
-	       offsetof(struct debug_table, debug_exception));
-	DEFINE(DT_DEBUG_SAVE, offsetof(struct debug_table, debug_save));
-#ifdef CONFIG_HAVE_HW_BREAKPOINT
-	DEFINE(DT_DBREAKC_SAVE, offsetof(struct debug_table, dbreakc_save));
-	DEFINE(DT_ICOUNT_SAVE, offsetof(struct debug_table, icount_save));
-	DEFINE(DT_ICOUNT_LEVEL_SAVE,
-	       offsetof(struct debug_table, icount_level_save));
-#endif
 
 	return 0;
 }

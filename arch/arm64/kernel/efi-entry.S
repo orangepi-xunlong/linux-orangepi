@@ -29,13 +29,12 @@
 	 * we want to be. The kernel image wants to be placed at TEXT_OFFSET
 	 * from start of RAM.
 	 */
-ENTRY(entry)
+ENTRY(efi_stub_entry)
 	/*
 	 * Create a stack frame to save FP/LR with extra space
 	 * for image_addr variable passed to efi_entry().
 	 */
 	stp	x29, x30, [sp, #-32]!
-	mov	x29, sp
 
 	/*
 	 * Call efi_entry to do the real work.
@@ -55,18 +54,18 @@ ENTRY(entry)
 	b.eq	efi_load_fail
 
 	/*
-	 * efi_entry() will have copied the kernel image if necessary and we
-	 * return here with device tree address in x0 and the kernel entry
-	 * point stored at *image_addr. Save those values in registers which
-	 * are callee preserved.
+	 * efi_entry() will have relocated the kernel image if necessary
+	 * and we return here with device tree address in x0 and the kernel
+	 * entry point stored at *image_addr. Save those values in registers
+	 * which are callee preserved.
 	 */
 	mov	x20, x0		// DTB address
 	ldr	x0, [sp, #16]	// relocated _text address
-	ldr	w21, =stext_offset
-	add	x21, x0, x21
+	mov	x21, x0
 
 	/*
-	 * Calculate size of the kernel Image (same for original and copy).
+	 * Flush dcache covering current runtime addresses
+	 * of kernel text/data. Then flush all of icache.
 	 */
 	adrp	x1, _text
 	add	x1, x1, #:lo12:_text
@@ -74,27 +73,13 @@ ENTRY(entry)
 	add	x2, x2, #:lo12:_edata
 	sub	x1, x2, x1
 
-	/*
-	 * Flush the copied Image to the PoC, and ensure it is not shadowed by
-	 * stale icache entries from before relocation.
-	 */
 	bl	__flush_dcache_area
 	ic	ialluis
 
-	/*
-	 * Ensure that the rest of this function (in the original Image) is
-	 * visible when the caches are disabled. The I-cache can't have stale
-	 * entries for the VA range of the current image, so no maintenance is
-	 * necessary.
-	 */
-	adr	x0, entry
-	adr	x1, entry_end
-	sub	x1, x1, x0
-	bl	__flush_dcache_area
-
 	/* Turn off Dcache and MMU */
 	mrs	x0, CurrentEL
-	cmp	x0, #CurrentEL_EL2
+	cmp	x0, #PSR_MODE_EL2t
+	ccmp	x0, #PSR_MODE_EL2h, #0x4, ne
 	b.ne	1f
 	mrs	x0, sctlr_el2
 	bic	x0, x0, #1 << 0	// clear SCTLR.M
@@ -121,5 +106,4 @@ efi_load_fail:
 	ldp	x29, x30, [sp], #32
 	ret
 
-entry_end:
-ENDPROC(entry)
+ENDPROC(efi_stub_entry)

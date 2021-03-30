@@ -10,6 +10,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/device.h>
 #include <linux/hw_random.h>
@@ -95,8 +96,8 @@ static int octeon_rng_probe(struct platform_device *pdev)
 
 	rng->ops = ops;
 
-	platform_set_drvdata(pdev, &rng->ops);
-	ret = devm_hwrng_register(&pdev->dev, &rng->ops);
+	dev_set_drvdata(&pdev->dev, &rng->ops);
+	ret = hwrng_register(&rng->ops);
 	if (ret)
 		return -ENOENT;
 
@@ -105,11 +106,22 @@ static int octeon_rng_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static int __exit octeon_rng_remove(struct platform_device *pdev)
+{
+	struct hwrng *rng = dev_get_drvdata(&pdev->dev);
+
+	hwrng_unregister(rng);
+
+	return 0;
+}
+
 static struct platform_driver octeon_rng_driver = {
 	.driver = {
 		.name		= "octeon_rng",
+		.owner		= THIS_MODULE,
 	},
 	.probe		= octeon_rng_probe,
+	.remove		= __exit_p(octeon_rng_remove),
 };
 
 module_platform_driver(octeon_rng_driver);

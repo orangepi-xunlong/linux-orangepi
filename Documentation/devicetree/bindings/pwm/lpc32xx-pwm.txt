@@ -6,12 +6,7 @@ Required properties:
 
 Examples:
 
-pwm@4005c000 {
+pwm@0x4005C000 {
 	compatible = "nxp,lpc3220-pwm";
-	reg = <0x4005c000 0x4>;
-};
-
-pwm@4005c004 {
-	compatible = "nxp,lpc3220-pwm";
-	reg = <0x4005c004 0x4>;
+	reg = <0x4005C000 0x8>;
 };

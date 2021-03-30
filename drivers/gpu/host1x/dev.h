@@ -27,7 +27,6 @@
 #include "job.h"
 
 struct host1x_syncpt;
-struct host1x_syncpt_base;
 struct host1x_channel;
 struct host1x_cdma;
 struct host1x_job;
@@ -45,7 +44,7 @@ struct host1x_cdma_ops {
 	void (*start)(struct host1x_cdma *cdma);
 	void (*stop)(struct host1x_cdma *cdma);
 	void (*flush)(struct  host1x_cdma *cdma);
-	int (*timeout_init)(struct host1x_cdma *cdma, unsigned int syncpt);
+	int (*timeout_init)(struct host1x_cdma *cdma, u32 syncpt_id);
 	void (*timeout_destroy)(struct host1x_cdma *cdma);
 	void (*freeze)(struct host1x_cdma *cdma);
 	void (*resume)(struct host1x_cdma *cdma, u32 getptr);
@@ -74,7 +73,7 @@ struct host1x_syncpt_ops {
 	void (*restore_wait_base)(struct host1x_syncpt *syncpt);
 	void (*load_wait_base)(struct host1x_syncpt *syncpt);
 	u32 (*load)(struct host1x_syncpt *syncpt);
-	int (*cpu_incr)(struct host1x_syncpt *syncpt);
+	void (*cpu_incr)(struct host1x_syncpt *syncpt);
 	int (*patch_wait)(struct host1x_syncpt *syncpt, void *patch_addr);
 };
 
@@ -82,21 +81,20 @@ struct host1x_intr_ops {
 	int (*init_host_sync)(struct host1x *host, u32 cpm,
 		void (*syncpt_thresh_work)(struct work_struct *work));
 	void (*set_syncpt_threshold)(
-		struct host1x *host, unsigned int id, u32 thresh);
-	void (*enable_syncpt_intr)(struct host1x *host, unsigned int id);
-	void (*disable_syncpt_intr)(struct host1x *host, unsigned int id);
+		struct host1x *host, u32 id, u32 thresh);
+	void (*enable_syncpt_intr)(struct host1x *host, u32 id);
+	void (*disable_syncpt_intr)(struct host1x *host, u32 id);
 	void (*disable_all_syncpt_intrs)(struct host1x *host);
 	int (*free_syncpt_irq)(struct host1x *host);
 };
 
 struct host1x_info {
-	unsigned int nb_channels; /* host1x: number of channels supported */
-	unsigned int nb_pts; /* host1x: number of syncpoints supported */
-	unsigned int nb_bases; /* host1x: number of syncpoint bases supported */
-	unsigned int nb_mlocks; /* host1x: number of mlocks supported */
-	int (*init)(struct host1x *host1x); /* initialize per SoC ops */
-	unsigned int sync_offset; /* offset of syncpoint registers */
-	u64 dma_mask; /* mask of addressable memory */
+	int	nb_channels;		/* host1x: num channels supported */
+	int	nb_pts;			/* host1x: num syncpoints supported */
+	int	nb_bases;		/* host1x: num syncpoints supported */
+	int	nb_mlocks;		/* host1x: number of mlocks */
+	int	(*init)(struct host1x *); /* initialize per SoC ops */
+	int	sync_offset;
 };
 
 struct host1x {
@@ -104,11 +102,11 @@ struct host1x {
 
 	void __iomem *regs;
 	struct host1x_syncpt *syncpt;
-	struct host1x_syncpt_base *bases;
 	struct device *dev;
 	struct clk *clk;
 
 	struct mutex intr_mutex;
+	struct workqueue_struct *intr_wq;
 	int intr_syncpt_irq;
 
 	const struct host1x_syncpt_ops *syncpt_op;
@@ -127,10 +125,7 @@ struct host1x {
 
 	struct dentry *debugfs;
 
-	struct mutex devices_lock;
-	struct list_head devices;
-
-	struct list_head list;
+	void *drm_data;
 };
 
 void host1x_sync_writel(struct host1x *host1x, u32 r, u32 v);
@@ -162,10 +157,10 @@ static inline u32 host1x_hw_syncpt_load(struct host1x *host,
 	return host->syncpt_op->load(sp);
 }
 
-static inline int host1x_hw_syncpt_cpu_incr(struct host1x *host,
-					    struct host1x_syncpt *sp)
+static inline void host1x_hw_syncpt_cpu_incr(struct host1x *host,
+					     struct host1x_syncpt *sp)
 {
-	return host->syncpt_op->cpu_incr(sp);
+	host->syncpt_op->cpu_incr(sp);
 }
 
 static inline int host1x_hw_syncpt_patch_wait(struct host1x *host,
@@ -182,20 +177,19 @@ static inline int host1x_hw_intr_init_host_sync(struct host1x *host, u32 cpm,
 }
 
 static inline void host1x_hw_intr_set_syncpt_threshold(struct host1x *host,
-						       unsigned int id,
-						       u32 thresh)
+						       u32 id, u32 thresh)
 {
 	host->intr_op->set_syncpt_threshold(host, id, thresh);
 }
 
 static inline void host1x_hw_intr_enable_syncpt_intr(struct host1x *host,
-						     unsigned int id)
+						     u32 id)
 {
 	host->intr_op->enable_syncpt_intr(host, id);
 }
 
 static inline void host1x_hw_intr_disable_syncpt_intr(struct host1x *host,
-						      unsigned int id)
+						      u32 id)
 {
 	host->intr_op->disable_syncpt_intr(host, id);
 }
@@ -212,9 +206,9 @@ static inline int host1x_hw_intr_free_syncpt_irq(struct host1x *host)
 
 static inline int host1x_hw_channel_init(struct host1x *host,
 					 struct host1x_channel *channel,
-					 unsigned int id)
+					 int chid)
 {
-	return host->channel_op->init(channel, host, id);
+	return host->channel_op->init(channel, host, chid);
 }
 
 static inline int host1x_hw_channel_submit(struct host1x *host,
@@ -243,9 +237,9 @@ static inline void host1x_hw_cdma_flush(struct host1x *host,
 
 static inline int host1x_hw_cdma_timeout_init(struct host1x *host,
 					      struct host1x_cdma *cdma,
-					      unsigned int syncpt)
+					      u32 syncpt_id)
 {
-	return host->cdma_op->timeout_init(cdma, syncpt);
+	return host->cdma_op->timeout_init(cdma, syncpt_id);
 }
 
 static inline void host1x_hw_cdma_timeout_destroy(struct host1x *host,
@@ -307,6 +301,8 @@ static inline void host1x_hw_show_mlocks(struct host1x *host, struct output *o)
 	host->debug_op->show_mlocks(host, o);
 }
 
-extern struct platform_driver tegra_mipi_driver;
+extern struct platform_driver tegra_hdmi_driver;
+extern struct platform_driver tegra_dc_driver;
+extern struct platform_driver tegra_gr2d_driver;
 
 #endif

@@ -4,17 +4,7 @@ KVM Lock Overview
 1. Acquisition Orders
 ---------------------
 
-The acquisition orders for mutexes are as follows:
-
-- kvm->lock is taken outside vcpu->mutex
-
-- kvm->lock is taken outside kvm->slots_lock and kvm->irq_lock
-
-- kvm->slots_lock is taken outside kvm->irq_lock, though acquiring
-  them together is quite rare.
-
-For spinlocks, kvm_lock is taken outside kvm->mmu_lock.  Everything
-else is a leaf: no other lock is taken inside the critical sections.
+(to be written)
 
 2: Exception
 ------------
@@ -99,7 +89,7 @@ In mmu_spte_clear_track_bits():
    old_spte = *spte;
 
    /* 'if' condition is satisfied. */
-   if (old_spte.Accessed == 1 &&
+   if (old_spte.Accssed == 1 &&
         old_spte.W == 0)
       spte = 0ull;
                                          on fast page fault path:
@@ -112,7 +102,7 @@ In mmu_spte_clear_track_bits():
       old_spte = xchg(spte, 0ull)
 
 
-   if (old_spte.Accessed == 1)
+   if (old_spte.Accssed == 1)
       kvm_set_pfn_accessed(spte.pfn);
    if (old_spte.Dirty == 1)
       kvm_set_pfn_dirty(spte.pfn);
@@ -122,7 +112,7 @@ The Dirty bit is lost in this case.
 
 In order to avoid this kind of issue, we always treat the spte as "volatile"
 if it can be updated out of mmu-lock, see spte_has_volatile_bits(), it means,
-the spte is always atomically updated in this case.
+the spte is always atomicly updated in this case.
 
 3): flush tlbs due to spte updated
 If the spte is updated from writable to readonly, we should flush all TLBs,
@@ -135,7 +125,7 @@ be flushed caused by this reason in mmu_spte_update() since this is a common
 function to update spte (present -> present).
 
 Since the spte is "volatile" if it can be updated out of mmu-lock, we always
-atomically update the spte, the race caused by fast page fault can be avoided,
+atomicly update the spte, the race caused by fast page fault can be avoided,
 See the comments in spte_has_volatile_bits() and mmu_spte_update().
 
 3. Reference
@@ -165,26 +155,3 @@ Type:		spinlock_t
 Arch:		any
 Protects:	-shadow page/shadow tlb entry
 Comment:	it is a spinlock since it is used in mmu notifier.
-
-Name:		kvm->srcu
-Type:		srcu lock
-Arch:		any
-Protects:	- kvm->memslots
-		- kvm->buses
-Comment:	The srcu read lock must be held while accessing memslots (e.g.
-		when using gfn_to_* functions) and while accessing in-kernel
-		MMIO/PIO address->device structure mapping (kvm->buses).
-		The srcu index can be stored in kvm_vcpu->srcu_idx per vcpu
-		if it is needed by multiple functions.
-
-Name:		blocked_vcpu_on_cpu_lock
-Type:		spinlock_t
-Arch:		x86
-Protects:	blocked_vcpu_on_cpu
-Comment:	This is a per-CPU lock and it is used for VT-d posted-interrupts.
-		When VT-d posted-interrupts is supported and the VM has assigned
-		devices, we put the blocked vCPU on the list blocked_vcpu_on_cpu
-		protected by blocked_vcpu_on_cpu_lock, when VT-d hardware issues
-		wakeup notification event since external interrupts from the
-		assigned devices happens, we will find the vCPU on the list to
-		wakeup.

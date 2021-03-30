@@ -334,7 +334,8 @@ int hfsplus_asc2uni(struct super_block *sb,
  * Composed unicode characters are decomposed and case-folding is performed
  * if the appropriate bits are (un)set on the superblock.
  */
-int hfsplus_hash_dentry(const struct dentry *dentry, struct qstr *str)
+int hfsplus_hash_dentry(const struct dentry *dentry, const struct inode *inode,
+		struct qstr *str)
 {
 	struct super_block *sb = dentry->d_sb;
 	const char *astr;
@@ -346,7 +347,7 @@ int hfsplus_hash_dentry(const struct dentry *dentry, struct qstr *str)
 
 	casefold = test_bit(HFSPLUS_SB_CASEFOLD, &HFSPLUS_SB(sb)->flags);
 	decompose = !test_bit(HFSPLUS_SB_NODECOMPOSE, &HFSPLUS_SB(sb)->flags);
-	hash = init_name_hash(dentry);
+	hash = init_name_hash();
 	astr = str->name;
 	len = str->len;
 	while (len > 0) {
@@ -385,10 +386,12 @@ int hfsplus_hash_dentry(const struct dentry *dentry, struct qstr *str)
  * Composed unicode characters are decomposed and case-folding is performed
  * if the appropriate bits are (un)set on the superblock.
  */
-int hfsplus_compare_dentry(const struct dentry *dentry,
+int hfsplus_compare_dentry(const struct dentry *parent,
+		const struct inode *pinode,
+		const struct dentry *dentry, const struct inode *inode,
 		unsigned int len, const char *str, const struct qstr *name)
 {
-	struct super_block *sb = dentry->d_sb;
+	struct super_block *sb = parent->d_sb;
 	int casefold, decompose, size;
 	int dsize1, dsize2, len1, len2;
 	const u16 *dstr1, *dstr2;

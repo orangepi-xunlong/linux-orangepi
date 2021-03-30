@@ -1,14 +1,17 @@
 /*
- * nand_blk.c for  SUNXI NAND .
- *
- * Copyright (C) 2016 Allwinner.
- *
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2.  This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
- */
-
+*********************************************************************************************************
+*											        eBIOS
+*						            the Easy Portable/Player Develop Kits
+*									           dma sub system
+*
+*						        (c) Copyright 2006-2008, David China
+*											All	Rights Reserved
+*
+* File    : clk_for_nand.c
+* By      : Richard
+* Version : V1.00
+*********************************************************************************************************
+*/
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/module.h>
@@ -27,7 +30,7 @@
 #include <linux/timer.h>
 #include <linux/delay.h>
 #include <linux/mutex.h>
-/*#include <linux/sys_config.h>*/
+#include <linux/sys_config.h>
 #include <linux/dma-mapping.h>
 #include <linux/wait.h>
 #include <linux/sched.h>
@@ -38,7 +41,6 @@
 #include "nand_blk.h"
 #include <linux/regulator/consumer.h>
 #include <linux/of.h>
-#include <linux/sunxi-sid.h>
 
 #ifdef CONFIG_DMA_ENGINE
 #include <linux/dmaengine.h>
@@ -46,15 +48,10 @@
 #include <linux/dma/sunxi-dma.h>
 #endif
 
-#define  NAND_DRV_VERSION_0		0x03
-#define  NAND_DRV_VERSION_1		0x5018
-#define  NAND_DRV_DATE			0x20180313
-#define  NAND_DRV_TIME			0x16891449
-/*
- *1689--AW1689--A64
- *14--uboot2014
- *49--linux4.9
-*/
+#define  NAND_DRV_VERSION_0		0x2
+#define  NAND_DRV_VERSION_1		0x34
+#define  NAND_DRV_DATE			0x20160111
+#define  NAND_DRV_TIME			0x1726
 
 #define GPIO_BASE_ADDR			0x01c20800
 #define CCMU_BASE_ADDR			0x01c20000
@@ -225,17 +222,14 @@ int NAND_GetClk(__u32 nand_index, __u32 *pnand_clk0, __u32 *pnand_clk1)
 
 void eLIBs_CleanFlushDCacheRegion_nand(void *adr, size_t bytes)
 {
-
+#if 0
+	__flush_dcache_area(adr, bytes + (1 << 5) * 2 - 2);
+#endif
 }
 
 __s32 NAND_CleanFlushDCacheRegion(void *buff_addr, __u32 len)
 {
 	eLIBs_CleanFlushDCacheRegion_nand((void *)buff_addr, (size_t) len);
-	return 0;
-}
-
-__s32 NAND_InvaildDCacheRegion(__u32 rw, __u32 buff_addr, __u32 len)
-{
 	return 0;
 }
 
@@ -261,13 +255,10 @@ void *NAND_DMASingleUnmap(__u32 rw, void *buff_addr, __u32 len)
 {
 	void *mem_addr = buff_addr;
 
-	if (rw == 1) {
-		dma_unmap_single(ndfc_dev, (dma_addr_t) mem_addr, len,
-				 DMA_TO_DEVICE);
-	} else {
-		dma_unmap_single(ndfc_dev, (dma_addr_t) mem_addr, len,
-				 DMA_BIDIRECTIONAL);
-	}
+	if (rw == 1)
+		dma_unmap_single(ndfc_dev, (dma_addr_t) mem_addr, len, DMA_TO_DEVICE);
+	else
+		dma_unmap_single(ndfc_dev, (dma_addr_t) mem_addr, len, DMA_BIDIRECTIONAL);
 
 	return mem_addr;
 }
@@ -294,6 +285,7 @@ __s32 NAND_PIORequest(__u32 nand_index)
 
 void NAND_PIORelease(__u32 nand_index)
 {
+
 	struct pinctrl *pinctrl = NULL;
 
 	pinctrl = pinctrl_get_select(ndfc_dev, "sleep");
@@ -379,17 +371,10 @@ int nand_dma_config_start(__u32 rw, dma_addr_t addr, __u32 length)
 	dma_conf.dst_addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
 	dma_conf.src_maxburst = 1;
 	dma_conf.dst_maxburst = 1;
-	dma_conf.slave_id =
-	    rw ? sunxi_slave_id(DRQDST_NAND0,
-				DRQSRC_SDRAM) : sunxi_slave_id(DRQDST_SDRAM,
-							       DRQSRC_NAND0);
+	dma_conf.slave_id = rw ? sunxi_slave_id(DRQDST_NAND0, DRQSRC_SDRAM) : sunxi_slave_id(DRQDST_SDRAM, DRQSRC_NAND0);
 	dmaengine_slave_config(dma_hdl, &dma_conf);
 
-	dma_desc = dmaengine_prep_slave_single(dma_hdl, addr, length,
-					       (rw ? DMA_TO_DEVICE :
-						DMA_FROM_DEVICE),
-					       DMA_PREP_INTERRUPT |
-					       DMA_CTRL_ACK);
+	dma_desc = dmaengine_prep_slave_single(dma_hdl, addr, length, (rw ? DMA_TO_DEVICE : DMA_FROM_DEVICE), DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
 	if (!dma_desc) {
 		printk("dmaengine prepare failed!\n");
 		return -1;
@@ -592,6 +577,11 @@ int NAND_ReleaseDMA(__u32 nand_index)
 *****************************************************************************/
 __u32 NAND_GetNdfcVersion(void)
 {
+	/*
+	   0:
+	   1: A31/A31s/A21/A23
+	   2:
+	 */
 	return 1;
 }
 
@@ -611,7 +601,88 @@ void *NAND_GetIOBaseAddrCH1(void)
 {
 	return NDFC1_BASE_ADDR;
 }
+#if 0
+/*****************************************************************************
+*Name         :
+*Description  :
+*Parameter    :
+*Return       :
+*Note         :
+*****************************************************************************/
+__u32 nand_support_two_plane(void)
+{
+#if SUPPORT_TWO_PLANE
+	return 1;
+#else
+	return 0;
+#endif
+}
+__u32 nand_support_vertical_interleave(void)
+{
+#if SUPPORT_VERTICAL_INTERLEAVE
+	return 1;
+#else
+	return 0;
+#endif
+}
 
+__u32 nand_support_dual_channel(void)
+{
+#if SUPPORT_DUAL_CHANNEL
+	return 1;
+#else
+	return 0;
+#endif
+}
+
+/*****************************************************************************
+*Name         :
+*Description  :
+*Parameter    :
+*Return       :
+*Note         :
+*****************************************************************************/
+__u32 nand_wait_rb_before(void)
+{
+#if WAIT_RB_BEFORE
+	return 1;
+#else
+	return 0;
+#endif
+}
+
+/*****************************************************************************
+*Name         :
+*Description  :
+*Parameter    :
+*Return       :
+*Note         :
+*****************************************************************************/
+__u32 nand_wait_rb_mode(void)
+{
+#if WAIT_RB_INTERRRUPT
+	return 1;
+#else
+	return 0;
+#endif
+}
+
+/*****************************************************************************
+*Name         :
+*Description  :
+*Parameter    :
+*Return       :
+*Note         :
+*****************************************************************************/
+__u32 nand_wait_dma_mode(void)
+{
+#if WAIT_DMA_INTERRRUPT
+	return 1;
+#else
+	return 0;
+#endif
+}
+#endif
 /*****************************************************************************
 *Name         :
 *Description  :
@@ -676,11 +747,19 @@ __s32 nand_dma_wake_up(__u32 no)
 
 __u32 nand_dma_callback(void *para)
 {
+#if 0
+	wake_up(&NAND_DMA_WAIT_CH0);
+	printk("dma transfer finish\n");
+	if (para == NULL)
+		printk("1n2\n");
+
+#endif
 	return 0;
 }
 
 int NAND_get_storagetype(void)
 {
+
 	return 0;
 
 }
@@ -787,13 +866,16 @@ int NAND_ReleaseVoltage(void)
 
 int NAND_IS_Secure_sys(void)
 {
+#if 0
 	if (sunxi_soc_is_secure()) {
-		NAND_Print_DBG("secure system\n");
-		return 1;
+		printk("secure system\n");
+		return 1;	/*secure */
 	} else {
-		NAND_Print_DBG("non secure\n");
-		return 0;
+		printk("non secure\n");
+		return 0;	/*non secure */
 	}
+#endif
+	return 0;
 }
 
 __u32 NAND_Print_level(void)
@@ -847,45 +929,29 @@ void NAND_Print_Version(void)
 	       val[1], val[2], val[3]);
 }
 
-int NAND_Get_Version(void)
-{
-    return NAND_DRV_DATE;
-}
-
 void Dump_Gpio_Reg_Show(void)
 {
 	void __iomem *gpio_ptr = ioremap(GPIO_BASE_ADDR, 0x300);
 
-	printk("Reg 0x01c20848: 0x%x\n",
-	       *((volatile __u32 *)gpio_ptr + 18));
-	printk("Reg 0x01c2084c: 0x%x\n",
-	       *((volatile __u32 *)gpio_ptr + 19));
-	printk("Reg 0x01c20850: 0x%x\n",
-	       *((volatile __u32 *)gpio_ptr + 20));
-	printk("Reg 0x01c2085c: 0x%x\n",
-	       *((volatile __u32 *)gpio_ptr + 23));
-	printk("Reg 0x01c20864: 0x%x\n",
-	       *((volatile __u32 *)gpio_ptr + 24));
-	printk("Reg 0x01c20864: 0x%x\n",
-	       *((volatile __u32 *)gpio_ptr + 25));
-	printk("Reg 0x01c20864: 0x%x\n",
-	       *((volatile __u32 *)gpio_ptr + 26));
+	printk("Reg 0x01c20848: 0x%x\n", *((volatile __u32 *)gpio_ptr + 18));
+	printk("Reg 0x01c2084c: 0x%x\n", *((volatile __u32 *)gpio_ptr + 19));
+	printk("Reg 0x01c20850: 0x%x\n", *((volatile __u32 *)gpio_ptr + 20));
+	printk("Reg 0x01c2085c: 0x%x\n", *((volatile __u32 *)gpio_ptr + 23));
+	printk("Reg 0x01c20864: 0x%x\n", *((volatile __u32 *)gpio_ptr + 24));
+	printk("Reg 0x01c20864: 0x%x\n", *((volatile __u32 *)gpio_ptr + 25));
+	printk("Reg 0x01c20864: 0x%x\n", *((volatile __u32 *)gpio_ptr + 26));
 
 	iounmap(gpio_ptr);
-
 }
 
 void Dump_Ccmu_Reg_Show(void)
 {
 	void __iomem *ccmu_ptr = ioremap(CCMU_BASE_ADDR, 0x300);
 
-	printk("Reg 0x01c20028: 0x%x\n",
-	       *((volatile __u32 *)ccmu_ptr + 10));
-	printk(KERN_EMERG "Reg 0x01c20080: 0x%x\n",
-	       *((volatile __u32 *)ccmu_ptr + 32));
+	printk("Reg 0x01c20028: 0x%x\n", *((volatile __u32 *)ccmu_ptr + 10));
+	printk("Reg 0x01c20080: 0x%x\n", *((volatile __u32 *)ccmu_ptr + 32));
 
 	iounmap(ccmu_ptr);
-
 }
 
 void nand_cond_resched(void)

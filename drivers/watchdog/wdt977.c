@@ -507,3 +507,4 @@ module_exit(wd977_exit);
 MODULE_AUTHOR("Woody Suwalski <woodys@xandros.com>");
 MODULE_DESCRIPTION("W83977AF Watchdog driver");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);

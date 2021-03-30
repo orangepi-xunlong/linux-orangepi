@@ -105,7 +105,7 @@ snd_emu10k1_synth_get_voice(struct snd_emu10k1 *hw)
 			vp = &emu->voices[best[i].voice];
 			if ((ch = vp->ch) < 0) {
 				/*
-				dev_warn(emu->card->dev,
+				printk(KERN_WARNING
 				       "synth_get_voice: ch < 0 (%d) ??", i);
 				*/
 				continue;
@@ -337,7 +337,7 @@ start_voice(struct snd_emux_voice *vp)
 		return -EINVAL;
 	emem->map_locked++;
 	if (snd_emu10k1_memblk_map(hw, emem) < 0) {
-		/* dev_err(hw->card->devK, "emu: cannot map!\n"); */
+		/* printk(KERN_ERR "emu: cannot map!\n"); */
 		return -ENOMEM;
 	}
 	mapped_offset = snd_emu10k1_memblk_offset(emem) >> 1;
@@ -415,7 +415,7 @@ start_voice(struct snd_emux_voice *vp)
 	snd_emu10k1_ptr_write(hw, Z2, ch, 0);
 
 	/* invalidate maps */
-	temp = (hw->silent_page.addr << hw->address_mode) | (hw->address_mode ? MAP_PTI_MASK1 : MAP_PTI_MASK0);
+	temp = (hw->silent_page.addr << 1) | MAP_PTI_MASK;
 	snd_emu10k1_ptr_write(hw, MAPA, ch, temp);
 	snd_emu10k1_ptr_write(hw, MAPB, ch, temp);
 #if 0
@@ -436,7 +436,7 @@ start_voice(struct snd_emux_voice *vp)
 		snd_emu10k1_ptr_write(hw, CDF, ch, sample);
 
 		/* invalidate maps */
-		temp = ((unsigned int)hw->silent_page.addr << hw_address_mode) | (hw->address_mode ? MAP_PTI_MASK1 : MAP_PTI_MASK0);
+		temp = ((unsigned int)hw->silent_page.addr << 1) | MAP_PTI_MASK;
 		snd_emu10k1_ptr_write(hw, MAPA, ch, temp);
 		snd_emu10k1_ptr_write(hw, MAPB, ch, temp);
 		

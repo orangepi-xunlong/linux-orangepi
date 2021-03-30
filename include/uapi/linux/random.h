@@ -34,14 +34,17 @@
 /* Clear the entropy pool and associated counters.  (Superuser only.) */
 #define RNDCLEARPOOL	_IO( 'R', 0x06 )
 
-/* Reseed CRNG.  (Superuser only.) */
-#define RNDRESEEDCRNG	_IO( 'R', 0x07 )
-
 struct rand_pool_info {
 	int	entropy_count;
 	int	buf_size;
 	__u32	buf[0];
 };
+
+struct rnd_state {
+	__u32 s1, s2, s3;
+};
+
+/* Exported functions */
 
 /*
  * Flags for getrandom(2)

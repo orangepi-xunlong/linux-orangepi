@@ -43,7 +43,7 @@
 
 #define UNSET (-1U)
 
-#define PREFIX (t->i2c->dev.driver->name)
+#define PREFIX (t->i2c->driver->driver.name)
 
 /*
  * Driver modprobe parameters
@@ -134,10 +134,6 @@ struct tuner {
 	unsigned int        type; /* chip type id */
 	void                *config;
 	const char          *name;
-
-#if defined(CONFIG_MEDIA_CONTROLLER)
-	struct media_pad	pad[TUNER_NUM_PADS];
-#endif
 };
 
 /*
@@ -251,7 +247,7 @@ static const struct analog_demod_ops tuner_analog_ops = {
 /**
  * set_type - Sets the tuner type for a given device
  *
- * @c:			i2c_client descriptor
+ * @c:			i2c_client descriptoy
  * @type:		type of the tuner (e. g. tuner number)
  * @new_mode_mask:	Indicates if tuner supports TV and/or Radio
  * @new_config:		an optional parameter used by a few tuners to adjust
@@ -438,10 +434,6 @@ static void set_type(struct i2c_client *c, unsigned int type,
 		t->name = analog_ops->info.name;
 	}
 
-#ifdef CONFIG_MEDIA_CONTROLLER
-	t->sd.entity.name = t->name;
-#endif
-
 	tuner_dbg("type set to %s\n", t->name);
 
 	t->mode_mask = new_mode_mask;
@@ -460,7 +452,7 @@ static void set_type(struct i2c_client *c, unsigned int type,
 	}
 
 	tuner_dbg("%s %s I2C addr 0x%02x with type %d used for 0x%02x\n",
-		  c->adapter->name, c->dev.driver->name, c->addr << 1, type,
+		  c->adapter->name, c->driver->driver.name, c->addr << 1, type,
 		  t->mode_mask);
 	return;
 
@@ -564,7 +556,7 @@ static void tuner_lookup(struct i2c_adapter *adap,
 		int mode_mask;
 
 		if (pos->i2c->adapter != adap ||
-		    strcmp(pos->i2c->dev.driver->name, "tuner"))
+		    strcmp(pos->i2c->driver->driver.name, "tuner"))
 			continue;
 
 		mode_mask = pos->mode_mask;
@@ -600,9 +592,6 @@ static int tuner_probe(struct i2c_client *client,
 	struct tuner *t;
 	struct tuner *radio;
 	struct tuner *tv;
-#ifdef CONFIG_MEDIA_CONTROLLER
-	int ret;
-#endif
 
 	t = kzalloc(sizeof(struct tuner), GFP_KERNEL);
 	if (NULL == t)
@@ -612,7 +601,7 @@ static int tuner_probe(struct i2c_client *client,
 	t->name = "(tuner unset)";
 	t->type = UNSET;
 	t->audmode = V4L2_TUNER_MODE_STEREO;
-	t->standby = true;
+	t->standby = 1;
 	t->radio_freq = 87.5 * 16000;	/* Initial freq range */
 	t->tv_freq = 400 * 16; /* Sets freq to VHF High - needed for some PLL's to properly start */
 
@@ -695,35 +684,6 @@ static int tuner_probe(struct i2c_client *client,
 
 	/* Should be just before return */
 register_client:
-#if defined(CONFIG_MEDIA_CONTROLLER)
-	t->sd.entity.name = t->name;
-	/*
-	 * Handle the special case where the tuner has actually
-	 * two stages: the PLL to tune into a frequency and the
-	 * IF-PLL demodulator (tda988x).
-	 */
-	if (t->type == TUNER_TDA9887) {
-		t->pad[IF_VID_DEC_PAD_IF_INPUT].flags = MEDIA_PAD_FL_SINK;
-		t->pad[IF_VID_DEC_PAD_OUT].flags = MEDIA_PAD_FL_SOURCE;
-		ret = media_entity_pads_init(&t->sd.entity,
-					     IF_VID_DEC_PAD_NUM_PADS,
-					     &t->pad[0]);
-		t->sd.entity.function = MEDIA_ENT_F_IF_VID_DECODER;
-	} else {
-		t->pad[TUNER_PAD_RF_INPUT].flags = MEDIA_PAD_FL_SINK;
-		t->pad[TUNER_PAD_OUTPUT].flags = MEDIA_PAD_FL_SOURCE;
-		t->pad[TUNER_PAD_AUD_OUT].flags = MEDIA_PAD_FL_SOURCE;
-		ret = media_entity_pads_init(&t->sd.entity, TUNER_NUM_PADS,
-					     &t->pad[0]);
-		t->sd.entity.function = MEDIA_ENT_F_TUNER;
-	}
-
-	if (ret < 0) {
-		tuner_err("failed to initialize media entity!\n");
-		kfree(t);
-		return ret;
-	}
-#endif
 	/* Sets a default mode */
 	if (t->mode_mask & T_ANALOG_TV)
 		t->mode = V4L2_TUNER_ANALOG_TV;
@@ -1300,9 +1260,7 @@ static int tuner_suspend(struct device *dev)
 
 	tuner_dbg("suspend\n");
 
-	if (t->fe.ops.tuner_ops.suspend)
-		t->fe.ops.tuner_ops.suspend(&t->fe);
-	else if (!t->standby && analog_ops->standby)
+	if (!t->standby && analog_ops->standby)
 		analog_ops->standby(&t->fe);
 
 	return 0;
@@ -1315,9 +1273,7 @@ static int tuner_resume(struct device *dev)
 
 	tuner_dbg("resume\n");
 
-	if (t->fe.ops.tuner_ops.resume)
-		t->fe.ops.tuner_ops.resume(&t->fe);
-	else if (!t->standby)
+	if (!t->standby)
 		if (set_mode(t, t->mode) == 0)
 			set_freq(t, 0);
 
@@ -1345,6 +1301,7 @@ static int tuner_command(struct i2c_client *client, unsigned cmd, void *arg)
 
 static const struct v4l2_subdev_core_ops tuner_core_ops = {
 	.log_status = tuner_log_status,
+	.s_std = tuner_s_std,
 	.s_power = tuner_s_power,
 };
 
@@ -1358,14 +1315,9 @@ static const struct v4l2_subdev_tuner_ops tuner_tuner_ops = {
 	.s_config = tuner_s_config,
 };
 
-static const struct v4l2_subdev_video_ops tuner_video_ops = {
-	.s_std = tuner_s_std,
-};
-
 static const struct v4l2_subdev_ops tuner_ops = {
 	.core = &tuner_core_ops,
 	.tuner = &tuner_tuner_ops,
-	.video = &tuner_video_ops,
 };
 
 /*
@@ -1384,6 +1336,7 @@ MODULE_DEVICE_TABLE(i2c, tuner_id);
 
 static struct i2c_driver tuner_driver = {
 	.driver = {
+		.owner	= THIS_MODULE,
 		.name	= "tuner",
 		.pm	= &tuner_pm_ops,
 	},

@@ -5,6 +5,7 @@
  *  Support of BIGMEM added by Gerhard Wichert, Siemens AG, July 1999
  */
 
+#include <linux/module.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
@@ -136,7 +137,6 @@ page_table_range_init_count(unsigned long start, unsigned long end)
 
 	vaddr = start;
 	pgd_idx = pgd_index(vaddr);
-	pmd_idx = pmd_index(vaddr);
 
 	for ( ; (pgd_idx < PTRS_PER_PGD) && (vaddr != end); pgd_idx++) {
 		for (; (pmd_idx < PTRS_PER_PMD) && (vaddr != end);
@@ -283,7 +283,7 @@ kernel_physical_mapping_init(unsigned long start,
 	 */
 	mapping_iter = 1;
 
-	if (!boot_cpu_has(X86_FEATURE_PSE))
+	if (!cpu_has_pse)
 		use_pse = 0;
 
 repeat:
@@ -387,6 +387,7 @@ repeat:
 }
 
 pte_t *kmap_pte;
+pgprot_t kmap_prot;
 
 static inline pte_t *kmap_get_fixmap_pte(unsigned long vaddr)
 {
@@ -403,6 +404,8 @@ static void __init kmap_init(void)
 	 */
 	kmap_vstart = __fix_to_virt(FIX_KMAP_BEGIN);
 	kmap_pte = kmap_get_fixmap_pte(kmap_vstart);
+
+	kmap_prot = PAGE_KERNEL;
 }
 
 #ifdef CONFIG_HIGHMEM
@@ -430,7 +433,7 @@ void __init add_highpages_with_active_regions(int nid,
 	phys_addr_t start, end;
 	u64 i;
 
-	for_each_free_mem_range(i, nid, MEMBLOCK_NONE, &start, &end, NULL) {
+	for_each_free_mem_range(i, nid, &start, &end, NULL) {
 		unsigned long pfn = clamp_t(unsigned long, PFN_UP(start),
 					    start_pfn, end_pfn);
 		unsigned long e_pfn = clamp_t(unsigned long, PFN_DOWN(end),
@@ -534,7 +537,7 @@ static void __init pagetable_init(void)
 	permanent_kmaps_init(pgd_base);
 }
 
-pteval_t __supported_pte_mask __read_mostly = ~(_PAGE_NX | _PAGE_GLOBAL);
+pteval_t __supported_pte_mask __read_mostly = ~(_PAGE_NX | _PAGE_GLOBAL | _PAGE_IOMAP);
 EXPORT_SYMBOL_GPL(__supported_pte_mask);
 
 /* user-defined highmem size */
@@ -657,16 +660,18 @@ void __init initmem_init(void)
 		highstart_pfn = max_low_pfn;
 	printk(KERN_NOTICE "%ldMB HIGHMEM available.\n",
 		pages_to_mb(highend_pfn - highstart_pfn));
+	num_physpages = highend_pfn;
 	high_memory = (void *) __va(highstart_pfn * PAGE_SIZE - 1) + 1;
 #else
+	num_physpages = max_low_pfn;
 	high_memory = (void *) __va(max_low_pfn * PAGE_SIZE - 1) + 1;
 #endif
 
-	memblock_set_node(0, (phys_addr_t)ULLONG_MAX, &memblock.memory, 0);
+	memblock_set_node(0, (phys_addr_t)ULLONG_MAX, 0);
 	sparse_memory_present_with_active_regions(0);
 
 #ifdef CONFIG_FLATMEM
-	max_mapnr = IS_ENABLED(CONFIG_HIGHMEM) ? highend_pfn : max_low_pfn;
+	max_mapnr = num_physpages;
 #endif
 	__vmalloc_start_set = true;
 
@@ -734,6 +739,9 @@ static void __init test_wp_bit(void)
 
 void __init mem_init(void)
 {
+	int codesize, reservedpages, datasize, initsize;
+	int tmp;
+
 	pci_iommu_alloc();
 
 #ifdef CONFIG_FLATMEM
@@ -751,11 +759,32 @@ void __init mem_init(void)
 	set_highmem_pages_init();
 
 	/* this will put all low memory onto the freelists */
-	free_all_bootmem();
+	totalram_pages += free_all_bootmem();
+
+	reservedpages = 0;
+	for (tmp = 0; tmp < max_low_pfn; tmp++)
+		/*
+		 * Only count reserved RAM pages:
+		 */
+		if (page_is_ram(tmp) && PageReserved(pfn_to_page(tmp)))
+			reservedpages++;
 
 	after_bootmem = 1;
 
-	mem_init_print_info(NULL);
+	codesize =  (unsigned long) &_etext - (unsigned long) &_text;
+	datasize =  (unsigned long) &_edata - (unsigned long) &_etext;
+	initsize =  (unsigned long) &__init_end - (unsigned long) &__init_begin;
+
+	printk(KERN_INFO "Memory: %luk/%luk available (%dk kernel code, "
+			"%dk reserved, %dk data, %dk init, %ldk highmem)\n",
+		nr_free_pages() << (PAGE_SHIFT-10),
+		num_physpages << (PAGE_SHIFT-10),
+		codesize >> 10,
+		reservedpages << (PAGE_SHIFT-10),
+		datasize >> 10,
+		initsize >> 10,
+		totalhigh_pages << (PAGE_SHIFT-10));
+
 	printk(KERN_INFO "virtual kernel memory layout:\n"
 		"    fixmap  : 0x%08lx - 0x%08lx   (%4ld kB)\n"
 #ifdef CONFIG_HIGHMEM
@@ -816,11 +845,10 @@ void __init mem_init(void)
 }
 
 #ifdef CONFIG_MEMORY_HOTPLUG
-int arch_add_memory(int nid, u64 start, u64 size, bool for_device)
+int arch_add_memory(int nid, u64 start, u64 size)
 {
 	struct pglist_data *pgdata = NODE_DATA(nid);
-	struct zone *zone = pgdata->node_zones +
-		zone_for_memory(nid, start, size, ZONE_HIGHMEM, for_device);
+	struct zone *zone = pgdata->node_zones + ZONE_HIGHMEM;
 	unsigned long start_pfn = start >> PAGE_SHIFT;
 	unsigned long nr_pages = size >> PAGE_SHIFT;
 
@@ -864,6 +892,7 @@ static noinline int do_test_wp_bit(void)
 	return flag;
 }
 
+#ifdef CONFIG_DEBUG_RODATA
 const int rodata_test_data = 0xC3;
 EXPORT_SYMBOL_GPL(rodata_test_data);
 
@@ -949,6 +978,6 @@ void mark_rodata_ro(void)
 	set_pages_ro(virt_to_page(start), size >> PAGE_SHIFT);
 #endif
 	mark_nxdata_nx();
-	if (__supported_pte_mask & _PAGE_NX)
-		debug_checkwx();
 }
+#endif
+

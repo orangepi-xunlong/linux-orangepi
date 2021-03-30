@@ -2,10 +2,12 @@
  * Allwinner Technology CO., Ltd. sun8iw11p1 platform
  *
  * fpga support
- * modify base on juno.dts & sun8iw11
+ * modify base on juno.dts & sun8iw10
  */
 /* kernel used */
-/memreserve/ 0x48000000 0x01000000; /* atf                        : [0x48000000~0x49000000], size = 16M */
+/memreserve/ 0x43000000 0x00000800; /* super standby range        : [0x43000000~0x43000800], size = 2K  */
+/* carveout used */
+/memreserve/ 0x59200000 0x0C800000; /* ion carvout heap revserve  : [0x59200000~0x60000000], size = 200M  */
 
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/gpio/gpio.h>
@@ -13,8 +15,8 @@
 #include "sun8iw11p1-pinctrl.dtsi"
 / {
 	model = "sun8iw11p1";
-	compatible = "allwinner,sun8iw11p1";
-	interrupt-parent = <&wakeupgen>;
+	compatible = "arm,sun8iw11p1", "arm,sun8iw11p1";
+	interrupt-parent = <&gic>;
 	#address-cells = <2>;
 	#size-cells = <2>;
 
@@ -38,7 +40,6 @@
 		spi1 = &spi1;
 		spi2 = &spi2;
 		spi3 = &spi3;
-		gmac0 = &gmac0;
 		global_timer0  = &soc_timer0;
 		cci0 = &csi_cci0;
 		csi_res0 = &csi_res0;
@@ -50,7 +51,6 @@
 		nand0 =&nand0;
 		disp = &disp;
 		lcd0 = &lcd0;
-		lcd1 = &lcd1;
 		pwm = &pwm;
 		pwm0 = &pwm0;
 		tv0 = &tv0;
@@ -58,7 +58,6 @@
 		hdmi = &hdmi;
 		tvd = &tvd;
 		boot_disp = &boot_disp;
-		pmu0 = &pmu0;
 		charger0 = &charger0;
 		regulator0 = &regulator0;
 	};
@@ -69,126 +68,31 @@
 		linux,initrd-end = <0x0 0x0>;
 	};
 
-	firmware {
-		android {
-			compatible = "android,firmware";
-			name = "android";
-			boot_devices = "soc/sdc0,soc/sdc2,soc";
-			vbmeta {
-				compatible = "android,vbmeta";
-				parts = "vbmeta,vbmeta_system,vbmeta_vendor,boot,super,recovery";
-			};
-		};
-		optee {
-			compatible = "linaro,optee-tz";
-			method = "smc";
-		};
-	};
-
 	cpus {
-		enable-method = "allwinner,sun8iw11p1";
 		#address-cells = <1>;
 		#size-cells = <0>;
 
 		cpu@0 {
 			device_type = "cpu";
-			compatible = "arm,cortex-a7","arm,armv7";
+			compatible = "arm,cortex-a7";
 			reg = <0x0>;
-			enable-method = "psci";
-			clocks = <&clk_pll_cpu>;
 			cpufreq_tbl = < 480000
 					600000
 					720000
 					816000
-					912000
 					1008000
 					1104000
 					1152000
 					1200000>;
 			clock-latency = <2000000>;
 			clock-frequency = <1008000000>;
-			operating-points-v2 = <&cpu_opp_l_table0>;
-			cpu-idle-states = <&CPU_SLEEP_0 &CLUSTER_SLEEP_0 &SYS_SLEEP_0>;
-			regulators = "vdd-cpua";
 		};
 		cpu@1 {
 			device_type = "cpu";
-			compatible = "arm,cortex-a7","arm,armv7";
+			compatible = "arm,cortex-a7";
 			reg = <0x1>;
-			enable-method = "psci";
-			clocks = <&clk_pll_cpu>;
 			clock-frequency = <1008000000>;
-			operating-points-v2 = <&cpu_opp_l_table0>;
-			cpu-idle-states = <&CPU_SLEEP_0 &CLUSTER_SLEEP_0 &SYS_SLEEP_0>;
-			regulators = "vdd-cpua";
 		};
-		cpu@2 {
-			device_type = "cpu";
-			compatible = "arm,cortex-a7","arm,armv7";
-			reg = <0x2>;
-			enable-method = "psci";
-			clocks = <&clk_pll_cpu>;
-			clock-frequency = <1008000000>;
-			operating-points-v2 = <&cpu_opp_l_table0>;
-			cpu-idle-states = <&CPU_SLEEP_0 &CLUSTER_SLEEP_0 &SYS_SLEEP_0>;
-			regulators = "vdd-cpua";
-		};
-		cpu@3 {
-			device_type = "cpu";
-			compatible = "arm,cortex-a7","arm,armv7";
-			reg = <0x3>;
-			enable-method = "psci";
-			clocks = <&clk_pll_cpu>;
-			clock-frequency = <1008000000>;
-			operating-points-v2 = <&cpu_opp_l_table0>;
-			cpu-idle-states = <&CPU_SLEEP_0 &CLUSTER_SLEEP_0 &SYS_SLEEP_0>;
-			regulators = "vdd-cpua";
-		};
-		idle-states {
-			entry-method = "arm,psci";
-
-			CPU_SLEEP_0: cpu-sleep-0 {
-				compatible = "arm,idle-state";
-				arm,psci-suspend-param = <0x0010000>;
-				entry-latency-us = <140>;
-				exit-latency-us = <540>;
-				min-residency-us = <4800>;
-				local-timer-stop;
-			};
-
-			CLUSTER_SLEEP_0: cluster-sleep-0 {
-				compatible = "arm,idle-state";
-				arm,psci-suspend-param = <0x1010000>;
-				entry-latency-us = <500>;
-				exit-latency-us = <1000>;
-				min-residency-us = <10000>;
-				local-timer-stop;
-			};
-
-			SYS_SLEEP_0: sys-sleep-0 {
-				compatible = "arm,idle-state";
-				arm,psci-suspend-param = <0x2010000>;
-				entry-latency-us = <2000000>;
-				exit-latency-us = <2000000>;
-				min-residency-us = <2000000>;
-				local-timer-stop;
-			};
-		};
-	};
-
-	opp_dvfs_table:opp_dvfs_table {
-		cluster_num = <1>;
-		opp_table_count = <1>;
-
-	};
-
-	psci {
-		compatible = "arm,psci-0.2";
-		method = "smc";
-	};
-
-	dvfs_table: dvfs_table {
-		compatible = "allwinner,dvfs_table";
 	};
 
 	n_brom {
@@ -213,48 +117,27 @@
 
 	ion {
 		compatible = "allwinner,sunxi-ion";
-		/*types list here:
-		  ION_HEAP_TYPE_SYSTEM = 0,
-		  ION_HEAP_TYPE_SYSTEM_CONTIG = 1,
-		  ION_HEAP_TYPE_CARVEOUT = 2,
-		  ION_HEAP_TYPE_CHUNK = 3,
-		  ION_HEAP_TYPE_DMA = 4
-		  ION_HEAP_TYPE_SECURE = 6,
-		 **/
-		heap_sys_user@0{
-			compatible = "allwinner,sys_user";
-			heap-name  = "sys_user";
-			heap-id    = <0x0>;
-			heap-base  = <0x0>;
-			heap-size  = <0x0>;
-			heap-type  = "ion_system";
+		/*types is list here:
+			ION_HEAP_TYPE_SYSTEM = 0,
+			ION_HEAP_TYPE_SYSTEM_CONTIG = 1,
+			ION_HEAP_TYPE_CARVEOUT = 2,
+			ION_HEAP_TYPE_CHUNK = 3,
+			ION_HEAP_TYPE_DMA = 4
+		**/
+		system_contig{
+			type = <1>;
+			name = "system_contig";
 		};
-		/*
-		heap_sys_contig@0{
-			compatible = "allwinner,sys_contig";
-			heap-name  = "sys_contig";
-			heap-id    = <0x1>;
-			heap-base  = <0x0>;
-			heap-size  = <0x0>;
-			heap-type  = "ion_contig";
-		};*/
-		heap_cma@0{
-			compatible = "allwinner,cma";
-			heap-name  = "cma";
-			heap-id    = <0x4>;
-			heap-base  = <0x0>;
-			heap-size  = <0x0>;
-			heap-type  = "ion_cma";
+		carvout{
+			type = <2>;
+			name = "carvout";
+			base = <0x59200000>;
+			size = <0x0C800000>;
 		};
-		/*
-		heap_secure@0{
-			compatible = "allwinner,secure";
-			heap-name  = "secure";
-			heap-id    = <0x6>;
-			heap-base  = <0x0>;
-			heap-size  = <0x0>;
-			heap-type  = "ion_secure";
-		};*/
+		system{
+			type = <0>;
+			name = "system";
+		};
 	};
 
 	dram: dram {
@@ -303,13 +186,6 @@
 			  <0x0 0x01c84000 0 0x2000>, /* GIC VCPU Control */
 			  <0x0 0x01c86000 0 0x2000>; /* GIC VCPU */
 		interrupts = <GIC_PPI 9 0xf04>; /* GIC Maintenence IRQ */
-		interrupt-parent = <&gic>;
-	};
-	wakeupgen: interrupt-controller@0 {
-		compatible = "allwinner,sunxi-wakeupgen";
-		interrupt-controller;
-		#interrupt-cells = <3>;
-		interrupt-parent = <&gic>;
 	};
 
 	sid: sunxi-sid@1c1B000 {
@@ -324,14 +200,11 @@
 		reg = <0x0 0x01c1B200 0 0x0200>;
 	};
 
-	timer_arch {
+	timer {
 		compatible = "arm,armv7-timer";
-		interrupts = <GIC_PPI 13 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>, /* Secure Phys IRQ */
-			     <GIC_PPI 14 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>; /* Non-secure Phys IRQ */
+		interrupts = <GIC_PPI 13 0xff01>, /* Secure Phys IRQ */
+			     <GIC_PPI 14 0xff01>; /* Non-secure Phys IRQ */
 		clock-frequency = <24000000>;
-		arm,cpu-registers-not-fw-configured;
-		interrupt-parent = <&gic>;
-		arm,no-tick-in-suspend;
 	};
 
 	wdt: watchdog@01c20ca0 {
@@ -340,61 +213,15 @@
 	 };
 
 	pmu {
-		compatible = "arm,cortex-a7-pmu";
-		interrupts = <GIC_SPI 140 IRQ_TYPE_LEVEL_HIGH>,
-			     <GIC_SPI 141 IRQ_TYPE_LEVEL_HIGH>,
-			     <GIC_SPI 142 IRQ_TYPE_LEVEL_HIGH>,
-			     <GIC_SPI 143 IRQ_TYPE_LEVEL_HIGH>;
+		compatible = "arm,armv8-pmuv3";
+		interrupts = <GIC_SPI 120 4>,
+			     <GIC_SPI 121 4>,
+			     <GIC_SPI 122 4>,
+			     <GIC_SPI 123 4>;
 	};
 
 	dvfs_table: dvfs_table {
 		compatible = "allwinner,dvfs_table";
-		max_freq = <1200000000>;
-		min_freq = <480000000>;
-		lv_count = <8>;
-		lv1_freq = <1200000000>;
-		lv1_volt = <1300>;
-		lv2_freq = <1104000000>;
-		lv2_volt = <1240>;
-		lv3_freq = <1008000000>;
-		lv3_volt = <1160>;
-		lv4_freq = <912000000>;
-		lv4_volt = <1100>;
-		lv5_freq = <720000000>;
-		lv5_volt = <1000>;
-		lv6_freq = <0>;
-		lv6_volt = <1000>;
-		lv7_freq = <0>;
-		lv7_volt = <1000>;
-		lv8_freq = <0>;
-		lv8_volt = <1000>;
-	};
-
-	dvfs_table1: dvfs_table1 {
-		compatible = "allwinner,dvfs_table1";
-		max_freq = <1200000000>;
-		min_freq = <480000000>;
-		lv_count = <8>;
-		lv1_freq = <1200000000>;
-		lv1_volt = <1320>;
-		lv2_freq = <1104000000>;
-		lv2_volt = <1260>;
-		lv3_freq = <1008000000>;
-		lv3_volt = <1180>;
-		lv4_freq = <912000000>;
-		lv4_volt = <1140>;
-		lv5_freq = <720000000>;
-		lv5_volt = <1040>;
-		lv6_freq = <0>;
-		lv6_volt = <1000>;
-		lv7_freq = <0>;
-		lv7_volt = <1000>;
-		lv8_freq = <0>;
-		lv8_volt = <1000>;
-	};
-
-	dvfs_table2: dvfs_table2 {
-		compatible = "allwinner,dvfs_table2";
 		max_freq = <1200000000>;
 		min_freq = <480000000>;
 		lv_count = <8>;
@@ -421,7 +248,7 @@
 		reg = <0x0 0x01c62000 0x0 0x1000>,
 				<0x0 0x01c63000 0x0 0x1000>,
 				<0x0 0x01c20000 0x0 0x800>;
-		interrupts = <GIC_SPI 66 IRQ_TYPE_LEVEL_HIGH>;
+		interrupts = <GIC_SPI 66 0x4>;
 		clocks = <&clk_pll_ddr0>,<&clk_pll_ddr1>,<&clk_ahb1>;
 		status = "okay";
 	};
@@ -432,12 +259,7 @@
 	gpu_mali400_0: gpu@0x01c40000 {
 		compatible = "arm,mali-400", "arm,mali-utgard";
 		reg = <0x0 0x01c40000 0x0 0x10000>;
-		interrupts = <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 70 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 71 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 72 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 74 IRQ_TYPE_LEVEL_HIGH>,
-					<GIC_SPI 75 IRQ_TYPE_LEVEL_HIGH>;
+		interrupts = <GIC_SPI 69 4>, <GIC_SPI 70 4>, <GIC_SPI 71 4>, <GIC_SPI 72 4>, <GIC_SPI 74 4>, <GIC_SPI 75 4>;
 		interrupt-names = "IRQGP", "IRQGPMMU", "IRQPP0", "IRQPPMMU0", "IRQPP1", "IRQPPMMU1";
 		clocks = <&clk_pll_gpu>, <&clk_gpu>;
 	};
@@ -490,42 +312,39 @@
 		dma0:dma-controller@01c02000 {
 			compatible = "allwinner,sun50i-dma";
 			reg = <0x0 0x01c02000 0x0 0x1000>;
-			interrupts = <GIC_SPI 27 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 27 4>;
 			clocks = <&clk_dma>;
 			#dma-cells = <1>;
 		};
 
 		mbus0:mbus-controller@01c62000 {
-			compatible = "allwinner,sun8i-mbus";
+			compatible = "allwinner,sun8i-b100-mbus";
 			reg = <0x0 0x01c62000 0x0 0x110>;
 			#mbus-cells = <1>;
 		};
 
-		arisc {
-			compatible = "allwinner,sunxi-arisc";
+		standby_space {
+			compatible = "allwinner,standby_space";
+			/* num    dst        offset     size						*/
+			space1 = <0x43000000 0x00000000 0x00000800>; /* super standby para space        */
 		};
 
 		soc_timer0: timer@1c20c00 {
-			compatible = "allwinner,sun4i-a10-timer";
+			compatible = "allwinner,sunxi-timer";
 			device_type = "timer";
 			reg = <0x0 0x01c20c00 0x0 0x90>;
-			interrupts = <GIC_SPI 22 IRQ_TYPE_LEVEL_HIGH>;
-			/* On FPGA, timer can only use the losc.
-			 * On IC, timer should use the hosc.
-			 */
-			clocks = <&clk_hosc>, <&clk_losc>;
+			interrupts = <GIC_SPI 22 IRQ_TYPE_EDGE_RISING>;
+			clock-frequency = <24000000>;
+			timer-prescale = <16>;
 		};
 
 		rtc: rtc@01c20400 {
-			compatible = "allwinner,sun8i-rtc", \
-				      "allwinner,sunxi-rtc";
+			compatible = "allwinner,sun8iw11p1-rtc";
 			device_type = "rtc";
 			reg = <0x0 0x01c20400 0x0 0x1FC>;
 			interrupts = <GIC_SPI 24 IRQ_TYPE_LEVEL_HIGH>;
-			wakeup-source;
 			gpr_offset = <0x100>;
-			gpr_len	   = <8>;
-			gpr_cur_pos = <6>;
+			gpr_len	   = <4>;
 		};
 
 		ir0: ir@01c21800 {
@@ -535,8 +354,8 @@
 			pinctrl-names = "default";
 			pinctrl-0 = <&ir0_pins_a>;
 			clocks = <&clk_hosc>,<&clk_ir0>;
-			supply = "";
-			supply_vol = "";
+			supply = "vcc-pl";
+			supply_vol = <3300000>;
 			status = "okay";
 		};
 
@@ -547,8 +366,8 @@
 			pinctrl-names = "default";
 			pinctrl-0 = <&ir1_pins_a>;
 			clocks = <&clk_hosc>,<&clk_ir1>;
-			supply = "";
-			supply_vol = "";
+			supply = "vcc-pl";
+			supply_vol = <3300000>;
 			status = "disabled";
 		};
 
@@ -557,7 +376,7 @@
 			reg = <0x0 0x01c0e000 0x0 0x1000>,
 					<0x0 0x01c00000 0x0 0x10>,
 					<0x0 0x01c20000 0x0 0x800>;
-			interrupts = <GIC_SPI 53 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 53 4>;
 			clocks = <&clk_pll_ve>,
 							<&clk_ve>;
 
@@ -574,7 +393,7 @@
 			pinctrl-1 = <&uart0_pins_b>;
 			uart0_port = <0>;
 			uart0_type = <2>;
-			status = "okay";
+			status = "disabled";
 		};
 
 		uart1: uart@01c28400 {
@@ -715,23 +534,6 @@
 
 				regulator0: regulator@0{
 					status = "okay";
-
-					regulator1 {
-						regulator-name = "vcc-io";
-					};
-
-					regulator2 {
-						regulator-name = "vdd-cpua";
-					};
-
-					regulator3 {
-						regulator-name = "vdd-sys";
-					};
-
-					regulator9 {
-						regulator-name = "vcc-pll";
-					};
-
 				};
 
 				axp_gpio0: axp_gpio@0{
@@ -739,6 +541,7 @@
 					#size-cells = <0>;
 					#gpio-cells = <6>;
 					status = "okay";
+					device_type = "axp_pio";
 				};
 
 				charger0: charger@0{
@@ -822,14 +625,6 @@
 			spi0_cs_number = <2>;
 			spi0_cs_bitmap = <3>;
 			status = "disabled";
-			nor_flash@0 {
-				#address-cells = <1>;
-				#size-cells = <1>;
-				compatible = "atmel,at25df641";
-				spi-max-frequency = <50000000>;
-				reg = <0>;	/* Chip select 0 */
-				interrupts = <GIC_SPI 10 IRQ_TYPE_LEVEL_HIGH>;
-			};
 		};
 
 		spi1: spi@01c06000 {
@@ -904,7 +699,7 @@
 		udc:udc-controller@0x01c13000 {
 			compatible          = "allwinner,sunxi-udc";
 			reg                 = <0x0 0x01c13000 0x0 0x1000>, /*udc base*/
-						<0x0 0x01c00000 0x0 0x100>; /*sram base*/
+			                      <0x0 0x01c00000 0x0 0x100>; /*sram base*/
 			interrupts          = <GIC_SPI 38 IRQ_TYPE_LEVEL_HIGH>;
 			clocks              = <&clk_usbphy0>, <&clk_usbotg>;
 			status              = "okay";
@@ -913,8 +708,8 @@
 		ehci0:ehci0-controller@0x01c14000 {
 			compatible          = "allwinner,sunxi-ehci0";
 			reg                 = <0x0 0x01c14000 0x0 0xFFF>, /*hci0 base*/
-						<0x0 0x01c00000 0x0 0x100>, /*sram base*/
-						<0x0 0x01c13000 0x0 0x1000>; /*otg base*/
+			                      <0x0 0x01c00000 0x0 0x100>, /*sram base*/
+			                      <0x0 0x01c13000 0x0 0x1000>; /*otg base*/
 			interrupts          = <GIC_SPI 39 IRQ_TYPE_LEVEL_HIGH>;
 			clocks              = <&clk_usbphy0>, <&clk_usbehci0>;
 			hci_ctrl_no         = <0>;
@@ -924,8 +719,8 @@
 		ohci0:ohci0-controller@0x01c14400 {
 			compatible          = "allwinner,sunxi-ohci0";
 			reg                 = <0x0 0x01c14000 0x0 0xFFF>, /*hci0 base*/
-						<0x0 0x01c00000 0x0 0x100>, /*sram base*/
-						<0x0 0x01c13000 0x0 0x1000>; /*otg base*/
+			                      <0x0 0x01c00000 0x0 0x100>, /*sram base*/
+			                      <0x0 0x01c13000 0x0 0x1000>; /*otg base*/
 			interrupts          = <GIC_SPI 40 IRQ_TYPE_LEVEL_HIGH>;
 			clocks              = <&clk_usbphy0>, <&clk_usbohci0>, <&clk_usbohci012m>, <&clk_hoscx2>, <&clk_hosc>, <&clk_losc>;
 			hci_ctrl_no         = <0>;
@@ -944,8 +739,8 @@
 		ehci1:ehci1-controller@0x01c19000 {
 			compatible          = "allwinner,sunxi-ehci1";
 			reg                 = <0x0 0x01c19000 0x0 0xFFF>, /*hci1 base*/
-						<0x0 0x01c00000 0x0 0x100>, /*sram base*/
-						<0x0 0x01c13000 0x0 0x1000>; /*otg base*/
+			                      <0x0 0x01c00000 0x0 0x100>, /*sram base*/
+			                      <0x0 0x01c13000 0x0 0x1000>; /*otg base*/
 			interrupts          = <GIC_SPI 76 IRQ_TYPE_LEVEL_HIGH>;
 			clocks              = <&clk_usbphy1>, <&clk_usbehci1>;
 			hci_ctrl_no         = <1>;
@@ -955,8 +750,8 @@
 		ohci1:ohci1-controller@0x01c19400 {
 			compatible          = "allwinner,sunxi-ohci1";
 			reg                 = <0x0 0x01c19000 0x0 0xFFF>, /*hci1 base*/
-						<0x0 0x01c00000 0x0 0x100>, /*sram base*/
-						<0x0 0x01c13000 0x0 0x1000>; /*otg base*/
+			                      <0x0 0x01c00000 0x0 0x100>, /*sram base*/
+			                      <0x0 0x01c13000 0x0 0x1000>; /*otg base*/
 			interrupts          = <GIC_SPI 64 IRQ_TYPE_LEVEL_HIGH>;
 			clocks              = <&clk_usbphy1>, <&clk_usbohci1>, <&clk_usbohci112m>, <&clk_hoscx2>, <&clk_hosc>, <&clk_losc>;
 			hci_ctrl_no         = <1>;
@@ -975,8 +770,8 @@
 		ehci2:ehci2-controller@0x01c1c000 {
 			compatible          = "allwinner,sunxi-ehci2";
 			reg                 = <0x0 0x01c1c000 0x0 0xFFF>, /*hci2 base*/
-						<0x0 0x01c00000 0x0 0x100>, /*sram base*/
-						<0x0 0x01c13000 0x0 0x1000>; /*otg base*/
+			                      <0x0 0x01c00000 0x0 0x100>, /*sram base*/
+			                      <0x0 0x01c13000 0x0 0x1000>; /*otg base*/
 			interrupts          = <GIC_SPI 78 IRQ_TYPE_LEVEL_HIGH>;
 			clocks              = <&clk_usbphy2>, <&clk_usbehci2>;
 			hci_ctrl_no         = <2>;
@@ -986,8 +781,8 @@
 		ohci2:ohci2-controller@0x01c1c400 {
 			compatible          = "allwinner,sunxi-ohci2";
 			reg                 = <0x0 0x01c1c000 0x0 0xFFF>, /*hci2 base*/
-						<0x0 0x01c00000 0x0 0x100>, /*sram base*/
-						<0x0 0x01c13000 0x0 0x1000>; /*otg base*/
+			                      <0x0 0x01c00000 0x0 0x100>, /*sram base*/
+			                      <0x0 0x01c13000 0x0 0x1000>; /*otg base*/
 			interrupts          = <GIC_SPI 65 IRQ_TYPE_LEVEL_HIGH>;
 			clocks              = <&clk_usbphy2>, <&clk_usbohci2>, <&clk_usbohci212m>, <&clk_hoscx2>, <&clk_hosc>, <&clk_losc>;
 			hci_ctrl_no         = <2>;
@@ -1057,7 +852,7 @@
 			tdm_num = <0x1>;
 			status = "okay";
 		};
-		audiohdmi:daudio@0x01c22800{
+		daudio2:daudio@0x01c22800{
 			compatible = "allwinner,sunxi-tdmhdmi";
 			reg = <0x0 0x01c22800 0x0 0x58>;
 			clocks = <&clk_pll_audio>,<&clk_i2s2>;
@@ -1074,7 +869,7 @@
 		};
 		sndcodec:sound@0 {
 			compatible = "allwinner,sunxi-codec-machine";
-			interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 28 4>;
 			sunxi,cpudai-controller = <&cpudai>;
 			sunxi,audio-codec = <&codec>;
 			hp_detect_case = <0x00>;
@@ -1095,7 +890,7 @@
 		};
 		sndhdmi:sound@3{
 			compatible = "allwinner,sunxi-hdmi-machine";
-			sunxi,hdmi-controller = <&audiohdmi>;
+			sunxi,hdmi-controller = <&daudio2>;
 			status = "okay";
 		};
 		sndspdif:sound@4{
@@ -1107,24 +902,20 @@
 			compatible = "allwinner,sunxi-mmc-v4p5x";
 			device_type = "sdc2";
 			reg = <0x0 0x01C11000 0x0 0x1000>;
-			interrupts = <GIC_SPI 34 IRQ_TYPE_LEVEL_HIGH>;  /*  */
+			interrupts = <GIC_SPI 34 0x0104>;  /*  */
 			clocks = <&clk_hosc>,<&clk_pll_periph1x2>,<&clk_sdmmc2_mod>,<&clk_sdmmc2_bus>,<&clk_sdmmc2_rst>;
 	    clock-names = "osc24m","pll_periph","mmc","ahb","rst";
       pinctrl-names = "default","sleep";
 			pinctrl-0 = <&sdc2_pins_a>;
 			pinctrl-1 = <&sdc2_pins_b>;
 				bus-width = <8>;
-			cap-mmc-highspeed;
 			/*mmc-ddr-1_8v;*/
 			/*mmc-hs200-1_8v;*/
 			/*mmc-hs400-1_8v;*/
-			non-removable;
+			/*non-removable;*/
 			/*max-frequency = <200000000>;*/
 			max-frequency = <50000000>;
-			cap-erase;
-			mmc-high-capacity-erase-size;
-			no-sdio;
-			no-sd;
+
 			/*-- speed mode --*/
 			/*sm0: DS26_SDR12*/
 			/*sm1: HSSDR52_SDR25*/
@@ -1157,7 +948,7 @@
 			/*vqmc = "";*/
 			/*vdmc = "";*/
 	    /*sunxi-power-save-mode;*/
-			status = "ok";
+			status = "disabled";
 			/*status = "okay";*/
 
        };
@@ -1166,7 +957,7 @@
 			compatible = "allwinner,sunxi-mmc-v4p1x";
 			device_type = "sdc0";
 			reg = <0x0 0x01c0f000 0x0 0x1000>; /* only sdmmc0 */
-			interrupts = <GIC_SPI 32 IRQ_TYPE_LEVEL_HIGH>;  /*  */
+			interrupts = <GIC_SPI 32 0x0104>;  /*  */
 			clocks = <&clk_hosc>,<&clk_pll_periph1x2>,<&clk_sdmmc0_mod>,<&clk_sdmmc0_bus>,<&clk_sdmmc0_rst>;
 			clock-names = "osc24m","pll_periph","mmc","ahb","rst";
 			pinctrl-names = "default","sleep";
@@ -1184,9 +975,6 @@
 			/*vdmc = "";*/
 			/*sd-uhs-sdr50;*/
 			/*sd-uhs-ddr50;*/
-			cap-sd-highspeed;
-			no-sdio;
-			no-mmc;
 			/*cap-sdio-irq;*/
 			/*keep-power-in-suspend;*/
 			/*ignore-pm-notify;*/
@@ -1210,7 +998,7 @@
 			compatible = "allwinner,sunxi-mmc-v4p1x";
 			device_type = "sdc1";
 			reg = <0x0 0x1C10000 0x0 0x1000>;
-			interrupts = <GIC_SPI 33 IRQ_TYPE_LEVEL_HIGH>;  /*  */
+			interrupts = <GIC_SPI 33 0x0104>;  /*  */
 			clocks = <&clk_hosc>,<&clk_pll_periph1x2>,<&clk_sdmmc1_mod>,<&clk_sdmmc1_bus>,<&clk_sdmmc1_rst>;
 			clock-names = "osc24m","pll_periph","mmc","ahb","rst";
 			pinctrl-names = "default","sleep";
@@ -1230,8 +1018,6 @@
 			/*sd-uhs-sdr50;*/
 			/*sd-uhs-ddr50;*/
 			/*sd-uhs-sdr104;*/
-			cap-sd-highspeed;
-			no-mmc;
 			/*cap-sdio-irq;*/
 			/*keep-power-in-suspend;*/
 			/*ignore-pm-notify;*/
@@ -1239,7 +1025,6 @@
 			/*sunxi-dly-400k = <1 0 0 0 0>; */
 			/*sunxi-dly-26M  = <1 0 0 0 0>;*/
 			/*sunxi-dly-52M  = <1 0 0 0 0>;*/
-			sunxi-dly-52M  = <1 1 0 0 1>;
 			sunxi-dly-52M-ddr4  = <1 0 0 0 2>;
 			/*sunxi-dly-52M-ddr8  = <1 0 0 0 0>;*/
 			sunxi-dly-104M  = <1 0 0 0 1>;
@@ -1258,7 +1043,7 @@
 			compatible = "allwinner,sunxi-mmc-v4p1x";
 			device_type = "sdc3";
 			reg = <0x0 0x01C12000 0x0 0x1000>;
-			interrupts = <GIC_SPI 35 IRQ_TYPE_LEVEL_HIGH>;  /*  */
+			interrupts = <GIC_SPI 35 0x0104>;  /*  */
 			clocks = <&clk_hosc>,<&clk_pll_periph1x2>,<&clk_sdmmc3_mod>,<&clk_sdmmc3_bus>,<&clk_sdmmc3_rst>;
 			clock-names = "osc24m","pll_periph","mmc","ahb","rst";
 			pinctrl-names = "default","sleep";
@@ -1266,8 +1051,6 @@
 			pinctrl-1 = <&sdc3_pins_b>;
 			max-frequency = <50000000>;
 			bus-width = <4>;
-			cap-sd-highspeed;
-
 			/*broken-cd;*/
 			/*cd-inverted*/
 			/*cd-gpios = <&pio PG 6 6 1 2 0>;*/
@@ -1287,11 +1070,11 @@
 			/*sunxi-dly-400k = <1 0 0 0 0>; */
 			/*sunxi-dly-26M  = <1 0 0 0 0>;*/
 			/*sunxi-dly-52M  = <1 0 0 0 0>;*/
-			/*sunxi-dly-52M-ddr4  = <1 0 0 0 2>;*/
+			sunxi-dly-52M-ddr4  = <1 0 0 0 2>;
 			/*sunxi-dly-52M-ddr8  = <1 0 0 0 0>;*/
-			/*sunxi-dly-104M  = <1 0 0 0 1>;*/
+			sunxi-dly-104M  = <1 0 0 0 1>;
 			/*sunxi-dly-208M  = <1 1 0 0 0>;*/
-			/*sunxi-dly-208M  = <1 0 0 0 1>;*/
+			sunxi-dly-208M  = <1 0 0 0 1>;
 			/*sunxi-dly-104M-ddr  = <1 0 0 0 0>;*/
 			/*sunxi-dly-208M-ddr  = <1 0 0 0 0>;*/
 
@@ -1309,9 +1092,9 @@
 				<0x0 0x01c73000 0x0 0xfff>,/*tcon2*/
 				<0x0 0x01c74000 0x0 0xfff>,/*tcon3*/
 				<0x0 0x01ca0000 0x0 0x10fc>;/*dsi*/
-			interrupts = <GIC_SPI 44 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 45 IRQ_TYPE_LEVEL_HIGH>,
-				<GIC_SPI 51 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 52 IRQ_TYPE_LEVEL_HIGH>,
-				<GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;/* for dsi */
+			interrupts = <GIC_SPI 44 0x0104>, <GIC_SPI 45 0x0104>,
+				<GIC_SPI 51 0x0104>, <GIC_SPI 52 0x0104>,
+				<GIC_SPI 57 0x0104>;/* for dsi */
 			clocks = <&clk_de>,<&clk_tcon_top>,
 						<&clk_tcon0>,<&clk_tcon1>,
 						<&clk_tcon_tv0>,<&clk_tcon_tv1>,<&clk_lvds>,<&clk_mipidsi>;
@@ -1329,12 +1112,6 @@
 
 		lcd0: lcd0@01c0c000 {
 			compatible = "allwinner,sunxi-lcd0";
-			pinctrl-names = "active","sleep";
-
-			status = "okay";
-		};
-		lcd1: lcd1@01c0c001 {
-			compatible = "allwinner,sunxi-lcd1";
 			pinctrl-names = "active","sleep";
 
 			status = "okay";
@@ -1364,7 +1141,7 @@
 			compatible = "allwinner,sunxi-tvd";
 			reg = <0x0 0x01c30000 0x0 0x00010000>;/*tvd_top*/
 			clocks = <&clk_tvd_top>;
-			interrupts = <GIC_SPI 61 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 61 0x0104>;
 			tvd-number = <4>;
 			tvds = <&tvd0>, <&tvd1>, <&tvd2>, <&tvd3>;
 			status = "okay";
@@ -1373,7 +1150,7 @@
 		tvd0: tvd0@01c31000 {
 			compatible = "allwinner,sunxi-tvd0";
 			reg = <0x0 0x01c31000 0x0 0x00010000>;
-			interrupts = <GIC_SPI 97 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 97 0x0104>;
 			clocks = <&clk_tvd0>;
 			tvd_used = <1>;
 			tvd_if = <0>;
@@ -1383,7 +1160,7 @@
 		tvd1: tvd1@01c32000 {
 			compatible = "allwinner,sunxi-tvd1";
 			reg = <0x0 0x01c32000 0x0 0x00010000>;
-			interrupts = <GIC_SPI 98 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 98 0x0104>;
 			clocks = <&clk_tvd1>;
 			tvd_used = <1>;
 			tvd_if = <0>;
@@ -1393,7 +1170,7 @@
 		tvd2: tvd2@01c33000 {
 			compatible = "allwinner,sunxi-tvd2";
 			reg = <0x0 0x01c33000 0x0 0x00010000>;
-			interrupts = <GIC_SPI 99 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 99 0x0104>;
 			clocks = <&clk_tvd2>;
 			tvd_used = <1>;
 			tvd_if = <0>;
@@ -1403,30 +1180,17 @@
 		tvd3: tvd3@01c34000 {
 			compatible = "allwinner,sunxi-tvd3";
 			reg = <0x0 0x01c34000 0x0 0x00010000>;
-			interrupts = <GIC_SPI 100 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 100 0x0104>;
 			clocks = <&clk_tvd3>;
 			tvd_used = <1>;
 			tvd_if = <0>;
 			status = "okay";
 		};
 
-		v4in1: v4in1@01c30000 {
-			compatible = "allwinner,sunxi-v4in1";
-			reg = <0x0 0x01c30000 0x0 0x00010000>,/*tvd top*/
-				  <0x0 0x01c31000 0x0 0x00010000>,/*tvd0*/
-				  <0x0 0x01c32000 0x0 0x00010000>,/*tvd1*/
-				  <0x0 0x01c33000 0x0 0x00010000>,/*tvd2*/
-				  <0x0 0x01c34000 0x0 0x00010000>;/*tvd3*/
-			clocks = <&clk_tvd_top>, <&clk_tvd0>, <&clk_tvd1>,
-					 <&clk_tvd2>, <&clk_tvd3>;
-			interrupts = <GIC_SPI 97 IRQ_TYPE_LEVEL_HIGH>;
-			status = "okay";
-		};
-
 		soc_tr: tr@01000000 {
 			compatible = "allwinner,sun8iw11-tr";
 			reg = <0x0 0x01000000 0x0 0x000200bc>;
-			interrupts = <GIC_SPI 96 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 96 0x0104>;
 			clocks = <&clk_de>;
 			status = "okay";
 		};
@@ -1434,14 +1198,14 @@
 		g2d: g2d@01e80000 {
 			compatible = "allwinner,sunxi-g2d";
 			reg = <0x0 0x01e80000 0x0 0x800>;
-			interrupts = <GIC_SPI 46 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 46 0x0104>;
 			clocks = <&clk_de_mp>;
 			status = "okay";
 		};
 
 		pwm: pwm@01c23400 {
 			compatible = "allwinner,sunxi-pwm";
-			reg = <0x0 0x01c23400 0x0 0x3ff>;
+			reg = <0x0 0x01c23400 0x0 0x154>;
 			pwm-number = <1>;
 			pwm-base = <0x0>;
 			pwms = <&pwm0>, <&pwm1>;
@@ -1632,7 +1396,7 @@
 		csi_cci0:cci@0x01cb3000 {
 			compatible = "allwinner,sunxi-csi_cci";
 			reg = <0x0 0x01cb3000 0x0 0x1000>;	/*0x01cb3000--0x01cb4000*/
-			interrupts = <GIC_SPI 85 IRQ_TYPE_LEVEL_HIGH>;/*SUNXI_IRQ_CSI0_CCI (SUNXI_GIC_START + 85) = 117*/
+			interrupts = <GIC_SPI 85 4>;/*SUNXI_IRQ_CSI0_CCI (SUNXI_GIC_START + 85) = 117*/
 			status = "disabled";
 		};
 		csi_res0:csi_res@0x01c09000 {
@@ -1654,7 +1418,7 @@
 		csi0:vfe@0 {
 			device_type= "csi0";
 			compatible = "allwinner,sunxi-vfe";
-			interrupts = <GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH>;/*SUNXI_IRQ_CSI0 (SUNXI_GIC_START + 42 ) = 74*/
+			interrupts = <GIC_SPI 42 4>;/*SUNXI_IRQ_CSI0 (SUNXI_GIC_START + 42 ) = 74*/
 			pinctrl-names 		= "default","sleep";
 			pinctrl-0 		= <&csi0_pins_a>;
 			pinctrl-1 		= <&csi0_pins_b>;
@@ -1699,7 +1463,7 @@
 		csi1:vfe@1 {
 			device_type= "csi1";
 			compatible = "allwinner,sunxi-vfe";
-			interrupts = <GIC_SPI 43 IRQ_TYPE_LEVEL_HIGH>;/*SUNXI_IRQ_CSI1 (SUNXI_GIC_START + 43 ) = 75*/
+			interrupts = <GIC_SPI 43 4>;/*SUNXI_IRQ_CSI1 (SUNXI_GIC_START + 43 ) = 75*/
 			pinctrl-names 		= "default","sleep";
 			pinctrl-0 		= <&csi1_pins_a>;
 			pinctrl-1 		= <&csi1_pins_b>;
@@ -1748,14 +1512,14 @@
 			test-gpios = <&pio PH 0 1 2 2 1>;
 			status = "okay";
 		};
-		cryptoengine: ce@0x01c15000 {
+		cryptoengine: ce@1c15000 {
 			compatible = "allwinner,sunxi-ce";
-			device_name = "ce";
 			reg = <0x0 0x01c15000 0x0 0x80>, /* non-secure space */
 				  <0x0 0x01c15800 0x0 0x80>; /* secure space */
-			interrupts = <GIC_SPI 94 IRQ_TYPE_EDGE_RISING>, /* non-secure space */
-						 <GIC_SPI 54 IRQ_TYPE_EDGE_RISING>; /* secure space */
-			clock-frequency = <200000000>; /* 200MHz */
+			interrupts = <GIC_SPI 94 0xff01>, /* non-secure space */
+						 <GIC_SPI 80 0xff01>; /* secure space */
+			clock-frequency = <300000000>, /* 300MHz */
+							  <200000000>; /* 200MHz for RSA */
 			clocks = <&clk_ce>, <&clk_pll_periph0x2>;
 		};
 		di:deinterlace@0x01400000{
@@ -1767,17 +1531,17 @@
 			clocks = <&clk_deinterlace> ,<&clk_pll_periph0>;
 			status = "okay";
 		};
-		scr0:smartcard@0x01c2c400{
+		smc:smartcard@0x01c2c400{
 			#address-cells = <1>;
 			#size-cells = <0>;
 			compatible = "allwinner,sunxi-scr";
 			reg = <0x0 0x01c2c400 0x0 0x400>;
 			interrupts = <GIC_SPI 41 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&clk_scr0>, <&clk_apb2>;
+			clocks = <&clk_scr>, <&clk_apb2>;
 			clock-frequency = <24000000>;
 			pinctrl-names = "default", "sleep";
-			pinctrl-0 = <&scr0_pins_a>;
-			pinctrl-1 = <&scr0_pins_b>;
+			pinctrl-0 = <&scr_pins_a>;
+			pinctrl-1 = <&scr_pins_b>;
 			status = "okay";
 		};
 		nmi:nmi@0{
@@ -1793,7 +1557,7 @@
 			compatible = "allwinner,sun8iw11-nand";
 			device_type = "nand0";
 			reg = <0x0 0x01c03000 0x0 0x1000>; /* nand0 */
-			interrupts = <GIC_SPI 37 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 37 0x04>;
 			clocks = <&clk_pll_periph0>,<&clk_nand>;
 			pinctrl-names = "default", "sleep";
 			pinctrl-0 = <&nand0_pins_a &nand0_pins_b>;
@@ -1818,33 +1582,19 @@
 			interrupts = <GIC_SPI 36 IRQ_TYPE_NONE>;
 			clocks = <&clk_hosc>,<&clk_ths>;
 			sensor_num = <2>;
-			combine_num = <2>;
-			shut_temp= <120000>;/*millicelsius*/
+			shut_temp= <125>;
 			status = "okay";
 
-			ths_combine0:ths_combine0{
-				compatible = "allwinner,ths_combine0";
+			combine0:combine0{
 				#thermal-sensor-cells = <1>;
-				combine_sensor_num = <1>;
-				combine_sensor_type = "cpu";
-				combine_sensor_temp_type = "max";
-				combine_sensor_id = <0>;
+				combine_cnt = <2>;
+				combine_type = "max";
+				combine_chn = <0 1>;
 			};
-			ths_combine1:ths_combine1{
-				compatible = "allwinner,ths_combine1";
-				#thermal-sensor-cells = <1>;
-				combine_sensor_num = <1>;
-				combine_sensor_type = "gpu";
-				combine_sensor_temp_type = "max";
-				combine_sensor_id = <1>;
-			};
-
-
 		};
 
 		cpu_budget_cooling:cpu_budget_cool{
 			compatible = "allwinner,budget_cooling";
-			device_type = "cpu_budget_cooling";
 			#cooling-cells = <2>;
 			status = "okay";
 			state_cnt = <7>;
@@ -1871,40 +1621,50 @@
 		};
 
 		thermal-zones{
-			cpu_thermal_zone{
+			soc_thermal{
 
 				polling-delay-passive = <1000>;
 				polling-delay = <10000>;
-				thermal-sensors = <&ths_combine0 0>;
+				thermal-sensors = <&combine0 0>;
 
 				trips{
 					cpu_trip0:t0{
-						temperature = <95000>;
+						temperature = <90>;
 						type = "passive";
 						hysteresis = <0>;
 					};
 					cpu_trip1:t1{
-						temperature = <105000>;
+						temperature = <110>;
 						type = "passive";
 						hysteresis = <0>;
 					};
 					cpu_trip2:t2{
-						temperature = <112000>;
+						temperature = <115>;
 						type = "passive";
 						hysteresis = <0>;
 					};
 					cpu_trip3:t3{
-						temperature = <114000>;
+						temperature = <120>;
 						type = "passive";
 						hysteresis = <0>;
 					};
-					cpu_trip4:t4{
-						temperature = <117000>;
+					gpu_trip0:t4{
+						temperature = <90>;
 						type = "passive";
 						hysteresis = <0>;
 					};
-					crt_trip0:t5{
-						temperature = <120000>;
+					gpu_trip1:t5{
+						temperature = <100>;
+						type = "passive";
+						hysteresis = <0>;
+					};
+					gpu_trip2:t6{
+						temperature = <110>;
+						type = "passive";
+						hysteresis = <0>;
+					};
+					crt_trip:t7{
+						temperature = <120>;
 						type = "critical";
 						hysteresis = <0>;
 					};
@@ -1929,69 +1689,25 @@
 					bind3{
 						contribution = <0>;
 						trip = <&cpu_trip3>;
-						cooling-device = <&cpu_budget_cooling 4 4>;
+						cooling-device = <&cpu_budget_cooling 4 6>;
 					};
 					bind4{
-						contribution = <0>;
-						trip = <&cpu_trip4>;
-						cooling-device = <&cpu_budget_cooling 5 6>;
-					};
-				};
-			};
-			gpu_thermal_zone{
-
-				polling-delay-passive = <1000>;
-				polling-delay = <10000>;
-				thermal-sensors = <&ths_combine1 1>;
-
-				trips{
-					gpu_trip0:t0{
-						temperature = <90000>;
-						type = "passive";
-						hysteresis = <0>;
-					};
-					gpu_trip1:t1{
-						temperature = <100000>;
-						type = "passive";
-						hysteresis = <0>;
-					};
-					gpu_trip2:t2{
-						temperature = <110000>;
-						type = "passive";
-						hysteresis = <0>;
-					};
-					crt_trip1:t3{
-						temperature = <120000>;
-						type = "critical";
-						hysteresis = <0>;
-					};
-				};
-
-				cooling-maps{
-
-					bind0{
 						contribution = <0>;
 						trip = <&gpu_trip0>;
 						cooling-device = <&gpu_cooling 1 1>;
 					};
-					bind1{
+					bind5{
 						contribution = <0>;
 						trip = <&gpu_trip1>;
 						cooling-device = <&gpu_cooling 2 2>;
 					};
-					bind2{
+					bind6{
 						contribution = <0>;
 						trip = <&gpu_trip2>;
 						cooling-device = <&gpu_cooling 3 3>;
 					};
 				};
 			};
-		};
-		tpadc:tpadc{
-			compatible = "allwinner,sunxi-tpadc";
-			reg = <0x0 0x01c25000 0x0 0x400>;
-			interrupts = <GIC_SPI 29 IRQ_TYPE_NONE>;
-			status = "okay";
 		};
 
 		keyboard0:keyboard{
@@ -2000,11 +1716,11 @@
 			interrupts = <GIC_SPI 31 IRQ_TYPE_NONE>;
 			status = "okay";
 			key_cnt = <5>;
-			key0 = <190 115>;
-			key1 = <390 114>;
-			key2 = <600 139>;
-			key3 = <800 28>;
-			key4 = <980 102>;
+			key1 = <240 115>;
+			key2 = <500 114>;
+			key3 = <700 139>;
+			key4 = <890 28>;
+			key5 = <2000 102>;
 		};
 		keypad0:keypad{
 			compatible = "allwinner,keypad";
@@ -2066,9 +1782,9 @@
 			tx-delay = <7>;
 			rx-delay = <31>;
 			phy-rst;
-			gmac-power0;
-			gmac-power1;
-			gmac-power2;
+			gmac_power1 = "";
+			gmac_power2 = "";
+			gmac_power3 = "";
 			status = "disabled";
 		};
 

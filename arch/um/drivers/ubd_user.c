@@ -21,6 +21,11 @@
 #include "ubd.h"
 #include <os.h>
 
+void ignore_sigwinch_sig(void)
+{
+	signal(SIGWINCH, SIG_IGN);
+}
+
 int start_io_thread(unsigned long sp, int *fd_out)
 {
 	int pid, fds[2], err;

@@ -28,42 +28,6 @@
 #define F_GETPIPE_SZ	(F_LINUX_SPECIFIC_BASE + 8)
 
 /*
- * Set/Get seals
- */
-#define F_ADD_SEALS	(F_LINUX_SPECIFIC_BASE + 9)
-#define F_GET_SEALS	(F_LINUX_SPECIFIC_BASE + 10)
-
-/*
- * Types of seals
- */
-#define F_SEAL_SEAL	0x0001	/* prevent further seals from being set */
-#define F_SEAL_SHRINK	0x0002	/* prevent file from shrinking */
-#define F_SEAL_GROW	0x0004	/* prevent file from growing */
-#define F_SEAL_WRITE	0x0008	/* prevent writes */
-/* (1U << 31) is reserved for signed error codes */
-
-/*
- * Set/Get write life time hints. {GET,SET}_RW_HINT operate on the
- * underlying inode, while {GET,SET}_FILE_RW_HINT operate only on
- * the specific file.
- */
-#define F_GET_RW_HINT		(F_LINUX_SPECIFIC_BASE + 11)
-#define F_SET_RW_HINT		(F_LINUX_SPECIFIC_BASE + 12)
-#define F_GET_FILE_RW_HINT	(F_LINUX_SPECIFIC_BASE + 13)
-#define F_SET_FILE_RW_HINT	(F_LINUX_SPECIFIC_BASE + 14)
-
-/*
- * Valid hint values for F_{GET,SET}_RW_HINT. 0 is "not set", or can be
- * used to clear any hints previously set.
- */
-#define RWF_WRITE_LIFE_NOT_SET	0
-#define RWH_WRITE_LIFE_NONE	1
-#define RWH_WRITE_LIFE_SHORT	2
-#define RWH_WRITE_LIFE_MEDIUM	3
-#define RWH_WRITE_LIFE_LONG	4
-#define RWH_WRITE_LIFE_EXTREME	5
-
-/*
  * Types of directory notifications that may be requested.
  */
 #define DN_ACCESS	0x00000001	/* File accessed */

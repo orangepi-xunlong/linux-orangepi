@@ -321,7 +321,8 @@ static void hpcd_final_uli5288(struct pci_dev *dev)
 {
 	struct pci_controller *hose = pci_bus_to_host(dev->bus);
 	struct device_node *hosenode = hose ? hose->dn : NULL;
-	struct of_phandle_args oirq;
+	struct of_irq oirq;
+	int virq, pin = 2;
 	u32 laddr[3];
 
 	if (!machine_is(mpc86xx_hpcd))
@@ -330,13 +331,12 @@ static void hpcd_final_uli5288(struct pci_dev *dev)
 	if (!hosenode)
 		return;
 
-	oirq.np = hosenode;
-	oirq.args[0] = 2;
-	oirq.args_count = 1;
 	laddr[0] = (hose->first_busno << 16) | (PCI_DEVFN(31, 0) << 8);
 	laddr[1] = laddr[2] = 0;
-	of_irq_parse_raw(laddr, &oirq);
-	dev->irq = irq_create_of_mapping(&oirq);
+	of_irq_map_raw(hosenode, &pin, 1, laddr, &oirq);
+	virq = irq_create_of_mapping(oirq.controller, oirq.specifier,
+				     oirq.size);
+	dev->irq = virq;
 }
 
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_AL, 0x1575, hpcd_quirk_uli1575);

@@ -14,9 +14,10 @@
 #include <linux/init.h>
 #include <linux/reboot.h>
 
+#include "iomap.h"
 #include "common.h"
 #include "control.h"
-#include "prm.h"
+#include "prm3xxx.h"
 
 /* Global address base setup code */
 
@@ -31,5 +32,6 @@
 void omap3xxx_restart(enum reboot_mode mode, const char *cmd)
 {
 	omap3_ctrl_write_boot_mode((cmd ? (u8)*cmd : 0));
-	omap_prm_reset_system();
+	omap3xxx_prm_dpll3_reset(); /* never returns */
+	while (1);
 }

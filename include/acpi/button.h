@@ -3,7 +3,7 @@
 
 #include <linux/notifier.h>
 
-#if IS_ENABLED(CONFIG_ACPI_BUTTON)
+#if defined(CONFIG_ACPI_BUTTON) || defined(CONFIG_ACPI_BUTTON_MODULE)
 extern int acpi_lid_notifier_register(struct notifier_block *nb);
 extern int acpi_lid_notifier_unregister(struct notifier_block *nb);
 extern int acpi_lid_open(void);
@@ -20,6 +20,6 @@ static inline int acpi_lid_open(void)
 {
 	return 1;
 }
-#endif /* IS_ENABLED(CONFIG_ACPI_BUTTON) */
+#endif /* defined(CONFIG_ACPI_BUTTON) || defined(CONFIG_ACPI_BUTTON_MODULE) */
 
 #endif /* ACPI_BUTTON_H */

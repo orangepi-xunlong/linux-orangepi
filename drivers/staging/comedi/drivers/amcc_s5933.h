@@ -1,14 +1,16 @@
 /*
- * Stuff for AMCC S5933 PCI Controller
- *
- * Author: Michal Dobes <dobes@tesnet.cz>
- *
- * Inspirated from general-purpose AMCC S5933 PCI Matchmaker driver
- * made by Andrea Cisternino  <acister@pcape1.pi.infn.it>
- * and as result of espionage from MITE code made by David A. Schleef.
- * Thanks to AMCC for their on-line documentation and bus master DMA
- * example.
- */
+    comedi/drivers/amcc_s5933.h
+
+    Stuff for AMCC S5933 PCI Controller
+
+    Author: Michal Dobes <dobes@tesnet.cz>
+
+    Inspirated from general-purpose AMCC S5933 PCI Matchmaker driver
+    made by Andrea Cisternino  <acister@pcape1.pi.infn.it>
+    and as result of espionage from MITE code made by David A. Schleef.
+    Thanks to AMCC for their on-line documentation and bus master DMA
+    example.
+*/
 
 #ifndef _AMCC_S5933_H_
 #define _AMCC_S5933_H_
@@ -39,7 +41,7 @@
 #define  AMCC_OP_REG_MCSR_NVCMD  (AMCC_OP_REG_MCSR + 3)	/* Command in byte 3 */
 
 #define AMCC_FIFO_DEPTH_DWORD	8
-#define AMCC_FIFO_DEPTH_BYTES	(8 * sizeof(u32))
+#define AMCC_FIFO_DEPTH_BYTES	(8 * sizeof (u32))
 
 /****************************************************************************/
 /* AMCC - PCI Interrupt Control/Status Register                            */
@@ -50,13 +52,11 @@
 #define INTCSR_INBOX_BYTE(x)	(((x) & 0x3) << 8)
 #define INTCSR_INBOX_SELECT(x)	(((x) & 0x3) << 10)
 #define INTCSR_INBOX_FULL_INT	0x1000	/*  enable inbox full interrupt */
-/* read, or write clear inbox full interrupt */
-#define INTCSR_INBOX_INTR_STATUS	0x20000
-/* read only, interrupt asserted */
-#define INTCSR_INTR_ASSERTED	0x800000
+#define INTCSR_INBOX_INTR_STATUS	0x20000	/*  read, or write clear inbox full interrupt */
+#define INTCSR_INTR_ASSERTED	0x800000	/*  read only, interrupt asserted */
 
 /****************************************************************************/
-/* AMCC - PCI non-volatile ram command register (byte 3 of AMCC_OP_REG_MCSR) */
+/* AMCC - PCI non-volatile ram command register (byte 3 of master control/status register) */
 /****************************************************************************/
 #define MCSR_NV_LOAD_LOW_ADDR	0x0
 #define MCSR_NV_LOAD_HIGH_ADDR	0x20
@@ -108,8 +108,6 @@
 #define  AGCSTS_TCZERO_MASK	0x000000c0
 #define  AGCSTS_FIFO_ST_MASK	0x0000003f
 
-#define AGCSTS_TC_ENABLE	0x10000000
-
 #define AGCSTS_RESET_MBFLAGS	0x08000000
 #define AGCSTS_RESET_P2A_FIFO	0x04000000
 #define AGCSTS_RESET_A2P_FIFO	0x02000000
@@ -147,12 +145,12 @@
 #define AINT_READ_COMPL		0x00008000
 #define AINT_WRITE_COMPL	0x00004000
 
-#define AINT_OMB_ENABLE		0x00001000
-#define AINT_OMB_SELECT		0x00000c00
+#define AINT_OMB_ENABLE 	0x00001000
+#define AINT_OMB_SELECT 	0x00000c00
 #define AINT_OMB_BYTE		0x00000300
 
-#define AINT_IMB_ENABLE		0x00000010
-#define AINT_IMB_SELECT		0x0000000c
+#define AINT_IMB_ENABLE 	0x00000010
+#define AINT_IMB_SELECT 	0x0000000c
 #define AINT_IMB_BYTE		0x00000003
 
 /* these are bits from various different registers, needs cleanup XXX */

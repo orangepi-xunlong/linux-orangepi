@@ -1,5 +1,5 @@
 ///
-/// Remove unneeded semicolon.
+/// Removes unneeded semicolon.
 ///
 // Confidence: Moderate
 // Copyright: (C) 2012 Peter Senna Tschudin, INRIA/LIP6.  GPLv2.

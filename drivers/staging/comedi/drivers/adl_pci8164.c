@@ -13,12 +13,16 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 /*
  * Driver: adl_pci8164
  * Description: Driver for the Adlink PCI-8164 4 Axes Motion Control board
- * Devices: [ADLink] PCI-8164 (adl_pci8164)
+ * Devices: (ADLink) PCI-8164 [adl_pci8164]
  * Author: Michel Lachaine <mike@mikelachaine.ca>
  * Status: experimental
  * Updated: Mon, 14 Apr 2008 15:10:32 +0100
@@ -27,9 +31,9 @@
  */
 
 #include <linux/kernel.h>
-#include <linux/module.h>
+#include <linux/pci.h>
 
-#include "../comedi_pci.h"
+#include "../comedidev.h"
 
 #define PCI8164_AXIS(x)		((x) * 0x08)
 #define PCI8164_CMD_MSTS_REG	0x00
@@ -68,7 +72,7 @@ static int adl_pci8164_insn_write(struct comedi_device *dev,
 }
 
 static int adl_pci8164_auto_attach(struct comedi_device *dev,
-				   unsigned long context_unused)
+					     unsigned long context_unused)
 {
 	struct pci_dev *pcidev = comedi_to_pci_dev(dev);
 	struct comedi_subdevice *s;
@@ -134,7 +138,7 @@ static struct comedi_driver adl_pci8164_driver = {
 	.driver_name	= "adl_pci8164",
 	.module		= THIS_MODULE,
 	.auto_attach	= adl_pci8164_auto_attach,
-	.detach		= comedi_pci_detach,
+	.detach		= comedi_pci_disable,
 };
 
 static int adl_pci8164_pci_probe(struct pci_dev *dev,
@@ -144,7 +148,7 @@ static int adl_pci8164_pci_probe(struct pci_dev *dev,
 				      id->driver_data);
 }
 
-static const struct pci_device_id adl_pci8164_pci_table[] = {
+static DEFINE_PCI_DEVICE_TABLE(adl_pci8164_pci_table) = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_ADLINK, 0x8164) },
 	{ 0 }
 };

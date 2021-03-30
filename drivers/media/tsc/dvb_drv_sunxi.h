@@ -1,13 +1,3 @@
-/*
- * (C) Copyright 2010-2016
- * Allwinner Technology Co., Ltd. <www.allwinnertech.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- */
 #ifndef DRIVER_INTERFACE_H
 #define DRIVER_INTERFACE_H
 
@@ -39,4 +29,20 @@ struct intrstatus {
 	unsigned int port0pcr;
 };
 
+/*
+ * define struct for clock parameters
+ */
+/*#define CLK_NAME_LEN (32)*/
+
+#if 0
+struct clk_para {
+	char            clk_name[CLK_NAME_LEN];
+	unsigned long    handle;
+	int             clk_rate;
+};
+#endif
+
+/*define address of Registers*/
+#define REGS_BASE   (0x01C06000)
+#define REGS_SIZE   (0x1000)
 #endif

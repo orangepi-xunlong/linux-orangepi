@@ -21,7 +21,6 @@
 #define _PSB_GTT_H_
 
 #include <drm/drmP.h>
-#include <drm/drm_gem.h>
 
 /* This wants cleaning up with respect to the psb_dev and un-needed stuff */
 struct psb_gtt {
@@ -54,8 +53,7 @@ struct gtt_range {
 };
 
 extern struct gtt_range *psb_gtt_alloc_range(struct drm_device *dev, int len,
-					     const char *name, int backed,
-					     u32 align);
+						const char *name, int backed);
 extern void psb_gtt_kref_put(struct gtt_range *gt);
 extern void psb_gtt_free_range(struct drm_device *dev, struct gtt_range *gt);
 extern int psb_gtt_pin(struct gtt_range *gt);

@@ -76,24 +76,23 @@ int fdt_check_header(const void *fdt)
 
 const void *fdt_offset_ptr(const void *fdt, int offset, unsigned int len)
 {
-	unsigned absoffset = offset + fdt_off_dt_struct(fdt);
-
-	if ((absoffset < offset)
-	    || ((absoffset + len) < absoffset)
-	    || (absoffset + len) > fdt_totalsize(fdt))
-		return NULL;
+	const char *p;
 
 	if (fdt_version(fdt) >= 0x11)
 		if (((offset + len) < offset)
 		    || ((offset + len) > fdt_size_dt_struct(fdt)))
 			return NULL;
 
-	return _fdt_offset_ptr(fdt, offset);
+	p = _fdt_offset_ptr(fdt, offset);
+
+	if (p + len < p)
+		return NULL;
+	return p;
 }
 
 uint32_t fdt_next_tag(const void *fdt, int startoffset, int *nextoffset)
 {
-	const fdt32_t *tagp, *lenp;
+	const uint32_t *tagp, *lenp;
 	uint32_t tag;
 	int offset = startoffset;
 	const char *p;
@@ -195,34 +194,6 @@ int fdt_next_node(const void *fdt, int offset, int *depth)
 				return nextoffset;
 		}
 	} while (tag != FDT_BEGIN_NODE);
-
-	return offset;
-}
-
-int fdt_first_subnode(const void *fdt, int offset)
-{
-	int depth = 0;
-
-	offset = fdt_next_node(fdt, offset, &depth);
-	if (offset < 0 || depth != 1)
-		return -FDT_ERR_NOTFOUND;
-
-	return offset;
-}
-
-int fdt_next_subnode(const void *fdt, int offset)
-{
-	int depth = 1;
-
-	/*
-	 * With respect to the parent, the depth of the next subnode will be
-	 * the same as the last.
-	 */
-	do {
-		offset = fdt_next_node(fdt, offset, &depth);
-		if (offset < 0 || depth < 1)
-			return -FDT_ERR_NOTFOUND;
-	} while (depth > 1);
 
 	return offset;
 }

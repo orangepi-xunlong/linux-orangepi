@@ -19,7 +19,7 @@
 
 #define UART(x)		(*(volatile unsigned long *)(serial_port + (x)))
 
-static inline void putc(int c)
+static void putc(int c)
 {
 	unsigned long serial_port;
 

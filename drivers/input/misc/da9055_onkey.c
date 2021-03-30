@@ -11,6 +11,7 @@
  * option) any later version.
  */
 
+#include <linux/init.h>
 #include <linux/input.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
@@ -35,7 +36,7 @@ static void da9055_onkey_query(struct da9055_onkey *onkey)
 	} else {
 		key_stat &= DA9055_NOKEY_STS;
 		/*
-		 * Onkey status bit is cleared when onkey button is released.
+		 * Onkey status bit is cleared when onkey button is relased.
 		 */
 		if (!key_stat) {
 			input_report_key(onkey->input, KEY_POWER, 0);
@@ -109,6 +110,7 @@ static int da9055_onkey_probe(struct platform_device *pdev)
 
 	INIT_DELAYED_WORK(&onkey->work, da9055_onkey_work);
 
+	irq = regmap_irq_get_virq(da9055->irq_data, irq);
 	err = request_threaded_irq(irq, NULL, da9055_onkey_irq,
 				   IRQF_TRIGGER_HIGH | IRQF_ONESHOT,
 				   "ONKEY", onkey);
@@ -157,6 +159,7 @@ static struct platform_driver da9055_onkey_driver = {
 	.remove	= da9055_onkey_remove,
 	.driver = {
 		.name	= "da9055-onkey",
+		.owner	= THIS_MODULE,
 	},
 };
 

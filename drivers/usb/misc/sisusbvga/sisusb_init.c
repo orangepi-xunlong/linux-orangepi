@@ -40,6 +40,7 @@
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/poll.h>
+#include <linux/init.h>
 #include <linux/spinlock.h>
 
 #include "sisusb.h"

@@ -1,5 +1,5 @@
-#ifndef _UAPI__ASM_AVR32_SHMBUF_H
-#define _UAPI__ASM_AVR32_SHMBUF_H
+#ifndef __ASM_AVR32_SHMBUF_H
+#define __ASM_AVR32_SHMBUF_H
 
 /*
  * The shmid64_ds structure for i386 architecture.
@@ -39,4 +39,4 @@ struct shminfo64 {
 	unsigned long	__unused4;
 };
 
-#endif /* _UAPI__ASM_AVR32_SHMBUF_H */
+#endif /* __ASM_AVR32_SHMBUF_H */

@@ -89,10 +89,10 @@ static char version[] __initdata =
 #define DEB(x,y)	if (i596_debug & (x)) y
 
 
-#if IS_ENABLED(CONFIG_MVME16x_NET)
+#if defined(CONFIG_MVME16x_NET) || defined(CONFIG_MVME16x_NET_MODULE)
 #define ENABLE_MVME16x_NET
 #endif
-#if IS_ENABLED(CONFIG_BVME6000_NET)
+#if defined(CONFIG_BVME6000_NET) || defined(CONFIG_BVME6000_NET_MODULE)
 #define ENABLE_BVME6000_NET
 #endif
 
@@ -711,7 +711,7 @@ static int init_i596_mem(struct net_device *dev)
 	i596_add_cmd(dev, &lp->cf_cmd.cmd);
 
 	DEB(DEB_INIT,printk(KERN_DEBUG "%s: queuing CmdSASetup\n", dev->name));
-	memcpy(lp->sa_cmd.eth_addr, dev->dev_addr, ETH_ALEN);
+	memcpy(lp->sa_cmd.eth_addr, dev->dev_addr, 6);
 	lp->sa_cmd.cmd.command = CmdSASetup;
 	i596_add_cmd(dev, &lp->sa_cmd.cmd);
 
@@ -1042,7 +1042,7 @@ static void i596_tx_timeout (struct net_device *dev)
 		lp->last_restart = dev->stats.tx_packets;
 	}
 
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	netif_wake_queue (dev);
 }
 
@@ -1155,7 +1155,7 @@ struct net_device * __init i82596_probe(int unit)
 			err = -ENODEV;
 			goto out;
 		}
-		memcpy(eth_addr, (void *) 0xfffc1f2c, ETH_ALEN);	/* YUCK! Get addr from NOVRAM */
+		memcpy(eth_addr, (void *) 0xfffc1f2c, 6);	/* YUCK! Get addr from NOVRAM */
 		dev->base_addr = MVME_I596_BASE;
 		dev->irq = (unsigned) MVME16x_IRQ_I596;
 		goto found;
@@ -1527,7 +1527,9 @@ int __init init_module(void)
 	if (debug >= 0)
 		i596_debug = debug;
 	dev_82596 = i82596_probe(-1);
-	return PTR_ERR_OR_ZERO(dev_82596);
+	if (IS_ERR(dev_82596))
+		return PTR_ERR(dev_82596);
+	return 0;
 }
 
 void __exit cleanup_module(void)

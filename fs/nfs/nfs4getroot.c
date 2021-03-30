@@ -9,7 +9,7 @@
 
 #define NFSDBG_FACILITY		NFSDBG_CLIENT
 
-int nfs4_get_rootfh(struct nfs_server *server, struct nfs_fh *mntfh, bool auth_probe)
+int nfs4_get_rootfh(struct nfs_server *server, struct nfs_fh *mntfh)
 {
 	struct nfs_fsinfo fsinfo;
 	int ret = -ENOMEM;
@@ -21,7 +21,7 @@ int nfs4_get_rootfh(struct nfs_server *server, struct nfs_fh *mntfh, bool auth_p
 		goto out;
 
 	/* Start by getting the root filehandle from the server */
-	ret = nfs4_proc_get_rootfh(server, mntfh, &fsinfo, auth_probe);
+	ret = nfs4_proc_get_rootfh(server, mntfh, &fsinfo);
 	if (ret < 0) {
 		dprintk("nfs4_get_rootfh: getroot error = %d\n", -ret);
 		goto out;
@@ -32,6 +32,13 @@ int nfs4_get_rootfh(struct nfs_server *server, struct nfs_fh *mntfh, bool auth_p
 		printk(KERN_ERR "nfs4_get_rootfh:"
 		       " getroot encountered non-directory\n");
 		ret = -ENOTDIR;
+		goto out;
+	}
+
+	if (fsinfo.fattr->valid & NFS_ATTR_FATTR_V4_REFERRAL) {
+		printk(KERN_ERR "nfs4_get_rootfh:"
+		       " getroot obtained referral\n");
+		ret = -EREMOTE;
 		goto out;
 	}
 

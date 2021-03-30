@@ -4,7 +4,7 @@
  * SPEAr300 machine source file
  *
  * Copyright (C) 2009-2012 ST Microelectronics
- * Viresh Kumar <vireshk@kernel.org>
+ * Viresh Kumar <viresh.linux@gmail.com>
  *
  * This file is licensed under the terms of the GNU General Public
  * License version 2. This program is licensed "as is" without any
@@ -14,6 +14,7 @@
 #define pr_fmt(fmt) "SPEAr300: " fmt
 
 #include <linux/amba/pl08x.h>
+#include <linux/irqchip.h>
 #include <linux/of_platform.h>
 #include <asm/mach/arch.h>
 #include "generic.h"
@@ -194,7 +195,8 @@ static void __init spear300_dt_init(void)
 	pl080_plat_data.slave_channels = spear300_dma_info;
 	pl080_plat_data.num_slave_channels = ARRAY_SIZE(spear300_dma_info);
 
-	of_platform_default_populate(NULL, spear300_auxdata_lookup, NULL);
+	of_platform_populate(NULL, of_default_bus_match_table,
+			spear300_auxdata_lookup, NULL);
 }
 
 static const char * const spear300_dt_board_compat[] = {
@@ -210,6 +212,7 @@ static void __init spear300_map_io(void)
 
 DT_MACHINE_START(SPEAR300_DT, "ST SPEAr300 SoC with Flattened Device Tree")
 	.map_io		=	spear300_map_io,
+	.init_irq	=	irqchip_init,
 	.init_time	=	spear3xx_timer_init,
 	.init_machine	=	spear300_dt_init,
 	.restart	=	spear_restart,

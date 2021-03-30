@@ -59,14 +59,14 @@ static u32 wlcore_rx_get_align_buf_size(struct wl1271 *wl, u32 pkt_len)
 static void wl1271_rx_status(struct wl1271 *wl,
 			     struct wl1271_rx_descriptor *desc,
 			     struct ieee80211_rx_status *status,
-			     u8 beacon, u8 probe_rsp)
+			     u8 beacon)
 {
 	memset(status, 0, sizeof(struct ieee80211_rx_status));
 
 	if ((desc->flags & WL1271_RX_DESC_BAND_MASK) == WL1271_RX_DESC_BAND_BG)
-		status->band = NL80211_BAND_2GHZ;
+		status->band = IEEE80211_BAND_2GHZ;
 	else
-		status->band = NL80211_BAND_5GHZ;
+		status->band = IEEE80211_BAND_5GHZ;
 
 	status->rate_idx = wlcore_rate_to_idx(wl, desc->rate, status->band);
 
@@ -74,14 +74,7 @@ static void wl1271_rx_status(struct wl1271 *wl,
 	if (desc->rate <= wl->hw_min_ht_rate)
 		status->flag |= RX_FLAG_HT;
 
-	/*
-	* Read the signal level and antenna diversity indication.
-	* The msb in the signal level is always set as it is a
-	* negative number.
-	* The antenna indication is the msb of the rssi.
-	*/
-	status->signal = ((desc->rssi & RSSI_LEVEL_BITMASK) | BIT(7));
-	status->antenna = ((desc->rssi & ANT_DIVERSITY_BITMASK) >> 7);
+	status->signal = desc->rssi;
 
 	/*
 	 * FIXME: In wl1251, the SNR should be divided by two.  In wl1271 we
@@ -105,9 +98,6 @@ static void wl1271_rx_status(struct wl1271 *wl,
 				       desc_err_code);
 		}
 	}
-
-	if (beacon || probe_rsp)
-		status->boottime_ns = ktime_get_boot_ns();
 
 	if (beacon)
 		wlcore_set_pending_regdomain_ch(wl, (u16)desc->channel,
@@ -152,6 +142,7 @@ static int wl1271_rx_handle_data(struct wl1271 *wl, u8 *data, u32 length,
 	if (desc->packet_class == WL12XX_RX_CLASS_LOGGER) {
 		size_t len = length - sizeof(*desc);
 		wl12xx_copy_fwlog(wl, data + sizeof(*desc), len);
+		wake_up_interruptible(&wl->fwlog_waitq);
 		return 0;
 	}
 
@@ -197,8 +188,7 @@ static int wl1271_rx_handle_data(struct wl1271 *wl, u8 *data, u32 length,
 	if (ieee80211_is_data_present(hdr->frame_control))
 		is_data = 1;
 
-	wl1271_rx_status(wl, desc, IEEE80211_SKB_RXCB(skb), beacon,
-			 ieee80211_is_probe_resp(hdr->frame_control));
+	wl1271_rx_status(wl, desc, IEEE80211_SKB_RXCB(skb), beacon);
 	wlcore_hw_set_rx_csum(wl, desc, skb);
 
 	seq_num = (le16_to_cpu(hdr->seq_ctrl) & IEEE80211_SCTL_SEQ) >> 4;
@@ -213,9 +203,9 @@ static int wl1271_rx_handle_data(struct wl1271 *wl, u8 *data, u32 length,
 	return is_data;
 }
 
-int wlcore_rx(struct wl1271 *wl, struct wl_fw_status *status)
+int wlcore_rx(struct wl1271 *wl, struct wl_fw_status_1 *status)
 {
-	unsigned long active_hlids[BITS_TO_LONGS(WLCORE_MAX_LINKS)] = {0};
+	unsigned long active_hlids[BITS_TO_LONGS(WL12XX_MAX_LINKS)] = {0};
 	u32 buf_size;
 	u32 fw_rx_counter = status->fw_rx_counter % wl->num_rx_desc;
 	u32 drv_rx_counter = wl->rx_counter % wl->num_rx_desc;
@@ -225,13 +215,6 @@ int wlcore_rx(struct wl1271 *wl, struct wl_fw_status *status)
 	u8 hlid;
 	enum wl_rx_buf_align rx_align;
 	int ret = 0;
-
-	/* update rates per link */
-	hlid = status->counters.hlid;
-
-	if (hlid < WLCORE_MAX_LINKS)
-		wl->links[hlid].fw_rate_mbps =
-				status->counters.tx_last_rate_mbps;
 
 	while (drv_rx_counter != fw_rx_counter) {
 		buf_size = 0;
@@ -280,12 +263,12 @@ int wlcore_rx(struct wl1271 *wl, struct wl_fw_status *status)
 						  wl->aggr_buf + pkt_offset,
 						  pkt_len, rx_align,
 						  &hlid) == 1) {
-				if (hlid < wl->num_links)
+				if (hlid < WL12XX_MAX_LINKS)
 					__set_bit(hlid, active_hlids);
 				else
 					WARN(1,
-					     "hlid (%d) exceeded MAX_LINKS\n",
-					     hlid);
+					     "hlid exceeded WL12XX_MAX_LINKS "
+					     "(%d)\n", hlid);
 			}
 
 			wl->rx_counter++;
@@ -319,7 +302,7 @@ int wl1271_rx_filter_enable(struct wl1271 *wl,
 {
 	int ret;
 
-	if (!!test_bit(index, wl->rx_filter_enabled) == enable) {
+	if (wl->rx_filter_enabled[index] == enable) {
 		wl1271_warning("Request to enable an already "
 			     "enabled rx filter %d", index);
 		return 0;
@@ -333,10 +316,7 @@ int wl1271_rx_filter_enable(struct wl1271 *wl,
 		return ret;
 	}
 
-	if (enable)
-		__set_bit(index, wl->rx_filter_enabled);
-	else
-		__clear_bit(index, wl->rx_filter_enabled);
+	wl->rx_filter_enabled[index] = enable;
 
 	return 0;
 }
@@ -346,7 +326,7 @@ int wl1271_rx_filter_clear_all(struct wl1271 *wl)
 	int i, ret = 0;
 
 	for (i = 0; i < WL1271_MAX_RX_FILTERS; i++) {
-		if (!test_bit(i, wl->rx_filter_enabled))
+		if (!wl->rx_filter_enabled[i])
 			continue;
 		ret = wl1271_rx_filter_enable(wl, i, 0, NULL);
 		if (ret)

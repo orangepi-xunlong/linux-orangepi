@@ -1,0 +1,16 @@
+*.o
+*.o.cmd
+Module.symvers
+modules.order
+optee.ko
+optee.mod.c
+.optee.ko.cmd
+.tmp_versions
+.cproject
+Debug
+.*.swp
+.project
+.settings
+.optee_armtz.ko.cmd
+optee_armtz.ko
+optee_armtz.mod.c

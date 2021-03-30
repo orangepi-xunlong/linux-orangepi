@@ -59,25 +59,13 @@ extern void flush_tlb_mm_range(struct mm_struct *mm, unsigned long start,
 			       unsigned long end);
 
 static inline void
-tlb_flush_mmu_tlbonly(struct mmu_gather *tlb)
-{
-	flush_tlb_mm_range(tlb->mm, tlb->start, tlb->end);
-}
-
-static inline void
-tlb_flush_mmu_free(struct mmu_gather *tlb)
-{
-	init_tlb_gather(tlb);
-}
-
-static inline void
 tlb_flush_mmu(struct mmu_gather *tlb)
 {
 	if (!tlb->need_flush)
 		return;
 
-	tlb_flush_mmu_tlbonly(tlb);
-	tlb_flush_mmu_free(tlb);
+	flush_tlb_mm_range(tlb->mm, tlb->start, tlb->end);
+	init_tlb_gather(tlb);
 }
 
 /* tlb_finish_mmu
@@ -102,30 +90,12 @@ static inline int __tlb_remove_page(struct mmu_gather *tlb, struct page *page)
 {
 	tlb->need_flush = 1;
 	free_page_and_swap_cache(page);
-	return false; /* avoid calling tlb_flush_mmu */
+	return 1; /* avoid calling tlb_flush_mmu */
 }
 
 static inline void tlb_remove_page(struct mmu_gather *tlb, struct page *page)
 {
 	__tlb_remove_page(tlb, page);
-}
-
-static inline bool __tlb_remove_page_size(struct mmu_gather *tlb,
-					  struct page *page, int page_size)
-{
-	return __tlb_remove_page(tlb, page);
-}
-
-static inline bool __tlb_remove_pte_page(struct mmu_gather *tlb,
-					 struct page *page)
-{
-	return __tlb_remove_page(tlb, page);
-}
-
-static inline void tlb_remove_page_size(struct mmu_gather *tlb,
-					struct page *page, int page_size)
-{
-	return tlb_remove_page(tlb, page);
 }
 
 /**

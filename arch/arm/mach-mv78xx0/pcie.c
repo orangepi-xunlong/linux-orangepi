@@ -15,13 +15,8 @@
 #include <asm/irq.h>
 #include <asm/mach/pci.h>
 #include <plat/pcie.h>
-#include "mv78xx0.h"
+#include <mach/mv78xx0.h>
 #include "common.h"
-
-#define MV78XX0_MBUS_PCIE_MEM_TARGET(port, lane) ((port) ? 8 : 4)
-#define MV78XX0_MBUS_PCIE_MEM_ATTR(port, lane)   (0xf8 & ~(0x10 << (lane)))
-#define MV78XX0_MBUS_PCIE_IO_TARGET(port, lane)  ((port) ? 8 : 4)
-#define MV78XX0_MBUS_PCIE_IO_ATTR(port, lane)    (0xf0 & ~(0x10 << (lane)))
 
 struct pcie_port {
 	u8			maj;
@@ -76,6 +71,7 @@ static void __init mv78xx0_pcie_preinit(void)
 	start = MV78XX0_PCIE_MEM_PHYS_BASE;
 	for (i = 0; i < num_pcie_ports; i++) {
 		struct pcie_port *pp = pcie_port + i;
+		char winname[MVEBU_MBUS_MAX_WINNAME_SZ];
 
 		snprintf(pp->mem_space_name, sizeof(pp->mem_space_name),
 			"PCIe %d.%d MEM", pp->maj, pp->min);
@@ -89,12 +85,17 @@ static void __init mv78xx0_pcie_preinit(void)
 		if (request_resource(&iomem_resource, &pp->res))
 			panic("can't allocate PCIe MEM sub-space");
 
-		mvebu_mbus_add_window_by_id(MV78XX0_MBUS_PCIE_MEM_TARGET(pp->maj, pp->min),
-					    MV78XX0_MBUS_PCIE_MEM_ATTR(pp->maj, pp->min),
-					    pp->res.start, resource_size(&pp->res));
-		mvebu_mbus_add_window_remap_by_id(MV78XX0_MBUS_PCIE_IO_TARGET(pp->maj, pp->min),
-						  MV78XX0_MBUS_PCIE_IO_ATTR(pp->maj, pp->min),
-						  i * SZ_64K, SZ_64K, 0);
+		snprintf(winname, sizeof(winname), "pcie%d.%d",
+			 pp->maj, pp->min);
+
+		mvebu_mbus_add_window_remap_flags(winname,
+						  pp->res.start,
+						  resource_size(&pp->res),
+						  MVEBU_MBUS_NO_REMAP,
+						  MVEBU_MBUS_PCI_MEM);
+		mvebu_mbus_add_window_remap_flags(winname,
+						  i * SZ_64K, SZ_64K,
+						  0, MVEBU_MBUS_PCI_IO);
 	}
 }
 
@@ -197,13 +198,17 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MARVELL, PCI_ANY_ID, rc_pci_fixup);
 static struct pci_bus __init *
 mv78xx0_pcie_scan_bus(int nr, struct pci_sys_data *sys)
 {
-	if (nr >= num_pcie_ports) {
+	struct pci_bus *bus;
+
+	if (nr < num_pcie_ports) {
+		bus = pci_scan_root_bus(NULL, sys->busnr, &pcie_ops, sys,
+					&sys->resources);
+	} else {
+		bus = NULL;
 		BUG();
-		return NULL;
 	}
 
-	return pci_scan_root_bus(NULL, sys->busnr, &pcie_ops, sys,
-				 &sys->resources);
+	return bus;
 }
 
 static int __init mv78xx0_pcie_map_irq(const struct pci_dev *dev, u8 slot,

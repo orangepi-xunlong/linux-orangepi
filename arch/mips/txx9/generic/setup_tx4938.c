@@ -31,8 +31,8 @@ static void __init tx4938_wdr_init(void)
 {
 	/* report watchdog reset status */
 	if (____raw_readq(&tx4938_ccfgptr->ccfg) & TX4938_CCFG_WDRST)
-		pr_warn("Watchdog reset detected at 0x%lx\n",
-			read_c0_errorepc());
+		pr_warning("Watchdog reset detected at 0x%lx\n",
+			   read_c0_errorepc());
 	/* clear WatchDogReset (W1C) */
 	tx4938_ccfg_set(TX4938_CCFG_WDRST);
 	/* do reset on watchdog */
@@ -241,6 +241,7 @@ void __init tx4938_setup(void)
 		txx9_tmr_init(TX4938_TMR_REG(i) & 0xfffffffffULL);
 
 	/* PIO */
+	txx9_gpio_init(TX4938_PIO_REG & 0xfffffffffULL, 0, TX4938_NUM_PIO);
 	__raw_writel(0, &tx4938_pioptr->maskcpu);
 	__raw_writel(0, &tx4938_pioptr->maskext);
 

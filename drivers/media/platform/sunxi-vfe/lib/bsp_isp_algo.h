@@ -1,19 +1,3 @@
-/*
- * linux-4.9/drivers/media/platform/sunxi-vfe/lib/bsp_isp_algo.h
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
 
 /*
  ***************************************************************************************
@@ -26,7 +10,7 @@
  *
  * Version		  Author         Date		    Description
  *
- *   1.0		Yang Feng	2013/10/08	    First Version
+ *   1.0		Yang Feng   	2013/10/08	    First Version
  *
  ****************************************************************************************
  */
@@ -34,13 +18,13 @@
 #ifndef __BSP__ISP__ALGO__H
 #define __BSP__ISP__ALGO__H
 
-#include "isp_module_cfg.h" /* TODO m*/
+#include "isp_module_cfg.h" //TODO
 
-/* #include <linux/mutex.h> */
-#define  MAX(a, b)              (((a) > (b)) ? (a) : (b))
-#define  MIN(a, b)              (((a) < (b)) ? (a) : (b))
+//#include <linux/mutex.h>
+#define  MAX(a,b)              (((a) > (b)) ? (a) : (b))
+#define  MIN(a,b)              (((a) < (b)) ? (a) : (b))
 #define  SQUARE(x)             ((x) * (x))
-#define  CLIP(a, i, s)           (((a) > (s)) ? (s) : MAX(a, i))
+#define  CLIP(a,i,s)           (((a) > (s)) ? (s) : MAX(a,i))
 
 #define  SATURATION_MAX             150
 #define  ISP_DEFOG_MIN_RGB          1023
@@ -90,73 +74,85 @@
 /* 3A Default Constants */
 #define LSC_PIC_SIZE             4096
 
-typedef enum isp_bool {
+typedef enum isp_bool
+{
 	ISP_FALSE    = 0,
 	ISP_TRUE     = !ISP_FALSE,
 } isp_bool;
 
-enum auto_focus_mode {
+enum auto_focus_mode
+{
 	AF_MANUAL               = 0,
 	AF_AUTO_CONTINUEOUS     = 1,
 	AF_AUTO_SINGLE          = 2,
 };
 
-enum auto_focus_win_mode {
+enum auto_focus_win_mode
+{
 	AF_AUTO_WIN             = 0,
 	AF_NUM_WIN              = 1,
 };
 
-enum auto_focus_range {
+enum auto_focus_range
+{
 	AF_RANGE_AUTO           = 0,
 	AF_RANGE_NORMAL         = 1,
 	AF_RANGE_MACRO          = 2,
 	AF_RANGE_INFINITY       = 3,
 };
 
-enum auto_focus_status {
-	AUTO_FOCUS_STATUS_IDLE     = 0,
-	AUTO_FOCUS_STATUS_BUSY     = 1,
-	AUTO_FOCUS_STATUS_REACHED  = 2,
-	AUTO_FOCUS_STATUS_APPROCH  = 3,
-	AUTO_FOCUS_STATUS_REFOCUS  = 4,
-	AUTO_FOCUS_STATUS_FINDED   = 5,
-	AUTO_FOCUS_STATUS_FAILED   = 6,
+enum auto_focus_status
+{
+	AUTO_FOCUS_STATUS_IDLE     =0,
+	AUTO_FOCUS_STATUS_BUSY     =1,
+	AUTO_FOCUS_STATUS_REACHED  =2,
+	AUTO_FOCUS_STATUS_APPROCH  =3,
+	AUTO_FOCUS_STATUS_REFOCUS  =4,
+	AUTO_FOCUS_STATUS_FINDED   =5,
+	AUTO_FOCUS_STATUS_FAILED   =6,
 };
 
-enum exposure_mode {
+enum exposure_mode
+{
 	EXP_AUTO         = 0,
 	EXP_MANUAL       = 1,
 };
 
-enum exposure_win_mode {
+enum exposure_win_mode
+{
 	AE_AUTO_WIN     = 0,
 	AE_SINGLE_WIN   = 1,
 };
 
-enum iso_mode {
+enum iso_mode
+{
 	ISO_MANUAL         = 0,
 	ISO_AUTO,
 };
 
-enum auto_exposure_status {
-	AUTO_EXPOSURE_STATUS_IDLE      = 0,
-	AUTO_EXPOSURE_STATUS_BUSY      = 1,
+enum auto_exposure_status
+{
+	AUTO_EXPOSURE_STATUS_IDLE      =0,
+	AUTO_EXPOSURE_STATUS_BUSY      =1,
 };
 
-enum power_line_frequency {
+enum power_line_frequency
+{
 	FREQUENCY_DISABLED  = 0,
 	FREQUENCY_50HZ      = 1,
 	FREQUENCY_60HZ      = 2,
 	FREQUENCY_AUTO      = 3,
 };
 
-enum detected_flicker_type {
+enum detected_flicker_type
+{
 	FLICKER_NO        = 0,
 	FLICKER_50HZ      = 1,
 	FLICKER_60HZ      = 2,
 };
 
-enum scene_mode {
+enum scene_mode
+{
 	SCENE_MODE_NONE            = 0,
 	SCENE_MODE_BACKLIGHT       = 1,
 	SCENE_MODE_BEACH_SNOW      = 2,
@@ -171,10 +167,10 @@ enum scene_mode {
 	SCENE_MODE_SPORTS          = 11,
 	SCENE_MODE_SUNSET          = 12,
 	SCENE_MODE_TEXT            = 13,
-	SCENE_MODE_MAX,
 };
 
-enum colorfx {
+enum colorfx
+{
 	COLORFX_NONE               = 0,
 	COLORFX_BW                 = 1,
 	COLORFX_SEPIA              = 2,
@@ -193,7 +189,8 @@ enum colorfx {
 	COLORFX_SET_CBCR           = 15,
 };
 
-enum white_balance_mode {
+enum white_balance_mode
+{
 	WB_MANUAL        = 0,
 	WB_AUTO          = 1,
 	WB_INCANDESCENT  = 2,
@@ -207,25 +204,29 @@ enum white_balance_mode {
 	WB_TUNGSTEN      = 10,
 };
 
-enum auto_white_balance_status {
+enum auto_white_balance_status
+{
 	AUTO_WHITE_BALANECE_STATUS_IDLE     = 0,
 	AUTO_WHITE_BALANECE_BUSY            = 1,
 };
 
-enum gsensor_direction {
+enum gsensor_direction
+{
 	GSENSOR_ANGLE_0     = 0,
 	GSENSOR_ANGLE_90,
 	GSENSOR_ANGLE_180,
 	GSENSOR_ANGLE_270,
 };
 
-enum sensor_mode {
+enum sensor_mode
+{
 	PREVIEW_MODE     = 0,
 	CAPTURE_MODE,
 	VIDEO_MODE,
 };
 
-enum flash_mode {
+enum flash_mode
+{
 	FLASH_MODE_OFF      = 0,
 	FLASH_MODE_ON       = 1,
 	FLASH_MODE_TORCH    = 2,
@@ -233,14 +234,16 @@ enum flash_mode {
 	FLASH_MODE_RED_EYE  = 4,
 };
 
-enum isp_stat_buf_status {
+enum isp_stat_buf_status
+{
 	BUF_IDLE            = 0,
 	BUF_ACTIVE          = 1,
 	BUF_LOCKED          = 2,
 };
 
 
-enum frame_rate {
+enum frame_rate
+{
 	FRAME_RATE_DIV_BY_1        = 120,
 	FRAME_RATE_DIV_BY_1_dot_5  = 80,
 	FRAME_RATE_DIV_BY_2        = 60,
@@ -251,15 +254,16 @@ enum frame_rate {
 	FRAME_RATE_DIV_BY_8        = 15,
 };
 
-enum isp_test_mode {
-	ISP_TEST_ALL_ENABLE		= 0,
-	ISP_TEST_BAYER_GAINOFFSET	= 1,
-	ISP_TEST_LENS			= 2,
-	ISP_TEST_GAMMA			= 3,
-	ISP_TEST_COLOR_MATRIX		= 4,
-	ISP_TEST_COLOR			= 5,
-	ISP_TEST_VCM_RANGE		= 6,
-	ISP_TEST_MANUAL			= 7,
+enum isp_test_mode
+{
+	ISP_TEST_ALL_ENABLE           = 0,
+	ISP_TEST_BAYER_GAINOFFSET     = 1,
+	ISP_TEST_LENS                 = 2,
+	ISP_TEST_GAMMA                = 3,
+	ISP_TEST_COLOR_MATRIX         = 4,
+	ISP_TEST_COLOR                = 5,
+	ISP_TEST_VCM_RANGE            = 6,
+	ISP_TEST_MANUAL    			= 7,
 };
 enum take_picture_flag {
 	TAKE_PICTURE_STOP	= 0,
@@ -269,30 +273,26 @@ enum take_picture_flag {
 	TAKE_PICTURE_HDR	= 4,
 };
 
-struct sensor_band_step_config {
-	/* unsigned int reCal; */
-	/* unsigned int sensor_change_flag; */
+struct sensor_band_step_config
+{
+	//unsigned int reCal;
+	//unsigned int sensor_change_flag;
 	unsigned int t_line;
 	unsigned int band_step_50hz;
 	unsigned int band_step_60hz;
 };
 
-struct vcm_para {
+struct vcm_para
+{
 	int vcm_curr_code;
 	int vcm_max_code;
 	int vcm_min_code;
 	int vcm_step;
 	int vcm_table;
 };
-struct isp_video_stabilization {
-	int move_dir;
-	int move_step;
-	int hor_off;
-	int ver_off;
-};
 
-
-struct isp_stat_buffer {
+struct isp_stat_buffer
+{
 	unsigned int buf_size;
 	unsigned int frame_number;
 	unsigned int cur_frame;
@@ -301,7 +301,8 @@ struct isp_stat_buffer {
 	void *stat_buf;
 };
 
-struct h3a_win {
+struct h3a_win
+{
 	struct isp_h3a_coor_win af_coor;
 	struct isp_h3a_coor_win awb_coor;
 
@@ -310,31 +311,19 @@ struct h3a_win {
 	struct isp_h3a_coor_win hist_coor;
 };
 
-typedef union {
+typedef union
+{
 	unsigned int dwval;
-	struct {
-		unsigned int af_sharp:16;
-		unsigned int hdr_cnt:4;
-		unsigned int flash_ok:1;
-		unsigned int capture_ok:1;
-		unsigned int fast_capture_ok:1;
-		unsigned int res0:9;
+	struct
+	{
+		unsigned int af_sharp             : 16 ; 
+		unsigned int hdr_cnt                    :  4 ; 
+		unsigned int flash_ok             : 1 ;
+		unsigned int capture_ok        :  1 ; 
+		unsigned int fast_capture_ok        :  1 ; 
+		unsigned int res0        :  9 ; 
 	} bits;
 } IMAGE_FLAG;
-
-struct ae_table {
-	unsigned int min_exp;  /*us*/
-	unsigned int max_exp;
-	unsigned int min_gain;
-	unsigned int max_gain;
-};
-
-struct ae_table_info {
-	struct ae_table ae_tbl[10];
-	int length;
-	int ev_step;
-	int shutter_shift;
-};
 
 /*
  *
@@ -342,20 +331,20 @@ struct ae_table_info {
  *   It will be used to adjust exposure time, vcm and other regs.
  *
  */
-struct isp_3a_result {
+struct isp_3a_result
+{
 	/* AE Output */
-	unsigned int exp_line_num;          /*20bits,Q4*/
-	unsigned int exp_analog_gain;       /*16bits,Q8*/
-	unsigned int exp_digital_gain;      /*16bits,Q8*/
-	unsigned int ae_gain;               /*16bits,Q8*/
-	unsigned int lv;               /*LV*100*/
+	unsigned int exp_line_num;          //20bits,Q4
+	unsigned int exp_analog_gain;       //16bits,Q8
+	unsigned int exp_digital_gain;      //16bits,Q8
+	unsigned int ae_gain;               //16bits,Q8
 
 	int min_rgb_pre[8];
 	int defog_pre;
-	unsigned int exp_time;              /*us*/
-	unsigned int exp_line_temp;              /*20bits,Q4*/
-	unsigned int analog_gain_temp;      /*16bits,Q8*/
-	unsigned int digital_gain_temp;     /*16bits,Q8*/
+	unsigned int exp_time;              //us
+	unsigned int exp_line_temp;              //20bits,Q4
+	unsigned int analog_gain_temp;      //16bits,Q8
+	unsigned int digital_gain_temp;     //16bits,Q8
 
 	unsigned int ae_interval_cnt;
 	unsigned int ae_frame_cnt_temp;
@@ -367,7 +356,6 @@ struct isp_3a_result {
 	unsigned int motion_flag;
 	unsigned int ae_avp_to_af;
 
-	struct isp_video_stabilization video_stab;
 	struct isp_denoise filter_2d_coef;
 	enum isp_bndf_mode filter_mode;
 
@@ -389,7 +377,7 @@ struct isp_3a_result {
 	unsigned int real_vcm_pos;
 	enum auto_focus_status af_status;
 	IMAGE_FLAG image_quality;
-	/* struct mutex isp_3a_result_mutex; */
+	//struct mutex isp_3a_result_mutex;
 };
 
 /*
@@ -397,26 +385,26 @@ struct isp_3a_result {
  *   struct isp_driver_to_3a_stat - Stores the 3A stat buffer and related settings.
  *
  */
-struct isp_driver_to_3a_stat {
+struct isp_driver_to_3a_stat
+{
 	/* v4l2 drivers fill */
 	/* Frame isp_size and scale ratio will be used to set the current stat window */
 	struct isp_size pic_size;
 
 	/*added by zenglingying 2013-2-26 18:48:57*/
 	/*save the current image timing and cfg limits*/
-	unsigned int hoffset;     /*receive hoffset from sensor output*/
-	unsigned int voffset;     /*receive voffset from sensor output*/
-	unsigned int hts;         /*h size of timing, unit: pclk*/
-	unsigned int vts;         /*v size of timing, unit: line*/
-	unsigned int pclk;        /*pixel clock of 1sec*/
-	unsigned int intg_min;    /*integration min, unit: line, Q8*/
-	unsigned int intg_max;    /*integration max, unit: line, Q8*/
-	unsigned int fps_fixed;   /*fps mode 1=fixed fps*/
-								/*N=varied fps to 1/N of org fps*/
-	unsigned int bin_factor;  /*binning factor*/
-	unsigned int gain_min;    /*sensor gain min, Q8*/
-	unsigned int gain_max;    /*sensor gain max, Q8*/
-	struct ae_table_info ae_tbl;
+	unsigned int hoffset;     //receive hoffset from sensor output
+	unsigned int voffset;     //receive voffset from sensor output
+	unsigned int hts;         //h size of timing, unit: pclk
+	unsigned int vts;         //v size of timing, unit: line
+	unsigned int pclk;        //pixel clock of 1sec
+	unsigned int intg_min;    //integration min, unit: line, Q8
+	unsigned int intg_max;    //integration max, unit: line, Q8
+	unsigned int fps_fixed;   //fps mode 1=fixed fps
+	                        //N=varied fps to 1/N of org fps
+	unsigned int bin_factor;  //binning factor
+	unsigned int gain_min;    //sensor gain min, Q8
+	unsigned int gain_max;    //sensor gain max, Q8
 
 	int have_shading;
 	int isp_lens_cx;
@@ -445,8 +433,6 @@ struct isp_driver_to_3a_stat {
 	struct isp_awb_avp_stat awb_avp_saved;
 	int min_rgb_saved;
 	int c_noise_saved;
-	struct isp_cfg_pt *isp_cfg_saved;
-	struct isp_cfg_pt *isp_ir_cfg_saved;
 };
 
 
@@ -455,7 +441,8 @@ struct isp_driver_to_3a_stat {
  *   struct exposure_settings - Stores the exposure related settings.
  *
  */
-struct exposure_settings {
+struct exposure_settings
+{
 	int exp_compensation;
 	int exp_priorty;
 
@@ -476,11 +463,7 @@ struct exposure_settings {
 	int expect_tbl_cnt;
 	int tbl_max_ind;
 	int exposure_cfg[2];
-	int ae_hist_cfg[4];
-	int ae_hist_eq_cfg[13];
-
 	int iso_index;
-	int ae_interval_frame;
 };
 
 /*
@@ -488,14 +471,14 @@ struct exposure_settings {
  *   struct auto_focus_settings - Stores the auto focuse related settings.
  *
  */
-struct auto_focus_settings {
+struct auto_focus_settings
+{
 	int focus_absolute;
 	int focus_relative;
 	enum auto_focus_mode af_mode;
 	enum auto_focus_win_mode af_win_mode;
 	enum auto_focus_range af_range;
 	isp_bool focus_lock;
-	unsigned int af_interval_frame;
 };
 
 /*
@@ -503,7 +486,8 @@ struct auto_focus_settings {
  *   struct white_balance_settings - Stores the white balance related settings.
  *
  */
-struct white_balance_settings {
+struct white_balance_settings
+{
 	enum white_balance_mode wb_mode;
 	enum colorfx effect;
 	int wb_temperature;
@@ -511,13 +495,45 @@ struct white_balance_settings {
 	int awb_sensitive;
 };
 
-struct drc_gen_ctrl {
+struct drc_gen_ctrl
+{
 	unsigned int pic_size;
 	unsigned int pic_avg;
 	unsigned int hi_cnt;
 };
 
-struct isp_test_param {
+
+
+/*
+*
+*struct isp_alg_para.
+*
+*/
+struct isp_alg_para
+{
+	int defog_min_rgb;
+	unsigned int af_interval_frame;
+
+	//AFS
+	unsigned int afs_def_min_exp;
+
+	//AF
+	int af_small_step;
+	int af_mid_step;
+	int af_min_focus_value;
+	int af_monitor_start_frame;
+	int af_monitor_th_dec_slop1;
+	int af_monitor_th_dec_slop2;
+	int af_monitor_th_inc_slop1;
+	int af_monitor_th_inc_slop2;
+	int af_monitor_num;
+	int af_monitor_th_toss_range;
+	int af_focus_value_rs;
+	int af_vcm_def_pos;
+};
+
+struct isp_test_param
+{
 	/*isp test param */
 	int isp_test_mode;
 
@@ -540,7 +556,6 @@ struct isp_test_param {
 	int focus_change_interval;
 
 	int isp_dbg_level;
-	int isp_log_param;
 	int isp_focus_len;
 	int isp_gain;
 	int isp_exp_line;
@@ -561,9 +576,10 @@ struct isp_test_param {
 	int pri_contrast_en;
 	int hdr_gamma_en;
 	int disc_en;
-	int linear_en;
+	int linear_en;	
 };
-struct isp_3a_param {
+struct isp_3a_param
+{
 	/*isp ae param */
 	int define_ae_table;
 	int ae_max_lv;
@@ -575,7 +591,9 @@ struct isp_3a_param {
 	int ae_table_capture[28];
 	int ae_table_video[28];
 	int ae_win_weight[64];
-	int ae_hist_mod_en;
+
+	int ae_lum_low_th;
+	int ae_lum_high_th;
 	int ae_window_overexp_weigth;
 	int ae_hist_overexp_weight;
 	int ae_video_speed;
@@ -588,59 +606,34 @@ struct isp_3a_param {
 	int high_quality_mode_en;
 	int adaptive_frame_rate;
 	int force_frame_rate;
-	int ae_touch_dist_ind;
-	int ae_lum_berfore_gamma;
-	struct ae_table_info ae_tbl_scene[SCENE_MODE_MAX+6];
 
 	/*isp awb param */
 	int awb_interval;
 	int awb_speed;
+	//int awb_mode_select;
+	//int awb_light_param[21];
+	//int awb_coeff[30];
+	//int awb_tolerance;
 	int awb_color_temper_low;
 	int awb_color_temper_high;
-	int awb_base_temper;
+	//int r_gain_2900k;
+	//int b_gain_2900k;
 	int awb_light_num;
 	int awb_ext_light_num;
 	int awb_skin_color_num;
-	int awb_special_color_num;
 	int awb_light_info[320];
 	int awb_ext_light_info[320];
 	int awb_skin_color_info[160];
-	int awb_special_color_info[320];
 	int awb_preset_gain[22];
-	int awb_rgain_favor;
-	int awb_bgain_favor;
+	//struct isp_rgb2rgb_gain_offset color_matrix_inv;
 
 	/*isp af param */
-	int af_use_otp;
 	int vcm_min_code;
 	int vcm_max_code;
-	int af_interval_time;
-	int af_speed_ind; /*0~5*/
-	int af_auto_fine_en;
-	int af_single_fine_en;
-	int af_fine_step;
-	int af_move_cnt;
-	int af_still_cnt;
-	int af_move_monitor_cnt;
-	int af_still_monitor_cnt;
-	int af_stable_min;
-	int af_stable_max;
-	int af_low_light_ind;
-	int af_near_tolerance;
-	int af_far_tolerance;
-	int af_tolerance_off;
-	int af_peak_th;
-	int af_dir_th;
-	int af_change_ratio;
-	int af_move_minus;
-	int af_still_minus;
-	int af_scene_motion_th;
-	int af_tolerance_tbl_len;
-	int af_std_code_tbl[20];
-	int af_tolerance_value_tbl[20];
 };
 
-struct isp_iso_element {
+struct isp_iso_element
+{
 	int sharp_coeff[3];
 	int contrast_coeff[3];
 	int denoise_coeff[3];
@@ -654,12 +647,11 @@ struct isp_iso_element {
 	int saturation_cfg[4];
 	int sharp_cfg_hal[2];
 	int ae_cfg[2];
-	int ae_hist[4];
-	int ae_hist_eq[8];
-	int reserved[13];
+	int reserved[2];
 };
 
-struct isp_iso_param {
+struct isp_iso_param
+{
 	/*isp denoise param */
 	struct isp_iso_element isp_iso_100_cfg;
 	struct isp_iso_element isp_iso_200_cfg;
@@ -668,7 +660,8 @@ struct isp_iso_param {
 	struct isp_iso_element isp_iso_1600_cfg;
 	struct isp_iso_element isp_iso_3200_cfg;
 };
-struct isp_tunning_param {
+struct isp_tunning_param
+{
 	int flash_gain;
 	int flash_delay_frame;
 	int flicker_type;
@@ -690,48 +683,51 @@ struct isp_tunning_param {
 	int dpc_th_slop;
 	int dpc_otf_min_th;
 	int dpc_otf_max_th;
-	int cfa_dir_th;
+
 	/*isp tune param */
 	int bayer_gain_offset[8];
 	int lsc_mod;
 	int csc_coeff[6];
 	int lsc_center[2];
-	unsigned short lsc_tbl[12][768];
+	unsigned short lsc_tbl[8][768];
 	unsigned short hdr_tbl[4][256];
-	unsigned short gamma_tbl[256]; /* for hardware*/
-	unsigned short gamma_tbl_post[256]; /*currently real gamma*/
-	unsigned short gamma_tbl_ini[5][256]; /* form bin file*/
+	unsigned short gamma_tbl[256]; // for hardware
+	unsigned short gamma_tbl_post[256]; //currently real gamma
+	unsigned short gamma_tbl_ini[5][256]; // form bin file
 	unsigned short linear_tbl[768];
 	unsigned short disc_tbl[512];
 	struct isp_rgb2rgb_gain_offset color_matrix_ini[3];
 
 };
 
-struct isp_init_config {
+struct isp_init_config
+{
 	struct isp_test_param          isp_test_settings;
 	struct isp_3a_param            isp_3a_settings;
 	struct isp_tunning_param       isp_tunning_settings;
 	struct isp_iso_param           isp_iso_settings;
 };
 
+
 /*
- * Struct	: isp_hdr_setting_t -
+ * Struct	: isp_hdr_setting_t - 
  * &:
  * &:
  */
 struct hdr_setting_t {
-	int hdr_en;
-	int hdr_mode;
-	int frames_count;
-	int total_frames;
-	int values[5];
+  int hdr_en;
+  int hdr_mode;
+  int frames_count;
+  int total_frames;
+  int values[5];
 };
 /*
  *
  *   struct isp_gen_settings - Stores the isp settings
  *   also stores the stat buffer for 3a algorithms.
  */
-struct isp_gen_settings {
+struct isp_gen_settings
+{
 	/*  Exposure settings */
 	struct exposure_settings exp_settings;
 	struct hdr_setting_t hdr_setting;
@@ -748,9 +744,7 @@ struct isp_gen_settings {
 	int contrast_hal;
 	int brightness_hal;
 	int sharpness_hal;
-	int saturation_hal;
-
-	int ae_lum;               /*16bits,Q8*/
+	int ae_lum;               //16bits,Q8
 	int color_temp;
 
 	int r_gain_hal;
@@ -761,10 +755,8 @@ struct isp_gen_settings {
 	int brightness;
 	int sharpness;
 	int saturation;
-	int hflip;
-	int vflip;
+
 	int hue;
-	int output_addr;
 	enum gsensor_direction gsensor_dir;
 	enum sensor_mode sensor_mod;
 	struct sensor_band_step_config band_step_cfg;
@@ -773,7 +765,7 @@ struct isp_gen_settings {
 	struct h3a_win win;
 	unsigned int awb_inter_frame_cnt;
 	unsigned int awb_frame_cnt;
-	unsigned int frame_rate_max;
+
 	unsigned int ae_frame_cnt;
 	unsigned int af_frame_cnt;
 
@@ -785,17 +777,20 @@ struct isp_gen_settings {
 	int isp_ae_change_flags;
 	/* ISP module config */
 	struct isp_module_config module_cfg;
-	/* unsigned int isp_module_update_flags; */
-	struct isp_init_config isp_ini_cfg;
-	int defog_min_rgb;
+	//unsigned int isp_module_update_flags;
 
-	unsigned int alg_frame_cnt;
-	unsigned int take_pic_start_cnt;
+	struct isp_alg_para alg_para;
+	struct isp_init_config isp_ini_cfg;
+
+	unsigned alg_frame_cnt;
+	unsigned take_pic_start_cnt;
 	int take_picture_flag;
 	int isp_nigth_mode_flag;
 	int take_picture_done;
 	int blend_curve[256];
 	enum isp_test_mode test_mode;
+	int man_focus_len;
+	int man_gain;
 	int sharp_cfg_to_hal[2];
 	int double_ch_flag;
 	int enable_log;
@@ -805,7 +800,8 @@ struct isp_gen_settings {
 /*
  *   Flags raised when a setting is changed.
  */
-enum e3a_settings_flags {
+enum e3a_settings_flags
+{
 	SET_SCENE_MODE             = 1 << 0,
 	SET_WHITE_BALLANCE_MODE    = 1 << 1,
 	SET_FLICKER                = 1 << 2,
@@ -821,16 +817,16 @@ enum e3a_settings_flags {
 	ISP_SETTING_MAX,
 
 	/* all possible flags raised */
-	ISP_SETTINGS_ALL = (((ISP_SETTING_MAX - 1) << 1) - 1),
+	ISP_SETTINGS_ALL = (((ISP_SETTING_MAX -1 ) << 1) -1 ),
 };
 
 /*
  *  ISP Module API
  */
 
-void config_sensor_next_exposure(struct isp_gen_settings *isp_gen, struct isp_3a_result *isp_result);
-int get_flash_ratio(struct isp_gen_settings *isp_gen, struct isp_3a_result *isp_result);
-int get_pre_ev_cumul(struct isp_gen_settings *isp_gen, struct isp_3a_result *isp_result);
+void config_sensor_next_exposure(struct isp_gen_settings *isp_gen,struct isp_3a_result *isp_result);
+int get_flash_ratio(struct isp_gen_settings *isp_gen,struct isp_3a_result *isp_result);
+int get_pre_ev_cumul(struct isp_gen_settings *isp_gen,struct isp_3a_result *isp_result);
 
 void isp_param_init(struct isp_gen_settings *isp_gen);
 int  isp_module_init(struct isp_gen_settings *isp_gen, struct isp_3a_result *isp_result);
@@ -894,6 +890,6 @@ void bsp_isp_s_b_gain(struct isp_gen_settings *isp_gen, int value);
 void bsp_isp_s_hdr(struct isp_gen_settings *isp_gen, struct hdr_setting_t *hdr);
 void bsp_isp_s_take_pic(struct isp_gen_settings *isp_gen, int value);
 
-#endif /*__BSP__ISP__ALGO__H*/
+#endif //__BSP__ISP__ALGO__H
 
 

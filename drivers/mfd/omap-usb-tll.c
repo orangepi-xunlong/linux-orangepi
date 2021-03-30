@@ -30,8 +30,6 @@
 #include <linux/platform_data/usb-omap.h>
 #include <linux/of.h>
 
-#include "omap-usb.h"
-
 #define USBTLL_DRIVER_NAME	"usbhs_tll"
 
 /* TLL Register Set */
@@ -123,22 +121,22 @@ static DEFINE_SPINLOCK(tll_lock);	/* serialize access to tll_dev */
 
 static inline void usbtll_write(void __iomem *base, u32 reg, u32 val)
 {
-	writel_relaxed(val, base + reg);
+	__raw_writel(val, base + reg);
 }
 
 static inline u32 usbtll_read(void __iomem *base, u32 reg)
 {
-	return readl_relaxed(base + reg);
+	return __raw_readl(base + reg);
 }
 
 static inline void usbtll_writeb(void __iomem *base, u8 reg, u8 val)
 {
-	writeb_relaxed(val, base + reg);
+	__raw_writeb(val, base + reg);
 }
 
 static inline u8 usbtll_readb(void __iomem *base, u8 reg)
 {
-	return readb_relaxed(base + reg);
+	return __raw_readb(base + reg);
 }
 
 /*-------------------------------------------------------------------------*/
@@ -254,7 +252,7 @@ static int usbtll_omap_probe(struct platform_device *pdev)
 		break;
 	}
 
-	tll->ch_clk = devm_kzalloc(dev, sizeof(struct clk *) * tll->nch,
+	tll->ch_clk = devm_kzalloc(dev, sizeof(struct clk * [tll->nch]),
 						GFP_KERNEL);
 	if (!tll->ch_clk) {
 		ret = -ENOMEM;
@@ -271,8 +269,6 @@ static int usbtll_omap_probe(struct platform_device *pdev)
 
 		if (IS_ERR(tll->ch_clk[i]))
 			dev_dbg(dev, "can't get clock : %s\n", clkname);
-		else
-			clk_prepare(tll->ch_clk[i]);
 	}
 
 	pm_runtime_put_sync(dev);
@@ -305,12 +301,9 @@ static int usbtll_omap_remove(struct platform_device *pdev)
 	tll_dev = NULL;
 	spin_unlock(&tll_lock);
 
-	for (i = 0; i < tll->nch; i++) {
-		if (!IS_ERR(tll->ch_clk[i])) {
-			clk_unprepare(tll->ch_clk[i]);
+	for (i = 0; i < tll->nch; i++)
+		if (!IS_ERR(tll->ch_clk[i]))
 			clk_put(tll->ch_clk[i]);
-		}
-	}
 
 	pm_runtime_disable(&pdev->dev);
 	return 0;
@@ -326,7 +319,8 @@ MODULE_DEVICE_TABLE(of, usbtll_omap_dt_ids);
 static struct platform_driver usbtll_omap_driver = {
 	.driver = {
 		.name		= (char *)usbtll_driver_name,
-		.of_match_table = usbtll_omap_dt_ids,
+		.owner		= THIS_MODULE,
+		.of_match_table = of_match_ptr(usbtll_omap_dt_ids),
 	},
 	.probe		= usbtll_omap_probe,
 	.remove		= usbtll_omap_remove,
@@ -339,16 +333,20 @@ int omap_tll_init(struct usbhs_omap_platform_data *pdata)
 	unsigned reg;
 	struct usbtll_omap *tll;
 
-	if (!tll_dev)
-		return -ENODEV;
-
-	pm_runtime_get_sync(tll_dev);
-
 	spin_lock(&tll_lock);
+
+	if (!tll_dev) {
+		spin_unlock(&tll_lock);
+		return -ENODEV;
+	}
+
 	tll = dev_get_drvdata(tll_dev);
+
 	needs_tll = false;
 	for (i = 0; i < tll->nch; i++)
 		needs_tll |= omap_usb_mode_needs_tll(pdata->port_mode[i]);
+
+	pm_runtime_get_sync(tll_dev);
 
 	if (needs_tll) {
 		void __iomem *base = tll->base;
@@ -377,8 +375,8 @@ int omap_tll_init(struct usbhs_omap_platform_data *pdata)
 				 * and use SDR Mode
 				 */
 				reg &= ~(OMAP_TLL_CHANNEL_CONF_UTMIAUTOIDLE
+					| OMAP_TLL_CHANNEL_CONF_ULPINOBITSTUFF
 					| OMAP_TLL_CHANNEL_CONF_ULPIDDRMODE);
-				reg |= OMAP_TLL_CHANNEL_CONF_ULPINOBITSTUFF;
 			} else if (pdata->port_mode[i] ==
 					OMAP_EHCI_PORT_MODE_HSIC) {
 				/*
@@ -400,8 +398,9 @@ int omap_tll_init(struct usbhs_omap_platform_data *pdata)
 		}
 	}
 
-	spin_unlock(&tll_lock);
 	pm_runtime_put_sync(tll_dev);
+
+	spin_unlock(&tll_lock);
 
 	return 0;
 }
@@ -412,13 +411,16 @@ int omap_tll_enable(struct usbhs_omap_platform_data *pdata)
 	int i;
 	struct usbtll_omap *tll;
 
-	if (!tll_dev)
+	spin_lock(&tll_lock);
+
+	if (!tll_dev) {
+		spin_unlock(&tll_lock);
 		return -ENODEV;
+	}
+
+	tll = dev_get_drvdata(tll_dev);
 
 	pm_runtime_get_sync(tll_dev);
-
-	spin_lock(&tll_lock);
-	tll = dev_get_drvdata(tll_dev);
 
 	for (i = 0; i < tll->nch; i++) {
 		if (omap_usb_mode_needs_tll(pdata->port_mode[i])) {
@@ -446,10 +448,13 @@ int omap_tll_disable(struct usbhs_omap_platform_data *pdata)
 	int i;
 	struct usbtll_omap *tll;
 
-	if (!tll_dev)
-		return -ENODEV;
-
 	spin_lock(&tll_lock);
+
+	if (!tll_dev) {
+		spin_unlock(&tll_lock);
+		return -ENODEV;
+	}
+
 	tll = dev_get_drvdata(tll_dev);
 
 	for (i = 0; i < tll->nch; i++) {
@@ -459,8 +464,9 @@ int omap_tll_disable(struct usbhs_omap_platform_data *pdata)
 		}
 	}
 
-	spin_unlock(&tll_lock);
 	pm_runtime_put_sync(tll_dev);
+
+	spin_unlock(&tll_lock);
 
 	return 0;
 }

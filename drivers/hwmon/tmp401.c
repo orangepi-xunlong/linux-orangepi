@@ -44,10 +44,9 @@
 #include <linux/sysfs.h>
 
 /* Addresses to scan */
-static const unsigned short normal_i2c[] = { 0x48, 0x49, 0x4a, 0x4c, 0x4d,
-	0x4e, 0x4f, I2C_CLIENT_END };
+static const unsigned short normal_i2c[] = { 0x4c, 0x4d, 0x4e, I2C_CLIENT_END };
 
-enum chips { tmp401, tmp411, tmp431, tmp432, tmp435, tmp461 };
+enum chips { tmp401, tmp411, tmp431, tmp432 };
 
 /*
  * The TMP401 registers, note some registers have different addresses for
@@ -62,34 +61,31 @@ enum chips { tmp401, tmp411, tmp431, tmp432, tmp435, tmp461 };
 #define TMP401_MANUFACTURER_ID_REG		0xFE
 #define TMP401_DEVICE_ID_REG			0xFF
 
-static const u8 TMP401_TEMP_MSB_READ[7][2] = {
+static const u8 TMP401_TEMP_MSB_READ[6][2] = {
 	{ 0x00, 0x01 },	/* temp */
 	{ 0x06, 0x08 },	/* low limit */
 	{ 0x05, 0x07 },	/* high limit */
 	{ 0x20, 0x19 },	/* therm (crit) limit */
 	{ 0x30, 0x34 },	/* lowest */
 	{ 0x32, 0x36 },	/* highest */
-	{ 0, 0x11 },	/* offset */
 };
 
-static const u8 TMP401_TEMP_MSB_WRITE[7][2] = {
+static const u8 TMP401_TEMP_MSB_WRITE[6][2] = {
 	{ 0, 0 },	/* temp (unused) */
 	{ 0x0C, 0x0E },	/* low limit */
 	{ 0x0B, 0x0D },	/* high limit */
 	{ 0x20, 0x19 },	/* therm (crit) limit */
 	{ 0x30, 0x34 },	/* lowest */
 	{ 0x32, 0x36 },	/* highest */
-	{ 0, 0x11 },	/* offset */
 };
 
-static const u8 TMP401_TEMP_LSB[7][2] = {
+static const u8 TMP401_TEMP_LSB[6][2] = {
 	{ 0x15, 0x10 },	/* temp */
 	{ 0x17, 0x14 },	/* low limit */
 	{ 0x16, 0x13 },	/* high limit */
 	{ 0, 0 },	/* therm (crit) limit (unused) */
 	{ 0x31, 0x35 },	/* lowest */
 	{ 0x33, 0x37 },	/* highest */
-	{ 0, 0x12 },	/* offset */
 };
 
 static const u8 TMP432_TEMP_MSB_READ[4][3] = {
@@ -140,7 +136,6 @@ static const u8 TMP432_STATUS_REG[] = {
 #define TMP411C_DEVICE_ID			0x10
 #define TMP431_DEVICE_ID			0x31
 #define TMP432_DEVICE_ID			0x32
-#define TMP435_DEVICE_ID			0x35
 
 /*
  * Driver data (common to all clients)
@@ -151,8 +146,6 @@ static const struct i2c_device_id tmp401_id[] = {
 	{ "tmp411", tmp411 },
 	{ "tmp431", tmp431 },
 	{ "tmp432", tmp432 },
-	{ "tmp435", tmp435 },
-	{ "tmp461", tmp461 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, tmp401_id);
@@ -162,8 +155,7 @@ MODULE_DEVICE_TABLE(i2c, tmp401_id);
  */
 
 struct tmp401_data {
-	struct i2c_client *client;
-	const struct attribute_group *groups[3];
+	struct device *hwmon_dev;
 	struct mutex update_lock;
 	char valid; /* zero until following fields are valid */
 	unsigned long last_updated; /* in jiffies */
@@ -174,7 +166,7 @@ struct tmp401_data {
 	/* register values */
 	u8 status[4];
 	u8 config;
-	u16 temp[7][3];
+	u16 temp[6][3];
 	u8 temp_crit_hyst;
 };
 
@@ -239,8 +231,8 @@ static int tmp401_update_device_reg16(struct i2c_client *client,
 
 static struct tmp401_data *tmp401_update_device(struct device *dev)
 {
-	struct tmp401_data *data = dev_get_drvdata(dev);
-	struct i2c_client *client = data->client;
+	struct i2c_client *client = to_i2c_client(dev);
+	struct tmp401_data *data = i2c_get_clientdata(client);
 	struct tmp401_data *ret = data;
 	int i, val;
 	unsigned long next_update;
@@ -358,11 +350,14 @@ static ssize_t store_temp(struct device *dev, struct device_attribute *devattr,
 {
 	int nr = to_sensor_dev_attr_2(devattr)->nr;
 	int index = to_sensor_dev_attr_2(devattr)->index;
-	struct tmp401_data *data = dev_get_drvdata(dev);
-	struct i2c_client *client = data->client;
+	struct i2c_client *client = to_i2c_client(dev);
+	struct tmp401_data *data = tmp401_update_device(dev);
 	long val;
 	u16 reg;
 	u8 regaddr;
+
+	if (IS_ERR(data))
+		return PTR_ERR(data);
 
 	if (kstrtol(buf, 10, &val))
 		return -EINVAL;
@@ -410,7 +405,7 @@ static ssize_t store_temp_crit_hyst(struct device *dev, struct device_attribute
 	val = clamp_val(val, temp - 255000, temp);
 	reg = ((temp - val) + 500) / 1000;
 
-	i2c_smbus_write_byte_data(data->client, TMP401_TEMP_CRIT_HYST,
+	i2c_smbus_write_byte_data(to_i2c_client(dev), TMP401_TEMP_CRIT_HYST,
 				  reg);
 
 	data->temp_crit_hyst = reg;
@@ -428,8 +423,8 @@ static ssize_t store_temp_crit_hyst(struct device *dev, struct device_attribute
 static ssize_t reset_temp_history(struct device *dev,
 	struct device_attribute	*devattr, const char *buf, size_t count)
 {
-	struct tmp401_data *data = dev_get_drvdata(dev);
-	struct i2c_client *client = data->client;
+	struct i2c_client *client = to_i2c_client(dev);
+	struct tmp401_data *data = i2c_get_clientdata(client);
 	long val;
 
 	if (kstrtol(buf, 10, &val))
@@ -452,7 +447,8 @@ static ssize_t reset_temp_history(struct device *dev,
 static ssize_t show_update_interval(struct device *dev,
 				    struct device_attribute *attr, char *buf)
 {
-	struct tmp401_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = to_i2c_client(dev);
+	struct tmp401_data *data = i2c_get_clientdata(client);
 
 	return sprintf(buf, "%u\n", data->update_interval);
 }
@@ -461,8 +457,8 @@ static ssize_t set_update_interval(struct device *dev,
 				   struct device_attribute *attr,
 				   const char *buf, size_t count)
 {
-	struct tmp401_data *data = dev_get_drvdata(dev);
-	struct i2c_client *client = data->client;
+	struct i2c_client *client = to_i2c_client(dev);
+	struct tmp401_data *data = i2c_get_clientdata(client);
 	unsigned long val;
 	int err, rate;
 
@@ -617,29 +613,13 @@ static const struct attribute_group tmp432_group = {
 };
 
 /*
- * Additional features of the TMP461 chip.
- * The TMP461 temperature offset for the remote channel.
- */
-static SENSOR_DEVICE_ATTR_2(temp2_offset, S_IWUSR | S_IRUGO, show_temp,
-			    store_temp, 6, 1);
-
-static struct attribute *tmp461_attributes[] = {
-	&sensor_dev_attr_temp2_offset.dev_attr.attr,
-	NULL
-};
-
-static const struct attribute_group tmp461_group = {
-	.attrs = tmp461_attributes,
-};
-
-/*
  * Begin non sysfs callback code (aka Real code)
  */
 
-static int tmp401_init_client(struct tmp401_data *data,
-			      struct i2c_client *client)
+static void tmp401_init_client(struct i2c_client *client)
 {
-	int config, config_orig, status = 0;
+	int config, config_orig;
+	struct tmp401_data *data = i2c_get_clientdata(client);
 
 	/* Set the conversion rate to 2 Hz */
 	i2c_smbus_write_byte_data(client, TMP401_CONVERSION_RATE_WRITE, 5);
@@ -647,18 +627,16 @@ static int tmp401_init_client(struct tmp401_data *data,
 
 	/* Start conversions (disable shutdown if necessary) */
 	config = i2c_smbus_read_byte_data(client, TMP401_CONFIG_READ);
-	if (config < 0)
-		return config;
+	if (config < 0) {
+		dev_warn(&client->dev, "Initialization failed!\n");
+		return;
+	}
 
 	config_orig = config;
 	config &= ~TMP401_CONFIG_SHUTDOWN;
 
 	if (config != config_orig)
-		status = i2c_smbus_write_byte_data(client,
-						   TMP401_CONFIG_WRITE,
-						   config);
-
-	return status;
+		i2c_smbus_write_byte_data(client, TMP401_CONFIG_WRITE, config);
 }
 
 static int tmp401_detect(struct i2c_client *client,
@@ -700,17 +678,14 @@ static int tmp401_detect(struct i2c_client *client,
 		kind = tmp411;
 		break;
 	case TMP431_DEVICE_ID:
-		if (client->addr != 0x4c && client->addr != 0x4d)
+		if (client->addr == 0x4e)
 			return -ENODEV;
 		kind = tmp431;
 		break;
 	case TMP432_DEVICE_ID:
-		if (client->addr != 0x4c && client->addr != 0x4d)
+		if (client->addr == 0x4e)
 			return -ENODEV;
 		kind = tmp432;
-		break;
-	case TMP435_DEVICE_ID:
-		kind = tmp435;
 		break;
 	default:
 		return -ENODEV;
@@ -730,52 +705,77 @@ static int tmp401_detect(struct i2c_client *client,
 	return 0;
 }
 
+static int tmp401_remove(struct i2c_client *client)
+{
+	struct device *dev = &client->dev;
+	struct tmp401_data *data = i2c_get_clientdata(client);
+
+	if (data->hwmon_dev)
+		hwmon_device_unregister(data->hwmon_dev);
+
+	sysfs_remove_group(&dev->kobj, &tmp401_group);
+
+	if (data->kind == tmp411)
+		sysfs_remove_group(&dev->kobj, &tmp411_group);
+
+	if (data->kind == tmp432)
+		sysfs_remove_group(&dev->kobj, &tmp432_group);
+
+	return 0;
+}
+
 static int tmp401_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
-	static const char * const names[] = {
-		"TMP401", "TMP411", "TMP431", "TMP432", "TMP435", "TMP461"
-	};
 	struct device *dev = &client->dev;
-	struct device *hwmon_dev;
+	int err;
 	struct tmp401_data *data;
-	int groups = 0, status;
+	const char *names[] = { "TMP401", "TMP411", "TMP431", "TMP432" };
 
 	data = devm_kzalloc(dev, sizeof(struct tmp401_data), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 
-	data->client = client;
+	i2c_set_clientdata(client, data);
 	mutex_init(&data->update_lock);
 	data->kind = id->driver_data;
 
 	/* Initialize the TMP401 chip */
-	status = tmp401_init_client(data, client);
-	if (status < 0)
-		return status;
+	tmp401_init_client(client);
 
 	/* Register sysfs hooks */
-	data->groups[groups++] = &tmp401_group;
+	err = sysfs_create_group(&dev->kobj, &tmp401_group);
+	if (err)
+		return err;
 
 	/* Register additional tmp411 sysfs hooks */
-	if (data->kind == tmp411)
-		data->groups[groups++] = &tmp411_group;
+	if (data->kind == tmp411) {
+		err = sysfs_create_group(&dev->kobj, &tmp411_group);
+		if (err)
+			goto exit_remove;
+	}
 
 	/* Register additional tmp432 sysfs hooks */
-	if (data->kind == tmp432)
-		data->groups[groups++] = &tmp432_group;
+	if (data->kind == tmp432) {
+		err = sysfs_create_group(&dev->kobj, &tmp432_group);
+		if (err)
+			goto exit_remove;
+	}
 
-	if (data->kind == tmp461)
-		data->groups[groups++] = &tmp461_group;
-
-	hwmon_dev = devm_hwmon_device_register_with_groups(dev, client->name,
-							   data, data->groups);
-	if (IS_ERR(hwmon_dev))
-		return PTR_ERR(hwmon_dev);
+	data->hwmon_dev = hwmon_device_register(dev);
+	if (IS_ERR(data->hwmon_dev)) {
+		err = PTR_ERR(data->hwmon_dev);
+		data->hwmon_dev = NULL;
+		goto exit_remove;
+	}
 
 	dev_info(dev, "Detected TI %s chip\n", names[data->kind]);
 
 	return 0;
+
+exit_remove:
+	tmp401_remove(client);
+	return err;
 }
 
 static struct i2c_driver tmp401_driver = {
@@ -784,6 +784,7 @@ static struct i2c_driver tmp401_driver = {
 		.name	= "tmp401",
 	},
 	.probe		= tmp401_probe,
+	.remove		= tmp401_remove,
 	.id_table	= tmp401_id,
 	.detect		= tmp401_detect,
 	.address_list	= normal_i2c,

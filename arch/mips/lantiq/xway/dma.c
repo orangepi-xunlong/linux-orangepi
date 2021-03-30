@@ -12,7 +12,7 @@
  *   along with this program; if not, write to the Free Software
  *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
  *
- *   Copyright (C) 2011 John Crispin <john@phrozen.org>
+ *   Copyright (C) 2011 John Crispin <blogic@openwrt.org>
  */
 
 #include <linux/init.h>
@@ -220,6 +220,10 @@ ltq_dma_init(struct platform_device *pdev)
 	int i;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res)
+		panic("Failed to get dma resource");
+
+	/* remap dma register range */
 	ltq_dma_membase = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(ltq_dma_membase))
 		panic("Failed to remap dma resource");
@@ -261,6 +265,7 @@ static struct platform_driver dma_driver = {
 	.probe = ltq_dma_init,
 	.driver = {
 		.name = "dma-xway",
+		.owner = THIS_MODULE,
 		.of_match_table = dma_match,
 	},
 };

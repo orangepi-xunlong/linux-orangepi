@@ -12,7 +12,6 @@
  *
  */
 
-#include <linux/export.h>
 #include <linux/kernel.h>
 #include <linux/usb.h>
 #include <linux/io.h>
@@ -36,7 +35,7 @@ static int ulpi_viewport_wait(void __iomem *view, u32 mask)
 			return 0;
 
 		udelay(1);
-	}
+	};
 
 	return -ETIMEDOUT;
 }
@@ -79,4 +78,3 @@ struct usb_phy_io_ops ulpi_viewport_access_ops = {
 	.read	= ulpi_viewport_read,
 	.write	= ulpi_viewport_write,
 };
-EXPORT_SYMBOL_GPL(ulpi_viewport_access_ops);

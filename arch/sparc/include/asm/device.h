@@ -19,7 +19,7 @@ struct dev_archdata {
 	int			numa_node;
 };
 
-void of_propagate_archdata(struct platform_device *bus);
+extern void of_propagate_archdata(struct platform_device *bus);
 
 struct pdev_archdata {
 	struct resource		resource[PROMREG_MAX];

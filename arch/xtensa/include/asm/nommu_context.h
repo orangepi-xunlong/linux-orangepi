@@ -1,7 +1,3 @@
-static inline void init_mmu(void)
-{
-}
-
 static inline void enter_lazy_tlb(struct mm_struct *mm, struct task_struct *tsk)
 {
 }

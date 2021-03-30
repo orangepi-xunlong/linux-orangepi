@@ -12,7 +12,6 @@ obj-$(CONFIG_INPUT_POLLDEV)	+= input-polldev.o
 obj-$(CONFIG_INPUT_SPARSEKMAP)	+= sparse-keymap.o
 obj-$(CONFIG_INPUT_MATRIXKMAP)	+= matrix-keymap.o
 
-obj-$(CONFIG_INPUT_LEDS)	+= input-leds.o
 obj-$(CONFIG_INPUT_MOUSEDEV)	+= mousedev.o
 obj-$(CONFIG_INPUT_JOYDEV)	+= joydev.o
 obj-$(CONFIG_INPUT_EVDEV)	+= evdev.o
@@ -29,6 +28,5 @@ obj-$(CONFIG_INPUT_SENSOR)      += sensor/
 obj-$(CONFIG_INPUT_APMPOWER)	+= apm-power.o
 obj-$(CONFIG_INPUT_KEYRESET)	+= keyreset.o
 obj-$(CONFIG_INPUT_KEYCOMBO)	+= keycombo.o
-
-obj-$(CONFIG_RMI4_CORE)		+= rmi4/
-obj-$(CONFIG_INPUT_SENSORINIT) += init-input.o
+obj-$(CONFIG_INPUT_SW_DEVICE)	+= sw-device.o
+obj-$(CONFIG_INPUT_TOUCHSCREEN)	+= init-input.o

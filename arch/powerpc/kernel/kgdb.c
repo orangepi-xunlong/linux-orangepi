@@ -15,6 +15,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/init.h>
 #include <linux/kgdb.h>
 #include <linux/smp.h>
 #include <linux/signal.h>
@@ -150,16 +151,15 @@ static int kgdb_handle_breakpoint(struct pt_regs *regs)
 	return 1;
 }
 
-static DEFINE_PER_CPU(struct thread_info, kgdb_thread_info);
 static int kgdb_singlestep(struct pt_regs *regs)
 {
 	struct thread_info *thread_info, *exception_thread_info;
-	struct thread_info *backup_current_thread_info =
-		this_cpu_ptr(&kgdb_thread_info);
+	struct thread_info *backup_current_thread_info;
 
 	if (user_mode(regs))
 		return 0;
 
+	backup_current_thread_info = kmalloc(sizeof(struct thread_info), GFP_KERNEL);
 	/*
 	 * On Book E and perhaps other processors, singlestep is handled on
 	 * the critical exception stack.  This causes current_thread_info()
@@ -185,6 +185,7 @@ static int kgdb_singlestep(struct pt_regs *regs)
 		/* Restore current_thread_info lastly. */
 		memcpy(exception_thread_info, backup_current_thread_info, sizeof *thread_info);
 
+	kfree(backup_current_thread_info);
 	return 1;
 }
 
@@ -445,11 +446,7 @@ int kgdb_arch_handle_exception(int vector, int signo, int err_code,
  * Global data
  */
 struct kgdb_arch arch_kgdb_ops = {
-#ifdef __LITTLE_ENDIAN__
-	.gdb_bpt_instr = {0x08, 0x10, 0x82, 0x7d},
-#else
 	.gdb_bpt_instr = {0x7d, 0x82, 0x10, 0x08},
-#endif
 };
 
 static int kgdb_not_implemented(struct pt_regs *regs)

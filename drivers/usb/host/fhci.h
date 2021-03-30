@@ -27,8 +27,8 @@
 #include <linux/io.h>
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
-#include <soc/fsl/qe/qe.h>
-#include <soc/fsl/qe/immap_qe.h>
+#include <asm/qe.h>
+#include <asm/immap_qe.h>
 
 #define USB_CLOCK	48000000
 
@@ -338,7 +338,7 @@ struct ed {
 
 	/* read only parameters, should be cleared upon initialization */
 	u8 toggle_carry;	/* toggle carry from the last TD submitted */
-	u16 next_iso;		/* time stamp of next queued ISO transfer */
+	u32 last_iso;		/* time stamp of last queued ISO transfer */
 	struct td *td_head;	/* a pointer to the current TD handled */
 };
 

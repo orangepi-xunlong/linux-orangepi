@@ -11,8 +11,6 @@
  */
 
 #include <linux/linkage.h>
-#include <asm/frame.h>
-#include <asm/nospec-branch.h>
 
 #define CAMELLIA_TABLE_BYTE_LEN 272
 
@@ -53,6 +51,16 @@
 #define ymm14_x xmm14
 #define ymm15_x xmm15
 
+/*
+ * AES-NI instructions do not support ymmX registers, so we need splitting and
+ * merging.
+ */
+#define vaesenclast256(zero, yreg, tmp) \
+	vextracti128 $1, yreg, tmp##_x; \
+	vaesenclast zero##_x, yreg##_x, yreg##_x; \
+	vaesenclast zero##_x, tmp##_x, tmp##_x; \
+	vinserti128 $1, tmp##_x, yreg, yreg;
+
 /**********************************************************************
   32-way camellia
  **********************************************************************/
@@ -71,70 +79,46 @@
 	 * S-function with AES subbytes \
 	 */ \
 	vbroadcasti128 .Linv_shift_row, t4; \
-	vpbroadcastd .L0f0f0f0f, t7; \
-	vbroadcasti128 .Lpre_tf_lo_s1, t5; \
-	vbroadcasti128 .Lpre_tf_hi_s1, t6; \
-	vbroadcasti128 .Lpre_tf_lo_s4, t2; \
-	vbroadcasti128 .Lpre_tf_hi_s4, t3; \
+	vpbroadcastb .L0f0f0f0f, t7; \
+	vbroadcasti128 .Lpre_tf_lo_s1, t0; \
+	vbroadcasti128 .Lpre_tf_hi_s1, t1; \
 	\
 	/* AES inverse shift rows */ \
 	vpshufb t4, x0, x0; \
 	vpshufb t4, x7, x7; \
-	vpshufb t4, x3, x3; \
-	vpshufb t4, x6, x6; \
-	vpshufb t4, x2, x2; \
-	vpshufb t4, x5, x5; \
 	vpshufb t4, x1, x1; \
 	vpshufb t4, x4, x4; \
+	vpshufb t4, x2, x2; \
+	vpshufb t4, x5, x5; \
+	vpshufb t4, x3, x3; \
+	vpshufb t4, x6, x6; \
 	\
 	/* prefilter sboxes 1, 2 and 3 */ \
-	/* prefilter sbox 4 */ \
-	filter_8bit(x0, t5, t6, t7, t4); \
-	filter_8bit(x7, t5, t6, t7, t4); \
-	vextracti128 $1, x0, t0##_x; \
-	vextracti128 $1, x7, t1##_x; \
-	filter_8bit(x3, t2, t3, t7, t4); \
-	filter_8bit(x6, t2, t3, t7, t4); \
-	vextracti128 $1, x3, t3##_x; \
-	vextracti128 $1, x6, t2##_x; \
-	filter_8bit(x2, t5, t6, t7, t4); \
-	filter_8bit(x5, t5, t6, t7, t4); \
-	filter_8bit(x1, t5, t6, t7, t4); \
-	filter_8bit(x4, t5, t6, t7, t4); \
+	vbroadcasti128 .Lpre_tf_lo_s4, t2; \
+	vbroadcasti128 .Lpre_tf_hi_s4, t3; \
+	filter_8bit(x0, t0, t1, t7, t6); \
+	filter_8bit(x7, t0, t1, t7, t6); \
+	filter_8bit(x1, t0, t1, t7, t6); \
+	filter_8bit(x4, t0, t1, t7, t6); \
+	filter_8bit(x2, t0, t1, t7, t6); \
+	filter_8bit(x5, t0, t1, t7, t6); \
 	\
+	/* prefilter sbox 4 */ \
 	vpxor t4##_x, t4##_x, t4##_x; \
+	filter_8bit(x3, t2, t3, t7, t6); \
+	filter_8bit(x6, t2, t3, t7, t6); \
 	\
 	/* AES subbytes + AES shift rows */ \
-	vextracti128 $1, x2, t6##_x; \
-	vextracti128 $1, x5, t5##_x; \
-	vaesenclast t4##_x, x0##_x, x0##_x; \
-	vaesenclast t4##_x, t0##_x, t0##_x; \
-	vinserti128 $1, t0##_x, x0, x0; \
-	vaesenclast t4##_x, x7##_x, x7##_x; \
-	vaesenclast t4##_x, t1##_x, t1##_x; \
-	vinserti128 $1, t1##_x, x7, x7; \
-	vaesenclast t4##_x, x3##_x, x3##_x; \
-	vaesenclast t4##_x, t3##_x, t3##_x; \
-	vinserti128 $1, t3##_x, x3, x3; \
-	vaesenclast t4##_x, x6##_x, x6##_x; \
-	vaesenclast t4##_x, t2##_x, t2##_x; \
-	vinserti128 $1, t2##_x, x6, x6; \
-	vextracti128 $1, x1, t3##_x; \
-	vextracti128 $1, x4, t2##_x; \
 	vbroadcasti128 .Lpost_tf_lo_s1, t0; \
 	vbroadcasti128 .Lpost_tf_hi_s1, t1; \
-	vaesenclast t4##_x, x2##_x, x2##_x; \
-	vaesenclast t4##_x, t6##_x, t6##_x; \
-	vinserti128 $1, t6##_x, x2, x2; \
-	vaesenclast t4##_x, x5##_x, x5##_x; \
-	vaesenclast t4##_x, t5##_x, t5##_x; \
-	vinserti128 $1, t5##_x, x5, x5; \
-	vaesenclast t4##_x, x1##_x, x1##_x; \
-	vaesenclast t4##_x, t3##_x, t3##_x; \
-	vinserti128 $1, t3##_x, x1, x1; \
-	vaesenclast t4##_x, x4##_x, x4##_x; \
-	vaesenclast t4##_x, t2##_x, t2##_x; \
-	vinserti128 $1, t2##_x, x4, x4; \
+	vaesenclast256(t4, x0, t5); \
+	vaesenclast256(t4, x7, t5); \
+	vaesenclast256(t4, x1, t5); \
+	vaesenclast256(t4, x4, t5); \
+	vaesenclast256(t4, x2, t5); \
+	vaesenclast256(t4, x5, t5); \
+	vaesenclast256(t4, x3, t5); \
+	vaesenclast256(t4, x6, t5); \
 	\
 	/* postfilter sboxes 1 and 4 */ \
 	vbroadcasti128 .Lpost_tf_lo_s3, t2; \
@@ -155,12 +139,22 @@
 	/* postfilter sbox 2 */ \
 	filter_8bit(x1, t4, t5, t7, t2); \
 	filter_8bit(x4, t4, t5, t7, t2); \
-	vpxor t7, t7, t7; \
 	\
 	vpsrldq $1, t0, t1; \
 	vpsrldq $2, t0, t2; \
-	vpshufb t7, t1, t1; \
 	vpsrldq $3, t0, t3; \
+	vpsrldq $4, t0, t4; \
+	vpsrldq $5, t0, t5; \
+	vpsrldq $6, t0, t6; \
+	vpsrldq $7, t0, t7; \
+	vpbroadcastb t0##_x, t0; \
+	vpbroadcastb t1##_x, t1; \
+	vpbroadcastb t2##_x, t2; \
+	vpbroadcastb t3##_x, t3; \
+	vpbroadcastb t4##_x, t4; \
+	vpbroadcastb t6##_x, t6; \
+	vpbroadcastb t5##_x, t5; \
+	vpbroadcastb t7##_x, t7; \
 	\
 	/* P-function */ \
 	vpxor x5, x0, x0; \
@@ -168,20 +162,10 @@
 	vpxor x7, x2, x2; \
 	vpxor x4, x3, x3; \
 	\
-	vpshufb t7, t2, t2; \
-	vpsrldq $4, t0, t4; \
-	vpshufb t7, t3, t3; \
-	vpsrldq $5, t0, t5; \
-	vpshufb t7, t4, t4; \
-	\
 	vpxor x2, x4, x4; \
 	vpxor x3, x5, x5; \
 	vpxor x0, x6, x6; \
 	vpxor x1, x7, x7; \
-	\
-	vpsrldq $6, t0, t6; \
-	vpshufb t7, t5, t5; \
-	vpshufb t7, t6, t6; \
 	\
 	vpxor x7, x0, x0; \
 	vpxor x4, x1, x1; \
@@ -195,15 +179,11 @@
 	\
 	/* Add key material and result to CD (x becomes new CD) */ \
 	\
-	vpxor t6, x1, x1; \
-	vpxor 5 * 32(mem_cd), x1, x1; \
-	\
-	vpsrldq $7, t0, t6; \
-	vpshufb t7, t0, t0; \
-	vpshufb t7, t6, t7; \
-	\
 	vpxor t7, x0, x0; \
 	vpxor 4 * 32(mem_cd), x0, x0; \
+	\
+	vpxor t6, x1, x1; \
+	vpxor 5 * 32(mem_cd), x1, x1; \
 	\
 	vpxor t5, x2, x2; \
 	vpxor 6 * 32(mem_cd), x2, x2; \
@@ -224,7 +204,7 @@
 	vpxor 3 * 32(mem_cd), x7, x7;
 
 /*
- * Size optimization... with inlined roundsm32 binary would be over 5 times
+ * Size optimization... with inlined roundsm16 binary would be over 5 times
  * larger and would only marginally faster.
  */
 .align 8
@@ -344,13 +324,13 @@ ENDPROC(roundsm32_x4_x5_x6_x7_x0_x1_x2_x3_y4_y5_y6_y7_y0_y1_y2_y3_ab)
 	 */ \
 	vpbroadcastd kll, t0; /* only lowest 32-bit used */ \
 	vpxor tt0, tt0, tt0; \
-	vpshufb tt0, t0, t3; \
+	vpbroadcastb t0##_x, t3; \
 	vpsrldq $1, t0, t0; \
-	vpshufb tt0, t0, t2; \
+	vpbroadcastb t0##_x, t2; \
 	vpsrldq $1, t0, t0; \
-	vpshufb tt0, t0, t1; \
+	vpbroadcastb t0##_x, t1; \
 	vpsrldq $1, t0, t0; \
-	vpshufb tt0, t0, t0; \
+	vpbroadcastb t0##_x, t0; \
 	\
 	vpand l0, t0, t0; \
 	vpand l1, t1, t1; \
@@ -360,7 +340,6 @@ ENDPROC(roundsm32_x4_x5_x6_x7_x0_x1_x2_x3_y4_y5_y6_y7_y0_y1_y2_y3_ab)
 	rol32_1_32(t3, t2, t1, t0, tt1, tt2, tt3, tt0); \
 	\
 	vpxor l4, t0, l4; \
-	vpbroadcastd krr, t0; /* only lowest 32-bit used */ \
 	vmovdqu l4, 4 * 32(l); \
 	vpxor l5, t1, l5; \
 	vmovdqu l5, 5 * 32(l); \
@@ -375,13 +354,14 @@ ENDPROC(roundsm32_x4_x5_x6_x7_x0_x1_x2_x3_y4_y5_y6_y7_y0_y1_y2_y3_ab)
 	 * rl ^= t2; \
 	 */ \
 	\
-	vpshufb tt0, t0, t3; \
+	vpbroadcastd krr, t0; /* only lowest 32-bit used */ \
+	vpbroadcastb t0##_x, t3; \
 	vpsrldq $1, t0, t0; \
-	vpshufb tt0, t0, t2; \
+	vpbroadcastb t0##_x, t2; \
 	vpsrldq $1, t0, t0; \
-	vpshufb tt0, t0, t1; \
+	vpbroadcastb t0##_x, t1; \
 	vpsrldq $1, t0, t0; \
-	vpshufb tt0, t0, t0; \
+	vpbroadcastb t0##_x, t0; \
 	\
 	vpor 4 * 32(r), t0, t0; \
 	vpor 5 * 32(r), t1, t1; \
@@ -393,7 +373,6 @@ ENDPROC(roundsm32_x4_x5_x6_x7_x0_x1_x2_x3_y4_y5_y6_y7_y0_y1_y2_y3_ab)
 	vpxor 2 * 32(r), t2, t2; \
 	vpxor 3 * 32(r), t3, t3; \
 	vmovdqu t0, 0 * 32(r); \
-	vpbroadcastd krl, t0; /* only lowest 32-bit used */ \
 	vmovdqu t1, 1 * 32(r); \
 	vmovdqu t2, 2 * 32(r); \
 	vmovdqu t3, 3 * 32(r); \
@@ -403,13 +382,14 @@ ENDPROC(roundsm32_x4_x5_x6_x7_x0_x1_x2_x3_y4_y5_y6_y7_y0_y1_y2_y3_ab)
 	 * t2 &= rl; \
 	 * rr ^= rol32(t2, 1); \
 	 */ \
-	vpshufb tt0, t0, t3; \
+	vpbroadcastd krl, t0; /* only lowest 32-bit used */ \
+	vpbroadcastb t0##_x, t3; \
 	vpsrldq $1, t0, t0; \
-	vpshufb tt0, t0, t2; \
+	vpbroadcastb t0##_x, t2; \
 	vpsrldq $1, t0, t0; \
-	vpshufb tt0, t0, t1; \
+	vpbroadcastb t0##_x, t1; \
 	vpsrldq $1, t0, t0; \
-	vpshufb tt0, t0, t0; \
+	vpbroadcastb t0##_x, t0; \
 	\
 	vpand 0 * 32(r), t0, t0; \
 	vpand 1 * 32(r), t1, t1; \
@@ -423,7 +403,6 @@ ENDPROC(roundsm32_x4_x5_x6_x7_x0_x1_x2_x3_y4_y5_y6_y7_y0_y1_y2_y3_ab)
 	vpxor 6 * 32(r), t2, t2; \
 	vpxor 7 * 32(r), t3, t3; \
 	vmovdqu t0, 4 * 32(r); \
-	vpbroadcastd klr, t0; /* only lowest 32-bit used */ \
 	vmovdqu t1, 5 * 32(r); \
 	vmovdqu t2, 6 * 32(r); \
 	vmovdqu t3, 7 * 32(r); \
@@ -434,13 +413,14 @@ ENDPROC(roundsm32_x4_x5_x6_x7_x0_x1_x2_x3_y4_y5_y6_y7_y0_y1_y2_y3_ab)
 	 * ll ^= t0; \
 	 */ \
 	\
-	vpshufb tt0, t0, t3; \
+	vpbroadcastd klr, t0; /* only lowest 32-bit used */ \
+	vpbroadcastb t0##_x, t3; \
 	vpsrldq $1, t0, t0; \
-	vpshufb tt0, t0, t2; \
+	vpbroadcastb t0##_x, t2; \
 	vpsrldq $1, t0, t0; \
-	vpshufb tt0, t0, t1; \
+	vpbroadcastb t0##_x, t1; \
 	vpsrldq $1, t0, t0; \
-	vpshufb tt0, t0, t0; \
+	vpbroadcastb t0##_x, t0; \
 	\
 	vpor l4, t0, t0; \
 	vpor l5, t1, t1; \
@@ -768,7 +748,6 @@ __camellia_enc_blk32:
 	 *	%ymm0..%ymm15: 32 encrypted blocks, order swapped:
 	 *       7, 8, 6, 5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10, 9, 8
 	 */
-	FRAME_BEGIN
 
 	leaq 8 * 32(%rax), %rcx;
 
@@ -823,7 +802,6 @@ __camellia_enc_blk32:
 		    %ymm8, %ymm9, %ymm10, %ymm11, %ymm12, %ymm13, %ymm14,
 		    %ymm15, (key_table)(CTX, %r8, 8), (%rax), 1 * 32(%rax));
 
-	FRAME_END
 	ret;
 
 .align 8
@@ -856,7 +834,6 @@ __camellia_dec_blk32:
 	 *	%ymm0..%ymm15: 16 plaintext blocks, order swapped:
 	 *       7, 8, 6, 5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10, 9, 8
 	 */
-	FRAME_BEGIN
 
 	leaq 8 * 32(%rax), %rcx;
 
@@ -910,7 +887,6 @@ __camellia_dec_blk32:
 		    %ymm8, %ymm9, %ymm10, %ymm11, %ymm12, %ymm13, %ymm14,
 		    %ymm15, (key_table)(CTX), (%rax), 1 * 32(%rax));
 
-	FRAME_END
 	ret;
 
 .align 8
@@ -936,7 +912,6 @@ ENTRY(camellia_ecb_enc_32way)
 	 *	%rsi: dst (32 blocks)
 	 *	%rdx: src (32 blocks)
 	 */
-	FRAME_BEGIN
 
 	vzeroupper;
 
@@ -955,7 +930,6 @@ ENTRY(camellia_ecb_enc_32way)
 
 	vzeroupper;
 
-	FRAME_END
 	ret;
 ENDPROC(camellia_ecb_enc_32way)
 
@@ -965,7 +939,6 @@ ENTRY(camellia_ecb_dec_32way)
 	 *	%rsi: dst (32 blocks)
 	 *	%rdx: src (32 blocks)
 	 */
-	FRAME_BEGIN
 
 	vzeroupper;
 
@@ -989,7 +962,6 @@ ENTRY(camellia_ecb_dec_32way)
 
 	vzeroupper;
 
-	FRAME_END
 	ret;
 ENDPROC(camellia_ecb_dec_32way)
 
@@ -999,7 +971,6 @@ ENTRY(camellia_cbc_dec_32way)
 	 *	%rsi: dst (32 blocks)
 	 *	%rdx: src (32 blocks)
 	 */
-	FRAME_BEGIN
 
 	vzeroupper;
 
@@ -1057,7 +1028,6 @@ ENTRY(camellia_cbc_dec_32way)
 
 	vzeroupper;
 
-	FRAME_END
 	ret;
 ENDPROC(camellia_cbc_dec_32way)
 
@@ -1082,7 +1052,6 @@ ENTRY(camellia_ctr_32way)
 	 *	%rdx: src (32 blocks)
 	 *	%rcx: iv (little endian, 128bit)
 	 */
-	FRAME_BEGIN
 
 	vzeroupper;
 
@@ -1197,7 +1166,6 @@ ENTRY(camellia_ctr_32way)
 
 	vzeroupper;
 
-	FRAME_END
 	ret;
 ENDPROC(camellia_ctr_32way)
 
@@ -1230,7 +1198,6 @@ camellia_xts_crypt_32way:
 	 *	%r8: index for input whitening key
 	 *	%r9: pointer to  __camellia_enc_blk32 or __camellia_dec_blk32
 	 */
-	FRAME_BEGIN
 
 	vzeroupper;
 
@@ -1338,7 +1305,7 @@ camellia_xts_crypt_32way:
 	vpxor 14 * 32(%rax), %ymm15, %ymm14;
 	vpxor 15 * 32(%rax), %ymm15, %ymm15;
 
-	CALL_NOSPEC %r9;
+	call *%r9;
 
 	addq $(16 * 32), %rsp;
 
@@ -1364,7 +1331,6 @@ camellia_xts_crypt_32way:
 
 	vzeroupper;
 
-	FRAME_END
 	ret;
 ENDPROC(camellia_xts_crypt_32way)
 

@@ -63,6 +63,7 @@ struct omap_uart_state {
 static LIST_HEAD(uart_list);
 static u8 num_uarts;
 static u8 console_uart_id = -1;
+static u8 no_console_suspend;
 static u8 uart_debug;
 
 #define DEFAULT_RXDMA_POLLRATE		1	/* RX DMA polling rate (us) */
@@ -175,9 +176,6 @@ static char *cmdline_find_option(char *str)
 
 static int __init omap_serial_early_init(void)
 {
-	if (of_have_populated_dt())
-		return -ENODEV;
-
 	do {
 		char oh_name[MAX_UART_HWMOD_NAME_LEN];
 		struct omap_hwmod *oh;
@@ -203,17 +201,31 @@ static int __init omap_serial_early_init(void)
 		if (cmdline_find_option(uart_name)) {
 			console_uart_id = uart->num;
 
-			if (console_loglevel >= CONSOLE_LOGLEVEL_DEBUG) {
+			if (console_loglevel >= 10) {
 				uart_debug = true;
 				pr_info("%s used as console in debug mode: uart%d clocks will not be gated",
 					uart_name, uart->num);
 			}
+
+			if (cmdline_find_option("no_console_suspend"))
+				no_console_suspend = true;
+
+			/*
+			 * omap-uart can be used for earlyprintk logs
+			 * So if omap-uart is used as console then prevent
+			 * uart reset and idle to get logs from omap-uart
+			 * until uart console driver is available to take
+			 * care for console messages.
+			 * Idling or resetting omap-uart while printing logs
+			 * early boot logs can stall the boot-up.
+			 */
+			oh->flags |= HWMOD_INIT_NO_IDLE | HWMOD_INIT_NO_RESET;
 		}
 	} while (1);
 
 	return 0;
 }
-omap_postcore_initcall(omap_serial_early_init);
+omap_core_initcall(omap_serial_early_init);
 
 /**
  * omap_serial_init_port() - initialize single serial port
@@ -252,7 +264,7 @@ void __init omap_serial_init_port(struct omap_board_data *bdata,
 		info = omap_serial_default_info;
 
 	oh = uart->oh;
-	name = OMAP_SERIAL_DRIVER_NAME;
+	name = DRIVER_NAME;
 
 	omap_up.dma_enabled = info->dma_enabled;
 	omap_up.uartclk = OMAP24XX_BASE_BAUD * 16;
@@ -263,6 +275,9 @@ void __init omap_serial_init_port(struct omap_board_data *bdata,
 	omap_up.dma_rx_timeout = info->dma_rx_timeout;
 	omap_up.dma_rx_poll_rate = info->dma_rx_poll_rate;
 	omap_up.autosuspend_timeout = info->autosuspend_timeout;
+	omap_up.DTR_gpio = info->DTR_gpio;
+	omap_up.DTR_inverted = info->DTR_inverted;
+	omap_up.DTR_present = info->DTR_present;
 
 	pdata = &omap_up;
 	pdata_size = sizeof(struct omap_uart_port_info);
@@ -276,6 +291,9 @@ void __init omap_serial_init_port(struct omap_board_data *bdata,
 		     oh->name);
 		return;
 	}
+
+	if ((console_uart_id == bdata->id) && no_console_suspend)
+		omap_device_disable_idle_on_suspend(pdev);
 
 	oh->mux = omap_hwmod_mux_init(bdata->pads, bdata->pads_cnt);
 

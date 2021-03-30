@@ -11,7 +11,6 @@
  * warranty of any kind, whether express or implied.
  */
 
-#include <linux/clk.h>
 #include <linux/dma-mapping.h>
 #include <linux/etherdevice.h>
 #include <linux/init.h>
@@ -100,20 +99,10 @@ static struct platform_device au1xx0_uart_device = {
 
 static void __init alchemy_setup_uarts(int ctype)
 {
-	long uartclk;
+	unsigned int uartclk = get_au1x00_uart_baud_base() * 16;
 	int s = sizeof(struct plat_serial8250_port);
 	int c = alchemy_get_uarts(ctype);
 	struct plat_serial8250_port *ports;
-	struct clk *clk = clk_get(NULL, ALCHEMY_PERIPH_CLK);
-
-	if (IS_ERR(clk))
-		return;
-	if (clk_prepare_enable(clk)) {
-		clk_put(clk);
-		return;
-	}
-	uartclk = clk_get_rate(clk);
-	clk_put(clk);
 
 	ports = kzalloc(s * (c + 1), GFP_KERNEL);
 	if (!ports) {
@@ -431,7 +420,7 @@ static void __init alchemy_setup_macs(int ctype)
 		memcpy(au1xxx_eth1_platform_data.mac, ethaddr, 6);
 
 	/* Register second MAC if enabled in pinfunc */
-	if (!(alchemy_rdsys(AU1000_SYS_PINFUNC) & SYS_PF_NI2)) {
+	if (!(au_readl(SYS_PINFUNC) & (u32)SYS_PF_NI2)) {
 		ret = platform_device_register(&au1xxx_eth1_device);
 		if (ret)
 			printk(KERN_INFO "Alchemy: failed to register MAC1\n");

@@ -21,7 +21,7 @@
 #include <linux/regulator/machine.h>
 #include <linux/regulator/of_regulator.h>
 #include <linux/i2c/twl.h>
-#include <linux/delay.h>
+
 
 /*
  * The TWL4030/TW5030/TPS659x0/TWL6030 family chips include power management, a
@@ -58,7 +58,7 @@ struct twlreg_info {
 	struct regulator_desc	desc;
 
 	/* chip specific features */
-	unsigned long		features;
+	unsigned long 		features;
 
 	/*
 	 * optional override functions for voltage set/get
@@ -109,7 +109,7 @@ struct twlreg_info {
 #define SMPS_OFFSET_EN		BIT(0)
 #define SMPS_EXTENDED_EN	BIT(1)
 
-/* twl6032 SMPS EPROM values */
+/* twl6025 SMPS EPROM values */
 #define TWL6030_SMPS_OFFSET		0xB0
 #define TWL6030_SMPS_MULT		0xB3
 #define SMPS_MULTOFFSET_SMPS4	BIT(0)
@@ -173,7 +173,7 @@ static int twl6030reg_is_enabled(struct regulator_dev *rdev)
 	struct twlreg_info	*info = rdev_get_drvdata(rdev);
 	int			grp = 0, val;
 
-	if (!(twl_class_is_6030() && (info->features & TWL6032_SUBCLASS))) {
+	if (!(twl_class_is_6030() && (info->features & TWL6025_SUBCLASS))) {
 		grp = twlreg_grp(rdev);
 		if (grp < 0)
 			return grp;
@@ -186,74 +186,6 @@ static int twl6030reg_is_enabled(struct regulator_dev *rdev)
 	val = TWL6030_CFG_STATE_APP(val);
 
 	return grp && (val == TWL6030_CFG_STATE_ON);
-}
-
-#define PB_I2C_BUSY	BIT(0)
-#define PB_I2C_BWEN	BIT(1)
-
-/* Wait until buffer empty/ready to send a word on power bus. */
-static int twl4030_wait_pb_ready(void)
-{
-
-	int	ret;
-	int	timeout = 10;
-	u8	val;
-
-	do {
-		ret = twl_i2c_read_u8(TWL_MODULE_PM_MASTER, &val,
-				      TWL4030_PM_MASTER_PB_CFG);
-		if (ret < 0)
-			return ret;
-
-		if (!(val & PB_I2C_BUSY))
-			return 0;
-
-		mdelay(1);
-		timeout--;
-	} while (timeout);
-
-	return -ETIMEDOUT;
-}
-
-/* Send a word over the powerbus */
-static int twl4030_send_pb_msg(unsigned msg)
-{
-	u8	val;
-	int	ret;
-
-	/* save powerbus configuration */
-	ret = twl_i2c_read_u8(TWL_MODULE_PM_MASTER, &val,
-			      TWL4030_PM_MASTER_PB_CFG);
-	if (ret < 0)
-		return ret;
-
-	/* Enable i2c access to powerbus */
-	ret = twl_i2c_write_u8(TWL_MODULE_PM_MASTER, val | PB_I2C_BWEN,
-			       TWL4030_PM_MASTER_PB_CFG);
-	if (ret < 0)
-		return ret;
-
-	ret = twl4030_wait_pb_ready();
-	if (ret < 0)
-		return ret;
-
-	ret = twl_i2c_write_u8(TWL_MODULE_PM_MASTER, msg >> 8,
-			       TWL4030_PM_MASTER_PB_WORD_MSB);
-	if (ret < 0)
-		return ret;
-
-	ret = twl_i2c_write_u8(TWL_MODULE_PM_MASTER, msg & 0xff,
-			       TWL4030_PM_MASTER_PB_WORD_LSB);
-	if (ret < 0)
-		return ret;
-
-	ret = twl4030_wait_pb_ready();
-	if (ret < 0)
-		return ret;
-
-	/* Restore powerbus configuration */
-	return twl_i2c_write_u8(TWL_MODULE_PM_MASTER, val,
-				TWL4030_PM_MASTER_PB_CFG);
 }
 
 static int twl4030reg_enable(struct regulator_dev *rdev)
@@ -279,7 +211,7 @@ static int twl6030reg_enable(struct regulator_dev *rdev)
 	int			grp = 0;
 	int			ret;
 
-	if (!(twl_class_is_6030() && (info->features & TWL6032_SUBCLASS)))
+	if (!(twl_class_is_6030() && (info->features & TWL6025_SUBCLASS)))
 		grp = twlreg_grp(rdev);
 	if (grp < 0)
 		return grp;
@@ -313,7 +245,7 @@ static int twl6030reg_disable(struct regulator_dev *rdev)
 	int			grp = 0;
 	int			ret;
 
-	if (!(twl_class_is_6030() && (info->features & TWL6032_SUBCLASS)))
+	if (!(twl_class_is_6030() && (info->features & TWL6025_SUBCLASS)))
 		grp = P1_GRP_6030 | P2_GRP_6030 | P3_GRP_6030;
 
 	/* For 6030, set the off state for all grps enabled */
@@ -371,6 +303,7 @@ static int twl4030reg_set_mode(struct regulator_dev *rdev, unsigned mode)
 {
 	struct twlreg_info	*info = rdev_get_drvdata(rdev);
 	unsigned		message;
+	int			status;
 
 	/* We can only set the mode through state machine commands... */
 	switch (mode) {
@@ -384,19 +317,20 @@ static int twl4030reg_set_mode(struct regulator_dev *rdev, unsigned mode)
 		return -EINVAL;
 	}
 
-	return twl4030_send_pb_msg(message);
-}
+	/* Ensure the resource is associated with some group */
+	status = twlreg_grp(rdev);
+	if (status < 0)
+		return status;
+	if (!(status & (P3_GRP_4030 | P2_GRP_4030 | P1_GRP_4030)))
+		return -EACCES;
 
-static inline unsigned int twl4030reg_map_mode(unsigned int mode)
-{
-	switch (mode) {
-	case RES_STATE_ACTIVE:
-		return REGULATOR_MODE_NORMAL;
-	case RES_STATE_SLEEP:
-		return REGULATOR_MODE_STANDBY;
-	default:
-		return -EINVAL;
-	}
+	status = twl_i2c_write_u8(TWL_MODULE_PM_MASTER,
+			message >> 8, TWL4030_PM_MASTER_PB_WORD_MSB);
+	if (status < 0)
+		return status;
+
+	return twl_i2c_write_u8(TWL_MODULE_PM_MASTER,
+			message & 0xff, TWL4030_PM_MASTER_PB_WORD_LSB);
 }
 
 static int twl6030reg_set_mode(struct regulator_dev *rdev, unsigned mode)
@@ -405,7 +339,7 @@ static int twl6030reg_set_mode(struct regulator_dev *rdev, unsigned mode)
 	int grp = 0;
 	int val;
 
-	if (!(twl_class_is_6030() && (info->features & TWL6032_SUBCLASS)))
+	if (!(twl_class_is_6030() && (info->features & TWL6025_SUBCLASS)))
 		grp = twlreg_grp(rdev);
 
 	if (grp < 0)
@@ -901,11 +835,10 @@ static struct regulator_ops twlsmps_ops = {
 #define TWL4030_FIXED_LDO(label, offset, mVolts, num, turnon_delay, \
 			remap_conf) \
 		TWL_FIXED_LDO(label, offset, mVolts, num, turnon_delay, \
-			remap_conf, TWL4030, twl4030fixed_ops, \
-			twl4030reg_map_mode)
+			remap_conf, TWL4030, twl4030fixed_ops)
 #define TWL6030_FIXED_LDO(label, offset, mVolts, turnon_delay) \
 		TWL_FIXED_LDO(label, offset, mVolts, 0x0, turnon_delay, \
-			0x0, TWL6030, twl6030fixed_ops, NULL)
+			0x0, TWL6030, twl6030fixed_ops)
 
 #define TWL4030_ADJUSTABLE_LDO(label, offset, num, turnon_delay, remap_conf) \
 static const struct twlreg_info TWL4030_INFO_##label = { \
@@ -922,7 +855,6 @@ static const struct twlreg_info TWL4030_INFO_##label = { \
 		.type = REGULATOR_VOLTAGE, \
 		.owner = THIS_MODULE, \
 		.enable_time = turnon_delay, \
-		.of_map_mode = twl4030reg_map_mode, \
 		}, \
 	}
 
@@ -938,7 +870,6 @@ static const struct twlreg_info TWL4030_INFO_##label = { \
 		.type = REGULATOR_VOLTAGE, \
 		.owner = THIS_MODULE, \
 		.enable_time = turnon_delay, \
-		.of_map_mode = twl4030reg_map_mode, \
 		}, \
 	}
 
@@ -968,14 +899,14 @@ static const struct twlreg_info TWL6030_INFO_##label = { \
 		}, \
 	}
 
-#define TWL6032_ADJUSTABLE_LDO(label, offset, min_mVolts, max_mVolts) \
-static const struct twlreg_info TWL6032_INFO_##label = { \
+#define TWL6025_ADJUSTABLE_LDO(label, offset, min_mVolts, max_mVolts) \
+static const struct twlreg_info TWL6025_INFO_##label = { \
 	.base = offset, \
 	.min_mV = min_mVolts, \
 	.max_mV = max_mVolts, \
 	.desc = { \
 		.name = #label, \
-		.id = TWL6032_REG_##label, \
+		.id = TWL6025_REG_##label, \
 		.n_voltages = 32, \
 		.ops = &twl6030ldo_ops, \
 		.type = REGULATOR_VOLTAGE, \
@@ -984,7 +915,7 @@ static const struct twlreg_info TWL6032_INFO_##label = { \
 	}
 
 #define TWL_FIXED_LDO(label, offset, mVolts, num, turnon_delay, remap_conf, \
-		family, operations, map_mode) \
+		family, operations) \
 static const struct twlreg_info TWLFIXED_INFO_##label = { \
 	.base = offset, \
 	.id = num, \
@@ -999,18 +930,17 @@ static const struct twlreg_info TWLFIXED_INFO_##label = { \
 		.owner = THIS_MODULE, \
 		.min_uV = mVolts * 1000, \
 		.enable_time = turnon_delay, \
-		.of_map_mode = map_mode, \
 		}, \
 	}
 
-#define TWL6032_ADJUSTABLE_SMPS(label, offset) \
+#define TWL6025_ADJUSTABLE_SMPS(label, offset) \
 static const struct twlreg_info TWLSMPS_INFO_##label = { \
 	.base = offset, \
 	.min_mV = 600, \
 	.max_mV = 2100, \
 	.desc = { \
 		.name = #label, \
-		.id = TWL6032_REG_##label, \
+		.id = TWL6025_REG_##label, \
 		.n_voltages = 63, \
 		.ops = &twlsmps_ops, \
 		.type = REGULATOR_VOLTAGE, \
@@ -1051,15 +981,15 @@ TWL6030_ADJUSTABLE_LDO(VMMC, 0x68, 1000, 3300);
 TWL6030_ADJUSTABLE_LDO(VPP, 0x6c, 1000, 3300);
 TWL6030_ADJUSTABLE_LDO(VUSIM, 0x74, 1000, 3300);
 /* 6025 are renamed compared to 6030 versions */
-TWL6032_ADJUSTABLE_LDO(LDO2, 0x54, 1000, 3300);
-TWL6032_ADJUSTABLE_LDO(LDO4, 0x58, 1000, 3300);
-TWL6032_ADJUSTABLE_LDO(LDO3, 0x5c, 1000, 3300);
-TWL6032_ADJUSTABLE_LDO(LDO5, 0x68, 1000, 3300);
-TWL6032_ADJUSTABLE_LDO(LDO1, 0x6c, 1000, 3300);
-TWL6032_ADJUSTABLE_LDO(LDO7, 0x74, 1000, 3300);
-TWL6032_ADJUSTABLE_LDO(LDO6, 0x60, 1000, 3300);
-TWL6032_ADJUSTABLE_LDO(LDOLN, 0x64, 1000, 3300);
-TWL6032_ADJUSTABLE_LDO(LDOUSB, 0x70, 1000, 3300);
+TWL6025_ADJUSTABLE_LDO(LDO2, 0x54, 1000, 3300);
+TWL6025_ADJUSTABLE_LDO(LDO4, 0x58, 1000, 3300);
+TWL6025_ADJUSTABLE_LDO(LDO3, 0x5c, 1000, 3300);
+TWL6025_ADJUSTABLE_LDO(LDO5, 0x68, 1000, 3300);
+TWL6025_ADJUSTABLE_LDO(LDO1, 0x6c, 1000, 3300);
+TWL6025_ADJUSTABLE_LDO(LDO7, 0x74, 1000, 3300);
+TWL6025_ADJUSTABLE_LDO(LDO6, 0x60, 1000, 3300);
+TWL6025_ADJUSTABLE_LDO(LDOLN, 0x64, 1000, 3300);
+TWL6025_ADJUSTABLE_LDO(LDOUSB, 0x70, 1000, 3300);
 TWL4030_FIXED_LDO(VINTANA1, 0x3f, 1500, 11, 100, 0x08);
 TWL4030_FIXED_LDO(VINTDIG, 0x47, 1500, 13, 100, 0x08);
 TWL4030_FIXED_LDO(VUSB1V5, 0x71, 1500, 17, 100, 0x08);
@@ -1071,9 +1001,9 @@ TWL6030_FIXED_LDO(VDAC, 0x64, 1800, 0);
 TWL6030_FIXED_LDO(VUSB, 0x70, 3300, 0);
 TWL6030_FIXED_LDO(V1V8, 0x16, 1800, 0);
 TWL6030_FIXED_LDO(V2V1, 0x1c, 2100, 0);
-TWL6032_ADJUSTABLE_SMPS(SMPS3, 0x34);
-TWL6032_ADJUSTABLE_SMPS(SMPS4, 0x10);
-TWL6032_ADJUSTABLE_SMPS(VIO, 0x16);
+TWL6025_ADJUSTABLE_SMPS(SMPS3, 0x34);
+TWL6025_ADJUSTABLE_SMPS(SMPS4, 0x10);
+TWL6025_ADJUSTABLE_SMPS(VIO, 0x16);
 
 static u8 twl_get_smps_offset(void)
 {
@@ -1101,7 +1031,7 @@ static u8 twl_get_smps_mult(void)
 
 #define TWL4030_OF_MATCH(comp, label) TWL_OF_MATCH(comp, TWL4030, label)
 #define TWL6030_OF_MATCH(comp, label) TWL_OF_MATCH(comp, TWL6030, label)
-#define TWL6032_OF_MATCH(comp, label) TWL_OF_MATCH(comp, TWL6032, label)
+#define TWL6025_OF_MATCH(comp, label) TWL_OF_MATCH(comp, TWL6025, label)
 #define TWLFIXED_OF_MATCH(comp, label) TWL_OF_MATCH(comp, TWLFIXED, label)
 #define TWLSMPS_OF_MATCH(comp, label) TWL_OF_MATCH(comp, TWLSMPS, label)
 
@@ -1130,15 +1060,15 @@ static const struct of_device_id twl_of_match[] = {
 	TWL6030_OF_MATCH("ti,twl6030-vmmc", VMMC),
 	TWL6030_OF_MATCH("ti,twl6030-vpp", VPP),
 	TWL6030_OF_MATCH("ti,twl6030-vusim", VUSIM),
-	TWL6032_OF_MATCH("ti,twl6032-ldo2", LDO2),
-	TWL6032_OF_MATCH("ti,twl6032-ldo4", LDO4),
-	TWL6032_OF_MATCH("ti,twl6032-ldo3", LDO3),
-	TWL6032_OF_MATCH("ti,twl6032-ldo5", LDO5),
-	TWL6032_OF_MATCH("ti,twl6032-ldo1", LDO1),
-	TWL6032_OF_MATCH("ti,twl6032-ldo7", LDO7),
-	TWL6032_OF_MATCH("ti,twl6032-ldo6", LDO6),
-	TWL6032_OF_MATCH("ti,twl6032-ldoln", LDOLN),
-	TWL6032_OF_MATCH("ti,twl6032-ldousb", LDOUSB),
+	TWL6025_OF_MATCH("ti,twl6025-ldo2", LDO2),
+	TWL6025_OF_MATCH("ti,twl6025-ldo4", LDO4),
+	TWL6025_OF_MATCH("ti,twl6025-ldo3", LDO3),
+	TWL6025_OF_MATCH("ti,twl6025-ldo5", LDO5),
+	TWL6025_OF_MATCH("ti,twl6025-ldo1", LDO1),
+	TWL6025_OF_MATCH("ti,twl6025-ldo7", LDO7),
+	TWL6025_OF_MATCH("ti,twl6025-ldo6", LDO6),
+	TWL6025_OF_MATCH("ti,twl6025-ldoln", LDOLN),
+	TWL6025_OF_MATCH("ti,twl6025-ldousb", LDOUSB),
 	TWLFIXED_OF_MATCH("ti,twl4030-vintana1", VINTANA1),
 	TWLFIXED_OF_MATCH("ti,twl4030-vintdig", VINTDIG),
 	TWLFIXED_OF_MATCH("ti,twl4030-vusb1v5", VUSB1V5),
@@ -1150,9 +1080,9 @@ static const struct of_device_id twl_of_match[] = {
 	TWLFIXED_OF_MATCH("ti,twl6030-vusb", VUSB),
 	TWLFIXED_OF_MATCH("ti,twl6030-v1v8", V1V8),
 	TWLFIXED_OF_MATCH("ti,twl6030-v2v1", V2V1),
-	TWLSMPS_OF_MATCH("ti,twl6032-smps3", SMPS3),
-	TWLSMPS_OF_MATCH("ti,twl6032-smps4", SMPS4),
-	TWLSMPS_OF_MATCH("ti,twl6032-vio", VIO),
+	TWLSMPS_OF_MATCH("ti,twl6025-smps3", SMPS3),
+	TWLSMPS_OF_MATCH("ti,twl6025-smps4", SMPS4),
+	TWLSMPS_OF_MATCH("ti,twl6025-vio", VIO),
 	{},
 };
 MODULE_DEVICE_TABLE(of, twl_of_match);
@@ -1174,12 +1104,11 @@ static int twlreg_probe(struct platform_device *pdev)
 		template = match->data;
 		id = template->desc.id;
 		initdata = of_get_regulator_init_data(&pdev->dev,
-						      pdev->dev.of_node,
-						      &template->desc);
+						      pdev->dev.of_node);
 		drvdata = NULL;
 	} else {
 		id = pdev->id;
-		initdata = dev_get_platdata(&pdev->dev);
+		initdata = pdev->dev.platform_data;
 		for (i = 0, template = NULL; i < ARRAY_SIZE(twl_of_match); i++) {
 			template = twl_of_match[i].data;
 			if (template && template->desc.id == id)
@@ -1199,7 +1128,7 @@ static int twlreg_probe(struct platform_device *pdev)
 	if (!initdata)
 		return -EINVAL;
 
-	info = devm_kmemdup(&pdev->dev, template, sizeof(*info), GFP_KERNEL);
+	info = kmemdup(template, sizeof (*info), GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
 
@@ -1234,19 +1163,19 @@ static int twlreg_probe(struct platform_device *pdev)
 	}
 
 	switch (id) {
-	case TWL6032_REG_SMPS3:
+	case TWL6025_REG_SMPS3:
 		if (twl_get_smps_mult() & SMPS_MULTOFFSET_SMPS3)
 			info->flags |= SMPS_EXTENDED_EN;
 		if (twl_get_smps_offset() & SMPS_MULTOFFSET_SMPS3)
 			info->flags |= SMPS_OFFSET_EN;
 		break;
-	case TWL6032_REG_SMPS4:
+	case TWL6025_REG_SMPS4:
 		if (twl_get_smps_mult() & SMPS_MULTOFFSET_SMPS4)
 			info->flags |= SMPS_EXTENDED_EN;
 		if (twl_get_smps_offset() & SMPS_MULTOFFSET_SMPS4)
 			info->flags |= SMPS_OFFSET_EN;
 		break;
-	case TWL6032_REG_VIO:
+	case TWL6025_REG_VIO:
 		if (twl_get_smps_mult() & SMPS_MULTOFFSET_VIO)
 			info->flags |= SMPS_EXTENDED_EN;
 		if (twl_get_smps_offset() & SMPS_MULTOFFSET_VIO)
@@ -1259,10 +1188,11 @@ static int twlreg_probe(struct platform_device *pdev)
 	config.driver_data = info;
 	config.of_node = pdev->dev.of_node;
 
-	rdev = devm_regulator_register(&pdev->dev, &info->desc, &config);
+	rdev = regulator_register(&info->desc, &config);
 	if (IS_ERR(rdev)) {
 		dev_err(&pdev->dev, "can't register %s, %ld\n",
 				info->desc.name, PTR_ERR(rdev));
+		kfree(info);
 		return PTR_ERR(rdev);
 	}
 	platform_set_drvdata(pdev, rdev);
@@ -1282,15 +1212,27 @@ static int twlreg_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static int twlreg_remove(struct platform_device *pdev)
+{
+	struct regulator_dev *rdev = platform_get_drvdata(pdev);
+	struct twlreg_info *info = rdev->reg_data;
+
+	regulator_unregister(rdev);
+	kfree(info);
+	return 0;
+}
+
 MODULE_ALIAS("platform:twl_reg");
 
 static struct platform_driver twlreg_driver = {
 	.probe		= twlreg_probe,
+	.remove		= twlreg_remove,
 	/* NOTE: short name, to work around driver model truncation of
 	 * "twl_regulator.12" (and friends) to "twl_regulator.1".
 	 */
 	.driver  = {
 		.name  = "twl_reg",
+		.owner = THIS_MODULE,
 		.of_match_table = of_match_ptr(twl_of_match),
 	},
 };

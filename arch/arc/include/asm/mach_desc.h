@@ -23,8 +23,11 @@
  * @dt_compat:		Array of device tree 'compatible' strings
  * 			(XXX: although only 1st entry is looked at)
  * @init_early:		Very early callback [called from setup_arch()]
- * @init_per_cpu:	for each CPU as it is coming up (SMP as well as UP)
+ * @init_irq:		setup external IRQ controllers [called from init_IRQ()]
+ * @init_smp:		for each CPU (e.g. setup IPI)
  * 			[(M):init_IRQ(), (o):start_kernel_secondary()]
+ * @init_time:		platform specific clocksource/clockevent registration
+ * 			[called from time_init()]
  * @init_machine:	arch initcall level callback (e.g. populate static
  * 			platform devices or parse Devicetree)
  * @init_late:		Late initcall level callback
@@ -33,8 +36,13 @@
 struct machine_desc {
 	const char		*name;
 	const char		**dt_compat;
+
 	void			(*init_early)(void);
-	void			(*init_per_cpu)(unsigned int);
+	void			(*init_irq)(void);
+#ifdef CONFIG_SMP
+	void			(*init_smp)(unsigned int);
+#endif
+	void			(*init_time)(void);
 	void			(*init_machine)(void);
 	void			(*init_late)(void);
 
@@ -43,12 +51,22 @@ struct machine_desc {
 /*
  * Current machine - only accessible during boot.
  */
-extern const struct machine_desc *machine_desc;
+extern struct machine_desc *machine_desc;
 
 /*
  * Machine type table - also only accessible during boot
  */
-extern const struct machine_desc __arch_info_begin[], __arch_info_end[];
+extern struct machine_desc __arch_info_begin[], __arch_info_end[];
+#define for_each_machine_desc(p)			\
+	for (p = __arch_info_begin; p < __arch_info_end; p++)
+
+static inline struct machine_desc *default_machine_desc(void)
+{
+	/* the default machine is the last one linked in */
+	if (__arch_info_end - 1 < __arch_info_begin)
+		return NULL;
+	return __arch_info_end - 1;
+}
 
 /*
  * Set of macros to define architecture features.
@@ -63,6 +81,7 @@ __attribute__((__section__(".arch.info.init"))) = {	\
 #define MACHINE_END				\
 };
 
-extern const struct machine_desc *setup_machine_fdt(void *dt);
+extern struct machine_desc *setup_machine_fdt(void *dt);
+extern void __init copy_devtree(void);
 
 #endif

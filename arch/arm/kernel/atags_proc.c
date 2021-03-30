@@ -41,7 +41,7 @@ static int __init init_atags_procfs(void)
 	size_t size;
 
 	if (tag->hdr.tag != ATAG_CORE) {
-		pr_info("No ATAGs?");
+		printk(KERN_INFO "No ATAGs?");
 		return -EINVAL;
 	}
 
@@ -68,7 +68,7 @@ static int __init init_atags_procfs(void)
 
 nomem:
 	kfree(b);
-	pr_err("Exporting ATAGs: not enough memory\n");
+	printk(KERN_ERR "Exporting ATAGs: not enough memory\n");
 
 	return -ENOMEM;
 }

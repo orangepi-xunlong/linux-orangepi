@@ -1,19 +1,3 @@
-/*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-mipi/protocol.h
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
 #ifndef __PROTOCOL__H__
 #define __PROTOCOL__H__
 
@@ -73,25 +57,6 @@ enum pkt_fmt {
 	MIPI_USR_DAT5 = 0X35,
 	MIPI_USR_DAT6 = 0X36,
 	MIPI_USR_DAT7 = 0X37,
-};
-
-enum data_fmt_type {
-	FS  = 0x0,
-	FE  = 0x1,
-	LS  = 0x2,
-	LE  = 0x3,
-	GS0 = 0x8,
-	GS1 = 0x9,
-	GS2 = 0xa,
-	GS3 = 0xb,
-	GS4 = 0xc,
-	GS5 = 0xd,
-	GS6 = 0xe,
-	GS7 = 0xf,
-	GL  = 0x10,
-	YUV = 0x11,
-	RGB = 0x12,
-	RAW = 0x13,
 };
 
 enum protocol_int {

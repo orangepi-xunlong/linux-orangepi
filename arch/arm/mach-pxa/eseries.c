@@ -10,10 +10,8 @@
  *
  */
 
-#include <linux/clkdev.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <linux/clk-provider.h>
 #include <linux/gpio.h>
 #include <linux/delay.h>
 #include <linux/platform_device.h>
@@ -23,7 +21,6 @@
 #include <linux/mtd/nand.h>
 #include <linux/mtd/partitions.h>
 #include <linux/usb/gpio_vbus.h>
-#include <linux/memblock.h>
 
 #include <video/w100fb.h>
 
@@ -31,24 +28,27 @@
 #include <asm/mach/arch.h>
 #include <asm/mach-types.h>
 
-#include "pxa25x.h"
+#include <mach/pxa25x.h>
 #include <mach/eseries-gpio.h>
-#include "eseries-irq.h"
+#include <mach/eseries-irq.h>
 #include <mach/audio.h>
 #include <linux/platform_data/video-pxafb.h>
-#include "udc.h"
+#include <mach/udc.h>
 #include <linux/platform_data/irda-pxaficp.h>
 
 #include "devices.h"
 #include "generic.h"
+#include "clock.h"
 
 /* Only e800 has 128MB RAM */
-void __init eseries_fixup(struct tag *tags, char **cmdline)
+void __init eseries_fixup(struct tag *tags, char **cmdline, struct meminfo *mi)
 {
+	mi->nr_banks=1;
+	mi->bank[0].start = 0xa0000000;
 	if (machine_is_e800())
-		memblock_add(0xa0000000, SZ_128M);
+		mi->bank[0].size = (128*1024*1024);
 	else
-		memblock_add(0xa0000000, SZ_64M);
+		mi->bank[0].size = (64*1024*1024);
 }
 
 struct gpio_vbus_mach_info e7xx_udc_info = {
@@ -57,7 +57,7 @@ struct gpio_vbus_mach_info e7xx_udc_info = {
 	.gpio_pullup_inverted = 1
 };
 
-static struct platform_device e7xx_gpio_vbus __maybe_unused = {
+static struct platform_device e7xx_gpio_vbus = {
 	.name	= "gpio-vbus",
 	.id	= -1,
 	.dev	= {
@@ -126,9 +126,27 @@ struct resource eseries_tmio_resources[] = {
 };
 
 /* Some e-series hardware cannot control the 32K clock */
-static void __init __maybe_unused eseries_register_clks(void)
+static void clk_32k_dummy(struct clk *clk)
 {
-	clk_register_fixed_rate(NULL, "CLK_CK32K", NULL, 0, 32768);
+}
+
+static const struct clkops clk_32k_dummy_ops = {
+	.enable         = clk_32k_dummy,
+	.disable        = clk_32k_dummy,
+};
+
+static struct clk tmio_dummy_clk = {
+	.ops	= &clk_32k_dummy_ops,
+	.rate	= 32768,
+};
+
+static struct clk_lookup eseries_clkregs[] = {
+	INIT_CLKREG(&tmio_dummy_clk, NULL, "CLK_CK32K"),
+};
+
+static void __init eseries_register_clks(void)
+{
+	clkdev_add_table(eseries_clkregs, ARRAY_SIZE(eseries_clkregs));
 }
 
 #ifdef CONFIG_MACH_E330
@@ -666,7 +684,7 @@ static unsigned long e750_pin_config[] __initdata = {
 	/* PC Card */
 	GPIO8_GPIO,   /* CD0 */
 	GPIO44_GPIO,  /* CD1 */
-	/* GPIO11_GPIO,  IRQ0 */
+	GPIO11_GPIO,  /* IRQ0 */
 	GPIO6_GPIO,   /* IRQ1 */
 	GPIO27_GPIO,  /* RST0 */
 	GPIO24_GPIO,  /* RST1 */
@@ -761,9 +779,6 @@ static unsigned long e800_pin_config[] __initdata = {
 	GPIO29_AC97_SDATA_IN_0,
 	GPIO30_AC97_SDATA_OUT,
 	GPIO31_AC97_SYNC,
-
-	/* tc6393xb */
-	GPIO11_3_6MHz,
 };
 
 static struct w100_gen_regs e800_lcd_regs = {

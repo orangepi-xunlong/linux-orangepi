@@ -9,7 +9,7 @@ DECLARE_PER_CPU_READ_MOSTLY(unsigned long, espfix_stack);
 DECLARE_PER_CPU_READ_MOSTLY(unsigned long, espfix_waddr);
 
 extern void init_espfix_bsp(void);
-extern void init_espfix_ap(int cpu);
+extern void init_espfix_ap(void);
 
 #endif /* CONFIG_X86_64 */
 

@@ -7,8 +7,6 @@
  *                              Turned xenfs into a loadable module.
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/module.h>
@@ -57,9 +55,6 @@ static int xenfs_fill_super(struct super_block *sb, void *data, int silent)
 		{ "privcmd", &xen_privcmd_fops, S_IRUSR|S_IWUSR },
 		{ "xsd_kva", &xsd_kva_file_ops, S_IRUSR|S_IWUSR},
 		{ "xsd_port", &xsd_port_file_ops, S_IRUSR|S_IWUSR},
-#ifdef CONFIG_XEN_SYMS
-		{ "xensyms", &xensyms_ops, S_IRUSR},
-#endif
 		{""},
 	};
 
@@ -87,7 +82,7 @@ static int __init xenfs_init(void)
 	if (xen_domain())
 		return register_filesystem(&xenfs_type);
 
-	pr_info("not registering filesystem on non-xen platform\n");
+	printk(KERN_INFO "XENFS: not registering filesystem on non-xen platform\n");
 	return 0;
 }
 

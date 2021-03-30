@@ -15,6 +15,7 @@
 #ifndef __SUNXI_SCR_USER_H__
 #define __SUNXI_SCR_USER_H__
 
+
 #define MAX_ATR_LEN			33
 
 /* ioctrol command */
@@ -27,6 +28,7 @@
 #define SCR_IOCGATRPARA		_IOW(SCR_IOC_MAGIC, 5, struct smc_atr_para)
 #define SCR_IOCGPPSPARA		_IOW(SCR_IOC_MAGIC, 6, struct smc_pps_para)
 #define SCR_IOCWRDATA		_IOWR(SCR_IOC_MAGIC, 7, struct scr_wr_data)
+
 
 enum scr_card_sta {
 	SCR_CARD_OUT = 0,

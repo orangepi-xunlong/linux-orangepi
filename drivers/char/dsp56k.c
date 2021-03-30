@@ -325,7 +325,7 @@ static long dsp56k_ioctl(struct file *file, unsigned int cmd,
 			if(get_user(bin, &binary->bin) < 0)
 				return -EFAULT;
 		
-			if (len <= 0) {
+			if (len == 0) {
 				return -EINVAL;      /* nothing to upload?!? */
 			}
 			if (len > DSP56K_MAX_BINARY_LENGTH) {
@@ -383,7 +383,7 @@ static long dsp56k_ioctl(struct file *file, unsigned int cmd,
 			return put_user(status, &hf->status);
 		}
 		case DSP56K_HOST_CMD:
-			if (arg > 31)
+			if (arg > 31 || arg < 0)
 				return -EINVAL;
 			mutex_lock(&dsp56k_mutex);
 			dsp56k_host_interface.cvr = (u_char)((arg & DSP56K_CVR_HV_MASK) |

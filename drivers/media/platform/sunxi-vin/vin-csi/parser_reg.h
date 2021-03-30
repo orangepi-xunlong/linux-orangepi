@@ -1,30 +1,10 @@
-/*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-csi/parser_reg.h
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * Authors:  Zhao Wei <zhaowei@allwinnertech.com>
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
 
 #ifndef __CSIC__PARSER__REG__H__
 #define __CSIC__PARSER__REG__H__
 
-#include <media/sunxi_camera_v2.h>
 #include <linux/types.h>
-#include <media/v4l2-mediabus.h>
 
-#define MAX_CH_NUM 4
-
+#define MAX_CSIC_PRS_NUM 2
 
 /*register value*/
 
@@ -33,33 +13,23 @@ enum prs_mode {
 	PRS_MCSI,
 };
 
-enum ref_pol {
-	ACTIVE_LOW,		/* active low */
-	ACTIVE_HIGH,		/* active high */
-};
-
-enum edge_pol {
-	FALLING,		/* active falling */
-	RISING,			/* active rising */
-};
-
-enum prs_if {
-	/* YUV(separate syncs) */
-	/* YUYV422 Interleaved or RAW * (All data in one data bus) */
-	PRS_IF_INTLV = 0x00,
-	PRS_IF_INTLV_16BIT = 0x01, /* 16 bit YUYV422 Interleaved */
+enum csi_if {
+	/* YUV(seperate syncs) */
+	CSI_IF_INTLV = 0x00,	/* YUYV422 Interleaved or RAW
+				 * (All data in one data bus) */
+	CSI_IF_INTLV_16BIT = 0x01, /* 16 bit YUYV422 Interleaved */
 
 	/* CCIR656(embedded syncs) */
-	PRS_IF_BT656_1CH = 0x04,   /* BT656 1 channel */
-	PRS_IF_BT1120_1CH = 0x05,  /* 16bit BT656(BT1120 like) 1 channel */
-	/* BT656 2 channels (All data * interleaved in one data bus) */
-	PRS_IF_BT656_2CH = 0x0c,
-	/* 16bit BT656(BT1120 like) 2 channels * (All data interleaved in one data bus) */
-	PRS_IF_BT1120_2CH = 0x0d,
-	/* BT656 4 channels (All data * interleaved in one data bus) */
-	PRS_IF_BT656_4CH = 0x0e,
-	/* 16bit BT656(BT1120 like) 4 channels * (All data interleaved in one data bus) */
-	PRS_IF_BT1120_4CH = 0x0f,
+	CSI_IF_BT656_1CH = 0x04,	/* BT656 1 channel */
+	CSI_IF_BT1120_1CH = 0x05,	/* 16bit BT656(BT1120 like) 1 channel */
+	CSI_IF_BT656_2CH = 0x0c,	/* BT656 2 channels (All data
+					 * interleaved in one data bus) */
+	CSI_IF_BT1120_2CH = 0x0d,	/* 16bit BT656(BT1120 like) 2 channels
+					 * (All data interleaved in one data bus) */
+	CSI_IF_BT656_4CH = 0x0e, 	/* BT656 4 channels (All data
+					 * interleaved in one data bus) */
+	CSI_IF_BT1120_4CH = 0x0f,	/* 16bit BT656(BT1120 like) 4 channels
+					 * (All data interleaved in one data bus) */
 };
 
 enum output_mode {
@@ -110,7 +80,7 @@ enum clk_pol {
 /*
  * input reference polarity
  */
-enum refer_pol {
+enum ref_pol {
 	REF_NEGATIVE,		/* active low */
 	REF_POSITIVE,		/* active high */
 };
@@ -150,82 +120,27 @@ enum prs_int_sel {
 	PRS_INT_MUL_ERR = 0X4,
 };
 
-/*
- * csi buffer
- */
-
-enum csi_buf_sel {
-	CSI_BUF_0_A = 0,    /* FIFO for Y address A */
-	CSI_BUF_0_B,        /* FIFO for Y address B */
-	CSI_BUF_1_A,        /* FIFO for Cb address A */
-	CSI_BUF_1_B,        /* FIFO for Cb address B */
-	CSI_BUF_2_A,        /* FIFO for Cr address A */
-	CSI_BUF_2_B,        /* FIFO for Cr address B */
-};
-
-struct bus_timing {
-	enum ref_pol href_pol;
-	enum ref_pol vref_pol;
-	enum edge_pol pclk_sample;
-	enum ref_pol field_even_pol; /*field 0/1 0:odd 1:even*/
-};
-
-struct frame_size {
-	unsigned int width;	/* in pixel unit */
-	unsigned int height;	/* in pixel unit */
-};
-
-struct frame_offset {
-	unsigned int hoff;	/* in pixel unit */
-	unsigned int voff;	/* in pixel unit */
-};
-
-struct bus_info {
-	enum v4l2_mbus_type bus_if;
-	struct bus_timing bus_tmg;
-	u32 bus_ch_fmt[MAX_CH_NUM]; /* define the same as V4L2 */
-	unsigned int ch_total_num;
-};
-
-/*
- * frame arrangement
- * Indicate that how the channel images are put together into one buffer
- */
-struct frame_arrange {
-	unsigned char column;
-	unsigned char row;
-};
-
-struct frame_info {
-	struct frame_arrange arrange;
-	struct frame_size ch_size[MAX_CH_NUM];
-	struct frame_offset ch_offset[MAX_CH_NUM];
-	unsigned int pix_ch_fmt[MAX_CH_NUM];
-	enum v4l2_field ch_field[MAX_CH_NUM]; /* define the same as V4L2 */
-	unsigned int frm_byte_size;
-};
-
 /*register data struct*/
 
 struct prs_ncsi_if_cfg {
 	unsigned int pclk_shift;
 	enum src_type type;
 	enum field_pol field;
-	enum refer_pol vref;
-	enum refer_pol href;
+	enum ref_pol vref;
+	enum ref_pol href;
 	enum clk_pol clk;
 	enum field_dt_mode field_dt;
-	bool ddr_sample;
+	unsigned int ddr_sample;
 	enum seq_8plus2 seq_8_2;
 	enum if_data_width dw;
 	enum input_seq seq;
 	enum output_mode mode;
-	enum prs_if intf;
+	enum csi_if intf;
 };
 
 struct prs_mcsi_if_cfg {
-	enum input_seq seq;
-	enum output_mode mode;
+	enum input_seq input_seq;
+	enum output_mode output_mode;
 };
 
 struct prs_cap_mode {
@@ -256,8 +171,10 @@ struct prs_input_para {
 	unsigned int src_type;
 	unsigned int input_vt;
 	unsigned int input_ht;
+	unsigned int input_vb;
 	unsigned int input_hb;
-	unsigned int input_hs;
+	unsigned int input_y;
+	unsigned int input_x;
 };
 
 struct prs_int_status {
@@ -266,27 +183,20 @@ struct prs_int_status {
 	bool mul_err_pd;
 };
 
-struct prs_fps_ds {
-	unsigned int ch0_fps_ds;
-	unsigned int ch1_fps_ds;
-	unsigned int ch2_fps_ds;
-	unsigned int ch3_fps_ds;
-};
-
 int csic_prs_set_base_addr(unsigned int sel, unsigned long addr);
 void csic_prs_enable(unsigned int sel);
 void csic_prs_disable(unsigned int sel);
 void csic_prs_mode(unsigned int sel, enum prs_mode mode);
 void csic_prs_pclk_en(unsigned int sel, unsigned int en);
+void csic_prs_pclk_en(unsigned int sel, unsigned int en);
 void csic_prs_ncsi_en(unsigned int sel, unsigned int en);
 void csic_prs_mcsi_en(unsigned int sel, unsigned int en);
-void csic_prs_ch_en(unsigned int sel, unsigned int en);
+
 void csic_prs_ncsi_if_cfg(unsigned int sel, struct prs_ncsi_if_cfg *if_cfg);
 void csic_prs_mcsi_if_cfg(unsigned int sel, struct prs_mcsi_if_cfg *if_cfg);
-void csic_prs_capture_start(unsigned int sel, unsigned int ch_total_num,
+
+void csic_prs_capture(unsigned int sel, unsigned int ch,
 				struct prs_cap_mode *mode);
-void csic_prs_capture_stop(unsigned int sel);
-void csic_prs_fps_ds(unsigned int sel, struct prs_fps_ds *prs_fps_ds);
 void csic_prs_signal_status(unsigned int sel,
 				struct prs_signal_status *status);
 void csic_prs_ncsi_bt656_header_cfg(unsigned int sel,
@@ -295,16 +205,7 @@ void csic_prs_input_fmt_cfg(unsigned int sel, unsigned int ch,
 				enum prs_input_fmt fmt);
 void csic_prs_output_size_cfg(unsigned int sel, unsigned int ch,
 				struct prs_output_size *size);
-void csic_prs_set_pclk_dly(unsigned int sel, unsigned int pclk_dly);
-/*for csic sync*/
-void csic_prs_sync_en_cfg(unsigned int sel, struct csi_sync_ctrl *sync);
-void csic_prs_sync_en(unsigned int sel, struct csi_sync_ctrl *sync);
-void csic_prs_sync_cfg(unsigned int sel, struct csi_sync_ctrl *sync);
-void csic_prs_sync_wait_N(unsigned int sel, struct csi_sync_ctrl *sync);
-void csic_prs_sync_wait_M(unsigned int sel, struct csi_sync_ctrl *sync);
 
-void csic_prs_xs_en(unsigned int sel, struct csi_sync_ctrl *sync);
-void csic_prs_xs_period_len_register(unsigned int sel, struct csi_sync_ctrl *sync);
 /* for debug */
 void csic_prs_input_para_get(unsigned int sel, unsigned int ch,
 				struct prs_input_para *para);

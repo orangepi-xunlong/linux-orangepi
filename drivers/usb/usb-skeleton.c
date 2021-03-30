@@ -14,6 +14,7 @@
 
 #include <linux/kernel.h>
 #include <linux/errno.h>
+#include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/kref.h>
@@ -324,8 +325,9 @@ retry:
 		rv = skel_do_read_io(dev, count);
 		if (rv < 0)
 			goto exit;
-		else
+		else if (!(file->f_flags & O_NONBLOCK))
 			goto retry;
+		rv = -EAGAIN;
 	}
 exit:
 	mutex_unlock(&dev->io_mutex);
@@ -499,8 +501,10 @@ static int skel_probe(struct usb_interface *interface,
 
 	/* allocate memory for our device state and initialize it */
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
-	if (!dev)
+	if (!dev) {
+		dev_err(&interface->dev, "Out of memory\n");
 		goto error;
+	}
 	kref_init(&dev->kref);
 	sema_init(&dev->limit_sem, WRITES_IN_FLIGHT);
 	mutex_init(&dev->io_mutex);
@@ -524,11 +528,17 @@ static int skel_probe(struct usb_interface *interface,
 			dev->bulk_in_size = buffer_size;
 			dev->bulk_in_endpointAddr = endpoint->bEndpointAddress;
 			dev->bulk_in_buffer = kmalloc(buffer_size, GFP_KERNEL);
-			if (!dev->bulk_in_buffer)
+			if (!dev->bulk_in_buffer) {
+				dev_err(&interface->dev,
+					"Could not allocate bulk_in_buffer\n");
 				goto error;
+			}
 			dev->bulk_in_urb = usb_alloc_urb(0, GFP_KERNEL);
-			if (!dev->bulk_in_urb)
+			if (!dev->bulk_in_urb) {
+				dev_err(&interface->dev,
+					"Could not allocate bulk_in_urb\n");
 				goto error;
+			}
 		}
 
 		if (!dev->bulk_out_endpointAddr &&

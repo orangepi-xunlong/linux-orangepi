@@ -307,4 +307,4 @@ CPU_BE( orr	syndrome, diff, has_nul )
 .Lret0:
 	mov	result, #0
 	ret
-ENDPIPROC(strncmp)
+ENDPROC(strncmp)

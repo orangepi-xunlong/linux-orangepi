@@ -3,7 +3,7 @@
  *  under the terms of the GNU General Public License version 2 as published
  *  by the Free Software Foundation.
  *
- *  Copyright (C) 2010 John Crispin <john@phrozen.org>
+ *  Copyright (C) 2010 John Crispin <blogic@openwrt.org>
  */
 
 #include <linux/cpu.h>

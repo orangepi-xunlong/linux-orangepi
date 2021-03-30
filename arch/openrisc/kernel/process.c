@@ -152,6 +152,8 @@ copy_thread(unsigned long clone_flags, unsigned long usp,
 
 	top_of_kernel_stack = sp;
 
+	p->set_child_tid = p->clear_child_tid = NULL;
+
 	/* Locate userspace context on stack... */
 	sp -= STACK_FRAME_OVERHEAD;	/* redzone */
 	sp -= sizeof(struct pt_regs);
@@ -195,6 +197,7 @@ void start_thread(struct pt_regs *regs, unsigned long pc, unsigned long sp)
 {
 	unsigned long sr = mfspr(SPR_SR) & ~SPR_SR_SM;
 
+	set_fs(USER_DS);
 	memset(regs, 0, sizeof(struct pt_regs));
 
 	regs->pc = pc;

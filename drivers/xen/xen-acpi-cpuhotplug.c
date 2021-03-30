@@ -15,8 +15,6 @@
  * details.
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -24,7 +22,10 @@
 #include <linux/cpu.h>
 #include <linux/acpi.h>
 #include <linux/uaccess.h>
+#include <acpi/acpi_bus.h>
+#include <acpi/acpi_drivers.h>
 #include <acpi/processor.h>
+
 #include <xen/acpi.h>
 #include <xen/interface/platform.h>
 #include <asm/xen/hypercall.h>
@@ -46,7 +47,13 @@ static int xen_acpi_processor_enable(struct acpi_device *device)
 	unsigned long long value;
 	union acpi_object object = { 0 };
 	struct acpi_buffer buffer = { sizeof(union acpi_object), &object };
-	struct acpi_processor *pr = acpi_driver_data(device);
+	struct acpi_processor *pr;
+
+	pr = acpi_driver_data(device);
+	if (!pr) {
+		pr_err(PREFIX "Cannot find driver data\n");
+		return -EINVAL;
+	}
 
 	if (!strcmp(acpi_device_hid(device), ACPI_PROCESSOR_OBJECT_HID)) {
 		/* Declared with "Processor" statement; match ProcessorID */
@@ -71,7 +78,7 @@ static int xen_acpi_processor_enable(struct acpi_device *device)
 
 	pr->id = xen_pcpu_id(pr->acpi_id);
 
-	if (invalid_logical_cpuid(pr->id))
+	if ((int)pr->id < 0)
 		/* This cpu is not presented at hypervisor, try to hotadd it */
 		if (ACPI_FAILURE(xen_acpi_cpu_hotadd(pr))) {
 			pr_err(PREFIX "Hotadd CPU (acpi_id = %d) failed.\n",
@@ -82,7 +89,7 @@ static int xen_acpi_processor_enable(struct acpi_device *device)
 	return 0;
 }
 
-static int xen_acpi_processor_add(struct acpi_device *device)
+static int __cpuinit xen_acpi_processor_add(struct acpi_device *device)
 {
 	int ret;
 	struct acpi_processor *pr;
@@ -206,7 +213,7 @@ static int xen_hotadd_cpu(struct acpi_processor *pr)
 	op.u.cpu_add.acpi_id = pr->acpi_id;
 	op.u.cpu_add.pxm = pxm;
 
-	cpu_id = HYPERVISOR_platform_op(&op);
+	cpu_id = HYPERVISOR_dom0_op(&op);
 	if (cpu_id < 0)
 		pr_err(PREFIX "Failed to hotadd CPU for acpi_id %d\n",
 				pr->acpi_id);
@@ -220,7 +227,7 @@ static acpi_status xen_acpi_cpu_hotadd(struct acpi_processor *pr)
 		return AE_ERROR;
 
 	pr->id = xen_hotadd_cpu(pr);
-	if (invalid_logical_cpuid(pr->id))
+	if ((int)pr->id < 0)
 		return AE_ERROR;
 
 	/*
@@ -260,8 +267,7 @@ static void acpi_processor_hotplug_notify(acpi_handle handle,
 		if (!is_processor_present(handle))
 			break;
 
-		acpi_bus_get_device(handle, &device);
-		if (acpi_device_enumerated(device))
+		if (!acpi_bus_get_device(handle, &device))
 			break;
 
 		result = acpi_bus_scan(handle);
@@ -269,9 +275,8 @@ static void acpi_processor_hotplug_notify(acpi_handle handle,
 			pr_err(PREFIX "Unable to add the device\n");
 			break;
 		}
-		device = NULL;
-		acpi_bus_get_device(handle, &device);
-		if (!acpi_device_enumerated(device)) {
+		result = acpi_bus_get_device(handle, &device);
+		if (result) {
 			pr_err(PREFIX "Missing device object\n");
 			break;
 		}
@@ -307,7 +312,7 @@ static void acpi_processor_hotplug_notify(acpi_handle handle,
 		goto out;
 	}
 
-	(void) acpi_evaluate_ost(handle, event, ost_code, NULL);
+	(void) acpi_evaluate_hotplug_ost(handle, event, ost_code, NULL);
 
 out:
 	acpi_scan_lock_release();

@@ -1,32 +1,16 @@
-/*
- * linux-4.9/drivers/media/platform/sunxi-vfe/lib/isp_module_cfg.h
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
-/*
+/* 
  ***************************************************************************************
- *
+ * 
  * isp_module_cfg.h
- *
+ * 
  * Hawkview ISP - isp_module_cfg.h module
- *
+ * 
  * Copyright (c) 2013 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
- *
+ * 
  * Version		  Author         Date		    Description
- *
- *   1.0		Yang Feng	2013/11/07	    First Version
- *
+ * 
+ *   1.0		Yang Feng   	2013/11/07	    First Version
+ * 
  ****************************************************************************************
  */
 
@@ -38,16 +22,16 @@
 
 /* For debug */
 #define ISP_DGB
-/* #define ISP_DGB_FL */
+//#define ISP_DGB_FL
 
 #ifdef ISP_DGB
-#define  ISP_DBG(lev, dbg_level, x, arg...)  do { if (lev <= dbg_level) pr_debug("[ISP_DEBUG]"x, ##arg); } while (0)
+#define  ISP_DBG(lev,dbg_level,x,arg...)  do { if(lev <= dbg_level) printk("[ISP_DEBUG]"x,##arg); } while(0)
 #else
-#define  ISP_DBG(lev, dbg_level, x, arg...)
+#define  ISP_DBG(lev,dbg_level,x,arg...)
 #endif
 
 #ifdef ISP_DGB_FL
-#define  FUNCTION_LOG          do { pr_info("%s, line: %d\n", __func__, __LINE__); } while (0)
+#define  FUNCTION_LOG          do { printk("%s, line: %d\n", __FUNCTION__, __LINE__); } while(0)
 #else
 #define  FUNCTION_LOG
 #endif
@@ -63,7 +47,7 @@
 #define ISP_GAMMA_TBL_SIZE          256
 #define ISP_DRC_TBL_SIZE            256
 
-/* sensor */
+//sensor
 #define MAX_PIC_RESOLUTION_NUM      10
 
 /*
@@ -71,7 +55,8 @@
  *  struct isp_bndf_config - .
  *
  */
-struct isp_bndf_config {
+struct isp_bndf_config
+{
 	enum isp_bndf_mode bndf_mode;
 	struct isp_denoise filter_2d_coef;
 };
@@ -81,10 +66,10 @@ struct isp_bndf_config {
  *  struct isp_drc_config - .
  *
  */
-struct isp_drc_config {
+struct isp_drc_config
+{
 	enum isp_rgb_drc_mode rgb_drc_mode;
 	unsigned short drc_table[ISP_DRC_TBL_SIZE];
-	unsigned short drc_table_last[ISP_DRC_TBL_SIZE];
 };
 
 /*
@@ -93,7 +78,8 @@ struct isp_drc_config {
  *
  */
 
-struct isp_lut_config {
+struct isp_lut_config
+{
 	int lut_num;
 	enum isp_src lut_src;
 	enum isp_lut_dpc_mode lut_dpc_mode;
@@ -101,14 +87,16 @@ struct isp_lut_config {
 	unsigned char lut_dpc_src1_table[ISP_LUT_TBL_SIZE*4];
 };
 
-struct isp_lens_config {
+struct isp_lens_config
+{
 	struct isp_lsc_config lsc_cfg;
 	unsigned short lens_r_table[ISP_LENS_TBL_SIZE];
 	unsigned short lens_g_table[ISP_LENS_TBL_SIZE];
 	unsigned short lens_b_table[ISP_LENS_TBL_SIZE];
 };
 
-struct isp_gamma_config {
+struct isp_gamma_config
+{
 	unsigned char gamma_table[ISP_GAMMA_TBL_SIZE*2];
 };
 
@@ -118,7 +106,8 @@ struct isp_gamma_config {
  *  struct isp_sharp_config - .
  *
  */
-struct isp_sharp_config {
+struct isp_sharp_config
+{
 	int sharp_level;
 	int sharp_min_val;
 	int sharp_max_val;
@@ -129,7 +118,8 @@ struct isp_sharp_config {
  *  struct isp_private_contrast_config - .
  *
  */
-struct isp_private_contrast_config {
+struct isp_private_contrast_config
+{
 	unsigned char pri_contrast_level;
 	unsigned char pri_contrast_min_val;
 	unsigned char pri_contrast_max_val;
@@ -140,7 +130,8 @@ struct isp_private_contrast_config {
  *  struct isp_ae_config - .
  *
  */
-struct isp_ae_config {
+struct isp_ae_config
+{
 	unsigned short ae_low_bri_th;
 	unsigned short ae_high_bri_th;
 	struct isp_h3a_reg_win ae_reg_win;
@@ -150,7 +141,8 @@ struct isp_ae_config {
  *  struct isp_af_config - .
  *
  */
-struct isp_af_config {
+struct isp_af_config
+{
 	unsigned short af_sap_lim;
 	struct isp_h3a_reg_win af_reg_win;
 };
@@ -160,7 +152,8 @@ struct isp_af_config {
  *  struct isp_awb_config - .
  *
  */
-struct isp_awb_config {
+struct isp_awb_config
+{
 	unsigned short awb_sum_th;
 	unsigned short awb_r_sat_lim;
 	unsigned short awb_g_sat_lim;
@@ -176,7 +169,8 @@ struct isp_awb_config {
  *  struct isp_wb_gain_config - .
  *
  */
-struct isp_wb_gain_config {
+struct isp_wb_gain_config
+{
 	unsigned int clip_val;
 	struct isp_white_balance_gain wb_gain;
 
@@ -188,7 +182,8 @@ struct isp_wb_gain_config {
  *  struct isp_hist_config - .
  *
  */
-struct isp_hist_config {
+struct isp_hist_config
+{
 	int hist_threshold;
 	enum isp_src hist_src;
 	enum isp_hist_mode hist_mode;
@@ -200,7 +195,8 @@ struct isp_hist_config {
  *  struct isp_hist_config - .
  *
  */
-struct isp_cfa_config {
+struct isp_cfa_config
+{
 	int min_rgb;
 	unsigned int dir_th;
 };
@@ -210,7 +206,8 @@ struct isp_cfa_config {
  *  struct isp_afs_config - .
  *
  */
-struct isp_afs_config {
+struct isp_afs_config
+{
 	unsigned int inc_line;
 };
 
@@ -219,7 +216,8 @@ struct isp_afs_config {
  *  struct isp_rgb2rgb_config - .
  *
  */
-struct isp_rgb2rgb_config {
+struct isp_rgb2rgb_config
+{
 	 struct isp_rgb2rgb_gain_offset color_matrix_default;
 	 struct isp_rgb2rgb_gain_offset color_matrix;
 };
@@ -229,30 +227,35 @@ struct isp_rgb2rgb_config {
  *  struct isp_gain_offset_config - .
  *
  */
-struct isp_gain_offset_config {
+struct isp_gain_offset_config
+{
 	struct isp_bayer_gain_offset bayer_gain;
 	struct isp_yuv_gain_offset yuv_gain;
 };
 
-struct isp_otf_dpc_config {
+struct isp_otf_dpc_config
+{
 	unsigned int th_slop;
 	unsigned int min_th;
 	unsigned int max_th;
 };
 
-struct isp_sprite_win_config {
+struct isp_sprite_win_config
+{
 	struct isp_size sprite_size;
 	struct coor sprite_start;
 };
-struct isp_cnr_config {
-	unsigned short c_offset;
-	unsigned short c_noise;
+struct isp_cnr_config
+{
+    unsigned short c_offset;
+    unsigned short c_noise;
 };
-struct isp_saturation_config {
-	short satu_r;
-	short satu_g;
-	short satu_b;
-	short satu_gain;
+struct isp_saturation_config
+{
+    short satu_r;
+    short satu_g;
+    short satu_b;
+    short satu_gain;
 };
 
 
@@ -261,7 +264,8 @@ struct isp_saturation_config {
  *  struct isp_module_config - .
  *
  */
-struct isp_module_config {
+struct isp_module_config
+{
 	unsigned int isp_platform_id;
 	unsigned int module_enable_flag;
 	unsigned int isp_module_update_flags;
@@ -296,7 +300,7 @@ struct isp_module_config {
 	struct isp_3d_denoise_config tdf_cfg;
 	struct isp_saturation_config satu_cfg;
 
-	/* table addr */
+	//table addr
 	void *lut_src0_table;
 	void *lut_src1_table;
 	void *gamma_table;
@@ -307,7 +311,8 @@ struct isp_module_config {
 };
 
 
-enum isp_features_flags {
+enum isp_features_flags
+{
 	ISP_FEATURES_AFS               = (1 << 0),
 	ISP_FEATURES_SAP               = (1 << 1),
 	ISP_FEATURES_CONTRAST          = (1 << 2),
@@ -340,10 +345,10 @@ enum isp_features_flags {
 	ISP_FEATURES_MAX,
 
 	/* all possible flags raised */
-	ISP_FEATURES_All = (((ISP_FEATURES_MAX - 1) << 1) - 1),
+	ISP_FEATURES_All = (((ISP_FEATURES_MAX -1 ) << 1) -1 ) ,
 };
 
 void isp_module_platform_init(struct isp_module_config *module_cfg);
 void isp_setup_module_hw(struct isp_module_config *module_cfg);
 
-#endif /* __ISP__MODULE__CFG__H */
+#endif //__ISP__MODULE__CFG__H

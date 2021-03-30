@@ -20,4 +20,5 @@
 void smartcard_atr_decode(struct smc_atr_para *pscatr, struct smc_pps_para *psmc_pps,
 			uint8_t *pdata, uint8_t with_ts);
 
+
 #endif

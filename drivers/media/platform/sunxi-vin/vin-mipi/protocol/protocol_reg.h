@@ -1,25 +1,9 @@
-/*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-mipi/protocol/protocol_reg.h
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
 
 #ifndef __PROTOCOL_REG__H__
 #define __PROTOCOL_REG__H__
 
 #include "protocol.h"
-#define MAX_MIPI_PTL  2
+#define MAX_MIPI_PTL  1
 
 extern int ptcl_reg_map(unsigned int sel, unsigned long addr_base);
 extern void ptcl_enable(unsigned int sel);
@@ -53,7 +37,5 @@ extern enum source_type ptcl_get_src_type(unsigned int sel, unsigned char ch);
 extern enum line_sync ptcl_get_line_sync(unsigned int sel, unsigned char ch);
 extern unsigned char ptcl_get_int_status(unsigned int sel, unsigned char ch,
 					 enum protocol_int int_flag);
-extern void bsp_data_formats_enable(unsigned int sel, unsigned char type);
-extern void bsp_data_formats_disable(unsigned int sel, unsigned char type);
 
 #endif

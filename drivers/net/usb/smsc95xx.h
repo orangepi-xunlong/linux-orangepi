@@ -13,7 +13,8 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  *
  *****************************************************************************/
 
@@ -143,14 +144,6 @@
 #define E2P_DATA_MASK_			(0x000000FF)
 
 #define BURST_CAP			(0x38)
-
-#define	STRAP_STATUS			(0x3C)
-#define	STRAP_STATUS_PWR_SEL_		(0x00000020)
-#define	STRAP_STATUS_AMDIX_EN_		(0x00000010)
-#define	STRAP_STATUS_PORT_SWAP_		(0x00000008)
-#define	STRAP_STATUS_EEP_SIZE_		(0x00000004)
-#define	STRAP_STATUS_RMT_WKP_		(0x00000002)
-#define	STRAP_STATUS_EEP_DISABLE_	(0x00000001)
 
 #define GPIO_WAKE			(0x64)
 

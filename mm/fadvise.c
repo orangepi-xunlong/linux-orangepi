@@ -28,7 +28,6 @@
 SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
 {
 	struct fd f = fdget(fd);
-	struct inode *inode;
 	struct address_space *mapping;
 	struct backing_dev_info *bdi;
 	loff_t endbyte;			/* inclusive */
@@ -40,8 +39,7 @@ SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
 	if (!f.file)
 		return -EBADF;
 
-	inode = file_inode(f.file);
-	if (S_ISFIFO(inode->i_mode)) {
+	if (S_ISFIFO(file_inode(f.file)->i_mode)) {
 		ret = -ESPIPE;
 		goto out;
 	}
@@ -52,7 +50,7 @@ SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
 		goto out;
 	}
 
-	if (IS_DAX(inode)) {
+	if (mapping->a_ops->get_xip_mem) {
 		switch (advice) {
 		case POSIX_FADV_NORMAL:
 		case POSIX_FADV_RANDOM:
@@ -68,18 +66,14 @@ SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
 		goto out;
 	}
 
-	/*
-	 * Careful about overflows. Len == 0 means "as much as possible".  Use
-	 * unsigned math because signed overflows are undefined and UBSan
-	 * complains.
-	 */
-	endbyte = (u64)offset + (u64)len;
+	/* Careful about overflows. Len == 0 means "as much as possible" */
+	endbyte = offset + len;
 	if (!len || endbyte < len)
 		endbyte = -1;
 	else
 		endbyte--;		/* inclusive */
 
-	bdi = inode_to_bdi(mapping->host);
+	bdi = mapping->backing_dev_info;
 
 	switch (advice) {
 	case POSIX_FADV_NORMAL:
@@ -101,8 +95,8 @@ SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
 		break;
 	case POSIX_FADV_WILLNEED:
 		/* First and last PARTIAL page! */
-		start_index = offset >> PAGE_SHIFT;
-		end_index = endbyte >> PAGE_SHIFT;
+		start_index = offset >> PAGE_CACHE_SHIFT;
+		end_index = endbyte >> PAGE_CACHE_SHIFT;
 
 		/* Careful about overflow on the "+1" */
 		nrpages = end_index - start_index + 1;
@@ -119,36 +113,13 @@ SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
 	case POSIX_FADV_NOREUSE:
 		break;
 	case POSIX_FADV_DONTNEED:
-		if (!inode_write_congested(mapping->host))
+		if (!bdi_write_congested(mapping->backing_dev_info))
 			__filemap_fdatawrite_range(mapping, offset, endbyte,
 						   WB_SYNC_NONE);
 
-		/*
-		 * First and last FULL page! Partial pages are deliberately
-		 * preserved on the expectation that it is better to preserve
-		 * needed memory than to discard unneeded memory.
-		 */
-		start_index = (offset+(PAGE_SIZE-1)) >> PAGE_SHIFT;
-		end_index = (endbyte >> PAGE_SHIFT);
-		/*
-		 * The page at end_index will be inclusively discarded according
-		 * by invalidate_mapping_pages(), so subtracting 1 from
-		 * end_index means we will skip the last page.  But if endbyte
-		 * is page aligned or is at the end of file, we should not skip
-		 * that page - discarding the last page is safe enough.
-		 */
-		if ((endbyte & ~PAGE_MASK) != ~PAGE_MASK &&
-				endbyte != inode->i_size - 1) {
-			/* First page is tricky as 0 - 1 = -1, but pgoff_t
-			 * is unsigned, so the end_index >= start_index
-			 * check below would be true and we'll discard the whole
-			 * file cache which is not what was asked.
-			 */
-			if (end_index == 0)
-				break;
-
-			end_index--;
-		}
+		/* First and last FULL page! */
+		start_index = (offset+(PAGE_CACHE_SIZE-1)) >> PAGE_CACHE_SHIFT;
+		end_index = (endbyte >> PAGE_CACHE_SHIFT);
 
 		if (end_index >= start_index) {
 			unsigned long count = invalidate_mapping_pages(mapping,

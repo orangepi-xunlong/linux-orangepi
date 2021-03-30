@@ -10,6 +10,7 @@
  */
 
 #include <linux/oprofile.h>
+#include <linux/init.h>
 #include <linux/smp.h>
 #include <asm/firmware.h>
 #include <asm/ptrace.h>
@@ -207,7 +208,7 @@ static int power4_start(struct op_counter_config *ctr)
 	unsigned int mmcr0;
 
 	/* set the PMM bit (see comment below) */
-	mtmsr(mfmsr() | MSR_PMM);
+	mtmsrd(mfmsr() | MSR_PMM);
 
 	for (i = 0; i < cur_cpu_spec->num_pmcs; ++i) {
 		if (ctr[i].enabled) {
@@ -377,7 +378,7 @@ static void power4_handle_interrupt(struct pt_regs *regs,
 	is_kernel = get_kernel(pc, mmcra);
 
 	/* set the PMM bit (see comment below) */
-	mtmsr(mfmsr() | MSR_PMM);
+	mtmsrd(mfmsr() | MSR_PMM);
 
 	/* Check that the SIAR  valid bit in MMCRA is set to 1. */
 	if ((mmcra & MMCRA_SIAR_VALID_MASK) == MMCRA_SIAR_VALID_MASK)

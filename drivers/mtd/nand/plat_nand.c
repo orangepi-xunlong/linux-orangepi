@@ -9,7 +9,6 @@
  *
  */
 
-#include <linux/err.h>
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
@@ -20,17 +19,20 @@
 
 struct plat_nand_data {
 	struct nand_chip	chip;
+	struct mtd_info		mtd;
 	void __iomem		*io_base;
 };
+
+static const char *part_probe_types[] = { "cmdlinepart", NULL };
 
 /*
  * Probe for the NAND device.
  */
 static int plat_nand_probe(struct platform_device *pdev)
 {
-	struct platform_nand_data *pdata = dev_get_platdata(&pdev->dev);
+	struct platform_nand_data *pdata = pdev->dev.platform_data;
+	struct mtd_part_parser_data ppdata;
 	struct plat_nand_data *data;
-	struct mtd_info *mtd;
 	struct resource *res;
 	const char **part_types;
 	int err = 0;
@@ -45,20 +47,35 @@ static int plat_nand_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	/* Allocate memory for the device structure (and zero it) */
-	data = devm_kzalloc(&pdev->dev, sizeof(struct plat_nand_data),
-			    GFP_KERNEL);
-	if (!data)
-		return -ENOMEM;
-
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	data->io_base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(data->io_base))
-		return PTR_ERR(data->io_base);
+	if (!res)
+		return -ENXIO;
 
-	nand_set_flash_node(&data->chip, pdev->dev.of_node);
-	mtd = nand_to_mtd(&data->chip);
-	mtd->dev.parent = &pdev->dev;
+	/* Allocate memory for the device structure (and zero it) */
+	data = kzalloc(sizeof(struct plat_nand_data), GFP_KERNEL);
+	if (!data) {
+		dev_err(&pdev->dev, "failed to allocate device structure.\n");
+		return -ENOMEM;
+	}
+
+	if (!request_mem_region(res->start, resource_size(res),
+				dev_name(&pdev->dev))) {
+		dev_err(&pdev->dev, "request_mem_region failed\n");
+		err = -EBUSY;
+		goto out_free;
+	}
+
+	data->io_base = ioremap(res->start, resource_size(res));
+	if (data->io_base == NULL) {
+		dev_err(&pdev->dev, "ioremap failed\n");
+		err = -EIO;
+		goto out_release_io;
+	}
+
+	data->chip.priv = &data;
+	data->mtd.priv = &data->chip;
+	data->mtd.owner = THIS_MODULE;
+	data->mtd.name = dev_name(&pdev->dev);
 
 	data->chip.IO_ADDR_R = data->io_base;
 	data->chip.IO_ADDR_W = data->io_base;
@@ -73,8 +90,8 @@ static int plat_nand_probe(struct platform_device *pdev)
 	data->chip.bbt_options |= pdata->chip.bbt_options;
 
 	data->chip.ecc.hwctl = pdata->ctrl.hwcontrol;
+	data->chip.ecc.layout = pdata->chip.ecclayout;
 	data->chip.ecc.mode = NAND_ECC_SOFT;
-	data->chip.ecc.algo = NAND_ECC_HAMMING;
 
 	platform_set_drvdata(pdev, data);
 
@@ -86,24 +103,31 @@ static int plat_nand_probe(struct platform_device *pdev)
 	}
 
 	/* Scan to find existence of the device */
-	if (nand_scan(mtd, pdata->chip.nr_chips)) {
+	if (nand_scan(&data->mtd, pdata->chip.nr_chips)) {
 		err = -ENXIO;
 		goto out;
 	}
 
-	part_types = pdata->chip.part_probe_types;
+	part_types = pdata->chip.part_probe_types ? : part_probe_types;
 
-	err = mtd_device_parse_register(mtd, part_types, NULL,
+	ppdata.of_node = pdev->dev.of_node;
+	err = mtd_device_parse_register(&data->mtd, part_types, &ppdata,
 					pdata->chip.partitions,
 					pdata->chip.nr_partitions);
 
 	if (!err)
 		return err;
 
-	nand_release(mtd);
+	nand_release(&data->mtd);
 out:
 	if (pdata->ctrl.remove)
 		pdata->ctrl.remove(pdev);
+	platform_set_drvdata(pdev, NULL);
+	iounmap(data->io_base);
+out_release_io:
+	release_mem_region(res->start, resource_size(res));
+out_free:
+	kfree(data);
 	return err;
 }
 
@@ -113,11 +137,17 @@ out:
 static int plat_nand_remove(struct platform_device *pdev)
 {
 	struct plat_nand_data *data = platform_get_drvdata(pdev);
-	struct platform_nand_data *pdata = dev_get_platdata(&pdev->dev);
+	struct platform_nand_data *pdata = pdev->dev.platform_data;
+	struct resource *res;
 
-	nand_release(nand_to_mtd(&data->chip));
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+
+	nand_release(&data->mtd);
 	if (pdata->ctrl.remove)
 		pdata->ctrl.remove(pdev);
+	iounmap(data->io_base);
+	release_mem_region(res->start, resource_size(res));
+	kfree(data);
 
 	return 0;
 }
@@ -133,6 +163,7 @@ static struct platform_driver plat_nand_driver = {
 	.remove	= plat_nand_remove,
 	.driver	= {
 		.name		= "gen_nand",
+		.owner		= THIS_MODULE,
 		.of_match_table = plat_nand_match,
 	},
 };

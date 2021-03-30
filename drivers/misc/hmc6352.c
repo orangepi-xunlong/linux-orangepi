@@ -22,12 +22,12 @@
  */
 
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/i2c.h>
 #include <linux/err.h>
 #include <linux/delay.h>
 #include <linux/sysfs.h>
-#include <linux/nospec.h>
 
 static DEFINE_MUTEX(compass_mutex);
 
@@ -46,12 +46,10 @@ static int compass_store(struct device *dev, const char *buf, size_t count,
 	int ret;
 	unsigned long val;
 
-	ret = kstrtoul(buf, 10, &val);
-	if (ret)
-		return ret;
+	if (strict_strtoul(buf, 10, &val))
+		return -EINVAL;
 	if (val >= strlen(map))
 		return -EINVAL;
-	val = array_index_nospec(val, strlen(map));
 	mutex_lock(&compass_mutex);
 	ret = compass_command(c, map[val]);
 	mutex_unlock(&compass_mutex);

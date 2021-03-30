@@ -1,7 +1,6 @@
-#include <linux/compiler.h>
+#include <linux/kernel.h>
 #include <linux/export.h>
 #include <linux/cryptohash.h>
-#include <linux/bitops.h>
 
 /* F, G and H are basic MD4 functions: selection, majority, parity */
 #define F(x, y, z) ((z) ^ ((x) & ((y) ^ (z))))
@@ -15,7 +14,7 @@
  * Rotation is separate from addition to prevent recomputation
  */
 #define ROUND(f, a, b, c, d, x, s)	\
-	(a += f(b, c, d) + x, a = rol32(a, s))
+	(a += f(b, c, d) + x, a = (a << s) | (a >> (32 - s)))
 #define K1 0
 #define K2 013240474631UL
 #define K3 015666365641UL

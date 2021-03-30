@@ -14,6 +14,9 @@
 #include "intel-agp.h"
 #include <drm/intel-gtt.h>
 
+int intel_agp_enabled;
+EXPORT_SYMBOL(intel_agp_enabled);
+
 static int intel_fetch_size(void)
 {
 	int i;
@@ -115,6 +118,7 @@ static void intel_8xx_cleanup(void)
 
 static int intel_configure(void)
 {
+	u32 temp;
 	u16 temp2;
 	struct aper_size_info_16 *current_size;
 
@@ -124,8 +128,8 @@ static int intel_configure(void)
 	pci_write_config_word(agp_bridge->dev, INTEL_APSIZE, current_size->size_value);
 
 	/* address to map to */
-	agp_bridge->gart_bus_addr = pci_bus_address(agp_bridge->dev,
-						    AGP_APERTURE_BAR);
+	pci_read_config_dword(agp_bridge->dev, AGP_APBASE, &temp);
+	agp_bridge->gart_bus_addr = (temp & PCI_BASE_ADDRESS_MEM_MASK);
 
 	/* attbase - aperture base */
 	pci_write_config_dword(agp_bridge->dev, INTEL_ATTBASE, agp_bridge->gatt_bus_addr);
@@ -144,7 +148,7 @@ static int intel_configure(void)
 
 static int intel_815_configure(void)
 {
-	u32 addr;
+	u32 temp, addr;
 	u8 temp2;
 	struct aper_size_info_8 *current_size;
 
@@ -163,8 +167,8 @@ static int intel_815_configure(void)
 			current_size->size_value);
 
 	/* address to map to */
-	agp_bridge->gart_bus_addr = pci_bus_address(agp_bridge->dev,
-						    AGP_APERTURE_BAR);
+	pci_read_config_dword(agp_bridge->dev, AGP_APBASE, &temp);
+	agp_bridge->gart_bus_addr = (temp & PCI_BASE_ADDRESS_MEM_MASK);
 
 	pci_read_config_dword(agp_bridge->dev, INTEL_ATTBASE, &addr);
 	addr &= INTEL_815_ATTBASE_MASK;
@@ -204,6 +208,7 @@ static void intel_820_cleanup(void)
 
 static int intel_820_configure(void)
 {
+	u32 temp;
 	u8 temp2;
 	struct aper_size_info_8 *current_size;
 
@@ -213,8 +218,8 @@ static int intel_820_configure(void)
 	pci_write_config_byte(agp_bridge->dev, INTEL_APSIZE, current_size->size_value);
 
 	/* address to map to */
-	agp_bridge->gart_bus_addr = pci_bus_address(agp_bridge->dev,
-						    AGP_APERTURE_BAR);
+	pci_read_config_dword(agp_bridge->dev, AGP_APBASE, &temp);
+	agp_bridge->gart_bus_addr = (temp & PCI_BASE_ADDRESS_MEM_MASK);
 
 	/* attbase - aperture base */
 	pci_write_config_dword(agp_bridge->dev, INTEL_ATTBASE, agp_bridge->gatt_bus_addr);
@@ -234,6 +239,7 @@ static int intel_820_configure(void)
 
 static int intel_840_configure(void)
 {
+	u32 temp;
 	u16 temp2;
 	struct aper_size_info_8 *current_size;
 
@@ -243,8 +249,8 @@ static int intel_840_configure(void)
 	pci_write_config_byte(agp_bridge->dev, INTEL_APSIZE, current_size->size_value);
 
 	/* address to map to */
-	agp_bridge->gart_bus_addr = pci_bus_address(agp_bridge->dev,
-						    AGP_APERTURE_BAR);
+	pci_read_config_dword(agp_bridge->dev, AGP_APBASE, &temp);
+	agp_bridge->gart_bus_addr = (temp & PCI_BASE_ADDRESS_MEM_MASK);
 
 	/* attbase - aperture base */
 	pci_write_config_dword(agp_bridge->dev, INTEL_ATTBASE, agp_bridge->gatt_bus_addr);
@@ -262,6 +268,7 @@ static int intel_840_configure(void)
 
 static int intel_845_configure(void)
 {
+	u32 temp;
 	u8 temp2;
 	struct aper_size_info_8 *current_size;
 
@@ -275,9 +282,9 @@ static int intel_845_configure(void)
 				       agp_bridge->apbase_config);
 	} else {
 		/* address to map to */
-		agp_bridge->gart_bus_addr = pci_bus_address(agp_bridge->dev,
-							    AGP_APERTURE_BAR);
-		agp_bridge->apbase_config = agp_bridge->gart_bus_addr;
+		pci_read_config_dword(agp_bridge->dev, AGP_APBASE, &temp);
+		agp_bridge->gart_bus_addr = (temp & PCI_BASE_ADDRESS_MEM_MASK);
+		agp_bridge->apbase_config = temp;
 	}
 
 	/* attbase - aperture base */
@@ -296,6 +303,7 @@ static int intel_845_configure(void)
 
 static int intel_850_configure(void)
 {
+	u32 temp;
 	u16 temp2;
 	struct aper_size_info_8 *current_size;
 
@@ -305,8 +313,8 @@ static int intel_850_configure(void)
 	pci_write_config_byte(agp_bridge->dev, INTEL_APSIZE, current_size->size_value);
 
 	/* address to map to */
-	agp_bridge->gart_bus_addr = pci_bus_address(agp_bridge->dev,
-						    AGP_APERTURE_BAR);
+	pci_read_config_dword(agp_bridge->dev, AGP_APBASE, &temp);
+	agp_bridge->gart_bus_addr = (temp & PCI_BASE_ADDRESS_MEM_MASK);
 
 	/* attbase - aperture base */
 	pci_write_config_dword(agp_bridge->dev, INTEL_ATTBASE, agp_bridge->gatt_bus_addr);
@@ -324,6 +332,7 @@ static int intel_850_configure(void)
 
 static int intel_860_configure(void)
 {
+	u32 temp;
 	u16 temp2;
 	struct aper_size_info_8 *current_size;
 
@@ -333,8 +342,8 @@ static int intel_860_configure(void)
 	pci_write_config_byte(agp_bridge->dev, INTEL_APSIZE, current_size->size_value);
 
 	/* address to map to */
-	agp_bridge->gart_bus_addr = pci_bus_address(agp_bridge->dev,
-						    AGP_APERTURE_BAR);
+	pci_read_config_dword(agp_bridge->dev, AGP_APBASE, &temp);
+	agp_bridge->gart_bus_addr = (temp & PCI_BASE_ADDRESS_MEM_MASK);
 
 	/* attbase - aperture base */
 	pci_write_config_dword(agp_bridge->dev, INTEL_ATTBASE, agp_bridge->gatt_bus_addr);
@@ -352,6 +361,7 @@ static int intel_860_configure(void)
 
 static int intel_830mp_configure(void)
 {
+	u32 temp;
 	u16 temp2;
 	struct aper_size_info_8 *current_size;
 
@@ -361,8 +371,8 @@ static int intel_830mp_configure(void)
 	pci_write_config_byte(agp_bridge->dev, INTEL_APSIZE, current_size->size_value);
 
 	/* address to map to */
-	agp_bridge->gart_bus_addr = pci_bus_address(agp_bridge->dev,
-						    AGP_APERTURE_BAR);
+	pci_read_config_dword(agp_bridge->dev, AGP_APBASE, &temp);
+	agp_bridge->gart_bus_addr = (temp & PCI_BASE_ADDRESS_MEM_MASK);
 
 	/* attbase - aperture base */
 	pci_write_config_dword(agp_bridge->dev, INTEL_ATTBASE, agp_bridge->gatt_bus_addr);
@@ -380,6 +390,7 @@ static int intel_830mp_configure(void)
 
 static int intel_7505_configure(void)
 {
+	u32 temp;
 	u16 temp2;
 	struct aper_size_info_8 *current_size;
 
@@ -389,8 +400,8 @@ static int intel_7505_configure(void)
 	pci_write_config_byte(agp_bridge->dev, INTEL_APSIZE, current_size->size_value);
 
 	/* address to map to */
-	agp_bridge->gart_bus_addr = pci_bus_address(agp_bridge->dev,
-						    AGP_APERTURE_BAR);
+	pci_read_config_dword(agp_bridge->dev, AGP_APBASE, &temp);
+	agp_bridge->gart_bus_addr = (temp & PCI_BASE_ADDRESS_MEM_MASK);
 
 	/* attbase - aperture base */
 	pci_write_config_dword(agp_bridge->dev, INTEL_ATTBASE, agp_bridge->gatt_bus_addr);
@@ -803,6 +814,8 @@ static int agp_intel_probe(struct pci_dev *pdev,
 found_gmch:
 	pci_set_drvdata(pdev, bridge);
 	err = agp_add_bridge(bridge);
+	if (!err)
+		intel_agp_enabled = 1;
 	return err;
 }
 
@@ -920,5 +933,5 @@ static void __exit agp_intel_cleanup(void)
 module_init(agp_intel_init);
 module_exit(agp_intel_cleanup);
 
-MODULE_AUTHOR("Dave Jones, Various @Intel");
+MODULE_AUTHOR("Dave Jones <davej@redhat.com>");
 MODULE_LICENSE("GPL and additional rights");

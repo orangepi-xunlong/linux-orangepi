@@ -1,48 +1,48 @@
 /dts-v1/;
 
-#include "tegra20-colibri-512.dtsi"
+/include/ "tegra20-colibri-512.dtsi"
 
 / {
 	model = "Toradex Colibri T20 512MB on Iris";
 	compatible = "toradex,iris", "toradex,colibri_t20-512", "nvidia,tegra20";
 
-	aliases {
-		serial0 = &uarta;
-		serial1 = &uartd;
-	};
-
-	chosen {
-		stdout-path = "serial0:115200n8";
-	};
-
-	host1x@50000000 {
-		hdmi@54280000 {
+	host1x {
+		hdmi {
 			status = "okay";
 		};
 	};
 
-	pinmux@70000014 {
+	pinmux {
 		state_default: pinmux {
 			hdint {
-				nvidia,tristate = <TEGRA_PIN_DISABLE>;
+				nvidia,tristate = <0>;
 			};
 
 			i2cddc {
-				nvidia,tristate = <TEGRA_PIN_DISABLE>;
+				nvidia,tristate = <0>;
 			};
 
 			sdio4 {
-				nvidia,tristate = <TEGRA_PIN_DISABLE>;
+				nvidia,tristate = <0>;
 			};
 
 			uarta {
-				nvidia,tristate = <TEGRA_PIN_DISABLE>;
+				nvidia,tristate = <0>;
 			};
 
 			uartd {
-				nvidia,tristate = <TEGRA_PIN_DISABLE>;
+				nvidia,tristate = <0>;
 			};
 		};
+	};
+
+	usb@c5000000 {
+		status = "okay";
+		dr_mode = "otg";
+	};
+
+	usb@c5008000 {
+		status = "okay";
 	};
 
 	serial@70006000 {
@@ -54,22 +54,6 @@
 	};
 
 	i2c_ddc: i2c@7000c400 {
-		status = "okay";
-	};
-
-	usb@c5000000 {
-		status = "okay";
-	};
-
-	usb-phy@c5000000 {
-		status = "okay";
-	};
-
-	usb@c5008000 {
-		status = "okay";
-	};
-
-	usb-phy@c5008000 {
 		status = "okay";
 	};
 
@@ -89,7 +73,7 @@
 			regulator-max-microvolt = <5000000>;
 			regulator-boot-on;
 			regulator-always-on;
-			gpio = <&gpio TEGRA_GPIO(W, 2) GPIO_ACTIVE_HIGH>;
+			gpio = <&gpio 178 0>;
 		};
 
 		vcc_sd_reg: regulator@1 {

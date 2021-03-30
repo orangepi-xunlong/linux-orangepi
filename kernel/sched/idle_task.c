@@ -9,26 +9,37 @@
 
 #ifdef CONFIG_SMP
 static int
-select_task_rq_idle(struct task_struct *p, int cpu, int sd_flag, int flags)
+select_task_rq_idle(struct task_struct *p, int sd_flag, int flags)
 {
 	return task_cpu(p); /* IDLE tasks as never migrated */
 }
-#endif /* CONFIG_SMP */
 
+static void pre_schedule_idle(struct rq *rq, struct task_struct *prev)
+{
+	idle_exit_fair(rq);
+	rq_last_tick_reset(rq);
+}
+
+static void post_schedule_idle(struct rq *rq)
+{
+	idle_enter_fair(rq);
+}
+#endif /* CONFIG_SMP */
 /*
  * Idle tasks are unconditionally rescheduled:
  */
 static void check_preempt_curr_idle(struct rq *rq, struct task_struct *p, int flags)
 {
-	resched_curr(rq);
+	resched_task(rq->idle);
 }
 
-static struct task_struct *
-pick_next_task_idle(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
+static struct task_struct *pick_next_task_idle(struct rq *rq)
 {
-	put_prev_task(rq, prev);
-	update_idle_core(rq);
-	schedstat_inc(rq->sched_goidle);
+	schedstat_inc(rq, sched_goidle);
+#ifdef CONFIG_SMP
+	/* Trigger the post schedule to do an idle_enter for CFS */
+	rq->post_schedule = 1;
+#endif
 	return rq->idle;
 }
 
@@ -47,7 +58,6 @@ dequeue_task_idle(struct rq *rq, struct task_struct *p, int flags)
 
 static void put_prev_task_idle(struct rq *rq, struct task_struct *prev)
 {
-	rq_last_tick_reset(rq);
 }
 
 static void task_tick_idle(struct rq *rq, struct task_struct *curr, int queued)
@@ -74,10 +84,6 @@ static unsigned int get_rr_interval_idle(struct rq *rq, struct task_struct *task
 	return 0;
 }
 
-static void update_curr_idle(struct rq *rq)
-{
-}
-
 /*
  * Simple, special scheduling class for the per-CPU idle tasks:
  */
@@ -95,7 +101,8 @@ const struct sched_class idle_sched_class = {
 
 #ifdef CONFIG_SMP
 	.select_task_rq		= select_task_rq_idle,
-	.set_cpus_allowed	= set_cpus_allowed_common,
+	.pre_schedule		= pre_schedule_idle,
+	.post_schedule		= post_schedule_idle,
 #endif
 
 	.set_curr_task          = set_curr_task_idle,
@@ -105,5 +112,4 @@ const struct sched_class idle_sched_class = {
 
 	.prio_changed		= prio_changed_idle,
 	.switched_to		= switched_to_idle,
-	.update_curr		= update_curr_idle,
 };

@@ -173,6 +173,7 @@ int tegra_asoc_utils_init(struct tegra_asoc_utils_data *data,
 			  struct device *dev)
 {
 	int ret;
+	bool new_clocks = false;
 
 	data->dev = dev;
 
@@ -180,30 +181,40 @@ int tegra_asoc_utils_init(struct tegra_asoc_utils_data *data,
 		data->soc = TEGRA_ASOC_UTILS_SOC_TEGRA20;
 	else if (of_machine_is_compatible("nvidia,tegra30"))
 		data->soc = TEGRA_ASOC_UTILS_SOC_TEGRA30;
-	else if (of_machine_is_compatible("nvidia,tegra114"))
+	else if (of_machine_is_compatible("nvidia,tegra114")) {
 		data->soc = TEGRA_ASOC_UTILS_SOC_TEGRA114;
-	else if (of_machine_is_compatible("nvidia,tegra124"))
-		data->soc = TEGRA_ASOC_UTILS_SOC_TEGRA124;
-	else {
+		new_clocks = true;
+	} else {
 		dev_err(data->dev, "SoC unknown to Tegra ASoC utils\n");
 		return -EINVAL;
 	}
 
-	data->clk_pll_a = clk_get(dev, "pll_a");
+	if (new_clocks)
+		data->clk_pll_a = clk_get(dev, "pll_a");
+	else
+		data->clk_pll_a = clk_get_sys(NULL, "pll_a");
 	if (IS_ERR(data->clk_pll_a)) {
 		dev_err(data->dev, "Can't retrieve clk pll_a\n");
 		ret = PTR_ERR(data->clk_pll_a);
 		goto err;
 	}
 
-	data->clk_pll_a_out0 = clk_get(dev, "pll_a_out0");
+	if (new_clocks)
+		data->clk_pll_a_out0 = clk_get(dev, "pll_a_out0");
+	else
+		data->clk_pll_a_out0 = clk_get_sys(NULL, "pll_a_out0");
 	if (IS_ERR(data->clk_pll_a_out0)) {
 		dev_err(data->dev, "Can't retrieve clk pll_a_out0\n");
 		ret = PTR_ERR(data->clk_pll_a_out0);
 		goto err_put_pll_a;
 	}
 
-	data->clk_cdev1 = clk_get(dev, "mclk");
+	if (new_clocks)
+		data->clk_cdev1 = clk_get(dev, "mclk");
+	else if (data->soc == TEGRA_ASOC_UTILS_SOC_TEGRA20)
+		data->clk_cdev1 = clk_get_sys(NULL, "cdev1");
+	else
+		data->clk_cdev1 = clk_get_sys("extern1", NULL);
 	if (IS_ERR(data->clk_cdev1)) {
 		dev_err(data->dev, "Can't retrieve clk cdev1\n");
 		ret = PTR_ERR(data->clk_cdev1);

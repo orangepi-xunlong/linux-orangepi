@@ -5,15 +5,14 @@
  */
 
 /*
- * This file builds a disk-image from three different files:
+ * This file builds a disk-image from two different files:
  *
  * - setup: 8086 machine code, sets up system parm
  * - system: 80386 code for actual system
- * - zoffset.h: header with ZO_* defines
  *
- * It does some checking that all files are of the correct type, and writes
- * the result to the specified destination, removing headers and padding to
- * the right amount. It also writes some system data to stdout.
+ * It does some checking that all files are of the correct type, and
+ * just writes the result to stdout, removing headers and padding to
+ * the right amount. It also writes some system data to stderr.
  */
 
 /*
@@ -49,11 +48,11 @@ typedef unsigned int   u32;
 
 /* This must be large enough to hold the entire setup */
 u8 buf[SETUP_SECT_MAX*512];
+int is_big_kernel;
 
 #define PECOFF_RELOC_RESERVE 0x20
 
-unsigned long efi32_stub_entry;
-unsigned long efi64_stub_entry;
+unsigned long efi_stub_entry;
 unsigned long efi_pe_entry;
 unsigned long startup_64;
 
@@ -137,7 +136,7 @@ static void die(const char * str, ...)
 
 static void usage(void)
 {
-	die("Usage: build setup system zoffset.h image");
+	die("Usage: build setup system [zoffset.h] [> image]");
 }
 
 #ifdef CONFIG_EFI_STUB
@@ -237,54 +236,6 @@ static void update_pecoff_bss(unsigned int file_sz, unsigned int init_sz)
 	update_pecoff_section_header_fields(".bss", file_sz, bss_sz, 0, 0);
 }
 
-static int reserve_pecoff_reloc_section(int c)
-{
-	/* Reserve 0x20 bytes for .reloc section */
-	memset(buf+c, 0, PECOFF_RELOC_RESERVE);
-	return PECOFF_RELOC_RESERVE;
-}
-
-static void efi_stub_defaults(void)
-{
-	/* Defaults for old kernel */
-#ifdef CONFIG_X86_32
-	efi_pe_entry = 0x10;
-#else
-	efi_pe_entry = 0x210;
-	startup_64 = 0x200;
-#endif
-}
-
-static void efi_stub_entry_update(void)
-{
-	unsigned long addr = efi32_stub_entry;
-
-#ifdef CONFIG_X86_64
-	/* Yes, this is really how we defined it :( */
-	addr = efi64_stub_entry - 0x200;
-#endif
-
-#ifdef CONFIG_EFI_MIXED
-	if (efi32_stub_entry != addr)
-		die("32-bit and 64-bit EFI entry points do not match\n");
-#endif
-	put_unaligned_le32(addr, &buf[0x264]);
-}
-
-#else
-
-static inline void update_pecoff_setup_and_reloc(unsigned int size) {}
-static inline void update_pecoff_text(unsigned int text_start,
-				      unsigned int file_sz) {}
-static inline void update_pecoff_bss(unsigned int file_sz,
-				     unsigned int init_sz) {}
-static inline void efi_stub_defaults(void) {}
-static inline void efi_stub_entry_update(void) {}
-
-static inline int reserve_pecoff_reloc_section(int c)
-{
-	return 0;
-}
 #endif /* CONFIG_EFI_STUB */
 
 
@@ -310,14 +261,12 @@ static void parse_zoffset(char *fname)
 	c = fread(buf, 1, sizeof(buf) - 1, file);
 	if (ferror(file))
 		die("read-error on `zoffset.h'");
-	fclose(file);
 	buf[c] = 0;
 
 	p = (char *)buf;
 
 	while (p && *p) {
-		PARSE_ZOFS(p, efi32_stub_entry);
-		PARSE_ZOFS(p, efi64_stub_entry);
+		PARSE_ZOFS(p, efi_stub_entry);
 		PARSE_ZOFS(p, efi_pe_entry);
 		PARSE_ZOFS(p, startup_64);
 
@@ -329,24 +278,32 @@ static void parse_zoffset(char *fname)
 
 int main(int argc, char ** argv)
 {
-	unsigned int i, sz, setup_sectors, init_sz;
+	unsigned int i, sz, setup_sectors;
 	int c;
 	u32 sys_size;
 	struct stat sb;
-	FILE *file, *dest;
+	FILE *file;
 	int fd;
 	void *kernel;
 	u32 crc = 0xffffffffUL;
+#ifdef CONFIG_EFI_STUB
+	unsigned int init_sz;
+#endif
 
-	efi_stub_defaults();
+	/* Defaults for old kernel */
+#ifdef CONFIG_X86_32
+	efi_pe_entry = 0x10;
+	efi_stub_entry = 0x30;
+#else
+	efi_pe_entry = 0x210;
+	efi_stub_entry = 0x230;
+	startup_64 = 0x200;
+#endif
 
-	if (argc != 5)
+	if (argc == 4)
+		parse_zoffset(argv[3]);
+	else if (argc != 3)
 		usage();
-	parse_zoffset(argv[3]);
-
-	dest = fopen(argv[4], "w");
-	if (!dest)
-		die("Unable to write `%s': %m", argv[4]);
 
 	/* Copy the setup code */
 	file = fopen(argv[1], "r");
@@ -361,7 +318,11 @@ int main(int argc, char ** argv)
 		die("Boot block hasn't got boot flag (0xAA55)");
 	fclose(file);
 
-	c += reserve_pecoff_reloc_section(c);
+#ifdef CONFIG_EFI_STUB
+	/* Reserve 0x20 bytes for .reloc section */
+	memset(buf+c, 0, PECOFF_RELOC_RESERVE);
+	c += PECOFF_RELOC_RESERVE;
+#endif
 
 	/* Pad unused space with zeros */
 	setup_sectors = (c + 511) / 512;
@@ -370,12 +331,14 @@ int main(int argc, char ** argv)
 	i = setup_sectors*512;
 	memset(buf+c, 0, i-c);
 
+#ifdef CONFIG_EFI_STUB
 	update_pecoff_setup_and_reloc(i);
+#endif
 
 	/* Set the default root device */
 	put_unaligned_le16(DEFAULT_ROOT_DEV, &buf[508]);
 
-	printf("Setup is %d bytes (padded to %d bytes).\n", c, i);
+	fprintf(stderr, "Setup is %d bytes (padded to %d bytes).\n", c, i);
 
 	/* Open and stat the kernel file */
 	fd = open(argv[2], O_RDONLY);
@@ -384,7 +347,7 @@ int main(int argc, char ** argv)
 	if (fstat(fd, &sb))
 		die("Unable to stat `%s': %m", argv[2]);
 	sz = sb.st_size;
-	printf("System is %d kB\n", (sz+1023)/1024);
+	fprintf (stderr, "System is %d kB\n", (sz+1023)/1024);
 	kernel = mmap(NULL, sz, PROT_READ, MAP_SHARED, fd, 0);
 	if (kernel == MAP_FAILED)
 		die("Unable to mmap '%s': %m", argv[2]);
@@ -395,37 +358,38 @@ int main(int argc, char ** argv)
 	buf[0x1f1] = setup_sectors-1;
 	put_unaligned_le32(sys_size, &buf[0x1f4]);
 
+#ifdef CONFIG_EFI_STUB
 	update_pecoff_text(setup_sectors * 512, i + (sys_size * 16));
 	init_sz = get_unaligned_le32(&buf[0x260]);
 	update_pecoff_bss(i + (sys_size * 16), init_sz);
 
-	efi_stub_entry_update();
+#ifdef CONFIG_X86_64 /* Yes, this is really how we defined it :( */
+	efi_stub_entry -= 0x200;
+#endif
+	put_unaligned_le32(efi_stub_entry, &buf[0x264]);
+#endif
 
 	crc = partial_crc32(buf, i, crc);
-	if (fwrite(buf, 1, i, dest) != i)
+	if (fwrite(buf, 1, i, stdout) != i)
 		die("Writing setup failed");
 
 	/* Copy the kernel code */
 	crc = partial_crc32(kernel, sz, crc);
-	if (fwrite(kernel, 1, sz, dest) != sz)
+	if (fwrite(kernel, 1, sz, stdout) != sz)
 		die("Writing kernel failed");
 
 	/* Add padding leaving 4 bytes for the checksum */
 	while (sz++ < (sys_size*16) - 4) {
 		crc = partial_crc32_one('\0', crc);
-		if (fwrite("\0", 1, 1, dest) != 1)
+		if (fwrite("\0", 1, 1, stdout) != 1)
 			die("Writing padding failed");
 	}
 
 	/* Write the CRC */
-	printf("CRC %x\n", crc);
+	fprintf(stderr, "CRC %x\n", crc);
 	put_unaligned_le32(crc, buf);
-	if (fwrite(buf, 1, 4, dest) != 4)
+	if (fwrite(buf, 1, 4, stdout) != 4)
 		die("Writing CRC failed");
-
-	/* Catch any delayed write failures */
-	if (fclose(dest))
-		die("Writing image failed");
 
 	close(fd);
 

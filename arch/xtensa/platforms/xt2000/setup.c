@@ -64,7 +64,24 @@ void platform_restart(void)
 {
 	/* Flush and reset the mmu, simulate a processor reset, and
 	 * jump to the reset vector. */
-	cpu_reset();
+
+	__asm__ __volatile__ ("movi	a2, 15\n\t"
+			      "wsr	a2, icountlevel\n\t"
+			      "movi	a2, 0\n\t"
+			      "wsr	a2, icount\n\t"
+#if XCHAL_NUM_IBREAK > 0
+			      "wsr	a2, ibreakenable\n\t"
+#endif
+			      "wsr	a2, lcount\n\t"
+			      "movi	a2, 0x1f\n\t"
+			      "wsr	a2, ps\n\t"
+			      "isync\n\t"
+			      "jx	%0\n\t"
+			      :
+			      : "a" (XCHAL_RESET_VECTOR_VADDR)
+			      : "a2"
+			      );
+
 	/* control never gets here */
 }
 
@@ -75,8 +92,18 @@ void __init platform_setup(char** cmdline)
 
 /* early initialization */
 
-void __init platform_init(bp_tag_t *first)
+extern sysmem_info_t __initdata sysmem;
+
+void platform_init(bp_tag_t* first)
 {
+	/* Set default memory block if not provided by the bootloader. */
+
+	if (sysmem.nr_banks == 0) {
+		sysmem.nr_banks = 1;
+		sysmem.bank[0].start = PLATFORM_DEFAULT_MEM_START;
+		sysmem.bank[0].end = PLATFORM_DEFAULT_MEM_START
+				     + PLATFORM_DEFAULT_MEM_SIZE;
+	}
 }
 
 /* Heartbeat. Let the LED blink. */
@@ -94,6 +121,7 @@ void platform_heartbeat(void)
 }
 
 //#define RS_TABLE_SIZE 2
+//#define STD_COM_FLAGS (ASYNC_BOOT_AUTOCONF|ASYNC_SKIP_TEST)
 
 #define _SERIAL_PORT(_base,_irq)					\
 {									\

@@ -28,6 +28,7 @@
 #include <linux/module.h>
 #include <linux/gfp.h>
 #include <linux/pci.h>
+#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>

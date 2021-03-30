@@ -164,8 +164,7 @@ static int rose_state3_machine(struct sock *sk, struct sk_buff *skb, int framety
 		rose_frames_acked(sk, nr);
 		if (ns == rose->vr) {
 			rose_start_idletimer(sk);
-			if (sk_filter_trim_cap(sk, skb, ROSE_MIN_LEN) == 0 &&
-			    __sock_queue_rcv_skb(sk, skb) == 0) {
+			if (sock_queue_rcv_skb(sk, skb) == 0) {
 				rose->vr = (rose->vr + 1) % ROSE_MODULUS;
 				queued = 1;
 			} else {

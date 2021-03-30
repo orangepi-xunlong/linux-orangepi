@@ -19,7 +19,6 @@
 #include <linux/types.h>
 
 #include <asm/addrspace.h>
-#include <asm/cpu-type.h>
 #include <asm/irq_regs.h>
 #include <asm/ptrace.h>
 #include <asm/traps.h>

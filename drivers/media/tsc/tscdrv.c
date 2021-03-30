@@ -27,10 +27,9 @@
 #include <linux/module.h>
 #include <asm-generic/gpio.h>
 #include <asm/current.h>
-//#include <linux/sys_config.h>
+#include <linux/sys_config.h>
 #include <linux/platform_device.h>
 #include <linux/clk/sunxi.h>
-//#include <linux/clk-private.h>
 #include "dvb_drv_sunxi.h"
 #include "tscdrv.h"
 #include <asm/io.h>
@@ -40,68 +39,78 @@
 #include <linux/of_irq.h>
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/consumer.h>
-//#include <linux/pinctrl/pinconf-sunxi.h>
+#include <linux/pinctrl/pinconf-sunxi.h>
 
-#define TSC_MSG(fmt, arg...) pr_warn("[tsc]: "fmt, ##arg)
-#define TSC_DBG(fmt, arg...) \
-	pr_debug("[tsc]: %s()%d - "fmt, __func__, __LINE__, ##arg)
-#define TSC_ERR(fmt, arg...) \
-	pr_warn("[tsc]: %s()%d - "fmt, __func__, __LINE__, ##arg)
-#define TSC_INFO(fmt, arg...) \
-	pr_warn("[tsc]: %s()%d - "fmt, __func__, __LINE__, ##arg)
+#define dev_tsc_printk(level, msg...) printk(level "tsc: " msg)
 
 static struct tsc_dev *tsc_devp;
-static struct of_device_id sunxi_tsc_match[] = {
-	{ .compatible = "allwinner,sun8i-tsc",},
+static struct device_node *node;
+static int tsc_dev_major = TSCDEV_MAJOR;
+static int tsc_dev_minor = TSCDEV_MINOR;
+static spinlock_t tsc_spin_lock;
+static int clk_status;
+static struct of_device_id sun50i_tsc_match[] = {
 	{ .compatible = "allwinner,sun50i-tsc",},
 	{}
 };
 
-#define TSC_MODULE_CLK_RATE 120000000
-
-MODULE_DEVICE_TABLE(of, sunxi_tsc_match);
+MODULE_DEVICE_TABLE(of, sun50i_tsc_match);
 
 static DECLARE_WAIT_QUEUE_HEAD(wait_proc);
 
-int sunxi_tsc_enable_hw_clk(void)
+#ifdef CONFIG_PM
+int enable_tsc_hw_clk(void)
 {
 	unsigned long flags;
-	int ret = 0;
+	int res = -EFAULT;
 
-	spin_lock_irqsave(&tsc_devp->lock, flags);
-	if (clk_prepare_enable(tsc_devp->mclk)) {
-		TSC_MSG("enable mclk failed.\n");
-		ret = -EFAULT;
-		goto enable_out;
-	}
-enable_out:
-	spin_unlock_irqrestore(&tsc_devp->lock, flags);
-	return ret;
-}
+	spin_lock_irqsave(&tsc_spin_lock, flags);
+	if (clk_status == 1)
+		goto enalbe_out;
 
-int sunxi_tsc_disable_hw_clk(void)
-{
-	unsigned long flags;
-	int ret = 0;
-
-	spin_lock_irqsave(&tsc_devp->lock, flags);
-	if ((NULL == tsc_devp->mclk)
-		|| (IS_ERR(tsc_devp->mclk))) {
-		TSC_MSG("mclk is invalid!\n");
-		ret = -EFAULT;
+	clk_status = 1;
+	sunxi_periph_reset_deassert(tsc_devp->tsc_clk);
+	if (clk_prepare_enable(tsc_devp->tsc_clk)) {
+		dev_tsc_printk(KERN_WARNING, "enable tsc_clk failed.\n");
+		goto enalbe_out;
 	} else {
-		clk_disable_unprepare(tsc_devp->mclk);
+		res = 0;
 	}
-
-	spin_unlock_irqrestore(&tsc_devp->lock, flags);
-	return ret;
+	enalbe_out:
+	spin_unlock_irqrestore(&tsc_spin_lock, flags);
+	return res;
 }
+
+int disable_tsc_hw_clk(void)
+{
+	unsigned long flags;
+	int res = -EFAULT;
+
+	spin_lock_irqsave(&tsc_spin_lock, flags);
+	if (clk_status == 0) {
+		res = 0;
+		goto disable_out;
+	}
+	clk_status = 0;
+	if ((NULL == tsc_devp->tsc_clk)
+		|| (IS_ERR(tsc_devp->tsc_clk))) {
+		dev_tsc_printk(KERN_WARNING, "tsc_clk is invalid!\n");
+	} else {
+		clk_disable_unprepare(tsc_devp->tsc_clk);
+		sunxi_periph_reset_assert(tsc_devp->tsc_clk);
+		res = 0;
+	}
+	disable_out:
+	spin_unlock_irqrestore(&tsc_spin_lock, flags);
+	return res;
+}
+#endif
 
 /*
  * interrupt service routine
  * To wake up wait queue
  */
-static irqreturn_t sunxi_tsc_irq_handle(int irq, void *dev_id)
+static irqreturn_t tscdriverinterrupt(int irq, void *dev_id)
 {
 	struct iomap_para addrs = tsc_devp->iomap_addrs;
 	unsigned long tsc_int_status_reg;
@@ -121,7 +130,7 @@ static irqreturn_t sunxi_tsc_irq_handle(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static void sunxi_tsc_close_all_filters(struct tsc_dev *devp)
+static void close_all_fillters(struct tsc_dev *devp)
 {
 	int i;
 	unsigned int value = 0;
@@ -137,211 +146,6 @@ static void sunxi_tsc_close_all_filters(struct tsc_dev *devp)
 	}
 }
 
-static int sunxi_tsc_select_gpio_state(struct pinctrl *pctrl, char *name)
-{
-	int ret = 0;
-	struct pinctrl_state *pctrl_state = NULL;
-
-	pctrl_state = pinctrl_lookup_state(pctrl, name);
-	if (IS_ERR(pctrl_state)) {
-		TSC_MSG("pinctrl lookup state(%s) failed!\n", name);
-		return -1;
-	}
-
-	ret = pinctrl_select_state(pctrl, pctrl_state);
-	if (ret < 0)
-		TSC_MSG("pintrcl select state(%s) failed\n", name);
-
-	return ret;
-}
-
-
-static int sunxi_tsc_request_gpio(struct platform_device *pdev)
-{
-	int ret = 0;
-#ifdef CONFIG_ARCH_SUN50IW2
-	if ((tsc_devp->port_config.port0config &&
-			tsc_devp->port_config.port1config)
-		|| (tsc_devp->port_config.port2config &&
-			tsc_devp->port_config.port3config)) {
-		TSC_MSG("port config error!\n");
-		return -EINVAL;
-	}
-#endif
-	if (tsc_devp->port_config.port0config
-		|| tsc_devp->port_config.port1config
-		|| tsc_devp->port_config.port2config
-		|| tsc_devp->port_config.port3config) {
-		if (!tsc_devp->pinctrl) {
-			tsc_devp->pinctrl = devm_pinctrl_get(&pdev->dev);
-			if (IS_ERR_OR_NULL(tsc_devp->pinctrl)) {
-				TSC_MSG("request pinctrl handle  failed!\n");
-				return -EINVAL;
-			}
-		}
-	}
-	if (tsc_devp->port_config.port0config) {
-		ret = sunxi_tsc_select_gpio_state(tsc_devp->pinctrl,
-					"ts0-default");
-		if (ret)
-			TSC_MSG("set gpio default err!\n");
-	}
-	if (tsc_devp->port_config.port1config) {
-		ret = sunxi_tsc_select_gpio_state(tsc_devp->pinctrl,
-					"ts1-default");
-		if (ret)
-			TSC_MSG("set gpio default err!\n");
-	}
-	if (tsc_devp->port_config.port2config) {
-		ret = sunxi_tsc_select_gpio_state(tsc_devp->pinctrl,
-					"ts2-default");
-		if (ret)
-			TSC_MSG("set gpio default err!\n");
-	}
-	if (tsc_devp->port_config.port3config) {
-		ret = sunxi_tsc_select_gpio_state(tsc_devp->pinctrl,
-					"ts3-default");
-		if (ret)
-			TSC_MSG("set gpio default err!\n");
-	}
-
-	return ret;
-}
-
-static void sunxi_tsc_release_gpio(void)
-{
-	devm_pinctrl_put(tsc_devp->pinctrl);
-	tsc_devp->pinctrl = NULL;
-}
-
-static int sunxi_tsc_disable_gpio(void)
-{
-	int ret = 0;
-	if (tsc_devp->port_config.port0config) {
-		ret = sunxi_tsc_select_gpio_state(tsc_devp->pinctrl,
-					"ts0-sleep");
-		if (ret) {
-			TSC_ERR("select sleep state failed!\n");
-			return ret;
-		}
-	}
-	if (tsc_devp->port_config.port1config) {
-		ret = sunxi_tsc_select_gpio_state(tsc_devp->pinctrl,
-					"ts1-sleep");
-		if (ret) {
-			TSC_ERR("select sleep state failed!\n");
-			return ret;
-		}
-	}
-	if (tsc_devp->port_config.port2config) {
-		ret = sunxi_tsc_select_gpio_state(tsc_devp->pinctrl,
-					"ts2-sleep");
-		if (ret) {
-			TSC_ERR("select sleep state failed!\n");
-			return ret;
-		}
-
-	}
-	if (tsc_devp->port_config.port3config) {
-		ret = sunxi_tsc_select_gpio_state(tsc_devp->pinctrl,
-					"ts3-sleep");
-		if (ret) {
-			TSC_ERR("select sleep state failed!\n");
-			return ret;
-		}
-
-	}
-	return ret;
-}
-
-static int sunxi_tsc_hw_clk_init(struct platform_device *pdev)
-{
-	struct device_node *node;
-	unsigned int mclk_rate;
-	int ret = 0;
-
-	node = pdev->dev.of_node;
-	tsc_devp->pclk = of_clk_get(node, 0);
-	if ((!tsc_devp->pclk) || IS_ERR(tsc_devp->pclk)) {
-		TSC_MSG("try to get parent pll clk failed!\n");
-		ret = -EINVAL;
-		return ret;
-	}
-	tsc_devp->mclk = of_clk_get(node, 1);
-	if (!tsc_devp->mclk || IS_ERR(tsc_devp->mclk)) {
-		TSC_MSG("get mclk failed.\n");
-		ret = -EINVAL;
-		return ret;
-	}
-	ret = of_property_read_u32(pdev->dev.of_node, "clock-frequency",
-				&mclk_rate);
-	if (ret) {
-		TSC_MSG("don't set clock-frequency by dts\n");
-		mclk_rate = TSC_MODULE_CLK_RATE;
-	}
-	/* reset tsc module. */
-	sunxi_periph_reset_assert(tsc_devp->mclk);
-	clk_set_parent(tsc_devp->mclk, tsc_devp->pclk);
-
-	if (clk_set_rate(tsc_devp->mclk, mclk_rate) < 0) {
-		TSC_MSG("set clk rate failed\n");
-		ret = -EINVAL;
-	}
-	TSC_MSG("set clock rate is %ld\n", clk_get_rate(tsc_devp->mclk));
-
-	if (clk_prepare_enable(tsc_devp->mclk)) {
-		TSC_MSG("enable moudule clock failed\n");
-		return -EBUSY;
-	}
-
-	return clk_get_rate(tsc_devp->mclk);
-}
-
-
-static int sunxi_tsc_get_port_config(struct platform_device *pdev)
-{
-	int ret = 0;
-	unsigned int temp_val = 0;
-	struct device_node *node;
-
-	node = pdev->dev.of_node;
-	ret = of_property_read_u32(node, "ts0config", &temp_val);
-	if (ret < 0) {
-		TSC_MSG("ts0config missing or invalid.\n");
-		tsc_devp->port_config.port0config = 0;
-	} else {
-		tsc_devp->port_config.port0config = temp_val;
-	}
-	ret = of_property_read_u32(node, "ts1config", &temp_val);
-	if (ret < 0) {
-		TSC_MSG("ts1config missing or invalid.\n");
-		tsc_devp->port_config.port1config = 0;
-	} else {
-		tsc_devp->port_config.port1config = temp_val;
-	}
-	ret = of_property_read_u32(node, "ts2config", &temp_val);
-	if (ret < 0) {
-		TSC_MSG("ts2config missing or invalid.\n");
-		tsc_devp->port_config.port2config = 0;
-	} else {
-		tsc_devp->port_config.port2config = temp_val;
-	}
-	ret = of_property_read_u32(node, "ts3config", &temp_val);
-	if (ret < 0) {
-		TSC_MSG("ts3config missing or invalid.\n");
-		tsc_devp->port_config.port3config = 0;
-	} else {
-		tsc_devp->port_config.port3config = temp_val;
-	}
-
-	if (tsc_devp->port_config.port0config ||
-		tsc_devp->port_config.port1config ||
-		tsc_devp->port_config.port2config ||
-			tsc_devp->port_config.port3config)
-		return 0;
-	else
-		return -EINVAL;
-}
 /*
  * poll operateion for wait for TS irq
  */
@@ -363,7 +167,7 @@ long tscdev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	long ret;
 	struct intrstatus statusdata;
 	int arg_rate = (int)arg;
-	unsigned long tsc_pclk_rate;
+	unsigned long tsc_parent_clk_rate;
 
 	ret = 0;
 	if (_IOC_TYPE(cmd) != TSCDEV_IOC_MAGIC)
@@ -373,11 +177,10 @@ long tscdev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	switch (cmd) {
 	case TSCDEV_WAIT_INT:
-		ret = wait_event_interruptible_timeout(wait_proc,
-						tsc_devp->irq_flag, HZ * 1);
+		ret = wait_event_interruptible_timeout(wait_proc, tsc_devp->irq_flag, HZ * 1);
 		if (!ret && !tsc_devp->irq_flag) {
 			/* case: wait timeout. */
-			TSC_MSG("wait interrupt timeout.\n");
+			dev_tsc_printk(KERN_WARNING, "wait interrupt timeout.\n");
 			memset(&statusdata, 0, sizeof(statusdata));
 		} else {
 			/* case: interrupt occured. */
@@ -386,8 +189,7 @@ long tscdev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			statusdata.port0pcr     = tsc_devp->intstatus.port0pcr;
 		}
 		/* copy status data to user. */
-		if (copy_to_user((struct intrstatus *)arg,
-				&(tsc_devp->intstatus),
+		if (copy_to_user((struct intrstatus *)arg, &(tsc_devp->intstatus),
 			sizeof(struct intrstatus))) {
 			return -EFAULT;
 		}
@@ -412,37 +214,40 @@ long tscdev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		break;
 
 	case TSCDEV_GET_CLK:
-		if (!tsc_devp->mclk || IS_ERR(tsc_devp->mclk)) {
-			TSC_MSG("get tsc clk failed.\n");
+		tsc_devp->tsc_clk = of_clk_get(node, 1);
+		if (!tsc_devp->tsc_clk || IS_ERR(tsc_devp->tsc_clk)) {
+			dev_tsc_printk(KERN_WARNING, "get tsc clk failed.\n");
 			ret = -EINVAL;
 		}
 		break;
 
 	case TSCDEV_PUT_CLK:
 
-		clk_put(tsc_devp->mclk);
+		clk_put(tsc_devp->tsc_clk);
 
 		break;
 
 	case TSCDEV_ENABLE_CLK:
-		/* clk_prepare_enable(tsc_devp->mclk); */
-		ret = sunxi_tsc_enable_hw_clk();
+		/* clk_prepare_enable(tsc_devp->tsc_clk); */
+		ret = enable_tsc_hw_clk();
 		if (ret < 0) {
-			TSC_ERR("tsc clk enable failed!\n");
+			dev_tsc_printk(KERN_WARNING, "%s: tsc clk enable failed!\n",
+			__func__);
 			return -EFAULT;
 		}
 		break;
 
 	case TSCDEV_DISABLE_CLK:
-		/* clk_disable_unprepare(tsc_devp->mclk); */
-		ret = sunxi_tsc_disable_hw_clk();
+		/* clk_disable_unprepare(tsc_devp->tsc_clk); */
+		ret = disable_tsc_hw_clk();
 		if (ret < 0) {
-			TSC_ERR("tsc clk disable failed!\n");
+			dev_tsc_printk(KERN_WARNING, "%s: tsc clk disable failed!\n",
+			__func__);
 		}
 		break;
 
 	case TSCDEV_GET_CLK_FREQ:
-		ret = clk_get_rate(tsc_devp->mclk);
+		ret = clk_get_rate(tsc_devp->tsc_clk);
 		break;
 
 	case TSCDEV_SET_SRC_CLK_FREQ:
@@ -450,19 +255,19 @@ long tscdev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		break;
 
 	case TSCDEV_SET_CLK_FREQ:
-		if (clk_get_rate(tsc_devp->mclk)/1000000 != arg_rate) {
-			if (!clk_set_rate(tsc_devp->pclk, arg_rate*1000000)) {
-				tsc_pclk_rate = clk_get_rate(tsc_devp->pclk);
-				if (clk_set_rate(tsc_devp->mclk, tsc_pclk_rate))
-					TSC_MSG("set tsc clock failed!\n");
+		if (clk_get_rate(tsc_devp->tsc_clk)/1000000 != arg_rate) {
+			if (!clk_set_rate(tsc_devp->tsc_parent_pll_clk, arg_rate*1000000)) {
+				tsc_parent_clk_rate = clk_get_rate(tsc_devp->tsc_parent_pll_clk);
+				if (clk_set_rate(tsc_devp->tsc_clk, tsc_parent_clk_rate))
+					dev_tsc_printk(KERN_WARNING, "set tsc clock failed!\n");
 			} else
-				TSC_MSG("set pll4 clock failed!\n");
+				dev_tsc_printk(KERN_WARNING, "set pll4 clock failed!\n");
 		}
-		ret = clk_get_rate(tsc_devp->mclk);
+		ret = clk_get_rate(tsc_devp->tsc_clk);
 		break;
 
 	default:
-		TSC_MSG("invalid cmd!\n");
+		dev_tsc_printk(KERN_WARNING, "invalid cmd!\n");
 		ret = -EINVAL;
 		break;
 	}
@@ -474,7 +279,7 @@ static int tscdev_open(struct inode *inode, struct file *filp)
 {
 	/* unsigned long clk_rate; */
 	if (down_interruptible(&tsc_devp->sem)) {
-		TSC_MSG("down interruptible failed!\n");
+		dev_tsc_printk(KERN_WARNING, "down interruptible failed!\n");
 		return -ERESTARTSYS;
 	}
 	/* init other resource here */
@@ -488,7 +293,7 @@ static int tscdev_release(struct inode *inode, struct file *filp)
 {
 	if (down_interruptible(&tsc_devp->sem))
 		return -ERESTARTSYS;
-	sunxi_tsc_close_all_filters(tsc_devp);
+	close_all_fillters(tsc_devp);
 	/* release other resource here */
 	tsc_devp->irq_flag = 1;
 	up(&tsc_devp->sem);
@@ -497,12 +302,12 @@ static int tscdev_release(struct inode *inode, struct file *filp)
 
 void tscdev_vma_open(struct vm_area_struct *vma)
 {
-	TSC_INFO();
+	dev_tsc_printk(KERN_DEBUG, "%s\n", __func__);
 }
 
 void tscdev_vma_close(struct vm_area_struct *vma)
 {
-	TSC_INFO();
+	dev_tsc_printk(KERN_DEBUG, "%s\n", __func__);
 }
 
 static struct vm_operations_struct tscdev_remap_vm_ops = {
@@ -515,16 +320,15 @@ static int tscdev_mmap(struct file *filp, struct vm_area_struct *vma)
 	unsigned long temp_pfn;
 
 	if (vma->vm_end - vma->vm_start == 0) {
-		TSC_MSG("vm_end is equal vm_start : %lx\n", vma->vm_start);
+		dev_tsc_printk(KERN_WARNING, "vm_end is equal vm_start : %lx\n", vma->vm_start);
 		return 0;
 	}
 	if (vma->vm_pgoff > (~0UL >> PAGE_SHIFT)) {
-		TSC_MSG(
-		"vm_pgoff is %lx,it is large than the largest page number\n",
+		dev_tsc_printk(KERN_WARNING, "vm_pgoff is %lx,it is large than the largest page number\n",
 			vma->vm_pgoff);
 		return -EINVAL;
 	}
-	temp_pfn = tsc_devp->mapbase >> 12;
+	temp_pfn = REGS_BASE >> 12;
 	/* Set reserved and I/O flag for the area. */
 	vma->vm_flags |= /*VM_RESERVED | */VM_IO;
 	/* Select uncached access. */
@@ -538,6 +342,210 @@ static int tscdev_mmap(struct file *filp, struct vm_area_struct *vma)
 	return 0;
 }
 
+#ifndef NEW
+static int tsc_select_gpio_state(struct pinctrl *pctrl, char *name)
+{
+	int ret = 0;
+	struct pinctrl_state *pctrl_state = NULL;
+
+	pctrl_state = pinctrl_lookup_state(pctrl, name);
+	if (IS_ERR(pctrl_state)) {
+		dev_tsc_printk(KERN_WARNING, "pinctrl_lookup_state(%s) failed!\n", name);
+		return -1;
+	}
+	ret = pinctrl_select_state(pctrl, pctrl_state);
+	if (ret < 0)
+		dev_tsc_printk(KERN_WARNING, "pinctrl_select_state(%s) failed!\n", name);
+	return ret;
+}
+#endif
+
+static unsigned int request_tsc_pio(struct platform_device *pdev)
+{
+    /* request device pinctrl, set as default state */
+#ifdef NEW
+	int ret = 0;
+	if ((tsc_devp->port_config.port0config && tsc_devp->port_config.port1config)
+		|| (tsc_devp->port_config.port2config && tsc_devp->port_config.port3config)) {
+		dev_tsc_printk(KERN_WARNING, "port config error!\n");
+		return -EINVAL;
+	}
+	if (tsc_devp->port_config.port0config
+		|| tsc_devp->port_config.port1config
+		|| tsc_devp->port_config.port2config
+		|| tsc_devp->port_config.port3config) {
+		if (!tsc_devp->pinctrl) {
+			tsc_devp->pinctrl = devm_pinctrl_get(&pdev->dev);
+			if (IS_ERR_OR_NULL(tsc_devp->pinctrl)) {
+				dev_tsc_printk(KERN_WARNING, "request pinctrl handle for tsc failed!\n");
+				return -EINVAL;
+			}
+		}
+	}
+	if (tsc_devp->port_config.port0config) {
+		if (!tsc_devp->ts0_pinstate) {
+			tsc_devp->ts0_pinstate = pinctrl_lookup_state(tsc_devp->pinctrl, "ts0-default");
+			if (IS_ERR_OR_NULL(tsc_devp->ts0_pinstate)) {
+				dev_tsc_printk(KERN_WARNING, "%s %d: lookup state failed!\n",
+				__func__, __LINE__);
+				return -EINVAL;
+			}
+		}
+		if (!tsc_devp->ts0sleep_pinstate) {
+			tsc_devp->ts0sleep_pinstate = pinctrl_lookup_state(tsc_devp->pinctrl, "ts0-sleep");
+			if (IS_ERR_OR_NULL(tsc_devp->ts0sleep_pinstate)) {
+				dev_tsc_printk(KERN_WARNING, "%s %d: lookup state failed!\n",
+				__func__, __LINE__);
+				return -EINVAL;
+			}
+		}
+		ret = pinctrl_select_state(tsc_devp->pinctrl, tsc_devp->ts0_pinstate);
+		if (ret) {
+				dev_tsc_printk(KERN_WARNING, "%s %d: select state failed!\n",
+				__func__, __LINE__);
+				return ret;
+		}
+	}
+	if (tsc_devp->port_config.port1config) {
+		if (!tsc_devp->ts1_pinstate) {
+			tsc_devp->ts1_pinstate = pinctrl_lookup_state(tsc_devp->pinctrl, "ts1-default");
+			if (IS_ERR_OR_NULL(tsc_devp->ts1_pinstate)) {
+				dev_tsc_printk(KERN_WARNING, "%s %d: lookup state failed!\n",
+				__func__, __LINE__);
+				return -EINVAL;
+			}
+		}
+		if (!tsc_devp->ts1sleep_pinstate) {
+			tsc_devp->ts1sleep_pinstate = pinctrl_lookup_state(tsc_devp->pinctrl, "ts1-sleep");
+			if (IS_ERR_OR_NULL(tsc_devp->ts1sleep_pinstate)) {
+				dev_tsc_printk(KERN_WARNING, "%s %d: lookup state failed!\n",
+				__func__, __LINE__);
+				return -EINVAL;
+			}
+		}
+		ret = pinctrl_select_state(tsc_devp->pinctrl, tsc_devp->ts1_pinstate);
+		if (ret) {
+			dev_tsc_printk(KERN_WARNING, "%s %d: select state failed!\n",
+			__func__, __LINE__);
+			return ret;
+		}
+	}
+	if (tsc_devp->port_config.port2config) {
+		if (!tsc_devp->ts2_pinstate) {
+			tsc_devp->ts2_pinstate = pinctrl_lookup_state(tsc_devp->pinctrl, "ts2-default");
+			if (IS_ERR_OR_NULL(tsc_devp->ts2_pinstate)) {
+				dev_tsc_printk(KERN_WARNING, "%s %d: lookup state failed!\n",
+				__func__, __LINE__);
+				return -EINVAL;
+			}
+		}
+		if (!tsc_devp->ts2sleep_pinstate) {
+			tsc_devp->ts2sleep_pinstate = pinctrl_lookup_state(tsc_devp->pinctrl, "ts2-sleep");
+			if (IS_ERR_OR_NULL(tsc_devp->ts2sleep_pinstate)) {
+				dev_tsc_printk(KERN_WARNING, "%s %d: lookup state failed!\n",
+				__func__, __LINE__);
+				return -EINVAL;
+			}
+		}
+		ret = pinctrl_select_state(tsc_devp->pinctrl, tsc_devp->ts2_pinstate);
+		if (ret) {
+			dev_tsc_printk(KERN_WARNING, "%s %d: select state failed!\n",
+			__func__, __LINE__);
+			return ret;
+		}
+	}
+	if (tsc_devp->port_config.port3config) {
+		if (!tsc_devp->ts3_pinstate) {
+			tsc_devp->ts3_pinstate = pinctrl_lookup_state(tsc_devp->pinctrl, "ts3-default");
+			if (IS_ERR_OR_NULL(tsc_devp->ts3_pinstate)) {
+				dev_tsc_printk(KERN_WARNING, "%s %d: lookup state failed!\n",
+				__func__, __LINE__);
+				return -EINVAL;
+			}
+		}
+		if (!tsc_devp->ts3sleep_pinstate) {
+			tsc_devp->ts3sleep_pinstate = pinctrl_lookup_state(tsc_devp->pinctrl, "ts3-sleep");
+			if (IS_ERR_OR_NULL(tsc_devp->ts3sleep_pinstate)) {
+				dev_tsc_printk(KERN_WARNING, "%s %d: lookup state failed!\n",
+				__func__, __LINE__);
+				return -EINVAL;
+			}
+		}
+		ret = pinctrl_select_state(tsc_devp->pinctrl, tsc_devp->ts3_pinstate);
+		if (ret) {
+			dev_tsc_printk(KERN_WARNING, "%s %d: select state failed!\n",
+			__func__, __LINE__);
+			return ret;
+		}
+	}
+	return ret;
+#endif
+#ifndef NEW
+	tsc_devp->pinctrl = devm_pinctrl_get(&pdev->dev);
+	if (IS_ERR(tsc_devp->pinctrl)) {
+		dev_tsc_printk(KERN_WARNING, "devm get pinctrl handle for device failed!\n");
+		return -1;
+	}
+	return tsc_select_gpio_state(tsc_devp->pinctrl, "default");
+#endif
+}
+
+static int release_tsc_pio(void)
+{
+	int ret = 0;
+	if (tsc_devp->port_config.port0config) {
+		ret = pinctrl_select_state(tsc_devp->pinctrl, tsc_devp->ts0sleep_pinstate);
+		if (ret) {
+			dev_tsc_printk(KERN_WARNING, "%s %d: select sleep state failed!\n",
+			__func__, __LINE__);
+			return ret;
+		}
+	}
+	if (tsc_devp->port_config.port1config) {
+		ret = pinctrl_select_state(tsc_devp->pinctrl, tsc_devp->ts1sleep_pinstate);
+		if (ret) {
+			dev_tsc_printk(KERN_WARNING, "%s %d: select sleep state failed!\n",
+			__func__, __LINE__);
+			return ret;
+		}
+	}
+	if (tsc_devp->port_config.port2config) {
+		ret = pinctrl_select_state(tsc_devp->pinctrl, tsc_devp->ts2sleep_pinstate);
+		if (ret) {
+			dev_tsc_printk(KERN_WARNING, "%s %d: select sleep state failed!\n",
+			__func__, __LINE__);
+			return ret;
+		}
+
+	}
+	if (tsc_devp->port_config.port3config) {
+		ret = pinctrl_select_state(tsc_devp->pinctrl, tsc_devp->ts3sleep_pinstate);
+		if (ret) {
+			dev_tsc_printk(KERN_WARNING, "%s %d: select sleep state failed!\n",
+			__func__, __LINE__);
+			return ret;
+		}
+
+	}
+	if (tsc_devp->port_config.port0config
+		|| tsc_devp->port_config.port1config
+		|| tsc_devp->port_config.port2config
+		|| tsc_devp->port_config.port3config) {
+		if (tsc_devp->pinctrl != NULL) {
+			devm_pinctrl_put(tsc_devp->pinctrl);
+			tsc_devp->pinctrl = NULL;
+			tsc_devp->ts0_pinstate = NULL;
+			tsc_devp->ts1_pinstate = NULL;
+			tsc_devp->ts2_pinstate = NULL;
+			tsc_devp->ts3_pinstate = NULL;
+			tsc_devp->ts0sleep_pinstate = NULL;
+			tsc_devp->ts1sleep_pinstate = NULL;
+			tsc_devp->ts2sleep_pinstate = NULL;
+			tsc_devp->ts3sleep_pinstate = NULL;
+		}
+	}
+	return ret;
+}
 
 static struct file_operations tscdev_fops = {
 	.owner          = THIS_MODULE,
@@ -551,104 +559,149 @@ static struct file_operations tscdev_fops = {
 
 static int  tscdev_init(struct platform_device *pdev)
 {
+#ifdef NEW
+	unsigned int temp_val = 0;
+#endif
 	int ret = 0;
 	int devno;
+	unsigned long clk_rate;
 	struct device_node *node;
-	struct resource *mem_res;
 	dev_t dev;
 
 	dev = 0;
 	node = pdev->dev.of_node;
-
+	/* register or alloc the device number. */
+	if (tsc_dev_major) {
+		dev = MKDEV(tsc_dev_major, tsc_dev_minor);
+		ret = register_chrdev_region(dev, 1, "ts0");
+	} else {
+		ret = alloc_chrdev_region(&dev, tsc_dev_minor, 1, "ts0");
+		tsc_dev_major = MAJOR(dev);
+		tsc_dev_minor = MINOR(dev);
+	}
+	if (ret < 0) {
+		dev_tsc_printk(KERN_WARNING, "ts0: can't get major: %d.\n", tsc_dev_major);
+		ret = -EINVAL;
+		goto error0;
+	}
+	spin_lock_init(&tsc_spin_lock);
 	tsc_devp = kmalloc(sizeof(struct tsc_dev), GFP_KERNEL);
 	if (tsc_devp == NULL) {
-		TSC_MSG("malloc mem for tsc device err\n");
+		dev_tsc_printk(KERN_WARNING, "malloc mem for tsc device err.\n");
 		ret = -ENOMEM;
 		goto error0;
 	}
 	memset(tsc_devp, 0, sizeof(struct tsc_dev));
-	/* register or alloc the device number. */
-	tsc_devp->major = TSCDEV_MAJOR;
-	tsc_devp->minor = TSCDEV_MINOR;
-	if (tsc_devp->major) {
-		dev = MKDEV(tsc_devp->major, tsc_devp->minor);
-		ret = register_chrdev_region(dev, 1, "ts0");
-	} else {
-		ret = alloc_chrdev_region(&dev, tsc_devp->minor, 1, "ts0");
-		tsc_devp->major = MAJOR(dev);
-		tsc_devp->minor = MINOR(dev);
-	}
-	if (ret < 0) {
-		TSC_MSG("ts0: can't get major: %d.\n", tsc_devp->major);
-		ret = -EINVAL;
-		goto error0;
-	}
-	spin_lock_init(&tsc_devp->lock);
-
-
-	printk("[tsc] %s() - %d \n", __func__, __LINE__);
-	/* get physical address */
-	mem_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (mem_res == NULL) {
-		TSC_MSG("get memory resource failed\n");
-		ret = -ENOMEM;
-		goto error0;
-	}
-	tsc_devp->mapbase = mem_res->start;
-
 	tsc_devp->irq = irq_of_parse_and_map(node, 0);
 	if (tsc_devp->irq <= 0) {
-		TSC_MSG("can not parse irq.\n");
+		dev_tsc_printk(KERN_WARNING, "can not parse irq.\n");
 		ret = -EINVAL;
 		goto error0;
 	}
-
-	printk("[tsc] %s() - %d \n", __func__, __LINE__);
 	sema_init(&tsc_devp->sem, 1);
 	init_waitqueue_head(&tsc_devp->wq);
 	memset(&tsc_devp->iomap_addrs, 0, sizeof(struct iomap_para));
-	ret = request_irq(tsc_devp->irq, sunxi_tsc_irq_handle, 0, "ts0", NULL);
+	ret = request_irq(SUNXI_IRQ_TS, tscdriverinterrupt, 0, "ts0", NULL);
 	if (ret < 0) {
-		TSC_MSG("request irq err\n");
+		dev_tsc_printk(KERN_WARNING, "request irq err\n");
 		ret = -EINVAL;
 		goto error0;
 	}
 	/* map for macc io space */
 	tsc_devp->iomap_addrs.regs_macc = of_iomap(node, 0);
 	if (!tsc_devp->iomap_addrs.regs_macc) {
-		TSC_MSG("tsc can't map registers.\n");
+		dev_tsc_printk(KERN_WARNING, "ve can't map registers.\n");
 		ret = -EINVAL;
 		goto error0;
 	}
-	/* init tsc hw clk */
-	sunxi_tsc_hw_clk_init(pdev);
+	tsc_devp->tsc_parent_pll_clk = of_clk_get(node, 0);
+	if ((!tsc_devp->tsc_parent_pll_clk) || IS_ERR(tsc_devp->tsc_parent_pll_clk)) {
+		dev_tsc_printk(KERN_WARNING, "try to get tsc_parent_pll_clk failed!\n");
+		ret = -EINVAL;
+		goto error0;
+	}
+	tsc_devp->tsc_clk = of_clk_get(node, 1);
+	if (!tsc_devp->tsc_clk || IS_ERR(tsc_devp->tsc_clk)) {
+		dev_tsc_printk(KERN_WARNING, "get tsc_clk failed.\n");
+		ret = -EINVAL;
+		goto error0;
+	}
+	/* no reset tsc module. */
+	sunxi_periph_reset_assert(tsc_devp->tsc_clk);
+	clk_set_parent(tsc_devp->tsc_clk, tsc_devp->tsc_parent_pll_clk);
+	/* set ts clock rate. */
+	clk_rate = clk_get_rate(tsc_devp->tsc_parent_pll_clk);
+	clk_rate /= 2;
+
+	if (clk_set_rate(tsc_devp->tsc_clk, clk_rate) < 0) {
+		dev_tsc_printk(KERN_WARNING, "set clk rate error.\n");
+		ret = -EINVAL;
+		goto error0;
+	}
+	clk_rate = clk_get_rate(tsc_devp->tsc_clk);
+	dev_tsc_printk(KERN_NOTICE, "clock rate %ld\n", clk_rate);
+	clk_prepare_enable(tsc_devp->tsc_clk);
+
 	/* Create char device */
-	devno = MKDEV(tsc_devp->major, tsc_devp->minor);
+	devno = MKDEV(tsc_dev_major, tsc_dev_minor);
 	cdev_init(&tsc_devp->cdev, &tscdev_fops);
 	tsc_devp->cdev.owner = THIS_MODULE;
 	ret = cdev_add(&tsc_devp->cdev, devno, 1);
 	if (ret) {
-		TSC_MSG("err:%d add tscdev.", ret);
+		dev_tsc_printk(KERN_WARNING, "err:%d add tscdev.", ret);
 		ret = -EINVAL;
 		goto error0;
 	}
 	tsc_devp->tsc_class = class_create(THIS_MODULE, "ts0");
 	tsc_devp->dev = device_create(tsc_devp->tsc_class, NULL, devno, NULL, "ts0");
 
-	if (sunxi_tsc_get_port_config(pdev) < 0) {
-		TSC_ERR("get tsc port config failed!\n");
+#ifdef NEW
+	ret = of_property_read_u32(node, "ts0config", &temp_val);
+	if (ret < 0) {
+		dev_tsc_printk(KERN_WARNING, "%s %d: configuration missing or invalid.\n",
+		__func__, __LINE__);
+		ret = -EINVAL;
+		goto error0;
+	} else {
+		tsc_devp->port_config.port0config = temp_val;
+	}
+	temp_val = 0;
+	ret = of_property_read_u32(node, "ts1config", &temp_val);
+	if (ret < 0) {
+		dev_tsc_printk(KERN_WARNING, "%s %d: configuration missing or invalid.\n",
+		__func__, __LINE__);
+		ret = -EINVAL;
+		goto error0;
+	} else {
+		tsc_devp->port_config.port1config = temp_val;
+	}
+	temp_val = 0;
+	ret = of_property_read_u32(node, "ts2config", &temp_val);
+	if (ret < 0) {
+		dev_tsc_printk(KERN_WARNING, "%s %d: configuration missing or invalid.\n",
+		__func__, __LINE__);
+		ret = -EINVAL;
+		goto error0;
+	} else {
+		tsc_devp->port_config.port2config = temp_val;
+	}
+	temp_val = 0;
+	ret = of_property_read_u32(node, "ts3config", &temp_val);
+	if (ret < 0) {
+		dev_tsc_printk(KERN_WARNING, "%s %d: configuration missing or invalid.\n",
+		__func__, __LINE__);
+		ret = -EINVAL;
+		goto error0;
+	} else {
+		tsc_devp->port_config.port3config = temp_val;
+	}
+#endif
+	if (request_tsc_pio(pdev)) {
+		dev_tsc_printk(KERN_WARNING, "%s: request tsc pio failed!\n",
+		__func__);
 		ret = -EINVAL;
 		goto error0;
 	}
-
-	if (sunxi_tsc_request_gpio(pdev)) {
-		TSC_ERR("request tsc pio failed!\n");
-		ret = -EINVAL;
-		goto error0;
-	}
-
-	printk("[tsc] %s() - %d \n", __func__, __LINE__);
-	TSC_MSG("init succussful\n");
 	return 0;
 
 error0:
@@ -664,36 +717,37 @@ static void  tscdev_exit(void)
 	dev_t dev;
 	int ret = 0;
 
-	dev = MKDEV(tsc_devp->major, tsc_devp->minor);
-	free_irq(tsc_devp->irq, NULL);
+	dev = MKDEV(tsc_dev_major, tsc_dev_minor);
+	free_irq(SUNXI_IRQ_TS, NULL);
 	iounmap(tsc_devp->iomap_addrs.regs_macc);
+	iounmap(tsc_devp->iomap_addrs.regs_ccmu);
     /* Destroy char device */
 	if (tsc_devp) {
 		cdev_del(&tsc_devp->cdev);
 		device_destroy(tsc_devp->tsc_class, dev);
 		class_destroy(tsc_devp->tsc_class);
 	}
-	if (NULL == tsc_devp->mclk
-	|| IS_ERR(tsc_devp->mclk)) {
-		TSC_MSG("mclk handle is invalid.\n");
+	if (NULL == tsc_devp->tsc_clk
+	|| IS_ERR(tsc_devp->tsc_clk)) {
+		dev_tsc_printk(KERN_WARNING, "tsc_clk handle is invalid.\n");
 	} else {
-		/* clk_disable_unprepare(tsc_devp->mclk); */
-		ret = sunxi_tsc_disable_hw_clk();
+		/* clk_disable_unprepare(tsc_devp->tsc_clk); */
+		ret = disable_tsc_hw_clk();
 		if (ret < 0) {
-			TSC_ERR("tsc clk disable failed.\n");
+			dev_tsc_printk(KERN_WARNING, "%s: tsc clk disable failed.\n",
+			__func__);
 		}
-		clk_put(tsc_devp->mclk);
-		tsc_devp->mclk = NULL;
+		clk_put(tsc_devp->tsc_clk);
+		tsc_devp->tsc_clk = NULL;
 	}
-	if (NULL == tsc_devp->pclk
-		|| IS_ERR(tsc_devp->pclk)) {
-		TSC_MSG("parent pll clk handle is invalid.\n");
+	if (NULL == tsc_devp->tsc_parent_pll_clk
+		|| IS_ERR(tsc_devp->tsc_parent_pll_clk)) {
+		dev_tsc_printk(KERN_WARNING, "tsc_parent_pll_clk handle is invalid.\n");
 	} else {
-		clk_put(tsc_devp->pclk);
+		clk_put(tsc_devp->tsc_parent_pll_clk);
 	}
 	/* release ts pin */
-	sunxi_tsc_disable_gpio();
-	sunxi_tsc_release_gpio();
+	release_tsc_pio();
 	unregister_chrdev_region(dev, 1);
 	if (tsc_devp) {
 		kfree(tsc_devp);
@@ -703,38 +757,41 @@ static void  tscdev_exit(void)
 
 
 #ifdef CONFIG_PM
-static int sw_tsc_suspend(struct platform_device *pdev, pm_message_t state)
+static int snd_sw_tsc_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	int ret = 0;
 
-	ret = sunxi_tsc_disable_gpio();
+	ret = release_tsc_pio();
 	if (ret < 0) {
-		TSC_MSG("tsc release gpio failed!\n");
+		dev_tsc_printk(KERN_WARNING, "tsc release gpio failed!\n");
 		return -EFAULT;
 	}
-	ret = sunxi_tsc_disable_hw_clk();
+	ret = disable_tsc_hw_clk();
 	if (ret < 0) {
-		TSC_ERR("tsc clk disable failed!\n");
+		dev_tsc_printk(KERN_WARNING, "%s: tsc clk disable failed!\n",
+		__func__);
 		return -EFAULT;
 	}
-	TSC_MSG("standby suspend succeed!\n");
+	dev_tsc_printk(KERN_NOTICE, "standby suspend succeed!\n");
 	return 0;
 }
-static int sw_tsc_resume(struct platform_device *pdev)
+static int snd_sw_tsc_resume(struct platform_device *pdev)
 {
 	int ret = 0;
 
-	ret = sunxi_tsc_enable_hw_clk();
+	ret = enable_tsc_hw_clk();
 	if (ret < 0) {
-		TSC_ERR("tsc clk enable failed!\n");
+		dev_tsc_printk(KERN_WARNING, "%s: tsc clk enable failed!\n",
+		__func__);
 		return -EFAULT;
 	}
-	ret = sunxi_tsc_request_gpio(pdev);
+	ret = request_tsc_pio(pdev);
 	if (ret < 0) {
-		TSC_ERR("request tsc pio failed!\n");
+		dev_tsc_printk(KERN_WARNING, "%s: request tsc pio failed!\n",
+		__func__);
 		return -EFAULT;
 	}
-	TSC_MSG("standby resume succeed!\n");
+	dev_tsc_printk(KERN_NOTICE, "standby resume succeed!\n");
 	return 0;
 }
 #endif
@@ -747,7 +804,6 @@ static int sunxi_tsc_remove(struct platform_device *pdev)
 
 static int  sunxi_tsc_probe(struct platform_device *pdev)
 {
-	printk("[tsc] %s() - %d \n", __func__, __LINE__);
 	tscdev_init(pdev);
 	return 0;
 }
@@ -756,13 +812,13 @@ static struct platform_driver sunxi_tsc_driver = {
 	.probe = sunxi_tsc_probe,
 	.remove = sunxi_tsc_remove,
 #ifdef CONFIG_PM
-	.suspend = sw_tsc_suspend,
-	.resume  = sw_tsc_resume,
+	.suspend = snd_sw_tsc_suspend,
+	.resume  = snd_sw_tsc_resume,
 #endif
 	.driver  = {
 	.name = "ts0",
 	.owner = THIS_MODULE,
-	.of_match_table = sunxi_tsc_match,
+	.of_match_table = sun50i_tsc_match,
 	},
 };
 
@@ -786,3 +842,4 @@ MODULE_DESCRIPTION("User mode tsc device interface");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(DRV_VERSION);
 MODULE_ALIAS("platform:tsc-sunxi");
+

@@ -1,7 +1,7 @@
 /*
  * DTS file for SPEAr1340 Evaluation Baord
  *
- * Copyright 2012 Viresh Kumar <vireshk@kernel.org>
+ * Copyright 2012 Viresh Kumar <viresh.linux@gmail.com>
  *
  * The code contained herein is licensed under the GNU General Public
  * License. You may obtain a copy of the GNU General Public License
@@ -122,10 +122,6 @@
 			status = "okay";
 		};
 
-		miphy@eb800000 {
-			status = "okay";
-		};
-
 		dma@ea800000 {
 			status = "okay";
 		};
@@ -223,7 +219,7 @@
 				linux,code = <0x100>;
 				gpios = <&gpio1 1 0x4>;
 				debounce-interval = <20>;
-				wakeup-source;
+				gpio-key,wakeup = <1>;
 			};
 		};
 

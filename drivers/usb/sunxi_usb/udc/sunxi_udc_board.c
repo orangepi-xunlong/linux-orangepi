@@ -37,49 +37,28 @@ u32  open_usb_clock(sunxi_udc_io_t *sunxi_udc_io)
 {
 	DMSG_INFO_UDC("open_usb_clock\n");
 
-	/* To fix hardware design issue. */
-#if defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN50IW3) \
-	|| defined(CONFIG_ARCH_SUN50IW6) || defined(CONFIG_ARCH_SUN8IW15)
-	usb_otg_phy_txtune(sunxi_udc_io->usb_vbase);
-#endif
-
-	if (sunxi_udc_io->ahb_otg
-			&& sunxi_udc_io->mod_usbphy
-			&& !sunxi_udc_io->clk_is_open) {
-		if (clk_prepare_enable(sunxi_udc_io->ahb_otg))
+	if (sunxi_udc_io->ahb_otg && sunxi_udc_io->mod_usbphy && !sunxi_udc_io->clk_is_open) {
+		if (clk_prepare_enable(sunxi_udc_io->ahb_otg)) {
 			DMSG_PANIC("ERR:try to prepare_enable sunxi_udc_io->mod_usbphy failed!\n");
+		}
 
 		udelay(10);
 
-		if (clk_prepare_enable(sunxi_udc_io->mod_usbphy))
+		if (clk_prepare_enable(sunxi_udc_io->mod_usbphy)) {
 			DMSG_PANIC("ERR:try to prepare_enable sunxi_udc_io->mod_usbphy failed!\n");
+		}
 
 		udelay(10);
 
 		sunxi_udc_io->clk_is_open = 1;
 	} else {
 		DMSG_PANIC("ERR: clock handle is null, ahb_otg(0x%p), mod_usbotg(0x%p), mod_usbphy(0x%p), open(%d)\n",
-			sunxi_udc_io->ahb_otg,
-			sunxi_udc_io->mod_usbotg,
-			sunxi_udc_io->mod_usbphy,
-			sunxi_udc_io->clk_is_open);
+			sunxi_udc_io->ahb_otg, sunxi_udc_io->mod_usbotg, sunxi_udc_io->mod_usbphy, sunxi_udc_io->clk_is_open);
 	}
 
-#if defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN50IW3) \
-	|| defined(CONFIG_ARCH_SUN8IW6) || defined(CONFIG_ARCH_SUN50IW6) \
-	|| defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW8) \
-	|| defined(CONFIG_ARCH_SUN50IW9)
-	USBC_PHY_Set_Ctl(sunxi_udc_io->usb_vbase, USBC_PHY_CTL_VBUSVLDEXT);
-	USBC_PHY_Clear_Ctl(sunxi_udc_io->usb_vbase, USBC_PHY_CTL_SIDDQ);
-#else
 	UsbPhyInit(0);
-#endif
-
-#if defined(CONFIG_ARCH_SUN50I) || defined(CONFIG_ARCH_SUN8IW10) \
-	|| defined(CONFIG_ARCH_SUN8IW11) || defined(CONFIG_ARCH_SUN8IW12) \
-	|| defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN8IW7) \
-	|| defined(CONFIG_ARCH_SUN8IW17)
-	/* otg and hci0 Controller Shared phy in SUN50I and SUN8IW10 */
+#if defined (CONFIG_ARCH_SUN50I) || defined (CONFIG_ARCH_SUN8IW10) || defined (CONFIG_ARCH_SUN8IW11)
+	/*otg and hci0 Controller Shared phy in SUN50I and SUN8IW10*/
 	USBC_SelectPhyToDevice(sunxi_udc_io->usb_vbase);
 #endif
 
@@ -90,9 +69,7 @@ u32 close_usb_clock(sunxi_udc_io_t *sunxi_udc_io)
 {
 	DMSG_INFO_UDC("close_usb_clock\n");
 
-	if (sunxi_udc_io->ahb_otg
-			&& sunxi_udc_io->mod_usbphy
-			&& sunxi_udc_io->clk_is_open) {
+	if (sunxi_udc_io->ahb_otg && sunxi_udc_io->mod_usbphy && sunxi_udc_io->clk_is_open) {
 		sunxi_udc_io->clk_is_open = 0;
 
 		clk_disable_unprepare(sunxi_udc_io->mod_usbphy);
@@ -102,20 +79,10 @@ u32 close_usb_clock(sunxi_udc_io_t *sunxi_udc_io)
 
 	} else {
 		DMSG_PANIC("ERR: clock handle is null, ahb_otg(0x%p), mod_usbotg(0x%p), mod_usbphy(0x%p), open(%d)\n",
-			sunxi_udc_io->ahb_otg,
-			sunxi_udc_io->mod_usbotg,
-			sunxi_udc_io->mod_usbphy,
-			sunxi_udc_io->clk_is_open);
+			sunxi_udc_io->ahb_otg, sunxi_udc_io->mod_usbotg, sunxi_udc_io->mod_usbphy, sunxi_udc_io->clk_is_open);
 	}
 
-#if defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN50IW3) \
-	|| defined(CONFIG_ARCH_SUN8IW6) || defined(CONFIG_ARCH_SUN50IW6) \
-	|| defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW8) \
-	|| defined(CONFIG_ARCH_SUN50IW9)
-	USBC_PHY_Set_Ctl(sunxi_udc_io->usb_vbase, USBC_PHY_CTL_SIDDQ);
-#else
 	UsbPhyInit(0);
-#endif
 
 	return 0;
 }
@@ -128,8 +95,9 @@ __s32 sunxi_udc_bsp_init(sunxi_udc_io_t *sunxi_udc_io)
 	/* open usb lock */
 	open_usb_clock(sunxi_udc_io);
 
-#ifdef SUNXI_USB_FPGA
+#ifdef  SUNXI_USB_FPGA
 	clear_usb_reg(sunxi_udc_io->usb_vbase);
+	fpga_config_use_otg(sunxi_udc_io->usbc.sram_base);
 #endif
 
 	USBC_EnhanceSignal(sunxi_udc_io->usb_bsp_hdle);
@@ -165,6 +133,10 @@ __s32 sunxi_udc_bsp_exit(sunxi_udc_io_t *sunxi_udc_io)
 
 __s32 sunxi_udc_io_init(__u32 usbc_no, sunxi_udc_io_t *sunxi_udc_io)
 {
+
+	//DMSG_INFO_UDC("sram_vbase = 0x%p\n", sunxi_udc_io->sram_vbase);
+	//DMSG_INFO_UDC("usb_vbase  = 0x%p\n", sunxi_udc_io->usb_vbase);
+
 	sunxi_udc_io->usbc.usbc_info.num = usbc_no;
 	sunxi_udc_io->usbc.usbc_info.base = sunxi_udc_io->usb_vbase;
 	sunxi_udc_io->usbc.sram_base = sunxi_udc_io->sram_vbase;

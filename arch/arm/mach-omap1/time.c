@@ -43,9 +43,9 @@
 #include <linux/clocksource.h>
 #include <linux/clockchips.h>
 #include <linux/io.h>
-#include <linux/sched_clock.h>
 
 #include <asm/irq.h>
+#include <asm/sched_clock.h>
 
 #include <mach/hardware.h>
 #include <asm/mach/irq.h>
@@ -124,26 +124,29 @@ static int omap_mpu_set_next_event(unsigned long cycles,
 	return 0;
 }
 
-static int omap_mpu_set_oneshot(struct clock_event_device *evt)
+static void omap_mpu_set_mode(enum clock_event_mode mode,
+			      struct clock_event_device *evt)
 {
-	omap_mpu_timer_stop(0);
-	omap_mpu_remove_autoreset(0);
-	return 0;
-}
-
-static int omap_mpu_set_periodic(struct clock_event_device *evt)
-{
-	omap_mpu_set_autoreset(0);
-	return 0;
+	switch (mode) {
+	case CLOCK_EVT_MODE_PERIODIC:
+		omap_mpu_set_autoreset(0);
+		break;
+	case CLOCK_EVT_MODE_ONESHOT:
+		omap_mpu_timer_stop(0);
+		omap_mpu_remove_autoreset(0);
+		break;
+	case CLOCK_EVT_MODE_UNUSED:
+	case CLOCK_EVT_MODE_SHUTDOWN:
+	case CLOCK_EVT_MODE_RESUME:
+		break;
+	}
 }
 
 static struct clock_event_device clockevent_mpu_timer1 = {
-	.name			= "mpu_timer1",
-	.features		= CLOCK_EVT_FEAT_PERIODIC |
-				  CLOCK_EVT_FEAT_ONESHOT,
-	.set_next_event		= omap_mpu_set_next_event,
-	.set_state_periodic	= omap_mpu_set_periodic,
-	.set_state_oneshot	= omap_mpu_set_oneshot,
+	.name		= "mpu_timer1",
+	.features       = CLOCK_EVT_FEAT_PERIODIC | CLOCK_EVT_FEAT_ONESHOT,
+	.set_next_event	= omap_mpu_set_next_event,
+	.set_mode	= omap_mpu_set_mode,
 };
 
 static irqreturn_t omap_mpu_timer1_interrupt(int irq, void *dev_id)
@@ -157,7 +160,7 @@ static irqreturn_t omap_mpu_timer1_interrupt(int irq, void *dev_id)
 
 static struct irqaction omap_mpu_timer1_irq = {
 	.name		= "mpu_timer1",
-	.flags		= IRQF_TIMER | IRQF_IRQPOLL,
+	.flags		= IRQF_DISABLED | IRQF_TIMER | IRQF_IRQPOLL,
 	.handler	= omap_mpu_timer1_interrupt,
 };
 
@@ -178,7 +181,7 @@ static __init void omap_init_mpu_timer(unsigned long rate)
  * ---------------------------------------------------------------------------
  */
 
-static u64 notrace omap_mpu_read_sched_clock(void)
+static u32 notrace omap_mpu_read_sched_clock(void)
 {
 	return ~omap_mpu_timer_read(1);
 }
@@ -190,7 +193,7 @@ static void __init omap_init_clocksource(unsigned long rate)
 			"%s: can't register clocksource!\n";
 
 	omap_mpu_timer_start(1, ~0, 1);
-	sched_clock_register(omap_mpu_read_sched_clock, 32, rate);
+	setup_sched_clock(omap_mpu_read_sched_clock, 32, rate);
 
 	if (clocksource_mmio_init(&timer->read_tim, "mpu_timer2", rate,
 			300, 32, clocksource_mmio_readl_down))

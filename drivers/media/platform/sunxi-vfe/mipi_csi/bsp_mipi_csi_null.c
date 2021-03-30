@@ -1,24 +1,8 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vfe/mipi_csi/bsp_mipi_csi_null.c
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
-/*
  * sunxi mipi bsp interface
  * Author:wangxuan
  */
-/* #include "include.h" */
+//#include "include.h"
 #include "bsp_mipi_csi.h"
 #include "../utility/vfe_io.h"
 
@@ -73,7 +57,7 @@ void bsp_mipi_csi_set_para(unsigned int sel, struct mipi_para *para)
 }
 
 void bsp_mipi_csi_set_fmt(unsigned int sel, unsigned int total_rx_ch, struct mipi_fmt *fmt)
-{
+{   
 	return;
 }
-
+    

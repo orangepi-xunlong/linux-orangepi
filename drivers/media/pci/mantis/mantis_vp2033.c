@@ -37,12 +37,12 @@
 #define MANTIS_MODEL_NAME	"VP-2033"
 #define MANTIS_DEV_TYPE		"DVB-C"
 
-static struct tda1002x_config vp2033_tda1002x_cu1216_config = {
+struct tda1002x_config vp2033_tda1002x_cu1216_config = {
 	.demod_address = 0x18 >> 1,
 	.invert = 1,
 };
 
-static struct tda10023_config vp2033_tda10023_cu1216_config = {
+struct tda10023_config vp2033_tda10023_cu1216_config = {
 	.demod_address = 0x18 >> 1,
 	.invert = 1,
 };

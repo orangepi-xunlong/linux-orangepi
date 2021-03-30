@@ -12,6 +12,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <linux/input.h>
@@ -121,6 +122,7 @@ static struct platform_driver pcap_keys_device_driver = {
 	.remove		= pcap_keys_remove,
 	.driver		= {
 		.name	= "pcap-keys",
+		.owner	= THIS_MODULE,
 	}
 };
 module_platform_driver(pcap_keys_device_driver);

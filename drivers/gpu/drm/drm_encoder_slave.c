@@ -67,12 +67,12 @@ int drm_i2c_encoder_init(struct drm_device *dev,
 		goto fail;
 	}
 
-	if (!client->dev.driver) {
+	if (!client->driver) {
 		err = -ENODEV;
 		goto fail_unregister;
 	}
 
-	module = client->dev.driver->owner;
+	module = client->driver->driver.owner;
 	if (!try_module_get(module)) {
 		err = -ENODEV;
 		goto fail_unregister;
@@ -80,7 +80,7 @@ int drm_i2c_encoder_init(struct drm_device *dev,
 
 	encoder->bus_priv = client;
 
-	encoder_drv = to_drm_i2c_encoder_driver(to_i2c_driver(client->dev.driver));
+	encoder_drv = to_drm_i2c_encoder_driver(client->driver);
 
 	err = encoder_drv->encoder_init(client, dev, encoder);
 	if (err)
@@ -111,7 +111,7 @@ void drm_i2c_encoder_destroy(struct drm_encoder *drm_encoder)
 {
 	struct drm_encoder_slave *encoder = to_encoder_slave(drm_encoder);
 	struct i2c_client *client = drm_i2c_encoder_get_client(drm_encoder);
-	struct module *module = client->dev.driver->owner;
+	struct module *module = client->driver->driver.owner;
 
 	i2c_unregister_device(client);
 	encoder->bus_priv = NULL;
@@ -124,7 +124,7 @@ EXPORT_SYMBOL(drm_i2c_encoder_destroy);
  * Wrapper fxns which can be plugged in to drm_encoder_helper_funcs:
  */
 
-static inline const struct drm_encoder_slave_funcs *
+static inline struct drm_encoder_slave_funcs *
 get_slave_funcs(struct drm_encoder *enc)
 {
 	return to_encoder_slave(enc)->slave_funcs;
@@ -140,9 +140,6 @@ bool drm_i2c_encoder_mode_fixup(struct drm_encoder *encoder,
 		const struct drm_display_mode *mode,
 		struct drm_display_mode *adjusted_mode)
 {
-	if (!get_slave_funcs(encoder)->mode_fixup)
-		return true;
-
 	return get_slave_funcs(encoder)->mode_fixup(encoder, mode, adjusted_mode);
 }
 EXPORT_SYMBOL(drm_i2c_encoder_mode_fixup);

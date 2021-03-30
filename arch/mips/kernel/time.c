@@ -24,8 +24,8 @@
 #include <linux/export.h>
 
 #include <asm/cpu-features.h>
-#include <asm/cpu-type.h>
 #include <asm/div64.h>
+#include <asm/smtc_ipi.h>
 #include <asm/time.h>
 
 /*
@@ -36,7 +36,7 @@ EXPORT_SYMBOL(rtc_lock);
 
 int __weak rtc_mips_set_time(unsigned long sec)
 {
-	return -ENODEV;
+	return 0;
 }
 
 int __weak rtc_mips_set_mmss(unsigned long nowtime)
@@ -121,14 +121,6 @@ void __init time_init(void)
 {
 	plat_time_init();
 
-	/*
-	 * The use of the R4k timer as a clock event takes precedence;
-	 * if reading the Count register might interfere with the timer
-	 * interrupt, then we don't use the timer as a clock source.
-	 * We may still use the timer as a clock source though if the
-	 * timer interrupt isn't reliable; the interference doesn't
-	 * matter then, because we don't use the interrupt.
-	 */
-	if (mips_clockevent_init() != 0 || !cpu_has_mfc0_count_bug())
+	if (!mips_clockevent_init() || !cpu_has_mfc0_count_bug())
 		init_mips_clocksource();
 }

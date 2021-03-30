@@ -16,7 +16,7 @@
 #define DM_MSG_PREFIX "flakey"
 
 #define all_corrupt_bio_flags_match(bio, fc)	\
-	(((bio)->bi_opf & (fc)->corrupt_bio_flags) == (fc)->corrupt_bio_flags)
+	(((bio)->bi_rw & (fc)->corrupt_bio_flags) == (fc)->corrupt_bio_flags)
 
 /*
  * Flakey: Used for testing only, simulates intermittent,
@@ -176,14 +176,13 @@ static int flakey_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 
 	fc = kzalloc(sizeof(*fc), GFP_KERNEL);
 	if (!fc) {
-		ti->error = "Cannot allocate context";
+		ti->error = "Cannot allocate linear context";
 		return -ENOMEM;
 	}
 	fc->start_time = jiffies;
 
 	devname = dm_shift_arg(&as);
 
-	r = -EINVAL;
 	if (sscanf(dm_shift_arg(&as), "%llu%c", &tmpll, &dummy) != 1) {
 		ti->error = "Invalid device sector";
 		goto bad;
@@ -200,13 +199,11 @@ static int flakey_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 
 	if (!(fc->up_interval + fc->down_interval)) {
 		ti->error = "Total (up + down) interval is zero";
-		r = -EINVAL;
 		goto bad;
 	}
 
 	if (fc->up_interval + fc->down_interval < fc->up_interval) {
 		ti->error = "Interval overflow";
-		r = -EINVAL;
 		goto bad;
 	}
 
@@ -214,21 +211,20 @@ static int flakey_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (r)
 		goto bad;
 
-	r = dm_get_device(ti, devname, dm_table_get_mode(ti->table), &fc->dev);
-	if (r) {
+	if (dm_get_device(ti, devname, dm_table_get_mode(ti->table), &fc->dev)) {
 		ti->error = "Device lookup failed";
 		goto bad;
 	}
 
 	ti->num_flush_bios = 1;
 	ti->num_discard_bios = 1;
-	ti->per_io_data_size = sizeof(struct per_bio_data);
+	ti->per_bio_data_size = sizeof(struct per_bio_data);
 	ti->private = fc;
 	return 0;
 
 bad:
 	kfree(fc);
-	return r;
+	return -EINVAL;
 }
 
 static void flakey_dtr(struct dm_target *ti)
@@ -252,8 +248,7 @@ static void flakey_map_bio(struct dm_target *ti, struct bio *bio)
 
 	bio->bi_bdev = fc->dev->bdev;
 	if (bio_sectors(bio))
-		bio->bi_iter.bi_sector =
-			flakey_map_sector(ti, bio->bi_iter.bi_sector);
+		bio->bi_sector = flakey_map_sector(ti, bio->bi_sector);
 }
 
 static void corrupt_bio_data(struct bio *bio, struct flakey_c *fc)
@@ -268,10 +263,10 @@ static void corrupt_bio_data(struct bio *bio, struct flakey_c *fc)
 		data[fc->corrupt_bio_byte - 1] = fc->corrupt_bio_value;
 
 		DMDEBUG("Corrupting data bio=%p by writing %u to byte %u "
-			"(rw=%c bi_opf=%u bi_sector=%llu cur_bytes=%u)\n",
+			"(rw=%c bi_rw=%lu bi_sector=%llu cur_bytes=%u)\n",
 			bio, fc->corrupt_bio_value, fc->corrupt_bio_byte,
-			(bio_data_dir(bio) == WRITE) ? 'w' : 'r', bio->bi_opf,
-			(unsigned long long)bio->bi_iter.bi_sector, bio_bytes);
+			(bio_data_dir(bio) == WRITE) ? 'w' : 'r',
+			bio->bi_rw, (unsigned long long)bio->bi_sector, bio_bytes);
 	}
 }
 
@@ -291,20 +286,16 @@ static int flakey_map(struct dm_target *ti, struct bio *bio)
 		pb->bio_submitted = true;
 
 		/*
-		 * Error reads if neither corrupt_bio_byte or drop_writes are set.
-		 * Otherwise, flakey_end_io() will decide if the reads should be modified.
+		 * Map reads as normal.
 		 */
-		if (bio_data_dir(bio) == READ) {
-			if (!fc->corrupt_bio_byte && !test_bit(DROP_WRITES, &fc->flags))
-				return -EIO;
+		if (bio_data_dir(bio) == READ)
 			goto map_bio;
-		}
 
 		/*
 		 * Drop writes?
 		 */
 		if (test_bit(DROP_WRITES, &fc->flags)) {
-			bio_endio(bio);
+			bio_endio(bio, 0);
 			return DM_MAPIO_SUBMITTED;
 		}
 
@@ -334,22 +325,14 @@ static int flakey_end_io(struct dm_target *ti, struct bio *bio, int error)
 	struct flakey_c *fc = ti->private;
 	struct per_bio_data *pb = dm_per_bio_data(bio, sizeof(struct per_bio_data));
 
-	if (!error && pb->bio_submitted && (bio_data_dir(bio) == READ)) {
-		if (fc->corrupt_bio_byte && (fc->corrupt_bio_rw == READ) &&
-		    all_corrupt_bio_flags_match(bio, fc)) {
-			/*
-			 * Corrupt successful matching READs while in down state.
-			 */
-			corrupt_bio_data(bio, fc);
-
-		} else if (!test_bit(DROP_WRITES, &fc->flags)) {
-			/*
-			 * Error read during the down_interval if drop_writes
-			 * wasn't configured.
-			 */
-			return -EIO;
-		}
-	}
+	/*
+	 * Corrupt successful READs while in down state.
+	 * If flags were specified, only corrupt those that match.
+	 */
+	if (fc->corrupt_bio_byte && !error && pb->bio_submitted &&
+	    (bio_data_dir(bio) == READ) && (fc->corrupt_bio_rw == READ) &&
+	    all_corrupt_bio_flags_match(bio, fc))
+		corrupt_bio_data(bio, fc);
 
 	return error;
 }
@@ -387,20 +370,35 @@ static void flakey_status(struct dm_target *ti, status_type_t type,
 	}
 }
 
-static int flakey_prepare_ioctl(struct dm_target *ti,
-		struct block_device **bdev, fmode_t *mode)
+static int flakey_ioctl(struct dm_target *ti, unsigned int cmd, unsigned long arg)
 {
 	struct flakey_c *fc = ti->private;
-
-	*bdev = fc->dev->bdev;
+	struct dm_dev *dev = fc->dev;
+	int r = 0;
 
 	/*
 	 * Only pass ioctls through if the device sizes match exactly.
 	 */
 	if (fc->start ||
-	    ti->len != i_size_read((*bdev)->bd_inode) >> SECTOR_SHIFT)
-		return 1;
-	return 0;
+	    ti->len != i_size_read(dev->bdev->bd_inode) >> SECTOR_SHIFT)
+		r = scsi_verify_blk_ioctl(NULL, cmd);
+
+	return r ? : __blkdev_driver_ioctl(dev->bdev, dev->mode, cmd, arg);
+}
+
+static int flakey_merge(struct dm_target *ti, struct bvec_merge_data *bvm,
+			struct bio_vec *biovec, int max_size)
+{
+	struct flakey_c *fc = ti->private;
+	struct request_queue *q = bdev_get_queue(fc->dev->bdev);
+
+	if (!q->merge_bvec_fn)
+		return max_size;
+
+	bvm->bi_bdev = fc->dev->bdev;
+	bvm->bi_sector = flakey_map_sector(ti, bvm->bi_sector);
+
+	return min(max_size, q->merge_bvec_fn(q, bvm, biovec));
 }
 
 static int flakey_iterate_devices(struct dm_target *ti, iterate_devices_callout_fn fn, void *data)
@@ -419,7 +417,8 @@ static struct target_type flakey_target = {
 	.map    = flakey_map,
 	.end_io = flakey_end_io,
 	.status = flakey_status,
-	.prepare_ioctl = flakey_prepare_ioctl,
+	.ioctl	= flakey_ioctl,
+	.merge	= flakey_merge,
 	.iterate_devices = flakey_iterate_devices,
 };
 

@@ -80,7 +80,7 @@ void cx18_alsa_announce_pcm_data(struct snd_cx18_card *cxsc, u8 *pcm_data,
 	int period_elapsed = 0;
 	int length;
 
-	dprintk("cx18 alsa announce ptr=%p data=%p num_bytes=%zu\n", cxsc,
+	dprintk("cx18 alsa announce ptr=%p data=%p num_bytes=%zd\n", cxsc,
 		pcm_data, num_bytes);
 
 	substream = cxsc->capture_pcm_substream;
@@ -311,7 +311,7 @@ static struct page *snd_pcm_get_vmalloc_page(struct snd_pcm_substream *subs,
 	return vmalloc_to_page(pageptr);
 }
 
-static const struct snd_pcm_ops snd_cx18_pcm_capture_ops = {
+static struct snd_pcm_ops snd_cx18_pcm_capture_ops = {
 	.open		= snd_cx18_pcm_capture_open,
 	.close		= snd_cx18_pcm_capture_close,
 	.ioctl		= snd_cx18_pcm_ioctl,

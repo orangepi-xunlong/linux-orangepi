@@ -1,8 +1,8 @@
-#include <linux/export.h>
+#include <linux/module.h>
 
 #include "libgcc.h"
 
-word_type notrace __ucmpdi2(unsigned long long a, unsigned long long b)
+word_type __ucmpdi2(unsigned long long a, unsigned long long b)
 {
 	const DWunion au = {.ll = a};
 	const DWunion bu = {.ll = b};

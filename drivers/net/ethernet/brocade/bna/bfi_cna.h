@@ -1,5 +1,5 @@
 /*
- * Linux network driver for QLogic BR-series Converged Network Adapter.
+ * Linux network driver for Brocade Converged Network Adapter.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License (GPL) Version 2 as
@@ -11,16 +11,17 @@
  * General Public License for more details.
  */
 /*
- * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
- * Copyright (c) 2014-2015 QLogic Corporation
+ * Copyright (c) 2005-2010 Brocade Communications Systems, Inc.
  * All rights reserved
- * www.qlogic.com
+ * www.brocade.com
  */
 #ifndef __BFI_CNA_H__
 #define __BFI_CNA_H__
 
 #include "bfi.h"
 #include "bfa_defs_cna.h"
+
+#pragma pack(1)
 
 enum bfi_port_h2i {
 	BFI_PORT_H2I_ENABLE_REQ		= (1),
@@ -41,7 +42,7 @@ struct bfi_port_generic_req {
 	struct bfi_mhdr mh;		/*!< msg header			    */
 	u32	msgtag;		/*!< msgtag for reply		    */
 	u32	rsvd;
-} __packed;
+};
 
 /* Generic RSP type */
 struct bfi_port_generic_rsp {
@@ -49,13 +50,13 @@ struct bfi_port_generic_rsp {
 	u8		status;		/*!< port enable status		    */
 	u8		rsvd[3];
 	u32	msgtag;		/*!< msgtag for reply		    */
-} __packed;
+};
 
 /* BFI_PORT_H2I_GET_STATS_REQ */
 struct bfi_port_get_stats_req {
 	struct bfi_mhdr mh;		/*!< common msg header		    */
 	union bfi_addr_u   dma_addr;
-} __packed;
+};
 
 union bfi_port_h2i_msg_u {
 	struct bfi_mhdr mh;
@@ -63,7 +64,7 @@ union bfi_port_h2i_msg_u {
 	struct bfi_port_generic_req disable_req;
 	struct bfi_port_get_stats_req getstats_req;
 	struct bfi_port_generic_req clearstats_req;
-} __packed;
+};
 
 union bfi_port_i2h_msg_u {
 	struct bfi_mhdr mh;
@@ -71,7 +72,7 @@ union bfi_port_i2h_msg_u {
 	struct bfi_port_generic_rsp disable_rsp;
 	struct bfi_port_generic_rsp getstats_rsp;
 	struct bfi_port_generic_rsp clearstats_rsp;
-} __packed;
+};
 
 /* @brief Mailbox commands from host to (DCBX/LLDP) firmware */
 enum bfi_cee_h2i_msgs {
@@ -95,7 +96,7 @@ enum bfi_cee_i2h_msgs {
  */
 struct bfi_lldp_reset_stats {
 	struct bfi_mhdr mh;
-} __packed;
+};
 
 /*
  * @brief H2I command structure for resetting the stats.
@@ -103,7 +104,7 @@ struct bfi_lldp_reset_stats {
  */
 struct bfi_cee_reset_stats {
 	struct bfi_mhdr mh;
-} __packed;
+};
 
 /*
  * @brief  get configuration  command from host
@@ -112,7 +113,7 @@ struct bfi_cee_reset_stats {
 struct bfi_cee_get_req {
 	struct bfi_mhdr mh;
 	union bfi_addr_u   dma_addr;
-} __packed;
+};
 
 /*
  * @brief reply message from firmware
@@ -122,7 +123,7 @@ struct bfi_cee_get_rsp {
 	struct bfi_mhdr mh;
 	u8			cmd_status;
 	u8			rsvd[3];
-} __packed;
+};
 
 /*
  * @brief  get configuration  command from host
@@ -131,7 +132,7 @@ struct bfi_cee_get_rsp {
 struct bfi_cee_stats_req {
 	struct bfi_mhdr mh;
 	union bfi_addr_u   dma_addr;
-} __packed;
+};
 
 /*
  * @brief reply message from firmware
@@ -141,20 +142,22 @@ struct bfi_cee_stats_rsp {
 	struct bfi_mhdr mh;
 	u8			cmd_status;
 	u8			rsvd[3];
-} __packed;
+};
 
 /* @brief mailbox command structures from host to firmware */
 union bfi_cee_h2i_msg_u {
 	struct bfi_mhdr mh;
 	struct bfi_cee_get_req get_req;
 	struct bfi_cee_stats_req stats_req;
-} __packed;
+};
 
 /* @brief mailbox message structures from firmware to host	*/
 union bfi_cee_i2h_msg_u {
 	struct bfi_mhdr mh;
 	struct bfi_cee_get_rsp get_rsp;
 	struct bfi_cee_stats_rsp stats_rsp;
-} __packed;
+};
+
+#pragma pack()
 
 #endif /* __BFI_CNA_H__ */

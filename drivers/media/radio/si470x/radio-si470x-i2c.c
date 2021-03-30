@@ -96,7 +96,7 @@ MODULE_PARM_DESC(max_rds_errors, "RDS maximum block errors: *1*");
  */
 int si470x_get_register(struct si470x_device *radio, int regnr)
 {
-	__be16 buf[READ_REG_NUM];
+	u16 buf[READ_REG_NUM];
 	struct i2c_msg msgs[1] = {
 		{
 			.addr = radio->client->addr,
@@ -121,7 +121,7 @@ int si470x_get_register(struct si470x_device *radio, int regnr)
 int si470x_set_register(struct si470x_device *radio, int regnr)
 {
 	int i;
-	__be16 buf[WRITE_REG_NUM];
+	u16 buf[WRITE_REG_NUM];
 	struct i2c_msg msgs[1] = {
 		{
 			.addr = radio->client->addr,
@@ -151,7 +151,7 @@ int si470x_set_register(struct si470x_device *radio, int regnr)
 static int si470x_get_all_registers(struct si470x_device *radio)
 {
 	int i;
-	__be16 buf[READ_REG_NUM];
+	u16 buf[READ_REG_NUM];
 	struct i2c_msg msgs[1] = {
 		{
 			.addr = radio->client->addr,
@@ -384,14 +384,14 @@ static int si470x_i2c_probe(struct i2c_client *client,
 		goto err_radio;
 	}
 	dev_info(&client->dev, "DeviceID=0x%4.4hx ChipID=0x%4.4hx\n",
-			radio->registers[DEVICEID], radio->registers[SI_CHIPID]);
-	if ((radio->registers[SI_CHIPID] & SI_CHIPID_FIRMWARE) < RADIO_FW_VERSION) {
+			radio->registers[DEVICEID], radio->registers[CHIPID]);
+	if ((radio->registers[CHIPID] & CHIPID_FIRMWARE) < RADIO_FW_VERSION) {
 		dev_warn(&client->dev,
 			"This driver is known to work with "
 			"firmware version %hu,\n", RADIO_FW_VERSION);
 		dev_warn(&client->dev,
 			"but the device has firmware version %hu.\n",
-			radio->registers[SI_CHIPID] & SI_CHIPID_FIRMWARE);
+			radio->registers[CHIPID] & CHIPID_FIRMWARE);
 		version_warning = 1;
 	}
 
@@ -421,8 +421,7 @@ static int si470x_i2c_probe(struct i2c_client *client,
 	init_waitqueue_head(&radio->read_queue);
 
 	retval = request_threaded_irq(client->irq, NULL, si470x_i2c_interrupt,
-			IRQF_TRIGGER_FALLING | IRQF_ONESHOT, DRIVER_NAME,
-			radio);
+			IRQF_TRIGGER_FALLING, DRIVER_NAME, radio);
 	if (retval) {
 		dev_err(&client->dev, "Failed to register interrupt\n");
 		goto err_rds;
@@ -464,7 +463,7 @@ static int si470x_i2c_remove(struct i2c_client *client)
 }
 
 
-#ifdef CONFIG_PM_SLEEP
+#ifdef CONFIG_PM
 /*
  * si470x_i2c_suspend - suspend the device
  */
@@ -509,7 +508,8 @@ static SIMPLE_DEV_PM_OPS(si470x_i2c_pm, si470x_i2c_suspend, si470x_i2c_resume);
 static struct i2c_driver si470x_i2c_driver = {
 	.driver = {
 		.name		= "si470x",
-#ifdef CONFIG_PM_SLEEP
+		.owner		= THIS_MODULE,
+#ifdef CONFIG_PM
 		.pm		= &si470x_i2c_pm,
 #endif
 	},

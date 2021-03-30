@@ -27,6 +27,8 @@ static struct regulator_consumer_supply dummy_supplies[] = {
 	REGULATOR_SUPPLY("vdd33a", "smsc911x"),
 };
 
+static const char *part_probes[] = { "cmdlinepart", NULL };
+
 static struct mtd_partition rsk_partitions[] = {
 	{
 		.name		= "Bootloader",
@@ -48,6 +50,7 @@ static struct physmap_flash_data flash_data = {
 	.parts			= rsk_partitions,
 	.nr_parts		= ARRAY_SIZE(rsk_partitions),
 	.width			= 2,
+	.part_probe_types	= part_probes,
 };
 
 static struct resource flash_resource = {

@@ -8,9 +8,6 @@
 #include <linux/pid_namespace.h>	/* For task_active_pid_ns.  */
 #include <uapi/linux/ptrace.h>
 
-extern int ptrace_access_vm(struct task_struct *tsk, unsigned long addr,
-			    void *buf, int len, unsigned int gup_flags);
-
 /*
  * Ptrace flags
  *
@@ -22,6 +19,7 @@ extern int ptrace_access_vm(struct task_struct *tsk, unsigned long addr,
 #define PT_SEIZED	0x00010000	/* SEIZE used, enable new behavior */
 #define PT_PTRACED	0x00000001
 #define PT_DTRACE	0x00000002	/* delayed trace (used on m68k, i386) */
+#define PT_PTRACE_CAP	0x00000004	/* ptracer can follow suid-exec */
 
 #define PT_OPT_FLAG_SHIFT	3
 /* PT_TRACE_* event enable flags */
@@ -36,7 +34,6 @@ extern int ptrace_access_vm(struct task_struct *tsk, unsigned long addr,
 #define PT_TRACE_SECCOMP	PT_EVENT_FLAG(PTRACE_EVENT_SECCOMP)
 
 #define PT_EXITKILL		(PTRACE_O_EXITKILL << PT_OPT_FLAG_SHIFT)
-#define PT_SUSPEND_SECCOMP	(PTRACE_O_SUSPEND_SECCOMP << PT_OPT_FLAG_SHIFT)
 
 /* single stepping state bits (used on ARM and PA-RISC) */
 #define PT_SINGLESTEP_BIT	31
@@ -53,36 +50,13 @@ extern int ptrace_request(struct task_struct *child, long request,
 			  unsigned long addr, unsigned long data);
 extern void ptrace_notify(int exit_code);
 extern void __ptrace_link(struct task_struct *child,
-			  struct task_struct *new_parent,
-			  const struct cred *ptracer_cred);
+			  struct task_struct *new_parent);
 extern void __ptrace_unlink(struct task_struct *child);
-extern void exit_ptrace(struct task_struct *tracer, struct list_head *dead);
+extern void exit_ptrace(struct task_struct *tracer);
 #define PTRACE_MODE_READ	0x01
 #define PTRACE_MODE_ATTACH	0x02
 #define PTRACE_MODE_NOAUDIT	0x04
-#define PTRACE_MODE_FSCREDS 0x08
-#define PTRACE_MODE_REALCREDS 0x10
-
-/* shorthands for READ/ATTACH and FSCREDS/REALCREDS combinations */
-#define PTRACE_MODE_READ_FSCREDS (PTRACE_MODE_READ | PTRACE_MODE_FSCREDS)
-#define PTRACE_MODE_READ_REALCREDS (PTRACE_MODE_READ | PTRACE_MODE_REALCREDS)
-#define PTRACE_MODE_ATTACH_FSCREDS (PTRACE_MODE_ATTACH | PTRACE_MODE_FSCREDS)
-#define PTRACE_MODE_ATTACH_REALCREDS (PTRACE_MODE_ATTACH | PTRACE_MODE_REALCREDS)
-
-/**
- * ptrace_may_access - check whether the caller is permitted to access
- * a target task.
- * @task: target task
- * @mode: selects type of access and caller credentials
- *
- * Returns true on success, false on denial.
- *
- * One of the flags PTRACE_MODE_FSCREDS and PTRACE_MODE_REALCREDS must
- * be set in @mode to specify whether the access was requested through
- * a filesystem syscall (should use effective capabilities and fsuid
- * of the caller) or through an explicit syscall such as
- * process_vm_writev or ptrace (and should use the real credentials).
- */
+/* Returns true on success, false on denial. */
 extern bool ptrace_may_access(struct task_struct *task, unsigned int mode);
 
 static inline int ptrace_reparented(struct task_struct *child)
@@ -200,13 +174,16 @@ static inline void ptrace_init_task(struct task_struct *child, bool ptrace)
 {
 	INIT_LIST_HEAD(&child->ptrace_entry);
 	INIT_LIST_HEAD(&child->ptraced);
+#ifdef CONFIG_HAVE_HW_BREAKPOINT
+	atomic_set(&child->ptrace_bp_refcnt, 1);
+#endif
 	child->jobctl = 0;
 	child->ptrace = 0;
 	child->parent = child->real_parent;
 
 	if (unlikely(ptrace) && current->ptrace) {
 		child->ptrace = current->ptrace;
-		__ptrace_link(child, current->parent, current->ptracer_cred);
+		__ptrace_link(child, current->parent);
 
 		if (child->ptrace & PT_SEIZED)
 			task_set_jobctl_pending(child, JOBCTL_TRAP_STOP);
@@ -215,8 +192,6 @@ static inline void ptrace_init_task(struct task_struct *child, bool ptrace)
 
 		set_tsk_thread_flag(child, TIF_SIGPENDING);
 	}
-	else
-		child->ptracer_cred = NULL;
 }
 
 /**
@@ -410,5 +385,12 @@ static inline void user_single_step_siginfo(struct task_struct *tsk,
 extern int task_current_syscall(struct task_struct *target, long *callno,
 				unsigned long args[6], unsigned int maxargs,
 				unsigned long *sp, unsigned long *pc);
+
+#ifdef CONFIG_HAVE_HW_BREAKPOINT
+extern int ptrace_get_breakpoints(struct task_struct *tsk);
+extern void ptrace_put_breakpoints(struct task_struct *tsk);
+#else
+static inline void ptrace_put_breakpoints(struct task_struct *tsk) { }
+#endif /* CONFIG_HAVE_HW_BREAKPOINT */
 
 #endif

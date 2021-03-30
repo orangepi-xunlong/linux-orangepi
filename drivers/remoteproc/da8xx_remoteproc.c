@@ -26,7 +26,8 @@
 static char *da8xx_fw_name;
 module_param(da8xx_fw_name, charp, S_IRUGO);
 MODULE_PARM_DESC(da8xx_fw_name,
-		 "Name of DSP firmware file in /lib/firmware (if not specified defaults to 'rproc-dsp-fw')");
+		 "\n\t\tName of DSP firmware file in /lib/firmware"
+		 " (if not specified defaults to 'rproc-dsp-fw')");
 
 /*
  * OMAP-L138 Technical References:
@@ -147,7 +148,7 @@ static void da8xx_rproc_kick(struct rproc *rproc, int vqid)
 {
 	struct da8xx_rproc *drproc = (struct da8xx_rproc *)rproc->priv;
 
-	/* Interrupt remote proc */
+	/* Interupt remote proc */
 	writel(SYSCFG_CHIPSIG2, drproc->chipsig);
 }
 
@@ -164,7 +165,7 @@ static int reset_assert(struct device *dev)
 	dsp_clk = clk_get(dev, NULL);
 	if (IS_ERR(dsp_clk)) {
 		dev_err(dev, "clk_get error: %ld\n", PTR_ERR(dsp_clk));
-		return PTR_ERR(dsp_clk);
+		return PTR_RET(dsp_clk);
 	}
 
 	davinci_clk_reset_assert(dsp_clk);
@@ -200,11 +201,23 @@ static int da8xx_rproc_probe(struct platform_device *pdev)
 	}
 
 	bootreg_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!bootreg_res) {
+		dev_err(dev,
+			"platform_get_resource(IORESOURCE_MEM, 0): NULL\n");
+		return -EADDRNOTAVAIL;
+	}
+
+	chipsig_res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+	if (!chipsig_res) {
+		dev_err(dev,
+			"platform_get_resource(IORESOURCE_MEM, 1): NULL\n");
+		return -EADDRNOTAVAIL;
+	}
+
 	bootreg = devm_ioremap_resource(dev, bootreg_res);
 	if (IS_ERR(bootreg))
 		return PTR_ERR(bootreg);
 
-	chipsig_res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
 	chipsig = devm_ioremap_resource(dev, chipsig_res);
 	if (IS_ERR(chipsig))
 		return PTR_ERR(chipsig);
@@ -223,7 +236,6 @@ static int da8xx_rproc_probe(struct platform_device *pdev)
 
 	drproc = rproc->priv;
 	drproc->rproc = rproc;
-	rproc->has_iommu = false;
 
 	platform_set_drvdata(pdev, rproc);
 
@@ -261,7 +273,7 @@ static int da8xx_rproc_probe(struct platform_device *pdev)
 	return 0;
 
 free_rproc:
-	rproc_free(rproc);
+	rproc_put(rproc);
 
 	return ret;
 }
@@ -289,8 +301,10 @@ static int da8xx_rproc_remove(struct platform_device *pdev)
 	 */
 	disable_irq(drproc->irq);
 
+	devm_clk_put(dev, drproc->dsp_clk);
+
 	rproc_del(rproc);
-	rproc_free(rproc);
+	rproc_put(rproc);
 
 	return 0;
 }
@@ -300,6 +314,7 @@ static struct platform_driver da8xx_rproc_driver = {
 	.remove = da8xx_rproc_remove,
 	.driver = {
 		.name = "davinci-rproc",
+		.owner = THIS_MODULE,
 	},
 };
 

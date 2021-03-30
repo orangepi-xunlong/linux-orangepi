@@ -11,7 +11,6 @@
 #include <linux/init.h>
 #include <linux/pagemap.h>
 #include <linux/blkdev.h>
-#include <linux/backing-dev.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
 #include <linux/vfs.h>
@@ -67,7 +66,6 @@ struct inode *hfsplus_iget(struct super_block *sb, unsigned long ino)
 		return inode;
 
 	INIT_LIST_HEAD(&HFSPLUS_I(inode)->open_dir_list);
-	spin_lock_init(&HFSPLUS_I(inode)->open_dir_lock);
 	mutex_init(&HFSPLUS_I(inode)->extents_lock);
 	HFSPLUS_I(inode)->flags = 0;
 	HFSPLUS_I(inode)->extent_state = 0;
@@ -133,10 +131,9 @@ static int hfsplus_system_write_inode(struct inode *inode)
 	hfsplus_inode_write_fork(inode, fork);
 	if (tree) {
 		int err = hfs_btree_write(tree);
-
 		if (err) {
 			pr_err("b-tree write err: %d, ino %lu\n",
-			       err, inode->i_ino);
+					err, inode->i_ino);
 			return err;
 		}
 	}
@@ -164,7 +161,7 @@ static int hfsplus_write_inode(struct inode *inode,
 static void hfsplus_evict_inode(struct inode *inode)
 {
 	hfs_dbg(INODE, "hfsplus_evict_inode: %lu\n", inode->i_ino);
-	truncate_inode_pages_final(&inode->i_data);
+	truncate_inode_pages(&inode->i_data, 0);
 	clear_inode(inode);
 	if (HFSPLUS_IS_RSRC(inode)) {
 		HFSPLUS_I(HFSPLUS_I(inode)->rsrc_inode)->rsrc_inode = NULL;
@@ -220,8 +217,7 @@ static int hfsplus_sync_fs(struct super_block *sb, int wait)
 
 	error2 = hfsplus_submit_bio(sb,
 				   sbi->part_start + HFSPLUS_VOLHEAD_SECTOR,
-				   sbi->s_vhdr_buf, NULL, REQ_OP_WRITE,
-				   WRITE_SYNC);
+				   sbi->s_vhdr_buf, NULL, WRITE_SYNC);
 	if (!error)
 		error = error2;
 	if (!write_backup)
@@ -229,8 +225,7 @@ static int hfsplus_sync_fs(struct super_block *sb, int wait)
 
 	error2 = hfsplus_submit_bio(sb,
 				  sbi->part_start + sbi->sect_count - 2,
-				  sbi->s_backup_vhdr_buf, NULL, REQ_OP_WRITE,
-				  WRITE_SYNC);
+				  sbi->s_backup_vhdr_buf, NULL, WRITE_SYNC);
 	if (!error)
 		error2 = error;
 out:
@@ -328,7 +323,6 @@ static int hfsplus_statfs(struct dentry *dentry, struct kstatfs *buf)
 
 static int hfsplus_remount(struct super_block *sb, int *flags, char *data)
 {
-	sync_filesystem(sb);
 	if ((*flags & MS_RDONLY) == (sb->s_flags & MS_RDONLY))
 		return 0;
 	if (!(*flags & MS_RDONLY)) {
@@ -441,7 +435,7 @@ static int hfsplus_fill_super(struct super_block *sb, void *data, int silent)
 	err = -EFBIG;
 	last_fs_block = sbi->total_blocks - 1;
 	last_fs_page = (last_fs_block << sbi->alloc_blksz_shift) >>
-			PAGE_SHIFT;
+			PAGE_CACHE_SHIFT;
 
 	if ((last_fs_block > (sector_t)(~0ULL) >> (sbi->alloc_blksz_shift - 9)) ||
 	    (last_fs_page > (pgoff_t)(~0ULL))) {
@@ -480,14 +474,12 @@ static int hfsplus_fill_super(struct super_block *sb, void *data, int silent)
 		pr_err("failed to load catalog file\n");
 		goto out_close_ext_tree;
 	}
-	atomic_set(&sbi->attr_tree_state, HFSPLUS_EMPTY_ATTR_TREE);
 	if (vhdr->attr_file.total_blocks != 0) {
 		sbi->attr_tree = hfs_btree_open(sb, HFSPLUS_ATTR_CNID);
 		if (!sbi->attr_tree) {
 			pr_err("failed to load attributes file\n");
 			goto out_close_cat_tree;
 		}
-		atomic_set(&sbi->attr_tree_state, HFSPLUS_VALID_ATTR_TREE);
 	}
 	sb->s_xattr = hfsplus_xattr_handlers;
 
@@ -519,15 +511,11 @@ static int hfsplus_fill_super(struct super_block *sb, void *data, int silent)
 	err = hfs_find_init(sbi->cat_tree, &fd);
 	if (err)
 		goto out_put_root;
-	err = hfsplus_cat_build_key(sb, fd.search_key, HFSPLUS_ROOT_CNID, &str);
-	if (unlikely(err < 0))
-		goto out_put_root;
+	hfsplus_cat_build_key(sb, fd.search_key, HFSPLUS_ROOT_CNID, &str);
 	if (!hfs_brec_read(&fd, &entry, sizeof(entry))) {
 		hfs_find_exit(&fd);
-		if (entry.type != cpu_to_be16(HFSPLUS_FOLDER)) {
-			err = -EINVAL;
+		if (entry.type != cpu_to_be16(HFSPLUS_FOLDER))
 			goto out_put_root;
-		}
 		inode = hfsplus_iget(sb, be32_to_cpu(entry.folder.id));
 		if (IS_ERR(inode)) {
 			err = PTR_ERR(inode);
@@ -590,7 +578,6 @@ static int hfsplus_fill_super(struct super_block *sb, void *data, int silent)
 	return 0;
 
 out_put_hidden_dir:
-	cancel_delayed_work_sync(&sbi->sync_work);
 	iput(sbi->hidden_dir);
 out_put_root:
 	dput(sb->s_root);
@@ -669,7 +656,7 @@ static int __init init_hfsplus_fs(void)
 	int err;
 
 	hfsplus_inode_cachep = kmem_cache_create("hfsplus_icache",
-		HFSPLUS_INODE_SIZE, 0, SLAB_HWCACHE_ALIGN|SLAB_ACCOUNT,
+		HFSPLUS_INODE_SIZE, 0, SLAB_HWCACHE_ALIGN,
 		hfsplus_init_once);
 	if (!hfsplus_inode_cachep)
 		return -ENOMEM;

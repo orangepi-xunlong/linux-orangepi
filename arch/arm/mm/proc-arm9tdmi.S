@@ -32,13 +32,13 @@ ENTRY(cpu_arm9tdmi_proc_init)
 ENTRY(cpu_arm9tdmi_do_idle)
 ENTRY(cpu_arm9tdmi_dcache_clean_area)
 ENTRY(cpu_arm9tdmi_switch_mm)
-		ret	lr
+		mov	pc, lr
 
 /*
  * cpu_arm9tdmi_proc_fin()
  */
 ENTRY(cpu_arm9tdmi_proc_fin)
-		ret	lr
+		mov	pc, lr
 
 /*
  * Function: cpu_arm9tdmi_reset(loc)
@@ -47,13 +47,15 @@ ENTRY(cpu_arm9tdmi_proc_fin)
  */
 		.pushsection	.idmap.text, "ax"
 ENTRY(cpu_arm9tdmi_reset)
-		ret	r0
+		mov	pc, r0
 ENDPROC(cpu_arm9tdmi_reset)
 		.popsection
 
+		__CPUINIT
+
 		.type	__arm9tdmi_setup, #function
 __arm9tdmi_setup:
-		ret	lr
+		mov	pc, lr
 		.size	__arm9tdmi_setup, . - __arm9tdmi_setup
 
 		__INITDATA
@@ -70,7 +72,7 @@ __arm9tdmi_setup:
 
 		.align
 
-		.section ".proc.info.init", #alloc
+		.section ".proc.info.init", #alloc, #execinstr
 
 .macro arm9tdmi_proc_info name:req, cpu_val:req, cpu_mask:req, cpu_name:req
 		.type	__\name\()_proc_info, #object
@@ -79,7 +81,7 @@ __\name\()_proc_info:
 		.long	\cpu_mask
 		.long	0
 		.long	0
-		initfn	__arm9tdmi_setup, __\name\()_proc_info
+		b	__arm9tdmi_setup
 		.long	cpu_arch_name
 		.long	cpu_elf_name
 		.long	HWCAP_SWP | HWCAP_THUMB | HWCAP_26BIT

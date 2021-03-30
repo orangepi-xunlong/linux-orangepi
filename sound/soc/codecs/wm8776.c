@@ -265,7 +265,7 @@ static int wm8776_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	/* Set word length */
-	switch (params_width(params)) {
+	switch (snd_pcm_format_width(params_format(params))) {
 	case 16:
 		iface = 0;
 		break;
@@ -280,7 +280,7 @@ static int wm8776_hw_params(struct snd_pcm_substream *substream,
 		break;
 	default:
 		dev_err(codec->dev, "Unsupported sample size: %i\n",
-			params_width(params));
+			snd_pcm_format_width(params_format(params)));
 		return -EINVAL;
 	}
 
@@ -325,8 +325,7 @@ static int wm8776_set_sysclk(struct snd_soc_dai *dai,
 	struct snd_soc_codec *codec = dai->codec;
 	struct wm8776_priv *wm8776 = snd_soc_codec_get_drvdata(codec);
 
-	if (WARN_ON(dai->driver->id >= ARRAY_SIZE(wm8776->sysclk)))
-		return -EINVAL;
+	BUG_ON(dai->driver->id >= ARRAY_SIZE(wm8776->sysclk));
 
 	wm8776->sysclk[dai->driver->id] = freq;
 
@@ -344,7 +343,7 @@ static int wm8776_set_bias_level(struct snd_soc_codec *codec,
 	case SND_SOC_BIAS_PREPARE:
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_OFF) {
+		if (codec->dapm.bias_level == SND_SOC_BIAS_OFF) {
 			regcache_sync(wm8776->regmap);
 
 			/* Disable the global powerdown; DAPM does the rest */
@@ -357,6 +356,7 @@ static int wm8776_set_bias_level(struct snd_soc_codec *codec,
 		break;
 	}
 
+	codec->dapm.bias_level = level;
 	return 0;
 }
 
@@ -407,15 +407,41 @@ static struct snd_soc_dai_driver wm8776_dai[] = {
 	},
 };
 
+#ifdef CONFIG_PM
+static int wm8776_suspend(struct snd_soc_codec *codec)
+{
+	wm8776_set_bias_level(codec, SND_SOC_BIAS_OFF);
+
+	return 0;
+}
+
+static int wm8776_resume(struct snd_soc_codec *codec)
+{
+	wm8776_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
+	return 0;
+}
+#else
+#define wm8776_suspend NULL
+#define wm8776_resume NULL
+#endif
+
 static int wm8776_probe(struct snd_soc_codec *codec)
 {
 	int ret = 0;
+
+	ret = snd_soc_codec_set_cache_io(codec, 7, 9, SND_SOC_REGMAP);
+	if (ret < 0) {
+		dev_err(codec->dev, "Failed to set cache I/O: %d\n", ret);
+		return ret;
+	}
 
 	ret = wm8776_reset(codec);
 	if (ret < 0) {
 		dev_err(codec->dev, "Failed to issue reset: %d\n", ret);
 		return ret;
 	}
+
+	wm8776_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
 
 	/* Latch the update bits; right channel only since we always
 	 * update both. */
@@ -425,19 +451,26 @@ static int wm8776_probe(struct snd_soc_codec *codec)
 	return ret;
 }
 
-static const struct snd_soc_codec_driver soc_codec_dev_wm8776 = {
-	.probe = 	wm8776_probe,
-	.set_bias_level = wm8776_set_bias_level,
-	.suspend_bias_off = true,
+/* power down chip */
+static int wm8776_remove(struct snd_soc_codec *codec)
+{
+	wm8776_set_bias_level(codec, SND_SOC_BIAS_OFF);
+	return 0;
+}
 
-	.component_driver = {
-		.controls		= wm8776_snd_controls,
-		.num_controls		= ARRAY_SIZE(wm8776_snd_controls),
-		.dapm_widgets		= wm8776_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(wm8776_dapm_widgets),
-		.dapm_routes		= routes,
-		.num_dapm_routes	= ARRAY_SIZE(routes),
-	},
+static struct snd_soc_codec_driver soc_codec_dev_wm8776 = {
+	.probe = 	wm8776_probe,
+	.remove = 	wm8776_remove,
+	.suspend = 	wm8776_suspend,
+	.resume =	wm8776_resume,
+	.set_bias_level = wm8776_set_bias_level,
+
+	.controls = wm8776_snd_controls,
+	.num_controls = ARRAY_SIZE(wm8776_snd_controls),
+	.dapm_widgets = wm8776_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(wm8776_dapm_widgets),
+	.dapm_routes = routes,
+	.num_dapm_routes = ARRAY_SIZE(routes),
 };
 
 static const struct of_device_id wm8776_of_match[] = {
@@ -490,6 +523,7 @@ static int wm8776_spi_remove(struct spi_device *spi)
 static struct spi_driver wm8776_spi_driver = {
 	.driver = {
 		.name	= "wm8776",
+		.owner	= THIS_MODULE,
 		.of_match_table = wm8776_of_match,
 	},
 	.probe		= wm8776_spi_probe,
@@ -497,7 +531,7 @@ static struct spi_driver wm8776_spi_driver = {
 };
 #endif /* CONFIG_SPI_MASTER */
 
-#if IS_ENABLED(CONFIG_I2C)
+#if defined(CONFIG_I2C) || defined(CONFIG_I2C_MODULE)
 static int wm8776_i2c_probe(struct i2c_client *i2c,
 			    const struct i2c_device_id *id)
 {
@@ -537,6 +571,7 @@ MODULE_DEVICE_TABLE(i2c, wm8776_i2c_id);
 static struct i2c_driver wm8776_i2c_driver = {
 	.driver = {
 		.name = "wm8776",
+		.owner = THIS_MODULE,
 		.of_match_table = wm8776_of_match,
 	},
 	.probe =    wm8776_i2c_probe,
@@ -548,7 +583,7 @@ static struct i2c_driver wm8776_i2c_driver = {
 static int __init wm8776_modinit(void)
 {
 	int ret = 0;
-#if IS_ENABLED(CONFIG_I2C)
+#if defined(CONFIG_I2C) || defined(CONFIG_I2C_MODULE)
 	ret = i2c_add_driver(&wm8776_i2c_driver);
 	if (ret != 0) {
 		printk(KERN_ERR "Failed to register wm8776 I2C driver: %d\n",
@@ -568,7 +603,7 @@ module_init(wm8776_modinit);
 
 static void __exit wm8776_exit(void)
 {
-#if IS_ENABLED(CONFIG_I2C)
+#if defined(CONFIG_I2C) || defined(CONFIG_I2C_MODULE)
 	i2c_del_driver(&wm8776_i2c_driver);
 #endif
 #if defined(CONFIG_SPI_MASTER)

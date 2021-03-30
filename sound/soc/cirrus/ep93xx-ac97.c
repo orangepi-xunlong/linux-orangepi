@@ -19,13 +19,10 @@
 #include <linux/slab.h>
 
 #include <sound/core.h>
-#include <sound/dmaengine_pcm.h>
 #include <sound/ac97_codec.h>
 #include <sound/soc.h>
 
 #include <linux/platform_data/dma-ep93xx.h>
-
-#include "ep93xx-pcm.h"
 
 /*
  * Per channel (1-4) registers.
@@ -98,8 +95,6 @@ struct ep93xx_ac97_info {
 	struct device		*dev;
 	void __iomem		*regs;
 	struct completion	done;
-	struct snd_dmaengine_dai_dma_data dma_params_rx;
-	struct snd_dmaengine_dai_dma_data dma_params_tx;
 };
 
 /* currently ALSA only supports a single AC97 device */
@@ -107,13 +102,13 @@ static struct ep93xx_ac97_info *ep93xx_ac97_info;
 
 static struct ep93xx_dma_data ep93xx_ac97_pcm_out = {
 	.name		= "ac97-pcm-out",
-	.port		= EP93XX_DMA_AAC1,
+	.dma_port	= EP93XX_DMA_AAC1,
 	.direction	= DMA_MEM_TO_DEV,
 };
 
 static struct ep93xx_dma_data ep93xx_ac97_pcm_in = {
 	.name		= "ac97-pcm-in",
-	.port		= EP93XX_DMA_AAC1,
+	.dma_port	= EP93XX_DMA_AAC1,
 	.direction	= DMA_DEV_TO_MEM,
 };
 
@@ -242,12 +237,13 @@ static irqreturn_t ep93xx_ac97_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static struct snd_ac97_bus_ops ep93xx_ac97_ops = {
+struct snd_ac97_bus_ops soc_ac97_ops = {
 	.read		= ep93xx_ac97_read,
 	.write		= ep93xx_ac97_write,
 	.reset		= ep93xx_ac97_cold_reset,
 	.warm_reset	= ep93xx_ac97_warm_reset,
 };
+EXPORT_SYMBOL_GPL(soc_ac97_ops);
 
 static int ep93xx_ac97_trigger(struct snd_pcm_substream *substream,
 			       int cmd, struct snd_soc_dai *dai)
@@ -318,28 +314,29 @@ static int ep93xx_ac97_trigger(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int ep93xx_ac97_dai_probe(struct snd_soc_dai *dai)
+static int ep93xx_ac97_startup(struct snd_pcm_substream *substream,
+			       struct snd_soc_dai *dai)
 {
-	struct ep93xx_ac97_info *info = snd_soc_dai_get_drvdata(dai);
+	struct ep93xx_dma_data *dma_data;
 
-	info->dma_params_tx.filter_data = &ep93xx_ac97_pcm_out;
-	info->dma_params_rx.filter_data = &ep93xx_ac97_pcm_in;
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		dma_data = &ep93xx_ac97_pcm_out;
+	else
+		dma_data = &ep93xx_ac97_pcm_in;
 
-	dai->playback_dma_data = &info->dma_params_tx;
-	dai->capture_dma_data = &info->dma_params_rx;
-
+	snd_soc_dai_set_dma_data(dai, substream, dma_data);
 	return 0;
 }
 
 static const struct snd_soc_dai_ops ep93xx_ac97_dai_ops = {
+	.startup	= ep93xx_ac97_startup,
 	.trigger	= ep93xx_ac97_trigger,
 };
 
 static struct snd_soc_dai_driver ep93xx_ac97_dai = {
 	.name		= "ep93xx-ac97",
 	.id		= 0,
-	.bus_control	= true,
-	.probe		= ep93xx_ac97_dai_probe,
+	.ac97_control	= 1,
 	.playback	= {
 		.stream_name	= "AC97 Playback",
 		.channels_min	= 2,
@@ -373,6 +370,9 @@ static int ep93xx_ac97_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res)
+		return -ENODEV;
+
 	info->regs = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(info->regs))
 		return PTR_ERR(info->regs);
@@ -395,26 +395,17 @@ static int ep93xx_ac97_probe(struct platform_device *pdev)
 	ep93xx_ac97_info = info;
 	platform_set_drvdata(pdev, info);
 
-	ret = snd_soc_set_ac97_ops(&ep93xx_ac97_ops);
-	if (ret)
-		goto fail;
-
 	ret = snd_soc_register_component(&pdev->dev, &ep93xx_ac97_component,
 					 &ep93xx_ac97_dai, 1);
 	if (ret)
 		goto fail;
 
-	ret = devm_ep93xx_pcm_platform_register(&pdev->dev);
-	if (ret)
-		goto fail_unregister;
-
 	return 0;
 
-fail_unregister:
-	snd_soc_unregister_component(&pdev->dev);
 fail:
+	platform_set_drvdata(pdev, NULL);
 	ep93xx_ac97_info = NULL;
-	snd_soc_set_ac97_ops(NULL);
+	dev_set_drvdata(&pdev->dev, NULL);
 	return ret;
 }
 
@@ -427,9 +418,9 @@ static int ep93xx_ac97_remove(struct platform_device *pdev)
 	/* disable the AC97 controller */
 	ep93xx_ac97_write_reg(info, AC97GCR, 0);
 
+	platform_set_drvdata(pdev, NULL);
 	ep93xx_ac97_info = NULL;
-
-	snd_soc_set_ac97_ops(NULL);
+	dev_set_drvdata(&pdev->dev, NULL);
 
 	return 0;
 }
@@ -439,6 +430,7 @@ static struct platform_driver ep93xx_ac97_driver = {
 	.remove	= ep93xx_ac97_remove,
 	.driver = {
 		.name = "ep93xx-ac97",
+		.owner = THIS_MODULE,
 	},
 };
 

@@ -159,7 +159,7 @@ static int lookup_prev_stack_frame(unsigned long fp, unsigned long pc,
 
 			/* Sign extend */
 			regcache[dest] =
-				sign_extend64((((u64)op >> 10) & 0xffff), 9);
+				((((s64)(u64)op >> 10) & 0xffff) << 54) >> 54;
 			break;
 		case (0xd0 >> 2): /* addi */
 		case (0xd4 >> 2): /* addi.l */

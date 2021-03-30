@@ -4,7 +4,7 @@
  * based upon linux/arch/arm/mach-realview/platsmp.c
  *
  * Copyright (C) 2012 ST Microelectronics Ltd.
- * Shiraz Hashim <shiraz.linux.kernel@gmail.com>
+ * Shiraz Hashim <shiraz.hashim@st.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -20,29 +20,18 @@
 #include <mach/spear.h>
 #include "generic.h"
 
-/*
- * Write pen_release in a way that is guaranteed to be visible to all
- * observers, irrespective of whether they're taking part in coherency
- * or not.  This is necessary for the hotplug code to work reliably.
- */
-static void write_pen_release(int val)
-{
-	pen_release = val;
-	smp_wmb();
-	sync_cache_w(&pen_release);
-}
-
 static DEFINE_SPINLOCK(boot_lock);
 
 static void __iomem *scu_base = IOMEM(VA_SCU_BASE);
 
-static void spear13xx_secondary_init(unsigned int cpu)
+static void __cpuinit spear13xx_secondary_init(unsigned int cpu)
 {
 	/*
 	 * let the primary processor know we're out of the
 	 * pen, then head off into the C entry point
 	 */
-	write_pen_release(-1);
+	pen_release = -1;
+	smp_wmb();
 
 	/*
 	 * Synchronise with the boot thread.
@@ -51,7 +40,7 @@ static void spear13xx_secondary_init(unsigned int cpu)
 	spin_unlock(&boot_lock);
 }
 
-static int spear13xx_boot_secondary(unsigned int cpu, struct task_struct *idle)
+static int __cpuinit spear13xx_boot_secondary(unsigned int cpu, struct task_struct *idle)
 {
 	unsigned long timeout;
 
@@ -69,7 +58,9 @@ static int spear13xx_boot_secondary(unsigned int cpu, struct task_struct *idle)
 	 * Note that "pen_release" is the hardware CPU ID, whereas
 	 * "cpu" is Linux's internal ID.
 	 */
-	write_pen_release(cpu);
+	pen_release = cpu;
+	flush_cache_all();
+	outer_flush_all();
 
 	timeout = jiffies + (1 * HZ);
 	while (time_before(jiffies, timeout)) {
@@ -120,7 +111,7 @@ static void __init spear13xx_smp_prepare_cpus(unsigned int max_cpus)
 	__raw_writel(virt_to_phys(spear13xx_secondary_startup), SYS_LOCATION);
 }
 
-const struct smp_operations spear13xx_smp_ops __initconst = {
+struct smp_operations spear13xx_smp_ops __initdata = {
        .smp_init_cpus		= spear13xx_smp_init_cpus,
        .smp_prepare_cpus	= spear13xx_smp_prepare_cpus,
        .smp_secondary_init	= spear13xx_secondary_init,

@@ -185,8 +185,8 @@ static ssize_t print_frame(char *buf, size_t size, char *frm,
 			/* Fast forward. */
 			i = count - cut;
 			len += snprintf((buf + len), (size - len),
-					"--- %zu bytes skipped ---\n",
-					count - (cut * 2));
+					"--- %u bytes skipped ---\n",
+					(int)(count - (cut * 2)));
 		}
 
 		if ((!(i % 10)) && i) {
@@ -554,6 +554,7 @@ int cfspi_rxfrm(struct cfspi *cfspi, u8 *buf, size_t len)
 
 		skb->protocol = htons(ETH_P_CAIF);
 		skb_reset_mac_header(skb);
+		skb->dev = cfspi->ndev;
 
 		/*
 		 * Push received packet up the stack.
@@ -710,7 +711,7 @@ static void cfspi_setup(struct net_device *dev)
 	dev->netdev_ops = &cfspi_ops;
 	dev->type = ARPHRD_CAIF;
 	dev->flags = IFF_NOARP | IFF_POINTOPOINT;
-	dev->priv_flags |= IFF_NO_QUEUE;
+	dev->tx_queue_len = 0;
 	dev->mtu = SPI_MAX_PAYLOAD_SIZE;
 	dev->destructor = free_netdev;
 	skb_queue_head_init(&cfspi->qhead);
@@ -730,13 +731,10 @@ int cfspi_spi_probe(struct platform_device *pdev)
 	int res;
 	dev = (struct cfspi_dev *)pdev->dev.platform_data;
 
+	ndev = alloc_netdev(sizeof(struct cfspi),
+			"cfspi%d", cfspi_setup);
 	if (!dev)
 		return -ENODEV;
-
-	ndev = alloc_netdev(sizeof(struct cfspi), "cfspi%d",
-			    NET_NAME_UNKNOWN, cfspi_setup);
-	if (!ndev)
-		return -ENOMEM;
 
 	cfspi = netdev_priv(ndev);
 	netif_stop_queue(ndev);

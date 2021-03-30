@@ -30,8 +30,6 @@
  * IN THE SOFTWARE.
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/wait.h>
 #include <linux/interrupt.h>
 #include <linux/sched.h>
@@ -123,14 +121,14 @@ int xb_write(const void *data, unsigned len)
 			avail = len;
 
 		/* Must write data /after/ reading the consumer index. */
-		virt_mb();
+		mb();
 
 		memcpy(dst, data, avail);
 		data += avail;
 		len -= avail;
 
 		/* Other side must not see new producer until data is there. */
-		virt_wmb();
+		wmb();
 		intf->req_prod += avail;
 
 		/* Implies mb(): other side will see the updated producer. */
@@ -180,14 +178,14 @@ int xb_read(void *data, unsigned len)
 			avail = len;
 
 		/* Must read data /after/ reading the producer index. */
-		virt_rmb();
+		rmb();
 
 		memcpy(data, src, avail);
 		data += avail;
 		len -= avail;
 
 		/* Other side must not see free space until we've copied out */
-		virt_mb();
+		mb();
 		intf->rsp_cons += avail;
 
 		pr_debug("Finished read of %i bytes (%i to go)\n", avail, len);
@@ -207,12 +205,13 @@ int xb_init_comms(void)
 	struct xenstore_domain_interface *intf = xen_store_interface;
 
 	if (intf->req_prod != intf->req_cons)
-		pr_err("request ring is not quiescent (%08x:%08x)!\n",
-		       intf->req_cons, intf->req_prod);
+		printk(KERN_ERR "XENBUS request ring is not quiescent "
+		       "(%08x:%08x)!\n", intf->req_cons, intf->req_prod);
 
 	if (intf->rsp_prod != intf->rsp_cons) {
-		pr_warn("response ring is not quiescent (%08x:%08x): fixing up\n",
-			intf->rsp_cons, intf->rsp_prod);
+		printk(KERN_WARNING "XENBUS response ring is not quiescent "
+		       "(%08x:%08x): fixing up\n",
+		       intf->rsp_cons, intf->rsp_prod);
 		/* breaks kdump */
 		if (!reset_devices)
 			intf->rsp_cons = intf->rsp_prod;
@@ -226,7 +225,7 @@ int xb_init_comms(void)
 		err = bind_evtchn_to_irqhandler(xen_store_evtchn, wake_waiting,
 						0, "xenbus", &xb_waitq);
 		if (err < 0) {
-			pr_err("request irq failed %i\n", err);
+			printk(KERN_ERR "XENBUS request irq failed %i\n", err);
 			return err;
 		}
 

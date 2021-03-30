@@ -6,7 +6,6 @@
  * as published by the Free Software Foundation; either version
  * 2 of the License, or (at your option) any later version.
  */
-#include <linux/context_tracking.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/ptrace.h>
@@ -168,16 +167,12 @@ static inline void check_mult_sh(void)
 	panic(bug64hit, !R4000_WAR ? r4kwar : nowar);
 }
 
-static volatile int daddi_ov;
+static volatile int daddi_ov __cpuinitdata;
 
 asmlinkage void __init do_daddi_ov(struct pt_regs *regs)
 {
-	enum ctx_state prev_state;
-
-	prev_state = exception_enter();
 	daddi_ov = 1;
 	regs->cp0_epc += 4;
-	exception_exit(prev_state);
 }
 
 static inline void check_daddi(void)
@@ -190,7 +185,7 @@ static inline void check_daddi(void)
 	printk("Checking for the daddi bug... ");
 
 	local_irq_save(flags);
-	handler = set_except_vector(EXCCODE_OV, handle_daddi_ov);
+	handler = set_except_vector(12, handle_daddi_ov);
 	/*
 	 * The following code fails to trigger an overflow exception
 	 * when executed on R4000 rev. 2.2 or 3.0 (PRId 00000422 or
@@ -214,7 +209,7 @@ static inline void check_daddi(void)
 		".set	pop"
 		: "=r" (v), "=&r" (tmp)
 		: "I" (0xffffffffffffdb9aUL), "I" (0x1234));
-	set_except_vector(EXCCODE_OV, handler);
+	set_except_vector(12, handler);
 	local_irq_restore(flags);
 
 	if (daddi_ov) {
@@ -225,14 +220,14 @@ static inline void check_daddi(void)
 	printk("yes, workaround... ");
 
 	local_irq_save(flags);
-	handler = set_except_vector(EXCCODE_OV, handle_daddi_ov);
+	handler = set_except_vector(12, handle_daddi_ov);
 	asm volatile(
 		"addiu	%1, $0, %2\n\t"
 		"dsrl	%1, %1, 1\n\t"
 		"daddi	%0, %1, %3"
 		: "=r" (v), "=&r" (tmp)
 		: "I" (0xffffffffffffdb9aUL), "I" (0x1234));
-	set_except_vector(EXCCODE_OV, handler);
+	set_except_vector(12, handler);
 	local_irq_restore(flags);
 
 	if (daddi_ov) {
@@ -244,7 +239,7 @@ static inline void check_daddi(void)
 	panic(bug64hit, !DADDI_WAR ? daddiwar : nowar);
 }
 
-int daddiu_bug	= IS_ENABLED(CONFIG_CPU_MIPSR6) ? 0 : -1;
+int daddiu_bug	= -1;
 
 static inline void check_daddiu(void)
 {
@@ -314,14 +309,11 @@ static inline void check_daddiu(void)
 
 void __init check_bugs64_early(void)
 {
-	if (!IS_ENABLED(CONFIG_CPU_MIPSR6)) {
-		check_mult_sh();
-		check_daddiu();
-	}
+	check_mult_sh();
+	check_daddiu();
 }
 
 void __init check_bugs64(void)
 {
-	if (!IS_ENABLED(CONFIG_CPU_MIPSR6))
-		check_daddi();
+	check_daddi();
 }

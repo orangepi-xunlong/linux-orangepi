@@ -20,23 +20,23 @@
 
 
 /* this is the table of CCLK frequencies, in Hz */
-/* .driver_data is the entry in the auxiliary dpm_state_table[] */
+/* .index is the entry in the auxiliary dpm_state_table[] */
 static struct cpufreq_frequency_table bfin_freq_table[] = {
 	{
 		.frequency = CPUFREQ_TABLE_END,
-		.driver_data = 0,
+		.index = 0,
 	},
 	{
 		.frequency = CPUFREQ_TABLE_END,
-		.driver_data = 1,
+		.index = 1,
 	},
 	{
 		.frequency = CPUFREQ_TABLE_END,
-		.driver_data = 2,
+		.index = 2,
 	},
 	{
 		.frequency = CPUFREQ_TABLE_END,
-		.driver_data = 0,
+		.index = 0,
 	},
 };
 
@@ -112,7 +112,7 @@ static unsigned int bfin_getfreq_khz(unsigned int cpu)
 }
 
 #ifdef CONFIG_BF60x
-static int cpu_set_cclk(int cpu, unsigned long new)
+unsigned long cpu_set_cclk(int cpu, unsigned long new)
 {
 	struct clk *clk;
 	int ret;
@@ -127,28 +127,41 @@ static int cpu_set_cclk(int cpu, unsigned long new)
 }
 #endif
 
-static int bfin_target(struct cpufreq_policy *policy, unsigned int index)
+static int bfin_target(struct cpufreq_policy *policy,
+			unsigned int target_freq, unsigned int relation)
 {
 #ifndef CONFIG_BF60x
 	unsigned int plldiv;
 #endif
+	unsigned int index;
+	unsigned long cclk_hz;
+	struct cpufreq_freqs freqs;
 	static unsigned long lpj_ref;
 	static unsigned int  lpj_ref_freq;
-	unsigned int old_freq, new_freq;
 	int ret = 0;
 
 #if defined(CONFIG_CYCLES_CLOCKSOURCE)
 	cycles_t cycles;
 #endif
 
-	old_freq = bfin_getfreq_khz(0);
-	new_freq = bfin_freq_table[index].frequency;
+	if (cpufreq_frequency_table_target(policy, bfin_freq_table, target_freq,
+				relation, &index))
+		return -EINVAL;
 
+	cclk_hz = bfin_freq_table[index].frequency;
+
+	freqs.old = bfin_getfreq_khz(0);
+	freqs.new = cclk_hz;
+
+	pr_debug("cpufreq: changing cclk to %lu; target = %u, oldfreq = %u\n",
+			cclk_hz, target_freq, freqs.old);
+
+	cpufreq_notify_transition(policy, &freqs, CPUFREQ_PRECHANGE);
 #ifndef CONFIG_BF60x
 	plldiv = (bfin_read_PLL_DIV() & SSEL) | dpm_state_table[index].csel;
 	bfin_write_PLL_DIV(plldiv);
 #else
-	ret = cpu_set_cclk(policy->cpu, new_freq * 1000);
+	ret = cpu_set_cclk(policy->cpu, freqs.new * 1000);
 	if (ret != 0) {
 		WARN_ONCE(ret, "cpufreq set freq failed %d\n", ret);
 		return ret;
@@ -164,14 +177,23 @@ static int bfin_target(struct cpufreq_policy *policy, unsigned int index)
 #endif
 	if (!lpj_ref_freq) {
 		lpj_ref = loops_per_jiffy;
-		lpj_ref_freq = old_freq;
+		lpj_ref_freq = freqs.old;
 	}
-	if (new_freq != old_freq) {
+	if (freqs.new != freqs.old) {
 		loops_per_jiffy = cpufreq_scale(lpj_ref,
-				lpj_ref_freq, new_freq);
+				lpj_ref_freq, freqs.new);
 	}
 
+	/* TODO: just test case for cycles clock source, remove later */
+	cpufreq_notify_transition(policy, &freqs, CPUFREQ_POSTCHANGE);
+
+	pr_debug("cpufreq: done\n");
 	return ret;
+}
+
+static int bfin_verify_speed(struct cpufreq_policy *policy)
+{
+	return cpufreq_frequency_table_verify(policy, bfin_freq_table);
 }
 
 static int __bfin_cpu_init(struct cpufreq_policy *policy)
@@ -187,16 +209,24 @@ static int __bfin_cpu_init(struct cpufreq_policy *policy)
 
 	policy->cpuinfo.transition_latency = 50000; /* 50us assumed */
 
-	return cpufreq_table_validate_and_show(policy, bfin_freq_table);
+	policy->cur = cclk;
+	cpufreq_frequency_table_get_attr(bfin_freq_table, policy->cpu);
+	return cpufreq_frequency_table_cpuinfo(policy, bfin_freq_table);
 }
 
+static struct freq_attr *bfin_freq_attr[] = {
+	&cpufreq_freq_attr_scaling_available_freqs,
+	NULL,
+};
+
 static struct cpufreq_driver bfin_driver = {
-	.verify = cpufreq_generic_frequency_table_verify,
-	.target_index = bfin_target,
+	.verify = bfin_verify_speed,
+	.target = bfin_target,
 	.get = bfin_getfreq_khz,
 	.init = __bfin_cpu_init,
 	.name = "bfin cpufreq",
-	.attr = cpufreq_generic_attr,
+	.owner = THIS_MODULE,
+	.attr = bfin_freq_attr,
 };
 
 static int __init bfin_cpu_init(void)

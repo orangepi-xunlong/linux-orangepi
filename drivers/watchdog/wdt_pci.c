@@ -49,6 +49,7 @@
 #include <linux/delay.h>
 #include <linux/notifier.h>
 #include <linux/reboot.h>
+#include <linux/init.h>
 #include <linux/fs.h>
 #include <linux/pci.h>
 #include <linux/io.h>
@@ -719,7 +720,7 @@ static void wdtpci_remove_one(struct pci_dev *pdev)
 }
 
 
-static const struct pci_device_id wdtpci_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(wdtpci_pci_tbl) = {
 	{
 		.vendor	   = PCI_VENDOR_ID_ACCESSIO,
 		.device	   = PCI_DEVICE_ID_ACCESSIO_WDG_CSM,
@@ -743,3 +744,5 @@ module_pci_driver(wdtpci_driver);
 MODULE_AUTHOR("JP Nollmann, Alan Cox");
 MODULE_DESCRIPTION("Driver for the ICS PCI-WDT500/501 watchdog cards");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);
+MODULE_ALIAS_MISCDEV(TEMP_MINOR);

@@ -29,8 +29,24 @@
 #ifndef __DPC_H__
 #define __DPC_H__
 
+#include "ttype.h"
 #include "device.h"
+#include "wcmd.h"
 
-bool vnt_receive_frame(struct vnt_private *priv, struct vnt_rx_desc *curr_rd);
+/*---------------------  Export Definitions -------------------------*/
 
-#endif /* __RXTX_H__ */
+/*---------------------  Export Classes  ----------------------------*/
+
+/*---------------------  Export Variables  --------------------------*/
+
+/*---------------------  Export Functions  --------------------------*/
+
+bool
+device_receive_frame(
+	PSDevice pDevice,
+	PSRxDesc pCurrRD
+);
+
+void	MngWorkItem(void *Context);
+
+#endif // __RXTX_H__

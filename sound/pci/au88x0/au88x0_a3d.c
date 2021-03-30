@@ -463,7 +463,7 @@ static void a3dsrc_ZeroSliceIO(a3dsrc_t * a)
 static void a3dsrc_ZeroState(a3dsrc_t * a)
 {
 	/*
-	pr_debug( "vortex: ZeroState slice: %d, source %d\n",
+	printk(KERN_DEBUG "vortex: ZeroState slice: %d, source %d\n",
 	       a->slice, a->source);
 	*/
 	a3dsrc_SetAtmosState(a, 0, 0, 0, 0);
@@ -484,13 +484,12 @@ static void a3dsrc_ZeroState(a3dsrc_t * a)
 }
 
 /* Reset entire A3D engine */
-static void a3dsrc_ZeroStateA3D(a3dsrc_t *a, vortex_t *v)
+static void a3dsrc_ZeroStateA3D(a3dsrc_t * a)
 {
 	int i, var, var2;
 
 	if ((a->vortex) == NULL) {
-		dev_err(v->card->dev,
-			"ZeroStateA3D: ERROR: a->vortex is NULL\n");
+		printk(KERN_ERR "vortex: ZeroStateA3D: ERROR: a->vortex is NULL\n");
 		return;
 	}
 
@@ -602,7 +601,7 @@ static void vortex_Vort3D_enable(vortex_t *v)
 	Vort3DRend_Initialize(v, XT_HEADPHONE);
 	for (i = 0; i < NR_A3D; i++) {
 		vortex_A3dSourceHw_Initialize(v, i % 4, i >> 2);
-		a3dsrc_ZeroStateA3D(&v->a3d[0], v);
+		a3dsrc_ZeroStateA3D(&(v->a3d[0]));
 	}
 	/* Register ALSA controls */
 	vortex_a3d_register_controls(v);
@@ -629,15 +628,15 @@ static void vortex_Vort3D_connect(vortex_t * v, int en)
 	v->mixxtlk[0] =
 	    vortex_adb_checkinout(v, v->fixed_res, en, VORTEX_RESOURCE_MIXIN);
 	if (v->mixxtlk[0] < 0) {
-		dev_warn(v->card->dev,
-			 "vortex_Vort3D: ERROR: not enough free mixer resources.\n");
+		printk
+		    ("vortex: vortex_Vort3D: ERROR: not enough free mixer resources.\n");
 		return;
 	}
 	v->mixxtlk[1] =
 	    vortex_adb_checkinout(v, v->fixed_res, en, VORTEX_RESOURCE_MIXIN);
 	if (v->mixxtlk[1] < 0) {
-		dev_warn(v->card->dev,
-			 "vortex_Vort3D: ERROR: not enough free mixer resources.\n");
+		printk
+		    ("vortex: vortex_Vort3D: ERROR: not enough free mixer resources.\n");
 		return;
 	}
 #endif
@@ -677,11 +676,11 @@ static void vortex_Vort3D_connect(vortex_t * v, int en)
 }
 
 /* Initialize one single A3D source. */
-static void vortex_Vort3D_InitializeSource(a3dsrc_t *a, int en, vortex_t *v)
+static void vortex_Vort3D_InitializeSource(a3dsrc_t * a, int en)
 {
 	if (a->vortex == NULL) {
-		dev_warn(v->card->dev,
-			 "Vort3D_InitializeSource: A3D source not initialized\n");
+		printk
+		    ("vortex: Vort3D_InitializeSource: A3D source not initialized\n");
 		return;
 	}
 	if (en) {

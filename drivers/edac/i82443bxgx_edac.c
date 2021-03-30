@@ -350,6 +350,8 @@ fail:
 	return -ENODEV;
 }
 
+EXPORT_SYMBOL_GPL(i82443bxgx_edacmc_probe1);
+
 /* returns count (>= 0), or negative on error */
 static int i82443bxgx_edacmc_init_one(struct pci_dev *pdev,
 				      const struct pci_device_id *ent)
@@ -382,7 +384,9 @@ static void i82443bxgx_edacmc_remove_one(struct pci_dev *pdev)
 	edac_mc_free(mci);
 }
 
-static const struct pci_device_id i82443bxgx_pci_tbl[] = {
+EXPORT_SYMBOL_GPL(i82443bxgx_edacmc_remove_one);
+
+static DEFINE_PCI_DEVICE_TABLE(i82443bxgx_pci_tbl) = {
 	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82443BX_0)},
 	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82443BX_2)},
 	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82443GX_0)},
@@ -441,7 +445,9 @@ fail1:
 	pci_unregister_driver(&i82443bxgx_edacmc_driver);
 
 fail0:
-	pci_dev_put(mci_pdev);
+	if (mci_pdev != NULL)
+		pci_dev_put(mci_pdev);
+
 	return pci_rc;
 }
 
@@ -452,7 +458,8 @@ static void __exit i82443bxgx_edacmc_exit(void)
 	if (!i82443bxgx_registered)
 		i82443bxgx_edacmc_remove_one(mci_pdev);
 
-	pci_dev_put(mci_pdev);
+	if (mci_pdev)
+		pci_dev_put(mci_pdev);
 }
 
 module_init(i82443bxgx_edacmc_init);

@@ -12,6 +12,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/errno.h>
 #include <linux/of_platform.h>
 #include <linux/interrupt.h>
@@ -234,8 +235,7 @@ static int mpc52xx_spi_fsmstate_transfer(int irq, struct mpc52xx_spi *ms,
 		dev_err(&ms->master->dev, "mode fault\n");
 		mpc52xx_spi_chipsel(ms, 0);
 		ms->message->status = -EIO;
-		if (ms->message->complete)
-			ms->message->complete(ms->message->context);
+		ms->message->complete(ms->message->context);
 		ms->state = mpc52xx_spi_fsmstate_idle;
 		return FSM_CONTINUE;
 	}
@@ -289,8 +289,7 @@ mpc52xx_spi_fsmstate_wait(int irq, struct mpc52xx_spi *ms, u8 status, u8 data)
 		ms->msg_count++;
 		mpc52xx_spi_chipsel(ms, 0);
 		ms->message->status = 0;
-		if (ms->message->complete)
-			ms->message->complete(ms->message->context);
+		ms->message->complete(ms->message->context);
 		ms->state = mpc52xx_spi_fsmstate_idle;
 		return FSM_CONTINUE;
 	}
@@ -358,6 +357,20 @@ static void mpc52xx_spi_wq(struct work_struct *work)
  * spi_master ops
  */
 
+static int mpc52xx_spi_setup(struct spi_device *spi)
+{
+	if (spi->bits_per_word % 8)
+		return -EINVAL;
+
+	if (spi->mode & ~(SPI_CPOL | SPI_CPHA | SPI_LSB_FIRST))
+		return -EINVAL;
+
+	if (spi->chip_select >= spi->master->num_chipselect)
+		return -EINVAL;
+
+	return 0;
+}
+
 static int mpc52xx_spi_transfer(struct spi_device *spi, struct spi_message *m)
 {
 	struct mpc52xx_spi *ms = spi_master_get_devdata(spi->master);
@@ -420,12 +433,12 @@ static int mpc52xx_spi_probe(struct platform_device *op)
 		goto err_alloc;
 	}
 
+	master->setup = mpc52xx_spi_setup;
 	master->transfer = mpc52xx_spi_transfer;
 	master->mode_bits = SPI_CPOL | SPI_CPHA | SPI_LSB_FIRST;
-	master->bits_per_word_mask = SPI_BPW_MASK(8);
 	master->dev.of_node = op->dev.of_node;
 
-	platform_set_drvdata(op, master);
+	dev_set_drvdata(&op->dev, master);
 
 	ms = spi_master_get_devdata(master);
 	ms->master = master;
@@ -516,7 +529,7 @@ static int mpc52xx_spi_probe(struct platform_device *op)
 
 static int mpc52xx_spi_remove(struct platform_device *op)
 {
-	struct spi_master *master = spi_master_get(platform_get_drvdata(op));
+	struct spi_master *master = spi_master_get(dev_get_drvdata(&op->dev));
 	struct mpc52xx_spi *ms = spi_master_get_devdata(master);
 	int i;
 
@@ -543,6 +556,7 @@ MODULE_DEVICE_TABLE(of, mpc52xx_spi_match);
 static struct platform_driver mpc52xx_spi_of_driver = {
 	.driver = {
 		.name = "mpc52xx-spi",
+		.owner = THIS_MODULE,
 		.of_match_table = mpc52xx_spi_match,
 	},
 	.probe = mpc52xx_spi_probe,

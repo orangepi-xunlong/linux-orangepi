@@ -21,8 +21,8 @@
 #include <linux/videodev2.h>
 
 #include <mach/serial.h>
+#include <mach/edma.h>
 #include <mach/pm.h>
-#include <linux/platform_data/edma.h>
 #include <linux/platform_data/i2c-davinci.h>
 #include <linux/platform_data/mmc-davinci.h>
 #include <linux/platform_data/usb-davinci.h>
@@ -36,7 +36,7 @@ extern void __iomem *da8xx_syscfg1_base;
 
 /*
  * If the DA850/OMAP-L138/AM18x SoC on board is of a higher speed grade
- * (than the regular 300MHz variant), the board code should set this up
+ * (than the regular 300Mhz variant), the board code should set this up
  * with the supported speed before calling da850_register_cpufreq().
  */
 extern unsigned int da850_max_speed;
@@ -80,8 +80,8 @@ extern unsigned int da850_max_speed;
 #define DA8XX_SHARED_RAM_BASE	0x80000000
 #define DA8XX_ARM_RAM_BASE	0xffff0000
 
-void da830_init(void);
-void da850_init(void);
+void __init da830_init(void);
+void __init da850_init(void);
 
 int da830_register_edma(struct edma_rsv_info *rsv);
 int da850_register_edma(struct edma_rsv_info *rsv[2]);
@@ -95,26 +95,23 @@ int da8xx_register_uio_pruss(void);
 int da8xx_register_lcdc(struct da8xx_lcdc_platform_data *pdata);
 int da8xx_register_mmcsd0(struct davinci_mmc_config *config);
 int da850_register_mmcsd1(struct davinci_mmc_config *config);
-void da8xx_register_mcasp(int id, struct snd_platform_data *pdata);
+void __init da8xx_register_mcasp(int id, struct snd_platform_data *pdata);
 int da8xx_register_rtc(void);
-int da8xx_register_gpio(void *pdata);
 int da850_register_cpufreq(char *async_clk);
 int da8xx_register_cpuidle(void);
-void __iomem *da8xx_get_mem_ctlr(void);
+void __iomem * __init da8xx_get_mem_ctlr(void);
 int da850_register_pm(struct platform_device *pdev);
-int da850_register_sata(unsigned long refclkpn);
-int da850_register_vpif(void);
-int da850_register_vpif_display
+int __init da850_register_sata(unsigned long refclkpn);
+int __init da850_register_vpif(void);
+int __init da850_register_vpif_display
 			(struct vpif_display_config *display_config);
-int da850_register_vpif_capture
+int __init da850_register_vpif_capture
 			(struct vpif_capture_config *capture_config);
 void da8xx_restart(enum reboot_mode mode, const char *cmd);
 void da8xx_rproc_reserve_cma(void);
 int da8xx_register_rproc(void);
-int da850_register_gpio(void);
-int da830_register_gpio(void);
 
-extern struct platform_device da8xx_serial_device[];
+extern struct platform_device da8xx_serial_device;
 extern struct emac_platform_data da8xx_emac_pdata;
 extern struct da8xx_lcdc_platform_data sharp_lcd035q3dg01_pdata;
 extern struct da8xx_lcdc_platform_data sharp_lk043t1dg01_pdata;

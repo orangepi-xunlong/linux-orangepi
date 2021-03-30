@@ -24,7 +24,6 @@
 #define __get_user_size(x,ptr,size,retval)			\
 do {								\
 	retval = 0;						\
-	x = 0;							\
 	switch (size) {						\
 	case 1:							\
 		retval = __get_user_asm_b((void *)&x,		\
@@ -60,19 +59,19 @@ do {								\
 	switch (size) {						\
 	case 1:							\
 		retval = __put_user_asm_b((void *)&x,		\
-					  (__force long)ptr);	\
+					  (long)ptr);		\
 		break;						\
 	case 2:							\
 		retval = __put_user_asm_w((void *)&x,		\
-					  (__force long)ptr);	\
+					  (long)ptr);		\
 		break;						\
 	case 4:							\
 		retval = __put_user_asm_l((void *)&x,		\
-					  (__force long)ptr);	\
+					  (long)ptr);		\
 		break;						\
 	case 8:							\
 		retval = __put_user_asm_q((void *)&x,		\
-					  (__force long)ptr);	\
+					  (long)ptr);		\
 		break;						\
 	default:						\
 		__put_user_unknown();				\

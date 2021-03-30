@@ -495,7 +495,7 @@ static void rp_handle_port(struct r_port *info)
 	if (!info)
 		return;
 
-	if (!tty_port_initialized(&info->port)) {
+	if ((info->port.flags & ASYNC_INITIALIZED) == 0) {
 		printk(KERN_WARNING "rp: WARNING: rp_handle_port called with "
 				"info->flags & NOT_INIT\n");
 		return;
@@ -615,8 +615,7 @@ static void rp_do_poll(unsigned long dummy)
  *  the board.  
  *  Inputs:  board, aiop, chan numbers
  */
-static void __init
-init_r_port(int board, int aiop, int chan, struct pci_dev *pci_dev)
+static void init_r_port(int board, int aiop, int chan, struct pci_dev *pci_dev)
 {
 	unsigned rocketMode;
 	struct r_port *info;
@@ -644,6 +643,7 @@ init_r_port(int board, int aiop, int chan, struct pci_dev *pci_dev)
 	info->chan = chan;
 	tty_port_init(&info->port);
 	info->port.ops = &rocket_port_ops;
+	init_completion(&info->close_wait);
 	info->flags &= ~ROCKET_MODE_MASK;
 	switch (pc104[board][line]) {
 	case 422:
@@ -895,6 +895,14 @@ static int rp_open(struct tty_struct *tty, struct file *filp)
 	if (!page)
 		return -ENOMEM;
 
+	if (port->flags & ASYNC_CLOSING) {
+		retval = wait_for_completion_interruptible(&info->close_wait);
+		free_page(page);
+		if (retval)
+			return retval;
+		return ((port->flags & ASYNC_HUP_NOTIFY) ? -EAGAIN : -ERESTARTSYS);
+	}
+
 	/*
 	 * We must not sleep from here until the port is marked fully in use.
 	 */
@@ -921,7 +929,7 @@ static int rp_open(struct tty_struct *tty, struct file *filp)
 	/*
 	 * Info->count is now 1; so it's safe to sleep now.
 	 */
-	if (!tty_port_initialized(port)) {
+	if (!test_bit(ASYNCB_INITIALIZED, &port->flags)) {
 		cp = &info->channel;
 		sSetRxTrigger(cp, TRIG_1);
 		if (sGetChanStatus(cp) & CD_ACT)
@@ -945,7 +953,7 @@ static int rp_open(struct tty_struct *tty, struct file *filp)
 		sEnRxFIFO(cp);
 		sEnTransmit(cp);
 
-		tty_port_set_initialized(&info->port, 1);
+		set_bit(ASYNCB_INITIALIZED, &info->port.flags);
 
 		/*
 		 * Set up the tty->alt_speed kludge
@@ -960,7 +968,7 @@ static int rp_open(struct tty_struct *tty, struct file *filp)
 			tty->alt_speed = 460800;
 
 		configure_r_port(tty, info, NULL);
-		if (C_BAUD(tty)) {
+		if (tty->termios.c_cflag & CBAUD) {
 			sSetDTR(cp);
 			sSetRTS(cp);
 		}
@@ -1043,13 +1051,14 @@ static void rp_close(struct tty_struct *tty, struct file *filp)
 		}
 	}
 	spin_lock_irq(&port->lock);
+	info->port.flags &= ~(ASYNC_INITIALIZED | ASYNC_CLOSING | ASYNC_NORMAL_ACTIVE);
 	tty->closing = 0;
 	spin_unlock_irq(&port->lock);
-	tty_port_set_initialized(port, 0);
-	tty_port_set_active(port, 0);
 	mutex_unlock(&port->mutex);
 	tty_port_tty_set(port, NULL);
 
+	wake_up_interruptible(&port->close_wait);
+	complete_all(&info->close_wait);
 	atomic_dec(&rp_num_ports_open);
 
 #ifdef ROCKET_DEBUG_OPEN
@@ -1086,18 +1095,18 @@ static void rp_set_termios(struct tty_struct *tty,
 	cp = &info->channel;
 
 	/* Handle transition to B0 status */
-	if ((old_termios->c_cflag & CBAUD) && !C_BAUD(tty)) {
+	if ((old_termios->c_cflag & CBAUD) && !(tty->termios.c_cflag & CBAUD)) {
 		sClrDTR(cp);
 		sClrRTS(cp);
 	}
 
 	/* Handle transition away from B0 status */
-	if (!(old_termios->c_cflag & CBAUD) && C_BAUD(tty)) {
+	if (!(old_termios->c_cflag & CBAUD) && (tty->termios.c_cflag & CBAUD)) {
 		sSetRTS(cp);
 		sSetDTR(cp);
 	}
 
-	if ((old_termios->c_cflag & CRTSCTS) && !C_CRTSCTS(tty))
+	if ((old_termios->c_cflag & CRTSCTS) && !(tty->termios.c_cflag & CRTSCTS))
 		rp_start(tty);
 }
 
@@ -1360,7 +1369,8 @@ static void rp_throttle(struct tty_struct *tty)
 	struct r_port *info = tty->driver_data;
 
 #ifdef ROCKET_DEBUG_THROTTLE
-	printk(KERN_INFO "throttle %s ....\n", tty->name);
+	printk(KERN_INFO "throttle %s: %d....\n", tty->name,
+	       tty->ldisc.chars_in_buffer(tty));
 #endif
 
 	if (rocket_paranoia_check(info, "rp_throttle"))
@@ -1376,10 +1386,11 @@ static void rp_unthrottle(struct tty_struct *tty)
 {
 	struct r_port *info = tty->driver_data;
 #ifdef ROCKET_DEBUG_THROTTLE
-	printk(KERN_INFO "unthrottle %s ....\n", tty->name);
+	printk(KERN_INFO "unthrottle %s: %d....\n", tty->name,
+	       tty->ldisc.chars_in_buffer(tty));
 #endif
 
-	if (rocket_paranoia_check(info, "rp_unthrottle"))
+	if (rocket_paranoia_check(info, "rp_throttle"))
 		return;
 
 	if (I_IXOFF(tty))
@@ -1447,7 +1458,7 @@ static void rp_wait_until_sent(struct tty_struct *tty, int timeout)
 
 	orig_jiffies = jiffies;
 #ifdef ROCKET_DEBUG_WAIT_UNTIL_SENT
-	printk(KERN_INFO "In %s(%d) (jiff=%lu)...\n", __func__, timeout,
+	printk(KERN_INFO "In RP_wait_until_sent(%d) (jiff=%lu)...\n", timeout,
 	       jiffies);
 	printk(KERN_INFO "cps=%d...\n", info->cps);
 #endif
@@ -1500,6 +1511,10 @@ static void rp_hangup(struct tty_struct *tty)
 #endif
 	rp_flush_buffer(tty);
 	spin_lock_irqsave(&info->port.lock, flags);
+	if (info->port.flags & ASYNC_CLOSING) {
+		spin_unlock_irqrestore(&info->port.lock, flags);
+		return;
+	}
 	if (info->port.count)
 		atomic_dec(&rp_num_ports_open);
 	clear_bit((info->aiop * 8) + info->chan, (void *) &xmit_flags[info->board]);
@@ -1514,7 +1529,7 @@ static void rp_hangup(struct tty_struct *tty)
 	sDisCTSFlowCtl(cp);
 	sDisTxSoftFlowCtl(cp);
 	sClrTxXOFF(cp);
-	tty_port_set_initialized(&info->port, 0);
+	clear_bit(ASYNCB_INITIALIZED, &info->port.flags);
 
 	wake_up_interruptible(&info->port.open_wait);
 }
@@ -1626,7 +1641,7 @@ static int rp_write(struct tty_struct *tty,
 	/*  Write remaining data into the port's xmit_buf */
 	while (1) {
 		/* Hung up ? */
-		if (!tty_port_active(&info->port))
+		if (!test_bit(ASYNCB_NORMAL_ACTIVE, &info->port.flags))
 			goto end;
 		c = min(count, XMIT_BUF_SIZE - info->xmit_cnt - 1);
 		c = min(c, XMIT_BUF_SIZE - info->xmit_head);
@@ -1729,7 +1744,7 @@ static void rp_flush_buffer(struct tty_struct *tty)
 
 #ifdef CONFIG_PCI
 
-static const struct pci_device_id rocket_pci_ids[] = {
+static DEFINE_PCI_DEVICE_TABLE(rocket_pci_ids) = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_RP, PCI_DEVICE_ID_RP4QUAD) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_RP, PCI_DEVICE_ID_RP8OCTA) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_RP, PCI_DEVICE_ID_URP8OCTA) },
@@ -1913,7 +1928,7 @@ static __init int register_PCI(int i, struct pci_dev *dev)
 	ByteIO_t UPCIRingInd = 0;
 
 	if (!dev || !pci_match_id(rocket_pci_ids, dev) ||
-	    pci_enable_device(dev) || i >= NUM_BOARDS)
+	    pci_enable_device(dev))
 		return 0;
 
 	rcktpt_io_addr[i] = pci_resource_start(dev, 0);

@@ -1,5 +1,6 @@
 /*
- * drivers/staging/android/ion/compat_ion.h
+
+ * drivers/gpu/ion/compat_ion.h
  *
  * Copyright (C) 2013 Google, Inc.
  *
@@ -19,14 +20,14 @@
 
 #if IS_ENABLED(CONFIG_COMPAT)
 
-long compat_ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
-
 #define COMPAT_ION_IOC_SUNXI_FLUSH_RANGE       5
 
 typedef struct {
-		compat_long_t   start;
-		compat_long_t   end;
-} compat_sunxi_cache_range;
+       compat_long_t   start;
+       compat_long_t   end;
+}compat_sunxi_cache_range;
+
+long compat_ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
 
 #else
 

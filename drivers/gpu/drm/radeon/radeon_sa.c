@@ -49,7 +49,7 @@ static void radeon_sa_bo_try_free(struct radeon_sa_manager *sa_manager);
 
 int radeon_sa_bo_manager_init(struct radeon_device *rdev,
 			      struct radeon_sa_manager *sa_manager,
-			      unsigned size, u32 align, u32 domain, u32 flags)
+			      unsigned size, u32 align, u32 domain)
 {
 	int i, r;
 
@@ -65,7 +65,7 @@ int radeon_sa_bo_manager_init(struct radeon_device *rdev,
 	}
 
 	r = radeon_bo_create(rdev, size, align, true,
-			     domain, flags, NULL, NULL, &sa_manager->bo);
+			     domain, NULL, &sa_manager->bo);
 	if (r) {
 		dev_err(rdev->dev, "(%d) failed to allocate bo for manager\n", r);
 		return r;
@@ -312,7 +312,7 @@ static bool radeon_sa_bo_next_hole(struct radeon_sa_manager *sa_manager,
 int radeon_sa_bo_new(struct radeon_device *rdev,
 		     struct radeon_sa_manager *sa_manager,
 		     struct radeon_sa_bo **sa_bo,
-		     unsigned size, unsigned align)
+		     unsigned size, unsigned align, bool block)
 {
 	struct radeon_fence *fences[RADEON_NUM_RINGS];
 	unsigned tries[RADEON_NUM_RINGS];
@@ -349,20 +349,18 @@ int radeon_sa_bo_new(struct radeon_device *rdev,
 			/* see if we can skip over some allocations */
 		} while (radeon_sa_bo_next_hole(sa_manager, fences, tries));
 
-		for (i = 0; i < RADEON_NUM_RINGS; ++i)
-			radeon_fence_ref(fences[i]);
-
 		spin_unlock(&sa_manager->wq.lock);
 		r = radeon_fence_wait_any(rdev, fences, false);
-		for (i = 0; i < RADEON_NUM_RINGS; ++i)
-			radeon_fence_unref(&fences[i]);
 		spin_lock(&sa_manager->wq.lock);
 		/* if we have nothing to wait for block */
-		if (r == -ENOENT) {
+		if (r == -ENOENT && block) {
 			r = wait_event_interruptible_locked(
 				sa_manager->wq, 
 				radeon_sa_event(sa_manager, size, align)
 			);
+
+		} else if (r == -ENOENT) {
+			r = -ENOMEM;
 		}
 
 	} while (!r);
@@ -404,15 +402,13 @@ void radeon_sa_bo_dump_debug_info(struct radeon_sa_manager *sa_manager,
 
 	spin_lock(&sa_manager->wq.lock);
 	list_for_each_entry(i, &sa_manager->olist, olist) {
-		uint64_t soffset = i->soffset + sa_manager->gpu_addr;
-		uint64_t eoffset = i->eoffset + sa_manager->gpu_addr;
 		if (&i->olist == sa_manager->hole) {
 			seq_printf(m, ">");
 		} else {
 			seq_printf(m, " ");
 		}
-		seq_printf(m, "[0x%010llx 0x%010llx] size %8lld",
-			   soffset, eoffset, eoffset - soffset);
+		seq_printf(m, "[0x%08x 0x%08x] size %8d",
+			   i->soffset, i->eoffset, i->eoffset - i->soffset);
 		if (i->fence) {
 			seq_printf(m, " protected by 0x%016llx on ring %d",
 				   i->fence->seq, i->fence->ring);

@@ -56,8 +56,8 @@
 #include <linux/videodev2.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
-#include <media/drv-intf/msp3400.h>
-#include <media/i2c/tvaudio.h>
+#include <media/msp3400.h>
+#include <media/tvaudio.h>
 #include "msp3400-driver.h"
 
 /* ---------------------------------------------------------------------- */
@@ -570,6 +570,15 @@ static int msp_s_i2s_clock_freq(struct v4l2_subdev *sd, u32 freq)
 	return 0;
 }
 
+static int msp_g_chip_ident(struct v4l2_subdev *sd, struct v4l2_dbg_chip_ident *chip)
+{
+	struct msp_state *state = to_state(sd);
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+
+	return v4l2_chip_ident_i2c_client(client, chip, state->ident,
+			(state->rev1 << 16) | state->rev2);
+}
+
 static int msp_log_status(struct v4l2_subdev *sd)
 {
 	struct msp_state *state = to_state(sd);
@@ -642,10 +651,18 @@ static const struct v4l2_ctrl_ops msp_ctrl_ops = {
 
 static const struct v4l2_subdev_core_ops msp_core_ops = {
 	.log_status = msp_log_status,
+	.g_chip_ident = msp_g_chip_ident,
+	.g_ext_ctrls = v4l2_subdev_g_ext_ctrls,
+	.try_ext_ctrls = v4l2_subdev_try_ext_ctrls,
+	.s_ext_ctrls = v4l2_subdev_s_ext_ctrls,
+	.g_ctrl = v4l2_subdev_g_ctrl,
+	.s_ctrl = v4l2_subdev_s_ctrl,
+	.queryctrl = v4l2_subdev_queryctrl,
+	.querymenu = v4l2_subdev_querymenu,
+	.s_std = msp_s_std,
 };
 
 static const struct v4l2_subdev_video_ops msp_video_ops = {
-	.s_std = msp_s_std,
 	.querystd = msp_querystd,
 };
 
@@ -681,9 +698,6 @@ static int msp_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	int msp_revision;
 	int msp_product, msp_prod_hi, msp_prod_lo;
 	int msp_rom;
-#if defined(CONFIG_MEDIA_CONTROLLER)
-	int ret;
-#endif
 
 	if (!id)
 		strlcpy(client->name, "msp3400", sizeof(client->name));
@@ -693,23 +707,12 @@ static int msp_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		return -ENODEV;
 	}
 
-	state = devm_kzalloc(&client->dev, sizeof(*state), GFP_KERNEL);
+	state = kzalloc(sizeof(*state), GFP_KERNEL);
 	if (!state)
 		return -ENOMEM;
 
 	sd = &state->sd;
 	v4l2_i2c_subdev_init(sd, client, &msp_ops);
-
-#if defined(CONFIG_MEDIA_CONTROLLER)
-	state->pads[IF_AUD_DEC_PAD_IF_INPUT].flags = MEDIA_PAD_FL_SINK;
-	state->pads[IF_AUD_DEC_PAD_OUT].flags = MEDIA_PAD_FL_SOURCE;
-
-	sd->entity.function = MEDIA_ENT_F_IF_AUD_DECODER;
-
-	ret = media_entity_pads_init(&sd->entity, 2, state->pads);
-	if (ret < 0)
-		return ret;
-#endif
 
 	state->v4l2_std = V4L2_STD_NTSC;
 	state->detected_std = V4L2_STD_ALL;
@@ -729,6 +732,7 @@ static int msp_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	if (state->rev1 == -1 || (state->rev1 == 0 && state->rev2 == 0)) {
 		v4l_dbg(1, msp_debug, client,
 				"not an msp3400 (cannot read chip version)\n");
+		kfree(state);
 		return -ENODEV;
 	}
 
@@ -823,6 +827,7 @@ static int msp_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		int err = hdl->error;
 
 		v4l2_ctrl_handler_free(hdl);
+		kfree(state);
 		return err;
 	}
 
@@ -884,6 +889,7 @@ static int msp_remove(struct i2c_client *client)
 	msp_reset(client);
 
 	v4l2_ctrl_handler_free(&state->hdl);
+	kfree(state);
 	return 0;
 }
 
@@ -901,6 +907,7 @@ MODULE_DEVICE_TABLE(i2c, msp_id);
 
 static struct i2c_driver msp_driver = {
 	.driver = {
+		.owner	= THIS_MODULE,
 		.name	= "msp3400",
 		.pm	= &msp3400_pm_ops,
 	},
@@ -910,3 +917,11 @@ static struct i2c_driver msp_driver = {
 };
 
 module_i2c_driver(msp_driver);
+
+/*
+ * Overrides for Emacs so that we follow Linus's tabbing style.
+ * ---------------------------------------------------------------------------
+ * Local variables:
+ * c-basic-offset: 8
+ * End:
+ */

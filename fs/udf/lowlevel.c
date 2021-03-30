@@ -21,7 +21,7 @@
 
 #include <linux/blkdev.h>
 #include <linux/cdrom.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include "udf_sb.h"
 

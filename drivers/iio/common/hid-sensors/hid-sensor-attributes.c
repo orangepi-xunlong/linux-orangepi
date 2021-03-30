@@ -26,40 +26,6 @@
 #include <linux/iio/iio.h>
 #include <linux/iio/sysfs.h>
 
-static struct {
-	u32 usage_id;
-	int unit; /* 0 for default others from HID sensor spec */
-	int scale_val0; /* scale, whole number */
-	int scale_val1; /* scale, fraction in nanos */
-} unit_conversion[] = {
-	{HID_USAGE_SENSOR_ACCEL_3D, 0, 9, 806650000},
-	{HID_USAGE_SENSOR_ACCEL_3D,
-		HID_USAGE_SENSOR_UNITS_METERS_PER_SEC_SQRD, 1, 0},
-	{HID_USAGE_SENSOR_ACCEL_3D,
-		HID_USAGE_SENSOR_UNITS_G, 9, 806650000},
-
-	{HID_USAGE_SENSOR_GYRO_3D, 0, 0, 17453293},
-	{HID_USAGE_SENSOR_GYRO_3D,
-		HID_USAGE_SENSOR_UNITS_RADIANS_PER_SECOND, 1, 0},
-	{HID_USAGE_SENSOR_GYRO_3D,
-		HID_USAGE_SENSOR_UNITS_DEGREES_PER_SECOND, 0, 17453293},
-
-	{HID_USAGE_SENSOR_COMPASS_3D, 0, 0, 1000000},
-	{HID_USAGE_SENSOR_COMPASS_3D, HID_USAGE_SENSOR_UNITS_GAUSS, 1, 0},
-
-	{HID_USAGE_SENSOR_INCLINOMETER_3D, 0, 0, 17453293},
-	{HID_USAGE_SENSOR_INCLINOMETER_3D,
-		HID_USAGE_SENSOR_UNITS_DEGREES, 0, 17453293},
-	{HID_USAGE_SENSOR_INCLINOMETER_3D,
-		HID_USAGE_SENSOR_UNITS_RADIANS, 1, 0},
-
-	{HID_USAGE_SENSOR_ALS, 0, 1, 0},
-	{HID_USAGE_SENSOR_ALS, HID_USAGE_SENSOR_UNITS_LUX, 1, 0},
-
-	{HID_USAGE_SENSOR_PRESSURE, 0, 100, 0},
-	{HID_USAGE_SENSOR_PRESSURE, HID_USAGE_SENSOR_UNITS_PASCAL, 0, 1000000},
-};
-
 static int pow_10(unsigned power)
 {
 	int i;
@@ -147,26 +113,6 @@ static u32 convert_to_vtf_format(int size, int exp, int val1, int val2)
 	return value;
 }
 
-s32 hid_sensor_read_poll_value(struct hid_sensor_common *st)
-{
-	s32 value = 0;
-	int ret;
-
-	ret = sensor_hub_get_feature(st->hsdev,
-				     st->poll.report_id,
-				     st->poll.index, sizeof(value), &value);
-
-	if (ret < 0 || value < 0) {
-		return -EINVAL;
-	} else {
-		if (st->poll.units == HID_USAGE_SENSOR_UNITS_SECOND)
-			value = value * 1000;
-	}
-
-	return value;
-}
-EXPORT_SYMBOL(hid_sensor_read_poll_value);
-
 int hid_sensor_read_samp_freq_value(struct hid_sensor_common *st,
 				int *val1, int *val2)
 {
@@ -174,8 +120,8 @@ int hid_sensor_read_samp_freq_value(struct hid_sensor_common *st,
 	int ret;
 
 	ret = sensor_hub_get_feature(st->hsdev,
-				     st->poll.report_id,
-				     st->poll.index, sizeof(value), &value);
+		st->poll.report_id,
+		st->poll.index, &value);
 	if (ret < 0 || value < 0) {
 		*val1 = *val2 = 0;
 		return -EINVAL;
@@ -212,20 +158,13 @@ int hid_sensor_write_samp_freq_value(struct hid_sensor_common *st,
 		else
 			value = 0;
 	}
-	ret = sensor_hub_set_feature(st->hsdev, st->poll.report_id,
-				     st->poll.index, sizeof(value), &value);
+	ret = sensor_hub_set_feature(st->hsdev,
+		st->poll.report_id,
+		st->poll.index, value);
 	if (ret < 0 || value < 0)
-		return -EINVAL;
+		ret = -EINVAL;
 
-	ret = sensor_hub_get_feature(st->hsdev,
-				     st->poll.report_id,
-				     st->poll.index, sizeof(value), &value);
-	if (ret < 0 || value < 0)
-		return -EINVAL;
-
-	st->poll_interval = value;
-
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL(hid_sensor_write_samp_freq_value);
 
@@ -236,9 +175,8 @@ int hid_sensor_read_raw_hyst_value(struct hid_sensor_common *st,
 	int ret;
 
 	ret = sensor_hub_get_feature(st->hsdev,
-				     st->sensitivity.report_id,
-				     st->sensitivity.index, sizeof(value),
-				     &value);
+		st->sensitivity.report_id,
+		st->sensitivity.index, &value);
 	if (ret < 0 || value < 0) {
 		*val1 = *val2 = 0;
 		return -EINVAL;
@@ -261,131 +199,25 @@ int hid_sensor_write_raw_hyst_value(struct hid_sensor_common *st,
 	value = convert_to_vtf_format(st->sensitivity.size,
 				st->sensitivity.unit_expo,
 				val1, val2);
-	ret = sensor_hub_set_feature(st->hsdev, st->sensitivity.report_id,
-				     st->sensitivity.index, sizeof(value),
-				     &value);
+	ret = sensor_hub_set_feature(st->hsdev,
+		st->sensitivity.report_id,
+		st->sensitivity.index, value);
 	if (ret < 0 || value < 0)
-		return -EINVAL;
+		ret = -EINVAL;
 
-	ret = sensor_hub_get_feature(st->hsdev,
-				     st->sensitivity.report_id,
-				     st->sensitivity.index, sizeof(value),
-				     &value);
-	if (ret < 0 || value < 0)
-		return -EINVAL;
-
-	st->raw_hystersis = value;
-
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL(hid_sensor_write_raw_hyst_value);
-
-/*
- * This fuction applies the unit exponent to the scale.
- * For example:
- * 9.806650000 ->exp:2-> val0[980]val1[665000000]
- * 9.000806000 ->exp:2-> val0[900]val1[80600000]
- * 0.174535293 ->exp:2-> val0[17]val1[453529300]
- * 1.001745329 ->exp:0-> val0[1]val1[1745329]
- * 1.001745329 ->exp:2-> val0[100]val1[174532900]
- * 1.001745329 ->exp:4-> val0[10017]val1[453290000]
- * 9.806650000 ->exp:-2-> val0[0]val1[98066500]
- */
-static void adjust_exponent_nano(int *val0, int *val1, int scale0,
-				  int scale1, int exp)
-{
-	int i;
-	int x;
-	int res;
-	int rem;
-
-	if (exp > 0) {
-		*val0 = scale0 * pow_10(exp);
-		res = 0;
-		if (exp > 9) {
-			*val1 = 0;
-			return;
-		}
-		for (i = 0; i < exp; ++i) {
-			x = scale1 / pow_10(8 - i);
-			res += (pow_10(exp - 1 - i) * x);
-			scale1 = scale1 % pow_10(8 - i);
-		}
-		*val0 += res;
-			*val1 = scale1 * pow_10(exp);
-	} else if (exp < 0) {
-		exp = abs(exp);
-		if (exp > 9) {
-			*val0 = *val1 = 0;
-			return;
-		}
-		*val0 = scale0 / pow_10(exp);
-		rem = scale0 % pow_10(exp);
-		res = 0;
-		for (i = 0; i < (9 - exp); ++i) {
-			x = scale1 / pow_10(8 - i);
-			res += (pow_10(8 - exp - i) * x);
-			scale1 = scale1 % pow_10(8 - i);
-		}
-		*val1 = rem * pow_10(9 - exp) + res;
-	} else {
-		*val0 = scale0;
-		*val1 = scale1;
-	}
-}
-
-int hid_sensor_format_scale(u32 usage_id,
-			struct hid_sensor_hub_attribute_info *attr_info,
-			int *val0, int *val1)
-{
-	int i;
-	int exp;
-
-	*val0 = 1;
-	*val1 = 0;
-
-	for (i = 0; i < ARRAY_SIZE(unit_conversion); ++i) {
-		if (unit_conversion[i].usage_id == usage_id &&
-			unit_conversion[i].unit == attr_info->units) {
-			exp  = hid_sensor_convert_exponent(
-						attr_info->unit_expo);
-			adjust_exponent_nano(val0, val1,
-					unit_conversion[i].scale_val0,
-					unit_conversion[i].scale_val1, exp);
-			break;
-		}
-	}
-
-	return IIO_VAL_INT_PLUS_NANO;
-}
-EXPORT_SYMBOL(hid_sensor_format_scale);
-
-static
-int hid_sensor_get_reporting_interval(struct hid_sensor_hub_device *hsdev,
-					u32 usage_id,
-					struct hid_sensor_common *st)
-{
-	sensor_hub_input_get_attribute_info(hsdev,
-					HID_FEATURE_REPORT, usage_id,
-					HID_USAGE_SENSOR_PROP_REPORT_INTERVAL,
-					&st->poll);
-	/* Default unit of measure is milliseconds */
-	if (st->poll.units == 0)
-		st->poll.units = HID_USAGE_SENSOR_UNITS_MILLISECOND;
-
-	st->poll_interval = -1;
-
-	return 0;
-
-}
 
 int hid_sensor_parse_common_attributes(struct hid_sensor_hub_device *hsdev,
 					u32 usage_id,
 					struct hid_sensor_common *st)
 {
 
-
-	hid_sensor_get_reporting_interval(hsdev, usage_id, st);
+	sensor_hub_input_get_attribute_info(hsdev,
+					HID_FEATURE_REPORT, usage_id,
+					HID_USAGE_SENSOR_PROP_REPORT_INTERVAL,
+					&st->poll);
 
 	sensor_hub_input_get_attribute_info(hsdev,
 					HID_FEATURE_REPORT, usage_id,
@@ -396,8 +228,6 @@ int hid_sensor_parse_common_attributes(struct hid_sensor_hub_device *hsdev,
 					HID_FEATURE_REPORT, usage_id,
 					HID_USAGE_SENSOR_PROY_POWER_STATE,
 					&st->power_state);
-
-	st->raw_hystersis = -1;
 
 	sensor_hub_input_get_attribute_info(hsdev,
 			HID_FEATURE_REPORT, usage_id,

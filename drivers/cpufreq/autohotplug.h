@@ -1,9 +1,8 @@
 /*
  * drivers/cpufreq/autohotplug.h
  *
- * Copyright (C) 2016-2020 Allwinnertech.
- * East Yang <yangdong@allwinnertech.com>
-
+ * Copyright (c) 2012 Softwinner.
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -13,6 +12,10 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #ifndef __AUTOHOTPLUG__
@@ -40,10 +43,10 @@
 	#define AUTOHOTPLUG_STATS_SYSFS_MAX (0)
 #endif
 
-#define HOTPLUG_DATA_SYSFS_MAX (9 + AUTOHOTPLUG_SUNXI_SYSFS_MAX + \
-					AUTOHOTPLUG_STATS_SYSFS_MAX)
+#define HOTPLUG_DATA_SYSFS_MAX (9 + AUTOHOTPLUG_SUNXI_SYSFS_MAX + AUTOHOTPLUG_STATS_SYSFS_MAX)
 
-struct autohotplug_loadinfo {
+struct autohotplug_loadinfo
+{
 	unsigned int  cpu_load[CONFIG_NR_CPUS];
 	unsigned int  cpu_load_relative[CONFIG_NR_CPUS];
 	unsigned int  max_load;
@@ -53,7 +56,8 @@ struct autohotplug_loadinfo {
 	unsigned int  big_min_load;
 };
 
-struct autohotplug_governor_loadinfo {
+struct autohotplug_governor_loadinfo
+{
 	struct timer_list cpu_timer;
 	struct autohotplug_loadinfo load;
 };
@@ -97,32 +101,23 @@ extern int try_up_little(void);
 extern int try_up_big(void);
 
 extern void autohotplug_attr_add(const char *name,
-		unsigned int *value, umode_t mode,
-		unsigned int (*to_sysfs)(unsigned int, unsigned int *),
-		unsigned int (*from_sysfs)(unsigned int, unsigned int*));
+					unsigned int *value, umode_t mode,
+					unsigned int (*to_sysfs)(unsigned int, unsigned int *),
+					unsigned int (*from_sysfs)(unsigned int ,unsigned int*));
 extern int get_cpus_under(struct autohotplug_loadinfo *load,
-				unsigned char level, unsigned int *first);
+					unsigned char level, unsigned int *first);
 extern int get_bigs_above(struct autohotplug_loadinfo *load,
-				unsigned char level, unsigned int *first);
-extern int get_littles_under(struct autohotplug_loadinfo *load,
-				unsigned char level, unsigned int *first);
+					unsigned char level, unsigned int *first);
+extern int get_littles_under(struct autohotplug_loadinfo* load,
+					unsigned char level, unsigned int* first);
 extern int get_bigs_under(struct autohotplug_loadinfo *load,
-				unsigned char level, unsigned int *first);
+					unsigned char level, unsigned int *first);
 extern int get_cpus_stable_under(struct autohotplug_loadinfo *load,
-		unsigned char level, unsigned int *first, int is_up);
+					unsigned char level, unsigned int *first, int is_up);
 extern int get_cpus_online(struct autohotplug_loadinfo *load,
-				int *little, int *big);
+					int *little, int *big);
+
 
 extern struct autohotplug_governor autohotplug_smart;
-
-extern unsigned int  load_try_down;
-extern unsigned int  load_try_up;
-extern unsigned long cpu_up_lasttime;
-extern unsigned int  load_up_stable_us;
-extern unsigned int  load_down_stable_us;
-#ifdef CONFIG_SCHED_HMP
-extern void __init arch_get_fast_and_slow_cpus(struct cpumask *fast,
-						struct cpumask *slow);
-#endif
 
 #endif  /* #ifndef __AUTOHOTPLUG__ */

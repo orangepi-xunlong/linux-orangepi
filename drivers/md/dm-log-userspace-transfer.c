@@ -66,7 +66,7 @@ static int dm_ulog_sendto_server(struct dm_ulog_request *tfr)
 	msg->seq = tfr->seq;
 	msg->len = sizeof(struct dm_ulog_request) + tfr->data_size;
 
-	r = cn_netlink_send(msg, 0, 0, gfp_any());
+	r = cn_netlink_send(msg, 0, gfp_any());
 
 	return r;
 }
@@ -172,7 +172,6 @@ int dm_consult_userspace(const char *uuid, uint64_t luid, int request_type,
 			 char *rdata, size_t *rdata_size)
 {
 	int r = 0;
-	unsigned long tmo;
 	size_t dummy = 0;
 	int overhead_size = sizeof(struct dm_ulog_request) + sizeof(struct cn_msg);
 	struct dm_ulog_request *tfr = prealloced_ulog_tfr;
@@ -237,11 +236,11 @@ resend:
 		goto out;
 	}
 
-	tmo = wait_for_completion_timeout(&(pkg.complete), DM_ULOG_RETRY_TIMEOUT);
+	r = wait_for_completion_timeout(&(pkg.complete), DM_ULOG_RETRY_TIMEOUT);
 	spin_lock(&receiving_list_lock);
 	list_del_init(&(pkg.list));
 	spin_unlock(&receiving_list_lock);
-	if (!tmo) {
+	if (!r) {
 		DMWARN("[%s] Request timed out: [%u/%u] - retrying",
 		       (strlen(uuid) > 8) ?
 		       (uuid + (strlen(uuid) - 8)) : (uuid),

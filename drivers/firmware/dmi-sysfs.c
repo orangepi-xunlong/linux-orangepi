@@ -553,7 +553,7 @@ static const struct bin_attribute dmi_entry_raw_attr = {
 static void dmi_sysfs_entry_release(struct kobject *kobj)
 {
 	struct dmi_sysfs_entry *entry = to_entry(kobj);
-
+	sysfs_remove_bin_file(&entry->kobj, &dmi_entry_raw_attr);
 	spin_lock(&entry_list_lock);
 	list_del(&entry->list);
 	spin_unlock(&entry_list_lock);
@@ -566,6 +566,7 @@ static struct kobj_type dmi_sysfs_entry_ktype = {
 	.default_attrs = dmi_sysfs_entry_attrs,
 };
 
+static struct kobject *dmi_kobj;
 static struct kset *dmi_kset;
 
 /* Global count of all instances seen.  Only for setup */
@@ -647,20 +648,17 @@ static void cleanup_entry_list(void)
 
 static int __init dmi_sysfs_init(void)
 {
-	int error;
+	int error = -ENOMEM;
 	int val;
 
-	if (!dmi_kobj) {
-		pr_err("dmi-sysfs: dmi entry is absent.\n");
-		error = -ENODATA;
+	/* Set up our directory */
+	dmi_kobj = kobject_create_and_add("dmi", firmware_kobj);
+	if (!dmi_kobj)
 		goto err;
-	}
 
 	dmi_kset = kset_create_and_add("entries", NULL, dmi_kobj);
-	if (!dmi_kset) {
-		error = -ENOMEM;
+	if (!dmi_kset)
 		goto err;
-	}
 
 	val = 0;
 	error = dmi_walk(dmi_sysfs_register_handle, &val);
@@ -677,6 +675,7 @@ static int __init dmi_sysfs_init(void)
 err:
 	cleanup_entry_list();
 	kset_unregister(dmi_kset);
+	kobject_put(dmi_kobj);
 	return error;
 }
 
@@ -686,6 +685,7 @@ static void __exit dmi_sysfs_exit(void)
 	pr_debug("dmi-sysfs: unloading.\n");
 	cleanup_entry_list();
 	kset_unregister(dmi_kset);
+	kobject_put(dmi_kobj);
 }
 
 module_init(dmi_sysfs_init);

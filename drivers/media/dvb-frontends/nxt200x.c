@@ -2,7 +2,7 @@
  *    Support for NXT2002 and NXT2004 - VSB/QAM
  *
  *    Copyright (C) 2005 Kirk Lapray <kirk.lapray@gmail.com>
- *    Copyright (C) 2006-2014 Michael Krufky <mkrufky@linuxtv.org>
+ *    Copyright (C) 2006 Michael Krufky <mkrufky@m1k.net>
  *    based on nxt2002 by Taylor Jacob <rtjacob@earthlink.net>
  *    and nxt2004 by Jean-Francois Thibert <jeanfrancois@sagetv.com>
  *
@@ -781,7 +781,7 @@ static int nxt200x_setup_frontend_parameters(struct dvb_frontend *fe)
 	return 0;
 }
 
-static int nxt200x_read_status(struct dvb_frontend *fe, enum fe_status *status)
+static int nxt200x_read_status(struct dvb_frontend* fe, fe_status_t* status)
 {
 	struct nxt200x_state* state = fe->demodulator_priv;
 	u8 lock;

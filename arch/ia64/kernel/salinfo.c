@@ -141,7 +141,7 @@ enum salinfo_state {
 
 struct salinfo_data {
 	cpumask_t		cpu_event;	/* which cpus have outstanding events */
-	wait_queue_head_t	read_wait;
+	struct semaphore	mutex;
 	u8			*log_buffer;
 	u64			log_size;
 	u8			*oemdata;	/* decoded oem data */
@@ -181,6 +181,21 @@ struct salinfo_platform_oemdata_parms {
 	u64 *oemdata_size;
 	int ret;
 };
+
+/* Kick the mutex that tells user space that there is work to do.  Instead of
+ * trying to track the state of the mutex across multiple cpus, in user
+ * context, interrupt context, non-maskable interrupt context and hotplug cpu,
+ * it is far easier just to grab the mutex if it is free then release it.
+ *
+ * This routine must be called with data_saved_lock held, to make the down/up
+ * operation atomic.
+ */
+static void
+salinfo_work_to_do(struct salinfo_data *data)
+{
+	(void)(down_trylock(&data->mutex) ?: 0);
+	up(&data->mutex);
+}
 
 static void
 salinfo_platform_oemdata_cpu(void *context)
@@ -241,9 +256,9 @@ salinfo_log_wakeup(int type, u8 *buffer, u64 size, int irqsafe)
 			data_saved->buffer = buffer;
 		}
 	}
-	cpumask_set_cpu(smp_processor_id(), &data->cpu_event);
+	cpu_set(smp_processor_id(), data->cpu_event);
 	if (irqsafe) {
-		wake_up_interruptible(&data->read_wait);
+		salinfo_work_to_do(data);
 		spin_unlock_irqrestore(&data_saved_lock, flags);
 	}
 }
@@ -256,10 +271,14 @@ extern void ia64_mlogbuf_dump(void);
 static void
 salinfo_timeout_check(struct salinfo_data *data)
 {
+	unsigned long flags;
 	if (!data->open)
 		return;
-	if (!cpumask_empty(&data->cpu_event))
-		wake_up_interruptible(&data->read_wait);
+	if (!cpus_empty(data->cpu_event)) {
+		spin_lock_irqsave(&data_saved_lock, flags);
+		salinfo_work_to_do(data);
+		spin_unlock_irqrestore(&data_saved_lock, flags);
+	}
 }
 
 static void
@@ -289,19 +308,18 @@ salinfo_event_read(struct file *file, char __user *buffer, size_t count, loff_t 
 	int i, n, cpu = -1;
 
 retry:
-	if (cpumask_empty(&data->cpu_event)) {
+	if (cpus_empty(data->cpu_event) && down_trylock(&data->mutex)) {
 		if (file->f_flags & O_NONBLOCK)
 			return -EAGAIN;
-		if (wait_event_interruptible(data->read_wait,
-					     !cpumask_empty(&data->cpu_event)))
+		if (down_interruptible(&data->mutex))
 			return -EINTR;
 	}
 
 	n = data->cpu_check;
 	for (i = 0; i < nr_cpu_ids; i++) {
-		if (cpumask_test_cpu(n, &data->cpu_event)) {
+		if (cpu_isset(n, data->cpu_event)) {
 			if (!cpu_online(n)) {
-				cpumask_clear_cpu(n, &data->cpu_event);
+				cpu_clear(n, data->cpu_event);
 				continue;
 			}
 			cpu = n;
@@ -433,7 +451,7 @@ retry:
 		call_on_cpu(cpu, salinfo_log_read_cpu, data);
 	if (!data->log_size) {
 		data->state = STATE_NO_DATA;
-		cpumask_clear_cpu(cpu, &data->cpu_event);
+		cpu_clear(cpu, data->cpu_event);
 	} else {
 		data->state = STATE_LOG_RECORD;
 	}
@@ -473,11 +491,11 @@ salinfo_log_clear(struct salinfo_data *data, int cpu)
 	unsigned long flags;
 	spin_lock_irqsave(&data_saved_lock, flags);
 	data->state = STATE_NO_DATA;
-	if (!cpumask_test_cpu(cpu, &data->cpu_event)) {
+	if (!cpu_isset(cpu, data->cpu_event)) {
 		spin_unlock_irqrestore(&data_saved_lock, flags);
 		return 0;
 	}
-	cpumask_clear_cpu(cpu, &data->cpu_event);
+	cpu_clear(cpu, data->cpu_event);
 	if (data->saved_num) {
 		shift1_data_saved(data, data->saved_num - 1);
 		data->saved_num = 0;
@@ -491,8 +509,8 @@ salinfo_log_clear(struct salinfo_data *data, int cpu)
 	salinfo_log_new_read(cpu, data);
 	if (data->state == STATE_LOG_RECORD) {
 		spin_lock_irqsave(&data_saved_lock, flags);
-		cpumask_set_cpu(cpu, &data->cpu_event);
-		wake_up_interruptible(&data->read_wait);
+		cpu_set(cpu, data->cpu_event);
+		salinfo_work_to_do(data);
 		spin_unlock_irqrestore(&data_saved_lock, flags);
 	}
 	return 0;
@@ -550,7 +568,7 @@ static const struct file_operations salinfo_data_fops = {
 	.llseek  = default_llseek,
 };
 
-static int
+static int __cpuinit
 salinfo_cpu_callback(struct notifier_block *nb, unsigned long action, void *hcpu)
 {
 	unsigned int i, cpu = (unsigned long)hcpu;
@@ -563,8 +581,8 @@ salinfo_cpu_callback(struct notifier_block *nb, unsigned long action, void *hcpu
 		for (i = 0, data = salinfo_data;
 		     i < ARRAY_SIZE(salinfo_data);
 		     ++i, ++data) {
-			cpumask_set_cpu(cpu, &data->cpu_event);
-			wake_up_interruptible(&data->read_wait);
+			cpu_set(cpu, data->cpu_event);
+			salinfo_work_to_do(data);
 		}
 		spin_unlock_irqrestore(&data_saved_lock, flags);
 		break;
@@ -583,7 +601,7 @@ salinfo_cpu_callback(struct notifier_block *nb, unsigned long action, void *hcpu
 					shift1_data_saved(data, j);
 				}
 			}
-			cpumask_clear_cpu(cpu, &data->cpu_event);
+			cpu_clear(cpu, data->cpu_event);
 		}
 		spin_unlock_irqrestore(&data_saved_lock, flags);
 		break;
@@ -591,7 +609,7 @@ salinfo_cpu_callback(struct notifier_block *nb, unsigned long action, void *hcpu
 	return NOTIFY_OK;
 }
 
-static struct notifier_block salinfo_cpu_notifier =
+static struct notifier_block salinfo_cpu_notifier __cpuinitdata =
 {
 	.notifier_call = salinfo_cpu_callback,
 	.priority = 0,
@@ -617,12 +635,10 @@ salinfo_init(void)
 					   (void *)salinfo_entries[i].feature);
 	}
 
-	cpu_notifier_register_begin();
-
 	for (i = 0; i < ARRAY_SIZE(salinfo_log_name); i++) {
 		data = salinfo_data + i;
 		data->type = i;
-		init_waitqueue_head(&data->read_wait);
+		sema_init(&data->mutex, 1);
 		dir = proc_mkdir(salinfo_log_name[i], salinfo_dir);
 		if (!dir)
 			continue;
@@ -641,7 +657,7 @@ salinfo_init(void)
 
 		/* we missed any events before now */
 		for_each_online_cpu(j)
-			cpumask_set_cpu(j, &data->cpu_event);
+			cpu_set(j, data->cpu_event);
 
 		*sdir++ = dir;
 	}
@@ -653,9 +669,7 @@ salinfo_init(void)
 	salinfo_timer.function = &salinfo_timeout;
 	add_timer(&salinfo_timer);
 
-	__register_hotcpu_notifier(&salinfo_cpu_notifier);
-
-	cpu_notifier_register_done();
+	register_hotcpu_notifier(&salinfo_cpu_notifier);
 
 	return 0;
 }

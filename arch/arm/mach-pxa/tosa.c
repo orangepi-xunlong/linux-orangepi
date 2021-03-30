@@ -12,7 +12,6 @@
  *
  */
 
-#include <linux/clkdev.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
@@ -31,24 +30,23 @@
 #include <linux/gpio_keys.h>
 #include <linux/input.h>
 #include <linux/gpio.h>
-#include <linux/power/gpio-charger.h>
+#include <linux/pda_power.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/pxa2xx_spi.h>
 #include <linux/input/matrix_keypad.h>
 #include <linux/i2c/pxa-i2c.h>
 #include <linux/usb/gpio_vbus.h>
 #include <linux/reboot.h>
-#include <linux/memblock.h>
 
 #include <asm/setup.h>
 #include <asm/mach-types.h>
 
-#include "pxa25x.h"
+#include <mach/pxa25x.h>
 #include <mach/reset.h>
 #include <linux/platform_data/irda-pxaficp.h>
 #include <linux/platform_data/mmc-pxamci.h>
-#include "udc.h"
-#include "tosa_bt.h"
+#include <mach/udc.h>
+#include <mach/tosa_bt.h>
 #include <mach/audio.h>
 #include <mach/smemc.h>
 
@@ -59,6 +57,7 @@
 #include <asm/mach/sharpsl_param.h>
 
 #include "generic.h"
+#include "clock.h"
 #include "devices.h"
 
 static unsigned long tosa_pin_config[] = {
@@ -361,17 +360,44 @@ static struct pxaficp_platform_data tosa_ficp_platform_data = {
 /*
  * Tosa AC IN
  */
+static int tosa_power_init(struct device *dev)
+{
+	int ret = gpio_request(TOSA_GPIO_AC_IN, "ac in");
+	if (ret)
+		goto err_gpio_req;
+
+	ret = gpio_direction_input(TOSA_GPIO_AC_IN);
+	if (ret)
+		goto err_gpio_in;
+
+	return 0;
+
+err_gpio_in:
+	gpio_free(TOSA_GPIO_AC_IN);
+err_gpio_req:
+	return ret;
+}
+
+static void tosa_power_exit(struct device *dev)
+{
+	gpio_free(TOSA_GPIO_AC_IN);
+}
+
+static int tosa_power_ac_online(void)
+{
+	return gpio_get_value(TOSA_GPIO_AC_IN) == 0;
+}
+
 static char *tosa_ac_supplied_to[] = {
 	"main-battery",
 	"backup-battery",
 	"jacket-battery",
 };
 
-static struct gpio_charger_platform_data tosa_power_data = {
-	.name			= "charger",
-	.type			= POWER_SUPPLY_TYPE_MAINS,
-	.gpio			= TOSA_GPIO_AC_IN,
-	.gpio_active_low	= 1,
+static struct pda_power_pdata tosa_power_data = {
+	.init			= tosa_power_init,
+	.is_ac_online		= tosa_power_ac_online,
+	.exit			= tosa_power_exit,
 	.supplied_to		= tosa_ac_supplied_to,
 	.num_supplicants	= ARRAY_SIZE(tosa_ac_supplied_to),
 };
@@ -388,7 +414,7 @@ static struct resource tosa_power_resource[] = {
 };
 
 static struct platform_device tosa_power_device = {
-	.name			= "gpio-charger",
+	.name			= "pda-power",
 	.id			= -1,
 	.dev.platform_data	= &tosa_power_data,
 	.resource		= tosa_power_resource,
@@ -934,13 +960,17 @@ static void __init tosa_init(void)
 	platform_add_devices(devices, ARRAY_SIZE(devices));
 }
 
-static void __init fixup_tosa(struct tag *tags, char **cmdline)
+static void __init fixup_tosa(struct tag *tags, char **cmdline,
+			      struct meminfo *mi)
 {
 	sharpsl_save_param();
-	memblock_add(0xa0000000, SZ_64M);
+	mi->nr_banks=1;
+	mi->bank[0].start = 0xa0000000;
+	mi->bank[0].size = (64*1024*1024);
 }
 
 MACHINE_START(TOSA, "SHARP Tosa")
+	.restart_mode	= 'g',
 	.fixup          = fixup_tosa,
 	.map_io         = pxa25x_map_io,
 	.nr_irqs	= TOSA_NR_IRQS,

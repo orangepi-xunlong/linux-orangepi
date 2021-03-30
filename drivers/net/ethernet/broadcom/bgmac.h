@@ -1,6 +1,18 @@
 #ifndef _BGMAC_H
 #define _BGMAC_H
 
+#define pr_fmt(fmt)		KBUILD_MODNAME ": " fmt
+
+#define bgmac_err(bgmac, fmt, ...) \
+	dev_err(&(bgmac)->core->dev, fmt, ##__VA_ARGS__)
+#define bgmac_warn(bgmac, fmt, ...) \
+	dev_warn(&(bgmac)->core->dev, fmt,  ##__VA_ARGS__)
+#define bgmac_info(bgmac, fmt, ...) \
+	dev_info(&(bgmac)->core->dev, fmt,  ##__VA_ARGS__)
+#define bgmac_dbg(bgmac, fmt, ...) \
+	dev_dbg(&(bgmac)->core->dev, fmt, ##__VA_ARGS__)
+
+#include <linux/bcma/bcma.h>
 #include <linux/netdevice.h>
 
 #define BGMAC_DEV_CTL				0x000
@@ -83,11 +95,7 @@
 #define  BGMAC_RXQ_CTL_MDP_SHIFT		24
 #define BGMAC_GPIO_SELECT			0x194
 #define BGMAC_GPIO_OUTPUT_EN			0x198
-
-/* For 0x1e0 see BCMA_CLKCTLST. Below are BGMAC specific bits */
-#define  BGMAC_BCMA_CLKCTLST_MISC_PLL_REQ	0x00000100
-#define  BGMAC_BCMA_CLKCTLST_MISC_PLL_ST	0x01000000
-
+/* For 0x1e0 see BCMA_CLKCTLST */
 #define BGMAC_HW_WAR				0x1e4
 #define BGMAC_PWR_CTL				0x1e8
 #define BGMAC_DMA_BASE0				0x200		/* Tx and Rx controller */
@@ -110,7 +118,7 @@
 #define BGMAC_TX_LEN_1024_TO_1522		0x334
 #define BGMAC_TX_LEN_1523_TO_2047		0x338
 #define BGMAC_TX_LEN_2048_TO_4095		0x33c
-#define BGMAC_TX_LEN_4096_TO_8191		0x340
+#define BGMAC_TX_LEN_4095_TO_8191		0x340
 #define BGMAC_TX_LEN_8192_TO_MAX		0x344
 #define BGMAC_TX_JABBER_PKTS			0x348		/* Error */
 #define BGMAC_TX_OVERSIZE_PKTS			0x34c		/* Error */
@@ -153,7 +161,7 @@
 #define BGMAC_RX_LEN_1024_TO_1522		0x3e4
 #define BGMAC_RX_LEN_1523_TO_2047		0x3e8
 #define BGMAC_RX_LEN_2048_TO_4095		0x3ec
-#define BGMAC_RX_LEN_4096_TO_8191		0x3f0
+#define BGMAC_RX_LEN_4095_TO_8191		0x3f0
 #define BGMAC_RX_LEN_8192_TO_MAX		0x3f4
 #define BGMAC_RX_JABBER_PKTS			0x3f8		/* Error */
 #define BGMAC_RX_OVERSIZE_PKTS			0x3fc		/* Error */
@@ -177,7 +185,6 @@
 #define   BGMAC_CMDCFG_ES_10			0x00000000
 #define   BGMAC_CMDCFG_ES_100			0x00000004
 #define   BGMAC_CMDCFG_ES_1000			0x00000008
-#define   BGMAC_CMDCFG_ES_2500			0x0000000C
 #define  BGMAC_CMDCFG_PROM			0x00000010	/* Set to activate promiscuous mode */
 #define  BGMAC_CMDCFG_PAD_EN			0x00000020
 #define  BGMAC_CMDCFG_CF			0x00000040
@@ -186,8 +193,7 @@
 #define  BGMAC_CMDCFG_TAI			0x00000200
 #define  BGMAC_CMDCFG_HD			0x00000400	/* Set if in half duplex mode */
 #define  BGMAC_CMDCFG_HD_SHIFT			10
-#define  BGMAC_CMDCFG_SR_REV0			0x00000800	/* Set to reset mode, for core rev 0-3 */
-#define  BGMAC_CMDCFG_SR_REV4			0x00002000	/* Set to reset mode, for core rev >= 4 */
+#define  BGMAC_CMDCFG_SR			0x00000800	/* Set to reset mode */
 #define  BGMAC_CMDCFG_ML			0x00008000	/* Set to activate mac loopback mode */
 #define  BGMAC_CMDCFG_AE			0x00400000
 #define  BGMAC_CMDCFG_CFE			0x00800000
@@ -210,6 +216,27 @@
 #define BGMAC_RX_STATUS				0xb38
 #define BGMAC_TX_STATUS				0xb3c
 
+#define BGMAC_PHY_CTL				0x00
+#define  BGMAC_PHY_CTL_SPEED_MSB		0x0040
+#define  BGMAC_PHY_CTL_DUPLEX			0x0100		/* duplex mode */
+#define  BGMAC_PHY_CTL_RESTART			0x0200		/* restart autonegotiation */
+#define  BGMAC_PHY_CTL_ANENAB			0x1000		/* enable autonegotiation */
+#define  BGMAC_PHY_CTL_SPEED			0x2000
+#define  BGMAC_PHY_CTL_LOOP			0x4000		/* loopback */
+#define  BGMAC_PHY_CTL_RESET			0x8000		/* reset */
+/* Helpers */
+#define  BGMAC_PHY_CTL_SPEED_10			0
+#define  BGMAC_PHY_CTL_SPEED_100		BGMAC_PHY_CTL_SPEED
+#define  BGMAC_PHY_CTL_SPEED_1000		BGMAC_PHY_CTL_SPEED_MSB
+#define BGMAC_PHY_ADV				0x04
+#define  BGMAC_PHY_ADV_10HALF			0x0020		/* advertise 10MBits/s half duplex */
+#define  BGMAC_PHY_ADV_10FULL			0x0040		/* advertise 10MBits/s full duplex */
+#define  BGMAC_PHY_ADV_100HALF			0x0080		/* advertise 100MBits/s half duplex */
+#define  BGMAC_PHY_ADV_100FULL			0x0100		/* advertise 100MBits/s full duplex */
+#define BGMAC_PHY_ADV2				0x09
+#define  BGMAC_PHY_ADV2_1000HALF		0x0100		/* advertise 1000MBits/s half duplex */
+#define  BGMAC_PHY_ADV2_1000FULL		0x0200		/* advertise 1000MBits/s full duplex */
+
 /* BCMA GMAC core specific IO Control (BCMA_IOCTL) flags */
 #define BGMAC_BCMA_IOCTL_SW_CLKEN		0x00000004	/* PHY Clock Enable */
 #define BGMAC_BCMA_IOCTL_SW_RESET		0x00000008	/* PHY Reset */
@@ -227,34 +254,9 @@
 #define  BGMAC_DMA_TX_SUSPEND			0x00000002
 #define  BGMAC_DMA_TX_LOOPBACK			0x00000004
 #define  BGMAC_DMA_TX_FLUSH			0x00000010
-#define  BGMAC_DMA_TX_MR_MASK			0x000000C0	/* Multiple outstanding reads */
-#define  BGMAC_DMA_TX_MR_SHIFT			6
-#define   BGMAC_DMA_TX_MR_1			0
-#define   BGMAC_DMA_TX_MR_2			1
 #define  BGMAC_DMA_TX_PARITY_DISABLE		0x00000800
 #define  BGMAC_DMA_TX_ADDREXT_MASK		0x00030000
 #define  BGMAC_DMA_TX_ADDREXT_SHIFT		16
-#define  BGMAC_DMA_TX_BL_MASK			0x001C0000	/* BurstLen bits */
-#define  BGMAC_DMA_TX_BL_SHIFT			18
-#define   BGMAC_DMA_TX_BL_16			0
-#define   BGMAC_DMA_TX_BL_32			1
-#define   BGMAC_DMA_TX_BL_64			2
-#define   BGMAC_DMA_TX_BL_128			3
-#define   BGMAC_DMA_TX_BL_256			4
-#define   BGMAC_DMA_TX_BL_512			5
-#define   BGMAC_DMA_TX_BL_1024			6
-#define  BGMAC_DMA_TX_PC_MASK			0x00E00000	/* Prefetch control */
-#define  BGMAC_DMA_TX_PC_SHIFT			21
-#define   BGMAC_DMA_TX_PC_0			0
-#define   BGMAC_DMA_TX_PC_4			1
-#define   BGMAC_DMA_TX_PC_8			2
-#define   BGMAC_DMA_TX_PC_16			3
-#define  BGMAC_DMA_TX_PT_MASK			0x03000000	/* Prefetch threshold */
-#define  BGMAC_DMA_TX_PT_SHIFT			24
-#define   BGMAC_DMA_TX_PT_1			0
-#define   BGMAC_DMA_TX_PT_2			1
-#define   BGMAC_DMA_TX_PT_4			2
-#define   BGMAC_DMA_TX_PT_8			3
 #define BGMAC_DMA_TX_INDEX			0x04
 #define BGMAC_DMA_TX_RINGLO			0x08
 #define BGMAC_DMA_TX_RINGHI			0x0C
@@ -282,33 +284,8 @@
 #define  BGMAC_DMA_RX_DIRECT_FIFO		0x00000100
 #define  BGMAC_DMA_RX_OVERFLOW_CONT		0x00000400
 #define  BGMAC_DMA_RX_PARITY_DISABLE		0x00000800
-#define  BGMAC_DMA_RX_MR_MASK			0x000000C0	/* Multiple outstanding reads */
-#define  BGMAC_DMA_RX_MR_SHIFT			6
-#define   BGMAC_DMA_TX_MR_1			0
-#define   BGMAC_DMA_TX_MR_2			1
 #define  BGMAC_DMA_RX_ADDREXT_MASK		0x00030000
 #define  BGMAC_DMA_RX_ADDREXT_SHIFT		16
-#define  BGMAC_DMA_RX_BL_MASK			0x001C0000	/* BurstLen bits */
-#define  BGMAC_DMA_RX_BL_SHIFT			18
-#define   BGMAC_DMA_RX_BL_16			0
-#define   BGMAC_DMA_RX_BL_32			1
-#define   BGMAC_DMA_RX_BL_64			2
-#define   BGMAC_DMA_RX_BL_128			3
-#define   BGMAC_DMA_RX_BL_256			4
-#define   BGMAC_DMA_RX_BL_512			5
-#define   BGMAC_DMA_RX_BL_1024			6
-#define  BGMAC_DMA_RX_PC_MASK			0x00E00000	/* Prefetch control */
-#define  BGMAC_DMA_RX_PC_SHIFT			21
-#define   BGMAC_DMA_RX_PC_0			0
-#define   BGMAC_DMA_RX_PC_4			1
-#define   BGMAC_DMA_RX_PC_8			2
-#define   BGMAC_DMA_RX_PC_16			3
-#define  BGMAC_DMA_RX_PT_MASK			0x03000000	/* Prefetch threshold */
-#define  BGMAC_DMA_RX_PT_SHIFT			24
-#define   BGMAC_DMA_RX_PT_1			0
-#define   BGMAC_DMA_RX_PT_2			1
-#define   BGMAC_DMA_RX_PT_4			2
-#define   BGMAC_DMA_RX_PT_8			3
 #define BGMAC_DMA_RX_INDEX			0x24
 #define BGMAC_DMA_RX_RINGLO			0x28
 #define BGMAC_DMA_RX_RINGHI			0x2C
@@ -332,27 +309,23 @@
 
 #define BGMAC_DESC_CTL0_EOT			0x10000000	/* End of ring */
 #define BGMAC_DESC_CTL0_IOC			0x20000000	/* IRQ on complete */
-#define BGMAC_DESC_CTL0_EOF			0x40000000	/* End of frame */
-#define BGMAC_DESC_CTL0_SOF			0x80000000	/* Start of frame */
+#define BGMAC_DESC_CTL0_SOF			0x40000000	/* Start of frame */
+#define BGMAC_DESC_CTL0_EOF			0x80000000	/* End of frame */
 #define BGMAC_DESC_CTL1_LEN			0x00001FFF
 
-#define BGMAC_PHY_NOREGS			BRCM_PSEUDO_PHY_ADDR
+#define BGMAC_PHY_NOREGS			0x1E
 #define BGMAC_PHY_MASK				0x1F
 
 #define BGMAC_MAX_TX_RINGS			4
 #define BGMAC_MAX_RX_RINGS			1
 
 #define BGMAC_TX_RING_SLOTS			128
-#define BGMAC_RX_RING_SLOTS			512
+#define BGMAC_RX_RING_SLOTS			512 - 1		/* Why -1? Well, Broadcom does that... */
 
 #define BGMAC_RX_HEADER_LEN			28		/* Last 24 bytes are unused. Well... */
 #define BGMAC_RX_FRAME_OFFSET			30		/* There are 2 unused bytes between header and real data */
-#define BGMAC_RX_BUF_OFFSET			(NET_SKB_PAD + NET_IP_ALIGN - \
-						 BGMAC_RX_FRAME_OFFSET)
 #define BGMAC_RX_MAX_FRAME_SIZE			1536		/* Copied from b44/tg3 */
 #define BGMAC_RX_BUF_SIZE			(BGMAC_RX_FRAME_OFFSET + BGMAC_RX_MAX_FRAME_SIZE)
-#define BGMAC_RX_ALLOC_SIZE			(SKB_DATA_ALIGN(BGMAC_RX_BUF_SIZE + BGMAC_RX_BUF_OFFSET) + \
-						 SKB_DATA_ALIGN(sizeof(struct skb_shared_info)))
 
 #define BGMAC_BFL_ENETROBO			0x0010		/* has ephy roboswitch spi */
 #define BGMAC_BFL_ENETADM			0x0080		/* has ADMtek switch */
@@ -369,52 +342,16 @@
 #define BGMAC_CHIPCTL_1_SW_TYPE_RGMII		0x000000C0
 #define BGMAC_CHIPCTL_1_RXC_DLL_BYPASS		0x00010000
 
-#define BGMAC_CHIPCTL_4_IF_TYPE_MASK		0x00003000
-#define BGMAC_CHIPCTL_4_IF_TYPE_RMII		0x00000000
-#define BGMAC_CHIPCTL_4_IF_TYPE_MII		0x00001000
-#define BGMAC_CHIPCTL_4_IF_TYPE_RGMII		0x00002000
-#define BGMAC_CHIPCTL_4_SW_TYPE_MASK		0x0000C000
-#define BGMAC_CHIPCTL_4_SW_TYPE_EPHY		0x00000000
-#define BGMAC_CHIPCTL_4_SW_TYPE_EPHYMII		0x00004000
-#define BGMAC_CHIPCTL_4_SW_TYPE_EPHYRMII	0x00008000
-#define BGMAC_CHIPCTL_4_SW_TYPE_RGMII		0x0000C000
-
-#define BGMAC_CHIPCTL_7_IF_TYPE_MASK		0x000000C0
-#define BGMAC_CHIPCTL_7_IF_TYPE_RMII		0x00000000
-#define BGMAC_CHIPCTL_7_IF_TYPE_MII		0x00000040
-#define BGMAC_CHIPCTL_7_IF_TYPE_RGMII		0x00000080
+#define BGMAC_SPEED_10				0x0001
+#define BGMAC_SPEED_100				0x0002
+#define BGMAC_SPEED_1000			0x0004
 
 #define BGMAC_WEIGHT	64
 
 #define ETHER_MAX_LEN   1518
 
-/* Feature Flags */
-#define BGMAC_FEAT_TX_MASK_SETUP	BIT(0)
-#define BGMAC_FEAT_RX_MASK_SETUP	BIT(1)
-#define BGMAC_FEAT_IOST_ATTACHED	BIT(2)
-#define BGMAC_FEAT_NO_RESET		BIT(3)
-#define BGMAC_FEAT_MISC_PLL_REQ		BIT(4)
-#define BGMAC_FEAT_SW_TYPE_PHY		BIT(5)
-#define BGMAC_FEAT_SW_TYPE_EPHYRMII	BIT(6)
-#define BGMAC_FEAT_SW_TYPE_RGMII	BIT(7)
-#define BGMAC_FEAT_CMN_PHY_CTL		BIT(8)
-#define BGMAC_FEAT_FLW_CTRL1		BIT(9)
-#define BGMAC_FEAT_FLW_CTRL2		BIT(10)
-#define BGMAC_FEAT_SET_RXQ_CLK		BIT(11)
-#define BGMAC_FEAT_CLKCTLST		BIT(12)
-#define BGMAC_FEAT_NO_CLR_MIB		BIT(13)
-#define BGMAC_FEAT_FORCE_SPEED_2500	BIT(14)
-#define BGMAC_FEAT_CMDCFG_SR_REV4	BIT(15)
-#define BGMAC_FEAT_IRQ_ID_OOB_6		BIT(16)
-#define BGMAC_FEAT_CC4_IF_SW_TYPE	BIT(17)
-#define BGMAC_FEAT_CC4_IF_SW_TYPE_RGMII	BIT(18)
-#define BGMAC_FEAT_CC7_IF_TYPE_RGMII	BIT(19)
-
 struct bgmac_slot_info {
-	union {
-		struct sk_buff *skb;
-		void *buf;
-	};
+	struct sk_buff *skb;
 	dma_addr_t dma_addr;
 };
 
@@ -440,14 +377,13 @@ enum bgmac_dma_ring_type {
  * empty.
  */
 struct bgmac_dma_ring {
-	u32 start;
-	u32 end;
+	u16 num_slots;
+	u16 start;
+	u16 end;
 
+	u16 mmio_base;
 	struct bgmac_dma_desc *cpu_base;
 	dma_addr_t dma_base;
-	u32 index_base; /* Used for unaligned rings only, otherwise 0 */
-	u16 mmio_base;
-	bool unaligned;
 
 	struct bgmac_slot_info slots[BGMAC_RX_RING_SLOTS];
 };
@@ -459,23 +395,8 @@ struct bgmac_rx_header {
 };
 
 struct bgmac {
-	union {
-		struct {
-			void *base;
-			void *idm_base;
-		} plat;
-		struct {
-			struct bcma_device *core;
-			/* Reference to CMN core for BCM4706 */
-			struct bcma_device *cmn;
-		} bcma;
-	};
-
-	struct device *dev;
-	struct device *dma_dev;
-	unsigned char mac_addr[ETH_ALEN];
-	u32 feature_flags;
-
+	struct bcma_device *core;
+	struct bcma_device *cmn; /* Reference to CMN core for BCM4706 */
 	struct net_device *net_dev;
 	struct napi_struct napi;
 	struct mii_bus *mii_bus;
@@ -490,82 +411,28 @@ struct bgmac {
 	u32 mib_rx_regs[BGMAC_NUM_MIB_RX_REGS];
 
 	/* Int */
-	int irq;
 	u32 int_mask;
+	u32 int_status;
 
-	/* Current MAC state */
-	int mac_speed;
-	int mac_duplex;
+	/* Speed-related */
+	int speed;
+	bool autoneg;
+	bool full_duplex;
 
 	u8 phyaddr;
 	bool has_robosw;
 
 	bool loopback;
-
-	u32 (*read)(struct bgmac *bgmac, u16 offset);
-	void (*write)(struct bgmac *bgmac, u16 offset, u32 value);
-	u32 (*idm_read)(struct bgmac *bgmac, u16 offset);
-	void (*idm_write)(struct bgmac *bgmac, u16 offset, u32 value);
-	bool (*clk_enabled)(struct bgmac *bgmac);
-	void (*clk_enable)(struct bgmac *bgmac, u32 flags);
-	void (*cco_ctl_maskset)(struct bgmac *bgmac, u32 offset, u32 mask,
-				u32 set);
-	u32 (*get_bus_clock)(struct bgmac *bgmac);
-	void (*cmn_maskset32)(struct bgmac *bgmac, u16 offset, u32 mask,
-			      u32 set);
 };
-
-int bgmac_enet_probe(struct bgmac *info);
-void bgmac_enet_remove(struct bgmac *bgmac);
-
-struct mii_bus *bcma_mdio_mii_register(struct bcma_device *core, u8 phyaddr);
-void bcma_mdio_mii_unregister(struct mii_bus *mii_bus);
 
 static inline u32 bgmac_read(struct bgmac *bgmac, u16 offset)
 {
-	return bgmac->read(bgmac, offset);
+	return bcma_read32(bgmac->core, offset);
 }
 
 static inline void bgmac_write(struct bgmac *bgmac, u16 offset, u32 value)
 {
-	bgmac->write(bgmac, offset, value);
-}
-
-static inline u32 bgmac_idm_read(struct bgmac *bgmac, u16 offset)
-{
-	return bgmac->idm_read(bgmac, offset);
-}
-
-static inline void bgmac_idm_write(struct bgmac *bgmac, u16 offset, u32 value)
-{
-	bgmac->idm_write(bgmac, offset, value);
-}
-
-static inline bool bgmac_clk_enabled(struct bgmac *bgmac)
-{
-	return bgmac->clk_enabled(bgmac);
-}
-
-static inline void bgmac_clk_enable(struct bgmac *bgmac, u32 flags)
-{
-	bgmac->clk_enable(bgmac, flags);
-}
-
-static inline void bgmac_cco_ctl_maskset(struct bgmac *bgmac, u32 offset,
-					 u32 mask, u32 set)
-{
-	bgmac->cco_ctl_maskset(bgmac, offset, mask, set);
-}
-
-static inline u32 bgmac_get_bus_clock(struct bgmac *bgmac)
-{
-	return bgmac->get_bus_clock(bgmac);
-}
-
-static inline void bgmac_cmn_maskset32(struct bgmac *bgmac, u16 offset,
-				       u32 mask, u32 set)
-{
-	bgmac->cmn_maskset32(bgmac, offset, mask, set);
+	bcma_write32(bgmac->core, offset, value);
 }
 
 static inline void bgmac_maskset(struct bgmac *bgmac, u16 offset, u32 mask,
@@ -583,4 +450,5 @@ static inline void bgmac_set(struct bgmac *bgmac, u16 offset, u32 set)
 {
 	bgmac_maskset(bgmac, offset, ~0, set);
 }
+
 #endif /* _BGMAC_H */

@@ -1,0 +1,23 @@
+menuconfig FS_BLOCK_COMPAT
+	bool "Compatibility settings for fs and block layer"
+	default n
+	help
+	  To provide users with some proprietary features.
+
+config FILE_DIRTY_LIMIT
+	bool "Enable file dirty limit to reduce dirty caches"
+	depends on FS_BLOCK_COMPAT
+	default n
+	help
+	  The function is modified in:
+	  include/linux/fs.h
+	  include/linux/writeback.h
+	  include/linux/backing-dev.h
+	  mm/page-writeback.c
+	  mm/backing-dev.c
+	  mm/filemap.c
+	  mm/truncate.c
+	  fs/fs-writeback.c
+	  fs/ext4/inode.c
+	  kernel/sysctl.c
+

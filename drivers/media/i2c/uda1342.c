@@ -20,7 +20,7 @@
 #include <linux/i2c.h>
 #include <linux/videodev2.h>
 #include <media/v4l2-device.h>
-#include <media/i2c/uda1342.h>
+#include <media/uda1342.h>
 #include <linux/slab.h>
 
 static int write_reg(struct i2c_client *client, int reg, int value)
@@ -69,7 +69,7 @@ static int uda1342_probe(struct i2c_client *client,
 	dev_dbg(&client->dev, "initializing UDA1342 at address %d on %s\n",
 		client->addr, adapter->name);
 
-	sd = devm_kzalloc(&client->dev, sizeof(*sd), GFP_KERNEL);
+	sd = kzalloc(sizeof(struct v4l2_subdev), GFP_KERNEL);
 	if (sd == NULL)
 		return -ENOMEM;
 
@@ -89,6 +89,7 @@ static int uda1342_remove(struct i2c_client *client)
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 
 	v4l2_device_unregister_subdev(sd);
+	kfree(sd);
 	return 0;
 }
 

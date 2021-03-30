@@ -2954,7 +2954,7 @@ DAC960_DetectController(struct pci_dev *PCI_Device,
 	case DAC960_PD_Controller:
 	  if (!request_region(Controller->IO_Address, 0x80,
 			      Controller->FullModelName)) {
-		DAC960_Error("IO port 0x%lx busy for Controller at\n",
+		DAC960_Error("IO port 0x%d busy for Controller at\n",
 			     Controller, Controller->IO_Address);
 		goto Failure;
 	  }
@@ -2990,7 +2990,7 @@ DAC960_DetectController(struct pci_dev *PCI_Device,
 	case DAC960_P_Controller:
 	  if (!request_region(Controller->IO_Address, 0x80,
 			      Controller->FullModelName)){
-		DAC960_Error("IO port 0x%lx busy for Controller at\n",
+		DAC960_Error("IO port 0x%d busy for Controller at\n",
 		   	     Controller, Controller->IO_Address);
 		goto Failure;
 	  }
@@ -6411,12 +6411,12 @@ static bool DAC960_V2_ExecuteUserCommand(DAC960_Controller_T *Controller,
 					.ScatterGatherSegments[0]
 					.SegmentByteCount =
 	    CommandMailbox->ControllerInfo.DataTransferSize;
-	  while (1) {
-	    DAC960_ExecuteCommand(Command);
-	    if (!Controller->V2.NewControllerInformation->PhysicalScanActive)
-		break;
-	    msleep(1000);
-	  }
+	  DAC960_ExecuteCommand(Command);
+	  while (Controller->V2.NewControllerInformation->PhysicalScanActive)
+	    {
+	      DAC960_ExecuteCommand(Command);
+	      sleep_on_timeout(&Controller->CommandWaitQueue, HZ);
+	    }
 	  DAC960_UserCritical("Discovery Completed\n", Controller);
  	}
     }
@@ -6741,11 +6741,11 @@ static long DAC960_gam_ioctl(struct file *file, unsigned int Request,
 	ErrorCode = -ENOMEM;
 	if (DataTransferLength > 0)
 	  {
-	    DataTransferBuffer = pci_zalloc_consistent(Controller->PCIDevice,
-                                                       DataTransferLength,
-                                                       &DataTransferBufferDMA);
+	    DataTransferBuffer = pci_alloc_consistent(Controller->PCIDevice,
+				DataTransferLength, &DataTransferBufferDMA);
 	    if (DataTransferBuffer == NULL)
 	    	break;
+	    memset(DataTransferBuffer, 0, DataTransferLength);
 	  }
 	else if (DataTransferLength < 0)
 	  {
@@ -6877,11 +6877,11 @@ static long DAC960_gam_ioctl(struct file *file, unsigned int Request,
     	ErrorCode = -ENOMEM;
 	if (DataTransferLength > 0)
 	  {
-	    DataTransferBuffer = pci_zalloc_consistent(Controller->PCIDevice,
-                                                       DataTransferLength,
-                                                       &DataTransferBufferDMA);
+	    DataTransferBuffer = pci_alloc_consistent(Controller->PCIDevice,
+				DataTransferLength, &DataTransferBufferDMA);
 	    if (DataTransferBuffer == NULL)
 	    	break;
+	    memset(DataTransferBuffer, 0, DataTransferLength);
 	  }
 	else if (DataTransferLength < 0)
 	  {
@@ -6899,14 +6899,14 @@ static long DAC960_gam_ioctl(struct file *file, unsigned int Request,
 	RequestSenseLength = UserCommand.RequestSenseLength;
 	if (RequestSenseLength > 0)
 	  {
-	    RequestSenseBuffer = pci_zalloc_consistent(Controller->PCIDevice,
-                                                       RequestSenseLength,
-                                                       &RequestSenseBufferDMA);
+	    RequestSenseBuffer = pci_alloc_consistent(Controller->PCIDevice,
+			RequestSenseLength, &RequestSenseBufferDMA);
 	    if (RequestSenseBuffer == NULL)
 	      {
 		ErrorCode = -ENOMEM;
 		goto Failure2;
 	      }
+	    memset(RequestSenseBuffer, 0, RequestSenseLength);
 	  }
 	spin_lock_irqsave(&Controller->queue_lock, flags);
 	while ((Command = DAC960_AllocateCommand(Controller)) == NULL)
@@ -7035,16 +7035,18 @@ static long DAC960_gam_ioctl(struct file *file, unsigned int Request,
 		ErrorCode = -EFAULT;
 		break;
 	}
-	ErrorCode = wait_event_interruptible_timeout(Controller->HealthStatusWaitQueue,
-			!(Controller->V2.HealthStatusBuffer->StatusChangeCounter
-			    == HealthStatusBuffer.StatusChangeCounter &&
-			  Controller->V2.HealthStatusBuffer->NextEventSequenceNumber
-			    == HealthStatusBuffer.NextEventSequenceNumber),
-			DAC960_MonitoringTimerInterval);
-	if (ErrorCode == -ERESTARTSYS) {
-		ErrorCode = -EINTR;
-		break;
-	}
+	while (Controller->V2.HealthStatusBuffer->StatusChangeCounter
+	       == HealthStatusBuffer.StatusChangeCounter &&
+	       Controller->V2.HealthStatusBuffer->NextEventSequenceNumber
+	       == HealthStatusBuffer.NextEventSequenceNumber)
+	  {
+	    interruptible_sleep_on_timeout(&Controller->HealthStatusWaitQueue,
+					   DAC960_MonitoringTimerInterval);
+	    if (signal_pending(current)) {
+	    	ErrorCode = -EINTR;
+	    	break;
+	    }
+	  }
 	if (copy_to_user(GetHealthStatus.HealthStatusBuffer,
 			 Controller->V2.HealthStatusBuffer,
 			 sizeof(DAC960_V2_HealthStatusBuffer_T)))

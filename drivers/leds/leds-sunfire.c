@@ -135,8 +135,10 @@ static int sunfire_led_generic_probe(struct platform_device *pdev,
 	}
 
 	p = devm_kzalloc(&pdev->dev, sizeof(*p), GFP_KERNEL);
-	if (!p)
+	if (!p) {
+		dev_err(&pdev->dev, "Could not allocate struct sunfire_drvdata\n");
 		return -ENOMEM;
+	}
 
 	for (i = 0; i < NUM_LEDS_PER_BOARD; i++) {
 		struct led_classdev *lp = &p->leds[i].led_cdev;
@@ -157,14 +159,14 @@ static int sunfire_led_generic_probe(struct platform_device *pdev,
 		}
 	}
 
-	platform_set_drvdata(pdev, p);
+	dev_set_drvdata(&pdev->dev, p);
 
 	return 0;
 }
 
 static int sunfire_led_generic_remove(struct platform_device *pdev)
 {
-	struct sunfire_drvdata *p = platform_get_drvdata(pdev);
+	struct sunfire_drvdata *p = dev_get_drvdata(&pdev->dev);
 	int i;
 
 	for (i = 0; i < NUM_LEDS_PER_BOARD; i++)
@@ -223,6 +225,7 @@ static struct platform_driver sunfire_clockboard_led_driver = {
 	.remove		= sunfire_led_generic_remove,
 	.driver		= {
 		.name	= "sunfire-clockboard-leds",
+		.owner	= THIS_MODULE,
 	},
 };
 
@@ -231,22 +234,32 @@ static struct platform_driver sunfire_fhc_led_driver = {
 	.remove		= sunfire_led_generic_remove,
 	.driver		= {
 		.name	= "sunfire-fhc-leds",
+		.owner	= THIS_MODULE,
 	},
-};
-
-static struct platform_driver * const drivers[] = {
-	&sunfire_clockboard_led_driver,
-	&sunfire_fhc_led_driver,
 };
 
 static int __init sunfire_leds_init(void)
 {
-	return platform_register_drivers(drivers, ARRAY_SIZE(drivers));
+	int err = platform_driver_register(&sunfire_clockboard_led_driver);
+
+	if (err) {
+		pr_err("Could not register clock board LED driver\n");
+		return err;
+	}
+
+	err = platform_driver_register(&sunfire_fhc_led_driver);
+	if (err) {
+		pr_err("Could not register FHC LED driver\n");
+		platform_driver_unregister(&sunfire_clockboard_led_driver);
+	}
+
+	return err;
 }
 
 static void __exit sunfire_leds_exit(void)
 {
-	platform_unregister_drivers(drivers, ARRAY_SIZE(drivers));
+	platform_driver_unregister(&sunfire_clockboard_led_driver);
+	platform_driver_unregister(&sunfire_fhc_led_driver);
 }
 
 module_init(sunfire_leds_init);

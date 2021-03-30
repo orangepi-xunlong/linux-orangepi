@@ -124,13 +124,10 @@ ssize_t vfio_pci_bar_rw(struct vfio_pci_device *vdev, char __user *buf,
 	void __iomem *io;
 	ssize_t done;
 
-	if (pci_resource_start(pdev, bar))
-		end = pci_resource_len(pdev, bar);
-	else if (bar == PCI_ROM_RESOURCE &&
-		 pdev->resource[bar].flags & IORESOURCE_ROM_SHADOW)
-		end = 0x20000;
-	else
+	if (!pci_resource_start(pdev, bar))
 		return -EINVAL;
+
+	end = pci_resource_len(pdev, bar);
 
 	if (pos >= end)
 		return -EINVAL;
@@ -193,10 +190,7 @@ ssize_t vfio_pci_vga_rw(struct vfio_pci_device *vdev, char __user *buf,
 	if (!vdev->has_vga)
 		return -EINVAL;
 
-	if (pos > 0xbfffful)
-		return -EINVAL;
-
-	switch ((u32)pos) {
+	switch (pos) {
 	case 0xa0000 ... 0xbffff:
 		count = min(count, (size_t)(0xc0000 - pos));
 		iomem = ioremap_nocache(0xa0000, 0xbffff - 0xa0000 + 1);

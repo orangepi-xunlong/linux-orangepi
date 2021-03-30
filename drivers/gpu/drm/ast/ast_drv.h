@@ -36,8 +36,6 @@
 #include <drm/ttm/ttm_memory.h>
 #include <drm/ttm/ttm_module.h>
 
-#include <drm/drm_gem.h>
-
 #include <linux/i2c.h>
 #include <linux/i2c-algo-bit.h>
 
@@ -63,15 +61,7 @@ enum ast_chip {
 	AST2200,
 	AST2150,
 	AST2300,
-	AST2400,
 	AST1180,
-};
-
-enum ast_tx_chip {
-	AST_TX_NONE,
-	AST_TX_SIL164,
-	AST_TX_ITE66121,
-	AST_TX_DP501,
 };
 
 #define AST_DRAM_512Mx16 0
@@ -112,17 +102,6 @@ struct ast_private {
 	 * we have. */
 	struct ttm_bo_kmap_obj cache_kmap;
 	int next_cursor;
-	bool support_wide_screen;
-	enum {
-		ast_use_p2a,
-		ast_use_dt,
-		ast_use_defaults
-	} config_mode;
-
-	enum ast_tx_chip tx_chip_type;
-	u8 dp501_maxclk;
-	u8 *dp501_fw_addr;
-	const struct firmware *dp501_fw;	/* dp501 fw */
 };
 
 int ast_driver_load(struct drm_device *dev, unsigned long flags);
@@ -132,17 +111,14 @@ struct ast_gem_object;
 
 #define AST_IO_AR_PORT_WRITE		(0x40)
 #define AST_IO_MISC_PORT_WRITE		(0x42)
-#define AST_IO_VGA_ENABLE_PORT		(0x43)
 #define AST_IO_SEQ_PORT			(0x44)
-#define AST_IO_DAC_INDEX_READ		(0x47)
+#define AST_DAC_INDEX_READ		(0x3c7)
 #define AST_IO_DAC_INDEX_WRITE		(0x48)
 #define AST_IO_DAC_DATA		        (0x49)
 #define AST_IO_GR_PORT			(0x4E)
 #define AST_IO_CRTC_PORT		(0x54)
 #define AST_IO_INPUT_STATUS1_READ	(0x5A)
 #define AST_IO_MISC_PORT_READ		(0x4C)
-
-#define AST_IO_MM_OFFSET		(0x380)
 
 #define __ast_read(x) \
 static inline u##x ast_read##x(struct ast_private *ast, u32 reg) { \
@@ -261,6 +237,7 @@ struct ast_framebuffer {
 struct ast_fbdev {
 	struct drm_fb_helper helper;
 	struct ast_framebuffer afb;
+	struct list_head fbdev_list;
 	void *sysram;
 	int size;
 	struct ttm_bo_kmap_obj mapping;
@@ -313,20 +290,19 @@ extern void ast_mode_fini(struct drm_device *dev);
 
 int ast_framebuffer_init(struct drm_device *dev,
 			 struct ast_framebuffer *ast_fb,
-			 const struct drm_mode_fb_cmd2 *mode_cmd,
+			 struct drm_mode_fb_cmd2 *mode_cmd,
 			 struct drm_gem_object *obj);
 
 int ast_fbdev_init(struct drm_device *dev);
 void ast_fbdev_fini(struct drm_device *dev);
 void ast_fbdev_set_suspend(struct drm_device *dev, int state);
-void ast_fbdev_set_base(struct ast_private *ast, unsigned long gpu_addr);
 
 struct ast_bo {
 	struct ttm_buffer_object bo;
 	struct ttm_placement placement;
 	struct ttm_bo_kmap_obj kmap;
 	struct drm_gem_object gem;
-	struct ttm_place placements[3];
+	u32 placements[3];
 	int pin_count;
 };
 #define gem_to_ast_bo(gobj) container_of((gobj), struct ast_bo, gem)
@@ -346,7 +322,11 @@ ast_bo(struct ttm_buffer_object *bo)
 extern int ast_dumb_create(struct drm_file *file,
 			   struct drm_device *dev,
 			   struct drm_mode_create_dumb *args);
+extern int ast_dumb_destroy(struct drm_file *file,
+			    struct drm_device *dev,
+			    uint32_t handle);
 
+extern int ast_gem_init_object(struct drm_gem_object *obj);
 extern void ast_gem_free_object(struct drm_gem_object *obj);
 extern int ast_dumb_mmap_offset(struct drm_file *file,
 				struct drm_device *dev,
@@ -368,41 +348,12 @@ int ast_gem_create(struct drm_device *dev,
 int ast_bo_pin(struct ast_bo *bo, u32 pl_flag, u64 *gpu_addr);
 int ast_bo_unpin(struct ast_bo *bo);
 
-static inline int ast_bo_reserve(struct ast_bo *bo, bool no_wait)
-{
-	int ret;
-
-	ret = ttm_bo_reserve(&bo->bo, true, no_wait, NULL);
-	if (ret) {
-		if (ret != -ERESTARTSYS && ret != -EBUSY)
-			DRM_ERROR("reserve failed %p\n", bo);
-		return ret;
-	}
-	return 0;
-}
-
-static inline void ast_bo_unreserve(struct ast_bo *bo)
-{
-	ttm_bo_unreserve(&bo->bo);
-}
-
+int ast_bo_reserve(struct ast_bo *bo, bool no_wait);
+void ast_bo_unreserve(struct ast_bo *bo);
 void ast_ttm_placement(struct ast_bo *bo, int domain);
 int ast_bo_push_sysram(struct ast_bo *bo);
 int ast_mmap(struct file *filp, struct vm_area_struct *vma);
 
 /* ast post */
-void ast_enable_vga(struct drm_device *dev);
-void ast_enable_mmio(struct drm_device *dev);
-bool ast_is_vga_enabled(struct drm_device *dev);
 void ast_post_gpu(struct drm_device *dev);
-u32 ast_mindwm(struct ast_private *ast, u32 r);
-void ast_moutdwm(struct ast_private *ast, u32 r, u32 v);
-/* ast dp501 */
-int ast_load_dp501_microcode(struct drm_device *dev);
-void ast_set_dp501_video_output(struct drm_device *dev, u8 mode);
-bool ast_launch_m68k(struct drm_device *dev);
-bool ast_backup_fw(struct drm_device *dev, u8 *addr, u32 size);
-bool ast_dp501_read_edid(struct drm_device *dev, u8 *ediddata);
-u8 ast_get_dp501_max_clk(struct drm_device *dev);
-void ast_init_3rdtx(struct drm_device *dev);
 #endif

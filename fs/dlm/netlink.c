@@ -56,8 +56,13 @@ static int send_data(struct sk_buff *skb)
 {
 	struct genlmsghdr *genlhdr = nlmsg_data((struct nlmsghdr *)skb->data);
 	void *data = genlmsg_data(genlhdr);
+	int rv;
 
-	genlmsg_end(skb, data);
+	rv = genlmsg_end(skb, data);
+	if (rv < 0) {
+		nlmsg_free(skb);
+		return rv;
+	}
 
 	return genlmsg_unicast(&init_net, skb, listener_nlportid);
 }
@@ -69,16 +74,14 @@ static int user_cmd(struct sk_buff *skb, struct genl_info *info)
 	return 0;
 }
 
-static struct genl_ops dlm_nl_ops[] = {
-	{
-		.cmd	= DLM_CMD_HELLO,
-		.doit	= user_cmd,
-	},
+static struct genl_ops dlm_nl_ops = {
+	.cmd		= DLM_CMD_HELLO,
+	.doit		= user_cmd,
 };
 
 int __init dlm_netlink_init(void)
 {
-	return genl_register_family_with_ops(&family, dlm_nl_ops);
+	return genl_register_family_with_ops(&family, &dlm_nl_ops, 1);
 }
 
 void dlm_netlink_exit(void)

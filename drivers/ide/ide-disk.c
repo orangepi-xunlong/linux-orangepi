@@ -186,11 +186,12 @@ static ide_startstop_t ide_do_rw_disk(ide_drive_t *drive, struct request *rq,
 	BUG_ON(drive->dev_flags & IDE_DFLAG_BLOCKED);
 	BUG_ON(rq->cmd_type != REQ_TYPE_FS);
 
-	ledtrig_disk_activity();
+	ledtrig_ide_activity();
 
-	pr_debug("%s: %sing: block=%llu, sectors=%u\n",
+	pr_debug("%s: %sing: block=%llu, sectors=%u, buffer=0x%08lx\n",
 		 drive->name, rq_data_dir(rq) == READ ? "read" : "writ",
-		 (unsigned long long)block, blk_rq_sectors(rq));
+		 (unsigned long long)block, blk_rq_sectors(rq),
+		 (unsigned long)rq->buffer);
 
 	if (hwif->rw_disk)
 		hwif->rw_disk(drive, rq);
@@ -431,7 +432,7 @@ static int idedisk_prep_fn(struct request_queue *q, struct request *rq)
 	ide_drive_t *drive = q->queuedata;
 	struct ide_cmd *cmd;
 
-	if (req_op(rq) != REQ_OP_FLUSH)
+	if (!(rq->cmd_flags & REQ_FLUSH))
 		return BLKPREP_OK;
 
 	if (rq->special) {
@@ -477,7 +478,7 @@ static int set_multcount(ide_drive_t *drive, int arg)
 	if (drive->special_flags & IDE_SFLAG_SET_MULTMODE)
 		return -EBUSY;
 
-	rq = blk_get_request(drive->queue, READ, __GFP_RECLAIM);
+	rq = blk_get_request(drive->queue, READ, __GFP_WAIT);
 	rq->cmd_type = REQ_TYPE_ATA_TASKFILE;
 
 	drive->mult_req = arg;
@@ -522,7 +523,7 @@ static int ide_do_setfeature(ide_drive_t *drive, u8 feature, u8 nsect)
 static void update_flush(ide_drive_t *drive)
 {
 	u16 *id = drive->id;
-	bool wc = false;
+	unsigned flush = 0;
 
 	if (drive->dev_flags & IDE_DFLAG_WCACHE) {
 		unsigned long long capacity;
@@ -546,12 +547,12 @@ static void update_flush(ide_drive_t *drive)
 		       drive->name, barrier ? "" : "not ");
 
 		if (barrier) {
-			wc = true;
+			flush = REQ_FLUSH;
 			blk_queue_prep_rq(drive->queue, idedisk_prep_fn);
 		}
 	}
 
-	blk_queue_write_cache(drive->queue, wc, false);
+	blk_queue_flush(drive->queue, flush);
 }
 
 ide_devset_get_flag(wcache, IDE_DFLAG_WCACHE);
@@ -685,10 +686,8 @@ static void ide_disk_setup(ide_drive_t *drive)
 	printk(KERN_INFO "%s: max request size: %dKiB\n", drive->name,
 	       queue_max_sectors(q) / 2);
 
-	if (ata_id_is_ssd(id)) {
+	if (ata_id_is_ssd(id))
 		queue_flag_set_unlocked(QUEUE_FLAG_NONROT, q);
-		queue_flag_clear_unlocked(QUEUE_FLAG_ADD_RANDOM, q);
-	}
 
 	/* calculate drive capacity, and select LBA if possible */
 	ide_disk_get_capacity(drive);

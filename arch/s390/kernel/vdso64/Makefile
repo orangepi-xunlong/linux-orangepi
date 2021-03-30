@@ -1,8 +1,6 @@
 # List of files in the vdso, has to be asm only for now
 
-KCOV_INSTRUMENT := n
-
-obj-vdso64 = gettimeofday.o clock_getres.o clock_gettime.o note.o getcpu.o
+obj-vdso64 = gettimeofday.o clock_getres.o clock_gettime.o note.o
 
 # Build rules
 
@@ -15,7 +13,7 @@ KBUILD_AFLAGS_64 += -m64 -s
 KBUILD_CFLAGS_64 := $(filter-out -m64,$(KBUILD_CFLAGS))
 KBUILD_CFLAGS_64 += -m64 -fPIC -shared -fno-common -fno-builtin
 KBUILD_CFLAGS_64 += -nostdlib -Wl,-soname=linux-vdso64.so.1 \
-			$(call cc-ldoption, -Wl$(comma)--hash-style=both)
+			$(call cc-ldoption, -Wl$(comma)--hash-style=sysv)
 
 $(targets:%=$(obj)/%.dbg): KBUILD_CFLAGS = $(KBUILD_CFLAGS_64)
 $(targets:%=$(obj)/%.dbg): KBUILD_AFLAGS = $(KBUILD_AFLAGS_64)
@@ -24,15 +22,14 @@ obj-y += vdso64_wrapper.o
 extra-y += vdso64.lds
 CPPFLAGS_vdso64.lds += -P -C -U$(ARCH)
 
-# Disable gcov profiling and ubsan for VDSO code
+# Disable gcov profiling for VDSO code
 GCOV_PROFILE := n
-UBSAN_SANITIZE := n
 
 # Force dependency (incbin is bad)
 $(obj)/vdso64_wrapper.o : $(obj)/vdso64.so
 
 # link rule for the .so file, .lds has to be first
-$(obj)/vdso64.so.dbg: $(src)/vdso64.lds $(obj-vdso64) FORCE
+$(obj)/vdso64.so.dbg: $(src)/vdso64.lds $(obj-vdso64)
 	$(call if_changed,vdso64ld)
 
 # strip rule for the .so file
@@ -41,12 +38,12 @@ $(obj)/%.so: $(obj)/%.so.dbg FORCE
 	$(call if_changed,objcopy)
 
 # assembly rules for the .S files
-$(obj-vdso64): %.o: %.S FORCE
+$(obj-vdso64): %.o: %.S
 	$(call if_changed_dep,vdso64as)
 
 # actual build commands
 quiet_cmd_vdso64ld = VDSO64L $@
-      cmd_vdso64ld = $(CC) $(c_flags) -Wl,-T $(filter %.lds %.o,$^) -o $@
+      cmd_vdso64ld = $(CC) $(c_flags) -Wl,-T $^ -o $@
 quiet_cmd_vdso64as = VDSO64A $@
       cmd_vdso64as = $(CC) $(a_flags) -c -o $@ $<
 

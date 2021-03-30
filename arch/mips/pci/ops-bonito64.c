@@ -22,6 +22,7 @@
 #include <linux/types.h>
 #include <linux/pci.h>
 #include <linux/kernel.h>
+#include <linux/init.h>
 
 #include <asm/mips-boards/bonito64.h>
 

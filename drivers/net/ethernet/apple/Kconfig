@@ -7,7 +7,9 @@ config NET_VENDOR_APPLE
 	default y
 	depends on (PPC_PMAC && PPC32) || MAC
 	---help---
-	  If you have a network (Ethernet) card belonging to this class, say Y.
+	  If you have a network (Ethernet) card belonging to this class, say Y
+	  and read the Ethernet-HOWTO, available from
+	  <http://www.tldp.org/docs.html#howto>.
 
 	  Note that the answer to this question doesn't directly affect the
 	  kernel: saying N will just cause the configurator to skip all
@@ -51,12 +53,13 @@ config BMAC
 	  will be called bmac.
 
 config MACMACE
-	tristate "Macintosh (AV) onboard MACE ethernet"
+	bool "Macintosh (AV) onboard MACE ethernet"
 	depends on MAC
 	select CRC32
 	---help---
 	  Support for the onboard AMD 79C940 MACE Ethernet controller used in
 	  the 660AV and 840AV Macintosh.  If you have one of these Macintoshes
-	  say Y here.
+	  say Y and read the Ethernet-HOWTO, available from
+	  <http://www.tldp.org/docs.html#howto>.
 
 endif # NET_VENDOR_APPLE

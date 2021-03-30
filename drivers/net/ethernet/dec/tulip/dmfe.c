@@ -192,6 +192,9 @@
 	(__CHK_IO_SIZE(((pci_dev)->device << 16) | (pci_dev)->vendor, \
 	(pci_dev)->revision))
 
+/* Sten Check */
+#define DEVICE net_device
+
 /* Structure/enum declaration ------------------------------- */
 struct tx_desc {
         __le32 tdes0, tdes1, tdes2, tdes3; /* Data for the card */
@@ -310,10 +313,10 @@ static u8 SF_mode;		/* Special Function: 1:VLAN, 2:RX Flow Control
 
 
 /* function declaration ------------------------------------- */
-static int dmfe_open(struct net_device *);
-static netdev_tx_t dmfe_start_xmit(struct sk_buff *, struct net_device *);
-static int dmfe_stop(struct net_device *);
-static void dmfe_set_filter_mode(struct net_device *);
+static int dmfe_open(struct DEVICE *);
+static netdev_tx_t dmfe_start_xmit(struct sk_buff *, struct DEVICE *);
+static int dmfe_stop(struct DEVICE *);
+static void dmfe_set_filter_mode(struct DEVICE *);
 static const struct ethtool_ops netdev_ethtool_ops;
 static u16 read_srom_word(void __iomem *, int);
 static irqreturn_t dmfe_interrupt(int , void *);
@@ -323,22 +326,22 @@ static void poll_dmfe (struct net_device *dev);
 static void dmfe_descriptor_init(struct net_device *);
 static void allocate_rx_buffer(struct net_device *);
 static void update_cr6(u32, void __iomem *);
-static void send_filter_frame(struct net_device *);
-static void dm9132_id_table(struct net_device *);
-static u16 dmfe_phy_read(void __iomem *, u8, u8, u32);
-static void dmfe_phy_write(void __iomem *, u8, u8, u16, u32);
-static void dmfe_phy_write_1bit(void __iomem *, u32);
-static u16 dmfe_phy_read_1bit(void __iomem *);
+static void send_filter_frame(struct DEVICE *);
+static void dm9132_id_table(struct DEVICE *);
+static u16 phy_read(void __iomem *, u8, u8, u32);
+static void phy_write(void __iomem *, u8, u8, u16, u32);
+static void phy_write_1bit(void __iomem *, u32);
+static u16 phy_read_1bit(void __iomem *);
 static u8 dmfe_sense_speed(struct dmfe_board_info *);
 static void dmfe_process_mode(struct dmfe_board_info *);
 static void dmfe_timer(unsigned long);
 static inline u32 cal_CRC(unsigned char *, unsigned int, u8);
-static void dmfe_rx_packet(struct net_device *, struct dmfe_board_info *);
-static void dmfe_free_tx_pkt(struct net_device *, struct dmfe_board_info *);
+static void dmfe_rx_packet(struct DEVICE *, struct dmfe_board_info *);
+static void dmfe_free_tx_pkt(struct DEVICE *, struct dmfe_board_info *);
 static void dmfe_reuse_skb(struct dmfe_board_info *, struct sk_buff *);
-static void dmfe_dynamic_reset(struct net_device *);
+static void dmfe_dynamic_reset(struct DEVICE *);
 static void dmfe_free_rxbuffer(struct dmfe_board_info *);
-static void dmfe_init_dm910x(struct net_device *);
+static void dmfe_init_dm910x(struct DEVICE *);
 static void dmfe_parse_srom(struct dmfe_board_info *);
 static void dmfe_program_DM9801(struct dmfe_board_info *, int);
 static void dmfe_program_DM9802(struct dmfe_board_info *);
@@ -520,6 +523,7 @@ err_out_res:
 err_out_disable:
 	pci_disable_device(pdev);
 err_out_free:
+	pci_set_drvdata(pdev, NULL);
 	free_netdev(dev);
 
 	return err;
@@ -544,6 +548,8 @@ static void dmfe_remove_one(struct pci_dev *pdev)
 					db->buf_pool_ptr, db->buf_pool_dma_ptr);
 		pci_release_regions(pdev);
 		free_netdev(dev);	/* free board information */
+
+		pci_set_drvdata(pdev, NULL);
 	}
 
 	DMFE_DBUG(0, "dmfe_remove_one() exit", 0);
@@ -555,7 +561,7 @@ static void dmfe_remove_one(struct pci_dev *pdev)
  *	The interface is opened whenever "ifconfig" actives it.
  */
 
-static int dmfe_open(struct net_device *dev)
+static int dmfe_open(struct DEVICE *dev)
 {
 	struct dmfe_board_info *db = netdev_priv(dev);
 	const int irq = db->pdev->irq;
@@ -614,7 +620,7 @@ static int dmfe_open(struct net_device *dev)
  *	Enable Tx/Rx machine
  */
 
-static void dmfe_init_dm910x(struct net_device *dev)
+static void dmfe_init_dm910x(struct DEVICE *dev)
 {
 	struct dmfe_board_info *db = netdev_priv(dev);
 	void __iomem *ioaddr = db->ioaddr;
@@ -650,7 +656,7 @@ static void dmfe_init_dm910x(struct net_device *dev)
 	if ( !(db->media_mode & DMFE_AUTO) )
 		db->op_mode = db->media_mode; 	/* Force Mode */
 
-	/* Initialize Transmit/Receive descriptor and CR3/4 */
+	/* Initialize Transmit/Receive decriptor and CR3/4 */
 	dmfe_descriptor_init(dev);
 
 	/* Init CR6 to program DM910x operation */
@@ -681,7 +687,7 @@ static void dmfe_init_dm910x(struct net_device *dev)
  */
 
 static netdev_tx_t dmfe_start_xmit(struct sk_buff *skb,
-					 struct net_device *dev)
+					 struct DEVICE *dev)
 {
 	struct dmfe_board_info *db = netdev_priv(dev);
 	void __iomem *ioaddr = db->ioaddr;
@@ -693,7 +699,7 @@ static netdev_tx_t dmfe_start_xmit(struct sk_buff *skb,
 	/* Too large packet check */
 	if (skb->len > MAX_PACKET_SIZE) {
 		pr_err("big packet = %d\n", (u16)skb->len);
-		dev_kfree_skb_any(skb);
+		dev_kfree_skb(skb);
 		return NETDEV_TX_OK;
 	}
 
@@ -725,7 +731,7 @@ static netdev_tx_t dmfe_start_xmit(struct sk_buff *skb,
 		txptr->tdes0 = cpu_to_le32(0x80000000);	/* Set owner bit */
 		db->tx_packet_cnt++;			/* Ready to send */
 		dw32(DCR1, 0x1);			/* Issue Tx polling */
-		netif_trans_update(dev);		/* saved time stamp */
+		dev->trans_start = jiffies;		/* saved time stamp */
 	} else {
 		db->tx_queue_cnt++;			/* queue TX packet */
 		dw32(DCR1, 0x1);			/* Issue Tx polling */
@@ -740,7 +746,7 @@ static netdev_tx_t dmfe_start_xmit(struct sk_buff *skb,
 	dw32(DCR7, db->cr7_data);
 
 	/* free this SKB */
-	dev_consume_skb_any(skb);
+	dev_kfree_skb(skb);
 
 	return NETDEV_TX_OK;
 }
@@ -751,7 +757,7 @@ static netdev_tx_t dmfe_start_xmit(struct sk_buff *skb,
  *	The interface is stopped when it is brought.
  */
 
-static int dmfe_stop(struct net_device *dev)
+static int dmfe_stop(struct DEVICE *dev)
 {
 	struct dmfe_board_info *db = netdev_priv(dev);
 	void __iomem *ioaddr = db->ioaddr;
@@ -767,7 +773,7 @@ static int dmfe_stop(struct net_device *dev)
 	/* Reset & stop DM910X board */
 	dw32(DCR0, DM910X_RESET);
 	udelay(100);
-	dmfe_phy_write(ioaddr, db->phy_addr, 0, 0x8000, db->chip_id);
+	phy_write(ioaddr, db->phy_addr, 0, 0x8000, db->chip_id);
 
 	/* free interrupt */
 	free_irq(db->pdev->irq, dev);
@@ -795,7 +801,7 @@ static int dmfe_stop(struct net_device *dev)
 
 static irqreturn_t dmfe_interrupt(int irq, void *dev_id)
 {
-	struct net_device *dev = dev_id;
+	struct DEVICE *dev = dev_id;
 	struct dmfe_board_info *db = netdev_priv(dev);
 	void __iomem *ioaddr = db->ioaddr;
 	unsigned long flags;
@@ -876,7 +882,7 @@ static void poll_dmfe (struct net_device *dev)
  *	Free TX resource after TX complete
  */
 
-static void dmfe_free_tx_pkt(struct net_device *dev, struct dmfe_board_info *db)
+static void dmfe_free_tx_pkt(struct DEVICE *dev, struct dmfe_board_info * db)
 {
 	struct tx_desc *txptr;
 	void __iomem *ioaddr = db->ioaddr;
@@ -931,7 +937,7 @@ static void dmfe_free_tx_pkt(struct net_device *dev, struct dmfe_board_info *db)
 		db->tx_packet_cnt++;			/* Ready to send */
 		db->tx_queue_cnt--;
 		dw32(DCR1, 0x1);			/* Issue Tx polling */
-		netif_trans_update(dev);		/* saved time stamp */
+		dev->trans_start = jiffies;		/* saved time stamp */
 	}
 
 	/* Resource available check */
@@ -958,7 +964,7 @@ static inline u32 cal_CRC(unsigned char * Data, unsigned int Len, u8 flag)
  *	Receive the come packet and pass to upper layer
  */
 
-static void dmfe_rx_packet(struct net_device *dev, struct dmfe_board_info *db)
+static void dmfe_rx_packet(struct DEVICE *dev, struct dmfe_board_info * db)
 {
 	struct rx_desc *rxptr;
 	struct sk_buff *skb, *newskb;
@@ -1049,7 +1055,7 @@ static void dmfe_rx_packet(struct net_device *dev, struct dmfe_board_info *db)
  * Set DM910X multicast address
  */
 
-static void dmfe_set_filter_mode(struct net_device *dev)
+static void dmfe_set_filter_mode(struct DEVICE * dev)
 {
 	struct dmfe_board_info *db = netdev_priv(dev);
 	unsigned long flags;
@@ -1151,7 +1157,7 @@ static void dmfe_timer(unsigned long data)
 		if (db->chip_type && (db->chip_id==PCI_DM9102_ID)) {
 			db->cr6_data &= ~0x40000;
 			update_cr6(db->cr6_data, ioaddr);
-			dmfe_phy_write(ioaddr, db->phy_addr, 0, 0x1000, db->chip_id);
+			phy_write(ioaddr, db->phy_addr, 0, 0x1000, db->chip_id);
 			db->cr6_data |= 0x40000;
 			update_cr6(db->cr6_data, ioaddr);
 			db->timer.expires = DMFE_TIMER_WUT + HZ * 2;
@@ -1227,9 +1233,9 @@ static void dmfe_timer(unsigned long data)
 	*/
 
 	/* need a dummy read because of PHY's register latch*/
-	dmfe_phy_read (db->ioaddr, db->phy_addr, 1, db->chip_id);
-	link_ok_phy = (dmfe_phy_read (db->ioaddr,
-				      db->phy_addr, 1, db->chip_id) & 0x4) ? 1 : 0;
+	phy_read (db->ioaddr, db->phy_addr, 1, db->chip_id);
+	link_ok_phy = (phy_read (db->ioaddr,
+		       db->phy_addr, 1, db->chip_id) & 0x4) ? 1 : 0;
 
 	if (link_ok_phy != link_ok) {
 		DMFE_DBUG (0, "PHY and chip report different link status", 0);
@@ -1244,8 +1250,8 @@ static void dmfe_timer(unsigned long data)
 		/* For Force 10/100M Half/Full mode: Enable Auto-Nego mode */
 		/* AUTO or force 1M Homerun/Longrun don't need */
 		if ( !(db->media_mode & 0x38) )
-			dmfe_phy_write(db->ioaddr, db->phy_addr,
-				       0, 0x1000, db->chip_id);
+			phy_write(db->ioaddr, db->phy_addr,
+				  0, 0x1000, db->chip_id);
 
 		/* AUTO mode, if INT phyxcer link failed, select EXT device */
 		if (db->media_mode & DMFE_AUTO) {
@@ -1542,7 +1548,7 @@ static void send_filter_frame(struct net_device *dev)
 		update_cr6(db->cr6_data | 0x2000, ioaddr);
 		dw32(DCR1, 0x1);	/* Issue Tx polling */
 		update_cr6(db->cr6_data, ioaddr);
-		netif_trans_update(dev);
+		dev->trans_start = jiffies;
 	} else
 		db->tx_queue_cnt++;	/* Put in TX queue */
 }
@@ -1646,16 +1652,16 @@ static u8 dmfe_sense_speed(struct dmfe_board_info *db)
 	/* CR6 bit18=0, select 10/100M */
 	update_cr6(db->cr6_data & ~0x40000, ioaddr);
 
-	phy_mode = dmfe_phy_read(db->ioaddr, db->phy_addr, 1, db->chip_id);
-	phy_mode = dmfe_phy_read(db->ioaddr, db->phy_addr, 1, db->chip_id);
+	phy_mode = phy_read(db->ioaddr, db->phy_addr, 1, db->chip_id);
+	phy_mode = phy_read(db->ioaddr, db->phy_addr, 1, db->chip_id);
 
 	if ( (phy_mode & 0x24) == 0x24 ) {
 		if (db->chip_id == PCI_DM9132_ID)	/* DM9132 */
-			phy_mode = dmfe_phy_read(db->ioaddr,
-						 db->phy_addr, 7, db->chip_id) & 0xf000;
+			phy_mode = phy_read(db->ioaddr,
+				    db->phy_addr, 7, db->chip_id) & 0xf000;
 		else 				/* DM9102/DM9102A */
-			phy_mode = dmfe_phy_read(db->ioaddr,
-						 db->phy_addr, 17, db->chip_id) & 0xf000;
+			phy_mode = phy_read(db->ioaddr,
+				    db->phy_addr, 17, db->chip_id) & 0xf000;
 		switch (phy_mode) {
 		case 0x1000: db->op_mode = DMFE_10MHF; break;
 		case 0x2000: db->op_mode = DMFE_10MFD; break;
@@ -1692,15 +1698,15 @@ static void dmfe_set_phyxcer(struct dmfe_board_info *db)
 
 	/* DM9009 Chip: Phyxcer reg18 bit12=0 */
 	if (db->chip_id == PCI_DM9009_ID) {
-		phy_reg = dmfe_phy_read(db->ioaddr,
-					db->phy_addr, 18, db->chip_id) & ~0x1000;
+		phy_reg = phy_read(db->ioaddr,
+				   db->phy_addr, 18, db->chip_id) & ~0x1000;
 
-		dmfe_phy_write(db->ioaddr,
-			       db->phy_addr, 18, phy_reg, db->chip_id);
+		phy_write(db->ioaddr,
+			  db->phy_addr, 18, phy_reg, db->chip_id);
 	}
 
 	/* Phyxcer capability setting */
-	phy_reg = dmfe_phy_read(db->ioaddr, db->phy_addr, 4, db->chip_id) & ~0x01e0;
+	phy_reg = phy_read(db->ioaddr, db->phy_addr, 4, db->chip_id) & ~0x01e0;
 
 	if (db->media_mode & DMFE_AUTO) {
 		/* AUTO Mode */
@@ -1721,13 +1727,13 @@ static void dmfe_set_phyxcer(struct dmfe_board_info *db)
 		phy_reg|=db->PHY_reg4;
 		db->media_mode|=DMFE_AUTO;
 	}
-	dmfe_phy_write(db->ioaddr, db->phy_addr, 4, phy_reg, db->chip_id);
+	phy_write(db->ioaddr, db->phy_addr, 4, phy_reg, db->chip_id);
 
  	/* Restart Auto-Negotiation */
 	if ( db->chip_type && (db->chip_id == PCI_DM9102_ID) )
-		dmfe_phy_write(db->ioaddr, db->phy_addr, 0, 0x1800, db->chip_id);
+		phy_write(db->ioaddr, db->phy_addr, 0, 0x1800, db->chip_id);
 	if ( !db->chip_type )
-		dmfe_phy_write(db->ioaddr, db->phy_addr, 0, 0x1200, db->chip_id);
+		phy_write(db->ioaddr, db->phy_addr, 0, 0x1200, db->chip_id);
 }
 
 
@@ -1759,7 +1765,7 @@ static void dmfe_process_mode(struct dmfe_board_info *db)
 	/* 10/100M phyxcer force mode need */
 	if ( !(db->media_mode & 0x18)) {
 		/* Forece Mode */
-		phy_reg = dmfe_phy_read(db->ioaddr, db->phy_addr, 6, db->chip_id);
+		phy_reg = phy_read(db->ioaddr, db->phy_addr, 6, db->chip_id);
 		if ( !(phy_reg & 0x1) ) {
 			/* parter without N-Way capability */
 			phy_reg = 0x0;
@@ -1769,12 +1775,12 @@ static void dmfe_process_mode(struct dmfe_board_info *db)
 			case DMFE_100MHF: phy_reg = 0x2000; break;
 			case DMFE_100MFD: phy_reg = 0x2100; break;
 			}
-			dmfe_phy_write(db->ioaddr,
-				       db->phy_addr, 0, phy_reg, db->chip_id);
+			phy_write(db->ioaddr,
+				  db->phy_addr, 0, phy_reg, db->chip_id);
        			if ( db->chip_type && (db->chip_id == PCI_DM9102_ID) )
 				mdelay(20);
-			dmfe_phy_write(db->ioaddr,
-				       db->phy_addr, 0, phy_reg, db->chip_id);
+			phy_write(db->ioaddr,
+				  db->phy_addr, 0, phy_reg, db->chip_id);
 		}
 	}
 }
@@ -1784,8 +1790,8 @@ static void dmfe_process_mode(struct dmfe_board_info *db)
  *	Write a word to Phy register
  */
 
-static void dmfe_phy_write(void __iomem *ioaddr, u8 phy_addr, u8 offset,
-			   u16 phy_data, u32 chip_id)
+static void phy_write(void __iomem *ioaddr, u8 phy_addr, u8 offset,
+		      u16 phy_data, u32 chip_id)
 {
 	u16 i;
 
@@ -1796,34 +1802,34 @@ static void dmfe_phy_write(void __iomem *ioaddr, u8 phy_addr, u8 offset,
 
 		/* Send 33 synchronization clock to Phy controller */
 		for (i = 0; i < 35; i++)
-			dmfe_phy_write_1bit(ioaddr, PHY_DATA_1);
+			phy_write_1bit(ioaddr, PHY_DATA_1);
 
 		/* Send start command(01) to Phy */
-		dmfe_phy_write_1bit(ioaddr, PHY_DATA_0);
-		dmfe_phy_write_1bit(ioaddr, PHY_DATA_1);
+		phy_write_1bit(ioaddr, PHY_DATA_0);
+		phy_write_1bit(ioaddr, PHY_DATA_1);
 
 		/* Send write command(01) to Phy */
-		dmfe_phy_write_1bit(ioaddr, PHY_DATA_0);
-		dmfe_phy_write_1bit(ioaddr, PHY_DATA_1);
+		phy_write_1bit(ioaddr, PHY_DATA_0);
+		phy_write_1bit(ioaddr, PHY_DATA_1);
 
 		/* Send Phy address */
 		for (i = 0x10; i > 0; i = i >> 1)
-			dmfe_phy_write_1bit(ioaddr,
-					    phy_addr & i ? PHY_DATA_1 : PHY_DATA_0);
+			phy_write_1bit(ioaddr,
+				       phy_addr & i ? PHY_DATA_1 : PHY_DATA_0);
 
 		/* Send register address */
 		for (i = 0x10; i > 0; i = i >> 1)
-			dmfe_phy_write_1bit(ioaddr,
-					    offset & i ? PHY_DATA_1 : PHY_DATA_0);
+			phy_write_1bit(ioaddr,
+				       offset & i ? PHY_DATA_1 : PHY_DATA_0);
 
 		/* written trasnition */
-		dmfe_phy_write_1bit(ioaddr, PHY_DATA_1);
-		dmfe_phy_write_1bit(ioaddr, PHY_DATA_0);
+		phy_write_1bit(ioaddr, PHY_DATA_1);
+		phy_write_1bit(ioaddr, PHY_DATA_0);
 
 		/* Write a word data to PHY controller */
 		for ( i = 0x8000; i > 0; i >>= 1)
-			dmfe_phy_write_1bit(ioaddr,
-					    phy_data & i ? PHY_DATA_1 : PHY_DATA_0);
+			phy_write_1bit(ioaddr,
+				       phy_data & i ? PHY_DATA_1 : PHY_DATA_0);
 	}
 }
 
@@ -1832,7 +1838,7 @@ static void dmfe_phy_write(void __iomem *ioaddr, u8 phy_addr, u8 offset,
  *	Read a word data from phy register
  */
 
-static u16 dmfe_phy_read(void __iomem *ioaddr, u8 phy_addr, u8 offset, u32 chip_id)
+static u16 phy_read(void __iomem *ioaddr, u8 phy_addr, u8 offset, u32 chip_id)
 {
 	int i;
 	u16 phy_data;
@@ -1845,33 +1851,33 @@ static u16 dmfe_phy_read(void __iomem *ioaddr, u8 phy_addr, u8 offset, u32 chip_
 
 		/* Send 33 synchronization clock to Phy controller */
 		for (i = 0; i < 35; i++)
-			dmfe_phy_write_1bit(ioaddr, PHY_DATA_1);
+			phy_write_1bit(ioaddr, PHY_DATA_1);
 
 		/* Send start command(01) to Phy */
-		dmfe_phy_write_1bit(ioaddr, PHY_DATA_0);
-		dmfe_phy_write_1bit(ioaddr, PHY_DATA_1);
+		phy_write_1bit(ioaddr, PHY_DATA_0);
+		phy_write_1bit(ioaddr, PHY_DATA_1);
 
 		/* Send read command(10) to Phy */
-		dmfe_phy_write_1bit(ioaddr, PHY_DATA_1);
-		dmfe_phy_write_1bit(ioaddr, PHY_DATA_0);
+		phy_write_1bit(ioaddr, PHY_DATA_1);
+		phy_write_1bit(ioaddr, PHY_DATA_0);
 
 		/* Send Phy address */
 		for (i = 0x10; i > 0; i = i >> 1)
-			dmfe_phy_write_1bit(ioaddr,
-					    phy_addr & i ? PHY_DATA_1 : PHY_DATA_0);
+			phy_write_1bit(ioaddr,
+				       phy_addr & i ? PHY_DATA_1 : PHY_DATA_0);
 
 		/* Send register address */
 		for (i = 0x10; i > 0; i = i >> 1)
-			dmfe_phy_write_1bit(ioaddr,
-					    offset & i ? PHY_DATA_1 : PHY_DATA_0);
+			phy_write_1bit(ioaddr,
+				       offset & i ? PHY_DATA_1 : PHY_DATA_0);
 
 		/* Skip transition state */
-		dmfe_phy_read_1bit(ioaddr);
+		phy_read_1bit(ioaddr);
 
 		/* read 16bit data */
 		for (phy_data = 0, i = 0; i < 16; i++) {
 			phy_data <<= 1;
-			phy_data |= dmfe_phy_read_1bit(ioaddr);
+			phy_data |= phy_read_1bit(ioaddr);
 		}
 	}
 
@@ -1883,7 +1889,7 @@ static u16 dmfe_phy_read(void __iomem *ioaddr, u8 phy_addr, u8 offset, u32 chip_
  *	Write one bit data to Phy Controller
  */
 
-static void dmfe_phy_write_1bit(void __iomem *ioaddr, u32 phy_data)
+static void phy_write_1bit(void __iomem *ioaddr, u32 phy_data)
 {
 	dw32(DCR9, phy_data);		/* MII Clock Low */
 	udelay(1);
@@ -1898,7 +1904,7 @@ static void dmfe_phy_write_1bit(void __iomem *ioaddr, u32 phy_data)
  *	Read one bit phy data from PHY controller
  */
 
-static u16 dmfe_phy_read_1bit(void __iomem *ioaddr)
+static u16 phy_read_1bit(void __iomem *ioaddr)
 {
 	u16 phy_data;
 
@@ -1992,11 +1998,11 @@ static void dmfe_parse_srom(struct dmfe_board_info * db)
 	/* Check DM9801 or DM9802 present or not */
 	db->HPNA_present = 0;
 	update_cr6(db->cr6_data | 0x40000, db->ioaddr);
-	tmp_reg = dmfe_phy_read(db->ioaddr, db->phy_addr, 3, db->chip_id);
+	tmp_reg = phy_read(db->ioaddr, db->phy_addr, 3, db->chip_id);
 	if ( ( tmp_reg & 0xfff0 ) == 0xb900 ) {
 		/* DM9801 or DM9802 present */
 		db->HPNA_timer = 8;
-		if ( dmfe_phy_read(db->ioaddr, db->phy_addr, 31, db->chip_id) == 0x4404) {
+		if ( phy_read(db->ioaddr, db->phy_addr, 31, db->chip_id) == 0x4404) {
 			/* DM9801 HomeRun */
 			db->HPNA_present = 1;
 			dmfe_program_DM9801(db, tmp_reg);
@@ -2022,29 +2028,29 @@ static void dmfe_program_DM9801(struct dmfe_board_info * db, int HPNA_rev)
 	switch(HPNA_rev) {
 	case 0xb900: /* DM9801 E3 */
 		db->HPNA_command |= 0x1000;
-		reg25 = dmfe_phy_read(db->ioaddr, db->phy_addr, 24, db->chip_id);
+		reg25 = phy_read(db->ioaddr, db->phy_addr, 24, db->chip_id);
 		reg25 = ( (reg25 + HPNA_NoiseFloor) & 0xff) | 0xf000;
-		reg17 = dmfe_phy_read(db->ioaddr, db->phy_addr, 17, db->chip_id);
+		reg17 = phy_read(db->ioaddr, db->phy_addr, 17, db->chip_id);
 		break;
 	case 0xb901: /* DM9801 E4 */
-		reg25 = dmfe_phy_read(db->ioaddr, db->phy_addr, 25, db->chip_id);
+		reg25 = phy_read(db->ioaddr, db->phy_addr, 25, db->chip_id);
 		reg25 = (reg25 & 0xff00) + HPNA_NoiseFloor;
-		reg17 = dmfe_phy_read(db->ioaddr, db->phy_addr, 17, db->chip_id);
+		reg17 = phy_read(db->ioaddr, db->phy_addr, 17, db->chip_id);
 		reg17 = (reg17 & 0xfff0) + HPNA_NoiseFloor + 3;
 		break;
 	case 0xb902: /* DM9801 E5 */
 	case 0xb903: /* DM9801 E6 */
 	default:
 		db->HPNA_command |= 0x1000;
-		reg25 = dmfe_phy_read(db->ioaddr, db->phy_addr, 25, db->chip_id);
+		reg25 = phy_read(db->ioaddr, db->phy_addr, 25, db->chip_id);
 		reg25 = (reg25 & 0xff00) + HPNA_NoiseFloor - 5;
-		reg17 = dmfe_phy_read(db->ioaddr, db->phy_addr, 17, db->chip_id);
+		reg17 = phy_read(db->ioaddr, db->phy_addr, 17, db->chip_id);
 		reg17 = (reg17 & 0xfff0) + HPNA_NoiseFloor;
 		break;
 	}
-	dmfe_phy_write(db->ioaddr, db->phy_addr, 16, db->HPNA_command, db->chip_id);
-	dmfe_phy_write(db->ioaddr, db->phy_addr, 17, reg17, db->chip_id);
-	dmfe_phy_write(db->ioaddr, db->phy_addr, 25, reg25, db->chip_id);
+	phy_write(db->ioaddr, db->phy_addr, 16, db->HPNA_command, db->chip_id);
+	phy_write(db->ioaddr, db->phy_addr, 17, reg17, db->chip_id);
+	phy_write(db->ioaddr, db->phy_addr, 25, reg25, db->chip_id);
 }
 
 
@@ -2057,10 +2063,10 @@ static void dmfe_program_DM9802(struct dmfe_board_info * db)
 	uint phy_reg;
 
 	if ( !HPNA_NoiseFloor ) HPNA_NoiseFloor = DM9802_NOISE_FLOOR;
-	dmfe_phy_write(db->ioaddr, db->phy_addr, 16, db->HPNA_command, db->chip_id);
-	phy_reg = dmfe_phy_read(db->ioaddr, db->phy_addr, 25, db->chip_id);
+	phy_write(db->ioaddr, db->phy_addr, 16, db->HPNA_command, db->chip_id);
+	phy_reg = phy_read(db->ioaddr, db->phy_addr, 25, db->chip_id);
 	phy_reg = ( phy_reg & 0xff00) + HPNA_NoiseFloor;
-	dmfe_phy_write(db->ioaddr, db->phy_addr, 25, phy_reg, db->chip_id);
+	phy_write(db->ioaddr, db->phy_addr, 25, phy_reg, db->chip_id);
 }
 
 
@@ -2074,7 +2080,7 @@ static void dmfe_HPNA_remote_cmd_chk(struct dmfe_board_info * db)
 	uint phy_reg;
 
 	/* Got remote device status */
-	phy_reg = dmfe_phy_read(db->ioaddr, db->phy_addr, 17, db->chip_id) & 0x60;
+	phy_reg = phy_read(db->ioaddr, db->phy_addr, 17, db->chip_id) & 0x60;
 	switch(phy_reg) {
 	case 0x00: phy_reg = 0x0a00;break; /* LP/LS */
 	case 0x20: phy_reg = 0x0900;break; /* LP/HS */
@@ -2084,8 +2090,8 @@ static void dmfe_HPNA_remote_cmd_chk(struct dmfe_board_info * db)
 
 	/* Check remote device status match our setting ot not */
 	if ( phy_reg != (db->HPNA_command & 0x0f00) ) {
-		dmfe_phy_write(db->ioaddr, db->phy_addr, 16, db->HPNA_command,
-			       db->chip_id);
+		phy_write(db->ioaddr, db->phy_addr, 16, db->HPNA_command,
+			  db->chip_id);
 		db->HPNA_timer=8;
 	} else
 		db->HPNA_timer=600;	/* Match, every 10 minutes, check */
@@ -2093,7 +2099,7 @@ static void dmfe_HPNA_remote_cmd_chk(struct dmfe_board_info * db)
 
 
 
-static const struct pci_device_id dmfe_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(dmfe_pci_tbl) = {
 	{ 0x1282, 0x9132, PCI_ANY_ID, PCI_ANY_ID, 0, 0, PCI_DM9132_ID },
 	{ 0x1282, 0x9102, PCI_ANY_ID, PCI_ANY_ID, 0, 0, PCI_DM9102_ID },
 	{ 0x1282, 0x9100, PCI_ANY_ID, PCI_ANY_ID, 0, 0, PCI_DM9100_ID },
@@ -2262,7 +2268,7 @@ static int __init dmfe_init_module(void)
 
 static void __exit dmfe_cleanup_module(void)
 {
-	DMFE_DBUG(0, "dmfe_cleanup_module() ", debug);
+	DMFE_DBUG(0, "dmfe_clean_module() ", debug);
 	pci_unregister_driver(&dmfe_driver);
 }
 

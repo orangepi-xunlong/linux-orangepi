@@ -1,39 +1,25 @@
-/*
- * linux-4.9/drivers/media/platform/sunxi-vfe/platform_cfg.h
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
 
 /*
  ***************************************************************************************
- *
+ * 
  * platform_cfg.h
- *
+ * 
  * Hawkview ISP - platform_cfg.h module
- *
+ * 
  * Copyright (c) 2014 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
- *
+ * 
  * Version		  Author         Date		    Description
  *
- *   2.0		  Yang Feng	2014/07/24	      Second Version
- *
+ *   2.0		  Yang Feng   	2014/07/24	      Second Version
+ * 
  ****************************************************************************************
  */
 
 #ifndef __PLATFORM_CFG__H__
 #define __PLATFORM_CFG__H__
 
-/* #define FPGA_VER */
+//#define FPGA_VER
+#define SUNXI_MEM
 
 #ifdef FPGA_VER
 #define FPGA_PIN
@@ -48,19 +34,19 @@
 #ifdef VFE_CLK
 #include <linux/clk.h>
 #include <linux/clk/sunxi.h>
-#include <linux/sh_clk.h>
+#include <linux/clk-private.h>
 #endif
 
 #ifdef VFE_GPIO
 #include <linux/pinctrl/consumer.h>
-#include <linux/pinctrl/pinconf.h>
+#include <linux/pinctrl/pinconf-sunxi.h>
 #endif
 
 #ifdef VFE_PMU
 #include <linux/regulator/consumer.h>
 #endif
 
-#include <linux/sunxi-gpio.h>
+#include <linux/sys_config.h>
 #include <linux/of.h>
 #include <linux/of_gpio.h>
 #include <linux/of_irq.h>
@@ -74,34 +60,18 @@
 #define DPHY_CLK (150*1000*1000)
 #endif
 
-#if defined CONFIG_ARCH_SUN3IW1P1
-#include "platform/sun3iw1p1_vfe_cfg.h"
-#define SUNXI_PLATFORM_ID ISP_PLATFORM_NUM
-#elif defined CONFIG_ARCH_SUN50IW1P1
+#if defined CONFIG_ARCH_SUN50IW1P1
 #include "platform/sun50iw1p1_vfe_cfg.h"
 #define SUNXI_PLATFORM_ID ISP_PLATFORM_SUN50IW1P1
-#elif defined CONFIG_ARCH_SUN8IW5P1
-#include "platform/sun8iw5p1_vfe_cfg.h"
-#define SUNXI_PLATFORM_ID ISP_PLATFORM_SUN8IW5P1
-#elif defined CONFIG_ARCH_SUN8IW6P1
-#include "platform/sun8iw6p1_vfe_cfg.h"
-#define SUNXI_PLATFORM_ID ISP_PLATFORM_SUN8IW6P1
-#elif defined CONFIG_ARCH_SUN8IW7P1
-#include "platform/sun8iw7p1_vfe_cfg.h"
-#define SUNXI_PLATFORM_ID ISP_PLATFORM_SUN8IW7P1
 #elif defined CONFIG_ARCH_SUN8IW10P1
 #include "platform/sun8iw10p1_vfe_cfg.h"
 #define SUNXI_PLATFORM_ID ISP_PLATFORM_NUM
 #elif defined CONFIG_ARCH_SUN8IW11P1
-#define CH_OUTPUT_IN_DIFFERENT_VIDEO
 #include "platform/sun8iw11p1_vfe_cfg.h"
 #define SUNXI_PLATFORM_ID ISP_PLATFORM_NUM
 #elif defined CONFIG_ARCH_SUN50IW2P1
 #include "platform/sun50iw2p1_vfe_cfg.h"
 #define SUNXI_PLATFORM_ID ISP_PLATFORM_SUN50IW1P1
-#else
-#include "platform/sun8iw11p1_vfe_cfg.h"
-#define SUNXI_PLATFORM_ID ISP_PLATFORM_NUM
 #endif
 
 #define ISP_LUT_MEM_OFS             0x0
@@ -112,4 +82,4 @@
 #define ISP_DRC_MEM_OFS            0x0
 #define ISP_DISC_MEM_OFS          (ISP_DRC_MEM_OFS + ISP_DRC_MEM_SIZE)
 
-#endif /* __PLATFORM_CFG__H__ */
+#endif //__PLATFORM_CFG__H__

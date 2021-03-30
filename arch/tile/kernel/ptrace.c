@@ -22,7 +22,6 @@
 #include <linux/regset.h>
 #include <linux/elf.h>
 #include <linux/tracehook.h>
-#include <linux/context_tracking.h>
 #include <asm/traps.h>
 #include <arch/chip.h>
 
@@ -111,7 +110,7 @@ static int tile_gpr_set(struct task_struct *target,
 			  const void *kbuf, const void __user *ubuf)
 {
 	int ret;
-	struct pt_regs regs = *task_pt_regs(target);
+	struct pt_regs regs;
 
 	ret = user_regset_copyin(&pos, &count, &kbuf, &ubuf, &regs, 0,
 				 sizeof(regs));
@@ -253,18 +252,12 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 
 int do_syscall_trace_enter(struct pt_regs *regs)
 {
-	u32 work = ACCESS_ONCE(current_thread_info()->flags);
-
-	if ((work & _TIF_SYSCALL_TRACE) &&
-	    tracehook_report_syscall_entry(regs)) {
-		regs->regs[TREG_SYSCALL_NR] = -1;
-		return -1;
+	if (test_thread_flag(TIF_SYSCALL_TRACE)) {
+		if (tracehook_report_syscall_entry(regs))
+			regs->regs[TREG_SYSCALL_NR] = -1;
 	}
 
-	if (secure_computing(NULL) == -1)
-		return -1;
-
-	if (work & _TIF_SYSCALL_TRACEPOINT)
+	if (test_thread_flag(TIF_SYSCALL_TRACEPOINT))
 		trace_sys_enter(regs, regs->regs[TREG_SYSCALL_NR]);
 
 	return regs->regs[TREG_SYSCALL_NR];
@@ -272,21 +265,6 @@ int do_syscall_trace_enter(struct pt_regs *regs)
 
 void do_syscall_trace_exit(struct pt_regs *regs)
 {
-	long errno;
-
-	/*
-	 * The standard tile calling convention returns the value (or negative
-	 * errno) in r0, and zero (or positive errno) in r1.
-	 * It saves a couple of cycles on the hot path to do this work in
-	 * registers only as we return, rather than updating the in-memory
-	 * struct ptregs.
-	 */
-	errno = (long) regs->regs[0];
-	if (errno < 0 && errno > -4096)
-		regs->regs[1] = -errno;
-	else
-		regs->regs[1] = 0;
-
 	if (test_thread_flag(TIF_SYSCALL_TRACE))
 		tracehook_report_syscall_exit(regs, 0);
 
@@ -294,7 +272,7 @@ void do_syscall_trace_exit(struct pt_regs *regs)
 		trace_sys_exit(regs, regs->regs[0]);
 }
 
-void send_sigtrap(struct task_struct *tsk, struct pt_regs *regs)
+void send_sigtrap(struct task_struct *tsk, struct pt_regs *regs, int error_code)
 {
 	struct siginfo info;
 
@@ -310,5 +288,5 @@ void send_sigtrap(struct task_struct *tsk, struct pt_regs *regs)
 /* Handle synthetic interrupt delivered only by the simulator. */
 void __kprobes do_breakpoint(struct pt_regs* regs, int fault_num)
 {
-	send_sigtrap(current, regs);
+	send_sigtrap(current, regs, fault_num);
 }

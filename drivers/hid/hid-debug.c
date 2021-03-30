@@ -30,7 +30,6 @@
 
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
-#include <linux/kfifo.h>
 #include <linux/sched.h>
 #include <linux/export.h>
 #include <linux/slab.h>
@@ -166,9 +165,6 @@ static const struct hid_usage_entry hid_usage_table[] = {
     {0, 0x53, "DeviceIndex"},
     {0, 0x54, "ContactCount"},
     {0, 0x55, "ContactMaximumNumber"},
-    {0, 0x59, "ButtonType"},
-    {0, 0x5A, "SecondaryBarrelSwitch"},
-    {0, 0x5B, "TransducerSerialNumber"},
   { 15, 0, "PhysicalInterfaceDevice" },
     {0, 0x00, "Undefined"},
     {0, 0x01, "Physical_Interface_Device"},
@@ -276,85 +272,6 @@ static const struct hid_usage_entry hid_usage_table[] = {
     {0, 0xAA, "Shared_Parameter_Blocks"},
     {0, 0xAB, "Create_New_Effect_Report"},
     {0, 0xAC, "RAM_Pool_Available"},
-  {  0x20, 0, "Sensor" },
-    { 0x20, 0x01, "Sensor" },
-    { 0x20, 0x10, "Biometric" },
-      { 0x20, 0x11, "BiometricHumanPresence" },
-      { 0x20, 0x12, "BiometricHumanProximity" },
-      { 0x20, 0x13, "BiometricHumanTouch" },
-    { 0x20, 0x20, "Electrical" },
-      { 0x20, 0x21, "ElectricalCapacitance" },
-      { 0x20, 0x22, "ElectricalCurrent" },
-      { 0x20, 0x23, "ElectricalPower" },
-      { 0x20, 0x24, "ElectricalInductance" },
-      { 0x20, 0x25, "ElectricalResistance" },
-      { 0x20, 0x26, "ElectricalVoltage" },
-      { 0x20, 0x27, "ElectricalPoteniometer" },
-      { 0x20, 0x28, "ElectricalFrequency" },
-      { 0x20, 0x29, "ElectricalPeriod" },
-    { 0x20, 0x30, "Environmental" },
-      { 0x20, 0x31, "EnvironmentalAtmosphericPressure" },
-      { 0x20, 0x32, "EnvironmentalHumidity" },
-      { 0x20, 0x33, "EnvironmentalTemperature" },
-      { 0x20, 0x34, "EnvironmentalWindDirection" },
-      { 0x20, 0x35, "EnvironmentalWindSpeed" },
-    { 0x20, 0x40, "Light" },
-      { 0x20, 0x41, "LightAmbientLight" },
-      { 0x20, 0x42, "LightConsumerInfrared" },
-    { 0x20, 0x50, "Location" },
-      { 0x20, 0x51, "LocationBroadcast" },
-      { 0x20, 0x52, "LocationDeadReckoning" },
-      { 0x20, 0x53, "LocationGPS" },
-      { 0x20, 0x54, "LocationLookup" },
-      { 0x20, 0x55, "LocationOther" },
-      { 0x20, 0x56, "LocationStatic" },
-      { 0x20, 0x57, "LocationTriangulation" },
-    { 0x20, 0x60, "Mechanical" },
-      { 0x20, 0x61, "MechanicalBooleanSwitch" },
-      { 0x20, 0x62, "MechanicalBooleanSwitchArray" },
-      { 0x20, 0x63, "MechanicalMultivalueSwitch" },
-      { 0x20, 0x64, "MechanicalForce" },
-      { 0x20, 0x65, "MechanicalPressure" },
-      { 0x20, 0x66, "MechanicalStrain" },
-      { 0x20, 0x67, "MechanicalWeight" },
-      { 0x20, 0x68, "MechanicalHapticVibrator" },
-      { 0x20, 0x69, "MechanicalHallEffectSwitch" },
-    { 0x20, 0x70, "Motion" },
-      { 0x20, 0x71, "MotionAccelerometer1D" },
-      { 0x20, 0x72, "MotionAccelerometer2D" },
-      { 0x20, 0x73, "MotionAccelerometer3D" },
-      { 0x20, 0x74, "MotionGyrometer1D" },
-      { 0x20, 0x75, "MotionGyrometer2D" },
-      { 0x20, 0x76, "MotionGyrometer3D" },
-      { 0x20, 0x77, "MotionMotionDetector" },
-      { 0x20, 0x78, "MotionSpeedometer" },
-      { 0x20, 0x79, "MotionAccelerometer" },
-      { 0x20, 0x7A, "MotionGyrometer" },
-    { 0x20, 0x80, "Orientation" },
-      { 0x20, 0x81, "OrientationCompass1D" },
-      { 0x20, 0x82, "OrientationCompass2D" },
-      { 0x20, 0x83, "OrientationCompass3D" },
-      { 0x20, 0x84, "OrientationInclinometer1D" },
-      { 0x20, 0x85, "OrientationInclinometer2D" },
-      { 0x20, 0x86, "OrientationInclinometer3D" },
-      { 0x20, 0x87, "OrientationDistance1D" },
-      { 0x20, 0x88, "OrientationDistance2D" },
-      { 0x20, 0x89, "OrientationDistance3D" },
-      { 0x20, 0x8A, "OrientationDeviceOrientation" },
-      { 0x20, 0x8B, "OrientationCompass" },
-      { 0x20, 0x8C, "OrientationInclinometer" },
-      { 0x20, 0x8D, "OrientationDistance" },
-    { 0x20, 0x90, "Scanner" },
-      { 0x20, 0x91, "ScannerBarcode" },
-      { 0x20, 0x91, "ScannerRFID" },
-      { 0x20, 0x91, "ScannerNFC" },
-    { 0x20, 0xA0, "Time" },
-      { 0x20, 0xA1, "TimeAlarmTimer" },
-      { 0x20, 0xA2, "TimeRealTimeClock" },
-    { 0x20, 0xE0, "Other" },
-      { 0x20, 0xE1, "OtherCustom" },
-      { 0x20, 0xE2, "OtherGeneric" },
-      { 0x20, 0xE3, "OtherGenericEnumerator" },
   { 0x84, 0, "Power Device" },
     { 0x84, 0x02, "PresentStatus" },
     { 0x84, 0x03, "ChangeStatus" },
@@ -456,7 +373,7 @@ static char *resolv_usage_page(unsigned page, struct seq_file *f) {
 	char *buf = NULL;
 
 	if (!f) {
-		buf = kzalloc(HID_DEBUG_BUFSIZE, GFP_ATOMIC);
+		buf = kzalloc(sizeof(char) * HID_DEBUG_BUFSIZE, GFP_ATOMIC);
 		if (!buf)
 			return ERR_PTR(-ENOMEM);
 	}
@@ -660,12 +577,17 @@ EXPORT_SYMBOL_GPL(hid_dump_device);
 /* enqueue string to 'events' ring buffer */
 void hid_debug_event(struct hid_device *hdev, char *buf)
 {
+	int i;
 	struct hid_debug_list *list;
 	unsigned long flags;
 
 	spin_lock_irqsave(&hdev->debug_list_lock, flags);
-	list_for_each_entry(list, &hdev->debug_list, node)
-		kfifo_in(&list->hid_debug_fifo, buf, strlen(buf));
+	list_for_each_entry(list, &hdev->debug_list, node) {
+		for (i = 0; i < strlen(buf); i++)
+			list->hid_debug_buf[(list->tail + i) % HID_DEBUG_BUFSIZE] =
+				buf[i];
+		list->tail = (list->tail + i) % HID_DEBUG_BUFSIZE;
+        }
 	spin_unlock_irqrestore(&hdev->debug_list_lock, flags);
 
 	wake_up_interruptible(&hdev->debug_wait);
@@ -716,7 +638,8 @@ void hid_dump_input(struct hid_device *hdev, struct hid_usage *usage, __s32 valu
 	hid_debug_event(hdev, buf);
 
 	kfree(buf);
-	wake_up_interruptible(&hdev->debug_wait);
+        wake_up_interruptible(&hdev->debug_wait);
+
 }
 EXPORT_SYMBOL_GPL(hid_dump_input);
 
@@ -810,7 +733,7 @@ static const char *keys[KEY_MAX + 1] = {
 	[KEY_DELETEFILE] = "DeleteFile",	[KEY_XFER] = "X-fer",
 	[KEY_PROG1] = "Prog1",			[KEY_PROG2] = "Prog2",
 	[KEY_WWW] = "WWW",			[KEY_MSDOS] = "MSDOS",
-	[KEY_COFFEE] = "Coffee",		[KEY_ROTATE_DISPLAY] = "RotateDisplay",
+	[KEY_COFFEE] = "Coffee",		[KEY_DIRECTION] = "Direction",
 	[KEY_CYCLEWINDOWS] = "CycleWindows",	[KEY_MAIL] = "Mail",
 	[KEY_BOOKMARKS] = "Bookmarks",		[KEY_COMPUTER] = "Computer",
 	[KEY_BACK] = "Back",			[KEY_FORWARD] = "Forward",
@@ -942,12 +865,6 @@ static const char *keys[KEY_MAX + 1] = {
 	[KEY_BRIGHTNESS_MIN] = "BrightnessMin",
 	[KEY_BRIGHTNESS_MAX] = "BrightnessMax",
 	[KEY_BRIGHTNESS_AUTO] = "BrightnessAuto",
-	[KEY_KBDINPUTASSIST_PREV] = "KbdInputAssistPrev",
-	[KEY_KBDINPUTASSIST_NEXT] = "KbdInputAssistNext",
-	[KEY_KBDINPUTASSIST_PREVGROUP] = "KbdInputAssistPrevGroup",
-	[KEY_KBDINPUTASSIST_NEXTGROUP] = "KbdInputAssistNextGroup",
-	[KEY_KBDINPUTASSIST_ACCEPT] = "KbdInputAssistAccept",
-	[KEY_KBDINPUTASSIST_CANCEL] = "KbdInputAssistCancel",
 };
 
 static const char *relatives[REL_MAX + 1] = {
@@ -1081,8 +998,8 @@ static int hid_debug_events_open(struct inode *inode, struct file *file)
 		goto out;
 	}
 
-	err = kfifo_alloc(&list->hid_debug_fifo, HID_DEBUG_FIFOSIZE, GFP_KERNEL);
-	if (err) {
+	if (!(list->hid_debug_buf = kzalloc(sizeof(char) * HID_DEBUG_BUFSIZE, GFP_KERNEL))) {
+		err = -ENOMEM;
 		kfree(list);
 		goto out;
 	}
@@ -1102,57 +1019,70 @@ static ssize_t hid_debug_events_read(struct file *file, char __user *buffer,
 		size_t count, loff_t *ppos)
 {
 	struct hid_debug_list *list = file->private_data;
-	int ret = 0, copied;
+	int ret = 0, len;
 	DECLARE_WAITQUEUE(wait, current);
 
 	mutex_lock(&list->read_mutex);
-	if (kfifo_is_empty(&list->hid_debug_fifo)) {
-		add_wait_queue(&list->hdev->debug_wait, &wait);
-		set_current_state(TASK_INTERRUPTIBLE);
-
-		while (kfifo_is_empty(&list->hid_debug_fifo)) {
-			if (file->f_flags & O_NONBLOCK) {
-				ret = -EAGAIN;
-				break;
-			}
-
-			if (signal_pending(current)) {
-				ret = -ERESTARTSYS;
-				break;
-			}
-
-			/* if list->hdev is NULL we cannot remove_wait_queue().
-			 * if list->hdev->debug is 0 then hid_debug_unregister()
-			 * was already called and list->hdev is being destroyed.
-			 * if we add remove_wait_queue() here we can hit a race.
-			 */
-			if (!list->hdev || !list->hdev->debug) {
-				ret = -EIO;
-				set_current_state(TASK_RUNNING);
-				goto out;
-			}
-
-			/* allow O_NONBLOCK from other threads */
-			mutex_unlock(&list->read_mutex);
-			schedule();
-			mutex_lock(&list->read_mutex);
+	while (ret == 0) {
+		if (list->head == list->tail) {
+			add_wait_queue(&list->hdev->debug_wait, &wait);
 			set_current_state(TASK_INTERRUPTIBLE);
-		}
 
-		__set_current_state(TASK_RUNNING);
-		remove_wait_queue(&list->hdev->debug_wait, &wait);
+			while (list->head == list->tail) {
+				if (file->f_flags & O_NONBLOCK) {
+					ret = -EAGAIN;
+					break;
+				}
+				if (signal_pending(current)) {
+					ret = -ERESTARTSYS;
+					break;
+				}
+
+				if (!list->hdev || !list->hdev->debug) {
+					ret = -EIO;
+					break;
+				}
+
+				/* allow O_NONBLOCK from other threads */
+				mutex_unlock(&list->read_mutex);
+				schedule();
+				mutex_lock(&list->read_mutex);
+				set_current_state(TASK_INTERRUPTIBLE);
+			}
+
+			set_current_state(TASK_RUNNING);
+			remove_wait_queue(&list->hdev->debug_wait, &wait);
+		}
 
 		if (ret)
 			goto out;
-	}
 
-	/* pass the fifo content to userspace, locking is not needed with only
-	 * one concurrent reader and one concurrent writer
-	 */
-	ret = kfifo_to_user(&list->hid_debug_fifo, buffer, count, &copied);
-	if (ret)
-		goto out;
-	ret = copied;
+		/* pass the ringbuffer contents to userspace */
+copy_rest:
+		if (list->tail == list->head)
+			goto out;
+		if (list->tail > list->head) {
+			len = list->tail - list->head;
+
+			if (copy_to_user(buffer + ret, &list->hid_debug_buf[list->head], len)) {
+				ret = -EFAULT;
+				goto out;
+			}
+			ret += len;
+			list->head += len;
+		} else {
+			len = HID_DEBUG_BUFSIZE - list->head;
+
+			if (copy_to_user(buffer, &list->hid_debug_buf[list->head], len)) {
+				ret = -EFAULT;
+				goto out;
+			}
+			list->head = 0;
+			ret += len;
+			goto copy_rest;
+		}
+
+	}
 out:
 	mutex_unlock(&list->read_mutex);
 	return ret;
@@ -1163,7 +1093,7 @@ static unsigned int hid_debug_events_poll(struct file *file, poll_table *wait)
 	struct hid_debug_list *list = file->private_data;
 
 	poll_wait(file, &list->hdev->debug_wait, wait);
-	if (!kfifo_is_empty(&list->hid_debug_fifo))
+	if (list->head != list->tail)
 		return POLLIN | POLLRDNORM;
 	if (!list->hdev->debug)
 		return POLLERR | POLLHUP;
@@ -1178,7 +1108,7 @@ static int hid_debug_events_release(struct inode *inode, struct file *file)
 	spin_lock_irqsave(&list->hdev->debug_list_lock, flags);
 	list_del(&list->node);
 	spin_unlock_irqrestore(&list->hdev->debug_list_lock, flags);
-	kfifo_free(&list->hid_debug_fifo);
+	kfree(list->hid_debug_buf);
 	kfree(list);
 
 	return 0;
@@ -1229,3 +1159,4 @@ void hid_debug_exit(void)
 {
 	debugfs_remove_recursive(hid_debug_root);
 }
+

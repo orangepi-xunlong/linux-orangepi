@@ -16,7 +16,7 @@
 #include <linux/module.h>
 #include <linux/rtc.h>
 #include <linux/platform_device.h>
-#include <linux/platform_data/rtc-m48t86.h>
+#include <linux/m48t86.h>
 #include <linux/bcd.h>
 
 #define M48T86_REG_SEC		0x00
@@ -39,11 +39,14 @@
 #define M48T86_REG_B_SET	(1 << 7)
 #define M48T86_REG_D_VRT	(1 << 7)
 
+#define DRV_VERSION "0.1"
+
+
 static int m48t86_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
 	unsigned char reg;
 	struct platform_device *pdev = to_platform_device(dev);
-	struct m48t86_ops *ops = dev_get_platdata(&pdev->dev);
+	struct m48t86_ops *ops = pdev->dev.platform_data;
 
 	reg = ops->readbyte(M48T86_REG_B);
 
@@ -81,7 +84,7 @@ static int m48t86_rtc_set_time(struct device *dev, struct rtc_time *tm)
 {
 	unsigned char reg;
 	struct platform_device *pdev = to_platform_device(dev);
-	struct m48t86_ops *ops = dev_get_platdata(&pdev->dev);
+	struct m48t86_ops *ops = pdev->dev.platform_data;
 
 	reg = ops->readbyte(M48T86_REG_B);
 
@@ -120,7 +123,7 @@ static int m48t86_rtc_proc(struct device *dev, struct seq_file *seq)
 {
 	unsigned char reg;
 	struct platform_device *pdev = to_platform_device(dev);
-	struct m48t86_ops *ops = dev_get_platdata(&pdev->dev);
+	struct m48t86_ops *ops = pdev->dev.platform_data;
 
 	reg = ops->readbyte(M48T86_REG_B);
 
@@ -144,7 +147,7 @@ static const struct rtc_class_ops m48t86_rtc_ops = {
 static int m48t86_rtc_probe(struct platform_device *dev)
 {
 	unsigned char reg;
-	struct m48t86_ops *ops = dev_get_platdata(&dev->dev);
+	struct m48t86_ops *ops = dev->dev.platform_data;
 	struct rtc_device *rtc;
 
 	rtc = devm_rtc_device_register(&dev->dev, "m48t86",
@@ -163,11 +166,19 @@ static int m48t86_rtc_probe(struct platform_device *dev)
 	return 0;
 }
 
+static int m48t86_rtc_remove(struct platform_device *dev)
+{
+	platform_set_drvdata(dev, NULL);
+
+	return 0;
+}
+
 static struct platform_driver m48t86_rtc_platform_driver = {
 	.driver		= {
 		.name	= "rtc-m48t86",
 	},
 	.probe		= m48t86_rtc_probe,
+	.remove		= m48t86_rtc_remove,
 };
 
 module_platform_driver(m48t86_rtc_platform_driver);
@@ -175,4 +186,5 @@ module_platform_driver(m48t86_rtc_platform_driver);
 MODULE_AUTHOR("Alessandro Zummo <a.zummo@towertech.it>");
 MODULE_DESCRIPTION("M48T86 RTC driver");
 MODULE_LICENSE("GPL");
+MODULE_VERSION(DRV_VERSION);
 MODULE_ALIAS("platform:rtc-m48t86");

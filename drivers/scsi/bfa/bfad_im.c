@@ -1,10 +1,9 @@
 /*
- * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
- * Copyright (c) 2014- QLogic Corporation.
+ * Copyright (c) 2005-2010 Brocade Communications Systems, Inc.
  * All rights reserved
- * www.qlogic.com
+ * www.brocade.com
  *
- * Linux driver for QLogic BR-series Fibre Channel Host Bus Adapter.
+ * Linux driver for Brocade Fibre Channel Host Bus Adapter.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License (GPL) Version 2 as
@@ -74,14 +73,9 @@ bfa_cb_ioim_done(void *drv, struct bfad_ioim_s *dio,
 
 		break;
 
+	case BFI_IOIM_STS_ABORTED:
 	case BFI_IOIM_STS_TIMEDOUT:
-		host_status = DID_TIME_OUT;
-		cmnd->result = ScsiResult(host_status, 0);
-		break;
 	case BFI_IOIM_STS_PATHTOV:
-		host_status = DID_TRANSPORT_DISRUPTED;
-		cmnd->result = ScsiResult(host_status, 0);
-		break;
 	default:
 		host_status = DID_ERROR;
 		cmnd->result = ScsiResult(host_status, 0);
@@ -186,7 +180,7 @@ bfad_im_info(struct Scsi_Host *shost)
 
 	memset(bfa_buf, 0, sizeof(bfa_buf));
 	snprintf(bfa_buf, sizeof(bfa_buf),
-		"QLogic BR-series FC/FCOE Adapter, hwpath: %s driver: %s",
+		"Brocade FC/FCOE Adapter, " "hwpath: %s driver: %s",
 		bfad->pci_name, BFAD_DRIVER_VERSION);
 
 	return bfa_buf;
@@ -212,7 +206,7 @@ bfad_im_abort_handler(struct scsi_cmnd *cmnd)
 	spin_lock_irqsave(&bfad->bfad_lock, flags);
 	hal_io = (struct bfa_ioim_s *) cmnd->host_scribble;
 	if (!hal_io) {
-		/* IO has been completed, return success */
+		/* IO has been completed, retrun success */
 		rc = SUCCESS;
 		goto out;
 	}
@@ -272,19 +266,6 @@ bfad_im_target_reset_send(struct bfad_s *bfad, struct scsi_cmnd *cmnd,
 	cmnd->host_scribble = NULL;
 	cmnd->SCp.Status = 0;
 	bfa_itnim = bfa_fcs_itnim_get_halitn(&itnim->fcs_itnim);
-	/*
-	 * bfa_itnim can be NULL if the port gets disconnected and the bfa
-	 * and fcs layers have cleaned up their nexus with the targets and
-	 * the same has not been cleaned up by the shim
-	 */
-	if (bfa_itnim == NULL) {
-		bfa_tskim_free(tskim);
-		BFA_LOG(KERN_ERR, bfad, bfa_log_level,
-			"target reset, bfa_itnim is NULL\n");
-		rc = BFA_STATUS_FAILED;
-		goto out;
-	}
-
 	memset(&scsilun, 0, sizeof(scsilun));
 	bfa_tskim_start(tskim, bfa_itnim, scsilun,
 			    FCP_TM_TARGET_RESET, BFAD_TARGET_RESET_TMO);
@@ -340,19 +321,6 @@ bfad_im_reset_lun_handler(struct scsi_cmnd *cmnd)
 	cmnd->SCp.ptr = (char *)&wq;
 	cmnd->SCp.Status = 0;
 	bfa_itnim = bfa_fcs_itnim_get_halitn(&itnim->fcs_itnim);
-	/*
-	 * bfa_itnim can be NULL if the port gets disconnected and the bfa
-	 * and fcs layers have cleaned up their nexus with the targets and
-	 * the same has not been cleaned up by the shim
-	 */
-	if (bfa_itnim == NULL) {
-		bfa_tskim_free(tskim);
-		BFA_LOG(KERN_ERR, bfad, bfa_log_level,
-			"lun reset, bfa_itnim is NULL\n");
-		spin_unlock_irqrestore(&bfad->bfad_lock, flags);
-		rc = FAILED;
-		goto out;
-	}
 	int_to_scsilun(cmnd->device->lun, &scsilun);
 	bfa_tskim_start(tskim, bfa_itnim, scsilun,
 			    FCP_TM_LUN_RESET, BFAD_LUN_RESET_TMO);
@@ -440,13 +408,13 @@ bfad_im_slave_destroy(struct scsi_device *sdev)
  * BFA FCS itnim alloc callback, after successful PRLI
  * Context: Interrupt
  */
-int
+void
 bfa_fcb_itnim_alloc(struct bfad_s *bfad, struct bfa_fcs_itnim_s **itnim,
 		    struct bfad_itnim_s **itnim_drv)
 {
 	*itnim_drv = kzalloc(sizeof(struct bfad_itnim_s), GFP_ATOMIC);
 	if (*itnim_drv == NULL)
-		return -ENOMEM;
+		return;
 
 	(*itnim_drv)->im = bfad->im;
 	*itnim = &(*itnim_drv)->fcs_itnim;
@@ -457,7 +425,6 @@ bfa_fcb_itnim_alloc(struct bfad_s *bfad, struct bfa_fcs_itnim_s **itnim,
 	 */
 	INIT_WORK(&(*itnim_drv)->itnim_work, bfad_im_itnim_work_handler);
 	bfad->bfad_flags |= BFAD_RPORT_ONLINE;
-	return 0;
 }
 
 /*
@@ -804,7 +771,11 @@ bfad_thread_workq(struct bfad_s *bfad)
 static int
 bfad_im_slave_configure(struct scsi_device *sdev)
 {
-	scsi_change_queue_depth(sdev, bfa_lun_queue_depth);
+	if (sdev->tagged_supported)
+		scsi_activate_tcq(sdev, bfa_lun_queue_depth);
+	else
+		scsi_deactivate_tcq(sdev, bfa_lun_queue_depth);
+
 	return 0;
 }
 
@@ -877,8 +848,6 @@ bfad_im_module_exit(void)
 
 	if (bfad_im_scsi_vport_transport_template)
 		fc_release_transport(bfad_im_scsi_vport_transport_template);
-
-	idr_destroy(&bfad_im_port_index);
 }
 
 void
@@ -894,8 +863,14 @@ bfad_ramp_up_qdepth(struct bfad_itnim_s *itnim, struct scsi_device *sdev)
 			if (bfa_lun_queue_depth > tmp_sdev->queue_depth) {
 				if (tmp_sdev->id != sdev->id)
 					continue;
-				scsi_change_queue_depth(tmp_sdev,
-					tmp_sdev->queue_depth + 1);
+				if (tmp_sdev->ordered_tags)
+					scsi_adjust_queue_depth(tmp_sdev,
+						MSG_ORDERED_TAG,
+						tmp_sdev->queue_depth + 1);
+				else
+					scsi_adjust_queue_depth(tmp_sdev,
+						MSG_SIMPLE_TAG,
+						tmp_sdev->queue_depth + 1);
 
 				itnim->last_ramp_up_time = jiffies;
 			}
@@ -969,14 +944,12 @@ static int
 bfad_im_slave_alloc(struct scsi_device *sdev)
 {
 	struct fc_rport *rport = starget_to_rport(scsi_target(sdev));
-	struct bfad_itnim_data_s *itnim_data;
-	struct bfa_s *bfa;
+	struct bfad_itnim_data_s *itnim_data =
+				(struct bfad_itnim_data_s *) rport->dd_data;
+	struct bfa_s *bfa = itnim_data->itnim->bfa_itnim->bfa;
 
 	if (!rport || fc_remote_port_chkready(rport))
 		return -ENXIO;
-
-	itnim_data = (struct bfad_itnim_data_s *) rport->dd_data;
-	bfa = itnim_data->itnim->bfa_itnim->bfa;
 
 	if (bfa_get_lun_mask_status(bfa) == BFA_LUNMASK_ENABLED) {
 		/*
@@ -1062,7 +1035,7 @@ bfad_fc_host_init(struct bfad_im_port_s *im_port)
 	/* For fibre channel services type 0x20 */
 	fc_host_supported_fc4s(host)[7] = 1;
 
-	strlcpy(symname, bfad->bfa_fcs.fabric.bport.port_cfg.sym_name.symname,
+	strncpy(symname, bfad->bfa_fcs.fabric.bport.port_cfg.sym_name.symname,
 		BFA_SYMNAME_MAXLEN);
 	sprintf(fc_host_symbolic_name(host), "%s", symname);
 

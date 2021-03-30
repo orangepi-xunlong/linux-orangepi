@@ -68,6 +68,7 @@ MODULE_VERSION(DRV_VERSION);
 int max_mtu = 9000;
 int interrupt_mod_interval = 0;
 
+
 /* Interoperability */
 int mpa_version = 1;
 module_param(mpa_version, int, 0644);
@@ -674,11 +675,8 @@ static int nes_probe(struct pci_dev *pcidev, const struct pci_device_id *ent)
 	INIT_DELAYED_WORK(&nesdev->work, nes_recheck_link_status);
 
 	/* Initialize network devices */
-	netdev = nes_netdev_init(nesdev, mmio_regs);
-	if (netdev == NULL) {
-		ret = -ENOMEM;
+	if ((netdev = nes_netdev_init(nesdev, mmio_regs)) == NULL)
 		goto bail7;
-	}
 
 	/* Register network device */
 	ret = register_netdev(netdev);

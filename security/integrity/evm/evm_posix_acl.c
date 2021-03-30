@@ -11,9 +11,8 @@
 
 #include <linux/module.h>
 #include <linux/xattr.h>
-#include <linux/evm.h>
 
-int posix_xattr_acl(const char *xattr)
+int posix_xattr_acl(char *xattr)
 {
 	int xattr_len = strlen(xattr);
 

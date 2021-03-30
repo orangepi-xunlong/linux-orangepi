@@ -308,7 +308,9 @@ static const struct snd_soc_dapm_route wm8770_intercon[] = {
 static int vout12supply_event(struct snd_soc_dapm_widget *w,
 	struct snd_kcontrol *kcontrol, int event)
 {
-	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
+	struct snd_soc_codec *codec;
+
+	codec = w->codec;
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
@@ -325,7 +327,9 @@ static int vout12supply_event(struct snd_soc_dapm_widget *w,
 static int vout34supply_event(struct snd_soc_dapm_widget *w,
 	struct snd_kcontrol *kcontrol, int event)
 {
-	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
+	struct snd_soc_codec *codec;
+
+	codec = w->codec;
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
@@ -422,16 +426,16 @@ static int wm8770_hw_params(struct snd_pcm_substream *substream,
 	wm8770 = snd_soc_codec_get_drvdata(codec);
 
 	iface = 0;
-	switch (params_width(params)) {
-	case 16:
+	switch (params_format(params)) {
+	case SNDRV_PCM_FORMAT_S16_LE:
 		break;
-	case 20:
+	case SNDRV_PCM_FORMAT_S20_3LE:
 		iface |= 0x10;
 		break;
-	case 24:
+	case SNDRV_PCM_FORMAT_S24_LE:
 		iface |= 0x20;
 		break;
-	case 32:
+	case SNDRV_PCM_FORMAT_S32_LE:
 		iface |= 0x30;
 		break;
 	}
@@ -510,7 +514,7 @@ static int wm8770_set_bias_level(struct snd_soc_codec *codec,
 	case SND_SOC_BIAS_PREPARE:
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_OFF) {
+		if (codec->dapm.bias_level == SND_SOC_BIAS_OFF) {
 			ret = regulator_bulk_enable(ARRAY_SIZE(wm8770->supplies),
 						    wm8770->supplies);
 			if (ret) {
@@ -534,6 +538,7 @@ static int wm8770_set_bias_level(struct snd_soc_codec *codec,
 		break;
 	}
 
+	codec->dapm.bias_level = level;
 	return 0;
 }
 
@@ -575,6 +580,12 @@ static int wm8770_probe(struct snd_soc_codec *codec)
 	wm8770 = snd_soc_codec_get_drvdata(codec);
 	wm8770->codec = codec;
 
+	ret = snd_soc_codec_set_cache_io(codec, 7, 9, SND_SOC_REGMAP);
+	if (ret < 0) {
+		dev_err(codec->dev, "Failed to set cache I/O: %d\n", ret);
+		return ret;
+	}
+
 	ret = regulator_bulk_enable(ARRAY_SIZE(wm8770->supplies),
 				    wm8770->supplies);
 	if (ret) {
@@ -608,19 +619,17 @@ err_reg_enable:
 	return ret;
 }
 
-static const struct snd_soc_codec_driver soc_codec_dev_wm8770 = {
+static struct snd_soc_codec_driver soc_codec_dev_wm8770 = {
 	.probe = wm8770_probe,
 	.set_bias_level = wm8770_set_bias_level,
 	.idle_bias_off = true,
 
-	.component_driver = {
-		.controls		= wm8770_snd_controls,
-		.num_controls		= ARRAY_SIZE(wm8770_snd_controls),
-		.dapm_widgets		= wm8770_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(wm8770_dapm_widgets),
-		.dapm_routes		= wm8770_intercon,
-		.num_dapm_routes	= ARRAY_SIZE(wm8770_intercon),
-	},
+	.controls = wm8770_snd_controls,
+	.num_controls = ARRAY_SIZE(wm8770_snd_controls),
+	.dapm_widgets = wm8770_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(wm8770_dapm_widgets),
+	.dapm_routes = wm8770_intercon,
+	.num_dapm_routes = ARRAY_SIZE(wm8770_intercon),
 };
 
 static const struct of_device_id wm8770_of_match[] = {
@@ -705,6 +714,7 @@ static int wm8770_spi_remove(struct spi_device *spi)
 static struct spi_driver wm8770_spi_driver = {
 	.driver = {
 		.name = "wm8770",
+		.owner = THIS_MODULE,
 		.of_match_table = wm8770_of_match,
 	},
 	.probe = wm8770_spi_probe,

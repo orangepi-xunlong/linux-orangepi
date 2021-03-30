@@ -17,6 +17,8 @@ typedef struct {
 } sigset_t;
 
 #define __ARCH_HAS_SA_RESTORER
+
 #include <asm/sigcontext.h>
+#undef __HAVE_ARCH_SIG_BITOPS
 
 #endif /* _H8300_SIGNAL_H */

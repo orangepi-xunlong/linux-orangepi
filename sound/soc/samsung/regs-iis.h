@@ -1,4 +1,5 @@
-/*
+/* arch/arm/plat-samsung/include/plat/regs-iis.h
+ *
  * Copyright (c) 2003 Simtec Electronics <linux@simtec.co.uk>
  *		      http://www.simtec.co.uk/products/SWLINUX/
  *
@@ -9,8 +10,8 @@
  * S3C2410 IIS register definition
 */
 
-#ifndef __SAMSUNG_REGS_IIS_H__
-#define __SAMSUNG_REGS_IIS_H__
+#ifndef __ASM_ARCH_REGS_IIS_H
+#define __ASM_ARCH_REGS_IIS_H
 
 #define S3C2410_IISCON			(0x00)
 
@@ -66,4 +67,4 @@
 
 #define S3C2410_IISFIFO			(0x10)
 
-#endif /* __SAMSUNG_REGS_IIS_H__ */
+#endif /* __ASM_ARCH_REGS_IIS_H */

@@ -64,6 +64,9 @@
 
 #include "af_can.h"
 
+static __initconst const char banner[] = KERN_INFO
+	"can: controller area network core (" CAN_VERSION_STRING ")\n";
+
 MODULE_DESCRIPTION("Controller Area Network PF_CAN core");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("Urs Thuermann <urs.thuermann@volkswagen.de>, "
@@ -88,8 +91,6 @@ static DEFINE_MUTEX(proto_tab_lock);
 struct timer_list can_stattimer;   /* timer for statistics update */
 struct s_stats    can_stats;       /* packet statistics */
 struct s_pstats   can_pstats;      /* receive list statistics */
-
-static atomic_t skbcounter = ATOMIC_INIT(0);
 
 /*
  * af_can socket functions
@@ -181,7 +182,7 @@ static int can_create(struct net *net, struct socket *sock, int protocol,
 
 	sock->ops = cp->ops;
 
-	sk = sk_alloc(net, PF_CAN, GFP_KERNEL, cp->prot, kern);
+	sk = sk_alloc(net, PF_CAN, GFP_KERNEL, cp->prot);
 	if (!sk) {
 		err = -ENOMEM;
 		goto errout;
@@ -261,9 +262,6 @@ int can_send(struct sk_buff *skb, int loop)
 		goto inval_skb;
 	}
 
-	skb->ip_summed = CHECKSUM_UNNECESSARY;
-
-	skb_reset_mac_header(skb);
 	skb_reset_network_header(skb);
 	skb_reset_transport_header(skb);
 
@@ -340,29 +338,6 @@ static struct dev_rcv_lists *find_dev_rcv_lists(struct net_device *dev)
 }
 
 /**
- * effhash - hash function for 29 bit CAN identifier reduction
- * @can_id: 29 bit CAN identifier
- *
- * Description:
- *  To reduce the linear traversal in one linked list of _single_ EFF CAN
- *  frame subscriptions the 29 bit identifier is mapped to 10 bits.
- *  (see CAN_EFF_RCV_HASH_BITS definition)
- *
- * Return:
- *  Hash value from 0x000 - 0x3FF ( enforced by CAN_EFF_RCV_HASH_BITS mask )
- */
-static unsigned int effhash(canid_t can_id)
-{
-	unsigned int hash;
-
-	hash = can_id;
-	hash ^= can_id >> CAN_EFF_RCV_HASH_BITS;
-	hash ^= can_id >> (2 * CAN_EFF_RCV_HASH_BITS);
-
-	return hash & ((1 << CAN_EFF_RCV_HASH_BITS) - 1);
-}
-
-/**
  * find_rcv_list - determine optimal filterlist inside device filter struct
  * @can_id: pointer to CAN identifier of a given can_filter
  * @mask: pointer to CAN mask of a given can_filter
@@ -425,8 +400,10 @@ static struct hlist_head *find_rcv_list(canid_t *can_id, canid_t *mask,
 	    !(*can_id & CAN_RTR_FLAG)) {
 
 		if (*can_id & CAN_EFF_FLAG) {
-			if (*mask == (CAN_EFF_MASK | CAN_EFF_RTR_FLAGS))
-				return &d->rx_eff[effhash(*can_id)];
+			if (*mask == (CAN_EFF_MASK | CAN_EFF_RTR_FLAGS)) {
+				/* RFC: a future use-case for hash-tables? */
+				return &d->rx[RX_EFF];
+			}
 		} else {
 			if (*mask == (CAN_SFF_MASK | CAN_EFF_RTR_FLAGS))
 				return &d->rx_sff[*can_id];
@@ -444,8 +421,7 @@ static struct hlist_head *find_rcv_list(canid_t *can_id, canid_t *mask,
  * @mask: CAN mask (see description)
  * @func: callback function on filter match
  * @data: returned parameter for callback function
- * @ident: string for calling module identification
- * @sk: socket pointer (might be NULL)
+ * @ident: string for calling module indentification
  *
  * Description:
  *  Invokes the callback function with the received sk_buff and the given
@@ -469,7 +445,7 @@ static struct hlist_head *find_rcv_list(canid_t *can_id, canid_t *mask,
  */
 int can_rx_register(struct net_device *dev, canid_t can_id, canid_t mask,
 		    void (*func)(struct sk_buff *, void *), void *data,
-		    char *ident, struct sock *sk)
+		    char *ident)
 {
 	struct receiver *r;
 	struct hlist_head *rl;
@@ -497,7 +473,6 @@ int can_rx_register(struct net_device *dev, canid_t can_id, canid_t mask,
 		r->func    = func;
 		r->data    = data;
 		r->ident   = ident;
-		r->sk      = sk;
 
 		hlist_add_head_rcu(&r->list, rl);
 		d->entries++;
@@ -522,16 +497,13 @@ EXPORT_SYMBOL(can_rx_register);
 static void can_rx_delete_receiver(struct rcu_head *rp)
 {
 	struct receiver *r = container_of(rp, struct receiver, rcu);
-	struct sock *sk = r->sk;
 
 	kmem_cache_free(rcv_cache, r);
-	if (sk)
-		sock_put(sk);
 }
 
 /**
  * can_rx_unregister - unsubscribe CAN frames from a specific interface
- * @dev: pointer to netdevice (NULL => unsubscribe from 'all' CAN devices list)
+ * @dev: pointer to netdevice (NULL => unsubcribe from 'all' CAN devices list)
  * @can_id: CAN identifier
  * @mask: CAN mask
  * @func: callback function on filter match
@@ -601,11 +573,8 @@ void can_rx_unregister(struct net_device *dev, canid_t can_id, canid_t mask,
 	spin_unlock(&can_rcvlists_lock);
 
 	/* schedule the receiver item for deletion */
-	if (r) {
-		if (r->sk)
-			sock_hold(r->sk);
+	if (r)
 		call_rcu(&r->rcu, can_rx_delete_receiver);
-	}
 }
 EXPORT_SYMBOL(can_rx_unregister);
 
@@ -663,7 +632,7 @@ static int can_rcv_filter(struct dev_rcv_lists *d, struct sk_buff *skb)
 		return matches;
 
 	if (can_id & CAN_EFF_FLAG) {
-		hlist_for_each_entry_rcu(r, &d->rx_eff[effhash(can_id)], list) {
+		hlist_for_each_entry_rcu(r, &d->rx[RX_EFF], list) {
 			if (r->can_id == can_id) {
 				deliver(skb, r);
 				matches++;
@@ -688,10 +657,6 @@ static void can_receive(struct sk_buff *skb, struct net_device *dev)
 	/* update statistics */
 	can_stats.rx_frames++;
 	can_stats.rx_frames_delta++;
-
-	/* create non-zero unique skb identifier together with *skb */
-	while (!(can_skb_prv(skb)->skbcnt))
-		can_skb_prv(skb)->skbcnt = atomic_inc_return(&skbcounter);
 
 	rcu_read_lock();
 
@@ -722,12 +687,13 @@ static int can_rcv(struct sk_buff *skb, struct net_device *dev,
 	if (unlikely(!net_eq(dev_net(dev), &init_net)))
 		goto drop;
 
-	if (unlikely(dev->type != ARPHRD_CAN || skb->len != CAN_MTU ||
-		     cfd->len > CAN_MAX_DLEN)) {
-		pr_warn_once("PF_CAN: dropped non conform CAN skbuf: dev type %d, len %d, datalen %d\n",
-			     dev->type, skb->len, cfd->len);
+	if (WARN_ONCE(dev->type != ARPHRD_CAN ||
+		      skb->len != CAN_MTU ||
+		      cfd->len > CAN_MAX_DLEN,
+		      "PF_CAN: dropped non conform CAN skbuf: "
+		      "dev type %d, len %d, datalen %d\n",
+		      dev->type, skb->len, cfd->len))
 		goto drop;
-	}
 
 	can_receive(skb, dev);
 	return NET_RX_SUCCESS;
@@ -745,12 +711,13 @@ static int canfd_rcv(struct sk_buff *skb, struct net_device *dev,
 	if (unlikely(!net_eq(dev_net(dev), &init_net)))
 		goto drop;
 
-	if (unlikely(dev->type != ARPHRD_CAN || skb->len != CANFD_MTU ||
-		     cfd->len > CANFD_MAX_DLEN)) {
-		pr_warn_once("PF_CAN: dropped non conform CAN FD skbuf: dev type %d, len %d, datalen %d\n",
-			     dev->type, skb->len, cfd->len);
+	if (WARN_ONCE(dev->type != ARPHRD_CAN ||
+		      skb->len != CANFD_MTU ||
+		      cfd->len > CANFD_MAX_DLEN,
+		      "PF_CAN: dropped non conform CAN FD skbuf: "
+		      "dev type %d, len %d, datalen %d\n",
+		      dev->type, skb->len, cfd->len))
 		goto drop;
-	}
 
 	can_receive(skb, dev);
 	return NET_RX_SUCCESS;
@@ -828,9 +795,9 @@ EXPORT_SYMBOL(can_proto_unregister);
  * af_can notifier to create/remove CAN netdevice specific structs
  */
 static int can_notifier(struct notifier_block *nb, unsigned long msg,
-			void *ptr)
+			void *data)
 {
-	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
+	struct net_device *dev = (struct net_device *)data;
 	struct dev_rcv_lists *d;
 
 	if (!net_eq(dev_net(dev), &init_net))
@@ -908,7 +875,7 @@ static __init int can_init(void)
 		     offsetof(struct can_frame, data) !=
 		     offsetof(struct canfd_frame, data));
 
-	pr_info("can: controller area network core (" CAN_VERSION_STRING ")\n");
+	printk(banner);
 
 	memset(&can_rx_alldev_list, 0, sizeof(can_rx_alldev_list));
 
@@ -917,14 +884,14 @@ static __init int can_init(void)
 	if (!rcv_cache)
 		return -ENOMEM;
 
-	if (IS_ENABLED(CONFIG_PROC_FS)) {
-		if (stats_timer) {
+	if (stats_timer) {
 		/* the statistics are updated every second (timer triggered) */
-			setup_timer(&can_stattimer, can_stat_update, 0);
-			mod_timer(&can_stattimer, round_jiffies(jiffies + HZ));
-		}
-		can_init_proc();
-	}
+		setup_timer(&can_stattimer, can_stat_update, 0);
+		mod_timer(&can_stattimer, round_jiffies(jiffies + HZ));
+	} else
+		can_stattimer.function = NULL;
+
+	can_init_proc();
 
 	/* protocol register */
 	sock_register(&can_family_ops);
@@ -939,12 +906,10 @@ static __exit void can_exit(void)
 {
 	struct net_device *dev;
 
-	if (IS_ENABLED(CONFIG_PROC_FS)) {
-		if (stats_timer)
-			del_timer_sync(&can_stattimer);
+	if (stats_timer)
+		del_timer_sync(&can_stattimer);
 
-		can_remove_proc();
-	}
+	can_remove_proc();
 
 	/* protocol unregister */
 	dev_remove_pack(&canfd_packet);

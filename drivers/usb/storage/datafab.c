@@ -1,5 +1,4 @@
-/*
- * Driver for Datafab USB Compact Flash reader
+/* Driver for Datafab USB Compact Flash reader
  *
  * datafab driver v0.1:
  *
@@ -60,9 +59,6 @@
 #include "transport.h"
 #include "protocol.h"
 #include "debug.h"
-#include "scsiglue.h"
-
-#define DRV_NAME "ums-datafab"
 
 MODULE_DESCRIPTION("Driver for Datafab USB Compact Flash reader");
 MODULE_AUTHOR("Jimmie Mayfield <mayfield+datafab@sackheads.org>");
@@ -694,23 +690,18 @@ static int datafab_transport(struct scsi_cmnd *srb, struct us_data *us)
 	}
 
 	if (srb->cmnd[0] == ALLOW_MEDIUM_REMOVAL) {
-		/*
-		 * sure.  whatever.  not like we can stop the user from
-		 * popping the media out of the device (no locking doors, etc)
-		 */
+		// sure.  whatever.  not like we can stop the user from
+		// popping the media out of the device (no locking doors, etc)
+		//
 		return USB_STOR_TRANSPORT_GOOD;
 	}
 
 	if (srb->cmnd[0] == START_STOP) {
-		/*
-		 * this is used by sd.c'check_scsidisk_media_change to detect
-		 * media change
-		 */
+		/* this is used by sd.c'check_scsidisk_media_change to detect
+		   media change */
 		usb_stor_dbg(us, "START_STOP\n");
-		/*
-		 * the first datafab_id_device after a media change returns
-		 * an error (determined experimentally)
-		 */
+		/* the first datafab_id_device after a media change returns
+		   an error (determined experimentally) */
 		rc = datafab_id_device(us, info);
 		if (rc == USB_STOR_TRANSPORT_GOOD) {
 			info->sense_key = NO_SENSE;
@@ -730,8 +721,6 @@ static int datafab_transport(struct scsi_cmnd *srb, struct us_data *us)
 	return USB_STOR_TRANSPORT_FAILED;
 }
 
-static struct scsi_host_template datafab_host_template;
-
 static int datafab_probe(struct usb_interface *intf,
 			 const struct usb_device_id *id)
 {
@@ -739,8 +728,7 @@ static int datafab_probe(struct usb_interface *intf,
 	int result;
 
 	result = usb_stor_probe1(&us, intf, id,
-			(id - datafab_usb_ids) + datafab_unusual_dev_list,
-			&datafab_host_template);
+			(id - datafab_usb_ids) + datafab_unusual_dev_list);
 	if (result)
 		return result;
 
@@ -754,7 +742,7 @@ static int datafab_probe(struct usb_interface *intf,
 }
 
 static struct usb_driver datafab_driver = {
-	.name =		DRV_NAME,
+	.name =		"ums-datafab",
 	.probe =	datafab_probe,
 	.disconnect =	usb_stor_disconnect,
 	.suspend =	usb_stor_suspend,
@@ -767,4 +755,4 @@ static struct usb_driver datafab_driver = {
 	.no_dynamic_id = 1,
 };
 
-module_usb_stor_driver(datafab_driver, datafab_host_template, DRV_NAME);
+module_usb_driver(datafab_driver);

@@ -15,8 +15,11 @@ endif
 
 export KDIR = $(KERNEL_DIR)
 export KERNELDIR = $(KERNEL_DIR)
+export ARCH
+export CROSS_COMPILER
 
-GPU_BUILD_TYPE = release
+#GPU_BUILD_TYPE = release
+GPU_BUILD_TYPE = debug
 
 include $(KERNEL_DIR)/.config
 
@@ -27,19 +30,7 @@ endif
 ##############################################################
 ##############     Set WINDOW_SYSTEM_TYPE      ###############
 ##############################################################
-ifeq ($(LICHEE_PLATFORM), android)
-WINDOW_SYSTEM_TYPE = android
-else ifeq ($(LICHEE_PLATFORM), secureandroid)
-WINDOW_SYSTEM_TYPE = android
-else ifeq ($(LICHEE_PLATFORM), camdroid)
-WINDOW_SYSTEM_TYPE = android
-else ifeq ($(LICHEE_PLATFORM), linux)
 WINDOW_SYSTEM_TYPE = linux
-else ifeq ($(LICHEE_PLATFORM), dragonboard)
-WINDOW_SYSTEM_TYPE = linux
-else
-$(error LICHEE_PLATFORM is invalid)
-endif
 
 ##############################################################
 ##################     Set GPU_TYPE         ##################
@@ -49,24 +40,19 @@ GPU_TYPE = $(CONFIG_SUNXI_GPU_TYPE)
 ##############################################################
 #############  Set GPU_BUILD_DIR and GPU_KO_NAME #############
 ##############################################################
-ifeq ($(strip $(GPU_TYPE)), $(filter $(GPU_TYPE), "mali400" "mali450"))
-GPU_BUILD_DIR = mali-utgard/kernel_mode/driver/src/devicedrv/mali
+ifeq ($(GPU_TYPE), "mali400")
+GPU_BUILD_DIR = mali400/kernel_mode/driver/src/devicedrv/mali
 GPU_KO_NAME   = $(GPU_BUILD_DIR)/mali.ko
-else ifeq ($(strip $(GPU_TYPE)), $(filter $(GPU_TYPE), "mali-t720" "mali-t760"))
-GPU_BUILD_DIR = mali-midgard/kernel_mode/driver
-GPU_KO_NAME   = $(GPU_BUILD_DIR)/drivers/gpu/arm/midgard/mali_kbase.ko
-GPU_KO_NAME  += $(GPU_BUILD_DIR)/drivers/base/kds/kds.ko
-GPU_KO_NAME  += $(GPU_BUILD_DIR)/drivers/base/dma_buf_test_exporter/dma-buf-test-exporter.ko
-else ifeq ($(strip $(GPU_TYPE)), $(filter $(GPU_TYPE), "mali-g31"))
-GPU_BUILD_DIR = mali-bifrost/driver
-GPU_KO_NAME   = $(GPU_BUILD_DIR)/drivers/gpu/arm/midgard/mali_kbase.ko
-GPU_KO_NAME  += $(GPU_BUILD_DIR)/drivers/base/dma_buf_test_exporter/dma-buf-test-exporter.ko
+else ifeq ($(GPU_TYPE), "mali450")
+GPU_BUILD_DIR = mali450/kernel_mode/driver/src/devicedrv/mali
+UMP_BUILD_DIR = mali450/kernel_mode/driver/src/devicedrv/ump
+UMPLOCK_BUILD_DIR = mali450/kernel_mode/driver/src/devicedrv/umplock
+GPU_KO_NAME   = $(GPU_BUILD_DIR)/mali.ko
+UMP_KO_NAME   = $(UMP_BUILD_DIR)/ump.ko
+UMPLOCK_KO_NAME = $(UMPLOCK_BUILD_DIR)/umplock.ko
 else ifeq ($(GPU_TYPE), "sgx544")
-GPU_BUILD_DIR = sgx544/$(WINDOW_SYSTEM_TYPE)/kernel_mode/eurasia_km/eurasiacon/build/linux2/sunxi_$(WINDOW_SYSTEM_TYPE)
+GPU_BUILD_DIR = sgx544/$(WINDOW_SYSTEM_TYPE)/kernel_mode/eurasia_km/eurasiacon/build/linux2/sunxi_android
 GPU_KO_NAME   = sgx544/$(WINDOW_SYSTEM_TYPE)/kernel_mode/eurasia_km/eurasiacon/binary2_sunxi_$(WINDOW_SYSTEM_TYPE)_$(GPU_BUILD_TYPE)/target/pvrsrvkm.ko
-ifeq ($(WINDOW_SYSTEM_TYPE), linux)
-GPU_KO_NAME   += sgx544/$(WINDOW_SYSTEM_TYPE)/kernel_mode/eurasia_km/eurasiacon/binary2_sunxi_$(WINDOW_SYSTEM_TYPE)_$(GPU_BUILD_TYPE)/target/dc_sunxi.ko
-endif
 else ifeq ($(GPU_TYPE), "rgx6230")
 GPU_BUILD_DIR = rgx6230/$(WINDOW_SYSTEM_TYPE)/kernel_mode/rogue_km/build/linux/sunxi_$(WINDOW_SYSTEM_TYPE)
 GPU_KO_NAME   = rgx6230/$(WINDOW_SYSTEM_TYPE)/kernel_mode/rogue_km/binary_sunxi_$(WINDOW_SYSTEM_TYPE)_$(GPU_BUILD_TYPE)/target_armv7-a/pvrsrvkm.ko
@@ -82,9 +68,13 @@ all: build install
 
 build:
 	$(MAKE) -j -C $(GPU_BUILD_DIR) BUILD=$(GPU_BUILD_TYPE)
+	$(MAKE) -j -C $(UMPLOCK_BUILD_DIR) BUILD=$(GPU_BUILD_TYPE) 
+	$(MAKE) -j -C $(UMP_BUILD_DIR) BUILD=$(GPU_BUILD_TYPE) 
 
 install:
 	@cp -uv $(GPU_KO_NAME) $(LICHEE_MOD_DIR);
+	@cp -uv $(UMP_KO_NAME) $(LICHEE_MOD_DIR);
+	@cp -uv $(UMPLOCK_KO_NAME) $(LICHEE_MOD_DIR);
 
 clean:
 	$(MAKE) -C $(GPU_BUILD_DIR) clean

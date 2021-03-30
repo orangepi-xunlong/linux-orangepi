@@ -82,7 +82,7 @@ int ipv6_skip_exthdr(const struct sk_buff *skb, int start, u8 *nexthdrp,
 		if (nexthdr == NEXTHDR_NONE)
 			return -1;
 		hp = skb_header_pointer(skb, start, sizeof(_hdr), &_hdr);
-		if (!hp)
+		if (hp == NULL)
 			return -1;
 		if (nexthdr == NEXTHDR_FRAGMENT) {
 			__be16 _frag_off, *fp;
@@ -91,7 +91,7 @@ int ipv6_skip_exthdr(const struct sk_buff *skb, int start, u8 *nexthdrp,
 							       frag_off),
 						sizeof(_frag_off),
 						&_frag_off);
-			if (!fp)
+			if (fp == NULL)
 				return -1;
 
 			*frag_offp = *fp;
@@ -112,10 +112,10 @@ int ipv6_skip_exthdr(const struct sk_buff *skb, int start, u8 *nexthdrp,
 }
 EXPORT_SYMBOL(ipv6_skip_exthdr);
 
-int ipv6_find_tlv(const struct sk_buff *skb, int offset, int type)
+int ipv6_find_tlv(struct sk_buff *skb, int offset, int type)
 {
 	const unsigned char *nh = skb_network_header(skb);
-	int packet_len = skb_tail_pointer(skb) - skb_network_header(skb);
+	int packet_len = skb->tail - skb->network_header;
 	struct ipv6_opt_hdr *hdr;
 	int len;
 
@@ -218,7 +218,7 @@ int ipv6_find_hdr(const struct sk_buff *skb, unsigned int *offset,
 		}
 
 		hp = skb_header_pointer(skb, start, sizeof(_hdr), &_hdr);
-		if (!hp)
+		if (hp == NULL)
 			return -EBADMSG;
 
 		if (nexthdr == NEXTHDR_ROUTING) {
@@ -226,7 +226,7 @@ int ipv6_find_hdr(const struct sk_buff *skb, unsigned int *offset,
 
 			rh = skb_header_pointer(skb, start, sizeof(_rh),
 						&_rh);
-			if (!rh)
+			if (rh == NULL)
 				return -EBADMSG;
 
 			if (flags && (*flags & IP6_FH_F_SKIP_RH) &&
@@ -245,7 +245,7 @@ int ipv6_find_hdr(const struct sk_buff *skb, unsigned int *offset,
 							       frag_off),
 						sizeof(_frag_off),
 						&_frag_off);
-			if (!fp)
+			if (fp == NULL)
 				return -EBADMSG;
 
 			_frag_off = ntohs(*fp) & ~0x7;
@@ -260,11 +260,7 @@ int ipv6_find_hdr(const struct sk_buff *skb, unsigned int *offset,
 						return -EINVAL;
 					}
 				}
-				if (!found)
-					return -ENOENT;
-				if (fragoff)
-					*fragoff = _frag_off;
-				break;
+				return -ENOENT;
 			}
 			hdrlen = 8;
 		} else if (nexthdr == NEXTHDR_AUTH) {

@@ -13,6 +13,7 @@
 #include <linux/kernel.h>
 #include <linux/io.h>
 #include <linux/slab.h>
+#include <linux/init.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/map.h>
 #include <linux/mtd/partitions.h>
@@ -45,6 +46,7 @@ struct ltq_mtd {
 };
 
 static const char ltq_map_name[] = "ltq_nor";
+static const char * const ltq_probe_types[] = { "cmdlinepart", "ofpart", NULL };
 
 static map_word
 ltq_read16(struct map_info *map, unsigned long adr)
@@ -110,6 +112,7 @@ ltq_copy_to(struct map_info *map, unsigned long to,
 static int
 ltq_mtd_probe(struct platform_device *pdev)
 {
+	struct mtd_part_parser_data ppdata;
 	struct ltq_mtd *ltq_mtd;
 	struct cfi_private *cfi;
 	int err;
@@ -120,28 +123,24 @@ ltq_mtd_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	ltq_mtd = devm_kzalloc(&pdev->dev, sizeof(struct ltq_mtd), GFP_KERNEL);
-	if (!ltq_mtd)
-		return -ENOMEM;
-
+	ltq_mtd = kzalloc(sizeof(struct ltq_mtd), GFP_KERNEL);
 	platform_set_drvdata(pdev, ltq_mtd);
 
 	ltq_mtd->res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!ltq_mtd->res) {
 		dev_err(&pdev->dev, "failed to get memory resource\n");
-		return -ENOENT;
+		err = -ENOENT;
+		goto err_out;
 	}
 
-	ltq_mtd->map = devm_kzalloc(&pdev->dev, sizeof(struct map_info),
-				    GFP_KERNEL);
-	if (!ltq_mtd->map)
-		return -ENOMEM;
-
+	ltq_mtd->map = kzalloc(sizeof(struct map_info), GFP_KERNEL);
 	ltq_mtd->map->phys = ltq_mtd->res->start;
 	ltq_mtd->map->size = resource_size(ltq_mtd->res);
 	ltq_mtd->map->virt = devm_ioremap_resource(&pdev->dev, ltq_mtd->res);
-	if (IS_ERR(ltq_mtd->map->virt))
-		return PTR_ERR(ltq_mtd->map->virt);
+	if (IS_ERR(ltq_mtd->map->virt)) {
+		err = PTR_ERR(ltq_mtd->map->virt);
+		goto err_out;
+	}
 
 	ltq_mtd->map->name = ltq_map_name;
 	ltq_mtd->map->bankwidth = 2;
@@ -156,17 +155,19 @@ ltq_mtd_probe(struct platform_device *pdev)
 
 	if (!ltq_mtd->mtd) {
 		dev_err(&pdev->dev, "probing failed\n");
-		return -ENXIO;
+		err = -ENXIO;
+		goto err_free;
 	}
 
-	ltq_mtd->mtd->dev.parent = &pdev->dev;
-	mtd_set_of_node(ltq_mtd->mtd, pdev->dev.of_node);
+	ltq_mtd->mtd->owner = THIS_MODULE;
 
 	cfi = ltq_mtd->map->fldrv_priv;
 	cfi->addr_unlock1 ^= 1;
 	cfi->addr_unlock2 ^= 1;
 
-	err = mtd_device_register(ltq_mtd->mtd, NULL, 0);
+	ppdata.of_node = pdev->dev.of_node;
+	err = mtd_device_parse_register(ltq_mtd->mtd, ltq_probe_types,
+					&ppdata, NULL, 0);
 	if (err) {
 		dev_err(&pdev->dev, "failed to add partitions\n");
 		goto err_destroy;
@@ -176,6 +177,10 @@ ltq_mtd_probe(struct platform_device *pdev)
 
 err_destroy:
 	map_destroy(ltq_mtd->mtd);
+err_free:
+	kfree(ltq_mtd->map);
+err_out:
+	kfree(ltq_mtd);
 	return err;
 }
 
@@ -184,9 +189,13 @@ ltq_mtd_remove(struct platform_device *pdev)
 {
 	struct ltq_mtd *ltq_mtd = platform_get_drvdata(pdev);
 
-	if (ltq_mtd && ltq_mtd->mtd) {
-		mtd_device_unregister(ltq_mtd->mtd);
-		map_destroy(ltq_mtd->mtd);
+	if (ltq_mtd) {
+		if (ltq_mtd->mtd) {
+			mtd_device_unregister(ltq_mtd->mtd);
+			map_destroy(ltq_mtd->mtd);
+		}
+		kfree(ltq_mtd->map);
+		kfree(ltq_mtd);
 	}
 	return 0;
 }
@@ -202,6 +211,7 @@ static struct platform_driver ltq_mtd_driver = {
 	.remove = ltq_mtd_remove,
 	.driver = {
 		.name = "ltq-nor",
+		.owner = THIS_MODULE,
 		.of_match_table = ltq_mtd_match,
 	},
 };

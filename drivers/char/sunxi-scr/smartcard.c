@@ -15,6 +15,7 @@
 #include <linux/module.h>
 #include "smartcard.h"
 
+
 void smartcard_ta1_decode(struct smc_atr_para *psmc_atr, uint8_t ta1)
 {
 	pr_debug("%s: enter!!\n", __func__);
@@ -105,6 +106,8 @@ void smartcard_ta1_decode(struct smc_atr_para *psmc_atr, uint8_t ta1)
 		pr_err("Unsupport ta1 = 0x%x\n", ta1);
 		break;
 	}
+
+	return ;
 }
 
 void smartcard_tb1_decode(struct smc_atr_para *psmc_atr, uint8_t tb1)
@@ -125,12 +128,15 @@ void smartcard_tb1_decode(struct smc_atr_para *psmc_atr, uint8_t tb1)
 		psmc_atr->I = 50;
 	}
 
-	if (((tb1&0x1f) > 4) && ((tb1&0x1f) < 26))
+	if (((tb1&0x1f) > 4) && ((tb1&0x1f) < 26)) {
 		psmc_atr->P = (tb1&0x1f); /* 5~25 in Volts */
-	else if (0 == (tb1&0x1f))
+	} else if (0 == (tb1&0x1f)) {
 		psmc_atr->P = 0;
-	else
+	} else {
 		psmc_atr->P = 5;
+	}
+
+	return ;
 }
 
 /* ATR data format: max 33 byte(include TS)
@@ -154,7 +160,7 @@ void smartcard_tb1_decode(struct smc_atr_para *psmc_atr, uint8_t tb1)
  *	code II,PI
  * TCi: Interface character
  *	code N
- * TDi: Interface character
+ * TDi: Interface charater
  *	code Yi+1, T
  *	[bit7|bit6|bit5|bit4|bit3|bit2|bit1|bit0]
  *	|------ Yi + 1 -----|-------- T --------|
@@ -167,7 +173,7 @@ void smartcard_tb1_decode(struct smc_atr_para *psmc_atr, uint8_t tb1)
  *		T=0: character transmit
  *		T=1: block transmit
  *		T=other: reserved
- * T1~TK: history byte, information of the card like manufacture name
+ * T1~TK: history byte, infomation of the card like manufacture name
  * TCK: verify character, make sure the data is correctly
 */
 void smartcard_atr_decode(struct smc_atr_para *psmc_atr, struct smc_pps_para *psmc_pps,
@@ -311,15 +317,24 @@ void smartcard_atr_decode(struct smc_atr_para *psmc_atr, struct smc_pps_para *ps
 	}
 
 rx_tk:
-	for (i = 0; i < (psmc_atr->TK_NUM); i++)
+	for (i = 0; i < (psmc_atr->TK_NUM); i++) {
 		psmc_atr->TK[i] = pdata[index++];
+	}
 
 	psmc_pps->pck = psmc_pps->ppss;
 	psmc_pps->pck ^= psmc_pps->pps0;
-	if (psmc_pps->pps0&(0x1<<4))
+	if (psmc_pps->pps0&(0x1<<4)) {
 		psmc_pps->pck ^= psmc_pps->pps1;
-	if (psmc_pps->pps0&(0x1<<5))
+	}
+	if (psmc_pps->pps0&(0x1<<5)) {
 		psmc_pps->pck ^= psmc_pps->pps2;
-	if (psmc_pps->pps0&(0x1<<6))
+	}
+	if (psmc_pps->pps0&(0x1<<6)) {
 		psmc_pps->pck ^= psmc_pps->pps3;
+	}
+
+	return ;
 }
+
+
+

@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2005 - 2016 Broadcom
+ * Copyright (C) 2005 - 2013 Emulex
  * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
@@ -7,12 +7,12 @@
  * as published by the Free Software Foundation.  The full GNU General
  * Public License is included in this distribution in the file called COPYING.
  *
- * Written by: Jayamohan Kallickal (jayamohan.kallickal@broadcom.com)
+ * Written by: Jayamohan Kallickal (jayamohan.kallickal@emulex.com)
  *
  * Contact Information:
- * linux-drivers@broadcom.com
+ * linux-drivers@emulex.com
  *
- * Avago Technologies
+ * Emulex
  * 3333 Susan Street
  * Costa Mesa, CA 92626
  */
@@ -23,18 +23,25 @@
 #include "be_main.h"
 #include "be_mgmt.h"
 
-void beiscsi_iface_create_default(struct beiscsi_hba *phba);
+#define BE2_IPV4  0x1
+#define BE2_IPV6  0x10
+#define BE2_DHCP_V4 0x05
 
-void beiscsi_iface_destroy_default(struct beiscsi_hba *phba);
+#define NON_BLOCKING 0x0
+#define BLOCKING 0x1
 
-int beiscsi_iface_get_param(struct iscsi_iface *iface,
+void beiscsi_create_def_ifaces(struct beiscsi_hba *phba);
+
+void beiscsi_destroy_def_ifaces(struct beiscsi_hba *phba);
+
+int be2iscsi_iface_get_param(struct iscsi_iface *iface,
 			     enum iscsi_param_type param_type,
 			     int param, char *buf);
 
-int beiscsi_iface_set_param(struct Scsi_Host *shost,
+int be2iscsi_iface_set_param(struct Scsi_Host *shost,
 			     void *data, uint32_t count);
 
-umode_t beiscsi_attr_is_visible(int param_type, int param);
+umode_t be2iscsi_attr_is_visible(int param_type, int param);
 
 void beiscsi_offload_connection(struct beiscsi_conn *beiscsi_conn,
 				struct beiscsi_offload_params *params);
@@ -49,8 +56,6 @@ struct iscsi_cls_session *beiscsi_session_create(struct iscsi_endpoint *ep,
 						 uint32_t initial_cmdsn);
 
 void beiscsi_session_destroy(struct iscsi_cls_session *cls_session);
-
-void beiscsi_session_fail(struct iscsi_cls_session *cls_session);
 
 struct iscsi_cls_conn *beiscsi_conn_create(struct iscsi_cls_session
 					   *cls_session, uint32_t cid);

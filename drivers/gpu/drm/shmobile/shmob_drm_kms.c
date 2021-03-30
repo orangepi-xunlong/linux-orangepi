@@ -1,7 +1,7 @@
 /*
  * shmob_drm_kms.c  --  SH Mobile DRM Mode Setting
  *
- * Copyright (C) 2012 Renesas Electronics Corporation
+ * Copyright (C) 2012 Renesas Corporation
  *
  * Laurent Pinchart (laurent.pinchart@ideasonboard.com)
  *
@@ -104,7 +104,7 @@ const struct shmob_drm_format_info *shmob_drm_format_info(u32 fourcc)
 
 static struct drm_framebuffer *
 shmob_drm_fb_create(struct drm_device *dev, struct drm_file *file_priv,
-		    const struct drm_mode_fb_cmd2 *mode_cmd)
+		    struct drm_mode_fb_cmd2 *mode_cmd)
 {
 	const struct shmob_drm_format_info *format;
 
@@ -116,7 +116,7 @@ shmob_drm_fb_create(struct drm_device *dev, struct drm_file *file_priv,
 	}
 
 	if (mode_cmd->pitches[0] & 7 || mode_cmd->pitches[0] >= 65536) {
-		dev_dbg(dev->dev, "invalid pitch value %u\n",
+		dev_dbg(dev->dev, "valid pitch value %u\n",
 			mode_cmd->pitches[0]);
 		return ERR_PTR(-EINVAL);
 	}

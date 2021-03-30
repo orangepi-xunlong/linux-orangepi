@@ -6,9 +6,10 @@ Required properties:
 - interrupts: Should contain ethernet controller interrupt
 
 Optional properties:
-- phy-mode: See ethernet.txt file in the same directory. If the property is
-  absent, "rmii" is assumed.
+- phy-mode: String, operation mode of the PHY interface.
+  Supported values are: "mii", "rmii" (default)
 - use-iram: Use LPC32xx internal SRAM (IRAM) for DMA buffering
+- local-mac-address : 6 bytes, mac address
 
 Example:
 

@@ -15,6 +15,7 @@
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/isapnp.h>
+#include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/platform_device.h>
@@ -77,13 +78,12 @@ static unsigned char version[] = "ax88796.c: Copyright 2005,2007 Simtec Electron
 
 #define AX_GPOC_PPDSET	BIT(6)
 
-static u32 ax_msg_enable;
-
 /* device private data */
 
 struct ax_device {
 	struct mii_bus *mii_bus;
 	struct mdiobb_ctrl bb_ctrl;
+	struct phy_device *phy_dev;
 	void __iomem *addr_memr;
 	u8 reg_memr;
 	int link;
@@ -147,7 +147,8 @@ static void ax_reset_8390(struct net_device *dev)
 	unsigned long reset_start_time = jiffies;
 	void __iomem *addr = (void __iomem *)dev->base_addr;
 
-	netif_dbg(ei_local, hw, dev, "resetting the 8390 t=%ld...\n", jiffies);
+	if (ei_debug > 1)
+		netdev_dbg(dev, "resetting the 8390 t=%ld\n", jiffies);
 
 	ei_outb(ei_inb(addr + NE_RESET), addr + NE_RESET);
 
@@ -156,7 +157,7 @@ static void ax_reset_8390(struct net_device *dev)
 
 	/* This check _should_not_ be necessary, omit eventually. */
 	while ((ei_inb(addr + EN0_ISR) & ENISR_RESET) == 0) {
-		if (time_after(jiffies, reset_start_time + 2 * HZ / 100)) {
+		if (jiffies - reset_start_time > 2 * HZ / 100) {
 			netdev_warn(dev, "%s: did not complete.\n", __func__);
 			break;
 		}
@@ -292,7 +293,7 @@ static void ax_block_output(struct net_device *dev, int count,
 	dma_start = jiffies;
 
 	while ((ei_inb(nic_base + EN0_ISR) & ENISR_RDC) == 0) {
-		if (time_after(jiffies, dma_start + 2 * HZ / 100)) { /* 20ms */
+		if (jiffies - dma_start > 2 * HZ / 100) {		/* 20ms */
 			netdev_warn(dev, "timeout waiting for Tx RDC.\n");
 			ax_reset_8390(dev);
 			ax_NS8390_init(dev, 1);
@@ -319,7 +320,7 @@ static void ax_block_output(struct net_device *dev, int count,
 static void ax_handle_link_change(struct net_device *dev)
 {
 	struct ax_device  *ax = to_ax_dev(dev);
-	struct phy_device *phy_dev = dev->phydev;
+	struct phy_device *phy_dev = ax->phy_dev;
 	int status_change = 0;
 
 	if (phy_dev->link && ((ax->speed != phy_dev->speed) ||
@@ -368,8 +369,10 @@ static int ax_mii_probe(struct net_device *dev)
 	phy_dev->supported &= PHY_BASIC_FEATURES;
 	phy_dev->advertising = phy_dev->supported;
 
+	ax->phy_dev = phy_dev;
+
 	netdev_info(dev, "PHY driver [%s] (mii_bus:phy_addr=%s, irq=%d)\n",
-		    phy_dev->drv->name, phydev_name(phy_dev), phy_dev->irq);
+		    phy_dev->drv->name, dev_name(&phy_dev->dev), phy_dev->irq);
 
 	return 0;
 }
@@ -407,7 +410,7 @@ static int ax_open(struct net_device *dev)
 	ret = ax_mii_probe(dev);
 	if (ret)
 		goto failed_mii_probe;
-	phy_start(dev->phydev);
+	phy_start(ax->phy_dev);
 
 	ret = ax_ei_open(dev);
 	if (ret)
@@ -418,7 +421,7 @@ static int ax_open(struct net_device *dev)
 	return 0;
 
  failed_ax_ei_open:
-	phy_disconnect(dev->phydev);
+	phy_disconnect(ax->phy_dev);
  failed_mii_probe:
 	ax_phy_switch(dev, 0);
 	free_irq(dev->irq, dev);
@@ -439,7 +442,7 @@ static int ax_close(struct net_device *dev)
 
 	/* turn the phy off */
 	ax_phy_switch(dev, 0);
-	phy_disconnect(dev->phydev);
+	phy_disconnect(ax->phy_dev);
 
 	free_irq(dev->irq, dev);
 	return 0;
@@ -447,7 +450,8 @@ static int ax_close(struct net_device *dev)
 
 static int ax_ioctl(struct net_device *dev, struct ifreq *req, int cmd)
 {
-	struct phy_device *phy_dev = dev->phydev;
+	struct ax_device *ax = to_ax_dev(dev);
+	struct phy_device *phy_dev = ax->phy_dev;
 
 	if (!netif_running(dev))
 		return -EINVAL;
@@ -470,28 +474,34 @@ static void ax_get_drvinfo(struct net_device *dev,
 	strlcpy(info->bus_info, pdev->name, sizeof(info->bus_info));
 }
 
-static u32 ax_get_msglevel(struct net_device *dev)
+static int ax_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 {
-	struct ei_device *ei_local = netdev_priv(dev);
+	struct ax_device *ax = to_ax_dev(dev);
+	struct phy_device *phy_dev = ax->phy_dev;
 
-	return ei_local->msg_enable;
+	if (!phy_dev)
+		return -ENODEV;
+
+	return phy_ethtool_gset(phy_dev, cmd);
 }
 
-static void ax_set_msglevel(struct net_device *dev, u32 v)
+static int ax_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 {
-	struct ei_device *ei_local = netdev_priv(dev);
+	struct ax_device *ax = to_ax_dev(dev);
+	struct phy_device *phy_dev = ax->phy_dev;
 
-	ei_local->msg_enable = v;
+	if (!phy_dev)
+		return -ENODEV;
+
+	return phy_ethtool_sset(phy_dev, cmd);
 }
 
 static const struct ethtool_ops ax_ethtool_ops = {
 	.get_drvinfo		= ax_get_drvinfo,
+	.get_settings		= ax_get_settings,
+	.set_settings		= ax_set_settings,
 	.get_link		= ethtool_op_get_link,
 	.get_ts_info		= ethtool_op_get_ts_info,
-	.get_msglevel		= ax_get_msglevel,
-	.set_msglevel		= ax_set_msglevel,
-	.get_link_ksettings	= phy_ethtool_get_link_ksettings,
-	.set_link_ksettings	= phy_ethtool_set_link_ksettings,
 };
 
 #ifdef CONFIG_AX88796_93CX6
@@ -601,7 +611,7 @@ static int ax_mii_init(struct net_device *dev)
 	struct platform_device *pdev = to_platform_device(dev->dev.parent);
 	struct ei_device *ei_local = netdev_priv(dev);
 	struct ax_device *ax = to_ax_dev(dev);
-	int err;
+	int err, i;
 
 	ax->bb_ctrl.ops = &bb_ops;
 	ax->addr_memr = ei_local->mem + AX_MEMR;
@@ -616,12 +626,23 @@ static int ax_mii_init(struct net_device *dev)
 	snprintf(ax->mii_bus->id, MII_BUS_ID_SIZE, "%s-%x",
 		pdev->name, pdev->id);
 
+	ax->mii_bus->irq = kmalloc(sizeof(int) * PHY_MAX_ADDR, GFP_KERNEL);
+	if (!ax->mii_bus->irq) {
+		err = -ENOMEM;
+		goto out_free_mdio_bitbang;
+	}
+
+	for (i = 0; i < PHY_MAX_ADDR; i++)
+		ax->mii_bus->irq[i] = PHY_POLL;
+
 	err = mdiobus_register(ax->mii_bus);
 	if (err)
-		goto out_free_mdio_bitbang;
+		goto out_free_irq;
 
 	return 0;
 
+ out_free_irq:
+	kfree(ax->mii_bus->irq);
  out_free_mdio_bitbang:
 	free_mdio_bitbang(ax->mii_bus);
  out:
@@ -681,12 +702,12 @@ static int ax_init_dev(struct net_device *dev)
 			for (i = 0; i < 16; i++)
 				SA_prom[i] = SA_prom[i+i];
 
-		memcpy(dev->dev_addr, SA_prom, ETH_ALEN);
+		memcpy(dev->dev_addr, SA_prom, 6);
 	}
 
 #ifdef CONFIG_AX88796_93CX6
 	if (ax->plat->flags & AXFLG_HAS_93CX6) {
-		unsigned char mac_addr[ETH_ALEN];
+		unsigned char mac_addr[6];
 		struct eeprom_93cx6 eeprom;
 
 		eeprom.data = ei_local;
@@ -698,7 +719,7 @@ static int ax_init_dev(struct net_device *dev)
 				       (__le16 __force *)mac_addr,
 				       sizeof(mac_addr) >> 1);
 
-		memcpy(dev->dev_addr, mac_addr, ETH_ALEN);
+		memcpy(dev->dev_addr, mac_addr, 6);
 	}
 #endif
 	if (ax->plat->wordlength == 2) {
@@ -742,7 +763,6 @@ static int ax_init_dev(struct net_device *dev)
 	ei_local->block_output = &ax_block_output;
 	ei_local->get_8390_hdr = &ax_get_8390_hdr;
 	ei_local->priv = 0;
-	ei_local->msg_enable = ax_msg_enable;
 
 	dev->netdev_ops = &ax_netdev_ops;
 	dev->ethtool_ops = &ax_ethtool_ops;
@@ -820,7 +840,7 @@ static int ax_probe(struct platform_device *pdev)
 	ei_local = netdev_priv(dev);
 	ax = to_ax_dev(dev);
 
-	ax->plat = dev_get_platdata(&pdev->dev);
+	ax->plat = pdev->dev.platform_data;
 	platform_set_drvdata(pdev, dev);
 
 	ei_local->rxcr_base = ax->plat->rcr_val;
@@ -910,8 +930,7 @@ static int ax_probe(struct platform_device *pdev)
 	iounmap(ax->map2);
 
  exit_mem2:
-	if (mem2)
-		release_mem_region(mem2->start, mem2_size);
+	release_mem_region(mem2->start, mem2_size);
 
  exit_mem1:
 	iounmap(ei_local->mem);
@@ -964,6 +983,7 @@ static int ax_resume(struct platform_device *pdev)
 static struct platform_driver axdrv = {
 	.driver	= {
 		.name		= "ax88796",
+		.owner		= THIS_MODULE,
 	},
 	.probe		= ax_probe,
 	.remove		= ax_remove,

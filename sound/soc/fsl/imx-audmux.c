@@ -26,6 +26,7 @@
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
+#include <linux/pinctrl/consumer.h>
 
 #include "imx-audmux.h"
 
@@ -66,15 +67,15 @@ static ssize_t audmux_read_file(struct file *file, char __user *user_buf,
 				size_t count, loff_t *ppos)
 {
 	ssize_t ret;
-	char *buf;
-	uintptr_t port = (uintptr_t)file->private_data;
+	char *buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	int port = (int)file->private_data;
 	u32 pdcr, ptcr;
 
-	if (audmux_clk) {
-		ret = clk_prepare_enable(audmux_clk);
-		if (ret)
-			return ret;
-	}
+	if (!buf)
+		return -ENOMEM;
+
+	if (audmux_clk)
+		clk_prepare_enable(audmux_clk);
 
 	ptcr = readl(audmux_base + IMX_AUDMUX_V2_PTCR(port));
 	pdcr = readl(audmux_base + IMX_AUDMUX_V2_PDCR(port));
@@ -82,53 +83,49 @@ static ssize_t audmux_read_file(struct file *file, char __user *user_buf,
 	if (audmux_clk)
 		clk_disable_unprepare(audmux_clk);
 
-	buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	ret = scnprintf(buf, PAGE_SIZE, "PDCR: %08x\nPTCR: %08x\n",
+	ret = snprintf(buf, PAGE_SIZE, "PDCR: %08x\nPTCR: %08x\n",
 		       pdcr, ptcr);
 
 	if (ptcr & IMX_AUDMUX_V2_PTCR_TFSDIR)
-		ret += scnprintf(buf + ret, PAGE_SIZE - ret,
+		ret += snprintf(buf + ret, PAGE_SIZE - ret,
 				"TxFS output from %s, ",
 				audmux_port_string((ptcr >> 27) & 0x7));
 	else
-		ret += scnprintf(buf + ret, PAGE_SIZE - ret,
+		ret += snprintf(buf + ret, PAGE_SIZE - ret,
 				"TxFS input, ");
 
 	if (ptcr & IMX_AUDMUX_V2_PTCR_TCLKDIR)
-		ret += scnprintf(buf + ret, PAGE_SIZE - ret,
+		ret += snprintf(buf + ret, PAGE_SIZE - ret,
 				"TxClk output from %s",
 				audmux_port_string((ptcr >> 22) & 0x7));
 	else
-		ret += scnprintf(buf + ret, PAGE_SIZE - ret,
+		ret += snprintf(buf + ret, PAGE_SIZE - ret,
 				"TxClk input");
 
-	ret += scnprintf(buf + ret, PAGE_SIZE - ret, "\n");
+	ret += snprintf(buf + ret, PAGE_SIZE - ret, "\n");
 
 	if (ptcr & IMX_AUDMUX_V2_PTCR_SYN) {
-		ret += scnprintf(buf + ret, PAGE_SIZE - ret,
+		ret += snprintf(buf + ret, PAGE_SIZE - ret,
 				"Port is symmetric");
 	} else {
 		if (ptcr & IMX_AUDMUX_V2_PTCR_RFSDIR)
-			ret += scnprintf(buf + ret, PAGE_SIZE - ret,
+			ret += snprintf(buf + ret, PAGE_SIZE - ret,
 					"RxFS output from %s, ",
 					audmux_port_string((ptcr >> 17) & 0x7));
 		else
-			ret += scnprintf(buf + ret, PAGE_SIZE - ret,
+			ret += snprintf(buf + ret, PAGE_SIZE - ret,
 					"RxFS input, ");
 
 		if (ptcr & IMX_AUDMUX_V2_PTCR_RCLKDIR)
-			ret += scnprintf(buf + ret, PAGE_SIZE - ret,
+			ret += snprintf(buf + ret, PAGE_SIZE - ret,
 					"RxClk output from %s",
 					audmux_port_string((ptcr >> 12) & 0x7));
 		else
-			ret += scnprintf(buf + ret, PAGE_SIZE - ret,
+			ret += snprintf(buf + ret, PAGE_SIZE - ret,
 					"RxClk input");
 	}
 
-	ret += scnprintf(buf + ret, PAGE_SIZE - ret,
+	ret += snprintf(buf + ret, PAGE_SIZE - ret,
 			"\nData received from %s\n",
 			audmux_port_string((pdcr >> 13) & 0x7));
 
@@ -145,9 +142,9 @@ static const struct file_operations audmux_debugfs_fops = {
 	.llseek = default_llseek,
 };
 
-static void audmux_debugfs_init(void)
+static void __init audmux_debugfs_init(void)
 {
-	uintptr_t i;
+	int i;
 	char buf[20];
 
 	audmux_debugfs_root = debugfs_create_dir("audmux", NULL);
@@ -157,10 +154,10 @@ static void audmux_debugfs_init(void)
 	}
 
 	for (i = 0; i < MX31_AUDMUX_PORT7_SSI_PINS_7 + 1; i++) {
-		snprintf(buf, sizeof(buf), "ssi%lu", i);
+		snprintf(buf, sizeof(buf), "ssi%d", i);
 		if (!debugfs_create_file(buf, 0444, audmux_debugfs_root,
 					 (void *)i, &audmux_debugfs_fops))
-			pr_warning("Failed to create AUDMUX port %lu debugfs file\n",
+			pr_warning("Failed to create AUDMUX port %d debugfs file\n",
 				   i);
 	}
 }
@@ -184,7 +181,7 @@ static enum imx_audmux_type {
 	IMX31_AUDMUX,
 } audmux_type;
 
-static const struct platform_device_id imx_audmux_ids[] = {
+static struct platform_device_id imx_audmux_ids[] = {
 	{
 		.name = "imx21-audmux",
 		.driver_data = IMX21_AUDMUX,
@@ -228,19 +225,14 @@ EXPORT_SYMBOL_GPL(imx_audmux_v1_configure_port);
 int imx_audmux_v2_configure_port(unsigned int port, unsigned int ptcr,
 		unsigned int pdcr)
 {
-	int ret;
-
 	if (audmux_type != IMX31_AUDMUX)
 		return -EINVAL;
 
 	if (!audmux_base)
 		return -ENOSYS;
 
-	if (audmux_clk) {
-		ret = clk_prepare_enable(audmux_clk);
-		if (ret)
-			return ret;
-	}
+	if (audmux_clk)
+		clk_prepare_enable(audmux_clk);
 
 	writel(ptcr, audmux_base + IMX_AUDMUX_V2_PTCR(port));
 	writel(pdcr, audmux_base + IMX_AUDMUX_V2_PDCR(port));
@@ -252,69 +244,10 @@ int imx_audmux_v2_configure_port(unsigned int port, unsigned int ptcr,
 }
 EXPORT_SYMBOL_GPL(imx_audmux_v2_configure_port);
 
-static int imx_audmux_parse_dt_defaults(struct platform_device *pdev,
-		struct device_node *of_node)
-{
-	struct device_node *child;
-
-	for_each_available_child_of_node(of_node, child) {
-		unsigned int port;
-		unsigned int ptcr = 0;
-		unsigned int pdcr = 0;
-		unsigned int pcr = 0;
-		unsigned int val;
-		int ret;
-		int i = 0;
-
-		ret = of_property_read_u32(child, "fsl,audmux-port", &port);
-		if (ret) {
-			dev_warn(&pdev->dev, "Failed to get fsl,audmux-port of child node \"%s\"\n",
-					child->full_name);
-			continue;
-		}
-		if (!of_property_read_bool(child, "fsl,port-config")) {
-			dev_warn(&pdev->dev, "child node \"%s\" does not have property fsl,port-config\n",
-					child->full_name);
-			continue;
-		}
-
-		for (i = 0; (ret = of_property_read_u32_index(child,
-					"fsl,port-config", i, &val)) == 0;
-				++i) {
-			if (audmux_type == IMX31_AUDMUX) {
-				if (i % 2)
-					pdcr |= val;
-				else
-					ptcr |= val;
-			} else {
-				pcr |= val;
-			}
-		}
-
-		if (ret != -EOVERFLOW) {
-			dev_err(&pdev->dev, "Failed to read u32 at index %d of child %s\n",
-					i, child->full_name);
-			continue;
-		}
-
-		if (audmux_type == IMX31_AUDMUX) {
-			if (i % 2) {
-				dev_err(&pdev->dev, "One pdcr value is missing in child node %s\n",
-						child->full_name);
-				continue;
-			}
-			imx_audmux_v2_configure_port(port, ptcr, pdcr);
-		} else {
-			imx_audmux_v1_configure_port(port, pcr);
-		}
-	}
-
-	return 0;
-}
-
 static int imx_audmux_probe(struct platform_device *pdev)
 {
 	struct resource *res;
+	struct pinctrl *pinctrl;
 	const struct of_device_id *of_id =
 			of_match_device(imx_audmux_dt_ids, &pdev->dev);
 
@@ -322,6 +255,12 @@ static int imx_audmux_probe(struct platform_device *pdev)
 	audmux_base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(audmux_base))
 		return PTR_ERR(audmux_base);
+
+	pinctrl = devm_pinctrl_get_select_default(&pdev->dev);
+	if (IS_ERR(pinctrl)) {
+		dev_err(&pdev->dev, "setup pinctrl failed!");
+		return PTR_ERR(pinctrl);
+	}
 
 	audmux_clk = devm_clk_get(&pdev->dev, "audmux");
 	if (IS_ERR(audmux_clk)) {
@@ -335,9 +274,6 @@ static int imx_audmux_probe(struct platform_device *pdev)
 	audmux_type = pdev->id_entry->driver_data;
 	if (audmux_type == IMX31_AUDMUX)
 		audmux_debugfs_init();
-
-	if (of_id)
-		imx_audmux_parse_dt_defaults(pdev, pdev->dev.of_node);
 
 	return 0;
 }
@@ -356,6 +292,7 @@ static struct platform_driver imx_audmux_driver = {
 	.id_table	= imx_audmux_ids,
 	.driver	= {
 		.name	= DRIVER_NAME,
+		.owner	= THIS_MODULE,
 		.of_match_table = imx_audmux_dt_ids,
 	}
 };

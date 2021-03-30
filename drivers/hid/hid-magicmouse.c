@@ -34,10 +34,9 @@ module_param(emulate_scroll_wheel, bool, 0644);
 MODULE_PARM_DESC(emulate_scroll_wheel, "Emulate a scroll wheel");
 
 static unsigned int scroll_speed = 32;
-static int param_set_scroll_speed(const char *val,
-				  const struct kernel_param *kp) {
+static int param_set_scroll_speed(const char *val, struct kernel_param *kp) {
 	unsigned long speed;
-	if (!val || kstrtoul(val, 0, &speed) || speed > 63)
+	if (!val || strict_strtoul(val, 0, &speed) || speed > 63)
 		return -EINVAL;
 	scroll_speed = speed;
 	return 0;
@@ -477,30 +476,27 @@ static int magicmouse_input_configured(struct hid_device *hdev,
 
 {
 	struct magicmouse_sc *msc = hid_get_drvdata(hdev);
-	int ret;
 
-	ret = magicmouse_setup_input(msc->input, hdev);
+	int ret = magicmouse_setup_input(msc->input, hdev);
 	if (ret) {
 		hid_err(hdev, "magicmouse setup input failed (%d)\n", ret);
 		/* clean msc->input to notify probe() of the failure */
 		msc->input = NULL;
-		return ret;
 	}
 
-	return 0;
+	return ret;
 }
 
 
 static int magicmouse_probe(struct hid_device *hdev,
 	const struct hid_device_id *id)
 {
-	const u8 feature[] = { 0xd7, 0x01 };
-	u8 *buf;
+	__u8 feature[] = { 0xd7, 0x01 };
 	struct magicmouse_sc *msc;
 	struct hid_report *report;
 	int ret;
 
-	msc = devm_kzalloc(&hdev->dev, sizeof(*msc), GFP_KERNEL);
+	msc = kzalloc(sizeof(*msc), GFP_KERNEL);
 	if (msc == NULL) {
 		hid_err(hdev, "can't alloc magicmouse descriptor\n");
 		return -ENOMEM;
@@ -514,13 +510,13 @@ static int magicmouse_probe(struct hid_device *hdev,
 	ret = hid_parse(hdev);
 	if (ret) {
 		hid_err(hdev, "magicmouse hid parse failed\n");
-		return ret;
+		goto err_free;
 	}
 
 	ret = hid_hw_start(hdev, HID_CONNECT_DEFAULT);
 	if (ret) {
 		hid_err(hdev, "magicmouse hw start failed\n");
-		return ret;
+		goto err_free;
 	}
 
 	if (!msc->input) {
@@ -546,12 +542,6 @@ static int magicmouse_probe(struct hid_device *hdev,
 	}
 	report->size = 6;
 
-	buf = kmemdup(feature, sizeof(feature), GFP_KERNEL);
-	if (!buf) {
-		ret = -ENOMEM;
-		goto err_stop_hw;
-	}
-
 	/*
 	 * Some devices repond with 'invalid report id' when feature
 	 * report switching it into multitouch mode is sent to it.
@@ -560,9 +550,8 @@ static int magicmouse_probe(struct hid_device *hdev,
 	 * but there seems to be no other way of switching the mode.
 	 * Thus the super-ugly hacky success check below.
 	 */
-	ret = hid_hw_raw_request(hdev, buf[0], buf, sizeof(feature),
-				HID_FEATURE_REPORT, HID_REQ_SET_REPORT);
-	kfree(buf);
+	ret = hdev->hid_output_raw_report(hdev, feature, sizeof(feature),
+			HID_FEATURE_REPORT);
 	if (ret != -EIO && ret != sizeof(feature)) {
 		hid_err(hdev, "unable to request touch data (%d)\n", ret);
 		goto err_stop_hw;
@@ -571,7 +560,17 @@ static int magicmouse_probe(struct hid_device *hdev,
 	return 0;
 err_stop_hw:
 	hid_hw_stop(hdev);
+err_free:
+	kfree(msc);
 	return ret;
+}
+
+static void magicmouse_remove(struct hid_device *hdev)
+{
+	struct magicmouse_sc *msc = hid_get_drvdata(hdev);
+
+	hid_hw_stop(hdev);
+	kfree(msc);
 }
 
 static const struct hid_device_id magic_mice[] = {
@@ -587,6 +586,7 @@ static struct hid_driver magicmouse_driver = {
 	.name = "magicmouse",
 	.id_table = magic_mice,
 	.probe = magicmouse_probe,
+	.remove = magicmouse_remove,
 	.raw_event = magicmouse_raw_event,
 	.input_mapping = magicmouse_input_mapping,
 	.input_configured = magicmouse_input_configured,

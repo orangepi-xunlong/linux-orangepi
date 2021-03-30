@@ -257,8 +257,8 @@ enum rx_desc_status_bits {
 	RXFSD = 0x00000800,	/* first descriptor */
 	RXLSD = 0x00000400,	/* last descriptor */
 	ErrorSummary = 0x80,	/* error summary */
-	RUNTPKT = 0x40,		/* runt packet received */
-	LONGPKT = 0x20,		/* long packet received */
+	RUNT = 0x40,		/* runt packet received */
+	LONG = 0x20,		/* long packet received */
 	FAE = 0x10,		/* frame align error */
 	CRC = 0x08,		/* crc error */
 	RXER = 0x04,		/* receive error */
@@ -699,6 +699,7 @@ static void fealnx_remove_one(struct pci_dev *pdev)
 		pci_iounmap(pdev, np->mem);
 		free_netdev(dev);
 		pci_release_regions(pdev);
+		pci_set_drvdata(pdev, NULL);
 	} else
 		printk(KERN_ERR "fealnx: remove for unknown device\n");
 }
@@ -1227,7 +1228,7 @@ static void fealnx_tx_timeout(struct net_device *dev)
 
 	spin_unlock_irqrestore(&np->lock, flags);
 
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	dev->stats.tx_errors++;
 	netif_wake_queue(dev); /* or .._start_.. ?? */
 }
@@ -1633,7 +1634,7 @@ static int netdev_rx(struct net_device *dev)
 					       dev->name, rx_status);
 
 				dev->stats.rx_errors++;	/* end of a packet. */
-				if (rx_status & (LONGPKT | RUNTPKT))
+				if (rx_status & (LONG | RUNT))
 					dev->stats.rx_length_errors++;
 				if (rx_status & RXER)
 					dev->stats.rx_frame_errors++;
@@ -1936,7 +1937,7 @@ static int netdev_close(struct net_device *dev)
 	return 0;
 }
 
-static const struct pci_device_id fealnx_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(fealnx_pci_tbl) = {
 	{0x1516, 0x0800, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
 	{0x1516, 0x0803, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 1},
 	{0x1516, 0x0891, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 2},

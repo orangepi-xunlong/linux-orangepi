@@ -6,7 +6,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2013, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -43,7 +43,6 @@
  */
 
 #include <acpi/acpi.h>
-#include <linux/acpi.h>
 #include "accommon.h"
 
 #define _COMPONENT          ACPI_HARDWARE
@@ -117,8 +116,8 @@ acpi_status acpi_hw_extended_sleep(u8 sleep_state)
 
 	/* Clear wake status (WAK_STS) */
 
-	status = acpi_write((u64)ACPI_X_WAKE_STATUS,
-			    &acpi_gbl_FADT.sleep_status);
+	status =
+	    acpi_write((u64)ACPI_X_WAKE_STATUS, &acpi_gbl_FADT.sleep_status);
 	if (ACPI_FAILURE(status)) {
 		return_ACPI_STATUS(status);
 	}
@@ -128,14 +127,6 @@ acpi_status acpi_hw_extended_sleep(u8 sleep_state)
 	/* Flush caches, as per ACPI specification */
 
 	ACPI_FLUSH_CPU_CACHE();
-
-	status = acpi_os_prepare_extended_sleep(sleep_state,
-						acpi_gbl_sleep_type_a,
-						acpi_gbl_sleep_type_b);
-	if (ACPI_SKIP(status))
-		return_ACPI_STATUS(AE_OK);
-	if (ACPI_FAILURE(status))
-		return_ACPI_STATUS(status);
 
 	/*
 	 * Set the SLP_TYP and SLP_EN bits.

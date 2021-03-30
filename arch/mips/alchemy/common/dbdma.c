@@ -261,7 +261,7 @@ u32 au1xxx_dbdma_chan_alloc(u32 srcid, u32 destid,
 	au1x_dma_chan_t *cp;
 
 	/*
-	 * We do the initialization on the first channel allocation.
+	 * We do the intialization on the first channel allocation.
 	 * We have to wait because of the interrupt handler initialization
 	 * which can't be done successfully during board set up.
 	 */
@@ -341,7 +341,7 @@ u32 au1xxx_dbdma_chan_alloc(u32 srcid, u32 destid,
 			(dtp->dev_flags & DEV_FLAGS_SYNC))
 				i |= DDMA_CFG_SYNC;
 		cp->ddma_cfg = i;
-		wmb(); /* drain writebuffer */
+		au_sync();
 
 		/*
 		 * Return a non-zero value that can be used to find the channel
@@ -631,7 +631,7 @@ u32 au1xxx_dbdma_put_source(u32 chanid, dma_addr_t buf, int nbytes, u32 flags)
 	 */
 	dma_cache_wback_inv((unsigned long)buf, nbytes);
 	dp->dscr_cmd0 |= DSCR_CMD0_V;	/* Let it rip */
-	wmb(); /* drain writebuffer */
+	au_sync();
 	dma_cache_wback_inv((unsigned long)dp, sizeof(*dp));
 	ctp->chan_ptr->ddma_dbell = 0;
 
@@ -693,7 +693,7 @@ u32 au1xxx_dbdma_put_dest(u32 chanid, dma_addr_t buf, int nbytes, u32 flags)
 	 */
 	dma_cache_inv((unsigned long)buf, nbytes);
 	dp->dscr_cmd0 |= DSCR_CMD0_V;	/* Let it rip */
-	wmb(); /* drain writebuffer */
+	au_sync();
 	dma_cache_wback_inv((unsigned long)dp, sizeof(*dp));
 	ctp->chan_ptr->ddma_dbell = 0;
 
@@ -760,7 +760,7 @@ void au1xxx_dbdma_stop(u32 chanid)
 
 	cp = ctp->chan_ptr;
 	cp->ddma_cfg &= ~DDMA_CFG_EN;	/* Disable channel */
-	wmb(); /* drain writebuffer */
+	au_sync();
 	while (!(cp->ddma_stat & DDMA_STAT_H)) {
 		udelay(1);
 		halt_timeout++;
@@ -771,7 +771,7 @@ void au1xxx_dbdma_stop(u32 chanid)
 	}
 	/* clear current desc valid and doorbell */
 	cp->ddma_stat |= (DDMA_STAT_DB | DDMA_STAT_V);
-	wmb(); /* drain writebuffer */
+	au_sync();
 }
 EXPORT_SYMBOL(au1xxx_dbdma_stop);
 
@@ -789,9 +789,9 @@ void au1xxx_dbdma_start(u32 chanid)
 	cp = ctp->chan_ptr;
 	cp->ddma_desptr = virt_to_phys(ctp->cur_ptr);
 	cp->ddma_cfg |= DDMA_CFG_EN;	/* Enable channel */
-	wmb(); /* drain writebuffer */
+	au_sync();
 	cp->ddma_dbell = 0;
-	wmb(); /* drain writebuffer */
+	au_sync();
 }
 EXPORT_SYMBOL(au1xxx_dbdma_start);
 
@@ -832,7 +832,7 @@ u32 au1xxx_get_dma_residue(u32 chanid)
 
 	/* This is only valid if the channel is stopped. */
 	rv = cp->ddma_bytecnt;
-	wmb(); /* drain writebuffer */
+	au_sync();
 
 	return rv;
 }
@@ -868,7 +868,7 @@ static irqreturn_t dbdma_interrupt(int irq, void *dev_id)
 	au1x_dma_chan_t *cp;
 
 	intstat = dbdma_gptr->ddma_intstat;
-	wmb(); /* drain writebuffer */
+	au_sync();
 	chan_index = __ffs(intstat);
 
 	ctp = chan_tab_ptr[chan_index];
@@ -877,7 +877,7 @@ static irqreturn_t dbdma_interrupt(int irq, void *dev_id)
 
 	/* Reset interrupt. */
 	cp->ddma_irq = 0;
-	wmb(); /* drain writebuffer */
+	au_sync();
 
 	if (ctp->chan_callback)
 		ctp->chan_callback(irq, ctp->chan_callparam);
@@ -964,7 +964,7 @@ u32 au1xxx_dbdma_put_dscr(u32 chanid, au1x_ddma_desc_t *dscr)
 	dp->dscr_source1 = dscr->dscr_source1;
 	dp->dscr_cmd1 = dscr->dscr_cmd1;
 	nbytes = dscr->dscr_cmd1;
-	/* Allow the caller to specify if an interrupt is generated */
+	/* Allow the caller to specifiy if an interrupt is generated */
 	dp->dscr_cmd0 &= ~DSCR_CMD0_IE;
 	dp->dscr_cmd0 |= dscr->dscr_cmd0 | DSCR_CMD0_V;
 	ctp->chan_ptr->ddma_dbell = 0;
@@ -1061,7 +1061,7 @@ static int __init dbdma_setup(unsigned int irq, dbdev_tab_t *idtable)
 	dbdma_gptr->ddma_config = 0;
 	dbdma_gptr->ddma_throttle = 0;
 	dbdma_gptr->ddma_inten = 0xffff;
-	wmb(); /* drain writebuffer */
+	au_sync();
 
 	ret = request_irq(irq, dbdma_interrupt, 0, "dbdma", (void *)dbdma_gptr);
 	if (ret)

@@ -1,4 +1,3 @@
-#include <linux/init.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
@@ -10,11 +9,10 @@
 
 #include <asm/setup.h>
 #include <asm/bootinfo.h>
-#include <asm/bootinfo-apollo.h>
-#include <asm/byteorder.h>
 #include <asm/pgtable.h>
 #include <asm/apollohw.h>
 #include <asm/irq.h>
+#include <asm/rtc.h>
 #include <asm/machdep.h>
 
 u_long sio01_physaddr;
@@ -45,27 +43,28 @@ static const char *apollo_models[] = {
 	[APOLLO_DN4500-APOLLO_DN3000] = "DN4500 (Roadrunner)"
 };
 
-int __init apollo_parse_bootinfo(const struct bi_record *record)
-{
+int apollo_parse_bootinfo(const struct bi_record *record) {
+
 	int unknown = 0;
-	const void *data = record->data;
+	const unsigned long *data = record->data;
 
-	switch (be16_to_cpu(record->tag)) {
-	case BI_APOLLO_MODEL:
-		apollo_model = be32_to_cpup(data);
-		break;
+	switch(record->tag) {
+		case BI_APOLLO_MODEL:
+			apollo_model=*data;
+			break;
 
-	default:
-		 unknown=1;
+		default:
+			 unknown=1;
 	}
 
 	return unknown;
 }
 
-static void __init dn_setup_model(void)
-{
-	pr_info("Apollo hardware found: [%s]\n",
-		apollo_models[apollo_model - APOLLO_DN3000]);
+void dn_setup_model(void) {
+
+
+	printk("Apollo hardware found: ");
+	printk("[%s]\n", apollo_models[apollo_model - APOLLO_DN3000]);
 
 	switch(apollo_model) {
 		case APOLLO_UNKNOWN:
@@ -196,10 +195,8 @@ void dn_sched_init(irq_handler_t timer_routine)
 	*(volatile unsigned char *)(pica+1)&=(~8);
 
 #if 0
-	pr_info("*(0x10803) %02x\n",
-		*(volatile unsigned char *)(apollo_timer + 0x3));
-	pr_info("*(0x10803) %02x\n",
-		*(volatile unsigned char *)(apollo_timer + 0x3));
+	printk("*(0x10803) %02x\n",*(volatile unsigned char *)(apollo_timer + 0x3));
+	printk("*(0x10803) %02x\n",*(volatile unsigned char *)(apollo_timer + 0x3));
 #endif
 
 	if (request_irq(IRQ_APOLLO, dn_timer_int, 0, "time", timer_routine))
@@ -237,10 +234,12 @@ int dn_dummy_hwclk(int op, struct rtc_time *t) {
 
 }
 
-int dn_dummy_set_clock_mmss(unsigned long nowtime)
-{
-	pr_info("set_clock_mmss\n");
-	return 0;
+int dn_dummy_set_clock_mmss(unsigned long nowtime) {
+
+  printk("set_clock_mmss\n");
+
+  return 0;
+
 }
 
 void dn_dummy_reset(void) {

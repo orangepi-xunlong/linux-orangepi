@@ -1,5 +1,5 @@
-#ifndef _UAPI_NF_CONNTRACK_SCTP_H
-#define _UAPI_NF_CONNTRACK_SCTP_H
+#ifndef _NF_CONNTRACK_SCTP_H
+#define _NF_CONNTRACK_SCTP_H
 /* SCTP tracking. */
 
 #include <linux/netfilter/nf_conntrack_tuple_common.h>
@@ -13,9 +13,13 @@ enum sctp_conntrack {
 	SCTP_CONNTRACK_SHUTDOWN_SENT,
 	SCTP_CONNTRACK_SHUTDOWN_RECD,
 	SCTP_CONNTRACK_SHUTDOWN_ACK_SENT,
-	SCTP_CONNTRACK_HEARTBEAT_SENT,
-	SCTP_CONNTRACK_HEARTBEAT_ACKED,
 	SCTP_CONNTRACK_MAX
 };
 
-#endif /* _UAPI_NF_CONNTRACK_SCTP_H */
+struct ip_ct_sctp {
+	enum sctp_conntrack state;
+
+	__be32 vtag[IP_CT_DIR_MAX];
+};
+
+#endif /* _NF_CONNTRACK_SCTP_H */

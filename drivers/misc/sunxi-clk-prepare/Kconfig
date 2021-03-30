@@ -1,0 +1,8 @@
+
+config SUNXI_CLK_PREPARE
+	tristate "allwinnertech clk related modules prepare driver"
+	depends on COMMON_CLK && ARCH_SUNXI
+	default n
+	help
+	  This is a driver for manager module clk's relation.
+

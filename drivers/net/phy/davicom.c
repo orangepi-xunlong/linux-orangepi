@@ -72,7 +72,7 @@ static int dm9161_config_intr(struct phy_device *phydev)
 	if (temp < 0)
 		return temp;
 
-	if (PHY_INTERRUPT_ENABLED == phydev->interrupts)
+	if(PHY_INTERRUPT_ENABLED == phydev->interrupts )
 		temp &= ~(MII_DM9161_INTR_STOP);
 	else
 		temp |= MII_DM9161_INTR_STOP;
@@ -156,17 +156,7 @@ static struct phy_driver dm91xx_driver[] = {
 	.read_status	= genphy_read_status,
 	.ack_interrupt	= dm9161_ack_interrupt,
 	.config_intr	= dm9161_config_intr,
-}, {
-	.phy_id		= 0x0181b8b0,
-	.name		= "Davicom DM9161B/C",
-	.phy_id_mask	= 0x0ffffff0,
-	.features	= PHY_BASIC_FEATURES,
-	.flags		= PHY_HAS_INTERRUPT,
-	.config_init	= dm9161_config_init,
-	.config_aneg	= dm9161_config_aneg,
-	.read_status	= genphy_read_status,
-	.ack_interrupt	= dm9161_ack_interrupt,
-	.config_intr	= dm9161_config_intr,
+	.driver		= { .owner = THIS_MODULE,},
 }, {
 	.phy_id		= 0x0181b8a0,
 	.name		= "Davicom DM9161A",
@@ -178,6 +168,7 @@ static struct phy_driver dm91xx_driver[] = {
 	.read_status	= genphy_read_status,
 	.ack_interrupt	= dm9161_ack_interrupt,
 	.config_intr	= dm9161_config_intr,
+	.driver		= { .owner = THIS_MODULE,},
 }, {
 	.phy_id		= 0x00181b80,
 	.name		= "Davicom DM9131",
@@ -188,13 +179,26 @@ static struct phy_driver dm91xx_driver[] = {
 	.read_status	= genphy_read_status,
 	.ack_interrupt	= dm9161_ack_interrupt,
 	.config_intr	= dm9161_config_intr,
+	.driver		= { .owner = THIS_MODULE,},
 } };
 
-module_phy_driver(dm91xx_driver);
+static int __init davicom_init(void)
+{
+	return phy_drivers_register(dm91xx_driver,
+		ARRAY_SIZE(dm91xx_driver));
+}
+
+static void __exit davicom_exit(void)
+{
+	phy_drivers_unregister(dm91xx_driver,
+		ARRAY_SIZE(dm91xx_driver));
+}
+
+module_init(davicom_init);
+module_exit(davicom_exit);
 
 static struct mdio_device_id __maybe_unused davicom_tbl[] = {
 	{ 0x0181b880, 0x0ffffff0 },
-	{ 0x0181b8b0, 0x0ffffff0 },
 	{ 0x0181b8a0, 0x0ffffff0 },
 	{ 0x00181b80, 0x0ffffff0 },
 	{ }

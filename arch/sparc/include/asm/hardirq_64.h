@@ -14,4 +14,6 @@
 
 void ack_bad_irq(unsigned int irq);
 
+#define HARDIRQ_BITS	8
+
 #endif /* !(__SPARC64_HARDIRQ_H) */

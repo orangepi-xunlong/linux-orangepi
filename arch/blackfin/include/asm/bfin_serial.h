@@ -9,11 +9,8 @@
 #ifndef __BFIN_ASM_SERIAL_H__
 #define __BFIN_ASM_SERIAL_H__
 
-#include <linux/circ_buf.h>
 #include <linux/serial_core.h>
 #include <linux/spinlock.h>
-#include <linux/timer.h>
-#include <linux/workqueue.h>
 #include <mach/anomaly.h>
 #include <mach/bfin_serial.h>
 
@@ -22,11 +19,15 @@
     defined(CONFIG_BFIN_UART2_CTSRTS) || \
     defined(CONFIG_BFIN_UART3_CTSRTS)
 # if defined(BFIN_UART_BF54X_STYLE) || defined(BFIN_UART_BF60X_STYLE)
-#  define SERIAL_BFIN_HARD_CTSRTS
+#  define CONFIG_SERIAL_BFIN_HARD_CTSRTS
 # else
-#  define SERIAL_BFIN_CTSRTS
+#  define CONFIG_SERIAL_BFIN_CTSRTS
 # endif
 #endif
+
+struct circ_buf;
+struct timer_list;
+struct work_struct;
 
 struct bfin_serial_port {
 	struct uart_port port;
@@ -50,8 +51,8 @@ struct bfin_serial_port {
 #elif ANOMALY_05000363
 	unsigned int anomaly_threshold;
 #endif
-#if defined(SERIAL_BFIN_CTSRTS) || \
-	defined(SERIAL_BFIN_HARD_CTSRTS)
+#if defined(CONFIG_SERIAL_BFIN_CTSRTS) || \
+	defined(CONFIG_SERIAL_BFIN_HARD_CTSRTS)
 	int cts_pin;
 	int rts_pin;
 #endif

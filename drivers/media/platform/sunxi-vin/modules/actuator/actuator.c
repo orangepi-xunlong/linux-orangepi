@@ -1,19 +1,3 @@
-/*
- * drivers/media/platform/sunxi-vin/modules/actuator/actuator.c
- *
- * Copyright (c) 2014 softwinner.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
 
 /*
  ******************************************************************************
@@ -24,9 +8,9 @@
  *
  * Copyright (c) 2015 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
  *
- * Version        Author         Date           Description
+ * Version		  Author         Date		    Description
  *
- *   3.0        Yang Feng        2015/12/02 ISP Tuning Tools Support
+ *   3.0		  Yang Feng   	2015/12/02	ISP Tuning Tools Support
  *
  ******************************************************************************
  */
@@ -39,7 +23,6 @@
 long sunxi_actuator_ioctl(struct v4l2_subdev *sd,
 			unsigned int cmd, void *arg)
 {
-#ifdef CONFIG_ACTUATOR_MODULE
 	long ret = 0;
 
 	struct actuator_ctrl_t *act_ctrl;
@@ -51,7 +34,6 @@ long sunxi_actuator_ioctl(struct v4l2_subdev *sd,
 	switch (cmd) {
 	case ACT_INIT:{
 		struct actuator_para_t *a_para = arg;
-
 		act_dbg("ACT_INIT\n");
 		ret = act_ctrl->func_tbl.actuator_init(act_ctrl, a_para);
 		break;
@@ -68,7 +50,6 @@ long sunxi_actuator_ioctl(struct v4l2_subdev *sd,
 	}
 	case ACT_RELEASE: {
 		struct actuator_ctrl_word_t *ctrlwd = arg;
-
 		act_dbg("ACT_RELEASE\n");
 		ret = act_ctrl->func_tbl.actuator_release(act_ctrl, ctrlwd);
 		break;
@@ -76,7 +57,6 @@ long sunxi_actuator_ioctl(struct v4l2_subdev *sd,
 	case ACT_SET_CODE_RANGE: {
 		unsigned short min, max, steps;
 		unsigned short *pt = arg;
-
 		act_dbg("ACT_SET_CODE_RANGE\n");
 		min = pt[0];
 		max = pt[1];
@@ -94,7 +74,6 @@ long sunxi_actuator_ioctl(struct v4l2_subdev *sd,
 	}
 	case ACT_GET_CODE_RANGE: {
 		unsigned short *pt = arg;
-
 		act_dbg("ACT_SET_CODE_RANGE\n");
 		pt[0] = act_ctrl->active_min;
 		pt[1] = act_ctrl->active_max;
@@ -103,7 +82,6 @@ long sunxi_actuator_ioctl(struct v4l2_subdev *sd,
 	}
 	case ACT_SET_CODE: {
 		struct actuator_ctrl_word_t *ctrlwd = arg;
-
 		act_dbg("ACT_SET_CODE[%d][%d]\n", ctrlwd->code, ctrlwd->sr);
 		ret =
 		    act_ctrl->func_tbl.actuator_set_code(act_ctrl,
@@ -118,7 +96,6 @@ long sunxi_actuator_ioctl(struct v4l2_subdev *sd,
 	}
 	case ACT_SET_POS: {
 		unsigned short *dest_pos = arg;
-
 		act_dbg("ACT_SET_POS[%d]\n", dest_pos[0]);
 		ret =
 		    act_ctrl->func_tbl.actuator_set_pos(act_ctrl, dest_pos[0]);
@@ -126,14 +103,12 @@ long sunxi_actuator_ioctl(struct v4l2_subdev *sd,
 	}
 	case ACT_GET_POS: {
 		unsigned short *step_pos = arg;
-
 		act_dbg("ACT_GET_POS\n");
 		step_pos[0] = act_ctrl->curr_pos;
 		break;
 	}
 	case ACT_MOV_POS: {
 		struct actuator_ctrl_step_t *ctrlstep = arg;
-
 		act_dbg("ACT_MOV_POS[%x][%x]\n", ctrlstep->step,
 			ctrlstep->dir);
 		ret =
@@ -149,10 +124,8 @@ long sunxi_actuator_ioctl(struct v4l2_subdev *sd,
 	mutex_unlock(act_ctrl->actuator_mutex);
 
 	return ret;
-#else
-	return 0;
-#endif
 }
+
 EXPORT_SYMBOL_GPL(sunxi_actuator_ioctl);
 
 MODULE_AUTHOR("zenglingying");

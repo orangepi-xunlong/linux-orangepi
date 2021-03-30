@@ -33,6 +33,7 @@
 #include <linux/tty.h>
 #include <linux/sysrq.h>
 #include <linux/delay.h>
+#include <linux/fb.h>
 #include <linux/init.h>
 
 
@@ -50,7 +51,7 @@ static void ast_dirty_update(struct ast_fbdev *afbdev,
 	struct ast_bo *bo;
 	int src_offset, dst_offset;
 	int bpp = (afbdev->afb.base.bits_per_pixel + 7)/8;
-	int ret = -EBUSY;
+	int ret;
 	bool unmap = false;
 	bool store_for_later = false;
 	int x2, y2;
@@ -64,8 +65,7 @@ static void ast_dirty_update(struct ast_fbdev *afbdev,
 	 * then the BO is being moved and we should
 	 * store up the damage until later.
 	 */
-	if (drm_can_sleep())
-		ret = ast_bo_reserve(bo, true);
+	ret = ast_bo_reserve(bo, true);
 	if (ret) {
 		if (ret != -EBUSY)
 			return;
@@ -124,7 +124,7 @@ static void ast_fillrect(struct fb_info *info,
 			 const struct fb_fillrect *rect)
 {
 	struct ast_fbdev *afbdev = info->par;
-	drm_fb_helper_sys_fillrect(info, rect);
+	sys_fillrect(info, rect);
 	ast_dirty_update(afbdev, rect->dx, rect->dy, rect->width,
 			 rect->height);
 }
@@ -133,7 +133,7 @@ static void ast_copyarea(struct fb_info *info,
 			 const struct fb_copyarea *area)
 {
 	struct ast_fbdev *afbdev = info->par;
-	drm_fb_helper_sys_copyarea(info, area);
+	sys_copyarea(info, area);
 	ast_dirty_update(afbdev, area->dx, area->dy, area->width,
 			 area->height);
 }
@@ -142,7 +142,7 @@ static void ast_imageblit(struct fb_info *info,
 			  const struct fb_image *image)
 {
 	struct ast_fbdev *afbdev = info->par;
-	drm_fb_helper_sys_imageblit(info, image);
+	sys_imageblit(info, image);
 	ast_dirty_update(afbdev, image->dx, image->dy, image->width,
 			 image->height);
 }
@@ -162,13 +162,16 @@ static struct fb_ops astfb_ops = {
 };
 
 static int astfb_create_object(struct ast_fbdev *afbdev,
-			       const struct drm_mode_fb_cmd2 *mode_cmd,
+			       struct drm_mode_fb_cmd2 *mode_cmd,
 			       struct drm_gem_object **gobj_p)
 {
 	struct drm_device *dev = afbdev->helper.dev;
+	u32 bpp, depth;
 	u32 size;
 	struct drm_gem_object *gobj;
+
 	int ret = 0;
+	drm_fb_get_bpp_depth(mode_cmd->pixel_format, &depth, &bpp);
 
 	size = mode_cmd->pitches[0] * mode_cmd->height;
 	ret = ast_gem_create(dev, size, true, &gobj);
@@ -182,13 +185,13 @@ static int astfb_create_object(struct ast_fbdev *afbdev,
 static int astfb_create(struct drm_fb_helper *helper,
 			struct drm_fb_helper_surface_size *sizes)
 {
-	struct ast_fbdev *afbdev =
-		container_of(helper, struct ast_fbdev, helper);
+	struct ast_fbdev *afbdev = (struct ast_fbdev *)helper;
 	struct drm_device *dev = afbdev->helper.dev;
 	struct drm_mode_fb_cmd2 mode_cmd;
 	struct drm_framebuffer *fb;
 	struct fb_info *info;
 	int size, ret;
+	struct device *device = &dev->pdev->dev;
 	void *sysram;
 	struct drm_gem_object *gobj = NULL;
 	struct ast_bo *bo = NULL;
@@ -212,28 +215,40 @@ static int astfb_create(struct drm_fb_helper *helper,
 	if (!sysram)
 		return -ENOMEM;
 
-	info = drm_fb_helper_alloc_fbi(helper);
-	if (IS_ERR(info)) {
-		ret = PTR_ERR(info);
-		goto err_free_vram;
+	info = framebuffer_alloc(0, device);
+	if (!info) {
+		ret = -ENOMEM;
+		goto out;
 	}
 	info->par = afbdev;
 
 	ret = ast_framebuffer_init(dev, &afbdev->afb, &mode_cmd, gobj);
 	if (ret)
-		goto err_release_fbi;
+		goto out;
 
 	afbdev->sysram = sysram;
 	afbdev->size = size;
 
 	fb = &afbdev->afb.base;
 	afbdev->helper.fb = fb;
+	afbdev->helper.fbdev = info;
 
 	strcpy(info->fix.id, "astdrmfb");
 
 	info->flags = FBINFO_DEFAULT | FBINFO_CAN_FORCE_OUTPUT;
 	info->fbops = &astfb_ops;
 
+	ret = fb_alloc_cmap(&info->cmap, 256, 0);
+	if (ret) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	info->apertures = alloc_apertures(1);
+	if (!info->apertures) {
+		ret = -ENOMEM;
+		goto out;
+	}
 	info->apertures->ranges[0].base = pci_resource_start(dev->pdev, 0);
 	info->apertures->ranges[0].size = pci_resource_len(dev->pdev, 0);
 
@@ -249,11 +264,7 @@ static int astfb_create(struct drm_fb_helper *helper,
 		      fb->width, fb->height);
 
 	return 0;
-
-err_release_fbi:
-	drm_fb_helper_release_fbi(helper);
-err_free_vram:
-	vfree(afbdev->sysram);
+out:
 	return ret;
 }
 
@@ -275,7 +286,7 @@ static void ast_fb_gamma_get(struct drm_crtc *crtc, u16 *red, u16 *green,
 	*blue = ast_crtc->lut_b[regno] << 8;
 }
 
-static const struct drm_fb_helper_funcs ast_fb_helper_funcs = {
+static struct drm_fb_helper_funcs ast_fb_helper_funcs = {
 	.gamma_set = ast_fb_gamma_set,
 	.gamma_get = ast_fb_gamma_get,
 	.fb_probe = astfb_create,
@@ -284,11 +295,15 @@ static const struct drm_fb_helper_funcs ast_fb_helper_funcs = {
 static void ast_fbdev_destroy(struct drm_device *dev,
 			      struct ast_fbdev *afbdev)
 {
+	struct fb_info *info;
 	struct ast_framebuffer *afb = &afbdev->afb;
-
-	drm_crtc_force_disable_all(dev);
-	drm_fb_helper_unregister_fbi(&afbdev->helper);
-	drm_fb_helper_release_fbi(&afbdev->helper);
+	if (afbdev->helper.fbdev) {
+		info = afbdev->helper.fbdev;
+		unregister_framebuffer(info);
+		if (info->cmap.len)
+			fb_dealloc_cmap(&info->cmap);
+		framebuffer_release(info);
+	}
 
 	if (afb->obj) {
 		drm_gem_object_unreference_unlocked(afb->obj);
@@ -312,33 +327,22 @@ int ast_fbdev_init(struct drm_device *dev)
 		return -ENOMEM;
 
 	ast->fbdev = afbdev;
+	afbdev->helper.funcs = &ast_fb_helper_funcs;
 	spin_lock_init(&afbdev->dirty_lock);
-
-	drm_fb_helper_prepare(dev, &afbdev->helper, &ast_fb_helper_funcs);
-
 	ret = drm_fb_helper_init(dev, &afbdev->helper,
 				 1, 1);
-	if (ret)
-		goto free;
+	if (ret) {
+		kfree(afbdev);
+		return ret;
+	}
 
-	ret = drm_fb_helper_single_add_all_connectors(&afbdev->helper);
-	if (ret)
-		goto fini;
+	drm_fb_helper_single_add_all_connectors(&afbdev->helper);
 
 	/* disable all the possible outputs/crtcs before entering KMS mode */
 	drm_helper_disable_unused_functions(dev);
 
-	ret = drm_fb_helper_initial_config(&afbdev->helper, 32);
-	if (ret)
-		goto fini;
-
+	drm_fb_helper_initial_config(&afbdev->helper, 32);
 	return 0;
-
-fini:
-	drm_fb_helper_fini(&afbdev->helper);
-free:
-	kfree(afbdev);
-	return ret;
 }
 
 void ast_fbdev_fini(struct drm_device *dev)
@@ -360,12 +364,5 @@ void ast_fbdev_set_suspend(struct drm_device *dev, int state)
 	if (!ast->fbdev)
 		return;
 
-	drm_fb_helper_set_suspend(&ast->fbdev->helper, state);
-}
-
-void ast_fbdev_set_base(struct ast_private *ast, unsigned long gpu_addr)
-{
-	ast->fbdev->helper.fbdev->fix.smem_start =
-		ast->fbdev->helper.fbdev->apertures->ranges[0].base + gpu_addr;
-	ast->fbdev->helper.fbdev->fix.smem_len = ast->vram_size - gpu_addr;
+	fb_set_suspend(ast->fbdev->helper.fbdev, state);
 }

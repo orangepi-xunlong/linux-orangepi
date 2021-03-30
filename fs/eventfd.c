@@ -45,10 +45,10 @@ struct eventfd_ctx {
  *
  * This function is supposed to be called by the kernel in paths that do not
  * allow sleeping. In this function we allow the counter to reach the ULLONG_MAX
- * value, and we signal this as overflow condition by returning a POLLERR
+ * value, and we signal this as overflow condition by returining a POLLERR
  * to poll(2).
  *
- * Returns the amount by which the counter was incremented.  This will be less
+ * Returns the amount by which the counter was incrememnted.  This will be less
  * than @n if the counter has overflowed.
  */
 __u64 eventfd_signal(struct eventfd_ctx *ctx, __u64 n)
@@ -118,56 +118,18 @@ static unsigned int eventfd_poll(struct file *file, poll_table *wait)
 {
 	struct eventfd_ctx *ctx = file->private_data;
 	unsigned int events = 0;
-	u64 count;
+	unsigned long flags;
 
 	poll_wait(file, &ctx->wqh, wait);
 
-	/*
-	 * All writes to ctx->count occur within ctx->wqh.lock.  This read
-	 * can be done outside ctx->wqh.lock because we know that poll_wait
-	 * takes that lock (through add_wait_queue) if our caller will sleep.
-	 *
-	 * The read _can_ therefore seep into add_wait_queue's critical
-	 * section, but cannot move above it!  add_wait_queue's spin_lock acts
-	 * as an acquire barrier and ensures that the read be ordered properly
-	 * against the writes.  The following CAN happen and is safe:
-	 *
-	 *     poll                               write
-	 *     -----------------                  ------------
-	 *     lock ctx->wqh.lock (in poll_wait)
-	 *     count = ctx->count
-	 *     __add_wait_queue
-	 *     unlock ctx->wqh.lock
-	 *                                        lock ctx->qwh.lock
-	 *                                        ctx->count += n
-	 *                                        if (waitqueue_active)
-	 *                                          wake_up_locked_poll
-	 *                                        unlock ctx->qwh.lock
-	 *     eventfd_poll returns 0
-	 *
-	 * but the following, which would miss a wakeup, cannot happen:
-	 *
-	 *     poll                               write
-	 *     -----------------                  ------------
-	 *     count = ctx->count (INVALID!)
-	 *                                        lock ctx->qwh.lock
-	 *                                        ctx->count += n
-	 *                                        **waitqueue_active is false**
-	 *                                        **no wake_up_locked_poll!**
-	 *                                        unlock ctx->qwh.lock
-	 *     lock ctx->wqh.lock (in poll_wait)
-	 *     __add_wait_queue
-	 *     unlock ctx->wqh.lock
-	 *     eventfd_poll returns 0
-	 */
-	count = READ_ONCE(ctx->count);
-
-	if (count > 0)
+	spin_lock_irqsave(&ctx->wqh.lock, flags);
+	if (ctx->count > 0)
 		events |= POLLIN;
-	if (count == ULLONG_MAX)
+	if (ctx->count == ULLONG_MAX)
 		events |= POLLERR;
-	if (ULLONG_MAX - 1 > count)
+	if (ULLONG_MAX - 1 > ctx->count)
 		events |= POLLOUT;
+	spin_unlock_irqrestore(&ctx->wqh.lock, flags);
 
 	return events;
 }
@@ -325,14 +287,17 @@ static ssize_t eventfd_write(struct file *file, const char __user *buf, size_t c
 }
 
 #ifdef CONFIG_PROC_FS
-static void eventfd_show_fdinfo(struct seq_file *m, struct file *f)
+static int eventfd_show_fdinfo(struct seq_file *m, struct file *f)
 {
 	struct eventfd_ctx *ctx = f->private_data;
+	int ret;
 
 	spin_lock_irq(&ctx->wqh.lock);
-	seq_printf(m, "eventfd-count: %16llx\n",
-		   (unsigned long long)ctx->count);
+	ret = seq_printf(m, "eventfd-count: %16llx\n",
+			 (unsigned long long)ctx->count);
 	spin_unlock_irq(&ctx->wqh.lock);
+
+	return ret;
 }
 #endif
 
@@ -384,12 +349,15 @@ EXPORT_SYMBOL_GPL(eventfd_fget);
  */
 struct eventfd_ctx *eventfd_ctx_fdget(int fd)
 {
+	struct file *file;
 	struct eventfd_ctx *ctx;
-	struct fd f = fdget(fd);
-	if (!f.file)
-		return ERR_PTR(-EBADF);
-	ctx = eventfd_ctx_fileget(f.file);
-	fdput(f);
+
+	file = eventfd_fget(fd);
+	if (IS_ERR(file))
+		return (struct eventfd_ctx *) file;
+	ctx = eventfd_ctx_get(file->private_data);
+	fput(file);
+
 	return ctx;
 }
 EXPORT_SYMBOL_GPL(eventfd_ctx_fdget);

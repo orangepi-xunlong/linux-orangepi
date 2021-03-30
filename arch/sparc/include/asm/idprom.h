@@ -20,6 +20,6 @@ struct idprom {
 };
 
 extern struct idprom *idprom;
-void idprom_init(void);
+extern void idprom_init(void);
 
 #endif /* !(_SPARC_IDPROM_H) */

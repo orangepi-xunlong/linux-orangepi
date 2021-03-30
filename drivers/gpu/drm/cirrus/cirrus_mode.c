@@ -16,7 +16,6 @@
  */
 #include <drm/drmP.h>
 #include <drm/drm_crtc_helper.h>
-#include <drm/drm_plane_helper.h>
 
 #include <video/cirrus.h>
 
@@ -91,7 +90,19 @@ static void cirrus_crtc_dpms(struct drm_crtc *crtc, int mode)
 	WREG_GFX(0xe, gr0e);
 }
 
-static void cirrus_set_start_address(struct drm_crtc *crtc, unsigned offset)
+/*
+ * The core passes the desired mode to the CRTC code to see whether any
+ * CRTC-specific modifications need to be made to it. We're in a position
+ * to just pass that straight through, so this does nothing
+ */
+static bool cirrus_crtc_mode_fixup(struct drm_crtc *crtc,
+				   const struct drm_display_mode *mode,
+				   struct drm_display_mode *adjusted_mode)
+{
+	return true;
+}
+
+void cirrus_set_start_address(struct drm_crtc *crtc, unsigned offset)
 {
 	struct cirrus_device *cdev = crtc->dev->dev_private;
 	u32 addr;
@@ -138,7 +149,7 @@ static int cirrus_crtc_do_set_base(struct drm_crtc *crtc,
 		cirrus_bo_unreserve(bo);
 	}
 
-	cirrus_fb = to_cirrus_framebuffer(crtc->primary->fb);
+	cirrus_fb = to_cirrus_framebuffer(crtc->fb);
 	obj = cirrus_fb->obj;
 	bo = gem_to_cirrus_bo(obj);
 
@@ -257,7 +268,7 @@ static int cirrus_crtc_mode_set(struct drm_crtc *crtc,
 	sr07 = RREG8(SEQ_DATA);
 	sr07 &= 0xe0;
 	hdr = 0;
-	switch (crtc->primary->fb->bits_per_pixel) {
+	switch (crtc->fb->bits_per_pixel) {
 	case 8:
 		sr07 |= 0x11;
 		break;
@@ -280,13 +291,13 @@ static int cirrus_crtc_mode_set(struct drm_crtc *crtc,
 	WREG_SEQ(0x7, sr07);
 
 	/* Program the pitch */
-	tmp = crtc->primary->fb->pitches[0] / 8;
+	tmp = crtc->fb->pitches[0] / 8;
 	WREG_CRT(VGA_CRTC_OFFSET, tmp);
 
 	/* Enable extended blanking and pitch bits, and enable full memory */
 	tmp = 0x22;
-	tmp |= (crtc->primary->fb->pitches[0] >> 7) & 0x10;
-	tmp |= (crtc->primary->fb->pitches[0] >> 6) & 0x40;
+	tmp |= (crtc->fb->pitches[0] >> 7) & 0x10;
+	tmp |= (crtc->fb->pitches[0] >> 6) & 0x40;
 	WREG_CRT(0x1b, tmp);
 
 	/* Enable high-colour modes */
@@ -325,20 +336,21 @@ static void cirrus_crtc_commit(struct drm_crtc *crtc)
  * use this for 8-bit mode so can't perform smooth fades on deeper modes,
  * but it's a requirement that we provide the function
  */
-static int cirrus_crtc_gamma_set(struct drm_crtc *crtc, u16 *red, u16 *green,
-				 u16 *blue, uint32_t size)
+static void cirrus_crtc_gamma_set(struct drm_crtc *crtc, u16 *red, u16 *green,
+				  u16 *blue, uint32_t start, uint32_t size)
 {
 	struct cirrus_crtc *cirrus_crtc = to_cirrus_crtc(crtc);
 	int i;
 
-	for (i = 0; i < size; i++) {
+	if (size != CIRRUS_LUT_SIZE)
+		return;
+
+	for (i = 0; i < CIRRUS_LUT_SIZE; i++) {
 		cirrus_crtc->lut_r[i] = red[i];
 		cirrus_crtc->lut_g[i] = green[i];
 		cirrus_crtc->lut_b[i] = blue[i];
 	}
 	cirrus_crtc_load_lut(crtc);
-
-	return 0;
 }
 
 /* Simple cleanup function */
@@ -359,6 +371,7 @@ static const struct drm_crtc_funcs cirrus_crtc_funcs = {
 
 static const struct drm_crtc_helper_funcs cirrus_helper_funcs = {
 	.dpms = cirrus_crtc_dpms,
+	.mode_fixup = cirrus_crtc_mode_fixup,
 	.mode_set = cirrus_crtc_mode_set,
 	.mode_set_base = cirrus_crtc_mode_set_base,
 	.prepare = cirrus_crtc_prepare,
@@ -416,6 +429,14 @@ void cirrus_crtc_fb_gamma_get(struct drm_crtc *crtc, u16 *red, u16 *green,
 	*blue = cirrus_crtc->lut_b[regno];
 }
 
+
+static bool cirrus_encoder_mode_fixup(struct drm_encoder *encoder,
+				      const struct drm_display_mode *mode,
+				      struct drm_display_mode *adjusted_mode)
+{
+	return true;
+}
+
 static void cirrus_encoder_mode_set(struct drm_encoder *encoder,
 				struct drm_display_mode *mode,
 				struct drm_display_mode *adjusted_mode)
@@ -435,7 +456,7 @@ static void cirrus_encoder_commit(struct drm_encoder *encoder)
 {
 }
 
-static void cirrus_encoder_destroy(struct drm_encoder *encoder)
+void cirrus_encoder_destroy(struct drm_encoder *encoder)
 {
 	struct cirrus_encoder *cirrus_encoder = to_cirrus_encoder(encoder);
 	drm_encoder_cleanup(encoder);
@@ -444,6 +465,7 @@ static void cirrus_encoder_destroy(struct drm_encoder *encoder)
 
 static const struct drm_encoder_helper_funcs cirrus_encoder_helper_funcs = {
 	.dpms = cirrus_encoder_dpms,
+	.mode_fixup = cirrus_encoder_mode_fixup,
 	.mode_set = cirrus_encoder_mode_set,
 	.prepare = cirrus_encoder_prepare,
 	.commit = cirrus_encoder_commit,
@@ -466,35 +488,48 @@ static struct drm_encoder *cirrus_encoder_init(struct drm_device *dev)
 	encoder->possible_crtcs = 0x1;
 
 	drm_encoder_init(dev, encoder, &cirrus_encoder_encoder_funcs,
-			 DRM_MODE_ENCODER_DAC, NULL);
+			 DRM_MODE_ENCODER_DAC);
 	drm_encoder_helper_add(encoder, &cirrus_encoder_helper_funcs);
 
 	return encoder;
 }
 
 
-static int cirrus_vga_get_modes(struct drm_connector *connector)
+int cirrus_vga_get_modes(struct drm_connector *connector)
 {
-	int count;
-
 	/* Just add a static list of modes */
-	if (cirrus_bpp <= 24) {
-		count = drm_add_modes_noedid(connector, 1280, 1024);
-		drm_set_preferred_mode(connector, 1024, 768);
-	} else {
-		count = drm_add_modes_noedid(connector, 800, 600);
-		drm_set_preferred_mode(connector, 800, 600);
-	}
-	return count;
+	drm_add_modes_noedid(connector, 640, 480);
+	drm_add_modes_noedid(connector, 800, 600);
+	drm_add_modes_noedid(connector, 1024, 768);
+	drm_add_modes_noedid(connector, 1280, 1024);
+
+	return 4;
 }
 
-static struct drm_encoder *cirrus_connector_best_encoder(struct drm_connector
+static int cirrus_vga_mode_valid(struct drm_connector *connector,
+				 struct drm_display_mode *mode)
+{
+	/* Any mode we've added is valid */
+	return MODE_OK;
+}
+
+struct drm_encoder *cirrus_connector_best_encoder(struct drm_connector
 						  *connector)
 {
 	int enc_id = connector->encoder_ids[0];
+	struct drm_mode_object *obj;
+	struct drm_encoder *encoder;
+
 	/* pick the encoder ids */
-	if (enc_id)
-		return drm_encoder_find(connector->dev, enc_id);
+	if (enc_id) {
+		obj =
+		    drm_mode_object_find(connector->dev, enc_id,
+					 DRM_MODE_OBJECT_ENCODER);
+		if (!obj)
+			return NULL;
+		encoder = obj_to_encoder(obj);
+		return encoder;
+	}
 	return NULL;
 }
 
@@ -510,12 +545,13 @@ static void cirrus_connector_destroy(struct drm_connector *connector)
 	kfree(connector);
 }
 
-static const struct drm_connector_helper_funcs cirrus_vga_connector_helper_funcs = {
+struct drm_connector_helper_funcs cirrus_vga_connector_helper_funcs = {
 	.get_modes = cirrus_vga_get_modes,
+	.mode_valid = cirrus_vga_mode_valid,
 	.best_encoder = cirrus_connector_best_encoder,
 };
 
-static const struct drm_connector_funcs cirrus_vga_connector_funcs = {
+struct drm_connector_funcs cirrus_vga_connector_funcs = {
 	.dpms = drm_helper_connector_dpms,
 	.detect = cirrus_vga_detect,
 	.fill_modes = drm_helper_probe_single_connector_modes,
@@ -538,7 +574,6 @@ static struct drm_connector *cirrus_vga_init(struct drm_device *dev)
 
 	drm_connector_helper_add(connector, &cirrus_vga_connector_helper_funcs);
 
-	drm_connector_register(connector);
 	return connector;
 }
 

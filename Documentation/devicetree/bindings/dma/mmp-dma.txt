@@ -1,22 +1,17 @@
 * MARVELL MMP DMA controller
 
 Marvell Peripheral DMA Controller
-Used platforms: pxa688, pxa910, pxa3xx, etc
+Used platfroms: pxa688, pxa910, pxa3xx, etc
 
 Required properties:
 - compatible: Should be "marvell,pdma-1.0"
 - reg: Should contain DMA registers location and length.
 - interrupts: Either contain all of the per-channel DMA interrupts
 		or one irq for pdma device
-
-Optional properties:
-- #dma-channels: Number of DMA channels supported by the controller (defaults
-  to 32 when not specified)
-- #dma-requests: Number of DMA requestor lines supported by the controller
-  (defaults to 32 when not specified)
+- #dma-channels: Number of DMA channels supported by the controller.
 
 "marvell,pdma-1.0"
-Used platforms: pxa25x, pxa27x, pxa3xx, pxa93x, pxa168, pxa910, pxa688.
+Used platfroms: pxa25x, pxa27x, pxa3xx, pxa93x, pxa168, pxa910, pxa688.
 
 Examples:
 
@@ -50,7 +45,7 @@ pdma: dma-controller@d4000000 {
 
 
 Marvell Two Channel DMA Controller used specifically for audio
-Used platforms: pxa688, pxa910
+Used platfroms: pxa688, pxa910
 
 Required properties:
 - compatible: Should be "marvell,adma-1.0" or "marvell,pxa910-squ"

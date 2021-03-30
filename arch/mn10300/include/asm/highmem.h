@@ -70,12 +70,11 @@ static inline void kunmap(struct page *page)
  * be used in IRQ contexts, so in some (very limited) cases we need
  * it.
  */
-static inline void *kmap_atomic(struct page *page)
+static inline unsigned long kmap_atomic(struct page *page)
 {
 	unsigned long vaddr;
 	int idx, type;
 
-	preempt_disable();
 	pagefault_disable();
 	if (page < highmem_start_page)
 		return page_address(page);
@@ -90,7 +89,7 @@ static inline void *kmap_atomic(struct page *page)
 	set_pte(kmap_pte - idx, mk_pte(page, kmap_prot));
 	local_flush_tlb_one(vaddr);
 
-	return (void *)vaddr;
+	return vaddr;
 }
 
 static inline void __kunmap_atomic(unsigned long vaddr)
@@ -99,7 +98,6 @@ static inline void __kunmap_atomic(unsigned long vaddr)
 
 	if (vaddr < FIXADDR_START) { /* FIXME */
 		pagefault_enable();
-		preempt_enable();
 		return;
 	}
 
@@ -124,7 +122,6 @@ static inline void __kunmap_atomic(unsigned long vaddr)
 
 	kmap_atomic_idx_pop();
 	pagefault_enable();
-	preempt_enable();
 }
 #endif /* __KERNEL__ */
 

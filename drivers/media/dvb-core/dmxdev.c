@@ -206,6 +206,8 @@ static int dvb_dvr_release(struct inode *inode, struct file *file)
 	/* TODO */
 	dvbdev->users--;
 	if (dvbdev->users == 1 && dmxdev->exit == 1) {
+		fops_put(file->f_op);
+		file->f_op = NULL;
 		mutex_unlock(&dmxdev->mutex);
 		wake_up(&dvbdev->wait_queue);
 	} else
@@ -352,7 +354,8 @@ static void dvb_dmxdev_filter_timer(struct dmxdev_filter *dmxdevfilter)
 
 static int dvb_dmxdev_section_callback(const u8 *buffer1, size_t buffer1_len,
 				       const u8 *buffer2, size_t buffer2_len,
-				       struct dmx_section_filter *filter)
+				       struct dmx_section_filter *filter,
+				       enum dmx_success success)
 {
 	struct dmxdev_filter *dmxdevfilter = filter->priv;
 	int ret;
@@ -385,7 +388,8 @@ static int dvb_dmxdev_section_callback(const u8 *buffer1, size_t buffer1_len,
 
 static int dvb_dmxdev_ts_callback(const u8 *buffer1, size_t buffer1_len,
 				  const u8 *buffer2, size_t buffer2_len,
-				  struct dmx_ts_feed *feed)
+				  struct dmx_ts_feed *feed,
+				  enum dmx_success success)
 {
 	struct dmxdev_filter *dmxdevfilter = feed->priv;
 	struct dvb_ringbuffer *buffer;
@@ -556,7 +560,7 @@ static int dvb_dmxdev_start_feed(struct dmxdev *dmxdev,
 				 struct dmxdev_filter *filter,
 				 struct dmxdev_feed *feed)
 {
-	ktime_t timeout = ktime_set(0, 0);
+	struct timespec timeout = { 0 };
 	struct dmx_pes_filter_params *para = &filter->params.pes;
 	dmx_output_t otype;
 	int ret;
@@ -1021,9 +1025,6 @@ static int dvb_demux_do_ioctl(struct file *file,
 		dmxdev->demux->get_pes_pids(dmxdev->demux, parg);
 		break;
 
-#if 0
-	/* Not used upstream and never documented */
-
 	case DMX_GET_CAPS:
 		if (!dmxdev->demux->get_caps) {
 			ret = -EINVAL;
@@ -1039,7 +1040,6 @@ static int dvb_demux_do_ioctl(struct file *file,
 		}
 		ret = dmxdev->demux->set_source(dmxdev->demux, parg);
 		break;
-#endif
 
 	case DMX_GET_STC:
 		if (!dmxdev->demux->get_stc) {
@@ -1071,7 +1071,7 @@ static int dvb_demux_do_ioctl(struct file *file,
 		break;
 
 	default:
-		ret = -ENOTTY;
+		ret = -EINVAL;
 		break;
 	}
 	mutex_unlock(&dmxdev->mutex);
@@ -1089,8 +1089,8 @@ static unsigned int dvb_demux_poll(struct file *file, poll_table *wait)
 	struct dmxdev_filter *dmxdevfilter = file->private_data;
 	unsigned int mask = 0;
 
-	if ((!dmxdevfilter) || dmxdevfilter->dev->exit)
-		return POLLERR;
+	if (!dmxdevfilter)
+		return -EINVAL;
 
 	poll_wait(file, &dmxdevfilter->buffer.queue, wait);
 
@@ -1120,6 +1120,8 @@ static int dvb_demux_release(struct inode *inode, struct file *file)
 	mutex_lock(&dmxdev->mutex);
 	dmxdev->dvbdev->users--;
 	if(dmxdev->dvbdev->users==1 && dmxdev->exit==1) {
+		fops_put(file->f_op);
+		file->f_op = NULL;
 		mutex_unlock(&dmxdev->mutex);
 		wake_up(&dmxdev->dvbdev->wait_queue);
 	} else
@@ -1138,13 +1140,10 @@ static const struct file_operations dvb_demux_fops = {
 	.llseek = default_llseek,
 };
 
-static const struct dvb_device dvbdev_demux = {
+static struct dvb_device dvbdev_demux = {
 	.priv = NULL,
 	.users = 1,
 	.writers = 1,
-#if defined(CONFIG_MEDIA_CONTROLLER_DVB)
-	.name = "dvb-demux",
-#endif
 	.fops = &dvb_demux_fops
 };
 
@@ -1186,9 +1185,6 @@ static unsigned int dvb_dvr_poll(struct file *file, poll_table *wait)
 
 	dprintk("function : %s\n", __func__);
 
-	if (dmxdev->exit)
-		return POLLERR;
-
 	poll_wait(file, &dmxdev->dvr_buffer.queue, wait);
 
 	if ((file->f_flags & O_ACCMODE) == O_RDONLY) {
@@ -1214,15 +1210,13 @@ static const struct file_operations dvb_dvr_fops = {
 	.llseek = default_llseek,
 };
 
-static const struct dvb_device dvbdev_dvr = {
+static struct dvb_device dvbdev_dvr = {
 	.priv = NULL,
 	.readers = 1,
 	.users = 1,
-#if defined(CONFIG_MEDIA_CONTROLLER_DVB)
-	.name = "dvb-dvr",
-#endif
 	.fops = &dvb_dvr_fops
 };
+
 int dvb_dmxdev_init(struct dmxdev *dmxdev, struct dvb_adapter *dvb_adapter)
 {
 	int i;
@@ -1244,9 +1238,9 @@ int dvb_dmxdev_init(struct dmxdev *dmxdev, struct dvb_adapter *dvb_adapter)
 	}
 
 	dvb_register_device(dvb_adapter, &dmxdev->dvbdev, &dvbdev_demux, dmxdev,
-			    DVB_DEVICE_DEMUX, dmxdev->filternum);
+			    DVB_DEVICE_DEMUX);
 	dvb_register_device(dvb_adapter, &dmxdev->dvr_dvbdev, &dvbdev_dvr,
-			    dmxdev, DVB_DEVICE_DVR, dmxdev->filternum);
+			    dmxdev, DVB_DEVICE_DVR);
 
 	dvb_ringbuffer_init(&dmxdev->dvr_buffer, NULL, 8192);
 

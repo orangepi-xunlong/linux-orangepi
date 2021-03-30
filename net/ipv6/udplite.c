@@ -45,16 +45,18 @@ struct proto udplitev6_prot = {
 	.getsockopt	   = udpv6_getsockopt,
 	.sendmsg	   = udpv6_sendmsg,
 	.recvmsg	   = udpv6_recvmsg,
-	.backlog_rcv	   = __udpv6_queue_rcv_skb,
+	.backlog_rcv	   = udpv6_queue_rcv_skb,
 	.hash		   = udp_lib_hash,
 	.unhash		   = udp_lib_unhash,
 	.get_port	   = udp_v6_get_port,
 	.obj_size	   = sizeof(struct udp6_sock),
+	.slab_flags	   = SLAB_DESTROY_BY_RCU,
 	.h.udp_table	   = &udplite_table,
 #ifdef CONFIG_COMPAT
 	.compat_setsockopt = compat_udpv6_setsockopt,
 	.compat_getsockopt = compat_udpv6_getsockopt,
 #endif
+	.clear_sk	   = udp_v6_clear_sk,
 };
 
 static struct inet_protosw udplite6_protosw = {
@@ -62,6 +64,7 @@ static struct inet_protosw udplite6_protosw = {
 	.protocol	= IPPROTO_UDPLITE,
 	.prot		= &udplitev6_prot,
 	.ops		= &inet6_dgram_ops,
+	.no_check	= 0,
 	.flags		= INET_PROTOSW_PERMANENT,
 };
 

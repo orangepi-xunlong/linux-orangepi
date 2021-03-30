@@ -137,6 +137,7 @@ static struct platform_driver snirm710_driver = {
 	.remove	= snirm710_driver_remove,
 	.driver	= {
 		.name	= "snirm_53c710",
+		.owner	= THIS_MODULE,
 	},
 };
 

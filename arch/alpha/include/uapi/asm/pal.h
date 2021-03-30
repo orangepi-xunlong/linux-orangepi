@@ -46,7 +46,6 @@
 #define PAL_rdusp	58
 #define PAL_whami	60
 #define PAL_retsys	61
-#define PAL_wtint	62
 #define PAL_rti		63
 
 

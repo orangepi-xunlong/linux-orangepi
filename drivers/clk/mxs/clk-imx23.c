@@ -9,9 +9,8 @@
  * http://www.gnu.org/copyleft/gpl.html
  */
 
-#include <linux/clk/mxs.h>
 #include <linux/clk.h>
-#include <linux/clk-provider.h>
+#include <linux/clkdev.h>
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/io.h>
@@ -76,12 +75,12 @@ static void __init clk_misc_init(void)
 	writel_relaxed(30 << BP_FRAC_IOFRAC, FRAC + SET);
 }
 
-static const char *const sel_pll[]  __initconst = { "pll", "ref_xtal", };
-static const char *const sel_cpu[]  __initconst = { "ref_cpu", "ref_xtal", };
-static const char *const sel_pix[]  __initconst = { "ref_pix", "ref_xtal", };
-static const char *const sel_io[]   __initconst = { "ref_io", "ref_xtal", };
-static const char *const cpu_sels[] __initconst = { "cpu_pll", "cpu_xtal", };
-static const char *const emi_sels[] __initconst = { "emi_pll", "emi_xtal", };
+static const char *sel_pll[]  __initconst = { "pll", "ref_xtal", };
+static const char *sel_cpu[]  __initconst = { "ref_cpu", "ref_xtal", };
+static const char *sel_pix[]  __initconst = { "ref_pix", "ref_xtal", };
+static const char *sel_io[]   __initconst = { "ref_io", "ref_xtal", };
+static const char *cpu_sels[] __initconst = { "cpu_pll", "cpu_xtal", };
+static const char *emi_sels[] __initconst = { "emi_pll", "emi_xtal", };
 
 enum imx23_clk {
 	ref_xtal, pll, ref_cpu, ref_emi, ref_pix, ref_io, saif_sel,
@@ -100,16 +99,16 @@ static enum imx23_clk clks_init_on[] __initdata = {
 	cpu, hbus, xbus, emi, uart,
 };
 
-static void __init mx23_clocks_init(struct device_node *np)
+int __init mx23_clocks_init(void)
 {
-	struct device_node *dcnp;
+	struct device_node *np;
 	u32 i;
 
-	dcnp = of_find_compatible_node(NULL, NULL, "fsl,imx23-digctl");
-	digctrl = of_iomap(dcnp, 0);
+	np = of_find_compatible_node(NULL, NULL, "fsl,imx23-digctl");
+	digctrl = of_iomap(np, 0);
 	WARN_ON(!digctrl);
-	of_node_put(dcnp);
 
+	np = of_find_compatible_node(NULL, NULL, "fsl,imx23-clkctrl");
 	clkctrl = of_iomap(np, 0);
 	WARN_ON(!clkctrl);
 
@@ -162,7 +161,7 @@ static void __init mx23_clocks_init(struct device_node *np)
 		if (IS_ERR(clks[i])) {
 			pr_err("i.MX23 clk %d: register failed with %ld\n",
 				i, PTR_ERR(clks[i]));
-			return;
+			return PTR_ERR(clks[i]);
 		}
 
 	clk_data.clks = clks;
@@ -172,5 +171,5 @@ static void __init mx23_clocks_init(struct device_node *np)
 	for (i = 0; i < ARRAY_SIZE(clks_init_on); i++)
 		clk_prepare_enable(clks[clks_init_on[i]]);
 
+	return 0;
 }
-CLK_OF_DECLARE(imx23_clkctrl, "fsl,imx23-clkctrl", mx23_clocks_init);

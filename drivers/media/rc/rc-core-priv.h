@@ -1,7 +1,7 @@
 /*
  * Remote Controller core raw events header
  *
- * Copyright (C) 2010 by Mauro Carvalho Chehab
+ * Copyright (C) 2010 by Mauro Carvalho Chehab <mchehab@redhat.com>
  *
  * This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -15,9 +15,6 @@
 
 #ifndef _RC_CORE_PRIV
 #define _RC_CORE_PRIV
-
-/* Define the max number of pulse/space transitions to buffer */
-#define	MAX_IR_EVENT_SIZE	512
 
 #include <linux/slab.h>
 #include <linux/spinlock.h>
@@ -38,8 +35,7 @@ struct ir_raw_event_ctrl {
 	struct list_head		list;		/* to keep track of raw clients */
 	struct task_struct		*thread;
 	spinlock_t			lock;
-	/* fifo for the pulse/space durations */
-	DECLARE_KFIFO(kfifo, struct ir_raw_event, MAX_IR_EVENT_SIZE);
+	struct kfifo_rec_ptr_1		kfifo;		/* fifo for the pulse/space durations */
 	ktime_t				last_event;	/* when last event occurred */
 	enum raw_event_type		last_type;	/* last event type */
 	struct rc_dev			*dev;		/* pointer to the parent rc_dev */
@@ -58,7 +54,7 @@ struct ir_raw_event_ctrl {
 		int state;
 		u32 bits;
 		unsigned count;
-		bool is_rc5x;
+		unsigned wanted_bits;
 	} rc5;
 	struct rc6_dec {
 		int state;
@@ -81,17 +77,17 @@ struct ir_raw_event_ctrl {
 		bool first;
 		bool toggle;
 	} jvc;
+	struct rc5_sz_dec {
+		int state;
+		u32 bits;
+		unsigned count;
+		unsigned wanted_bits;
+	} rc5_sz;
 	struct sanyo_dec {
 		int state;
 		unsigned count;
 		u64 bits;
 	} sanyo;
-	struct sharp_dec {
-		int state;
-		unsigned count;
-		u32 bits;
-		unsigned int pulse_len;
-	} sharp;
 	struct mce_kbd_dec {
 		struct input_dev *idev;
 		struct timer_list rx_timeout;
@@ -114,11 +110,6 @@ struct ir_raw_event_ctrl {
 		bool send_timeout_reports;
 
 	} lirc;
-	struct xmp_dec {
-		int state;
-		unsigned count;
-		u32 durations[16];
-	} xmp;
 };
 
 /* macros for IR decoders */
@@ -170,5 +161,62 @@ void ir_raw_init(void);
  * Those load logic are called during ir-core init, and automatically
  * loads the compiled decoders for their usage with IR raw events
  */
+
+/* from ir-nec-decoder.c */
+#ifdef CONFIG_IR_NEC_DECODER_MODULE
+#define load_nec_decode()	request_module_nowait("ir-nec-decoder")
+#else
+static inline void load_nec_decode(void) { }
+#endif
+
+/* from ir-rc5-decoder.c */
+#ifdef CONFIG_IR_RC5_DECODER_MODULE
+#define load_rc5_decode()	request_module_nowait("ir-rc5-decoder")
+#else
+static inline void load_rc5_decode(void) { }
+#endif
+
+/* from ir-rc6-decoder.c */
+#ifdef CONFIG_IR_RC6_DECODER_MODULE
+#define load_rc6_decode()	request_module_nowait("ir-rc6-decoder")
+#else
+static inline void load_rc6_decode(void) { }
+#endif
+
+/* from ir-jvc-decoder.c */
+#ifdef CONFIG_IR_JVC_DECODER_MODULE
+#define load_jvc_decode()	request_module_nowait("ir-jvc-decoder")
+#else
+static inline void load_jvc_decode(void) { }
+#endif
+
+/* from ir-sony-decoder.c */
+#ifdef CONFIG_IR_SONY_DECODER_MODULE
+#define load_sony_decode()	request_module_nowait("ir-sony-decoder")
+#else
+static inline void load_sony_decode(void) { }
+#endif
+
+/* from ir-sanyo-decoder.c */
+#ifdef CONFIG_IR_SANYO_DECODER_MODULE
+#define load_sanyo_decode()	request_module_nowait("ir-sanyo-decoder")
+#else
+static inline void load_sanyo_decode(void) { }
+#endif
+
+/* from ir-mce_kbd-decoder.c */
+#ifdef CONFIG_IR_MCE_KBD_DECODER_MODULE
+#define load_mce_kbd_decode()	request_module_nowait("ir-mce_kbd-decoder")
+#else
+static inline void load_mce_kbd_decode(void) { }
+#endif
+
+/* from ir-lirc-codec.c */
+#ifdef CONFIG_IR_LIRC_CODEC_MODULE
+#define load_lirc_codec()	request_module_nowait("ir-lirc-codec")
+#else
+static inline void load_lirc_codec(void) { }
+#endif
+
 
 #endif /* _RC_CORE_PRIV */

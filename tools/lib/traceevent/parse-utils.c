@@ -25,6 +25,40 @@
 
 #define __weak __attribute__((weak))
 
+void __vdie(const char *fmt, va_list ap)
+{
+	int ret = errno;
+
+	if (errno)
+		perror("trace-cmd");
+	else
+		ret = -1;
+
+	fprintf(stderr, "  ");
+	vfprintf(stderr, fmt, ap);
+
+	fprintf(stderr, "\n");
+	exit(ret);
+}
+
+void __die(const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	__vdie(fmt, ap);
+	va_end(ap);
+}
+
+void __weak die(const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	__vdie(fmt, ap);
+	va_end(ap);
+}
+
 void __vwarning(const char *fmt, va_list ap)
 {
 	if (errno)
@@ -82,4 +116,14 @@ void __weak pr_stat(const char *fmt, ...)
 	va_start(ap, fmt);
 	__vpr_stat(fmt, ap);
 	va_end(ap);
+}
+
+void __weak *malloc_or_die(unsigned int size)
+{
+	void *data;
+
+	data = malloc(size);
+	if (!data)
+		die("malloc");
+	return data;
 }

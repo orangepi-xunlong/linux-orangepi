@@ -53,12 +53,17 @@
 
 #ifdef __KERNEL__
 
-#include <linux/device.h>
-
 struct cma;
 struct page;
+struct device;
 
 #ifdef CONFIG_DMA_CMA
+
+/*
+ * There is always at least global CMA area and a few optional device
+ * private areas configured in kernel .config.
+ */
+#define MAX_CMA_AREAS	(1 + CONFIG_CMA_AREAS)
 
 extern struct cma *dma_contiguous_default_area;
 
@@ -83,8 +88,7 @@ static inline void dma_contiguous_set_default(struct cma *cma)
 void dma_contiguous_reserve(phys_addr_t addr_limit);
 
 int __init dma_contiguous_reserve_area(phys_addr_t size, phys_addr_t base,
-				       phys_addr_t limit, struct cma **res_cma,
-				       bool fixed);
+				       phys_addr_t limit, struct cma **res_cma);
 
 /**
  * dma_declare_contiguous() - reserve area for contiguous memory handling
@@ -104,19 +108,21 @@ static inline int dma_declare_contiguous(struct device *dev, phys_addr_t size,
 {
 	struct cma *cma;
 	int ret;
-	ret = dma_contiguous_reserve_area(size, base, limit, &cma, true);
+	ret = dma_contiguous_reserve_area(size, base, limit, &cma);
 	if (ret == 0)
 		dev_set_cma_area(dev, cma);
 
 	return ret;
 }
 
-struct page *dma_alloc_from_contiguous(struct device *dev, size_t count,
+struct page *dma_alloc_from_contiguous(struct device *dev, int count,
 				       unsigned int order);
 bool dma_release_from_contiguous(struct device *dev, struct page *pages,
 				 int count);
 
 #else
+
+#define MAX_CMA_AREAS	(0)
 
 static inline struct cma *dev_get_cma_area(struct device *dev)
 {
@@ -130,9 +136,7 @@ static inline void dma_contiguous_set_default(struct cma *cma) { }
 static inline void dma_contiguous_reserve(phys_addr_t limit) { }
 
 static inline int dma_contiguous_reserve_area(phys_addr_t size, phys_addr_t base,
-				       phys_addr_t limit, struct cma **res_cma,
-				       bool fixed)
-{
+				       phys_addr_t limit, struct cma **res_cma) {
 	return -ENOSYS;
 }
 
@@ -144,7 +148,7 @@ int dma_declare_contiguous(struct device *dev, phys_addr_t size,
 }
 
 static inline
-struct page *dma_alloc_from_contiguous(struct device *dev, size_t count,
+struct page *dma_alloc_from_contiguous(struct device *dev, int count,
 				       unsigned int order)
 {
 	return NULL;

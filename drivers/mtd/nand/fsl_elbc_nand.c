@@ -24,10 +24,10 @@
 
 #include <linux/module.h>
 #include <linux/types.h>
+#include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/ioport.h>
-#include <linux/of_address.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
@@ -48,6 +48,7 @@
 /* mtd information per set */
 
 struct fsl_elbc_mtd {
+	struct mtd_info mtd;
 	struct nand_chip chip;
 	struct fsl_lbc_ctrl *ctrl;
 
@@ -79,53 +80,32 @@ struct fsl_elbc_fcm_ctrl {
 
 /* These map to the positions used by the FCM hardware ECC generator */
 
-static int fsl_elbc_ooblayout_ecc(struct mtd_info *mtd, int section,
-				  struct mtd_oob_region *oobregion)
-{
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct fsl_elbc_mtd *priv = nand_get_controller_data(chip);
+/* Small Page FLASH with FMR[ECCM] = 0 */
+static struct nand_ecclayout fsl_elbc_oob_sp_eccm0 = {
+	.eccbytes = 3,
+	.eccpos = {6, 7, 8},
+	.oobfree = { {0, 5}, {9, 7} },
+};
 
-	if (section >= chip->ecc.steps)
-		return -ERANGE;
+/* Small Page FLASH with FMR[ECCM] = 1 */
+static struct nand_ecclayout fsl_elbc_oob_sp_eccm1 = {
+	.eccbytes = 3,
+	.eccpos = {8, 9, 10},
+	.oobfree = { {0, 5}, {6, 2}, {11, 5} },
+};
 
-	oobregion->offset = (16 * section) + 6;
-	if (priv->fmr & FMR_ECCM)
-		oobregion->offset += 2;
+/* Large Page FLASH with FMR[ECCM] = 0 */
+static struct nand_ecclayout fsl_elbc_oob_lp_eccm0 = {
+	.eccbytes = 12,
+	.eccpos = {6, 7, 8, 22, 23, 24, 38, 39, 40, 54, 55, 56},
+	.oobfree = { {1, 5}, {9, 13}, {25, 13}, {41, 13}, {57, 7} },
+};
 
-	oobregion->length = chip->ecc.bytes;
-
-	return 0;
-}
-
-static int fsl_elbc_ooblayout_free(struct mtd_info *mtd, int section,
-				   struct mtd_oob_region *oobregion)
-{
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct fsl_elbc_mtd *priv = nand_get_controller_data(chip);
-
-	if (section > chip->ecc.steps)
-		return -ERANGE;
-
-	if (!section) {
-		oobregion->offset = 0;
-		if (mtd->writesize > 512)
-			oobregion->offset++;
-		oobregion->length = (priv->fmr & FMR_ECCM) ? 7 : 5;
-	} else {
-		oobregion->offset = (16 * section) -
-				    ((priv->fmr & FMR_ECCM) ? 5 : 7);
-		if (section < chip->ecc.steps)
-			oobregion->length = 13;
-		else
-			oobregion->length = mtd->oobsize - oobregion->offset;
-	}
-
-	return 0;
-}
-
-static const struct mtd_ooblayout_ops fsl_elbc_ooblayout_ops = {
-	.ecc = fsl_elbc_ooblayout_ecc,
-	.free = fsl_elbc_ooblayout_free,
+/* Large Page FLASH with FMR[ECCM] = 1 */
+static struct nand_ecclayout fsl_elbc_oob_lp_eccm1 = {
+	.eccbytes = 12,
+	.eccpos = {8, 9, 10, 24, 25, 26, 40, 41, 42, 56, 57, 58},
+	.oobfree = { {1, 7}, {11, 13}, {27, 13}, {43, 13}, {59, 5} },
 };
 
 /*
@@ -164,8 +144,8 @@ static struct nand_bbt_descr bbt_mirror_descr = {
  */
 static void set_addr(struct mtd_info *mtd, int column, int page_addr, int oob)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct fsl_elbc_mtd *priv = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct fsl_elbc_mtd *priv = chip->priv;
 	struct fsl_lbc_ctrl *ctrl = priv->ctrl;
 	struct fsl_lbc_regs __iomem *lbc = ctrl->regs;
 	struct fsl_elbc_fcm_ctrl *elbc_fcm_ctrl = ctrl->nand;
@@ -215,8 +195,8 @@ static void set_addr(struct mtd_info *mtd, int column, int page_addr, int oob)
  */
 static int fsl_elbc_run_command(struct mtd_info *mtd)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct fsl_elbc_mtd *priv = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct fsl_elbc_mtd *priv = chip->priv;
 	struct fsl_lbc_ctrl *ctrl = priv->ctrl;
 	struct fsl_elbc_fcm_ctrl *elbc_fcm_ctrl = ctrl->nand;
 	struct fsl_lbc_regs __iomem *lbc = ctrl->regs;
@@ -288,7 +268,7 @@ static int fsl_elbc_run_command(struct mtd_info *mtd)
 
 static void fsl_elbc_do_read(struct nand_chip *chip, int oob)
 {
-	struct fsl_elbc_mtd *priv = nand_get_controller_data(chip);
+	struct fsl_elbc_mtd *priv = chip->priv;
 	struct fsl_lbc_ctrl *ctrl = priv->ctrl;
 	struct fsl_lbc_regs __iomem *lbc = ctrl->regs;
 
@@ -320,8 +300,8 @@ static void fsl_elbc_do_read(struct nand_chip *chip, int oob)
 static void fsl_elbc_cmdfunc(struct mtd_info *mtd, unsigned int command,
                              int column, int page_addr)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct fsl_elbc_mtd *priv = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct fsl_elbc_mtd *priv = chip->priv;
 	struct fsl_lbc_ctrl *ctrl = priv->ctrl;
 	struct fsl_elbc_fcm_ctrl *elbc_fcm_ctrl = ctrl->nand;
 	struct fsl_lbc_regs __iomem *lbc = ctrl->regs;
@@ -545,8 +525,8 @@ static void fsl_elbc_select_chip(struct mtd_info *mtd, int chip)
  */
 static void fsl_elbc_write_buf(struct mtd_info *mtd, const u8 *buf, int len)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct fsl_elbc_mtd *priv = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct fsl_elbc_mtd *priv = chip->priv;
 	struct fsl_elbc_fcm_ctrl *elbc_fcm_ctrl = priv->ctrl->nand;
 	unsigned int bufsize = mtd->writesize + mtd->oobsize;
 
@@ -583,8 +563,8 @@ static void fsl_elbc_write_buf(struct mtd_info *mtd, const u8 *buf, int len)
  */
 static u8 fsl_elbc_read_byte(struct mtd_info *mtd)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct fsl_elbc_mtd *priv = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct fsl_elbc_mtd *priv = chip->priv;
 	struct fsl_elbc_fcm_ctrl *elbc_fcm_ctrl = priv->ctrl->nand;
 
 	/* If there are still bytes in the FCM, then use the next byte. */
@@ -600,8 +580,8 @@ static u8 fsl_elbc_read_byte(struct mtd_info *mtd)
  */
 static void fsl_elbc_read_buf(struct mtd_info *mtd, u8 *buf, int len)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct fsl_elbc_mtd *priv = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct fsl_elbc_mtd *priv = chip->priv;
 	struct fsl_elbc_fcm_ctrl *elbc_fcm_ctrl = priv->ctrl->nand;
 	int avail;
 
@@ -625,7 +605,7 @@ static void fsl_elbc_read_buf(struct mtd_info *mtd, u8 *buf, int len)
  */
 static int fsl_elbc_wait(struct mtd_info *mtd, struct nand_chip *chip)
 {
-	struct fsl_elbc_mtd *priv = nand_get_controller_data(chip);
+	struct fsl_elbc_mtd *priv = chip->priv;
 	struct fsl_elbc_fcm_ctrl *elbc_fcm_ctrl = priv->ctrl->nand;
 
 	if (elbc_fcm_ctrl->status != LTESR_CC)
@@ -639,8 +619,8 @@ static int fsl_elbc_wait(struct mtd_info *mtd, struct nand_chip *chip)
 
 static int fsl_elbc_chip_init_tail(struct mtd_info *mtd)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct fsl_elbc_mtd *priv = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct fsl_elbc_mtd *priv = chip->priv;
 	struct fsl_lbc_ctrl *ctrl = priv->ctrl;
 	struct fsl_lbc_regs __iomem *lbc = ctrl->regs;
 	unsigned int al;
@@ -670,6 +650,8 @@ static int fsl_elbc_chip_init_tail(struct mtd_info *mtd)
 	        chip->page_shift);
 	dev_dbg(priv->dev, "fsl_elbc_init: nand->phys_erase_shift = %d\n",
 	        chip->phys_erase_shift);
+	dev_dbg(priv->dev, "fsl_elbc_init: nand->ecclayout = %p\n",
+	        chip->ecclayout);
 	dev_dbg(priv->dev, "fsl_elbc_init: nand->ecc.mode = %d\n",
 	        chip->ecc.mode);
 	dev_dbg(priv->dev, "fsl_elbc_init: nand->ecc.steps = %d\n",
@@ -678,8 +660,8 @@ static int fsl_elbc_chip_init_tail(struct mtd_info *mtd)
 	        chip->ecc.bytes);
 	dev_dbg(priv->dev, "fsl_elbc_init: nand->ecc.total = %d\n",
 	        chip->ecc.total);
-	dev_dbg(priv->dev, "fsl_elbc_init: mtd->ooblayout = %p\n",
-		mtd->ooblayout);
+	dev_dbg(priv->dev, "fsl_elbc_init: nand->ecc.layout = %p\n",
+	        chip->ecc.layout);
 	dev_dbg(priv->dev, "fsl_elbc_init: mtd->flags = %08x\n", mtd->flags);
 	dev_dbg(priv->dev, "fsl_elbc_init: mtd->size = %lld\n", mtd->size);
 	dev_dbg(priv->dev, "fsl_elbc_init: mtd->erasesize = %d\n",
@@ -696,6 +678,14 @@ static int fsl_elbc_chip_init_tail(struct mtd_info *mtd)
 	} else if (mtd->writesize == 2048) {
 		priv->page_size = 1;
 		setbits32(&lbc->bank[priv->bank].or, OR_FCM_PGS);
+		/* adjust ecc setup if needed */
+		if ((in_be32(&lbc->bank[priv->bank].br) & BR_DECC) ==
+		    BR_DECC_CHK_GEN) {
+			chip->ecc.size = 512;
+			chip->ecc.layout = (priv->fmr & FMR_ECCM) ?
+			                   &fsl_elbc_oob_lp_eccm1 :
+			                   &fsl_elbc_oob_lp_eccm0;
+		}
 	} else {
 		dev_err(priv->dev,
 		        "fsl_elbc_init: page size %d is not supported\n",
@@ -709,7 +699,7 @@ static int fsl_elbc_chip_init_tail(struct mtd_info *mtd)
 static int fsl_elbc_read_page(struct mtd_info *mtd, struct nand_chip *chip,
 			      uint8_t *buf, int oob_required, int page)
 {
-	struct fsl_elbc_mtd *priv = nand_get_controller_data(chip);
+	struct fsl_elbc_mtd *priv = chip->priv;
 	struct fsl_lbc_ctrl *ctrl = priv->ctrl;
 	struct fsl_elbc_fcm_ctrl *elbc_fcm_ctrl = ctrl->nand;
 
@@ -727,7 +717,7 @@ static int fsl_elbc_read_page(struct mtd_info *mtd, struct nand_chip *chip,
  * waitfunc.
  */
 static int fsl_elbc_write_page(struct mtd_info *mtd, struct nand_chip *chip,
-				const uint8_t *buf, int oob_required, int page)
+				const uint8_t *buf, int oob_required)
 {
 	fsl_elbc_write_buf(mtd, buf, mtd->writesize);
 	fsl_elbc_write_buf(mtd, chip->oob_poi, mtd->oobsize);
@@ -740,7 +730,7 @@ static int fsl_elbc_write_page(struct mtd_info *mtd, struct nand_chip *chip,
  */
 static int fsl_elbc_write_subpage(struct mtd_info *mtd, struct nand_chip *chip,
 				uint32_t offset, uint32_t data_len,
-				const uint8_t *buf, int oob_required, int page)
+				const uint8_t *buf, int oob_required)
 {
 	fsl_elbc_write_buf(mtd, buf, mtd->writesize);
 	fsl_elbc_write_buf(mtd, chip->oob_poi, mtd->oobsize);
@@ -754,13 +744,12 @@ static int fsl_elbc_chip_init(struct fsl_elbc_mtd *priv)
 	struct fsl_lbc_regs __iomem *lbc = ctrl->regs;
 	struct fsl_elbc_fcm_ctrl *elbc_fcm_ctrl = ctrl->nand;
 	struct nand_chip *chip = &priv->chip;
-	struct mtd_info *mtd = nand_to_mtd(chip);
 
 	dev_dbg(priv->dev, "eLBC Set Information for bank %d\n", priv->bank);
 
 	/* Fill in fsl_elbc_mtd structure */
-	mtd->dev.parent = priv->dev;
-	nand_set_flash_node(chip, priv->dev->of_node);
+	priv->mtd.priv = chip;
+	priv->mtd.owner = THIS_MODULE;
 
 	/* set timeout to maximum */
 	priv->fmr = 15 << FMR_CWTO_SHIFT;
@@ -783,7 +772,7 @@ static int fsl_elbc_chip_init(struct fsl_elbc_mtd *priv)
 	chip->bbt_options = NAND_BBT_USE_FLASH;
 
 	chip->controller = &elbc_fcm_ctrl->controller;
-	nand_set_controller_data(chip, priv);
+	chip->priv = priv;
 
 	chip->ecc.read_page = fsl_elbc_read_page;
 	chip->ecc.write_page = fsl_elbc_write_page;
@@ -793,14 +782,15 @@ static int fsl_elbc_chip_init(struct fsl_elbc_mtd *priv)
 	if ((in_be32(&lbc->bank[priv->bank].br) & BR_DECC) ==
 	    BR_DECC_CHK_GEN) {
 		chip->ecc.mode = NAND_ECC_HW;
-		mtd_set_ooblayout(mtd, &fsl_elbc_ooblayout_ops);
+		/* put in small page settings and adjust later if needed */
+		chip->ecc.layout = (priv->fmr & FMR_ECCM) ?
+				&fsl_elbc_oob_sp_eccm1 : &fsl_elbc_oob_sp_eccm0;
 		chip->ecc.size = 512;
 		chip->ecc.bytes = 3;
 		chip->ecc.strength = 1;
 	} else {
 		/* otherwise fall back to default software ECC */
 		chip->ecc.mode = NAND_ECC_SOFT;
-		chip->ecc.algo = NAND_ECC_HAMMING;
 	}
 
 	return 0;
@@ -809,11 +799,9 @@ static int fsl_elbc_chip_init(struct fsl_elbc_mtd *priv)
 static int fsl_elbc_chip_remove(struct fsl_elbc_mtd *priv)
 {
 	struct fsl_elbc_fcm_ctrl *elbc_fcm_ctrl = priv->ctrl->nand;
-	struct mtd_info *mtd = nand_to_mtd(&priv->chip);
+	nand_release(&priv->mtd);
 
-	nand_release(mtd);
-
-	kfree(mtd->name);
+	kfree(priv->mtd.name);
 
 	if (priv->vbase)
 		iounmap(priv->vbase);
@@ -837,8 +825,9 @@ static int fsl_elbc_nand_probe(struct platform_device *pdev)
 	int bank;
 	struct device *dev;
 	struct device_node *node = pdev->dev.of_node;
-	struct mtd_info *mtd;
+	struct mtd_part_parser_data ppdata;
 
+	ppdata.of_node = pdev->dev.of_node;
 	if (!fsl_lbc_ctrl_dev || !fsl_lbc_ctrl_dev->regs)
 		return -ENODEV;
 	lbc = fsl_lbc_ctrl_dev->regs;
@@ -873,13 +862,15 @@ static int fsl_elbc_nand_probe(struct platform_device *pdev)
 	if (!fsl_lbc_ctrl_dev->nand) {
 		elbc_fcm_ctrl = kzalloc(sizeof(*elbc_fcm_ctrl), GFP_KERNEL);
 		if (!elbc_fcm_ctrl) {
+			dev_err(dev, "failed to allocate memory\n");
 			mutex_unlock(&fsl_elbc_nand_mutex);
 			ret = -ENOMEM;
 			goto err;
 		}
 		elbc_fcm_ctrl->counter++;
 
-		nand_hw_control_init(&elbc_fcm_ctrl->controller);
+		spin_lock_init(&elbc_fcm_ctrl->controller.lock);
+		init_waitqueue_head(&elbc_fcm_ctrl->controller.wq);
 		fsl_lbc_ctrl_dev->nand = elbc_fcm_ctrl;
 	} else {
 		elbc_fcm_ctrl = fsl_lbc_ctrl_dev->nand;
@@ -899,9 +890,8 @@ static int fsl_elbc_nand_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-	mtd = nand_to_mtd(&priv->chip);
-	mtd->name = kasprintf(GFP_KERNEL, "%llx.flash", (u64)res.start);
-	if (!nand_to_mtd(&priv->chip)->name) {
+	priv->mtd.name = kasprintf(GFP_KERNEL, "%x.flash", (unsigned)res.start);
+	if (!priv->mtd.name) {
 		ret = -ENOMEM;
 		goto err;
 	}
@@ -910,21 +900,21 @@ static int fsl_elbc_nand_probe(struct platform_device *pdev)
 	if (ret)
 		goto err;
 
-	ret = nand_scan_ident(mtd, 1, NULL);
+	ret = nand_scan_ident(&priv->mtd, 1, NULL);
 	if (ret)
 		goto err;
 
-	ret = fsl_elbc_chip_init_tail(mtd);
+	ret = fsl_elbc_chip_init_tail(&priv->mtd);
 	if (ret)
 		goto err;
 
-	ret = nand_scan_tail(mtd);
+	ret = nand_scan_tail(&priv->mtd);
 	if (ret)
 		goto err;
 
 	/* First look for RedBoot table or partitions on the command
 	 * line, these take precedence over device tree information */
-	mtd_device_parse_register(mtd, part_probe_types, NULL,
+	mtd_device_parse_register(&priv->mtd, part_probe_types, &ppdata,
 				  NULL, 0);
 
 	printk(KERN_INFO "eLBC NAND device at 0x%llx, bank %d\n",
@@ -959,11 +949,11 @@ static const struct of_device_id fsl_elbc_nand_match[] = {
 	{ .compatible = "fsl,elbc-fcm-nand", },
 	{}
 };
-MODULE_DEVICE_TABLE(of, fsl_elbc_nand_match);
 
 static struct platform_driver fsl_elbc_nand_driver = {
 	.driver = {
 		.name = "fsl,elbc-fcm-nand",
+		.owner = THIS_MODULE,
 		.of_match_table = fsl_elbc_nand_match,
 	},
 	.probe = fsl_elbc_nand_probe,

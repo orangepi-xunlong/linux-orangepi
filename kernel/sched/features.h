@@ -36,14 +36,19 @@ SCHED_FEAT(CACHE_HOT_BUDDY, true)
  */
 SCHED_FEAT(WAKEUP_PREEMPTION, true)
 
+/*
+ * Use arch dependent cpu power functions
+ */
+SCHED_FEAT(ARCH_POWER, false)
+
 SCHED_FEAT(HRTICK, false)
 SCHED_FEAT(DOUBLE_TICK, false)
 SCHED_FEAT(LB_BIAS, true)
 
 /*
- * Decrement CPU capacity based on time not spent running tasks
+ * Decrement CPU power based on time not spent running tasks
  */
-SCHED_FEAT(NONTASK_CAPACITY, true)
+SCHED_FEAT(NONTASK_POWER, true)
 
 /*
  * Queue remote wakeups on the target CPU and process them
@@ -51,50 +56,17 @@ SCHED_FEAT(NONTASK_CAPACITY, true)
  */
 SCHED_FEAT(TTWU_QUEUE, true)
 
-/*
- * When doing wakeups, attempt to limit superfluous scans of the LLC domain.
- */
-SCHED_FEAT(SIS_AVG_CPU, false)
-
-#ifdef HAVE_RT_PUSH_IPI
-/*
- * In order to avoid a thundering herd attack of CPUs that are
- * lowering their priorities at the same time, and there being
- * a single CPU that has an RT task that can migrate and is waiting
- * to run, where the other CPUs will try to take that CPUs
- * rq lock and possibly create a large contention, sending an
- * IPI to that CPU and let that CPU push the RT task to where
- * it should go may be a better scenario.
- */
-SCHED_FEAT(RT_PUSH_IPI, true)
-#endif
-
 SCHED_FEAT(FORCE_SD_OVERLAP, false)
 SCHED_FEAT(RT_RUNTIME_SHARE, true)
 SCHED_FEAT(LB_MIN, false)
-SCHED_FEAT(ATTACH_AGE_LOAD, true)
 
 /*
- * Energy aware scheduling. Use platform energy model to guide scheduling
- * decisions optimizing for energy efficiency.
+ * Apply the automatic NUMA scheduling policy. Enabled automatically
+ * at runtime if running on a NUMA machine. Can be controlled via
+ * numa_balancing=. Allow PTE scanning to be forced on UMA machines
+ * for debugging the core machinery.
  */
-#ifdef CONFIG_DEFAULT_USE_ENERGY_AWARE
-SCHED_FEAT(ENERGY_AWARE, true)
-#else
-SCHED_FEAT(ENERGY_AWARE, false)
+#ifdef CONFIG_NUMA_BALANCING
+SCHED_FEAT(NUMA,	false)
+SCHED_FEAT(NUMA_FORCE,	false)
 #endif
-
-/*
- * Minimum capacity capping. Keep track of minimum capacity factor when
- * minimum frequency available to a policy is modified.
- * If enabled, this can be used to inform the scheduler about capacity
- * restrictions.
- */
-SCHED_FEAT(MIN_CAPACITY_CAPPING, false)
-
-/*
- * Enforce the priority of candidates selected by find_best_target()
- * ON: If the target CPU saves any energy, use that.
- * OFF: Use whichever of target or backup saves most.
- */
-SCHED_FEAT(FBT_STRICT_ORDER, true)

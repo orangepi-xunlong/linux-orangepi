@@ -44,6 +44,7 @@ for_each_subchannel(int(*fn)(struct subchannel_id, void *), void *data)
 	int ret;
 
 	init_subchannel_id(&schid);
+	ret = -ENODEV;
 	do {
 		do {
 			ret = fn(schid, data);
@@ -68,8 +69,7 @@ static int call_fn_known_sch(struct device *dev, void *data)
 	struct cb_data *cb = data;
 	int rc = 0;
 
-	if (cb->set)
-		idset_sch_del(cb->set, sch->schid);
+	idset_sch_del(cb->set, sch->schid);
 	if (cb->fn_known_sch)
 		rc = cb->fn_known_sch(sch, cb->data);
 	return rc;
@@ -114,13 +114,6 @@ int for_each_subchannel_staged(int (*fn_known)(struct subchannel *, void *),
 	cb.data = data;
 	cb.fn_known_sch = fn_known;
 	cb.fn_unknown_sch = fn_unknown;
-
-	if (fn_known && !fn_unknown) {
-		/* Skip idset allocation in case of known-only loop. */
-		cb.set = NULL;
-		return bus_for_each_dev(&css_bus_type, NULL, &cb,
-					call_fn_known_sch);
-	}
 
 	cb.set = idset_sch_new();
 	if (!cb.set)
@@ -390,7 +383,7 @@ static int css_evaluate_new_subchannel(struct subchannel_id schid, int slow)
 		/* Will be done on the slow path. */
 		return -EAGAIN;
 	}
-	if (stsch(schid, &schib)) {
+	if (stsch_err(schid, &schib)) {
 		/* Subchannel is not provided. */
 		return -ENXIO;
 	}
@@ -553,16 +546,11 @@ static int slow_eval_unknown_fn(struct subchannel_id schid, void *data)
 		case -ENOMEM:
 		case -EIO:
 			/* These should abort looping */
-			spin_lock_irq(&slow_subchannel_lock);
 			idset_sch_del_subseq(slow_subchannel_set, schid);
-			spin_unlock_irq(&slow_subchannel_lock);
 			break;
 		default:
 			rc = 0;
 		}
-		/* Allow scheduling here since the containing loop might
-		 * take a while.  */
-		cond_resched();
 	}
 	return rc;
 }
@@ -582,7 +570,7 @@ static void css_slow_path_func(struct work_struct *unused)
 	spin_unlock_irqrestore(&slow_subchannel_lock, flags);
 }
 
-static DECLARE_DELAYED_WORK(slow_path_work, css_slow_path_func);
+static DECLARE_WORK(slow_path_work, css_slow_path_func);
 struct workqueue_struct *cio_work_q;
 
 void css_schedule_eval(struct subchannel_id schid)
@@ -592,7 +580,7 @@ void css_schedule_eval(struct subchannel_id schid)
 	spin_lock_irqsave(&slow_subchannel_lock, flags);
 	idset_sch_add(slow_subchannel_set, schid);
 	atomic_set(&css_eval_scheduled, 1);
-	queue_delayed_work(cio_work_q, &slow_path_work, 0);
+	queue_work(cio_work_q, &slow_path_work);
 	spin_unlock_irqrestore(&slow_subchannel_lock, flags);
 }
 
@@ -603,7 +591,7 @@ void css_schedule_eval_all(void)
 	spin_lock_irqsave(&slow_subchannel_lock, flags);
 	idset_fill(slow_subchannel_set);
 	atomic_set(&css_eval_scheduled, 1);
-	queue_delayed_work(cio_work_q, &slow_path_work, 0);
+	queue_work(cio_work_q, &slow_path_work);
 	spin_unlock_irqrestore(&slow_subchannel_lock, flags);
 }
 
@@ -616,7 +604,7 @@ static int __unset_registered(struct device *dev, void *data)
 	return 0;
 }
 
-void css_schedule_eval_all_unreg(unsigned long delay)
+static void css_schedule_eval_all_unreg(void)
 {
 	unsigned long flags;
 	struct idset *unreg_set;
@@ -634,7 +622,7 @@ void css_schedule_eval_all_unreg(unsigned long delay)
 	spin_lock_irqsave(&slow_subchannel_lock, flags);
 	idset_add_set(slow_subchannel_set, unreg_set);
 	atomic_set(&css_eval_scheduled, 1);
-	queue_delayed_work(cio_work_q, &slow_path_work, delay);
+	queue_work(cio_work_q, &slow_path_work);
 	spin_unlock_irqrestore(&slow_subchannel_lock, flags);
 	idset_free(unreg_set);
 }
@@ -647,8 +635,7 @@ void css_wait_for_slow_path(void)
 /* Schedule reprobing of all unregistered subchannels. */
 void css_schedule_reprobe(void)
 {
-	/* Schedule with a delay to allow merging of subsequent calls. */
-	css_schedule_eval_all_unreg(1 * HZ);
+	css_schedule_eval_all_unreg();
 }
 EXPORT_SYMBOL_GPL(css_schedule_reprobe);
 
@@ -702,12 +689,17 @@ css_generate_pgid(struct channel_subsystem *css, u32 tod_high)
 		css->global_pgid.pgid_high.ext_cssid.version = 0x80;
 		css->global_pgid.pgid_high.ext_cssid.cssid = css->cssid;
 	} else {
+#ifdef CONFIG_SMP
 		css->global_pgid.pgid_high.cpu_addr = stap();
+#else
+		css->global_pgid.pgid_high.cpu_addr = 0;
+#endif
 	}
 	get_cpu_id(&cpu_id);
 	css->global_pgid.cpu_id = cpu_id.ident;
 	css->global_pgid.cpu_model = cpu_id.machine;
 	css->global_pgid.tod_high = tod_high;
+
 }
 
 static void
@@ -748,7 +740,7 @@ css_cm_enable_store(struct device *dev, struct device_attribute *attr,
 	int ret;
 	unsigned long val;
 
-	ret = kstrtoul(buf, 16, &val);
+	ret = strict_strtoul(buf, 16, &val);
 	if (ret)
 		return ret;
 	mutex_lock(&css->mutex);
@@ -1083,7 +1075,6 @@ void channel_subsystem_reinit(void)
 		if (chp)
 			chp_update_desc(chp);
 	}
-	cmf_reactivate();
 }
 
 #ifdef CONFIG_PROC_FS

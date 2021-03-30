@@ -21,7 +21,7 @@
 #ifndef ISCSI_IBFT_H
 #define ISCSI_IBFT_H
 
-#include <linux/acpi.h>
+#include <acpi/acpi.h>
 
 /*
  * Logical location of iSCSI Boot Format Table.

@@ -65,11 +65,11 @@ static long long INIT read_int(unsigned char *ptr, int size)
 #define LZMA_IOBUF_SIZE	0x10000
 
 struct rc {
-	long (*fill)(void*, unsigned long);
+	int (*fill)(void*, unsigned int);
 	uint8_t *ptr;
 	uint8_t *buffer;
 	uint8_t *buffer_end;
-	long buffer_size;
+	int buffer_size;
 	uint32_t code;
 	uint32_t range;
 	uint32_t bound;
@@ -82,7 +82,7 @@ struct rc {
 #define RC_MODEL_TOTAL_BITS 11
 
 
-static long INIT nofill(void *buffer, unsigned long len)
+static int INIT nofill(void *buffer, unsigned int len)
 {
 	return -1;
 }
@@ -99,8 +99,8 @@ static void INIT rc_read(struct rc *rc)
 
 /* Called once */
 static inline void INIT rc_init(struct rc *rc,
-				       long (*fill)(void*, unsigned long),
-				       char *buffer, long buffer_size)
+				       int (*fill)(void*, unsigned int),
+				       char *buffer, int buffer_size)
 {
 	if (fill)
 		rc->fill = fill;
@@ -280,7 +280,7 @@ struct writer {
 	size_t buffer_pos;
 	int bufsize;
 	size_t global_pos;
-	long (*flush)(void*, unsigned long);
+	int(*flush)(void*, unsigned int);
 	struct lzma_header *header;
 };
 
@@ -534,11 +534,11 @@ static inline int INIT process_bit1(struct writer *wr, struct rc *rc,
 
 
 
-STATIC inline int INIT unlzma(unsigned char *buf, long in_len,
-			      long (*fill)(void*, unsigned long),
-			      long (*flush)(void*, unsigned long),
+STATIC inline int INIT unlzma(unsigned char *buf, int in_len,
+			      int(*fill)(void*, unsigned int),
+			      int(*flush)(void*, unsigned int),
 			      unsigned char *output,
-			      long *posp,
+			      int *posp,
 			      void(*error)(char *x)
 	)
 {
@@ -620,7 +620,7 @@ STATIC inline int INIT unlzma(unsigned char *buf, long in_len,
 
 	num_probs = LZMA_BASE_SIZE + (LZMA_LIT_SIZE << (lc + lp));
 	p = (uint16_t *) large_malloc(num_probs * sizeof(*p));
-	if (p == NULL)
+	if (p == 0)
 		goto exit_2;
 	num_probs = LZMA_LITERAL + (LZMA_LIT_SIZE << (lc + lp));
 	for (i = 0; i < num_probs; i++)
@@ -667,12 +667,13 @@ exit_0:
 }
 
 #ifdef PREBOOT
-STATIC int INIT __decompress(unsigned char *buf, long in_len,
-			      long (*fill)(void*, unsigned long),
-			      long (*flush)(void*, unsigned long),
-			      unsigned char *output, long out_len,
-			      long *posp,
-			      void (*error)(char *x))
+STATIC int INIT decompress(unsigned char *buf, int in_len,
+			      int(*fill)(void*, unsigned int),
+			      int(*flush)(void*, unsigned int),
+			      unsigned char *output,
+			      int *posp,
+			      void(*error)(char *x)
+	)
 {
 	return unlzma(buf, in_len - 4, fill, flush, output, posp, error);
 }

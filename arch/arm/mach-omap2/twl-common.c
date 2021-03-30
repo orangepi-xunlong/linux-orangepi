@@ -24,7 +24,6 @@
 #include <linux/i2c/twl.h>
 #include <linux/gpio.h>
 #include <linux/string.h>
-#include <linux/phy/phy.h>
 #include <linux/regulator/machine.h>
 #include <linux/regulator/fixed.h>
 
@@ -66,24 +65,19 @@ void __init omap_pmic_init(int bus, u32 clkrate,
 	omap_register_i2c_bus(bus, clkrate, &pmic_i2c_board_info, 1);
 }
 
-#ifdef CONFIG_ARCH_OMAP4
 void __init omap4_pmic_init(const char *pmic_type,
 		    struct twl4030_platform_data *pmic_data,
 		    struct i2c_board_info *devices, int nr_devices)
 {
 	/* PMIC part*/
-	unsigned int irq;
-
 	omap_mux_init_signal("sys_nirq1", OMAP_PIN_INPUT_PULLUP | OMAP_PIN_OFF_WAKEUPENABLE);
 	omap_mux_init_signal("fref_clk0_out.sys_drm_msecure", OMAP_PIN_OUTPUT);
-	irq = omap4_xlate_irq(7 + OMAP44XX_IRQ_GIC_START);
-	omap_pmic_init(1, 400, pmic_type, irq, pmic_data);
+	omap_pmic_init(1, 400, pmic_type, 7 + OMAP44XX_IRQ_GIC_START, pmic_data);
 
 	/* Register additional devices on i2c1 bus if needed */
 	if (devices)
 		i2c_register_board_info(1, devices, nr_devices);
 }
-#endif
 
 void __init omap_pmic_late_init(void)
 {
@@ -97,7 +91,7 @@ void __init omap_pmic_late_init(void)
 
 #if defined(CONFIG_ARCH_OMAP3)
 static struct twl4030_usb_data omap3_usb_pdata = {
-	.usb_mode = T2_USB_MODE_ULPI,
+	.usb_mode	= T2_USB_MODE_ULPI,
 };
 
 static int omap3_batt_table[] = {
@@ -146,7 +140,6 @@ static struct regulator_init_data omap3_vdac_idata = {
 
 static struct regulator_consumer_supply omap3_vpll2_supplies[] = {
 	REGULATOR_SUPPLY("vdds_dsi", "omapdss"),
-	REGULATOR_SUPPLY("vdds_dsi", "omapdss_dpi.0"),
 	REGULATOR_SUPPLY("vdds_dsi", "omapdss_dsi.0"),
 };
 
@@ -532,7 +525,8 @@ void __init omap4_pmic_get_config(struct twl4030_platform_data *pmic_data,
 }
 #endif /* CONFIG_ARCH_OMAP4 */
 
-#if IS_ENABLED(CONFIG_SND_OMAP_SOC_OMAP_TWL4030)
+#if defined(CONFIG_SND_OMAP_SOC_OMAP_TWL4030) || \
+	defined(CONFIG_SND_OMAP_SOC_OMAP_TWL4030_MODULE)
 #include <linux/platform_data/omap-twl4030.h>
 
 /* Commonly used configuration */

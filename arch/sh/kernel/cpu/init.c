@@ -43,9 +43,9 @@
  * peripherals (nofpu, nodsp, and so forth).
  */
 #define onchip_setup(x)					\
-static int x##_disabled = !cpu_has_##x;			\
+static int x##_disabled __cpuinitdata = !cpu_has_##x;	\
 							\
-static int x##_setup(char *opts)			\
+static int __cpuinit x##_setup(char *opts)			\
 {							\
 	x##_disabled = 1;				\
 	return 1;					\
@@ -59,7 +59,7 @@ onchip_setup(dsp);
 #define CPUOPM		0xff2f0000
 #define CPUOPM_RABD	(1 << 5)
 
-static void speculative_execution_init(void)
+static void __cpuinit speculative_execution_init(void)
 {
 	/* Clear RABD */
 	__raw_writel(__raw_readl(CPUOPM) & ~CPUOPM_RABD, CPUOPM);
@@ -78,7 +78,7 @@ static void speculative_execution_init(void)
 #define EXPMASK_BRDSSLP		(1 << 1)
 #define EXPMASK_MMCAW		(1 << 4)
 
-static void expmask_init(void)
+static void __cpuinit expmask_init(void)
 {
 	unsigned long expmask = __raw_readl(EXPMASK);
 
@@ -106,13 +106,13 @@ void __attribute__ ((weak)) l2_cache_init(void)
 /*
  * Generic first-level cache init
  */
-#if defined(CONFIG_SUPERH32) && !defined(CONFIG_CPU_J2)
+#ifdef CONFIG_SUPERH32
 static void cache_init(void)
 {
 	unsigned long ccr, flags;
 
 	jump_to_uncached();
-	ccr = __raw_readl(SH_CCR);
+	ccr = __raw_readl(CCR);
 
 	/*
 	 * At this point we don't know whether the cache is enabled or not - a
@@ -189,7 +189,7 @@ static void cache_init(void)
 
 	l2_cache_init();
 
-	__raw_writel(flags, SH_CCR);
+	__raw_writel(flags, CCR);
 	back_to_cached();
 }
 #else
@@ -217,7 +217,7 @@ static void detect_cache_shape(void)
 		l2_cache_shape = -1; /* No S-cache */
 }
 
-static void fpu_init(void)
+static void __cpuinit fpu_init(void)
 {
 	/* Disable the FPU */
 	if (fpu_disabled && (current_cpu_data.flags & CPU_HAS_FPU)) {
@@ -230,7 +230,7 @@ static void fpu_init(void)
 }
 
 #ifdef CONFIG_SH_DSP
-static void release_dsp(void)
+static void __cpuinit release_dsp(void)
 {
 	unsigned long sr;
 
@@ -244,7 +244,7 @@ static void release_dsp(void)
 	);
 }
 
-static void dsp_init(void)
+static void __cpuinit dsp_init(void)
 {
 	unsigned long sr;
 
@@ -276,7 +276,7 @@ static void dsp_init(void)
 	release_dsp();
 }
 #else
-static inline void dsp_init(void) { }
+static inline void __cpuinit dsp_init(void) { }
 #endif /* CONFIG_SH_DSP */
 
 /**
@@ -295,7 +295,7 @@ static inline void dsp_init(void) { }
  * Each processor family is still responsible for doing its own probing
  * and cache configuration in cpu_probe().
  */
-asmlinkage void cpu_init(void)
+asmlinkage void __cpuinit cpu_init(void)
 {
 	current_thread_info()->cpu = hard_smp_processor_id();
 
@@ -323,13 +323,9 @@ asmlinkage void cpu_init(void)
 	cache_init();
 
 	if (raw_smp_processor_id() == 0) {
-#ifdef CONFIG_MMU
 		shm_align_mask = max_t(unsigned long,
 				       current_cpu_data.dcache.way_size - 1,
 				       PAGE_SIZE - 1);
-#else
-		shm_align_mask = PAGE_SIZE - 1;
-#endif
 
 		/* Boot CPU sets the cache shape */
 		detect_cache_shape();

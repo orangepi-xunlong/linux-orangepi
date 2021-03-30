@@ -1,9 +1,7 @@
 #ifndef _LINUX_DN_H
 #define _LINUX_DN_H
 
-#include <linux/ioctl.h>
 #include <linux/types.h>
-#include <linux/if_ether.h>
 
 /*
 
@@ -122,7 +120,7 @@ struct linkinfo_dn {
  * Ethernet address format (for DECnet)
  */
 union etheraddress {
-        __u8 dne_addr[ETH_ALEN];      /* Full ethernet address */
+        __u8 dne_addr[6];             /* Full ethernet address */
   struct {
                 __u8 dne_hiord[4];    /* DECnet HIORD prefix   */
                 __u8 dne_nodeaddr[2]; /* DECnet node address   */

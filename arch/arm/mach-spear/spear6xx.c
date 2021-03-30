@@ -16,6 +16,7 @@
 #include <linux/amba/pl08x.h>
 #include <linux/clk.h>
 #include <linux/err.h>
+#include <linux/irqchip.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
@@ -334,8 +335,8 @@ static struct pl08x_platform_data spear6xx_pl080_plat_data = {
 	},
 	.lli_buses = PL08X_AHB1,
 	.mem_buses = PL08X_AHB1,
-	.get_xfer_signal = pl080_get_signal,
-	.put_xfer_signal = pl080_put_signal,
+	.get_signal = pl080_get_signal,
+	.put_signal = pl080_put_signal,
 	.slave_channels = spear600_dma_info,
 	.num_slave_channels = ARRAY_SIZE(spear600_dma_info),
 };
@@ -411,7 +412,8 @@ struct of_dev_auxdata spear6xx_auxdata_lookup[] __initdata = {
 
 static void __init spear600_dt_init(void)
 {
-	of_platform_default_populate(NULL, spear6xx_auxdata_lookup, NULL);
+	of_platform_populate(NULL, of_default_bus_match_table,
+			spear6xx_auxdata_lookup, NULL);
 }
 
 static const char *spear600_dt_board_compat[] = {
@@ -421,6 +423,7 @@ static const char *spear600_dt_board_compat[] = {
 
 DT_MACHINE_START(SPEAR600_DT, "ST SPEAr600 (Flattened Device Tree)")
 	.map_io		=	spear6xx_map_io,
+	.init_irq	=	irqchip_init,
 	.init_time	=	spear6xx_timer_init,
 	.init_machine	=	spear600_dt_init,
 	.restart	=	spear_restart,

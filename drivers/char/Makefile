@@ -9,9 +9,11 @@ obj-$(CONFIG_ATARI_DSP56K)	+= dsp56k.o
 obj-$(CONFIG_VIRTIO_CONSOLE)	+= virtio_console.o
 obj-$(CONFIG_RAW_DRIVER)	+= raw.o
 obj-$(CONFIG_SGI_SNSC)		+= snsc.o snsc_event.o
+obj-$(CONFIG_MSM_SMD_PKT)	+= msm_smd_pkt.o
 obj-$(CONFIG_MSPEC)		+= mspec.o
 obj-$(CONFIG_MMTIMER)		+= mmtimer.o
 obj-$(CONFIG_UV_MMTIMER)	+= uv_mmtimer.o
+obj-$(CONFIG_VIOTAPE)		+= viotape.o
 obj-$(CONFIG_IBM_BSR)		+= bsr.o
 obj-$(CONFIG_SGI_MBCS)		+= mbcs.o
 obj-$(CONFIG_BFIN_OTP)		+= bfin-otp.o
@@ -25,6 +27,7 @@ obj-$(CONFIG_APPLICOM)		+= applicom.o
 obj-$(CONFIG_SONYPI)		+= sonypi.o
 obj-$(CONFIG_RTC)		+= rtc.o
 obj-$(CONFIG_HPET)		+= hpet.o
+obj-$(CONFIG_GEN_RTC)		+= genrtc.o
 obj-$(CONFIG_EFI_RTC)		+= efirtc.o
 obj-$(CONFIG_DS1302)		+= ds1302.o
 obj-$(CONFIG_XILINX_HWICAP)	+= xilinx_hwicap/
@@ -34,6 +37,7 @@ else
   obj-$(CONFIG_NVRAM)	+= nvram.o
 endif
 obj-$(CONFIG_TOSHIBA)		+= toshiba.o
+obj-$(CONFIG_I8K)		+= i8k.o
 obj-$(CONFIG_DS1620)		+= ds1620.o
 obj-$(CONFIG_HW_RANDOM)		+= hw_random/
 obj-$(CONFIG_PPDEV)		+= ppdev.o
@@ -46,7 +50,7 @@ obj-$(CONFIG_GPIO_TB0219)	+= tb0219.o
 obj-$(CONFIG_TELCLOCK)		+= tlclk.o
 
 obj-$(CONFIG_MWAVE)		+= mwave/
-obj-y				+= agp/
+obj-$(CONFIG_AGP)		+= agp/
 obj-$(CONFIG_PCMCIA)		+= pcmcia/
 
 obj-$(CONFIG_HANGCHECK_TIMER)	+= hangcheck-timer.o
@@ -58,14 +62,11 @@ obj-$(CONFIG_JS_RTC)		+= js-rtc.o
 js-rtc-y = rtc.o
 
 obj-$(CONFIG_TILE_SROM)		+= tile-srom.o
-obj-$(CONFIG_XILLYBUS)		+= xillybus/
-obj-y                           += sunxi-scr/
-obj-$(CONFIG_POWERNV_OP_PANEL)	+= powernv-op-panel.o
-obj-$(CONFIG_ARCH_SUNXI)	+= sunxi-sysinfo/
-
-obj-$(CONFIG_SUNXI_TIMER_TEST)  += timer_test/
-obj-$(CONFIG_DUMP_REG)          += dump_reg/
+obj-$(CONFIG_SUNXI_DMA_TEST)	+= dma_test/
+obj-y				+= sunxi-scr/
+obj-y				+= sunxi-di/
+obj-$(CONFIG_DUMP_REG) += dump_reg/
 obj-$(CONFIG_SUNXI_TRANSFORM)   += sunxi_tr/
-obj-y                           += sunxi-di/
-obj-$(CONFIG_SUNXI_G2D)         += sunxi_g2d/
-obj-$(CONFIG_TDA7729_AUDIO_DSP)		+= tda7729/
+obj-$(CONFIG_ARCH_SUNXI)    += sunxi-sysinfo/
+obj-$(CONFIG_SUNXI_TIMER_TEST)	+= timer_test/
+obj-$(CONFIG_SUNXI_G2D)		+= sunxi_g2d/

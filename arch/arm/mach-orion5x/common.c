@@ -24,17 +24,18 @@
 #include <asm/page.h>
 #include <asm/setup.h>
 #include <asm/system_misc.h>
+#include <asm/timex.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 #include <asm/mach/time.h>
+#include <mach/bridge-regs.h>
+#include <mach/hardware.h>
+#include <mach/orion5x.h>
 #include <linux/platform_data/mtd-orion_nand.h>
 #include <linux/platform_data/usb-ehci-orion.h>
 #include <plat/time.h>
 #include <plat/common.h>
-
-#include "bridge-regs.h"
 #include "common.h"
-#include "orion5x.h"
 
 /*****************************************************************************
  * I/O Address Mapping
@@ -66,7 +67,8 @@ static struct clk *tclk;
 
 void __init clk_init(void)
 {
-	tclk = clk_register_fixed_rate(NULL, "tclk", NULL, 0, orion5x_tclk);
+	tclk = clk_register_fixed_rate(NULL, "tclk", NULL, CLK_IS_ROOT,
+				       orion5x_tclk);
 
 	orion_clkdev_init(tclk);
 }
@@ -105,9 +107,9 @@ void __init orion5x_eth_init(struct mv643xx_eth_platform_data *eth_data)
 /*****************************************************************************
  * Ethernet switch
  ****************************************************************************/
-void __init orion5x_eth_switch_init(struct dsa_platform_data *d)
+void __init orion5x_eth_switch_init(struct dsa_platform_data *d, int irq)
 {
-	orion_ge00_switch_init(d);
+	orion_ge00_switch_init(d, irq);
 }
 
 
@@ -133,7 +135,7 @@ void __init orion5x_sata_init(struct mv_sata_platform_data *sata_data)
 /*****************************************************************************
  * SPI
  ****************************************************************************/
-void __init orion5x_spi_init(void)
+void __init orion5x_spi_init()
 {
 	orion_spi_init(SPI_PHYS_BASE);
 }
@@ -172,10 +174,8 @@ void __init orion5x_xor_init(void)
  ****************************************************************************/
 static void __init orion5x_crypto_init(void)
 {
-	mvebu_mbus_add_window_by_id(ORION_MBUS_SRAM_TARGET,
-				    ORION_MBUS_SRAM_ATTR,
-				    ORION5X_SRAM_PHYS_BASE,
-				    ORION5X_SRAM_SIZE);
+	mvebu_mbus_add_window("sram", ORION5X_SRAM_PHYS_BASE,
+			      ORION5X_SRAM_SIZE);
 	orion_crypto_init(ORION5X_CRYPTO_PHYS_BASE, ORION5X_SRAM_PHYS_BASE,
 			  SZ_8K, IRQ_ORION5X_CESA);
 }
@@ -183,21 +183,9 @@ static void __init orion5x_crypto_init(void)
 /*****************************************************************************
  * Watchdog
  ****************************************************************************/
-static struct resource orion_wdt_resource[] = {
-		DEFINE_RES_MEM(TIMER_PHYS_BASE, 0x04),
-		DEFINE_RES_MEM(RSTOUTn_MASK_PHYS, 0x04),
-};
-
-static struct platform_device orion_wdt_device = {
-	.name		= "orion_wdt",
-	.id		= -1,
-	.num_resources	= ARRAY_SIZE(orion_wdt_resource),
-	.resource	= orion_wdt_resource,
-};
-
-static void __init orion5x_wdt_init(void)
+void __init orion5x_wdt_init(void)
 {
-	platform_device_register(&orion_wdt_device);
+	orion_wdt_init();
 }
 
 
@@ -234,29 +222,27 @@ void orion5x_setup_wins(void)
 	 * The PCIe windows will no longer be statically allocated
 	 * here once Orion5x is migrated to the pci-mvebu driver.
 	 */
-	mvebu_mbus_add_window_remap_by_id(ORION_MBUS_PCIE_IO_TARGET,
-					  ORION_MBUS_PCIE_IO_ATTR,
-					  ORION5X_PCIE_IO_PHYS_BASE,
+	mvebu_mbus_add_window_remap_flags("pcie0.0", ORION5X_PCIE_IO_PHYS_BASE,
 					  ORION5X_PCIE_IO_SIZE,
-					  ORION5X_PCIE_IO_BUS_BASE);
-	mvebu_mbus_add_window_by_id(ORION_MBUS_PCIE_MEM_TARGET,
-				    ORION_MBUS_PCIE_MEM_ATTR,
-				    ORION5X_PCIE_MEM_PHYS_BASE,
-				    ORION5X_PCIE_MEM_SIZE);
-	mvebu_mbus_add_window_remap_by_id(ORION_MBUS_PCI_IO_TARGET,
-					  ORION_MBUS_PCI_IO_ATTR,
-					  ORION5X_PCI_IO_PHYS_BASE,
+					  ORION5X_PCIE_IO_BUS_BASE,
+					  MVEBU_MBUS_PCI_IO);
+	mvebu_mbus_add_window_remap_flags("pcie0.0", ORION5X_PCIE_MEM_PHYS_BASE,
+					  ORION5X_PCIE_MEM_SIZE,
+					  MVEBU_MBUS_NO_REMAP,
+					  MVEBU_MBUS_PCI_MEM);
+	mvebu_mbus_add_window_remap_flags("pci0.0", ORION5X_PCI_IO_PHYS_BASE,
 					  ORION5X_PCI_IO_SIZE,
-					  ORION5X_PCI_IO_BUS_BASE);
-	mvebu_mbus_add_window_by_id(ORION_MBUS_PCI_MEM_TARGET,
-				    ORION_MBUS_PCI_MEM_ATTR,
-				    ORION5X_PCI_MEM_PHYS_BASE,
-				    ORION5X_PCI_MEM_SIZE);
+					  ORION5X_PCI_IO_BUS_BASE,
+					  MVEBU_MBUS_PCI_IO);
+	mvebu_mbus_add_window_remap_flags("pci0.0", ORION5X_PCI_MEM_PHYS_BASE,
+					  ORION5X_PCI_MEM_SIZE,
+					  MVEBU_MBUS_NO_REMAP,
+					  MVEBU_MBUS_PCI_MEM);
 }
 
 int orion5x_tclk;
 
-static int __init orion5x_find_tclk(void)
+int __init orion5x_find_tclk(void)
 {
 	u32 dev, rev;
 
@@ -376,7 +362,8 @@ void orion5x_restart(enum reboot_mode mode, const char *cmd)
  * Many orion-based systems have buggy bootloader implementations.
  * This is a common fixup for bogus memory tags.
  */
-void __init tag_fixup_mem32(struct tag *t, char **from)
+void __init tag_fixup_mem32(struct tag *t, char **from,
+			    struct meminfo *meminfo)
 {
 	for (; t->hdr.size; t = tag_next(t))
 		if (t->hdr.tag == ATAG_MEM &&

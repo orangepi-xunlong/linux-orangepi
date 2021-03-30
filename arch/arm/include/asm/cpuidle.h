@@ -31,13 +31,13 @@ static inline int arm_cpuidle_simple_enter(struct cpuidle_device *dev,
 struct device_node;
 
 struct cpuidle_ops {
-	int (*suspend)(unsigned long arg);
+	int (*suspend)(int cpu, unsigned long arg);
 	int (*init)(struct device_node *, int cpu);
 };
 
 struct of_cpuidle_method {
 	const char *method;
-	const struct cpuidle_ops *ops;
+	struct cpuidle_ops *ops;
 };
 
 #define CPUIDLE_METHOD_OF_DECLARE(name, _method, _ops)			\

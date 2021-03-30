@@ -25,7 +25,6 @@ void (*_machine_crash_shutdown)(struct pt_regs *regs) = NULL;
 #ifdef CONFIG_SMP
 void (*relocated_kexec_smp_wait) (void *);
 atomic_t kexec_ready_to_reboot = ATOMIC_INIT(0);
-void (*_crash_smp_send_stop)(void) = NULL;
 #endif
 
 int
@@ -72,12 +71,8 @@ machine_kexec(struct kimage *image)
 	kexec_start_address =
 		(unsigned long) phys_to_virt(image->start);
 
-	if (image->type == KEXEC_TYPE_DEFAULT) {
-		kexec_indirection_page =
-			(unsigned long) phys_to_virt(image->head & PAGE_MASK);
-	} else {
-		kexec_indirection_page = (unsigned long)&image->head;
-	}
+	kexec_indirection_page =
+		(unsigned long) phys_to_virt(image->head & PAGE_MASK);
 
 	memcpy((void*)reboot_code_buffer, relocate_new_kernel,
 	       relocate_new_kernel_size);
@@ -95,9 +90,6 @@ machine_kexec(struct kimage *image)
 		    *ptr & IND_DESTINATION)
 			*ptr = (unsigned long) phys_to_virt(*ptr);
 	}
-
-	/* Mark offline BEFORE disabling local irq. */
-	set_cpu_online(smp_processor_id(), false);
 
 	/*
 	 * we do not want to be bothered.

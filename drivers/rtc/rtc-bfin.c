@@ -346,7 +346,7 @@ static int bfin_rtc_probe(struct platform_device *pdev)
 {
 	struct bfin_rtc *rtc;
 	struct device *dev = &pdev->dev;
-	int ret;
+	int ret = 0;
 	unsigned long timeout = jiffies + HZ;
 
 	dev_dbg_stamp(dev);
@@ -361,17 +361,16 @@ static int bfin_rtc_probe(struct platform_device *pdev)
 	/* Register our RTC with the RTC framework */
 	rtc->rtc_dev = devm_rtc_device_register(dev, pdev->name, &bfin_rtc_ops,
 						THIS_MODULE);
-	if (IS_ERR(rtc->rtc_dev))
-		return PTR_ERR(rtc->rtc_dev);
+	if (unlikely(IS_ERR(rtc->rtc_dev))) {
+		ret = PTR_ERR(rtc->rtc_dev);
+		goto err;
+	}
 
 	/* Grab the IRQ and init the hardware */
 	ret = devm_request_irq(dev, IRQ_RTC, bfin_rtc_interrupt, 0,
 				pdev->name, dev);
 	if (unlikely(ret))
-		dev_err(&pdev->dev,
-			"unable to request IRQ; alarm won't work, "
-			"and writes will be delayed\n");
-
+		goto err;
 	/* sometimes the bootloader touched things, but the write complete was not
 	 * enabled, so let's just do a quick timeout here since the IRQ will not fire ...
 	 */
@@ -382,6 +381,9 @@ static int bfin_rtc_probe(struct platform_device *pdev)
 	bfin_write_RTC_SWCNT(0);
 
 	return 0;
+
+err:
+	return ret;
 }
 
 static int bfin_rtc_remove(struct platform_device *pdev)
@@ -389,6 +391,7 @@ static int bfin_rtc_remove(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 
 	bfin_rtc_reset(dev, 0);
+	platform_set_drvdata(pdev, NULL);
 
 	return 0;
 }

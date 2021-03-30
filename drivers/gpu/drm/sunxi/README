@@ -1,0 +1,7 @@
+1. when you want to build sunxi for module, you need clone it to lichee/linux-3.10/drivers/gpu/drm/ and repace the original sunxi dir;
+
+2. Support lichee/build.sh;
+
+3. Use the 
+	./build-sunxi.sh
+	to build sunxi module, only after finish step 1;

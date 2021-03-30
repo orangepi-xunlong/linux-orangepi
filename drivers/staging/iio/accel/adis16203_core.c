@@ -37,7 +37,6 @@ static int adis16203_write_raw(struct iio_dev *indio_dev,
 	struct adis *st = iio_priv(indio_dev);
 	/* currently only one writable parameter which keeps this simple */
 	u8 addr = adis16203_addresses[chan->scan_index];
-
 	return adis_write_reg_16(st, addr, val & 0x3FFF);
 }
 
@@ -51,7 +50,6 @@ static int adis16203_read_raw(struct iio_dev *indio_dev,
 	int bits;
 	u8 addr;
 	s16 val16;
-
 	switch (mask) {
 	case IIO_CHAN_INFO_RAW:
 		return adis_single_conversion(indio_dev, chan,
@@ -101,14 +99,13 @@ static int adis16203_read_raw(struct iio_dev *indio_dev,
 }
 
 static const struct iio_chan_spec adis16203_channels[] = {
-	ADIS_SUPPLY_CHAN(ADIS16203_SUPPLY_OUT, ADIS16203_SCAN_SUPPLY, 0, 12),
-	ADIS_AUX_ADC_CHAN(ADIS16203_AUX_ADC, ADIS16203_SCAN_AUX_ADC, 0, 12),
+	ADIS_SUPPLY_CHAN(ADIS16203_SUPPLY_OUT, ADIS16203_SCAN_SUPPLY, 12),
+	ADIS_AUX_ADC_CHAN(ADIS16203_AUX_ADC, ADIS16203_SCAN_AUX_ADC, 12),
 	ADIS_INCLI_CHAN(X, ADIS16203_XINCL_OUT, ADIS16203_SCAN_INCLI_X,
-			BIT(IIO_CHAN_INFO_CALIBBIAS), 0, 14),
+		BIT(IIO_CHAN_INFO_CALIBBIAS), 14),
 	/* Fixme: Not what it appears to be - see data sheet */
-	ADIS_INCLI_CHAN(Y, ADIS16203_YINCL_OUT, ADIS16203_SCAN_INCLI_Y,
-			0, 0, 14),
-	ADIS_TEMP_CHAN(ADIS16203_TEMP_OUT, ADIS16203_SCAN_TEMP, 0, 12),
+	ADIS_INCLI_CHAN(Y, ADIS16203_YINCL_OUT, ADIS16203_SCAN_INCLI_Y, 0, 14),
+	ADIS_TEMP_CHAN(ADIS16203_TEMP_OUT, ADIS16203_SCAN_TEMP, 12),
 	IIO_CHAN_SOFT_TIMESTAMP(5),
 };
 
@@ -134,7 +131,6 @@ static const struct adis_data adis16203_data = {
 	.diag_stat_reg = ADIS16203_DIAG_STAT,
 
 	.self_test_mask = ADIS16203_MSC_CTRL_SELF_TEST_EN,
-	.self_test_no_autoclear = true,
 	.startup_delay = ADIS16203_STARTUP_DELAY,
 
 	.status_error_msgs = adis16203_status_error_msgs,
@@ -152,9 +148,11 @@ static int adis16203_probe(struct spi_device *spi)
 	struct adis *st;
 
 	/* setup the industrialio driver allocated elements */
-	indio_dev = devm_iio_device_alloc(&spi->dev, sizeof(*st));
-	if (!indio_dev)
-		return -ENOMEM;
+	indio_dev = iio_device_alloc(sizeof(*st));
+	if (indio_dev == NULL) {
+		ret = -ENOMEM;
+		goto error_ret;
+	}
 	st = iio_priv(indio_dev);
 	/* this is only used for removal purposes */
 	spi_set_drvdata(spi, indio_dev);
@@ -168,11 +166,11 @@ static int adis16203_probe(struct spi_device *spi)
 
 	ret = adis_init(st, indio_dev, spi, &adis16203_data);
 	if (ret)
-		return ret;
+		goto error_free_dev;
 
 	ret = adis_setup_buffer_and_trigger(st, indio_dev, NULL);
 	if (ret)
-		return ret;
+		goto error_free_dev;
 
 	/* Get the device into a sane initial state */
 	ret = adis_initial_startup(st);
@@ -187,6 +185,9 @@ static int adis16203_probe(struct spi_device *spi)
 
 error_cleanup_buffer_trigger:
 	adis_cleanup_buffer_and_trigger(st, indio_dev);
+error_free_dev:
+	iio_device_free(indio_dev);
+error_ret:
 	return ret;
 }
 
@@ -197,6 +198,7 @@ static int adis16203_remove(struct spi_device *spi)
 
 	iio_device_unregister(indio_dev);
 	adis_cleanup_buffer_and_trigger(st, indio_dev);
+	iio_device_free(indio_dev);
 
 	return 0;
 }
@@ -204,6 +206,7 @@ static int adis16203_remove(struct spi_device *spi)
 static struct spi_driver adis16203_driver = {
 	.driver = {
 		.name = "adis16203",
+		.owner = THIS_MODULE,
 	},
 	.probe = adis16203_probe,
 	.remove = adis16203_remove,

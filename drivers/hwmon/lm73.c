@@ -55,7 +55,7 @@ static const unsigned short lm73_convrates[] = {
 };
 
 struct lm73_data {
-	struct i2c_client *client;
+	struct device *hwmon_dev;
 	struct mutex lock;
 	u8 ctrl;			/* control register value */
 };
@@ -66,7 +66,7 @@ static ssize_t set_temp(struct device *dev, struct device_attribute *da,
 			const char *buf, size_t count)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(da);
-	struct lm73_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = to_i2c_client(dev);
 	long temp;
 	short value;
 	s32 err;
@@ -77,7 +77,7 @@ static ssize_t set_temp(struct device *dev, struct device_attribute *da,
 
 	/* Write value */
 	value = clamp_val(temp / 250, LM73_TEMP_MIN, LM73_TEMP_MAX) << 5;
-	err = i2c_smbus_write_word_swapped(data->client, attr->index, value);
+	err = i2c_smbus_write_word_swapped(client, attr->index, value);
 	return (err < 0) ? err : count;
 }
 
@@ -85,10 +85,10 @@ static ssize_t show_temp(struct device *dev, struct device_attribute *da,
 			 char *buf)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(da);
-	struct lm73_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = to_i2c_client(dev);
 	int temp;
 
-	s32 err = i2c_smbus_read_word_swapped(data->client, attr->index);
+	s32 err = i2c_smbus_read_word_swapped(client, attr->index);
 	if (err < 0)
 		return err;
 
@@ -101,7 +101,8 @@ static ssize_t show_temp(struct device *dev, struct device_attribute *da,
 static ssize_t set_convrate(struct device *dev, struct device_attribute *da,
 			    const char *buf, size_t count)
 {
-	struct lm73_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = to_i2c_client(dev);
+	struct lm73_data *data = i2c_get_clientdata(client);
 	unsigned long convrate;
 	s32 err;
 	int res = 0;
@@ -123,8 +124,7 @@ static ssize_t set_convrate(struct device *dev, struct device_attribute *da,
 	mutex_lock(&data->lock);
 	data->ctrl &= LM73_CTRL_TO_MASK;
 	data->ctrl |= res << LM73_CTRL_RES_SHIFT;
-	err = i2c_smbus_write_byte_data(data->client, LM73_REG_CTRL,
-					data->ctrl);
+	err = i2c_smbus_write_byte_data(client, LM73_REG_CTRL, data->ctrl);
 	mutex_unlock(&data->lock);
 
 	if (err < 0)
@@ -136,7 +136,8 @@ static ssize_t set_convrate(struct device *dev, struct device_attribute *da,
 static ssize_t show_convrate(struct device *dev, struct device_attribute *da,
 			     char *buf)
 {
-	struct lm73_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = to_i2c_client(dev);
+	struct lm73_data *data = i2c_get_clientdata(client);
 	int res;
 
 	res = (data->ctrl & LM73_CTRL_RES_MASK) >> LM73_CTRL_RES_SHIFT;
@@ -146,12 +147,13 @@ static ssize_t show_convrate(struct device *dev, struct device_attribute *da,
 static ssize_t show_maxmin_alarm(struct device *dev,
 				 struct device_attribute *da, char *buf)
 {
+	struct i2c_client *client = to_i2c_client(dev);
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(da);
-	struct lm73_data *data = dev_get_drvdata(dev);
+	struct lm73_data *data = i2c_get_clientdata(client);
 	s32 ctrl;
 
 	mutex_lock(&data->lock);
-	ctrl = i2c_smbus_read_byte_data(data->client, LM73_REG_CTRL);
+	ctrl = i2c_smbus_read_byte_data(client, LM73_REG_CTRL);
 	if (ctrl < 0)
 		goto abort;
 	data->ctrl = ctrl;
@@ -181,7 +183,7 @@ static SENSOR_DEVICE_ATTR(temp1_max_alarm, S_IRUGO,
 static SENSOR_DEVICE_ATTR(temp1_min_alarm, S_IRUGO,
 			show_maxmin_alarm, NULL, LM73_CTRL_LO_SHIFT);
 
-static struct attribute *lm73_attrs[] = {
+static struct attribute *lm73_attributes[] = {
 	&sensor_dev_attr_temp1_input.dev_attr.attr,
 	&sensor_dev_attr_temp1_max.dev_attr.attr,
 	&sensor_dev_attr_temp1_min.dev_attr.attr,
@@ -190,7 +192,10 @@ static struct attribute *lm73_attrs[] = {
 	&sensor_dev_attr_temp1_min_alarm.dev_attr.attr,
 	NULL
 };
-ATTRIBUTE_GROUPS(lm73);
+
+static const struct attribute_group lm73_group = {
+	.attrs = lm73_attributes,
+};
 
 /*-----------------------------------------------------------------------*/
 
@@ -199,16 +204,16 @@ ATTRIBUTE_GROUPS(lm73);
 static int
 lm73_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
-	struct device *dev = &client->dev;
-	struct device *hwmon_dev;
+	int status;
 	struct lm73_data *data;
 	int ctrl;
 
-	data = devm_kzalloc(dev, sizeof(struct lm73_data), GFP_KERNEL);
+	data = devm_kzalloc(&client->dev, sizeof(struct lm73_data),
+			    GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 
-	data->client = client;
+	i2c_set_clientdata(client, data);
 	mutex_init(&data->lock);
 
 	ctrl = i2c_smbus_read_byte_data(client, LM73_REG_CTRL);
@@ -216,13 +221,33 @@ lm73_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		return ctrl;
 	data->ctrl = ctrl;
 
-	hwmon_dev = devm_hwmon_device_register_with_groups(dev, client->name,
-							   data, lm73_groups);
-	if (IS_ERR(hwmon_dev))
-		return PTR_ERR(hwmon_dev);
+	/* Register sysfs hooks */
+	status = sysfs_create_group(&client->dev.kobj, &lm73_group);
+	if (status)
+		return status;
 
-	dev_info(dev, "sensor '%s'\n", client->name);
+	data->hwmon_dev = hwmon_device_register(&client->dev);
+	if (IS_ERR(data->hwmon_dev)) {
+		status = PTR_ERR(data->hwmon_dev);
+		goto exit_remove;
+	}
 
+	dev_info(&client->dev, "%s: sensor '%s'\n",
+		 dev_name(data->hwmon_dev), client->name);
+
+	return 0;
+
+exit_remove:
+	sysfs_remove_group(&client->dev.kobj, &lm73_group);
+	return status;
+}
+
+static int lm73_remove(struct i2c_client *client)
+{
+	struct lm73_data *data = i2c_get_clientdata(client);
+
+	hwmon_device_unregister(data->hwmon_dev);
+	sysfs_remove_group(&client->dev.kobj, &lm73_group);
 	return 0;
 }
 
@@ -275,6 +300,7 @@ static struct i2c_driver lm73_driver = {
 		.name	= "lm73",
 	},
 	.probe		= lm73_probe,
+	.remove		= lm73_remove,
 	.id_table	= lm73_ids,
 	.detect		= lm73_detect,
 	.address_list	= normal_i2c,

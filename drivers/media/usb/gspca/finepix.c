@@ -41,6 +41,7 @@ struct usb_fpix {
 	struct gspca_dev gspca_dev;	/* !! must be the first item */
 
 	struct work_struct work_struct;
+	struct workqueue_struct *work_thread;
 };
 
 /* Delay after which claim the next frame. If the delay is too small,
@@ -225,7 +226,9 @@ static int sd_start(struct gspca_dev *gspca_dev)
 	/* Again, reset bulk in endpoint */
 	usb_clear_halt(gspca_dev->dev, gspca_dev->urb[0]->pipe);
 
-	schedule_work(&dev->work_struct);
+	/* Start the workqueue function to do the streaming */
+	dev->work_thread = create_singlethread_workqueue(MODULE_NAME);
+	queue_work(dev->work_thread, &dev->work_struct);
 
 	return 0;
 }
@@ -238,8 +241,9 @@ static void sd_stop0(struct gspca_dev *gspca_dev)
 
 	/* wait for the work queue to terminate */
 	mutex_unlock(&gspca_dev->usb_lock);
-	flush_work(&dev->work_struct);
+	destroy_workqueue(dev->work_thread);
 	mutex_lock(&gspca_dev->usb_lock);
+	dev->work_thread = NULL;
 }
 
 /* Table of supported USB devices */

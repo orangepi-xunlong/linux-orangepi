@@ -22,9 +22,9 @@
 #include <linux/gpio.h>
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
+#include <mach/orion5x.h>
 #include "common.h"
 #include "mpp.h"
-#include "orion5x.h"
 
 /*****************************************************************************
  * Linkstation LS-CHL Info
@@ -294,10 +294,8 @@ static void __init lschl_init(void)
 	orion5x_uart0_init();
 	orion5x_xor_init();
 
-	mvebu_mbus_add_window_by_id(ORION_MBUS_DEVBUS_BOOT_TARGET,
-				    ORION_MBUS_DEVBUS_BOOT_ATTR,
-				    LSCHL_NOR_BOOT_BASE,
-				    LSCHL_NOR_BOOT_SIZE);
+	mvebu_mbus_add_window("devbus-boot", LSCHL_NOR_BOOT_BASE,
+			      LSCHL_NOR_BOOT_SIZE);
 	platform_device_register(&lschl_nor_flash);
 
 	platform_device_register(&lschl_leds);
@@ -320,7 +318,6 @@ static void __init lschl_init(void)
 MACHINE_START(LINKSTATION_LSCHL, "Buffalo Linkstation LiveV3 (LS-CHL)")
 	/* Maintainer: Ash Hughes <ashley.hughes@blueyonder.co.uk> */
 	.atag_offset	= 0x100,
-	.nr_irqs	= ORION5X_NR_IRQS,
 	.init_machine	= lschl_init,
 	.map_io		= orion5x_map_io,
 	.init_early	= orion5x_init_early,

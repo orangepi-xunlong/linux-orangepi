@@ -67,24 +67,24 @@ struct lpc32xx_adc_info {
 };
 
 static int lpc32xx_read_raw(struct iio_dev *indio_dev,
-			    struct iio_chan_spec const *chan,
-			    int *val,
-			    int *val2,
-			    long mask)
+				struct iio_chan_spec const *chan,
+				int *val,
+				int *val2,
+				long mask)
 {
 	struct lpc32xx_adc_info *info = iio_priv(indio_dev);
 
 	if (mask == IIO_CHAN_INFO_RAW) {
 		mutex_lock(&indio_dev->mlock);
-		clk_prepare_enable(info->clk);
+		clk_enable(info->clk);
 		/* Measurement setup */
 		__raw_writel(AD_INTERNAL | (chan->address) | AD_REFp | AD_REFm,
-			     LPC32XX_ADC_SELECT(info->adc_base));
+			LPC32XX_ADC_SELECT(info->adc_base));
 		/* Trigger conversion */
 		__raw_writel(AD_PDN_CTRL | AD_STROBE,
-			     LPC32XX_ADC_CTRL(info->adc_base));
+			LPC32XX_ADC_CTRL(info->adc_base));
 		wait_for_completion(&info->completion); /* set by ISR */
-		clk_disable_unprepare(info->clk);
+		clk_disable(info->clk);
 		*val = info->value;
 		mutex_unlock(&indio_dev->mlock);
 
@@ -116,7 +116,7 @@ static const struct iio_chan_spec lpc32xx_adc_iio_channels[] = {
 
 static irqreturn_t lpc32xx_adc_isr(int irq, void *dev_id)
 {
-	struct lpc32xx_adc_info *info = dev_id;
+	struct lpc32xx_adc_info *info = (struct lpc32xx_adc_info *) dev_id;
 
 	/* Read value and clear irq */
 	info->value = __raw_readl(LPC32XX_ADC_VALUE(info->adc_base)) &
@@ -137,39 +137,43 @@ static int lpc32xx_adc_probe(struct platform_device *pdev)
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
 		dev_err(&pdev->dev, "failed to get platform I/O memory\n");
-		return -ENXIO;
+		retval = -EBUSY;
+		goto errout1;
 	}
 
-	iodev = devm_iio_device_alloc(&pdev->dev, sizeof(*info));
-	if (!iodev)
-		return -ENOMEM;
+	iodev = iio_device_alloc(sizeof(struct lpc32xx_adc_info));
+	if (!iodev) {
+		dev_err(&pdev->dev, "failed allocating iio device\n");
+		retval = -ENOMEM;
+		goto errout1;
+	}
 
 	info = iio_priv(iodev);
 
-	info->adc_base = devm_ioremap(&pdev->dev, res->start,
-						resource_size(res));
+	info->adc_base = ioremap(res->start, resource_size(res));
 	if (!info->adc_base) {
 		dev_err(&pdev->dev, "failed mapping memory\n");
-		return -EBUSY;
+		retval = -EBUSY;
+		goto errout2;
 	}
 
-	info->clk = devm_clk_get(&pdev->dev, NULL);
+	info->clk = clk_get(&pdev->dev, NULL);
 	if (IS_ERR(info->clk)) {
 		dev_err(&pdev->dev, "failed getting clock\n");
-		return PTR_ERR(info->clk);
+		goto errout3;
 	}
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq <= 0) {
+	if ((irq < 0) || (irq >= NR_IRQS)) {
 		dev_err(&pdev->dev, "failed getting interrupt resource\n");
-		return -ENXIO;
+		retval = -EINVAL;
+		goto errout4;
 	}
 
-	retval = devm_request_irq(&pdev->dev, irq, lpc32xx_adc_isr, 0,
-				  MOD_NAME, info);
+	retval = request_irq(irq, lpc32xx_adc_isr, 0, MOD_NAME, info);
 	if (retval < 0) {
 		dev_err(&pdev->dev, "failed requesting interrupt\n");
-		return retval;
+		goto errout4;
 	}
 
 	platform_set_drvdata(pdev, iodev);
@@ -183,11 +187,38 @@ static int lpc32xx_adc_probe(struct platform_device *pdev)
 	iodev->channels = lpc32xx_adc_iio_channels;
 	iodev->num_channels = ARRAY_SIZE(lpc32xx_adc_iio_channels);
 
-	retval = devm_iio_device_register(&pdev->dev, iodev);
+	retval = iio_device_register(iodev);
 	if (retval)
-		return retval;
+		goto errout5;
 
 	dev_info(&pdev->dev, "LPC32XX ADC driver loaded, IRQ %d\n", irq);
+
+	return 0;
+
+errout5:
+	free_irq(irq, info);
+errout4:
+	clk_put(info->clk);
+errout3:
+	iounmap(info->adc_base);
+errout2:
+	iio_device_free(iodev);
+errout1:
+	return retval;
+}
+
+static int lpc32xx_adc_remove(struct platform_device *pdev)
+{
+	struct iio_dev *iodev = platform_get_drvdata(pdev);
+	struct lpc32xx_adc_info *info = iio_priv(iodev);
+	int irq = platform_get_irq(pdev, 0);
+
+	iio_device_unregister(iodev);
+	free_irq(irq, info);
+	platform_set_drvdata(pdev, NULL);
+	clk_put(info->clk);
+	iounmap(info->adc_base);
+	iio_device_free(iodev);
 
 	return 0;
 }
@@ -202,8 +233,10 @@ MODULE_DEVICE_TABLE(of, lpc32xx_adc_match);
 
 static struct platform_driver lpc32xx_adc_driver = {
 	.probe		= lpc32xx_adc_probe,
+	.remove		= lpc32xx_adc_remove,
 	.driver		= {
 		.name	= MOD_NAME,
+		.owner	= THIS_MODULE,
 		.of_match_table = of_match_ptr(lpc32xx_adc_match),
 	},
 };

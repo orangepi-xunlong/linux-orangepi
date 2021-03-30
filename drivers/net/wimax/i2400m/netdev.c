@@ -334,7 +334,7 @@ int i2400m_net_tx(struct i2400m *i2400m, struct net_device *net_dev,
 	d_fnstart(3, dev, "(i2400m %p net_dev %p skb %p)\n",
 		  i2400m, net_dev, skb);
 	/* FIXME: check eth hdr, only IPv4 is routed by the device as of now */
-	netif_trans_update(net_dev);
+	net_dev->trans_start = jiffies;
 	i2400m_tx_prep_header(skb);
 	d_printf(3, dev, "NETTX: skb %p sending %d bytes to radio\n",
 		 skb, skb->len);
@@ -374,7 +374,8 @@ netdev_tx_t i2400m_hard_start_xmit(struct sk_buff *skb,
 
 	d_fnstart(3, dev, "(skb %p net_dev %p)\n", skb, net_dev);
 
-	if (skb_cow_head(skb, 0))
+	if (skb_header_cloned(skb) && 
+	    pskb_expand_head(skb, 0, 0, GFP_ATOMIC))
 		goto drop;
 
 	if (i2400m->state == I2400M_SS_IDLE)

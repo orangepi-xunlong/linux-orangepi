@@ -14,9 +14,7 @@
 #include <mach/hardware.h>
 #include <mach/global_reg.h>
 
-#include "common.h"
-
-void gemini_restart(enum reboot_mode mode, const char *cmd)
+void gemini_restart(char mode, const char *cmd)
 {
 	__raw_writel(RESET_GLOBAL | RESET_CPU1,
 		     IO_ADDRESS(GEMINI_GLOBAL_BASE) + GLOBAL_RESET);

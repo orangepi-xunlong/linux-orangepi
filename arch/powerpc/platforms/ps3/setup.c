@@ -80,7 +80,7 @@ static void ps3_power_save(void)
 	lv1_pause(0);
 }
 
-static void __noreturn ps3_restart(char *cmd)
+static void ps3_restart(char *cmd)
 {
 	DBG("%s:%d cmd '%s'\n", __func__, __LINE__, cmd);
 
@@ -96,7 +96,7 @@ static void ps3_power_off(void)
 	ps3_sys_manager_power_off(); /* never returns */
 }
 
-static void __noreturn ps3_halt(void)
+static void ps3_halt(void)
 {
 	DBG("%s:%d\n", __func__, __LINE__);
 
@@ -125,7 +125,12 @@ static void __init prealloc(struct ps3_prealloc *p)
 	if (!p->size)
 		return;
 
-	p->address = memblock_virt_alloc(p->size, p->align);
+	p->address = __alloc_bootmem(p->size, p->align, __pa(MAX_DMA_ADDRESS));
+	if (!p->address) {
+		printk(KERN_ERR "%s: Cannot allocate %s\n", __func__,
+		       p->name);
+		return;
+	}
 
 	printk(KERN_INFO "%s: %lu bytes at %p\n", p->name, p->size,
 	       p->address);
@@ -226,25 +231,23 @@ static void __init ps3_progress(char *s, unsigned short hex)
 	printk("*** %04x : %s\n", hex, s ? s : "");
 }
 
-void __init ps3_early_mm_init(void)
+static int __init ps3_probe(void)
 {
 	unsigned long htab_size;
+	unsigned long dt_root;
 
+	DBG(" -> %s:%d\n", __func__, __LINE__);
+
+	dt_root = of_get_flat_dt_root();
+	if (!of_flat_dt_is_compatible(dt_root, "sony,ps3"))
+		return 0;
+
+	powerpc_firmware_features |= FW_FEATURE_PS3_POSSIBLE;
+
+	ps3_os_area_save_params();
 	ps3_mm_init();
 	ps3_mm_vas_create(&htab_size);
 	ps3_hpte_init(htab_size);
-}
-
-static int __init ps3_probe(void)
-{
-	DBG(" -> %s:%d\n", __func__, __LINE__);
-
-	if (!of_machine_is_compatible("sony,ps3"))
-		return 0;
-
-	ps3_os_area_save_params();
-
-	pm_power_off = ps3_power_off;
 
 	DBG(" <- %s:%d\n", __func__, __LINE__);
 	return 1;
@@ -275,6 +278,7 @@ define_machine(ps3) {
 	.calibrate_decr			= ps3_calibrate_decr,
 	.progress			= ps3_progress,
 	.restart			= ps3_restart,
+	.power_off			= ps3_power_off,
 	.halt				= ps3_halt,
 #if defined(CONFIG_KEXEC)
 	.kexec_cpu_down			= ps3_kexec_cpu_down,

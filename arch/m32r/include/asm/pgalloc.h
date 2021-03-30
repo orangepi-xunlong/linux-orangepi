@@ -43,12 +43,7 @@ static __inline__ pgtable_t pte_alloc_one(struct mm_struct *mm,
 {
 	struct page *pte = alloc_page(GFP_KERNEL|__GFP_ZERO);
 
-	if (!pte)
-		return NULL;
-	if (!pgtable_page_ctor(pte)) {
-		__free_page(pte);
-		return NULL;
-	}
+	pgtable_page_ctor(pte);
 	return pte;
 }
 

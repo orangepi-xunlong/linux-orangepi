@@ -74,7 +74,7 @@ void ip_vs_unbind_scheduler(struct ip_vs_service *svc,
 
 	if (sched->done_service)
 		sched->done_service(svc);
-	/* svc->scheduler can be set to NULL only by caller */
+	/* svc->scheduler can not be set to NULL */
 }
 
 
@@ -104,7 +104,8 @@ static struct ip_vs_scheduler *ip_vs_sched_getbyname(const char *sched_name)
 			mutex_unlock(&ip_vs_sched_mutex);
 			return sched;
 		}
-		module_put(sched->module);
+		if (sched->module)
+			module_put(sched->module);
 	}
 
 	mutex_unlock(&ip_vs_sched_mutex);
@@ -137,7 +138,7 @@ struct ip_vs_scheduler *ip_vs_scheduler_get(const char *sched_name)
 
 void ip_vs_scheduler_put(struct ip_vs_scheduler *scheduler)
 {
-	if (scheduler)
+	if (scheduler && scheduler->module)
 		module_put(scheduler->module);
 }
 
@@ -147,21 +148,21 @@ void ip_vs_scheduler_put(struct ip_vs_scheduler *scheduler)
 
 void ip_vs_scheduler_err(struct ip_vs_service *svc, const char *msg)
 {
-	struct ip_vs_scheduler *sched = rcu_dereference(svc->scheduler);
-	char *sched_name = sched ? sched->name : "none";
+	struct ip_vs_scheduler *sched;
 
+	sched = rcu_dereference(svc->scheduler);
 	if (svc->fwmark) {
 		IP_VS_ERR_RL("%s: FWM %u 0x%08X - %s\n",
-			     sched_name, svc->fwmark, svc->fwmark, msg);
+			     sched->name, svc->fwmark, svc->fwmark, msg);
 #ifdef CONFIG_IP_VS_IPV6
 	} else if (svc->af == AF_INET6) {
 		IP_VS_ERR_RL("%s: %s [%pI6c]:%d - %s\n",
-			     sched_name, ip_vs_proto_name(svc->protocol),
+			     sched->name, ip_vs_proto_name(svc->protocol),
 			     &svc->addr.in6, ntohs(svc->port), msg);
 #endif
 	} else {
 		IP_VS_ERR_RL("%s: %s %pI4:%d - %s\n",
-			     sched_name, ip_vs_proto_name(svc->protocol),
+			     sched->name, ip_vs_proto_name(svc->protocol),
 			     &svc->addr.ip, ntohs(svc->port), msg);
 	}
 }

@@ -6,21 +6,11 @@ sys64_execve:
 	jmpl	%g1, %g0
 	 flushw
 
-sys64_execveat:
-	set	sys_execveat, %g1
-	jmpl	%g1, %g0
-	 flushw
-
 #ifdef CONFIG_COMPAT
 sunos_execv:
 	mov	%g0, %o2
 sys32_execve:
 	set	compat_sys_execve, %g1
-	jmpl	%g1, %g0
-	 flushw
-
-sys32_execveat:
-	set	compat_sys_execveat, %g1
 	jmpl	%g1, %g0
 	 flushw
 #endif
@@ -62,7 +52,7 @@ sys32_rt_sigreturn:
 #endif
 	.align	32
 1:	ldx	[%g6 + TI_FLAGS], %l5
-	andcc	%l5, (_TIF_SYSCALL_TRACE|_TIF_SECCOMP|_TIF_SYSCALL_AUDIT|_TIF_SYSCALL_TRACEPOINT|_TIF_NOHZ), %g0
+	andcc	%l5, (_TIF_SYSCALL_TRACE|_TIF_SECCOMP|_TIF_SYSCALL_AUDIT|_TIF_SYSCALL_TRACEPOINT), %g0
 	be,pt	%icc, rtrap
 	 nop
 	call	syscall_trace_leave
@@ -108,8 +98,8 @@ sys_clone:
 	ba,pt	%xcc, sparc_do_fork
 	 add	%sp, PTREGS_OFF, %o2
 
-	.globl	ret_from_fork
-ret_from_fork:
+	.globl	ret_from_syscall
+ret_from_syscall:
 	/* Clear current_thread_info()->new_child. */
 	stb	%g0, [%g6 + TI_NEW_CHILD]
 	call	schedule_tail
@@ -158,25 +148,7 @@ linux_syscall_trace32:
 	 add	%sp, PTREGS_OFF, %o0
 	brnz,pn	%o0, 3f
 	 mov	-ENOSYS, %o0
-
-	/* Syscall tracing can modify the registers.  */
-	ldx	[%sp + PTREGS_OFF + PT_V9_G1], %g1
-	sethi	%hi(sys_call_table32), %l7
-	ldx	[%sp + PTREGS_OFF + PT_V9_I0], %i0
-	or	%l7, %lo(sys_call_table32), %l7
-	ldx	[%sp + PTREGS_OFF + PT_V9_I1], %i1
-	ldx	[%sp + PTREGS_OFF + PT_V9_I2], %i2
-	ldx	[%sp + PTREGS_OFF + PT_V9_I3], %i3
-	ldx	[%sp + PTREGS_OFF + PT_V9_I4], %i4
-	ldx	[%sp + PTREGS_OFF + PT_V9_I5], %i5
-
-	cmp	%g1, NR_syscalls
-	bgeu,pn	%xcc, 3f
-	 mov	-ENOSYS, %o0
-
-	sll	%g1, 2, %l4
 	srl	%i0, 0, %o0
-	lduw	[%l7 + %l4], %l7
 	srl	%i4, 0, %o4
 	srl	%i1, 0, %o1
 	srl	%i2, 0, %o2
@@ -188,25 +160,7 @@ linux_syscall_trace:
 	 add	%sp, PTREGS_OFF, %o0
 	brnz,pn	%o0, 3f
 	 mov	-ENOSYS, %o0
-
-	/* Syscall tracing can modify the registers.  */
-	ldx	[%sp + PTREGS_OFF + PT_V9_G1], %g1
-	sethi	%hi(sys_call_table64), %l7
-	ldx	[%sp + PTREGS_OFF + PT_V9_I0], %i0
-	or	%l7, %lo(sys_call_table64), %l7
-	ldx	[%sp + PTREGS_OFF + PT_V9_I1], %i1
-	ldx	[%sp + PTREGS_OFF + PT_V9_I2], %i2
-	ldx	[%sp + PTREGS_OFF + PT_V9_I3], %i3
-	ldx	[%sp + PTREGS_OFF + PT_V9_I4], %i4
-	ldx	[%sp + PTREGS_OFF + PT_V9_I5], %i5
-
-	cmp	%g1, NR_syscalls
-	bgeu,pn	%xcc, 3f
-	 mov	-ENOSYS, %o0
-
-	sll	%g1, 2, %l4
 	mov	%i0, %o0
-	lduw	[%l7 + %l4], %l7
 	mov	%i1, %o1
 	mov	%i2, %o2
 	mov	%i3, %o3
@@ -230,7 +184,7 @@ linux_sparc_syscall32:
 
 	srl	%i3, 0, %o3				! IEU0
 	srl	%i2, 0, %o2				! IEU0	Group
-	andcc	%l0, (_TIF_SYSCALL_TRACE|_TIF_SECCOMP|_TIF_SYSCALL_AUDIT|_TIF_SYSCALL_TRACEPOINT|_TIF_NOHZ), %g0
+	andcc	%l0, (_TIF_SYSCALL_TRACE|_TIF_SECCOMP|_TIF_SYSCALL_AUDIT|_TIF_SYSCALL_TRACEPOINT), %g0
 	bne,pn	%icc, linux_syscall_trace32		! CTI
 	 mov	%i0, %l5				! IEU1
 5:	call	%l7					! CTI	Group brk forced
@@ -254,7 +208,7 @@ linux_sparc_syscall:
 
 	mov	%i3, %o3				! IEU1
 	mov	%i4, %o4				! IEU0	Group
-	andcc	%l0, (_TIF_SYSCALL_TRACE|_TIF_SECCOMP|_TIF_SYSCALL_AUDIT|_TIF_SYSCALL_TRACEPOINT|_TIF_NOHZ), %g0
+	andcc	%l0, (_TIF_SYSCALL_TRACE|_TIF_SECCOMP|_TIF_SYSCALL_AUDIT|_TIF_SYSCALL_TRACEPOINT), %g0
 	bne,pn	%icc, linux_syscall_trace		! CTI	Group
 	 mov	%i0, %l5				! IEU0
 2:	call	%l7					! CTI	Group brk forced
@@ -269,7 +223,7 @@ ret_sys_call:
 
 	cmp	%o0, -ERESTART_RESTARTBLOCK
 	bgeu,pn	%xcc, 1f
-	 andcc	%l0, (_TIF_SYSCALL_TRACE|_TIF_SECCOMP|_TIF_SYSCALL_AUDIT|_TIF_SYSCALL_TRACEPOINT|_TIF_NOHZ), %g0
+	 andcc	%l0, (_TIF_SYSCALL_TRACE|_TIF_SECCOMP|_TIF_SYSCALL_AUDIT|_TIF_SYSCALL_TRACEPOINT), %g0
 	ldx	[%sp + PTREGS_OFF + PT_V9_TNPC], %l1 ! pc = npc
 
 2:

@@ -17,9 +17,9 @@
 #include <linux/jiffies.h>
 #include <linux/clockchips.h>
 #include <linux/types.h>
-#include <linux/clk.h>
 
 #include <linux/io.h>
+#include <asm/mach/time.h>
 
 #include <linux/of.h>
 #include <linux/of_address.h>
@@ -66,10 +66,11 @@ static void kona_timer_disable_and_clear(void __iomem *base)
 
 }
 
-static int
-kona_timer_get_counter(void __iomem *timer_base, uint32_t *msw, uint32_t *lsw)
+static void
+kona_timer_get_counter(void *timer_base, uint32_t *msw, uint32_t *lsw)
 {
-	int loop_limit = 3;
+	void __iomem *base = IOMEM(timer_base);
+	int loop_limit = 4;
 
 	/*
 	 * Read 64-bit free running counter
@@ -83,19 +84,47 @@ kona_timer_get_counter(void __iomem *timer_base, uint32_t *msw, uint32_t *lsw)
 	 *      if new hi-word is equal to previously read hi-word then stop.
 	 */
 
-	do {
-		*msw = readl(timer_base + KONA_GPTIMER_STCHI_OFFSET);
-		*lsw = readl(timer_base + KONA_GPTIMER_STCLO_OFFSET);
-		if (*msw == readl(timer_base + KONA_GPTIMER_STCHI_OFFSET))
+	while (--loop_limit) {
+		*msw = readl(base + KONA_GPTIMER_STCHI_OFFSET);
+		*lsw = readl(base + KONA_GPTIMER_STCLO_OFFSET);
+		if (*msw == readl(base + KONA_GPTIMER_STCHI_OFFSET))
 			break;
-	} while (--loop_limit);
+	}
 	if (!loop_limit) {
 		pr_err("bcm_kona_timer: getting counter failed.\n");
 		pr_err(" Timer will be impacted\n");
-		return -ETIMEDOUT;
 	}
 
-	return 0;
+	return;
+}
+
+static const struct of_device_id bcm_timer_ids[] __initconst = {
+	{.compatible = "bcm,kona-timer"},
+	{},
+};
+
+static void __init kona_timers_init(void)
+{
+	struct device_node *node;
+	u32 freq;
+
+	node = of_find_matching_node(NULL, bcm_timer_ids);
+
+	if (!node)
+		panic("No timer");
+
+	if (!of_property_read_u32(node, "clock-frequency", &freq))
+		arch_timer_rate = freq;
+	else
+		panic("clock-frequency not set in the .dts file");
+
+	/* Setup IRQ numbers */
+	timers.tmr_irq = irq_of_parse_and_map(node, 0);
+
+	/* Setup IO addresses */
+	timers.tmr_regs = of_iomap(node, 0);
+
+	kona_timer_disable_and_clear(timers.tmr_regs);
 }
 
 static int kona_timer_set_next_event(unsigned long clc,
@@ -113,11 +142,8 @@ static int kona_timer_set_next_event(unsigned long clc,
 
 	uint32_t lsw, msw;
 	uint32_t reg;
-	int ret;
 
-	ret = kona_timer_get_counter(timers.tmr_regs, &msw, &lsw);
-	if (ret)
-		return ret;
+	kona_timer_get_counter(timers.tmr_regs, &msw, &lsw);
 
 	/* Load the "next" event tick value */
 	writel(lsw + clc, timers.tmr_regs + KONA_GPTIMER_STCM0_OFFSET);
@@ -130,18 +156,25 @@ static int kona_timer_set_next_event(unsigned long clc,
 	return 0;
 }
 
-static int kona_timer_shutdown(struct clock_event_device *evt)
+static void kona_timer_set_mode(enum clock_event_mode mode,
+			     struct clock_event_device *unused)
 {
-	kona_timer_disable_and_clear(timers.tmr_regs);
-	return 0;
+	switch (mode) {
+	case CLOCK_EVT_MODE_ONESHOT:
+		/* by default mode is one shot don't do any thing */
+		break;
+	case CLOCK_EVT_MODE_UNUSED:
+	case CLOCK_EVT_MODE_SHUTDOWN:
+	default:
+		kona_timer_disable_and_clear(timers.tmr_regs);
+	}
 }
 
 static struct clock_event_device kona_clockevent_timer = {
 	.name = "timer 1",
 	.features = CLOCK_EVT_FEAT_ONESHOT,
 	.set_next_event = kona_timer_set_next_event,
-	.set_state_shutdown = kona_timer_shutdown,
-	.tick_resume = kona_timer_shutdown,
+	.set_mode = kona_timer_set_mode
 };
 
 static void __init kona_timer_clockevents_init(void)
@@ -166,41 +199,13 @@ static struct irqaction kona_timer_irq = {
 	.handler = kona_timer_interrupt,
 };
 
-static int __init kona_timer_init(struct device_node *node)
+static void __init kona_timer_init(void)
 {
-	u32 freq;
-	struct clk *external_clk;
-
-	external_clk = of_clk_get_by_name(node, NULL);
-
-	if (!IS_ERR(external_clk)) {
-		arch_timer_rate = clk_get_rate(external_clk);
-		clk_prepare_enable(external_clk);
-	} else if (!of_property_read_u32(node, "clock-frequency", &freq)) {
-		arch_timer_rate = freq;
-	} else {
-		pr_err("Kona Timer v1 unable to determine clock-frequency");
-		return -EINVAL;
-	}
-
-	/* Setup IRQ numbers */
-	timers.tmr_irq = irq_of_parse_and_map(node, 0);
-
-	/* Setup IO addresses */
-	timers.tmr_regs = of_iomap(node, 0);
-
-	kona_timer_disable_and_clear(timers.tmr_regs);
-
+	kona_timers_init();
 	kona_timer_clockevents_init();
 	setup_irq(timers.tmr_irq, &kona_timer_irq);
 	kona_timer_set_next_event((arch_timer_rate / HZ), NULL);
-
-	return 0;
 }
 
-CLOCKSOURCE_OF_DECLARE(brcm_kona, "brcm,kona-timer", kona_timer_init);
-/*
- * bcm,kona-timer is deprecated by brcm,kona-timer
- * being kept here for driver compatibility
- */
-CLOCKSOURCE_OF_DECLARE(bcm_kona, "bcm,kona-timer", kona_timer_init);
+CLOCKSOURCE_OF_DECLARE(bcm_kona, "bcm,kona-timer",
+	kona_timer_init);

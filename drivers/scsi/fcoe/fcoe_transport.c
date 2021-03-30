@@ -32,13 +32,13 @@ MODULE_AUTHOR("Open-FCoE.org");
 MODULE_DESCRIPTION("FIP discovery protocol and FCoE transport for FCoE HBAs");
 MODULE_LICENSE("GPL v2");
 
-static int fcoe_transport_create(const char *, const struct kernel_param *);
-static int fcoe_transport_destroy(const char *, const struct kernel_param *);
+static int fcoe_transport_create(const char *, struct kernel_param *);
+static int fcoe_transport_destroy(const char *, struct kernel_param *);
 static int fcoe_transport_show(char *buffer, const struct kernel_param *kp);
 static struct fcoe_transport *fcoe_transport_lookup(struct net_device *device);
 static struct fcoe_transport *fcoe_netdev_map_lookup(struct net_device *device);
-static int fcoe_transport_enable(const char *, const struct kernel_param *);
-static int fcoe_transport_disable(const char *, const struct kernel_param *);
+static int fcoe_transport_enable(const char *, struct kernel_param *);
+static int fcoe_transport_disable(const char *, struct kernel_param *);
 static int libfcoe_device_notification(struct notifier_block *notifier,
 				    ulong event, void *ptr);
 
@@ -58,7 +58,7 @@ MODULE_PARM_DESC(show, " Show attached FCoE transports");
 module_param_call(create, fcoe_transport_create, NULL,
 		  (void *)FIP_MODE_FABRIC, S_IWUSR);
 __MODULE_PARM_TYPE(create, "string");
-MODULE_PARM_DESC(create, " Creates fcoe instance on an ethernet interface");
+MODULE_PARM_DESC(create, " Creates fcoe instance on a ethernet interface");
 
 module_param_call(create_vn2vn, fcoe_transport_create, NULL,
 		  (void *)FIP_MODE_VN2VN, S_IWUSR);
@@ -68,55 +68,20 @@ MODULE_PARM_DESC(create_vn2vn, " Creates a VN_node to VN_node FCoE instance "
 
 module_param_call(destroy, fcoe_transport_destroy, NULL, NULL, S_IWUSR);
 __MODULE_PARM_TYPE(destroy, "string");
-MODULE_PARM_DESC(destroy, " Destroys fcoe instance on an ethernet interface");
+MODULE_PARM_DESC(destroy, " Destroys fcoe instance on a ethernet interface");
 
 module_param_call(enable, fcoe_transport_enable, NULL, NULL, S_IWUSR);
 __MODULE_PARM_TYPE(enable, "string");
-MODULE_PARM_DESC(enable, " Enables fcoe on an ethernet interface.");
+MODULE_PARM_DESC(enable, " Enables fcoe on a ethernet interface.");
 
 module_param_call(disable, fcoe_transport_disable, NULL, NULL, S_IWUSR);
 __MODULE_PARM_TYPE(disable, "string");
-MODULE_PARM_DESC(disable, " Disables fcoe on an ethernet interface.");
+MODULE_PARM_DESC(disable, " Disables fcoe on a ethernet interface.");
 
 /* notification function for packets from net device */
 static struct notifier_block libfcoe_notifier = {
 	.notifier_call = libfcoe_device_notification,
 };
-
-static const struct {
-	u32 fc_port_speed;
-#define SPEED_2000	2000
-#define SPEED_4000	4000
-#define SPEED_8000	8000
-#define SPEED_16000	16000
-#define SPEED_32000	32000
-	u32 eth_port_speed;
-} fcoe_port_speed_mapping[] = {
-	{ FC_PORTSPEED_1GBIT,   SPEED_1000   },
-	{ FC_PORTSPEED_2GBIT,   SPEED_2000   },
-	{ FC_PORTSPEED_4GBIT,   SPEED_4000   },
-	{ FC_PORTSPEED_8GBIT,   SPEED_8000   },
-	{ FC_PORTSPEED_10GBIT,  SPEED_10000  },
-	{ FC_PORTSPEED_16GBIT,  SPEED_16000  },
-	{ FC_PORTSPEED_20GBIT,  SPEED_20000  },
-	{ FC_PORTSPEED_25GBIT,  SPEED_25000  },
-	{ FC_PORTSPEED_32GBIT,  SPEED_32000  },
-	{ FC_PORTSPEED_40GBIT,  SPEED_40000  },
-	{ FC_PORTSPEED_50GBIT,  SPEED_50000  },
-	{ FC_PORTSPEED_100GBIT, SPEED_100000 },
-};
-
-static inline u32 eth2fc_speed(u32 eth_port_speed)
-{
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(fcoe_port_speed_mapping); i++) {
-		if (fcoe_port_speed_mapping[i].eth_port_speed == eth_port_speed)
-			return fcoe_port_speed_mapping[i].fc_port_speed;
-	}
-
-	return FC_PORTSPEED_UNKNOWN;
-}
 
 /**
  * fcoe_link_speed_update() - Update the supported and actual link speeds
@@ -128,40 +93,25 @@ static inline u32 eth2fc_speed(u32 eth_port_speed)
 int fcoe_link_speed_update(struct fc_lport *lport)
 {
 	struct net_device *netdev = fcoe_get_netdev(lport);
-	struct ethtool_link_ksettings ecmd;
+	struct ethtool_cmd ecmd;
 
-	if (!__ethtool_get_link_ksettings(netdev, &ecmd)) {
-		lport->link_supported_speeds &= ~(FC_PORTSPEED_1GBIT  |
-		                                  FC_PORTSPEED_10GBIT |
-		                                  FC_PORTSPEED_20GBIT |
-		                                  FC_PORTSPEED_40GBIT);
-
-		if (ecmd.link_modes.supported[0] & (
-			    SUPPORTED_1000baseT_Half |
-			    SUPPORTED_1000baseT_Full |
-			    SUPPORTED_1000baseKX_Full))
+	if (!__ethtool_get_settings(netdev, &ecmd)) {
+		lport->link_supported_speeds &=
+			~(FC_PORTSPEED_1GBIT | FC_PORTSPEED_10GBIT);
+		if (ecmd.supported & (SUPPORTED_1000baseT_Half |
+				      SUPPORTED_1000baseT_Full))
 			lport->link_supported_speeds |= FC_PORTSPEED_1GBIT;
-
-		if (ecmd.link_modes.supported[0] & (
-			    SUPPORTED_10000baseT_Full   |
-			    SUPPORTED_10000baseKX4_Full |
-			    SUPPORTED_10000baseKR_Full  |
-			    SUPPORTED_10000baseR_FEC))
-			lport->link_supported_speeds |= FC_PORTSPEED_10GBIT;
-
-		if (ecmd.link_modes.supported[0] & (
-			    SUPPORTED_20000baseMLD2_Full |
-			    SUPPORTED_20000baseKR2_Full))
-			lport->link_supported_speeds |= FC_PORTSPEED_20GBIT;
-
-		if (ecmd.link_modes.supported[0] & (
-			    SUPPORTED_40000baseKR4_Full |
-			    SUPPORTED_40000baseCR4_Full |
-			    SUPPORTED_40000baseSR4_Full |
-			    SUPPORTED_40000baseLR4_Full))
-			lport->link_supported_speeds |= FC_PORTSPEED_40GBIT;
-
-		lport->link_speed = eth2fc_speed(ecmd.base.speed);
+		if (ecmd.supported & SUPPORTED_10000baseT_Full)
+			lport->link_supported_speeds |=
+				FC_PORTSPEED_10GBIT;
+		switch (ethtool_cmd_speed(&ecmd)) {
+		case SPEED_1000:
+			lport->link_speed = FC_PORTSPEED_1GBIT;
+			break;
+		case SPEED_10000:
+			lport->link_speed = FC_PORTSPEED_10GBIT;
+			break;
+		}
 		return 0;
 	}
 	return -1;
@@ -230,10 +180,24 @@ void fcoe_ctlr_get_lesb(struct fcoe_ctlr_device *ctlr_dev)
 {
 	struct fcoe_ctlr *fip = fcoe_ctlr_device_priv(ctlr_dev);
 	struct net_device *netdev = fcoe_get_netdev(fip->lp);
-	struct fc_els_lesb *fc_lesb;
+	struct fcoe_fc_els_lesb *fcoe_lesb;
+	struct fc_els_lesb fc_lesb;
 
-	fc_lesb = (struct fc_els_lesb *)(&ctlr_dev->lesb);
-	__fcoe_get_lesb(fip->lp, fc_lesb, netdev);
+	__fcoe_get_lesb(fip->lp, &fc_lesb, netdev);
+	fcoe_lesb = (struct fcoe_fc_els_lesb *)(&fc_lesb);
+
+	ctlr_dev->lesb.lesb_link_fail =
+		ntohl(fcoe_lesb->lesb_link_fail);
+	ctlr_dev->lesb.lesb_vlink_fail =
+		ntohl(fcoe_lesb->lesb_vlink_fail);
+	ctlr_dev->lesb.lesb_miss_fka =
+		ntohl(fcoe_lesb->lesb_miss_fka);
+	ctlr_dev->lesb.lesb_symb_err =
+		ntohl(fcoe_lesb->lesb_symb_err);
+	ctlr_dev->lesb.lesb_err_block =
+		ntohl(fcoe_lesb->lesb_err_block);
+	ctlr_dev->lesb.lesb_fcs_error =
+		ntohl(fcoe_lesb->lesb_fcs_error);
 }
 EXPORT_SYMBOL_GPL(fcoe_ctlr_get_lesb);
 
@@ -740,7 +704,7 @@ static struct net_device *fcoe_if_to_netdev(const char *buffer)
 static int libfcoe_device_notification(struct notifier_block *notifier,
 				    ulong event, void *ptr)
 {
-	struct net_device *netdev = netdev_notifier_info_to_dev(ptr);
+	struct net_device *netdev = ptr;
 
 	switch (event) {
 	case NETDEV_UNREGISTER:
@@ -757,6 +721,7 @@ ssize_t fcoe_ctlr_create_store(struct bus_type *bus,
 {
 	struct net_device *netdev = NULL;
 	struct fcoe_transport *ft = NULL;
+	struct fcoe_ctlr_device *ctlr_dev = NULL;
 	int rc = 0;
 	int err;
 
@@ -803,8 +768,9 @@ ssize_t fcoe_ctlr_create_store(struct bus_type *bus,
 		goto out_putdev;
 	}
 
-	LIBFCOE_TRANSPORT_DBG("transport %s succeeded to create fcoe on %s.\n",
-			      ft->name, netdev->name);
+	LIBFCOE_TRANSPORT_DBG("transport %s %s to create fcoe on %s.\n",
+			      ft->name, (ctlr_dev) ? "succeeded" : "failed",
+			      netdev->name);
 
 out_putdev:
 	dev_put(netdev);
@@ -865,8 +831,7 @@ EXPORT_SYMBOL(fcoe_ctlr_destroy_store);
  *
  * Returns: 0 for success
  */
-static int fcoe_transport_create(const char *buffer,
-				 const struct kernel_param *kp)
+static int fcoe_transport_create(const char *buffer, struct kernel_param *kp)
 {
 	int rc = -ENODEV;
 	struct net_device *netdev = NULL;
@@ -931,8 +896,7 @@ out_nodev:
  *
  * Returns: 0 for success
  */
-static int fcoe_transport_destroy(const char *buffer,
-				  const struct kernel_param *kp)
+static int fcoe_transport_destroy(const char *buffer, struct kernel_param *kp)
 {
 	int rc = -ENODEV;
 	struct net_device *netdev = NULL;
@@ -976,8 +940,7 @@ out_nodev:
  *
  * Returns: 0 for success
  */
-static int fcoe_transport_disable(const char *buffer,
-				  const struct kernel_param *kp)
+static int fcoe_transport_disable(const char *buffer, struct kernel_param *kp)
 {
 	int rc = -ENODEV;
 	struct net_device *netdev = NULL;
@@ -1011,8 +974,7 @@ out_nodev:
  *
  * Returns: 0 for success
  */
-static int fcoe_transport_enable(const char *buffer,
-				 const struct kernel_param *kp)
+static int fcoe_transport_enable(const char *buffer, struct kernel_param *kp)
 {
 	int rc = -ENODEV;
 	struct net_device *netdev = NULL;

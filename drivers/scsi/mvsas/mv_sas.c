@@ -74,7 +74,7 @@ void mvs_tag_init(struct mvs_info *mvi)
 		mvs_tag_clear(mvi, i);
 }
 
-static struct mvs_info *mvs_find_dev_mvi(struct domain_device *dev)
+struct mvs_info *mvs_find_dev_mvi(struct domain_device *dev)
 {
 	unsigned long i = 0, j = 0, hi = 0;
 	struct sas_ha_struct *sha = dev->port->ha;
@@ -102,7 +102,7 @@ static struct mvs_info *mvs_find_dev_mvi(struct domain_device *dev)
 
 }
 
-static int mvs_find_dev_phyno(struct domain_device *dev, int *phyno)
+int mvs_find_dev_phyno(struct domain_device *dev, int *phyno)
 {
 	unsigned long i = 0, j = 0, n = 0, num = 0;
 	struct mvs_device *mvi_dev = (struct mvs_device *)dev->lldd_dev;
@@ -429,10 +429,7 @@ static u32 mvs_get_ncq_tag(struct sas_task *task, u32 *tag)
 
 	if (qc) {
 		if (qc->tf.command == ATA_CMD_FPDMA_WRITE ||
-		    qc->tf.command == ATA_CMD_FPDMA_READ ||
-		    qc->tf.command == ATA_CMD_FPDMA_RECV ||
-		    qc->tf.command == ATA_CMD_FPDMA_SEND ||
-		    qc->tf.command == ATA_CMD_NCQ_NON_DATA) {
+			qc->tf.command == ATA_CMD_FPDMA_READ) {
 			*tag = qc->tag;
 			return 1;
 		}
@@ -444,11 +441,14 @@ static u32 mvs_get_ncq_tag(struct sas_task *task, u32 *tag)
 static int mvs_task_prep_ata(struct mvs_info *mvi,
 			     struct mvs_task_exec_info *tei)
 {
+	struct sas_ha_struct *sha = mvi->sas;
 	struct sas_task *task = tei->task;
 	struct domain_device *dev = task->dev;
 	struct mvs_device *mvi_dev = dev->lldd_dev;
 	struct mvs_cmd_hdr *hdr = tei->hdr;
 	struct asd_sas_port *sas_port = dev->port;
+	struct sas_phy *sphy = dev->phy;
+	struct asd_sas_phy *sas_phy = sha->sas_phy[sphy->number];
 	struct mvs_slot_info *slot;
 	void *buf_prd;
 	u32 tag = tei->tag, hdr_tag;
@@ -468,7 +468,7 @@ static int mvs_task_prep_ata(struct mvs_info *mvi,
 	slot->tx = mvi->tx_prod;
 	del_q = TXQ_MODE_I | tag |
 		(TXQ_CMD_STP << TXQ_CMD_SHIFT) |
-		((sas_port->phy_mask & TXQ_PHY_MASK) << TXQ_PHY_SHIFT) |
+		(MVS_PHY_ID << TXQ_PHY_SHIFT) |
 		(mvi_dev->taskfileset << TXQ_SRS_SHIFT);
 	mvi->tx[mvi->tx_prod] = cpu_to_le32(del_q);
 
@@ -479,7 +479,7 @@ static int mvs_task_prep_ata(struct mvs_info *mvi,
 
 	if (task->ata_task.use_ncq)
 		flags |= MCH_FPDMA;
-	if (dev->sata_dev.class == ATA_DEV_ATAPI) {
+	if (dev->sata_dev.command_set == ATAPI_COMMAND_SET) {
 		if (task->ata_task.fis.command != ATA_CMD_ID_ATAPI)
 			flags |= MCH_ATAPI;
 	}
@@ -546,7 +546,7 @@ static int mvs_task_prep_ata(struct mvs_info *mvi,
 		task->ata_task.fis.flags |= 0x80; /* C=1: update ATA cmd reg */
 	/* fill in command FIS and ATAPI CDB */
 	memcpy(buf_cmd, &task->ata_task.fis, sizeof(struct host_to_dev_fis));
-	if (dev->sata_dev.class == ATA_DEV_ATAPI)
+	if (dev->sata_dev.command_set == ATAPI_COMMAND_SET)
 		memcpy(buf_cmd + STP_ATAPI_CMD,
 			task->ata_task.atapi_packet, 16);
 
@@ -686,8 +686,7 @@ static int mvs_task_prep_ssp(struct mvs_info *mvi,
 	if (ssp_hdr->frame_type != SSP_TASK) {
 		buf_cmd[9] = fburst | task->ssp_task.task_attr |
 				(task->ssp_task.task_prio << 3);
-		memcpy(buf_cmd + 12, task->ssp_task.cmd->cmnd,
-		       task->ssp_task.cmd->cmd_len);
+		memcpy(buf_cmd + 12, &task->ssp_task.cdb, 16);
 	} else{
 		buf_cmd[10] = tmf->tmf;
 		switch (tmf->tmf) {
@@ -740,8 +739,8 @@ static int mvs_task_prep(struct sas_task *task, struct mvs_info *mvi, int is_tmf
 			mv_dprintk("device %016llx not ready.\n",
 				SAS_ADDR(dev->sas_addr));
 
-		rc = SAS_PHY_DOWN;
-		return rc;
+			rc = SAS_PHY_DOWN;
+			return rc;
 	}
 	tei.port = dev->port->lldd_port;
 	if (tei.port && !tei.port->port_attached && !tmf) {
@@ -791,10 +790,8 @@ static int mvs_task_prep(struct sas_task *task, struct mvs_info *mvi, int is_tmf
 	slot->slot_tag = tag;
 
 	slot->buf = pci_pool_alloc(mvi->dma_pool, GFP_ATOMIC, &slot->buf_dma);
-	if (!slot->buf) {
-		rc = -ENOMEM;
+	if (!slot->buf)
 		goto err_out_tag;
-	}
 	memset(slot->buf, 0, MVS_SLOT_BUF_SZ);
 
 	tei.task = task;
@@ -854,7 +851,43 @@ prep_out:
 	return rc;
 }
 
-static int mvs_task_exec(struct sas_task *task, gfp_t gfp_flags,
+static struct mvs_task_list *mvs_task_alloc_list(int *num, gfp_t gfp_flags)
+{
+	struct mvs_task_list *first = NULL;
+
+	for (; *num > 0; --*num) {
+		struct mvs_task_list *mvs_list = kmem_cache_zalloc(mvs_task_list_cache, gfp_flags);
+
+		if (!mvs_list)
+			break;
+
+		INIT_LIST_HEAD(&mvs_list->list);
+		if (!first)
+			first = mvs_list;
+		else
+			list_add_tail(&mvs_list->list, &first->list);
+
+	}
+
+	return first;
+}
+
+static inline void mvs_task_free_list(struct mvs_task_list *mvs_list)
+{
+	LIST_HEAD(list);
+	struct list_head *pos, *a;
+	struct mvs_task_list *mlist = NULL;
+
+	__list_add(&list, mvs_list->list.prev, &mvs_list->list);
+
+	list_for_each_safe(pos, a, &list) {
+		list_del_init(pos);
+		mlist = list_entry(pos, struct mvs_task_list, list);
+		kmem_cache_free(mvs_task_list_cache, mlist);
+	}
+}
+
+static int mvs_task_exec(struct sas_task *task, const int num, gfp_t gfp_flags,
 				struct completion *completion, int is_tmf,
 				struct mvs_tmf_task *tmf)
 {
@@ -878,9 +911,74 @@ static int mvs_task_exec(struct sas_task *task, gfp_t gfp_flags,
 	return rc;
 }
 
-int mvs_queue_command(struct sas_task *task, gfp_t gfp_flags)
+static int mvs_collector_task_exec(struct sas_task *task, const int num, gfp_t gfp_flags,
+				struct completion *completion, int is_tmf,
+				struct mvs_tmf_task *tmf)
 {
-	return mvs_task_exec(task, gfp_flags, NULL, 0, NULL);
+	struct domain_device *dev = task->dev;
+	struct mvs_prv_info *mpi = dev->port->ha->lldd_ha;
+	struct mvs_info *mvi = NULL;
+	struct sas_task *t = task;
+	struct mvs_task_list *mvs_list = NULL, *a;
+	LIST_HEAD(q);
+	int pass[2] = {0};
+	u32 rc = 0;
+	u32 n = num;
+	unsigned long flags = 0;
+
+	mvs_list = mvs_task_alloc_list(&n, gfp_flags);
+	if (n) {
+		printk(KERN_ERR "%s: mvs alloc list failed.\n", __func__);
+		rc = -ENOMEM;
+		goto free_list;
+	}
+
+	__list_add(&q, mvs_list->list.prev, &mvs_list->list);
+
+	list_for_each_entry(a, &q, list) {
+		a->task = t;
+		t = list_entry(t->list.next, struct sas_task, list);
+	}
+
+	list_for_each_entry(a, &q , list) {
+
+		t = a->task;
+		mvi = ((struct mvs_device *)t->dev->lldd_dev)->mvi_info;
+
+		spin_lock_irqsave(&mvi->lock, flags);
+		rc = mvs_task_prep(t, mvi, is_tmf, tmf, &pass[mvi->id]);
+		if (rc)
+			dev_printk(KERN_ERR, mvi->dev, "mvsas exec failed[%d]!\n", rc);
+		spin_unlock_irqrestore(&mvi->lock, flags);
+	}
+
+	if (likely(pass[0]))
+			MVS_CHIP_DISP->start_delivery(mpi->mvi[0],
+				(mpi->mvi[0]->tx_prod - 1) & (MVS_CHIP_SLOT_SZ - 1));
+
+	if (likely(pass[1]))
+			MVS_CHIP_DISP->start_delivery(mpi->mvi[1],
+				(mpi->mvi[1]->tx_prod - 1) & (MVS_CHIP_SLOT_SZ - 1));
+
+	list_del_init(&q);
+
+free_list:
+	if (mvs_list)
+		mvs_task_free_list(mvs_list);
+
+	return rc;
+}
+
+int mvs_queue_command(struct sas_task *task, const int num,
+			gfp_t gfp_flags)
+{
+	struct mvs_device *mvi_dev = task->dev->lldd_dev;
+	struct sas_ha_struct *sas = mvi_dev->mvi_info->sas;
+
+	if (sas->lldd_max_execute_num < 2)
+		return mvs_task_exec(task, num, gfp_flags, NULL, 0, NULL);
+	else
+		return mvs_collector_task_exec(task, num, gfp_flags, NULL, 0, NULL);
 }
 
 static void mvs_slot_free(struct mvs_info *mvi, u32 rx_desc)
@@ -892,8 +990,6 @@ static void mvs_slot_free(struct mvs_info *mvi, u32 rx_desc)
 static void mvs_slot_task_free(struct mvs_info *mvi, struct sas_task *task,
 			  struct mvs_slot_info *slot, u32 slot_idx)
 {
-	if (!slot)
-		return;
 	if (!slot->task)
 		return;
 	if (!sas_protocol_ata(task->task_proto))
@@ -1160,7 +1256,7 @@ void mvs_port_deformed(struct asd_sas_phy *sas_phy)
 	mvs_port_notify_deformed(sas_phy, 1);
 }
 
-static struct mvs_device *mvs_alloc_dev(struct mvs_info *mvi)
+struct mvs_device *mvs_alloc_dev(struct mvs_info *mvi)
 {
 	u32 dev;
 	for (dev = 0; dev < MVS_MAX_DEVICES; dev++) {
@@ -1177,7 +1273,7 @@ static struct mvs_device *mvs_alloc_dev(struct mvs_info *mvi)
 	return NULL;
 }
 
-static void mvs_free_dev(struct mvs_device *mvi_dev)
+void mvs_free_dev(struct mvs_device *mvi_dev)
 {
 	u32 id = mvi_dev->device_id;
 	memset(mvi_dev, 0, sizeof(*mvi_dev));
@@ -1187,7 +1283,7 @@ static void mvs_free_dev(struct mvs_device *mvi_dev)
 	mvi_dev->taskfileset = MVS_ID_NOT_MAPPED;
 }
 
-static int mvs_dev_found_notify(struct domain_device *dev, int lock)
+int mvs_dev_found_notify(struct domain_device *dev, int lock)
 {
 	unsigned long flags = 0;
 	int res = 0;
@@ -1243,27 +1339,23 @@ int mvs_dev_found(struct domain_device *dev)
 	return mvs_dev_found_notify(dev, 1);
 }
 
-static void mvs_dev_gone_notify(struct domain_device *dev)
+void mvs_dev_gone_notify(struct domain_device *dev)
 {
 	unsigned long flags = 0;
 	struct mvs_device *mvi_dev = dev->lldd_dev;
-	struct mvs_info *mvi;
-
-	if (!mvi_dev) {
-		mv_dprintk("found dev has gone.\n");
-		return;
-	}
-
-	mvi = mvi_dev->mvi_info;
+	struct mvs_info *mvi = mvi_dev->mvi_info;
 
 	spin_lock_irqsave(&mvi->lock, flags);
 
-	mv_dprintk("found dev[%d:%x] is gone.\n",
-		mvi_dev->device_id, mvi_dev->dev_type);
-	mvs_release_task(mvi, dev);
-	mvs_free_reg_set(mvi, mvi_dev);
-	mvs_free_dev(mvi_dev);
-
+	if (mvi_dev) {
+		mv_dprintk("found dev[%d:%x] is gone.\n",
+			mvi_dev->device_id, mvi_dev->dev_type);
+		mvs_release_task(mvi, dev);
+		mvs_free_reg_set(mvi, mvi_dev);
+		mvs_free_dev(mvi_dev);
+	} else {
+		mv_dprintk("found dev has gone.\n");
+	}
 	dev->lldd_dev = NULL;
 	mvi_dev->sas_device = NULL;
 
@@ -1314,11 +1406,11 @@ static int mvs_exec_internal_tmf_task(struct domain_device *dev,
 		task->slow_task->timer.expires = jiffies + MVS_TASK_TIMEOUT*HZ;
 		add_timer(&task->slow_task->timer);
 
-		res = mvs_task_exec(task, GFP_KERNEL, NULL, 1, tmf);
+		res = mvs_task_exec(task, 1, GFP_KERNEL, NULL, 1, tmf);
 
 		if (res) {
 			del_timer(&task->slow_task->timer);
-			mv_printk("executing internal task failed:%d\n", res);
+			mv_printk("executing internel task failed:%d\n", res);
 			goto ex_err;
 		}
 
@@ -1613,7 +1705,7 @@ static int mvs_sata_done(struct mvs_info *mvi, struct sas_task *task,
 	return stat;
 }
 
-static void mvs_set_sense(u8 *buffer, int len, int d_sense,
+void mvs_set_sense(u8 *buffer, int len, int d_sense,
 		int key, int asc, int ascq)
 {
 	memset(buffer, 0, len);
@@ -1652,7 +1744,7 @@ static void mvs_set_sense(u8 *buffer, int len, int d_sense,
 	return;
 }
 
-static void mvs_fill_ssp_resp_iu(struct ssp_response_iu *iu,
+void mvs_fill_ssp_resp_iu(struct ssp_response_iu *iu,
 				u8 key, u8 asc, u8 asc_q)
 {
 	iu->datapres = 2;
@@ -1764,16 +1856,11 @@ int mvs_slot_complete(struct mvs_info *mvi, u32 rx_desc, u32 flags)
 		goto out;
 	}
 
-	/*
-	 * error info record present; slot->response is 32 bit aligned but may
-	 * not be 64 bit aligned, so check for zero in two 32 bit reads
-	 */
-	if (unlikely((rx_desc & RXQ_ERR)
-		     && (*((u32 *)slot->response)
-			 || *(((u32 *)slot->response) + 1)))) {
+	/* error info record present */
+	if (unlikely((rx_desc & RXQ_ERR) && (*(u64 *) slot->response))) {
 		mv_dprintk("port %d slot %d rx_desc %X has error info"
 			"%016llX.\n", slot->port->sas_port.id, slot_idx,
-			 rx_desc, get_unaligned_le64(slot->response));
+			 rx_desc, (u64)(*(u64 *)slot->response));
 		tstat->stat = mvs_slot_err(mvi, task, slot_idx);
 		tstat->resp = SAS_TASK_COMPLETE;
 		goto out;
@@ -2110,16 +2197,3 @@ int mvs_int_rx(struct mvs_info *mvi, bool self_clear)
 	return 0;
 }
 
-int mvs_gpio_write(struct sas_ha_struct *sha, u8 reg_type, u8 reg_index,
-			u8 reg_count, u8 *write_data)
-{
-	struct mvs_prv_info *mvs_prv = sha->lldd_ha;
-	struct mvs_info *mvi = mvs_prv->mvi[0];
-
-	if (MVS_CHIP_DISP->gpio_write) {
-		return MVS_CHIP_DISP->gpio_write(mvs_prv, reg_type,
-			reg_index, reg_count, write_data);
-	}
-
-	return -ENOSYS;
-}

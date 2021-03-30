@@ -56,9 +56,6 @@ static inline void arch_local_irq_disable(void)
 #define local_fiq_enable()	asm("msr	daifclr, #1" : : : "memory")
 #define local_fiq_disable()	asm("msr	daifset, #1" : : : "memory")
 
-#define local_async_enable()	asm("msr	daifclr, #4" : : : "memory")
-#define local_async_disable()	asm("msr	daifset, #4" : : : "memory")
-
 /*
  * Save the current interrupt enable state.
  */
@@ -109,6 +106,9 @@ static inline int arch_irqs_disabled_flags(unsigned long flags)
 		"msr    daif, %0		// local_dbg_restore\n"	\
 		: : "r" (flags) : "memory");				\
 	} while (0)
+
+#define local_dbg_enable()	asm("msr	daifclr, #8" : : : "memory")
+#define local_dbg_disable()	asm("msr	daifset, #8" : : : "memory")
 
 #endif
 #endif

@@ -4,6 +4,7 @@
  * Copyright (C) 1997 David S. Miller (davem@caip.rutgers.edu)
  */
 
+#include <linux/init.h>
 
 #include <asm/head.h>
 #include <asm/asi.h>
@@ -31,11 +32,13 @@ itlb_load:
 dtlb_load:
 	.asciz	"SUNW,dtlb-load"
 
+	/* XXX __cpuinit this thing XXX */
 #define TRAMP_STACK_SIZE	1024
 	.align	16
 tramp_stack:
 	.skip	TRAMP_STACK_SIZE
 
+	__CPUINIT
 	.align		8
 	.globl		sparc64_cpu_startup, sparc64_cpu_startup_end
 sparc64_cpu_startup:
@@ -109,13 +112,10 @@ startup_continue:
 	brnz,pn		%g1, 1b
 	 nop
 
-	/* Get onto temporary stack which will be in the locked
-	 * kernel image.
-	 */
-	sethi		%hi(tramp_stack), %g1
-	or		%g1, %lo(tramp_stack), %g1
-	add		%g1, TRAMP_STACK_SIZE, %g1
-	sub		%g1, STACKFRAME_SZ + STACK_BIAS + 256, %sp
+	sethi		%hi(p1275buf), %g2
+	or		%g2, %lo(p1275buf), %g2
+	ldx		[%g2 + 0x10], %l2
+	add		%l2, -(192 + 128), %sp
 	flushw
 
 	/* Setup the loop variables:
@@ -397,6 +397,7 @@ after_lock_tlb:
 	sllx		%g5, THREAD_SHIFT, %g5
 	sub		%g5, (STACKFRAME_SZ + STACK_BIAS), %g5
 	add		%g6, %g5, %sp
+	mov		0, %fp
 
 	rdpr		%pstate, %o1
 	or		%o1, PSTATE_IE, %o1

@@ -22,7 +22,7 @@
 #include <linux/device.h>
 #include <linux/gpio.h>
 #include <linux/pinctrl/pinconf.h>
-/*#include <linux/sunxi-gpio.h>*/
+#include <linux/pinctrl/pinconf-sunxi.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/of_irq.h>
 #include <linux/of_address.h>
@@ -31,7 +31,6 @@
 #include <linux/of_platform.h>
 
 #include <linux/io.h>
-#include <linux/clk.h>
 
 #define PWM_DEBUG 0
 #define PWM_NUM_MAX 4
@@ -42,22 +41,14 @@
 #define SETMASK(width, shift)   ((width?((-1U) >> (32-width)):0)  << (shift))
 #define CLRMASK(width, shift)   (~(SETMASK(width, shift)))
 #define GET_BITS(shift, width, reg)     \
-		(((reg) & SETMASK(width, shift)) >> (shift))
+            (((reg) & SETMASK(width, shift)) >> (shift))
 #define SET_BITS(shift, width, reg, val) \
-	    (((reg) & CLRMASK(width, shift)) | (val << (shift)))
+            (((reg) & CLRMASK(width, shift)) | (val << (shift)))
 
 #if PWM_DEBUG
 #define pwm_debug(msg...) pr_info
 #else
 #define pwm_debug(msg...)
-#endif
-
-#if ((defined CONFIG_ARCH_SUN8IW12P1) ||\
-			(defined CONFIG_ARCH_SUN8IW17P1) ||\
-			(defined CONFIG_ARCH_SUN50IW6P1) ||\
-			(defined CONFIG_ARCH_SUN8IW15P1) ||\
-			(defined CONFIG_ARCH_SUN50IW3P1))
-#define CLK_GATE_SUPPORT
 #endif
 
 struct sunxi_pwm_config {
@@ -91,9 +82,6 @@ struct sunxi_pwm_chip {
 	struct pwm_chip chip;
 	void __iomem *base;
 	struct sunxi_pwm_config *config;
-#if defined(CLK_GATE_SUPPORT)
-	struct clk	*pwm_clk;
-#endif
 };
 
 static inline struct sunxi_pwm_chip *to_sunxi_pwm_chip(struct pwm_chip *chip)
@@ -151,192 +139,145 @@ exit:
 	return ret;
 }
 
-static int sunxi_pwm_get_config(struct platform_device *pdev,
-				struct sunxi_pwm_config *config)
+static int sunxi_pwm_get_config(struct platform_device *pdev, struct sunxi_pwm_config *config)
 {
 	struct device_node *np = pdev->dev.of_node;
 	int ret = 0;
 
 	/* read register config */
-	ret = of_property_read_u32(np,
-			"reg_busy_offset", &config->reg_busy_offset);
+	ret = of_property_read_u32(np, "reg_busy_offset", &config->reg_busy_offset);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_busy_offset! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_busy_offset! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-			"reg_busy_shift", &config->reg_busy_shift);
+	ret = of_property_read_u32(np, "reg_busy_shift", &config->reg_busy_shift);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_busy_shift! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_busy_shift! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-			"reg_enable_offset", &config->reg_enable_offset);
+	ret = of_property_read_u32(np, "reg_enable_offset", &config->reg_enable_offset);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_enable_offset! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_enable_offset! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-			"reg_enable_shift", &config->reg_enable_shift);
+	ret = of_property_read_u32(np, "reg_enable_shift", &config->reg_enable_shift);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_enable_shift! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_enable_shift! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-		"reg_clk_gating_offset", &config->reg_clk_gating_offset);
+	ret = of_property_read_u32(np, "reg_clk_gating_offset", &config->reg_clk_gating_offset);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_clk_gating_offset! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_clk_gating_offset! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-			"reg_clk_gating_shift", &config->reg_clk_gating_shift);
+	ret = of_property_read_u32(np, "reg_clk_gating_shift", &config->reg_clk_gating_shift);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_clk_gating_shift! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_clk_gating_shift! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-			"reg_bypass_offset", &config->reg_bypass_offset);
+	ret = of_property_read_u32(np, "reg_bypass_offset", &config->reg_bypass_offset);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_bypass_offset! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_bypass_offset! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-			"reg_bypass_shift", &config->reg_bypass_shift);
+	ret = of_property_read_u32(np, "reg_bypass_shift", &config->reg_bypass_shift);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_bypass_shift! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_bypass_shift! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-		"reg_pulse_start_offset", &config->reg_pulse_start_offset);
+	ret = of_property_read_u32(np, "reg_pulse_start_offset", &config->reg_pulse_start_offset);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_bypass_offset! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_bypass_offset! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-		"reg_pulse_start_shift", &config->reg_pulse_start_shift);
+	ret = of_property_read_u32(np, "reg_pulse_start_shift", &config->reg_pulse_start_shift);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_pulse_start_shift! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_pulse_start_shift! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-			"reg_mode_offset", &config->reg_mode_offset);
+	ret = of_property_read_u32(np, "reg_mode_offset", &config->reg_mode_offset);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_mode_offset! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_mode_offset! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-			"reg_mode_shift", &config->reg_mode_shift);
+	ret = of_property_read_u32(np, "reg_mode_shift", &config->reg_mode_shift);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_mode_shift! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_mode_shift! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-			"reg_polarity_offset", &config->reg_polarity_offset);
+	ret = of_property_read_u32(np, "reg_polarity_offset", &config->reg_polarity_offset);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_polarity_offset! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_polarity_offset! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-			"reg_polarity_shift", &config->reg_polarity_shift);
+	ret = of_property_read_u32(np, "reg_polarity_shift", &config->reg_polarity_shift);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_polarity_shift! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_polarity_shift! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-			"reg_period_offset", &config->reg_period_offset);
+	ret = of_property_read_u32(np, "reg_period_offset", &config->reg_period_offset);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_period_offset! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_period_offset! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-			"reg_period_shift", &config->reg_period_shift);
+	ret = of_property_read_u32(np, "reg_period_shift", &config->reg_period_shift);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_period_shift! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_period_shift! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-			"reg_period_width", &config->reg_period_width);
+	ret = of_property_read_u32(np, "reg_period_width", &config->reg_period_width);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_period_width! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_period_width! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-			"reg_active_offset", &config->reg_active_offset);
+	ret = of_property_read_u32(np, "reg_active_offset", &config->reg_active_offset);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_duty_offset! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_duty_offset! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-			"reg_active_shift", &config->reg_active_shift);
+	ret = of_property_read_u32(np, "reg_active_shift", &config->reg_active_shift);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_duty_shift! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_duty_shift! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-			"reg_active_width", &config->reg_active_width);
+	ret = of_property_read_u32(np, "reg_active_width", &config->reg_active_width);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_duty_width! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_duty_width! err=%d\n", ret);
 		goto err;
 	}
 
-	ret = of_property_read_u32(np,
-			"reg_prescal_offset", &config->reg_prescal_offset);
+	ret = of_property_read_u32(np, "reg_prescal_offset", &config->reg_prescal_offset);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_duty_width! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_duty_width! err=%d\n", ret);
 		goto err;
 	}
-	ret = of_property_read_u32(np,
-			"reg_prescal_shift", &config->reg_prescal_shift);
+	ret = of_property_read_u32(np, "reg_prescal_shift", &config->reg_prescal_shift);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_duty_width! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_duty_width! err=%d\n", ret);
 		goto err;
 	}
-	ret = of_property_read_u32(np,
-			"reg_prescal_width", &config->reg_prescal_width);
+	ret = of_property_read_u32(np, "reg_prescal_width", &config->reg_prescal_width);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get reg_duty_width! err=%d\n", ret);
+		dev_err(&pdev->dev, "failed to get reg_duty_width! err=%d\n", ret);
 		goto err;
 	}
 err:
@@ -346,8 +287,7 @@ err:
 	return ret;
 }
 
-static int sunxi_pwm_set_polarity(struct pwm_chip *chip,
-			struct pwm_device *pwm, enum pwm_polarity polarity)
+static int sunxi_pwm_set_polarity(struct pwm_chip *chip, struct pwm_device *pwm, enum pwm_polarity polarity)
 {
 	u32 temp;
 	struct sunxi_pwm_chip *pc = to_sunxi_pwm_chip(chip);
@@ -357,9 +297,9 @@ static int sunxi_pwm_set_polarity(struct pwm_chip *chip,
 	reg_shift = pc->config[pwm->pwm - chip->base].reg_polarity_shift;
 	temp = sunxi_pwm_readl(chip, reg_offset);
 	if (polarity == PWM_POLARITY_NORMAL)
-		temp = SET_BITS(reg_shift, 1, temp, 0);
-	else
 		temp = SET_BITS(reg_shift, 1, temp, 1);
+	else
+		temp = SET_BITS(reg_shift, 1, temp, 0);
 
 	sunxi_pwm_writel(chip, reg_offset, temp);
 
@@ -428,20 +368,16 @@ static int sunxi_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
 	}
 
 	if (period_ns < 5*100*1000)
-		active_cycles = (duty_ns * entire_cycles + (period_ns/2))
-								/ period_ns;
+		active_cycles = (duty_ns * entire_cycles + (period_ns/2)) /period_ns;
 	else if (period_ns >= 5*100*1000 && period_ns < 6553500)
-		active_cycles = ((duty_ns / 100) * entire_cycles +
-				(period_ns / 2 / 100)) / (period_ns/100);
+		active_cycles = ((duty_ns / 100) * entire_cycles + (period_ns /2 / 100)) / (period_ns/100);
 	else
-		active_cycles = ((duty_ns / 10000) * entire_cycles +
-				(period_ns / 2 / 10000)) / (period_ns/10000);
+		active_cycles = ((duty_ns / 10000) * entire_cycles + (period_ns /2 / 10000)) / (period_ns/10000);
 
 	/* config prescal */
 	reg_offset = pc->config[pwm->pwm - chip->base].reg_prescal_offset;
 	reg_shift = pc->config[pwm->pwm - chip->base].reg_prescal_shift;
 	reg_width = pc->config[pwm->pwm - chip->base].reg_prescal_width;
-
 	temp = sunxi_pwm_readl(chip, reg_offset);
 	temp = SET_BITS(reg_shift, reg_width, temp, (pre_scal[pre_scal_id][0]));
 	sunxi_pwm_writel(chip, reg_offset, temp);
@@ -450,7 +386,6 @@ static int sunxi_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
 	reg_offset = pc->config[pwm->pwm - chip->base].reg_active_offset;
 	reg_shift = pc->config[pwm->pwm - chip->base].reg_active_shift;
 	reg_width = pc->config[pwm->pwm - chip->base].reg_active_width;
-
 	temp = sunxi_pwm_readl(chip, reg_offset);
 	temp = SET_BITS(reg_shift, reg_width, temp, (active_cycles));
 	sunxi_pwm_writel(chip, reg_offset, temp);
@@ -478,13 +413,13 @@ static int sunxi_pwm_enable(struct pwm_chip *chip, struct pwm_device *pwm)
 	index = pwm->pwm - chip->base;
 	sub_np = of_parse_phandle(chip->dev->of_node, "pwms", index);
 	if (IS_ERR_OR_NULL(sub_np)) {
-		pr_err("%s: can't parse \"pwms\" property\n", __func__);
-		return -ENODEV;
+			pr_err("%s: can't parse \"pwms\" property\n", __func__);
+			return -ENODEV;
 	}
 	pwm_pdevice = of_find_device_by_node(sub_np);
 	if (IS_ERR_OR_NULL(pwm_pdevice)) {
-		pr_err("%s: can't parse pwm device\n", __func__);
-		return -ENODEV;
+			pr_err("%s: can't parse pwm device\n", __func__);
+			return -ENODEV;
 	}
 	sunxi_pwm_pin_set_state(&pwm_pdevice->dev, PWM_PIN_STATE_ACTIVE);
 
@@ -516,13 +451,13 @@ static void sunxi_pwm_disable(struct pwm_chip *chip, struct pwm_device *pwm)
 	index = pwm->pwm - chip->base;
 	sub_np = of_parse_phandle(chip->dev->of_node, "pwms", index);
 	if (IS_ERR_OR_NULL(sub_np)) {
-		pr_err("%s: can't parse \"pwms\" property\n", __func__);
-		return;
+			pr_err("%s: can't parse \"pwms\" property\n", __func__);
+			return;
 	}
 	pwm_pdevice = of_find_device_by_node(sub_np);
 	if (IS_ERR_OR_NULL(pwm_pdevice)) {
-		pr_err("%s: can't parse pwm device\n", __func__);
-		return;
+			pr_err("%s: can't parse pwm device\n", __func__);
+			return;
 	}
 
 	/* disable pwm controller */
@@ -553,7 +488,7 @@ static struct pwm_ops sunxi_pwm_ops = {
 static int sunxi_pwm_probe(struct platform_device *pdev)
 {
 	int ret;
-	struct sunxi_pwm_chip *pwm;
+	struct sunxi_pwm_chip* pwm;
 	struct device_node *np = pdev->dev.of_node;
 	int i;
 	struct platform_device *pwm_pdevice;
@@ -561,9 +496,8 @@ static int sunxi_pwm_probe(struct platform_device *pdev)
 
 	pwm = devm_kzalloc(&pdev->dev, sizeof(*pwm), GFP_KERNEL);
 	if (!pwm) {
-		ret = -ENOMEM;
 		dev_err(&pdev->dev, "failed to allocate memory!\n");
-		return ret;
+		return -ENOMEM;
 	}
 
 	/* io map pwm base */
@@ -577,8 +511,7 @@ static int sunxi_pwm_probe(struct platform_device *pdev)
 	/* read property pwm-number */
 	ret = of_property_read_u32(np, "pwm-number", &pwm->chip.npwm);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get pwm number: %d, force to one!\n", ret);
+		dev_err(&pdev->dev, "failed to get pwm number: %d, force to one!\n", ret);
 		/* force to one pwm if read property fail */
 		pwm->chip.npwm = 1;
 	}
@@ -586,8 +519,7 @@ static int sunxi_pwm_probe(struct platform_device *pdev)
 	/* read property pwm-base */
 	ret = of_property_read_u32(np, "pwm-base", &pwm->chip.base);
 	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"failed to get pwm-base: %d, force to -1 !\n", ret);
+		dev_err(&pdev->dev, "failed to get pwm-base: %d, force to -1 !\n", ret);
 		/* force to one pwm if read property fail */
 		pwm->chip.base = -1;
 	}
@@ -602,37 +534,27 @@ static int sunxi_pwm_probe(struct platform_device *pdev)
 	}
 	platform_set_drvdata(pdev, pwm);
 
-	pwm->config = devm_kzalloc(&pdev->dev,
-			sizeof(*pwm->config) * pwm->chip.npwm, GFP_KERNEL);
+	pwm->config = devm_kzalloc(&pdev->dev, sizeof(*pwm->config) * pwm->chip.npwm, GFP_KERNEL);
 	if (!pwm->config) {
-		ret = -ENOMEM;
 		dev_err(&pdev->dev, "failed to allocate memory!\n");
 		goto err_alloc;
 	}
 
-	for (i = 0; i < pwm->chip.npwm; i++) {
-		sub_np = of_parse_phandle(np, "pwms", i);
+	for (i=0; i<pwm->chip.npwm; i++) {
+		sub_np = of_parse_phandle(np, "pwms",i);
 		if (IS_ERR_OR_NULL(sub_np)) {
-			pr_err("%s: can't parse \"pwms\" property\n",
-				__func__);
+			printk("%s: can't parse \"pwms\" property\n", __func__);
 			return -EINVAL;
 		}
 
 		pwm_pdevice = of_find_device_by_node(sub_np);
 		ret =	sunxi_pwm_get_config(pwm_pdevice, &pwm->config[i]);
-		if (ret)
+		if (ret) {
 			goto err_get_config;
+		}
 	}
 
-#if defined(CLK_GATE_SUPPORT)
-	pwm->pwm_clk = of_clk_get(pdev->dev.of_node, 0);
-	if (IS_ERR_OR_NULL(pwm->pwm_clk)) {
-		pr_err("%s: can't get pwm clk\n", __func__);
-		return -EINVAL;
-	}
-	clk_prepare_enable(pwm->pwm_clk);
-#endif
-	return 0;
+  return 0;
 
 err_get_config:
 err_alloc:
@@ -646,9 +568,7 @@ err_iomap:
 static int sunxi_pwm_remove(struct platform_device *pdev)
 {
 	struct sunxi_pwm_chip *pwm = platform_get_drvdata(pdev);
-#if defined CLK_GATE_SUPPORT
-	clk_disable(pwm->pwm_clk);
-#endif
+
 	return pwmchip_remove(&pwm->chip);
 }
 
@@ -696,8 +616,9 @@ static int __init pwm_module_init(void)
 #if !defined(CONFIG_OF)
 	ret = platform_device_register(&sunxi_pwm_device);
 #endif
-	if (ret == 0)
+	if (ret == 0) {
 		ret = platform_driver_register(&sunxi_pwm_driver);
+	}
 
 	return ret;
 }

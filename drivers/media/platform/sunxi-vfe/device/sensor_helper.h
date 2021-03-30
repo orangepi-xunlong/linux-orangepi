@@ -1,22 +1,6 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vfe/device/sensor_helper.h
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
-/*
  * sensor helper header file
- *
+ * 
  */
 #ifndef __SENSOR__HELPER__H__
 #define __SENSOR__HELPER__H__
@@ -40,6 +24,6 @@ extern int sensor_read(struct v4l2_subdev *sd, addr_type addr,  data_type *value
 extern int sensor_write(struct v4l2_subdev *sd, addr_type addr, data_type value);
 extern int sensor_write_array(struct v4l2_subdev *sd, struct regval_list *regs, int array_size);
 
-/* extern int sensor_power(struct v4l2_subdev *sd, int on); */
+//extern int sensor_power(struct v4l2_subdev *sd, int on);
 
-#endif /* __SENSOR__HELPER__H__ */
+#endif //__SENSOR__HELPER__H__

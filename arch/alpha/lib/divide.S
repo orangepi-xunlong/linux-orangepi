@@ -45,7 +45,6 @@
  *	$28 - compare status
  */
 
-#include <asm/export.h>
 #define halt .long 0
 
 /*
@@ -152,7 +151,6 @@ ufunction:
 	addq	$30,STACK,$30
 	ret	$31,($23),1
 	.end	ufunction
-EXPORT_SYMBOL(ufunction)
 
 /*
  * Uhh.. Ugly signed division. I'd rather not have it at all, but
@@ -195,4 +193,3 @@ sfunction:
 	addq	$30,STACK,$30
 	ret	$31,($23),1
 	.end	sfunction
-EXPORT_SYMBOL(sfunction)

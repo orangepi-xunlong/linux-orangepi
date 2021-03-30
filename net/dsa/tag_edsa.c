@@ -10,16 +10,20 @@
 
 #include <linux/etherdevice.h>
 #include <linux/list.h>
+#include <linux/netdevice.h>
 #include <linux/slab.h>
 #include "dsa_priv.h"
 
 #define DSA_HLEN	4
 #define EDSA_HLEN	8
 
-static struct sk_buff *edsa_xmit(struct sk_buff *skb, struct net_device *dev)
+netdev_tx_t edsa_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	u8 *edsa_header;
+
+	dev->stats.tx_packets++;
+	dev->stats.tx_bytes += skb->len;
 
 	/*
 	 * Convert the outermost 802.1q tag to a DSA tag and prepend
@@ -73,11 +77,16 @@ static struct sk_buff *edsa_xmit(struct sk_buff *skb, struct net_device *dev)
 		edsa_header[7] = 0x00;
 	}
 
-	return skb;
+	skb->protocol = htons(ETH_P_EDSA);
+
+	skb->dev = p->parent->dst->master_netdev;
+	dev_queue_xmit(skb);
+
+	return NETDEV_TX_OK;
 
 out_free:
 	kfree_skb(skb);
-	return NULL;
+	return NETDEV_TX_OK;
 }
 
 static int edsa_rcv(struct sk_buff *skb, struct net_device *dev,
@@ -120,14 +129,10 @@ static int edsa_rcv(struct sk_buff *skb, struct net_device *dev,
 	 * Check that the source device exists and that the source
 	 * port is a registered DSA port.
 	 */
-	if (source_device >= DSA_MAX_SWITCHES)
+	if (source_device >= dst->pd->nr_chips)
 		goto out_drop;
-
 	ds = dst->ds[source_device];
-	if (!ds)
-		goto out_drop;
-
-	if (source_port >= DSA_MAX_PORTS || !ds->ports[source_port].netdev)
+	if (source_port >= DSA_MAX_PORTS || ds->ports[source_port] == NULL)
 		goto out_drop;
 
 	/*
@@ -182,7 +187,7 @@ static int edsa_rcv(struct sk_buff *skb, struct net_device *dev,
 			2 * ETH_ALEN);
 	}
 
-	skb->dev = ds->ports[source_port].netdev;
+	skb->dev = ds->ports[source_port];
 	skb_push(skb, ETH_HLEN);
 	skb->pkt_type = PACKET_HOST;
 	skb->protocol = eth_type_trans(skb, skb->dev);
@@ -200,7 +205,7 @@ out:
 	return 0;
 }
 
-const struct dsa_device_ops edsa_netdev_ops = {
-	.xmit	= edsa_xmit,
-	.rcv	= edsa_rcv,
+struct packet_type edsa_packet_type __read_mostly = {
+	.type	= cpu_to_be16(ETH_P_EDSA),
+	.func	= edsa_rcv,
 };

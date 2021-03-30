@@ -1,5 +1,5 @@
-/* Copyright (c) 2013 Coraid, Inc.  See COPYING for GPL terms. */
-#define VERSION "85"
+/* Copyright (c) 2012 Coraid, Inc.  See COPYING for GPL terms. */
+#define VERSION "81"
 #define AOE_MAJOR 152
 #define DEVICE_NAME "aoe"
 
@@ -100,8 +100,11 @@ enum {
 
 struct buf {
 	ulong nframesout;
+	ulong resid;
+	ulong bv_resid;
+	sector_t sector;
 	struct bio *bio;
-	struct bvec_iter iter;
+	struct bio_vec *bv;
 	struct request *rq;
 };
 
@@ -117,10 +120,13 @@ struct frame {
 	ulong waited;
 	ulong waited_total;
 	struct aoetgt *t;		/* parent target I belong to */
+	sector_t lba;
 	struct sk_buff *skb;		/* command skb freed on module exit */
 	struct sk_buff *r_skb;		/* response skb for async processing */
 	struct buf *buf;
-	struct bvec_iter iter;
+	struct bio_vec *bv;
+	ulong bcnt;
+	ulong bv_off;
 	char flags;
 };
 
@@ -163,7 +169,6 @@ struct aoedev {
 	ulong ref;
 	struct work_struct work;/* disk create work struct */
 	struct gendisk *gd;
-	struct dentry *debugfs;
 	struct request_queue *blkq;
 	struct hd_geometry geo;
 	sector_t ssize;
@@ -191,17 +196,14 @@ struct ktstate {
 	struct completion rendez;
 	struct task_struct *task;
 	wait_queue_head_t *waitq;
-	int (*fn) (int);
-	char name[12];
+	int (*fn) (void);
+	char *name;
 	spinlock_t *lock;
-	int id;
-	int active;
 };
 
 int aoeblk_init(void);
 void aoeblk_exit(void);
 void aoeblk_gdalloc(void *);
-void aoedisk_rm_debugfs(struct aoedev *d);
 void aoedisk_rm_sysfs(struct aoedev *d);
 
 int aoechr_init(void);
@@ -220,7 +222,6 @@ int aoecmd_init(void);
 struct sk_buff *aoecmd_ata_id(struct aoedev *);
 void aoe_freetframe(struct frame *);
 void aoe_flush_iocq(void);
-void aoe_flush_iocq_by_index(int);
 void aoe_end_request(struct aoedev *, struct request *, int);
 int aoe_ktstart(struct ktstate *k);
 void aoe_ktstop(struct ktstate *k);

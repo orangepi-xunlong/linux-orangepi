@@ -4,20 +4,21 @@
 #include <linux/spinlock.h>
 #include <linux/smp.h>
 #include <linux/interrupt.h>
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/cpu.h>
-#include <linux/debugfs.h>
 
 #include <asm/tlbflush.h>
 #include <asm/mmu_context.h>
-#include <asm/nospec-branch.h>
 #include <asm/cache.h>
 #include <asm/apic.h>
 #include <asm/uv/uv.h>
-#include <asm/kaiser.h>
+#include <linux/debugfs.h>
+
+DEFINE_PER_CPU_SHARED_ALIGNED(struct tlb_state, cpu_tlbstate)
+			= { &init_mm, 0, };
 
 /*
- *	TLB flushing, formerly SMP-only
+ *	Smarter SMP flushing macros.
  *		c/o Linus Torvalds.
  *
  *	These mean you can really definitely utterly forget about
@@ -30,43 +31,11 @@
  *	Implement flush IPI by CALL_FUNCTION_VECTOR, Alex Shi
  */
 
-atomic64_t last_mm_ctx_id = ATOMIC64_INIT(1);
-
 struct flush_tlb_info {
 	struct mm_struct *flush_mm;
 	unsigned long flush_start;
 	unsigned long flush_end;
 };
-
-static void load_new_mm_cr3(pgd_t *pgdir)
-{
-	unsigned long new_mm_cr3 = __pa(pgdir);
-
-	if (kaiser_enabled) {
-		/*
-		 * We reuse the same PCID for different tasks, so we must
-		 * flush all the entries for the PCID out when we change tasks.
-		 * Flush KERN below, flush USER when returning to userspace in
-		 * kaiser's SWITCH_USER_CR3 (_SWITCH_TO_USER_CR3) macro.
-		 *
-		 * invpcid_flush_single_context(X86_CR3_PCID_ASID_USER) could
-		 * do it here, but can only be used if X86_FEATURE_INVPCID is
-		 * available - and many machines support pcid without invpcid.
-		 *
-		 * If X86_CR3_PCID_KERN_FLUSH actually added something, then it
-		 * would be needed in the write_cr3() below - if PCIDs enabled.
-		 */
-		BUILD_BUG_ON(X86_CR3_PCID_KERN_FLUSH);
-		kaiser_flush_tlb_on_return_to_user();
-	}
-
-	/*
-	 * Caution: many callers of this function expect
-	 * that load_cr3() is serializing and orders TLB
-	 * fills with respect to the mm_cpumask writes.
-	 */
-	write_cr3(new_mm_cr3);
-}
 
 /*
  * We cannot call mmdrop() because we are in interrupt context,
@@ -79,165 +48,10 @@ void leave_mm(int cpu)
 		BUG();
 	if (cpumask_test_cpu(cpu, mm_cpumask(active_mm))) {
 		cpumask_clear_cpu(cpu, mm_cpumask(active_mm));
-		load_new_mm_cr3(swapper_pg_dir);
-		/*
-		 * This gets called in the idle path where RCU
-		 * functions differently.  Tracing normally
-		 * uses RCU, so we have to call the tracepoint
-		 * specially here.
-		 */
-		trace_tlb_flush_rcuidle(TLB_FLUSH_ON_TASK_SWITCH, TLB_FLUSH_ALL);
+		load_cr3(swapper_pg_dir);
 	}
 }
 EXPORT_SYMBOL_GPL(leave_mm);
-
-void switch_mm(struct mm_struct *prev, struct mm_struct *next,
-	       struct task_struct *tsk)
-{
-	unsigned long flags;
-
-	local_irq_save(flags);
-	switch_mm_irqs_off(prev, next, tsk);
-	local_irq_restore(flags);
-}
-
-void switch_mm_irqs_off(struct mm_struct *prev, struct mm_struct *next,
-			struct task_struct *tsk)
-{
-	unsigned cpu = smp_processor_id();
-
-	if (likely(prev != next)) {
-		u64 last_ctx_id = this_cpu_read(cpu_tlbstate.last_ctx_id);
-
-		/*
-		 * Avoid user/user BTB poisoning by flushing the branch
-		 * predictor when switching between processes. This stops
-		 * one process from doing Spectre-v2 attacks on another.
-		 *
-		 * As an optimization, flush indirect branches only when
-		 * switching into processes that disable dumping. This
-		 * protects high value processes like gpg, without having
-		 * too high performance overhead. IBPB is *expensive*!
-		 *
-		 * This will not flush branches when switching into kernel
-		 * threads. It will also not flush if we switch to idle
-		 * thread and back to the same process. It will flush if we
-		 * switch to a different non-dumpable process.
-		 */
-		if (tsk && tsk->mm &&
-		    tsk->mm->context.ctx_id != last_ctx_id &&
-		    get_dumpable(tsk->mm) != SUID_DUMP_USER)
-			indirect_branch_prediction_barrier();
-
-		if (IS_ENABLED(CONFIG_VMAP_STACK)) {
-			/*
-			 * If our current stack is in vmalloc space and isn't
-			 * mapped in the new pgd, we'll double-fault.  Forcibly
-			 * map it.
-			 */
-			unsigned int stack_pgd_index = pgd_index(current_stack_pointer);
-
-			pgd_t *pgd = next->pgd + stack_pgd_index;
-
-			if (unlikely(pgd_none(*pgd)))
-				set_pgd(pgd, init_mm.pgd[stack_pgd_index]);
-		}
-
-		/*
-		 * Record last user mm's context id, so we can avoid
-		 * flushing branch buffer with IBPB if we switch back
-		 * to the same user.
-		 */
-		if (next != &init_mm)
-			this_cpu_write(cpu_tlbstate.last_ctx_id, next->context.ctx_id);
-
-		this_cpu_write(cpu_tlbstate.state, TLBSTATE_OK);
-		this_cpu_write(cpu_tlbstate.active_mm, next);
-
-		cpumask_set_cpu(cpu, mm_cpumask(next));
-
-		/*
-		 * Re-load page tables.
-		 *
-		 * This logic has an ordering constraint:
-		 *
-		 *  CPU 0: Write to a PTE for 'next'
-		 *  CPU 0: load bit 1 in mm_cpumask.  if nonzero, send IPI.
-		 *  CPU 1: set bit 1 in next's mm_cpumask
-		 *  CPU 1: load from the PTE that CPU 0 writes (implicit)
-		 *
-		 * We need to prevent an outcome in which CPU 1 observes
-		 * the new PTE value and CPU 0 observes bit 1 clear in
-		 * mm_cpumask.  (If that occurs, then the IPI will never
-		 * be sent, and CPU 0's TLB will contain a stale entry.)
-		 *
-		 * The bad outcome can occur if either CPU's load is
-		 * reordered before that CPU's store, so both CPUs must
-		 * execute full barriers to prevent this from happening.
-		 *
-		 * Thus, switch_mm needs a full barrier between the
-		 * store to mm_cpumask and any operation that could load
-		 * from next->pgd.  TLB fills are special and can happen
-		 * due to instruction fetches or for no reason at all,
-		 * and neither LOCK nor MFENCE orders them.
-		 * Fortunately, load_cr3() is serializing and gives the
-		 * ordering guarantee we need.
-		 *
-		 */
-		load_new_mm_cr3(next->pgd);
-
-		trace_tlb_flush(TLB_FLUSH_ON_TASK_SWITCH, TLB_FLUSH_ALL);
-
-		/* Stop flush ipis for the previous mm */
-		cpumask_clear_cpu(cpu, mm_cpumask(prev));
-
-		/* Load per-mm CR4 state */
-		load_mm_cr4(next);
-
-#ifdef CONFIG_MODIFY_LDT_SYSCALL
-		/*
-		 * Load the LDT, if the LDT is different.
-		 *
-		 * It's possible that prev->context.ldt doesn't match
-		 * the LDT register.  This can happen if leave_mm(prev)
-		 * was called and then modify_ldt changed
-		 * prev->context.ldt but suppressed an IPI to this CPU.
-		 * In this case, prev->context.ldt != NULL, because we
-		 * never set context.ldt to NULL while the mm still
-		 * exists.  That means that next->context.ldt !=
-		 * prev->context.ldt, because mms never share an LDT.
-		 */
-		if (unlikely(prev->context.ldt != next->context.ldt))
-			load_mm_ldt(next);
-#endif
-	} else {
-		this_cpu_write(cpu_tlbstate.state, TLBSTATE_OK);
-		BUG_ON(this_cpu_read(cpu_tlbstate.active_mm) != next);
-
-		if (!cpumask_test_cpu(cpu, mm_cpumask(next))) {
-			/*
-			 * On established mms, the mm_cpumask is only changed
-			 * from irq context, from ptep_clear_flush() while in
-			 * lazy tlb mode, and here. Irqs are blocked during
-			 * schedule, protecting us from simultaneous changes.
-			 */
-			cpumask_set_cpu(cpu, mm_cpumask(next));
-
-			/*
-			 * We were in lazy tlb mode and leave_mm disabled
-			 * tlb flush IPI delivery. We must reload CR3
-			 * to make sure to use no freed page tables.
-			 *
-			 * As above, load_cr3() is serializing and orders TLB
-			 * fills with respect to the mm_cpumask write.
-			 */
-			load_new_mm_cr3(next->pgd);
-			trace_tlb_flush(TLB_FLUSH_ON_TASK_SWITCH, TLB_FLUSH_ALL);
-			load_mm_cr4(next);
-			load_mm_ldt(next);
-		}
-	}
-}
 
 /*
  * The flush IPI assumes that a thread switch happens in this order:
@@ -286,24 +100,21 @@ static void flush_tlb_func(void *info)
 
 	inc_irq_stat(irq_tlb_count);
 
-	if (f->flush_mm && f->flush_mm != this_cpu_read(cpu_tlbstate.active_mm))
+	if (f->flush_mm != this_cpu_read(cpu_tlbstate.active_mm))
 		return;
 
-	count_vm_tlb_event(NR_TLB_REMOTE_FLUSH_RECEIVED);
 	if (this_cpu_read(cpu_tlbstate.state) == TLBSTATE_OK) {
-		if (f->flush_end == TLB_FLUSH_ALL) {
+		if (f->flush_end == TLB_FLUSH_ALL)
 			local_flush_tlb();
-			trace_tlb_flush(TLB_REMOTE_SHOOTDOWN, TLB_FLUSH_ALL);
-		} else {
+		else if (!f->flush_end)
+			__flush_tlb_single(f->flush_start);
+		else {
 			unsigned long addr;
-			unsigned long nr_pages =
-				(f->flush_end - f->flush_start) / PAGE_SIZE;
 			addr = f->flush_start;
 			while (addr < f->flush_end) {
 				__flush_tlb_single(addr);
 				addr += PAGE_SIZE;
 			}
-			trace_tlb_flush(TLB_REMOTE_SHOOTDOWN, nr_pages);
 		}
 	} else
 		leave_mm(smp_processor_id());
@@ -315,17 +126,9 @@ void native_flush_tlb_others(const struct cpumask *cpumask,
 				 unsigned long end)
 {
 	struct flush_tlb_info info;
-
 	info.flush_mm = mm;
 	info.flush_start = start;
 	info.flush_end = end;
-
-	count_vm_tlb_event(NR_TLB_REMOTE_FLUSH);
-	if (end == TLB_FLUSH_ALL)
-		trace_tlb_flush(TLB_REMOTE_SEND_IPI, TLB_FLUSH_ALL);
-	else
-		trace_tlb_flush(TLB_REMOTE_SEND_IPI,
-				(end - start) >> PAGE_SHIFT);
 
 	if (is_uv_system()) {
 		unsigned int cpu;
@@ -340,76 +143,119 @@ void native_flush_tlb_others(const struct cpumask *cpumask,
 	smp_call_function_many(cpumask, flush_tlb_func, &info, 1);
 }
 
+void flush_tlb_current_task(void)
+{
+	struct mm_struct *mm = current->mm;
+
+	preempt_disable();
+
+	local_flush_tlb();
+	if (cpumask_any_but(mm_cpumask(mm), smp_processor_id()) < nr_cpu_ids)
+		flush_tlb_others(mm_cpumask(mm), mm, 0UL, TLB_FLUSH_ALL);
+	preempt_enable();
+}
+
 /*
- * See Documentation/x86/tlb.txt for details.  We choose 33
- * because it is large enough to cover the vast majority (at
- * least 95%) of allocations, and is small enough that we are
- * confident it will not cause too much overhead.  Each single
- * flush is about 100 ns, so this caps the maximum overhead at
- * _about_ 3,000 ns.
- *
- * This is in units of pages.
+ * It can find out the THP large page, or
+ * HUGETLB page in tlb_flush when THP disabled
  */
-static unsigned long tlb_single_page_flush_ceiling __read_mostly = 33;
+static inline unsigned long has_large_page(struct mm_struct *mm,
+				 unsigned long start, unsigned long end)
+{
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+	unsigned long addr = ALIGN(start, HPAGE_SIZE);
+	for (; addr < end; addr += HPAGE_SIZE) {
+		pgd = pgd_offset(mm, addr);
+		if (likely(!pgd_none(*pgd))) {
+			pud = pud_offset(pgd, addr);
+			if (likely(!pud_none(*pud))) {
+				pmd = pmd_offset(pud, addr);
+				if (likely(!pmd_none(*pmd)))
+					if (pmd_large(*pmd))
+						return addr;
+			}
+		}
+	}
+	return 0;
+}
 
 void flush_tlb_mm_range(struct mm_struct *mm, unsigned long start,
 				unsigned long end, unsigned long vmflag)
 {
 	unsigned long addr;
-	/* do a global flush by default */
-	unsigned long base_pages_to_flush = TLB_FLUSH_ALL;
+	unsigned act_entries, tlb_entries = 0;
 
 	preempt_disable();
-
-	if ((end != TLB_FLUSH_ALL) && !(vmflag & VM_HUGETLB))
-		base_pages_to_flush = (end - start) >> PAGE_SHIFT;
-	if (base_pages_to_flush > tlb_single_page_flush_ceiling)
-		base_pages_to_flush = TLB_FLUSH_ALL;
-
-	if (current->active_mm != mm) {
-		/* Synchronize with switch_mm. */
-		smp_mb();
-
-		goto out;
-	}
+	if (current->active_mm != mm)
+		goto flush_all;
 
 	if (!current->mm) {
 		leave_mm(smp_processor_id());
-
-		/* Synchronize with switch_mm. */
-		smp_mb();
-
-		goto out;
+		goto flush_all;
 	}
 
-	/*
-	 * Both branches below are implicit full barriers (MOV to CR or
-	 * INVLPG) that synchronize with switch_mm.
-	 */
-	if (base_pages_to_flush == TLB_FLUSH_ALL) {
-		count_vm_tlb_event(NR_TLB_LOCAL_FLUSH_ALL);
+	if (end == TLB_FLUSH_ALL || tlb_flushall_shift == -1
+					|| vmflag & VM_HUGETLB) {
 		local_flush_tlb();
-	} else {
-		/* flush range by one by one 'invlpg' */
-		for (addr = start; addr < end;	addr += PAGE_SIZE) {
-			count_vm_tlb_event(NR_TLB_LOCAL_FLUSH_ONE);
-			__flush_tlb_single(addr);
+		goto flush_all;
+	}
+
+	/* In modern CPU, last level tlb used for both data/ins */
+	if (vmflag & VM_EXEC)
+		tlb_entries = tlb_lli_4k[ENTRIES];
+	else
+		tlb_entries = tlb_lld_4k[ENTRIES];
+	/* Assume all of TLB entries was occupied by this task */
+	act_entries = mm->total_vm > tlb_entries ? tlb_entries : mm->total_vm;
+
+	/* tlb_flushall_shift is on balance point, details in commit log */
+	if ((end - start) >> PAGE_SHIFT > act_entries >> tlb_flushall_shift)
+		local_flush_tlb();
+	else {
+		if (has_large_page(mm, start, end)) {
+			local_flush_tlb();
+			goto flush_all;
 		}
+		/* flush range by one by one 'invlpg' */
+		for (addr = start; addr < end;	addr += PAGE_SIZE)
+			__flush_tlb_single(addr);
+
+		if (cpumask_any_but(mm_cpumask(mm),
+				smp_processor_id()) < nr_cpu_ids)
+			flush_tlb_others(mm_cpumask(mm), mm, start, end);
+		preempt_enable();
+		return;
 	}
-	trace_tlb_flush(TLB_LOCAL_MM_SHOOTDOWN, base_pages_to_flush);
-out:
-	if (base_pages_to_flush == TLB_FLUSH_ALL) {
-		start = 0UL;
-		end = TLB_FLUSH_ALL;
-	}
+
+flush_all:
 	if (cpumask_any_but(mm_cpumask(mm), smp_processor_id()) < nr_cpu_ids)
-		flush_tlb_others(mm_cpumask(mm), mm, start, end);
+		flush_tlb_others(mm_cpumask(mm), mm, 0UL, TLB_FLUSH_ALL);
+	preempt_enable();
+}
+
+void flush_tlb_page(struct vm_area_struct *vma, unsigned long start)
+{
+	struct mm_struct *mm = vma->vm_mm;
+
+	preempt_disable();
+
+	if (current->active_mm == mm) {
+		if (current->mm)
+			__flush_tlb_one(start);
+		else
+			leave_mm(smp_processor_id());
+	}
+
+	if (cpumask_any_but(mm_cpumask(mm), smp_processor_id()) < nr_cpu_ids)
+		flush_tlb_others(mm_cpumask(mm), mm, start, 0UL);
+
 	preempt_enable();
 }
 
 static void do_flush_tlb_all(void *info)
 {
-	count_vm_tlb_event(NR_TLB_REMOTE_FLUSH_RECEIVED);
 	__flush_tlb_all();
 	if (this_cpu_read(cpu_tlbstate.state) == TLBSTATE_LAZY)
 		leave_mm(smp_processor_id());
@@ -417,7 +263,6 @@ static void do_flush_tlb_all(void *info)
 
 void flush_tlb_all(void)
 {
-	count_vm_tlb_event(NR_TLB_REMOTE_FLUSH);
 	on_each_cpu(do_flush_tlb_all, NULL, 1);
 }
 
@@ -433,26 +278,32 @@ static void do_kernel_range_flush(void *info)
 
 void flush_tlb_kernel_range(unsigned long start, unsigned long end)
 {
+	unsigned act_entries;
+	struct flush_tlb_info info;
+
+	/* In modern CPU, last level tlb used for both data/ins */
+	act_entries = tlb_lld_4k[ENTRIES];
 
 	/* Balance as user space task's flush, a bit conservative */
-	if (end == TLB_FLUSH_ALL ||
-	    (end - start) > tlb_single_page_flush_ceiling * PAGE_SIZE) {
+	if (end == TLB_FLUSH_ALL || tlb_flushall_shift == -1 ||
+		(end - start) >> PAGE_SHIFT > act_entries >> tlb_flushall_shift)
+
 		on_each_cpu(do_flush_tlb_all, NULL, 1);
-	} else {
-		struct flush_tlb_info info;
+	else {
 		info.flush_start = start;
 		info.flush_end = end;
 		on_each_cpu(do_kernel_range_flush, &info, 1);
 	}
 }
 
+#ifdef CONFIG_DEBUG_TLBFLUSH
 static ssize_t tlbflush_read_file(struct file *file, char __user *user_buf,
 			     size_t count, loff_t *ppos)
 {
 	char buf[32];
 	unsigned int len;
 
-	len = sprintf(buf, "%ld\n", tlb_single_page_flush_ceiling);
+	len = sprintf(buf, "%hd\n", tlb_flushall_shift);
 	return simple_read_from_buffer(user_buf, count, ppos, buf, len);
 }
 
@@ -461,20 +312,20 @@ static ssize_t tlbflush_write_file(struct file *file,
 {
 	char buf[32];
 	ssize_t len;
-	int ceiling;
+	s8 shift;
 
 	len = min(count, sizeof(buf) - 1);
 	if (copy_from_user(buf, user_buf, len))
 		return -EFAULT;
 
 	buf[len] = '\0';
-	if (kstrtoint(buf, 0, &ceiling))
+	if (kstrtos8(buf, 0, &shift))
 		return -EINVAL;
 
-	if (ceiling < 0)
+	if (shift < -1 || shift >= BITS_PER_LONG)
 		return -EINVAL;
 
-	tlb_single_page_flush_ceiling = ceiling;
+	tlb_flushall_shift = shift;
 	return count;
 }
 
@@ -484,10 +335,11 @@ static const struct file_operations fops_tlbflush = {
 	.llseek = default_llseek,
 };
 
-static int __init create_tlb_single_page_flush_ceiling(void)
+static int __init create_tlb_flushall_shift(void)
 {
-	debugfs_create_file("tlb_single_page_flush_ceiling", S_IRUSR | S_IWUSR,
+	debugfs_create_file("tlb_flushall_shift", S_IRUSR | S_IWUSR,
 			    arch_debugfs_dir, NULL, &fops_tlbflush);
 	return 0;
 }
-late_initcall(create_tlb_single_page_flush_ceiling);
+late_initcall(create_tlb_flushall_shift);
+#endif

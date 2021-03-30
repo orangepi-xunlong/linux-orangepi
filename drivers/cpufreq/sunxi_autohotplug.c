@@ -1,20 +1,3 @@
-/*
- * drivers/cpufreq/sunxi_autohotplug.c
- *
- * Copyright (C) 2016-2020 Allwinnertech.
- * East Yang <yangdong@allwinnertech.com>
-
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
-
 #include <linux/cpumask.h>
 #include <linux/cpufreq.h>
 #include <linux/module.h>
@@ -22,18 +5,26 @@
 
 #include <trace/events/autohotplug.h>
 
+extern unsigned int  load_try_down;
+extern unsigned int  load_try_up;
+extern unsigned long cpu_up_lasttime;
+extern unsigned int  load_up_stable_us;
+extern unsigned int  load_down_stable_us;
+
 #if defined(CONFIG_SCHED_HMP) || defined(CONFIG_SCHED_SMP_DCMP)
 static unsigned int load_save_up = 60;
 static unsigned int little_core_coop_min_freq = 600000;
 
 #ifdef CONFIG_SCHED_HMP
-static unsigned long cpu_boost_lasttime;
+extern void __init arch_get_fast_and_slow_cpus(struct cpumask *fast,
+									struct cpumask *slow);
+static unsigned long cpu_boost_lasttime = 0;
 static unsigned int  load_try_boost = 90;
 static unsigned int  load_save_big_up = 80;
 static unsigned int  load_lastbig_stable_us = 1500000;
 static unsigned int  load_boost_stable_us = 200000;
 static unsigned int  cpu_boost_last_hold_us = 3000000;
-int hmp_cluster0_is_big;
+int hmp_cluster0_is_big = 0;
 #endif
 #endif
 
@@ -45,18 +36,18 @@ static int is_cpu_load_stable(unsigned int cpu, int stable_type)
 		return 0;
 
 	if (stable_type == STABLE_DOWN)
-		ret = time_after_eq(jiffies, cpu_up_lasttime +
-				usecs_to_jiffies(load_down_stable_us));
-	else if (stable_type == STABLE_UP)
-		ret = time_after_eq(jiffies, cpu_up_lasttime +
-				usecs_to_jiffies(load_up_stable_us));
+		ret = time_after_eq(jiffies,
+					cpu_up_lasttime + usecs_to_jiffies(load_down_stable_us));
+	else if(stable_type == STABLE_UP)
+		ret = time_after_eq(jiffies,
+					cpu_up_lasttime + usecs_to_jiffies(load_up_stable_us));
 #if defined(CONFIG_SCHED_HMP)
-	else if (stable_type == STABLE_BOOST)
-		ret = time_after_eq(jiffies, cpu_up_lasttime +
-				usecs_to_jiffies(load_boost_stable_us));
-	else if (stable_type == STABLE_LAST_BIG)
-		ret = time_after_eq(jiffies, cpu_up_lasttime +
-				usecs_to_jiffies(load_lastbig_stable_us));
+	else if(stable_type == STABLE_BOOST)
+		ret = time_after_eq(jiffies,
+					cpu_up_lasttime + usecs_to_jiffies(load_boost_stable_us));
+	else if(stable_type == STABLE_LAST_BIG)
+		ret = time_after_eq(jiffies,
+					cpu_up_lasttime + usecs_to_jiffies(load_lastbig_stable_us));
 #endif
 	else
 		return 0;
@@ -66,78 +57,76 @@ static int is_cpu_load_stable(unsigned int cpu, int stable_type)
 }
 
 #if defined(CONFIG_SCHED_HMP)
-static int autohotplug_smart_try_up_hmp_normal(
-					struct autohotplug_loadinfo *load)
+static int autohotplug_smart_try_up_hmp_normal(struct autohotplug_loadinfo *load)
 {
 	unsigned int tmp = CONFIG_NR_CPUS;
 	int big_nr, little_nr, ret;
 
 	if ((load->max_load != INVALID_LOAD)
 			&& (load->max_load >= load_try_up)
-			&& is_cpu_load_stable(load->max_cpu, STABLE_UP)) {
+			&& is_cpu_load_stable(load->max_cpu, STABLE_UP))
+	{
 		if (load->max_load >= load_try_boost) {
-			if (get_bigs_under(load, load_save_up, NULL))
+			if (get_bigs_under(load, load_save_up, NULL)) {
 				return 0;
+			} else {
+				get_cpus_online(load, &little_nr, &big_nr);
+				if (big_nr != 0) {
+					if (try_up_big())
+						ret = 1;
+					else
+						ret = try_up_little();
 
-			get_cpus_online(load, &little_nr, &big_nr);
-			if (big_nr != 0) {
-				if (try_up_big())
-					ret = 1;
-				else
-					ret = try_up_little();
+					if (ret)
+						cpu_boost_lasttime = jiffies;
+					return ret;
+				} else {
+					if (try_up_little())
+						ret = 1;
+					else
+						ret = try_up_big();
 
-				if (ret)
-					cpu_boost_lasttime = jiffies;
-
-				return ret;
+					if (ret)
+						cpu_boost_lasttime = jiffies;
+					return ret;
+				}
 			}
-
-			if (try_up_little())
-				ret = 1;
-			else
-				ret = try_up_big();
-
-			if (ret)
-				cpu_boost_lasttime = jiffies;
-
-			return ret;
+		} else {
+			if (get_cpus_under(load, load_save_up, &tmp)) {
+				return 0;
+			} else {
+				if (try_up_little()) {
+					return 1;
+				} else {
+					if (get_cpus_under(load, load_save_big_up, NULL))
+						return 0;
+					else
+						return try_up_big();
+				}
+			}
 		}
-
-		if (get_cpus_under(load, load_save_up, &tmp))
-			return 0;
-
-		if (try_up_little())
-			return 1;
-
-		if (get_cpus_under(load, load_save_big_up, NULL))
-			return 0;
-
-		return try_up_big();
 	}
 
 	return 0;
 }
 
-static int autohotplug_smart_try_down_hmp_normal(
-					struct autohotplug_loadinfo *load)
+static int autohotplug_smart_try_down_hmp_normal(struct autohotplug_loadinfo *load)
 {
 	unsigned int to_down = CONFIG_NR_CPUS;
 	unsigned int on_boost = CONFIG_NR_CPUS;
 
 	if (get_cpus_under(load, load_try_down, &to_down, 0) >= 1) {
-		if (time_before(jiffies, cpu_boost_lasttime +
-				usecs_to_jiffies(cpu_boost_last_hold_us)))
+		if (time_before(jiffies,
+				cpu_boost_lasttime + usecs_to_jiffies(cpu_boost_last_hold_us)))
 			return 0;
 		if (get_bigs_under(load, load_try_down, &to_down) >= 2)
 			return do_cpu_down(to_down);
 		else if (get_littles_under(load, load_try_down, &to_down) > 1)
 			return do_cpu_down(to_down);
 		else if (get_bigs_under(load, load_try_down, &to_down) == 1
-				&& !(get_bigs_above(load, load_try_boost,
-							&on_boost)
+				&& !(get_bigs_above(load, load_try_boost, &on_boost)
 				&& is_cpu_load_stable(on_boost, STABLE_BOOST))
-				&& (load->cpu_load[to_down] <=
-							load->big_min_load)
+				&& (load->cpu_load[to_down] <= load->big_min_load)
 				&& is_cpu_load_stable(to_down, STABLE_LAST_BIG))
 			return do_cpu_down(to_down);
 		else
@@ -162,8 +151,7 @@ static void autohotplug_smart_try_freq_limit_hmp_normal(void)
 	if (big_cpu != CONFIG_NR_CPUS) {
 		if (policy) {
 			if (policy->min < little_core_coop_min_freq) {
-				policy->user_policy.min =
-						little_core_coop_min_freq;
+				policy->user_policy.min = little_core_coop_min_freq;
 				cpufreq_update_policy(0);
 			}
 			cpufreq_cpu_put(policy);
@@ -171,8 +159,7 @@ static void autohotplug_smart_try_freq_limit_hmp_normal(void)
 	} else {
 		if (policy) {
 			if (policy->min > policy->cpuinfo.min_freq) {
-				policy->user_policy.min =
-						policy->cpuinfo.min_freq;
+				policy->user_policy.min = policy->cpuinfo.min_freq;
 				cpufreq_update_policy(0);
 			}
 			cpufreq_cpu_put(policy);
@@ -182,36 +169,36 @@ static void autohotplug_smart_try_freq_limit_hmp_normal(void)
 #endif
 
 #if defined(CONFIG_SCHED_HMP) || defined(CONFIG_SCHED_SMP_DCMP)
-static int autohotplug_smart_try_up_hmp_simple(
-					struct autohotplug_loadinfo *load)
+static int autohotplug_smart_try_up_hmp_simple(struct autohotplug_loadinfo *load)
 {
-	int ret = 0;
+	int ret =0;
 	unsigned int first;
 
 	if (!get_cpus_under(load, load_save_up, &first)
-			&& is_cpu_load_stable(load->max_cpu, STABLE_UP)) {
+				&& is_cpu_load_stable(load->max_cpu, STABLE_UP))
+	{
 		if (try_up_big()) {
 			ret = 1;
 		} else {
-			ret = try_up_little();
+			try_up_little();
+			ret = 1;
 		}
 	}
 
 	return ret;
 }
 
-static int autohotplug_smart_try_down_hmp_simple(
-					struct autohotplug_loadinfo *load)
+static int autohotplug_smart_try_down_hmp_simple(struct autohotplug_loadinfo *load)
 {
 	int big_nr, little_nr;
 	unsigned int first, to_down;
 
 	get_cpus_online(load, &little_nr, &big_nr);
 	if (get_cpus_under(load, load_try_down, &first) >= 2
-				&& is_cpu_load_stable(first, STABLE_DOWN)) {
+				&& is_cpu_load_stable(first, STABLE_DOWN))
+	{
 		if (little_nr) {
-			if (get_littles_under(load, load_try_down * 2,
-						&to_down))
+			if (get_littles_under(load, load_try_down * 2, &to_down))
 				return do_cpu_down(to_down);
 		} else {
 			return do_cpu_down(first);
@@ -221,7 +208,6 @@ static int autohotplug_smart_try_down_hmp_simple(
 	return 0;
 }
 
-#if defined(CONFIG_SCHED_HMP)
 static void autohotplug_smart_try_freq_limit_hmp_simple(void)
 {
 	struct cpufreq_policy *policy1 = NULL;
@@ -250,13 +236,13 @@ static void autohotplug_smart_try_freq_limit_hmp_simple(void)
 			policy2->user_policy.min = little_core_coop_min_freq;
 			cpufreq_update_policy(little);
 		}
-	} else if (big_nr) {
+	}else if(big_nr){
 		policy1 = cpufreq_cpu_get(big);
 		if (policy1 && policy1->min < little_core_coop_min_freq) {
 			policy1->user_policy.min = little_core_coop_min_freq;
 			cpufreq_update_policy(big);
 		}
-	} else if (little_nr) {
+	}else if(little_nr){
 		policy2 = cpufreq_cpu_get(little);
 		if (policy2 && policy2->min < little_core_coop_min_freq) {
 			policy2->user_policy.min = little_core_coop_min_freq;
@@ -270,11 +256,9 @@ static void autohotplug_smart_try_freq_limit_hmp_simple(void)
 		cpufreq_cpu_put(policy2);
 }
 #endif
-#endif
 
 #if !defined(CONFIG_SCHED_HMP) && !defined(CONFIG_SCHED_SMP_DCMP)
-static int autohotplug_smart_try_up_smp_normal(
-					struct autohotplug_loadinfo *load)
+static int autohotplug_smart_try_up_smp_normal(struct autohotplug_loadinfo *load)
 {
 	unsigned int first;
 
@@ -285,8 +269,7 @@ static int autohotplug_smart_try_up_smp_normal(
 	return 0;
 }
 
-static int autohotplug_smart_try_down_smp_normal(
-					struct autohotplug_loadinfo *load)
+static int autohotplug_smart_try_down_smp_normal(struct autohotplug_loadinfo *load)
 {
 	unsigned int first;
 
@@ -310,21 +293,16 @@ static int autohotplug_smart_get_fast_slow_cpus(struct cpumask *fast,
 		hmp_cluster0_is_big = 0;
 
 	if (hmp_cluster0_is_big) {
-		autohotplug_smart.try_up = autohotplug_smart_try_up_hmp_simple;
-		autohotplug_smart.try_down =
-				autohotplug_smart_try_down_hmp_simple;
-		autohotplug_smart.try_freq_limit =
-				autohotplug_smart_try_freq_limit_hmp_simple;
+		autohotplug_smart.try_up         = autohotplug_smart_try_up_hmp_simple;
+		autohotplug_smart.try_down       = autohotplug_smart_try_down_hmp_simple;
+		autohotplug_smart.try_freq_limit = autohotplug_smart_try_freq_limit_hmp_simple;
 	} else {
-		autohotplug_smart.try_up = autohotplug_smart_try_up_hmp_normal;
-		autohotplug_smart.try_down =
-				autohotplug_smart_try_down_hmp_normal;
-		autohotplug_smart.try_freq_limit =
-				autohotplug_smart_try_freq_limit_hmp_normal;
+		autohotplug_smart.try_up         = autohotplug_smart_try_up_hmp_normal;
+		autohotplug_smart.try_down       = autohotplug_smart_try_down_hmp_normal;
+		autohotplug_smart.try_freq_limit = autohotplug_smart_try_freq_limit_hmp_normal;
 	}
 #elif defined(CONFIG_SCHED_SMP_DCMP)
-	if (strlen(CONFIG_CLUSTER0_CPU_MASK) &&
-		strlen(CONFIG_CLUSTER1_CPU_MASK)) {
+	if (strlen(CONFIG_CLUSTER0_CPU_MASK) && strlen(CONFIG_CLUSTER1_CPU_MASK)) {
 		if (cpulist_parse(CONFIG_CLUSTER0_CPU_MASK, fast)) {
 			pr_err("Failed to parse cluster0 cpu mask!\n");
 			return -1;
@@ -349,21 +327,21 @@ static int autohotplug_smart_get_fast_slow_cpus(struct cpumask *fast,
 static void autohotplug_smart_init_attr(void)
 {
 #if defined(CONFIG_SCHED_HMP) || defined(CONFIG_SCHED_SMP_DCMP)
-	autohotplug_attr_add("little_min_freq", &little_core_coop_min_freq,
-				0644, NULL, NULL);
-	autohotplug_attr_add("save_all_up_load", &load_save_up,
-				0644, NULL, NULL);
+	autohotplug_attr_add("little_min_freq", &little_core_coop_min_freq, 0644,
+						NULL, NULL);
+	autohotplug_attr_add("save_all_up_load",   &load_save_up,           0644,
+							NULL, NULL);
 #ifdef CONFIG_SCHED_HMP
-	autohotplug_attr_add("try_boost_load", &load_try_boost,
-				0644, NULL, NULL);
-	autohotplug_attr_add("save_big_up_load", &load_save_big_up,
-				0644, NULL, NULL);
-	autohotplug_attr_add("stable_boost_us", &load_boost_stable_us,
-				0644, NULL, NULL);
-	autohotplug_attr_add("stable_last_big_us", &load_lastbig_stable_us,
-				0644, NULL, NULL);
-	autohotplug_attr_add("hold_last_boost_us", &cpu_boost_last_hold_us,
-				0644, NULL, NULL);
+	autohotplug_attr_add("try_boost_load",     &load_try_boost,         0644,
+							NULL, NULL);
+	autohotplug_attr_add("save_big_up_load",   &load_save_big_up,       0644,
+						NULL, NULL);
+	autohotplug_attr_add("stable_boost_us",    &load_boost_stable_us,   0644,
+							NULL, NULL);
+	autohotplug_attr_add("stable_last_big_us", &load_lastbig_stable_us, 0644,
+						NULL, NULL);
+	autohotplug_attr_add("hold_last_boost_us", &cpu_boost_last_hold_us, 0644,
+							NULL, NULL);
 #endif
 #endif
 }

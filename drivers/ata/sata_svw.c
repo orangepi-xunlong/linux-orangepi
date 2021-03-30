@@ -39,6 +39,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
@@ -47,7 +48,11 @@
 #include <scsi/scsi_cmnd.h>
 #include <scsi/scsi.h>
 #include <linux/libata.h>
-#include <linux/of.h>
+
+#ifdef CONFIG_PPC_OF
+#include <asm/prom.h>
+#include <asm/pci-bridge.h>
+#endif /* CONFIG_PPC_OF */
 
 #define DRV_NAME	"sata_svw"
 #define DRV_VERSION	"2.3"
@@ -316,6 +321,7 @@ static u8 k2_stat_check_status(struct ata_port *ap)
 	return readl(ap->ioaddr.status_addr);
 }
 
+#ifdef CONFIG_PPC_OF
 static int k2_sata_show_info(struct seq_file *m, struct Scsi_Host *shost)
 {
 	struct ata_port *ap;
@@ -345,10 +351,14 @@ static int k2_sata_show_info(struct seq_file *m, struct Scsi_Host *shost)
 	}
 	return 0;
 }
+#endif /* CONFIG_PPC_OF */
+
 
 static struct scsi_host_template k2_sata_sht = {
 	ATA_BMDMA_SHT(DRV_NAME),
+#ifdef CONFIG_PPC_OF
 	.show_info		= k2_sata_show_info,
+#endif
 };
 
 
@@ -487,10 +497,10 @@ static int k2_sata_init_one(struct pci_dev *pdev, const struct pci_device_id *en
 		ata_port_pbar_desc(ap, 5, offset, "port");
 	}
 
-	rc = dma_set_mask(&pdev->dev, ATA_DMA_MASK);
+	rc = pci_set_dma_mask(pdev, ATA_DMA_MASK);
 	if (rc)
 		return rc;
-	rc = dma_set_coherent_mask(&pdev->dev, ATA_DMA_MASK);
+	rc = pci_set_consistent_dma_mask(pdev, ATA_DMA_MASK);
 	if (rc)
 		return rc;
 

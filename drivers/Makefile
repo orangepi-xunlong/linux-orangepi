@@ -7,12 +7,11 @@
 
 obj-y				+= irqchip/
 obj-y				+= bus/
-
-obj-$(CONFIG_GENERIC_PHY)	+= phy/
+obj-y				+= soc/
 
 # GPIO must come after pinctrl as gpios may need to mux pins etc
-obj-$(CONFIG_PINCTRL)		+= pinctrl/
-obj-$(CONFIG_GPIOLIB)		+= gpio/
+obj-y				+= pinctrl/
+obj-y				+= gpio/
 obj-y				+= pwm/
 obj-$(CONFIG_PCI)		+= pci/
 obj-$(CONFIG_PARISC)		+= parisc/
@@ -21,7 +20,7 @@ obj-y				+= video/
 obj-y				+= idle/
 
 # IPMI must come before ACPI in order to provide IPMI opregion support
-obj-y				+= char/ipmi/
+obj-$(CONFIG_IPMI_HANDLER)	+= char/ipmi/
 
 obj-$(CONFIG_ACPI)		+= acpi/
 obj-$(CONFIG_SFI)		+= sfi/
@@ -29,14 +28,9 @@ obj-$(CONFIG_SFI)		+= sfi/
 # was used and do nothing if so
 obj-$(CONFIG_PNP)		+= pnp/
 obj-y				+= amba/
-
-obj-y				+= clk/
 # Many drivers will want to use DMA so this has to be made available
 # really early.
 obj-$(CONFIG_DMADEVICES)	+= dma/
-
-# SOC specific infrastructure drivers.
-obj-y				+= soc/
 
 obj-$(CONFIG_VIRTIO)		+= virtio/
 obj-$(CONFIG_XEN)		+= xen/
@@ -52,35 +46,26 @@ obj-$(CONFIG_RESET_CONTROLLER)	+= reset/
 obj-y				+= tty/
 obj-y				+= char/
 
-# iommu/ comes before gpu as gpu are using iommu controllers
-obj-$(CONFIG_IOMMU_SUPPORT)	+= iommu/
-
-# gpu/ comes after char for AGP vs DRM startup and after iommu
+# gpu/ comes after char for AGP vs DRM startup
 obj-y				+= gpu/
 
 obj-$(CONFIG_CONNECTOR)		+= connector/
 
 # i810fb and intelfb depend on char/agp/
-obj-$(CONFIG_FB_I810)           += video/fbdev/i810/
-obj-$(CONFIG_FB_INTEL)          += video/fbdev/intelfb/
+obj-$(CONFIG_FB_I810)           += video/i810/
+obj-$(CONFIG_FB_INTEL)          += video/intelfb/
 
 obj-$(CONFIG_PARPORT)		+= parport/
-obj-$(CONFIG_NVM)		+= lightnvm/
 obj-y				+= base/ block/ misc/ mfd/ nfc/
-obj-$(CONFIG_LIBNVDIMM)		+= nvdimm/
-obj-$(CONFIG_DEV_DAX)		+= dax/
-obj-$(CONFIG_DMA_SHARED_BUFFER) += dma-buf/
 obj-$(CONFIG_NUBUS)		+= nubus/
 obj-y				+= macintosh/
 obj-$(CONFIG_IDE)		+= ide/
 obj-$(CONFIG_SCSI)		+= scsi/
-obj-y				+= nvme/
 obj-$(CONFIG_ATA)		+= ata/
 obj-$(CONFIG_TARGET_CORE)	+= target/
 obj-$(CONFIG_MTD)		+= mtd/
 obj-$(CONFIG_SPI)		+= spi/
-obj-$(CONFIG_SPMI)		+= spmi/
-obj-$(CONFIG_HSI)		+= hsi/
+obj-y				+= hsi/
 obj-y				+= net/
 obj-$(CONFIG_ATM)		+= atm/
 obj-$(CONFIG_FUSION)		+= message/
@@ -93,25 +78,26 @@ obj-$(CONFIG_PCCARD)		+= pcmcia/
 obj-$(CONFIG_DIO)		+= dio/
 obj-$(CONFIG_SBUS)		+= sbus/
 obj-$(CONFIG_ZORRO)		+= zorro/
+obj-$(CONFIG_MAC)		+= macintosh/
 obj-$(CONFIG_ATA_OVER_ETH)	+= block/aoe/
 obj-$(CONFIG_PARIDE) 		+= block/paride/
 obj-$(CONFIG_TC)		+= tc/
 obj-$(CONFIG_UWB)		+= uwb/
 obj-$(CONFIG_USB_PHY)		+= usb/
 obj-$(CONFIG_USB)		+= usb/
-obj-$(CONFIG_USB_SUPPORT)	+= usb/
 obj-$(CONFIG_PCI)		+= usb/
 obj-$(CONFIG_USB_GADGET)	+= usb/
-obj-$(CONFIG_OF)		+= usb/
+obj-$(CONFIG_USB_SUNXI_USB) += usb/sunxi_usb/
 obj-$(CONFIG_SERIO)		+= input/serio/
 obj-$(CONFIG_GAMEPORT)		+= input/gameport/
 obj-$(CONFIG_INPUT)		+= input/
+obj-$(CONFIG_I2O)		+= message/
 obj-$(CONFIG_RTC_LIB)		+= rtc/
 obj-y				+= i2c/ media/
 obj-$(CONFIG_PPS)		+= pps/
 obj-$(CONFIG_PTP_1588_CLOCK)	+= ptp/
 obj-$(CONFIG_W1)		+= w1/
-obj-y				+= power/
+obj-$(CONFIG_POWER_SUPPLY)	+= power/
 obj-$(CONFIG_HWMON)		+= hwmon/
 obj-$(CONFIG_THERMAL)		+= thermal/
 obj-$(CONFIG_WATCHDOG)		+= watchdog/
@@ -124,15 +110,17 @@ obj-$(CONFIG_EISA)		+= eisa/
 obj-y				+= lguest/
 obj-$(CONFIG_CPU_FREQ)		+= cpufreq/
 obj-$(CONFIG_CPU_IDLE)		+= cpuidle/
-obj-$(CONFIG_SUNXI_MPP)		+= mpp/
 obj-y				+= mmc/
 obj-$(CONFIG_MEMSTICK)		+= memstick/
-obj-$(CONFIG_NEW_LEDS)		+= leds/
+obj-y				+= leds/
+obj-$(CONFIG_SWITCH)		+= switch/
 obj-$(CONFIG_INFINIBAND)	+= infiniband/
 obj-$(CONFIG_SGI_SN)		+= sn/
 obj-y				+= firmware/
 obj-$(CONFIG_CRYPTO)		+= crypto/
 obj-$(CONFIG_SUPERH)		+= sh/
+obj-$(CONFIG_ARCH_SHMOBILE)	+= sh/
+obj-$(CONFIG_SSBI)		+= ssbi/
 ifndef CONFIG_ARCH_USES_GETTIMEOFFSET
 obj-y				+= clocksource/
 endif
@@ -143,13 +131,16 @@ obj-$(CONFIG_OF)		+= of/
 obj-$(CONFIG_SSB)		+= ssb/
 obj-$(CONFIG_BCMA)		+= bcma/
 obj-$(CONFIG_VHOST_RING)	+= vhost/
-obj-$(CONFIG_VHOST)		+= vhost/
 obj-$(CONFIG_VLYNQ)		+= vlynq/
 obj-$(CONFIG_STAGING)		+= staging/
 obj-y				+= platform/
+#common clk code
+obj-y				+= clk/
 
 obj-$(CONFIG_MAILBOX)		+= mailbox/
 obj-$(CONFIG_HWSPINLOCK)	+= hwspinlock/
+obj-$(CONFIG_NFC)		+= nfc/
+obj-$(CONFIG_IOMMU_SUPPORT)	+= iommu/
 obj-$(CONFIG_REMOTEPROC)	+= remoteproc/
 obj-$(CONFIG_RPMSG)		+= rpmsg/
 
@@ -164,17 +155,7 @@ obj-$(CONFIG_IIO)		+= iio/
 obj-$(CONFIG_VME_BUS)		+= vme/
 obj-$(CONFIG_IPACK_BUS)		+= ipack/
 obj-$(CONFIG_NTB)		+= ntb/
-obj-$(CONFIG_FMC)		+= fmc/
-obj-$(CONFIG_POWERCAP)		+= powercap/
-obj-$(CONFIG_MCB)		+= mcb/
-obj-$(CONFIG_PERF_EVENTS)	+= perf/
-obj-$(CONFIG_RAS)		+= ras/
-obj-$(CONFIG_THUNDERBOLT)	+= thunderbolt/
-obj-$(CONFIG_CORESIGHT)		+= hwtracing/coresight/
-obj-y				+= hwtracing/intel_th/
-obj-$(CONFIG_STM)		+= hwtracing/stm/
-obj-$(CONFIG_ANDROID)		+= android/
-obj-$(CONFIG_NVMEM)		+= nvmem/
-obj-$(CONFIG_FPGA)		+= fpga/
-obj-$(CONFIG_TEE)		+= tee/
+
 obj-$(CONFIG_GATOR)		+= gator/
+obj-$(CONFIG_CORESIGHT)		+= coresight/
+obj-$(CONFIG_SUNXI_ARISC) 	+= arisc/

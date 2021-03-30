@@ -8,6 +8,6 @@
 #define CTRL_H
 
 /* Prototypes for backend-level services exposed to APIs */
-int caam_get_era(void);
+int caam_get_era(u64 caam_id);
 
 #endif /* CTRL_H */

@@ -797,8 +797,6 @@ static const u16 bb_ramp_pwm_normal[] = {
 	(0  << 9) | 400, /* BB_RAMP6 */
 };
 
-#if 0
-/* Currently unused */
 static const u16 bb_ramp_pwm_boost[] = {
 	550, /* max BB gain in 10th of dB */
 	8, /* ramp_slope = 1dB of gain -> clock_ticks_per_db = clk_khz / ramp_slope -> BB_RAMP2 */
@@ -808,7 +806,6 @@ static const u16 bb_ramp_pwm_boost[] = {
 	(2  << 9) | 208, /* BB_RAMP5 = 29dB */
 	(0  << 9) | 440, /* BB_RAMP6 */
 };
-#endif
 
 static const u16 rf_ramp_pwm_cband[] = {
 	314, /* max RF gain in 10th of dB */
@@ -852,8 +849,6 @@ static const u16 rf_ramp_pwm_uhf[] = {
 	(0  << 10) | 580, /* GAIN_4_2, LNA 4 */
 };
 
-#if 0
-/* Currently unused */
 static const u16 rf_ramp_pwm_sband[] = {
 	253, /* max RF gain in 10th of dB */
 	38, /* ramp_slope = 1dB of gain -> clock_ticks_per_db = clk_khz / ramp_slope -> RF_RAMP2 */
@@ -867,7 +862,6 @@ static const u16 rf_ramp_pwm_sband[] = {
 	(0  << 10) | 0, /* GAIN_4_1, LNA 4 = 0dB */
 	(0  << 10) | 0, /* GAIN_4_2, LNA 4 */
 };
-#endif
 
 struct slope {
 	s16 range;
@@ -1121,15 +1115,9 @@ void dib0090_pwm_gain_reset(struct dvb_frontend *fe)
 		dib0090_set_bbramp_pwm(state, bb_ramp);
 
 		/* activate the ramp generator using PWM control */
-		if (state->rf_ramp)
-			dprintk("ramp RF gain = %d BAND = %s version = %d",
-				state->rf_ramp[0],
-				(state->current_band == BAND_CBAND) ? "CBAND" : "NOT CBAND",
-				state->identity.version & 0x1f);
+		dprintk("ramp RF gain = %d BAND = %s version = %d", state->rf_ramp[0], (state->current_band == BAND_CBAND) ? "CBAND" : "NOT CBAND", state->identity.version & 0x1f);
 
-		if (rf_ramp && ((state->rf_ramp && state->rf_ramp[0] == 0) ||
-		    (state->current_band == BAND_CBAND &&
-		    (state->identity.version & 0x1f) <= P1D_E_F))) {
+		if ((state->rf_ramp[0] == 0) || (state->current_band == BAND_CBAND && (state->identity.version & 0x1f) <= P1D_E_F)) {
 			dprintk("DE-Engage mux for direct gain reg control");
 			en_pwm_rf_mux = 0;
 		} else
@@ -1708,10 +1696,12 @@ static int dib0090_dc_offset_calibration(struct dib0090_state *state, enum front
 
 		if (state->identity.p1g)
 			state->dc = dc_p1g_table;
+		*tune_state = CT_TUNER_STEP_0;
 
 		/* fall through */
+
 	case CT_TUNER_STEP_0:
-		dprintk("Start/continue DC calibration for %s path", (state->dc->i == 1) ? "I" : "Q");
+		dprintk("Sart/continue DC calibration for %s path", (state->dc->i == 1) ? "I" : "Q");
 		dib0090_write_reg(state, 0x01, state->dc->bb1);
 		dib0090_write_reg(state, 0x07, state->bb7 | (state->dc->i << 7));
 
@@ -2567,19 +2557,10 @@ static int dib0090_set_params(struct dvb_frontend *fe)
 
 	do {
 		ret = dib0090_tune(fe);
-		if (ret == FE_CALLBACK_TIME_NEVER)
+		if (ret != FE_CALLBACK_TIME_NEVER)
+			msleep(ret / 10);
+		else
 			break;
-
-		/*
-		 * Despite dib0090_tune returns time at a 0.1 ms range,
-		 * the actual sleep time depends on CONFIG_HZ. The worse case
-		 * is when CONFIG_HZ=100. In such case, the minimum granularity
-		 * is 10ms. On some real field tests, the tuner sometimes don't
-		 * lock when this timer is lower than 10ms. So, enforce a 10ms
-		 * granularity and use usleep_range() instead of msleep().
-		 */
-		ret = 10 * (ret + 99)/100;
-		usleep_range(ret * 1000, (ret + 1) * 1000);
 	} while (state->tune_state != CT_TUNER_STOP);
 
 	return 0;
@@ -2681,7 +2662,7 @@ free_mem:
 }
 EXPORT_SYMBOL(dib0090_fw_register);
 
-MODULE_AUTHOR("Patrick Boettcher <patrick.boettcher@posteo.de>");
-MODULE_AUTHOR("Olivier Grenie <olivier.grenie@parrot.com>");
+MODULE_AUTHOR("Patrick Boettcher <pboettcher@dibcom.fr>");
+MODULE_AUTHOR("Olivier Grenie <olivier.grenie@dibcom.fr>");
 MODULE_DESCRIPTION("Driver for the DiBcom 0090 base-band RF Tuner");
 MODULE_LICENSE("GPL");

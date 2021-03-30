@@ -38,6 +38,7 @@
 #include <linux/device.h>
 #include <linux/file.h>
 #include <linux/fs.h>
+#include <linux/aio.h>
 #include <linux/kdev_t.h>
 #include <linux/kthread.h>
 #include <linux/list.h>
@@ -47,7 +48,6 @@
 #include <linux/slab.h>
 #include <linux/stat.h>
 #include <linux/module.h>
-#include <linux/uio.h>
 
 #include "fuse_i.h"
 
@@ -88,24 +88,28 @@ static struct list_head *cuse_conntbl_head(dev_t devt)
  * FUSE file.
  */
 
-static ssize_t cuse_read_iter(struct kiocb *kiocb, struct iov_iter *to)
+static ssize_t cuse_read(struct file *file, char __user *buf, size_t count,
+			 loff_t *ppos)
 {
-	struct fuse_io_priv io = FUSE_IO_PRIV_SYNC(kiocb->ki_filp);
 	loff_t pos = 0;
+	struct iovec iov = { .iov_base = buf, .iov_len = count };
+	struct fuse_io_priv io = { .async = 0, .file = file };
 
-	return fuse_direct_io(&io, to, &pos, FUSE_DIO_CUSE);
+	return fuse_direct_io(&io, &iov, 1, count, &pos, 0);
 }
 
-static ssize_t cuse_write_iter(struct kiocb *kiocb, struct iov_iter *from)
+static ssize_t cuse_write(struct file *file, const char __user *buf,
+			  size_t count, loff_t *ppos)
 {
-	struct fuse_io_priv io = FUSE_IO_PRIV_SYNC(kiocb->ki_filp);
 	loff_t pos = 0;
+	struct iovec iov = { .iov_base = (void __user *)buf, .iov_len = count };
+	struct fuse_io_priv io = { .async = 0, .file = file };
+
 	/*
 	 * No locking or generic_write_checks(), the server is
 	 * responsible for locking and sanity checks.
 	 */
-	return fuse_direct_io(&io, from, &pos,
-			      FUSE_DIO_WRITE | FUSE_DIO_CUSE);
+	return fuse_direct_io(&io, &iov, 1, count, &pos, 1);
 }
 
 static int cuse_open(struct inode *inode, struct file *file)
@@ -177,8 +181,8 @@ static long cuse_file_compat_ioctl(struct file *file, unsigned int cmd,
 
 static const struct file_operations cuse_frontend_fops = {
 	.owner			= THIS_MODULE,
-	.read_iter		= cuse_read_iter,
-	.write_iter		= cuse_write_iter,
+	.read			= cuse_read,
+	.write			= cuse_write,
 	.open			= cuse_open,
 	.release		= cuse_release,
 	.unlocked_ioctl		= cuse_file_ioctl,
@@ -406,7 +410,7 @@ err_unlock:
 err_region:
 	unregister_chrdev_region(devt, 1);
 err:
-	fuse_abort_conn(fc);
+	fuse_conn_kill(fc);
 	goto out;
 }
 
@@ -469,7 +473,7 @@ err:
 static void cuse_fc_release(struct fuse_conn *fc)
 {
 	struct cuse_conn *cc = fc_to_cc(fc);
-	kfree_rcu(cc, fc.rcu);
+	kfree(cc);
 }
 
 /**
@@ -489,7 +493,6 @@ static void cuse_fc_release(struct fuse_conn *fc)
  */
 static int cuse_channel_open(struct inode *inode, struct file *file)
 {
-	struct fuse_dev *fud;
 	struct cuse_conn *cc;
 	int rc;
 
@@ -500,22 +503,17 @@ static int cuse_channel_open(struct inode *inode, struct file *file)
 
 	fuse_conn_init(&cc->fc);
 
-	fud = fuse_dev_alloc(&cc->fc);
-	if (!fud) {
-		kfree(cc);
-		return -ENOMEM;
-	}
-
 	INIT_LIST_HEAD(&cc->list);
 	cc->fc.release = cuse_fc_release;
 
+	cc->fc.connected = 1;
 	cc->fc.initialized = 1;
 	rc = cuse_send_init(cc);
 	if (rc) {
-		fuse_dev_free(fud);
+		fuse_conn_put(&cc->fc);
 		return rc;
 	}
-	file->private_data = fud;
+	file->private_data = &cc->fc;	/* channel owns base reference to cc */
 
 	return 0;
 }
@@ -533,8 +531,7 @@ static int cuse_channel_open(struct inode *inode, struct file *file)
  */
 static int cuse_channel_release(struct inode *inode, struct file *file)
 {
-	struct fuse_dev *fud = file->private_data;
-	struct cuse_conn *cc = fc_to_cc(fud->fc);
+	struct cuse_conn *cc = fc_to_cc(file->private_data);
 	int rc;
 
 	/* remove from the conntbl, no more access from this point on */
@@ -549,8 +546,6 @@ static int cuse_channel_release(struct inode *inode, struct file *file)
 		unregister_chrdev_region(cc->cdev->dev, 1);
 		cdev_del(cc->cdev);
 	}
-	/* Base reference is now owned by "fud" */
-	fuse_conn_put(&cc->fc);
 
 	rc = fuse_dev_release(inode, file);	/* puts the base reference */
 
@@ -573,7 +568,6 @@ static ssize_t cuse_class_waiting_show(struct device *dev,
 
 	return sprintf(buf, "%d\n", atomic_read(&cc->fc.num_waiting));
 }
-static DEVICE_ATTR(waiting, 0400, cuse_class_waiting_show, NULL);
 
 static ssize_t cuse_class_abort_store(struct device *dev,
 				      struct device_attribute *attr,
@@ -584,23 +578,18 @@ static ssize_t cuse_class_abort_store(struct device *dev,
 	fuse_abort_conn(&cc->fc);
 	return count;
 }
-static DEVICE_ATTR(abort, 0200, NULL, cuse_class_abort_store);
 
-static struct attribute *cuse_class_dev_attrs[] = {
-	&dev_attr_waiting.attr,
-	&dev_attr_abort.attr,
-	NULL,
+static struct device_attribute cuse_class_dev_attrs[] = {
+	__ATTR(waiting, S_IFREG | 0400, cuse_class_waiting_show, NULL),
+	__ATTR(abort, S_IFREG | 0200, NULL, cuse_class_abort_store),
+	{ }
 };
-ATTRIBUTE_GROUPS(cuse_class_dev);
 
 static struct miscdevice cuse_miscdev = {
-	.minor		= CUSE_MINOR,
+	.minor		= MISC_DYNAMIC_MINOR,
 	.name		= "cuse",
 	.fops		= &cuse_channel_fops,
 };
-
-MODULE_ALIAS_MISCDEV(CUSE_MINOR);
-MODULE_ALIAS("devname:cuse");
 
 static int __init cuse_init(void)
 {
@@ -620,7 +609,7 @@ static int __init cuse_init(void)
 	if (IS_ERR(cuse_class))
 		return PTR_ERR(cuse_class);
 
-	cuse_class->dev_groups = cuse_class_dev_groups;
+	cuse_class->dev_attrs = cuse_class_dev_attrs;
 
 	rc = misc_register(&cuse_miscdev);
 	if (rc) {

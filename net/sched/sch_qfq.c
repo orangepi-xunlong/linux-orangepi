@@ -137,7 +137,7 @@ struct qfq_class {
 
 	struct gnet_stats_basic_packed bstats;
 	struct gnet_stats_queue qstats;
-	struct gnet_stats_rate_est64 rate_est;
+	struct gnet_stats_rate_est rate_est;
 	struct Qdisc *qdisc;
 	struct list_head alist;		/* Link for active-classes list. */
 	struct qfq_aggregate *agg;	/* Parent aggregate. */
@@ -181,11 +181,12 @@ struct qfq_group {
 };
 
 struct qfq_sched {
-	struct tcf_proto __rcu *filter_list;
+	struct tcf_proto *filter_list;
 	struct Qdisc_class_hash clhash;
 
 	u64			oldV, V;	/* Precise virtual times. */
 	struct qfq_aggregate	*in_serv_agg;   /* Aggregate being served. */
+	u32			num_active_agg; /* Num. of active aggregates */
 	u32			wsum;		/* weight sum */
 	u32			iwsum;		/* inverse weight sum */
 
@@ -220,10 +221,9 @@ static struct qfq_class *qfq_find_class(struct Qdisc *sch, u32 classid)
 static void qfq_purge_queue(struct qfq_class *cl)
 {
 	unsigned int len = cl->qdisc->q.qlen;
-	unsigned int backlog = cl->qdisc->qstats.backlog;
 
 	qdisc_reset(cl->qdisc);
-	qdisc_tree_reduce_backlog(cl->qdisc, len, backlog);
+	qdisc_tree_decrease_qlen(cl->qdisc, len);
 }
 
 static const struct nla_policy qfq_policy[TCA_QFQ_MAX + 1] = {
@@ -339,7 +339,8 @@ static struct qfq_aggregate *qfq_choose_next_agg(struct qfq_sched *);
 
 static void qfq_destroy_agg(struct qfq_sched *q, struct qfq_aggregate *agg)
 {
-	hlist_del_init(&agg->nonfull_next);
+	if (!hlist_unhashed(&agg->nonfull_next))
+		hlist_del_init(&agg->nonfull_next);
 	q->wsum -= agg->class_weight;
 	if (q->wsum != 0)
 		q->iwsum = ONE_FP / q->wsum;
@@ -458,10 +459,8 @@ static int qfq_change_class(struct Qdisc *sch, u32 classid, u32 parentid,
 
 	if (cl != NULL) { /* modify existing class */
 		if (tca[TCA_RATE]) {
-			err = gen_replace_estimator(&cl->bstats, NULL,
-						    &cl->rate_est,
-						    NULL,
-						    qdisc_root_sleeping_running(sch),
+			err = gen_replace_estimator(&cl->bstats, &cl->rate_est,
+						    qdisc_root_sleeping_lock(sch),
 						    tca[TCA_RATE]);
 			if (err)
 				return err;
@@ -485,10 +484,8 @@ static int qfq_change_class(struct Qdisc *sch, u32 classid, u32 parentid,
 		cl->qdisc = &noop_qdisc;
 
 	if (tca[TCA_RATE]) {
-		err = gen_new_estimator(&cl->bstats, NULL,
-					&cl->rate_est,
-					NULL,
-					qdisc_root_sleeping_running(sch),
+		err = gen_new_estimator(&cl->bstats, &cl->rate_est,
+					qdisc_root_sleeping_lock(sch),
 					tca[TCA_RATE]);
 		if (err)
 			goto destroy_class;
@@ -579,8 +576,7 @@ static void qfq_put_class(struct Qdisc *sch, unsigned long arg)
 		qfq_destroy_class(sch, cl);
 }
 
-static struct tcf_proto __rcu **qfq_tcf_chain(struct Qdisc *sch,
-					      unsigned long cl)
+static struct tcf_proto **qfq_tcf_chain(struct Qdisc *sch, unsigned long cl)
 {
 	struct qfq_sched *q = qdisc_priv(sch);
 
@@ -620,7 +616,11 @@ static int qfq_graft_class(struct Qdisc *sch, unsigned long arg,
 			new = &noop_qdisc;
 	}
 
-	*old = qdisc_replace(sch, new, &cl->qdisc);
+	sch_tree_lock(sch);
+	qfq_purge_queue(cl);
+	*old = cl->qdisc;
+	cl->qdisc = new;
+	sch_tree_unlock(sch);
 	return 0;
 }
 
@@ -661,15 +661,14 @@ static int qfq_dump_class_stats(struct Qdisc *sch, unsigned long arg,
 	struct tc_qfq_stats xstats;
 
 	memset(&xstats, 0, sizeof(xstats));
+	cl->qdisc->qstats.qlen = cl->qdisc->q.qlen;
 
 	xstats.weight = cl->agg->class_weight;
 	xstats.lmax = cl->agg->lmax;
 
-	if (gnet_stats_copy_basic(qdisc_root_sleeping_running(sch),
-				  d, NULL, &cl->bstats) < 0 ||
+	if (gnet_stats_copy_basic(d, &cl->bstats) < 0 ||
 	    gnet_stats_copy_rate_est(d, &cl->bstats, &cl->rate_est) < 0 ||
-	    gnet_stats_copy_queue(d, NULL,
-				  &cl->qdisc->qstats, cl->qdisc->q.qlen) < 0)
+	    gnet_stats_copy_queue(d, &cl->qdisc->qstats) < 0)
 		return -1;
 
 	return gnet_stats_copy_app(d, &xstats, sizeof(xstats));
@@ -705,7 +704,6 @@ static struct qfq_class *qfq_classify(struct sk_buff *skb, struct Qdisc *sch,
 	struct qfq_sched *q = qdisc_priv(sch);
 	struct qfq_class *cl;
 	struct tcf_result res;
-	struct tcf_proto *fl;
 	int result;
 
 	if (TC_H_MAJ(skb->priority ^ sch->handle) == 0) {
@@ -716,8 +714,7 @@ static struct qfq_class *qfq_classify(struct sk_buff *skb, struct Qdisc *sch,
 	}
 
 	*qerr = NET_XMIT_SUCCESS | __NET_XMIT_BYPASS;
-	fl = rcu_dereference_bh(q->filter_list);
-	result = tc_classify(skb, fl, &res, false);
+	result = tc_classify(skb, q->filter_list, &res);
 	if (result >= 0) {
 #ifdef CONFIG_NET_CLS_ACT
 		switch (result) {
@@ -829,14 +826,7 @@ static void qfq_make_eligible(struct qfq_sched *q)
 	unsigned long old_vslot = q->oldV >> q->min_slot_shift;
 
 	if (vslot != old_vslot) {
-		unsigned long mask;
-		int last_flip_pos = fls(vslot ^ old_vslot);
-
-		if (last_flip_pos > 31) /* higher than the number of groups */
-			mask = ~0UL;    /* make all groups eligible */
-		else
-			mask = (1UL << last_flip_pos) - 1;
-
+		unsigned long mask = (1ULL << fls(vslot ^ old_vslot)) - 1;
 		qfq_move_groups(q, mask, IR, ER);
 		qfq_move_groups(q, mask, IB, EB);
 	}
@@ -1040,61 +1030,9 @@ static inline void charge_actual_service(struct qfq_aggregate *agg)
 	agg->F = agg->S + (u64)service_received * agg->inv_w;
 }
 
-/* Assign a reasonable start time for a new aggregate in group i.
- * Admissible values for \hat(F) are multiples of \sigma_i
- * no greater than V+\sigma_i . Larger values mean that
- * we had a wraparound so we consider the timestamp to be stale.
- *
- * If F is not stale and F >= V then we set S = F.
- * Otherwise we should assign S = V, but this may violate
- * the ordering in EB (see [2]). So, if we have groups in ER,
- * set S to the F_j of the first group j which would be blocking us.
- * We are guaranteed not to move S backward because
- * otherwise our group i would still be blocked.
- */
-static void qfq_update_start(struct qfq_sched *q, struct qfq_aggregate *agg)
-{
-	unsigned long mask;
-	u64 limit, roundedF;
-	int slot_shift = agg->grp->slot_shift;
-
-	roundedF = qfq_round_down(agg->F, slot_shift);
-	limit = qfq_round_down(q->V, slot_shift) + (1ULL << slot_shift);
-
-	if (!qfq_gt(agg->F, q->V) || qfq_gt(roundedF, limit)) {
-		/* timestamp was stale */
-		mask = mask_from(q->bitmaps[ER], agg->grp->index);
-		if (mask) {
-			struct qfq_group *next = qfq_ffs(q, mask);
-			if (qfq_gt(roundedF, next->F)) {
-				if (qfq_gt(limit, next->F))
-					agg->S = next->F;
-				else /* preserve timestamp correctness */
-					agg->S = limit;
-				return;
-			}
-		}
-		agg->S = q->V;
-	} else  /* timestamp is not stale */
-		agg->S = agg->F;
-}
-
-/* Update the timestamps of agg before scheduling/rescheduling it for
- * service.  In particular, assign to agg->F its maximum possible
- * value, i.e., the virtual finish time with which the aggregate
- * should be labeled if it used all its budget once in service.
- */
-static inline void
-qfq_update_agg_ts(struct qfq_sched *q,
-		    struct qfq_aggregate *agg, enum update_reason reason)
-{
-	if (reason != requeue)
-		qfq_update_start(q, agg);
-	else /* just charge agg for the service received */
-		agg->S = agg->F;
-
-	agg->F = agg->S + (u64)agg->budgetmax * agg->inv_w;
-}
+static inline void qfq_update_agg_ts(struct qfq_sched *q,
+				     struct qfq_aggregate *agg,
+				     enum update_reason reason);
 
 static void qfq_schedule_agg(struct qfq_sched *q, struct qfq_aggregate *agg);
 
@@ -1153,7 +1091,6 @@ static struct sk_buff *qfq_dequeue(struct Qdisc *sch)
 	if (!skb)
 		return NULL;
 
-	qdisc_qstats_backlog_dec(sch, skb);
 	sch->q.qlen--;
 	qdisc_bstats_update(sch, skb);
 
@@ -1218,8 +1155,67 @@ static struct qfq_aggregate *qfq_choose_next_agg(struct qfq_sched *q)
 	return agg;
 }
 
-static int qfq_enqueue(struct sk_buff *skb, struct Qdisc *sch,
-		       struct sk_buff **to_free)
+/*
+ * Assign a reasonable start time for a new aggregate in group i.
+ * Admissible values for \hat(F) are multiples of \sigma_i
+ * no greater than V+\sigma_i . Larger values mean that
+ * we had a wraparound so we consider the timestamp to be stale.
+ *
+ * If F is not stale and F >= V then we set S = F.
+ * Otherwise we should assign S = V, but this may violate
+ * the ordering in EB (see [2]). So, if we have groups in ER,
+ * set S to the F_j of the first group j which would be blocking us.
+ * We are guaranteed not to move S backward because
+ * otherwise our group i would still be blocked.
+ */
+static void qfq_update_start(struct qfq_sched *q, struct qfq_aggregate *agg)
+{
+	unsigned long mask;
+	u64 limit, roundedF;
+	int slot_shift = agg->grp->slot_shift;
+
+	roundedF = qfq_round_down(agg->F, slot_shift);
+	limit = qfq_round_down(q->V, slot_shift) + (1ULL << slot_shift);
+
+	if (!qfq_gt(agg->F, q->V) || qfq_gt(roundedF, limit)) {
+		/* timestamp was stale */
+		mask = mask_from(q->bitmaps[ER], agg->grp->index);
+		if (mask) {
+			struct qfq_group *next = qfq_ffs(q, mask);
+			if (qfq_gt(roundedF, next->F)) {
+				if (qfq_gt(limit, next->F))
+					agg->S = next->F;
+				else /* preserve timestamp correctness */
+					agg->S = limit;
+				return;
+			}
+		}
+		agg->S = q->V;
+	} else  /* timestamp is not stale */
+		agg->S = agg->F;
+}
+
+/*
+ * Update the timestamps of agg before scheduling/rescheduling it for
+ * service.  In particular, assign to agg->F its maximum possible
+ * value, i.e., the virtual finish time with which the aggregate
+ * should be labeled if it used all its budget once in service.
+ */
+static inline void
+qfq_update_agg_ts(struct qfq_sched *q,
+		    struct qfq_aggregate *agg, enum update_reason reason)
+{
+	if (reason != requeue)
+		qfq_update_start(q, agg);
+	else /* just charge agg for the service received */
+		agg->S = agg->F;
+
+	agg->F = agg->S + (u64)agg->budgetmax * agg->inv_w;
+}
+
+static void qfq_schedule_agg(struct qfq_sched *, struct qfq_aggregate *);
+
+static int qfq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 {
 	struct qfq_sched *q = qdisc_priv(sch);
 	struct qfq_class *cl;
@@ -1229,7 +1225,7 @@ static int qfq_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	cl = qfq_classify(skb, sch, &err);
 	if (cl == NULL) {
 		if (err & __NET_XMIT_BYPASS)
-			qdisc_qstats_drop(sch);
+			sch->qstats.drops++;
 		kfree_skb(skb);
 		return err;
 	}
@@ -1240,24 +1236,21 @@ static int qfq_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 			 cl->agg->lmax, qdisc_pkt_len(skb), cl->common.classid);
 		err = qfq_change_agg(sch, cl, cl->agg->class_weight,
 				     qdisc_pkt_len(skb));
-		if (err) {
-			cl->qstats.drops++;
-			return qdisc_drop(skb, sch, to_free);
-		}
+		if (err)
+			return err;
 	}
 
-	err = qdisc_enqueue(skb, cl->qdisc, to_free);
+	err = qdisc_enqueue(skb, cl->qdisc);
 	if (unlikely(err != NET_XMIT_SUCCESS)) {
 		pr_debug("qfq_enqueue: enqueue failed %d\n", err);
 		if (net_xmit_drop_count(err)) {
 			cl->qstats.drops++;
-			qdisc_qstats_drop(sch);
+			sch->qstats.drops++;
 		}
 		return err;
 	}
 
 	bstats_update(&cl->bstats, skb);
-	qdisc_qstats_backlog_inc(sch, skb);
 	++sch->q.qlen;
 
 	agg = cl->agg;
@@ -1428,6 +1421,52 @@ static void qfq_qlen_notify(struct Qdisc *sch, unsigned long arg)
 		qfq_deactivate_class(q, cl);
 }
 
+static unsigned int qfq_drop_from_slot(struct qfq_sched *q,
+				       struct hlist_head *slot)
+{
+	struct qfq_aggregate *agg;
+	struct qfq_class *cl;
+	unsigned int len;
+
+	hlist_for_each_entry(agg, slot, next) {
+		list_for_each_entry(cl, &agg->active, alist) {
+
+			if (!cl->qdisc->ops->drop)
+				continue;
+
+			len = cl->qdisc->ops->drop(cl->qdisc);
+			if (len > 0) {
+				if (cl->qdisc->q.qlen == 0)
+					qfq_deactivate_class(q, cl);
+
+				return len;
+			}
+		}
+	}
+	return 0;
+}
+
+static unsigned int qfq_drop(struct Qdisc *sch)
+{
+	struct qfq_sched *q = qdisc_priv(sch);
+	struct qfq_group *grp;
+	unsigned int i, j, len;
+
+	for (i = 0; i <= QFQ_MAX_INDEX; i++) {
+		grp = &q->groups[i];
+		for (j = 0; j < QFQ_MAX_SLOTS; j++) {
+			len = qfq_drop_from_slot(q, &grp->slots[j]);
+			if (len > 0) {
+				sch->q.qlen--;
+				return len;
+			}
+		}
+
+	}
+
+	return 0;
+}
+
 static int qfq_init_qdisc(struct Qdisc *sch, struct nlattr *opt)
 {
 	struct qfq_sched *q = qdisc_priv(sch);
@@ -1478,7 +1517,6 @@ static void qfq_reset_qdisc(struct Qdisc *sch)
 			qdisc_reset(cl->qdisc);
 		}
 	}
-	sch->qstats.backlog = 0;
 	sch->q.qlen = 0;
 }
 
@@ -1523,6 +1561,7 @@ static struct Qdisc_ops qfq_qdisc_ops __read_mostly = {
 	.enqueue	= qfq_enqueue,
 	.dequeue	= qfq_dequeue,
 	.peek		= qdisc_peek_dequeued,
+	.drop		= qfq_drop,
 	.init		= qfq_init_qdisc,
 	.reset		= qfq_reset_qdisc,
 	.destroy	= qfq_destroy_qdisc,

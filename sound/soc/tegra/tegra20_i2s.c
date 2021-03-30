@@ -297,7 +297,7 @@ static bool tegra20_i2s_wr_rd_reg(struct device *dev, unsigned int reg)
 		return true;
 	default:
 		return false;
-	}
+	};
 }
 
 static bool tegra20_i2s_volatile_reg(struct device *dev, unsigned int reg)
@@ -310,7 +310,7 @@ static bool tegra20_i2s_volatile_reg(struct device *dev, unsigned int reg)
 		return true;
 	default:
 		return false;
-	}
+	};
 }
 
 static bool tegra20_i2s_precious_reg(struct device *dev, unsigned int reg)
@@ -321,7 +321,7 @@ static bool tegra20_i2s_precious_reg(struct device *dev, unsigned int reg)
 		return true;
 	default:
 		return false;
-	}
+	};
 }
 
 static const struct regmap_config tegra20_i2s_regmap_config = {
@@ -333,13 +333,15 @@ static const struct regmap_config tegra20_i2s_regmap_config = {
 	.readable_reg = tegra20_i2s_wr_rd_reg,
 	.volatile_reg = tegra20_i2s_volatile_reg,
 	.precious_reg = tegra20_i2s_precious_reg,
-	.cache_type = REGCACHE_FLAT,
+	.cache_type = REGCACHE_RBTREE,
 };
 
 static int tegra20_i2s_platform_probe(struct platform_device *pdev)
 {
 	struct tegra20_i2s *i2s;
-	struct resource *mem;
+	struct resource *mem, *memregion, *dmareq;
+	u32 of_dma[2];
+	u32 dma_ch;
 	void __iomem *regs;
 	int ret;
 
@@ -362,9 +364,38 @@ static int tegra20_i2s_platform_probe(struct platform_device *pdev)
 	}
 
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	regs = devm_ioremap_resource(&pdev->dev, mem);
-	if (IS_ERR(regs)) {
-		ret = PTR_ERR(regs);
+	if (!mem) {
+		dev_err(&pdev->dev, "No memory resource\n");
+		ret = -ENODEV;
+		goto err_clk_put;
+	}
+
+	dmareq = platform_get_resource(pdev, IORESOURCE_DMA, 0);
+	if (!dmareq) {
+		if (of_property_read_u32_array(pdev->dev.of_node,
+					"nvidia,dma-request-selector",
+					of_dma, 2) < 0) {
+			dev_err(&pdev->dev, "No DMA resource\n");
+			ret = -ENODEV;
+			goto err_clk_put;
+		}
+		dma_ch = of_dma[1];
+	} else {
+		dma_ch = dmareq->start;
+	}
+
+	memregion = devm_request_mem_region(&pdev->dev, mem->start,
+					    resource_size(mem), DRV_NAME);
+	if (!memregion) {
+		dev_err(&pdev->dev, "Memory region already claimed\n");
+		ret = -EBUSY;
+		goto err_clk_put;
+	}
+
+	regs = devm_ioremap(&pdev->dev, mem->start, resource_size(mem));
+	if (!regs) {
+		dev_err(&pdev->dev, "ioremap failed\n");
+		ret = -ENOMEM;
 		goto err_clk_put;
 	}
 
@@ -379,10 +410,12 @@ static int tegra20_i2s_platform_probe(struct platform_device *pdev)
 	i2s->capture_dma_data.addr = mem->start + TEGRA20_I2S_FIFO2;
 	i2s->capture_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
 	i2s->capture_dma_data.maxburst = 4;
+	i2s->capture_dma_data.slave_id = dma_ch;
 
 	i2s->playback_dma_data.addr = mem->start + TEGRA20_I2S_FIFO1;
 	i2s->playback_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
 	i2s->playback_dma_data.maxburst = 4;
+	i2s->playback_dma_data.slave_id = dma_ch;
 
 	pm_runtime_enable(&pdev->dev);
 	if (!pm_runtime_enabled(&pdev->dev)) {
@@ -449,6 +482,7 @@ static const struct dev_pm_ops tegra20_i2s_pm_ops = {
 static struct platform_driver tegra20_i2s_driver = {
 	.driver = {
 		.name = DRV_NAME,
+		.owner = THIS_MODULE,
 		.of_match_table = tegra20_i2s_of_match,
 		.pm = &tegra20_i2s_pm_ops,
 	},

@@ -8,8 +8,6 @@
 
 #include <linux/types.h>
 
-#define ARCH_IRQ_ENABLED	(3UL << (BITS_PER_LONG - 8))
-
 /* store then OR system mask. */
 #define __arch_local_irq_stosm(__or)					\
 ({									\
@@ -38,7 +36,7 @@ static inline notrace void __arch_local_irq_ssm(unsigned long flags)
 
 static inline notrace unsigned long arch_local_save_flags(void)
 {
-	return __arch_local_irq_stnsm(0xff);
+	return __arch_local_irq_stosm(0x00);
 }
 
 static inline notrace unsigned long arch_local_irq_save(void)
@@ -56,17 +54,14 @@ static inline notrace void arch_local_irq_enable(void)
 	__arch_local_irq_stosm(0x03);
 }
 
-/* This only restores external and I/O interrupt state */
 static inline notrace void arch_local_irq_restore(unsigned long flags)
 {
-	/* only disabled->disabled and disabled->enabled is valid */
-	if (flags & ARCH_IRQ_ENABLED)
-		arch_local_irq_enable();
+	__arch_local_irq_ssm(flags);
 }
 
 static inline notrace bool arch_irqs_disabled_flags(unsigned long flags)
 {
-	return !(flags & ARCH_IRQ_ENABLED);
+	return !(flags & (3UL << (BITS_PER_LONG - 8)));
 }
 
 static inline notrace bool arch_irqs_disabled(void)

@@ -25,7 +25,6 @@ static ssize_t media_show(struct device *dev, struct device_attribute *attr,
 	ide_drive_t *drive = to_ide_device(dev);
 	return sprintf(buf, "%s\n", ide_media_string(drive));
 }
-static DEVICE_ATTR_RO(media);
 
 static ssize_t drivename_show(struct device *dev, struct device_attribute *attr,
 			      char *buf)
@@ -33,7 +32,6 @@ static ssize_t drivename_show(struct device *dev, struct device_attribute *attr,
 	ide_drive_t *drive = to_ide_device(dev);
 	return sprintf(buf, "%s\n", drive->name);
 }
-static DEVICE_ATTR_RO(drivename);
 
 static ssize_t modalias_show(struct device *dev, struct device_attribute *attr,
 			     char *buf)
@@ -41,7 +39,6 @@ static ssize_t modalias_show(struct device *dev, struct device_attribute *attr,
 	ide_drive_t *drive = to_ide_device(dev);
 	return sprintf(buf, "ide:m-%s\n", ide_media_string(drive));
 }
-static DEVICE_ATTR_RO(modalias);
 
 static ssize_t model_show(struct device *dev, struct device_attribute *attr,
 			  char *buf)
@@ -49,7 +46,6 @@ static ssize_t model_show(struct device *dev, struct device_attribute *attr,
 	ide_drive_t *drive = to_ide_device(dev);
 	return sprintf(buf, "%s\n", (char *)&drive->id[ATA_ID_PROD]);
 }
-static DEVICE_ATTR_RO(model);
 
 static ssize_t firmware_show(struct device *dev, struct device_attribute *attr,
 			     char *buf)
@@ -57,7 +53,6 @@ static ssize_t firmware_show(struct device *dev, struct device_attribute *attr,
 	ide_drive_t *drive = to_ide_device(dev);
 	return sprintf(buf, "%s\n", (char *)&drive->id[ATA_ID_FW_REV]);
 }
-static DEVICE_ATTR_RO(firmware);
 
 static ssize_t serial_show(struct device *dev, struct device_attribute *attr,
 			   char *buf)
@@ -65,28 +60,16 @@ static ssize_t serial_show(struct device *dev, struct device_attribute *attr,
 	ide_drive_t *drive = to_ide_device(dev);
 	return sprintf(buf, "%s\n", (char *)&drive->id[ATA_ID_SERNO]);
 }
-static DEVICE_ATTR(serial, 0400, serial_show, NULL);
 
-static DEVICE_ATTR(unload_heads, 0644, ide_park_show, ide_park_store);
-
-static struct attribute *ide_attrs[] = {
-	&dev_attr_media.attr,
-	&dev_attr_drivename.attr,
-	&dev_attr_modalias.attr,
-	&dev_attr_model.attr,
-	&dev_attr_firmware.attr,
-	&dev_attr_serial.attr,
-	&dev_attr_unload_heads.attr,
-	NULL,
-};
-
-static const struct attribute_group ide_attr_group = {
-	.attrs = ide_attrs,
-};
-
-const struct attribute_group *ide_dev_groups[] = {
-	&ide_attr_group,
-	NULL,
+struct device_attribute ide_dev_attrs[] = {
+	__ATTR_RO(media),
+	__ATTR_RO(drivename),
+	__ATTR_RO(modalias),
+	__ATTR_RO(model),
+	__ATTR_RO(firmware),
+	__ATTR(serial, 0400, serial_show, NULL),
+	__ATTR(unload_heads, 0644, ide_park_show, ide_park_store),
+	__ATTR_NULL
 };
 
 static ssize_t store_delete_devices(struct device *portdev,

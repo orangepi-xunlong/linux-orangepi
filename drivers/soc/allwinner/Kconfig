@@ -1,0 +1,19 @@
+#
+# Allwinner sunXi SoC drivers
+#
+config SUNXI_SRAM
+	bool "Allwinner SOC SRAM controlloer"
+	default ARCH_SUNXI
+	help
+	  Say y here to enable the SRAM controller support. This
+	  device is responsible on mapping the SRAM in the sunXi SoCs
+	  whether to the CPU/DMA, or to the devices.
+
+config SUNXI_BOOTUP_EXTEND
+       bool "support ir bootup feature"
+       depends on SUNXI_ARISC
+       default y
+       help
+         support ir bootup feature.
+         but must has the module known as "ar100" or "cpus".
+         the feature is support power up with ir when poweroff.

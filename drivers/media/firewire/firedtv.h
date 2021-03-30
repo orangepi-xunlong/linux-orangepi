@@ -96,11 +96,11 @@ struct firedtv {
 
 	enum model_type		type;
 	char			subunit;
-	s8			isochannel;
+	char			isochannel;
 	struct fdtv_ir_context	*ir_context;
 
-	enum fe_sec_voltage	voltage;
-	enum fe_sec_tone_mode	tone;
+	fe_sec_voltage_t	voltage;
+	fe_sec_tone_mode_t	tone;
 
 	struct mutex		demux_mutex;
 	unsigned long		channel_active;
@@ -124,10 +124,8 @@ int avc_lnb_control(struct firedtv *fdtv, char voltage, char burst,
 		    struct dvb_diseqc_master_cmd *diseqcmd);
 void avc_remote_ctrl_work(struct work_struct *work);
 int avc_register_remote_control(struct firedtv *fdtv);
-int avc_ca_app_info(struct firedtv *fdtv, unsigned char *app_info,
-		    unsigned int *len);
-int avc_ca_info(struct firedtv *fdtv, unsigned char *app_info,
-		unsigned int *len);
+int avc_ca_app_info(struct firedtv *fdtv, char *app_info, unsigned int *len);
+int avc_ca_info(struct firedtv *fdtv, char *app_info, unsigned int *len);
 int avc_ca_reset(struct firedtv *fdtv);
 int avc_ca_pmt(struct firedtv *fdtv, char *app_info, int length);
 int avc_ca_get_time_date(struct firedtv *fdtv, int *interval);

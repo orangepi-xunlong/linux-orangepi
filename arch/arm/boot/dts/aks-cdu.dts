@@ -9,17 +9,11 @@
 
 /dts-v1/;
 
-#include "ge863-pro3.dtsi"
+/include/ "ge863-pro3.dtsi"
 
 / {
 	chosen {
 		bootargs = "console=ttyS0,115200 ubi.mtd=4 root=ubi0:rootfs rootfstype=ubifs";
-	};
-
-	clocks {
-		slow_xtal {
-			clock-frequency = <32768>;
-		};
 	};
 
 	ahb {
@@ -52,12 +46,12 @@
 			};
 
 			usb1: gadget@fffa4000 {
-				atmel,vbus-gpio = <&pioC 15 GPIO_ACTIVE_HIGH>;
+				atmel,vbus-gpio = <&pioC 15 0>;
 				status = "okay";
 			};
 		};
 
-		usb0: ohci@500000 {
+		usb0: ohci@00500000 {
 			num-ports = <2>;
 			status = "okay";
 		};
@@ -96,23 +90,23 @@
 		compatible = "gpio-leds";
 
 		red {
-			gpios = <&pioC 10 GPIO_ACTIVE_HIGH>;
+			gpios = <&pioC 10 0>;
 			linux,default-trigger = "none";
 		};
 
 		green {
-			gpios = <&pioA 5 GPIO_ACTIVE_LOW>;
+			gpios = <&pioA 5 1>;
 			linux,default-trigger = "none";
 			default-state = "on";
 		};
 
 		yellow {
-			gpios = <&pioB 20 GPIO_ACTIVE_LOW>;
+			gpios = <&pioB 20 1>;
 			linux,default-trigger = "none";
 		};
 
 		blue {
-			gpios = <&pioB 21 GPIO_ACTIVE_LOW>;
+			gpios = <&pioB 21 1>;
 			linux,default-trigger = "none";
 		};
 	};

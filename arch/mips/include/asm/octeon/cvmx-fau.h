@@ -105,16 +105,6 @@ typedef union {
 	} s;
 } cvmx_fau_async_tagwait_result_t;
 
-#ifdef __BIG_ENDIAN_BITFIELD
-#define SWIZZLE_8  0
-#define SWIZZLE_16 0
-#define SWIZZLE_32 0
-#else
-#define SWIZZLE_8  0x7
-#define SWIZZLE_16 0x6
-#define SWIZZLE_32 0x4
-#endif
-
 /**
  * Builds a store I/O address for writing to the FAU
  *
@@ -185,7 +175,6 @@ static inline int64_t cvmx_fau_fetch_and_add64(cvmx_fau_reg_64_t reg,
 static inline int32_t cvmx_fau_fetch_and_add32(cvmx_fau_reg_32_t reg,
 					       int32_t value)
 {
-	reg ^= SWIZZLE_32;
 	return cvmx_read64_int32(__cvmx_fau_atomic_address(0, reg, value));
 }
 
@@ -200,7 +189,6 @@ static inline int32_t cvmx_fau_fetch_and_add32(cvmx_fau_reg_32_t reg,
 static inline int16_t cvmx_fau_fetch_and_add16(cvmx_fau_reg_16_t reg,
 					       int16_t value)
 {
-	reg ^= SWIZZLE_16;
 	return cvmx_read64_int16(__cvmx_fau_atomic_address(0, reg, value));
 }
 
@@ -213,7 +201,6 @@ static inline int16_t cvmx_fau_fetch_and_add16(cvmx_fau_reg_16_t reg,
  */
 static inline int8_t cvmx_fau_fetch_and_add8(cvmx_fau_reg_8_t reg, int8_t value)
 {
-	reg ^= SWIZZLE_8;
 	return cvmx_read64_int8(__cvmx_fau_atomic_address(0, reg, value));
 }
 
@@ -260,7 +247,6 @@ cvmx_fau_tagwait_fetch_and_add32(cvmx_fau_reg_32_t reg, int32_t value)
 		uint64_t i32;
 		cvmx_fau_tagwait32_t t;
 	} result;
-	reg ^= SWIZZLE_32;
 	result.i32 =
 	    cvmx_read64_int32(__cvmx_fau_atomic_address(1, reg, value));
 	return result.t;
@@ -284,7 +270,6 @@ cvmx_fau_tagwait_fetch_and_add16(cvmx_fau_reg_16_t reg, int16_t value)
 		uint64_t i16;
 		cvmx_fau_tagwait16_t t;
 	} result;
-	reg ^= SWIZZLE_16;
 	result.i16 =
 	    cvmx_read64_int16(__cvmx_fau_atomic_address(1, reg, value));
 	return result.t;
@@ -307,7 +292,6 @@ cvmx_fau_tagwait_fetch_and_add8(cvmx_fau_reg_8_t reg, int8_t value)
 		uint64_t i8;
 		cvmx_fau_tagwait8_t t;
 	} result;
-	reg ^= SWIZZLE_8;
 	result.i8 = cvmx_read64_int8(__cvmx_fau_atomic_address(1, reg, value));
 	return result.t;
 }
@@ -537,7 +521,6 @@ static inline void cvmx_fau_atomic_add64(cvmx_fau_reg_64_t reg, int64_t value)
  */
 static inline void cvmx_fau_atomic_add32(cvmx_fau_reg_32_t reg, int32_t value)
 {
-	reg ^= SWIZZLE_32;
 	cvmx_write64_int32(__cvmx_fau_store_address(0, reg), value);
 }
 
@@ -550,7 +533,6 @@ static inline void cvmx_fau_atomic_add32(cvmx_fau_reg_32_t reg, int32_t value)
  */
 static inline void cvmx_fau_atomic_add16(cvmx_fau_reg_16_t reg, int16_t value)
 {
-	reg ^= SWIZZLE_16;
 	cvmx_write64_int16(__cvmx_fau_store_address(0, reg), value);
 }
 
@@ -562,7 +544,6 @@ static inline void cvmx_fau_atomic_add16(cvmx_fau_reg_16_t reg, int16_t value)
  */
 static inline void cvmx_fau_atomic_add8(cvmx_fau_reg_8_t reg, int8_t value)
 {
-	reg ^= SWIZZLE_8;
 	cvmx_write64_int8(__cvmx_fau_store_address(0, reg), value);
 }
 
@@ -587,7 +568,6 @@ static inline void cvmx_fau_atomic_write64(cvmx_fau_reg_64_t reg, int64_t value)
  */
 static inline void cvmx_fau_atomic_write32(cvmx_fau_reg_32_t reg, int32_t value)
 {
-	reg ^= SWIZZLE_32;
 	cvmx_write64_int32(__cvmx_fau_store_address(1, reg), value);
 }
 
@@ -600,7 +580,6 @@ static inline void cvmx_fau_atomic_write32(cvmx_fau_reg_32_t reg, int32_t value)
  */
 static inline void cvmx_fau_atomic_write16(cvmx_fau_reg_16_t reg, int16_t value)
 {
-	reg ^= SWIZZLE_16;
 	cvmx_write64_int16(__cvmx_fau_store_address(1, reg), value);
 }
 
@@ -612,7 +591,6 @@ static inline void cvmx_fau_atomic_write16(cvmx_fau_reg_16_t reg, int16_t value)
  */
 static inline void cvmx_fau_atomic_write8(cvmx_fau_reg_8_t reg, int8_t value)
 {
-	reg ^= SWIZZLE_8;
 	cvmx_write64_int8(__cvmx_fau_store_address(1, reg), value);
 }
 

@@ -1,20 +1,8 @@
 /*
- * drivers/media/platform/sunxi-tvd/bsp_tvd/bsp_tvd.c
+ * bsp_tvd.c
  *
- * Copyright (c) 2007-2018 Allwinnertech Co., Ltd.
- * Author: zhengxiaobin <zhengxiaobin@allwinnertech.com>
- *
- * tvd lowlevel
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
+ *  Created on: 2015-9-6
+ *      Author: dlp
  */
 
 #include "bsp_tvd.h"
@@ -28,13 +16,13 @@ s32 tvd_top_set_reg_base(unsigned long base)
 	return 0;
 }
 
-s32 tvd_set_reg_base(u32 sel, unsigned long base)
+s32 tvd_set_reg_base(u32 sel,unsigned long base)
 {
-	if (sel > 3)
+	if(sel>3)
 		return -1;
 
 	tvd_device[sel] = (__tvd_dev_t *)base;
-	return 0;
+		return 0;
 }
 
 void tvd_3d_mode(u32 _3d_sel, u32 _3d_en, u32 _3d_addr)
@@ -48,96 +36,47 @@ void tvd_3d_mode(u32 _3d_sel, u32 _3d_en, u32 _3d_addr)
 	tvd_device[_3d_sel]->tvd_yc_sep1.bits._3d_comb_filter_dis =
 								_3d_en ? 0 : 1;
 }
-
-void tvd_enable_chanel(u32 sel, u32 en)
+s32 tvd_init(u32 sel,u32 interface)
 {
-	tvd_device[sel]->tvd_en.bits.tvd_en_ch = en;
-}
 
-s32 tvd_init(u32 sel, u32 interface)
-{
-	if (sel == 0 && interface != CVBS_INTERFACE) {
-		tvd_adc_config(0, 1);
-		tvd_adc_config(1, 1);
-		tvd_adc_config(2, 1);
-	} else if (interface == CVBS_INTERFACE || sel == 3) {
-		tvd_adc_config(sel, 1);
+	if(sel==0 && interface!=0)
+	{
+		tvd_adc_config(0);
+		tvd_adc_config(1);
+		tvd_adc_config(2);
+	}
+	else if(interface==0)
+	{
+		tvd_adc_config(sel);
 	}
 
 	if (tvd_top_dev->tvd_top_map.bits.tvd_adc_map != 2) {
-		tvd_top_dev->tvd_top_map.bits.tvd_adc_map = (interface ? 2 : 1);
-		/*
+		tvd_top_dev->tvd_top_map.bits.tvd_adc_map =
 		(sel == 0) ? (interface ? 2 : 1) :
 		(sel == 1) ? (interface ? 0 : 1) :
 		(sel == 2) ? (interface ? 0 : 1) :
 		(interface ? 0 : 1);
-		*/
 	}
-	/*
-		if(sel==0)
-		{
-			tvd_top_dev->tvd_top_map.bits.tvd_adc_map = interface ?
-	   2 : 1;
-		}
-	*/
-	tvd_enable_chanel(sel, 1);
-	return 0;
-}
-
-s32 tvd_deinit(u32 sel, u32 interface)
-{
-	tvd_enable_chanel(sel, 0);
-	if (sel == 0 && interface != CVBS_INTERFACE) {
-		tvd_adc_config(0, 0);
-		tvd_adc_config(1, 0);
-		tvd_adc_config(2, 0);
-	} else if (interface == CVBS_INTERFACE || sel == 3) {
-		tvd_adc_config(sel, 0);
+/*
+	if(sel==0)
+	{
+		tvd_top_dev->tvd_top_map.bits.tvd_adc_map = interface ? 2 : 1;
 	}
-
-	return 0;
-}
-
-s32 tvd_get_lock(u32 sel)
-{
-	u32 reg_val;
-	u32 lock;
-	u32 irq_status;
-
-	tvd_irq_status_get(sel, TVD_IRQ_UNLOCK, &irq_status);
-	tvd_irq_status_clear(sel, TVD_IRQ_UNLOCK);
-	reg_val = tvd_device[sel]->tvd_status4.dwval;
-	if (0xe != (reg_val & 0xf) || (0x1 == irq_status))
-		lock = 0;
-	else
-		lock = 1;
-	return lock;
-}
-
-void tvd_reset(u32 sel)
-{
-	volatile u32 delay = 100;
-	tvd_device[sel]->tvd_en.bits.tvd_en_ch = 0;
-	while (delay--)
-		;
+*/
 	tvd_device[sel]->tvd_en.bits.tvd_en_ch = 1;
+	return 0;
 }
 
-void tvd_blue_display_mode(u32 sel, u32 mode)
+s32 tvd_get_status(u32 sel,u32* locked,u32* system)
 {
-	tvd_device[sel]->tvd_mode.bits.blue_display_mode = mode;
-}
-
-s32 tvd_get_status(u32 sel, u32 *locked, u32 *system)
-{
-	if (tvd_device[sel]->tvd_status4.bits.no_signal_detected == 0 &&
-	    tvd_device[sel]->tvd_status4.bits.h_locked == 1 &&
-	    tvd_device[sel]->tvd_status4.bits.v_locked == 1)
+	if(tvd_device[sel]->tvd_status4.bits.no_signal_detected == 0 &&
+       tvd_device[sel]->tvd_status4.bits.h_locked == 1           &&
+       tvd_device[sel]->tvd_status4.bits.v_locked == 1 )
 		*locked = 1;
 	else
 		*locked = 0;
 
-	if (tvd_device[sel]->tvd_status4.bits._625lines_detected == 1)
+	if(tvd_device[sel]->tvd_status4.bits._625lines_detected == 1)
 		*system = 1;
 	else
 		*system = 0;
@@ -145,50 +84,46 @@ s32 tvd_get_status(u32 sel, u32 *locked, u32 *system)
 	return 0;
 }
 
-/*system: 1:pal; 0:NTSC*/
-s32 tvd_config(u32 sel, u32 interface, u32 system)
+s32 tvd_config(u32 sel,u32 interface,u32 system)
 {
-	tvd_device[sel]->tvd_wb1.bits.wb_en = 0;    /*wb dma disable*/
-	tvd_device[sel]->tvd_en.bits.tvd_en_ch = 0; /*tvd module disable*/
+	tvd_device[sel]->tvd_wb1.bits.wb_en = 0;
+	tvd_device[sel]->tvd_en.bits.tvd_en_ch = 0;
 
 	tvd_device[sel]->tvd_en.bits.en_lock_disable_write_back1only_start_wb_when_locked = 0;
 	tvd_device[sel]->tvd_en.bits.en_lock_disable_write_back2when_unlocked = 0;
 	tvd_device[sel]->tvd_en.bits.clr_rsmp_fifo = 0;
-	tvd_device[sel]->tvd_mode.bits.blue_display_mode = 2; /*auto*/
-	tvd_device[sel]->tvd_mode.bits.blue_color = 1;	/*black*/
+	tvd_device[sel]->tvd_mode.bits.blue_display_mode = 2;
+	tvd_device[sel]->tvd_mode.bits.blue_color = 1;
 	tvd_device[sel]->tvd_clamp_agc1.bits.agc_en = 1;
 	tvd_device[sel]->tvd_clamp_agc1.bits.agc_frequence = 1;
-	tvd_device[sel]->tvd_clamp_agc1.bits.cagc_en = interface ? 0 : 1;
-	tvd_device[sel]->tvd_clamp_agc2.bits.agc_gate_width = 64;
-	tvd_device[sel]->tvd_clamp_agc2.bits.agc_backporch_delay = 100;
-	tvd_device[sel]->tvd_clamp_agc2.bits.agc_gate_begin = 1666;
-	tvd_device[sel]->tvd_hlock1.bits.h_sample_step = 0x20000000;
+	tvd_device[sel]->tvd_clamp_agc1.bits.cagc_en = interface?0:1;
+	tvd_device[sel]->tvd_clamp_agc2.bits.agc_gate_width = system ? 70 : 64;
+	tvd_device[sel]->tvd_clamp_agc2.bits.agc_backporch_delay =
+							system ? 110 : 100;
+	tvd_device[sel]->tvd_clamp_agc2.bits.agc_gate_begin = system ?
+								1832 : 1666;
+	tvd_device[sel]->tvd_hlock1.bits.h_sample_step = system ?
+							0x1d1745d1 : 0x20000000;
 	tvd_device[sel]->tvd_hlock2.bits.hsync_filter_gate_start_time = 214;
 	tvd_device[sel]->tvd_hlock2.bits.hsync_filter_gate_end_time = 78;
-	tvd_device[sel]->tvd_hlock3.bits.hsync_rising_detect_window_start_time =
-	    45;
-	tvd_device[sel]->tvd_hlock3.bits.hsync_rising_detect_window_end_time =
-	    80;
-	tvd_device[sel]->tvd_hlock3.bits.hsync_tip_detect_window_start_time =
-	    233;
+	tvd_device[sel]->tvd_hlock3.bits.hsync_rising_detect_window_start_time = 45;
+	tvd_device[sel]->tvd_hlock3.bits.hsync_rising_detect_window_end_time = 80;
+	tvd_device[sel]->tvd_hlock3.bits.hsync_tip_detect_window_start_time = 233;
 	tvd_device[sel]->tvd_hlock3.bits.hsync_tip_detect_window_end_time = 15;
-	tvd_device[sel]
-	    ->tvd_hlock4.bits
-	    .hsync_detect_window_start_time_for_coarse_detection = 0;
+	tvd_device[sel]->tvd_hlock4.bits.hsync_detect_window_start_time_for_coarse_detection = 0;
 	tvd_device[sel]->tvd_hlock4.bits.hsync_detect_window_end_time_for_corase_detect = 128;
 	tvd_device[sel]->tvd_hlock4.bits.hsync_rising_time_for_fine_detect = 62;
 	tvd_device[sel]->tvd_hlock4.bits.hsync_fine_to_coarse_offset = 62;
 
-	tvd_device[sel]->tvd_mode.bits.ypbpr_mode = interface ? 1 : 0;
+	tvd_device[sel]->tvd_mode.bits.ypbpr_mode = interface?1:0;
 	tvd_device[sel]->tvd_mode.bits.svideo_mode = 0;
-	tvd_device[sel]->tvd_mode.bits.progressive_mode =
-	    (interface == 2) ? 1 : 0;
+	tvd_device[sel]->tvd_mode.bits.progressive_mode = (interface==2)?1:0;
 
 	tvd_device[sel]->tvd_clamp_agc1.bits.agc_target =  interface ? 0 :
-						(system == 0) ? 221 : 220;
+						(system == 0) ? 225 : 220;
 	tvd_device[sel]->tvd_clamp_agc1.bits.cagc_target = interface ?
 							0 : (system == 0) ?
-							160 : 144;
+							160 : 134;
 	tvd_device[sel]->tvd_clamp_agc2.bits.black_level_clamp =
 					(interface == 0 || system == 0) ? 1 : 0;
 	tvd_device[sel]->tvd_hlock2.bits.htol = system;
@@ -210,8 +145,8 @@ s32 tvd_config(u32 sel, u32 interface, u32 system)
 	tvd_device[sel]->tvd_clock1.bits.wide_burst_gate = 0;
 	tvd_device[sel]->tvd_clock1.bits.chroma_lpf = 1;
 	tvd_device[sel]->tvd_clock2.bits.c_sample_step = interface ? 0x0 :
-					system ? 0x2a098acb : 0x21f07c1f;
-	tvd_device[sel]->tvd_yc_sep1.bits._3d_comb_filter_mode = system ? 4 : 1;
+					system ? 0x2637385b : 0x21f07c1f;
+	tvd_device[sel]->tvd_yc_sep1.bits._3d_comb_filter_mode = system ? 1 : 1;
 	tvd_device[sel]->tvd_yc_sep1.bits._3d_comb_filter_dis = 1;
 	tvd_device[sel]->tvd_yc_sep1.bits._2d_comb_filter_mode = system?6:0;
 	tvd_device[sel]->tvd_yc_sep1.bits.secam_notch_wide = 0;
@@ -219,54 +154,40 @@ s32 tvd_config(u32 sel, u32 interface, u32 system)
 	tvd_device[sel]->tvd_yc_sep1.bits.pal_chroma_level = 16;
 	tvd_device[sel]->tvd_yc_sep1.bits.comb_filter_buffer_clear = 0;
 	tvd_device[sel]->tvd_yc_sep1.bits.notch_factor = 0;
-	tvd_device[sel]->tvd_yc_sep1.bits._2d_comb_factor = 2;
-	tvd_device[sel]->tvd_yc_sep1.bits._3d_comb_factor = system ? 0 : 1;
+	tvd_device[sel]->tvd_yc_sep1.bits._2d_comb_factor = 3;
+	tvd_device[sel]->tvd_yc_sep1.bits._3d_comb_factor = 0;
 	tvd_device[sel]->tvd_yc_sep1.bits.chroma_coring_enable = 0;
-	tvd_device[sel]->tvd_yc_sep2.bits.horizontal_luma_filter_gain = 2;
-	tvd_device[sel]->tvd_yc_sep2.bits.horizontal_chroma_filter_gain = 2;
-	tvd_device[sel]->tvd_yc_sep2.bits.luma_vertical_filter_gain = 3;
-	tvd_device[sel]->tvd_yc_sep2.bits.chroma_vertical_filter_gain = 3;
-	tvd_device[sel]->tvd_yc_sep2.bits.motion_detect_noise_detect_en = 1;
-	tvd_device[sel]->tvd_yc_sep2.bits.motion_detect_noise_threshold =
-	    system ? 32 : 33;
-	tvd_device[sel]->tvd_yc_sep2.bits.noise_detect_en = system ? 0 : 1;
+	tvd_device[sel]->tvd_yc_sep2.bits.horizontal_luma_filter_gain = 3;
+	tvd_device[sel]->tvd_yc_sep2.bits.horizontal_chroma_filter_gain = 3;
+	tvd_device[sel]->tvd_yc_sep2.bits.luma_vertical_filter_gain = 2;
+	tvd_device[sel]->tvd_yc_sep2.bits.chroma_vertical_filter_gain = 2;
+	tvd_device[sel]->tvd_yc_sep2.bits.motion_detect_noise_detect_en = 0;
+	tvd_device[sel]->tvd_yc_sep2.bits.motion_detect_noise_threshold = 32;
+	tvd_device[sel]->tvd_yc_sep2.bits.noise_detect_en = 0;
 	/* default value:50 */
 	tvd_device[sel]->tvd_yc_sep2.bits.noise_threshold = 10;
 	tvd_device[sel]->tvd_yc_sep2.bits.luma_noise_factor = 3;
-	tvd_device[sel]->tvd_yc_sep2.bits.chroma_noise_factor = 2;
-	tvd_device[sel]->tvd_yc_sep2.bits.burst_noise_factor = 0;
-	tvd_device[sel]->tvd_yc_sep2.bits.vertical_noise_factor = 0;
-	tvd_device[sel]->tvd_enhance1.bits.yc_delay = 0;
+	tvd_device[sel]->tvd_yc_sep2.bits.chroma_noise_factor = 3;
+	tvd_device[sel]->tvd_yc_sep2.bits.burst_noise_factor = 3;
+	tvd_device[sel]->tvd_yc_sep2.bits.vertical_noise_factor = 3;
+	tvd_device[sel]->tvd_enhance1.bits.yc_delay = system ? 2 : 0;
 
-	tvd_device[sel]->tvd_enhance1.bits.contrast_gain =
-	    tvd_get_contrast(sel);
-	tvd_device[sel]->tvd_enhance1.bits.bright_offset = tvd_get_luma(sel);
-	if (system == 0) {
-		tvd_device[sel]->tvd_enhance1.bits.sharp_en = 1;
-		tvd_device[sel]->tvd_enhance1.bits.sharp_coef1 = 5;
-		tvd_device[sel]->tvd_enhance1.bits.sharp_coef2 = 2;
-		tvd_device[sel]->tvd_enhance3.bits.cbcr_gain_en = 1;
-	} else if (system == 1) {
-		tvd_device[sel]->tvd_enhance1.bits.sharp_en = 0;
-		tvd_device[sel]->tvd_enhance1.bits.sharp_coef1 = 2;
-		tvd_device[sel]->tvd_enhance1.bits.sharp_coef2 = 1;
-		tvd_device[sel]->tvd_enhance3.bits.cbcr_gain_en = 0;
-	}
+	tvd_device[sel]->tvd_enhance1.bits.contrast_gain = 128;
+	tvd_device[sel]->tvd_enhance1.bits.bright_offset = 32;
 	tvd_device[sel]->tvd_enhance1.bits.sharp_en = 0;
 	tvd_device[sel]->tvd_enhance1.bits.sharp_coef1 = 2;
 	tvd_device[sel]->tvd_enhance1.bits.sharp_coef2 = 1;
-	tvd_device[sel]->tvd_enhance2.bits.saturation_gain =
-	    tvd_get_saturation(sel);
+	tvd_device[sel]->tvd_enhance2.bits.saturation_gain = 128;
 	tvd_device[sel]->tvd_enhance2.bits.chroma_enhance_en = 1;
 	tvd_device[sel]->tvd_enhance2.bits.chroma_enhance_strength = 3;
 	tvd_device[sel]->tvd_enhance3.bits.cb_gain = 2055;
 	tvd_device[sel]->tvd_enhance3.bits.cr_gain = 1457;
+	tvd_device[sel]->tvd_enhance3.bits.cbcr_gain_en = 0;
 
 	if (interface == 0) {
 		tvd_device[sel]->tvd_enhance3.bits.cb_gain = 0x811;
 		tvd_device[sel]->tvd_enhance3.bits.cr_gain = 0x5b8;
-		tvd_device[sel]->tvd_enhance3.bits.cbcr_gain_en =
-		    system ? 0 : 1;
+		tvd_device[sel]->tvd_enhance3.bits.cbcr_gain_en = 1;
 	} else {
 		tvd_device[sel]->tvd_enhance3.bits.cb_gain = 1460;
 		tvd_device[sel]->tvd_enhance3.bits.cr_gain = 1460;
@@ -309,7 +230,7 @@ s32 tvd_config(u32 sel, u32 interface, u32 system)
 	tvd_device[sel]->tvd_debug4.bits.agc_gate_vsync_stip = 0;
 	tvd_device[sel]->tvd_debug4.bits.agc_gate_vsync_coarse = 1;
 	tvd_device[sel]->tvd_debug4.bits.agc_gate_kill_mode = 0;
-	tvd_device[sel]->tvd_debug4.bits.agc_peak_en = system ? 1 : 0;
+	tvd_device[sel]->tvd_debug4.bits.agc_peak_en = 1;
 	tvd_device[sel]->tvd_debug4.bits.hstate_unlocked = 1;
 	tvd_device[sel]->tvd_debug4.bits.disable_hfine = 0;
 	tvd_device[sel]->tvd_debug4.bits.hstate_fixed = 0;
@@ -329,8 +250,8 @@ s32 tvd_config(u32 sel, u32 interface, u32 system)
 	tvd_device[sel]->tvd_debug6.bits.lose_chromalock_level = 7;
 	tvd_device[sel]->tvd_debug6.bits.lose_chromalock_count = 6;
 	tvd_device[sel]->tvd_debug6.bits.palsw_level = 2;
-	tvd_device[sel]->tvd_debug6.bits.vsync_thresh = 44;
-	tvd_device[sel]->tvd_debug6.bits.vsync_cntl = 2;
+	tvd_device[sel]->tvd_debug6.bits.vsync_thresh = 0;
+	tvd_device[sel]->tvd_debug6.bits.vsync_cntl = 0;
 	tvd_device[sel]->tvd_debug6.bits.vloop_tc = 2;
 	tvd_device[sel]->tvd_debug6.bits.field_detect_mode = 2;
 	tvd_device[sel]->tvd_debug6.bits.cpump_delay = 185;
@@ -352,45 +273,35 @@ s32 tvd_config(u32 sel, u32 interface, u32 system)
 	tvd_device[sel]->tvd_debug11.bits.chroma_step_pal = 0x2a098acb;
 	tvd_device[sel]->tvd_debug12.bits.y_wb_protect = 0xffffffff;
 	tvd_device[sel]->tvd_debug13.bits.uv_wb_protect = 0xffffffff;
-	tvd_device[sel]->tvd_debug14.bits.agc_peak_nominal = system ? 12 : 10;
+	tvd_device[sel]->tvd_debug14.bits.agc_peak_nominal = 12;
 	tvd_device[sel]->tvd_debug14.bits.agc_peak_cntl = 1;
 	tvd_device[sel]->tvd_debug14.bits.vsync_agc_lockout_start = 108;
 	tvd_device[sel]->tvd_debug14.bits.vsync_agc_max = 16;
 	tvd_device[sel]->tvd_debug14.bits.noise_line = 0;
 	tvd_device[sel]->tvd_en.bits.tvd_en_ch = 1;
-	/*tvd_device[sel]->tvd_debug15.bits.adc_lock_interval_period=0x40;*/
-	/*tvd_device[sel]->tvd_debug15.bits.adc_lock_interval_low=30;*/
-	/*tvd_device[sel]->tvd_debug15.bits.adc_lock_mode=1;*/
 
 	return 0;
 }
 
-s32 tvd_set_wb_width(u32 sel, u32 width)
+s32 tvd_set_wb_width(u32 sel,u32 width)
 {
 	tvd_device[sel]->tvd_wb2.bits.hactive_num = width;
 	return 0;
 }
 
-s32 tvd_set_wb_width_jump(u32 sel, u32 width_jump)
+s32 tvd_set_wb_width_jump(u32 sel,u32 width_jump)
 {
 	tvd_device[sel]->tvd_wb1.bits.hactive_stride = width_jump;
 	return 0;
 }
 
-s32 tvd_set_wb_height(u32 sel, u32 height)
+s32 tvd_set_wb_height(u32 sel,u32 height)
 {
 	tvd_device[sel]->tvd_wb2.bits.vactive_num = height;
 	return 0;
 }
 
-/**
- * @name       tvd_set_wb_addr
- * @brief      set dma y and c(uv) channel addre
- * @param[IN]
- * @param[OUT]
- * @return
- */
-s32 tvd_set_wb_addr(u32 sel, u32 addr_y, u32 addr_c)
+s32 tvd_set_wb_addr(u32 sel,u32 addr_y,u32 addr_c)
 {
 	//make sure 1 frame change 1 buffer,no need to detect this bit
 	//while(tvd_device[sel]->tvd_wb1.bits.wb_addr_valid);
@@ -400,15 +311,12 @@ s32 tvd_set_wb_addr(u32 sel, u32 addr_y, u32 addr_c)
 	return 0;
 }
 
-s32 tvd_set_wb_fmt(u32 sel, TVD_FMT_T fmt)
+s32 tvd_set_wb_fmt(u32 sel,TVD_FMT_T fmt)
 {
 	tvd_device[sel]->tvd_wb1.bits.wb_mb_mode =
 						(fmt == TVD_MB_YUV420) ? 1 : 0;
 	tvd_device[sel]->tvd_wb1.bits.wb_format  =
 						(fmt == TVD_PL_YUV422) ? 1 : 0;
-
-	tvd_device[sel]->tvd_wb1.bits.yuv420_fil_en =
-	    (fmt == TVD_PL_YUV422) ? 0 : 1;
 	return 0;
 }
 
@@ -419,7 +327,7 @@ s32 tvd_set_wb_uv_swap(u32 sel, u32 swap)
 	return 0;
 }
 
-s32 tvd_set_wb_field(u32 sel, u32 is_field_mode, u32 is_field_even)
+s32 tvd_set_wb_field(u32 sel,u32 is_field_mode,u32 is_field_even)
 {
 	tvd_device[sel]->tvd_wb1.bits.wb_frame_mode = is_field_mode ? 0 : 1 ;
 	tvd_device[sel]->tvd_wb1.bits.hyscale_en =    is_field_mode ? 1 : 0 ;
@@ -438,25 +346,25 @@ s32 tvd_capture_off(u32 sel)
 	return 0;
 }
 
-s32 tvd_irq_enable(u32 sel, TVD_IRQ_T irq_id)
+s32 tvd_irq_enable(u32 sel,TVD_IRQ_T irq_id)
 {
 	tvd_device[sel]->tvd_irq_ctl.dwval |= (1<<irq_id);
 	return 0;
 }
 
-s32 tvd_irq_disable(u32 sel, TVD_IRQ_T irq_id)
+s32 tvd_irq_disable(u32 sel,TVD_IRQ_T irq_id)
 {
 	tvd_device[sel]->tvd_irq_ctl.dwval &= ~(1<<irq_id);
 	return 0;
 }
 
-s32 tvd_irq_status_get(u32 sel, TVD_IRQ_T irq_id, u32 *irq_status)
+s32 tvd_irq_status_get(u32 sel,TVD_IRQ_T irq_id,u32* irq_status)
 {
 	*irq_status = (tvd_device[sel]->tvd_irq_status.dwval >> irq_id) & 0x1;
 	return 0;
 }
 
-s32 tvd_irq_status_clear(u32 sel, TVD_IRQ_T irq_id)
+s32 tvd_irq_status_clear(u32 sel,TVD_IRQ_T irq_id)
 {
 	tvd_device[sel]->tvd_irq_status.dwval = (1<<irq_id);
 	return 0;
@@ -480,7 +388,7 @@ s32 tvd_set_saturation(u32 sel, u32 saturation)
 	return 0;
 }
 
-s32 tvd_set_luma(u32 sel, u32 luma)
+s32 tvd_set_luma(u32 sel,u32 luma)
 {
 	tvd_device[sel]->tvd_enhance1.bits.bright_offset = luma;
 	return 0;
@@ -505,20 +413,13 @@ u32 tvd_get_contrast(u32 sel)
 	return tvd_device[sel]->tvd_enhance1.bits.contrast_gain;
 }
 
-/**
- * @name       tvd_adc_config
- * @brief      config tvd adc and enable it
- * @param[IN]  adc: the index of tvd module
- * @param[IN]  en: 1: enable; 0: disable
- * @return    0 if success
- */
-s32 tvd_adc_config(u32 adc, u32 en)
+s32 tvd_adc_config(u32 adc)
 {
 	volatile tvd_adc_cfg_reg_t *adc_cfg_p;
 	volatile tvd_adc_ctl_reg_t *adc_ctl_p;
 	volatile tvd_adc_dig_reg_t *adc_dig_p;
 
-	if (adc > 3 || en > 1)
+	if (adc > 3)
 		return -1;
 
 	adc_cfg_p = (adc == 0) ? &tvd_top_dev->tvd_adc0_cfg :
@@ -546,9 +447,9 @@ s32 tvd_adc_config(u32 adc, u32 en)
 	adc_cfg_p->bits.clp_step = 7;
 	adc_cfg_p->bits.data_dly = 1;
 	adc_dig_p->bits.lpf_dig_sel = 0;
-	adc_dig_p->bits.lpf_dig_en = en;
-	adc_ctl_p->bits.afe_en = en;
-	adc_ctl_p->bits.adc_en = en;
+	adc_dig_p->bits.lpf_dig_en = 1;
+	adc_ctl_p->bits.afe_en = 1;
+	adc_ctl_p->bits.adc_en = 1;
 	return 0;
 }
 
@@ -573,6 +474,7 @@ u32 tvd_dbgmode_dump_data(u32 chan_sel, u32 mode, uintptr_t dump_dst_addr,
 			  u32 data_length)
 {
 	u32 i = 0;
+	u32 timeout = 0;
 	/* tvd configuration backup */
 	__tvd_dev_t *tvd_dev_bak = kmalloc(sizeof(__tvd_dev_t),
 	    GFP_KERNEL | __GFP_ZERO);
@@ -605,6 +507,8 @@ u32 tvd_dbgmode_dump_data(u32 chan_sel, u32 mode, uintptr_t dump_dst_addr,
 	    tvd_device[chan_sel]->tvd_debug1.bits.tvin_lock_high;
 	tvd_dev_bak->tvd_en.bits.tvd_en_ch =
 	    tvd_device[chan_sel]->tvd_en.bits.tvd_en_ch;
+	tvd_dev_bak->tvd_yc_sep1.bits._3d_comb_filter_dis =
+		tvd_device[chan_sel]->tvd_yc_sep1.bits._3d_comb_filter_dis;
 
 	tvd_top_bak->tvd_adc_dump.bits.adc_test_mode =
 	    tvd_top_dev->tvd_adc_dump.bits.adc_test_mode;
@@ -643,10 +547,11 @@ u32 tvd_dbgmode_dump_data(u32 chan_sel, u32 mode, uintptr_t dump_dst_addr,
 	tvd_device[chan_sel]->tvd_debug1.bits.tvin_lock_high = 0;
 
 	/* delay for lock finish */
-	msleep(50);
-
-	while (tvd_top_dev->tvd_adc_dump.bits.adc_wb_start)
-		;
+	while (tvd_top_dev->tvd_adc_dump.bits.adc_wb_start && (timeout < 1000)) {
+		timeout++;
+		udelay(50);
+	}
+	timeout = 0;
 
 	tvd_top_dev->tvd_adc_dump.bits.adc_test_mode = 1;
 
@@ -673,9 +578,13 @@ u32 tvd_dbgmode_dump_data(u32 chan_sel, u32 mode, uintptr_t dump_dst_addr,
 
 	tvd_top_dev->tvd_adc_dump.bits.adc_wb_start = 1;
 	/* wait for dump finish */
-	while (tvd_top_dev->tvd_adc_dump.bits.adc_wb_start)
-		;
-
+	while (tvd_top_dev->tvd_adc_dump.bits.adc_wb_start && (timeout < 1000)) {
+		timeout++;
+		udelay(50);
+	}
+	tvd_device[chan_sel]->tvd_yc_sep1.bits._3d_comb_filter_dis = 1;
+	tvd_top_dev->tvd_3d_ctl1.bits.tvd_en_3d_dma = 0;
+	tvd_top_dev->tvd_3d_ctl1.bits.comb_3d_en = 0;
 	/* reset tvd configuration */
 	tvd_device[chan_sel]->tvd_debug7.bits.agc_half_en =
 	    tvd_dev_bak->tvd_debug7.bits.agc_half_en;
@@ -717,8 +626,9 @@ u32 tvd_dbgmode_dump_data(u32 chan_sel, u32 mode, uintptr_t dump_dst_addr,
 	tvd_top_dev->tvd_3d_ctl1.bits.tvd_en_3d_dma =
 	    tvd_top_bak->tvd_3d_ctl1.bits.tvd_en_3d_dma;
 	tvd_top_dev->tvd_3d_ctl1.bits.comb_3d_en =
-	    tvd_top_bak->tvd_3d_ctl1.bits.comb_3d_en;
-
+		tvd_top_bak->tvd_3d_ctl1.bits.comb_3d_en;
+	tvd_device[chan_sel]->tvd_yc_sep1.bits._3d_comb_filter_dis =
+		tvd_dev_bak->tvd_yc_sep1.bits._3d_comb_filter_dis;
 	kfree(tvd_top_bak);
 	kfree(tvd_dev_bak);
 
@@ -748,3 +658,4 @@ void tvd_cagc_config(u32 sel, u32 enable)
 {
 	tvd_device[sel]->tvd_clamp_agc1.bits.cagc_en = enable;
 }
+

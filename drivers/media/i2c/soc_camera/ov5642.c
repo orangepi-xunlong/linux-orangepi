@@ -24,7 +24,7 @@
 #include <linux/v4l2-mediabus.h>
 
 #include <media/soc_camera.h>
-#include <media/v4l2-clk.h>
+#include <media/v4l2-chip-ident.h>
 #include <media/v4l2-subdev.h>
 
 /* OV5642 registers */
@@ -602,7 +602,7 @@ static struct regval_list ov5642_default_regs_finalise[] = {
 };
 
 struct ov5642_datafmt {
-	u32	code;
+	enum v4l2_mbus_pixelcode	code;
 	enum v4l2_colorspace		colorspace;
 };
 
@@ -610,7 +610,6 @@ struct ov5642 {
 	struct v4l2_subdev		subdev;
 	const struct ov5642_datafmt	*fmt;
 	struct v4l2_rect                crop_rect;
-	struct v4l2_clk			*clk;
 
 	/* blanking information */
 	int total_width;
@@ -618,7 +617,7 @@ struct ov5642 {
 };
 
 static const struct ov5642_datafmt ov5642_colour_fmts[] = {
-	{MEDIA_BUS_FMT_UYVY8_2X8, V4L2_COLORSPACE_JPEG},
+	{V4L2_MBUS_FMT_UYVY8_2X8, V4L2_COLORSPACE_JPEG},
 };
 
 static struct ov5642 *to_ov5642(const struct i2c_client *client)
@@ -628,7 +627,7 @@ static struct ov5642 *to_ov5642(const struct i2c_client *client)
 
 /* Find a data format by a pixel code in an array */
 static const struct ov5642_datafmt
-			*ov5642_find_datafmt(u32 code)
+			*ov5642_find_datafmt(enum v4l2_mbus_pixelcode code)
 {
 	int i;
 
@@ -642,7 +641,7 @@ static const struct ov5642_datafmt
 static int reg_read(struct i2c_client *client, u16 reg, u8 *val)
 {
 	int ret;
-	/* We have 16-bit i2c addresses - care for endianness */
+	/* We have 16-bit i2c addresses - care for endianess */
 	unsigned char data[2] = { reg >> 8, reg & 0xff };
 
 	ret = i2c_master_send(client, data, 2);
@@ -786,49 +785,49 @@ static int ov5642_set_resolution(struct v4l2_subdev *sd)
 	return ret;
 }
 
-static int ov5642_set_fmt(struct v4l2_subdev *sd,
-		struct v4l2_subdev_pad_config *cfg,
-		struct v4l2_subdev_format *format)
+static int ov5642_try_fmt(struct v4l2_subdev *sd,
+			  struct v4l2_mbus_framefmt *mf)
 {
-	struct v4l2_mbus_framefmt *mf = &format->format;
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct ov5642 *priv = to_ov5642(client);
 	const struct ov5642_datafmt *fmt = ov5642_find_datafmt(mf->code);
-
-	if (format->pad)
-		return -EINVAL;
 
 	mf->width = priv->crop_rect.width;
 	mf->height = priv->crop_rect.height;
 
 	if (!fmt) {
-		if (format->which == V4L2_SUBDEV_FORMAT_ACTIVE)
-			return -EINVAL;
 		mf->code	= ov5642_colour_fmts[0].code;
 		mf->colorspace	= ov5642_colour_fmts[0].colorspace;
 	}
 
 	mf->field	= V4L2_FIELD_NONE;
 
-	if (format->which == V4L2_SUBDEV_FORMAT_ACTIVE)
-		priv->fmt = ov5642_find_datafmt(mf->code);
-	else
-		cfg->try_fmt = *mf;
 	return 0;
 }
 
-static int ov5642_get_fmt(struct v4l2_subdev *sd,
-		struct v4l2_subdev_pad_config *cfg,
-		struct v4l2_subdev_format *format)
+static int ov5642_s_fmt(struct v4l2_subdev *sd,
+			struct v4l2_mbus_framefmt *mf)
 {
-	struct v4l2_mbus_framefmt *mf = &format->format;
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct ov5642 *priv = to_ov5642(client);
+
+	/* MIPI CSI could have changed the format, double-check */
+	if (!ov5642_find_datafmt(mf->code))
+		return -EINVAL;
+
+	ov5642_try_fmt(sd, mf);
+	priv->fmt = ov5642_find_datafmt(mf->code);
+
+	return 0;
+}
+
+static int ov5642_g_fmt(struct v4l2_subdev *sd,
+			struct v4l2_mbus_framefmt *mf)
+{
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct ov5642 *priv = to_ov5642(client);
 
 	const struct ov5642_datafmt *fmt = priv->fmt;
-
-	if (format->pad)
-		return -EINVAL;
 
 	mf->code	= fmt->code;
 	mf->colorspace	= fmt->colorspace;
@@ -839,29 +838,39 @@ static int ov5642_get_fmt(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int ov5642_enum_mbus_code(struct v4l2_subdev *sd,
-		struct v4l2_subdev_pad_config *cfg,
-		struct v4l2_subdev_mbus_code_enum *code)
+static int ov5642_enum_fmt(struct v4l2_subdev *sd, unsigned int index,
+			   enum v4l2_mbus_pixelcode *code)
 {
-	if (code->pad || code->index >= ARRAY_SIZE(ov5642_colour_fmts))
+	if (index >= ARRAY_SIZE(ov5642_colour_fmts))
 		return -EINVAL;
 
-	code->code = ov5642_colour_fmts[code->index].code;
+	*code = ov5642_colour_fmts[index].code;
 	return 0;
 }
 
-static int ov5642_set_selection(struct v4l2_subdev *sd,
-		struct v4l2_subdev_pad_config *cfg,
-		struct v4l2_subdev_selection *sel)
+static int ov5642_g_chip_ident(struct v4l2_subdev *sd,
+			       struct v4l2_dbg_chip_ident *id)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+
+	if (id->match.type != V4L2_CHIP_MATCH_I2C_ADDR)
+		return -EINVAL;
+
+	if (id->match.addr != client->addr)
+		return -ENODEV;
+
+	id->ident	= V4L2_IDENT_OV5642;
+	id->revision	= 0;
+
+	return 0;
+}
+
+static int ov5642_s_crop(struct v4l2_subdev *sd, const struct v4l2_crop *a)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct ov5642 *priv = to_ov5642(client);
-	struct v4l2_rect rect = sel->r;
+	struct v4l2_rect rect = a->c;
 	int ret;
-
-	if (sel->which != V4L2_SUBDEV_FORMAT_ACTIVE ||
-	    sel->target != V4L2_SEL_TGT_CROP)
-		return -EINVAL;
 
 	v4l_bound_align_image(&rect.width, 48, OV5642_MAX_WIDTH, 1,
 			      &rect.height, 32, OV5642_MAX_HEIGHT, 1, 0);
@@ -884,30 +893,32 @@ static int ov5642_set_selection(struct v4l2_subdev *sd,
 	return ret;
 }
 
-static int ov5642_get_selection(struct v4l2_subdev *sd,
-		struct v4l2_subdev_pad_config *cfg,
-		struct v4l2_subdev_selection *sel)
+static int ov5642_g_crop(struct v4l2_subdev *sd, struct v4l2_crop *a)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct ov5642 *priv = to_ov5642(client);
+	struct v4l2_rect *rect = &a->c;
 
-	if (sel->which != V4L2_SUBDEV_FORMAT_ACTIVE)
+	if (a->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
 		return -EINVAL;
 
-	switch (sel->target) {
-	case V4L2_SEL_TGT_CROP_BOUNDS:
-	case V4L2_SEL_TGT_CROP_DEFAULT:
-		sel->r.left = 0;
-		sel->r.top = 0;
-		sel->r.width = OV5642_MAX_WIDTH;
-		sel->r.height = OV5642_MAX_HEIGHT;
-		return 0;
-	case V4L2_SEL_TGT_CROP:
-		sel->r = priv->crop_rect;
-		return 0;
-	default:
-		return -EINVAL;
-	}
+	*rect = priv->crop_rect;
+
+	return 0;
+}
+
+static int ov5642_cropcap(struct v4l2_subdev *sd, struct v4l2_cropcap *a)
+{
+	a->bounds.left			= 0;
+	a->bounds.top			= 0;
+	a->bounds.width			= OV5642_MAX_WIDTH;
+	a->bounds.height		= OV5642_MAX_HEIGHT;
+	a->defrect			= a->bounds;
+	a->type				= V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	a->pixelaspect.numerator	= 1;
+	a->pixelaspect.denominator	= 1;
+
+	return 0;
 }
 
 static int ov5642_g_mbus_config(struct v4l2_subdev *sd,
@@ -924,13 +935,12 @@ static int ov5642_s_power(struct v4l2_subdev *sd, int on)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct soc_camera_subdev_desc *ssdd = soc_camera_i2c_to_desc(client);
-	struct ov5642 *priv = to_ov5642(client);
 	int ret;
 
 	if (!on)
-		return soc_camera_power_off(&client->dev, ssdd, priv->clk);
+		return soc_camera_power_off(&client->dev, ssdd);
 
-	ret = soc_camera_power_on(&client->dev, ssdd, priv->clk);
+	ret = soc_camera_power_on(&client->dev, ssdd);
 	if (ret < 0)
 		return ret;
 
@@ -944,19 +954,19 @@ static int ov5642_s_power(struct v4l2_subdev *sd, int on)
 }
 
 static struct v4l2_subdev_video_ops ov5642_subdev_video_ops = {
+	.s_mbus_fmt	= ov5642_s_fmt,
+	.g_mbus_fmt	= ov5642_g_fmt,
+	.try_mbus_fmt	= ov5642_try_fmt,
+	.enum_mbus_fmt	= ov5642_enum_fmt,
+	.s_crop		= ov5642_s_crop,
+	.g_crop		= ov5642_g_crop,
+	.cropcap	= ov5642_cropcap,
 	.g_mbus_config	= ov5642_g_mbus_config,
-};
-
-static const struct v4l2_subdev_pad_ops ov5642_subdev_pad_ops = {
-	.enum_mbus_code = ov5642_enum_mbus_code,
-	.get_selection	= ov5642_get_selection,
-	.set_selection	= ov5642_set_selection,
-	.get_fmt	= ov5642_get_fmt,
-	.set_fmt	= ov5642_set_fmt,
 };
 
 static struct v4l2_subdev_core_ops ov5642_subdev_core_ops = {
 	.s_power	= ov5642_s_power,
+	.g_chip_ident	= ov5642_g_chip_ident,
 #ifdef CONFIG_VIDEO_ADV_DEBUG
 	.g_register	= ov5642_get_register,
 	.s_register	= ov5642_set_register,
@@ -966,7 +976,6 @@ static struct v4l2_subdev_core_ops ov5642_subdev_core_ops = {
 static struct v4l2_subdev_ops ov5642_subdev_ops = {
 	.core	= &ov5642_subdev_core_ops,
 	.video	= &ov5642_subdev_video_ops,
-	.pad	= &ov5642_subdev_pad_ops,
 };
 
 static int ov5642_video_probe(struct i2c_client *client)
@@ -1012,7 +1021,6 @@ static int ov5642_probe(struct i2c_client *client,
 {
 	struct ov5642 *priv;
 	struct soc_camera_subdev_desc *ssdd = soc_camera_i2c_to_desc(client);
-	int ret;
 
 	if (!ssdd) {
 		dev_err(&client->dev, "OV5642: missing platform data!\n");
@@ -1034,23 +1042,13 @@ static int ov5642_probe(struct i2c_client *client,
 	priv->total_width = OV5642_DEFAULT_WIDTH + BLANKING_EXTRA_WIDTH;
 	priv->total_height = BLANKING_MIN_HEIGHT;
 
-	priv->clk = v4l2_clk_get(&client->dev, "mclk");
-	if (IS_ERR(priv->clk))
-		return PTR_ERR(priv->clk);
-
-	ret = ov5642_video_probe(client);
-	if (ret < 0)
-		v4l2_clk_put(priv->clk);
-
-	return ret;
+	return ov5642_video_probe(client);
 }
 
 static int ov5642_remove(struct i2c_client *client)
 {
 	struct soc_camera_subdev_desc *ssdd = soc_camera_i2c_to_desc(client);
-	struct ov5642 *priv = to_ov5642(client);
 
-	v4l2_clk_put(priv->clk);
 	if (ssdd->free_bus)
 		ssdd->free_bus(ssdd);
 

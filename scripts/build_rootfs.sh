@@ -23,6 +23,7 @@ extract_rootfs()
     fi
 }
 
+
 if [ $# -ne 2 ]; then
 	echo -e "please input correct parameters"
 	echo -e "\t[build.sh e rootf.cpio.gz] to extract the rootfs template to skel folder"
@@ -39,3 +40,4 @@ else
 	echo "Wrong arguments"
 	exit 1
 fi
+

@@ -39,11 +39,17 @@
 #include <linux/hash.h>
 #include <linux/ratelimit.h>
 #include <asm/unaligned.h>
+#include <scsi/scsi.h>
+#include <scsi/scsi_host.h>
+#include <scsi/scsi_device.h>
+#include <scsi/scsi_cmnd.h>
 #include <scsi/libfc.h>
 #include <scsi/fc_encode.h>
 
 #include <target/target_core_base.h>
 #include <target/target_core_fabric.h>
+#include <target/target_core_configfs.h>
+#include <target/configfs_macros.h>
 
 #include "tcm_fc.h"
 
@@ -76,10 +82,6 @@ int ft_queue_data_in(struct se_cmd *se_cmd)
 
 	if (cmd->aborted)
 		return 0;
-
-	if (se_cmd->scsi_status == SAM_STAT_TASK_SET_FULL)
-		goto queue_status;
-
 	ep = fc_seq_exch(cmd->seq);
 	lport = ep->lp;
 	cmd->seq = lport->tt.seq_start_next(cmd->seq);
@@ -154,9 +156,9 @@ int ft_queue_data_in(struct se_cmd *se_cmd)
 			BUG_ON(!page);
 			from = kmap_atomic(page + (mem_off >> PAGE_SHIFT));
 			page_addr = from;
-			from += offset_in_page(mem_off);
+			from += mem_off & ~PAGE_MASK;
 			tlen = min(tlen, (size_t)(PAGE_SIZE -
-						offset_in_page(mem_off)));
+						(mem_off & ~PAGE_MASK)));
 			memcpy(to, from, tlen);
 			kunmap_atomic(page_addr);
 			to += tlen;
@@ -176,23 +178,14 @@ int ft_queue_data_in(struct se_cmd *se_cmd)
 			       FC_TYPE_FCP, f_ctl, fh_off);
 		error = lport->tt.seq_send(lport, seq, fp);
 		if (error) {
-			pr_info_ratelimited("%s: Failed to send frame %p, "
+			/* XXX For now, initiator will retry */
+			pr_err_ratelimited("%s: Failed to send frame %p, "
 						"xid <0x%x>, remaining %zu, "
 						"lso_max <0x%x>\n",
 						__func__, fp, ep->xid,
 						remaining, lport->lso_max);
-			/*
-			 * Go ahead and set TASK_SET_FULL status ignoring the
-			 * rest of the DataIN, and immediately attempt to
-			 * send the response via ft_queue_status() in order
-			 * to notify the initiator that it should reduce it's
-			 * per LUN queue_depth.
-			 */
-			se_cmd->scsi_status = SAM_STAT_TASK_SET_FULL;
-			break;
 		}
 	}
-queue_status:
 	return ft_queue_status(se_cmd);
 }
 
@@ -314,9 +307,9 @@ void ft_recv_write_data(struct ft_cmd *cmd, struct fc_frame *fp)
 
 		to = kmap_atomic(page + (mem_off >> PAGE_SHIFT));
 		page_addr = to;
-		to += offset_in_page(mem_off);
+		to += mem_off & ~PAGE_MASK;
 		tlen = min(tlen, (size_t)(PAGE_SIZE -
-					  offset_in_page(mem_off)));
+					  (mem_off & ~PAGE_MASK)));
 		memcpy(to, from, tlen);
 		kunmap_atomic(page_addr);
 
@@ -353,7 +346,7 @@ void ft_invl_hw_context(struct ft_cmd *cmd)
 		ep = fc_seq_exch(seq);
 		if (ep) {
 			lport = ep->lp;
-			if (lport && (ep->xid <= lport->lro_xid)) {
+			if (lport && (ep->xid <= lport->lro_xid))
 				/*
 				 * "ddp_done" trigger invalidation of HW
 				 * specific DDP context
@@ -368,7 +361,6 @@ void ft_invl_hw_context(struct ft_cmd *cmd)
 				 * identified using ep->xid)
 				 */
 				cmd->was_ddp_setup = 0;
-			}
 		}
 	}
 }

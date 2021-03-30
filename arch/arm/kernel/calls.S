@@ -389,23 +389,11 @@
 		CALL(sys_process_vm_writev)
 		CALL(sys_kcmp)
 		CALL(sys_finit_module)
-/* 380 */	CALL(sys_sched_setattr)
-		CALL(sys_sched_getattr)
-		CALL(sys_renameat2)
+/* 380 */	CALL(sys_ni_syscall)		/* reserved sys_sched_setattr */
+		CALL(sys_ni_syscall)		/* reserved sys_sched_getattr */
+		CALL(sys_ni_syscall)		/* reserved sys_renameat2     */
 		CALL(sys_seccomp)
-		CALL(sys_getrandom)
-/* 385 */	CALL(sys_memfd_create)
-		CALL(sys_bpf)
-		CALL(sys_execveat)
-		CALL(sys_userfaultfd)
-		CALL(sys_membarrier)
-/* 390 */	CALL(sys_mlock2)
-		CALL(sys_copy_file_range)
-		CALL(sys_preadv2)
-		CALL(sys_pwritev2)
-		CALL(sys_pkey_mprotect)
-/* 395 */	CALL(sys_pkey_alloc)
-		CALL(sys_pkey_free)
+
 #ifndef syscalls_counted
 .equ syscalls_padding, ((NR_syscalls + 3) & ~3) - NR_syscalls
 #define syscalls_counted

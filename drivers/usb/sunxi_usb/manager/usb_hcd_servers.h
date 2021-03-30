@@ -13,15 +13,11 @@
  *
  */
 
-#ifndef __USB_HCD_SERVERS_H__
-#define __USB_HCD_SERVERS_H__
-
-extern int sunxi_usb_disable_ehci(__u32 usbc_no);
-extern int sunxi_usb_enable_ehci(__u32 usbc_no);
-extern int sunxi_usb_disable_ohci(__u32 usbc_no);
-extern int sunxi_usb_enable_ohci(__u32 usbc_no);
+#ifndef  __USB_HCD_SERVERS_H__
+#define  __USB_HCD_SERVERS_H__
 
 int sunxi_usb_disable_hcd(__u32 usbc_no);
 int sunxi_usb_enable_hcd(__u32 usbc_no);
 
-#endif /* __USB_HCD_SERVERS_H__ */
+#endif  //__USB_HCD_SERVERS_H__
+

@@ -17,6 +17,7 @@
 #include <linux/export.h>
 #include <linux/crash_dump.h>
 #include <linux/delay.h>
+#include <linux/init.h>
 #include <linux/irq.h>
 #include <linux/types.h>
 
@@ -48,8 +49,8 @@ int crashing_cpu = -1;
 static int time_to_dump;
 
 #define CRASH_HANDLER_MAX 3
-/* List of shutdown handles */
-static crash_shutdown_t crash_shutdown_handles[CRASH_HANDLER_MAX];
+/* NULL terminated list of shutdown handles */
+static crash_shutdown_t crash_shutdown_handles[CRASH_HANDLER_MAX+1];
 static DEFINE_SPINLOCK(crash_handlers_lock);
 
 static unsigned long crash_shutdown_buf[JMP_BUF_LEN];
@@ -65,7 +66,7 @@ static int handle_fault(struct pt_regs *regs)
 #ifdef CONFIG_SMP
 
 static atomic_t cpus_in_crash;
-static void crash_ipi_callback(struct pt_regs *regs)
+void crash_ipi_callback(struct pt_regs *regs)
 {
 	static cpumask_t cpus_state_saved = CPU_MASK_NONE;
 
@@ -81,7 +82,7 @@ static void crash_ipi_callback(struct pt_regs *regs)
 	}
 
 	atomic_inc(&cpus_in_crash);
-	smp_mb__after_atomic();
+	smp_mb__after_atomic_inc();
 
 	/*
 	 * Starting the kdump boot.
@@ -221,8 +222,8 @@ void crash_kexec_secondary(struct pt_regs *regs)
 #endif	/* CONFIG_SMP */
 
 /* wait for all the CPUs to hit real mode but timeout if they don't come in */
-#if defined(CONFIG_SMP) && defined(CONFIG_PPC64)
-static void __maybe_unused crash_kexec_wait_realmode(int cpu)
+#if defined(CONFIG_SMP) && defined(CONFIG_PPC_STD_MMU_64)
+static void crash_kexec_wait_realmode(int cpu)
 {
 	unsigned int msecs;
 	int i;
@@ -244,7 +245,7 @@ static void __maybe_unused crash_kexec_wait_realmode(int cpu)
 }
 #else
 static inline void crash_kexec_wait_realmode(int cpu) {}
-#endif	/* CONFIG_SMP && CONFIG_PPC64 */
+#endif	/* CONFIG_SMP && CONFIG_PPC_STD_MMU_64 */
 
 /*
  * Register a function to be called on shutdown.  Only use this if you
@@ -288,14 +289,9 @@ int crash_shutdown_unregister(crash_shutdown_t handler)
 		rc = 1;
 	} else {
 		/* Shift handles down */
-		for (; i < (CRASH_HANDLER_MAX - 1); i++)
+		for (; crash_shutdown_handles[i]; i++)
 			crash_shutdown_handles[i] =
 				crash_shutdown_handles[i+1];
-		/*
-		 * Reset last entry to NULL now that it has been shifted down,
-		 * this will allow new handles to be added here.
-		 */
-		crash_shutdown_handles[i] = NULL;
 		rc = 0;
 	}
 
@@ -351,7 +347,7 @@ void default_machine_crash_shutdown(struct pt_regs *regs)
 	old_handler = __debugger_fault_handler;
 	__debugger_fault_handler = handle_fault;
 	crash_shutdown_cpu = smp_processor_id();
-	for (i = 0; i < CRASH_HANDLER_MAX && crash_shutdown_handles[i]; i++) {
+	for (i = 0; crash_shutdown_handles[i]; i++) {
 		if (setjmp(crash_shutdown_buf) == 0) {
 			/*
 			 * Insert syncs and delay to ensure

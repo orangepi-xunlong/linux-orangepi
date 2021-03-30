@@ -35,7 +35,8 @@ int fivm_open_verify(struct file *file, const char *pathname, int mask)
 
 int fivm_register_func(
 		int (*mmap_verify)(struct file *, unsigned long),
-		int (*open_verify)(struct file *, const char *, int))
+		int (*open_verify)(struct file *, const char *, int)
+		)
 {
 	memset(&fivm_ops, 0, sizeof(fivm_ops));
 	fivm_ops.mmap_verify = mmap_verify;

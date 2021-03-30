@@ -18,7 +18,7 @@
 #include <linux/i2c.h>
 #include <linux/io.h>
 #include <linux/clk.h>
-#include <linux/platform_data/at24.h>
+#include <linux/i2c/at24.h>
 #include <linux/leds.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
@@ -40,8 +40,8 @@
 #include <linux/platform_data/mtd-davinci.h>
 #include <linux/platform_data/keyscan-davinci.h>
 
-#include <media/i2c/ths7303.h>
-#include <media/i2c/tvp514x.h>
+#include <media/ths7303.h>
+#include <media/tvp514x.h>
 
 #include "davinci.h"
 
@@ -174,6 +174,10 @@ static struct at24_platform_data eeprom_info = {
 	.flags          = AT24_FLAG_ADDR16,
 	.setup          = davinci_get_mac_addr,
 	.context	= (void *)0x7f00,
+};
+
+static struct snd_platform_data dm365_evm_snd_data = {
+	.asp_chan_q = EVENTQ_3,
 };
 
 static struct i2c_board_info i2c_info[] = {
@@ -481,7 +485,7 @@ static struct vpbe_output dm365evm_vpbe_outputs[] = {
 		.default_mode	= "ntsc",
 		.num_modes	= ARRAY_SIZE(dm365evm_enc_std_timing),
 		.modes		= dm365evm_enc_std_timing,
-		.if_params	= MEDIA_BUS_FMT_FIXED,
+		.if_params	= V4L2_MBUS_FMT_FIXED,
 	},
 	{
 		.output		= {
@@ -494,17 +498,18 @@ static struct vpbe_output dm365evm_vpbe_outputs[] = {
 		.default_mode	= "480p59_94",
 		.num_modes	= ARRAY_SIZE(dm365evm_enc_preset_timing),
 		.modes		= dm365evm_enc_preset_timing,
-		.if_params	= MEDIA_BUS_FMT_FIXED,
+		.if_params	= V4L2_MBUS_FMT_FIXED,
 	},
 };
 
 /*
  * Amplifiers on the board
  */
-static struct ths7303_platform_data ths7303_pdata = {
+struct ths7303_platform_data ths7303_pdata = {
 	.ch_1 = 3,
 	.ch_2 = 3,
 	.ch_3 = 3,
+	.init_enable = 1,
 };
 
 static struct amp_config_info vpbe_amp = {
@@ -714,6 +719,10 @@ fail:
 	/* REVISIT export switches: NTSC/PAL (SW5.6), EXTRA1 (SW5.2), etc */
 }
 
+static struct davinci_uart_config uart_config __initdata = {
+	.enabled_uarts = (1 << 0),
+};
+
 static void __init dm365_evm_map_io(void)
 {
 	dm365_init();
@@ -739,14 +748,8 @@ static struct spi_board_info dm365_evm_spi_info[] __initconst = {
 
 static __init void dm365_evm_init(void)
 {
-	int ret;
-
-	ret = dm365_gpio_register();
-	if (ret)
-		pr_warn("%s: GPIO init failed: %d\n", __func__, ret);
-
 	evm_init_i2c();
-	davinci_serial_init(dm365_serial_device);
+	davinci_serial_init(&uart_config);
 
 	dm365evm_emac_configure();
 	dm365evm_mmc_configure();
@@ -759,9 +762,9 @@ static __init void dm365_evm_init(void)
 	evm_init_cpld();
 
 #ifdef CONFIG_SND_DM365_AIC3X_CODEC
-	dm365_init_asp();
+	dm365_init_asp(&dm365_evm_snd_data);
 #elif defined(CONFIG_SND_DM365_VOICE_CODEC)
-	dm365_init_vc();
+	dm365_init_vc(&dm365_evm_snd_data);
 #endif
 	dm365_init_rtc();
 	dm365_init_ks(&dm365evm_ks_data);

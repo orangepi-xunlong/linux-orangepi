@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2013, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -41,8 +41,7 @@
  * POSSIBILITY OF SUCH DAMAGES.
  */
 
-#define EXPORT_ACPI_INTERFACES
-
+#include <linux/export.h>
 #include <acpi/acpi.h>
 #include "accommon.h"
 
@@ -101,13 +100,8 @@ acpi_status acpi_get_timer(u32 * ticks)
 		return_ACPI_STATUS(AE_BAD_PARAMETER);
 	}
 
-	/* ACPI 5.0A: PM Timer is optional */
-
-	if (!acpi_gbl_FADT.xpm_timer_block.address) {
-		return_ACPI_STATUS(AE_SUPPORT);
-	}
-
 	status = acpi_hw_read(ticks, &acpi_gbl_FADT.xpm_timer_block);
+
 	return_ACPI_STATUS(status);
 }
 
@@ -152,12 +146,6 @@ acpi_get_timer_duration(u32 start_ticks, u32 end_ticks, u32 * time_elapsed)
 
 	if (!time_elapsed) {
 		return_ACPI_STATUS(AE_BAD_PARAMETER);
-	}
-
-	/* ACPI 5.0A: PM Timer is optional */
-
-	if (!acpi_gbl_FADT.xpm_timer_block.address) {
-		return_ACPI_STATUS(AE_SUPPORT);
 	}
 
 	/*

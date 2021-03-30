@@ -34,6 +34,7 @@
 #include <asm/uaccess.h>
 
 #include "signal32.h"
+#include "sys32.h"
 
 #define DEBUG_COMPAT_SIG 0 
 #define DEBUG_COMPAT_SIG_LEVEL 2
@@ -319,7 +320,7 @@ copy_siginfo_from_user32 (siginfo_t *to, compat_siginfo_t __user *from)
 }
 
 int
-copy_siginfo_to_user32 (compat_siginfo_t __user *to, const siginfo_t *from)
+copy_siginfo_to_user32 (compat_siginfo_t __user *to, siginfo_t *from)
 {
 	compat_uptr_t addr;
 	compat_int_t val;
@@ -370,11 +371,6 @@ copy_siginfo_to_user32 (compat_siginfo_t __user *to, const siginfo_t *from)
 			err |= __put_user(from->si_pid, &to->si_pid);
 			val = (compat_int_t)from->si_int;
 			err |= __put_user(val, &to->si_int);
-			break;
-		case __SI_SYS >> 16:
-			err |= __put_user(ptr_to_compat(from->si_call_addr), &to->si_call_addr);
-			err |= __put_user(from->si_syscall, &to->si_syscall);
-			err |= __put_user(from->si_arch, &to->si_arch);
 			break;
 		}
 	}

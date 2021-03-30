@@ -46,7 +46,7 @@ struct vmwgfx_gmrid_man {
 
 static int vmw_gmrid_man_get_node(struct ttm_mem_type_manager *man,
 				  struct ttm_buffer_object *bo,
-				  const struct ttm_place *place,
+				  struct ttm_placement *placement,
 				  struct ttm_mem_reg *mem)
 {
 	struct vmwgfx_gmrid_man *gman =
@@ -125,21 +125,10 @@ static int vmw_gmrid_man_init(struct ttm_mem_type_manager *man,
 		return -ENOMEM;
 
 	spin_lock_init(&gman->lock);
+	gman->max_gmr_pages = dev_priv->max_gmr_pages;
 	gman->used_gmr_pages = 0;
 	ida_init(&gman->gmr_ida);
-
-	switch (p_size) {
-	case VMW_PL_GMR:
-		gman->max_gmr_ids = dev_priv->max_gmr_ids;
-		gman->max_gmr_pages = dev_priv->max_gmr_pages;
-		break;
-	case VMW_PL_MOB:
-		gman->max_gmr_ids = VMWGFX_NUM_MOB;
-		gman->max_gmr_pages = dev_priv->max_mob_pages;
-		break;
-	default:
-		BUG();
-	}
+	gman->max_gmr_ids = p_size;
 	man->priv = (void *) gman;
 	return 0;
 }

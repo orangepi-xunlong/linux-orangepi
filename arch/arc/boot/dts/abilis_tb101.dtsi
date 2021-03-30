@@ -21,8 +21,14 @@
 
 /include/ "abilis_tb10x.dtsi"
 
+/* interrupt specifiers
+ * --------------------
+ * 0: rising, 1: low, 2: high, 3: falling,
+ */
 
 / {
+	clock-frequency		= <500000000>;	/* 500 MHZ */
+
 	soc100 {
 		bus-frequency	= <166666666>;
 
@@ -41,133 +47,133 @@
 		iomux: iomux@FF10601c {
 			/* Port 1 */
 			pctl_tsin_s0: pctl-tsin-s0 {   /* Serial TS-in 0 */
-				abilis,function = "mis0";
+				pingrp = "mis0_pins";
 			};
 			pctl_tsin_s1: pctl-tsin-s1 {   /* Serial TS-in 1 */
-				abilis,function = "mis1";
+				pingrp = "mis1_pins";
 			};
 			pctl_gpio_a: pctl-gpio-a {     /* GPIO bank A */
-				abilis,function = "gpioa";
+				pingrp = "gpioa_pins";
 			};
 			pctl_tsin_p1: pctl-tsin-p1 {   /* Parallel TS-in 1 */
-				abilis,function = "mip1";
+				pingrp = "mip1_pins";
 			};
 			/* Port 2 */
 			pctl_tsin_s2: pctl-tsin-s2 {   /* Serial TS-in 2 */
-				abilis,function = "mis2";
+				pingrp = "mis2_pins";
 			};
 			pctl_tsin_s3: pctl-tsin-s3 {   /* Serial TS-in 3 */
-				abilis,function = "mis3";
+				pingrp = "mis3_pins";
 			};
 			pctl_gpio_c: pctl-gpio-c {     /* GPIO bank C */
-				abilis,function = "gpioc";
+				pingrp = "gpioc_pins";
 			};
 			pctl_tsin_p3: pctl-tsin-p3 {   /* Parallel TS-in 3 */
-				abilis,function = "mip3";
+				pingrp = "mip3_pins";
 			};
 			/* Port 3 */
 			pctl_tsin_s4: pctl-tsin-s4 {   /* Serial TS-in 4 */
-				abilis,function = "mis4";
+				pingrp = "mis4_pins";
 			};
 			pctl_tsin_s5: pctl-tsin-s5 {   /* Serial TS-in 5 */
-				abilis,function = "mis5";
+				pingrp = "mis5_pins";
 			};
 			pctl_gpio_e: pctl-gpio-e {     /* GPIO bank E */
-				abilis,function = "gpioe";
+				pingrp = "gpioe_pins";
 			};
 			pctl_tsin_p5: pctl-tsin-p5 {   /* Parallel TS-in 5 */
-				abilis,function = "mip5";
+				pingrp = "mip5_pins";
 			};
 			/* Port 4 */
 			pctl_tsin_s6: pctl-tsin-s6 {   /* Serial TS-in 6 */
-				abilis,function = "mis6";
+				pingrp = "mis6_pins";
 			};
 			pctl_tsin_s7: pctl-tsin-s7 {   /* Serial TS-in 7 */
-				abilis,function = "mis7";
+				pingrp = "mis7_pins";
 			};
 			pctl_gpio_g: pctl-gpio-g {     /* GPIO bank G */
-				abilis,function = "gpiog";
+				pingrp = "gpiog_pins";
 			};
 			pctl_tsin_p7: pctl-tsin-p7 {   /* Parallel TS-in 7 */
-				abilis,function = "mip7";
+				pingrp = "mip7_pins";
 			};
 			/* Port 5 */
 			pctl_gpio_j: pctl-gpio-j {     /* GPIO bank J */
-				abilis,function = "gpioj";
+				pingrp = "gpioj_pins";
 			};
 			pctl_gpio_k: pctl-gpio-k {     /* GPIO bank K */
-				abilis,function = "gpiok";
+				pingrp = "gpiok_pins";
 			};
 			pctl_ciplus: pctl-ciplus {     /* CI+ interface */
-				abilis,function = "ciplus";
+				pingrp = "ciplus_pins";
 			};
 			pctl_mcard: pctl-mcard {       /* M-Card interface */
-				abilis,function = "mcard";
+				pingrp = "mcard_pins";
 			};
 			pctl_stc0: pctl-stc0 {         /* Smart card I/F 0 */
-				abilis,function = "stc0";
+				pingrp = "stc0_pins";
 			};
 			pctl_stc1: pctl-stc1 {         /* Smart card I/F 1 */
-				abilis,function = "stc1";
+				pingrp = "stc1_pins";
 			};
 			/* Port 6 */
 			pctl_tsout_p: pctl-tsout-p {   /* Parallel TS-out */
-				abilis,function = "mop";
+				pingrp = "mop_pins";
 			};
 			pctl_tsout_s0: pctl-tsout-s0 { /* Serial TS-out 0 */
-				abilis,function = "mos0";
+				pingrp = "mos0_pins";
 			};
 			pctl_tsout_s1: pctl-tsout-s1 { /* Serial TS-out 1 */
-				abilis,function = "mos1";
+				pingrp = "mos1_pins";
 			};
 			pctl_tsout_s2: pctl-tsout-s2 { /* Serial TS-out 2 */
-				abilis,function = "mos2";
+				pingrp = "mos2_pins";
 			};
 			pctl_tsout_s3: pctl-tsout-s3 { /* Serial TS-out 3 */
-				abilis,function = "mos3";
+				pingrp = "mos3_pins";
 			};
 			/* Port 7 */
 			pctl_uart0: pctl-uart0 {       /* UART 0 */
-				abilis,function = "uart0";
+				pingrp = "uart0_pins";
 			};
 			pctl_uart1: pctl-uart1 {       /* UART 1 */
-				abilis,function = "uart1";
+				pingrp = "uart1_pins";
 			};
 			pctl_gpio_l: pctl-gpio-l {     /* GPIO bank L */
-				abilis,function = "gpiol";
+				pingrp = "gpiol_pins";
 			};
 			pctl_gpio_m: pctl-gpio-m {     /* GPIO bank M */
-				abilis,function = "gpiom";
+				pingrp = "gpiom_pins";
 			};
 			/* Port 8 */
 			pctl_spi3: pctl-spi3 {
-				abilis,function = "spi3";
+				pingrp = "spi3_pins";
 			};
 			pctl_jtag: pctl-jtag {
-				abilis,function = "jtag";
+				pingrp = "jtag_pins";
 			};
 			/* Port 9 */
 			pctl_spi1: pctl-spi1 {
-				abilis,function = "spi1";
+				pingrp = "spi1_pins";
 			};
 			pctl_gpio_n: pctl-gpio-n {
-				abilis,function = "gpion";
+				pingrp = "gpion_pins";
 			};
 			/* Unmuxed GPIOs */
 			pctl_gpio_b: pctl-gpio-b {
-				abilis,function = "gpiob";
+				pingrp = "gpiob_pins";
 			};
 			pctl_gpio_d: pctl-gpio-d {
-				abilis,function = "gpiod";
+				pingrp = "gpiod_pins";
 			};
 			pctl_gpio_f: pctl-gpio-f {
-				abilis,function = "gpiof";
+				pingrp = "gpiof_pins";
 			};
 			pctl_gpio_h: pctl-gpio-h {
-				abilis,function = "gpioh";
+				pingrp = "gpioh_pins";
 			};
 			pctl_gpio_i: pctl-gpio-i {
-				abilis,function = "gpioi";
+				pingrp = "gpioi_pins";
 			};
 		};
 
@@ -176,182 +182,168 @@
 			interrupt-controller;
 			#interrupt-cells = <1>;
 			interrupt-parent = <&tb10x_ictl>;
-			interrupts = <27 2>;
+			interrupts = <27 1>;
 			reg = <0xFF140000 0x1000>;
 			gpio-controller;
-			#gpio-cells = <2>;
-			abilis,ngpio = <3>;
-			gpio-ranges = <&iomux 0 0 0>;
-			gpio-ranges-group-names = "gpioa";
+			#gpio-cells = <1>;
+			gpio-base  = <0>;
+			gpio-pins = <&pctl_gpio_a>;
 		};
 		gpiob: gpio@FF141000 {
 			compatible = "abilis,tb10x-gpio";
 			interrupt-controller;
 			#interrupt-cells = <1>;
 			interrupt-parent = <&tb10x_ictl>;
-			interrupts = <27 2>;
+			interrupts = <27 1>;
 			reg = <0xFF141000 0x1000>;
 			gpio-controller;
-			#gpio-cells = <2>;
-			abilis,ngpio = <2>;
-			gpio-ranges = <&iomux 0 0 0>;
-			gpio-ranges-group-names = "gpiob";
+			#gpio-cells = <1>;
+			gpio-base  = <3>;
+			gpio-pins = <&pctl_gpio_b>;
 		};
 		gpioc: gpio@FF142000 {
 			compatible = "abilis,tb10x-gpio";
 			interrupt-controller;
 			#interrupt-cells = <1>;
 			interrupt-parent = <&tb10x_ictl>;
-			interrupts = <27 2>;
+			interrupts = <27 1>;
 			reg = <0xFF142000 0x1000>;
 			gpio-controller;
-			#gpio-cells = <2>;
-			abilis,ngpio = <3>;
-			gpio-ranges = <&iomux 0 0 0>;
-			gpio-ranges-group-names = "gpioc";
+			#gpio-cells = <1>;
+			gpio-base  = <5>;
+			gpio-pins = <&pctl_gpio_c>;
 		};
 		gpiod: gpio@FF143000 {
 			compatible = "abilis,tb10x-gpio";
 			interrupt-controller;
 			#interrupt-cells = <1>;
 			interrupt-parent = <&tb10x_ictl>;
-			interrupts = <27 2>;
+			interrupts = <27 1>;
 			reg = <0xFF143000 0x1000>;
 			gpio-controller;
-			#gpio-cells = <2>;
-			abilis,ngpio = <2>;
-			gpio-ranges = <&iomux 0 0 0>;
-			gpio-ranges-group-names = "gpiod";
+			#gpio-cells = <1>;
+			gpio-base  = <8>;
+			gpio-pins = <&pctl_gpio_d>;
 		};
 		gpioe: gpio@FF144000 {
 			compatible = "abilis,tb10x-gpio";
 			interrupt-controller;
 			#interrupt-cells = <1>;
 			interrupt-parent = <&tb10x_ictl>;
-			interrupts = <27 2>;
+			interrupts = <27 1>;
 			reg = <0xFF144000 0x1000>;
 			gpio-controller;
-			#gpio-cells = <2>;
-			abilis,ngpio = <3>;
-			gpio-ranges = <&iomux 0 0 0>;
-			gpio-ranges-group-names = "gpioe";
+			#gpio-cells = <1>;
+			gpio-base  = <10>;
+			gpio-pins = <&pctl_gpio_e>;
 		};
 		gpiof: gpio@FF145000 {
 			compatible = "abilis,tb10x-gpio";
 			interrupt-controller;
 			#interrupt-cells = <1>;
 			interrupt-parent = <&tb10x_ictl>;
-			interrupts = <27 2>;
+			interrupts = <27 1>;
 			reg = <0xFF145000 0x1000>;
 			gpio-controller;
-			#gpio-cells = <2>;
-			abilis,ngpio = <2>;
-			gpio-ranges = <&iomux 0 0 0>;
-			gpio-ranges-group-names = "gpiof";
+			#gpio-cells = <1>;
+			gpio-base  = <13>;
+			gpio-pins = <&pctl_gpio_f>;
 		};
 		gpiog: gpio@FF146000 {
 			compatible = "abilis,tb10x-gpio";
 			interrupt-controller;
 			#interrupt-cells = <1>;
 			interrupt-parent = <&tb10x_ictl>;
-			interrupts = <27 2>;
+			interrupts = <27 1>;
 			reg = <0xFF146000 0x1000>;
 			gpio-controller;
-			#gpio-cells = <2>;
-			abilis,ngpio = <3>;
-			gpio-ranges = <&iomux 0 0 0>;
-			gpio-ranges-group-names = "gpiog";
+			#gpio-cells = <1>;
+			gpio-base  = <15>;
+			gpio-pins = <&pctl_gpio_g>;
 		};
 		gpioh: gpio@FF147000 {
 			compatible = "abilis,tb10x-gpio";
 			interrupt-controller;
 			#interrupt-cells = <1>;
 			interrupt-parent = <&tb10x_ictl>;
-			interrupts = <27 2>;
+			interrupts = <27 1>;
 			reg = <0xFF147000 0x1000>;
 			gpio-controller;
-			#gpio-cells = <2>;
-			abilis,ngpio = <2>;
-			gpio-ranges = <&iomux 0 0 0>;
-			gpio-ranges-group-names = "gpioh";
+			#gpio-cells = <1>;
+			gpio-base  = <18>;
+			gpio-pins = <&pctl_gpio_h>;
 		};
 		gpioi: gpio@FF148000 {
 			compatible = "abilis,tb10x-gpio";
 			interrupt-controller;
 			#interrupt-cells = <1>;
 			interrupt-parent = <&tb10x_ictl>;
-			interrupts = <27 2>;
+			interrupts = <27 1>;
 			reg = <0xFF148000 0x1000>;
 			gpio-controller;
-			#gpio-cells = <2>;
-			abilis,ngpio = <12>;
-			gpio-ranges = <&iomux 0 0 0>;
-			gpio-ranges-group-names = "gpioi";
+			#gpio-cells = <1>;
+			gpio-base  = <20>;
+			gpio-pins = <&pctl_gpio_i>;
 		};
 		gpioj: gpio@FF149000 {
 			compatible = "abilis,tb10x-gpio";
 			interrupt-controller;
 			#interrupt-cells = <1>;
 			interrupt-parent = <&tb10x_ictl>;
-			interrupts = <27 2>;
+			interrupts = <27 1>;
 			reg = <0xFF149000 0x1000>;
 			gpio-controller;
-			#gpio-cells = <2>;
-			abilis,ngpio = <32>;
-			gpio-ranges = <&iomux 0 0 0>;
-			gpio-ranges-group-names = "gpioj";
+			#gpio-cells = <1>;
+			gpio-base  = <32>;
+			gpio-pins = <&pctl_gpio_j>;
 		};
 		gpiok: gpio@FF14a000 {
 			compatible = "abilis,tb10x-gpio";
 			interrupt-controller;
 			#interrupt-cells = <1>;
 			interrupt-parent = <&tb10x_ictl>;
-			interrupts = <27 2>;
+			interrupts = <27 1>;
 			reg = <0xFF14A000 0x1000>;
 			gpio-controller;
-			#gpio-cells = <2>;
-			abilis,ngpio = <22>;
-			gpio-ranges = <&iomux 0 0 0>;
-			gpio-ranges-group-names = "gpiok";
+			#gpio-cells = <1>;
+			gpio-base  = <64>;
+			gpio-pins = <&pctl_gpio_k>;
 		};
 		gpiol: gpio@FF14b000 {
 			compatible = "abilis,tb10x-gpio";
 			interrupt-controller;
 			#interrupt-cells = <1>;
 			interrupt-parent = <&tb10x_ictl>;
-			interrupts = <27 2>;
+			interrupts = <27 1>;
 			reg = <0xFF14B000 0x1000>;
 			gpio-controller;
-			#gpio-cells = <2>;
-			abilis,ngpio = <4>;
-			gpio-ranges = <&iomux 0 0 0>;
-			gpio-ranges-group-names = "gpiol";
+			#gpio-cells = <1>;
+			gpio-base  = <86>;
+			gpio-pins = <&pctl_gpio_l>;
 		};
 		gpiom: gpio@FF14c000 {
 			compatible = "abilis,tb10x-gpio";
 			interrupt-controller;
 			#interrupt-cells = <1>;
 			interrupt-parent = <&tb10x_ictl>;
-			interrupts = <27 2>;
+			interrupts = <27 1>;
 			reg = <0xFF14C000 0x1000>;
 			gpio-controller;
-			#gpio-cells = <2>;
-			abilis,ngpio = <4>;
-			gpio-ranges = <&iomux 0 0 0>;
-			gpio-ranges-group-names = "gpiom";
+			#gpio-cells = <1>;
+			gpio-base  = <90>;
+			gpio-pins = <&pctl_gpio_m>;
 		};
 		gpion: gpio@FF14d000 {
 			compatible = "abilis,tb10x-gpio";
 			interrupt-controller;
 			#interrupt-cells = <1>;
 			interrupt-parent = <&tb10x_ictl>;
-			interrupts = <27 2>;
+			interrupts = <27 1>;
 			reg = <0xFF14D000 0x1000>;
 			gpio-controller;
-			#gpio-cells = <2>;
-			abilis,ngpio = <5>;
-			gpio-ranges = <&iomux 0 0 0>;
-			gpio-ranges-group-names = "gpion";
+			#gpio-cells = <1>;
+			gpio-base  = <94>;
+			gpio-pins = <&pctl_gpio_n>;
 		};
 	};
 };

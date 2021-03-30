@@ -23,11 +23,18 @@
 #include <linux/iio/common/st_sensors.h>
 #include "st_magn.h"
 
-int st_magn_trig_set_state(struct iio_trigger *trig, bool state)
+static int st_magn_buffer_preenable(struct iio_dev *indio_dev)
 {
-	struct iio_dev *indio_dev = iio_trigger_get_drvdata(trig);
+	int err;
 
-	return st_sensors_set_dataready_irq(indio_dev, state);
+	err = st_sensors_set_enable(indio_dev, true);
+	if (err < 0)
+		goto st_magn_set_enable_error;
+
+	err = iio_sw_buffer_preenable(indio_dev);
+
+st_magn_set_enable_error:
+	return err;
 }
 
 static int st_magn_buffer_postenable(struct iio_dev *indio_dev)
@@ -45,7 +52,7 @@ static int st_magn_buffer_postenable(struct iio_dev *indio_dev)
 	if (err < 0)
 		goto st_magn_buffer_postenable_error;
 
-	return st_sensors_set_enable(indio_dev, true);
+	return err;
 
 st_magn_buffer_postenable_error:
 	kfree(mdata->buffer_data);
@@ -58,11 +65,11 @@ static int st_magn_buffer_predisable(struct iio_dev *indio_dev)
 	int err;
 	struct st_sensor_data *mdata = iio_priv(indio_dev);
 
-	err = st_sensors_set_enable(indio_dev, false);
+	err = iio_triggered_buffer_predisable(indio_dev);
 	if (err < 0)
 		goto st_magn_buffer_predisable_error;
 
-	err = iio_triggered_buffer_predisable(indio_dev);
+	err = st_sensors_set_enable(indio_dev, false);
 
 st_magn_buffer_predisable_error:
 	kfree(mdata->buffer_data);
@@ -70,13 +77,14 @@ st_magn_buffer_predisable_error:
 }
 
 static const struct iio_buffer_setup_ops st_magn_buffer_setup_ops = {
+	.preenable = &st_magn_buffer_preenable,
 	.postenable = &st_magn_buffer_postenable,
 	.predisable = &st_magn_buffer_predisable,
 };
 
 int st_magn_allocate_ring(struct iio_dev *indio_dev)
 {
-	return iio_triggered_buffer_setup(indio_dev, NULL,
+	return iio_triggered_buffer_setup(indio_dev, &iio_pollfunc_store_time,
 		&st_sensors_trigger_handler, &st_magn_buffer_setup_ops);
 }
 

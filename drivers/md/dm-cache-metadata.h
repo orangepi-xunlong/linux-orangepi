@@ -9,17 +9,19 @@
 
 #include "dm-cache-block-types.h"
 #include "dm-cache-policy-internal.h"
-#include "persistent-data/dm-space-map-metadata.h"
 
 /*----------------------------------------------------------------*/
 
-#define DM_CACHE_METADATA_BLOCK_SIZE DM_SM_METADATA_BLOCK_SIZE
+#define DM_CACHE_METADATA_BLOCK_SIZE 4096
 
 /* FIXME: remove this restriction */
 /*
  * The metadata device is currently limited in size.
+ *
+ * We have one block of index, which can hold 255 index entries.  Each
+ * index entry contains allocation info about 16k metadata blocks.
  */
-#define DM_CACHE_METADATA_MAX_SECTORS DM_SM_METADATA_MAX_SECTORS
+#define DM_CACHE_METADATA_MAX_SECTORS (255 * (1 << 14) * (DM_CACHE_METADATA_BLOCK_SIZE / (1 << SECTOR_SHIFT)))
 
 /*
  * A metadata device larger than 16GB triggers a warning.
@@ -66,7 +68,7 @@ void dm_cache_metadata_close(struct dm_cache_metadata *cmd);
  * origin blocks to map to.
  */
 int dm_cache_resize(struct dm_cache_metadata *cmd, dm_cblock_t new_cache_size);
-int dm_cache_size(struct dm_cache_metadata *cmd, dm_cblock_t *result);
+dm_cblock_t dm_cache_size(struct dm_cache_metadata *cmd);
 
 int dm_cache_discard_bitset_resize(struct dm_cache_metadata *cmd,
 				   sector_t discard_block_size,
@@ -102,10 +104,6 @@ struct dm_cache_statistics {
 
 void dm_cache_metadata_get_stats(struct dm_cache_metadata *cmd,
 				 struct dm_cache_statistics *stats);
-
-/*
- * 'void' because it's no big deal if it fails.
- */
 void dm_cache_metadata_set_stats(struct dm_cache_metadata *cmd,
 				 struct dm_cache_statistics *stats);
 
@@ -130,18 +128,14 @@ void dm_cache_dump(struct dm_cache_metadata *cmd);
  * rather than querying the policy for each cblock, we let it walk its data
  * structures and fill in the hints in whatever order it wishes.
  */
-int dm_cache_write_hints(struct dm_cache_metadata *cmd, struct dm_cache_policy *p);
+
+int dm_cache_begin_hints(struct dm_cache_metadata *cmd, struct dm_cache_policy *p);
 
 /*
- * Query method.  Are all the blocks in the cache clean?
+ * requests hints for every cblock and stores in the metadata device.
  */
-int dm_cache_metadata_all_clean(struct dm_cache_metadata *cmd, bool *result);
-
-int dm_cache_metadata_needs_check(struct dm_cache_metadata *cmd, bool *result);
-int dm_cache_metadata_set_needs_check(struct dm_cache_metadata *cmd);
-void dm_cache_metadata_set_read_only(struct dm_cache_metadata *cmd);
-void dm_cache_metadata_set_read_write(struct dm_cache_metadata *cmd);
-int dm_cache_metadata_abort(struct dm_cache_metadata *cmd);
+int dm_cache_save_hint(struct dm_cache_metadata *cmd,
+		       dm_cblock_t cblock, uint32_t hint);
 
 /*----------------------------------------------------------------*/
 

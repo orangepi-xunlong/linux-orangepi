@@ -31,7 +31,6 @@
 #include <asm/switch_to.h>
 
 #include "sigutil.h"
-#include "kernel.h"
 
 /* This magic should be in g_upper[0] for all upper parts
  * to be valid.
@@ -69,7 +68,7 @@ struct rt_signal_frame32 {
 	/* __siginfo_rwin_t * */u32 rwin_save;
 } __attribute__((aligned(8)));
 
-int copy_siginfo_to_user32(compat_siginfo_t __user *to, const siginfo_t *from)
+int copy_siginfo_to_user32(compat_siginfo_t __user *to, siginfo_t *from)
 {
 	int err;
 
@@ -138,31 +137,19 @@ int copy_siginfo_from_user32(siginfo_t *to, compat_siginfo_t __user *from)
 	return 0;
 }
 
-/* Checks if the fp is valid.  We always build signal frames which are
- * 16-byte aligned, therefore we can always enforce that the restore
- * frame has that property as well.
- */
-static bool invalid_frame_pointer(void __user *fp, int fplen)
-{
-	if ((((unsigned long) fp) & 15) ||
-	    ((unsigned long)fp) > 0x100000000ULL - fplen)
-		return true;
-	return false;
-}
-
 void do_sigreturn32(struct pt_regs *regs)
 {
 	struct signal_frame32 __user *sf;
 	compat_uptr_t fpu_save;
 	compat_uptr_t rwin_save;
-	unsigned int psr, ufp;
-	unsigned int pc, npc;
+	unsigned int psr;
+	unsigned pc, npc;
 	sigset_t set;
-	compat_sigset_t seta;
+	unsigned seta[_COMPAT_NSIG_WORDS];
 	int err, i;
 	
 	/* Always make any pending restarted system calls return -EINTR */
-	current->restart_block.fn = do_no_restart_syscall;
+	current_thread_info()->restart_block.fn = do_no_restart_syscall;
 
 	synchronize_user_stack();
 
@@ -170,16 +157,11 @@ void do_sigreturn32(struct pt_regs *regs)
 	sf = (struct signal_frame32 __user *) regs->u_regs[UREG_FP];
 
 	/* 1. Make sure we are not getting garbage from the user */
-	if (invalid_frame_pointer(sf, sizeof(*sf)))
+	if (!access_ok(VERIFY_READ, sf, sizeof(*sf)) ||
+	    (((unsigned long) sf) & 3))
 		goto segv;
 
-	if (get_user(ufp, &sf->info.si_regs.u_regs[UREG_FP]))
-		goto segv;
-
-	if (ufp & 0x7)
-		goto segv;
-
-	if (__get_user(pc, &sf->info.si_regs.pc) ||
+	if (get_user(pc, &sf->info.si_regs.pc) ||
 	    __get_user(npc, &sf->info.si_regs.npc))
 		goto segv;
 
@@ -227,13 +209,17 @@ void do_sigreturn32(struct pt_regs *regs)
 		if (restore_rwin_state(compat_ptr(rwin_save)))
 			goto segv;
 	}
-	err |= __get_user(seta.sig[0], &sf->info.si_mask);
-	err |= copy_from_user(&seta.sig[1], &sf->extramask,
+	err |= __get_user(seta[0], &sf->info.si_mask);
+	err |= copy_from_user(seta+1, &sf->extramask,
 			      (_COMPAT_NSIG_WORDS - 1) * sizeof(unsigned int));
 	if (err)
 	    	goto segv;
-
-	set.sig[0] = seta.sig[0] + (((long)seta.sig[1]) << 32);
+	switch (_NSIG_WORDS) {
+		case 4: set.sig[3] = seta[6] + (((long)seta[7]) << 32);
+		case 3: set.sig[2] = seta[4] + (((long)seta[5]) << 32);
+		case 2: set.sig[1] = seta[2] + (((long)seta[3]) << 32);
+		case 1: set.sig[0] = seta[0] + (((long)seta[1]) << 32);
+	}
 	set_current_blocked(&set);
 	return;
 
@@ -244,7 +230,7 @@ segv:
 asmlinkage void do_rt_sigreturn32(struct pt_regs *regs)
 {
 	struct rt_signal_frame32 __user *sf;
-	unsigned int psr, pc, npc, ufp;
+	unsigned int psr, pc, npc;
 	compat_uptr_t fpu_save;
 	compat_uptr_t rwin_save;
 	sigset_t set;
@@ -252,23 +238,18 @@ asmlinkage void do_rt_sigreturn32(struct pt_regs *regs)
 	int err, i;
 	
 	/* Always make any pending restarted system calls return -EINTR */
-	current->restart_block.fn = do_no_restart_syscall;
+	current_thread_info()->restart_block.fn = do_no_restart_syscall;
 
 	synchronize_user_stack();
 	regs->u_regs[UREG_FP] &= 0x00000000ffffffffUL;
 	sf = (struct rt_signal_frame32 __user *) regs->u_regs[UREG_FP];
 
 	/* 1. Make sure we are not getting garbage from the user */
-	if (invalid_frame_pointer(sf, sizeof(*sf)))
+	if (!access_ok(VERIFY_READ, sf, sizeof(*sf)) ||
+	    (((unsigned long) sf) & 3))
 		goto segv;
 
-	if (get_user(ufp, &sf->regs.u_regs[UREG_FP]))
-		goto segv;
-
-	if (ufp & 0x7)
-		goto segv;
-
-	if (__get_user(pc, &sf->regs.pc) || 
+	if (get_user(pc, &sf->regs.pc) || 
 	    __get_user(npc, &sf->regs.npc))
 		goto segv;
 
@@ -322,11 +303,24 @@ asmlinkage void do_rt_sigreturn32(struct pt_regs *regs)
 			goto segv;
 	}
 
-	set.sig[0] = seta.sig[0] + (((long)seta.sig[1]) << 32);
+	switch (_NSIG_WORDS) {
+		case 4: set.sig[3] = seta.sig[6] + (((long)seta.sig[7]) << 32);
+		case 3: set.sig[2] = seta.sig[4] + (((long)seta.sig[5]) << 32);
+		case 2: set.sig[1] = seta.sig[2] + (((long)seta.sig[3]) << 32);
+		case 1: set.sig[0] = seta.sig[0] + (((long)seta.sig[1]) << 32);
+	}
 	set_current_blocked(&set);
 	return;
 segv:
 	force_sig(SIGSEGV, current);
+}
+
+/* Checks if the fp is valid */
+static int invalid_frame_pointer(void __user *fp, int fplen)
+{
+	if ((((unsigned long) fp) & 7) || ((unsigned long)fp) > 0x100000000ULL - fplen)
+		return 1;
+	return 0;
 }
 
 static void __user *get_sigframe(struct ksignal *ksig, struct pt_regs *regs, unsigned long framesize)
@@ -423,7 +417,7 @@ static int setup_frame32(struct ksignal *ksig, struct pt_regs *regs,
 	void __user *tail;
 	int sigframe_size;
 	u32 psr;
-	compat_sigset_t seta;
+	unsigned int seta[_COMPAT_NSIG_WORDS];
 
 	/* 1. Make sure everything is clean */
 	synchronize_user_stack();
@@ -487,14 +481,18 @@ static int setup_frame32(struct ksignal *ksig, struct pt_regs *regs,
 		err |= __put_user(0, &sf->rwin_save);
 	}
 
-	/* If these change we need to know - assignments to seta relies on these sizes */
-	BUILD_BUG_ON(_NSIG_WORDS != 1);
-	BUILD_BUG_ON(_COMPAT_NSIG_WORDS != 2);
-	seta.sig[1] = (oldset->sig[0] >> 32);
-	seta.sig[0] = oldset->sig[0];
-
-	err |= __put_user(seta.sig[0], &sf->info.si_mask);
-	err |= __copy_to_user(sf->extramask, &seta.sig[1],
+	switch (_NSIG_WORDS) {
+	case 4: seta[7] = (oldset->sig[3] >> 32);
+	        seta[6] = oldset->sig[3];
+	case 3: seta[5] = (oldset->sig[2] >> 32);
+	        seta[4] = oldset->sig[2];
+	case 2: seta[3] = (oldset->sig[1] >> 32);
+	        seta[2] = oldset->sig[1];
+	case 1: seta[1] = (oldset->sig[0] >> 32);
+	        seta[0] = oldset->sig[0];
+	}
+	err |= __put_user(seta[0], &sf->info.si_mask);
+	err |= __copy_to_user(sf->extramask, seta + 1,
 			      (_COMPAT_NSIG_WORDS - 1) * sizeof(unsigned int));
 
 	if (!wsaved) {
@@ -624,8 +622,16 @@ static int setup_rt_frame32(struct ksignal *ksig, struct pt_regs *regs,
 	/* Setup sigaltstack */
 	err |= __compat_save_altstack(&sf->stack, regs->u_regs[UREG_FP]);
 
-	seta.sig[1] = (oldset->sig[0] >> 32);
-	seta.sig[0] = oldset->sig[0];
+	switch (_NSIG_WORDS) {
+	case 4: seta.sig[7] = (oldset->sig[3] >> 32);
+		seta.sig[6] = oldset->sig[3];
+	case 3: seta.sig[5] = (oldset->sig[2] >> 32);
+		seta.sig[4] = oldset->sig[2];
+	case 2: seta.sig[3] = (oldset->sig[1] >> 32);
+		seta.sig[2] = oldset->sig[1];
+	case 1: seta.sig[1] = (oldset->sig[0] >> 32);
+		seta.sig[0] = oldset->sig[0];
+	}
 	err |= __copy_to_user(&sf->mask, &seta, sizeof(compat_sigset_t));
 
 	if (!wsaved) {

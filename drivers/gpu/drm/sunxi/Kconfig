@@ -1,0 +1,12 @@
+menuconfig DRM_SUNXI
+    tristate "DRM Support for Allwinnertech SoC A and R Series"
+    depends on DRM && ARCH_SUNXI
+    select DRM_KMS_HELPER
+    help
+      Choose this for Allwintertech  A64 R18 and others.
+config DRM_SUNXI_ROTATER
+	bool "Support the sunxi rotate device"
+
+config DRM_SUNXI_HDMI
+	bool "Support the sunxi hdmi device"
+

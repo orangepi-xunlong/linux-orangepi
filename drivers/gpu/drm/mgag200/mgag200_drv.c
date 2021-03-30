@@ -28,14 +28,13 @@ module_param_named(modeset, mgag200_modeset, int, 0400);
 
 static struct drm_driver driver;
 
-static const struct pci_device_id pciidlist[] = {
+static DEFINE_PCI_DEVICE_TABLE(pciidlist) = {
 	{ PCI_VENDOR_ID_MATROX, 0x522, PCI_ANY_ID, PCI_ANY_ID, 0, 0, G200_SE_A },
 	{ PCI_VENDOR_ID_MATROX, 0x524, PCI_ANY_ID, PCI_ANY_ID, 0, 0, G200_SE_B },
 	{ PCI_VENDOR_ID_MATROX, 0x530, PCI_ANY_ID, PCI_ANY_ID, 0, 0, G200_EV },
 	{ PCI_VENDOR_ID_MATROX, 0x532, PCI_ANY_ID, PCI_ANY_ID, 0, 0, G200_WB },
 	{ PCI_VENDOR_ID_MATROX, 0x533, PCI_ANY_ID, PCI_ANY_ID, 0, 0, G200_EH },
 	{ PCI_VENDOR_ID_MATROX, 0x534, PCI_ANY_ID, PCI_ANY_ID, 0, 0, G200_ER },
-	{ PCI_VENDOR_ID_MATROX, 0x536, PCI_ANY_ID, PCI_ANY_ID, 0, 0, G200_EW3 },
 	{0,}
 };
 
@@ -56,7 +55,7 @@ static void mgag200_kick_out_firmware_fb(struct pci_dev *pdev)
 #ifdef CONFIG_X86
 	primary = pdev->resource[PCI_ROM_RESOURCE].flags & IORESOURCE_ROM_SHADOW;
 #endif
-	drm_fb_helper_remove_conflicting_framebuffers(ap, "mgag200drmfb", primary);
+	remove_conflicting_framebuffers(ap, "mgag200drmfb", primary);
 	kfree(ap);
 }
 
@@ -82,6 +81,7 @@ static const struct file_operations mgag200_driver_fops = {
 	.unlocked_ioctl = drm_ioctl,
 	.mmap = mgag200_mmap,
 	.poll = drm_poll,
+	.fasync = drm_fasync,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = drm_compat_ioctl,
 #endif
@@ -89,10 +89,9 @@ static const struct file_operations mgag200_driver_fops = {
 };
 
 static struct drm_driver driver = {
-	.driver_features = DRIVER_GEM | DRIVER_MODESET,
+	.driver_features = DRIVER_GEM | DRIVER_MODESET | DRIVER_USE_MTRR,
 	.load = mgag200_driver_load,
 	.unload = mgag200_driver_unload,
-	.set_busid = drm_pci_set_busid,
 	.fops = &mgag200_driver_fops,
 	.name = DRIVER_NAME,
 	.desc = DRIVER_DESC,
@@ -101,10 +100,11 @@ static struct drm_driver driver = {
 	.minor = DRIVER_MINOR,
 	.patchlevel = DRIVER_PATCHLEVEL,
 
-	.gem_free_object_unlocked = mgag200_gem_free_object,
+	.gem_init_object = mgag200_gem_init_object,
+	.gem_free_object = mgag200_gem_free_object,
 	.dumb_create = mgag200_dumb_create,
 	.dumb_map_offset = mgag200_dumb_mmap_offset,
-	.dumb_destroy = drm_gem_dumb_destroy,
+	.dumb_destroy = mgag200_dumb_destroy,
 };
 
 static struct pci_driver mgag200_pci_driver = {
@@ -116,8 +116,10 @@ static struct pci_driver mgag200_pci_driver = {
 
 static int __init mgag200_init(void)
 {
+#ifdef CONFIG_VGA_CONSOLE
 	if (vgacon_text_force() && mgag200_modeset == -1)
 		return -EINVAL;
+#endif
 
 	if (mgag200_modeset == 0)
 		return -EINVAL;

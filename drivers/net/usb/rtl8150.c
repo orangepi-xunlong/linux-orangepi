@@ -6,6 +6,7 @@
  * version 2 as published by the Free Software Foundation.
  */
 
+#include <linux/init.h>
 #include <linux/signal.h>
 #include <linux/slab.h>
 #include <linux/module.h>
@@ -155,36 +156,16 @@ static const char driver_name [] = "rtl8150";
 */
 static int get_registers(rtl8150_t * dev, u16 indx, u16 size, void *data)
 {
-	void *buf;
-	int ret;
-
-	buf = kmalloc(size, GFP_NOIO);
-	if (!buf)
-		return -ENOMEM;
-
-	ret = usb_control_msg(dev->udev, usb_rcvctrlpipe(dev->udev, 0),
-			      RTL8150_REQ_GET_REGS, RTL8150_REQT_READ,
-			      indx, 0, buf, size, 500);
-	if (ret > 0 && ret <= size)
-		memcpy(data, buf, ret);
-	kfree(buf);
-	return ret;
+	return usb_control_msg(dev->udev, usb_rcvctrlpipe(dev->udev, 0),
+			       RTL8150_REQ_GET_REGS, RTL8150_REQT_READ,
+			       indx, 0, data, size, 500);
 }
 
-static int set_registers(rtl8150_t * dev, u16 indx, u16 size, const void *data)
+static int set_registers(rtl8150_t * dev, u16 indx, u16 size, void *data)
 {
-	void *buf;
-	int ret;
-
-	buf = kmemdup(data, size, GFP_NOIO);
-	if (!buf)
-		return -ENOMEM;
-
-	ret = usb_control_msg(dev->udev, usb_sndctrlpipe(dev->udev, 0),
-			      RTL8150_REQ_SET_REGS, RTL8150_REQT_WRITE,
-			      indx, 0, buf, size, 500);
-	kfree(buf);
-	return ret;
+	return usb_control_msg(dev->udev, usb_sndctrlpipe(dev->udev, 0),
+			       RTL8150_REQ_SET_REGS, RTL8150_REQT_WRITE,
+			       indx, 0, data, size, 500);
 }
 
 static void async_set_reg_cb(struct urb *urb)
@@ -471,7 +452,7 @@ static void write_bulk_callback(struct urb *urb)
 	if (status)
 		dev_info(&urb->dev->dev, "%s: Tx status %d\n",
 			 dev->netdev->name, status);
-	netif_trans_update(dev->netdev);
+	dev->netdev->trans_start = jiffies;
 	netif_wake_queue(dev->netdev);
 }
 
@@ -681,7 +662,7 @@ static void rtl8150_set_multicast(struct net_device *netdev)
 		   (netdev->flags & IFF_ALLMULTI)) {
 		rx_creg &= 0xfffe;
 		rx_creg |= 0x0002;
-		dev_dbg(&netdev->dev, "%s: allmulti set\n", netdev->name);
+		dev_info(&netdev->dev, "%s: allmulti set\n", netdev->name);
 	} else {
 		/* ~RX_MULTICAST, ~RX_PROMISCUOUS */
 		rx_creg &= 0x00fc;
@@ -714,7 +695,7 @@ static netdev_tx_t rtl8150_start_xmit(struct sk_buff *skb,
 	} else {
 		netdev->stats.tx_packets++;
 		netdev->stats.tx_bytes += skb->len;
-		netif_trans_update(netdev);
+		netdev->trans_start = jiffies;
 	}
 
 	return NETDEV_TX_OK;
@@ -773,13 +754,14 @@ static int rtl8150_open(struct net_device *netdev)
 static int rtl8150_close(struct net_device *netdev)
 {
 	rtl8150_t *dev = netdev_priv(netdev);
+	int res = 0;
 
 	netif_stop_queue(netdev);
 	if (!test_bit(RTL8150_UNPLUG, &dev->flags))
 		disable_net_traffic(dev);
 	unlink_all_urbs(dev);
 
-	return 0;
+	return res;
 }
 
 static void rtl8150_get_drvinfo(struct net_device *netdev, struct ethtool_drvinfo *info)
@@ -897,7 +879,7 @@ static int rtl8150_probe(struct usb_interface *intf,
 	dev->netdev = netdev;
 	netdev->netdev_ops = &rtl8150_netdev_ops;
 	netdev->watchdog_timeo = RTL8150_TX_TIMEOUT;
-	netdev->ethtool_ops = &ops;
+	SET_ETHTOOL_OPS(netdev, &ops);
 	dev->intr_interval = 100;	/* 100ms */
 
 	if (!alloc_all_urbs(dev)) {

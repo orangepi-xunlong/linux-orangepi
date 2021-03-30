@@ -942,102 +942,101 @@ static int lg216x_read_rs_err_count(struct lg216x_state *state, u16 *err)
 
 /* ------------------------------------------------------------------------ */
 
-static int lg216x_get_frontend(struct dvb_frontend *fe,
-			       struct dtv_frontend_properties *c)
+static int lg216x_get_frontend(struct dvb_frontend *fe)
 {
 	struct lg216x_state *state = fe->demodulator_priv;
 	int ret;
 
 	lg_dbg("\n");
 
-	c->modulation = VSB_8;
-	c->frequency = state->current_frequency;
-	c->delivery_system = SYS_ATSCMH;
+	fe->dtv_property_cache.modulation = VSB_8;
+	fe->dtv_property_cache.frequency = state->current_frequency;
+	fe->dtv_property_cache.delivery_system = SYS_ATSCMH;
 
 	ret = lg216x_get_fic_version(state,
-				     &c->atscmh_fic_ver);
+				     &fe->dtv_property_cache.atscmh_fic_ver);
 	if (lg_fail(ret))
 		goto fail;
-	if (state->fic_ver != c->atscmh_fic_ver) {
-		state->fic_ver = c->atscmh_fic_ver;
+	if (state->fic_ver != fe->dtv_property_cache.atscmh_fic_ver) {
+		state->fic_ver = fe->dtv_property_cache.atscmh_fic_ver;
 
 #if 0
 		ret = lg2160_get_parade_id(state,
-				&c->atscmh_parade_id);
+				&fe->dtv_property_cache.atscmh_parade_id);
 		if (lg_fail(ret))
 			goto fail;
 /* #else */
-		c->atscmh_parade_id = state->parade_id;
+		fe->dtv_property_cache.atscmh_parade_id = state->parade_id;
 #endif
 		ret = lg216x_get_nog(state,
-				     &c->atscmh_nog);
+				     &fe->dtv_property_cache.atscmh_nog);
 		if (lg_fail(ret))
 			goto fail;
 		ret = lg216x_get_tnog(state,
-				      &c->atscmh_tnog);
+				      &fe->dtv_property_cache.atscmh_tnog);
 		if (lg_fail(ret))
 			goto fail;
 		ret = lg216x_get_sgn(state,
-				     &c->atscmh_sgn);
+				     &fe->dtv_property_cache.atscmh_sgn);
 		if (lg_fail(ret))
 			goto fail;
 		ret = lg216x_get_prc(state,
-				     &c->atscmh_prc);
+				     &fe->dtv_property_cache.atscmh_prc);
 		if (lg_fail(ret))
 			goto fail;
 
 		ret = lg216x_get_rs_frame_mode(state,
 			(enum atscmh_rs_frame_mode *)
-			&c->atscmh_rs_frame_mode);
+			&fe->dtv_property_cache.atscmh_rs_frame_mode);
 		if (lg_fail(ret))
 			goto fail;
 		ret = lg216x_get_rs_frame_ensemble(state,
 			(enum atscmh_rs_frame_ensemble *)
-			&c->atscmh_rs_frame_ensemble);
+			&fe->dtv_property_cache.atscmh_rs_frame_ensemble);
 		if (lg_fail(ret))
 			goto fail;
 		ret = lg216x_get_rs_code_mode(state,
 			(enum atscmh_rs_code_mode *)
-			&c->atscmh_rs_code_mode_pri,
+			&fe->dtv_property_cache.atscmh_rs_code_mode_pri,
 			(enum atscmh_rs_code_mode *)
-			&c->atscmh_rs_code_mode_sec);
+			&fe->dtv_property_cache.atscmh_rs_code_mode_sec);
 		if (lg_fail(ret))
 			goto fail;
 		ret = lg216x_get_sccc_block_mode(state,
 			(enum atscmh_sccc_block_mode *)
-			&c->atscmh_sccc_block_mode);
+			&fe->dtv_property_cache.atscmh_sccc_block_mode);
 		if (lg_fail(ret))
 			goto fail;
 		ret = lg216x_get_sccc_code_mode(state,
 			(enum atscmh_sccc_code_mode *)
-			&c->atscmh_sccc_code_mode_a,
+			&fe->dtv_property_cache.atscmh_sccc_code_mode_a,
 			(enum atscmh_sccc_code_mode *)
-			&c->atscmh_sccc_code_mode_b,
+			&fe->dtv_property_cache.atscmh_sccc_code_mode_b,
 			(enum atscmh_sccc_code_mode *)
-			&c->atscmh_sccc_code_mode_c,
+			&fe->dtv_property_cache.atscmh_sccc_code_mode_c,
 			(enum atscmh_sccc_code_mode *)
-			&c->atscmh_sccc_code_mode_d);
+			&fe->dtv_property_cache.atscmh_sccc_code_mode_d);
 		if (lg_fail(ret))
 			goto fail;
 	}
 #if 0
 	ret = lg216x_read_fic_err_count(state,
-				(u8 *)&c->atscmh_fic_err);
+				(u8 *)&fe->dtv_property_cache.atscmh_fic_err);
 	if (lg_fail(ret))
 		goto fail;
 	ret = lg216x_read_crc_err_count(state,
-				&c->atscmh_crc_err);
+				&fe->dtv_property_cache.atscmh_crc_err);
 	if (lg_fail(ret))
 		goto fail;
 	ret = lg216x_read_rs_err_count(state,
-				&c->atscmh_rs_err);
+				&fe->dtv_property_cache.atscmh_rs_err);
 	if (lg_fail(ret))
 		goto fail;
 
 	switch (state->cfg->lg_chip) {
 	case LG2160:
-		if (((c->atscmh_rs_err >= 240) &&
-		     (c->atscmh_crc_err >= 240)) &&
+		if (((fe->dtv_property_cache.atscmh_rs_err >= 240) &&
+		     (fe->dtv_property_cache.atscmh_crc_err >= 240)) &&
 		    ((jiffies_to_msecs(jiffies) - state->last_reset) > 6000))
 			ret = lg216x_soft_reset(state);
 		break;
@@ -1055,17 +1054,14 @@ fail:
 static int lg216x_get_property(struct dvb_frontend *fe,
 			       struct dtv_property *tvp)
 {
-	struct dtv_frontend_properties *c = &fe->dtv_property_cache;
-
 	return (DTV_ATSCMH_FIC_VER == tvp->cmd) ?
-		lg216x_get_frontend(fe, c) : 0;
+		lg216x_get_frontend(fe) : 0;
 }
 
 
 static int lg2160_set_frontend(struct dvb_frontend *fe)
 {
 	struct lg216x_state *state = fe->demodulator_priv;
-	struct dtv_frontend_properties *c = &fe->dtv_property_cache;
 	int ret;
 
 	lg_dbg("(%d)\n", fe->dtv_property_cache.frequency);
@@ -1133,7 +1129,7 @@ static int lg2160_set_frontend(struct dvb_frontend *fe)
 	ret = lg216x_enable_fic(state, 1);
 	lg_fail(ret);
 
-	lg216x_get_frontend(fe, c);
+	lg216x_get_frontend(fe);
 fail:
 	return ret;
 }
@@ -1207,7 +1203,7 @@ static int lg216x_read_lock_status(struct lg216x_state *state,
 #endif
 }
 
-static int lg216x_read_status(struct dvb_frontend *fe, enum fe_status *status)
+static int lg216x_read_status(struct dvb_frontend *fe, fe_status_t *status)
 {
 	struct lg216x_state *state = fe->demodulator_priv;
 	int ret, acq_lock, sync_lock;
@@ -1460,3 +1456,9 @@ MODULE_DESCRIPTION("LG Electronics LG216x ATSC/MH Demodulator Driver");
 MODULE_AUTHOR("Michael Krufky <mkrufky@linuxtv.org>");
 MODULE_LICENSE("GPL");
 MODULE_VERSION("0.3");
+
+/*
+ * Local variables:
+ * c-basic-offset: 8
+ * End:
+ */

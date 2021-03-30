@@ -16,13 +16,13 @@
 struct pci_sys_data;
 struct pci_ops;
 struct pci_bus;
-struct device;
 
 struct hw_pci {
-	struct msi_controller *msi_ctrl;
+#ifdef CONFIG_PCI_DOMAINS
+	int		domain;
+#endif
 	struct pci_ops	*ops;
 	int		nr_controllers;
-	unsigned int	io_optional:1;
 	void		**private_data;
 	int		(*setup)(int nr, struct pci_sys_data *);
 	struct pci_bus *(*scan)(int nr, struct pci_sys_data *);
@@ -41,6 +41,9 @@ struct hw_pci {
  * Per-controller structure
  */
 struct pci_sys_data {
+#ifdef CONFIG_PCI_DOMAINS
+	int		domain;
+#endif
 	struct list_head node;
 	int		busnr;		/* primary bus number			*/
 	u64		mem_offset;	/* bus->cpu memory mapping offset	*/
@@ -53,22 +56,19 @@ struct pci_sys_data {
 	u8		(*swizzle)(struct pci_dev *, u8 *);
 					/* IRQ mapping				*/
 	int		(*map_irq)(const struct pci_dev *, u8, u8);
+					/* Resource alignement requirements	*/
+	resource_size_t (*align_resource)(struct pci_dev *dev,
+					  const struct resource *res,
+					  resource_size_t start,
+					  resource_size_t size,
+					  resource_size_t align);
 	void		*private_data;	/* platform controller private data	*/
 };
 
 /*
  * Call this with your hw_pci struct to initialise the PCI system.
  */
-void pci_common_init_dev(struct device *, struct hw_pci *);
-
-/*
- * Compatibility wrapper for older platforms that do not care about
- * passing the parent device.
- */
-static inline void pci_common_init(struct hw_pci *hw)
-{
-	pci_common_init_dev(NULL, hw);
-}
+void pci_common_init(struct hw_pci *);
 
 /*
  * Setup early fixed I/O mapping.
@@ -91,5 +91,14 @@ extern struct pci_ops dc21285_ops;
 extern int dc21285_setup(int nr, struct pci_sys_data *);
 extern void dc21285_preinit(void);
 extern void dc21285_postinit(void);
+
+extern struct pci_ops via82c505_ops;
+extern int via82c505_setup(int nr, struct pci_sys_data *);
+extern void via82c505_init(void *sysdata);
+
+extern struct pci_ops pci_v3_ops;
+extern int pci_v3_setup(int nr, struct pci_sys_data *);
+extern void pci_v3_preinit(void);
+extern void pci_v3_postinit(void);
 
 #endif /* __ASM_MACH_PCI_H */

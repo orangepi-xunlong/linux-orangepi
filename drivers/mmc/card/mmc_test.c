@@ -32,8 +32,6 @@
 #define BUFFER_ORDER		2
 #define BUFFER_SIZE		(PAGE_SIZE << BUFFER_ORDER)
 
-#define TEST_ALIGN_END		8
-
 /*
  * Limit the test area size to the maximum MMC HC erase group size.  Note that
  * the maximum SD allocation unit size is just 4MiB.
@@ -184,29 +182,6 @@ static int mmc_test_set_blksize(struct mmc_test_card *test, unsigned size)
 	return mmc_set_blocklen(test->card, size);
 }
 
-static bool mmc_test_card_cmd23(struct mmc_card *card)
-{
-	return mmc_card_mmc(card) ||
-	       (mmc_card_sd(card) && card->scr.cmds & SD_SCR_CMD23_SUPPORT);
-}
-
-static void mmc_test_prepare_sbc(struct mmc_test_card *test,
-				 struct mmc_request *mrq, unsigned int blocks)
-{
-	struct mmc_card *card = test->card;
-
-	if (!mrq->sbc || !mmc_host_cmd23(card->host) ||
-	    !mmc_test_card_cmd23(card) || !mmc_op_multi(mrq->cmd->opcode) ||
-	    (card->quirks & MMC_QUIRK_BLK_NO_CMD23)) {
-		mrq->sbc = NULL;
-		return;
-	}
-
-	mrq->sbc->opcode = MMC_SET_BLOCK_COUNT;
-	mrq->sbc->arg = blocks;
-	mrq->sbc->flags = MMC_RSP_R1 | MMC_CMD_AC;
-}
-
 /*
  * Fill in the mmc_request structure given a set of transfer parameters.
  */
@@ -243,8 +218,6 @@ static void mmc_test_prepare_mrq(struct mmc_test_card *test,
 	mrq->data->flags = write ? MMC_DATA_WRITE : MMC_DATA_READ;
 	mrq->data->sg = sg;
 	mrq->data->sg_len = sg_len;
-
-	mmc_test_prepare_sbc(test, mrq, blocks);
 
 	mmc_set_data_timeout(mrq->data, test->card);
 }
@@ -293,6 +266,8 @@ static int mmc_test_wait_busy(struct mmc_test_card *test)
 static int mmc_test_buffer_transfer(struct mmc_test_card *test,
 	u8 *buffer, unsigned addr, unsigned blksz, int write)
 {
+	int ret;
+
 	struct mmc_request mrq = {0};
 	struct mmc_command cmd = {0};
 	struct mmc_command stop = {0};
@@ -315,7 +290,11 @@ static int mmc_test_buffer_transfer(struct mmc_test_card *test,
 	if (data.error)
 		return data.error;
 
-	return mmc_test_wait_busy(test);
+	ret = mmc_test_wait_busy(test);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static void mmc_test_free_mem(struct mmc_test_mem *mem)
@@ -718,8 +697,6 @@ static int mmc_test_check_result(struct mmc_test_card *test,
 
 	ret = 0;
 
-	if (mrq->sbc && mrq->sbc->error)
-		ret = mrq->sbc->error;
 	if (!ret && mrq->cmd->error)
 		ret = mrq->cmd->error;
 	if (!ret && mrq->data->error)
@@ -818,7 +795,7 @@ static int mmc_test_nonblock_transfer(struct mmc_test_card *test,
 	struct mmc_async_req *cur_areq = &test_areq[0].areq;
 	struct mmc_async_req *other_areq = &test_areq[1].areq;
 	int i;
-	int ret = RESULT_OK;
+	int ret;
 
 	test_areq[0].test = test;
 	test_areq[1].test = test;
@@ -847,7 +824,9 @@ static int mmc_test_nonblock_transfer(struct mmc_test_card *test,
 				mmc_test_nonblock_reset(&mrq1, &cmd1,
 							&stop1, &data1);
 		}
-		swap(cur_areq, other_areq);
+		done_areq = cur_areq;
+		cur_areq = other_areq;
+		other_areq = done_areq;
 		dev_addr += blocks;
 	}
 
@@ -1013,7 +992,11 @@ static int mmc_test_basic_write(struct mmc_test_card *test)
 
 	sg_init_one(&sg, test->buffer, 512);
 
-	return mmc_test_simple_transfer(test, &sg, 1, 0, 1, 512, 1);
+	ret = mmc_test_simple_transfer(test, &sg, 1, 0, 1, 512, 1);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int mmc_test_basic_read(struct mmc_test_card *test)
@@ -1027,29 +1010,44 @@ static int mmc_test_basic_read(struct mmc_test_card *test)
 
 	sg_init_one(&sg, test->buffer, 512);
 
-	return mmc_test_simple_transfer(test, &sg, 1, 0, 1, 512, 0);
+	ret = mmc_test_simple_transfer(test, &sg, 1, 0, 1, 512, 0);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int mmc_test_verify_write(struct mmc_test_card *test)
 {
+	int ret;
 	struct scatterlist sg;
 
 	sg_init_one(&sg, test->buffer, 512);
 
-	return mmc_test_transfer(test, &sg, 1, 0, 1, 512, 1);
+	ret = mmc_test_transfer(test, &sg, 1, 0, 1, 512, 1);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int mmc_test_verify_read(struct mmc_test_card *test)
 {
+	int ret;
 	struct scatterlist sg;
 
 	sg_init_one(&sg, test->buffer, 512);
 
-	return mmc_test_transfer(test, &sg, 1, 0, 1, 512, 0);
+	ret = mmc_test_transfer(test, &sg, 1, 0, 1, 512, 0);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int mmc_test_multi_write(struct mmc_test_card *test)
 {
+	int ret;
 	unsigned int size;
 	struct scatterlist sg;
 
@@ -1066,11 +1064,16 @@ static int mmc_test_multi_write(struct mmc_test_card *test)
 
 	sg_init_one(&sg, test->buffer, size);
 
-	return mmc_test_transfer(test, &sg, 1, 0, size/512, 512, 1);
+	ret = mmc_test_transfer(test, &sg, 1, 0, size/512, 512, 1);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int mmc_test_multi_read(struct mmc_test_card *test)
 {
+	int ret;
 	unsigned int size;
 	struct scatterlist sg;
 
@@ -1087,7 +1090,11 @@ static int mmc_test_multi_read(struct mmc_test_card *test)
 
 	sg_init_one(&sg, test->buffer, size);
 
-	return mmc_test_transfer(test, &sg, 1, 0, size/512, 512, 0);
+	ret = mmc_test_transfer(test, &sg, 1, 0, size/512, 512, 0);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int mmc_test_pow2_write(struct mmc_test_card *test)
@@ -1167,7 +1174,7 @@ static int mmc_test_align_write(struct mmc_test_card *test)
 	int ret, i;
 	struct scatterlist sg;
 
-	for (i = 1; i < TEST_ALIGN_END; i++) {
+	for (i = 1;i < 4;i++) {
 		sg_init_one(&sg, test->buffer + i, 512);
 		ret = mmc_test_transfer(test, &sg, 1, 0, 1, 512, 1);
 		if (ret)
@@ -1182,7 +1189,7 @@ static int mmc_test_align_read(struct mmc_test_card *test)
 	int ret, i;
 	struct scatterlist sg;
 
-	for (i = 1; i < TEST_ALIGN_END; i++) {
+	for (i = 1;i < 4;i++) {
 		sg_init_one(&sg, test->buffer + i, 512);
 		ret = mmc_test_transfer(test, &sg, 1, 0, 1, 512, 0);
 		if (ret)
@@ -1209,7 +1216,7 @@ static int mmc_test_align_multi_write(struct mmc_test_card *test)
 	if (size < 1024)
 		return RESULT_UNSUP_HOST;
 
-	for (i = 1; i < TEST_ALIGN_END; i++) {
+	for (i = 1;i < 4;i++) {
 		sg_init_one(&sg, test->buffer + i, size);
 		ret = mmc_test_transfer(test, &sg, 1, 0, size/512, 512, 1);
 		if (ret)
@@ -1236,7 +1243,7 @@ static int mmc_test_align_multi_read(struct mmc_test_card *test)
 	if (size < 1024)
 		return RESULT_UNSUP_HOST;
 
-	for (i = 1; i < TEST_ALIGN_END; i++) {
+	for (i = 1;i < 4;i++) {
 		sg_init_one(&sg, test->buffer + i, size);
 		ret = mmc_test_transfer(test, &sg, 1, 0, size/512, 512, 0);
 		if (ret)
@@ -1254,7 +1261,11 @@ static int mmc_test_xfersize_write(struct mmc_test_card *test)
 	if (ret)
 		return ret;
 
-	return mmc_test_broken_transfer(test, 1, 512, 1);
+	ret = mmc_test_broken_transfer(test, 1, 512, 1);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int mmc_test_xfersize_read(struct mmc_test_card *test)
@@ -1265,7 +1276,11 @@ static int mmc_test_xfersize_read(struct mmc_test_card *test)
 	if (ret)
 		return ret;
 
-	return mmc_test_broken_transfer(test, 1, 512, 0);
+	ret = mmc_test_broken_transfer(test, 1, 512, 0);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int mmc_test_multi_xfersize_write(struct mmc_test_card *test)
@@ -1279,7 +1294,11 @@ static int mmc_test_multi_xfersize_write(struct mmc_test_card *test)
 	if (ret)
 		return ret;
 
-	return mmc_test_broken_transfer(test, 2, 512, 1);
+	ret = mmc_test_broken_transfer(test, 2, 512, 1);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int mmc_test_multi_xfersize_read(struct mmc_test_card *test)
@@ -1293,33 +1312,48 @@ static int mmc_test_multi_xfersize_read(struct mmc_test_card *test)
 	if (ret)
 		return ret;
 
-	return mmc_test_broken_transfer(test, 2, 512, 0);
+	ret = mmc_test_broken_transfer(test, 2, 512, 0);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 #ifdef CONFIG_HIGHMEM
 
 static int mmc_test_write_high(struct mmc_test_card *test)
 {
+	int ret;
 	struct scatterlist sg;
 
 	sg_init_table(&sg, 1);
 	sg_set_page(&sg, test->highmem, 512, 0);
 
-	return mmc_test_transfer(test, &sg, 1, 0, 1, 512, 1);
+	ret = mmc_test_transfer(test, &sg, 1, 0, 1, 512, 1);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int mmc_test_read_high(struct mmc_test_card *test)
 {
+	int ret;
 	struct scatterlist sg;
 
 	sg_init_table(&sg, 1);
 	sg_set_page(&sg, test->highmem, 512, 0);
 
-	return mmc_test_transfer(test, &sg, 1, 0, 1, 512, 0);
+	ret = mmc_test_transfer(test, &sg, 1, 0, 1, 512, 0);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int mmc_test_multi_write_high(struct mmc_test_card *test)
 {
+	int ret;
 	unsigned int size;
 	struct scatterlist sg;
 
@@ -1337,11 +1371,16 @@ static int mmc_test_multi_write_high(struct mmc_test_card *test)
 	sg_init_table(&sg, 1);
 	sg_set_page(&sg, test->highmem, size, 0);
 
-	return mmc_test_transfer(test, &sg, 1, 0, size/512, 512, 1);
+	ret = mmc_test_transfer(test, &sg, 1, 0, size/512, 512, 1);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int mmc_test_multi_read_high(struct mmc_test_card *test)
 {
+	int ret;
 	unsigned int size;
 	struct scatterlist sg;
 
@@ -1359,7 +1398,11 @@ static int mmc_test_multi_read_high(struct mmc_test_card *test)
 	sg_init_table(&sg, 1);
 	sg_set_page(&sg, test->highmem, size, 0);
 
-	return mmc_test_transfer(test, &sg, 1, 0, size/512, 512, 0);
+	ret = mmc_test_transfer(test, &sg, 1, 0, size/512, 512, 0);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 #else
@@ -2290,258 +2333,26 @@ static int mmc_test_profile_sglen_r_nonblock_perf(struct mmc_test_card *test)
 /*
  * eMMC hardware reset.
  */
-static int mmc_test_reset(struct mmc_test_card *test)
+static int mmc_test_hw_reset(struct mmc_test_card *test)
 {
 	struct mmc_card *card = test->card;
 	struct mmc_host *host = card->host;
 	int err;
 
-	err = mmc_hw_reset(host);
+	err = mmc_hw_reset_check(host);
 	if (!err)
 		return RESULT_OK;
-	else if (err == -EOPNOTSUPP)
-		return RESULT_UNSUP_HOST;
 
-	return RESULT_FAIL;
-}
+	if (err == -ENOSYS)
+		return RESULT_FAIL;
 
-struct mmc_test_req {
-	struct mmc_request mrq;
-	struct mmc_command sbc;
-	struct mmc_command cmd;
-	struct mmc_command stop;
-	struct mmc_command status;
-	struct mmc_data data;
-};
+	if (err != -EOPNOTSUPP)
+		return err;
 
-static struct mmc_test_req *mmc_test_req_alloc(void)
-{
-	struct mmc_test_req *rq = kzalloc(sizeof(*rq), GFP_KERNEL);
+	if (!mmc_can_reset(card))
+		return RESULT_UNSUP_CARD;
 
-	if (rq) {
-		rq->mrq.cmd = &rq->cmd;
-		rq->mrq.data = &rq->data;
-		rq->mrq.stop = &rq->stop;
-	}
-
-	return rq;
-}
-
-static int mmc_test_send_status(struct mmc_test_card *test,
-				struct mmc_command *cmd)
-{
-	memset(cmd, 0, sizeof(*cmd));
-
-	cmd->opcode = MMC_SEND_STATUS;
-	if (!mmc_host_is_spi(test->card->host))
-		cmd->arg = test->card->rca << 16;
-	cmd->flags = MMC_RSP_SPI_R2 | MMC_RSP_R1 | MMC_CMD_AC;
-
-	return mmc_wait_for_cmd(test->card->host, cmd, 0);
-}
-
-static int mmc_test_ongoing_transfer(struct mmc_test_card *test,
-				     unsigned int dev_addr, int use_sbc,
-				     int repeat_cmd, int write, int use_areq)
-{
-	struct mmc_test_req *rq = mmc_test_req_alloc();
-	struct mmc_host *host = test->card->host;
-	struct mmc_test_area *t = &test->area;
-	struct mmc_test_async_req test_areq = { .test = test };
-	struct mmc_request *mrq;
-	unsigned long timeout;
-	bool expired = false;
-	int ret = 0, cmd_ret;
-	u32 status = 0;
-	int count = 0;
-
-	if (!rq)
-		return -ENOMEM;
-
-	mrq = &rq->mrq;
-	if (use_sbc)
-		mrq->sbc = &rq->sbc;
-	mrq->cap_cmd_during_tfr = true;
-
-	test_areq.areq.mrq = mrq;
-	test_areq.areq.err_check = mmc_test_check_result_async;
-
-	mmc_test_prepare_mrq(test, mrq, t->sg, t->sg_len, dev_addr, t->blocks,
-			     512, write);
-
-	if (use_sbc && t->blocks > 1 && !mrq->sbc) {
-		ret =  mmc_host_cmd23(host) ?
-		       RESULT_UNSUP_CARD :
-		       RESULT_UNSUP_HOST;
-		goto out_free;
-	}
-
-	/* Start ongoing data request */
-	if (use_areq) {
-		mmc_start_req(host, &test_areq.areq, &ret);
-		if (ret)
-			goto out_free;
-	} else {
-		mmc_wait_for_req(host, mrq);
-	}
-
-	timeout = jiffies + msecs_to_jiffies(3000);
-	do {
-		count += 1;
-
-		/* Send status command while data transfer in progress */
-		cmd_ret = mmc_test_send_status(test, &rq->status);
-		if (cmd_ret)
-			break;
-
-		status = rq->status.resp[0];
-		if (status & R1_ERROR) {
-			cmd_ret = -EIO;
-			break;
-		}
-
-		if (mmc_is_req_done(host, mrq))
-			break;
-
-		expired = time_after(jiffies, timeout);
-		if (expired) {
-			pr_info("%s: timeout waiting for Tran state status %#x\n",
-				mmc_hostname(host), status);
-			cmd_ret = -ETIMEDOUT;
-			break;
-		}
-	} while (repeat_cmd && R1_CURRENT_STATE(status) != R1_STATE_TRAN);
-
-	/* Wait for data request to complete */
-	if (use_areq)
-		mmc_start_req(host, NULL, &ret);
-	else
-		mmc_wait_for_req_done(test->card->host, mrq);
-
-	/*
-	 * For cap_cmd_during_tfr request, upper layer must send stop if
-	 * required.
-	 */
-	if (mrq->data->stop && (mrq->data->error || !mrq->sbc)) {
-		if (ret)
-			mmc_wait_for_cmd(host, mrq->data->stop, 0);
-		else
-			ret = mmc_wait_for_cmd(host, mrq->data->stop, 0);
-	}
-
-	if (ret)
-		goto out_free;
-
-	if (cmd_ret) {
-		pr_info("%s: Send Status failed: status %#x, error %d\n",
-			mmc_hostname(test->card->host), status, cmd_ret);
-	}
-
-	ret = mmc_test_check_result(test, mrq);
-	if (ret)
-		goto out_free;
-
-	ret = mmc_test_wait_busy(test);
-	if (ret)
-		goto out_free;
-
-	if (repeat_cmd && (t->blocks + 1) << 9 > t->max_tfr)
-		pr_info("%s: %d commands completed during transfer of %u blocks\n",
-			mmc_hostname(test->card->host), count, t->blocks);
-
-	if (cmd_ret)
-		ret = cmd_ret;
-out_free:
-	kfree(rq);
-
-	return ret;
-}
-
-static int __mmc_test_cmds_during_tfr(struct mmc_test_card *test,
-				      unsigned long sz, int use_sbc, int write,
-				      int use_areq)
-{
-	struct mmc_test_area *t = &test->area;
-	int ret;
-
-	if (!(test->card->host->caps & MMC_CAP_CMD_DURING_TFR))
-		return RESULT_UNSUP_HOST;
-
-	ret = mmc_test_area_map(test, sz, 0, 0);
-	if (ret)
-		return ret;
-
-	ret = mmc_test_ongoing_transfer(test, t->dev_addr, use_sbc, 0, write,
-					use_areq);
-	if (ret)
-		return ret;
-
-	return mmc_test_ongoing_transfer(test, t->dev_addr, use_sbc, 1, write,
-					 use_areq);
-}
-
-static int mmc_test_cmds_during_tfr(struct mmc_test_card *test, int use_sbc,
-				    int write, int use_areq)
-{
-	struct mmc_test_area *t = &test->area;
-	unsigned long sz;
-	int ret;
-
-	for (sz = 512; sz <= t->max_tfr; sz += 512) {
-		ret = __mmc_test_cmds_during_tfr(test, sz, use_sbc, write,
-						 use_areq);
-		if (ret)
-			return ret;
-	}
-	return 0;
-}
-
-/*
- * Commands during read - no Set Block Count (CMD23).
- */
-static int mmc_test_cmds_during_read(struct mmc_test_card *test)
-{
-	return mmc_test_cmds_during_tfr(test, 0, 0, 0);
-}
-
-/*
- * Commands during write - no Set Block Count (CMD23).
- */
-static int mmc_test_cmds_during_write(struct mmc_test_card *test)
-{
-	return mmc_test_cmds_during_tfr(test, 0, 1, 0);
-}
-
-/*
- * Commands during read - use Set Block Count (CMD23).
- */
-static int mmc_test_cmds_during_read_cmd23(struct mmc_test_card *test)
-{
-	return mmc_test_cmds_during_tfr(test, 1, 0, 0);
-}
-
-/*
- * Commands during write - use Set Block Count (CMD23).
- */
-static int mmc_test_cmds_during_write_cmd23(struct mmc_test_card *test)
-{
-	return mmc_test_cmds_during_tfr(test, 1, 1, 0);
-}
-
-/*
- * Commands during non-blocking read - use Set Block Count (CMD23).
- */
-static int mmc_test_cmds_during_read_cmd23_nonblock(struct mmc_test_card *test)
-{
-	return mmc_test_cmds_during_tfr(test, 1, 0, 1);
-}
-
-/*
- * Commands during non-blocking write - use Set Block Count (CMD23).
- */
-static int mmc_test_cmds_during_write_cmd23_nonblock(struct mmc_test_card *test)
-{
-	return mmc_test_cmds_during_tfr(test, 1, 1, 1);
+	return RESULT_UNSUP_HOST;
 }
 
 static const struct mmc_test_case mmc_test_cases[] = {
@@ -2868,50 +2679,8 @@ static const struct mmc_test_case mmc_test_cases[] = {
 	},
 
 	{
-		.name = "Reset test",
-		.run = mmc_test_reset,
-	},
-
-	{
-		.name = "Commands during read - no Set Block Count (CMD23)",
-		.prepare = mmc_test_area_prepare,
-		.run = mmc_test_cmds_during_read,
-		.cleanup = mmc_test_area_cleanup,
-	},
-
-	{
-		.name = "Commands during write - no Set Block Count (CMD23)",
-		.prepare = mmc_test_area_prepare,
-		.run = mmc_test_cmds_during_write,
-		.cleanup = mmc_test_area_cleanup,
-	},
-
-	{
-		.name = "Commands during read - use Set Block Count (CMD23)",
-		.prepare = mmc_test_area_prepare,
-		.run = mmc_test_cmds_during_read_cmd23,
-		.cleanup = mmc_test_area_cleanup,
-	},
-
-	{
-		.name = "Commands during write - use Set Block Count (CMD23)",
-		.prepare = mmc_test_area_prepare,
-		.run = mmc_test_cmds_during_write_cmd23,
-		.cleanup = mmc_test_area_cleanup,
-	},
-
-	{
-		.name = "Commands during non-blocking read - use Set Block Count (CMD23)",
-		.prepare = mmc_test_area_prepare,
-		.run = mmc_test_cmds_during_read_cmd23_nonblock,
-		.cleanup = mmc_test_area_cleanup,
-	},
-
-	{
-		.name = "Commands during non-blocking write - use Set Block Count (CMD23)",
-		.prepare = mmc_test_area_prepare,
-		.run = mmc_test_cmds_during_write_cmd23_nonblock,
-		.cleanup = mmc_test_area_cleanup,
+		.name = "eMMC hardware reset",
+		.run = mmc_test_hw_reset,
 	},
 };
 
@@ -3080,12 +2849,18 @@ static ssize_t mtf_test_write(struct file *file, const char __user *buf,
 	struct seq_file *sf = (struct seq_file *)file->private_data;
 	struct mmc_card *card = (struct mmc_card *)sf->private;
 	struct mmc_test_card *test;
+	char lbuf[12];
 	long testcase;
-	int ret;
 
-	ret = kstrtol_from_user(buf, count, 10, &testcase);
-	if (ret)
-		return ret;
+	if (count >= sizeof(lbuf))
+		return -EINVAL;
+
+	if (copy_from_user(lbuf, buf, count))
+		return -EFAULT;
+	lbuf[count] = '\0';
+
+	if (strict_strtol(lbuf, 10, &testcase))
+		return -EINVAL;
 
 	test = kzalloc(sizeof(struct mmc_test_card), GFP_KERNEL);
 	if (!test)
@@ -3137,7 +2912,6 @@ static int mtf_testlist_show(struct seq_file *sf, void *data)
 
 	mutex_lock(&mmc_test_lock);
 
-	seq_printf(sf, "0:\tRun all tests\n");
 	for (i = 0; i < ARRAY_SIZE(mmc_test_cases); i++)
 		seq_printf(sf, "%d:\t%s\n", i+1, mmc_test_cases[i].name);
 
@@ -3251,17 +3025,12 @@ static void mmc_test_remove(struct mmc_card *card)
 	mmc_test_free_dbgfs_file(card);
 }
 
-static void mmc_test_shutdown(struct mmc_card *card)
-{
-}
-
 static struct mmc_driver mmc_driver = {
 	.drv		= {
 		.name	= "mmc_test",
 	},
 	.probe		= mmc_test_probe,
 	.remove		= mmc_test_remove,
-	.shutdown	= mmc_test_shutdown,
 };
 
 static int __init mmc_test_init(void)

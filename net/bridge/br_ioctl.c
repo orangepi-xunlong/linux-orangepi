@@ -21,19 +21,18 @@
 #include <asm/uaccess.h>
 #include "br_private.h"
 
+/* called with RTNL */
 static int get_bridge_ifindices(struct net *net, int *indices, int num)
 {
 	struct net_device *dev;
 	int i = 0;
 
-	rcu_read_lock();
-	for_each_netdev_rcu(net, dev) {
+	for_each_netdev(net, dev) {
 		if (i >= num)
 			break;
 		if (dev->priv_flags & IFF_EBRIDGE)
 			indices[i++] = dev->ifindex;
 	}
-	rcu_read_unlock();
 
 	return i;
 }
@@ -113,9 +112,7 @@ static int add_del_if(struct net_bridge *br, int ifindex, int isadd)
 static int old_dev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
 	struct net_bridge *br = netdev_priv(dev);
-	struct net_bridge_port *p = NULL;
 	unsigned long args[4];
-	int ret = -EOPNOTSUPP;
 
 	if (copy_from_user(args, rq->ifr_data, sizeof(args)))
 		return -EFAULT;
@@ -185,29 +182,26 @@ static int old_dev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 		if (!ns_capable(dev_net(dev)->user_ns, CAP_NET_ADMIN))
 			return -EPERM;
 
-		ret = br_set_forward_delay(br, args[1]);
-		break;
+		return br_set_forward_delay(br, args[1]);
 
 	case BRCTL_SET_BRIDGE_HELLO_TIME:
 		if (!ns_capable(dev_net(dev)->user_ns, CAP_NET_ADMIN))
 			return -EPERM;
 
-		ret = br_set_hello_time(br, args[1]);
-		break;
+		return br_set_hello_time(br, args[1]);
 
 	case BRCTL_SET_BRIDGE_MAX_AGE:
 		if (!ns_capable(dev_net(dev)->user_ns, CAP_NET_ADMIN))
 			return -EPERM;
 
-		ret = br_set_max_age(br, args[1]);
-		break;
+		return br_set_max_age(br, args[1]);
 
 	case BRCTL_SET_AGEING_TIME:
 		if (!ns_capable(dev_net(dev)->user_ns, CAP_NET_ADMIN))
 			return -EPERM;
 
-		ret = br_set_ageing_time(br, args[1]);
-		break;
+		br->ageing_time = clock_t_to_jiffies(args[1]);
+		return 0;
 
 	case BRCTL_GET_PORT_INFO:
 	{
@@ -247,19 +241,22 @@ static int old_dev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 			return -EPERM;
 
 		br_stp_set_enabled(br, args[1]);
-		ret = 0;
-		break;
+		return 0;
 
 	case BRCTL_SET_BRIDGE_PRIORITY:
 		if (!ns_capable(dev_net(dev)->user_ns, CAP_NET_ADMIN))
 			return -EPERM;
 
+		spin_lock_bh(&br->lock);
 		br_stp_set_bridge_priority(br, args[1]);
-		ret = 0;
-		break;
+		spin_unlock_bh(&br->lock);
+		return 0;
 
 	case BRCTL_SET_PORT_PRIORITY:
 	{
+		struct net_bridge_port *p;
+		int ret;
+
 		if (!ns_capable(dev_net(dev)->user_ns, CAP_NET_ADMIN))
 			return -EPERM;
 
@@ -269,11 +266,14 @@ static int old_dev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 		else
 			ret = br_stp_set_port_priority(p, args[2]);
 		spin_unlock_bh(&br->lock);
-		break;
+		return ret;
 	}
 
 	case BRCTL_SET_PATH_COST:
 	{
+		struct net_bridge_port *p;
+		int ret;
+
 		if (!ns_capable(dev_net(dev)->user_ns, CAP_NET_ADMIN))
 			return -EPERM;
 
@@ -283,7 +283,8 @@ static int old_dev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 		else
 			ret = br_stp_set_path_cost(p, args[2]);
 		spin_unlock_bh(&br->lock);
-		break;
+
+		return ret;
 	}
 
 	case BRCTL_GET_FDB_ENTRIES:
@@ -291,14 +292,7 @@ static int old_dev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 				       args[2], args[3]);
 	}
 
-	if (!ret) {
-		if (p)
-			br_ifinfo_notify(RTM_NEWLINK, p);
-		else
-			netdev_state_change(br->dev);
-	}
-
-	return ret;
+	return -EOPNOTSUPP;
 }
 
 static int old_deviceless(struct net *net, void __user *uarg)
@@ -387,7 +381,7 @@ int br_dev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
 	struct net_bridge *br = netdev_priv(dev);
 
-	switch (cmd) {
+	switch(cmd) {
 	case SIOCDEVPRIVATE:
 		return old_dev_ioctl(dev, rq, cmd);
 

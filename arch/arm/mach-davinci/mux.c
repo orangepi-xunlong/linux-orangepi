@@ -15,9 +15,6 @@
  *
  * Copyright (C) 2008 Texas Instruments.
  */
-
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/spinlock.h>
@@ -30,7 +27,7 @@ static void __iomem *pinmux_base;
 /*
  * Sets the DAVINCI MUX register based on the table
  */
-int davinci_cfg_reg(const unsigned long index)
+int __init_or_module davinci_cfg_reg(const unsigned long index)
 {
 	static DEFINE_SPINLOCK(mux_spin_lock);
 	struct davinci_soc_info *soc_info = &davinci_soc_info;
@@ -49,7 +46,7 @@ int davinci_cfg_reg(const unsigned long index)
 	}
 
 	if (index >= soc_info->pinmux_pins_num) {
-		pr_err("Invalid pin mux index: %lu (%lu)\n",
+		printk(KERN_ERR "Invalid pin mux index: %lu (%lu)\n",
 		       index, soc_info->pinmux_pins_num);
 		dump_stack();
 		return -ENODEV;
@@ -58,7 +55,7 @@ int davinci_cfg_reg(const unsigned long index)
 	cfg = &soc_info->pinmux_pins[index];
 
 	if (cfg->name == NULL) {
-		pr_err("No entry for the specified index\n");
+		printk(KERN_ERR "No entry for the specified index\n");
 		return -ENODEV;
 	}
 
@@ -85,15 +82,15 @@ int davinci_cfg_reg(const unsigned long index)
 
 	if (warn) {
 #ifdef CONFIG_DAVINCI_MUX_WARNINGS
-		pr_warn("initialized %s\n", cfg->name);
+		printk(KERN_WARNING "MUX: initialized %s\n", cfg->name);
 #endif
 	}
 
 #ifdef CONFIG_DAVINCI_MUX_DEBUG
 	if (cfg->debug || warn) {
-		pr_warn("Setting register %s\n", cfg->name);
-		pr_warn("   %s (0x%08x) = 0x%08x -> 0x%08x\n",
-			cfg->mux_reg_name, cfg->mux_reg, reg_orig, reg);
+		printk(KERN_WARNING "MUX: Setting register %s\n", cfg->name);
+		printk(KERN_WARNING "	   %s (0x%08x) = 0x%08x -> 0x%08x\n",
+		       cfg->mux_reg_name, cfg->mux_reg, reg_orig, reg);
 	}
 #endif
 
@@ -101,7 +98,7 @@ int davinci_cfg_reg(const unsigned long index)
 }
 EXPORT_SYMBOL(davinci_cfg_reg);
 
-int davinci_cfg_reg_list(const short pins[])
+int __init_or_module davinci_cfg_reg_list(const short pins[])
 {
 	int i, error = -EINVAL;
 

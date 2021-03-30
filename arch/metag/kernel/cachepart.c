@@ -15,7 +15,7 @@
 #define SYSC_DCPART(n)	(SYSC_DCPART0 + SYSC_xCPARTn_STRIDE * (n))
 #define SYSC_ICPART(n)	(SYSC_ICPART0 + SYSC_xCPARTn_STRIDE * (n))
 
-#define CACHE_ASSOCIATIVITY 4 /* 4 way set-associative */
+#define CACHE_ASSOCIATIVITY 4 /* 4 way set-assosiative */
 #define ICACHE 0
 #define DCACHE 1
 
@@ -55,7 +55,7 @@ unsigned int get_global_icache_size(void)
 	return (get_icache_size() * ((temp >> SYSC_xCPARTG_AND_S) + 1)) >> 4;
 }
 
-static int get_thread_cache_size(unsigned int cache, int thread_id)
+static unsigned int get_thread_cache_size(unsigned int cache, int thread_id)
 {
 	unsigned int cache_size;
 	unsigned int t_cache_part;
@@ -94,29 +94,28 @@ static int get_thread_cache_size(unsigned int cache, int thread_id)
 
 void check_for_cache_aliasing(int thread_id)
 {
-	int thread_cache_size;
+	unsigned int thread_cache_size;
 	unsigned int cache_type;
 	for (cache_type = ICACHE; cache_type <= DCACHE; cache_type++) {
 		thread_cache_size =
 				get_thread_cache_size(cache_type, thread_id);
 		if (thread_cache_size < 0)
-			pr_emerg("Can't read %s cache size\n",
+			pr_emerg("Can't read %s cache size", \
 				 cache_type ? "DCACHE" : "ICACHE");
 		else if (thread_cache_size == 0)
 			/* Cache is off. No need to check for aliasing */
 			continue;
 		if (thread_cache_size / CACHE_ASSOCIATIVITY > PAGE_SIZE) {
-			pr_emerg("Potential cache aliasing detected in %s on Thread %d\n",
+			pr_emerg("Cache aliasing detected in %s on Thread %d",
 				 cache_type ? "DCACHE" : "ICACHE", thread_id);
-			pr_warn("Total %s size: %u bytes\n",
-				cache_type ? "DCACHE" : "ICACHE",
+			pr_warn("Total %s size: %u bytes",
+				cache_type ? "DCACHE" : "ICACHE ",
 				cache_type ? get_dcache_size()
 				: get_icache_size());
-			pr_warn("Thread %s size: %d bytes\n",
+			pr_warn("Thread %s size: %d bytes",
 				cache_type ? "CACHE" : "ICACHE",
 				thread_cache_size);
-			pr_warn("Page Size: %lu bytes\n", PAGE_SIZE);
-			panic("Potential cache aliasing detected");
+			pr_warn("Page Size: %lu bytes", PAGE_SIZE);
 		}
 	}
 }

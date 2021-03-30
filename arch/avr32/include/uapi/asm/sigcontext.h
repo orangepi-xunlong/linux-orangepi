@@ -5,8 +5,8 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-#ifndef _UAPI__ASM_AVR32_SIGCONTEXT_H
-#define _UAPI__ASM_AVR32_SIGCONTEXT_H
+#ifndef __ASM_AVR32_SIGCONTEXT_H
+#define __ASM_AVR32_SIGCONTEXT_H
 
 struct sigcontext {
 	unsigned long	oldmask;
@@ -31,4 +31,4 @@ struct sigcontext {
 	unsigned long	r0;
 };
 
-#endif /* _UAPI__ASM_AVR32_SIGCONTEXT_H */
+#endif /* __ASM_AVR32_SIGCONTEXT_H */

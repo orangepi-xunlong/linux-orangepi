@@ -32,7 +32,7 @@ static int au1xtoy_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
 	unsigned long t;
 
-	t = alchemy_rdsys(AU1000_SYS_TOYREAD);
+	t = au_readl(SYS_TOYREAD);
 
 	rtc_time_to_tm(t, tm);
 
@@ -45,12 +45,13 @@ static int au1xtoy_rtc_set_time(struct device *dev, struct rtc_time *tm)
 
 	rtc_tm_to_time(tm, &t);
 
-	alchemy_wrsys(t, AU1000_SYS_TOYWRITE);
+	au_writel(t, SYS_TOYWRITE);
+	au_sync();
 
 	/* wait for the pending register write to succeed.  This can
 	 * take up to 6 seconds...
 	 */
-	while (alchemy_rdsys(AU1000_SYS_CNTRCTRL) & SYS_CNTRL_C0S)
+	while (au_readl(SYS_COUNTER_CNTRL) & SYS_CNTRL_C0S)
 		msleep(1);
 
 	return 0;
@@ -67,7 +68,7 @@ static int au1xtoy_rtc_probe(struct platform_device *pdev)
 	unsigned long t;
 	int ret;
 
-	t = alchemy_rdsys(AU1000_SYS_CNTRCTRL);
+	t = au_readl(SYS_COUNTER_CNTRL);
 	if (!(t & CNTR_OK)) {
 		dev_err(&pdev->dev, "counters not working; aborting.\n");
 		ret = -ENODEV;
@@ -77,10 +78,10 @@ static int au1xtoy_rtc_probe(struct platform_device *pdev)
 	ret = -ETIMEDOUT;
 
 	/* set counter0 tickrate to 1Hz if necessary */
-	if (alchemy_rdsys(AU1000_SYS_TOYTRIM) != 32767) {
+	if (au_readl(SYS_TOYTRIM) != 32767) {
 		/* wait until hardware gives access to TRIM register */
 		t = 0x00100000;
-		while ((alchemy_rdsys(AU1000_SYS_CNTRCTRL) & SYS_CNTRL_T0S) && --t)
+		while ((au_readl(SYS_COUNTER_CNTRL) & SYS_CNTRL_T0S) && --t)
 			msleep(1);
 
 		if (!t) {
@@ -92,11 +93,12 @@ static int au1xtoy_rtc_probe(struct platform_device *pdev)
 		}
 
 		/* set 1Hz TOY tick rate */
-		alchemy_wrsys(32767, AU1000_SYS_TOYTRIM);
+		au_writel(32767, SYS_TOYTRIM);
+		au_sync();
 	}
 
 	/* wait until the hardware allows writes to the counter reg */
-	while (alchemy_rdsys(AU1000_SYS_CNTRCTRL) & SYS_CNTRL_C0S)
+	while (au_readl(SYS_COUNTER_CNTRL) & SYS_CNTRL_C0S)
 		msleep(1);
 
 	rtcdev = devm_rtc_device_register(&pdev->dev, "rtc-au1xxx",
@@ -114,10 +116,18 @@ out_err:
 	return ret;
 }
 
+static int au1xtoy_rtc_remove(struct platform_device *pdev)
+{
+	platform_set_drvdata(pdev, NULL);
+
+	return 0;
+}
+
 static struct platform_driver au1xrtc_driver = {
 	.driver		= {
 		.name	= "rtc-au1xxx",
 	},
+	.remove		= au1xtoy_rtc_remove,
 };
 
 module_platform_driver_probe(au1xrtc_driver, au1xtoy_rtc_probe);

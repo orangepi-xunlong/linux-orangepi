@@ -26,8 +26,6 @@
  * **********************
  */
 
-#define pr_fmt(fmt) "arcnet:" KBUILD_MODNAME ": " fmt
-
 #include <linux/module.h>
 #include <linux/gfp.h>
 #include <linux/init.h>
@@ -35,8 +33,9 @@
 #include <net/arp.h>
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>
+#include <linux/arcdevice.h>
 
-#include "arcdevice.h"
+#define VERSION "arcnet: cap mode (`c') encapsulation support loaded.\n"
 
 /* packet receiver */
 static void rx(struct net_device *dev, int bufnum,
@@ -48,8 +47,7 @@ static void rx(struct net_device *dev, int bufnum,
 	char *pktbuf, *pkthdrbuf;
 	int ofs;
 
-	arc_printk(D_DURING, dev, "it's a raw(cap) packet (length=%d)\n",
-		   length);
+	BUGMSG(D_DURING, "it's a raw(cap) packet (length=%d)\n", length);
 
 	if (length >= MinTU)
 		ofs = 512 - length;
@@ -57,7 +55,8 @@ static void rx(struct net_device *dev, int bufnum,
 		ofs = 256 - length;
 
 	skb = alloc_skb(length + ARC_HDR_SIZE + sizeof(int), GFP_ATOMIC);
-	if (!skb) {
+	if (skb == NULL) {
+		BUGMSG(D_NORMAL, "Memory squeeze, dropping packet.\n");
 		dev->stats.rx_dropped++;
 		return;
 	}
@@ -67,17 +66,17 @@ static void rx(struct net_device *dev, int bufnum,
 	pkt = (struct archdr *)skb_mac_header(skb);
 	skb_pull(skb, ARC_HDR_SIZE);
 
-	/* up to sizeof(pkt->soft) has already been copied from the card
-	 * squeeze in an int for the cap encapsulation
-	 * use these variables to be sure we count in bytes, not in
-	 * sizeof(struct archdr)
-	 */
-	pktbuf = (char *)pkt;
-	pkthdrbuf = (char *)pkthdr;
-	memcpy(pktbuf, pkthdrbuf, ARC_HDR_SIZE + sizeof(pkt->soft.cap.proto));
-	memcpy(pktbuf + ARC_HDR_SIZE + sizeof(pkt->soft.cap.proto) + sizeof(int),
-	       pkthdrbuf + ARC_HDR_SIZE + sizeof(pkt->soft.cap.proto),
-	       sizeof(struct archdr) - ARC_HDR_SIZE - sizeof(pkt->soft.cap.proto));
+	/* up to sizeof(pkt->soft) has already been copied from the card */
+	/* squeeze in an int for the cap encapsulation */
+
+	/* use these variables to be sure we count in bytes, not in
+	   sizeof(struct archdr) */
+	pktbuf=(char*)pkt;
+	pkthdrbuf=(char*)pkthdr;
+	memcpy(pktbuf, pkthdrbuf, ARC_HDR_SIZE+sizeof(pkt->soft.cap.proto));
+	memcpy(pktbuf+ARC_HDR_SIZE+sizeof(pkt->soft.cap.proto)+sizeof(int),
+	       pkthdrbuf+ARC_HDR_SIZE+sizeof(pkt->soft.cap.proto),
+	       sizeof(struct archdr)-ARC_HDR_SIZE-sizeof(pkt->soft.cap.proto));
 
 	if (length > sizeof(pkt->soft))
 		lp->hw.copy_from_card(dev, bufnum, ofs + sizeof(pkt->soft),
@@ -85,14 +84,15 @@ static void rx(struct net_device *dev, int bufnum,
 				      + sizeof(int),
 				      length - sizeof(pkt->soft));
 
-	if (BUGLVL(D_SKB))
-		arcnet_dump_skb(dev, skb, "rx");
+	BUGLVL(D_SKB) arcnet_dump_skb(dev, skb, "rx");
 
 	skb->protocol = cpu_to_be16(ETH_P_ARCNET);
 	netif_rx(skb);
 }
 
-/* Create the ARCnet hard/soft headers for cap mode.
+
+/*
+ * Create the ARCnet hard/soft headers for cap mode.
  * There aren't any soft headers in cap mode - not even the protocol id.
  */
 static int build_header(struct sk_buff *skb,
@@ -101,12 +101,12 @@ static int build_header(struct sk_buff *skb,
 			uint8_t daddr)
 {
 	int hdr_size = ARC_HDR_SIZE;
-	struct archdr *pkt = (struct archdr *)skb_push(skb, hdr_size);
+	struct archdr *pkt = (struct archdr *) skb_push(skb, hdr_size);
 
-	arc_printk(D_PROTO, dev, "Preparing header for cap packet %x.\n",
-		   *((int *)&pkt->soft.cap.cookie[0]));
-
-	/* Set the source hardware address.
+	BUGMSG(D_PROTO, "Preparing header for cap packet %x.\n",
+	       *((int*)&pkt->soft.cap.cookie[0]));
+	/*
+	 * Set the source hardware address.
 	 *
 	 * This is pretty pointless for most purposes, but it can help in
 	 * debugging.  ARCnet does not allow us to change the source address in
@@ -117,8 +117,9 @@ static int build_header(struct sk_buff *skb,
 	/* see linux/net/ethernet/eth.c to see where I got the following */
 
 	if (dev->flags & (IFF_LOOPBACK | IFF_NOARP)) {
-		/* FIXME: fill in the last byte of the dest ipaddr here to
-		 * better comply with RFC1051 in "noarp" mode.
+		/*
+		 * FIXME: fill in the last byte of the dest ipaddr here to better
+		 * comply with RFC1051 in "noarp" mode.
 		 */
 		pkt->hard.dest = 0;
 		return hdr_size;
@@ -129,6 +130,7 @@ static int build_header(struct sk_buff *skb,
 	return hdr_size;	/* success */
 }
 
+
 static int prepare_tx(struct net_device *dev, struct archdr *pkt, int length,
 		      int bufnum)
 {
@@ -136,21 +138,22 @@ static int prepare_tx(struct net_device *dev, struct archdr *pkt, int length,
 	struct arc_hardware *hard = &pkt->hard;
 	int ofs;
 
+
 	/* hard header is not included in packet length */
 	length -= ARC_HDR_SIZE;
 	/* And neither is the cookie field */
 	length -= sizeof(int);
 
-	arc_printk(D_DURING, dev, "prepare_tx: txbufs=%d/%d/%d\n",
-		   lp->next_tx, lp->cur_tx, bufnum);
+	BUGMSG(D_DURING, "prepare_tx: txbufs=%d/%d/%d\n",
+	       lp->next_tx, lp->cur_tx, bufnum);
 
-	arc_printk(D_PROTO, dev, "Sending for cap packet %x.\n",
-		   *((int *)&pkt->soft.cap.cookie[0]));
+	BUGMSG(D_PROTO, "Sending for cap packet %x.\n",
+	       *((int*)&pkt->soft.cap.cookie[0]));
 
 	if (length > XMTU) {
 		/* should never happen! other people already check for this. */
-		arc_printk(D_NORMAL, dev, "Bug!  prepare_tx with size %d (> %d)\n",
-			   length, XMTU);
+		BUGMSG(D_NORMAL, "Bug!  prepare_tx with size %d (> %d)\n",
+		       length, XMTU);
 		length = XMTU;
 	}
 	if (length > MinTU) {
@@ -159,12 +162,11 @@ static int prepare_tx(struct net_device *dev, struct archdr *pkt, int length,
 	} else if (length > MTU) {
 		hard->offset[0] = 0;
 		hard->offset[1] = ofs = 512 - length - 3;
-	} else {
+	} else
 		hard->offset[0] = ofs = 256 - length;
-	}
 
-	arc_printk(D_DURING, dev, "prepare_tx: length=%d ofs=%d\n",
-		   length, ofs);
+	BUGMSG(D_DURING, "prepare_tx: length=%d ofs=%d\n",
+	       length,ofs);
 
 	/* Copy the arcnet-header + the protocol byte down: */
 	lp->hw.copy_to_card(dev, bufnum, 0, hard, ARC_HDR_SIZE);
@@ -172,10 +174,9 @@ static int prepare_tx(struct net_device *dev, struct archdr *pkt, int length,
 			    sizeof(pkt->soft.cap.proto));
 
 	/* Skip the extra integer we have written into it as a cookie
-	 * but write the rest of the message:
-	 */
-	lp->hw.copy_to_card(dev, bufnum, ofs + 1,
-			    ((unsigned char *)&pkt->soft.cap.mes), length - 1);
+	   but write the rest of the message: */
+	lp->hw.copy_to_card(dev, bufnum, ofs+1,
+			    ((unsigned char*)&pkt->soft.cap.mes),length-1);
 
 	lp->lastload_dest = hard->dest;
 
@@ -187,20 +188,21 @@ static int ack_tx(struct net_device *dev, int acked)
 	struct arcnet_local *lp = netdev_priv(dev);
 	struct sk_buff *ackskb;
 	struct archdr *ackpkt;
-	int length = sizeof(struct arc_cap);
+	int length=sizeof(struct arc_cap);
 
-	arc_printk(D_DURING, dev, "capmode: ack_tx: protocol: %x: result: %d\n",
-		   lp->outgoing.skb->protocol, acked);
+	BUGMSG(D_DURING, "capmode: ack_tx: protocol: %x: result: %d\n",
+		lp->outgoing.skb->protocol, acked);
 
-	if (BUGLVL(D_SKB))
-		arcnet_dump_skb(dev, lp->outgoing.skb, "ack_tx");
+	BUGLVL(D_SKB) arcnet_dump_skb(dev, lp->outgoing.skb, "ack_tx");
 
 	/* Now alloc a skb to send back up through the layers: */
-	ackskb = alloc_skb(length + ARC_HDR_SIZE, GFP_ATOMIC);
-	if (!ackskb)
+	ackskb = alloc_skb(length + ARC_HDR_SIZE , GFP_ATOMIC);
+	if (ackskb == NULL) {
+		BUGMSG(D_NORMAL, "Memory squeeze, can't acknowledge.\n");
 		goto free_outskb;
+	}
 
-	skb_put(ackskb, length + ARC_HDR_SIZE);
+	skb_put(ackskb, length + ARC_HDR_SIZE );
 	ackskb->dev = dev;
 
 	skb_reset_mac_header(ackskb);
@@ -210,39 +212,38 @@ static int ack_tx(struct net_device *dev, int acked)
 	skb_copy_from_linear_data(lp->outgoing.skb, ackpkt,
 				  ARC_HDR_SIZE + sizeof(struct arc_cap));
 	ackpkt->soft.cap.proto = 0; /* using protocol 0 for acknowledge */
-	ackpkt->soft.cap.mes.ack = acked;
+	ackpkt->soft.cap.mes.ack=acked;
 
-	arc_printk(D_PROTO, dev, "Ackknowledge for cap packet %x.\n",
-		   *((int *)&ackpkt->soft.cap.cookie[0]));
+	BUGMSG(D_PROTO, "Ackknowledge for cap packet %x.\n",
+			*((int*)&ackpkt->soft.cap.cookie[0]));
 
 	ackskb->protocol = cpu_to_be16(ETH_P_ARCNET);
 
-	if (BUGLVL(D_SKB))
-		arcnet_dump_skb(dev, ackskb, "ack_tx_recv");
+	BUGLVL(D_SKB) arcnet_dump_skb(dev, ackskb, "ack_tx_recv");
 	netif_rx(ackskb);
 
 free_outskb:
 	dev_kfree_skb_irq(lp->outgoing.skb);
-	lp->outgoing.proto = NULL;
-			/* We are always finished when in this protocol */
+	lp->outgoing.proto = NULL; /* We are always finished when in this protocol */
 
 	return 0;
 }
 
-static struct ArcProto capmode_proto = {
-	.suffix		= 'r',
-	.mtu		= XMTU,
-	.rx		= rx,
-	.build_header	= build_header,
-	.prepare_tx	= prepare_tx,
-	.ack_tx		= ack_tx
+static struct ArcProto capmode_proto =
+{
+	'r',
+	XMTU,
+	0,
+	rx,
+	build_header,
+	prepare_tx,
+	NULL,
+	ack_tx
 };
 
-static int __init capmode_module_init(void)
+static void arcnet_cap_init(void)
 {
 	int count;
-
-	pr_info("cap mode (`c') encapsulation support loaded\n");
 
 	for (count = 1; count <= 8; count++)
 		if (arc_proto_map[count] == arc_proto_default)
@@ -254,7 +255,12 @@ static int __init capmode_module_init(void)
 
 	arc_proto_default = &capmode_proto;
 	arc_raw_proto = &capmode_proto;
+}
 
+static int __init capmode_module_init(void)
+{
+	printk(VERSION);
+	arcnet_cap_init();
 	return 0;
 }
 

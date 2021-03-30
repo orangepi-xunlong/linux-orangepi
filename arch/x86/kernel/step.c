@@ -5,7 +5,6 @@
 #include <linux/mm.h>
 #include <linux/ptrace.h>
 #include <asm/desc.h>
-#include <asm/mmu_context.h>
 
 unsigned long convert_ip_to_linear(struct task_struct *child, struct pt_regs *regs)
 {
@@ -18,7 +17,6 @@ unsigned long convert_ip_to_linear(struct task_struct *child, struct pt_regs *re
 		return addr;
 	}
 
-#ifdef CONFIG_MODIFY_LDT_SYSCALL
 	/*
 	 * We'll assume that the code segments in the GDT
 	 * are all zero-based. That is largely true: the
@@ -29,14 +27,13 @@ unsigned long convert_ip_to_linear(struct task_struct *child, struct pt_regs *re
 		struct desc_struct *desc;
 		unsigned long base;
 
-		seg >>= 3;
+		seg &= ~7UL;
 
 		mutex_lock(&child->mm->context.lock);
-		if (unlikely(!child->mm->context.ldt ||
-			     seg >= child->mm->context.ldt->size))
+		if (unlikely((seg >> 3) >= child->mm->context.size))
 			addr = -1L; /* bogus selector, access would fault */
 		else {
-			desc = &child->mm->context.ldt->entries[seg];
+			desc = child->mm->context.ldt + seg;
 			base = get_desc_base(desc);
 
 			/* 16-bit code segment? */
@@ -46,7 +43,6 @@ unsigned long convert_ip_to_linear(struct task_struct *child, struct pt_regs *re
 		}
 		mutex_unlock(&child->mm->context.lock);
 	}
-#endif
 
 	return addr;
 }
@@ -57,8 +53,7 @@ static int is_setting_trap_flag(struct task_struct *child, struct pt_regs *regs)
 	unsigned char opcode[15];
 	unsigned long addr = convert_ip_to_linear(child, regs);
 
-	copied = access_process_vm(child, addr, opcode, sizeof(opcode),
-			FOLL_FORCE);
+	copied = access_process_vm(child, addr, opcode, sizeof(opcode), 0);
 	for (i = 0; i < copied; i++) {
 		switch (opcode[i]) {
 		/* popf and iret */

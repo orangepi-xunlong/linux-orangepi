@@ -19,7 +19,6 @@
 #include <linux/init.h>
 #include <linux/reboot.h>
 #include <linux/seq_file.h>
-#include <linux/of_fdt.h>
 #include <linux/of_platform.h>
 
 #include <asm/machdep.h>
@@ -59,7 +58,7 @@ static void ppa8548_show_cpuinfo(struct seq_file *m)
 	seq_printf(m, "PLL setting\t: 0x%x\n", ((phid1 >> 24) & 0x3f));
 }
 
-static const struct of_device_id of_bus_ids[] __initconst = {
+static struct of_device_id __initdata of_bus_ids[] = {
 	{ .name = "soc", },
 	{ .type = "soc", },
 	{ .compatible = "simple-bus", },
@@ -81,7 +80,9 @@ machine_device_initcall(ppa8548, declare_of_platform_devices);
  */
 static int __init ppa8548_probe(void)
 {
-	return of_machine_is_compatible("ppa8548");
+	unsigned long root = of_get_flat_dt_root();
+
+	return of_flat_dt_is_compatible(root, "ppa8548");
 }
 
 define_machine(ppa8548) {
@@ -91,6 +92,7 @@ define_machine(ppa8548) {
 	.init_IRQ	= ppa8548_pic_init,
 	.show_cpuinfo	= ppa8548_show_cpuinfo,
 	.get_irq	= mpic_get_irq,
+	.restart	= fsl_rstcr_restart,
 	.calibrate_decr = generic_calibrate_decr,
 	.progress	= udbg_progress,
 };

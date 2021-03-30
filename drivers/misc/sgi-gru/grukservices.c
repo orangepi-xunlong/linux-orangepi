@@ -160,12 +160,7 @@ static void gru_load_kernel_context(struct gru_blade_state *bs, int blade_id)
 	down_write(&bs->bs_kgts_sema);
 
 	if (!bs->bs_kgts) {
-		do {
-			bs->bs_kgts = gru_alloc_gts(NULL, 0, 0, 0, 0, 0);
-			if (!IS_ERR(bs->bs_kgts))
-				break;
-			msleep(1);
-		} while (true);
+		bs->bs_kgts = gru_alloc_gts(NULL, 0, 0, 0, 0, 0);
 		bs->bs_kgts->ts_user_blade_id = blade_id;
 	}
 	kgts = bs->bs_kgts;
@@ -434,8 +429,8 @@ int gru_get_cb_exception_detail(void *cb,
 	return 0;
 }
 
-static char *gru_get_cb_exception_detail_str(int ret, void *cb,
-					     char *buf, int size)
+char *gru_get_cb_exception_detail_str(int ret, void *cb,
+				      char *buf, int size)
 {
 	struct gru_control_block_status *gen = (void *)cb;
 	struct control_block_extended_exc_detail excdet;
@@ -510,7 +505,7 @@ int gru_wait_proc(void *cb)
 	return ret;
 }
 
-static void gru_abort(int ret, void *cb, char *str)
+void gru_abort(int ret, void *cb, char *str)
 {
 	char buf[GRU_EXC_STR_SIZE];
 
@@ -718,8 +713,8 @@ cberr:
 static int send_message_put_nacked(void *cb, struct gru_message_queue_desc *mqd,
 			void *mesg, int lines)
 {
-	unsigned long m;
-	int ret, loops = 200;	/* experimentally determined */
+	unsigned long m, *val = mesg, gpa, save;
+	int ret;
 
 	m = mqd->mq_gpa + (gru_get_amo_value_head(cb) << 6);
 	if (lines == 2) {
@@ -735,28 +730,22 @@ static int send_message_put_nacked(void *cb, struct gru_message_queue_desc *mqd,
 		return MQE_OK;
 
 	/*
-	 * Send a noop message in order to deliver a cross-partition interrupt
-	 * to the SSI that contains the target message queue. Normally, the
-	 * interrupt is automatically delivered by hardware following mesq
-	 * operations, but some error conditions require explicit delivery.
-	 * The noop message will trigger delivery. Otherwise partition failures
+	 * Send a cross-partition interrupt to the SSI that contains the target
+	 * message queue. Normally, the interrupt is automatically delivered by
+	 * hardware but some error conditions require explicit delivery.
+	 * Use the GRU to deliver the interrupt. Otherwise partition failures
 	 * could cause unrecovered errors.
 	 */
-	do {
-		ret = send_noop_message(cb, mqd, mesg);
-	} while ((ret == MQIE_AGAIN || ret == MQE_CONGESTION) && (loops-- > 0));
-
-	if (ret == MQIE_AGAIN || ret == MQE_CONGESTION) {
-		/*
-		 * Don't indicate to the app to resend the message, as it's
-		 * already been successfully sent.  We simply send an OK
-		 * (rather than fail the send with MQE_UNEXPECTED_CB_ERR),
-		 * assuming that the other side is receiving enough
-		 * interrupts to get this message processed anyway.
-		 */
-		ret = MQE_OK;
-	}
-	return ret;
+	gpa = uv_global_gru_mmr_address(mqd->interrupt_pnode, UVH_IPI_INT);
+	save = *val;
+	*val = uv_hub_ipi_value(mqd->interrupt_apicid, mqd->interrupt_vector,
+				dest_Fixed);
+	gru_vstore_phys(cb, gpa, gru_get_tri(mesg), IAA_REGISTER, IMA);
+	ret = gru_wait(cb);
+	*val = save;
+	if (ret != CBS_IDLE)
+		return MQE_UNEXPECTED_CB_ERR;
+	return MQE_OK;
 }
 
 /*
@@ -1008,6 +997,7 @@ static int quicktest1(unsigned long arg)
 {
 	struct gru_message_queue_desc mqd;
 	void *p, *mq;
+	unsigned long *dw;
 	int i, ret = -EIO;
 	char mes[GRU_CACHE_LINE_BYTES], *m;
 
@@ -1017,6 +1007,7 @@ static int quicktest1(unsigned long arg)
 		return -ENOMEM;
 	mq = ALIGNUP(p, 1024);
 	memset(mes, 0xee, sizeof(mes));
+	dw = mq;
 
 	gru_create_message_queue(&mqd, mq, 8 * GRU_CACHE_LINE_BYTES, 0, 0, 0);
 	for (i = 0; i < 6; i++) {

@@ -20,7 +20,6 @@
 struct pci_controller *pci_vga_hose;
 static struct resource alpha_vga = {
 	.name	= "alpha-vga+",
-	.flags	= IORESOURCE_IO,
 	.start	= 0x3C0,
 	.end	= 0x3DF
 };
@@ -62,9 +61,7 @@ locate_and_init_vga(void *(*sel_func)(void *, void *))
 
 	/* Set the VGA hose and init the new console. */
 	pci_vga_hose = hose;
-	console_lock();
-	do_take_over_console(&vga_con, 0, MAX_NR_CONSOLES-1, 1);
-	console_unlock();
+	take_over_console(&vga_con, 0, MAX_NR_CONSOLES-1, 1);
 }
 
 void __init

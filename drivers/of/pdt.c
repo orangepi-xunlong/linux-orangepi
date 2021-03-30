@@ -22,10 +22,12 @@
 #include <linux/slab.h>
 #include <linux/of.h>
 #include <linux/of_pdt.h>
+#include <asm/prom.h>
 
 static struct of_pdt_ops *of_pdt_prom_ops __initdata;
 
-void __initdata (*of_pdt_build_more)(struct device_node *dp);
+void __initdata (*of_pdt_build_more)(struct device_node *dp,
+		struct device_node ***nextp);
 
 #if defined(CONFIG_SPARC)
 unsigned int of_pdt_unique_id __initdata;
@@ -175,9 +177,10 @@ static struct device_node * __init of_pdt_create_node(phandle node,
 		return NULL;
 
 	dp = prom_early_alloc(sizeof(*dp));
-	of_node_init(dp);
 	of_pdt_incr_unique_id(dp);
 	dp->parent = parent;
+
+	kref_init(&dp->kref);
 
 	dp->name = of_pdt_get_one_property(node, "name");
 	dp->type = of_pdt_get_one_property(node, "device_type");
@@ -191,7 +194,8 @@ static struct device_node * __init of_pdt_create_node(phandle node,
 }
 
 static struct device_node * __init of_pdt_build_tree(struct device_node *parent,
-						   phandle node)
+						   phandle node,
+						   struct device_node ***nextp)
 {
 	struct device_node *ret = NULL, *prev_sibling = NULL;
 	struct device_node *dp;
@@ -208,12 +212,16 @@ static struct device_node * __init of_pdt_build_tree(struct device_node *parent,
 			ret = dp;
 		prev_sibling = dp;
 
+		*(*nextp) = dp;
+		*nextp = &dp->allnext;
+
 		dp->full_name = of_pdt_build_full_name(dp);
 
-		dp->child = of_pdt_build_tree(dp, of_pdt_prom_ops->getchild(node));
+		dp->child = of_pdt_build_tree(dp,
+				of_pdt_prom_ops->getchild(node), nextp);
 
 		if (of_pdt_build_more)
-			of_pdt_build_more(dp);
+			of_pdt_build_more(dp, nextp);
 
 		node = of_pdt_prom_ops->getsibling(node);
 	}
@@ -228,18 +236,21 @@ static void * __init kernel_tree_alloc(u64 size, u64 align)
 
 void __init of_pdt_build_devicetree(phandle root_node, struct of_pdt_ops *ops)
 {
+	struct device_node **nextp;
+
 	BUG_ON(!ops);
 	of_pdt_prom_ops = ops;
 
-	of_root = of_pdt_create_node(root_node, NULL);
+	of_allnodes = of_pdt_create_node(root_node, NULL);
 #if defined(CONFIG_SPARC)
-	of_root->path_component_name = "";
+	of_allnodes->path_component_name = "";
 #endif
-	of_root->full_name = "/";
+	of_allnodes->full_name = "/";
 
-	of_root->child = of_pdt_build_tree(of_root,
-				of_pdt_prom_ops->getchild(of_root->phandle));
+	nextp = &of_allnodes->allnext;
+	of_allnodes->child = of_pdt_build_tree(of_allnodes,
+			of_pdt_prom_ops->getchild(of_allnodes->phandle), &nextp);
 
-	/* Get pointer to "/chosen" and "/aliases" nodes for use everywhere */
+	/* Get pointer to "/chosen" and "/aliasas" nodes for use everywhere */
 	of_alias_scan(kernel_tree_alloc);
 }

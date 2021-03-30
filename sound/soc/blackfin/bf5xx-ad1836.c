@@ -30,10 +30,15 @@
 
 #include "../codecs/ad1836.h"
 
+#include "bf5xx-tdm-pcm.h"
+#include "bf5xx-tdm.h"
+
 static struct snd_soc_card bf5xx_ad1836;
 
-static int bf5xx_ad1836_init(struct snd_soc_pcm_runtime *rtd)
+static int bf5xx_ad1836_hw_params(struct snd_pcm_substream *substream,
+	struct snd_pcm_hw_params *params)
 {
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 	unsigned int channel_map[] = {0, 4, 1, 5, 2, 6, 3, 7};
 	int ret = 0;
@@ -44,12 +49,12 @@ static int bf5xx_ad1836_init(struct snd_soc_pcm_runtime *rtd)
 	if (ret < 0)
 		return ret;
 
-	ret = snd_soc_dai_set_tdm_slot(cpu_dai, 0xFF, 0xFF, 8, 32);
-	if (ret < 0)
-		return ret;
-
 	return 0;
 }
+
+static struct snd_soc_ops bf5xx_ad1836_ops = {
+	.hw_params = bf5xx_ad1836_hw_params,
+};
 
 #define BF5XX_AD1836_DAIFMT (SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_IB_IF | \
 				SND_SOC_DAIFMT_CBM_CFM)
@@ -58,9 +63,9 @@ static struct snd_soc_dai_link bf5xx_ad1836_dai = {
 	.name = "ad1836",
 	.stream_name = "AD1836",
 	.codec_dai_name = "ad1836-hifi",
-	.platform_name = "bfin-i2s-pcm-audio",
+	.platform_name = "bfin-tdm-pcm-audio",
+	.ops = &bf5xx_ad1836_ops,
 	.dai_fmt = BF5XX_AD1836_DAIFMT,
-	.init = bf5xx_ad1836_init,
 };
 
 static struct snd_soc_card bf5xx_ad1836 = {
@@ -87,18 +92,28 @@ static int bf5xx_ad1836_driver_probe(struct platform_device *pdev)
 	card->dev = &pdev->dev;
 	platform_set_drvdata(pdev, card);
 
-	ret = devm_snd_soc_register_card(&pdev->dev, card);
+	ret = snd_soc_register_card(card);
 	if (ret)
 		dev_err(&pdev->dev, "Failed to register card\n");
 	return ret;
 }
 
+static int bf5xx_ad1836_driver_remove(struct platform_device *pdev)
+{
+	struct snd_soc_card *card = platform_get_drvdata(pdev);
+
+	snd_soc_unregister_card(card);
+	return 0;
+}
+
 static struct platform_driver bf5xx_ad1836_driver = {
 	.driver = {
 		.name = "bfin-snd-ad1836",
+		.owner = THIS_MODULE,
 		.pm = &snd_soc_pm_ops,
 	},
 	.probe = bf5xx_ad1836_driver_probe,
+	.remove = bf5xx_ad1836_driver_remove,
 };
 module_platform_driver(bf5xx_ad1836_driver);
 

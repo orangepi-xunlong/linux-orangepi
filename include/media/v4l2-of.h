@@ -17,7 +17,6 @@
 #include <linux/list.h>
 #include <linux/types.h>
 #include <linux/errno.h>
-#include <linux/of_graph.h>
 
 #include <media/v4l2-mediabus.h>
 
@@ -29,15 +28,12 @@ struct device_node;
  * @data_lanes: an array of physical data lane indexes
  * @clock_lane: physical lane index of the clock lane
  * @num_data_lanes: number of data lanes
- * @lane_polarities: polarity of the lanes. The order is the same of
- *		   the physical lanes.
  */
 struct v4l2_of_bus_mipi_csi2 {
 	unsigned int flags;
 	unsigned char data_lanes[4];
 	unsigned char clock_lane;
 	unsigned short num_data_lanes;
-	bool lane_polarities[5];
 };
 
 /**
@@ -54,47 +50,35 @@ struct v4l2_of_bus_parallel {
 
 /**
  * struct v4l2_of_endpoint - the endpoint data structure
- * @base: struct of_endpoint containing port, id, and local of_node
+ * @port: identifier (value of reg property) of a port this endpoint belongs to
+ * @id: identifier (value of reg property) of this endpoint
+ * @local_node: pointer to device_node of this endpoint
+ * @remote: phandle to remote endpoint node
  * @bus_type: bus type
  * @bus: bus configuration data structure
- * @link_frequencies: array of supported link frequencies
- * @nr_of_link_frequencies: number of elements in link_frequenccies array
+ * @head: list head for this structure
  */
 struct v4l2_of_endpoint {
-	struct of_endpoint base;
-	/* Fields below this line will be zeroed by v4l2_of_parse_endpoint() */
+	unsigned int port;
+	unsigned int id;
+	const struct device_node *local_node;
+	const __be32 *remote;
 	enum v4l2_mbus_type bus_type;
 	union {
 		struct v4l2_of_bus_parallel parallel;
 		struct v4l2_of_bus_mipi_csi2 mipi_csi2;
 	} bus;
-	u64 *link_frequencies;
-	unsigned int nr_of_link_frequencies;
-};
-
-/**
- * struct v4l2_of_link - a link between two endpoints
- * @local_node: pointer to device_node of this endpoint
- * @local_port: identifier of the port this endpoint belongs to
- * @remote_node: pointer to device_node of the remote endpoint
- * @remote_port: identifier of the port the remote endpoint belongs to
- */
-struct v4l2_of_link {
-	struct device_node *local_node;
-	unsigned int local_port;
-	struct device_node *remote_node;
-	unsigned int remote_port;
+	struct list_head head;
 };
 
 #ifdef CONFIG_OF
-int v4l2_of_parse_endpoint(const struct device_node *node,
-			   struct v4l2_of_endpoint *endpoint);
-struct v4l2_of_endpoint *v4l2_of_alloc_parse_endpoint(
-	const struct device_node *node);
-void v4l2_of_free_endpoint(struct v4l2_of_endpoint *endpoint);
-int v4l2_of_parse_link(const struct device_node *node,
-		       struct v4l2_of_link *link);
-void v4l2_of_put_link(struct v4l2_of_link *link);
+void v4l2_of_parse_endpoint(const struct device_node *node,
+				struct v4l2_of_endpoint *link);
+struct device_node *v4l2_of_get_next_endpoint(const struct device_node *parent,
+					struct device_node *previous);
+struct device_node *v4l2_of_get_remote_port_parent(
+					const struct device_node *node);
+struct device_node *v4l2_of_get_remote_port(const struct device_node *node);
 #else /* CONFIG_OF */
 
 static inline int v4l2_of_parse_endpoint(const struct device_node *node,
@@ -103,24 +87,23 @@ static inline int v4l2_of_parse_endpoint(const struct device_node *node,
 	return -ENOSYS;
 }
 
-static inline struct v4l2_of_endpoint *v4l2_of_alloc_parse_endpoint(
-	const struct device_node *node)
+static inline struct device_node *v4l2_of_get_next_endpoint(
+					const struct device_node *parent,
+					struct device_node *previous)
 {
 	return NULL;
 }
 
-static inline void v4l2_of_free_endpoint(struct v4l2_of_endpoint *endpoint)
+static inline struct device_node *v4l2_of_get_remote_port_parent(
+					const struct device_node *node)
 {
+	return NULL;
 }
 
-static inline int v4l2_of_parse_link(const struct device_node *node,
-				     struct v4l2_of_link *link)
+static inline struct device_node *v4l2_of_get_remote_port(
+					const struct device_node *node)
 {
-	return -ENOSYS;
-}
-
-static inline void v4l2_of_put_link(struct v4l2_of_link *link)
-{
+	return NULL;
 }
 
 #endif /* CONFIG_OF */

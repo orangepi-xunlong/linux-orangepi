@@ -70,18 +70,6 @@ enum policy_operation {
 };
 
 /*
- * When issuing a POLICY_REPLACE the policy needs to make a callback to
- * lock the block being demoted.  This doesn't need to occur during a
- * writeback operation since the block remains in the cache.
- */
-struct policy_locker;
-typedef int (*policy_lock_fn)(struct policy_locker *l, dm_oblock_t oblock);
-
-struct policy_locker {
-	policy_lock_fn fn;
-};
-
-/*
  * This is the instruction passed back to the core target.
  */
 struct policy_result {
@@ -89,6 +77,9 @@ struct policy_result {
 	dm_oblock_t old_oblock;	/* POLICY_REPLACE */
 	dm_cblock_t cblock;	/* POLICY_HIT, POLICY_NEW, POLICY_REPLACE */
 };
+
+typedef int (*policy_walk_fn)(void *context, dm_cblock_t cblock,
+			      dm_oblock_t oblock, uint32_t hint);
 
 /*
  * The cache policy object.  Just a bunch of methods.  It is envisaged that
@@ -131,8 +122,7 @@ struct dm_cache_policy {
 	 */
 	int (*map)(struct dm_cache_policy *p, dm_oblock_t oblock,
 		   bool can_block, bool can_migrate, bool discarded_oblock,
-		   struct bio *bio, struct policy_locker *locker,
-		   struct policy_result *result);
+		   struct bio *bio, struct policy_result *result);
 
 	/*
 	 * Sometimes we want to see if a block is in the cache, without
@@ -145,6 +135,9 @@ struct dm_cache_policy {
 	 */
 	int (*lookup)(struct dm_cache_policy *p, dm_oblock_t oblock, dm_cblock_t *cblock);
 
+	/*
+	 * oblock must be a mapped block.  Must not block.
+	 */
 	void (*set_dirty)(struct dm_cache_policy *p, dm_oblock_t oblock);
 	void (*clear_dirty)(struct dm_cache_policy *p, dm_oblock_t oblock);
 
@@ -155,11 +148,8 @@ struct dm_cache_policy {
 	int (*load_mapping)(struct dm_cache_policy *p, dm_oblock_t oblock,
 			    dm_cblock_t cblock, uint32_t hint, bool hint_valid);
 
-	/*
-	 * Gets the hint for a given cblock.  Called in a single threaded
-	 * context.  So no locking required.
-	 */
-	uint32_t (*get_hint)(struct dm_cache_policy *p, dm_cblock_t cblock);
+	int (*walk_mappings)(struct dm_cache_policy *p, policy_walk_fn fn,
+			     void *context);
 
 	/*
 	 * Override functions used on the error paths of the core target.
@@ -169,27 +159,8 @@ struct dm_cache_policy {
 	void (*force_mapping)(struct dm_cache_policy *p, dm_oblock_t current_oblock,
 			      dm_oblock_t new_oblock);
 
-	/*
-	 * This is called via the invalidate_cblocks message.  It is
-	 * possible the particular cblock has already been removed due to a
-	 * write io in passthrough mode.  In which case this should return
-	 * -ENODATA.
-	 */
-	int (*remove_cblock)(struct dm_cache_policy *p, dm_cblock_t cblock);
+	int (*writeback_work)(struct dm_cache_policy *p, dm_oblock_t *oblock, dm_cblock_t *cblock);
 
-	/*
-	 * Provide a dirty block to be written back by the core target.  If
-	 * critical_only is set then the policy should only provide work if
-	 * it urgently needs it.
-	 *
-	 * Returns:
-	 *
-	 * 0 and @cblock,@oblock: block to write back provided
-	 *
-	 * -ENODATA: no dirty blocks available
-	 */
-	int (*writeback_work)(struct dm_cache_policy *p, dm_oblock_t *oblock, dm_cblock_t *cblock,
-			      bool critical_only);
 
 	/*
 	 * How full is the cache?
@@ -200,16 +171,16 @@ struct dm_cache_policy {
 	 * Because of where we sit in the block layer, we can be asked to
 	 * map a lot of little bios that are all in the same block (no
 	 * queue merging has occurred).  To stop the policy being fooled by
-	 * these, the core target sends regular tick() calls to the policy.
+	 * these the core target sends regular tick() calls to the policy.
 	 * The policy should only count an entry as hit once per tick.
 	 */
-	void (*tick)(struct dm_cache_policy *p, bool can_block);
+	void (*tick)(struct dm_cache_policy *p);
 
 	/*
 	 * Configuration.
 	 */
-	int (*emit_config_values)(struct dm_cache_policy *p, char *result,
-				  unsigned maxlen, ssize_t *sz_ptr);
+	int (*emit_config_values)(struct dm_cache_policy *p,
+				  char *result, unsigned maxlen);
 	int (*set_config_value)(struct dm_cache_policy *p,
 				const char *key, const char *value);
 
@@ -237,12 +208,6 @@ struct dm_cache_policy_type {
 	 */
 	char name[CACHE_POLICY_NAME_SIZE];
 	unsigned version[CACHE_POLICY_VERSION_SIZE];
-
-	/*
-	 * For use by an alias dm_cache_policy_type to point to the
-	 * real dm_cache_policy_type.
-	 */
-	struct dm_cache_policy_type *real;
 
 	/*
 	 * Policies may store a hint for each each cache block.

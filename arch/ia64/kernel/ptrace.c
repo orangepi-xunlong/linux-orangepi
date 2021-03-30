@@ -453,7 +453,7 @@ ia64_peek (struct task_struct *child, struct switch_stack *child_stack,
 			return 0;
 		}
 	}
-	copied = access_process_vm(child, addr, &ret, sizeof(ret), FOLL_FORCE);
+	copied = access_process_vm(child, addr, &ret, sizeof(ret), 0);
 	if (copied != sizeof(ret))
 		return -EIO;
 	*val = ret;
@@ -489,8 +489,7 @@ ia64_poke (struct task_struct *child, struct switch_stack *child_stack,
 				*ia64_rse_skip_regs(krbs, regnum) = val;
 			}
 		}
-	} else if (access_process_vm(child, addr, &val, sizeof(val),
-				FOLL_FORCE | FOLL_WRITE)
+	} else if (access_process_vm(child, addr, &val, sizeof(val), 1)
 		   != sizeof(val))
 		return -EIO;
 	return 0;
@@ -544,8 +543,7 @@ ia64_sync_user_rbs (struct task_struct *child, struct switch_stack *sw,
 		ret = ia64_peek(child, sw, user_rbs_end, addr, &val);
 		if (ret < 0)
 			return ret;
-		if (access_process_vm(child, addr, &val, sizeof(val),
-				FOLL_FORCE | FOLL_WRITE)
+		if (access_process_vm(child, addr, &val, sizeof(val), 1)
 		    != sizeof(val))
 			return -EIO;
 	}
@@ -561,8 +559,7 @@ ia64_sync_kernel_rbs (struct task_struct *child, struct switch_stack *sw,
 
 	/* now copy word for word from user rbs to kernel rbs: */
 	for (addr = user_rbs_start; addr < user_rbs_end; addr += 8) {
-		if (access_process_vm(child, addr, &val, sizeof(val),
-				FOLL_FORCE)
+		if (access_process_vm(child, addr, &val, sizeof(val), 0)
 				!= sizeof(val))
 			return -EIO;
 
@@ -1159,8 +1156,7 @@ arch_ptrace (struct task_struct *child, long request,
 	case PTRACE_PEEKTEXT:
 	case PTRACE_PEEKDATA:
 		/* read word at location addr */
-		if (ptrace_access_vm(child, addr, &data, sizeof(data),
-				FOLL_FORCE)
+		if (access_process_vm(child, addr, &data, sizeof(data), 0)
 		    != sizeof(data))
 			return -EIO;
 		/* ensure return value is not mistaken for error code */
@@ -1223,7 +1219,7 @@ syscall_trace_enter (long arg0, long arg1, long arg2, long arg3,
 		ia64_sync_krbs();
 
 
-	audit_syscall_entry(regs.r15, arg0, arg1, arg2, arg3);
+	audit_syscall_entry(AUDIT_ARCH_IA64, regs.r15, arg0, arg1, arg2, arg3);
 
 	return 0;
 }

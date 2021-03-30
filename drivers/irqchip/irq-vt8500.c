@@ -27,7 +27,6 @@
 #include <linux/slab.h>
 #include <linux/io.h>
 #include <linux/irq.h>
-#include <linux/irqchip.h>
 #include <linux/irqdomain.h>
 #include <linux/interrupt.h>
 #include <linux/bitops.h>
@@ -39,6 +38,8 @@
 #include <asm/irq.h>
 #include <asm/exception.h>
 #include <asm/mach/irq.h>
+
+#include "irqchip.h"
 
 #define VT8500_ICPC_IRQ		0x20
 #define VT8500_ICPC_FIQ		0x24
@@ -126,15 +127,15 @@ static int vt8500_irq_set_type(struct irq_data *d, unsigned int flow_type)
 		return -EINVAL;
 	case IRQF_TRIGGER_HIGH:
 		dctr |= VT8500_TRIGGER_HIGH;
-		irq_set_handler_locked(d, handle_level_irq);
+		__irq_set_handler_locked(d->irq, handle_level_irq);
 		break;
 	case IRQF_TRIGGER_FALLING:
 		dctr |= VT8500_TRIGGER_FALLING;
-		irq_set_handler_locked(d, handle_edge_irq);
+		__irq_set_handler_locked(d->irq, handle_edge_irq);
 		break;
 	case IRQF_TRIGGER_RISING:
 		dctr |= VT8500_TRIGGER_RISING;
-		irq_set_handler_locked(d, handle_edge_irq);
+		__irq_set_handler_locked(d->irq, handle_edge_irq);
 		break;
 	}
 	writeb(dctr, base + VT8500_ICDC + d->hwirq);
@@ -167,19 +168,20 @@ static int vt8500_irq_map(struct irq_domain *h, unsigned int virq,
 							irq_hw_number_t hw)
 {
 	irq_set_chip_and_handler(virq, &vt8500_irq_chip, handle_level_irq);
+	set_irq_flags(virq, IRQF_VALID);
 
 	return 0;
 }
 
-static const struct irq_domain_ops vt8500_irq_domain_ops = {
+static struct irq_domain_ops vt8500_irq_domain_ops = {
 	.map = vt8500_irq_map,
 	.xlate = irq_domain_xlate_onecell,
 };
 
-static void __exception_irq_entry vt8500_handle_irq(struct pt_regs *regs)
+asmlinkage void __exception_irq_entry vt8500_handle_irq(struct pt_regs *regs)
 {
 	u32 stat, i;
-	int irqnr;
+	int irqnr, virq;
 	void __iomem *base;
 
 	/* Loop through each active controller */
@@ -196,12 +198,12 @@ static void __exception_irq_entry vt8500_handle_irq(struct pt_regs *regs)
 				continue;
 		}
 
-		handle_domain_irq(intc[i].domain, irqnr, regs);
+		virq = irq_find_mapping(intc[i].domain, irqnr);
+		handle_IRQ(virq, regs);
 	}
 }
 
-static int __init vt8500_irq_init(struct device_node *node,
-				  struct device_node *parent)
+int __init vt8500_irq_init(struct device_node *node, struct device_node *parent)
 {
 	int irq, i;
 	struct device_node *np = node;

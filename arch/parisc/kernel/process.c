@@ -13,7 +13,7 @@
  *    Copyright (C) 2000 Grant Grundler <grundler with parisc-linux.org>
  *    Copyright (C) 2001 Alan Modra <amodra at parisc-linux.org>
  *    Copyright (C) 2001-2002 Ryan Bradetich <rbrad at parisc-linux.org>
- *    Copyright (C) 2001-2014 Helge Deller <deller@gmx.de>
+ *    Copyright (C) 2001-2007 Helge Deller <deller at parisc-linux.org>
  *    Copyright (C) 2002 Randolph Chung <tausq with parisc-linux.org>
  *
  *
@@ -39,7 +39,6 @@
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/fs.h>
-#include <linux/cpu.h>
 #include <linux/module.h>
 #include <linux/personality.h>
 #include <linux/ptrace.h>
@@ -50,8 +49,6 @@
 #include <linux/kallsyms.h>
 #include <linux/uaccess.h>
 #include <linux/rcupdate.h>
-#include <linux/random.h>
-#include <linux/nmi.h>
 
 #include <asm/io.h>
 #include <asm/asm-offsets.h>
@@ -141,15 +138,17 @@ void machine_power_off(void)
 
 	printk(KERN_EMERG "System shut down completed.\n"
 	       "Please power this system off now.");
-
-	/* prevent soft lockup/stalled CPU messages for endless loop. */
-	rcu_sysrq_start();
-	lockup_detector_suspend();
-	for (;;);
 }
 
 void (*pm_power_off)(void) = machine_power_off;
 EXPORT_SYMBOL(pm_power_off);
+
+/*
+ * Free current thread data structures etc..
+ */
+void exit_thread(void)
+{
+}
 
 void flush_thread(void)
 {
@@ -181,44 +180,9 @@ int dump_task_fpu (struct task_struct *tsk, elf_fpregset_t *r)
 	return 1;
 }
 
-/*
- * Idle thread support
- *
- * Detect when running on QEMU with SeaBIOS PDC Firmware and let
- * QEMU idle the host too.
- */
-
-int running_on_qemu __read_mostly;
-
-void __cpuidle arch_cpu_idle_dead(void)
-{
-	/* nop on real hardware, qemu will offline CPU. */
-	asm volatile("or %%r31,%%r31,%%r31\n":::);
-}
-
-void __cpuidle arch_cpu_idle(void)
-{
-	local_irq_enable();
-
-	/* nop on real hardware, qemu will idle sleep. */
-	asm volatile("or %%r10,%%r10,%%r10\n":::);
-}
-
-static int __init parisc_idle_init(void)
-{
-	if (!running_on_qemu)
-		cpu_idle_poll_ctrl(1);
-
-	return 0;
-}
-arch_initcall(parisc_idle_init);
-
-/*
- * Copy architecture-specific thread state
- */
 int
 copy_thread(unsigned long clone_flags, unsigned long usp,
-	    unsigned long kthread_arg, struct task_struct *p)
+	    unsigned long arg, struct task_struct *p)
 {
 	struct pt_regs *cregs = &(p->thread.regs);
 	void *stack = task_stack_page(p);
@@ -228,12 +192,15 @@ copy_thread(unsigned long clone_flags, unsigned long usp,
 	 * Make them const so the compiler knows they live in .text */
 	extern void * const ret_from_kernel_thread;
 	extern void * const child_return;
-
+#ifdef CONFIG_HPUX
+	extern void * const hpux_child_return;
+#endif
 	if (unlikely(p->flags & PF_KTHREAD)) {
-		/* kernel thread */
 		memset(cregs, 0, sizeof(struct pt_regs));
 		if (!usp) /* idle thread */
 			return 0;
+
+		/* kernel thread */
 		/* Must exit via ret_from_kernel_thread in order
 		 * to call schedule_tail()
 		 */
@@ -249,7 +216,7 @@ copy_thread(unsigned long clone_flags, unsigned long usp,
 #else
 		cregs->gr[26] = usp;
 #endif
-		cregs->gr[25] = kthread_arg;
+		cregs->gr[25] = arg;
 	} else {
 		/* user thread */
 		/* usp must be word aligned.  This also prevents users from
@@ -261,8 +228,15 @@ copy_thread(unsigned long clone_flags, unsigned long usp,
 				cregs->gr[30] = usp;
 		}
 		cregs->ksp = (unsigned long)stack + THREAD_SZ_ALGN + FRAME_SIZE;
-		cregs->kpc = (unsigned long) &child_return;
-
+		if (personality(p->personality) == PER_HPUX) {
+#ifdef CONFIG_HPUX
+			cregs->kpc = (unsigned long) &hpux_child_return;
+#else
+			BUG();
+#endif
+		} else {
+			cregs->kpc = (unsigned long) &child_return;
+		}
 		/* Setup thread TLS area from the 4th parameter in clone */
 		if (clone_flags & CLONE_SETTLS)
 			cregs->cr27 = cregs->gr[23];
@@ -312,21 +286,3 @@ void *dereference_function_descriptor(void *ptr)
 	return ptr;
 }
 #endif
-
-static inline unsigned long brk_rnd(void)
-{
-	/* 8MB for 32bit, 1GB for 64bit */
-	if (is_32bit_task())
-		return (get_random_int() & 0x7ffUL) << PAGE_SHIFT;
-	else
-		return (get_random_int() & 0x3ffffUL) << PAGE_SHIFT;
-}
-
-unsigned long arch_randomize_brk(struct mm_struct *mm)
-{
-	unsigned long ret = PAGE_ALIGN(mm->brk + brk_rnd());
-
-	if (ret < mm->brk)
-		return mm->brk;
-	return ret;
-}

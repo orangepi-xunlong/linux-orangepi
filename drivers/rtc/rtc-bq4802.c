@@ -164,10 +164,6 @@ static int bq4802_probe(struct platform_device *pdev)
 	} else if (p->r->flags & IORESOURCE_MEM) {
 		p->regs = devm_ioremap(&pdev->dev, p->r->start,
 					resource_size(p->r));
-		if (!p->regs){
-			err = -ENOMEM;
-			goto out;
-		}
 		p->read = bq4802_read_mem;
 		p->write = bq4802_write_mem;
 	} else {
@@ -190,6 +186,13 @@ out:
 
 }
 
+static int bq4802_remove(struct platform_device *pdev)
+{
+	platform_set_drvdata(pdev, NULL);
+
+	return 0;
+}
+
 /* work with hotplug and coldplug */
 MODULE_ALIAS("platform:rtc-bq4802");
 
@@ -198,6 +201,7 @@ static struct platform_driver bq4802_driver = {
 		.name	= "rtc-bq4802",
 	},
 	.probe		= bq4802_probe,
+	.remove		= bq4802_remove,
 };
 
 module_platform_driver(bq4802_driver);

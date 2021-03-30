@@ -1,14 +1,18 @@
 
 /*
- * sensor_helper.h: helper function for sensors.
+ ******************************************************************************
  *
- * Copyright (c) 2017 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ * sensor_helper.h
  *
- * Authors:  Zhao Wei <zhaowei@allwinnertech.com>
+ * Hawkview ISP - sensor_helper.h module
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * Copyright (c) 2015 by Allwinnertech Co., Ltd.  http:
+ *
+ * Version		  Author         Date		    Description
+ *
+ *   3.0		  Yang Feng   	2015/12/02	ISP Tuning Tools Support
+ *
+ ******************************************************************************
  */
 
 #ifndef __SENSOR__HELPER__H__
@@ -20,7 +24,6 @@
 #include "../../utility/vin_supply.h"
 #include "../../vin-cci/cci_helper.h"
 #include "camera_cfg.h"
-#include "camera.h"
 #include "../../platform/platform_cfg.h"
 
 #define REG_DLY  0xffff
@@ -30,21 +33,15 @@ struct regval_list {
 	data_type data;
 };
 
-struct sensor_helper_dev {
-	struct regulator *pmic[MAX_POW_NUM];
-	unsigned int id;
-	const char *name;
-};
-
-#define DEV_DBG_EN   0
+#define DEV_DBG_EN   		0
 #if (DEV_DBG_EN == 1)
 #define sensor_dbg(x, arg...) printk(KERN_DEBUG "[%s]"x, SENSOR_NAME, ##arg)
 #else
 #define sensor_dbg(x, arg...)
 #endif
 
-#define sensor_err(x, arg...) pr_err("[%s] error, "x, SENSOR_NAME, ##arg)
-#define sensor_print(x, arg...) pr_info("[%s]"x, SENSOR_NAME, ##arg)
+#define sensor_err(x, arg...) printk(KERN_ERR "[%s] error, "x, SENSOR_NAME, ##arg)
+#define sensor_print(x, arg...) printk(KERN_NOTICE "[%s]"x, SENSOR_NAME, ##arg)
 
 extern int sensor_read(struct v4l2_subdev *sd, addr_type addr,
 		       data_type *value);
@@ -53,35 +50,4 @@ extern int sensor_write(struct v4l2_subdev *sd, addr_type addr,
 extern int sensor_write_array(struct v4l2_subdev *sd,
 				struct regval_list *regs,
 				int array_size);
-#ifdef CONFIG_COMPAT
-extern long sensor_compat_ioctl32(struct v4l2_subdev *sd,
-		unsigned int cmd, unsigned long arg);
-#endif
-extern struct sensor_info *to_state(struct v4l2_subdev *sd);
-extern void sensor_cfg_req(struct v4l2_subdev *sd, struct sensor_config *cfg);
-extern void sensor_isp_input(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *mf);
-extern unsigned int sensor_get_exp(struct v4l2_subdev *sd);
-extern unsigned int sensor_get_clk(struct v4l2_subdev *sd, struct v4l2_mbus_config *cfg,
-			unsigned long *top_clk, unsigned long *isp_clk);
-extern int sensor_enum_mbus_code(struct v4l2_subdev *sd,
-				struct v4l2_subdev_pad_config *cfg,
-				struct v4l2_subdev_mbus_code_enum *code);
-extern int sensor_enum_frame_size(struct v4l2_subdev *sd,
-			struct v4l2_subdev_pad_config *cfg,
-			struct v4l2_subdev_frame_size_enum *fse);
-extern int sensor_get_fmt(struct v4l2_subdev *sd,
-			struct v4l2_subdev_pad_config *cfg,
-			struct v4l2_subdev_format *fmt);
-extern int sensor_set_fmt(struct v4l2_subdev *sd,
-			struct v4l2_subdev_pad_config *cfg,
-			struct v4l2_subdev_format *fmt);
-extern int sensor_g_parm(struct v4l2_subdev *sd,
-			struct v4l2_streamparm *parms);
-extern int sensor_s_parm(struct v4l2_subdev *sd,
-			struct v4l2_streamparm *parms);
-extern int sensor_try_ctrl(struct v4l2_ctrl *ctrl);
-
-extern int actuator_init(struct v4l2_subdev *sd, struct actuator_para *range);
-extern int actuator_set_code(struct v4l2_subdev *sd, struct actuator_ctrl *pos);
-
 #endif

@@ -42,10 +42,6 @@ static ulong mask = GPIO_DEFAULT_MASK;
 module_param_named(mask, mask, ulong, 0444);
 MODULE_PARM_DESC(mask, "GPIO channel mask.");
 
-/*
- * FIXME: convert this singleton driver to use the state container
- * design pattern, see Documentation/driver-model/design-patterns.txt
- */
 static struct cs5535_gpio_chip {
 	struct gpio_chip chip;
 	resource_size_t base;
@@ -205,7 +201,7 @@ EXPORT_SYMBOL_GPL(cs5535_gpio_setup_event);
 
 static int chip_gpio_request(struct gpio_chip *c, unsigned offset)
 {
-	struct cs5535_gpio_chip *chip = gpiochip_get_data(c);
+	struct cs5535_gpio_chip *chip = (struct cs5535_gpio_chip *) c;
 	unsigned long flags;
 
 	spin_lock_irqsave(&chip->lock, flags);
@@ -245,7 +241,7 @@ static void chip_gpio_set(struct gpio_chip *chip, unsigned offset, int val)
 
 static int chip_direction_input(struct gpio_chip *c, unsigned offset)
 {
-	struct cs5535_gpio_chip *chip = gpiochip_get_data(c);
+	struct cs5535_gpio_chip *chip = (struct cs5535_gpio_chip *) c;
 	unsigned long flags;
 
 	spin_lock_irqsave(&chip->lock, flags);
@@ -258,7 +254,7 @@ static int chip_direction_input(struct gpio_chip *c, unsigned offset)
 
 static int chip_direction_output(struct gpio_chip *c, unsigned offset, int val)
 {
-	struct cs5535_gpio_chip *chip = gpiochip_get_data(c);
+	struct cs5535_gpio_chip *chip = (struct cs5535_gpio_chip *) c;
 	unsigned long flags;
 
 	spin_lock_irqsave(&chip->lock, flags);
@@ -320,13 +316,12 @@ static int cs5535_gpio_probe(struct platform_device *pdev)
 	res = platform_get_resource(pdev, IORESOURCE_IO, 0);
 	if (!res) {
 		dev_err(&pdev->dev, "can't fetch device resource info\n");
-		return err;
+		goto done;
 	}
 
-	if (!devm_request_region(&pdev->dev, res->start, resource_size(res),
-				 pdev->name)) {
+	if (!request_region(res->start, resource_size(res), pdev->name)) {
 		dev_err(&pdev->dev, "can't request region\n");
-		return err;
+		goto done;
 	}
 
 	/* set up the driver-specific struct */
@@ -348,19 +343,42 @@ static int cs5535_gpio_probe(struct platform_device *pdev)
 				mask_orig, mask);
 
 	/* finally, register with the generic GPIO API */
-	err = devm_gpiochip_add_data(&pdev->dev, &cs5535_gpio_chip.chip,
-				     &cs5535_gpio_chip);
+	err = gpiochip_add(&cs5535_gpio_chip.chip);
 	if (err)
-		return err;
+		goto release_region;
 
+	return 0;
+
+release_region:
+	release_region(res->start, resource_size(res));
+done:
+	return err;
+}
+
+static int cs5535_gpio_remove(struct platform_device *pdev)
+{
+	struct resource *r;
+	int err;
+
+	err = gpiochip_remove(&cs5535_gpio_chip.chip);
+	if (err) {
+		/* uhh? */
+		dev_err(&pdev->dev, "unable to remove gpio_chip?\n");
+		return err;
+	}
+
+	r = platform_get_resource(pdev, IORESOURCE_IO, 0);
+	release_region(r->start, resource_size(r));
 	return 0;
 }
 
 static struct platform_driver cs5535_gpio_driver = {
 	.driver = {
 		.name = DRV_NAME,
+		.owner = THIS_MODULE,
 	},
 	.probe = cs5535_gpio_probe,
+	.remove = cs5535_gpio_remove,
 };
 
 module_platform_driver(cs5535_gpio_driver);

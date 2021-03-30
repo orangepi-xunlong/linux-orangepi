@@ -34,7 +34,7 @@ static int ad7879_spi_xfer(struct spi_device *spi,
 	struct spi_transfer *xfers;
 	void *spi_data;
 	u16 *command;
-	u16 *_rx_buf = rx_buf; /* shut gcc up */
+	u16 *_rx_buf = _rx_buf; /* shut gcc up */
 	u8 idx;
 	int ret;
 
@@ -142,6 +142,7 @@ static int ad7879_spi_remove(struct spi_device *spi)
 	struct ad7879 *ts = spi_get_drvdata(spi);
 
 	ad7879_remove(ts);
+	spi_set_drvdata(spi, NULL);
 
 	return 0;
 }
@@ -149,6 +150,7 @@ static int ad7879_spi_remove(struct spi_device *spi)
 static struct spi_driver ad7879_spi_driver = {
 	.driver = {
 		.name	= "ad7879",
+		.owner	= THIS_MODULE,
 		.pm	= &ad7879_pm_ops,
 	},
 	.probe		= ad7879_spi_probe,

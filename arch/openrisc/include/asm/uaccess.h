@@ -82,6 +82,10 @@ struct exception_table_entry {
 	unsigned long insn, fixup;
 };
 
+/* Returns 0 if exception not found and fixup otherwise.  */
+extern unsigned long search_exception_table(unsigned long);
+extern void sort_exception_table(void);
+
 /*
  * These are the main single-value transfer routines.  They automatically
  * use the right size if we just have the right pointer type.
@@ -188,7 +192,7 @@ struct __large_struct {
 ({								\
 	long __gu_err, __gu_val;				\
 	__get_user_size(__gu_val, (ptr), (size), __gu_err);	\
-	(x) = (__force __typeof__(*(ptr)))__gu_val;		\
+	(x) = (__typeof__(*(ptr)))__gu_val;			\
 	__gu_err;						\
 })
 
@@ -198,7 +202,7 @@ struct __large_struct {
 	const __typeof__(*(ptr)) * __gu_addr = (ptr);			\
 	if (access_ok(VERIFY_READ, __gu_addr, size))			\
 		__get_user_size(__gu_val, __gu_addr, (size), __gu_err);	\
-	(x) = (__force __typeof__(*(ptr)))__gu_val;			\
+	(x) = (__typeof__(*(ptr)))__gu_val;				\
 	__gu_err;							\
 })
 
@@ -211,7 +215,7 @@ do {									\
 	case 1: __get_user_asm(x, ptr, retval, "l.lbz"); break;		\
 	case 2: __get_user_asm(x, ptr, retval, "l.lhz"); break;		\
 	case 4: __get_user_asm(x, ptr, retval, "l.lwz"); break;		\
-	case 8: __get_user_asm2(x, ptr, retval); break;			\
+	case 8: __get_user_asm2(x, ptr, retval);			\
 	default: (x) = __get_user_bad();				\
 	}								\
 } while (0)
@@ -269,20 +273,28 @@ __copy_tofrom_user(void *to, const void *from, unsigned long size);
 static inline unsigned long
 copy_from_user(void *to, const void *from, unsigned long n)
 {
-	unsigned long res = n;
+	unsigned long over;
 
-	if (likely(access_ok(VERIFY_READ, from, n)))
-		res = __copy_tofrom_user(to, from, n);
-	if (unlikely(res))
-		memset(to + (n - res), 0, res);
-	return res;
+	if (access_ok(VERIFY_READ, from, n))
+		return __copy_tofrom_user(to, from, n);
+	if ((unsigned long)from < TASK_SIZE) {
+		over = (unsigned long)from + n - TASK_SIZE;
+		return __copy_tofrom_user(to, from, n - over) + over;
+	}
+	return n;
 }
 
 static inline unsigned long
 copy_to_user(void *to, const void *from, unsigned long n)
 {
-	if (likely(access_ok(VERIFY_WRITE, to, n)))
-		n = __copy_tofrom_user(to, from, n);
+	unsigned long over;
+
+	if (access_ok(VERIFY_WRITE, to, n))
+		return __copy_tofrom_user(to, from, n);
+	if ((unsigned long)to < TASK_SIZE) {
+		over = (unsigned long)to + n - TASK_SIZE;
+		return __copy_tofrom_user(to, from, n - over) + over;
+	}
 	return n;
 }
 
@@ -291,8 +303,13 @@ extern unsigned long __clear_user(void *addr, unsigned long size);
 static inline __must_check unsigned long
 clear_user(void *addr, unsigned long size)
 {
-	if (likely(access_ok(VERIFY_WRITE, addr, size)))
-		size = __clear_user(addr, size);
+
+	if (access_ok(VERIFY_WRITE, addr, size))
+		return __clear_user(addr, size);
+	if ((unsigned long)addr < TASK_SIZE) {
+		unsigned long over = (unsigned long)addr + size - TASK_SIZE;
+		return __clear_user(addr, size - over) + over;
+	}
 	return size;
 }
 

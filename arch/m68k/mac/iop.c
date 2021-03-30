@@ -60,7 +60,7 @@
  *
  * The host talks to the IOPs using a rather simple message-passing scheme via
  * a shared memory area in the IOP RAM. Each IOP has seven "channels"; each
- * channel is connected to a specific software driver on the IOP. For example
+ * channel is conneced to a specific software driver on the IOP. For example
  * on the SCC IOP there is one channel for each serial port. Each channel has
  * an incoming and and outgoing message queue with a depth of one.
  *
@@ -111,15 +111,16 @@
 #include <linux/init.h>
 #include <linux/interrupt.h>
 
+#include <asm/bootinfo.h>
 #include <asm/macintosh.h>
 #include <asm/macints.h>
 #include <asm/mac_iop.h>
 
 /*#define DEBUG_IOP*/
 
-/* Non-zero if the IOPs are present */
+/* Set to non-zero if the IOPs are present. Set by iop_init() */
 
-int iop_scc_present, iop_ism_present;
+int iop_scc_present,iop_ism_present;
 
 /* structure for tracking channel listeners */
 

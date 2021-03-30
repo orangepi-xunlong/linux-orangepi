@@ -113,6 +113,9 @@ void __init msp_per_irq_init(void)
 	/* initialize all the IRQ descriptors */
 	for (i = MSP_PER_INTBASE; i < MSP_PER_INTBASE + 32; i++) {
 		irq_set_chip(i, &msp_per_irq_controller);
+#ifdef CONFIG_MIPS_MT_SMTC
+		irq_hwmask[i] = C_IRQ4;
+#endif
 	}
 }
 

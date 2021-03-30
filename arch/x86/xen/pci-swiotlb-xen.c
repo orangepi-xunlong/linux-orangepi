@@ -49,7 +49,7 @@ int __init pci_xen_swiotlb_detect(void)
 	 * activate this IOMMU. If running as PV privileged, activate it
 	 * irregardless.
 	 */
-	if (xen_initial_domain() || swiotlb || swiotlb_force == SWIOTLB_FORCE)
+	if ((xen_initial_domain() || swiotlb || swiotlb_force))
 		xen_swiotlb = 1;
 
 	/* If we are running under Xen, we MUST disable the native SWIOTLB.
@@ -75,10 +75,8 @@ void __init pci_xen_swiotlb_init(void)
 		xen_swiotlb_init(1, true /* early */);
 		dma_ops = &xen_swiotlb_dma_ops;
 
-#ifdef CONFIG_PCI
 		/* Make sure ACS will be enabled */
 		pci_request_acs();
-#endif
 	}
 }
 
@@ -94,10 +92,8 @@ int pci_xen_swiotlb_init_late(void)
 		return rc;
 
 	dma_ops = &xen_swiotlb_dma_ops;
-#ifdef CONFIG_PCI
 	/* Make sure ACS will be enabled */
 	pci_request_acs();
-#endif
 
 	return 0;
 }

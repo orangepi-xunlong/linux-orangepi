@@ -22,6 +22,7 @@
 #include "udfdecl.h"
 #include <linux/fs.h>
 #include <linux/mm.h>
+#include <linux/buffer_head.h>
 
 #include "udf_i.h"
 #include "udf_sb.h"
@@ -260,9 +261,6 @@ void udf_truncate_extents(struct inode *inode)
 			epos.block = eloc;
 			epos.bh = udf_tread(sb,
 					udf_get_lb_pblock(sb, &eloc, 0));
-			/* Error reading indirect block? */
-			if (!epos.bh)
-				return;
 			if (elen)
 				indirect_ext_len =
 					(elen + sb->s_blocksize - 1) >>

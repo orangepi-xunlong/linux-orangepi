@@ -33,7 +33,7 @@ static void serial_write(const char *buf, int len)
 		scdp->putc(*buf++);
 }
 
-static void serial_edit_cmdline(char *buf, int len, unsigned int timeout)
+static void serial_edit_cmdline(char *buf, int len)
 {
 	int timer = 0, count;
 	char ch, *cp;
@@ -44,7 +44,7 @@ static void serial_edit_cmdline(char *buf, int len, unsigned int timeout)
 	cp = &buf[count];
 	count++;
 
-	do {
+	while (timer++ < 5*1000) {
 		if (scdp->tstc()) {
 			while (((ch = scdp->getc()) != '\n') && (ch != '\r')) {
 				/* Test for backspace/delete */
@@ -70,7 +70,7 @@ static void serial_edit_cmdline(char *buf, int len, unsigned int timeout)
 			break;  /* Exit 'timer' loop */
 		}
 		udelay(1000);  /* 1 msec */
-	} while (timer++ < timeout);
+	}
 	*cp = 0;
 }
 
@@ -132,8 +132,6 @@ int serial_console_init(void)
 	else if (dt_is_compatible(devp, "xlnx,opb-uartlite-1.00.b") ||
 		 dt_is_compatible(devp, "xlnx,xps-uartlite-1.00.a"))
 		rc = uartlite_console_init(devp, &serial_cd);
-	else if (dt_is_compatible(devp, "ibm,opal-console-raw"))
-		rc = opal_console_init(devp, &serial_cd);
 
 	/* Add other serial console driver calls here */
 

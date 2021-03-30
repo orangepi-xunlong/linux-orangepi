@@ -201,25 +201,42 @@ static int lpc32xx_rtc_probe(struct platform_device *pdev)
 {
 	struct resource *res;
 	struct lpc32xx_rtc *rtc;
+	resource_size_t size;
 	int rtcirq;
 	u32 tmp;
 
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res) {
+		dev_err(&pdev->dev, "Can't get memory resource\n");
+		return -ENOENT;
+	}
+
 	rtcirq = platform_get_irq(pdev, 0);
-	if (rtcirq < 0) {
+	if (rtcirq < 0 || rtcirq >= NR_IRQS) {
 		dev_warn(&pdev->dev, "Can't get interrupt resource\n");
 		rtcirq = -1;
 	}
 
 	rtc = devm_kzalloc(&pdev->dev, sizeof(*rtc), GFP_KERNEL);
-	if (unlikely(!rtc))
+	if (unlikely(!rtc)) {
+		dev_err(&pdev->dev, "Can't allocate memory\n");
 		return -ENOMEM;
-
+	}
 	rtc->irq = rtcirq;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	rtc->rtc_base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(rtc->rtc_base))
-		return PTR_ERR(rtc->rtc_base);
+	size = resource_size(res);
+
+	if (!devm_request_mem_region(&pdev->dev, res->start, size,
+				     pdev->name)) {
+		dev_err(&pdev->dev, "RTC registers are not free\n");
+		return -EBUSY;
+	}
+
+	rtc->rtc_base = devm_ioremap(&pdev->dev, res->start, size);
+	if (!rtc->rtc_base) {
+		dev_err(&pdev->dev, "Can't map memory\n");
+		return -ENOMEM;
+	}
 
 	spin_lock_init(&rtc->lock);
 
@@ -260,6 +277,7 @@ static int lpc32xx_rtc_probe(struct platform_device *pdev)
 					&lpc32xx_rtc_ops, THIS_MODULE);
 	if (IS_ERR(rtc->rtc)) {
 		dev_err(&pdev->dev, "Can't get RTC\n");
+		platform_set_drvdata(pdev, NULL);
 		return PTR_ERR(rtc->rtc);
 	}
 
@@ -287,6 +305,8 @@ static int lpc32xx_rtc_remove(struct platform_device *pdev)
 
 	if (rtc->irq >= 0)
 		device_init_wakeup(&pdev->dev, 0);
+
+	platform_set_drvdata(pdev, NULL);
 
 	return 0;
 }

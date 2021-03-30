@@ -21,22 +21,12 @@ struct pagevec {
 };
 
 void __pagevec_release(struct pagevec *pvec);
-void __pagevec_lru_add(struct pagevec *pvec);
-unsigned pagevec_lookup_entries(struct pagevec *pvec,
-				struct address_space *mapping,
-				pgoff_t start, unsigned nr_entries,
-				pgoff_t *indices);
-void pagevec_remove_exceptionals(struct pagevec *pvec);
+void __pagevec_lru_add(struct pagevec *pvec, enum lru_list lru);
 unsigned pagevec_lookup(struct pagevec *pvec, struct address_space *mapping,
 		pgoff_t start, unsigned nr_pages);
-unsigned pagevec_lookup_range_tag(struct pagevec *pvec,
-		struct address_space *mapping, pgoff_t *index, pgoff_t end,
-		int tag);
-static inline unsigned pagevec_lookup_tag(struct pagevec *pvec,
-		struct address_space *mapping, pgoff_t *index, int tag)
-{
-	return pagevec_lookup_range_tag(pvec, mapping, index, (pgoff_t)-1, tag);
-}
+unsigned pagevec_lookup_tag(struct pagevec *pvec,
+		struct address_space *mapping, pgoff_t *index, int tag,
+		unsigned nr_pages);
 
 static inline void pagevec_init(struct pagevec *pvec, int cold)
 {
@@ -72,6 +62,38 @@ static inline void pagevec_release(struct pagevec *pvec)
 {
 	if (pagevec_count(pvec))
 		__pagevec_release(pvec);
+}
+
+static inline void __pagevec_lru_add_anon(struct pagevec *pvec)
+{
+	__pagevec_lru_add(pvec, LRU_INACTIVE_ANON);
+}
+
+static inline void __pagevec_lru_add_active_anon(struct pagevec *pvec)
+{
+	__pagevec_lru_add(pvec, LRU_ACTIVE_ANON);
+}
+
+static inline void __pagevec_lru_add_file(struct pagevec *pvec)
+{
+	__pagevec_lru_add(pvec, LRU_INACTIVE_FILE);
+}
+
+static inline void __pagevec_lru_add_active_file(struct pagevec *pvec)
+{
+	__pagevec_lru_add(pvec, LRU_ACTIVE_FILE);
+}
+
+static inline void pagevec_lru_add_file(struct pagevec *pvec)
+{
+	if (pagevec_count(pvec))
+		__pagevec_lru_add_file(pvec);
+}
+
+static inline void pagevec_lru_add_anon(struct pagevec *pvec)
+{
+	if (pagevec_count(pvec))
+		__pagevec_lru_add_anon(pvec);
 }
 
 #endif /* _LINUX_PAGEVEC_H */

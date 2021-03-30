@@ -5,10 +5,9 @@
  *
  * Copyright (C) 1995, 96, 97, 98, 99, 2003, 05 Ralf Baechle
  */
-#ifndef _UAPI_ASM_FCNTL_H
-#define _UAPI_ASM_FCNTL_H
+#ifndef _ASM_FCNTL_H
+#define _ASM_FCNTL_H
 
-#include <asm/sgidefs.h>
 
 #define O_APPEND	0x0008
 #define O_DSYNC		0x0010	/* used to be O_SYNC, see below */
@@ -56,15 +55,14 @@
  * contain all the same fields as struct flock.
  */
 
-#if _MIPS_SIM != _MIPS_SIM_ABI64
-
+#ifdef CONFIG_32BIT
 #include <linux/types.h>
 
 struct flock {
 	short	l_type;
 	short	l_whence;
-	__kernel_off_t	l_start;
-	__kernel_off_t	l_len;
+	off_t	l_start;
+	off_t	l_len;
 	long	l_sysid;
 	__kernel_pid_t l_pid;
 	long	pad[4];
@@ -72,8 +70,8 @@ struct flock {
 
 #define HAVE_ARCH_STRUCT_FLOCK
 
-#endif /* _MIPS_SIM == _MIPS_SIM_ABI32 */
+#endif /* CONFIG_32BIT */
 
 #include <asm-generic/fcntl.h>
 
-#endif /* _UAPI_ASM_FCNTL_H */
+#endif /* _ASM_FCNTL_H */

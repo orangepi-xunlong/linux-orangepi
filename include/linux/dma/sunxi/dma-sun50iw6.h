@@ -1,16 +1,10 @@
-/*
- * Allwinner sun50iw6p1 SoCs R_PIO pinctrl driver.
- *
- * Copyright(c) 2012-2016 Allwinnertech Co., Ltd.
- * Author: WimHuang <huangwei@allwinnertech.com>
- *
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
-
 #ifndef __DMA_SUN50IW6__
 #define __DMA_SUN50IW6__
 
+/*
+ * The source DRQ type and port corresponding relation
+ *
+ */
 #define DRQSRC_SRAM		0
 #define DRQSRC_SDRAM		DRQSRC_SRAM
 #define DRQSRC_DRAM		1
@@ -32,16 +26,16 @@
 /* #define DRQSRC_RESEVER	11 */
 /* #define DRQSRC_RESEVER	12 */
 /* #define DRQSRC_RESEVER	13 */
-#define DRQSRC_UART0_RX		14
-#define DRQSRC_UART1_RX		15
-#define DRQSRC_UART2_RX		16
-#define DRQSRC_UART3_RX		17
+#define DRQSRC_UART0RX		14
+#define DRQSRC_UART1RX		15
+#define DRQSRC_UART2RX		16
+#define DRQSRC_UART3RX		17
 /* #define DRQSRC_RESEVER	18 */
 /* #define DRQSRC_RESEVER	19 */
 /* #define DRQSRC_RESEVER	20 */
 /* #define DRQSRC_RESEVER	21 */
-#define DRQSRC_SPI0_RX		22
-#define DRQSRC_SPI1_RX		23
+#define DRQSRC_SPI0RX		22
+#define DRQSRC_SPI1RX		23
 /* #define DRQSRC_RESEVER	24 */
 /* #define DRQSRC_RESEVER	25 */
 /* #define DRQSRC_RESEVER	26 */
@@ -53,11 +47,6 @@
 #define DRQSRC_OTG_EP3		32
 #define DRQSRC_OTG_EP4		33
 #define DRQSRC_OTG_EP5		34
-
-/* Add by wolfgang to support Audio Hub */
-#define DRQSRC_AHUB0_RX		43
-#define DRQSRC_AHUB1_RX		44
-#define DRQSRC_AHUB2_RX		45
 
 /*
  * The destination DRQ type and port corresponding relation
@@ -84,16 +73,16 @@
 /* #define DRQDST_RESEVER	11 */
 /* #define DRQDST_RESEVER	12 */
 #define DRQDST_IR0TX		13
-#define DRQDST_UART0_TX		14
-#define DRQDST_UART1_TX 	15
-#define DRQDST_UART2_TX		16
-#define DRQDST_UART3_TX		17
+#define DRQDST_UART0TX		14
+#define DRQDST_UART1TX 		15
+#define DRQDST_UART2TX		16
+#define DRQDST_UART3TX		17
 /* #define DRQDST_RESEVER	18 */
 /* #define DRQDST_RESEVER	19 */
 /* #define DRQDST_RESEVER	20 */
 /* #define DRQDST_RESEVER	21 */
-#define DRQDST_SPI0_TX		22
-#define DRQDST_SPI1_TX		23
+#define DRQDST_SPI0TX		22
+#define DRQDST_SPI1TX		23
 /* #define DRQDST_RESEVER	24 */
 /* #define DRQDST_RESEVER	25 */
 /* #define DRQDST_RESEVER	26 */
@@ -106,8 +95,4 @@
 #define DRQDST_OTG_EP4		33
 #define DRQDST_OTG_EP5		34
 
-/* Add by wolfgang to support Audio Hub */
-#define DRQDST_AHUB0_TX		43
-#define DRQDST_AHUB1_TX		44
-#define DRQDST_AHUB2_TX		45
 #endif /*__DMA_SUN50IW6__  */

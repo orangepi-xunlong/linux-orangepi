@@ -111,13 +111,6 @@ static const struct dmi_system_id stk_upside_down_dmi_table[] = {
 			DMI_MATCH(DMI_PRODUCT_NAME, "F3JC")
 		}
 	},
-	{
-		.ident = "T12Rg-H",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "HCL Infosystems Limited"),
-			DMI_MATCH(DMI_PRODUCT_NAME, "T12Rg-H")
-		}
-	},
 	{}
 };
 
@@ -144,37 +137,30 @@ int stk_camera_write_reg(struct stk_camera *dev, u16 index, u8 value)
 		return 0;
 }
 
-int stk_camera_read_reg(struct stk_camera *dev, u16 index, u8 *value)
+int stk_camera_read_reg(struct stk_camera *dev, u16 index, int *value)
 {
 	struct usb_device *udev = dev->udev;
-	unsigned char *buf;
 	int ret;
-
-	buf = kmalloc(sizeof(u8), GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
 
 	ret = usb_control_msg(udev, usb_rcvctrlpipe(udev, 0),
 			0x00,
 			USB_DIR_IN | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
 			0x00,
 			index,
-			buf,
+			(u8 *) value,
 			sizeof(u8),
 			500);
-	if (ret >= 0)
-		*value = *buf;
-
-	kfree(buf);
-	return ret;
+	if (ret < 0)
+		return ret;
+	else
+		return 0;
 }
 
 static int stk_start_stream(struct stk_camera *dev)
 {
-	u8 value;
+	int value;
 	int i, ret;
-	u8 value_116, value_117;
-
+	int value_116, value_117;
 
 	if (!is_present(dev))
 		return -ENODEV;
@@ -214,7 +200,7 @@ static int stk_start_stream(struct stk_camera *dev)
 
 static int stk_stop_stream(struct stk_camera *dev)
 {
-	u8 value;
+	int value;
 	int i;
 	if (is_present(dev)) {
 		stk_camera_read_reg(dev, 0x0100, &value);
@@ -459,8 +445,10 @@ static int stk_prepare_iso(struct stk_camera *dev)
 			STK_ERROR("isobuf data already allocated\n");
 		if (dev->isobufs[i].urb == NULL) {
 			urb = usb_alloc_urb(ISO_FRAMES_PER_DESC, GFP_KERNEL);
-			if (urb == NULL)
+			if (urb == NULL) {
+				STK_ERROR("Failed to allocate URB %d\n", i);
 				goto isobufs_out;
+			}
 			dev->isobufs[i].urb = urb;
 		} else {
 			STK_ERROR("Killing URB\n");
@@ -561,8 +549,10 @@ static int stk_free_sio_buffers(struct stk_camera *dev)
 	nbufs = dev->n_sbufs;
 	dev->n_sbufs = 0;
 	spin_unlock_irqrestore(&dev->spinlock, flags);
-	for (i = 0; i < nbufs; i++)
-		vfree(dev->sio_bufs[i].buffer);
+	for (i = 0; i < nbufs; i++) {
+		if (dev->sio_bufs[i].buffer != NULL)
+			vfree(dev->sio_bufs[i].buffer);
+	}
 	kfree(dev->sio_bufs);
 	dev->sio_bufs = NULL;
 	return 0;
@@ -926,6 +916,7 @@ static int stk_vidioc_g_fmt_vid_cap(struct file *filp,
 		pix_format->bytesperline = 2 * pix_format->width;
 	pix_format->sizeimage = pix_format->bytesperline
 				* pix_format->height;
+	pix_format->priv = 0;
 	return 0;
 }
 
@@ -969,6 +960,7 @@ static int stk_try_fmt_vid_cap(struct file *filp,
 		fmtd->fmt.pix.bytesperline = 2 * fmtd->fmt.pix.width;
 	fmtd->fmt.pix.sizeimage = fmtd->fmt.pix.bytesperline
 		* fmtd->fmt.pix.height;
+	fmtd->fmt.pix.priv = 0;
 	return 0;
 }
 
@@ -1265,7 +1257,9 @@ static int stk_register_video_device(struct stk_camera *dev)
 
 	dev->vdev = stk_v4l_data;
 	dev->vdev.lock = &dev->lock;
+	dev->vdev.debug = debug;
 	dev->vdev.v4l2_dev = &dev->v4l2_dev;
+	set_bit(V4L2_FL_USE_FH_PRIO, &dev->vdev.flags);
 	video_set_drvdata(&dev->vdev, dev);
 	err = video_register_device(&dev->vdev, VFL_TYPE_GRABBER, -1);
 	if (err)

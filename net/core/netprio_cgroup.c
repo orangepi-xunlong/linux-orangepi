@@ -11,6 +11,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/string.h>
@@ -26,16 +27,16 @@
 
 #include <linux/fdtable.h>
 
-/*
- * netprio allocates per-net_device priomap array which is indexed by
- * css->id.  Limiting css ID to 16bits doesn't lose anything.
- */
-#define NETPRIO_ID_MAX		USHRT_MAX
-
 #define PRIOMAP_MIN_SZ		128
 
+static inline struct cgroup_netprio_state *cgrp_netprio_state(struct cgroup *cgrp)
+{
+	return container_of(cgroup_subsys_state(cgrp, net_prio_subsys_id),
+			    struct cgroup_netprio_state, css);
+}
+
 /*
- * Extend @dev->priomap so that it's large enough to accommodate
+ * Extend @dev->priomap so that it's large enough to accomodate
  * @target_idx.  @dev->priomap.priomap_len > @target_idx after successful
  * return.  Must be called under rtnl lock.
  */
@@ -86,73 +87,67 @@ static int extend_netdev_table(struct net_device *dev, u32 target_idx)
 
 /**
  * netprio_prio - return the effective netprio of a cgroup-net_device pair
- * @css: css part of the target pair
+ * @cgrp: cgroup part of the target pair
  * @dev: net_device part of the target pair
  *
  * Should be called under RCU read or rtnl lock.
  */
-static u32 netprio_prio(struct cgroup_subsys_state *css, struct net_device *dev)
+static u32 netprio_prio(struct cgroup *cgrp, struct net_device *dev)
 {
 	struct netprio_map *map = rcu_dereference_rtnl(dev->priomap);
-	int id = css->cgroup->id;
 
-	if (map && id < map->priomap_len)
-		return map->priomap[id];
+	if (map && cgrp->id < map->priomap_len)
+		return map->priomap[cgrp->id];
 	return 0;
 }
 
 /**
  * netprio_set_prio - set netprio on a cgroup-net_device pair
- * @css: css part of the target pair
+ * @cgrp: cgroup part of the target pair
  * @dev: net_device part of the target pair
  * @prio: prio to set
  *
- * Set netprio to @prio on @css-@dev pair.  Should be called under rtnl
+ * Set netprio to @prio on @cgrp-@dev pair.  Should be called under rtnl
  * lock and may fail under memory pressure for non-zero @prio.
  */
-static int netprio_set_prio(struct cgroup_subsys_state *css,
-			    struct net_device *dev, u32 prio)
+static int netprio_set_prio(struct cgroup *cgrp, struct net_device *dev,
+			    u32 prio)
 {
 	struct netprio_map *map;
-	int id = css->cgroup->id;
 	int ret;
 
 	/* avoid extending priomap for zero writes */
 	map = rtnl_dereference(dev->priomap);
-	if (!prio && (!map || map->priomap_len <= id))
+	if (!prio && (!map || map->priomap_len <= cgrp->id))
 		return 0;
 
-	ret = extend_netdev_table(dev, id);
+	ret = extend_netdev_table(dev, cgrp->id);
 	if (ret)
 		return ret;
 
 	map = rtnl_dereference(dev->priomap);
-	map->priomap[id] = prio;
+	map->priomap[cgrp->id] = prio;
 	return 0;
 }
 
-static struct cgroup_subsys_state *
-cgrp_css_alloc(struct cgroup_subsys_state *parent_css)
+static struct cgroup_subsys_state *cgrp_css_alloc(struct cgroup *cgrp)
 {
-	struct cgroup_subsys_state *css;
+	struct cgroup_netprio_state *cs;
 
-	css = kzalloc(sizeof(*css), GFP_KERNEL);
-	if (!css)
+	cs = kzalloc(sizeof(*cs), GFP_KERNEL);
+	if (!cs)
 		return ERR_PTR(-ENOMEM);
 
-	return css;
+	return &cs->css;
 }
 
-static int cgrp_css_online(struct cgroup_subsys_state *css)
+static int cgrp_css_online(struct cgroup *cgrp)
 {
-	struct cgroup_subsys_state *parent_css = css->parent;
+	struct cgroup *parent = cgrp->parent;
 	struct net_device *dev;
 	int ret = 0;
 
-	if (css->id > NETPRIO_ID_MAX)
-		return -ENOSPC;
-
-	if (!parent_css)
+	if (!parent)
 		return 0;
 
 	rtnl_lock();
@@ -161,9 +156,9 @@ static int cgrp_css_online(struct cgroup_subsys_state *css)
 	 * onlining, there is no need to clear them on offline.
 	 */
 	for_each_netdev(&init_net, dev) {
-		u32 prio = netprio_prio(parent_css, dev);
+		u32 prio = netprio_prio(parent, dev);
 
-		ret = netprio_set_prio(css, dev, prio);
+		ret = netprio_set_prio(cgrp, dev, prio);
 		if (ret)
 			break;
 	}
@@ -171,76 +166,69 @@ static int cgrp_css_online(struct cgroup_subsys_state *css)
 	return ret;
 }
 
-static void cgrp_css_free(struct cgroup_subsys_state *css)
+static void cgrp_css_free(struct cgroup *cgrp)
 {
-	kfree(css);
+	kfree(cgrp_netprio_state(cgrp));
 }
 
-static u64 read_prioidx(struct cgroup_subsys_state *css, struct cftype *cft)
+static u64 read_prioidx(struct cgroup *cgrp, struct cftype *cft)
 {
-	return css->cgroup->id;
+	return cgrp->id;
 }
 
-static int read_priomap(struct seq_file *sf, void *v)
+static int read_priomap(struct cgroup *cont, struct cftype *cft,
+			struct cgroup_map_cb *cb)
 {
 	struct net_device *dev;
 
 	rcu_read_lock();
 	for_each_netdev_rcu(&init_net, dev)
-		seq_printf(sf, "%s %u\n", dev->name,
-			   netprio_prio(seq_css(sf), dev));
+		cb->fill(cb, dev->name, netprio_prio(cont, dev));
 	rcu_read_unlock();
 	return 0;
 }
 
-static ssize_t write_priomap(struct kernfs_open_file *of,
-			     char *buf, size_t nbytes, loff_t off)
+static int write_priomap(struct cgroup *cgrp, struct cftype *cft,
+			 const char *buffer)
 {
 	char devname[IFNAMSIZ + 1];
 	struct net_device *dev;
 	u32 prio;
 	int ret;
 
-	if (sscanf(buf, "%"__stringify(IFNAMSIZ)"s %u", devname, &prio) != 2)
+	if (sscanf(buffer, "%"__stringify(IFNAMSIZ)"s %u", devname, &prio) != 2)
 		return -EINVAL;
 
 	dev = dev_get_by_name(&init_net, devname);
 	if (!dev)
 		return -ENODEV;
 
-	cgroup_sk_alloc_disable();
-
 	rtnl_lock();
 
-	ret = netprio_set_prio(of_css(of), dev, prio);
+	ret = netprio_set_prio(cgrp, dev, prio);
 
 	rtnl_unlock();
 	dev_put(dev);
-	return ret ?: nbytes;
+	return ret;
 }
 
 static int update_netprio(const void *v, struct file *file, unsigned n)
 {
 	int err;
 	struct socket *sock = sock_from_file(file, &err);
-	if (sock) {
-		spin_lock(&cgroup_sk_update_lock);
-		sock_cgroup_set_prioidx(&sock->sk->sk_cgrp_data,
-					(unsigned long)v);
-		spin_unlock(&cgroup_sk_update_lock);
-	}
+	if (sock)
+		sock->sk->sk_cgrp_prioidx = (u32)(unsigned long)v;
 	return 0;
 }
 
-static void net_prio_attach(struct cgroup_taskset *tset)
+static void net_prio_attach(struct cgroup *cgrp, struct cgroup_taskset *tset)
 {
 	struct task_struct *p;
-	struct cgroup_subsys_state *css;
+	void *v;
 
-	cgroup_taskset_for_each(p, css, tset) {
-		void *v = (void *)(unsigned long)css->cgroup->id;
-
+	cgroup_taskset_for_each(p, cgrp, tset) {
 		task_lock(p);
+		v = (void *)(unsigned long)task_netprioidx(p);
 		iterate_fd(p->files, 0, update_netprio, v);
 		task_unlock(p);
 	}
@@ -253,24 +241,27 @@ static struct cftype ss_files[] = {
 	},
 	{
 		.name = "ifpriomap",
-		.seq_show = read_priomap,
-		.write = write_priomap,
+		.read_map = read_priomap,
+		.write_string = write_priomap,
 	},
 	{ }	/* terminate */
 };
 
-struct cgroup_subsys net_prio_cgrp_subsys = {
+struct cgroup_subsys net_prio_subsys = {
+	.name		= "net_prio",
 	.css_alloc	= cgrp_css_alloc,
 	.css_online	= cgrp_css_online,
 	.css_free	= cgrp_css_free,
 	.attach		= net_prio_attach,
-	.legacy_cftypes	= ss_files,
+	.subsys_id	= net_prio_subsys_id,
+	.base_cftypes	= ss_files,
+	.module		= THIS_MODULE,
 };
 
 static int netprio_device_event(struct notifier_block *unused,
 				unsigned long event, void *ptr)
 {
-	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
+	struct net_device *dev = ptr;
 	struct netprio_map *old;
 
 	/*
@@ -295,9 +286,37 @@ static struct notifier_block netprio_device_notifier = {
 
 static int __init init_cgroup_netprio(void)
 {
+	int ret;
+
+	ret = cgroup_load_subsys(&net_prio_subsys);
+	if (ret)
+		goto out;
+
 	register_netdevice_notifier(&netprio_device_notifier);
-	return 0;
+
+out:
+	return ret;
 }
 
-subsys_initcall(init_cgroup_netprio);
+static void __exit exit_cgroup_netprio(void)
+{
+	struct netprio_map *old;
+	struct net_device *dev;
+
+	unregister_netdevice_notifier(&netprio_device_notifier);
+
+	cgroup_unload_subsys(&net_prio_subsys);
+
+	rtnl_lock();
+	for_each_netdev(&init_net, dev) {
+		old = rtnl_dereference(dev->priomap);
+		RCU_INIT_POINTER(dev->priomap, NULL);
+		if (old)
+			kfree_rcu(old, rcu);
+	}
+	rtnl_unlock();
+}
+
+module_init(init_cgroup_netprio);
+module_exit(exit_cgroup_netprio);
 MODULE_LICENSE("GPL v2");

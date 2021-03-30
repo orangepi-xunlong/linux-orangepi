@@ -94,6 +94,7 @@ ipv6header_mt6(const struct sk_buff *skb, struct xt_action_param *par)
 			break;
 		default:
 			return false;
+			break;
 		}
 
 		nexthdr = hp->nexthdr;

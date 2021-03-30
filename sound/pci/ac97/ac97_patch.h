@@ -49,7 +49,7 @@ struct ac97_enum {
 	unsigned char shift_l;
 	unsigned char shift_r;
 	unsigned short mask;
-	const char * const *texts;
+	const char **texts;
 };
 
 #define AC97_ENUM_DOUBLE(xreg, xshift_l, xshift_r, xmask, xtexts) \

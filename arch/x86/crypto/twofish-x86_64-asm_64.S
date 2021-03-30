@@ -264,7 +264,7 @@ ENTRY(twofish_enc_blk)
 	movq	R1,	8(%rsi)
 
 	popq	R1
-	movl	$1,%eax
+	movq	$1,%rax
 	ret
 ENDPROC(twofish_enc_blk)
 
@@ -316,6 +316,6 @@ ENTRY(twofish_dec_blk)
 	movq	R1,	8(%rsi)
 
 	popq	R1
-	movl	$1,%eax
+	movq	$1,%rax
 	ret
 ENDPROC(twofish_dec_blk)

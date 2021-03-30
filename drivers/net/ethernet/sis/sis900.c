@@ -106,8 +106,7 @@ static const char * card_names[] = {
 	"SiS 900 PCI Fast Ethernet",
 	"SiS 7016 PCI Fast Ethernet"
 };
-
-static const struct pci_device_id sis900_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(sis900_pci_tbl) = {
 	{PCI_VENDOR_ID_SI, PCI_DEVICE_ID_SI_900,
 	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, SIS_900},
 	{PCI_VENDOR_ID_SI, PCI_DEVICE_ID_SI_7016,
@@ -577,6 +576,7 @@ err_unmap_tx:
 err_out_unmap:
 	pci_iounmap(pci_dev, ioaddr);
 err_out_cleardev:
+	pci_set_drvdata(pci_dev, NULL);
 	pci_release_regions(pci_dev);
  err_out:
 	free_netdev(net_dev);
@@ -1309,8 +1309,22 @@ static void sis900_timer(unsigned long data)
 	struct sis900_private *sis_priv = netdev_priv(net_dev);
 	struct mii_phy *mii_phy = sis_priv->mii;
 	static const int next_tick = 5*HZ;
-	int speed = 0, duplex = 0;
 	u16 status;
+
+	if (!sis_priv->autong_complete){
+		int uninitialized_var(speed), duplex = 0;
+
+		sis900_read_mode(net_dev, &speed, &duplex);
+		if (duplex){
+			sis900_set_mode(sis_priv, speed, duplex);
+			sis630_set_eq(net_dev, sis_priv->chipset_rev);
+			netif_start_queue(net_dev);
+		}
+
+		sis_priv->timer.expires = jiffies + HZ;
+		add_timer(&sis_priv->timer);
+		return;
+	}
 
 	status = mdio_read(net_dev, sis_priv->cur_phy, MII_STATUS);
 	status = mdio_read(net_dev, sis_priv->cur_phy, MII_STATUS);
@@ -1322,15 +1336,9 @@ static void sis900_timer(unsigned long data)
 		status = sis900_default_phy(net_dev);
 		mii_phy = sis_priv->mii;
 
-		if (status & MII_STAT_LINK) {
-			WARN_ON(!(status & MII_STAT_AUTO_DONE));
-
-			sis900_read_mode(net_dev, &speed, &duplex);
-			if (duplex) {
-				sis900_set_mode(sis_priv, speed, duplex);
-				sis630_set_eq(net_dev, sis_priv->chipset_rev);
-				netif_carrier_on(net_dev);
-			}
+		if (status & MII_STAT_LINK){
+			sis900_check_mode(net_dev, mii_phy);
+			netif_carrier_on(net_dev);
 		}
 	} else {
 	/* Link ON -> OFF */
@@ -1426,7 +1434,7 @@ static void sis900_set_mode(struct sis900_private *sp, int speed, int duplex)
 		rx_flags |= RxATX;
 	}
 
-#if IS_ENABLED(CONFIG_VLAN_8021Q)
+#if defined(CONFIG_VLAN_8021Q) || defined(CONFIG_VLAN_8021Q_MODULE)
 	/* Can accept Jumbo packet */
 	rx_flags |= RxAJAB;
 #endif
@@ -1575,7 +1583,7 @@ static void sis900_tx_timeout(struct net_device *net_dev)
 
 	spin_unlock_irqrestore(&sis_priv->lock, flags);
 
-	netif_trans_update(net_dev); /* prevent tx timeout */
+	net_dev->trans_start = jiffies; /* prevent tx timeout */
 
 	/* load Transmit Descriptor Register */
 	sw32(txdp, sis_priv->tx_ring_dma);
@@ -1604,6 +1612,12 @@ sis900_start_xmit(struct sk_buff *skb, struct net_device *net_dev)
 	unsigned int  index_cur_tx, index_dirty_tx;
 	unsigned int  count_dirty_tx;
 
+	/* Don't transmit data before the complete of auto-negotiation */
+	if(!sis_priv->autong_complete){
+		netif_stop_queue(net_dev);
+		return NETDEV_TX_BUSY;
+	}
+
 	spin_lock_irqsave(&sis_priv->lock, flags);
 
 	/* Calculate the next Tx descriptor entry. */
@@ -1615,7 +1629,7 @@ sis900_start_xmit(struct sk_buff *skb, struct net_device *net_dev)
 		skb->data, skb->len, PCI_DMA_TODEVICE);
 	if (unlikely(pci_dma_mapping_error(sis_priv->pci_dev,
 		sis_priv->tx_ring[entry].bufptr))) {
-			dev_kfree_skb_any(skb);
+			dev_kfree_skb(skb);
 			sis_priv->tx_skbuff[entry] = NULL;
 			net_dev->stats.tx_dropped++;
 			spin_unlock_irqrestore(&sis_priv->lock, flags);
@@ -1709,7 +1723,7 @@ static irqreturn_t sis900_interrupt(int irq, void *dev_instance)
 
 	if(netif_msg_intr(sis_priv))
 		printk(KERN_DEBUG "%s: exiting interrupt, "
-		       "interrupt status = %#8.8x\n",
+		       "interrupt status = 0x%#8.8x.\n",
 		       net_dev->name, sr32(isr));
 
 	spin_unlock (&sis_priv->lock);
@@ -1750,7 +1764,7 @@ static int sis900_rx(struct net_device *net_dev)
 		data_size = rx_status & DSIZE;
 		rx_size = data_size - CRC_SIZE;
 
-#if IS_ENABLED(CONFIG_VLAN_8021Q)
+#if defined(CONFIG_VLAN_8021Q) || defined(CONFIG_VLAN_8021Q_MODULE)
 		/* ``TOOLONG'' flag means jumbo packet received. */
 		if ((rx_status & TOOLONG) && data_size <= MAX_FRAME_SIZE)
 			rx_status &= (~ ((unsigned int)TOOLONG));
@@ -2259,6 +2273,7 @@ static int sis900_set_config(struct net_device *dev, struct ifmap *map)
 		case IF_PORT_100BASEFX: /* 100BaseFx */
                 	/* These Modes are not supported (are they?)*/
 			return -EOPNOTSUPP;
+			break;
 
 		default:
 			return -EINVAL;
@@ -2426,6 +2441,7 @@ static void sis900_remove(struct pci_dev *pci_dev)
 	pci_iounmap(pci_dev, sis_priv->ioaddr);
 	free_netdev(net_dev);
 	pci_release_regions(pci_dev);
+	pci_set_drvdata(pci_dev, NULL);
 }
 
 #ifdef CONFIG_PM

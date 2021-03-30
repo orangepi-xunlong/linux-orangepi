@@ -143,6 +143,7 @@ fail1:
 
 fail0:
 	dprintk(MANTIS_ERROR, 1, "ERROR: <%d> exiting", ret);
+	pci_set_drvdata(pdev, NULL);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(mantis_pci_init);
@@ -160,6 +161,7 @@ void mantis_pci_exit(struct mantis_pci *mantis)
 	}
 
 	pci_disable_device(pdev);
+	pci_set_drvdata(pdev, NULL);
 }
 EXPORT_SYMBOL_GPL(mantis_pci_exit);
 

@@ -18,7 +18,8 @@
 #include <linux/init.h>
 #include <linux/types.h>
 #include <linux/input.h>
-#include <linux/acpi.h>
+#include <acpi/acpi_bus.h>
+#include <acpi/acpi_drivers.h>
 
 #define MODULE_NAME "xo15-ebook"
 

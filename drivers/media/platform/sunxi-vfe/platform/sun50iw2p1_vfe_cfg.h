@@ -1,19 +1,3 @@
-/*
- * linux-4.9/drivers/media/platform/sunxi-vfe/platform/sun50iw2p1_vfe_cfg.h
- *
- * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
-
 
 /*
  ***************************************************************************************
@@ -26,7 +10,7 @@
  *
  * Version		  Author         Date		    Description
  *
- *   2.0		  Yang Feng	2014/07/24	      Second Version
+ *   2.0		  Yang Feng   	2014/07/24	      Second Version
  *
  ****************************************************************************************
  */
@@ -39,14 +23,14 @@
 #define VFE_CSI_REGULATOR				""
 #define USE_SPECIFIC_CCI
 
-#define CSI0_REGS_BASE			0x01cb0000
+#define CSI0_REGS_BASE          		0x01cb0000
 
 #define CSI0_CCI_REG_BASE				0x01cb3000
-#define MIPI_CSI0_REGS_BASE			0x01cb1000
+#define MIPI_CSI0_REGS_BASE    			0x01cb1000
 
-#define ISP_REGS_BASE			0x01cb8000
+#define ISP_REGS_BASE           		0x01cb8000
 #define GPIO_REGS_VBASE					0x01c20800
-#define CPU_DRAM_PADDR_ORG			    0x40000000
+#define CPU_DRAM_PADDR_ORG 			    0x40000000
 #define HW_DMA_OFFSET					0x00000000
 #define MAX_VFE_INPUT					1	/*the maximum number of input source of video front end*/
 
@@ -92,7 +76,7 @@
 /*table size configs*/
 
 #define ISP_LINEAR_LUT_LENS_GAMMA_MEM_SIZE	0x1000
-#define ISP_LUT_MEM_SIZE			0x0400
+#define ISP_LUT_MEM_SIZE            		0x0400
 #define ISP_LENS_MEM_SIZE					0x0600
 #define ISP_GAMMA_MEM_SIZE					0x0200
 #define ISP_LINEAR_MEM_SIZE					0x0

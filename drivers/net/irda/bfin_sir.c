@@ -411,12 +411,12 @@ static int bfin_sir_startup(struct bfin_sir_port *port, struct net_device *dev)
 
 #else
 
-	if (request_irq(port->irq, bfin_sir_rx_int, 0, "BFIN_SIR_RX", dev)) {
+	if (request_irq(port->irq, bfin_sir_rx_int, IRQF_DISABLED, "BFIN_SIR_RX", dev)) {
 		dev_warn(&dev->dev, "Unable to attach SIR RX interrupt\n");
 		return -EBUSY;
 	}
 
-	if (request_irq(port->irq+1, bfin_sir_tx_int, 0, "BFIN_SIR_TX", dev)) {
+	if (request_irq(port->irq+1, bfin_sir_tx_int, IRQF_DISABLED, "BFIN_SIR_TX", dev)) {
 		dev_warn(&dev->dev, "Unable to attach SIR TX interrupt\n");
 		free_irq(port->irq, dev);
 		return -EBUSY;
@@ -531,7 +531,7 @@ static void bfin_sir_send_work(struct work_struct *work)
 	bfin_sir_dma_tx_chars(dev);
 #endif
 	bfin_sir_enable_tx(port);
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 }
 
 static int bfin_sir_hard_xmit(struct sk_buff *skb, struct net_device *dev)
@@ -794,6 +794,7 @@ static int bfin_sir_remove(struct platform_device *pdev)
 	kfree(self->rx_buff.head);
 	free_netdev(dev);
 	kfree(sir_port);
+	platform_set_drvdata(pdev, NULL);
 
 	return 0;
 }

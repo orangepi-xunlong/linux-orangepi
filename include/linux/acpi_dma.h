@@ -16,7 +16,6 @@
 
 #include <linux/list.h>
 #include <linux/device.h>
-#include <linux/err.h>
 #include <linux/dmaengine.h>
 
 /**
@@ -104,12 +103,12 @@ static inline void devm_acpi_dma_controller_free(struct device *dev)
 static inline struct dma_chan *acpi_dma_request_slave_chan_by_index(
 		struct device *dev, size_t index)
 {
-	return ERR_PTR(-ENODEV);
+	return NULL;
 }
 static inline struct dma_chan *acpi_dma_request_slave_chan_by_name(
 		struct device *dev, const char *name)
 {
-	return ERR_PTR(-ENODEV);
+	return NULL;
 }
 
 #define acpi_dma_simple_xlate	NULL

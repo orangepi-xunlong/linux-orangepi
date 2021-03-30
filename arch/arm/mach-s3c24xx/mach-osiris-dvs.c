@@ -20,7 +20,6 @@
 #include <linux/i2c/tps65010.h>
 
 #include <plat/cpu-freq.h>
-#include <mach/gpio-samsung.h>
 
 #define OSIRIS_GPIO_DVS	S3C2410_GPB(5)
 
@@ -70,16 +69,16 @@ static int osiris_dvs_notify(struct notifier_block *nb,
 
 	switch (val) {
 	case CPUFREQ_PRECHANGE:
-		if ((old_dvs && !new_dvs) ||
-		    (cur_dvs && !new_dvs)) {
+		if (old_dvs & !new_dvs ||
+		    cur_dvs & !new_dvs) {
 			pr_debug("%s: exiting dvs\n", __func__);
 			cur_dvs = false;
 			gpio_set_value(OSIRIS_GPIO_DVS, 1);
 		}
 		break;
 	case CPUFREQ_POSTCHANGE:
-		if ((!old_dvs && new_dvs) ||
-		    (!cur_dvs && new_dvs)) {
+		if (!old_dvs & new_dvs ||
+		    !cur_dvs & new_dvs) {
 			pr_debug("entering dvs\n");
 			cur_dvs = true;
 			gpio_set_value(OSIRIS_GPIO_DVS, 0);
@@ -143,7 +142,7 @@ static int osiris_dvs_remove(struct platform_device *pdev)
 	return 0;
 }
 
-/* the CONFIG_PM block is so small, it isn't worth actually compiling it
+/* the CONFIG_PM block is so small, it isn't worth actaully compiling it
  * out if the configuration isn't set. */
 
 static int osiris_dvs_suspend(struct device *dev)
@@ -171,6 +170,7 @@ static struct platform_driver osiris_dvs_driver = {
 	.remove		= osiris_dvs_remove,
 	.driver		= {
 		.name	= "osiris-dvs",
+		.owner	= THIS_MODULE,
 		.pm	= &osiris_dvs_pm,
 	},
 };

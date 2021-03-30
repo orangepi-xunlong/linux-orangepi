@@ -14,6 +14,8 @@
 #ifndef	__ASM_ARCH_ARISC_H
 #define	__ASM_ARCH_ARISC_H
 
+#include <linux/power/aw_pm.h>
+
 /* the base of messages */
 #define ARISC_MESSAGE_BASE          (0x10)
 
@@ -34,9 +36,6 @@
 #define ARISC_CPU_OP_REQ                (ARISC_MESSAGE_BASE + 0x12)  /* cpu operations         (ac327 to arisc) */
 #define ARISC_QUERY_WAKEUP_SRC_REQ      (ARISC_MESSAGE_BASE + 0x13)  /* query wakeup source    (ac327 to arisc) */
 #define ARISC_SYS_OP_REQ                (ARISC_MESSAGE_BASE + 0x14)  /* system operations      (ac327 to arisc) */
-#define ARISC_CLEAR_WAKEUP_SRC_REQ      (ARISC_MESSAGE_BASE + 0x15)  /* query wakeup source    (ac327 to arisc) */
-/*set wakeup source (ac327 to arisc)*/
-#define ARISC_SET_WAKEUP_SRC_REQ  (ARISC_MESSAGE_BASE + 0x16)
 
 /* dvfs commands */
 #define ARISC_CPUX_DVFS_REQ              (ARISC_MESSAGE_BASE + 0x20)  /* request dvfs           (ac327 to arisc) */
@@ -88,23 +87,10 @@
 
 /* arisc initialize state notify commands */
 #define ARISC_STARTUP_NOTIFY             (ARISC_MESSAGE_BASE + 0x80)  /* arisc init state notify(arisc to ac327) */
-#define ARISC_CRASHDUMP                  (ARISC_MESSAGE_BASE + 0x85)
-
-/* sensorhub commands */
-#define ARISC_AP_READ_DATA               (ARISC_MESSAGE_BASE + 0x90)  /* ap read data        (ac327 to arisc) */
-#define ARISC_AP_WRITE_DATA              (ARISC_MESSAGE_BASE + 0x91)  /* ap write data       (ac327 to arisc) */
-#define ARISC_SH_READ_DATA               (ARISC_MESSAGE_BASE + 0x92)  /* sh read data        (arisc to ac327) */
-#define ARISC_SH_WRITE_DATA              (ARISC_MESSAGE_BASE + 0x93)  /* sh write data       (arisc to ac327) */
-#define ARISC_SET_MSGBOX_RX_INT          (ARISC_MESSAGE_BASE + 0x94)  /* set msgbox rx int  (ac327 to arisc) */
-#define ARISC_GET_MSGBOX_RX_PEND         (ARISC_MESSAGE_BASE + 0x95)  /* get msgbox rx pend  (ac327 to arisc) */
-#define ARISC_CLR_MSGBOX_RX_PEND         (ARISC_MESSAGE_BASE + 0x96)  /* clr msgbox rx pend  (ac327 to arisc) */
-#define ARISC_AP_WAKEUP_SH               (ARISC_MESSAGE_BASE + 0x97)  /* ap wakeup sh  (ac327 to arisc) */
 
 #ifdef CONFIG_ARM
 /* the base of ARM SVC ARISC */
-#define ARM_SVC_ARISC_BASE \
-	ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, ARM_SMCCC_SMC_32, \
-			   ARM_SMCCC_OWNER_OEM, 0)
+#define ARM_SVC_ARISC_BASE          (0x80000000)
 #endif
 
 #ifdef CONFIG_ARM64
@@ -128,16 +114,12 @@
 #define ARM_SVC_ARISC_CPUIDLE_CFG_REQ           (ARM_SVC_ARISC_BASE + ARISC_CPUIDLE_CFG_REQ)           /* request to config      (ac327 to arisc) */
 #define ARM_SVC_ARISC_CPU_OP_REQ                (ARM_SVC_ARISC_BASE + ARISC_CPU_OP_REQ)                /* cpu operations         (ac327 to arisc) */
 #define ARM_SVC_ARISC_QUERY_WAKEUP_SRC_REQ      (ARM_SVC_ARISC_BASE + ARISC_QUERY_WAKEUP_SRC_REQ)      /* query wakeup source    (ac327 to arisc) */
-#define ARM_SVC_ARISC_CLEAR_WAKEUP_SRC_REQ      (ARM_SVC_ARISC_BASE + ARISC_CLEAR_WAKEUP_SRC_REQ)      /* query wakeup source    (ac327 to arisc) */
 #define ARM_SVC_ARISC_SYS_OP_REQ                (ARM_SVC_ARISC_BASE + ARISC_SYS_OP_REQ)                /* system operations      (ac327 to arisc) */
-#define ARM_SVC_ARISC_SET_WAKEUP_SRC_REQ  \
-	(ARM_SVC_ARISC_BASE + ARISC_SET_WAKEUP_SRC_REQ)
 
 /* dvfs commands */
 #define ARM_SVC_ARISC_CPUX_DVFS_REQ              (ARM_SVC_ARISC_BASE + ARISC_CPUX_DVFS_REQ)            /* request dvfs           (ac327 to arisc) */
 #define ARM_SVC_ARISC_CPUX_DVFS_CFG_VF_REQ       (ARM_SVC_ARISC_BASE + ARISC_CPUX_DVFS_CFG_VF_REQ)     /* request config dvfs v-f table(ac327 to arisc) */
-/* request config pmu info  used for sun8iw7p1*/
-#define ARISC_CPUX_DVFS_CFG_REQ			 (ARISC_MESSAGE_BASE + 0x22)
+
 /* pmu commands */
 #define ARM_SVC_ARISC_AXP_INT_COMING_NOTIFY      (ARM_SVC_ARISC_BASE + ARISC_AXP_INT_COMING_NOTIFY)    /* interrupt coming notify(arisc to ac327) */
 #define ARM_SVC_ARISC_AXP_DISABLE_IRQ            (ARM_SVC_ARISC_BASE + ARISC_AXP_DISABLE_IRQ)          /* disable axp irq of arisc                */
@@ -184,17 +166,7 @@
 
 /* arisc initialize state notify commands */
 #define ARM_SVC_ARISC_STARTUP_NOTIFY             (ARM_SVC_ARISC_BASE + ARISC_STARTUP_NOTIFY)           /* arisc init state notify(arisc to ac327) */
-#define ARM_SVC_ARISC_CRASHDUMP_START            (ARM_SVC_ARISC_BASE + ARISC_CRASHDUMP)
 
-/* sensorhub commands */
-#define ARM_SVC_ARISC_AP_READ_DATA               (ARM_SVC_ARISC_BASE + ARISC_AP_READ_DATA)             /* ap read data        (ac327 to arisc) */
-#define ARM_SVC_ARISC_AP_WRITE_DATA              (ARM_SVC_ARISC_BASE + ARISC_AP_WRITE_DATA)            /* ap write data       (ac327 to arisc) */
-#define ARM_SVC_ARISC_SH_READ_DATA               (ARM_SVC_ARISC_BASE + ARISC_SH_READ_DATA)             /* sh read data        (arisc to ac327) */
-#define ARM_SVC_ARISC_SH_WRITE_DATA              (ARM_SVC_ARISC_BASE + ARISC_SH_WRITE_DATA)            /* sh write data       (arisc to ac327) */
-#define ARM_SVC_ARISC_SET_MSGBOX_RX_INT          (ARM_SVC_ARISC_BASE + ARISC_SET_MSGBOX_RX_INT)        /* set msgbox rx int (ac327 to arisc) */
-#define ARM_SVC_ARISC_GET_MSGBOX_RX_PEND         (ARM_SVC_ARISC_BASE + ARISC_GET_MSGBOX_RX_PEND)       /* get msgbox rx pend (ac327 to arisc) */
-#define ARM_SVC_ARISC_CLR_MSGBOX_RX_PEND         (ARM_SVC_ARISC_BASE + ARISC_CLR_MSGBOX_RX_PEND)       /* clr msgbox rx pend (ac327 to arisc) */
-#define ARM_SVC_ARISC_AP_WAKEUP_SH               (ARM_SVC_ARISC_BASE + ARISC_AP_WAKEUP_SH)             /* ap wakeup sh (ac327 to arisc) */
 
 #define NMI_INT_TYPE_PMU (0)
 #define NMI_INT_TYPE_RTC (1)
@@ -203,7 +175,6 @@
 
 /* the modes of arisc dvfs */
 #define	ARISC_DVFS_SYN		(1<<0)
-#define ARISC_DVFS_ASYN         (0)
 
 /* message attributes(only use 8bit) */
 #define	ARISC_MESSAGE_ATTR_ASYN		    (0<<0)	/* need asyn with another cpu     */
@@ -242,8 +213,9 @@
 #define AUDIO_SRAM_PER_SIZE_16K (16384)     /* period size 16k = 0x4000 = 16384 */
 #define AUDIO_SRAM_PER_SIZE_32K (32768)     /* period size 32k = 0x8000 = 32768 */
 
-/* pmu voltage types */
-typedef enum power_voltage_type {
+//pmu voltage types
+typedef enum power_voltage_type
+{
 	AW1657_POWER_DCDCA = 0x0,
 	AW1657_POWER_DCDCB,
 	AW1657_POWER_DCDCC,
@@ -300,14 +272,15 @@ typedef int (*arisc_cb_t)(void *arg);
  * @regaddr:    array of registers address;
  * @data:       array of registers data;
  */
-typedef struct arisc_rsb_block_cfg {
+typedef struct arisc_rsb_block_cfg
+{
 	unsigned int len;
 	unsigned int datatype;
 	unsigned int msgattr;
 	unsigned int devaddr;
 	unsigned char *regaddr;
 	unsigned int *data;
-} arisc_rsb_block_cfg_t;
+}arisc_rsb_block_cfg_t;
 
 /*
  * @len  :       number of operate registers, max len:4;
@@ -319,7 +292,8 @@ typedef struct arisc_rsb_block_cfg {
  * @mask :       point of mask bits data;
  * @delay:       point of delay times;
  */
-typedef struct arisc_rsb_bits_cfg {
+typedef struct arisc_rsb_bits_cfg
+{
 	unsigned int len;
 	unsigned int datatype;
 	unsigned int msgattr;
@@ -328,19 +302,31 @@ typedef struct arisc_rsb_bits_cfg {
 	unsigned char *regaddr;
 	unsigned char *delay;
 	unsigned int *mask;
-} arisc_rsb_bits_cfg_t;
+}arisc_rsb_bits_cfg_t;
 
-typedef enum arisc_rw_type {
+typedef enum arisc_rw_type
+{
 	ARISC_READ = 0x0,
 	ARISC_WRITE = 0x1,
 } arisc_rw_type_e;
 
-typedef struct nmi_isr {
+typedef struct nmi_isr
+{
 	arisc_cb_t   handler;
 	void        *arg;
 } nmi_isr_t;
 
 extern nmi_isr_t nmi_isr_node[2];
+
+/*
+ * @flags: 0x01-clean pendings, 0x10-enter cupidle.
+ * @resume_addr: resume address for cpu0 out of idle.
+ */
+typedef struct sunxi_enter_idle_para{
+	unsigned long flags;
+	void *resume_addr;
+}sunxi_enter_idle_para_t;
+
 
 /*
  * @len :       number of read registers, max len:8;
@@ -372,8 +358,6 @@ typedef struct arisc_twi_bits_cfg {
 	unsigned char *delay;
 } arisc_twi_bits_cfg_t;
 
-struct super_standby_para;
-struct standby_info_para;
 /* ====================================dvfs interface==================================== */
 /*
  * set specific pll target frequency.
@@ -388,17 +372,6 @@ struct standby_info_para;
  */
 int arisc_dvfs_set_cpufreq(unsigned int freq, unsigned int pll, unsigned int mode, arisc_cb_t cb, void *cb_arg);
 
-/*
- * push the vf_table(opp_table) from kernel to arisc.
- * @vf:      pointer point to vf_table(opp_table)what need to do.;
- * @cluster: the vf_table belongs to which cluster.
- * @vf_num:  vf_table(opp_table) how many freq-voltage num;
- *
- * return: result, 0 - push vf_table(opp_table) successed,
- *                !0 - push vf_table(opp_table) failed;
- */
-int arisc_dvfs_cfg_vf_table(unsigned int cluster, unsigned int vf_num,
-					unsigned long vf_table);
 /**
  * query super-standby wakeup source.
  * @para:  point of buffer to store wakeup event informations.
@@ -407,30 +380,33 @@ int arisc_dvfs_cfg_vf_table(unsigned int cluster, unsigned int vf_num,
  */
 int arisc_query_wakeup_source(u32 *event);
 
-#define SET_ROOT_WAKEUP_SOURCE(root_irq)  (root_irq)
-#define SET_SEC_WAKEUP_SOURCE(root_irq, secondary_irq)  \
-	((1 << 30) | ((secondary_irq) << 10) | (root_irq))
-#define SET_THIRD_WAKEUP_SOURCE(root_irq, secondary_irq, third_irq)  \
-	((2 << 30) | ((third_irq) << 20) ((secondary_irq) << 10) | (root_irq))
-#define SET_WAKEUP_TIME_MS(ms)  ((3 << 30) | (ms))
+extern int arisc_query_set_standby_info(struct standby_info_para *para, arisc_rw_type_e op);
 
-/**
- * set wakeup source.
- * @para:  wakeup source irq.
+/*
+ * query config of standby power state and consumer.
+ * @para:  point of buffer to store power informations.
  *
- * return: result, 0 - set successed,
- *                    !0 - set failed;
+ * return: result, 0 - query successed, !0 - query failed;
  */
-int arisc_set_wakeup_source(u32 wakeup_irq);
+extern int arisc_query_standby_power_cfg(struct standby_info_para *para);
 
-/**
- * clear wakeup source.
- * @para:  wakeup source irq.
+/*
+ * set config of standby power state and consumer.
+ * @para:  point of buffer to store power informations.
  *
- * return: result, 0 - set successed,
- *                    !0 - set failed;
+ * return: result, 0 - set successed, !0 - set failed;
  */
-int arisc_clear_wakeup_source(u32 wakeup_irq);
+#define arisc_set_standby_power_cfg(para) \
+	arisc_query_set_standby_info(para, ARISC_WRITE)
+
+/*
+ * query standby power state and consumer.
+ * @para:  point of buffer to store power informations.
+ *
+ * return: result, 0 - query successed, !0 - query failed;
+ */
+#define arisc_query_standby_power(para) \
+	arisc_query_set_standby_info(para, ARISC_READ)
 
 /**
  * query super-standby dram crc result.
@@ -477,8 +453,7 @@ int arisc_set_nmi_trigger(u32 type);
 int arisc_axp_get_chip_id(unsigned char *chip_id);
 #if (defined CONFIG_ARCH_SUN8IW5P1) || \
 	(defined CONFIG_ARCH_SUN50IW1P1) || \
-	(defined CONFIG_ARCH_SUN50IW2P1) || \
-	(defined CONFIG_ARCH_SUN50IW3P1)
+	(defined CONFIG_ARCH_SUN50IW2P1)
 int arisc_adjust_pmu_chgcur(unsigned int max_chgcur, unsigned int chg_ic_temp);
 #endif
 int arisc_set_pwr_tree(u32 *pwr_tree);
@@ -623,60 +598,5 @@ int twi_bits_ops_sync(struct arisc_twi_bits_cfg *cfg);
 /* ====================================debug interface==================================== */
 int arisc_message_loopback(void);
 int arisc_config_ir_paras(u32 ir_code, u32 ir_addr);
-int arisc_set_crashdump_mode(void);
 
-int arisc_standby_super(struct super_standby_para *para, arisc_cb_t cb, void *cb_arg);
-int arisc_cpux_ready_notify(void);
-
-/**
- * ap read data.
- * @data:    point of data;
- * @length:  length of data;
- *
- * return: result, 0 - read data successed,
- *                !0 - read data failed or the len more then max len;
- */
-int arisc_ap_read_data(char *data, int length);
-
-/**
- * ap write data.
- * @data:    point of data;
- * @length:  length of data;
- *
- * return: result, 0 - write data successed,
- *                !0 - write data failed or the len more then max len;
- */
-int arisc_ap_write_data(char *data, int length);
-
-/**
- * set msgbox channel receiver interrupt.
- *
- * return: result, 0 - setting successed,
- *                !0 - setting failed;
- */
-int arisc_set_msgbox_receiver_int(unsigned int channel, unsigned int user, bool enable);
-
-/**
- * get msgbox channel receiver pend.
- *
- * return: result 1 - interrupt pending,
- *                !0 - interrupt not pending;
- */
-int arisc_get_msgbox_receiver_pend(unsigned int channel, unsigned int user);
-
-/**
- * clear msgbox channel receiver pend.
- *
- * return: result 0 - clear interrupt pending successed,
- *                !0 - clear interrupt pending  failed;;
- */
-int arisc_clear_msgbox_receiver_pend(unsigned int channel, unsigned int user);
-
-/**
- *  ap wakeup sh interrupt.
- *
- * return: result 0 - send successed,
- *                !0 - send  failed;;
- */
-int arisc_ap_wakeup_sh(bool wakeup);
 #endif	/* __ASM_ARCH_A100_H */

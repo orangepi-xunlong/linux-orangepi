@@ -1,15 +1,17 @@
-
 /*
- * header for cameras.
+ ******************************************************************************
  *
- * Copyright (c) 2017 by Allwinnertech Co., Ltd.  http://www.allwinnertech.com
+ * camera.h
  *
- * Authors:  Zhao Wei <zhaowei@allwinnertech.com>
- *	Yang Feng <yangfeng@allwinnertech.com>
+ * Hawkview ISP - camera.h module
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * Copyright (c) 2015 by Allwinnertech Co., Ltd.  http:
+ *
+ * Version		Author         Date		    Description
+ *
+ *   3.0		Yang Feng   	2015/12/18	VIDEO INPUT
+ *
+ *****************************************************************************
  */
 
 #ifndef __CAMERA__H__
@@ -63,25 +65,13 @@
 #define CCI_BITS_16         16
 #define SENSOR_MAGIC_NUMBER 0x156977
 
-struct sensor_format_struct {
-	__u8 *desc;
-	u32 mbus_code;
-	struct regval_list *regs;
-	int regs_size;
-	int bpp; /* Bytes per pixel */
-};
-
 struct sensor_info {
 	struct v4l2_subdev sd;
 	struct media_pad sensor_pads[SENSOR_PAD_NUM];
 	struct mutex lock;
 	struct sensor_format_struct *fmt;	/* Current format */
-	struct sensor_win_size *current_wins;
-	struct sensor_format_struct *fmt_pt;	/* format start */
-	struct sensor_win_size *win_pt;		/* win start */
 	unsigned int width;
 	unsigned int height;
-	unsigned int use_current_win;
 	unsigned int capture_mode;	/*V4L2_MODE_VIDEO/V4L2_MODE_IMAGE*/
 	unsigned int af_first_flag;
 	unsigned int preview_first_flag;
@@ -105,17 +95,146 @@ struct sensor_info {
 	enum v4l2_flash_led_mode flash_mode;
 	enum v4l2_power_line_frequency band_filter;
 	struct v4l2_fract tpf;
-	unsigned int stream_seq;
-	unsigned int fmt_num;
-	unsigned int win_size_num;
-	unsigned int sensor_field;
-	unsigned int combo_mode;
-	unsigned int time_hs;
-	unsigned int isp_wdr_mode;
+	struct sensor_win_size *current_wins;
 	unsigned int magic_num;
-	unsigned int lane_num;
-	unsigned int bit_width;
-	struct v4l2_ctrl_handler handler;
 };
+
+#define SENSOR_ENUM_MBUS_CODE \
+static int sensor_enum_mbus_code(struct v4l2_subdev *sd, \
+				 struct v4l2_subdev_fh *fh, \
+				 struct v4l2_subdev_mbus_code_enum *code) \
+{ \
+	if (code->index >= N_FMTS) \
+		return -EINVAL; \
+	code->code = sensor_formats[code->index].mbus_code; \
+	return 0; \
+}
+
+#define SENSOR_ENUM_FRAME_SIZE \
+static int sensor_enum_frame_size(struct v4l2_subdev *sd, \
+				  struct v4l2_subdev_fh *fh, \
+				  struct v4l2_subdev_frame_size_enum *fse) \
+{ \
+	if (fse->index >= N_WIN_SIZES) \
+		return -EINVAL; \
+	fse->min_width = sensor_win_sizes[fse->index].width; \
+	fse->max_width = fse->min_width; \
+	fse->max_height = sensor_win_sizes[fse->index].height; \
+	fse->min_height = fse->max_height; \
+	return 0; \
+}
+
+#define SENSOR_FIND_MBUS_CODE \
+static struct sensor_format_struct *sensor_find_mbus_code(struct v4l2_mbus_framefmt *fmt) \
+{ \
+	int i; \
+	for (i = 0; i < N_FMTS; ++i) { \
+		if (sensor_formats[i].mbus_code == fmt->code) \
+			break; \
+	} \
+	if (i >= N_FMTS) \
+		return sensor_formats; \
+	return sensor_formats + i; \
+}
+
+#define SENSOR_FIND_FRAME_SIZE \
+static struct sensor_win_size *sensor_find_frame_size(struct v4l2_mbus_framefmt *fmt) \
+{ \
+	struct sensor_win_size *ws; \
+	struct sensor_win_size *best_ws; \
+	int best_dist = INT_MAX; \
+	int i; \
+	ws = sensor_win_sizes; \
+	best_ws = NULL; \
+	for (i = 0; i < N_WIN_SIZES; ++i) { \
+		int dist = abs(ws->width - fmt->width) + \
+		    abs(ws->height - fmt->height); \
+		if (dist < best_dist) { \
+			best_dist = dist; \
+			best_ws = ws; \
+		} \
+		++ws; \
+	} \
+	return best_ws; \
+}
+
+#define SENSOR_TRY_FORMAT \
+static void sensor_try_format(struct sensor_info *info, \
+			      struct v4l2_subdev_fh *fh, \
+			      struct v4l2_subdev_format *fmt, \
+			      struct sensor_win_size **ws, \
+			      struct sensor_format_struct **sf) \
+{ \
+	u32 code = V4L2_MBUS_FMT_YUYV8_2X8; \
+	if (fmt->pad == SENSOR_PAD_SOURCE) { \
+		*ws = sensor_find_frame_size(&fmt->format); \
+		*sf = sensor_find_mbus_code(&fmt->format); \
+		code = (*sf)->mbus_code; \
+	} \
+	sensor_fill_mbus_fmt(&fmt->format, *ws, code); \
+}
+
+#define SENSOR_GET_FMT \
+static int sensor_get_fmt(struct v4l2_subdev *sd, \
+			  struct v4l2_subdev_fh *fh, \
+			  struct v4l2_subdev_format *fmt) \
+{ \
+	struct sensor_info *info = to_state(sd); \
+	const struct sensor_win_size *ws; \
+	u32 code; \
+	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) { \
+		fmt->format = *v4l2_subdev_get_try_format(fh, fmt->pad); \
+		return 0; \
+	} \
+	mutex_lock(&info->lock); \
+	switch (fmt->pad) { \
+	case SENSOR_PAD_SOURCE: \
+		code = info->fmt->mbus_code; \
+		ws = info->current_wins; \
+		break; \
+	default: \
+		mutex_unlock(&info->lock); \
+		return -EINVAL; \
+	} \
+	sensor_fill_mbus_fmt(&fmt->format, ws, code); \
+	mutex_unlock(&info->lock); \
+	return 0; \
+}
+
+#define SENSOR_SET_FMT \
+static int sensor_set_fmt(struct v4l2_subdev *sd, \
+			  struct v4l2_subdev_fh *fh, \
+			  struct v4l2_subdev_format *fmt) \
+{ \
+	struct sensor_win_size *ws = NULL; \
+	struct sensor_format_struct *sf = NULL; \
+	struct sensor_info *info = to_state(sd); \
+	struct v4l2_mbus_framefmt *mf; \
+	int ret = 0; \
+	mutex_lock(&info->lock); \
+	sensor_print("%s %d*%d 0x%x 0x%x\n", __func__, fmt->format.width, \
+		  fmt->format.height, fmt->format.code, fmt->format.field); \
+	sensor_try_format(info, fh, fmt, &ws, &sf); \
+	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) { \
+		if (NULL == fh) { \
+			sensor_err("fh is NULL when V4L2_SUBDEV_FORMAT_TRY\n"); \
+			mutex_unlock(&info->lock); \
+			return -EINVAL; \
+		} \
+		mf = v4l2_subdev_get_try_format(fh, fmt->pad); \
+		*mf = fmt->format; \
+	} else { \
+		switch (fmt->pad) { \
+		case SENSOR_PAD_SOURCE: \
+			info->current_wins = ws; \
+			info->fmt = sf; \
+			break; \
+		default: \
+			ret = -EBUSY; \
+		} \
+	} \
+	mutex_unlock(&info->lock); \
+	return ret;\
+}
 
 #endif /*__CAMERA__H__*/

@@ -154,10 +154,7 @@ struct dino_device
 };
 
 /* Looks nice and keeps the compiler happy */
-#define DINO_DEV(d) ({				\
-	void *__pdata = d;			\
-	BUG_ON(!__pdata);			\
-	(struct dino_device *)__pdata; })
+#define DINO_DEV(d) ((struct dino_device *) d)
 
 
 /*
@@ -602,10 +599,8 @@ dino_fixup_bus(struct pci_bus *bus)
 		** P2PB's only have 2 BARs, no IRQs.
 		** I'd like to just ignore them for now.
 		*/
-		if ((dev->class >> 8) == PCI_CLASS_BRIDGE_PCI)  {
-			pcibios_init_bridge(dev);
+		if ((dev->class >> 8) == PCI_CLASS_BRIDGE_PCI)
 			continue;
-		}
 
 		/* null out the ROM resource if there is one (we don't
 		 * care about an expansion rom on parisc, since it
@@ -918,7 +913,7 @@ static int __init dino_probe(struct parisc_device *dev)
 	printk("%s version %s found at 0x%lx\n", name, version, hpa);
 
 	if (!request_mem_region(hpa, PAGE_SIZE, name)) {
-		printk(KERN_ERR "DINO: Hey! Someone took my MMIO space (0x%lx)!\n",
+		printk(KERN_ERR "DINO: Hey! Someone took my MMIO space (0x%ld)!\n",
 			hpa);
 		return 1;
 	}
@@ -956,7 +951,7 @@ static int __init dino_probe(struct parisc_device *dev)
 
 	dino_dev->hba.dev = dev;
 	dino_dev->hba.base_addr = ioremap_nocache(hpa, 4096);
-	dino_dev->hba.lmmio_space_offset = PCI_F_EXTEND;
+	dino_dev->hba.lmmio_space_offset = 0;	/* CPU addrs == bus addrs */
 	spin_lock_init(&dino_dev->dinosaur_pen);
 	dino_dev->hba.iommu = ccio_get_iommu(dev);
 

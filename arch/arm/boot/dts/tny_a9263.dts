@@ -6,7 +6,7 @@
  * Licensed under GPLv2 only
  */
 /dts-v1/;
-#include "at91sam9263.dtsi"
+/include/ "at91sam9263.dtsi"
 
 / {
 	model = "Calao TNY A9263";
@@ -21,11 +21,12 @@
 	};
 
 	clocks {
-		slow_xtal {
-			clock-frequency = <32768>;
-		};
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
 
-		main_xtal {
+		main_clock: clock@0 {
+			compatible = "atmel,osc", "fixed-clock";
 			clock-frequency = <12000000>;
 		};
 	};
@@ -37,7 +38,7 @@
 			};
 
 			usb1: gadget@fff78000 {
-				atmel,vbus-gpio = <&pioB 11 GPIO_ACTIVE_HIGH>;
+				atmel,vbus-gpio = <&pioB 11 0>;
 				status = "okay";
 			};
 		};
@@ -90,7 +91,7 @@
 		};
 	};
 
-	i2c-gpio-0 {
+	i2c@0 {
 		status = "okay";
 	};
 };

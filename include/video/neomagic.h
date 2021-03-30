@@ -159,7 +159,10 @@ struct neofb_par {
 	unsigned char VCLK3NumeratorHigh;
 	unsigned char VCLK3Denominator;
 	unsigned char VerticalExt;
-	int wc_cookie;
+
+#ifdef CONFIG_MTRR
+	int mtrr;
+#endif
 	u8 __iomem *mmio_vbase;
 	u8 cursorOff;
 	u8 *cursorPad;		/* Must die !! */

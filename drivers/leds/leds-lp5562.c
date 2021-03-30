@@ -13,10 +13,10 @@
 #include <linux/delay.h>
 #include <linux/firmware.h>
 #include <linux/i2c.h>
+#include <linux/init.h>
 #include <linux/leds.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
-#include <linux/of.h>
 #include <linux/platform_data/leds-lp55xx.h>
 #include <linux/slab.h>
 
@@ -311,8 +311,10 @@ static int lp5562_post_init_device(struct lp55xx_chip *chip)
 	return 0;
 }
 
-static int lp5562_led_brightness(struct lp55xx_led *led)
+static void lp5562_led_brightness_work(struct work_struct *work)
 {
+	struct lp55xx_led *led = container_of(work, struct lp55xx_led,
+					      brightness_work);
 	struct lp55xx_chip *chip = led->chip;
 	u8 addr[] = {
 		LP5562_REG_R_PWM,
@@ -320,13 +322,10 @@ static int lp5562_led_brightness(struct lp55xx_led *led)
 		LP5562_REG_B_PWM,
 		LP5562_REG_W_PWM,
 	};
-	int ret;
 
 	mutex_lock(&chip->lock);
-	ret = lp55xx_write(chip, addr[led->chan_nr], led->brightness);
+	lp55xx_write(chip, addr[led->chan_nr], led->brightness);
 	mutex_unlock(&chip->lock);
-
-	return ret;
 }
 
 static void lp5562_write_program_memory(struct lp55xx_chip *chip,
@@ -347,9 +346,9 @@ static void lp5562_write_program_memory(struct lp55xx_chip *chip,
 /* check the size of program count */
 static inline bool _is_pc_overflow(struct lp55xx_predef_pattern *ptn)
 {
-	return ptn->size_r >= LP5562_PROGRAM_LENGTH ||
-	       ptn->size_g >= LP5562_PROGRAM_LENGTH ||
-	       ptn->size_b >= LP5562_PROGRAM_LENGTH;
+	return (ptn->size_r >= LP5562_PROGRAM_LENGTH ||
+		ptn->size_g >= LP5562_PROGRAM_LENGTH ||
+		ptn->size_b >= LP5562_PROGRAM_LENGTH);
 }
 
 static int lp5562_run_predef_led_pattern(struct lp55xx_chip *chip, int mode)
@@ -478,8 +477,8 @@ static ssize_t lp5562_store_engine_mux(struct device *dev,
 	return len;
 }
 
-static LP55XX_DEV_ATTR_WO(led_pattern, lp5562_store_pattern);
-static LP55XX_DEV_ATTR_WO(engine_mux, lp5562_store_engine_mux);
+static DEVICE_ATTR(led_pattern, S_IWUSR, NULL, lp5562_store_pattern);
+static DEVICE_ATTR(engine_mux, S_IWUSR, NULL, lp5562_store_engine_mux);
 
 static struct attribute *lp5562_attributes[] = {
 	&dev_attr_led_pattern.attr,
@@ -504,7 +503,7 @@ static struct lp55xx_device_config lp5562_cfg = {
 	},
 	.post_init_device   = lp5562_post_init_device,
 	.set_led_current    = lp5562_set_led_current,
-	.brightness_fn      = lp5562_led_brightness,
+	.brightness_work_fn = lp5562_led_brightness_work,
 	.run_engine         = lp5562_run_engine,
 	.firmware_cb        = lp5562_firmware_loaded,
 	.dev_attr_group     = &lp5562_group,
@@ -516,18 +515,11 @@ static int lp5562_probe(struct i2c_client *client,
 	int ret;
 	struct lp55xx_chip *chip;
 	struct lp55xx_led *led;
-	struct lp55xx_platform_data *pdata = dev_get_platdata(&client->dev);
-	struct device_node *np = client->dev.of_node;
+	struct lp55xx_platform_data *pdata = client->dev.platform_data;
 
 	if (!pdata) {
-		if (np) {
-			pdata = lp55xx_of_populate_pdata(&client->dev, np);
-			if (IS_ERR(pdata))
-				return PTR_ERR(pdata);
-		} else {
-			dev_err(&client->dev, "no platform data\n");
-			return -EINVAL;
-		}
+		dev_err(&client->dev, "no platform data\n");
+		return -EINVAL;
 	}
 
 	chip = devm_kzalloc(&client->dev, sizeof(*chip), GFP_KERNEL);
@@ -591,19 +583,9 @@ static const struct i2c_device_id lp5562_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, lp5562_id);
 
-#ifdef CONFIG_OF
-static const struct of_device_id of_lp5562_leds_match[] = {
-	{ .compatible = "ti,lp5562", },
-	{},
-};
-
-MODULE_DEVICE_TABLE(of, of_lp5562_leds_match);
-#endif
-
 static struct i2c_driver lp5562_driver = {
 	.driver = {
 		.name	= "lp5562",
-		.of_match_table = of_match_ptr(of_lp5562_leds_match),
 	},
 	.probe		= lp5562_probe,
 	.remove		= lp5562_remove,

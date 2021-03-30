@@ -89,29 +89,11 @@ struct sunxi_clk_periph_mux {
 
 struct sunxi_clk_comgate {
 	const u8        *name;
-	u16             val;
-	u16             mask;
+	u8              val;
+	u8              mask;
 	u8              share;
 	u8              res;
 };
-
-#ifdef CONFIG_PM_SLEEP
-struct sunxi_periph_clk_reg_cache {
-	struct list_head node;
-	void __iomem *mux_reg;
-	u32	mux_value;
-	void __iomem *divider_reg;
-	u32 divider_value;
-	void __iomem *gate_enable_reg;
-	u32 gate_enable_value;
-	void __iomem *gate_reset_reg;
-	u32 gate_reset_value;
-	void __iomem *gate_bus_reg;
-	u32 gate_bus_value;
-	void __iomem *gate_dram_reg;
-	u32 gate_dram_value;
-};
-#endif
 
 #define BUS_GATE_SHARE  0x01
 #define RST_GATE_SHARE  0x02
@@ -145,10 +127,10 @@ struct sunxi_clk_periph {
 	struct sunxi_clk_periph_mux     mux;
 	struct sunxi_clk_periph_gate    gate;
 	struct sunxi_clk_periph_div     divider;
-	struct sunxi_clk_comgate       *com_gate;
+	struct sunxi_clk_comgate*       com_gate;
 	u8                              com_gate_off;
-	struct clk_ops                 *priv_clkops;
-	struct sunxi_reg_ops           *priv_regops;
+	struct clk_ops*                 priv_clkops;
+	struct sunxi_reg_ops*           priv_regops;
 };
 
 struct periph_init_data {
@@ -159,36 +141,31 @@ struct periph_init_data {
 	struct sunxi_clk_periph *periph;
 };
 
-static inline u32 periph_readl(struct sunxi_clk_periph *periph, void __iomem *reg)
+static inline u32 periph_readl(struct sunxi_clk_periph * periph, void __iomem * reg)
 {
-	return (((unsigned long)periph->priv_regops) \
-			? periph->priv_regops->reg_readl(reg) \
-			: readl(reg));
+	return (((unsigned long)periph->priv_regops)?periph->priv_regops->reg_readl(reg):readl(reg));
 }
 
-static inline void periph_writel(struct sunxi_clk_periph *periph, unsigned int val, void __iomem *reg)
+static inline void periph_writel(struct sunxi_clk_periph * periph, unsigned int val, void __iomem * reg)
 {
-	(((unsigned long)periph->priv_regops) \
-		? periph->priv_regops->reg_writel(val, reg) \
-		: writel(val, reg));
+	(((unsigned long)periph->priv_regops)?periph->priv_regops->reg_writel(val,reg):writel(val,reg));
 }
-
-extern const struct clk_ops sunxi_clk_periph_ops;
 
 struct clk *sunxi_clk_register_periph(struct periph_init_data *pd,
 					void __iomem  *base);
 
 int sunxi_periph_reset_deassert(struct clk *c);
 int sunxi_periph_reset_assert(struct clk *c);
-void sunxi_clk_get_periph_ops(struct clk_ops *ops);
+extern void sunxi_clk_get_periph_ops(struct clk_ops* ops);
 
 #define to_clk_periph(_hw) container_of(_hw, struct sunxi_clk_periph, hw)
+
 
 #define SUNXI_CLK_PERIPH(name, _mux_reg, _mux_shift, _mux_width,  \
 			_div_reg, _div_mshift, _div_mwidth, _div_nshift, _div_nwidth,   \
 			_gate_flags, _enable_reg, _reset_reg, _bus_gate_reg, _drm_gate_reg, \
-			_enable_shift, _reset_shift, _bus_gate_shift, _dram_gate_shift, _lock, _com_gate, _com_gate_off) \
-static struct sunxi_clk_periph sunxi_clk_periph_##name = {      \
+			_enable_shift, _reset_shift, _bus_gate_shift, _dram_gate_shift, _lock,_com_gate,_com_gate_off) \
+static struct sunxi_clk_periph sunxi_clk_periph_##name ={       \
 	.lock = _lock,                                          \
 															\
 	.mux = {                                                \

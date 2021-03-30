@@ -5,7 +5,7 @@
  ******************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2013, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -132,7 +132,8 @@ struct acpi_rsconvert_info *acpi_gbl_convert_resource_serial_bus_dispatch[] = {
 	acpi_rs_convert_uart_serial_bus,
 };
 
-#if defined(ACPI_DEBUG_OUTPUT) || defined(ACPI_DISASSEMBLER) || defined(ACPI_DEBUGGER)
+#ifdef ACPI_FUTURE_USAGE
+#if defined(ACPI_DEBUG_OUTPUT) || defined(ACPI_DEBUGGER)
 
 /* Dispatch table for resource dump functions */
 
@@ -167,6 +168,7 @@ struct acpi_rsdump_info *acpi_gbl_dump_serial_bus_dispatch[] = {
 };
 #endif
 
+#endif				/* ACPI_FUTURE_USAGE */
 /*
  * Base sizes for external AML resource descriptors, indexed by internal type.
  * Includes size of the descriptor header (1 byte for small descriptors,

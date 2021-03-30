@@ -102,18 +102,6 @@ static void gelic_card_get_ether_port_status(struct gelic_card *card,
 	}
 }
 
-/**
- * gelic_descr_get_status -- returns the status of a descriptor
- * @descr: descriptor to look at
- *
- * returns the status as in the dmac_cmd_status field of the descriptor
- */
-static enum gelic_descr_dma_status
-gelic_descr_get_status(struct gelic_descr *descr)
-{
-	return be32_to_cpu(descr->dmac_cmd_status) & GELIC_DESCR_DMA_STAT_MASK;
-}
-
 static int gelic_card_set_link_mode(struct gelic_card *card, int mode)
 {
 	int status;
@@ -287,6 +275,18 @@ void gelic_card_down(struct gelic_card *card)
 	}
 	mutex_unlock(&card->updown_lock);
 	pr_debug("%s: done\n", __func__);
+}
+
+/**
+ * gelic_descr_get_status -- returns the status of a descriptor
+ * @descr: descriptor to look at
+ *
+ * returns the status as in the dmac_cmd_status field of the descriptor
+ */
+static enum gelic_descr_dma_status
+gelic_descr_get_status(struct gelic_descr *descr)
+{
+	return be32_to_cpu(descr->dmac_cmd_status) & GELIC_DESCR_DMA_STAT_MASK;
 }
 
 /**
@@ -1065,7 +1065,7 @@ refill:
 
 	/*
 	 * this call can fail, but for now, just leave this
-	 * descriptor without skb
+	 * decriptor without skb
 	 */
 	gelic_descr_prepare_rx(card, descr);
 
@@ -1466,7 +1466,8 @@ static void gelic_ether_setup_netdev_ops(struct net_device *netdev,
 {
 	netdev->watchdog_timeo = GELIC_NET_WATCHDOG_TIMEOUT;
 	/* NAPI */
-	netif_napi_add(netdev, napi, gelic_net_poll, NAPI_POLL_WEIGHT);
+	netif_napi_add(netdev, napi,
+		       gelic_net_poll, GELIC_NET_NAPI_WEIGHT);
 	netdev->ethtool_ops = &gelic_ether_ethtool_ops;
 	netdev->netdev_ops = &gelic_netdevice_ops;
 }
@@ -1561,7 +1562,7 @@ static struct gelic_card *gelic_alloc_card_net(struct net_device **netdev)
 	 * alloc netdev
 	 */
 	*netdev = alloc_etherdev(sizeof(struct gelic_port));
-	if (!*netdev) {
+	if (!netdev) {
 		kfree(card->unalign);
 		return NULL;
 	}
@@ -1726,7 +1727,7 @@ static int ps3_gelic_driver_probe(struct ps3_system_bus_device *dev)
 		goto fail_alloc_irq;
 	}
 	result = request_irq(card->irq, gelic_card_interrupt,
-			     0, netdev->name, card);
+			     IRQF_DISABLED, netdev->name, card);
 
 	if (result) {
 		dev_info(ctodev(card), "%s:request_irq failed (%d)\n",
@@ -1739,14 +1740,12 @@ static int ps3_gelic_driver_probe(struct ps3_system_bus_device *dev)
 		GELIC_CARD_PORT_STATUS_CHANGED;
 
 
-	result = gelic_card_init_chain(card, &card->tx_chain,
-				       card->descr, GELIC_NET_TX_DESCRIPTORS);
-	if (result)
+	if (gelic_card_init_chain(card, &card->tx_chain,
+			card->descr, GELIC_NET_TX_DESCRIPTORS))
 		goto fail_alloc_tx;
-	result = gelic_card_init_chain(card, &card->rx_chain,
-				       card->descr + GELIC_NET_TX_DESCRIPTORS,
-				       GELIC_NET_RX_DESCRIPTORS);
-	if (result)
+	if (gelic_card_init_chain(card, &card->rx_chain,
+				 card->descr + GELIC_NET_TX_DESCRIPTORS,
+				 GELIC_NET_RX_DESCRIPTORS))
 		goto fail_alloc_rx;
 
 	/* head of chain */
@@ -1756,8 +1755,7 @@ static int ps3_gelic_driver_probe(struct ps3_system_bus_device *dev)
 		card->rx_top, card->tx_top, sizeof(struct gelic_descr),
 		GELIC_NET_RX_DESCRIPTORS);
 	/* allocate rx skbs */
-	result = gelic_card_alloc_rx_skbs(card);
-	if (result)
+	if (gelic_card_alloc_rx_skbs(card))
 		goto fail_alloc_skbs;
 
 	spin_lock_init(&card->tx_lock);
@@ -1769,14 +1767,13 @@ static int ps3_gelic_driver_probe(struct ps3_system_bus_device *dev)
 	gelic_ether_setup_netdev_ops(netdev, &card->napi);
 	result = gelic_net_setup_netdev(netdev, card);
 	if (result) {
-		dev_dbg(&dev->core, "%s: setup_netdev failed %d\n",
+		dev_dbg(&dev->core, "%s: setup_netdev failed %d",
 			__func__, result);
 		goto fail_setup_netdev;
 	}
 
 #ifdef CONFIG_GELIC_WIRELESS
-	result = gelic_wl_driver_probe(card);
-	if (result) {
+	if (gelic_wl_driver_probe(card)) {
 		dev_dbg(&dev->core, "%s: WL init failed\n", __func__);
 		goto fail_setup_netdev;
 	}
@@ -1791,7 +1788,7 @@ fail_alloc_rx:
 	gelic_card_free_chain(card, card->tx_chain.head);
 fail_alloc_tx:
 	free_irq(card->irq, card);
-	netdev->irq = 0;
+	netdev->irq = NO_IRQ;
 fail_request_irq:
 	ps3_sb_event_receive_port_destroy(dev, card->irq);
 fail_alloc_irq:
@@ -1843,7 +1840,7 @@ static int ps3_gelic_driver_remove(struct ps3_system_bus_device *dev)
 	netdev0 = card->netdev[GELIC_PORT_ETHERNET_0];
 	/* disconnect event port */
 	free_irq(card->irq, card);
-	netdev0->irq = 0;
+	netdev0->irq = NO_IRQ;
 	ps3_sb_event_receive_port_destroy(card->dev, card->irq);
 
 	wait_event(card->waitq,

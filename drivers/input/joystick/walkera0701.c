@@ -200,39 +200,35 @@ static void walkera0701_close(struct input_dev *dev)
 	parport_release(w->pardevice);
 }
 
-static void walkera0701_attach(struct parport *pp)
+static int walkera0701_connect(struct walkera_dev *w, int parport)
 {
-	struct pardev_cb walkera0701_parport_cb;
-	struct walkera_dev *w = &w_dev;
+	int error;
 
-	if (pp->number != walkera0701_pp_no) {
-		pr_debug("Not using parport%d.\n", pp->number);
-		return;
+	w->parport = parport_find_number(parport);
+	if (!w->parport) {
+		pr_err("parport %d does not exist\n", parport);
+		return -ENODEV;
 	}
 
-	if (pp->irq == -1) {
+	if (w->parport->irq == -1) {
 		pr_err("parport %d does not have interrupt assigned\n",
-			pp->number);
-		return;
+			parport);
+		error = -EINVAL;
+		goto err_put_parport;
 	}
 
-	w->parport = pp;
-
-	memset(&walkera0701_parport_cb, 0, sizeof(walkera0701_parport_cb));
-	walkera0701_parport_cb.flags = PARPORT_FLAG_EXCL;
-	walkera0701_parport_cb.irq_func = walkera0701_irq_handler;
-	walkera0701_parport_cb.private = w;
-
-	w->pardevice = parport_register_dev_model(pp, "walkera0701",
-						  &walkera0701_parport_cb, 0);
-
+	w->pardevice = parport_register_device(w->parport, "walkera0701",
+				    NULL, NULL, walkera0701_irq_handler,
+				    PARPORT_DEV_EXCL, w);
 	if (!w->pardevice) {
 		pr_err("failed to register parport device\n");
-		return;
+		error = -EIO;
+		goto err_put_parport;
 	}
 
 	if (parport_negotiate(w->pardevice->port, IEEE1284_MODE_COMPAT)) {
 		pr_err("failed to negotiate parport mode\n");
+		error = -EIO;
 		goto err_unregister_device;
 	}
 
@@ -242,6 +238,7 @@ static void walkera0701_attach(struct parport *pp)
 	w->input_dev = input_allocate_device();
 	if (!w->input_dev) {
 		pr_err("failed to allocate input device\n");
+		error = -ENOMEM;
 		goto err_unregister_device;
 	}
 
@@ -268,46 +265,38 @@ static void walkera0701_attach(struct parport *pp)
 	input_set_abs_params(w->input_dev, ABS_RUDDER, -512, 512, 0, 0);
 	input_set_abs_params(w->input_dev, ABS_MISC, -512, 512, 0, 0);
 
-	if (input_register_device(w->input_dev)) {
+	error = input_register_device(w->input_dev);
+	if (error) {
 		pr_err("failed to register input device\n");
 		goto err_free_input_dev;
 	}
 
-	return;
+	return 0;
 
 err_free_input_dev:
 	input_free_device(w->input_dev);
 err_unregister_device:
 	parport_unregister_device(w->pardevice);
+err_put_parport:
+	parport_put_port(w->parport);
+	return error;
 }
 
-static void walkera0701_detach(struct parport *port)
+static void walkera0701_disconnect(struct walkera_dev *w)
 {
-	struct walkera_dev *w = &w_dev;
-
-	if (!w->pardevice || w->parport->number != port->number)
-		return;
-
 	input_unregister_device(w->input_dev);
 	parport_unregister_device(w->pardevice);
-	w->parport = NULL;
+	parport_put_port(w->parport);
 }
-
-static struct parport_driver walkera0701_parport_driver = {
-	.name = "walkera0701",
-	.match_port = walkera0701_attach,
-	.detach = walkera0701_detach,
-	.devmodel = true,
-};
 
 static int __init walkera0701_init(void)
 {
-	return parport_register_driver(&walkera0701_parport_driver);
+	return walkera0701_connect(&w_dev, walkera0701_pp_no);
 }
 
 static void __exit walkera0701_exit(void)
 {
-	parport_unregister_driver(&walkera0701_parport_driver);
+	walkera0701_disconnect(&w_dev);
 }
 
 module_init(walkera0701_init);

@@ -65,7 +65,7 @@ int sync_filesystem(struct super_block *sb)
 		return ret;
 	return __sync_filesystem(sb, 1);
 }
-EXPORT_SYMBOL(sync_filesystem);
+EXPORT_SYMBOL_GPL(sync_filesystem);
 
 static void sync_inodes_one_sb(struct super_block *sb, void *arg)
 {
@@ -86,12 +86,7 @@ static void fdatawrite_one_bdev(struct block_device *bdev, void *arg)
 
 static void fdatawait_one_bdev(struct block_device *bdev, void *arg)
 {
-	/*
-	 * We keep the error status of individual mapping so that
-	 * applications can catch the writeback error using fsync(2).
-	 * See filemap_fdatawait_keep_errors() for details.
-	 */
-	filemap_fdatawait_keep_errors(bdev->bd_inode->i_mapping);
+	filemap_fdatawait(bdev->bd_inode->i_mapping);
 }
 
 /*
@@ -159,7 +154,7 @@ SYSCALL_DEFINE1(syncfs, int, fd)
 
 	if (!f.file)
 		return -EBADF;
-	sb = f.file->f_path.dentry->d_sb;
+	sb = f.file->f_dentry->d_sb;
 
 	down_read(&sb->s_umount);
 	ret = sync_filesystem(sb);
@@ -182,16 +177,8 @@ SYSCALL_DEFINE1(syncfs, int, fd)
  */
 int vfs_fsync_range(struct file *file, loff_t start, loff_t end, int datasync)
 {
-	struct inode *inode = file->f_mapping->host;
-
-	if (!file->f_op->fsync)
+	if (!file->f_op || !file->f_op->fsync)
 		return -EINVAL;
-	if (!datasync && (inode->i_state & I_DIRTY_TIME)) {
-		spin_lock(&inode->i_lock);
-		inode->i_state &= ~I_DIRTY_TIME;
-		spin_unlock(&inode->i_lock);
-		mark_inode_dirty_sync(inode);
-	}
 	return file->f_op->fsync(file, start, end, datasync);
 }
 EXPORT_SYMBOL(vfs_fsync_range);
@@ -218,7 +205,6 @@ static int do_fsync(unsigned int fd, int datasync)
 	if (f.file) {
 		ret = vfs_fsync(f.file, datasync);
 		fdput(f);
-		inc_syscfs(current);
 	}
 	return ret;
 }
@@ -232,6 +218,23 @@ SYSCALL_DEFINE1(fdatasync, unsigned int, fd)
 {
 	return do_fsync(fd, 1);
 }
+
+/**
+ * generic_write_sync - perform syncing after a write if file / inode is sync
+ * @file:	file to which the write happened
+ * @pos:	offset where the write started
+ * @count:	length of the write
+ *
+ * This is just a simple wrapper about our general syncing function.
+ */
+int generic_write_sync(struct file *file, loff_t pos, loff_t count)
+{
+	if (!(file->f_flags & O_DSYNC) && !IS_SYNC(file->f_mapping->host))
+		return 0;
+	return vfs_fsync_range(file, pos, pos + count - 1,
+			       (file->f_flags & __O_SYNC) ? 0 : 1);
+}
+EXPORT_SYMBOL(generic_write_sync);
 
 /*
  * sys_sync_file_range() permits finely controlled syncing over a segment of
@@ -303,7 +306,7 @@ SYSCALL_DEFINE4(sync_file_range, int, fd, loff_t, offset, loff_t, nbytes,
 		goto out;
 
 	if (sizeof(pgoff_t) == 4) {
-		if (offset >= (0x100000000ULL << PAGE_SHIFT)) {
+		if (offset >= (0x100000000ULL << PAGE_CACHE_SHIFT)) {
 			/*
 			 * The range starts outside a 32 bit machine's
 			 * pagecache addressing capabilities.  Let it "succeed"
@@ -311,7 +314,7 @@ SYSCALL_DEFINE4(sync_file_range, int, fd, loff_t, offset, loff_t, nbytes,
 			ret = 0;
 			goto out;
 		}
-		if (endbyte >= (0x100000000ULL << PAGE_SHIFT)) {
+		if (endbyte >= (0x100000000ULL << PAGE_CACHE_SHIFT)) {
 			/*
 			 * Out to EOF
 			 */
@@ -349,8 +352,7 @@ SYSCALL_DEFINE4(sync_file_range, int, fd, loff_t, offset, loff_t, nbytes,
 	}
 
 	if (flags & SYNC_FILE_RANGE_WRITE) {
-		ret = __filemap_fdatawrite_range(mapping, offset, endbyte,
-						 WB_SYNC_NONE);
+		ret = filemap_fdatawrite_range(mapping, offset, endbyte);
 		if (ret < 0)
 			goto out_put;
 	}

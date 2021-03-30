@@ -16,6 +16,7 @@
  */
 
 #include <linux/oprofile.h>
+#include <linux/init.h>
 #include <linux/smp.h>
 #include <asm/ptrace.h>
 #include <asm/processor.h>

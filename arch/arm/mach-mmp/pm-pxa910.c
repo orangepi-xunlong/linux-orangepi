@@ -18,18 +18,31 @@
 #include <linux/io.h>
 #include <linux/irq.h>
 #include <asm/mach-types.h>
-#include <asm/outercache.h>
-
-#include "cputype.h"
-#include "addr-map.h"
-#include "pm-pxa910.h"
-#include "regs-icu.h"
-#include "irqs.h"
+#include <mach/hardware.h>
+#include <mach/cputype.h>
+#include <mach/addr-map.h>
+#include <mach/pm-pxa910.h>
+#include <mach/regs-icu.h>
+#include <mach/irqs.h>
 
 int pxa910_set_wake(struct irq_data *data, unsigned int on)
 {
-	uint32_t awucrm = 0, apcr = 0;
 	int irq = data->irq;
+	struct irq_desc *desc = irq_to_desc(data->irq);
+	uint32_t awucrm = 0, apcr = 0;
+
+	if (unlikely(irq >= nr_irqs)) {
+		pr_err("IRQ nubmers are out of boundary!\n");
+		return -EINVAL;
+	}
+
+	if (on) {
+		if (desc->action)
+			desc->action->flags |= IRQF_NO_SUSPEND;
+	} else {
+		if (desc->action)
+			desc->action->flags &= ~IRQF_NO_SUSPEND;
+	}
 
 	/* setting wakeup sources */
 	switch (irq) {
@@ -102,11 +115,9 @@ int pxa910_set_wake(struct irq_data *data, unsigned int on)
 		if (irq >= IRQ_GPIO_START && irq < IRQ_BOARD_START) {
 			awucrm = MPMU_AWUCRM_WAKEUP(2);
 			apcr |= MPMU_APCR_SLPWP2;
-		} else {
-			/* FIXME: This should return a proper error code ! */
+		} else
 			printk(KERN_ERR "Error: no defined wake up source irq: %d\n",
 				irq);
-		}
 	}
 
 	if (on) {

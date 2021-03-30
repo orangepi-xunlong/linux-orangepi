@@ -11,7 +11,7 @@
 struct kern_ipc_perm
 {
 	spinlock_t	lock;
-	bool		deleted;
+	int		deleted;
 	int		id;
 	key_t		key;
 	kuid_t		uid;

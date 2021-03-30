@@ -251,26 +251,16 @@ static SIMPLE_DEV_PM_OPS(pm80x_rtc_pm_ops, pm80x_rtc_suspend, pm80x_rtc_resume);
 static int pm80x_rtc_probe(struct platform_device *pdev)
 {
 	struct pm80x_chip *chip = dev_get_drvdata(pdev->dev.parent);
-	struct pm80x_rtc_pdata *pdata = dev_get_platdata(&pdev->dev);
+	struct pm80x_platform_data *pm80x_pdata;
+	struct pm80x_rtc_pdata *pdata = NULL;
 	struct pm80x_rtc_info *info;
-	struct device_node *node = pdev->dev.of_node;
 	struct rtc_time tm;
 	unsigned long ticks = 0;
 	int ret;
 
-	if (!pdata && !node) {
-		dev_err(&pdev->dev,
-			"pm80x-rtc requires platform data or of_node\n");
-		return -EINVAL;
-	}
-
-	if (!pdata) {
-		pdata = devm_kzalloc(&pdev->dev, sizeof(*pdata), GFP_KERNEL);
-		if (!pdata) {
-			dev_err(&pdev->dev, "failed to allocate memory\n");
-			return -ENOMEM;
-		}
-	}
+	pdata = pdev->dev.platform_data;
+	if (pdata == NULL)
+		dev_warn(&pdev->dev, "No platform data!\n");
 
 	info =
 	    devm_kzalloc(&pdev->dev, sizeof(struct pm80x_rtc_info), GFP_KERNEL);
@@ -336,8 +326,12 @@ static int pm80x_rtc_probe(struct platform_device *pdev)
 	regmap_update_bits(info->map, PM800_RTC_CONTROL, PM800_RTC1_USE_XO,
 			   PM800_RTC1_USE_XO);
 
-	/* remember whether this power up is caused by PMIC RTC or not */
-	info->rtc_dev->dev.platform_data = &pdata->rtc_wakeup;
+	if (pdev->dev.parent->platform_data) {
+		pm80x_pdata = pdev->dev.parent->platform_data;
+		pdata = pm80x_pdata->rtc;
+		if (pdata)
+			info->rtc_dev->dev.platform_data = &pdata->rtc_wakeup;
+	}
 
 	device_init_wakeup(&pdev->dev, 1);
 
@@ -351,6 +345,7 @@ out:
 static int pm80x_rtc_remove(struct platform_device *pdev)
 {
 	struct pm80x_rtc_info *info = platform_get_drvdata(pdev);
+	platform_set_drvdata(pdev, NULL);
 	pm80x_free_irq(info->chip, info->irq, info);
 	return 0;
 }

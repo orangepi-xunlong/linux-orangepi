@@ -12,7 +12,7 @@
  * Software Foundation; version 2 of the License.
  */
 
-#ifndef _IPOCTAL_H_
+#ifndef _IPOCTAL_H
 #define _IPOCTAL_H_
 
 #define NR_CHANNELS		8

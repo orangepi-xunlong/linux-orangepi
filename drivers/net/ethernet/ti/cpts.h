@@ -27,7 +27,6 @@
 #include <linux/list.h>
 #include <linux/ptp_clock_kernel.h>
 #include <linux/skbuff.h>
-#include <linux/timecounter.h>
 
 struct cpsw_cpts {
 	u32 idver;                /* Identification and version */
@@ -128,8 +127,8 @@ struct cpts {
 };
 
 #ifdef CONFIG_TI_CPTS
-void cpts_rx_timestamp(struct cpts *cpts, struct sk_buff *skb);
-void cpts_tx_timestamp(struct cpts *cpts, struct sk_buff *skb);
+extern void cpts_rx_timestamp(struct cpts *cpts, struct sk_buff *skb);
+extern void cpts_tx_timestamp(struct cpts *cpts, struct sk_buff *skb);
 #else
 static inline void cpts_rx_timestamp(struct cpts *cpts, struct sk_buff *skb)
 {
@@ -139,7 +138,8 @@ static inline void cpts_tx_timestamp(struct cpts *cpts, struct sk_buff *skb)
 }
 #endif
 
-int cpts_register(struct device *dev, struct cpts *cpts, u32 mult, u32 shift);
-void cpts_unregister(struct cpts *cpts);
+extern int cpts_register(struct device *dev, struct cpts *cpts,
+			 u32 mult, u32 shift);
+extern void cpts_unregister(struct cpts *cpts);
 
 #endif

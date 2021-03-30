@@ -1,7 +1,9 @@
 /*******************************************************************************
  * This file contains the iSCSI Target DataIN value generation functions.
  *
- * (c) Copyright 2007-2013 Datera, Inc.
+ * \u00a9 Copyright 2007-2011 RisingTide Systems LLC.
+ *
+ * Licensed to the Linux Foundation under the General Public License (GPL) version 2.
  *
  * Author: Nicholas A. Bellinger <nab@linux-iscsi.org>
  *
@@ -18,7 +20,7 @@
 
 #include <scsi/iscsi_proto.h>
 
-#include <target/iscsi/iscsi_target_core.h>
+#include "iscsi_target_core.h"
 #include "iscsi_target_seq_pdu_list.h"
 #include "iscsi_target_erl1.h"
 #include "iscsi_target_util.h"
@@ -524,4 +526,3 @@ struct iscsi_datain_req *iscsit_get_datain_values(
 
 	return NULL;
 }
-EXPORT_SYMBOL(iscsit_get_datain_values);

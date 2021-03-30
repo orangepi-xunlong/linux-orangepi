@@ -29,6 +29,7 @@
 #include <linux/module.h>
 #include <linux/namei.h>
 #include <linux/skbuff.h>
+#include <linux/crypto.h>
 #include <linux/mount.h>
 #include <linux/pagemap.h>
 #include <linux/key.h>
@@ -119,15 +120,16 @@ static int ecryptfs_init_lower_file(struct dentry *dentry,
 				    struct file **lower_file)
 {
 	const struct cred *cred = current_cred();
-	struct path *path = ecryptfs_dentry_to_lower_path(dentry);
+	struct dentry *lower_dentry = ecryptfs_dentry_to_lower(dentry);
+	struct vfsmount *lower_mnt = ecryptfs_dentry_to_lower_mnt(dentry);
 	int rc;
 
-	rc = ecryptfs_privileged_open(lower_file, path->dentry, path->mnt,
+	rc = ecryptfs_privileged_open(lower_file, lower_dentry, lower_mnt,
 				      cred);
 	if (rc) {
 		printk(KERN_ERR "Error opening lower file "
 		       "for lower_dentry [0x%p] and lower_mnt [0x%p]; "
-		       "rc = [%d]\n", path->dentry, path->mnt, rc);
+		       "rc = [%d]\n", lower_dentry, lower_mnt, rc);
 		(*lower_file) = NULL;
 	}
 	return rc;
@@ -406,7 +408,7 @@ static int ecryptfs_parse_options(struct ecryptfs_sb_info *sbi, char *options,
 	if (!cipher_name_set) {
 		int cipher_name_len = strlen(ECRYPTFS_DEFAULT_CIPHER);
 
-		BUG_ON(cipher_name_len > ECRYPTFS_MAX_CIPHER_NAME_SIZE);
+		BUG_ON(cipher_name_len >= ECRYPTFS_MAX_CIPHER_NAME_SIZE);
 		strcpy(mount_crypt_stat->global_default_cipher_name,
 		       ECRYPTFS_DEFAULT_CIPHER);
 	}
@@ -519,7 +521,7 @@ static struct dentry *ecryptfs_mount(struct file_system_type *fs_type, int flags
 		goto out;
 	}
 
-	rc = bdi_setup_and_register(&sbi->bdi, "ecryptfs");
+	rc = bdi_setup_and_register(&sbi->bdi, "ecryptfs", BDI_CAP_MAP_COPY);
 	if (rc)
 		goto out1;
 
@@ -529,7 +531,6 @@ static struct dentry *ecryptfs_mount(struct file_system_type *fs_type, int flags
 	/* ->kill_sb() will take care of sbi after that point */
 	sbi = NULL;
 	s->s_op = &ecryptfs_sops;
-	s->s_xattr = ecryptfs_xattr_handlers;
 	s->s_d_op = &ecryptfs_dops;
 
 	err = "Reading sb failed";
@@ -546,11 +547,11 @@ static struct dentry *ecryptfs_mount(struct file_system_type *fs_type, int flags
 		goto out_free;
 	}
 
-	if (check_ruid && !uid_eq(d_inode(path.dentry)->i_uid, current_uid())) {
+	if (check_ruid && !uid_eq(path.dentry->d_inode->i_uid, current_uid())) {
 		rc = -EPERM;
 		printk(KERN_ERR "Mount of device (uid: %d) not owned by "
 		       "requested user (uid: %d)\n",
-			i_uid_read(d_inode(path.dentry)),
+			i_uid_read(path.dentry->d_inode),
 			from_kuid(&init_user_ns, current_uid()));
 		goto out_free;
 	}
@@ -576,15 +577,8 @@ static struct dentry *ecryptfs_mount(struct file_system_type *fs_type, int flags
 	s->s_maxbytes = path.dentry->d_sb->s_maxbytes;
 	s->s_blocksize = path.dentry->d_sb->s_blocksize;
 	s->s_magic = ECRYPTFS_SUPER_MAGIC;
-	s->s_stack_depth = path.dentry->d_sb->s_stack_depth + 1;
 
-	rc = -EINVAL;
-	if (s->s_stack_depth > FILESYSTEM_MAX_STACK_DEPTH) {
-		pr_err("eCryptfs: maximum fs stacking depth exceeded\n");
-		goto out_free;
-	}
-
-	inode = ecryptfs_get_inode(d_inode(path.dentry), s);
+	inode = ecryptfs_get_inode(path.dentry->d_inode, s);
 	rc = PTR_ERR(inode);
 	if (IS_ERR(inode))
 		goto out_free;
@@ -602,7 +596,8 @@ static struct dentry *ecryptfs_mount(struct file_system_type *fs_type, int flags
 
 	/* ->kill_sb() will take care of root_info */
 	ecryptfs_set_dentry_private(s->s_root, root_info);
-	root_info->lower_path = path;
+	ecryptfs_set_dentry_lower(s->s_root, path.dentry);
+	ecryptfs_set_dentry_lower_mnt(s->s_root, path.mnt);
 
 	s->s_flags |= MS_ACTIVE;
 	return dget(s->s_root);
@@ -663,7 +658,6 @@ static struct ecryptfs_cache_info {
 	struct kmem_cache **cache;
 	const char *name;
 	size_t size;
-	unsigned long flags;
 	void (*ctor)(void *obj);
 } ecryptfs_cache_infos[] = {
 	{
@@ -685,7 +679,6 @@ static struct ecryptfs_cache_info {
 		.cache = &ecryptfs_inode_info_cache,
 		.name = "ecryptfs_inode_cache",
 		.size = sizeof(struct ecryptfs_inode_info),
-		.flags = SLAB_ACCOUNT,
 		.ctor = inode_info_init_once,
 	},
 	{
@@ -696,12 +689,12 @@ static struct ecryptfs_cache_info {
 	{
 		.cache = &ecryptfs_header_cache,
 		.name = "ecryptfs_headers",
-		.size = PAGE_SIZE,
+		.size = PAGE_CACHE_SIZE,
 	},
 	{
 		.cache = &ecryptfs_xattr_cache,
 		.name = "ecryptfs_xattr_cache",
-		.size = PAGE_SIZE,
+		.size = PAGE_CACHE_SIZE,
 	},
 	{
 		.cache = &ecryptfs_key_record_cache,
@@ -739,7 +732,8 @@ static void ecryptfs_free_kmem_caches(void)
 		struct ecryptfs_cache_info *info;
 
 		info = &ecryptfs_cache_infos[i];
-		kmem_cache_destroy(*(info->cache));
+		if (*(info->cache))
+			kmem_cache_destroy(*(info->cache));
 	}
 }
 
@@ -756,8 +750,8 @@ static int ecryptfs_init_kmem_caches(void)
 		struct ecryptfs_cache_info *info;
 
 		info = &ecryptfs_cache_infos[i];
-		*(info->cache) = kmem_cache_create(info->name, info->size, 0,
-				SLAB_HWCACHE_ALIGN | info->flags, info->ctor);
+		*(info->cache) = kmem_cache_create(info->name, info->size,
+				0, SLAB_HWCACHE_ALIGN, info->ctor);
 		if (!*(info->cache)) {
 			ecryptfs_free_kmem_caches();
 			ecryptfs_printk(KERN_WARNING, "%s: "
@@ -818,7 +812,7 @@ static int __init ecryptfs_init(void)
 {
 	int rc;
 
-	if (ECRYPTFS_DEFAULT_EXTENT_SIZE > PAGE_SIZE) {
+	if (ECRYPTFS_DEFAULT_EXTENT_SIZE > PAGE_CACHE_SIZE) {
 		rc = -EINVAL;
 		ecryptfs_printk(KERN_ERR, "The eCryptfs extent size is "
 				"larger than the host's page size, and so "
@@ -826,7 +820,7 @@ static int __init ecryptfs_init(void)
 				"default eCryptfs extent size is [%u] bytes; "
 				"the page size is [%lu] bytes.\n",
 				ECRYPTFS_DEFAULT_EXTENT_SIZE,
-				(unsigned long)PAGE_SIZE);
+				(unsigned long)PAGE_CACHE_SIZE);
 		goto out;
 	}
 	rc = ecryptfs_init_kmem_caches();

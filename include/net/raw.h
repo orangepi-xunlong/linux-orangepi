@@ -26,7 +26,7 @@ extern struct proto raw_prot;
 void raw_icmp_error(struct sk_buff *, int, u32);
 int raw_local_deliver(struct sk_buff *, int);
 
-int raw_rcv(struct sock *, struct sk_buff *);
+extern int 	raw_rcv(struct sock *, struct sk_buff *);
 
 #define RAW_HTABLE_SIZE	MAX_INET_PROTOS
 
@@ -36,8 +36,8 @@ struct raw_hashinfo {
 };
 
 #ifdef CONFIG_PROC_FS
-int raw_proc_init(void);
-void raw_proc_exit(void);
+extern int  raw_proc_init(void);
+extern void raw_proc_exit(void);
 
 struct raw_iter_state {
 	struct seq_net_private p;
@@ -57,7 +57,7 @@ int raw_seq_open(struct inode *ino, struct file *file,
 
 #endif
 
-int raw_hash_sk(struct sock *sk);
+void raw_hash_sk(struct sock *sk);
 void raw_unhash_sk(struct sock *sk);
 
 struct raw_sock {

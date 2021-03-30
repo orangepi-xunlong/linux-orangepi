@@ -87,13 +87,13 @@ struct sunxi_scr {
 	uint32_t rx_repeat;	/* rx repeat */
 	uint32_t scclk_div;	/* scclk divisor */
 	uint32_t baud_div;	/* baud divisor */
-	uint8_t act_time;	/* active/deactive time, in scclk cycles */
+	uint8_t act_time;	/* activation/deactivation time, in scclk cycles */
 	uint8_t rst_time;	/* reset time, in scclk cycles */
 	uint8_t atr_time;	/* ATR limit time, in scclk cycles */
 	uint32_t guard_time;	/* gaurd time, in ETUs */
 	uint32_t chlimit_time;	/* character limit time, in ETUs */
 
-	/* some necessary flags */
+	/* some neccesary flags */
 	volatile uint8_t atr_resp;
 	volatile uint8_t rx_transmit_status;
 

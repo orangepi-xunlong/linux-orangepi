@@ -214,9 +214,7 @@ static void pcibios_allocate_bridge_resources(struct pci_dev *dev)
 		r = &dev->resource[idx];
 		if (!r->flags)
 			continue;
-		if (r->parent)	/* Already allocated */
-			continue;
-		if (!r->start || pci_claim_bridge_resource(dev, idx) < 0) {
+		if (!r->start || pci_claim_resource(dev, idx) < 0) {
 			/*
 			 * Something is wrong with the region.
 			 * Invalidate the resource to prevent
@@ -275,16 +273,11 @@ static void pcibios_allocate_dev_resources(struct pci_dev *dev, int pass)
 					"BAR %d: reserving %pr (d=%d, p=%d)\n",
 					idx, r, disabled, pass);
 				if (pci_claim_resource(dev, idx) < 0) {
-					if (r->flags & IORESOURCE_PCI_FIXED) {
-						dev_info(&dev->dev, "BAR %d %pR is immovable\n",
-							 idx, r);
-					} else {
-						/* We'll assign a new address later */
-						pcibios_save_fw_addr(dev,
-								idx, r->start);
-						r->end -= r->start;
-						r->start = 0;
-					}
+					/* We'll assign a new address later */
+					pcibios_save_fw_addr(dev,
+							idx, r->start);
+					r->end -= r->start;
+					r->start = 0;
 				}
 			}
 		}
@@ -329,8 +322,6 @@ static void pcibios_allocate_dev_rom_resource(struct pci_dev *dev)
 	r = &dev->resource[PCI_ROM_RESOURCE];
 	if (!r->flags || !r->start)
 		return;
-	if (r->parent) /* Already allocated */
-		return;
 
 	if (pci_claim_resource(dev, PCI_ROM_RESOURCE) < 0) {
 		r->end -= r->start;
@@ -364,12 +355,6 @@ static int __init pcibios_assign_resources(void)
 
 	return 0;
 }
-
-/**
- * called in fs_initcall (one below subsys_initcall),
- * give a chance for motherboard reserve resources
- */
-fs_initcall(pcibios_assign_resources);
 
 void pcibios_resource_survey_bus(struct pci_bus *bus)
 {
@@ -407,6 +392,12 @@ void __init pcibios_resource_survey(void)
 	ioapic_insert_resources();
 }
 
+/**
+ * called in fs_initcall (one below subsys_initcall),
+ * give a chance for motherboard reserve resources
+ */
+fs_initcall(pcibios_assign_resources);
+
 static const struct vm_operations_struct pci_mmap_ops = {
 	.access = generic_access_phys,
 };
@@ -429,18 +420,20 @@ int pci_mmap_page_range(struct pci_dev *dev, struct vm_area_struct *vma,
  	 * Caller can followup with UC MINUS request and add a WC mtrr if there
  	 * is a free mtrr slot.
  	 */
-	if (!pat_enabled() && write_combine)
+	if (!pat_enabled && write_combine)
 		return -EINVAL;
 
-	if (pat_enabled() && write_combine)
-		prot |= cachemode2protval(_PAGE_CACHE_MODE_WC);
-	else if (pat_enabled() || boot_cpu_data.x86 > 3)
+	if (pat_enabled && write_combine)
+		prot |= _PAGE_CACHE_WC;
+	else if (pat_enabled || boot_cpu_data.x86 > 3)
 		/*
 		 * ioremap() and ioremap_nocache() defaults to UC MINUS for now.
 		 * To avoid attribute conflicts, request UC MINUS here
 		 * as well.
 		 */
-		prot |= cachemode2protval(_PAGE_CACHE_MODE_UC_MINUS);
+		prot |= _PAGE_CACHE_UC_MINUS;
+
+	prot |= _PAGE_IOMAP;	/* creating a mapping for IO */
 
 	vma->vm_page_prot = __pgprot(prot);
 

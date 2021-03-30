@@ -12,8 +12,6 @@
 
 #include <linux/const.h>
 
-#include <asm/mipsregs.h>
-
 /*
  * This gives the physical RAM offset.
  */
@@ -27,12 +25,8 @@
 #else
 #define CAC_BASE		_AC(0x80000000, UL)
 #endif
-#ifndef IO_BASE
 #define IO_BASE			_AC(0xa0000000, UL)
-#endif
-#ifndef UNCAC_BASE
 #define UNCAC_BASE		_AC(0xa0000000, UL)
-#endif
 
 #ifndef MAP_BASE
 #ifdef CONFIG_KVM_GUEST
@@ -54,7 +48,11 @@
 #ifdef CONFIG_64BIT
 
 #ifndef CAC_BASE
-#define CAC_BASE	PHYS_TO_XKPHYS(read_c0_config() & CONF_CM_CMASK, 0)
+#ifdef CONFIG_DMA_NONCOHERENT
+#define CAC_BASE		_AC(0x9800000000000000, UL)
+#else
+#define CAC_BASE		_AC(0xa800000000000000, UL)
+#endif
 #endif
 
 #ifndef IO_BASE
@@ -92,11 +90,7 @@
 #endif
 
 #ifndef FIXADDR_TOP
-#ifdef CONFIG_KVM_GUEST
-#define FIXADDR_TOP		((unsigned long)(long)(int)0x7ffe0000)
-#else
 #define FIXADDR_TOP		((unsigned long)(long)(int)0xfffe0000)
-#endif
 #endif
 
 #endif /* __ASM_MACH_GENERIC_SPACES_H */

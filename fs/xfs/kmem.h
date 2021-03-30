@@ -32,7 +32,6 @@ typedef unsigned __bitwise xfs_km_flags_t;
 #define KM_NOSLEEP	((__force xfs_km_flags_t)0x0002u)
 #define KM_NOFS		((__force xfs_km_flags_t)0x0004u)
 #define KM_MAYFAIL	((__force xfs_km_flags_t)0x0008u)
-#define KM_ZERO		((__force xfs_km_flags_t)0x0010u)
 
 /*
  * We use a special process flag to avoid recursive callbacks into
@@ -44,7 +43,7 @@ kmem_flags_convert(xfs_km_flags_t flags)
 {
 	gfp_t	lflags;
 
-	BUG_ON(flags & ~(KM_SLEEP|KM_NOSLEEP|KM_NOFS|KM_MAYFAIL|KM_ZERO));
+	BUG_ON(flags & ~(KM_SLEEP|KM_NOSLEEP|KM_NOFS|KM_MAYFAIL));
 
 	if (flags & KM_NOSLEEP) {
 		lflags = GFP_ATOMIC | __GFP_NOWARN;
@@ -53,27 +52,24 @@ kmem_flags_convert(xfs_km_flags_t flags)
 		if ((current->flags & PF_FSTRANS) || (flags & KM_NOFS))
 			lflags &= ~__GFP_FS;
 	}
-
-	if (flags & KM_ZERO)
-		lflags |= __GFP_ZERO;
-
 	return lflags;
 }
 
 extern void *kmem_alloc(size_t, xfs_km_flags_t);
-extern void *kmem_zalloc_large(size_t size, xfs_km_flags_t);
-extern void *kmem_realloc(const void *, size_t, xfs_km_flags_t);
-static inline void  kmem_free(const void *ptr)
+extern void *kmem_zalloc(size_t, xfs_km_flags_t);
+extern void *kmem_realloc(const void *, size_t, size_t, xfs_km_flags_t);
+extern void  kmem_free(const void *);
+
+static inline void *kmem_zalloc_large(size_t size)
 {
-	kvfree(ptr);
+	return vzalloc(size);
+}
+static inline void kmem_free_large(void *ptr)
+{
+	vfree(ptr);
 }
 
-
-static inline void *
-kmem_zalloc(size_t size, xfs_km_flags_t flags)
-{
-	return kmem_alloc(size, flags | KM_ZERO);
-}
+extern void *kmem_zalloc_greedy(size_t *, size_t, size_t);
 
 /*
  * Zone interfaces
@@ -82,7 +78,6 @@ kmem_zalloc(size_t size, xfs_km_flags_t flags)
 #define KM_ZONE_HWALIGN	SLAB_HWCACHE_ALIGN
 #define KM_ZONE_RECLAIM	SLAB_RECLAIM_ACCOUNT
 #define KM_ZONE_SPREAD	SLAB_MEM_SPREAD
-#define KM_ZONE_ACCOUNT	SLAB_ACCOUNT
 
 #define kmem_zone	kmem_cache
 #define kmem_zone_t	struct kmem_cache
@@ -114,11 +109,6 @@ kmem_zone_destroy(kmem_zone_t *zone)
 }
 
 extern void *kmem_zone_alloc(kmem_zone_t *, xfs_km_flags_t);
-
-static inline void *
-kmem_zone_zalloc(kmem_zone_t *zone, xfs_km_flags_t flags)
-{
-	return kmem_zone_alloc(zone, flags | KM_ZERO);
-}
+extern void *kmem_zone_zalloc(kmem_zone_t *, xfs_km_flags_t);
 
 #endif /* __XFS_SUPPORT_KMEM_H__ */

@@ -22,12 +22,16 @@
  * See the GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with GNU CC; see the file COPYING.  If not, see
- * <http://www.gnu.org/licenses/>.
+ * along with GNU CC; see the file COPYING.  If not, write to
+ * the Free Software Foundation, 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  * Please send any bug reports or fixes you make to the
  * email address(es):
- *    lksctp developers <linux-sctp@vger.kernel.org>
+ *    lksctp developers <lksctp-developers@lists.sourceforge.net>
+ *
+ * Or submit a bug report through the following website:
+ *    http://www.sf.net/projects/lksctp
  *
  * Written or modified by:
  *    La Monte H.P. Yarroll <piggy@acm.org>
@@ -36,9 +40,16 @@
  *    Jon Grimm             <jgrimm@us.ibm.com>
  *    Daisy Chang	    <daisyc@us.ibm.com>
  *    Sridhar Samudrala	    <sri@us.ibm.com>
+ *
+ * Any bugs reported given to us we will try to fix... any fixes shared will
+ * be incorporated into the next SCTP release.
  */
 
 #include <net/sctp/sctp.h>
+
+#if SCTP_DEBUG
+int sctp_debug_flag = 1;	/* Initially enable DEBUG */
+#endif	/* SCTP_DEBUG */
 
 /* These are printable forms of Chunk ID's from section 3.1.  */
 static const char *const sctp_cid_tbl[SCTP_NUM_BASE_CHUNK_TYPES] = {
@@ -166,7 +177,7 @@ static const char *const sctp_timer_tbl[] = {
 /* Lookup timer debug name. */
 const char *sctp_tname(const sctp_subtype_t id)
 {
-	if (id.timeout < ARRAY_SIZE(sctp_timer_tbl))
+	if (id.timeout <= SCTP_EVENT_TIMEOUT_MAX)
 		return sctp_timer_tbl[id.timeout];
 	return "unknown_timer";
 }

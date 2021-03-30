@@ -24,7 +24,7 @@
 #include "mpc10x.h"
 
 
-static const struct of_device_id storcenter_of_bus[] __initconst = {
+static __initdata struct of_device_id storcenter_of_bus[] = {
 	{ .name = "soc", },
 	{},
 };
@@ -96,7 +96,7 @@ static void __init storcenter_init_IRQ(void)
 	mpic_init(mpic);
 }
 
-static void __noreturn storcenter_restart(char *cmd)
+static void storcenter_restart(char *cmd)
 {
 	local_irq_disable();
 
@@ -109,7 +109,9 @@ static void __noreturn storcenter_restart(char *cmd)
 
 static int __init storcenter_probe(void)
 {
-	return of_machine_is_compatible("iomega,storcenter");
+	unsigned long root = of_get_flat_dt_root();
+
+	return of_flat_dt_is_compatible(root, "iomega,storcenter");
 }
 
 define_machine(storcenter){

@@ -12,7 +12,9 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ * along with this program; if not, write to the
+ * Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
 
 #define pr_fmt(fmt) "hci: %s: " fmt, __func__
@@ -122,6 +124,17 @@ out_skb_err:
 	kfree(cmd);
 
 	return err;
+}
+
+u8 nfc_hci_pipe2gate(struct nfc_hci_dev *hdev, u8 pipe)
+{
+	int gate;
+
+	for (gate = 0; gate < NFC_HCI_MAX_GATES; gate++)
+		if (hdev->gate2pipe[gate] == pipe)
+			return gate;
+
+	return 0xff;
 }
 
 /*

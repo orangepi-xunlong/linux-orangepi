@@ -23,7 +23,6 @@
 #include "check.h"
 #include "msdos.h"
 #include "efi.h"
-#include "aix.h"
 
 /*
  * Many architectures don't like unaligned accesses, while
@@ -91,7 +90,7 @@ static int aix_magic_present(struct parsed_partitions *state, unsigned char *p)
 		if (d[0] == '_' && d[1] == 'L' && d[2] == 'V' && d[3] == 'M')
 			ret = 1;
 		put_dev_sector(sect);
-	}
+	};
 	return ret;
 }
 
@@ -143,7 +142,7 @@ static void parse_extended(struct parsed_partitions *state,
 			return;
 
 		if (!msdos_magic_present(data + 510))
-			goto done;
+			goto done; 
 
 		p = (struct partition *) (data + 0x1be);
 
@@ -156,12 +155,11 @@ static void parse_extended(struct parsed_partitions *state,
 		 * and OS/2 seems to use all four entries.
 		 */
 
-		/*
+		/* 
 		 * First process the data partition(s)
 		 */
-		for (i = 0; i < 4; i++, p++) {
+		for (i=0; i<4; i++, p++) {
 			sector_t offs, size, next;
-
 			if (!nr_sects(p) || is_extended_partition(p))
 				continue;
 
@@ -195,7 +193,7 @@ static void parse_extended(struct parsed_partitions *state,
 		 * It should be a link to the next logical partition.
 		 */
 		p -= 4;
-		for (i = 0; i < 4; i++, p++)
+		for (i=0; i<4; i++, p++)
 			if (nr_sects(p) && is_extended_partition(p))
 				break;
 		if (i == 4)
@@ -244,8 +242,8 @@ static void parse_solaris_x86(struct parsed_partitions *state,
 		return;
 	}
 	/* Ensure we can handle previous case of VTOC with 8 entries gracefully */
-	max_nparts = le16_to_cpu(v->v_nparts) > 8 ? SOLARIS_X86_NUMSLICE : 8;
-	for (i = 0; i < max_nparts && state->next < state->limit; i++) {
+	max_nparts = le16_to_cpu (v->v_nparts) > 8 ? SOLARIS_X86_NUMSLICE : 8;
+	for (i=0; i<max_nparts && state->next<state->limit; i++) {
 		struct solaris_x86_slice *s = &v->v_slice[i];
 		char tmp[3 + 10 + 1 + 1];
 
@@ -265,7 +263,7 @@ static void parse_solaris_x86(struct parsed_partitions *state,
 }
 
 #if defined(CONFIG_BSD_DISKLABEL)
-/*
+/* 
  * Create devices for BSD partitions listed in a disklabel, under a
  * dos-like partition. See parse_extended() for more information.
  */
@@ -296,14 +294,10 @@ static void parse_bsd(struct parsed_partitions *state,
 
 		if (state->next == state->limit)
 			break;
-		if (p->p_fstype == BSD_FS_UNUSED)
+		if (p->p_fstype == BSD_FS_UNUSED) 
 			continue;
 		bsd_start = le32_to_cpu(p->p_offset);
 		bsd_size = le32_to_cpu(p->p_size);
-		/* FreeBSD has relative offset if C partition offset is zero */
-		if (memcmp(flavour, "bsd\0", 4) == 0 &&
-		    le32_to_cpu(l->d_partitions[2].p_offset) == 0)
-			bsd_start += offset;
 		if (offset == bsd_start && size == bsd_size)
 			/* full parent partition, we have it already */
 			continue;
@@ -414,7 +408,7 @@ static void parse_minix(struct parsed_partitions *state,
 	/* The first sector of a Minix partition can have either
 	 * a secondary MBR describing its subpartitions, or
 	 * the normal boot sector. */
-	if (msdos_magic_present(data + 510) &&
+	if (msdos_magic_present (data + 510) &&
 	    SYS_IND(p) == MINIX_PARTITION) { /* subpartition table present */
 		char tmp[1 + BDEVNAME_SIZE + 10 + 9 + 1];
 
@@ -447,7 +441,7 @@ static struct {
 	{NEW_SOLARIS_X86_PARTITION, parse_solaris_x86},
 	{0, NULL},
 };
-
+ 
 int msdos_partition(struct parsed_partitions *state)
 {
 	sector_t sector_size = bdev_logical_block_size(state->bdev) / 512;
@@ -468,12 +462,8 @@ int msdos_partition(struct parsed_partitions *state)
 	 */
 	if (aix_magic_present(state, data)) {
 		put_dev_sector(sect);
-#ifdef CONFIG_AIX_PARTITION
-		return aix_partition(state);
-#else
 		strlcat(state->pp_buf, " [AIX]", PAGE_SIZE);
 		return 0;
-#endif
 	}
 
 	if (!msdos_magic_present(data + 510)) {
@@ -532,7 +522,6 @@ int msdos_partition(struct parsed_partitions *state)
 	for (slot = 1 ; slot <= 4 ; slot++, p++) {
 		sector_t start = start_sect(p)*sector_size;
 		sector_t size = nr_sects(p)*sector_size;
-
 		if (!size)
 			continue;
 		if (is_extended_partition(p)) {
@@ -543,7 +532,6 @@ int msdos_partition(struct parsed_partitions *state)
 			 * sector, although it may not be enough/proper.
 			 */
 			sector_t n = 2;
-
 			n = min(size, max(sector_size, n));
 			put_partition(state, slot, start, n);
 

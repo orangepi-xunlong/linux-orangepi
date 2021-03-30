@@ -591,8 +591,7 @@ static inline struct dm1105_dev *frontend_to_dm1105_dev(struct dvb_frontend *fe)
 	return container_of(fe->dvb, struct dm1105_dev, dvb_adapter);
 }
 
-static int dm1105_set_voltage(struct dvb_frontend *fe,
-			      enum fe_sec_voltage voltage)
+static int dm1105_set_voltage(struct dvb_frontend *fe, fe_sec_voltage_t voltage)
 {
 	struct dm1105_dev *dev = frontend_to_dm1105_dev(fe);
 
@@ -615,7 +614,7 @@ static int dm1105_set_voltage(struct dvb_frontend *fe,
 
 static void dm1105_set_dma_addr(struct dm1105_dev *dev)
 {
-	dm_writel(DM1105_STADR, (__force u32)cpu_to_le32(dev->dma_addr));
+	dm_writel(DM1105_STADR, cpu_to_le32(dev->dma_addr));
 }
 
 static int dm1105_dma_map(struct dm1105_dev *dev)
@@ -679,8 +678,7 @@ static void dm1105_emit_key(struct work_struct *work)
 
 	data = (ircom >> 8) & 0x7f;
 
-	/* FIXME: UNKNOWN because we don't generate a full NEC scancode (yet?) */
-	rc_keydown(ir->dev, RC_TYPE_UNKNOWN, data, 0);
+	rc_keydown(ir->dev, data, 0);
 }
 
 /* work handler */
@@ -1180,6 +1178,7 @@ err_pci_release_regions:
 err_pci_disable_device:
 	pci_disable_device(pdev);
 err_kfree:
+	pci_set_drvdata(pdev, NULL);
 	kfree(dev);
 	return ret;
 }
@@ -1203,13 +1202,16 @@ static void dm1105_remove(struct pci_dev *pdev)
 	dvb_dmxdev_release(&dev->dmxdev);
 	dvb_dmx_release(dvbdemux);
 	dvb_unregister_adapter(dvb_adapter);
-	i2c_del_adapter(&dev->i2c_adap);
+	if (&dev->i2c_adap)
+		i2c_del_adapter(&dev->i2c_adap);
 
 	dm1105_hw_exit(dev);
+	synchronize_irq(pdev->irq);
 	free_irq(pdev->irq, dev);
 	pci_iounmap(pdev, dev->io_mem);
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
+	pci_set_drvdata(pdev, NULL);
 	dm1105_devcount--;
 	kfree(dev);
 }
@@ -1239,7 +1241,18 @@ static struct pci_driver dm1105_driver = {
 	.remove = dm1105_remove,
 };
 
-module_pci_driver(dm1105_driver);
+static int __init dm1105_init(void)
+{
+	return pci_register_driver(&dm1105_driver);
+}
+
+static void __exit dm1105_exit(void)
+{
+	pci_unregister_driver(&dm1105_driver);
+}
+
+module_init(dm1105_init);
+module_exit(dm1105_exit);
 
 MODULE_AUTHOR("Igor M. Liplianin <liplianin@me.by>");
 MODULE_DESCRIPTION("SDMC DM1105 DVB driver");

@@ -66,10 +66,9 @@ int atom_debug = 0;
 static int atom_execute_table_locked(struct atom_context *ctx, int index, uint32_t * params);
 int atom_execute_table(struct atom_context *ctx, int index, uint32_t * params);
 
-static uint32_t atom_arg_mask[8] = {
-	0xFFFFFFFF, 0x0000FFFF, 0x00FFFF00, 0xFFFF0000,
-	0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000
-};
+static uint32_t atom_arg_mask[8] =
+    { 0xFFFFFFFF, 0xFFFF, 0xFFFF00, 0xFFFF0000, 0xFF, 0xFF00, 0xFF0000,
+0xFF000000 };
 static int atom_arg_shift[8] = { 0, 0, 8, 16, 0, 8, 16, 24 };
 
 static int atom_dst_to_src[8][4] = {
@@ -1218,7 +1217,7 @@ free:
 	return ret;
 }
 
-int atom_execute_table_scratch_unlocked(struct atom_context *ctx, int index, uint32_t * params)
+int atom_execute_table(struct atom_context *ctx, int index, uint32_t * params)
 {
 	int r;
 
@@ -1236,15 +1235,6 @@ int atom_execute_table_scratch_unlocked(struct atom_context *ctx, int index, uin
 	ctx->divmul[1] = 0;
 	r = atom_execute_table_locked(ctx, index, params);
 	mutex_unlock(&ctx->mutex);
-	return r;
-}
-
-int atom_execute_table(struct atom_context *ctx, int index, uint32_t * params)
-{
-	int r;
-	mutex_lock(&ctx->scratch_mutex);
-	r = atom_execute_table_scratch_unlocked(ctx, index, params);
-	mutex_unlock(&ctx->scratch_mutex);
 	return r;
 }
 

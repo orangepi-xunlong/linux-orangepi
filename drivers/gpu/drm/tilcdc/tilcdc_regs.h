@@ -80,7 +80,6 @@
 #define LCDC_INVERT_PIXEL_CLOCK                  BIT(22)
 #define LCDC_INVERT_HSYNC                        BIT(21)
 #define LCDC_INVERT_VSYNC                        BIT(20)
-#define LCDC_LPP_B10                             BIT(26)
 
 /* LCDC Block */
 #define LCDC_PID_REG                             0x0
@@ -117,20 +116,6 @@ static inline void tilcdc_write(struct drm_device *dev, u32 reg, u32 data)
 {
 	struct tilcdc_drm_private *priv = dev->dev_private;
 	iowrite32(data, priv->mmio + reg);
-}
-
-static inline void tilcdc_write64(struct drm_device *dev, u32 reg, u64 data)
-{
-	struct tilcdc_drm_private *priv = dev->dev_private;
-	volatile void __iomem *addr = priv->mmio + reg;
-
-#if defined(iowrite64) && !defined(iowrite64_is_nonatomic)
-	iowrite64(data, addr);
-#else
-	__iowmb();
-	/* This compiles to strd (=64-bit write) on ARM7 */
-	*(volatile u64 __force *)addr = __cpu_to_le64(data);
-#endif
 }
 
 static inline u32 tilcdc_read(struct drm_device *dev, u32 reg)

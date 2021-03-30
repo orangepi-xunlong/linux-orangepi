@@ -1,5 +1,6 @@
 iscsi_target_mod-y +=		iscsi_target_parameters.o \
 				iscsi_target_seq_pdu_list.o \
+				iscsi_target_tq.o \
 				iscsi_target_auth.o \
 				iscsi_target_datain_values.o \
 				iscsi_target_device.o \
@@ -18,4 +19,3 @@ iscsi_target_mod-y +=		iscsi_target_parameters.o \
 				iscsi_target_transport.o
 
 obj-$(CONFIG_ISCSI_TARGET)	+= iscsi_target_mod.o
-obj-$(CONFIG_ISCSI_TARGET_CXGB4) += cxgbit/

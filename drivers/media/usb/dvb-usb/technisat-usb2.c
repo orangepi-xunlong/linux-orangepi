@@ -60,8 +60,6 @@ struct technisat_usb2_state {
 	u8 power_state;
 
 	u16 last_scan_code;
-
-	u8 buf[64];
 };
 
 /* debug print helpers */
@@ -89,12 +87,8 @@ struct technisat_usb2_state {
 static int technisat_usb2_i2c_access(struct usb_device *udev,
 		u8 device_addr, u8 *tx, u8 txlen, u8 *rx, u8 rxlen)
 {
-	u8 *b;
+	u8 b[64];
 	int ret, actual_length;
-
-	b = kmalloc(64, GFP_KERNEL);
-	if (!b)
-		return -ENOMEM;
 
 	deb_i2c("i2c-access: %02x, tx: ", device_addr);
 	debug_dump(tx, txlen, deb_i2c);
@@ -108,7 +102,7 @@ static int technisat_usb2_i2c_access(struct usb_device *udev,
 	if (rxlen > 62) {
 		err("i2c RX buffer can't exceed 62 bytes (dev 0x%02x)",
 				device_addr);
-		rxlen = 62;
+		txlen = 62;
 	}
 
 	b[0] = I2C_SPEED_100KHZ_BIT;
@@ -127,7 +121,7 @@ static int technisat_usb2_i2c_access(struct usb_device *udev,
 
 	if (ret < 0) {
 		err("i2c-error: out failed %02x = %d", device_addr, ret);
-		goto err;
+		return -ENODEV;
 	}
 
 	ret = usb_bulk_msg(udev,
@@ -135,7 +129,7 @@ static int technisat_usb2_i2c_access(struct usb_device *udev,
 			b, 64, &actual_length, 1000);
 	if (ret < 0) {
 		err("i2c-error: in failed %02x = %d", device_addr, ret);
-		goto err;
+		return -ENODEV;
 	}
 
 	if (b[0] != I2C_STATUS_OK) {
@@ -144,7 +138,7 @@ static int technisat_usb2_i2c_access(struct usb_device *udev,
 		if (!(b[0] == I2C_STATUS_NAK &&
 				device_addr == 0x60
 				/* && device_is_technisat_usb2 */))
-			goto err;
+			return -ENODEV;
 	}
 
 	deb_i2c("status: %d, ", b[0]);
@@ -158,9 +152,7 @@ static int technisat_usb2_i2c_access(struct usb_device *udev,
 
 	deb_i2c("\n");
 
-err:
-	kfree(b);
-	return ret;
+	return 0;
 }
 
 static int technisat_usb2_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg *msg,
@@ -222,29 +214,29 @@ static void technisat_usb2_frontend_reset(struct usb_device *udev)
 
 /* LED control */
 enum technisat_usb2_led_state {
-	TECH_LED_OFF,
-	TECH_LED_BLINK,
-	TECH_LED_ON,
-	TECH_LED_UNDEFINED
+	LED_OFF,
+	LED_BLINK,
+	LED_ON,
+	LED_UNDEFINED
 };
 
-static int technisat_usb2_set_led(struct dvb_usb_device *d, int red,
-				  enum technisat_usb2_led_state st)
+static int technisat_usb2_set_led(struct dvb_usb_device *d, int red, enum technisat_usb2_led_state state)
 {
-	struct technisat_usb2_state *state = d->priv;
-	u8 *led = state->buf;
 	int ret;
 
-	led[0] = red ? SET_RED_LED_VENDOR_REQUEST : SET_GREEN_LED_VENDOR_REQUEST;
+	u8 led[8] = {
+		red ? SET_RED_LED_VENDOR_REQUEST : SET_GREEN_LED_VENDOR_REQUEST,
+		0
+	};
 
-	if (disable_led_control && st != TECH_LED_OFF)
+	if (disable_led_control && state != LED_OFF)
 		return 0;
 
-	switch (st) {
-	case TECH_LED_ON:
+	switch (state) {
+	case LED_ON:
 		led[1] = 0x82;
 		break;
-	case TECH_LED_BLINK:
+	case LED_BLINK:
 		led[1] = 0x82;
 		if (red) {
 			led[2] = 0x02;
@@ -259,7 +251,7 @@ static int technisat_usb2_set_led(struct dvb_usb_device *d, int red,
 		break;
 
 	default:
-	case TECH_LED_OFF:
+	case LED_OFF:
 		led[1] = 0x80;
 		break;
 	}
@@ -271,7 +263,7 @@ static int technisat_usb2_set_led(struct dvb_usb_device *d, int red,
 		red ? SET_RED_LED_VENDOR_REQUEST : SET_GREEN_LED_VENDOR_REQUEST,
 		USB_TYPE_VENDOR | USB_DIR_OUT,
 		0, 0,
-		led, 8, 500);
+		led, sizeof(led), 500);
 
 	mutex_unlock(&d->i2c_mutex);
 	return ret;
@@ -279,11 +271,8 @@ static int technisat_usb2_set_led(struct dvb_usb_device *d, int red,
 
 static int technisat_usb2_set_led_timer(struct dvb_usb_device *d, u8 red, u8 green)
 {
-	struct technisat_usb2_state *state = d->priv;
-	u8 *b = state->buf;
 	int ret;
-
-	b[0] = 0;
+	u8 b = 0;
 
 	if (mutex_lock_interruptible(&d->i2c_mutex) < 0)
 		return -EAGAIN;
@@ -292,7 +281,7 @@ static int technisat_usb2_set_led_timer(struct dvb_usb_device *d, u8 red, u8 gre
 		SET_LED_TIMER_DIVIDER_VENDOR_REQUEST,
 		USB_TYPE_VENDOR | USB_DIR_OUT,
 		(red << 8) | green, 0,
-		b, 1, 500);
+		&b, 1, 500);
 
 	mutex_unlock(&d->i2c_mutex);
 
@@ -321,11 +310,11 @@ static void technisat_usb2_green_led_control(struct work_struct *work)
 				goto schedule;
 
 			if (ber > 1000)
-				technisat_usb2_set_led(state->dev, 0, TECH_LED_BLINK);
+				technisat_usb2_set_led(state->dev, 0, LED_BLINK);
 			else
-				technisat_usb2_set_led(state->dev, 0, TECH_LED_ON);
+				technisat_usb2_set_led(state->dev, 0, LED_ON);
 		} else
-			technisat_usb2_set_led(state->dev, 0, TECH_LED_OFF);
+			technisat_usb2_set_led(state->dev, 0, LED_OFF);
 	}
 
 schedule:
@@ -339,11 +328,7 @@ static int technisat_usb2_identify_state(struct usb_device *udev,
 		struct dvb_usb_device_description **desc, int *cold)
 {
 	int ret;
-	u8 *version;
-
-	version = kmalloc(3, GFP_KERNEL);
-	if (!version)
-		return -ENOMEM;
+	u8 version[3];
 
 	/* first select the interface */
 	if (usb_set_interface(udev, 0, 1) != 0)
@@ -357,7 +342,7 @@ static int technisat_usb2_identify_state(struct usb_device *udev,
 		GET_VERSION_INFO_VENDOR_REQUEST,
 		USB_TYPE_VENDOR | USB_DIR_IN,
 		0, 0,
-		version, 3, 500);
+		version, sizeof(version), 500);
 
 	if (ret < 0)
 		*cold = 1;
@@ -365,8 +350,6 @@ static int technisat_usb2_identify_state(struct usb_device *udev,
 		info("firmware version: %d.%d", version[1], version[2]);
 		*cold = 0;
 	}
-
-	kfree(version);
 
 	return 0;
 }
@@ -382,9 +365,9 @@ static int technisat_usb2_power_ctrl(struct dvb_usb_device *d, int level)
 		return 0;
 
 	/* green led is turned off in any case - will be turned on when tuning */
-	technisat_usb2_set_led(d, 0, TECH_LED_OFF);
+	technisat_usb2_set_led(d, 0, LED_OFF);
 	/* red led is turned on all the time */
-	technisat_usb2_set_led(d, 1, TECH_LED_ON);
+	technisat_usb2_set_led(d, 1, LED_ON);
 	return 0;
 }
 
@@ -466,11 +449,9 @@ static int technisat_usb2_read_mac_address(struct dvb_usb_device *d,
 	return 0;
 }
 
-static struct stv090x_config technisat_usb2_stv090x_config;
-
 /* frontend attach */
 static int technisat_usb2_set_voltage(struct dvb_frontend *fe,
-				      enum fe_sec_voltage voltage)
+		fe_sec_voltage_t voltage)
 {
 	int i;
 	u8 gpio[3] = { 0 }; /* 0 = 2, 1 = 3, 2 = 4 */
@@ -491,8 +472,7 @@ static int technisat_usb2_set_voltage(struct dvb_frontend *fe,
 	}
 
 	for (i = 0; i < 3; i++)
-		if (technisat_usb2_stv090x_config.set_gpio(fe, i+2, 0,
-							   gpio[i], 0) != 0)
+		if (stv090x_set_gpio(fe, i+2, 0, gpio[i], 0) != 0)
 			return -EREMOTEIO;
 	return 0;
 }
@@ -529,7 +509,7 @@ static int technisat_usb2_frontend_attach(struct dvb_usb_adapter *a)
 			&a->dev->i2c_adap, STV090x_DEMODULATOR_0);
 
 	if (a->fe_adap[0].fe) {
-		const struct stv6110x_devctl *ctl;
+		struct stv6110x_devctl *ctl;
 
 		ctl = dvb_attach(stv6110x_attach,
 				a->fe_adap[0].fe,
@@ -611,9 +591,7 @@ static int technisat_usb2_frontend_attach(struct dvb_usb_adapter *a)
 
 static int technisat_usb2_get_ir(struct dvb_usb_device *d)
 {
-	struct technisat_usb2_state *state = d->priv;
-	u8 *buf = state->buf;
-	u8 *b;
+	u8 buf[62], *b;
 	int ret;
 	struct ir_raw_event ev;
 
@@ -639,7 +617,7 @@ static int technisat_usb2_get_ir(struct dvb_usb_device *d)
 			GET_IR_DATA_VENDOR_REQUEST,
 			USB_TYPE_VENDOR | USB_DIR_IN,
 			0x8080, 0,
-			buf, 62, 500);
+			buf, sizeof(buf), 500);
 
 unlock:
 	mutex_unlock(&d->i2c_mutex);
@@ -689,7 +667,7 @@ static int technisat_usb2_rc_query(struct dvb_usb_device *d)
 		return 0;
 
 	if (!disable_led_control)
-		technisat_usb2_set_led(d, 1, TECH_LED_BLINK);
+		technisat_usb2_set_led(d, 1, LED_BLINK);
 
 	return 0;
 }
@@ -726,13 +704,13 @@ static struct dvb_usb_device_properties technisat_usb2_devices = {
 
 			.stream = {
 				.type = USB_ISOC,
-				.count = 4,
+				.count = 8,
 				.endpoint = 0x2,
 				.u = {
 					.isoc = {
 						.framesperurb = 32,
 						.framesize = 2048,
-						.interval = 1,
+						.interval = 3,
 					}
 				}
 			},

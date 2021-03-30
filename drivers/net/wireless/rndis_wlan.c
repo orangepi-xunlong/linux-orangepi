@@ -15,7 +15,8 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  *  Portions of this file are based on NDISwrapper project,
  *  Copyright (C) 2003-2005 Pontus Fuchs, Giridhar Pemmasani
@@ -26,6 +27,7 @@
 // #define	VERBOSE			// more; success messages
 
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/ethtool.h>
@@ -199,13 +201,13 @@ enum ndis_80211_pmkid_cand_list_flag_bits {
 
 struct ndis_80211_auth_request {
 	__le32 length;
-	u8 bssid[ETH_ALEN];
+	u8 bssid[6];
 	u8 padding[2];
 	__le32 flags;
 } __packed;
 
 struct ndis_80211_pmkid_candidate {
-	u8 bssid[ETH_ALEN];
+	u8 bssid[6];
 	u8 padding[2];
 	__le32 flags;
 } __packed;
@@ -248,7 +250,7 @@ struct ndis_80211_conf {
 
 struct ndis_80211_bssid_ex {
 	__le32 length;
-	u8 mac[ETH_ALEN];
+	u8 mac[6];
 	u8 padding[2];
 	struct ndis_80211_ssid ssid;
 	__le32 privacy;
@@ -283,7 +285,7 @@ struct ndis_80211_key {
 	__le32 size;
 	__le32 index;
 	__le32 length;
-	u8 bssid[ETH_ALEN];
+	u8 bssid[6];
 	u8 padding[6];
 	u8 rsc[8];
 	u8 material[32];
@@ -292,7 +294,7 @@ struct ndis_80211_key {
 struct ndis_80211_remove_key {
 	__le32 size;
 	__le32 index;
-	u8 bssid[ETH_ALEN];
+	u8 bssid[6];
 	u8 padding[2];
 } __packed;
 
@@ -310,7 +312,7 @@ struct ndis_80211_assoc_info {
 	struct req_ie {
 		__le16 capa;
 		__le16 listen_interval;
-		u8 cur_ap_address[ETH_ALEN];
+		u8 cur_ap_address[6];
 	} req_ie;
 	__le32 req_ie_length;
 	__le32 offset_req_ies;
@@ -338,7 +340,7 @@ struct ndis_80211_capability {
 } __packed;
 
 struct ndis_80211_bssid_info {
-	u8 bssid[ETH_ALEN];
+	u8 bssid[6];
 	u8 pmkid[16];
 } __packed;
 
@@ -356,9 +358,9 @@ struct ndis_80211_pmkid {
 #define CAP_MODE_80211G		4
 #define CAP_MODE_MASK		7
 
-#define WORK_LINK_UP		0
-#define WORK_LINK_DOWN		1
-#define WORK_SET_MULTICAST_LIST	2
+#define WORK_LINK_UP		(1<<0)
+#define WORK_LINK_DOWN		(1<<1)
+#define WORK_SET_MULTICAST_LIST	(1<<2)
 
 #define RNDIS_WLAN_ALG_NONE	0
 #define RNDIS_WLAN_ALG_WEP	(1<<0)
@@ -517,7 +519,7 @@ static int rndis_set_default_key(struct wiphy *wiphy, struct net_device *netdev,
 				 u8 key_index, bool unicast, bool multicast);
 
 static int rndis_get_station(struct wiphy *wiphy, struct net_device *dev,
-			     const u8 *mac, struct station_info *sinfo);
+					u8 *mac, struct station_info *sinfo);
 
 static int rndis_dump_station(struct wiphy *wiphy, struct net_device *dev,
 			       int idx, u8 *mac, struct station_info *sinfo);
@@ -1037,7 +1039,7 @@ static int get_bssid(struct usbnet *usbdev, u8 bssid[ETH_ALEN])
 			      bssid, &len);
 
 	if (ret != 0)
-		eth_zero_addr(bssid);
+		memset(bssid, 0, ETH_ALEN);
 
 	return ret;
 }
@@ -1236,7 +1238,7 @@ static int set_rts_threshold(struct usbnet *usbdev, u32 rts_threshold)
 
 	netdev_dbg(usbdev->net, "%s(): %i\n", __func__, rts_threshold);
 
-	if (rts_threshold == -1 || rts_threshold > 2347)
+	if (rts_threshold < 0 || rts_threshold > 2347)
 		rts_threshold = 2347;
 
 	tmp = cpu_to_le32(rts_threshold);
@@ -1290,8 +1292,7 @@ static int set_channel(struct usbnet *usbdev, int channel)
 	if (is_associated(usbdev))
 		return 0;
 
-	dsconfig = 1000 *
-		ieee80211_channel_to_frequency(channel, NL80211_BAND_2GHZ);
+	dsconfig = ieee80211_dsss_chan_to_freq(channel) * 1000;
 
 	len = sizeof(config);
 	ret = rndis_query_oid(usbdev,
@@ -1391,7 +1392,7 @@ static int add_wep_key(struct usbnet *usbdev, const u8 *key, int key_len,
 	priv->encr_keys[index].len = key_len;
 	priv->encr_keys[index].cipher = cipher;
 	memcpy(&priv->encr_keys[index].material, key, key_len);
-	eth_broadcast_addr(priv->encr_keys[index].bssid);
+	memset(&priv->encr_keys[index].bssid, 0xff, ETH_ALEN);
 
 	return 0;
 }
@@ -1466,7 +1467,7 @@ static int add_wpa_key(struct usbnet *usbdev, const u8 *key, int key_len,
 	} else {
 		/* group key */
 		if (priv->infra_mode == NDIS_80211_INFRA_ADHOC)
-			eth_broadcast_addr(ndis_key.bssid);
+			memset(ndis_key.bssid, 0xff, ETH_ALEN);
 		else
 			get_bssid(usbdev, ndis_key.bssid);
 	}
@@ -1486,7 +1487,7 @@ static int add_wpa_key(struct usbnet *usbdev, const u8 *key, int key_len,
 	if (flags & NDIS_80211_ADDKEY_PAIRWISE_KEY)
 		memcpy(&priv->encr_keys[index].bssid, ndis_key.bssid, ETH_ALEN);
 	else
-		eth_broadcast_addr(priv->encr_keys[index].bssid);
+		memset(&priv->encr_keys[index].bssid, 0xff, ETH_ALEN);
 
 	if (flags & NDIS_80211_ADDKEY_TRANSMIT_KEY)
 		priv->encr_tx_key_index = index;
@@ -2022,10 +2023,9 @@ static bool rndis_bss_info_update(struct usbnet *usbdev,
 	capability = le16_to_cpu(fixed->capabilities);
 	beacon_interval = le16_to_cpu(fixed->beacon_interval);
 
-	bss = cfg80211_inform_bss(priv->wdev.wiphy, channel,
-				  CFG80211_BSS_FTYPE_UNKNOWN, bssid->mac,
-				  timestamp, capability, beacon_interval,
-				  ie, ie_len, signal, GFP_KERNEL);
+	bss = cfg80211_inform_bss(priv->wdev.wiphy, channel, bssid->mac,
+		timestamp, capability, beacon_interval, ie, ie_len, signal,
+		GFP_KERNEL);
 	cfg80211_put_bss(priv->wdev.wiphy, bss);
 
 	return (bss != NULL);
@@ -2134,7 +2134,6 @@ static void rndis_get_scan_results(struct work_struct *work)
 	struct rndis_wlan_private *priv =
 		container_of(work, struct rndis_wlan_private, scan_work.work);
 	struct usbnet *usbdev = priv->usbdev;
-	struct cfg80211_scan_info info = {};
 	int ret;
 
 	netdev_dbg(usbdev->net, "get_scan_results\n");
@@ -2144,8 +2143,7 @@ static void rndis_get_scan_results(struct work_struct *work)
 
 	ret = rndis_check_bssid_list(usbdev, NULL, NULL);
 
-	info.aborted = ret < 0;
-	cfg80211_scan_done(priv->scan_request, &info);
+	cfg80211_scan_done(priv->scan_request, ret < 0);
 
 	priv->scan_request = NULL;
 }
@@ -2282,7 +2280,7 @@ static int rndis_disconnect(struct wiphy *wiphy, struct net_device *dev,
 	netdev_dbg(usbdev->net, "cfg80211.disconnect(%d)\n", reason_code);
 
 	priv->connected = false;
-	eth_zero_addr(priv->bssid);
+	memset(priv->bssid, 0, ETH_ALEN);
 
 	return deauthenticate(usbdev);
 }
@@ -2394,7 +2392,7 @@ static int rndis_leave_ibss(struct wiphy *wiphy, struct net_device *dev)
 	netdev_dbg(usbdev->net, "cfg80211.leave_ibss()\n");
 
 	priv->connected = false;
-	eth_zero_addr(priv->bssid);
+	memset(priv->bssid, 0, ETH_ALEN);
 
 	return deauthenticate(usbdev);
 }
@@ -2480,7 +2478,7 @@ static void rndis_fill_station_info(struct usbnet *usbdev,
 	ret = rndis_query_oid(usbdev, RNDIS_OID_GEN_LINK_SPEED, &linkspeed, &len);
 	if (ret == 0) {
 		sinfo->txrate.legacy = le32_to_cpu(linkspeed) / 1000;
-		sinfo->filled |= BIT(NL80211_STA_INFO_TX_BITRATE);
+		sinfo->filled |= STATION_INFO_TX_BITRATE;
 	}
 
 	len = sizeof(rssi);
@@ -2488,12 +2486,12 @@ static void rndis_fill_station_info(struct usbnet *usbdev,
 			      &rssi, &len);
 	if (ret == 0) {
 		sinfo->signal = level_to_qual(le32_to_cpu(rssi));
-		sinfo->filled |= BIT(NL80211_STA_INFO_SIGNAL);
+		sinfo->filled |= STATION_INFO_SIGNAL;
 	}
 }
 
 static int rndis_get_station(struct wiphy *wiphy, struct net_device *dev,
-			     const u8 *mac, struct station_info *sinfo)
+					u8 *mac, struct station_info *sinfo)
 {
 	struct rndis_wlan_private *priv = wiphy_priv(wiphy);
 	struct usbnet *usbdev = priv->usbdev;
@@ -2714,10 +2712,9 @@ static void rndis_wlan_craft_connected_bss(struct usbnet *usbdev, u8 *bssid,
 		bssid, (u32)timestamp, capability, beacon_period, ie_len,
 		ssid.essid, signal);
 
-	bss = cfg80211_inform_bss(priv->wdev.wiphy, channel,
-				  CFG80211_BSS_FTYPE_UNKNOWN, bssid,
-				  timestamp, capability, beacon_period,
-				  ie_buf, ie_len, signal, GFP_KERNEL);
+	bss = cfg80211_inform_bss(priv->wdev.wiphy, channel, bssid,
+		timestamp, capability, beacon_period, ie_buf, ie_len,
+		signal, GFP_KERNEL);
 	cfg80211_put_bss(priv->wdev.wiphy, bss);
 }
 
@@ -2840,9 +2837,7 @@ static void rndis_wlan_do_link_up_work(struct usbnet *usbdev)
 					bssid, req_ie, req_ie_len,
 					resp_ie, resp_ie_len, GFP_KERNEL);
 	} else if (priv->infra_mode == NDIS_80211_INFRA_ADHOC)
-		cfg80211_ibss_joined(usbdev->net, bssid,
-				     get_current_channel(usbdev, NULL),
-				     GFP_KERNEL);
+		cfg80211_ibss_joined(usbdev->net, bssid, GFP_KERNEL);
 
 	kfree(info);
 
@@ -2859,11 +2854,11 @@ static void rndis_wlan_do_link_down_work(struct usbnet *usbdev)
 
 	if (priv->connected) {
 		priv->connected = false;
-		eth_zero_addr(priv->bssid);
+		memset(priv->bssid, 0, ETH_ALEN);
 
 		deauthenticate(usbdev);
 
-		cfg80211_disconnected(usbdev->net, 0, NULL, 0, true, GFP_KERNEL);
+		cfg80211_disconnected(usbdev->net, 0, NULL, 0, GFP_KERNEL);
 	}
 
 	netif_carrier_off(usbdev->net);
@@ -2921,8 +2916,6 @@ static void rndis_wlan_auth_indication(struct usbnet *usbdev,
 
 	while (buflen >= sizeof(*auth_req)) {
 		auth_req = (void *)buf;
-		if (buflen < le32_to_cpu(auth_req->length))
-			return;
 		type = "unknown";
 		flags = le32_to_cpu(auth_req->flags);
 		pairwise_error = false;
@@ -3429,10 +3422,6 @@ static int rndis_wlan_bind(struct usbnet *usbdev, struct usb_interface *intf)
 
 	/* because rndis_command() sleeps we need to use workqueue */
 	priv->workqueue = create_singlethread_workqueue("rndis_wlan");
-	if (!priv->workqueue) {
-		wiphy_free(wiphy);
-		return -ENOMEM;
-	}
 	INIT_WORK(&priv->work, rndis_wlan_worker);
 	INIT_DELAYED_WORK(&priv->dev_poller_work, rndis_device_poller);
 	INIT_DELAYED_WORK(&priv->scan_work, rndis_get_scan_results);
@@ -3484,7 +3473,7 @@ static int rndis_wlan_bind(struct usbnet *usbdev, struct usb_interface *intf)
 	priv->band.n_channels = ARRAY_SIZE(rndis_channels);
 	priv->band.bitrates = priv->rates;
 	priv->band.n_bitrates = ARRAY_SIZE(rndis_rates);
-	wiphy->bands[NL80211_BAND_2GHZ] = &priv->band;
+	wiphy->bands[IEEE80211_BAND_2GHZ] = &priv->band;
 	wiphy->signal_type = CFG80211_SIGNAL_TYPE_UNSPEC;
 
 	memcpy(priv->cipher_suites, rndis_cipher_suites,
@@ -3582,11 +3571,7 @@ static int rndis_wlan_stop(struct usbnet *usbdev)
 	flush_workqueue(priv->workqueue);
 
 	if (priv->scan_request) {
-		struct cfg80211_scan_info info = {
-			.aborted = true,
-		};
-
-		cfg80211_scan_done(priv->scan_request, &info);
+		cfg80211_scan_done(priv->scan_request, true);
 		priv->scan_request = NULL;
 	}
 

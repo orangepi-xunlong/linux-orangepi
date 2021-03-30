@@ -141,59 +141,6 @@ static int dasd_ioctl_resume(struct dasd_block *block)
 }
 
 /*
- * Abort all failfast I/O on a device.
- */
-static int dasd_ioctl_abortio(struct dasd_block *block)
-{
-	unsigned long flags;
-	struct dasd_device *base;
-	struct dasd_ccw_req *cqr, *n;
-
-	base = block->base;
-	if (!capable(CAP_SYS_ADMIN))
-		return -EACCES;
-
-	if (test_and_set_bit(DASD_FLAG_ABORTALL, &base->flags))
-		return 0;
-	DBF_DEV_EVENT(DBF_NOTICE, base, "%s", "abortall flag set");
-
-	spin_lock_irqsave(&block->request_queue_lock, flags);
-	spin_lock(&block->queue_lock);
-	list_for_each_entry_safe(cqr, n, &block->ccw_queue, blocklist) {
-		if (test_bit(DASD_CQR_FLAGS_FAILFAST, &cqr->flags) &&
-		    cqr->callback_data &&
-		    cqr->callback_data != DASD_SLEEPON_START_TAG &&
-		    cqr->callback_data != DASD_SLEEPON_END_TAG) {
-			spin_unlock(&block->queue_lock);
-			blk_abort_request(cqr->callback_data);
-			spin_lock(&block->queue_lock);
-		}
-	}
-	spin_unlock(&block->queue_lock);
-	spin_unlock_irqrestore(&block->request_queue_lock, flags);
-
-	dasd_schedule_block_bh(block);
-	return 0;
-}
-
-/*
- * Allow I/O on a device
- */
-static int dasd_ioctl_allowio(struct dasd_block *block)
-{
-	struct dasd_device *base;
-
-	base = block->base;
-	if (!capable(CAP_SYS_ADMIN))
-		return -EACCES;
-
-	if (test_and_clear_bit(DASD_FLAG_ABORTALL, &base->flags))
-		DBF_DEV_EVENT(DBF_NOTICE, base, "%s", "abortall flag unset");
-
-	return 0;
-}
-
-/*
  * performs formatting of _device_ according to _fdata_
  * Note: The discipline's format_function is assumed to deliver formatting
  * commands to format multiple units of the device. In terms of the ECKD
@@ -231,28 +178,11 @@ dasd_format(struct dasd_block *block, struct format_data_t *fdata)
 		bdput(bdev);
 	}
 
-	rc = base->discipline->format_device(base, fdata, 1);
-	if (rc == -EAGAIN)
-		rc = base->discipline->format_device(base, fdata, 0);
+	rc = base->discipline->format_device(base, fdata);
+	if (rc)
+		return rc;
 
-	return rc;
-}
-
-static int dasd_check_format(struct dasd_block *block,
-			     struct format_check_t *cdata)
-{
-	struct dasd_device *base;
-	int rc;
-
-	base = block->base;
-	if (!base->discipline->check_device_format)
-		return -ENOTTY;
-
-	rc = base->discipline->check_device_format(base, cdata, 1);
-	if (rc == -EAGAIN)
-		rc = base->discipline->check_device_format(base, cdata, 0);
-
-	return rc;
+	return 0;
 }
 
 /*
@@ -282,54 +212,14 @@ dasd_ioctl_format(struct block_device *bdev, void __user *argp)
 		return -EFAULT;
 	}
 	if (bdev != bdev->bd_contains) {
-		pr_warn("%s: The specified DASD is a partition and cannot be formatted\n",
-			dev_name(&base->cdev->dev));
+		pr_warning("%s: The specified DASD is a partition and cannot "
+			   "be formatted\n",
+			   dev_name(&base->cdev->dev));
 		dasd_put_device(base);
 		return -EINVAL;
 	}
 	rc = dasd_format(base->block, &fdata);
 	dasd_put_device(base);
-
-	return rc;
-}
-
-/*
- * Check device format
- */
-static int dasd_ioctl_check_format(struct block_device *bdev, void __user *argp)
-{
-	struct format_check_t cdata;
-	struct dasd_device *base;
-	int rc = 0;
-
-	if (!argp)
-		return -EINVAL;
-
-	base = dasd_device_from_gendisk(bdev->bd_disk);
-	if (!base)
-		return -ENODEV;
-	if (bdev != bdev->bd_contains) {
-		pr_warn("%s: The specified DASD is a partition and cannot be checked\n",
-			dev_name(&base->cdev->dev));
-		rc = -EINVAL;
-		goto out_err;
-	}
-
-	if (copy_from_user(&cdata, argp, sizeof(cdata))) {
-		rc = -EFAULT;
-		goto out_err;
-	}
-
-	rc = dasd_check_format(base->block, &cdata);
-	if (rc)
-		goto out_err;
-
-	if (copy_to_user(argp, &cdata, sizeof(cdata)))
-		rc = -EFAULT;
-
-out_err:
-	dasd_put_device(base);
-
 	return rc;
 }
 
@@ -568,17 +458,8 @@ int dasd_ioctl(struct block_device *bdev, fmode_t mode,
 	case BIODASDRESUME:
 		rc = dasd_ioctl_resume(block);
 		break;
-	case BIODASDABORTIO:
-		rc = dasd_ioctl_abortio(block);
-		break;
-	case BIODASDALLOWIO:
-		rc = dasd_ioctl_allowio(block);
-		break;
 	case BIODASDFMT:
 		rc = dasd_ioctl_format(bdev, argp);
-		break;
-	case BIODASDCHECKFMT:
-		rc = dasd_ioctl_check_format(bdev, argp);
 		break;
 	case BIODASDINFO:
 		rc = dasd_ioctl_information(block, cmd, argp);

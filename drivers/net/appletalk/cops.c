@@ -861,7 +861,7 @@ static void cops_timeout(struct net_device *dev)
 	}
 	printk(KERN_WARNING "%s: Transmit timed out.\n", dev->name);
 	cops_jumpstart(dev);	/* Restart the card. */
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	netif_wake_queue(dev);
 }
 
@@ -996,7 +996,7 @@ static int __init cops_module_init(void)
 		printk(KERN_WARNING "%s: You shouldn't autoprobe with insmod\n",
 			cardname);
 	cops_dev = cops_probe(-1);
-	return PTR_ERR_OR_ZERO(cops_dev);
+	return PTR_RET(cops_dev);
 }
 
 static void __exit cops_module_exit(void)

@@ -25,17 +25,14 @@
 #define HWLOCK_IRQSTATE	0x01	/* Disable interrupts, save state */
 #define HWLOCK_IRQ	0x02	/* Disable interrupts, don't save state */
 
-#define SUNXI_MSG_HWSPINLOCK (0)	/* message */
+/* hwspinlock id */
+#define SUNXI_MSG_HWSPINLOCK (0)        /* message */
 
-/* rtc reg */
-#define SUNXI_RTC_HWSPINLOCK (2)
-/* cpuidle */
-#define SUNXI_IDL_HWSPINLCOK (3)
-/* intc */
-#define SUNXI_INTC_HWSPINLOCK (4)
+#define SUNXI_RTC_HWSPINLOCK (2)        /* rtc reg */
+#define SUNXI_IDL_HWSPINLCOK (3)        /* cpuidle */
+#define SUNXI_INTC_HWSPINLOCK (4)       /* intc */
 
 struct device;
-struct device_node;
 struct hwspinlock;
 struct hwspinlock_device;
 struct hwspinlock_ops;
@@ -76,7 +73,6 @@ int hwspin_lock_unregister(struct hwspinlock_device *bank);
 struct hwspinlock *hwspin_lock_request(void);
 struct hwspinlock *hwspin_lock_request_specific(unsigned int id);
 int hwspin_lock_free(struct hwspinlock *hwlock);
-int of_hwspin_lock_get_id(struct device_node *np, int index);
 int hwspin_lock_get_id(struct hwspinlock *hwlock);
 int __hwspin_lock_timeout(struct hwspinlock *, unsigned int, int,
 							unsigned long *);
@@ -129,11 +125,6 @@ int __hwspin_trylock(struct hwspinlock *hwlock, int mode, unsigned long *flags)
 static inline
 void __hwspin_unlock(struct hwspinlock *hwlock, int mode, unsigned long *flags)
 {
-}
-
-static inline int of_hwspin_lock_get_id(struct device_node *np, int index)
-{
-	return 0;
 }
 
 static inline int hwspin_lock_get_id(struct hwspinlock *hwlock)

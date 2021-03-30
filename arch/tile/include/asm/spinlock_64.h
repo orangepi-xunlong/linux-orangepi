@@ -18,8 +18,6 @@
 #ifndef _ASM_TILE_SPINLOCK_64_H
 #define _ASM_TILE_SPINLOCK_64_H
 
-#include <linux/compiler.h>
-
 /* Shifts and masks for the various fields in "lock". */
 #define __ARCH_SPIN_CURRENT_SHIFT	17
 #define __ARCH_SPIN_NEXT_MASK		0x7fff
@@ -29,7 +27,7 @@
  * Return the "current" portion of a ticket lock value,
  * i.e. the number that currently owns the lock.
  */
-static inline u32 arch_spin_current(u32 val)
+static inline int arch_spin_current(u32 val)
 {
 	return val >> __ARCH_SPIN_CURRENT_SHIFT;
 }
@@ -38,7 +36,7 @@ static inline u32 arch_spin_current(u32 val)
  * Return the "next" portion of a ticket lock value,
  * i.e. the number that the next task to try to acquire the lock will get.
  */
-static inline u32 arch_spin_next(u32 val)
+static inline int arch_spin_next(u32 val)
 {
 	return val & __ARCH_SPIN_NEXT_MASK;
 }
@@ -46,8 +44,7 @@ static inline u32 arch_spin_next(u32 val)
 /* The lock is locked if a task would have to wait to get it. */
 static inline int arch_spin_is_locked(arch_spinlock_t *lock)
 {
-	/* Use READ_ONCE() to ensure that calling this in a loop is OK. */
-	u32 val = READ_ONCE(lock->lock);
+	u32 val = lock->lock;
 	return arch_spin_current(val) != arch_spin_next(val);
 }
 

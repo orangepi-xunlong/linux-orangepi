@@ -14,9 +14,11 @@
 #include <linux/err.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/mc146818rtc.h>
+#include <asm-generic/rtc.h>
 
 #include "internal.h"
+
+#define PREFIX "ACPI: "
 
 ACPI_MODULE_NAME("cmos rtc");
 
@@ -33,7 +35,7 @@ acpi_cmos_rtc_space_handler(u32 function, acpi_physical_address address,
 		      void *handler_context, void *region_context)
 {
 	int i;
-	u8 *value = (u8 *)value64;
+	u8 *value = (u8 *)&value64;
 
 	if (address > 0xff || !value64)
 		return AE_BAD_PARAMETER;
@@ -68,7 +70,7 @@ static int acpi_install_cmos_rtc_space_handler(struct acpi_device *adev,
 		return -ENODEV;
 	}
 
-	return 1;
+	return 0;
 }
 
 static void acpi_remove_cmos_rtc_space_handler(struct acpi_device *adev)

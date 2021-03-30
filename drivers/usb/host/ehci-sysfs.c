@@ -29,7 +29,7 @@ static ssize_t show_companion(struct device *dev,
 	int			count = PAGE_SIZE;
 	char			*ptr = buf;
 
-	ehci = hcd_to_ehci(dev_get_drvdata(dev));
+	ehci = hcd_to_ehci(bus_to_hcd(dev_get_drvdata(dev)));
 	nports = HCS_N_PORTS(ehci->hcs_params);
 
 	for (index = 0; index < nports; ++index) {
@@ -54,7 +54,7 @@ static ssize_t store_companion(struct device *dev,
 	struct ehci_hcd		*ehci;
 	int			portnum, new_owner;
 
-	ehci = hcd_to_ehci(dev_get_drvdata(dev));
+	ehci = hcd_to_ehci(bus_to_hcd(dev_get_drvdata(dev)));
 	new_owner = PORT_OWNER;		/* Owned by companion */
 	if (sscanf(buf, "%d", &portnum) != 1)
 		return -EINVAL;
@@ -85,7 +85,7 @@ static ssize_t show_uframe_periodic_max(struct device *dev,
 	struct ehci_hcd		*ehci;
 	int			n;
 
-	ehci = hcd_to_ehci(dev_get_drvdata(dev));
+	ehci = hcd_to_ehci(bus_to_hcd(dev_get_drvdata(dev)));
 	n = scnprintf(buf, PAGE_SIZE, "%d\n", ehci->uframe_periodic_max);
 	return n;
 }
@@ -97,11 +97,12 @@ static ssize_t store_uframe_periodic_max(struct device *dev,
 {
 	struct ehci_hcd		*ehci;
 	unsigned		uframe_periodic_max;
-	unsigned		uframe;
+	unsigned		frame, uframe;
+	unsigned short		allocated_max;
 	unsigned long		flags;
 	ssize_t			ret;
 
-	ehci = hcd_to_ehci(dev_get_drvdata(dev));
+	ehci = hcd_to_ehci(bus_to_hcd(dev_get_drvdata(dev)));
 	if (kstrtouint(buf, 0, &uframe_periodic_max) < 0)
 		return -EINVAL;
 
@@ -121,18 +122,20 @@ static ssize_t store_uframe_periodic_max(struct device *dev,
 
 	/*
 	 * for request to decrease max periodic bandwidth, we have to check
-	 * to see whether the decrease is possible.
+	 * every microframe in the schedule to see whether the decrease is
+	 * possible.
 	 */
 	if (uframe_periodic_max < ehci->uframe_periodic_max) {
-		u8		allocated_max = 0;
+		allocated_max = 0;
 
-		for (uframe = 0; uframe < EHCI_BANDWIDTH_SIZE; ++uframe)
-			allocated_max = max(allocated_max,
-					ehci->bandwidth[uframe]);
+		for (frame = 0; frame < ehci->periodic_size; ++frame)
+			for (uframe = 0; uframe < 7; ++uframe)
+				allocated_max = max(allocated_max,
+						    periodic_usecs (ehci, frame, uframe));
 
 		if (allocated_max > uframe_periodic_max) {
 			ehci_info(ehci,
-				"cannot decrease uframe_periodic_max because "
+				"cannot decrease uframe_periodic_max becase "
 				"periodic bandwidth is already allocated "
 				"(%u > %u)\n",
 				allocated_max, uframe_periodic_max);

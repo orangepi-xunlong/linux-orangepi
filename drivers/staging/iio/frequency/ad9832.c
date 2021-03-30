@@ -24,14 +24,14 @@
 
 static unsigned long ad9832_calc_freqreg(unsigned long mclk, unsigned long fout)
 {
-	unsigned long long freqreg = (u64)fout *
-				     (u64)((u64)1L << AD9832_FREQ_BITS);
+	unsigned long long freqreg = (u64) fout *
+				     (u64) ((u64) 1L << AD9832_FREQ_BITS);
 	do_div(freqreg, mclk);
 	return freqreg;
 }
 
 static int ad9832_write_frequency(struct ad9832_state *st,
-				  unsigned int addr, unsigned long fout)
+				  unsigned addr, unsigned long fout)
 {
 	unsigned long regval;
 
@@ -57,9 +57,9 @@ static int ad9832_write_frequency(struct ad9832_state *st,
 }
 
 static int ad9832_write_phase(struct ad9832_state *st,
-			      unsigned long addr, unsigned long phase)
+				  unsigned long addr, unsigned long phase)
 {
-	if (phase > BIT(AD9832_PHASE_BITS))
+	if (phase > (1 << AD9832_PHASE_BITS))
 		return -EINVAL;
 
 	st->phase_data[0] = cpu_to_be16((AD9832_CMD_PHA8BITSW << CMD_SHIFT) |
@@ -72,21 +72,23 @@ static int ad9832_write_phase(struct ad9832_state *st,
 	return spi_sync(st->spi, &st->phase_msg);
 }
 
-static ssize_t ad9832_write(struct device *dev, struct device_attribute *attr,
-			    const char *buf, size_t len)
+static ssize_t ad9832_write(struct device *dev,
+		struct device_attribute *attr,
+		const char *buf,
+		size_t len)
 {
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
 	struct ad9832_state *st = iio_priv(indio_dev);
 	struct iio_dev_attr *this_attr = to_iio_dev_attr(attr);
 	int ret;
-	unsigned long val;
+	long val;
 
-	ret = kstrtoul(buf, 10, &val);
+	ret = strict_strtoul(buf, 10, &val);
 	if (ret)
 		goto error_ret;
 
 	mutex_lock(&indio_dev->mlock);
-	switch ((u32)this_attr->address) {
+	switch ((u32) this_attr->address) {
 	case AD9832_FREQ0HM:
 	case AD9832_FREQ1HM:
 		ret = ad9832_write_frequency(st, this_attr->address, val);
@@ -107,11 +109,11 @@ static ssize_t ad9832_write(struct device *dev, struct device_attribute *attr,
 		ret = spi_sync(st->spi, &st->msg);
 		break;
 	case AD9832_FREQ_SYM:
-		if (val == 1) {
+		if (val == 1)
 			st->ctrl_fp |= AD9832_FREQ;
-		} else if (val == 0) {
+		else if (val == 0)
 			st->ctrl_fp &= ~AD9832_FREQ;
-		} else {
+		else {
 			ret = -EINVAL;
 			break;
 		}
@@ -120,7 +122,7 @@ static ssize_t ad9832_write(struct device *dev, struct device_attribute *attr,
 		ret = spi_sync(st->spi, &st->msg);
 		break;
 	case AD9832_PHASE_SYM:
-		if (val > 3) {
+		if (val < 0 || val > 3) {
 			ret = -EINVAL;
 			break;
 		}
@@ -201,7 +203,7 @@ static const struct iio_info ad9832_info = {
 
 static int ad9832_probe(struct spi_device *spi)
 {
-	struct ad9832_platform_data *pdata = dev_get_platdata(&spi->dev);
+	struct ad9832_platform_data *pdata = spi->dev.platform_data;
 	struct iio_dev *indio_dev;
 	struct ad9832_state *st;
 	struct regulator *reg;
@@ -212,15 +214,15 @@ static int ad9832_probe(struct spi_device *spi)
 		return -ENODEV;
 	}
 
-	reg = devm_regulator_get(&spi->dev, "vcc");
+	reg = regulator_get(&spi->dev, "vcc");
 	if (!IS_ERR(reg)) {
 		ret = regulator_enable(reg);
 		if (ret)
-			return ret;
+			goto error_put_reg;
 	}
 
-	indio_dev = devm_iio_device_alloc(&spi->dev, sizeof(*st));
-	if (!indio_dev) {
+	indio_dev = iio_device_alloc(sizeof(*st));
+	if (indio_dev == NULL) {
 		ret = -ENOMEM;
 		goto error_disable_reg;
 	}
@@ -277,42 +279,47 @@ static int ad9832_probe(struct spi_device *spi)
 	ret = spi_sync(st->spi, &st->msg);
 	if (ret) {
 		dev_err(&spi->dev, "device init failed\n");
-		goto error_disable_reg;
+		goto error_free_device;
 	}
 
 	ret = ad9832_write_frequency(st, AD9832_FREQ0HM, pdata->freq0);
 	if (ret)
-		goto error_disable_reg;
+		goto error_free_device;
 
 	ret = ad9832_write_frequency(st, AD9832_FREQ1HM, pdata->freq1);
 	if (ret)
-		goto error_disable_reg;
+		goto error_free_device;
 
 	ret = ad9832_write_phase(st, AD9832_PHASE0H, pdata->phase0);
 	if (ret)
-		goto error_disable_reg;
+		goto error_free_device;
 
 	ret = ad9832_write_phase(st, AD9832_PHASE1H, pdata->phase1);
 	if (ret)
-		goto error_disable_reg;
+		goto error_free_device;
 
 	ret = ad9832_write_phase(st, AD9832_PHASE2H, pdata->phase2);
 	if (ret)
-		goto error_disable_reg;
+		goto error_free_device;
 
 	ret = ad9832_write_phase(st, AD9832_PHASE3H, pdata->phase3);
 	if (ret)
-		goto error_disable_reg;
+		goto error_free_device;
 
 	ret = iio_device_register(indio_dev);
 	if (ret)
-		goto error_disable_reg;
+		goto error_free_device;
 
 	return 0;
 
+error_free_device:
+	iio_device_free(indio_dev);
 error_disable_reg:
 	if (!IS_ERR(reg))
 		regulator_disable(reg);
+error_put_reg:
+	if (!IS_ERR(reg))
+		regulator_put(reg);
 
 	return ret;
 }
@@ -323,8 +330,11 @@ static int ad9832_remove(struct spi_device *spi)
 	struct ad9832_state *st = iio_priv(indio_dev);
 
 	iio_device_unregister(indio_dev);
-	if (!IS_ERR(st->reg))
+	if (!IS_ERR(st->reg)) {
 		regulator_disable(st->reg);
+		regulator_put(st->reg);
+	}
+	iio_device_free(indio_dev);
 
 	return 0;
 }
@@ -339,6 +349,7 @@ MODULE_DEVICE_TABLE(spi, ad9832_id);
 static struct spi_driver ad9832_driver = {
 	.driver = {
 		.name	= "ad9832",
+		.owner	= THIS_MODULE,
 	},
 	.probe		= ad9832_probe,
 	.remove		= ad9832_remove,
