@@ -27,19 +27,7 @@ endif
 ##############################################################
 ##############     Set WINDOW_SYSTEM_TYPE      ###############
 ##############################################################
-ifeq ($(LICHEE_PLATFORM), android)
-WINDOW_SYSTEM_TYPE = android
-else ifeq ($(LICHEE_PLATFORM), secureandroid)
-WINDOW_SYSTEM_TYPE = android
-else ifeq ($(LICHEE_PLATFORM), camdroid)
-WINDOW_SYSTEM_TYPE = android
-else ifeq ($(LICHEE_PLATFORM), linux)
 WINDOW_SYSTEM_TYPE = linux
-else ifeq ($(LICHEE_PLATFORM), dragonboard)
-WINDOW_SYSTEM_TYPE = linux
-else
-$(error LICHEE_PLATFORM is invalid)
-endif
 
 ##############################################################
 ##################     Set GPU_TYPE         ##################

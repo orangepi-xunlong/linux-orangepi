@@ -194,6 +194,10 @@ if grep -q '^CONFIG_MODULES=y' $KCONFIG_CONFIG ; then
 	INSTALL_MOD_PATH="$tmpdir" $MAKE KBUILD_SRC= modules_install
 	rm -f "$tmpdir/lib/modules/$version/build"
 	rm -f "$tmpdir/lib/modules/$version/source"
+	if [[ -d ../../.tmp/gpu_modules_sun50iw9 ]]; then
+		mkdir -p $tmpdir/lib/modules/$version/kernel/gpu
+		cp ../../.tmp/gpu_modules_sun50iw9/*.ko $tmpdir/lib/modules/$version/kernel/gpu
+	fi
 	if [ "$ARCH" = "um" ] ; then
 		mv "$tmpdir/lib/modules/$version"/* "$tmpdir/usr/lib/uml/modules/$version/"
 		rmdir "$tmpdir/lib/modules/$version"
