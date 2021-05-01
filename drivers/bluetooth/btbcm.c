@@ -135,7 +135,7 @@ int btbcm_check_bdaddr(struct hci_dev *hdev)
 		if (btbcm_set_bdaddr_from_efi(hdev) != 0) {
 			bt_dev_info(hdev, "BCM: Using default device address (%pMR)",
 				    &bda->bdaddr);
-			hci_set_quirk(hdev, HCI_QUIRK_INVALID_BDADDR);
+			//hci_set_quirk(hdev, HCI_QUIRK_INVALID_BDADDR);
 		}
 	}
 
