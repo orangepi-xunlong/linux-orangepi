@@ -1,16 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2015 Vladimir Zapolskiy <vz@mleia.com>
- *
- * The code contained herein is licensed under the GNU General Public
- * License. You may obtain a copy of the GNU General Public License
- * Version 2 or later at the following locations:
- *
- * http://www.opensource.org/licenses/gpl-license.html
- * http://www.gnu.org/copyleft/gpl.html
  */
 
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
+#include <linux/io.h>
 #include <linux/of_address.h>
 #include <linux/regmap.h>
 
@@ -67,6 +62,7 @@
 #define LPC32XX_USB_CLK_STS		0xF8
 
 static struct regmap_config lpc32xx_scb_regmap_config = {
+	.name = "scb",
 	.reg_bits = 32,
 	.val_bits = 32,
 	.reg_stride = 4,
@@ -526,7 +522,7 @@ static unsigned long clk_pll_recalc_rate(struct clk_hw *hw,
 	    !(pll_is_valid(parent_rate, 1, 1000000, 20000000)
 	      && pll_is_valid(cco_rate, 1, 156000000, 320000000)
 	      && pll_is_valid(ref_rate, 1, 1000000, 27000000)))
-		pr_err("%s: PLL clocks are not in valid ranges: %lu/%lu/%lu",
+		pr_err("%s: PLL clocks are not in valid ranges: %lu/%lu/%lu\n",
 		       clk_hw_get_name(hw),
 		       parent_rate, cco_rate, ref_rate);
 
@@ -885,7 +881,7 @@ static const struct clk_ops clk_usb_i2c_ops = {
 	.recalc_rate = clk_usb_i2c_recalc_rate,
 };
 
-static int clk_gate_enable(struct clk_hw *hw)
+static int lpc32xx_clk_gate_enable(struct clk_hw *hw)
 {
 	struct lpc32xx_clk_gate *clk = to_lpc32xx_gate(hw);
 	u32 mask = BIT(clk->bit_idx);
@@ -894,7 +890,7 @@ static int clk_gate_enable(struct clk_hw *hw)
 	return regmap_update_bits(clk_regmap, clk->reg, mask, val);
 }
 
-static void clk_gate_disable(struct clk_hw *hw)
+static void lpc32xx_clk_gate_disable(struct clk_hw *hw)
 {
 	struct lpc32xx_clk_gate *clk = to_lpc32xx_gate(hw);
 	u32 mask = BIT(clk->bit_idx);
@@ -903,7 +899,7 @@ static void clk_gate_disable(struct clk_hw *hw)
 	regmap_update_bits(clk_regmap, clk->reg, mask, val);
 }
 
-static int clk_gate_is_enabled(struct clk_hw *hw)
+static int lpc32xx_clk_gate_is_enabled(struct clk_hw *hw)
 {
 	struct lpc32xx_clk_gate *clk = to_lpc32xx_gate(hw);
 	u32 val;
@@ -916,9 +912,9 @@ static int clk_gate_is_enabled(struct clk_hw *hw)
 }
 
 static const struct clk_ops lpc32xx_clk_gate_ops = {
-	.enable = clk_gate_enable,
-	.disable = clk_gate_disable,
-	.is_enabled = clk_gate_is_enabled,
+	.enable = lpc32xx_clk_gate_enable,
+	.disable = lpc32xx_clk_gate_disable,
+	.is_enabled = lpc32xx_clk_gate_is_enabled,
 };
 
 #define div_mask(width)	((1 << (width)) - 1)
@@ -956,7 +952,7 @@ static unsigned long clk_divider_recalc_rate(struct clk_hw *hw,
 	val &= div_mask(divider->width);
 
 	return divider_recalc_rate(hw, parent_rate, val, divider->table,
-				   divider->flags);
+				   divider->flags, divider->width);
 }
 
 static long clk_divider_round_rate(struct clk_hw *hw, unsigned long rate,
@@ -1084,13 +1080,12 @@ struct clk_hw_proto {
 	};
 };
 
-#define LPC32XX_DEFINE_FIXED(_idx, _rate, _flags)			\
+#define LPC32XX_DEFINE_FIXED(_idx, _rate)			\
 [CLK_PREFIX(_idx)] = {							\
 	.type = CLK_FIXED,						\
 	{								\
 		.f = {							\
 			.fixed_rate = (_rate),				\
-			.flags = (_flags),				\
 		},							\
 	},								\
 }
@@ -1224,7 +1219,7 @@ struct clk_hw_proto {
 }
 
 static struct clk_hw_proto clk_hw_proto[LPC32XX_CLK_HW_MAX] = {
-	LPC32XX_DEFINE_FIXED(RTC, 32768, 0),
+	LPC32XX_DEFINE_FIXED(RTC, 32768),
 	LPC32XX_DEFINE_PLL(PLL397X, pll_397x, HCLKPLL_CTRL, BIT(1)),
 	LPC32XX_DEFINE_PLL(HCLK_PLL, hclk_pll, HCLKPLL_CTRL, PLL_CTRL_ENABLE),
 	LPC32XX_DEFINE_PLL(USB_PLL, usb_pll, USB_CTRL, PLL_CTRL_ENABLE),
@@ -1467,7 +1462,7 @@ static struct clk * __init lpc32xx_clk_register(u32 id)
 		struct clk_fixed_rate *fixed = &clk_hw->f;
 
 		clk = clk_register_fixed_rate(NULL, lpc32xx_clk->name,
-			parents[0], fixed->flags, fixed->fixed_rate);
+			parents[0], 0, fixed->fixed_rate);
 		break;
 	}
 	default:
@@ -1505,7 +1500,7 @@ static void __init lpc32xx_clk_init(struct device_node *np)
 		return;
 	}
 	if (clk_get_rate(clk_32k) != 32768) {
-		pr_err("invalid clock rate of external 32KHz oscillator");
+		pr_err("invalid clock rate of external 32KHz oscillator\n");
 		return;
 	}
 

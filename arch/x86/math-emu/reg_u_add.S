@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 	.file	"reg_u_add.S"
 /*---------------------------------------------------------------------------+
  |  reg_u_add.S                                                              |
@@ -31,7 +32,7 @@
 #include "control_w.h"
 
 .text
-ENTRY(FPU_u_add)
+SYM_FUNC_START(FPU_u_add)
 	pushl	%ebp
 	movl	%esp,%ebp
 	pushl	%esi
@@ -165,3 +166,4 @@ L_exit:
 	leave
 	ret
 #endif /* PARANOID */
+SYM_FUNC_END(FPU_u_add)

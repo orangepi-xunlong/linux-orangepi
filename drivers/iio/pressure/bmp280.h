@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/bitops.h>
 #include <linux/device.h>
 #include <linux/regmap.h>
@@ -96,6 +97,11 @@
 #define BME280_CHIP_ID			0x60
 #define BMP280_SOFT_RESET_VAL		0xB6
 
+/* BMP280 register skipped special values */
+#define BMP280_TEMP_SKIPPED		0x80000
+#define BMP280_PRESS_SKIPPED		0x80000
+#define BMP280_HUMIDITY_SKIPPED		0x8000
+
 /* Regmap configurations */
 extern const struct regmap_config bmp180_regmap_config;
 extern const struct regmap_config bmp280_regmap_config;
@@ -106,7 +112,6 @@ int bmp280_common_probe(struct device *dev,
 			unsigned int chip,
 			const char *name,
 			int irq);
-int bmp280_common_remove(struct device *dev);
 
 /* PM ops */
 extern const struct dev_pm_ops bmp280_dev_pm_ops;

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Interface the generic pinconfig portions of the pinctrl subsystem
  *
@@ -6,17 +7,15 @@
  * This interface is used in the core to keep track of pins.
  *
  * Author: Linus Walleij <linus.walleij@linaro.org>
- *
- * License terms: GNU General Public License (GPL) version 2
  */
 #ifndef __LINUX_PINCTRL_PINCONF_GENERIC_H
 #define __LINUX_PINCTRL_PINCONF_GENERIC_H
 
-/*
- * You shouldn't even be able to compile with these enums etc unless you're
- * using generic pin config. That is why this is defined out.
- */
-#ifdef CONFIG_GENERIC_PINCONF
+#include <linux/device.h>
+#include <linux/pinctrl/machine.h>
+
+struct pinctrl_dev;
+struct pinctrl_map;
 
 /**
  * enum pin_config_param - possible pin configuration parameters
@@ -61,6 +60,8 @@
  *	push-pull mode, the argument is ignored.
  * @PIN_CONFIG_DRIVE_STRENGTH: the pin will sink or source at most the current
  *	passed as argument. The argument is in mA.
+ * @PIN_CONFIG_DRIVE_STRENGTH_UA: the pin will sink or source at most the current
+ *	passed as argument. The argument is in uA.
  * @PIN_CONFIG_INPUT_DEBOUNCE: this will configure the pin to debounce mode,
  *	which means it will wait for signals to settle when reading inputs. The
  *	argument gives the debounce time in usecs. Setting the
@@ -79,21 +80,28 @@
  *	operation, if several modes of operation are supported these can be
  *	passed in the argument on a custom form, else just use argument 1
  *	to indicate low power mode, argument 0 turns low power mode off.
- * @PIN_CONFIG_OUTPUT: this will configure the pin as an output. Use argument
- *	1 to indicate high level, argument 0 to indicate low level. (Please
- *	see Documentation/pinctrl.txt, section "GPIO mode pitfalls" for a
- *	discussion around this parameter.)
+ * @PIN_CONFIG_OUTPUT_ENABLE: this will enable the pin's output mode
+ * 	without driving a value there. For most platforms this reduces to
+ * 	enable the output buffers and then let the pin controller current
+ * 	configuration (eg. the currently selected mux function) drive values on
+ * 	the line. Use argument 1 to enable output mode, argument 0 to disable
+ * 	it.
+ * @PIN_CONFIG_OUTPUT: this will configure the pin as an output and drive a
+ * 	value on the line. Use argument 1 to indicate high level, argument 0 to
+ *	indicate low level. (Please see Documentation/driver-api/pinctl.rst,
+ *	section "GPIO mode pitfalls" for a discussion around this parameter.)
  * @PIN_CONFIG_POWER_SOURCE: if the pin can select between different power
  *	supplies, the argument to this parameter (on a custom format) tells
  *	the driver which alternative power source to use.
+ * @PIN_CONFIG_SLEEP_HARDWARE_STATE: indicate this is sleep related state.
  * @PIN_CONFIG_SLEW_RATE: if the pin can select slew rate, the argument to
  *	this parameter (on a custom format) tells the driver which alternative
  *	slew rate to use.
-*  @SUNXI_PINCFG_TYPE_***:possible pin configuration types supported
- * @SUNXI_PINCFG_TYPE_FUNC: Function configuration.
- * @SUNXI_PINCFG_TYPE_DAT : Pin value configuration.
- * @SUNXI_PINCFG_TYPE_PUD : Pull up/down configuration.
- * @SUNXI_PINCFG_TYPE_DRV : Drive strength configuration.
+ * @PIN_CONFIG_SKEW_DELAY: if the pin has programmable skew rate (on inputs)
+ *	or latch delay (on outputs) this parameter (in a custom format)
+ *	specifies the clock skew or latch delay. It typically controls how
+ *	many double inverters are put in front of the line.
+ * @PIN_CONFIG_PERSIST_STATE: retain pin state across sleep or controller reset
  * @PIN_CONFIG_END: this is the last enumerator for pin configurations, if
  *	you need to pass in custom configurations to the pin controller, use
  *	PIN_CONFIG_END+1 as the base offset.
@@ -111,33 +119,22 @@ enum pin_config_param {
 	PIN_CONFIG_DRIVE_OPEN_SOURCE,
 	PIN_CONFIG_DRIVE_PUSH_PULL,
 	PIN_CONFIG_DRIVE_STRENGTH,
+	PIN_CONFIG_DRIVE_STRENGTH_UA,
 	PIN_CONFIG_INPUT_DEBOUNCE,
 	PIN_CONFIG_INPUT_ENABLE,
 	PIN_CONFIG_INPUT_SCHMITT,
 	PIN_CONFIG_INPUT_SCHMITT_ENABLE,
 	PIN_CONFIG_LOW_POWER_MODE,
+	PIN_CONFIG_OUTPUT_ENABLE,
 	PIN_CONFIG_OUTPUT,
 	PIN_CONFIG_POWER_SOURCE,
+	PIN_CONFIG_SLEEP_HARDWARE_STATE,
 	PIN_CONFIG_SLEW_RATE,
-	SUNXI_PINCFG_TYPE_FUNC,
-	SUNXI_PINCFG_TYPE_DAT,
-	SUNXI_PINCFG_TYPE_PUD,
-	SUNXI_PINCFG_TYPE_DRV,
+	PIN_CONFIG_SKEW_DELAY,
+	PIN_CONFIG_PERSIST_STATE,
 	PIN_CONFIG_END = 0x7F,
 	PIN_CONFIG_MAX = 0xFF,
 };
-
-#ifdef CONFIG_DEBUG_FS
-#define PCONFDUMP(a, b, c, d) { .param = a, .display = b, .format = c, \
-				.has_arg = d }
-
-struct pin_config_item {
-	const enum pin_config_param param;
-	const char * const display;
-	const char * const format;
-	bool has_arg;
-};
-#endif /* CONFIG_DEBUG_FS */
 
 /*
  * Helpful configuration macro to be used in tables etc.
@@ -167,12 +164,16 @@ static inline unsigned long pinconf_to_config_packed(enum pin_config_param param
 	return PIN_CONF_PACKED(param, argument);
 }
 
-#ifdef CONFIG_OF
+#define PCONFDUMP(a, b, c, d) {					\
+	.param = a, .display = b, .format = c, .has_arg = d	\
+	}
 
-#include <linux/device.h>
-#include <linux/pinctrl/machine.h>
-struct pinctrl_dev;
-struct pinctrl_map;
+struct pin_config_item {
+	const enum pin_config_param param;
+	const char * const display;
+	const char * const format;
+	bool has_arg;
+};
 
 struct pinconf_generic_params {
 	const char * const property;
@@ -217,8 +218,5 @@ static inline int pinconf_generic_dt_node_to_map_all(
 	return pinconf_generic_dt_node_to_map(pctldev, np_config, map, num_maps,
 			PIN_MAP_TYPE_INVALID);
 }
-#endif
-
-#endif /* CONFIG_GENERIC_PINCONF */
 
 #endif /* __LINUX_PINCTRL_PINCONF_GENERIC_H */

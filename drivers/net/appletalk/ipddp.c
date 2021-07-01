@@ -33,7 +33,7 @@
 #include <linux/if_arp.h>
 #include <linux/slab.h>
 #include <net/route.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include "ipddp.h"		/* Our stuff */
 
@@ -59,7 +59,6 @@ static int ipddp_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd);
 static const struct net_device_ops ipddp_netdev_ops = {
 	.ndo_start_xmit		= ipddp_xmit,
 	.ndo_do_ioctl   	= ipddp_ioctl,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -117,10 +116,14 @@ static struct net_device * __init ipddp_init(void)
  */
 static netdev_tx_t ipddp_xmit(struct sk_buff *skb, struct net_device *dev)
 {
-	__be32 paddr = skb_rtable(skb)->rt_gateway;
+        struct rtable *rtable = skb_rtable(skb);
+        __be32 paddr = 0;
         struct ddpehdr *ddp;
         struct ipddp_route *rt;
         struct atalk_addr *our_addr;
+
+	if (rtable->rt_gw_family == AF_INET)
+		paddr = rtable->rt_gw4;
 
 	spin_lock(&ipddp_route_lock);
 
@@ -316,9 +319,7 @@ module_param(ipddp_mode, int, 0);
 static int __init ipddp_init_module(void)
 {
 	dev_ipddp = ipddp_init();
-        if (IS_ERR(dev_ipddp))
-                return PTR_ERR(dev_ipddp);
-	return 0;
+	return PTR_ERR_OR_ZERO(dev_ipddp);
 }
 
 static void __exit ipddp_cleanup_module(void)

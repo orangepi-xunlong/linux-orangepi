@@ -1,26 +1,30 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Support for Partition Mobility/Migration
  *
  * Copyright (C) 2010 Nathan Fontenot
  * Copyright (C) 2010 IBM Corporation
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
  */
 
+
+#define pr_fmt(fmt) "mobility: " fmt
+
+#include <linux/cpu.h>
 #include <linux/kernel.h>
 #include <linux/kobject.h>
+#include <linux/sched.h>
 #include <linux/smp.h>
 #include <linux/stat.h>
 #include <linux/completion.h>
 #include <linux/device.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
+#include <linux/stringify.h>
 
 #include <asm/machdep.h>
 #include <asm/rtas.h>
 #include "pseries.h"
+#include "../../kernel/cacheinfo.h"
 
 static struct kobject *mobility_kobj;
 
@@ -39,6 +43,7 @@ struct update_props_workarea {
 #define ADD_DT_NODE	0x03000000
 
 #define MIGRATION_SCOPE	(1)
+#define PRRN_SCOPE -2
 
 static int mobility_rtas_call(int token, char *buf, s32 scope)
 {
@@ -61,6 +66,8 @@ static int delete_dt_node(__be32 phandle)
 	dn = of_find_node_by_phandle(be32_to_cpu(phandle));
 	if (!dn)
 		return -ENOENT;
+
+	pr_debug("removing node %pOFfp\n", dn);
 
 	dlpar_detach_node(dn);
 	of_node_put(dn);
@@ -120,6 +127,7 @@ static int update_dt_property(struct device_node *dn, struct property **prop,
 	}
 
 	if (!more) {
+		pr_debug("updating node %pOF property %s\n", dn, name);
 		of_update_property(dn, new_prop);
 		*prop = NULL;
 	}
@@ -206,7 +214,11 @@ static int update_dt_node(__be32 phandle, s32 scope)
 
 				prop_data += vd;
 			}
+
+			cond_resched();
 		}
+
+		cond_resched();
 	} while (rtas_rc == 1);
 
 	of_node_put(dn);
@@ -230,9 +242,11 @@ static int add_dt_node(__be32 parent_phandle, __be32 drc_index)
 		return -ENOENT;
 	}
 
-	rc = dlpar_attach_node(dn);
+	rc = dlpar_attach_node(dn, parent_dn);
 	if (rc)
 		dlpar_free_cc_nodes(dn);
+
+	pr_debug("added node %pOFfp\n", dn);
 
 	of_node_put(parent_dn);
 	return rc;
@@ -282,8 +296,12 @@ int pseries_devicetree_update(s32 scope)
 					add_dt_node(phandle, drc_index);
 					break;
 				}
+
+				cond_resched();
 			}
 		}
+
+		cond_resched();
 	} while (rc == 1);
 
 	kfree(rtas_buf);
@@ -309,19 +327,40 @@ void post_mobility_fixup(void)
 	if (rc)
 		printk(KERN_ERR "Post-mobility activate-fw failed: %d\n", rc);
 
+	/*
+	 * We don't want CPUs to go online/offline while the device
+	 * tree is being updated.
+	 */
+	cpus_read_lock();
+
+	/*
+	 * It's common for the destination firmware to replace cache
+	 * nodes.  Release all of the cacheinfo hierarchy's references
+	 * before updating the device tree.
+	 */
+	cacheinfo_teardown();
+
 	rc = pseries_devicetree_update(MIGRATION_SCOPE);
 	if (rc)
 		printk(KERN_ERR "Post-mobility device tree update "
 			"failed: %d\n", rc);
 
-	/* Possibly switch to a new RFI flush type */
-	pseries_setup_rfi_flush();
+	cacheinfo_rebuild();
+
+	cpus_read_unlock();
+
+	/* Possibly switch to a new L1 flush type */
+	pseries_setup_security_mitigations();
+
+	/* Reinitialise system information for hv-24x7 */
+	read_24x7_sys_info();
 
 	return;
 }
 
-static ssize_t migrate_store(struct class *class, struct class_attribute *attr,
-			     const char *buf, size_t count)
+static ssize_t migration_store(struct class *class,
+			       struct class_attribute *attr, const char *buf,
+			       size_t count)
 {
 	u64 streamid;
 	int rc;
@@ -340,6 +379,7 @@ static ssize_t migrate_store(struct class *class, struct class_attribute *attr,
 		return rc;
 
 	post_mobility_fixup();
+
 	return count;
 }
 
@@ -351,8 +391,8 @@ static ssize_t migrate_store(struct class *class, struct class_attribute *attr,
  */
 #define MIGRATION_API_VERSION	1
 
-static CLASS_ATTR(migration, S_IWUSR, NULL, migrate_store);
-static CLASS_ATTR_STRING(api_version, S_IRUGO, __stringify(MIGRATION_API_VERSION));
+static CLASS_ATTR_WO(migration);
+static CLASS_ATTR_STRING(api_version, 0444, __stringify(MIGRATION_API_VERSION));
 
 static int __init mobility_sysfs_init(void)
 {
@@ -364,11 +404,11 @@ static int __init mobility_sysfs_init(void)
 
 	rc = sysfs_create_file(mobility_kobj, &class_attr_migration.attr);
 	if (rc)
-		pr_err("mobility: unable to create migration sysfs file (%d)\n", rc);
+		pr_err("unable to create migration sysfs file (%d)\n", rc);
 
 	rc = sysfs_create_file(mobility_kobj, &class_attr_api_version.attr.attr);
 	if (rc)
-		pr_err("mobility: unable to create api_version sysfs file (%d)\n", rc);
+		pr_err("unable to create api_version sysfs file (%d)\n", rc);
 
 	return 0;
 }

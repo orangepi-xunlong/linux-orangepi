@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/drivers/mmc/host/au1xmmc.c - AU1XX0 MMC driver
  *
@@ -16,9 +17,6 @@
  *     All Rights Reserved.
  *
 
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 /* Why don't we use the SD controllers' carddetect feature?
@@ -40,6 +38,7 @@
 #include <linux/interrupt.h>
 #include <linux/dma-mapping.h>
 #include <linux/scatterlist.h>
+#include <linux/highmem.h>
 #include <linux/leds.h>
 #include <linux/mmc/host.h>
 #include <linux/slab.h>
@@ -260,7 +259,7 @@ static void au1xmmc_tasklet_finish(unsigned long param)
 	au1xmmc_finish_request(host);
 }
 
-static int au1xmmc_send_command(struct au1xmmc_host *host, int wait,
+static int au1xmmc_send_command(struct au1xmmc_host *host,
 				struct mmc_command *cmd, struct mmc_data *data)
 {
 	u32 mmccmd = (cmd->opcode << SD_CMD_CI_SHIFT);
@@ -303,28 +302,12 @@ static int au1xmmc_send_command(struct au1xmmc_host *host, int wait,
 	__raw_writel(cmd->arg, HOST_CMDARG(host));
 	wmb(); /* drain writebuffer */
 
-	if (wait)
-		IRQ_OFF(host, SD_CONFIG_CR);
-
 	__raw_writel((mmccmd | SD_CMD_GO), HOST_CMD(host));
 	wmb(); /* drain writebuffer */
 
 	/* Wait for the command to go on the line */
 	while (__raw_readl(HOST_CMD(host)) & SD_CMD_GO)
 		/* nop */;
-
-	/* Wait for the command to come back */
-	if (wait) {
-		u32 status = __raw_readl(HOST_STATUS(host));
-
-		while (!(status & SD_STATUS_CR))
-			status = __raw_readl(HOST_STATUS(host));
-
-		/* Clear the CR status */
-		__raw_writel(SD_STATUS_CR, HOST_STATUS(host));
-
-		IRQ_ON(host, SD_CONFIG_CR);
-	}
 
 	return 0;
 }
@@ -405,7 +388,7 @@ static void au1xmmc_send_pio(struct au1xmmc_host *host)
 
 	/* This is the pointer to the data buffer */
 	sg = &data->sg[host->pio.index];
-	sg_ptr = sg_virt(sg) + host->pio.offset;
+	sg_ptr = kmap_atomic(sg_page(sg)) + sg->offset + host->pio.offset;
 
 	/* This is the space left inside the buffer */
 	sg_len = data->sg[host->pio.index].length - host->pio.offset;
@@ -421,11 +404,12 @@ static void au1xmmc_send_pio(struct au1xmmc_host *host)
 		if (!(status & SD_STATUS_TH))
 			break;
 
-		val = *sg_ptr++;
+		val = sg_ptr[count];
 
 		__raw_writel((unsigned long)val, HOST_TXPORT(host));
 		wmb(); /* drain writebuffer */
 	}
+	kunmap_atomic(sg_ptr);
 
 	host->pio.len -= count;
 	host->pio.offset += count;
@@ -462,7 +446,7 @@ static void au1xmmc_receive_pio(struct au1xmmc_host *host)
 
 	if (host->pio.index < host->dma.len) {
 		sg = &data->sg[host->pio.index];
-		sg_ptr = sg_virt(sg) + host->pio.offset;
+		sg_ptr = kmap_atomic(sg_page(sg)) + sg->offset + host->pio.offset;
 
 		/* This is the space left inside the buffer */
 		sg_len = sg_dma_len(&data->sg[host->pio.index]) - host->pio.offset;
@@ -501,8 +485,10 @@ static void au1xmmc_receive_pio(struct au1xmmc_host *host)
 		val = __raw_readl(HOST_RXPORT(host));
 
 		if (sg_ptr)
-			*sg_ptr++ = (unsigned char)(val & 0xFF);
+			sg_ptr[count] = (unsigned char)(val & 0xFF);
 	}
+	if (sg_ptr)
+		kunmap_atomic(sg_ptr);
 
 	host->pio.len -= count;
 	host->pio.offset += count;
@@ -709,7 +695,7 @@ static void au1xmmc_request(struct mmc_host* mmc, struct mmc_request* mrq)
 	}
 
 	if (!ret)
-		ret = au1xmmc_send_command(host, 0, mrq->cmd, mrq->data);
+		ret = au1xmmc_send_command(host, mrq->cmd, mrq->data);
 
 	if (ret) {
 		mrq->cmd->error = ret;
@@ -982,12 +968,9 @@ static int au1xmmc_probe(struct platform_device *pdev)
 		goto out2;
 	}
 
-	r = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
-	if (!r) {
-		dev_err(&pdev->dev, "no IRQ defined\n");
+	host->irq = platform_get_irq(pdev, 0);
+	if (host->irq < 0)
 		goto out3;
-	}
-	host->irq = r->start;
 
 	mmc->ops = &au1xmmc_ops;
 
@@ -1206,6 +1189,7 @@ static struct platform_driver au1xmmc_driver = {
 	.resume        = au1xmmc_resume,
 	.driver        = {
 		.name  = DRIVER_NAME,
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 	},
 };
 

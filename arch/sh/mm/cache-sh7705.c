@@ -16,12 +16,10 @@
 #include <linux/threads.h>
 #include <asm/addrspace.h>
 #include <asm/page.h>
-#include <asm/pgtable.h>
 #include <asm/processor.h>
 #include <asm/cache.h>
 #include <asm/io.h>
-#include <asm/uaccess.h>
-#include <asm/pgalloc.h>
+#include <linux/uaccess.h>
 #include <asm/mmu_context.h>
 #include <asm/cacheflush.h>
 
@@ -136,7 +134,7 @@ static void __flush_dcache_page(unsigned long phys)
 static void sh7705_flush_dcache_page(void *arg)
 {
 	struct page *page = arg;
-	struct address_space *mapping = page_mapping(page);
+	struct address_space *mapping = page_mapping_file(page);
 
 	if (mapping && !mapping_mapped(mapping))
 		clear_bit(PG_dcache_clean, &page->flags);

@@ -25,6 +25,7 @@
 #include "agp.h"
 #include "intel-agp.h"
 #include <drm/intel-gtt.h>
+#include <asm/set_memory.h>
 
 /*
  * If we have Intel graphics, we're not going to have anything other than
@@ -79,7 +80,7 @@ static struct _intel_private {
 	unsigned int needs_dmar : 1;
 	phys_addr_t gma_bus_addr;
 	/*  Size of memory reserved for graphics by the BIOS */
-	unsigned int stolen_size;
+	resource_size_t stolen_size;
 	/* Total number of gtt entries. */
 	unsigned int gtt_total_entries;
 	/* Part of the gtt that is mappable by the cpu, for those chips where
@@ -303,8 +304,10 @@ static int intel_gtt_setup_scratch_page(void)
 	if (intel_private.needs_dmar) {
 		dma_addr = pci_map_page(intel_private.pcidev, page, 0,
 				    PAGE_SIZE, PCI_DMA_BIDIRECTIONAL);
-		if (pci_dma_mapping_error(intel_private.pcidev, dma_addr))
+		if (pci_dma_mapping_error(intel_private.pcidev, dma_addr)) {
+			__free_page(page);
 			return -EINVAL;
+		}
 
 		intel_private.scratch_page_dma = dma_addr;
 	} else
@@ -332,21 +335,13 @@ static void i810_write_entry(dma_addr_t addr, unsigned int entry,
 	writel_relaxed(addr | pte_flags, intel_private.gtt + entry);
 }
 
-static const struct aper_size_info_fixed intel_fake_agp_sizes[] = {
-	{32, 8192, 3},
-	{64, 16384, 4},
-	{128, 32768, 5},
-	{256, 65536, 6},
-	{512, 131072, 7},
-};
-
-static unsigned int intel_gtt_stolen_size(void)
+static resource_size_t intel_gtt_stolen_size(void)
 {
 	u16 gmch_ctrl;
 	u8 rdct;
 	int local = 0;
 	static const int ddt[4] = { 0, 16, 32, 64 };
-	unsigned int stolen_size = 0;
+	resource_size_t stolen_size = 0;
 
 	if (INTEL_GTT_GEN == 1)
 		return 0; /* no stolen mem on i81x */
@@ -424,8 +419,8 @@ static unsigned int intel_gtt_stolen_size(void)
 	}
 
 	if (stolen_size > 0) {
-		dev_info(&intel_private.bridge_dev->dev, "detected %dK %s memory\n",
-		       stolen_size / KB(1), local ? "local" : "stolen");
+		dev_info(&intel_private.bridge_dev->dev, "detected %lluK %s memory\n",
+		       (u64)stolen_size / KB(1), local ? "local" : "stolen");
 	} else {
 		dev_info(&intel_private.bridge_dev->dev,
 		       "no pre-allocated video memory detected\n");
@@ -670,6 +665,14 @@ static int intel_gtt_init(void)
 }
 
 #if IS_ENABLED(CONFIG_AGP_INTEL)
+static const struct aper_size_info_fixed intel_fake_agp_sizes[] = {
+	{32, 8192, 3},
+	{64, 16384, 4},
+	{128, 32768, 5},
+	{256, 65536, 6},
+	{512, 131072, 7},
+};
+
 static int intel_fake_agp_fetch_size(void)
 {
 	int num_sizes = ARRAY_SIZE(intel_fake_agp_sizes);
@@ -845,6 +848,7 @@ void intel_gtt_insert_page(dma_addr_t addr,
 			   unsigned int flags)
 {
 	intel_private.driver->write_entry(addr, pg, flags);
+	readl(intel_private.gtt + pg);
 	if (intel_private.driver->chipset_flush)
 		intel_private.driver->chipset_flush();
 }
@@ -870,7 +874,7 @@ void intel_gtt_insert_sg_entries(struct sg_table *st,
 			j++;
 		}
 	}
-	wmb();
+	readl(intel_private.gtt + j - 1);
 	if (intel_private.driver->chipset_flush)
 		intel_private.driver->chipset_flush();
 }
@@ -1086,7 +1090,7 @@ static void intel_i9xx_setup_flush(void)
 	}
 
 	if (intel_private.ifp_resource.start)
-		intel_private.i9xx_flush_page = ioremap_nocache(intel_private.ifp_resource.start, PAGE_SIZE);
+		intel_private.i9xx_flush_page = ioremap(intel_private.ifp_resource.start, PAGE_SIZE);
 	if (!intel_private.i9xx_flush_page)
 		dev_err(&intel_private.pcidev->dev,
 			"can't ioremap flush page - no chipset flushing\n");
@@ -1104,6 +1108,7 @@ static void i9xx_cleanup(void)
 
 static void i9xx_chipset_flush(void)
 {
+	wmb();
 	if (intel_private.i9xx_flush_page)
 		writel(1, intel_private.i9xx_flush_page);
 }
@@ -1404,13 +1409,16 @@ int intel_gmch_probe(struct pci_dev *bridge_pdev, struct pci_dev *gpu_pdev,
 
 	dev_info(&bridge_pdev->dev, "Intel %s Chipset\n", intel_gtt_chipsets[i].name);
 
-	mask = intel_private.driver->dma_mask_size;
-	if (pci_set_dma_mask(intel_private.pcidev, DMA_BIT_MASK(mask)))
-		dev_err(&intel_private.pcidev->dev,
-			"set gfx device dma mask %d-bit failed!\n", mask);
-	else
-		pci_set_consistent_dma_mask(intel_private.pcidev,
-					    DMA_BIT_MASK(mask));
+	if (bridge) {
+		mask = intel_private.driver->dma_mask_size;
+		if (pci_set_dma_mask(intel_private.pcidev, DMA_BIT_MASK(mask)))
+			dev_err(&intel_private.pcidev->dev,
+				"set gfx device dma mask %d-bit failed!\n",
+				mask);
+		else
+			pci_set_consistent_dma_mask(intel_private.pcidev,
+						    DMA_BIT_MASK(mask));
+	}
 
 	if (intel_gtt_init() != 0) {
 		intel_gmch_remove();
@@ -1422,11 +1430,11 @@ int intel_gmch_probe(struct pci_dev *bridge_pdev, struct pci_dev *gpu_pdev,
 }
 EXPORT_SYMBOL(intel_gmch_probe);
 
-void intel_gtt_get(u64 *gtt_total, size_t *stolen_size,
-		   phys_addr_t *mappable_base, u64 *mappable_end)
+void intel_gtt_get(u64 *gtt_total,
+		   phys_addr_t *mappable_base,
+		   resource_size_t *mappable_end)
 {
 	*gtt_total = intel_private.gtt_total_entries << PAGE_SHIFT;
-	*stolen_size = intel_private.stolen_size;
 	*mappable_base = intel_private.gma_bus_addr;
 	*mappable_end = intel_private.gtt_mappable_entries << PAGE_SHIFT;
 }

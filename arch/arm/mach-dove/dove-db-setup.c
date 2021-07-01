@@ -13,7 +13,7 @@
 #include <linux/platform_device.h>
 #include <linux/irq.h>
 #include <linux/mtd/physmap.h>
-#include <linux/mtd/nand.h>
+#include <linux/mtd/rawnand.h>
 #include <linux/timer.h>
 #include <linux/ata_platform.h>
 #include <linux/mv643xx_eth.h>
@@ -24,7 +24,7 @@
 #include <linux/gpio.h>
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
-#include <mach/dove.h>
+#include "dove.h"
 #include "common.h"
 
 static struct mv643xx_eth_platform_data dove_db_ge00_data = {

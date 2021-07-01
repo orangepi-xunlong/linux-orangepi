@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/mmc/core/bus.c
  *
  *  Copyright (C) 2003 Russell King, All Rights Reserved.
  *  Copyright (C) 2007 Pierre Ossman
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  *  MMC card bus driver model
  */
@@ -23,6 +20,8 @@
 #include <linux/mmc/host.h>
 
 #include "core.h"
+#include "card.h"
+#include "host.h"
 #include "sdio_cis.h"
 #include "bus.h"
 
@@ -69,6 +68,7 @@ mmc_bus_uevent(struct device *dev, struct kobj_uevent_env *env)
 {
 	struct mmc_card *card = mmc_dev_to_card(dev);
 	const char *type;
+	unsigned int i;
 	int retval = 0;
 
 	switch (card->type) {
@@ -93,6 +93,31 @@ mmc_bus_uevent(struct device *dev, struct kobj_uevent_env *env)
 		if (retval)
 			return retval;
 	}
+
+	if (card->type == MMC_TYPE_SDIO || card->type == MMC_TYPE_SD_COMBO) {
+		retval = add_uevent_var(env, "SDIO_ID=%04X:%04X",
+					card->cis.vendor, card->cis.device);
+		if (retval)
+			return retval;
+
+		retval = add_uevent_var(env, "SDIO_REVISION=%u.%u",
+					card->major_rev, card->minor_rev);
+		if (retval)
+			return retval;
+
+		for (i = 0; i < card->num_info; i++) {
+			retval = add_uevent_var(env, "SDIO_INFO%u=%s", i+1, card->info[i]);
+			if (retval)
+				return retval;
+		}
+	}
+
+	/*
+	 * SDIO (non-combo) cards are not handled by mmc_block driver and do not
+	 * have accessible CID register which used by mmc_card_name() function.
+	 */
+	if (card->type == MMC_TYPE_SDIO)
+		return 0;
 
 	retval = add_uevent_var(env, "MMC_NAME=%s", mmc_card_name(card));
 	if (retval)
@@ -349,8 +374,6 @@ int mmc_add_card(struct mmc_card *card)
 #ifdef CONFIG_DEBUG_FS
 	mmc_add_card_debugfs(card);
 #endif
-	mmc_init_context_info(card->host);
-
 	card->dev.of_node = mmc_of_find_child_device(card->host, 0);
 
 	device_enable_async_suspend(&card->dev);
@@ -370,6 +393,8 @@ int mmc_add_card(struct mmc_card *card)
  */
 void mmc_remove_card(struct mmc_card *card)
 {
+	struct mmc_host *host = card->host;
+
 #ifdef CONFIG_DEBUG_FS
 	mmc_remove_card_debugfs(card);
 #endif
@@ -386,6 +411,10 @@ void mmc_remove_card(struct mmc_card *card)
 		of_node_put(card->dev.of_node);
 	}
 
+	if (host->cqe_enabled) {
+		host->cqe_ops->cqe_disable(host);
+		host->cqe_enabled = false;
+	}
+
 	put_device(&card->dev);
 }
-

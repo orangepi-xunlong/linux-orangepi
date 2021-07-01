@@ -587,7 +587,7 @@ static __initconst const u64 p4_hw_cache_event_ids
  * P4_CONFIG_ALIASABLE or bits for P4_PEBS_METRIC, they are
  * either up to date automatically or not applicable at all.
  */
-struct p4_event_alias {
+static struct p4_event_alias {
 	u64 original;
 	u64 alternative;
 } p4_event_aliases[] = {
@@ -776,8 +776,9 @@ static int p4_validate_raw_event(struct perf_event *event)
 	 * the user needs special permissions to be able to use it
 	 */
 	if (p4_ht_active() && p4_event_bind_map[v].shared) {
-		if (perf_paranoid_cpu() && !capable(CAP_SYS_ADMIN))
-			return -EACCES;
+		v = perf_allow_cpu(&event->attr);
+		if (v)
+			return v;
 	}
 
 	/* ESCR EventMask bits may be invalid */
@@ -1259,7 +1260,7 @@ again:
 		}
 		/*
 		 * Perf does test runs to see if a whole group can be assigned
-		 * together succesfully.  There can be multiple rounds of this.
+		 * together successfully.  There can be multiple rounds of this.
 		 * Unfortunately, p4_pmu_swap_config_ts touches the hwc->config
 		 * bits, such that the next round of group assignments will
 		 * cause the above p4_should_swap_ts to pass instead of fail.

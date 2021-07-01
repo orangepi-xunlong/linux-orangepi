@@ -1,12 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  arch/arm/include/asm/proc-fns.h
  *
  *  Copyright (C) 1997-1999 Russell King
  *  Copyright (C) 2000 Deep Blue Solutions Ltd
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #ifndef __ASM_PROCFNS_H
 #define __ASM_PROCFNS_H
@@ -47,7 +44,7 @@ struct processor {
 	/*
 	 * Special stuff for a reset
 	 */
-	void (*reset)(unsigned long addr) __attribute__((noreturn));
+	void (*reset)(unsigned long addr, bool hvc) __attribute__((noreturn));
 	/*
 	 * Idle the processor
 	 */
@@ -96,7 +93,7 @@ extern void cpu_set_pte_ext(pte_t *ptep, pte_t pte);
 #else
 extern void cpu_set_pte_ext(pte_t *ptep, pte_t pte, unsigned int ext);
 #endif
-extern void cpu_reset(unsigned long addr) __attribute__((noreturn));
+extern void cpu_reset(unsigned long addr, bool hvc) __attribute__((noreturn));
 
 /* These three are private to arch/arm/kernel/suspend.c */
 extern void cpu_do_suspend(void *);

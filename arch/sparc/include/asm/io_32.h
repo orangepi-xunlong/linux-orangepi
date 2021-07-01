@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __SPARC_IO_H
 #define __SPARC_IO_H
 
@@ -9,6 +10,13 @@
 #define memset_io(d,c,sz)     _memset_io(d,c,sz)
 #define memcpy_fromio(d,s,sz) _memcpy_fromio(d,s,sz)
 #define memcpy_toio(d,s,sz)   _memcpy_toio(d,s,sz)
+
+/*
+ * Bus number may be embedded in the higher bits of the physical address.
+ * This is why we have no bus number argument to ioremap().
+ */
+void __iomem *ioremap(phys_addr_t offset, size_t size);
+void iounmap(volatile void __iomem *addr);
 
 #include <asm-generic/io.h>
 
@@ -120,18 +128,6 @@ static inline void sbus_memcpy_toio(volatile void __iomem *dst,
 	}
 }
 
-#ifdef __KERNEL__
-
-/*
- * Bus number may be embedded in the higher bits of the physical address.
- * This is why we have no bus number argument to ioremap().
- */
-void __iomem *ioremap(unsigned long offset, unsigned long size);
-#define ioremap_nocache(X,Y)	ioremap((X),(Y))
-#define ioremap_wc(X,Y)		ioremap((X),(Y))
-#define ioremap_wt(X,Y)		ioremap((X),(Y))
-void iounmap(volatile void __iomem *addr);
-
 /* Create a virtual mapping cookie for an IO port range */
 void __iomem *ioport_map(unsigned long port, unsigned int nr);
 void ioport_unmap(void __iomem *);
@@ -150,8 +146,6 @@ static inline int sbus_can_burst64(void)
 }
 struct device;
 void sbus_set_sbus64(struct device *, int);
-
-#endif
 
 #define __ARCH_HAS_NO_PAGE_ZERO_MAPPED		1
 

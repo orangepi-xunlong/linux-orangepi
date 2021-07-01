@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Driver for the PSC of the Freescale MPC52xx PSCs configured as UARTs.
  *
@@ -23,10 +24,6 @@
  *                    Grant Likely <grant.likely@secretlab.ca>
  * Copyright (C) 2004-2006 Sylvain Munaut <tnt@246tNt.com>
  * Copyright (C) 2003 MontaVista, Software, Inc.
- *
- * This file is licensed under the terms of the GNU General Public License
- * version 2. This program is licensed "as is" without any warranty of any
- * kind, whether express or implied.
  */
 
 #undef DEBUG
@@ -46,10 +43,6 @@
 
 #include <asm/mpc52xx.h>
 #include <asm/mpc52xx_psc.h>
-
-#if defined(CONFIG_SERIAL_MPC52xx_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
-#define SUPPORT_SYSRQ
-#endif
 
 #include <linux/serial_core.h>
 
@@ -1347,7 +1340,7 @@ mpc52xx_uart_verify_port(struct uart_port *port, struct serial_struct *ser)
 }
 
 
-static struct uart_ops mpc52xx_uart_ops = {
+static const struct uart_ops mpc52xx_uart_ops = {
 	.tx_empty	= mpc52xx_uart_tx_empty,
 	.set_mctrl	= mpc52xx_uart_set_mctrl,
 	.get_mctrl	= mpc52xx_uart_get_mctrl,
@@ -1385,12 +1378,8 @@ mpc52xx_uart_int_rx_chars(struct uart_port *port)
 		ch = psc_ops->read_char(port);
 
 		/* Handle sysreq char */
-#ifdef SUPPORT_SYSRQ
-		if (uart_handle_sysrq_char(port, ch)) {
-			port->sysrq = 0;
+		if (uart_handle_sysrq_char(port, ch))
 			continue;
-		}
-#endif
 
 		/* Store it */
 
@@ -1634,8 +1623,8 @@ mpc52xx_console_setup(struct console *co, char *options)
 		return -EINVAL;
 	}
 
-	pr_debug("Console on ttyPSC%x is %s\n",
-		 co->index, mpc52xx_uart_nodes[co->index]->full_name);
+	pr_debug("Console on ttyPSC%x is %pOF\n",
+		 co->index, mpc52xx_uart_nodes[co->index]);
 
 	/* Fetch register locations */
 	ret = of_address_to_resource(np, 0, &res);
@@ -1755,8 +1744,8 @@ static int mpc52xx_uart_of_probe(struct platform_device *op)
 			break;
 	if (idx >= MPC52xx_PSC_MAXNUM)
 		return -EINVAL;
-	pr_debug("Found %s assigned to ttyPSC%x\n",
-		 mpc52xx_uart_nodes[idx]->full_name, idx);
+	pr_debug("Found %pOF assigned to ttyPSC%x\n",
+		 mpc52xx_uart_nodes[idx], idx);
 
 	/* set the uart clock to the input clock of the psc, the different
 	 * prescalers are taken into account in the set_baudrate() methods
@@ -1773,6 +1762,7 @@ static int mpc52xx_uart_of_probe(struct platform_device *op)
 	spin_lock_init(&port->lock);
 	port->uartclk = uartclk;
 	port->fifosize	= 512;
+	port->has_sysrq = IS_ENABLED(CONFIG_SERIAL_MPC52xx_CONSOLE);
 	port->iotype	= UPIO_MEM;
 	port->flags	= UPF_BOOT_AUTOCONF |
 			  (uart_console(port) ? 0 : UPF_IOREMAP);
@@ -1881,8 +1871,8 @@ mpc52xx_uart_of_enumerate(void)
 
 	for (i = 0; i < MPC52xx_PSC_MAXNUM; i++) {
 		if (mpc52xx_uart_nodes[i])
-			pr_debug("%s assigned to ttyPSC%x\n",
-				 mpc52xx_uart_nodes[i]->full_name, i);
+			pr_debug("%pOF assigned to ttyPSC%x\n",
+				 mpc52xx_uart_nodes[i], i);
 	}
 }
 

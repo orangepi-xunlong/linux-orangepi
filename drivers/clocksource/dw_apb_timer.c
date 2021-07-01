@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * (C) Copyright 2009 Intel Corporation
  * Author: Jacob Pan (jacob.jun.pan@intel.com)
  *
  * Shared with ARM platforms, Jamie Iles, Picochip 2011
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Support for the Synopsys DesignWare APB Timers.
  */
@@ -101,7 +98,7 @@ static irqreturn_t dw_apb_clockevent_irq(int irq, void *data)
 	struct dw_apb_clock_event_device *dw_ced = ced_to_dw_apb_ced(evt);
 
 	if (!evt->event_handler) {
-		pr_info("Spurious APBT timer interrupt %d", irq);
+		pr_info("Spurious APBT timer interrupt %d\n", irq);
 		return IRQ_NONE;
 	}
 
@@ -225,7 +222,8 @@ static int apbt_next_event(unsigned long delta,
 /**
  * dw_apb_clockevent_init() - use an APB timer as a clock_event_device
  *
- * @cpu:	The CPU the events will be targeted at.
+ * @cpu:	The CPU the events will be targeted at or -1 if CPU affiliation
+ *		isn't required.
  * @name:	The name used for the timer and the IRQ for it.
  * @rating:	The rating to give the timer.
  * @base:	I/O base for the timer registers.
@@ -257,8 +255,10 @@ dw_apb_clockevent_init(int cpu, const char *name, unsigned rating,
 	clockevents_calc_mult_shift(&dw_ced->ced, freq, APBT_MIN_PERIOD);
 	dw_ced->ced.max_delta_ns = clockevent_delta2ns(0x7fffffff,
 						       &dw_ced->ced);
+	dw_ced->ced.max_delta_ticks = 0x7fffffff;
 	dw_ced->ced.min_delta_ns = clockevent_delta2ns(5000, &dw_ced->ced);
-	dw_ced->ced.cpumask = cpumask_of(cpu);
+	dw_ced->ced.min_delta_ticks = 5000;
+	dw_ced->ced.cpumask = cpu < 0 ? cpu_possible_mask : cpumask_of(cpu);
 	dw_ced->ced.features = CLOCK_EVT_FEAT_PERIODIC |
 				CLOCK_EVT_FEAT_ONESHOT | CLOCK_EVT_FEAT_DYNIRQ;
 	dw_ced->ced.set_state_shutdown = apbt_shutdown;
@@ -271,15 +271,10 @@ dw_apb_clockevent_init(int cpu, const char *name, unsigned rating,
 	dw_ced->ced.rating = rating;
 	dw_ced->ced.name = name;
 
-	dw_ced->irqaction.name		= dw_ced->ced.name;
-	dw_ced->irqaction.handler	= dw_apb_clockevent_irq;
-	dw_ced->irqaction.dev_id	= &dw_ced->ced;
-	dw_ced->irqaction.irq		= irq;
-	dw_ced->irqaction.flags		= IRQF_TIMER | IRQF_IRQPOLL |
-					  IRQF_NOBALANCING;
-
 	dw_ced->eoi = apbt_eoi;
-	err = setup_irq(irq, &dw_ced->irqaction);
+	err = request_irq(irq, dw_apb_clockevent_irq,
+			  IRQF_TIMER | IRQF_IRQPOLL | IRQF_NOBALANCING,
+			  dw_ced->ced.name, &dw_ced->ced);
 	if (err) {
 		pr_err("failed to request timer irq\n");
 		kfree(dw_ced);
@@ -348,7 +343,7 @@ void dw_apb_clocksource_start(struct dw_apb_clocksource *dw_cs)
 	dw_apb_clocksource_read(dw_cs);
 }
 
-static cycle_t __apbt_read_clocksource(struct clocksource *cs)
+static u64 __apbt_read_clocksource(struct clocksource *cs)
 {
 	u32 current_count;
 	struct dw_apb_clocksource *dw_cs =
@@ -357,7 +352,7 @@ static cycle_t __apbt_read_clocksource(struct clocksource *cs)
 	current_count = apbt_readl_relaxed(&dw_cs->timer,
 					APBTMR_N_CURRENT_VALUE);
 
-	return (cycle_t)~current_count;
+	return (u64)~current_count;
 }
 
 static void apbt_restart_clocksource(struct clocksource *cs)
@@ -416,7 +411,7 @@ void dw_apb_clocksource_register(struct dw_apb_clocksource *dw_cs)
  *
  * @dw_cs:	The clocksource to read.
  */
-cycle_t dw_apb_clocksource_read(struct dw_apb_clocksource *dw_cs)
+u64 dw_apb_clocksource_read(struct dw_apb_clocksource *dw_cs)
 {
-	return (cycle_t)~apbt_readl(&dw_cs->timer, APBTMR_N_CURRENT_VALUE);
+	return (u64)~apbt_readl(&dw_cs->timer, APBTMR_N_CURRENT_VALUE);
 }

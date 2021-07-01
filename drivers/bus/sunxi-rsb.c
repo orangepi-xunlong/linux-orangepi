@@ -45,6 +45,8 @@
 #include <linux/of_irq.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
+#include <linux/pm.h>
+#include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/reset.h>
 #include <linux/slab.h>
@@ -126,6 +128,7 @@ struct sunxi_rsb {
 	struct completion complete;
 	struct mutex lock;
 	unsigned int status;
+	u32 clk_freq;
 };
 
 /* bus / slave device related functions */
@@ -273,8 +276,6 @@ static int _sunxi_rsb_run_xfer(struct sunxi_rsb *rsb)
 
 	reinit_completion(&rsb->complete);
 
-	writel(RSB_INTS_LOAD_BSY | RSB_INTS_TRANS_ERR | RSB_INTS_TRANS_OVER,
-	       rsb->regs + RSB_INTE);
 	writel(RSB_CTRL_START_TRANS | RSB_CTRL_GLOBAL_INT_ENB,
 	       rsb->regs + RSB_CTRL);
 
@@ -282,7 +283,7 @@ static int _sunxi_rsb_run_xfer(struct sunxi_rsb *rsb)
 					    msecs_to_jiffies(100))) {
 		dev_dbg(rsb->dev, "RSB timeout\n");
 
-		/* abort the transfer */
+		/* abort the transfer and disable interrupts */
 		writel(RSB_CTRL_ABORT_TRANS, rsb->regs + RSB_CTRL);
 
 		/* clear any interrupt flags */
@@ -311,89 +312,12 @@ static int _sunxi_rsb_run_xfer(struct sunxi_rsb *rsb)
 	return 0;
 }
 
-static int sunxi_rsb_read(struct sunxi_rsb *rsb, u8 rtaddr, u8 addr,
-			  u32 *buf, size_t len)
-{
-	u32 cmd;
-	int ret;
-
-	if (!buf)
-		return -EINVAL;
-
-	switch (len) {
-	case 1:
-		cmd = RSB_CMD_RD8;
-		break;
-	case 2:
-		cmd = RSB_CMD_RD16;
-		break;
-	case 4:
-		cmd = RSB_CMD_RD32;
-		break;
-	default:
-		dev_err(rsb->dev, "Invalid access width: %zd\n", len);
-		return -EINVAL;
-	}
-
-	mutex_lock(&rsb->lock);
-
-	writel(addr, rsb->regs + RSB_ADDR);
-	writel(RSB_DAR_RTA(rtaddr), rsb->regs + RSB_DAR);
-	writel(cmd, rsb->regs + RSB_CMD);
-
-	ret = _sunxi_rsb_run_xfer(rsb);
-	if (ret)
-		goto unlock;
-
-	*buf = readl(rsb->regs + RSB_DATA);
-
-unlock:
-	mutex_unlock(&rsb->lock);
-
-	return ret;
-}
-
-static int sunxi_rsb_write(struct sunxi_rsb *rsb, u8 rtaddr, u8 addr,
-			   const u32 *buf, size_t len)
-{
-	u32 cmd;
-	int ret;
-
-	if (!buf)
-		return -EINVAL;
-
-	switch (len) {
-	case 1:
-		cmd = RSB_CMD_WR8;
-		break;
-	case 2:
-		cmd = RSB_CMD_WR16;
-		break;
-	case 4:
-		cmd = RSB_CMD_WR32;
-		break;
-	default:
-		dev_err(rsb->dev, "Invalid access width: %zd\n", len);
-		return -EINVAL;
-	}
-
-	mutex_lock(&rsb->lock);
-
-	writel(addr, rsb->regs + RSB_ADDR);
-	writel(RSB_DAR_RTA(rtaddr), rsb->regs + RSB_DAR);
-	writel(*buf, rsb->regs + RSB_DATA);
-	writel(cmd, rsb->regs + RSB_CMD);
-	ret = _sunxi_rsb_run_xfer(rsb);
-
-	mutex_unlock(&rsb->lock);
-
-	return ret;
-}
-
 /* RSB regmap functions */
 struct sunxi_rsb_ctx {
 	struct sunxi_rsb_device *rdev;
-	int size;
+	u32 mask;
+	u8 rd_cmd;
+	u8 wr_cmd;
 };
 
 static int regmap_sunxi_rsb_reg_read(void *context, unsigned int reg,
@@ -401,11 +325,33 @@ static int regmap_sunxi_rsb_reg_read(void *context, unsigned int reg,
 {
 	struct sunxi_rsb_ctx *ctx = context;
 	struct sunxi_rsb_device *rdev = ctx->rdev;
+	struct sunxi_rsb *rsb = rdev->rsb;
+	int ret;
 
+	if (!val)
+		return -EINVAL;
 	if (reg > 0xff)
 		return -EINVAL;
 
-	return sunxi_rsb_read(rdev->rsb, rdev->rtaddr, reg, val, ctx->size);
+	pm_runtime_get_sync(rsb->dev);
+	mutex_lock(&rsb->lock);
+
+	writel(reg, rsb->regs + RSB_ADDR);
+	writel(RSB_DAR_RTA(rdev->rtaddr), rsb->regs + RSB_DAR);
+	writel(ctx->rd_cmd, rsb->regs + RSB_CMD);
+
+	ret = _sunxi_rsb_run_xfer(rsb);
+	if (ret)
+		goto unlock;
+
+	*val = readl(rsb->regs + RSB_DATA) & ctx->mask;
+
+unlock:
+	mutex_unlock(&rsb->lock);
+	pm_runtime_mark_last_busy(rsb->dev);
+	pm_runtime_put_autosuspend(rsb->dev);
+
+	return ret;
 }
 
 static int regmap_sunxi_rsb_reg_write(void *context, unsigned int reg,
@@ -413,8 +359,27 @@ static int regmap_sunxi_rsb_reg_write(void *context, unsigned int reg,
 {
 	struct sunxi_rsb_ctx *ctx = context;
 	struct sunxi_rsb_device *rdev = ctx->rdev;
+	struct sunxi_rsb *rsb = rdev->rsb;
+	int ret;
 
-	return sunxi_rsb_write(rdev->rsb, rdev->rtaddr, reg, &val, ctx->size);
+	if (reg > 0xff)
+		return -EINVAL;
+
+	pm_runtime_get_sync(rsb->dev);
+	mutex_lock(&rsb->lock);
+
+	writel(reg, rsb->regs + RSB_ADDR);
+	writel(RSB_DAR_RTA(rdev->rtaddr), rsb->regs + RSB_DAR);
+	writel(val, rsb->regs + RSB_DATA);
+	writel(ctx->wr_cmd, rsb->regs + RSB_CMD);
+
+	ret = _sunxi_rsb_run_xfer(rsb);
+
+	mutex_unlock(&rsb->lock);
+	pm_runtime_mark_last_busy(rsb->dev);
+	pm_runtime_put_autosuspend(rsb->dev);
+
+	return ret;
 }
 
 static void regmap_sunxi_rsb_free_ctx(void *context)
@@ -436,13 +401,24 @@ static struct sunxi_rsb_ctx *regmap_sunxi_rsb_init_ctx(struct sunxi_rsb_device *
 		const struct regmap_config *config)
 {
 	struct sunxi_rsb_ctx *ctx;
+	u8 rd_cmd, wr_cmd;
 
 	switch (config->val_bits) {
 	case 8:
+		rd_cmd = RSB_CMD_RD8;
+		wr_cmd = RSB_CMD_WR8;
+		break;
 	case 16:
+		rd_cmd = RSB_CMD_RD16;
+		wr_cmd = RSB_CMD_WR16;
+		break;
 	case 32:
+		rd_cmd = RSB_CMD_RD32;
+		wr_cmd = RSB_CMD_WR32;
 		break;
 	default:
+		dev_err(&rdev->dev, "Invalid RSB access width: %d\n",
+			config->val_bits);
 		return ERR_PTR(-EINVAL);
 	}
 
@@ -451,7 +427,9 @@ static struct sunxi_rsb_ctx *regmap_sunxi_rsb_init_ctx(struct sunxi_rsb_device *
 		return ERR_PTR(-ENOMEM);
 
 	ctx->rdev = rdev;
-	ctx->size = config->val_bits / 8;
+	ctx->mask = GENMASK(config->val_bits - 1, 0);
+	ctx->rd_cmd = rd_cmd;
+	ctx->wr_cmd = wr_cmd;
 
 	return ctx;
 }
@@ -480,7 +458,8 @@ static irqreturn_t sunxi_rsb_irq(int irq, void *dev_id)
 	status = readl(rsb->regs + RSB_INTS);
 	rsb->status = status;
 
-	/* Clear interrupts */
+	/* Disable and clear interrupts */
+	writel(0, rsb->regs + RSB_CTRL);
 	status &= (RSB_INTS_LOAD_BSY | RSB_INTS_TRANS_ERR |
 		   RSB_INTS_TRANS_OVER);
 	writel(status, rsb->regs + RSB_INTS);
@@ -557,20 +536,20 @@ static int of_rsb_register_devices(struct sunxi_rsb *rsb)
 
 	/* Runtime addresses for all slaves should be set first */
 	for_each_available_child_of_node(np, child) {
-		dev_dbg(dev, "setting child %s runtime address\n",
-			child->full_name);
+		dev_dbg(dev, "setting child %pOF runtime address\n",
+			child);
 
 		ret = of_property_read_u32(child, "reg", &hwaddr);
 		if (ret) {
-			dev_err(dev, "%s: invalid 'reg' property: %d\n",
-				child->full_name, ret);
+			dev_err(dev, "%pOF: invalid 'reg' property: %d\n",
+				child, ret);
 			continue;
 		}
 
 		rtaddr = sunxi_rsb_get_rtaddr(hwaddr);
 		if (!rtaddr) {
-			dev_err(dev, "%s: unknown hardware device address\n",
-				child->full_name);
+			dev_err(dev, "%pOF: unknown hardware device address\n",
+				child);
 			continue;
 		}
 
@@ -587,15 +566,15 @@ static int of_rsb_register_devices(struct sunxi_rsb *rsb)
 		/* send command */
 		ret = _sunxi_rsb_run_xfer(rsb);
 		if (ret)
-			dev_warn(dev, "%s: set runtime address failed: %d\n",
-				 child->full_name, ret);
+			dev_warn(dev, "%pOF: set runtime address failed: %d\n",
+				 child, ret);
 	}
 
 	/* Then we start adding devices and probing them */
 	for_each_available_child_of_node(np, child) {
 		struct sunxi_rsb_device *rdev;
 
-		dev_dbg(dev, "adding child %s\n", child->full_name);
+		dev_dbg(dev, "adding child %pOF\n", child);
 
 		ret = of_property_read_u32(child, "reg", &hwaddr);
 		if (ret)
@@ -607,29 +586,129 @@ static int of_rsb_register_devices(struct sunxi_rsb *rsb)
 
 		rdev = sunxi_rsb_device_create(rsb, child, hwaddr, rtaddr);
 		if (IS_ERR(rdev))
-			dev_err(dev, "failed to add child device %s: %ld\n",
-				child->full_name, PTR_ERR(rdev));
+			dev_err(dev, "failed to add child device %pOF: %ld\n",
+				child, PTR_ERR(rdev));
 	}
 
 	return 0;
 }
 
-static const struct of_device_id sunxi_rsb_of_match_table[] = {
-	{ .compatible = "allwinner,sun8i-a23-rsb" },
-	{}
+static int sunxi_rsb_init_controller(struct sunxi_rsb *rsb)
+{
+	struct device *dev = rsb->dev;
+	unsigned long p_clk_freq;
+	u32 clk_delay, reg;
+	int clk_div, ret;
+
+	ret = clk_prepare_enable(rsb->clk);
+	if (ret) {
+		dev_err(dev, "failed to enable clk: %d\n", ret);
+		return ret;
+	}
+
+	ret = reset_control_reset(rsb->rstc);
+	if (ret) {
+		dev_err(dev, "failed to deassert reset line: %d\n", ret);
+		goto err_clk_disable;
+	}
+
+	/* reset the controller */
+	writel(RSB_CTRL_SOFT_RST, rsb->regs + RSB_CTRL);
+	readl_poll_timeout(rsb->regs + RSB_CTRL, reg,
+			   !(reg & RSB_CTRL_SOFT_RST), 1000, 100000);
+
+	/*
+	 * Clock frequency and delay calculation code is from
+	 * Allwinner U-boot sources.
+	 *
+	 * From A83 user manual:
+	 * bus clock frequency = parent clock frequency / (2 * (divider + 1))
+	 */
+	p_clk_freq = clk_get_rate(rsb->clk);
+	clk_div = p_clk_freq / rsb->clk_freq / 2;
+	if (!clk_div)
+		clk_div = 1;
+	else if (clk_div > RSB_CCR_MAX_CLK_DIV + 1)
+		clk_div = RSB_CCR_MAX_CLK_DIV + 1;
+
+	clk_delay = clk_div >> 1;
+	if (!clk_delay)
+		clk_delay = 1;
+
+	dev_info(dev, "RSB running at %lu Hz\n", p_clk_freq / clk_div / 2);
+	writel(RSB_CCR_SDA_OUT_DELAY(clk_delay) | RSB_CCR_CLK_DIV(clk_div - 1),
+	       rsb->regs + RSB_CCR);
+
+	/*
+	 * Select the interrupts we care about. They will not actually fire
+	 * until the RSB_CTRL_GLOBAL_INT_ENB bit is set.
+	 */
+	writel(RSB_INTS_LOAD_BSY | RSB_INTS_TRANS_ERR | RSB_INTS_TRANS_OVER,
+	       rsb->regs + RSB_INTE);
+
+	return 0;
+
+err_clk_disable:
+	clk_disable_unprepare(rsb->clk);
+
+	return ret;
+}
+
+static int sunxi_rsb_exit_controller(struct sunxi_rsb *rsb)
+{
+	reset_control_assert(rsb->rstc);
+	clk_disable_unprepare(rsb->clk);
+
+	return 0;
+}
+
+static int __maybe_unused sunxi_rsb_runtime_suspend(struct device *dev)
+{
+	struct sunxi_rsb *rsb = dev_get_drvdata(dev);
+
+	clk_disable_unprepare(rsb->clk);
+
+	return 0;
+}
+
+static int __maybe_unused sunxi_rsb_runtime_resume(struct device *dev)
+{
+	struct sunxi_rsb *rsb = dev_get_drvdata(dev);
+
+	return clk_prepare_enable(rsb->clk);
+}
+
+static int __maybe_unused sunxi_rsb_suspend(struct device *dev)
+{
+	struct sunxi_rsb *rsb = dev_get_drvdata(dev);
+
+	/* Ensure the clock is running before asserting reset. */
+	if (pm_runtime_status_suspended(dev))
+		pm_runtime_resume(dev);
+
+	return sunxi_rsb_exit_controller(rsb);
+}
+
+static int __maybe_unused sunxi_rsb_resume(struct device *dev)
+{
+	struct sunxi_rsb *rsb = dev_get_drvdata(dev);
+
+	return sunxi_rsb_init_controller(rsb);
+}
+
+static const struct dev_pm_ops sunxi_rsb_dev_pm_ops = {
+	SET_RUNTIME_PM_OPS(sunxi_rsb_runtime_suspend,
+			   sunxi_rsb_runtime_resume, NULL)
+	SET_NOIRQ_SYSTEM_SLEEP_PM_OPS(sunxi_rsb_suspend, sunxi_rsb_resume)
 };
-MODULE_DEVICE_TABLE(of, sunxi_rsb_of_match_table);
 
 static int sunxi_rsb_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
-	struct resource *r;
 	struct sunxi_rsb *rsb;
-	unsigned long p_clk_freq;
-	u32 clk_delay, clk_freq = 3000000;
-	int clk_div, irq, ret;
-	u32 reg;
+	u32 clk_freq = 3000000;
+	int irq, ret;
 
 	of_property_read_u32(np, "clock-frequency", &clk_freq);
 	if (clk_freq > RSB_MAX_FREQ) {
@@ -644,17 +723,16 @@ static int sunxi_rsb_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	rsb->dev = dev;
+	rsb->clk_freq = clk_freq;
 	platform_set_drvdata(pdev, rsb);
-	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	rsb->regs = devm_ioremap_resource(dev, r);
+
+	rsb->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(rsb->regs))
 		return PTR_ERR(rsb->regs);
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(dev, "failed to retrieve irq: %d\n", irq);
+	if (irq < 0)
 		return irq;
-	}
 
 	rsb->clk = devm_clk_get(dev, NULL);
 	if (IS_ERR(rsb->clk)) {
@@ -663,62 +741,26 @@ static int sunxi_rsb_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	ret = clk_prepare_enable(rsb->clk);
-	if (ret) {
-		dev_err(dev, "failed to enable clk: %d\n", ret);
-		return ret;
-	}
-
-	p_clk_freq = clk_get_rate(rsb->clk);
-
 	rsb->rstc = devm_reset_control_get(dev, NULL);
 	if (IS_ERR(rsb->rstc)) {
 		ret = PTR_ERR(rsb->rstc);
 		dev_err(dev, "failed to retrieve reset controller: %d\n", ret);
-		goto err_clk_disable;
-	}
-
-	ret = reset_control_deassert(rsb->rstc);
-	if (ret) {
-		dev_err(dev, "failed to deassert reset line: %d\n", ret);
-		goto err_clk_disable;
+		return ret;
 	}
 
 	init_completion(&rsb->complete);
 	mutex_init(&rsb->lock);
 
-	/* reset the controller */
-	writel(RSB_CTRL_SOFT_RST, rsb->regs + RSB_CTRL);
-	readl_poll_timeout(rsb->regs + RSB_CTRL, reg,
-			   !(reg & RSB_CTRL_SOFT_RST), 1000, 100000);
-
-	/*
-	 * Clock frequency and delay calculation code is from
-	 * Allwinner U-boot sources.
-	 *
-	 * From A83 user manual:
-	 * bus clock frequency = parent clock frequency / (2 * (divider + 1))
-	 */
-	clk_div = p_clk_freq / clk_freq / 2;
-	if (!clk_div)
-		clk_div = 1;
-	else if (clk_div > RSB_CCR_MAX_CLK_DIV + 1)
-		clk_div = RSB_CCR_MAX_CLK_DIV + 1;
-
-	clk_delay = clk_div >> 1;
-	if (!clk_delay)
-		clk_delay = 1;
-
-	dev_info(dev, "RSB running at %lu Hz\n", p_clk_freq / clk_div / 2);
-	writel(RSB_CCR_SDA_OUT_DELAY(clk_delay) | RSB_CCR_CLK_DIV(clk_div - 1),
-	       rsb->regs + RSB_CCR);
-
 	ret = devm_request_irq(dev, irq, sunxi_rsb_irq, 0, RSB_CTRL_NAME, rsb);
 	if (ret) {
 		dev_err(dev, "can't register interrupt handler irq %d: %d\n",
 			irq, ret);
-		goto err_reset_assert;
+		return ret;
 	}
+
+	ret = sunxi_rsb_init_controller(rsb);
+	if (ret)
+		return ret;
 
 	/* initialize all devices on the bus into RSB mode */
 	ret = sunxi_rsb_init_device_mode(rsb);
@@ -727,34 +769,43 @@ static int sunxi_rsb_probe(struct platform_device *pdev)
 
 	of_rsb_register_devices(rsb);
 
+	pm_suspend_ignore_children(dev, true);
+	pm_runtime_set_autosuspend_delay(dev, 1000);
+	pm_runtime_use_autosuspend(dev);
+	pm_runtime_set_active(dev);
+	pm_runtime_enable(dev);
+
 	return 0;
-
-err_reset_assert:
-	reset_control_assert(rsb->rstc);
-
-err_clk_disable:
-	clk_disable_unprepare(rsb->clk);
-
-	return ret;
 }
 
 static int sunxi_rsb_remove(struct platform_device *pdev)
 {
 	struct sunxi_rsb *rsb = platform_get_drvdata(pdev);
 
+	pm_runtime_get_sync(&pdev->dev);
+
 	device_for_each_child(rsb->dev, NULL, sunxi_rsb_remove_devices);
-	reset_control_assert(rsb->rstc);
-	clk_disable_unprepare(rsb->clk);
+	sunxi_rsb_exit_controller(rsb);
+
+	pm_runtime_disable(&pdev->dev);
+	pm_runtime_put_noidle(&pdev->dev);
 
 	return 0;
 }
+
+static const struct of_device_id sunxi_rsb_of_match_table[] = {
+	{ .compatible = "allwinner,sun8i-a23-rsb" },
+	{}
+};
+MODULE_DEVICE_TABLE(of, sunxi_rsb_of_match_table);
 
 static struct platform_driver sunxi_rsb_driver = {
 	.probe = sunxi_rsb_probe,
 	.remove	= sunxi_rsb_remove,
 	.driver	= {
-		.name = RSB_CTRL_NAME,
+		.name		= RSB_CTRL_NAME,
 		.of_match_table = sunxi_rsb_of_match_table,
+		.pm		= &sunxi_rsb_dev_pm_ops,
 	},
 };
 

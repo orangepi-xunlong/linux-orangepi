@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _MLX4_STATS_
 #define _MLX4_STATS_
 
@@ -37,7 +38,7 @@ struct mlx4_en_port_stats {
 	unsigned long queue_stopped;
 	unsigned long wake_queue;
 	unsigned long tx_timeout;
-	unsigned long rx_alloc_failed;
+	unsigned long rx_alloc_pages;
 	unsigned long rx_chksum_good;
 	unsigned long rx_chksum_none;
 	unsigned long rx_chksum_complete;
@@ -55,6 +56,21 @@ struct mlx4_en_perf_stats {
 #define NUM_PERF_COUNTERS		6
 };
 
+struct mlx4_en_xdp_stats {
+	unsigned long rx_xdp_drop;
+	unsigned long rx_xdp_tx;
+	unsigned long rx_xdp_tx_full;
+#define NUM_XDP_STATS		3
+};
+
+struct mlx4_en_phy_stats {
+	unsigned long rx_packets_phy;
+	unsigned long rx_bytes_phy;
+	unsigned long tx_packets_phy;
+	unsigned long tx_bytes_phy;
+#define NUM_PHY_STATS		4
+};
+
 #define NUM_MAIN_STATS	21
 
 #define MLX4_NUM_PRIORITIES	8
@@ -68,6 +84,11 @@ struct mlx4_en_flow_stats_rx {
 					 MLX4_NUM_PRIORITIES)
 };
 
+#define FLOW_PRIORITY_STATS_IDX_RX_FRAMES	(NUM_MAIN_STATS +	\
+						 NUM_PORT_STATS +	\
+						 NUM_PF_STATS +		\
+						 NUM_FLOW_PRIORITY_STATS_RX)
+
 struct mlx4_en_flow_stats_tx {
 	u64 tx_pause;
 	u64 tx_pause_duration;
@@ -76,6 +97,13 @@ struct mlx4_en_flow_stats_tx {
 #define NUM_FLOW_PRIORITY_STATS_TX	(NUM_FLOW_STATS_TX * \
 					 MLX4_NUM_PRIORITIES)
 };
+
+#define FLOW_PRIORITY_STATS_IDX_TX_FRAMES	(NUM_MAIN_STATS +	\
+						 NUM_PORT_STATS +	\
+						 NUM_PF_STATS +		\
+						 NUM_FLOW_PRIORITY_STATS_RX + \
+						 NUM_FLOW_STATS_RX +	\
+						 NUM_FLOW_PRIORITY_STATS_TX)
 
 #define NUM_FLOW_STATS (NUM_FLOW_STATS_RX + NUM_FLOW_STATS_TX + \
 			NUM_FLOW_PRIORITY_STATS_TX + \
@@ -107,7 +135,8 @@ enum {
 };
 
 #define NUM_ALL_STATS	(NUM_MAIN_STATS + NUM_PORT_STATS + NUM_PKT_STATS + \
-			 NUM_FLOW_STATS + NUM_PERF_STATS + NUM_PF_STATS)
+			 NUM_FLOW_STATS + NUM_PERF_STATS + NUM_PF_STATS + \
+			 NUM_XDP_STATS + NUM_PHY_STATS)
 
 #define MLX4_FIND_NETDEV_STAT(n) (offsetof(struct net_device_stats, n) / \
 				  sizeof(((struct net_device_stats *)0)->n))

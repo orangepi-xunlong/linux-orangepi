@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* linux/drivers/video/sm501fb.c
  *
  * Copyright (c) 2006 Simtec Electronics
  *	Vincent Sanders <vince@simtec.co.uk>
  *	Ben Dooks <ben@simtec.co.uk>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Framebuffer driver for the Silicon Motion SM501
  */
@@ -31,7 +28,7 @@
 #include <linux/console.h>
 #include <linux/io.h>
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/div64.h>
 
 #ifdef CONFIG_PM
@@ -46,7 +43,7 @@
 static char *fb_mode = "640x480-16@60";
 static unsigned long default_bpp = 16;
 
-static struct fb_videomode sm501_default_mode = {
+static const struct fb_videomode sm501_default_mode = {
 	.refresh	= 60,
 	.xres		= 640,
 	.yres		= 480,
@@ -1008,6 +1005,7 @@ static int sm501fb_blank_crt(int blank_mode, struct fb_info *info)
 	case FB_BLANK_POWERDOWN:
 		ctrl &= ~SM501_DC_CRT_CONTROL_ENABLE;
 		sm501_misc_control(fbi->dev->parent, SM501_MISC_DAC_POWER, 0);
+		fallthrough;
 
 	case FB_BLANK_NORMAL:
 		ctrl |= SM501_DC_CRT_CONTROL_BLANK;
@@ -1272,6 +1270,14 @@ static ssize_t sm501fb_debug_show_pnl(struct device *dev,
 }
 
 static DEVICE_ATTR(fbregs_pnl, 0444, sm501fb_debug_show_pnl, NULL);
+
+static struct attribute *sm501fb_attrs[] = {
+	&dev_attr_crt_src.attr,
+	&dev_attr_fbregs_pnl.attr,
+	&dev_attr_fbregs_crt.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(sm501fb);
 
 /* acceleration operations */
 static int sm501fb_sync(struct fb_info *info)
@@ -1867,10 +1873,8 @@ static int sm501fb_probe_one(struct sm501fb_info *info,
 	}
 
 	fbi = framebuffer_alloc(sizeof(struct sm501fb_par), info->dev);
-	if (fbi == NULL) {
-		dev_err(info->dev, "cannot allocate %s framebuffer\n", name);
+	if (!fbi)
 		return -ENOMEM;
-	}
 
 	par = fbi->par;
 	par->info = info;
@@ -1888,6 +1892,9 @@ static void sm501_free_init_fb(struct sm501fb_info *info,
 				enum sm501_controller head)
 {
 	struct fb_info *fbi = info->fb[head];
+
+	if (!fbi)
+		return;
 
 	fb_dealloc_cmap(&fbi->cmap);
 }
@@ -1928,8 +1935,7 @@ static int sm501fb_probe(struct platform_device *pdev)
 	int ret;
 
 	/* allocate our framebuffers */
-
-	info = kzalloc(sizeof(struct sm501fb_info), GFP_KERNEL);
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
 	if (!info) {
 		dev_err(dev, "failed to allocate state\n");
 		return -ENOMEM;
@@ -2013,32 +2019,8 @@ static int sm501fb_probe(struct platform_device *pdev)
 		goto err_started_crt;
 	}
 
-	/* create device files */
-
-	ret = device_create_file(dev, &dev_attr_crt_src);
-	if (ret)
-		goto err_started_panel;
-
-	ret = device_create_file(dev, &dev_attr_fbregs_pnl);
-	if (ret)
-		goto err_attached_crtsrc_file;
-
-	ret = device_create_file(dev, &dev_attr_fbregs_crt);
-	if (ret)
-		goto err_attached_pnlregs_file;
-
 	/* we registered, return ok */
 	return 0;
-
-err_attached_pnlregs_file:
-	device_remove_file(dev, &dev_attr_fbregs_pnl);
-
-err_attached_crtsrc_file:
-	device_remove_file(dev, &dev_attr_crt_src);
-
-err_started_panel:
-	unregister_framebuffer(info->fb[HEAD_PANEL]);
-	sm501_free_init_fb(info, HEAD_PANEL);
 
 err_started_crt:
 	unregister_framebuffer(info->fb[HEAD_CRT]);
@@ -2069,15 +2051,13 @@ static int sm501fb_remove(struct platform_device *pdev)
 	struct fb_info	   *fbinfo_crt = info->fb[0];
 	struct fb_info	   *fbinfo_pnl = info->fb[1];
 
-	device_remove_file(&pdev->dev, &dev_attr_fbregs_crt);
-	device_remove_file(&pdev->dev, &dev_attr_fbregs_pnl);
-	device_remove_file(&pdev->dev, &dev_attr_crt_src);
-
 	sm501_free_init_fb(info, HEAD_CRT);
 	sm501_free_init_fb(info, HEAD_PANEL);
 
-	unregister_framebuffer(fbinfo_crt);
-	unregister_framebuffer(fbinfo_pnl);
+	if (fbinfo_crt)
+		unregister_framebuffer(fbinfo_crt);
+	if (fbinfo_pnl)
+		unregister_framebuffer(fbinfo_pnl);
 
 	sm501fb_stop(info);
 	kfree(info);
@@ -2094,8 +2074,12 @@ static int sm501fb_suspend_fb(struct sm501fb_info *info,
 			      enum sm501_controller head)
 {
 	struct fb_info *fbi = info->fb[head];
-	struct sm501fb_par *par = fbi->par;
+	struct sm501fb_par *par;
 
+	if (!fbi)
+		return 0;
+
+	par = fbi->par;
 	if (par->screen.size == 0)
 		return 0;
 
@@ -2141,8 +2125,12 @@ static void sm501fb_resume_fb(struct sm501fb_info *info,
 			      enum sm501_controller head)
 {
 	struct fb_info *fbi = info->fb[head];
-	struct sm501fb_par *par = fbi->par;
+	struct sm501fb_par *par;
 
+	if (!fbi)
+		return;
+
+	par = fbi->par;
 	if (par->screen.size == 0)
 		return;
 
@@ -2226,6 +2214,7 @@ static struct platform_driver sm501fb_driver = {
 	.resume		= sm501fb_resume,
 	.driver		= {
 		.name	= "sm501-fb",
+		.dev_groups	= sm501fb_groups,
 	},
 };
 

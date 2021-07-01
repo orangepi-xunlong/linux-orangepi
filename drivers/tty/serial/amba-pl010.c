@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  *  Driver for AMBA serial ports
  *
@@ -6,20 +7,6 @@
  *  Copyright 1999 ARM Limited
  *  Copyright (C) 2000 Deep Blue Solutions Ltd.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
  * This is a generic driver for ARM AMBA-type serial ports.  They
  * have a lot of 16550-like features, but are not register compatible.
  * Note that although they do have CTS, DCD and DSR inputs, they do
@@ -27,10 +14,6 @@
  * required, these have to be supplied via some other means (eg, GPIO)
  * and hooked into this driver.
  */
-
-#if defined(CONFIG_SERIAL_AMBA_PL010_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
-#define SUPPORT_SYSRQ
-#endif
 
 #include <linux/module.h>
 #include <linux/ioport.h>
@@ -554,7 +537,7 @@ static int pl010_verify_port(struct uart_port *port, struct serial_struct *ser)
 	return ret;
 }
 
-static struct uart_ops amba_pl010_pops = {
+static const struct uart_ops amba_pl010_pops = {
 	.tx_empty	= pl010_tx_empty,
 	.set_mctrl	= pl010_set_mctrl,
 	.get_mctrl	= pl010_get_mctrl,
@@ -697,6 +680,7 @@ static struct console amba_console = {
 #define AMBA_CONSOLE	NULL
 #endif
 
+static DEFINE_MUTEX(amba_reg_lock);
 static struct uart_driver amba_reg = {
 	.owner			= THIS_MODULE,
 	.driver_name		= "ttyAM",
@@ -740,6 +724,7 @@ static int pl010_probe(struct amba_device *dev, const struct amba_id *id)
 	uap->port.iotype = UPIO_MEM;
 	uap->port.irq = dev->irq[0];
 	uap->port.fifosize = 16;
+	uap->port.has_sysrq = IS_ENABLED(CONFIG_SERIAL_AMBA_PL010_CONSOLE);
 	uap->port.ops = &amba_pl010_pops;
 	uap->port.flags = UPF_BOOT_AUTOCONF;
 	uap->port.line = i;
@@ -749,6 +734,19 @@ static int pl010_probe(struct amba_device *dev, const struct amba_id *id)
 	amba_ports[i] = uap;
 
 	amba_set_drvdata(dev, uap);
+
+	mutex_lock(&amba_reg_lock);
+	if (!amba_reg.state) {
+		ret = uart_register_driver(&amba_reg);
+		if (ret < 0) {
+			mutex_unlock(&amba_reg_lock);
+			dev_err(uap->port.dev,
+				"Failed to register AMBA-PL010 driver\n");
+			return ret;
+		}
+	}
+	mutex_unlock(&amba_reg_lock);
+
 	ret = uart_add_one_port(&amba_reg, &uap->port);
 	if (ret)
 		amba_ports[i] = NULL;
@@ -760,12 +758,18 @@ static int pl010_remove(struct amba_device *dev)
 {
 	struct uart_amba_port *uap = amba_get_drvdata(dev);
 	int i;
+	bool busy = false;
 
 	uart_remove_one_port(&amba_reg, &uap->port);
 
 	for (i = 0; i < ARRAY_SIZE(amba_ports); i++)
 		if (amba_ports[i] == uap)
 			amba_ports[i] = NULL;
+		else if (amba_ports[i])
+			busy = true;
+
+	if (!busy)
+		uart_unregister_driver(&amba_reg);
 
 	return 0;
 }
@@ -794,7 +798,7 @@ static int pl010_resume(struct device *dev)
 
 static SIMPLE_DEV_PM_OPS(pl010_dev_pm_ops, pl010_suspend, pl010_resume);
 
-static struct amba_id pl010_ids[] = {
+static const struct amba_id pl010_ids[] = {
 	{
 		.id	= 0x00041010,
 		.mask	= 0x000fffff,
@@ -816,23 +820,14 @@ static struct amba_driver pl010_driver = {
 
 static int __init pl010_init(void)
 {
-	int ret;
-
 	printk(KERN_INFO "Serial: AMBA driver\n");
 
-	ret = uart_register_driver(&amba_reg);
-	if (ret == 0) {
-		ret = amba_driver_register(&pl010_driver);
-		if (ret)
-			uart_unregister_driver(&amba_reg);
-	}
-	return ret;
+	return  amba_driver_register(&pl010_driver);
 }
 
 static void __exit pl010_exit(void)
 {
 	amba_driver_unregister(&pl010_driver);
-	uart_unregister_driver(&amba_reg);
 }
 
 module_init(pl010_init);

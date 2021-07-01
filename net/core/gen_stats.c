@@ -1,16 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * net/core/gen_stats.c
- *
- *             This program is free software; you can redistribute it and/or
- *             modify it under the terms of the GNU General Public License
- *             as published by the Free Software Foundation; either version
- *             2 of the License, or (at your option) any later version.
  *
  * Authors:  Thomas Graf <tgraf@suug.ch>
  *           Jamal Hadi Salim
  *           Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
  *
- * See Documentation/networking/gen_stats.txt
+ * See Documentation/networking/gen_stats.rst
  */
 
 #include <linux/types.h>
@@ -127,8 +123,7 @@ __gnet_stats_copy_basic_cpu(struct gnet_stats_basic_packed *bstats,
 	for_each_possible_cpu(i) {
 		struct gnet_stats_basic_cpu *bcpu = per_cpu_ptr(cpu, i);
 		unsigned int start;
-		u64 bytes;
-		u32 packets;
+		u64 bytes, packets;
 
 		do {
 			start = u64_stats_fetch_begin_irq(&bcpu->syncp);
@@ -162,6 +157,39 @@ __gnet_stats_copy_basic(const seqcount_t *running,
 }
 EXPORT_SYMBOL(__gnet_stats_copy_basic);
 
+static int
+___gnet_stats_copy_basic(const seqcount_t *running,
+			 struct gnet_dump *d,
+			 struct gnet_stats_basic_cpu __percpu *cpu,
+			 struct gnet_stats_basic_packed *b,
+			 int type)
+{
+	struct gnet_stats_basic_packed bstats = {0};
+
+	__gnet_stats_copy_basic(running, &bstats, cpu, b);
+
+	if (d->compat_tc_stats && type == TCA_STATS_BASIC) {
+		d->tc_stats.bytes = bstats.bytes;
+		d->tc_stats.packets = bstats.packets;
+	}
+
+	if (d->tail) {
+		struct gnet_stats_basic sb;
+		int res;
+
+		memset(&sb, 0, sizeof(sb));
+		sb.bytes = bstats.bytes;
+		sb.packets = bstats.packets;
+		res = gnet_stats_copy(d, type, &sb, sizeof(sb), TCA_STATS_PAD);
+		if (res < 0 || sb.packets == bstats.packets)
+			return res;
+		/* emit 64bit stats only if needed */
+		return gnet_stats_copy(d, TCA_STATS_PKT64, &bstats.packets,
+				       sizeof(bstats.packets), TCA_STATS_PAD);
+	}
+	return 0;
+}
+
 /**
  * gnet_stats_copy_basic - copy basic statistics into statistic TLV
  * @running: seqcount_t pointer
@@ -181,33 +209,39 @@ gnet_stats_copy_basic(const seqcount_t *running,
 		      struct gnet_stats_basic_cpu __percpu *cpu,
 		      struct gnet_stats_basic_packed *b)
 {
-	struct gnet_stats_basic_packed bstats = {0};
-
-	__gnet_stats_copy_basic(running, &bstats, cpu, b);
-
-	if (d->compat_tc_stats) {
-		d->tc_stats.bytes = bstats.bytes;
-		d->tc_stats.packets = bstats.packets;
-	}
-
-	if (d->tail) {
-		struct gnet_stats_basic sb;
-
-		memset(&sb, 0, sizeof(sb));
-		sb.bytes = bstats.bytes;
-		sb.packets = bstats.packets;
-		return gnet_stats_copy(d, TCA_STATS_BASIC, &sb, sizeof(sb),
-				       TCA_STATS_PAD);
-	}
-	return 0;
+	return ___gnet_stats_copy_basic(running, d, cpu, b,
+					TCA_STATS_BASIC);
 }
 EXPORT_SYMBOL(gnet_stats_copy_basic);
 
 /**
+ * gnet_stats_copy_basic_hw - copy basic hw statistics into statistic TLV
+ * @running: seqcount_t pointer
+ * @d: dumping handle
+ * @cpu: copy statistic per cpu
+ * @b: basic statistics
+ *
+ * Appends the basic statistics to the top level TLV created by
+ * gnet_stats_start_copy().
+ *
+ * Returns 0 on success or -1 with the statistic lock released
+ * if the room in the socket buffer was not sufficient.
+ */
+int
+gnet_stats_copy_basic_hw(const seqcount_t *running,
+			 struct gnet_dump *d,
+			 struct gnet_stats_basic_cpu __percpu *cpu,
+			 struct gnet_stats_basic_packed *b)
+{
+	return ___gnet_stats_copy_basic(running, d, cpu, b,
+					TCA_STATS_BASIC_HW);
+}
+EXPORT_SYMBOL(gnet_stats_copy_basic_hw);
+
+/**
  * gnet_stats_copy_rate_est - copy rate estimator statistics into statistics TLV
  * @d: dumping handle
- * @b: basic statistics
- * @r: rate estimator statistics
+ * @rate_est: rate estimator
  *
  * Appends the rate estimator statistics to the top level TLV created by
  * gnet_stats_start_copy().
@@ -217,18 +251,17 @@ EXPORT_SYMBOL(gnet_stats_copy_basic);
  */
 int
 gnet_stats_copy_rate_est(struct gnet_dump *d,
-			 const struct gnet_stats_basic_packed *b,
-			 struct gnet_stats_rate_est64 *r)
+			 struct net_rate_estimator __rcu **rate_est)
 {
+	struct gnet_stats_rate_est64 sample;
 	struct gnet_stats_rate_est est;
 	int res;
 
-	if (b && !gen_estimator_active(b, r))
+	if (!gen_estimator_read(rate_est, &sample))
 		return 0;
-
-	est.bps = min_t(u64, UINT_MAX, r->bps);
+	est.bps = min_t(u64, UINT_MAX, sample.bps);
 	/* we have some time before reaching 2^32 packets per second */
-	est.pps = r->pps;
+	est.pps = sample.pps;
 
 	if (d->compat_tc_stats) {
 		d->tc_stats.bps = est.bps;
@@ -238,11 +271,11 @@ gnet_stats_copy_rate_est(struct gnet_dump *d,
 	if (d->tail) {
 		res = gnet_stats_copy(d, TCA_STATS_RATE_EST, &est, sizeof(est),
 				      TCA_STATS_PAD);
-		if (res < 0 || est.bps == r->bps)
+		if (res < 0 || est.bps == sample.bps)
 			return res;
 		/* emit 64bit stats only if needed */
-		return gnet_stats_copy(d, TCA_STATS_RATE_EST64, r, sizeof(*r),
-				       TCA_STATS_PAD);
+		return gnet_stats_copy(d, TCA_STATS_RATE_EST64, &sample,
+				       sizeof(sample), TCA_STATS_PAD);
 	}
 
 	return 0;
@@ -266,10 +299,10 @@ __gnet_stats_copy_queue_cpu(struct gnet_stats_queue *qstats,
 	}
 }
 
-static void __gnet_stats_copy_queue(struct gnet_stats_queue *qstats,
-				    const struct gnet_stats_queue __percpu *cpu,
-				    const struct gnet_stats_queue *q,
-				    __u32 qlen)
+void __gnet_stats_copy_queue(struct gnet_stats_queue *qstats,
+			     const struct gnet_stats_queue __percpu *cpu,
+			     const struct gnet_stats_queue *q,
+			     __u32 qlen)
 {
 	if (cpu) {
 		__gnet_stats_copy_queue_cpu(qstats, cpu);
@@ -283,6 +316,7 @@ static void __gnet_stats_copy_queue(struct gnet_stats_queue *qstats,
 
 	qstats->qlen = qlen;
 }
+EXPORT_SYMBOL(__gnet_stats_copy_queue);
 
 /**
  * gnet_stats_copy_queue - copy queue statistics into statistics TLV

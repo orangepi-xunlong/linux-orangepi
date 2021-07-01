@@ -1,19 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  net/dccp/output.c
  *
  *  An implementation of the DCCP protocol
  *  Arnaldo Carvalho de Melo <acme@conectiva.com.br>
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License
- *	as published by the Free Software Foundation; either version
- *	2 of the License, or (at your option) any later version.
  */
 
 #include <linux/dccp.h>
 #include <linux/kernel.h>
 #include <linux/skbuff.h>
 #include <linux/slab.h>
+#include <linux/sched/signal.h>
 
 #include <net/inet_sock.h>
 #include <net/sock.h>
@@ -65,7 +62,7 @@ static int dccp_transmit_skb(struct sock *sk, struct sk_buff *skb)
 		switch (dcb->dccpd_type) {
 		case DCCP_PKT_DATA:
 			set_ack = 0;
-			/* fall through */
+			fallthrough;
 		case DCCP_PKT_DATAACK:
 		case DCCP_PKT_RESET:
 			break;
@@ -75,12 +72,12 @@ static int dccp_transmit_skb(struct sock *sk, struct sk_buff *skb)
 			/* Use ISS on the first (non-retransmitted) Request. */
 			if (icsk->icsk_retransmits == 0)
 				dcb->dccpd_seq = dp->dccps_iss;
-			/* fall through */
+			fallthrough;
 
 		case DCCP_PKT_SYNC:
 		case DCCP_PKT_SYNCACK:
 			ackno = dcb->dccpd_ack_seq;
-			/* fall through */
+			fallthrough;
 		default:
 			/*
 			 * Set owner/destructor: some skbs are allocated via
@@ -484,7 +481,7 @@ struct sk_buff *dccp_ctl_make_reset(struct sock *sk, struct sk_buff *rcv_skb)
 	case DCCP_RESET_CODE_PACKET_ERROR:
 		dhr->dccph_reset_data[0] = rxdh->dccph_type;
 		break;
-	case DCCP_RESET_CODE_OPTION_ERROR:	/* fall through */
+	case DCCP_RESET_CODE_OPTION_ERROR:
 	case DCCP_RESET_CODE_MANDATORY_ERROR:
 		memcpy(dhr->dccph_reset_data, dcb->dccpd_reset_data, 3);
 		break;

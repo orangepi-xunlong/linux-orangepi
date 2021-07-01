@@ -1,24 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*******************************************************************************
 
   Header file for stmmac platform data
 
   Copyright (C) 2009  STMicroelectronics Ltd
 
-  This program is free software; you can redistribute it and/or modify it
-  under the terms and conditions of the GNU General Public License,
-  version 2, as published by the Free Software Foundation.
-
-  This program is distributed in the hope it will be useful, but WITHOUT
-  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-  more details.
-
-  You should have received a copy of the GNU General Public License along with
-  this program; if not, write to the Free Software Foundation, Inc.,
-  51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
-
-  The full GNU General Public License is included in this distribution in
-  the file called "COPYING".
 
   Author: Giuseppe Cavallaro <peppe.cavallaro@st.com>
 *******************************************************************************/
@@ -27,6 +13,11 @@
 #define __STMMAC_PLATFORM_DATA
 
 #include <linux/platform_device.h>
+#include <linux/phy.h>
+
+#define MTL_MAX_RX_QUEUES	8
+#define MTL_MAX_TX_QUEUES	8
+#define STMMAC_CH_MAX		8
 
 #define STMMAC_RX_COE_NONE	0
 #define STMMAC_RX_COE_TYPE1	1
@@ -43,6 +34,18 @@
 #define	STMMAC_CSR_35_60M	0x3	/* MDC = clk_scr_i/26 */
 #define	STMMAC_CSR_150_250M	0x4	/* MDC = clk_scr_i/102 */
 #define	STMMAC_CSR_250_300M	0x5	/* MDC = clk_scr_i/122 */
+
+/* MTL algorithms identifiers */
+#define MTL_TX_ALGORITHM_WRR	0x0
+#define MTL_TX_ALGORITHM_WFQ	0x1
+#define MTL_TX_ALGORITHM_DWRR	0x2
+#define MTL_TX_ALGORITHM_SP	0x3
+#define MTL_RX_ALGORITHM_SP	0x4
+#define MTL_RX_ALGORITHM_WSP	0x5
+
+/* RX/TX Queue Mode */
+#define MTL_QUEUE_AVB		0x0
+#define MTL_QUEUE_DCB		0x1
 
 /* The MDC clock could be set higher than the IEEE 802.3
  * specified frequency limit 0f 2.5 MHz, by programming a clock divider
@@ -76,21 +79,22 @@
 /* Platfrom data for platform device structure's platform_data field */
 
 struct stmmac_mdio_bus_data {
-	int (*phy_reset)(void *priv);
 	unsigned int phy_mask;
+	unsigned int has_xpcs;
 	int *irqs;
 	int probed_phy_irq;
-#ifdef CONFIG_OF
-	int reset_gpio, active_low;
-	u32 delays[3];
-#endif
+	bool needs_reset;
 };
 
 struct stmmac_dma_cfg {
 	int pbl;
+	int txpbl;
+	int rxpbl;
+	bool pblx8;
 	int fixed_burst;
 	int mixed_burst;
 	bool aal;
+	bool eame;
 };
 
 #define AXI_BLEN	7
@@ -100,21 +104,56 @@ struct stmmac_axi {
 	u32 axi_wr_osr_lmt;
 	u32 axi_rd_osr_lmt;
 	bool axi_kbbe;
-	bool axi_axi_all;
 	u32 axi_blen[AXI_BLEN];
 	bool axi_fb;
 	bool axi_mb;
 	bool axi_rb;
 };
 
+#define EST_GCL		1024
+struct stmmac_est {
+	int enable;
+	u32 btr_offset[2];
+	u32 btr[2];
+	u32 ctr[2];
+	u32 ter;
+	u32 gcl_unaligned[EST_GCL];
+	u32 gcl[EST_GCL];
+	u32 gcl_size;
+};
+
+struct stmmac_rxq_cfg {
+	u8 mode_to_use;
+	u32 chan;
+	u8 pkt_route;
+	bool use_prio;
+	u32 prio;
+};
+
+struct stmmac_txq_cfg {
+	u32 weight;
+	u8 mode_to_use;
+	/* Credit Base Shaper parameters */
+	u32 send_slope;
+	u32 idle_slope;
+	u32 high_credit;
+	u32 low_credit;
+	bool use_prio;
+	u32 prio;
+	int tbs_en;
+};
+
 struct plat_stmmacenet_data {
 	int bus_id;
 	int phy_addr;
 	int interface;
+	phy_interface_t phy_interface;
 	struct stmmac_mdio_bus_data *mdio_bus_data;
 	struct device_node *phy_node;
+	struct device_node *phylink_node;
 	struct device_node *mdio_node;
 	struct stmmac_dma_cfg *dma_cfg;
+	struct stmmac_est *est;
 	int clk_csr;
 	int has_gmac;
 	int enh_desc;
@@ -131,16 +170,37 @@ struct plat_stmmacenet_data {
 	int unicast_filter_entries;
 	int tx_fifo_size;
 	int rx_fifo_size;
+	u32 addr64;
+	u32 rx_queues_to_use;
+	u32 tx_queues_to_use;
+	u8 rx_sched_algorithm;
+	u8 tx_sched_algorithm;
+	struct stmmac_rxq_cfg rx_queues_cfg[MTL_MAX_RX_QUEUES];
+	struct stmmac_txq_cfg tx_queues_cfg[MTL_MAX_TX_QUEUES];
 	void (*fix_mac_speed)(void *priv, unsigned int speed);
-	void (*bus_setup)(void __iomem *ioaddr);
+	int (*serdes_powerup)(struct net_device *ndev, void *priv);
+	void (*serdes_powerdown)(struct net_device *ndev, void *priv);
 	int (*init)(struct platform_device *pdev, void *priv);
 	void (*exit)(struct platform_device *pdev, void *priv);
-	void (*suspend)(struct platform_device *pdev, void *priv);
-	void (*resume)(struct platform_device *pdev, void *priv);
+	struct mac_device_info *(*setup)(void *priv);
 	void *bsp_priv;
+	struct clk *stmmac_clk;
+	struct clk *pclk;
+	struct clk *clk_ptp_ref;
+	unsigned int clk_ptp_rate;
+	unsigned int clk_ref_rate;
+	s32 ptp_max_adj;
+	struct reset_control *stmmac_rst;
 	struct stmmac_axi *axi;
 	int has_gmac4;
+	bool has_sun8i;
 	bool tso_en;
+	int rss_en;
 	int mac_port_sel_speed;
+	bool en_tx_lpi_clockgating;
+	int has_xgmac;
+	bool vlan_fail_q_en;
+	u8 vlan_fail_q;
+	unsigned int eee_usecs_rate;
 };
 #endif

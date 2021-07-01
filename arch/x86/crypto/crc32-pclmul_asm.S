@@ -38,9 +38,9 @@
  */
 
 #include <linux/linkage.h>
-#include <asm/inst.h>
 
 
+.section .rodata
 .align 16
 /*
  * [x4*128+32 mod P(x) << 32)]'  << 1   = 0x154442bd4
@@ -102,7 +102,7 @@
  *	                     size_t len, uint crc32)
  */
 
-ENTRY(crc32_pclmul_le_16) /* buffer and buffer size are 16 bytes aligned */
+SYM_FUNC_START(crc32_pclmul_le_16) /* buffer and buffer size are 16 bytes aligned */
 	movdqa  (BUF), %xmm1
 	movdqa  0x10(BUF), %xmm2
 	movdqa  0x20(BUF), %xmm3
@@ -111,19 +111,13 @@ ENTRY(crc32_pclmul_le_16) /* buffer and buffer size are 16 bytes aligned */
 	pxor    CONSTANT, %xmm1
 	sub     $0x40, LEN
 	add     $0x40, BUF
-#ifndef __x86_64__
-	/* This is for position independent code(-fPIC) support for 32bit */
-	call    delta
-delta:
-	pop     %ecx
-#endif
 	cmp     $0x40, LEN
 	jb      less_64
 
 #ifdef __x86_64__
 	movdqa .Lconstant_R2R1(%rip), CONSTANT
 #else
-	movdqa .Lconstant_R2R1 - delta(%ecx), CONSTANT
+	movdqa .Lconstant_R2R1, CONSTANT
 #endif
 
 loop_64:/*  64 bytes Full cache line folding */
@@ -134,17 +128,17 @@ loop_64:/*  64 bytes Full cache line folding */
 #ifdef __x86_64__
 	movdqa  %xmm4, %xmm8
 #endif
-	PCLMULQDQ 00, CONSTANT, %xmm1
-	PCLMULQDQ 00, CONSTANT, %xmm2
-	PCLMULQDQ 00, CONSTANT, %xmm3
+	pclmulqdq $0x00, CONSTANT, %xmm1
+	pclmulqdq $0x00, CONSTANT, %xmm2
+	pclmulqdq $0x00, CONSTANT, %xmm3
 #ifdef __x86_64__
-	PCLMULQDQ 00, CONSTANT, %xmm4
+	pclmulqdq $0x00, CONSTANT, %xmm4
 #endif
-	PCLMULQDQ 0x11, CONSTANT, %xmm5
-	PCLMULQDQ 0x11, CONSTANT, %xmm6
-	PCLMULQDQ 0x11, CONSTANT, %xmm7
+	pclmulqdq $0x11, CONSTANT, %xmm5
+	pclmulqdq $0x11, CONSTANT, %xmm6
+	pclmulqdq $0x11, CONSTANT, %xmm7
 #ifdef __x86_64__
-	PCLMULQDQ 0x11, CONSTANT, %xmm8
+	pclmulqdq $0x11, CONSTANT, %xmm8
 #endif
 	pxor    %xmm5, %xmm1
 	pxor    %xmm6, %xmm2
@@ -154,8 +148,8 @@ loop_64:/*  64 bytes Full cache line folding */
 #else
 	/* xmm8 unsupported for x32 */
 	movdqa  %xmm4, %xmm5
-	PCLMULQDQ 00, CONSTANT, %xmm4
-	PCLMULQDQ 0x11, CONSTANT, %xmm5
+	pclmulqdq $0x00, CONSTANT, %xmm4
+	pclmulqdq $0x11, CONSTANT, %xmm5
 	pxor    %xmm5, %xmm4
 #endif
 
@@ -172,25 +166,25 @@ less_64:/*  Folding cache line into 128bit */
 #ifdef __x86_64__
 	movdqa  .Lconstant_R4R3(%rip), CONSTANT
 #else
-	movdqa  .Lconstant_R4R3 - delta(%ecx), CONSTANT
+	movdqa  .Lconstant_R4R3, CONSTANT
 #endif
 	prefetchnta     (BUF)
 
 	movdqa  %xmm1, %xmm5
-	PCLMULQDQ 0x00, CONSTANT, %xmm1
-	PCLMULQDQ 0x11, CONSTANT, %xmm5
+	pclmulqdq $0x00, CONSTANT, %xmm1
+	pclmulqdq $0x11, CONSTANT, %xmm5
 	pxor    %xmm5, %xmm1
 	pxor    %xmm2, %xmm1
 
 	movdqa  %xmm1, %xmm5
-	PCLMULQDQ 0x00, CONSTANT, %xmm1
-	PCLMULQDQ 0x11, CONSTANT, %xmm5
+	pclmulqdq $0x00, CONSTANT, %xmm1
+	pclmulqdq $0x11, CONSTANT, %xmm5
 	pxor    %xmm5, %xmm1
 	pxor    %xmm3, %xmm1
 
 	movdqa  %xmm1, %xmm5
-	PCLMULQDQ 0x00, CONSTANT, %xmm1
-	PCLMULQDQ 0x11, CONSTANT, %xmm5
+	pclmulqdq $0x00, CONSTANT, %xmm1
+	pclmulqdq $0x11, CONSTANT, %xmm5
 	pxor    %xmm5, %xmm1
 	pxor    %xmm4, %xmm1
 
@@ -198,8 +192,8 @@ less_64:/*  Folding cache line into 128bit */
 	jb      fold_64
 loop_16:/* Folding rest buffer into 128bit */
 	movdqa  %xmm1, %xmm5
-	PCLMULQDQ 0x00, CONSTANT, %xmm1
-	PCLMULQDQ 0x11, CONSTANT, %xmm5
+	pclmulqdq $0x00, CONSTANT, %xmm1
+	pclmulqdq $0x11, CONSTANT, %xmm5
 	pxor    %xmm5, %xmm1
 	pxor    (BUF), %xmm1
 	sub     $0x10, LEN
@@ -210,7 +204,7 @@ loop_16:/* Folding rest buffer into 128bit */
 fold_64:
 	/* perform the last 64 bit fold, also adds 32 zeroes
 	 * to the input stream */
-	PCLMULQDQ 0x01, %xmm1, CONSTANT /* R4 * xmm1.low */
+	pclmulqdq $0x01, %xmm1, CONSTANT /* R4 * xmm1.low */
 	psrldq  $0x08, %xmm1
 	pxor    CONSTANT, %xmm1
 
@@ -220,27 +214,27 @@ fold_64:
 	movdqa  .Lconstant_R5(%rip), CONSTANT
 	movdqa  .Lconstant_mask32(%rip), %xmm3
 #else
-	movdqa  .Lconstant_R5 - delta(%ecx), CONSTANT
-	movdqa  .Lconstant_mask32 - delta(%ecx), %xmm3
+	movdqa  .Lconstant_R5, CONSTANT
+	movdqa  .Lconstant_mask32, %xmm3
 #endif
 	psrldq  $0x04, %xmm2
 	pand    %xmm3, %xmm1
-	PCLMULQDQ 0x00, CONSTANT, %xmm1
+	pclmulqdq $0x00, CONSTANT, %xmm1
 	pxor    %xmm2, %xmm1
 
 	/* Finish up with the bit-reversed barrett reduction 64 ==> 32 bits */
 #ifdef __x86_64__
 	movdqa  .Lconstant_RUpoly(%rip), CONSTANT
 #else
-	movdqa  .Lconstant_RUpoly - delta(%ecx), CONSTANT
+	movdqa  .Lconstant_RUpoly, CONSTANT
 #endif
 	movdqa  %xmm1, %xmm2
 	pand    %xmm3, %xmm1
-	PCLMULQDQ 0x10, CONSTANT, %xmm1
+	pclmulqdq $0x10, CONSTANT, %xmm1
 	pand    %xmm3, %xmm1
-	PCLMULQDQ 0x00, CONSTANT, %xmm1
+	pclmulqdq $0x00, CONSTANT, %xmm1
 	pxor    %xmm2, %xmm1
-	PEXTRD  0x01, %xmm1, %eax
+	pextrd  $0x01, %xmm1, %eax
 
 	ret
-ENDPROC(crc32_pclmul_le_16)
+SYM_FUNC_END(crc32_pclmul_le_16)

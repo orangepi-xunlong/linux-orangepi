@@ -1,4 +1,5 @@
-/* Copyright (C) 2014-2015 Broadcom Corporation
+/*
+ * Copyright (C) 2014-2017 Broadcom
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -8,6 +9,10 @@
  * kind, whether express or implied; without even the implied warranty
  * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ */
+
+/*
+ * Broadcom Cygnus IOMUX driver
  *
  * This file contains the Cygnus IOMUX driver that supports group based PINMUX
  * configuration. Although PINMUX configuration is mainly group based, the
@@ -17,7 +22,6 @@
 
 #include <linux/err.h>
 #include <linux/io.h>
-#include <linux/module.h>
 #include <linux/of.h>
 #include <linux/slab.h>
 #include <linux/platform_device.h>
@@ -919,7 +923,6 @@ static int cygnus_mux_log_init(struct cygnus_pinctrl *pinctrl)
 	if (!pinctrl->mux_log)
 		return -ENOMEM;
 
-	log = pinctrl->mux_log;
 	for (i = 0; i < CYGNUS_NUM_IOMUX_REGS; i++) {
 		for (j = 0; j < CYGNUS_NUM_MUX_PER_REG; j++) {
 			log = &pinctrl->mux_log[i * CYGNUS_NUM_MUX_PER_REG
@@ -937,7 +940,6 @@ static int cygnus_mux_log_init(struct cygnus_pinctrl *pinctrl)
 static int cygnus_pinmux_probe(struct platform_device *pdev)
 {
 	struct cygnus_pinctrl *pinctrl;
-	struct resource *res;
 	int i, ret;
 	struct pinctrl_pin_desc *pins;
 	unsigned num_pins = ARRAY_SIZE(cygnus_pins);
@@ -950,15 +952,13 @@ static int cygnus_pinmux_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, pinctrl);
 	spin_lock_init(&pinctrl->lock);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	pinctrl->base0 = devm_ioremap_resource(&pdev->dev, res);
+	pinctrl->base0 = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(pinctrl->base0)) {
 		dev_err(&pdev->dev, "unable to map I/O space\n");
 		return PTR_ERR(pinctrl->base0);
 	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-	pinctrl->base1 = devm_ioremap_resource(&pdev->dev, res);
+	pinctrl->base1 = devm_platform_ioremap_resource(pdev, 1);
 	if (IS_ERR(pinctrl->base1)) {
 		dev_err(&pdev->dev, "unable to map I/O space\n");
 		return PTR_ERR(pinctrl->base1);
@@ -1016,7 +1016,3 @@ static int __init cygnus_pinmux_init(void)
 	return platform_driver_register(&cygnus_pinmux_driver);
 }
 arch_initcall(cygnus_pinmux_init);
-
-MODULE_AUTHOR("Ray Jui <rjui@broadcom.com>");
-MODULE_DESCRIPTION("Broadcom Cygnus IOMUX driver");
-MODULE_LICENSE("GPL v2");

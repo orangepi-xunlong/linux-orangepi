@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015 Pablo Neira Ayuso <pablo@netfilter.org>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -28,7 +25,7 @@ static void nft_dup_ipv6_eval(const struct nft_expr *expr,
 	struct in6_addr *gw = (struct in6_addr *)&regs->data[priv->sreg_addr];
 	int oif = priv->sreg_dev ? regs->data[priv->sreg_dev] : -1;
 
-	nf_dup_ipv6(pkt->net, pkt->skb, pkt->hook, gw, oif);
+	nf_dup_ipv6(nft_net(pkt), pkt->skb, nft_hook(pkt), gw, oif);
 }
 
 static int nft_dup_ipv6_init(const struct nft_ctx *ctx,
@@ -108,3 +105,4 @@ module_exit(nft_dup_ipv6_module_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Pablo Neira Ayuso <pablo@netfilter.org>");
 MODULE_ALIAS_NFT_AF_EXPR(AF_INET6, "dup");
+MODULE_DESCRIPTION("IPv6 nftables packet duplication support");

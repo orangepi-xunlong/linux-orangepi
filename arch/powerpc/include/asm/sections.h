@@ -1,10 +1,27 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_POWERPC_SECTIONS_H
 #define _ASM_POWERPC_SECTIONS_H
 #ifdef __KERNEL__
 
 #include <linux/elf.h>
 #include <linux/uaccess.h>
+
+#define arch_is_kernel_initmem_freed arch_is_kernel_initmem_freed
+
 #include <asm-generic/sections.h>
+
+extern bool init_mem_is_free;
+
+static inline int arch_is_kernel_initmem_freed(unsigned long addr)
+{
+	if (!init_mem_is_free)
+		return 0;
+
+	return addr >= (unsigned long)__init_begin &&
+		addr < (unsigned long)__init_end;
+}
+
+extern char __head_end[];
 
 #ifdef __powerpc64__
 
@@ -13,6 +30,13 @@ extern char __end_interrupts[];
 
 extern char __prom_init_toc_start[];
 extern char __prom_init_toc_end[];
+
+#ifdef CONFIG_PPC_POWERNV
+extern char start_real_trampolines[];
+extern char end_real_trampolines[];
+extern char start_virt_trampolines[];
+extern char end_virt_trampolines[];
+#endif
 
 static inline int in_kernel_text(unsigned long addr)
 {
@@ -51,27 +75,28 @@ static inline int overlaps_kernel_text(unsigned long start, unsigned long end)
 		(unsigned long)_stext < end;
 }
 
-static inline int overlaps_kvm_tmp(unsigned long start, unsigned long end)
-{
-#ifdef CONFIG_KVM_GUEST
-	extern char kvm_tmp[];
-	return start < (unsigned long)kvm_tmp &&
-		(unsigned long)&kvm_tmp[1024 * 1024] < end;
-#else
-	return 0;
-#endif
-}
-
 #ifdef PPC64_ELF_ABI_v1
+
+#define HAVE_DEREFERENCE_FUNCTION_DESCRIPTOR 1
+
 #undef dereference_function_descriptor
 static inline void *dereference_function_descriptor(void *ptr)
 {
 	struct ppc64_opd_entry *desc = ptr;
 	void *p;
 
-	if (!probe_kernel_address(&desc->funcaddr, p))
+	if (!get_kernel_nofault(p, (void *)&desc->funcaddr))
 		ptr = p;
 	return ptr;
+}
+
+#undef dereference_kernel_function_descriptor
+static inline void *dereference_kernel_function_descriptor(void *ptr)
+{
+	if (ptr < (void *)__start_opd || ptr >= (void *)__end_opd)
+		return ptr;
+
+	return dereference_function_descriptor(ptr);
 }
 #endif /* PPC64_ELF_ABI_v1 */
 

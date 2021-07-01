@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * handling diagnose instructions
  *
- * Copyright IBM Corp. 2008, 2011
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License (version 2 only)
- * as published by the Free Software Foundation.
+ * Copyright IBM Corp. 2008, 2020
  *
  *    Author(s): Carsten Otte <cotte@de.ibm.com>
  *               Christian Borntraeger <borntraeger@de.ibm.com>
@@ -13,7 +10,6 @@
 
 #include <linux/kvm.h>
 #include <linux/kvm_host.h>
-#include <asm/pgalloc.h>
 #include <asm/gmap.h>
 #include <asm/virtio-ccw.h>
 #include "kvm-s390.h"
@@ -27,7 +23,7 @@ static int diag_release_pages(struct kvm_vcpu *vcpu)
 	unsigned long prefix  = kvm_s390_get_prefix(vcpu);
 
 	start = vcpu->run->s.regs.gprs[(vcpu->arch.sie_block->ipa & 0xf0) >> 4];
-	end = vcpu->run->s.regs.gprs[vcpu->arch.sie_block->ipa & 0xf] + 4096;
+	end = vcpu->run->s.regs.gprs[vcpu->arch.sie_block->ipa & 0xf] + PAGE_SIZE;
 	vcpu->stat.diagnose_10++;
 
 	if (start & ~PAGE_MASK || end & ~PAGE_MASK || start >= end
@@ -51,9 +47,9 @@ static int diag_release_pages(struct kvm_vcpu *vcpu)
 		 */
 		gmap_discard(vcpu->arch.gmap, start, prefix);
 		if (start <= prefix)
-			gmap_discard(vcpu->arch.gmap, 0, 4096);
-		if (end > prefix + 4096)
-			gmap_discard(vcpu->arch.gmap, 4096, 8192);
+			gmap_discard(vcpu->arch.gmap, 0, PAGE_SIZE);
+		if (end > prefix + PAGE_SIZE)
+			gmap_discard(vcpu->arch.gmap, PAGE_SIZE, 2 * PAGE_SIZE);
 		gmap_discard(vcpu->arch.gmap, prefix + 2 * PAGE_SIZE, end);
 	}
 	return 0;
@@ -150,7 +146,7 @@ static int __diag_time_slice_end(struct kvm_vcpu *vcpu)
 {
 	VCPU_EVENT(vcpu, 5, "%s", "diag time slice end");
 	vcpu->stat.diagnose_44++;
-	kvm_vcpu_on_spin(vcpu);
+	kvm_vcpu_on_spin(vcpu, true);
 	return 0;
 }
 
@@ -161,14 +157,28 @@ static int __diag_time_slice_end_directed(struct kvm_vcpu *vcpu)
 
 	tid = vcpu->run->s.regs.gprs[(vcpu->arch.sie_block->ipa & 0xf0) >> 4];
 	vcpu->stat.diagnose_9c++;
-	VCPU_EVENT(vcpu, 5, "diag time slice end directed to %d", tid);
 
+	/* yield to self */
 	if (tid == vcpu->vcpu_id)
-		return 0;
+		goto no_yield;
 
+	/* yield to invalid */
 	tcpu = kvm_get_vcpu_by_id(vcpu->kvm, tid);
-	if (tcpu)
-		kvm_vcpu_yield_to(tcpu);
+	if (!tcpu)
+		goto no_yield;
+
+	/* target already running */
+	if (READ_ONCE(tcpu->cpu) >= 0)
+		goto no_yield;
+
+	if (kvm_vcpu_yield_to(tcpu) <= 0)
+		goto no_yield;
+
+	VCPU_EVENT(vcpu, 5, "diag time slice end directed to %d: done", tid);
+	return 0;
+no_yield:
+	VCPU_EVENT(vcpu, 5, "diag time slice end directed to %d: ignored", tid);
+	vcpu->stat.diagnose_9c_ignored++;
 	return 0;
 }
 
@@ -190,6 +200,10 @@ static int __diag_ipl_functions(struct kvm_vcpu *vcpu)
 		return -EOPNOTSUPP;
 	}
 
+	/*
+	 * no need to check the return value of vcpu_stop as it can only have
+	 * an error for protvirt, but protvirt means user cpu state
+	 */
 	if (!kvm_s390_user_cpu_state_ctrl(vcpu->kvm))
 		kvm_s390_vcpu_stop(vcpu);
 	vcpu->run->s390_reset_flags |= KVM_S390_RESET_SUBSYSTEM;
@@ -260,6 +274,7 @@ int kvm_s390_handle_diag(struct kvm_vcpu *vcpu)
 	case 0x500:
 		return __diag_virtio_hypercall(vcpu);
 	default:
+		vcpu->stat.diagnose_other++;
 		return -EOPNOTSUPP;
 	}
 }

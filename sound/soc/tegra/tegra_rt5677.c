@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
 * tegra_rt5677.c - Tegra machine ASoC driver for boards using RT5677 codec.
  *
  * Copyright (c) 2014, The Chromium OS Authors.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  * Based on code copyright/by:
  *
@@ -52,8 +41,8 @@ struct tegra_rt5677 {
 static int tegra_rt5677_asoc_hw_params(struct snd_pcm_substream *substream,
 					struct snd_pcm_hw_params *params)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
 	struct snd_soc_card *card = rtd->card;
 	struct tegra_rt5677 *machine = snd_soc_card_get_drvdata(card);
 	int srate, mclk, err;
@@ -93,7 +82,7 @@ static int tegra_rt5677_event_hp(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
-static struct snd_soc_ops tegra_rt5677_ops = {
+static const struct snd_soc_ops tegra_rt5677_ops = {
 	.hw_params = tegra_rt5677_asoc_hw_params,
 };
 
@@ -169,37 +158,24 @@ static int tegra_rt5677_asoc_init(struct snd_soc_pcm_runtime *rtd)
 	return 0;
 }
 
-static int tegra_rt5677_card_remove(struct snd_soc_card *card)
-{
-	struct tegra_rt5677 *machine = snd_soc_card_get_drvdata(card);
-
-	if (gpio_is_valid(machine->gpio_hp_det)) {
-		snd_soc_jack_free_gpios(&tegra_rt5677_hp_jack, 1,
-				&tegra_rt5677_hp_jack_gpio);
-	}
-
-	if (gpio_is_valid(machine->gpio_mic_present)) {
-		snd_soc_jack_free_gpios(&tegra_rt5677_mic_jack, 1,
-				&tegra_rt5677_mic_jack_gpio);
-	}
-
-	return 0;
-}
+SND_SOC_DAILINK_DEFS(pcm,
+	DAILINK_COMP_ARRAY(COMP_EMPTY()),
+	DAILINK_COMP_ARRAY(COMP_CODEC(NULL, "rt5677-aif1")),
+	DAILINK_COMP_ARRAY(COMP_EMPTY()));
 
 static struct snd_soc_dai_link tegra_rt5677_dai = {
 	.name = "RT5677",
 	.stream_name = "RT5677 PCM",
-	.codec_dai_name = "rt5677-aif1",
 	.init = tegra_rt5677_asoc_init,
 	.ops = &tegra_rt5677_ops,
 	.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
 			SND_SOC_DAIFMT_CBS_CFS,
+	SND_SOC_DAILINK_REG(pcm),
 };
 
 static struct snd_soc_card snd_soc_tegra_rt5677 = {
 	.name = "tegra-rt5677",
 	.owner = THIS_MODULE,
-	.remove = tegra_rt5677_card_remove,
 	.dai_link = &tegra_rt5677_dai,
 	.num_links = 1,
 	.controls = tegra_rt5677_controls,
@@ -222,7 +198,6 @@ static int tegra_rt5677_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	card->dev = &pdev->dev;
-	platform_set_drvdata(pdev, card);
 	snd_soc_card_set_drvdata(card, machine);
 
 	machine->gpio_hp_det = of_get_named_gpio(np, "nvidia,hp-det-gpios", 0);
@@ -268,40 +243,45 @@ static int tegra_rt5677_probe(struct platform_device *pdev)
 	if (ret)
 		goto err;
 
-	tegra_rt5677_dai.codec_of_node = of_parse_phandle(np,
+	tegra_rt5677_dai.codecs->of_node = of_parse_phandle(np,
 			"nvidia,audio-codec", 0);
-	if (!tegra_rt5677_dai.codec_of_node) {
+	if (!tegra_rt5677_dai.codecs->of_node) {
 		dev_err(&pdev->dev,
 			"Property 'nvidia,audio-codec' missing or invalid\n");
 		ret = -EINVAL;
 		goto err;
 	}
 
-	tegra_rt5677_dai.cpu_of_node = of_parse_phandle(np,
+	tegra_rt5677_dai.cpus->of_node = of_parse_phandle(np,
 			"nvidia,i2s-controller", 0);
-	if (!tegra_rt5677_dai.cpu_of_node) {
+	if (!tegra_rt5677_dai.cpus->of_node) {
 		dev_err(&pdev->dev,
 			"Property 'nvidia,i2s-controller' missing or invalid\n");
 		ret = -EINVAL;
-		goto err;
+		goto err_put_codec_of_node;
 	}
-	tegra_rt5677_dai.platform_of_node = tegra_rt5677_dai.cpu_of_node;
+	tegra_rt5677_dai.platforms->of_node = tegra_rt5677_dai.cpus->of_node;
 
 	ret = tegra_asoc_utils_init(&machine->util_data, &pdev->dev);
 	if (ret)
-		goto err;
+		goto err_put_cpu_of_node;
 
 	ret = snd_soc_register_card(card);
 	if (ret) {
 		dev_err(&pdev->dev, "snd_soc_register_card failed (%d)\n",
 			ret);
-		goto err_fini_utils;
+		goto err_put_cpu_of_node;
 	}
 
 	return 0;
 
-err_fini_utils:
-	tegra_asoc_utils_fini(&machine->util_data);
+err_put_cpu_of_node:
+	of_node_put(tegra_rt5677_dai.cpus->of_node);
+	tegra_rt5677_dai.cpus->of_node = NULL;
+	tegra_rt5677_dai.platforms->of_node = NULL;
+err_put_codec_of_node:
+	of_node_put(tegra_rt5677_dai.codecs->of_node);
+	tegra_rt5677_dai.codecs->of_node = NULL;
 err:
 	return ret;
 }
@@ -309,11 +289,14 @@ err:
 static int tegra_rt5677_remove(struct platform_device *pdev)
 {
 	struct snd_soc_card *card = platform_get_drvdata(pdev);
-	struct tegra_rt5677 *machine = snd_soc_card_get_drvdata(card);
 
 	snd_soc_unregister_card(card);
 
-	tegra_asoc_utils_fini(&machine->util_data);
+	tegra_rt5677_dai.platforms->of_node = NULL;
+	of_node_put(tegra_rt5677_dai.codecs->of_node);
+	tegra_rt5677_dai.codecs->of_node = NULL;
+	of_node_put(tegra_rt5677_dai.cpus->of_node);
+	tegra_rt5677_dai.cpus->of_node = NULL;
 
 	return 0;
 }

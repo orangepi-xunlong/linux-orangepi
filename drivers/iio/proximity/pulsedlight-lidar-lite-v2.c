@@ -1,17 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * pulsedlight-lidar-lite-v2.c - Support for PulsedLight LIDAR sensor
  *
- * Copyright (C) 2015 Matt Ranostay <mranostay@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
+ * Copyright (C) 2015, 2017-2018
+ * Author: Matt Ranostay <matt.ranostay@konsulko.com>
  *
  * TODO: interrupt mode, and signal strength reporting
  */
@@ -21,6 +13,7 @@
 #include <linux/i2c.h>
 #include <linux/delay.h>
 #include <linux/module.h>
+#include <linux/mod_devicetable.h>
 #include <linux/pm_runtime.h>
 #include <linux/iio/iio.h>
 #include <linux/iio/sysfs.h>
@@ -144,12 +137,13 @@ static inline int lidar_write_power(struct lidar_data *data, int val)
 
 static int lidar_read_measurement(struct lidar_data *data, u16 *reg)
 {
+	__be16 value;
 	int ret = data->xfer(data, LIDAR_REG_DATA_HBYTE |
 			(data->i2c_enabled ? LIDAR_REG_DATA_WORD_READ : 0),
-			(u8 *) reg, 2);
+			(u8 *) &value, 2);
 
 	if (!ret)
-		*reg = be16_to_cpu(*reg);
+		*reg = be16_to_cpu(value);
 
 	return ret;
 }
@@ -166,6 +160,7 @@ static int lidar_get_measurement(struct lidar_data *data, u16 *reg)
 	ret = lidar_write_control(data, LIDAR_REG_CONTROL_ACQUIRE);
 	if (ret < 0) {
 		dev_err(&client->dev, "cannot send start measurement command");
+		pm_runtime_put_noidle(&client->dev);
 		return ret;
 	}
 
@@ -249,7 +244,6 @@ static irqreturn_t lidar_trigger_handler(int irq, void *private)
 }
 
 static const struct iio_info lidar_info = {
-	.driver_module = THIS_MODULE,
 	.read_raw = lidar_read_raw,
 };
 
@@ -301,8 +295,6 @@ static int lidar_probe(struct i2c_client *client,
 	if (ret)
 		goto error_unreg_buffer;
 	pm_runtime_enable(&client->dev);
-
-	pm_runtime_mark_last_busy(&client->dev);
 	pm_runtime_idle(&client->dev);
 
 	return 0;
@@ -328,12 +320,14 @@ static int lidar_remove(struct i2c_client *client)
 
 static const struct i2c_device_id lidar_id[] = {
 	{"lidar-lite-v2", 0},
+	{"lidar-lite-v3", 0},
 	{ },
 };
 MODULE_DEVICE_TABLE(i2c, lidar_id);
 
 static const struct of_device_id lidar_dt_ids[] = {
 	{ .compatible = "pulsedlight,lidar-lite-v2" },
+	{ .compatible = "grmn,lidar-lite-v3" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, lidar_dt_ids);
@@ -368,7 +362,7 @@ static const struct dev_pm_ops lidar_pm_ops = {
 static struct i2c_driver lidar_driver = {
 	.driver = {
 		.name	= LIDAR_DRV_NAME,
-		.of_match_table	= of_match_ptr(lidar_dt_ids),
+		.of_match_table	= lidar_dt_ids,
 		.pm	= &lidar_pm_ops,
 	},
 	.probe		= lidar_probe,
@@ -377,6 +371,6 @@ static struct i2c_driver lidar_driver = {
 };
 module_i2c_driver(lidar_driver);
 
-MODULE_AUTHOR("Matt Ranostay <mranostay@gmail.com>");
+MODULE_AUTHOR("Matt Ranostay <matt.ranostay@konsulko.com>");
 MODULE_DESCRIPTION("PulsedLight LIDAR sensor");
 MODULE_LICENSE("GPL");

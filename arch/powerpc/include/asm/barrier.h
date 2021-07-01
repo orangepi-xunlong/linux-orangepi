@@ -1,8 +1,15 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (C) 1999 Cort Dougan <cort@cs.nmt.edu>
  */
 #ifndef _ASM_POWERPC_BARRIER_H
 #define _ASM_POWERPC_BARRIER_H
+
+#include <asm/asm-const.h>
+
+#ifndef __ASSEMBLY__
+#include <asm/ppc-opcode.h>
+#endif
 
 /*
  * Memory barrier.
@@ -15,8 +22,6 @@
  * mb() prevents loads and stores being reordered across this point.
  * rmb() prevents loads being reordered across this point.
  * wmb() prevents stores being reordered across this point.
- * read_barrier_depends() prevents data-dependent loads being reordered
- *	across this point (nop on PPC).
  *
  * *mb() variants without smp_ prefix must order all types of memory
  * operations with one another. sync is the only instruction sufficient
@@ -75,7 +80,21 @@ do {									\
 	___p1;								\
 })
 
-#define smp_mb__before_spinlock()   smp_mb()
+#ifdef CONFIG_PPC64
+#define smp_cond_load_relaxed(ptr, cond_expr) ({		\
+	typeof(ptr) __PTR = (ptr);				\
+	__unqual_scalar_typeof(*ptr) VAL;			\
+	VAL = READ_ONCE(*__PTR);				\
+	if (unlikely(!(cond_expr))) {				\
+		spin_begin();					\
+		do {						\
+			VAL = READ_ONCE(*__PTR);		\
+		} while (!(cond_expr));				\
+		spin_end();					\
+	}							\
+	(typeof(*ptr))VAL;					\
+})
+#endif
 
 #ifdef CONFIG_PPC_BOOK3S_64
 #define NOSPEC_BARRIER_SLOT   nop
@@ -97,6 +116,15 @@ do {									\
 #define barrier_nospec_asm
 #define barrier_nospec()
 #endif /* CONFIG_PPC_BARRIER_NOSPEC */
+
+/*
+ * pmem_wmb() ensures that all stores for which the modification
+ * are written to persistent storage by preceding dcbfps/dcbstps
+ * instructions have updated persistent storage before any data
+ * access or data transfer caused by subsequent instructions is
+ * initiated.
+ */
+#define pmem_wmb() __asm__ __volatile__(PPC_PHWSYNC ::: "memory")
 
 #include <asm-generic/barrier.h>
 

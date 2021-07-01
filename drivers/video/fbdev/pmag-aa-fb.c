@@ -67,7 +67,7 @@ struct aafb_par {
 	struct bt431_regs __iomem *bt431;
 };
 
-static struct fb_var_screeninfo aafb_defined = {
+static const struct fb_var_screeninfo aafb_defined = {
 	.xres		= 1280,
 	.yres		= 1024,
 	.xres_virtual	= 2048,
@@ -90,7 +90,7 @@ static struct fb_var_screeninfo aafb_defined = {
 	.vmode		= FB_VMODE_NONINTERLACED,
 };
 
-static struct fb_fix_screeninfo aafb_fix = {
+static const struct fb_fix_screeninfo aafb_fix = {
 	.id		= "PMAG-AA",
 	.smem_len	= (2048 * 1024),
 	.type		= FB_TYPE_PACKED_PIXELS,
@@ -147,7 +147,7 @@ static int aafb_blank(int blank, struct fb_info *info)
 	return 0;
 }
 
-static struct fb_ops aafb_ops = {
+static const struct fb_ops aafb_ops = {
 	.owner		= THIS_MODULE,
 	.fb_blank	= aafb_blank,
 	.fb_fillrect	= cfb_fillrect,
@@ -165,10 +165,8 @@ static int pmagaafb_probe(struct device *dev)
 	int err;
 
 	info = framebuffer_alloc(sizeof(struct aafb_par), dev);
-	if (!info) {
-		printk(KERN_ERR "%s: Cannot allocate memory\n", dev_name(dev));
+	if (!info)
 		return -ENOMEM;
-	}
 
 	par = info->par;
 	dev_set_drvdata(dev, info);
@@ -190,7 +188,7 @@ static int pmagaafb_probe(struct device *dev)
 
 	/* MMIO mapping setup. */
 	info->fix.mmio_start = start + PMAG_AA_BT455_OFFSET;
-	par->mmio = ioremap_nocache(info->fix.mmio_start, info->fix.mmio_len);
+	par->mmio = ioremap(info->fix.mmio_start, info->fix.mmio_len);
 	if (!par->mmio) {
 		printk(KERN_ERR "%s: Cannot map MMIO\n", dev_name(dev));
 		err = -ENOMEM;
@@ -201,7 +199,7 @@ static int pmagaafb_probe(struct device *dev)
 
 	/* Frame buffer mapping setup. */
 	info->fix.smem_start = start + PMAG_AA_ONBOARD_FBMEM_OFFSET;
-	info->screen_base = ioremap_nocache(info->fix.smem_start,
+	info->screen_base = ioremap(info->fix.smem_start,
 					    info->fix.smem_len);
 	if (!info->screen_base) {
 		printk(KERN_ERR "%s: Cannot map FB\n", dev_name(dev));
@@ -247,7 +245,7 @@ err_alloc:
 	return err;
 }
 
-static int __exit pmagaafb_remove(struct device *dev)
+static int pmagaafb_remove(struct device *dev)
 {
 	struct tc_dev *tdev = to_tc_dev(dev);
 	struct fb_info *info = dev_get_drvdata(dev);
@@ -280,7 +278,7 @@ static struct tc_driver pmagaafb_driver = {
 		.name	= "pmagaafb",
 		.bus	= &tc_bus_type,
 		.probe	= pmagaafb_probe,
-		.remove	= __exit_p(pmagaafb_remove),
+		.remove	= pmagaafb_remove,
 	},
 };
 

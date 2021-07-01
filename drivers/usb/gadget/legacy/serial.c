@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * serial.c -- USB gadget serial driver
  *
  * Copyright (C) 2003 Al Borchers (alborchers@steinerpoint.com)
  * Copyright (C) 2008 by David Brownell
  * Copyright (C) 2008 by Nokia Corporation
- *
- * This software is distributed under the terms of the GNU General
- * Public License ("GPL") as published by the Free Software Foundation,
- * either version 2 of that License or (at your option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -99,6 +96,36 @@ MODULE_PARM_DESC(use_obex, "Use CDC OBEX, default=no");
 static unsigned n_ports = 1;
 module_param(n_ports, uint, 0);
 MODULE_PARM_DESC(n_ports, "number of ports to create, default=1");
+
+static bool enable = true;
+
+static int switch_gserial_enable(bool do_enable);
+
+static int enable_set(const char *s, const struct kernel_param *kp)
+{
+	bool do_enable;
+	int ret;
+
+	if (!s)	/* called for no-arg enable == default */
+		return 0;
+
+	ret = strtobool(s, &do_enable);
+	if (ret || enable == do_enable)
+		return ret;
+
+	ret = switch_gserial_enable(do_enable);
+	if (!ret)
+		enable = do_enable;
+
+	return ret;
+}
+
+static const struct kernel_param_ops enable_ops = {
+	.set = enable_set,
+	.get = param_get_bool,
+};
+
+module_param_cb(enable, &enable_ops, &enable, 0644);
 
 /*-------------------------------------------------------------------------*/
 
@@ -243,6 +270,19 @@ static struct usb_composite_driver gserial_driver = {
 	.unbind		= gs_unbind,
 };
 
+static int switch_gserial_enable(bool do_enable)
+{
+	if (!serial_config_driver.label)
+		/* init() was not called, yet */
+		return 0;
+
+	if (do_enable)
+		return usb_composite_probe(&gserial_driver);
+
+	usb_composite_unregister(&gserial_driver);
+	return 0;
+}
+
 static int __init init(void)
 {
 	/* We *could* export two configs; that'd be much cleaner...
@@ -269,12 +309,16 @@ static int __init init(void)
 	}
 	strings_dev[STRING_DESCRIPTION_IDX].s = serial_config_driver.label;
 
+	if (!enable)
+		return 0;
+
 	return usb_composite_probe(&gserial_driver);
 }
 module_init(init);
 
 static void __exit cleanup(void)
 {
-	usb_composite_unregister(&gserial_driver);
+	if (enable)
+		usb_composite_unregister(&gserial_driver);
 }
 module_exit(cleanup);

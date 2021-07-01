@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /* Freezer declarations */
 
 #ifndef FREEZER_H_INCLUDED
@@ -181,7 +182,7 @@ static inline void freezable_schedule_unsafe(void)
 }
 
 /*
- * Like freezable_schedule_timeout(), but should not block the freezer.  Do not
+ * Like schedule_timeout(), but should not block the freezer.  Do not
  * call this with locks held.
  */
 static inline long freezable_schedule_timeout(long timeout)
@@ -203,6 +204,17 @@ static inline long freezable_schedule_timeout_interruptible(long timeout)
 	freezer_do_not_count();
 	__retval = schedule_timeout_interruptible(timeout);
 	freezer_count();
+	return __retval;
+}
+
+/* DO NOT ADD ANY NEW CALLERS OF THIS FUNCTION */
+static inline long freezable_schedule_timeout_interruptible_unsafe(long timeout)
+{
+	long __retval;
+
+	freezer_do_not_count();
+	__retval = schedule_timeout_interruptible(timeout);
+	freezer_count_unsafe();
 	return __retval;
 }
 
@@ -282,6 +294,9 @@ static inline void set_freezable(void) {}
 #define freezable_schedule_timeout(timeout)  schedule_timeout(timeout)
 
 #define freezable_schedule_timeout_interruptible(timeout)		\
+	schedule_timeout_interruptible(timeout)
+
+#define freezable_schedule_timeout_interruptible_unsafe(timeout)	\
 	schedule_timeout_interruptible(timeout)
 
 #define freezable_schedule_timeout_killable(timeout)			\

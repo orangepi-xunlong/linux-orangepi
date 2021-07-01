@@ -13,9 +13,9 @@
 #ifndef _ASM_FIXMAP_H
 #define _ASM_FIXMAP_H
 
-#include <asm/pgtable.h>
 #ifdef CONFIG_HIGHMEM
 #include <linux/threads.h>
+#include <linux/pgtable.h>
 #include <asm/kmap_types.h>
 #endif
 
@@ -44,7 +44,7 @@ enum fixed_addresses {
 	__end_of_fixed_addresses
 };
 
-#define FIXADDR_TOP     (VMALLOC_START - PAGE_SIZE)
+#define FIXADDR_TOP     (XCHAL_KSEG_CACHED_VADDR - PAGE_SIZE)
 #define FIXADDR_SIZE	(__end_of_fixed_addresses << PAGE_SHIFT)
 #define FIXADDR_START	((FIXADDR_TOP - FIXADDR_SIZE) & PMD_MASK)
 
@@ -63,7 +63,7 @@ static __always_inline unsigned long fix_to_virt(const unsigned int idx)
 	 * table.
 	 */
 	BUILD_BUG_ON(FIXADDR_START <
-		     XCHAL_PAGE_TABLE_VADDR + XCHAL_PAGE_TABLE_SIZE);
+		     TLBTEMP_BASE_1 + TLBTEMP_SIZE);
 	BUILD_BUG_ON(idx >= __end_of_fixed_addresses);
 	return __fix_to_virt(idx);
 }
@@ -75,11 +75,5 @@ static inline unsigned long virt_to_fix(const unsigned long vaddr)
 }
 
 #endif
-
-#define kmap_get_fixmap_pte(vaddr) \
-	pte_offset_kernel( \
-		pmd_offset(pud_offset(pgd_offset_k(vaddr), (vaddr)), (vaddr)), \
-		(vaddr) \
-	)
 
 #endif

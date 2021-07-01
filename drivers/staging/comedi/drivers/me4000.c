@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * me4000.c
  * Source code for the Meilhaus ME-4000 board family.
  *
  * COMEDI - Linux Control and Measurement Device Interface
  * Copyright (C) 2000 David A. Schleef <ds@schleef.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 /*
@@ -35,7 +26,7 @@
  *
  * The firmware required by these boards is available in the
  * comedi_nonfree_firmware tarball available from
- * http://www.comedi.org.
+ * https://www.comedi.org.
  */
 
 #include <linux/module.h>
@@ -933,7 +924,7 @@ static irqreturn_t me4000_ai_isr(int irq, void *dev_id)
 	struct comedi_subdevice *s = dev->read_subdev;
 	int i;
 	int c = 0;
-	unsigned int lval;
+	unsigned short lval;
 
 	if (!dev->attached)
 		return IRQ_NONE;
@@ -1281,7 +1272,7 @@ static struct pci_driver me4000_pci_driver = {
 };
 module_comedi_pci_driver(me4000_driver, me4000_pci_driver);
 
-MODULE_AUTHOR("Comedi http://www.comedi.org");
+MODULE_AUTHOR("Comedi https://www.comedi.org");
 MODULE_DESCRIPTION("Comedi driver for Meilhaus ME-4000 series boards");
 MODULE_LICENSE("GPL");
 MODULE_FIRMWARE(ME4000_FIRMWARE);

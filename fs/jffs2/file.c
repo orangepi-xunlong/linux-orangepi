@@ -35,7 +35,7 @@ int jffs2_fsync(struct file *filp, loff_t start, loff_t end, int datasync)
 	struct jffs2_sb_info *c = JFFS2_SB_INFO(inode->i_sb);
 	int ret;
 
-	ret = filemap_write_and_wait_range(inode->i_mapping, start, end);
+	ret = file_write_and_wait_range(filp, start, end);
 	if (ret)
 		return ret;
 
@@ -57,6 +57,7 @@ const struct file_operations jffs2_file_operations =
 	.mmap =		generic_file_readonly_mmap,
 	.fsync =	jffs2_fsync,
 	.splice_read =	generic_file_splice_read,
+	.splice_write = iter_file_splice_write,
 };
 
 /* jffs2_file_inode_operations */
@@ -109,9 +110,9 @@ static int jffs2_do_readpage_nolock (struct inode *inode, struct page *pg)
 	return ret;
 }
 
-int jffs2_do_readpage_unlock(struct inode *inode, struct page *pg)
+int jffs2_do_readpage_unlock(void *data, struct page *pg)
 {
-	int ret = jffs2_do_readpage_nolock(inode, pg);
+	int ret = jffs2_do_readpage_nolock(data, pg);
 	unlock_page(pg);
 	return ret;
 }
@@ -175,7 +176,7 @@ static int jffs2_write_begin(struct file *filp, struct address_space *mapping,
 		ri.uid = cpu_to_je16(i_uid_read(inode));
 		ri.gid = cpu_to_je16(i_gid_read(inode));
 		ri.isize = cpu_to_je32(max((uint32_t)inode->i_size, pageofs));
-		ri.atime = ri.ctime = ri.mtime = cpu_to_je32(get_seconds());
+		ri.atime = ri.ctime = ri.mtime = cpu_to_je32(JFFS2_NOW());
 		ri.offset = cpu_to_je32(inode->i_size);
 		ri.dsize = cpu_to_je32(pageofs - inode->i_size);
 		ri.csize = cpu_to_je32(0);
@@ -283,7 +284,7 @@ static int jffs2_write_end(struct file *filp, struct address_space *mapping,
 	ri->uid = cpu_to_je16(i_uid_read(inode));
 	ri->gid = cpu_to_je16(i_gid_read(inode));
 	ri->isize = cpu_to_je32((uint32_t)inode->i_size);
-	ri->atime = ri->ctime = ri->mtime = cpu_to_je32(get_seconds());
+	ri->atime = ri->ctime = ri->mtime = cpu_to_je32(JFFS2_NOW());
 
 	/* In 2.4, it was already kmapped by generic_file_write(). Doesn't
 	   hurt to do it again. The alternative is ifdefs, which are ugly. */

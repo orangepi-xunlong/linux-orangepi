@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright 2014 Texas Instruments, Inc.
- *
  * Keystone 2 Edison SoC specific device tree
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * Copyright (C) 2014-2017 Texas Instruments Incorporated - http://www.ti.com/
  */
 
 clocks {
@@ -35,7 +32,7 @@ clocks {
 		reg-names = "control";
 	};
 
-	clkusb1: clkusb1 {
+	clkusb1: clkusb1@2350004 {
 		#clock-cells = <0>;
 		compatible = "ti,keystone,psc-clock";
 		clocks = <&chipclk16>;
@@ -45,7 +42,7 @@ clocks {
 		domain-id = <0>;
 	};
 
-	clkhyperlink0: clkhyperlink0 {
+	clkhyperlink0: clkhyperlink0@2350030 {
 		#clock-cells = <0>;
 		compatible = "ti,keystone,psc-clock";
 		clocks = <&chipclk12>;
@@ -55,7 +52,7 @@ clocks {
 		domain-id = <5>;
 	};
 
-	clkpcie1: clkpcie1 {
+	clkpcie1: clkpcie1@235006c {
 		#clock-cells = <0>;
 		compatible = "ti,keystone,psc-clock";
 		clocks = <&chipclk12>;
@@ -65,7 +62,7 @@ clocks {
 		domain-id = <18>;
 	};
 
-	clkxge: clkxge {
+	clkxge: clkxge@23500c8 {
 		#clock-cells = <0>;
 		compatible = "ti,keystone,psc-clock";
 		clocks = <&chipclk13>;
@@ -73,5 +70,25 @@ clocks {
 		reg = <0x023500c8 0xb00>, <0x02350074 0x400>;
 		reg-names = "control", "domain";
 		domain-id = <29>;
+	};
+
+	/*
+	 * Below are set of fixed, input clocks definitions,
+	 * for which real frequencies have to be defined in board files.
+	 * Those clocks can be used as reference clocks for some HW modules
+	 * (as cpts, for example) by configuring corresponding clock muxes.
+	 */
+	tsipclka: tsipclka {
+		#clock-cells = <0>;
+		compatible = "fixed-clock";
+		clock-frequency = <0>;
+		clock-output-names = "tsipclka";
+	};
+
+	tsipclkb: tsipclkb {
+		#clock-cells = <0>;
+		compatible = "fixed-clock";
+		clock-frequency = <0>;
+		clock-output-names = "tsipclkb";
 	};
 };

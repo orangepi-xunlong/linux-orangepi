@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2014 Samsung Electronics Co., Ltd.
  * Sylwester Nawrocki <s.nawrocki@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/clk.h>
@@ -13,6 +10,54 @@
 #include <linux/device.h>
 #include <linux/of.h>
 #include <linux/printk.h>
+
+#include "clk.h"
+
+static int __set_clk_flags(struct device_node *node)
+{
+	struct of_phandle_args clkspec;
+	struct property *prop;
+	int i, index = 0, rc;
+	const __be32 *cur;
+	struct clk *clk;
+	u32 nr_cells;
+
+	rc = of_property_read_u32(node, "#clock-cells", &nr_cells);
+	if (rc < 0) {
+		pr_err("clk: missing #clock-cells property on %pOF\n", node);
+		return rc;
+	}
+
+	clkspec.np         = node;
+	clkspec.args_count = nr_cells;
+
+	of_property_for_each_u32(node, "protected-clocks", prop, cur, clkspec.args[0]) {
+		/* read the remainder of the clock specifier */
+		for (i = 1; i < nr_cells; ++i) {
+			cur = of_prop_next_u32(prop, cur, &clkspec.args[i]);
+			if (!cur) {
+				pr_err("clk: invalid value of protected-clocks"
+				       " property at %pOF\n", node);
+				return -EINVAL;
+			}
+		}
+		clk = of_clk_get_from_provider(&clkspec);
+		if (IS_ERR(clk)) {
+			if (PTR_ERR(clk) != -EPROBE_DEFER)
+				pr_err("clk: couldn't get protected clock"
+				       " %u for %pOF\n", index, node);
+			return PTR_ERR(clk);
+		}
+
+		rc = __clk_protect(clk);
+		if (rc < 0)
+			pr_warn("clk: failed to protect %s: %d\n",
+				__clk_get_name(clk), rc);
+		clk_put(clk);
+		index++;
+	}
+	return 0;
+}
 
 static int __set_clk_parents(struct device_node *node, bool clk_supplier)
 {
@@ -23,8 +68,8 @@ static int __set_clk_parents(struct device_node *node, bool clk_supplier)
 	num_parents = of_count_phandle_with_args(node, "assigned-clock-parents",
 						 "#clock-cells");
 	if (num_parents == -EINVAL)
-		pr_err("clk: invalid value of clock-parents property at %s\n",
-		       node->full_name);
+		pr_err("clk: invalid value of clock-parents property at %pOF\n",
+		       node);
 
 	for (index = 0; index < num_parents; index++) {
 		rc = of_parse_phandle_with_args(node, "assigned-clock-parents",
@@ -40,8 +85,9 @@ static int __set_clk_parents(struct device_node *node, bool clk_supplier)
 			return 0;
 		pclk = of_clk_get_from_provider(&clkspec);
 		if (IS_ERR(pclk)) {
-			pr_warn("clk: couldn't get parent clock %d for %s\n",
-				index, node->full_name);
+			if (PTR_ERR(pclk) != -EPROBE_DEFER)
+				pr_warn("clk: couldn't get parent clock %d for %pOF\n",
+					index, node);
 			return PTR_ERR(pclk);
 		}
 
@@ -55,8 +101,9 @@ static int __set_clk_parents(struct device_node *node, bool clk_supplier)
 		}
 		clk = of_clk_get_from_provider(&clkspec);
 		if (IS_ERR(clk)) {
-			pr_warn("clk: couldn't get assigned clock %d for %s\n",
-				index, node->full_name);
+			if (PTR_ERR(clk) != -EPROBE_DEFER)
+				pr_warn("clk: couldn't get assigned clock %d for %pOF\n",
+					index, node);
 			rc = PTR_ERR(clk);
 			goto err;
 		}
@@ -99,8 +146,9 @@ static int __set_clk_rates(struct device_node *node, bool clk_supplier)
 
 			clk = of_clk_get_from_provider(&clkspec);
 			if (IS_ERR(clk)) {
-				pr_warn("clk: couldn't get clock %d for %s\n",
-					index, node->full_name);
+				if (PTR_ERR(clk) != -EPROBE_DEFER)
+					pr_warn("clk: couldn't get clock %d for %pOF\n",
+						index, node);
 				return PTR_ERR(clk);
 			}
 
@@ -134,6 +182,12 @@ int of_clk_set_defaults(struct device_node *node, bool clk_supplier)
 
 	if (!node)
 		return 0;
+
+	if (clk_supplier) {
+		rc = __set_clk_flags(node);
+		if (rc < 0)
+			return rc;
+	}
 
 	rc = __set_clk_parents(node, clk_supplier);
 	if (rc < 0)

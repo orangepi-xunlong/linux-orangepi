@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_IA64_CHECKSUM_H
 #define _ASM_IA64_CHECKSUM_H
 
@@ -35,19 +36,6 @@ extern __wsum csum_tcpudp_nofold(__be32 saddr, __be32 daddr,
  * it's best to have buff aligned on a 32-bit boundary
  */
 extern __wsum csum_partial(const void *buff, int len, __wsum sum);
-
-/*
- * Same as csum_partial, but copies from src while it checksums.
- *
- * Here it is even more important to align src and dst on a 32-bit (or
- * even better 64-bit) boundary.
- */
-extern __wsum csum_partial_copy_from_user(const void __user *src, void *dst,
-						 int len, __wsum sum,
-						 int *errp);
-
-extern __wsum csum_partial_copy_nocheck(const void *src, void *dst,
-					       int len, __wsum sum);
 
 /*
  * This routine is used for miscellaneous IP-like checksums, mainly in

@@ -1,13 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Functions and registers to access AC100 codec / RTC combo IC.
  *
  * Copyright (C) 2016 Chen-Yu Tsai
  *
  * Chen-Yu Tsai <wens@csie.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef __LINUX_MFD_AC100_H
@@ -83,6 +80,7 @@ struct ac100_dev {
 #define AC100_ERPOUT_CTRL		0x57
 #define AC100_SPKOUT_CTRL		0x58
 #define AC100_LINEOUT_CTRL		0x59
+#define AC100_ADDA_TUNE1 		0x5a
 
 /* ADC digital audio processing (high pass filter & auto gain control */
 #define AC100_ADC_DAP_L_STA		0x80

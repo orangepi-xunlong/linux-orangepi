@@ -1,7 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __ASM_SH_SYSCALLS_32_H
 #define __ASM_SH_SYSCALLS_32_H
-
-#ifdef __KERNEL__
 
 #include <linux/compiler.h>
 #include <linux/linkage.h>
@@ -25,5 +24,4 @@ asmlinkage void do_syscall_trace_leave(struct pt_regs *regs);
 asmlinkage void do_notify_resume(struct pt_regs *regs, unsigned int save_r0,
 				 unsigned long thread_info_flags);
 
-#endif /* __KERNEL__ */
 #endif /* __ASM_SH_SYSCALLS_32_H */

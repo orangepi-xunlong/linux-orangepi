@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * comedi/drivers/dt2815.c
  * Hardware driver for Data Translation DT2815
  *
  * COMEDI - Linux Control and Measurement Device Interface
  * Copyright (C) 1999 Anders Blomdell <anders.blomdell@control.lth.se>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 /*
  * Driver: dt2815
@@ -101,6 +92,7 @@ static int dt2815_ao_insn(struct comedi_device *dev, struct comedi_subdevice *s,
 	int ret;
 
 	for (i = 0; i < insn->n; i++) {
+		/* FIXME: lo bit 0 chooses voltage output or current output */
 		lo = ((data[i] & 0x0f) << 4) | (chan << 1) | 0x01;
 		hi = (data[i] & 0xff0) >> 4;
 
@@ -113,6 +105,8 @@ static int dt2815_ao_insn(struct comedi_device *dev, struct comedi_subdevice *s,
 		ret = comedi_timeout(dev, s, insn, dt2815_ao_status, 0x10);
 		if (ret)
 			return ret;
+
+		outb(hi, dev->iobase + DT2815_DATA);
 
 		devpriv->ao_readback[chan] = data[i];
 	}
@@ -188,7 +182,7 @@ static int dt2815_attach(struct comedi_device *dev, struct comedi_devconfig *it)
 		/* This is incredibly slow (approx 20 ms) */
 		unsigned int status;
 
-		udelay(1000);
+		usleep_range(1000, 3000);
 		status = inb(dev->iobase + DT2815_STATUS);
 		if (status == 4) {
 			unsigned int program;
@@ -218,6 +212,6 @@ static struct comedi_driver dt2815_driver = {
 };
 module_comedi_driver(dt2815_driver);
 
-MODULE_AUTHOR("Comedi http://www.comedi.org");
+MODULE_AUTHOR("Comedi https://www.comedi.org");
 MODULE_DESCRIPTION("Comedi low-level driver");
 MODULE_LICENSE("GPL");

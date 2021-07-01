@@ -1,18 +1,13 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __LINUX_VMACACHE_H
 #define __LINUX_VMACACHE_H
 
 #include <linux/sched.h>
 #include <linux/mm.h>
 
-/*
- * Hash based on the page number. Provides a good hit rate for
- * workloads with good locality and those with random accesses as well.
- */
-#define VMACACHE_HASH(addr) ((addr >> PAGE_SHIFT) & VMACACHE_MASK)
-
 static inline void vmacache_flush(struct task_struct *tsk)
 {
-	memset(tsk->vmacache, 0, sizeof(tsk->vmacache));
+	memset(tsk->vmacache.vmas, 0, sizeof(tsk->vmacache.vmas));
 }
 
 extern void vmacache_update(unsigned long addr, struct vm_area_struct *newvma);

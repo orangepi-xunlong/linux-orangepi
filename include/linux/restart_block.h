@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Common syscall restarting data
  */
@@ -6,10 +7,17 @@
 
 #include <linux/compiler.h>
 #include <linux/types.h>
+#include <linux/time64.h>
 
 struct timespec;
-struct compat_timespec;
+struct old_timespec32;
 struct pollfd;
+
+enum timespec_type {
+	TT_NONE		= 0,
+	TT_NATIVE	= 1,
+	TT_COMPAT	= 2,
+};
 
 /*
  * System call restart block.
@@ -29,10 +37,11 @@ struct restart_block {
 		/* For nanosleep */
 		struct {
 			clockid_t clockid;
-			struct timespec __user *rmtp;
-#ifdef CONFIG_COMPAT
-			struct compat_timespec __user *compat_rmtp;
-#endif
+			enum timespec_type type;
+			union {
+				struct __kernel_timespec __user *rmtp;
+				struct old_timespec32 __user *compat_rmtp;
+			};
 			u64 expires;
 		} nanosleep;
 		/* For poll */

@@ -1,19 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*  Kernel module help for PPC64.
     Copyright (C) 2001, 2003 Rusty Russell IBM Corporation.
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -32,6 +20,7 @@
 #include <linux/sort.h>
 #include <asm/setup.h>
 #include <asm/sections.h>
+#include <asm/inst.h>
 
 /* FIXME: We don't do .init separately.  To do this, we'd need to have
    a separate r2 value in the init and core section, and stub between
@@ -93,6 +82,15 @@ static unsigned int local_entry_offset(const Elf64_Sym *sym)
 {
 	return 0;
 }
+
+void *dereference_module_function_descriptor(struct module *mod, void *ptr)
+{
+	if (ptr < (void *)mod->arch.start_opd ||
+			ptr >= (void *)mod->arch.end_opd)
+		return ptr;
+
+	return dereference_function_descriptor(ptr);
+}
 #endif
 
 #define STUB_MAGIC 0x73747562 /* stub */
@@ -124,57 +122,28 @@ struct ppc64_stub_entry
  * the stub, but it's significantly shorter to put these values at the
  * end of the stub code, and patch the stub address (32-bits relative
  * to the TOC ptr, r2) into the stub.
+ *
+ * addis   r11,r2, <high>
+ * addi    r11,r11, <low>
+ * std     r2,R2_STACK_OFFSET(r1)
+ * ld      r12,32(r11)
+ * ld      r2,40(r11)
+ * mtctr   r12
+ * bctr
  */
-
 static u32 ppc64_stub_insns[] = {
-	0x3d620000,			/* addis   r11,r2, <high> */
-	0x396b0000,			/* addi    r11,r11, <low> */
+	PPC_INST_ADDIS | __PPC_RT(R11) | __PPC_RA(R2),
+	PPC_INST_ADDI | __PPC_RT(R11) | __PPC_RA(R11),
 	/* Save current r2 value in magic place on the stack. */
-	0xf8410000|R2_STACK_OFFSET,	/* std     r2,R2_STACK_OFFSET(r1) */
-	0xe98b0020,			/* ld      r12,32(r11) */
+	PPC_INST_STD | __PPC_RS(R2) | __PPC_RA(R1) | R2_STACK_OFFSET,
+	PPC_INST_LD | __PPC_RT(R12) | __PPC_RA(R11) | 32,
 #ifdef PPC64_ELF_ABI_v1
 	/* Set up new r2 from function descriptor */
-	0xe84b0028,			/* ld      r2,40(r11) */
+	PPC_INST_LD | __PPC_RT(R2) | __PPC_RA(R11) | 40,
 #endif
-	0x7d8903a6,			/* mtctr   r12 */
-	0x4e800420			/* bctr */
+	PPC_INST_MTCTR | __PPC_RS(R12),
+	PPC_INST_BCTR,
 };
-
-#ifdef CONFIG_DYNAMIC_FTRACE
-int module_trampoline_target(struct module *mod, unsigned long addr,
-			     unsigned long *target)
-{
-	struct ppc64_stub_entry *stub;
-	func_desc_t funcdata;
-	u32 magic;
-
-	if (!within_module_core(addr, mod)) {
-		pr_err("%s: stub %lx not in module %s\n", __func__, addr, mod->name);
-		return -EFAULT;
-	}
-
-	stub = (struct ppc64_stub_entry *)addr;
-
-	if (probe_kernel_read(&magic, &stub->magic, sizeof(magic))) {
-		pr_err("%s: fault reading magic for stub %lx for %s\n", __func__, addr, mod->name);
-		return -EFAULT;
-	}
-
-	if (magic != STUB_MAGIC) {
-		pr_err("%s: bad magic for stub %lx for %s\n", __func__, addr, mod->name);
-		return -EFAULT;
-	}
-
-	if (probe_kernel_read(&funcdata, &stub->funcdata, sizeof(funcdata))) {
-		pr_err("%s: fault reading funcdata for stub %lx for %s\n", __func__, addr, mod->name);
-                return -EFAULT;
-	}
-
-	*target = stub_func_addr(funcdata);
-
-	return 0;
-}
-#endif
 
 /* Count how many different 24-bit relocations (different symbol,
    different addend) */
@@ -222,21 +191,6 @@ static int relacmp(const void *_x, const void *_y)
 		return 0;
 }
 
-static void relaswap(void *_x, void *_y, int size)
-{
-	uint64_t *x, *y, tmp;
-	int i;
-
-	y = (uint64_t *)_x;
-	x = (uint64_t *)_y;
-
-	for (i = 0; i < sizeof(Elf64_Rela) / sizeof(uint64_t); i++) {
-		tmp = x[i];
-		x[i] = y[i];
-		y[i] = tmp;
-	}
-}
-
 /* Get size of potential trampolines required. */
 static unsigned long get_stubs_size(const Elf64_Ehdr *hdr,
 				    const Elf64_Shdr *sechdrs)
@@ -260,7 +214,7 @@ static unsigned long get_stubs_size(const Elf64_Ehdr *hdr,
 			 */
 			sort((void *)sechdrs[i].sh_addr,
 			     sechdrs[i].sh_size / sizeof(Elf64_Rela),
-			     sizeof(Elf64_Rela), relacmp, relaswap);
+			     sizeof(Elf64_Rela), relacmp, NULL);
 
 			relocs += count_relocs((void *)sechdrs[i].sh_addr,
 					       sechdrs[i].sh_size
@@ -271,6 +225,10 @@ static unsigned long get_stubs_size(const Elf64_Ehdr *hdr,
 #ifdef CONFIG_DYNAMIC_FTRACE
 	/* make the trampoline to the ftrace_caller */
 	relocs++;
+#ifdef CONFIG_DYNAMIC_FTRACE_WITH_REGS
+	/* an additional one for ftrace_regs_caller */
+	relocs++;
+#endif
 #endif
 
 	pr_debug("Looks like a total of %lu stubs, max\n", relocs);
@@ -286,14 +244,6 @@ static void dedotify_versions(struct modversion_info *vers,
 	for (end = (void *)vers + size; vers < end; vers++)
 		if (vers->name[0] == '.') {
 			memmove(vers->name, vers->name+1, strlen(vers->name));
-#ifdef ARCH_RELOCATES_KCRCTAB
-			/* The TOC symbol has no CRC computed. To avoid CRC
-			 * check failing, we must force it to the expected
-			 * value (see CRC check in module.c).
-			 */
-			if (!strcmp(vers->name, "TOC."))
-				vers->crc = -(unsigned long)reloc_start;
-#endif
 		}
 }
 
@@ -347,8 +297,11 @@ int module_frob_arch_sections(Elf64_Ehdr *hdr,
 		char *p;
 		if (strcmp(secstrings + sechdrs[i].sh_name, ".stubs") == 0)
 			me->arch.stubs_section = i;
-		else if (strcmp(secstrings + sechdrs[i].sh_name, ".toc") == 0)
+		else if (strcmp(secstrings + sechdrs[i].sh_name, ".toc") == 0) {
 			me->arch.toc_section = i;
+			if (sechdrs[i].sh_addralign < 8)
+				sechdrs[i].sh_addralign = 8;
+		}
 		else if (strcmp(secstrings+sechdrs[i].sh_name,"__versions")==0)
 			dedotify_versions((void *)hdr + sechdrs[i].sh_offset,
 					  sechdrs[i].sh_size);
@@ -381,28 +334,114 @@ int module_frob_arch_sections(Elf64_Ehdr *hdr,
 	return 0;
 }
 
-/* r2 is the TOC pointer: it actually points 0x8000 into the TOC (this
-   gives the value maximum span in an instruction which uses a signed
-   offset) */
-static inline unsigned long my_r2(const Elf64_Shdr *sechdrs, struct module *me)
+#ifdef CONFIG_MPROFILE_KERNEL
+
+#define PACATOC offsetof(struct paca_struct, kernel_toc)
+
+/*
+ * ld      r12,PACATOC(r13)
+ * addis   r12,r12,<high>
+ * addi    r12,r12,<low>
+ * mtctr   r12
+ * bctr
+ */
+static u32 stub_insns[] = {
+	PPC_INST_LD | __PPC_RT(R12) | __PPC_RA(R13) | PACATOC,
+	PPC_INST_ADDIS | __PPC_RT(R12) | __PPC_RA(R12),
+	PPC_INST_ADDI | __PPC_RT(R12) | __PPC_RA(R12),
+	PPC_INST_MTCTR | __PPC_RS(R12),
+	PPC_INST_BCTR,
+};
+
+/*
+ * For mprofile-kernel we use a special stub for ftrace_caller() because we
+ * can't rely on r2 containing this module's TOC when we enter the stub.
+ *
+ * That can happen if the function calling us didn't need to use the toc. In
+ * that case it won't have setup r2, and the r2 value will be either the
+ * kernel's toc, or possibly another modules toc.
+ *
+ * To deal with that this stub uses the kernel toc, which is always accessible
+ * via the paca (in r13). The target (ftrace_caller()) is responsible for
+ * saving and restoring the toc before returning.
+ */
+static inline int create_ftrace_stub(struct ppc64_stub_entry *entry,
+					unsigned long addr,
+					struct module *me)
 {
-	return sechdrs[me->arch.toc_section].sh_addr + 0x8000;
+	long reladdr;
+
+	memcpy(entry->jump, stub_insns, sizeof(stub_insns));
+
+	/* Stub uses address relative to kernel toc (from the paca) */
+	reladdr = addr - kernel_toc_addr();
+	if (reladdr > 0x7FFFFFFF || reladdr < -(0x80000000L)) {
+		pr_err("%s: Address of %ps out of range of kernel_toc.\n",
+							me->name, (void *)addr);
+		return 0;
+	}
+
+	entry->jump[1] |= PPC_HA(reladdr);
+	entry->jump[2] |= PPC_LO(reladdr);
+
+	/* Eventhough we don't use funcdata in the stub, it's needed elsewhere. */
+	entry->funcdata = func_desc(addr);
+	entry->magic = STUB_MAGIC;
+
+	return 1;
 }
 
-/* Both low and high 16 bits are added as SIGNED additions, so if low
-   16 bits has high bit set, high 16 bits must be adjusted.  These
-   macros do that (stolen from binutils). */
-#define PPC_LO(v) ((v) & 0xffff)
-#define PPC_HI(v) (((v) >> 16) & 0xffff)
-#define PPC_HA(v) PPC_HI ((v) + 0x8000)
+static bool is_mprofile_ftrace_call(const char *name)
+{
+	if (!strcmp("_mcount", name))
+		return true;
+#ifdef CONFIG_DYNAMIC_FTRACE
+	if (!strcmp("ftrace_caller", name))
+		return true;
+#ifdef CONFIG_DYNAMIC_FTRACE_WITH_REGS
+	if (!strcmp("ftrace_regs_caller", name))
+		return true;
+#endif
+#endif
+
+	return false;
+}
+#else
+static inline int create_ftrace_stub(struct ppc64_stub_entry *entry,
+					unsigned long addr,
+					struct module *me)
+{
+	return 0;
+}
+
+static bool is_mprofile_ftrace_call(const char *name)
+{
+	return false;
+}
+#endif
+
+/*
+ * r2 is the TOC pointer: it actually points 0x8000 into the TOC (this gives the
+ * value maximum span in an instruction which uses a signed offset). Round down
+ * to a 256 byte boundary for the odd case where we are setting up r2 without a
+ * .toc section.
+ */
+static inline unsigned long my_r2(const Elf64_Shdr *sechdrs, struct module *me)
+{
+	return (sechdrs[me->arch.toc_section].sh_addr & ~0xfful) + 0x8000;
+}
 
 /* Patch stub to reference function and correct r2 value. */
 static inline int create_stub(const Elf64_Shdr *sechdrs,
 			      struct ppc64_stub_entry *entry,
 			      unsigned long addr,
-			      struct module *me)
+			      struct module *me,
+			      const char *name)
 {
 	long reladdr;
+
+	if (is_mprofile_ftrace_call(name))
+		return create_ftrace_stub(entry, addr, me);
 
 	memcpy(entry->jump, ppc64_stub_insns, sizeof(ppc64_stub_insns));
 
@@ -427,7 +466,8 @@ static inline int create_stub(const Elf64_Shdr *sechdrs,
    stub to set up the TOC ptr (r2) for the function. */
 static unsigned long stub_for_addr(const Elf64_Shdr *sechdrs,
 				   unsigned long addr,
-				   struct module *me)
+				   struct module *me,
+				   const char *name)
 {
 	struct ppc64_stub_entry *stubs;
 	unsigned int i, num_stubs;
@@ -437,66 +477,26 @@ static unsigned long stub_for_addr(const Elf64_Shdr *sechdrs,
 	/* Find this stub, or if that fails, the next avail. entry */
 	stubs = (void *)sechdrs[me->arch.stubs_section].sh_addr;
 	for (i = 0; stub_func_addr(stubs[i].funcdata); i++) {
-		BUG_ON(i >= num_stubs);
+		if (WARN_ON(i >= num_stubs))
+			return 0;
 
 		if (stub_func_addr(stubs[i].funcdata) == func_addr(addr))
 			return (unsigned long)&stubs[i];
 	}
 
-	if (!create_stub(sechdrs, &stubs[i], addr, me))
+	if (!create_stub(sechdrs, &stubs[i], addr, me, name))
 		return 0;
 
 	return (unsigned long)&stubs[i];
 }
 
-#ifdef CC_USING_MPROFILE_KERNEL
-static bool is_early_mcount_callsite(u32 *instruction)
-{
-	/*
-	 * Check if this is one of the -mprofile-kernel sequences.
-	 */
-	if (instruction[-1] == PPC_INST_STD_LR &&
-	    instruction[-2] == PPC_INST_MFLR)
-		return true;
-
-	if (instruction[-1] == PPC_INST_MFLR)
-		return true;
-
-	return false;
-}
-
-/*
- * In case of _mcount calls, do not save the current callee's TOC (in r2) into
- * the original caller's stack frame. If we did we would clobber the saved TOC
- * value of the original caller.
- */
-static void squash_toc_save_inst(const char *name, unsigned long addr)
-{
-	struct ppc64_stub_entry *stub = (struct ppc64_stub_entry *)addr;
-
-	/* Only for calls to _mcount */
-	if (strcmp("_mcount", name) != 0)
-		return;
-
-	stub->jump[2] = PPC_INST_NOP;
-}
-#else
-static void squash_toc_save_inst(const char *name, unsigned long addr) { }
-
-/* without -mprofile-kernel, mcount calls are never early */
-static bool is_early_mcount_callsite(u32 *instruction)
-{
-	return false;
-}
-#endif
-
 /* We expect a noop next: if it is, replace it with instruction to
    restore r2. */
-static int restore_r2(u32 *instruction, struct module *me)
+static int restore_r2(const char *name, u32 *instruction, struct module *me)
 {
 	u32 *prev_insn = instruction - 1;
 
-	if (is_early_mcount_callsite(prev_insn))
+	if (is_mprofile_ftrace_call(name))
 		return 1;
 
 	/*
@@ -504,12 +504,12 @@ static int restore_r2(u32 *instruction, struct module *me)
 	 * "link" branches and they don't return, so they don't need the r2
 	 * restore afterwards.
 	 */
-	if (!instr_is_relative_link_branch(*prev_insn))
+	if (!instr_is_relative_link_branch(ppc_inst(*prev_insn)))
 		return 1;
 
 	if (*instruction != PPC_INST_NOP) {
-		pr_err("%s: Expect noop after relocate, got %08x\n",
-		       me->name, *instruction);
+		pr_err("%s: Expected nop after call, got %08x at %pS\n",
+			me->name, *instruction, instruction);
 		return 0;
 	}
 	/* ld r2,R2_STACK_OFFSET(r1) */
@@ -631,15 +631,16 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 
 		case R_PPC_REL24:
 			/* FIXME: Handle weak symbols here --RR */
-			if (sym->st_shndx == SHN_UNDEF) {
+			if (sym->st_shndx == SHN_UNDEF ||
+			    sym->st_shndx == SHN_LIVEPATCH) {
 				/* External: go via stub */
-				value = stub_for_addr(sechdrs, value, me);
+				value = stub_for_addr(sechdrs, value, me,
+						strtab + sym->st_name);
 				if (!value)
 					return -ENOENT;
-				if (!restore_r2((u32 *)location + 1, me))
+				if (!restore_r2(strtab + sym->st_name,
+							(u32 *)location + 1, me))
 					return -ENOEXEC;
-
-				squash_toc_save_inst(strtab + sym->st_name, value);
 			} else
 				value += local_entry_offset(sym);
 
@@ -660,6 +661,18 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 		case R_PPC64_REL64:
 			/* 64 bits relative (used by features fixups) */
 			*location = value - (unsigned long)location;
+			break;
+
+		case R_PPC64_REL32:
+			/* 32 bits relative (used by relative exception tables) */
+			/* Convert value to relative */
+			value -= (unsigned long)location;
+			if (value + 0x80000000 > 0xffffffff) {
+				pr_err("%s: REL32 %li out of range!\n",
+				       me->name, (long int)value);
+				return -ENOEXEC;
+			}
+			*(u32 *)location = value;
 			break;
 
 		case R_PPC64_TOCSAVE:
@@ -683,18 +696,21 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 		         *	ld r2, ...(r12)
 			 *	add r2, r2, r12
 			 */
-			if ((((uint32_t *)location)[0] & ~0xfffc)
-			    != 0xe84c0000)
+			if ((((uint32_t *)location)[0] & ~0xfffc) !=
+			    (PPC_INST_LD | __PPC_RT(R2) | __PPC_RA(R12)))
 				break;
-			if (((uint32_t *)location)[1] != 0x7c426214)
+			if (((uint32_t *)location)[1] !=
+			    (PPC_INST_ADD | __PPC_RT(R2) | __PPC_RA(R2) | __PPC_RB(R12)))
 				break;
 			/*
 			 * If found, replace it with:
 			 *	addis r2, r12, (.TOC.-func)@ha
-			 *	addi r2, r12, (.TOC.-func)@l
+			 *	addi  r2,  r2, (.TOC.-func)@l
 			 */
-			((uint32_t *)location)[0] = 0x3c4c0000 + PPC_HA(value);
-			((uint32_t *)location)[1] = 0x38420000 + PPC_LO(value);
+			((uint32_t *)location)[0] = PPC_INST_ADDIS | __PPC_RT(R2) |
+						    __PPC_RA(R12) | PPC_HA(value);
+			((uint32_t *)location)[1] = PPC_INST_ADDI | __PPC_RT(R2) |
+						    __PPC_RA(R2) | PPC_LO(value);
 			break;
 
 		case R_PPC64_REL16_HA:
@@ -726,76 +742,56 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 }
 
 #ifdef CONFIG_DYNAMIC_FTRACE
-
-#ifdef CC_USING_MPROFILE_KERNEL
-
-#define PACATOC offsetof(struct paca_struct, kernel_toc)
-
-/*
- * For mprofile-kernel we use a special stub for ftrace_caller() because we
- * can't rely on r2 containing this module's TOC when we enter the stub.
- *
- * That can happen if the function calling us didn't need to use the toc. In
- * that case it won't have setup r2, and the r2 value will be either the
- * kernel's toc, or possibly another modules toc.
- *
- * To deal with that this stub uses the kernel toc, which is always accessible
- * via the paca (in r13). The target (ftrace_caller()) is responsible for
- * saving and restoring the toc before returning.
- */
-static unsigned long create_ftrace_stub(const Elf64_Shdr *sechdrs, struct module *me)
+int module_trampoline_target(struct module *mod, unsigned long addr,
+			     unsigned long *target)
 {
-	struct ppc64_stub_entry *entry;
-	unsigned int i, num_stubs;
-	static u32 stub_insns[] = {
-		0xe98d0000 | PACATOC, 	/* ld      r12,PACATOC(r13)	*/
-		0x3d8c0000,		/* addis   r12,r12,<high>	*/
-		0x398c0000, 		/* addi    r12,r12,<low>	*/
-		0x7d8903a6, 		/* mtctr   r12			*/
-		0x4e800420, 		/* bctr				*/
-	};
-	long reladdr;
+	struct ppc64_stub_entry *stub;
+	func_desc_t funcdata;
+	u32 magic;
 
-	num_stubs = sechdrs[me->arch.stubs_section].sh_size / sizeof(*entry);
-
-	/* Find the next available stub entry */
-	entry = (void *)sechdrs[me->arch.stubs_section].sh_addr;
-	for (i = 0; i < num_stubs && stub_func_addr(entry->funcdata); i++, entry++);
-
-	if (i >= num_stubs) {
-		pr_err("%s: Unable to find a free slot for ftrace stub.\n", me->name);
-		return 0;
+	if (!within_module_core(addr, mod)) {
+		pr_err("%s: stub %lx not in module %s\n", __func__, addr, mod->name);
+		return -EFAULT;
 	}
 
-	memcpy(entry->jump, stub_insns, sizeof(stub_insns));
+	stub = (struct ppc64_stub_entry *)addr;
 
-	/* Stub uses address relative to kernel toc (from the paca) */
-	reladdr = (unsigned long)ftrace_caller - kernel_toc_addr();
-	if (reladdr > 0x7FFFFFFF || reladdr < -(0x80000000L)) {
-		pr_err("%s: Address of ftrace_caller out of range of kernel_toc.\n", me->name);
-		return 0;
+	if (copy_from_kernel_nofault(&magic, &stub->magic,
+			sizeof(magic))) {
+		pr_err("%s: fault reading magic for stub %lx for %s\n", __func__, addr, mod->name);
+		return -EFAULT;
 	}
 
-	entry->jump[1] |= PPC_HA(reladdr);
-	entry->jump[2] |= PPC_LO(reladdr);
+	if (magic != STUB_MAGIC) {
+		pr_err("%s: bad magic for stub %lx for %s\n", __func__, addr, mod->name);
+		return -EFAULT;
+	}
 
-	/* Eventhough we don't use funcdata in the stub, it's needed elsewhere. */
-	entry->funcdata = func_desc((unsigned long)ftrace_caller);
-	entry->magic = STUB_MAGIC;
+	if (copy_from_kernel_nofault(&funcdata, &stub->funcdata,
+			sizeof(funcdata))) {
+		pr_err("%s: fault reading funcdata for stub %lx for %s\n", __func__, addr, mod->name);
+                return -EFAULT;
+	}
 
-	return (unsigned long)entry;
+	*target = stub_func_addr(funcdata);
+
+	return 0;
 }
-#else
-static unsigned long create_ftrace_stub(const Elf64_Shdr *sechdrs, struct module *me)
-{
-	return stub_for_addr(sechdrs, (unsigned long)ftrace_caller, me);
-}
-#endif
 
 int module_finalize_ftrace(struct module *mod, const Elf_Shdr *sechdrs)
 {
-	mod->arch.toc = my_r2(sechdrs, mod);
-	mod->arch.tramp = create_ftrace_stub(sechdrs, mod);
+	mod->arch.tramp = stub_for_addr(sechdrs,
+					(unsigned long)ftrace_caller,
+					mod,
+					"ftrace_caller");
+#ifdef CONFIG_DYNAMIC_FTRACE_WITH_REGS
+	mod->arch.tramp_regs = stub_for_addr(sechdrs,
+					(unsigned long)ftrace_regs_caller,
+					mod,
+					"ftrace_regs_caller");
+	if (!mod->arch.tramp_regs)
+		return -ENOENT;
+#endif
 
 	if (!mod->arch.tramp)
 		return -ENOENT;

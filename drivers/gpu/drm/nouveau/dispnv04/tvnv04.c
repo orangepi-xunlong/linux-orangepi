@@ -24,7 +24,6 @@
  *
  */
 
-#include <drm/drmP.h>
 #include "nouveau_drv.h"
 #include "nouveau_reg.h"
 #include "nouveau_encoder.h"
@@ -54,7 +53,7 @@ static struct nvkm_i2c_bus_probe nv04_tv_encoder_info[] = {
 int nv04_tv_identify(struct drm_device *dev, int i2c_index)
 {
 	struct nouveau_drm *drm = nouveau_drm(dev);
-	struct nvkm_i2c *i2c = nvxx_i2c(&drm->device);
+	struct nvkm_i2c *i2c = nvxx_i2c(&drm->client.device);
 	struct nvkm_i2c_bus *bus = nvkm_i2c_bus_find(i2c, i2c_index);
 	if (bus) {
 		return nvkm_i2c_bus_probe(bus, "TV encoder",
@@ -173,7 +172,7 @@ static void nv04_tv_commit(struct drm_encoder *encoder)
 	helper->dpms(encoder, DRM_MODE_DPMS_ON);
 
 	NV_DEBUG(drm, "Output %s is running on CRTC %d using output %c\n",
-		 nouveau_encoder_connector_get(nv_encoder)->base.name,
+		 nv04_encoder_get_connector(nv_encoder)->base.name,
 		 nv_crtc->index, '@' + ffs(nv_encoder->dcb->or));
 }
 
@@ -206,7 +205,7 @@ nv04_tv_create(struct drm_connector *connector, struct dcb_output *entry)
 	struct drm_encoder *encoder;
 	struct drm_device *dev = connector->dev;
 	struct nouveau_drm *drm = nouveau_drm(dev);
-	struct nvkm_i2c *i2c = nvxx_i2c(&drm->device);
+	struct nvkm_i2c *i2c = nvxx_i2c(&drm->client.device);
 	struct nvkm_i2c_bus *bus = nvkm_i2c_bus_find(i2c, entry->i2c_index);
 	int type, ret;
 
@@ -244,7 +243,7 @@ nv04_tv_create(struct drm_connector *connector, struct dcb_output *entry)
 
 	/* Attach it to the specified connector. */
 	get_slave_funcs(encoder)->create_resources(encoder, connector);
-	drm_mode_connector_attach_encoder(connector, encoder);
+	drm_connector_attach_encoder(connector, encoder);
 
 	return 0;
 

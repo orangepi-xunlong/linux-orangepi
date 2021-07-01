@@ -44,7 +44,7 @@ static int __init storcenter_add_bridge(struct device_node *dev)
 	struct pci_controller *hose;
 	const int *bus_range;
 
-	printk("Adding PCI host bridge %s\n", dev->full_name);
+	printk("Adding PCI host bridge %pOF\n", dev);
 
 	hose = pcibios_alloc_controller(dev);
 	if (hose == NULL)
@@ -101,7 +101,8 @@ static void __noreturn storcenter_restart(char *cmd)
 	local_irq_disable();
 
 	/* Set exception prefix high - to the firmware */
-	_nmask_and_or_msr(0, MSR_IP);
+	mtmsr(mfmsr() | MSR_IP);
+	isync();
 
 	/* Wait for reset to happen */
 	for (;;) ;

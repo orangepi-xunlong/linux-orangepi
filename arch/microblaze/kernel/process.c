@@ -11,11 +11,13 @@
 #include <linux/cpu.h>
 #include <linux/export.h>
 #include <linux/sched.h>
+#include <linux/sched/debug.h>
+#include <linux/sched/task.h>
+#include <linux/sched/task_stack.h>
 #include <linux/pm.h>
 #include <linux/tick.h>
 #include <linux/bitops.h>
 #include <linux/ptrace.h>
-#include <asm/pgalloc.h>
 #include <linux/uaccess.h> /* for USER_DS macros */
 #include <asm/cacheflush.h>
 
@@ -51,8 +53,8 @@ void flush_thread(void)
 {
 }
 
-int copy_thread(unsigned long clone_flags, unsigned long usp,
-		unsigned long arg, struct task_struct *p)
+int copy_thread(unsigned long clone_flags, unsigned long usp, unsigned long arg,
+		struct task_struct *p, unsigned long tls)
 {
 	struct pt_regs *childregs = task_pt_regs(p);
 	struct thread_info *ti = task_thread_info(p);
@@ -111,27 +113,10 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 	 *  which contains TLS area
 	 */
 	if (clone_flags & CLONE_SETTLS)
-		childregs->r21 = childregs->r10;
+		childregs->r21 = tls;
 
 	return 0;
 }
-
-#ifndef CONFIG_MMU
-/*
- * Return saved PC of a blocked thread.
- */
-unsigned long thread_saved_pc(struct task_struct *tsk)
-{
-	struct cpu_context *ctx =
-		&(((struct thread_info *)(tsk->stack))->cpu_context);
-
-	/* Check whether the thread is blocked in resume() */
-	if (in_sched_functions(ctx->r15))
-		return (unsigned long)ctx->r15;
-	else
-		return ctx->r14;
-}
-#endif
 
 unsigned long get_wchan(struct task_struct *p)
 {
@@ -164,5 +149,5 @@ int dump_fpu(struct pt_regs *regs, elf_fpregset_t *fpregs)
 
 void arch_cpu_idle(void)
 {
-       local_irq_enable();
+       raw_local_irq_enable();
 }

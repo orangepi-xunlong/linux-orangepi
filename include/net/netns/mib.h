@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __NETNS_MIB_H__
 #define __NETNS_MIB_H__
 
@@ -22,6 +23,12 @@ struct netns_mib {
 #endif
 #ifdef CONFIG_XFRM_STATISTICS
 	DEFINE_SNMP_STAT(struct linux_xfrm_mib, xfrm_statistics);
+#endif
+#if IS_ENABLED(CONFIG_TLS)
+	DEFINE_SNMP_STAT(struct linux_tls_mib, tls_statistics);
+#endif
+#ifdef CONFIG_MPTCP
+	DEFINE_SNMP_STAT(struct mptcp_mib, mptcp_statistics);
 #endif
 };
 

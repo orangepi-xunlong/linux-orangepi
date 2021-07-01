@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *	Description of Z8530 Z85C30 and Z85230 communications chips
  *
@@ -419,8 +420,6 @@ extern struct z8530_irqhandler z8530_sync, z8530_async, z8530_nop;
 /*
  *	Asynchronous Interfacing
  */
-
-#define SERIAL_MAGIC 0x5301
 
 /*
  * The size of the serial xmit buffer is 1 page, or 4096 bytes

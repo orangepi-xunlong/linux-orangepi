@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2012 - 2014 Allwinner Tech
  * Pan Nan <pannan@allwinnertech.com>
  *
  * Copyright (C) 2014 Maxime Ripard
  * Maxime Ripard <maxime.ripard@free-electrons.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
  */
 
 #include <linux/clk.h>
@@ -46,6 +42,8 @@
 #define SUN4I_CTL_TP				BIT(18)
 
 #define SUN4I_INT_CTL_REG		0x0c
+#define SUN4I_INT_CTL_RF_F34			BIT(4)
+#define SUN4I_INT_CTL_TF_E34			BIT(12)
 #define SUN4I_INT_CTL_TC			BIT(16)
 
 #define SUN4I_INT_STA_REG		0x10
@@ -61,11 +59,14 @@
 #define SUN4I_CLK_CTL_CDR1(div)			(((div) & SUN4I_CLK_CTL_CDR1_MASK) << 8)
 #define SUN4I_CLK_CTL_DRS			BIT(12)
 
+#define SUN4I_MAX_XFER_SIZE			0xffffff
+
 #define SUN4I_BURST_CNT_REG		0x20
-#define SUN4I_BURST_CNT(cnt)			((cnt) & 0xffffff)
+#define SUN4I_BURST_CNT(cnt)			((cnt) & SUN4I_MAX_XFER_SIZE)
 
 #define SUN4I_XMIT_CNT_REG		0x24
-#define SUN4I_XMIT_CNT(cnt)			((cnt) & 0xffffff)
+#define SUN4I_XMIT_CNT(cnt)			((cnt) & SUN4I_MAX_XFER_SIZE)
+
 
 #define SUN4I_FIFO_STA_REG		0x28
 #define SUN4I_FIFO_STA_RF_CNT_MASK		0x7f
@@ -96,6 +97,31 @@ static inline void sun4i_spi_write(struct sun4i_spi *sspi, u32 reg, u32 value)
 	writel(value, sspi->base_addr + reg);
 }
 
+static inline u32 sun4i_spi_get_tx_fifo_count(struct sun4i_spi *sspi)
+{
+	u32 reg = sun4i_spi_read(sspi, SUN4I_FIFO_STA_REG);
+
+	reg >>= SUN4I_FIFO_STA_TF_CNT_BITS;
+
+	return reg & SUN4I_FIFO_STA_TF_CNT_MASK;
+}
+
+static inline void sun4i_spi_enable_interrupt(struct sun4i_spi *sspi, u32 mask)
+{
+	u32 reg = sun4i_spi_read(sspi, SUN4I_INT_CTL_REG);
+
+	reg |= mask;
+	sun4i_spi_write(sspi, SUN4I_INT_CTL_REG, reg);
+}
+
+static inline void sun4i_spi_disable_interrupt(struct sun4i_spi *sspi, u32 mask)
+{
+	u32 reg = sun4i_spi_read(sspi, SUN4I_INT_CTL_REG);
+
+	reg &= ~mask;
+	sun4i_spi_write(sspi, SUN4I_INT_CTL_REG, reg);
+}
+
 static inline void sun4i_spi_drain_fifo(struct sun4i_spi *sspi, int len)
 {
 	u32 reg, cnt;
@@ -118,10 +144,13 @@ static inline void sun4i_spi_drain_fifo(struct sun4i_spi *sspi, int len)
 
 static inline void sun4i_spi_fill_fifo(struct sun4i_spi *sspi, int len)
 {
+	u32 cnt;
 	u8 byte;
 
-	if (len > sspi->len)
-		len = sspi->len;
+	/* See how much data we can fit */
+	cnt = SUN4I_FIFO_DEPTH - sun4i_spi_get_tx_fifo_count(sspi);
+
+	len = min3(len, (int)cnt, sspi->len);
 
 	while (len--) {
 		byte = sspi->tx_buf ? *sspi->tx_buf++ : 0;
@@ -169,7 +198,7 @@ static void sun4i_spi_set_cs(struct spi_device *spi, bool enable)
 
 static size_t sun4i_spi_max_transfer_size(struct spi_device *spi)
 {
-	return SUN4I_FIFO_DEPTH - 1;
+	return SUN4I_MAX_XFER_SIZE - 1;
 }
 
 static int sun4i_spi_transfer_one(struct spi_master *master,
@@ -184,10 +213,10 @@ static int sun4i_spi_transfer_one(struct spi_master *master,
 	u32 reg;
 
 	/* We don't support transfer larger than the FIFO */
-	if (tfr->len > SUN4I_FIFO_DEPTH)
+	if (tfr->len > SUN4I_MAX_XFER_SIZE)
 		return -EMSGSIZE;
 
-	if (tfr->tx_buf && tfr->len >= SUN4I_FIFO_DEPTH)
+	if (tfr->tx_buf && tfr->len >= SUN4I_MAX_XFER_SIZE)
 		return -EMSGSIZE;
 
 	reinit_completion(&sspi->done);
@@ -286,7 +315,11 @@ static int sun4i_spi_transfer_one(struct spi_master *master,
 	sun4i_spi_fill_fifo(sspi, SUN4I_FIFO_DEPTH - 1);
 
 	/* Enable the interrupts */
-	sun4i_spi_write(sspi, SUN4I_INT_CTL_REG, SUN4I_INT_CTL_TC);
+	sun4i_spi_enable_interrupt(sspi, SUN4I_INT_CTL_TC |
+					 SUN4I_INT_CTL_RF_F34);
+	/* Only enable Tx FIFO interrupt if we really need it */
+	if (tx_len > SUN4I_FIFO_DEPTH)
+		sun4i_spi_enable_interrupt(sspi, SUN4I_INT_CTL_TF_E34);
 
 	/* Start the transfer */
 	reg = sun4i_spi_read(sspi, SUN4I_CTL_REG);
@@ -306,7 +339,6 @@ static int sun4i_spi_transfer_one(struct spi_master *master,
 		goto out;
 	}
 
-	sun4i_spi_drain_fifo(sspi, SUN4I_FIFO_DEPTH);
 
 out:
 	sun4i_spi_write(sspi, SUN4I_INT_CTL_REG, 0);
@@ -322,7 +354,30 @@ static irqreturn_t sun4i_spi_handler(int irq, void *dev_id)
 	/* Transfer complete */
 	if (status & SUN4I_INT_CTL_TC) {
 		sun4i_spi_write(sspi, SUN4I_INT_STA_REG, SUN4I_INT_CTL_TC);
+		sun4i_spi_drain_fifo(sspi, SUN4I_FIFO_DEPTH);
 		complete(&sspi->done);
+		return IRQ_HANDLED;
+	}
+
+	/* Receive FIFO 3/4 full */
+	if (status & SUN4I_INT_CTL_RF_F34) {
+		sun4i_spi_drain_fifo(sspi, SUN4I_FIFO_DEPTH);
+		/* Only clear the interrupt _after_ draining the FIFO */
+		sun4i_spi_write(sspi, SUN4I_INT_STA_REG, SUN4I_INT_CTL_RF_F34);
+		return IRQ_HANDLED;
+	}
+
+	/* Transmit FIFO 3/4 empty */
+	if (status & SUN4I_INT_CTL_TF_E34) {
+		sun4i_spi_fill_fifo(sspi, SUN4I_FIFO_DEPTH);
+
+		if (!sspi->len)
+			/* nothing left to transmit */
+			sun4i_spi_disable_interrupt(sspi, SUN4I_INT_CTL_TF_E34);
+
+		/* Only clear the interrupt _after_ re-seeding the FIFO */
+		sun4i_spi_write(sspi, SUN4I_INT_STA_REG, SUN4I_INT_CTL_TF_E34);
+
 		return IRQ_HANDLED;
 	}
 
@@ -334,6 +389,7 @@ static int sun4i_spi_runtime_resume(struct device *dev)
 	struct spi_master *master = dev_get_drvdata(dev);
 	struct sun4i_spi *sspi = spi_master_get_devdata(master);
 	int ret;
+	u32 reg;
 
 	ret = clk_prepare_enable(sspi->hclk);
 	if (ret) {
@@ -346,9 +402,10 @@ static int sun4i_spi_runtime_resume(struct device *dev)
 		dev_err(dev, "Couldn't enable module clock\n");
 		goto err;
 	}
+	reg = sun4i_spi_read(sspi, SUN4I_CTL_REG);
 
 	sun4i_spi_write(sspi, SUN4I_CTL_REG,
-			SUN4I_CTL_ENABLE | SUN4I_CTL_MASTER | SUN4I_CTL_TP);
+        reg | SUN4I_CTL_ENABLE | SUN4I_CTL_MASTER | SUN4I_CTL_TP);
 
 	return 0;
 
@@ -373,7 +430,6 @@ static int sun4i_spi_probe(struct platform_device *pdev)
 {
 	struct spi_master *master;
 	struct sun4i_spi *sspi;
-	struct resource	*res;
 	int ret = 0, irq;
 
 	master = spi_alloc_master(&pdev->dev, sizeof(struct sun4i_spi));
@@ -385,8 +441,7 @@ static int sun4i_spi_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, master);
 	sspi = spi_master_get_devdata(master);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	sspi->base_addr = devm_ioremap_resource(&pdev->dev, res);
+	sspi->base_addr = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(sspi->base_addr)) {
 		ret = PTR_ERR(sspi->base_addr);
 		goto err_free_master;
@@ -394,7 +449,6 @@ static int sun4i_spi_probe(struct platform_device *pdev)
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
-		dev_err(&pdev->dev, "No spi IRQ specified\n");
 		ret = -ENXIO;
 		goto err_free_master;
 	}

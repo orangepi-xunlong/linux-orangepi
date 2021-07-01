@@ -1,0 +1,853 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+// Copyright (C) 2019 Icenowy Zheng <icenowy@aosc.xyz>
+// Copyright (C) 2020 Martijn Braam <martijn@brixit.nl>
+// Copyright (C) 2020 Ondrej Jirman <megous@megous.com>
+
+#include "sun50i-a64.dtsi"
+#include "sun50i-a64-cpu-opp.dtsi"
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/leds/common.h>
+#include <dt-bindings/pwm/pwm.h>
+#include <dt-bindings/usb/pd.h>
+
+/ {
+	aliases {
+		serial0 = &uart0;
+		ethernet0 = &rtl8723cs;
+	};
+
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pwms = <&r_pwm 0 50000 PWM_POLARITY_INVERTED>;
+		enable-gpios = <&pio 7 10 GPIO_ACTIVE_HIGH>; /* PH10 */
+		/* Backlight configuration differs per PinePhone revision. */
+	};
+
+        bat: battery {
+                compatible = "simple-battery";
+                voltage-min-design-microvolt = <3000000>;
+                voltage-max-design-microvolt = <4350000>;
+                energy-full-design-microwatt-hours = <12000000>;
+                charge-full-design-microamp-hours = <2750000>;
+                precharge-current-microamp = <130000>;
+                charge-term-current-microamp = <50000>;
+                constant-charge-current-max-microamp = <1300000>;
+                constant-charge-voltage-max-microvolt = <4350000>;
+                factory-internal-resistance-micro-ohms = <150000>;
+                resistance-temp-table = <20 150>;
+                ocv-capacity-celsius = <20>;
+                ocv-capacity-table-0 =
+                	<4334000 100>,
+			<4319700 99>,
+			<4304300 98>,
+			<4292200 97>,
+			<4280100 96>,
+			<4269100 95>,
+			<4253700 94>,
+			<4242700 93>,
+			<4232800 92>,
+			<4222900 91>,
+			<4211900 90>,
+			<4203100 89>,
+			<4192100 88>,
+			<4177800 87>,
+			<4167900 86>,
+			<4155800 85>,
+			<4147000 84>,
+			<4136000 83>,
+			<4126100 82>,
+			<4111800 81>,
+			<4102999 80>,
+			<4093100 79>,
+			<4084300 78>,
+			<4075500 77>,
+			<4064500 76>,
+			<4054600 75>,
+			<4042500 74>,
+			<4035900 73>,
+			<4029300 72>,
+			<4018300 71>,
+			<4006200 70>,
+			<3993000 69>,
+			<3974300 68>,
+			<3964400 67>,
+			<3956700 66>,
+			<3949000 65>,
+			<3943500 64>,
+			<3938000 63>,
+			<3931400 62>,
+			<3923700 61>,
+			<3917100 60>,
+			<3903900 59>,
+			<3895100 58>,
+			<3887400 57>,
+			<3878600 56>,
+			<3870900 55>,
+			<3863200 54>,
+			<3855500 53>,
+			<3848900 52>,
+			<3837900 51>,
+			<3830200 50>,
+			<3825800 49>,
+			<3821400 48>,
+			<3815900 47>,
+			<3810400 46>,
+			<3806000 45>,
+			<3801600 44>,
+			<3797200 43>,
+			<3792800 42>,
+			<3789500 41>,
+			<3786200 40>,
+			<3781800 39>,
+			<3778500 38>,
+			<3775200 37>,
+			<3770800 36>,
+			<3764200 35>,
+			<3760900 34>,
+			<3758700 33>,
+			<3755400 32>,
+			<3754300 31>,
+			<3752100 30>,
+			<3748800 29>,
+			<3749900 28>,
+			<3745500 27>,
+			<3742200 26>,
+			<3741100 25>,
+			<3737800 24>,
+			<3734500 23>,
+			<3731200 22>,
+			<3730100 21>,
+			<3724600 20>,
+			<3722400 19>,
+			<3718000 18>,
+			<3713600 17>,
+			<3708100 16>,
+			<3701500 15>,
+			<3689400 14>,
+			<3682800 13>,
+			<3674000 12>,
+			<3666300 11>,
+			<3659700 10>,
+			<3653100 9>,
+			<3647600 8>,
+			<3641000 7>,
+			<3625600 6>,
+			<3613500 5>,
+			<3591500 4>,
+			<3554100 3>,
+			<3489200 2>,
+			<3393500 1>,
+			<3256000 0>;
+                x-powers,ocv-capacity-table =
+                	<0xc0 0>,
+			<0xc1 1>,
+			<0xc2 1>,
+			<0xc3 2>,
+			<0xc4 2>,
+			<0xc5 4>,
+			<0xc6 4>,
+			<0xc7 5>,
+			<0xc8 6>,
+			<0xc9 8>,
+			<0xca 11>,
+			<0xcb 15>,
+			<0xcc 22>,
+			<0xcd 36>,
+			<0xce 44>,
+			<0xcf 48>,
+			<0xd0 51>,
+			<0xd1 53>,
+			<0xd2 56>,
+			<0xd3 60>,
+			<0xd4 64>,
+			<0xd5 69>,
+			<0xd6 71>,
+			<0xd7 75>,
+			<0xd8 78>,
+			<0xd9 82>,
+			<0xda 84>,
+			<0xdb 85>,
+			<0xdc 88>,
+			<0xdd 92>,
+			<0xde 95>,
+			<0xdf 98>;
+        };
+
+	bt_sco_codec: bt-sco-codec {
+		#sound-dai-cells = <1>;
+		compatible = "linux,bt-sco";
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	ec25_codec: ec25-codec {
+		#sound-dai-cells = <1>;
+		compatible = "quectel,ec25";
+	};
+
+	i2c_csi: i2c-csi {
+		compatible = "i2c-gpio";
+		sda-gpios = <&pio 4 13 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>; /* PE13 */
+		scl-gpios = <&pio 4 12 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>; /* PE12 */
+		i2c-gpio,delay-us = <3>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		blue {
+			function = LED_FUNCTION_INDICATOR;
+			color = <LED_COLOR_ID_BLUE>;
+			gpios = <&pio 3 20 GPIO_ACTIVE_HIGH>; /* PD20 */
+			retain-state-suspended;
+		};
+
+		green {
+			function = LED_FUNCTION_INDICATOR;
+			color = <LED_COLOR_ID_GREEN>;
+			gpios = <&pio 3 18 GPIO_ACTIVE_HIGH>; /* PD18 */
+			retain-state-suspended;
+		};
+
+		red {
+			function = LED_FUNCTION_INDICATOR;
+			color = <LED_COLOR_ID_RED>;
+			gpios = <&pio 3 19 GPIO_ACTIVE_HIGH>; /* PD19 */
+			retain-state-suspended;
+		};
+	};
+
+	hdmi-connector {
+		compatible = "hdmi-connector";
+		type = "a";
+
+		port {
+			hdmi_con_in: endpoint {
+				remote-endpoint = <&hdmi_out_con>;
+			};
+		};
+	};
+
+	reg_anx1v0: anx1v0 {
+		compatible = "regulator-fixed";
+		regulator-name = "anx1v0";
+		regulator-min-microvolt = <1000000>;
+		regulator-max-microvolt = <1000000>;
+	};
+
+	reg_usb_5v: usb-5v {
+		compatible = "regulator-fixed";
+		regulator-name = "usb-5v";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		gpio = <&pio 3 8 GPIO_ACTIVE_HIGH>; /* PD8 */
+		enable-active-high;
+	};
+
+	reg_vbat_bb: vbat-bb {
+		compatible = "regulator-fixed";
+		regulator-name = "vbat-bb";
+		regulator-min-microvolt = <3500000>;
+		regulator-max-microvolt = <3500000>;
+		gpio = <&r_pio 0 7 GPIO_ACTIVE_HIGH>; /* PL7 */
+		enable-active-high;
+	};
+
+	reg_vbat_wifi: vbat-wifi {
+		compatible = "regulator-fixed";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-name = "vbat-wifi";
+	};
+
+	/* This is a charge pump for CC1 and CC2 pins on USB-C connector. */
+	reg_vconn5v0: vconn5v0 {
+		compatible = "regulator-fixed";
+		regulator-name = "vconn5v0";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		gpio = <&pio 3 9 GPIO_ACTIVE_HIGH>; /* PD9 */
+		enable-active-high;
+	};
+
+	speaker_amp: audio-amplifier {
+		compatible = "simple-audio-amplifier";
+		enable-gpios = <&pio 2 7 GPIO_ACTIVE_HIGH>; /* PC7 */
+		sound-name-prefix = "Speaker Amp";
+	};
+
+	vibrator {
+		compatible = "gpio-vibrator";
+		enable-gpios = <&pio 3 2 GPIO_ACTIVE_HIGH>; /* PD2 */
+		vcc-supply = <&reg_dcdc1>;
+	};
+
+	sgm3140: led-controller {
+		compatible = "sgmicro,sgm3140";
+		vin-supply = <&reg_dcdc1>;
+
+		sgm3140_flash: led {
+			function = LED_FUNCTION_FLASH;
+			color = <LED_COLOR_ID_WHITE>;
+			flash-max-timeout-us = <250000>;
+		};
+	};
+};
+
+&codec {
+	pinctrl-names = "default";
+	pinctrl-0 = <&aif2_pins>, <&aif3_pins>;
+	status = "okay";
+};
+
+&codec_analog {
+	cpvdd-supply = <&reg_eldo1>;
+	status = "okay";
+};
+
+&cpu0 {
+	cpu-supply = <&reg_dcdc2>;
+};
+
+&cpu1 {
+	cpu-supply = <&reg_dcdc2>;
+};
+
+&cpu2 {
+	cpu-supply = <&reg_dcdc2>;
+};
+
+&cpu3 {
+	cpu-supply = <&reg_dcdc2>;
+};
+
+&csi {
+	pinctrl-0 = <&csi_pins>, <&csi_mclk_pin>;
+	status = "okay";
+
+	port {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		csi_ov5640_ep: endpoint@0 {
+			reg = <0>;
+			remote-endpoint = <&ov5640_ep>;
+			bus-width = <8>;
+			hsync-active = <1>; /* Active high */
+			vsync-active = <0>; /* Active low */
+			data-active = <1>;  /* Active high */
+			pclk-sample = <1>;  /* Rising */
+		};
+
+		csi_gc2145_ep: endpoint@1 {
+			reg = <1>;
+			remote-endpoint = <&gc2145_ep>;
+			bus-width = <8>;
+			hsync-active = <1>;
+			vsync-active = <1>;
+			data-active = <1>;
+			pclk-sample = <1>;
+		};
+	};
+};
+
+&dai {
+	status = "okay";
+};
+
+&de {
+	status = "okay";
+};
+
+&dphy {
+	status = "okay";
+};
+
+&dsi {
+	vcc-dsi-supply = <&reg_dldo1>;
+	status = "okay";
+
+	panel@0 {
+		compatible = "xingbangda,xbd599";
+		reg = <0>;
+		reset-gpios = <&pio 3 23 GPIO_ACTIVE_LOW>; /* PD23 */
+		iovcc-supply = <&reg_dldo2>;
+		vcc-supply = <&reg_ldo_io0>;
+		backlight = <&backlight>;
+	};
+};
+
+&ehci0 {
+	status = "okay";
+};
+
+&ehci1 {
+	status = "okay";
+};
+
+&hdmi {
+	hvcc-supply = <&reg_dldo1>;
+	status = "okay";
+};
+
+&hdmi_out {
+	hdmi_out_con: endpoint {
+		remote-endpoint = <&hdmi_con_in>;
+	};
+};
+
+&hdmi_sound {
+	status = "okay";
+};
+
+&i2c_csi {
+	gc2145: front-camera@3c {
+		compatible = "galaxycore,gc2145";
+		reg = <0x3c>;
+		clocks = <&ccu CLK_CSI_MCLK>;
+		clock-names = "xclk";
+
+		AVDD-supply = <&reg_dldo3>;
+		DVDD-supply = <&reg_aldo1>;
+		IOVDD-supply = <&reg_eldo3>;
+		reset-gpios = <&pio 4 16 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>; /* PE16 */
+		enable-gpios = <&pio 4 17 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>; /* PE17 */
+
+		port {
+			gc2145_ep: endpoint {
+				remote-endpoint = <&csi_gc2145_ep>;
+				bus-width = <8>;
+				hsync-active = <1>;
+				vsync-active = <1>;
+				data-active = <1>;
+				pclk-sample = <1>;
+			};
+		};
+	};
+
+	ov5640: rear-camera@4c {
+		compatible = "ovti,ov5640";
+		reg = <0x4c>;
+		clocks = <&ccu CLK_CSI_MCLK>;
+		clock-names = "xclk";
+
+		AVDD-supply = <&reg_dldo3>;
+		DOVDD-supply = <&reg_aldo1>; /* shared with AFVCC */
+		DVDD-supply = <&reg_eldo3>;
+		reset-gpios = <&pio 3 3 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>; /* PD3 */
+		powerdown-gpios = <&pio 2 0 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>; /* PC0 */
+
+		port {
+			ov5640_ep: endpoint {
+				remote-endpoint = <&csi_ov5640_ep>;
+				bus-width = <8>;
+				hsync-active = <1>; /* Active high */
+				vsync-active = <0>; /* Active low */
+				data-active = <1>;  /* Active high */
+				pclk-sample = <1>;  /* Rising */
+			};
+		};
+	};
+};
+
+&i2c0 {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	touchscreen@5d {
+		compatible = "goodix,gt917s";
+		reg = <0x5d>;
+		interrupt-parent = <&pio>;
+		interrupts = <7 4 IRQ_TYPE_LEVEL_HIGH>; /* PH4 */
+		irq-gpios = <&pio 7 4 GPIO_ACTIVE_HIGH>; /* PH4 */
+		reset-gpios = <&pio 7 11 GPIO_ACTIVE_HIGH>; /* PH11 */
+		AVDD28-supply = <&reg_ldo_io0>;
+		VDDIO-supply = <&reg_ldo_io0>;
+		touchscreen-size-x = <720>;
+		touchscreen-size-y = <1440>;
+	};
+};
+
+&i2c1 {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	/* Magnetometer */
+	lis3mdl: lis3mdl@1e {
+		compatible = "st,lis3mdl-magn";
+		reg = <0x1e>;
+		vdd-supply = <&reg_dldo1>;
+		vddio-supply = <&reg_dldo1>;
+	};
+
+	/* Light/proximity sensor */
+	stk3311@48 {
+		compatible = "sensortek,stk3311";
+		reg = <0x48>;
+		interrupt-parent = <&pio>;
+		interrupts = <1 0 IRQ_TYPE_EDGE_FALLING>; /* PB0 */
+		vdd-supply = <&reg_ldo_io0>;
+		leda-supply = <&reg_dldo1>;
+	};
+
+	/* Accelerometer/gyroscope */
+	mpu6050@68 {
+		compatible = "invensense,mpu6050";
+		reg = <0x68>;
+		interrupt-parent = <&pio>;
+		interrupts = <7 5 IRQ_TYPE_EDGE_RISING>; /* PH5 */
+		vdd-supply = <&reg_dldo1>;
+		vddio-supply = <&reg_dldo1>;
+		mount-matrix = "0", "1", "0",
+				"-1", "0", "0",
+				"0", "0", "-1";
+	};
+};
+
+/* Connected to pogo pins (external spring based pinheader for user addons) */
+&i2c2 {
+	status = "okay";
+};
+
+&i2s2 {
+	status = "okay";
+};
+
+&lradc {
+	vref-supply = <&reg_aldo3>;
+	status = "okay";
+
+	button-200 {
+		label = "Volume Up";
+		linux,code = <KEY_VOLUMEUP>;
+		channel = <0>;
+		voltage = <200000>;
+	};
+
+	button-400 {
+		label = "Volume Down";
+		linux,code = <KEY_VOLUMEDOWN>;
+		channel = <0>;
+		voltage = <400000>;
+	};
+};
+
+&mmc0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mmc0_pins>;
+	vmmc-supply = <&reg_dcdc1>;
+	vqmmc-supply = <&reg_dcdc1>;
+	cd-gpios = <&pio 5 6 GPIO_ACTIVE_LOW>; /* PF6 */
+	disable-wp;
+	bus-width = <4>;
+	post-power-on-delay-ms = <1>; /* power is already turned on by the bootloader */
+	status = "okay";
+};
+
+&mmc1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mmc1_pins>;
+	vmmc-supply = <&reg_vbat_wifi>;
+	vqmmc-supply = <&reg_dldo4>;
+	bus-width = <4>;
+	non-removable;
+	post-power-on-delay-ms = <1>; /* wifi power is always on */
+	status = "okay";
+
+	rtl8723cs: wifi@1 {
+		reg = <1>;
+//		host-wake-gpios = <&r_pio 0 3 GPIO_ACTIVE_HIGH>; /* PL3 */
+		interrupt-parent = <&r_pio>;
+		interrupts = <0 3 IRQ_TYPE_EDGE_FALLING>; /* PL3 */
+	};
+};
+
+&mmc2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mmc2_pins>;
+	vmmc-supply = <&reg_dcdc1>;
+	vqmmc-supply = <&reg_dcdc1>;
+	bus-width = <8>;
+	non-removable;
+	cap-mmc-hw-reset;
+	post-power-on-delay-ms = <1>; /* power is already turned on by the bootloader */
+	status = "okay";
+};
+
+&ohci0 {
+	status = "okay";
+};
+
+&ohci1 {
+	status = "okay";
+};
+
+&pio {
+	vcc-pb-supply = <&reg_dcdc1>;
+	vcc-pc-supply = <&reg_dcdc1>;
+	vcc-pd-supply = <&reg_dcdc1>;
+	/* pinctrl would enable this even if no camera is powered,
+	 * which is wrong/not necessary
+	 *
+	 * vcc-pe-supply = <&reg_aldo1>; (also used by pogo pins i2c)
+	 */
+	vcc-pf-supply = <&reg_dcdc1>;
+	vcc-pg-supply = <&reg_dldo4>;
+	vcc-ph-supply = <&reg_dcdc1>;
+};
+
+&r_pio {
+	/*
+	 * FIXME: We can't add that supply for now since it would
+	 * create a circular dependency between pinctrl, the regulator
+	 * and the RSB Bus.
+	 *
+	 * vcc-pl-supply = <&reg_aldo2>;
+	 */
+};
+
+&r_pwm {
+	status = "okay";
+};
+
+&r_rsb {
+	status = "okay";
+
+	axp803: pmic@3a3 {
+		compatible = "x-powers,axp803";
+		reg = <0x3a3>;
+		interrupt-parent = <&r_intc>;
+		interrupts = <0 IRQ_TYPE_LEVEL_LOW>;
+	};
+};
+
+#include "axp803.dtsi"
+
+&battery_power_supply {
+	status = "okay";
+	monitored-battery = <&bat>;
+};
+
+&reg_aldo1 {
+	regulator-min-microvolt = <1800000>;
+	regulator-max-microvolt = <1800000>;
+	regulator-name = "dovdd-csi";
+};
+
+&reg_aldo2 {
+	regulator-always-on;
+	regulator-min-microvolt = <1800000>;
+	regulator-max-microvolt = <1800000>;
+	regulator-name = "vcc-pl";
+};
+
+&reg_aldo3 {
+	regulator-always-on;
+	regulator-min-microvolt = <2700000>;
+	regulator-max-microvolt = <3300000>;
+	regulator-name = "vcc-pll-avcc";
+};
+
+&reg_dcdc1 {
+	regulator-always-on;
+	regulator-min-microvolt = <3300000>;
+	regulator-max-microvolt = <3300000>;
+	regulator-name = "vcc-3v3";
+};
+
+&reg_dcdc2 {
+	regulator-always-on;
+	regulator-min-microvolt = <1000000>;
+	regulator-max-microvolt = <1300000>;
+	regulator-name = "vdd-cpux";
+};
+
+/* DCDC3 is polyphased with DCDC2 */
+
+&reg_dcdc5 {
+	regulator-always-on;
+	regulator-min-microvolt = <1200000>;
+	regulator-max-microvolt = <1200000>;
+	regulator-name = "vcc-dram";
+};
+
+&reg_dcdc6 {
+	regulator-always-on;
+	regulator-min-microvolt = <1100000>;
+	regulator-max-microvolt = <1100000>;
+	regulator-name = "vdd-sys";
+};
+
+&reg_dldo1 {
+	regulator-min-microvolt = <3300000>;
+	regulator-max-microvolt = <3300000>;
+	regulator-name = "vcc-dsi-sensor";
+};
+
+&reg_dldo2 {
+	regulator-min-microvolt = <1800000>;
+	regulator-max-microvolt = <1800000>;
+	regulator-name = "vcc-mipi-io";
+};
+
+&reg_dldo3 {
+	regulator-min-microvolt = <2800000>;
+	regulator-max-microvolt = <2800000>;
+	regulator-name = "avdd-csi";
+};
+
+&reg_dldo4 {
+	regulator-min-microvolt = <1800000>;
+	regulator-max-microvolt = <1800000>;
+	regulator-name = "vcc-wifi-io";
+};
+
+&reg_eldo1 {
+	regulator-always-on;
+	regulator-min-microvolt = <1800000>;
+	regulator-max-microvolt = <1800000>;
+	regulator-name = "vcc-lpddr";
+};
+
+&reg_eldo3 {
+	regulator-min-microvolt = <1800000>;
+	regulator-max-microvolt = <1800000>;
+	regulator-name = "dvdd-1v8-csi";
+};
+
+&reg_fldo1 {
+	regulator-min-microvolt = <1200000>;
+	regulator-max-microvolt = <1200000>;
+	regulator-name = "vcc-1v2-hsic";
+};
+
+&reg_fldo2 {
+	regulator-always-on;
+	regulator-min-microvolt = <1100000>;
+	regulator-max-microvolt = <1100000>;
+	regulator-name = "vdd-cpus";
+};
+
+&reg_ldo_io0 {
+	regulator-min-microvolt = <3300000>;
+	regulator-max-microvolt = <3300000>;
+	regulator-name = "vcc-lcd-ctp-stk";
+	status = "okay";
+};
+
+&reg_ldo_io1 {
+	regulator-min-microvolt = <1800000>;
+	regulator-max-microvolt = <1800000>;
+	regulator-name = "vcc-1v8-typec";
+	status = "okay";
+};
+
+&reg_rtc_ldo {
+	regulator-name = "vcc-rtc";
+};
+
+&sound {
+	status = "okay";
+	simple-audio-card,name = "PinePhone";
+	simple-audio-card,aux-devs = <&codec_analog>, <&speaker_amp>;
+	simple-audio-card,widgets = "Microphone", "Headset Microphone",
+				    "Microphone", "Internal Microphone",
+				    "Headphone", "Headphone Jack",
+				    "Speaker", "Internal Earpiece",
+				    "Speaker", "Internal Speaker";
+	simple-audio-card,routing =
+			"Headphone Jack", "HP",
+			"Internal Earpiece", "EARPIECE",
+			"Internal Speaker", "Speaker Amp OUTL",
+			"Internal Speaker", "Speaker Amp OUTR",
+			"Speaker Amp INL", "LINEOUT",
+			"Speaker Amp INR", "LINEOUT",
+			"Left DAC", "DACL",
+			"Right DAC", "DACR",
+			"ADCL", "Left ADC",
+			"ADCR", "Right ADC",
+			"Internal Microphone", "MBIAS",
+			"MIC1", "Internal Microphone",
+			"Headset Microphone", "HBIAS",
+			"MIC2", "Headset Microphone";
+
+	simple-audio-card,dai-link@1 {
+		format = "dsp_a";
+		frame-master = <&link1_codec>;
+		bitclock-master = <&link1_codec>;
+		bitclock-inversion;
+
+		link1_cpu: cpu {
+			sound-dai = <&ec25_codec 0>;
+		};
+
+		link1_codec: codec {
+			sound-dai = <&codec 1>;
+			dai-tdm-slot-num = <1>;
+			dai-tdm-slot-width = <32>;
+		};
+	};
+
+	simple-audio-card,dai-link@2 {
+		format = "dsp_a";
+		frame-master = <&link2_codec>;
+		bitclock-master = <&link2_codec>;
+		bitclock-inversion;
+
+		link2_cpu: cpu {
+			sound-dai = <&bt_sco_codec 0>;
+		};
+
+		link2_codec: codec {
+			sound-dai = <&codec 2>;
+			dai-tdm-slot-num = <2>;
+			dai-tdm-slot-width = <16>;
+		};
+	};
+};
+
+&uart0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0_pb_pins>;
+	status = "okay";
+};
+
+&uart1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart1_pins>, <&uart1_rts_cts_pins>;
+	status = "okay";
+
+	bluetooth {
+		compatible = "realtek,rtl8723cs-bt";
+		reset-gpios = <&r_pio 0 4 GPIO_ACTIVE_LOW>; /* PL4 */
+		device-wake-gpios = <&pio 7 6 GPIO_ACTIVE_LOW>; /* PH6 */
+		host-wake-gpios = <&r_pio 0 5 GPIO_ACTIVE_HIGH>; /* PL5 */
+		firmware-postfix = "pinephone";
+	};
+};
+
+/* Connected to the modem (hardware flow control can't be used) */
+&uart3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart3_pins>;
+	status = "okay";
+};
+
+&usb_otg {
+	dr_mode = "otg";
+	status = "okay";
+};
+
+&usb_power_supply {
+	status = "okay";
+};
+
+&usbphy {
+	status = "okay";
+};

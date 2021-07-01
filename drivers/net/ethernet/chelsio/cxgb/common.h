@@ -55,7 +55,6 @@
 
 #define DRV_DESCRIPTION "Chelsio 10Gb Ethernet Driver"
 #define DRV_NAME "cxgb"
-#define DRV_VERSION "2.2"
 
 #define CH_DEVICE(devid, ssid, idx) \
 	{ PCI_VENDOR_ID_CHELSIO, devid, PCI_ANY_ID, ssid, 0, 0, idx }
@@ -84,6 +83,11 @@ struct t1_rx_mode {
 
 #define SPEED_INVALID 0xffff
 #define DUPLEX_INVALID 0xff
+
+/* Max frame size PM3393 can handle. Includes Ethernet header and CRC. */
+#define PM3393_MAX_FRAME_SIZE 9600
+
+#define VSC7326_MAX_MTU 9600
 
 enum {
 	CHBT_BOARD_N110,
@@ -218,7 +222,6 @@ struct port_info {
 	struct cmac *mac;
 	struct cphy *phy;
 	struct link_config link_config;
-	struct net_device_stats netstats;
 };
 
 struct sge;

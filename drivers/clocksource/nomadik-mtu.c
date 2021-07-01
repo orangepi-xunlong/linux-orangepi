@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2008 STMicroelectronics
  * Copyright (C) 2010 Alessandro Rubini
  * Copyright (C) 2010 Linus Walleij for ST-Ericsson
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2, as
- * published by the Free Software Foundation.
  */
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -69,7 +66,6 @@ static u32 clk_prescale;
 static u32 nmdk_cycle;		/* write-once */
 static struct delay_timer mtu_delay_timer;
 
-#ifdef CONFIG_CLKSRC_NOMADIK_MTU_SCHED_CLOCK
 /*
  * Override the global weak sched_clock symbol with this
  * local implementation which uses the clocksource to get some
@@ -82,7 +78,6 @@ static u64 notrace nomadik_read_sched_clock(void)
 
 	return -readl(mtu_base + MTU_VAL(0));
 }
-#endif
 
 static unsigned long nmdk_timer_read_current_timer(void)
 {
@@ -186,18 +181,12 @@ static irqreturn_t nmdk_timer_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static struct irqaction nmdk_timer_irq = {
-	.name		= "Nomadik Timer Tick",
-	.flags		= IRQF_TIMER,
-	.handler	= nmdk_timer_interrupt,
-	.dev_id		= &nmdk_clkevt,
-};
-
 static int __init nmdk_timer_init(void __iomem *base, int irq,
 				   struct clk *pclk, struct clk *clk)
 {
 	unsigned long rate;
 	int ret;
+	int min_ticks;
 
 	mtu_base = base;
 
@@ -206,7 +195,8 @@ static int __init nmdk_timer_init(void __iomem *base, int irq,
 
 	/*
 	 * Tick rate is 2.4MHz for Nomadik and 2.4Mhz, 100MHz or 133 MHz
-	 * for ux500.
+	 * for ux500, and in one specific Ux500 case 32768 Hz.
+	 *
 	 * Use a divide-by-16 counter if the tick rate is more than 32MHz.
 	 * At 32 MHz, the timer (with 32 bit counter) can be programmed
 	 * to wake-up at a max 127s a head in time. Dividing a 2.4 MHz timer
@@ -234,15 +224,20 @@ static int __init nmdk_timer_init(void __iomem *base, int irq,
 		return ret;
 	}
 
-#ifdef CONFIG_CLKSRC_NOMADIK_MTU_SCHED_CLOCK
 	sched_clock_register(nomadik_read_sched_clock, 32, rate);
-#endif
 
 	/* Timer 1 is used for events, register irq and clockevents */
-	setup_irq(irq, &nmdk_timer_irq);
+	if (request_irq(irq, nmdk_timer_interrupt, IRQF_TIMER,
+			"Nomadik Timer Tick", &nmdk_clkevt))
+		pr_err("%s: request_irq() failed\n", "Nomadik Timer Tick");
 	nmdk_clkevt.cpumask = cpumask_of(0);
 	nmdk_clkevt.irq = irq;
-	clockevents_config_and_register(&nmdk_clkevt, rate, 2, 0xffffffffU);
+	if (rate < 100000)
+		min_ticks = 5;
+	else
+		min_ticks = 2;
+	clockevents_config_and_register(&nmdk_clkevt, rate, min_ticks,
+					0xffffffffU);
 
 	mtu_delay_timer.read_current_timer = &nmdk_timer_read_current_timer;
 	mtu_delay_timer.freq = rate;
@@ -260,29 +255,29 @@ static int __init nmdk_timer_of_init(struct device_node *node)
 
 	base = of_iomap(node, 0);
 	if (!base) {
-		pr_err("Can't remap registers");
+		pr_err("Can't remap registers\n");
 		return -ENXIO;
 	}
 
 	pclk = of_clk_get_by_name(node, "apb_pclk");
 	if (IS_ERR(pclk)) {
-		pr_err("could not get apb_pclk");
+		pr_err("could not get apb_pclk\n");
 		return PTR_ERR(pclk);
 	}
 
 	clk = of_clk_get_by_name(node, "timclk");
 	if (IS_ERR(clk)) {
-		pr_err("could not get timclk");
+		pr_err("could not get timclk\n");
 		return PTR_ERR(clk);
 	}
 
 	irq = irq_of_parse_and_map(node, 0);
 	if (irq <= 0) {
-		pr_err("Can't parse IRQ");
+		pr_err("Can't parse IRQ\n");
 		return -EINVAL;
 	}
 
 	return nmdk_timer_init(base, irq, pclk, clk);
 }
-CLOCKSOURCE_OF_DECLARE(nomadik_mtu, "st,nomadik-mtu",
+TIMER_OF_DECLARE(nomadik_mtu, "st,nomadik-mtu",
 		       nmdk_timer_of_init);

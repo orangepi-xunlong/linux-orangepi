@@ -1,24 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2005-2006 by Texas Instruments
  *
  * This file is part of the Inventra Controller Driver for Linux.
- *
- * The Inventra Controller Driver for Linux is free software; you
- * can redistribute it and/or modify it under the terms of the GNU
- * General Public License version 2 as published by the Free Software
- * Foundation.
- *
- * The Inventra Controller Driver for Linux is distributed in
- * the hope that it will be useful, but WITHOUT ANY WARRANTY;
- * without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public
- * License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with The Inventra Controller Driver for Linux ; if not,
- * write to the Free Software Foundation, Inc., 59 Temple Place,
- * Suite 330, Boston, MA  02111-1307  USA
- *
  */
 
 #include <linux/module.h>
@@ -29,7 +13,7 @@
 #include <linux/clk.h>
 #include <linux/err.h>
 #include <linux/io.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
 #include <linux/usb/usb_phy_generic.h>
@@ -40,10 +24,6 @@
 #include <asm/mach-types.h>
 
 #include "musb_core.h"
-
-#ifdef CONFIG_MACH_DAVINCI_EVM
-#define GPIO_nVBUS_DRV		160
-#endif
 
 #include "davinci.h"
 #include "cppi_dma.h"
@@ -56,6 +36,9 @@ struct davinci_glue {
 	struct device		*dev;
 	struct platform_device	*musb;
 	struct clk		*clk;
+	bool			vbus_state;
+	struct gpio_desc	*vbus;
+	struct work_struct	vbus_work;
 };
 
 /* REVISIT (PM) we should be able to keep the PHY in low power mode most
@@ -133,7 +116,6 @@ static void davinci_musb_disable(struct musb *musb)
 			  DAVINCI_USB_USBINT_MASK
 			| DAVINCI_USB_TXINT_MASK
 			| DAVINCI_USB_RXINT_MASK);
-	musb_writeb(musb->mregs, MUSB_DEVCTL, 0);
 	musb_writel(musb->ctrl_base, DAVINCI_USB_EOI_REG, 0);
 
 	if (is_dma_capable() && !dma_off)
@@ -152,43 +134,44 @@ static void davinci_musb_disable(struct musb *musb)
  * when J10 is out, and TI documents it as handling OTG.
  */
 
-#ifdef CONFIG_MACH_DAVINCI_EVM
-
-static int vbus_state = -1;
-
 /* I2C operations are always synchronous, and require a task context.
  * With unloaded systems, using the shared workqueue seems to suffice
  * to satisfy the 100msec A_WAIT_VRISE timeout...
  */
-static void evm_deferred_drvvbus(struct work_struct *ignored)
+static void evm_deferred_drvvbus(struct work_struct *work)
 {
-	gpio_set_value_cansleep(GPIO_nVBUS_DRV, vbus_state);
-	vbus_state = !vbus_state;
+	struct davinci_glue *glue = container_of(work, struct davinci_glue,
+						 vbus_work);
+
+	gpiod_set_value_cansleep(glue->vbus, glue->vbus_state);
+	glue->vbus_state = !glue->vbus_state;
 }
 
-#endif	/* EVM */
-
-static void davinci_musb_source_power(struct musb *musb, int is_on, int immediate)
+static void davinci_musb_source_power(struct musb *musb, int is_on,
+				      int immediate)
 {
-#ifdef CONFIG_MACH_DAVINCI_EVM
+	struct davinci_glue *glue = dev_get_drvdata(musb->controller->parent);
+
+	/* This GPIO handling is entirely optional */
+	if (!glue->vbus)
+		return;
+
 	if (is_on)
 		is_on = 1;
 
-	if (vbus_state == is_on)
+	if (glue->vbus_state == is_on)
 		return;
-	vbus_state = !is_on;		/* 0/1 vs "-1 == unknown/init" */
+	/* 0/1 vs "-1 == unknown/init" */
+	glue->vbus_state = !is_on;
 
 	if (machine_is_davinci_evm()) {
-		static DECLARE_WORK(evm_vbus_work, evm_deferred_drvvbus);
-
 		if (immediate)
-			gpio_set_value_cansleep(GPIO_nVBUS_DRV, vbus_state);
+			gpiod_set_value_cansleep(glue->vbus, glue->vbus_state);
 		else
-			schedule_work(&evm_vbus_work);
+			schedule_work(&glue->vbus_work);
 	}
 	if (immediate)
-		vbus_state = is_on;
-#endif
+		glue->vbus_state = is_on;
 }
 
 static void davinci_musb_set_vbus(struct musb *musb, int is_on)
@@ -200,11 +183,9 @@ static void davinci_musb_set_vbus(struct musb *musb, int is_on)
 
 #define	POLL_SECONDS	2
 
-static struct timer_list otg_workaround;
-
-static void otg_timer(unsigned long _musb)
+static void otg_timer(struct timer_list *t)
 {
-	struct musb		*musb = (void *)_musb;
+	struct musb		*musb = from_timer(musb, t, dev_timer);
 	void __iomem		*mregs = musb->mregs;
 	u8			devctl;
 	unsigned long		flags;
@@ -225,7 +206,7 @@ static void otg_timer(unsigned long _musb)
 		 * VBUSERR got reported during enumeration" cases.
 		 */
 		if (devctl & MUSB_DEVCTL_VBUS) {
-			mod_timer(&otg_workaround, jiffies + POLL_SECONDS * HZ);
+			mod_timer(&musb->dev_timer, jiffies + POLL_SECONDS * HZ);
 			break;
 		}
 		musb->xceiv->otg->state = OTG_STATE_A_WAIT_VRISE;
@@ -249,7 +230,7 @@ static void otg_timer(unsigned long _musb)
 				devctl | MUSB_DEVCTL_SESSION);
 		devctl = musb_readb(mregs, MUSB_DEVCTL);
 		if (devctl & MUSB_DEVCTL_BDEVICE)
-			mod_timer(&otg_workaround, jiffies + POLL_SECONDS * HZ);
+			mod_timer(&musb->dev_timer, jiffies + POLL_SECONDS * HZ);
 		else
 			musb->xceiv->otg->state = OTG_STATE_A_IDLE;
 		break;
@@ -326,18 +307,16 @@ static irqreturn_t davinci_musb_interrupt(int irq, void *__hci)
 			 */
 			musb->int_usb &= ~MUSB_INTR_VBUSERROR;
 			musb->xceiv->otg->state = OTG_STATE_A_WAIT_VFALL;
-			mod_timer(&otg_workaround, jiffies + POLL_SECONDS * HZ);
+			mod_timer(&musb->dev_timer, jiffies + POLL_SECONDS * HZ);
 			WARNING("VBUS error workaround (delay coming)\n");
 		} else if (drvvbus) {
 			MUSB_HST_MODE(musb);
-			otg->default_a = 1;
 			musb->xceiv->otg->state = OTG_STATE_A_WAIT_VRISE;
 			portstate(musb->port1_status |= USB_PORT_STAT_POWER);
-			del_timer(&otg_workaround);
+			del_timer(&musb->dev_timer);
 		} else {
 			musb->is_active = 0;
 			MUSB_DEV_MODE(musb);
-			otg->default_a = 0;
 			musb->xceiv->otg->state = OTG_STATE_B_IDLE;
 			portstate(musb->port1_status &= ~USB_PORT_STAT_POWER);
 		}
@@ -362,7 +341,7 @@ static irqreturn_t davinci_musb_interrupt(int irq, void *__hci)
 
 	/* poll for ID change */
 	if (musb->xceiv->otg->state == OTG_STATE_B_IDLE)
-		mod_timer(&otg_workaround, jiffies + POLL_SECONDS * HZ);
+		mod_timer(&musb->dev_timer, jiffies + POLL_SECONDS * HZ);
 
 	spin_unlock_irqrestore(&musb->lock, flags);
 
@@ -394,7 +373,7 @@ static int davinci_musb_init(struct musb *musb)
 	if (revision == 0)
 		goto fail;
 
-	setup_timer(&otg_workaround, otg_timer, (unsigned long) musb);
+	timer_setup(&musb->dev_timer, otg_timer, 0);
 
 	davinci_musb_source_power(musb, 0, 1);
 
@@ -444,7 +423,10 @@ unregister:
 
 static int davinci_musb_exit(struct musb *musb)
 {
-	del_timer_sync(&otg_workaround);
+	int	maxdelay = 30;
+	u8	devctl, warn = 0;
+
+	del_timer_sync(&musb->dev_timer);
 
 	/* force VBUS off */
 	if (cpu_is_davinci_dm355()) {
@@ -457,31 +439,27 @@ static int davinci_musb_exit(struct musb *musb)
 
 	davinci_musb_source_power(musb, 0 /*off*/, 1);
 
-	/* delay, to avoid problems with module reload */
-	if (musb->xceiv->otg->default_a) {
-		int	maxdelay = 30;
-		u8	devctl, warn = 0;
+	/*
+	 * delay, to avoid problems with module reload.
+	 * if there's no peripheral connected, this can take a
+	 * long time to fall, especially on EVM with huge C133.
+	 */
+	do {
+		devctl = musb_readb(musb->mregs, MUSB_DEVCTL);
+		if (!(devctl & MUSB_DEVCTL_VBUS))
+			break;
+		if ((devctl & MUSB_DEVCTL_VBUS) != warn) {
+			warn = devctl & MUSB_DEVCTL_VBUS;
+			dev_dbg(musb->controller, "VBUS %d\n",
+				warn >> MUSB_DEVCTL_VBUS_SHIFT);
+		}
+		msleep(1000);
+		maxdelay--;
+	} while (maxdelay > 0);
 
-		/* if there's no peripheral connected, this can take a
-		 * long time to fall, especially on EVM with huge C133.
-		 */
-		do {
-			devctl = musb_readb(musb->mregs, MUSB_DEVCTL);
-			if (!(devctl & MUSB_DEVCTL_VBUS))
-				break;
-			if ((devctl & MUSB_DEVCTL_VBUS) != warn) {
-				warn = devctl & MUSB_DEVCTL_VBUS;
-				dev_dbg(musb->controller, "VBUS %d\n",
-					warn >> MUSB_DEVCTL_VBUS_SHIFT);
-			}
-			msleep(1000);
-			maxdelay--;
-		} while (maxdelay > 0);
-
-		/* in OTG mode, another host might be connected */
-		if (devctl & MUSB_DEVCTL_VBUS)
-			dev_dbg(musb->controller, "VBUS off timeout (devctl %02x)\n", devctl);
-	}
+	/* in OTG mode, another host might be connected */
+	if (devctl & MUSB_DEVCTL_VBUS)
+		dev_dbg(musb->controller, "VBUS off timeout (devctl %02x)\n", devctl);
 
 	phy_off();
 
@@ -545,6 +523,15 @@ static int davinci_probe(struct platform_device *pdev)
 	glue->clk			= clk;
 
 	pdata->platform_ops		= &davinci_ops;
+
+	glue->vbus = devm_gpiod_get_optional(&pdev->dev, NULL, GPIOD_OUT_LOW);
+	if (IS_ERR(glue->vbus)) {
+		ret = PTR_ERR(glue->vbus);
+		goto err0;
+	} else {
+		glue->vbus_state = -1;
+		INIT_WORK(&glue->vbus_work, evm_deferred_drvvbus);
+	}
 
 	usb_phy_generic_register();
 	platform_set_drvdata(pdev, glue);

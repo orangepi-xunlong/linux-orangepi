@@ -1,0 +1,73 @@
+Device Tree Bindings for LED support on X-Powers PMIC
+
+Most of the X-Powers PMICs have integrated battery charger with LED indicator.
+The output is open-drain, so the state is either high-Z or output-low. The
+driver is a subnode of AXP20X MFD driver, since it uses shared bus with all
+other cells.
+The LED can be controlled either manually or automatically. Then in automatic
+(controlled by the charger) there are two indication modes:
+
+Mode-A
+======
+- output-low:		Charging
+- high-Z:		Not charging
+- 1Hz flashing:		Abnormal alarm
+- 4Hz flashing:		Overvoltage alarm
+
+Mode-B
+======
+- output-low:		Battery full
+- high-Z:		Not charging
+- 1Hz flashing:		Charging
+- 4Hz flashing:		Overvoltage or abnormal alarm
+
+The control and the mode can be changed from sysfs.
+
+For AXP20X MFD bindings see:
+Documentation/devicetree/bindings/mfd/axp20x.txt
+
+Required properties:
+- compatible : Must be "x-powers,axp20x-led"
+
+Supported common LED properties, see ./common.txt for more informationn
+- label : See Documentation/devicetree/bindings/leds/common.txt
+- linux,default-trigger : See Documentation/devicetree/bindings/leds/common.txt
+- default-state: See Documentation/devicetree/bindings/leds/common.txt
+
+Optional properties:
+- x-powers,charger-mode: 0 for Mode-A, 1 for Mode-B
+			If omitted, then the control is set to manual mode.
+			On invalid value, Mode-A is used.
+
+Example:
+
+	axp803: pmic@3a3 {
+		compatible = "x-powers,axp803";
+
+		...
+
+		led@0 {
+			compatible = "x-powers,axp20x-led";
+			status = "okay";
+
+			label = "axp20x:yellow:chgled";
+			linux,default-trigger = "timer";
+			default-state = "on";
+		};
+	};
+
+or
+
+	axp803: pmic@3a3 {
+		compatible = "x-powers,axp803";
+
+		...
+
+		led@0 {
+			compatible = "x-powers,axp20x-led";
+			status = "okay";
+
+			label = "axp20x:yellow:chgled";
+			x-powers,charger-mode = <1>;
+		};
+	};

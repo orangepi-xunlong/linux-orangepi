@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014 Linaro Ltd.
  * Copyright (c) 2014 Hisilicon Limited.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
  */
 
 #include <linux/clk.h>
@@ -40,9 +37,12 @@
 #define INT_CLR_RCV		BIT(16)
 #define INT_CLR_RCVTIMEOUT	(BIT(16) | BIT(17))
 
-#define IR_CLK			0x48
 #define IR_CLK_ENABLE		BIT(4)
 #define IR_CLK_RESET		BIT(5)
+
+/* IR_ENABLE register bits */
+#define IR_ENABLE_EN		BIT(0)
+#define IR_ENABLE_EN_EXTRA	BIT(8)
 
 #define IR_CFG_WIDTH_MASK	0xffff
 #define IR_CFG_WIDTH_SHIFT	16
@@ -61,6 +61,23 @@
 
 #define IR_HIX5HD2_NAME		"hix5hd2-ir"
 
+/* Need to set extra bit for enabling IR */
+#define HIX5HD2_FLAG_EXTRA_ENABLE	BIT(0)
+
+struct hix5hd2_soc_data {
+	u32 clk_reg;
+	u32 flags;
+};
+
+static const struct hix5hd2_soc_data hix5hd2_data = {
+	.clk_reg = 0x48,
+};
+
+static const struct hix5hd2_soc_data hi3796cv300_data = {
+	.clk_reg = 0x60,
+	.flags = HIX5HD2_FLAG_EXTRA_ENABLE,
+};
+
 struct hix5hd2_ir_priv {
 	int			irq;
 	void __iomem		*base;
@@ -69,21 +86,42 @@ struct hix5hd2_ir_priv {
 	struct regmap		*regmap;
 	struct clk		*clock;
 	unsigned long		rate;
+	const struct hix5hd2_soc_data *socdata;
 };
 
-static void hix5hd2_ir_enable(struct hix5hd2_ir_priv *dev, bool on)
+static int hix5hd2_ir_clk_enable(struct hix5hd2_ir_priv *dev, bool on)
 {
+	u32 clk_reg = dev->socdata->clk_reg;
 	u32 val;
+	int ret = 0;
 
-	regmap_read(dev->regmap, IR_CLK, &val);
-	if (on) {
-		val &= ~IR_CLK_RESET;
-		val |= IR_CLK_ENABLE;
+	if (dev->regmap) {
+		regmap_read(dev->regmap, clk_reg, &val);
+		if (on) {
+			val &= ~IR_CLK_RESET;
+			val |= IR_CLK_ENABLE;
+		} else {
+			val &= ~IR_CLK_ENABLE;
+			val |= IR_CLK_RESET;
+		}
+		regmap_write(dev->regmap, clk_reg, val);
 	} else {
-		val &= ~IR_CLK_ENABLE;
-		val |= IR_CLK_RESET;
+		if (on)
+			ret = clk_prepare_enable(dev->clock);
+		else
+			clk_disable_unprepare(dev->clock);
 	}
-	regmap_write(dev->regmap, IR_CLK, val);
+	return ret;
+}
+
+static inline void hix5hd2_ir_enable(struct hix5hd2_ir_priv *priv)
+{
+	u32 val = IR_ENABLE_EN;
+
+	if (priv->socdata->flags & HIX5HD2_FLAG_EXTRA_ENABLE)
+		val |= IR_ENABLE_EN_EXTRA;
+
+	writel_relaxed(val, priv->base + IR_ENABLE);
 }
 
 static int hix5hd2_ir_config(struct hix5hd2_ir_priv *priv)
@@ -91,7 +129,8 @@ static int hix5hd2_ir_config(struct hix5hd2_ir_priv *priv)
 	int timeout = 10000;
 	u32 val, rate;
 
-	writel_relaxed(0x01, priv->base + IR_ENABLE);
+	hix5hd2_ir_enable(priv);
+
 	while (readl_relaxed(priv->base + IR_BUSY)) {
 		if (timeout--) {
 			udelay(1);
@@ -120,16 +159,25 @@ static int hix5hd2_ir_config(struct hix5hd2_ir_priv *priv)
 static int hix5hd2_ir_open(struct rc_dev *rdev)
 {
 	struct hix5hd2_ir_priv *priv = rdev->priv;
+	int ret;
 
-	hix5hd2_ir_enable(priv, true);
-	return hix5hd2_ir_config(priv);
+	ret = hix5hd2_ir_clk_enable(priv, true);
+	if (ret)
+		return ret;
+
+	ret = hix5hd2_ir_config(priv);
+	if (ret) {
+		hix5hd2_ir_clk_enable(priv, false);
+		return ret;
+	}
+	return 0;
 }
 
 static void hix5hd2_ir_close(struct rc_dev *rdev)
 {
 	struct hix5hd2_ir_priv *priv = rdev->priv;
 
-	hix5hd2_ir_enable(priv, false);
+	hix5hd2_ir_clk_enable(priv, false);
 }
 
 static irqreturn_t hix5hd2_ir_rx_interrupt(int irq, void *data)
@@ -157,7 +205,7 @@ static irqreturn_t hix5hd2_ir_rx_interrupt(int irq, void *data)
 	}
 
 	if ((irq_sr & INTMS_SYMBRCV) || (irq_sr & INTMS_TIMEOUT)) {
-		DEFINE_IR_RAW_EVENT(ev);
+		struct ir_raw_event ev = {};
 
 		symb_num = readl_relaxed(priv->base + IR_DATAH);
 		for (i = 0; i < symb_num; i++) {
@@ -166,12 +214,12 @@ static irqreturn_t hix5hd2_ir_rx_interrupt(int irq, void *data)
 			data_h =  ((symb_val >> 16) & 0xffff) * 10;
 			symb_time = (data_l + data_h) / 10;
 
-			ev.duration = US_TO_NS(data_l);
+			ev.duration = data_l;
 			ev.pulse = true;
 			ir_raw_event_store(priv->rdev, &ev);
 
 			if (symb_time < IR_CFG_SYMBOL_MAXWIDTH) {
-				ev.duration = US_TO_NS(data_h);
+				ev.duration = data_h;
 				ev.pulse = false;
 				ir_raw_event_store(priv->rdev, &ev);
 			} else {
@@ -190,6 +238,13 @@ static irqreturn_t hix5hd2_ir_rx_interrupt(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+static const struct of_device_id hix5hd2_ir_table[] = {
+	{ .compatible = "hisilicon,hix5hd2-ir", &hix5hd2_data, },
+	{ .compatible = "hisilicon,hi3796cv300-ir", &hi3796cv300_data, },
+	{},
+};
+MODULE_DEVICE_TABLE(of, hix5hd2_ir_table);
+
 static int hix5hd2_ir_probe(struct platform_device *pdev)
 {
 	struct rc_dev *rdev;
@@ -197,6 +252,7 @@ static int hix5hd2_ir_probe(struct platform_device *pdev)
 	struct resource *res;
 	struct hix5hd2_ir_priv *priv;
 	struct device_node *node = pdev->dev.of_node;
+	const struct of_device_id *of_id;
 	const char *map_name;
 	int ret;
 
@@ -204,11 +260,18 @@ static int hix5hd2_ir_probe(struct platform_device *pdev)
 	if (!priv)
 		return -ENOMEM;
 
+	of_id = of_match_device(hix5hd2_ir_table, dev);
+	if (!of_id) {
+		dev_err(dev, "Unable to initialize IR data\n");
+		return -ENODEV;
+	}
+	priv->socdata = of_id->data;
+
 	priv->regmap = syscon_regmap_lookup_by_phandle(node,
 						       "hisilicon,power-syscon");
 	if (IS_ERR(priv->regmap)) {
-		dev_err(dev, "no power-reg\n");
-		return -EINVAL;
+		dev_info(dev, "no power-reg\n");
+		priv->regmap = NULL;
 	}
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -217,12 +280,10 @@ static int hix5hd2_ir_probe(struct platform_device *pdev)
 		return PTR_ERR(priv->base);
 
 	priv->irq = platform_get_irq(pdev, 0);
-	if (priv->irq < 0) {
-		dev_err(dev, "irq can not get\n");
+	if (priv->irq < 0)
 		return priv->irq;
-	}
 
-	rdev = rc_allocate_device();
+	rdev = rc_allocate_device(RC_DRIVER_IR_RAW);
 	if (!rdev)
 		return -ENOMEM;
 
@@ -232,25 +293,26 @@ static int hix5hd2_ir_probe(struct platform_device *pdev)
 		ret = PTR_ERR(priv->clock);
 		goto err;
 	}
-	clk_prepare_enable(priv->clock);
+	ret = clk_prepare_enable(priv->clock);
+	if (ret)
+		goto err;
 	priv->rate = clk_get_rate(priv->clock);
 
-	rdev->driver_type = RC_DRIVER_IR_RAW;
-	rdev->allowed_protocols = RC_BIT_ALL;
+	rdev->allowed_protocols = RC_PROTO_BIT_ALL_IR_DECODER;
 	rdev->priv = priv;
 	rdev->open = hix5hd2_ir_open;
 	rdev->close = hix5hd2_ir_close;
 	rdev->driver_name = IR_HIX5HD2_NAME;
 	map_name = of_get_property(node, "linux,rc-map-name", NULL);
 	rdev->map_name = map_name ?: RC_MAP_EMPTY;
-	rdev->input_name = IR_HIX5HD2_NAME;
+	rdev->device_name = IR_HIX5HD2_NAME;
 	rdev->input_phys = IR_HIX5HD2_NAME "/input0";
 	rdev->input_id.bustype = BUS_HOST;
 	rdev->input_id.vendor = 0x0001;
 	rdev->input_id.product = 0x0001;
 	rdev->input_id.version = 0x0100;
-	rdev->rx_resolution = US_TO_NS(10);
-	rdev->timeout = US_TO_NS(IR_CFG_SYMBOL_MAXWIDTH * 10);
+	rdev->rx_resolution = 10;
+	rdev->timeout = IR_CFG_SYMBOL_MAXWIDTH * 10;
 
 	ret = rc_register_device(rdev);
 	if (ret < 0)
@@ -295,7 +357,7 @@ static int hix5hd2_ir_suspend(struct device *dev)
 	struct hix5hd2_ir_priv *priv = dev_get_drvdata(dev);
 
 	clk_disable_unprepare(priv->clock);
-	hix5hd2_ir_enable(priv, false);
+	hix5hd2_ir_clk_enable(priv, false);
 
 	return 0;
 }
@@ -303,11 +365,20 @@ static int hix5hd2_ir_suspend(struct device *dev)
 static int hix5hd2_ir_resume(struct device *dev)
 {
 	struct hix5hd2_ir_priv *priv = dev_get_drvdata(dev);
+	int ret;
 
-	hix5hd2_ir_enable(priv, true);
-	clk_prepare_enable(priv->clock);
+	ret = hix5hd2_ir_clk_enable(priv, true);
+	if (ret)
+		return ret;
 
-	writel_relaxed(0x01, priv->base + IR_ENABLE);
+	ret = clk_prepare_enable(priv->clock);
+	if (ret) {
+		hix5hd2_ir_clk_enable(priv, false);
+		return ret;
+	}
+
+	hix5hd2_ir_enable(priv);
+
 	writel_relaxed(0x00, priv->base + IR_INTM);
 	writel_relaxed(0xff, priv->base + IR_INTC);
 	writel_relaxed(0x01, priv->base + IR_START);
@@ -318,12 +389,6 @@ static int hix5hd2_ir_resume(struct device *dev)
 
 static SIMPLE_DEV_PM_OPS(hix5hd2_ir_pm_ops, hix5hd2_ir_suspend,
 			 hix5hd2_ir_resume);
-
-static const struct of_device_id hix5hd2_ir_table[] = {
-	{ .compatible = "hisilicon,hix5hd2-ir", },
-	{},
-};
-MODULE_DEVICE_TABLE(of, hix5hd2_ir_table);
 
 static struct platform_driver hix5hd2_ir_driver = {
 	.driver = {

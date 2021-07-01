@@ -1,45 +1,11 @@
+// SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
 /******************************************************************************
  *
  * Module Name: evregion - Operation Region support
  *
+ * Copyright (C) 2000 - 2020, Intel Corp.
+ *
  *****************************************************************************/
-
-/*
- * Copyright (C) 2000 - 2016, Intel Corp.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions, and the following disclaimer,
- *    without modification.
- * 2. Redistributions in binary form must reproduce at minimum a disclaimer
- *    substantially similar to the "NO WARRANTY" disclaimer below
- *    ("Disclaimer") and any redistribution must be conditioned upon
- *    including a substantially similar Disclaimer requirement for further
- *    binary redistribution.
- * 3. Neither the names of the above-listed copyright holders nor the names
- *    of any contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
- *
- * NO WARRANTY
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDERS OR CONTRIBUTORS BE LIABLE FOR SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
- * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGES.
- */
 
 #include <acpi/acpi.h>
 #include "accommon.h"
@@ -145,6 +111,8 @@ acpi_ev_address_space_dispatch(union acpi_operand_object *region_obj,
 	union acpi_operand_object *region_obj2;
 	void *region_context = NULL;
 	struct acpi_connection_info *context;
+	acpi_mutex context_mutex;
+	u8 context_locked;
 	acpi_physical_address address;
 
 	ACPI_FUNCTION_TRACE(ev_address_space_dispatch);
@@ -169,6 +137,8 @@ acpi_ev_address_space_dispatch(union acpi_operand_object *region_obj,
 	}
 
 	context = handler_desc->address_space.context;
+	context_mutex = handler_desc->address_space.context_mutex;
+	context_locked = FALSE;
 
 	/*
 	 * It may be the case that the region has never been initialized.
@@ -237,41 +207,6 @@ acpi_ev_address_space_dispatch(union acpi_operand_object *region_obj,
 	handler = handler_desc->address_space.handler;
 	address = (region_obj->region.address + region_offset);
 
-	/*
-	 * Special handling for generic_serial_bus and general_purpose_io:
-	 * There are three extra parameters that must be passed to the
-	 * handler via the context:
-	 *   1) Connection buffer, a resource template from Connection() op
-	 *   2) Length of the above buffer
-	 *   3) Actual access length from the access_as() op
-	 *
-	 * In addition, for general_purpose_io, the Address and bit_width fields
-	 * are defined as follows:
-	 *   1) Address is the pin number index of the field (bit offset from
-	 *      the previous Connection)
-	 *   2) bit_width is the actual bit length of the field (number of pins)
-	 */
-	if ((region_obj->region.space_id == ACPI_ADR_SPACE_GSBUS) &&
-	    context && field_obj) {
-
-		/* Get the Connection (resource_template) buffer */
-
-		context->connection = field_obj->field.resource_buffer;
-		context->length = field_obj->field.resource_length;
-		context->access_length = field_obj->field.access_length;
-	}
-	if ((region_obj->region.space_id == ACPI_ADR_SPACE_GPIO) &&
-	    context && field_obj) {
-
-		/* Get the Connection (resource_template) buffer */
-
-		context->connection = field_obj->field.resource_buffer;
-		context->length = field_obj->field.resource_length;
-		context->access_length = field_obj->field.access_length;
-		address = field_obj->field.pin_number_index;
-		bit_width = field_obj->field.bit_length;
-	}
-
 	ACPI_DEBUG_PRINT((ACPI_DB_OPREGION,
 			  "Handler %p (@%p) Address %8.8X%8.8X [%s]\n",
 			  &region_obj->region.handler->address_space, handler,
@@ -284,9 +219,65 @@ acpi_ev_address_space_dispatch(union acpi_operand_object *region_obj,
 		/*
 		 * For handlers other than the default (supplied) handlers, we must
 		 * exit the interpreter because the handler *might* block -- we don't
-		 * know what it will do, so we can't hold the lock on the intepreter.
+		 * know what it will do, so we can't hold the lock on the interpreter.
 		 */
 		acpi_ex_exit_interpreter();
+	}
+
+	/*
+	 * Special handling for generic_serial_bus and general_purpose_io:
+	 * There are three extra parameters that must be passed to the
+	 * handler via the context:
+	 *   1) Connection buffer, a resource template from Connection() op
+	 *   2) Length of the above buffer
+	 *   3) Actual access length from the access_as() op
+	 *
+	 * Since we pass these extra parameters via the context, which is
+	 * shared between threads, we must lock the context to avoid these
+	 * parameters being changed from another thread before the handler
+	 * has completed running.
+	 *
+	 * In addition, for general_purpose_io, the Address and bit_width fields
+	 * are defined as follows:
+	 *   1) Address is the pin number index of the field (bit offset from
+	 *      the previous Connection)
+	 *   2) bit_width is the actual bit length of the field (number of pins)
+	 */
+	if ((region_obj->region.space_id == ACPI_ADR_SPACE_GSBUS) &&
+	    context && field_obj) {
+
+		status =
+		    acpi_os_acquire_mutex(context_mutex, ACPI_WAIT_FOREVER);
+		if (ACPI_FAILURE(status)) {
+			goto re_enter_interpreter;
+		}
+
+		context_locked = TRUE;
+
+		/* Get the Connection (resource_template) buffer */
+
+		context->connection = field_obj->field.resource_buffer;
+		context->length = field_obj->field.resource_length;
+		context->access_length = field_obj->field.access_length;
+	}
+	if ((region_obj->region.space_id == ACPI_ADR_SPACE_GPIO) &&
+	    context && field_obj) {
+
+		status =
+		    acpi_os_acquire_mutex(context_mutex, ACPI_WAIT_FOREVER);
+		if (ACPI_FAILURE(status)) {
+			goto re_enter_interpreter;
+		}
+
+		context_locked = TRUE;
+
+		/* Get the Connection (resource_template) buffer */
+
+		context->connection = field_obj->field.resource_buffer;
+		context->length = field_obj->field.resource_length;
+		context->access_length = field_obj->field.access_length;
+		address = field_obj->field.pin_number_index;
+		bit_width = field_obj->field.bit_length;
 	}
 
 	/* Call the handler */
@@ -294,12 +285,27 @@ acpi_ev_address_space_dispatch(union acpi_operand_object *region_obj,
 	status = handler(function, address, bit_width, value, context,
 			 region_obj2->extra.region_context);
 
+	if (context_locked) {
+		acpi_os_release_mutex(context_mutex);
+	}
+
 	if (ACPI_FAILURE(status)) {
 		ACPI_EXCEPTION((AE_INFO, status, "Returned by Handler for [%s]",
 				acpi_ut_get_region_name(region_obj->region.
 							space_id)));
+
+		/*
+		 * Special case for an EC timeout. These are seen so frequently
+		 * that an additional error message is helpful
+		 */
+		if ((region_obj->region.space_id == ACPI_ADR_SPACE_EC) &&
+		    (status == AE_TIME)) {
+			ACPI_ERROR((AE_INFO,
+				    "Timeout from EC hardware or EC device driver"));
+		}
 	}
 
+re_enter_interpreter:
 	if (!(handler_desc->address_space.handler_flags &
 	      ACPI_ADDR_HANDLER_DEFAULT_INSTALLED)) {
 		/*
@@ -677,6 +683,19 @@ acpi_ev_execute_reg_methods(struct acpi_namespace_node *node,
 
 	ACPI_FUNCTION_TRACE(ev_execute_reg_methods);
 
+	/*
+	 * These address spaces do not need a call to _REG, since the ACPI
+	 * specification defines them as: "must always be accessible". Since
+	 * they never change state (never become unavailable), no need to ever
+	 * call _REG on them. Also, a data_table is not a "real" address space,
+	 * so do not call _REG. September 2018.
+	 */
+	if ((space_id == ACPI_ADR_SPACE_SYSTEM_MEMORY) ||
+	    (space_id == ACPI_ADR_SPACE_SYSTEM_IO) ||
+	    (space_id == ACPI_ADR_SPACE_DATA_TABLE)) {
+		return_VOID;
+	}
+
 	info.space_id = space_id;
 	info.function = function;
 	info.reg_run_count = 0;
@@ -738,8 +757,8 @@ acpi_ev_reg_run(acpi_handle obj_handle,
 	}
 
 	/*
-	 * We only care about regions.and objects that are allowed to have address
-	 * space handlers
+	 * We only care about regions and objects that are allowed to have
+	 * address space handlers
 	 */
 	if ((node->type != ACPI_TYPE_REGION) && (node != acpi_gbl_root_node)) {
 		return (AE_OK);
@@ -847,11 +866,11 @@ acpi_ev_orphan_ec_reg_method(struct acpi_namespace_node *ec_device_node)
 	objects[1].type = ACPI_TYPE_INTEGER;
 	objects[1].integer.value = ACPI_REG_CONNECT;
 
-	status = acpi_evaluate_object(reg_method, NULL, &args, NULL);
+	(void)acpi_evaluate_object(reg_method, NULL, &args, NULL);
 
 exit:
 	/* We ignore all errors from above, don't care */
 
-	status = acpi_ut_acquire_mutex(ACPI_MTX_NAMESPACE);
+	(void)acpi_ut_acquire_mutex(ACPI_MTX_NAMESPACE);
 	return_VOID;
 }

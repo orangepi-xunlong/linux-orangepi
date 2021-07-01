@@ -1,7 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __MACH_MMP_CLK_H
 #define __MACH_MMP_CLK_H
 
 #include <linux/clk-provider.h>
+#include <linux/pm_domain.h>
 #include <linux/clkdev.h>
 
 #define APBC_NO_BUS_CTRL	BIT(0)
@@ -15,6 +17,7 @@ struct mmp_clk_factor_masks {
 	unsigned int den_mask;
 	unsigned int num_shift;
 	unsigned int den_shift;
+	unsigned int enable_mask;
 };
 
 struct mmp_clk_factor_tbl {
@@ -96,7 +99,7 @@ struct mmp_clk_mix {
 extern const struct clk_ops mmp_clk_mix_ops;
 extern struct clk *mmp_clk_register_mix(struct device *dev,
 					const char *name,
-					const char **parent_names,
+					const char * const *parent_names,
 					u8 num_parents,
 					unsigned long flags,
 					struct mmp_clk_mix_config *config,
@@ -123,9 +126,6 @@ extern struct clk *mmp_clk_register_gate(struct device *dev, const char *name,
 			u32 val_disable, unsigned int gate_flags,
 			spinlock_t *lock);
 
-
-extern struct clk *mmp_clk_register_pll2(const char *name,
-		const char *parent_name, unsigned long flags);
 extern struct clk *mmp_clk_register_apbc(const char *name,
 		const char *parent_name, void __iomem *base,
 		unsigned int delay, unsigned int apbc_flags, spinlock_t *lock);
@@ -195,7 +195,7 @@ void mmp_register_gate_clks(struct mmp_clk_unit *unit,
 struct mmp_param_mux_clk {
 	unsigned int id;
 	char *name;
-	const char **parent_name;
+	const char * const *parent_name;
 	u8 num_parents;
 	unsigned long flags;
 	unsigned long offset;
@@ -223,6 +223,23 @@ void mmp_register_div_clks(struct mmp_clk_unit *unit,
 			struct mmp_param_div_clk *clks,
 			void __iomem *base, int size);
 
+struct mmp_param_pll_clk {
+	unsigned int id;
+	char *name;
+	unsigned long default_rate;
+	unsigned long enable_offset;
+	u32 enable;
+	unsigned long offset;
+	u8 shift;
+	/* MMP3 specific: */
+	unsigned long input_rate;
+	unsigned long postdiv_offset;
+	unsigned long postdiv_shift;
+};
+void mmp_register_pll_clks(struct mmp_clk_unit *unit,
+			struct mmp_param_pll_clk *clks,
+			void __iomem *base, int size);
+
 #define DEFINE_MIX_REG_INFO(w_d, s_d, w_m, s_m, fc)	\
 {							\
 	.width_div = (w_d),				\
@@ -236,4 +253,13 @@ void mmp_clk_init(struct device_node *np, struct mmp_clk_unit *unit,
 		int nr_clks);
 void mmp_clk_add(struct mmp_clk_unit *unit, unsigned int id,
 		struct clk *clk);
+
+/* Power islands */
+#define MMP_PM_DOMAIN_NO_DISABLE		BIT(0)
+
+struct generic_pm_domain *mmp_pm_domain_register(const char *name,
+		void __iomem *reg,
+		u32 power_on, u32 reset, u32 clock_enable,
+		unsigned int flags, spinlock_t *lock);
+
 #endif

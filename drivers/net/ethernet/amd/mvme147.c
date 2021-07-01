@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* mvme147.c  : the  Linux/mvme147/lance ethernet driver
  *
  * Copyright (C) 05/1998 Peter Maydell <pmaydell@chiark.greenend.org.uk>
@@ -15,6 +16,7 @@
 #include <linux/init.h>
 #include <linux/errno.h>
 #include <linux/gfp.h>
+#include <linux/pgtable.h>
 /* Used for the temporal inet entries and routing */
 #include <linux/socket.h>
 #include <linux/route.h>
@@ -23,7 +25,6 @@
 #include <linux/skbuff.h>
 
 #include <asm/io.h>
-#include <asm/pgtable.h>
 #include <asm/mvme147hw.h>
 
 /* We have 32K of RAM for the init block and buffers. This places
@@ -62,7 +63,6 @@ static const struct net_device_ops lance_netdev_ops = {
 	.ndo_start_xmit		= lance_start_xmit,
 	.ndo_set_rx_mode	= lance_set_multicast,
 	.ndo_tx_timeout		= lance_tx_timeout,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_set_mac_address	= eth_mac_addr,
 };
