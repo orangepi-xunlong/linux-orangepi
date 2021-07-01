@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 ** ccio-dma.c:
 **	DMA management routines for first generation cache-coherent machines.
@@ -7,10 +8,6 @@
 **	(c) Copyright 2000 Ryan Bradetich
 **	(c) Copyright 2000 Hewlett-Packard Company
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
 **
 **
 **  "Real Mode" operation refers to U2/Uturn chip operation.
@@ -42,18 +39,21 @@
 #include <linux/reboot.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/dma-map-ops.h>
 #include <linux/scatterlist.h>
 #include <linux/iommu-helper.h>
 #include <linux/export.h>
 
 #include <asm/byteorder.h>
 #include <asm/cache.h>		/* for L1_CACHE_BYTES */
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/page.h>
 #include <asm/dma.h>
 #include <asm/io.h>
 #include <asm/hardware.h>       /* for register_module() */
 #include <asm/parisc-device.h>
+
+#include "iommu.h"
 
 /* 
 ** Choose "ccio" since that's what HP-UX calls it.
@@ -357,8 +357,7 @@ ccio_alloc_range(struct ioc *ioc, struct device *dev, size_t size)
 	** ggg sacrifices another 710 to the computer gods.
 	*/
 
-	boundary_size = ALIGN((unsigned long long)dma_get_seg_boundary(dev) + 1,
-			      1ULL << IOVP_SHIFT) >> IOVP_SHIFT;
+	boundary_size = dma_get_seg_boundary_nr_pages(dev, IOVP_SHIFT);
 
 	if (pages_needed <= 8) {
 		/*
@@ -563,14 +562,12 @@ ccio_io_pdir_entry(u64 *pdir_ptr, space_t sid, unsigned long vba,
 	/* We currently only support kernel addresses */
 	BUG_ON(sid != KERNEL_SPACE);
 
-	mtsp(sid,1);
-
 	/*
 	** WORD 1 - low order word
 	** "hints" parm includes the VALID bit!
 	** "dep" clobbers the physical address offset bits as well.
 	*/
-	pa = virt_to_phys(vba);
+	pa = lpa(vba);
 	asm volatile("depw  %1,31,12,%0" : "+r" (pa) : "r" (hints));
 	((u32 *)pdir_ptr)[1] = (u32) pa;
 
@@ -595,7 +592,7 @@ ccio_io_pdir_entry(u64 *pdir_ptr, space_t sid, unsigned long vba,
 	** Grab virtual index [0:11]
 	** Deposit virt_idx bits into I/O PDIR word
 	*/
-	asm volatile ("lci %%r0(%%sr1, %1), %0" : "=r" (ci) : "r" (vba));
+	asm volatile ("lci %%r0(%1), %0" : "=r" (ci) : "r" (vba));
 	asm volatile ("extru %1,19,12,%0" : "+r" (ci) : "r" (ci));
 	asm volatile ("depw  %1,15,12,%0" : "+r" (pa) : "r" (ci));
 
@@ -607,14 +604,13 @@ ccio_io_pdir_entry(u64 *pdir_ptr, space_t sid, unsigned long vba,
 	**        PCX-T'? Don't know. (eg C110 or similar K-class)
 	**
 	** See PDC_MODEL/option 0/SW_CAP word for "Non-coherent IO-PDIR bit".
-	** Hopefully we can patch (NOP) these out at boot time somehow.
 	**
 	** "Since PCX-U employs an offset hash that is incompatible with
 	** the real mode coherence index generation of U2, the PDIR entry
 	** must be flushed to memory to retain coherence."
 	*/
-	asm volatile("fdc %%r0(%0)" : : "r" (pdir_ptr));
-	asm volatile("sync");
+	asm_io_fdc(pdir_ptr);
+	asm_io_sync();
 }
 
 /**
@@ -680,17 +676,14 @@ ccio_mark_invalid(struct ioc *ioc, dma_addr_t iova, size_t byte_cnt)
 		** FIXME: PCX_W platforms don't need FDC/SYNC. (eg C360)
 		**   PCX-U/U+ do. (eg C200/C240)
 		** See PDC_MODEL/option 0/SW_CAP for "Non-coherent IO-PDIR bit".
-		**
-		** Hopefully someone figures out how to patch (NOP) the
-		** FDC/SYNC out at boot time.
 		*/
-		asm volatile("fdc %%r0(%0)" : : "r" (pdir_ptr[7]));
+		asm_io_fdc(pdir_ptr);
 
 		iovp     += IOVP_SIZE;
 		byte_cnt -= IOVP_SIZE;
 	}
 
-	asm volatile("sync");
+	asm_io_sync();
 	ccio_clear_io_tlb(ioc, CCIO_IOVP(iova), saved_byte_cnt);
 }
 
@@ -714,8 +707,8 @@ ccio_dma_supported(struct device *dev, u64 mask)
 		return 0;
 	}
 
-	/* only support 32-bit devices (ie PCI/GSC) */
-	return (int)(mask == 0xffffffffUL);
+	/* only support 32-bit or better devices (ie PCI/GSC) */
+	return (int)(mask >= 0xffffffffUL);
 }
 
 /**
@@ -742,7 +735,7 @@ ccio_map_single(struct device *dev, void *addr, size_t size,
 	BUG_ON(!dev);
 	ioc = GET_IOC(dev);
 	if (!ioc)
-		return DMA_ERROR_CODE;
+		return DMA_MAPPING_ERROR;
 
 	BUG_ON(size <= 0);
 
@@ -1023,7 +1016,7 @@ ccio_unmap_sg(struct device *dev, struct scatterlist *sglist, int nents,
 	DBG_RUN_SG("%s() DONE (nents %d)\n", __func__, nents);
 }
 
-static struct dma_map_ops ccio_ops = {
+static const struct dma_map_ops ccio_ops = {
 	.dma_supported =	ccio_dma_supported,
 	.alloc =		ccio_alloc,
 	.free =			ccio_free,
@@ -1031,6 +1024,9 @@ static struct dma_map_ops ccio_ops = {
 	.unmap_page =		ccio_unmap_page,
 	.map_sg = 		ccio_map_sg,
 	.unmap_sg = 		ccio_unmap_sg,
+	.get_sgtable =		dma_common_get_sgtable,
+	.alloc_pages =		dma_common_alloc_pages,
+	.free_pages =		dma_common_free_pages,
 };
 
 #ifdef CONFIG_PROC_FS
@@ -1100,19 +1096,6 @@ static int ccio_proc_info(struct seq_file *m, void *p)
 	return 0;
 }
 
-static int ccio_proc_info_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, &ccio_proc_info, NULL);
-}
-
-static const struct file_operations ccio_proc_info_fops = {
-	.owner = THIS_MODULE,
-	.open = ccio_proc_info_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = single_release,
-};
-
 static int ccio_proc_bitmap_info(struct seq_file *m, void *p)
 {
 	struct ioc *ioc = ioc_list;
@@ -1127,19 +1110,6 @@ static int ccio_proc_bitmap_info(struct seq_file *m, void *p)
 
 	return 0;
 }
-
-static int ccio_proc_bitmap_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, &ccio_proc_bitmap_info, NULL);
-}
-
-static const struct file_operations ccio_proc_bitmap_fops = {
-	.owner = THIS_MODULE,
-	.open = ccio_proc_bitmap_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = single_release,
-};
 #endif /* CONFIG_PROC_FS */
 
 /**
@@ -1187,7 +1157,7 @@ void * ccio_get_iommu(const struct parisc_device *dev)
  * to/from certain pages.  To avoid this happening, we mark these pages
  * as `used', and ensure that nothing will try to allocate from them.
  */
-void ccio_cujo20_fixup(struct parisc_device *cujo, u32 iovp)
+void __init ccio_cujo20_fixup(struct parisc_device *cujo, u32 iovp)
 {
 	unsigned int idx;
 	struct parisc_device *dev = parisc_parent(cujo);
@@ -1233,7 +1203,7 @@ ccio_get_iotlb_size(struct parisc_device *dev)
 #endif /* 0 */
 
 /* We *can't* support JAVA (T600). Venture there at your own risk. */
-static const struct parisc_device_id ccio_tbl[] = {
+static const struct parisc_device_id ccio_tbl[] __initconst = {
 	{ HPHW_IOA, HVERSION_REV_ANY_ID, U2_IOA_RUNWAY, 0xb }, /* U2 */
 	{ HPHW_IOA, HVERSION_REV_ANY_ID, UTURN_IOA_RUNWAY, 0xb }, /* UTurn */
 	{ 0, }
@@ -1241,7 +1211,7 @@ static const struct parisc_device_id ccio_tbl[] = {
 
 static int ccio_probe(struct parisc_device *dev);
 
-static struct parisc_driver ccio_driver = {
+static struct parisc_driver ccio_driver __refdata = {
 	.name =		"ccio",
 	.id_table =	ccio_tbl,
 	.probe =	ccio_probe,
@@ -1255,7 +1225,7 @@ static struct parisc_driver ccio_driver = {
  * I/O Page Directory, the resource map, and initalizing the
  * U2/Uturn chip into virtual mode.
  */
-static void
+static void __init
 ccio_ioc_init(struct ioc *ioc)
 {
 	int i;
@@ -1273,7 +1243,7 @@ ccio_ioc_init(struct ioc *ioc)
 	** Hot-Plug/Removal of PCI cards. (aka PCI OLARD).
 	*/
 
-	iova_space_size = (u32) (totalram_pages / count_parisc_driver(&ccio_driver));
+	iova_space_size = (u32) (totalram_pages() / count_parisc_driver(&ccio_driver));
 
 	/* limit IOVA space size to 1MB-1GB */
 
@@ -1312,7 +1282,7 @@ ccio_ioc_init(struct ioc *ioc)
 
 	DBG_INIT("%s() hpa 0x%p mem %luMB IOV %dMB (%d bits)\n",
 			__func__, ioc->ioc_regs,
-			(unsigned long) totalram_pages >> (20 - PAGE_SHIFT),
+			(unsigned long) totalram_pages() >> (20 - PAGE_SHIFT),
 			iova_space_size>>20,
 			iov_order + PAGE_SHIFT);
 
@@ -1547,11 +1517,12 @@ static int __init ccio_probe(struct parisc_device *dev)
 {
 	int i;
 	struct ioc *ioc, **ioc_p = &ioc_list;
+	struct pci_hba_data *hba;
 
 	ioc = kzalloc(sizeof(struct ioc), GFP_KERNEL);
 	if (ioc == NULL) {
 		printk(KERN_ERR MODULE_NAME ": memory allocation failure\n");
-		return 1;
+		return -ENOMEM;
 	}
 
 	ioc->name = dev->id.hversion == U2_IOA_RUNWAY ? "U2" : "UTurn";
@@ -1565,27 +1536,31 @@ static int __init ccio_probe(struct parisc_device *dev)
 	*ioc_p = ioc;
 
 	ioc->hw_path = dev->hw_path;
-	ioc->ioc_regs = ioremap_nocache(dev->hpa.start, 4096);
+	ioc->ioc_regs = ioremap(dev->hpa.start, 4096);
+	if (!ioc->ioc_regs) {
+		kfree(ioc);
+		return -ENOMEM;
+	}
 	ccio_ioc_init(ioc);
 	ccio_init_resources(ioc);
 	hppa_dma_ops = &ccio_ops;
-	dev->dev.platform_data = kzalloc(sizeof(struct pci_hba_data), GFP_KERNEL);
 
+	hba = kzalloc(sizeof(*hba), GFP_KERNEL);
 	/* if this fails, no I/O cards will work, so may as well bug */
-	BUG_ON(dev->dev.platform_data == NULL);
-	HBA_DATA(dev->dev.platform_data)->iommu = ioc;
+	BUG_ON(hba == NULL);
+
+	hba->iommu = ioc;
+	dev->dev.platform_data = hba;
 
 #ifdef CONFIG_PROC_FS
 	if (ioc_count == 0) {
-		proc_create(MODULE_NAME, 0, proc_runway_root,
-			    &ccio_proc_info_fops);
-		proc_create(MODULE_NAME"-bitmap", 0, proc_runway_root,
-			    &ccio_proc_bitmap_fops);
+		proc_create_single(MODULE_NAME, 0, proc_runway_root,
+				ccio_proc_info);
+		proc_create_single(MODULE_NAME"-bitmap", 0, proc_runway_root,
+				ccio_proc_bitmap_info);
 	}
 #endif
 	ioc_count++;
-
-	parisc_has_iommu();
 	return 0;
 }
 

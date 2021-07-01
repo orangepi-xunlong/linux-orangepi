@@ -95,7 +95,7 @@ static int asiliantfb_set_par(struct fb_info *info);
 static int asiliantfb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 				u_int transp, struct fb_info *info);
 
-static struct fb_ops asiliantfb_ops = {
+static const struct fb_ops asiliantfb_ops = {
 	.owner		= THIS_MODULE,
 	.fb_check_var	= asiliantfb_check_var,
 	.fb_set_par	= asiliantfb_set_par,
@@ -592,7 +592,7 @@ static void asiliantfb_remove(struct pci_dev *dp)
 	framebuffer_release(p);
 }
 
-static struct pci_device_id asiliantfb_pci_tbl[] = {
+static const struct pci_device_id asiliantfb_pci_tbl[] = {
 	{ PCI_VENDOR_ID_CT, PCI_DEVICE_ID_CT_69000, PCI_ANY_ID, PCI_ANY_ID },
 	{ 0 }
 };

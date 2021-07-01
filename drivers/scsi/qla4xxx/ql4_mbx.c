@@ -1,8 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * QLogic iSCSI HBA Driver
  * Copyright (c)  2003-2013 QLogic Corporation
- *
- * See LICENSE.qla4xxx for copyright and licensing details.
  */
 
 #include <linux/ctype.h>
@@ -47,7 +46,7 @@ void qla4xxx_process_mbox_intr(struct scsi_qla_host *ha, int out_count)
 /**
  * qla4xxx_is_intr_poll_mode – Are we allowed to poll for interrupts?
  * @ha: Pointer to host adapter structure.
- * @ret: 1=polling mode, 0=non-polling mode
+ * returns: 1=polling mode, 0=non-polling mode
  **/
 static int qla4xxx_is_intr_poll_mode(struct scsi_qla_host *ha)
 {
@@ -633,7 +632,6 @@ int qla4xxx_initialize_fw_cb(struct scsi_qla_host * ha)
 			      ha->host_no, __func__));
 		goto exit_init_fw_cb_no_free;
 	}
-	memset(init_fw_cb, 0, sizeof(struct addr_ctrl_blk));
 
 	/* Get Initialize Firmware Control Block. */
 	memset(&mbox_cmd, 0, sizeof(mbox_cmd));
@@ -641,9 +639,6 @@ int qla4xxx_initialize_fw_cb(struct scsi_qla_host * ha)
 
 	if (qla4xxx_get_ifcb(ha, &mbox_cmd[0], &mbox_sts[0], init_fw_cb_dma) !=
 	    QLA_SUCCESS) {
-		dma_free_coherent(&ha->pdev->dev,
-				  sizeof(struct addr_ctrl_blk),
-				  init_fw_cb, init_fw_cb_dma);
 		goto exit_init_fw_cb;
 	}
 
@@ -720,7 +715,6 @@ int qla4xxx_get_dhcp_ip_address(struct scsi_qla_host * ha)
 	}
 
 	/* Get Initialize Firmware Control Block. */
-	memset(init_fw_cb, 0, sizeof(struct addr_ctrl_blk));
 	if (qla4xxx_get_ifcb(ha, &mbox_cmd[0], &mbox_sts[0], init_fw_cb_dma) !=
 	    QLA_SUCCESS) {
 		DEBUG2(printk("scsi%ld: %s: Failed to get init_fw_ctrl_blk\n",
@@ -815,7 +809,7 @@ int qla4xxx_get_firmware_status(struct scsi_qla_host * ha)
 	return QLA_SUCCESS;
 }
 
-/**
+/*
  * qla4xxx_get_fwddb_entry - retrieves firmware ddb entry
  * @ha: Pointer to host adapter structure.
  * @fw_ddb_index: Firmware's device database index
@@ -1264,8 +1258,7 @@ int qla4xxx_reset_lun(struct scsi_qla_host * ha, struct ddb_entry * ddb_entry,
 /**
  * qla4xxx_reset_target - issues target Reset
  * @ha: Pointer to host adapter structure.
- * @db_entry: Pointer to device database entry
- * @un_entry: Pointer to lun entry structure
+ * @ddb_entry: Pointer to device database entry
  *
  * This routine performs a TARGET RESET on the specified target.
  * The caller must ensure that the ddb_entry pointers
@@ -1351,7 +1344,6 @@ int qla4xxx_about_firmware(struct scsi_qla_host *ha)
 		return status;
 	}
 
-	memset(about_fw, 0, sizeof(struct about_fw_info));
 	memset(&mbox_cmd, 0, sizeof(mbox_cmd));
 	memset(&mbox_sts, 0, sizeof(mbox_sts));
 
@@ -1587,12 +1579,11 @@ int qla4xxx_get_chap(struct scsi_qla_host *ha, char *username, char *password,
 	struct ql4_chap_table *chap_table;
 	dma_addr_t chap_dma;
 
-	chap_table = dma_pool_alloc(ha->chap_dma_pool, GFP_KERNEL, &chap_dma);
+	chap_table = dma_pool_zalloc(ha->chap_dma_pool, GFP_KERNEL, &chap_dma);
 	if (chap_table == NULL)
 		return -ENOMEM;
 
 	chap_size = sizeof(struct ql4_chap_table);
-	memset(chap_table, 0, chap_size);
 
 	if (is_qla40XX(ha))
 		offset = FLASH_CHAP_OFFSET | (idx * chap_size);
@@ -1651,13 +1642,12 @@ int qla4xxx_set_chap(struct scsi_qla_host *ha, char *username, char *password,
 	uint32_t chap_size = 0;
 	dma_addr_t chap_dma;
 
-	chap_table = dma_pool_alloc(ha->chap_dma_pool, GFP_KERNEL, &chap_dma);
+	chap_table = dma_pool_zalloc(ha->chap_dma_pool, GFP_KERNEL, &chap_dma);
 	if (chap_table == NULL) {
 		ret =  -ENOMEM;
 		goto exit_set_chap;
 	}
 
-	memset(chap_table, 0, sizeof(struct ql4_chap_table));
 	if (bidi)
 		chap_table->flags |= BIT_6; /* peer */
 	else
@@ -2032,10 +2022,7 @@ int qla4xxx_set_param_ddbentry(struct scsi_qla_host *ha,
 	ptid = (uint16_t *)&fw_ddb_entry->isid[1];
 	*ptid = cpu_to_le16((uint16_t)ddb_entry->sess->target_id);
 
-	DEBUG2(ql4_printk(KERN_INFO, ha, "ISID [%02x%02x%02x%02x%02x%02x]\n",
-			  fw_ddb_entry->isid[5], fw_ddb_entry->isid[4],
-			  fw_ddb_entry->isid[3], fw_ddb_entry->isid[2],
-			  fw_ddb_entry->isid[1], fw_ddb_entry->isid[0]));
+	DEBUG2(ql4_printk(KERN_INFO, ha, "ISID [%pmR]\n", fw_ddb_entry->isid));
 
 	iscsi_opts = le16_to_cpu(fw_ddb_entry->iscsi_options);
 	memset(fw_ddb_entry->iscsi_alias, 0, sizeof(fw_ddb_entry->iscsi_alias));

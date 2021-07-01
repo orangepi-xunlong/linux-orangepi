@@ -1,18 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /******************************************************************************
  *
  * Copyright(c) 2009-2013  Realtek Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
  *
  * Contact Information:
  * wlanfae <wlanfae@realtek.com>
@@ -30,7 +19,7 @@
 #include "rtl8188e_hal.h"
 
 #include <linux/firmware.h>
-#include <linux/kmemleak.h>
+#include <linux/slab.h>
 
 static void _rtl88e_enable_fw_download(struct adapter *adapt, bool enable)
 {
@@ -109,9 +98,9 @@ static void rtl88e_firmware_selfreset(struct adapter *adapt)
 {
 	u8 u1b_tmp;
 
-	u1b_tmp = usb_read8(adapt, REG_SYS_FUNC_EN+1);
-	usb_write8(adapt, REG_SYS_FUNC_EN+1, (u1b_tmp & (~BIT(2))));
-	usb_write8(adapt, REG_SYS_FUNC_EN+1, (u1b_tmp | BIT(2)));
+	u1b_tmp = usb_read8(adapt, REG_SYS_FUNC_EN + 1);
+	usb_write8(adapt, REG_SYS_FUNC_EN + 1, (u1b_tmp & (~BIT(2))));
+	usb_write8(adapt, REG_SYS_FUNC_EN + 1, (u1b_tmp | BIT(2)));
 }
 
 static int _rtl88e_fw_free_to_go(struct adapter *adapt)
@@ -122,7 +111,7 @@ static int _rtl88e_fw_free_to_go(struct adapter *adapt)
 
 	do {
 		value32 = usb_read32(adapt, REG_MCUFWDL);
-		if (value32 & FWDL_ChkSum_rpt)
+		if (value32 & FWDL_CHKSUM_RPT)
 			break;
 	} while (counter++ < POLLING_READY_TIMEOUT_COUNT);
 
@@ -157,7 +146,7 @@ int rtl88eu_download_fw(struct adapter *adapt)
 	struct dvobj_priv *dvobj = adapter_to_dvobj(adapt);
 	struct device *device = dvobj_to_dev(dvobj);
 	const struct firmware *fw;
-	const char fw_name[] = "rtlwifi/rtl8188eufw.bin";
+	static const char fw_name[] = "rtlwifi/rtl8188eufw.bin";
 	struct rtl92c_firmware_header *pfwheader = NULL;
 	u8 *download_data, *fw_data;
 	size_t download_size;
@@ -203,7 +192,8 @@ int rtl88eu_download_fw(struct adapter *adapt)
 		rtl88e_firmware_selfreset(adapt);
 	}
 	_rtl88e_enable_fw_download(adapt, true);
-	usb_write8(adapt, REG_MCUFWDL, usb_read8(adapt, REG_MCUFWDL) | FWDL_ChkSum_rpt);
+	usb_write8(adapt, REG_MCUFWDL,
+		   usb_read8(adapt, REG_MCUFWDL) | FWDL_CHKSUM_RPT);
 	_rtl88e_write_fw(adapt, download_data, download_size);
 	_rtl88e_enable_fw_download(adapt, false);
 

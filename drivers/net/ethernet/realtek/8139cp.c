@@ -76,7 +76,7 @@
 #include <linux/cache.h>
 #include <asm/io.h>
 #include <asm/irq.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 /* These identify the driver base version and may not be removed. */
 static char version[] =
@@ -465,10 +465,8 @@ static int cp_rx_poll(struct napi_struct *napi, int budget)
 	struct cp_private *cp = container_of(napi, struct cp_private, napi);
 	struct net_device *dev = cp->dev;
 	unsigned int rx_tail = cp->rx_tail;
-	int rx;
+	int rx = 0;
 
-	rx = 0;
-rx_status_loop:
 	cpw16(IntrStatus, cp_rx_intr_mask);
 
 	while (rx < budget) {
@@ -556,15 +554,10 @@ rx_next:
 	/* if we did not reach work limit, then we're done with
 	 * this round of polling
 	 */
-	if (rx < budget) {
+	if (rx < budget && napi_complete_done(napi, rx)) {
 		unsigned long flags;
 
-		if (cpr16(IntrStatus) & cp_rx_intr_mask)
-			goto rx_status_loop;
-
-		napi_gro_flush(napi, false);
 		spin_lock_irqsave(&cp->lock, flags);
-		__napi_complete(napi);
 		cpw16_f(IntrMask, cp_intr_mask);
 		spin_unlock_irqrestore(&cp->lock, flags);
 	}
@@ -578,12 +571,17 @@ static irqreturn_t cp_interrupt (int irq, void *dev_instance)
 	struct cp_private *cp;
 	int handled = 0;
 	u16 status;
+	u16 mask;
 
 	if (unlikely(dev == NULL))
 		return IRQ_NONE;
 	cp = netdev_priv(dev);
 
 	spin_lock(&cp->lock);
+
+	mask = cpr16(IntrMask);
+	if (!mask)
+		goto out_unlock;
 
 	status = cpr16(IntrStatus);
 	if (!status || (status == 0xFFFF))
@@ -693,7 +691,7 @@ static void cp_tx (struct cp_private *cp)
 			}
 			bytes_compl += skb->len;
 			pkts_compl++;
-			dev_kfree_skb_irq(skb);
+			dev_consume_skb_irq(skb);
 		}
 
 		cp->tx_skb[tx_tail] = NULL;
@@ -755,8 +753,8 @@ static netdev_tx_t cp_start_xmit (struct sk_buff *skb,
 	mss = skb_shinfo(skb)->gso_size;
 
 	if (mss > MSSMask) {
-		WARN_ONCE(1, "Net bug: GSO size %d too large for 8139CP\n",
-			  mss);
+		netdev_WARN_ONCE(dev, "Net bug: GSO size %d too large for 8139CP\n",
+				 mss);
 		goto out_dma_error;
 	}
 
@@ -1237,11 +1235,11 @@ static int cp_close (struct net_device *dev)
 	return 0;
 }
 
-static void cp_tx_timeout(struct net_device *dev)
+static void cp_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	struct cp_private *cp = netdev_priv(dev);
 	unsigned long flags;
-	int rc, i;
+	int i;
 
 	netdev_warn(dev, "Transmit timeout, status %2x %4x %4x %4x\n",
 		    cpr8(Cmd), cpr16(CpCmd),
@@ -1262,7 +1260,7 @@ static void cp_tx_timeout(struct net_device *dev)
 
 	cp_stop_hw(cp);
 	cp_clean_rings(cp);
-	rc = cp_init_rings(cp);
+	cp_init_rings(cp);
 	cp_start_hw(cp);
 	__cp_set_rx_mode(dev);
 	cpw16_f(IntrMask, cp_norx_intr_mask);
@@ -1276,10 +1274,6 @@ static void cp_tx_timeout(struct net_device *dev)
 static int cp_change_mtu(struct net_device *dev, int new_mtu)
 {
 	struct cp_private *cp = netdev_priv(dev);
-
-	/* check for invalid MTU, according to hardware limits */
-	if (new_mtu < CP_MIN_MTU || new_mtu > CP_MAX_MTU)
-		return -EINVAL;
 
 	/* if network interface not up, no need for complexity */
 	if (!netif_running(dev)) {
@@ -1417,27 +1411,28 @@ static int cp_get_sset_count (struct net_device *dev, int sset)
 	}
 }
 
-static int cp_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+static int cp_get_link_ksettings(struct net_device *dev,
+				 struct ethtool_link_ksettings *cmd)
 {
 	struct cp_private *cp = netdev_priv(dev);
-	int rc;
 	unsigned long flags;
 
 	spin_lock_irqsave(&cp->lock, flags);
-	rc = mii_ethtool_gset(&cp->mii_if, cmd);
+	mii_ethtool_get_link_ksettings(&cp->mii_if, cmd);
 	spin_unlock_irqrestore(&cp->lock, flags);
 
-	return rc;
+	return 0;
 }
 
-static int cp_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+static int cp_set_link_ksettings(struct net_device *dev,
+				 const struct ethtool_link_ksettings *cmd)
 {
 	struct cp_private *cp = netdev_priv(dev);
 	int rc;
 	unsigned long flags;
 
 	spin_lock_irqsave(&cp->lock, flags);
-	rc = mii_ethtool_sset(&cp->mii_if, cmd);
+	rc = mii_ethtool_set_link_ksettings(&cp->mii_if, cmd);
 	spin_unlock_irqrestore(&cp->lock, flags);
 
 	return rc;
@@ -1589,8 +1584,6 @@ static const struct ethtool_ops cp_ethtool_ops = {
 	.get_drvinfo		= cp_get_drvinfo,
 	.get_regs_len		= cp_get_regs_len,
 	.get_sset_count		= cp_get_sset_count,
-	.get_settings		= cp_get_settings,
-	.set_settings		= cp_set_settings,
 	.nway_reset		= cp_nway_reset,
 	.get_link		= ethtool_op_get_link,
 	.get_msglevel		= cp_get_msglevel,
@@ -1604,6 +1597,8 @@ static const struct ethtool_ops cp_ethtool_ops = {
 	.get_eeprom		= cp_get_eeprom,
 	.set_eeprom		= cp_set_eeprom,
 	.get_ringparam		= cp_get_ringparam,
+	.get_link_ksettings	= cp_get_link_ksettings,
+	.set_link_ksettings	= cp_set_link_ksettings,
 };
 
 static int cp_ioctl (struct net_device *dev, struct ifreq *rq, int cmd)
@@ -2010,6 +2005,10 @@ static int cp_init_one (struct pci_dev *pdev, const struct pci_device_id *ent)
 	dev->vlan_features = NETIF_F_SG | NETIF_F_IP_CSUM | NETIF_F_TSO |
 		NETIF_F_HIGHDMA;
 
+	/* MTU range: 60 - 4096 */
+	dev->min_mtu = CP_MIN_MTU;
+	dev->max_mtu = CP_MAX_MTU;
+
 	rc = register_netdev(dev);
 	if (rc)
 		goto err_out_iomap;
@@ -2055,10 +2054,9 @@ static void cp_remove_one (struct pci_dev *pdev)
 	free_netdev(dev);
 }
 
-#ifdef CONFIG_PM
-static int cp_suspend (struct pci_dev *pdev, pm_message_t state)
+static int __maybe_unused cp_suspend(struct device *device)
 {
-	struct net_device *dev = pci_get_drvdata(pdev);
+	struct net_device *dev = dev_get_drvdata(device);
 	struct cp_private *cp = netdev_priv(dev);
 	unsigned long flags;
 
@@ -2076,16 +2074,14 @@ static int cp_suspend (struct pci_dev *pdev, pm_message_t state)
 
 	spin_unlock_irqrestore (&cp->lock, flags);
 
-	pci_save_state(pdev);
-	pci_enable_wake(pdev, pci_choose_state(pdev, state), cp->wol_enabled);
-	pci_set_power_state(pdev, pci_choose_state(pdev, state));
+	device_set_wakeup_enable(device, cp->wol_enabled);
 
 	return 0;
 }
 
-static int cp_resume (struct pci_dev *pdev)
+static int __maybe_unused cp_resume(struct device *device)
 {
-	struct net_device *dev = pci_get_drvdata (pdev);
+	struct net_device *dev = dev_get_drvdata(device);
 	struct cp_private *cp = netdev_priv(dev);
 	unsigned long flags;
 
@@ -2093,10 +2089,6 @@ static int cp_resume (struct pci_dev *pdev)
 		return 0;
 
 	netif_device_attach (dev);
-
-	pci_set_power_state(pdev, PCI_D0);
-	pci_restore_state(pdev);
-	pci_enable_wake(pdev, PCI_D0, 0);
 
 	/* FIXME: sh*t may happen if the Rx ring buffer is depleted */
 	cp_init_rings_index (cp);
@@ -2112,7 +2104,6 @@ static int cp_resume (struct pci_dev *pdev)
 
 	return 0;
 }
-#endif /* CONFIG_PM */
 
 static const struct pci_device_id cp_pci_tbl[] = {
         { PCI_DEVICE(PCI_VENDOR_ID_REALTEK,     PCI_DEVICE_ID_REALTEK_8139), },
@@ -2121,15 +2112,14 @@ static const struct pci_device_id cp_pci_tbl[] = {
 };
 MODULE_DEVICE_TABLE(pci, cp_pci_tbl);
 
+static SIMPLE_DEV_PM_OPS(cp_pm_ops, cp_suspend, cp_resume);
+
 static struct pci_driver cp_driver = {
 	.name         = DRV_NAME,
 	.id_table     = cp_pci_tbl,
 	.probe        =	cp_init_one,
 	.remove       = cp_remove_one,
-#ifdef CONFIG_PM
-	.resume       = cp_resume,
-	.suspend      = cp_suspend,
-#endif
+	.driver.pm    = &cp_pm_ops,
 };
 
 module_pci_driver(cp_driver);

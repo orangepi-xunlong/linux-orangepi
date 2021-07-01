@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * PIC32 Integrated Serial Driver.
  *
@@ -5,8 +6,6 @@
  *
  * Authors:
  *   Sorin-Andrei Pistirica <andrei.pistirica@microchip.com>
- *
- * Licensed under GPLv2 or later.
  */
 
 #include <linux/kernel.h>
@@ -495,13 +494,13 @@ static int pic32_uart_startup(struct uart_port *port)
 
 out_t:
 	kfree(sport->irq_tx_name);
-	free_irq(sport->irq_tx, sport);
+	free_irq(sport->irq_tx, port);
 out_r:
 	kfree(sport->irq_rx_name);
-	free_irq(sport->irq_rx, sport);
+	free_irq(sport->irq_rx, port);
 out_f:
 	kfree(sport->irq_fault_name);
-	free_irq(sport->irq_fault, sport);
+	free_irq(sport->irq_fault, port);
 out_done:
 	return ret;
 }
@@ -619,7 +618,7 @@ static int pic32_uart_request_port(struct uart_port *port)
 				"pic32_uart_mem"))
 		return -EBUSY;
 
-	port->membase = devm_ioremap_nocache(port->dev, port->mapbase,
+	port->membase = devm_ioremap(port->dev, port->mapbase,
 						resource_size(res_mem));
 	if (!port->membase) {
 		dev_err(port->dev, "Unable to map registers\n");
@@ -769,11 +768,6 @@ static int __init pic32_console_init(void)
 }
 console_initcall(pic32_console_init);
 
-static inline bool is_pic32_console_port(struct uart_port *port)
-{
-	return port->cons && port->cons->index == port->line;
-}
-
 /*
  * Late console initialization.
  */
@@ -874,8 +868,7 @@ static int pic32_uart_probe(struct platform_device *pdev)
 	}
 
 #ifdef CONFIG_SERIAL_PIC32_CONSOLE
-	if (is_pic32_console_port(port) &&
-	    (pic32_console.flags & CON_ENABLED)) {
+	if (uart_console(port) && (pic32_console.flags & CON_ENABLED)) {
 		/* The peripheral clock has been enabled by console_setup,
 		 * so disable it till the port is used.
 		 */
@@ -920,6 +913,7 @@ static struct platform_driver pic32_uart_platform_driver = {
 	.driver		= {
 		.name	= PIC32_DEV_NAME,
 		.of_match_table	= of_match_ptr(pic32_serial_dt_ids),
+		.suppress_bind_attrs = IS_BUILTIN(CONFIG_SERIAL_PIC32),
 	},
 };
 

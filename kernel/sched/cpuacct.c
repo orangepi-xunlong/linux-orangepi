@@ -1,23 +1,14 @@
-#include <linux/cgroup.h>
-#include <linux/slab.h>
-#include <linux/percpu.h>
-#include <linux/spinlock.h>
-#include <linux/cpumask.h>
-#include <linux/seq_file.h>
-#include <linux/rcupdate.h>
-#include <linux/kernel_stat.h>
-#include <linux/err.h>
-
-#include "sched.h"
-
+// SPDX-License-Identifier: GPL-2.0
 /*
  * CPU accounting code for task groups.
  *
  * Based on the work by Paul Menage (menage@google.com) and Balbir Singh
  * (balbir@in.ibm.com).
  */
+#include <asm/irq_regs.h>
+#include "sched.h"
 
-/* Time spent by the tasks of the cpu accounting group executing in ... */
+/* Time spent by the tasks of the CPU accounting group executing in ... */
 enum cpuacct_stat_index {
 	CPUACCT_STAT_USER,	/* ... user mode */
 	CPUACCT_STAT_SYSTEM,	/* ... kernel mode */
@@ -34,12 +25,12 @@ struct cpuacct_usage {
 	u64	usages[CPUACCT_STAT_NSTATS];
 };
 
-/* track cpu usage of a group of tasks and its child groups */
+/* track CPU usage of a group of tasks and its child groups */
 struct cpuacct {
-	struct cgroup_subsys_state css;
-	/* cpuusage holds pointer to a u64-type object on every cpu */
-	struct cpuacct_usage __percpu *cpuusage;
-	struct kernel_cpustat __percpu *cpustat;
+	struct cgroup_subsys_state	css;
+	/* cpuusage holds pointer to a u64-type object on every CPU */
+	struct cpuacct_usage __percpu	*cpuusage;
+	struct kernel_cpustat __percpu	*cpustat;
 };
 
 static inline struct cpuacct *css_ca(struct cgroup_subsys_state *css)
@@ -47,7 +38,7 @@ static inline struct cpuacct *css_ca(struct cgroup_subsys_state *css)
 	return css ? container_of(css, struct cpuacct, css) : NULL;
 }
 
-/* return cpu accounting group to which this task belongs */
+/* Return CPU accounting group to which this task belongs */
 static inline struct cpuacct *task_ca(struct task_struct *tsk)
 {
 	return css_ca(task_css(tsk, cpuacct_cgrp_id));
@@ -64,7 +55,7 @@ static struct cpuacct root_cpuacct = {
 	.cpuusage	= &root_cpuacct_cpuusage,
 };
 
-/* create a new cpu accounting group */
+/* Create a new CPU accounting group */
 static struct cgroup_subsys_state *
 cpuacct_css_alloc(struct cgroup_subsys_state *parent_css)
 {
@@ -95,7 +86,7 @@ out:
 	return ERR_PTR(-ENOMEM);
 }
 
-/* destroy an existing cpu accounting group */
+/* Destroy an existing CPU accounting group */
 static void cpuacct_css_free(struct cgroup_subsys_state *css)
 {
 	struct cpuacct *ca = css_ca(css);
@@ -161,7 +152,7 @@ static void cpuacct_cpuusage_write(struct cpuacct *ca, int cpu, u64 val)
 #endif
 }
 
-/* return total cpu usage (in nanoseconds) of a group */
+/* Return total CPU usage (in nanoseconds) of a group */
 static u64 __cpuusage_read(struct cgroup_subsys_state *css,
 			   enum cpuacct_stat_index index)
 {
@@ -297,7 +288,7 @@ static int cpuacct_stats_show(struct seq_file *sf, void *v)
 	for (stat = 0; stat < CPUACCT_STAT_NSTATS; stat++) {
 		seq_printf(sf, "%s %lld\n",
 			   cpuacct_stat_desc[stat],
-			   cputime64_to_clock_t(val[stat]));
+			   (long long)nsec_to_clock_t(val[stat]));
 	}
 
 	return 0;
@@ -349,7 +340,7 @@ void cpuacct_charge(struct task_struct *tsk, u64 cputime)
 {
 	struct cpuacct *ca;
 	int index = CPUACCT_STAT_SYSTEM;
-	struct pt_regs *regs = task_pt_regs(tsk);
+	struct pt_regs *regs = get_irq_regs() ? : task_pt_regs(tsk);
 
 	if (regs && user_mode(regs))
 		index = CPUACCT_STAT_USER;
@@ -357,7 +348,7 @@ void cpuacct_charge(struct task_struct *tsk, u64 cputime)
 	rcu_read_lock();
 
 	for (ca = task_ca(tsk); ca; ca = parent_ca(ca))
-		this_cpu_ptr(ca->cpuusage)->usages[index] += cputime;
+		__this_cpu_add(ca->cpuusage->usages[index], cputime);
 
 	rcu_read_unlock();
 }
@@ -373,7 +364,7 @@ void cpuacct_account_field(struct task_struct *tsk, int index, u64 val)
 
 	rcu_read_lock();
 	for (ca = task_ca(tsk); ca != &root_cpuacct; ca = parent_ca(ca))
-		this_cpu_ptr(ca->cpustat)->cpustat[index] += val;
+		__this_cpu_add(ca->cpustat->cpustat[index], val);
 	rcu_read_unlock();
 }
 

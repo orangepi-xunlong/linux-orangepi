@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_X86_SIGFRAME_H
 #define _ASM_X86_SIGFRAME_H
 
@@ -32,11 +33,7 @@ struct sigframe_ia32 {
 	 * legacy application accessing/modifying it.
 	 */
 	struct _fpstate_32 fpstate_unused;
-#ifdef CONFIG_IA32_EMULATION
-	unsigned int extramask[_COMPAT_NSIG_WORDS-1];
-#else /* !CONFIG_IA32_EMULATION */
-	unsigned long extramask[_NSIG_WORDS-1];
-#endif /* CONFIG_IA32_EMULATION */
+	unsigned int extramask[1];
 	char retcode[8];
 	/* fp state follows here */
 };

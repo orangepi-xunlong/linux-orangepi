@@ -11,7 +11,6 @@
 
 #include <linux/err.h>
 #include <linux/init.h>
-#include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include "pinctrl-spear3xx.h"
@@ -380,8 +379,6 @@ static const struct of_device_id spear310_pinctrl_of_match[] = {
 
 static int spear310_pinctrl_probe(struct platform_device *pdev)
 {
-	int ret;
-
 	spear3xx_machdata.groups = spear310_pingroups;
 	spear3xx_machdata.ngroups = ARRAY_SIZE(spear310_pingroups);
 	spear3xx_machdata.functions = spear310_functions;
@@ -393,11 +390,7 @@ static int spear310_pinctrl_probe(struct platform_device *pdev)
 
 	spear3xx_machdata.modes_supported = false;
 
-	ret = spear_pinctrl_probe(pdev, &spear3xx_machdata);
-	if (ret)
-		return ret;
-
-	return 0;
+	return spear_pinctrl_probe(pdev, &spear3xx_machdata);
 }
 
 static struct platform_driver spear310_pinctrl_driver = {
@@ -413,14 +406,3 @@ static int __init spear310_pinctrl_init(void)
 	return platform_driver_register(&spear310_pinctrl_driver);
 }
 arch_initcall(spear310_pinctrl_init);
-
-static void __exit spear310_pinctrl_exit(void)
-{
-	platform_driver_unregister(&spear310_pinctrl_driver);
-}
-module_exit(spear310_pinctrl_exit);
-
-MODULE_AUTHOR("Viresh Kumar <vireshk@kernel.org>");
-MODULE_DESCRIPTION("ST Microelectronics SPEAr310 pinctrl driver");
-MODULE_LICENSE("GPL v2");
-MODULE_DEVICE_TABLE(of, spear310_pinctrl_of_match);

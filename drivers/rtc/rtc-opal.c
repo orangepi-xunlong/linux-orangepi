@@ -1,19 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * IBM OPAL RTC driver
  * Copyright (C) 2014 IBM
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -184,7 +172,14 @@ static int opal_set_tpo_time(struct device *dev, struct rtc_wkalrm *alarm)
 	u32 y_m_d = 0;
 	int token, rc;
 
-	tm_to_opal(&alarm->time, &y_m_d, &h_m_s_ms);
+	/* if alarm is enabled */
+	if (alarm->enabled) {
+		tm_to_opal(&alarm->time, &y_m_d, &h_m_s_ms);
+		pr_debug("Alarm set to %x %llx\n", y_m_d, h_m_s_ms);
+
+	} else {
+		pr_debug("Alarm getting disabled\n");
+	}
 
 	token = opal_async_get_token_interruptible();
 	if (token < 0) {
@@ -217,6 +212,18 @@ exit:
 	return rc;
 }
 
+static int opal_tpo_alarm_irq_enable(struct device *dev, unsigned int enabled)
+{
+	struct rtc_wkalrm alarm = { .enabled = 0 };
+
+	/*
+	 * TPO is automatically enabled when opal_set_tpo_time() is called with
+	 * non-zero rtc-time. We only handle disable case which needs to be
+	 * explicitly told to opal.
+	 */
+	return enabled ? 0 : opal_set_tpo_time(dev, &alarm);
+}
+
 static struct rtc_class_ops opal_rtc_ops = {
 	.read_time	= opal_get_rtc_time,
 	.set_time	= opal_set_rtc_time,
@@ -232,6 +239,7 @@ static int opal_rtc_probe(struct platform_device *pdev)
 		device_set_wakeup_capable(&pdev->dev, true);
 		opal_rtc_ops.read_alarm	= opal_get_tpo_time;
 		opal_rtc_ops.set_alarm = opal_set_tpo_time;
+		opal_rtc_ops.alarm_irq_enable = opal_tpo_alarm_irq_enable;
 	}
 
 	rtc = devm_rtc_device_register(&pdev->dev, DRVNAME, &opal_rtc_ops,

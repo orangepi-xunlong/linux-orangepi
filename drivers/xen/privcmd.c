@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /******************************************************************************
  * privcmd.c
  *
@@ -22,16 +23,16 @@
 #include <linux/pagemap.h>
 #include <linux/seq_file.h>
 #include <linux/miscdevice.h>
+#include <linux/moduleparam.h>
 
-#include <asm/pgalloc.h>
-#include <asm/pgtable.h>
-#include <asm/tlb.h>
 #include <asm/xen/hypervisor.h>
 #include <asm/xen/hypercall.h>
 
 #include <xen/xen.h>
 #include <xen/privcmd.h>
 #include <xen/interface/xen.h>
+#include <xen/interface/memory.h>
+#include <xen/interface/hvm/dm_op.h>
 #include <xen/features.h>
 #include <xen/page.h>
 #include <xen/xen-ops.h>
@@ -43,15 +44,35 @@ MODULE_LICENSE("GPL");
 
 #define PRIV_VMA_LOCKED ((void *)1)
 
+static unsigned int privcmd_dm_op_max_num = 16;
+module_param_named(dm_op_max_nr_bufs, privcmd_dm_op_max_num, uint, 0644);
+MODULE_PARM_DESC(dm_op_max_nr_bufs,
+		 "Maximum number of buffers per dm_op hypercall");
+
+static unsigned int privcmd_dm_op_buf_max_size = 4096;
+module_param_named(dm_op_buf_max_size, privcmd_dm_op_buf_max_size, uint,
+		   0644);
+MODULE_PARM_DESC(dm_op_buf_max_size,
+		 "Maximum size of a dm_op hypercall buffer");
+
+struct privcmd_data {
+	domid_t domid;
+};
+
 static int privcmd_vma_range_is_mapped(
                struct vm_area_struct *vma,
                unsigned long addr,
                unsigned long nr_pages);
 
-static long privcmd_ioctl_hypercall(void __user *udata)
+static long privcmd_ioctl_hypercall(struct file *file, void __user *udata)
 {
+	struct privcmd_data *data = file->private_data;
 	struct privcmd_hypercall hypercall;
 	long ret;
+
+	/* Disallow arbitrary hypercalls if restricted */
+	if (data->domid != DOMID_INVALID)
+		return -EPERM;
 
 	if (copy_from_user(&hypercall, udata, sizeof(hypercall)))
 		return -EFAULT;
@@ -169,12 +190,9 @@ static int traverse_pages_block(unsigned nelem, size_t size,
 				void *state)
 {
 	void *pagedata;
-	unsigned pageidx;
 	int ret = 0;
 
 	BUG_ON(size > PAGE_SIZE);
-
-	pageidx = PAGE_SIZE;
 
 	while (nelem) {
 		int nr = (PAGE_SIZE/size);
@@ -229,8 +247,9 @@ static int mmap_gfn_range(void *data, void *state)
 	return 0;
 }
 
-static long privcmd_ioctl_mmap(void __user *udata)
+static long privcmd_ioctl_mmap(struct file *file, void __user *udata)
 {
+	struct privcmd_data *data = file->private_data;
 	struct privcmd_mmap mmapcmd;
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
@@ -245,6 +264,10 @@ static long privcmd_ioctl_mmap(void __user *udata)
 	if (copy_from_user(&mmapcmd, udata, sizeof(mmapcmd)))
 		return -EFAULT;
 
+	/* If restriction is in place, check the domid matches */
+	if (data->domid != DOMID_INVALID && data->domid != mmapcmd.dom)
+		return -EPERM;
+
 	rc = gather_array(&pagelist,
 			  mmapcmd.num, sizeof(struct privcmd_mmap_entry),
 			  mmapcmd.entry);
@@ -252,7 +275,7 @@ static long privcmd_ioctl_mmap(void __user *udata)
 	if (rc || list_empty(&pagelist))
 		goto out;
 
-	down_write(&mm->mmap_sem);
+	mmap_write_lock(mm);
 
 	{
 		struct page *page = list_first_entry(&pagelist,
@@ -277,7 +300,7 @@ static long privcmd_ioctl_mmap(void __user *udata)
 
 
 out_up:
-	up_write(&mm->mmap_sem);
+	mmap_write_unlock(mm);
 
 out:
 	free_page_list(&pagelist);
@@ -401,7 +424,7 @@ static int alloc_empty_pages(struct vm_area_struct *vma, int numpgs)
 	if (pages == NULL)
 		return -ENOMEM;
 
-	rc = alloc_xenballooned_pages(numpgs, pages);
+	rc = xen_alloc_unpopulated_pages(numpgs, pages);
 	if (rc != 0) {
 		pr_warn("%s Could not alloc %d pfns rc:%d\n", __func__,
 			numpgs, rc);
@@ -416,8 +439,10 @@ static int alloc_empty_pages(struct vm_area_struct *vma, int numpgs)
 
 static const struct vm_operations_struct privcmd_vm_ops;
 
-static long privcmd_ioctl_mmap_batch(void __user *udata, int version)
+static long privcmd_ioctl_mmap_batch(
+	struct file *file, void __user *udata, int version)
 {
+	struct privcmd_data *data = file->private_data;
 	int ret;
 	struct privcmd_mmapbatch_v2 m;
 	struct mm_struct *mm = current->mm;
@@ -432,19 +457,23 @@ static long privcmd_ioctl_mmap_batch(void __user *udata, int version)
 			return -EFAULT;
 		/* Returns per-frame error in m.arr. */
 		m.err = NULL;
-		if (!access_ok(VERIFY_WRITE, m.arr, m.num * sizeof(*m.arr)))
+		if (!access_ok(m.arr, m.num * sizeof(*m.arr)))
 			return -EFAULT;
 		break;
 	case 2:
 		if (copy_from_user(&m, udata, sizeof(struct privcmd_mmapbatch_v2)))
 			return -EFAULT;
 		/* Returns per-frame error code in m.err. */
-		if (!access_ok(VERIFY_WRITE, m.err, m.num * (sizeof(*m.err))))
+		if (!access_ok(m.err, m.num * (sizeof(*m.err))))
 			return -EFAULT;
 		break;
 	default:
 		return -EINVAL;
 	}
+
+	/* If restriction is in place, check the domid matches */
+	if (data->domid != DOMID_INVALID && data->domid != m.dom)
+		return -EPERM;
 
 	nr_pages = DIV_ROUND_UP(m.num, XEN_PFN_PER_PAGE);
 	if ((m.num <= 0) || (nr_pages > (LONG_MAX >> PAGE_SHIFT)))
@@ -467,7 +496,7 @@ static long privcmd_ioctl_mmap_batch(void __user *udata, int version)
 		}
 	}
 
-	down_write(&mm->mmap_sem);
+	mmap_write_lock(mm);
 
 	vma = find_vma(mm, m.addr);
 	if (!vma ||
@@ -523,7 +552,7 @@ static long privcmd_ioctl_mmap_batch(void __user *udata, int version)
 	BUG_ON(traverse_pages_block(m.num, sizeof(xen_pfn_t),
 				    &pagelist, mmap_batch_fn, &state));
 
-	up_write(&mm->mmap_sem);
+	mmap_write_unlock(mm);
 
 	if (state.global_error) {
 		/* Write back errors in second pass. */
@@ -544,39 +573,327 @@ out:
 	return ret;
 
 out_unlock:
-	up_write(&mm->mmap_sem);
+	mmap_write_unlock(mm);
 	goto out;
+}
+
+static int lock_pages(
+	struct privcmd_dm_op_buf kbufs[], unsigned int num,
+	struct page *pages[], unsigned int nr_pages, unsigned int *pinned)
+{
+	unsigned int i;
+
+	for (i = 0; i < num; i++) {
+		unsigned int requested;
+		int page_count;
+
+		requested = DIV_ROUND_UP(
+			offset_in_page(kbufs[i].uptr) + kbufs[i].size,
+			PAGE_SIZE);
+		if (requested > nr_pages)
+			return -ENOSPC;
+
+		page_count = pin_user_pages_fast(
+			(unsigned long) kbufs[i].uptr,
+			requested, FOLL_WRITE, pages);
+		if (page_count < 0)
+			return page_count;
+
+		*pinned += page_count;
+		nr_pages -= page_count;
+		pages += page_count;
+	}
+
+	return 0;
+}
+
+static void unlock_pages(struct page *pages[], unsigned int nr_pages)
+{
+	unpin_user_pages_dirty_lock(pages, nr_pages, true);
+}
+
+static long privcmd_ioctl_dm_op(struct file *file, void __user *udata)
+{
+	struct privcmd_data *data = file->private_data;
+	struct privcmd_dm_op kdata;
+	struct privcmd_dm_op_buf *kbufs;
+	unsigned int nr_pages = 0;
+	struct page **pages = NULL;
+	struct xen_dm_op_buf *xbufs = NULL;
+	unsigned int i;
+	long rc;
+	unsigned int pinned = 0;
+
+	if (copy_from_user(&kdata, udata, sizeof(kdata)))
+		return -EFAULT;
+
+	/* If restriction is in place, check the domid matches */
+	if (data->domid != DOMID_INVALID && data->domid != kdata.dom)
+		return -EPERM;
+
+	if (kdata.num == 0)
+		return 0;
+
+	if (kdata.num > privcmd_dm_op_max_num)
+		return -E2BIG;
+
+	kbufs = kcalloc(kdata.num, sizeof(*kbufs), GFP_KERNEL);
+	if (!kbufs)
+		return -ENOMEM;
+
+	if (copy_from_user(kbufs, kdata.ubufs,
+			   sizeof(*kbufs) * kdata.num)) {
+		rc = -EFAULT;
+		goto out;
+	}
+
+	for (i = 0; i < kdata.num; i++) {
+		if (kbufs[i].size > privcmd_dm_op_buf_max_size) {
+			rc = -E2BIG;
+			goto out;
+		}
+
+		if (!access_ok(kbufs[i].uptr,
+			       kbufs[i].size)) {
+			rc = -EFAULT;
+			goto out;
+		}
+
+		nr_pages += DIV_ROUND_UP(
+			offset_in_page(kbufs[i].uptr) + kbufs[i].size,
+			PAGE_SIZE);
+	}
+
+	pages = kcalloc(nr_pages, sizeof(*pages), GFP_KERNEL);
+	if (!pages) {
+		rc = -ENOMEM;
+		goto out;
+	}
+
+	xbufs = kcalloc(kdata.num, sizeof(*xbufs), GFP_KERNEL);
+	if (!xbufs) {
+		rc = -ENOMEM;
+		goto out;
+	}
+
+	rc = lock_pages(kbufs, kdata.num, pages, nr_pages, &pinned);
+	if (rc < 0) {
+		nr_pages = pinned;
+		goto out;
+	}
+
+	for (i = 0; i < kdata.num; i++) {
+		set_xen_guest_handle(xbufs[i].h, kbufs[i].uptr);
+		xbufs[i].size = kbufs[i].size;
+	}
+
+	xen_preemptible_hcall_begin();
+	rc = HYPERVISOR_dm_op(kdata.dom, kdata.num, xbufs);
+	xen_preemptible_hcall_end();
+
+out:
+	unlock_pages(pages, nr_pages);
+	kfree(xbufs);
+	kfree(pages);
+	kfree(kbufs);
+
+	return rc;
+}
+
+static long privcmd_ioctl_restrict(struct file *file, void __user *udata)
+{
+	struct privcmd_data *data = file->private_data;
+	domid_t dom;
+
+	if (copy_from_user(&dom, udata, sizeof(dom)))
+		return -EFAULT;
+
+	/* Set restriction to the specified domain, or check it matches */
+	if (data->domid == DOMID_INVALID)
+		data->domid = dom;
+	else if (data->domid != dom)
+		return -EINVAL;
+
+	return 0;
+}
+
+static long privcmd_ioctl_mmap_resource(struct file *file,
+				struct privcmd_mmap_resource __user *udata)
+{
+	struct privcmd_data *data = file->private_data;
+	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *vma;
+	struct privcmd_mmap_resource kdata;
+	xen_pfn_t *pfns = NULL;
+	struct xen_mem_acquire_resource xdata = { };
+	int rc;
+
+	if (copy_from_user(&kdata, udata, sizeof(kdata)))
+		return -EFAULT;
+
+	/* If restriction is in place, check the domid matches */
+	if (data->domid != DOMID_INVALID && data->domid != kdata.dom)
+		return -EPERM;
+
+	/* Both fields must be set or unset */
+	if (!!kdata.addr != !!kdata.num)
+		return -EINVAL;
+
+	xdata.domid = kdata.dom;
+	xdata.type = kdata.type;
+	xdata.id = kdata.id;
+
+	if (!kdata.addr && !kdata.num) {
+		/* Query the size of the resource. */
+		rc = HYPERVISOR_memory_op(XENMEM_acquire_resource, &xdata);
+		if (rc)
+			return rc;
+		return __put_user(xdata.nr_frames, &udata->num);
+	}
+
+	mmap_write_lock(mm);
+
+	vma = find_vma(mm, kdata.addr);
+	if (!vma || vma->vm_ops != &privcmd_vm_ops) {
+		rc = -EINVAL;
+		goto out;
+	}
+
+	pfns = kcalloc(kdata.num, sizeof(*pfns), GFP_KERNEL);
+	if (!pfns) {
+		rc = -ENOMEM;
+		goto out;
+	}
+
+	if (IS_ENABLED(CONFIG_XEN_AUTO_XLATE) &&
+	    xen_feature(XENFEAT_auto_translated_physmap)) {
+		unsigned int nr = DIV_ROUND_UP(kdata.num, XEN_PFN_PER_PAGE);
+		struct page **pages;
+		unsigned int i;
+
+		rc = alloc_empty_pages(vma, nr);
+		if (rc < 0)
+			goto out;
+
+		pages = vma->vm_private_data;
+		for (i = 0; i < kdata.num; i++) {
+			xen_pfn_t pfn =
+				page_to_xen_pfn(pages[i / XEN_PFN_PER_PAGE]);
+
+			pfns[i] = pfn + (i % XEN_PFN_PER_PAGE);
+		}
+	} else
+		vma->vm_private_data = PRIV_VMA_LOCKED;
+
+	xdata.frame = kdata.idx;
+	xdata.nr_frames = kdata.num;
+	set_xen_guest_handle(xdata.frame_list, pfns);
+
+	xen_preemptible_hcall_begin();
+	rc = HYPERVISOR_memory_op(XENMEM_acquire_resource, &xdata);
+	xen_preemptible_hcall_end();
+
+	if (rc)
+		goto out;
+
+	if (IS_ENABLED(CONFIG_XEN_AUTO_XLATE) &&
+	    xen_feature(XENFEAT_auto_translated_physmap)) {
+		rc = xen_remap_vma_range(vma, kdata.addr, kdata.num << PAGE_SHIFT);
+	} else {
+		unsigned int domid =
+			(xdata.flags & XENMEM_rsrc_acq_caller_owned) ?
+			DOMID_SELF : kdata.dom;
+		int num;
+
+		num = xen_remap_domain_mfn_array(vma,
+						 kdata.addr & PAGE_MASK,
+						 pfns, kdata.num, (int *)pfns,
+						 vma->vm_page_prot,
+						 domid,
+						 vma->vm_private_data);
+		if (num < 0)
+			rc = num;
+		else if (num != kdata.num) {
+			unsigned int i;
+
+			for (i = 0; i < num; i++) {
+				rc = pfns[i];
+				if (rc < 0)
+					break;
+			}
+		} else
+			rc = 0;
+	}
+
+out:
+	mmap_write_unlock(mm);
+	kfree(pfns);
+
+	return rc;
 }
 
 static long privcmd_ioctl(struct file *file,
 			  unsigned int cmd, unsigned long data)
 {
-	int ret = -ENOSYS;
+	int ret = -ENOTTY;
 	void __user *udata = (void __user *) data;
 
 	switch (cmd) {
 	case IOCTL_PRIVCMD_HYPERCALL:
-		ret = privcmd_ioctl_hypercall(udata);
+		ret = privcmd_ioctl_hypercall(file, udata);
 		break;
 
 	case IOCTL_PRIVCMD_MMAP:
-		ret = privcmd_ioctl_mmap(udata);
+		ret = privcmd_ioctl_mmap(file, udata);
 		break;
 
 	case IOCTL_PRIVCMD_MMAPBATCH:
-		ret = privcmd_ioctl_mmap_batch(udata, 1);
+		ret = privcmd_ioctl_mmap_batch(file, udata, 1);
 		break;
 
 	case IOCTL_PRIVCMD_MMAPBATCH_V2:
-		ret = privcmd_ioctl_mmap_batch(udata, 2);
+		ret = privcmd_ioctl_mmap_batch(file, udata, 2);
+		break;
+
+	case IOCTL_PRIVCMD_DM_OP:
+		ret = privcmd_ioctl_dm_op(file, udata);
+		break;
+
+	case IOCTL_PRIVCMD_RESTRICT:
+		ret = privcmd_ioctl_restrict(file, udata);
+		break;
+
+	case IOCTL_PRIVCMD_MMAP_RESOURCE:
+		ret = privcmd_ioctl_mmap_resource(file, udata);
 		break;
 
 	default:
-		ret = -EINVAL;
 		break;
 	}
 
 	return ret;
+}
+
+static int privcmd_open(struct inode *ino, struct file *file)
+{
+	struct privcmd_data *data = kzalloc(sizeof(*data), GFP_KERNEL);
+
+	if (!data)
+		return -ENOMEM;
+
+	/* DOMID_INVALID implies no restriction */
+	data->domid = DOMID_INVALID;
+
+	file->private_data = data;
+	return 0;
+}
+
+static int privcmd_release(struct inode *ino, struct file *file)
+{
+	struct privcmd_data *data = file->private_data;
+
+	kfree(data);
+	return 0;
 }
 
 static void privcmd_close(struct vm_area_struct *vma)
@@ -591,18 +908,18 @@ static void privcmd_close(struct vm_area_struct *vma)
 
 	rc = xen_unmap_domain_gfn_range(vma, numgfns, pages);
 	if (rc == 0)
-		free_xenballooned_pages(numpgs, pages);
+		xen_free_unpopulated_pages(numpgs, pages);
 	else
 		pr_crit("unable to unmap MFN range: leaking %d pages. rc=%d\n",
 			numpgs, rc);
 	kfree(pages);
 }
 
-static int privcmd_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
+static vm_fault_t privcmd_fault(struct vm_fault *vmf)
 {
 	printk(KERN_DEBUG "privcmd_fault: vma=%p %lx-%lx, pgoff=%lx, uv=%p\n",
-	       vma, vma->vm_start, vma->vm_end,
-	       vmf->pgoff, vmf->virtual_address);
+	       vmf->vma, vmf->vma->vm_start, vmf->vma->vm_end,
+	       vmf->pgoff, (void *)vmf->address);
 
 	return VM_FAULT_SIGBUS;
 }
@@ -629,8 +946,7 @@ static int privcmd_mmap(struct file *file, struct vm_area_struct *vma)
  * on a per pfn/pte basis. Mapping calls that fail with ENOENT
  * can be then retried until success.
  */
-static int is_mapped_fn(pte_t *pte, struct page *pmd_page,
-	                unsigned long addr, void *data)
+static int is_mapped_fn(pte_t *pte, unsigned long addr, void *data)
 {
 	return pte_none(*pte) ? 0 : -EBUSY;
 }
@@ -647,6 +963,8 @@ static int privcmd_vma_range_is_mapped(
 const struct file_operations xen_privcmd_fops = {
 	.owner = THIS_MODULE,
 	.unlocked_ioctl = privcmd_ioctl,
+	.open = privcmd_open,
+	.release = privcmd_release,
 	.mmap = privcmd_mmap,
 };
 EXPORT_SYMBOL_GPL(xen_privcmd_fops);
@@ -669,12 +987,21 @@ static int __init privcmd_init(void)
 		pr_err("Could not register Xen privcmd device\n");
 		return err;
 	}
+
+	err = misc_register(&xen_privcmdbuf_dev);
+	if (err != 0) {
+		pr_err("Could not register Xen hypercall-buf device\n");
+		misc_deregister(&privcmd_dev);
+		return err;
+	}
+
 	return 0;
 }
 
 static void __exit privcmd_exit(void)
 {
 	misc_deregister(&privcmd_dev);
+	misc_deregister(&xen_privcmdbuf_dev);
 }
 
 module_init(privcmd_init);

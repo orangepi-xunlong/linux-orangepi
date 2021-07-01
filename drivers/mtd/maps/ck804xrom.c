@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ck804xrom.c
  *
@@ -190,7 +191,7 @@ static int __init ck804xrom_init_one(struct pci_dev *pdev,
 	/* FIXME handle registers 0x80 - 0x8C the bios region locks */
 
 	/* For write accesses caches are useless */
-	window->virt = ioremap_nocache(window->phys, window->size);
+	window->virt = ioremap(window->phys, window->size);
 	if (!window->virt) {
 		printk(KERN_ERR MOD_NAME ": ioremap(%08lx, %08lx) failed\n",
 			window->phys, window->size);
@@ -326,7 +327,7 @@ static void ck804xrom_remove_one(struct pci_dev *pdev)
 	ck804xrom_cleanup(window);
 }
 
-static struct pci_device_id ck804xrom_pci_tbl[] = {
+static const struct pci_device_id ck804xrom_pci_tbl[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_NVIDIA, 0x0051), .driver_data = DEV_CK804 },
 	{ PCI_DEVICE(PCI_VENDOR_ID_NVIDIA, 0x0360), .driver_data = DEV_MCP55 },
 	{ PCI_DEVICE(PCI_VENDOR_ID_NVIDIA, 0x0361), .driver_data = DEV_MCP55 },
@@ -353,7 +354,7 @@ static struct pci_driver ck804xrom_driver = {
 static int __init init_ck804xrom(void)
 {
 	struct pci_dev *pdev;
-	struct pci_device_id *id;
+	const struct pci_device_id *id;
 	int retVal;
 	pdev = NULL;
 

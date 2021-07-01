@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 / {
 	#address-cells = <1>;
 	#size-cells = <1>;
@@ -50,6 +51,12 @@
 		compatible = "simple-bus";
 		ranges;
 
+		clkctl: clock-controller@10000004 {
+			compatible = "brcm,bcm6328-clocks";
+			reg = <0x10000004 0x4>;
+			#clock-cells = <1>;
+		};
+
 		periph_intc: interrupt-controller@10000020 {
 			compatible = "brcm,bcm6345-l1-intc";
 			reg = <0x10000020 0x10>,
@@ -68,6 +75,7 @@
 			interrupt-parent = <&periph_intc>;
 			interrupts = <28>;
 			clocks = <&periph_clk>;
+			clock-names = "refclk";
 			status = "disabled";
 		};
 
@@ -77,6 +85,7 @@
 			interrupt-parent = <&periph_intc>;
 			interrupts = <39>;
 			clocks = <&periph_clk>;
+			clock-names = "refclk";
 			status = "disabled";
 		};
 
@@ -99,6 +108,12 @@
 			compatible = "brcm,bcm6328-leds";
 			reg = <0x10000800 0x24>;
 			status = "disabled";
+		};
+
+		periph_pwr: power-controller@10001848 {
+			compatible = "brcm,bcm6328-power-controller";
+			reg = <0x10001848 0x4>;
+			#power-domain-cells = <1>;
 		};
 
 		ehci: usb@10002500 {

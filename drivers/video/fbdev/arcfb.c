@@ -419,6 +419,8 @@ static int arcfb_ioctl(struct fb_info *info,
 			schedule();
 			finish_wait(&arcfb_waitq, &wait);
 		}
+		fallthrough;
+
 		case FBIO_GETCONTROL2:
 		{
 			unsigned char ctl2;
@@ -489,7 +491,7 @@ static ssize_t arcfb_write(struct fb_info *info, const char __user *buf,
 	return err;
 }
 
-static struct fb_ops arcfb_ops = {
+static const struct fb_ops arcfb_ops = {
 	.owner		= THIS_MODULE,
 	.fb_open	= arcfb_open,
 	.fb_read        = fb_sys_read,
@@ -542,10 +544,6 @@ static int arcfb_probe(struct platform_device *dev)
 	par->cslut[1] = 0x06;
 	info->flags = FBINFO_FLAG_DEFAULT;
 	spin_lock_init(&par->lock);
-	retval = register_framebuffer(info);
-	if (retval < 0)
-		goto err1;
-	platform_set_drvdata(dev, info);
 	if (irq) {
 		par->irq = irq;
 		if (request_irq(par->irq, &arcfb_interrupt, IRQF_SHARED,
@@ -556,6 +554,10 @@ static int arcfb_probe(struct platform_device *dev)
 			goto err1;
 		}
 	}
+	retval = register_framebuffer(info);
+	if (retval < 0)
+		goto err1;
+	platform_set_drvdata(dev, info);
 	fb_info(info, "Arc frame buffer device, using %dK of video memory\n",
 		videomemorysize >> 10);
 
@@ -591,6 +593,8 @@ static int arcfb_remove(struct platform_device *dev)
 
 	if (info) {
 		unregister_framebuffer(info);
+		if (irq)
+			free_irq(((struct arcfb_par *)(info->par))->irq, info);
 		vfree((void __force *)info->screen_base);
 		framebuffer_release(info);
 	}
@@ -645,17 +649,17 @@ module_param(nosplash, uint, 0);
 MODULE_PARM_DESC(nosplash, "Disable doing the splash screen");
 module_param(arcfb_enable, uint, 0);
 MODULE_PARM_DESC(arcfb_enable, "Enable communication with Arc board");
-module_param(dio_addr, ulong, 0);
+module_param_hw(dio_addr, ulong, ioport, 0);
 MODULE_PARM_DESC(dio_addr, "IO address for data, eg: 0x480");
-module_param(cio_addr, ulong, 0);
+module_param_hw(cio_addr, ulong, ioport, 0);
 MODULE_PARM_DESC(cio_addr, "IO address for control, eg: 0x400");
-module_param(c2io_addr, ulong, 0);
+module_param_hw(c2io_addr, ulong, ioport, 0);
 MODULE_PARM_DESC(c2io_addr, "IO address for secondary control, eg: 0x408");
 module_param(splashval, ulong, 0);
 MODULE_PARM_DESC(splashval, "Splash pattern: 0xFF is black, 0x00 is green");
 module_param(tuhold, ulong, 0);
 MODULE_PARM_DESC(tuhold, "Time to hold between strobing data to Arc board");
-module_param(irq, uint, 0);
+module_param_hw(irq, uint, irq, 0);
 MODULE_PARM_DESC(irq, "IRQ for the Arc board");
 
 module_init(arcfb_init);

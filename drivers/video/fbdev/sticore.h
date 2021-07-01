@@ -1,13 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef STICORE_H
 #define STICORE_H
 
 /* generic STI structures & functions */
-
-#if 0
-#define DPRINTK(x)	printk x
-#else
-#define DPRINTK(x) 
-#endif
 
 #define MAX_STI_ROMS 4		/* max no. of ROMs which this driver handles */
 
@@ -245,8 +240,12 @@ struct sti_rom_font {
 /* sticore internal font handling */
 
 struct sti_cooked_font {
-        struct sti_rom_font *raw;
+	struct sti_rom_font *raw;	/* native ptr for STI functions */
+	void *raw_ptr;			/* kmalloc'ed font data */
 	struct sti_cooked_font *next_font;
+	int height, width;
+	int refcount;
+	u32 crc;
 };
 
 struct sti_cooked_rom {
@@ -340,9 +339,6 @@ struct sti_all_data {
 struct sti_struct {
 	spinlock_t lock;
 		
-	/* the following fields needs to be filled in by the word/byte routines */
-	int font_width;	
-	int font_height;
 	/* char **mon_strings; */
 	int sti_mem_request;
 	u32 graphics_id[2];
@@ -361,6 +357,7 @@ struct sti_struct {
 
 	struct sti_glob_cfg *glob_cfg;	/* points into sti_all_data */
 
+	int wordmode;
 	struct sti_cooked_font *font;	/* ptr to selected font (cooked) */
 
 	struct pci_dev *pd;
@@ -379,6 +376,7 @@ struct sti_struct {
 /* sticore interface functions */
 
 struct sti_struct *sti_get_rom(unsigned int index); /* 0: default sti */
+void sti_font_convert_bytemode(struct sti_struct *sti, struct sti_cooked_font *f);
 
 
 /* sticore main function to call STI firmware */
@@ -390,12 +388,14 @@ int sti_call(const struct sti_struct *sti, unsigned long func,
 
 /* functions to call the STI ROM directly */
 
-void sti_putc(struct sti_struct *sti, int c, int y, int x);
+void sti_putc(struct sti_struct *sti, int c, int y, int x,
+		struct sti_cooked_font *font);
 void sti_set(struct sti_struct *sti, int src_y, int src_x,
-	     int height, int width, u8 color);
+		int height, int width, u8 color);
 void sti_clear(struct sti_struct *sti, int src_y, int src_x,
-	       int height, int width, int c);
+		int height, int width, int c, struct sti_cooked_font *font);
 void sti_bmove(struct sti_struct *sti, int src_y, int src_x,
-	       int dst_y, int dst_x, int height, int width);
+		int dst_y, int dst_x, int height, int width,
+		struct sti_cooked_font *font);
 
 #endif	/* STICORE_H */

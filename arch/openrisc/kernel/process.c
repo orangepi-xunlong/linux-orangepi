@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * OpenRISC process.c
  *
@@ -9,11 +10,6 @@
  * Copyright (C) 2003 Matjaz Breskvar <phoenix@bsemi.com>
  * Copyright (C) 2010-2011 Jonas Bonn <jonas@southpole.se>
  *
- *      This program is free software; you can redistribute it and/or
- *      modify it under the terms of the GNU General Public License
- *      as published by the Free Software Foundation; either version
- *      2 of the License, or (at your option) any later version.
- *
  * This file handles the architecture-dependent parts of process handling...
  */
 
@@ -22,8 +18,11 @@
 
 #include <linux/errno.h>
 #include <linux/sched.h>
+#include <linux/sched/debug.h>
+#include <linux/sched/task.h>
+#include <linux/sched/task_stack.h>
 #include <linux/kernel.h>
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/mm.h>
 #include <linux/stddef.h>
 #include <linux/unistd.h>
@@ -36,8 +35,7 @@
 #include <linux/mqueue.h>
 #include <linux/fs.h>
 
-#include <asm/uaccess.h>
-#include <asm/pgtable.h>
+#include <linux/uaccess.h>
 #include <asm/io.h>
 #include <asm/processor.h>
 #include <asm/spr_defs.h>
@@ -75,7 +73,19 @@ void machine_power_off(void)
 	__asm__("l.nop 1");
 }
 
+/*
+ * Send the doze signal to the cpu if available.
+ * Make sure, that all interrupts are enabled
+ */
+void arch_cpu_idle(void)
+{
+	raw_local_irq_enable();
+	if (mfspr(SPR_UPR) & SPR_UPR_PMP)
+		mtspr(SPR_PMR, mfspr(SPR_PMR) | SPR_PMR_DME);
+}
+
 void (*pm_power_off) (void) = machine_power_off;
+EXPORT_SYMBOL(pm_power_off);
 
 /*
  * When a process does an "exec", machine state like FPU and debug
@@ -95,11 +105,6 @@ void show_regs(struct pt_regs *regs)
 	show_registers(regs);
 }
 
-unsigned long thread_saved_pc(struct task_struct *t)
-{
-	return (unsigned long)user_regs(t->stack)->pc;
-}
-
 void release_thread(struct task_struct *dead_task)
 {
 }
@@ -116,7 +121,7 @@ extern asmlinkage void ret_from_fork(void);
  * @usp: user stack pointer or fn for kernel thread
  * @arg: arg to fn for kernel thread; always NULL for userspace thread
  * @p: the newly created task
- * @regs: CPU context to copy for userspace thread; always NULL for kthread
+ * @tls: the Thread Local Storage pointer for the new process
  *
  * At the top of a newly initialized kernel stack are two stacked pt_reg
  * structures.  The first (topmost) is the userspace context of the thread.
@@ -142,8 +147,8 @@ extern asmlinkage void ret_from_fork(void);
  */
 
 int
-copy_thread(unsigned long clone_flags, unsigned long usp,
-	    unsigned long arg, struct task_struct *p)
+copy_thread(unsigned long clone_flags, unsigned long usp, unsigned long arg,
+	    struct task_struct *p, unsigned long tls)
 {
 	struct pt_regs *userregs;
 	struct pt_regs *kregs;
@@ -151,8 +156,6 @@ copy_thread(unsigned long clone_flags, unsigned long usp,
 	unsigned long top_of_kernel_stack;
 
 	top_of_kernel_stack = sp;
-
-	p->set_child_tid = p->clear_child_tid = NULL;
 
 	/* Locate userspace context on stack... */
 	sp -= STACK_FRAME_OVERHEAD;	/* redzone */
@@ -173,6 +176,13 @@ copy_thread(unsigned long clone_flags, unsigned long usp,
 
 		if (usp)
 			userregs->sp = usp;
+
+		/*
+		 * For CLONE_SETTLS set "tp" (r10) to the TLS pointer.
+		 */
+		if (clone_flags & CLONE_SETTLS)
+			userregs->gpr[10] = tls;
+
 		userregs->gpr[11] = 0;	/* Result from fork() */
 
 		kregs->gpr[20] = 0;	/* Userspace thread */
@@ -204,15 +214,9 @@ void start_thread(struct pt_regs *regs, unsigned long pc, unsigned long sp)
 	regs->sp = sp;
 }
 
-/* Fill in the fpu structure for a core dump.  */
-int dump_fpu(struct pt_regs *regs, elf_fpregset_t * fpu)
-{
-	/* TODO */
-	return 0;
-}
-
 extern struct thread_info *_switch(struct thread_info *old_ti,
 				   struct thread_info *new_ti);
+extern int lwa_flag;
 
 struct task_struct *__switch_to(struct task_struct *old,
 				struct task_struct *new)
@@ -229,6 +233,8 @@ struct task_struct *__switch_to(struct task_struct *old,
 	 */
 	new_ti = new->stack;
 	old_ti = old->stack;
+
+	lwa_flag = 0;
 
 	current_thread_info_set[smp_processor_id()] = new_ti;
 	last = (_switch(old_ti, new_ti))->task;

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef MOXA_H_FILE
 #define MOXA_H_FILE
 
@@ -137,7 +138,7 @@
 #define IntrQuit	0x40	/* received QUIT code             */
 #define IntrEOF 	0x80	/* received EOF code              */
 
-#define IntrRxTrigger 	0x100	/* rx data count reach tigger value */
+#define IntrRxTrigger 	0x100	/* rx data count reach trigger value */
 #define IntrTxTrigger 	0x200	/* tx data count below trigger value */
 
 #define Magic_no	(Config_base + 0)
@@ -300,5 +301,7 @@
 #define	MX_PARNONE	0x00
 #define	MX_PAREVEN	0x40
 #define	MX_PARODD	0xC0
+#define	MX_PARMARK	0xA0
+#define	MX_PARSPACE	0x20
 
 #endif

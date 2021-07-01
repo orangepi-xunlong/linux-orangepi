@@ -101,7 +101,7 @@ static int rivafb_blank(int blank, struct fb_info *info);
  *
  * ------------------------------------------------------------------------- */
 
-static struct pci_device_id rivafb_pci_tbl[] = {
+static const struct pci_device_id rivafb_pci_tbl[] = {
 	{ PCI_VENDOR_ID_NVIDIA_SGS, PCI_DEVICE_ID_NVIDIA_SGS_RIVA128,
 	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
 	{ PCI_VENDOR_ID_NVIDIA, PCI_DEVICE_ID_NVIDIA_TNT,
@@ -202,11 +202,7 @@ static int flatpanel = -1; /* Autodetect later */
 static int forceCRTC = -1;
 static bool noaccel  = 0;
 static bool nomtrr = 0;
-#ifdef CONFIG_PMAC_BACKLIGHT
-static int backlight = 1;
-#else
-static int backlight = 0;
-#endif
+static int backlight = IS_BUILTIN(CONFIG_PMAC_BACKLIGHT);
 
 static char *mode_option = NULL;
 static bool strictmode       = 0;
@@ -780,7 +776,7 @@ static int riva_load_video_mode(struct fb_info *info)
 	else
 		newmode.misc_output |= 0x80;	
 
-	rc = CalcStateExt(&par->riva, &newmode.ext, bpp, width,
+	rc = CalcStateExt(&par->riva, &newmode.ext, par->pdev, bpp, width,
 			  hDisplaySize, height, dotClock);
 	if (rc)
 		goto out;
@@ -1097,7 +1093,7 @@ static int rivafb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 		break;
 	case 9 ... 15:
 		var->green.length = 5;
-		/* fall through */
+		fallthrough;
 	case 16:
 		var->bits_per_pixel = 16;
 		/* The Riva128 supports RGB555 only */
@@ -1615,7 +1611,7 @@ static int rivafb_cursor(struct fb_info *info, struct fb_cursor *cursor)
 		u8 *msk = (u8 *) cursor->mask;
 		u8 *src;
 		
-		src = kmalloc(s_pitch * cursor->image.height, GFP_ATOMIC);
+		src = kmalloc_array(s_pitch, cursor->image.height, GFP_ATOMIC);
 
 		if (src) {
 			switch (cursor->rop) {
@@ -1673,7 +1669,7 @@ static int rivafb_sync(struct fb_info *info)
  * ------------------------------------------------------------------------- */
 
 /* kernel interface */
-static struct fb_ops riva_fb_ops = {
+static const struct fb_ops riva_fb_ops = {
 	.owner 		= THIS_MODULE,
 	.fb_open	= rivafb_open,
 	.fb_release	= rivafb_release,
@@ -1902,7 +1898,6 @@ static int rivafb_probe(struct pci_dev *pd, const struct pci_device_id *ent)
 
 	info = framebuffer_alloc(sizeof(struct riva_par), &pd->dev);
 	if (!info) {
-		printk (KERN_ERR PFX "could not allocate memory\n");
 		ret = -ENOMEM;
 		goto err_ret;
 	}

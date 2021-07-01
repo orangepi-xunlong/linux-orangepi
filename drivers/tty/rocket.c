@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
 /*
  * RocketPort device driver for Linux
  *
  * Written by Theodore Ts'o, 1995, 1996, 1997, 1998, 1999, 2000.
  * 
  * Copyright (C) 1995, 1996, 1997, 1998, 1999, 2000, 2003 by Comtrol, Inc.
- * 
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of the
- * License, or (at your option) any later version.
- * 
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- * 
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 /*
@@ -99,7 +86,7 @@
 
 /****** RocketPort Local Variables ******/
 
-static void rp_do_poll(unsigned long dummy);
+static void rp_do_poll(struct timer_list *unused);
 
 static struct tty_driver *rocket_driver;
 
@@ -111,7 +98,7 @@ static struct r_port *rp_table[MAX_RP_PORTS];	       /*  The main repository of 
 static unsigned int xmit_flags[NUM_BOARDS];	       /*  Bit significant, indicates port had data to transmit. */
 						       /*  eg.  Bit 0 indicates port 0 has xmit data, ...        */
 static atomic_t rp_num_ports_open;	               /*  Number of serial ports open                           */
-static DEFINE_TIMER(rocket_timer, rp_do_poll, 0, 0);
+static DEFINE_TIMER(rocket_timer, rp_do_poll);
 
 static unsigned long board1;	                       /* ISA addresses, retrieved from rocketport.conf          */
 static unsigned long board2;
@@ -250,15 +237,15 @@ static int sReadAiopNumChan(WordIO_t io);
 
 MODULE_AUTHOR("Theodore Ts'o");
 MODULE_DESCRIPTION("Comtrol RocketPort driver");
-module_param(board1, ulong, 0);
+module_param_hw(board1, ulong, ioport, 0);
 MODULE_PARM_DESC(board1, "I/O port for (ISA) board #1");
-module_param(board2, ulong, 0);
+module_param_hw(board2, ulong, ioport, 0);
 MODULE_PARM_DESC(board2, "I/O port for (ISA) board #2");
-module_param(board3, ulong, 0);
+module_param_hw(board3, ulong, ioport, 0);
 MODULE_PARM_DESC(board3, "I/O port for (ISA) board #3");
-module_param(board4, ulong, 0);
+module_param_hw(board4, ulong, ioport, 0);
 MODULE_PARM_DESC(board4, "I/O port for (ISA) board #4");
-module_param(controller, ulong, 0);
+module_param_hw(controller, ulong, ioport, 0);
 MODULE_PARM_DESC(controller, "I/O port for (ISA) rocketport controller");
 module_param(support_low_speed, bool, 0);
 MODULE_PARM_DESC(support_low_speed, "1 means support 50 baud, 0 means support 460400 baud");
@@ -279,7 +266,7 @@ MODULE_PARM_DESC(pc104_3, "set interface types for ISA(PC104) board #3 (e.g. pc1
 module_param_array(pc104_4, ulong, NULL, 0);
 MODULE_PARM_DESC(pc104_4, "set interface types for ISA(PC104) board #4 (e.g. pc104_4=232,232,485,485,...");
 
-static int rp_init(void);
+static int __init rp_init(void);
 static void rp_cleanup_module(void);
 
 module_init(rp_init);
@@ -538,7 +525,7 @@ static void rp_handle_port(struct r_port *info)
 /*
  *  The top level polling routine.  Repeats every 1/100 HZ (10ms).
  */
-static void rp_do_poll(unsigned long dummy)
+static void rp_do_poll(struct timer_list *unused)
 {
 	CONTROLLER_t *ctlp;
 	int ctrl, aiop, ch, line;
@@ -645,18 +632,21 @@ init_r_port(int board, int aiop, int chan, struct pci_dev *pci_dev)
 	tty_port_init(&info->port);
 	info->port.ops = &rocket_port_ops;
 	info->flags &= ~ROCKET_MODE_MASK;
-	switch (pc104[board][line]) {
-	case 422:
-		info->flags |= ROCKET_MODE_RS422;
-		break;
-	case 485:
-		info->flags |= ROCKET_MODE_RS485;
-		break;
-	case 232:
-	default:
+	if (board < ARRAY_SIZE(pc104) && line < ARRAY_SIZE(pc104_1))
+		switch (pc104[board][line]) {
+		case 422:
+			info->flags |= ROCKET_MODE_RS422;
+			break;
+		case 485:
+			info->flags |= ROCKET_MODE_RS485;
+			break;
+		case 232:
+		default:
+			info->flags |= ROCKET_MODE_RS232;
+			break;
+		}
+	else
 		info->flags |= ROCKET_MODE_RS232;
-		break;
-	}
 
 	info->intmask = RXF_TRIG | TXFIFO_MT | SRC_INT | DELTA_CD | DELTA_CTS | DELTA_DSR;
 	if (sInitChan(ctlp, &info->channel, aiop, chan) == 0) {
@@ -947,18 +937,6 @@ static int rp_open(struct tty_struct *tty, struct file *filp)
 
 		tty_port_set_initialized(&info->port, 1);
 
-		/*
-		 * Set up the tty->alt_speed kludge
-		 */
-		if ((info->flags & ROCKET_SPD_MASK) == ROCKET_SPD_HI)
-			tty->alt_speed = 57600;
-		if ((info->flags & ROCKET_SPD_MASK) == ROCKET_SPD_VHI)
-			tty->alt_speed = 115200;
-		if ((info->flags & ROCKET_SPD_MASK) == ROCKET_SPD_SHI)
-			tty->alt_speed = 230400;
-		if ((info->flags & ROCKET_SPD_MASK) == ROCKET_SPD_WARP)
-			tty->alt_speed = 460800;
-
 		configure_r_port(tty, info, NULL);
 		if (C_BAUD(tty)) {
 			sSetDTR(cp);
@@ -1189,8 +1167,6 @@ static int get_config(struct r_port *info, struct rocket_config __user *retinfo)
 {
 	struct rocket_config tmp;
 
-	if (!retinfo)
-		return -EFAULT;
 	memset(&tmp, 0, sizeof (tmp));
 	mutex_lock(&info->port.mutex);
 	tmp.line = info->line;
@@ -1221,23 +1197,20 @@ static int set_config(struct tty_struct *tty, struct r_port *info,
 			return -EPERM;
 		}
 		info->flags = ((info->flags & ~ROCKET_USR_MASK) | (new_serial.flags & ROCKET_USR_MASK));
-		configure_r_port(tty, info, NULL);
 		mutex_unlock(&info->port.mutex);
 		return 0;
+	}
+
+	if ((new_serial.flags ^ info->flags) & ROCKET_SPD_MASK) {
+		/* warn about deprecation, unless clearing */
+		if (new_serial.flags & ROCKET_SPD_MASK)
+			dev_warn_ratelimited(tty->dev, "use of SPD flags is deprecated\n");
 	}
 
 	info->flags = ((info->flags & ~ROCKET_FLAGS) | (new_serial.flags & ROCKET_FLAGS));
 	info->port.close_delay = new_serial.close_delay;
 	info->port.closing_wait = new_serial.closing_wait;
 
-	if ((info->flags & ROCKET_SPD_MASK) == ROCKET_SPD_HI)
-		tty->alt_speed = 57600;
-	if ((info->flags & ROCKET_SPD_MASK) == ROCKET_SPD_VHI)
-		tty->alt_speed = 115200;
-	if ((info->flags & ROCKET_SPD_MASK) == ROCKET_SPD_SHI)
-		tty->alt_speed = 230400;
-	if ((info->flags & ROCKET_SPD_MASK) == ROCKET_SPD_WARP)
-		tty->alt_speed = 460800;
 	mutex_unlock(&info->port.mutex);
 
 	configure_r_port(tty, info, NULL);
@@ -1252,24 +1225,28 @@ static int set_config(struct tty_struct *tty, struct r_port *info,
  */
 static int get_ports(struct r_port *info, struct rocket_ports __user *retports)
 {
-	struct rocket_ports tmp;
-	int board;
+	struct rocket_ports *tmp;
+	int board, ret = 0;
 
-	if (!retports)
-		return -EFAULT;
-	memset(&tmp, 0, sizeof (tmp));
-	tmp.tty_major = rocket_driver->major;
+	tmp = kzalloc(sizeof(*tmp), GFP_KERNEL);
+	if (!tmp)
+		return -ENOMEM;
+
+	tmp->tty_major = rocket_driver->major;
 
 	for (board = 0; board < 4; board++) {
-		tmp.rocketModel[board].model = rocketModel[board].model;
-		strcpy(tmp.rocketModel[board].modelString, rocketModel[board].modelString);
-		tmp.rocketModel[board].numPorts = rocketModel[board].numPorts;
-		tmp.rocketModel[board].loadrm2 = rocketModel[board].loadrm2;
-		tmp.rocketModel[board].startingPortNumber = rocketModel[board].startingPortNumber;
+		tmp->rocketModel[board].model = rocketModel[board].model;
+		strcpy(tmp->rocketModel[board].modelString,
+		       rocketModel[board].modelString);
+		tmp->rocketModel[board].numPorts = rocketModel[board].numPorts;
+		tmp->rocketModel[board].loadrm2 = rocketModel[board].loadrm2;
+		tmp->rocketModel[board].startingPortNumber =
+			rocketModel[board].startingPortNumber;
 	}
-	if (copy_to_user(retports, &tmp, sizeof (*retports)))
-		return -EFAULT;
-	return 0;
+	if (copy_to_user(retports, tmp, sizeof(*retports)))
+		ret = -EFAULT;
+	kfree(tmp);
+	return ret;
 }
 
 static int reset_rm2(struct r_port *info, void __user *arg)
@@ -1315,23 +1292,29 @@ static int rp_ioctl(struct tty_struct *tty,
 		return -ENXIO;
 
 	switch (cmd) {
-	case RCKP_GET_STRUCT:
-		if (copy_to_user(argp, info, sizeof (struct r_port)))
-			ret = -EFAULT;
-		break;
 	case RCKP_GET_CONFIG:
+		dev_warn_ratelimited(tty->dev,
+					"RCKP_GET_CONFIG option is deprecated\n");
 		ret = get_config(info, argp);
 		break;
 	case RCKP_SET_CONFIG:
+		dev_warn_ratelimited(tty->dev,
+					"RCKP_SET_CONFIG option is deprecated\n");
 		ret = set_config(tty, info, argp);
 		break;
 	case RCKP_GET_PORTS:
+		dev_warn_ratelimited(tty->dev,
+					"RCKP_GET_PORTS option is deprecated\n");
 		ret = get_ports(info, argp);
 		break;
 	case RCKP_RESET_RM2:
+		dev_warn_ratelimited(tty->dev,
+					"RCKP_RESET_RM2 option is deprecated\n");
 		ret = reset_rm2(info, argp);
 		break;
 	case RCKP_GET_VERSION:
+		dev_warn_ratelimited(tty->dev,
+					"RCKP_GET_VERSION option is deprecated\n");
 		ret = get_version(info, argp);
 		break;
 	default:
@@ -1902,7 +1885,7 @@ static int sPCIInitController(CONTROLLER_T * CtlP, int CtlNum,
  */
 static __init int register_PCI(int i, struct pci_dev *dev)
 {
-	int num_aiops, aiop, max_num_aiops, num_chan, chan;
+	int num_aiops, aiop, max_num_aiops, chan;
 	unsigned int aiopio[MAX_AIOPS_PER_BOARD];
 	CONTROLLER_t *ctlp;
 
@@ -1913,7 +1896,7 @@ static __init int register_PCI(int i, struct pci_dev *dev)
 	ByteIO_t UPCIRingInd = 0;
 
 	if (!dev || !pci_match_id(rocket_pci_ids, dev) ||
-	    pci_enable_device(dev))
+	    pci_enable_device(dev) || i >= NUM_BOARDS)
 		return 0;
 
 	rcktpt_io_addr[i] = pci_resource_start(dev, 0);
@@ -2174,8 +2157,7 @@ static __init int register_PCI(int i, struct pci_dev *dev)
 	/*  Reset the AIOPIC, init the serial ports */
 	for (aiop = 0; aiop < num_aiops; aiop++) {
 		sResetAiopByNum(ctlp, aiop);
-		num_chan = ports_per_aiop;
-		for (chan = 0; chan < num_chan; chan++)
+		for (chan = 0; chan < ports_per_aiop; chan++)
 			init_r_port(i, aiop, chan, dev);
 	}
 
@@ -2183,11 +2165,10 @@ static __init int register_PCI(int i, struct pci_dev *dev)
 	if ((rcktpt_type[i] == ROCKET_TYPE_MODEM) ||
 	    (rcktpt_type[i] == ROCKET_TYPE_MODEMII) ||
 	    (rcktpt_type[i] == ROCKET_TYPE_MODEMIII)) {
-		num_chan = ports_per_aiop;
-		for (chan = 0; chan < num_chan; chan++)
+		for (chan = 0; chan < ports_per_aiop; chan++)
 			sPCIModemReset(ctlp, chan, 1);
 		msleep(500);
-		for (chan = 0; chan < num_chan; chan++)
+		for (chan = 0; chan < ports_per_aiop; chan++)
 			sPCIModemReset(ctlp, chan, 0);
 		msleep(500);
 		rmSpeakerReset(ctlp, rocketModel[i].model);

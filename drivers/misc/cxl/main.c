@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2014 IBM Corp.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #include <linux/spinlock.h>
@@ -19,7 +15,10 @@
 #include <linux/slab.h>
 #include <linux/idr.h>
 #include <linux/pci.h>
+#include <linux/sched/task.h>
+
 #include <asm/cputable.h>
+#include <asm/mmu.h>
 #include <misc/cxl-base.h>
 
 #include "cxl.h"
@@ -57,16 +56,10 @@ int cxl_afu_slbia(struct cxl_afu *afu)
 
 static inline void _cxl_slbia(struct cxl_context *ctx, struct mm_struct *mm)
 {
-	struct task_struct *task;
 	unsigned long flags;
-	if (!(task = get_pid_task(ctx->pid, PIDTYPE_PID))) {
-		pr_devel("%s unable to get task %i\n",
-			 __func__, pid_nr(ctx->pid));
-		return;
-	}
 
-	if (task->mm != mm)
-		goto out_put;
+	if (ctx->mm != mm)
+		return;
 
 	pr_devel("%s matched mm - card: %i afu: %i pe: %i\n", __func__,
 		 ctx->afu->adapter->adapter_num, ctx->afu->slice, ctx->pe);
@@ -77,8 +70,6 @@ static inline void _cxl_slbia(struct cxl_context *ctx, struct mm_struct *mm)
 	spin_unlock_irqrestore(&ctx->sste_lock, flags);
 	mb();
 	cxl_afu_slbia(ctx->afu);
-out_put:
-	put_task_struct(task);
 }
 
 static inline void cxl_slbia_core(struct mm_struct *mm)
@@ -110,11 +101,6 @@ static inline void cxl_slbia_core(struct mm_struct *mm)
 
 static struct cxl_calls cxl_calls = {
 	.cxl_slbia = cxl_slbia_core,
-	.cxl_pci_associate_default_context = _cxl_pci_associate_default_context,
-	.cxl_pci_disable_device = _cxl_pci_disable_device,
-	.cxl_next_msi_hwirq = _cxl_next_msi_hwirq,
-	.cxl_cx4_setup_msi_irqs = _cxl_cx4_setup_msi_irqs,
-	.cxl_cx4_teardown_msi_irqs = _cxl_cx4_teardown_msi_irqs,
 	.owner = THIS_MODULE,
 };
 
@@ -293,7 +279,7 @@ int cxl_adapter_context_get(struct cxl *adapter)
 	int rc;
 
 	rc = atomic_inc_unless_negative(&adapter->contexts_num);
-	return rc >= 0 ? 0 : -EBUSY;
+	return rc ? 0 : -EBUSY;
 }
 
 void cxl_adapter_context_put(struct cxl *adapter)
@@ -330,13 +316,23 @@ static int __init init_cxl(void)
 {
 	int rc = 0;
 
+	if (!tlbie_capable)
+		return -EINVAL;
+
 	if ((rc = cxl_file_init()))
 		return rc;
 
 	cxl_debugfs_init();
 
-	if ((rc = register_cxl_calls(&cxl_calls)))
-		goto err;
+	/*
+	 * we don't register the callback on P9. slb callack is only
+	 * used for the PSL8 MMU and CX4.
+	 */
+	if (cxl_is_power8()) {
+		rc = register_cxl_calls(&cxl_calls);
+		if (rc)
+			goto err;
+	}
 
 	if (cpu_has_feature(CPU_FTR_HVMODE)) {
 		cxl_ops = &cxl_native_ops;
@@ -353,7 +349,8 @@ static int __init init_cxl(void)
 
 	return 0;
 err1:
-	unregister_cxl_calls(&cxl_calls);
+	if (cxl_is_power8())
+		unregister_cxl_calls(&cxl_calls);
 err:
 	cxl_debugfs_exit();
 	cxl_file_exit();
@@ -372,7 +369,8 @@ static void exit_cxl(void)
 
 	cxl_debugfs_exit();
 	cxl_file_exit();
-	unregister_cxl_calls(&cxl_calls);
+	if (cxl_is_power8())
+		unregister_cxl_calls(&cxl_calls);
 	idr_destroy(&cxl_adapter_idr);
 }
 

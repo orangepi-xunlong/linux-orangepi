@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	linux/drivers/net/wireless/libertas/if_spi.c
  *
@@ -10,11 +11,6 @@
  *	Colin McCabe <colin@cozybit.com>
  *
  *	Inspired by if_sdio.c, Copyright 2007-2008 Pierre Ossman
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -39,7 +35,7 @@
 struct if_spi_packet {
 	struct list_head		list;
 	u16				blen;
-	u8				buffer[0] __attribute__((aligned(4)));
+	u8				buffer[] __aligned(4);
 };
 
 struct if_spi_card {
@@ -239,8 +235,9 @@ static int spu_read(struct if_spi_card *card, u16 reg, u8 *buf, int len)
 		spi_message_add_tail(&dummy_trans, &m);
 	} else {
 		/* Busy-wait while the SPU fills the FIFO */
-		reg_trans.delay_usecs =
+		reg_trans.delay.value =
 			DIV_ROUND_UP((100 + (delay * 10)), 1000);
+		reg_trans.delay.unit = SPI_DELAY_UNIT_USECS;
 	}
 
 	/* read in data */
@@ -466,8 +463,6 @@ static int if_spi_prog_helper_firmware(struct if_spi_card *card,
 	const u8 *fw;
 	u8 temp[HELPER_FW_LOAD_CHUNK_SZ];
 
-	lbs_deb_enter(LBS_DEB_SPI);
-
 	err = spu_set_interrupt_mode(card, 1, 0);
 	if (err)
 		goto out;
@@ -533,7 +528,7 @@ static int if_spi_prog_helper_firmware(struct if_spi_card *card,
 out:
 	if (err)
 		pr_err("failed to load helper firmware (err=%d)\n", err);
-	lbs_deb_leave_args(LBS_DEB_SPI, "err %d", err);
+
 	return err;
 }
 
@@ -587,8 +582,6 @@ static int if_spi_prog_main_firmware(struct if_spi_card *card,
 	int bytes, crc_err = 0, err = 0;
 	const u8 *fw;
 	u16 num_crc_errs;
-
-	lbs_deb_enter(LBS_DEB_SPI);
 
 	err = spu_set_interrupt_mode(card, 1, 0);
 	if (err)
@@ -666,7 +659,7 @@ static int if_spi_prog_main_firmware(struct if_spi_card *card,
 out:
 	if (err)
 		pr_err("failed to load firmware (err=%d)\n", err);
-	lbs_deb_leave_args(LBS_DEB_SPI, "err %d", err);
+
 	return err;
 }
 
@@ -698,8 +691,6 @@ static int if_spi_c2h_cmd(struct if_spi_card *card)
 	 * ALIGN(len, 4) > IF_SPI_CMD_BUF_SIZE
 	 */
 	BUILD_BUG_ON(IF_SPI_CMD_BUF_SIZE % 4 != 0);
-
-	lbs_deb_enter(LBS_DEB_SPI);
 
 	/* How many bytes are there to read? */
 	err = spu_read_u16(card, IF_SPI_SCRATCH_2_REG, &len);
@@ -735,7 +726,7 @@ static int if_spi_c2h_cmd(struct if_spi_card *card)
 out:
 	if (err)
 		netdev_err(priv->dev, "%s: err=%d\n", __func__, err);
-	lbs_deb_leave(LBS_DEB_SPI);
+
 	return err;
 }
 
@@ -747,8 +738,6 @@ static int if_spi_c2h_data(struct if_spi_card *card)
 	char *data;
 	u16 len;
 	int err = 0;
-
-	lbs_deb_enter(LBS_DEB_SPI);
 
 	/* How many bytes are there to read? */
 	err = spu_read_u16(card, IF_SPI_SCRATCH_1_REG, &len);
@@ -778,23 +767,19 @@ static int if_spi_c2h_data(struct if_spi_card *card)
 
 	/* Read the data from the WLAN module into our skb... */
 	err = spu_read(card, IF_SPI_DATA_RDWRPORT_REG, data, ALIGN(len, 4));
-	if (err)
-		goto free_skb;
+	if (err) {
+		dev_kfree_skb(skb);
+		goto out;
+	}
 
 	/* pass the SKB to libertas */
 	err = lbs_process_rxed_packet(card->priv, skb);
-	if (err)
-		goto free_skb;
+	/* lbs_process_rxed_packet() consumes the skb */
 
-	/* success */
-	goto out;
-
-free_skb:
-	dev_kfree_skb(skb);
 out:
 	if (err)
 		netdev_err(priv->dev, "%s: err=%d\n", __func__, err);
-	lbs_deb_leave(LBS_DEB_SPI);
+
 	return err;
 }
 
@@ -804,15 +789,13 @@ static void if_spi_h2c(struct if_spi_card *card,
 {
 	struct lbs_private *priv = card->priv;
 	int err = 0;
-	u16 int_type, port_reg;
+	u16 port_reg;
 
 	switch (type) {
 	case MVMS_DAT:
-		int_type = IF_SPI_CIC_TX_DOWNLOAD_OVER;
 		port_reg = IF_SPI_DATA_RDWRPORT_REG;
 		break;
 	case MVMS_CMD:
-		int_type = IF_SPI_CIC_CMD_DOWNLOAD_OVER;
 		port_reg = IF_SPI_CMD_RDWRPORT_REG;
 		break;
 	default:
@@ -869,8 +852,6 @@ static void if_spi_host_to_card_worker(struct work_struct *work)
 
 	card = container_of(work, struct if_spi_card, packet_work);
 	priv = card->priv;
-
-	lbs_deb_enter(LBS_DEB_SPI);
 
 	/*
 	 * Read the host interrupt status register to see what we
@@ -943,8 +924,6 @@ static void if_spi_host_to_card_worker(struct work_struct *work)
 err:
 	if (err)
 		netdev_err(priv->dev, "%s: got error %d\n", __func__, err);
-
-	lbs_deb_leave(LBS_DEB_SPI);
 }
 
 /*
@@ -961,8 +940,6 @@ static int if_spi_host_to_card(struct lbs_private *priv,
 	struct if_spi_card *card = priv->card;
 	struct if_spi_packet *packet;
 	u16 blen;
-
-	lbs_deb_enter_args(LBS_DEB_SPI, "type %d, bytes %d", type, nb);
 
 	if (nb == 0) {
 		netdev_err(priv->dev, "%s: invalid size requested: %d\n",
@@ -1004,7 +981,6 @@ static int if_spi_host_to_card(struct lbs_private *priv,
 	/* Queue spi xfer work */
 	queue_work(card->workqueue, &card->packet_work);
 out:
-	lbs_deb_leave_args(LBS_DEB_SPI, "err=%d", err);
 	return err;
 }
 
@@ -1034,8 +1010,6 @@ static int if_spi_init_card(struct if_spi_card *card)
 	u32 scratch;
 	const struct firmware *helper = NULL;
 	const struct firmware *mainfw = NULL;
-
-	lbs_deb_enter(LBS_DEB_SPI);
 
 	err = spu_init(card, card->pdata->use_dummy_writes);
 	if (err)
@@ -1093,7 +1067,6 @@ static int if_spi_init_card(struct if_spi_card *card)
 		goto out;
 
 out:
-	lbs_deb_leave_args(LBS_DEB_SPI, "err %d\n", err);
 	return err;
 }
 
@@ -1125,8 +1098,6 @@ static int if_spi_probe(struct spi_device *spi)
 	struct lbs_private *priv = NULL;
 	struct libertas_spi_platform_data *pdata = dev_get_platdata(&spi->dev);
 	int err = 0;
-
-	lbs_deb_enter(LBS_DEB_SPI);
 
 	if (!pdata) {
 		err = -EINVAL;
@@ -1166,8 +1137,8 @@ static int if_spi_probe(struct spi_device *spi)
 	 * This will call alloc_etherdev.
 	 */
 	priv = lbs_add_card(card, &spi->dev);
-	if (!priv) {
-		err = -ENOMEM;
+	if (IS_ERR(priv)) {
+		err = PTR_ERR(priv);
 		goto free_card;
 	}
 	card->priv = priv;
@@ -1221,7 +1192,6 @@ teardown:
 	if (pdata->teardown)
 		pdata->teardown(spi);
 out:
-	lbs_deb_leave_args(LBS_DEB_SPI, "err %d\n", err);
 	return err;
 }
 
@@ -1231,7 +1201,6 @@ static int libertas_spi_remove(struct spi_device *spi)
 	struct lbs_private *priv = card->priv;
 
 	lbs_deb_spi("libertas_spi_remove\n");
-	lbs_deb_enter(LBS_DEB_SPI);
 
 	cancel_work_sync(&card->resume_work);
 
@@ -1243,7 +1212,7 @@ static int libertas_spi_remove(struct spi_device *spi)
 	if (card->pdata->teardown)
 		card->pdata->teardown(spi);
 	free_if_spi_card(card);
-	lbs_deb_leave(LBS_DEB_SPI);
+
 	return 0;
 }
 
@@ -1297,18 +1266,16 @@ static struct spi_driver libertas_spi_driver = {
 static int __init if_spi_init_module(void)
 {
 	int ret = 0;
-	lbs_deb_enter(LBS_DEB_SPI);
+
 	printk(KERN_INFO "libertas_spi: Libertas SPI driver\n");
 	ret = spi_register_driver(&libertas_spi_driver);
-	lbs_deb_leave(LBS_DEB_SPI);
+
 	return ret;
 }
 
 static void __exit if_spi_exit_module(void)
 {
-	lbs_deb_enter(LBS_DEB_SPI);
 	spi_unregister_driver(&libertas_spi_driver);
-	lbs_deb_leave(LBS_DEB_SPI);
 }
 
 module_init(if_spi_init_module);

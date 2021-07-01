@@ -98,7 +98,6 @@ struct ocrdma_dev_attr {
 	u64 max_mr_size;
 	u32 max_num_mr_pbl;
 	int max_mw;
-	int max_fmr;
 	int max_map_per_fmr;
 	int max_pages_per_frmr;
 	u16 max_ord_per_qp;
@@ -186,7 +185,6 @@ struct ocrdma_hw_mr {
 	u32 num_pbes;
 	u32 pbl_size;
 	u32 pbe_size;
-	u64 fbo;
 	u64 va;
 };
 
@@ -527,17 +525,17 @@ static inline int is_cqe_wr_imm(struct ocrdma_cqe *cqe)
 }
 
 static inline int ocrdma_resolve_dmac(struct ocrdma_dev *dev,
-		struct ib_ah_attr *ah_attr, u8 *mac_addr)
+		struct rdma_ah_attr *ah_attr, u8 *mac_addr)
 {
 	struct in6_addr in6;
 
-	memcpy(&in6, ah_attr->grh.dgid.raw, sizeof(in6));
+	memcpy(&in6, rdma_ah_read_grh(ah_attr)->dgid.raw, sizeof(in6));
 	if (rdma_is_multicast_addr(&in6))
 		rdma_get_mcast_mac(&in6, mac_addr);
 	else if (rdma_link_local_addr(&in6))
 		rdma_get_ll_mac(&in6, mac_addr);
 	else
-		memcpy(mac_addr, ah_attr->dmac, ETH_ALEN);
+		memcpy(mac_addr, ah_attr->roce.dmac, ETH_ALEN);
 	return 0;
 }
 

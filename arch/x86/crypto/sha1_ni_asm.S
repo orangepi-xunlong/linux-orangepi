@@ -95,7 +95,7 @@
  */
 .text
 .align 32
-ENTRY(sha1_ni_transform)
+SYM_FUNC_START(sha1_ni_transform)
 	mov		%rsp, RSPSAVE
 	sub		$FRAME_SIZE, %rsp
 	and		$~0xF, %rsp
@@ -291,12 +291,14 @@ ENTRY(sha1_ni_transform)
 	mov		RSPSAVE, %rsp
 
 	ret
-ENDPROC(sha1_ni_transform)
+SYM_FUNC_END(sha1_ni_transform)
 
-.data
-
-.align 64
+.section	.rodata.cst16.PSHUFFLE_BYTE_FLIP_MASK, "aM", @progbits, 16
+.align 16
 PSHUFFLE_BYTE_FLIP_MASK:
 	.octa 0x000102030405060708090a0b0c0d0e0f
+
+.section	.rodata.cst16.UPPER_WORD_MASK, "aM", @progbits, 16
+.align 16
 UPPER_WORD_MASK:
 	.octa 0xFFFFFFFF000000000000000000000000

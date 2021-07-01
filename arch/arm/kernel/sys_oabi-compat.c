@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  arch/arm/kernel/sys_oabi-compat.c
  *
@@ -7,10 +8,6 @@
  *  Author:	Nicolas Pitre
  *  Created:	Oct 7, 2005
  *  Copyright:	MontaVista Software, Inc.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
  */
 
 /*
@@ -76,6 +73,7 @@
 #include <linux/syscalls.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
+#include <linux/cred.h>
 #include <linux/fcntl.h>
 #include <linux/eventpoll.h>
 #include <linux/sem.h>
@@ -250,25 +248,21 @@ struct oabi_epoll_event {
 	__u64 data;
 } __attribute__ ((packed,aligned(4)));
 
+#ifdef CONFIG_EPOLL
 asmlinkage long sys_oabi_epoll_ctl(int epfd, int op, int fd,
 				   struct oabi_epoll_event __user *event)
 {
 	struct oabi_epoll_event user;
 	struct epoll_event kernel;
-	mm_segment_t fs;
-	long ret;
 
-	if (op == EPOLL_CTL_DEL)
-		return sys_epoll_ctl(epfd, op, fd, NULL);
-	if (copy_from_user(&user, event, sizeof(user)))
+	if (ep_op_has_event(op) &&
+	    copy_from_user(&user, event, sizeof(user)))
 		return -EFAULT;
+
 	kernel.events = user.events;
 	kernel.data   = user.data;
-	fs = get_fs();
-	set_fs(KERNEL_DS);
-	ret = sys_epoll_ctl(epfd, op, fd, &kernel);
-	set_fs(fs);
-	return ret;
+
+	return do_epoll_ctl(epfd, op, fd, &kernel, false);
 }
 
 asmlinkage long sys_oabi_epoll_wait(int epfd,
@@ -276,6 +270,7 @@ asmlinkage long sys_oabi_epoll_wait(int epfd,
 				    int maxevents, int timeout)
 {
 	struct epoll_event *kbuf;
+	struct oabi_epoll_event e;
 	mm_segment_t fs;
 	long ret, err, i;
 
@@ -283,9 +278,9 @@ asmlinkage long sys_oabi_epoll_wait(int epfd,
 			maxevents > (INT_MAX/sizeof(*kbuf)) ||
 			maxevents > (INT_MAX/sizeof(*events)))
 		return -EINVAL;
-	if (!access_ok(VERIFY_WRITE, events, sizeof(*events) * maxevents))
+	if (!access_ok(events, sizeof(*events) * maxevents))
 		return -EFAULT;
-	kbuf = kmalloc(sizeof(*kbuf) * maxevents, GFP_KERNEL);
+	kbuf = kmalloc_array(maxevents, sizeof(*kbuf), GFP_KERNEL);
 	if (!kbuf)
 		return -ENOMEM;
 	fs = get_fs();
@@ -294,13 +289,30 @@ asmlinkage long sys_oabi_epoll_wait(int epfd,
 	set_fs(fs);
 	err = 0;
 	for (i = 0; i < ret; i++) {
-		__put_user_error(kbuf[i].events, &events->events, err);
-		__put_user_error(kbuf[i].data,   &events->data,   err);
+		e.events = kbuf[i].events;
+		e.data = kbuf[i].data;
+		err = __copy_to_user(events, &e, sizeof(e));
+		if (err)
+			break;
 		events++;
 	}
 	kfree(kbuf);
 	return err ? -EFAULT : ret;
 }
+#else
+asmlinkage long sys_oabi_epoll_ctl(int epfd, int op, int fd,
+				   struct oabi_epoll_event __user *event)
+{
+	return -EINVAL;
+}
+
+asmlinkage long sys_oabi_epoll_wait(int epfd,
+				    struct oabi_epoll_event __user *events,
+				    int maxevents, int timeout)
+{
+	return -EINVAL;
+}
+#endif
 
 struct oabi_sembuf {
 	unsigned short	sem_num;
@@ -312,25 +324,27 @@ struct oabi_sembuf {
 asmlinkage long sys_oabi_semtimedop(int semid,
 				    struct oabi_sembuf __user *tsops,
 				    unsigned nsops,
-				    const struct timespec __user *timeout)
+				    const struct old_timespec32 __user *timeout)
 {
 	struct sembuf *sops;
-	struct timespec local_timeout;
+	struct old_timespec32 local_timeout;
 	long err;
 	int i;
 
 	if (nsops < 1 || nsops > SEMOPM)
 		return -EINVAL;
-	if (!access_ok(VERIFY_READ, tsops, sizeof(*tsops) * nsops))
+	if (!access_ok(tsops, sizeof(*tsops) * nsops))
 		return -EFAULT;
-	sops = kmalloc(sizeof(*sops) * nsops, GFP_KERNEL);
+	sops = kmalloc_array(nsops, sizeof(*sops), GFP_KERNEL);
 	if (!sops)
 		return -ENOMEM;
 	err = 0;
 	for (i = 0; i < nsops; i++) {
-		__get_user_error(sops[i].sem_num, &tsops->sem_num, err);
-		__get_user_error(sops[i].sem_op,  &tsops->sem_op,  err);
-		__get_user_error(sops[i].sem_flg, &tsops->sem_flg, err);
+		struct oabi_sembuf osb;
+		err |= __copy_from_user(&osb, tsops, sizeof(osb));
+		sops[i].sem_num = osb.sem_num;
+		sops[i].sem_op = osb.sem_op;
+		sops[i].sem_flg = osb.sem_flg;
 		tsops++;
 	}
 	if (timeout) {
@@ -343,7 +357,7 @@ asmlinkage long sys_oabi_semtimedop(int semid,
 	} else {
 		mm_segment_t fs = get_fs();
 		set_fs(KERNEL_DS);
-		err = sys_semtimedop(semid, sops, nsops, timeout);
+		err = sys_semtimedop_time32(semid, sops, nsops, timeout);
 		set_fs(fs);
 	}
 	kfree(sops);
@@ -368,7 +382,7 @@ asmlinkage int sys_oabi_ipc(uint call, int first, int second, int third,
 		return  sys_oabi_semtimedop(first,
 					    (struct oabi_sembuf __user *)ptr,
 					    second,
-					    (const struct timespec __user *)fifth);
+					    (const struct old_timespec32 __user *)fifth);
 	default:
 		return sys_ipc(call, first, second, third, ptr, fifth);
 	}

@@ -1,12 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* -*- linux-c -*- ------------------------------------------------------- *
  *
  *   Copyright 2003 H. Peter Anvin - All Rights Reserved
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, Inc., 53 Temple Place Ste 330,
- *   Boston MA 02111-1307, USA; either version 2 of the License, or
- *   (at your option) any later version; incorporated herein by reference.
  *
  * ----------------------------------------------------------------------- */
 
@@ -32,9 +27,10 @@ extern const char raid6_empty_zero_page[PAGE_SIZE];
 
 #include <errno.h>
 #include <inttypes.h>
-#include <limits.h>
 #include <stddef.h>
+#include <string.h>
 #include <sys/mman.h>
+#include <sys/time.h>
 #include <sys/types.h>
 
 /* Not standard, but glibc defines it */
@@ -48,11 +44,16 @@ typedef uint64_t u64;
 #ifndef PAGE_SIZE
 # define PAGE_SIZE 4096
 #endif
+#ifndef PAGE_SHIFT
+# define PAGE_SHIFT 12
+#endif
 extern const char raid6_empty_zero_page[PAGE_SIZE];
 
 #define __init
 #define __exit
-#define __attribute_const__ __attribute__((const))
+#ifndef __attribute_const__
+# define __attribute_const__ __attribute__((const))
+#endif
 #define noinline __attribute__((noinline))
 
 #define preempt_enable()
@@ -61,12 +62,17 @@ extern const char raid6_empty_zero_page[PAGE_SIZE];
 #define enable_kernel_altivec()
 #define disable_kernel_altivec()
 
+#undef	EXPORT_SYMBOL
 #define EXPORT_SYMBOL(sym)
+#undef	EXPORT_SYMBOL_GPL
 #define EXPORT_SYMBOL_GPL(sym)
 #define MODULE_LICENSE(licence)
 #define MODULE_DESCRIPTION(desc)
 #define subsys_initcall(x)
 #define module_exit(x)
+
+#define IS_ENABLED(x) (x)
+#define CONFIG_RAID6_PQ_BENCHMARK 1
 #endif /* __KERNEL__ */
 
 /* Routine choices */
@@ -105,8 +111,11 @@ extern const struct raid6_calls raid6_avx2x4;
 extern const struct raid6_calls raid6_avx512x1;
 extern const struct raid6_calls raid6_avx512x2;
 extern const struct raid6_calls raid6_avx512x4;
-extern const struct raid6_calls raid6_tilegx8;
 extern const struct raid6_calls raid6_s390vx8;
+extern const struct raid6_calls raid6_vpermxor1;
+extern const struct raid6_calls raid6_vpermxor2;
+extern const struct raid6_calls raid6_vpermxor4;
+extern const struct raid6_calls raid6_vpermxor8;
 
 struct raid6_recov_calls {
 	void (*data2)(int, size_t, int, int, void **);
@@ -121,6 +130,7 @@ extern const struct raid6_recov_calls raid6_recov_ssse3;
 extern const struct raid6_recov_calls raid6_recov_avx2;
 extern const struct raid6_recov_calls raid6_recov_avx512;
 extern const struct raid6_recov_calls raid6_recov_s390xc;
+extern const struct raid6_recov_calls raid6_recov_neon;
 
 extern const struct raid6_calls raid6_neonx1;
 extern const struct raid6_calls raid6_neonx2;
@@ -142,6 +152,7 @@ int raid6_select_algo(void);
 extern const u8 raid6_gfmul[256][256] __attribute__((aligned(256)));
 extern const u8 raid6_vgfmul[256][32] __attribute__((aligned(256)));
 extern const u8 raid6_gfexp[256]      __attribute__((aligned(256)));
+extern const u8 raid6_gflog[256]      __attribute__((aligned(256)));
 extern const u8 raid6_gfinv[256]      __attribute__((aligned(256)));
 extern const u8 raid6_gfexi[256]      __attribute__((aligned(256)));
 

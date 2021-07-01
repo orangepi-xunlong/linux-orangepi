@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_POWERPC_DMA_H
 #define _ASM_POWERPC_DMA_H
 #ifdef __KERNEL__
@@ -150,10 +151,9 @@
 #define DMA2_EXT_REG		0x4D6
 
 #ifndef __powerpc64__
-    /* in arch/ppc/kernel/setup.c -- Cort */
+    /* in arch/powerpc/kernel/setup_32.c -- Cort */
     extern unsigned int DMA_MODE_WRITE;
     extern unsigned int DMA_MODE_READ;
-    extern unsigned long ISA_DMA_THRESHOLD;
 #else
     #define DMA_MODE_READ	0x44	/* I/O to memory, no autoinit, increment, single mode */
     #define DMA_MODE_WRITE	0x48	/* memory to I/O, no autoinit, increment, single mode */

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * NUMA memory policies for Linux.
  * Copyright 2003,2004 Andi Kleen SuSE Labs
@@ -5,8 +6,9 @@
 #ifndef _LINUX_MEMPOLICY_H
 #define _LINUX_MEMPOLICY_H 1
 
-
+#include <linux/sched.h>
 #include <linux/mmzone.h>
+#include <linux/dax.h>
 #include <linux/slab.h>
 #include <linux/rbtree.h>
 #include <linux/spinlock.h>
@@ -26,10 +28,10 @@ struct mm_struct;
  * the process policy is used. Interrupts ignore the memory policy
  * of the current process.
  *
- * Locking policy for interlave:
+ * Locking policy for interleave:
  * In process context there is no locking because only the process accesses
  * its own state. All vma manipulation is somewhat protected by a down_read on
- * mmap_sem.
+ * mmap_lock.
  *
  * Freeing policy:
  * Mempolicy objects are reference counted.  A mempolicy will be freed when
@@ -141,16 +143,24 @@ bool vma_policy_mof(struct vm_area_struct *vma);
 
 extern void numa_default_policy(void);
 extern void numa_policy_init(void);
-extern void mpol_rebind_task(struct task_struct *tsk, const nodemask_t *new,
-				enum mpol_rebind_step step);
+extern void mpol_rebind_task(struct task_struct *tsk, const nodemask_t *new);
 extern void mpol_rebind_mm(struct mm_struct *mm, nodemask_t *new);
 
-extern struct zonelist *huge_zonelist(struct vm_area_struct *vma,
+extern int huge_node(struct vm_area_struct *vma,
 				unsigned long addr, gfp_t gfp_flags,
 				struct mempolicy **mpol, nodemask_t **nodemask);
 extern bool init_nodemask_of_mempolicy(nodemask_t *mask);
 extern bool mempolicy_nodemask_intersects(struct task_struct *tsk,
 				const nodemask_t *mask);
+extern nodemask_t *policy_nodemask(gfp_t gfp, struct mempolicy *policy);
+
+static inline nodemask_t *policy_nodemask_current(gfp_t gfp)
+{
+	struct mempolicy *mpol = get_task_policy(current);
+
+	return policy_nodemask(gfp, mpol);
+}
+
 extern unsigned int mempolicy_slab_node(void);
 
 extern enum zone_type policy_zone;
@@ -172,27 +182,7 @@ extern int mpol_parse_str(char *str, struct mempolicy **mpol);
 extern void mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol);
 
 /* Check if a vma is migratable */
-static inline bool vma_migratable(struct vm_area_struct *vma)
-{
-	if (vma->vm_flags & (VM_IO | VM_PFNMAP))
-		return false;
-
-#ifndef CONFIG_ARCH_ENABLE_HUGEPAGE_MIGRATION
-	if (vma->vm_flags & VM_HUGETLB)
-		return false;
-#endif
-
-	/*
-	 * Migration allocates pages in the highest zone. If we cannot
-	 * do so then migration (at least from node to node) is not
-	 * possible.
-	 */
-	if (vma->vm_file &&
-		gfp_zone(mapping_gfp_mask(vma->vm_file->f_mapping))
-								< policy_zone)
-			return false;
-	return true;
-}
+extern bool vma_migratable(struct vm_area_struct *vma);
 
 extern int mpol_misplaced(struct page *, struct vm_area_struct *, unsigned long);
 extern void mpol_put_task_policy(struct task_struct *);
@@ -252,8 +242,7 @@ static inline void numa_default_policy(void)
 }
 
 static inline void mpol_rebind_task(struct task_struct *tsk,
-				const nodemask_t *new,
-				enum mpol_rebind_step step)
+				const nodemask_t *new)
 {
 }
 
@@ -261,13 +250,13 @@ static inline void mpol_rebind_mm(struct mm_struct *mm, nodemask_t *new)
 {
 }
 
-static inline struct zonelist *huge_zonelist(struct vm_area_struct *vma,
+static inline int huge_node(struct vm_area_struct *vma,
 				unsigned long addr, gfp_t gfp_flags,
 				struct mempolicy **mpol, nodemask_t **nodemask)
 {
 	*mpol = NULL;
 	*nodemask = NULL;
-	return node_zonelist(0, gfp_flags);
+	return 0;
 }
 
 static inline bool init_nodemask_of_mempolicy(nodemask_t *m)
@@ -300,6 +289,11 @@ static inline int mpol_misplaced(struct page *page, struct vm_area_struct *vma,
 
 static inline void mpol_put_task_policy(struct task_struct *task)
 {
+}
+
+static inline nodemask_t *policy_nodemask_current(gfp_t gfp)
+{
+	return NULL;
 }
 #endif /* CONFIG_NUMA */
 #endif

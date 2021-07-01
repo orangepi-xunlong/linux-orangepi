@@ -1,21 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ARC PGU DRM driver.
  *
  * Copyright (C) 2016 Synopsys, Inc. (www.synopsys.com)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
+#include <drm/drm_bridge.h>
 #include <drm/drm_crtc.h>
-#include <drm/drm_encoder_slave.h>
+#include <drm/drm_encoder.h>
+#include <drm/drm_device.h>
 
 #include "arcpgu.h"
 
@@ -47,10 +40,7 @@ int arcpgu_drm_hdmi_init(struct drm_device *drm, struct device_node *np)
 		return ret;
 
 	/* Link drm_bridge to encoder */
-	bridge->encoder = encoder;
-	encoder->bridge = bridge;
-
-	ret = drm_bridge_attach(drm, bridge);
+	ret = drm_bridge_attach(encoder, bridge, NULL, 0);
 	if (ret)
 		drm_encoder_cleanup(encoder);
 

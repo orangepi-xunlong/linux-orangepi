@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Hisilicon Kirin SoCs drm master driver
  *
@@ -8,102 +9,166 @@
  *	Xinliang Liu <z.liuxinliang@hisilicon.com>
  *	Xinliang Liu <xinliang.liu@linaro.org>
  *	Xinwei Kong <kong.kongxinwei@hisilicon.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/of_platform.h>
 #include <linux/component.h>
+#include <linux/module.h>
 #include <linux/of_graph.h>
+#include <linux/platform_device.h>
 
-#include <drm/drmP.h>
-#include <drm/drm_gem_cma_helper.h>
-#include <drm/drm_fb_cma_helper.h>
 #include <drm/drm_atomic_helper.h>
-#include <drm/drm_crtc_helper.h>
+#include <drm/drm_drv.h>
+#include <drm/drm_fb_cma_helper.h>
+#include <drm/drm_fb_helper.h>
+#include <drm/drm_gem_cma_helper.h>
+#include <drm/drm_gem_framebuffer_helper.h>
+#include <drm/drm_of.h>
+#include <drm/drm_probe_helper.h>
+#include <drm/drm_vblank.h>
 
 #include "kirin_drm_drv.h"
 
-static struct kirin_dc_ops *dc_ops;
+#define KIRIN_MAX_PLANE	2
 
-static int kirin_drm_kms_cleanup(struct drm_device *dev)
+struct kirin_drm_private {
+	struct kirin_crtc crtc;
+	struct kirin_plane planes[KIRIN_MAX_PLANE];
+	void *hw_ctx;
+};
+
+static int kirin_drm_crtc_init(struct drm_device *dev, struct drm_crtc *crtc,
+			       struct drm_plane *plane,
+			       const struct kirin_drm_data *driver_data)
 {
-	struct kirin_drm_private *priv = dev->dev_private;
+	struct device_node *port;
+	int ret;
 
-#ifdef CONFIG_DRM_FBDEV_EMULATION
-	if (priv->fbdev) {
-		drm_fbdev_cma_fini(priv->fbdev);
-		priv->fbdev = NULL;
+	/* set crtc port so that
+	 * drm_of_find_possible_crtcs call works
+	 */
+	port = of_get_child_by_name(dev->dev->of_node, "port");
+	if (!port) {
+		DRM_ERROR("no port node found in %pOF\n", dev->dev->of_node);
+		return -EINVAL;
 	}
-#endif
-	drm_kms_helper_poll_fini(dev);
-	drm_vblank_cleanup(dev);
-	dc_ops->cleanup(dev);
-	drm_mode_config_cleanup(dev);
-	devm_kfree(dev->dev, priv);
-	dev->dev_private = NULL;
+	of_node_put(port);
+	crtc->port = port;
+
+	ret = drm_crtc_init_with_planes(dev, crtc, plane, NULL,
+					driver_data->crtc_funcs, NULL);
+	if (ret) {
+		DRM_ERROR("failed to init crtc.\n");
+		return ret;
+	}
+
+	drm_crtc_helper_add(crtc, driver_data->crtc_helper_funcs);
 
 	return 0;
 }
 
-#ifdef CONFIG_DRM_FBDEV_EMULATION
-static void kirin_fbdev_output_poll_changed(struct drm_device *dev)
+static int kirin_drm_plane_init(struct drm_device *dev, struct drm_plane *plane,
+				enum drm_plane_type type,
+				const struct kirin_drm_data *data)
 {
-	struct kirin_drm_private *priv = dev->dev_private;
+	int ret = 0;
 
-	if (priv->fbdev) {
-		drm_fbdev_cma_hotplug_event(priv->fbdev);
-	} else {
-		priv->fbdev = drm_fbdev_cma_init(dev, 32,
-				dev->mode_config.num_crtc,
-				dev->mode_config.num_connector);
-		if (IS_ERR(priv->fbdev))
-			priv->fbdev = NULL;
+	ret = drm_universal_plane_init(dev, plane, 1, data->plane_funcs,
+				       data->channel_formats,
+				       data->channel_formats_cnt,
+				       NULL, type, NULL);
+	if (ret) {
+		DRM_ERROR("fail to init plane, ch=%d\n", 0);
+		return ret;
 	}
-}
-#endif
 
-static const struct drm_mode_config_funcs kirin_drm_mode_config_funcs = {
-	.fb_create = drm_fb_cma_create,
-#ifdef CONFIG_DRM_FBDEV_EMULATION
-	.output_poll_changed = kirin_fbdev_output_poll_changed,
-#endif
-	.atomic_check = drm_atomic_helper_check,
-	.atomic_commit = drm_atomic_helper_commit,
-};
+	drm_plane_helper_add(plane, data->plane_helper_funcs);
 
-static void kirin_drm_mode_config_init(struct drm_device *dev)
-{
-	dev->mode_config.min_width = 0;
-	dev->mode_config.min_height = 0;
-
-	dev->mode_config.max_width = 2048;
-	dev->mode_config.max_height = 2048;
-
-	dev->mode_config.funcs = &kirin_drm_mode_config_funcs;
+	return 0;
 }
 
-static int kirin_drm_kms_init(struct drm_device *dev)
+static void kirin_drm_private_cleanup(struct drm_device *dev)
 {
-	struct kirin_drm_private *priv;
+	struct kirin_drm_private *kirin_priv = dev->dev_private;
+	struct kirin_drm_data *data;
+
+	data = (struct kirin_drm_data *)of_device_get_match_data(dev->dev);
+	if (data->cleanup_hw_ctx)
+		data->cleanup_hw_ctx(kirin_priv->hw_ctx);
+
+	devm_kfree(dev->dev, kirin_priv);
+	dev->dev_private = NULL;
+}
+
+static int kirin_drm_private_init(struct drm_device *dev,
+				  const struct kirin_drm_data *driver_data)
+{
+	struct platform_device *pdev = to_platform_device(dev->dev);
+	struct kirin_drm_private *kirin_priv;
+	struct drm_plane *prim_plane;
+	enum drm_plane_type type;
+	void *ctx;
 	int ret;
+	u32 ch;
 
-	priv = devm_kzalloc(dev->dev, sizeof(*priv), GFP_KERNEL);
-	if (!priv)
+	kirin_priv = devm_kzalloc(dev->dev, sizeof(*kirin_priv), GFP_KERNEL);
+	if (!kirin_priv) {
+		DRM_ERROR("failed to alloc kirin_drm_private\n");
 		return -ENOMEM;
+	}
 
-	dev->dev_private = priv;
-	dev_set_drvdata(dev->dev, dev);
+	ctx = driver_data->alloc_hw_ctx(pdev, &kirin_priv->crtc.base);
+	if (IS_ERR(ctx)) {
+		DRM_ERROR("failed to initialize kirin_priv hw ctx\n");
+		return -EINVAL;
+	}
+	kirin_priv->hw_ctx = ctx;
+
+	/*
+	 * plane init
+	 * TODO: Now only support primary plane, overlay planes
+	 * need to do.
+	 */
+	for (ch = 0; ch < driver_data->num_planes; ch++) {
+		if (ch == driver_data->prim_plane)
+			type = DRM_PLANE_TYPE_PRIMARY;
+		else
+			type = DRM_PLANE_TYPE_OVERLAY;
+		ret = kirin_drm_plane_init(dev, &kirin_priv->planes[ch].base,
+					   type, driver_data);
+		if (ret)
+			return ret;
+		kirin_priv->planes[ch].ch = ch;
+		kirin_priv->planes[ch].hw_ctx = ctx;
+	}
+
+	/* crtc init */
+	prim_plane = &kirin_priv->planes[driver_data->prim_plane].base;
+	ret = kirin_drm_crtc_init(dev, &kirin_priv->crtc.base,
+				  prim_plane, driver_data);
+	if (ret)
+		return ret;
+	kirin_priv->crtc.hw_ctx = ctx;
+	dev->dev_private = kirin_priv;
+
+	return 0;
+}
+
+static int kirin_drm_kms_init(struct drm_device *dev,
+			      const struct kirin_drm_data *driver_data)
+{
+	int ret;
 
 	/* dev->mode_config initialization */
 	drm_mode_config_init(dev);
-	kirin_drm_mode_config_init(dev);
+	dev->mode_config.min_width = 0;
+	dev->mode_config.min_height = 0;
+	dev->mode_config.max_width = driver_data->config_max_width;
+	dev->mode_config.max_height = driver_data->config_max_width;
+	dev->mode_config.funcs = driver_data->mode_config_funcs;
 
 	/* display controller init */
-	ret = dc_ops->init(dev);
+	ret = kirin_drm_private_init(dev, driver_data);
 	if (ret)
 		goto err_mode_config_cleanup;
 
@@ -111,7 +176,7 @@ static int kirin_drm_kms_init(struct drm_device *dev)
 	ret = component_bind_all(dev->dev, dev);
 	if (ret) {
 		DRM_ERROR("failed to bind all component.\n");
-		goto err_dc_cleanup;
+		goto err_private_cleanup;
 	}
 
 	/* vblank init */
@@ -129,107 +194,63 @@ static int kirin_drm_kms_init(struct drm_device *dev)
 	/* init kms poll for handling hpd */
 	drm_kms_helper_poll_init(dev);
 
-	/* force detection after connectors init */
-	(void)drm_helper_hpd_irq_event(dev);
-
 	return 0;
 
 err_unbind_all:
 	component_unbind_all(dev->dev, dev);
-err_dc_cleanup:
-	dc_ops->cleanup(dev);
+err_private_cleanup:
+	kirin_drm_private_cleanup(dev);
 err_mode_config_cleanup:
 	drm_mode_config_cleanup(dev);
-	devm_kfree(dev->dev, priv);
-	dev->dev_private = NULL;
-
 	return ret;
 }
-
-static const struct file_operations kirin_drm_fops = {
-	.owner		= THIS_MODULE,
-	.open		= drm_open,
-	.release	= drm_release,
-	.unlocked_ioctl	= drm_ioctl,
-#ifdef CONFIG_COMPAT
-	.compat_ioctl	= drm_compat_ioctl,
-#endif
-	.poll		= drm_poll,
-	.read		= drm_read,
-	.llseek		= no_llseek,
-	.mmap		= drm_gem_cma_mmap,
-};
-
-static int kirin_gem_cma_dumb_create(struct drm_file *file,
-				     struct drm_device *dev,
-				     struct drm_mode_create_dumb *args)
-{
-	return drm_gem_cma_dumb_create_internal(file, dev, args);
-}
-
-static struct drm_driver kirin_drm_driver = {
-	.driver_features	= DRIVER_GEM | DRIVER_MODESET | DRIVER_PRIME |
-				  DRIVER_ATOMIC,
-	.fops			= &kirin_drm_fops,
-
-	.gem_free_object_unlocked = drm_gem_cma_free_object,
-	.gem_vm_ops		= &drm_gem_cma_vm_ops,
-	.dumb_create		= kirin_gem_cma_dumb_create,
-	.dumb_map_offset	= drm_gem_cma_dumb_map_offset,
-	.dumb_destroy		= drm_gem_dumb_destroy,
-
-	.prime_handle_to_fd	= drm_gem_prime_handle_to_fd,
-	.prime_fd_to_handle	= drm_gem_prime_fd_to_handle,
-	.gem_prime_export	= drm_gem_prime_export,
-	.gem_prime_import	= drm_gem_prime_import,
-	.gem_prime_get_sg_table = drm_gem_cma_prime_get_sg_table,
-	.gem_prime_import_sg_table = drm_gem_cma_prime_import_sg_table,
-	.gem_prime_vmap		= drm_gem_cma_prime_vmap,
-	.gem_prime_vunmap	= drm_gem_cma_prime_vunmap,
-	.gem_prime_mmap		= drm_gem_cma_prime_mmap,
-
-	.name			= "kirin",
-	.desc			= "Hisilicon Kirin SoCs' DRM Driver",
-	.date			= "20150718",
-	.major			= 1,
-	.minor			= 0,
-};
 
 static int compare_of(struct device *dev, void *data)
 {
 	return dev->of_node == data;
 }
 
+static int kirin_drm_kms_cleanup(struct drm_device *dev)
+{
+	drm_kms_helper_poll_fini(dev);
+	kirin_drm_private_cleanup(dev);
+	drm_mode_config_cleanup(dev);
+
+	return 0;
+}
+
 static int kirin_drm_bind(struct device *dev)
 {
-	struct drm_driver *driver = &kirin_drm_driver;
+	struct kirin_drm_data *driver_data;
 	struct drm_device *drm_dev;
 	int ret;
 
-	drm_dev = drm_dev_alloc(driver, dev);
+	driver_data = (struct kirin_drm_data *)of_device_get_match_data(dev);
+	if (!driver_data)
+		return -EINVAL;
+
+	drm_dev = drm_dev_alloc(driver_data->driver, dev);
 	if (IS_ERR(drm_dev))
 		return PTR_ERR(drm_dev);
+	dev_set_drvdata(dev, drm_dev);
 
-	drm_dev->platformdev = to_platform_device(dev);
-
-	ret = kirin_drm_kms_init(drm_dev);
+	/* display controller init */
+	ret = kirin_drm_kms_init(drm_dev, driver_data);
 	if (ret)
-		goto err_drm_dev_unref;
+		goto err_drm_dev_put;
 
 	ret = drm_dev_register(drm_dev, 0);
 	if (ret)
 		goto err_kms_cleanup;
 
-	DRM_INFO("Initialized %s %d.%d.%d %s on minor %d\n",
-		 driver->name, driver->major, driver->minor, driver->patchlevel,
-		 driver->date, drm_dev->primary->index);
+	drm_fbdev_generic_setup(drm_dev, 32);
 
 	return 0;
 
 err_kms_cleanup:
 	kirin_drm_kms_cleanup(drm_dev);
-err_drm_dev_unref:
-	drm_dev_unref(drm_dev);
+err_drm_dev_put:
+	drm_dev_put(drm_dev);
 
 	return ret;
 }
@@ -240,42 +261,13 @@ static void kirin_drm_unbind(struct device *dev)
 
 	drm_dev_unregister(drm_dev);
 	kirin_drm_kms_cleanup(drm_dev);
-	drm_dev_unref(drm_dev);
+	drm_dev_put(drm_dev);
 }
 
 static const struct component_master_ops kirin_drm_ops = {
 	.bind = kirin_drm_bind,
 	.unbind = kirin_drm_unbind,
 };
-
-static struct device_node *kirin_get_remote_node(struct device_node *np)
-{
-	struct device_node *endpoint, *remote;
-
-	/* get the first endpoint, in our case only one remote node
-	 * is connected to display controller.
-	 */
-	endpoint = of_graph_get_next_endpoint(np, NULL);
-	if (!endpoint) {
-		DRM_ERROR("no valid endpoint node\n");
-		return ERR_PTR(-ENODEV);
-	}
-	of_node_put(endpoint);
-
-	remote = of_graph_get_remote_port_parent(endpoint);
-	if (!remote) {
-		DRM_ERROR("no valid remote node\n");
-		return ERR_PTR(-ENODEV);
-	}
-	of_node_put(remote);
-
-	if (!of_device_is_available(remote)) {
-		DRM_ERROR("not available for remote node\n");
-		return ERR_PTR(-ENODEV);
-	}
-
-	return remote;
-}
 
 static int kirin_drm_platform_probe(struct platform_device *pdev)
 {
@@ -284,33 +276,25 @@ static int kirin_drm_platform_probe(struct platform_device *pdev)
 	struct component_match *match = NULL;
 	struct device_node *remote;
 
-	dc_ops = (struct kirin_dc_ops *)of_device_get_match_data(dev);
-	if (!dc_ops) {
-		DRM_ERROR("failed to get dt id data\n");
-		return -EINVAL;
-	}
+	remote = of_graph_get_remote_node(np, 0, 0);
+	if (!remote)
+		return -ENODEV;
 
-	remote = kirin_get_remote_node(np);
-	if (IS_ERR(remote))
-		return PTR_ERR(remote);
-
-	component_match_add(dev, &match, compare_of, remote);
+	drm_of_component_match_add(dev, &match, compare_of, remote);
+	of_node_put(remote);
 
 	return component_master_add_with_match(dev, &kirin_drm_ops, match);
-
-	return 0;
 }
 
 static int kirin_drm_platform_remove(struct platform_device *pdev)
 {
 	component_master_del(&pdev->dev, &kirin_drm_ops);
-	dc_ops = NULL;
 	return 0;
 }
 
 static const struct of_device_id kirin_drm_dt_ids[] = {
 	{ .compatible = "hisilicon,hi6220-ade",
-	  .data = &ade_dc_ops,
+	  .data = &ade_driver_data,
 	},
 	{ /* end node */ },
 };

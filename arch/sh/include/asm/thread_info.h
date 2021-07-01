@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __ASM_SH_THREAD_INFO_H
 #define __ASM_SH_THREAD_INFO_H
 
@@ -9,8 +10,6 @@
  *  Copyright (C) 2002  David Howells (dhowells@redhat.com)
  *  - Incorporating suggestions made by Linus Torvalds and Dave Miller
  */
-#ifdef __KERNEL__
-
 #include <asm/page.h>
 
 /*
@@ -62,9 +61,6 @@ struct thread_info {
 	.addr_limit	= KERNEL_DS,		\
 }
 
-#define init_thread_info	(init_thread_union.thread_info)
-#define init_stack		(init_thread_union.stack)
-
 /* how to get the current stack pointer from C */
 register unsigned long current_stack_pointer asm("r15") __used;
 
@@ -72,9 +68,7 @@ register unsigned long current_stack_pointer asm("r15") __used;
 static inline struct thread_info *current_thread_info(void)
 {
 	struct thread_info *ti;
-#if defined(CONFIG_SUPERH64)
-	__asm__ __volatile__ ("getcon	cr17, %0" : "=r" (ti));
-#elif defined(CONFIG_CPU_HAS_SR_RB)
+#if defined(CONFIG_CPU_HAS_SR_RB)
 	__asm__ __volatile__ ("stc	r7_bank, %0" : "=r" (ti));
 #else
 	unsigned long __dummy;
@@ -174,7 +168,4 @@ static inline unsigned int get_thread_fault_code(void)
 }
 
 #endif	/* !__ASSEMBLY__ */
-
-#endif /* __KERNEL__ */
-
 #endif /* __ASM_SH_THREAD_INFO_H */

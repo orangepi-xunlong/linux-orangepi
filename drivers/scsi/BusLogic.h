@@ -1,17 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
 
   Linux Driver for BusLogic MultiMaster and FlashPoint SCSI Host Adapters
 
   Copyright 1995-1998 by Leonard N. Zubkoff <lnz@dandelion.com>
 
-  This program is free software; you may redistribute and/or modify it under
-  the terms of the GNU General Public License Version 2 as published by the
-  Free Software Foundation.
-
-  This program is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
-  or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
-  for complete details.
 
   The author respectfully requests that any modifications to this software be
   sent directly to him for evaluation and testing.
@@ -821,7 +814,7 @@ struct blogic_ccb {
 	unsigned char cdblen;				/* Byte 2 */
 	unsigned char sense_datalen;			/* Byte 3 */
 	u32 datalen;					/* Bytes 4-7 */
-	void *data;					/* Bytes 8-11 */
+	u32 data;					/* Bytes 8-11 */
 	unsigned char:8;				/* Byte 12 */
 	unsigned char:8;				/* Byte 13 */
 	enum blogic_adapter_status adapter_status;	/* Byte 14 */
@@ -935,7 +928,7 @@ struct blogic_tgt_stats {
 	unsigned short bdr_request;
 	unsigned short bdr_tried;
 	unsigned short bdr_done;
-	unsigned short adatper_reset_req;
+	unsigned short adapter_reset_req;
 	unsigned short adapter_reset_attempt;
 	unsigned short adapter_reset_done;
 };

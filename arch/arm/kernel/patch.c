@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/kernel.h>
 #include <linux/spinlock.h>
 #include <linux/kprobes.h>
@@ -15,26 +16,24 @@ struct patch {
 	unsigned int insn;
 };
 
-static DEFINE_SPINLOCK(patch_lock);
+#ifdef CONFIG_MMU
+static DEFINE_RAW_SPINLOCK(patch_lock);
 
 static void __kprobes *patch_map(void *addr, int fixmap, unsigned long *flags)
-	__acquires(&patch_lock)
 {
 	unsigned int uintaddr = (uintptr_t) addr;
 	bool module = !core_kernel_text(uintaddr);
 	struct page *page;
 
-	if (module && IS_ENABLED(CONFIG_DEBUG_SET_MODULE_RONX))
+	if (module && IS_ENABLED(CONFIG_STRICT_MODULE_RWX))
 		page = vmalloc_to_page(addr);
-	else if (!module && IS_ENABLED(CONFIG_DEBUG_RODATA))
+	else if (!module && IS_ENABLED(CONFIG_STRICT_KERNEL_RWX))
 		page = virt_to_page(addr);
 	else
 		return addr;
 
 	if (flags)
-		spin_lock_irqsave(&patch_lock, *flags);
-	else
-		__acquire(&patch_lock);
+		raw_spin_lock_irqsave(&patch_lock, *flags);
 
 	set_fixmap(fixmap, page_to_phys(page));
 
@@ -42,15 +41,19 @@ static void __kprobes *patch_map(void *addr, int fixmap, unsigned long *flags)
 }
 
 static void __kprobes patch_unmap(int fixmap, unsigned long *flags)
-	__releases(&patch_lock)
 {
 	clear_fixmap(fixmap);
 
 	if (flags)
-		spin_unlock_irqrestore(&patch_lock, *flags);
-	else
-		__release(&patch_lock);
+		raw_spin_unlock_irqrestore(&patch_lock, *flags);
 }
+#else
+static void __kprobes *patch_map(void *addr, int fixmap, unsigned long *flags)
+{
+	return addr;
+}
+static void __kprobes patch_unmap(int fixmap, unsigned long *flags) { }
+#endif
 
 void __kprobes __patch_text_real(void *addr, unsigned int insn, bool remap)
 {
@@ -63,8 +66,6 @@ void __kprobes __patch_text_real(void *addr, unsigned int insn, bool remap)
 
 	if (remap)
 		waddr = patch_map(addr, FIX_TEXT_POKE0, &flags);
-	else
-		__acquire(&patch_lock);
 
 	if (thumb2 && __opcode_is_thumb16(insn)) {
 		*(u16 *)waddr = __opcode_to_mem_thumb16(insn);
@@ -101,8 +102,7 @@ void __kprobes __patch_text_real(void *addr, unsigned int insn, bool remap)
 	if (waddr != addr) {
 		flush_kernel_vmap_range(waddr, twopage ? size / 2 : size);
 		patch_unmap(FIX_TEXT_POKE0, &flags);
-	} else
-		__release(&patch_lock);
+	}
 
 	flush_icache_range((uintptr_t)(addr),
 			   (uintptr_t)(addr) + size);
@@ -124,5 +124,5 @@ void __kprobes patch_text(void *addr, unsigned int insn)
 		.insn = insn,
 	};
 
-	stop_machine(patch_text_stop_machine, &patch, NULL);
+	stop_machine_cpuslocked(patch_text_stop_machine, &patch, NULL);
 }

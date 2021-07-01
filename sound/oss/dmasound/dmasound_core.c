@@ -182,8 +182,9 @@
 #include <linux/soundcard.h>
 #include <linux/poll.h>
 #include <linux/mutex.h>
+#include <linux/sched/signal.h>
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include "dmasound.h"
 
@@ -383,6 +384,7 @@ static const struct file_operations mixer_fops =
 	.owner		= THIS_MODULE,
 	.llseek		= no_llseek,
 	.unlocked_ioctl	= mixer_unlocked_ioctl,
+	.compat_ioctl	= compat_ptr_ioctl,
 	.open		= mixer_open,
 	.release	= mixer_release,
 };
@@ -419,7 +421,7 @@ static int sq_allocate_buffers(struct sound_queue *sq, int num, int size)
 		return 0;
 	sq->numBufs = num;
 	sq->bufSize = size;
-	sq->buffers = kmalloc (num * sizeof(char *), GFP_KERNEL);
+	sq->buffers = kmalloc_array (num, sizeof(char *), GFP_KERNEL);
 	if (!sq->buffers)
 		return -ENOMEM;
 	for (i = 0; i < num; i++) {
@@ -669,9 +671,9 @@ static ssize_t sq_write(struct file *file, const char __user *src, size_t uLeft,
 	return uUsed < 0? uUsed: uWritten;
 }
 
-static unsigned int sq_poll(struct file *file, struct poll_table_struct *wait)
+static __poll_t sq_poll(struct file *file, struct poll_table_struct *wait)
 {
-	unsigned int mask = 0;
+	__poll_t mask = 0;
 	int retVal;
 	
 	if (write_sq.locked == 0) {
@@ -683,7 +685,7 @@ static unsigned int sq_poll(struct file *file, struct poll_table_struct *wait)
 		poll_wait(file, &write_sq.action_queue, wait);
 	if (file->f_mode & FMODE_WRITE)
 		if (write_sq.count < write_sq.max_active || write_sq.block_size - write_sq.rear_size > 0)
-			mask |= POLLOUT | POLLWRNORM;
+			mask |= EPOLLOUT | EPOLLWRNORM;
 	return mask;
 
 }
@@ -1166,6 +1168,7 @@ static const struct file_operations sq_fops =
 	.write		= sq_write,
 	.poll		= sq_poll,
 	.unlocked_ioctl	= sq_unlocked_ioctl,
+	.compat_ioctl	= compat_ptr_ioctl,
 	.open		= sq_open,
 	.release	= sq_release,
 };
@@ -1475,13 +1478,13 @@ static int dmasound_setup(char *str)
 			printk("dmasound_setup: invalid catch radius, using default = %d\n", catchRadius);
 		else
 			catchRadius = ints[3];
-		/* fall through */
+		fallthrough;
 	case 2:
 		if (ints[1] < MIN_BUFFERS)
 			printk("dmasound_setup: invalid number of buffers, using default = %d\n", numWriteBufs);
 		else
 			numWriteBufs = ints[1];
-		/* fall through */
+		fallthrough;
 	case 1:
 		if ((size = ints[2]) < 256) /* check for small buffer specs */
 			size <<= 10 ;

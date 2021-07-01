@@ -4,6 +4,7 @@
  * regulatory support structures
  *
  * Copyright 2008-2009	Luis R. Rodriguez <mcgrof@qca.qualcomm.com>
+ * Copyright (C) 2018 Intel Corporation
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -43,7 +44,7 @@ enum environment_cap {
  *	and potentially inform users of which devices specifically
  *	cased the conflicts.
  * @initiator: indicates who sent this request, could be any of
- *	of those set in nl80211_reg_initiator (%NL80211_REGDOM_SET_BY_*)
+ *	those set in nl80211_reg_initiator (%NL80211_REGDOM_SET_BY_*)
  * @alpha2: the ISO / IEC 3166 alpha2 country code of the requested
  *	regulatory domain. We have a few special codes:
  *	00 - World regulatory domain
@@ -188,11 +189,38 @@ struct ieee80211_power_rule {
 	u32 max_eirp;
 };
 
+/**
+ * struct ieee80211_wmm_ac - used to store per ac wmm regulatory limitation
+ *
+ * The information provided in this structure is required for QoS
+ * transmit queue configuration. Cf. IEEE 802.11 7.3.2.29.
+ *
+ * @cw_min: minimum contention window [a value of the form
+ *      2^n-1 in the range 1..32767]
+ * @cw_max: maximum contention window [like @cw_min]
+ * @cot: maximum burst time in units of 32 usecs, 0 meaning disabled
+ * @aifsn: arbitration interframe space [0..255]
+ *
+ */
+struct ieee80211_wmm_ac {
+	u16 cw_min;
+	u16 cw_max;
+	u16 cot;
+	u8 aifsn;
+};
+
+struct ieee80211_wmm_rule {
+	struct ieee80211_wmm_ac client[IEEE80211_NUM_ACS];
+	struct ieee80211_wmm_ac ap[IEEE80211_NUM_ACS];
+};
+
 struct ieee80211_reg_rule {
 	struct ieee80211_freq_range freq_range;
 	struct ieee80211_power_rule power_rule;
+	struct ieee80211_wmm_rule wmm_rule;
 	u32 flags;
 	u32 dfs_cac_ms;
+	bool has_wmm;
 };
 
 struct ieee80211_regdomain {
@@ -202,13 +230,6 @@ struct ieee80211_regdomain {
 	enum nl80211_dfs_regions dfs_region;
 	struct ieee80211_reg_rule reg_rules[];
 };
-
-#define MHZ_TO_KHZ(freq) ((freq) * 1000)
-#define KHZ_TO_MHZ(freq) ((freq) / 1000)
-#define DBI_TO_MBI(gain) ((gain) * 100)
-#define MBI_TO_DBI(gain) ((gain) / 100)
-#define DBM_TO_MBM(gain) ((gain) * 100)
-#define MBM_TO_DBM(gain) ((gain) / 100)
 
 #define REG_RULE_EXT(start, end, bw, gain, eirp, dfs_cac, reg_flags)	\
 {									\

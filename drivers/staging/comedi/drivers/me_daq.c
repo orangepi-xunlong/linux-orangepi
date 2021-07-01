@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * comedi/drivers/me_daq.c
  * Hardware driver for Meilhaus data acquisition cards:
  *   ME-2000i, ME-2600i, ME-3000vm1
  *
  * Copyright (C) 2002 Michael Hillmann <hillmann@syscongroup.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 /*
@@ -559,7 +550,7 @@ static struct pci_driver me_daq_pci_driver = {
 };
 module_comedi_pci_driver(me_daq_driver, me_daq_pci_driver);
 
-MODULE_AUTHOR("Comedi http://www.comedi.org");
+MODULE_AUTHOR("Comedi https://www.comedi.org");
 MODULE_DESCRIPTION("Comedi low-level driver");
 MODULE_LICENSE("GPL");
 MODULE_FIRMWARE(ME2600_FIRMWARE);

@@ -1,34 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- *
+ * Copyright (c) 2003-2020, Intel Corporation. All rights reserved.
  * Intel Management Engine Interface (Intel MEI) Linux driver
- * Copyright (c) 2003-2012, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
  */
+
 #include <linux/module.h>
-#include <linux/moduleparam.h>
 #include <linux/kernel.h>
 #include <linux/device.h>
-#include <linux/fs.h>
 #include <linux/errno.h>
 #include <linux/types.h>
-#include <linux/fcntl.h>
 #include <linux/pci.h>
-#include <linux/poll.h>
-#include <linux/ioctl.h>
-#include <linux/cdev.h>
 #include <linux/sched.h>
-#include <linux/uuid.h>
-#include <linux/compat.h>
-#include <linux/jiffies.h>
 #include <linux/interrupt.h>
 
 #include <linux/pm_domain.h>
@@ -43,57 +25,93 @@
 
 /* mei_pci_tbl - PCI Device ID Table */
 static const struct pci_device_id mei_me_pci_tbl[] = {
-	{MEI_PCI_DEVICE(MEI_DEV_ID_82946GZ, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_82G35, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_82Q965, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_82G965, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_82GM965, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_82GME965, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_82Q35, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_82G33, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_82Q33, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_82X38, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_3200, mei_me_legacy_cfg)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_82946GZ, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_82G35, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_82Q965, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_82G965, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_82GM965, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_82GME965, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_82Q35, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_82G33, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_82Q33, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_82X38, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_3200, MEI_ME_ICH_CFG)},
 
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_6, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_7, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_8, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_9, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_10, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9M_1, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9M_2, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9M_3, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9M_4, mei_me_legacy_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH10_1, mei_me_ich_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH10_2, mei_me_ich_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH10_3, mei_me_ich_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH10_4, mei_me_ich_cfg)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_6, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_7, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_8, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_9, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9_10, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9M_1, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9M_2, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9M_3, MEI_ME_ICH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH9M_4, MEI_ME_ICH_CFG)},
 
-	{MEI_PCI_DEVICE(MEI_DEV_ID_IBXPK_1, mei_me_pch_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_IBXPK_2, mei_me_pch_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_CPT_1, mei_me_pch_cpt_pbg_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_PBG_1, mei_me_pch_cpt_pbg_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_PPT_1, mei_me_pch_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_PPT_2, mei_me_pch_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_PPT_3, mei_me_pch_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_LPT_H, mei_me_pch8_sps_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_LPT_W, mei_me_pch8_sps_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_LPT_LP, mei_me_pch8_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_LPT_HR, mei_me_pch8_sps_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_WPT_LP, mei_me_pch8_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_WPT_LP_2, mei_me_pch8_cfg)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH10_1, MEI_ME_ICH10_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH10_2, MEI_ME_ICH10_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH10_3, MEI_ME_ICH10_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICH10_4, MEI_ME_ICH10_CFG)},
 
-	{MEI_PCI_DEVICE(MEI_DEV_ID_SPT, mei_me_pch8_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_SPT_2, mei_me_pch8_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_SPT_H, mei_me_pch8_sps_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_SPT_H_2, mei_me_pch8_sps_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_LBG, mei_me_pch8_cfg)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_IBXPK_1, MEI_ME_PCH6_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_IBXPK_2, MEI_ME_PCH6_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_CPT_1, MEI_ME_PCH_CPT_PBG_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_PBG_1, MEI_ME_PCH_CPT_PBG_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_PPT_1, MEI_ME_PCH7_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_PPT_2, MEI_ME_PCH7_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_PPT_3, MEI_ME_PCH7_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_LPT_H, MEI_ME_PCH8_SPS_4_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_LPT_W, MEI_ME_PCH8_SPS_4_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_LPT_LP, MEI_ME_PCH8_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_LPT_HR, MEI_ME_PCH8_SPS_4_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_WPT_LP, MEI_ME_PCH8_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_WPT_LP_2, MEI_ME_PCH8_CFG)},
 
-	{MEI_PCI_DEVICE(MEI_DEV_ID_BXT_M, mei_me_pch8_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_APL_I, mei_me_pch8_cfg)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_SPT, MEI_ME_PCH8_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_SPT_2, MEI_ME_PCH8_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_SPT_3, MEI_ME_PCH8_ITOUCH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_SPT_H, MEI_ME_PCH8_SPS_4_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_SPT_H_2, MEI_ME_PCH8_SPS_4_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_LBG, MEI_ME_PCH12_SPS_4_CFG)},
 
-	{MEI_PCI_DEVICE(MEI_DEV_ID_KBP, mei_me_pch8_cfg)},
-	{MEI_PCI_DEVICE(MEI_DEV_ID_KBP_2, mei_me_pch8_cfg)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_BXT_M, MEI_ME_PCH8_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_APL_I, MEI_ME_PCH8_CFG)},
+
+	{MEI_PCI_DEVICE(MEI_DEV_ID_DNV_IE, MEI_ME_PCH8_CFG)},
+
+	{MEI_PCI_DEVICE(MEI_DEV_ID_GLK, MEI_ME_PCH8_CFG)},
+
+	{MEI_PCI_DEVICE(MEI_DEV_ID_KBP, MEI_ME_PCH8_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_KBP_2, MEI_ME_PCH8_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_KBP_3, MEI_ME_PCH8_CFG)},
+
+	{MEI_PCI_DEVICE(MEI_DEV_ID_CNP_LP, MEI_ME_PCH12_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_CNP_LP_3, MEI_ME_PCH8_ITOUCH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_CNP_H, MEI_ME_PCH12_SPS_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_CNP_H_3, MEI_ME_PCH12_SPS_ITOUCH_CFG)},
+
+	{MEI_PCI_DEVICE(MEI_DEV_ID_CMP_LP, MEI_ME_PCH12_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_CMP_LP_3, MEI_ME_PCH8_ITOUCH_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_CMP_V, MEI_ME_PCH12_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_CMP_H, MEI_ME_PCH12_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_CMP_H_3, MEI_ME_PCH8_ITOUCH_CFG)},
+
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ICP_LP, MEI_ME_PCH12_CFG)},
+
+	{MEI_PCI_DEVICE(MEI_DEV_ID_TGP_LP, MEI_ME_PCH15_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_TGP_H, MEI_ME_PCH15_SPS_CFG)},
+
+	{MEI_PCI_DEVICE(MEI_DEV_ID_JSP_N, MEI_ME_PCH15_CFG)},
+
+	{MEI_PCI_DEVICE(MEI_DEV_ID_MCC, MEI_ME_PCH15_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_MCC_4, MEI_ME_PCH8_CFG)},
+
+	{MEI_PCI_DEVICE(MEI_DEV_ID_CDF, MEI_ME_PCH8_CFG)},
+
+	{MEI_PCI_DEVICE(MEI_DEV_ID_EBG, MEI_ME_PCH15_SPS_CFG)},
+
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ADP_S, MEI_ME_PCH15_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ADP_LP, MEI_ME_PCH15_CFG)},
+	{MEI_PCI_DEVICE(MEI_DEV_ID_ADP_P, MEI_ME_PCH15_CFG)},
 
 	/* required last entry */
 	{0, }
@@ -108,6 +126,13 @@ static inline void mei_me_unset_pm_domain(struct mei_device *dev);
 static inline void mei_me_set_pm_domain(struct mei_device *dev) {}
 static inline void mei_me_unset_pm_domain(struct mei_device *dev) {}
 #endif /* CONFIG_PM */
+
+static int mei_me_read_fws(const struct mei_device *dev, int where, u32 *val)
+{
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
+
+	return pci_read_config_dword(pdev, where, val);
+}
 
 /**
  * mei_me_quirk_probe - probe for devices that doesn't valid ME interface
@@ -138,29 +163,32 @@ static bool mei_me_quirk_probe(struct pci_dev *pdev,
  */
 static int mei_me_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
-	const struct mei_cfg *cfg = (struct mei_cfg *)(ent->driver_data);
+	const struct mei_cfg *cfg;
 	struct mei_device *dev;
 	struct mei_me_hw *hw;
 	unsigned int irqflags;
 	int err;
 
+	cfg = mei_me_get_cfg(ent->driver_data);
+	if (!cfg)
+		return -ENODEV;
 
 	if (!mei_me_quirk_probe(pdev, cfg))
 		return -ENODEV;
 
 	/* enable pci dev */
-	err = pci_enable_device(pdev);
+	err = pcim_enable_device(pdev);
 	if (err) {
 		dev_err(&pdev->dev, "failed to enable pci device.\n");
 		goto end;
 	}
 	/* set PCI host mastering  */
 	pci_set_master(pdev);
-	/* pci request regions for mei driver */
-	err = pci_request_regions(pdev, KBUILD_MODNAME);
+	/* pci request regions and mapping IO device memory for mei driver */
+	err = pcim_iomap_regions(pdev, BIT(0), KBUILD_MODNAME);
 	if (err) {
 		dev_err(&pdev->dev, "failed to get pci regions.\n");
-		goto disable_device;
+		goto end;
 	}
 
 	if (dma_set_mask(&pdev->dev, DMA_BIT_MASK(64)) ||
@@ -173,25 +201,22 @@ static int mei_me_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 	if (err) {
 		dev_err(&pdev->dev, "No usable DMA configuration, aborting\n");
-		goto release_regions;
+		goto end;
 	}
-
 
 	/* allocates and initializes the mei dev structure */
-	dev = mei_me_dev_init(pdev, cfg);
+	dev = mei_me_dev_init(&pdev->dev, cfg);
 	if (!dev) {
 		err = -ENOMEM;
-		goto release_regions;
+		goto end;
 	}
 	hw = to_me_hw(dev);
-	/* mapping  IO device memory */
-	hw->mem_addr = pci_iomap(pdev, 0, 0);
-	if (!hw->mem_addr) {
-		dev_err(&pdev->dev, "mapping I/O device memory failure.\n");
-		err = -ENOMEM;
-		goto free_device;
-	}
+	hw->mem_addr = pcim_iomap_table(pdev)[0];
+	hw->read_fws = mei_me_read_fws;
+
 	pci_enable_msi(pdev);
+
+	hw->irq = pdev->irq;
 
 	 /* request and enable interrupt */
 	irqflags = pci_dev_msi_enabled(pdev) ? IRQF_ONESHOT : IRQF_SHARED;
@@ -203,7 +228,7 @@ static int mei_me_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (err) {
 		dev_err(&pdev->dev, "request_threaded_irq failure. irq = %d\n",
 		       pdev->irq);
-		goto disable_msi;
+		goto end;
 	}
 
 	if (mei_start(dev)) {
@@ -222,15 +247,27 @@ static int mei_me_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	pci_set_drvdata(pdev, dev);
 
 	/*
-	* For not wake-able HW runtime pm framework
-	* can't be used on pci device level.
-	* Use domain runtime pm callbacks instead.
-	*/
-	if (!pci_dev_run_wake(pdev))
-		mei_me_set_pm_domain(dev);
+	 * MEI requires to resume from runtime suspend mode
+	 * in order to perform link reset flow upon system suspend.
+	 */
+	dev_pm_set_driver_flags(&pdev->dev, DPM_FLAG_NO_DIRECT_COMPLETE);
 
-	if (mei_pg_is_enabled(dev))
+	/*
+	 * ME maps runtime suspend/resume to D0i states,
+	 * hence we need to go around native PCI runtime service which
+	 * eventually brings the device into D3cold/hot state,
+	 * but the mei device cannot wake up from D3 unlike from D0i3.
+	 * To get around the PCI device native runtime pm,
+	 * ME uses runtime pm domain handlers which take precedence
+	 * over the driver's pm handlers.
+	 */
+	mei_me_set_pm_domain(dev);
+
+	if (mei_pg_is_enabled(dev)) {
 		pm_runtime_put_noidle(&pdev->dev);
+		if (hw->d0i3_supported)
+			pm_runtime_allow(&pdev->dev);
+	}
 
 	dev_dbg(&pdev->dev, "initialization successful.\n");
 
@@ -242,18 +279,35 @@ release_irq:
 	mei_cancel_work(dev);
 	mei_disable_interrupts(dev);
 	free_irq(pdev->irq, dev);
-disable_msi:
-	pci_disable_msi(pdev);
-	pci_iounmap(pdev, hw->mem_addr);
-free_device:
-	kfree(dev);
-release_regions:
-	pci_release_regions(pdev);
-disable_device:
-	pci_disable_device(pdev);
 end:
 	dev_err(&pdev->dev, "initialization failed.\n");
 	return err;
+}
+
+/**
+ * mei_me_shutdown - Device Removal Routine
+ *
+ * @pdev: PCI device structure
+ *
+ * mei_me_shutdown is called from the reboot notifier
+ * it's a simplified version of remove so we go down
+ * faster.
+ */
+static void mei_me_shutdown(struct pci_dev *pdev)
+{
+	struct mei_device *dev;
+
+	dev = pci_get_drvdata(pdev);
+	if (!dev)
+		return;
+
+	dev_dbg(&pdev->dev, "shutdown\n");
+	mei_stop(dev);
+
+	mei_me_unset_pm_domain(dev);
+
+	mei_disable_interrupts(dev);
+	free_irq(pdev->irq, dev);
 }
 
 /**
@@ -261,13 +315,12 @@ end:
  *
  * @pdev: PCI device structure
  *
- * mei_remove is called by the PCI subsystem to alert the driver
+ * mei_me_remove is called by the PCI subsystem to alert the driver
  * that it should release a PCI device.
  */
 static void mei_me_remove(struct pci_dev *pdev)
 {
 	struct mei_device *dev;
-	struct mei_me_hw *hw;
 
 	dev = pci_get_drvdata(pdev);
 	if (!dev)
@@ -276,33 +329,18 @@ static void mei_me_remove(struct pci_dev *pdev)
 	if (mei_pg_is_enabled(dev))
 		pm_runtime_get_noresume(&pdev->dev);
 
-	hw = to_me_hw(dev);
-
-
 	dev_dbg(&pdev->dev, "stop\n");
 	mei_stop(dev);
 
-	if (!pci_dev_run_wake(pdev))
-		mei_me_unset_pm_domain(dev);
+	mei_me_unset_pm_domain(dev);
 
-	/* disable interrupts */
 	mei_disable_interrupts(dev);
 
 	free_irq(pdev->irq, dev);
-	pci_disable_msi(pdev);
-
-	if (hw->mem_addr)
-		pci_iounmap(pdev, hw->mem_addr);
 
 	mei_deregister(dev);
-
-	kfree(dev);
-
-	pci_release_regions(pdev);
-	pci_disable_device(pdev);
-
-
 }
+
 #ifdef CONFIG_PM_SLEEP
 static int mei_me_pci_suspend(struct device *device)
 {
@@ -365,12 +403,11 @@ static int mei_me_pci_resume(struct device *device)
 #ifdef CONFIG_PM
 static int mei_me_pm_runtime_idle(struct device *device)
 {
-	struct pci_dev *pdev = to_pci_dev(device);
 	struct mei_device *dev;
 
-	dev_dbg(&pdev->dev, "rpm: me: runtime_idle\n");
+	dev_dbg(device, "rpm: me: runtime_idle\n");
 
-	dev = pci_get_drvdata(pdev);
+	dev = dev_get_drvdata(device);
 	if (!dev)
 		return -ENODEV;
 	if (mei_write_is_idle(dev))
@@ -381,13 +418,12 @@ static int mei_me_pm_runtime_idle(struct device *device)
 
 static int mei_me_pm_runtime_suspend(struct device *device)
 {
-	struct pci_dev *pdev = to_pci_dev(device);
 	struct mei_device *dev;
 	int ret;
 
-	dev_dbg(&pdev->dev, "rpm: me: runtime suspend\n");
+	dev_dbg(device, "rpm: me: runtime suspend\n");
 
-	dev = pci_get_drvdata(pdev);
+	dev = dev_get_drvdata(device);
 	if (!dev)
 		return -ENODEV;
 
@@ -400,7 +436,7 @@ static int mei_me_pm_runtime_suspend(struct device *device)
 
 	mutex_unlock(&dev->device_lock);
 
-	dev_dbg(&pdev->dev, "rpm: me: runtime suspend ret=%d\n", ret);
+	dev_dbg(device, "rpm: me: runtime suspend ret=%d\n", ret);
 
 	if (ret && ret != -EAGAIN)
 		schedule_work(&dev->reset_work);
@@ -410,13 +446,12 @@ static int mei_me_pm_runtime_suspend(struct device *device)
 
 static int mei_me_pm_runtime_resume(struct device *device)
 {
-	struct pci_dev *pdev = to_pci_dev(device);
 	struct mei_device *dev;
 	int ret;
 
-	dev_dbg(&pdev->dev, "rpm: me: runtime resume\n");
+	dev_dbg(device, "rpm: me: runtime resume\n");
 
-	dev = pci_get_drvdata(pdev);
+	dev = dev_get_drvdata(device);
 	if (!dev)
 		return -ENODEV;
 
@@ -426,7 +461,7 @@ static int mei_me_pm_runtime_resume(struct device *device)
 
 	mutex_unlock(&dev->device_lock);
 
-	dev_dbg(&pdev->dev, "rpm: me: runtime resume ret = %d\n", ret);
+	dev_dbg(device, "rpm: me: runtime resume ret = %d\n", ret);
 
 	if (ret)
 		schedule_work(&dev->reset_work);
@@ -486,8 +521,9 @@ static struct pci_driver mei_me_driver = {
 	.id_table = mei_me_pci_tbl,
 	.probe = mei_me_probe,
 	.remove = mei_me_remove,
-	.shutdown = mei_me_remove,
+	.shutdown = mei_me_shutdown,
 	.driver.pm = MEI_ME_PM_OPS,
+	.driver.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 };
 
 module_pci_driver(mei_me_driver);

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0
 config ARCH_ZYNQ
 	bool "Xilinx Zynq ARM Cortex A9 Platform"
 	depends on ARCH_MULTI_V7
@@ -9,7 +10,6 @@ config ARCH_ZYNQ
 	select CADENCE_TTC_TIMER
 	select HAVE_ARM_SCU if SMP
 	select HAVE_ARM_TWD if SMP
-	select ICST
 	select MFD_SYSCON
 	select PINCTRL
 	select PINCTRL_ZYNQ

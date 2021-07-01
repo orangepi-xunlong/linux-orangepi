@@ -1,705 +1,304 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2013 Allwinnertech, kevin.z.m <kevin@allwinnertech.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * Copyright (C) 2013 Emilio López <emilio@elopez.com.ar>
  *
  * Adjustable factor-based clock implementation
  */
 
-#include <linux/clk.h>
 #include <linux/clk-provider.h>
-#include <linux/module.h>
-#include <linux/slab.h>
-#include <linux/io.h>
-#include <linux/err.h>
-#include <linux/string.h>
 #include <linux/delay.h>
+#include <linux/err.h>
+#include <linux/io.h>
+#include <linux/of_address.h>
+#include <linux/slab.h>
+#include <linux/string.h>
 
-#include "clk-sunxi.h"
 #include "clk-factors.h"
 
-static int sunxi_clk_disable_plllock(struct sunxi_clk_factors *factor)
+/*
+ * DOC: basic adjustable factor-based clock
+ *
+ * Traits of this clock:
+ * prepare - clk_prepare only ensures that parents are prepared
+ * enable - clk_enable only ensures that parents are enabled
+ * rate - rate is adjustable.
+ *        clk->rate = (parent->rate * N * (K + 1) >> P) / (M + 1)
+ * parent - fixed parent.  No clk_set_parent support
+ */
+
+#define to_clk_factors(_hw) container_of(_hw, struct clk_factors, hw)
+
+#define FACTORS_MAX_PARENTS		5
+
+#define SETMASK(len, pos)		(((1U << (len)) - 1) << (pos))
+#define CLRMASK(len, pos)		(~(SETMASK(len, pos)))
+#define FACTOR_GET(bit, len, reg)	(((reg) & SETMASK(len, bit)) >> (bit))
+
+#define FACTOR_SET(bit, len, reg, val) \
+	(((reg) & CLRMASK(len, bit)) | (val << (bit)))
+
+static unsigned long clk_factors_recalc_rate(struct clk_hw *hw,
+					     unsigned long parent_rate)
 {
-	volatile u32 reg;
+	u8 n = 1, k = 0, p = 0, m = 0;
+	u32 reg;
+	unsigned long rate;
+	struct clk_factors *factors = to_clk_factors(hw);
+	const struct clk_factors_config *config = factors->config;
 
-	switch (factor->lock_mode) {
-	case PLL_LOCK_NEW_MODE:
-	case PLL_LOCK_OLD_MODE:
-		/* make sure pll new mode is disable */
-		reg = factor_readl(factor, factor->pll_lock_ctrl_reg);
-		reg = SET_BITS(factor->lock_en_bit, 1, reg, 0);
-		factor_writel(factor, reg, factor->pll_lock_ctrl_reg);
+	/* Fetch the register value */
+	reg = readl(factors->reg);
 
-		reg = factor_readl(factor, factor->pll_lock_ctrl_reg);
-		reg = SET_BITS(28, 1, reg, 0);
-		factor_writel(factor, reg, factor->pll_lock_ctrl_reg);
-		break;
-	case PLL_LOCK_NONE_MODE:
-		break;
-	default:
-		WARN(1, "invaild pll lock mode:%u\n", factor->lock_mode);
-		return -1;
+	/* Get each individual factor if applicable */
+	if (config->nwidth != SUNXI_FACTORS_NOT_APPLICABLE)
+		n = FACTOR_GET(config->nshift, config->nwidth, reg);
+	if (config->kwidth != SUNXI_FACTORS_NOT_APPLICABLE)
+		k = FACTOR_GET(config->kshift, config->kwidth, reg);
+	if (config->mwidth != SUNXI_FACTORS_NOT_APPLICABLE)
+		m = FACTOR_GET(config->mshift, config->mwidth, reg);
+	if (config->pwidth != SUNXI_FACTORS_NOT_APPLICABLE)
+		p = FACTOR_GET(config->pshift, config->pwidth, reg);
+
+	if (factors->recalc) {
+		struct factors_request factors_req = {
+			.parent_rate = parent_rate,
+			.n = n,
+			.k = k,
+			.m = m,
+			.p = p,
+		};
+
+		/* get mux details from mux clk structure */
+		if (factors->mux)
+			factors_req.parent_index =
+				(reg >> factors->mux->shift) &
+				factors->mux->mask;
+
+		factors->recalc(&factors_req);
+
+		return factors_req.rate;
 	}
 
-	return 0;
+	/* Calculate the rate */
+	rate = (parent_rate * (n + config->n_start) * (k + 1) >> p) / (m + 1);
+
+	return rate;
 }
 
-static int sunxi_clk_is_lock(struct sunxi_clk_factors *factor)
+static int clk_factors_determine_rate(struct clk_hw *hw,
+				      struct clk_rate_request *req)
 {
-	volatile u32 reg;
-	u32 loop = 5000;
-
-	if (factor->lock_mode >= PLL_LOCK_MODE_MAX) {
-		WARN(1, "invaild pll lock mode:%u\n", factor->lock_mode);
-		return -1;
-	}
-
-	if (factor->lock_mode == PLL_LOCK_NEW_MODE) {
-		/* enable pll new mode */
-		reg = factor_readl(factor, factor->pll_lock_ctrl_reg);
-		reg = SET_BITS(28, 1, reg, 1);
-		factor_writel(factor, reg, factor->pll_lock_ctrl_reg);
-
-		reg = factor_readl(factor, factor->pll_lock_ctrl_reg);
-		reg = SET_BITS(factor->lock_en_bit, 1, reg, 1);
-		factor_writel(factor, reg, factor->pll_lock_ctrl_reg);
-	}
-
-	while (--loop) {
-		reg = factor_readl(factor, factor->lock_reg);
-		if (GET_BITS(factor->lock_bit, 1, reg)) {
-			udelay(20);
-			break;
-		}
-
-		udelay(1);
-	}
-
-	if (factor->lock_mode == PLL_LOCK_NEW_MODE) {
-		/* disable pll new mode */
-		reg = factor_readl(factor, factor->pll_lock_ctrl_reg);
-		reg = SET_BITS(factor->lock_en_bit, 1, reg, 0);
-		factor_writel(factor, reg, factor->pll_lock_ctrl_reg);
-
-		reg = factor_readl(factor, factor->pll_lock_ctrl_reg);
-		reg = SET_BITS(28, 1, reg, 0);
-		factor_writel(factor, reg, factor->pll_lock_ctrl_reg);
-	}
-
-	if (!loop) {
-#if (defined CONFIG_FPGA_V4_PLATFORM) || (defined CONFIG_FPGA_V7_PLATFORM)
-		pr_err("clk %s wait lock timeout\n",
-		       clk_hw_get_name(&factor->hw));
-		return 0;
-#else
-		return -1;
-#endif
-	}
-
-	return 0;
-}
-
-#ifndef CONFIG_ARCH_SUN8IW12P1
-static int sunxi_clk_fators_enable(struct clk_hw *hw)
-{
-	struct sunxi_clk_factors *factor = to_clk_factor(hw);
-	struct sunxi_clk_factors_config *config = factor->config;
-	unsigned long reg;
-	unsigned long flags = 0;
-
-	/* check if the pll enabled already */
-	reg = factor_readl(factor, factor->reg);
-	if (GET_BITS(config->enshift, 1, reg))
-		return 0;
-
-	if (factor->lock)
-		spin_lock_irqsave(factor->lock, flags);
-
-	sunxi_clk_disable_plllock(factor);
-
-	/* get factor register value */
-	reg = factor_readl(factor, factor->reg);
-	if (config->sdmwidth) {
-		factor_writel(factor, config->sdmval,
-			 (void __iomem *)config->sdmpat);
-		reg = SET_BITS(config->sdmshift, config->sdmwidth, reg, 1);
-	}
-
-	/* enable the register */
-	reg = SET_BITS(config->enshift, 1, reg, 1);
-
-	/* update for pll_ddr register */
-	if (config->updshift)
-		reg = SET_BITS(config->updshift, 1, reg, 1);
-
-	if (config->out_enshift)
-		reg = SET_BITS(config->out_enshift, 1, reg, 1);
-
-	if (config->mux_inshift)
-		reg = SET_BITS(config->mux_inshift, 1, reg, 1);
-
-	factor_writel(factor, reg, factor->reg);
-
-	if (sunxi_clk_is_lock(factor)) {
-		if (factor->lock)
-			spin_unlock_irqrestore(factor->lock, flags);
-		WARN(1, "clk %s wait lock timeout\n", clk_hw_get_name(&factor->hw));
-		return -1;
-	}
-
-	if (factor->lock)
-		spin_unlock_irqrestore(factor->lock, flags);
-
-	return 0;
-}
-#else
-#define PLL_ENABLE_INIT_FACTOR_N	80
-#define PLL_LOCK_TIMEOUT_CNT		5
-
-static int sunxi_clk_fators_enable(struct clk_hw *hw)
-{
-	struct sunxi_clk_factors *factor = to_clk_factor(hw);
-	struct sunxi_clk_factors_config *config = factor->config;
-	unsigned long reg;
-	unsigned long flags = 0;
-	u16 factor_n;
-	u8 i;
-
-	/* check if the pll enabled already */
-	reg = factor_readl(factor, factor->reg);
-	if (GET_BITS(config->enshift, 1, reg))
-		return 0;
-
-	if (factor->lock)
-		spin_lock_irqsave(factor->lock, flags);
-
-	sunxi_clk_disable_plllock(factor);
-
-	/* get factor register value */
-	reg = factor_readl(factor, factor->reg);
-	/* store the factor n */
-	factor_n = (reg >> config->nshift) & 0xFF;
-
-	/* enable the register */
-	reg = SET_BITS(config->enshift, 1, reg, 1);
-
-	if (config->sdmwidth) {
-		factor_writel(factor, config->sdmval,
-			(void __iomem *)config->sdmpat);
-		reg = SET_BITS(config->sdmshift, config->sdmwidth, reg, 1);
-	}
-
-	/* config a larger value for factor_n */
-	if (config->nwidth)
-		reg = SET_BITS(config->nshift, config->nwidth, reg,
-					 PLL_ENABLE_INIT_FACTOR_N);
-
-	/* update for pll_ddr register */
-	if (config->updshift)
-		reg = SET_BITS(config->updshift, 1, reg, 1);
-
-	factor_writel(factor, reg, factor->reg);
-
-	for (i = 0; i < PLL_LOCK_TIMEOUT_CNT; i++) {
-		if (sunxi_clk_is_lock(factor) == 0)
-			break;
-
-		reg = SET_BITS(config->enshift, 1, reg, 0);
-		factor_writel(factor, reg, factor->reg);
-		udelay(1);
-		reg = SET_BITS(config->enshift, 1, reg, 1);
-		factor_writel(factor, reg, factor->reg);
-	}
-	if (i == PLL_LOCK_TIMEOUT_CNT) {
-		if (factor->lock)
-			spin_unlock_irqrestore(factor->lock, flags);
-		WARN(1, "clk %s wait lock timeout\n", clk_hw_get_name(&factor->hw));
-		return -1;
-	}
-
-	if (config->nwidth)
-		reg = SET_BITS(config->nshift, config->nwidth, reg, factor_n);
-
-	factor_writel(factor, reg, factor->reg);
-
-	if (sunxi_clk_is_lock(factor)) {
-		if (factor->lock)
-			spin_unlock_irqrestore(factor->lock, flags);
-		WARN(1, "clk %s wait lock timeout\n", clk_hw_get_name(&factor->hw));
-		return -1;
-	}
-
-	if (factor->lock)
-		spin_unlock_irqrestore(factor->lock, flags);
-
-	return 0;
-}
-#endif
-
-static void sunxi_clk_fators_disable(struct clk_hw *hw)
-{
-	struct sunxi_clk_factors *factor = to_clk_factor(hw);
-	struct sunxi_clk_factors_config *config = factor->config;
-	unsigned long reg;
-	unsigned long flags = 0;
-
-	if (factor->flags & CLK_NO_DISABLE)
-		return;
-
-	/* check if the pll disabled already */
-	reg = factor_readl(factor, factor->reg);
-	if (!GET_BITS(config->enshift, 1, reg))
-		return;
-
-	/* When the pll is not in use, just set it to the minimum frequency */
-	if (factor->flags & CLK_IGNORE_DISABLE) {
-		/*
-		clk_set_rate(hw->clk, 0);
-		*/
-		return;
-	}
-
-	if (factor->lock)
-		spin_lock_irqsave(factor->lock, flags);
-
-	reg = factor_readl(factor, factor->reg);
-	if (config->sdmwidth)
-		reg = SET_BITS(config->sdmshift, config->sdmwidth, reg, 0);
-
-	/* update for pll_ddr register */
-	if (config->updshift)
-		reg = SET_BITS(config->updshift, 1, reg, 1);
-
-	/* disable pll */
-	reg = SET_BITS(config->enshift, 1, reg, 0);
-	factor_writel(factor, reg, factor->reg);
-
-	/* disable pll lock if needed */
-	sunxi_clk_disable_plllock(factor);
-
-	if (factor->lock)
-		spin_unlock_irqrestore(factor->lock, flags);
-}
-
-static int sunxi_clk_fators_is_enabled(struct clk_hw *hw)
-{
-	unsigned long val;
-	struct sunxi_clk_factors *factor = to_clk_factor(hw);
-	struct sunxi_clk_factors_config *config = factor->config;
-	unsigned long reg;
-	unsigned long flags = 0;
-
-	if (factor->flags & CLK_NO_DISABLE)
-		return __clk_get_enable_count(hw->clk);
-
-	if (factor->lock)
-		spin_lock_irqsave(factor->lock, flags);
-
-	reg = factor_readl(factor, factor->reg);
-	val = GET_BITS(config->enshift, 1, reg);
-
-	if (factor->lock)
-		spin_unlock_irqrestore(factor->lock, flags);
-
-	return val ? 1 : 0;
-}
-
-static unsigned long sunxi_clk_factors_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)
-{
-	unsigned long reg;
-	struct clk_factors_value factor_val;
-	struct sunxi_clk_factors *factor = to_clk_factor(hw);
-	struct sunxi_clk_factors_config *config = factor->config;
-	unsigned long flags = 0;
-
-	if (!factor->calc_rate)
-		return 0;
-
-	if (factor->lock)
-		spin_lock_irqsave(factor->lock, flags);
-
-	reg = factor_readl(factor, factor->reg);
-
-	if (factor->lock)
-		spin_unlock_irqrestore(factor->lock, flags);
-
-	if (config->nwidth)
-		factor_val.factorn = GET_BITS(config->nshift, config->nwidth, reg);
-	else
-		factor_val.factorn = 0xffff;
-
-	if (config->kwidth)
-		factor_val.factork = GET_BITS(config->kshift, config->kwidth, reg);
-	else
-		factor_val.factork = 0xffff;
-
-	if (config->mwidth)
-		factor_val.factorm = GET_BITS(config->mshift, config->mwidth, reg);
-	else
-		factor_val.factorm = 0xffff;
-
-	if (config->pwidth)
-		factor_val.factorp = GET_BITS(config->pshift, config->pwidth, reg);
-	else
-		factor_val.factorp = 0xffff;
-
-	if (config->d1width)
-		factor_val.factord1 = GET_BITS(config->d1shift, config->d1width, reg);
-	else
-		factor_val.factord1 = 0xffff;
-
-	if (config->d2width)
-		factor_val.factord2 = GET_BITS(config->d2shift, config->d2width, reg);
-	else
-		factor_val.factord2 = 0xffff;
-
-	if (config->frac) {
-		factor_val.frac_mode = GET_BITS(config->modeshift, 1, reg);
-		factor_val.frac_freq = GET_BITS(config->outshift, 1, reg);
-	} else {
-		factor_val.frac_mode = 0xffff;
-		factor_val.frac_freq = 0xffff;
-	}
-
-	return factor->calc_rate(parent_rate, &factor_val);
-}
-
-static long sunxi_clk_factors_round_rate(struct clk_hw *hw, unsigned long rate, unsigned long *prate)
-{
-	struct clk_factors_value factor_val;
-	struct sunxi_clk_factors *factor = to_clk_factor(hw);
-
-	if (!factor->get_factors || !factor->calc_rate)
-		return rate;
-
-	factor->get_factors(rate, *prate, &factor_val);
-	return factor->calc_rate(*prate, &factor_val);
-}
-
-static int sunxi_clk_factors_set_flat_facotrs(struct sunxi_clk_factors *factor,
-				struct clk_factors_value *values)
-{
-	struct sunxi_clk_factors_config *config = factor->config;
-	u32 reg, tmp_factor_p, tmp_factor_m;
-	unsigned long flags = 0;
-
-	if (factor->lock)
-		spin_lock_irqsave(factor->lock, flags);
-
-	sunxi_clk_disable_plllock(factor);
-
-	/*get all factors from the regitsters*/
-	reg = factor_readl(factor, factor->reg);
-	tmp_factor_p = config->pwidth ? GET_BITS(config->pshift, config->pwidth, reg) : 0;
-	tmp_factor_m = config->mwidth ? GET_BITS(config->mshift, config->mwidth, reg) : 0;
-
-	/* 1).try to increase factor p first */
-	if (config->pwidth && (tmp_factor_p < values->factorp)) {
-		reg = factor_readl(factor, factor->reg);
-		reg = SET_BITS(config->pshift, config->pwidth, reg, values->factorp);
-		factor_writel(factor, reg, factor->reg);
-		if (factor->flags & CLK_RATE_FLAT_DELAY)
-			udelay(config->delay);
-	}
-
-	/* 2).try to increase factor m first */
-	if (config->mwidth && (tmp_factor_m < values->factorm)) {
-		reg = factor_readl(factor, factor->reg);
-		reg = SET_BITS(config->mshift, config->mwidth, reg, values->factorm);
-		factor_writel(factor, reg, factor->reg);
-		if (factor->flags & CLK_RATE_FLAT_DELAY)
-			udelay(config->delay);
-	}
-
-	/* 3. write factor n & k */
-	reg = factor_readl(factor, factor->reg);
-	if (config->nwidth)
-		reg = SET_BITS(config->nshift, config->nwidth, reg, values->factorn);
-	if (config->kwidth)
-		reg = SET_BITS(config->kshift, config->kwidth, reg, values->factork);
-	factor_writel(factor, reg, factor->reg);
-
-	/* 4. do pair things for 2). decease factor m */
-	if (config->mwidth && (tmp_factor_m > values->factorm)) {
-		reg = factor_readl(factor, factor->reg);
-		reg = SET_BITS(config->mshift, config->mwidth, reg, values->factorm);
-		factor_writel(factor, reg, factor->reg);
-		if (factor->flags & CLK_RATE_FLAT_DELAY)
-			udelay(config->delay);
-	}
-
-	/* 5. wait for PLL state stable */
-	if (sunxi_clk_is_lock(factor)) {
-		if (factor->lock)
-			spin_unlock_irqrestore(factor->lock, flags);
-		WARN(1, "clk %s wait lock timeout\n", clk_hw_get_name(&factor->hw));
-		return -1;
-	}
-
-	/*6.do pair things for 1).  decease factor p */
-	if (config->pwidth && (tmp_factor_p > values->factorp)) {
-		reg = factor_readl(factor, factor->reg);
-		reg = SET_BITS(config->pshift, config->pwidth, reg, values->factorp);
-		factor_writel(factor, reg, factor->reg);
-		if (factor->flags & CLK_RATE_FLAT_DELAY)
-			udelay(config->delay);
-	}
-
-	if (factor->lock)
-		spin_unlock_irqrestore(factor->lock, flags);
-
-	return 0;
-}
-
-
-static int sunxi_clk_factors_set_rate(struct clk_hw *hw, unsigned long rate, unsigned long parent_rate)
-{
-	unsigned long reg;
-	struct clk_factors_value factor_val;
-	struct sunxi_clk_factors *factor = to_clk_factor(hw);
-	struct sunxi_clk_factors_config *config = factor->config;
-	unsigned long flags = 0;
-
-	if (!factor->get_factors)
-		return 0;
-
-	/* factor_val is initialized with its original value,
-	 * it's factors(such as:M,N,K,P,d1,d2...) are Random Value.
-	 * if donot judge the return value of "factor->get_factors",
-	 * it may change the original register value.
-	 */
-	if (factor->get_factors(rate, parent_rate, &factor_val) < 0) {
-		/* cannot get right factors for clk,just break */
-		WARN(1, "clk %s set rate failed! Because cannot get right factors for clk\n", hw->init->name);
-		return 0;
-	}
-
-	if (factor->flags & CLK_RATE_FLAT_FACTORS)
-		return sunxi_clk_factors_set_flat_facotrs(factor, &factor_val);
-
-	if (factor->lock)
-		spin_lock_irqsave(factor->lock, flags);
-
-	sunxi_clk_disable_plllock(factor);
-
-	reg = factor_readl(factor, factor->reg);
-	if (config->sdmwidth) {
-		factor_writel(factor, config->sdmval, (void __iomem *)config->sdmpat);
-		reg = SET_BITS(config->sdmshift, config->sdmwidth, reg, 1);
-	}
-	if (config->nwidth)
-		reg = SET_BITS(config->nshift, config->nwidth, reg, factor_val.factorn);
-	if (config->kwidth)
-		reg = SET_BITS(config->kshift, config->kwidth, reg, factor_val.factork);
-	if (config->mwidth)
-		reg = SET_BITS(config->mshift, config->mwidth, reg, factor_val.factorm);
-	if (config->pwidth)
-		reg = SET_BITS(config->pshift, config->pwidth, reg, factor_val.factorp);
-	if (config->d1width)
-		reg = SET_BITS(config->d1shift, config->d1width, reg, factor_val.factord1);
-	if (config->d2width)
-		reg = SET_BITS(config->d2shift, config->d2width, reg, factor_val.factord2);
-	if (config->frac) {
-		reg = SET_BITS(config->modeshift, 1, reg, factor_val.frac_mode);
-		reg = SET_BITS(config->outshift, 1, reg, factor_val.frac_freq);
-	}
-	if (config->updshift)
-		reg = SET_BITS(config->updshift, 1, reg, 1);
-	factor_writel(factor, reg, factor->reg);
-
-#ifndef CONFIG_SUNXI_CLK_DUMMY_DEBUG
-	if (GET_BITS(config->enshift, 1, reg)) {
-		if (sunxi_clk_is_lock(factor)) {
-			if (factor->lock)
-				spin_unlock_irqrestore(factor->lock, flags);
-			WARN(1, "clk %s wait lock timeout\n", clk_hw_get_name(&factor->hw));
-			return -1;
+	struct clk_factors *factors = to_clk_factors(hw);
+	struct clk_hw *parent, *best_parent = NULL;
+	int i, num_parents;
+	unsigned long parent_rate, best = 0, child_rate, best_child_rate = 0;
+
+	/* find the parent that can help provide the fastest rate <= rate */
+	num_parents = clk_hw_get_num_parents(hw);
+	for (i = 0; i < num_parents; i++) {
+		struct factors_request factors_req = {
+			.rate = req->rate,
+			.parent_index = i,
+		};
+		parent = clk_hw_get_parent_by_index(hw, i);
+		if (!parent)
+			continue;
+		if (clk_hw_get_flags(hw) & CLK_SET_RATE_PARENT)
+			parent_rate = clk_hw_round_rate(parent, req->rate);
+		else
+			parent_rate = clk_hw_get_rate(parent);
+
+		factors_req.parent_rate = parent_rate;
+		factors->get_factors(&factors_req);
+		child_rate = factors_req.rate;
+
+		if (child_rate <= req->rate && child_rate > best_child_rate) {
+			best_parent = parent;
+			best = parent_rate;
+			best_child_rate = child_rate;
 		}
 	}
-#endif
 
-	if (factor->lock)
-		spin_unlock_irqrestore(factor->lock, flags);
+	if (!best_parent)
+		return -EINVAL;
+
+	req->best_parent_hw = best_parent;
+	req->best_parent_rate = best;
+	req->rate = best_child_rate;
+
+	return 0;
+}
+
+static int clk_factors_set_rate(struct clk_hw *hw, unsigned long rate,
+				unsigned long parent_rate)
+{
+	struct factors_request req = {
+		.rate = rate,
+		.parent_rate = parent_rate,
+	};
+	u32 reg;
+	struct clk_factors *factors = to_clk_factors(hw);
+	const struct clk_factors_config *config = factors->config;
+	unsigned long flags = 0;
+
+	factors->get_factors(&req);
+
+	if (factors->lock)
+		spin_lock_irqsave(factors->lock, flags);
+
+	/* Fetch the register value */
+	reg = readl(factors->reg);
+
+	/* Set up the new factors - macros do not do anything if width is 0 */
+	reg = FACTOR_SET(config->nshift, config->nwidth, reg, req.n);
+	reg = FACTOR_SET(config->kshift, config->kwidth, reg, req.k);
+	reg = FACTOR_SET(config->mshift, config->mwidth, reg, req.m);
+	reg = FACTOR_SET(config->pshift, config->pwidth, reg, req.p);
+
+	/* Apply them now */
+	writel(reg, factors->reg);
+
+	/* delay 500us so pll stabilizes */
+	__delay((rate >> 20) * 500 / 2);
+
+	if (factors->lock)
+		spin_unlock_irqrestore(factors->lock, flags);
 
 	return 0;
 }
 
 static const struct clk_ops clk_factors_ops = {
-	.enable = sunxi_clk_fators_enable,
-	.disable = sunxi_clk_fators_disable,
-	.is_enabled = sunxi_clk_fators_is_enabled,
-
-	.recalc_rate = sunxi_clk_factors_recalc_rate,
-	.round_rate = sunxi_clk_factors_round_rate,
-	.set_rate = sunxi_clk_factors_set_rate,
+	.determine_rate = clk_factors_determine_rate,
+	.recalc_rate = clk_factors_recalc_rate,
+	.set_rate = clk_factors_set_rate,
 };
 
-void sunxi_clk_get_factors_ops(struct clk_ops *ops)
+static struct clk *__sunxi_factors_register(struct device_node *node,
+					    const struct factors_data *data,
+					    spinlock_t *lock, void __iomem *reg,
+					    unsigned long flags)
 {
-	memcpy(ops, &clk_factors_ops, sizeof(clk_factors_ops));
-}
-
-/*
- * sunxi_clk_set_factor_lock_mode() - Set factor lock mode
- */
-void sunxi_clk_set_factor_lock_mode(struct factor_init_data *factor,
-		const char *lock_mode)
-{
-	if (!strcmp(lock_mode, "new"))
-		factor->lock_mode = PLL_LOCK_NEW_MODE;
-	else if (!strcmp(lock_mode, "old"))
-		factor->lock_mode = PLL_LOCK_OLD_MODE;
-	else
-		factor->lock_mode = PLL_LOCK_NONE_MODE;
-}
-
-/**
- * clk_register_factors - register a factors clock with
- * the clock framework
- * @dev: device registering this clock
- * @name: name of this clock
- * @parent_name: name of clock's parent
- * @flags: framework-specific flags
- * @reg: register address to adjust factors
- * @config: shift and width of factors n, k, m, p, div1 and div2
- * @get_factors: function to calculate the factors for a given frequency
- * @lock: shared register lock for this clock
- */
-struct clk *sunxi_clk_register_factors(struct device *dev, void __iomem *base,
-		spinlock_t *lock, struct factor_init_data *init_data)
-{
-	struct sunxi_clk_factors *factors;
 	struct clk *clk;
-	struct clk_init_data init;
+	struct clk_factors *factors;
+	struct clk_gate *gate = NULL;
+	struct clk_mux *mux = NULL;
+	struct clk_hw *gate_hw = NULL;
+	struct clk_hw *mux_hw = NULL;
+	const char *clk_name = node->name;
+	const char *parents[FACTORS_MAX_PARENTS];
+	int ret, i = 0;
 
-	/* allocate the factors */
-	factors = kzalloc(sizeof(struct sunxi_clk_factors), GFP_KERNEL);
-	if (!factors) {
-		pr_err("%s: could not allocate factors clk\n", __func__);
-		return ERR_PTR(-ENOMEM);
+	/* if we have a mux, we will have >1 parents */
+	i = of_clk_parent_fill(node, parents, FACTORS_MAX_PARENTS);
+
+	/*
+	 * some factor clocks, such as pll5 and pll6, may have multiple
+	 * outputs, and have their name designated in factors_data
+	 */
+	if (data->name)
+		clk_name = data->name;
+	else
+		of_property_read_string(node, "clock-output-names", &clk_name);
+
+	factors = kzalloc(sizeof(struct clk_factors), GFP_KERNEL);
+	if (!factors)
+		goto err_factors;
+
+	/* set up factors properties */
+	factors->reg = reg;
+	factors->config = data->table;
+	factors->get_factors = data->getter;
+	factors->recalc = data->recalc;
+	factors->lock = lock;
+
+	/* Add a gate if this factor clock can be gated */
+	if (data->enable) {
+		gate = kzalloc(sizeof(struct clk_gate), GFP_KERNEL);
+		if (!gate)
+			goto err_gate;
+
+		factors->gate = gate;
+
+		/* set up gate properties */
+		gate->reg = reg;
+		gate->bit_idx = data->enable;
+		gate->lock = factors->lock;
+		gate_hw = &gate->hw;
 	}
 
-#ifdef __SUNXI_ALL_CLK_IGNORE_UNUSED__
-	init_data->flags |= CLK_IGNORE_UNUSED;
-#endif
-	init.name = init_data->name;
-	init.ops = init_data->priv_ops ? (init_data->priv_ops) : (&clk_factors_ops);
-	factors->priv_regops = init_data->priv_regops ? (init_data->priv_regops) : NULL;
-	init.flags = init_data->flags;
-	init.parent_names = init_data->parent_names;
-	init.num_parents = init_data->num_parents;
+	/* Add a mux if this factor clock can be muxed */
+	if (data->mux) {
+		mux = kzalloc(sizeof(struct clk_mux), GFP_KERNEL);
+		if (!mux)
+			goto err_mux;
 
-	/* struct clk_factors assignments */
-	factors->reg = base + init_data->reg;
-	factors->lock_reg = base + init_data->lock_reg;
-	factors->lock_bit = init_data->lock_bit;
-	factors->pll_lock_ctrl_reg = base + init_data->pll_lock_ctrl_reg;
-	factors->lock_en_bit = init_data->lock_en_bit;
-	factors->lock_mode = init_data->lock_mode;
-	factors->config = init_data->config;
-	factors->config->sdmpat = (unsigned long __force)(base + factors->config->sdmpat);
-	factors->lock = lock;
-	factors->hw.init = &init;
-	factors->get_factors = init_data->get_factors;
-	factors->calc_rate = init_data->calc_rate;
-	factors->flags = init_data->flags;
-	/* register the clock */
-	clk = clk_register(dev, &factors->hw);
-	factors->hw.init = NULL;
+		factors->mux = mux;
 
+		/* set up gate properties */
+		mux->reg = reg;
+		mux->shift = data->mux;
+		mux->mask = data->muxmask;
+		mux->lock = factors->lock;
+		mux_hw = &mux->hw;
+	}
+
+	clk = clk_register_composite(NULL, clk_name,
+			parents, i,
+			mux_hw, &clk_mux_ops,
+			&factors->hw, &clk_factors_ops,
+			gate_hw, &clk_gate_ops, CLK_IS_CRITICAL);
 	if (IS_ERR(clk))
-		kfree(factors);
+		goto err_register;
+
+	ret = of_clk_add_provider(node, of_clk_src_simple_get, clk);
+	if (ret)
+		goto err_provider;
 
 	return clk;
+
+err_provider:
+	/* TODO: The composite clock stuff will leak a bit here. */
+	clk_unregister(clk);
+err_register:
+	kfree(mux);
+err_mux:
+	kfree(gate);
+err_gate:
+	kfree(factors);
+err_factors:
+	return NULL;
 }
 
-int sunxi_clk_get_common_factors(struct sunxi_clk_factors_config *f_config, struct clk_factors_value *factor,
-		struct sunxi_clk_factor_freq table[], unsigned long index, unsigned long tbl_size)
+struct clk *sunxi_factors_register(struct device_node *node,
+				   const struct factors_data *data,
+				   spinlock_t *lock,
+				   void __iomem *reg)
 {
-	if (index >= tbl_size/sizeof(struct sunxi_clk_factor_freq))
-		return -1;
-
-	factor->factorn = (table[index].factor>>f_config->nshift)&((1<<(f_config->nwidth))-1);
-	factor->factork = (table[index].factor>>f_config->kshift)&((1<<(f_config->kwidth))-1);
-	factor->factorm = (table[index].factor>>f_config->mshift)&((1<<(f_config->mwidth))-1);
-	factor->factorp = (table[index].factor>>f_config->pshift)&((1<<(f_config->pwidth))-1);
-	factor->factord1 = (table[index].factor>>f_config->d1shift)&((1<<(f_config->d1width))-1);
-	factor->factord2 = (table[index].factor>>f_config->d2shift)&((1<<(f_config->d2width))-1);
-
-	if (f_config->frac) {
-		factor->frac_mode = (table[index].factor>>f_config->modeshift)&1;
-		factor->frac_freq = (table[index].factor>>f_config->outshift)&1;
-	}
-
-	return 0;
+	return __sunxi_factors_register(node, data, lock, reg, 0);
 }
 
-static int sunxi_clk_freq_search(struct sunxi_clk_factor_freq tbl[],
-				unsigned long freq, int low, int high)
+struct clk *sunxi_factors_register_critical(struct device_node *node,
+					    const struct factors_data *data,
+					    spinlock_t *lock,
+					    void __iomem *reg)
 {
-	int mid;
-	unsigned long checkfreq;
-
-	if (low > high)
-		return (high == -1) ? 0 : high;
-
-	mid = (low + high)/2;
-	checkfreq = tbl[mid].freq/1000000;
-
-	if (checkfreq == freq)
-		return mid;
-	else if (checkfreq > freq)
-		return sunxi_clk_freq_search(tbl, freq, low, mid - 1);
-	else
-		return sunxi_clk_freq_search(tbl, freq, mid + 1, high);
+	return __sunxi_factors_register(node, data, lock, reg, CLK_IS_CRITICAL);
 }
 
-static int sunxi_clk_freq_find(struct sunxi_clk_factor_freq tbl[],
-				unsigned long n, unsigned long freq)
+void sunxi_factors_unregister(struct device_node *node, struct clk *clk)
 {
-	int delta1, delta2;
-	int i = sunxi_clk_freq_search(tbl, freq, 0, n-1);
+	struct clk_hw *hw = __clk_get_hw(clk);
+	struct clk_factors *factors;
 
-	if (i != n-1) {
+	if (!hw)
+		return;
 
-		delta1 = (freq > tbl[i].freq / 1000000)
-			? (freq - tbl[i].freq / 1000000)
-			: (tbl[i].freq / 1000000 - freq);
+	factors = to_clk_factors(hw);
 
-		delta2 = (freq > tbl[i+1].freq / 1000000)
-			? (freq - tbl[i+1].freq / 1000000)
-			: (tbl[i+1].freq / 1000000 - freq);
-
-		if (delta2 < delta1)
-			i++;
-	}
-
-	return i;
-}
-
-int sunxi_clk_com_ftr_sr(struct sunxi_clk_factors_config *f_config,
-				struct clk_factors_value *factor,
-				struct sunxi_clk_factor_freq table[],
-				unsigned long index, unsigned long tbl_count)
-{
-	int i = sunxi_clk_freq_find(table, tbl_count, index);
-
-	if (i >= tbl_count)
-		return -1;
-
-	factor->factorn = (table[i].factor >> f_config->nshift)&((1<<(f_config->nwidth))-1);
-	factor->factork = (table[i].factor>>f_config->kshift)&((1<<(f_config->kwidth))-1);
-	factor->factorm = (table[i].factor>>f_config->mshift)&((1<<(f_config->mwidth))-1);
-	factor->factorp = (table[i].factor>>f_config->pshift)&((1<<(f_config->pwidth))-1);
-	factor->factord1 = (table[i].factor>>f_config->d1shift)&((1<<(f_config->d1width))-1);
-	factor->factord2 = (table[i].factor>>f_config->d2shift)&((1<<(f_config->d2width))-1);
-
-	if (f_config->frac) {
-		factor->frac_mode = (table[i].factor>>f_config->modeshift)&1;
-		factor->frac_freq = (table[i].factor>>f_config->outshift)&1;
-	}
-
-	return 0;
+	of_clk_del_provider(node);
+	/* TODO: The composite clock stuff will leak a bit here. */
+	clk_unregister(clk);
+	kfree(factors->mux);
+	kfree(factors->gate);
+	kfree(factors);
 }

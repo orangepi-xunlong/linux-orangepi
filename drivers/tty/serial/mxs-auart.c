@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Application UART driver for:
  *	Freescale STMP37XX/STMP378X
@@ -9,15 +10,7 @@
  *	Provide Alphascale ASM9260 support.
  * Copyright 2008-2010 Freescale Semiconductor, Inc.
  * Copyright 2008 Embedded Alley Solutions, Inc All Rights Reserved.
- *
- * The code contained herein is licensed under the GNU General Public
- * License. You may obtain a copy of the GNU General Public License
- * Version 2 or later at the following locations:
  */
-
-#if defined(CONFIG_SERIAL_MXS_AUART_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
-#define SUPPORT_SYSRQ
-#endif
 
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -43,7 +36,6 @@
 
 #include <asm/cacheflush.h>
 
-#include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
 #include <linux/err.h>
 #include <linux/irq.h>
@@ -95,6 +87,7 @@
 #define AUART_LINECTRL_BAUD_DIVFRAC_SHIFT	8
 #define AUART_LINECTRL_BAUD_DIVFRAC_MASK	0x00003f00
 #define AUART_LINECTRL_BAUD_DIVFRAC(v)		(((v) & 0x3f) << 8)
+#define AUART_LINECTRL_SPS			(1 << 7)
 #define AUART_LINECTRL_WLEN_MASK		0x00000060
 #define AUART_LINECTRL_WLEN(v)			(((v) & 0x3) << 5)
 #define AUART_LINECTRL_FEN			(1 << 4)
@@ -972,10 +965,8 @@ err_out:
 
 }
 
-#define RTS_AT_AUART()	IS_ERR_OR_NULL(mctrl_gpio_to_gpiod(s->gpios,	\
-							UART_GPIO_RTS))
-#define CTS_AT_AUART()	IS_ERR_OR_NULL(mctrl_gpio_to_gpiod(s->gpios,	\
-							UART_GPIO_CTS))
+#define RTS_AT_AUART()	!mctrl_gpio_to_gpiod(s->gpios, UART_GPIO_RTS)
+#define CTS_AT_AUART()	!mctrl_gpio_to_gpiod(s->gpios, UART_GPIO_CTS)
 static void mxs_auart_settermios(struct uart_port *u,
 				 struct ktermios *termios,
 				 struct ktermios *old)
@@ -1014,9 +1005,11 @@ static void mxs_auart_settermios(struct uart_port *u,
 		ctrl |= AUART_LINECTRL_PEN;
 		if ((cflag & PARODD) == 0)
 			ctrl |= AUART_LINECTRL_EPS;
+		if (cflag & CMSPAR)
+			ctrl |= AUART_LINECTRL_SPS;
 	}
 
-	u->read_status_mask = 0;
+	u->read_status_mask = AUART_STAT_OERR;
 
 	if (termios->c_iflag & INPCK)
 		u->read_status_mask |= AUART_STAT_PERR;
@@ -1597,7 +1590,7 @@ static int mxs_auart_init_gpios(struct mxs_auart_port *s, struct device *dev)
 
 	for (i = 0; i < UART_GPIO_MAX; i++) {
 		gpiod = mctrl_gpio_to_gpiod(s->gpios, i);
-		if (gpiod && (gpiod_get_direction(gpiod) == GPIOF_DIR_IN))
+		if (gpiod && (gpiod_get_direction(gpiod) == 1))
 			s->gpio_irq[i] = gpiod_to_irq(gpiod);
 		else
 			s->gpio_irq[i] = -EINVAL;
@@ -1635,8 +1628,9 @@ static int mxs_auart_request_gpio_irq(struct mxs_auart_port *s)
 
 	/*
 	 * If something went wrong, rollback.
+	 * Be careful: i may be unsigned.
 	 */
-	while (err && (--i >= 0))
+	while (err && (i-- > 0))
 		if (irq[i] >= 0)
 			free_irq(irq[i], s);
 
@@ -1679,37 +1673,46 @@ static int mxs_auart_probe(struct platform_device *pdev)
 		return ret;
 
 	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!r)
-		return -ENXIO;
+	if (!r) {
+		ret = -ENXIO;
+		goto out_disable_clks;
+	}
 
 	s->port.mapbase = r->start;
 	s->port.membase = ioremap(r->start, resource_size(r));
+	if (!s->port.membase) {
+		ret = -ENOMEM;
+		goto out_disable_clks;
+	}
 	s->port.ops = &mxs_auart_ops;
 	s->port.iotype = UPIO_MEM;
 	s->port.fifosize = MXS_AUART_FIFO_SIZE;
 	s->port.uartclk = clk_get_rate(s->clk);
 	s->port.type = PORT_IMX;
+	s->port.has_sysrq = IS_ENABLED(CONFIG_SERIAL_MXS_AUART_CONSOLE);
 
 	mxs_init_regs(s);
 
 	s->mctrl_prev = 0;
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
-		return irq;
+	if (irq < 0) {
+		ret = irq;
+		goto out_iounmap;
+	}
 
 	s->port.irq = irq;
 	ret = devm_request_irq(&pdev->dev, irq, mxs_auart_irq_handle, 0,
 			       dev_name(&pdev->dev), s);
 	if (ret)
-		return ret;
+		goto out_iounmap;
 
 	platform_set_drvdata(pdev, s);
 
 	ret = mxs_auart_init_gpios(s, &pdev->dev);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to initialize GPIOs.\n");
-		return ret;
+		goto out_iounmap;
 	}
 
 	/*
@@ -1717,7 +1720,7 @@ static int mxs_auart_probe(struct platform_device *pdev)
 	 */
 	ret = mxs_auart_request_gpio_irq(s);
 	if (ret)
-		return ret;
+		goto out_iounmap;
 
 	auart_port[s->port.line] = s;
 
@@ -1725,7 +1728,7 @@ static int mxs_auart_probe(struct platform_device *pdev)
 
 	ret = uart_add_one_port(&auart_driver, &s->port);
 	if (ret)
-		goto out_free_gpio_irq;
+		goto out_free_qpio_irq;
 
 	/* ASM9260 don't have version reg */
 	if (is_asm9260_auart(s)) {
@@ -1739,9 +1742,18 @@ static int mxs_auart_probe(struct platform_device *pdev)
 
 	return 0;
 
-out_free_gpio_irq:
+out_free_qpio_irq:
 	mxs_auart_free_gpio_irq(s);
 	auart_port[pdev->id] = NULL;
+
+out_iounmap:
+	iounmap(s->port.membase);
+
+out_disable_clks:
+	if (is_asm9260_auart(s)) {
+		clk_disable_unprepare(s->clk);
+		clk_disable_unprepare(s->clk_ahb);
+	}
 	return ret;
 }
 
@@ -1752,6 +1764,11 @@ static int mxs_auart_remove(struct platform_device *pdev)
 	uart_remove_one_port(&auart_driver, &s->port);
 	auart_port[pdev->id] = NULL;
 	mxs_auart_free_gpio_irq(s);
+	iounmap(s->port.membase);
+	if (is_asm9260_auart(s)) {
+		clk_disable_unprepare(s->clk);
+		clk_disable_unprepare(s->clk_ahb);
+	}
 
 	return 0;
 }

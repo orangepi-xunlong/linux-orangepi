@@ -1,17 +1,6 @@
+// SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2010 Broadcom Corporation
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
- * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 #include <linux/kernel.h>
 #include <linux/delay.h>
@@ -159,7 +148,7 @@ u16 read_radio_reg(struct brcms_phy *pi, u16 addr)
 {
 	u16 data;
 
-	if ((addr == RADIO_IDCODE))
+	if (addr == RADIO_IDCODE)
 		return 0xffff;
 
 	switch (pi->pubpi.phy_type) {
@@ -1524,14 +1513,12 @@ static s8 wlc_phy_env_measure_temperature(struct brcms_phy *pi)
 static void wlc_phy_upd_env_txpwr_rate_limits(struct brcms_phy *pi, u32 band)
 {
 	u8 i;
-	s8 temp, vbat;
 
 	for (i = 0; i < TXP_NUM_RATES; i++)
 		pi->txpwr_env_limit[i] = BRCMS_TXPWR_MAX;
 
-	vbat = wlc_phy_env_measure_vbat(pi);
-	temp = wlc_phy_env_measure_temperature(pi);
-
+	wlc_phy_env_measure_vbat(pi);
+	wlc_phy_env_measure_temperature(pi);
 }
 
 static s8
@@ -1916,7 +1903,7 @@ void wlc_phy_txpower_update_shm(struct brcms_phy *pi)
 				     pi->hwpwr_txcur);
 
 		for (j = TXP_FIRST_OFDM; j <= TXP_LAST_OFDM; j++) {
-			const u8 ucode_ofdm_rates[] = {
+			static const u8 ucode_ofdm_rates[] = {
 				0x0c, 0x12, 0x18, 0x24, 0x30, 0x48, 0x60, 0x6c
 			};
 			offset = wlapi_bmac_rate_shm_offset(

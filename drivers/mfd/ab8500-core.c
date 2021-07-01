@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) ST-Ericsson SA 2010
  *
- * License Terms: GNU General Public License v2
  * Author: Srinidhi Kasagar <srinidhi.kasagar@stericsson.com>
  * Author: Rabin Vincent <rabin.vincent@stericsson.com>
  * Author: Mattias Wallin <mattias.wallin@stericsson.com>
@@ -14,7 +14,7 @@
 #include <linux/irqdomain.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
-#include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/platform_device.h>
 #include <linux/mfd/core.h>
 #include <linux/mfd/abx500.h>
@@ -123,6 +123,10 @@ static DEFINE_SPINLOCK(on_stat_lock);
 static u8 turn_on_stat_mask = 0xFF;
 static u8 turn_on_stat_set;
 static bool no_bm; /* No battery management */
+/*
+ * not really modular, but the easiest way to keep compat with existing
+ * bootargs behaviour is to continue using module_param here.
+ */
 module_param(no_bm, bool, S_IRUGO);
 
 #define AB9540_MODEM_CTRL2_REG			0x23
@@ -257,7 +261,7 @@ static int get_register_interruptible(struct ab8500 *ab8500, u8 bank,
 	mutex_unlock(&ab8500->lock);
 	dev_vdbg(ab8500->dev, "rd: addr %#x => data %#x\n", addr, ret);
 
-	return ret;
+	return (ret < 0) ? ret : 0;
 }
 
 static int ab8500_get_register(struct device *dev, u8 bank,
@@ -606,107 +610,53 @@ int ab8500_suspend(struct ab8500 *ab8500)
 }
 
 static const struct mfd_cell ab8500_bm_devs[] = {
-	{
-		.name = "ab8500-charger",
-		.of_compatible = "stericsson,ab8500-charger",
-		.platform_data = &ab8500_bm_data,
-		.pdata_size = sizeof(ab8500_bm_data),
-	},
-	{
-		.name = "ab8500-btemp",
-		.of_compatible = "stericsson,ab8500-btemp",
-		.platform_data = &ab8500_bm_data,
-		.pdata_size = sizeof(ab8500_bm_data),
-	},
-	{
-		.name = "ab8500-fg",
-		.of_compatible = "stericsson,ab8500-fg",
-		.platform_data = &ab8500_bm_data,
-		.pdata_size = sizeof(ab8500_bm_data),
-	},
-	{
-		.name = "ab8500-chargalg",
-		.of_compatible = "stericsson,ab8500-chargalg",
-		.platform_data = &ab8500_bm_data,
-		.pdata_size = sizeof(ab8500_bm_data),
-	},
+	OF_MFD_CELL("ab8500-charger", NULL, &ab8500_bm_data,
+		    sizeof(ab8500_bm_data), 0, "stericsson,ab8500-charger"),
+	OF_MFD_CELL("ab8500-btemp", NULL, &ab8500_bm_data,
+		    sizeof(ab8500_bm_data), 0, "stericsson,ab8500-btemp"),
+	OF_MFD_CELL("ab8500-fg", NULL, &ab8500_bm_data,
+		    sizeof(ab8500_bm_data), 0, "stericsson,ab8500-fg"),
+	OF_MFD_CELL("ab8500-chargalg", NULL, &ab8500_bm_data,
+		    sizeof(ab8500_bm_data), 0, "stericsson,ab8500-chargalg"),
 };
 
 static const struct mfd_cell ab8500_devs[] = {
 #ifdef CONFIG_DEBUG_FS
-	{
-		.name = "ab8500-debug",
-		.of_compatible = "stericsson,ab8500-debug",
-	},
+	OF_MFD_CELL("ab8500-debug",
+		    NULL, NULL, 0, 0, "stericsson,ab8500-debug"),
 #endif
-	{
-		.name = "ab8500-sysctrl",
-		.of_compatible = "stericsson,ab8500-sysctrl",
-	},
-	{
-		.name = "ab8500-ext-regulator",
-		.of_compatible = "stericsson,ab8500-ext-regulator",
-	},
-	{
-		.name = "ab8500-regulator",
-		.of_compatible = "stericsson,ab8500-regulator",
-	},
-	{
-		.name = "abx500-clk",
-		.of_compatible = "stericsson,abx500-clk",
-	},
-	{
-		.name = "ab8500-gpadc",
-		.of_compatible = "stericsson,ab8500-gpadc",
-	},
-	{
-		.name = "ab8500-rtc",
-		.of_compatible = "stericsson,ab8500-rtc",
-	},
-	{
-		.name = "ab8500-acc-det",
-		.of_compatible = "stericsson,ab8500-acc-det",
-	},
-	{
-
-		.name = "ab8500-poweron-key",
-		.of_compatible = "stericsson,ab8500-poweron-key",
-	},
-	{
-		.name = "ab8500-pwm",
-		.of_compatible = "stericsson,ab8500-pwm",
-		.id = 1,
-	},
-	{
-		.name = "ab8500-pwm",
-		.of_compatible = "stericsson,ab8500-pwm",
-		.id = 2,
-	},
-	{
-		.name = "ab8500-pwm",
-		.of_compatible = "stericsson,ab8500-pwm",
-		.id = 3,
-	},
-	{
-		.name = "ab8500-denc",
-		.of_compatible = "stericsson,ab8500-denc",
-	},
-	{
-		.name = "pinctrl-ab8500",
-		.of_compatible = "stericsson,ab8500-gpio",
-	},
-	{
-		.name = "abx500-temp",
-		.of_compatible = "stericsson,abx500-temp",
-	},
-	{
-		.name = "ab8500-usb",
-		.of_compatible = "stericsson,ab8500-usb",
-	},
-	{
-		.name = "ab8500-codec",
-		.of_compatible = "stericsson,ab8500-codec",
-	},
+	OF_MFD_CELL("ab8500-sysctrl",
+		    NULL, NULL, 0, 0, "stericsson,ab8500-sysctrl"),
+	OF_MFD_CELL("ab8500-ext-regulator",
+		    NULL, NULL, 0, 0, "stericsson,ab8500-ext-regulator"),
+	OF_MFD_CELL("ab8500-regulator",
+		    NULL, NULL, 0, 0, "stericsson,ab8500-regulator"),
+	OF_MFD_CELL("ab8500-clk",
+		    NULL, NULL, 0, 0, "stericsson,ab8500-clk"),
+	OF_MFD_CELL("ab8500-gpadc",
+		    NULL, NULL, 0, 0, "stericsson,ab8500-gpadc"),
+	OF_MFD_CELL("ab8500-rtc",
+		    NULL, NULL, 0, 0, "stericsson,ab8500-rtc"),
+	OF_MFD_CELL("ab8500-acc-det",
+		    NULL, NULL, 0, 0, "stericsson,ab8500-acc-det"),
+	OF_MFD_CELL("ab8500-poweron-key",
+		    NULL, NULL, 0, 0, "stericsson,ab8500-poweron-key"),
+	OF_MFD_CELL("ab8500-pwm",
+		    NULL, NULL, 0, 1, "stericsson,ab8500-pwm"),
+	OF_MFD_CELL("ab8500-pwm",
+		    NULL, NULL, 0, 2, "stericsson,ab8500-pwm"),
+	OF_MFD_CELL("ab8500-pwm",
+		    NULL, NULL, 0, 3, "stericsson,ab8500-pwm"),
+	OF_MFD_CELL("ab8500-denc",
+		    NULL, NULL, 0, 0, "stericsson,ab8500-denc"),
+	OF_MFD_CELL("pinctrl-ab8500",
+		    NULL, NULL, 0, 0, "stericsson,ab8500-gpio"),
+	OF_MFD_CELL("abx500-temp",
+		    NULL, NULL, 0, 0, "stericsson,abx500-temp"),
+	OF_MFD_CELL("ab8500-usb",
+		    NULL, NULL, 0, 0, "stericsson,ab8500-usb"),
+	OF_MFD_CELL("ab8500-codec",
+		    NULL, NULL, 0, 0, "stericsson,ab8500-codec"),
 };
 
 static const struct mfd_cell ab9540_devs[] = {
@@ -768,17 +718,20 @@ static const struct mfd_cell ab8505_devs[] = {
 #ifdef CONFIG_DEBUG_FS
 	{
 		.name = "ab8500-debug",
+		.of_compatible = "stericsson,ab8500-debug",
 	},
 #endif
 	{
 		.name = "ab8500-sysctrl",
+		.of_compatible = "stericsson,ab8500-sysctrl",
 	},
 	{
 		.name = "ab8500-regulator",
+		.of_compatible = "stericsson,ab8505-regulator",
 	},
 	{
 		.name = "abx500-clk",
-		.of_compatible = "stericsson,abx500-clk",
+		.of_compatible = "stericsson,ab8500-clk",
 	},
 	{
 		.name = "ab8500-gpadc",
@@ -786,25 +739,32 @@ static const struct mfd_cell ab8505_devs[] = {
 	},
 	{
 		.name = "ab8500-rtc",
+		.of_compatible = "stericsson,ab8500-rtc",
 	},
 	{
 		.name = "ab8500-acc-det",
+		.of_compatible = "stericsson,ab8500-acc-det",
 	},
 	{
 		.name = "ab8500-poweron-key",
+		.of_compatible = "stericsson,ab8500-poweron-key",
 	},
 	{
 		.name = "ab8500-pwm",
+		.of_compatible = "stericsson,ab8500-pwm",
 		.id = 1,
 	},
 	{
 		.name = "pinctrl-ab8505",
+		.of_compatible = "stericsson,ab8505-gpio",
 	},
 	{
 		.name = "ab8500-usb",
+		.of_compatible = "stericsson,ab8500-usb",
 	},
 	{
 		.name = "ab8500-codec",
+		.of_compatible = "stericsson,ab8500-codec",
 	},
 	{
 		.name = "ab-iddet",
@@ -1055,15 +1015,15 @@ static struct attribute *ab9540_sysfs_entries[] = {
 	NULL,
 };
 
-static struct attribute_group ab8500_attr_group = {
+static const struct attribute_group ab8500_attr_group = {
 	.attrs	= ab8500_sysfs_entries,
 };
 
-static struct attribute_group ab8505_attr_group = {
+static const struct attribute_group ab8505_attr_group = {
 	.attrs	= ab8505_sysfs_entries,
 };
 
-static struct attribute_group ab9540_attr_group = {
+static const struct attribute_group ab9540_attr_group = {
 	.attrs	= ab9540_sysfs_entries,
 };
 
@@ -1324,28 +1284,9 @@ static int ab8500_probe(struct platform_device *pdev)
 	return ret;
 }
 
-static int ab8500_remove(struct platform_device *pdev)
-{
-	struct ab8500 *ab8500 = platform_get_drvdata(pdev);
-
-	if (((is_ab8505(ab8500) || is_ab9540(ab8500)) &&
-			ab8500->chip_id >= AB8500_CUT2P0) || is_ab8540(ab8500))
-		sysfs_remove_group(&ab8500->dev->kobj, &ab9540_attr_group);
-	else
-		sysfs_remove_group(&ab8500->dev->kobj, &ab8500_attr_group);
-
-	if ((is_ab8505(ab8500) || is_ab9540(ab8500)) &&
-			ab8500->chip_id >= AB8500_CUT2P0)
-		sysfs_remove_group(&ab8500->dev->kobj, &ab8505_attr_group);
-
-	mfd_remove_devices(ab8500->dev);
-
-	return 0;
-}
-
 static const struct platform_device_id ab8500_id[] = {
 	{ "ab8500-core", AB8500_VERSION_AB8500 },
-	{ "ab8505-i2c", AB8500_VERSION_AB8505 },
+	{ "ab8505-core", AB8500_VERSION_AB8505 },
 	{ "ab9540-i2c", AB8500_VERSION_AB9540 },
 	{ "ab8540-i2c", AB8500_VERSION_AB8540 },
 	{ }
@@ -1354,9 +1295,9 @@ static const struct platform_device_id ab8500_id[] = {
 static struct platform_driver ab8500_core_driver = {
 	.driver = {
 		.name = "ab8500-core",
+		.suppress_bind_attrs = true,
 	},
 	.probe	= ab8500_probe,
-	.remove	= ab8500_remove,
 	.id_table = ab8500_id,
 };
 
@@ -1364,14 +1305,4 @@ static int __init ab8500_core_init(void)
 {
 	return platform_driver_register(&ab8500_core_driver);
 }
-
-static void __exit ab8500_core_exit(void)
-{
-	platform_driver_unregister(&ab8500_core_driver);
-}
 core_initcall(ab8500_core_init);
-module_exit(ab8500_core_exit);
-
-MODULE_AUTHOR("Mattias Wallin, Srinidhi Kasagar, Rabin Vincent");
-MODULE_DESCRIPTION("AB8500 MFD core");
-MODULE_LICENSE("GPL v2");

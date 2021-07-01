@@ -1,34 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB */
 /*
  * Copyright (c) 2016 Mellanox Technologies Ltd. All rights reserved.
  * Copyright (c) 2015 System Fabric Works, Inc. All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * OpenIB.org BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *	- Redistributions of source code must retain the above
- *	  copyright notice, this list of conditions and the following
- *	  disclaimer.
- *
- *	- Redistributions in binary form must reproduce the above
- *	  copyright notice, this list of conditions and the following
- *	  disclaimer in the documentation and/or other materials
- *	  provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
  */
 
 #ifndef RXE_HDR_H
@@ -53,8 +26,16 @@ struct rxe_pkt_info {
 };
 
 /* Macros should be used only for received skb */
-#define SKB_TO_PKT(skb) ((struct rxe_pkt_info *)(skb)->cb)
-#define PKT_TO_SKB(pkt) container_of((void *)(pkt), struct sk_buff, cb)
+static inline struct rxe_pkt_info *SKB_TO_PKT(struct sk_buff *skb)
+{
+	BUILD_BUG_ON(sizeof(struct rxe_pkt_info) > sizeof(skb->cb));
+	return (void *)skb->cb;
+}
+
+static inline struct sk_buff *PKT_TO_SKB(struct rxe_pkt_info *pkt)
+{
+	return container_of((void *)pkt, struct sk_buff, cb);
+}
 
 /*
  * IBA header types and methods
@@ -635,7 +616,7 @@ struct rxe_atmeth {
 	__be32			rkey;
 	__be64			swap_add;
 	__be64			comp;
-} __attribute__((__packed__));
+} __packed;
 
 static inline u64 __atmeth_va(void *arg)
 {

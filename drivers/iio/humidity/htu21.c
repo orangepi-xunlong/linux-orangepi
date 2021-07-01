@@ -1,11 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * htu21.c - Support for Measurement-Specialties
  *           htu21 temperature & humidity sensor
  *	     and humidity part of MS8607 sensor
  *
  * Copyright (c) 2014 Measurement-Specialties
- *
- * Licensed under the GPL-2.
  *
  * (7-bit I2C slave address 0x40)
  *
@@ -20,6 +19,7 @@
 #include <linux/kernel.h>
 #include <linux/stat.h>
 #include <linux/module.h>
+#include <linux/mod_devicetable.h>
 #include <linux/iio/iio.h>
 #include <linux/iio/sysfs.h>
 
@@ -175,7 +175,6 @@ static const struct iio_info htu21_info = {
 	.read_raw = htu21_read_raw,
 	.write_raw = htu21_write_raw,
 	.attrs = &htu21_attribute_group,
-	.driver_module = THIS_MODULE,
 };
 
 static int htu21_probe(struct i2c_client *client,
@@ -206,7 +205,6 @@ static int htu21_probe(struct i2c_client *client,
 
 	indio_dev->info = &htu21_info;
 	indio_dev->name = id->name;
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 
 	if (id->driver_data == MS8607) {
@@ -238,11 +236,19 @@ static const struct i2c_device_id htu21_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, htu21_id);
 
+static const struct of_device_id htu21_of_match[] = {
+	{ .compatible = "meas,htu21", },
+	{ .compatible = "meas,ms8607-humidity", },
+	{ },
+};
+MODULE_DEVICE_TABLE(of, htu21_of_match);
+
 static struct i2c_driver htu21_driver = {
 	.probe = htu21_probe,
 	.id_table = htu21_id,
 	.driver = {
 		   .name = "htu21",
+		   .of_match_table = htu21_of_match,
 		   },
 };
 

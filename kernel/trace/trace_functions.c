@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * ring buffer based function tracer
  *
@@ -33,29 +34,37 @@ enum {
 	TRACE_FUNC_OPT_STACK	= 0x1,
 };
 
-static int allocate_ftrace_ops(struct trace_array *tr)
+int ftrace_allocate_ftrace_ops(struct trace_array *tr)
 {
 	struct ftrace_ops *ops;
+
+	/* The top level array uses the "global_ops" */
+	if (tr->flags & TRACE_ARRAY_FL_GLOBAL)
+		return 0;
 
 	ops = kzalloc(sizeof(*ops), GFP_KERNEL);
 	if (!ops)
 		return -ENOMEM;
 
-	/* Currently only the non stack verision is supported */
+	/* Currently only the non stack version is supported */
 	ops->func = function_trace_call;
 	ops->flags = FTRACE_OPS_FL_RECURSION_SAFE | FTRACE_OPS_FL_PID;
 
 	tr->ops = ops;
 	ops->private = tr;
+
 	return 0;
 }
 
+void ftrace_free_ftrace_ops(struct trace_array *tr)
+{
+	kfree(tr->ops);
+	tr->ops = NULL;
+}
 
 int ftrace_create_function_files(struct trace_array *tr,
 				 struct dentry *parent)
 {
-	int ret;
-
 	/*
 	 * The top level array uses the "global_ops", and the files are
 	 * created on boot up.
@@ -63,9 +72,8 @@ int ftrace_create_function_files(struct trace_array *tr,
 	if (tr->flags & TRACE_ARRAY_FL_GLOBAL)
 		return 0;
 
-	ret = allocate_ftrace_ops(tr);
-	if (ret)
-		return ret;
+	if (!tr->ops)
+		return -EINVAL;
 
 	ftrace_create_filter_files(tr->ops, parent);
 
@@ -75,8 +83,7 @@ int ftrace_create_function_files(struct trace_array *tr,
 void ftrace_destroy_function_files(struct trace_array *tr)
 {
 	ftrace_destroy_filter_files(tr->ops);
-	kfree(tr->ops);
-	tr->ops = NULL;
+	ftrace_free_ftrace_ops(tr);
 }
 
 static int function_trace_init(struct trace_array *tr)
@@ -100,7 +107,7 @@ static int function_trace_init(struct trace_array *tr)
 
 	ftrace_init_array_ops(tr, func);
 
-	tr->trace_buffer.cpu = get_cpu();
+	tr->array_buffer.cpu = get_cpu();
 	put_cpu();
 
 	tracing_start_cmdline_record();
@@ -117,7 +124,7 @@ static void function_trace_reset(struct trace_array *tr)
 
 static void function_trace_start(struct trace_array *tr)
 {
-	tracing_reset_online_cpus(&tr->trace_buffer);
+	tracing_reset_online_cpus(&tr->array_buffer);
 }
 
 static void
@@ -142,7 +149,7 @@ function_trace_call(unsigned long ip, unsigned long parent_ip,
 		goto out;
 
 	cpu = smp_processor_id();
-	data = per_cpu_ptr(tr->trace_buffer.data, cpu);
+	data = per_cpu_ptr(tr->array_buffer.data, cpu);
 	if (!atomic_read(&data->disabled)) {
 		local_save_flags(flags);
 		trace_function(tr, ip, parent_ip, flags, pc);
@@ -152,6 +159,24 @@ function_trace_call(unsigned long ip, unsigned long parent_ip,
  out:
 	preempt_enable_notrace();
 }
+
+#ifdef CONFIG_UNWINDER_ORC
+/*
+ * Skip 2:
+ *
+ *   function_stack_trace_call()
+ *   ftrace_call()
+ */
+#define STACK_SKIP 2
+#else
+/*
+ * Skip 3:
+ *   __trace_stack()
+ *   function_stack_trace_call()
+ *   ftrace_call()
+ */
+#define STACK_SKIP 3
+#endif
 
 static void
 function_stack_trace_call(unsigned long ip, unsigned long parent_ip,
@@ -173,21 +198,13 @@ function_stack_trace_call(unsigned long ip, unsigned long parent_ip,
 	 */
 	local_irq_save(flags);
 	cpu = raw_smp_processor_id();
-	data = per_cpu_ptr(tr->trace_buffer.data, cpu);
+	data = per_cpu_ptr(tr->array_buffer.data, cpu);
 	disabled = atomic_inc_return(&data->disabled);
 
 	if (likely(disabled == 1)) {
 		pc = preempt_count();
 		trace_function(tr, ip, parent_ip, flags, pc);
-		/*
-		 * skip over 5 funcs:
-		 *    __ftrace_trace_stack,
-		 *    __trace_stack,
-		 *    function_stack_trace_call
-		 *    ftrace_list_func
-		 *    ftrace_call
-		 */
-		__trace_stack(tr, flags, 5, pc);
+		__trace_stack(tr, flags, STACK_SKIP, pc);
 	}
 
 	atomic_dec(&data->disabled);
@@ -267,10 +284,14 @@ static struct tracer function_trace __tracer_data =
 };
 
 #ifdef CONFIG_DYNAMIC_FTRACE
-static void update_traceon_count(void **data, bool on)
+static void update_traceon_count(struct ftrace_probe_ops *ops,
+				 unsigned long ip,
+				 struct trace_array *tr, bool on,
+				 void *data)
 {
-	long *count = (long *)data;
-	long old_count = *count;
+	struct ftrace_func_mapper *mapper = data;
+	long *count;
+	long old_count;
 
 	/*
 	 * Tracing gets disabled (or enabled) once per count.
@@ -301,23 +322,22 @@ static void update_traceon_count(void **data, bool on)
 	 * setting the tracing_on file. But we currently don't care
 	 * about that.
 	 */
-	if (!old_count)
+	count = (long *)ftrace_func_mapper_find_ip(mapper, ip);
+	old_count = *count;
+
+	if (old_count <= 0)
 		return;
 
 	/* Make sure we see count before checking tracing state */
 	smp_rmb();
 
-	if (on == !!tracing_is_on())
+	if (on == !!tracer_tracing_is_on(tr))
 		return;
 
 	if (on)
-		tracing_on();
+		tracer_tracing_on(tr);
 	else
-		tracing_off();
-
-	/* unlimited? */
-	if (old_count == -1)
-		return;
+		tracer_tracing_off(tr);
 
 	/* Make sure tracing state is visible before updating count */
 	smp_wmb();
@@ -326,182 +346,277 @@ static void update_traceon_count(void **data, bool on)
 }
 
 static void
-ftrace_traceon_count(unsigned long ip, unsigned long parent_ip, void **data)
+ftrace_traceon_count(unsigned long ip, unsigned long parent_ip,
+		     struct trace_array *tr, struct ftrace_probe_ops *ops,
+		     void *data)
 {
-	update_traceon_count(data, 1);
+	update_traceon_count(ops, ip, tr, 1, data);
 }
 
 static void
-ftrace_traceoff_count(unsigned long ip, unsigned long parent_ip, void **data)
+ftrace_traceoff_count(unsigned long ip, unsigned long parent_ip,
+		      struct trace_array *tr, struct ftrace_probe_ops *ops,
+		      void *data)
 {
-	update_traceon_count(data, 0);
+	update_traceon_count(ops, ip, tr, 0, data);
 }
 
 static void
-ftrace_traceon(unsigned long ip, unsigned long parent_ip, void **data)
+ftrace_traceon(unsigned long ip, unsigned long parent_ip,
+	       struct trace_array *tr, struct ftrace_probe_ops *ops,
+	       void *data)
 {
-	if (tracing_is_on())
+	if (tracer_tracing_is_on(tr))
 		return;
 
-	tracing_on();
+	tracer_tracing_on(tr);
 }
 
 static void
-ftrace_traceoff(unsigned long ip, unsigned long parent_ip, void **data)
+ftrace_traceoff(unsigned long ip, unsigned long parent_ip,
+		struct trace_array *tr, struct ftrace_probe_ops *ops,
+		void *data)
 {
+	if (!tracer_tracing_is_on(tr))
+		return;
+
+	tracer_tracing_off(tr);
+}
+
+#ifdef CONFIG_UNWINDER_ORC
+/*
+ * Skip 3:
+ *
+ *   function_trace_probe_call()
+ *   ftrace_ops_assist_func()
+ *   ftrace_call()
+ */
+#define FTRACE_STACK_SKIP 3
+#else
+/*
+ * Skip 5:
+ *
+ *   __trace_stack()
+ *   ftrace_stacktrace()
+ *   function_trace_probe_call()
+ *   ftrace_ops_assist_func()
+ *   ftrace_call()
+ */
+#define FTRACE_STACK_SKIP 5
+#endif
+
+static __always_inline void trace_stack(struct trace_array *tr)
+{
+	unsigned long flags;
+	int pc;
+
+	local_save_flags(flags);
+	pc = preempt_count();
+
+	__trace_stack(tr, flags, FTRACE_STACK_SKIP, pc);
+}
+
+static void
+ftrace_stacktrace(unsigned long ip, unsigned long parent_ip,
+		  struct trace_array *tr, struct ftrace_probe_ops *ops,
+		  void *data)
+{
+	trace_stack(tr);
+}
+
+static void
+ftrace_stacktrace_count(unsigned long ip, unsigned long parent_ip,
+			struct trace_array *tr, struct ftrace_probe_ops *ops,
+			void *data)
+{
+	struct ftrace_func_mapper *mapper = data;
+	long *count;
+	long old_count;
+	long new_count;
+
 	if (!tracing_is_on())
 		return;
 
-	tracing_off();
-}
+	/* unlimited? */
+	if (!mapper) {
+		trace_stack(tr);
+		return;
+	}
 
-/*
- * Skip 4:
- *   ftrace_stacktrace()
- *   function_trace_probe_call()
- *   ftrace_ops_list_func()
- *   ftrace_call()
- */
-#define STACK_SKIP 4
-
-static void
-ftrace_stacktrace(unsigned long ip, unsigned long parent_ip, void **data)
-{
-	trace_dump_stack(STACK_SKIP);
-}
-
-static void
-ftrace_stacktrace_count(unsigned long ip, unsigned long parent_ip, void **data)
-{
-	long *count = (long *)data;
-	long old_count;
-	long new_count;
+	count = (long *)ftrace_func_mapper_find_ip(mapper, ip);
 
 	/*
 	 * Stack traces should only execute the number of times the
 	 * user specified in the counter.
 	 */
 	do {
-
-		if (!tracing_is_on())
-			return;
-
 		old_count = *count;
 
 		if (!old_count)
 			return;
 
-		/* unlimited? */
-		if (old_count == -1) {
-			trace_dump_stack(STACK_SKIP);
-			return;
-		}
-
 		new_count = old_count - 1;
 		new_count = cmpxchg(count, old_count, new_count);
 		if (new_count == old_count)
-			trace_dump_stack(STACK_SKIP);
+			trace_stack(tr);
+
+		if (!tracing_is_on())
+			return;
 
 	} while (new_count != old_count);
 }
 
-static int update_count(void **data)
+static int update_count(struct ftrace_probe_ops *ops, unsigned long ip,
+			void *data)
 {
-	unsigned long *count = (long *)data;
+	struct ftrace_func_mapper *mapper = data;
+	long *count = NULL;
 
-	if (!*count)
-		return 0;
+	if (mapper)
+		count = (long *)ftrace_func_mapper_find_ip(mapper, ip);
 
-	if (*count != -1)
+	if (count) {
+		if (*count <= 0)
+			return 0;
 		(*count)--;
+	}
 
 	return 1;
 }
 
 static void
-ftrace_dump_probe(unsigned long ip, unsigned long parent_ip, void **data)
+ftrace_dump_probe(unsigned long ip, unsigned long parent_ip,
+		  struct trace_array *tr, struct ftrace_probe_ops *ops,
+		  void *data)
 {
-	if (update_count(data))
+	if (update_count(ops, ip, data))
 		ftrace_dump(DUMP_ALL);
 }
 
 /* Only dump the current CPU buffer. */
 static void
-ftrace_cpudump_probe(unsigned long ip, unsigned long parent_ip, void **data)
+ftrace_cpudump_probe(unsigned long ip, unsigned long parent_ip,
+		     struct trace_array *tr, struct ftrace_probe_ops *ops,
+		     void *data)
 {
-	if (update_count(data))
+	if (update_count(ops, ip, data))
 		ftrace_dump(DUMP_ORIG);
 }
 
 static int
 ftrace_probe_print(const char *name, struct seq_file *m,
-		   unsigned long ip, void *data)
+		   unsigned long ip, struct ftrace_probe_ops *ops,
+		   void *data)
 {
-	long count = (long)data;
+	struct ftrace_func_mapper *mapper = data;
+	long *count = NULL;
 
 	seq_printf(m, "%ps:%s", (void *)ip, name);
 
-	if (count == -1)
-		seq_puts(m, ":unlimited\n");
+	if (mapper)
+		count = (long *)ftrace_func_mapper_find_ip(mapper, ip);
+
+	if (count)
+		seq_printf(m, ":count=%ld\n", *count);
 	else
-		seq_printf(m, ":count=%ld\n", count);
+		seq_puts(m, ":unlimited\n");
 
 	return 0;
 }
 
 static int
 ftrace_traceon_print(struct seq_file *m, unsigned long ip,
-			 struct ftrace_probe_ops *ops, void *data)
+		     struct ftrace_probe_ops *ops,
+		     void *data)
 {
-	return ftrace_probe_print("traceon", m, ip, data);
+	return ftrace_probe_print("traceon", m, ip, ops, data);
 }
 
 static int
 ftrace_traceoff_print(struct seq_file *m, unsigned long ip,
 			 struct ftrace_probe_ops *ops, void *data)
 {
-	return ftrace_probe_print("traceoff", m, ip, data);
+	return ftrace_probe_print("traceoff", m, ip, ops, data);
 }
 
 static int
 ftrace_stacktrace_print(struct seq_file *m, unsigned long ip,
 			struct ftrace_probe_ops *ops, void *data)
 {
-	return ftrace_probe_print("stacktrace", m, ip, data);
+	return ftrace_probe_print("stacktrace", m, ip, ops, data);
 }
 
 static int
 ftrace_dump_print(struct seq_file *m, unsigned long ip,
 			struct ftrace_probe_ops *ops, void *data)
 {
-	return ftrace_probe_print("dump", m, ip, data);
+	return ftrace_probe_print("dump", m, ip, ops, data);
 }
 
 static int
 ftrace_cpudump_print(struct seq_file *m, unsigned long ip,
 			struct ftrace_probe_ops *ops, void *data)
 {
-	return ftrace_probe_print("cpudump", m, ip, data);
+	return ftrace_probe_print("cpudump", m, ip, ops, data);
+}
+
+
+static int
+ftrace_count_init(struct ftrace_probe_ops *ops, struct trace_array *tr,
+		  unsigned long ip, void *init_data, void **data)
+{
+	struct ftrace_func_mapper *mapper = *data;
+
+	if (!mapper) {
+		mapper = allocate_ftrace_func_mapper();
+		if (!mapper)
+			return -ENOMEM;
+		*data = mapper;
+	}
+
+	return ftrace_func_mapper_add_ip(mapper, ip, init_data);
+}
+
+static void
+ftrace_count_free(struct ftrace_probe_ops *ops, struct trace_array *tr,
+		  unsigned long ip, void *data)
+{
+	struct ftrace_func_mapper *mapper = data;
+
+	if (!ip) {
+		free_ftrace_func_mapper(mapper, NULL);
+		return;
+	}
+
+	ftrace_func_mapper_remove_ip(mapper, ip);
 }
 
 static struct ftrace_probe_ops traceon_count_probe_ops = {
 	.func			= ftrace_traceon_count,
 	.print			= ftrace_traceon_print,
+	.init			= ftrace_count_init,
+	.free			= ftrace_count_free,
 };
 
 static struct ftrace_probe_ops traceoff_count_probe_ops = {
 	.func			= ftrace_traceoff_count,
 	.print			= ftrace_traceoff_print,
+	.init			= ftrace_count_init,
+	.free			= ftrace_count_free,
 };
 
 static struct ftrace_probe_ops stacktrace_count_probe_ops = {
 	.func			= ftrace_stacktrace_count,
 	.print			= ftrace_stacktrace_print,
+	.init			= ftrace_count_init,
+	.free			= ftrace_count_free,
 };
 
 static struct ftrace_probe_ops dump_probe_ops = {
 	.func			= ftrace_dump_probe,
 	.print			= ftrace_dump_print,
+	.init			= ftrace_count_init,
+	.free			= ftrace_count_free,
 };
 
 static struct ftrace_probe_ops cpudump_probe_ops = {
@@ -525,7 +640,8 @@ static struct ftrace_probe_ops stacktrace_probe_ops = {
 };
 
 static int
-ftrace_trace_probe_callback(struct ftrace_probe_ops *ops,
+ftrace_trace_probe_callback(struct trace_array *tr,
+			    struct ftrace_probe_ops *ops,
 			    struct ftrace_hash *hash, char *glob,
 			    char *cmd, char *param, int enable)
 {
@@ -537,10 +653,8 @@ ftrace_trace_probe_callback(struct ftrace_probe_ops *ops,
 	if (!enable)
 		return -EINVAL;
 
-	if (glob[0] == '!') {
-		unregister_ftrace_function_probe_func(glob+1, ops);
-		return 0;
-	}
+	if (glob[0] == '!')
+		return unregister_ftrace_function_probe_func(glob+1, tr, ops);
 
 	if (!param)
 		goto out_reg;
@@ -559,16 +673,19 @@ ftrace_trace_probe_callback(struct ftrace_probe_ops *ops,
 		return ret;
 
  out_reg:
-	ret = register_ftrace_function_probe(glob, ops, count);
+	ret = register_ftrace_function_probe(glob, tr, ops, count);
 
 	return ret < 0 ? ret : 0;
 }
 
 static int
-ftrace_trace_onoff_callback(struct ftrace_hash *hash,
+ftrace_trace_onoff_callback(struct trace_array *tr, struct ftrace_hash *hash,
 			    char *glob, char *cmd, char *param, int enable)
 {
 	struct ftrace_probe_ops *ops;
+
+	if (!tr)
+		return -ENODEV;
 
 	/* we register both traceon and traceoff to this callback */
 	if (strcmp(cmd, "traceon") == 0)
@@ -576,45 +693,54 @@ ftrace_trace_onoff_callback(struct ftrace_hash *hash,
 	else
 		ops = param ? &traceoff_count_probe_ops : &traceoff_probe_ops;
 
-	return ftrace_trace_probe_callback(ops, hash, glob, cmd,
+	return ftrace_trace_probe_callback(tr, ops, hash, glob, cmd,
 					   param, enable);
 }
 
 static int
-ftrace_stacktrace_callback(struct ftrace_hash *hash,
+ftrace_stacktrace_callback(struct trace_array *tr, struct ftrace_hash *hash,
 			   char *glob, char *cmd, char *param, int enable)
 {
 	struct ftrace_probe_ops *ops;
+
+	if (!tr)
+		return -ENODEV;
 
 	ops = param ? &stacktrace_count_probe_ops : &stacktrace_probe_ops;
 
-	return ftrace_trace_probe_callback(ops, hash, glob, cmd,
+	return ftrace_trace_probe_callback(tr, ops, hash, glob, cmd,
 					   param, enable);
 }
 
 static int
-ftrace_dump_callback(struct ftrace_hash *hash,
+ftrace_dump_callback(struct trace_array *tr, struct ftrace_hash *hash,
 			   char *glob, char *cmd, char *param, int enable)
 {
 	struct ftrace_probe_ops *ops;
+
+	if (!tr)
+		return -ENODEV;
 
 	ops = &dump_probe_ops;
 
 	/* Only dump once. */
-	return ftrace_trace_probe_callback(ops, hash, glob, cmd,
+	return ftrace_trace_probe_callback(tr, ops, hash, glob, cmd,
 					   "1", enable);
 }
 
 static int
-ftrace_cpudump_callback(struct ftrace_hash *hash,
+ftrace_cpudump_callback(struct trace_array *tr, struct ftrace_hash *hash,
 			   char *glob, char *cmd, char *param, int enable)
 {
 	struct ftrace_probe_ops *ops;
 
+	if (!tr)
+		return -ENODEV;
+
 	ops = &cpudump_probe_ops;
 
 	/* Only dump once. */
-	return ftrace_trace_probe_callback(ops, hash, glob, cmd,
+	return ftrace_trace_probe_callback(tr, ops, hash, glob, cmd,
 					   "1", enable);
 }
 
@@ -687,9 +813,8 @@ static inline int init_func_cmd_traceon(void)
 }
 #endif /* CONFIG_DYNAMIC_FTRACE */
 
-static __init int init_function_trace(void)
+__init int init_function_trace(void)
 {
 	init_func_cmd_traceon();
 	return register_tracer(&function_trace);
 }
-core_initcall(init_function_trace);

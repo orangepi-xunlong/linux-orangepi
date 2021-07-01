@@ -1,15 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * net/sched/sch_tbf.c	Token Bucket Filter queue.
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
  *		Dmitry Torokhov <dtor@mail.ru> - allow attaching inner qdiscs -
  *						 original idea by Martin Devera
- *
  */
 
 #include <linux/module.h>
@@ -20,6 +15,7 @@
 #include <linux/skbuff.h>
 #include <net/netlink.h>
 #include <net/sch_generic.h>
+#include <net/pkt_cls.h>
 #include <net/pkt_sched.h>
 
 
@@ -142,14 +138,50 @@ static u64 psched_ns_t2l(const struct psched_ratecfg *r,
 	return len;
 }
 
-/*
- * Return length of individual segments of a gso packet,
- * including all headers (MAC, IP, TCP/UDP)
- */
-static unsigned int skb_gso_mac_seglen(const struct sk_buff *skb)
+static void tbf_offload_change(struct Qdisc *sch)
 {
-	unsigned int hdr_len = skb_transport_header(skb) - skb_mac_header(skb);
-	return hdr_len + skb_gso_transport_seglen(skb);
+	struct tbf_sched_data *q = qdisc_priv(sch);
+	struct net_device *dev = qdisc_dev(sch);
+	struct tc_tbf_qopt_offload qopt;
+
+	if (!tc_can_offload(dev) || !dev->netdev_ops->ndo_setup_tc)
+		return;
+
+	qopt.command = TC_TBF_REPLACE;
+	qopt.handle = sch->handle;
+	qopt.parent = sch->parent;
+	qopt.replace_params.rate = q->rate;
+	qopt.replace_params.max_size = q->max_size;
+	qopt.replace_params.qstats = &sch->qstats;
+
+	dev->netdev_ops->ndo_setup_tc(dev, TC_SETUP_QDISC_TBF, &qopt);
+}
+
+static void tbf_offload_destroy(struct Qdisc *sch)
+{
+	struct net_device *dev = qdisc_dev(sch);
+	struct tc_tbf_qopt_offload qopt;
+
+	if (!tc_can_offload(dev) || !dev->netdev_ops->ndo_setup_tc)
+		return;
+
+	qopt.command = TC_TBF_DESTROY;
+	qopt.handle = sch->handle;
+	qopt.parent = sch->parent;
+	dev->netdev_ops->ndo_setup_tc(dev, TC_SETUP_QDISC_TBF, &qopt);
+}
+
+static int tbf_offload_dump(struct Qdisc *sch)
+{
+	struct tc_tbf_qopt_offload qopt;
+
+	qopt.command = TC_TBF_STATS;
+	qopt.handle = sch->handle;
+	qopt.parent = sch->parent;
+	qopt.stats.bstats = &sch->bstats;
+	qopt.stats.qstats = &sch->qstats;
+
+	return qdisc_offload_dump_helper(sch, TC_SETUP_QDISC_TBF, &qopt);
 }
 
 /* GSO packet is too big, segment it so that tbf can transmit
@@ -170,9 +202,8 @@ static int tbf_segment(struct sk_buff *skb, struct Qdisc *sch,
 		return qdisc_drop(skb, sch, to_free);
 
 	nb = 0;
-	while (segs) {
-		nskb = segs->next;
-		segs->next = NULL;
+	skb_list_walk_safe(segs, segs, nskb) {
+		skb_mark_not_on_list(segs);
 		qdisc_skb_cb(segs)->pkt_len = segs->len;
 		len += segs->len;
 		ret = qdisc_enqueue(segs, q->qdisc, to_free);
@@ -182,7 +213,6 @@ static int tbf_segment(struct sk_buff *skb, struct Qdisc *sch,
 		} else {
 			nb++;
 		}
-		segs = nskb;
 	}
 	sch->q.qlen += nb;
 	if (nb > 1)
@@ -195,10 +225,12 @@ static int tbf_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 		       struct sk_buff **to_free)
 {
 	struct tbf_sched_data *q = qdisc_priv(sch);
+	unsigned int len = qdisc_pkt_len(skb);
 	int ret;
 
 	if (qdisc_pkt_len(skb) > q->max_size) {
-		if (skb_is_gso(skb) && skb_gso_mac_seglen(skb) <= q->max_size)
+		if (skb_is_gso(skb) &&
+		    skb_gso_validate_mac_len(skb, q->max_size))
 			return tbf_segment(skb, sch, to_free);
 		return qdisc_drop(skb, sch, to_free);
 	}
@@ -209,7 +241,7 @@ static int tbf_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 		return ret;
 	}
 
-	qdisc_qstats_backlog_inc(sch, skb);
+	sch->qstats.backlog += len;
 	sch->q.qlen++;
 	return NET_XMIT_SUCCESS;
 }
@@ -302,7 +334,8 @@ static const struct nla_policy tbf_policy[TCA_TBF_MAX + 1] = {
 	[TCA_TBF_PBURST] = { .type = NLA_U32 },
 };
 
-static int tbf_change(struct Qdisc *sch, struct nlattr *opt)
+static int tbf_change(struct Qdisc *sch, struct nlattr *opt,
+		      struct netlink_ext_ack *extack)
 {
 	int err;
 	struct tbf_sched_data *q = qdisc_priv(sch);
@@ -315,7 +348,8 @@ static int tbf_change(struct Qdisc *sch, struct nlattr *opt)
 	s64 buffer, mtu;
 	u64 rate64 = 0, prate64 = 0;
 
-	err = nla_parse_nested(tb, TCA_TBF_MAX, opt, tbf_policy);
+	err = nla_parse_nested_deprecated(tb, TCA_TBF_MAX, opt, tbf_policy,
+					  NULL);
 	if (err < 0)
 		return err;
 
@@ -326,11 +360,13 @@ static int tbf_change(struct Qdisc *sch, struct nlattr *opt)
 	qopt = nla_data(tb[TCA_TBF_PARMS]);
 	if (qopt->rate.linklayer == TC_LINKLAYER_UNAWARE)
 		qdisc_put_rtab(qdisc_get_rtab(&qopt->rate,
-					      tb[TCA_TBF_RTAB]));
+					      tb[TCA_TBF_RTAB],
+					      NULL));
 
 	if (qopt->peakrate.linklayer == TC_LINKLAYER_UNAWARE)
 			qdisc_put_rtab(qdisc_get_rtab(&qopt->peakrate,
-						      tb[TCA_TBF_PTAB]));
+						      tb[TCA_TBF_PTAB],
+						      NULL));
 
 	buffer = min_t(u64, PSCHED_TICKS2NS(qopt->buffer), ~0U);
 	mtu = min_t(u64, PSCHED_TICKS2NS(qopt->mtu), ~0U);
@@ -383,18 +419,21 @@ static int tbf_change(struct Qdisc *sch, struct nlattr *opt)
 		if (err)
 			goto done;
 	} else if (qopt->limit > 0) {
-		child = fifo_create_dflt(sch, &bfifo_qdisc_ops, qopt->limit);
+		child = fifo_create_dflt(sch, &bfifo_qdisc_ops, qopt->limit,
+					 extack);
 		if (IS_ERR(child)) {
 			err = PTR_ERR(child);
 			goto done;
 		}
+
+		/* child is fifo, no need to check for noop_qdisc */
+		qdisc_hash_add(child, true);
 	}
 
 	sch_tree_lock(sch);
 	if (child) {
-		qdisc_tree_reduce_backlog(q->qdisc, q->qdisc->q.qlen,
-					  q->qdisc->qstats.backlog);
-		qdisc_destroy(q->qdisc);
+		qdisc_tree_flush_backlog(q->qdisc);
+		qdisc_put(q->qdisc);
 		q->qdisc = child;
 	}
 	q->limit = qopt->limit;
@@ -415,22 +454,26 @@ static int tbf_change(struct Qdisc *sch, struct nlattr *opt)
 
 	sch_tree_unlock(sch);
 	err = 0;
+
+	tbf_offload_change(sch);
 done:
 	return err;
 }
 
-static int tbf_init(struct Qdisc *sch, struct nlattr *opt)
+static int tbf_init(struct Qdisc *sch, struct nlattr *opt,
+		    struct netlink_ext_ack *extack)
 {
 	struct tbf_sched_data *q = qdisc_priv(sch);
 
-	if (opt == NULL)
-		return -EINVAL;
-
-	q->t_c = ktime_get_ns();
 	qdisc_watchdog_init(&q->watchdog, sch);
 	q->qdisc = &noop_qdisc;
 
-	return tbf_change(sch, opt);
+	if (!opt)
+		return -EINVAL;
+
+	q->t_c = ktime_get_ns();
+
+	return tbf_change(sch, opt, extack);
 }
 
 static void tbf_destroy(struct Qdisc *sch)
@@ -438,7 +481,8 @@ static void tbf_destroy(struct Qdisc *sch)
 	struct tbf_sched_data *q = qdisc_priv(sch);
 
 	qdisc_watchdog_cancel(&q->watchdog);
-	qdisc_destroy(q->qdisc);
+	tbf_offload_destroy(sch);
+	qdisc_put(q->qdisc);
 }
 
 static int tbf_dump(struct Qdisc *sch, struct sk_buff *skb)
@@ -446,9 +490,13 @@ static int tbf_dump(struct Qdisc *sch, struct sk_buff *skb)
 	struct tbf_sched_data *q = qdisc_priv(sch);
 	struct nlattr *nest;
 	struct tc_tbf_qopt opt;
+	int err;
 
-	sch->qstats.backlog = q->qdisc->qstats.backlog;
-	nest = nla_nest_start(skb, TCA_OPTIONS);
+	err = tbf_offload_dump(sch);
+	if (err)
+		return err;
+
+	nest = nla_nest_start_noflag(skb, TCA_OPTIONS);
 	if (nest == NULL)
 		goto nla_put_failure;
 
@@ -491,7 +539,7 @@ static int tbf_dump_class(struct Qdisc *sch, unsigned long cl,
 }
 
 static int tbf_graft(struct Qdisc *sch, unsigned long arg, struct Qdisc *new,
-		     struct Qdisc **old)
+		     struct Qdisc **old, struct netlink_ext_ack *extack)
 {
 	struct tbf_sched_data *q = qdisc_priv(sch);
 
@@ -508,13 +556,9 @@ static struct Qdisc *tbf_leaf(struct Qdisc *sch, unsigned long arg)
 	return q->qdisc;
 }
 
-static unsigned long tbf_get(struct Qdisc *sch, u32 classid)
+static unsigned long tbf_find(struct Qdisc *sch, u32 classid)
 {
 	return 1;
-}
-
-static void tbf_put(struct Qdisc *sch, unsigned long arg)
-{
 }
 
 static void tbf_walk(struct Qdisc *sch, struct qdisc_walker *walker)
@@ -532,8 +576,7 @@ static void tbf_walk(struct Qdisc *sch, struct qdisc_walker *walker)
 static const struct Qdisc_class_ops tbf_class_ops = {
 	.graft		=	tbf_graft,
 	.leaf		=	tbf_leaf,
-	.get		=	tbf_get,
-	.put		=	tbf_put,
+	.find		=	tbf_find,
 	.walk		=	tbf_walk,
 	.dump		=	tbf_dump_class,
 };

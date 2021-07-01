@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * FB driver for the ST7789V LCD Controller
  *
  * Copyright (C) 2015 Dennis Menschel
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/bitops.h>
@@ -28,6 +19,12 @@
 #define DEFAULT_GAMMA \
 	"70 2C 2E 15 10 09 48 33 53 0B 19 18 20 25\n" \
 	"70 2C 2E 15 10 09 48 33 53 0B 19 18 20 25"
+
+#define HSD20_IPS_GAMMA \
+	"D0 05 0A 09 08 05 2E 44 45 0F 17 16 2B 33\n" \
+	"D0 05 0A 09 08 05 2E 43 45 0F 16 16 2B 33"
+
+#define HSD20_IPS 1
 
 /**
  * enum st7789v_command - ST7789V display controller commands
@@ -91,14 +88,20 @@ static int init_display(struct fbtft_par *par)
 
 	/* set pixel format to RGB-565 */
 	write_reg(par, MIPI_DCS_SET_PIXEL_FORMAT, MIPI_DCS_PIXEL_FMT_16BIT);
+	if (HSD20_IPS)
+		write_reg(par, PORCTRL, 0x05, 0x05, 0x00, 0x33, 0x33);
 
-	write_reg(par, PORCTRL, 0x08, 0x08, 0x00, 0x22, 0x22);
+	else
+		write_reg(par, PORCTRL, 0x08, 0x08, 0x00, 0x22, 0x22);
 
 	/*
 	 * VGH = 13.26V
 	 * VGL = -10.43V
 	 */
-	write_reg(par, GCTRL, 0x35);
+	if (HSD20_IPS)
+		write_reg(par, GCTRL, 0x75);
+	else
+		write_reg(par, GCTRL, 0x35);
 
 	/*
 	 * VDV and VRH register values come from command write
@@ -110,13 +113,19 @@ static int init_display(struct fbtft_par *par)
 	 * VAP =  4.1V + (VCOM + VCOM offset + 0.5 * VDV)
 	 * VAN = -4.1V + (VCOM + VCOM offset + 0.5 * VDV)
 	 */
-	write_reg(par, VRHS, 0x0B);
+	if (HSD20_IPS)
+		write_reg(par, VRHS, 0x13);
+	else
+		write_reg(par, VRHS, 0x0B);
 
 	/* VDV = 0V */
 	write_reg(par, VDVS, 0x20);
 
 	/* VCOM = 0.9V */
-	write_reg(par, VCOMS, 0x20);
+	if (HSD20_IPS)
+		write_reg(par, VCOMS, 0x22);
+	else
+		write_reg(par, VCOMS, 0x20);
 
 	/* VCOM offset = 0V */
 	write_reg(par, VCMOFSET, 0x20);
@@ -129,6 +138,10 @@ static int init_display(struct fbtft_par *par)
 	write_reg(par, PWCTRL1, 0xA4, 0xA1);
 
 	write_reg(par, MIPI_DCS_SET_DISPLAY_ON);
+
+	if (HSD20_IPS)
+		write_reg(par, MIPI_DCS_ENTER_INVERT_MODE);
+
 	return 0;
 }
 
@@ -178,7 +191,7 @@ static int set_var(struct fbtft_par *par)
  *
  * Return: 0 on success, < 0 if error occurred.
  */
-static int set_gamma(struct fbtft_par *par, unsigned long *curves)
+static int set_gamma(struct fbtft_par *par, u32 *curves)
 {
 	int i;
 	int j;
@@ -189,7 +202,7 @@ static int set_gamma(struct fbtft_par *par, unsigned long *curves)
 	 * The masks are the same for both positive and negative voltage
 	 * gamma curves.
 	 */
-	const u8 gamma_par_mask[] = {
+	static const u8 gamma_par_mask[] = {
 		0xFF, /* V63[3:0], V0[3:0]*/
 		0x3F, /* V1[5:0] */
 		0x3F, /* V2[5:0] */
@@ -210,13 +223,12 @@ static int set_gamma(struct fbtft_par *par, unsigned long *curves)
 		c = i * par->gamma.num_values;
 		for (j = 0; j < par->gamma.num_values; j++)
 			curves[c + j] &= gamma_par_mask[j];
-		write_reg(
-			par, PVGAMCTRL + i,
-			curves[c + 0], curves[c + 1], curves[c + 2],
-			curves[c + 3], curves[c + 4], curves[c + 5],
-			curves[c + 6], curves[c + 7], curves[c + 8],
-			curves[c + 9], curves[c + 10], curves[c + 11],
-			curves[c + 12], curves[c + 13]);
+		write_reg(par, PVGAMCTRL + i,
+			  curves[c + 0],  curves[c + 1],  curves[c + 2],
+			  curves[c + 3],  curves[c + 4],  curves[c + 5],
+			  curves[c + 6],  curves[c + 7],  curves[c + 8],
+			  curves[c + 9],  curves[c + 10], curves[c + 11],
+			  curves[c + 12], curves[c + 13]);
 	}
 	return 0;
 }
@@ -244,7 +256,7 @@ static struct fbtft_display display = {
 	.height = 320,
 	.gamma_num = 2,
 	.gamma_len = 14,
-	.gamma = DEFAULT_GAMMA,
+	.gamma = HSD20_IPS_GAMMA,
 	.fbtftops = {
 		.init_display = init_display,
 		.set_var = set_var,

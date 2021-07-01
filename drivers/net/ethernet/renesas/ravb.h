@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /* Renesas Ethernet AVB device driver
  *
  * Copyright (C) 2014-2015 Renesas Electronics Corporation
@@ -5,10 +6,6 @@
  * Copyright (C) 2015-2016 Cogent Embedded, Inc. <source@cogentembedded.com>
  *
  * Based on the SuperH Ethernet driver
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License version 2,
- * as published by the Free Software Foundation.
  */
 
 #ifndef __RAVB_H__
@@ -76,6 +73,7 @@ enum ravb_reg {
 	CDAR20	= 0x0060,
 	CDAR21	= 0x0064,
 	ESR	= 0x0088,
+	APSR	= 0x008C,	/* R-Car Gen3 only */
 	RCR	= 0x0090,
 	RQC0	= 0x0094,
 	RQC1	= 0x0098,
@@ -195,16 +193,12 @@ enum ravb_reg {
 	GECMR	= 0x05b0,
 	MAHR	= 0x05c0,
 	MALR	= 0x05c8,
-	TROCR	= 0x0700,	/* Undocumented? */
-	CDCR	= 0x0708,	/* Undocumented? */
-	LCCR	= 0x0710,	/* Undocumented? */
+	TROCR	= 0x0700,	/* R-Car Gen3 only */
 	CEFCR	= 0x0740,
 	FRECR	= 0x0748,
 	TSFRCR	= 0x0750,
 	TLFRCR	= 0x0758,
 	RFCR	= 0x0760,
-	CERCR	= 0x0768,	/* Undocumented? */
-	CEECR	= 0x0770,	/* Undocumented? */
 	MAFCR	= 0x0778,
 };
 
@@ -222,7 +216,6 @@ enum CCC_BIT {
 	CCC_CSEL_HPB	= 0x00010000,
 	CCC_CSEL_ETH_TX	= 0x00020000,
 	CCC_CSEL_GMII_REF = 0x00030000,
-	CCC_BOC		= 0x00100000,	/* Undocumented? */
 	CCC_LBME	= 0x01000000,
 };
 
@@ -246,6 +239,15 @@ enum ESR_BIT {
 	ESR_EQN		= 0x0000001F,
 	ESR_ET		= 0x00000F00,
 	ESR_EIL		= 0x00001000,
+};
+
+/* APSR */
+enum APSR_BIT {
+	APSR_MEMS		= 0x00000002,
+	APSR_CMSW		= 0x00000010,
+	APSR_DM			= 0x00006000,	/* Undocumented? */
+	APSR_DM_RDM		= 0x00002000,
+	APSR_DM_TDM		= 0x00004000,
 };
 
 /* RCR */
@@ -310,7 +312,7 @@ enum UFCD_BIT {
 
 /* SFO */
 enum SFO_BIT {
-	SFO_FPB		= 0x0000003F,
+	SFO_FBP		= 0x0000003F,
 };
 
 /* RTC */
@@ -421,6 +423,7 @@ enum EIS_BIT {
 	EIS_CULF1	= 0x00000080,
 	EIS_TFFF	= 0x00000100,
 	EIS_QFS		= 0x00010000,
+	EIS_RESERVED	= (GENMASK(31, 17) | GENMASK(15, 11)),
 };
 
 /* RIC0 */
@@ -465,6 +468,7 @@ enum RIS0_BIT {
 	RIS0_FRF15	= 0x00008000,
 	RIS0_FRF16	= 0x00010000,
 	RIS0_FRF17	= 0x00020000,
+	RIS0_RESERVED	= GENMASK(31, 18),
 };
 
 /* RIC1 */
@@ -521,6 +525,7 @@ enum RIS2_BIT {
 	RIS2_QFF16	= 0x00010000,
 	RIS2_QFF17	= 0x00020000,
 	RIS2_RFFF	= 0x80000000,
+	RIS2_RESERVED	= GENMASK(30, 18),
 };
 
 /* TIC */
@@ -537,6 +542,7 @@ enum TIS_BIT {
 	TIS_FTF1	= 0x00000002,	/* Undocumented? */
 	TIS_TFUF	= 0x00000100,
 	TIS_TFWF	= 0x00000200,
+	TIS_RESERVED	= (GENMASK(31, 20) | GENMASK(15, 12) | GENMASK(7, 4))
 };
 
 /* ISS */
@@ -610,6 +616,7 @@ enum GIC_BIT {
 enum GIS_BIT {
 	GIS_PTCF	= 0x00000001,	/* Undocumented? */
 	GIS_PTMF	= 0x00000004,
+	GIS_RESERVED	= GENMASK(15, 10),
 };
 
 /* GIE (R-Car Gen3 only) */
@@ -947,7 +954,12 @@ enum RAVB_QUEUE {
 #define RX_QUEUE_OFFSET	4
 #define NUM_RX_QUEUE	2
 #define NUM_TX_QUEUE	2
-#define NUM_TX_DESC	2	/* TX descriptors per packet */
+
+#define RX_BUF_SZ	(2048 - ETH_FCS_LEN + sizeof(__sum16))
+
+/* TX descriptors per packet */
+#define NUM_TX_DESC_GEN2	2
+#define NUM_TX_DESC_GEN3	1
 
 struct ravb_tstamp_skb {
 	struct list_head list;
@@ -981,6 +993,7 @@ struct ravb_private {
 	struct net_device *ndev;
 	struct platform_device *pdev;
 	void __iomem *addr;
+	struct clk *clk;
 	struct mdiobb_ctrl mdiobb;
 	u32 num_rx_ring[NUM_RX_QUEUE];
 	u32 num_tx_ring[NUM_TX_QUEUE];
@@ -1015,7 +1028,6 @@ struct ravb_private {
 	phy_interface_t phy_interface;
 	int msg_enable;
 	int speed;
-	int duplex;
 	int emac_irq;
 	enum ravb_chip_id chip_id;
 	int rx_irqs[NUM_RX_QUEUE];
@@ -1023,6 +1035,11 @@ struct ravb_private {
 
 	unsigned no_avb_link:1;
 	unsigned avb_link_active_low:1;
+	unsigned wol_enabled:1;
+	unsigned rxcidm:1;		/* RX Clock Internal Delay Mode */
+	unsigned txcidm:1;		/* TX Clock Internal Delay Mode */
+	unsigned rgmii_override:1;	/* Deprecated rgmii-*id behavior */
+	int num_tx_desc;		/* TX descriptors per packet */
 };
 
 static inline u32 ravb_read(struct net_device *ndev, enum ravb_reg reg)

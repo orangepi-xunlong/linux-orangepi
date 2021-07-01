@@ -1,15 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* -------------------------------------------------------------------------
  * Copyright (C) 2014-2016, Intel Corporation
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  * -------------------------------------------------------------------------
  */
 
@@ -84,7 +76,7 @@ static u8 nci_core_get_config_otp_ram_version[5] = {
 struct nci_core_get_config_rsp {
 	u8 status;
 	u8 count;
-	u8 data[0];
+	u8 data[];
 };
 
 static int fdp_nci_create_conn(struct nci_dev *ndev)
@@ -192,7 +184,7 @@ static int fdp_nci_send_patch(struct nci_dev *ndev, u8 conn_id, u8 type)
 	const struct firmware *fw;
 	struct sk_buff *skb;
 	unsigned long len;
-	u8 max_size, payload_size;
+	int max_size, payload_size;
 	int rc = 0;
 
 	if ((type == NCI_PATCH_TYPE_OTP && !info->otp_patch) ||
@@ -215,8 +207,7 @@ static int fdp_nci_send_patch(struct nci_dev *ndev, u8 conn_id, u8 type)
 
 	while (len) {
 
-		payload_size = min_t(unsigned long, (unsigned long) max_size,
-				     len);
+		payload_size = min_t(unsigned long, max_size, len);
 
 		skb = nci_skb_alloc(ndev, (NCI_CTRL_HDR_SIZE + payload_size),
 				    GFP_KERNEL);
@@ -228,8 +219,7 @@ static int fdp_nci_send_patch(struct nci_dev *ndev, u8 conn_id, u8 type)
 
 		skb_reserve(skb, NCI_CTRL_HDR_SIZE);
 
-		memcpy(skb_put(skb, payload_size), fw->data + (fw->size - len),
-		       payload_size);
+		skb_put_data(skb, fw->data + (fw->size - len), payload_size);
 
 		rc = nci_send_data(ndev, conn_id, skb);
 
@@ -727,7 +717,7 @@ static struct nci_driver_ops fdp_prop_ops[] = {
 	},
 };
 
-struct nci_ops nci_ops = {
+static struct nci_ops nci_ops = {
 	.open = fdp_nci_open,
 	.close = fdp_nci_close,
 	.send = fdp_nci_send,
@@ -750,11 +740,9 @@ int fdp_nci_probe(struct fdp_i2c_phy *phy, struct nfc_phy_ops *phy_ops,
 	u32 protocols;
 	int r;
 
-	info = kzalloc(sizeof(struct fdp_nci_info), GFP_KERNEL);
-	if (!info) {
-		r = -ENOMEM;
-		goto err_info_alloc;
-	}
+	info = devm_kzalloc(dev, sizeof(struct fdp_nci_info), GFP_KERNEL);
+	if (!info)
+		return -ENOMEM;
 
 	info->phy = phy;
 	info->phy_ops = phy_ops;
@@ -776,8 +764,7 @@ int fdp_nci_probe(struct fdp_i2c_phy *phy, struct nfc_phy_ops *phy_ops,
 				   tx_tailroom);
 	if (!ndev) {
 		nfc_err(dev, "Cannot allocate nfc ndev\n");
-		r = -ENOMEM;
-		goto err_alloc_ndev;
+		return -ENOMEM;
 	}
 
 	r = nci_register_device(ndev);
@@ -793,9 +780,6 @@ int fdp_nci_probe(struct fdp_i2c_phy *phy, struct nfc_phy_ops *phy_ops,
 
 err_regdev:
 	nci_free_device(ndev);
-err_alloc_ndev:
-	kfree(info);
-err_info_alloc:
 	return r;
 }
 EXPORT_SYMBOL(fdp_nci_probe);
@@ -809,7 +793,6 @@ void fdp_nci_remove(struct nci_dev *ndev)
 
 	nci_unregister_device(ndev);
 	nci_free_device(ndev);
-	kfree(info);
 }
 EXPORT_SYMBOL(fdp_nci_remove);
 

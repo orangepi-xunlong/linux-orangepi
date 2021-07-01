@@ -1,21 +1,34 @@
+# SPDX-License-Identifier: GPL-2.0
 #
 # Makefile for sunxi specific clk
 #
 
-obj-y += clk-sunxi.o clk-factors.o clk-periph.o
-obj-${CONFIG_COMMON_CLK_DEBUG} += clk-debugfs.o
-obj-${CONFIG_ARCH_SUN50IW3} += clk-sun50iw3.o
-obj-${CONFIG_ARCH_SUN50IW1} += clk-sun50iw1.o
-obj-${CONFIG_ARCH_SUN50IW6} += clk-sun50iw6.o
-obj-${CONFIG_ARCH_SUN50IW8} += clk-sun50iw8.o
-obj-${CONFIG_ARCH_SUN50IW5T} += clk-sun50iw5t.o
-obj-${CONFIG_ARCH_SUN8IW6} += clk-sun8iw6.o
-ifeq ($(CONFIG_SUNXI_ARISC), y)
-obj-${CONFIG_ARCH_SUN8IW6} += clk-ac100.o
-endif
-obj-${CONFIG_ARCH_SUN8IW7} += clk-sun8iw7.o
-obj-${CONFIG_ARCH_SUN8IW11} += clk-sun8iw11.o
-obj-${CONFIG_ARCH_SUN8IW12} += clk-sun8iw12.o
-obj-${CONFIG_ARCH_SUN8IW15} += clk-sun8iw15.o
-obj-${CONFIG_ARCH_SUN8IW17} += clk-sun8iw17.o
-obj-${CONFIG_ARCH_SUN8IW18} += clk-sun8iw18.o
+obj-$(CONFIG_CLK_SUNXI) += clk-factors.o
+
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-sunxi.o
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-a10-codec.o
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-a10-hosc.o
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-a10-mod1.o
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-a10-pll2.o
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-a10-ve.o
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-a20-gmac.o
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-mod0.o
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-simple-gates.o
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-sun4i-display.o
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-sun4i-pll3.o
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-sun4i-tcon-ch1.o
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-sun8i-bus-gates.o
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-sun8i-mbus.o
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-sun9i-core.o
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-sun9i-mmc.o
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-usb.o
+
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-sun8i-apb0.o
+obj-$(CONFIG_CLK_SUNXI_CLOCKS) += clk-sun9i-cpus.o
+
+obj-$(CONFIG_CLK_SUNXI_PRCM_SUN6I)	+= clk-sun6i-apb0.o
+obj-$(CONFIG_CLK_SUNXI_PRCM_SUN6I)	+= clk-sun6i-apb0-gates.o
+obj-$(CONFIG_CLK_SUNXI_PRCM_SUN6I)	+= clk-sun6i-ar100.o
+
+obj-$(CONFIG_CLK_SUNXI_PRCM_SUN8I)	+= clk-sun8i-apb0.o
+obj-$(CONFIG_CLK_SUNXI_PRCM_SUN8I)	+= clk-sun6i-apb0-gates.o

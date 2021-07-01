@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for the ADC present in the Atmel AT91 evaluation boards.
  *
  * Copyright 2011 Free Electrons
- *
- * Licensed under the GPLv2 or later.
  */
 
 #include <linux/bitmap.h>
@@ -30,6 +29,7 @@
 #include <linux/iio/trigger.h>
 #include <linux/iio/trigger_consumer.h>
 #include <linux/iio/triggered_buffer.h>
+#include <linux/pinctrl/consumer.h>
 
 /* Registers */
 #define AT91_ADC_CR		0x00		/* Control Register */
@@ -157,7 +157,7 @@
  * struct at91_adc_reg_desc - Various informations relative to registers
  * @channel_base:	Base offset for the channel data registers
  * @drdy_mask:		Mask of the DRDY field in the relevant registers
-			(Interruptions registers mostly)
+ *			(Interruptions registers mostly)
  * @status_register:	Offset of the Interrupt Status Register
  * @trigger_register:	Offset of the Trigger setup register
  * @mr_prescal_mask:	Mask of the PRESCAL field in the adc MR register
@@ -247,12 +247,14 @@ static irqreturn_t at91_adc_trigger_handler(int irq, void *p)
 	struct iio_poll_func *pf = p;
 	struct iio_dev *idev = pf->indio_dev;
 	struct at91_adc_state *st = iio_priv(idev);
+	struct iio_chan_spec const *chan;
 	int i, j = 0;
 
 	for (i = 0; i < idev->masklength; i++) {
 		if (!test_bit(i, idev->active_scan_mask))
 			continue;
-		st->buffer[j] = at91_adc_readl(st, AT91_ADC_CHAN(st, i));
+		chan = idev->channels + i;
+		st->buffer[j] = at91_adc_readl(st, AT91_ADC_CHAN(st, chan->channel));
 		j++;
 	}
 
@@ -278,18 +280,20 @@ static void handle_adc_eoc_trigger(int irq, struct iio_dev *idev)
 		iio_trigger_poll(idev->trig);
 	} else {
 		st->last_value = at91_adc_readl(st, AT91_ADC_CHAN(st, st->chnb));
+		/* Needed to ACK the DRDY interruption */
+		at91_adc_readl(st, AT91_ADC_LCDR);
 		st->done = true;
 		wake_up_interruptible(&st->wq_data_avail);
 	}
 }
 
-static int at91_ts_sample(struct at91_adc_state *st)
+static int at91_ts_sample(struct iio_dev *idev)
 {
+	struct at91_adc_state *st = iio_priv(idev);
 	unsigned int xscale, yscale, reg, z1, z2;
 	unsigned int x, y, pres, xpos, ypos;
 	unsigned int rxp = 1;
 	unsigned int factor = 1000;
-	struct iio_dev *idev = iio_priv_to_dev(st);
 
 	unsigned int xyz_mask_bits = st->res;
 	unsigned int xyz_mask = (1 << xyz_mask_bits) - 1;
@@ -445,7 +449,7 @@ static irqreturn_t at91_adc_9x5_interrupt(int irq, void *private)
 
 		if (status & AT91_ADC_ISR_PENS) {
 			/* validate data by pen contact */
-			at91_ts_sample(st);
+			at91_ts_sample(idev);
 		} else {
 			/* triggered by event that is no pen contact, just read
 			 * them to clean the interrupt and discard all.
@@ -593,7 +597,6 @@ static int at91_adc_configure_trigger(struct iio_trigger *trig, bool state)
 }
 
 static const struct iio_trigger_ops at91_adc_trigger_ops = {
-	.owner = THIS_MODULE,
 	.set_trigger_state = &at91_adc_configure_trigger,
 };
 
@@ -624,8 +627,8 @@ static int at91_adc_trigger_init(struct iio_dev *idev)
 	struct at91_adc_state *st = iio_priv(idev);
 	int i, ret;
 
-	st->trig = devm_kzalloc(&idev->dev,
-				st->trigger_number * sizeof(*st->trig),
+	st->trig = devm_kcalloc(&idev->dev,
+				st->trigger_number, sizeof(*st->trig),
 				GFP_KERNEL);
 
 	if (st->trig == NULL) {
@@ -700,23 +703,29 @@ static int at91_adc_read_raw(struct iio_dev *idev,
 		ret = wait_event_interruptible_timeout(st->wq_data_avail,
 						       st->done,
 						       msecs_to_jiffies(1000));
-		if (ret == 0)
-			ret = -ETIMEDOUT;
-		if (ret < 0) {
-			mutex_unlock(&st->lock);
-			return ret;
-		}
 
-		*val = st->last_value;
-
+		/* Disable interrupts, regardless if adc conversion was
+		 * successful or not
+		 */
 		at91_adc_writel(st, AT91_ADC_CHDR,
 				AT91_ADC_CH(chan->channel));
 		at91_adc_writel(st, AT91_ADC_IDR, BIT(chan->channel));
 
-		st->last_value = 0;
-		st->done = false;
+		if (ret > 0) {
+			/* a valid conversion took place */
+			*val = st->last_value;
+			st->last_value = 0;
+			st->done = false;
+			ret = IIO_VAL_INT;
+		} else if (ret == 0) {
+			/* conversion timeout */
+			dev_err(&idev->dev, "ADC Channel %d timeout.\n",
+				chan->channel);
+			ret = -ETIMEDOUT;
+		}
+
 		mutex_unlock(&st->lock);
-		return IIO_VAL_INT;
+		return ret;
 
 	case IIO_CHAN_INFO_SCALE:
 		*val = st->vref_mv;
@@ -728,10 +737,10 @@ static int at91_adc_read_raw(struct iio_dev *idev,
 	return -EINVAL;
 }
 
-static int at91_adc_of_get_resolution(struct at91_adc_state *st,
+static int at91_adc_of_get_resolution(struct iio_dev *idev,
 				      struct platform_device *pdev)
 {
-	struct iio_dev *idev = iio_priv_to_dev(st);
+	struct at91_adc_state *st = iio_priv(idev);
 	struct device_node *np = pdev->dev.of_node;
 	int count, i, ret = 0;
 	char *res_name, *s;
@@ -798,7 +807,7 @@ static u32 calc_startup_ticks_9x5(u32 startup_time, u32 adc_clk_khz)
 	 * For sama5d3x and at91sam9x5, the formula changes to:
 	 * Startup Time = <lookup_table_value> / ADC Clock
 	 */
-	const int startup_lookup[] = {
+	static const int startup_lookup[] = {
 		0,   8,   16,  24,
 		64,  80,  96,  112,
 		512, 576, 640, 704,
@@ -857,10 +866,10 @@ static int at91_adc_probe_dt_ts(struct device_node *node,
 	}
 }
 
-static int at91_adc_probe_dt(struct at91_adc_state *st,
+static int at91_adc_probe_dt(struct iio_dev *idev,
 			     struct platform_device *pdev)
 {
-	struct iio_dev *idev = iio_priv_to_dev(st);
+	struct at91_adc_state *st = iio_priv(idev);
 	struct device_node *node = pdev->dev.of_node;
 	struct device_node *trig_node;
 	int i = 0, ret;
@@ -901,14 +910,15 @@ static int at91_adc_probe_dt(struct at91_adc_state *st,
 	}
 	st->vref_mv = prop;
 
-	ret = at91_adc_of_get_resolution(st, pdev);
+	ret = at91_adc_of_get_resolution(idev, pdev);
 	if (ret)
 		goto error_ret;
 
 	st->registers = &st->caps->registers;
 	st->num_channels = st->caps->num_channels;
 	st->trigger_number = of_get_child_count(node);
-	st->trigger_list = devm_kzalloc(&idev->dev, st->trigger_number *
+	st->trigger_list = devm_kcalloc(&idev->dev,
+					st->trigger_number,
 					sizeof(struct at91_adc_trigger),
 					GFP_KERNEL);
 	if (!st->trigger_list) {
@@ -975,7 +985,6 @@ static int at91_adc_probe_pdata(struct at91_adc_state *st,
 }
 
 static const struct iio_info at91_adc_info = {
-	.driver_module = THIS_MODULE,
 	.read_raw = &at91_adc_read_raw,
 };
 
@@ -1001,9 +1010,9 @@ static void atmel_ts_close(struct input_dev *dev)
 		at91_adc_writel(st, AT91_ADC_IDR, AT91RL_ADC_IER_PEN);
 }
 
-static int at91_ts_hw_init(struct at91_adc_state *st, u32 adc_clk_khz)
+static int at91_ts_hw_init(struct iio_dev *idev, u32 adc_clk_khz)
 {
-	struct iio_dev *idev = iio_priv_to_dev(st);
+	struct at91_adc_state *st = iio_priv(idev);
 	u32 reg = 0;
 	u32 tssctim = 0;
 	int i = 0;
@@ -1076,11 +1085,11 @@ static int at91_ts_hw_init(struct at91_adc_state *st, u32 adc_clk_khz)
 	return 0;
 }
 
-static int at91_ts_register(struct at91_adc_state *st,
+static int at91_ts_register(struct iio_dev *idev,
 		struct platform_device *pdev)
 {
+	struct at91_adc_state *st = iio_priv(idev);
 	struct input_dev *input;
-	struct iio_dev *idev = iio_priv_to_dev(st);
 	int ret;
 
 	input = input_allocate_device();
@@ -1143,7 +1152,6 @@ static int at91_adc_probe(struct platform_device *pdev)
 	int ret;
 	struct iio_dev *idev;
 	struct at91_adc_state *st;
-	struct resource *res;
 	u32 reg;
 
 	idev = devm_iio_device_alloc(&pdev->dev, sizeof(struct at91_adc_state));
@@ -1153,7 +1161,7 @@ static int at91_adc_probe(struct platform_device *pdev)
 	st = iio_priv(idev);
 
 	if (pdev->dev.of_node)
-		ret = at91_adc_probe_dt(st, pdev);
+		ret = at91_adc_probe_dt(idev, pdev);
 	else
 		ret = at91_adc_probe_pdata(st, pdev);
 
@@ -1164,23 +1172,18 @@ static int at91_adc_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, idev);
 
-	idev->dev.parent = &pdev->dev;
 	idev->name = dev_name(&pdev->dev);
 	idev->modes = INDIO_DIRECT_MODE;
 	idev->info = &at91_adc_info;
 
 	st->irq = platform_get_irq(pdev, 0);
-	if (st->irq < 0) {
-		dev_err(&pdev->dev, "No IRQ ID is designated\n");
+	if (st->irq < 0)
 		return -ENODEV;
-	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-
-	st->reg_base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(st->reg_base)) {
+	st->reg_base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(st->reg_base))
 		return PTR_ERR(st->reg_base);
-	}
+
 
 	/*
 	 * Disable all IRQs before setting up the handler
@@ -1297,11 +1300,11 @@ static int at91_adc_probe(struct platform_device *pdev)
 			goto error_disable_adc_clk;
 		}
 	} else {
-		ret = at91_ts_register(st, pdev);
+		ret = at91_ts_register(idev, pdev);
 		if (ret)
 			goto error_disable_adc_clk;
 
-		at91_ts_hw_init(st, adc_clk_khz);
+		at91_ts_hw_init(idev, adc_clk_khz);
 	}
 
 	ret = iio_device_register(idev);
@@ -1346,6 +1349,32 @@ static int at91_adc_remove(struct platform_device *pdev)
 
 	return 0;
 }
+
+#ifdef CONFIG_PM_SLEEP
+static int at91_adc_suspend(struct device *dev)
+{
+	struct iio_dev *idev = dev_get_drvdata(dev);
+	struct at91_adc_state *st = iio_priv(idev);
+
+	pinctrl_pm_select_sleep_state(dev);
+	clk_disable_unprepare(st->clk);
+
+	return 0;
+}
+
+static int at91_adc_resume(struct device *dev)
+{
+	struct iio_dev *idev = dev_get_drvdata(dev);
+	struct at91_adc_state *st = iio_priv(idev);
+
+	clk_prepare_enable(st->clk);
+	pinctrl_pm_select_default_state(dev);
+
+	return 0;
+}
+#endif
+
+static SIMPLE_DEV_PM_OPS(at91_adc_pm_ops, at91_adc_suspend, at91_adc_resume);
 
 static struct at91_adc_caps at91sam9260_caps = {
 	.calc_startup_ticks = calc_startup_ticks_9260,
@@ -1440,7 +1469,8 @@ static struct platform_driver at91_adc_driver = {
 	.id_table = at91_adc_ids,
 	.driver = {
 		   .name = DRIVER_NAME,
-		   .of_match_table = of_match_ptr(at91_adc_dt_ids),
+		   .of_match_table = at91_adc_dt_ids,
+		   .pm = &at91_adc_pm_ops,
 	},
 };
 

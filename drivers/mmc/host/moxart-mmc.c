@@ -256,7 +256,7 @@ static void moxart_dma_complete(void *param)
 
 static void moxart_transfer_dma(struct mmc_data *data, struct moxart_host *host)
 {
-	u32 len, dir_data, dir_slave;
+	u32 len, dir_slave;
 	long dma_time;
 	struct dma_async_tx_descriptor *desc = NULL;
 	struct dma_chan *dma_chan;
@@ -266,16 +266,14 @@ static void moxart_transfer_dma(struct mmc_data *data, struct moxart_host *host)
 
 	if (data->flags & MMC_DATA_WRITE) {
 		dma_chan = host->dma_chan_tx;
-		dir_data = DMA_TO_DEVICE;
 		dir_slave = DMA_MEM_TO_DEV;
 	} else {
 		dma_chan = host->dma_chan_rx;
-		dir_data = DMA_FROM_DEVICE;
 		dir_slave = DMA_DEV_TO_MEM;
 	}
 
 	len = dma_map_sg(dma_chan->device->dev, data->sg,
-			 data->sg_len, dir_data);
+			 data->sg_len, mmc_get_dma_dir(data));
 
 	if (len > 0) {
 		desc = dmaengine_prep_slave_sg(dma_chan, data->sg,
@@ -301,7 +299,7 @@ static void moxart_transfer_dma(struct mmc_data *data, struct moxart_host *host)
 
 	dma_unmap_sg(dma_chan->device->dev,
 		     data->sg, data->sg_len,
-		     dir_data);
+		     mmc_get_dma_dir(data));
 }
 
 
@@ -548,7 +546,7 @@ static int moxart_get_ro(struct mmc_host *mmc)
 	return !!(readl(host->base + REG_STATUS) & WRITE_PROT);
 }
 
-static struct mmc_host_ops moxart_ops = {
+static const struct mmc_host_ops moxart_ops = {
 	.request = moxart_request,
 	.set_ios = moxart_set_ios,
 	.get_ro = moxart_get_ro,
@@ -610,8 +608,8 @@ static int moxart_probe(struct platform_device *pdev)
 	host->timeout = msecs_to_jiffies(1000);
 	host->sysclk = clk_get_rate(clk);
 	host->fifo_width = readl(host->base + REG_FEATURE) << 2;
-	host->dma_chan_tx = dma_request_slave_channel_reason(dev, "tx");
-	host->dma_chan_rx = dma_request_slave_channel_reason(dev, "rx");
+	host->dma_chan_tx = dma_request_chan(dev, "tx");
+	host->dma_chan_rx = dma_request_chan(dev, "rx");
 
 	spin_lock_init(&host->lock);
 
@@ -691,19 +689,18 @@ static int moxart_remove(struct platform_device *pdev)
 
 	dev_set_drvdata(&pdev->dev, NULL);
 
-	if (mmc) {
-		if (!IS_ERR(host->dma_chan_tx))
-			dma_release_channel(host->dma_chan_tx);
-		if (!IS_ERR(host->dma_chan_rx))
-			dma_release_channel(host->dma_chan_rx);
-		mmc_remove_host(mmc);
-		mmc_free_host(mmc);
+	if (!IS_ERR(host->dma_chan_tx))
+		dma_release_channel(host->dma_chan_tx);
+	if (!IS_ERR(host->dma_chan_rx))
+		dma_release_channel(host->dma_chan_rx);
+	mmc_remove_host(mmc);
+	mmc_free_host(mmc);
 
-		writel(0, host->base + REG_INTERRUPT_MASK);
-		writel(0, host->base + REG_POWER_CONTROL);
-		writel(readl(host->base + REG_CLOCK_CONTROL) | CLK_OFF,
-		       host->base + REG_CLOCK_CONTROL);
-	}
+	writel(0, host->base + REG_INTERRUPT_MASK);
+	writel(0, host->base + REG_POWER_CONTROL);
+	writel(readl(host->base + REG_CLOCK_CONTROL) | CLK_OFF,
+	       host->base + REG_CLOCK_CONTROL);
+
 	return 0;
 }
 
@@ -719,6 +716,7 @@ static struct platform_driver moxart_mmc_driver = {
 	.remove     = moxart_remove,
 	.driver     = {
 		.name		= "mmc-moxart",
+		.probe_type	= PROBE_PREFER_ASYNCHRONOUS,
 		.of_match_table	= moxart_mmc_match,
 	},
 };

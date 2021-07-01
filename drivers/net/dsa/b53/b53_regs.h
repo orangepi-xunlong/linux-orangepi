@@ -50,6 +50,9 @@
 /* Jumbo Frame Registers */
 #define B53_JUMBO_PAGE			0x40
 
+/* EEE Control Registers Page */
+#define B53_EEE_PAGE			0x92
+
 /* CFP Configuration Registers Page */
 #define B53_CFP_PAGE			0xa1
 
@@ -112,6 +115,7 @@
 #define B53_UC_FLOOD_MASK		0x32
 #define B53_MC_FLOOD_MASK		0x34
 #define B53_IPMC_FLOOD_MASK		0x36
+#define B53_DIS_LEARNING		0x3c
 
 /*
  * Override Ports 0-7 State on devices with xMII interfaces (8 bit)
@@ -143,6 +147,7 @@
 /* Software reset register (8 bit) */
 #define B53_SOFTRESET			0x79
 #define   SW_RST			BIT(7)
+#define   EN_CH_RST			BIT(6)
 #define   EN_SW_RST			BIT(4)
 
 /* Fast Aging Control register (8 bit) */
@@ -209,12 +214,51 @@
 #define B53_BRCM_HDR			0x03
 #define   BRCM_HDR_P8_EN		BIT(0) /* Enable tagging on port 8 */
 #define   BRCM_HDR_P5_EN		BIT(1) /* Enable tagging on port 5 */
+#define   BRCM_HDR_P7_EN		BIT(2) /* Enable tagging on port 7 */
+
+/* Mirror capture control register (16 bit) */
+#define B53_MIR_CAP_CTL			0x10
+#define  CAP_PORT_MASK			0xf
+#define  BLK_NOT_MIR			BIT(14)
+#define  MIRROR_EN			BIT(15)
+
+/* Ingress mirror control register (16 bit) */
+#define B53_IG_MIR_CTL			0x12
+#define  MIRROR_MASK			0x1ff
+#define  DIV_EN				BIT(13)
+#define  MIRROR_FILTER_MASK		0x3
+#define  MIRROR_FILTER_SHIFT		14
+#define  MIRROR_ALL			0
+#define  MIRROR_DA			1
+#define  MIRROR_SA			2
+
+/* Ingress mirror divider register (16 bit) */
+#define B53_IG_MIR_DIV			0x14
+#define  IN_MIRROR_DIV_MASK		0x3ff
+
+/* Ingress mirror MAC address register (48 bit) */
+#define B53_IG_MIR_MAC			0x16
+
+/* Egress mirror control register (16 bit) */
+#define B53_EG_MIR_CTL			0x1C
+
+/* Egress mirror divider register (16 bit) */
+#define B53_EG_MIR_DIV			0x1E
+
+/* Egress mirror MAC address register (48 bit) */
+#define B53_EG_MIR_MAC			0x20
 
 /* Device ID register (8 or 32 bit) */
 #define B53_DEVICE_ID			0x30
 
 /* Revision ID register (8 bit) */
 #define B53_REV_ID			0x40
+
+/* Broadcom header RX control (16 bit) */
+#define B53_BRCM_HDR_RX_DIS		0x60
+
+/* Broadcom header TX control (16 bit)	*/
+#define B53_BRCM_HDR_TX_DIS		0x62
 
 /*************************************************************************
  * ARL Access Page Registers
@@ -249,6 +293,7 @@
 /* ARL Table Read/Write Register (8 bit) */
 #define B53_ARLTBL_RW_CTRL		0x00
 #define    ARLTBL_RW			BIT(0)
+#define    ARLTBL_IVL_SVL_SELECT	BIT(6)
 #define    ARLTBL_START_DONE		BIT(7)
 
 /* MAC Address Index Register (48 bit) */
@@ -261,7 +306,7 @@
  *
  * BCM5325 and BCM5365 share most definitions below
  */
-#define B53_ARLTBL_MAC_VID_ENTRY(n)	(0x10 * (n))
+#define B53_ARLTBL_MAC_VID_ENTRY(n)	((0x10 * (n)) + 0x10)
 #define   ARLTBL_MAC_MASK		0xffffffffffffULL
 #define   ARLTBL_VID_S			48
 #define   ARLTBL_VID_MASK_25		0xff
@@ -273,12 +318,15 @@
 #define   ARLTBL_VALID_25		BIT(63)
 
 /* ARL Table Data Entry N Registers (32 bit) */
-#define B53_ARLTBL_DATA_ENTRY(n)	((0x10 * (n)) + 0x08)
+#define B53_ARLTBL_DATA_ENTRY(n)	((0x10 * (n)) + 0x18)
 #define   ARLTBL_DATA_PORT_ID_MASK	0x1ff
 #define   ARLTBL_TC(tc)			((3 & tc) << 11)
 #define   ARLTBL_AGE			BIT(14)
 #define   ARLTBL_STATIC			BIT(15)
 #define   ARLTBL_VALID			BIT(16)
+
+/* Maximum number of bin entries in the ARL for all switches */
+#define B53_ARLTBL_MAX_BIN_ENTRIES	4
 
 /* ARL Search Control Register (8 bit) */
 #define B53_ARL_SRCH_CTL		0x50
@@ -430,6 +478,44 @@
 #define B53_JUMBO_MAX_SIZE_63XX		0x08
 #define   JMS_MIN_SIZE			1518
 #define   JMS_MAX_SIZE			9724
+
+/*************************************************************************
+ * EEE Configuration Page Registers
+ *************************************************************************/
+
+/* EEE Enable control register (16 bit) */
+#define B53_EEE_EN_CTRL			0x00
+
+/* EEE LPI assert status register (16 bit) */
+#define B53_EEE_LPI_ASSERT_STS		0x02
+
+/* EEE LPI indicate status register (16 bit) */
+#define B53_EEE_LPI_INDICATE		0x4
+
+/* EEE Receiving idle symbols status register (16 bit) */
+#define B53_EEE_RX_IDLE_SYM_STS		0x6
+
+/* EEE Pipeline timer register (32 bit) */
+#define B53_EEE_PIP_TIMER		0xC
+
+/* EEE Sleep timer Gig register (32 bit) */
+#define B53_EEE_SLEEP_TIMER_GIG(i)	(0x10 + 4 * (i))
+
+/* EEE Sleep timer FE register (32 bit) */
+#define B53_EEE_SLEEP_TIMER_FE(i)	(0x34 + 4 * (i))
+
+/* EEE Minimum LP timer Gig register (32 bit) */
+#define B53_EEE_MIN_LP_TIMER_GIG(i)	(0x58 + 4 * (i))
+
+/* EEE Minimum LP timer FE register (32 bit) */
+#define B53_EEE_MIN_LP_TIMER_FE(i)	(0x7c + 4 * (i))
+
+/* EEE Wake timer Gig register (16 bit) */
+#define B53_EEE_WAKE_TIMER_GIG(i)	(0xa0 + 2 * (i))
+
+/* EEE Wake timer FE register (16 bit) */
+#define B53_EEE_WAKE_TIMER_FE(i)	(0xb2 + 2 * (i))
+
 
 /*************************************************************************
  * CFP Configuration Page Registers

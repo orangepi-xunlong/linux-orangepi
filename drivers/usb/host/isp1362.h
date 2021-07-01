@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * ISP1362 HCD (Host Controller Driver) for USB.
  *
@@ -5,62 +6,16 @@
  */
 
 /* ------------------------------------------------------------------------- */
-/*
- * Platform specific compile time options
- */
-#if defined(CONFIG_BLACKFIN)
-
-#include <linux/io.h>
-#define USE_32BIT		0
-#define MAX_ROOT_PORTS		2
-#define USE_PLATFORM_DELAY	0
-#define USE_NDELAY		1
-
-#define DUMMY_DELAY_ACCESS \
-	do { \
-		bfin_read16(ASYNC_BANK0_BASE); \
-		bfin_read16(ASYNC_BANK0_BASE); \
-		bfin_read16(ASYNC_BANK0_BASE); \
-	} while (0)
-
-#undef insw
-#undef outsw
-
-#define insw  delayed_insw
-#define outsw  delayed_outsw
-
-static inline void delayed_outsw(unsigned int addr, void *buf, int len)
-{
-	unsigned short *bp = (unsigned short *)buf;
-	while (len--) {
-		DUMMY_DELAY_ACCESS;
-		outw(*bp++, addr);
-	}
-}
-
-static inline void delayed_insw(unsigned int addr, void *buf, int len)
-{
-	unsigned short *bp = (unsigned short *)buf;
-	while (len--) {
-		DUMMY_DELAY_ACCESS;
-		*bp++ = inw(addr);
-	}
-}
-
-#else
 
 #define MAX_ROOT_PORTS		2
 
 #define USE_32BIT		0
 
-/* These options are mutually eclusive */
+/* These options are mutually exclusive */
 #define USE_PLATFORM_DELAY	0
 #define USE_NDELAY		0
 
 #define DUMMY_DELAY_ACCESS do {} while (0)
-
-#endif
-
 
 /* ------------------------------------------------------------------------- */
 
@@ -101,7 +56,7 @@ typedef const unsigned char isp1362_reg_t;
 #define ISP1362_REG_NO(r)		(r)
 
 #define ISP1362_REG(name, addr, width, rw) \
-static isp1362_reg_t ISP1362_REG_##name = addr
+static isp1362_reg_t __maybe_unused ISP1362_REG_##name = addr
 
 #define REG_ACCESS_TEST(r)		do {} while (0)
 #define REG_WIDTH_TEST(r, w)		do {} while (0)

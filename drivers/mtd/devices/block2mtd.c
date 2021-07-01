@@ -44,7 +44,7 @@ struct block2mtd_dev {
 static LIST_HEAD(blkmtd_device_list);
 
 
-static struct page *page_read(struct address_space *mapping, int index)
+static struct page *page_read(struct address_space *mapping, pgoff_t index)
 {
 	return read_mapping_page(mapping, index, NULL);
 }
@@ -54,7 +54,7 @@ static int _block2mtd_erase(struct block2mtd_dev *dev, loff_t to, size_t len)
 {
 	struct address_space *mapping = dev->blkdev->bd_inode->i_mapping;
 	struct page *page;
-	int index = to >> PAGE_SHIFT;	// page index
+	pgoff_t index = to >> PAGE_SHIFT;	// page index
 	int pages = len >> PAGE_SHIFT;
 	u_long *p;
 	u_long *max;
@@ -88,17 +88,12 @@ static int block2mtd_erase(struct mtd_info *mtd, struct erase_info *instr)
 	size_t len = instr->len;
 	int err;
 
-	instr->state = MTD_ERASING;
 	mutex_lock(&dev->write_mutex);
 	err = _block2mtd_erase(dev, from, len);
 	mutex_unlock(&dev->write_mutex);
-	if (err) {
+	if (err)
 		pr_err("erase failed err = %d\n", err);
-		instr->state = MTD_ERASE_FAILED;
-	} else
-		instr->state = MTD_ERASE_DONE;
 
-	mtd_erase_callback(instr);
 	return err;
 }
 
@@ -108,7 +103,7 @@ static int block2mtd_read(struct mtd_info *mtd, loff_t from, size_t len,
 {
 	struct block2mtd_dev *dev = mtd->priv;
 	struct page *page;
-	int index = from >> PAGE_SHIFT;
+	pgoff_t index = from >> PAGE_SHIFT;
 	int offset = from & (PAGE_SIZE-1);
 	int cpylen;
 
@@ -142,7 +137,7 @@ static int _block2mtd_write(struct block2mtd_dev *dev, const u_char *buf,
 {
 	struct page *page;
 	struct address_space *mapping = dev->blkdev->bd_inode->i_mapping;
-	int index = to >> PAGE_SHIFT;	// page index
+	pgoff_t index = to >> PAGE_SHIFT;	// page index
 	int offset = to & ~PAGE_MASK;	// page offset
 	int cpylen;
 
@@ -225,7 +220,7 @@ static struct block2mtd_dev *add_device(char *devname, int erase_size,
 	int i;
 #endif
 	const fmode_t mode = FMODE_READ | FMODE_WRITE | FMODE_EXCL;
-	struct block_device *bdev = ERR_PTR(-ENODEV);
+	struct block_device *bdev;
 	struct block2mtd_dev *dev;
 	char *name;
 
@@ -334,8 +329,10 @@ static int ustrtoul(const char *cp, char **endp, unsigned int base)
 	switch (**endp) {
 	case 'G' :
 		result *= 1024;
+		fallthrough;
 	case 'M':
 		result *= 1024;
+		fallthrough;
 	case 'K':
 	case 'k':
 		result *= 1024;

@@ -1,20 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (c) 2001-2004 by David Brownell
  * Copyright (c) 2003 Michal Sojka, for high-speed iso transfers
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
- * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 /* this file is part of ehci-hcd.c */
@@ -130,8 +117,9 @@ static struct ehci_tt *find_tt(struct usb_device *udev)
 	if (utt->multi) {
 		tt_index = utt->hcpriv;
 		if (!tt_index) {		/* Create the index array */
-			tt_index = kzalloc(utt->hub->maxchild *
-					sizeof(*tt_index), GFP_ATOMIC);
+			tt_index = kcalloc(utt->hub->maxchild,
+					   sizeof(*tt_index),
+					   GFP_ATOMIC);
 			if (!tt_index)
 				return ERR_PTR(-ENOMEM);
 			utt->hcpriv = tt_index;
@@ -318,26 +306,6 @@ static int __maybe_unused same_tt(struct usb_device *dev1,
 }
 
 #ifdef CONFIG_USB_EHCI_TT_NEWSCHED
-
-/* Which uframe does the low/fullspeed transfer start in?
- *
- * The parameter is the mask of ssplits in "H-frame" terms
- * and this returns the transfer start uframe in "B-frame" terms,
- * which allows both to match, e.g. a ssplit in "H-frame" uframe 0
- * will cause a transfer in "B-frame" uframe 0.  "B-frames" lag
- * "H-frames" by 1 uframe.  See the EHCI spec sec 4.5 and figure 4.7.
- */
-static inline unsigned char tt_start_uframe(struct ehci_hcd *ehci, __hc32 mask)
-{
-	unsigned char smask = hc32_to_cpu(ehci, mask) & QH_SMASK;
-
-	if (!smask) {
-		ehci_err(ehci, "invalid empty smask!\n");
-		/* uframe 7 can't have bw so this will indicate failure */
-		return 7;
-	}
-	return ffs(smask) - 1;
-}
 
 static const unsigned char
 max_tt_usecs[] = { 125, 125, 125, 125, 125, 125, 30, 0 };
@@ -1064,11 +1032,10 @@ iso_stream_init(
 
 	/* knows about ITD vs SITD */
 	if (dev->speed == USB_SPEED_HIGH) {
-		unsigned multi = hb_mult(maxp);
+		unsigned multi = usb_endpoint_maxp_mult(&urb->ep->desc);
 
 		stream->highspeed = 1;
 
-		maxp = max_packet(maxp);
 		buf1 |= maxp;
 		maxp *= multi;
 
@@ -1106,7 +1073,7 @@ iso_stream_init(
 		addr |= epnum << 8;
 		addr |= dev->devnum;
 		stream->ps.usecs = HS_USECS_ISO(maxp);
-		think_time = dev->tt ? dev->tt->think_time : 0;
+		think_time = dev->tt->think_time;
 		stream->ps.tt_usecs = NS_TO_US(think_time + usb_calc_bus_time(
 				dev->speed, is_input, 1, maxp));
 		hs_transfers = max(1u, (maxp + 187) / 188);
@@ -1848,7 +1815,6 @@ static bool itd_complete(struct ehci_hcd *ehci, struct ehci_itd *itd)
 	unsigned				uframe;
 	int					urb_index = -1;
 	struct ehci_iso_stream			*stream = itd->stream;
-	struct usb_device			*dev;
 	bool					retval = false;
 
 	/* for each uframe with a packet */
@@ -1899,7 +1865,6 @@ static bool itd_complete(struct ehci_hcd *ehci, struct ehci_itd *itd)
 	 */
 
 	/* give urb back to the driver; completion often (re)submits */
-	dev = urb->dev;
 	ehci_urb_done(ehci, urb, 0);
 	retval = true;
 	urb = NULL;
@@ -2243,7 +2208,6 @@ static bool sitd_complete(struct ehci_hcd *ehci, struct ehci_sitd *sitd)
 	u32					t;
 	int					urb_index;
 	struct ehci_iso_stream			*stream = sitd->stream;
-	struct usb_device			*dev;
 	bool					retval = false;
 
 	urb_index = sitd->index;
@@ -2281,7 +2245,6 @@ static bool sitd_complete(struct ehci_hcd *ehci, struct ehci_sitd *sitd)
 	 */
 
 	/* give urb back to the driver; completion often (re)submits */
-	dev = urb->dev;
 	ehci_urb_done(ehci, urb, 0);
 	retval = true;
 	urb = NULL;
@@ -2492,7 +2455,7 @@ restart:
 			ehci_dbg(ehci, "corrupt type %d frame %d shadow %p\n",
 					type, frame, q.ptr);
 			/* BUG(); */
-			/* FALL THROUGH */
+			fallthrough;
 		case Q_TYPE_QH:
 		case Q_TYPE_FSTN:
 			/* End of the iTDs and siTDs */
