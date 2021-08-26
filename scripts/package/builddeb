@@ -467,7 +467,7 @@ Description: Linux kernel firmware, version $version
  This package contains firmware from the Linux kernel, version $version.
 EOF
 
-	create_package "$fwpackagename" "$fwdir"
+	#create_package "$fwpackagename" "$fwdir"
 fi
 
 cat <<EOF >> debian/control
