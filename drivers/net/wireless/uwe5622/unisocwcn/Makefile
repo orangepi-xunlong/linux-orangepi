@@ -317,7 +317,7 @@ ccflags-y += -DCONFIG_WL_WAKE_HOST_EN
 #ccflags-y += -DCONFIG_WCN_CHECK_MODULE_VENDOR
 #ifneq ($(TARGET_BUILD_VARIANT),user)
 ccflags-y += -DCONFIG_WCN_LOOPCHECK
-ccflags-y += -DCONFIG_CPLOG_DEBUG
+#ccflags-y += -DCONFIG_CPLOG_DEBUG
 #endif
 #ccflags-y += -DCONFIG_MEM_PD
 ccflags-y += -DCONFIG_SDIO_TX_ADMA_MODE
