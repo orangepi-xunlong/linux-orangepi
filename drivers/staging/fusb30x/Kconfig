@@ -1,0 +1,10 @@
+config FUSB_30X
+	tristate "Fairchild FUSB30X Type-C chip driver"
+	depends on I2C
+	help
+	  This is a driver for the Fairchild FUSB302 Type-C chip.  It supports
+	  USB Type-C PD functionality controlled using I2C.
+
+	  This driver supports extcon reporting not yet implemented in the
+	  mainline FUSB302 driver.
+

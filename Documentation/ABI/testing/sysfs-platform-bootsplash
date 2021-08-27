@@ -1,0 +1,43 @@
+What:		/sys/devices/platform/bootsplash.0/enabled
+Date:		Oct 2017
+KernelVersion:	4.14
+Contact:	Max Staudt <mstaudt@suse.de>
+Description:
+		Can be set and read.
+
+		0: Splash is disabled.
+		1: Splash is shown whenever fbcon would show a text console
+		   (i.e. no graphical application is running), and a splash
+		   file is loaded.
+
+What:		/sys/devices/platform/bootsplash.0/drop_splash
+Date:		Oct 2017
+KernelVersion:	4.14
+Contact:	Max Staudt <mstaudt@suse.de>
+Description:
+		Can only be set.
+
+		Any value written will cause the current splash theme file
+		to be unloaded and the text console to be redrawn.
+
+What:		/sys/devices/platform/bootsplash.0/load_file
+Date:		Oct 2017
+KernelVersion:	4.14
+Contact:	Max Staudt <mstaudt@suse.de>
+Description:
+		Can only be set.
+
+		Any value written will cause the splash to be disabled and
+		internal memory structures to be freed.
+
+		A firmware path written will cause a new theme file to be
+		loaded and the current bootsplash to be replaced.
+		The current enabled/disabled status is not touched.
+		If the splash is already active, it will be redrawn.
+
+		The path has to be a path in /lib/firmware since
+		request_firmware() is used to fetch the data.
+
+		When setting the splash from the shell, echo -n has to be
+		used as any trailing '\n' newline will be interpreted as
+		part of the path.
