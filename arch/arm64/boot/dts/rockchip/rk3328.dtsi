@@ -1218,6 +1218,8 @@
 			 <&cru ACLK_USB3OTG>;
 		clock-names = "ref_clk", "suspend_clk",
 			      "bus_clk";
+		resets = <&cru SRST_USB3OTG>;
+		reset-names = "usb3-otg";
 		dr_mode = "otg";
 		phy_type = "utmi_wide";
 		snps,dis-del-phy-power-chg-quirk;
