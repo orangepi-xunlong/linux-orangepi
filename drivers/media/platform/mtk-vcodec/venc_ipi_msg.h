@@ -1,18 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2016 MediaTek Inc.
  * Author: Jungchang Tsao <jungchang.tsao@mediatek.com>
  *	   Daniel Hsiao <daniel.hsiao@mediatek.com>
  *	   Tiffany Lin <tiffany.lin@mediatek.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef _VENC_IPI_MSG_H_
@@ -61,7 +52,7 @@ struct venc_ap_ipi_msg_init {
  *			(struct venc_vp8_vsi/venc_h264_vsi *)
  * @param_id:	parameter id (venc_set_param_type)
  * @data_item:	number of items in the data array
- * @data[8]:	data array to store the set parameters
+ * @data:	data array to store the set parameters
  */
 struct venc_ap_ipi_msg_set_param {
 	uint32_t msg_id;
@@ -69,6 +60,11 @@ struct venc_ap_ipi_msg_set_param {
 	uint32_t param_id;
 	uint32_t data_item;
 	uint32_t data[8];
+};
+
+struct venc_ap_ipi_msg_set_param_ext {
+	struct venc_ap_ipi_msg_set_param base;
+	uint32_t data_ext[24];
 };
 
 /**
@@ -89,6 +85,19 @@ struct venc_ap_ipi_msg_enc {
 	uint32_t input_addr[3];
 	uint32_t bs_addr;
 	uint32_t bs_size;
+};
+
+/**
+ * struct venc_ap_ipi_msg_enc_ext - AP to SCP extended enc cmd structure
+ *
+ * @base:	base msg structure
+ * @data_item:	number of items in the data array
+ * @data:	data array to store the set parameters
+ */
+struct venc_ap_ipi_msg_enc_ext {
+	struct venc_ap_ipi_msg_enc base;
+	uint32_t data_item;
+	uint32_t data[32];
 };
 
 /**
@@ -129,16 +138,17 @@ struct venc_vpu_ipi_msg_common {
  * @venc_inst:	AP encoder instance (struct venc_vp8_inst/venc_h264_inst *)
  * @vpu_inst_addr:	VPU encoder instance addr
  *			(struct venc_vp8_vsi/venc_h264_vsi *)
- * @reserved:	reserved for future use. vpu is running in 32bit. Without
- *		this reserved field, if kernel run in 64bit. this struct size
- *		will be different between kernel and vpu
+ * @venc_abi_version:	ABI version of the firmware. Kernel can use it to
+ *			ensure that it is compatible with the firmware.
+ *			For MT8173 the value of this field is undefined and
+ *			should not be used.
  */
 struct venc_vpu_ipi_msg_init {
 	uint32_t msg_id;
 	uint32_t status;
 	uint64_t venc_inst;
 	uint32_t vpu_inst_addr;
-	uint32_t reserved;
+	uint32_t venc_abi_version;
 };
 
 /**
@@ -148,7 +158,7 @@ struct venc_vpu_ipi_msg_init {
  * @venc_inst:	AP encoder instance (struct venc_vp8_inst/venc_h264_inst *)
  * @param_id:	parameter id (venc_set_param_type)
  * @data_item:	number of items in the data array
- * @data[6]:	data array to store the return result
+ * @data:	data array to store the return result
  */
 struct venc_vpu_ipi_msg_set_param {
 	uint32_t msg_id;
@@ -161,10 +171,10 @@ struct venc_vpu_ipi_msg_set_param {
 
 /**
  * enum venc_ipi_msg_enc_state - Type of encode state
- * VEN_IPI_MSG_ENC_STATE_FRAME:	one frame being encoded
- * VEN_IPI_MSG_ENC_STATE_PART:	bit stream buffer full
- * VEN_IPI_MSG_ENC_STATE_SKIP:	encoded skip frame
- * VEN_IPI_MSG_ENC_STATE_ERROR:	encounter error
+ * @VEN_IPI_MSG_ENC_STATE_FRAME:	one frame being encoded
+ * @VEN_IPI_MSG_ENC_STATE_PART:		bit stream buffer full
+ * @VEN_IPI_MSG_ENC_STATE_SKIP:		encoded skip frame
+ * @VEN_IPI_MSG_ENC_STATE_ERROR:	encounter error
  */
 enum venc_ipi_msg_enc_state {
 	VEN_IPI_MSG_ENC_STATE_FRAME,

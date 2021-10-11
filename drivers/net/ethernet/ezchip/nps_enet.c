@@ -1,21 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright(c) 2015 EZchip Technologies.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
  */
 
 #include <linux/module.h>
 #include <linux/etherdevice.h>
+#include <linux/interrupt.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
 #include <linux/of_net.h>
@@ -189,10 +179,8 @@ static int nps_enet_poll(struct napi_struct *napi, int budget)
 
 	nps_enet_tx_handler(ndev);
 	work_done = nps_enet_rx_handler(ndev);
-	if (work_done < budget) {
+	if ((work_done < budget) && napi_complete_done(napi, work_done)) {
 		u32 buf_int_enable_value = 0;
-
-		napi_complete(napi);
 
 		/* set tx_done and rx_rdy bits */
 		buf_int_enable_value |= NPS_ENET_ENABLE << RX_RDY_SHIFT;
@@ -587,8 +575,6 @@ static s32 nps_enet_probe(struct platform_device *pdev)
 	struct net_device *ndev;
 	struct nps_enet_priv *priv;
 	s32 err = 0;
-	const char *mac_addr;
-	struct resource *res_regs;
 
 	if (!dev->of_node)
 		return -ENODEV;
@@ -607,8 +593,7 @@ static s32 nps_enet_probe(struct platform_device *pdev)
 	/* FIXME :: no multicast support yet */
 	ndev->flags &= ~IFF_MULTICAST;
 
-	res_regs = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	priv->regs_base = devm_ioremap_resource(dev, res_regs);
+	priv->regs_base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(priv->regs_base)) {
 		err = PTR_ERR(priv->regs_base);
 		goto out_netdev;
@@ -616,10 +601,8 @@ static s32 nps_enet_probe(struct platform_device *pdev)
 	dev_dbg(dev, "Registers base address is 0x%p\n", priv->regs_base);
 
 	/* set kernel MAC address to dev */
-	mac_addr = of_get_mac_address(dev->of_node);
-	if (mac_addr)
-		ether_addr_copy(ndev->dev_addr, mac_addr);
-	else
+	err = of_get_mac_address(dev->of_node, ndev->dev_addr);
+	if (err)
 		eth_hw_addr_random(ndev);
 
 	/* Get IRQ number */

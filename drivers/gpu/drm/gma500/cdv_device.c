@@ -1,32 +1,21 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /**************************************************************************
  * Copyright (c) 2011, Intel Corporation.
  * All Rights Reserved.
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- *
  **************************************************************************/
 
 #include <linux/backlight.h>
-#include <drm/drmP.h>
+#include <linux/delay.h>
+
 #include <drm/drm.h>
-#include <drm/gma_drm.h>
-#include "psb_drv.h"
-#include "psb_reg.h"
-#include "psb_intel_reg.h"
-#include "intel_bios.h"
+
 #include "cdv_device.h"
 #include "gma_device.h"
+#include "intel_bios.h"
+#include "psb_drv.h"
+#include "psb_intel_reg.h"
+#include "psb_reg.h"
 
 #define VGA_SR_INDEX		0x3c4
 #define VGA_SR_DATA		0x3c5
@@ -106,13 +95,14 @@ static u32 cdv_get_max_backlight(struct drm_device *dev)
 static int cdv_get_brightness(struct backlight_device *bd)
 {
 	struct drm_device *dev = bl_get_data(bd);
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
 	u32 val = REG_READ(BLC_PWM_CTL) & BACKLIGHT_DUTY_CYCLE_MASK;
 
 	if (cdv_backlight_combination_mode(dev)) {
 		u8 lbpc;
 
 		val &= ~1;
-		pci_read_config_byte(dev->pdev, 0xF4, &lbpc);
+		pci_read_config_byte(pdev, 0xF4, &lbpc);
 		val *= lbpc;
 	}
 	return (val * 100)/cdv_get_max_backlight(dev);
@@ -122,6 +112,7 @@ static int cdv_get_brightness(struct backlight_device *bd)
 static int cdv_set_brightness(struct backlight_device *bd)
 {
 	struct drm_device *dev = bl_get_data(bd);
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
 	int level = bd->props.brightness;
 	u32 blc_pwm_ctl;
 
@@ -139,7 +130,7 @@ static int cdv_set_brightness(struct backlight_device *bd)
 		lbpc = level * 0xfe / max + 1;
 		level /= lbpc;
 
-		pci_write_config_byte(dev->pdev, 0xF4, lbpc);
+		pci_write_config_byte(pdev, 0xF4, lbpc);
 	}
 
 	blc_pwm_ctl = REG_READ(BLC_PWM_CTL) & ~BACKLIGHT_DUTY_CYCLE_MASK;
@@ -185,21 +176,22 @@ static int cdv_backlight_init(struct drm_device *dev)
  *	for this and the MID devices.
  */
 
-static inline u32 CDV_MSG_READ32(uint port, uint offset)
+static inline u32 CDV_MSG_READ32(int domain, uint port, uint offset)
 {
 	int mcr = (0x10<<24) | (port << 16) | (offset << 8);
 	uint32_t ret_val = 0;
-	struct pci_dev *pci_root = pci_get_bus_and_slot(0, 0);
+	struct pci_dev *pci_root = pci_get_domain_bus_and_slot(domain, 0, 0);
 	pci_write_config_dword(pci_root, 0xD0, mcr);
 	pci_read_config_dword(pci_root, 0xD4, &ret_val);
 	pci_dev_put(pci_root);
 	return ret_val;
 }
 
-static inline void CDV_MSG_WRITE32(uint port, uint offset, u32 value)
+static inline void CDV_MSG_WRITE32(int domain, uint port, uint offset,
+				   u32 value)
 {
 	int mcr = (0x11<<24) | (port << 16) | (offset << 8) | 0xF0;
-	struct pci_dev *pci_root = pci_get_bus_and_slot(0, 0);
+	struct pci_dev *pci_root = pci_get_domain_bus_and_slot(domain, 0, 0);
 	pci_write_config_dword(pci_root, 0xD4, value);
 	pci_write_config_dword(pci_root, 0xD0, mcr);
 	pci_dev_put(pci_root);
@@ -215,12 +207,14 @@ static inline void CDV_MSG_WRITE32(uint port, uint offset, u32 value)
 static void cdv_init_pm(struct drm_device *dev)
 {
 	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
 	u32 pwr_cnt;
+	int domain = pci_domain_nr(pdev->bus);
 	int i;
 
-	dev_priv->apm_base = CDV_MSG_READ32(PSB_PUNIT_PORT,
+	dev_priv->apm_base = CDV_MSG_READ32(domain, PSB_PUNIT_PORT,
 							PSB_APMBA) & 0xFFFF;
-	dev_priv->ospm_base = CDV_MSG_READ32(PSB_PUNIT_PORT,
+	dev_priv->ospm_base = CDV_MSG_READ32(domain, PSB_PUNIT_PORT,
 							PSB_OSPMBA) & 0xFFFF;
 
 	/* Power status */
@@ -243,6 +237,8 @@ static void cdv_init_pm(struct drm_device *dev)
 
 static void cdv_errata(struct drm_device *dev)
 {
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
+
 	/* Disable bonus launch.
 	 *	CPU and GPU competes for memory and display misses updates and
 	 *	flickers. Worst with dual core, dual displays.
@@ -251,7 +247,7 @@ static void cdv_errata(struct drm_device *dev)
 	 *	Bonus Launch to work around the issue, by degrading
 	 *	performance.
 	 */
-	 CDV_MSG_WRITE32(3, 0x30, 0x08027108);
+	 CDV_MSG_WRITE32(pci_domain_nr(pdev->bus), 3, 0x30, 0x08027108);
 }
 
 /**
@@ -264,12 +260,13 @@ static void cdv_errata(struct drm_device *dev)
 static int cdv_save_display_registers(struct drm_device *dev)
 {
 	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
 	struct psb_save_area *regs = &dev_priv->regs;
 	struct drm_connector *connector;
 
 	dev_dbg(dev->dev, "Saving GPU registers.\n");
 
-	pci_read_config_byte(dev->pdev, 0xF4, &regs->cdv.saveLBB);
+	pci_read_config_byte(pdev, 0xF4, &regs->cdv.saveLBB);
 
 	regs->cdv.saveDSPCLK_GATE_D = REG_READ(DSPCLK_GATE_D);
 	regs->cdv.saveRAMCLK_GATE_D = REG_READ(RAMCLK_GATE_D);
@@ -318,11 +315,12 @@ static int cdv_save_display_registers(struct drm_device *dev)
 static int cdv_restore_display_registers(struct drm_device *dev)
 {
 	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
 	struct psb_save_area *regs = &dev_priv->regs;
 	struct drm_connector *connector;
 	u32 temp;
 
-	pci_write_config_byte(dev->pdev, 0xF4, regs->cdv.saveLBB);
+	pci_write_config_byte(pdev, 0xF4, regs->cdv.saveLBB);
 
 	REG_WRITE(DSPCLK_GATE_D, regs->cdv.saveDSPCLK_GATE_D);
 	REG_WRITE(RAMCLK_GATE_D, regs->cdv.saveRAMCLK_GATE_D);
@@ -430,16 +428,16 @@ static int cdv_power_up(struct drm_device *dev)
 static void cdv_hotplug_work_func(struct work_struct *work)
 {
         struct drm_psb_private *dev_priv = container_of(work, struct drm_psb_private,
-							hotplug_work);                 
+							hotplug_work);
         struct drm_device *dev = dev_priv->dev;
 
         /* Just fire off a uevent and let userspace tell us what to do */
         drm_helper_hpd_irq_event(dev);
-}                       
+}
 
 /* The core driver has received a hotplug IRQ. We are in IRQ context
    so extract the needed information and kick off queued processing */
-   
+
 static int cdv_hotplug_event(struct drm_device *dev)
 {
 	struct drm_psb_private *dev_priv = dev->dev_private;
@@ -458,7 +456,7 @@ static void cdv_hotplug_enable(struct drm_device *dev, bool on)
 	}  else {
 		REG_WRITE(PORT_HOTPLUG_EN, 0);
 		REG_WRITE(PORT_HOTPLUG_STAT, REG_READ(PORT_HOTPLUG_STAT));
-	}	
+	}
 }
 
 static const char *force_audio_names[] = {
@@ -483,7 +481,7 @@ void cdv_intel_attach_force_audio_property(struct drm_connector *connector)
 			return;
 
 		for (i = 0; i < ARRAY_SIZE(force_audio_names); i++)
-			drm_property_add_enum(prop, i, i-1, force_audio_names[i]);
+			drm_property_add_enum(prop, i-1, force_audio_names[i]);
 
 		dev_priv->force_audio_property = prop;
 	}
@@ -512,7 +510,7 @@ void cdv_intel_attach_broadcast_rgb_property(struct drm_connector *connector)
 			return;
 
 		for (i = 0; i < ARRAY_SIZE(broadcast_rgb_names); i++)
-			drm_property_add_enum(prop, i, i, broadcast_rgb_names[i]);
+			drm_property_add_enum(prop, i, broadcast_rgb_names[i]);
 
 		dev_priv->broadcast_rgb_property = prop;
 	}
@@ -577,9 +575,10 @@ static const struct psb_offset cdv_regmap[2] = {
 static int cdv_chip_setup(struct drm_device *dev)
 {
 	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
 	INIT_WORK(&dev_priv->hotplug_work, cdv_hotplug_work_func);
 
-	if (pci_enable_msi(dev->pdev))
+	if (pci_enable_msi(pdev))
 		dev_warn(dev->dev, "Enabling MSI failed!\n");
 	dev_priv->regmap = cdv_regmap;
 	gma_get_core_freq(dev);
@@ -593,7 +592,6 @@ static int cdv_chip_setup(struct drm_device *dev)
 
 const struct psb_ops cdv_chip_ops = {
 	.name = "GMA3600/3650",
-	.accel_2d = 0,
 	.pipes = 2,
 	.crtcs = 2,
 	.hdmi_mask = (1 << 0) | (1 << 1),
@@ -605,7 +603,7 @@ const struct psb_ops cdv_chip_ops = {
 	.errata = cdv_errata,
 
 	.crtc_helper = &cdv_intel_helper_funcs,
-	.crtc_funcs = &cdv_intel_crtc_funcs,
+	.crtc_funcs = &gma_intel_crtc_funcs,
 	.clock_funcs = &cdv_clock_funcs,
 
 	.output_init = cdv_output_init,

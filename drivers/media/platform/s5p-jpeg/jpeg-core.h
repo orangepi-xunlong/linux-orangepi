@@ -1,13 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* linux/drivers/media/platform/s5p-jpeg/jpeg-core.h
  *
  * Copyright (c) 2011 Samsung Electronics Co., Ltd.
  *		http://www.samsung.com
  *
- * Author: Andrzej Pietrasiewicz <andrzej.p@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * Author: Andrzej Pietrasiewicz <andrzejtp2010@gmail.com>
  */
 
 #ifndef JPEG_CORE_H_
@@ -63,6 +60,7 @@
 
 #define S5P_JPEG_ENCODE		0
 #define S5P_JPEG_DECODE		1
+#define S5P_JPEG_DISABLE	-1
 
 #define FMT_TYPE_OUTPUT		0
 #define FMT_TYPE_CAPTURE	1
@@ -98,6 +96,11 @@ enum  exynos4_jpeg_img_quality_level {
 	QUALITY_LEVEL_4,	/* low */
 };
 
+enum s5p_jpeg_ctx_state {
+	JPEGCTX_RUNNING = 0,
+	JPEGCTX_RESOLUTION_CHANGE,
+};
+
 /**
  * struct s5p_jpeg - JPEG IP abstraction
  * @lock:		the mutex protecting this structure
@@ -108,12 +111,12 @@ enum  exynos4_jpeg_img_quality_level {
  * @m2m_dev:		v4l2 mem2mem device data
  * @regs:		JPEG IP registers mapping
  * @irq:		JPEG IP irq
+ * @irq_ret:		JPEG IP irq result value
  * @clocks:		JPEG IP clock(s)
  * @dev:		JPEG IP struct device
  * @variant:		driver variant to be used
- * @irq_status		interrupt flags set during single encode/decode
-			operation
-
+ * @irq_status:		interrupt flags set during single encode/decode
+ *			operation
  */
 struct s5p_jpeg {
 	struct mutex		lock;
@@ -146,17 +149,17 @@ struct s5p_jpeg_variant {
 };
 
 /**
- * struct jpeg_fmt - driver's internal color format data
- * @name:	format descritpion
+ * struct s5p_jpeg_fmt - driver's internal color format data
  * @fourcc:	the fourcc code, 0 if not applicable
  * @depth:	number of bits per pixel
  * @colplanes:	number of color planes (1 for packed formats)
+ * @memplanes:	number of memory planes (1 for packed formats)
  * @h_align:	horizontal alignment order (align to 2^h_align)
  * @v_align:	vertical alignment order (align to 2^v_align)
+ * @subsampling:subsampling of a raw format or a JPEG
  * @flags:	flags describing format applicability
  */
 struct s5p_jpeg_fmt {
-	char	*name;
 	u32	fourcc;
 	int	depth;
 	int	colplanes;
@@ -168,7 +171,7 @@ struct s5p_jpeg_fmt {
 };
 
 /**
- * s5p_jpeg_marker - collection of markers from jpeg header
+ * struct s5p_jpeg_marker - collection of markers from jpeg header
  * @marker:	markers' positions relative to the buffer beginning
  * @len:	markers' payload lengths (without length field)
  * @n:		number of markers in collection
@@ -180,16 +183,15 @@ struct s5p_jpeg_marker {
 };
 
 /**
- * s5p_jpeg_q_data - parameters of one queue
+ * struct s5p_jpeg_q_data - parameters of one queue
  * @fmt:	driver-specific format of this queue
  * @w:		image width
  * @h:		image height
  * @sos:	SOS marker's position relative to the buffer beginning
  * @dht:	DHT markers' positions relative to the buffer beginning
  * @dqt:	DQT markers' positions relative to the buffer beginning
- * @sof:	SOF0 marker's postition relative to the buffer beginning
+ * @sof:	SOF0 marker's position relative to the buffer beginning
  * @sof_len:	SOF0 marker's payload length (without length field itself)
- * @components:	number of image components
  * @size:	image buffer size in bytes
  */
 struct s5p_jpeg_q_data {
@@ -201,12 +203,11 @@ struct s5p_jpeg_q_data {
 	struct s5p_jpeg_marker	dqt;
 	u32			sof;
 	u32			sof_len;
-	u32			components;
 	u32			size;
 };
 
 /**
- * s5p_jpeg_ctx - the device context data
+ * struct s5p_jpeg_ctx - the device context data
  * @jpeg:		JPEG IP device for this context
  * @mode:		compression (encode) operation or decompression (decode)
  * @compr_quality:	destination image quality in compression (encode) mode
@@ -220,6 +221,7 @@ struct s5p_jpeg_q_data {
  * @hdr_parsed:		set if header has been parsed during decompression
  * @crop_altered:	set if crop rectangle has been altered by the user space
  * @ctrl_handler:	controls handler
+ * @state:		state of the context
  */
 struct s5p_jpeg_ctx {
 	struct s5p_jpeg		*jpeg;
@@ -235,10 +237,11 @@ struct s5p_jpeg_ctx {
 	bool			hdr_parsed;
 	bool			crop_altered;
 	struct v4l2_ctrl_handler ctrl_handler;
+	enum s5p_jpeg_ctx_state	state;
 };
 
 /**
- * s5p_jpeg_buffer - description of memory containing input JPEG data
+ * struct s5p_jpeg_buffer - description of memory containing input JPEG data
  * @size:	buffer size
  * @curr:	current position in the buffer
  * @data:	pointer to the data

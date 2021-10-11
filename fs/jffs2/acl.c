@@ -133,7 +133,8 @@ static void *jffs2_acl_to_medium(const struct posix_acl *acl, size_t *size)
 	size_t i;
 
 	*size = jffs2_acl_size(acl->a_count);
-	header = kmalloc(sizeof(*header) + acl->a_count * sizeof(*entry), GFP_KERNEL);
+	header = kmalloc(struct_size(header, a_entries, acl->a_count),
+			GFP_KERNEL);
 	if (!header)
 		return ERR_PTR(-ENOMEM);
 	header->a_version = cpu_to_je32(JFFS2_ACL_VERSION);
@@ -225,7 +226,8 @@ static int __jffs2_set_acl(struct inode *inode, int xprefix, struct posix_acl *a
 	return rc;
 }
 
-int jffs2_set_acl(struct inode *inode, struct posix_acl *acl, int type)
+int jffs2_set_acl(struct user_namespace *mnt_userns, struct inode *inode,
+		  struct posix_acl *acl, int type)
 {
 	int rc, xprefix;
 
@@ -235,7 +237,8 @@ int jffs2_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 		if (acl) {
 			umode_t mode;
 
-			rc = posix_acl_update_mode(inode, &mode, &acl);
+			rc = posix_acl_update_mode(&init_user_ns, inode, &mode,
+						   &acl);
 			if (rc)
 				return rc;
 			if (inode->i_mode != mode) {

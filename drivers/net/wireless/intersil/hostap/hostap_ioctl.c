@@ -1,8 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /* ioctl() (mostly Linux Wireless Extensions) routines for Host AP driver */
 
 #include <linux/slab.h>
 #include <linux/types.h>
-#include <linux/sched.h>
+#include <linux/sched/signal.h>
 #include <linux/ethtool.h>
 #include <linux/if_arp.h>
 #include <linux/module.h>
@@ -43,19 +44,8 @@ static struct iw_statistics *hostap_get_wireless_stats(struct net_device *dev)
 
 	if (local->iw_mode != IW_MODE_MASTER &&
 	    local->iw_mode != IW_MODE_REPEAT) {
-		int update = 1;
-#ifdef in_atomic
-		/* RID reading might sleep and it must not be called in
-		 * interrupt context or while atomic. However, this
-		 * function seems to be called while atomic (at least in Linux
-		 * 2.5.59). Update signal quality values only if in suitable
-		 * context. Otherwise, previous values read from tick timer
-		 * will be used. */
-		if (in_atomic())
-			update = 0;
-#endif /* in_atomic */
 
-		if (update && prism2_update_comms_qual(dev) == 0)
+		if (prism2_update_comms_qual(dev) == 0)
 			wstats->qual.updated = IW_QUAL_ALL_UPDATED |
 				IW_QUAL_DBM;
 
@@ -512,8 +502,8 @@ static int prism2_ioctl_giwaplist(struct net_device *dev,
 		return -EOPNOTSUPP;
 	}
 
-	addr = kmalloc(sizeof(struct sockaddr) * IW_MAX_AP, GFP_KERNEL);
-	qual = kmalloc(sizeof(struct iw_quality) * IW_MAX_AP, GFP_KERNEL);
+	addr = kmalloc_array(IW_MAX_AP, sizeof(struct sockaddr), GFP_KERNEL);
+	qual = kmalloc_array(IW_MAX_AP, sizeof(struct iw_quality), GFP_KERNEL);
 	if (addr == NULL || qual == NULL) {
 		kfree(addr);
 		kfree(qual);
@@ -1954,7 +1944,7 @@ static inline int prism2_translate_scan(local_info_t *local,
 					char *buffer, int buflen)
 {
 	struct hfa384x_hostscan_result *scan;
-	int entry, hostscan;
+	int entry;
 	char *current_ev = buffer;
 	char *end_buf = buffer + buflen;
 	struct list_head *ptr;
@@ -1967,7 +1957,6 @@ static inline int prism2_translate_scan(local_info_t *local,
 		bss->included = 0;
 	}
 
-	hostscan = local->last_scan_type == PRISM2_HOSTSCAN;
 	for (entry = 0; entry < local->last_scan_results_count; entry++) {
 		int found = 0;
 		scan = &local->last_scan_results[entry];
@@ -2544,7 +2533,7 @@ static int prism2_ioctl_priv_prism2_param(struct net_device *dev,
 			ret = -EINVAL;
 		}
 		if (local->iw_mode == IW_MODE_MASTER) {
-			wait_queue_t __wait;
+			wait_queue_entry_t __wait;
 			init_waitqueue_entry(&__wait, current);
 			add_wait_queue(&local->hostscan_wq, &__wait);
 			set_current_state(TASK_INTERRUPTIBLE);

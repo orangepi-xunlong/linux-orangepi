@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Belkin USB Serial Adapter Driver
  *
@@ -9,12 +10,7 @@
  *  and associated source files.  Please see the usb/serial files for
  *  individual credits and copyrights.
  *
- *	This program is free software; you can redistribute it and/or modify
- *	it under the terms of the GNU General Public License as published by
- *	the Free Software Foundation; either version 2 of the License, or
- *	(at your option) any later version.
- *
- * See Documentation/usb/usb-serial.txt for more information on using this
+ * See Documentation/usb/usb-serial.rst for more information on using this
  * driver
  *
  * TODO:
@@ -41,7 +37,7 @@
 
 /* function prototypes for a Belkin USB Serial Adapter F5U103 */
 static int belkin_sa_port_probe(struct usb_serial_port *port);
-static int belkin_sa_port_remove(struct usb_serial_port *port);
+static void belkin_sa_port_remove(struct usb_serial_port *port);
 static int  belkin_sa_open(struct tty_struct *tty,
 			struct usb_serial_port *port);
 static void belkin_sa_close(struct usb_serial_port *port);
@@ -138,14 +134,12 @@ static int belkin_sa_port_probe(struct usb_serial_port *port)
 	return 0;
 }
 
-static int belkin_sa_port_remove(struct usb_serial_port *port)
+static void belkin_sa_port_remove(struct usb_serial_port *port)
 {
 	struct belkin_sa_private *priv;
 
 	priv = usb_get_serial_port_data(port);
 	kfree(priv);
-
-	return 0;
 }
 
 static int belkin_sa_open(struct tty_struct *tty,

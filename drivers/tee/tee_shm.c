@@ -1,15 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015-2016, Linaro Limited
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 #include <linux/device.h>
 #include <linux/dma-buf.h>
@@ -18,35 +9,36 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/tee_drv.h>
+#include <linux/uio.h>
 #include "tee_private.h"
 
-/* extra references appended to shm object for registered shared memory */
-struct tee_shm_dmabuf_ref {
-     struct tee_shm shm;
-     struct dma_buf *dmabuf;
-     struct dma_buf_attachment *attach;
-     struct sg_table *sgt;
-};
+static void release_registered_pages(struct tee_shm *shm)
+{
+	if (shm->pages) {
+		if (shm->flags & TEE_SHM_USER_MAPPED) {
+			unpin_user_pages(shm->pages, shm->num_pages);
+		} else {
+			size_t n;
+
+			for (n = 0; n < shm->num_pages; n++)
+				put_page(shm->pages[n]);
+		}
+
+		kfree(shm->pages);
+	}
+}
 
 static void tee_shm_release(struct tee_shm *shm)
 {
-	struct tee_device *teedev = shm->teedev;
+	struct tee_device *teedev = shm->ctx->teedev;
 
-	mutex_lock(&teedev->mutex);
-	idr_remove(&teedev->idr, shm->id);
-	if (shm->ctx)
-		list_del(&shm->link);
-	mutex_unlock(&teedev->mutex);
+	if (shm->flags & TEE_SHM_DMA_BUF) {
+		mutex_lock(&teedev->mutex);
+		idr_remove(&teedev->idr, shm->id);
+		mutex_unlock(&teedev->mutex);
+	}
 
-	if (shm->flags & TEE_SHM_EXT_DMA_BUF) {
-		struct tee_shm_dmabuf_ref *ref;
-
-		ref = container_of(shm, struct tee_shm_dmabuf_ref, shm);
-		dma_buf_unmap_attachment(ref->attach, ref->sgt,
-					 DMA_BIDIRECTIONAL);
-		dma_buf_detach(shm->dmabuf, ref->attach);
-		dma_buf_put(ref->dmabuf);
-	} else if (shm->flags & TEE_SHM_POOL) {
+	if (shm->flags & TEE_SHM_POOL) {
 		struct tee_shm_pool_mgr *poolm;
 
 		if (shm->flags & TEE_SHM_DMA_BUF)
@@ -56,23 +48,19 @@ static void tee_shm_release(struct tee_shm *shm)
 
 		poolm->ops->free(poolm, shm);
 	} else if (shm->flags & TEE_SHM_REGISTER) {
-		size_t n;
 		int rc = teedev->desc->ops->shm_unregister(shm->ctx, shm);
 
 		if (rc)
 			dev_err(teedev->dev.parent,
 				"unregister shm %p failed: %d", shm, rc);
 
-		for (n = 0; n < shm->num_pages; n++)
-			put_page(shm->pages[n]);
-
-		kfree(shm->pages);
+		release_registered_pages(shm);
 	}
 
-	if (shm->ctx)
-		teedev_ctx_put(shm->ctx);
+	teedev_ctx_put(shm->ctx);
 
 	kfree(shm);
+
 	tee_device_put(teedev);
 }
 
@@ -95,23 +83,13 @@ static void tee_shm_op_release(struct dma_buf *dmabuf)
 	tee_shm_release(shm);
 }
 
-static void *tee_shm_op_kmap_atomic(struct dma_buf *dmabuf, unsigned long pgnum)
-{
-	return NULL;
-}
-
-static void *tee_shm_op_kmap(struct dma_buf *dmabuf, unsigned long pgnum)
-{
-	return NULL;
-}
-
 static int tee_shm_op_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
 {
 	struct tee_shm *shm = dmabuf->priv;
 	size_t size = vma->vm_end - vma->vm_start;
 
 	/* Refuse sharing shared memory provided by application */
-	if (shm->flags & TEE_SHM_REGISTER)
+	if (shm->flags & TEE_SHM_USER_MAPPED)
 		return -EINVAL;
 
 	return remap_pfn_range(vma, vma->vm_start, shm->paddr >> PAGE_SHIFT,
@@ -122,24 +100,16 @@ static const struct dma_buf_ops tee_shm_dma_buf_ops = {
 	.map_dma_buf = tee_shm_op_map_dma_buf,
 	.unmap_dma_buf = tee_shm_op_unmap_dma_buf,
 	.release = tee_shm_op_release,
-	.kmap_atomic = tee_shm_op_kmap_atomic,
-	.kmap = tee_shm_op_kmap,
 	.mmap = tee_shm_op_mmap,
 };
 
-static struct tee_shm *__tee_shm_alloc(struct tee_context *ctx,
-				       struct tee_device *teedev,
-				       size_t size, u32 flags)
+struct tee_shm *tee_shm_alloc(struct tee_context *ctx, size_t size, u32 flags)
 {
+	struct tee_device *teedev = ctx->teedev;
 	struct tee_shm_pool_mgr *poolm = NULL;
 	struct tee_shm *shm;
 	void *ret;
 	int rc;
-
-	if (ctx && ctx->teedev != teedev) {
-		dev_err(teedev->dev.parent, "ctx and teedev mismatch\n");
-		return ERR_PTR(-EINVAL);
-	}
 
 	if (!(flags & TEE_SHM_MAPPED)) {
 		dev_err(teedev->dev.parent,
@@ -168,7 +138,6 @@ static struct tee_shm *__tee_shm_alloc(struct tee_context *ctx,
 	}
 
 	shm->flags = flags | TEE_SHM_POOL;
-	shm->teedev = teedev;
 	shm->ctx = ctx;
 	if (flags & TEE_SHM_DMA_BUF)
 		poolm = teedev->pool->dma_buf_mgr;
@@ -181,16 +150,17 @@ static struct tee_shm *__tee_shm_alloc(struct tee_context *ctx,
 		goto err_kfree;
 	}
 
-	mutex_lock(&teedev->mutex);
-	shm->id = idr_alloc(&teedev->idr, shm, 1, 0, GFP_KERNEL);
-	mutex_unlock(&teedev->mutex);
-	if (shm->id < 0) {
-		ret = ERR_PTR(shm->id);
-		goto err_pool_free;
-	}
 
 	if (flags & TEE_SHM_DMA_BUF) {
 		DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
+
+		mutex_lock(&teedev->mutex);
+		shm->id = idr_alloc(&teedev->idr, shm, 1, 0, GFP_KERNEL);
+		mutex_unlock(&teedev->mutex);
+		if (shm->id < 0) {
+			ret = ERR_PTR(shm->id);
+			goto err_pool_free;
+		}
 
 		exp_info.ops = &tee_shm_dma_buf_ops;
 		exp_info.size = shm->size;
@@ -204,18 +174,15 @@ static struct tee_shm *__tee_shm_alloc(struct tee_context *ctx,
 		}
 	}
 
-	if (ctx) {
-		teedev_ctx_get(ctx);
-		mutex_lock(&teedev->mutex);
-		list_add_tail(&shm->link, &ctx->list_shm);
-		mutex_unlock(&teedev->mutex);
-	}
+	teedev_ctx_get(ctx);
 
 	return shm;
 err_rem:
-	mutex_lock(&teedev->mutex);
-	idr_remove(&teedev->idr, shm->id);
-	mutex_unlock(&teedev->mutex);
+	if (flags & TEE_SHM_DMA_BUF) {
+		mutex_lock(&teedev->mutex);
+		idr_remove(&teedev->idr, shm->id);
+		mutex_unlock(&teedev->mutex);
+	}
 err_pool_free:
 	poolm->ops->free(poolm, shm);
 err_kfree:
@@ -224,43 +191,21 @@ err_dev_put:
 	tee_device_put(teedev);
 	return ret;
 }
-
-/**
- * tee_shm_alloc() - Allocate shared memory
- * @ctx:	Context that allocates the shared memory
- * @size:	Requested size of shared memory
- * @flags:	Flags setting properties for the requested shared memory.
- *
- * Memory allocated as global shared memory is automatically freed when the
- * TEE file pointer is closed. The @flags field uses the bits defined by
- * TEE_SHM_* in <linux/tee_drv.h>. TEE_SHM_MAPPED must currently always be
- * set. If TEE_SHM_DMA_BUF global shared memory will be allocated and
- * associated with a dma-buf handle, else driver private memory.
- */
-struct tee_shm *tee_shm_alloc(struct tee_context *ctx, size_t size, u32 flags)
-{
-	return __tee_shm_alloc(ctx, ctx->teedev, size, flags);
-}
 EXPORT_SYMBOL_GPL(tee_shm_alloc);
-
-struct tee_shm *tee_shm_priv_alloc(struct tee_device *teedev, size_t size)
-{
-	return __tee_shm_alloc(NULL, teedev, size, TEE_SHM_MAPPED);
-}
-EXPORT_SYMBOL_GPL(tee_shm_priv_alloc);
 
 struct tee_shm *tee_shm_register(struct tee_context *ctx, unsigned long addr,
 				 size_t length, u32 flags)
 {
 	struct tee_device *teedev = ctx->teedev;
-	const u32 req_flags = TEE_SHM_DMA_BUF | TEE_SHM_USER_MAPPED;
+	const u32 req_user_flags = TEE_SHM_DMA_BUF | TEE_SHM_USER_MAPPED;
+	const u32 req_kernel_flags = TEE_SHM_DMA_BUF | TEE_SHM_KERNEL_MAPPED;
 	struct tee_shm *shm;
 	void *ret;
 	int rc;
 	int num_pages;
 	unsigned long start;
 
-	if (flags != req_flags)
+	if (flags != req_user_flags && flags != req_kernel_flags)
 		return ERR_PTR(-ENOTSUPP);
 
 	if (!tee_device_get(teedev))
@@ -281,9 +226,9 @@ struct tee_shm *tee_shm_register(struct tee_context *ctx, unsigned long addr,
 	}
 
 	shm->flags = flags | TEE_SHM_REGISTER;
-	shm->teedev = teedev;
 	shm->ctx = ctx;
 	shm->id = -1;
+	addr = untagged_addr(addr);
 	start = rounddown(addr, PAGE_SIZE);
 	shm->offset = addr - start;
 	shm->size = length;
@@ -294,7 +239,27 @@ struct tee_shm *tee_shm_register(struct tee_context *ctx, unsigned long addr,
 		goto err;
 	}
 
-	rc = get_user_pages_fast(start, num_pages, 1, shm->pages);
+	if (flags & TEE_SHM_USER_MAPPED) {
+		rc = pin_user_pages_fast(start, num_pages, FOLL_WRITE,
+					 shm->pages);
+	} else {
+		struct kvec *kiov;
+		int i;
+
+		kiov = kcalloc(num_pages, sizeof(*kiov), GFP_KERNEL);
+		if (!kiov) {
+			ret = ERR_PTR(-ENOMEM);
+			goto err;
+		}
+
+		for (i = 0; i < num_pages; i++) {
+			kiov[i].iov_base = (void *)(start + i * PAGE_SIZE);
+			kiov[i].iov_len = PAGE_SIZE;
+		}
+
+		rc = get_kernel_pages(kiov, num_pages, 0, shm->pages);
+		kfree(kiov);
+	}
 	if (rc > 0)
 		shm->num_pages = rc;
 	if (rc != num_pages) {
@@ -336,25 +301,15 @@ struct tee_shm *tee_shm_register(struct tee_context *ctx, unsigned long addr,
 		}
 	}
 
-	mutex_lock(&teedev->mutex);
-	list_add_tail(&shm->link, &ctx->list_shm);
-	mutex_unlock(&teedev->mutex);
-
 	return shm;
 err:
 	if (shm) {
-		size_t n;
-
 		if (shm->id >= 0) {
 			mutex_lock(&teedev->mutex);
 			idr_remove(&teedev->idr, shm->id);
 			mutex_unlock(&teedev->mutex);
 		}
-		if (shm->pages) {
-			for (n = 0; n < shm->num_pages; n++)
-				put_page(shm->pages[n]);
-			kfree(shm->pages);
-		}
+		release_registered_pages(shm);
 	}
 	kfree(shm);
 	teedev_ctx_put(ctx);
@@ -362,100 +317,6 @@ err:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(tee_shm_register);
-
-struct tee_shm *tee_shm_register_fd(struct tee_context *ctx, int fd)
-{
-	struct tee_shm_dmabuf_ref *ref;
-	void *rc;
-	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
-
-	if (!tee_device_get(ctx->teedev))
-		return ERR_PTR(-EINVAL);
-
-	ref = kzalloc(sizeof(*ref), GFP_KERNEL);
-	if (!ref) {
-		rc = ERR_PTR(-ENOMEM);
-		goto err;
-	}
-
-	ref->shm.ctx = ctx;
-	ref->shm.teedev = ctx->teedev;
-	ref->shm.id = -1;
-
-	ref->dmabuf = dma_buf_get(fd);
-	if (!ref->dmabuf) {
-		rc = ERR_PTR(-EINVAL);
-		goto err;
-	}
-
-	ref->attach = dma_buf_attach(ref->dmabuf, &ref->shm.teedev->dev);
-	if (IS_ERR_OR_NULL(ref->attach)) {
-		rc = ERR_PTR(-EINVAL);
-		goto err;
-	}
-
-	ref->sgt = dma_buf_map_attachment(ref->attach, DMA_BIDIRECTIONAL);
-	if (IS_ERR_OR_NULL(ref->sgt)) {
-		rc = ERR_PTR(-EINVAL);
-		goto err;
-	}
-
-	if (sg_nents(ref->sgt->sgl) != 1) {
-		rc = ERR_PTR(-EINVAL);
-		goto err;
-	}
-
-	ref->shm.paddr = sg_dma_address(ref->sgt->sgl);
-	ref->shm.size = sg_dma_len(ref->sgt->sgl);
-	ref->shm.flags = TEE_SHM_DMA_BUF | TEE_SHM_EXT_DMA_BUF;
-
-	mutex_lock(&ref->shm.teedev->mutex);
-	ref->shm.id = idr_alloc(&ref->shm.teedev->idr, &ref->shm,
-				1, 0, GFP_KERNEL);
-	mutex_unlock(&ref->shm.teedev->mutex);
-	if (ref->shm.id < 0) {
-		rc = ERR_PTR(ref->shm.id);
-		goto err;
-	}
-
-	/* export a dmabuf to later get a userland ref */
-	exp_info.ops = &tee_shm_dma_buf_ops;
-	exp_info.size = ref->shm.size;
-	exp_info.flags = O_RDWR;
-	exp_info.priv = &ref->shm;
-
-	ref->shm.dmabuf = dma_buf_export(&exp_info);
-	if (IS_ERR(ref->shm.dmabuf)) {
-		rc = ERR_PTR(-EINVAL);
-		goto err;
-	}
-
-	mutex_lock(&ref->shm.teedev->mutex);
-	list_add_tail(&ref->shm.link, &ctx->list_shm);
-	mutex_unlock(&ref->shm.teedev->mutex);
-
-	return &ref->shm;
-
-err:
-	if (ref) {
-		if (ref->shm.id >= 0) {
-			mutex_lock(&ctx->teedev->mutex);
-			idr_remove(&ctx->teedev->idr, ref->shm.id);
-			mutex_unlock(&ctx->teedev->mutex);
-		}
-		if (ref->sgt)
-			dma_buf_unmap_attachment(ref->attach, ref->sgt,
-						 DMA_BIDIRECTIONAL);
-		if (ref->attach)
-			dma_buf_detach(ref->dmabuf, ref->attach);
-		if (ref->dmabuf)
-			dma_buf_put(ref->dmabuf);
-	}
-	kfree(ref);
-	tee_device_put(ctx->teedev);
-	return rc;
-}
-EXPORT_SYMBOL_GPL(tee_shm_register_fd);
 
 /**
  * tee_shm_get_fd() - Increase reference count and return file descriptor
@@ -469,9 +330,10 @@ int tee_shm_get_fd(struct tee_shm *shm)
 	if (!(shm->flags & TEE_SHM_DMA_BUF))
 		return -EINVAL;
 
+	get_dma_buf(shm->dmabuf);
 	fd = dma_buf_fd(shm->dmabuf, O_CLOEXEC);
-	if (fd >= 0)
-		get_dma_buf(shm->dmabuf);
+	if (fd < 0)
+		dma_buf_put(shm->dmabuf);
 	return fd;
 }
 

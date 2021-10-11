@@ -1,41 +1,58 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Builtin evlist command: Show the list of event selectors present
  * in a perf.data file.
  */
 #include "builtin.h"
 
-#include "util/util.h"
-
 #include <linux/list.h>
 
 #include "perf.h"
 #include "util/evlist.h"
 #include "util/evsel.h"
+#include "util/evsel_fprintf.h"
 #include "util/parse-events.h"
 #include <subcmd/parse-options.h>
 #include "util/session.h"
 #include "util/data.h"
 #include "util/debug.h"
+#include <linux/err.h>
+#include "util/tool.h"
+
+static int process_header_feature(struct perf_session *session __maybe_unused,
+				  union perf_event *event __maybe_unused)
+{
+	session_done = 1;
+	return 0;
+}
 
 static int __cmd_evlist(const char *file_name, struct perf_attr_details *details)
 {
 	struct perf_session *session;
-	struct perf_evsel *pos;
-	struct perf_data_file file = {
-		.path = file_name,
-		.mode = PERF_DATA_MODE_READ,
-		.force = details->force,
+	struct evsel *pos;
+	struct perf_data data = {
+		.path      = file_name,
+		.mode      = PERF_DATA_MODE_READ,
+		.force     = details->force,
+	};
+	struct perf_tool tool = {
+		/* only needed for pipe mode */
+		.attr = perf_event__process_attr,
+		.feature = process_header_feature,
 	};
 	bool has_tracepoint = false;
 
-	session = perf_session__new(&file, 0, NULL);
-	if (session == NULL)
-		return -1;
+	session = perf_session__new(&data, 0, &tool);
+	if (IS_ERR(session))
+		return PTR_ERR(session);
+
+	if (data.is_pipe)
+		perf_session__process_events(session);
 
 	evlist__for_each_entry(session->evlist, pos) {
-		perf_evsel__fprintf(pos, details, stdout);
+		evsel__fprintf(pos, details, stdout);
 
-		if (pos->attr.type == PERF_TYPE_TRACEPOINT)
+		if (pos->core.attr.type == PERF_TYPE_TRACEPOINT)
 			has_tracepoint = true;
 	}
 
@@ -46,7 +63,7 @@ static int __cmd_evlist(const char *file_name, struct perf_attr_details *details
 	return 0;
 }
 
-int cmd_evlist(int argc, const char **argv, const char *prefix __maybe_unused)
+int cmd_evlist(int argc, const char **argv)
 {
 	struct perf_attr_details details = { .verbose = false, };
 	const struct option options[] = {

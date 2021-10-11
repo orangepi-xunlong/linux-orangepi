@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  cobalt driver initialization and card probing
  *
@@ -5,19 +6,6 @@
  *
  *  Copyright 2012-2015 Cisco Systems, Inc. and/or its affiliates.
  *  All rights reserved.
- *
- *  This program is free software; you may redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; version 2 of the License.
- *
- *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- *  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- *  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- *  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- *  BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- *  ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- *  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- *  SOFTWARE.
  */
 
 #include <linux/delay.h>
@@ -36,7 +24,7 @@
 #include "cobalt-omnitek.h"
 
 /* add your revision and whatnot here */
-static struct pci_device_id cobalt_pci_tbl[] = {
+static const struct pci_device_id cobalt_pci_tbl[] = {
 	{PCI_VENDOR_ID_CISCO, PCI_DEVICE_ID_COBALT,
 	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
 	{0,}
@@ -68,19 +56,19 @@ static u8 edid[256] = {
 	0x45, 0x59, 0x61, 0x59, 0x81, 0x99, 0x01, 0x01,
 	0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x3a,
 	0x80, 0x18, 0x71, 0x38, 0x2d, 0x40, 0x58, 0x2c,
-	0x46, 0x00, 0xe0, 0x0e, 0x11, 0x00, 0x00, 0x1e,
+	0x45, 0x00, 0xe0, 0x0e, 0x11, 0x00, 0x00, 0x1e,
 	0x00, 0x00, 0x00, 0xfd, 0x00, 0x18, 0x55, 0x18,
 	0x5e, 0x11, 0x00, 0x0a, 0x20, 0x20, 0x20, 0x20,
 	0x20, 0x20, 0x00, 0x00, 0x00, 0xfc, 0x00, 0x63,
 	0x6f, 0x62, 0x61, 0x6c, 0x74, 0x0a, 0x20, 0x20,
 	0x20, 0x20, 0x20, 0x20, 0x00, 0x00, 0x00, 0x10,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x9c,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x9d,
 
-	0x02, 0x03, 0x1f, 0xf0, 0x4a, 0x90, 0x1f, 0x04,
+	0x02, 0x03, 0x1f, 0xf1, 0x4a, 0x10, 0x1f, 0x04,
 	0x13, 0x22, 0x21, 0x20, 0x02, 0x11, 0x01, 0x23,
 	0x09, 0x07, 0x07, 0x68, 0x03, 0x0c, 0x00, 0x10,
-	0x00, 0x00, 0x22, 0x0f, 0xe2, 0x00, 0xea, 0x00,
+	0x00, 0x00, 0x22, 0x0f, 0xe2, 0x00, 0xca, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -92,7 +80,7 @@ static u8 edid[256] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xa7,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
 };
 
 static void cobalt_set_interrupt(struct cobalt *cobalt, bool enable)
@@ -198,18 +186,16 @@ void cobalt_pcie_status_show(struct cobalt *cobalt)
 {
 	struct pci_dev *pci_dev = cobalt->pci_dev;
 	struct pci_dev *pci_bus_dev = cobalt->pci_dev->bus->self;
-	int offset;
-	int bus_offset;
 	u32 capa;
 	u16 stat, ctrl;
 
-	offset = pci_find_capability(pci_dev, PCI_CAP_ID_EXP);
-	bus_offset = pci_find_capability(pci_bus_dev, PCI_CAP_ID_EXP);
+	if (!pci_is_pcie(pci_dev) || !pci_is_pcie(pci_bus_dev))
+		return;
 
 	/* Device */
-	pci_read_config_dword(pci_dev, offset + PCI_EXP_DEVCAP, &capa);
-	pci_read_config_word(pci_dev, offset + PCI_EXP_DEVCTL, &ctrl);
-	pci_read_config_word(pci_dev, offset + PCI_EXP_DEVSTA, &stat);
+	pcie_capability_read_dword(pci_dev, PCI_EXP_DEVCAP, &capa);
+	pcie_capability_read_word(pci_dev, PCI_EXP_DEVCTL, &ctrl);
+	pcie_capability_read_word(pci_dev, PCI_EXP_DEVSTA, &stat);
 	cobalt_info("PCIe device capability 0x%08x: Max payload %d\n",
 		    capa, get_payload_size(capa & PCI_EXP_DEVCAP_PAYLOAD));
 	cobalt_info("PCIe device control 0x%04x: Max payload %d. Max read request %d\n",
@@ -219,9 +205,9 @@ void cobalt_pcie_status_show(struct cobalt *cobalt)
 	cobalt_info("PCIe device status 0x%04x\n", stat);
 
 	/* Link */
-	pci_read_config_dword(pci_dev, offset + PCI_EXP_LNKCAP, &capa);
-	pci_read_config_word(pci_dev, offset + PCI_EXP_LNKCTL, &ctrl);
-	pci_read_config_word(pci_dev, offset + PCI_EXP_LNKSTA, &stat);
+	pcie_capability_read_dword(pci_dev, PCI_EXP_LNKCAP, &capa);
+	pcie_capability_read_word(pci_dev, PCI_EXP_LNKCTL, &ctrl);
+	pcie_capability_read_word(pci_dev, PCI_EXP_LNKSTA, &stat);
 	cobalt_info("PCIe link capability 0x%08x: %s per lane and %u lanes\n",
 			capa, get_link_speed(capa),
 			(capa & PCI_EXP_LNKCAP_MLW) >> 4);
@@ -231,15 +217,15 @@ void cobalt_pcie_status_show(struct cobalt *cobalt)
 		    (stat & PCI_EXP_LNKSTA_NLW) >> 4);
 
 	/* Bus */
-	pci_read_config_dword(pci_bus_dev, bus_offset + PCI_EXP_LNKCAP, &capa);
+	pcie_capability_read_dword(pci_bus_dev, PCI_EXP_LNKCAP, &capa);
 	cobalt_info("PCIe bus link capability 0x%08x: %s per lane and %u lanes\n",
 			capa, get_link_speed(capa),
 			(capa & PCI_EXP_LNKCAP_MLW) >> 4);
 
 	/* Slot */
-	pci_read_config_dword(pci_dev, offset + PCI_EXP_SLTCAP, &capa);
-	pci_read_config_word(pci_dev, offset + PCI_EXP_SLTCTL, &ctrl);
-	pci_read_config_word(pci_dev, offset + PCI_EXP_SLTSTA, &stat);
+	pcie_capability_read_dword(pci_dev, PCI_EXP_SLTCAP, &capa);
+	pcie_capability_read_word(pci_dev, PCI_EXP_SLTCTL, &ctrl);
+	pcie_capability_read_word(pci_dev, PCI_EXP_SLTSTA, &stat);
 	cobalt_info("PCIe slot capability 0x%08x\n", capa);
 	cobalt_info("PCIe slot control 0x%04x\n", ctrl);
 	cobalt_info("PCIe slot status 0x%04x\n", stat);
@@ -248,26 +234,22 @@ void cobalt_pcie_status_show(struct cobalt *cobalt)
 static unsigned pcie_link_get_lanes(struct cobalt *cobalt)
 {
 	struct pci_dev *pci_dev = cobalt->pci_dev;
-	unsigned offset;
 	u16 link;
 
-	offset = pci_find_capability(pci_dev, PCI_CAP_ID_EXP);
-	if (!offset)
+	if (!pci_is_pcie(pci_dev))
 		return 0;
-	pci_read_config_word(pci_dev, offset + PCI_EXP_LNKSTA, &link);
+	pcie_capability_read_word(pci_dev, PCI_EXP_LNKSTA, &link);
 	return (link & PCI_EXP_LNKSTA_NLW) >> 4;
 }
 
 static unsigned pcie_bus_link_get_lanes(struct cobalt *cobalt)
 {
 	struct pci_dev *pci_dev = cobalt->pci_dev->bus->self;
-	unsigned offset;
 	u32 link;
 
-	offset = pci_find_capability(pci_dev, PCI_CAP_ID_EXP);
-	if (!offset)
+	if (!pci_is_pcie(pci_dev))
 		return 0;
-	pci_read_config_dword(pci_dev, offset + PCI_EXP_LNKCAP, &link);
+	pcie_capability_read_dword(pci_dev, PCI_EXP_LNKCAP, &link);
 	return (link & PCI_EXP_LNKCAP_MLW) >> 4;
 }
 
@@ -308,9 +290,7 @@ static void cobalt_pci_iounmap(struct cobalt *cobalt, struct pci_dev *pci_dev)
 static void cobalt_free_msi(struct cobalt *cobalt, struct pci_dev *pci_dev)
 {
 	free_irq(pci_dev->irq, (void *)cobalt);
-
-	if (cobalt->msi_enabled)
-		pci_disable_msi(pci_dev);
+	pci_free_irq_vectors(pci_dev);
 }
 
 static int cobalt_setup_pci(struct cobalt *cobalt, struct pci_dev *pci_dev,
@@ -387,14 +367,12 @@ static int cobalt_setup_pci(struct cobalt *cobalt, struct pci_dev *pci_dev,
 	   from being generated. */
 	cobalt_set_interrupt(cobalt, false);
 
-	if (pci_enable_msi_range(pci_dev, 1, 1) < 1) {
+	if (pci_alloc_irq_vectors(pci_dev, 1, 1, PCI_IRQ_MSI) < 1) {
 		cobalt_err("Could not enable MSI\n");
-		cobalt->msi_enabled = false;
 		ret = -EIO;
 		goto err_release;
 	}
 	msi_config_show(cobalt, pci_dev);
-	cobalt->msi_enabled = true;
 
 	/* Register IRQ */
 	if (request_irq(pci_dev->irq, cobalt_irq_handler, IRQF_SHARED,
@@ -594,7 +572,7 @@ static int cobalt_subdevs_hsma_init(struct cobalt *cobalt)
 		.addr = 0x20,
 		.platform_data = &adv7842_pdata,
 	};
-	static struct v4l2_subdev_format sd_fmt = {
+	struct v4l2_subdev_format sd_fmt = {
 		.pad = ADV7842_PAD_SOURCE,
 		.which = V4L2_SUBDEV_FORMAT_ACTIVE,
 		.format.code = MEDIA_BUS_FMT_YUYV8_1X16,
@@ -606,7 +584,7 @@ static int cobalt_subdevs_hsma_init(struct cobalt *cobalt)
 		.cec_clk = 12000000,
 	};
 	static struct i2c_board_info adv7511_info = {
-		.type = "adv7511",
+		.type = "adv7511-v4l2",
 		.addr = 0x39, /* 0x39 or 0x3d */
 		.platform_data = &adv7511_pdata,
 	};
@@ -684,7 +662,7 @@ static int cobalt_probe(struct pci_dev *pci_dev,
 	/* FIXME - module parameter arrays constrain max instances */
 	i = atomic_inc_return(&cobalt_instance) - 1;
 
-	cobalt = kzalloc(sizeof(struct cobalt), GFP_ATOMIC);
+	cobalt = kzalloc(sizeof(struct cobalt), GFP_KERNEL);
 	if (cobalt == NULL)
 		return -ENOMEM;
 	cobalt->pci_dev = pci_dev;
@@ -740,9 +718,6 @@ static int cobalt_probe(struct pci_dev *pci_dev,
 			goto err_i2c;
 	}
 
-	retval = v4l2_device_register_subdev_nodes(&cobalt->v4l2_dev);
-	if (retval)
-		goto err_i2c;
 	retval = cobalt_nodes_register(cobalt);
 	if (retval) {
 		cobalt_err("Error %d registering device nodes\n", retval);
@@ -769,8 +744,6 @@ err_pci:
 err_wq:
 	destroy_workqueue(cobalt->irq_work_queues);
 err:
-	if (retval == 0)
-		retval = -ENODEV;
 	cobalt_err("error %d on initialization\n", retval);
 
 	v4l2_device_unregister(&cobalt->v4l2_dev);

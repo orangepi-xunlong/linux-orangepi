@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * IPWireless 3G PCMCIA Network Driver
  *
@@ -100,7 +101,6 @@ static int ipw_open(struct tty_struct *linux_tty, struct file *filp)
 
 	tty->port.tty = linux_tty;
 	linux_tty->driver_data = tty;
-	tty->port.low_latency = 1;
 
 	if (tty->tty_type == TTYTYPE_MODEM)
 		ipwireless_ppp_open(tty->network);
@@ -217,7 +217,7 @@ static int ipw_write(struct tty_struct *linux_tty,
 	ret = ipwireless_send_packet(tty->hardware, IPW_CHANNEL_RAS,
 			       buf, count,
 			       ipw_write_packet_sent_callback, tty);
-	if (ret == -1) {
+	if (ret < 0) {
 		mutex_unlock(&tty->ipw_tty_mutex);
 		return 0;
 	}
@@ -235,10 +235,10 @@ static int ipw_write_room(struct tty_struct *linux_tty)
 
 	/* FIXME: Exactly how is the tty object locked here .. */
 	if (!tty)
-		return -ENODEV;
+		return 0;
 
 	if (!tty->port.count)
-		return -EINVAL;
+		return 0;
 
 	room = IPWIRELESS_TX_QUEUE_SIZE - tty->tx_bytes_queued;
 	if (room < 0)
@@ -247,20 +247,27 @@ static int ipw_write_room(struct tty_struct *linux_tty)
 	return room;
 }
 
-static int ipwireless_get_serial_info(struct ipw_tty *tty,
-				      struct serial_struct __user *retinfo)
+static int ipwireless_get_serial_info(struct tty_struct *linux_tty,
+				      struct serial_struct *ss)
 {
-	struct serial_struct tmp;
+	struct ipw_tty *tty = linux_tty->driver_data;
 
-	memset(&tmp, 0, sizeof(tmp));
-	tmp.type = PORT_UNKNOWN;
-	tmp.line = tty->index;
-	tmp.baud_base = 115200;
+	if (!tty)
+		return -ENODEV;
 
-	if (copy_to_user(retinfo, &tmp, sizeof(*retinfo)))
-		return -EFAULT;
+	if (!tty->port.count)
+		return -EINVAL;
 
+	ss->type = PORT_UNKNOWN;
+	ss->line = tty->index;
+	ss->baud_base = 115200;
 	return 0;
+}
+
+static int ipwireless_set_serial_info(struct tty_struct *linux_tty,
+				      struct serial_struct *ss)
+{
+	return 0;	/* Keeps the PCMCIA scripts happy. */
 }
 
 static int ipw_chars_in_buffer(struct tty_struct *linux_tty)
@@ -385,15 +392,6 @@ static int ipw_ioctl(struct tty_struct *linux_tty,
 		return -EINVAL;
 
 	/* FIXME: Exactly how is the tty object locked here .. */
-
-	switch (cmd) {
-	case TIOCGSERIAL:
-		return ipwireless_get_serial_info(tty, (void __user *) arg);
-
-	case TIOCSSERIAL:
-		return 0;	/* Keeps the PCMCIA scripts happy. */
-	}
-
 	if (tty->tty_type == TTYTYPE_MODEM) {
 		switch (cmd) {
 		case PPPIOCGCHAN:
@@ -560,6 +558,8 @@ static const struct tty_operations tty_ops = {
 	.chars_in_buffer = ipw_chars_in_buffer,
 	.tiocmget = ipw_tiocmget,
 	.tiocmset = ipw_tiocmset,
+	.set_serial = ipwireless_set_serial_info,
+	.get_serial = ipwireless_get_serial_info,
 };
 
 int ipwireless_tty_init(void)
@@ -596,13 +596,8 @@ int ipwireless_tty_init(void)
 
 void ipwireless_tty_release(void)
 {
-	int ret;
-
-	ret = tty_unregister_driver(ipw_tty_driver);
+	tty_unregister_driver(ipw_tty_driver);
 	put_tty_driver(ipw_tty_driver);
-	if (ret != 0)
-		printk(KERN_ERR IPWIRELESS_PCCARD_NAME
-			": tty_unregister_driver failed with code %d\n", ret);
 }
 
 int ipwireless_tty_is_modem(struct ipw_tty *tty)

@@ -64,12 +64,6 @@
 
 #define		RSSI_OFFSET_DIG_LPS			5
 
-#ifdef PHYDM_TDMA_DIG_SUPPORT
-#define DIG_NUM_OF_TDMA_STATES	2 /*@L, H state*/
-#define DIG_TIMER_MS			250
-#define	ONE_SEC_MS			1000
-#endif
-
 /*LNA saturation check*/
 #define OFDM_AGC_TAB_0			0
 #define	OFDM_AGC_TAB_2			2
@@ -93,21 +87,6 @@ enum lna_sat_timer_state {
 	CANCEL_LNA_SAT_CHK_TIMMER,
 	RELEASE_LNA_SAT_CHK_TIMMER
 };
-
-#ifdef IS_USE_NEW_TDMA
-enum tdma_dig_timer {
-	INIT_TDMA_DIG_TIMMER,
-	CANCEL_TDMA_DIG_TIMMER,
-	RELEASE_TDMA_DIG_TIMMER
-};
-
-enum tdma_dig_state {
-	TDMA_DIG_LOW_STATE = 0,
-	TDMA_DIG_HIGH_STATE = 1,
-	NORMAL_DIG = 2
-};
-#endif
-
 /*--------------------Define Struct-----------------------------------*/
 
 struct phydm_dig_struct {
@@ -156,15 +135,7 @@ struct phydm_dig_struct {
 	u32		fa_start_timestamp;
 	u32		fa_end_timestamp;
 	u32		fa_acc_1sec_timestamp;
-#ifdef IS_USE_NEW_TDMA
-	u8		tdma_dig_block_cnt;/*@for 1 second dump indicator use*/
-			/*@dynamic upper bound for L/H state*/
-	u8		tdma_rx_gain_max[DIG_NUM_OF_TDMA_STATES];
-			/*@dynamic lower bound for L/H state*/
-	u8		tdma_rx_gain_min[DIG_NUM_OF_TDMA_STATES];
-			/*To distinguish current state(L-sate or H-state)*/
-#endif
-#endif
+#endif	
 };
 
 struct phydm_fa_struct {
@@ -242,7 +213,7 @@ struct phydm_lna_sat_info_struct {
 	u32			check_time;
 	boolean		pre_sat_status;
 	boolean		cur_sat_status;
-	struct phydm_timer_list	phydm_lna_sat_chk_timer;
+	struct timer_list	phydm_lna_sat_chk_timer;
 	u32			cur_timer_check_cnt;
 	u32			pre_timer_check_cnt;
 };
@@ -335,35 +306,6 @@ void
 phydm_false_alarm_counter_acc_reset(
 	void		*p_dm_void
 	);
-
-#ifdef IS_USE_NEW_TDMA
-void phydm_tdma_dig_timers(void *p_dm_void, u8 state);
-/*void phydm_tdma_dig_cbk(void *p_dm_void);*/
-
-#if (DM_ODM_SUPPORT_TYPE == ODM_WIN)
-void phydm_tdma_dig_cbk(struct phydm_timer_list	*timer);
-
-#elif (DM_ODM_SUPPORT_TYPE == ODM_CE)
-void phydm_tdma_dig_cbk(void *p_dm_void);
-
-void phydm_tdma_dig_workitem_callback(void *p_context);
-
-#else
-
-void phydm_tdma_dig_cbk(void *p_dm_void);
-
-#endif
-
-void phydm_tdma_fa_cnt_chk(void *p_dm_void);
-
-void phydm_tdma_low_dig(void *p_dm_void);
-
-void phydm_tdma_high_dig(void *p_dm_void);
-
-void phydm_fa_cnt_acc(void *p_dm_void, boolean rssi_dump_en,
-		      u8 cur_tdma_dig_state);
-
-#endif /*@#ifdef IS_USE_NEW_TDMA*/
 
 #endif	/*#ifdef PHYDM_TDMA_DIG_SUPPORT*/
 

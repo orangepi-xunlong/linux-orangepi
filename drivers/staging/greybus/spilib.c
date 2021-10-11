@@ -1,19 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Greybus SPI library
  *
  * Copyright 2014-2016 Google Inc.
  * Copyright 2014-2016 Linaro Ltd.
- *
- * Released under the GPLv2 only.
  */
 
 #include <linux/bitops.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/greybus.h>
 #include <linux/spi/spi.h>
 
-#include "greybus.h"
 #include "spilib.h"
 
 struct gb_spilib {
@@ -246,6 +245,7 @@ static struct gb_operation *gb_spi_operation_create(struct gb_spilib *spi,
 	/* Fill in the transfers array */
 	xfer = spi->first_xfer;
 	while (msg->state != GB_SPI_STATE_OP_DONE) {
+		int xfer_delay;
 		if (xfer == spi->last_xfer)
 			xfer_len = spi->last_xfer_size;
 		else
@@ -260,7 +260,9 @@ static struct gb_operation *gb_spi_operation_create(struct gb_spilib *spi,
 
 		gb_xfer->speed_hz = cpu_to_le32(xfer->speed_hz);
 		gb_xfer->len = cpu_to_le32(xfer_len);
-		gb_xfer->delay_usecs = cpu_to_le16(xfer->delay_usecs);
+		xfer_delay = spi_delay_to_ns(&xfer->delay, xfer) / 1000;
+		xfer_delay = clamp_t(u16, xfer_delay, 0, U16_MAX);
+		gb_xfer->delay_usecs = cpu_to_le16(xfer_delay);
 		gb_xfer->cs_change = xfer->cs_change;
 		gb_xfer->bits_per_word = xfer->bits_per_word;
 
@@ -456,10 +458,10 @@ static int gb_spi_setup_device(struct gb_spilib *spi, u8 cs)
 	dev_type = response.device_type;
 
 	if (dev_type == GB_SPI_SPI_DEV)
-		strlcpy(spi_board.modalias, "spidev",
+		strscpy(spi_board.modalias, "spidev",
 			sizeof(spi_board.modalias));
 	else if (dev_type == GB_SPI_SPI_NOR)
-		strlcpy(spi_board.modalias, "spi-nor",
+		strscpy(spi_board.modalias, "spi-nor",
 			sizeof(spi_board.modalias));
 	else if (dev_type == GB_SPI_SPI_MODALIAS)
 		memcpy(spi_board.modalias, response.name,
@@ -544,10 +546,13 @@ int gb_spilib_master_init(struct gb_connection *connection, struct device *dev,
 
 	return 0;
 
-exit_spi_unregister:
-	spi_unregister_master(master);
 exit_spi_put:
 	spi_master_put(master);
+
+	return ret;
+
+exit_spi_unregister:
+	spi_unregister_master(master);
 
 	return ret;
 }
@@ -558,7 +563,6 @@ void gb_spilib_master_exit(struct gb_connection *connection)
 	struct spi_master *master = gb_connection_get_data(connection);
 
 	spi_unregister_master(master);
-	spi_master_put(master);
 }
 EXPORT_SYMBOL_GPL(gb_spilib_master_exit);
 

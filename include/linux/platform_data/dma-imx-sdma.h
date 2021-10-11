@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __MACH_MXC_SDMA_H__
 #define __MACH_MXC_SDMA_H__
 
@@ -50,18 +51,10 @@ struct sdma_script_start_addrs {
 	/* End of v2 array */
 	s32 zcanfd_2_mcu_addr;
 	s32 zqspi_2_mcu_addr;
+	s32 mcu_2_ecspi_addr;
 	/* End of v3 array */
-};
-
-/**
- * struct sdma_platform_data - platform specific data for SDMA engine
- *
- * @fw_name		The firmware name
- * @script_addrs	SDMA scripts addresses in SDMA ROM
- */
-struct sdma_platform_data {
-	char *fw_name;
-	struct sdma_script_start_addrs *script_addrs;
+	s32 mcu_2_zqspi_addr;
+	/* End of v4 array */
 };
 
 #endif /* __MACH_MXC_SDMA_H__ */

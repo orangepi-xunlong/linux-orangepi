@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * SCLP line mode console driver
  *
@@ -25,11 +26,11 @@
 #define sclp_console_name  "ttyS"
 
 /* Lock to guard over changes to global variables */
-static spinlock_t sclp_con_lock;
+static DEFINE_SPINLOCK(sclp_con_lock);
 /* List of free pages that can be used for console output buffering */
-static struct list_head sclp_con_pages;
+static LIST_HEAD(sclp_con_pages);
 /* List of full struct sclp_buffer structures ready for output */
-static struct list_head sclp_con_outqueue;
+static LIST_HEAD(sclp_con_outqueue);
 /* Pointer to current console buffer */
 static struct sclp_buffer *sclp_conbuf;
 /* Timer for delayed output of console messages */
@@ -40,8 +41,8 @@ static int sclp_con_suspended;
 static int sclp_con_queue_running;
 
 /* Output format for console messages */
-static unsigned short sclp_con_columns;
-static unsigned short sclp_con_width_htab;
+#define SCLP_CON_COLUMNS	320
+#define SPACES_PER_TAB		8
 
 static void
 sclp_conbuf_callback(struct sclp_buffer *buffer, int rc)
@@ -124,7 +125,7 @@ static void sclp_console_sync_queue(void)
  * temporary write buffer without further waiting on a final new line.
  */
 static void
-sclp_console_timeout(unsigned long data)
+sclp_console_timeout(struct timer_list *unused)
 {
 	sclp_conbuf_emit();
 }
@@ -188,8 +189,8 @@ sclp_console_write(struct console *console, const char *message,
 			}
 			page = sclp_con_pages.next;
 			list_del((struct list_head *) page);
-			sclp_conbuf = sclp_make_buffer(page, sclp_con_columns,
-						       sclp_con_width_htab);
+			sclp_conbuf = sclp_make_buffer(page, SCLP_CON_COLUMNS,
+						       SPACES_PER_TAB);
 		}
 		/* try to write the string to the current output buffer */
 		written = sclp_write(sclp_conbuf, (const unsigned char *)
@@ -210,11 +211,7 @@ sclp_console_write(struct console *console, const char *message,
 	/* Setup timer to output current console buffer after 1/10 second */
 	if (sclp_conbuf != NULL && sclp_chars_in_buffer(sclp_conbuf) != 0 &&
 	    !timer_pending(&sclp_con_timer)) {
-		init_timer(&sclp_con_timer);
-		sclp_con_timer.function = sclp_console_timeout;
-		sclp_con_timer.data = 0UL;
-		sclp_con_timer.expires = jiffies + HZ/10;
-		add_timer(&sclp_con_timer);
+		mod_timer(&sclp_con_timer, jiffies + HZ / 10);
 	}
 out:
 	spin_unlock_irqrestore(&sclp_con_lock, flags);
@@ -326,26 +323,12 @@ sclp_console_init(void)
 	if (rc)
 		return rc;
 	/* Allocate pages for output buffering */
-	INIT_LIST_HEAD(&sclp_con_pages);
 	for (i = 0; i < sclp_console_pages; i++) {
 		page = (void *) get_zeroed_page(GFP_KERNEL | GFP_DMA);
 		list_add_tail(page, &sclp_con_pages);
 	}
-	INIT_LIST_HEAD(&sclp_con_outqueue);
-	spin_lock_init(&sclp_con_lock);
 	sclp_conbuf = NULL;
-	init_timer(&sclp_con_timer);
-
-	/* Set output format */
-	if (MACHINE_IS_VM)
-		/*
-		 * save 4 characters for the CPU number
-		 * written at start of each line by VM/CP
-		 */
-		sclp_con_columns = 76;
-	else
-		sclp_con_columns = 80;
-	sclp_con_width_htab = 8;
+	timer_setup(&sclp_con_timer, sclp_console_timeout, 0);
 
 	/* enable printk-access to this driver */
 	atomic_notifier_chain_register(&panic_notifier_list, &on_panic_nb);

@@ -1,71 +1,12 @@
-/******************************************************************************
- *
- * This file is provided under a dual BSD/GPLv2 license.  When using or
- * redistributing this file, you may do so under either license.
- *
- * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2005 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2013 - 2014 Intel Mobile Communications GmbH
- * Copyright(c) 2016        Intel Deutschland GmbH
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110,
- * USA
- *
- * The full GNU General Public License is included in this distribution
- * in the file called COPYING.
- *
- * Contact Information:
- *  Intel Linux Wireless <linuxwifi@intel.com>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- * BSD LICENSE
- *
- * Copyright(c) 2005 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2013 - 2014 Intel Mobile Communications GmbH
- * Copyright(c) 2016        Intel Deutschland GmbH
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name Intel Corporation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *****************************************************************************/
-
+/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
+/*
+ * Copyright (C) 2005-2014, 2018-2020 Intel Corporation
+ * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
+ * Copyright (C) 2016 Intel Deutschland GmbH
+ */
 #ifndef	__iwl_prph_h__
 #define __iwl_prph_h__
+#include <linux/bitfield.h>
 
 /*
  * Registers in this file are internal, not PCI bus memory mapped.
@@ -108,12 +49,13 @@
 /* Device system time */
 #define DEVICE_SYSTEM_TIME_REG 0xA0206C
 
-/* Device NMI register */
+/* Device NMI register and value for 8000 family and lower hw's */
 #define DEVICE_SET_NMI_REG 0x00a01c30
-#define DEVICE_SET_NMI_VAL_HW BIT(0)
 #define DEVICE_SET_NMI_VAL_DRV BIT(7)
-#define DEVICE_SET_NMI_8000_REG 0x00a01c24
-#define DEVICE_SET_NMI_8000_VAL 0x1000000
+/* Device NMI register and value for 9000 family and above hw's */
+#define UREG_NIC_SET_NMI_DRIVER 0x00a05c10
+#define UREG_NIC_SET_NMI_DRIVER_NMI_FROM_DRIVER BIT(24)
+#define UREG_NIC_SET_NMI_DRIVER_RESET_HANDSHAKE (BIT(24) | BIT(25))
 
 /* Shared registers (0x0..0x3ff, via target indirect or periphery */
 #define SHR_BASE	0x00a10000
@@ -246,14 +188,14 @@
 #define SCD_QUEUE_STTS_REG_POS_SCD_ACT_EN (19)
 #define SCD_QUEUE_STTS_REG_MSK		(0x017F0000)
 
-#define SCD_QUEUE_CTX_REG1_CREDIT_POS		(8)
-#define SCD_QUEUE_CTX_REG1_CREDIT_MSK		(0x00FFFF00)
-#define SCD_QUEUE_CTX_REG1_SUPER_CREDIT_POS	(24)
-#define SCD_QUEUE_CTX_REG1_SUPER_CREDIT_MSK	(0xFF000000)
-#define SCD_QUEUE_CTX_REG2_WIN_SIZE_POS		(0)
-#define SCD_QUEUE_CTX_REG2_WIN_SIZE_MSK		(0x0000007F)
-#define SCD_QUEUE_CTX_REG2_FRAME_LIMIT_POS	(16)
-#define SCD_QUEUE_CTX_REG2_FRAME_LIMIT_MSK	(0x007F0000)
+#define SCD_QUEUE_CTX_REG1_CREDIT		(0x00FFFF00)
+#define SCD_QUEUE_CTX_REG1_SUPER_CREDIT		(0xFF000000)
+#define SCD_QUEUE_CTX_REG1_VAL(_n, _v)		FIELD_PREP(SCD_QUEUE_CTX_REG1_ ## _n, _v)
+
+#define SCD_QUEUE_CTX_REG2_WIN_SIZE		(0x0000007F)
+#define SCD_QUEUE_CTX_REG2_FRAME_LIMIT		(0x007F0000)
+#define SCD_QUEUE_CTX_REG2_VAL(_n, _v)		FIELD_PREP(SCD_QUEUE_CTX_REG2_ ## _n, _v)
+
 #define SCD_GP_CTRL_ENABLE_31_QUEUES		BIT(0)
 #define SCD_GP_CTRL_AUTO_ACTIVE_MODE		BIT(18)
 
@@ -294,9 +236,6 @@
 
 /*********************** END TX SCHEDULER *************************************/
 
-/* tcp checksum offload */
-#define RX_EN_CSUM		(0x00a00d88)
-
 /* Oscillator clock */
 #define OSC_CLK				(0xa04068)
 #define OSC_CLK_FORCE_CONTROL		(0x8)
@@ -309,12 +248,15 @@
  * Note this address is cleared after MAC reset.
  */
 #define UREG_UCODE_LOAD_STATUS		(0xa05c40)
+#define UREG_CPU_INIT_RUN		(0xa05c44)
 
 #define LMPM_SECURE_UCODE_LOAD_CPU1_HDR_ADDR	(0x1E78)
 #define LMPM_SECURE_UCODE_LOAD_CPU2_HDR_ADDR	(0x1E7C)
 
 #define LMPM_SECURE_CPU1_HDR_MEM_SPACE		(0x420000)
 #define LMPM_SECURE_CPU2_HDR_MEM_SPACE		(0x420400)
+
+#define LMAC2_PRPH_OFFSET		(0x100000)
 
 /* Rx FIFO */
 #define RXF_SIZE_ADDR			(0xa00c88)
@@ -328,6 +270,7 @@
 #define RXF_SIZE_BYTE_CND_POS		(7)
 #define RXF_SIZE_BYTE_CNT_MSK		(0x3ff << RXF_SIZE_BYTE_CND_POS)
 #define RXF_DIFF_FROM_PREV		(0x200)
+#define RXF2C_DIFF_FROM_PREV		(0x4e00)
 
 #define RXF_LD_FENCE_OFFSET_ADDR	(0xa00c10)
 #define RXF_FIFO_RD_FENCE_ADDR		(0xa00c0c)
@@ -358,18 +301,43 @@
 #define RADIO_RSP_ADDR_POS		(6)
 #define RADIO_RSP_RD_CMD		(3)
 
+/* LTR control (Qu only) */
+#define HPM_MAC_LTR_CSR			0xa0348c
+#define HPM_MAC_LRT_ENABLE_ALL		0xf
+/* also uses CSR_LTR_* for values */
+#define HPM_UMAC_LTR			0xa03480
+
 /* FW monitor */
 #define MON_BUFF_SAMPLE_CTL		(0xa03c00)
-#define MON_BUFF_BASE_ADDR		(0xa03c3c)
+#define MON_BUFF_BASE_ADDR		(0xa03c1c)
 #define MON_BUFF_END_ADDR		(0xa03c40)
 #define MON_BUFF_WRPTR			(0xa03c44)
 #define MON_BUFF_CYCLE_CNT		(0xa03c48)
+/* FW monitor family 8000 and on */
+#define MON_BUFF_BASE_ADDR_VER2		(0xa03c1c)
+#define MON_BUFF_END_ADDR_VER2		(0xa03c20)
+#define MON_BUFF_WRPTR_VER2		(0xa03c24)
+#define MON_BUFF_CYCLE_CNT_VER2		(0xa03c28)
+#define MON_BUFF_SHIFT_VER2		(0x8)
+/* FW monitor familiy AX210 and on */
+#define DBGC_CUR_DBGBUF_BASE_ADDR_LSB		(0xd03c20)
+#define DBGC_CUR_DBGBUF_BASE_ADDR_MSB		(0xd03c24)
+#define DBGC_CUR_DBGBUF_STATUS			(0xd03c1c)
+#define DBGC_DBGBUF_WRAP_AROUND			(0xd03c2c)
+#define DBGC_CUR_DBGBUF_STATUS_OFFSET_MSK	(0x00ffffff)
+#define DBGC_CUR_DBGBUF_STATUS_IDX_MSK		(0x0f000000)
 
 #define MON_DMARB_RD_CTL_ADDR		(0xa03c60)
 #define MON_DMARB_RD_DATA_ADDR		(0xa03c5c)
 
 #define DBGC_IN_SAMPLE			(0xa03c00)
 #define DBGC_OUT_CTRL			(0xa03c0c)
+
+/* M2S registers */
+#define LDBG_M2S_BUF_WPTR			(0xa0476c)
+#define LDBG_M2S_BUF_WRAP_CNT			(0xa04774)
+#define LDBG_M2S_BUF_WPTR_VAL_MSK		(0x000fffff)
+#define LDBG_M2S_BUF_WRAP_CNT_VAL_MSK		(0x000fffff)
 
 /* enable the ID buf for read */
 #define WFPM_PS_CTL_CLR			0xA0300C
@@ -379,26 +347,38 @@
 #define RADIO_REG_SYS_MANUAL_DFT_0	0xAD4078
 #define RFIC_REG_RD			0xAD0470
 #define WFPM_CTRL_REG			0xA03030
+#define WFPM_GP2			0xA030B4
 enum {
 	ENABLE_WFPM = BIT(31),
 	WFPM_AUX_CTL_AUX_IF_MAC_OWNER_MSK	= 0x80000000,
 };
 
-#define AUX_MISC_REG			0xA200B0
-enum {
-	HW_STEP_LOCATION_BITS = 24,
-};
+#define CNVI_AUX_MISC_CHIP				0xA200B0
+#define CNVR_AUX_MISC_CHIP				0xA2B800
+#define CNVR_SCU_SD_REGS_SD_REG_DIG_DCDC_VTRIM		0xA29890
+#define CNVR_SCU_SD_REGS_SD_REG_ACTIVE_VDIG_MIRROR	0xA29938
 
-#define AUX_MISC_MASTER1_EN		0xA20818
-enum aux_misc_master1_en {
-	AUX_MISC_MASTER1_EN_SBE_MSK	= 0x1,
-};
-
-#define AUX_MISC_MASTER1_SMPHR_STATUS	0xA20800
-#define RSA_ENABLE			0xA24B08
 #define PREG_AUX_BUS_WPROT_0		0xA04CC0
+
+/* device family 9000 WPROT register */
+#define PREG_PRPH_WPROT_9000		0xA04CE0
+/* device family 22000 WPROT register */
+#define PREG_PRPH_WPROT_22000		0xA04D00
+
+#define SB_MODIFY_CFG_FLAG		0xA03088
 #define SB_CPU_1_STATUS			0xA01E30
 #define SB_CPU_2_STATUS			0xA01E34
+#define UMAG_SB_CPU_1_STATUS		0xA038C0
+#define UMAG_SB_CPU_2_STATUS		0xA038C4
+#define UMAG_GEN_HW_STATUS		0xA038C8
+#define UREG_UMAC_CURRENT_PC		0xa05c18
+#define UREG_LMAC1_CURRENT_PC		0xa05c1c
+#define UREG_LMAC2_CURRENT_PC		0xa05c20
+
+/* For UMAG_GEN_HW_STATUS reg check */
+enum {
+	UMAG_GEN_HW_IS_FPGA = BIT(1),
+};
 
 /* FW chicken bits */
 #define LMPM_CHICK			0xA01FF8
@@ -415,4 +395,50 @@ enum {
 #define UREG_CHICK		(0xA05C00)
 #define UREG_CHICK_MSI_ENABLE	BIT(24)
 #define UREG_CHICK_MSIX_ENABLE	BIT(25)
+
+#define HPM_DEBUG			0xA03440
+#define PERSISTENCE_BIT			BIT(12)
+#define PREG_WFPM_ACCESS		BIT(12)
+
+#define HPM_HIPM_GEN_CFG			0xA03458
+#define HPM_HIPM_GEN_CFG_CR_PG_EN		BIT(0)
+#define HPM_HIPM_GEN_CFG_CR_SLP_EN		BIT(1)
+#define HPM_HIPM_GEN_CFG_CR_FORCE_ACTIVE	BIT(10)
+
+#define UREG_DOORBELL_TO_ISR6		0xA05C04
+#define UREG_DOORBELL_TO_ISR6_NMI_BIT	BIT(0)
+#define UREG_DOORBELL_TO_ISR6_RESET_HANDSHAKE (BIT(0) | BIT(1))
+#define UREG_DOORBELL_TO_ISR6_SUSPEND	BIT(18)
+#define UREG_DOORBELL_TO_ISR6_RESUME	BIT(19)
+#define UREG_DOORBELL_TO_ISR6_PNVM	BIT(20)
+
+#define FSEQ_ERROR_CODE			0xA340C8
+#define FSEQ_TOP_INIT_VERSION		0xA34038
+#define FSEQ_CNVIO_INIT_VERSION		0xA3403C
+#define FSEQ_OTP_VERSION		0xA340FC
+#define FSEQ_TOP_CONTENT_VERSION	0xA340F4
+#define FSEQ_ALIVE_TOKEN		0xA340F0
+#define FSEQ_CNVI_ID			0xA3408C
+#define FSEQ_CNVR_ID			0xA34090
+
+#define IWL_D3_SLEEP_STATUS_SUSPEND	0xD3
+#define IWL_D3_SLEEP_STATUS_RESUME	0xD0
+
+#define WMAL_INDRCT_RD_CMD1_OPMOD_POS 28
+#define WMAL_INDRCT_RD_CMD1_BYTE_ADDRESS_MSK 0xFFFFF
+#define WMAL_CMD_READ_BURST_ACCESS 2
+#define WMAL_MRSPF_1 0xADFC20
+#define WMAL_INDRCT_RD_CMD1 0xADFD44
+#define WMAL_INDRCT_CMD1 0xADFC14
+#define WMAL_INDRCT_CMD(addr) \
+	((WMAL_CMD_READ_BURST_ACCESS << WMAL_INDRCT_RD_CMD1_OPMOD_POS) | \
+	 ((addr) & WMAL_INDRCT_RD_CMD1_BYTE_ADDRESS_MSK))
+
+#define WFPM_LMAC1_PS_CTL_RW 0xA03380
+#define WFPM_LMAC2_PS_CTL_RW 0xA033C0
+#define WFPM_PS_CTL_RW_PHYRF_PD_FSM_CURSTATE_MSK 0x0000000F
+#define WFPM_PHYRF_STATE_ON 5
+#define HBUS_TIMEOUT 0xA5A5A5A1
+#define WFPM_DPHY_OFF 0xDF10FF
+
 #endif				/* __iwl_prph_h__ */

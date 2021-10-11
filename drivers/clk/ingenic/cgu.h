@@ -1,30 +1,23 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Ingenic SoC CGU driver
  *
  * Copyright (c) 2013-2015 Imagination Technologies
- * Author: Paul Burton <paul.burton@imgtec.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Author: Paul Burton <paul.burton@mips.com>
  */
 
 #ifndef __DRIVERS_CLK_INGENIC_CGU_H__
 #define __DRIVERS_CLK_INGENIC_CGU_H__
 
 #include <linux/bitops.h>
+#include <linux/clk-provider.h>
 #include <linux/of.h>
 #include <linux/spinlock.h>
 
 /**
  * struct ingenic_cgu_pll_info - information about a PLL
  * @reg: the offset of the PLL's control register within the CGU
+ * @rate_multiplier: the multiplier needed by pll rate calculation
  * @m_shift: the number of bits to shift the multiplier value by (ie. the
  *           index of the lowest bit of the multiplier value in the PLL's
  *           control register)
@@ -45,19 +38,24 @@
  * @od_encoding: a pointer to an array mapping post-VCO divider values to
  *               their encoded values in the PLL control register, or -1 for
  *               unsupported values
+ * @bypass_reg: the offset of the bypass control register within the CGU
  * @bypass_bit: the index of the bypass bit in the PLL control register
  * @enable_bit: the index of the enable bit in the PLL control register
  * @stable_bit: the index of the stable bit in the PLL control register
+ * @no_bypass_bit: if set, the PLL has no bypass functionality
  */
 struct ingenic_cgu_pll_info {
 	unsigned reg;
+	unsigned rate_multiplier;
 	const s8 *od_encoding;
 	u8 m_shift, m_bits, m_offset;
 	u8 n_shift, n_bits, n_offset;
 	u8 od_shift, od_bits, od_max;
+	unsigned bypass_reg;
 	u8 bypass_bit;
 	u8 enable_bit;
 	u8 stable_bit;
+	bool no_bypass_bit;
 };
 
 /**
@@ -78,7 +76,7 @@ struct ingenic_cgu_mux_info {
  * @reg: offset of the divider control register within the CGU
  * @shift: number of bits to left shift the divide value by (ie. the index of
  *         the lowest bit of the divide value within its control register)
- * @div: number of bits to divide the divider value by (i.e. if the
+ * @div: number to divide the divider value by (i.e. if the
  *	 effective divider value is the value written to the register
  *	 multiplied by some constant)
  * @bits: the size of the divide value in bits
@@ -86,6 +84,8 @@ struct ingenic_cgu_mux_info {
  *          isn't one
  * @busy_bit: the index of the busy bit within reg, or -1 if there isn't one
  * @stop_bit: the index of the stop bit within reg, or -1 if there isn't one
+ * @div_table: optional table to map the value read from the register to the
+ *             actual divider value
  */
 struct ingenic_cgu_div_info {
 	unsigned reg;
@@ -95,6 +95,7 @@ struct ingenic_cgu_div_info {
 	s8 ce_bit;
 	s8 busy_bit;
 	s8 stop_bit;
+	const u8 *div_table;
 };
 
 /**
@@ -109,10 +110,14 @@ struct ingenic_cgu_fixdiv_info {
  * struct ingenic_cgu_gate_info - information about a clock gate
  * @reg: offset of the gate control register within the CGU
  * @bit: offset of the bit in the register that controls the gate
+ * @clear_to_gate: if set, the clock is gated when the bit is cleared
+ * @delay_us: delay in microseconds after which the clock is considered stable
  */
 struct ingenic_cgu_gate_info {
 	unsigned reg;
 	u8 bit;
+	bool clear_to_gate;
+	u16 delay_us;
 };
 
 /**
@@ -120,7 +125,7 @@ struct ingenic_cgu_gate_info {
  * @clk_ops: custom clock operation callbacks
  */
 struct ingenic_cgu_custom_info {
-	struct clk_ops *clk_ops;
+	const struct clk_ops *clk_ops;
 };
 
 /**
@@ -188,7 +193,7 @@ struct ingenic_cgu {
 
 /**
  * struct ingenic_clk - private data for a clock
- * @hw: see Documentation/clk.txt
+ * @hw: see Documentation/driver-api/clk.rst
  * @cgu: a pointer to the CGU data
  * @idx: the index of this clock in cgu->clock_info
  */

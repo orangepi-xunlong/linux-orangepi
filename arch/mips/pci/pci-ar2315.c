@@ -1,16 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 /**
@@ -42,6 +31,7 @@
 #include <linux/platform_device.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
+#include <linux/dma-direct.h>
 #include <linux/mm.h>
 #include <linux/delay.h>
 #include <linux/bitops.h>
@@ -149,6 +139,13 @@
 #define AR2315_PCI_HOST_SLOT	3
 #define AR2315_PCI_HOST_DEVID	((0xff18 << 16) | PCI_VENDOR_ID_ATHEROS)
 
+/*
+ * We need some arbitrary non-zero value to be programmed to the BAR1 register
+ * of PCI host controller to enable DMA. The same value should be used as the
+ * offset to calculate the physical address of DMA buffer for PCI devices.
+ */
+#define AR2315_PCI_HOST_SDRAM_BASEADDR	0x20000000
+
 /* ??? access BAR */
 #define AR2315_PCI_HOST_MBAR0		0x10000000
 /* RAM access BAR */
@@ -166,6 +163,23 @@ struct ar2315_pci_ctrl {
 	struct resource mem_res;
 	struct resource io_res;
 };
+
+static inline dma_addr_t ar2315_dev_offset(struct device *dev)
+{
+	if (dev && dev_is_pci(dev))
+		return AR2315_PCI_HOST_SDRAM_BASEADDR;
+	return 0;
+}
+
+dma_addr_t phys_to_dma(struct device *dev, phys_addr_t paddr)
+{
+	return paddr + ar2315_dev_offset(dev);
+}
+
+phys_addr_t dma_to_phys(struct device *dev, dma_addr_t dma_addr)
+{
+	return dma_addr - ar2315_dev_offset(dev);
+}
 
 static inline struct ar2315_pci_ctrl *ar2315_pci_bus_to_apc(struct pci_bus *bus)
 {
@@ -410,9 +424,8 @@ static int ar2315_pci_probe(struct platform_device *pdev)
 		return -EINVAL;
 	apc->irq = irq;
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
-					   "ar2315-pci-ctrl");
-	apc->mmr_mem = devm_ioremap_resource(dev, res);
+	apc->mmr_mem = devm_platform_ioremap_resource_byname(pdev,
+							     "ar2315-pci-ctrl");
 	if (IS_ERR(apc->mmr_mem))
 		return PTR_ERR(apc->mmr_mem);
 
@@ -428,7 +441,7 @@ static int ar2315_pci_probe(struct platform_device *pdev)
 	apc->mem_res.flags = IORESOURCE_MEM;
 
 	/* Remap PCI config space */
-	apc->cfg_mem = devm_ioremap_nocache(dev, res->start,
+	apc->cfg_mem = devm_ioremap(dev, res->start,
 					    AR2315_PCI_CFG_SIZE);
 	if (!apc->cfg_mem) {
 		dev_err(dev, "failed to remap PCI config space\n");
@@ -471,11 +484,11 @@ static int ar2315_pci_probe(struct platform_device *pdev)
 	apc->io_res.name = "AR2315 IO space";
 	apc->io_res.start = 0;
 	apc->io_res.end = 0;
-	apc->io_res.flags = IORESOURCE_IO,
+	apc->io_res.flags = IORESOURCE_IO;
 
 	apc->pci_ctrl.pci_ops = &ar2315_pci_ops;
-	apc->pci_ctrl.mem_resource = &apc->mem_res,
-	apc->pci_ctrl.io_resource = &apc->io_res,
+	apc->pci_ctrl.mem_resource = &apc->mem_res;
+	apc->pci_ctrl.io_resource = &apc->io_res;
 
 	register_pci_controller(&apc->pci_ctrl);
 

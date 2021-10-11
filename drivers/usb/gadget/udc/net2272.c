@@ -1,28 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Driver for PLX NET2272 USB device controller
  *
  * Copyright (C) 2005-2006 PLX Technology, Inc.
  * Copyright (C) 2006-2011 Analog Devices, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/errno.h>
-#include <linux/gpio.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
@@ -67,7 +53,7 @@ static const char * const ep_name[] = {
  *
  * If use_dma is disabled, pio will be used instead.
  */
-static bool use_dma = 0;
+static bool use_dma = false;
 module_param(use_dma, bool, 0644);
 
 /*
@@ -181,7 +167,7 @@ static void net2272_dequeue_all(struct net2272_ep *);
 static int net2272_kick_dma(struct net2272_ep *, struct net2272_request *);
 static int net2272_fifo_status(struct usb_ep *);
 
-static struct usb_ep_ops net2272_ep_ops;
+static const struct usb_ep_ops net2272_ep_ops;
 
 /*---------------------------------------------------------------------------*/
 
@@ -202,10 +188,10 @@ net2272_enable(struct usb_ep *_ep, const struct usb_endpoint_descriptor *desc)
 	if (!dev->driver || dev->gadget.speed == USB_SPEED_UNKNOWN)
 		return -ESHUTDOWN;
 
-	max = usb_endpoint_maxp(desc) & 0x1fff;
+	max = usb_endpoint_maxp(desc);
 
 	spin_lock_irqsave(&dev->lock, flags);
-	_ep->maxpacket = max & 0x7fff;
+	_ep->maxpacket = max;
 	ep->desc = desc;
 
 	/* net2272_ep_reset() has already been called */
@@ -553,7 +539,6 @@ net2272_read_fifo(struct net2272_ep *ep, struct net2272_request *req)
 	int count;
 	int tmp;
 	int cleanup = 0;
-	int status = -1;
 
 	dev_vdbg(ep->dev->dev, "read_fifo %s actual %d len %d\n",
 		ep->ep.name, req->req.actual, req->req.length);
@@ -586,8 +571,7 @@ net2272_read_fifo(struct net2272_ep *ep, struct net2272_request *req)
 
 		/* completion */
 		if (unlikely(cleanup || is_short ||
-				((req->req.actual == req->req.length)
-				 && !req->req.zero))) {
+				req->req.actual == req->req.length)) {
 
 			if (cleanup) {
 				net2272_out_flush(ep);
@@ -606,6 +590,8 @@ net2272_read_fifo(struct net2272_ep *ep, struct net2272_request *req)
 			}
 
 			if (!list_empty(&ep->queue)) {
+				int status;
+
 				req = list_entry(ep->queue.next,
 					struct net2272_request, queue);
 				status = net2272_kick_dma(ep, req);
@@ -653,7 +639,7 @@ net2272_request_dma(struct net2272 *dev, unsigned ep, u32 buf,
 	dev->dma_busy = 1;
 
 	/* initialize platform's dma */
-#ifdef CONFIG_PCI
+#ifdef CONFIG_USB_PCI
 	/* NET2272 addr, buffer addr, length, etc. */
 	switch (dev->dev_id) {
 	case PCI_DEVICE_ID_RDK1:
@@ -701,7 +687,7 @@ static void
 net2272_start_dma(struct net2272 *dev)
 {
 	/* start platform's dma controller */
-#ifdef CONFIG_PCI
+#ifdef CONFIG_USB_PCI
 	switch (dev->dev_id) {
 	case PCI_DEVICE_ID_RDK1:
 		writeb((1 << CHANNEL_ENABLE) | (1 << CHANNEL_START),
@@ -797,7 +783,7 @@ net2272_kick_dma(struct net2272_ep *ep, struct net2272_request *req)
 
 static void net2272_cancel_dma(struct net2272 *dev)
 {
-#ifdef CONFIG_PCI
+#ifdef CONFIG_USB_PCI
 	switch (dev->dev_id) {
 	case PCI_DEVICE_ID_RDK1:
 		writeb(0, dev->rdk1.plx9054_base_addr + DMACSR0);
@@ -958,6 +944,7 @@ net2272_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 			break;
 	}
 	if (&req->req != _req) {
+		ep->stopped = stopped;
 		spin_unlock_irqrestore(&ep->dev->lock, flags);
 		return -EINVAL;
 	}
@@ -1067,7 +1054,7 @@ net2272_fifo_flush(struct usb_ep *_ep)
 	net2272_ep_write(ep, EP_STAT1, 1 << BUFFER_FLUSH);
 }
 
-static struct usb_ep_ops net2272_ep_ops = {
+static const struct usb_ep_ops net2272_ep_ops = {
 	.enable        = net2272_enable,
 	.disable       = net2272_disable,
 
@@ -1190,11 +1177,6 @@ registers_show(struct device *_dev, struct device_attribute *attr, char *buf)
 	next = buf;
 	size = PAGE_SIZE;
 	spin_lock_irqsave(&dev->lock, flags);
-
-	if (dev->driver)
-		s = dev->driver->driver.name;
-	else
-		s = "(none)";
 
 	/* Main Control Registers */
 	t = scnprintf(next, size, "%s version %s,"
@@ -1706,7 +1688,7 @@ net2272_set_test_mode(struct net2272 *dev, int mode)
 	net2272_write(dev, USBTEST, mode);
 
 	/* load test packet */
-	if (mode == TEST_PACKET) {
+	if (mode == USB_TEST_PACKET) {
 		/* switch to 8 bit mode */
 		net2272_write(dev, LOCCTL, net2272_read(dev, LOCCTL) &
 				~(1 << DATA_WIDTH));
@@ -2096,7 +2078,7 @@ static irqreturn_t net2272_irq(int irq, void *_dev)
 #if defined(PLX_PCI_RDK2)
 	/* see if PCI int for us by checking irqstat */
 	intcsr = readl(dev->rdk2.fpga_base_addr + RDK2_IRQSTAT);
-	if (!intcsr & (1 << NET2272_PCI_IRQ)) {
+	if (!(intcsr & (1 << NET2272_PCI_IRQ))) {
 		spin_unlock(&dev->lock);
 		return IRQ_NONE;
 	}
@@ -2214,7 +2196,8 @@ static int net2272_present(struct net2272 *dev)
 static void
 net2272_gadget_release(struct device *_dev)
 {
-	struct net2272 *dev = dev_get_drvdata(_dev);
+	struct net2272 *dev = container_of(_dev, struct net2272, gadget.dev);
+
 	kfree(dev);
 }
 
@@ -2223,7 +2206,8 @@ net2272_gadget_release(struct device *_dev)
 static void
 net2272_remove(struct net2272 *dev)
 {
-	usb_del_gadget_udc(&dev->gadget);
+	if (dev->added)
+		usb_del_gadget(&dev->gadget);
 	free_irq(dev->irq, dev);
 	iounmap(dev->base_addr);
 	device_remove_file(dev->dev, &dev_attr_registers);
@@ -2253,6 +2237,7 @@ static struct net2272 *net2272_probe_init(struct device *dev, unsigned int irq)
 
 	/* the "gadget" abstracts/virtualizes the controller */
 	ret->gadget.name = driver_name;
+	usb_initialize_gadget(dev, &ret->gadget, net2272_gadget_release);
 
 	return ret;
 }
@@ -2291,10 +2276,10 @@ net2272_probe_fin(struct net2272 *dev, unsigned int irqflags)
 	if (ret)
 		goto err_irq;
 
-	ret = usb_add_gadget_udc_release(dev->dev, &dev->gadget,
-			net2272_gadget_release);
+	ret = usb_add_gadget(&dev->gadget);
 	if (ret)
 		goto err_add_udc;
+	dev->added = 1;
 
 	return 0;
 
@@ -2306,7 +2291,7 @@ err_add_udc:
 	return ret;
 }
 
-#ifdef CONFIG_PCI
+#ifdef CONFIG_USB_PCI
 
 /*
  * wrap this driver around the specified device, but
@@ -2341,7 +2326,7 @@ net2272_rdk1_probe(struct pci_dev *pdev, struct net2272 *dev)
 			goto err;
 		}
 
-		mem_mapped_addr[i] = ioremap_nocache(resource, len);
+		mem_mapped_addr[i] = ioremap(resource, len);
 		if (mem_mapped_addr[i] == NULL) {
 			release_mem_region(resource, len);
 			dev_dbg(dev->dev, "can't map memory\n");
@@ -2388,6 +2373,8 @@ net2272_rdk1_probe(struct pci_dev *pdev, struct net2272 *dev)
 
  err:
 	while (--i >= 0) {
+		if (i == 1)
+			continue;	/* BAR1 unused */
 		iounmap(mem_mapped_addr[i]);
 		release_mem_region(pci_resource_start(pdev, i),
 			pci_resource_len(pdev, i));
@@ -2419,7 +2406,7 @@ net2272_rdk2_probe(struct pci_dev *pdev, struct net2272 *dev)
 			goto err;
 		}
 
-		mem_mapped_addr[i] = ioremap_nocache(resource, len);
+		mem_mapped_addr[i] = ioremap(resource, len);
 		if (mem_mapped_addr[i] == NULL) {
 			release_mem_region(resource, len);
 			dev_dbg(dev->dev, "can't map memory\n");
@@ -2467,7 +2454,7 @@ net2272_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	if (pci_enable_device(pdev) < 0) {
 		ret = -ENODEV;
-		goto err_free;
+		goto err_put;
 	}
 
 	pci_set_master(pdev);
@@ -2490,8 +2477,8 @@ net2272_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
  err_pci:
 	pci_disable_device(pdev);
- err_free:
-	kfree(dev);
+ err_put:
+	usb_put_gadget(&dev->gadget);
 
 	return ret;
 }
@@ -2552,7 +2539,7 @@ net2272_pci_remove(struct pci_dev *pdev)
 
 	pci_disable_device(pdev);
 
-	kfree(dev);
+	usb_put_gadget(&dev->gadget);
 }
 
 /* Table of matching PCI IDs */
@@ -2643,7 +2630,7 @@ net2272_plat_probe(struct platform_device *pdev)
 		ret = -EBUSY;
 		goto err;
 	}
-	dev->base_addr = ioremap_nocache(base, len);
+	dev->base_addr = ioremap(base, len);
 	if (!dev->base_addr) {
 		dev_dbg(dev->dev, "can't map memory\n");
 		ret = -EFAULT;
@@ -2665,6 +2652,8 @@ net2272_plat_probe(struct platform_device *pdev)
  err_req:
 	release_mem_region(base, len);
  err:
+	usb_put_gadget(&dev->gadget);
+
 	return ret;
 }
 
@@ -2678,7 +2667,7 @@ net2272_plat_remove(struct platform_device *pdev)
 	release_mem_region(pdev->resource[0].start,
 		resource_size(&pdev->resource[0]));
 
-	kfree(dev);
+	usb_put_gadget(&dev->gadget);
 
 	return 0;
 }

@@ -19,6 +19,7 @@
 #include <linux/quotaops.h>
 #include <linux/swap.h>
 #include <linux/uio.h>
+#include <linux/bio.h>
 
 int reiserfs_commit_write(struct file *f, struct page *page,
 			  unsigned from, unsigned to);
@@ -1043,7 +1044,8 @@ research:
 			if (blocks_needed == 1) {
 				un = &unf_single;
 			} else {
-				un = kzalloc(min(blocks_needed, max_to_insert) * UNFM_P_SIZE, GFP_NOFS);
+				un = kcalloc(min(blocks_needed, max_to_insert),
+					     UNFM_P_SIZE, GFP_NOFS);
 				if (!un) {
 					un = &unf_single;
 					blocks_needed = 1;
@@ -1064,7 +1066,7 @@ research:
 			} else {
 				/* paste hole to the indirect item */
 				/*
-				 * If kmalloc failed, max_to_insert becomes
+				 * If kcalloc failed, max_to_insert becomes
 				 * zero and it means we only have space for
 				 * one block
 				 */
@@ -1158,11 +1160,9 @@ failure:
 	return retval;
 }
 
-static int
-reiserfs_readpages(struct file *file, struct address_space *mapping,
-		   struct list_head *pages, unsigned nr_pages)
+static void reiserfs_readahead(struct readahead_control *rac)
 {
-	return mpage_readpages(mapping, pages, nr_pages, reiserfs_get_block);
+	mpage_readahead(rac, reiserfs_get_block);
 }
 
 /*
@@ -1374,7 +1374,6 @@ static void init_inode(struct inode *inode, struct treepath *path)
 static void inode2sd(void *sd, struct inode *inode, loff_t size)
 {
 	struct stat_data *sd_v2 = (struct stat_data *)sd;
-	__u16 flags;
 
 	set_sd_v2_mode(sd_v2, inode->i_mode);
 	set_sd_v2_nlink(sd_v2, inode->i_nlink);
@@ -1389,9 +1388,7 @@ static void inode2sd(void *sd, struct inode *inode, loff_t size)
 		set_sd_v2_rdev(sd_v2, new_encode_dev(inode->i_rdev));
 	else
 		set_sd_v2_generation(sd_v2, inode->i_generation);
-	flags = REISERFS_I(inode)->i_attrs;
-	i_attrs_to_sd_attrs(inode, &flags);
-	set_sd_v2_attrs(sd_v2, flags);
+	set_sd_v2_attrs(sd_v2, REISERFS_I(inode)->i_attrs);
 }
 
 /* used to copy inode's fields to old stat data */
@@ -1554,11 +1551,7 @@ void reiserfs_read_locked_inode(struct inode *inode,
 	 * set version 1, version 2 could be used too, because stat data
 	 * key is the same in both versions
 	 */
-	key.version = KEY_FORMAT_3_5;
-	key.on_disk_key.k_dir_id = dirino;
-	key.on_disk_key.k_objectid = inode->i_ino;
-	key.on_disk_key.k_offset = 0;
-	key.on_disk_key.k_type = 0;
+	_make_cpu_key(&key, KEY_FORMAT_3_5, dirino, inode->i_ino, 0, 0, 3);
 
 	/* look for the object's stat data */
 	retval = search_item(inode->i_sb, &key, &path_to_sd);
@@ -1778,7 +1771,7 @@ int reiserfs_write_inode(struct inode *inode, struct writeback_control *wbc)
 	struct reiserfs_transaction_handle th;
 	int jbegin_count = 1;
 
-	if (inode->i_sb->s_flags & MS_RDONLY)
+	if (sb_rdonly(inode->i_sb))
 		return -EROFS;
 	/*
 	 * memory pressure can sometimes initiate write_inode calls with
@@ -2001,10 +1994,6 @@ int reiserfs_new_inode(struct reiserfs_transaction_handle *th,
 
 	/* uid and gid must already be set by the caller for quota init */
 
-	/* symlink cannot be immutable or append only, right? */
-	if (S_ISLNK(inode->i_mode))
-		inode->i_flags &= ~(S_IMMUTABLE | S_APPEND);
-
 	inode->i_mtime = inode->i_atime = inode->i_ctime = current_time(inode);
 	inode->i_size = i_size;
 	inode->i_blocks = 0;
@@ -2102,6 +2091,15 @@ int reiserfs_new_inode(struct reiserfs_transaction_handle *th,
 		goto out_inserted_sd;
 	}
 
+	/*
+	 * Mark it private if we're creating the privroot
+	 * or something under it.
+	 */
+	if (IS_PRIVATE(dir) || dentry == REISERFS_SB(sb)->priv_root) {
+		inode->i_flags |= S_PRIVATE;
+		inode->i_opflags &= ~IOP_XATTR;
+	}
+
 	if (reiserfs_posixacl(inode->i_sb)) {
 		reiserfs_write_unlock(inode->i_sb);
 		retval = reiserfs_inherit_default_acl(th, dir, dentry, inode);
@@ -2112,12 +2110,11 @@ int reiserfs_new_inode(struct reiserfs_transaction_handle *th,
 			journal_end(th);
 			goto out_inserted_sd;
 		}
-	} else if (inode->i_sb->s_flags & MS_POSIXACL) {
+	} else if (inode->i_sb->s_flags & SB_POSIXACL) {
 		reiserfs_warning(inode->i_sb, "jdm-13090",
 				 "ACLs aren't enabled in the fs, "
 				 "but vfs thinks they are!");
-	} else if (IS_PRIVATE(dir))
-		inode->i_flags |= S_PRIVATE;
+	}
 
 	if (security->name) {
 		reiserfs_write_unlock(inode->i_sb);
@@ -2162,7 +2159,8 @@ out_end_trans:
 out_inserted_sd:
 	clear_nlink(inode);
 	th->t_trans_id = 0;	/* so the caller can't use this handle later */
-	unlock_new_inode(inode); /* OK to do even if we hadn't locked it */
+	if (inode->i_state & I_NEW)
+		unlock_new_inode(inode);
 	iput(inode);
 	return err;
 }
@@ -3094,28 +3092,6 @@ void sd_attrs_to_i_attrs(__u16 sd_attrs, struct inode *inode)
 	}
 }
 
-void i_attrs_to_sd_attrs(struct inode *inode, __u16 * sd_attrs)
-{
-	if (reiserfs_attrs(inode->i_sb)) {
-		if (inode->i_flags & S_IMMUTABLE)
-			*sd_attrs |= REISERFS_IMMUTABLE_FL;
-		else
-			*sd_attrs &= ~REISERFS_IMMUTABLE_FL;
-		if (inode->i_flags & S_SYNC)
-			*sd_attrs |= REISERFS_SYNC_FL;
-		else
-			*sd_attrs &= ~REISERFS_SYNC_FL;
-		if (inode->i_flags & S_NOATIME)
-			*sd_attrs |= REISERFS_NOATIME_FL;
-		else
-			*sd_attrs &= ~REISERFS_NOATIME_FL;
-		if (REISERFS_I(inode)->i_flags & i_nopack_mask)
-			*sd_attrs |= REISERFS_NOTAIL_FL;
-		else
-			*sd_attrs &= ~REISERFS_NOTAIL_FL;
-	}
-}
-
 /*
  * decide if this buffer needs to stay around for data logging or ordered
  * write purposes
@@ -3306,13 +3282,14 @@ static ssize_t reiserfs_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 	return ret;
 }
 
-int reiserfs_setattr(struct dentry *dentry, struct iattr *attr)
+int reiserfs_setattr(struct user_namespace *mnt_userns, struct dentry *dentry,
+		     struct iattr *attr)
 {
 	struct inode *inode = d_inode(dentry);
 	unsigned int ia_valid;
 	int error;
 
-	error = setattr_prepare(dentry, attr);
+	error = setattr_prepare(&init_user_ns, dentry, attr);
 	if (error)
 		return error;
 
@@ -3437,7 +3414,7 @@ int reiserfs_setattr(struct dentry *dentry, struct iattr *attr)
 	}
 
 	if (!error) {
-		setattr_copy(inode, attr);
+		setattr_copy(&init_user_ns, inode, attr);
 		mark_inode_dirty(inode);
 	}
 
@@ -3453,7 +3430,7 @@ out:
 const struct address_space_operations reiserfs_address_space_operations = {
 	.writepage = reiserfs_writepage,
 	.readpage = reiserfs_readpage,
-	.readpages = reiserfs_readpages,
+	.readahead = reiserfs_readahead,
 	.releasepage = reiserfs_releasepage,
 	.invalidatepage = reiserfs_invalidatepage,
 	.write_begin = reiserfs_write_begin,

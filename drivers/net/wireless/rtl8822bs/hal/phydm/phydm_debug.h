@@ -309,12 +309,12 @@ phydm_get_phy_statistic(
 	void		*p_dm_void
 );
 
-void
+void 
 phydm_basic_dbg_message(
 	void		*p_dm_void
 );
 
-void
+void 
 phydm_basic_profile(
 	void		*p_dm_void,
 	u32		*_used,
@@ -348,7 +348,7 @@ void phydm_sbd_check(
 );
 
 void phydm_sbd_callback(
-	struct phydm_timer_list		*p_timer
+	struct timer_list		*p_timer
 );
 
 void phydm_sbd_workitem_callback(

@@ -23,18 +23,18 @@
  *	_etext = .;
  *
  *      _sdata = .;
- *	RO_DATA_SECTION(PAGE_SIZE)
- *	RW_DATA_SECTION(...)
+ *	RO_DATA(PAGE_SIZE)
+ *	RW_DATA(...)
  *	_edata = .;
  *
  *	EXCEPTION_TABLE(...)
- *	NOTES
  *
  *	BSS_SECTION(0, 0, 0)
  *	_end = .;
  *
  *	STABS_DEBUG
  *	DWARF_DEBUG
+ *	ELF_DETAILS
  *
  *	DISCARDS		// must be the last
  * }
@@ -54,7 +54,32 @@
 #define LOAD_OFFSET 0
 #endif
 
-#include <linux/export.h>
+/*
+ * Only some architectures want to have the .notes segment visible in
+ * a separate PT_NOTE ELF Program Header. When this happens, it needs
+ * to be visible in both the kernel text's PT_LOAD and the PT_NOTE
+ * Program Headers. In this case, though, the PT_LOAD needs to be made
+ * the default again so that all the following sections don't also end
+ * up in the PT_NOTE Program Header.
+ */
+#ifdef EMITS_PT_NOTE
+#define NOTES_HEADERS		:text :note
+#define NOTES_HEADERS_RESTORE	__restore_ph : { *(.__restore_ph) } :text
+#else
+#define NOTES_HEADERS
+#define NOTES_HEADERS_RESTORE
+#endif
+
+/*
+ * Some architectures have non-executable read-only exception tables.
+ * They can be added to the RO_DATA segment by specifying their desired
+ * alignment.
+ */
+#ifdef RO_EXCEPTION_TABLE_ALIGN
+#define RO_EXCEPTION_TABLE	EXCEPTION_TABLE(RO_EXCEPTION_TABLE_ALIGN)
+#else
+#define RO_EXCEPTION_TABLE
+#endif
 
 /* Align . to a 8 byte boundary equals to maximum function alignment. */
 #define ALIGN_FUNCTION()  . = ALIGN(8)
@@ -64,25 +89,54 @@
  * generates .data.identifier sections, which need to be pulled in with
  * .data. We don't want to pull in .data..other sections, which Linux
  * has defined. Same for text and bss.
+ *
+ * With LTO_CLANG, the linker also splits sections by default, so we need
+ * these macros to combine the sections during the final link.
+ *
+ * RODATA_MAIN is not used because existing code already defines .rodata.x
+ * sections to be brought in with rodata.
  */
-#ifdef CONFIG_LD_DEAD_CODE_DATA_ELIMINATION
+#if defined(CONFIG_LD_DEAD_CODE_DATA_ELIMINATION) || defined(CONFIG_LTO_CLANG)
 #define TEXT_MAIN .text .text.[0-9a-zA-Z_]*
-#define TEXT_CFI_MAIN .text.cfi .text.[0-9a-zA-Z_]*.cfi
-#define DATA_MAIN .data .data.[0-9a-zA-Z_]*
-#define BSS_MAIN .bss .bss.[0-9a-zA-Z_]*
+#define DATA_MAIN .data .data.[0-9a-zA-Z_]* .data..L* .data..compoundliteral* .data.$__unnamed_* .data.$L*
+#define SDATA_MAIN .sdata .sdata.[0-9a-zA-Z_]*
+#define RODATA_MAIN .rodata .rodata.[0-9a-zA-Z_]* .rodata..L*
+#define BSS_MAIN .bss .bss.[0-9a-zA-Z_]* .bss..compoundliteral*
+#define SBSS_MAIN .sbss .sbss.[0-9a-zA-Z_]*
 #else
 #define TEXT_MAIN .text
-#define TEXT_CFI_MAIN .text.cfi
 #define DATA_MAIN .data
+#define SDATA_MAIN .sdata
+#define RODATA_MAIN .rodata
 #define BSS_MAIN .bss
+#define SBSS_MAIN .sbss
 #endif
 
 /*
- * Align to a 32 byte boundary equal to the
- * alignment gcc 4.5 uses for a struct
+ * GCC 4.5 and later have a 32 bytes section alignment for structures.
+ * Except GCC 4.9, that feels the need to align on 64 bytes.
  */
+#if __GNUC__ == 4 && __GNUC_MINOR__ == 9
+#define STRUCT_ALIGNMENT 64
+#else
 #define STRUCT_ALIGNMENT 32
+#endif
 #define STRUCT_ALIGN() . = ALIGN(STRUCT_ALIGNMENT)
+
+/*
+ * The order of the sched class addresses are important, as they are
+ * used to determine the order of the priority of each sched class in
+ * relation to each other.
+ */
+#define SCHED_DATA				\
+	STRUCT_ALIGN();				\
+	__begin_sched_classes = .;		\
+	*(__idle_sched_class)			\
+	*(__fair_sched_class)			\
+	*(__rt_sched_class)			\
+	*(__dl_sched_class)			\
+	*(__stop_sched_class)			\
+	__end_sched_classes = .;
 
 /* The actual configuration determine if the init/exit sections
  * are handled as text/data or they can be discarded (which
@@ -105,58 +159,83 @@
 #endif
 
 #ifdef CONFIG_FTRACE_MCOUNT_RECORD
+/*
+ * The ftrace call sites are logged to a section whose name depends on the
+ * compiler option used. A given kernel image will only use one, AKA
+ * FTRACE_CALLSITE_SECTION. We capture all of them here to avoid header
+ * dependencies for FTRACE_CALLSITE_SECTION's definition.
+ *
+ * Need to also make ftrace_stub_graph point to ftrace_stub
+ * so that the same stub location may have different protocols
+ * and not mess up with C verifiers.
+ */
 #define MCOUNT_REC()	. = ALIGN(8);				\
-			VMLINUX_SYMBOL(__start_mcount_loc) = .; \
+			__start_mcount_loc = .;			\
 			KEEP(*(__mcount_loc))			\
-			VMLINUX_SYMBOL(__stop_mcount_loc) = .;
+			KEEP(*(__patchable_function_entries))	\
+			__stop_mcount_loc = .;			\
+			ftrace_stub_graph = ftrace_stub;
 #else
-#define MCOUNT_REC()
+# ifdef CONFIG_FUNCTION_TRACER
+#  define MCOUNT_REC()	ftrace_stub_graph = ftrace_stub;
+# else
+#  define MCOUNT_REC()
+# endif
 #endif
 
 #ifdef CONFIG_TRACE_BRANCH_PROFILING
-#define LIKELY_PROFILE()	VMLINUX_SYMBOL(__start_annotated_branch_profile) = .; \
-				*(_ftrace_annotated_branch)			      \
-				VMLINUX_SYMBOL(__stop_annotated_branch_profile) = .;
+#define LIKELY_PROFILE()	__start_annotated_branch_profile = .;	\
+				KEEP(*(_ftrace_annotated_branch))	\
+				__stop_annotated_branch_profile = .;
 #else
 #define LIKELY_PROFILE()
 #endif
 
 #ifdef CONFIG_PROFILE_ALL_BRANCHES
-#define BRANCH_PROFILE()	VMLINUX_SYMBOL(__start_branch_profile) = .;   \
-				*(_ftrace_branch)			      \
-				VMLINUX_SYMBOL(__stop_branch_profile) = .;
+#define BRANCH_PROFILE()	__start_branch_profile = .;		\
+				KEEP(*(_ftrace_branch))			\
+				__stop_branch_profile = .;
 #else
 #define BRANCH_PROFILE()
 #endif
 
 #ifdef CONFIG_KPROBES
 #define KPROBE_BLACKLIST()	. = ALIGN(8);				      \
-				VMLINUX_SYMBOL(__start_kprobe_blacklist) = .; \
-				*(_kprobe_blacklist)			      \
-				VMLINUX_SYMBOL(__stop_kprobe_blacklist) = .;
+				__start_kprobe_blacklist = .;		      \
+				KEEP(*(_kprobe_blacklist))		      \
+				__stop_kprobe_blacklist = .;
 #else
 #define KPROBE_BLACKLIST()
 #endif
 
+#ifdef CONFIG_FUNCTION_ERROR_INJECTION
+#define ERROR_INJECT_WHITELIST()	STRUCT_ALIGN();			      \
+			__start_error_injection_whitelist = .;		      \
+			KEEP(*(_error_injection_whitelist))		      \
+			__stop_error_injection_whitelist = .;
+#else
+#define ERROR_INJECT_WHITELIST()
+#endif
+
 #ifdef CONFIG_EVENT_TRACING
 #define FTRACE_EVENTS()	. = ALIGN(8);					\
-			VMLINUX_SYMBOL(__start_ftrace_events) = .;	\
+			__start_ftrace_events = .;			\
 			KEEP(*(_ftrace_events))				\
-			VMLINUX_SYMBOL(__stop_ftrace_events) = .;	\
-			VMLINUX_SYMBOL(__start_ftrace_enum_maps) = .;	\
-			KEEP(*(_ftrace_enum_map))			\
-			VMLINUX_SYMBOL(__stop_ftrace_enum_maps) = .;
+			__stop_ftrace_events = .;			\
+			__start_ftrace_eval_maps = .;			\
+			KEEP(*(_ftrace_eval_map))			\
+			__stop_ftrace_eval_maps = .;
 #else
 #define FTRACE_EVENTS()
 #endif
 
 #ifdef CONFIG_TRACING
-#define TRACE_PRINTKS() VMLINUX_SYMBOL(__start___trace_bprintk_fmt) = .;      \
-			 *(__trace_printk_fmt) /* Trace_printk fmt' pointer */ \
-			 VMLINUX_SYMBOL(__stop___trace_bprintk_fmt) = .;
-#define TRACEPOINT_STR() VMLINUX_SYMBOL(__start___tracepoint_str) = .;	\
-			 *(__tracepoint_str) /* Trace_printk fmt' pointer */ \
-			 VMLINUX_SYMBOL(__stop___tracepoint_str) = .;
+#define TRACE_PRINTKS()	 __start___trace_bprintk_fmt = .;      \
+			 KEEP(*(__trace_printk_fmt)) /* Trace_printk fmt' pointer */ \
+			 __stop___trace_bprintk_fmt = .;
+#define TRACEPOINT_STR() __start___tracepoint_str = .;	\
+			 KEEP(*(__tracepoint_str)) /* Trace_printk fmt' pointer */ \
+			 __stop___tracepoint_str = .;
 #else
 #define TRACE_PRINTKS()
 #define TRACEPOINT_STR()
@@ -164,20 +243,43 @@
 
 #ifdef CONFIG_FTRACE_SYSCALLS
 #define TRACE_SYSCALLS() . = ALIGN(8);					\
-			 VMLINUX_SYMBOL(__start_syscalls_metadata) = .;	\
-			 *(__syscalls_metadata)				\
-			 VMLINUX_SYMBOL(__stop_syscalls_metadata) = .;
+			 __start_syscalls_metadata = .;			\
+			 KEEP(*(__syscalls_metadata))			\
+			 __stop_syscalls_metadata = .;
 #else
 #define TRACE_SYSCALLS()
 #endif
 
+#ifdef CONFIG_BPF_EVENTS
+#define BPF_RAW_TP() STRUCT_ALIGN();					\
+			 __start__bpf_raw_tp = .;			\
+			 KEEP(*(__bpf_raw_tp_map))			\
+			 __stop__bpf_raw_tp = .;
+#else
+#define BPF_RAW_TP()
+#endif
+
 #ifdef CONFIG_SERIAL_EARLYCON
 #define EARLYCON_TABLE() . = ALIGN(8);				\
-			 VMLINUX_SYMBOL(__earlycon_table) = .;	\
-			 *(__earlycon_table)			\
-			 VMLINUX_SYMBOL(__earlycon_table_end) = .;
+			 __earlycon_table = .;			\
+			 KEEP(*(__earlycon_table))		\
+			 __earlycon_table_end = .;
 #else
 #define EARLYCON_TABLE()
+#endif
+
+#ifdef CONFIG_SECURITY
+#define LSM_TABLE()	. = ALIGN(8);					\
+			__start_lsm_info = .;				\
+			KEEP(*(.lsm_info.init))				\
+			__end_lsm_info = .;
+#define EARLY_LSM_TABLE()	. = ALIGN(8);				\
+			__start_early_lsm_info = .;			\
+			KEEP(*(.early_lsm_info.init))			\
+			__end_early_lsm_info = .;
+#else
+#define LSM_TABLE()
+#define EARLY_LSM_TABLE()
 #endif
 
 #define ___OF_TABLE(cfg, name)	_OF_TABLE_##cfg(name)
@@ -186,14 +288,13 @@
 #define _OF_TABLE_0(name)
 #define _OF_TABLE_1(name)						\
 	. = ALIGN(8);							\
-	VMLINUX_SYMBOL(__##name##_of_table) = .;			\
+	__##name##_of_table = .;					\
 	KEEP(*(__##name##_of_table))					\
 	KEEP(*(__##name##_of_table_end))
 
-#define CLKSRC_OF_TABLES()	OF_TABLE(CONFIG_CLKSRC_OF, clksrc)
+#define TIMER_OF_TABLES()	OF_TABLE(CONFIG_TIMER_OF, timer)
 #define IRQCHIP_OF_MATCH_TABLE() OF_TABLE(CONFIG_IRQCHIP, irqchip)
 #define CLK_OF_TABLES()		OF_TABLE(CONFIG_COMMON_CLK, clk)
-#define IOMMU_OF_TABLES()	OF_TABLE(CONFIG_OF_IOMMU, iommu)
 #define RESERVEDMEM_OF_TABLES()	OF_TABLE(CONFIG_OF_RESERVED_MEM, reservedmem)
 #define CPU_METHOD_OF_TABLES()	OF_TABLE(CONFIG_SMP, cpu_method)
 #define CPUIDLE_METHOD_OF_TABLES() OF_TABLE(CONFIG_CPU_IDLE, cpuidle_method)
@@ -201,43 +302,64 @@
 #ifdef CONFIG_ACPI
 #define ACPI_PROBE_TABLE(name)						\
 	. = ALIGN(8);							\
-	VMLINUX_SYMBOL(__##name##_acpi_probe_table) = .;		\
-	*(__##name##_acpi_probe_table)					\
-	VMLINUX_SYMBOL(__##name##_acpi_probe_table_end) = .;
+	__##name##_acpi_probe_table = .;				\
+	KEEP(*(__##name##_acpi_probe_table))				\
+	__##name##_acpi_probe_table_end = .;
 #else
 #define ACPI_PROBE_TABLE(name)
 #endif
 
+#ifdef CONFIG_THERMAL
+#define THERMAL_TABLE(name)						\
+	. = ALIGN(8);							\
+	__##name##_thermal_table = .;					\
+	KEEP(*(__##name##_thermal_table))				\
+	__##name##_thermal_table_end = .;
+#else
+#define THERMAL_TABLE(name)
+#endif
+
+#ifdef CONFIG_DTPM
+#define DTPM_TABLE()							\
+	. = ALIGN(8);							\
+	__dtpm_table = .;						\
+	KEEP(*(__dtpm_table))						\
+	__dtpm_table_end = .;
+#else
+#define DTPM_TABLE()
+#endif
+
 #define KERNEL_DTB()							\
 	STRUCT_ALIGN();							\
-	VMLINUX_SYMBOL(__dtb_start) = .;				\
-	*(.dtb.init.rodata)						\
-	VMLINUX_SYMBOL(__dtb_end) = .;
+	__dtb_start = .;						\
+	KEEP(*(.dtb.init.rodata))					\
+	__dtb_end = .;
 
 /*
  * .data section
  */
 #define DATA_DATA							\
+	*(.xiptext)							\
 	*(DATA_MAIN)							\
 	*(.ref.data)							\
 	*(.data..shared_aligned) /* percpu related */			\
-	MEM_KEEP(init.data)						\
-	MEM_KEEP(exit.data)						\
+	MEM_KEEP(init.data*)						\
+	MEM_KEEP(exit.data*)						\
 	*(.data.unlikely)						\
+	__start_once = .;						\
+	*(.data.once)							\
+	__end_once = .;							\
 	STRUCT_ALIGN();							\
 	*(__tracepoints)						\
 	/* implement dynamic printk debug */				\
-	. = ALIGN(8);                                                   \
-	VMLINUX_SYMBOL(__start___jump_table) = .;                       \
-	*(__jump_table)                                                 \
-	VMLINUX_SYMBOL(__stop___jump_table) = .;                        \
 	. = ALIGN(8);							\
-	VMLINUX_SYMBOL(__start___verbose) = .;                          \
-	*(__verbose)                                                    \
-	VMLINUX_SYMBOL(__stop___verbose) = .;				\
+	__start___dyndbg = .;						\
+	KEEP(*(__dyndbg))						\
+	__stop___dyndbg = .;						\
 	LIKELY_PROFILE()		       				\
 	BRANCH_PROFILE()						\
 	TRACE_PRINTKS()							\
+	BPF_RAW_TP()							\
 	TRACEPOINT_STR()
 
 /*
@@ -245,14 +367,15 @@
  */
 #define NOSAVE_DATA							\
 	. = ALIGN(PAGE_SIZE);						\
-	VMLINUX_SYMBOL(__nosave_begin) = .;				\
+	__nosave_begin = .;						\
 	*(.data..nosave)						\
 	. = ALIGN(PAGE_SIZE);						\
-	VMLINUX_SYMBOL(__nosave_end) = .;
+	__nosave_end = .;
 
 #define PAGE_ALIGNED_DATA(page_align)					\
 	. = ALIGN(page_align);						\
-	*(.data..page_aligned)
+	*(.data..page_aligned)						\
+	. = ALIGN(page_align);
 
 #define READ_MOSTLY_DATA(align)						\
 	. = ALIGN(align);						\
@@ -265,9 +388,28 @@
 
 #define INIT_TASK_DATA(align)						\
 	. = ALIGN(align);						\
-	VMLINUX_SYMBOL(__start_init_task) = .;				\
-	*(.data..init_task)						\
-	VMLINUX_SYMBOL(__end_init_task) = .;
+	__start_init_task = .;						\
+	init_thread_union = .;						\
+	init_stack = .;							\
+	KEEP(*(.data..init_task))					\
+	KEEP(*(.data..init_thread_info))				\
+	. = __start_init_task + THREAD_SIZE;				\
+	__end_init_task = .;
+
+#define JUMP_TABLE_DATA							\
+	. = ALIGN(8);							\
+	__start___jump_table = .;					\
+	KEEP(*(__jump_table))						\
+	__stop___jump_table = .;
+
+#define STATIC_CALL_DATA						\
+	. = ALIGN(8);							\
+	__start_static_call_sites = .;					\
+	KEEP(*(.static_call_sites))					\
+	__stop_static_call_sites = .;					\
+	__start_static_call_tramp_key = .;				\
+	KEEP(*(.static_call_tramp_key))					\
+	__stop_static_call_tramp_key = .;
 
 /*
  * Allow architectures to handle ro_after_init data on their
@@ -275,25 +417,28 @@
  */
 #ifndef RO_AFTER_INIT_DATA
 #define RO_AFTER_INIT_DATA						\
-	__start_data_ro_after_init = .;					\
+	. = ALIGN(8);							\
+	__start_ro_after_init = .;					\
 	*(.data..ro_after_init)						\
-	__end_data_ro_after_init = .;
+	JUMP_TABLE_DATA							\
+	STATIC_CALL_DATA						\
+	__end_ro_after_init = .;
 #endif
 
 /*
  * Read only Data
  */
-#define RO_DATA_SECTION(align)						\
+#define RO_DATA(align)							\
 	. = ALIGN((align));						\
 	.rodata           : AT(ADDR(.rodata) - LOAD_OFFSET) {		\
-		VMLINUX_SYMBOL(__start_rodata) = .;			\
+		__start_rodata = .;					\
 		*(.rodata) *(.rodata.*)					\
+		SCHED_DATA						\
 		RO_AFTER_INIT_DATA	/* Read only after init */	\
-		*(__vermagic)		/* Kernel version magic */	\
 		. = ALIGN(8);						\
-		VMLINUX_SYMBOL(__start___tracepoints_ptrs) = .;		\
-		*(__tracepoints_ptrs)	/* Tracepoints: pointer array */\
-		VMLINUX_SYMBOL(__stop___tracepoints_ptrs) = .;		\
+		__start___tracepoints_ptrs = .;				\
+		KEEP(*(__tracepoints_ptrs)) /* Tracepoints: pointer array */ \
+		__stop___tracepoints_ptrs = .;				\
 		*(__tracepoints_strings)/* Tracepoints: strings */	\
 	}								\
 									\
@@ -301,118 +446,74 @@
 		*(.rodata1)						\
 	}								\
 									\
-	BUG_TABLE							\
-									\
 	/* PCI quirks */						\
 	.pci_fixup        : AT(ADDR(.pci_fixup) - LOAD_OFFSET) {	\
-		VMLINUX_SYMBOL(__start_pci_fixups_early) = .;		\
+		__start_pci_fixups_early = .;				\
 		KEEP(*(.pci_fixup_early))				\
-		VMLINUX_SYMBOL(__end_pci_fixups_early) = .;		\
-		VMLINUX_SYMBOL(__start_pci_fixups_header) = .;		\
+		__end_pci_fixups_early = .;				\
+		__start_pci_fixups_header = .;				\
 		KEEP(*(.pci_fixup_header))				\
-		VMLINUX_SYMBOL(__end_pci_fixups_header) = .;		\
-		VMLINUX_SYMBOL(__start_pci_fixups_final) = .;		\
+		__end_pci_fixups_header = .;				\
+		__start_pci_fixups_final = .;				\
 		KEEP(*(.pci_fixup_final))				\
-		VMLINUX_SYMBOL(__end_pci_fixups_final) = .;		\
-		VMLINUX_SYMBOL(__start_pci_fixups_enable) = .;		\
+		__end_pci_fixups_final = .;				\
+		__start_pci_fixups_enable = .;				\
 		KEEP(*(.pci_fixup_enable))				\
-		VMLINUX_SYMBOL(__end_pci_fixups_enable) = .;		\
-		VMLINUX_SYMBOL(__start_pci_fixups_resume) = .;		\
+		__end_pci_fixups_enable = .;				\
+		__start_pci_fixups_resume = .;				\
 		KEEP(*(.pci_fixup_resume))				\
-		VMLINUX_SYMBOL(__end_pci_fixups_resume) = .;		\
-		VMLINUX_SYMBOL(__start_pci_fixups_resume_early) = .;	\
+		__end_pci_fixups_resume = .;				\
+		__start_pci_fixups_resume_early = .;			\
 		KEEP(*(.pci_fixup_resume_early))			\
-		VMLINUX_SYMBOL(__end_pci_fixups_resume_early) = .;	\
-		VMLINUX_SYMBOL(__start_pci_fixups_suspend) = .;		\
+		__end_pci_fixups_resume_early = .;			\
+		__start_pci_fixups_suspend = .;				\
 		KEEP(*(.pci_fixup_suspend))				\
-		VMLINUX_SYMBOL(__end_pci_fixups_suspend) = .;		\
-		VMLINUX_SYMBOL(__start_pci_fixups_suspend_late) = .;	\
+		__end_pci_fixups_suspend = .;				\
+		__start_pci_fixups_suspend_late = .;			\
 		KEEP(*(.pci_fixup_suspend_late))			\
-		VMLINUX_SYMBOL(__end_pci_fixups_suspend_late) = .;	\
+		__end_pci_fixups_suspend_late = .;			\
 	}								\
 									\
 	/* Built-in firmware blobs */					\
-	.builtin_fw        : AT(ADDR(.builtin_fw) - LOAD_OFFSET) {	\
-		VMLINUX_SYMBOL(__start_builtin_fw) = .;			\
-		*(.builtin_fw)						\
-		VMLINUX_SYMBOL(__end_builtin_fw) = .;			\
+	.builtin_fw : AT(ADDR(.builtin_fw) - LOAD_OFFSET) ALIGN(8) {	\
+		__start_builtin_fw = .;					\
+		KEEP(*(.builtin_fw))					\
+		__end_builtin_fw = .;					\
 	}								\
 									\
 	TRACEDATA							\
 									\
 	/* Kernel symbol table: Normal symbols */			\
 	__ksymtab         : AT(ADDR(__ksymtab) - LOAD_OFFSET) {		\
-		VMLINUX_SYMBOL(__start___ksymtab) = .;			\
+		__start___ksymtab = .;					\
 		KEEP(*(SORT(___ksymtab+*)))				\
-		VMLINUX_SYMBOL(__stop___ksymtab) = .;			\
+		__stop___ksymtab = .;					\
 	}								\
 									\
 	/* Kernel symbol table: GPL-only symbols */			\
 	__ksymtab_gpl     : AT(ADDR(__ksymtab_gpl) - LOAD_OFFSET) {	\
-		VMLINUX_SYMBOL(__start___ksymtab_gpl) = .;		\
+		__start___ksymtab_gpl = .;				\
 		KEEP(*(SORT(___ksymtab_gpl+*)))				\
-		VMLINUX_SYMBOL(__stop___ksymtab_gpl) = .;		\
-	}								\
-									\
-	/* Kernel symbol table: Normal unused symbols */		\
-	__ksymtab_unused  : AT(ADDR(__ksymtab_unused) - LOAD_OFFSET) {	\
-		VMLINUX_SYMBOL(__start___ksymtab_unused) = .;		\
-		KEEP(*(SORT(___ksymtab_unused+*)))			\
-		VMLINUX_SYMBOL(__stop___ksymtab_unused) = .;		\
-	}								\
-									\
-	/* Kernel symbol table: GPL-only unused symbols */		\
-	__ksymtab_unused_gpl : AT(ADDR(__ksymtab_unused_gpl) - LOAD_OFFSET) { \
-		VMLINUX_SYMBOL(__start___ksymtab_unused_gpl) = .;	\
-		KEEP(*(SORT(___ksymtab_unused_gpl+*)))			\
-		VMLINUX_SYMBOL(__stop___ksymtab_unused_gpl) = .;	\
-	}								\
-									\
-	/* Kernel symbol table: GPL-future-only symbols */		\
-	__ksymtab_gpl_future : AT(ADDR(__ksymtab_gpl_future) - LOAD_OFFSET) { \
-		VMLINUX_SYMBOL(__start___ksymtab_gpl_future) = .;	\
-		KEEP(*(SORT(___ksymtab_gpl_future+*)))			\
-		VMLINUX_SYMBOL(__stop___ksymtab_gpl_future) = .;	\
+		__stop___ksymtab_gpl = .;				\
 	}								\
 									\
 	/* Kernel symbol table: Normal symbols */			\
 	__kcrctab         : AT(ADDR(__kcrctab) - LOAD_OFFSET) {		\
-		VMLINUX_SYMBOL(__start___kcrctab) = .;			\
+		__start___kcrctab = .;					\
 		KEEP(*(SORT(___kcrctab+*)))				\
-		VMLINUX_SYMBOL(__stop___kcrctab) = .;			\
+		__stop___kcrctab = .;					\
 	}								\
 									\
 	/* Kernel symbol table: GPL-only symbols */			\
 	__kcrctab_gpl     : AT(ADDR(__kcrctab_gpl) - LOAD_OFFSET) {	\
-		VMLINUX_SYMBOL(__start___kcrctab_gpl) = .;		\
+		__start___kcrctab_gpl = .;				\
 		KEEP(*(SORT(___kcrctab_gpl+*)))				\
-		VMLINUX_SYMBOL(__stop___kcrctab_gpl) = .;		\
-	}								\
-									\
-	/* Kernel symbol table: Normal unused symbols */		\
-	__kcrctab_unused  : AT(ADDR(__kcrctab_unused) - LOAD_OFFSET) {	\
-		VMLINUX_SYMBOL(__start___kcrctab_unused) = .;		\
-		KEEP(*(SORT(___kcrctab_unused+*)))			\
-		VMLINUX_SYMBOL(__stop___kcrctab_unused) = .;		\
-	}								\
-									\
-	/* Kernel symbol table: GPL-only unused symbols */		\
-	__kcrctab_unused_gpl : AT(ADDR(__kcrctab_unused_gpl) - LOAD_OFFSET) { \
-		VMLINUX_SYMBOL(__start___kcrctab_unused_gpl) = .;	\
-		KEEP(*(SORT(___kcrctab_unused_gpl+*)))			\
-		VMLINUX_SYMBOL(__stop___kcrctab_unused_gpl) = .;	\
-	}								\
-									\
-	/* Kernel symbol table: GPL-future-only symbols */		\
-	__kcrctab_gpl_future : AT(ADDR(__kcrctab_gpl_future) - LOAD_OFFSET) { \
-		VMLINUX_SYMBOL(__start___kcrctab_gpl_future) = .;	\
-		KEEP(*(SORT(___kcrctab_gpl_future+*)))			\
-		VMLINUX_SYMBOL(__stop___kcrctab_gpl_future) = .;	\
+		__stop___kcrctab_gpl = .;				\
 	}								\
 									\
 	/* Kernel symbol table: strings */				\
         __ksymtab_strings : AT(ADDR(__ksymtab_strings) - LOAD_OFFSET) {	\
-		KEEP(*(__ksymtab_strings))				\
+		*(__ksymtab_strings)					\
 	}								\
 									\
 	/* __*init sections */						\
@@ -424,32 +525,49 @@
 									\
 	/* Built-in module parameters. */				\
 	__param : AT(ADDR(__param) - LOAD_OFFSET) {			\
-		VMLINUX_SYMBOL(__start___param) = .;			\
+		__start___param = .;					\
 		KEEP(*(__param))					\
-		VMLINUX_SYMBOL(__stop___param) = .;			\
+		__stop___param = .;					\
 	}								\
 									\
 	/* Built-in module versions. */					\
 	__modver : AT(ADDR(__modver) - LOAD_OFFSET) {			\
-		VMLINUX_SYMBOL(__start___modver) = .;			\
-		*(__modver)						\
-		VMLINUX_SYMBOL(__stop___modver) = .;			\
-		. = ALIGN((align));					\
-		VMLINUX_SYMBOL(__end_rodata) = .;			\
+		__start___modver = .;					\
+		KEEP(*(__modver))					\
+		__stop___modver = .;					\
 	}								\
-	. = ALIGN((align));
+									\
+	RO_EXCEPTION_TABLE						\
+	NOTES								\
+	BTF								\
+									\
+	. = ALIGN((align));						\
+	__end_rodata = .;
 
-/* RODATA & RO_DATA provided for backward compatibility.
- * All archs are supposed to use RO_DATA() */
-#define RODATA          RO_DATA_SECTION(4096)
-#define RO_DATA(align)  RO_DATA_SECTION(align)
 
-#define SECURITY_INIT							\
-	.security_initcall.init : AT(ADDR(.security_initcall.init) - LOAD_OFFSET) { \
-		VMLINUX_SYMBOL(__security_initcall_start) = .;		\
-		KEEP(*(.security_initcall.init))			\
-		VMLINUX_SYMBOL(__security_initcall_end) = .;		\
-	}
+/*
+ * .text..L.cfi.jumptable.* contain Control-Flow Integrity (CFI)
+ * jump table entries.
+ */
+#ifdef CONFIG_CFI_CLANG
+#define TEXT_CFI_JT							\
+		. = ALIGN(PMD_SIZE);					\
+		__cfi_jt_start = .;					\
+		*(.text..L.cfi.jumptable .text..L.cfi.jumptable.*)	\
+		. = ALIGN(PMD_SIZE);					\
+		__cfi_jt_end = .;
+#else
+#define TEXT_CFI_JT
+#endif
+
+/*
+ * Non-instrumentable text section
+ */
+#define NOINSTR_TEXT							\
+		ALIGN_FUNCTION();					\
+		__noinstr_text_start = .;				\
+		*(.noinstr.text)					\
+		__noinstr_text_end = .;
 
 /*
  * .text section. Map to function alignment to avoid address changes
@@ -461,59 +579,69 @@
  */
 #define TEXT_TEXT							\
 		ALIGN_FUNCTION();					\
-		*(.text.hot TEXT_MAIN .text.fixup .text.unlikely)	\
-		*(.text..ftrace)					\
-		*(TEXT_CFI_MAIN) 					\
+		*(.text.hot .text.hot.*)				\
+		*(TEXT_MAIN .text.fixup)				\
+		*(.text.unlikely .text.unlikely.*)			\
+		*(.text.unknown .text.unknown.*)			\
+		NOINSTR_TEXT						\
+		*(.text..refcount)					\
 		*(.ref.text)						\
-	MEM_KEEP(init.text)						\
-	MEM_KEEP(exit.text)						\
+		TEXT_CFI_JT						\
+	MEM_KEEP(init.text*)						\
+	MEM_KEEP(exit.text*)						\
 
 
 /* sched.text is aling to function alignment to secure we have same
  * address even at second ld pass when generating System.map */
 #define SCHED_TEXT							\
 		ALIGN_FUNCTION();					\
-		VMLINUX_SYMBOL(__sched_text_start) = .;			\
+		__sched_text_start = .;					\
 		*(.sched.text)						\
-		VMLINUX_SYMBOL(__sched_text_end) = .;
+		__sched_text_end = .;
 
 /* spinlock.text is aling to function alignment to secure we have same
  * address even at second ld pass when generating System.map */
 #define LOCK_TEXT							\
 		ALIGN_FUNCTION();					\
-		VMLINUX_SYMBOL(__lock_text_start) = .;			\
+		__lock_text_start = .;					\
 		*(.spinlock.text)					\
-		VMLINUX_SYMBOL(__lock_text_end) = .;
+		__lock_text_end = .;
 
 #define CPUIDLE_TEXT							\
 		ALIGN_FUNCTION();					\
-		VMLINUX_SYMBOL(__cpuidle_text_start) = .;		\
+		__cpuidle_text_start = .;				\
 		*(.cpuidle.text)					\
-		VMLINUX_SYMBOL(__cpuidle_text_end) = .;
+		__cpuidle_text_end = .;
 
 #define KPROBES_TEXT							\
 		ALIGN_FUNCTION();					\
-		VMLINUX_SYMBOL(__kprobes_text_start) = .;		\
+		__kprobes_text_start = .;				\
 		*(.kprobes.text)					\
-		VMLINUX_SYMBOL(__kprobes_text_end) = .;
+		__kprobes_text_end = .;
 
 #define ENTRY_TEXT							\
 		ALIGN_FUNCTION();					\
-		VMLINUX_SYMBOL(__entry_text_start) = .;			\
+		__entry_text_start = .;					\
 		*(.entry.text)						\
-		VMLINUX_SYMBOL(__entry_text_end) = .;
+		__entry_text_end = .;
 
 #define IRQENTRY_TEXT							\
 		ALIGN_FUNCTION();					\
-		VMLINUX_SYMBOL(__irqentry_text_start) = .;		\
+		__irqentry_text_start = .;				\
 		*(.irqentry.text)					\
-		VMLINUX_SYMBOL(__irqentry_text_end) = .;
+		__irqentry_text_end = .;
 
 #define SOFTIRQENTRY_TEXT						\
 		ALIGN_FUNCTION();					\
-		VMLINUX_SYMBOL(__softirqentry_text_start) = .;		\
+		__softirqentry_text_start = .;				\
 		*(.softirqentry.text)					\
-		VMLINUX_SYMBOL(__softirqentry_text_end) = .;
+		__softirqentry_text_end = .;
+
+#define STATIC_CALL_TEXT						\
+		ALIGN_FUNCTION();					\
+		__static_call_text_start = .;				\
+		*(.static_call.text)					\
+		__static_call_text_end = .;
 
 /* Section used for early init (in .S files) */
 #define HEAD_TEXT  KEEP(*(.head.text))
@@ -529,10 +657,28 @@
 #define EXCEPTION_TABLE(align)						\
 	. = ALIGN(align);						\
 	__ex_table : AT(ADDR(__ex_table) - LOAD_OFFSET) {		\
-		VMLINUX_SYMBOL(__start___ex_table) = .;			\
+		__start___ex_table = .;					\
 		KEEP(*(__ex_table))					\
-		VMLINUX_SYMBOL(__stop___ex_table) = .;			\
+		__stop___ex_table = .;					\
 	}
+
+/*
+ * .BTF
+ */
+#ifdef CONFIG_DEBUG_INFO_BTF
+#define BTF								\
+	.BTF : AT(ADDR(.BTF) - LOAD_OFFSET) {				\
+		__start_BTF = .;					\
+		KEEP(*(.BTF))						\
+		__stop_BTF = .;						\
+	}								\
+	. = ALIGN(4);							\
+	.BTF_ids : AT(ADDR(.BTF_ids) - LOAD_OFFSET) {			\
+		*(.BTF_ids)						\
+	}
+#else
+#define BTF
+#endif
 
 /*
  * Init task
@@ -545,11 +691,12 @@
 
 #ifdef CONFIG_CONSTRUCTORS
 #define KERNEL_CTORS()	. = ALIGN(8);			   \
-			VMLINUX_SYMBOL(__ctors_start) = .; \
-			*(.ctors)			   \
-			*(SORT(.init_array.*))		   \
-			*(.init_array)			   \
-			VMLINUX_SYMBOL(__ctors_end) = .;
+			__ctors_start = .;		   \
+			KEEP(*(SORT(.ctors.*)))		   \
+			KEEP(*(.ctors))			   \
+			KEEP(*(SORT(.init_array.*)))	   \
+			KEEP(*(.init_array))		   \
+			__ctors_end = .;
 #else
 #define KERNEL_CTORS()
 #endif
@@ -557,38 +704,43 @@
 /* init and exit section handling */
 #define INIT_DATA							\
 	KEEP(*(SORT(___kentry+*)))					\
-	*(.init.data)							\
-	MEM_DISCARD(init.data)						\
+	*(.init.data init.data.*)					\
+	MEM_DISCARD(init.data*)						\
 	KERNEL_CTORS()							\
 	MCOUNT_REC()							\
 	*(.init.rodata .init.rodata.*)					\
 	FTRACE_EVENTS()							\
 	TRACE_SYSCALLS()						\
 	KPROBE_BLACKLIST()						\
+	ERROR_INJECT_WHITELIST()					\
 	MEM_DISCARD(init.rodata)					\
 	CLK_OF_TABLES()							\
 	RESERVEDMEM_OF_TABLES()						\
-	CLKSRC_OF_TABLES()						\
-	IOMMU_OF_TABLES()						\
+	TIMER_OF_TABLES()						\
 	CPU_METHOD_OF_TABLES()						\
 	CPUIDLE_METHOD_OF_TABLES()					\
 	KERNEL_DTB()							\
 	IRQCHIP_OF_MATCH_TABLE()					\
 	ACPI_PROBE_TABLE(irqchip)					\
-	ACPI_PROBE_TABLE(clksrc)					\
-	EARLYCON_TABLE()
+	ACPI_PROBE_TABLE(timer)						\
+	THERMAL_TABLE(governor)						\
+	DTPM_TABLE()							\
+	EARLYCON_TABLE()						\
+	LSM_TABLE()							\
+	EARLY_LSM_TABLE()						\
+	KUNIT_TABLE()
 
 #define INIT_TEXT							\
 	*(.init.text .init.text.*)					\
 	*(.text.startup)						\
-	MEM_DISCARD(init.text)
+	MEM_DISCARD(init.text*)
 
 #define EXIT_DATA							\
-	*(.exit.data)							\
-	*(.fini_array)							\
-	*(.dtors)							\
-	MEM_DISCARD(exit.data)						\
-	MEM_DISCARD(exit.rodata)
+	*(.exit.data .exit.data.*)					\
+	*(.fini_array .fini_array.*)					\
+	*(.dtors .dtors.*)						\
+	MEM_DISCARD(exit.data*)						\
+	MEM_DISCARD(exit.rodata*)
 
 #define EXIT_TEXT							\
 	*(.exit.text)							\
@@ -596,7 +748,7 @@
 	MEM_DISCARD(exit.text)
 
 #define EXIT_CALL							\
-	KEEP(*(.exitcall.exit))
+	*(.exitcall.exit)
 
 /*
  * bss (Block Started by Symbol) - uninitialized data
@@ -605,7 +757,8 @@
 #define SBSS(sbss_align)						\
 	. = ALIGN(sbss_align);						\
 	.sbss : AT(ADDR(.sbss) - LOAD_OFFSET) {				\
-		*(.sbss)						\
+		*(.dynsbss)						\
+		*(SBSS_MAIN)						\
 		*(.scommon)						\
 	}
 
@@ -621,7 +774,9 @@
 	. = ALIGN(bss_align);						\
 	.bss : AT(ADDR(.bss) - LOAD_OFFSET) {				\
 		BSS_FIRST_SECTIONS					\
+		. = ALIGN(PAGE_SIZE);					\
 		*(.bss..page_aligned)					\
+		. = ALIGN(PAGE_SIZE);					\
 		*(.dynbss)						\
 		*(BSS_MAIN)						\
 		*(COMMON)						\
@@ -651,41 +806,88 @@
 		.debug_str      0 : { *(.debug_str) }			\
 		.debug_loc      0 : { *(.debug_loc) }			\
 		.debug_macinfo  0 : { *(.debug_macinfo) }		\
+		.debug_pubtypes 0 : { *(.debug_pubtypes) }		\
+		/* DWARF 3 */						\
+		.debug_ranges	0 : { *(.debug_ranges) }		\
 		/* SGI/MIPS DWARF 2 extensions */			\
 		.debug_weaknames 0 : { *(.debug_weaknames) }		\
 		.debug_funcnames 0 : { *(.debug_funcnames) }		\
 		.debug_typenames 0 : { *(.debug_typenames) }		\
 		.debug_varnames  0 : { *(.debug_varnames) }		\
+		/* GNU DWARF 2 extensions */				\
+		.debug_gnu_pubnames 0 : { *(.debug_gnu_pubnames) }	\
+		.debug_gnu_pubtypes 0 : { *(.debug_gnu_pubtypes) }	\
+		/* DWARF 4 */						\
+		.debug_types	0 : { *(.debug_types) }			\
+		/* DWARF 5 */						\
+		.debug_addr	0 : { *(.debug_addr) }			\
+		.debug_line_str	0 : { *(.debug_line_str) }		\
+		.debug_loclists	0 : { *(.debug_loclists) }		\
+		.debug_macro	0 : { *(.debug_macro) }			\
+		.debug_names	0 : { *(.debug_names) }			\
+		.debug_rnglists	0 : { *(.debug_rnglists) }		\
+		.debug_str_offsets	0 : { *(.debug_str_offsets) }
 
-		/* Stabs debugging sections.  */
+/* Stabs debugging sections. */
 #define STABS_DEBUG							\
 		.stab 0 : { *(.stab) }					\
 		.stabstr 0 : { *(.stabstr) }				\
 		.stab.excl 0 : { *(.stab.excl) }			\
 		.stab.exclstr 0 : { *(.stab.exclstr) }			\
 		.stab.index 0 : { *(.stab.index) }			\
-		.stab.indexstr 0 : { *(.stab.indexstr) }		\
-		.comment 0 : { *(.comment) }
+		.stab.indexstr 0 : { *(.stab.indexstr) }
+
+/* Required sections not related to debugging. */
+#define ELF_DETAILS							\
+		.comment 0 : { *(.comment) }				\
+		.symtab 0 : { *(.symtab) }				\
+		.strtab 0 : { *(.strtab) }				\
+		.shstrtab 0 : { *(.shstrtab) }
 
 #ifdef CONFIG_GENERIC_BUG
 #define BUG_TABLE							\
 	. = ALIGN(8);							\
 	__bug_table : AT(ADDR(__bug_table) - LOAD_OFFSET) {		\
-		VMLINUX_SYMBOL(__start___bug_table) = .;		\
+		__start___bug_table = .;				\
 		KEEP(*(__bug_table))					\
-		VMLINUX_SYMBOL(__stop___bug_table) = .;			\
+		__stop___bug_table = .;					\
 	}
 #else
 #define BUG_TABLE
+#endif
+
+#ifdef CONFIG_UNWINDER_ORC
+#define ORC_UNWIND_TABLE						\
+	. = ALIGN(4);							\
+	.orc_unwind_ip : AT(ADDR(.orc_unwind_ip) - LOAD_OFFSET) {	\
+		__start_orc_unwind_ip = .;				\
+		KEEP(*(.orc_unwind_ip))					\
+		__stop_orc_unwind_ip = .;				\
+	}								\
+	. = ALIGN(2);							\
+	.orc_unwind : AT(ADDR(.orc_unwind) - LOAD_OFFSET) {		\
+		__start_orc_unwind = .;					\
+		KEEP(*(.orc_unwind))					\
+		__stop_orc_unwind = .;					\
+	}								\
+	. = ALIGN(4);							\
+	.orc_lookup : AT(ADDR(.orc_lookup) - LOAD_OFFSET) {		\
+		orc_lookup = .;						\
+		. += (((SIZEOF(.text) + LOOKUP_BLOCK_SIZE - 1) /	\
+			LOOKUP_BLOCK_SIZE) + 1) * 4;			\
+		orc_lookup_end = .;					\
+	}
+#else
+#define ORC_UNWIND_TABLE
 #endif
 
 #ifdef CONFIG_PM_TRACE
 #define TRACEDATA							\
 	. = ALIGN(4);							\
 	.tracedata : AT(ADDR(.tracedata) - LOAD_OFFSET) {		\
-		VMLINUX_SYMBOL(__tracedata_start) = .;			\
-		*(.tracedata)						\
-		VMLINUX_SYMBOL(__tracedata_end) = .;			\
+		__tracedata_start = .;					\
+		KEEP(*(.tracedata))					\
+		__tracedata_end = .;					\
 	}
 #else
 #define TRACEDATA
@@ -693,24 +895,25 @@
 
 #define NOTES								\
 	.notes : AT(ADDR(.notes) - LOAD_OFFSET) {			\
-		VMLINUX_SYMBOL(__start_notes) = .;			\
-		*(.note.*)						\
-		VMLINUX_SYMBOL(__stop_notes) = .;			\
-	}
+		__start_notes = .;					\
+		KEEP(*(.note.*))					\
+		__stop_notes = .;					\
+	} NOTES_HEADERS							\
+	NOTES_HEADERS_RESTORE
 
 #define INIT_SETUP(initsetup_align)					\
 		. = ALIGN(initsetup_align);				\
-		VMLINUX_SYMBOL(__setup_start) = .;			\
+		__setup_start = .;					\
 		KEEP(*(.init.setup))					\
-		VMLINUX_SYMBOL(__setup_end) = .;
+		__setup_end = .;
 
 #define INIT_CALLS_LEVEL(level)						\
-		VMLINUX_SYMBOL(__initcall##level##_start) = .;		\
+		__initcall##level##_start = .;				\
 		KEEP(*(.initcall##level##.init))			\
 		KEEP(*(.initcall##level##s.init))			\
 
 #define INIT_CALLS							\
-		VMLINUX_SYMBOL(__initcall_start) = .;			\
+		__initcall_start = .;					\
 		KEEP(*(.initcallearly.init))				\
 		INIT_CALLS_LEVEL(0)					\
 		INIT_CALLS_LEVEL(1)					\
@@ -721,28 +924,49 @@
 		INIT_CALLS_LEVEL(rootfs)				\
 		INIT_CALLS_LEVEL(6)					\
 		INIT_CALLS_LEVEL(7)					\
-		VMLINUX_SYMBOL(__initcall_end) = .;
+		__initcall_end = .;
 
 #define CON_INITCALL							\
-		VMLINUX_SYMBOL(__con_initcall_start) = .;		\
+		__con_initcall_start = .;				\
 		KEEP(*(.con_initcall.init))				\
-		VMLINUX_SYMBOL(__con_initcall_end) = .;
+		__con_initcall_end = .;
 
-#define SECURITY_INITCALL						\
-		VMLINUX_SYMBOL(__security_initcall_start) = .;		\
-		KEEP(*(.security_initcall.init))			\
-		VMLINUX_SYMBOL(__security_initcall_end) = .;
+/* Alignment must be consistent with (kunit_suite *) in include/kunit/test.h */
+#define KUNIT_TABLE()							\
+		. = ALIGN(8);						\
+		__kunit_suites_start = .;				\
+		KEEP(*(.kunit_test_suites))				\
+		__kunit_suites_end = .;
 
 #ifdef CONFIG_BLK_DEV_INITRD
 #define INIT_RAM_FS							\
 	. = ALIGN(4);							\
-	VMLINUX_SYMBOL(__initramfs_start) = .;				\
+	__initramfs_start = .;						\
 	KEEP(*(.init.ramfs))						\
 	. = ALIGN(8);							\
 	KEEP(*(.init.ramfs.info))
 #else
 #define INIT_RAM_FS
 #endif
+
+/*
+ * Memory encryption operates on a page basis. Since we need to clear
+ * the memory encryption mask for this section, it needs to be aligned
+ * on a page boundary and be a page-size multiple in length.
+ *
+ * Note: We use a separate section so that only this section gets
+ * decrypted to avoid exposing more than we wish.
+ */
+#ifdef CONFIG_AMD_MEM_ENCRYPT
+#define PERCPU_DECRYPTED_SECTION					\
+	. = ALIGN(PAGE_SIZE);						\
+	*(.data..decrypted)						\
+	*(.data..percpu..decrypted)					\
+	. = ALIGN(PAGE_SIZE);
+#else
+#define PERCPU_DECRYPTED_SECTION
+#endif
+
 
 /*
  * Default discarded sections.
@@ -753,13 +977,48 @@
  * section definitions so that such archs put those in earlier section
  * definitions.
  */
-#define DISCARDS							\
-	/DISCARD/ : {							\
+#ifdef RUNTIME_DISCARD_EXIT
+#define EXIT_DISCARDS
+#else
+#define EXIT_DISCARDS							\
 	EXIT_TEXT							\
-	EXIT_DATA							\
-	EXIT_CALL							\
+	EXIT_DATA
+#endif
+
+/*
+ * Clang's -fprofile-arcs, -fsanitize=kernel-address, and
+ * -fsanitize=thread produce unwanted sections (.eh_frame
+ * and .init_array.*), but CONFIG_CONSTRUCTORS wants to
+ * keep any .init_array.* sections.
+ * https://bugs.llvm.org/show_bug.cgi?id=46478
+ */
+#if defined(CONFIG_GCOV_KERNEL) || defined(CONFIG_KASAN_GENERIC) || defined(CONFIG_KCSAN) || \
+	defined(CONFIG_CFI_CLANG)
+# ifdef CONFIG_CONSTRUCTORS
+#  define SANITIZER_DISCARDS						\
+	*(.eh_frame)
+# else
+#  define SANITIZER_DISCARDS						\
+	*(.init_array) *(.init_array.*)					\
+	*(.eh_frame)
+# endif
+#else
+# define SANITIZER_DISCARDS
+#endif
+
+#define COMMON_DISCARDS							\
+	SANITIZER_DISCARDS						\
 	*(.discard)							\
 	*(.discard.*)							\
+	*(.modinfo)							\
+	/* ld.bfd warns about .gnu.version* even when not emitted */	\
+	*(.gnu.version*)						\
+
+#define DISCARDS							\
+	/DISCARD/ : {							\
+	EXIT_DISCARDS							\
+	EXIT_CALL							\
+	COMMON_DISCARDS							\
 	}
 
 /**
@@ -773,15 +1032,8 @@
  * sharing between subsections for different purposes.
  */
 #define PERCPU_INPUT(cacheline)						\
-	VMLINUX_SYMBOL(__per_cpu_start) = .;				\
-	VMLINUX_SYMBOL(__per_cpu_user_mapped_start) = .;		\
+	__per_cpu_start = .;						\
 	*(.data..percpu..first)						\
-	. = ALIGN(cacheline);						\
-	*(.data..percpu..user_mapped)					\
-	*(.data..percpu..user_mapped..shared_aligned)			\
-	. = ALIGN(PAGE_SIZE);						\
-	*(.data..percpu..user_mapped..page_aligned)			\
-	VMLINUX_SYMBOL(__per_cpu_user_mapped_end) = .;			\
 	. = ALIGN(PAGE_SIZE);						\
 	*(.data..percpu..page_aligned)					\
 	. = ALIGN(cacheline);						\
@@ -789,7 +1041,8 @@
 	. = ALIGN(cacheline);						\
 	*(.data..percpu)						\
 	*(.data..percpu..shared_aligned)				\
-	VMLINUX_SYMBOL(__per_cpu_end) = .;
+	PERCPU_DECRYPTED_SECTION					\
+	__per_cpu_end = .;
 
 /**
  * PERCPU_VADDR - define output section for percpu area
@@ -816,12 +1069,11 @@
  * address, use PERCPU_SECTION.
  */
 #define PERCPU_VADDR(cacheline, vaddr, phdr)				\
-	VMLINUX_SYMBOL(__per_cpu_load) = .;				\
-	.data..percpu vaddr : AT(VMLINUX_SYMBOL(__per_cpu_load)		\
-				- LOAD_OFFSET) {			\
+	__per_cpu_load = .;						\
+	.data..percpu vaddr : AT(__per_cpu_load - LOAD_OFFSET) {	\
 		PERCPU_INPUT(cacheline)					\
 	} phdr								\
-	. = VMLINUX_SYMBOL(__per_cpu_load) + SIZEOF(.data..percpu);
+	. = __per_cpu_load + SIZEOF(.data..percpu);
 
 /**
  * PERCPU_SECTION - define output section for percpu area, simple version
@@ -838,7 +1090,7 @@
 #define PERCPU_SECTION(cacheline)					\
 	. = ALIGN(PAGE_SIZE);						\
 	.data..percpu	: AT(ADDR(.data..percpu) - LOAD_OFFSET) {	\
-		VMLINUX_SYMBOL(__per_cpu_load) = .;			\
+		__per_cpu_load = .;					\
 		PERCPU_INPUT(cacheline)					\
 	}
 
@@ -861,7 +1113,7 @@
  * matches the requirement of PAGE_ALIGNED_DATA.
  *
  * use 0 as page_align if page_aligned data is not used */
-#define RW_DATA_SECTION(cacheline, pagealigned, inittask)		\
+#define RW_DATA(cacheline, pagealigned, inittask)			\
 	. = ALIGN(PAGE_SIZE);						\
 	.data : AT(ADDR(.data) - LOAD_OFFSET) {				\
 		INIT_TASK_DATA(inittask)				\
@@ -871,14 +1123,15 @@
 		READ_MOSTLY_DATA(cacheline)				\
 		DATA_DATA						\
 		CONSTRUCTORS						\
-	}
+	}								\
+	BUG_TABLE							\
 
 #define INIT_TEXT_SECTION(inittext_align)				\
 	. = ALIGN(inittext_align);					\
 	.init.text : AT(ADDR(.init.text) - LOAD_OFFSET) {		\
-		VMLINUX_SYMBOL(_sinittext) = .;				\
+		_sinittext = .;						\
 		INIT_TEXT						\
-		VMLINUX_SYMBOL(_einittext) = .;				\
+		_einittext = .;						\
 	}
 
 #define INIT_DATA_SECTION(initsetup_align)				\
@@ -887,14 +1140,13 @@
 		INIT_SETUP(initsetup_align)				\
 		INIT_CALLS						\
 		CON_INITCALL						\
-		SECURITY_INITCALL					\
 		INIT_RAM_FS						\
 	}
 
 #define BSS_SECTION(sbss_align, bss_align, stop_align)			\
 	. = ALIGN(sbss_align);						\
-	VMLINUX_SYMBOL(__bss_start) = .;				\
+	__bss_start = .;						\
 	SBSS(sbss_align)						\
 	BSS(bss_align)							\
 	. = ALIGN(stop_align);						\
-	VMLINUX_SYMBOL(__bss_stop) = .;
+	__bss_stop = .;

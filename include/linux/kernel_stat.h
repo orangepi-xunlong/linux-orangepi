@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_KERNEL_STAT_H
 #define _LINUX_KERNEL_STAT_H
 
@@ -9,7 +10,6 @@
 #include <linux/sched.h>
 #include <linux/vtime.h>
 #include <asm/irq.h>
-#include <linux/cputime.h>
 
 /*
  * 'kernel_stat.h' contains the definitions needed for doing
@@ -67,7 +67,6 @@ static inline unsigned int kstat_softirqs_cpu(unsigned int irq, int cpu)
 /*
  * Number of interrupts per specific IRQ source, since bootup
  */
-extern unsigned int kstat_irqs(unsigned int irq);
 extern unsigned int kstat_irqs_usr(unsigned int irq);
 
 /*
@@ -78,15 +77,36 @@ static inline unsigned int kstat_cpu_irqs_sum(unsigned int cpu)
 	return kstat_cpu(cpu).irqs_sum;
 }
 
-extern void account_user_time(struct task_struct *, cputime_t, cputime_t);
-extern void account_system_time(struct task_struct *, int, cputime_t, cputime_t);
-extern void account_steal_time(cputime_t);
-extern void account_idle_time(cputime_t);
+#ifdef CONFIG_VIRT_CPU_ACCOUNTING_GEN
+extern u64 kcpustat_field(struct kernel_cpustat *kcpustat,
+			  enum cpu_usage_stat usage, int cpu);
+extern void kcpustat_cpu_fetch(struct kernel_cpustat *dst, int cpu);
+#else
+static inline u64 kcpustat_field(struct kernel_cpustat *kcpustat,
+				 enum cpu_usage_stat usage, int cpu)
+{
+	return kcpustat->cpustat[usage];
+}
+
+static inline void kcpustat_cpu_fetch(struct kernel_cpustat *dst, int cpu)
+{
+	*dst = kcpustat_cpu(cpu);
+}
+
+#endif
+
+extern void account_user_time(struct task_struct *, u64);
+extern void account_guest_time(struct task_struct *, u64);
+extern void account_system_time(struct task_struct *, int, u64);
+extern void account_system_index_time(struct task_struct *, u64,
+				      enum cpu_usage_stat);
+extern void account_steal_time(u64);
+extern void account_idle_time(u64);
 
 #ifdef CONFIG_VIRT_CPU_ACCOUNTING_NATIVE
 static inline void account_process_tick(struct task_struct *tsk, int user)
 {
-	vtime_account_user(tsk);
+	vtime_flush(tsk);
 }
 #else
 extern void account_process_tick(struct task_struct *, int user);

@@ -119,7 +119,7 @@ static enum i40iw_status_code vchnl_vf_send_get_pe_stats_req(struct i40iw_sc_dev
 	return ret_code;
 }
 
-/**
+/*
  * vchnl_vf_send_add_hmc_objs_req - Add HMC objects
  * @dev: IWARP device pointer
  * @vchnl_req: Virtual channel message request pointer
@@ -158,9 +158,9 @@ static enum i40iw_status_code vchnl_vf_send_add_hmc_objs_req(struct i40iw_sc_dev
  * vchnl_vf_send_del_hmc_objs_req - del HMC objects
  * @dev: IWARP device pointer
  * @vchnl_req: Virtual channel message request pointer
- * @ rsrc_type - resource type to delete
- * @ start_index - starting index for resource
- * @ rsrc_count - number of resource type to delete
+ * @rsrc_type: resource type to delete
+ * @start_index: starting index for resource
+ * @rsrc_count: number of resource type to delete
  */
 static enum i40iw_status_code vchnl_vf_send_del_hmc_objs_req(struct i40iw_sc_dev *dev,
 							     struct i40iw_virtchnl_req *vchnl_req,
@@ -222,6 +222,7 @@ static void vchnl_pf_send_get_ver_resp(struct i40iw_sc_dev *dev,
  * @dev: IWARP device pointer
  * @vf_id: Virtual function ID associated with the message
  * @vchnl_msg: Virtual channel message buffer pointer
+ * @hmc_fcn: HMC function index pointer
  */
 static void vchnl_pf_send_get_hmc_fcn_resp(struct i40iw_sc_dev *dev,
 					   u32 vf_id,
@@ -276,6 +277,7 @@ static void vchnl_pf_send_get_pe_stats_resp(struct i40iw_sc_dev *dev,
  * @dev: IWARP device pointer
  * @vf_id: Virtual function ID associated with the message
  * @vchnl_msg: Virtual channel message buffer pointer
+ * @op_ret_code: I40IW_ERR_* status code
  */
 static void vchnl_pf_send_error_resp(struct i40iw_sc_dev *dev, u32 vf_id,
 				     struct i40iw_virtchnl_op_buf *vchnl_msg,
@@ -297,8 +299,9 @@ static void vchnl_pf_send_error_resp(struct i40iw_sc_dev *dev, u32 vf_id,
 
 /**
  * pf_cqp_get_hmc_fcn_callback - Callback for Get HMC Fcn
- * @cqp_req_param: CQP Request param value
- * @not_used: unused CQP callback parameter
+ * @dev: IWARP device pointer
+ * @callback_param: unused CQP callback parameter
+ * @cqe_info: CQE information pointer
  */
 static void pf_cqp_get_hmc_fcn_callback(struct i40iw_sc_dev *dev, void *callback_param,
 					struct i40iw_ccq_cqe_info *cqe_info)
@@ -330,8 +333,8 @@ static void pf_cqp_get_hmc_fcn_callback(struct i40iw_sc_dev *dev, void *callback
 }
 
 /**
- * pf_add_hmc_obj - Callback for Add HMC Object
- * @vf_dev: pointer to the VF Device
+ * pf_add_hmc_obj_callback - Callback for Add HMC Object
+ * @work_vf_dev: pointer to the VF Device
  */
 static void pf_add_hmc_obj_callback(void *work_vf_dev)
 {
@@ -403,6 +406,19 @@ del_out:
 }
 
 /**
+ * i40iw_vf_init_pestat - Initialize stats for VF
+ * @dev: pointer to the VF Device
+ * @stats: Statistics structure pointer
+ * @index: Stats index
+ */
+static void i40iw_vf_init_pestat(struct i40iw_sc_dev *dev, struct i40iw_vsi_pestat *stats, u16 index)
+{
+	stats->hw = dev->hw;
+	i40iw_hw_stats_init(stats, (u8)index, false);
+	spin_lock_init(&stats->lock);
+}
+
+/**
  * i40iw_vchnl_recv_pf - Receive PF virtual channel messages
  * @dev: IWARP device pointer
  * @vf_id: Virtual function ID associated with the message
@@ -421,9 +437,8 @@ enum i40iw_status_code i40iw_vchnl_recv_pf(struct i40iw_sc_dev *dev,
 	u16 first_avail_iw_vf = I40IW_MAX_PE_ENABLED_VF_COUNT;
 	struct i40iw_virt_mem vf_dev_mem;
 	struct i40iw_virtchnl_work_info work_info;
-	struct i40iw_dev_pestat *devstat;
+	struct i40iw_vsi_pestat *stats;
 	enum i40iw_status_code ret_code;
-	unsigned long flags;
 
 	if (!dev || !msg || !len)
 		return I40IW_ERR_PARAM;
@@ -431,10 +446,7 @@ enum i40iw_status_code i40iw_vchnl_recv_pf(struct i40iw_sc_dev *dev,
 	if (!dev->vchnl_up)
 		return I40IW_ERR_NOT_READY;
 	if (vchnl_msg->iw_op_code == I40IW_VCHNL_OP_GET_VER) {
-		if (vchnl_msg->iw_op_ver != I40IW_VCHNL_OP_GET_VER_V0)
-			vchnl_pf_send_get_ver_resp(dev, vf_id, vchnl_msg);
-		else
-			vchnl_pf_send_get_ver_resp(dev, vf_id, vchnl_msg);
+		vchnl_pf_send_get_ver_resp(dev, vf_id, vchnl_msg);
 		return I40IW_SUCCESS;
 	}
 	for (iw_vf_idx = 0; iw_vf_idx < I40IW_MAX_PE_ENABLED_VF_COUNT; iw_vf_idx++) {
@@ -496,14 +508,7 @@ enum i40iw_status_code i40iw_vchnl_recv_pf(struct i40iw_sc_dev *dev,
 				i40iw_debug(dev, I40IW_DEBUG_VIRT,
 					    "VF%u error CQP HMC Function operation.\n",
 					    vf_id);
-			ret_code = i40iw_device_init_pestat(&vf_dev->dev_pestat);
-			if (ret_code)
-				i40iw_debug(dev, I40IW_DEBUG_VIRT,
-					    "VF%u - i40iw_device_init_pestat failed\n",
-					    vf_id);
-			vf_dev->dev_pestat.ops.iw_hw_stat_init(&vf_dev->dev_pestat,
-							      (u8)vf_dev->pmf_index,
-							      dev->hw, false);
+			i40iw_vf_init_pestat(dev, &vf_dev->pestat, vf_dev->pmf_index);
 			vf_dev->stats_initialized = true;
 		} else {
 			if (vf_dev) {
@@ -534,12 +539,10 @@ enum i40iw_status_code i40iw_vchnl_recv_pf(struct i40iw_sc_dev *dev,
 	case I40IW_VCHNL_OP_GET_STATS:
 		if (!vf_dev)
 			return I40IW_ERR_BAD_PTR;
-		devstat = &vf_dev->dev_pestat;
-		spin_lock_irqsave(&dev->dev_pestat.stats_lock, flags);
-		devstat->ops.iw_hw_stat_read_all(devstat, &devstat->hw_stats);
-		spin_unlock_irqrestore(&dev->dev_pestat.stats_lock, flags);
+		stats = &vf_dev->pestat;
+		i40iw_hw_stats_read_all(stats, &stats->hw_stats);
 		vf_dev->msg_count--;
-		vchnl_pf_send_get_pe_stats_resp(dev, vf_id, vchnl_msg, &devstat->hw_stats);
+		vchnl_pf_send_get_pe_stats_resp(dev, vf_id, vchnl_msg, &stats->hw_stats);
 		break;
 	default:
 		i40iw_debug(dev, I40IW_DEBUG_VIRT,

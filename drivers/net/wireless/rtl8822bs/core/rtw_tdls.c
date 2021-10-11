@@ -1006,7 +1006,7 @@ s32 rtw_tdls_do_ch_sw(_adapter *padapter, struct sta_info *ptdls_sta, u8 chnl_ty
 
 	/* set mac_id sleep before channel switch */
 	rtw_hal_macid_sleep(padapter, ptdls_sta->cmn.mac_id);
-
+	
 #ifdef CONFIG_TDLS_CH_SW_BY_DRV
 	set_channel_bwmode(padapter, channel, channel_offset, bwmode);
 	ret = _SUCCESS;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Allwinner sunxi resistive touchscreen controller driver
  *
@@ -5,16 +6,6 @@
  *
  * The hwmon parts are based on work by Corentin LABBE which is:
  * Copyright (C) 2013 Corentin LABBE <clabbe.montjoie@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 /*
@@ -31,7 +22,7 @@
  * in the kernel). So this driver offers straight forward, reliable single
  * touch functionality only.
  *
- * s.a. A20 User Manual "1.15 TP" (Documentation/arm/sunxi/README)
+ * s.a. A20 User Manual "1.15 TP" (Documentation/arm/sunxi.rst)
  * (looks like the description in the A20 User Manual v1.3 is better
  * than the one in the A10 User Manual v.1.5)
  */
@@ -41,6 +32,7 @@
 #include <linux/thermal.h>
 #include <linux/init.h>
 #include <linux/input.h>
+#include <linux/input/touchscreen.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/module.h>
@@ -115,7 +107,7 @@
 struct sun4i_ts_data {
 	struct device *dev;
 	struct input_dev *input;
-	struct thermal_zone_device *tz;
+	struct touchscreen_properties prop;
 	void __iomem *base;
 	unsigned int irq;
 	bool ignore_fifo_data;
@@ -133,8 +125,8 @@ static void sun4i_ts_irq_handle_input(struct sun4i_ts_data *ts, u32 reg_val)
 		y = readl(ts->base + TP_DATA);
 		/* The 1st location reported after an up event is unreliable */
 		if (!ts->ignore_fifo_data) {
-			input_report_abs(ts->input, ABS_X, x);
-			input_report_abs(ts->input, ABS_Y, y);
+			touchscreen_report_pos(ts->input, &ts->prop, x, y, false);
+
 			/*
 			 * The hardware has a separate down status bit, but
 			 * that gets set before we get the first location,
@@ -207,7 +199,7 @@ static int sun4i_get_tz_temp(void *data, int *temp)
 	return sun4i_get_temp(data, temp);
 }
 
-static struct thermal_zone_of_device_ops sun4i_ts_tz_ops = {
+static const struct thermal_zone_of_device_ops sun4i_ts_tz_ops = {
 	.get_temp = sun4i_get_tz_temp,
 };
 
@@ -247,6 +239,7 @@ static int sun4i_ts_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
 	struct device *hwmon;
+	struct thermal_zone_device *thermal;
 	int error;
 	u32 reg;
 	bool ts_attached;
@@ -305,13 +298,21 @@ static int sun4i_ts_probe(struct platform_device *pdev)
 		ts->input->id.version = 0x0100;
 		ts->input->evbit[0] =  BIT(EV_SYN) | BIT(EV_KEY) | BIT(EV_ABS);
 		__set_bit(BTN_TOUCH, ts->input->keybit);
-		input_set_abs_params(ts->input, ABS_X, 0, 4095, 0, 0);
-		input_set_abs_params(ts->input, ABS_Y, 0, 4095, 0, 0);
+
+		touchscreen_parse_properties(ts->input, false, &ts->prop);
+
+		if (!ts->prop.max_x || !ts->prop.max_y) {
+			dev_info(&pdev->dev, "Invalid configuration, using defaults\n");
+			ts->prop.max_x = 4095;
+			ts->prop.max_y = 4095;
+		}
+
+		input_set_abs_params(ts->input, ABS_X, 0, ts->prop.max_x, 0, 0);
+		input_set_abs_params(ts->input, ABS_Y, 0, ts->prop.max_y, 0, 0);
 		input_set_drvdata(ts->input, ts);
 	}
 
-	ts->base = devm_ioremap_resource(dev,
-			      platform_get_resource(pdev, IORESOURCE_MEM, 0));
+	ts->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(ts->base))
 		return PTR_ERR(ts->base);
 
@@ -366,10 +367,10 @@ static int sun4i_ts_probe(struct platform_device *pdev)
 	if (IS_ERR(hwmon))
 		return PTR_ERR(hwmon);
 
-	ts->tz = thermal_zone_of_sensor_register(ts->dev, 0, ts,
-						 &sun4i_ts_tz_ops);
-	if (IS_ERR(ts->tz))
-		ts->tz = NULL;
+	thermal = devm_thermal_zone_of_sensor_register(ts->dev, 0, ts,
+						       &sun4i_ts_tz_ops);
+	if (IS_ERR(thermal))
+		return PTR_ERR(thermal);
 
 	writel(TEMP_IRQ_EN(1), ts->base + TP_INT_FIFOC);
 
@@ -377,7 +378,6 @@ static int sun4i_ts_probe(struct platform_device *pdev)
 		error = input_register_device(ts->input);
 		if (error) {
 			writel(0, ts->base + TP_INT_FIFOC);
-			thermal_zone_of_sensor_unregister(ts->dev, ts->tz);
 			return error;
 		}
 	}
@@ -393,8 +393,6 @@ static int sun4i_ts_remove(struct platform_device *pdev)
 	/* Explicit unregister to avoid open/close changing the imask later */
 	if (ts->input)
 		input_unregister_device(ts->input);
-
-	thermal_zone_of_sensor_unregister(ts->dev, ts->tz);
 
 	/* Deactivate all IRQs */
 	writel(0, ts->base + TP_INT_FIFOC);

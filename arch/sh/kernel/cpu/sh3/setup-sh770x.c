@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * SH3 Setup code for SH7706, SH7707, SH7708, SH7709
  *
@@ -7,10 +8,6 @@
  * Based on setup-sh7709.c
  *
  *  Copyright (C) 2006  Paul Mundt
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 #include <linux/init.h>
 #include <linux/io.h>
@@ -21,6 +18,7 @@
 #include <linux/sh_timer.h>
 #include <linux/sh_intc.h>
 #include <cpu/serial.h>
+#include <asm/platform_early.h>
 
 enum {
 	UNUSED = 0,
@@ -109,12 +107,8 @@ static struct platform_device rtc_device = {
 };
 
 static struct plat_sci_port scif0_platform_data = {
-	.port_reg	= 0xa4000136,
-	.flags		= UPF_BOOT_AUTOCONF,
-	.scscr		= SCSCR_TE | SCSCR_RE,
 	.type		= PORT_SCI,
 	.ops		= &sh770x_sci_port_ops,
-	.regshift	= 1,
 };
 
 static struct resource scif0_resources[] = {
@@ -135,8 +129,6 @@ static struct platform_device scif0_device = {
     defined(CONFIG_CPU_SUBTYPE_SH7707) || \
     defined(CONFIG_CPU_SUBTYPE_SH7709)
 static struct plat_sci_port scif1_platform_data = {
-	.flags		= UPF_BOOT_AUTOCONF,
-	.scscr		= SCSCR_TE | SCSCR_RE,
 	.type		= PORT_SCIF,
 	.ops		= &sh770x_sci_port_ops,
 	.regtype	= SCIx_SH3_SCIF_REGTYPE,
@@ -160,9 +152,6 @@ static struct platform_device scif1_device = {
 #if defined(CONFIG_CPU_SUBTYPE_SH7707) || \
     defined(CONFIG_CPU_SUBTYPE_SH7709)
 static struct plat_sci_port scif2_platform_data = {
-	.port_reg	= SCIx_NOT_SUPPORTED,
-	.flags		= UPF_BOOT_AUTOCONF,
-	.scscr		= SCSCR_TE | SCSCR_RE,
 	.type		= PORT_IRDA,
 	.ops		= &sh770x_sci_port_ops,
 };
@@ -242,7 +231,7 @@ static struct platform_device *sh770x_early_devices[] __initdata = {
 
 void __init plat_early_device_setup(void)
 {
-	early_platform_add_devices(sh770x_early_devices,
+	sh_early_platform_add_devices(sh770x_early_devices,
 				   ARRAY_SIZE(sh770x_early_devices));
 }
 

@@ -38,7 +38,7 @@ enum auto_dbg_type_e{
 	AUTO_DBG_STOP 		= 0,
 	AUTO_DBG_CHECK_HANG 	= 1,
 	AUTO_DBG_CHECK_RA	= 2,
-	AUTO_DBG_CHECK_DIG	= 3
+	AUTO_DBG_CHECK_DIG	= 3	
 };
 
 /* 1 ============================================================
@@ -58,14 +58,14 @@ struct n_dbgport_803 {
 	/*BYTE 2*/
 	u8 txd:8;
 	/*BYTE 1*/
-	u8 cck_cca_pp: 1;
+	u8 cck_cca_pp: 1; 
 	u8 ofdm_cca_pp: 1;
 	u8 rx_rst: 1;
 	u8 rdrdy: 1;
 	u8 rxd_7_4: 4;
 	/*BYTE 0*/
 	u8 rxd_3_0: 4;
-	u8 ofdm_tx_en: 1;
+	u8 ofdm_tx_en: 1; 
 	u8 cck_tx_en: 1;
 	u8 zero_1bit_2:1;
 	u8 clk_80m: 1;

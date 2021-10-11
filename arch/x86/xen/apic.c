@@ -1,7 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/init.h>
+#include <linux/thread_info.h>
 
 #include <asm/x86_init.h>
 #include <asm/apic.h>
+#include <asm/io_apic.h>
 #include <asm/xen/hypercall.h>
 
 #include <xen/xen.h>
@@ -30,7 +33,7 @@ static unsigned int xen_io_apic_read(unsigned apic, unsigned reg)
 	return 0xfd;
 }
 
-static unsigned long xen_set_apic_id(unsigned int x)
+static u32 xen_set_apic_id(unsigned int x)
 {
 	WARN_ON(1);
 	return x;
@@ -56,11 +59,7 @@ static u32 xen_apic_read(u32 reg)
 		return 0;
 
 	if (reg == APIC_LVR)
-		return 0x10;
-#ifdef CONFIG_X86_32
-	if (reg == APIC_LDR)
-		return SET_APIC_LOGICAL_ID(1UL << smp_processor_id());
-#endif
+		return 0x14;
 	if (reg != APIC_ID)
 		return 0;
 
@@ -111,7 +110,7 @@ static int xen_madt_oem_check(char *oem_id, char *oem_table_id)
 	return xen_pv_domain();
 }
 
-static int xen_id_always_valid(int apicid)
+static int xen_id_always_valid(u32 apicid)
 {
 	return 1;
 }
@@ -125,14 +124,6 @@ static int xen_phys_pkg_id(int initial_apic_id, int index_msb)
 {
 	return initial_apic_id >> index_msb;
 }
-
-#ifdef CONFIG_X86_32
-static int xen_x86_32_early_logical_apicid(int cpu)
-{
-	/* Match with APIC_LDR read. Otherwise setup_local_APIC complains. */
-	return 1 << cpu;
-}
-#endif
 
 static void xen_noop(void)
 {
@@ -157,17 +148,12 @@ static struct apic xen_pv_apic = {
 	.apic_id_valid 			= xen_id_always_valid,
 	.apic_id_registered 		= xen_id_always_registered,
 
-	/* .irq_delivery_mode - used in native_compose_msi_msg only */
-	/* .irq_dest_mode     - used in native_compose_msi_msg only */
+	/* .delivery_mode and .dest_mode_logical not used by XENPV */
 
-	.target_cpus			= default_target_cpus,
 	.disable_esr			= 0,
-	/* .dest_logical      -  default_send_IPI_ use it but we use our own. */
+
 	.check_apicid_used		= default_check_apicid_used, /* Used on 32-bit */
-
-	.vector_allocation_domain	= flat_vector_allocation_domain,
 	.init_apic_ldr			= xen_noop, /* setup_local_APIC calls it */
-
 	.ioapic_phys_id_map		= default_ioapic_phys_id_map, /* Used on 32-bit */
 	.setup_apic_routing		= NULL,
 	.cpu_present_to_apicid		= xen_cpu_present_to_apicid,
@@ -178,7 +164,7 @@ static struct apic xen_pv_apic = {
 	.get_apic_id 			= xen_get_apic_id,
 	.set_apic_id 			= xen_set_apic_id, /* Can be NULL on 32-bit. */
 
-	.cpu_mask_to_apicid_and		= flat_cpu_mask_to_apicid_and,
+	.calc_dest_apicid		= apic_flat_calc_apicid,
 
 #ifdef CONFIG_SMP
 	.send_IPI_mask 			= xen_send_IPI_mask,
@@ -198,11 +184,6 @@ static struct apic xen_pv_apic = {
 	.icr_write 			= xen_apic_icr_write,
 	.wait_icr_idle 			= xen_noop,
 	.safe_wait_icr_idle 		= xen_safe_apic_wait_icr_idle,
-
-#ifdef CONFIG_X86_32
-	/* generic_processor_info and setup_local_APIC. */
-	.x86_32_early_logical_apicid	= xen_x86_32_early_logical_apicid,
-#endif
 };
 
 static void __init xen_apic_check(void)
@@ -216,7 +197,7 @@ static void __init xen_apic_check(void)
 }
 void __init xen_init_apic(void)
 {
-	x86_io_apic_ops.read = xen_io_apic_read;
+	x86_apic_ops.io_apic_read = xen_io_apic_read;
 	/* On PV guests the APIC CPUID bit is disabled so none of the
 	 * routines end up executing. */
 	if (!xen_initial_domain())

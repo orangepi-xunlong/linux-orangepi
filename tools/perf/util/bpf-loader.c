@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * bpf-loader.c
  *
@@ -9,32 +10,30 @@
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
 #include <linux/err.h>
+#include <linux/kernel.h>
 #include <linux/string.h>
-#include "perf.h"
+#include <linux/zalloc.h>
+#include <errno.h>
+#include <stdlib.h>
 #include "debug.h"
+#include "evlist.h"
 #include "bpf-loader.h"
 #include "bpf-prologue.h"
-#include "llvm-utils.h"
 #include "probe-event.h"
 #include "probe-finder.h" // for MAX_PROBES
 #include "parse-events.h"
+#include "strfilter.h"
+#include "util.h"
 #include "llvm-utils.h"
+#include "c++/clang-c.h"
 
-#define DEFINE_PRINT_FN(name, level) \
-static int libbpf_##name(const char *fmt, ...)	\
-{						\
-	va_list args;				\
-	int ret;				\
-						\
-	va_start(args, fmt);			\
-	ret = veprintf(level, verbose, pr_fmt(fmt), args);\
-	va_end(args);				\
-	return ret;				\
+#include <internal/xyarray.h>
+
+static int libbpf_perf_print(enum libbpf_print_level level __attribute__((unused)),
+			      const char *fmt, va_list args)
+{
+	return veprintf(1, verbose, pr_fmt(fmt), args);
 }
-
-DEFINE_PRINT_FN(warning, 1)
-DEFINE_PRINT_FN(info, 1)
-DEFINE_PRINT_FN(debug, 1)
 
 struct bpf_prog_priv {
 	bool is_tp;
@@ -55,14 +54,12 @@ bpf__prepare_load_buffer(void *obj_buf, size_t obj_buf_sz, const char *name)
 	struct bpf_object *obj;
 
 	if (!libbpf_initialized) {
-		libbpf_set_print(libbpf_warning,
-				 libbpf_info,
-				 libbpf_debug);
+		libbpf_set_print(libbpf_perf_print);
 		libbpf_initialized = true;
 	}
 
 	obj = bpf_object__open_buffer(obj_buf, obj_buf_sz, name);
-	if (IS_ERR(obj)) {
+	if (IS_ERR_OR_NULL(obj)) {
 		pr_debug("bpf: failed to load buffer\n");
 		return ERR_PTR(-EINVAL);
 	}
@@ -75,9 +72,7 @@ struct bpf_object *bpf__prepare_load(const char *filename, bool source)
 	struct bpf_object *obj;
 
 	if (!libbpf_initialized) {
-		libbpf_set_print(libbpf_warning,
-				 libbpf_info,
-				 libbpf_debug);
+		libbpf_set_print(libbpf_perf_print);
 		libbpf_initialized = true;
 	}
 
@@ -86,15 +81,26 @@ struct bpf_object *bpf__prepare_load(const char *filename, bool source)
 		void *obj_buf;
 		size_t obj_buf_sz;
 
-		err = llvm__compile_bpf(filename, &obj_buf, &obj_buf_sz);
-		if (err)
-			return ERR_PTR(-BPF_LOADER_ERRNO__COMPILE);
+		perf_clang__init();
+		err = perf_clang__compile_bpf(filename, &obj_buf, &obj_buf_sz);
+		perf_clang__cleanup();
+		if (err) {
+			pr_debug("bpf: builtin compilation failed: %d, try external compiler\n", err);
+			err = llvm__compile_bpf(filename, &obj_buf, &obj_buf_sz);
+			if (err)
+				return ERR_PTR(-BPF_LOADER_ERRNO__COMPILE);
+		} else
+			pr_debug("bpf: successful builtin compilation\n");
 		obj = bpf_object__open_buffer(obj_buf, obj_buf_sz, filename);
+
+		if (!IS_ERR_OR_NULL(obj) && llvm_param.dump_obj)
+			llvm__dump_obj(filename, obj_buf, obj_buf_sz);
+
 		free(obj_buf);
 	} else
 		obj = bpf_object__open(filename);
 
-	if (IS_ERR(obj)) {
+	if (IS_ERR_OR_NULL(obj)) {
 		pr_debug("bpf: failed to load %s\n", filename);
 		return obj;
 	}
@@ -241,7 +247,7 @@ parse_prog_config_kvpair(const char *config_str, struct perf_probe_event *pev)
 	int err = 0;
 
 	if (!text) {
-		pr_debug("No enough memory: dup config_str failed\n");
+		pr_debug("Not enough memory: dup config_str failed\n");
 		return ERR_PTR(-ENOMEM);
 	}
 
@@ -322,12 +328,6 @@ config_bpf_program(struct bpf_program *prog)
 	probe_conf.no_inlines = false;
 	probe_conf.force_add = false;
 
-	config_str = bpf_program__title(prog, false);
-	if (IS_ERR(config_str)) {
-		pr_debug("bpf: unable to get title for program\n");
-		return PTR_ERR(config_str);
-	}
-
 	priv = calloc(sizeof(*priv), 1);
 	if (!priv) {
 		pr_debug("bpf: failed to alloc priv\n");
@@ -335,6 +335,7 @@ config_bpf_program(struct bpf_program *prog)
 	}
 	pev = &priv->pev;
 
+	config_str = bpf_program__section_name(prog);
 	pr_debug("bpf: config program '%s'\n", config_str);
 	err = parse_prog_config(config_str, &main_str, &is_tp, pev);
 	if (err)
@@ -448,10 +449,7 @@ preproc_gen_prologue(struct bpf_program *prog, int n,
 	if (err) {
 		const char *title;
 
-		title = bpf_program__title(prog, false);
-		if (!title)
-			title = "[unknown]";
-
+		title = bpf_program__section_name(prog);
 		pr_debug("Failed to generate prologue for program %s\n",
 			 title);
 		return err;
@@ -531,7 +529,7 @@ static int map_prologue(struct perf_probe_event *pev, int *mapping,
 
 	ptevs = malloc(array_sz);
 	if (!ptevs) {
-		pr_debug("No enough memory: alloc ptevs failed\n");
+		pr_debug("Not enough memory: alloc ptevs failed\n");
 		return -ENOMEM;
 	}
 
@@ -604,13 +602,13 @@ static int hook_load_preprocessor(struct bpf_program *prog)
 	priv->need_prologue = true;
 	priv->insns_buf = malloc(sizeof(struct bpf_insn) * BPF_MAXINSNS);
 	if (!priv->insns_buf) {
-		pr_debug("No enough memory: alloc insns_buf failed\n");
+		pr_debug("Not enough memory: alloc insns_buf failed\n");
 		return -ENOMEM;
 	}
 
 	priv->type_mapping = malloc(sizeof(int) * pev->ntevs);
 	if (!priv->type_mapping) {
-		pr_debug("No enough memory: alloc type_mapping failed\n");
+		pr_debug("Not enough memory: alloc type_mapping failed\n");
 		return -ENOMEM;
 	}
 	memset(priv->type_mapping, -1,
@@ -659,13 +657,13 @@ int bpf__probe(struct bpf_object *obj)
 
 		err = convert_perf_probe_events(pev, 1);
 		if (err < 0) {
-			pr_debug("bpf_probe: failed to convert perf probe events");
+			pr_debug("bpf_probe: failed to convert perf probe events\n");
 			goto out;
 		}
 
 		err = apply_perf_probe_events(pev, 1);
 		if (err < 0) {
-			pr_debug("bpf_probe: failed to apply perf probe events");
+			pr_debug("bpf_probe: failed to apply perf probe events\n");
 			goto out;
 		}
 
@@ -673,7 +671,7 @@ int bpf__probe(struct bpf_object *obj)
 		 * After probing, let's consider prologue, which
 		 * adds program fetcher to BPF programs.
 		 *
-		 * hook_load_preprocessorr() hooks pre-processor
+		 * hook_load_preprocessor() hooks pre-processor
 		 * to bpf_program, let it generate prologue
 		 * dynamically during loading.
 		 */
@@ -732,7 +730,9 @@ int bpf__load(struct bpf_object *obj)
 
 	err = bpf_object__load(obj);
 	if (err) {
-		pr_debug("bpf: load objects failed\n");
+		char bf[128];
+		libbpf_strerror(err, bf, sizeof(bf));
+		pr_debug("bpf: load objects failed: err=%d: (%s)\n", err, bf);
 		return err;
 	}
 	return 0;
@@ -758,7 +758,7 @@ int bpf__foreach_event(struct bpf_object *obj,
 
 		if (priv->is_tp) {
 			fd = bpf_program__fd(prog);
-			err = (*func)(priv->sys_name, priv->evt_name, fd, arg);
+			err = (*func)(priv->sys_name, priv->evt_name, fd, obj, arg);
 			if (err) {
 				pr_debug("bpf: tracepoint call back failed, stop iterate\n");
 				return err;
@@ -783,7 +783,7 @@ int bpf__foreach_event(struct bpf_object *obj,
 				return fd;
 			}
 
-			err = (*func)(tev->group, tev->event, fd, arg);
+			err = (*func)(tev->group, tev->event, fd, obj, arg);
 			if (err) {
 				pr_debug("bpf: call back failed, stop iterate\n");
 				return err;
@@ -812,7 +812,7 @@ struct bpf_map_op {
 	} k;
 	union {
 		u64 value;
-		struct perf_evsel *evsel;
+		struct evsel *evsel;
 	} v;
 };
 
@@ -824,7 +824,7 @@ static void
 bpf_map_op__delete(struct bpf_map_op *op)
 {
 	if (!list_empty(&op->list))
-		list_del(&op->list);
+		list_del_init(&op->list);
 	if (op->key_type == BPF_MAP_KEY_RANGES)
 		parse_events__clear_array(&op->k.array);
 	free(op);
@@ -864,7 +864,7 @@ bpf_map_op_setkey(struct bpf_map_op *op, struct parse_events_term *term)
 
 		op->k.array.ranges = memdup(term->array.ranges, memsz);
 		if (!op->k.array.ranges) {
-			pr_debug("No enough memory to alloc indices for map\n");
+			pr_debug("Not enough memory to alloc indices for map\n");
 			return -ENOMEM;
 		}
 		op->key_type = BPF_MAP_KEY_RANGES;
@@ -929,7 +929,7 @@ bpf_map_priv__clone(struct bpf_map_priv *priv)
 
 	newpriv = zalloc(sizeof(*newpriv));
 	if (!newpriv) {
-		pr_debug("No enough memory to alloc map private\n");
+		pr_debug("Not enough memory to alloc map private\n");
 		return NULL;
 	}
 	INIT_LIST_HEAD(&newpriv->ops_list);
@@ -960,7 +960,7 @@ bpf_map__add_op(struct bpf_map *map, struct bpf_map_op *op)
 	if (!priv) {
 		priv = zalloc(sizeof(*priv));
 		if (!priv) {
-			pr_debug("No enough memory to alloc map private\n");
+			pr_debug("Not enough memory to alloc map private\n");
 			return -ENOMEM;
 		}
 		INIT_LIST_HEAD(&priv->ops_list);
@@ -1038,7 +1038,7 @@ __bpf_map__config_value(struct bpf_map *map,
 static int
 bpf_map__config_value(struct bpf_map *map,
 		      struct parse_events_term *term,
-		      struct perf_evlist *evlist __maybe_unused)
+		      struct evlist *evlist __maybe_unused)
 {
 	if (!term->err_val) {
 		pr_debug("Config value not set\n");
@@ -1056,14 +1056,13 @@ bpf_map__config_value(struct bpf_map *map,
 static int
 __bpf_map__config_event(struct bpf_map *map,
 			struct parse_events_term *term,
-			struct perf_evlist *evlist)
+			struct evlist *evlist)
 {
-	struct perf_evsel *evsel;
 	const struct bpf_map_def *def;
 	struct bpf_map_op *op;
 	const char *map_name = bpf_map__name(map);
+	struct evsel *evsel = evlist__find_evsel_by_str(evlist, term->val.str);
 
-	evsel = perf_evlist__find_evsel_by_str(evlist, term->val.str);
 	if (!evsel) {
 		pr_debug("Event (for '%s') '%s' doesn't exist\n",
 			 map_name, term->val.str);
@@ -1098,7 +1097,7 @@ __bpf_map__config_event(struct bpf_map *map,
 static int
 bpf_map__config_event(struct bpf_map *map,
 		      struct parse_events_term *term,
-		      struct perf_evlist *evlist)
+		      struct evlist *evlist)
 {
 	if (!term->err_val) {
 		pr_debug("Config value not set\n");
@@ -1116,7 +1115,7 @@ bpf_map__config_event(struct bpf_map *map,
 struct bpf_obj_config__map_func {
 	const char *config_opt;
 	int (*config_func)(struct bpf_map *, struct parse_events_term *,
-			   struct perf_evlist *);
+			   struct evlist *);
 };
 
 struct bpf_obj_config__map_func bpf_obj_config__map_funcs[] = {
@@ -1164,7 +1163,7 @@ config_map_indices_range_check(struct parse_events_term *term,
 static int
 bpf__obj_config_map(struct bpf_object *obj,
 		    struct parse_events_term *term,
-		    struct perf_evlist *evlist,
+		    struct evlist *evlist,
 		    int *key_scan_pos)
 {
 	/* key is "map:<mapname>.<config opt>" */
@@ -1217,13 +1216,13 @@ bpf__obj_config_map(struct bpf_object *obj,
 out:
 	free(map_name);
 	if (!err)
-		key_scan_pos += strlen(map_opt);
+		*key_scan_pos += strlen(map_opt);
 	return err;
 }
 
 int bpf__config_obj(struct bpf_object *obj,
 		    struct parse_events_term *term,
-		    struct perf_evlist *evlist,
+		    struct evlist *evlist,
 		    int *error_pos)
 {
 	int key_scan_pos = 0;
@@ -1232,7 +1231,7 @@ int bpf__config_obj(struct bpf_object *obj,
 	if (!obj || !term || !term->config)
 		return -EINVAL;
 
-	if (!prefixcmp(term->config, "map:")) {
+	if (strstarts(term->config, "map:")) {
 		key_scan_pos = sizeof("map:") - 1;
 		err = bpf__obj_config_map(obj, term, evlist, &key_scan_pos);
 		goto out;
@@ -1396,9 +1395,9 @@ apply_config_value_for_key(int map_fd, void *pkey,
 
 static int
 apply_config_evsel_for_key(const char *name, int map_fd, void *pkey,
-			   struct perf_evsel *evsel)
+			   struct evsel *evsel)
 {
-	struct xyarray *xy = evsel->fd;
+	struct xyarray *xy = evsel->core.fd;
 	struct perf_event_attr *attr;
 	unsigned int key, events;
 	bool check_pass = false;
@@ -1416,13 +1415,13 @@ apply_config_evsel_for_key(const char *name, int map_fd, void *pkey,
 		return -BPF_LOADER_ERRNO__OBJCONF_MAP_EVTDIM;
 	}
 
-	attr = &evsel->attr;
+	attr = &evsel->core.attr;
 	if (attr->inherit) {
 		pr_debug("ERROR: Can't put inherit event into map %s\n", name);
 		return -BPF_LOADER_ERRNO__OBJCONF_MAP_EVTINH;
 	}
 
-	if (perf_evsel__is_bpf_output(evsel))
+	if (evsel__is_bpf_output(evsel))
 		check_pass = true;
 	if (attr->type == PERF_TYPE_RAW)
 		check_pass = true;
@@ -1486,7 +1485,7 @@ apply_obj_config_object(struct bpf_object *obj)
 	struct bpf_map *map;
 	int err;
 
-	bpf_map__for_each(map, obj) {
+	bpf_object__for_each_map(map, obj) {
 		err = apply_obj_config_map(map);
 		if (err)
 			return err;
@@ -1510,28 +1509,28 @@ int bpf__apply_obj_config(void)
 
 #define bpf__for_each_map(pos, obj, objtmp)	\
 	bpf_object__for_each_safe(obj, objtmp)	\
-		bpf_map__for_each(pos, obj)
+		bpf_object__for_each_map(pos, obj)
 
-#define bpf__for_each_stdout_map(pos, obj, objtmp)	\
+#define bpf__for_each_map_named(pos, obj, objtmp, name)	\
 	bpf__for_each_map(pos, obj, objtmp) 		\
 		if (bpf_map__name(pos) && 		\
-			(strcmp("__bpf_stdout__", 	\
+			(strcmp(name, 			\
 				bpf_map__name(pos)) == 0))
 
-int bpf__setup_stdout(struct perf_evlist *evlist __maybe_unused)
+struct evsel *bpf__setup_output_event(struct evlist *evlist, const char *name)
 {
 	struct bpf_map_priv *tmpl_priv = NULL;
 	struct bpf_object *obj, *tmp;
-	struct perf_evsel *evsel = NULL;
+	struct evsel *evsel = NULL;
 	struct bpf_map *map;
 	int err;
 	bool need_init = false;
 
-	bpf__for_each_stdout_map(map, obj, tmp) {
+	bpf__for_each_map_named(map, obj, tmp, name) {
 		struct bpf_map_priv *priv = bpf_map__priv(map);
 
 		if (IS_ERR(priv))
-			return -BPF_LOADER_ERRNO__INTERNAL;
+			return ERR_PTR(-BPF_LOADER_ERRNO__INTERNAL);
 
 		/*
 		 * No need to check map type: type should have been
@@ -1544,49 +1543,61 @@ int bpf__setup_stdout(struct perf_evlist *evlist __maybe_unused)
 	}
 
 	if (!need_init)
-		return 0;
+		return NULL;
 
 	if (!tmpl_priv) {
-		err = parse_events(evlist, "bpf-output/no-inherit=1,name=__bpf_stdout__/",
-				   NULL);
+		char *event_definition = NULL;
+
+		if (asprintf(&event_definition, "bpf-output/no-inherit=1,name=%s/", name) < 0)
+			return ERR_PTR(-ENOMEM);
+
+		err = parse_events(evlist, event_definition, NULL);
+		free(event_definition);
+
 		if (err) {
-			pr_debug("ERROR: failed to create bpf-output event\n");
-			return -err;
+			pr_debug("ERROR: failed to create the \"%s\" bpf-output event\n", name);
+			return ERR_PTR(-err);
 		}
 
-		evsel = perf_evlist__last(evlist);
+		evsel = evlist__last(evlist);
 	}
 
-	bpf__for_each_stdout_map(map, obj, tmp) {
+	bpf__for_each_map_named(map, obj, tmp, name) {
 		struct bpf_map_priv *priv = bpf_map__priv(map);
 
 		if (IS_ERR(priv))
-			return -BPF_LOADER_ERRNO__INTERNAL;
+			return ERR_PTR(-BPF_LOADER_ERRNO__INTERNAL);
 		if (priv)
 			continue;
 
 		if (tmpl_priv) {
 			priv = bpf_map_priv__clone(tmpl_priv);
 			if (!priv)
-				return -ENOMEM;
+				return ERR_PTR(-ENOMEM);
 
 			err = bpf_map__set_priv(map, priv, bpf_map_priv__clear);
 			if (err) {
 				bpf_map_priv__clear(map, priv);
-				return err;
+				return ERR_PTR(err);
 			}
 		} else if (evsel) {
 			struct bpf_map_op *op;
 
 			op = bpf_map__add_newop(map, NULL);
 			if (IS_ERR(op))
-				return PTR_ERR(op);
+				return ERR_CAST(op);
 			op->op_type = BPF_MAP_OP_SET_EVSEL;
 			op->v.evsel = evsel;
 		}
 	}
 
-	return 0;
+	return evsel;
+}
+
+int bpf__setup_stdout(struct evlist *evlist)
+{
+	struct evsel *evsel = bpf__setup_output_event(evlist, "__bpf_stdout__");
+	return PTR_ERR_OR_ZERO(evsel);
 }
 
 #define ERRNO_OFFSET(e)		((e) - __BPF_LOADER_ERRNO__START)
@@ -1739,7 +1750,7 @@ int bpf__strerror_load(struct bpf_object *obj,
 
 int bpf__strerror_config_obj(struct bpf_object *obj __maybe_unused,
 			     struct parse_events_term *term __maybe_unused,
-			     struct perf_evlist *evlist __maybe_unused,
+			     struct evlist *evlist __maybe_unused,
 			     int *error_pos __maybe_unused, int err,
 			     char *buf, size_t size)
 {
@@ -1763,8 +1774,8 @@ int bpf__strerror_apply_obj_config(int err, char *buf, size_t size)
 	return 0;
 }
 
-int bpf__strerror_setup_stdout(struct perf_evlist *evlist __maybe_unused,
-			       int err, char *buf, size_t size)
+int bpf__strerror_setup_output_event(struct evlist *evlist __maybe_unused,
+				     int err, char *buf, size_t size)
 {
 	bpf__strerror_head(err, buf, size);
 	bpf__strerror_end(buf, size);

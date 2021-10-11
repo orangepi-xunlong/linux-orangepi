@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Definitions for the new Marvell Yukon 2 driver.
  */
@@ -250,12 +251,6 @@ enum {
 	PSM_CONFIG_REG4_RST_PHY_LINK_DETECT = 1<<0, /* Reset GPHY Link Detect */
 };
 
-
-#define PCI_STATUS_ERROR_BITS (PCI_STATUS_DETECTED_PARITY | \
-			       PCI_STATUS_SIG_SYSTEM_ERROR | \
-			       PCI_STATUS_REC_MASTER_ABORT | \
-			       PCI_STATUS_REC_TARGET_ABORT | \
-			       PCI_STATUS_PARITY)
 
 enum csr_regs {
 	B0_RAP		= 0x0000,
@@ -2247,6 +2242,7 @@ struct sky2_port {
 	u16		     rx_data_size;
 	u16		     rx_nfrags;
 
+	unsigned long	     last_rx;
 	struct {
 		unsigned long last;
 		u32	mac_rp;
@@ -2307,7 +2303,7 @@ struct sky2_hw {
 	struct work_struct   restart_work;
 	wait_queue_head_t    msi_wait;
 
-	char		     irq_name[0];
+	char		     irq_name[];
 };
 
 static inline int sky2_is_copper(const struct sky2_hw *hw)

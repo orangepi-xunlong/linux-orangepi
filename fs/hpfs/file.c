@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/hpfs/file.c
  *
@@ -8,6 +9,7 @@
 
 #include "hpfs_fn.h"
 #include <linux/mpage.h>
+#include <linux/fiemap.h>
 
 #define BLOCKS(size) (((size) + 511) >> 9)
 
@@ -24,7 +26,7 @@ int hpfs_file_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 	struct inode *inode = file->f_mapping->host;
 	int ret;
 
-	ret = filemap_write_and_wait_range(file->f_mapping, start, end);
+	ret = file_write_and_wait_range(file, start, end);
 	if (ret)
 		return ret;
 	return sync_blockdev(inode->i_sb->s_bdev);
@@ -124,10 +126,9 @@ static int hpfs_writepage(struct page *page, struct writeback_control *wbc)
 	return block_write_full_page(page, hpfs_get_block, wbc);
 }
 
-static int hpfs_readpages(struct file *file, struct address_space *mapping,
-			  struct list_head *pages, unsigned nr_pages)
+static void hpfs_readahead(struct readahead_control *rac)
 {
-	return mpage_readpages(mapping, pages, nr_pages, hpfs_get_block);
+	mpage_readahead(rac, hpfs_get_block);
 }
 
 static int hpfs_writepages(struct address_space *mapping,
@@ -197,7 +198,7 @@ static int hpfs_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo, 
 const struct address_space_operations hpfs_aops = {
 	.readpage = hpfs_readpage,
 	.writepage = hpfs_writepage,
-	.readpages = hpfs_readpages,
+	.readahead = hpfs_readahead,
 	.writepages = hpfs_writepages,
 	.write_begin = hpfs_write_begin,
 	.write_end = hpfs_write_end,
@@ -214,6 +215,7 @@ const struct file_operations hpfs_file_ops =
 	.fsync		= hpfs_file_fsync,
 	.splice_read	= generic_file_splice_read,
 	.unlocked_ioctl	= hpfs_ioctl,
+	.compat_ioctl	= compat_ptr_ioctl,
 };
 
 const struct inode_operations hpfs_file_iops =

@@ -1,43 +1,18 @@
+/* SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB */
 /*
  * Copyright (c) 2016 Mellanox Technologies Ltd. All rights reserved.
  * Copyright (c) 2015 System Fabric Works, Inc. All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * OpenIB.org BSD license below:
- *
- *	   Redistribution and use in source and binary forms, with or
- *	   without modification, are permitted provided that the following
- *	   conditions are met:
- *
- *	- Redistributions of source code must retain the above
- *	  copyright notice, this list of conditions and the following
- *	  disclaimer.
- *
- *	- Redistributions in binary form must reproduce the above
- *	  copyright notice, this list of conditions and the following
- *	  disclaimer in the documentation and/or other materials
- *	  provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
  */
 
 #ifndef RXE_VERBS_H
 #define RXE_VERBS_H
 
 #include <linux/interrupt.h>
+#include <linux/workqueue.h>
 #include <rdma/rdma_user_rxe.h>
 #include "rxe_pool.h"
 #include "rxe_task.h"
+#include "rxe_hw_counters.h"
 
 static inline int pkey_match(u16 key1, u16 key2)
 {
@@ -59,18 +34,18 @@ static inline int psn_compare(u32 psn_a, u32 psn_b)
 }
 
 struct rxe_ucontext {
+	struct ib_ucontext ibuc;
 	struct rxe_pool_entry	pelem;
-	struct ib_ucontext	ibuc;
 };
 
 struct rxe_pd {
+	struct ib_pd            ibpd;
 	struct rxe_pool_entry	pelem;
-	struct ib_pd		ibpd;
 };
 
 struct rxe_ah {
-	struct rxe_pool_entry	pelem;
 	struct ib_ah		ibah;
+	struct rxe_pool_entry	pelem;
 	struct rxe_pd		*pd;
 	struct rxe_av		av;
 };
@@ -83,11 +58,12 @@ struct rxe_cqe {
 };
 
 struct rxe_cq {
-	struct rxe_pool_entry	pelem;
 	struct ib_cq		ibcq;
+	struct rxe_pool_entry	pelem;
 	struct rxe_queue	*queue;
 	spinlock_t		cq_lock;
 	u8			notify;
+	bool			is_dying;
 	int			is_user;
 	struct tasklet_struct	comp_task;
 };
@@ -117,8 +93,8 @@ struct rxe_rq {
 };
 
 struct rxe_srq {
-	struct rxe_pool_entry	pelem;
 	struct ib_srq		ibsrq;
+	struct rxe_pool_entry	pelem;
 	struct rxe_pd		*pd;
 	struct rxe_rq		rq;
 	u32			srq_num;
@@ -135,8 +111,6 @@ enum rxe_qp_state {
 	QP_STATE_DRAINED,	/* req only */
 	QP_STATE_ERROR
 };
-
-extern char *rxe_qp_state_name[];
 
 struct rxe_req_info {
 	enum rxe_qp_state	state;
@@ -157,6 +131,7 @@ struct rxe_comp_info {
 	int			opcode;
 	int			timeout;
 	int			timeout_retry;
+	int			started_retry;
 	u32			retry_cnt;
 	u32			rnr_retry;
 	struct rxe_task		task;
@@ -170,6 +145,7 @@ enum rdatm_res_state {
 
 struct resp_res {
 	int			type;
+	int			replay;
 	u32			first_psn;
 	u32			last_psn;
 	u32			cur_psn;
@@ -180,7 +156,7 @@ struct resp_res {
 			struct sk_buff	*skb;
 		} atomic;
 		struct {
-			struct rxe_mem	*mr;
+			struct rxe_mr	*mr;
 			u64		va_org;
 			u32		rkey;
 			u32		length;
@@ -194,6 +170,7 @@ struct rxe_resp_info {
 	enum rxe_qp_state	state;
 	u32			msn;
 	u32			psn;
+	u32			ack_psn;
 	int			opcode;
 	int			drop_msg;
 	int			goto_error;
@@ -206,9 +183,10 @@ struct rxe_resp_info {
 
 	/* RDMA read / atomic only */
 	u64			va;
-	struct rxe_mem		*mr;
+	struct rxe_mr		*mr;
 	u32			resid;
 	u32			rkey;
+	u32			length;
 	u64			atomic_orig;
 
 	/* SRQ only */
@@ -246,6 +224,8 @@ struct rxe_qp {
 	struct rxe_rq		rq;
 
 	struct socket		*sk;
+	u32			dst_cookie;
+	u16			src_port;
 
 	struct rxe_av		pri_av;
 	struct rxe_av		alt_av;
@@ -278,21 +258,22 @@ struct rxe_qp {
 	struct timer_list rnr_nak_timer;
 
 	spinlock_t		state_lock; /* guard requester and completer */
+
+	struct execute_work	cleanup_work;
 };
 
-enum rxe_mem_state {
-	RXE_MEM_STATE_ZOMBIE,
-	RXE_MEM_STATE_INVALID,
-	RXE_MEM_STATE_FREE,
-	RXE_MEM_STATE_VALID,
+enum rxe_mr_state {
+	RXE_MR_STATE_ZOMBIE,
+	RXE_MR_STATE_INVALID,
+	RXE_MR_STATE_FREE,
+	RXE_MR_STATE_VALID,
 };
 
-enum rxe_mem_type {
-	RXE_MEM_TYPE_NONE,
-	RXE_MEM_TYPE_DMA,
-	RXE_MEM_TYPE_MR,
-	RXE_MEM_TYPE_FMR,
-	RXE_MEM_TYPE_MW,
+enum rxe_mr_type {
+	RXE_MR_TYPE_NONE,
+	RXE_MR_TYPE_DMA,
+	RXE_MR_TYPE_MR,
+	RXE_MR_TYPE_MW,
 };
 
 #define RXE_BUF_PER_MAP		(PAGE_SIZE / sizeof(struct rxe_phys_buf))
@@ -306,21 +287,14 @@ struct rxe_map {
 	struct rxe_phys_buf	buf[RXE_BUF_PER_MAP];
 };
 
-struct rxe_mem {
+struct rxe_mr {
 	struct rxe_pool_entry	pelem;
-	union {
-		struct ib_mr		ibmr;
-		struct ib_mw		ibmw;
-	};
+	struct ib_mr		ibmr;
 
-	struct rxe_pd		*pd;
 	struct ib_umem		*umem;
 
-	u32			lkey;
-	u32			rkey;
-
-	enum rxe_mem_state	state;
-	enum rxe_mem_type	type;
+	enum rxe_mr_state	state;
+	enum rxe_mr_type	type;
 	u64			va;
 	u64			iova;
 	size_t			length;
@@ -339,6 +313,17 @@ struct rxe_mem {
 	u32			num_map;
 
 	struct rxe_map		**map;
+};
+
+enum rxe_mw_state {
+	RXE_MW_STATE_INVALID = RXE_MR_STATE_INVALID,
+	RXE_MW_STATE_FREE = RXE_MR_STATE_FREE,
+	RXE_MW_STATE_VALID = RXE_MR_STATE_VALID,
+};
+
+struct rxe_mw {
+	struct ib_mw ibmw;
+	struct rxe_pool_entry pelem;
 };
 
 struct rxe_mc_grp {
@@ -362,7 +347,6 @@ struct rxe_mc_elem {
 
 struct rxe_port {
 	struct ib_port_attr	attr;
-	u16			*pkey_tbl;
 	__be64			port_guid;
 	__be64			subnet_prefix;
 	spinlock_t		port_lock; /* guard port */
@@ -372,35 +356,12 @@ struct rxe_port {
 	u32			qp_gsi_index;
 };
 
-/* callbacks from rdma_rxe to network interface layer */
-struct rxe_ifc_ops {
-	void (*release)(struct rxe_dev *rxe);
-	__be64 (*node_guid)(struct rxe_dev *rxe);
-	__be64 (*port_guid)(struct rxe_dev *rxe);
-	struct device *(*dma_device)(struct rxe_dev *rxe);
-	int (*mcast_add)(struct rxe_dev *rxe, union ib_gid *mgid);
-	int (*mcast_delete)(struct rxe_dev *rxe, union ib_gid *mgid);
-	int (*prepare)(struct rxe_dev *rxe, struct rxe_pkt_info *pkt,
-		       struct sk_buff *skb, u32 *crc);
-	int (*send)(struct rxe_dev *rxe, struct rxe_pkt_info *pkt,
-		    struct sk_buff *skb);
-	int (*loopback)(struct sk_buff *skb);
-	struct sk_buff *(*init_packet)(struct rxe_dev *rxe, struct rxe_av *av,
-				       int paylen, struct rxe_pkt_info *pkt);
-	char *(*parent_name)(struct rxe_dev *rxe, unsigned int port_num);
-	enum rdma_link_layer (*link_layer)(struct rxe_dev *rxe,
-					   unsigned int port_num);
-};
-
 struct rxe_dev {
 	struct ib_device	ib_dev;
 	struct ib_device_attr	attr;
 	int			max_ucontext;
 	int			max_inline_data;
-	struct kref		ref_cnt;
 	struct mutex	usdev_lock;
-
-	struct rxe_ifc_ops	*ifc_ops;
 
 	struct net_device	*ndev;
 
@@ -421,11 +382,18 @@ struct rxe_dev {
 	struct list_head	pending_mmaps;
 
 	spinlock_t		mmap_offset_lock; /* guard mmap_offset */
-	int			mmap_offset;
+	u64			mmap_offset;
+
+	atomic64_t		stats_counters[RXE_NUM_OF_COUNTERS];
 
 	struct rxe_port		port;
-	struct list_head	list;
+	struct crypto_shash	*tfm;
 };
+
+static inline void rxe_counter_inc(struct rxe_dev *rxe, enum rxe_counters index)
+{
+	atomic64_inc(&rxe->stats_counters[index]);
+}
 
 static inline struct rxe_dev *to_rdev(struct ib_device *dev)
 {
@@ -462,19 +430,33 @@ static inline struct rxe_cq *to_rcq(struct ib_cq *cq)
 	return cq ? container_of(cq, struct rxe_cq, ibcq) : NULL;
 }
 
-static inline struct rxe_mem *to_rmr(struct ib_mr *mr)
+static inline struct rxe_mr *to_rmr(struct ib_mr *mr)
 {
-	return mr ? container_of(mr, struct rxe_mem, ibmr) : NULL;
+	return mr ? container_of(mr, struct rxe_mr, ibmr) : NULL;
 }
 
-static inline struct rxe_mem *to_rmw(struct ib_mw *mw)
+static inline struct rxe_mw *to_rmw(struct ib_mw *mw)
 {
-	return mw ? container_of(mw, struct rxe_mem, ibmw) : NULL;
+	return mw ? container_of(mw, struct rxe_mw, ibmw) : NULL;
 }
 
-int rxe_register_device(struct rxe_dev *rxe);
-int rxe_unregister_device(struct rxe_dev *rxe);
+static inline struct rxe_pd *mr_pd(struct rxe_mr *mr)
+{
+	return to_rpd(mr->ibmr.pd);
+}
 
-void rxe_mc_cleanup(void *arg);
+static inline u32 mr_lkey(struct rxe_mr *mr)
+{
+	return mr->ibmr.lkey;
+}
+
+static inline u32 mr_rkey(struct rxe_mr *mr)
+{
+	return mr->ibmr.rkey;
+}
+
+int rxe_register_device(struct rxe_dev *rxe, const char *ibdev_name);
+
+void rxe_mc_cleanup(struct rxe_pool_entry *arg);
 
 #endif /* RXE_VERBS_H */

@@ -50,7 +50,12 @@
 #define MLX4_STATS_ERROR_COUNTERS_MASK		0x1ffc30ULL
 #define MLX4_STATS_PORT_COUNTERS_MASK		0x1fe00000ULL
 
-#define MLX4_FLAG_V_IGNORE_FCS_MASK		0x2
+#define MLX4_FLAG2_V_IGNORE_FCS_MASK		BIT(1)
+#define MLX4_FLAG2_V_USER_MTU_MASK		BIT(5)
+#define MLX4_FLAG2_V_USER_MAC_MASK		BIT(6)
+#define MLX4_FLAG_V_MTU_MASK			BIT(0)
+#define MLX4_FLAG_V_PPRX_MASK			BIT(1)
+#define MLX4_FLAG_V_PPTX_MASK			BIT(2)
 #define MLX4_IGNORE_FCS_MASK			0x1
 #define MLX4_TC_MAX_NUMBER			8
 
@@ -609,9 +614,9 @@ int __mlx4_register_vlan(struct mlx4_dev *dev, u8 port, u16 vlan,
 		int index_at_dup_port = -1;
 
 		for (i = MLX4_VLAN_REGULAR; i < MLX4_MAX_VLAN_NUM; i++) {
-			if ((vlan == (MLX4_VLAN_MASK & be32_to_cpu(table->entries[i]))))
+			if (vlan == (MLX4_VLAN_MASK & be32_to_cpu(table->entries[i])))
 				index_at_port = i;
-			if ((vlan == (MLX4_VLAN_MASK & be32_to_cpu(dup_table->entries[i]))))
+			if (vlan == (MLX4_VLAN_MASK & be32_to_cpu(dup_table->entries[i])))
 				index_at_dup_port = i;
 		}
 		/* check that same vlan is not in the tables at different indices */
@@ -1239,13 +1244,96 @@ void mlx4_reset_roce_gids(struct mlx4_dev *dev, int slave)
 	return;
 }
 
+static void
+mlx4_en_set_port_mtu(struct mlx4_dev *dev, int slave, int port,
+		     struct mlx4_set_port_general_context *gen_context)
+{
+	struct mlx4_priv *priv = mlx4_priv(dev);
+	struct mlx4_mfunc_master_ctx *master = &priv->mfunc.master;
+	struct mlx4_slave_state *slave_st = &master->slave_state[slave];
+	u16 mtu, prev_mtu;
+
+	/* Mtu is configured as the max USER_MTU among all
+	 * the functions on the port.
+	 */
+	mtu = be16_to_cpu(gen_context->mtu);
+	mtu = min_t(int, mtu, dev->caps.eth_mtu_cap[port] +
+		    ETH_HLEN + VLAN_HLEN + ETH_FCS_LEN);
+	prev_mtu = slave_st->mtu[port];
+	slave_st->mtu[port] = mtu;
+	if (mtu > master->max_mtu[port])
+		master->max_mtu[port] = mtu;
+	if (mtu < prev_mtu && prev_mtu == master->max_mtu[port]) {
+		int i;
+
+		slave_st->mtu[port] = mtu;
+		master->max_mtu[port] = mtu;
+		for (i = 0; i < dev->num_slaves; i++)
+			master->max_mtu[port] =
+				max_t(u16, master->max_mtu[port],
+				      master->slave_state[i].mtu[port]);
+	}
+	gen_context->mtu = cpu_to_be16(master->max_mtu[port]);
+}
+
+static void
+mlx4_en_set_port_user_mtu(struct mlx4_dev *dev, int slave, int port,
+			  struct mlx4_set_port_general_context *gen_context)
+{
+	struct mlx4_priv *priv = mlx4_priv(dev);
+	struct mlx4_mfunc_master_ctx *master = &priv->mfunc.master;
+	struct mlx4_slave_state *slave_st = &master->slave_state[slave];
+	u16 user_mtu, prev_user_mtu;
+
+	/* User Mtu is configured as the max USER_MTU among all
+	 * the functions on the port.
+	 */
+	user_mtu = be16_to_cpu(gen_context->user_mtu);
+	user_mtu = min_t(int, user_mtu, dev->caps.eth_mtu_cap[port]);
+	prev_user_mtu = slave_st->user_mtu[port];
+	slave_st->user_mtu[port] = user_mtu;
+	if (user_mtu > master->max_user_mtu[port])
+		master->max_user_mtu[port] = user_mtu;
+	if (user_mtu < prev_user_mtu &&
+	    prev_user_mtu == master->max_user_mtu[port]) {
+		int i;
+
+		slave_st->user_mtu[port] = user_mtu;
+		master->max_user_mtu[port] = user_mtu;
+		for (i = 0; i < dev->num_slaves; i++)
+			master->max_user_mtu[port] =
+				max_t(u16, master->max_user_mtu[port],
+				      master->slave_state[i].user_mtu[port]);
+	}
+	gen_context->user_mtu = cpu_to_be16(master->max_user_mtu[port]);
+}
+
+static void
+mlx4_en_set_port_global_pause(struct mlx4_dev *dev, int slave,
+			      struct mlx4_set_port_general_context *gen_context)
+{
+	struct mlx4_priv *priv = mlx4_priv(dev);
+	struct mlx4_mfunc_master_ctx *master = &priv->mfunc.master;
+
+	/* Slave cannot change Global Pause configuration */
+	if (slave != mlx4_master_func_num(dev) &&
+	    (gen_context->pptx != master->pptx ||
+	     gen_context->pprx != master->pprx)) {
+		gen_context->pptx = master->pptx;
+		gen_context->pprx = master->pprx;
+		mlx4_warn(dev, "denying Global Pause change for slave:%d\n",
+			  slave);
+	} else {
+		master->pptx = gen_context->pptx;
+		master->pprx = gen_context->pprx;
+	}
+}
+
 static int mlx4_common_set_port(struct mlx4_dev *dev, int slave, u32 in_mod,
 				u8 op_mod, struct mlx4_cmd_mailbox *inbox)
 {
 	struct mlx4_priv *priv = mlx4_priv(dev);
 	struct mlx4_port_info *port_info;
-	struct mlx4_mfunc_master_ctx *master = &priv->mfunc.master;
-	struct mlx4_slave_state *slave_st = &master->slave_state[slave];
 	struct mlx4_set_port_rqp_calc_context *qpn_context;
 	struct mlx4_set_port_general_context *gen_context;
 	struct mlx4_roce_gid_entry *gid_entry_tbl, *gid_entry_mbox, *gid_entry_mb1;
@@ -1256,7 +1344,6 @@ static int mlx4_common_set_port(struct mlx4_dev *dev, int slave, u32 in_mod,
 	int base;
 	u32 in_modifier;
 	u32 promisc;
-	u16 mtu, prev_mtu;
 	int err;
 	int i, j;
 	int offset;
@@ -1269,7 +1356,9 @@ static int mlx4_common_set_port(struct mlx4_dev *dev, int slave, u32 in_mod,
 	is_eth = op_mod;
 	port_info = &priv->port[port];
 
-	/* Slaves cannot perform SET_PORT operations except changing MTU */
+	/* Slaves cannot perform SET_PORT operations,
+	 * except for changing MTU and USER_MTU.
+	 */
 	if (is_eth) {
 		if (slave != dev->caps.function &&
 		    in_modifier != MLX4_SET_PORT_GENERAL &&
@@ -1297,40 +1386,20 @@ static int mlx4_common_set_port(struct mlx4_dev *dev, int slave, u32 in_mod,
 			break;
 		case MLX4_SET_PORT_GENERAL:
 			gen_context = inbox->buf;
-			/* Mtu is configured as the max MTU among all the
-			 * the functions on the port. */
-			mtu = be16_to_cpu(gen_context->mtu);
-			mtu = min_t(int, mtu, dev->caps.eth_mtu_cap[port] +
-				    ETH_HLEN + VLAN_HLEN + ETH_FCS_LEN);
-			prev_mtu = slave_st->mtu[port];
-			slave_st->mtu[port] = mtu;
-			if (mtu > master->max_mtu[port])
-				master->max_mtu[port] = mtu;
-			if (mtu < prev_mtu && prev_mtu ==
-						master->max_mtu[port]) {
-				slave_st->mtu[port] = mtu;
-				master->max_mtu[port] = mtu;
-				for (i = 0; i < dev->num_slaves; i++) {
-					master->max_mtu[port] =
-					max(master->max_mtu[port],
-					    master->slave_state[i].mtu[port]);
-				}
-			}
 
-			gen_context->mtu = cpu_to_be16(master->max_mtu[port]);
-			/* Slave cannot change Global Pause configuration */
-			if (slave != mlx4_master_func_num(dev) &&
-			    ((gen_context->pptx != master->pptx) ||
-			     (gen_context->pprx != master->pprx))) {
-				gen_context->pptx = master->pptx;
-				gen_context->pprx = master->pprx;
-				mlx4_warn(dev,
-					  "denying Global Pause change for slave:%d\n",
-					  slave);
-			} else {
-				master->pptx = gen_context->pptx;
-				master->pprx = gen_context->pprx;
-			}
+			if (gen_context->flags & MLX4_FLAG_V_MTU_MASK)
+				mlx4_en_set_port_mtu(dev, slave, port,
+						     gen_context);
+
+			if (gen_context->flags2 & MLX4_FLAG2_V_USER_MTU_MASK)
+				mlx4_en_set_port_user_mtu(dev, slave, port,
+							  gen_context);
+
+			if (gen_context->flags &
+			    (MLX4_FLAG_V_PPRX_MASK | MLX4_FLAG_V_PPTX_MASK))
+				mlx4_en_set_port_global_pause(dev, slave,
+							      gen_context);
+
 			break;
 		case MLX4_SET_PORT_GID_TABLE:
 			/* change to MULTIPLE entries: number of guest's gids
@@ -1608,6 +1677,54 @@ int mlx4_SET_PORT_qpn_calc(struct mlx4_dev *dev, u8 port, u32 base_qpn,
 }
 EXPORT_SYMBOL(mlx4_SET_PORT_qpn_calc);
 
+int mlx4_SET_PORT_user_mtu(struct mlx4_dev *dev, u8 port, u16 user_mtu)
+{
+	struct mlx4_cmd_mailbox *mailbox;
+	struct mlx4_set_port_general_context *context;
+	u32 in_mod;
+	int err;
+
+	mailbox = mlx4_alloc_cmd_mailbox(dev);
+	if (IS_ERR(mailbox))
+		return PTR_ERR(mailbox);
+	context = mailbox->buf;
+	context->flags2 |= MLX4_FLAG2_V_USER_MTU_MASK;
+	context->user_mtu = cpu_to_be16(user_mtu);
+
+	in_mod = MLX4_SET_PORT_GENERAL << 8 | port;
+	err = mlx4_cmd(dev, mailbox->dma, in_mod, MLX4_SET_PORT_ETH_OPCODE,
+		       MLX4_CMD_SET_PORT, MLX4_CMD_TIME_CLASS_B,
+		       MLX4_CMD_WRAPPED);
+
+	mlx4_free_cmd_mailbox(dev, mailbox);
+	return err;
+}
+EXPORT_SYMBOL(mlx4_SET_PORT_user_mtu);
+
+int mlx4_SET_PORT_user_mac(struct mlx4_dev *dev, u8 port, u8 *user_mac)
+{
+	struct mlx4_cmd_mailbox *mailbox;
+	struct mlx4_set_port_general_context *context;
+	u32 in_mod;
+	int err;
+
+	mailbox = mlx4_alloc_cmd_mailbox(dev);
+	if (IS_ERR(mailbox))
+		return PTR_ERR(mailbox);
+	context = mailbox->buf;
+	context->flags2 |= MLX4_FLAG2_V_USER_MAC_MASK;
+	memcpy(context->user_mac, user_mac, sizeof(context->user_mac));
+
+	in_mod = MLX4_SET_PORT_GENERAL << 8 | port;
+	err = mlx4_cmd(dev, mailbox->dma, in_mod, MLX4_SET_PORT_ETH_OPCODE,
+		       MLX4_CMD_SET_PORT, MLX4_CMD_TIME_CLASS_B,
+		       MLX4_CMD_NATIVE);
+
+	mlx4_free_cmd_mailbox(dev, mailbox);
+	return err;
+}
+EXPORT_SYMBOL(mlx4_SET_PORT_user_mac);
+
 int mlx4_SET_PORT_fcs_check(struct mlx4_dev *dev, u8 port, u8 ignore_fcs_value)
 {
 	struct mlx4_cmd_mailbox *mailbox;
@@ -1619,7 +1736,7 @@ int mlx4_SET_PORT_fcs_check(struct mlx4_dev *dev, u8 port, u8 ignore_fcs_value)
 	if (IS_ERR(mailbox))
 		return PTR_ERR(mailbox);
 	context = mailbox->buf;
-	context->v_ignore_fcs |= MLX4_FLAG_V_IGNORE_FCS_MASK;
+	context->flags2 |= MLX4_FLAG2_V_IGNORE_FCS_MASK;
 	if (ignore_fcs_value)
 		context->ignore_fcs |= MLX4_IGNORE_FCS_MASK;
 	else
@@ -1856,6 +1973,7 @@ EXPORT_SYMBOL(mlx4_get_roce_gid_from_slave);
 #define I2C_ADDR_LOW  0x50
 #define I2C_ADDR_HIGH 0x51
 #define I2C_PAGE_SIZE 256
+#define I2C_HIGH_PAGE_SIZE 128
 
 /* Module Info Data */
 struct mlx4_cable_info {
@@ -1909,6 +2027,88 @@ static inline const char *cable_info_mad_err_str(u16 mad_status)
 	return "Unknown Error";
 }
 
+static int mlx4_get_module_id(struct mlx4_dev *dev, u8 port, u8 *module_id)
+{
+	struct mlx4_cmd_mailbox *inbox, *outbox;
+	struct mlx4_mad_ifc *inmad, *outmad;
+	struct mlx4_cable_info *cable_info;
+	int ret;
+
+	inbox = mlx4_alloc_cmd_mailbox(dev);
+	if (IS_ERR(inbox))
+		return PTR_ERR(inbox);
+
+	outbox = mlx4_alloc_cmd_mailbox(dev);
+	if (IS_ERR(outbox)) {
+		mlx4_free_cmd_mailbox(dev, inbox);
+		return PTR_ERR(outbox);
+	}
+
+	inmad = (struct mlx4_mad_ifc *)(inbox->buf);
+	outmad = (struct mlx4_mad_ifc *)(outbox->buf);
+
+	inmad->method = 0x1; /* Get */
+	inmad->class_version = 0x1;
+	inmad->mgmt_class = 0x1;
+	inmad->base_version = 0x1;
+	inmad->attr_id = cpu_to_be16(0xFF60); /* Module Info */
+
+	cable_info = (struct mlx4_cable_info *)inmad->data;
+	cable_info->dev_mem_address = 0;
+	cable_info->page_num = 0;
+	cable_info->i2c_addr = I2C_ADDR_LOW;
+	cable_info->size = cpu_to_be16(1);
+
+	ret = mlx4_cmd_box(dev, inbox->dma, outbox->dma, port, 3,
+			   MLX4_CMD_MAD_IFC, MLX4_CMD_TIME_CLASS_C,
+			   MLX4_CMD_NATIVE);
+	if (ret)
+		goto out;
+
+	if (be16_to_cpu(outmad->status)) {
+		/* Mad returned with bad status */
+		ret = be16_to_cpu(outmad->status);
+		mlx4_warn(dev,
+			  "MLX4_CMD_MAD_IFC Get Module ID attr(%x) port(%d) i2c_addr(%x) offset(%d) size(%d): Response Mad Status(%x) - %s\n",
+			  0xFF60, port, I2C_ADDR_LOW, 0, 1, ret,
+			  cable_info_mad_err_str(ret));
+		ret = -ret;
+		goto out;
+	}
+	cable_info = (struct mlx4_cable_info *)outmad->data;
+	*module_id = cable_info->data[0];
+out:
+	mlx4_free_cmd_mailbox(dev, inbox);
+	mlx4_free_cmd_mailbox(dev, outbox);
+	return ret;
+}
+
+static void mlx4_sfp_eeprom_params_set(u8 *i2c_addr, u8 *page_num, u16 *offset)
+{
+	*i2c_addr = I2C_ADDR_LOW;
+	*page_num = 0;
+
+	if (*offset < I2C_PAGE_SIZE)
+		return;
+
+	*i2c_addr = I2C_ADDR_HIGH;
+	*offset -= I2C_PAGE_SIZE;
+}
+
+static void mlx4_qsfp_eeprom_params_set(u8 *i2c_addr, u8 *page_num, u16 *offset)
+{
+	/* Offsets 0-255 belong to page 0.
+	 * Offsets 256-639 belong to pages 01, 02, 03.
+	 * For example, offset 400 is page 02: 1 + (400 - 256) / 128 = 2
+	 */
+	if (*offset < I2C_PAGE_SIZE)
+		*page_num = 0;
+	else
+		*page_num = 1 + (*offset - I2C_PAGE_SIZE) / I2C_HIGH_PAGE_SIZE;
+	*i2c_addr = I2C_ADDR_LOW;
+	*offset -= *page_num * I2C_HIGH_PAGE_SIZE;
+}
+
 /**
  * mlx4_get_module_info - Read cable module eeprom data
  * @dev: mlx4_dev.
@@ -1928,11 +2128,29 @@ int mlx4_get_module_info(struct mlx4_dev *dev, u8 port,
 	struct mlx4_cmd_mailbox *inbox, *outbox;
 	struct mlx4_mad_ifc *inmad, *outmad;
 	struct mlx4_cable_info *cable_info;
-	u16 i2c_addr;
+	u8 module_id, i2c_addr, page_num;
 	int ret;
 
 	if (size > MODULE_INFO_MAX_READ)
 		size = MODULE_INFO_MAX_READ;
+
+	ret = mlx4_get_module_id(dev, port, &module_id);
+	if (ret)
+		return ret;
+
+	switch (module_id) {
+	case MLX4_MODULE_ID_SFP:
+		mlx4_sfp_eeprom_params_set(&i2c_addr, &page_num, &offset);
+		break;
+	case MLX4_MODULE_ID_QSFP:
+	case MLX4_MODULE_ID_QSFP_PLUS:
+	case MLX4_MODULE_ID_QSFP28:
+		mlx4_qsfp_eeprom_params_set(&i2c_addr, &page_num, &offset);
+		break;
+	default:
+		mlx4_err(dev, "Module ID not recognized: %#x\n", module_id);
+		return -EINVAL;
+	}
 
 	inbox = mlx4_alloc_cmd_mailbox(dev);
 	if (IS_ERR(inbox))
@@ -1959,16 +2177,9 @@ int mlx4_get_module_info(struct mlx4_dev *dev, u8 port,
 		 */
 		size -= offset + size - I2C_PAGE_SIZE;
 
-	i2c_addr = I2C_ADDR_LOW;
-	if (offset >= I2C_PAGE_SIZE) {
-		/* Reset offset to high page */
-		i2c_addr = I2C_ADDR_HIGH;
-		offset -= I2C_PAGE_SIZE;
-	}
-
 	cable_info = (struct mlx4_cable_info *)inmad->data;
 	cable_info->dev_mem_address = cpu_to_be16(offset);
-	cable_info->page_num = 0;
+	cable_info->page_num = page_num;
 	cable_info->i2c_addr = i2c_addr;
 	cable_info->size = cpu_to_be16(size);
 

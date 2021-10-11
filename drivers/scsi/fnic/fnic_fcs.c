@@ -52,8 +52,11 @@ void fnic_handle_link(struct work_struct *work)
 	unsigned long flags;
 	int old_link_status;
 	u32 old_link_down_cnt;
+	u64 old_port_speed, new_port_speed;
 
 	spin_lock_irqsave(&fnic->fnic_lock, flags);
+
+	fnic->link_events = 1;      /* less work to just set everytime*/
 
 	if (fnic->stop_rx_link_events) {
 		spin_unlock_irqrestore(&fnic->fnic_lock, flags);
@@ -62,8 +65,47 @@ void fnic_handle_link(struct work_struct *work)
 
 	old_link_down_cnt = fnic->link_down_cnt;
 	old_link_status = fnic->link_status;
+	old_port_speed = atomic64_read(
+			&fnic->fnic_stats.misc_stats.current_port_speed);
+
 	fnic->link_status = vnic_dev_link_status(fnic->vdev);
 	fnic->link_down_cnt = vnic_dev_link_down_cnt(fnic->vdev);
+
+	new_port_speed = vnic_dev_port_speed(fnic->vdev);
+	atomic64_set(&fnic->fnic_stats.misc_stats.current_port_speed,
+			new_port_speed);
+	if (old_port_speed != new_port_speed)
+		FNIC_MAIN_DBG(KERN_INFO, fnic->lport->host,
+				"Current vnic speed set to :  %llu\n",
+				new_port_speed);
+
+	switch (vnic_dev_port_speed(fnic->vdev)) {
+	case DCEM_PORTSPEED_10G:
+		fc_host_speed(fnic->lport->host)   = FC_PORTSPEED_10GBIT;
+		fnic->lport->link_supported_speeds = FC_PORTSPEED_10GBIT;
+		break;
+	case DCEM_PORTSPEED_20G:
+		fc_host_speed(fnic->lport->host)   = FC_PORTSPEED_20GBIT;
+		fnic->lport->link_supported_speeds = FC_PORTSPEED_20GBIT;
+		break;
+	case DCEM_PORTSPEED_25G:
+		fc_host_speed(fnic->lport->host)   = FC_PORTSPEED_25GBIT;
+		fnic->lport->link_supported_speeds = FC_PORTSPEED_25GBIT;
+		break;
+	case DCEM_PORTSPEED_40G:
+	case DCEM_PORTSPEED_4x10G:
+		fc_host_speed(fnic->lport->host)   = FC_PORTSPEED_40GBIT;
+		fnic->lport->link_supported_speeds = FC_PORTSPEED_40GBIT;
+		break;
+	case DCEM_PORTSPEED_100G:
+		fc_host_speed(fnic->lport->host)   = FC_PORTSPEED_100GBIT;
+		fnic->lport->link_supported_speeds = FC_PORTSPEED_100GBIT;
+		break;
+	default:
+		fc_host_speed(fnic->lport->host)   = FC_PORTSPEED_UNKNOWN;
+		fnic->lport->link_supported_speeds = FC_PORTSPEED_UNKNOWN;
+		break;
+	}
 
 	if (old_link_status == fnic->link_status) {
 		if (!fnic->link_status) {
@@ -254,7 +296,7 @@ void fnic_handle_event(struct work_struct *work)
 }
 
 /**
- * Check if the Received FIP FLOGI frame is rejected
+ * is_fnic_fip_flogi_reject() - Check if the Received FIP FLOGI frame is rejected
  * @fip: The FCoE controller that received the frame
  * @skb: The received FIP frame
  *
@@ -269,12 +311,10 @@ static inline int is_fnic_fip_flogi_reject(struct fcoe_ctlr *fip,
 	struct fc_frame_header *fh = NULL;
 	struct fip_desc *desc;
 	struct fip_encaps *els;
-	enum fip_desc_type els_dtype = 0;
 	u16 op;
 	u8 els_op;
 	u8 sub;
 
-	size_t els_len = 0;
 	size_t rlen;
 	size_t dlen = 0;
 
@@ -306,10 +346,8 @@ static inline int is_fnic_fip_flogi_reject(struct fcoe_ctlr *fip,
 		if (dlen < sizeof(*els) + sizeof(*fh) + 1)
 			return 0;
 
-		els_len = dlen - sizeof(*els);
 		els = (struct fip_encaps *)desc;
 		fh = (struct fc_frame_header *)(els + 1);
-		els_dtype = desc->fip_dtype;
 
 		if (!fh)
 			return 0;
@@ -336,19 +374,20 @@ static void fnic_fcoe_send_vlan_req(struct fnic *fnic)
 	struct fnic_stats *fnic_stats = &fnic->fnic_stats;
 	struct sk_buff *skb;
 	char *eth_fr;
-	int fr_len;
 	struct fip_vlan *vlan;
 	u64 vlan_tov;
 
 	fnic_fcoe_reset_vlans(fnic);
 	fnic->set_vlan(fnic, 0);
-	FNIC_FCS_DBG(KERN_INFO, fnic->lport->host,
-		  "Sending VLAN request...\n");
+
+	if (printk_ratelimit())
+		FNIC_FCS_DBG(KERN_INFO, fnic->lport->host,
+			  "Sending VLAN request...\n");
+
 	skb = dev_alloc_skb(sizeof(struct fip_vlan));
 	if (!skb)
 		return;
 
-	fr_len = sizeof(*vlan);
 	eth_fr = (char *)skb->data;
 	vlan = (struct fip_vlan *)eth_fr;
 
@@ -359,7 +398,7 @@ static void fnic_fcoe_send_vlan_req(struct fnic *fnic)
 
 	vlan->fip.fip_ver = FIP_VER_ENCAPS(FIP_VER);
 	vlan->fip.fip_op = htons(FIP_OP_VLAN);
-	vlan->fip.fip_subcode = FIP_SC_VL_NOTE;
+	vlan->fip.fip_subcode = FIP_SC_VL_REQ;
 	vlan->fip.fip_dl_len = htons(sizeof(vlan->desc) / FIP_BPW);
 
 	vlan->desc.mac.fd_desc.fip_dtype = FIP_DT_MAC;
@@ -415,15 +454,13 @@ static void fnic_fcoe_process_vlan_resp(struct fnic *fnic, struct sk_buff *skb)
 			vid = ntohs(((struct fip_vlan_desc *)desc)->fd_vlan);
 			shost_printk(KERN_INFO, fnic->lport->host,
 				  "process_vlan_resp: FIP VLAN %d\n", vid);
-			vlan = kmalloc(sizeof(*vlan),
-							GFP_ATOMIC);
+			vlan = kzalloc(sizeof(*vlan), GFP_ATOMIC);
 			if (!vlan) {
 				/* retry from timer */
 				spin_unlock_irqrestore(&fnic->vlans_lock,
 							flags);
 				goto out;
 			}
-			memset(vlan, 0, sizeof(struct fcoe_vlan));
 			vlan->vid = vid & 0x0fff;
 			vlan->state = FIP_VLAN_AVAIL;
 			list_add_tail(&vlan->list, &fnic->vlans);
@@ -637,7 +674,7 @@ static inline int fnic_import_rq_eth_pkt(struct fnic *fnic, struct sk_buff *skb)
 	eh = (struct ethhdr *)skb->data;
 	if (eh->h_proto == htons(ETH_P_8021Q)) {
 		memmove((u8 *)eh + VLAN_HLEN, eh, ETH_ALEN * 2);
-		eh = (struct ethhdr *)skb_pull(skb, VLAN_HLEN);
+		eh = skb_pull(skb, VLAN_HLEN);
 		skb_reset_mac_header(skb);
 	}
 	if (eh->h_proto == htons(ETH_P_FIP)) {
@@ -796,7 +833,6 @@ static void fnic_rq_cmpl_frame_recv(struct vnic_rq *rq, struct cq_desc
 	struct sk_buff *skb;
 	struct fc_frame *fp;
 	struct fnic_stats *fnic_stats = &fnic->fnic_stats;
-	unsigned int eth_hdrs_stripped;
 	u8 type, color, eop, sop, ingress_port, vlan_stripped;
 	u8 fcoe = 0, fcoe_sof, fcoe_eof;
 	u8 fcoe_fc_crc_ok = 1, fcoe_enc_error = 0;
@@ -811,8 +847,8 @@ static void fnic_rq_cmpl_frame_recv(struct vnic_rq *rq, struct cq_desc
 	u32 fcp_bytes_written = 0;
 	unsigned long flags;
 
-	pci_unmap_single(fnic->pdev, buf->dma_addr, buf->len,
-			 PCI_DMA_FROMDEVICE);
+	dma_unmap_single(&fnic->pdev->dev, buf->dma_addr, buf->len,
+			 DMA_FROM_DEVICE);
 	skb = buf->os_buf;
 	fp = (struct fc_frame *)skb;
 	buf->os_buf = NULL;
@@ -826,7 +862,6 @@ static void fnic_rq_cmpl_frame_recv(struct vnic_rq *rq, struct cq_desc
 				   &ingress_port, &packet_error,
 				   &fcoe_enc_error, &fcs_ok, &vlan_stripped,
 				   &vlan);
-		eth_hdrs_stripped = 1;
 		skb_trim(skb, fcp_bytes_written);
 		fr_sof(fp) = sof;
 		fr_eof(fp) = eof;
@@ -843,7 +878,6 @@ static void fnic_rq_cmpl_frame_recv(struct vnic_rq *rq, struct cq_desc
 				    &tcp_udp_csum_ok, &udp, &tcp,
 				    &ipv4_csum_ok, &ipv6, &ipv4,
 				    &ipv4_fragment, &fcs_ok);
-		eth_hdrs_stripped = 0;
 		skb_trim(skb, bytes_written);
 		if (!fcs_ok) {
 			atomic64_inc(&fnic_stats->misc_stats.frame_errors);
@@ -952,9 +986,8 @@ int fnic_alloc_rq_frame(struct vnic_rq *rq)
 	skb_reset_transport_header(skb);
 	skb_reset_network_header(skb);
 	skb_put(skb, len);
-	pa = pci_map_single(fnic->pdev, skb->data, len, PCI_DMA_FROMDEVICE);
-
-	if (pci_dma_mapping_error(fnic->pdev, pa)) {
+	pa = dma_map_single(&fnic->pdev->dev, skb->data, len, DMA_FROM_DEVICE);
+	if (dma_mapping_error(&fnic->pdev->dev, pa)) {
 		r = -ENOMEM;
 		printk(KERN_ERR "PCI mapping failed with error %d\n", r);
 		goto free_skb;
@@ -973,8 +1006,8 @@ void fnic_free_rq_buf(struct vnic_rq *rq, struct vnic_rq_buf *buf)
 	struct fc_frame *fp = buf->os_buf;
 	struct fnic *fnic = vnic_dev_priv(rq->vdev);
 
-	pci_unmap_single(fnic->pdev, buf->dma_addr, buf->len,
-			 PCI_DMA_FROMDEVICE);
+	dma_unmap_single(&fnic->pdev->dev, buf->dma_addr, buf->len,
+			 DMA_FROM_DEVICE);
 
 	dev_kfree_skb(fp_skb(fp));
 	buf->os_buf = NULL;
@@ -993,12 +1026,10 @@ void fnic_eth_send(struct fcoe_ctlr *fip, struct sk_buff *skb)
 	struct ethhdr *eth_hdr;
 	struct vlan_ethhdr *vlan_hdr;
 	unsigned long flags;
-	int r;
 
 	if (!fnic->vlan_hw_insert) {
 		eth_hdr = (struct ethhdr *)skb_mac_header(skb);
-		vlan_hdr = (struct vlan_ethhdr *)skb_push(skb,
-				sizeof(*vlan_hdr) - sizeof(*eth_hdr));
+		vlan_hdr = skb_push(skb, sizeof(*vlan_hdr) - sizeof(*eth_hdr));
 		memcpy(vlan_hdr, eth_hdr, 2 * ETH_ALEN);
 		vlan_hdr->h_vlan_proto = htons(ETH_P_8021Q);
 		vlan_hdr->h_vlan_encapsulated_proto = eth_hdr->h_proto;
@@ -1014,11 +1045,10 @@ void fnic_eth_send(struct fcoe_ctlr *fip, struct sk_buff *skb)
 		}
 	}
 
-	pa = pci_map_single(fnic->pdev, skb->data, skb->len, PCI_DMA_TODEVICE);
-
-	r = pci_dma_mapping_error(fnic->pdev, pa);
-	if (r) {
-		printk(KERN_ERR "PCI mapping failed with error %d\n", r);
+	pa = dma_map_single(&fnic->pdev->dev, skb->data, skb->len,
+			DMA_TO_DEVICE);
+	if (dma_mapping_error(&fnic->pdev->dev, pa)) {
+		printk(KERN_ERR "DMA mapping failed\n");
 		goto free_skb;
 	}
 
@@ -1034,7 +1064,7 @@ void fnic_eth_send(struct fcoe_ctlr *fip, struct sk_buff *skb)
 
 irq_restore:
 	spin_unlock_irqrestore(&fnic->wq_lock[0], flags);
-	pci_unmap_single(fnic->pdev, pa, skb->len, PCI_DMA_TODEVICE);
+	dma_unmap_single(&fnic->pdev->dev, pa, skb->len, DMA_TO_DEVICE);
 free_skb:
 	kfree_skb(skb);
 }
@@ -1064,7 +1094,7 @@ static int fnic_send_frame(struct fnic *fnic, struct fc_frame *fp)
 
 	if (!fnic->vlan_hw_insert) {
 		eth_hdr_len = sizeof(*vlan_hdr) + sizeof(*fcoe_hdr);
-		vlan_hdr = (struct vlan_ethhdr *)skb_push(skb, eth_hdr_len);
+		vlan_hdr = skb_push(skb, eth_hdr_len);
 		eth_hdr = (struct ethhdr *)vlan_hdr;
 		vlan_hdr->h_vlan_proto = htons(ETH_P_8021Q);
 		vlan_hdr->h_vlan_encapsulated_proto = htons(ETH_P_FCOE);
@@ -1072,7 +1102,7 @@ static int fnic_send_frame(struct fnic *fnic, struct fc_frame *fp)
 		fcoe_hdr = (struct fcoe_hdr *)(vlan_hdr + 1);
 	} else {
 		eth_hdr_len = sizeof(*eth_hdr) + sizeof(*fcoe_hdr);
-		eth_hdr = (struct ethhdr *)skb_push(skb, eth_hdr_len);
+		eth_hdr = skb_push(skb, eth_hdr_len);
 		eth_hdr->h_proto = htons(ETH_P_FCOE);
 		fcoe_hdr = (struct fcoe_hdr *)(eth_hdr + 1);
 	}
@@ -1091,9 +1121,8 @@ static int fnic_send_frame(struct fnic *fnic, struct fc_frame *fp)
 	if (FC_FCOE_VER)
 		FC_FCOE_ENCAPS_VER(fcoe_hdr, FC_FCOE_VER);
 
-	pa = pci_map_single(fnic->pdev, eth_hdr, tot_len, PCI_DMA_TODEVICE);
-
-	if (pci_dma_mapping_error(fnic->pdev, pa)) {
+	pa = dma_map_single(&fnic->pdev->dev, eth_hdr, tot_len, DMA_TO_DEVICE);
+	if (dma_mapping_error(&fnic->pdev->dev, pa)) {
 		ret = -ENOMEM;
 		printk(KERN_ERR "DMA map failed with error %d\n", ret);
 		goto free_skb_on_err;
@@ -1107,8 +1136,7 @@ static int fnic_send_frame(struct fnic *fnic, struct fc_frame *fp)
 	spin_lock_irqsave(&fnic->wq_lock[0], flags);
 
 	if (!vnic_wq_desc_avail(wq)) {
-		pci_unmap_single(fnic->pdev, pa,
-				 tot_len, PCI_DMA_TODEVICE);
+		dma_unmap_single(&fnic->pdev->dev, pa, tot_len, DMA_TO_DEVICE);
 		ret = -1;
 		goto irq_restore;
 	}
@@ -1223,8 +1251,8 @@ static void fnic_wq_complete_frame_send(struct vnic_wq *wq,
 	struct fc_frame *fp = (struct fc_frame *)skb;
 	struct fnic *fnic = vnic_dev_priv(wq->vdev);
 
-	pci_unmap_single(fnic->pdev, buf->dma_addr,
-			 buf->len, PCI_DMA_TODEVICE);
+	dma_unmap_single(&fnic->pdev->dev, buf->dma_addr, buf->len,
+			 DMA_TO_DEVICE);
 	dev_kfree_skb_irq(fp_skb(fp));
 	buf->os_buf = NULL;
 }
@@ -1266,8 +1294,8 @@ void fnic_free_wq_buf(struct vnic_wq *wq, struct vnic_wq_buf *buf)
 	struct fc_frame *fp = buf->os_buf;
 	struct fnic *fnic = vnic_dev_priv(wq->vdev);
 
-	pci_unmap_single(fnic->pdev, buf->dma_addr,
-			 buf->len, PCI_DMA_TODEVICE);
+	dma_unmap_single(&fnic->pdev->dev, buf->dma_addr, buf->len,
+			 DMA_TO_DEVICE);
 
 	dev_kfree_skb(fp_skb(fp));
 	buf->os_buf = NULL;
@@ -1313,16 +1341,18 @@ void fnic_handle_fip_timer(struct fnic *fnic)
 
 	spin_lock_irqsave(&fnic->vlans_lock, flags);
 	if (list_empty(&fnic->vlans)) {
-		/* no vlans available, try again */
-		FNIC_FCS_DBG(KERN_DEBUG, fnic->lport->host,
-			  "Start VLAN Discovery\n");
 		spin_unlock_irqrestore(&fnic->vlans_lock, flags);
+		/* no vlans available, try again */
+		if (unlikely(fnic_log_level & FNIC_FCS_LOGGING))
+			if (printk_ratelimit())
+				shost_printk(KERN_DEBUG, fnic->lport->host,
+						"Start VLAN Discovery\n");
 		fnic_event_enq(fnic, FNIC_EVT_START_VLAN_DISC);
 		return;
 	}
 
 	vlan = list_first_entry(&fnic->vlans, struct fcoe_vlan, list);
-	shost_printk(KERN_DEBUG, fnic->lport->host,
+	FNIC_FCS_DBG(KERN_DEBUG, fnic->lport->host,
 		  "fip_timer: vlan %d state %d sol_count %d\n",
 		  vlan->vid, vlan->state, vlan->sol_count);
 	switch (vlan->state) {
@@ -1332,10 +1362,12 @@ void fnic_handle_fip_timer(struct fnic *fnic)
 		spin_unlock_irqrestore(&fnic->vlans_lock, flags);
 		break;
 	case FIP_VLAN_FAILED:
-		/* if all vlans are in failed state, restart vlan disc */
-		FNIC_FCS_DBG(KERN_DEBUG, fnic->lport->host,
-			  "Start VLAN Discovery\n");
 		spin_unlock_irqrestore(&fnic->vlans_lock, flags);
+		/* if all vlans are in failed state, restart vlan disc */
+		if (unlikely(fnic_log_level & FNIC_FCS_LOGGING))
+			if (printk_ratelimit())
+				shost_printk(KERN_DEBUG, fnic->lport->host,
+					  "Start VLAN Discovery\n");
 		fnic_event_enq(fnic, FNIC_EVT_START_VLAN_DISC);
 		break;
 	case FIP_VLAN_SENT:
@@ -1344,7 +1376,7 @@ void fnic_handle_fip_timer(struct fnic *fnic)
 			 * no response on this vlan, remove  from the list.
 			 * Try the next vlan
 			 */
-			shost_printk(KERN_INFO, fnic->lport->host,
+			FNIC_FCS_DBG(KERN_INFO, fnic->lport->host,
 				  "Dequeue this VLAN ID %d from list\n",
 				  vlan->vid);
 			list_del(&vlan->list);
@@ -1354,7 +1386,7 @@ void fnic_handle_fip_timer(struct fnic *fnic)
 				/* we exhausted all vlans, restart vlan disc */
 				spin_unlock_irqrestore(&fnic->vlans_lock,
 							flags);
-				shost_printk(KERN_INFO, fnic->lport->host,
+				FNIC_FCS_DBG(KERN_INFO, fnic->lport->host,
 					  "fip_timer: vlan list empty, "
 					  "trigger vlan disc\n");
 				fnic_event_enq(fnic, FNIC_EVT_START_VLAN_DISC);

@@ -334,7 +334,7 @@ hal_com_txbf_rate_work_item_callback(
 #if (DM_ODM_SUPPORT_TYPE == ODM_WIN)
 void
 hal_com_txbf_fw_ndpa_timer_callback(
-	struct phydm_timer_list		*p_timer
+	struct timer_list		*p_timer
 )
 {
 

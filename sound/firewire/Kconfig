@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 menuconfig SND_FIREWIRE
 	bool "FireWire sound devices"
 	depends on FIREWIRE
@@ -34,12 +35,14 @@ config SND_OXFW
 	   * LaCie Firewire Speakers
 	   * Behringer F-Control Audio 202
 	   * Mackie(Loud) Onyx-i series (former models)
+	   * Mackie(Loud) Onyx 1640i (former model)
 	   * Mackie(Loud) Onyx Satellite
 	   * Mackie(Loud) Tapco Link.Firewire
-	   * Mackie(Loud) d.2 pro/d.4 pro
+	   * Mackie(Loud) d.4 pro
 	   * Mackie(Loud) U.420/U.420d
 	   * TASCAM FireOne
 	   * Stanton Controllers & Systems 1 Deck/Mixer
+	   * APOGEE duet FireWire
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called snd-oxfw.
@@ -74,14 +77,14 @@ config SND_BEBOB
 	tristate "BridgeCo DM1000/DM1100/DM1500 with BeBoB firmware"
 	select SND_FIREWIRE_LIB
 	select SND_HWDEP
-        help
+	help
 	 Say Y here to include support for FireWire devices based
 	 on BridgeCo DM1000/DM1100/DM1500 with BeBoB firmware:
 	  * Edirol FA-66/FA-101
 	  * PreSonus FIREBOX/FIREPOD/FP10/Inspire1394
 	  * BridgeCo RDAudio1/Audio5
 	  * Mackie Onyx 1220/1620/1640 (FireWire I/O Card)
-	  * Mackie d.2 (FireWire Option)
+	  * Mackie d.2 (FireWire Option) and d.2 Pro
 	  * Stanton FinalScratch 2 (ScratchAmp)
 	  * Tascam IF-FW/DM
 	  * Behringer XENIX UFX 1204/1604
@@ -108,8 +111,8 @@ config SND_BEBOB
 	  * M-Audio FireWire 1814/ProjectMix IO
 	  * Digidesign Mbox 2 Pro
 
-          To compile this driver as a module, choose M here: the module
-          will be called snd-bebob.
+	  To compile this driver as a module, choose M here: the module
+	  will be called snd-bebob.
 
 config SND_FIREWIRE_DIGI00X
 	tristate "Digidesign Digi 002/003 family support"
@@ -138,5 +141,35 @@ config SND_FIREWIRE_TASCAM
 
 	 To compile this driver as a module, choose M here: the module
 	 will be called snd-firewire-tascam.
+
+config SND_FIREWIRE_MOTU
+	tristate "Mark of the unicorn FireWire series support"
+	select SND_FIREWIRE_LIB
+	select SND_HWDEP
+	help
+	 Say Y here to enable support for FireWire devices which MOTU produced:
+	  * 828mk2
+	  * Traveler
+	  * Ultralite
+	  * 8pre
+	  * 828mk3 (FireWire only)
+	  * 828mk3 (Hybrid)
+	  * Audio Express
+	  * 4pre
+
+	 To compile this driver as a module, choose M here: the module
+	 will be called snd-firewire-motu.
+
+config SND_FIREFACE
+	tristate "RME Fireface series support"
+	select SND_FIREWIRE_LIB
+	select SND_HWDEP
+	help
+	 Say Y here to include support for RME fireface series.
+	  * Fireface 400
+	  * Fireface 800
+	  * Fireface UFX
+	  * Fireface UCX
+	  * Fireface 802
 
 endif # SND_FIREWIRE

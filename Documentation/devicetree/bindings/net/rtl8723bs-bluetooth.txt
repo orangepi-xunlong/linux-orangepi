@@ -1,0 +1,35 @@
+RTL8723BS/RTL8723CS Bluetooth
+---------------------
+
+RTL8723CS/RTL8723CS is WiFi + BT chip. WiFi part is connected over SDIO, while
+BT is connected over serial. It speaks H5 protocol with few extra commands
+to upload firmware and change module speed.
+
+Required properties:
+
+ - compatible: should be one of the following:
+   * "realtek,rtl8723bs-bt"
+   * "realtek,rtl8723cs-bt"
+Optional properties:
+
+ - device-wake-gpios: GPIO specifier, used to wakeup the BT module (active high)
+ - enable-gpios: GPIO specifier, used to enable the BT module (active high)
+ - host-wake-gpios: GPIO specifier, used to wakeup the host processor (active high)
+ - firmware-postfix: firmware postfix to be used for firmware config
+ - reset-gpios: GPIO specifier, used to reset the BT module (active high)
+
+Example:
+
+&uart1 {
+       pinctrl-names = "default";
+       pinctrl-0 = <&uart1_pins>, <&uart1_rts_cts_pins>;
+       status = "okay";
+
+       bluetooth {
+               compatible = "realtek,rtl8723bs-bt";
+               reset-gpios = <&r_pio 0 4 GPIO_ACTIVE_LOW>; /* PL4 */
+               device-wake-gpios = <&r_pio 0 5 GPIO_ACTIVE_HIGH>; /* PL5 */
+               host-wakeup-gpios = <&r_pio 0 6 GPIO_ACTIVE_HIGH>; /* PL6 */
+               firmware-postfix="pine64";
+       };
+};

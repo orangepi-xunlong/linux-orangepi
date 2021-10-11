@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * inode.c -- user mode filesystem api for usb gadget controllers
  *
  * Copyright (C) 2003-2004 David Brownell
  * Copyright (C) 2003 Agilent Technologies
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 
@@ -16,17 +12,19 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/fs.h>
+#include <linux/fs_context.h>
 #include <linux/pagemap.h>
 #include <linux/uts.h>
 #include <linux/wait.h>
 #include <linux/compiler.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/poll.h>
-#include <linux/mmu_context.h>
+#include <linux/kthread.h>
 #include <linux/aio.h>
 #include <linux/uio.h>
+#include <linux/refcount.h>
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/moduleparam.h>
@@ -84,8 +82,7 @@ static int ep_open(struct inode *, struct file *);
 
 /* /dev/gadget/$CHIP represents ep0 and the whole device */
 enum ep0_state {
-	/* DISBLED is the initial state.
-	 */
+	/* DISABLED is the initial state. */
 	STATE_DEV_DISABLED = 0,
 
 	/* Only one open() of /dev/gadget/$CHIP; only one file tracks
@@ -115,7 +112,7 @@ enum ep0_state {
 
 struct dev_data {
 	spinlock_t			lock;
-	atomic_t			count;
+	refcount_t			count;
 	int				udc_usage;
 	enum ep0_state			state;		/* P: lock */
 	struct usb_gadgetfs_event	event [N_EVENT];
@@ -152,12 +149,12 @@ struct dev_data {
 
 static inline void get_dev (struct dev_data *data)
 {
-	atomic_inc (&data->count);
+	refcount_inc (&data->count);
 }
 
 static void put_dev (struct dev_data *data)
 {
-	if (likely (!atomic_dec_and_test (&data->count)))
+	if (likely (!refcount_dec_and_test (&data->count)))
 		return;
 	/* needs no more cleanup */
 	BUG_ON (waitqueue_active (&data->wait));
@@ -172,7 +169,7 @@ static struct dev_data *dev_new (void)
 	if (!dev)
 		return NULL;
 	dev->state = STATE_DEV_DISABLED;
-	atomic_set (&dev->count, 1);
+	refcount_set (&dev->count, 1);
 	spin_lock_init (&dev->lock);
 	INIT_LIST_HEAD (&dev->epfiles);
 	init_waitqueue_head (&dev->wait);
@@ -192,7 +189,7 @@ enum ep_state {
 struct ep_data {
 	struct mutex			lock;
 	enum ep_state			state;
-	atomic_t			count;
+	refcount_t			count;
 	struct dev_data			*dev;
 	/* must hold dev->lock before accessing ep or req */
 	struct usb_ep			*ep;
@@ -207,12 +204,12 @@ struct ep_data {
 
 static inline void get_ep (struct ep_data *data)
 {
-	atomic_inc (&data->count);
+	refcount_inc (&data->count);
 }
 
 static void put_ep (struct ep_data *data)
 {
-	if (likely (!atomic_dec_and_test (&data->count)))
+	if (likely (!refcount_dec_and_test (&data->count)))
 		return;
 	put_dev (data->dev);
 	/* needs no more cleanup */
@@ -315,7 +312,7 @@ nonblock:
 	case STATE_EP_READY:			/* not configured yet */
 		if (is_write)
 			return 0;
-		// FALLTHRU
+		fallthrough;
 	case STATE_EP_UNBOUND:			/* clean disconnect */
 		break;
 	// case STATE_EP_DISABLED:		/* "can't happen" */
@@ -347,7 +344,7 @@ ep_io (struct ep_data *epdata, void *buf, unsigned len)
 	spin_unlock_irq (&epdata->dev->lock);
 
 	if (likely (value == 0)) {
-		value = wait_event_interruptible (done.wait, done.done);
+		value = wait_for_completion_interruptible(&done);
 		if (value != 0) {
 			spin_lock_irq (&epdata->dev->lock);
 			if (likely (epdata->ep != NULL)) {
@@ -356,7 +353,7 @@ ep_io (struct ep_data *epdata, void *buf, unsigned len)
 				usb_ep_dequeue (epdata->ep, epdata->req);
 				spin_unlock_irq (&epdata->dev->lock);
 
-				wait_event (done.wait, done.done);
+				wait_for_completion(&done);
 				if (epdata->status == -ECONNRESET)
 					epdata->status = -EINTR;
 			} else {
@@ -465,9 +462,9 @@ static void ep_user_copy_worker(struct work_struct *work)
 	struct kiocb *iocb = priv->iocb;
 	size_t ret;
 
-	use_mm(mm);
+	kthread_use_mm(mm);
 	ret = copy_to_iter(priv->buf, priv->actual, &priv->to);
-	unuse_mm(mm);
+	kthread_unuse_mm(mm);
 	if (!ret)
 		ret = -EFAULT;
 
@@ -501,7 +498,8 @@ static void ep_aio_complete(struct usb_ep *ep, struct usb_request *req)
 		iocb->private = NULL;
 		/* aio_complete() reports bytes-transferred _and_ faults */
 
-		iocb->ki_complete(iocb, req->actual ? req->actual : req->status,
+		iocb->ki_complete(iocb,
+				req->actual ? req->actual : (long)req->status,
 				req->status);
 	} else {
 		/* ep_copy_to_user() won't report both; we hide some faults */
@@ -668,7 +666,7 @@ ep_write_iter(struct kiocb *iocb, struct iov_iter *from)
 		return -ENOMEM;
 	}
 
-	if (unlikely(copy_from_iter(buf, len, from) != len)) {
+	if (unlikely(!copy_from_iter_full(buf, len, from))) {
 		value = -EFAULT;
 		goto out;
 	}
@@ -1087,7 +1085,7 @@ next_event (struct dev_data *dev, enum usb_gadgetfs_event_type type)
 	case GADGETFS_DISCONNECT:
 		if (dev->state == STATE_DEV_SETUP)
 			dev->setup_abort = 1;
-		// FALL THROUGH
+		fallthrough;
 	case GADGETFS_CONNECT:
 		dev->ev_next = 0;
 		break;
@@ -1213,36 +1211,36 @@ dev_release (struct inode *inode, struct file *fd)
 	return 0;
 }
 
-static unsigned int
+static __poll_t
 ep0_poll (struct file *fd, poll_table *wait)
 {
        struct dev_data         *dev = fd->private_data;
-       int                     mask = 0;
+       __poll_t                mask = 0;
 
 	if (dev->state <= STATE_DEV_OPENED)
 		return DEFAULT_POLLMASK;
 
-       poll_wait(fd, &dev->wait, wait);
+	poll_wait(fd, &dev->wait, wait);
 
-       spin_lock_irq (&dev->lock);
+	spin_lock_irq(&dev->lock);
 
-       /* report fd mode change before acting on it */
-       if (dev->setup_abort) {
-               dev->setup_abort = 0;
-               mask = POLLHUP;
-               goto out;
-       }
+	/* report fd mode change before acting on it */
+	if (dev->setup_abort) {
+		dev->setup_abort = 0;
+		mask = EPOLLHUP;
+		goto out;
+	}
 
-       if (dev->state == STATE_DEV_SETUP) {
-               if (dev->setup_in || dev->setup_can_stall)
-                       mask = POLLOUT;
-       } else {
-               if (dev->ev_next != 0)
-                       mask = POLLIN;
-       }
+	if (dev->state == STATE_DEV_SETUP) {
+		if (dev->setup_in || dev->setup_can_stall)
+			mask = EPOLLOUT;
+	} else {
+		if (dev->ev_next != 0)
+			mask = EPOLLIN;
+	}
 out:
-       spin_unlock_irq(&dev->lock);
-       return mask;
+	spin_unlock_irq(&dev->lock);
+	return mask;
 }
 
 static long dev_ioctl (struct file *fd, unsigned code, unsigned long value)
@@ -1364,7 +1362,6 @@ gadgetfs_setup (struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 
 	req->buf = dev->rbuf;
 	req->context = NULL;
-	value = -EOPNOTSUPP;
 	switch (ctrl->bRequest) {
 
 	case USB_REQ_GET_DESCRIPTOR:
@@ -1385,7 +1382,6 @@ gadgetfs_setup (struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 			make_qualifier (dev);
 			break;
 		case USB_DT_OTHER_SPEED_CONFIG:
-			// FALLTHROUGH
 		case USB_DT_CONFIG:
 			value = config_buf (dev,
 					w_value >> 8,
@@ -1474,7 +1470,6 @@ delegate:
 			dev->setup_wLength = w_length;
 			dev->setup_out_ready = 0;
 			dev->setup_out_error = 0;
-			value = 0;
 
 			/* read DATA stage for OUT right away */
 			if (unlikely (!dev->setup_in && w_length)) {
@@ -1593,7 +1588,7 @@ static int activate_ep_files (struct dev_data *dev)
 		init_waitqueue_head (&data->wait);
 
 		strncpy (data->name, ep->name, sizeof (data->name) - 1);
-		atomic_set (&data->count, 1);
+		refcount_set (&data->count, 1);
 		data->dev = dev;
 		get_dev (dev);
 
@@ -1723,7 +1718,7 @@ gadgetfs_suspend (struct usb_gadget *gadget)
 	case STATE_DEV_UNCONNECTED:
 		next_event (dev, GADGETFS_SUSPEND);
 		ep0_readable (dev);
-		/* FALLTHROUGH */
+		fallthrough;
 	default:
 		break;
 	}
@@ -1740,7 +1735,7 @@ static struct usb_gadget_driver gadgetfs_driver = {
 	.suspend	= gadgetfs_suspend,
 
 	.driver	= {
-		.name		= (char *) shortname,
+		.name		= shortname,
 	},
 };
 
@@ -1788,7 +1783,7 @@ static ssize_t
 dev_config (struct file *fd, const char __user *buf, size_t len, loff_t *ptr)
 {
 	struct dev_data		*dev = fd->private_data;
-	ssize_t			value = len, length = len;
+	ssize_t			value, length = len;
 	unsigned		total;
 	u32			tag;
 	char			*kbuf;
@@ -1857,7 +1852,6 @@ dev_config (struct file *fd, const char __user *buf, size_t len, loff_t *ptr)
 			|| dev->dev->bDescriptorType != USB_DT_DEVICE
 			|| dev->dev->bNumConfigurations != 1)
 		goto fail;
-	dev->dev->bNumConfigurations = 1;
 	dev->dev->bcdUSB = cpu_to_le16 (0x0200);
 
 	/* triggers gadgetfs_bind(); then we can enumerate. */
@@ -1888,7 +1882,7 @@ dev_config (struct file *fd, const char __user *buf, size_t len, loff_t *ptr)
 
 fail:
 	spin_unlock_irq (&dev->lock);
-	pr_debug ("%s: %s fail %Zd, %p\n", shortname, __func__, value, dev);
+	pr_debug ("%s: %s fail %zd, %p\n", shortname, __func__, value, dev);
 	kfree (dev->buf);
 	dev->buf = NULL;
 	return value;
@@ -1996,7 +1990,7 @@ static const struct super_operations gadget_fs_operations = {
 };
 
 static int
-gadgetfs_fill_super (struct super_block *sb, void *opts, int silent)
+gadgetfs_fill_super (struct super_block *sb, struct fs_context *fc)
 {
 	struct inode	*inode;
 	struct dev_data	*dev;
@@ -2046,15 +2040,26 @@ gadgetfs_fill_super (struct super_block *sb, void *opts, int silent)
 	return 0;
 
 Enomem:
+	kfree(CHIP);
+	CHIP = NULL;
+
 	return -ENOMEM;
 }
 
 /* "mount -t gadgetfs path /dev/gadget" ends up here */
-static struct dentry *
-gadgetfs_mount (struct file_system_type *t, int flags,
-		const char *path, void *opts)
+static int gadgetfs_get_tree(struct fs_context *fc)
 {
-	return mount_single (t, flags, opts, gadgetfs_fill_super);
+	return get_tree_single(fc, gadgetfs_fill_super);
+}
+
+static const struct fs_context_operations gadgetfs_context_ops = {
+	.get_tree	= gadgetfs_get_tree,
+};
+
+static int gadgetfs_init_fs_context(struct fs_context *fc)
+{
+	fc->ops = &gadgetfs_context_ops;
+	return 0;
 }
 
 static void
@@ -2074,7 +2079,7 @@ gadgetfs_kill_sb (struct super_block *sb)
 static struct file_system_type gadgetfs_type = {
 	.owner		= THIS_MODULE,
 	.name		= shortname,
-	.mount		= gadgetfs_mount,
+	.init_fs_context = gadgetfs_init_fs_context,
 	.kill_sb	= gadgetfs_kill_sb,
 };
 MODULE_ALIAS_FS("gadgetfs");

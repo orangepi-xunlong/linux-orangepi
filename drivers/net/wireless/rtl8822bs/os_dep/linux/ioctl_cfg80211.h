@@ -173,17 +173,6 @@ struct rtw_wdev_priv {
 	ATOMIC_T switch_ch_to;
 #endif
 
-#ifdef CONFIG_RTW_CFGVENDOR_RANDOM_MAC_OUI
-	u8 pno_mac_addr[ETH_ALEN];
-	u16 pno_scan_seq_num;
-#endif
-
-#ifdef CONFIG_RTW_CFGVEDNOR_RSSIMONITOR
-        s8 rssi_monitor_max;
-        s8 rssi_monitor_min;
-        u8 rssi_monitor_enable;
-#endif
-
 };
 
 bool rtw_cfg80211_is_connect_requested(_adapter *adapter);
@@ -269,7 +258,7 @@ void rtw_cfg80211_surveydone_event_callback(_adapter *padapter);
 struct cfg80211_bss *rtw_cfg80211_inform_bss(_adapter *padapter, struct wlan_network *pnetwork);
 int rtw_cfg80211_check_bss(_adapter *padapter);
 void rtw_cfg80211_ibss_indicate_connect(_adapter *padapter);
-int rtw_cfg80211_indicate_connect(_adapter *padapter);
+void rtw_cfg80211_indicate_connect(_adapter *padapter);
 void rtw_cfg80211_indicate_disconnect(_adapter *padapter, u16 reason, u8 locally_generated);
 void rtw_cfg80211_indicate_scan_done(_adapter *adapter, bool aborted);
 u32 rtw_cfg80211_wait_scan_req_empty(_adapter *adapter, u32 timeout_ms);
@@ -287,9 +276,6 @@ void rtw_cfg80211_indicate_sta_disassoc(_adapter *padapter, unsigned char *da, u
 #ifdef CONFIG_P2P
 void rtw_cfg80211_set_is_roch(_adapter *adapter, bool val);
 bool rtw_cfg80211_get_is_roch(_adapter *adapter);
-bool rtw_cfg80211_is_ro_ch_once(_adapter *adapter);
-void rtw_cfg80211_set_last_ro_ch_time(_adapter *adapter);
-s32 rtw_cfg80211_get_last_ro_ch_passing_ms(_adapter *adapter);
 
 int rtw_cfg80211_iface_has_p2p_group_cap(_adapter *adapter);
 int rtw_cfg80211_is_p2p_scan(_adapter *adapter);

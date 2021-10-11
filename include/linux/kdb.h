@@ -77,7 +77,6 @@ extern int kdb_poll_idx;
  * number whenever the kernel debugger is entered.
  */
 extern int kdb_initial_cpu;
-extern atomic_t kdb_event;
 
 /* Types and messages used for dynamically added kdb shell commands */
 
@@ -126,7 +125,7 @@ extern const char *kdb_diemsg;
 #define KDB_FLAG_NO_I8042	(1 << 7) /* No i8042 chip is available, do
 					  * not use keyboard */
 
-extern int kdb_flags;	/* Global flags, see kdb_state for per cpu state */
+extern unsigned int kdb_flags;	/* Global flags, see kdb_state for per cpu state */
 
 extern void kdb_save_flags(void);
 extern void kdb_restore_flags(void);
@@ -162,6 +161,7 @@ enum kdb_msgsrc {
 };
 
 extern int kdb_trap_printk;
+extern int kdb_printf_cpu;
 extern __printf(2, 0) int vkdb_printf(enum kdb_msgsrc src, const char *fmt,
 				      va_list args);
 extern __printf(1, 2) int kdb_printf(const char *, ...);
@@ -183,8 +183,6 @@ int kdb_process_cpu(const struct task_struct *p)
 	return cpu;
 }
 
-/* kdb access to register set for stack dumping */
-extern struct pt_regs *kdb_current_regs;
 #ifdef CONFIG_KALLSYMS
 extern const char *kdb_walk_kallsyms(loff_t *pos);
 #else /* ! CONFIG_KALLSYMS */

@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012  Smith Micro Software, Inc.
  * Copyright (c) 2012  Bjørn Mork <bjorn@mork.no>
  *
  * This driver is based on and reuse most of cdc_ncm, which is
  * Copyright (C) ST-Ericsson 2010-2012
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -23,6 +20,7 @@
 #include <linux/usb/cdc_ncm.h>
 #include <net/ipv6.h>
 #include <net/addrconf.h>
+#include <net/ipv6_stubs.h>
 
 /* alternative VLAN for IP session 0 if not untagged */
 #define MBIM_IPS0_VID	4094
@@ -100,6 +98,7 @@ static const struct net_device_ops cdc_mbim_netdev_ops = {
 	.ndo_stop             = usbnet_stop,
 	.ndo_start_xmit       = usbnet_start_xmit,
 	.ndo_tx_timeout       = usbnet_tx_timeout,
+	.ndo_get_stats64      = dev_get_tstats64,
 	.ndo_change_mtu       = cdc_ncm_change_mtu,
 	.ndo_set_mac_address  = eth_mac_addr,
 	.ndo_validate_addr    = eth_validate_addr,
@@ -398,7 +397,7 @@ static struct sk_buff *cdc_mbim_process_dgram(struct usbnet *dev, u8 *buf, size_
 	memcpy(eth_hdr(skb)->h_dest, dev->net->dev_addr, ETH_ALEN);
 
 	/* add datagram */
-	memcpy(skb_put(skb, len), buf, len);
+	skb_put_data(skb, buf, len);
 
 	/* map MBIM session to VLAN */
 	if (tci)
@@ -639,6 +638,13 @@ static const struct usb_device_id mbim_devs[] = {
 	 * devices is broader than necessary, but harmless.
 	 */
 	{ USB_VENDOR_AND_INTERFACE_INFO(0x12d1, USB_CLASS_COMM, USB_CDC_SUBCLASS_MBIM, USB_CDC_PROTO_NONE),
+	  .driver_info = (unsigned long)&cdc_mbim_info_ndp_to_end,
+	},
+
+	/* The HP lt4132 (03f0:a31d) is a rebranded Huawei ME906s-158,
+	 * therefore it too requires the above "NDP to end" quirk.
+	 */
+	{ USB_DEVICE_AND_INTERFACE_INFO(0x03f0, 0xa31d, USB_CLASS_COMM, USB_CDC_SUBCLASS_MBIM, USB_CDC_PROTO_NONE),
 	  .driver_info = (unsigned long)&cdc_mbim_info_ndp_to_end,
 	},
 

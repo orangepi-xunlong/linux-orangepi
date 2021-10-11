@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * c8sectpfe-core.c - C8SECTPFE STi DVB driver
  *
@@ -6,10 +7,6 @@
  *   Author:Peter Bennett <peter.bennett@st.com>
  *	    Peter Griffin <peter.griffin@linaro.org>
  *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License as
- *	published by the Free Software Foundation; either version 2 of
- *	the License, or (at your option) any later version.
  */
 #include <linux/atomic.h>
 #include <linux/clk.h>
@@ -38,10 +35,10 @@
 #include "c8sectpfe-core.h"
 #include "c8sectpfe-common.h"
 #include "c8sectpfe-debugfs.h"
-#include "dmxdev.h"
-#include "dvb_demux.h"
-#include "dvb_frontend.h"
-#include "dvb_net.h"
+#include <media/dmxdev.h>
+#include <media/dvb_demux.h>
+#include <media/dvb_frontend.h>
+#include <media/dvb_net.h>
 
 #define FIRMWARE_MEMDMA "pti_memdma_h407.elf"
 MODULE_FIRMWARE(FIRMWARE_MEMDMA);
@@ -61,9 +58,9 @@ static int load_c8sectpfe_fw(struct c8sectpfei *fei);
 
 #define FIFO_LEN 1024
 
-static void c8sectpfe_timer_interrupt(unsigned long ac8sectpfei)
+static void c8sectpfe_timer_interrupt(struct timer_list *t)
 {
-	struct c8sectpfei *fei = (struct c8sectpfei *)ac8sectpfei;
+	struct c8sectpfei *fei = from_timer(fei, t, timer);
 	struct channel_info *channel;
 	int chan_num;
 
@@ -80,9 +77,9 @@ static void c8sectpfe_timer_interrupt(unsigned long ac8sectpfei)
 	add_timer(&fei->timer);
 }
 
-static void channel_swdemux_tsklet(unsigned long data)
+static void channel_swdemux_tsklet(struct tasklet_struct *t)
 {
-	struct channel_info *channel = (struct channel_info *)data;
+	struct channel_info *channel = from_tasklet(channel, t, tsklet);
 	struct c8sectpfei *fei;
 	unsigned long wp, rp;
 	int pos, num_packets, n, size;
@@ -114,8 +111,7 @@ static void channel_swdemux_tsklet(unsigned long data)
 	buf = (u8 *) channel->back_buffer_aligned;
 
 	dev_dbg(fei->dev,
-		"chan=%d channel=%p num_packets = %d, buf = %p, pos = 0x%x\n\t"
-		"rp=0x%lx, wp=0x%lx\n",
+		"chan=%d channel=%p num_packets = %d, buf = %p, pos = 0x%x\n\trp=0x%lx, wp=0x%lx\n",
 		channel->tsin_id, channel, num_packets, buf, pos, rp, wp);
 
 	for (n = 0; n < num_packets; n++) {
@@ -212,8 +208,7 @@ static int c8sectpfe_start_feed(struct dvb_demux_feed *dvbdmxfeed)
 
 		dev_dbg(fei->dev, "Starting channel=%p\n", channel);
 
-		tasklet_init(&channel->tsklet, channel_swdemux_tsklet,
-			     (unsigned long) channel);
+		tasklet_setup(&channel->tsklet, channel_swdemux_tsklet);
 
 		/* Reset the internal inputblock sram pointers */
 		writel(channel->fifo,
@@ -642,8 +637,7 @@ static int configure_memdma_and_inputblock(struct c8sectpfei *fei,
 	writel(tsin->back_buffer_busaddr, tsin->irec + DMA_PRDS_BUSRP_TP(0));
 
 	/* initialize tasklet */
-	tasklet_init(&tsin->tsklet, channel_swdemux_tsklet,
-		(unsigned long) tsin);
+	tasklet_setup(&tsin->tsklet, channel_swdemux_tsklet);
 
 	return 0;
 
@@ -661,7 +655,7 @@ static irqreturn_t c8sectpfe_error_irq_handler(int irq, void *priv)
 
 	/*
 	 * TODO FIXME we should detect some error conditions here
-	 * and ideally so something about them!
+	 * and ideally do something about them!
 	 */
 
 	return IRQ_HANDLED;
@@ -694,19 +688,15 @@ static int c8sectpfe_probe(struct platform_device *pdev)
 	if (IS_ERR(fei->sram))
 		return PTR_ERR(fei->sram);
 
-	fei->sram_size = res->end - res->start;
+	fei->sram_size = resource_size(res);
 
 	fei->idle_irq = platform_get_irq_byname(pdev, "c8sectpfe-idle-irq");
-	if (fei->idle_irq < 0) {
-		dev_err(dev, "Can't get c8sectpfe-idle-irq\n");
+	if (fei->idle_irq < 0)
 		return fei->idle_irq;
-	}
 
 	fei->error_irq = platform_get_irq_byname(pdev, "c8sectpfe-error-irq");
-	if (fei->error_irq < 0) {
-		dev_err(dev, "Can't get c8sectpfe-error-irq\n");
+	if (fei->error_irq < 0)
 		return fei->error_irq;
-	}
 
 	platform_set_drvdata(pdev, fei);
 
@@ -775,7 +765,7 @@ static int c8sectpfe_probe(struct platform_device *pdev)
 
 		if (!fei->channel_data[index]) {
 			ret = -ENOMEM;
-			goto err_clk_disable;
+			goto err_node_put;
 		}
 
 		tsin = fei->channel_data[index];
@@ -785,17 +775,16 @@ static int c8sectpfe_probe(struct platform_device *pdev)
 		ret = of_property_read_u32(child, "tsin-num", &tsin->tsin_id);
 		if (ret) {
 			dev_err(&pdev->dev, "No tsin_num found\n");
-			goto err_clk_disable;
+			goto err_node_put;
 		}
 
 		/* sanity check value */
 		if (tsin->tsin_id > fei->hw_stats.num_ib) {
 			dev_err(&pdev->dev,
-				"tsin-num %d specified greater than number\n\t"
-				"of input block hw in SoC! (%d)",
+				"tsin-num %d specified greater than number\n\tof input block hw in SoC! (%d)",
 				tsin->tsin_id, fei->hw_stats.num_ib);
 			ret = -EINVAL;
-			goto err_clk_disable;
+			goto err_node_put;
 		}
 
 		tsin->invert_ts_clk = of_property_read_bool(child,
@@ -811,20 +800,22 @@ static int c8sectpfe_probe(struct platform_device *pdev)
 					&tsin->dvb_card);
 		if (ret) {
 			dev_err(&pdev->dev, "No dvb-card found\n");
-			goto err_clk_disable;
+			goto err_node_put;
 		}
 
 		i2c_bus = of_parse_phandle(child, "i2c-bus", 0);
 		if (!i2c_bus) {
 			dev_err(&pdev->dev, "No i2c-bus found\n");
-			goto err_clk_disable;
+			ret = -ENODEV;
+			goto err_node_put;
 		}
 		tsin->i2c_adapter =
 			of_find_i2c_adapter_by_node(i2c_bus);
 		if (!tsin->i2c_adapter) {
 			dev_err(&pdev->dev, "No i2c adapter found\n");
 			of_node_put(i2c_bus);
-			goto err_clk_disable;
+			ret = -ENODEV;
+			goto err_node_put;
 		}
 		of_node_put(i2c_bus);
 
@@ -835,7 +826,8 @@ static int c8sectpfe_probe(struct platform_device *pdev)
 			dev_err(dev,
 				"reset gpio for tsin%d not valid (gpio=%d)\n",
 				tsin->tsin_id, tsin->rst_gpio);
-			goto err_clk_disable;
+			ret = -EINVAL;
+			goto err_node_put;
 		}
 
 		ret = devm_gpio_request_one(dev, tsin->rst_gpio,
@@ -843,7 +835,7 @@ static int c8sectpfe_probe(struct platform_device *pdev)
 		if (ret && ret != -EBUSY) {
 			dev_err(dev, "Can't request tsin%d reset gpio\n"
 				, fei->channel_data[index]->tsin_id);
-			goto err_clk_disable;
+			goto err_node_put;
 		}
 
 		if (!ret) {
@@ -857,8 +849,7 @@ static int c8sectpfe_probe(struct platform_device *pdev)
 		tsin->demux_mapping = index;
 
 		dev_dbg(fei->dev,
-			"channel=%p n=%d tsin_num=%d, invert-ts-clk=%d\n\t"
-			"serial-not-parallel=%d pkt-clk-valid=%d dvb-card=%d\n",
+			"channel=%p n=%d tsin_num=%d, invert-ts-clk=%d\n\tserial-not-parallel=%d pkt-clk-valid=%d dvb-card=%d\n",
 			fei->channel_data[index], index,
 			tsin->tsin_id, tsin->invert_ts_clk,
 			tsin->serial_not_parallel, tsin->async_not_sync,
@@ -868,9 +859,7 @@ static int c8sectpfe_probe(struct platform_device *pdev)
 	}
 
 	/* Setup timer interrupt */
-	init_timer(&fei->timer);
-	fei->timer.function = c8sectpfe_timer_interrupt;
-	fei->timer.data = (unsigned long)fei;
+	timer_setup(&fei->timer, c8sectpfe_timer_interrupt, 0);
 
 	mutex_init(&fei->lock);
 
@@ -889,9 +878,10 @@ static int c8sectpfe_probe(struct platform_device *pdev)
 
 	return 0;
 
+err_node_put:
+	of_node_put(child);
 err_clk_disable:
-	/* TODO uncomment when upstream has taken a reference on this clk */
-	/*clk_disable_unprepare(fei->c8sectpfeclk);*/
+	clk_disable_unprepare(fei->c8sectpfeclk);
 	return ret;
 }
 
@@ -926,11 +916,8 @@ static int c8sectpfe_remove(struct platform_device *pdev)
 	if (readl(fei->io + SYS_OTHER_CLKEN))
 		writel(0, fei->io + SYS_OTHER_CLKEN);
 
-	/* TODO uncomment when upstream has taken a reference on this clk */
-	/*
 	if (fei->c8sectpfeclk)
 		clk_disable_unprepare(fei->c8sectpfeclk);
-	*/
 
 	return 0;
 }
@@ -1047,10 +1034,9 @@ static void load_imem_segment(struct c8sectpfei *fei, Elf32_Phdr *phdr,
 	 */
 
 	dev_dbg(fei->dev,
-		"Loading IMEM segment %d 0x%08x\n\t"
-		" (0x%x bytes) -> 0x%p (0x%x bytes)\n", seg_num,
-		phdr->p_paddr, phdr->p_filesz,
-		dest, phdr->p_memsz + phdr->p_memsz / 3);
+		"Loading IMEM segment %d 0x%08x\n\t (0x%x bytes) -> 0x%p (0x%x bytes)\n",
+		seg_num, phdr->p_paddr, phdr->p_filesz, dest,
+		phdr->p_memsz + phdr->p_memsz / 3);
 
 	for (i = 0; i < phdr->p_filesz; i++) {
 
@@ -1077,8 +1063,7 @@ static void load_dmem_segment(struct c8sectpfei *fei, Elf32_Phdr *phdr,
 	 */
 
 	dev_dbg(fei->dev,
-		"Loading DMEM segment %d 0x%08x\n\t"
-		"(0x%x bytes) -> 0x%p (0x%x bytes)\n",
+		"Loading DMEM segment %d 0x%08x\n\t(0x%x bytes) -> 0x%p (0x%x bytes)\n",
 		seg_num, phdr->p_paddr, phdr->p_filesz,
 		dst, phdr->p_memsz);
 

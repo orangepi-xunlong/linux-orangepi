@@ -1,22 +1,5 @@
-/* Intel(R) Ethernet Switch Host Interface Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- */
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Copyright(c) 2013 - 2019 Intel Corporation. */
 
 #ifndef _FM10K_H_
 #define _FM10K_H_
@@ -58,21 +41,23 @@ struct fm10k_l2_accel {
 	u16 count;
 	u16 dglort;
 	struct rcu_head rcu;
-	struct net_device *macvlan[0];
+	struct net_device *macvlan[];
 };
 
 enum fm10k_ring_state_t {
 	__FM10K_TX_DETECT_HANG,
 	__FM10K_HANG_CHECK_ARMED,
 	__FM10K_TX_XPS_INIT_DONE,
+	/* This must be last and is used to calculate BITMAP size */
+	__FM10K_TX_STATE_SIZE__,
 };
 
 #define check_for_tx_hang(ring) \
-	test_bit(__FM10K_TX_DETECT_HANG, &(ring)->state)
+	test_bit(__FM10K_TX_DETECT_HANG, (ring)->state)
 #define set_check_for_tx_hang(ring) \
-	set_bit(__FM10K_TX_DETECT_HANG, &(ring)->state)
+	set_bit(__FM10K_TX_DETECT_HANG, (ring)->state)
 #define clear_check_for_tx_hang(ring) \
-	clear_bit(__FM10K_TX_DETECT_HANG, &(ring)->state)
+	clear_bit(__FM10K_TX_DETECT_HANG, (ring)->state)
 
 struct fm10k_tx_buffer {
 	struct fm10k_tx_desc *next_to_watch;
@@ -126,7 +111,7 @@ struct fm10k_ring {
 		struct fm10k_rx_buffer *rx_buffer;
 	};
 	u32 __iomem *tail;
-	unsigned long state;
+	DECLARE_BITMAP(state, __FM10K_TX_STATE_SIZE__);
 	dma_addr_t dma;			/* phys. address of descriptor ring */
 	unsigned int size;		/* length in bytes */
 
@@ -192,14 +177,10 @@ static inline struct netdev_queue *txring_txq(const struct fm10k_ring *ring)
 #define MIN_Q_VECTORS	1
 enum fm10k_non_q_vectors {
 	FM10K_MBX_VECTOR,
-#define NON_Q_VECTORS_VF NON_Q_VECTORS_PF
-	NON_Q_VECTORS_PF
+	NON_Q_VECTORS
 };
 
-#define NON_Q_VECTORS(hw)	(((hw)->mac.type == fm10k_mac_pf) ? \
-						NON_Q_VECTORS_PF : \
-						NON_Q_VECTORS_VF)
-#define MIN_MSIX_COUNT(hw)	(MIN_Q_VECTORS + NON_Q_VECTORS(hw))
+#define MIN_MSIX_COUNT(hw)	(MIN_Q_VECTORS + NON_Q_VECTORS)
 
 struct fm10k_q_vector {
 	struct fm10k_intfc *interface;
@@ -217,7 +198,7 @@ struct fm10k_q_vector {
 	struct rcu_head rcu;	/* to avoid race with update stats on free */
 
 	/* for dynamic allocation of rings associated with this q_vector */
-	struct fm10k_ring ring[0] ____cacheline_internodealigned_in_smp;
+	struct fm10k_ring ring[] ____cacheline_internodealigned_in_smp;
 };
 
 enum fm10k_ring_f_enum {
@@ -237,32 +218,79 @@ struct fm10k_iov_data {
 	unsigned int		num_vfs;
 	unsigned int		next_vf_mbx;
 	struct rcu_head		rcu;
-	struct fm10k_vf_info	vf_info[0];
+	struct fm10k_vf_info	vf_info[];
 };
 
-struct fm10k_udp_port {
-	struct list_head	list;
-	sa_family_t		sa_family;
-	__be16			port;
+enum fm10k_macvlan_request_type {
+	FM10K_UC_MAC_REQUEST,
+	FM10K_MC_MAC_REQUEST,
+	FM10K_VLAN_REQUEST
+};
+
+struct fm10k_macvlan_request {
+	enum fm10k_macvlan_request_type type;
+	struct list_head list;
+	union {
+		struct fm10k_mac_request {
+			u8 addr[ETH_ALEN];
+			u16 glort;
+			u16 vid;
+		} mac;
+		struct fm10k_vlan_request {
+			u32 vid;
+			u8 vsi;
+		} vlan;
+	};
+	bool set;
 };
 
 /* one work queue for entire driver */
 extern struct workqueue_struct *fm10k_workqueue;
+
+/* The following enumeration contains flags which indicate or enable modified
+ * driver behaviors. To avoid race conditions, the flags are stored in
+ * a BITMAP in the fm10k_intfc structure. The BITMAP should be accessed using
+ * atomic *_bit() operations.
+ */
+enum fm10k_flags_t {
+	FM10K_FLAG_RESET_REQUESTED,
+	FM10K_FLAG_RSS_FIELD_IPV4_UDP,
+	FM10K_FLAG_RSS_FIELD_IPV6_UDP,
+	FM10K_FLAG_SWPRI_CONFIG,
+	/* __FM10K_FLAGS_SIZE__ is used to calculate the size of
+	 * interface->flags and must be the last value in this
+	 * enumeration.
+	 */
+	__FM10K_FLAGS_SIZE__
+};
+
+enum fm10k_state_t {
+	__FM10K_RESETTING,
+	__FM10K_RESET_DETACHED,
+	__FM10K_RESET_SUSPENDED,
+	__FM10K_DOWN,
+	__FM10K_SERVICE_SCHED,
+	__FM10K_SERVICE_REQUEST,
+	__FM10K_SERVICE_DISABLE,
+	__FM10K_MACVLAN_SCHED,
+	__FM10K_MACVLAN_REQUEST,
+	__FM10K_MACVLAN_DISABLE,
+	__FM10K_LINK_DOWN,
+	__FM10K_UPDATING_STATS,
+	/* This value must be last and determines the BITMAP size */
+	__FM10K_STATE_SIZE__,
+};
 
 struct fm10k_intfc {
 	unsigned long active_vlans[BITS_TO_LONGS(VLAN_N_VID)];
 	struct net_device *netdev;
 	struct fm10k_l2_accel *l2_accel; /* pointer to L2 acceleration list */
 	struct pci_dev *pdev;
-	unsigned long state;
+	DECLARE_BITMAP(state, __FM10K_STATE_SIZE__);
 
-	u32 flags;
-#define FM10K_FLAG_RESET_REQUESTED		(u32)(BIT(0))
-#define FM10K_FLAG_RSS_FIELD_IPV4_UDP		(u32)(BIT(1))
-#define FM10K_FLAG_RSS_FIELD_IPV6_UDP		(u32)(BIT(2))
-#define FM10K_FLAG_RX_TS_ENABLED		(u32)(BIT(3))
-#define FM10K_FLAG_SWPRI_CONFIG			(u32)(BIT(4))
-#define FM10K_FLAG_DEBUG_STATS			(u32)(BIT(5))
+	/* Access flag values using atomic *_bit() operations */
+	DECLARE_BITMAP(flags, __FM10K_FLAGS_SIZE__);
+
 	int xcast_mode;
 
 	/* Tx fast path data */
@@ -316,6 +344,8 @@ struct fm10k_intfc {
 
 	struct fm10k_hw_stats stats;
 	struct fm10k_hw hw;
+	/* Mailbox lock */
+	spinlock_t mbx_lock;
 	u32 __iomem *uc_addr;
 	u32 __iomem *sw_addr;
 	u16 msg_enable;
@@ -334,8 +364,14 @@ struct fm10k_intfc {
 	u32 rssrk[FM10K_RSSRK_SIZE];
 
 	/* UDP encapsulation port tracking information */
-	struct list_head vxlan_port;
-	struct list_head geneve_port;
+	__be16 vxlan_port;
+	__be16 geneve_port;
+
+	/* MAC/VLAN update queue */
+	struct list_head macvlan_requests;
+	struct delayed_work macvlan_task;
+	/* MAC/VLAN update queue lock */
+	spinlock_t macvlan_lock;
 
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *dbg_intfc;
@@ -354,35 +390,19 @@ struct fm10k_intfc {
 	u16 vid;
 };
 
-enum fm10k_state_t {
-	__FM10K_RESETTING,
-	__FM10K_DOWN,
-	__FM10K_SERVICE_SCHED,
-	__FM10K_SERVICE_DISABLE,
-	__FM10K_MBX_LOCK,
-	__FM10K_LINK_DOWN,
-	__FM10K_UPDATING_STATS,
-};
-
 static inline void fm10k_mbx_lock(struct fm10k_intfc *interface)
 {
-	/* busy loop if we cannot obtain the lock as some calls
-	 * such as ndo_set_rx_mode may be made in atomic context
-	 */
-	while (test_and_set_bit(__FM10K_MBX_LOCK, &interface->state))
-		udelay(20);
+	spin_lock(&interface->mbx_lock);
 }
 
 static inline void fm10k_mbx_unlock(struct fm10k_intfc *interface)
 {
-	/* flush memory to make sure state is correct */
-	smp_mb__before_atomic();
-	clear_bit(__FM10K_MBX_LOCK, &interface->state);
+	spin_unlock(&interface->mbx_lock);
 }
 
 static inline int fm10k_mbx_trylock(struct fm10k_intfc *interface)
 {
-	return !test_and_set_bit(__FM10K_MBX_LOCK, &interface->state);
+	return spin_trylock(&interface->mbx_lock);
 }
 
 /* fm10k_test_staterr - test bits in Rx descriptor status and error fields */
@@ -450,7 +470,6 @@ struct fm10k_cb {
 
 /* main */
 extern char fm10k_driver_name[];
-extern const char fm10k_driver_version[];
 int fm10k_init_queueing_scheme(struct fm10k_intfc *interface);
 void fm10k_clear_queueing_scheme(struct fm10k_intfc *interface);
 __be16 fm10k_tx_encap_offload(struct sk_buff *skb);
@@ -472,10 +491,8 @@ void fm10k_up(struct fm10k_intfc *interface);
 void fm10k_down(struct fm10k_intfc *interface);
 void fm10k_update_stats(struct fm10k_intfc *interface);
 void fm10k_service_event_schedule(struct fm10k_intfc *interface);
+void fm10k_macvlan_schedule(struct fm10k_intfc *interface);
 void fm10k_update_rx_drop_en(struct fm10k_intfc *interface);
-#ifdef CONFIG_NET_POLL_CONTROLLER
-void fm10k_netpoll(struct net_device *netdev);
-#endif
 
 /* Netdev */
 struct net_device *fm10k_alloc_netdev(const struct fm10k_info *info);
@@ -492,6 +509,12 @@ void fm10k_reset_rx_state(struct fm10k_intfc *);
 int fm10k_setup_tc(struct net_device *dev, u8 tc);
 int fm10k_open(struct net_device *netdev);
 int fm10k_close(struct net_device *netdev);
+int fm10k_queue_vlan_request(struct fm10k_intfc *interface, u32 vid,
+			     u8 vsi, bool set);
+int fm10k_queue_mac_request(struct fm10k_intfc *interface, u16 glort,
+			    const unsigned char *addr, u16 vid, bool set);
+void fm10k_clear_macvlan_queue(struct fm10k_intfc *interface,
+			       u16 glort, bool vlans);
 
 /* Ethtool */
 void fm10k_set_ethtool_ops(struct net_device *dev);
@@ -504,6 +527,7 @@ void fm10k_iov_suspend(struct pci_dev *pdev);
 int fm10k_iov_resume(struct pci_dev *pdev);
 void fm10k_iov_disable(struct pci_dev *pdev);
 int fm10k_iov_configure(struct pci_dev *pdev, int num_vfs);
+void fm10k_iov_update_stats(struct fm10k_intfc *interface);
 s32 fm10k_iov_update_pvid(struct fm10k_intfc *interface, u16 glort, u16 pvid);
 int fm10k_ndo_set_vf_mac(struct net_device *netdev, int vf_idx, u8 *mac);
 int fm10k_ndo_set_vf_vlan(struct net_device *netdev,
@@ -512,6 +536,8 @@ int fm10k_ndo_set_vf_bw(struct net_device *netdev, int vf_idx,
 			int __always_unused min_rate, int max_rate);
 int fm10k_ndo_get_vf_config(struct net_device *netdev,
 			    int vf_idx, struct ifla_vf_info *ivi);
+int fm10k_ndo_get_vf_stats(struct net_device *netdev,
+			   int vf_idx, struct ifla_vf_stats *stats);
 
 /* DebugFS */
 #ifdef CONFIG_DEBUG_FS

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * USB IBM C-It Video Camera driver
  *
@@ -10,21 +11,6 @@
  *
  * (C) Copyright 1999 Johannes Erdfelt
  * (C) Copyright 1999 Randy Dunlap
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -708,7 +694,8 @@ static int cit_read_reg(struct gspca_dev *gspca_dev, u16 index, int verbose)
 	}
 
 	if (verbose)
-		PDEBUG(D_PROBE, "Register %04x value: %02x", index, buf[0]);
+		gspca_dbg(gspca_dev, D_PROBE, "Register %04x value: %02x\n",
+			  index, buf[0]);
 
 	return 0;
 }
@@ -1319,7 +1306,7 @@ static int cit_set_sharpness(struct gspca_dev *gspca_dev, s32 val)
 		break;
 	case CIT_MODEL1: {
 		int i;
-		const unsigned short sa[] = {
+		static const unsigned short sa[] = {
 			0x11, 0x13, 0x16, 0x18, 0x1a, 0x8, 0x0a };
 
 		for (i = 0; i < cit_model1_ntries; i++)
@@ -1422,7 +1409,7 @@ static int cit_restart_stream(struct gspca_dev *gspca_dev)
 	case CIT_MODEL0:
 	case CIT_MODEL1:
 		cit_write_reg(gspca_dev, 0x0001, 0x0114);
-		/* Fall through */
+		fallthrough;
 	case CIT_MODEL2:
 	case CIT_MODEL4:
 		cit_write_reg(gspca_dev, 0x00c0, 0x010c); /* Go! */
@@ -1455,6 +1442,9 @@ static int cit_get_packet_size(struct gspca_dev *gspca_dev)
 		return -EIO;
 	}
 
+	if (alt->desc.bNumEndpoints < 1)
+		return -ENODEV;
+
 	return le16_to_cpu(alt->endpoint[0].desc.wMaxPacketSize);
 }
 
@@ -1475,10 +1465,11 @@ static int cit_get_clock_div(struct gspca_dev *gspca_dev)
 			fps[clock_div - 1] * 3 / 2)
 		clock_div--;
 
-	PDEBUG(D_PROBE,
-	       "PacketSize: %d, res: %dx%d -> using clockdiv: %d (%d fps)",
-	       packet_size, gspca_dev->pixfmt.width, gspca_dev->pixfmt.height,
-	       clock_div, fps[clock_div]);
+	gspca_dbg(gspca_dev, D_PROBE,
+		  "PacketSize: %d, res: %dx%d -> using clockdiv: %d (%d fps)\n",
+		  packet_size,
+		  gspca_dev->pixfmt.width, gspca_dev->pixfmt.height,
+		  clock_div, fps[clock_div]);
 
 	return clock_div;
 }
@@ -2638,6 +2629,7 @@ static int sd_start(struct gspca_dev *gspca_dev)
 
 static int sd_isoc_init(struct gspca_dev *gspca_dev)
 {
+	struct usb_interface_cache *intfc;
 	struct usb_host_interface *alt;
 	int max_packet_size;
 
@@ -2653,8 +2645,17 @@ static int sd_isoc_init(struct gspca_dev *gspca_dev)
 		break;
 	}
 
+	intfc = gspca_dev->dev->actconfig->intf_cache[0];
+
+	if (intfc->num_altsetting < 2)
+		return -ENODEV;
+
+	alt = &intfc->altsetting[1];
+
+	if (alt->desc.bNumEndpoints < 1)
+		return -ENODEV;
+
 	/* Start isoc bandwidth "negotiation" at max isoc bandwidth */
-	alt = &gspca_dev->dev->actconfig->intf_cache[0]->altsetting[1];
 	alt->endpoint[0].desc.wMaxPacketSize = cpu_to_le16(max_packet_size);
 
 	return 0;
@@ -2677,6 +2678,9 @@ static int sd_isoc_nego(struct gspca_dev *gspca_dev)
 		break;
 	}
 
+	/*
+	 * Existence of altsetting and endpoint was verified in sd_isoc_init()
+	 */
 	alt = &gspca_dev->dev->actconfig->intf_cache[0]->altsetting[1];
 	packet_size = le16_to_cpu(alt->endpoint[0].desc.wMaxPacketSize);
 	if (packet_size <= min_packet_size)
@@ -2721,7 +2725,7 @@ static void sd_stop0(struct gspca_dev *gspca_dev)
 		break;
 	case CIT_MODEL2:
 		v4l2_ctrl_grab(sd->lighting, false);
-		/* Fall through! */
+		fallthrough;
 	case CIT_MODEL4:
 		cit_model2_Packet1(gspca_dev, 0x0030, 0x0004);
 
@@ -2869,17 +2873,17 @@ static u8 *cit_find_sof(struct gspca_dev *gspca_dev, u8 *data, int len)
 				sd->sof_read = 0;
 				if (data[i] == 0xff) {
 					if (i >= 4)
-						PDEBUG(D_FRAM,
-						       "header found at offset: %d: %02x %02x 00 %3ph\n",
-						       i - 1,
-						       data[i - 4],
-						       data[i - 3],
-						       &data[i]);
+						gspca_dbg(gspca_dev, D_FRAM,
+							  "header found at offset: %d: %02x %02x 00 %3ph\n\n",
+							  i - 1,
+							  data[i - 4],
+							  data[i - 3],
+							  &data[i]);
 					else
-						PDEBUG(D_FRAM,
-						       "header found at offset: %d: 00 %3ph\n",
-						       i - 1,
-						       &data[i]);
+						gspca_dbg(gspca_dev, D_FRAM,
+							  "header found at offset: %d: 00 %3ph\n\n",
+							  i - 1,
+							  &data[i]);
 					return data + i + (sd->sof_len - 1);
 				}
 				break;

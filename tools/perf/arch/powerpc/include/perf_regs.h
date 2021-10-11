@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef ARCH_PERF_REGS_H
 #define ARCH_PERF_REGS_H
 
@@ -61,10 +62,24 @@ static const char *reg_names[] = {
 	[PERF_REG_POWERPC_SOFTE] = "softe",
 	[PERF_REG_POWERPC_TRAP] = "trap",
 	[PERF_REG_POWERPC_DAR] = "dar",
-	[PERF_REG_POWERPC_DSISR] = "dsisr"
+	[PERF_REG_POWERPC_DSISR] = "dsisr",
+	[PERF_REG_POWERPC_SIER] = "sier",
+	[PERF_REG_POWERPC_MMCRA] = "mmcra",
+	[PERF_REG_POWERPC_MMCR0] = "mmcr0",
+	[PERF_REG_POWERPC_MMCR1] = "mmcr1",
+	[PERF_REG_POWERPC_MMCR2] = "mmcr2",
+	[PERF_REG_POWERPC_MMCR3] = "mmcr3",
+	[PERF_REG_POWERPC_SIER2] = "sier2",
+	[PERF_REG_POWERPC_SIER3] = "sier3",
+	[PERF_REG_POWERPC_PMC1] = "pmc1",
+	[PERF_REG_POWERPC_PMC2] = "pmc2",
+	[PERF_REG_POWERPC_PMC3] = "pmc3",
+	[PERF_REG_POWERPC_PMC4] = "pmc4",
+	[PERF_REG_POWERPC_PMC5] = "pmc5",
+	[PERF_REG_POWERPC_PMC6] = "pmc6",
 };
 
-static inline const char *perf_reg_name(int id)
+static inline const char *__perf_reg_name(int id)
 {
 	return reg_names[id];
 }

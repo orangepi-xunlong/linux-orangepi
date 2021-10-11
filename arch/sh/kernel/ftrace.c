@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2008 Matt Fleming <matt@console-pimps.org>
  * Copyright (C) 2008 Paul Mundt <lethal@linux-sh.org>
@@ -66,7 +67,7 @@ static unsigned char *ftrace_call_replace(unsigned long ip, unsigned long addr)
  * Modifying code must take extra care. On an SMP machine, if
  * the code being modified is also being executed on another CPU
  * that CPU will have undefined results and possibly take a GPF.
- * We use kstop_machine to stop other CPUS from exectuing code.
+ * We use kstop_machine to stop other CPUS from executing code.
  * But this does not stop NMIs from happening. We still need
  * to protect against that. We separate out the modification of
  * the code to take care of this.
@@ -96,19 +97,6 @@ static int mod_code_status;		/* holds return value of text write */
 static void *mod_code_ip;		/* holds the IP to write to */
 static void *mod_code_newcode;		/* holds the text to write to the IP */
 
-static unsigned nmi_wait_count;
-static atomic_t nmi_update_count = ATOMIC_INIT(0);
-
-int ftrace_arch_read_dyn_info(char *buf, int size)
-{
-	int r;
-
-	r = snprintf(buf, size, "%u %u",
-		     nmi_wait_count,
-		     atomic_read(&nmi_update_count));
-	return r;
-}
-
 static void clear_mod_flag(void)
 {
 	int old = atomic_read(&nmi_running);
@@ -131,7 +119,7 @@ static void ftrace_mod_code(void)
 	 * But if one were to fail, then they all should, and if one were
 	 * to succeed, then they all should.
 	 */
-	mod_code_status = probe_kernel_write(mod_code_ip, mod_code_newcode,
+	mod_code_status = copy_to_kernel_nofault(mod_code_ip, mod_code_newcode,
 					     MCOUNT_INSN_SIZE);
 
 	/* if we fail, then kill any new writers */
@@ -144,7 +132,6 @@ void arch_ftrace_nmi_enter(void)
 	if (atomic_inc_return(&nmi_running) & MOD_CODE_WRITE_FLAG) {
 		smp_rmb();
 		ftrace_mod_code();
-		atomic_inc(&nmi_update_count);
 	}
 	/* Must have previous changes seen before executions */
 	smp_mb();
@@ -165,8 +152,6 @@ static void wait_for_nmi_and_set_mod_flag(void)
 	do {
 		cpu_relax();
 	} while (atomic_cmpxchg(&nmi_running, 0, MOD_CODE_WRITE_FLAG));
-
-	nmi_wait_count++;
 }
 
 static void wait_for_nmi(void)
@@ -177,8 +162,6 @@ static void wait_for_nmi(void)
 	do {
 		cpu_relax();
 	} while (atomic_read(&nmi_running));
-
-	nmi_wait_count++;
 }
 
 static int
@@ -220,7 +203,7 @@ static int ftrace_modify_code(unsigned long ip, unsigned char *old_code,
 	 */
 
 	/* read the text we want to modify */
-	if (probe_kernel_read(replaced, (void *)ip, MCOUNT_INSN_SIZE))
+	if (copy_from_kernel_nofault(replaced, (void *)ip, MCOUNT_INSN_SIZE))
 		return -EFAULT;
 
 	/* Make sure it is what we expect it to be */
@@ -285,7 +268,7 @@ static int ftrace_mod(unsigned long ip, unsigned long old_addr,
 {
 	unsigned char code[MCOUNT_INSN_SIZE];
 
-	if (probe_kernel_read(code, (void *)ip, MCOUNT_INSN_SIZE))
+	if (copy_from_kernel_nofault(code, (void *)ip, MCOUNT_INSN_SIZE))
 		return -EFAULT;
 
 	if (old_addr != __raw_readl((unsigned long *)code))
@@ -338,8 +321,7 @@ int ftrace_disable_ftrace_graph_caller(void)
 void prepare_ftrace_return(unsigned long *parent, unsigned long self_addr)
 {
 	unsigned long old;
-	int faulted, err;
-	struct ftrace_graph_ent trace;
+	int faulted;
 	unsigned long return_hooker = (unsigned long)&return_to_handler;
 
 	if (unlikely(ftrace_graph_is_dead()))
@@ -382,18 +364,7 @@ void prepare_ftrace_return(unsigned long *parent, unsigned long self_addr)
 		return;
 	}
 
-	err = ftrace_push_return_trace(old, self_addr, &trace.depth, 0, NULL);
-	if (err == -EBUSY) {
+	if (function_graph_enter(old, self_addr, 0, NULL))
 		__raw_writel(old, parent);
-		return;
-	}
-
-	trace.func = self_addr;
-
-	/* Only trace if the calling function expects to */
-	if (!ftrace_graph_entry(&trace)) {
-		current->curr_ret_stack--;
-		__raw_writel(old, parent);
-	}
 }
 #endif /* CONFIG_FUNCTION_GRAPH_TRACER */

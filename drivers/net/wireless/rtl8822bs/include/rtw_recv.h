@@ -112,7 +112,6 @@ struct recv_reorder_ctrl {
 struct	stainfo_rxcache	{
 	u16	tid_rxseq[16];
 	u8 iv[16][8];
-	u8 last_tid;
 #if 0
 	unsigned short	tid0_rxseq;
 	unsigned short	tid1_rxseq;
@@ -400,7 +399,7 @@ struct recv_priv {
 	struct sk_buff_head rx_skb_queue;
 #ifdef CONFIG_RTW_NAPI
 		struct sk_buff_head rx_napi_skb_queue;
-#endif
+#endif 
 #ifdef CONFIG_RX_INDICATE_QUEUE
 	struct task rx_indicate_tasklet;
 	struct ifqueue rx_indicate_queue;
@@ -783,7 +782,7 @@ __inline static u8 *recvframe_pull_tail(union recv_frame *precvframe, sint sz)
 
 __inline static _buffer *get_rxbuf_desc(union recv_frame *precvframe)
 {
-	_buffer *buf_desc = NULL;
+	_buffer *buf_desc;
 
 	if (precvframe == NULL)
 		return NULL;
@@ -808,7 +807,7 @@ __inline static union recv_frame *rxmem_to_recvframe(u8 *rxmem)
 __inline static union recv_frame *pkt_to_recvframe(_pkt *pkt)
 {
 
-	u8 *buf_star = NULL;
+	u8 *buf_star;
 	union recv_frame *precv_frame;
 #ifdef PLATFORM_WINDOWS
 	_buffer *buf_desc;

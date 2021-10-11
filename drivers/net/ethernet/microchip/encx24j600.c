@@ -1,14 +1,9 @@
-/**
+// SPDX-License-Identifier: GPL-2.0-or-later
+/*
  * Microchip ENCX24J600 ethernet driver
  *
  * Copyright (C) 2015 Gridpoint
  * Author: Jon Ringle <jringle@gridpoint.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 
 #include <linux/device.h>
@@ -30,7 +25,7 @@
 
 #define DEFAULT_MSG_ENABLE (NETIF_MSG_DRV | NETIF_MSG_PROBE | NETIF_MSG_LINK)
 static int debug = -1;
-module_param(debug, int, 0);
+module_param(debug, int, 0000);
 MODULE_PARM_DESC(debug, "Debug level (0=none,...,16=all)");
 
 /* SRAM memory layout:
@@ -105,6 +100,7 @@ static u16 encx24j600_read_reg(struct encx24j600_priv *priv, u8 reg)
 	struct net_device *dev = priv->ndev;
 	unsigned int val = 0;
 	int ret = regmap_read(priv->ctx.regmap, reg, &val);
+
 	if (unlikely(ret))
 		netif_err(priv, drv, dev, "%s: error %d reading reg %02x\n",
 			  __func__, ret, reg);
@@ -115,6 +111,7 @@ static void encx24j600_write_reg(struct encx24j600_priv *priv, u8 reg, u16 val)
 {
 	struct net_device *dev = priv->ndev;
 	int ret = regmap_write(priv->ctx.regmap, reg, val);
+
 	if (unlikely(ret))
 		netif_err(priv, drv, dev, "%s: error %d writing reg %02x=%04x\n",
 			  __func__, ret, reg, val);
@@ -125,6 +122,7 @@ static void encx24j600_update_reg(struct encx24j600_priv *priv, u8 reg,
 {
 	struct net_device *dev = priv->ndev;
 	int ret = regmap_update_bits(priv->ctx.regmap, reg, mask, val);
+
 	if (unlikely(ret))
 		netif_err(priv, drv, dev, "%s: error %d updating reg %02x=%04x~%04x\n",
 			  __func__, ret, reg, val, mask);
@@ -135,6 +133,7 @@ static u16 encx24j600_read_phy(struct encx24j600_priv *priv, u8 reg)
 	struct net_device *dev = priv->ndev;
 	unsigned int val = 0;
 	int ret = regmap_read(priv->ctx.phymap, reg, &val);
+
 	if (unlikely(ret))
 		netif_err(priv, drv, dev, "%s: error %d reading %02x\n",
 			  __func__, ret, reg);
@@ -145,6 +144,7 @@ static void encx24j600_write_phy(struct encx24j600_priv *priv, u8 reg, u16 val)
 {
 	struct net_device *dev = priv->ndev;
 	int ret = regmap_write(priv->ctx.phymap, reg, val);
+
 	if (unlikely(ret))
 		netif_err(priv, drv, dev, "%s: error %d writing reg %02x=%04x\n",
 			  __func__, ret, reg, val);
@@ -164,6 +164,7 @@ static void encx24j600_cmd(struct encx24j600_priv *priv, u8 cmd)
 {
 	struct net_device *dev = priv->ndev;
 	int ret = regmap_write(priv->ctx.regmap, cmd, 0);
+
 	if (unlikely(ret))
 		netif_err(priv, drv, dev, "%s: error %d with cmd %02x\n",
 			  __func__, ret, cmd);
@@ -173,6 +174,7 @@ static int encx24j600_raw_read(struct encx24j600_priv *priv, u8 reg, u8 *data,
 			       size_t count)
 {
 	int ret;
+
 	mutex_lock(&priv->ctx.mutex);
 	ret = regmap_encx24j600_spi_read(&priv->ctx, reg, data, count);
 	mutex_unlock(&priv->ctx.mutex);
@@ -184,6 +186,7 @@ static int encx24j600_raw_write(struct encx24j600_priv *priv, u8 reg,
 				const u8 *data, size_t count)
 {
 	int ret;
+
 	mutex_lock(&priv->ctx.mutex);
 	ret = regmap_encx24j600_spi_write(&priv->ctx, reg, data, count);
 	mutex_unlock(&priv->ctx.mutex);
@@ -194,6 +197,7 @@ static int encx24j600_raw_write(struct encx24j600_priv *priv, u8 reg,
 static void encx24j600_update_phcon1(struct encx24j600_priv *priv)
 {
 	u16 phcon1 = encx24j600_read_phy(priv, PHCON1);
+
 	if (priv->autoneg == AUTONEG_ENABLE) {
 		phcon1 |= ANEN | RENEG;
 	} else {
@@ -218,7 +222,6 @@ static int encx24j600_wait_for_autoneg(struct encx24j600_priv *priv)
 	unsigned long timeout = jiffies + msecs_to_jiffies(2000);
 	u16 phstat1;
 	u16 estat;
-	int ret = 0;
 
 	phstat1 = encx24j600_read_phy(priv, PHSTAT1);
 	while ((phstat1 & ANDONE) == 0) {
@@ -254,7 +257,7 @@ static int encx24j600_wait_for_autoneg(struct encx24j600_priv *priv)
 		encx24j600_write_reg(priv, MACLCON, 0x370f);
 	}
 
-	return ret;
+	return 0;
 }
 
 /* Access the PHY to determine link status */
@@ -328,6 +331,7 @@ static int encx24j600_receive_packet(struct encx24j600_priv *priv,
 {
 	struct net_device *dev = priv->ndev;
 	struct sk_buff *skb = netdev_alloc_skb(dev, rsv->len + NET_IP_ALIGN);
+
 	if (!skb) {
 		pr_err_ratelimited("RX: OOM: packet dropped\n");
 		dev->stats.rx_dropped++;
@@ -346,7 +350,6 @@ static int encx24j600_receive_packet(struct encx24j600_priv *priv,
 	/* Maintain stats */
 	dev->stats.rx_packets++;
 	dev->stats.rx_bytes += rsv->len;
-	priv->next_packet = rsv->next_packet;
 
 	netif_rx(skb);
 
@@ -382,6 +385,8 @@ static void encx24j600_rx_packets(struct encx24j600_priv *priv, u8 packet_count)
 		} else {
 			encx24j600_receive_packet(priv, &rsv);
 		}
+
+		priv->next_packet = rsv.next_packet;
 
 		newrxtail = priv->next_packet - 2;
 		if (newrxtail == ENC_RX_BUF_START)
@@ -598,9 +603,8 @@ static void encx24j600_set_rxfilter_mode(struct encx24j600_priv *priv)
 	}
 }
 
-static int encx24j600_hw_init(struct encx24j600_priv *priv)
+static void encx24j600_hw_init(struct encx24j600_priv *priv)
 {
-	int ret = 0;
 	u16 macon2;
 
 	priv->hw_enabled = false;
@@ -643,8 +647,6 @@ static int encx24j600_hw_init(struct encx24j600_priv *priv)
 
 	if (netif_msg_hw(priv))
 		encx24j600_dump_config(priv, "Hw is initialized");
-
-	return ret;
 }
 
 static void encx24j600_hw_enable(struct encx24j600_priv *priv)
@@ -827,6 +829,7 @@ static void encx24j600_set_multicast_list(struct net_device *dev)
 static void encx24j600_hw_tx(struct encx24j600_priv *priv)
 {
 	struct net_device *dev = priv->ndev;
+
 	netif_info(priv, tx_queued, dev, "TX Packet Len:%d\n",
 		   priv->tx_skb->len);
 
@@ -885,7 +888,7 @@ static netdev_tx_t encx24j600_tx(struct sk_buff *skb, struct net_device *dev)
 }
 
 /* Deal with a transmit timeout */
-static void encx24j600_tx_timeout(struct net_device *dev)
+static void encx24j600_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	struct encx24j600_priv *priv = netdev_priv(dev);
 
@@ -894,7 +897,6 @@ static void encx24j600_tx_timeout(struct net_device *dev)
 
 	dev->stats.tx_errors++;
 	netif_wake_queue(dev);
-	return;
 }
 
 static int encx24j600_get_regs_len(struct net_device *dev)
@@ -929,51 +931,57 @@ static void encx24j600_get_drvinfo(struct net_device *dev,
 		sizeof(info->bus_info));
 }
 
-static int encx24j600_get_settings(struct net_device *dev,
-				   struct ethtool_cmd *cmd)
+static int encx24j600_get_link_ksettings(struct net_device *dev,
+					 struct ethtool_link_ksettings *cmd)
 {
 	struct encx24j600_priv *priv = netdev_priv(dev);
+	u32 supported;
 
-	cmd->transceiver = XCVR_INTERNAL;
-	cmd->supported = SUPPORTED_10baseT_Half | SUPPORTED_10baseT_Full |
+	supported = SUPPORTED_10baseT_Half | SUPPORTED_10baseT_Full |
 			 SUPPORTED_100baseT_Half | SUPPORTED_100baseT_Full |
 			 SUPPORTED_Autoneg | SUPPORTED_TP;
 
-	ethtool_cmd_speed_set(cmd, priv->speed);
-	cmd->duplex = priv->full_duplex ? DUPLEX_FULL : DUPLEX_HALF;
-	cmd->port = PORT_TP;
-	cmd->autoneg = priv->autoneg ? AUTONEG_ENABLE : AUTONEG_DISABLE;
+	ethtool_convert_legacy_u32_to_link_mode(cmd->link_modes.supported,
+						supported);
+
+	cmd->base.speed = priv->speed;
+	cmd->base.duplex = priv->full_duplex ? DUPLEX_FULL : DUPLEX_HALF;
+	cmd->base.port = PORT_TP;
+	cmd->base.autoneg = priv->autoneg ? AUTONEG_ENABLE : AUTONEG_DISABLE;
 
 	return 0;
 }
 
-static int encx24j600_set_settings(struct net_device *dev,
-				   struct ethtool_cmd *cmd)
+static int
+encx24j600_set_link_ksettings(struct net_device *dev,
+			      const struct ethtool_link_ksettings *cmd)
 {
-	return encx24j600_setlink(dev, cmd->autoneg,
-				  ethtool_cmd_speed(cmd), cmd->duplex);
+	return encx24j600_setlink(dev, cmd->base.autoneg,
+				  cmd->base.speed, cmd->base.duplex);
 }
 
 static u32 encx24j600_get_msglevel(struct net_device *dev)
 {
 	struct encx24j600_priv *priv = netdev_priv(dev);
+
 	return priv->msg_enable;
 }
 
 static void encx24j600_set_msglevel(struct net_device *dev, u32 val)
 {
 	struct encx24j600_priv *priv = netdev_priv(dev);
+
 	priv->msg_enable = val;
 }
 
 static const struct ethtool_ops encx24j600_ethtool_ops = {
-	.get_settings = encx24j600_get_settings,
-	.set_settings = encx24j600_set_settings,
 	.get_drvinfo = encx24j600_get_drvinfo,
 	.get_msglevel = encx24j600_get_msglevel,
 	.set_msglevel = encx24j600_set_msglevel,
 	.get_regs_len = encx24j600_get_regs_len,
 	.get_regs = encx24j600_get_regs,
+	.get_link_ksettings = encx24j600_get_link_ksettings,
+	.set_link_ksettings = encx24j600_set_link_ksettings,
 };
 
 static const struct net_device_ops encx24j600_netdev_ops = {
@@ -1030,12 +1038,7 @@ static int encx24j600_spi_probe(struct spi_device *spi)
 	}
 
 	/* Initialize the device HW to the consistent state */
-	if (encx24j600_hw_init(priv)) {
-		netif_err(priv, probe, ndev,
-			  DRV_NAME ": HW initialization error\n");
-		ret = -EIO;
-		goto out_free;
-	}
+	encx24j600_hw_init(priv);
 
 	kthread_init_worker(&priv->kworker);
 	kthread_init_work(&priv->tx_work, encx24j600_tx_proc);
@@ -1058,7 +1061,7 @@ static int encx24j600_spi_probe(struct spi_device *spi)
 	if (unlikely(ret)) {
 		netif_err(priv, probe, ndev, "Error %d initializing card encx24j600 card\n",
 			  ret);
-		goto out_free;
+		goto out_stop;
 	}
 
 	eidled = encx24j600_read_reg(priv, EIDLED);
@@ -1076,6 +1079,8 @@ static int encx24j600_spi_probe(struct spi_device *spi)
 
 out_unregister:
 	unregister_netdev(priv->ndev);
+out_stop:
+	kthread_stop(priv->kworker_task);
 out_free:
 	free_netdev(ndev);
 
@@ -1088,6 +1093,7 @@ static int encx24j600_spi_remove(struct spi_device *spi)
 	struct encx24j600_priv *priv = dev_get_drvdata(&spi->dev);
 
 	unregister_netdev(priv->ndev);
+	kthread_stop(priv->kworker_task);
 
 	free_netdev(priv->ndev);
 
@@ -1111,17 +1117,7 @@ static struct spi_driver encx24j600_spi_net_driver = {
 	.id_table	= encx24j600_spi_id_table,
 };
 
-static int __init encx24j600_init(void)
-{
-	return spi_register_driver(&encx24j600_spi_net_driver);
-}
-module_init(encx24j600_init);
-
-static void encx24j600_exit(void)
-{
-	spi_unregister_driver(&encx24j600_spi_net_driver);
-}
-module_exit(encx24j600_exit);
+module_spi_driver(encx24j600_spi_net_driver);
 
 MODULE_DESCRIPTION(DRV_NAME " ethernet driver");
 MODULE_AUTHOR("Jon Ringle <jringle@gridpoint.com>");

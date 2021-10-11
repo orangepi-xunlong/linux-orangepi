@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * kallsyms.c: in-kernel printing of symbolic oopses and stack traces.
  *
@@ -12,7 +13,6 @@
  *      compression (see scripts/kallsyms.c for a more complete description)
  */
 #include <linux/kallsyms.h>
-#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/seq_file.h>
 #include <linux/fs.h>
@@ -20,18 +20,12 @@
 #include <linux/err.h>
 #include <linux/proc_fs.h>
 #include <linux/sched.h>	/* for cond_resched */
-#include <linux/mm.h>
 #include <linux/ctype.h>
 #include <linux/slab.h>
+#include <linux/filter.h>
+#include <linux/ftrace.h>
+#include <linux/kprobes.h>
 #include <linux/compiler.h>
-
-#include <asm/sections.h>
-
-#ifdef CONFIG_KALLSYMS_ALL
-#define all_var 1
-#else
-#define all_var 0
-#endif
 
 /*
  * These will be re-linked against their real values
@@ -45,47 +39,16 @@ extern const u8 kallsyms_names[] __weak;
  * Tell the compiler that the count isn't in the small data section if the arch
  * has one (eg: FRV).
  */
-extern const unsigned long kallsyms_num_syms
-__attribute__((weak, section(".rodata")));
+extern const unsigned int kallsyms_num_syms
+__section(".rodata") __attribute__((weak));
 
 extern const unsigned long kallsyms_relative_base
-__attribute__((weak, section(".rodata")));
+__section(".rodata") __attribute__((weak));
 
-extern const u8 kallsyms_token_table[] __weak;
+extern const char kallsyms_token_table[] __weak;
 extern const u16 kallsyms_token_index[] __weak;
 
-extern const unsigned long kallsyms_markers[] __weak;
-
-static inline int is_kernel_inittext(unsigned long addr)
-{
-	if (addr >= (unsigned long)_sinittext
-	    && addr <= (unsigned long)_einittext)
-		return 1;
-	return 0;
-}
-
-static inline int is_kernel_text(unsigned long addr)
-{
-	if ((addr >= (unsigned long)_stext && addr <= (unsigned long)_etext) ||
-	    arch_is_kernel_text(addr))
-		return 1;
-	return in_gate_area_no_mm(addr);
-}
-
-static inline int is_kernel(unsigned long addr)
-{
-	if (addr >= (unsigned long)_stext && addr <= (unsigned long)_end)
-		return 1;
-	return in_gate_area_no_mm(addr);
-}
-
-static int is_ksym_addr(unsigned long addr)
-{
-	if (all_var)
-		return is_kernel(addr);
-
-	return is_kernel_text(addr) || is_kernel_inittext(addr);
-}
+extern const unsigned int kallsyms_markers[] __weak;
 
 /*
  * Expand a compressed symbol data into the resulting uncompressed string,
@@ -96,7 +59,8 @@ static unsigned int kallsyms_expand_symbol(unsigned int off,
 					   char *result, size_t maxlen)
 {
 	int len, skipped_first = 0;
-	const u8 *tptr, *data;
+	const char *tptr;
+	const u8 *data;
 
 	/* Get the compressed symbol length from the first symbol byte. */
 	data = &kallsyms_names[off];
@@ -197,6 +161,27 @@ static unsigned long kallsyms_sym_address(int idx)
 	return kallsyms_relative_base - 1 - kallsyms_offsets[idx];
 }
 
+#if defined(CONFIG_CFI_CLANG) && defined(CONFIG_LTO_CLANG_THIN)
+/*
+ * LLVM appends a hash to static function names when ThinLTO and CFI are
+ * both enabled, i.e. foo() becomes foo$707af9a22804d33c81801f27dcfe489b.
+ * This causes confusion and potentially breaks user space tools, so we
+ * strip the suffix from expanded symbol names.
+ */
+static inline bool cleanup_symbol_name(char *s)
+{
+	char *res;
+
+	res = strrchr(s, '$');
+	if (res)
+		*res = '\0';
+
+	return res != NULL;
+}
+#else
+static inline bool cleanup_symbol_name(char *s) { return false; }
+#endif
+
 /* Lookup the address for this symbol. Returns 0 if not found. */
 unsigned long kallsyms_lookup_name(const char *name)
 {
@@ -209,11 +194,18 @@ unsigned long kallsyms_lookup_name(const char *name)
 
 		if (strcmp(namebuf, name) == 0)
 			return kallsyms_sym_address(i);
+
+		if (cleanup_symbol_name(namebuf) && strcmp(namebuf, name) == 0)
+			return kallsyms_sym_address(i);
 	}
 	return module_kallsyms_lookup_name(name);
 }
-EXPORT_SYMBOL_GPL(kallsyms_lookup_name);
 
+#ifdef CONFIG_LIVEPATCH
+/*
+ * Iterate over all symbols in vmlinux.  For symbols from modules use
+ * module_kallsyms_on_each_symbol instead.
+ */
 int kallsyms_on_each_symbol(int (*fn)(void *, const char *, struct module *,
 				      unsigned long),
 			    void *data)
@@ -229,9 +221,9 @@ int kallsyms_on_each_symbol(int (*fn)(void *, const char *, struct module *,
 		if (ret != 0)
 			return ret;
 	}
-	return module_kallsyms_on_each_symbol(fn, data);
+	return 0;
 }
-EXPORT_SYMBOL_GPL(kallsyms_on_each_symbol);
+#endif /* CONFIG_LIVEPATCH */
 
 static unsigned long get_symbol_pos(unsigned long addr,
 				    unsigned long *symbolsize,
@@ -279,7 +271,7 @@ static unsigned long get_symbol_pos(unsigned long addr,
 	if (!symbol_end) {
 		if (is_kernel_inittext(addr))
 			symbol_end = (unsigned long)_einittext;
-		else if (all_var)
+		else if (IS_ENABLED(CONFIG_KALLSYMS_ALL))
 			symbol_end = (unsigned long)_end;
 		else
 			symbol_end = (unsigned long)_etext;
@@ -300,29 +292,14 @@ int kallsyms_lookup_size_offset(unsigned long addr, unsigned long *symbolsize,
 				unsigned long *offset)
 {
 	char namebuf[KSYM_NAME_LEN];
-	if (is_ksym_addr(addr))
-		return !!get_symbol_pos(addr, symbolsize, offset);
 
-	return !!module_address_lookup(addr, symbolsize, offset, NULL, namebuf);
+	if (is_ksym_addr(addr)) {
+		get_symbol_pos(addr, symbolsize, offset);
+		return 1;
+	}
+	return !!module_address_lookup(addr, symbolsize, offset, NULL, namebuf) ||
+	       !!__bpf_address_lookup(addr, symbolsize, offset, namebuf);
 }
-
-#ifdef CONFIG_CFI_CLANG
-/*
- * LLVM appends .cfi to function names when CONFIG_CFI_CLANG is enabled,
- * which causes confusion and potentially breaks user space tools, so we
- * will strip the postfix from expanded symbol names.
- */
-static inline void cleanup_symbol_name(char *s)
-{
-	char *res;
-
-	res = strrchr(s, '.');
-	if (res && !strcmp(res, ".cfi"))
-		*res = '\0';
-}
-#else
-static inline void cleanup_symbol_name(char *s) {}
-#endif
 
 /*
  * Lookup an address
@@ -336,6 +313,8 @@ const char *kallsyms_lookup(unsigned long addr,
 			    unsigned long *offset,
 			    char **modname, char *namebuf)
 {
+	const char *ret;
+
 	namebuf[KSYM_NAME_LEN - 1] = 0;
 	namebuf[0] = 0;
 
@@ -348,17 +327,25 @@ const char *kallsyms_lookup(unsigned long addr,
 				       namebuf, KSYM_NAME_LEN);
 		if (modname)
 			*modname = NULL;
+
+		ret = namebuf;
 		goto found;
 	}
 
-	/* See if it's in a module. */
-	if (!module_address_lookup(addr, symbolsize, offset, modname,
-				     namebuf))
-		return NULL;
+	/* See if it's in a module or a BPF JITed image. */
+	ret = module_address_lookup(addr, symbolsize, offset,
+				    modname, namebuf);
+	if (!ret)
+		ret = bpf_address_lookup(addr, symbolsize,
+					 offset, modname, namebuf);
+
+	if (!ret)
+		ret = ftrace_mod_address_lookup(addr, symbolsize,
+						offset, modname, namebuf);
 
 found:
 	cleanup_symbol_name(namebuf);
-	return namebuf;
+	return ret;
 }
 
 int lookup_symbol_name(unsigned long addr, char *symname)
@@ -496,35 +483,104 @@ int sprint_backtrace(char *buffer, unsigned long address)
 	return __sprint_symbol(buffer, address, -1, 1);
 }
 
-/* Look up a kernel symbol and print it to the kernel messages. */
-void __print_symbol(const char *fmt, unsigned long address)
-{
-	char buffer[KSYM_SYMBOL_LEN];
-
-	sprint_symbol(buffer, address);
-
-	printk(fmt, buffer);
-}
-EXPORT_SYMBOL(__print_symbol);
-
 /* To avoid using get_symbol_offset for every symbol, we carry prefix along. */
 struct kallsym_iter {
 	loff_t pos;
+	loff_t pos_arch_end;
+	loff_t pos_mod_end;
+	loff_t pos_ftrace_mod_end;
+	loff_t pos_bpf_end;
 	unsigned long value;
 	unsigned int nameoff; /* If iterating in core kernel symbols. */
 	char type;
 	char name[KSYM_NAME_LEN];
 	char module_name[MODULE_NAME_LEN];
 	int exported;
+	int show_value;
 };
+
+int __weak arch_get_kallsym(unsigned int symnum, unsigned long *value,
+			    char *type, char *name)
+{
+	return -EINVAL;
+}
+
+static int get_ksymbol_arch(struct kallsym_iter *iter)
+{
+	int ret = arch_get_kallsym(iter->pos - kallsyms_num_syms,
+				   &iter->value, &iter->type,
+				   iter->name);
+
+	if (ret < 0) {
+		iter->pos_arch_end = iter->pos;
+		return 0;
+	}
+
+	return 1;
+}
 
 static int get_ksymbol_mod(struct kallsym_iter *iter)
 {
-	if (module_get_kallsym(iter->pos - kallsyms_num_syms, &iter->value,
-				&iter->type, iter->name, iter->module_name,
-				&iter->exported) < 0)
+	int ret = module_get_kallsym(iter->pos - iter->pos_arch_end,
+				     &iter->value, &iter->type,
+				     iter->name, iter->module_name,
+				     &iter->exported);
+	if (ret < 0) {
+		iter->pos_mod_end = iter->pos;
 		return 0;
+	}
+
 	return 1;
+}
+
+/*
+ * ftrace_mod_get_kallsym() may also get symbols for pages allocated for ftrace
+ * purposes. In that case "__builtin__ftrace" is used as a module name, even
+ * though "__builtin__ftrace" is not a module.
+ */
+static int get_ksymbol_ftrace_mod(struct kallsym_iter *iter)
+{
+	int ret = ftrace_mod_get_kallsym(iter->pos - iter->pos_mod_end,
+					 &iter->value, &iter->type,
+					 iter->name, iter->module_name,
+					 &iter->exported);
+	if (ret < 0) {
+		iter->pos_ftrace_mod_end = iter->pos;
+		return 0;
+	}
+
+	return 1;
+}
+
+static int get_ksymbol_bpf(struct kallsym_iter *iter)
+{
+	int ret;
+
+	strlcpy(iter->module_name, "bpf", MODULE_NAME_LEN);
+	iter->exported = 0;
+	ret = bpf_get_kallsym(iter->pos - iter->pos_ftrace_mod_end,
+			      &iter->value, &iter->type,
+			      iter->name);
+	if (ret < 0) {
+		iter->pos_bpf_end = iter->pos;
+		return 0;
+	}
+
+	return 1;
+}
+
+/*
+ * This uses "__builtin__kprobes" as a module name for symbols for pages
+ * allocated for kprobes' purposes, even though "__builtin__kprobes" is not a
+ * module.
+ */
+static int get_ksymbol_kprobe(struct kallsym_iter *iter)
+{
+	strlcpy(iter->module_name, "__builtin__kprobes", MODULE_NAME_LEN);
+	iter->exported = 0;
+	return kprobe_get_kallsym(iter->pos - iter->pos_bpf_end,
+				  &iter->value, &iter->type,
+				  iter->name) < 0 ? 0 : 1;
 }
 
 /* Returns space to next name. */
@@ -547,16 +603,48 @@ static void reset_iter(struct kallsym_iter *iter, loff_t new_pos)
 	iter->name[0] = '\0';
 	iter->nameoff = get_symbol_offset(new_pos);
 	iter->pos = new_pos;
+	if (new_pos == 0) {
+		iter->pos_arch_end = 0;
+		iter->pos_mod_end = 0;
+		iter->pos_ftrace_mod_end = 0;
+		iter->pos_bpf_end = 0;
+	}
+}
+
+/*
+ * The end position (last + 1) of each additional kallsyms section is recorded
+ * in iter->pos_..._end as each section is added, and so can be used to
+ * determine which get_ksymbol_...() function to call next.
+ */
+static int update_iter_mod(struct kallsym_iter *iter, loff_t pos)
+{
+	iter->pos = pos;
+
+	if ((!iter->pos_arch_end || iter->pos_arch_end > pos) &&
+	    get_ksymbol_arch(iter))
+		return 1;
+
+	if ((!iter->pos_mod_end || iter->pos_mod_end > pos) &&
+	    get_ksymbol_mod(iter))
+		return 1;
+
+	if ((!iter->pos_ftrace_mod_end || iter->pos_ftrace_mod_end > pos) &&
+	    get_ksymbol_ftrace_mod(iter))
+		return 1;
+
+	if ((!iter->pos_bpf_end || iter->pos_bpf_end > pos) &&
+	    get_ksymbol_bpf(iter))
+		return 1;
+
+	return get_ksymbol_kprobe(iter);
 }
 
 /* Returns false if pos at or past end of file. */
 static int update_iter(struct kallsym_iter *iter, loff_t pos)
 {
 	/* Module symbols can be accessed randomly. */
-	if (pos >= kallsyms_num_syms) {
-		iter->pos = pos;
-		return get_ksymbol_mod(iter);
-	}
+	if (pos >= kallsyms_num_syms)
+		return update_iter_mod(iter, pos);
 
 	/* If we're not on the desired position, reset to new position. */
 	if (pos != iter->pos)
@@ -590,11 +678,14 @@ static void s_stop(struct seq_file *m, void *p)
 
 static int s_show(struct seq_file *m, void *p)
 {
+	void *value;
 	struct kallsym_iter *iter = m->private;
 
 	/* Some debugging symbols have no name.  Ignore them. */
 	if (!iter->name[0])
 		return 0;
+
+	value = iter->show_value ? (void *)iter->value : NULL;
 
 	if (iter->module_name[0]) {
 		char type;
@@ -605,10 +696,10 @@ static int s_show(struct seq_file *m, void *p)
 		 */
 		type = iter->exported ? toupper(iter->type) :
 					tolower(iter->type);
-		seq_printf(m, "%pK %c %s\t[%s]\n", (void *)iter->value,
+		seq_printf(m, "%px %c %s\t[%s]\n", value,
 			   type, iter->name, iter->module_name);
 	} else
-		seq_printf(m, "%pK %c %s\n", (void *)iter->value,
+		seq_printf(m, "%px %c %s\n", value,
 			   iter->type, iter->name);
 	return 0;
 }
@@ -619,6 +710,41 @@ static const struct seq_operations kallsyms_op = {
 	.stop = s_stop,
 	.show = s_show
 };
+
+static inline int kallsyms_for_perf(void)
+{
+#ifdef CONFIG_PERF_EVENTS
+	extern int sysctl_perf_event_paranoid;
+	if (sysctl_perf_event_paranoid <= 1)
+		return 1;
+#endif
+	return 0;
+}
+
+/*
+ * We show kallsyms information even to normal users if we've enabled
+ * kernel profiling and are explicitly not paranoid (so kptr_restrict
+ * is clear, and sysctl_perf_event_paranoid isn't set).
+ *
+ * Otherwise, require CAP_SYSLOG (assuming kptr_restrict isn't set to
+ * block even that).
+ */
+bool kallsyms_show_value(const struct cred *cred)
+{
+	switch (kptr_restrict) {
+	case 0:
+		if (kallsyms_for_perf())
+			return true;
+		fallthrough;
+	case 1:
+		if (security_capable(cred, &init_user_ns, CAP_SYSLOG,
+				     CAP_OPT_NOAUDIT) == 0)
+			return true;
+		fallthrough;
+	default:
+		return false;
+	}
+}
 
 static int kallsyms_open(struct inode *inode, struct file *file)
 {
@@ -633,6 +759,11 @@ static int kallsyms_open(struct inode *inode, struct file *file)
 		return -ENOMEM;
 	reset_iter(iter, 0);
 
+	/*
+	 * Instead of checking this on every s_show() call, cache
+	 * the result here at open time.
+	 */
+	iter->show_value = kallsyms_show_value(file->f_cred);
 	return 0;
 }
 
@@ -656,16 +787,16 @@ const char *kdb_walk_kallsyms(loff_t *pos)
 }
 #endif	/* CONFIG_KGDB_KDB */
 
-static const struct file_operations kallsyms_operations = {
-	.open = kallsyms_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = seq_release_private,
+static const struct proc_ops kallsyms_proc_ops = {
+	.proc_open	= kallsyms_open,
+	.proc_read	= seq_read,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= seq_release_private,
 };
 
 static int __init kallsyms_init(void)
 {
-	proc_create("kallsyms", 0444, NULL, &kallsyms_operations);
+	proc_create("kallsyms", 0444, NULL, &kallsyms_proc_ops);
 	return 0;
 }
 device_initcall(kallsyms_init);

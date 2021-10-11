@@ -59,14 +59,14 @@ phydm_update_power_training_state(
 	PHYDM_DBG(p_dm, DBG_PWR_TRAIN, ("%s ======>\n", __FUNCTION__));
 
 	if (p_pow_train_t->force_power_training_state == DISABLE_POW_TRAIN) {
-
+		
 		p_dm->is_disable_power_training = true;
 		phydm_reset_pt_para(p_dm);
 		PHYDM_DBG(p_dm, DBG_PWR_TRAIN, ("Disable PT\n"));
 		return;
 
 	} else if (p_pow_train_t->force_power_training_state == ENABLE_POW_TRAIN) {
-
+	
 		p_dm->is_disable_power_training = false;
 		phydm_reset_pt_para(p_dm);
 		PHYDM_DBG(p_dm, DBG_PWR_TRAIN, ("Enable PT\n"));
@@ -120,7 +120,7 @@ phydm_update_power_training_state(
 
 		PHYDM_DBG(p_dm, DBG_PWR_TRAIN, ("num_qry_phy_status_ofdm = %d, num_qry_phy_status_cck = %d\n",
 			p_dm->phy_dbg_info.num_qry_phy_status_ofdm, p_dm->phy_dbg_info.num_qry_phy_status_cck));
-
+		
 		PHYDM_DBG(p_dm, DBG_PWR_TRAIN, ("pt_score_tmp = %d\n", pt_score_tmp));
 		PHYDM_DBG(p_dm, DBG_PWR_TRAIN, ("pt_score_tmp = 0(DISABLE), 1(KEEP), 2(ENABLE)\n"));
 
@@ -132,12 +132,12 @@ phydm_update_power_training_state(
 
 		/* mode decision */
 		if (pt_score_tmp == ENABLE_PT_SCORE) {
-
+			
 			p_dm->is_disable_power_training = false;
 			PHYDM_DBG(p_dm, DBG_PWR_TRAIN, ("Enable power training under dynamic.\n"));
-
+			
 		} else if (pt_score_tmp == DISABLE_PT_SCORE) {
-
+		
 			p_dm->is_disable_power_training = true;
 			PHYDM_DBG(p_dm, DBG_PWR_TRAIN, ("Disable PT due to noisy.\n"));
 		}
@@ -148,7 +148,7 @@ phydm_update_power_training_state(
 		p_dm->phy_dbg_info.num_qry_phy_status_ofdm = 0;
 		p_dm->phy_dbg_info.num_qry_phy_status_cck = 0;
 	} else {
-
+	
 		p_dm->is_disable_power_training = true;
 		phydm_reset_pt_para(p_dm);
 
@@ -179,7 +179,7 @@ phydm_pow_train_debug(
 		PHYDM_SNPRINTF((output + used, out_len - used, "0: Dynamic state\n"));
 		PHYDM_SNPRINTF((output + used, out_len - used, "1: Enable PT\n"));
 		PHYDM_SNPRINTF((output + used, out_len - used, "2: Disable PT\n"));
-
+		
 	} else {
 
 		for (i = 0; i < 10; i++) {
@@ -199,7 +199,7 @@ phydm_pow_train_debug(
 			PHYDM_SNPRINTF((output + used, out_len - used, "Disable PT\n"));
 		} else {
 			PHYDM_SNPRINTF((output + used, out_len - used, "Set Error\n"));
-		}
+		}		
 	}
 
 	*_used = used;

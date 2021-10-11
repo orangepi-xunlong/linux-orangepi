@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TCP Low Priority (TCP-LP)
  *
@@ -37,7 +38,7 @@
 #include <net/tcp.h>
 
 /* resolution of owd */
-#define LP_RESOL       1000
+#define LP_RESOL       TCP_TS_HZ
 
 /**
  * enum tcp_lp_state
@@ -62,7 +63,7 @@ enum tcp_lp_state {
  * @sowd: smoothed OWD << 3
  * @owd_min: min OWD
  * @owd_max: max OWD
- * @owd_max_rsv: resrved max owd
+ * @owd_max_rsv: reserved max owd
  * @remote_hz: estimated remote HZ
  * @remote_ref_time: remote reference time
  * @local_ref_time: local reference time
@@ -88,6 +89,7 @@ struct lp {
 
 /**
  * tcp_lp_init
+ * @sk: socket to initialize congestion control algorithm for
  *
  * Init all required variables.
  * Clone the handling from Vegas module implementation.
@@ -110,6 +112,7 @@ static void tcp_lp_init(struct sock *sk)
 
 /**
  * tcp_lp_cong_avoid
+ * @sk: socket to avoid congesting
  *
  * Implementation of cong_avoid.
  * Will only call newReno CA when away from inference.
@@ -125,6 +128,7 @@ static void tcp_lp_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 
 /**
  * tcp_lp_remote_hz_estimator
+ * @sk: socket which needs an estimate for the remote HZs
  *
  * Estimate remote HZ.
  * We keep on updating the estimated value, where original TCP-LP
@@ -147,9 +151,9 @@ static u32 tcp_lp_remote_hz_estimator(struct sock *sk)
 	    tp->rx_opt.rcv_tsecr == lp->local_ref_time)
 		goto out;
 
-	m = HZ * (tp->rx_opt.rcv_tsval -
-		  lp->remote_ref_time) / (tp->rx_opt.rcv_tsecr -
-					  lp->local_ref_time);
+	m = TCP_TS_HZ *
+	    (tp->rx_opt.rcv_tsval - lp->remote_ref_time) /
+	    (tp->rx_opt.rcv_tsecr - lp->local_ref_time);
 	if (m < 0)
 		m = -m;
 
@@ -175,6 +179,7 @@ static u32 tcp_lp_remote_hz_estimator(struct sock *sk)
 
 /**
  * tcp_lp_owd_calculator
+ * @sk: socket to calculate one way delay for
  *
  * Calculate one way delay (in relative format).
  * Original implement OWD as minus of remote time difference to local time
@@ -194,7 +199,7 @@ static u32 tcp_lp_owd_calculator(struct sock *sk)
 	if (lp->flag & LP_VALID_RHZ) {
 		owd =
 		    tp->rx_opt.rcv_tsval * (LP_RESOL / lp->remote_hz) -
-		    tp->rx_opt.rcv_tsecr * (LP_RESOL / HZ);
+		    tp->rx_opt.rcv_tsecr * (LP_RESOL / TCP_TS_HZ);
 		if (owd < 0)
 			owd = -owd;
 	}
@@ -209,6 +214,8 @@ static u32 tcp_lp_owd_calculator(struct sock *sk)
 
 /**
  * tcp_lp_rtt_sample
+ * @sk: socket to add a rtt sample to
+ * @rtt: round trip time, which is ignored!
  *
  * Implementation or rtt_sample.
  * Will take the following action,
@@ -253,6 +260,7 @@ static void tcp_lp_rtt_sample(struct sock *sk, u32 rtt)
 
 /**
  * tcp_lp_pkts_acked
+ * @sk: socket requiring congestion avoidance calculations
  *
  * Implementation of pkts_acked.
  * Deal with active drop under Early Congestion Indication.
@@ -264,18 +272,19 @@ static void tcp_lp_pkts_acked(struct sock *sk, const struct ack_sample *sample)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct lp *lp = inet_csk_ca(sk);
+	u32 now = tcp_time_stamp(tp);
 	u32 delta;
 
 	if (sample->rtt_us > 0)
 		tcp_lp_rtt_sample(sk, sample->rtt_us);
 
 	/* calc inference */
-	delta = tcp_time_stamp - tp->rx_opt.rcv_tsecr;
+	delta = now - tp->rx_opt.rcv_tsecr;
 	if ((s32)delta > 0)
 		lp->inference = 3 * delta;
 
 	/* test if within inference */
-	if (lp->last_drop && (tcp_time_stamp - lp->last_drop < lp->inference))
+	if (lp->last_drop && (now - lp->last_drop < lp->inference))
 		lp->flag |= LP_WITHIN_INF;
 	else
 		lp->flag &= ~LP_WITHIN_INF;
@@ -296,7 +305,7 @@ static void tcp_lp_pkts_acked(struct sock *sk, const struct ack_sample *sample)
 
 	/* FIXME: try to reset owd_min and owd_max here
 	 * so decrease the chance the min/max is no longer suitable
-	 * and will usually within threshold when whithin inference */
+	 * and will usually within threshold when within inference */
 	lp->owd_min = lp->sowd >> 3;
 	lp->owd_max = lp->sowd >> 2;
 	lp->owd_max_rsv = lp->sowd >> 2;
@@ -312,12 +321,13 @@ static void tcp_lp_pkts_acked(struct sock *sk, const struct ack_sample *sample)
 		tp->snd_cwnd = max(tp->snd_cwnd >> 1U, 1U);
 
 	/* record this drop time */
-	lp->last_drop = tcp_time_stamp;
+	lp->last_drop = now;
 }
 
 static struct tcp_congestion_ops tcp_lp __read_mostly = {
 	.init = tcp_lp_init,
 	.ssthresh = tcp_reno_ssthresh,
+	.undo_cwnd = tcp_reno_undo_cwnd,
 	.cong_avoid = tcp_lp_cong_avoid,
 	.pkts_acked = tcp_lp_pkts_acked,
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * This is a simple driver for the GTM601 Voice PCM interface
  *
@@ -6,20 +7,15 @@
  * Author: Marek Belisko <marek@goldelico.com>
  *
  * Based on wm8727.c driver
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/device.h>
+#include <linux/of_device.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
-#include <sound/ac97_codec.h>
 #include <sound/initval.h>
 #include <sound/soc.h>
 
@@ -51,34 +47,52 @@ static struct snd_soc_dai_driver gtm601_dai = {
 	},
 };
 
-static const struct snd_soc_codec_driver soc_codec_dev_gtm601 = {
-	.component_driver = {
-		.dapm_widgets		= gtm601_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(gtm601_dapm_widgets),
-		.dapm_routes		= gtm601_dapm_routes,
-		.num_dapm_routes	= ARRAY_SIZE(gtm601_dapm_routes),
+static struct snd_soc_dai_driver bm818_dai = {
+	.name = "bm818",
+	.playback = {
+		.stream_name = "Playback",
+		.channels_min = 2,
+		.channels_max = 2,
+		.rates = SNDRV_PCM_RATE_48000,
+		.formats = SNDRV_PCM_FMTBIT_S16_LE,
 	},
+	.capture = {
+		.stream_name = "Capture",
+		.channels_min = 2,
+		.channels_max = 2,
+		.rates = SNDRV_PCM_RATE_48000,
+		.formats = SNDRV_PCM_FMTBIT_S16_LE,
+	},
+};
+
+static const struct snd_soc_component_driver soc_component_dev_gtm601 = {
+	.dapm_widgets		= gtm601_dapm_widgets,
+	.num_dapm_widgets	= ARRAY_SIZE(gtm601_dapm_widgets),
+	.dapm_routes		= gtm601_dapm_routes,
+	.num_dapm_routes	= ARRAY_SIZE(gtm601_dapm_routes),
+	.idle_bias_on		= 1,
+	.use_pmdown_time	= 1,
+	.endianness		= 1,
+	.non_legacy_dai_naming	= 1,
 };
 
 static int gtm601_platform_probe(struct platform_device *pdev)
 {
-	return snd_soc_register_codec(&pdev->dev,
-			&soc_codec_dev_gtm601, &gtm601_dai, 1);
+	const struct snd_soc_dai_driver *dai_driver;
+
+	dai_driver = of_device_get_match_data(&pdev->dev);
+
+	return devm_snd_soc_register_component(&pdev->dev,
+			&soc_component_dev_gtm601,
+			(struct snd_soc_dai_driver *)dai_driver, 1);
 }
 
-static int gtm601_platform_remove(struct platform_device *pdev)
-{
-	snd_soc_unregister_codec(&pdev->dev);
-	return 0;
-}
-
-#if defined(CONFIG_OF)
-static const struct of_device_id gtm601_codec_of_match[] = {
-	{ .compatible = "option,gtm601", },
+static const struct of_device_id gtm601_codec_of_match[] __maybe_unused = {
+	{ .compatible = "option,gtm601", .data = (void *)&gtm601_dai },
+	{ .compatible = "broadmobi,bm818", .data = (void *)&bm818_dai },
 	{},
 };
 MODULE_DEVICE_TABLE(of, gtm601_codec_of_match);
-#endif
 
 static struct platform_driver gtm601_codec_driver = {
 	.driver = {
@@ -86,7 +100,6 @@ static struct platform_driver gtm601_codec_driver = {
 		.of_match_table = of_match_ptr(gtm601_codec_of_match),
 	},
 	.probe = gtm601_platform_probe,
-	.remove = gtm601_platform_remove,
 };
 
 module_platform_driver(gtm601_codec_driver);

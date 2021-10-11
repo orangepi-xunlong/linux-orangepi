@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Libata driver for the highpoint 37x and 30x UDMA66 ATA controllers.
  *
@@ -224,17 +225,14 @@ static int hpt_dma_blacklisted(const struct ata_device *dev, char *modestr,
 			       const char * const list[])
 {
 	unsigned char model_num[ATA_ID_PROD_LEN + 1];
-	int i = 0;
+	int i;
 
 	ata_id_c_string(dev->id, model_num, ATA_ID_PROD, sizeof(model_num));
 
-	while (list[i] != NULL) {
-		if (!strcmp(list[i], model_num)) {
-			pr_warn("%s is not supported for %s\n",
-				modestr, list[i]);
-			return 1;
-		}
-		i++;
+	i = match_string(list, -1, model_num);
+	if (i >= 0) {
+		pr_warn("%s is not supported for %s\n", modestr, list[i]);
+		return 1;
 	}
 	return 0;
 }
@@ -277,6 +275,7 @@ static const char * const bad_ata100_5[] = {
 /**
  *	hpt370_filter	-	mode selection filter
  *	@adev: ATA device
+ *	@mask: mode mask
  *
  *	Block UDMA on devices that cause trouble with this controller.
  */
@@ -295,6 +294,7 @@ static unsigned long hpt370_filter(struct ata_device *adev, unsigned long mask)
 /**
  *	hpt370a_filter	-	mode selection filter
  *	@adev: ATA device
+ *	@mask: mode mask
  *
  *	Block UDMA on devices that cause trouble with this controller.
  */
@@ -465,7 +465,7 @@ static void hpt370_set_dmamode(struct ata_port *ap, struct ata_device *adev)
 }
 
 /**
- *	hpt370_bmdma_end		-	DMA engine stop
+ *	hpt370_bmdma_stop		-	DMA engine stop
  *	@qc: ATA command
  *
  *	Work around the HPT370 DMA engine.
@@ -559,7 +559,7 @@ static void hpt372_set_dmamode(struct ata_port *ap, struct ata_device *adev)
 }
 
 /**
- *	hpt37x_bmdma_end		-	DMA engine stop
+ *	hpt37x_bmdma_stop		-	DMA engine stop
  *	@qc: ATA command
  *
  *	Clean up after the HPT372 and later DMA engine

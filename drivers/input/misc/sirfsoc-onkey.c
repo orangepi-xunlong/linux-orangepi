@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Power key driver for SiRF PrimaII
  *
  * Copyright (c) 2013 - 2014 Cambridge Silicon Radio Limited, a CSR plc group
  * company.
- *
- * Licensed under GPLv2 or later.
  */
 
 #include <linux/module.h>
@@ -172,13 +171,6 @@ static int sirfsoc_pwrc_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int sirfsoc_pwrc_remove(struct platform_device *pdev)
-{
-	device_init_wakeup(&pdev->dev, 0);
-
-	return 0;
-}
-
 static int __maybe_unused sirfsoc_pwrc_resume(struct device *dev)
 {
 	struct sirfsoc_pwrc_drvdata *pwrcdrv = dev_get_drvdata(dev);
@@ -189,7 +181,7 @@ static int __maybe_unused sirfsoc_pwrc_resume(struct device *dev)
 	 * if users touch X_ONKEY_B, see arch/arm/mach-prima2/pm.c
 	 */
 	mutex_lock(&input->mutex);
-	if (input->users)
+	if (input_device_enabled(input))
 		sirfsoc_pwrc_toggle_interrupts(pwrcdrv, true);
 	mutex_unlock(&input->mutex);
 
@@ -200,7 +192,6 @@ static SIMPLE_DEV_PM_OPS(sirfsoc_pwrc_pm_ops, NULL, sirfsoc_pwrc_resume);
 
 static struct platform_driver sirfsoc_pwrc_driver = {
 	.probe		= sirfsoc_pwrc_probe,
-	.remove		= sirfsoc_pwrc_remove,
 	.driver		= {
 		.name	= "sirfsoc-pwrc",
 		.pm	= &sirfsoc_pwrc_pm_ops,

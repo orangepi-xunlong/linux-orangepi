@@ -18,7 +18,7 @@
  * Clean patches should be sent to the ARM Linux Patch System.  Please see the
  * following web page for more information:
  *
- *	http://www.arm.linux.org.uk/developer/patches/info.shtml
+ *	https://www.arm.linux.org.uk/developer/patches/info.shtml
  *
  * Thank you.
  *
@@ -173,7 +173,7 @@
 #include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/cpufreq.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
 #include <linux/mutex.h>
@@ -323,13 +323,11 @@ sa1100fb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 		 * according to the RGB bitfield information.
 		 */
 		if (regno < 16) {
-			u32 *pal = fbi->fb.pseudo_palette;
-
 			val  = chan_to_field(red, &fbi->fb.var.red);
 			val |= chan_to_field(green, &fbi->fb.var.green);
 			val |= chan_to_field(blue, &fbi->fb.var.blue);
 
-			pal[regno] = val;
+			fbi->pseudo_palette[regno] = val;
 			ret = 0;
 		}
 		break;
@@ -576,7 +574,7 @@ static int sa1100fb_mmap(struct fb_info *info,
 	return vm_iomap_memory(vma, info->fix.mmio_start, info->fix.mmio_len);
 }
 
-static struct fb_ops sa1100fb_ops = {
+static const struct fb_ops sa1100fb_ops = {
 	.owner		= THIS_MODULE,
 	.fb_check_var	= sa1100fb_check_var,
 	.fb_set_par	= sa1100fb_set_par,
@@ -801,8 +799,8 @@ static void sa1100fb_enable_controller(struct sa1100fb_info *fbi)
 	writel_relaxed(fbi->dbar2, fbi->base + DBAR2);
 	writel_relaxed(fbi->reg_lccr0 | LCCR0_LEN, fbi->base + LCCR0);
 
-	if (machine_is_shannon())
-		gpio_set_value(SHANNON_GPIO_DISP_EN, 1);
+	if (fbi->shannon_lcden)
+		gpiod_set_value(fbi->shannon_lcden, 1);
 
 	dev_dbg(fbi->dev, "DBAR1: 0x%08x\n", readl_relaxed(fbi->base + DBAR1));
 	dev_dbg(fbi->dev, "DBAR2: 0x%08x\n", readl_relaxed(fbi->base + DBAR2));
@@ -819,8 +817,8 @@ static void sa1100fb_disable_controller(struct sa1100fb_info *fbi)
 
 	dev_dbg(fbi->dev, "Disabling LCD controller\n");
 
-	if (machine_is_shannon())
-		gpio_set_value(SHANNON_GPIO_DISP_EN, 0);
+	if (fbi->shannon_lcden)
+		gpiod_set_value(fbi->shannon_lcden, 0);
 
 	set_current_state(TASK_UNINTERRUPTIBLE);
 	add_wait_queue(&fbi->ctrlr_wait, &wait);
@@ -937,7 +935,7 @@ static void set_ctrlr_state(struct sa1100fb_info *fbi, u_int state)
 		 */
 		if (old_state != C_DISABLE_PM)
 			break;
-		/* fall through */
+		fallthrough;
 
 	case C_ENABLE:
 		/*
@@ -970,44 +968,6 @@ static void sa1100fb_task(struct work_struct *w)
 
 #ifdef CONFIG_CPU_FREQ
 /*
- * Calculate the minimum DMA period over all displays that we own.
- * This, together with the SDRAM bandwidth defines the slowest CPU
- * frequency that can be selected.
- */
-static unsigned int sa1100fb_min_dma_period(struct sa1100fb_info *fbi)
-{
-#if 0
-	unsigned int min_period = (unsigned int)-1;
-	int i;
-
-	for (i = 0; i < MAX_NR_CONSOLES; i++) {
-		struct display *disp = &fb_display[i];
-		unsigned int period;
-
-		/*
-		 * Do we own this display?
-		 */
-		if (disp->fb_info != &fbi->fb)
-			continue;
-
-		/*
-		 * Ok, calculate its DMA period
-		 */
-		period = sa1100fb_display_dma_period(&disp->var);
-		if (period < min_period)
-			min_period = period;
-	}
-
-	return min_period;
-#else
-	/*
-	 * FIXME: we need to verify _all_ consoles.
-	 */
-	return sa1100fb_display_dma_period(&fbi->fb.var);
-#endif
-}
-
-/*
  * CPU clock speed change handler.  We need to adjust the LCD timing
  * parameters when the CPU clock is adjusted by the power management
  * subsystem.
@@ -1028,31 +988,6 @@ sa1100fb_freq_transition(struct notifier_block *nb, unsigned long val,
 		pcd = get_pcd(fbi, fbi->fb.var.pixclock);
 		fbi->reg_lccr3 = (fbi->reg_lccr3 & ~0xff) | LCCR3_PixClkDiv(pcd);
 		set_ctrlr_state(fbi, C_ENABLE_CLKCHANGE);
-		break;
-	}
-	return 0;
-}
-
-static int
-sa1100fb_freq_policy(struct notifier_block *nb, unsigned long val,
-		     void *data)
-{
-	struct sa1100fb_info *fbi = TO_INF(nb, freq_policy);
-	struct cpufreq_policy *policy = data;
-
-	switch (val) {
-	case CPUFREQ_ADJUST:
-		dev_dbg(fbi->dev, "min dma period: %d ps, "
-			"new clock %d kHz\n", sa1100fb_min_dma_period(fbi),
-			policy->max);
-		/* todo: fill in min/max values */
-		break;
-	case CPUFREQ_NOTIFY:
-		do {} while(0);
-		/* todo: panic if min/max values aren't fulfilled 
-		 * [can't really happen unless there's a bug in the
-		 * CPU policy verififcation process *
-		 */
 		break;
 	}
 	return 0;
@@ -1118,7 +1053,7 @@ static int sa1100fb_map_video_memory(struct sa1100fb_info *fbi)
 }
 
 /* Fake monspecs to fill in fbinfo structure */
-static struct fb_monspecs monspecs = {
+static const struct fb_monspecs monspecs = {
 	.hfmin	= 30000,
 	.hfmax	= 70000,
 	.vfmin	= 50,
@@ -1132,12 +1067,10 @@ static struct sa1100fb_info *sa1100fb_init_fbinfo(struct device *dev)
 	struct sa1100fb_info *fbi;
 	unsigned i;
 
-	fbi = kmalloc(sizeof(struct sa1100fb_info) + sizeof(u32) * 16,
-		      GFP_KERNEL);
+	fbi = devm_kzalloc(dev, sizeof(struct sa1100fb_info), GFP_KERNEL);
 	if (!fbi)
 		return NULL;
 
-	memset(fbi, 0, sizeof(struct sa1100fb_info));
 	fbi->dev = dev;
 
 	strcpy(fbi->fb.fix.id, SA1100_NAME);
@@ -1159,7 +1092,7 @@ static struct sa1100fb_info *sa1100fb_init_fbinfo(struct device *dev)
 	fbi->fb.fbops		= &sa1100fb_ops;
 	fbi->fb.flags		= FBINFO_DEFAULT;
 	fbi->fb.monspecs	= monspecs;
-	fbi->fb.pseudo_palette	= (fbi + 1);
+	fbi->fb.pseudo_palette	= fbi->pseudo_palette;
 
 	fbi->rgb[RGB_4]		= &rgb_4;
 	fbi->rgb[RGB_8]		= &rgb_8;
@@ -1210,7 +1143,6 @@ static struct sa1100fb_info *sa1100fb_init_fbinfo(struct device *dev)
 static int sa1100fb_probe(struct platform_device *pdev)
 {
 	struct sa1100fb_info *fbi;
-	struct resource *res;
 	int ret, irq;
 
 	if (!dev_get_platdata(&pdev->dev)) {
@@ -1218,47 +1150,38 @@ static int sa1100fb_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0 || !res)
+	if (irq < 0)
 		return -EINVAL;
 
-	if (!request_mem_region(res->start, resource_size(res), "LCD"))
-		return -EBUSY;
-
 	fbi = sa1100fb_init_fbinfo(&pdev->dev);
-	ret = -ENOMEM;
 	if (!fbi)
-		goto failed;
+		return -ENOMEM;
 
-	fbi->clk = clk_get(&pdev->dev, NULL);
-	if (IS_ERR(fbi->clk)) {
-		ret = PTR_ERR(fbi->clk);
-		fbi->clk = NULL;
-		goto failed;
+	fbi->base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(fbi->base))
+		return PTR_ERR(fbi->base);
+
+	fbi->clk = devm_clk_get(&pdev->dev, NULL);
+	if (IS_ERR(fbi->clk))
+		return PTR_ERR(fbi->clk);
+
+	ret = devm_request_irq(&pdev->dev, irq, sa1100fb_handle_irq, 0,
+			       "LCD", fbi);
+	if (ret) {
+		dev_err(&pdev->dev, "request_irq failed: %d\n", ret);
+		return ret;
 	}
 
-	fbi->base = ioremap(res->start, resource_size(res));
-	if (!fbi->base)
-		goto failed;
+	fbi->shannon_lcden = gpiod_get_optional(&pdev->dev, "shannon-lcden",
+						GPIOD_OUT_LOW);
+	if (IS_ERR(fbi->shannon_lcden))
+		return PTR_ERR(fbi->shannon_lcden);
 
 	/* Initialize video memory */
 	ret = sa1100fb_map_video_memory(fbi);
 	if (ret)
-		goto failed;
-
-	ret = request_irq(irq, sa1100fb_handle_irq, 0, "LCD", fbi);
-	if (ret) {
-		dev_err(&pdev->dev, "request_irq failed: %d\n", ret);
-		goto failed;
-	}
-
-	if (machine_is_shannon()) {
-		ret = gpio_request_one(SHANNON_GPIO_DISP_EN,
-			GPIOF_OUT_INIT_LOW, "display enable");
-		if (ret)
-			goto err_free_irq;
-	}
+		return ret;
 
 	/*
 	 * This makes sure that our colour bitfield
@@ -1269,32 +1192,19 @@ static int sa1100fb_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, fbi);
 
 	ret = register_framebuffer(&fbi->fb);
-	if (ret < 0)
-		goto err_reg_fb;
+	if (ret < 0) {
+		dma_free_wc(fbi->dev, fbi->map_size, fbi->map_cpu,
+			    fbi->map_dma);
+		return ret;
+	}
 
 #ifdef CONFIG_CPU_FREQ
 	fbi->freq_transition.notifier_call = sa1100fb_freq_transition;
-	fbi->freq_policy.notifier_call = sa1100fb_freq_policy;
 	cpufreq_register_notifier(&fbi->freq_transition, CPUFREQ_TRANSITION_NOTIFIER);
-	cpufreq_register_notifier(&fbi->freq_policy, CPUFREQ_POLICY_NOTIFIER);
 #endif
 
 	/* This driver cannot be unloaded at the moment */
 	return 0;
-
- err_reg_fb:
-	if (machine_is_shannon())
-		gpio_free(SHANNON_GPIO_DISP_EN);
- err_free_irq:
-	free_irq(irq, fbi);
- failed:
-	if (fbi)
-		iounmap(fbi->base);
-	if (fbi->clk)
-		clk_put(fbi->clk);
-	kfree(fbi);
-	release_mem_region(res->start, resource_size(res));
-	return ret;
 }
 
 static struct platform_driver sa1100fb_driver = {

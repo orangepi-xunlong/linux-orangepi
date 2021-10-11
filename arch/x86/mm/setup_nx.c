@@ -1,8 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/spinlock.h>
 #include <linux/errno.h>
 #include <linux/init.h>
+#include <linux/pgtable.h>
 
-#include <asm/pgtable.h>
 #include <asm/proto.h>
 #include <asm/cpufeature.h>
 

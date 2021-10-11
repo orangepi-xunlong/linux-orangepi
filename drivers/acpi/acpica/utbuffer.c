@@ -1,45 +1,11 @@
+// SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
 /******************************************************************************
  *
  * Module Name: utbuffer - Buffer dump routines
  *
+ * Copyright (C) 2000 - 2021, Intel Corp.
+ *
  *****************************************************************************/
-
-/*
- * Copyright (C) 2000 - 2016, Intel Corp.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions, and the following disclaimer,
- *    without modification.
- * 2. Redistributions in binary form must reproduce at minimum a disclaimer
- *    substantially similar to the "NO WARRANTY" disclaimer below
- *    ("Disclaimer") and any redistribution must be conditioned upon
- *    including a substantially similar Disclaimer requirement for further
- *    binary redistribution.
- * 3. Neither the names of the above-listed copyright holders nor the names
- *    of any contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
- *
- * NO WARRANTY
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDERS OR CONTRIBUTORS BE LIABLE FOR SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
- * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGES.
- */
 
 #include <acpi/acpi.h>
 #include "accommon.h"
@@ -71,7 +37,9 @@ void acpi_ut_dump_buffer(u8 *buffer, u32 count, u32 display, u32 base_offset)
 	u32 j;
 	u32 temp32;
 	u8 buf_char;
+	u32 display_data_only = display & DB_DISPLAY_DATA_ONLY;
 
+	display &= ~DB_DISPLAY_DATA_ONLY;
 	if (!buffer) {
 		acpi_os_printf("Null Buffer Pointer in DumpBuffer!\n");
 		return;
@@ -87,7 +55,9 @@ void acpi_ut_dump_buffer(u8 *buffer, u32 count, u32 display, u32 base_offset)
 
 		/* Print current offset */
 
-		acpi_os_printf("%6.4X: ", (base_offset + i));
+		if (!display_data_only) {
+			acpi_os_printf("%8.4X: ", (base_offset + i));
+		}
 
 		/* Print 16 hex chars */
 
@@ -143,32 +113,34 @@ void acpi_ut_dump_buffer(u8 *buffer, u32 count, u32 display, u32 base_offset)
 		 * Print the ASCII equivalent characters but watch out for the bad
 		 * unprintable ones (printable chars are 0x20 through 0x7E)
 		 */
-		acpi_os_printf(" ");
-		for (j = 0; j < 16; j++) {
-			if (i + j >= count) {
-				acpi_os_printf("\n");
-				return;
+		if (!display_data_only) {
+			acpi_os_printf(" ");
+			for (j = 0; j < 16; j++) {
+				if (i + j >= count) {
+					acpi_os_printf("\n");
+					return;
+				}
+
+				/*
+				 * Add comment characters so rest of line is ignored when
+				 * compiled
+				 */
+				if (j == 0) {
+					acpi_os_printf("// ");
+				}
+
+				buf_char = buffer[(acpi_size)i + j];
+				if (isprint(buf_char)) {
+					acpi_os_printf("%c", buf_char);
+				} else {
+					acpi_os_printf(".");
+				}
 			}
 
-			/*
-			 * Add comment characters so rest of line is ignored when
-			 * compiled
-			 */
-			if (j == 0) {
-				acpi_os_printf("// ");
-			}
+			/* Done with that line. */
 
-			buf_char = buffer[(acpi_size)i + j];
-			if (isprint(buf_char)) {
-				acpi_os_printf("%c", buf_char);
-			} else {
-				acpi_os_printf(".");
-			}
+			acpi_os_printf("\n");
 		}
-
-		/* Done with that line. */
-
-		acpi_os_printf("\n");
 		i += 16;
 	}
 
@@ -253,7 +225,7 @@ acpi_ut_dump_buffer_to_file(ACPI_FILE file,
 
 		/* Print current offset */
 
-		fprintf(file, "%6.4X: ", (base_offset + i));
+		fprintf(file, "%8.4X: ", (base_offset + i));
 
 		/* Print 16 hex chars */
 

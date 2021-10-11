@@ -367,65 +367,6 @@ static u32 edca_setting_dl_g_mode[HT_IOT_PEER_MAX] =
 /*RALINK, ATHEROS, CISCO, MERU, MARVELL, 92U_AP, SELF_AP */
 { 0x4322, 0xa44f, 0x5e4322, 0xa42b, 0x5e4322, 0x4322,	 0xa42b, 0x5ea42b, 0xa44f, 0x5e4322, 0x5ea42b};
 
-
-struct turbo_edca_setting{
-	u32 edca_ul; /* uplink, tx */
-	u32 edca_dl; /* downlink, rx */
-};
-
-#define TURBO_EDCA_ENT(UL, DL) {UL, DL}
-
-#if 0
-#define TURBO_EDCA_MODE_NUM 18
-static struct turbo_edca_setting rtw_turbo_edca[TURBO_EDCA_MODE_NUM] = {
-	TURBO_EDCA_ENT(0xa42b, 0xa42b), /* mode 0 */
-	TURBO_EDCA_ENT(0x431c, 0x431c), /* mode 1 */
-	TURBO_EDCA_ENT(0x4319, 0x4319), /* mode 2 */
-
-	TURBO_EDCA_ENT(0x5ea42b, 0x5ea42b), /* mode 3 */
-	TURBO_EDCA_ENT(0x5e431c, 0x5e431c), /* mode 4 */
-	TURBO_EDCA_ENT(0x5e4319, 0x5e4319), /* mode 5 */
-
-	TURBO_EDCA_ENT(0x6ea42b, 0x6ea42b), /* mode 6 */
-	TURBO_EDCA_ENT(0x6e431c, 0x6e431c), /* mode 7 */
-	TURBO_EDCA_ENT(0x6e4319, 0x6e4319), /* mode 8 */
-
-	TURBO_EDCA_ENT(0x5ea42b, 0xa42b), /* mode 9 */
-	TURBO_EDCA_ENT(0x5e431c, 0x431c), /* mode 10 */
-	TURBO_EDCA_ENT(0x5e4319, 0x4319), /* mode 11 */
-
-	TURBO_EDCA_ENT(0x6ea42b, 0xa42b), /* mode 12 */
-	TURBO_EDCA_ENT(0x6e431c, 0x431c), /* mode 13 */
-	TURBO_EDCA_ENT(0x6e4319, 0x4319), /* mode 14 */
-
-	TURBO_EDCA_ENT(0x431c, 0x5e431c), /* mode 15 */
-
-	TURBO_EDCA_ENT(0xa42b, 0x5ea42b), /* mode 16 */
-
-	TURBO_EDCA_ENT(0x138642b, 0x431c), /* mode 17 */
-};
-#else
-#define TURBO_EDCA_MODE_NUM 8
-static struct turbo_edca_setting rtw_turbo_edca[TURBO_EDCA_MODE_NUM] = {
-	/* { UL, DL } */
-	TURBO_EDCA_ENT(0x5e431c, 0x431c), /* mode 0 */
-
-	TURBO_EDCA_ENT(0x431c, 0x431c), /* mode 1 */
-
-	TURBO_EDCA_ENT(0x5e431c, 0x5e431c), /* mode 2 */
-
-	TURBO_EDCA_ENT(0x5ea42b, 0x5ea42b), /* mode 3 */
-
-	TURBO_EDCA_ENT(0x5ea42b, 0x431c), /* mode 4 */
-
-	TURBO_EDCA_ENT(0x6ea42b, 0x6ea42b), /* mode 5 */
-
-	TURBO_EDCA_ENT(0xa42b, 0xa42b), /* mode 6 */
-
-	TURBO_EDCA_ENT(0x5e431c, 0xa42b), /* mode 7 */
-};
-#endif
-
 void rtw_hal_turbo_edca(_adapter *adapter)
 {
 	HAL_DATA_TYPE		*hal_data = GET_HAL_DATA(adapter);
@@ -455,7 +396,7 @@ void rtw_hal_turbo_edca(_adapter *adapter)
 	u8	is_linked = _FALSE;
 	u8	interface_type;
 
-	if (hal_data->dis_turboedca == 1)
+	if (hal_data->dis_turboedca)
 		return;
 
 	if (rtw_mi_check_status(adapter, MI_ASSOC))
@@ -552,36 +493,6 @@ void rtw_hal_turbo_edca(_adapter *adapter)
 				EDCA_BE_DL = 0x6ea42b;
 			}
 
-			if ((ic_type == RTL8822B)
-			    && (interface_type == RTW_SDIO))
-				EDCA_BE_DL = 0x00431c;
-
-#ifdef CONFIG_RTW_TPT_MODE
-			if ( dvobj->tpt_mode > 0 ) {
-				EDCA_BE_UL = dvobj->edca_be_ul;
-				EDCA_BE_DL = dvobj->edca_be_dl;
-			}
-#endif /* CONFIG_RTW_TPT_MODE */
-
-			/* keep this condition at last check */
-			if (hal_data->dis_turboedca == 2) {
-
-					if (hal_data->edca_param_mode < TURBO_EDCA_MODE_NUM) {
-
-						struct turbo_edca_setting param;
-
-						param = rtw_turbo_edca[hal_data->edca_param_mode];
-
-						EDCA_BE_UL = param.edca_ul;
-						EDCA_BE_DL = param.edca_dl;
-
-					} else {
-
-						EDCA_BE_UL = hal_data->edca_param_mode;
-						EDCA_BE_DL = hal_data->edca_param_mode;
-					}
-			}
-
 			if (traffic_index == DOWN_LINK)
 				edca_param = EDCA_BE_DL;
 			else
@@ -589,13 +500,9 @@ void rtw_hal_turbo_edca(_adapter *adapter)
 #ifdef 	CONFIG_RTW_CUSTOMIZE_BEEDCA
 			edca_param = CONFIG_RTW_CUSTOMIZE_BEEDCA;
 #endif
+			rtw_hal_set_hwreg(adapter, HW_VAR_AC_PARAM_BE, (u8 *)(&edca_param));
 
-			if ( edca_param != hal_data->ac_param_be) {
-
-				rtw_hal_set_hwreg(adapter, HW_VAR_AC_PARAM_BE, (u8 *)(&edca_param));
-
-				RTW_INFO("Turbo EDCA =0x%x\n", edca_param);
-			}
+			RTW_DBG("Turbo EDCA =0x%x\n", edca_param);
 
 			hal_data->prv_traffic_idx = traffic_index;
 		}
@@ -1009,17 +916,10 @@ void dump_sta_traffic(void *sel, _adapter *adapter, struct sta_info *psta)
 {
 	struct ra_sta_info *ra_info;
 	u8 curr_sgi = _FALSE;
-	u32 tx_tp_mbips, rx_tp_mbips, bi_tp_mbips;
 
 	if (!psta)
 		return;
-	RTW_PRINT_SEL(sel, "\n");
-	RTW_PRINT_SEL(sel, "====== mac_id : %d [" MAC_FMT "] ======\n",
-		psta->cmn.mac_id, MAC_ARG(psta->cmn.mac_addr));
-
-	if (is_client_associated_to_ap(psta->padapter))
-		RTW_PRINT_SEL(sel, "BCN counts : %d (per-%d second), DTIM Period:%d\n",
-		rtw_get_bcn_cnt(psta->padapter) / 2, 1, rtw_get_bcn_dtim_period(psta->padapter));
+	RTW_PRINT_SEL(sel, "====== mac_id : %d ======\n", psta->cmn.mac_id);
 
 	ra_info = &psta->cmn.ra_info;
 	curr_sgi = (ra_info->curr_tx_rate & 0x80) ? _TRUE : _FALSE;
@@ -1047,51 +947,14 @@ void dump_sta_traffic(void *sel, _adapter *adapter, struct sta_info *psta)
 		);
 	}
 
-	_RTW_PRINT_SEL(sel, "RTW: [TP] ");
-	tx_tp_mbips = psta->sta_stats.tx_tp_kbits >> 10;
-	rx_tp_mbips = psta->sta_stats.rx_tp_kbits >> 10;
-	bi_tp_mbips = tx_tp_mbips + rx_tp_mbips;
+	RTW_PRINT_SEL(sel, "TP {Tx,Rx,Total} = { %d , %d , %d } Mbps\n",
+		(psta->sta_stats.tx_tp_mbytes << 3), (psta->sta_stats.rx_tp_mbytes << 3),
+		(psta->sta_stats.tx_tp_mbytes + psta->sta_stats.rx_tp_mbytes) << 3);
 
-	if (tx_tp_mbips)
-		_RTW_PRINT_SEL(sel, "Tx : %d(Mbps) ", tx_tp_mbips);
-	else
-		_RTW_PRINT_SEL(sel, "Tx : %d(Kbps) ", psta->sta_stats.tx_tp_kbits);
-
-	if (rx_tp_mbips)
-		_RTW_PRINT_SEL(sel, "Rx : %d(Mbps) ", rx_tp_mbips);
-	else
-		_RTW_PRINT_SEL(sel, "Rx : %d(Kbps) ", psta->sta_stats.rx_tp_kbits);
-
-	if (bi_tp_mbips)
-		_RTW_PRINT_SEL(sel, "Total : %d(Mbps)\n", bi_tp_mbips);
-	else
-		_RTW_PRINT_SEL(sel, "Total : %d(Kbps)\n", psta->sta_stats.tx_tp_kbits + psta->sta_stats.rx_tp_kbits);
-
-
-	_RTW_PRINT_SEL(sel, "RTW: [Smooth TP] ");
-	tx_tp_mbips = psta->sta_stats.smooth_tx_tp_kbits >> 10;
-	rx_tp_mbips = psta->sta_stats.smooth_rx_tp_kbits >> 10;
-	bi_tp_mbips = tx_tp_mbips + rx_tp_mbips;
-	if (tx_tp_mbips)
-		_RTW_PRINT_SEL(sel, "Tx : %d(Mbps) ", tx_tp_mbips);
-	else
-		_RTW_PRINT_SEL(sel, "Tx : %d(Kbps) ", psta->sta_stats.smooth_tx_tp_kbits);
-
-	if (rx_tp_mbips)
-		_RTW_PRINT_SEL(sel, "Rx : %d(Mbps) ", rx_tp_mbips);
-	else
-		_RTW_PRINT_SEL(sel, "Rx : %d(Kbps) ", psta->sta_stats.smooth_rx_tp_kbits);
-
-	if (bi_tp_mbips)
-		_RTW_PRINT_SEL(sel, "Total : %d(Mbps)\n", bi_tp_mbips);
-	else
-		_RTW_PRINT_SEL(sel, "Total : %d(Kbps)\n", psta->sta_stats.smooth_tx_tp_kbits + psta->sta_stats.rx_tp_kbits);
-
-	#if 0
 	RTW_PRINT_SEL(sel, "Moving-AVG TP {Tx,Rx,Total} = { %d , %d , %d } Mbps\n\n",
 		(psta->cmn.tx_moving_average_tp << 3), (psta->cmn.rx_moving_average_tp << 3),
 		(psta->cmn.tx_moving_average_tp + psta->cmn.rx_moving_average_tp) << 3);
-	#endif
+
 }
 
 void dump_sta_info(void *sel, struct sta_info *psta)
@@ -1259,15 +1122,15 @@ void rtw_dyn_soml_config(_adapter *adapter)
 		RTW_INFO("dyn_soml_en = 1\n");
 	} else {
 		if (adapter->registrypriv.dyn_soml_en == 2) {
-			rtw_dyn_soml_para_set(adapter,
-				adapter->registrypriv.dyn_soml_train_num,
-				adapter->registrypriv.dyn_soml_interval,
+			rtw_dyn_soml_para_set(adapter, 
+				adapter->registrypriv.dyn_soml_train_num, 
+				adapter->registrypriv.dyn_soml_interval, 
 				adapter->registrypriv.dyn_soml_period,
 				adapter->registrypriv.dyn_soml_delay);
 			RTW_INFO("dyn_soml_en = 2\n");
 			RTW_INFO("dyn_soml_en, param = %d, %d, %d, %d\n",
 				adapter->registrypriv.dyn_soml_train_num,
-				adapter->registrypriv.dyn_soml_interval,
+				adapter->registrypriv.dyn_soml_interval, 
 				adapter->registrypriv.dyn_soml_period,
 				adapter->registrypriv.dyn_soml_delay);
 		} else if (adapter->registrypriv.dyn_soml_en == 0) {
@@ -1276,23 +1139,6 @@ void rtw_dyn_soml_config(_adapter *adapter)
 			RTW_ERR("%s, wrong setting: dyn_soml_en = %d\n", __func__,
 				adapter->registrypriv.dyn_soml_en);
 	}
-}
-#endif
-
-#ifdef CONFIG_LPS_PWR_TRACKING
-void rtw_phydm_pwr_tracking_directly(_adapter *adapter)
-{
-	PHAL_DATA_TYPE hal_data = GET_HAL_DATA(adapter);
-	u8 rfk_forbidden = _TRUE;
-	u8 is_linked = _FALSE;
-
-	if (rtw_mi_check_status(adapter, MI_ASSOC))
-		is_linked = _TRUE;
-
-	rfk_forbidden = (_rtw_phydm_rfk_condition_check(adapter, hal_data->bScanInProcess, is_linked) == _TRUE) ? _FALSE : _TRUE;
-	halrf_cmn_info_set(&hal_data->odmpriv, HALRF_CMNINFO_RFK_FORBIDDEN, rfk_forbidden);
-
-	odm_txpowertracking_direct_ce(&hal_data->odmpriv);
 }
 #endif
 

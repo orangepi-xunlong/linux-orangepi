@@ -278,26 +278,76 @@ void rtl8822b_req_txrpt_cmd(PADAPTER adapter, u8 macid)
 	rtw_halmac_send_h2c(adapter_to_dvobj(adapter), h2c);
 }
 
-#define SET_PWR_MODE_SET_BCN_RECEIVING_TIME(h2c_pkt, value)                    \
-	SET_BITS_TO_LE_4BYTE(h2c_pkt + 0X04, 24, 5, value)
-#define SET_PWR_MODE_SET_ADOPT_BCN_RECEIVING_TIME(h2c_pkt, value)              \
-	SET_BITS_TO_LE_4BYTE(h2c_pkt + 0X04, 31, 1, value)
+/*
+ * lps_wait_bb_rf_ready() - Wait BB/RF ready after leaving LPS
+ * @adapter	struct _ADAPTER*
+ * @timeout	time to wait complete, unit is millisecond
+ *
+ * This function is used to wait BB and RF ready after leaving LPS. Besdies
+ * checking registers, it will wait 1 ms to let everything has time to finish
+ * their jobs, so this function will cost more than 1ms to return. Please call
+ * this function carefully, or you will waste time to wait.
+ *
+ * Return 0 for BB/RF ready, otherwise NOT ready.
+ * The error codes are as following:
+ * -1	unclassified error
+ * -2	RF ready check timeout
+ * -3	BB ready check timeout
+ */
+static int lps_wait_bb_rf_ready(struct _ADAPTER *adapter, u32 timeout)
+{
+	systime s_time;	/* start time */
+	u8 ready = 0;
+#define RF_READY	BIT(0)	/* BB ready */
+#define BB_READY	BIT(1)	/* RF ready */
+	u8 awake = _FALSE;
+	u8 sys_func_en;
+
+
+	s_time = rtw_get_current_time();
+
+	do {
+		if (!(ready & RF_READY)) {
+			rtw_hal_get_hwreg(adapter, HW_VAR_FWLPS_RF_ON, &awake);
+			if (awake == _TRUE)
+				ready |= RF_READY;
+		}
+
+		if ((ready & RF_READY) && (!(ready & BB_READY))) {
+			sys_func_en = rtw_read8(adapter, REG_SYS_FUNC_EN_8822B);
+			if (sys_func_en & BIT_FEN_BBRSTB_8822B)
+				break;
+		}
+
+		if (rtw_is_surprise_removed(adapter))
+			return -1;
+
+		if (rtw_get_passing_time_ms(s_time) > timeout) {
+			if (!(ready & RF_READY))
+				return -2;
+			return -3;
+		}
+
+		rtw_usleep_os(100); /* 100us interval between each check */
+	} while (1);
+
+	rtw_usleep_os(1000); /* Wait 1ms */
+
+	return 0;
+}
 
 void rtl8822b_set_FwPwrMode_cmd(PADAPTER adapter, u8 psmode)
 {
 	int i;
 	u8 smart_ps = 0, mode = 0;
 	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(adapter);
-#ifdef CONFIG_BCN_RECV_TIME
-	u8 bcn_recv_time;
 	struct mlme_ext_priv *pmlmeext = &adapter->mlmeextpriv;
-#endif
 #ifdef CONFIG_WMMPS_STA
 	struct mlme_priv	*pmlmepriv = &(adapter->mlmepriv);
 	struct qos_priv	*pqospriv = &pmlmepriv->qospriv;
-#endif /* CONFIG_WMMPS_STA */
+#endif /* CONFIG_WMMPS_STA */	
 	u8 h2c[RTW_HALMAC_H2C_MAX_SIZE] = {0};
-	u8 PowerState = 0, awake_intvl = 1, rlbm = 0;
+	u8 PowerState = 0, awake_intvl = 1, byte5 = 0, rlbm = 0;
 	u8 allQueueUAPSD = 0;
 	char *fw_psmode_str = "";
 #ifdef CONFIG_P2P
@@ -313,7 +363,7 @@ void rtl8822b_set_FwPwrMode_cmd(PADAPTER adapter, u8 psmode)
 			psmode == PS_MODE_ACTIVE ? pwrpriv->current_lps_hw_port_id:get_hw_port(adapter));
 
 	if (psmode == PS_MODE_MIN || psmode == PS_MODE_MAX) {
-#ifdef CONFIG_WMMPS_STA
+#ifdef CONFIG_WMMPS_STA	
 		if (rtw_is_wmmps_mode(adapter)) {
 			mode = 2;
 
@@ -326,8 +376,8 @@ void rtl8822b_set_FwPwrMode_cmd(PADAPTER adapter, u8 psmode)
 #endif /* CONFIG_WMMPS_STA */
 		{
 			mode = 1;
-#ifdef CONFIG_WMMPS_STA
-			/* For WMMPS test case, the station must retain sleep mode to capture buffered data on LPS mechanism */
+#ifdef CONFIG_WMMPS_STA	
+			/* For WMMPS test case, the station must retain sleep mode to capture buffered data on LPS mechanism */ 
 			if ((pqospriv->uapsd_tid & BIT_MASK_TID_TC)  != 0)
 				smart_ps = 0;
 			else
@@ -375,13 +425,28 @@ void rtl8822b_set_FwPwrMode_cmd(PADAPTER adapter, u8 psmode)
 
 	if (psmode > 0) {
 #ifdef CONFIG_BT_COEXIST
-		if (rtw_btcoex_IsBtControlLps(adapter) == _TRUE)
+		if (rtw_btcoex_IsBtControlLps(adapter) == _TRUE) {
 			PowerState = rtw_btcoex_RpwmVal(adapter);
-		else
+			byte5 = rtw_btcoex_LpsVal(adapter);
+
+			if ((rlbm == 2) && (byte5 & BIT(4))) {
+				/*
+				 * Keep awake interval to 1 to prevent from
+				 * decreasing coex performance
+				 */
+				awake_intvl = 2;
+				rlbm = 2;
+			}
+		} else
 #endif /* CONFIG_BT_COEXIST */
+		{
 			PowerState = 0x00; /* AllON(0x0C), RFON(0x04), RFOFF(0x00) */
-	} else
+			byte5 = 0x40;
+		}
+	} else {
 		PowerState = 0x0C; /* AllON(0x0C), RFON(0x04), RFOFF(0x00) */
+		byte5 = 0x40;
+	}
 
 	if (mode == 0)
 		fw_psmode_str = "ACTIVE";
@@ -392,7 +457,7 @@ void rtl8822b_set_FwPwrMode_cmd(PADAPTER adapter, u8 psmode)
 	else
 		fw_psmode_str = "UNSPECIFIED";
 
-	RTW_INFO(FUNC_ADPT_FMT": fw ps mode = %s, drv ps mode = %d, rlbm = %d , smart_ps = %d, allQueueUAPSD = %d\n",
+	RTW_INFO(FUNC_ADPT_FMT": fw ps mode = %s, drv ps mode = %d, rlbm = %d , smart_ps = %d, allQueueUAPSD = %d\n", 
 				FUNC_ADPT_ARG(adapter), fw_psmode_str, psmode, rlbm, smart_ps, allQueueUAPSD);
 
 	SET_PWR_MODE_SET_CMD_ID(h2c, CMD_ID_SET_PWR_MODE);
@@ -411,18 +476,60 @@ void rtl8822b_set_FwPwrMode_cmd(PADAPTER adapter, u8 psmode)
 		SET_PWR_MODE_SET_PORT_ID(h2c, get_hw_port(adapter));
 		pwrpriv->current_lps_hw_port_id = get_hw_port(adapter);
 	}
-#ifdef CONFIG_BCN_RECV_TIME
-	if (pmlmeext->bcn_rx_time) {
-		bcn_recv_time = pmlmeext->bcn_rx_time / 128; /*unit : 128 us*/
-		if (pmlmeext->bcn_rx_time % 128)
-			bcn_recv_time += 1;
 
-		if (bcn_recv_time > 31)
-			bcn_recv_time = 31;
-		SET_PWR_MODE_SET_ADOPT_BCN_RECEIVING_TIME(h2c, 1);
-		SET_PWR_MODE_SET_BCN_RECEIVING_TIME(h2c, bcn_recv_time);
+	if (byte5 & BIT(0))
+		SET_PWR_MODE_SET_LOW_POWER_RX_BCN(h2c, 1);
+	if (byte5 & BIT(1))
+		SET_PWR_MODE_SET_ANT_AUTO_SWITCH(h2c, 1);
+	if (byte5 & BIT(2))
+		SET_PWR_MODE_SET_PS_ALLOW_BT_HIGH_PRIORITY(h2c, 1);
+	if (byte5 & BIT(3))
+		SET_PWR_MODE_SET_PROTECT_BCN(h2c, 1);
+	if (byte5 & BIT(4))
+		SET_PWR_MODE_SET_SILENCE_PERIOD(h2c, 1);
+	if (byte5 & BIT(5))
+		SET_PWR_MODE_SET_FAST_BT_CONNECT(h2c, 1);
+	if (byte5 & BIT(6))
+		SET_PWR_MODE_SET_TWO_ANTENNA_EN(h2c, 1);
+
+#ifdef CONFIG_LPS_LCLK
+	if (psmode != PS_MODE_ACTIVE) {
+		if ((pmlmeext->adaptive_tsf_done == _FALSE)
+		    && (pmlmeext->bcn_cnt > 0)) {
+			u8 ratio_20_delay, ratio_80_delay;
+
+			/*
+			 * byte 6 for adaptive_early_32k
+			 * [0:3] = DrvBcnEarly (ms), [4:7] = DrvBcnTimeOut (ms)
+			 * 20% for DrvBcnEarly, 80% for DrvBcnTimeOut
+			 */
+			ratio_20_delay = 0;
+			ratio_80_delay = 0;
+			pmlmeext->DrvBcnEarly = 0xff;
+			pmlmeext->DrvBcnTimeOut = 0xff;
+
+			for (i = 0; i < 9; i++) {
+				pmlmeext->bcn_delay_ratio[i] = (pmlmeext->bcn_delay_cnt[i] * 100) / pmlmeext->bcn_cnt;
+
+				ratio_20_delay += pmlmeext->bcn_delay_ratio[i];
+				ratio_80_delay += pmlmeext->bcn_delay_ratio[i];
+
+				if (ratio_20_delay > 20 && pmlmeext->DrvBcnEarly == 0xff)
+					pmlmeext->DrvBcnEarly = i;
+
+				if (ratio_80_delay > 80 && pmlmeext->DrvBcnTimeOut == 0xff)
+					pmlmeext->DrvBcnTimeOut = i;
+
+				/* reset adaptive_early_32k cnt */
+				pmlmeext->bcn_delay_cnt[i] = 0;
+				pmlmeext->bcn_delay_ratio[i] = 0;
+			}
+
+			pmlmeext->bcn_cnt = 0;
+			pmlmeext->adaptive_tsf_done = _TRUE;
+		}
 	}
-#endif
+#endif /* CONFIG_LPS_LCLK */
 
 #ifdef CONFIG_BT_COEXIST
 	rtw_btcoex_RecordPwrMode(adapter, h2c + 1, RTW_HALMAC_H2C_MAX_SIZE - 1);
@@ -430,6 +537,13 @@ void rtl8822b_set_FwPwrMode_cmd(PADAPTER adapter, u8 psmode)
 
 	RTW_DBG_DUMP("H2C-PwrMode Parm:", h2c, RTW_HALMAC_H2C_MAX_SIZE);
 	rtw_halmac_send_h2c(adapter_to_dvobj(adapter), h2c);
+
+	if (psmode == PS_MODE_ACTIVE) {
+		i = lps_wait_bb_rf_ready(adapter, 1000);
+		if (i)
+			RTW_WARN("%s: BB/RF status is unknown!(%d)\n",
+				 __FUNCTION__, i);
+	}
 }
 
 void rtl8822b_set_FwPwrModeInIPS_cmd(PADAPTER adapter, u8 cmd_param)
@@ -449,35 +563,6 @@ void rtl8822b_set_FwPwrModeInIPS_cmd(PADAPTER adapter, u8 cmd_param)
 	RTW_DBG_DUMP("H2C-FwPwrModeInIPS Parm:", h2c, RTW_HALMAC_H2C_MAX_SIZE);
 	rtw_halmac_send_h2c(adapter_to_dvobj(adapter), h2c);
 }
-
-#ifdef CONFIG_LPS_PWR_TRACKING
-#define CLASS_FW_THERMAL_RPT	0x06
-#define CMD_ID_FW_THERMAL_RPT	0x0B
-
-#define SET_FW_THERMAL_RPT_SET_CMD_ID(__pH2C, __Value)    SET_BITS_TO_LE_4BYTE(__pH2C + 0X00, 0, 5, __Value)
-#define SET_FW_THERMAL_RPT_SET_CLASS(__pH2C, __Value)    SET_BITS_TO_LE_4BYTE(__pH2C + 0X00, 5, 3, __Value)
-
-#define SET_FW_THERMAL_RPT_SET_DETECT_EN(__pH2C, __Value)    SET_BITS_TO_LE_4BYTE(__pH2C + 0X00, 8, 1, __Value)
-#define SET_FW_THERMAL_RPT_SET_DETECT_VALUE(__pH2C, __Value)    SET_BITS_TO_LE_4BYTE(__pH2C + 0X00, 16, 8, __Value)
-#define SET_FW_THERMAL_RPT_SET_DETECT_PERIOD(__pH2C, __Value)    SET_BITS_TO_LE_4BYTE(__pH2C + 0X00, 24, 8, __Value)
-
-void rtl8822b_set_fw_thermal_rpt_cmd(_adapter *adapter, u8 enable, u8 thermal_value)
-{
-	u8 h2c[RTW_HALMAC_H2C_MAX_SIZE] = {0};
-
-	SET_FW_THERMAL_RPT_SET_CLASS(h2c, CLASS_FW_THERMAL_RPT);
-	SET_FW_THERMAL_RPT_SET_CMD_ID(h2c, CMD_ID_FW_THERMAL_RPT);
-
-	if (enable) {
-		SET_FW_THERMAL_RPT_SET_DETECT_EN(h2c, 1);
-		SET_FW_THERMAL_RPT_SET_DETECT_VALUE(h2c, thermal_value);
-		SET_FW_THERMAL_RPT_SET_DETECT_PERIOD(h2c, 19);/*0:100ms,1:200ms, 9:1s, 19:2s*/
-	} else {
-		SET_FW_THERMAL_RPT_SET_DETECT_EN(h2c, 0);
-	}
-	rtw_halmac_send_h2c(adapter_to_dvobj(adapter), h2c);
-}
-#endif
 
 static s32 rtl8822b_set_FwLowPwrLps_cmd(PADAPTER adapter, u8 enable)
 {
@@ -1182,10 +1267,6 @@ C2HSPC_STAT_8822b(
 	rtw_sctx_done(&pstapriv->gotc2h);
 }
 
-#ifdef CONFIG_LPS_PWR_TRACKING
-#define C2H_PKT_DETECT_THERMAL_GET_THERMAL_VALUE(c2h_pkt)    LE_BITS_TO_4BYTE(c2h_pkt + 0X04, 0, 32)
-#endif
-
 /**
  * c2h = RXDESC + c2h packet
  * size = RXDESC_SIZE + c2h packet size
@@ -1252,17 +1333,6 @@ static void process_c2h_event(PADAPTER adapter, u8 *c2h, u32 size)
 			c2h_ccx_rpt(adapter, pc2h_data);
 			break;
 		}
-#ifdef CONFIG_LPS_PWR_TRACKING
-		else if (C2H_HDR_GET_C2H_SUB_CMD_ID(pc2h_data) == C2H_SUB_CMD_ID_C2H_PKT_DETECT_THERMAL) {
-			u32 thermal = 0;
-
-			thermal = C2H_PKT_DETECT_THERMAL_GET_THERMAL_VALUE(pc2h_data);
-			if (1)
-				RTW_INFO("[C2H] FW Thermal report :0x%02x\n", thermal);
-			rtw_lps_pwr_tracking(adapter, thermal);
-			break;
-		}
-#endif
 
 		/* indicate c2h pkt + rx desc to halmac */
 		rtw_halmac_c2h_handle(adapter_to_dvobj(adapter), c2h, size);
@@ -1331,13 +1401,7 @@ void rtl8822b_c2h_handler_no_io(PADAPTER adapter, u8 *pbuf, u16 length)
 	case C2H_BCN_EARLY_RPT:
 	case C2H_EXTEND:
 		/* no I/O, process directly */
-#ifdef CONFIG_LPS_PWR_TRACKING
-		if (id == C2H_EXTEND &&
-			C2H_HDR_GET_C2H_SUB_CMD_ID(pc2h_content) == C2H_SUB_CMD_ID_C2H_PKT_DETECT_THERMAL)
-			rtw_c2h_packet_wk_cmd(adapter, pbuf, length);
-		else
-#endif
-			process_c2h_event(adapter, pbuf, length);
+		process_c2h_event(adapter, pbuf, length);
 		break;
 
 	default:

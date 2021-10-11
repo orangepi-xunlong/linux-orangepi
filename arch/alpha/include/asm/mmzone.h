@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Written by Kanoj Sarcar (kanoj@sgi.com) Aug 99
  * Adapted for the alpha wildfire architecture Jan 2001.
@@ -5,9 +6,9 @@
 #ifndef _ASM_MMZONE_H_
 #define _ASM_MMZONE_H_
 
-#include <asm/smp.h>
+#ifdef CONFIG_DISCONTIGMEM
 
-struct bootmem_data_t; /* stupid forward decl. */
+#include <asm/smp.h>
 
 /*
  * Following are macros that are specific to this numa platform.
@@ -46,8 +47,6 @@ PLAT_NODE_DATA_LOCALNR(unsigned long p, int n)
 }
 #endif
 
-#ifdef CONFIG_DISCONTIGMEM
-
 /*
  * Following are macros that each numa implementation must define.
  */
@@ -68,12 +67,6 @@ PLAT_NODE_DATA_LOCALNR(unsigned long p, int n)
 
 /* XXX: FIXME -- nyc */
 #define kern_addr_valid(kaddr)	(0)
-
-#define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
-
-#define pmd_page(pmd)		(pfn_to_page(pmd_val(pmd) >> 32))
-#define pgd_page(pgd)		(pfn_to_page(pgd_val(pgd) >> 32))
-#define pte_pfn(pte)		(pte_val(pte) >> 32)
 
 #define mk_pte(page, pgprot)						     \
 ({								 	     \
@@ -97,15 +90,10 @@ PLAT_NODE_DATA_LOCALNR(unsigned long p, int n)
 	__xx;                                                           \
 })
 
-#define page_to_pa(page)						\
-	(page_to_pfn(page) << PAGE_SHIFT)
-
 #define pfn_to_nid(pfn)		pa_to_nid(((u64)(pfn) << PAGE_SHIFT))
 #define pfn_valid(pfn)							\
 	(((pfn) - node_start_pfn(pfn_to_nid(pfn))) <			\
 	 node_spanned_pages(pfn_to_nid(pfn)))					\
-
-#define virt_addr_valid(kaddr)	pfn_valid((__pa(kaddr) >> PAGE_SHIFT))
 
 #endif /* CONFIG_DISCONTIGMEM */
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <media/drv-intf/saa7146_vv.h>
@@ -54,8 +55,6 @@ void saa7146_dma_free(struct saa7146_dev *dev,struct videobuf_queue *q,
 	struct videobuf_dmabuf *dma=videobuf_to_dma(&buf->vb);
 	DEB_EE("dev:%p, buf:%p\n", dev, buf);
 
-	BUG_ON(in_interrupt());
-
 	videobuf_waiton(q, &buf->vb, 0, 0);
 	videobuf_dma_unmap(q->dev, dma);
 	videobuf_dma_free(dma);
@@ -96,8 +95,6 @@ void saa7146_buffer_finish(struct saa7146_dev *dev,
 	DEB_EE("dev:%p, dmaq:%p, state:%d\n", dev, q, state);
 	DEB_EE("q->curr:%p\n", q->curr);
 
-	BUG_ON(!q->curr);
-
 	/* finish current buffer */
 	if (NULL == q->curr) {
 		DEB_D("aiii. no current buffer\n");
@@ -105,7 +102,7 @@ void saa7146_buffer_finish(struct saa7146_dev *dev,
 	}
 
 	q->curr->vb.state = state;
-	v4l2_get_timestamp(&q->curr->vb.ts);
+	q->curr->vb.ts = ktime_get_ns();
 	wake_up(&q->curr->vb.done);
 
 	q->curr = NULL;
@@ -163,9 +160,9 @@ void saa7146_buffer_next(struct saa7146_dev *dev,
 	}
 }
 
-void saa7146_buffer_timeout(unsigned long data)
+void saa7146_buffer_timeout(struct timer_list *t)
 {
-	struct saa7146_dmaqueue *q = (struct saa7146_dmaqueue*)data;
+	struct saa7146_dmaqueue *q = from_timer(q, t, timeout);
 	struct saa7146_dev *dev = q->dev;
 	unsigned long flags;
 
@@ -295,7 +292,7 @@ static int fops_mmap(struct file *file, struct vm_area_struct * vma)
 	int res;
 
 	switch (vdev->vfl_type) {
-	case VFL_TYPE_GRABBER: {
+	case VFL_TYPE_VIDEO: {
 		DEB_EE("V4L2_BUF_TYPE_VIDEO_CAPTURE: file:%p, vma:%p\n",
 		       file, vma);
 		q = &fh->video_q;
@@ -320,19 +317,19 @@ static int fops_mmap(struct file *file, struct vm_area_struct * vma)
 	return res;
 }
 
-static unsigned int __fops_poll(struct file *file, struct poll_table_struct *wait)
+static __poll_t __fops_poll(struct file *file, struct poll_table_struct *wait)
 {
 	struct video_device *vdev = video_devdata(file);
 	struct saa7146_fh *fh = file->private_data;
 	struct videobuf_buffer *buf = NULL;
 	struct videobuf_queue *q;
-	unsigned int res = v4l2_ctrl_poll(file, wait);
+	__poll_t res = v4l2_ctrl_poll(file, wait);
 
 	DEB_EE("file:%p, poll:%p\n", file, wait);
 
 	if (vdev->vfl_type == VFL_TYPE_VBI) {
 		if (fh->dev->ext_vv_data->capabilities & V4L2_CAP_SLICED_VBI_OUTPUT)
-			return res | POLLOUT | POLLWRNORM;
+			return res | EPOLLOUT | EPOLLWRNORM;
 		if( 0 == fh->vbi_q.streaming )
 			return res | videobuf_poll_stream(file, &fh->vbi_q, wait);
 		q = &fh->vbi_q;
@@ -346,23 +343,23 @@ static unsigned int __fops_poll(struct file *file, struct poll_table_struct *wai
 
 	if (!buf) {
 		DEB_D("buf == NULL!\n");
-		return res | POLLERR;
+		return res | EPOLLERR;
 	}
 
 	poll_wait(file, &buf->done, wait);
 	if (buf->state == VIDEOBUF_DONE || buf->state == VIDEOBUF_ERROR) {
 		DEB_D("poll succeeded!\n");
-		return res | POLLIN | POLLRDNORM;
+		return res | EPOLLIN | EPOLLRDNORM;
 	}
 
 	DEB_D("nothing to poll for, buf->state:%d\n", buf->state);
 	return res;
 }
 
-static unsigned int fops_poll(struct file *file, struct poll_table_struct *wait)
+static __poll_t fops_poll(struct file *file, struct poll_table_struct *wait)
 {
 	struct video_device *vdev = video_devdata(file);
-	unsigned int res;
+	__poll_t res;
 
 	mutex_lock(vdev->lock);
 	res = __fops_poll(file, wait);
@@ -377,7 +374,7 @@ static ssize_t fops_read(struct file *file, char __user *data, size_t count, lof
 	int ret;
 
 	switch (vdev->vfl_type) {
-	case VFL_TYPE_GRABBER:
+	case VFL_TYPE_VIDEO:
 /*
 		DEB_EE("V4L2_BUF_TYPE_VIDEO_CAPTURE: file:%p, data:%p, count:%lun",
 		       file, data, (unsigned long)count);
@@ -408,7 +405,7 @@ static ssize_t fops_write(struct file *file, const char __user *data, size_t cou
 	int ret;
 
 	switch (vdev->vfl_type) {
-	case VFL_TYPE_GRABBER:
+	case VFL_TYPE_VIDEO:
 		return -EINVAL;
 	case VFL_TYPE_VBI:
 		if (fh->dev->ext_vv_data->vbi_fops.write) {
@@ -518,8 +515,8 @@ int saa7146_vv_init(struct saa7146_dev* dev, struct saa7146_ext_vv *ext_vv)
 	dev->ext_vv_data = ext_vv;
 
 	vv->d_clipping.cpu_addr =
-		pci_zalloc_consistent(dev->pci, SAA7146_CLIPPING_MEM,
-				      &vv->d_clipping.dma_handle);
+		dma_alloc_coherent(&dev->pci->dev, SAA7146_CLIPPING_MEM,
+				   &vv->d_clipping.dma_handle, GFP_KERNEL);
 	if( NULL == vv->d_clipping.cpu_addr ) {
 		ERR("out of memory. aborting.\n");
 		kfree(vv);
@@ -559,7 +556,7 @@ int saa7146_vv_init(struct saa7146_dev* dev, struct saa7146_ext_vv *ext_vv)
 	vbi->start[1] = 312;
 	vbi->count[1] = 16;
 
-	init_timer(&vv->vbi_read_timeout);
+	timer_setup(&vv->vbi_read_timeout, NULL, 0);
 
 	vv->ov_fb.capability = V4L2_FBUF_CAP_LIST_CLIPPING;
 	vv->ov_fb.flags = V4L2_FBUF_FLAG_PRIMARY;
@@ -577,7 +574,8 @@ int saa7146_vv_release(struct saa7146_dev* dev)
 	DEB_EE("dev:%p\n", dev);
 
 	v4l2_device_unregister(&dev->v4l2_dev);
-	pci_free_consistent(dev->pci, SAA7146_CLIPPING_MEM, vv->d_clipping.cpu_addr, vv->d_clipping.dma_handle);
+	dma_free_coherent(&dev->pci->dev, SAA7146_CLIPPING_MEM,
+			  vv->d_clipping.cpu_addr, vv->d_clipping.dma_handle);
 	v4l2_ctrl_handler_free(&dev->ctrl_handler);
 	kfree(vv);
 	dev->vv_data = NULL;
@@ -596,7 +594,7 @@ int saa7146_register_device(struct video_device *vfd, struct saa7146_dev *dev,
 	DEB_EE("dev:%p, name:'%s', type:%d\n", dev, name, type);
 
 	vfd->fops = &video_fops;
-	if (type == VFL_TYPE_GRABBER)
+	if (type == VFL_TYPE_VIDEO)
 		vfd->ioctl_ops = &dev->ext_vv_data->vid_ops;
 	else
 		vfd->ioctl_ops = &dev->ext_vv_data->vbi_ops;
@@ -606,7 +604,16 @@ int saa7146_register_device(struct video_device *vfd, struct saa7146_dev *dev,
 	vfd->tvnorms = 0;
 	for (i = 0; i < dev->ext_vv_data->num_stds; i++)
 		vfd->tvnorms |= dev->ext_vv_data->stds[i].id;
-	strlcpy(vfd->name, name, sizeof(vfd->name));
+	strscpy(vfd->name, name, sizeof(vfd->name));
+	vfd->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_VIDEO_OVERLAY |
+			   V4L2_CAP_READWRITE | V4L2_CAP_STREAMING;
+	vfd->device_caps |= dev->ext_vv_data->capabilities;
+	if (type == VFL_TYPE_VIDEO)
+		vfd->device_caps &=
+			~(V4L2_CAP_VBI_CAPTURE | V4L2_CAP_SLICED_VBI_OUTPUT);
+	else
+		vfd->device_caps &=
+			~(V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_VIDEO_OVERLAY | V4L2_CAP_AUDIO);
 	video_set_drvdata(vfd, dev);
 
 	err = video_register_device(vfd, type, -1);

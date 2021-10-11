@@ -1,7 +1,7 @@
 /*
  * TI SYSCON regmap reset driver
  *
- * Copyright (C) 2015-2016 Texas Instruments Incorporated - http://www.ti.com/
+ * Copyright (C) 2015-2016 Texas Instruments Incorporated - https://www.ti.com/
  *	Andrew F. Davis <afd@ti.com>
  *	Suman Anna <afd@ti.com>
  *
@@ -89,7 +89,7 @@ static int ti_syscon_reset_assert(struct reset_controller_dev *rcdev,
 	mask = BIT(control->assert_bit);
 	value = (control->flags & ASSERT_SET) ? mask : 0x0;
 
-	return regmap_update_bits(data->regmap, control->assert_offset, mask, value);
+	return regmap_write_bits(data->regmap, control->assert_offset, mask, value);
 }
 
 /**
@@ -120,7 +120,7 @@ static int ti_syscon_reset_deassert(struct reset_controller_dev *rcdev,
 	mask = BIT(control->deassert_bit);
 	value = (control->flags & DEASSERT_SET) ? mask : 0x0;
 
-	return regmap_update_bits(data->regmap, control->deassert_offset, mask, value);
+	return regmap_write_bits(data->regmap, control->deassert_offset, mask, value);
 }
 
 /**
@@ -158,7 +158,7 @@ static int ti_syscon_reset_status(struct reset_controller_dev *rcdev,
 		!(control->flags & STATUS_SET);
 }
 
-static struct reset_control_ops ti_syscon_reset_ops = {
+static const struct reset_control_ops ti_syscon_reset_ops = {
 	.assert		= ti_syscon_reset_assert,
 	.deassert	= ti_syscon_reset_deassert,
 	.status		= ti_syscon_reset_status,
@@ -189,7 +189,8 @@ static int ti_syscon_reset_probe(struct platform_device *pdev)
 	}
 
 	nr_controls = (size / sizeof(*list)) / 7;
-	controls = devm_kzalloc(dev, nr_controls * sizeof(*controls), GFP_KERNEL);
+	controls = devm_kcalloc(dev, nr_controls, sizeof(*controls),
+				GFP_KERNEL);
 	if (!controls)
 		return -ENOMEM;
 

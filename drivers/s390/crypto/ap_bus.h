@@ -1,5 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
- * Copyright IBM Corp. 2006, 2012
+ * Copyright IBM Corp. 2006, 2019
  * Author(s): Cornelia Huck <cornelia.huck@de.ibm.com>
  *	      Martin Schwidefsky <schwidefsky@de.ibm.com>
  *	      Ralph Wuerthner <rwuerthn@de.ibm.com>
@@ -7,71 +8,28 @@
  *	      Holger Dengler <hd@linux.vnet.ibm.com>
  *
  * Adjunct processor bus header file.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #ifndef _AP_BUS_H_
 #define _AP_BUS_H_
 
 #include <linux/device.h>
-#include <linux/mod_devicetable.h>
 #include <linux/types.h>
+#include <linux/hashtable.h>
+#include <asm/isc.h>
+#include <asm/ap.h>
 
-#define AP_DEVICES 64		/* Number of AP devices. */
+#define AP_DEVICES 256		/* Number of AP devices. */
 #define AP_DOMAINS 256		/* Number of AP domains. */
+#define AP_IOCTLS  256		/* Number of ioctls. */
 #define AP_RESET_TIMEOUT (HZ*0.7)	/* Time in ticks for reset timeouts. */
 #define AP_CONFIG_TIME 30	/* Time in seconds between AP bus rescans. */
 #define AP_POLL_TIME 1		/* Time in ticks between receive polls. */
 
 extern int ap_domain_index;
 
-/**
- * The ap_qid_t identifier of an ap queue. It contains a
- * 6 bit device index and a 4 bit queue index (domain).
- */
-typedef unsigned int ap_qid_t;
-
-#define AP_MKQID(_device, _queue) (((_device) & 63) << 8 | ((_queue) & 255))
-#define AP_QID_DEVICE(_qid) (((_qid) >> 8) & 63)
-#define AP_QID_QUEUE(_qid) ((_qid) & 255)
-
-/**
- * structy ap_queue_status - Holds the AP queue status.
- * @queue_empty: Shows if queue is empty
- * @replies_waiting: Waiting replies
- * @queue_full: Is 1 if the queue is full
- * @pad: A 4 bit pad
- * @int_enabled: Shows if interrupts are enabled for the AP
- * @response_conde: Holds the 8 bit response code
- * @pad2: A 16 bit pad
- *
- * The ap queue status word is returned by all three AP functions
- * (PQAP, NQAP and DQAP).  There's a set of flags in the first
- * byte, followed by a 1 byte response code.
- */
-struct ap_queue_status {
-	unsigned int queue_empty	: 1;
-	unsigned int replies_waiting	: 1;
-	unsigned int queue_full		: 1;
-	unsigned int pad1		: 4;
-	unsigned int int_enabled	: 1;
-	unsigned int response_code	: 8;
-	unsigned int pad2		: 16;
-} __packed;
-
+extern DECLARE_HASHTABLE(ap_queues, 8);
+extern spinlock_t ap_queues_lock;
 
 static inline int ap_test_bit(unsigned int *ptr, unsigned int nr)
 {
@@ -92,6 +50,7 @@ static inline int ap_test_bit(unsigned int *ptr, unsigned int nr)
 #define AP_RESPONSE_NO_FIRST_PART	0x13
 #define AP_RESPONSE_MESSAGE_TOO_BIG	0x15
 #define AP_RESPONSE_REQ_FAC_NOT_INST	0x16
+#define AP_RESPONSE_INVALID_DOMAIN	0x42
 
 /*
  * Known device types
@@ -106,6 +65,7 @@ static inline int ap_test_bit(unsigned int *ptr, unsigned int nr)
 #define AP_DEVICE_TYPE_CEX4	10
 #define AP_DEVICE_TYPE_CEX5	11
 #define AP_DEVICE_TYPE_CEX6	12
+#define AP_DEVICE_TYPE_CEX7	13
 
 /*
  * Known function facilities
@@ -124,50 +84,67 @@ static inline int ap_test_bit(unsigned int *ptr, unsigned int nr)
 #define AP_INTR_ENABLED		1	/* AP interrupt enabled */
 
 /*
- * AP device states
+ * AP queue state machine states
  */
-enum ap_state {
-	AP_STATE_RESET_START,
-	AP_STATE_RESET_WAIT,
-	AP_STATE_SETIRQ_WAIT,
-	AP_STATE_IDLE,
-	AP_STATE_WORKING,
-	AP_STATE_QUEUE_FULL,
-	AP_STATE_SUSPEND_WAIT,
-	AP_STATE_BORKED,
-	NR_AP_STATES
+enum ap_sm_state {
+	AP_SM_STATE_RESET_START = 0,
+	AP_SM_STATE_RESET_WAIT,
+	AP_SM_STATE_SETIRQ_WAIT,
+	AP_SM_STATE_IDLE,
+	AP_SM_STATE_WORKING,
+	AP_SM_STATE_QUEUE_FULL,
+	NR_AP_SM_STATES
 };
 
 /*
- * AP device events
+ * AP queue state machine events
  */
-enum ap_event {
-	AP_EVENT_POLL,
-	AP_EVENT_TIMEOUT,
-	NR_AP_EVENTS
+enum ap_sm_event {
+	AP_SM_EVENT_POLL,
+	AP_SM_EVENT_TIMEOUT,
+	NR_AP_SM_EVENTS
 };
 
 /*
- * AP wait behaviour
+ * AP queue state wait behaviour
  */
-enum ap_wait {
-	AP_WAIT_AGAIN,		/* retry immediately */
-	AP_WAIT_TIMEOUT,	/* wait for timeout */
-	AP_WAIT_INTERRUPT,	/* wait for thin interrupt (if available) */
-	AP_WAIT_NONE,		/* no wait */
-	NR_AP_WAIT
+enum ap_sm_wait {
+	AP_SM_WAIT_AGAIN,	/* retry immediately */
+	AP_SM_WAIT_TIMEOUT,	/* wait for timeout */
+	AP_SM_WAIT_INTERRUPT,	/* wait for thin interrupt (if available) */
+	AP_SM_WAIT_NONE,	/* no wait */
+	NR_AP_SM_WAIT
+};
+
+/*
+ * AP queue device states
+ */
+enum ap_dev_state {
+	AP_DEV_STATE_UNINITIATED = 0,	/* fresh and virgin, not touched */
+	AP_DEV_STATE_OPERATING,		/* queue dev is working normal */
+	AP_DEV_STATE_SHUTDOWN,		/* remove/unbind/shutdown in progress */
+	AP_DEV_STATE_ERROR,		/* device is in error state */
+	NR_AP_DEV_STATES
 };
 
 struct ap_device;
 struct ap_message;
 
+/*
+ * The ap driver struct includes a flags field which holds some info for
+ * the ap bus about the driver. Currently only one flag is supported and
+ * used: The DEFAULT flag marks an ap driver as a default driver which is
+ * used together with the apmask and aqmask whitelisting of the ap bus.
+ */
+#define AP_DRIVER_FLAG_DEFAULT 0x0001
+
 struct ap_driver {
 	struct device_driver driver;
 	struct ap_device_id *ids;
+	unsigned int flags;
 
 	int (*probe)(struct ap_device *);
 	void (*remove)(struct ap_device *);
-	int request_timeout;		/* request timeout in jiffies */
 };
 
 #define to_ap_drv(x) container_of((x), struct ap_driver, driver)
@@ -175,67 +152,93 @@ struct ap_driver {
 int ap_driver_register(struct ap_driver *, struct module *, char *);
 void ap_driver_unregister(struct ap_driver *);
 
-typedef enum ap_wait (ap_func_t)(struct ap_device *ap_dev);
-
 struct ap_device {
 	struct device device;
 	struct ap_driver *drv;		/* Pointer to AP device driver. */
-	spinlock_t lock;		/* Per device lock. */
-	struct list_head list;		/* private list of all AP devices. */
-
-	enum ap_state state;		/* State of the AP device. */
-
-	ap_qid_t qid;			/* AP queue id. */
-	int queue_depth;		/* AP queue depth.*/
 	int device_type;		/* AP device type. */
-	int raw_hwtype;			/* AP raw hardware type. */
-	unsigned int functions;		/* AP device function bitfield. */
-	struct timer_list timeout;	/* Timer for request timeouts. */
-
-	int interrupt;			/* indicate if interrupts are enabled */
-	int queue_count;		/* # messages currently on AP queue. */
-
-	struct list_head pendingq;	/* List of message sent to AP queue. */
-	int pendingq_count;		/* # requests on pendingq list. */
-	struct list_head requestq;	/* List of message yet to be sent. */
-	int requestq_count;		/* # requests on requestq list. */
-	int total_request_count;	/* # requests ever for this AP device. */
-
-	struct ap_message *reply;	/* Per device reply message. */
-
-	void *private;			/* ap driver private pointer. */
 };
 
 #define to_ap_dev(x) container_of((x), struct ap_device, device)
 
+struct ap_card {
+	struct ap_device ap_dev;
+	void *private;			/* ap driver private pointer. */
+	int raw_hwtype;			/* AP raw hardware type. */
+	unsigned int functions;		/* AP device function bitfield. */
+	int queue_depth;		/* AP queue depth.*/
+	int id;				/* AP card number. */
+	bool config;			/* configured state */
+	atomic64_t total_request_count;	/* # requests ever for this AP device.*/
+};
+
+#define to_ap_card(x) container_of((x), struct ap_card, ap_dev.device)
+
+struct ap_queue {
+	struct ap_device ap_dev;
+	struct hlist_node hnode;	/* Node for the ap_queues hashtable */
+	struct ap_card *card;		/* Ptr to assoc. AP card. */
+	spinlock_t lock;		/* Per device lock. */
+	void *private;			/* ap driver private pointer. */
+	enum ap_dev_state dev_state;	/* queue device state */
+	bool config;			/* configured state */
+	ap_qid_t qid;			/* AP queue id. */
+	int interrupt;			/* indicate if interrupts are enabled */
+	int queue_count;		/* # messages currently on AP queue. */
+	int pendingq_count;		/* # requests on pendingq list. */
+	int requestq_count;		/* # requests on requestq list. */
+	u64 total_request_count;	/* # requests ever for this AP device.*/
+	int request_timeout;		/* Request timeout in jiffies. */
+	struct timer_list timeout;	/* Timer for request timeouts. */
+	struct list_head pendingq;	/* List of message sent to AP queue. */
+	struct list_head requestq;	/* List of message yet to be sent. */
+	struct ap_message *reply;	/* Per device reply message. */
+	enum ap_sm_state sm_state;	/* ap queue state machine state */
+	int last_err_rc;		/* last error state response code */
+};
+
+#define to_ap_queue(x) container_of((x), struct ap_queue, ap_dev.device)
+
+typedef enum ap_sm_wait (ap_func_t)(struct ap_queue *queue);
+
+/* failure injection cmd struct */
+struct ap_fi {
+	union {
+		u16 cmd;		/* fi flags + action */
+		struct {
+			u8 flags;	/* fi flags only */
+			u8 action;	/* fi action only */
+		};
+	};
+};
+
+/* all currently known fi actions */
+enum ap_fi_actions {
+	AP_FI_ACTION_CCA_AGENT_FF   = 0x01,
+	AP_FI_ACTION_CCA_DOM_INVAL  = 0x02,
+	AP_FI_ACTION_NQAP_QID_INVAL = 0x03,
+};
+
+/* all currently known fi flags */
+enum ap_fi_flags {
+	AP_FI_FLAG_NO_RETRY	  = 0x01,
+	AP_FI_FLAG_TOGGLE_SPECIAL = 0x02,
+};
+
 struct ap_message {
 	struct list_head list;		/* Request queueing. */
 	unsigned long long psmid;	/* Message id. */
-	void *message;			/* Pointer to message buffer. */
-	size_t length;			/* Message length. */
+	void *msg;			/* Pointer to message buffer. */
+	unsigned int len;		/* Message length. */
+	u16 flags;			/* Flags, see AP_MSG_FLAG_xxx */
+	struct ap_fi fi;		/* Failure Injection cmd */
 	int rc;				/* Return code for this message */
-
 	void *private;			/* ap driver private pointer. */
-	unsigned int special:1;		/* Used for special commands. */
 	/* receive is called from tasklet context */
-	void (*receive)(struct ap_device *, struct ap_message *,
+	void (*receive)(struct ap_queue *, struct ap_message *,
 			struct ap_message *);
 };
 
-struct ap_config_info {
-	unsigned int special_command:1;
-	unsigned int ap_extended:1;
-	unsigned char reserved1:6;
-	unsigned char reserved2[15];
-	unsigned int apm[8];		/* AP ID mask */
-	unsigned int aqm[8];		/* AP queue mask */
-	unsigned int adm[8];		/* AP domain mask */
-	unsigned char reserved4[16];
-} __packed;
-
-#define AP_DEVICE(dt)					\
-	.dev_type=(dt),					\
-	.match_flags=AP_DEVICE_ID_MATCH_DEVICE_TYPE,
+#define AP_MSG_FLAG_SPECIAL  1		/* flag msg as 'special' with NQAP */
 
 /**
  * ap_init_message() - Initialize ap_message.
@@ -244,11 +247,18 @@ struct ap_config_info {
  */
 static inline void ap_init_message(struct ap_message *ap_msg)
 {
-	ap_msg->psmid = 0;
-	ap_msg->length = 0;
-	ap_msg->rc = 0;
-	ap_msg->special = 0;
-	ap_msg->receive = NULL;
+	memset(ap_msg, 0, sizeof(*ap_msg));
+}
+
+/**
+ * ap_release_message() - Release ap_message.
+ * Releases all memory used internal within the ap_message struct
+ * Currently this is the message and private field.
+ */
+static inline void ap_release_message(struct ap_message *ap_msg)
+{
+	kfree_sensitive(ap_msg->msg);
+	kfree_sensitive(ap_msg->private);
 }
 
 /*
@@ -259,13 +269,97 @@ static inline void ap_init_message(struct ap_message *ap_msg)
 int ap_send(ap_qid_t, unsigned long long, void *, size_t);
 int ap_recv(ap_qid_t, unsigned long long *, void *, size_t);
 
-void ap_queue_message(struct ap_device *ap_dev, struct ap_message *ap_msg);
-void ap_cancel_message(struct ap_device *ap_dev, struct ap_message *ap_msg);
-void ap_flush_queue(struct ap_device *ap_dev);
-void ap_bus_force_rescan(void);
-void ap_device_init_reply(struct ap_device *ap_dev, struct ap_message *ap_msg);
+enum ap_sm_wait ap_sm_event(struct ap_queue *aq, enum ap_sm_event event);
+enum ap_sm_wait ap_sm_event_loop(struct ap_queue *aq, enum ap_sm_event event);
 
-int ap_module_init(void);
-void ap_module_exit(void);
+int ap_queue_message(struct ap_queue *aq, struct ap_message *ap_msg);
+void ap_cancel_message(struct ap_queue *aq, struct ap_message *ap_msg);
+void ap_flush_queue(struct ap_queue *aq);
+
+void *ap_airq_ptr(void);
+void ap_wait(enum ap_sm_wait wait);
+void ap_request_timeout(struct timer_list *t);
+void ap_bus_force_rescan(void);
+
+int ap_test_config_usage_domain(unsigned int domain);
+int ap_test_config_ctrl_domain(unsigned int domain);
+
+void ap_queue_init_reply(struct ap_queue *aq, struct ap_message *ap_msg);
+struct ap_queue *ap_queue_create(ap_qid_t qid, int device_type);
+void ap_queue_prepare_remove(struct ap_queue *aq);
+void ap_queue_remove(struct ap_queue *aq);
+void ap_queue_init_state(struct ap_queue *aq);
+
+struct ap_card *ap_card_create(int id, int queue_depth, int raw_device_type,
+			       int comp_device_type, unsigned int functions);
+
+struct ap_perms {
+	unsigned long ioctlm[BITS_TO_LONGS(AP_IOCTLS)];
+	unsigned long apm[BITS_TO_LONGS(AP_DEVICES)];
+	unsigned long aqm[BITS_TO_LONGS(AP_DOMAINS)];
+};
+extern struct ap_perms ap_perms;
+extern struct mutex ap_perms_mutex;
+
+/*
+ * Get ap_queue device for this qid.
+ * Returns ptr to the struct ap_queue device or NULL if there
+ * was no ap_queue device with this qid found. When something is
+ * found, the reference count of the embedded device is increased.
+ * So the caller has to decrease the reference count after use
+ * with a call to put_device(&aq->ap_dev.device).
+ */
+struct ap_queue *ap_get_qdev(ap_qid_t qid);
+
+/*
+ * check APQN for owned/reserved by ap bus and default driver(s).
+ * Checks if this APQN is or will be in use by the ap bus
+ * and the default set of drivers.
+ * If yes, returns 1, if not returns 0. On error a negative
+ * errno value is returned.
+ */
+int ap_owned_by_def_drv(int card, int queue);
+
+/*
+ * check 'matrix' of APQNs for owned/reserved by ap bus and
+ * default driver(s).
+ * Checks if there is at least one APQN in the given 'matrix'
+ * marked as owned/reserved by the ap bus and default driver(s).
+ * If such an APQN is found the return value is 1, otherwise
+ * 0 is returned. On error a negative errno value is returned.
+ * The parameter apm is a bitmask which should be declared
+ * as DECLARE_BITMAP(apm, AP_DEVICES), the aqm parameter is
+ * similar, should be declared as DECLARE_BITMAP(aqm, AP_DOMAINS).
+ */
+int ap_apqn_in_matrix_owned_by_def_drv(unsigned long *apm,
+				       unsigned long *aqm);
+
+/*
+ * ap_parse_mask_str() - helper function to parse a bitmap string
+ * and clear/set the bits in the bitmap accordingly. The string may be
+ * given as absolute value, a hex string like 0x1F2E3D4C5B6A" simple
+ * overwriting the current content of the bitmap. Or as relative string
+ * like "+1-16,-32,-0x40,+128" where only single bits or ranges of
+ * bits are cleared or set. Distinction is done based on the very
+ * first character which may be '+' or '-' for the relative string
+ * and othewise assume to be an absolute value string. If parsing fails
+ * a negative errno value is returned. All arguments and bitmaps are
+ * big endian order.
+ */
+int ap_parse_mask_str(const char *str,
+		      unsigned long *bitmap, int bits,
+		      struct mutex *lock);
+
+/*
+ * Interface to wait for the AP bus to have done one initial ap bus
+ * scan and all detected APQNs have been bound to device drivers.
+ * If these both conditions are not fulfilled, this function blocks
+ * on a condition with wait_for_completion_killable_timeout().
+ * If these both conditions are fulfilled (before the timeout hits)
+ * the return value is 0. If the timeout (in jiffies) hits instead
+ * -ETIME is returned. On failures negative return values are
+ * returned to the caller.
+ */
+int ap_wait_init_apqn_bindings_complete(unsigned long timeout);
 
 #endif /* _AP_BUS_H_ */

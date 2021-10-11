@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2012 ST Ericsson.
  *
  * Power supply driver for ST Ericsson pm2xxx_charger charger
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/init.h>
@@ -21,13 +18,13 @@
 #include <linux/i2c.h>
 #include <linux/workqueue.h>
 #include <linux/mfd/abx500/ab8500.h>
-#include <linux/mfd/abx500/ab8500-bm.h>
-#include <linux/mfd/abx500/ux500_chargalg.h>
 #include <linux/pm2301_charger.h>
 #include <linux/gpio.h>
 #include <linux/pm_runtime.h>
 #include <linux/pm.h>
 
+#include "ab8500-bm.h"
+#include "ab8500-chargalg.h"
 #include "pm2301_charger.h"
 
 #define to_pm2xxx_charger_ac_device_info(x) container_of((x), \
@@ -105,11 +102,6 @@ static int pm2xxx_charger_current_map[] = {
 	2600,
 	2800,
 	3000,
-};
-
-static const struct i2c_device_id pm2xxx_ident[] = {
-	{ "pm2301", 0 },
-	{ }
 };
 
 static void set_lpn_pin(struct pm2xxx_charger *pm2)
@@ -399,7 +391,7 @@ static int pm2_int_reg3(void *pm2_data, int val)
 
 	if (val & (PM2XXX_INT4_ITCHARGINGON)) {
 		dev_dbg(pm2->dev ,
-			"chargind operation has started\n");
+			"charging operation has started\n");
 	}
 
 	if (val & (PM2XXX_INT4_ITVRESUME)) {
@@ -463,7 +455,6 @@ static int pm2_int_reg4(void *pm2_data, int val)
 static int pm2_int_reg5(void *pm2_data, int val)
 {
 	struct pm2xxx_charger *pm2 = pm2_data;
-	int ret = 0;
 
 	if (val & (PM2XXX_INT6_ITVPWR2DROP | PM2XXX_INT6_ITVPWR1DROP)) {
 		dev_dbg(pm2->dev, "VMPWR drop to VBAT level\n");
@@ -476,7 +467,7 @@ static int pm2_int_reg5(void *pm2_data, int val)
 		dev_dbg(pm2->dev, "Falling/Rising edge on WPWR1/2\n");
 	}
 
-	return ret;
+	return 0;
 }
 
 static irqreturn_t  pm2xxx_irq_int(int irq, void *data)
@@ -1098,7 +1089,7 @@ static int pm2xxx_wall_charger_probe(struct i2c_client *i2c_client,
 	ret = request_threaded_irq(gpio_to_irq(pm2->pdata->gpio_irq_number),
 				NULL,
 				pm2xxx_charger_irq[0].isr,
-				pm2->pdata->irq_type,
+				pm2->pdata->irq_type | IRQF_ONESHOT,
 				pm2xxx_charger_irq[0].name, pm2);
 
 	if (ret != 0) {

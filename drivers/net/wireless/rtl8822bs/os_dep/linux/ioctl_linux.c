@@ -1008,8 +1008,10 @@ static int wpa_set_encryption(struct net_device *dev, struct ieee_param *param, 
 						}
 						padapter->securitypriv.binstallGrpkey = _TRUE;
 						/* DEBUG_ERR((" param->u.crypt.key_len=%d\n", param->u.crypt.key_len)); */
-						if (param->u.crypt.idx < 4)
-							_rtw_memcpy(padapter->securitypriv.iv_seq[param->u.crypt.idx], param->u.crypt.seq, 8);
+						if (param->u.crypt.idx < 4) {
+							_adapter *padapter = (_adapter *)rtw_netdev_priv(dev);
+							_rtw_memcpy(padapter->securitypriv.iv_seq[param->u.crypt.idx], param->u.crypt.seq, 8);							
+						}
 						RTW_INFO(" ~~~~set sta key:groupkey\n");
 
 						padapter->securitypriv.dot118021XGrpKeyid = param->u.crypt.idx;
@@ -1126,7 +1128,6 @@ static int rtw_set_wpa_ie(_adapter *padapter, char *pie, unsigned short ielen)
 	u8 *buf = NULL, *pos = NULL;
 	u32 left;
 	int group_cipher = 0, pairwise_cipher = 0;
-	u8 mfp_opt = MFP_NO;
 	int ret = 0;
 	u8 null_addr[] = {0, 0, 0, 0, 0, 0};
 #ifdef CONFIG_P2P
@@ -1164,13 +1165,26 @@ static int rtw_set_wpa_ie(_adapter *padapter, char *pie, unsigned short ielen)
 			goto exit;
 		}
 
+#if 0
+		pos += RSN_HEADER_LEN;
+		left  = ielen - RSN_HEADER_LEN;
+
+		if (left >= RSN_SELECTOR_LEN) {
+			pos += RSN_SELECTOR_LEN;
+			left -= RSN_SELECTOR_LEN;
+		} else if (left > 0) {
+			ret = -1;
+			goto exit;
+		}
+#endif
+
 		if (rtw_parse_wpa_ie(buf, ielen, &group_cipher, &pairwise_cipher, NULL) == _SUCCESS) {
 			padapter->securitypriv.dot11AuthAlgrthm = dot11AuthAlgrthm_8021X;
 			padapter->securitypriv.ndisauthtype = Ndis802_11AuthModeWPAPSK;
 			_rtw_memcpy(padapter->securitypriv.supplicant_ie, &buf[0], ielen);
 		}
 
-		if (rtw_parse_wpa2_ie(buf, ielen, &group_cipher, &pairwise_cipher, NULL, &mfp_opt) == _SUCCESS) {
+		if (rtw_parse_wpa2_ie(buf, ielen, &group_cipher, &pairwise_cipher, NULL) == _SUCCESS) {
 			padapter->securitypriv.dot11AuthAlgrthm = dot11AuthAlgrthm_8021X;
 			padapter->securitypriv.ndisauthtype = Ndis802_11AuthModeWPA2PSK;
 			_rtw_memcpy(padapter->securitypriv.supplicant_ie, &buf[0], ielen);
@@ -1226,13 +1240,6 @@ static int rtw_set_wpa_ie(_adapter *padapter, char *pie, unsigned short ielen)
 			padapter->securitypriv.ndisencryptstatus = Ndis802_11Encryption1Enabled;
 			break;
 		}
-
-		if (mfp_opt == MFP_INVALID) {
-			RTW_INFO(FUNC_ADPT_FMT" invalid MFP setting\n", FUNC_ADPT_ARG(padapter));
-			ret = -EINVAL;
-			goto exit;
-		}
-		padapter->securitypriv.mfp_opt = mfp_opt;
 
 		_clr_fwstate_(&padapter->mlmepriv, WIFI_UNDER_WPS);
 		{/* set wps_ie	 */
@@ -2046,13 +2053,6 @@ static int rtw_wx_set_scan(struct net_device *dev, struct iw_request_info *a,
 		goto exit;
 	}
 #endif
-
-	if (adapter_to_dvobj(padapter)->scan_deny == _TRUE) {
-		RTW_INFO(FUNC_ADPT_FMT" tpt mode, scan deny!\n", FUNC_ADPT_ARG(padapter));
-		indicate_wx_scan_complete_event(padapter);
-		goto exit;
-	}
-
 	if (rtw_is_scan_deny(padapter)) {
 		indicate_wx_scan_complete_event(padapter);
 		goto exit;
@@ -3093,10 +3093,10 @@ static int rtw_wx_set_auth(struct net_device *dev,
 		*/
 		if (check_fwstate(&padapter->mlmepriv, _FW_LINKED)) {
 			LeaveAllPowerSaveMode(padapter);
-			rtw_disassoc_cmd(padapter, 500, RTW_CMDF_WAIT_ACK);
+			rtw_disassoc_cmd(padapter, 500, RTW_CMDF_DIRECTLY);
 			RTW_INFO("%s...call rtw_indicate_disconnect\n ", __FUNCTION__);
 			rtw_indicate_disconnect(padapter, 0, _FALSE);
-			rtw_free_assoc_resources_cmd(padapter, _TRUE, RTW_CMDF_WAIT_ACK);
+			rtw_free_assoc_resources(padapter, 1);
 		}
 #endif
 
@@ -4870,9 +4870,13 @@ static int rtw_p2p_connect(struct net_device *dev,
 			u8 union_ch = rtw_mi_get_union_chan(padapter);
 			u8 union_bw = rtw_mi_get_union_bw(padapter);
 			u8 union_offset = rtw_mi_get_union_offset(padapter);
-
+			/*	Have to enter the power saving with the AP */
 			set_channel_bwmode(padapter, union_ch, union_offset, union_bw);
-			rtw_leave_opch(padapter);
+			#ifdef CONFIG_AP_MODE
+			/*mac-id sleep or wake-up for AP mode*/
+			rtw_mi_buddy_ap_acdata_control(padapter, 1);
+			#endif
+			rtw_mi_buddy_issue_nulldata(padapter, NULL, 1, 3, 500);
 		}
 #endif /* CONFIG_CONCURRENT_MODE */
 
@@ -5061,10 +5065,13 @@ static int rtw_p2p_invite_req(struct net_device *dev,
 			u8 union_ch = rtw_mi_get_union_chan(padapter);
 			u8 union_bw = rtw_mi_get_union_bw(padapter);
 			u8 union_offset = rtw_mi_get_union_offset(padapter);
-
+			/*	Have to enter the power saving with the AP */
 			set_channel_bwmode(padapter, union_ch, union_offset, union_bw);
-			rtw_leave_opch(padapter);
-
+			#ifdef CONFIG_AP_MODE
+			/*mac-id sleep or wake-up for AP mode*/
+			rtw_mi_buddy_ap_acdata_control(padapter, 1);
+			#endif/*CONFIG_AP_MODE*/
+			rtw_mi_buddy_issue_nulldata(padapter, NULL, 1, 3, 500);
 		} else
 			set_channel_bwmode(padapter, uintPeerChannel, HAL_PRIME_CHNL_OFFSET_DONT_CARE, CHANNEL_WIDTH_20);
 #else
@@ -5624,9 +5631,13 @@ static int rtw_p2p_prov_disc(struct net_device *dev,
 			u8 union_bw = rtw_mi_get_union_bw(padapter);
 			u8 union_offset = rtw_mi_get_union_offset(padapter);
 
+			/*	Have to enter the power saving with the AP */
 			set_channel_bwmode(padapter, union_ch, union_offset, union_bw);
-			rtw_leave_opch(padapter);
-
+			#ifdef CONFIG_AP_MODE
+			/*mac-id sleep or wake-up for AP mode*/
+			rtw_mi_buddy_ap_acdata_control(padapter, 1);
+			#endif/*CONFIG_AP_MODE*/
+			rtw_mi_buddy_issue_nulldata(padapter, NULL, 1, 3, 500);
 		} else
 			set_channel_bwmode(padapter, uintPeerChannel, HAL_PRIME_CHNL_OFFSET_DONT_CARE, CHANNEL_WIDTH_20);
 #else
@@ -6286,6 +6297,11 @@ static int rtw_dbg_port(struct net_device *dev,
 			RTW_INFO("auth_alg=0x%x, enc_alg=0x%x, auth_type=0x%x, enc_type=0x%x\n",
 				psecuritypriv->dot11AuthAlgrthm, psecuritypriv->dot11PrivacyAlgrthm,
 				psecuritypriv->ndisauthtype, psecuritypriv->ndisencryptstatus);
+			break;
+		case 0x02:
+			RTW_INFO("pmlmeinfo->state=0x%x\n", pmlmeinfo->state);
+			RTW_INFO("DrvBcnEarly=%d\n", pmlmeext->DrvBcnEarly);
+			RTW_INFO("DrvBcnTimeOut=%d\n", pmlmeext->DrvBcnTimeOut);
 			break;
 		case 0x03:
 			RTW_INFO("qos_option=%d\n", pmlmepriv->qospriv.qos_option);
@@ -10144,10 +10160,10 @@ static int rtw_priv_mp_get(struct net_device *dev,
 		RTW_INFO("set case mp_channel\n");
 		rtw_mp_channel(dev , info, wrqu, extra);
 		break;
-    	case  MP_CHL_OFFSET:
-       		RTW_INFO("set case mp_ch_offset\n");
-        	rtw_mp_ch_offset(dev , info, wrqu, extra);
-        	break;
+	case  MP_CHL_OFFSET:
+		RTW_INFO("set case mp_ch_offset\n");
+		rtw_mp_ch_offset(dev , info, wrqu, extra);
+		break;
 	case READ_REG:
 		RTW_INFO("mp_get  READ_REG\n");
 		rtw_mp_read_reg(dev, info, wrqu, extra);
@@ -10266,7 +10282,7 @@ static int rtw_priv_mp_get(struct net_device *dev,
 	case  BT_EFUSE_FILE:
 		RTW_INFO("mp_get BT EFUSE_FILE\n");
 		rtw_bt_efuse_file_map(dev, info, wdata, extra);
-		break;
+		break;	
 	default:
 		return -EIO;
 	}
@@ -10505,7 +10521,7 @@ static int rtw_priv_get(struct net_device *dev,
 	if (subcmd < MP_NULL) {
 #ifdef CONFIG_MP_INCLUDED
 		rtw_priv_mp_get(dev, info, wdata, extra);
-#endif
+#endif		
 		return 0;
 	}
 
@@ -12011,7 +12027,7 @@ static int rtw_test(
 	}
 
 	pbuf[len] = '\0';
-
+	
 	RTW_INFO("%s: string=\"%s\"\n", __func__, pbuf);
 
 	ptmp = (char *)pbuf;
@@ -12408,7 +12424,7 @@ static iw_handler rtw_private_handler[] = {
 	rtw_wx_priv_null,				/* 0x19 */
 #ifdef CONFIG_MP_INCLUDED
 	rtw_wx_priv_null,				/* 0x1A */
-	rtw_wx_priv_null,				/* 0x1B */
+	rtw_wx_priv_null,				/* 0x1B */	
 #else
 	rtw_wx_priv_null,				/* 0x1A */
 	rtw_mp_efuse_get,				/* 0x1B */

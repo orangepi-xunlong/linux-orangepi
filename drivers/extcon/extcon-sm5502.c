@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * extcon-sm5502.c - Silicon Mitus SM5502 extcon drvier to support USB switches
  *
  * Copyright (c) 2014 Samsung Electronics Co., Ltd
  * Author: Chanwoo Choi <cw00.choi@samsung.com>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/err.h>
@@ -19,7 +15,7 @@
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
-#include <linux/extcon.h>
+#include <linux/extcon-provider.h>
 
 #include "extcon-sm5502.h"
 
@@ -69,6 +65,10 @@ struct sm5502_muic_info {
 /* Default value of SM5502 register to bring up MUIC device. */
 static struct reg_data sm5502_reg_data[] = {
 	{
+		.reg = SM5502_REG_RESET,
+		.val = SM5502_REG_RESET_MASK,
+		.invert = true,
+	}, {
 		.reg = SM5502_REG_CONTROL,
 		.val = SM5502_REG_CONTROL_MASK_INT_MASK,
 		.invert = false,
@@ -135,13 +135,16 @@ enum sm5502_muic_acc_type {
 	SM5502_MUIC_ADC_AUDIO_TYPE1,
 	SM5502_MUIC_ADC_OPEN = 0x1f,
 
-	/* The below accessories have same ADC value (0x1f or 0x1e).
-	   So, Device type1 is used to separate specific accessory. */
+	/*
+	 * The below accessories have same ADC value (0x1f or 0x1e).
+	 * So, Device type1 is used to separate specific accessory.
+	 */
 							/* |---------|--ADC| */
 							/* |    [7:5]|[4:0]| */
 	SM5502_MUIC_ADC_AUDIO_TYPE1_FULL_REMOTE = 0x3e,	/* |      001|11110| */
 	SM5502_MUIC_ADC_AUDIO_TYPE1_SEND_END = 0x5e,	/* |      010|11110| */
 							/* |Dev Type1|--ADC| */
+	SM5502_MUIC_ADC_GROUND_USB_OTG = 0x80,		/* |      100|00000| */
 	SM5502_MUIC_ADC_OPEN_USB = 0x5f,		/* |      010|11111| */
 	SM5502_MUIC_ADC_OPEN_TA = 0xdf,			/* |      110|11111| */
 	SM5502_MUIC_ADC_OPEN_USB_OTG = 0xff,		/* |      111|11111| */
@@ -247,7 +250,7 @@ static int sm5502_muic_set_path(struct sm5502_muic_info *info,
 		dev_err(info->dev, "Unknown DM_CON/DP_CON switch type (%d)\n",
 				con_sw);
 		return -EINVAL;
-	};
+	}
 
 	switch (vbus_sw) {
 	case VBUSIN_SWITCH_OPEN:
@@ -266,7 +269,7 @@ static int sm5502_muic_set_path(struct sm5502_muic_info *info,
 	default:
 		dev_err(info->dev, "Unknown VBUS switch type (%d)\n", vbus_sw);
 		return -EINVAL;
-	};
+	}
 
 	return 0;
 }
@@ -274,7 +277,7 @@ static int sm5502_muic_set_path(struct sm5502_muic_info *info,
 /* Return cable type of attached or detached accessories */
 static unsigned int sm5502_muic_get_cable_type(struct sm5502_muic_info *info)
 {
-	unsigned int cable_type = -1, adc, dev_type1;
+	unsigned int cable_type, adc, dev_type1;
 	int ret;
 
 	/* Read ADC value according to external cable or button */
@@ -289,11 +292,27 @@ static unsigned int sm5502_muic_get_cable_type(struct sm5502_muic_info *info)
 	 * connected with to MUIC device.
 	 */
 	cable_type = adc & SM5502_REG_ADC_MASK;
-	if (cable_type == SM5502_MUIC_ADC_GROUND)
-		return SM5502_MUIC_ADC_GROUND;
 
 	switch (cable_type) {
 	case SM5502_MUIC_ADC_GROUND:
+		ret = regmap_read(info->regmap, SM5502_REG_DEV_TYPE1,
+				  &dev_type1);
+		if (ret) {
+			dev_err(info->dev, "failed to read DEV_TYPE1 reg\n");
+			return ret;
+		}
+
+		switch (dev_type1) {
+		case SM5502_REG_DEV_TYPE1_USB_OTG_MASK:
+			cable_type = SM5502_MUIC_ADC_GROUND_USB_OTG;
+			break;
+		default:
+			dev_dbg(info->dev,
+				"cannot identify the cable type: adc(0x%x), dev_type1(0x%x)\n",
+				adc, dev_type1);
+			return -EINVAL;
+		}
+		break;
 	case SM5502_MUIC_ADC_SEND_END_BUTTON:
 	case SM5502_MUIC_ADC_REMOTE_S1_BUTTON:
 	case SM5502_MUIC_ADC_REMOTE_S2_BUTTON:
@@ -355,13 +374,13 @@ static unsigned int sm5502_muic_get_cable_type(struct sm5502_muic_info *info)
 				"cannot identify the cable type: adc(0x%x)\n",
 				adc);
 			return -EINVAL;
-		};
+		}
 		break;
 	default:
 		dev_err(info->dev,
 			"failed to identify the cable type: adc(0x%x)\n", adc);
 		return -EINVAL;
-	};
+	}
 
 	return cable_type;
 }
@@ -394,6 +413,7 @@ static int sm5502_muic_cable_handler(struct sm5502_muic_info *info,
 		con_sw	= DM_DP_SWITCH_OPEN;
 		vbus_sw	= VBUSIN_SWITCH_VBUSOUT;
 		break;
+	case SM5502_MUIC_ADC_GROUND_USB_OTG:
 	case SM5502_MUIC_ADC_OPEN_USB_OTG:
 		id	= EXTCON_USB_HOST;
 		con_sw	= DM_DP_SWITCH_USB;
@@ -403,7 +423,7 @@ static int sm5502_muic_cable_handler(struct sm5502_muic_info *info,
 		dev_dbg(info->dev,
 			"cannot handle this cable_type (0x%x)\n", cable_type);
 		return 0;
-	};
+	}
 
 	/* Change internal hardware path(DM_CON/DP_CON, VBUSIN) */
 	ret = sm5502_muic_set_path(info, con_sw, vbus_sw, attached);
@@ -599,7 +619,7 @@ static int sm5022_muic_i2c_probe(struct i2c_client *i2c,
 
 		ret = devm_request_threaded_irq(info->dev, virq, NULL,
 						sm5502_muic_irq_handler,
-						IRQF_NO_SUSPEND,
+						IRQF_NO_SUSPEND | IRQF_ONESHOT,
 						muic_irq->name, info);
 		if (ret) {
 			dev_err(info->dev,

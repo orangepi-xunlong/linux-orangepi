@@ -97,17 +97,40 @@ static void bm_get_version(u16 *id, u8 *major, u8 *minor)
 /* signal transactions for FBPRs with higher priority */
 #define FBPR_AR_RPRIO_HI BIT(30)
 
-static void bm_set_memory(u64 ba, u32 size)
+/* Track if probe has occurred and if cleanup is required */
+static int __bman_probed;
+static int __bman_requires_cleanup;
+
+
+static int bm_set_memory(u64 ba, u32 size)
 {
+	u32 bar, bare;
 	u32 exp = ilog2(size);
 	/* choke if size isn't within range */
 	DPAA_ASSERT(size >= 4096 && size <= 1024*1024*1024 &&
 		   is_power_of_2(size));
 	/* choke if '[e]ba' has lower-alignment than 'size' */
 	DPAA_ASSERT(!(ba & (size - 1)));
+
+	/* Check to see if BMan has already been initialized */
+	bar = bm_ccsr_in(REG_FBPR_BAR);
+	if (bar) {
+		/* Maker sure ba == what was programmed) */
+		bare = bm_ccsr_in(REG_FBPR_BARE);
+		if (bare != upper_32_bits(ba) || bar != lower_32_bits(ba)) {
+			pr_err("Attempted to reinitialize BMan with different BAR, got 0x%llx read BARE=0x%x BAR=0x%x\n",
+			       ba, bare, bar);
+			return -ENOMEM;
+		}
+		pr_info("BMan BAR already configured\n");
+		__bman_requires_cleanup = 1;
+		return 1;
+	}
+
 	bm_ccsr_out(REG_FBPR_BARE, upper_32_bits(ba));
 	bm_ccsr_out(REG_FBPR_BAR, lower_32_bits(ba));
 	bm_ccsr_out(REG_FBPR_AR, exp - 1);
+	return 0;
 }
 
 /*
@@ -166,6 +189,22 @@ static irqreturn_t bman_isr(int irq, void *ptr)
 	return IRQ_HANDLED;
 }
 
+int bman_is_probed(void)
+{
+	return __bman_probed;
+}
+EXPORT_SYMBOL_GPL(bman_is_probed);
+
+int bman_requires_cleanup(void)
+{
+	return __bman_requires_cleanup;
+}
+
+void bman_done_cleanup(void)
+{
+	__bman_requires_cleanup = 0;
+}
+
 static int fsl_bman_probe(struct platform_device *pdev)
 {
 	int ret, err_irq;
@@ -175,14 +214,15 @@ static int fsl_bman_probe(struct platform_device *pdev)
 	u16 id, bm_pool_cnt;
 	u8 major, minor;
 
+	__bman_probed = -1;
+
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
-		dev_err(dev, "Can't get %s property 'IORESOURCE_MEM'\n",
-			node->full_name);
+		dev_err(dev, "Can't get %pOF property 'IORESOURCE_MEM'\n",
+			node);
 		return -ENXIO;
 	}
-	bm_ccsr_start = devm_ioremap(dev, res->start,
-				     res->end - res->start + 1);
+	bm_ccsr_start = devm_ioremap(dev, res->start, resource_size(res));
 	if (!bm_ccsr_start)
 		return -ENXIO;
 
@@ -202,18 +242,33 @@ static int fsl_bman_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
+	/*
+	 * If FBPR memory wasn't defined using the qbman compatible string
+	 * try using the of_reserved_mem_device method
+	 */
+	if (!fbpr_a) {
+		ret = qbman_init_private_mem(dev, 0, &fbpr_a, &fbpr_sz);
+		if (ret) {
+			dev_err(dev, "qbman_init_private_mem() failed 0x%x\n",
+				ret);
+			return -ENODEV;
+		}
+	}
+
+	dev_dbg(dev, "Allocated FBPR 0x%llx 0x%zx\n", fbpr_a, fbpr_sz);
+
 	bm_set_memory(fbpr_a, fbpr_sz);
 
 	err_irq = platform_get_irq(pdev, 0);
 	if (err_irq <= 0) {
-		dev_info(dev, "Can't get %s IRQ\n", node->full_name);
+		dev_info(dev, "Can't get %pOF IRQ\n", node);
 		return -ENODEV;
 	}
 	ret = devm_request_irq(dev, err_irq, bman_isr, IRQF_SHARED, "bman-err",
 			       dev);
 	if (ret)  {
-		dev_err(dev, "devm_request_irq() failed %d for '%s'\n",
-			ret, node->full_name);
+		dev_err(dev, "devm_request_irq() failed %d for '%pOF'\n",
+			ret, node);
 		return ret;
 	}
 	/* Disable Buffer Pool State Change */
@@ -240,6 +295,8 @@ static int fsl_bman_probe(struct platform_device *pdev)
 			0, bm_pool_cnt - 1, ret);
 		return ret;
 	}
+
+	__bman_probed = 1;
 
 	return 0;
 };

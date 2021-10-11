@@ -19,6 +19,7 @@
 
 #define IDETAPE_VERSION "1.20"
 
+#include <linux/compat.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/string.h>
@@ -282,7 +283,7 @@ static void idetape_analyze_error(ide_drive_t *drive)
 
 	/* correct remaining bytes to transfer */
 	if (pc->flags & PC_FLAG_DMA_ERROR)
-		rq->resid_len = tape->blk_size * get_unaligned_be32(&sense[3]);
+		scsi_req(rq)->resid_len = tape->blk_size * get_unaligned_be32(&sense[3]);
 
 	/*
 	 * If error was the result of a zero-length read or write command,
@@ -316,7 +317,7 @@ static void idetape_analyze_error(ide_drive_t *drive)
 			pc->flags |= PC_FLAG_ABORT;
 		}
 		if (!(pc->flags & PC_FLAG_ABORT) &&
-		    (blk_rq_bytes(rq) - rq->resid_len))
+		    (blk_rq_bytes(rq) - scsi_req(rq)->resid_len))
 			pc->retries = IDETAPE_MAX_PC_RETRIES + 1;
 	}
 }
@@ -348,7 +349,7 @@ static int ide_tape_callback(ide_drive_t *drive, int dsc)
 					"itself - Aborting request!\n");
 	} else if (pc->c[0] == READ_6 || pc->c[0] == WRITE_6) {
 		unsigned int blocks =
-			(blk_rq_bytes(rq) - rq->resid_len) / tape->blk_size;
+			(blk_rq_bytes(rq) - scsi_req(rq)->resid_len) / tape->blk_size;
 
 		tape->avg_size += blocks * tape->blk_size;
 
@@ -366,7 +367,7 @@ static int ide_tape_callback(ide_drive_t *drive, int dsc)
 			err = pc->error;
 		}
 	}
-	rq->errors = err;
+	scsi_req(rq)->result = err;
 
 	return uptodate;
 }
@@ -474,7 +475,7 @@ static ide_startstop_t ide_tape_issue_pc(ide_drive_t *drive,
 
 		drive->failed_pc = NULL;
 		drive->pc_callback(drive, 0);
-		ide_complete_rq(drive, -EIO, blk_rq_bytes(rq));
+		ide_complete_rq(drive, BLK_STS_IOERR, blk_rq_bytes(rq));
 		return ide_stopped;
 	}
 	ide_debug_log(IDE_DBG_SENSE, "retry #%d, cmd: 0x%02x", pc->retries,
@@ -560,7 +561,7 @@ static void ide_tape_create_rw_cmd(idetape_tape_t *tape,
 		pc->flags |= PC_FLAG_WRITING;
 	}
 
-	memcpy(rq->cmd, pc->c, 12);
+	memcpy(scsi_req(rq)->cmd, pc->c, 12);
 }
 
 static ide_startstop_t idetape_do_request(ide_drive_t *drive,
@@ -570,14 +571,16 @@ static ide_startstop_t idetape_do_request(ide_drive_t *drive,
 	idetape_tape_t *tape = drive->driver_data;
 	struct ide_atapi_pc *pc = NULL;
 	struct ide_cmd cmd;
+	struct scsi_request *req = scsi_req(rq);
 	u8 stat;
 
 	ide_debug_log(IDE_DBG_RQ, "cmd: 0x%x, sector: %llu, nr_sectors: %u",
-		      rq->cmd[0], (unsigned long long)blk_rq_pos(rq),
+		      req->cmd[0], (unsigned long long)blk_rq_pos(rq),
 		      blk_rq_sectors(rq));
 
-	BUG_ON(!(rq->cmd_type == REQ_TYPE_DRV_PRIV ||
-		 rq->cmd_type == REQ_TYPE_ATA_SENSE));
+	BUG_ON(!blk_rq_is_private(rq));
+	BUG_ON(ide_req(rq)->type != ATA_PRIV_MISC &&
+	       ide_req(rq)->type != ATA_PRIV_SENSE);
 
 	/* Retry a failed packet command */
 	if (drive->failed_pc && drive->pc->c[0] == REQUEST_SENSE) {
@@ -592,7 +595,7 @@ static ide_startstop_t idetape_do_request(ide_drive_t *drive,
 	stat = hwif->tp_ops->read_status(hwif);
 
 	if ((drive->dev_flags & IDE_DFLAG_DSC_OVERLAP) == 0 &&
-	    (rq->cmd[13] & REQ_IDETAPE_PC2) == 0)
+	    (req->cmd[13] & REQ_IDETAPE_PC2) == 0)
 		drive->atapi_flags |= IDE_AFLAG_IGNORE_DSC;
 
 	if (drive->dev_flags & IDE_DFLAG_POST_RESET) {
@@ -609,7 +612,7 @@ static ide_startstop_t idetape_do_request(ide_drive_t *drive,
 		} else if (time_after(jiffies, tape->dsc_timeout)) {
 			printk(KERN_ERR "ide-tape: %s: DSC timeout\n",
 				tape->name);
-			if (rq->cmd[13] & REQ_IDETAPE_PC2) {
+			if (req->cmd[13] & REQ_IDETAPE_PC2) {
 				idetape_media_access_finished(drive);
 				return ide_stopped;
 			} else {
@@ -626,23 +629,23 @@ static ide_startstop_t idetape_do_request(ide_drive_t *drive,
 		tape->postponed_rq = false;
 	}
 
-	if (rq->cmd[13] & REQ_IDETAPE_READ) {
+	if (req->cmd[13] & REQ_IDETAPE_READ) {
 		pc = &tape->queued_pc;
 		ide_tape_create_rw_cmd(tape, pc, rq, READ_6);
 		goto out;
 	}
-	if (rq->cmd[13] & REQ_IDETAPE_WRITE) {
+	if (req->cmd[13] & REQ_IDETAPE_WRITE) {
 		pc = &tape->queued_pc;
 		ide_tape_create_rw_cmd(tape, pc, rq, WRITE_6);
 		goto out;
 	}
-	if (rq->cmd[13] & REQ_IDETAPE_PC1) {
-		pc = (struct ide_atapi_pc *)rq->special;
-		rq->cmd[13] &= ~(REQ_IDETAPE_PC1);
-		rq->cmd[13] |= REQ_IDETAPE_PC2;
+	if (req->cmd[13] & REQ_IDETAPE_PC1) {
+		pc = (struct ide_atapi_pc *)ide_req(rq)->special;
+		req->cmd[13] &= ~(REQ_IDETAPE_PC1);
+		req->cmd[13] |= REQ_IDETAPE_PC2;
 		goto out;
 	}
-	if (rq->cmd[13] & REQ_IDETAPE_PC2) {
+	if (req->cmd[13] & REQ_IDETAPE_PC2) {
 		idetape_media_access_finished(drive);
 		return ide_stopped;
 	}
@@ -852,23 +855,23 @@ static int idetape_queue_rw_tail(ide_drive_t *drive, int cmd, int size)
 	BUG_ON(cmd != REQ_IDETAPE_READ && cmd != REQ_IDETAPE_WRITE);
 	BUG_ON(size < 0 || size % tape->blk_size);
 
-	rq = blk_get_request(drive->queue, READ, __GFP_RECLAIM);
-	rq->cmd_type = REQ_TYPE_DRV_PRIV;
-	rq->cmd[13] = cmd;
+	rq = blk_get_request(drive->queue, REQ_OP_DRV_IN, 0);
+	ide_req(rq)->type = ATA_PRIV_MISC;
+	scsi_req(rq)->cmd[13] = cmd;
 	rq->rq_disk = tape->disk;
 	rq->__sector = tape->first_frame;
 
 	if (size) {
 		ret = blk_rq_map_kern(drive->queue, rq, tape->buf, size,
-				      __GFP_RECLAIM);
+				      GFP_NOIO);
 		if (ret)
 			goto out_put;
 	}
 
-	blk_execute_rq(drive->queue, tape->disk, rq, 0);
+	blk_execute_rq(tape->disk, rq, 0);
 
 	/* calculate the number of transferred bytes and update buffer state */
-	size -= rq->resid_len;
+	size -= scsi_req(rq)->resid_len;
 	tape->cur = tape->buf;
 	if (cmd == REQ_IDETAPE_READ)
 		tape->valid = size;
@@ -876,7 +879,7 @@ static int idetape_queue_rw_tail(ide_drive_t *drive, int cmd, int size)
 		tape->valid = 0;
 
 	ret = size;
-	if (rq->errors == IDE_DRV_ERROR_GENERAL)
+	if (scsi_req(rq)->result == IDE_DRV_ERROR_GENERAL)
 		ret = -EIO;
 out_put:
 	blk_put_request(rq);
@@ -1133,7 +1136,7 @@ static ssize_t idetape_chrdev_read(struct file *file, char __user *buf,
 	ssize_t ret = 0;
 	int rc;
 
-	ide_debug_log(IDE_DBG_FUNC, "count %Zd", count);
+	ide_debug_log(IDE_DBG_FUNC, "count %zd", count);
 
 	if (tape->chrdev_dir != IDETAPE_DIR_READ) {
 		if (test_bit(ilog2(IDE_AFLAG_DETECT_BS), &drive->atapi_flags))
@@ -1192,7 +1195,7 @@ static ssize_t idetape_chrdev_write(struct file *file, const char __user *buf,
 	if (tape->write_prot)
 		return -EACCES;
 
-	ide_debug_log(IDE_DBG_FUNC, "count %Zd", count);
+	ide_debug_log(IDE_DBG_FUNC, "count %zd", count);
 
 	/* Initialize write operation */
 	rc = idetape_init_rw(drive, IDETAPE_DIR_WRITE);
@@ -1405,14 +1408,10 @@ static long do_idetape_chrdev_ioctl(struct file *file,
 		if (tape->drv_write_prot)
 			mtget.mt_gstat |= GMT_WR_PROT(0xffffffff);
 
-		if (copy_to_user(argp, &mtget, sizeof(struct mtget)))
-			return -EFAULT;
-		return 0;
+		return put_user_mtget(argp, &mtget);
 	case MTIOCPOS:
 		mtpos.mt_blkno = position / tape->user_bs_factor - block_offset;
-		if (copy_to_user(argp, &mtpos, sizeof(struct mtpos)))
-			return -EFAULT;
-		return 0;
+		return put_user_mtpos(argp, &mtpos);
 	default:
 		if (tape->chrdev_dir == IDETAPE_DIR_READ)
 			ide_tape_discard_merge_buffer(drive, 1);
@@ -1424,6 +1423,22 @@ static long idetape_chrdev_ioctl(struct file *file,
 				unsigned int cmd, unsigned long arg)
 {
 	long ret;
+	mutex_lock(&ide_tape_mutex);
+	ret = do_idetape_chrdev_ioctl(file, cmd, arg);
+	mutex_unlock(&ide_tape_mutex);
+	return ret;
+}
+
+static long idetape_chrdev_compat_ioctl(struct file *file,
+				unsigned int cmd, unsigned long arg)
+{
+	long ret;
+
+	if (cmd == MTIOCPOS32)
+		cmd = MTIOCPOS;
+	else if (cmd == MTIOCGET32)
+		cmd = MTIOCGET;
+
 	mutex_lock(&ide_tape_mutex);
 	ret = do_idetape_chrdev_ioctl(file, cmd, arg);
 	mutex_unlock(&ide_tape_mutex);
@@ -1744,7 +1759,6 @@ static void idetape_setup(ide_drive_t *drive, idetape_tape_t *tape, int minor)
 {
 	unsigned long t;
 	int speed;
-	int buffer_size;
 	u16 *ctl = (u16 *)&tape->caps[12];
 
 	ide_debug_log(IDE_DBG_FUNC, "minor: %d", minor);
@@ -1779,7 +1793,6 @@ static void idetape_setup(ide_drive_t *drive, idetape_tape_t *tape, int minor)
 		*ctl /= 2;
 		tape->buffer_size = *ctl * tape->blk_size;
 	}
-	buffer_size = tape->buffer_size;
 
 	/* select the "best" DSC read/write polling freq */
 	speed = max(*(u16 *)&tape->caps[14], *(u16 *)&tape->caps[8]);
@@ -1809,7 +1822,6 @@ static void ide_tape_remove(ide_drive_t *drive)
 
 	ide_proc_unregister_driver(drive, tape->driver);
 	device_del(&tape->dev);
-	ide_unregister_region(tape->disk);
 
 	mutex_lock(&idetape_ref_mutex);
 	put_device(&tape->dev);
@@ -1845,22 +1857,9 @@ static int idetape_name_proc_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-static int idetape_name_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, idetape_name_proc_show, PDE_DATA(inode));
-}
-
-static const struct file_operations idetape_name_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= idetape_name_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
 static ide_proc_entry_t idetape_proc[] = {
-	{ "capacity",	S_IFREG|S_IRUGO,	&ide_capacity_proc_fops	},
-	{ "name",	S_IFREG|S_IRUGO,	&idetape_name_proc_fops	},
+	{ "capacity",	S_IFREG|S_IRUGO,	ide_capacity_proc_show	},
+	{ "name",	S_IFREG|S_IRUGO,	idetape_name_proc_show	},
 	{}
 };
 
@@ -1899,6 +1898,8 @@ static const struct file_operations idetape_fops = {
 	.read		= idetape_chrdev_read,
 	.write		= idetape_chrdev_write,
 	.unlocked_ioctl	= idetape_chrdev_ioctl,
+	.compat_ioctl	= IS_ENABLED(CONFIG_COMPAT) ?
+			  idetape_chrdev_compat_ioctl : NULL,
 	.open		= idetape_chrdev_open,
 	.release	= idetape_chrdev_release,
 	.llseek		= noop_llseek,
@@ -1943,11 +1944,22 @@ static int idetape_ioctl(struct block_device *bdev, fmode_t mode,
 	return err;
 }
 
+static int idetape_compat_ioctl(struct block_device *bdev, fmode_t mode,
+				unsigned int cmd, unsigned long arg)
+{
+        if (cmd == 0x0340 || cmd == 0x350)
+		arg = (unsigned long)compat_ptr(arg);
+
+	return idetape_ioctl(bdev, mode, cmd, arg);
+}
+
 static const struct block_device_operations idetape_block_ops = {
 	.owner		= THIS_MODULE,
 	.open		= idetape_open,
 	.release	= idetape_release,
 	.ioctl		= idetape_ioctl,
+	.compat_ioctl	= IS_ENABLED(CONFIG_COMPAT) ?
+				idetape_compat_ioctl : NULL,
 };
 
 static int ide_tape_probe(ide_drive_t *drive)
@@ -2013,7 +2025,6 @@ static int ide_tape_probe(ide_drive_t *drive)
 		      "n%s", tape->name);
 
 	g->fops = &idetape_block_ops;
-	ide_register_region(g);
 
 	return 0;
 

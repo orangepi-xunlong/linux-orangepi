@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  (C) 2001-2004  Dave Jones.
  *  (C) 2002  Padraig Brady. <padraig@antefacto.com>
  *
- *  Licensed under the terms of the GNU GPL License version 2.
  *  Based upon datasheets & sample CPUs kindly provided by VIA.
  *
  *  VIA have currently 3 different versions of Longhaul.
@@ -474,8 +474,8 @@ static int longhaul_get_ranges(void)
 		return -EINVAL;
 	}
 
-	longhaul_table = kzalloc((numscales + 1) * sizeof(*longhaul_table),
-			GFP_KERNEL);
+	longhaul_table = kcalloc(numscales + 1, sizeof(*longhaul_table),
+				 GFP_KERNEL);
 	if (!longhaul_table)
 		return -ENOMEM;
 
@@ -593,14 +593,13 @@ static void longhaul_setup_voltagescaling(void)
 		break;
 	default:
 		return;
-		break;
 	}
 	if (min_vid_speed >= highest_speed)
 		return;
 	/* Calculate kHz for one voltage step */
 	kHz_step = (highest_speed - min_vid_speed) / numvscales;
 
-	cpufreq_for_each_entry(freq_pos, longhaul_table) {
+	cpufreq_for_each_entry_idx(freq_pos, longhaul_table, j) {
 		speed = freq_pos->frequency;
 		if (speed > min_vid_speed)
 			pos = (speed - min_vid_speed) / kHz_step + minvid.pos;
@@ -609,7 +608,7 @@ static void longhaul_setup_voltagescaling(void)
 		freq_pos->driver_data |= mV_vrm_table[pos] << 8;
 		vid = vrm_mV_table[mV_vrm_table[pos]];
 		pr_info("f: %d kHz, index: %d, vid: %d mV\n",
-			speed, (int)(freq_pos - longhaul_table), vid.mV);
+			speed, j, vid.mV);
 	}
 
 	can_scale_voltage = 1;
@@ -851,7 +850,7 @@ static int longhaul_cpu_init(struct cpufreq_policy *policy)
 	case TYPE_POWERSAVER:
 		pr_cont("Powersaver supported\n");
 		break;
-	};
+	}
 
 	/* Doesn't hurt */
 	longhaul_setup_southbridge();
@@ -894,9 +893,10 @@ static int longhaul_cpu_init(struct cpufreq_policy *policy)
 	if ((longhaul_version != TYPE_LONGHAUL_V1) && (scale_voltage != 0))
 		longhaul_setup_voltagescaling();
 
-	policy->cpuinfo.transition_latency = 200000;	/* nsec */
+	policy->transition_delay_us = 200000;	/* usec */
+	policy->freq_table = longhaul_table;
 
-	return cpufreq_table_validate_and_show(policy, longhaul_table);
+	return 0;
 }
 
 static struct cpufreq_driver longhaul_driver = {
@@ -909,7 +909,7 @@ static struct cpufreq_driver longhaul_driver = {
 };
 
 static const struct x86_cpu_id longhaul_id[] = {
-	{ X86_VENDOR_CENTAUR, 6 },
+	X86_MATCH_VENDOR_FAM(CENTAUR, 6, NULL),
 	{}
 };
 MODULE_DEVICE_TABLE(x86cpu, longhaul_id);

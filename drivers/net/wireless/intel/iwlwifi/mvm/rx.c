@@ -1,73 +1,15 @@
-/******************************************************************************
- *
- * This file is provided under a dual BSD/GPLv2 license.  When using or
- * redistributing this file, you may do so under either license.
- *
- * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
- * Copyright(c) 2016 Intel Deutschland GmbH
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110,
- * USA
- *
- * The full GNU General Public License is included in this distribution
- * in the file called COPYING.
- *
- * Contact Information:
- *  Intel Linux Wireless <linuxwifi@intel.com>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- * BSD LICENSE
- *
- * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name Intel Corporation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *****************************************************************************/
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
+/*
+ * Copyright (C) 2012-2014, 2018-2020 Intel Corporation
+ * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
+ * Copyright (C) 2016-2017 Intel Deutschland GmbH
+ */
+#include <asm/unaligned.h>
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
 #include "iwl-trans.h"
 #include "mvm.h"
 #include "fw-api.h"
-#include "fw-dbg.h"
 
 /*
  * iwl_mvm_rx_rx_phy_cmd - REPLY_RX_PHY_CMD handler
@@ -78,6 +20,10 @@
 void iwl_mvm_rx_rx_phy_cmd(struct iwl_mvm *mvm, struct iwl_rx_cmd_buffer *rxb)
 {
 	struct iwl_rx_packet *pkt = rxb_addr(rxb);
+	unsigned int pkt_len = iwl_rx_packet_payload_len(pkt);
+
+	if (unlikely(pkt_len < sizeof(mvm->last_phy_info)))
+		return;
 
 	memcpy(&mvm->last_phy_info, pkt->data, sizeof(mvm->last_phy_info));
 	mvm->ampdu_ref++;
@@ -133,7 +79,7 @@ static void iwl_mvm_pass_packet_to_mac80211(struct iwl_mvm *mvm,
 	 */
 	hdrlen = (len <= skb_tailroom(skb)) ? len : hdrlen + crypt_len + 8;
 
-	memcpy(skb_put(skb, hdrlen), hdr, hdrlen);
+	skb_put_data(skb, hdr, hdrlen);
 	fraglen = len - hdrlen;
 
 	if (fraglen) {
@@ -223,10 +169,12 @@ static u32 iwl_mvm_set_mac80211_rx_flag(struct iwl_mvm *mvm,
 
 	case RX_MPDU_RES_STATUS_SEC_TKIP_ENC:
 		/* Don't drop the frame and decrypt it in SW */
-		if (!(rx_pkt_status & RX_MPDU_RES_STATUS_TTAK_OK))
+		if (!fw_has_api(&mvm->fw->ucode_capa,
+				IWL_UCODE_TLV_API_DEPRECATE_TTAK) &&
+		    !(rx_pkt_status & RX_MPDU_RES_STATUS_TTAK_OK))
 			return 0;
 		*crypt_len = IEEE80211_TKIP_IV_LEN;
-		/* fall through if TTAK OK */
+		fallthrough;
 
 	case RX_MPDU_RES_STATUS_SEC_WEP_ENC:
 		if (!(rx_pkt_status & RX_MPDU_RES_STATUS_ICV_OK))
@@ -245,10 +193,80 @@ static u32 iwl_mvm_set_mac80211_rx_flag(struct iwl_mvm *mvm,
 		return 0;
 
 	default:
-		IWL_ERR(mvm, "Unhandled alg: 0x%x\n", rx_pkt_status);
+		/* Expected in monitor (not having the keys) */
+		if (!mvm->monitor_on)
+			IWL_ERR(mvm, "Unhandled alg: 0x%x\n", rx_pkt_status);
 	}
 
 	return 0;
+}
+
+static void iwl_mvm_rx_handle_tcm(struct iwl_mvm *mvm,
+				  struct ieee80211_sta *sta,
+				  struct ieee80211_hdr *hdr, u32 len,
+				  struct iwl_rx_phy_info *phy_info,
+				  u32 rate_n_flags)
+{
+	struct iwl_mvm_sta *mvmsta;
+	struct iwl_mvm_tcm_mac *mdata;
+	int mac;
+	int ac = IEEE80211_AC_BE; /* treat non-QoS as BE */
+	struct iwl_mvm_vif *mvmvif;
+	/* expected throughput in 100Kbps, single stream, 20 MHz */
+	static const u8 thresh_tpt[] = {
+		9, 18, 30, 42, 60, 78, 90, 96, 120, 135,
+	};
+	u16 thr;
+
+	if (ieee80211_is_data_qos(hdr->frame_control))
+		ac = tid_to_mac80211_ac[ieee80211_get_tid(hdr)];
+
+	mvmsta = iwl_mvm_sta_from_mac80211(sta);
+	mac = mvmsta->mac_id_n_color & FW_CTXT_ID_MSK;
+
+	if (time_after(jiffies, mvm->tcm.ts + MVM_TCM_PERIOD))
+		schedule_delayed_work(&mvm->tcm.work, 0);
+	mdata = &mvm->tcm.data[mac];
+	mdata->rx.pkts[ac]++;
+
+	/* count the airtime only once for each ampdu */
+	if (mdata->rx.last_ampdu_ref != mvm->ampdu_ref) {
+		mdata->rx.last_ampdu_ref = mvm->ampdu_ref;
+		mdata->rx.airtime += le16_to_cpu(phy_info->frame_time);
+	}
+
+	if (!(rate_n_flags & (RATE_MCS_HT_MSK | RATE_MCS_VHT_MSK)))
+		return;
+
+	mvmvif = iwl_mvm_vif_from_mac80211(mvmsta->vif);
+
+	if (mdata->opened_rx_ba_sessions ||
+	    mdata->uapsd_nonagg_detect.detected ||
+	    (!mvmvif->queue_params[IEEE80211_AC_VO].uapsd &&
+	     !mvmvif->queue_params[IEEE80211_AC_VI].uapsd &&
+	     !mvmvif->queue_params[IEEE80211_AC_BE].uapsd &&
+	     !mvmvif->queue_params[IEEE80211_AC_BK].uapsd) ||
+	    mvmsta->sta_id != mvmvif->ap_sta_id)
+		return;
+
+	if (rate_n_flags & RATE_MCS_HT_MSK) {
+		thr = thresh_tpt[rate_n_flags & RATE_HT_MCS_RATE_CODE_MSK];
+		thr *= 1 + ((rate_n_flags & RATE_HT_MCS_NSS_MSK) >>
+					RATE_HT_MCS_NSS_POS);
+	} else {
+		if (WARN_ON((rate_n_flags & RATE_VHT_MCS_RATE_CODE_MSK) >=
+				ARRAY_SIZE(thresh_tpt)))
+			return;
+		thr = thresh_tpt[rate_n_flags & RATE_VHT_MCS_RATE_CODE_MSK];
+		thr *= 1 + ((rate_n_flags & RATE_VHT_MCS_NSS_MSK) >>
+					RATE_VHT_MCS_NSS_POS);
+	}
+
+	thr <<= ((rate_n_flags & RATE_MCS_CHAN_WIDTH_MSK) >>
+				RATE_MCS_CHAN_WIDTH_POS);
+
+	mdata->uapsd_nonagg_detect.rx_bytes += len;
+	ewma_rate_add(&mdata->uapsd_nonagg_detect.rate, thr);
 }
 
 static void iwl_mvm_rx_csum(struct ieee80211_sta *sta,
@@ -279,17 +297,27 @@ void iwl_mvm_rx_rx_mpdu(struct iwl_mvm *mvm, struct napi_struct *napi,
 	struct iwl_rx_mpdu_res_start *rx_res;
 	struct ieee80211_sta *sta = NULL;
 	struct sk_buff *skb;
-	u32 len;
+	u32 len, pkt_len = iwl_rx_packet_payload_len(pkt);
 	u32 rate_n_flags;
 	u32 rx_pkt_status;
 	u8 crypt_len = 0;
-	bool take_ref;
+
+	if (unlikely(pkt_len < sizeof(*rx_res))) {
+		IWL_DEBUG_DROP(mvm, "Bad REPLY_RX_MPDU_CMD size\n");
+		return;
+	}
 
 	phy_info = &mvm->last_phy_info;
 	rx_res = (struct iwl_rx_mpdu_res_start *)pkt->data;
 	hdr = (struct ieee80211_hdr *)(pkt->data + sizeof(*rx_res));
 	len = le16_to_cpu(rx_res->byte_count);
-	rx_pkt_status = le32_to_cpup((__le32 *)
+
+	if (unlikely(len + sizeof(*rx_res) + sizeof(__le32) > pkt_len)) {
+		IWL_DEBUG_DROP(mvm, "FW lied about packet len\n");
+		return;
+	}
+
+	rx_pkt_status = get_unaligned_le32((__le32 *)
 		(pkt->data + sizeof(*rx_res) + len));
 
 	/* Dont use dev_alloc_skb(), we'll have enough headroom once
@@ -351,7 +379,7 @@ void iwl_mvm_rx_rx_mpdu(struct iwl_mvm *mvm, struct napi_struct *napi,
 
 		id >>= RX_MDPU_RES_STATUS_STA_ID_SHIFT;
 
-		if (!WARN_ON_ONCE(id >= IWL_MVM_STATION_COUNT)) {
+		if (!WARN_ON_ONCE(id >= mvm->fw->ucode_capa.num_stations)) {
 			sta = rcu_dereference(mvm->fw_id_to_mac_id[id]);
 			if (IS_ERR(sta))
 				sta = NULL;
@@ -367,13 +395,14 @@ void iwl_mvm_rx_rx_mpdu(struct iwl_mvm *mvm, struct napi_struct *napi,
 		struct iwl_mvm_sta *mvmsta = iwl_mvm_sta_from_mac80211(sta);
 		struct ieee80211_vif *tx_blocked_vif =
 			rcu_dereference(mvm->csa_tx_blocked_vif);
+		struct iwl_fw_dbg_trigger_tlv *trig;
+		struct ieee80211_vif *vif = mvmsta->vif;
 
 		/* We have tx blocked stations (with CS bit). If we heard
 		 * frames from a blocked station on a new channel we can
 		 * TX to it again.
 		 */
-		if (unlikely(tx_blocked_vif) &&
-		    mvmsta->vif == tx_blocked_vif) {
+		if (unlikely(tx_blocked_vif) && vif == tx_blocked_vif) {
 			struct iwl_mvm_vif *mvmvif =
 				iwl_mvm_vif_from_mac80211(tx_blocked_vif);
 
@@ -382,26 +411,29 @@ void iwl_mvm_rx_rx_mpdu(struct iwl_mvm *mvm, struct napi_struct *napi,
 								 false);
 		}
 
-		rs_update_last_rssi(mvm, &mvmsta->lq_sta, rx_status);
+		rs_update_last_rssi(mvm, mvmsta, rx_status);
 
-		if (iwl_fw_dbg_trigger_enabled(mvm->fw, FW_DBG_TRIGGER_RSSI) &&
-		    ieee80211_is_beacon(hdr->frame_control)) {
-			struct iwl_fw_dbg_trigger_tlv *trig;
+		trig = iwl_fw_dbg_trigger_on(&mvm->fwrt,
+					     ieee80211_vif_to_wdev(vif),
+					     FW_DBG_TRIGGER_RSSI);
+
+		if (trig && ieee80211_is_beacon(hdr->frame_control)) {
 			struct iwl_fw_dbg_trigger_low_rssi *rssi_trig;
-			bool trig_check;
 			s32 rssi;
 
-			trig = iwl_fw_dbg_get_trigger(mvm->fw,
-						      FW_DBG_TRIGGER_RSSI);
 			rssi_trig = (void *)trig->data;
 			rssi = le32_to_cpu(rssi_trig->rssi);
 
-			trig_check =
-				iwl_fw_dbg_trigger_check_stop(mvm, mvmsta->vif,
-							      trig);
-			if (trig_check && rx_status->signal < rssi)
-				iwl_mvm_fw_dbg_collect_trig(mvm, trig, NULL);
+			if (rx_status->signal < rssi)
+				iwl_fw_dbg_collect_trig(&mvm->fwrt, trig,
+							NULL);
 		}
+
+		if (!mvm->tcm.paused && len >= sizeof(*hdr) &&
+		    !is_multicast_ether_addr(hdr->addr1) &&
+		    ieee80211_is_data(hdr->frame_control))
+			iwl_mvm_rx_handle_tcm(mvm, sta, hdr, len, phy_info,
+					      rate_n_flags);
 
 		if (ieee80211_is_data(hdr->frame_control))
 			iwl_mvm_rx_csum(sta, skb, rx_pkt_status);
@@ -410,7 +442,7 @@ void iwl_mvm_rx_rx_mpdu(struct iwl_mvm *mvm, struct napi_struct *napi,
 
 	/* set the preamble flag if appropriate */
 	if (phy_info->phy_flags & cpu_to_le16(RX_RES_PHY_FLAGS_SHORT_PREAMBLE))
-		rx_status->flag |= RX_FLAG_SHORTPRE;
+		rx_status->enc_flags |= RX_ENC_FLAG_SHORTPRE;
 
 	if (phy_info->phy_flags & cpu_to_le16(RX_RES_PHY_FLAGS_AGG)) {
 		/*
@@ -427,42 +459,50 @@ void iwl_mvm_rx_rx_mpdu(struct iwl_mvm *mvm, struct napi_struct *napi,
 	case RATE_MCS_CHAN_WIDTH_20:
 		break;
 	case RATE_MCS_CHAN_WIDTH_40:
-		rx_status->flag |= RX_FLAG_40MHZ;
+		rx_status->bw = RATE_INFO_BW_40;
 		break;
 	case RATE_MCS_CHAN_WIDTH_80:
-		rx_status->vht_flag |= RX_VHT_FLAG_80MHZ;
+		rx_status->bw = RATE_INFO_BW_80;
 		break;
 	case RATE_MCS_CHAN_WIDTH_160:
-		rx_status->vht_flag |= RX_VHT_FLAG_160MHZ;
+		rx_status->bw = RATE_INFO_BW_160;
 		break;
 	}
-	if (rate_n_flags & RATE_MCS_SGI_MSK)
-		rx_status->flag |= RX_FLAG_SHORT_GI;
+	if (!(rate_n_flags & RATE_MCS_CCK_MSK) &&
+	    rate_n_flags & RATE_MCS_SGI_MSK)
+		rx_status->enc_flags |= RX_ENC_FLAG_SHORT_GI;
 	if (rate_n_flags & RATE_HT_MCS_GF_MSK)
-		rx_status->flag |= RX_FLAG_HT_GF;
+		rx_status->enc_flags |= RX_ENC_FLAG_HT_GF;
 	if (rate_n_flags & RATE_MCS_LDPC_MSK)
-		rx_status->flag |= RX_FLAG_LDPC;
+		rx_status->enc_flags |= RX_ENC_FLAG_LDPC;
 	if (rate_n_flags & RATE_MCS_HT_MSK) {
-		u8 stbc = (rate_n_flags & RATE_MCS_HT_STBC_MSK) >>
+		u8 stbc = (rate_n_flags & RATE_MCS_STBC_MSK) >>
 				RATE_MCS_STBC_POS;
-		rx_status->flag |= RX_FLAG_HT;
+		rx_status->encoding = RX_ENC_HT;
 		rx_status->rate_idx = rate_n_flags & RATE_HT_MCS_INDEX_MSK;
-		rx_status->flag |= stbc << RX_FLAG_STBC_SHIFT;
+		rx_status->enc_flags |= stbc << RX_ENC_FLAG_STBC_SHIFT;
 	} else if (rate_n_flags & RATE_MCS_VHT_MSK) {
-		u8 stbc = (rate_n_flags & RATE_MCS_VHT_STBC_MSK) >>
+		u8 stbc = (rate_n_flags & RATE_MCS_STBC_MSK) >>
 				RATE_MCS_STBC_POS;
-		rx_status->vht_nss =
+		rx_status->nss =
 			((rate_n_flags & RATE_VHT_MCS_NSS_MSK) >>
 						RATE_VHT_MCS_NSS_POS) + 1;
 		rx_status->rate_idx = rate_n_flags & RATE_VHT_MCS_RATE_CODE_MSK;
-		rx_status->flag |= RX_FLAG_VHT;
-		rx_status->flag |= stbc << RX_FLAG_STBC_SHIFT;
+		rx_status->encoding = RX_ENC_VHT;
+		rx_status->enc_flags |= stbc << RX_ENC_FLAG_STBC_SHIFT;
 		if (rate_n_flags & RATE_MCS_BF_MSK)
-			rx_status->vht_flag |= RX_VHT_FLAG_BF;
+			rx_status->enc_flags |= RX_ENC_FLAG_BF;
 	} else {
-		rx_status->rate_idx =
-			iwl_mvm_legacy_rate_to_mac80211_idx(rate_n_flags,
-							    rx_status->band);
+		int rate = iwl_mvm_legacy_rate_to_mac80211_idx(rate_n_flags,
+							       rx_status->band);
+
+		if (WARN(rate < 0 || rate > 0xFF,
+			 "Invalid rate flags 0x%x, band %d,\n",
+			 rate_n_flags, rx_status->band)) {
+			kfree_skb(skb);
+			return;
+		}
+		rx_status->rate_idx = rate;
 	}
 
 #ifdef CONFIG_IWLWIFI_DEBUGFS
@@ -477,40 +517,19 @@ void iwl_mvm_rx_rx_mpdu(struct iwl_mvm *mvm, struct napi_struct *napi,
 
 	if (unlikely(ieee80211_is_beacon(hdr->frame_control) ||
 		     ieee80211_is_probe_resp(hdr->frame_control)))
-		rx_status->boottime_ns = ktime_get_boot_ns();
-
-	/* Take a reference briefly to kick off a d0i3 entry delay so
-	 * we can handle bursts of RX packets without toggling the
-	 * state too often.  But don't do this for beacons if we are
-	 * going to idle because the beacon filtering changes we make
-	 * cause the firmware to send us collateral beacons. */
-	take_ref = !(test_bit(STATUS_TRANS_GOING_IDLE, &mvm->trans->status) &&
-		     ieee80211_is_beacon(hdr->frame_control));
-
-	if (take_ref)
-		iwl_mvm_ref(mvm, IWL_MVM_REF_RX);
+		rx_status->boottime_ns = ktime_get_boottime_ns();
 
 	iwl_mvm_pass_packet_to_mac80211(mvm, sta, napi, skb, hdr, len,
 					crypt_len, rxb);
-
-	if (take_ref)
-		iwl_mvm_unref(mvm, IWL_MVM_REF_RX);
-}
-
-static void iwl_mvm_update_rx_statistics(struct iwl_mvm *mvm,
-					 struct mvm_statistics_rx *rx_stats)
-{
-	lockdep_assert_held(&mvm->mutex);
-
-	mvm->rx_stats = *rx_stats;
 }
 
 struct iwl_mvm_stat_data {
 	struct iwl_mvm *mvm;
+	__le32 flags;
 	__le32 mac_id;
 	u8 beacon_filter_average_energy;
-	struct mvm_statistics_general_v8 *general;
-	struct mvm_statistics_load *load;
+	__le32 *beacon_counter;
+	u8 *beacon_average_energy;
 };
 
 static void iwl_mvm_stat_iterator(void *_data, u8 *mac,
@@ -524,17 +543,23 @@ static void iwl_mvm_stat_iterator(void *_data, u8 *mac,
 	int hyst = vif->bss_conf.cqm_rssi_hyst;
 	u16 id = le32_to_cpu(data->mac_id);
 	struct iwl_mvm_vif *mvmvif = iwl_mvm_vif_from_mac80211(vif);
+	u16 vif_id = mvmvif->id;
 
 	/* This doesn't need the MAC ID check since it's not taking the
 	 * data copied into the "data" struct, but rather the data from
 	 * the notification directly.
 	 */
-	if (data->general) {
-		mvmvif->beacon_stats.num_beacons =
-			le32_to_cpu(data->general->beacon_counter[mvmvif->id]);
-		mvmvif->beacon_stats.avg_signal =
-			-data->general->beacon_average_energy[mvmvif->id];
-	}
+	mvmvif->beacon_stats.num_beacons =
+		le32_to_cpu(data->beacon_counter[vif_id]);
+	mvmvif->beacon_stats.avg_signal =
+		-data->beacon_average_energy[vif_id];
+
+	/* make sure that beacon statistics don't go backwards with TCM
+	 * request to clear statistics
+	 */
+	if (le32_to_cpu(data->flags) & IWL_STATISTICS_REPLY_FLG_CLEAR)
+		mvmvif->beacon_stats.accu_num_beacons +=
+			mvmvif->beacon_stats.num_beacons;
 
 	if (mvmvif->id != id)
 		return;
@@ -583,6 +608,7 @@ static void iwl_mvm_stat_iterator(void *_data, u8 *mac,
 		ieee80211_cqm_rssi_notify(
 			vif,
 			NL80211_CQM_RSSI_THRESHOLD_EVENT_LOW,
+			sig,
 			GFP_KERNEL);
 	} else if (sig > thold &&
 		   (last_event == 0 || sig > last_event + hyst)) {
@@ -592,6 +618,7 @@ static void iwl_mvm_stat_iterator(void *_data, u8 *mac,
 		ieee80211_cqm_rssi_notify(
 			vif,
 			NL80211_CQM_RSSI_THRESHOLD_EVENT_HIGH,
+			sig,
 			GFP_KERNEL);
 	}
 }
@@ -603,14 +630,11 @@ iwl_mvm_rx_stats_check_trigger(struct iwl_mvm *mvm, struct iwl_rx_packet *pkt)
 	struct iwl_fw_dbg_trigger_stats *trig_stats;
 	u32 trig_offset, trig_thold;
 
-	if (!iwl_fw_dbg_trigger_enabled(mvm->fw, FW_DBG_TRIGGER_STATS))
+	trig = iwl_fw_dbg_trigger_on(&mvm->fwrt, NULL, FW_DBG_TRIGGER_STATS);
+	if (!trig)
 		return;
 
-	trig = iwl_fw_dbg_get_trigger(mvm->fw, FW_DBG_TRIGGER_STATS);
 	trig_stats = (void *)trig->data;
-
-	if (!iwl_fw_dbg_trigger_check_stop(mvm, NULL, trig))
-		return;
 
 	trig_offset = le32_to_cpu(trig_stats->stop_offset);
 	trig_thold = le32_to_cpu(trig_stats->stop_threshold);
@@ -621,57 +645,191 @@ iwl_mvm_rx_stats_check_trigger(struct iwl_mvm *mvm, struct iwl_rx_packet *pkt)
 	if (le32_to_cpup((__le32 *) (pkt->data + trig_offset)) < trig_thold)
 		return;
 
-	iwl_mvm_fw_dbg_collect_trig(mvm, trig, NULL);
+	iwl_fw_dbg_collect_trig(&mvm->fwrt, trig, NULL);
+}
+
+static void iwl_mvm_stats_energy_iter(void *_data,
+				      struct ieee80211_sta *sta)
+{
+	struct iwl_mvm_sta *mvmsta = iwl_mvm_sta_from_mac80211(sta);
+	u8 *energy = _data;
+	u32 sta_id = mvmsta->sta_id;
+
+	if (WARN_ONCE(sta_id >= IWL_MVM_STATION_COUNT_MAX, "sta_id %d >= %d",
+		      sta_id, IWL_MVM_STATION_COUNT_MAX))
+		return;
+
+	if (energy[sta_id])
+		mvmsta->avg_energy = energy[sta_id];
+
+}
+
+static void
+iwl_mvm_update_tcm_from_stats(struct iwl_mvm *mvm, __le32 *air_time_le,
+			      __le32 *rx_bytes_le)
+{
+	int i;
+
+	spin_lock(&mvm->tcm.lock);
+	for (i = 0; i < NUM_MAC_INDEX_DRIVER; i++) {
+		struct iwl_mvm_tcm_mac *mdata = &mvm->tcm.data[i];
+		u32 rx_bytes = le32_to_cpu(rx_bytes_le[i]);
+		u32 airtime = le32_to_cpu(air_time_le[i]);
+
+		mdata->rx.airtime += airtime;
+		mdata->uapsd_nonagg_detect.rx_bytes += rx_bytes;
+		if (airtime) {
+			/* re-init every time to store rate from FW */
+			ewma_rate_init(&mdata->uapsd_nonagg_detect.rate);
+			ewma_rate_add(&mdata->uapsd_nonagg_detect.rate,
+				      rx_bytes * 8 / airtime);
+		}
+	}
+	spin_unlock(&mvm->tcm.lock);
+}
+
+static void
+iwl_mvm_handle_rx_statistics_tlv(struct iwl_mvm *mvm,
+				 struct iwl_rx_packet *pkt)
+{
+	struct iwl_mvm_stat_data data = {
+		.mvm = mvm,
+	};
+	u8 beacon_average_energy[MAC_INDEX_AUX];
+	u8 average_energy[IWL_MVM_STATION_COUNT_MAX];
+	struct iwl_statistics_operational_ntfy *stats;
+	int expected_size;
+	__le32 flags;
+	int i;
+
+	expected_size = sizeof(*stats);
+	if (WARN_ONCE(iwl_rx_packet_payload_len(pkt) < expected_size,
+		      "received invalid statistics size (%d)!, expected_size: %d\n",
+		      iwl_rx_packet_payload_len(pkt), expected_size))
+		return;
+
+	stats = (void *)&pkt->data;
+
+	if (WARN_ONCE(stats->hdr.type != FW_STATISTICS_OPERATIONAL ||
+		      stats->hdr.version !=
+		      iwl_fw_lookup_notif_ver(mvm->fw, LONG_GROUP, STATISTICS_CMD, 0),
+		      "received unsupported hdr type %d, version %d\n",
+		      stats->hdr.type, stats->hdr.version))
+		return;
+
+	flags = stats->flags;
+	mvm->radio_stats.rx_time = le64_to_cpu(stats->rx_time);
+	mvm->radio_stats.tx_time = le64_to_cpu(stats->tx_time);
+	mvm->radio_stats.on_time_rf = le64_to_cpu(stats->on_time_rf);
+	mvm->radio_stats.on_time_scan = le64_to_cpu(stats->on_time_scan);
+
+	iwl_mvm_rx_stats_check_trigger(mvm, pkt);
+
+	data.mac_id = stats->mac_id;
+	data.beacon_filter_average_energy =
+		le32_to_cpu(stats->beacon_filter_average_energy);
+	data.flags = flags;
+	data.beacon_counter = stats->beacon_counter;
+	for (i = 0; i < ARRAY_SIZE(beacon_average_energy); i++)
+		beacon_average_energy[i] =
+			le32_to_cpu(stats->beacon_average_energy[i]);
+
+	data.beacon_average_energy = beacon_average_energy;
+
+	ieee80211_iterate_active_interfaces(mvm->hw,
+					    IEEE80211_IFACE_ITER_NORMAL,
+					    iwl_mvm_stat_iterator,
+					    &data);
+
+	for (i = 0; i < ARRAY_SIZE(average_energy); i++)
+		average_energy[i] = le32_to_cpu(stats->average_energy[i]);
+	ieee80211_iterate_stations_atomic(mvm->hw, iwl_mvm_stats_energy_iter,
+					  average_energy);
+	/*
+	 * Don't update in case the statistics are not cleared, since
+	 * we will end up counting twice the same airtime, once in TCM
+	 * request and once in statistics notification.
+	 */
+	if (le32_to_cpu(flags) & IWL_STATISTICS_REPLY_FLG_CLEAR)
+		iwl_mvm_update_tcm_from_stats(mvm, stats->air_time,
+					      stats->rx_bytes);
 }
 
 void iwl_mvm_handle_rx_statistics(struct iwl_mvm *mvm,
 				  struct iwl_rx_packet *pkt)
 {
-	struct iwl_notif_statistics_v11 *stats = (void *)&pkt->data;
 	struct iwl_mvm_stat_data data = {
 		.mvm = mvm,
 	};
-	int expected_size = iwl_mvm_has_new_rx_api(mvm) ? sizeof(*stats) :
-			    sizeof(struct iwl_notif_statistics_v10);
-	u32 temperature;
+	__le32 *bytes, *air_time, flags;
+	int expected_size;
+	u8 *energy;
 
-	if (iwl_rx_packet_payload_len(pkt) != expected_size)
-		goto invalid;
+	/* From ver 14 and up we use TLV statistics format */
+	if (iwl_fw_lookup_notif_ver(mvm->fw, LONG_GROUP,
+				    STATISTICS_CMD, 0) >= 14)
+		return iwl_mvm_handle_rx_statistics_tlv(mvm, pkt);
 
-	temperature = le32_to_cpu(stats->general.radio_temperature);
-	data.mac_id = stats->rx.general.mac_id;
-	data.beacon_filter_average_energy =
-		stats->general.beacon_filter_average_energy;
-
-	iwl_mvm_update_rx_statistics(mvm, &stats->rx);
-
-	mvm->radio_stats.rx_time = le64_to_cpu(stats->general.rx_time);
-	mvm->radio_stats.tx_time = le64_to_cpu(stats->general.tx_time);
-	mvm->radio_stats.on_time_rf =
-		le64_to_cpu(stats->general.on_time_rf);
-	mvm->radio_stats.on_time_scan =
-		le64_to_cpu(stats->general.on_time_scan);
-
-	data.general = &stats->general;
-	if (iwl_mvm_has_new_rx_api(mvm)) {
-		int i;
-
-		data.load = &stats->load_stats;
-
-		rcu_read_lock();
-		for (i = 0; i < IWL_MVM_STATION_COUNT; i++) {
-			struct iwl_mvm_sta *sta;
-
-			if (!data.load->avg_energy[i])
-				continue;
-
-			sta = iwl_mvm_sta_from_staid_rcu(mvm, i);
-			if (!sta)
-				continue;
-			sta->avg_energy = data.load->avg_energy[i];
-		}
-		rcu_read_unlock();
+	if (!iwl_mvm_has_new_rx_stats_api(mvm)) {
+		if (iwl_mvm_has_new_rx_api(mvm))
+			expected_size = sizeof(struct iwl_notif_statistics_v11);
+		else
+			expected_size = sizeof(struct iwl_notif_statistics_v10);
+	} else {
+		expected_size = sizeof(struct iwl_notif_statistics);
 	}
+
+	if (WARN_ONCE(iwl_rx_packet_payload_len(pkt) != expected_size,
+		      "received invalid statistics size (%d)!\n",
+		      iwl_rx_packet_payload_len(pkt)))
+		return;
+
+	if (!iwl_mvm_has_new_rx_stats_api(mvm)) {
+		struct iwl_notif_statistics_v11 *stats = (void *)&pkt->data;
+
+		data.mac_id = stats->rx.general.mac_id;
+		data.beacon_filter_average_energy =
+			stats->general.common.beacon_filter_average_energy;
+
+		mvm->rx_stats_v3 = stats->rx;
+
+		mvm->radio_stats.rx_time =
+			le64_to_cpu(stats->general.common.rx_time);
+		mvm->radio_stats.tx_time =
+			le64_to_cpu(stats->general.common.tx_time);
+		mvm->radio_stats.on_time_rf =
+			le64_to_cpu(stats->general.common.on_time_rf);
+		mvm->radio_stats.on_time_scan =
+			le64_to_cpu(stats->general.common.on_time_scan);
+
+		data.beacon_counter = stats->general.beacon_counter;
+		data.beacon_average_energy =
+			stats->general.beacon_average_energy;
+		flags = stats->flag;
+	} else {
+		struct iwl_notif_statistics *stats = (void *)&pkt->data;
+
+		data.mac_id = stats->rx.general.mac_id;
+		data.beacon_filter_average_energy =
+			stats->general.common.beacon_filter_average_energy;
+
+		mvm->rx_stats = stats->rx;
+
+		mvm->radio_stats.rx_time =
+			le64_to_cpu(stats->general.common.rx_time);
+		mvm->radio_stats.tx_time =
+			le64_to_cpu(stats->general.common.tx_time);
+		mvm->radio_stats.on_time_rf =
+			le64_to_cpu(stats->general.common.on_time_rf);
+		mvm->radio_stats.on_time_scan =
+			le64_to_cpu(stats->general.common.on_time_scan);
+
+		data.beacon_counter = stats->general.beacon_counter;
+		data.beacon_average_energy =
+			stats->general.beacon_average_energy;
+		flags = stats->flag;
+	}
+	data.flags = flags;
 
 	iwl_mvm_rx_stats_check_trigger(mvm, pkt);
 
@@ -679,10 +837,34 @@ void iwl_mvm_handle_rx_statistics(struct iwl_mvm *mvm,
 					    IEEE80211_IFACE_ITER_NORMAL,
 					    iwl_mvm_stat_iterator,
 					    &data);
-	return;
- invalid:
-	IWL_ERR(mvm, "received invalid statistics size (%d)!\n",
-		iwl_rx_packet_payload_len(pkt));
+
+	if (!iwl_mvm_has_new_rx_api(mvm))
+		return;
+
+	if (!iwl_mvm_has_new_rx_stats_api(mvm)) {
+		struct iwl_notif_statistics_v11 *v11 = (void *)&pkt->data;
+
+		energy = (void *)&v11->load_stats.avg_energy;
+		bytes = (void *)&v11->load_stats.byte_count;
+		air_time = (void *)&v11->load_stats.air_time;
+	} else {
+		struct iwl_notif_statistics *stats = (void *)&pkt->data;
+
+		energy = (void *)&stats->load_stats.avg_energy;
+		bytes = (void *)&stats->load_stats.byte_count;
+		air_time = (void *)&stats->load_stats.air_time;
+	}
+	ieee80211_iterate_stations_atomic(mvm->hw, iwl_mvm_stats_energy_iter,
+					  energy);
+
+	/*
+	 * Don't update in case the statistics are not cleared, since
+	 * we will end up counting twice the same airtime, once in TCM
+	 * request and once in statistics notification.
+	 */
+	if (le32_to_cpu(flags) & IWL_STATISTICS_REPLY_FLG_CLEAR)
+		iwl_mvm_update_tcm_from_stats(mvm, air_time, bytes);
+
 }
 
 void iwl_mvm_rx_statistics(struct iwl_mvm *mvm, struct iwl_rx_cmd_buffer *rxb)
@@ -696,12 +878,11 @@ void iwl_mvm_window_status_notif(struct iwl_mvm *mvm,
 	struct iwl_rx_packet *pkt = rxb_addr(rxb);
 	struct iwl_ba_window_status_notif *notif = (void *)pkt->data;
 	int i;
-	u32 pkt_len = iwl_rx_packet_payload_len(pkt);
 
-	if (WARN_ONCE(pkt_len != sizeof(*notif),
-		      "Received window status notification of wrong size (%u)\n",
-		      pkt_len))
-		return;
+	BUILD_BUG_ON(ARRAY_SIZE(notif->ra_tid) != BA_WINDOW_STREAMS_MAX);
+	BUILD_BUG_ON(ARRAY_SIZE(notif->mpdu_rx_count) != BA_WINDOW_STREAMS_MAX);
+	BUILD_BUG_ON(ARRAY_SIZE(notif->bitmap) != BA_WINDOW_STREAMS_MAX);
+	BUILD_BUG_ON(ARRAY_SIZE(notif->start_seq_num) != BA_WINDOW_STREAMS_MAX);
 
 	rcu_read_lock();
 	for (i = 0; i < BA_WINDOW_STREAMS_MAX; i++) {

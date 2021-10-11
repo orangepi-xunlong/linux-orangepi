@@ -1,22 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * This file is provided under the GPLv2 license.
- *
- * GPL LICENSE SUMMARY
- *
  * Copyright(c) 2014 Intel Mobile Communications GmbH
  * Copyright(c) 2015 Intel Deutschland GmbH
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * The full GNU General Public License is included in this distribution
- * in the file called COPYING.
  *
  * Contact Information:
  *  Intel Linux Wireless <ilw@linux.intel.com>
@@ -138,7 +123,7 @@ static int devcd_free(struct device *dev, void *data)
 static ssize_t disabled_show(struct class *class, struct class_attribute *attr,
 			     char *buf)
 {
-	return sprintf(buf, "%d\n", devcd_disabled);
+	return sysfs_emit(buf, "%d\n", devcd_disabled);
 }
 
 static ssize_t disabled_store(struct class *class, struct class_attribute *attr,
@@ -160,33 +145,26 @@ static ssize_t disabled_store(struct class *class, struct class_attribute *attr,
 
 	return count;
 }
+static CLASS_ATTR_RW(disabled);
 
-static struct class_attribute devcd_class_attrs[] = {
-	__ATTR_RW(disabled),
-	__ATTR_NULL
+static struct attribute *devcd_class_attrs[] = {
+	&class_attr_disabled.attr,
+	NULL,
 };
+ATTRIBUTE_GROUPS(devcd_class);
 
 static struct class devcd_class = {
 	.name		= "devcoredump",
 	.owner		= THIS_MODULE,
 	.dev_release	= devcd_dev_release,
 	.dev_groups	= devcd_dev_groups,
-	.class_attrs	= devcd_class_attrs,
+	.class_groups	= devcd_class_groups,
 };
 
 static ssize_t devcd_readv(char *buffer, loff_t offset, size_t count,
 			   void *data, size_t datalen)
 {
-	if (offset > datalen)
-		return -EINVAL;
-
-	if (offset + count > datalen)
-		count = datalen - offset;
-
-	if (count)
-		memcpy(buffer, ((u8 *)data) + offset, count);
-
-	return count;
+	return memory_read_from_buffer(buffer, count, &offset, data, datalen);
 }
 
 static void devcd_freev(void *data)
@@ -224,7 +202,7 @@ static int devcd_match_failing(struct device *dev, const void *failing)
  * NOTE: if two tables allocated with devcd_alloc_sgtable and then chained
  * using the sg_chain function then that function should be called only once
  * on the chained table
- * @table: pointer to sg_table to free
+ * @data: pointer to sg_table to free
  */
 static void devcd_free_sgtable(void *data)
 {
@@ -232,7 +210,7 @@ static void devcd_free_sgtable(void *data)
 }
 
 /**
- * devcd_read_from_table - copy data from sg_table to a given buffer
+ * devcd_read_from_sgtable - copy data from sg_table to a given buffer
  * and return the number of bytes read
  * @buffer: the buffer to copy the data to it
  * @buf_len: the length of the buffer
@@ -314,13 +292,16 @@ void dev_coredumpm(struct device *dev, struct module *owner,
 	if (device_add(&devcd->devcd_dev))
 		goto put_device;
 
+	/*
+	 * These should normally not fail, but there is no problem
+	 * continuing without the links, so just warn instead of
+	 * failing.
+	 */
 	if (sysfs_create_link(&devcd->devcd_dev.kobj, &dev->kobj,
-			      "failing_device"))
-		/* nothing - symlink will be missing */;
-
-	if (sysfs_create_link(&dev->kobj, &devcd->devcd_dev.kobj,
-			      "devcoredump"))
-		/* nothing - symlink will be missing */;
+			      "failing_device") ||
+	    sysfs_create_link(&dev->kobj, &devcd->devcd_dev.kobj,
+		              "devcoredump"))
+		dev_warn(dev, "devcoredump create_link failed\n");
 
 	INIT_DELAYED_WORK(&devcd->del_wk, devcd_del);
 	schedule_delayed_work(&devcd->del_wk, DEVCD_TIMEOUT);
@@ -336,7 +317,7 @@ void dev_coredumpm(struct device *dev, struct module *owner,
 EXPORT_SYMBOL_GPL(dev_coredumpm);
 
 /**
- * dev_coredumpmsg - create device coredump that uses scatterlist as data
+ * dev_coredumpsg - create device coredump that uses scatterlist as data
  * parameter
  * @dev: the struct device for the crashed device
  * @table: the dump data

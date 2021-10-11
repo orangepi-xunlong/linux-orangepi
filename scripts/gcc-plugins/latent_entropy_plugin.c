@@ -125,11 +125,7 @@ static tree handle_latent_entropy_attribute(tree *node, tree name,
 						bool *no_add_attrs)
 {
 	tree type;
-#if BUILDING_GCC_VERSION <= 4007
-	VEC(constructor_elt, gc) *vals;
-#else
 	vec<constructor_elt, va_gc> *vals;
-#endif
 
 	switch (TREE_CODE(*node)) {
 	default:
@@ -181,11 +177,7 @@ static tree handle_latent_entropy_attribute(tree *node, tree name,
 			if (fld)
 				break;
 
-#if BUILDING_GCC_VERSION <= 4007
-			vals = VEC_alloc(constructor_elt, gc, nelt);
-#else
 			vec_alloc(vals, nelt);
-#endif
 
 			for (fld = lst; fld; fld = TREE_CHAIN(fld)) {
 				tree random_const, fld_t = TREE_TYPE(fld);
@@ -225,11 +217,7 @@ static tree handle_latent_entropy_attribute(tree *node, tree name,
 			elt_size_int = TREE_INT_CST_LOW(elt_size);
 			nelt = array_size_int / elt_size_int;
 
-#if BUILDING_GCC_VERSION <= 4007
-			vals = VEC_alloc(constructor_elt, gc, nelt);
-#else
 			vec_alloc(vals, nelt);
-#endif
 
 			for (i = 0; i < nelt; i++) {
 				tree cst = size_int(i);
@@ -255,21 +243,14 @@ static tree handle_latent_entropy_attribute(tree *node, tree name,
 	return NULL_TREE;
 }
 
-static struct attribute_spec latent_entropy_attr = {
-	.name				= "latent_entropy",
-	.min_length			= 0,
-	.max_length			= 0,
-	.decl_required			= true,
-	.type_required			= false,
-	.function_type_required		= false,
-	.handler			= handle_latent_entropy_attribute,
-#if BUILDING_GCC_VERSION >= 4007
-	.affects_type_identity		= false
-#endif
-};
+static struct attribute_spec latent_entropy_attr = { };
 
 static void register_attributes(void *event_data __unused, void *data __unused)
 {
+	latent_entropy_attr.name		= "latent_entropy";
+	latent_entropy_attr.decl_required	= true;
+	latent_entropy_attr.handler		= handle_latent_entropy_attribute;
+
 	register_attribute(&latent_entropy_attr);
 }
 
@@ -543,7 +524,7 @@ static unsigned int latent_entropy_execute(void)
 	while (bb != EXIT_BLOCK_PTR_FOR_FN(cfun)) {
 		perturb_local_entropy(bb, local_entropy);
 		bb = bb->next_bb;
-	};
+	}
 
 	/* 4. mix local entropy into the global entropy variable */
 	perturb_latent_entropy(local_entropy);
@@ -592,12 +573,6 @@ __visible int plugin_init(struct plugin_name_args *plugin_info,
 	const struct plugin_argument * const argv = plugin_info->argv;
 	int i;
 
-	struct register_pass_info latent_entropy_pass_info;
-
-	latent_entropy_pass_info.pass		= make_latent_entropy_pass();
-	latent_entropy_pass_info.reference_pass_name		= "optimized";
-	latent_entropy_pass_info.ref_pass_instance_number	= 1;
-	latent_entropy_pass_info.pos_op		= PASS_POS_INSERT_BEFORE;
 	static const struct ggc_root_tab gt_ggc_r_gt_latent_entropy[] = {
 		{
 			.base = &latent_entropy_decl,
@@ -609,6 +584,8 @@ __visible int plugin_init(struct plugin_name_args *plugin_info,
 		LAST_GGC_ROOT_TAB
 	};
 
+	PASS_INFO(latent_entropy, "optimized", 1, PASS_POS_INSERT_BEFORE);
+
 	if (!plugin_default_version_check(version, &gcc_version)) {
 		error(G_("incompatible gcc/plugin versions"));
 		return 1;
@@ -619,7 +596,7 @@ __visible int plugin_init(struct plugin_name_args *plugin_info,
 			enabled = false;
 			continue;
 		}
-		error(G_("unkown option '-fplugin-arg-%s-%s'"), plugin_name, argv[i].key);
+		error(G_("unknown option '-fplugin-arg-%s-%s'"), plugin_name, argv[i].key);
 	}
 
 	register_callback(plugin_name, PLUGIN_INFO, NULL,

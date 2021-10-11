@@ -1,20 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * tps65910.c  --  TI TPS6591x
+ * tps65910.c  --  TI TPS6591x chip family multi-function driver
  *
  * Copyright 2010 Texas Instruments Inc.
  *
  * Author: Graeme Gregory <gg@slimlogic.co.uk>
  * Author: Jorge Eduardo Candelaria <jedu@slimlogic.co.uk>
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under  the terms of the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the License, or (at your
- *  option) any later version.
- *
  */
 
-#include <linux/module.h>
-#include <linux/moduleparam.h>
 #include <linux/init.h>
 #include <linux/err.h>
 #include <linux/slab.h>
@@ -28,7 +21,7 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 
-static struct resource rtc_resources[] = {
+static const struct resource rtc_resources[] = {
 	{
 		.start  = TPS65910_IRQ_RTC_ALARM,
 		.end    = TPS65910_IRQ_RTC_ALARM,
@@ -229,7 +222,7 @@ static struct regmap_irq_chip tps65910_irq_chip = {
 static int tps65910_irq_init(struct tps65910 *tps65910, int irq,
 		    struct tps65910_platform_data *pdata)
 {
-	int ret = 0;
+	int ret;
 	static struct regmap_irq_chip *tps6591x_irqs_chip;
 
 	if (!irq) {
@@ -299,8 +292,8 @@ static int tps65910_ck32k_init(struct tps65910 *tps65910,
 	if (!pmic_pdata->en_ck32k_xtal)
 		return 0;
 
-	ret = tps65910_reg_clear_bits(tps65910, TPS65910_DEVCTRL,
-						DEVCTRL_CK32K_CTRL_MASK);
+	ret = regmap_clear_bits(tps65910->regmap, TPS65910_DEVCTRL,
+				DEVCTRL_CK32K_CTRL_MASK);
 	if (ret < 0) {
 		dev_err(tps65910->dev, "clear ck32k_ctrl failed: %d\n", ret);
 		return ret;
@@ -312,50 +305,46 @@ static int tps65910_ck32k_init(struct tps65910 *tps65910,
 static int tps65910_sleepinit(struct tps65910 *tps65910,
 		struct tps65910_board *pmic_pdata)
 {
-	struct device *dev = NULL;
-	int ret = 0;
-
-	dev = tps65910->dev;
+	struct device *dev;
+	int ret;
 
 	if (!pmic_pdata->en_dev_slp)
 		return 0;
 
+	dev = tps65910->dev;
+
 	/* enabling SLEEP device state */
-	ret = tps65910_reg_set_bits(tps65910, TPS65910_DEVCTRL,
-				DEVCTRL_DEV_SLP_MASK);
+	ret = regmap_set_bits(tps65910->regmap, TPS65910_DEVCTRL,
+			      DEVCTRL_DEV_SLP_MASK);
 	if (ret < 0) {
 		dev_err(dev, "set dev_slp failed: %d\n", ret);
 		goto err_sleep_init;
 	}
 
-	/* Return if there is no sleep keepon data. */
-	if (!pmic_pdata->slp_keepon)
-		return 0;
-
-	if (pmic_pdata->slp_keepon->therm_keepon) {
-		ret = tps65910_reg_set_bits(tps65910,
-				TPS65910_SLEEP_KEEP_RES_ON,
-				SLEEP_KEEP_RES_ON_THERM_KEEPON_MASK);
+	if (pmic_pdata->slp_keepon.therm_keepon) {
+		ret = regmap_set_bits(tps65910->regmap,
+				      TPS65910_SLEEP_KEEP_RES_ON,
+				      SLEEP_KEEP_RES_ON_THERM_KEEPON_MASK);
 		if (ret < 0) {
 			dev_err(dev, "set therm_keepon failed: %d\n", ret);
 			goto disable_dev_slp;
 		}
 	}
 
-	if (pmic_pdata->slp_keepon->clkout32k_keepon) {
-		ret = tps65910_reg_set_bits(tps65910,
-				TPS65910_SLEEP_KEEP_RES_ON,
-				SLEEP_KEEP_RES_ON_CLKOUT32K_KEEPON_MASK);
+	if (pmic_pdata->slp_keepon.clkout32k_keepon) {
+		ret = regmap_set_bits(tps65910->regmap,
+				      TPS65910_SLEEP_KEEP_RES_ON,
+				      SLEEP_KEEP_RES_ON_CLKOUT32K_KEEPON_MASK);
 		if (ret < 0) {
 			dev_err(dev, "set clkout32k_keepon failed: %d\n", ret);
 			goto disable_dev_slp;
 		}
 	}
 
-	if (pmic_pdata->slp_keepon->i2chs_keepon) {
-		ret = tps65910_reg_set_bits(tps65910,
-				TPS65910_SLEEP_KEEP_RES_ON,
-				SLEEP_KEEP_RES_ON_I2CHS_KEEPON_MASK);
+	if (pmic_pdata->slp_keepon.i2chs_keepon) {
+		ret = regmap_set_bits(tps65910->regmap,
+				      TPS65910_SLEEP_KEEP_RES_ON,
+				      SLEEP_KEEP_RES_ON_I2CHS_KEEPON_MASK);
 		if (ret < 0) {
 			dev_err(dev, "set i2chs_keepon failed: %d\n", ret);
 			goto disable_dev_slp;
@@ -365,8 +354,8 @@ static int tps65910_sleepinit(struct tps65910 *tps65910,
 	return 0;
 
 disable_dev_slp:
-	tps65910_reg_clear_bits(tps65910, TPS65910_DEVCTRL,
-				DEVCTRL_DEV_SLP_MASK);
+	regmap_clear_bits(tps65910->regmap, TPS65910_DEVCTRL,
+			  DEVCTRL_DEV_SLP_MASK);
 
 err_sleep_init:
 	return ret;
@@ -378,7 +367,6 @@ static const struct of_device_id tps65910_of_match[] = {
 	{ .compatible = "ti,tps65911", .data = (void *)TPS65911},
 	{ },
 };
-MODULE_DEVICE_TABLE(of, tps65910_of_match);
 
 static struct tps65910_board *tps65910_parse_dt(struct i2c_client *client,
 						unsigned long *chip_id)
@@ -387,7 +375,7 @@ static struct tps65910_board *tps65910_parse_dt(struct i2c_client *client,
 	struct tps65910_board *board_info;
 	unsigned int prop;
 	const struct of_device_id *match;
-	int ret = 0;
+	int ret;
 
 	match = of_match_device(tps65910_of_match, &client->dev);
 	if (!match) {
@@ -399,10 +387,8 @@ static struct tps65910_board *tps65910_parse_dt(struct i2c_client *client,
 
 	board_info = devm_kzalloc(&client->dev, sizeof(*board_info),
 			GFP_KERNEL);
-	if (!board_info) {
-		dev_err(&client->dev, "Failed to allocate pdata\n");
+	if (!board_info)
 		return NULL;
-	}
 
 	ret = of_property_read_u32(np, "ti,vmbch-threshold", &prop);
 	if (!ret)
@@ -414,6 +400,18 @@ static struct tps65910_board *tps65910_parse_dt(struct i2c_client *client,
 
 	prop = of_property_read_bool(np, "ti,en-ck32k-xtal");
 	board_info->en_ck32k_xtal = prop;
+
+	prop = of_property_read_bool(np, "ti,sleep-enable");
+	board_info->en_dev_slp = prop;
+
+	prop = of_property_read_bool(np, "ti,sleep-keep-therm");
+	board_info->slp_keepon.therm_keepon = prop;
+
+	prop = of_property_read_bool(np, "ti,sleep-keep-ck32k");
+	board_info->slp_keepon.clkout32k_keepon = prop;
+
+	prop = of_property_read_bool(np, "ti,sleep-keep-hsclk");
+	board_info->slp_keepon.i2chs_keepon = prop;
 
 	board_info->irq = client->irq;
 	board_info->irq_base = -1;
@@ -438,12 +436,18 @@ static void tps65910_power_off(void)
 
 	tps65910 = dev_get_drvdata(&tps65910_i2c_client->dev);
 
-	if (tps65910_reg_set_bits(tps65910, TPS65910_DEVCTRL,
-			DEVCTRL_PWR_OFF_MASK) < 0)
+	/*
+	 * The PWR_OFF bit needs to be set separately, before transitioning
+	 * to the OFF state. It enables the "sequential" power-off mode on
+	 * TPS65911, it's a NO-OP on TPS65910.
+	 */
+	if (regmap_set_bits(tps65910->regmap, TPS65910_DEVCTRL,
+			    DEVCTRL_PWR_OFF_MASK) < 0)
 		return;
 
-	tps65910_reg_clear_bits(tps65910, TPS65910_DEVCTRL,
-			DEVCTRL_DEV_ON_MASK);
+	regmap_update_bits(tps65910->regmap, TPS65910_DEVCTRL,
+			   DEVCTRL_DEV_OFF_MASK | DEVCTRL_DEV_ON_MASK,
+			   DEVCTRL_DEV_OFF_MASK);
 }
 
 static int tps65910_i2c_probe(struct i2c_client *i2c,
@@ -454,7 +458,7 @@ static int tps65910_i2c_probe(struct i2c_client *i2c,
 	struct tps65910_board *of_pmic_plat_data = NULL;
 	struct tps65910_platform_data *init_data;
 	unsigned long chip_id = id->driver_data;
-	int ret = 0;
+	int ret;
 
 	pmic_plat_data = dev_get_platdata(&i2c->dev);
 
@@ -521,8 +525,6 @@ static const struct i2c_device_id tps65910_i2c_id[] = {
        { "tps65911", TPS65911 },
        { }
 };
-MODULE_DEVICE_TABLE(i2c, tps65910_i2c_id);
-
 
 static struct i2c_driver tps65910_i2c_driver = {
 	.driver = {
@@ -539,14 +541,3 @@ static int __init tps65910_i2c_init(void)
 }
 /* init early so consumer devices can complete system boot */
 subsys_initcall(tps65910_i2c_init);
-
-static void __exit tps65910_i2c_exit(void)
-{
-	i2c_del_driver(&tps65910_i2c_driver);
-}
-module_exit(tps65910_i2c_exit);
-
-MODULE_AUTHOR("Graeme Gregory <gg@slimlogic.co.uk>");
-MODULE_AUTHOR("Jorge Eduardo Candelaria <jedu@slimlogic.co.uk>");
-MODULE_DESCRIPTION("TPS6591x chip family multi-function driver");
-MODULE_LICENSE("GPL");

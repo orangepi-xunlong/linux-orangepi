@@ -254,7 +254,7 @@ static int  ni65_lance_reinit(struct net_device *dev);
 static void ni65_init_lance(struct priv *p,unsigned char*,int,int);
 static netdev_tx_t ni65_send_packet(struct sk_buff *skb,
 				    struct net_device *dev);
-static void  ni65_timeout(struct net_device *dev);
+static void  ni65_timeout(struct net_device *dev, unsigned int txqueue);
 static int  ni65_close(struct net_device *dev);
 static int  ni65_alloc_buffer(struct net_device *dev);
 static void ni65_free_buffer(struct priv *p);
@@ -407,7 +407,6 @@ static const struct net_device_ops ni65_netdev_ops = {
 	.ndo_start_xmit		= ni65_send_packet,
 	.ndo_tx_timeout		= ni65_timeout,
 	.ndo_set_rx_mode	= set_multicast_list,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -436,10 +435,8 @@ static int __init ni65_probe1(struct net_device *dev,int ioaddr)
 		}
 		if(cards[i].vendor_id) {
 			for(j=0;j<3;j++)
-				if(inb(ioaddr+cards[i].addr_offset+j) != cards[i].vendor_id[j]) {
+				if(inb(ioaddr+cards[i].addr_offset+j) != cards[i].vendor_id[j])
 					release_region(ioaddr, cards[i].total_size);
-					continue;
-			  }
 		}
 		break;
 	}
@@ -700,16 +697,14 @@ static void ni65_free_buffer(struct priv *p)
 	for(i=0;i<TMDNUM;i++) {
 		kfree(p->tmdbounce[i]);
 #ifdef XMT_VIA_SKB
-		if(p->tmd_skb[i])
-			dev_kfree_skb(p->tmd_skb[i]);
+		dev_kfree_skb(p->tmd_skb[i]);
 #endif
 	}
 
 	for(i=0;i<RMDNUM;i++)
 	{
 #ifdef RCV_VIA_SKB
-		if(p->recv_skb[i])
-			dev_kfree_skb(p->recv_skb[i]);
+		dev_kfree_skb(p->recv_skb[i]);
 #else
 		kfree(p->recvbounce[i]);
 #endif
@@ -1031,7 +1026,7 @@ static void ni65_xmit_intr(struct net_device *dev,int csr0)
 
 #ifdef XMT_VIA_SKB
 		if(p->tmd_skb[p->tmdlast]) {
-			 dev_kfree_skb_irq(p->tmd_skb[p->tmdlast]);
+			 dev_consume_skb_irq(p->tmd_skb[p->tmdlast]);
 			 p->tmd_skb[p->tmdlast] = NULL;
 		}
 #endif
@@ -1138,7 +1133,7 @@ static void ni65_recv_intr(struct net_device *dev,int csr0)
  * kick xmitter ..
  */
 
-static void ni65_timeout(struct net_device *dev)
+static void ni65_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	int i;
 	struct priv *p = dev->ml_priv;
@@ -1228,9 +1223,9 @@ static void set_multicast_list(struct net_device *dev)
 #ifdef MODULE
 static struct net_device *dev_ni65;
 
-module_param(irq, int, 0);
-module_param(io, int, 0);
-module_param(dma, int, 0);
+module_param_hw(irq, int, irq, 0);
+module_param_hw(io, int, ioport, 0);
+module_param_hw(dma, int, dma, 0);
 MODULE_PARM_DESC(irq, "ni6510 IRQ number (ignored for some cards)");
 MODULE_PARM_DESC(io, "ni6510 I/O base address");
 MODULE_PARM_DESC(dma, "ni6510 ISA DMA channel (ignored for some cards)");

@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * FireWire Serial driver
  *
  * Copyright (C) 2012 Peter Hurley <peter@hurleysoftware.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -28,7 +19,10 @@
 
 #include "fwserial.h"
 
-#define be32_to_u64(hi, lo)  ((u64)be32_to_cpu(hi) << 32 | be32_to_cpu(lo))
+inline u64 be32_to_u64(__be32 hi, __be32 lo)
+{
+	return ((u64)be32_to_cpu(hi) << 32 | be32_to_cpu(lo));
+}
 
 #define LINUX_VENDOR_ID   0xd00d1eU  /* same id used in card root directory   */
 #define FWSERIAL_VERSION  0x00e81cU  /* must be unique within LINUX_VENDOR_ID */
@@ -46,7 +40,7 @@ module_param_named(loop, create_loop_dev, bool, 0644);
 /*
  * Threshold below which the tty is woken for writing
  * - should be equal to WAKEUP_CHARS in drivers/tty/n_tty.c because
- *   even if the writer is woken, n_tty_poll() won't set POLLOUT until
+ *   even if the writer is woken, n_tty_poll() won't set EPOLLOUT until
  *   our fifo is below this level
  */
 #define WAKEUP_CHARS             256
@@ -215,13 +209,6 @@ static void fwtty_log_tx_error(struct fwtty_port *port, int rcode)
 	default:
 		fwtty_err_ratelimited(port, "failed tx: %d\n", rcode);
 	}
-}
-
-static void fwtty_txn_constructor(void *this)
-{
-	struct fwtty_transaction *txn = this;
-
-	init_timer(&txn->fw_txn.split_timeout_timer);
 }
 
 static void fwtty_common_callback(struct fw_card *card, int rcode,
@@ -479,7 +466,7 @@ static void fwtty_throttle_port(struct fwtty_port *port)
  * fwtty_do_hangup - wait for ldisc to deliver all pending rx; only then hangup
  *
  * When the remote has finished tx, and all in-flight rx has been received and
- * and pushed to the flip buffer, the remote may close its device. This will
+ * pushed to the flip buffer, the remote may close its device. This will
  * drop DTR on the remote which will drop carrier here. Typically, the tty is
  * hung up when carrier is dropped or lost.
  *
@@ -1225,42 +1212,40 @@ static int wait_msr_change(struct fwtty_port *port, unsigned long mask)
 					check_msr_delta(port, mask, &prev));
 }
 
-static int get_serial_info(struct fwtty_port *port,
-			   struct serial_struct __user *info)
+static int get_serial_info(struct tty_struct *tty,
+			   struct serial_struct *ss)
 {
-	struct serial_struct tmp;
+	struct fwtty_port *port = tty->driver_data;
 
-	memset(&tmp, 0, sizeof(tmp));
+	mutex_lock(&port->port.mutex);
+	ss->line = port->index;
+	ss->baud_base = 400000000;
+	ss->close_delay = jiffies_to_msecs(port->port.close_delay) / 10;
+	ss->closing_wait = 3000;
+	mutex_unlock(&port->port.mutex);
 
-	tmp.type =  PORT_UNKNOWN;
-	tmp.line =  port->port.tty->index;
-	tmp.flags = port->port.flags;
-	tmp.xmit_fifo_size = FWTTY_PORT_TXFIFO_LEN;
-	tmp.baud_base = 400000000;
-	tmp.close_delay = port->port.close_delay;
-
-	return (copy_to_user(info, &tmp, sizeof(*info))) ? -EFAULT : 0;
+	return 0;
 }
 
-static int set_serial_info(struct fwtty_port *port,
-			   struct serial_struct __user *info)
+static int set_serial_info(struct tty_struct *tty,
+			   struct serial_struct *ss)
 {
-	struct serial_struct tmp;
+	struct fwtty_port *port = tty->driver_data;
+	unsigned int cdelay;
 
-	if (copy_from_user(&tmp, info, sizeof(tmp)))
-		return -EFAULT;
+	cdelay = msecs_to_jiffies(ss->close_delay * 10);
 
-	if (tmp.irq != 0 || tmp.port != 0 || tmp.custom_divisor != 0 ||
-	    tmp.baud_base != 400000000)
-		return -EPERM;
-
+	mutex_lock(&port->port.mutex);
 	if (!capable(CAP_SYS_ADMIN)) {
-		if (((tmp.flags & ~ASYNC_USR_MASK) !=
-		     (port->port.flags & ~ASYNC_USR_MASK)))
+		if (cdelay != port->port.close_delay ||
+		    ((ss->flags & ~ASYNC_USR_MASK) !=
+		     (port->port.flags & ~ASYNC_USR_MASK))) {
+			mutex_unlock(&port->port.mutex);
 			return -EPERM;
-	} else {
-		port->port.close_delay = tmp.close_delay * HZ / 100;
+		}
 	}
+	port->port.close_delay = cdelay;
+	mutex_unlock(&port->port.mutex);
 
 	return 0;
 }
@@ -1272,18 +1257,6 @@ static int fwtty_ioctl(struct tty_struct *tty, unsigned int cmd,
 	int err;
 
 	switch (cmd) {
-	case TIOCGSERIAL:
-		mutex_lock(&port->port.mutex);
-		err = get_serial_info(port, (void __user *)arg);
-		mutex_unlock(&port->port.mutex);
-		break;
-
-	case TIOCSSERIAL:
-		mutex_lock(&port->port.mutex);
-		err = set_serial_info(port, (void __user *)arg);
-		mutex_unlock(&port->port.mutex);
-		break;
-
 	case TIOCMIWAIT:
 		err = wait_msr_change(port, arg);
 		break;
@@ -1344,8 +1317,8 @@ static int fwtty_break_ctl(struct tty_struct *tty, int state)
 	if (state == -1) {
 		set_bit(STOP_TX, &port->flags);
 		ret = wait_event_interruptible_timeout(port->wait_tx,
-					       !test_bit(IN_TX, &port->flags),
-					       10);
+						       !test_bit(IN_TX, &port->flags),
+						       10);
 		if (ret == 0 || ret == -ERESTARTSYS) {
 			clear_bit(STOP_TX, &port->flags);
 			fwtty_restart_tx(port);
@@ -1488,7 +1461,7 @@ static int fwtty_proc_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-static int fwtty_debugfs_stats_show(struct seq_file *m, void *v)
+static int fwtty_stats_show(struct seq_file *m, void *v)
 {
 	struct fw_serial *serial = m->private;
 	struct fwtty_port *port;
@@ -1506,8 +1479,9 @@ static int fwtty_debugfs_stats_show(struct seq_file *m, void *v)
 	}
 	return 0;
 }
+DEFINE_SHOW_ATTRIBUTE(fwtty_stats);
 
-static int fwtty_debugfs_peers_show(struct seq_file *m, void *v)
+static int fwtty_peers_show(struct seq_file *m, void *v)
 {
 	struct fw_serial *serial = m->private;
 	struct fwtty_peer *peer;
@@ -1521,45 +1495,7 @@ static int fwtty_debugfs_peers_show(struct seq_file *m, void *v)
 	rcu_read_unlock();
 	return 0;
 }
-
-static int fwtty_proc_open(struct inode *inode, struct file *fp)
-{
-	return single_open(fp, fwtty_proc_show, NULL);
-}
-
-static int fwtty_stats_open(struct inode *inode, struct file *fp)
-{
-	return single_open(fp, fwtty_debugfs_stats_show, inode->i_private);
-}
-
-static int fwtty_peers_open(struct inode *inode, struct file *fp)
-{
-	return single_open(fp, fwtty_debugfs_peers_show, inode->i_private);
-}
-
-static const struct file_operations fwtty_stats_fops = {
-	.owner =	THIS_MODULE,
-	.open =		fwtty_stats_open,
-	.read =		seq_read,
-	.llseek =	seq_lseek,
-	.release =	single_release,
-};
-
-static const struct file_operations fwtty_peers_fops = {
-	.owner =	THIS_MODULE,
-	.open =		fwtty_peers_open,
-	.read =		seq_read,
-	.llseek =	seq_lseek,
-	.release =	single_release,
-};
-
-static const struct file_operations fwtty_proc_fops = {
-	.owner =        THIS_MODULE,
-	.open =         fwtty_proc_open,
-	.read =         seq_read,
-	.llseek =       seq_lseek,
-	.release =      single_release,
-};
+DEFINE_SHOW_ATTRIBUTE(fwtty_peers);
 
 static const struct tty_port_operations fwtty_port_ops = {
 	.dtr_rts =		fwtty_port_dtr_rts,
@@ -1586,7 +1522,9 @@ static const struct tty_operations fwtty_ops = {
 	.tiocmget =		fwtty_tiocmget,
 	.tiocmset =		fwtty_tiocmset,
 	.get_icount =		fwtty_get_icount,
-	.proc_fops =		&fwtty_proc_fops,
+	.set_serial =		set_serial_info,
+	.get_serial =		get_serial_info,
+	.proc_show =		fwtty_proc_show,
 };
 
 static const struct tty_operations fwloop_ops = {
@@ -1607,6 +1545,8 @@ static const struct tty_operations fwloop_ops = {
 	.tiocmget =		fwtty_tiocmget,
 	.tiocmset =		fwtty_tiocmset,
 	.get_icount =		fwtty_get_icount,
+	.set_serial =		set_serial_info,
+	.get_serial =		get_serial_info,
 };
 
 static inline int mgmt_pkt_expected_len(__be16 code)
@@ -1664,12 +1604,6 @@ static inline void fill_plug_rsp_ok(struct fwserial_mgmt_pkt *pkt,
 static inline void fill_plug_rsp_nack(struct fwserial_mgmt_pkt *pkt)
 {
 	pkt->hdr.code = cpu_to_be16(FWSC_VIRT_CABLE_PLUG_RSP | FWSC_RSP_NACK);
-	pkt->hdr.len = cpu_to_be16(mgmt_pkt_expected_len(pkt->hdr.code));
-}
-
-static inline void fill_unplug_req(struct fwserial_mgmt_pkt *pkt)
-{
-	pkt->hdr.code = cpu_to_be16(FWSC_VIRT_CABLE_UNPLUG);
 	pkt->hdr.len = cpu_to_be16(mgmt_pkt_expected_len(pkt->hdr.code));
 }
 
@@ -1812,9 +1746,9 @@ static void fwserial_release_port(struct fwtty_port *port, bool reset)
 		(*port->fwcon_ops->notify)(FWCON_NOTIFY_DETACH, port->con_data);
 }
 
-static void fwserial_plug_timeout(unsigned long data)
+static void fwserial_plug_timeout(struct timer_list *t)
 {
-	struct fwtty_peer *peer = (struct fwtty_peer *)data;
+	struct fwtty_peer *peer = from_timer(peer, t, timer);
 	struct fwtty_port *port;
 
 	spin_lock_bh(&peer->lock);
@@ -1866,7 +1800,6 @@ static int fwserial_connect_peer(struct fwtty_peer *peer)
 
 	fill_plug_req(pkt, peer->port);
 
-	setup_timer(&peer->timer, fwserial_plug_timeout, (unsigned long)peer);
 	mod_timer(&peer->timer, jiffies + VIRT_CABLE_PLUG_TIMEOUT);
 	spin_unlock_bh(&peer->lock);
 
@@ -2104,7 +2037,7 @@ static int fwserial_add_peer(struct fw_serial *serial, struct fw_unit *unit)
 	spin_lock_init(&peer->lock);
 	peer->port = NULL;
 
-	init_timer(&peer->timer);
+	timer_setup(&peer->timer, fwserial_plug_timeout, 0);
 	INIT_WORK(&peer->work, fwserial_peer_workfn);
 	INIT_DELAYED_WORK(&peer->connect, fwserial_auto_connect);
 
@@ -2255,6 +2188,7 @@ static int fwserial_create(struct fw_unit *unit)
 		err = fw_core_add_address_handler(&port->rx_handler,
 						  &fw_high_memory_region);
 		if (err) {
+			tty_port_destroy(&port->port);
 			kfree(port);
 			goto free_ports;
 		}
@@ -2337,6 +2271,7 @@ unregister_ttys:
 
 free_ports:
 	for (--i; i >= 0; --i) {
+		fw_core_remove_address_handler(&serial->ports[i]->rx_handler);
 		tty_port_destroy(&serial->ports[i]->port);
 		kfree(serial->ports[i]);
 	}
@@ -2696,7 +2631,7 @@ static int fwserial_parse_mgmt_write(struct fwtty_peer *peer,
 
 	rcode = RCODE_COMPLETE;
 
-	fwtty_dbg(&peer->unit, "mgmt: hdr.code: %04hx\n", pkt->hdr.code);
+	fwtty_dbg(&peer->unit, "mgmt: hdr.code: %04x\n", pkt->hdr.code);
 
 	switch (be16_to_cpu(pkt->hdr.code) & FWSC_CODE_MASK) {
 	case FWSC_VIRT_CABLE_PLUG:
@@ -2869,7 +2804,7 @@ static int __init fwserial_init(void)
 
 	fwtty_txn_cache = kmem_cache_create("fwtty_txn_cache",
 					    sizeof(struct fwtty_transaction),
-					    0, 0, fwtty_txn_constructor);
+					    0, 0, NULL);
 	if (!fwtty_txn_cache) {
 		err = -ENOMEM;
 		goto unregister_loop;

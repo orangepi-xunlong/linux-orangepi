@@ -2316,26 +2316,3 @@ void rtl8822b_phy_bf_sounding_status(PADAPTER adapter, u8 status)
 }
 #endif /* CONFIG_BEAMFORMING */
 
-#ifdef CONFIG_LPS_PWR_TRACKING
-void rtw_lps_pwr_tracking(_adapter *adapter, u8 thermal_value)
-{
-	#ifdef CONFIG_LPS
-	u8 lps_changed = 0;
-
-	if (adapter_to_pwrctl(adapter)->bLeisurePs &&
-		adapter_to_pwrctl(adapter)->bFwCurrentInPSMode &&
-		adapter_to_pwrctl(adapter)->pwr_mode != PS_MODE_ACTIVE)
-		lps_changed = _TRUE;
-		LPS_Leave(adapter, "LPS_CTRL_TXSS");
-
-	rtw_phydm_pwr_tracking_directly(adapter);
-
-	if (lps_changed)
-		LPS_Enter(adapter, "LPS_CTRL_TXSS");
-	#endif
-
-	thermal_value += THERMAL_DIFF_TH;
-	rtl8822b_set_fw_thermal_rpt_cmd(adapter, _TRUE, thermal_value);
-}
-#endif
-

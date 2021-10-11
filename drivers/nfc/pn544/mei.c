@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * HCI based Driver for NXP pn544 NFC Chip
- *
  * Copyright (C) 2013  Intel Corporation. All rights reserved.
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ * HCI based Driver for NXP pn544 NFC Chip
  */
 
 #include <linux/module.h>
@@ -53,7 +42,7 @@ static int pn544_mei_probe(struct mei_cl_device *cldev,
 	return 0;
 }
 
-static int pn544_mei_remove(struct mei_cl_device *cldev)
+static void pn544_mei_remove(struct mei_cl_device *cldev)
 {
 	struct nfc_mei_phy *phy = mei_cldev_get_drvdata(cldev);
 
@@ -62,8 +51,6 @@ static int pn544_mei_remove(struct mei_cl_device *cldev)
 	pn544_hci_remove(phy->hdev);
 
 	nfc_mei_phy_free(phy);
-
-	return 0;
 }
 
 static struct mei_cl_device_id pn544_mei_tbl[] = {
@@ -82,28 +69,7 @@ static struct mei_cl_driver pn544_driver = {
 	.remove = pn544_mei_remove,
 };
 
-static int pn544_mei_init(void)
-{
-	int r;
-
-	pr_debug(DRIVER_DESC ": %s\n", __func__);
-
-	r = mei_cldev_driver_register(&pn544_driver);
-	if (r) {
-		pr_err(PN544_DRIVER_NAME ": driver registration failed\n");
-		return r;
-	}
-
-	return 0;
-}
-
-static void pn544_mei_exit(void)
-{
-	mei_cldev_driver_unregister(&pn544_driver);
-}
-
-module_init(pn544_mei_init);
-module_exit(pn544_mei_exit);
+module_mei_cl_driver(pn544_driver);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION(DRIVER_DESC);

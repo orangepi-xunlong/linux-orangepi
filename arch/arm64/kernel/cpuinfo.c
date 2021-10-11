@@ -1,24 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Record and handle CPU attributes.
  *
  * Copyright (C) 2014 ARM Ltd.
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include <asm/arch_timer.h>
-#include <asm/cachetype.h>
+#include <asm/cache.h>
 #include <asm/cpu.h>
 #include <asm/cputype.h>
 #include <asm/cpufeature.h>
+#include <asm/fpsimd.h>
 
 #include <linux/bitops.h>
 #include <linux/bug.h>
@@ -42,64 +33,103 @@
 DEFINE_PER_CPU(struct cpuinfo_arm64, cpu_data);
 static struct cpuinfo_arm64 boot_cpu_data;
 
-static char *icache_policy_str[] = {
-	[ICACHE_POLICY_RESERVED] = "RESERVED/UNKNOWN",
-	[ICACHE_POLICY_AIVIVT] = "AIVIVT",
-	[ICACHE_POLICY_VIPT] = "VIPT",
-	[ICACHE_POLICY_PIPT] = "PIPT",
+static const char *icache_policy_str[] = {
+	[ICACHE_POLICY_VPIPT]		= "VPIPT",
+	[ICACHE_POLICY_RESERVED]	= "RESERVED/UNKNOWN",
+	[ICACHE_POLICY_VIPT]		= "VIPT",
+	[ICACHE_POLICY_PIPT]		= "PIPT",
 };
 
 unsigned long __icache_flags;
 
 static const char *const hwcap_str[] = {
-	"fp",
-	"asimd",
-	"evtstrm",
-	"aes",
-	"pmull",
-	"sha1",
-	"sha2",
-	"crc32",
-	"atomics",
-	"fphp",
-	"asimdhp",
-	NULL
+	[KERNEL_HWCAP_FP]		= "fp",
+	[KERNEL_HWCAP_ASIMD]		= "asimd",
+	[KERNEL_HWCAP_EVTSTRM]		= "evtstrm",
+	[KERNEL_HWCAP_AES]		= "aes",
+	[KERNEL_HWCAP_PMULL]		= "pmull",
+	[KERNEL_HWCAP_SHA1]		= "sha1",
+	[KERNEL_HWCAP_SHA2]		= "sha2",
+	[KERNEL_HWCAP_CRC32]		= "crc32",
+	[KERNEL_HWCAP_ATOMICS]		= "atomics",
+	[KERNEL_HWCAP_FPHP]		= "fphp",
+	[KERNEL_HWCAP_ASIMDHP]		= "asimdhp",
+	[KERNEL_HWCAP_CPUID]		= "cpuid",
+	[KERNEL_HWCAP_ASIMDRDM]		= "asimdrdm",
+	[KERNEL_HWCAP_JSCVT]		= "jscvt",
+	[KERNEL_HWCAP_FCMA]		= "fcma",
+	[KERNEL_HWCAP_LRCPC]		= "lrcpc",
+	[KERNEL_HWCAP_DCPOP]		= "dcpop",
+	[KERNEL_HWCAP_SHA3]		= "sha3",
+	[KERNEL_HWCAP_SM3]		= "sm3",
+	[KERNEL_HWCAP_SM4]		= "sm4",
+	[KERNEL_HWCAP_ASIMDDP]		= "asimddp",
+	[KERNEL_HWCAP_SHA512]		= "sha512",
+	[KERNEL_HWCAP_SVE]		= "sve",
+	[KERNEL_HWCAP_ASIMDFHM]		= "asimdfhm",
+	[KERNEL_HWCAP_DIT]		= "dit",
+	[KERNEL_HWCAP_USCAT]		= "uscat",
+	[KERNEL_HWCAP_ILRCPC]		= "ilrcpc",
+	[KERNEL_HWCAP_FLAGM]		= "flagm",
+	[KERNEL_HWCAP_SSBS]		= "ssbs",
+	[KERNEL_HWCAP_SB]		= "sb",
+	[KERNEL_HWCAP_PACA]		= "paca",
+	[KERNEL_HWCAP_PACG]		= "pacg",
+	[KERNEL_HWCAP_DCPODP]		= "dcpodp",
+	[KERNEL_HWCAP_SVE2]		= "sve2",
+	[KERNEL_HWCAP_SVEAES]		= "sveaes",
+	[KERNEL_HWCAP_SVEPMULL]		= "svepmull",
+	[KERNEL_HWCAP_SVEBITPERM]	= "svebitperm",
+	[KERNEL_HWCAP_SVESHA3]		= "svesha3",
+	[KERNEL_HWCAP_SVESM4]		= "svesm4",
+	[KERNEL_HWCAP_FLAGM2]		= "flagm2",
+	[KERNEL_HWCAP_FRINT]		= "frint",
+	[KERNEL_HWCAP_SVEI8MM]		= "svei8mm",
+	[KERNEL_HWCAP_SVEF32MM]		= "svef32mm",
+	[KERNEL_HWCAP_SVEF64MM]		= "svef64mm",
+	[KERNEL_HWCAP_SVEBF16]		= "svebf16",
+	[KERNEL_HWCAP_I8MM]		= "i8mm",
+	[KERNEL_HWCAP_BF16]		= "bf16",
+	[KERNEL_HWCAP_DGH]		= "dgh",
+	[KERNEL_HWCAP_RNG]		= "rng",
+	[KERNEL_HWCAP_BTI]		= "bti",
+	[KERNEL_HWCAP_MTE]		= "mte",
 };
 
 #ifdef CONFIG_COMPAT
+#define COMPAT_KERNEL_HWCAP(x)	const_ilog2(COMPAT_HWCAP_ ## x)
 static const char *const compat_hwcap_str[] = {
-	"swp",
-	"half",
-	"thumb",
-	"26bit",
-	"fastmult",
-	"fpa",
-	"vfp",
-	"edsp",
-	"java",
-	"iwmmxt",
-	"crunch",
-	"thumbee",
-	"neon",
-	"vfpv3",
-	"vfpv3d16",
-	"tls",
-	"vfpv4",
-	"idiva",
-	"idivt",
-	"vfpd32",
-	"lpae",
-	"evtstrm",
-	NULL
+	[COMPAT_KERNEL_HWCAP(SWP)]	= "swp",
+	[COMPAT_KERNEL_HWCAP(HALF)]	= "half",
+	[COMPAT_KERNEL_HWCAP(THUMB)]	= "thumb",
+	[COMPAT_KERNEL_HWCAP(26BIT)]	= NULL,	/* Not possible on arm64 */
+	[COMPAT_KERNEL_HWCAP(FAST_MULT)] = "fastmult",
+	[COMPAT_KERNEL_HWCAP(FPA)]	= NULL,	/* Not possible on arm64 */
+	[COMPAT_KERNEL_HWCAP(VFP)]	= "vfp",
+	[COMPAT_KERNEL_HWCAP(EDSP)]	= "edsp",
+	[COMPAT_KERNEL_HWCAP(JAVA)]	= NULL,	/* Not possible on arm64 */
+	[COMPAT_KERNEL_HWCAP(IWMMXT)]	= NULL,	/* Not possible on arm64 */
+	[COMPAT_KERNEL_HWCAP(CRUNCH)]	= NULL,	/* Not possible on arm64 */
+	[COMPAT_KERNEL_HWCAP(THUMBEE)]	= NULL,	/* Not possible on arm64 */
+	[COMPAT_KERNEL_HWCAP(NEON)]	= "neon",
+	[COMPAT_KERNEL_HWCAP(VFPv3)]	= "vfpv3",
+	[COMPAT_KERNEL_HWCAP(VFPV3D16)]	= NULL,	/* Not possible on arm64 */
+	[COMPAT_KERNEL_HWCAP(TLS)]	= "tls",
+	[COMPAT_KERNEL_HWCAP(VFPv4)]	= "vfpv4",
+	[COMPAT_KERNEL_HWCAP(IDIVA)]	= "idiva",
+	[COMPAT_KERNEL_HWCAP(IDIVT)]	= "idivt",
+	[COMPAT_KERNEL_HWCAP(VFPD32)]	= NULL,	/* Not possible on arm64 */
+	[COMPAT_KERNEL_HWCAP(LPAE)]	= "lpae",
+	[COMPAT_KERNEL_HWCAP(EVTSTRM)]	= "evtstrm",
 };
 
+#define COMPAT_KERNEL_HWCAP2(x)	const_ilog2(COMPAT_HWCAP2_ ## x)
 static const char *const compat_hwcap2_str[] = {
-	"aes",
-	"pmull",
-	"sha1",
-	"sha2",
-	"crc32",
-	NULL
+	[COMPAT_KERNEL_HWCAP2(AES)]	= "aes",
+	[COMPAT_KERNEL_HWCAP2(PMULL)]	= "pmull",
+	[COMPAT_KERNEL_HWCAP2(SHA1)]	= "sha1",
+	[COMPAT_KERNEL_HWCAP2(SHA2)]	= "sha2",
+	[COMPAT_KERNEL_HWCAP2(CRC32)]	= "crc32",
 };
 #endif /* CONFIG_COMPAT */
 
@@ -118,6 +148,8 @@ static int c_show(struct seq_file *m, void *v)
 		 * "processor".  Give glibc what it expects.
 		 */
 		seq_printf(m, "processor\t: %d\n", i);
+                seq_printf(m, "Processor\t: AArch64 Processor rev %d (aarch64)\n", MIDR_REVISION(midr));
+                seq_printf(m, "Hardware\t: sun50iw1p1\n");
 		if (compat)
 			seq_printf(m, "model name\t: ARMv8 Processor rev %d (%s)\n",
 				   MIDR_REVISION(midr), COMPAT_ELF_PLATFORM);
@@ -135,17 +167,26 @@ static int c_show(struct seq_file *m, void *v)
 		seq_puts(m, "Features\t:");
 		if (compat) {
 #ifdef CONFIG_COMPAT
-			for (j = 0; compat_hwcap_str[j]; j++)
-				if (compat_elf_hwcap & (1 << j))
-					seq_printf(m, " %s", compat_hwcap_str[j]);
+			for (j = 0; j < ARRAY_SIZE(compat_hwcap_str); j++) {
+				if (compat_elf_hwcap & (1 << j)) {
+					/*
+					 * Warn once if any feature should not
+					 * have been present on arm64 platform.
+					 */
+					if (WARN_ON_ONCE(!compat_hwcap_str[j]))
+						continue;
 
-			for (j = 0; compat_hwcap2_str[j]; j++)
+					seq_printf(m, " %s", compat_hwcap_str[j]);
+				}
+			}
+
+			for (j = 0; j < ARRAY_SIZE(compat_hwcap2_str); j++)
 				if (compat_elf_hwcap2 & (1 << j))
 					seq_printf(m, " %s", compat_hwcap2_str[j]);
 #endif /* CONFIG_COMPAT */
 		} else {
-			for (j = 0; hwcap_str[j]; j++)
-				if (elf_hwcap & (1 << j))
+			for (j = 0; j < ARRAY_SIZE(hwcap_str); j++)
+				if (cpu_have_feature(j))
 					seq_printf(m, " %s", hwcap_str[j]);
 		}
 		seq_puts(m, "\n");
@@ -222,12 +263,12 @@ static struct attribute *cpuregs_id_attrs[] = {
 	NULL
 };
 
-static struct attribute_group cpuregs_attr_group = {
+static const struct attribute_group cpuregs_attr_group = {
 	.attrs = cpuregs_id_attrs,
 	.name = "identification"
 };
 
-static int cpuid_add_regs(int cpu)
+static int cpuid_cpu_online(unsigned int cpu)
 {
 	int rc;
 	struct device *dev;
@@ -248,7 +289,7 @@ out:
 	return rc;
 }
 
-static int cpuid_remove_regs(int cpu)
+static int cpuid_cpu_offline(unsigned int cpu)
 {
 	struct device *dev;
 	struct cpuinfo_arm64 *info = &per_cpu(cpu_data, cpu);
@@ -264,61 +305,43 @@ static int cpuid_remove_regs(int cpu)
 	return 0;
 }
 
-static int cpuid_callback(struct notifier_block *nb,
-			 unsigned long action, void *hcpu)
-{
-	int rc = 0;
-	unsigned long cpu = (unsigned long)hcpu;
-
-	switch (action & ~CPU_TASKS_FROZEN) {
-	case CPU_ONLINE:
-		rc = cpuid_add_regs(cpu);
-		break;
-	case CPU_DEAD:
-		rc = cpuid_remove_regs(cpu);
-		break;
-	}
-
-	return notifier_from_errno(rc);
-}
-
 static int __init cpuinfo_regs_init(void)
 {
-	int cpu;
-
-	cpu_notifier_register_begin();
+	int cpu, ret;
 
 	for_each_possible_cpu(cpu) {
 		struct cpuinfo_arm64 *info = &per_cpu(cpu_data, cpu);
 
 		kobject_init(&info->kobj, &cpuregs_kobj_type);
-		if (cpu_online(cpu))
-			cpuid_add_regs(cpu);
 	}
-	__hotcpu_notifier(cpuid_callback, 0);
 
-	cpu_notifier_register_done();
+	ret = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "arm64/cpuinfo:online",
+				cpuid_cpu_online, cpuid_cpu_offline);
+	if (ret < 0) {
+		pr_err("cpuinfo: failed to register hotplug callbacks.\n");
+		return ret;
+	}
 	return 0;
 }
+device_initcall(cpuinfo_regs_init);
+
 static void cpuinfo_detect_icache_policy(struct cpuinfo_arm64 *info)
 {
 	unsigned int cpu = smp_processor_id();
 	u32 l1ip = CTR_L1IP(info->reg_ctr);
 
-	if (l1ip != ICACHE_POLICY_PIPT) {
-		/*
-		 * VIPT caches are non-aliasing if the VA always equals the PA
-		 * in all bit positions that are covered by the index. This is
-		 * the case if the size of a way (# of sets * line size) does
-		 * not exceed PAGE_SIZE.
-		 */
-		u32 waysize = icache_get_numsets() * icache_get_linesize();
-
-		if (l1ip != ICACHE_POLICY_VIPT || waysize > PAGE_SIZE)
-			set_bit(ICACHEF_ALIASING, &__icache_flags);
+	switch (l1ip) {
+	case ICACHE_POLICY_PIPT:
+		break;
+	case ICACHE_POLICY_VPIPT:
+		set_bit(ICACHEF_VPIPT, &__icache_flags);
+		break;
+	case ICACHE_POLICY_RESERVED:
+	case ICACHE_POLICY_VIPT:
+		/* Assume aliasing */
+		set_bit(ICACHEF_ALIASING, &__icache_flags);
+		break;
 	}
-	if (l1ip == ICACHE_POLICY_AIVIVT)
-		set_bit(ICACHEF_AIVIVT, &__icache_flags);
 
 	pr_info("Detected %s I-cache on CPU%d\n", icache_policy_str[l1ip], cpu);
 }
@@ -326,7 +349,15 @@ static void cpuinfo_detect_icache_policy(struct cpuinfo_arm64 *info)
 static void __cpuinfo_store_cpu(struct cpuinfo_arm64 *info)
 {
 	info->reg_cntfrq = arch_timer_get_cntfrq();
-	info->reg_ctr = read_cpuid_cachetype();
+	/*
+	 * Use the effective value of the CTR_EL0 than the raw value
+	 * exposed by the CPU. CTR_EL0.IDC field value must be interpreted
+	 * with the CLIDR_EL1 fields to avoid triggering false warnings
+	 * when there is a mismatch across the CPUs. Keep track of the
+	 * effective value of the CTR_EL0 in our internal records for
+	 * accurate sanity check and feature enablement.
+	 */
+	info->reg_ctr = read_cpuid_effective_cachetype();
 	info->reg_dczid = read_cpuid(DCZID_EL0);
 	info->reg_midr = read_cpuid_id();
 	info->reg_revidr = read_cpuid(REVIDR_EL1);
@@ -340,27 +371,37 @@ static void __cpuinfo_store_cpu(struct cpuinfo_arm64 *info)
 	info->reg_id_aa64mmfr2 = read_cpuid(ID_AA64MMFR2_EL1);
 	info->reg_id_aa64pfr0 = read_cpuid(ID_AA64PFR0_EL1);
 	info->reg_id_aa64pfr1 = read_cpuid(ID_AA64PFR1_EL1);
+	info->reg_id_aa64zfr0 = read_cpuid(ID_AA64ZFR0_EL1);
 
 	/* Update the 32bit ID registers only if AArch32 is implemented */
 	if (id_aa64pfr0_32bit_el0(info->reg_id_aa64pfr0)) {
 		info->reg_id_dfr0 = read_cpuid(ID_DFR0_EL1);
+		info->reg_id_dfr1 = read_cpuid(ID_DFR1_EL1);
 		info->reg_id_isar0 = read_cpuid(ID_ISAR0_EL1);
 		info->reg_id_isar1 = read_cpuid(ID_ISAR1_EL1);
 		info->reg_id_isar2 = read_cpuid(ID_ISAR2_EL1);
 		info->reg_id_isar3 = read_cpuid(ID_ISAR3_EL1);
 		info->reg_id_isar4 = read_cpuid(ID_ISAR4_EL1);
 		info->reg_id_isar5 = read_cpuid(ID_ISAR5_EL1);
+		info->reg_id_isar6 = read_cpuid(ID_ISAR6_EL1);
 		info->reg_id_mmfr0 = read_cpuid(ID_MMFR0_EL1);
 		info->reg_id_mmfr1 = read_cpuid(ID_MMFR1_EL1);
 		info->reg_id_mmfr2 = read_cpuid(ID_MMFR2_EL1);
 		info->reg_id_mmfr3 = read_cpuid(ID_MMFR3_EL1);
+		info->reg_id_mmfr4 = read_cpuid(ID_MMFR4_EL1);
+		info->reg_id_mmfr5 = read_cpuid(ID_MMFR5_EL1);
 		info->reg_id_pfr0 = read_cpuid(ID_PFR0_EL1);
 		info->reg_id_pfr1 = read_cpuid(ID_PFR1_EL1);
+		info->reg_id_pfr2 = read_cpuid(ID_PFR2_EL1);
 
 		info->reg_mvfr0 = read_cpuid(MVFR0_EL1);
 		info->reg_mvfr1 = read_cpuid(MVFR1_EL1);
 		info->reg_mvfr2 = read_cpuid(MVFR2_EL1);
 	}
+
+	if (IS_ENABLED(CONFIG_ARM64_SVE) &&
+	    id_aa64pfr0_sve(info->reg_id_aa64pfr0))
+		info->reg_zcr = read_zcr_features();
 
 	cpuinfo_detect_icache_policy(info);
 }
@@ -380,5 +421,3 @@ void __init cpuinfo_store_boot_cpu(void)
 	boot_cpu_data = *info;
 	init_cpu_features(&boot_cpu_data);
 }
-
-device_initcall(cpuinfo_regs_init);

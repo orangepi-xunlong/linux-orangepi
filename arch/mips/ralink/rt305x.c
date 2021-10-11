@@ -1,7 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
  *
  * Parts of this file are based on Ralink's 2.6.21 BSP
  *
@@ -12,8 +10,9 @@
 
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <linux/module.h>
+#include <linux/bug.h>
 
+#include <asm/io.h>
 #include <asm/mipsregs.h>
 #include <asm/mach-ralink/ralink_regs.h>
 #include <asm/mach-ralink/rt305x.h>
@@ -48,6 +47,10 @@ static struct rt2880_pmx_func rgmii_func[] = { FUNC("rgmii", 0, 40, 12) };
 static struct rt2880_pmx_func rt3352_lna_func[] = { FUNC("lna", 0, 36, 2) };
 static struct rt2880_pmx_func rt3352_pa_func[] = { FUNC("pa", 0, 38, 2) };
 static struct rt2880_pmx_func rt3352_led_func[] = { FUNC("led", 0, 40, 5) };
+static struct rt2880_pmx_func rt3352_cs1_func[] = {
+	FUNC("spi_cs1", 0, 45, 1),
+	FUNC("wdg_cs1", 1, 45, 1),
+};
 
 static struct rt2880_pmx_group rt3050_pinmux_data[] = {
 	GRP("i2c", i2c_func, 1, RT305X_GPIO_MODE_I2C),
@@ -74,6 +77,7 @@ static struct rt2880_pmx_group rt3352_pinmux_data[] = {
 	GRP("lna", rt3352_lna_func, 1, RT3352_GPIO_MODE_LNA),
 	GRP("pa", rt3352_pa_func, 1, RT3352_GPIO_MODE_PA),
 	GRP("led", rt3352_led_func, 1, RT5350_GPIO_MODE_PHY_LED),
+	GRP("spi_cs1", rt3352_cs1_func, 2, RT5350_GPIO_MODE_SPI_CS1),
 	{ 0 }
 };
 
@@ -189,6 +193,8 @@ void __init ralink_clk_init(void)
 
 	ralink_clk_add("cpu", cpu_rate);
 	ralink_clk_add("sys", sys_rate);
+	ralink_clk_add("10000900.i2c", uart_rate);
+	ralink_clk_add("10000a00.i2s", uart_rate);
 	ralink_clk_add("10000b00.spi", sys_rate);
 	ralink_clk_add("10000b40.spi", sys_rate);
 	ralink_clk_add("10000100.timer", wdt_rate);
@@ -208,7 +214,7 @@ void __init ralink_of_remap(void)
 		panic("Failed to remap core resources");
 }
 
-void prom_soc_init(struct ralink_soc_info *soc_info)
+void __init prom_soc_init(struct ralink_soc_info *soc_info)
 {
 	void __iomem *sysc = (void __iomem *) KSEG1ADDR(RT305X_SYSC_BASE);
 	unsigned char *name;

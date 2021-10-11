@@ -1185,11 +1185,11 @@ static void construct_mic_iv(
 		mic_iv[1] = mpdu[24] & 0x0f;   /* mute bits 7-4   */
 	if (!qc_exists)
 		mic_iv[1] = 0x00;
-#if defined(CONFIG_IEEE80211W) || defined(CONFIG_RTW_MESH)
+#ifdef CONFIG_IEEE80211W
 	/* 802.11w management frame should set management bit(4) */
 	if (frtype == WIFI_MGT_TYPE)
 		mic_iv[1] |= BIT(4);
-#endif
+#endif /* CONFIG_IEEE80211W */
 	for (i = 2; i < 8; i++)
 		mic_iv[i] = mpdu[i + 8];                    /* mic_iv[2:7] = A2[0:5] = mpdu[10:15] */
 #ifdef CONSISTENT_PN_ORDER
@@ -1219,12 +1219,12 @@ static void construct_mic_header1(
 {
 	mic_header1[0] = (u8)((header_length - 2) / 256);
 	mic_header1[1] = (u8)((header_length - 2) % 256);
-#if defined(CONFIG_IEEE80211W) || defined(CONFIG_RTW_MESH)
+#ifdef CONFIG_IEEE80211W
 	/* 802.11w management frame don't AND subtype bits 4,5,6 of frame control field */
 	if (frtype == WIFI_MGT_TYPE)
 		mic_header1[2] = mpdu[0];
 	else
-#endif
+#endif /* CONFIG_IEEE80211W */
 		mic_header1[2] = mpdu[0] & 0xcf;    /* Mute CF poll & CF ack bits */
 
 	mic_header1[3] = mpdu[1] & 0xc7;    /* Mute retry, more data and pwr mgt bits */
@@ -1320,11 +1320,11 @@ static void construct_ctr_preload(
 		ctr_preload[1] = mpdu[30] & 0x0f;   /* QoC_Control */
 	if (qc_exists && !a4_exists)
 		ctr_preload[1] = mpdu[24] & 0x0f;
-#if defined(CONFIG_IEEE80211W) || defined(CONFIG_RTW_MESH)
+#ifdef CONFIG_IEEE80211W
 	/* 802.11w management frame should set management bit(4) */
 	if (frtype == WIFI_MGT_TYPE)
 		ctr_preload[1] |= BIT(4);
-#endif
+#endif /* CONFIG_IEEE80211W */
 	for (i = 2; i < 8; i++)
 		ctr_preload[i] = mpdu[i + 8];                       /* ctr_preload[2:7] = A2[0:5] = mpdu[10:15] */
 #ifdef CONSISTENT_PN_ORDER
@@ -2033,96 +2033,94 @@ exit:
 }
 
 #ifdef CONFIG_IEEE80211W
-u32	rtw_BIP_verify(_adapter *padapter, u8 *whdr_pos, sint flen
-	, const u8 *key, u16 keyid, u64* ipn)
+u32	rtw_BIP_verify(_adapter *padapter, u8 *precvframe)
 {
-	u8 *BIP_AAD, *mme;
+	struct rx_pkt_attrib *pattrib = &((union recv_frame *)precvframe)->u.hdr.attrib;
+	u8 *pframe;
+	u8 *BIP_AAD, *p;
 	u32	res = _FAIL;
 	uint len, ori_len;
-	u16 pkt_keyid = 0;
-	u64 pkt_ipn = 0;
 	struct rtw_ieee80211_hdr *pwlanhdr;
 	u8 mic[16];
-
-	mme = whdr_pos + flen - 18;
-	if (*mme != _MME_IE_)
-		return RTW_RX_HANDLED;
-
-	/* copy key index */
-	_rtw_memcpy(&pkt_keyid, mme + 2, 2);
-	pkt_keyid = le16_to_cpu(pkt_keyid);
-	if (pkt_keyid != keyid) {
-		RTW_INFO("BIP key index error!\n");
-		return _FAIL;
-	}
-
-	/* save packet number */
-	_rtw_memcpy(&pkt_ipn, mme + 4, 6);
-	pkt_ipn = le64_to_cpu(pkt_ipn);
-	/* BIP packet number should bigger than previous BIP packet */
-	if (pkt_ipn < *ipn) { /* wrap around? */
-		RTW_INFO("replay BIP packet\n");
-		return _FAIL;
-	}
-
-	ori_len = flen - WLAN_HDR_A3_LEN + BIP_AAD_SIZE;
+	struct mlme_ext_priv	*pmlmeext = &padapter->mlmeextpriv;
+	ori_len = pattrib->pkt_len - WLAN_HDR_A3_LEN + BIP_AAD_SIZE;
 	BIP_AAD = rtw_zmalloc(ori_len);
+
 	if (BIP_AAD == NULL) {
 		RTW_INFO("BIP AAD allocate fail\n");
 		return _FAIL;
 	}
-
+	/* PKT start */
+	pframe = (unsigned char *)((union recv_frame *)precvframe)->u.hdr.rx_data;
 	/* mapping to wlan header */
-	pwlanhdr = (struct rtw_ieee80211_hdr *)whdr_pos;
-
+	pwlanhdr = (struct rtw_ieee80211_hdr *)pframe;
 	/* save the frame body + MME */
-	_rtw_memcpy(BIP_AAD + BIP_AAD_SIZE, whdr_pos + WLAN_HDR_A3_LEN, flen - WLAN_HDR_A3_LEN);
+	_rtw_memcpy(BIP_AAD + BIP_AAD_SIZE, pframe + WLAN_HDR_A3_LEN, pattrib->pkt_len - WLAN_HDR_A3_LEN);
+	/* find MME IE pointer */
+	p = rtw_get_ie(BIP_AAD + BIP_AAD_SIZE, _MME_IE_, &len, pattrib->pkt_len - WLAN_HDR_A3_LEN);
+	/* Baron */
+	if (p) {
+		u16 keyid = 0;
+		u64 temp_ipn = 0;
+		/* save packet number */
+		_rtw_memcpy(&temp_ipn, p + 4, 6);
+		temp_ipn = le64_to_cpu(temp_ipn);
+		/* BIP packet number should bigger than previous BIP packet */
+		if (temp_ipn < pmlmeext->mgnt_80211w_IPN_rx) {
+			RTW_INFO("replay BIP packet\n");
+			goto BIP_exit;
+		}
+		/* copy key index */
+		_rtw_memcpy(&keyid, p + 2, 2);
+		keyid = le16_to_cpu(keyid);
+		if (keyid != padapter->securitypriv.dot11wBIPKeyid) {
+			RTW_INFO("BIP key index error!\n");
+			goto BIP_exit;
+		}
+		/* clear the MIC field of MME to zero */
+		_rtw_memset(p + 2 + len - 8, 0, 8);
 
-	/* point mme to the copy */
-	mme = BIP_AAD + ori_len - 18;
+		/* conscruct AAD, copy frame control field */
+		_rtw_memcpy(BIP_AAD, &pwlanhdr->frame_ctl, 2);
+		ClearRetry(BIP_AAD);
+		ClearPwrMgt(BIP_AAD);
+		ClearMData(BIP_AAD);
+		/* conscruct AAD, copy address 1 to address 3 */
+		_rtw_memcpy(BIP_AAD + 2, pwlanhdr->addr1, 18);
 
-	/* clear the MIC field of MME to zero */
-	_rtw_memset(mme + 10, 0, 8);
-
-	/* conscruct AAD, copy frame control field */
-	_rtw_memcpy(BIP_AAD, &pwlanhdr->frame_ctl, 2);
-	ClearRetry(BIP_AAD);
-	ClearPwrMgt(BIP_AAD);
-	ClearMData(BIP_AAD);
-	/* conscruct AAD, copy address 1 to address 3 */
-	_rtw_memcpy(BIP_AAD + 2, pwlanhdr->addr1, 18);
-
-	if (omac1_aes_128(key, BIP_AAD, ori_len, mic))
-		goto BIP_exit;
+		if (omac1_aes_128(padapter->securitypriv.dot11wBIPKey[padapter->securitypriv.dot11wBIPKeyid].skey
+				  , BIP_AAD, ori_len, mic))
+			goto BIP_exit;
 
 #if 0
-	/* management packet content */
-	{
-		int pp;
-		RTW_INFO("pkt: ");
-		for (pp = 0; pp < flen; pp++)
-			printk(" %02x ", whdr_pos[pp]);
-		RTW_INFO("\n");
-		/* BIP AAD + management frame body + MME(MIC is zero) */
-		RTW_INFO("AAD+PKT: ");
-		for (pp = 0; pp < ori_len; pp++)
-			RTW_INFO(" %02x ", BIP_AAD[pp]);
-		RTW_INFO("\n");
-		/* show the MIC result */
-		RTW_INFO("mic: ");
-		for (pp = 0; pp < 16; pp++)
-			RTW_INFO(" %02x ", mic[pp]);
-		RTW_INFO("\n");
-	}
+		/* management packet content */
+		{
+			int pp;
+			RTW_INFO("pkt: ");
+			for (pp = 0; pp < pattrib->pkt_len; pp++)
+				printk(" %02x ", pframe[pp]);
+			RTW_INFO("\n");
+			/* BIP AAD + management frame body + MME(MIC is zero) */
+			RTW_INFO("AAD+PKT: ");
+			for (pp = 0; pp < ori_len; pp++)
+				RTW_INFO(" %02x ", BIP_AAD[pp]);
+			RTW_INFO("\n");
+			/* show the MIC result */
+			RTW_INFO("mic: ");
+			for (pp = 0; pp < 16; pp++)
+				RTW_INFO(" %02x ", mic[pp]);
+			RTW_INFO("\n");
+		}
 #endif
+		/* MIC field should be last 8 bytes of packet (packet without FCS) */
+		if (_rtw_memcmp(mic, pframe + pattrib->pkt_len - 8, 8)) {
+			pmlmeext->mgnt_80211w_IPN_rx = temp_ipn;
+			res = _SUCCESS;
+		} else
+			RTW_INFO("BIP MIC error!\n");
 
-	/* MIC field should be last 8 bytes of packet (packet without FCS) */
-	if (_rtw_memcmp(mic, whdr_pos + flen - 8, 8)) {
-		*ipn = pkt_ipn;
-		res = _SUCCESS;
 	} else
-		RTW_INFO("BIP MIC error!\n");
-
+		res = RTW_RX_HANDLED;
 BIP_exit:
 
 	rtw_mfree(BIP_AAD, ori_len);
@@ -2132,7 +2130,7 @@ BIP_exit:
 
 #ifndef PLATFORM_FREEBSD
 /* compress 512-bits */
-static int sha256_compress(struct sha256_state *md, unsigned char *buf)
+static int sha256_compress(struct sha256_state_rtk *md, unsigned char *buf)
 {
 	u32 S[8], W[64], t0, t1;
 	u32 t;
@@ -2180,7 +2178,7 @@ static int sha256_compress(struct sha256_state *md, unsigned char *buf)
 }
 
 /* Initialize the hash state */
-static void sha256_init(struct sha256_state *md)
+static void sha256_init_rtk(struct sha256_state_rtk *md)
 {
 	md->curlen = 0;
 	md->length = 0;
@@ -2201,7 +2199,7 @@ static void sha256_init(struct sha256_state *md)
    @param inlen  The length of the data (octets)
    @return CRYPT_OK if successful
 */
-static int sha256_process(struct sha256_state *md, unsigned char *in,
+static int sha256_process(struct sha256_state_rtk *md, unsigned char *in,
 			  unsigned long inlen)
 {
 	unsigned long n;
@@ -2242,7 +2240,7 @@ static int sha256_process(struct sha256_state *md, unsigned char *in,
    @param out [out] The destination of the hash (32 bytes)
    @return CRYPT_OK if successful
 */
-static int sha256_done(struct sha256_state *md, unsigned char *out)
+static int sha256_done(struct sha256_state_rtk *md, unsigned char *out)
 {
 	int i;
 
@@ -2292,10 +2290,10 @@ static int sha256_done(struct sha256_state *md, unsigned char *out)
 static int sha256_vector(size_t num_elem, u8 *addr[], size_t *len,
 			 u8 *mac)
 {
-	struct sha256_state ctx;
+	struct sha256_state_rtk ctx;
 	size_t i;
 
-	sha256_init(&ctx);
+	sha256_init_rtk(&ctx);
 	for (i = 0; i < num_elem; i++)
 		if (sha256_process(&ctx, addr[i], len[i]))
 			return -1;
@@ -2720,7 +2718,7 @@ static void rijndaelEncrypt(u32 rk[/*44*/], u8 pt[16], u8 ct[16])
 	PUTU32(ct + 12, s3);
 }
 
-static void *aes_encrypt_init(const u8 *key, size_t len)
+static void *aes_encrypt_init(u8 *key, size_t len)
 {
 	u32 *rk;
 	if (len != 16)
@@ -2770,12 +2768,12 @@ static void aes_encrypt_deinit(void *ctx)
  * OMAC1 was standardized with the name CMAC by NIST in a Special Publication
  * (SP) 800-38B.
  */
-static int omac1_aes_128_vector(const u8 *key, size_t num_elem,
-			 const u8 *addr[], const size_t *len, u8 *mac)
+static int omac1_aes_128_vector(u8 *key, size_t num_elem,
+				u8 *addr[], size_t *len, u8 *mac)
 {
 	void *ctx;
 	u8 cbc[AES_BLOCK_SIZE], pad[AES_BLOCK_SIZE];
-	const u8 *pos, *end;
+	u8 *pos, *end;
 	size_t i, e, left, total_len;
 
 	ctx = aes_encrypt_init(key, 16);
@@ -2843,7 +2841,7 @@ static int omac1_aes_128_vector(const u8 *key, size_t num_elem,
  * OMAC1 was standardized with the name CMAC by NIST in a Special Publication
  * (SP) 800-38B.
  */ /* modify for CONFIG_IEEE80211W */
-int omac1_aes_128(const u8 *key, const u8 *data, size_t data_len, u8 *mac)
+int omac1_aes_128(u8 *key, u8 *data, size_t data_len, u8 *mac)
 {
 	return omac1_aes_128_vector(key, 1, &data, &data_len, mac);
 }

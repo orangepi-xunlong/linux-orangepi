@@ -68,12 +68,10 @@ int rtw_soft_ap = 0;
 			int rtw_lps_level = LPS_NORMAL;
 		#endif
 	#endif/*CONFIG_USB_HCI*/
-	int rtw_lps_chk_by_tp = 1;
 #else /* !CONFIG_POWER_SAVING */
 	int rtw_power_mgnt = PS_MODE_ACTIVE;
 	int rtw_ips_mode = IPS_NONE;
 	int rtw_lps_level = LPS_NORMAL;
-	int rtw_lps_chk_by_tp = 0;
 #endif /* CONFIG_POWER_SAVING */
 
 
@@ -83,17 +81,15 @@ MODULE_PARM_DESC(rtw_ips_mode, "The default IPS mode");
 module_param(rtw_lps_level, int, 0644);
 MODULE_PARM_DESC(rtw_lps_level, "The default LPS level");
 
-module_param(rtw_lps_chk_by_tp, int, 0644);
-
-/* LPS:
+/* LPS: 
  * rtw_smart_ps = 0 => TX: pwr bit = 1, RX: PS_Poll
  * rtw_smart_ps = 1 => TX: pwr bit = 0, RX: PS_Poll
  * rtw_smart_ps = 2 => TX: pwr bit = 0, RX: NullData with pwr bit = 0
 */
 int rtw_smart_ps = 2;
 
-#ifdef CONFIG_WMMPS_STA
-/* WMMPS:
+#ifdef CONFIG_WMMPS_STA	
+/* WMMPS: 
  * rtw_smart_ps = 0 => Only for fw test
  * rtw_smart_ps = 1 => Refer to Beacon's TIM Bitmap
  * rtw_smart_ps = 2 => Don't refer to Beacon's TIM Bitmap
@@ -257,7 +253,11 @@ module_param(rtw_rf_config, int, 0644);
 int rtw_check_hw_status = 0;
 
 int rtw_low_power = 0;
-int rtw_wifi_spec = 0;
+#ifdef CONFIG_WIFI_TEST
+	int rtw_wifi_spec = 1;/* for wifi test */
+#else
+	int rtw_wifi_spec = 0;
+#endif
 
 int rtw_special_rf_path = 0; /* 0: 2T2R ,1: only turn on path A 1T1R */
 
@@ -909,7 +909,6 @@ uint loadparam(_adapter *padapter)
 	registry_par->power_mgnt = (u8)rtw_power_mgnt;
 	registry_par->ips_mode = (u8)rtw_ips_mode;
 	registry_par->lps_level = (u8)rtw_lps_level;
-	registry_par->lps_chk_by_tp = (u8)rtw_lps_chk_by_tp;
 	registry_par->radio_enable = (u8)rtw_radio_enable;
 	registry_par->long_retry_lmt = (u8)rtw_long_retry_lmt;
 	registry_par->short_retry_lmt = (u8)rtw_short_retry_lmt;
@@ -1308,10 +1307,15 @@ unsigned int rtw_classify8021d(struct sk_buff *skb)
 
 
 static u16 rtw_select_queue(struct net_device *dev, struct sk_buff *skb
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0)
-	, void *accel_priv
-	#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0)
-	, select_queue_fallback_t fallback
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0)
+				, struct net_device *sb_dev
+#endif
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0)
+	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0)) && (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0))
+				, void *accel_priv
+	#endif
+	#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0) 
+				, select_queue_fallback_t fallback
 	#endif
 #endif
 )
@@ -1841,52 +1845,40 @@ u32 rtw_start_drv_threads(_adapter *padapter)
 	if (is_primary_adapter(padapter))
 #endif
 	{
-		if (padapter->xmitThread == NULL) {
-			RTW_INFO(FUNC_ADPT_FMT " start RTW_XMIT_THREAD\n", FUNC_ADPT_ARG(padapter));
-			padapter->xmitThread = kthread_run(rtw_xmit_thread, padapter, "RTW_XMIT_THREAD");
-			if (IS_ERR(padapter->xmitThread)) {
-				padapter->xmitThread = NULL;
-				_status = _FAIL;
-			}
+		padapter->xmitThread = kthread_run(rtw_xmit_thread, padapter, "RTW_XMIT_THREAD");
+		if (IS_ERR(padapter->xmitThread)) {
+			padapter->xmitThread = NULL;
+			_status = _FAIL;
 		}
 	}
 #endif /* #ifdef CONFIG_XMIT_THREAD_MODE */
 
 #ifdef CONFIG_RECV_THREAD_MODE
 	if (is_primary_adapter(padapter)) {
-		if (padapter->recvThread == NULL) {
-			RTW_INFO(FUNC_ADPT_FMT " start RTW_RECV_THREAD\n", FUNC_ADPT_ARG(padapter));
-			padapter->recvThread = kthread_run(rtw_recv_thread, padapter, "RTW_RECV_THREAD");
-			if (IS_ERR(padapter->recvThread)) {
-				padapter->recvThread = NULL;
-				_status = _FAIL;
-			}
+		padapter->recvThread = kthread_run(rtw_recv_thread, padapter, "RTW_RECV_THREAD");
+		if (IS_ERR(padapter->recvThread)) {
+			padapter->recvThread = NULL;
+			_status = _FAIL;
 		}
 	}
 #endif
 
 	if (is_primary_adapter(padapter)) {
-		if (padapter->cmdThread == NULL) {
-			RTW_INFO(FUNC_ADPT_FMT " start RTW_CMD_THREAD\n", FUNC_ADPT_ARG(padapter));
-			padapter->cmdThread = kthread_run(rtw_cmd_thread, padapter, "RTW_CMD_THREAD");
-			if (IS_ERR(padapter->cmdThread)) {
-				padapter->cmdThread = NULL;
-				_status = _FAIL;
-			}
-			else
-				_rtw_down_sema(&padapter->cmdpriv.start_cmdthread_sema); /* wait for cmd_thread to run */
+		padapter->cmdThread = kthread_run(rtw_cmd_thread, padapter, "RTW_CMD_THREAD");
+		if (IS_ERR(padapter->cmdThread)) {
+			padapter->cmdThread = NULL;
+			_status = _FAIL;
 		}
+		else
+			_rtw_down_sema(&padapter->cmdpriv.start_cmdthread_sema); /* wait for cmd_thread to run */
 	}
 
 
 #ifdef CONFIG_EVENT_THREAD_MODE
-	if (padapter->evtThread == NULL) {
-		RTW_INFO(FUNC_ADPT_FMT " start RTW_EVENT_THREAD\n", FUNC_ADPT_ARG(padapter));
-		padapter->evtThread = kthread_run(event_thread, padapter, "RTW_EVENT_THREAD");
-		if (IS_ERR(padapter->evtThread)) {
-			padapter->evtThread = NULL;
-			_status = _FAIL;
-		}
+	padapter->evtThread = kthread_run(event_thread, padapter, "RTW_EVENT_THREAD");
+	if (IS_ERR(padapter->evtThread)) {
+		padapter->evtThread = NULL;
+		_status = _FAIL;
 	}
 #endif
 
@@ -2102,13 +2094,6 @@ struct dvobj_priv *devobj_init(void)
 #endif /* CONFIG_RTW_NAPI_DYNAMIC */
 
 
-#ifdef CONFIG_RTW_TPT_MODE
-	pdvobj->tpt_mode = 0;
-	pdvobj->edca_be_ul = 0x5ea42b;
-	pdvobj->edca_be_dl = 0x00a42b;
-#endif
-	pdvobj->scan_deny = _FALSE;
-
 	return pdvobj;
 
 }
@@ -2249,9 +2234,7 @@ u8 rtw_init_drv_sw(_adapter *padapter)
 
 	u8	ret8 = _SUCCESS;
 
-#ifdef CONFIG_RTW_CFGVENDOR_RANDOM_MAC_OUI
-	struct rtw_wdev_priv *pwdev_priv = adapter_wdev_data(padapter);
-#endif
+
 
 	_rtw_init_listhead(&padapter->list);
 
@@ -2386,10 +2369,6 @@ u8 rtw_init_drv_sw(_adapter *padapter)
 
 #ifdef CONFIG_RTW_REPEATER_SON
 	init_rtw_rson_data(adapter_to_dvobj(padapter));
-#endif
-
-#ifdef CONFIG_RTW_CFGVENDOR_RANDOM_MAC_OUI
-	memset(pwdev_priv->pno_mac_addr, 0xFF, ETH_ALEN);
 #endif
 
 exit:
@@ -3527,11 +3506,11 @@ static int netdev_close(struct net_device *pnetdev)
 #ifndef CONFIG_ANDROID
 		/* s2. */
 		LeaveAllPowerSaveMode(padapter);
-		rtw_disassoc_cmd(padapter, 500, RTW_CMDF_WAIT_ACK);
+		rtw_disassoc_cmd(padapter, 500, RTW_CMDF_DIRECTLY);
 		/* s2-2.  indicate disconnect to os */
 		rtw_indicate_disconnect(padapter, 0, _FALSE);
 		/* s2-3. */
-		rtw_free_assoc_resources_cmd(padapter, _TRUE, RTW_CMDF_WAIT_ACK);
+		rtw_free_assoc_resources(padapter, 1);
 		/* s2-4. */
 		rtw_free_network_queue(padapter, _TRUE);
 #endif
@@ -4024,7 +4003,7 @@ int rtw_suspend_free_assoc_resource(_adapter *padapter)
 #endif
 
 	/* s2-3. */
-	rtw_free_assoc_resources(padapter, _TRUE);
+	rtw_free_assoc_resources(padapter, 1);
 
 	/* s2-4. */
 #ifdef CONFIG_AUTOSUSPEND
@@ -4513,7 +4492,7 @@ int rtw_resume_process_wow(_adapter *padapter)
 					 rtw_get_stainfo(&padapter->stapriv,
 					 get_bssid(&padapter->mlmepriv)), 0);
 
-			rtw_free_assoc_resources(padapter, _TRUE);
+			rtw_free_assoc_resources(padapter, 1);
 			pmlmeinfo->state = WIFI_FW_NULL_STATE;
 
 		} else {

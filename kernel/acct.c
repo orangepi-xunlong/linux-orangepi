@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/kernel/acct.c
  *
@@ -24,7 +25,7 @@
  *  Now we silently close acct_file on attempt to reopen. Cleaned sys_acct().
  *  XTerms and EMACS are manifestations of pure evil. 21/10/98, AV.
  *
- *  Fixed a nasty interaction with with sys_umount(). If the accointing
+ *  Fixed a nasty interaction with sys_umount(). If the accounting
  *  was suspeneded we failed to stop it on umount(). Messy.
  *  Another one: remount to readonly didn't stop accounting.
  *	Question: what should we do if we have CAP_SYS_ADMIN but not
@@ -39,7 +40,7 @@
  *  is one more bug... 10/11/98, AV.
  *
  *	Oh, fsck... Oopsable SMP race in do_process_acct() - we must hold
- * ->mmap_sem to walk the vma list of current->mm. Nasty, since it leaks
+ * ->mmap_lock to walk the vma list of current->mm. Nasty, since it leaks
  * a struct file opened for write. Fixed. 2/6/2000, AV.
  */
 
@@ -56,6 +57,8 @@
 #include <linux/syscalls.h>
 #include <linux/mount.h>
 #include <linux/uaccess.h>
+#include <linux/sched/cputime.h>
+
 #include <asm/div64.h>
 #include <linux/blkdev.h> /* sector_div */
 #include <linux/pid_namespace.h>
@@ -144,7 +147,7 @@ static struct bsd_acct_struct *acct_get(struct pid_namespace *ns)
 again:
 	smp_rmb();
 	rcu_read_lock();
-	res = to_acct(ACCESS_ONCE(ns->bacct));
+	res = to_acct(READ_ONCE(ns->bacct));
 	if (!res) {
 		rcu_read_unlock();
 		return NULL;
@@ -156,7 +159,7 @@ again:
 	}
 	rcu_read_unlock();
 	mutex_lock(&res->lock);
-	if (res != to_acct(ACCESS_ONCE(ns->bacct))) {
+	if (res != to_acct(READ_ONCE(ns->bacct))) {
 		mutex_unlock(&res->lock);
 		acct_put(res);
 		goto again;
@@ -224,7 +227,7 @@ static int acct_on(struct filename *pathname)
 		filp_close(file, NULL);
 		return PTR_ERR(internal);
 	}
-	err = mnt_want_write(internal);
+	err = __mnt_want_write(internal);
 	if (err) {
 		mntput(internal);
 		kfree(acct);
@@ -249,7 +252,7 @@ static int acct_on(struct filename *pathname)
 	old = xchg(&ns->bacct, &acct->pin);
 	mutex_unlock(&acct->lock);
 	pin_kill(old);
-	mnt_drop_write(mnt);
+	__mnt_drop_write(mnt);
 	mntput(mnt);
 	return 0;
 }
@@ -260,12 +263,12 @@ static DEFINE_MUTEX(acct_on_mutex);
  * sys_acct - enable/disable process accounting
  * @name: file name for accounting records or NULL to shutdown accounting
  *
- * Returns 0 for success or negative errno values for failure.
- *
  * sys_acct() is the only system call needed to implement process
  * accounting. It takes the name of the file where accounting records
  * should be written. If the filename is NULL, accounting will be
  * shutdown.
+ *
+ * Returns: 0 for success or negative errno values for failure.
  */
 SYSCALL_DEFINE1(acct, const char __user *, name)
 {
@@ -378,9 +381,7 @@ static comp2_t encode_comp2_t(u64 value)
 		return (value & (MAXFRACT2>>1)) | (exp << (MANTSIZE2-1));
 	}
 }
-#endif
-
-#if ACCT_VERSION == 3
+#elif ACCT_VERSION == 3
 /*
  * encode an u64 into a 32 bit IEEE float
  */
@@ -413,6 +414,7 @@ static void fill_ac(acct_t *ac)
 {
 	struct pacct_struct *pacct = &current->signal->pacct;
 	u64 elapsed, run_time;
+	time64_t btime;
 	struct tty_struct *tty;
 
 	/*
@@ -445,7 +447,8 @@ static void fill_ac(acct_t *ac)
 	}
 #endif
 	do_div(elapsed, AHZ);
-	ac->ac_btime = get_seconds() - elapsed;
+	btime = ktime_get_real_seconds() - elapsed;
+	ac->ac_btime = clamp_t(time64_t, btime, 0, U32_MAX);
 #if ACCT_VERSION==2
 	ac->ac_ahz = AHZ;
 #endif
@@ -453,8 +456,8 @@ static void fill_ac(acct_t *ac)
 	spin_lock_irq(&current->sighand->siglock);
 	tty = current->signal->tty;	/* Safe as we hold the siglock */
 	ac->ac_tty = tty ? old_encode_dev(tty_devnum(tty)) : 0;
-	ac->ac_utime = encode_comp_t(jiffies_to_AHZ(cputime_to_jiffies(pacct->ac_utime)));
-	ac->ac_stime = encode_comp_t(jiffies_to_AHZ(cputime_to_jiffies(pacct->ac_stime)));
+	ac->ac_utime = encode_comp_t(nsec_to_AHZ(pacct->ac_utime));
+	ac->ac_stime = encode_comp_t(nsec_to_AHZ(pacct->ac_stime));
 	ac->ac_flag = pacct->ac_flag;
 	ac->ac_mem = encode_comp_t(pacct->ac_mem);
 	ac->ac_minflt = encode_comp_t(pacct->ac_minflt);
@@ -495,8 +498,7 @@ static void do_acct_process(struct bsd_acct_struct *acct)
 	/* backward-compatible 16 bit fields */
 	ac.ac_uid16 = ac.ac_uid;
 	ac.ac_gid16 = ac.ac_gid;
-#endif
-#if ACCT_VERSION == 3
+#elif ACCT_VERSION == 3
 	{
 		struct pid_namespace *ns = acct->ns;
 
@@ -514,7 +516,7 @@ static void do_acct_process(struct bsd_acct_struct *acct)
 	if (file_start_write_trylock(file)) {
 		/* it's been opened O_APPEND, so position is irrelevant */
 		loff_t pos = 0;
-		__kernel_write(file, (char *)&ac, sizeof(acct_t), &pos);
+		__kernel_write(file, &ac, sizeof(acct_t), &pos);
 		file_end_write(file);
 	}
 out:
@@ -530,19 +532,19 @@ out:
 void acct_collect(long exitcode, int group_dead)
 {
 	struct pacct_struct *pacct = &current->signal->pacct;
-	cputime_t utime, stime;
+	u64 utime, stime;
 	unsigned long vsize = 0;
 
 	if (group_dead && current->mm) {
 		struct vm_area_struct *vma;
 
-		down_read(&current->mm->mmap_sem);
+		mmap_read_lock(current->mm);
 		vma = current->mm->mmap;
 		while (vma) {
 			vsize += vma->vm_end - vma->vm_start;
 			vma = vma->vm_next;
 		}
-		up_read(&current->mm->mmap_sem);
+		mmap_read_unlock(current->mm);
 	}
 
 	spin_lock_irq(&current->sighand->siglock);
@@ -559,6 +561,7 @@ void acct_collect(long exitcode, int group_dead)
 		pacct->ac_flag |= ACORE;
 	if (current->flags & PF_SIGNALED)
 		pacct->ac_flag |= AXSIG;
+
 	task_cputime(current, &utime, &stime);
 	pacct->ac_utime += utime;
 	pacct->ac_stime += stime;
@@ -580,9 +583,7 @@ static void slow_acct_process(struct pid_namespace *ns)
 }
 
 /**
- * acct_process
- *
- * handles process accounting for an exiting task
+ * acct_process - handles process accounting for an exiting task
  */
 void acct_process(void)
 {

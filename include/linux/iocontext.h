@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef IOCONTEXT_H
 #define IOCONTEXT_H
 
@@ -7,6 +8,7 @@
 
 enum {
 	ICQ_EXITED		= 1 << 2,
+	ICQ_DESTROYED		= 1 << 3,
 };
 
 /*
@@ -103,12 +105,6 @@ struct io_context {
 	spinlock_t lock;
 
 	unsigned short ioprio;
-
-	/*
-	 * For request batching
-	 */
-	int nr_batch_requests;     /* Number of requests left in the batch */
-	unsigned long last_waited; /* Time last woken after wait for request */
 
 	struct radix_tree_root	icq_tree;
 	struct io_cq __rcu	*icq_hint;

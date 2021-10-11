@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  ebtable_filter
  *
@@ -9,6 +10,7 @@
  */
 
 #include <linux/netfilter_bridge/ebtables.h>
+#include <uapi/linux/netfilter_bridge.h>
 #include <linux/module.h>
 
 #define FILTER_VALID_HOOKS ((1 << NF_BR_LOCAL_IN) | (1 << NF_BR_FORWARD) | \
@@ -57,34 +59,27 @@ static const struct ebt_table frame_filter = {
 };
 
 static unsigned int
-ebt_in_hook(void *priv, struct sk_buff *skb,
-	    const struct nf_hook_state *state)
+ebt_filter_hook(void *priv, struct sk_buff *skb,
+		const struct nf_hook_state *state)
 {
-	return ebt_do_table(skb, state, state->net->xt.frame_filter);
+	return ebt_do_table(skb, state, priv);
 }
 
-static unsigned int
-ebt_out_hook(void *priv, struct sk_buff *skb,
-	     const struct nf_hook_state *state)
-{
-	return ebt_do_table(skb, state, state->net->xt.frame_filter);
-}
-
-static struct nf_hook_ops ebt_ops_filter[] __read_mostly = {
+static const struct nf_hook_ops ebt_ops_filter[] = {
 	{
-		.hook		= ebt_in_hook,
+		.hook		= ebt_filter_hook,
 		.pf		= NFPROTO_BRIDGE,
 		.hooknum	= NF_BR_LOCAL_IN,
 		.priority	= NF_BR_PRI_FILTER_BRIDGED,
 	},
 	{
-		.hook		= ebt_in_hook,
+		.hook		= ebt_filter_hook,
 		.pf		= NFPROTO_BRIDGE,
 		.hooknum	= NF_BR_FORWARD,
 		.priority	= NF_BR_PRI_FILTER_BRIDGED,
 	},
 	{
-		.hook		= ebt_out_hook,
+		.hook		= ebt_filter_hook,
 		.pf		= NFPROTO_BRIDGE,
 		.hooknum	= NF_BR_LOCAL_OUT,
 		.priority	= NF_BR_PRI_FILTER_OTHER,
@@ -93,36 +88,32 @@ static struct nf_hook_ops ebt_ops_filter[] __read_mostly = {
 
 static int __net_init frame_filter_net_init(struct net *net)
 {
-	net->xt.frame_filter = ebt_register_table(net, &frame_filter);
-	return PTR_ERR_OR_ZERO(net->xt.frame_filter);
+	return ebt_register_table(net, &frame_filter, ebt_ops_filter);
+}
+
+static void __net_exit frame_filter_net_pre_exit(struct net *net)
+{
+	ebt_unregister_table_pre_exit(net, "filter");
 }
 
 static void __net_exit frame_filter_net_exit(struct net *net)
 {
-	ebt_unregister_table(net, net->xt.frame_filter);
+	ebt_unregister_table(net, "filter");
 }
 
 static struct pernet_operations frame_filter_net_ops = {
 	.init = frame_filter_net_init,
 	.exit = frame_filter_net_exit,
+	.pre_exit = frame_filter_net_pre_exit,
 };
 
 static int __init ebtable_filter_init(void)
 {
-	int ret;
-
-	ret = register_pernet_subsys(&frame_filter_net_ops);
-	if (ret < 0)
-		return ret;
-	ret = nf_register_hooks(ebt_ops_filter, ARRAY_SIZE(ebt_ops_filter));
-	if (ret < 0)
-		unregister_pernet_subsys(&frame_filter_net_ops);
-	return ret;
+	return register_pernet_subsys(&frame_filter_net_ops);
 }
 
 static void __exit ebtable_filter_fini(void)
 {
-	nf_unregister_hooks(ebt_ops_filter, ARRAY_SIZE(ebt_ops_filter));
 	unregister_pernet_subsys(&frame_filter_net_ops);
 }
 

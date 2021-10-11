@@ -47,7 +47,7 @@ phydm_hw_divider(
 	for (i = 0; i < 10; i++) {
 		ODM_delay_ms(1);
 		if (odm_get_bb_reg(p_dm, reg_devider_rpt, BIT(24))) { /*Chk HW rpt is ready*/
-
+			
 			result = (u16)odm_get_bb_reg(p_dm, reg_devider_rpt, MASKBYTE2);
 			break;
 		}
@@ -69,13 +69,13 @@ phydm_fahm_trigger(
 	if (p_dm->support_ic_type & ODM_IC_11AC_SERIES) {
 
 		odm_set_bb_reg(p_dm, 0x1cf8, 0xffff00, trigger_period);
-
+		
 		fahm_reg1 =  0x994;
 	} else {
-
-		odm_set_bb_reg(p_dm, 0x978, 0xff000000, (trigger_period & 0xff));
+	
+		odm_set_bb_reg(p_dm, 0x978, 0xff000000, (trigger_period & 0xff));		
 		odm_set_bb_reg(p_dm, 0x97c, 0xff, (trigger_period & 0xff00)>>8);
-
+		
 		fahm_reg1 =  0x890;
 	}
 
@@ -96,7 +96,7 @@ phydm_fahm_set_valid_cnt(
 
 	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
 
-	if ((ccx_info->fahm_nume_sel == numerator_sel) &&
+	if ((ccx_info->fahm_nume_sel == numerator_sel) && 
 		(ccx_info->fahm_denum_sel == denumerator_sel)) {
 
 		PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("no need to update\n", __FUNCTION__));
@@ -105,7 +105,7 @@ phydm_fahm_set_valid_cnt(
 
 	ccx_info->fahm_nume_sel = numerator_sel;
 	ccx_info->fahm_denum_sel = denumerator_sel;
-
+	
 	if (p_dm->support_ic_type & ODM_IC_11AC_SERIES) {
 		fahm_reg1 =  0x994;
 	} else {
@@ -132,7 +132,7 @@ phydm_get_fahm_result(
 	u8		i;
 
 	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
-
+	
 	if (p_dm->support_ic_type & ODM_IC_11AC_SERIES) {
 		reg_rpt =  0x1f80;
 		reg_rpt_2 = 0x1f98;
@@ -142,9 +142,9 @@ phydm_get_fahm_result(
 	}
 
 	for (i = 0; i < 10; i++) {
-
+		
 		if (odm_get_bb_reg(p_dm, reg_rpt_2, BIT(31))) { /*Chk HW rpt is ready*/
-
+			
 			is_ready = true;
 			break;
 		}
@@ -158,14 +158,14 @@ phydm_get_fahm_result(
 	fahm_denumerator = (u16)odm_get_bb_reg(p_dm, reg_rpt_2, MASKLWORD);
 
 	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("Reg[0x%x] fahm_denmrtr = %d\n", reg_rpt_2, fahm_denumerator));
-
+	
 
 	/*Get nemerator*/
 	for (i = 0; i<6; i++) {
 		reg_val_tmp = odm_get_bb_reg(p_dm, reg_rpt + (i<<2), MASKDWORD);
-
+		
 		PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("Reg[0x%x] fahm_denmrtr = %d\n", (p_dm, reg_rpt + (i*4), reg_val_tmp)));
-
+		
 		fahm_rpt_cnt[i*2] = (u16)(reg_val_tmp & MASKLWORD);
 		fahm_rpt_cnt[i*2 +1] = (u16)((reg_val_tmp & MASKHWORD)>>16);
 	}
@@ -175,13 +175,13 @@ phydm_get_fahm_result(
 	}
 
 	PHYDM_DBG(p_dm, DBG_ENV_MNTR,("FAHM_RPT_cnt[10:0]=[%d, %d, %d, %d, %d(IGI), %d, %d, %d, %d, %d, %d, %d]\n",
-		fahm_rpt_cnt[11], fahm_rpt_cnt[10], fahm_rpt_cnt[9], fahm_rpt_cnt[8], fahm_rpt_cnt[7], fahm_rpt_cnt[6],
+		fahm_rpt_cnt[11], fahm_rpt_cnt[10], fahm_rpt_cnt[9], fahm_rpt_cnt[8], fahm_rpt_cnt[7], fahm_rpt_cnt[6], 
 		fahm_rpt_cnt[5], fahm_rpt_cnt[4], fahm_rpt_cnt[3], fahm_rpt_cnt[2], fahm_rpt_cnt[1], fahm_rpt_cnt[0]));
 
 	PHYDM_DBG(p_dm, DBG_ENV_MNTR,("FAHM_RPT_%[10:0]=[%d, %d, %d, %d, %d(IGI), %d, %d, %d, %d, %d, %d, %d]\n",
-		fahm_rpt[11], fahm_rpt[10], fahm_rpt[9], fahm_rpt[8], fahm_rpt[7], fahm_rpt[6],
+		fahm_rpt[11], fahm_rpt[10], fahm_rpt[9], fahm_rpt[8], fahm_rpt[7], fahm_rpt[6], 
 		fahm_rpt[5], fahm_rpt[4], fahm_rpt[3], fahm_rpt[2], fahm_rpt[1], fahm_rpt[0]));
-
+	
 }
 
 void
@@ -206,13 +206,13 @@ phydm_set_fahm_th_by_igi(
 
 	ccx_info->env_mntr_igi = igi;	/*bkp IGI*/
 
-	if (igi >= CCA_CAP)
+	if (igi >= CCA_CAP) 
 		fahm_th[0] = (igi - CCA_CAP) * IGI_TO_NHM_TH_MULTIPLIER;
 	else
 		fahm_th[0] = 0;
-
+	
 	rssi_th[0] = igi -10 - CCA_CAP;
-
+	
 	for (i = 1; i <= 10; i++) {
 		fahm_th[i] = fahm_th[0] + th_gap * i;
 		rssi_th[i] = rssi_th[0] +  (i<<1);
@@ -222,7 +222,7 @@ phydm_set_fahm_th_by_igi(
 		rssi_th[10], rssi_th[9], rssi_th[8], rssi_th[7], rssi_th[6], rssi_th[5], rssi_th[4], rssi_th[3], rssi_th[2], rssi_th[1], rssi_th[0]));
 
 	if (p_dm->support_ic_type & ODM_IC_11AC_SERIES) {
-
+		
 		odm_set_bb_reg(p_dm, 0x1c38, 0xffffff00, ((fahm_th[2]<<24) |(fahm_th[1]<<16) | (fahm_th[0]<<8)));
 		odm_set_bb_reg(p_dm, 0x1c78, 0xffffff00, ((fahm_th[5]<<24) |(fahm_th[4]<<16) | (fahm_th[3]<<8)));
 		odm_set_bb_reg(p_dm, 0x1c7c, 0xffffff00, ((fahm_th[7]<<24) |(fahm_th[6]<<16)));
@@ -232,7 +232,7 @@ phydm_set_fahm_th_by_igi(
 		odm_set_bb_reg(p_dm, 0x970, MASKDWORD, ((fahm_th[3]<<24) |(fahm_th[2]<<16) | (fahm_th[1]<<8) | fahm_th[0]));
 		odm_set_bb_reg(p_dm, 0x974, MASKDWORD, ((fahm_th[7]<<24) |(fahm_th[6]<<16) | (fahm_th[5]<<8) | fahm_th[4]));
 		odm_set_bb_reg(p_dm, 0x978, MASKDWORD, ((fahm_th[10]<<16) | (fahm_th[9]<<8) | fahm_th[8]));
-	}
+	}	
 }
 
 void
@@ -254,9 +254,9 @@ phydm_fahm_init(
 	}
 
 	ccx_info->fahm_period = 65535;
-
+	
 	odm_set_bb_reg(p_dm, fahm_reg1, 0x6, 3);	/*FAHM HW block enable*/
-
+	
 	phydm_fahm_set_valid_cnt(p_dm, FAHM_INCLD_FA, (FAHM_INCLD_FA| FAHM_INCLD_CRC_OK |FAHM_INCLD_CRC_ER));
 	phydm_set_fahm_th_by_igi(p_dm, p_dm->dm_dig_table.cur_ig_value);
 }
@@ -290,11 +290,11 @@ phydm_fahm_dbg(
 		PHYDM_SNPRINTF((output + used, out_len - used, "{3: MNTR mode sel} {1: driver, 2. FW}\n"));
 		return;
 	} else if (var1[0] == 1) { /* Set & trigger CLM */
-
+		
 		phydm_set_fahm_th_by_igi(p_dm, p_dm->dm_dig_table.cur_ig_value);
 		phydm_fahm_trigger(p_dm, ccx_info->fahm_period);
 		PHYDM_SNPRINTF((output + used, out_len - used, "Monitor FAHM for %d * 4us\n", ccx_info->fahm_period));
-
+		
 	} else if (var1[0] == 2) { /* Get CLM results */
 
 		phydm_get_fahm_result(p_dm);
@@ -308,10 +308,10 @@ phydm_fahm_dbg(
 			ccx_info->clm_mntr_mode = CLM_FW_MNTR;
 
 	}*/ else {
-
+		
 		PHYDM_SNPRINTF((output + used, out_len - used, "Error\n"));
 	}
-
+	
 	*_used = used;
 	*_out_len = out_len;
 }
@@ -333,12 +333,12 @@ phydm_c2h_clm_report_handler(
 
 	if (cmd_len >=12)
 		return;
-
+	
 	ccx_info->clm_fw_result_acc += clm_report;
 	ccx_info->clm_fw_result_cnt++;
 
 	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%d] clm_report= %d\n", ccx_info->clm_fw_result_cnt, clm_report));
-
+	
 }
 
 void
@@ -352,7 +352,7 @@ phydm_clm_h2c(
 	u8		h2c_val[H2C_MAX_LENGTH] = {0};
 	u8		i = 0;
 	u8		obs_time_idx = 0;
-
+	
 	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("%s ======>\n", __func__));
 	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("obs_time_index=%d *4 ms\n", obs_time));
 
@@ -362,7 +362,7 @@ phydm_clm_h2c(
 			break;
 		}
 	}
-
+	
 	/*
 	obs_time =(2^16 -1) ~ (2^15)  => obs_time_idx = 15  (65535 ~ 32768)
 	obs_time =(2^15 -1) ~ (2^14)  => obs_time_idx = 14
@@ -438,9 +438,9 @@ phydm_nhm_setting(
 
 	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("[%s]===>\n", __FUNCTION__));
 
-
+	
 	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("IGI=0x%x\n", ccx_info->echo_igi));
-
+	
 	if (nhm_setting == SET_NHM_SETTING) {
 		PHYDM_DBG(p_dm, DBG_ENV_MNTR,
 		("NHM_th[H->L]=[0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x]\n",
@@ -921,7 +921,7 @@ phydm_ccx_monitor_trigger(
 
 	/* check if NHM threshold is changed */
 	if (p_dm->support_ic_type & ODM_IC_11AC_SERIES) {
-
+		
 		nhm_th[0] = (u8)odm_get_bb_reg(p_dm, ODM_REG_NHM_TH3_TO_TH0_11AC, MASKBYTE0);
 		nhm_th[1] = (u8)odm_get_bb_reg(p_dm, ODM_REG_NHM_TH3_TO_TH0_11AC, MASKBYTE1);
 		nhm_th[2] = (u8)odm_get_bb_reg(p_dm, ODM_REG_NHM_TH3_TO_TH0_11AC, MASKBYTE2);
@@ -934,7 +934,7 @@ phydm_ccx_monitor_trigger(
 		nhm_th[9] = (u8)odm_get_bb_reg(p_dm, ODM_REG_NHM_TH9_TH10_11AC, MASKBYTE2);
 		nhm_th[10] = (u8)odm_get_bb_reg(p_dm, ODM_REG_NHM_TH9_TH10_11AC, MASKBYTE3);
 	} else if (p_dm->support_ic_type & ODM_IC_11N_SERIES) {
-
+		
 		nhm_th[0] = (u8)odm_get_bb_reg(p_dm, ODM_REG_NHM_TH3_TO_TH0_11N, MASKBYTE0);
 		nhm_th[1] = (u8)odm_get_bb_reg(p_dm, ODM_REG_NHM_TH3_TO_TH0_11N, MASKBYTE1);
 		nhm_th[2] = (u8)odm_get_bb_reg(p_dm, ODM_REG_NHM_TH3_TO_TH0_11N, MASKBYTE2);
@@ -949,8 +949,8 @@ phydm_ccx_monitor_trigger(
 	}
 
 	for (i = 0; i <= 10; i++) {
-
-		if (nhm_th[i] != ccx_info->nhm_th[i]) {
+		
+		if (nhm_th[i] != ccx_info->nhm_th[i]) {	
 			PHYDM_DBG(p_dm, DBG_ENV_MNTR,
 				("nhm_th[%d] != ccx_info->nhm_th[%d]!!\n", i, i));
 		}
@@ -968,7 +968,7 @@ phydm_ccx_monitor_trigger(
 
 	/*[CLM]*/
 	ccx_info->clm_period = monitor_time_4us;
-
+	
 	if (ccx_info->clm_mntr_mode == CLM_DRIVER_MNTR) {
 		phydm_clm_setting(p_dm);
 		phydm_clm_trigger(p_dm);
@@ -1002,7 +1002,7 @@ phydm_ccx_monitor_result(
 	}
 
 	if (ccx_info->clm_mntr_mode == CLM_DRIVER_MNTR) {
-
+		
 		if (phydm_check_clm_rdy(p_dm)) {
 			phydm_get_clm_result(p_dm);
 
@@ -1011,14 +1011,14 @@ phydm_ccx_monitor_result(
 				if (ccx_info->clm_period == 64000)
 					ccx_info->clm_ratio = (u8)(((ccx_info->clm_result >> 6) + 5) /10);
 				else if (ccx_info->clm_period == 65535) {
-
+					
 					clm_result_tmp = (u32)(ccx_info->clm_result * 100);
 					ccx_info->clm_ratio = (u8)((clm_result_tmp + (1<<15)) >> 16);
 				} else
 					ccx_info->clm_ratio = (u8)((ccx_info->clm_result*100) / ccx_info->clm_period);
 			}
 		}
-
+		
 	} else {
 		if (ccx_info->clm_fw_result_cnt != 0)
 			ccx_info->clm_ratio = (u8)(ccx_info->clm_fw_result_acc /ccx_info->clm_fw_result_cnt);
@@ -1027,14 +1027,14 @@ phydm_ccx_monitor_result(
 
 		PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("clm_fw_result_acc=%d, clm_fw_result_cnt=%d\n",
 			ccx_info->clm_fw_result_acc, ccx_info->clm_fw_result_cnt));
-
+		
 		ccx_info->clm_fw_result_acc = 0;
 		ccx_info->clm_fw_result_cnt = 0;
 	}
 
 	PHYDM_DBG(p_dm, DBG_ENV_MNTR, ("IGI=0x%x, nhm_ratio=%d, clm_ratio=%d\n\n",
 		ccx_info->echo_igi, ccx_info->nhm_ratio, ccx_info->clm_ratio));
-
+		
 }
 
 void
@@ -1134,13 +1134,13 @@ phydm_clm_dbg(
 		PHYDM_SNPRINTF((output + used, out_len - used, "{3: MNTR mode sel} {1: driver, 2. FW}\n"));
 		return;
 	} else if (var1[0] == 1) { /* Set & trigger CLM */
-
+		
 		ccx_info->clm_period = 65535;		/* 65535*4us = 262.14ms*/
 		phydm_clm_setting(p_dm);
 		phydm_clm_hw_restart(p_dm);
 		phydm_clm_trigger(p_dm);
 		PHYDM_SNPRINTF((output + used, out_len - used, "Monitor CLM for 262ms\n"));
-
+		
 	} else if (var1[0] == 2) { /* Get CLM results */
 
 		phydm_get_clm_result(p_dm);
@@ -1154,10 +1154,10 @@ phydm_clm_dbg(
 			ccx_info->clm_mntr_mode = CLM_FW_MNTR;
 
 	} else {
-
+		
 		PHYDM_SNPRINTF((output + used, out_len - used, "Error\n"));
 	}
-
+	
 	*_used = used;
 	*_out_len = out_len;
 }

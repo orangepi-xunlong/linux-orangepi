@@ -12,7 +12,6 @@ Example:
 	pmic@5b {
 		compatible = "active-semi,act8945a";
 		reg = <0x5b>;
-		status = "okay";
 
 		active-semi,vsel-high;
 
@@ -72,13 +71,12 @@ Example:
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_charger_chglev &pinctrl_charger_lbo &pinctrl_charger_irq>;
 			interrupt-parent = <&pioA>;
-			interrupts = <45 GPIO_ACTIVE_LOW>;
+			interrupts = <45 IRQ_TYPE_LEVEL_LOW>;
 
 			active-semi,chglev-gpios = <&pioA 12 GPIO_ACTIVE_HIGH>;
 			active-semi,lbo-gpios = <&pioA 72 GPIO_ACTIVE_LOW>;
 			active-semi,input-voltage-threshold-microvolt = <6600>;
 			active-semi,precondition-timeout = <40>;
 			active-semi,total-timeout = <3>;
-			status = "okay";
 		};
 	};

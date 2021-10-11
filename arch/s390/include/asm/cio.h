@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Common interface for I/O on S/390
  */
@@ -6,6 +7,7 @@
 
 #include <linux/spinlock.h>
 #include <linux/bitops.h>
+#include <linux/genalloc.h>
 #include <asm/types.h>
 
 #define LPM_ANYPATH 0xff
@@ -32,6 +34,24 @@ struct ccw1 {
 	__u16 count;
 	__u32 cda;
 } __attribute__ ((packed,aligned(8)));
+
+/**
+ * struct ccw0 - channel command word
+ * @cmd_code: command code
+ * @cda: data address
+ * @flags: flags, like IDA addressing, etc.
+ * @reserved: will be ignored
+ * @count: byte count
+ *
+ * The format-0 ccw structure.
+ */
+struct ccw0 {
+	__u8 cmd_code;
+	__u32 cda : 24;
+	__u8  flags;
+	__u8  reserved;
+	__u16 count;
+} __packed __aligned(8);
 
 #define CCW_FLAG_DC		0x80
 #define CCW_FLAG_CC		0x40
@@ -208,7 +228,7 @@ struct esw_eadm {
  * a field is valid; a field not being valid is always passed as %0.
  * If a unit check occurred, @ecw may contain sense data; this is retrieved
  * by the common I/O layer itself if the device doesn't support concurrent
- * sense (so that the device driver never needs to perform basic sene itself).
+ * sense (so that the device driver never needs to perform basic sense itself).
  * For unsolicited interrupts, the irb is passed as-is (expect for sense data,
  * if applicable).
  */
@@ -245,6 +265,36 @@ struct ciw {
 #define CIW_TYPE_RNI	0x2    	/* read node identifier */
 
 /*
+ * Node Descriptor as defined in SA22-7204, "Common I/O-Device Commands"
+ */
+
+#define ND_VALIDITY_VALID	0
+#define ND_VALIDITY_OUTDATED	1
+#define ND_VALIDITY_INVALID	2
+
+struct node_descriptor {
+	/* Flags. */
+	union {
+		struct {
+			u32 validity:3;
+			u32 reserved:5;
+		} __packed;
+		u8 byte0;
+	} __packed;
+
+	/* Node parameters. */
+	u32 params:24;
+
+	/* Node ID. */
+	char type[6];
+	char model[3];
+	char manufacturer[3];
+	char plant[2];
+	char seq[12];
+	u16 tag;
+} __packed;
+
+/*
  * Flags used as input parameters for do_IO()
  */
 #define DOIO_ALLOW_SUSPEND	 0x0001 /* allow for channel prog. suspend */
@@ -279,7 +329,7 @@ struct ccw_dev_id {
 };
 
 /**
- * ccw_device_id_is_equal() - compare two ccw_dev_ids
+ * ccw_dev_id_is_equal() - compare two ccw_dev_ids
  * @dev_id1: a ccw_dev_id
  * @dev_id2: another ccw_dev_id
  * Returns:
@@ -306,21 +356,23 @@ static inline u8 pathmask_to_pos(u8 mask)
 	return 8 - ffs(mask);
 }
 
-void channel_subsystem_reinit(void);
 extern void css_schedule_reprobe(void);
 
-extern void reipl_ccw_dev(struct ccw_dev_id *id);
+extern void *cio_dma_zalloc(size_t size);
+extern void cio_dma_free(void *cpu_addr, size_t size);
+extern struct device *cio_get_dma_css_dev(void);
 
-struct cio_iplinfo {
-	u8 ssid;
-	u16 devno;
-	int is_qdio;
-};
-
-extern int cio_get_iplinfo(struct cio_iplinfo *iplinfo);
+void *cio_gp_dma_zalloc(struct gen_pool *gp_dma, struct device *dma_dev,
+			size_t size);
+void cio_gp_dma_free(struct gen_pool *gp_dma, void *cpu_addr, size_t size);
+void cio_gp_dma_destroy(struct gen_pool *gp_dma, struct device *dma_dev);
+struct gen_pool *cio_gp_dma_create(struct device *dma_dev, int nr_pages);
 
 /* Function from drivers/s390/cio/chsc.c */
 int chsc_sstpc(void *page, unsigned int op, u16 ctrl, u64 *clock_delta);
 int chsc_sstpi(void *page, void *result, size_t size);
+int chsc_stzi(void *page, void *result, size_t size);
+int chsc_sgib(u32 origin);
+int chsc_scud(u16 cu, u64 *esm, u8 *esm_valid);
 
 #endif

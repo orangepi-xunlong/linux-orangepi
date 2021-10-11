@@ -2,7 +2,7 @@
  * Linux/PA-RISC Project (http://www.parisc-linux.org/)
  * 
  * System call entry code / Linux gateway page
- * Copyright (c) Matthew Wilcox 1999 <willy@bofh.ai>
+ * Copyright (c) Matthew Wilcox 1999 <willy@infradead.org>
  * Licensed under the GNU GPL.
  * thanks to Philipp Rumpf, Mike Shaver and various others
  * sorry about the wall, puffin..
@@ -48,7 +48,7 @@ registers).
 	 */
 #define KILL_INSN	break	0,0
 
-	.level          LEVEL
+	.level          PA_ASM_LEVEL
 
 	.text
 
@@ -108,12 +108,8 @@ linux_gateway_entry:
 	mtsp	%r0,%sr6			/* get kernel space into sr6 */
 
 #ifdef CONFIG_64BIT
-	/* for now we can *always* set the W bit on entry to the syscall
-	 * since we don't support wide userland processes.  We could
-	 * also save the current SM other than in r0 and restore it on
-	 * exit from the syscall, and also use that value to know
-	 * whether to do narrow or wide syscalls. -PB
-	 */
+	/* Store W bit on entry to the syscall in case it's a wide userland
+	 * process. */
 	ssm	PSW_SM_W, %r1
 	extrd,u	%r1,PSW_W_BIT,1,%r1
 	/* sp must be aligned on 4, so deposit the W bit setting into
@@ -227,8 +223,7 @@ linux_gateway_entry:
 	or,=	%r2,%r2,%r2
 	ldo	R%sys_call_table64(%r1), %r19
 #else
-	ldil	L%sys_call_table, %r1
-	ldo     R%sys_call_table(%r1), %r19
+	load32	sys_call_table, %r19
 #endif	
 	comiclr,>>	__NR_Linux_syscalls, %r20, %r0
 	b,n	.Lsyscall_nosys
@@ -331,8 +326,6 @@ tracesys_next:
 	 *  task->thread.regs.gr[20] above.
 	 */
 	copy	%ret0,%r20
-	ldil	L%sys_call_table,%r1
-	ldo     R%sys_call_table(%r1), %r19
 
 	ldo     -THREAD_SZ_ALGN-FRAME_SIZE(%r30),%r1      /* get task ptr */
 	LDREG	TI_TASK(%r1), %r1
@@ -353,6 +346,23 @@ tracesys_next:
 	cmpib,COND(=),n -1,%r20,tracesys_exit /* seccomp may have returned -1 */
 	comiclr,>>	__NR_Linux_syscalls, %r20, %r0
 	b,n	.Ltracesys_nosys
+
+	/* Note!  We cannot use the syscall table that is mapped
+	nearby since the gateway page is mapped execute-only. */
+
+#ifdef CONFIG_64BIT
+	LDREG	TASK_PT_GR30(%r1), %r19		/* get users sp back */
+	extrd,u	%r19,63,1,%r2			/* W hidden in bottom bit */
+
+	ldil	L%sys_call_table, %r1
+	or,=	%r2,%r2,%r2
+	addil	L%(sys_call_table64-sys_call_table), %r1
+	ldo	R%sys_call_table(%r1), %r19
+	or,=	%r2,%r2,%r2
+	ldo	R%sys_call_table64(%r1), %r19
+#else
+	load32	sys_call_table, %r19
+#endif
 
 	LDREGX  %r20(%r19), %r19
 
@@ -464,16 +474,13 @@ tracesys_sigexit:
 lws_start:
 
 #ifdef CONFIG_64BIT
-	/* FIXME: If we are a 64-bit kernel just
-	 *        turn this on unconditionally.
-	 */
 	ssm	PSW_SM_W, %r1
 	extrd,u	%r1,PSW_W_BIT,1,%r1
 	/* sp must be aligned on 4, so deposit the W bit setting into
 	 * the bottom of sp temporarily */
 	or,ev	%r1,%r30,%r30
 
-	/* Clip LWS number to a 32-bit value always */
+	/* Clip LWS number to a 32-bit value for 32-bit processes */
 	depdi	0, 31, 32, %r20
 #endif	
 
@@ -564,8 +571,8 @@ lws_compare_and_swap:
 	ldil	L%lws_lock_start, %r20
 	ldo	R%lws_lock_start(%r20), %r28
 
-	/* Extract four bits from r26 and hash lock (Bits 4-7) */
-	extru  %r26, 27, 4, %r20
+	/* Extract eight bits from r26 and hash lock (Bits 3-11) */
+	extru  %r26, 28, 8, %r20
 
 	/* Find lock to use, the hash is either one of 0 to
 	   15, multiplied by 16 (keep it 16-byte aligned)
@@ -629,9 +636,9 @@ cas_action:
 	stw	%r1, 4(%sr2,%r20)
 #endif
 	/* The load and store could fail */
-1:	ldw,ma	0(%r26), %r28
+1:	ldw	0(%r26), %r28
 	sub,<>	%r28, %r25, %r0
-2:	stw,ma	%r24, 0(%r26)
+2:	stw	%r24, 0(%r26)
 	/* Free lock */
 	stw,ma	%r20, 0(%sr2,%r20)
 #if ENABLE_LWS_DEBUG
@@ -647,7 +654,7 @@ cas_action:
 3:		
 	/* Error occurred on load or store */
 	/* Free lock */
-	stw	%r20, 0(%sr2,%r20)
+	stw,ma	%r20, 0(%sr2,%r20)
 #if ENABLE_LWS_DEBUG
 	stw	%r0, 4(%sr2,%r20)
 #endif
@@ -754,8 +761,8 @@ cas2_lock_start:
 	ldil	L%lws_lock_start, %r20
 	ldo	R%lws_lock_start(%r20), %r28
 
-	/* Extract four bits from r26 and hash lock (Bits 4-7) */
-	extru  %r26, 27, 4, %r20
+	/* Extract eight bits from r26 and hash lock (Bits 3-11) */
+	extru  %r26, 28, 8, %r20
 
 	/* Find lock to use, the hash is either one of 0 to
 	   15, multiplied by 16 (keep it 16-byte aligned)
@@ -796,30 +803,30 @@ cas2_action:
 	ldo	1(%r0),%r28
 
 	/* 8bit CAS */
-13:	ldb,ma	0(%r26), %r29
+13:	ldb	0(%r26), %r29
 	sub,=	%r29, %r25, %r0
 	b,n	cas2_end
-14:	stb,ma	%r24, 0(%r26)
+14:	stb	%r24, 0(%r26)
 	b	cas2_end
 	copy	%r0, %r28
 	nop
 	nop
 
 	/* 16bit CAS */
-15:	ldh,ma	0(%r26), %r29
+15:	ldh	0(%r26), %r29
 	sub,=	%r29, %r25, %r0
 	b,n	cas2_end
-16:	sth,ma	%r24, 0(%r26)
+16:	sth	%r24, 0(%r26)
 	b	cas2_end
 	copy	%r0, %r28
 	nop
 	nop
 
 	/* 32bit CAS */
-17:	ldw,ma	0(%r26), %r29
+17:	ldw	0(%r26), %r29
 	sub,=	%r29, %r25, %r0
 	b,n	cas2_end
-18:	stw,ma	%r24, 0(%r26)
+18:	stw	%r24, 0(%r26)
 	b	cas2_end
 	copy	%r0, %r28
 	nop
@@ -827,10 +834,10 @@ cas2_action:
 
 	/* 64bit CAS */
 #ifdef CONFIG_64BIT
-19:	ldd,ma	0(%r26), %r29
+19:	ldd	0(%r26), %r29
 	sub,*=	%r29, %r25, %r0
 	b,n	cas2_end
-20:	std,ma	%r24, 0(%r26)
+20:	std	%r24, 0(%r26)
 	copy	%r0, %r28
 #else
 	/* Compare first word */
@@ -858,7 +865,7 @@ cas2_end:
 22:
 	/* Error occurred on load or store */
 	/* Free lock */
-	stw	%r20, 0(%sr2,%r20)
+	stw,ma	%r20, 0(%sr2,%r20)
 	ssm	PSW_SM_I, %r0
 	ldo	1(%r0),%r28
 	b	lws_exit
@@ -912,17 +919,22 @@ ENTRY(lws_table)
 END(lws_table)
 	/* End of lws table */
 
+#ifdef CONFIG_64BIT
+#define __SYSCALL_WITH_COMPAT(nr, native, compat)	__SYSCALL(nr, compat)
+#else
+#define __SYSCALL_WITH_COMPAT(nr, native, compat)	__SYSCALL(nr, native)
+#endif
+#define __SYSCALL(nr, entry)	ASM_ULONG_INSN entry
 	.align 8
 ENTRY(sys_call_table)
 	.export sys_call_table,data
-#include "syscall_table.S"
+#include <asm/syscall_table_32.h>    /* 32-bit syscalls */
 END(sys_call_table)
 
 #ifdef CONFIG_64BIT
 	.align 8
 ENTRY(sys_call_table64)
-#define SYSCALL_TABLE_64BIT
-#include "syscall_table.S"
+#include <asm/syscall_table_64.h>    /* 64-bit syscalls */
 END(sys_call_table64)
 #endif
 
@@ -938,7 +950,7 @@ END(sys_call_table64)
 	.align	L1_CACHE_BYTES
 ENTRY(lws_lock_start)
 	/* lws locks */
-	.rept 16
+	.rept 256
 	/* Keep locks aligned at 16-bytes */
 	.word 1
 	.word 0 
@@ -949,5 +961,3 @@ END(lws_lock_start)
 	.previous
 
 .end
-
-

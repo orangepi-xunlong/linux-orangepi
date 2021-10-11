@@ -300,12 +300,12 @@ void rtw_os_xmit_schedule(_adapter *padapter)
 		tasklet_hi_schedule(&pxmitpriv->xmit_tasklet);
 
 	_exit_critical_bh(&pxmitpriv->lock, &irqL);
-
+	
 #if defined(CONFIG_PCI_HCI) && defined(CONFIG_XMIT_THREAD_MODE)
 	if (_rtw_queue_empty(&padapter->xmitpriv.pending_xmitbuf_queue) == _FALSE)
 		_rtw_up_sema(&padapter->xmitpriv.xmit_sema);
 #endif
-
+	
 
 #endif
 }

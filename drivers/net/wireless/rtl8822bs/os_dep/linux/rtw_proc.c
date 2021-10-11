@@ -61,8 +61,13 @@ inline struct proc_dir_entry *rtw_proc_create_dir(const char *name, struct proc_
 	return entry;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0)
+inline struct proc_dir_entry *rtw_proc_create_entry(const char *name, struct proc_dir_entry *parent,
+	const struct proc_ops *fops, void * data)
+#else
 inline struct proc_dir_entry *rtw_proc_create_entry(const char *name, struct proc_dir_entry *parent,
 	const struct file_operations *fops, void * data)
+#endif
 {
 	struct proc_dir_entry *entry;
 
@@ -230,6 +235,23 @@ static ssize_t rtw_drv_proc_write(struct file *file, const char __user *buffer, 
 	return -EROFS;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0)
+static const struct proc_ops rtw_drv_proc_seq_fops = {
+	.proc_open = rtw_drv_proc_open,
+	.proc_read = seq_read,
+	.proc_lseek = seq_lseek,
+	.proc_release = seq_release,
+	.proc_write = rtw_drv_proc_write,
+};
+
+static const struct proc_ops rtw_drv_proc_sseq_fops = {
+	.proc_open = rtw_drv_proc_open,
+	.proc_read = seq_read,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+	.proc_write = rtw_drv_proc_write,
+};
+#else
 static const struct file_operations rtw_drv_proc_seq_fops = {
 	.owner = THIS_MODULE,
 	.open = rtw_drv_proc_open,
@@ -247,6 +269,7 @@ static const struct file_operations rtw_drv_proc_sseq_fops = {
 	.release = single_release,
 	.write = rtw_drv_proc_write,
 };
+#endif
 
 int rtw_drv_proc_init(void)
 {
@@ -810,21 +833,8 @@ static int proc_get_turboedca_ctrl(struct seq_file *m, void *v)
 	_adapter *padapter = (_adapter *)rtw_netdev_priv(dev);
 	HAL_DATA_TYPE *hal_data = GET_HAL_DATA(padapter);
 
-	if (hal_data) {
-
-		u32 edca_param;
-
-		if (hal_data->dis_turboedca == 0)
-			RTW_PRINT_SEL(m, "Turbo-EDCA : %s\n", "Enable");
-		else
-			RTW_PRINT_SEL(m, "Turbo-EDCA : %s, mode=%d, edca_param_mode=0x%x\n", "Disable", hal_data->dis_turboedca, hal_data->edca_param_mode);
-
-
-		rtw_hal_get_hwreg(padapter, HW_VAR_AC_PARAM_BE, (u8 *)(&edca_param));
-
-		_RTW_PRINT_SEL(m, "PARAM_BE:0x%x\n", edca_param);
-
-	}
+	if (hal_data)
+		RTW_PRINT_SEL(m, "Turbo-EDCA :%s\n", (hal_data->dis_turboedca) ? "Disable" : "Enable");
 
 	return 0;
 }
@@ -834,9 +844,9 @@ static ssize_t proc_set_turboedca_ctrl(struct file *file, const char __user *buf
 	struct net_device *dev = data;
 	_adapter *padapter = (_adapter *)rtw_netdev_priv(dev);
 	HAL_DATA_TYPE *hal_data = GET_HAL_DATA(padapter);
+
 	char tmp[32] = {0};
 	int mode = 0, num = 0;
-	u32 param_mode = 0;
 
 	if (count < 1)
 		return -EFAULT;
@@ -846,38 +856,15 @@ static ssize_t proc_set_turboedca_ctrl(struct file *file, const char __user *buf
 
 	if (buffer && !copy_from_user(tmp, buffer, count)) {
 
-		num = sscanf(tmp, "%d %x", &mode, &param_mode);
+		num	= sscanf(tmp, "%d ", &mode);
 
-		if (num < 1 || num > 2) {
+		if (num != 1) {
 			RTW_INFO("argument number is wrong\n");
 			return -EFAULT;
 		}
-
-		/*  0: enable turboedca,
-			1: disable turboedca,
-			2: disable turboedca and setting EDCA parameter based on the input parameter
-			> 2 : currently reset to 0 */
-
-		if (mode > 2)
-			mode = 0;
-
 		hal_data->dis_turboedca = mode;
-
-		hal_data->edca_param_mode = 0; /* init. value */
-
-		RTW_INFO("dis_turboedca mode = 0x%x\n", hal_data->dis_turboedca);
-
-		if (num == 2) {
-
-			hal_data->edca_param_mode = param_mode;
-
-			RTW_INFO("param_mode = 0x%x\n", param_mode);
-		}
-
 	}
-
 	return count;
-
 }
 #ifdef CONFIG_WOWLAN
 static int proc_get_wow_lps_ctrl(struct seq_file *m, void *v)
@@ -1587,38 +1574,13 @@ static int proc_get_tx_bw_mode(struct seq_file *m, void *v)
 	return 0;
 }
 
-static void rtw_set_tx_bw_mode(struct _ADAPTER *adapter, u8 bw_mode)
-{
-	struct mlme_priv *mlme = &(adapter->mlmepriv);
-	struct mlme_ext_priv *mlmeext = &(adapter->mlmeextpriv);
-	struct macid_ctl_t *macid_ctl = &adapter->dvobj->macid_ctl;
-	u8 update = _FALSE;
-
-	if ((MLME_STATE(adapter) & WIFI_ASOC_STATE)
-		&& ((mlmeext->cur_channel <= 14 && BW_MODE_2G(bw_mode) != ADAPTER_TX_BW_2G(adapter))
-			|| (mlmeext->cur_channel >= 36 && BW_MODE_5G(bw_mode) != ADAPTER_TX_BW_5G(adapter)))
-	) {
-		/* RA mask update needed */
-		update = _TRUE;
-	}
-	adapter->driver_tx_bw_mode = bw_mode;
-
-	if (update == _TRUE) {
-		struct sta_info *sta;
-		int i;
-
-		for (i = 0; i < MACID_NUM_SW_LIMIT; i++) {
-			sta = macid_ctl->sta[i];
-			if (sta && !is_broadcast_mac_addr(sta->cmn.mac_addr))
-				rtw_dm_ra_mask_wk_cmd(adapter, (u8 *)sta);
-		}
-	}
-}
-
 static ssize_t proc_set_tx_bw_mode(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data)
 {
 	struct net_device *dev = data;
 	_adapter *adapter = (_adapter *)rtw_netdev_priv(dev);
+	struct macid_ctl_t *macid_ctl = &adapter->dvobj->macid_ctl;
+	struct mlme_priv *mlme = &(adapter->mlmepriv);
+	struct mlme_ext_priv *mlmeext = &(adapter->mlmeextpriv);
 	char tmp[32];
 	u8 bw_mode;
 
@@ -1632,12 +1594,31 @@ static ssize_t proc_set_tx_bw_mode(struct file *file, const char __user *buffer,
 
 	if (buffer && !copy_from_user(tmp, buffer, count)) {
 
+		u8 update = _FALSE;
 		int num = sscanf(tmp, "%hhx", &bw_mode);
 
 		if (num < 1 || bw_mode == adapter->driver_tx_bw_mode)
 			goto exit;
 
-		rtw_set_tx_bw_mode(adapter, bw_mode);
+		if ((MLME_STATE(adapter) & WIFI_ASOC_STATE)
+			&& ((mlmeext->cur_channel <= 14 && BW_MODE_2G(bw_mode) != ADAPTER_TX_BW_2G(adapter))
+				|| (mlmeext->cur_channel >= 36 && BW_MODE_5G(bw_mode) != ADAPTER_TX_BW_5G(adapter)))
+		) {
+			/* RA mask update needed */
+			update = _TRUE;
+		}
+		adapter->driver_tx_bw_mode = bw_mode;
+
+		if (update == _TRUE) {
+			struct sta_info *sta;
+			int i;
+
+			for (i = 0; i < MACID_NUM_SW_LIMIT; i++) {
+				sta = macid_ctl->sta[i];
+				if (sta && !is_broadcast_mac_addr(sta->cmn.mac_addr))
+					rtw_dm_ra_mask_wk_cmd(adapter, (u8 *)sta);
+			}
+		}
 	}
 
 exit:
@@ -2769,179 +2750,6 @@ exit:
 	return count;
 }
 
-static int proc_get_scan_deny(struct seq_file *m, void *v)
-{
-	struct net_device *dev = m->private;
-	struct _ADAPTER *adapter= (_adapter *)rtw_netdev_priv(dev);
-	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
-
-	RTW_PRINT_SEL(m, "scan_deny is %s\n", (dvobj->scan_deny == _TRUE) ? "enable":"disable");
-
-	return 0;
-}
-
-static ssize_t proc_set_scan_deny(struct file *file, const char __user *buffer,
-				size_t count, loff_t *pos, void *data)
-{
-	struct net_device *dev = data;
-	struct _ADAPTER *adapter = (_adapter *)rtw_netdev_priv(dev);
-	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
-	char tmp[8];
-	int num = 0;
-	int enable = 0;
-
-	if (count > sizeof(tmp)) {
-		rtw_warn_on(1);
-		return -EFAULT;
-	}
-
-	if (!buffer || copy_from_user(tmp, buffer, count))
-		goto exit;
-
-	num = sscanf(tmp, "%d", &enable);
-	if (num !=  1) {
-		RTW_ERR("%s: invalid parameter!\n", __FUNCTION__);
-		goto exit;
-	}
-
-	dvobj->scan_deny = enable ? _TRUE : _FALSE;
-
-	RTW_PRINT("%s: scan_deny is %s\n",
-		  __FUNCTION__, (dvobj->scan_deny == _TRUE) ? "enable":"disable");
-
-exit:
-	return count;
-}
-
-#ifdef CONFIG_RTW_TPT_MODE
-static int proc_get_tpt_mode(struct seq_file *m, void *v)
-{
-	struct net_device *dev = m->private;
-	struct _ADAPTER *adapter= (_adapter *)rtw_netdev_priv(dev);
-	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
-
-	RTW_PRINT_SEL(m, "current tpt_mode = %d\n", dvobj->tpt_mode);
-
-	return 0;
-}
-
-static void tpt_mode_default(struct _ADAPTER *adapter)
-{
-	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
-
-	/* 1. disable scan deny */
-	dvobj->scan_deny = _FALSE;
-
-	/* 2. back to original LPS mode */
-#ifdef CONFIG_LPS
-	rtw_pm_set_lps(adapter, adapter->registrypriv.power_mgnt);
-#endif
-
-	/* 3. back to original 2.4 tx bw mode */
-	rtw_set_tx_bw_mode(adapter, adapter->registrypriv.tx_bw_mode);
-}
-
-static void rtw_tpt_mode(struct _ADAPTER *adapter)
-{
-	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
-	struct pwrctrl_priv *pwrctrlpriv = adapter_to_pwrctl(adapter);
-
-	if (dvobj->tpt_mode > 0) {
-
-		/* when enable each tpt mode
-			1. scan deny
-			2. disable LPS */
-
-		dvobj->scan_deny = _TRUE;
-
-#ifdef CONFIG_LPS
-		rtw_pm_set_lps(adapter, PS_MODE_ACTIVE);
-#endif
-
-	}
-
-	switch (dvobj->tpt_mode) {
-		case 0: /* default mode */
-			tpt_mode_default(adapter);
-			break;
-		case 1: /* High TP*/
-			/*tpt_mode1(adapter);*/
-			dvobj->edca_be_ul = 0x5e431c;
-			dvobj->edca_be_dl = 0x00431c;
-			break;
-		case 2: /* noise */
-			/* tpt_mode2(adapter); */
-			dvobj->edca_be_ul = 0x00431c;
-			dvobj->edca_be_dl = 0x00431c;
-
-			rtw_set_tx_bw_mode(adapter, 0x20); /* for 2.4g, fixed tx_bw_mode to 20Mhz */
-			break;
-		case 3: /* long distance */
-			/* tpt_mode3(adapter); */
-			dvobj->edca_be_ul = 0x00431c;
-			dvobj->edca_be_dl = 0x00431c;
-
-			rtw_set_tx_bw_mode(adapter, 0x20); /* for 2.4g, fixed tx_bw_mode to 20Mhz */
-			break;
-		case 4: /* noise + long distance */
-			/* tpt_mode4(adapter); */
-			dvobj->edca_be_ul = 0x00431c;
-			dvobj->edca_be_dl = 0x00431c;
-
-			rtw_set_tx_bw_mode(adapter, 0x20); /* for 2.4g, fixed tx_bw_mode to 20Mhz */
-			break;
-		default: /* default mode */
-			tpt_mode_default(adapter);
-			break;
-	}
-
-}
-
-static ssize_t proc_set_tpt_mode(struct file *file, const char __user *buffer,
-				size_t count, loff_t *pos, void *data)
-{
-	struct net_device *dev = data;
-	struct _ADAPTER *adapter = (_adapter *)rtw_netdev_priv(dev);
-	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
-	char tmp[32];
-	int num = 0;
-	int mode = 0;
-
-#define MAX_TPT_MODE_NUM 4
-
-	if (count > sizeof(tmp)) {
-		rtw_warn_on(1);
-		return -EFAULT;
-	}
-
-	if (!buffer || copy_from_user(tmp, buffer, count))
-		goto exit;
-
-	num = sscanf(tmp, "%d", &mode);
-	if (num !=  1) {
-		RTW_ERR("%s: invalid parameter!\n", __FUNCTION__);
-		goto exit;
-	}
-
-	if (mode > MAX_TPT_MODE_NUM)
-		mode = 0;
-
-	RTW_PRINT("%s: previous mode =  %d\n",
-		  __FUNCTION__, dvobj->tpt_mode);
-
-	RTW_PRINT("%s: enabled mode = %d\n",
-		  __FUNCTION__, mode);
-
-	dvobj->tpt_mode = mode;
-
-	rtw_tpt_mode(adapter);
-
-exit:
-	return count;
-
-}
-#endif /* CONFIG_RTW_TPT_MODE */
-
 /*
 * rtw_adapter_proc:
 * init/deinit when register/unregister net_device
@@ -3065,10 +2873,6 @@ const struct rtw_proc_hdl adapter_proc_hdls[] = {
 	RTW_PROC_HDL_SSEQ("sreset", proc_get_sreset, proc_set_sreset),
 #endif /* DBG_CONFIG_ERROR_DETECT */
 	RTW_PROC_HDL_SSEQ("trx_info_debug", proc_get_trx_info_debug, NULL),
-
-#ifdef CONFIG_HUAWEI_PROC
-	RTW_PROC_HDL_SSEQ("huawei_trx_info", proc_get_huawei_trx_info, NULL),
-#endif
 	RTW_PROC_HDL_SSEQ("linked_info_dump", proc_get_linked_info_dump, proc_set_linked_info_dump),
 	RTW_PROC_HDL_SSEQ("sta_tp_dump", proc_get_sta_tp_dump, proc_set_sta_tp_dump),
 	RTW_PROC_HDL_SSEQ("sta_tp_info", proc_get_sta_tp_info, NULL),
@@ -3155,10 +2959,10 @@ const struct rtw_proc_hdl adapter_proc_hdls[] = {
 	RTW_PROC_HDL_SSEQ("kfree_thermal", proc_get_kfree_thermal, proc_set_kfree_thermal),
 #endif
 #ifdef CONFIG_POWER_SAVING
-	RTW_PROC_HDL_SSEQ("ps_info", proc_get_ps_info, proc_set_ps_info),
+	RTW_PROC_HDL_SSEQ("ps_info", proc_get_ps_info, NULL),
 #ifdef CONFIG_WMMPS_STA
 	RTW_PROC_HDL_SSEQ("wmmps_info", proc_get_wmmps_info, proc_set_wmmps_info),
-#endif /* CONFIG_WMMPS_STA */
+#endif /* CONFIG_WMMPS_STA */	
 #endif
 #ifdef CONFIG_TDLS
 	RTW_PROC_HDL_SSEQ("tdls_info", proc_get_tdls_info, NULL),
@@ -3228,25 +3032,7 @@ const struct rtw_proc_hdl adapter_proc_hdls[] = {
 
 	RTW_PROC_HDL_SSEQ("dynamic_agg_enable", proc_get_dynamic_agg_enable, proc_set_dynamic_agg_enable),
 	RTW_PROC_HDL_SSEQ("iqk_fw_offload", proc_get_iqk_fw_offload, proc_set_iqk_fw_offload),
-
-#ifdef CONFIG_LPS_CHK_BY_TP
-	RTW_PROC_HDL_SSEQ("lps_chk_tp", proc_get_lps_chk_tp, proc_set_lps_chk_tp),
-#endif
-
 	RTW_PROC_HDL_SSEQ("vht_2g4", proc_get_vht_2g4, proc_set_vht_2g4),
-
-	RTW_PROC_HDL_SSEQ("scan_deny", proc_get_scan_deny, proc_set_scan_deny),
-#ifdef CONFIG_RTW_TPT_MODE
-	RTW_PROC_HDL_SSEQ("tpt_mode", proc_get_tpt_mode, proc_set_tpt_mode),
-#endif
-
-#ifdef CONFIG_CTRL_TXSS_BY_TP
-	RTW_PROC_HDL_SSEQ("txss_tp", proc_get_txss_tp, proc_set_txss_tp),
-	#ifdef DBG_CTRL_TXSS
-	RTW_PROC_HDL_SSEQ("txss_ctrl", proc_get_txss_ctrl, proc_set_txss_ctrl),
-	#endif
-#endif
-
 };
 
 const int adapter_proc_hdls_num = sizeof(adapter_proc_hdls) / sizeof(struct rtw_proc_hdl);
@@ -3285,6 +3071,23 @@ static ssize_t rtw_adapter_proc_write(struct file *file, const char __user *buff
 	return -EROFS;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0)
+static const struct proc_ops rtw_adapter_proc_seq_fops = {
+	.proc_open = rtw_adapter_proc_open,
+	.proc_read = seq_read,
+	.proc_lseek = seq_lseek,
+	.proc_release = seq_release,
+	.proc_write = rtw_adapter_proc_write,
+};
+
+static const struct proc_ops rtw_adapter_proc_sseq_fops = {
+	.proc_open = rtw_adapter_proc_open,
+	.proc_read = seq_read,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+	.proc_write = rtw_adapter_proc_write,
+};
+#else
 static const struct file_operations rtw_adapter_proc_seq_fops = {
 	.owner = THIS_MODULE,
 	.open = rtw_adapter_proc_open,
@@ -3302,6 +3105,7 @@ static const struct file_operations rtw_adapter_proc_sseq_fops = {
 	.release = single_release,
 	.write = rtw_adapter_proc_write,
 };
+#endif
 
 int proc_get_odm_adaptivity(struct seq_file *m, void *v)
 {
@@ -3457,6 +3261,23 @@ static ssize_t rtw_odm_proc_write(struct file *file, const char __user *buffer, 
 	return -EROFS;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0)
+static const struct proc_ops rtw_odm_proc_seq_fops = {
+	.proc_open = rtw_odm_proc_open,
+	.proc_read = seq_read,
+	.proc_lseek = seq_lseek,
+	.proc_release = seq_release,
+	.proc_write = rtw_odm_proc_write,
+};
+
+static const struct proc_ops rtw_odm_proc_sseq_fops = {
+	.proc_open = rtw_odm_proc_open,
+	.proc_read = seq_read,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+	.proc_write = rtw_odm_proc_write,
+};
+#else
 static const struct file_operations rtw_odm_proc_seq_fops = {
 	.owner = THIS_MODULE,
 	.open = rtw_odm_proc_open,
@@ -3474,6 +3295,7 @@ static const struct file_operations rtw_odm_proc_sseq_fops = {
 	.release = single_release,
 	.write = rtw_odm_proc_write,
 };
+#endif
 
 struct proc_dir_entry *rtw_odm_proc_init(struct net_device *dev)
 {

@@ -21,20 +21,25 @@
  *
  * Authors: Alex Deucher
  */
+
 #include <linux/firmware.h>
-#include <linux/slab.h>
 #include <linux/module.h>
-#include <drm/drmP.h>
+#include <linux/pci.h>
+#include <linux/slab.h>
+
+#include <drm/radeon_drm.h>
+
+#include "atom.h"
+#include "cayman_blit_shaders.h"
+#include "clearstate_cayman.h"
+#include "evergreen.h"
+#include "ni.h"
+#include "ni_reg.h"
+#include "nid.h"
 #include "radeon.h"
 #include "radeon_asic.h"
 #include "radeon_audio.h"
-#include <drm/radeon_drm.h>
-#include "nid.h"
-#include "atom.h"
-#include "ni_reg.h"
-#include "cayman_blit_shaders.h"
 #include "radeon_ucode.h"
-#include "clearstate_cayman.h"
 
 /*
  * Indirect registers accessor
@@ -186,21 +191,6 @@ static const u32 tn_rlc_save_restore_register_list[] =
 	0x9830,
 	0x802c,
 };
-
-extern bool evergreen_is_display_hung(struct radeon_device *rdev);
-extern void evergreen_print_gpu_status_regs(struct radeon_device *rdev);
-extern void evergreen_mc_stop(struct radeon_device *rdev, struct evergreen_mc_save *save);
-extern void evergreen_mc_resume(struct radeon_device *rdev, struct evergreen_mc_save *save);
-extern int evergreen_mc_wait_for_idle(struct radeon_device *rdev);
-extern void evergreen_mc_program(struct radeon_device *rdev);
-extern void evergreen_irq_suspend(struct radeon_device *rdev);
-extern int evergreen_mc_init(struct radeon_device *rdev);
-extern void evergreen_fix_pci_max_read_req_size(struct radeon_device *rdev);
-extern void evergreen_pcie_gen2_enable(struct radeon_device *rdev);
-extern void evergreen_program_aspm(struct radeon_device *rdev);
-extern void sumo_rlc_fini(struct radeon_device *rdev);
-extern int sumo_rlc_init(struct radeon_device *rdev);
-extern void evergreen_gpu_pci_config_reset(struct radeon_device *rdev);
 
 /* Firmware Names */
 MODULE_FIRMWARE("radeon/BARTS_pfp.bin");
@@ -774,8 +764,7 @@ int ni_init_microcode(struct radeon_device *rdev)
 	if (err)
 		goto out;
 	if (rdev->pfp_fw->size != pfp_req_size) {
-		printk(KERN_ERR
-		       "ni_cp: Bogus length %zu in firmware \"%s\"\n",
+		pr_err("ni_cp: Bogus length %zu in firmware \"%s\"\n",
 		       rdev->pfp_fw->size, fw_name);
 		err = -EINVAL;
 		goto out;
@@ -786,8 +775,7 @@ int ni_init_microcode(struct radeon_device *rdev)
 	if (err)
 		goto out;
 	if (rdev->me_fw->size != me_req_size) {
-		printk(KERN_ERR
-		       "ni_cp: Bogus length %zu in firmware \"%s\"\n",
+		pr_err("ni_cp: Bogus length %zu in firmware \"%s\"\n",
 		       rdev->me_fw->size, fw_name);
 		err = -EINVAL;
 	}
@@ -797,8 +785,7 @@ int ni_init_microcode(struct radeon_device *rdev)
 	if (err)
 		goto out;
 	if (rdev->rlc_fw->size != rlc_req_size) {
-		printk(KERN_ERR
-		       "ni_rlc: Bogus length %zu in firmware \"%s\"\n",
+		pr_err("ni_rlc: Bogus length %zu in firmware \"%s\"\n",
 		       rdev->rlc_fw->size, fw_name);
 		err = -EINVAL;
 	}
@@ -810,8 +797,7 @@ int ni_init_microcode(struct radeon_device *rdev)
 		if (err)
 			goto out;
 		if (rdev->mc_fw->size != mc_req_size) {
-			printk(KERN_ERR
-			       "ni_mc: Bogus length %zu in firmware \"%s\"\n",
+			pr_err("ni_mc: Bogus length %zu in firmware \"%s\"\n",
 			       rdev->mc_fw->size, fw_name);
 			err = -EINVAL;
 		}
@@ -821,15 +807,12 @@ int ni_init_microcode(struct radeon_device *rdev)
 		snprintf(fw_name, sizeof(fw_name), "radeon/%s_smc.bin", chip_name);
 		err = request_firmware(&rdev->smc_fw, fw_name, rdev->dev);
 		if (err) {
-			printk(KERN_ERR
-			       "smc: error loading firmware \"%s\"\n",
-			       fw_name);
+			pr_err("smc: error loading firmware \"%s\"\n", fw_name);
 			release_firmware(rdev->smc_fw);
 			rdev->smc_fw = NULL;
 			err = 0;
 		} else if (rdev->smc_fw->size != smc_req_size) {
-			printk(KERN_ERR
-			       "ni_mc: Bogus length %zu in firmware \"%s\"\n",
+			pr_err("ni_mc: Bogus length %zu in firmware \"%s\"\n",
 			       rdev->mc_fw->size, fw_name);
 			err = -EINVAL;
 		}
@@ -838,8 +821,7 @@ int ni_init_microcode(struct radeon_device *rdev)
 out:
 	if (err) {
 		if (err != -EINVAL)
-			printk(KERN_ERR
-			       "ni_cp: Failed to load firmware \"%s\"\n",
+			pr_err("ni_cp: Failed to load firmware \"%s\"\n",
 			       fw_name);
 		release_firmware(rdev->pfp_fw);
 		rdev->pfp_fw = NULL;
@@ -896,7 +878,7 @@ int tn_get_temp(struct radeon_device *rdev)
 static void cayman_gpu_init(struct radeon_device *rdev)
 {
 	u32 gb_addr_config = 0;
-	u32 mc_shared_chmap, mc_arb_ramcfg;
+	u32 mc_arb_ramcfg;
 	u32 cgts_tcc_disable;
 	u32 sx_debug_1;
 	u32 smx_dc_ctl0;
@@ -1021,7 +1003,7 @@ static void cayman_gpu_init(struct radeon_device *rdev)
 
 	evergreen_fix_pci_max_read_req_size(rdev);
 
-	mc_shared_chmap = RREG32(MC_SHARED_CHMAP);
+	RREG32(MC_SHARED_CHMAP);
 	mc_arb_ramcfg = RREG32(MC_ARB_RAMCFG);
 
 	tmp = (mc_arb_ramcfg & NOOFCOLS_MASK) >> NOOFCOLS_SHIFT;
@@ -1156,6 +1138,7 @@ static void cayman_gpu_init(struct radeon_device *rdev)
 						rdev->config.cayman.max_shader_engines,
 						CAYMAN_MAX_BACKENDS, disabled_rb_mask);
 	}
+	rdev->config.cayman.backend_map = tmp;
 	WREG32(GB_BACKEND_MAP, tmp);
 
 	cgts_tcc_disable = 0xffff0000;
@@ -2021,7 +2004,7 @@ static void cayman_uvd_init(struct radeon_device *rdev)
 		 * there. So it is pointless to try to go through that code
 		 * hence why we disable uvd here.
 		 */
-		rdev->has_uvd = 0;
+		rdev->has_uvd = false;
 		return;
 	}
 	rdev->ring[R600_RING_TYPE_UVD_INDEX].ring_obj = NULL;
@@ -2089,7 +2072,7 @@ static void cayman_vce_init(struct radeon_device *rdev)
 		 * there. So it is pointless to try to go through that code
 		 * hence why we disable vce here.
 		 */
-		rdev->has_vce = 0;
+		rdev->has_vce = false;
 		return;
 	}
 	rdev->ring[TN_RING_TYPE_VCE1_INDEX].ring_obj = NULL;
@@ -2686,10 +2669,8 @@ void cayman_vm_decode_fault(struct radeon_device *rdev,
 	       block, mc_id);
 }
 
-/**
+/*
  * cayman_vm_flush - vm flush using the CP
- *
- * @rdev: radeon_device pointer
  *
  * Update the page table base and flush the VM TLB
  * using the CP (cayman-si).

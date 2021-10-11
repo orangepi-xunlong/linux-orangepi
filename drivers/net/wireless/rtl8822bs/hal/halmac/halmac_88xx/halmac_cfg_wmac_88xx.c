@@ -15,16 +15,8 @@
 
 #include "halmac_cfg_wmac_88xx.h"
 #include "halmac_88xx_cfg.h"
-#include "halmac_efuse_88xx.h"
 
 #if HALMAC_88XX_SUPPORT
-
-#define EFUSE_PCB_INFO_OFFSET	0xCA
-
-static HALMAC_RET_STATUS
-board_rf_fine_tune_88xx(
-	IN PHALMAC_ADAPTER adapter
-);
 
 /**
  * halmac_cfg_mac_addr_88xx() - config mac address
@@ -825,10 +817,10 @@ halmac_cfg_bw_88xx(
 
 	switch (bw) {
 	case HALMAC_BW_80:
-		value32 = value32 | BIT(8);
+		value32 = value32 | BIT(7);
 		break;
 	case HALMAC_BW_40:
-		value32 = value32 | BIT(7);
+		value32 = value32 | BIT(8);
 		break;
 	case HALMAC_BW_20:
 	case HALMAC_BW_10:
@@ -854,7 +846,7 @@ halmac_cfg_bw_88xx(
 	return HALMAC_RET_SUCCESS;
 }
 
-HALMAC_RET_STATUS
+VOID
 halmac_enable_bb_rf_88xx(
 	IN PHALMAC_ADAPTER pHalmac_adapter,
 	IN u8 enable
@@ -863,12 +855,10 @@ halmac_enable_bb_rf_88xx(
 	u8 value8;
 	u32 value32;
 	PHALMAC_API pHalmac_api;
-	HALMAC_RET_STATUS status = HALMAC_RET_SUCCESS;
 
 	pHalmac_api = (PHALMAC_API)pHalmac_adapter->pHalmac_api;
 
 	if (enable == 1) {
-		status = board_rf_fine_tune_88xx(pHalmac_adapter);
 		value8 = HALMAC_REG_READ_8(pHalmac_adapter, REG_SYS_FUNC_EN);
 		value8 = value8 | BIT(0) | BIT(1);
 		HALMAC_REG_WRITE_8(pHalmac_adapter, REG_SYS_FUNC_EN, value8);
@@ -893,52 +883,6 @@ halmac_enable_bb_rf_88xx(
 		value32 = value32 & (~(BIT(24) | BIT(25) | BIT(26)));
 		HALMAC_REG_WRITE_32(pHalmac_adapter, REG_WLRF1, value32);
 	}
-
-	return status;
-}
-
-static HALMAC_RET_STATUS
-board_rf_fine_tune_88xx(
-	IN PHALMAC_ADAPTER pHalmac_adapter
-)
-{
-	u8 *map = NULL;
-	u32 size = pHalmac_adapter->hw_config_info.eeprom_size;
-	PHALMAC_API pHalmac_api;
-	VOID *drv_adapter = NULL;
-
-	drv_adapter = pHalmac_adapter->pDriver_adapter;
-	pHalmac_api = (PHALMAC_API)pHalmac_adapter->pHalmac_api;
-
-	if (pHalmac_adapter->chip_id == HALMAC_CHIP_ID_8822B) {
-		if (!pHalmac_adapter->hal_efuse_map_valid || !pHalmac_adapter->pHalEfuse_map) {
-			PLATFORM_MSG_PRINT(drv_adapter, HALMAC_MSG_INIT, HALMAC_DBG_ERR, "[ERR]efuse map invalid!!\n\n");
-			return HALMAC_RET_EFUSE_R_FAIL;
-		}
-
-		map = (u8 *)PLATFORM_RTL_MALLOC(drv_adapter, size);
-		if (!map) {
-			PLATFORM_MSG_PRINT(drv_adapter, HALMAC_MSG_INIT, HALMAC_DBG_ERR, "[ERR]malloc map\n");
-			return HALMAC_RET_MALLOC_FAIL;
-		}
-
-		PLATFORM_RTL_MEMSET(drv_adapter, map, 0xFF, size);
-
-		if (halmac_eeprom_parser_88xx(pHalmac_adapter, pHalmac_adapter->pHalEfuse_map, map) !=
-		    HALMAC_RET_SUCCESS) {
-			PLATFORM_RTL_FREE(drv_adapter, map, size);
-			return HALMAC_RET_EEPROM_PARSING_FAIL;
-		}
-
-		/* Fine-tune XTAL voltage for 2L PCB board */
-		if (*(map + EFUSE_PCB_INFO_OFFSET) == 0x0C)
-			HALMAC_REG_WRITE_8(pHalmac_adapter, REG_AFE_CTRL1 + 1,
-					   HALMAC_REG_READ_8(pHalmac_adapter, REG_AFE_CTRL1 + 1) | BIT(1));
-
-		PLATFORM_RTL_FREE(drv_adapter, map, size);
-	}
-
-	return HALMAC_RET_SUCCESS;
 }
 
 VOID

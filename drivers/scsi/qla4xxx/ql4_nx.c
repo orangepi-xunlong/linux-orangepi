@@ -1,8 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * QLogic iSCSI HBA Driver
  * Copyright (c)  2003-2013 QLogic Corporation
- *
- * See LICENSE.qla4xxx for copyright and licensing details.
  */
 #include <linux/delay.h>
 #include <linux/io.h>
@@ -45,6 +44,8 @@ qla4_8xxx_pci_base_offsetfset(struct scsi_qla_host *ha, unsigned long off)
 	return NULL;
 }
 
+static const int MD_MIU_TEST_AGT_RDDATA[] = { 0x410000A8,
+				0x410000AC, 0x410000B8, 0x410000BC };
 #define MAX_CRB_XFORM 60
 static unsigned long crb_addr_xform[MAX_CRB_XFORM];
 static int qla4_8xxx_crb_table_initialized;
@@ -374,6 +375,35 @@ qla4_82xx_pci_set_crbwindow_2M(struct scsi_qla_host *ha, ulong *off)
 	*off = (*off & MASK(16)) + CRB_INDIRECT_2M + ha->nx_pcibase;
 }
 
+#define CRB_WIN_LOCK_TIMEOUT 100000000
+
+/*
+ * Context: atomic
+ */
+static int qla4_82xx_crb_win_lock(struct scsi_qla_host *ha)
+{
+	int done = 0, timeout = 0;
+
+	while (!done) {
+		/* acquire semaphore3 from PCI HW block */
+		done = qla4_82xx_rd_32(ha, QLA82XX_PCIE_REG(PCIE_SEM7_LOCK));
+		if (done == 1)
+			break;
+		if (timeout >= CRB_WIN_LOCK_TIMEOUT)
+			return -1;
+
+		timeout++;
+		udelay(10);
+	}
+	qla4_82xx_wr_32(ha, QLA82XX_CRB_WIN_LOCK_ID, ha->func_num);
+	return 0;
+}
+
+void qla4_82xx_crb_win_unlock(struct scsi_qla_host *ha)
+{
+	qla4_82xx_rd_32(ha, QLA82XX_PCIE_REG(PCIE_SEM7_UNLOCK));
+}
+
 void
 qla4_82xx_wr_32(struct scsi_qla_host *ha, ulong off, u32 data)
 {
@@ -474,40 +504,6 @@ int qla4_82xx_md_wr_32(struct scsi_qla_host *ha, uint32_t off, uint32_t data)
 	return rval;
 }
 
-#define CRB_WIN_LOCK_TIMEOUT 100000000
-
-int qla4_82xx_crb_win_lock(struct scsi_qla_host *ha)
-{
-	int i;
-	int done = 0, timeout = 0;
-
-	while (!done) {
-		/* acquire semaphore3 from PCI HW block */
-		done = qla4_82xx_rd_32(ha, QLA82XX_PCIE_REG(PCIE_SEM7_LOCK));
-		if (done == 1)
-			break;
-		if (timeout >= CRB_WIN_LOCK_TIMEOUT)
-			return -1;
-
-		timeout++;
-
-		/* Yield CPU */
-		if (!in_interrupt())
-			schedule();
-		else {
-			for (i = 0; i < 20; i++)
-				cpu_relax();    /*This a nop instr on i386*/
-		}
-	}
-	qla4_82xx_wr_32(ha, QLA82XX_CRB_WIN_LOCK_ID, ha->func_num);
-	return 0;
-}
-
-void qla4_82xx_crb_win_unlock(struct scsi_qla_host *ha)
-{
-	qla4_82xx_rd_32(ha, QLA82XX_PCIE_REG(PCIE_SEM7_UNLOCK));
-}
-
 #define IDC_LOCK_TIMEOUT 100000000
 
 /**
@@ -516,11 +512,14 @@ void qla4_82xx_crb_win_unlock(struct scsi_qla_host *ha)
  *
  * General purpose lock used to synchronize access to
  * CRB_DEV_STATE, CRB_DEV_REF_COUNT, etc.
+ *
+ * Context: task, can sleep
  **/
 int qla4_82xx_idc_lock(struct scsi_qla_host *ha)
 {
-	int i;
 	int done = 0, timeout = 0;
+
+	might_sleep();
 
 	while (!done) {
 		/* acquire semaphore5 from PCI HW block */
@@ -531,14 +530,7 @@ int qla4_82xx_idc_lock(struct scsi_qla_host *ha)
 			return -1;
 
 		timeout++;
-
-		/* Yield CPU */
-		if (!in_interrupt())
-			schedule();
-		else {
-			for (i = 0; i < 20; i++)
-				cpu_relax();    /*This a nop instr on i386*/
-		}
+		msleep(100);
 	}
 	return 0;
 }
@@ -879,15 +871,18 @@ qla4_82xx_decode_crb_addr(unsigned long addr)
 static long rom_max_timeout = 100;
 static long qla4_82xx_rom_lock_timeout = 100;
 
+/*
+ * Context: task, can_sleep
+ */
 static int
 qla4_82xx_rom_lock(struct scsi_qla_host *ha)
 {
-	int i;
 	int done = 0, timeout = 0;
+
+	might_sleep();
 
 	while (!done) {
 		/* acquire semaphore2 from PCI HW block */
-
 		done = qla4_82xx_rd_32(ha, QLA82XX_PCIE_REG(PCIE_SEM2_LOCK));
 		if (done == 1)
 			break;
@@ -895,14 +890,7 @@ qla4_82xx_rom_lock(struct scsi_qla_host *ha)
 			return -1;
 
 		timeout++;
-
-		/* Yield CPU */
-		if (!in_interrupt())
-			schedule();
-		else {
-			for (i = 0; i < 20; i++)
-				cpu_relax();    /*This a nop instr on i386*/
-		}
+		msleep(20);
 	}
 	qla4_82xx_wr_32(ha, QLA82XX_ROM_LOCK_ID, ROM_LOCK_DRIVER);
 	return 0;
@@ -972,10 +960,10 @@ qla4_82xx_rom_fast_read(struct scsi_qla_host *ha, int addr, int *valp)
 	return ret;
 }
 
-/**
+/*
  * This routine does CRB initialize sequence
  * to put the ISP into operational state
- **/
+ */
 static int
 qla4_82xx_pinit_from_rom(struct scsi_qla_host *ha, int verbose)
 {
@@ -1075,7 +1063,7 @@ qla4_82xx_pinit_from_rom(struct scsi_qla_host *ha, int verbose)
 	ql4_printk(KERN_INFO, ha,
 		"%s: %d CRB init values found in ROM.\n", DRIVER_NAME, n);
 
-	buf = kmalloc(n * sizeof(struct crb_addr_pair), GFP_KERNEL);
+	buf = kmalloc_array(n, sizeof(struct crb_addr_pair), GFP_KERNEL);
 	if (buf == NULL) {
 		ql4_printk(KERN_WARNING, ha,
 		    "%s: [ERROR] Unable to malloc memory.\n", DRIVER_NAME);
@@ -1779,7 +1767,7 @@ qla4_82xx_start_firmware(struct scsi_qla_host *ha, uint32_t image_start)
 
 int qla4_82xx_try_start_fw(struct scsi_qla_host *ha)
 {
-	int rval = QLA_ERROR;
+	int rval;
 
 	/*
 	 * FW Load priority:
@@ -2643,7 +2631,7 @@ static uint32_t qla4_84xx_minidump_process_rddfe(struct scsi_qla_host *ha,
 	uint32_t addr1, addr2, value, data, temp, wrval;
 	uint8_t stride, stride2;
 	uint16_t count;
-	uint32_t poll, mask, data_size, modify_mask;
+	uint32_t poll, mask, modify_mask;
 	uint32_t wait_count = 0;
 	uint32_t *data_ptr = *d_ptr;
 	struct qla8044_minidump_entry_rddfe *rddfe;
@@ -2659,7 +2647,6 @@ static uint32_t qla4_84xx_minidump_process_rddfe(struct scsi_qla_host *ha,
 	poll = le32_to_cpu(rddfe->poll);
 	mask = le32_to_cpu(rddfe->mask);
 	modify_mask = le32_to_cpu(rddfe->modify_mask);
-	data_size = le32_to_cpu(rddfe->data_size);
 
 	addr2 = addr1 + stride;
 
@@ -2740,7 +2727,7 @@ static uint32_t qla4_84xx_minidump_process_rdmdio(struct scsi_qla_host *ha,
 	uint8_t stride1, stride2;
 	uint32_t addr3, addr4, addr5, addr6, addr7;
 	uint16_t count, loop_cnt;
-	uint32_t poll, mask;
+	uint32_t mask;
 	uint32_t *data_ptr = *d_ptr;
 	struct qla8044_minidump_entry_rdmdio *rdmdio;
 
@@ -2752,7 +2739,6 @@ static uint32_t qla4_84xx_minidump_process_rdmdio(struct scsi_qla_host *ha,
 	stride2 = le32_to_cpu(rdmdio->stride_2);
 	count = le32_to_cpu(rdmdio->count);
 
-	poll = le32_to_cpu(rdmdio->poll);
 	mask = le32_to_cpu(rdmdio->mask);
 	value2 = le32_to_cpu(rdmdio->value_2);
 
@@ -2811,7 +2797,7 @@ static uint32_t qla4_84xx_minidump_process_pollwr(struct scsi_qla_host *ha,
 				struct qla8xxx_minidump_entry_hdr *entry_hdr,
 				uint32_t **d_ptr)
 {
-	uint32_t addr1, addr2, value1, value2, poll, mask, r_value;
+	uint32_t addr1, addr2, value1, value2, poll, r_value;
 	struct qla8044_minidump_entry_pollwr *pollwr_hdr;
 	uint32_t wait_count = 0;
 	uint32_t rval = QLA_SUCCESS;
@@ -2823,7 +2809,6 @@ static uint32_t qla4_84xx_minidump_process_pollwr(struct scsi_qla_host *ha,
 	value2 = le32_to_cpu(pollwr_hdr->value_2);
 
 	poll = le32_to_cpu(pollwr_hdr->poll);
-	mask = le32_to_cpu(pollwr_hdr->mask);
 
 	while (wait_count < poll) {
 		ha->isp_ops->rd_reg_indirect(ha, addr1, &r_value);
@@ -3218,6 +3203,7 @@ md_failed:
 /**
  * qla4_8xxx_uevent_emit - Send uevent when the firmware dump is ready.
  * @ha: pointer to adapter structure
+ * @code: uevent code to act upon
  **/
 static void qla4_8xxx_uevent_emit(struct scsi_qla_host *ha, u32 code)
 {
@@ -3226,7 +3212,7 @@ static void qla4_8xxx_uevent_emit(struct scsi_qla_host *ha, u32 code)
 
 	switch (code) {
 	case QL4_UEVENT_CODE_FW_DUMP:
-		snprintf(event_string, sizeof(event_string), "FW_DUMP=%ld",
+		snprintf(event_string, sizeof(event_string), "FW_DUMP=%lu",
 			 ha->host_no);
 		break;
 	default:
@@ -3648,12 +3634,6 @@ flash_conf_addr(struct ql82xx_hw_data *hw, uint32_t faddr)
 	return hw->flash_conf_off | faddr;
 }
 
-static inline uint32_t
-flash_data_addr(struct ql82xx_hw_data *hw, uint32_t faddr)
-{
-	return hw->flash_data_off | faddr;
-}
-
 static uint32_t *
 qla4_82xx_read_flash_data(struct scsi_qla_host *ha, uint32_t *dwptr,
     uint32_t faddr, uint32_t length)
@@ -3686,9 +3666,9 @@ done_read:
 	return dwptr;
 }
 
-/**
+/*
  * Address and length are byte address
- **/
+ */
 static uint8_t *
 qla4_82xx_read_optrom_data(struct scsi_qla_host *ha, uint8_t *buf,
 		uint32_t offset, uint32_t length)
@@ -3945,7 +3925,7 @@ void qla4_82xx_process_mbox_intr(struct scsi_qla_host *ha, int out_count)
 		ha->isp_ops->interrupt_service_routine(ha, intr_status);
 
 		if (test_bit(AF_INTERRUPTS_ON, &ha->flags) &&
-		    test_bit(AF_INTx_ENABLED, &ha->flags))
+		    (!ha->pdev->msi_enabled && !ha->pdev->msix_enabled))
 			qla4_82xx_wr_32(ha, ha->nx_legacy_intr.tgt_mask_reg,
 					0xfbff);
 	}
@@ -4058,7 +4038,6 @@ int qla4_8xxx_get_sys_info(struct scsi_qla_host *ha)
 		return status;
 	}
 
-	memset(sys_info, 0, sizeof(*sys_info));
 	memset(&mbox_cmd, 0, sizeof(mbox_cmd));
 	memset(&mbox_sts, 0, sizeof(mbox_sts));
 
@@ -4094,12 +4073,8 @@ int qla4_8xxx_get_sys_info(struct scsi_qla_host *ha)
 	ha->phy_port_num = sys_info->port_num;
 	ha->iscsi_pci_func_cnt = sys_info->iscsi_pci_func_cnt;
 
-	DEBUG2(printk("scsi%ld: %s: "
-	    "mac %02x:%02x:%02x:%02x:%02x:%02x "
-	    "serial %s\n", ha->host_no, __func__,
-	    ha->my_mac[0], ha->my_mac[1], ha->my_mac[2],
-	    ha->my_mac[3], ha->my_mac[4], ha->my_mac[5],
-	    ha->serial_number));
+	DEBUG2(printk("scsi%ld: %s: mac %pM serial %s\n",
+	    ha->host_no, __func__, ha->my_mac, ha->serial_number));
 
 	status = QLA_SUCCESS;
 
@@ -4178,78 +4153,37 @@ qla4_82xx_disable_intrs(struct scsi_qla_host *ha)
 	spin_unlock_irq(&ha->hardware_lock);
 }
 
-struct ql4_init_msix_entry {
-	uint16_t entry;
-	uint16_t index;
-	const char *name;
-	irq_handler_t handler;
-};
-
-static struct ql4_init_msix_entry qla4_8xxx_msix_entries[QLA_MSIX_ENTRIES] = {
-	{ QLA_MSIX_DEFAULT, QLA_MIDX_DEFAULT,
-	    "qla4xxx (default)",
-	    (irq_handler_t)qla4_8xxx_default_intr_handler },
-	{ QLA_MSIX_RSP_Q, QLA_MIDX_RSP_Q,
-	    "qla4xxx (rsp_q)", (irq_handler_t)qla4_8xxx_msix_rsp_q },
-};
-
-void
-qla4_8xxx_disable_msix(struct scsi_qla_host *ha)
-{
-	int i;
-	struct ql4_msix_entry *qentry;
-
-	for (i = 0; i < QLA_MSIX_ENTRIES; i++) {
-		qentry = &ha->msix_entries[qla4_8xxx_msix_entries[i].index];
-		if (qentry->have_irq) {
-			free_irq(qentry->msix_vector, ha);
-			DEBUG2(ql4_printk(KERN_INFO, ha, "%s: %s\n",
-				__func__, qla4_8xxx_msix_entries[i].name));
-		}
-	}
-	pci_disable_msix(ha->pdev);
-	clear_bit(AF_MSIX_ENABLED, &ha->flags);
-}
-
 int
 qla4_8xxx_enable_msix(struct scsi_qla_host *ha)
 {
-	int i, ret;
-	struct msix_entry entries[QLA_MSIX_ENTRIES];
-	struct ql4_msix_entry *qentry;
+	int ret;
 
-	for (i = 0; i < QLA_MSIX_ENTRIES; i++)
-		entries[i].entry = qla4_8xxx_msix_entries[i].entry;
-
-	ret = pci_enable_msix_exact(ha->pdev, entries, ARRAY_SIZE(entries));
-	if (ret) {
+	ret = pci_alloc_irq_vectors(ha->pdev, QLA_MSIX_ENTRIES,
+			QLA_MSIX_ENTRIES, PCI_IRQ_MSIX);
+	if (ret < 0) {
 		ql4_printk(KERN_WARNING, ha,
 		    "MSI-X: Failed to enable support -- %d/%d\n",
 		    QLA_MSIX_ENTRIES, ret);
-		goto msix_out;
+		return ret;
 	}
-	set_bit(AF_MSIX_ENABLED, &ha->flags);
 
-	for (i = 0; i < QLA_MSIX_ENTRIES; i++) {
-		qentry = &ha->msix_entries[qla4_8xxx_msix_entries[i].index];
-		qentry->msix_vector = entries[i].vector;
-		qentry->msix_entry = entries[i].entry;
-		qentry->have_irq = 0;
-		ret = request_irq(qentry->msix_vector,
-		    qla4_8xxx_msix_entries[i].handler, 0,
-		    qla4_8xxx_msix_entries[i].name, ha);
-		if (ret) {
-			ql4_printk(KERN_WARNING, ha,
-			    "MSI-X: Unable to register handler -- %x/%d.\n",
-			    qla4_8xxx_msix_entries[i].index, ret);
-			qla4_8xxx_disable_msix(ha);
-			goto msix_out;
-		}
-		qentry->have_irq = 1;
-		DEBUG2(ql4_printk(KERN_INFO, ha, "%s: %s\n",
-			__func__, qla4_8xxx_msix_entries[i].name));
-	}
-msix_out:
+	ret = request_irq(pci_irq_vector(ha->pdev, 0),
+			qla4_8xxx_default_intr_handler, 0, "qla4xxx (default)",
+			ha);
+	if (ret)
+		goto out_free_vectors;
+
+	ret = request_irq(pci_irq_vector(ha->pdev, 1),
+			qla4_8xxx_msix_rsp_q, 0, "qla4xxx (rsp_q)", ha);
+	if (ret)
+		goto out_free_default_irq;
+
+	return 0;
+
+out_free_default_irq:
+	free_irq(pci_irq_vector(ha->pdev, 0), ha);
+out_free_vectors:
+	pci_free_irq_vectors(ha->pdev);
 	return ret;
 }
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * bt878.c: part of the driver for the Pinnacle PCTV Sat DVB PCI card
  *
@@ -7,32 +8,14 @@
  * Copyright (C) 1996,97,98 Ralph  Metzler (rjkm@metzlerbros.de)
  *                        & Marcus Metzler (mocm@metzlerbros.de)
  * (c) 1999,2000 Gerd Knorr <kraxel@goldbach.in-berlin.de>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
-
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
-
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
- * Or, point your browser to http://www.gnu.org/copyleft/gpl.html
- *
  */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
+#include <linux/pgtable.h>
 #include <asm/io.h>
 #include <linux/ioport.h>
-#include <asm/pgtable.h>
 #include <asm/page.h>
 #include <linux/types.h>
 #include <linux/interrupt.h>
@@ -40,8 +23,8 @@
 #include <linux/vmalloc.h>
 #include <linux/init.h>
 
-#include "dmxdev.h"
-#include "dvbdev.h"
+#include <media/dmxdev.h>
+#include <media/dvbdev.h>
 #include "bt878.h"
 #include "dst_priv.h"
 
@@ -84,14 +67,14 @@ EXPORT_SYMBOL(bt878);
 static void bt878_mem_free(struct bt878 *bt)
 {
 	if (bt->buf_cpu) {
-		pci_free_consistent(bt->dev, bt->buf_size, bt->buf_cpu,
-				    bt->buf_dma);
+		dma_free_coherent(&bt->dev->dev, bt->buf_size, bt->buf_cpu,
+				  bt->buf_dma);
 		bt->buf_cpu = NULL;
 	}
 
 	if (bt->risc_cpu) {
-		pci_free_consistent(bt->dev, bt->risc_size, bt->risc_cpu,
-				    bt->risc_dma);
+		dma_free_coherent(&bt->dev->dev, bt->risc_size, bt->risc_cpu,
+				  bt->risc_dma);
 		bt->risc_cpu = NULL;
 	}
 }
@@ -101,16 +84,16 @@ static int bt878_mem_alloc(struct bt878 *bt)
 	if (!bt->buf_cpu) {
 		bt->buf_size = 128 * 1024;
 
-		bt->buf_cpu = pci_zalloc_consistent(bt->dev, bt->buf_size,
-						    &bt->buf_dma);
+		bt->buf_cpu = dma_alloc_coherent(&bt->dev->dev, bt->buf_size,
+						 &bt->buf_dma, GFP_KERNEL);
 		if (!bt->buf_cpu)
 			return -ENOMEM;
 	}
 
 	if (!bt->risc_cpu) {
 		bt->risc_size = PAGE_SIZE;
-		bt->risc_cpu = pci_zalloc_consistent(bt->dev, bt->risc_size,
-						     &bt->risc_dma);
+		bt->risc_cpu = dma_alloc_coherent(&bt->dev->dev, bt->risc_size,
+						  &bt->risc_dma, GFP_KERNEL);
 		if (!bt->risc_cpu) {
 			bt878_mem_free(bt);
 			return -ENOMEM;
@@ -383,7 +366,7 @@ EXPORT_SYMBOL(bt878_device_control);
 		.driver_data = (unsigned long) name \
 	}
 
-static struct pci_device_id bt878_pci_tbl[] = {
+static const struct pci_device_id bt878_pci_tbl[] = {
 	BROOKTREE_878_DEVICE(0x0071, 0x0101, "Nebula Electronics DigiTV"),
 	BROOKTREE_878_DEVICE(0x1461, 0x0761, "AverMedia AverTV DVB-T 761"),
 	BROOKTREE_878_DEVICE(0x11bd, 0x001c, "Pinnacle PCTV Sat"),

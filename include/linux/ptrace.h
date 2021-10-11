@@ -1,12 +1,21 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_PTRACE_H
 #define _LINUX_PTRACE_H
 
 #include <linux/compiler.h>		/* For unlikely.  */
 #include <linux/sched.h>		/* For struct task_struct.  */
+#include <linux/sched/signal.h>		/* For send_sig(), same_thread_group(), etc. */
 #include <linux/err.h>			/* for IS_ERR_VALUE */
 #include <linux/bug.h>			/* For BUG_ON.  */
 #include <linux/pid_namespace.h>	/* For task_active_pid_ns.  */
 #include <uapi/linux/ptrace.h>
+#include <linux/seccomp.h>
+
+/* Add sp to seccomp_data, as seccomp is user API, we don't want to modify it */
+struct syscall_info {
+	__u64			sp;
+	struct seccomp_data	data;
+};
 
 extern int ptrace_access_vm(struct task_struct *tsk, unsigned long addr,
 			    void *buf, int len, unsigned int gup_flags);
@@ -60,8 +69,8 @@ extern void exit_ptrace(struct task_struct *tracer, struct list_head *dead);
 #define PTRACE_MODE_READ	0x01
 #define PTRACE_MODE_ATTACH	0x02
 #define PTRACE_MODE_NOAUDIT	0x04
-#define PTRACE_MODE_FSCREDS 0x08
-#define PTRACE_MODE_REALCREDS 0x10
+#define PTRACE_MODE_FSCREDS	0x08
+#define PTRACE_MODE_REALCREDS	0x10
 
 /* shorthands for READ/ATTACH and FSCREDS/REALCREDS combinations */
 #define PTRACE_MODE_READ_FSCREDS (PTRACE_MODE_READ | PTRACE_MODE_FSCREDS)
@@ -162,7 +171,7 @@ static inline void ptrace_event(int event, unsigned long message)
  *
  * Check whether @event is enabled and, if so, report @event and @pid
  * to the ptrace parent.  @pid is reported as the pid_t seen from the
- * the ptrace parent's pid namespace.
+ * ptrace parent's pid namespace.
  *
  * Called without locks.
  */
@@ -212,8 +221,6 @@ static inline void ptrace_init_task(struct task_struct *child, bool ptrace)
 			task_set_jobctl_pending(child, JOBCTL_TRAP_STOP);
 		else
 			sigaddset(&child->pending.signal, SIGSTOP);
-
-		set_tsk_thread_flag(child, TIF_SIGPENDING);
 	}
 	else
 		child->ptracer_cred = NULL;
@@ -336,15 +343,19 @@ static inline void user_enable_block_step(struct task_struct *task)
 extern void user_enable_block_step(struct task_struct *);
 #endif	/* arch_has_block_step */
 
-#ifdef ARCH_HAS_USER_SINGLE_STEP_INFO
-extern void user_single_step_siginfo(struct task_struct *tsk,
-				struct pt_regs *regs, siginfo_t *info);
+#ifdef ARCH_HAS_USER_SINGLE_STEP_REPORT
+extern void user_single_step_report(struct pt_regs *regs);
 #else
-static inline void user_single_step_siginfo(struct task_struct *tsk,
-				struct pt_regs *regs, siginfo_t *info)
+static inline void user_single_step_report(struct pt_regs *regs)
 {
-	memset(info, 0, sizeof(*info));
-	info->si_signo = SIGTRAP;
+	kernel_siginfo_t info;
+	clear_siginfo(&info);
+	info.si_signo = SIGTRAP;
+	info.si_errno = 0;
+	info.si_code = SI_USER;
+	info.si_pid = 0;
+	info.si_uid = 0;
+	force_sig_info(&info);
 }
 #endif
 
@@ -390,10 +401,6 @@ static inline void user_single_step_siginfo(struct task_struct *tsk,
 #define current_pt_regs() task_pt_regs(current)
 #endif
 
-#ifndef ptrace_signal_deliver
-#define ptrace_signal_deliver() ((void)0)
-#endif
-
 /*
  * unlike current_pt_regs(), this one is equal to task_pt_regs(current)
  * on *all* architectures; the only reason to have a per-arch definition
@@ -407,8 +414,7 @@ static inline void user_single_step_siginfo(struct task_struct *tsk,
 #define current_user_stack_pointer() user_stack_pointer(current_pt_regs())
 #endif
 
-extern int task_current_syscall(struct task_struct *target, long *callno,
-				unsigned long args[6], unsigned int maxargs,
-				unsigned long *sp, unsigned long *pc);
+extern int task_current_syscall(struct task_struct *target, struct syscall_info *info);
 
+extern void sigaction_compat_abi(struct k_sigaction *act, struct k_sigaction *oact);
 #endif

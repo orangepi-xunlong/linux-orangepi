@@ -925,5 +925,5 @@ int rtw_mp_iqk(struct net_device *dev,
 		 struct iw_point *wrqu, char *extra);
 int rtw_mp_lck(struct net_device *dev,
 		struct iw_request_info *info,
- 		struct iw_point *wrqu, char *extra);
+		struct iw_point *wrqu, char *extra);
 #endif /* _RTW_MP_H_ */

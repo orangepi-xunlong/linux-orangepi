@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  * ethtool.h: Defines for Linux ethtool.
  *
@@ -13,7 +14,7 @@
 #ifndef _UAPI_LINUX_ETHTOOL_H
 #define _UAPI_LINUX_ETHTOOL_H
 
-#include <linux/kernel.h>
+#include <linux/const.h>
 #include <linux/types.h>
 #include <linux/if_ether.h>
 
@@ -23,6 +24,14 @@
 
 /* All structures exposed to userland should be defined such that they
  * have the same layout for 32-bit and 64-bit userland.
+ */
+
+/* Note on reserved space.
+ * Reserved fields must not be accessed directly by user space because
+ * they may be replaced by a different field in the future. They must
+ * be initialized to zero before making the request, e.g. via memset
+ * of the entire structure or implicitly by not being set in a structure
+ * initializer.
  */
 
 /**
@@ -66,6 +75,7 @@
  *	and other link features that the link partner advertised
  *	through autonegotiation; 0 if unknown or not applicable.
  *	Read-only.
+ * @reserved: Reserved for future use; see the note on reserved space.
  *
  * The link speed in Mbps is split between @speed and @speed_hi.  Use
  * the ethtool_cmd_speed() and ethtool_cmd_speed_set() functions to
@@ -89,10 +99,6 @@
  * writable and subject to validation by the driver.  They should use
  * %ETHTOOL_GSET to get the current values before making specific
  * changes and then applying them with %ETHTOOL_SSET.
- *
- * Drivers that implement set_settings() should validate all fields
- * other than @cmd that are not described as read-only or deprecated,
- * and must ignore all fields described as read-only.
  *
  * Deprecated fields should be ignored by both users and drivers.
  */
@@ -158,6 +164,7 @@ static inline __u32 ethtool_cmd_speed(const struct ethtool_cmd *ep)
  * @bus_info: Device bus address.  This should match the dev_name()
  *	string for the underlying bus device, if there is one.  May be
  *	an empty string.
+ * @reserved2: Reserved for future use; see the note on reserved space.
  * @n_priv_flags: Number of flags valid for %ETHTOOL_GPFLAGS and
  *	%ETHTOOL_SPFLAGS commands; also the number of strings in the
  *	%ETH_SS_PRIV_FLAGS set
@@ -216,12 +223,16 @@ struct ethtool_value {
 	__u32	data;
 };
 
+#define PFC_STORM_PREVENTION_AUTO	0xffff
+#define PFC_STORM_PREVENTION_DISABLE	0
+
 enum tunable_id {
 	ETHTOOL_ID_UNSPEC,
 	ETHTOOL_RX_COPYBREAK,
 	ETHTOOL_TX_COPYBREAK,
+	ETHTOOL_PFC_PREVENTION_TOUT, /* timeout in msecs */
 	/*
-	 * Add your fresh new tubale attribute above and remember to update
+	 * Add your fresh new tunable attribute above and remember to update
 	 * tunable_strings[] in net/core/ethtool.c
 	 */
 	__ETHTOOL_TUNABLE_COUNT,
@@ -246,6 +257,49 @@ struct ethtool_tunable {
 	__u32	type_id;
 	__u32	len;
 	void	*data[0];
+};
+
+#define DOWNSHIFT_DEV_DEFAULT_COUNT	0xff
+#define DOWNSHIFT_DEV_DISABLE		0
+
+/* Time in msecs after which link is reported as down
+ * 0 = lowest time supported by the PHY
+ * 0xff = off, link down detection according to standard
+ */
+#define ETHTOOL_PHY_FAST_LINK_DOWN_ON	0
+#define ETHTOOL_PHY_FAST_LINK_DOWN_OFF	0xff
+
+/* Energy Detect Power Down (EDPD) is a feature supported by some PHYs, where
+ * the PHY's RX & TX blocks are put into a low-power mode when there is no
+ * link detected (typically cable is un-plugged). For RX, only a minimal
+ * link-detection is available, and for TX the PHY wakes up to send link pulses
+ * to avoid any lock-ups in case the peer PHY may also be running in EDPD mode.
+ *
+ * Some PHYs may support configuration of the wake-up interval for TX pulses,
+ * and some PHYs may support only disabling TX pulses entirely. For the latter
+ * a special value is required (ETHTOOL_PHY_EDPD_NO_TX) so that this can be
+ * configured from userspace (should the user want it).
+ *
+ * The interval units for TX wake-up are in milliseconds, since this should
+ * cover a reasonable range of intervals:
+ *  - from 1 millisecond, which does not sound like much of a power-saver
+ *  - to ~65 seconds which is quite a lot to wait for a link to come up when
+ *    plugging a cable
+ */
+#define ETHTOOL_PHY_EDPD_DFLT_TX_MSECS		0xffff
+#define ETHTOOL_PHY_EDPD_NO_TX			0xfffe
+#define ETHTOOL_PHY_EDPD_DISABLE		0
+
+enum phy_tunable_id {
+	ETHTOOL_PHY_ID_UNSPEC,
+	ETHTOOL_PHY_DOWNSHIFT,
+	ETHTOOL_PHY_FAST_LINK_DOWN,
+	ETHTOOL_PHY_EDPD,
+	/*
+	 * Add your fresh new phy tunable attribute above and remember to update
+	 * phy_tunable_strings[] in net/core/ethtool.c
+	 */
+	__ETHTOOL_PHY_TUNABLE_COUNT,
 };
 
 /**
@@ -312,6 +366,7 @@ struct ethtool_eeprom {
  * @tx_lpi_timer: Time in microseconds the interface delays prior to asserting
  *	its tx lpi (after reaching 'idle' state). Effective only when eee
  *	was negotiated and tx_lpi_enabled was set.
+ * @reserved: Reserved for future use; see the note on reserved space.
  */
 struct ethtool_eee {
 	__u32	cmd;
@@ -330,6 +385,7 @@ struct ethtool_eee {
  * @cmd: %ETHTOOL_GMODULEINFO
  * @type: Standard the module information conforms to %ETH_MODULE_SFF_xxxx
  * @eeprom_len: Length of the eeprom
+ * @reserved: Reserved for future use; see the note on reserved space.
  *
  * This structure is used to return the information to
  * properly size memory for a subsequent call to %ETHTOOL_GMODULEEEPROM.
@@ -535,6 +591,62 @@ struct ethtool_pauseparam {
 	__u32	tx_pause;
 };
 
+/* Link extended state */
+enum ethtool_link_ext_state {
+	ETHTOOL_LINK_EXT_STATE_AUTONEG,
+	ETHTOOL_LINK_EXT_STATE_LINK_TRAINING_FAILURE,
+	ETHTOOL_LINK_EXT_STATE_LINK_LOGICAL_MISMATCH,
+	ETHTOOL_LINK_EXT_STATE_BAD_SIGNAL_INTEGRITY,
+	ETHTOOL_LINK_EXT_STATE_NO_CABLE,
+	ETHTOOL_LINK_EXT_STATE_CABLE_ISSUE,
+	ETHTOOL_LINK_EXT_STATE_EEPROM_ISSUE,
+	ETHTOOL_LINK_EXT_STATE_CALIBRATION_FAILURE,
+	ETHTOOL_LINK_EXT_STATE_POWER_BUDGET_EXCEEDED,
+	ETHTOOL_LINK_EXT_STATE_OVERHEAT,
+};
+
+/* More information in addition to ETHTOOL_LINK_EXT_STATE_AUTONEG. */
+enum ethtool_link_ext_substate_autoneg {
+	ETHTOOL_LINK_EXT_SUBSTATE_AN_NO_PARTNER_DETECTED = 1,
+	ETHTOOL_LINK_EXT_SUBSTATE_AN_ACK_NOT_RECEIVED,
+	ETHTOOL_LINK_EXT_SUBSTATE_AN_NEXT_PAGE_EXCHANGE_FAILED,
+	ETHTOOL_LINK_EXT_SUBSTATE_AN_NO_PARTNER_DETECTED_FORCE_MODE,
+	ETHTOOL_LINK_EXT_SUBSTATE_AN_FEC_MISMATCH_DURING_OVERRIDE,
+	ETHTOOL_LINK_EXT_SUBSTATE_AN_NO_HCD,
+};
+
+/* More information in addition to ETHTOOL_LINK_EXT_STATE_LINK_TRAINING_FAILURE.
+ */
+enum ethtool_link_ext_substate_link_training {
+	ETHTOOL_LINK_EXT_SUBSTATE_LT_KR_FRAME_LOCK_NOT_ACQUIRED = 1,
+	ETHTOOL_LINK_EXT_SUBSTATE_LT_KR_LINK_INHIBIT_TIMEOUT,
+	ETHTOOL_LINK_EXT_SUBSTATE_LT_KR_LINK_PARTNER_DID_NOT_SET_RECEIVER_READY,
+	ETHTOOL_LINK_EXT_SUBSTATE_LT_REMOTE_FAULT,
+};
+
+/* More information in addition to ETHTOOL_LINK_EXT_STATE_LINK_LOGICAL_MISMATCH.
+ */
+enum ethtool_link_ext_substate_link_logical_mismatch {
+	ETHTOOL_LINK_EXT_SUBSTATE_LLM_PCS_DID_NOT_ACQUIRE_BLOCK_LOCK = 1,
+	ETHTOOL_LINK_EXT_SUBSTATE_LLM_PCS_DID_NOT_ACQUIRE_AM_LOCK,
+	ETHTOOL_LINK_EXT_SUBSTATE_LLM_PCS_DID_NOT_GET_ALIGN_STATUS,
+	ETHTOOL_LINK_EXT_SUBSTATE_LLM_FC_FEC_IS_NOT_LOCKED,
+	ETHTOOL_LINK_EXT_SUBSTATE_LLM_RS_FEC_IS_NOT_LOCKED,
+};
+
+/* More information in addition to ETHTOOL_LINK_EXT_STATE_BAD_SIGNAL_INTEGRITY.
+ */
+enum ethtool_link_ext_substate_bad_signal_integrity {
+	ETHTOOL_LINK_EXT_SUBSTATE_BSI_LARGE_NUMBER_OF_PHYSICAL_ERRORS = 1,
+	ETHTOOL_LINK_EXT_SUBSTATE_BSI_UNSUPPORTED_RATE,
+};
+
+/* More information in addition to ETHTOOL_LINK_EXT_STATE_CABLE_ISSUE. */
+enum ethtool_link_ext_substate_cable_issue {
+	ETHTOOL_LINK_EXT_SUBSTATE_CI_UNSUPPORTED_CABLE = 1,
+	ETHTOOL_LINK_EXT_SUBSTATE_CI_CABLE_TEST_FAILURE,
+};
+
 #define ETH_GSTRING_LEN		32
 
 /**
@@ -547,7 +659,23 @@ struct ethtool_pauseparam {
  *	now deprecated
  * @ETH_SS_FEATURES: Device feature names
  * @ETH_SS_RSS_HASH_FUNCS: RSS hush function names
+ * @ETH_SS_TUNABLES: tunable names
  * @ETH_SS_PHY_STATS: Statistic names, for use with %ETHTOOL_GPHYSTATS
+ * @ETH_SS_PHY_TUNABLES: PHY tunable names
+ * @ETH_SS_LINK_MODES: link mode names
+ * @ETH_SS_MSG_CLASSES: debug message class names
+ * @ETH_SS_WOL_MODES: wake-on-lan modes
+ * @ETH_SS_SOF_TIMESTAMPING: SOF_TIMESTAMPING_* flags
+ * @ETH_SS_TS_TX_TYPES: timestamping Tx types
+ * @ETH_SS_TS_RX_FILTERS: timestamping Rx filters
+ * @ETH_SS_UDP_TUNNEL_TYPES: UDP tunnel types
+ * @ETH_SS_STATS_STD: standardized stats
+ * @ETH_SS_STATS_ETH_PHY: names of IEEE 802.3 PHY statistics
+ * @ETH_SS_STATS_ETH_MAC: names of IEEE 802.3 MAC statistics
+ * @ETH_SS_STATS_ETH_CTRL: names of IEEE 802.3 MAC Control statistics
+ * @ETH_SS_STATS_RMON: names of RMON statistics
+ *
+ * @ETH_SS_COUNT: number of defined string sets
  */
 enum ethtool_stringset {
 	ETH_SS_TEST		= 0,
@@ -558,6 +686,22 @@ enum ethtool_stringset {
 	ETH_SS_RSS_HASH_FUNCS,
 	ETH_SS_TUNABLES,
 	ETH_SS_PHY_STATS,
+	ETH_SS_PHY_TUNABLES,
+	ETH_SS_LINK_MODES,
+	ETH_SS_MSG_CLASSES,
+	ETH_SS_WOL_MODES,
+	ETH_SS_SOF_TIMESTAMPING,
+	ETH_SS_TS_TX_TYPES,
+	ETH_SS_TS_RX_FILTERS,
+	ETH_SS_UDP_TUNNEL_TYPES,
+	ETH_SS_STATS_STD,
+	ETH_SS_STATS_ETH_PHY,
+	ETH_SS_STATS_ETH_MAC,
+	ETH_SS_STATS_ETH_CTRL,
+	ETH_SS_STATS_RMON,
+
+	/* add new constants above here */
+	ETH_SS_COUNT
 };
 
 /**
@@ -582,6 +726,7 @@ struct ethtool_gstrings {
 /**
  * struct ethtool_sset_info - string set information
  * @cmd: Command number = %ETHTOOL_GSSET_INFO
+ * @reserved: Reserved for future use; see the note on reserved space.
  * @sset_mask: On entry, a bitmask of string sets to query, with bits
  *	numbered according to &enum ethtool_stringset.  On return, a
  *	bitmask of those string sets queried that are supported.
@@ -626,6 +771,7 @@ enum ethtool_test_flags {
  * @flags: A bitmask of flags from &enum ethtool_test_flags.  Some
  *	flags may be set by the user on entry; others may be set by
  *	the driver on return.
+ * @reserved: Reserved for future use; see the note on reserved space.
  * @len: On return, the number of test results
  * @data: Array of test results
  *
@@ -826,6 +972,7 @@ union ethtool_flow_union {
  * @vlan_etype: VLAN EtherType
  * @vlan_tci: VLAN tag control information
  * @data: user defined data
+ * @padding: Reserved for future use; see the note on reserved space.
  *
  * Note, @vlan_etype, @vlan_tci, and @data are only valid if %FLOW_EXT
  * is set in &struct ethtool_rx_flow_spec @flow_type.
@@ -850,7 +997,8 @@ struct ethtool_flow_ext {
  *	includes the %FLOW_EXT or %FLOW_MAC_EXT flag
  *	(see &struct ethtool_flow_ext description).
  * @ring_cookie: RX ring/queue index to deliver to, or %RX_CLS_FLOW_DISC
- *	if packets should be discarded
+ *	if packets should be discarded, or %RX_CLS_FLOW_WAKE if the
+ *	packets should be used for Wake-on-LAN with %WAKE_FILTER
  * @location: Location of rule in the table.  Locations must be
  *	numbered such that a flow matching multiple rules will be
  *	classified according to the first (lowest numbered) rule.
@@ -865,7 +1013,7 @@ struct ethtool_rx_flow_spec {
 	__u32		location;
 };
 
-/* How rings are layed out when accessing virtual functions or
+/* How rings are laid out when accessing virtual functions or
  * offloaded queues is device specific. To allow users to do flow
  * steering and specify these queues the ring cookie is partitioned
  * into a 32bit queue index with an 8 bit virtual function id.
@@ -874,7 +1022,7 @@ struct ethtool_rx_flow_spec {
  * devices start supporting PCIe w/ARI. However at the moment I
  * do not know of any devices that support this so I do not reserve
  * space for this at this time. If a future patch consumes the next
- * byte it should be aware of this possiblity.
+ * byte it should be aware of this possibility.
  */
 #define ETHTOOL_RX_FLOW_SPEC_RING	0x00000000FFFFFFFFLL
 #define ETHTOOL_RX_FLOW_SPEC_RING_VF	0x000000FF00000000LL
@@ -882,13 +1030,13 @@ struct ethtool_rx_flow_spec {
 static inline __u64 ethtool_get_flow_spec_ring(__u64 ring_cookie)
 {
 	return ETHTOOL_RX_FLOW_SPEC_RING & ring_cookie;
-};
+}
 
 static inline __u64 ethtool_get_flow_spec_ring_vf(__u64 ring_cookie)
 {
 	return (ETHTOOL_RX_FLOW_SPEC_RING_VF & ring_cookie) >>
 				ETHTOOL_RX_FLOW_SPEC_RING_VF_OFF;
-};
+}
 
 /**
  * struct ethtool_rxnfc - command to get or set RX flow classification rules
@@ -898,12 +1046,15 @@ static inline __u64 ethtool_get_flow_spec_ring_vf(__u64 ring_cookie)
  * @flow_type: Type of flow to be affected, e.g. %TCP_V4_FLOW
  * @data: Command-dependent value
  * @fs: Flow classification rule
+ * @rss_context: RSS context to be affected
  * @rule_cnt: Number of rules to be affected
  * @rule_locs: Array of used rule locations
  *
  * For %ETHTOOL_GRXFH and %ETHTOOL_SRXFH, @data is a bitmask indicating
  * the fields included in the flow hash, e.g. %RXH_IP_SRC.  The following
- * structure fields must not be used.
+ * structure fields must not be used, except that if @flow_type includes
+ * the %FLOW_RSS flag, then @rss_context determines which RSS context to
+ * act on.
  *
  * For %ETHTOOL_GRXRINGS, @data is set to the number of RX rings/queues
  * on return.
@@ -915,7 +1066,9 @@ static inline __u64 ethtool_get_flow_spec_ring_vf(__u64 ring_cookie)
  * set in @data then special location values should not be used.
  *
  * For %ETHTOOL_GRXCLSRULE, @fs.@location specifies the location of an
- * existing rule on entry and @fs contains the rule on return.
+ * existing rule on entry and @fs contains the rule on return; if
+ * @fs.@flow_type includes the %FLOW_RSS flag, then @rss_context is
+ * filled with the RSS context ID associated with the rule.
  *
  * For %ETHTOOL_GRXCLSRLALL, @rule_cnt specifies the array size of the
  * user buffer for @rule_locs on entry.  On return, @data is the size
@@ -926,7 +1079,11 @@ static inline __u64 ethtool_get_flow_spec_ring_vf(__u64 ring_cookie)
  * For %ETHTOOL_SRXCLSRLINS, @fs specifies the rule to add or update.
  * @fs.@location either specifies the location to use or is a special
  * location value with %RX_CLS_LOC_SPECIAL flag set.  On return,
- * @fs.@location is the actual rule location.
+ * @fs.@location is the actual rule location.  If @fs.@flow_type
+ * includes the %FLOW_RSS flag, @rss_context is the RSS context ID to
+ * use for flow spreading traffic which matches this rule.  The value
+ * from the rxfh indirection table will be added to @fs.@ring_cookie
+ * to choose which ring to deliver to.
  *
  * For %ETHTOOL_SRXCLSRLDEL, @fs.@location specifies the location of an
  * existing rule on entry.
@@ -947,7 +1104,10 @@ struct ethtool_rxnfc {
 	__u32				flow_type;
 	__u64				data;
 	struct ethtool_rx_flow_spec	fs;
-	__u32				rule_cnt;
+	union {
+		__u32			rule_cnt;
+		__u32			rss_context;
+	};
 	__u32				rule_locs[0];
 };
 
@@ -974,7 +1134,11 @@ struct ethtool_rxfh_indir {
 /**
  * struct ethtool_rxfh - command to get/set RX flow hash indir or/and hash key.
  * @cmd: Specific command number - %ETHTOOL_GRSSH or %ETHTOOL_SRSSH
- * @rss_context: RSS context identifier.
+ * @rss_context: RSS context identifier.  Context 0 is the default for normal
+ *	traffic; other contexts can be referenced as the destination for RX flow
+ *	classification rules.  %ETH_RXFH_CONTEXT_ALLOC is used with command
+ *	%ETHTOOL_SRSSH to allocate a new RSS context; on return this field will
+ *	contain the ID of the newly allocated context.
  * @indir_size: On entry, the array size of the user buffer for the
  *	indirection table, which may be zero, or (for %ETHTOOL_SRSSH),
  *	%ETH_RXFH_INDIR_NO_CHANGE.  On return from %ETHTOOL_GRSSH,
@@ -984,7 +1148,8 @@ struct ethtool_rxfh_indir {
  *	hardware hash key.
  * @hfunc: Defines the current RSS hash function used by HW (or to be set to).
  *	Valid values are one of the %ETH_RSS_HASH_*.
- * @rsvd:	Reserved for future extensions.
+ * @rsvd8: Reserved for future use; see the note on reserved space.
+ * @rsvd32: Reserved for future use; see the note on reserved space.
  * @rss_config: RX ring/queue index for each hash value i.e., indirection table
  *	of @indir_size __u32 elements, followed by hash key of @key_size
  *	bytes.
@@ -993,7 +1158,8 @@ struct ethtool_rxfh_indir {
  * size should be returned.  For %ETHTOOL_SRSSH, an @indir_size of
  * %ETH_RXFH_INDIR_NO_CHANGE means that indir table setting is not requested
  * and a @indir_size of zero means the indir table should be reset to default
- * values. An hfunc of zero means that hash function setting is not requested.
+ * values (if @rss_context == 0) or that the RSS context should be deleted.
+ * An hfunc of zero means that hash function setting is not requested.
  */
 struct ethtool_rxfh {
 	__u32   cmd;
@@ -1005,6 +1171,7 @@ struct ethtool_rxfh {
 	__u32	rsvd32;
 	__u32   rss_config[0];
 };
+#define ETH_RXFH_CONTEXT_ALLOC		0xffffffff
 #define ETH_RXFH_INDIR_NO_CHANGE	0xffffffff
 
 /**
@@ -1150,7 +1317,9 @@ struct ethtool_sfeatures {
  * @so_timestamping: bit mask of the sum of the supported SO_TIMESTAMPING flags
  * @phc_index: device index of the associated PHC, or -1 if there is none
  * @tx_types: bit mask of the supported hwtstamp_tx_types enumeration values
+ * @tx_reserved: Reserved for future use; see the note on reserved space.
  * @rx_filters: bit mask of the supported hwtstamp_rx_filters enumeration values
+ * @rx_reserved: Reserved for future use; see the note on reserved space.
  *
  * The bits in the 'tx_types' and 'rx_filters' fields correspond to
  * the 'hwtstamp_tx_types' and 'hwtstamp_rx_filters' enumeration values,
@@ -1222,6 +1391,72 @@ struct ethtool_per_queue_op {
 	__u32	queue_mask[__KERNEL_DIV_ROUND_UP(MAX_NUM_QUEUE, 32)];
 	char	data[];
 };
+
+/**
+ * struct ethtool_fecparam - Ethernet Forward Error Correction parameters
+ * @cmd: Command number = %ETHTOOL_GFECPARAM or %ETHTOOL_SFECPARAM
+ * @active_fec: FEC mode which is active on the port, single bit set, GET only.
+ * @fec: Bitmask of configured FEC modes.
+ * @reserved: Reserved for future extensions, ignore on GET, write 0 for SET.
+ *
+ * Note that @reserved was never validated on input and ethtool user space
+ * left it uninitialized when calling SET. Hence going forward it can only be
+ * used to return a value to userspace with GET.
+ *
+ * FEC modes supported by the device can be read via %ETHTOOL_GLINKSETTINGS.
+ * FEC settings are configured by link autonegotiation whenever it's enabled.
+ * With autoneg on %ETHTOOL_GFECPARAM can be used to read the current mode.
+ *
+ * When autoneg is disabled %ETHTOOL_SFECPARAM controls the FEC settings.
+ * It is recommended that drivers only accept a single bit set in @fec.
+ * When multiple bits are set in @fec drivers may pick mode in an implementation
+ * dependent way. Drivers should reject mixing %ETHTOOL_FEC_AUTO_BIT with other
+ * FEC modes, because it's unclear whether in this case other modes constrain
+ * AUTO or are independent choices.
+ * Drivers must reject SET requests if they support none of the requested modes.
+ *
+ * If device does not support FEC drivers may use %ETHTOOL_FEC_NONE instead
+ * of returning %EOPNOTSUPP from %ETHTOOL_GFECPARAM.
+ *
+ * See enum ethtool_fec_config_bits for definition of valid bits for both
+ * @fec and @active_fec.
+ */
+struct ethtool_fecparam {
+	__u32   cmd;
+	/* bitmask of FEC modes */
+	__u32   active_fec;
+	__u32   fec;
+	__u32   reserved;
+};
+
+/**
+ * enum ethtool_fec_config_bits - flags definition of ethtool_fec_configuration
+ * @ETHTOOL_FEC_NONE_BIT: FEC mode configuration is not supported. Should not
+ *			be used together with other bits. GET only.
+ * @ETHTOOL_FEC_AUTO_BIT: Select default/best FEC mode automatically, usually
+ *			based link mode and SFP parameters read from module's
+ *			EEPROM. This bit does _not_ mean autonegotiation.
+ * @ETHTOOL_FEC_OFF_BIT: No FEC Mode
+ * @ETHTOOL_FEC_RS_BIT: Reed-Solomon FEC Mode
+ * @ETHTOOL_FEC_BASER_BIT: Base-R/Reed-Solomon FEC Mode
+ * @ETHTOOL_FEC_LLRS_BIT: Low Latency Reed Solomon FEC Mode (25G/50G Ethernet
+ *			Consortium)
+ */
+enum ethtool_fec_config_bits {
+	ETHTOOL_FEC_NONE_BIT,
+	ETHTOOL_FEC_AUTO_BIT,
+	ETHTOOL_FEC_OFF_BIT,
+	ETHTOOL_FEC_RS_BIT,
+	ETHTOOL_FEC_BASER_BIT,
+	ETHTOOL_FEC_LLRS_BIT,
+};
+
+#define ETHTOOL_FEC_NONE		(1 << ETHTOOL_FEC_NONE_BIT)
+#define ETHTOOL_FEC_AUTO		(1 << ETHTOOL_FEC_AUTO_BIT)
+#define ETHTOOL_FEC_OFF			(1 << ETHTOOL_FEC_OFF_BIT)
+#define ETHTOOL_FEC_RS			(1 << ETHTOOL_FEC_RS_BIT)
+#define ETHTOOL_FEC_BASER		(1 << ETHTOOL_FEC_BASER_BIT)
+#define ETHTOOL_FEC_LLRS		(1 << ETHTOOL_FEC_LLRS_BIT)
 
 /* CMDs currently supported */
 #define ETHTOOL_GSET		0x00000001 /* DEPRECATED, Get settings.
@@ -1313,7 +1548,10 @@ struct ethtool_per_queue_op {
 
 #define ETHTOOL_GLINKSETTINGS	0x0000004c /* Get ethtool_link_settings */
 #define ETHTOOL_SLINKSETTINGS	0x0000004d /* Set ethtool_link_settings */
-
+#define ETHTOOL_PHY_GTUNABLE	0x0000004e /* Get PHY tunable configuration */
+#define ETHTOOL_PHY_STUNABLE	0x0000004f /* Set PHY tunable configuration */
+#define ETHTOOL_GFECPARAM	0x00000050 /* Get FEC settings */
+#define ETHTOOL_SFECPARAM	0x00000051 /* Set FEC settings */
 
 /* compatibility with older code */
 #define SPARC_ETH_GSET		ETHTOOL_GSET
@@ -1353,6 +1591,13 @@ enum ethtool_link_mode_bit_indices {
 	ETHTOOL_LINK_MODE_56000baseSR4_Full_BIT	= 29,
 	ETHTOOL_LINK_MODE_56000baseLR4_Full_BIT	= 30,
 	ETHTOOL_LINK_MODE_25000baseCR_Full_BIT	= 31,
+
+	/* Last allowed bit for __ETHTOOL_LINK_MODE_LEGACY_MASK is bit
+	 * 31. Please do NOT define any SUPPORTED_* or ADVERTISED_*
+	 * macro for bits > 31. The only way to use indices > 31 is to
+	 * use the new ETHTOOL_GLINKSETTINGS/ETHTOOL_SLINKSETTINGS API.
+	 */
+
 	ETHTOOL_LINK_MODE_25000baseKR_Full_BIT	= 32,
 	ETHTOOL_LINK_MODE_25000baseSR_Full_BIT	= 33,
 	ETHTOOL_LINK_MODE_50000baseCR2_Full_BIT	= 34,
@@ -1371,15 +1616,51 @@ enum ethtool_link_mode_bit_indices {
 	ETHTOOL_LINK_MODE_2500baseT_Full_BIT	= 47,
 	ETHTOOL_LINK_MODE_5000baseT_Full_BIT	= 48,
 
-
-	/* Last allowed bit for __ETHTOOL_LINK_MODE_LEGACY_MASK is bit
-	 * 31. Please do NOT define any SUPPORTED_* or ADVERTISED_*
-	 * macro for bits > 31. The only way to use indices > 31 is to
-	 * use the new ETHTOOL_GLINKSETTINGS/ETHTOOL_SLINKSETTINGS API.
-	 */
-
-	__ETHTOOL_LINK_MODE_LAST
-	  = ETHTOOL_LINK_MODE_5000baseT_Full_BIT,
+	ETHTOOL_LINK_MODE_FEC_NONE_BIT	= 49,
+	ETHTOOL_LINK_MODE_FEC_RS_BIT	= 50,
+	ETHTOOL_LINK_MODE_FEC_BASER_BIT	= 51,
+	ETHTOOL_LINK_MODE_50000baseKR_Full_BIT		 = 52,
+	ETHTOOL_LINK_MODE_50000baseSR_Full_BIT		 = 53,
+	ETHTOOL_LINK_MODE_50000baseCR_Full_BIT		 = 54,
+	ETHTOOL_LINK_MODE_50000baseLR_ER_FR_Full_BIT	 = 55,
+	ETHTOOL_LINK_MODE_50000baseDR_Full_BIT		 = 56,
+	ETHTOOL_LINK_MODE_100000baseKR2_Full_BIT	 = 57,
+	ETHTOOL_LINK_MODE_100000baseSR2_Full_BIT	 = 58,
+	ETHTOOL_LINK_MODE_100000baseCR2_Full_BIT	 = 59,
+	ETHTOOL_LINK_MODE_100000baseLR2_ER2_FR2_Full_BIT = 60,
+	ETHTOOL_LINK_MODE_100000baseDR2_Full_BIT	 = 61,
+	ETHTOOL_LINK_MODE_200000baseKR4_Full_BIT	 = 62,
+	ETHTOOL_LINK_MODE_200000baseSR4_Full_BIT	 = 63,
+	ETHTOOL_LINK_MODE_200000baseLR4_ER4_FR4_Full_BIT = 64,
+	ETHTOOL_LINK_MODE_200000baseDR4_Full_BIT	 = 65,
+	ETHTOOL_LINK_MODE_200000baseCR4_Full_BIT	 = 66,
+	ETHTOOL_LINK_MODE_100baseT1_Full_BIT		 = 67,
+	ETHTOOL_LINK_MODE_1000baseT1_Full_BIT		 = 68,
+	ETHTOOL_LINK_MODE_400000baseKR8_Full_BIT	 = 69,
+	ETHTOOL_LINK_MODE_400000baseSR8_Full_BIT	 = 70,
+	ETHTOOL_LINK_MODE_400000baseLR8_ER8_FR8_Full_BIT = 71,
+	ETHTOOL_LINK_MODE_400000baseDR8_Full_BIT	 = 72,
+	ETHTOOL_LINK_MODE_400000baseCR8_Full_BIT	 = 73,
+	ETHTOOL_LINK_MODE_FEC_LLRS_BIT			 = 74,
+	ETHTOOL_LINK_MODE_100000baseKR_Full_BIT		 = 75,
+	ETHTOOL_LINK_MODE_100000baseSR_Full_BIT		 = 76,
+	ETHTOOL_LINK_MODE_100000baseLR_ER_FR_Full_BIT	 = 77,
+	ETHTOOL_LINK_MODE_100000baseCR_Full_BIT		 = 78,
+	ETHTOOL_LINK_MODE_100000baseDR_Full_BIT		 = 79,
+	ETHTOOL_LINK_MODE_200000baseKR2_Full_BIT	 = 80,
+	ETHTOOL_LINK_MODE_200000baseSR2_Full_BIT	 = 81,
+	ETHTOOL_LINK_MODE_200000baseLR2_ER2_FR2_Full_BIT = 82,
+	ETHTOOL_LINK_MODE_200000baseDR2_Full_BIT	 = 83,
+	ETHTOOL_LINK_MODE_200000baseCR2_Full_BIT	 = 84,
+	ETHTOOL_LINK_MODE_400000baseKR4_Full_BIT	 = 85,
+	ETHTOOL_LINK_MODE_400000baseSR4_Full_BIT	 = 86,
+	ETHTOOL_LINK_MODE_400000baseLR4_ER4_FR4_Full_BIT = 87,
+	ETHTOOL_LINK_MODE_400000baseDR4_Full_BIT	 = 88,
+	ETHTOOL_LINK_MODE_400000baseCR4_Full_BIT	 = 89,
+	ETHTOOL_LINK_MODE_100baseFX_Half_BIT		 = 90,
+	ETHTOOL_LINK_MODE_100baseFX_Full_BIT		 = 91,
+	/* must be last entry */
+	__ETHTOOL_LINK_MODE_MASK_NBITS
 };
 
 #define __ETHTOOL_LINK_MODE_LEGACY_MASK(base_name)	\
@@ -1470,25 +1751,31 @@ enum ethtool_link_mode_bit_indices {
  * it was forced up into this mode or autonegotiated.
  */
 
-/* The forced speed, in units of 1Mb. All values 0 to INT_MAX are legal. */
+/* The forced speed, in units of 1Mb. All values 0 to INT_MAX are legal.
+ * Update drivers/net/phy/phy.c:phy_speed_to_str() and
+ * drivers/net/bonding/bond_3ad.c:__get_link_speed() when adding new values.
+ */
 #define SPEED_10		10
 #define SPEED_100		100
 #define SPEED_1000		1000
 #define SPEED_2500		2500
 #define SPEED_5000		5000
 #define SPEED_10000		10000
+#define SPEED_14000		14000
 #define SPEED_20000		20000
 #define SPEED_25000		25000
 #define SPEED_40000		40000
 #define SPEED_50000		50000
 #define SPEED_56000		56000
 #define SPEED_100000		100000
+#define SPEED_200000		200000
+#define SPEED_400000		400000
 
 #define SPEED_UNKNOWN		-1
 
 static inline int ethtool_validate_speed(__u32 speed)
 {
-	return speed <= INT_MAX || speed == SPEED_UNKNOWN;
+	return speed <= INT_MAX || speed == (__u32)SPEED_UNKNOWN;
 }
 
 /* Duplex, half or full. */
@@ -1507,6 +1794,18 @@ static inline int ethtool_validate_duplex(__u8 duplex)
 
 	return 0;
 }
+
+#define MASTER_SLAVE_CFG_UNSUPPORTED		0
+#define MASTER_SLAVE_CFG_UNKNOWN		1
+#define MASTER_SLAVE_CFG_MASTER_PREFERRED	2
+#define MASTER_SLAVE_CFG_SLAVE_PREFERRED	3
+#define MASTER_SLAVE_CFG_MASTER_FORCE		4
+#define MASTER_SLAVE_CFG_SLAVE_FORCE		5
+#define MASTER_SLAVE_STATE_UNSUPPORTED		0
+#define MASTER_SLAVE_STATE_UNKNOWN		1
+#define MASTER_SLAVE_STATE_MASTER		2
+#define MASTER_SLAVE_STATE_SLAVE		3
+#define MASTER_SLAVE_STATE_ERR			4
 
 /* Which connector port. */
 #define PORT_TP			0x00
@@ -1545,6 +1844,9 @@ static inline int ethtool_validate_duplex(__u8 duplex)
 #define WAKE_ARP		(1 << 4)
 #define WAKE_MAGIC		(1 << 5)
 #define WAKE_MAGICSECURE	(1 << 6) /* only meaningful if WAKE_MAGIC */
+#define WAKE_FILTER		(1 << 7)
+
+#define WOL_MODE_COUNT		8
 
 /* L2-L4 network traffic flow types */
 #define	TCP_V4_FLOW	0x01	/* hash or spec (tcp_ip4_spec) */
@@ -1568,6 +1870,8 @@ static inline int ethtool_validate_duplex(__u8 duplex)
 /* Flag to enable additional fields in struct ethtool_rx_flow_spec */
 #define	FLOW_EXT	0x80000000
 #define	FLOW_MAC_EXT	0x40000000
+/* Flag to enable RSS spreading of traffic matching rule (nfc only) */
+#define	FLOW_RSS	0x20000000
 
 /* L3-L4 network traffic flow hash options */
 #define	RXH_L2DA	(1 << 1)
@@ -1580,6 +1884,7 @@ static inline int ethtool_validate_duplex(__u8 duplex)
 #define	RXH_DISCARD	(1 << 31)
 
 #define	RX_CLS_FLOW_DISC	0xffffffffffffffffULL
+#define RX_CLS_FLOW_WAKE	0xfffffffffffffffeULL
 
 /* Special RX classification rule insert location values */
 #define RX_CLS_LOC_SPECIAL	0x80000000	/* flag */
@@ -1596,6 +1901,9 @@ static inline int ethtool_validate_duplex(__u8 duplex)
 #define ETH_MODULE_SFF_8636_LEN		256
 #define ETH_MODULE_SFF_8436		0x4
 #define ETH_MODULE_SFF_8436_LEN		256
+
+#define ETH_MODULE_SFF_8636_MAX_LEN     640
+#define ETH_MODULE_SFF_8436_MAX_LEN     640
 
 /* Reset flags */
 /* The reset() operation must clear the flags for the components which
@@ -1619,6 +1927,7 @@ enum ethtool_reset_flags {
 	ETH_RESET_PHY		= 1 << 6,	/* Transceiver/PHY */
 	ETH_RESET_RAM		= 1 << 7,	/* RAM shared between
 						 * multiple components */
+	ETH_RESET_AP		= 1 << 8,	/* Application processor */
 
 	ETH_RESET_DEDICATED	= 0x0000ffff,	/* All components dedicated to
 						 * this interface */
@@ -1687,6 +1996,13 @@ enum ethtool_reset_flags {
  *	%ethtool_link_mode_bit_indices for the link modes, and other
  *	link features that the link partner advertised through
  *	autonegotiation; 0 if unknown or not applicable.  Read-only.
+ * @transceiver: Used to distinguish different possible PHY types,
+ *	reported consistently by PHYLIB.  Read-only.
+ * @master_slave_cfg: Master/slave port mode.
+ * @master_slave_state: Master/slave port state.
+ * @reserved: Reserved for future use; see the note on reserved space.
+ * @reserved1: Reserved for future use; see the note on reserved space.
+ * @link_mode_masks: Variable length bitmaps.
  *
  * If autonegotiation is disabled, the speed and @duplex represent the
  * fixed link mode and are writable if the driver supports multiple
@@ -1703,14 +2019,9 @@ enum ethtool_reset_flags {
  * rejected.
  *
  * Deprecated %ethtool_cmd fields transceiver, maxtxpkt and maxrxpkt
- * are not available in %ethtool_link_settings. Until all drivers are
- * converted to ignore them or to the new %ethtool_link_settings API,
- * for both queries and changes, users should always try
- * %ETHTOOL_GLINKSETTINGS first, and if it fails with -ENOTSUPP stick
- * only to %ETHTOOL_GSET and %ETHTOOL_SSET consistently. If it
- * succeeds, then users should stick to %ETHTOOL_GLINKSETTINGS and
- * %ETHTOOL_SLINKSETTINGS (which would support drivers implementing
- * either %ethtool_cmd or %ethtool_link_settings).
+ * are not available in %ethtool_link_settings. These fields will be
+ * always set to zero in %ETHTOOL_GSET reply and %ETHTOOL_SSET will
+ * fail if any of them is set to non-zero value.
  *
  * Users should assume that all fields not marked read-only are
  * writable and subject to validation by the driver.  They should use
@@ -1738,7 +2049,11 @@ struct ethtool_link_settings {
 	__u8	eth_tp_mdix;
 	__u8	eth_tp_mdix_ctrl;
 	__s8	link_mode_masks_nwords;
-	__u32	reserved[8];
+	__u8	transceiver;
+	__u8	master_slave_cfg;
+	__u8	master_slave_state;
+	__u8	reserved1[1];
+	__u32	reserved[7];
 	__u32	link_mode_masks[0];
 	/* layout of link_mode_masks fields:
 	 * __u32 map_supported[link_mode_masks_nwords];

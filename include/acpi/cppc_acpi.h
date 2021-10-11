@@ -1,33 +1,32 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * CPPC (Collaborative Processor Performance Control) methods used
  * by CPUfreq drivers.
  *
  * (C) Copyright 2014, 2015 Linaro Ltd.
  * Author: Ashwin Chaugule <ashwin.chaugule@linaro.org>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2
- * of the License.
  */
 
 #ifndef _CPPC_ACPI_H
 #define _CPPC_ACPI_H
 
 #include <linux/acpi.h>
+#include <linux/cpufreq.h>
 #include <linux/types.h>
 
 #include <acpi/pcc.h>
 #include <acpi/processor.h>
 
-/* Only support CPPCv2 for now. */
-#define CPPC_NUM_ENT	21
-#define CPPC_REV	2
+/* Support CPPCv2 and CPPCv3  */
+#define CPPC_V2_REV	2
+#define CPPC_V3_REV	3
+#define CPPC_V2_NUM_ENT	21
+#define CPPC_V3_NUM_ENT	23
 
 #define PCC_CMD_COMPLETE_MASK	(1 << 0)
 #define PCC_ERROR_MASK		(1 << 2)
 
-#define MAX_CPC_REG_ENT 19
+#define MAX_CPC_REG_ENT 21
 
 /* CPPC specific PCC commands. */
 #define	CMD_READ 0
@@ -41,7 +40,7 @@ struct cpc_reg {
 	u8 bit_width;
 	u8 bit_offset;
 	u8 access_width;
-	u64 __iomem address;
+	u64 address;
 } __packed;
 
 /*
@@ -91,6 +90,8 @@ enum cppc_regs {
 	AUTO_ACT_WINDOW,
 	ENERGY_PERF,
 	REFERENCE_PERF,
+	LOWEST_FREQ,
+	NOMINAL_FREQ,
 };
 
 /*
@@ -100,9 +101,13 @@ enum cppc_regs {
  * today.
  */
 struct cppc_perf_caps {
+	u32 guaranteed_perf;
 	u32 highest_perf;
 	u32 nominal_perf;
 	u32 lowest_perf;
+	u32 lowest_nonlinear_perf;
+	u32 lowest_freq;
+	u32 nominal_freq;
 };
 
 struct cppc_perf_ctrls {
@@ -115,24 +120,67 @@ struct cppc_perf_fb_ctrs {
 	u64 reference;
 	u64 delivered;
 	u64 reference_perf;
-	u64 ctr_wrap_time;
+	u64 wraparound_time;
 };
 
 /* Per CPU container for runtime CPPC management. */
 struct cppc_cpudata {
-	int cpu;
+	struct list_head node;
 	struct cppc_perf_caps perf_caps;
 	struct cppc_perf_ctrls perf_ctrls;
 	struct cppc_perf_fb_ctrs perf_fb_ctrs;
-	struct cpufreq_policy *cur_policy;
 	unsigned int shared_type;
 	cpumask_var_t shared_cpu_map;
 };
 
+#ifdef CONFIG_ACPI_CPPC_LIB
+extern int cppc_get_desired_perf(int cpunum, u64 *desired_perf);
 extern int cppc_get_perf_ctrs(int cpu, struct cppc_perf_fb_ctrs *perf_fb_ctrs);
 extern int cppc_set_perf(int cpu, struct cppc_perf_ctrls *perf_ctrls);
 extern int cppc_get_perf_caps(int cpu, struct cppc_perf_caps *caps);
-extern int acpi_get_psd_map(struct cppc_cpudata **);
+extern bool acpi_cpc_valid(void);
+extern int acpi_get_psd_map(unsigned int cpu, struct cppc_cpudata *cpu_data);
 extern unsigned int cppc_get_transition_latency(int cpu);
+extern bool cpc_ffh_supported(void);
+extern int cpc_read_ffh(int cpunum, struct cpc_reg *reg, u64 *val);
+extern int cpc_write_ffh(int cpunum, struct cpc_reg *reg, u64 val);
+#else /* !CONFIG_ACPI_CPPC_LIB */
+static inline int cppc_get_desired_perf(int cpunum, u64 *desired_perf)
+{
+	return -ENOTSUPP;
+}
+static inline int cppc_get_perf_ctrs(int cpu, struct cppc_perf_fb_ctrs *perf_fb_ctrs)
+{
+	return -ENOTSUPP;
+}
+static inline int cppc_set_perf(int cpu, struct cppc_perf_ctrls *perf_ctrls)
+{
+	return -ENOTSUPP;
+}
+static inline int cppc_get_perf_caps(int cpu, struct cppc_perf_caps *caps)
+{
+	return -ENOTSUPP;
+}
+static inline bool acpi_cpc_valid(void)
+{
+	return false;
+}
+static inline unsigned int cppc_get_transition_latency(int cpu)
+{
+	return CPUFREQ_ETERNAL;
+}
+static inline bool cpc_ffh_supported(void)
+{
+	return false;
+}
+static inline int cpc_read_ffh(int cpunum, struct cpc_reg *reg, u64 *val)
+{
+	return -ENOTSUPP;
+}
+static inline int cpc_write_ffh(int cpunum, struct cpc_reg *reg, u64 val)
+{
+	return -ENOTSUPP;
+}
+#endif /* !CONFIG_ACPI_CPPC_LIB */
 
 #endif /* _CPPC_ACPI_H*/

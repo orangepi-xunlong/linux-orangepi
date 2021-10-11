@@ -1,24 +1,9 @@
-#ifndef _DTC_H
-#define _DTC_H
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+#ifndef DTC_H
+#define DTC_H
 
 /*
  * (C) Copyright David Gibson <dwg@au1.ibm.com>, IBM Corporation.  2005.
- *
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of the
- * License, or (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307
- *                                                                   USA
  */
 
 #include <stdio.h>
@@ -31,13 +16,9 @@
 #include <ctype.h>
 #include <errno.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 #include <libfdt_env.h>
-#include <common.h>
-#include <dictionary.h>
-#include <iniparser.h>
-#include <script.h>
-#include <script_to_dts.h>
 #include <fdt.h>
 
 #include "util.h"
@@ -48,7 +29,6 @@
 #define debug(...)
 #endif
 
-
 #define DEFAULT_FDT_VERSION	17
 
 /*
@@ -58,7 +38,12 @@ extern int quiet;		/* Level of quietness */
 extern int reservenum;		/* Number of memory reservation slots */
 extern int minsize;		/* Minimum blob size */
 extern int padsize;		/* Additional padding to blob */
+extern int alignsize;		/* Additional padding to blob accroding to the alignsize */
 extern int phandle_format;	/* Use linux,phandle or phandle properties */
+extern int generate_symbols;	/* generate symbols for nodes with labels */
+extern int generate_fixups;	/* generate fixups */
+extern int auto_label_aliases;	/* auto generate labels -> aliases */
+extern int annotate;		/* annotate .dts with input source location */
 
 #define PHANDLE_LEGACY	0x1
 #define PHANDLE_EPAPR	0x2
@@ -66,28 +51,67 @@ extern int phandle_format;	/* Use linux,phandle or phandle properties */
 
 typedef uint32_t cell_t;
 
+static inline uint16_t dtb_ld16(const void *p)
+{
+	const uint8_t *bp = (const uint8_t *)p;
+
+	return ((uint16_t)bp[0] << 8)
+		| bp[1];
+}
+
+static inline uint32_t dtb_ld32(const void *p)
+{
+	const uint8_t *bp = (const uint8_t *)p;
+
+	return ((uint32_t)bp[0] << 24)
+		| ((uint32_t)bp[1] << 16)
+		| ((uint32_t)bp[2] << 8)
+		| bp[3];
+}
+
+static inline uint64_t dtb_ld64(const void *p)
+{
+	const uint8_t *bp = (const uint8_t *)p;
+
+	return ((uint64_t)bp[0] << 56)
+		| ((uint64_t)bp[1] << 48)
+		| ((uint64_t)bp[2] << 40)
+		| ((uint64_t)bp[3] << 32)
+		| ((uint64_t)bp[4] << 24)
+		| ((uint64_t)bp[5] << 16)
+		| ((uint64_t)bp[6] << 8)
+		| bp[7];
+}
 
 #define streq(a, b)	(strcmp((a), (b)) == 0)
-#define strneq(a, b, n)	(strncmp((a), (b), (n)) == 0)
+#define strstarts(s, prefix)	(strncmp((s), (prefix), strlen(prefix)) == 0)
+#define strprefixeq(a, n, b)	(strlen(b) == (n) && (memcmp(a, b, n) == 0))
 
 #define ALIGN(x, a)	(((x) + (a) - 1) & ~((a) - 1))
 
 /* Data blobs */
 enum markertype {
+	TYPE_NONE,
 	REF_PHANDLE,
 	REF_PATH,
 	LABEL,
+	TYPE_UINT8,
+	TYPE_UINT16,
+	TYPE_UINT32,
+	TYPE_UINT64,
+	TYPE_STRING,
 };
+extern const char *markername(enum markertype markertype);
 
 struct  marker {
 	enum markertype type;
-	int offset;
+	unsigned int offset;
 	char *ref;
 	struct marker *next;
 };
 
 struct data {
-	int len;
+	unsigned int len;
 	char *val;
 	struct marker *markers;
 };
@@ -101,9 +125,11 @@ struct data {
 	for_each_marker(m) \
 		if ((m)->type == (t))
 
+size_t type_marker_length(struct marker *m);
+
 void data_free(struct data d);
 
-struct data data_grow_for(struct data d, int xlen);
+struct data data_grow_for(struct data d, unsigned int xlen);
 
 struct data data_copy_mem(const char *mem, int len);
 struct data data_copy_escape_string(const char *s, int len);
@@ -115,7 +141,7 @@ struct data data_insert_at_marker(struct data d, struct marker *m,
 struct data data_merge(struct data d1, struct data d2);
 struct data data_append_cell(struct data d, cell_t word);
 struct data data_append_integer(struct data d, uint64_t word, int bits);
-struct data data_append_re(struct data d, const struct fdt_reserve_entry *re);
+struct data data_append_re(struct data d, uint64_t address, uint64_t size);
 struct data data_append_addr(struct data d, uint64_t addr);
 struct data data_append_byte(struct data d, uint8_t byte);
 struct data data_append_zeroes(struct data d, int len);
@@ -137,6 +163,10 @@ struct label {
 	struct label *next;
 };
 
+struct bus_type {
+	const char *name;
+};
+
 struct property {
 	bool deleted;
 	char *name;
@@ -145,6 +175,7 @@ struct property {
 	struct property *next;
 
 	struct label *labels;
+	struct srcpos *srcpos;
 };
 
 struct node {
@@ -163,6 +194,10 @@ struct node {
 	int addr_cells, size_cells;
 
 	struct label *labels;
+	const struct bus_type *bus;
+	struct srcpos *srcpos;
+
+	bool omit_if_unused, is_referenced;
 };
 
 #define for_each_label_withdel(l0, l) \
@@ -189,16 +224,21 @@ struct node {
 void add_label(struct label **labels, char *label);
 void delete_labels(struct label **labels);
 
-struct property *build_property(char *name, struct data val);
+struct property *build_property(char *name, struct data val,
+				struct srcpos *srcpos);
 struct property *build_property_delete(char *name);
 struct property *chain_property(struct property *first, struct property *list);
 struct property *reverse_properties(struct property *first);
 
-struct node *build_node(struct property *proplist, struct node *children);
-struct node *build_node_delete(void);
+struct node *build_node(struct property *proplist, struct node *children,
+			struct srcpos *srcpos);
+struct node *build_node_delete(struct srcpos *srcpos);
 struct node *name_node(struct node *node, char *name);
+struct node *omit_node_if_unused(struct node *node);
+struct node *reference_node(struct node *node);
 struct node *chain_node(struct node *first, struct node *list);
 struct node *merge_nodes(struct node *old_node, struct node *new_node);
+struct node *add_orphan_node(struct node *old_node, struct node *new_node, char *ref);
 
 void add_property(struct node *node, struct property *prop);
 void delete_property_by_name(struct node *node, char *name);
@@ -206,10 +246,14 @@ void delete_property(struct property *prop);
 void add_child(struct node *parent, struct node *child);
 void delete_node_by_name(struct node *parent, char *name);
 void delete_node(struct node *node);
+void append_to_property(struct node *node,
+			char *name, const void *data, int len,
+			enum markertype type);
 
 const char *get_unitname(struct node *node);
 struct property *get_property(struct node *node, const char *propname);
 cell_t propval_cell(struct property *prop);
+cell_t propval_cell_n(struct property *prop, unsigned int n);
 struct property *get_property_by_label(struct node *tree, const char *label,
 				       struct node **node);
 struct marker *get_marker_label(struct node *tree, const char *label,
@@ -217,8 +261,6 @@ struct marker *get_marker_label(struct node *tree, const char *label,
 struct node *get_subnode(struct node *node, const char *nodename);
 struct node *get_node_by_path(struct node *tree, const char *path);
 struct node *get_node_by_label(struct node *tree, const char *label);
-struct node *get_node_by_type(struct node *tree, const char *device_type);
-
 struct node *get_node_by_phandle(struct node *tree, cell_t phandle);
 struct node *get_node_by_ref(struct node *tree, const char *ref);
 cell_t get_node_phandle(struct node *root, struct node *node);
@@ -228,7 +270,7 @@ uint32_t guess_boot_cpuid(struct node *tree);
 /* Boot info (tree plus memreserve information */
 
 struct reserve_info {
-	struct fdt_reserve_entry re;
+	uint64_t address, size;
 
 	struct reserve_info *next;
 
@@ -242,35 +284,49 @@ struct reserve_info *add_reserve_entry(struct reserve_info *list,
 				       struct reserve_info *new);
 
 
-struct boot_info {
+struct dt_info {
+	unsigned int dtsflags;
 	struct reserve_info *reservelist;
-	struct node *dt;		/* the device tree */
 	uint32_t boot_cpuid_phys;
+	struct node *dt;		/* the device tree */
+	const char *outname;		/* filename being written to, "-" for stdout */
 };
 
-struct boot_info *build_boot_info(struct reserve_info *reservelist,
-				  struct node *tree, uint32_t boot_cpuid_phys);
-void sort_tree(struct boot_info *bi);
+/* DTS version flags definitions */
+#define DTSF_V1		0x0001	/* /dts-v1/ */
+#define DTSF_PLUGIN	0x0002	/* /plugin/ */
+
+struct dt_info *build_dt_info(unsigned int dtsflags,
+			      struct reserve_info *reservelist,
+			      struct node *tree, uint32_t boot_cpuid_phys);
+void sort_tree(struct dt_info *dti);
+void generate_label_tree(struct dt_info *dti, char *name, bool allocph);
+void generate_fixups_tree(struct dt_info *dti, char *name);
+void generate_local_fixups_tree(struct dt_info *dti, char *name);
 
 /* Checks */
 
 void parse_checks_option(bool warn, bool error, const char *arg);
-void dirty_checks(void);
-void process_checks(bool force, struct boot_info *bi);
+void process_checks(bool force, struct dt_info *dti);
 
 /* Flattened trees */
 
-void dt_to_blob(FILE *f, struct boot_info *bi, int version);
-void dt_to_asm(FILE *f, struct boot_info *bi, int version);
+void dt_to_blob(FILE *f, struct dt_info *dti, int version);
+void dt_to_asm(FILE *f, struct dt_info *dti, int version);
 
-struct boot_info *dt_from_blob(const char *fname);
+struct dt_info *dt_from_blob(const char *fname);
 
 /* Tree source */
-void dt_to_source(FILE *f, struct boot_info *bi);
-struct boot_info *dt_from_source(const char *f);
+
+void dt_to_source(FILE *f, struct dt_info *dti);
+struct dt_info *dt_from_source(const char *f);
+
+/* YAML source */
+
+void dt_to_yaml(FILE *f, struct dt_info *dti);
 
 /* FS trees */
 
-struct boot_info *dt_from_fs(const char *dirname);
+struct dt_info *dt_from_fs(const char *dirname);
 
-#endif /* _DTC_H */
+#endif /* DTC_H */

@@ -7,6 +7,7 @@ PMIC's from Qualcomm.
 	Usage: required
 	Value type: <string>
 	Definition: must be one of:
+		    "qcom,pm8005-gpio"
 		    "qcom,pm8018-gpio"
 		    "qcom,pm8038-gpio"
 		    "qcom,pm8058-gpio"
@@ -14,8 +15,28 @@ PMIC's from Qualcomm.
 		    "qcom,pm8917-gpio"
 		    "qcom,pm8921-gpio"
 		    "qcom,pm8941-gpio"
+		    "qcom,pm8950-gpio"
 		    "qcom,pm8994-gpio"
+		    "qcom,pm8998-gpio"
 		    "qcom,pma8084-gpio"
+		    "qcom,pmi8950-gpio"
+		    "qcom,pmi8994-gpio"
+		    "qcom,pmi8998-gpio"
+		    "qcom,pms405-gpio"
+		    "qcom,pm660-gpio"
+		    "qcom,pm660l-gpio"
+		    "qcom,pm8150-gpio"
+		    "qcom,pm8150b-gpio"
+		    "qcom,pm8350-gpio"
+		    "qcom,pm8350b-gpio"
+		    "qcom,pm8350c-gpio"
+		    "qcom,pmk8350-gpio"
+		    "qcom,pmr735a-gpio"
+		    "qcom,pmr735b-gpio"
+		    "qcom,pm6150-gpio"
+		    "qcom,pm6150l-gpio"
+		    "qcom,pm8008-gpio"
+		    "qcom,pmx55-gpio"
 
 		    And must contain either "qcom,spmi-gpio" or "qcom,ssbi-gpio"
 		    if the device is on an spmi bus or an ssbi bus respectively
@@ -76,6 +97,7 @@ to specify in a pin configuration subnode:
 	Value type: <string-array>
 	Definition: List of gpio pins affected by the properties specified in
 		    this subnode.  Valid pins are:
+		    gpio1-gpio4 for pm8005
 		    gpio1-gpio6 for pm8018
 		    gpio1-gpio12 for pm8038
 		    gpio1-gpio40 for pm8058
@@ -83,8 +105,28 @@ to specify in a pin configuration subnode:
 		    gpio1-gpio38 for pm8917
 		    gpio1-gpio44 for pm8921
 		    gpio1-gpio36 for pm8941
+		    gpio1-gpio8 for pm8950 (hole on gpio3)
 		    gpio1-gpio22 for pm8994
+		    gpio1-gpio26 for pm8998
 		    gpio1-gpio22 for pma8084
+		    gpio1-gpio2 for pmi8950
+		    gpio1-gpio10 for pmi8994
+		    gpio1-gpio12 for pms405 (holes on gpio1, gpio9 and gpio10)
+		    gpio1-gpio10 for pm8150 (holes on gpio2, gpio5, gpio7
+					     and gpio8)
+		    gpio1-gpio12 for pm8150b (holes on gpio3, gpio4, gpio7)
+		    gpio1-gpio12 for pm8150l (hole on gpio7)
+		    gpio1-gpio10 for pm8350
+		    gpio1-gpio8 for pm8350b
+		    gpio1-gpio9 for pm8350c
+		    gpio1-gpio4 for pmk8350
+		    gpio1-gpio4 for pmr735a
+		    gpio1-gpio4 for pmr735b
+		    gpio1-gpio10 for pm6150
+		    gpio1-gpio12 for pm6150l
+		    gpio1-gpio2 for pm8008
+		    gpio1-gpio11 for pmx55 (holes on gpio3, gpio7, gpio10
+					    and gpio11)
 
 - function:
 	Usage: required
@@ -98,7 +140,10 @@ to specify in a pin configuration subnode:
 		    "dtest1",
 		    "dtest2",
 		    "dtest3",
-		    "dtest4"
+		    "dtest4",
+		    And following values are supported by LV/MV GPIO subtypes:
+		    "func3",
+		    "func4"
 
 - bias-disable:
 	Usage: optional
@@ -182,6 +227,25 @@ to specify in a pin configuration subnode:
 	Usage: optional
 	Value type: <none>
 	Definition: The specified pins are configured in open-source mode.
+
+- qcom,analog-pass:
+	Usage: optional
+	Value type: <none>
+	Definition: The specified pins are configured in analog-pass-through mode.
+
+- qcom,atest:
+	Usage: optional
+	Value type: <u32>
+	Definition: Selects ATEST rail to route to GPIO when it's configured
+		    in analog-pass-through mode.
+		    Valid values are 1-4 corresponding to ATEST1 to ATEST4.
+
+- qcom,dtest-buffer:
+	Usage: optional
+	Value type: <u32>
+	Definition: Selects DTEST rail to route to GPIO when it's configured
+		    as digital input.
+		    Valid values are 1-4 corresponding to DTEST1 to DTEST4.
 
 Example:
 

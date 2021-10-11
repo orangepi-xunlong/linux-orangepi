@@ -1,7 +1,7 @@
 /*
  * file for managing the edac_device subsystem of devices for EDAC
  *
- * (C) 2007 SoftwareBitMaker 
+ * (C) 2007 SoftwareBitMaker
  *
  * This file may be distributed under the terms of the
  * GNU General Public License.
@@ -15,7 +15,7 @@
 #include <linux/slab.h>
 #include <linux/edac.h>
 
-#include "edac_core.h"
+#include "edac_device.h"
 #include "edac_module.h"
 
 #define EDAC_DEVICE_SYMLINK	"device"
@@ -275,6 +275,7 @@ int edac_device_register_sysfs_main_kobj(struct edac_device_ctl_info *edac_dev)
 
 	/* Error exit stack */
 err_kobj_reg:
+	kobject_put(&edac_dev->kobj);
 	module_put(edac_dev->owner);
 
 err_out:

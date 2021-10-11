@@ -1,35 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB */
 /*
  * Copyright (c) 2004 Topspin Communications.  All rights reserved.
  * Copyright (c) 2005 Voltaire, Inc.  All rights reserved.
  * Copyright (c) 2006 Intel Corporation.  All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * OpenIB.org BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
  */
 
 #ifndef IB_SA_H
@@ -43,6 +16,8 @@
 
 #include <rdma/ib_verbs.h>
 #include <rdma/ib_mad.h>
+#include <rdma/ib_addr.h>
+#include <rdma/opa_addr.h>
 
 enum {
 	IB_SA_CLASS_VERSION		= 2,	/* IB spec version 1.1/1.2 */
@@ -56,6 +31,7 @@ enum {
 	IB_SA_METHOD_GET_TRACE_TBL	= 0x13
 };
 
+#define OPA_SA_CLASS_VERSION	0x80
 enum {
 	IB_SA_ATTR_CLASS_PORTINFO    = 0x01,
 	IB_SA_ATTR_NOTICE	     = 0x02,
@@ -147,13 +123,47 @@ enum ib_sa_mc_join_states {
 #define IB_SA_PATH_REC_PACKET_LIFE_TIME			IB_SA_COMP_MASK(21)
 #define IB_SA_PATH_REC_PREFERENCE			IB_SA_COMP_MASK(22)
 
-struct ib_sa_path_rec {
-	__be64       service_id;
-	union ib_gid dgid;
-	union ib_gid sgid;
+enum sa_path_rec_type {
+	SA_PATH_REC_TYPE_IB,
+	SA_PATH_REC_TYPE_ROCE_V1,
+	SA_PATH_REC_TYPE_ROCE_V2,
+	SA_PATH_REC_TYPE_OPA
+};
+
+struct sa_path_rec_ib {
 	__be16       dlid;
 	__be16       slid;
 	u8           raw_traffic;
+};
+
+/**
+ * struct sa_path_rec_roce - RoCE specific portion of the path record entry
+ * @route_resolved:	When set, it indicates that this route is already
+ *			resolved for this path record entry.
+ * @dmac:		Destination mac address for the given DGID entry
+ *			of the path record entry.
+ */
+struct sa_path_rec_roce {
+	bool	route_resolved;
+	u8	dmac[ETH_ALEN];
+};
+
+struct sa_path_rec_opa {
+	__be32       dlid;
+	__be32       slid;
+	u8           raw_traffic;
+	u8	     l2_8B;
+	u8	     l2_10B;
+	u8	     l2_9B;
+	u8	     l2_16B;
+	u8	     qos_type;
+	u8	     qos_priority;
+};
+
+struct sa_path_rec {
+	union ib_gid dgid;
+	union ib_gid sgid;
+	__be64       service_id;
 	/* reserved */
 	__be32       flow_label;
 	u8           hop_limit;
@@ -170,17 +180,109 @@ struct ib_sa_path_rec {
 	u8           packet_life_time_selector;
 	u8           packet_life_time;
 	u8           preference;
-	u8           dmac[ETH_ALEN];
-	/* ignored in IB */
-	int	     ifindex;
-	/* ignored in IB */
-	struct net  *net;
-	enum ib_gid_type gid_type;
+	union {
+		struct sa_path_rec_ib ib;
+		struct sa_path_rec_roce roce;
+		struct sa_path_rec_opa opa;
+	};
+	enum sa_path_rec_type rec_type;
 };
 
-static inline struct net_device *ib_get_ndev_from_path(struct ib_sa_path_rec *rec)
+static inline enum ib_gid_type
+		sa_conv_pathrec_to_gid_type(struct sa_path_rec *rec)
 {
-	return rec->net ? dev_get_by_index(rec->net, rec->ifindex) : NULL;
+	switch (rec->rec_type) {
+	case SA_PATH_REC_TYPE_ROCE_V1:
+		return IB_GID_TYPE_ROCE;
+	case SA_PATH_REC_TYPE_ROCE_V2:
+		return IB_GID_TYPE_ROCE_UDP_ENCAP;
+	default:
+		return IB_GID_TYPE_IB;
+	}
+}
+
+static inline enum sa_path_rec_type
+		sa_conv_gid_to_pathrec_type(enum ib_gid_type type)
+{
+	switch (type) {
+	case IB_GID_TYPE_ROCE:
+		return SA_PATH_REC_TYPE_ROCE_V1;
+	case IB_GID_TYPE_ROCE_UDP_ENCAP:
+		return SA_PATH_REC_TYPE_ROCE_V2;
+	default:
+		return SA_PATH_REC_TYPE_IB;
+	}
+}
+
+static inline void path_conv_opa_to_ib(struct sa_path_rec *ib,
+				       struct sa_path_rec *opa)
+{
+	if ((be32_to_cpu(opa->opa.dlid) >=
+	     be16_to_cpu(IB_MULTICAST_LID_BASE)) ||
+	    (be32_to_cpu(opa->opa.slid) >=
+	     be16_to_cpu(IB_MULTICAST_LID_BASE))) {
+		/* Create OPA GID and zero out the LID */
+		ib->dgid.global.interface_id
+				= OPA_MAKE_ID(be32_to_cpu(opa->opa.dlid));
+		ib->dgid.global.subnet_prefix
+				= opa->dgid.global.subnet_prefix;
+		ib->sgid.global.interface_id
+				= OPA_MAKE_ID(be32_to_cpu(opa->opa.slid));
+		ib->dgid.global.subnet_prefix
+				= opa->dgid.global.subnet_prefix;
+		ib->ib.dlid	= 0;
+
+		ib->ib.slid	= 0;
+	} else {
+		ib->ib.dlid	= htons(ntohl(opa->opa.dlid));
+		ib->ib.slid	= htons(ntohl(opa->opa.slid));
+	}
+	ib->service_id		= opa->service_id;
+	ib->ib.raw_traffic	= opa->opa.raw_traffic;
+}
+
+static inline void path_conv_ib_to_opa(struct sa_path_rec *opa,
+				       struct sa_path_rec *ib)
+{
+	__be32 slid, dlid;
+
+	if ((ib_is_opa_gid(&ib->sgid)) ||
+	    (ib_is_opa_gid(&ib->dgid))) {
+		slid = htonl(opa_get_lid_from_gid(&ib->sgid));
+		dlid = htonl(opa_get_lid_from_gid(&ib->dgid));
+	} else {
+		slid = htonl(ntohs(ib->ib.slid));
+		dlid = htonl(ntohs(ib->ib.dlid));
+	}
+	opa->opa.slid		= slid;
+	opa->opa.dlid		= dlid;
+	opa->service_id		= ib->service_id;
+	opa->opa.raw_traffic	= ib->ib.raw_traffic;
+}
+
+/* Convert from OPA to IB path record */
+static inline void sa_convert_path_opa_to_ib(struct sa_path_rec *dest,
+					     struct sa_path_rec *src)
+{
+	if (src->rec_type != SA_PATH_REC_TYPE_OPA)
+		return;
+
+	*dest = *src;
+	dest->rec_type = SA_PATH_REC_TYPE_IB;
+	path_conv_opa_to_ib(dest, src);
+}
+
+/* Convert from IB to OPA path record */
+static inline void sa_convert_path_ib_to_opa(struct sa_path_rec *dest,
+					     struct sa_path_rec *src)
+{
+	if (src->rec_type != SA_PATH_REC_TYPE_IB)
+		return;
+
+	/* Do a structure copy and overwrite the relevant fields */
+	*dest = *src;
+	dest->rec_type = SA_PATH_REC_TYPE_OPA;
+	path_conv_ib_to_opa(dest, src);
 }
 
 #define IB_SA_MCMEMBER_REC_MGID				IB_SA_COMP_MASK( 0)
@@ -320,28 +422,23 @@ struct ib_sa_query;
 
 void ib_sa_cancel_query(int id, struct ib_sa_query *query);
 
-int ib_sa_path_rec_get(struct ib_sa_client *client,
-		       struct ib_device *device, u8 port_num,
-		       struct ib_sa_path_rec *rec,
-		       ib_sa_comp_mask comp_mask,
-		       int timeout_ms, gfp_t gfp_mask,
-		       void (*callback)(int status,
-					struct ib_sa_path_rec *resp,
+int ib_sa_path_rec_get(struct ib_sa_client *client, struct ib_device *device,
+		       u32 port_num, struct sa_path_rec *rec,
+		       ib_sa_comp_mask comp_mask, unsigned long timeout_ms,
+		       gfp_t gfp_mask,
+		       void (*callback)(int status, struct sa_path_rec *resp,
 					void *context),
-		       void *context,
-		       struct ib_sa_query **query);
+		       void *context, struct ib_sa_query **query);
 
 int ib_sa_service_rec_query(struct ib_sa_client *client,
-			 struct ib_device *device, u8 port_num,
-			 u8 method,
-			 struct ib_sa_service_rec *rec,
-			 ib_sa_comp_mask comp_mask,
-			 int timeout_ms, gfp_t gfp_mask,
-			 void (*callback)(int status,
-					  struct ib_sa_service_rec *resp,
-					  void *context),
-			 void *context,
-			 struct ib_sa_query **sa_query);
+			    struct ib_device *device, u32 port_num, u8 method,
+			    struct ib_sa_service_rec *rec,
+			    ib_sa_comp_mask comp_mask, unsigned long timeout_ms,
+			    gfp_t gfp_mask,
+			    void (*callback)(int status,
+					     struct ib_sa_service_rec *resp,
+					     void *context),
+			    void *context, struct ib_sa_query **sa_query);
 
 struct ib_sa_multicast {
 	struct ib_sa_mcmember_rec rec;
@@ -380,7 +477,8 @@ struct ib_sa_multicast {
  *   group, and the user must rejoin the group to continue using it.
  */
 struct ib_sa_multicast *ib_sa_join_multicast(struct ib_sa_client *client,
-					     struct ib_device *device, u8 port_num,
+					     struct ib_device *device,
+					     u32 port_num,
 					     struct ib_sa_mcmember_rec *rec,
 					     ib_sa_comp_mask comp_mask, gfp_t gfp_mask,
 					     int (*callback)(int status,
@@ -409,59 +507,126 @@ void ib_sa_free_multicast(struct ib_sa_multicast *multicast);
  * @mgid: MGID of multicast group.
  * @rec: Location to copy SA multicast member record.
  */
-int ib_sa_get_mcmember_rec(struct ib_device *device, u8 port_num,
+int ib_sa_get_mcmember_rec(struct ib_device *device, u32 port_num,
 			   union ib_gid *mgid, struct ib_sa_mcmember_rec *rec);
 
 /**
  * ib_init_ah_from_mcmember - Initialize address handle attributes based on
  * an SA multicast member record.
  */
-int ib_init_ah_from_mcmember(struct ib_device *device, u8 port_num,
+int ib_init_ah_from_mcmember(struct ib_device *device, u32 port_num,
 			     struct ib_sa_mcmember_rec *rec,
 			     struct net_device *ndev,
 			     enum ib_gid_type gid_type,
-			     struct ib_ah_attr *ah_attr);
+			     struct rdma_ah_attr *ah_attr);
 
-/**
- * ib_init_ah_from_path - Initialize address handle attributes based on an SA
- *   path record.
- */
-int ib_init_ah_from_path(struct ib_device *device, u8 port_num,
-			 struct ib_sa_path_rec *rec,
-			 struct ib_ah_attr *ah_attr);
+int ib_init_ah_attr_from_path(struct ib_device *device, u32 port_num,
+			      struct sa_path_rec *rec,
+			      struct rdma_ah_attr *ah_attr,
+			      const struct ib_gid_attr *sgid_attr);
 
 /**
  * ib_sa_pack_path - Conert a path record from struct ib_sa_path_rec
  * to IB MAD wire format.
  */
-void ib_sa_pack_path(struct ib_sa_path_rec *rec, void *attribute);
+void ib_sa_pack_path(struct sa_path_rec *rec, void *attribute);
 
 /**
  * ib_sa_unpack_path - Convert a path record from MAD format to struct
  * ib_sa_path_rec.
  */
-void ib_sa_unpack_path(void *attribute, struct ib_sa_path_rec *rec);
+void ib_sa_unpack_path(void *attribute, struct sa_path_rec *rec);
 
 /* Support GuidInfoRecord */
 int ib_sa_guid_info_rec_query(struct ib_sa_client *client,
-			      struct ib_device *device, u8 port_num,
+			      struct ib_device *device, u32 port_num,
 			      struct ib_sa_guidinfo_rec *rec,
 			      ib_sa_comp_mask comp_mask, u8 method,
-			      int timeout_ms, gfp_t gfp_mask,
+			      unsigned long timeout_ms, gfp_t gfp_mask,
 			      void (*callback)(int status,
 					       struct ib_sa_guidinfo_rec *resp,
 					       void *context),
-			      void *context,
-			      struct ib_sa_query **sa_query);
+			      void *context, struct ib_sa_query **sa_query);
 
-/* Support get SA ClassPortInfo */
-int ib_sa_classport_info_rec_query(struct ib_sa_client *client,
-				   struct ib_device *device, u8 port_num,
-				   int timeout_ms, gfp_t gfp_mask,
-				   void (*callback)(int status,
-						    struct ib_class_port_info *resp,
-						    void *context),
-				   void *context,
-				   struct ib_sa_query **sa_query);
+static inline bool sa_path_is_roce(struct sa_path_rec *rec)
+{
+	return ((rec->rec_type == SA_PATH_REC_TYPE_ROCE_V1) ||
+		(rec->rec_type == SA_PATH_REC_TYPE_ROCE_V2));
+}
 
+static inline bool sa_path_is_opa(struct sa_path_rec *rec)
+{
+	return (rec->rec_type == SA_PATH_REC_TYPE_OPA);
+}
+
+static inline void sa_path_set_slid(struct sa_path_rec *rec, u32 slid)
+{
+	if (rec->rec_type == SA_PATH_REC_TYPE_IB)
+		rec->ib.slid = cpu_to_be16(slid);
+	else if (rec->rec_type == SA_PATH_REC_TYPE_OPA)
+		rec->opa.slid = cpu_to_be32(slid);
+}
+
+static inline void sa_path_set_dlid(struct sa_path_rec *rec, u32 dlid)
+{
+	if (rec->rec_type == SA_PATH_REC_TYPE_IB)
+		rec->ib.dlid = cpu_to_be16(dlid);
+	else if (rec->rec_type == SA_PATH_REC_TYPE_OPA)
+		rec->opa.dlid = cpu_to_be32(dlid);
+}
+
+static inline void sa_path_set_raw_traffic(struct sa_path_rec *rec,
+					   u8 raw_traffic)
+{
+	if (rec->rec_type == SA_PATH_REC_TYPE_IB)
+		rec->ib.raw_traffic = raw_traffic;
+	else if (rec->rec_type == SA_PATH_REC_TYPE_OPA)
+		rec->opa.raw_traffic = raw_traffic;
+}
+
+static inline __be32 sa_path_get_slid(struct sa_path_rec *rec)
+{
+	if (rec->rec_type == SA_PATH_REC_TYPE_IB)
+		return htonl(ntohs(rec->ib.slid));
+	else if (rec->rec_type == SA_PATH_REC_TYPE_OPA)
+		return rec->opa.slid;
+	return 0;
+}
+
+static inline __be32 sa_path_get_dlid(struct sa_path_rec *rec)
+{
+	if (rec->rec_type == SA_PATH_REC_TYPE_IB)
+		return htonl(ntohs(rec->ib.dlid));
+	else if (rec->rec_type == SA_PATH_REC_TYPE_OPA)
+		return rec->opa.dlid;
+	return 0;
+}
+
+static inline u8 sa_path_get_raw_traffic(struct sa_path_rec *rec)
+{
+	if (rec->rec_type == SA_PATH_REC_TYPE_IB)
+		return rec->ib.raw_traffic;
+	else if (rec->rec_type == SA_PATH_REC_TYPE_OPA)
+		return rec->opa.raw_traffic;
+	return 0;
+}
+
+static inline void sa_path_set_dmac(struct sa_path_rec *rec, u8 *dmac)
+{
+	if (sa_path_is_roce(rec))
+		memcpy(rec->roce.dmac, dmac, ETH_ALEN);
+}
+
+static inline void sa_path_set_dmac_zero(struct sa_path_rec *rec)
+{
+	if (sa_path_is_roce(rec))
+		eth_zero_addr(rec->roce.dmac);
+}
+
+static inline u8 *sa_path_get_dmac(struct sa_path_rec *rec)
+{
+	if (sa_path_is_roce(rec))
+		return rec->roce.dmac;
+	return NULL;
+}
 #endif /* IB_SA_H */

@@ -27,11 +27,11 @@
 boolean phydm_dfs_is_meteorology_channel(void *p_dm_void){
 
 	struct PHY_DM_STRUCT *p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
-
+	
 	u8 c_channel = *(p_dm->p_channel);
 	u8 band_width = *(p_dm->p_band_width);
-
-	return ( (band_width == CHANNEL_WIDTH_80 && (c_channel) >= 116 && (c_channel) <= 128) ||
+	
+	return ( (band_width == CHANNEL_WIDTH_80 && (c_channel) >= 116 && (c_channel) <= 128) || 
 	  (band_width == CHANNEL_WIDTH_40 && (c_channel) >= 116 && (c_channel) <= 128) ||
 	  (band_width == CHANNEL_WIDTH_20 && (c_channel) >= 120 && (c_channel) <= 128) );
 }
@@ -212,7 +212,7 @@ void phydm_dfs_parameter_init(void *p_dm_void)
 	struct _DFS_STATISTICS	*p_dfs = (struct _DFS_STATISTICS *)phydm_get_structure(p_dm, PHYDM_DFS);
 
 	u8 i;
-
+	
 	p_dfs->fa_mask_th = 30;
 	p_dfs->det_print = 1;
 	p_dfs->det_print2 = 0;
@@ -238,7 +238,7 @@ void phydm_dfs_dynamic_setting(
 	u8 peak_window_cur=0, nb2wb_th_cur=0;
 	u8 region_domain = p_dm->dfs_region_domain;
 	u8 c_channel = *(p_dm->p_channel);
-
+	
 	if (p_dm->rx_tp <= 2) {
 		p_dfs->idle_mode = 1;
 		if(p_dfs->force_TP_mode)
@@ -260,7 +260,7 @@ void phydm_dfs_dynamic_setting(
 				short_pulse_cnt_th_cur = 14;
 				long_pulse_cnt_th_cur = 15;
 				nb2wb_th_cur = 3;
-				three_peak_th2_cur = 0;
+				three_peak_th2_cur = 0;                
 			} else {
 				short_pulse_cnt_th_cur = 6;
 				nb2wb_th_cur = 3;
@@ -275,11 +275,11 @@ void phydm_dfs_dynamic_setting(
 				peak_th_cur = 2;
 				nb2wb_th_cur = 3;
 				three_peak_opt_cur = 1;
-				three_peak_th2_cur = 0;
+				three_peak_th2_cur = 0;	
 				short_pulse_cnt_th_cur = 7;
 			} else {
 				three_peak_opt_cur = 1;
-				three_peak_th2_cur = 0;
+				three_peak_th2_cur = 0;	
 				short_pulse_cnt_th_cur = 7;
 				nb2wb_th_cur = 3;
 			}
@@ -298,14 +298,14 @@ void phydm_dfs_dynamic_setting(
 			if ((c_channel >= 52) && (c_channel <= 64)) {
 				long_pulse_cnt_th_cur = 15;
 				short_pulse_cnt_th_cur = 5; /*for high duty cycle*/
-				three_peak_th2_cur = 0;
+				three_peak_th2_cur = 0;			
 			}
 			else {
 				three_peak_opt_cur = 0;
 				three_peak_th2_cur = 0;
 				long_pulse_cnt_th_cur = 8;
 			}
-		}
+		}		
 		else if(region_domain == PHYDM_DFS_DOMAIN_FCC){
 		}
 		else if(region_domain == PHYDM_DFS_DOMAIN_ETSI){
@@ -335,10 +335,10 @@ phydm_radar_detect_dm_check(
 	boolean tri_short_pulse = 0, tri_long_pulse = 0, radar_type = 0, fault_flag_det = 0, fault_flag_psd = 0, fa_flag = 0, radar_detected = 0;
 	u8 st_l2h_new = 0, fa_mask_th = 0, sum = 0;
 	u8 c_channel = *(p_dm->p_channel);
-
+		
 	/*Get FA count during past 100ms*/
 	fa_count_cur = (u16)odm_get_bb_reg(p_dm, 0xf48, 0x0000ffff);
-
+	
 	if (p_dfs->fa_count_pre == 0)
 		fa_count_inc = 0;
 	else if (fa_count_cur >= p_dfs->fa_count_pre)
@@ -348,23 +348,23 @@ phydm_radar_detect_dm_check(
 	p_dfs->fa_count_pre = fa_count_cur;
 
 	p_dfs->fa_inc_hist[p_dfs->mask_idx] = fa_count_inc;
-
-	for (i=0; i<5; i++) {
-		total_fa_in_hist = total_fa_in_hist + p_dfs->fa_inc_hist[i];
-		if (p_dfs->fa_inc_hist[i] > max_fa_in_hist)
-			max_fa_in_hist = p_dfs->fa_inc_hist[i];
-	}
-	if (p_dfs->mask_idx >= 2)
+	
+	for (i=0; i<5; i++) {		
+		total_fa_in_hist = total_fa_in_hist + p_dfs->fa_inc_hist[i];		
+		if (p_dfs->fa_inc_hist[i] > max_fa_in_hist)			
+			max_fa_in_hist = p_dfs->fa_inc_hist[i];	
+	}	
+	if (p_dfs->mask_idx >= 2)		
 		index = p_dfs->mask_idx - 2;
-	else
-		index = 5 + p_dfs->mask_idx - 2;
-	if (index == 0)
-		pre_post_now_acc_fa_in_hist = p_dfs->fa_inc_hist[index] + p_dfs->fa_inc_hist[index+1] + p_dfs->fa_inc_hist[4];
-	else if (index == 4)
-		pre_post_now_acc_fa_in_hist = p_dfs->fa_inc_hist[index] + p_dfs->fa_inc_hist[0] + p_dfs->fa_inc_hist[index-1];
-	else
+	else		
+		index = 5 + p_dfs->mask_idx - 2;	
+	if (index == 0)		
+		pre_post_now_acc_fa_in_hist = p_dfs->fa_inc_hist[index] + p_dfs->fa_inc_hist[index+1] + p_dfs->fa_inc_hist[4];	
+	else if (index == 4)		
+		pre_post_now_acc_fa_in_hist = p_dfs->fa_inc_hist[index] + p_dfs->fa_inc_hist[0] + p_dfs->fa_inc_hist[index-1];	
+	else		
 		pre_post_now_acc_fa_in_hist = p_dfs->fa_inc_hist[index] + p_dfs->fa_inc_hist[index+1] + p_dfs->fa_inc_hist[index-1];
-
+		
 	/*Get VHT CRC32 ok count during past 100ms*/
 	vht_crc_ok_cnt_cur = (u16)odm_get_bb_reg(p_dm, 0xf0c, 0x00003fff);
 	if (vht_crc_ok_cnt_cur >= p_dfs->vht_crc_ok_cnt_pre)
@@ -446,7 +446,7 @@ phydm_radar_detect_dm_check(
 	if (tri_long_pulse) {
 		odm_set_bb_reg(p_dm, 0x924, BIT(15), 0);
 		odm_set_bb_reg(p_dm, 0x924, BIT(15), 1);
-		if (region_domain == PHYDM_DFS_DOMAIN_MKK) {
+		if (region_domain == PHYDM_DFS_DOMAIN_MKK) {	
 			if ((c_channel >= 52) && (c_channel <= 64)) {
 				tri_long_pulse = 0;
 			}
@@ -465,16 +465,16 @@ phydm_radar_detect_dm_check(
 	fault_flag_psd = 0;
 	fa_flag = 0;
 	if(region_domain == PHYDM_DFS_DOMAIN_ETSI){
-		fa_mask_th = p_dfs->fa_mask_th + 20;
+		fa_mask_th = p_dfs->fa_mask_th + 20;		
 	}
 	else{
-		fa_mask_th = p_dfs->fa_mask_th;
+		fa_mask_th = p_dfs->fa_mask_th;		
 	}
-	if (max_fa_in_hist >= fa_mask_th || total_fa_in_hist >= fa_mask_th || pre_post_now_acc_fa_in_hist >= fa_mask_th || (p_dfs->igi_cur >= 0x30)){
+	if (max_fa_in_hist >= fa_mask_th || total_fa_in_hist >= fa_mask_th || pre_post_now_acc_fa_in_hist >= fa_mask_th || (p_dfs->igi_cur >= 0x30)){		
 		st_l2h_new = p_dfs->st_l2h_max;
-		p_dfs->radar_det_mask_hist[index] = 1;
-		if (p_dfs->pulse_flag_hist[index] == 1){
-			p_dfs->pulse_flag_hist[index] = 0;
+		p_dfs->radar_det_mask_hist[index] = 1;		
+		if (p_dfs->pulse_flag_hist[index] == 1){			
+			p_dfs->pulse_flag_hist[index] = 0;			
 			if (p_dfs->det_print2){
 				PHYDM_DBG(p_dm, DBG_DFS, ("Radar is masked : FA mask\n"));
 			}
@@ -493,7 +493,7 @@ phydm_radar_detect_dm_check(
 		for (i=0; i<5; i++)
 			PHYDM_DBG(p_dm, DBG_DFS, ("%d ", p_dfs->pulse_flag_hist[i]));
 		PHYDM_DBG(p_dm, DBG_DFS, ("fa_inc_hist: "));
-		for (i=0; i<5; i++)
+		for (i=0; i<5; i++)			
 			PHYDM_DBG(p_dm, DBG_DFS, ("%d ", p_dfs->fa_inc_hist[i]));
 		PHYDM_DBG(p_dm, DBG_DFS,
 			("\nfa_mask_th: %d max_fa_in_hist: %d total_fa_in_hist: %d pre_post_now_acc_fa_in_hist: %d ", fa_mask_th, max_fa_in_hist, total_fa_in_hist, pre_post_now_acc_fa_in_hist));
@@ -510,7 +510,7 @@ phydm_radar_detect_dm_check(
 
 	if ((p_dfs->mask_hist_checked >= 5) && p_dfs->pulse_flag_hist[index])
 	{
-		if (sum <= 2)
+		if (sum <= 2) 
 		{
 			radar_detected = 1 ;
 			PHYDM_DBG(p_dm, DBG_DFS, ("Detected type %d radar signal!\n", radar_type));
@@ -527,15 +527,15 @@ phydm_radar_detect_dm_check(
 	if (p_dfs->mask_idx == 5)
 		p_dfs->mask_idx = 0;
 
-	if ((fault_flag_det == 0) && (fault_flag_psd == 0) && (fa_flag ==0)) {
+	if ((fault_flag_det == 0) && (fault_flag_psd == 0) && (fa_flag ==0)) {		
 		if (p_dfs->igi_cur < 0x30) {
 			st_l2h_new = p_dfs->st_l2h_min;
 		}
 	}
-
+	
 	if ((st_l2h_new != p_dfs->st_l2h_cur)) {
-		if (st_l2h_new < p_dfs->st_l2h_min) {
-			p_dfs->st_l2h_cur = p_dfs->st_l2h_min;
+		if (st_l2h_new < p_dfs->st_l2h_min) {			
+			p_dfs->st_l2h_cur = p_dfs->st_l2h_min;			
 		}
 		else if (st_l2h_new > p_dfs->st_l2h_max)
 			p_dfs->st_l2h_cur = p_dfs->st_l2h_max;
@@ -618,11 +618,11 @@ phydm_dfs_debug(
 	p_dfs->det_print2 = (boolean)argv[3];
 
 	PHYDM_SNPRINTF((output + used, out_len - used, "dbg_mode: %d, force_TP_mode: %d, det_print: %d, det_print2: %d\n", p_dfs->dbg_mode, p_dfs->force_TP_mode, p_dfs->det_print, p_dfs->det_print2));
-
+	
 	/*switch (argv[0]) {
 	case 1:
 #if defined(CONFIG_PHYDM_DFS_MASTER)
-		 set dbg parameters for radar detection instead of the default value
+		 set dbg parameters for radar detection instead of the default value 
 		if (argv[1] == 1) {
 			p_dm_odm->radar_detect_reg_918 = argv[2];
 			p_dm_odm->radar_detect_reg_91c = argv[3];
@@ -640,7 +640,7 @@ phydm_dfs_debug(
 			PHYDM_SNPRINTF((output + used, out_len - used, "Radar detection with default parameter\n"));
 		}
 		phydm_radar_detect_enable(p_dm_odm);
-#endif  defined(CONFIG_PHYDM_DFS_MASTER)
+#endif  defined(CONFIG_PHYDM_DFS_MASTER) 
 
 		break;
 	default:

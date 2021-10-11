@@ -1,4 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
+ * Copyright (c) 2016-2018 Oracle. All rights reserved.
  * Copyright (c) 2014 Open Grid Computing, Inc. All rights reserved.
  * Copyright (c) 2005-2006 Network Appliance, Inc. All rights reserved.
  *
@@ -40,511 +42,684 @@
  * Author: Tom Tucker <tom@opengridcomputing.com>
  */
 
-#include <linux/sunrpc/debug.h>
-#include <linux/sunrpc/rpc_rdma.h>
+/* Operation
+ *
+ * The main entry point is svc_rdma_recvfrom. This is called from
+ * svc_recv when the transport indicates there is incoming data to
+ * be read. "Data Ready" is signaled when an RDMA Receive completes,
+ * or when a set of RDMA Reads complete.
+ *
+ * An svc_rqst is passed in. This structure contains an array of
+ * free pages (rq_pages) that will contain the incoming RPC message.
+ *
+ * Short messages are moved directly into svc_rqst::rq_arg, and
+ * the RPC Call is ready to be processed by the Upper Layer.
+ * svc_rdma_recvfrom returns the length of the RPC Call message,
+ * completing the reception of the RPC Call.
+ *
+ * However, when an incoming message has Read chunks,
+ * svc_rdma_recvfrom must post RDMA Reads to pull the RPC Call's
+ * data payload from the client. svc_rdma_recvfrom sets up the
+ * RDMA Reads using pages in svc_rqst::rq_pages, which are
+ * transferred to an svc_rdma_recv_ctxt for the duration of the
+ * I/O. svc_rdma_recvfrom then returns zero, since the RPC message
+ * is still not yet ready.
+ *
+ * When the Read chunk payloads have become available on the
+ * server, "Data Ready" is raised again, and svc_recv calls
+ * svc_rdma_recvfrom again. This second call may use a different
+ * svc_rqst than the first one, thus any information that needs
+ * to be preserved across these two calls is kept in an
+ * svc_rdma_recv_ctxt.
+ *
+ * The second call to svc_rdma_recvfrom performs final assembly
+ * of the RPC Call message, using the RDMA Read sink pages kept in
+ * the svc_rdma_recv_ctxt. The xdr_buf is copied from the
+ * svc_rdma_recv_ctxt to the second svc_rqst. The second call returns
+ * the length of the completed RPC Call message.
+ *
+ * Page Management
+ *
+ * Pages under I/O must be transferred from the first svc_rqst to an
+ * svc_rdma_recv_ctxt before the first svc_rdma_recvfrom call returns.
+ *
+ * The first svc_rqst supplies pages for RDMA Reads. These are moved
+ * from rqstp::rq_pages into ctxt::pages. The consumed elements of
+ * the rq_pages array are set to NULL and refilled with the first
+ * svc_rdma_recvfrom call returns.
+ *
+ * During the second svc_rdma_recvfrom call, RDMA Read sink pages
+ * are transferred from the svc_rdma_recv_ctxt to the second svc_rqst.
+ */
+
+#include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <asm/unaligned.h>
 #include <rdma/ib_verbs.h>
 #include <rdma/rdma_cm.h>
+
+#include <linux/sunrpc/xdr.h>
+#include <linux/sunrpc/debug.h>
+#include <linux/sunrpc/rpc_rdma.h>
 #include <linux/sunrpc/svc_rdma.h>
 
-#define RPCDBG_FACILITY	RPCDBG_SVCXPRT
+#include "xprt_rdma.h"
+#include <trace/events/rpcrdma.h>
 
-/*
- * Replace the pages in the rq_argpages array with the pages from the SGE in
- * the RDMA_RECV completion. The SGL should contain full pages up until the
- * last one.
+static void svc_rdma_wc_receive(struct ib_cq *cq, struct ib_wc *wc);
+
+static inline struct svc_rdma_recv_ctxt *
+svc_rdma_next_recv_ctxt(struct list_head *list)
+{
+	return list_first_entry_or_null(list, struct svc_rdma_recv_ctxt,
+					rc_list);
+}
+
+static void svc_rdma_recv_cid_init(struct svcxprt_rdma *rdma,
+				   struct rpc_rdma_cid *cid)
+{
+	cid->ci_queue_id = rdma->sc_rq_cq->res.id;
+	cid->ci_completion_id = atomic_inc_return(&rdma->sc_completion_ids);
+}
+
+static struct svc_rdma_recv_ctxt *
+svc_rdma_recv_ctxt_alloc(struct svcxprt_rdma *rdma)
+{
+	struct svc_rdma_recv_ctxt *ctxt;
+	dma_addr_t addr;
+	void *buffer;
+
+	ctxt = kmalloc(sizeof(*ctxt), GFP_KERNEL);
+	if (!ctxt)
+		goto fail0;
+	buffer = kmalloc(rdma->sc_max_req_size, GFP_KERNEL);
+	if (!buffer)
+		goto fail1;
+	addr = ib_dma_map_single(rdma->sc_pd->device, buffer,
+				 rdma->sc_max_req_size, DMA_FROM_DEVICE);
+	if (ib_dma_mapping_error(rdma->sc_pd->device, addr))
+		goto fail2;
+
+	svc_rdma_recv_cid_init(rdma, &ctxt->rc_cid);
+	pcl_init(&ctxt->rc_call_pcl);
+	pcl_init(&ctxt->rc_read_pcl);
+	pcl_init(&ctxt->rc_write_pcl);
+	pcl_init(&ctxt->rc_reply_pcl);
+
+	ctxt->rc_recv_wr.next = NULL;
+	ctxt->rc_recv_wr.wr_cqe = &ctxt->rc_cqe;
+	ctxt->rc_recv_wr.sg_list = &ctxt->rc_recv_sge;
+	ctxt->rc_recv_wr.num_sge = 1;
+	ctxt->rc_cqe.done = svc_rdma_wc_receive;
+	ctxt->rc_recv_sge.addr = addr;
+	ctxt->rc_recv_sge.length = rdma->sc_max_req_size;
+	ctxt->rc_recv_sge.lkey = rdma->sc_pd->local_dma_lkey;
+	ctxt->rc_recv_buf = buffer;
+	ctxt->rc_temp = false;
+	return ctxt;
+
+fail2:
+	kfree(buffer);
+fail1:
+	kfree(ctxt);
+fail0:
+	return NULL;
+}
+
+static void svc_rdma_recv_ctxt_destroy(struct svcxprt_rdma *rdma,
+				       struct svc_rdma_recv_ctxt *ctxt)
+{
+	ib_dma_unmap_single(rdma->sc_pd->device, ctxt->rc_recv_sge.addr,
+			    ctxt->rc_recv_sge.length, DMA_FROM_DEVICE);
+	kfree(ctxt->rc_recv_buf);
+	kfree(ctxt);
+}
+
+/**
+ * svc_rdma_recv_ctxts_destroy - Release all recv_ctxt's for an xprt
+ * @rdma: svcxprt_rdma being torn down
+ *
  */
-static void rdma_build_arg_xdr(struct svc_rqst *rqstp,
-			       struct svc_rdma_op_ctxt *ctxt,
-			       u32 byte_count)
+void svc_rdma_recv_ctxts_destroy(struct svcxprt_rdma *rdma)
 {
-	struct rpcrdma_msg *rmsgp;
-	struct page *page;
-	u32 bc;
-	int sge_no;
+	struct svc_rdma_recv_ctxt *ctxt;
+	struct llist_node *node;
 
-	/* Swap the page in the SGE with the page in argpages */
-	page = ctxt->pages[0];
-	put_page(rqstp->rq_pages[0]);
-	rqstp->rq_pages[0] = page;
-
-	/* Set up the XDR head */
-	rqstp->rq_arg.head[0].iov_base = page_address(page);
-	rqstp->rq_arg.head[0].iov_len =
-		min_t(size_t, byte_count, ctxt->sge[0].length);
-	rqstp->rq_arg.len = byte_count;
-	rqstp->rq_arg.buflen = byte_count;
-
-	/* Compute bytes past head in the SGL */
-	bc = byte_count - rqstp->rq_arg.head[0].iov_len;
-
-	/* If data remains, store it in the pagelist */
-	rqstp->rq_arg.page_len = bc;
-	rqstp->rq_arg.page_base = 0;
-
-	/* RDMA_NOMSG: RDMA READ data should land just after RDMA RECV data */
-	rmsgp = (struct rpcrdma_msg *)rqstp->rq_arg.head[0].iov_base;
-	if (rmsgp->rm_type == rdma_nomsg)
-		rqstp->rq_arg.pages = &rqstp->rq_pages[0];
-	else
-		rqstp->rq_arg.pages = &rqstp->rq_pages[1];
-
-	sge_no = 1;
-	while (bc && sge_no < ctxt->count) {
-		page = ctxt->pages[sge_no];
-		put_page(rqstp->rq_pages[sge_no]);
-		rqstp->rq_pages[sge_no] = page;
-		bc -= min_t(u32, bc, ctxt->sge[sge_no].length);
-		rqstp->rq_arg.buflen += ctxt->sge[sge_no].length;
-		sge_no++;
+	while ((node = llist_del_first(&rdma->sc_recv_ctxts))) {
+		ctxt = llist_entry(node, struct svc_rdma_recv_ctxt, rc_node);
+		svc_rdma_recv_ctxt_destroy(rdma, ctxt);
 	}
-	rqstp->rq_respages = &rqstp->rq_pages[sge_no];
-	rqstp->rq_next_page = rqstp->rq_respages + 1;
-
-	/* If not all pages were used from the SGL, free the remaining ones */
-	bc = sge_no;
-	while (sge_no < ctxt->count) {
-		page = ctxt->pages[sge_no++];
-		put_page(page);
-	}
-	ctxt->count = bc;
-
-	/* Set up tail */
-	rqstp->rq_arg.tail[0].iov_base = NULL;
-	rqstp->rq_arg.tail[0].iov_len = 0;
 }
 
-/* Issue an RDMA_READ using the local lkey to map the data sink */
-int rdma_read_chunk_lcl(struct svcxprt_rdma *xprt,
-			struct svc_rqst *rqstp,
-			struct svc_rdma_op_ctxt *head,
-			int *page_no,
-			u32 *page_offset,
-			u32 rs_handle,
-			u32 rs_length,
-			u64 rs_offset,
-			bool last)
-{
-	struct ib_rdma_wr read_wr;
-	int pages_needed = PAGE_ALIGN(*page_offset + rs_length) >> PAGE_SHIFT;
-	struct svc_rdma_op_ctxt *ctxt = svc_rdma_get_context(xprt);
-	int ret, read, pno;
-	u32 pg_off = *page_offset;
-	u32 pg_no = *page_no;
-
-	ctxt->direction = DMA_FROM_DEVICE;
-	ctxt->read_hdr = head;
-	pages_needed = min_t(int, pages_needed, xprt->sc_max_sge_rd);
-	read = min_t(int, (pages_needed << PAGE_SHIFT) - *page_offset,
-		     rs_length);
-
-	for (pno = 0; pno < pages_needed; pno++) {
-		int len = min_t(int, rs_length, PAGE_SIZE - pg_off);
-
-		head->arg.pages[pg_no] = rqstp->rq_arg.pages[pg_no];
-		head->arg.page_len += len;
-
-		head->arg.len += len;
-		if (!pg_off)
-			head->count++;
-		rqstp->rq_respages = &rqstp->rq_arg.pages[pg_no+1];
-		rqstp->rq_next_page = rqstp->rq_respages + 1;
-		ctxt->sge[pno].addr =
-			ib_dma_map_page(xprt->sc_cm_id->device,
-					head->arg.pages[pg_no], pg_off,
-					PAGE_SIZE - pg_off,
-					DMA_FROM_DEVICE);
-		ret = ib_dma_mapping_error(xprt->sc_cm_id->device,
-					   ctxt->sge[pno].addr);
-		if (ret)
-			goto err;
-		svc_rdma_count_mappings(xprt, ctxt);
-
-		ctxt->sge[pno].lkey = xprt->sc_pd->local_dma_lkey;
-		ctxt->sge[pno].length = len;
-		ctxt->count++;
-
-		/* adjust offset and wrap to next page if needed */
-		pg_off += len;
-		if (pg_off == PAGE_SIZE) {
-			pg_off = 0;
-			pg_no++;
-		}
-		rs_length -= len;
-	}
-
-	if (last && rs_length == 0)
-		set_bit(RDMACTXT_F_LAST_CTXT, &ctxt->flags);
-	else
-		clear_bit(RDMACTXT_F_LAST_CTXT, &ctxt->flags);
-
-	memset(&read_wr, 0, sizeof(read_wr));
-	ctxt->cqe.done = svc_rdma_wc_read;
-	read_wr.wr.wr_cqe = &ctxt->cqe;
-	read_wr.wr.opcode = IB_WR_RDMA_READ;
-	read_wr.wr.send_flags = IB_SEND_SIGNALED;
-	read_wr.rkey = rs_handle;
-	read_wr.remote_addr = rs_offset;
-	read_wr.wr.sg_list = ctxt->sge;
-	read_wr.wr.num_sge = pages_needed;
-
-	ret = svc_rdma_send(xprt, &read_wr.wr);
-	if (ret) {
-		pr_err("svcrdma: Error %d posting RDMA_READ\n", ret);
-		set_bit(XPT_CLOSE, &xprt->sc_xprt.xpt_flags);
-		goto err;
-	}
-
-	/* return current location in page array */
-	*page_no = pg_no;
-	*page_offset = pg_off;
-	ret = read;
-	atomic_inc(&rdma_stat_read);
-	return ret;
- err:
-	svc_rdma_unmap_dma(ctxt);
-	svc_rdma_put_context(ctxt, 0);
-	return ret;
-}
-
-/* Issue an RDMA_READ using an FRMR to map the data sink */
-int rdma_read_chunk_frmr(struct svcxprt_rdma *xprt,
-			 struct svc_rqst *rqstp,
-			 struct svc_rdma_op_ctxt *head,
-			 int *page_no,
-			 u32 *page_offset,
-			 u32 rs_handle,
-			 u32 rs_length,
-			 u64 rs_offset,
-			 bool last)
-{
-	struct ib_rdma_wr read_wr;
-	struct ib_send_wr inv_wr;
-	struct ib_reg_wr reg_wr;
-	u8 key;
-	int nents = PAGE_ALIGN(*page_offset + rs_length) >> PAGE_SHIFT;
-	struct svc_rdma_op_ctxt *ctxt = svc_rdma_get_context(xprt);
-	struct svc_rdma_fastreg_mr *frmr = svc_rdma_get_frmr(xprt);
-	int ret, read, pno, dma_nents, n;
-	u32 pg_off = *page_offset;
-	u32 pg_no = *page_no;
-
-	if (IS_ERR(frmr))
-		return -ENOMEM;
-
-	ctxt->direction = DMA_FROM_DEVICE;
-	ctxt->frmr = frmr;
-	nents = min_t(unsigned int, nents, xprt->sc_frmr_pg_list_len);
-	read = min_t(int, (nents << PAGE_SHIFT) - *page_offset, rs_length);
-
-	frmr->direction = DMA_FROM_DEVICE;
-	frmr->access_flags = (IB_ACCESS_LOCAL_WRITE|IB_ACCESS_REMOTE_WRITE);
-	frmr->sg_nents = nents;
-
-	for (pno = 0; pno < nents; pno++) {
-		int len = min_t(int, rs_length, PAGE_SIZE - pg_off);
-
-		head->arg.pages[pg_no] = rqstp->rq_arg.pages[pg_no];
-		head->arg.page_len += len;
-		head->arg.len += len;
-		if (!pg_off)
-			head->count++;
-
-		sg_set_page(&frmr->sg[pno], rqstp->rq_arg.pages[pg_no],
-			    len, pg_off);
-
-		rqstp->rq_respages = &rqstp->rq_arg.pages[pg_no+1];
-		rqstp->rq_next_page = rqstp->rq_respages + 1;
-
-		/* adjust offset and wrap to next page if needed */
-		pg_off += len;
-		if (pg_off == PAGE_SIZE) {
-			pg_off = 0;
-			pg_no++;
-		}
-		rs_length -= len;
-	}
-
-	if (last && rs_length == 0)
-		set_bit(RDMACTXT_F_LAST_CTXT, &ctxt->flags);
-	else
-		clear_bit(RDMACTXT_F_LAST_CTXT, &ctxt->flags);
-
-	dma_nents = ib_dma_map_sg(xprt->sc_cm_id->device,
-				  frmr->sg, frmr->sg_nents,
-				  frmr->direction);
-	if (!dma_nents) {
-		pr_err("svcrdma: failed to dma map sg %p\n",
-		       frmr->sg);
-		return -ENOMEM;
-	}
-	atomic_inc(&xprt->sc_dma_used);
-
-	n = ib_map_mr_sg(frmr->mr, frmr->sg, frmr->sg_nents, NULL, PAGE_SIZE);
-	if (unlikely(n != frmr->sg_nents)) {
-		pr_err("svcrdma: failed to map mr %p (%d/%d elements)\n",
-		       frmr->mr, n, frmr->sg_nents);
-		return n < 0 ? n : -EINVAL;
-	}
-
-	/* Bump the key */
-	key = (u8)(frmr->mr->lkey & 0x000000FF);
-	ib_update_fast_reg_key(frmr->mr, ++key);
-
-	ctxt->sge[0].addr = frmr->mr->iova;
-	ctxt->sge[0].lkey = frmr->mr->lkey;
-	ctxt->sge[0].length = frmr->mr->length;
-	ctxt->count = 1;
-	ctxt->read_hdr = head;
-
-	/* Prepare REG WR */
-	ctxt->reg_cqe.done = svc_rdma_wc_reg;
-	reg_wr.wr.wr_cqe = &ctxt->reg_cqe;
-	reg_wr.wr.opcode = IB_WR_REG_MR;
-	reg_wr.wr.send_flags = IB_SEND_SIGNALED;
-	reg_wr.wr.num_sge = 0;
-	reg_wr.mr = frmr->mr;
-	reg_wr.key = frmr->mr->lkey;
-	reg_wr.access = frmr->access_flags;
-	reg_wr.wr.next = &read_wr.wr;
-
-	/* Prepare RDMA_READ */
-	memset(&read_wr, 0, sizeof(read_wr));
-	ctxt->cqe.done = svc_rdma_wc_read;
-	read_wr.wr.wr_cqe = &ctxt->cqe;
-	read_wr.wr.send_flags = IB_SEND_SIGNALED;
-	read_wr.rkey = rs_handle;
-	read_wr.remote_addr = rs_offset;
-	read_wr.wr.sg_list = ctxt->sge;
-	read_wr.wr.num_sge = 1;
-	if (xprt->sc_dev_caps & SVCRDMA_DEVCAP_READ_W_INV) {
-		read_wr.wr.opcode = IB_WR_RDMA_READ_WITH_INV;
-		read_wr.wr.ex.invalidate_rkey = ctxt->frmr->mr->lkey;
-	} else {
-		read_wr.wr.opcode = IB_WR_RDMA_READ;
-		read_wr.wr.next = &inv_wr;
-		/* Prepare invalidate */
-		memset(&inv_wr, 0, sizeof(inv_wr));
-		ctxt->inv_cqe.done = svc_rdma_wc_inv;
-		inv_wr.wr_cqe = &ctxt->inv_cqe;
-		inv_wr.opcode = IB_WR_LOCAL_INV;
-		inv_wr.send_flags = IB_SEND_SIGNALED | IB_SEND_FENCE;
-		inv_wr.ex.invalidate_rkey = frmr->mr->lkey;
-	}
-
-	/* Post the chain */
-	ret = svc_rdma_send(xprt, &reg_wr.wr);
-	if (ret) {
-		pr_err("svcrdma: Error %d posting RDMA_READ\n", ret);
-		set_bit(XPT_CLOSE, &xprt->sc_xprt.xpt_flags);
-		goto err;
-	}
-
-	/* return current location in page array */
-	*page_no = pg_no;
-	*page_offset = pg_off;
-	ret = read;
-	atomic_inc(&rdma_stat_read);
-	return ret;
- err:
-	svc_rdma_put_context(ctxt, 0);
-	svc_rdma_put_frmr(xprt, frmr);
-	return ret;
-}
-
-static unsigned int
-rdma_rcl_chunk_count(struct rpcrdma_read_chunk *ch)
-{
-	unsigned int count;
-
-	for (count = 0; ch->rc_discrim != xdr_zero; ch++)
-		count++;
-	return count;
-}
-
-/* If there was additional inline content, append it to the end of arg.pages.
- * Tail copy has to be done after the reader function has determined how many
- * pages are needed for RDMA READ.
+/**
+ * svc_rdma_recv_ctxt_get - Allocate a recv_ctxt
+ * @rdma: controlling svcxprt_rdma
+ *
+ * Returns a recv_ctxt or (rarely) NULL if none are available.
  */
-static int
-rdma_copy_tail(struct svc_rqst *rqstp, struct svc_rdma_op_ctxt *head,
-	       u32 position, u32 byte_count, u32 page_offset, int page_no)
+struct svc_rdma_recv_ctxt *svc_rdma_recv_ctxt_get(struct svcxprt_rdma *rdma)
 {
-	char *srcp, *destp;
+	struct svc_rdma_recv_ctxt *ctxt;
+	struct llist_node *node;
+
+	node = llist_del_first(&rdma->sc_recv_ctxts);
+	if (!node)
+		goto out_empty;
+	ctxt = llist_entry(node, struct svc_rdma_recv_ctxt, rc_node);
+
+out:
+	ctxt->rc_page_count = 0;
+	return ctxt;
+
+out_empty:
+	ctxt = svc_rdma_recv_ctxt_alloc(rdma);
+	if (!ctxt)
+		return NULL;
+	goto out;
+}
+
+/**
+ * svc_rdma_recv_ctxt_put - Return recv_ctxt to free list
+ * @rdma: controlling svcxprt_rdma
+ * @ctxt: object to return to the free list
+ *
+ */
+void svc_rdma_recv_ctxt_put(struct svcxprt_rdma *rdma,
+			    struct svc_rdma_recv_ctxt *ctxt)
+{
+	pcl_free(&ctxt->rc_call_pcl);
+	pcl_free(&ctxt->rc_read_pcl);
+	pcl_free(&ctxt->rc_write_pcl);
+	pcl_free(&ctxt->rc_reply_pcl);
+
+	if (!ctxt->rc_temp)
+		llist_add(&ctxt->rc_node, &rdma->sc_recv_ctxts);
+	else
+		svc_rdma_recv_ctxt_destroy(rdma, ctxt);
+}
+
+/**
+ * svc_rdma_release_rqst - Release transport-specific per-rqst resources
+ * @rqstp: svc_rqst being released
+ *
+ * Ensure that the recv_ctxt is released whether or not a Reply
+ * was sent. For example, the client could close the connection,
+ * or svc_process could drop an RPC, before the Reply is sent.
+ */
+void svc_rdma_release_rqst(struct svc_rqst *rqstp)
+{
+	struct svc_rdma_recv_ctxt *ctxt = rqstp->rq_xprt_ctxt;
+	struct svc_xprt *xprt = rqstp->rq_xprt;
+	struct svcxprt_rdma *rdma =
+		container_of(xprt, struct svcxprt_rdma, sc_xprt);
+
+	rqstp->rq_xprt_ctxt = NULL;
+	if (ctxt)
+		svc_rdma_recv_ctxt_put(rdma, ctxt);
+}
+
+static bool svc_rdma_refresh_recvs(struct svcxprt_rdma *rdma,
+				   unsigned int wanted, bool temp)
+{
+	const struct ib_recv_wr *bad_wr = NULL;
+	struct svc_rdma_recv_ctxt *ctxt;
+	struct ib_recv_wr *recv_chain;
 	int ret;
 
-	ret = 0;
-	srcp = head->arg.head[0].iov_base + position;
-	byte_count = head->arg.head[0].iov_len - position;
-	if (byte_count > PAGE_SIZE) {
-		dprintk("svcrdma: large tail unsupported\n");
-		return 0;
+	if (test_bit(XPT_CLOSE, &rdma->sc_xprt.xpt_flags))
+		return false;
+
+	recv_chain = NULL;
+	while (wanted--) {
+		ctxt = svc_rdma_recv_ctxt_get(rdma);
+		if (!ctxt)
+			break;
+
+		trace_svcrdma_post_recv(ctxt);
+		ctxt->rc_temp = temp;
+		ctxt->rc_recv_wr.next = recv_chain;
+		recv_chain = &ctxt->rc_recv_wr;
+		rdma->sc_pending_recvs++;
 	}
+	if (!recv_chain)
+		return false;
 
-	/* Fit as much of the tail on the current page as possible */
-	if (page_offset != PAGE_SIZE) {
-		destp = page_address(rqstp->rq_arg.pages[page_no]);
-		destp += page_offset;
-		while (byte_count--) {
-			*destp++ = *srcp++;
-			page_offset++;
-			if (page_offset == PAGE_SIZE && byte_count)
-				goto more;
-		}
-		goto done;
+	ret = ib_post_recv(rdma->sc_qp, recv_chain, &bad_wr);
+	if (ret)
+		goto err_free;
+	return true;
+
+err_free:
+	trace_svcrdma_rq_post_err(rdma, ret);
+	while (bad_wr) {
+		ctxt = container_of(bad_wr, struct svc_rdma_recv_ctxt,
+				    rc_recv_wr);
+		bad_wr = bad_wr->next;
+		svc_rdma_recv_ctxt_put(rdma, ctxt);
 	}
-
-more:
-	/* Fit the rest on the next page */
-	page_no++;
-	destp = page_address(rqstp->rq_arg.pages[page_no]);
-	while (byte_count--)
-		*destp++ = *srcp++;
-
-	rqstp->rq_respages = &rqstp->rq_arg.pages[page_no+1];
-	rqstp->rq_next_page = rqstp->rq_respages + 1;
-
-done:
-	byte_count = head->arg.head[0].iov_len - position;
-	head->arg.page_len += byte_count;
-	head->arg.len += byte_count;
-	head->arg.buflen += byte_count;
-	return 1;
+	/* Since we're destroying the xprt, no need to reset
+	 * sc_pending_recvs. */
+	return false;
 }
 
-static int rdma_read_chunks(struct svcxprt_rdma *xprt,
-			    struct rpcrdma_msg *rmsgp,
-			    struct svc_rqst *rqstp,
-			    struct svc_rdma_op_ctxt *head)
+/**
+ * svc_rdma_post_recvs - Post initial set of Recv WRs
+ * @rdma: fresh svcxprt_rdma
+ *
+ * Returns true if successful, otherwise false.
+ */
+bool svc_rdma_post_recvs(struct svcxprt_rdma *rdma)
 {
-	int page_no, ret;
-	struct rpcrdma_read_chunk *ch;
-	u32 handle, page_offset, byte_count;
-	u32 position;
-	u64 rs_offset;
-	bool last;
+	return svc_rdma_refresh_recvs(rdma, rdma->sc_max_requests, true);
+}
 
-	/* If no read list is present, return 0 */
-	ch = svc_rdma_get_read_chunk(rmsgp);
-	if (!ch)
-		return 0;
+/**
+ * svc_rdma_wc_receive - Invoked by RDMA provider for each polled Receive WC
+ * @cq: Completion Queue context
+ * @wc: Work Completion object
+ *
+ */
+static void svc_rdma_wc_receive(struct ib_cq *cq, struct ib_wc *wc)
+{
+	struct svcxprt_rdma *rdma = cq->cq_context;
+	struct ib_cqe *cqe = wc->wr_cqe;
+	struct svc_rdma_recv_ctxt *ctxt;
 
-	if (rdma_rcl_chunk_count(ch) > RPCSVC_MAXPAGES)
-		return -EINVAL;
+	rdma->sc_pending_recvs--;
 
-	/* The request is completed when the RDMA_READs complete. The
-	 * head context keeps all the pages that comprise the
-	 * request.
+	/* WARNING: Only wc->wr_cqe and wc->status are reliable */
+	ctxt = container_of(cqe, struct svc_rdma_recv_ctxt, rc_cqe);
+
+	trace_svcrdma_wc_receive(wc, &ctxt->rc_cid);
+	if (wc->status != IB_WC_SUCCESS)
+		goto flushed;
+
+	/* If receive posting fails, the connection is about to be
+	 * lost anyway. The server will not be able to send a reply
+	 * for this RPC, and the client will retransmit this RPC
+	 * anyway when it reconnects.
+	 *
+	 * Therefore we drop the Receive, even if status was SUCCESS
+	 * to reduce the likelihood of replayed requests once the
+	 * client reconnects.
 	 */
-	head->arg.head[0] = rqstp->rq_arg.head[0];
-	head->arg.tail[0] = rqstp->rq_arg.tail[0];
-	head->hdr_count = head->count;
-	head->arg.page_base = 0;
-	head->arg.page_len = 0;
-	head->arg.len = rqstp->rq_arg.len;
-	head->arg.buflen = rqstp->rq_arg.buflen;
+	if (rdma->sc_pending_recvs < rdma->sc_max_requests)
+		if (!svc_rdma_refresh_recvs(rdma, rdma->sc_recv_batch, false))
+			goto flushed;
 
-	/* RDMA_NOMSG: RDMA READ data should land just after RDMA RECV data */
-	position = be32_to_cpu(ch->rc_position);
-	if (position == 0) {
-		head->arg.pages = &head->pages[0];
-		page_offset = head->byte_len;
-	} else {
-		head->arg.pages = &head->pages[head->count];
-		page_offset = 0;
-	}
+	/* All wc fields are now known to be valid */
+	ctxt->rc_byte_len = wc->byte_len;
 
-	ret = 0;
-	page_no = 0;
-	for (; ch->rc_discrim != xdr_zero; ch++) {
-		if (be32_to_cpu(ch->rc_position) != position)
-			goto err;
+	spin_lock(&rdma->sc_rq_dto_lock);
+	list_add_tail(&ctxt->rc_list, &rdma->sc_rq_dto_q);
+	/* Note the unlock pairs with the smp_rmb in svc_xprt_ready: */
+	set_bit(XPT_DATA, &rdma->sc_xprt.xpt_flags);
+	spin_unlock(&rdma->sc_rq_dto_lock);
+	if (!test_bit(RDMAXPRT_CONN_PENDING, &rdma->sc_flags))
+		svc_xprt_enqueue(&rdma->sc_xprt);
+	return;
 
-		handle = be32_to_cpu(ch->rc_target.rs_handle),
-		byte_count = be32_to_cpu(ch->rc_target.rs_length);
-		xdr_decode_hyper((__be32 *)&ch->rc_target.rs_offset,
-				 &rs_offset);
-
-		while (byte_count > 0) {
-			last = (ch + 1)->rc_discrim == xdr_zero;
-			ret = xprt->sc_reader(xprt, rqstp, head,
-					      &page_no, &page_offset,
-					      handle, byte_count,
-					      rs_offset, last);
-			if (ret < 0)
-				goto err;
-			byte_count -= ret;
-			rs_offset += ret;
-			head->arg.buflen += ret;
-		}
-	}
-
-	/* Read list may need XDR round-up (see RFC 5666, s. 3.7) */
-	if (page_offset & 3) {
-		u32 pad = 4 - (page_offset & 3);
-
-		head->arg.tail[0].iov_len += pad;
-		head->arg.len += pad;
-		head->arg.buflen += pad;
-		page_offset += pad;
-	}
-
-	ret = 1;
-	if (position && position < head->arg.head[0].iov_len)
-		ret = rdma_copy_tail(rqstp, head, position,
-				     byte_count, page_offset, page_no);
-	head->arg.head[0].iov_len = position;
-	head->position = position;
-
- err:
-	/* Detach arg pages. svc_recv will replenish them */
-	for (page_no = 0;
-	     &rqstp->rq_pages[page_no] < rqstp->rq_respages; page_no++)
-		rqstp->rq_pages[page_no] = NULL;
-
-	return ret;
+flushed:
+	svc_rdma_recv_ctxt_put(rdma, ctxt);
+	svc_xprt_deferred_close(&rdma->sc_xprt);
 }
 
-static void rdma_read_complete(struct svc_rqst *rqstp,
-			       struct svc_rdma_op_ctxt *head)
+/**
+ * svc_rdma_flush_recv_queues - Drain pending Receive work
+ * @rdma: svcxprt_rdma being shut down
+ *
+ */
+void svc_rdma_flush_recv_queues(struct svcxprt_rdma *rdma)
 {
-	int page_no;
+	struct svc_rdma_recv_ctxt *ctxt;
 
-	/* Copy RPC pages */
-	for (page_no = 0; page_no < head->count; page_no++) {
-		put_page(rqstp->rq_pages[page_no]);
-		rqstp->rq_pages[page_no] = head->pages[page_no];
+	while ((ctxt = svc_rdma_next_recv_ctxt(&rdma->sc_rq_dto_q))) {
+		list_del(&ctxt->rc_list);
+		svc_rdma_recv_ctxt_put(rdma, ctxt);
 	}
+}
 
-	/* Adjustments made for RDMA_NOMSG type requests */
-	if (head->position == 0) {
-		if (head->arg.len <= head->sge[0].length) {
-			head->arg.head[0].iov_len = head->arg.len -
-							head->byte_len;
-			head->arg.page_len = 0;
+static void svc_rdma_build_arg_xdr(struct svc_rqst *rqstp,
+				   struct svc_rdma_recv_ctxt *ctxt)
+{
+	struct xdr_buf *arg = &rqstp->rq_arg;
+
+	arg->head[0].iov_base = ctxt->rc_recv_buf;
+	arg->head[0].iov_len = ctxt->rc_byte_len;
+	arg->tail[0].iov_base = NULL;
+	arg->tail[0].iov_len = 0;
+	arg->page_len = 0;
+	arg->page_base = 0;
+	arg->buflen = ctxt->rc_byte_len;
+	arg->len = ctxt->rc_byte_len;
+}
+
+/**
+ * xdr_count_read_segments - Count number of Read segments in Read list
+ * @rctxt: Ingress receive context
+ * @p: Start of an un-decoded Read list
+ *
+ * Before allocating anything, ensure the ingress Read list is safe
+ * to use.
+ *
+ * The segment count is limited to how many segments can fit in the
+ * transport header without overflowing the buffer. That's about 40
+ * Read segments for a 1KB inline threshold.
+ *
+ * Return values:
+ *   %true: Read list is valid. @rctxt's xdr_stream is updated to point
+ *	    to the first byte past the Read list. rc_read_pcl and
+ *	    rc_call_pcl cl_count fields are set to the number of
+ *	    Read segments in the list.
+ *  %false: Read list is corrupt. @rctxt's xdr_stream is left in an
+ *	    unknown state.
+ */
+static bool xdr_count_read_segments(struct svc_rdma_recv_ctxt *rctxt, __be32 *p)
+{
+	rctxt->rc_call_pcl.cl_count = 0;
+	rctxt->rc_read_pcl.cl_count = 0;
+	while (xdr_item_is_present(p)) {
+		u32 position, handle, length;
+		u64 offset;
+
+		p = xdr_inline_decode(&rctxt->rc_stream,
+				      rpcrdma_readseg_maxsz * sizeof(*p));
+		if (!p)
+			return false;
+
+		xdr_decode_read_segment(p, &position, &handle,
+					    &length, &offset);
+		if (position) {
+			if (position & 3)
+				return false;
+			++rctxt->rc_read_pcl.cl_count;
 		} else {
-			head->arg.head[0].iov_len = head->sge[0].length -
-								head->byte_len;
-			head->arg.page_len = head->arg.len -
-						head->sge[0].length;
+			++rctxt->rc_call_pcl.cl_count;
+		}
+
+		p = xdr_inline_decode(&rctxt->rc_stream, sizeof(*p));
+		if (!p)
+			return false;
+	}
+	return true;
+}
+
+/* Sanity check the Read list.
+ *
+ * Sanity checks:
+ * - Read list does not overflow Receive buffer.
+ * - Chunk size limited by largest NFS data payload.
+ *
+ * Return values:
+ *   %true: Read list is valid. @rctxt's xdr_stream is updated
+ *	    to point to the first byte past the Read list.
+ *  %false: Read list is corrupt. @rctxt's xdr_stream is left
+ *	    in an unknown state.
+ */
+static bool xdr_check_read_list(struct svc_rdma_recv_ctxt *rctxt)
+{
+	__be32 *p;
+
+	p = xdr_inline_decode(&rctxt->rc_stream, sizeof(*p));
+	if (!p)
+		return false;
+	if (!xdr_count_read_segments(rctxt, p))
+		return false;
+	if (!pcl_alloc_call(rctxt, p))
+		return false;
+	return pcl_alloc_read(rctxt, p);
+}
+
+static bool xdr_check_write_chunk(struct svc_rdma_recv_ctxt *rctxt)
+{
+	u32 segcount;
+	__be32 *p;
+
+	if (xdr_stream_decode_u32(&rctxt->rc_stream, &segcount))
+		return false;
+
+	/* A bogus segcount causes this buffer overflow check to fail. */
+	p = xdr_inline_decode(&rctxt->rc_stream,
+			      segcount * rpcrdma_segment_maxsz * sizeof(*p));
+	return p != NULL;
+}
+
+/**
+ * xdr_count_write_chunks - Count number of Write chunks in Write list
+ * @rctxt: Received header and decoding state
+ * @p: start of an un-decoded Write list
+ *
+ * Before allocating anything, ensure the ingress Write list is
+ * safe to use.
+ *
+ * Return values:
+ *       %true: Write list is valid. @rctxt's xdr_stream is updated
+ *		to point to the first byte past the Write list, and
+ *		the number of Write chunks is in rc_write_pcl.cl_count.
+ *      %false: Write list is corrupt. @rctxt's xdr_stream is left
+ *		in an indeterminate state.
+ */
+static bool xdr_count_write_chunks(struct svc_rdma_recv_ctxt *rctxt, __be32 *p)
+{
+	rctxt->rc_write_pcl.cl_count = 0;
+	while (xdr_item_is_present(p)) {
+		if (!xdr_check_write_chunk(rctxt))
+			return false;
+		++rctxt->rc_write_pcl.cl_count;
+		p = xdr_inline_decode(&rctxt->rc_stream, sizeof(*p));
+		if (!p)
+			return false;
+	}
+	return true;
+}
+
+/* Sanity check the Write list.
+ *
+ * Implementation limits:
+ * - This implementation currently supports only one Write chunk.
+ *
+ * Sanity checks:
+ * - Write list does not overflow Receive buffer.
+ * - Chunk size limited by largest NFS data payload.
+ *
+ * Return values:
+ *       %true: Write list is valid. @rctxt's xdr_stream is updated
+ *		to point to the first byte past the Write list.
+ *      %false: Write list is corrupt. @rctxt's xdr_stream is left
+ *		in an unknown state.
+ */
+static bool xdr_check_write_list(struct svc_rdma_recv_ctxt *rctxt)
+{
+	__be32 *p;
+
+	p = xdr_inline_decode(&rctxt->rc_stream, sizeof(*p));
+	if (!p)
+		return false;
+	if (!xdr_count_write_chunks(rctxt, p))
+		return false;
+	if (!pcl_alloc_write(rctxt, &rctxt->rc_write_pcl, p))
+		return false;
+
+	rctxt->rc_cur_result_payload = pcl_first_chunk(&rctxt->rc_write_pcl);
+	return true;
+}
+
+/* Sanity check the Reply chunk.
+ *
+ * Sanity checks:
+ * - Reply chunk does not overflow Receive buffer.
+ * - Chunk size limited by largest NFS data payload.
+ *
+ * Return values:
+ *       %true: Reply chunk is valid. @rctxt's xdr_stream is updated
+ *		to point to the first byte past the Reply chunk.
+ *      %false: Reply chunk is corrupt. @rctxt's xdr_stream is left
+ *		in an unknown state.
+ */
+static bool xdr_check_reply_chunk(struct svc_rdma_recv_ctxt *rctxt)
+{
+	__be32 *p;
+
+	p = xdr_inline_decode(&rctxt->rc_stream, sizeof(*p));
+	if (!p)
+		return false;
+
+	if (!xdr_item_is_present(p))
+		return true;
+	if (!xdr_check_write_chunk(rctxt))
+		return false;
+
+	rctxt->rc_reply_pcl.cl_count = 1;
+	return pcl_alloc_write(rctxt, &rctxt->rc_reply_pcl, p);
+}
+
+/* RPC-over-RDMA Version One private extension: Remote Invalidation.
+ * Responder's choice: requester signals it can handle Send With
+ * Invalidate, and responder chooses one R_key to invalidate.
+ *
+ * If there is exactly one distinct R_key in the received transport
+ * header, set rc_inv_rkey to that R_key. Otherwise, set it to zero.
+ */
+static void svc_rdma_get_inv_rkey(struct svcxprt_rdma *rdma,
+				  struct svc_rdma_recv_ctxt *ctxt)
+{
+	struct svc_rdma_segment *segment;
+	struct svc_rdma_chunk *chunk;
+	u32 inv_rkey;
+
+	ctxt->rc_inv_rkey = 0;
+
+	if (!rdma->sc_snd_w_inv)
+		return;
+
+	inv_rkey = 0;
+	pcl_for_each_chunk(chunk, &ctxt->rc_call_pcl) {
+		pcl_for_each_segment(segment, chunk) {
+			if (inv_rkey == 0)
+				inv_rkey = segment->rs_handle;
+			else if (inv_rkey != segment->rs_handle)
+				return;
 		}
 	}
+	pcl_for_each_chunk(chunk, &ctxt->rc_read_pcl) {
+		pcl_for_each_segment(segment, chunk) {
+			if (inv_rkey == 0)
+				inv_rkey = segment->rs_handle;
+			else if (inv_rkey != segment->rs_handle)
+				return;
+		}
+	}
+	pcl_for_each_chunk(chunk, &ctxt->rc_write_pcl) {
+		pcl_for_each_segment(segment, chunk) {
+			if (inv_rkey == 0)
+				inv_rkey = segment->rs_handle;
+			else if (inv_rkey != segment->rs_handle)
+				return;
+		}
+	}
+	pcl_for_each_chunk(chunk, &ctxt->rc_reply_pcl) {
+		pcl_for_each_segment(segment, chunk) {
+			if (inv_rkey == 0)
+				inv_rkey = segment->rs_handle;
+			else if (inv_rkey != segment->rs_handle)
+				return;
+		}
+	}
+	ctxt->rc_inv_rkey = inv_rkey;
+}
 
-	/* Point rq_arg.pages past header */
-	rqstp->rq_arg.pages = &rqstp->rq_pages[head->hdr_count];
-	rqstp->rq_arg.page_len = head->arg.page_len;
-	rqstp->rq_arg.page_base = head->arg.page_base;
+/**
+ * svc_rdma_xdr_decode_req - Decode the transport header
+ * @rq_arg: xdr_buf containing ingress RPC/RDMA message
+ * @rctxt: state of decoding
+ *
+ * On entry, xdr->head[0].iov_base points to first byte of the
+ * RPC-over-RDMA transport header.
+ *
+ * On successful exit, head[0] points to first byte past the
+ * RPC-over-RDMA header. For RDMA_MSG, this is the RPC message.
+ *
+ * The length of the RPC-over-RDMA header is returned.
+ *
+ * Assumptions:
+ * - The transport header is entirely contained in the head iovec.
+ */
+static int svc_rdma_xdr_decode_req(struct xdr_buf *rq_arg,
+				   struct svc_rdma_recv_ctxt *rctxt)
+{
+	__be32 *p, *rdma_argp;
+	unsigned int hdr_len;
 
-	/* rq_respages starts after the last arg page */
-	rqstp->rq_respages = &rqstp->rq_pages[page_no];
-	rqstp->rq_next_page = rqstp->rq_respages + 1;
+	rdma_argp = rq_arg->head[0].iov_base;
+	xdr_init_decode(&rctxt->rc_stream, rq_arg, rdma_argp, NULL);
 
-	/* Rebuild rq_arg head and tail. */
-	rqstp->rq_arg.head[0] = head->arg.head[0];
-	rqstp->rq_arg.tail[0] = head->arg.tail[0];
-	rqstp->rq_arg.len = head->arg.len;
-	rqstp->rq_arg.buflen = head->arg.buflen;
+	p = xdr_inline_decode(&rctxt->rc_stream,
+			      rpcrdma_fixed_maxsz * sizeof(*p));
+	if (unlikely(!p))
+		goto out_short;
+	p++;
+	if (*p != rpcrdma_version)
+		goto out_version;
+	p += 2;
+	rctxt->rc_msgtype = *p;
+	switch (rctxt->rc_msgtype) {
+	case rdma_msg:
+		break;
+	case rdma_nomsg:
+		break;
+	case rdma_done:
+		goto out_drop;
+	case rdma_error:
+		goto out_drop;
+	default:
+		goto out_proc;
+	}
+
+	if (!xdr_check_read_list(rctxt))
+		goto out_inval;
+	if (!xdr_check_write_list(rctxt))
+		goto out_inval;
+	if (!xdr_check_reply_chunk(rctxt))
+		goto out_inval;
+
+	rq_arg->head[0].iov_base = rctxt->rc_stream.p;
+	hdr_len = xdr_stream_pos(&rctxt->rc_stream);
+	rq_arg->head[0].iov_len -= hdr_len;
+	rq_arg->len -= hdr_len;
+	trace_svcrdma_decode_rqst(rctxt, rdma_argp, hdr_len);
+	return hdr_len;
+
+out_short:
+	trace_svcrdma_decode_short_err(rctxt, rq_arg->len);
+	return -EINVAL;
+
+out_version:
+	trace_svcrdma_decode_badvers_err(rctxt, rdma_argp);
+	return -EPROTONOSUPPORT;
+
+out_drop:
+	trace_svcrdma_decode_drop_err(rctxt, rdma_argp);
+	return 0;
+
+out_proc:
+	trace_svcrdma_decode_badproc_err(rctxt, rdma_argp);
+	return -EINVAL;
+
+out_inval:
+	trace_svcrdma_decode_parse_err(rctxt, rdma_argp);
+	return -EINVAL;
+}
+
+static void svc_rdma_send_error(struct svcxprt_rdma *rdma,
+				struct svc_rdma_recv_ctxt *rctxt,
+				int status)
+{
+	struct svc_rdma_send_ctxt *sctxt;
+
+	sctxt = svc_rdma_send_ctxt_get(rdma);
+	if (!sctxt)
+		return;
+	svc_rdma_send_error_msg(rdma, sctxt, rctxt, status);
 }
 
 /* By convention, backchannel calls arrive via rdma_msg type
@@ -552,140 +727,138 @@ static void rdma_read_complete(struct svc_rqst *rqstp,
  * the RPC/RDMA header small and fixed in size, so it is
  * straightforward to check the RPC header's direction field.
  */
-static bool
-svc_rdma_is_backchannel_reply(struct svc_xprt *xprt, struct rpcrdma_msg *rmsgp)
+static bool svc_rdma_is_reverse_direction_reply(struct svc_xprt *xprt,
+						struct svc_rdma_recv_ctxt *rctxt)
 {
-	__be32 *p = (__be32 *)rmsgp;
+	__be32 *p = rctxt->rc_recv_buf;
 
 	if (!xprt->xpt_bc_xprt)
 		return false;
 
-	if (rmsgp->rm_type != rdma_msg)
-		return false;
-	if (rmsgp->rm_body.rm_chunks[0] != xdr_zero)
-		return false;
-	if (rmsgp->rm_body.rm_chunks[1] != xdr_zero)
-		return false;
-	if (rmsgp->rm_body.rm_chunks[2] != xdr_zero)
+	if (rctxt->rc_msgtype != rdma_msg)
 		return false;
 
-	/* sanity */
-	if (p[7] != rmsgp->rm_xid)
+	if (!pcl_is_empty(&rctxt->rc_call_pcl))
 		return false;
-	/* call direction */
-	if (p[8] == cpu_to_be32(RPC_CALL))
+	if (!pcl_is_empty(&rctxt->rc_read_pcl))
+		return false;
+	if (!pcl_is_empty(&rctxt->rc_write_pcl))
+		return false;
+	if (!pcl_is_empty(&rctxt->rc_reply_pcl))
+		return false;
+
+	/* RPC call direction */
+	if (*(p + 8) == cpu_to_be32(RPC_CALL))
 		return false;
 
 	return true;
 }
 
-/*
- * Set up the rqstp thread context to point to the RQ buffer. If
- * necessary, pull additional data from the client with an RDMA_READ
- * request.
+/**
+ * svc_rdma_recvfrom - Receive an RPC call
+ * @rqstp: request structure into which to receive an RPC Call
+ *
+ * Returns:
+ *	The positive number of bytes in the RPC Call message,
+ *	%0 if there were no Calls ready to return,
+ *	%-EINVAL if the Read chunk data is too large,
+ *	%-ENOMEM if rdma_rw context pool was exhausted,
+ *	%-ENOTCONN if posting failed (connection is lost),
+ *	%-EIO if rdma_rw initialization failed (DMA mapping, etc).
+ *
+ * Called in a loop when XPT_DATA is set. XPT_DATA is cleared only
+ * when there are no remaining ctxt's to process.
+ *
+ * The next ctxt is removed from the "receive" lists.
+ *
+ * - If the ctxt completes a Read, then finish assembling the Call
+ *   message and return the number of bytes in the message.
+ *
+ * - If the ctxt completes a Receive, then construct the Call
+ *   message from the contents of the Receive buffer.
+ *
+ *   - If there are no Read chunks in this message, then finish
+ *     assembling the Call message and return the number of bytes
+ *     in the message.
+ *
+ *   - If there are Read chunks in this message, post Read WRs to
+ *     pull that payload and return 0.
  */
 int svc_rdma_recvfrom(struct svc_rqst *rqstp)
 {
 	struct svc_xprt *xprt = rqstp->rq_xprt;
 	struct svcxprt_rdma *rdma_xprt =
 		container_of(xprt, struct svcxprt_rdma, sc_xprt);
-	struct svc_rdma_op_ctxt *ctxt = NULL;
-	struct rpcrdma_msg *rmsgp;
-	int ret = 0;
+	struct svc_rdma_recv_ctxt *ctxt;
+	int ret;
 
-	dprintk("svcrdma: rqstp=%p\n", rqstp);
+	rqstp->rq_xprt_ctxt = NULL;
 
-	spin_lock_bh(&rdma_xprt->sc_rq_dto_lock);
-	if (!list_empty(&rdma_xprt->sc_read_complete_q)) {
-		ctxt = list_entry(rdma_xprt->sc_read_complete_q.next,
-				  struct svc_rdma_op_ctxt,
-				  dto_q);
-		list_del_init(&ctxt->dto_q);
-		spin_unlock_bh(&rdma_xprt->sc_rq_dto_lock);
-		rdma_read_complete(rqstp, ctxt);
-		goto complete;
-	} else if (!list_empty(&rdma_xprt->sc_rq_dto_q)) {
-		ctxt = list_entry(rdma_xprt->sc_rq_dto_q.next,
-				  struct svc_rdma_op_ctxt,
-				  dto_q);
-		list_del_init(&ctxt->dto_q);
-	} else {
-		atomic_inc(&rdma_stat_rq_starve);
+	ctxt = NULL;
+	spin_lock(&rdma_xprt->sc_rq_dto_lock);
+	ctxt = svc_rdma_next_recv_ctxt(&rdma_xprt->sc_rq_dto_q);
+	if (ctxt)
+		list_del(&ctxt->rc_list);
+	else
+		/* No new incoming requests, terminate the loop */
 		clear_bit(XPT_DATA, &xprt->xpt_flags);
-		ctxt = NULL;
-	}
-	spin_unlock_bh(&rdma_xprt->sc_rq_dto_lock);
-	if (!ctxt) {
-		/* This is the EAGAIN path. The svc_recv routine will
-		 * return -EAGAIN, the nfsd thread will go to call into
-		 * svc_recv again and we shouldn't be on the active
-		 * transport list
-		 */
-		if (test_bit(XPT_CLOSE, &xprt->xpt_flags))
-			goto defer;
-		goto out;
-	}
-	dprintk("svcrdma: processing ctxt=%p on xprt=%p, rqstp=%p, status=%d\n",
-		ctxt, rdma_xprt, rqstp, ctxt->wc_status);
-	atomic_inc(&rdma_stat_recv);
+	spin_unlock(&rdma_xprt->sc_rq_dto_lock);
 
-	/* Build up the XDR from the receive buffers. */
-	rdma_build_arg_xdr(rqstp, ctxt, ctxt->byte_len);
+	/* Unblock the transport for the next receive */
+	svc_xprt_received(xprt);
+	if (!ctxt)
+		return 0;
 
-	/* Decode the RDMA header. */
-	rmsgp = (struct rpcrdma_msg *)rqstp->rq_arg.head[0].iov_base;
-	ret = svc_rdma_xdr_decode_req(&rqstp->rq_arg);
+	percpu_counter_inc(&svcrdma_stat_recv);
+	ib_dma_sync_single_for_cpu(rdma_xprt->sc_pd->device,
+				   ctxt->rc_recv_sge.addr, ctxt->rc_byte_len,
+				   DMA_FROM_DEVICE);
+	svc_rdma_build_arg_xdr(rqstp, ctxt);
+
+	/* Prevent svc_xprt_release from releasing pages in rq_pages
+	 * if we return 0 or an error.
+	 */
+	rqstp->rq_respages = rqstp->rq_pages;
+	rqstp->rq_next_page = rqstp->rq_respages;
+
+	ret = svc_rdma_xdr_decode_req(&rqstp->rq_arg, ctxt);
 	if (ret < 0)
 		goto out_err;
 	if (ret == 0)
 		goto out_drop;
 	rqstp->rq_xprt_hlen = ret;
 
-	if (svc_rdma_is_backchannel_reply(xprt, rmsgp)) {
-		ret = svc_rdma_handle_bc_reply(xprt->xpt_bc_xprt, rmsgp,
-					       &rqstp->rq_arg);
-		svc_rdma_put_context(ctxt, 0);
-		if (ret)
-			goto repost;
-		return ret;
+	if (svc_rdma_is_reverse_direction_reply(xprt, ctxt))
+		goto out_backchannel;
+
+	svc_rdma_get_inv_rkey(rdma_xprt, ctxt);
+
+	if (!pcl_is_empty(&ctxt->rc_read_pcl) ||
+	    !pcl_is_empty(&ctxt->rc_call_pcl)) {
+		ret = svc_rdma_process_read_list(rdma_xprt, rqstp, ctxt);
+		if (ret < 0)
+			goto out_readfail;
 	}
 
-	/* Read read-list data. */
-	ret = rdma_read_chunks(rdma_xprt, rmsgp, rqstp, ctxt);
-	if (ret > 0) {
-		/* read-list posted, defer until data received from client. */
-		goto defer;
-	} else if (ret < 0) {
-		/* Post of read-list failed, free context. */
-		svc_rdma_put_context(ctxt, 1);
-		return 0;
-	}
-
-complete:
-	ret = rqstp->rq_arg.head[0].iov_len
-		+ rqstp->rq_arg.page_len
-		+ rqstp->rq_arg.tail[0].iov_len;
-	svc_rdma_put_context(ctxt, 0);
- out:
-	dprintk("svcrdma: ret=%d, rq_arg.len=%u, "
-		"rq_arg.head[0].iov_base=%p, rq_arg.head[0].iov_len=%zd\n",
-		ret, rqstp->rq_arg.len,
-		rqstp->rq_arg.head[0].iov_base,
-		rqstp->rq_arg.head[0].iov_len);
+	rqstp->rq_xprt_ctxt = ctxt;
 	rqstp->rq_prot = IPPROTO_MAX;
 	svc_xprt_copy_addrs(rqstp, xprt);
-	return ret;
+	return rqstp->rq_arg.len;
 
 out_err:
-	svc_rdma_send_error(rdma_xprt, rmsgp, ret);
-	svc_rdma_put_context(ctxt, 0);
+	svc_rdma_send_error(rdma_xprt, ctxt, ret);
+	svc_rdma_recv_ctxt_put(rdma_xprt, ctxt);
 	return 0;
 
-defer:
-	return 0;
+out_readfail:
+	if (ret == -EINVAL)
+		svc_rdma_send_error(rdma_xprt, ctxt, ret);
+	svc_rdma_recv_ctxt_put(rdma_xprt, ctxt);
+	return ret;
 
+out_backchannel:
+	svc_rdma_handle_bc_reply(rqstp, ctxt);
 out_drop:
-	svc_rdma_put_context(ctxt, 1);
-repost:
-	return svc_rdma_repost_recv(rdma_xprt, GFP_KERNEL);
+	svc_rdma_recv_ctxt_put(rdma_xprt, ctxt);
+	return 0;
 }

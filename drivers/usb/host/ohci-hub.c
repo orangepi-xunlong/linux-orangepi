@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-1.0+
 /*
  * OHCI HCD (Host Controller Driver) for USB.
  *
@@ -17,21 +18,21 @@
 	ohci_dbg (hc, \
 		"%s roothub.portstatus [%d] " \
 		"= 0x%08x%s%s%s%s%s%s%s%s%s%s%s%s\n", \
-		label, num, temp, \
-		(temp & RH_PS_PRSC) ? " PRSC" : "", \
-		(temp & RH_PS_OCIC) ? " OCIC" : "", \
-		(temp & RH_PS_PSSC) ? " PSSC" : "", \
-		(temp & RH_PS_PESC) ? " PESC" : "", \
-		(temp & RH_PS_CSC) ? " CSC" : "", \
+		label, num, value, \
+		(value & RH_PS_PRSC) ? " PRSC" : "", \
+		(value & RH_PS_OCIC) ? " OCIC" : "", \
+		(value & RH_PS_PSSC) ? " PSSC" : "", \
+		(value & RH_PS_PESC) ? " PESC" : "", \
+		(value & RH_PS_CSC) ? " CSC" : "", \
 		\
-		(temp & RH_PS_LSDA) ? " LSDA" : "", \
-		(temp & RH_PS_PPS) ? " PPS" : "", \
-		(temp & RH_PS_PRS) ? " PRS" : "", \
-		(temp & RH_PS_POCI) ? " POCI" : "", \
-		(temp & RH_PS_PSS) ? " PSS" : "", \
+		(value & RH_PS_LSDA) ? " LSDA" : "", \
+		(value & RH_PS_PPS) ? " PPS" : "", \
+		(value & RH_PS_PRS) ? " PRS" : "", \
+		(value & RH_PS_POCI) ? " POCI" : "", \
+		(value & RH_PS_PSS) ? " PSS" : "", \
 		\
-		(temp & RH_PS_PES) ? " PES" : "", \
-		(temp & RH_PS_CCS) ? " CCS" : "" \
+		(value & RH_PS_PES) ? " PES" : "", \
+		(value & RH_PS_CCS) ? " CCS" : "" \
 		);
 
 /*-------------------------------------------------------------------------*/
@@ -57,7 +58,7 @@ __acquires(ohci->lock)
 		ohci->hc_control |= OHCI_USB_RESET;
 		ohci_writel (ohci, ohci->hc_control, &ohci->regs->control);
 		(void) ohci_readl (ohci, &ohci->regs->control);
-		/* FALL THROUGH */
+		fallthrough;
 	case OHCI_USB_RESET:
 		status = -EBUSY;
 		ohci_dbg (ohci, "needs reinit!\n");
@@ -691,6 +692,7 @@ int ohci_hub_control(
 		case C_HUB_OVER_CURRENT:
 			ohci_writel (ohci, RH_HS_OCIC,
 					&ohci->regs->roothub.status);
+			break;
 		case C_HUB_LOCAL_POWER:
 			break;
 		default:

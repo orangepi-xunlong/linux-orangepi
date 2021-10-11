@@ -1,12 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* General netfs cache on cache files internal defs
  *
  * Copyright (C) 2007 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public Licence
- * as published by the Free Software Foundation; either version
- * 2 of the Licence, or (at your option) any later version.
  */
 
 #ifdef pr_fmt
@@ -18,7 +14,8 @@
 
 #include <linux/fscache-cache.h>
 #include <linux/timer.h>
-#include <linux/wait.h>
+#include <linux/wait_bit.h>
+#include <linux/cred.h>
 #include <linux/workqueue.h>
 #include <linux/security.h>
 
@@ -96,7 +93,7 @@ struct cachefiles_cache {
  * backing file read tracking
  */
 struct cachefiles_one_read {
-	wait_queue_t			monitor;	/* link into monitored waitqueue */
+	wait_queue_entry_t			monitor;	/* link into monitored waitqueue */
 	struct page			*back_page;	/* backing file page we're waiting for */
 	struct page			*netfs_page;	/* netfs page we're going to fill */
 	struct fscache_retrieval	*op;		/* retrieval op covering this */
@@ -122,6 +119,8 @@ struct cachefiles_xattr {
 	uint8_t				type;
 	uint8_t				data[];
 };
+
+#include <trace/events/cachefiles.h>
 
 /*
  * note change of state for daemon
@@ -150,6 +149,9 @@ extern int cachefiles_has_space(struct cachefiles_cache *cache,
  * interface.c
  */
 extern const struct fscache_cache_ops cachefiles_cache_ops;
+
+void cachefiles_put_object(struct fscache_object *_object,
+			   enum fscache_obj_ref_trace why);
 
 /*
  * key.c
@@ -217,6 +219,12 @@ extern int cachefiles_allocate_pages(struct fscache_retrieval *,
 				     struct list_head *, unsigned *, gfp_t);
 extern int cachefiles_write_page(struct fscache_storage *, struct page *);
 extern void cachefiles_uncache_page(struct fscache_object *, struct page *);
+
+/*
+ * rdwr2.c
+ */
+extern int cachefiles_begin_read_operation(struct netfs_read_request *,
+					   struct fscache_retrieval *);
 
 /*
  * security.c

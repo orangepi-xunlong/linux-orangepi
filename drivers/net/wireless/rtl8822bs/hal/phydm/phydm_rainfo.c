@@ -69,7 +69,7 @@ phydm_h2C_debug(
 	}
 
 	odm_fill_h2c_cmd(p_dm, phydm_h2c_id, H2C_MAX_LENGTH, h2c_parameter);
-
+	
 	*_used = used;
 	*_out_len = out_len;
 }
@@ -77,28 +77,28 @@ phydm_h2C_debug(
 void
 phydm_fw_fix_rate(
 	void		*p_dm_void,
-	u8		en,
-	u8		macid,
-	u8		bw,
+	u8		en, 
+	u8		macid, 
+	u8		bw, 
 	u8		rate
-
+	
 )
 {
 	struct PHY_DM_STRUCT		*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
 	u32	reg_u32_tmp;
 
 	if (p_dm->support_ic_type & PHYDM_IC_8051_SERIES) {
-
+		
 		reg_u32_tmp = (bw << 24) | (rate << 16) | (macid << 8) | en;
 		odm_set_bb_reg(p_dm, 0x4a0, MASKDWORD, reg_u32_tmp);
-
+			
 	} else {
-
+	
 		if (en == 1)
 			reg_u32_tmp = (0x60 << 24) | (macid << 16) | (bw << 8) | rate;
 		else
 			reg_u32_tmp = 0x40000000;
-
+			
 		odm_set_bb_reg(p_dm, 0x450, MASKDWORD, reg_u32_tmp);
 	}
 	if (en == 1) {
@@ -131,16 +131,16 @@ phydm_ra_debug(
 		if (input[i + 1])
 			PHYDM_SSCANF(input[i + 1], DCMD_DECIMAL, &var1[i]);
 	}
-
+	
 	if ((strcmp(input[1], help) == 0)) {
 		PHYDM_SNPRINTF((output + used, out_len - used, "{1} {0:-,1:+} {ofst}: set offset\n"));
 		PHYDM_SNPRINTF((output + used, out_len - used, "{1} {100}: show offset\n"));
 		PHYDM_SNPRINTF((output + used, out_len - used, "{2} {en} {macid} {bw} {rate}: fw fix rate\n"));
-
+		
 	} else if (var1[0] == 1) { /*Adjust PCR offset*/
 
 		if (var1[1] == 100) {
-			PHYDM_SNPRINTF((output + used, out_len - used, "[Get] RA_ofst=((%s%d))\n",
+			PHYDM_SNPRINTF((output + used, out_len - used, "[Get] RA_ofst=((%s%d))\n", 
 				((p_ra_table->RA_threshold_offset == 0) ? " " : ((p_ra_table->RA_offset_direction) ? "+" : "-")), p_ra_table->RA_threshold_offset));
 
 		} else if (var1[1] == 0) {
@@ -152,14 +152,14 @@ phydm_ra_debug(
 			p_ra_table->RA_threshold_offset = (u8)var1[2];
 			PHYDM_SNPRINTF((output + used, out_len - used, "[Set] RA_ofst=((+%d))\n", p_ra_table->RA_threshold_offset));
 		}
-
+		
 	} else if (var1[0] == 2) { /*FW fix rate*/
 
-		PHYDM_SNPRINTF((output + used, out_len - used,
+		PHYDM_SNPRINTF((output + used, out_len - used, 
 			"[FW fix TX Rate] {en, macid,bw,rate}={%d, %d, %d, 0x%x}", var1[1], var1[2], var1[3], var1[4]));
-
+		
 		phydm_fw_fix_rate(p_dm, (u8)var1[1], (u8)var1[2], (u8)var1[3], (u8)var1[4]);
-
+		
 	} else {
 		PHYDM_SNPRINTF((output + used, out_len - used, "[Set] Error\n"));
 		/**/
@@ -394,9 +394,9 @@ phydm_c2h_ra_report_handler(
 		u8 gid_index = macid - 128;
 		p_ra_table->mu1_rate[gid_index] = rate;
 	}
-
+	
 	/*p_ra_table->link_tx_rate[macid] = rate;*/
-
+		
 	if (is_sta_active(p_sta)) {
 		p_sta->ra_info.curr_tx_rate = rate;
 		/**/
@@ -471,7 +471,7 @@ odm_refresh_rate_adaptive_mask_mp(
 	struct _ADAPTER			*p_loop_adapter = GetDefaultAdapter(p_adapter);
 	PMGNT_INFO					p_loop_mgnt_info = &(p_loop_adapter->MgntInfo);
 	HAL_DATA_TYPE				*p_loop_hal_data = GET_HAL_DATA(p_loop_adapter);
-
+	
 	u32		i;
 	struct sta_info *p_entry;
 	u8		ratr_state_new;
@@ -495,7 +495,7 @@ odm_refresh_rate_adaptive_mask_mp(
 
 		p_loop_mgnt_info = &(p_loop_adapter->MgntInfo);
 		p_loop_hal_data = GET_HAL_DATA(p_loop_adapter);
-
+	
 		if (p_loop_mgnt_info->mAssoc && (!ACTING_AS_AP(p_loop_adapter))) {
 			odm_refresh_ldpc_rts_mp(p_loop_adapter, p_dm, p_loop_mgnt_info->mMacId, p_loop_mgnt_info->IOTPeer, p_loop_hal_data->UndecoratedSmoothedPWDB);
 		/*PHYDM_DBG(p_dm, DBG_RA_MASK, ("Infrasture mode\n"));*/
@@ -659,7 +659,7 @@ phydm_refresh_rate_adaptive_mask(
 
 	p_ra_t->up_ramask_cnt++;
 	/*p_ra_t->up_ramask_cnt_tmp++;*/
-
+	
 
 #if (DM_ODM_SUPPORT_TYPE == ODM_WIN)
 
@@ -674,7 +674,7 @@ phydm_refresh_rate_adaptive_mask(
 	phydm_ra_mask_watchdog(p_dm);
 
 #endif
-
+	
 }
 
 void
@@ -716,9 +716,9 @@ phydm_show_sta_info(
 		PHYDM_SNPRINTF((output + used, out_len - used, "Warning input value!\n"));
 		return;
 	}
-
+		
 	for (i = macid_start; i < macid_end; i++) {
-
+		
 		p_sta = p_dm->p_phydm_sta_info[i];
 
 
@@ -734,40 +734,40 @@ phydm_show_sta_info(
 
 		PHYDM_SNPRINTF((output + used, out_len - used, "==[MACID: %d]============>\n", p_sta->mac_id));
 		PHYDM_SNPRINTF((output + used, out_len - used, "AID:%d\n", p_sta->aid));
-		PHYDM_SNPRINTF((output + used, out_len - used, "ADDR:%x-%x-%x-%x-%x-%x\n",
+		PHYDM_SNPRINTF((output + used, out_len - used, "ADDR:%x-%x-%x-%x-%x-%x\n", 
 		p_sta->mac_addr[5], p_sta->mac_addr[4], p_sta->mac_addr[3], p_sta->mac_addr[2], p_sta->mac_addr[1], p_sta->mac_addr[0]));
 		PHYDM_SNPRINTF((output + used, out_len - used, "DM_ctrl:0x%x\n", p_sta->dm_ctrl));
 		PHYDM_SNPRINTF((output + used, out_len - used, "BW:%d, MIMO_Type:0x%x\n", p_sta->bw_mode, p_sta->mimo_type));
 		PHYDM_SNPRINTF((output + used, out_len - used, "STBC_en:%d, LDPC_en=%d\n", p_sta->stbc_en, p_sta->ldpc_en));
 
 		/*[RSSI Info]*/
-		PHYDM_SNPRINTF((output + used, out_len - used, "RSSI{All, OFDM, CCK}={%d, %d, %d}\n",
+		PHYDM_SNPRINTF((output + used, out_len - used, "RSSI{All, OFDM, CCK}={%d, %d, %d}\n", 
 			p_sta->rssi_stat.rssi, p_sta->rssi_stat.rssi_ofdm, p_sta->rssi_stat.rssi_cck));
 
 		/*[RA Info]*/
-		PHYDM_SNPRINTF((output + used, out_len - used, "Rate_ID:%d, RSSI_LV:%d, ra_bw:%d, SGI_en:%d\n",
+		PHYDM_SNPRINTF((output + used, out_len - used, "Rate_ID:%d, RSSI_LV:%d, ra_bw:%d, SGI_en:%d\n", 
 			p_ra->rate_id, p_ra->rssi_level, p_ra->ra_bw_mode, p_ra->is_support_sgi));
 
-		PHYDM_SNPRINTF((output + used, out_len - used, "VHT_en:%d, Wireless_set=0x%x, sm_ps=%d\n",
+		PHYDM_SNPRINTF((output + used, out_len - used, "VHT_en:%d, Wireless_set=0x%x, sm_ps=%d\n", 
 			p_ra->is_vht_enable, p_sta->support_wireless_set, p_sta->sm_ps));
 
-		PHYDM_SNPRINTF((output + used, out_len - used, "Dis{RA, PT}={%d, %d}, TxRx:%d, Noisy:%d\n",
+		PHYDM_SNPRINTF((output + used, out_len - used, "Dis{RA, PT}={%d, %d}, TxRx:%d, Noisy:%d\n", 
 			p_ra->disable_ra, p_ra->disable_pt, p_ra->txrx_state, p_ra->is_noisy));
-
-		PHYDM_SNPRINTF((output + used, out_len - used, "TX{Rate, BW}={%d, %d}, RTY:%d\n",
+		
+		PHYDM_SNPRINTF((output + used, out_len - used, "TX{Rate, BW}={%d, %d}, RTY:%d\n", 
 			p_ra->curr_tx_rate, p_ra->curr_tx_bw, p_ra->curr_retry_ratio));
-
+	
 		PHYDM_SNPRINTF((output + used, out_len - used, "RA_MAsk:0x%llx\n", p_ra->ramask));
-
+		
 		/*[TP]*/
-		PHYDM_SNPRINTF((output + used, out_len - used, "TP{TX,RX}={%d, %d}\n",
+		PHYDM_SNPRINTF((output + used, out_len - used, "TP{TX,RX}={%d, %d}\n", 
 			p_sta->tx_moving_average_tp, p_sta->rx_moving_average_tp));
 
 		#ifdef CONFIG_BEAMFORMING
 		/*[Beamforming]*/
-		PHYDM_SNPRINTF((output + used, out_len - used, "CAP{HT,VHT}={0x%x, 0x%x}\n",
+		PHYDM_SNPRINTF((output + used, out_len - used, "CAP{HT,VHT}={0x%x, 0x%x}\n", 
 			p_bf->ht_beamform_cap, p_bf->vht_beamform_cap));
-		PHYDM_SNPRINTF((output + used, out_len - used, "{p_aid,g_id}={0x%x, 0x%x}\n\n",
+		PHYDM_SNPRINTF((output + used, out_len - used, "{p_aid,g_id}={0x%x, 0x%x}\n\n", 
 			p_bf->p_aid, p_bf->g_id));
 		#endif
 	}
@@ -775,7 +775,7 @@ phydm_show_sta_info(
 	if (tatal_sta_num == 0) {
 		PHYDM_SNPRINTF((output + used, out_len - used, "No Linked STA\n"));
 	}
-
+	
 	*_used = used;
 	*_out_len = out_len;
 }
@@ -786,7 +786,7 @@ u8
 phydm_get_tx_stream_num(
 	void		*p_dm_void,
 	enum 	rf_type	mimo_type
-
+	
 )
 {
 	struct PHY_DM_STRUCT	*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
@@ -820,9 +820,9 @@ phydm_get_bb_mod_ra_mask(
 	u8		tx_stream_num = 1;
 	u8		rssi_lv = 0;
 	u64		ra_mask_bitmap = 0;
-
+	
 	if (is_sta_active(p_sta)) {
-
+		
 		p_ra = &(p_sta->ra_info);
 		bw = p_ra->ra_bw_mode;
 		wireless_mode = p_sta->support_wireless_set;
@@ -837,7 +837,7 @@ phydm_get_bb_mod_ra_mask(
 	PHYDM_DBG(p_dm, DBG_RA, ("macid=%d ori_RA_Mask= 0x%llx\n", macid, ra_mask_bitmap));
 	PHYDM_DBG(p_dm, DBG_RA, ("wireless_mode=0x%x, tx_stream_num=%d, BW=%d, MimoPs=%d, rssi_lv=%d\n",
 		wireless_mode, tx_stream_num, bw, p_sta->sm_ps, rssi_lv));
-
+	
 	if (p_sta->sm_ps == SM_PS_STATIC) /*mimo_ps_enable*/
 		tx_stream_num = 1;
 
@@ -866,7 +866,7 @@ phydm_get_bb_mod_ra_mask(
 		} else if (tx_stream_num == 3)
 			ra_mask_bitmap &= 0xffffff015;
 	} else if (wireless_mode ==  (WIRELESS_OFDM | WIRELESS_HT)) {		/*N_5G*/
-
+	
 		if (tx_stream_num == 1) {
 			if (bw == CHANNEL_WIDTH_40)
 				ra_mask_bitmap &= 0x000ff030;
@@ -888,13 +888,13 @@ phydm_get_bb_mod_ra_mask(
 			ra_mask_bitmap &= 0xfffff015;
 		else if (tx_stream_num == 3)
 			ra_mask_bitmap &= 0x3fffffff010;
-
+		
 
 		if (bw == CHANNEL_WIDTH_20) {/* AC 20MHz doesn't support MCS9 */
 			ra_mask_bitmap &= 0x1ff7fdfffff;
 		}
 	} else if (wireless_mode ==  (WIRELESS_OFDM | WIRELESS_VHT)) {		/*AC_5G*/
-
+	
 		if (tx_stream_num == 1)
 			ra_mask_bitmap &= 0x003ff010;
 		else if (tx_stream_num == 2)
@@ -908,10 +908,10 @@ phydm_get_bb_mod_ra_mask(
 		PHYDM_DBG(p_dm, DBG_RA, ("[Warrning] No RA mask is found\n"));
 		/**/
 	}
-
+	
 	PHYDM_DBG(p_dm, DBG_RA, ("Mod by mode=0x%llx\n", ra_mask_bitmap));
 
-
+	
 	/*[Modify RA Mask by RSSI level]*/
 	if (wireless_mode != WIRELESS_CCK) {
 
@@ -949,7 +949,7 @@ phydm_get_rate_id(
 	u8	rate_id_idx = PHYDM_BGN_20M_1SS;
 
 	if (is_sta_active(p_sta)) {
-
+		
 		p_ra = &(p_sta->ra_info);
 		bw = p_ra->ra_bw_mode;
 		wireless_mode = p_sta->support_wireless_set;
@@ -970,7 +970,7 @@ phydm_get_rate_id(
 	else if (wireless_mode ==  (WIRELESS_CCK | WIRELESS_OFDM))			/*BG mode*/
 		rate_id_idx = PHYDM_BG;
 	else if (wireless_mode ==  (WIRELESS_OFDM | WIRELESS_HT)) {		/*GN mode*/
-
+	
 		if (tx_stream_num == 1)
 			rate_id_idx = PHYDM_GN_N1SS;
 		else if (tx_stream_num == 2)
@@ -978,7 +978,7 @@ phydm_get_rate_id(
 		else if (tx_stream_num == 3)
 			rate_id_idx = PHYDM_ARFR5_N_3SS;
 	} else if (wireless_mode == (WIRELESS_CCK | WIRELESS_OFDM | WIRELESS_HT)) {	/*BGN mode*/
-
+	
 
 		if (bw == CHANNEL_WIDTH_40) {
 
@@ -999,7 +999,7 @@ phydm_get_rate_id(
 				rate_id_idx = PHYDM_ARFR5_N_3SS;
 		}
 	} else if (wireless_mode == (WIRELESS_OFDM | WIRELESS_VHT)) {	/*AC mode*/
-
+	
 		if (tx_stream_num == 1)
 			rate_id_idx = PHYDM_ARFR1_AC_1SS;
 		else if (tx_stream_num == 2)
@@ -1007,7 +1007,7 @@ phydm_get_rate_id(
 		else if (tx_stream_num == 3)
 			rate_id_idx = PHYDM_ARFR4_AC_3SS;
 	} else if (wireless_mode == (WIRELESS_CCK | WIRELESS_OFDM | WIRELESS_VHT)) {	/*AC 2.4G mode*/
-
+	
 		if (bw >= CHANNEL_WIDTH_80) {
 			if (tx_stream_num == 1)
 				rate_id_idx = PHYDM_ARFR1_AC_1SS;
@@ -1028,7 +1028,7 @@ phydm_get_rate_id(
 		PHYDM_DBG(p_dm, DBG_RA, ("[Warrning] No rate_id is found\n"));
 		rate_id_idx = 0;
 	}
-
+	
 	PHYDM_DBG(p_dm, DBG_RA, ("Rate_ID=((0x%x))\n", rate_id_idx));
 
 	return rate_id_idx;
@@ -1056,7 +1056,7 @@ phydm_ra_h2c(
 		PHYDM_DBG(p_dm, DBG_RA, ("[Warning] %s invalid sta_info\n", __func__));
 		return;
 	}
-
+	
 	PHYDM_DBG(p_dm, DBG_RA, ("%s ======>\n", __func__));
 	PHYDM_DBG(p_dm, DBG_RA, ("MACID=%d\n", p_sta->mac_id));
 
@@ -1067,10 +1067,10 @@ phydm_ra_h2c(
 
 	h2c_val[0] = p_sta->mac_id;
 	h2c_val[1] = (p_ra->rate_id & 0x1f) | ((init_ra_lv & 0x3) << 5) | (p_ra->is_support_sgi << 7);
-	h2c_val[2] = (u8)((p_ra->ra_bw_mode) | (((p_sta->ldpc_en) ? 1 : 0) << 2) |
-					((no_update_bw & 0x1) << 3) | (p_ra->is_vht_enable << 4) |
+	h2c_val[2] = (u8)((p_ra->ra_bw_mode) | (((p_sta->ldpc_en) ? 1 : 0) << 2) | 
+					((no_update_bw & 0x1) << 3) | (p_ra->is_vht_enable << 4) | 
 					((dis_pt & 0x1) << 6) | ((dis_ra & 0x1) << 7));
-
+	
 	h2c_val[3] = (u8)(ra_mask & 0xff);
 	h2c_val[4] = (u8)((ra_mask & 0xff00) >> 8);
 	h2c_val[5] = (u8)((ra_mask & 0xff0000) >> 16);
@@ -1083,7 +1083,7 @@ phydm_ra_h2c(
 
 	#if (defined(PHYDM_COMPILE_ABOVE_3SS))
 	if (p_dm->support_ic_type & (PHYDM_IC_ABOVE_3SS)) {
-
+		
 		h2c_val[3] = (u8)((ra_mask >> 32) & 0x000000ff);
 		h2c_val[4] = (u8)(((ra_mask >> 32) & 0x0000ff00) >> 8);
 		h2c_val[5] = (u8)(((ra_mask >> 32) & 0x00ff0000) >> 16);
@@ -1091,7 +1091,7 @@ phydm_ra_h2c(
 
 		PHYDM_DBG(p_dm, DBG_RA, ("PHYDM h2c[0x46]=0x%x %x %x %x %x %x %x\n",
 		h2c_val[6], h2c_val[5], h2c_val[4], h2c_val[3], h2c_val[2], h2c_val[1], h2c_val[0]));
-
+		
 		odm_fill_h2c_cmd(p_dm, PHYDM_RA_MASK_ABOVE_3SS, 5, h2c_val);
 	}
 	#endif
@@ -1130,7 +1130,7 @@ phydm_ra_registed(
 	{
 		p_ra->rate_id = phydm_get_rate_id(p_dm, macid);
 	}
-
+	
 	/*p_ra->is_vht_enable = (p_sta->support_wireless_set | WIRELESS_VHT) ? 1 : 0;*/
 	/*p_ra->disable_ra = 0;*/
 	/*p_ra->disable_pt = 0;*/
@@ -1138,11 +1138,11 @@ phydm_ra_registed(
 
 
 	if (rssi_from_assoc > 40)
-		init_ra_lv = 1;
+		init_ra_lv = 3;
 	else if (rssi_from_assoc > 20)
 		init_ra_lv = 2;
 	else
-		init_ra_lv = 3;
+		init_ra_lv = 1;
 
 	if (p_ra_t->record_ra_info)
 		p_ra_t->record_ra_info(p_dm, macid, p_sta, ra_mask);
@@ -1158,7 +1158,7 @@ phydm_ra_registed(
 		phydm_ra_h2c(p_dm, macid, p_ra->disable_ra, p_ra->disable_pt, 0, init_ra_lv, ra_mask);
 	}
 
-
+	
 
 }
 
@@ -1209,18 +1209,18 @@ phydm_ra_mask_watchdog(
 
 	if (!(p_dm->support_ability & ODM_BB_RA_MASK))
 		return;
-
+	
 	if (((!p_dm->is_linked)) || (p_dm->phydm_sys_up_time % 2) == 1)
 		return;
 
 	PHYDM_DBG(p_dm, DBG_RA_MASK, ("%s ======>\n", __func__));
-
+	
 	p_ra_t->up_ramask_cnt++;
 
 	for (macid = 0; macid < ODM_ASSOCIATE_ENTRY_NUM; macid++) {
-
+		
 		p_sta = p_dm->p_phydm_sta_info[macid];
-
+		
 		if (!is_sta_active(p_sta))
 			continue;
 
@@ -1235,34 +1235,34 @@ phydm_ra_mask_watchdog(
 		if ((p_dm->support_ic_type == ODM_RTL8812) ||
 			((p_dm->support_ic_type == ODM_RTL8821) && (p_dm->cut_version == ODM_CUT_A))
 			) {
-
+			
 			if (p_sta->rssi_stat.rssi < p_ra_t->ldpc_thres) {
-
+				
 				#if (DM_ODM_SUPPORT_TYPE == ODM_CE)
 				set_ra_ldpc_8812(p_sta, true);		/*LDPC TX enable*/
 				#endif
 				PHYDM_DBG(p_dm, DBG_RA_MASK, ("RSSI=%d, ldpc_en =TRUE\n", p_sta->rssi_stat.rssi));
-
+				
 			} else if (p_sta->rssi_stat.rssi > (p_ra_t->ldpc_thres + 3)) {
 
 				#if (DM_ODM_SUPPORT_TYPE == ODM_CE)
 				set_ra_ldpc_8812(p_sta, false);	/*LDPC TX disable*/
 				#endif
 				PHYDM_DBG(p_dm, DBG_RA_MASK, ("RSSI=%d, ldpc_en =FALSE\n", p_sta->rssi_stat.rssi));
-			}
+			}	
 		}
 		#endif
 
 		rssi_lv_new = phydm_rssi_lv_dec(p_dm, (u32)p_sta->rssi_stat.rssi, p_ra->rssi_level);
 
-		if ((p_ra->rssi_level != rssi_lv_new) ||
+		if ((p_ra->rssi_level != rssi_lv_new) || 
 			(p_ra_t->up_ramask_cnt >= FORCED_UPDATE_RAMASK_PERIOD)) {
 
 			PHYDM_DBG(p_dm, DBG_RA_MASK, ("RSSI LV:((%d))->((%d))\n", p_ra->rssi_level, rssi_lv_new));
-
+			
 			p_ra->rssi_level = rssi_lv_new;
 			p_ra_t->up_ramask_cnt = 0;
-
+			
 			ra_mask = phydm_get_bb_mod_ra_mask(p_dm, macid);
 
 			if (p_ra_t->record_ra_info)
@@ -1649,9 +1649,9 @@ phydm_ra_common_info_update(
 		for (macid = 0; macid < ODM_ASSOCIATE_ENTRY_NUM; macid++) {
 
 			p_sta = p_dm->p_phydm_sta_info[macid];
-
+			
 			if (is_sta_active(p_sta)) {
-
+			
 				rate_order_tmp = phydm_rate_order_compute(p_dm, (p_sta->ra_info.curr_tx_rate & 0x7f));
 
 				if (rate_order_tmp >= (p_ra_table->highest_client_tx_order)) {
@@ -1700,7 +1700,7 @@ phydm_ra_info_init(
 	p_ra_table->highest_client_tx_order = 0;
 	p_ra_table->RA_threshold_offset = 0;
 	p_ra_table->RA_offset_direction = 0;
-
+	
 #if (RTL8822B_SUPPORT == 1)
 	if (p_dm->support_ic_type == ODM_RTL8822B) {
 		u32	ret_value;
@@ -1709,7 +1709,7 @@ phydm_ra_info_init(
 		odm_set_bb_reg(p_dm, 0x4cc, MASKBYTE3, (ret_value - 1));
 	}
 #endif
-
+	
 	#ifdef CONFIG_RA_DYNAMIC_RTY_LIMIT
 	phydm_ra_dynamic_retry_limit_init(p_dm);
 	#endif
@@ -1723,7 +1723,7 @@ phydm_ra_info_init(
 	#endif
 
 	phydm_rate_adaptive_mask_init(p_dm);
-
+	
 }
 
 u8
@@ -1928,7 +1928,7 @@ phydm_gen_ramask_h2c_AP(
 		#ifdef CONFIG_WLAN_HAL
 		GET_HAL_INTERFACE(priv)->UpdateHalRAMaskHandler(priv, p_entry, rssi_level);
 		#endif
-	}
+	} 
 }
 
 #endif

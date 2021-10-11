@@ -25,14 +25,6 @@
 #include "ram.h"
 #include "regsnv04.h"
 
-bool
-nv04_fb_memtype_valid(struct nvkm_fb *fb, u32 tile_flags)
-{
-	if (!(tile_flags & 0xff00))
-		return true;
-	return false;
-}
-
 static void
 nv04_fb_init(struct nvkm_fb *fb)
 {
@@ -49,11 +41,10 @@ static const struct nvkm_fb_func
 nv04_fb = {
 	.init = nv04_fb_init,
 	.ram_new = nv04_ram_new,
-	.memtype_valid = nv04_fb_memtype_valid,
 };
 
 int
-nv04_fb_new(struct nvkm_device *device, int index, struct nvkm_fb **pfb)
+nv04_fb_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst, struct nvkm_fb **pfb)
 {
-	return nvkm_fb_new_(&nv04_fb, device, index, pfb);
+	return nvkm_fb_new_(&nv04_fb, device, type, inst, pfb);
 }

@@ -1,8 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
 config RDMA_RXE
 	tristate "Software RDMA over Ethernet (RoCE) driver"
 	depends on INET && PCI && INFINIBAND
-	depends on NET_UDP_TUNNEL
-	---help---
+	depends on INFINIBAND_VIRT_DMA
+	select NET_UDP_TUNNEL
+	select CRYPTO
+	select CRYPTO_CRC32
+	help
 	This driver implements the InfiniBand RDMA transport over
 	the Linux network stack. It enables a system with a
 	standard Ethernet adapter to interoperate with a RoCE
@@ -21,4 +25,4 @@ config RDMA_RXE
 	To configure and work with soft-RoCE driver please use the
 	following wiki page under "configure Soft-RoCE (RXE)" section:
 
-	https://github.com/SoftRoCE/rxe-dev/wiki/rxe-dev:-Home
+	https://github.com/linux-rdma/rdma-core/blob/master/Documentation/rxe.md

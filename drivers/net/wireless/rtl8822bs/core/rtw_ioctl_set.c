@@ -302,7 +302,7 @@ u8 rtw_set_802_11_bssid(_adapter *padapter, u8 *bssid)
 			if (check_fwstate(pmlmepriv, _FW_LINKED) == _TRUE)
 				rtw_indicate_disconnect(padapter, 0, _FALSE);
 
-			rtw_free_assoc_resources_cmd(padapter, _TRUE, 0);
+			rtw_free_assoc_resources(padapter, 1);
 
 			if ((check_fwstate(pmlmepriv, WIFI_ADHOC_MASTER_STATE) == _TRUE)) {
 				_clr_fwstate_(pmlmepriv, WIFI_ADHOC_MASTER_STATE);
@@ -374,7 +374,7 @@ u8 rtw_set_802_11_ssid(_adapter *padapter, NDIS_802_11_SSID *ssid)
 					if (check_fwstate(pmlmepriv, _FW_LINKED) == _TRUE)
 						rtw_indicate_disconnect(padapter, 0, _FALSE);
 
-					rtw_free_assoc_resources_cmd(padapter, _TRUE, 0);
+					rtw_free_assoc_resources(padapter, 1);
 
 					if (check_fwstate(pmlmepriv, WIFI_ADHOC_MASTER_STATE) == _TRUE) {
 						_clr_fwstate_(pmlmepriv, WIFI_ADHOC_MASTER_STATE);
@@ -395,7 +395,7 @@ u8 rtw_set_802_11_ssid(_adapter *padapter, NDIS_802_11_SSID *ssid)
 			if (check_fwstate(pmlmepriv, _FW_LINKED) == _TRUE)
 				rtw_indicate_disconnect(padapter, 0, _FALSE);
 
-			rtw_free_assoc_resources_cmd(padapter, _TRUE, 0);
+			rtw_free_assoc_resources(padapter, 1);
 
 			if (check_fwstate(pmlmepriv, WIFI_ADHOC_MASTER_STATE) == _TRUE) {
 				_clr_fwstate_(pmlmepriv, WIFI_ADHOC_MASTER_STATE);
@@ -531,7 +531,7 @@ u8 rtw_set_802_11_infrastructure_mode(_adapter *padapter,
 
 		if ((check_fwstate(pmlmepriv, _FW_LINKED) == _TRUE) ||
 		    (check_fwstate(pmlmepriv, WIFI_ADHOC_MASTER_STATE) == _TRUE))
-			rtw_free_assoc_resources_cmd(padapter, _TRUE, 0);
+			rtw_free_assoc_resources(padapter, 1);
 
 		if ((*pold_state == Ndis802_11Infrastructure) || (*pold_state == Ndis802_11IBSS)) {
 			if (check_fwstate(pmlmepriv, _FW_LINKED) == _TRUE) {
@@ -598,7 +598,7 @@ u8 rtw_set_802_11_disassociate(_adapter *padapter)
 		rtw_disassoc_cmd(padapter, 0, 0);
 		rtw_indicate_disconnect(padapter, 0, _FALSE);
 		/* modify for CONFIG_IEEE80211W, none 11w can use it */
-		rtw_free_assoc_resources_cmd(padapter, _TRUE, 0);
+		rtw_free_assoc_resources_cmd(padapter);
 		if (_FAIL == rtw_pwr_wakeup(padapter))
 			RTW_INFO("%s(): rtw_pwr_wakeup fail !!!\n", __FUNCTION__);
 	}

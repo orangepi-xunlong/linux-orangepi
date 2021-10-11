@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Google Peach Pi Rev 10+ board device tree source
  *
  * Copyright (c) 2014 Google, Inc
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 /dts-v1/;
@@ -14,9 +11,9 @@
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/clock/maxim,max77802.h>
 #include <dt-bindings/regulator/maxim,max77802.h>
+#include <dt-bindings/sound/samsung-i2s.h>
 #include "exynos5800.dtsi"
 #include "exynos5420-cpus.dtsi"
-#include "exynos-mfc-reserved-memory.dtsi"
 
 / {
 	model = "Google Peach Pi Rev 10+";
@@ -30,7 +27,7 @@
 
 	aliases {
 		/* Assign 20 so we don't get confused w/ builtin ones */
-		i2c20 = "/spi@12d40000/cros-ec@0/i2c-tunnel";
+		i2c20 = &i2c_tunnel;
 	};
 
 	backlight: backlight {
@@ -90,6 +87,14 @@
 		samsung,model = "Peach-Pi-I2S-MAX98091";
 		samsung,i2s-controller = <&i2s0>;
 		samsung,audio-codec = <&max98091>;
+
+		cpu {
+			sound-dai = <&i2s0 0>;
+		};
+
+		codec {
+			sound-dai = <&max98091>, <&hdmi>;
+		};
 	};
 
 	usb300_vbus_reg: regulator-usb300 {
@@ -133,7 +138,7 @@
 		};
 	};
 
-	mmc1_pwrseq: mmc1_pwrseq {
+	mmc1_pwrseq: mmc1-pwrseq {
 		compatible = "mmc-pwrseq-simple";
 		reset-gpios = <&gpx0 0 GPIO_ACTIVE_LOW>; /* WIFI_EN */
 		clocks = <&max77802 MAX77802_CLK_32K_CP>;
@@ -144,6 +149,20 @@
 &adc {
 	status = "okay";
 	vdd-supply = <&ldo9_reg>;
+};
+
+&clock_audss {
+	assigned-clocks = <&clock_audss EXYNOS_MOUT_AUDSS>;
+	assigned-clock-parents = <&clock CLK_MAU_EPLL>;
+};
+
+/*
+ * Peach Pi board uses SoC revision with lower maximum frequency for A7 cores
+ * (1.3 GHz instead of 1.4 GHz) than Odroid XU3/XU4 boards.  Thus we need to
+ * update A7 OPPs table accordingly.
+ */
+&cluster_a7_opp_table {
+	/delete-node/opp-1400000000;
 };
 
 &cpu0 {
@@ -195,7 +214,7 @@
 	status = "okay";
 	clock-frequency = <400000>;
 
-	max77802: max77802-pmic@9 {
+	max77802: pmic@9 {
 		compatible = "maxim,max77802";
 		interrupt-parent = <&gpx3>;
 		interrupts = <1 IRQ_TYPE_NONE>;
@@ -247,6 +266,8 @@
 				regulator-always-on;
 				regulator-boot-on;
 				regulator-ramp-delay = <12500>;
+				regulator-coupled-with = <&buck3_reg>;
+				regulator-coupled-max-spread = <300000>;
 				regulator-state-mem {
 					regulator-off-in-suspend;
 				};
@@ -259,6 +280,8 @@
 				regulator-always-on;
 				regulator-boot-on;
 				regulator-ramp-delay = <12500>;
+				regulator-coupled-with = <&buck2_reg>;
+				regulator-coupled-max-spread = <300000>;
 				regulator-state-mem {
 					regulator-off-in-suspend;
 				};
@@ -302,6 +325,7 @@
 				regulator-name = "vdd_1v35";
 				regulator-min-microvolt = <1350000>;
 				regulator-max-microvolt = <1350000>;
+				regulator-always-on;
 				regulator-boot-on;
 				regulator-state-mem {
 					regulator-on-in-suspend;
@@ -323,6 +347,7 @@
 				regulator-name = "vdd_2v";
 				regulator-min-microvolt = <2000000>;
 				regulator-max-microvolt = <2000000>;
+				regulator-always-on;
 				regulator-boot-on;
 				regulator-state-mem {
 					regulator-on-in-suspend;
@@ -333,6 +358,7 @@
 				regulator-name = "vdd_1v8";
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
+				regulator-always-on;
 				regulator-boot-on;
 				regulator-state-mem {
 					regulator-on-in-suspend;
@@ -427,6 +453,7 @@
 				regulator-name = "vdd_ldo10";
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
+				regulator-always-on;
 				regulator-state-mem {
 					regulator-off-in-suspend;
 				};
@@ -604,12 +631,13 @@
 	max98091: codec@10 {
 		compatible = "maxim,max98091";
 		reg = <0x10>;
-		interrupts = <2 0>;
+		interrupts = <2 IRQ_TYPE_NONE>;
 		interrupt-parent = <&gpx0>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&max98091_irq>;
 		clocks = <&pmu_system_controller 0>;
 		clock-names = "mclk";
+		#sound-dai-cells = <0>;
 	};
 
 	light-sensor@44 {
@@ -662,12 +690,18 @@
 };
 
 &i2s0 {
+	assigned-clocks = <&i2s0 CLK_I2S_RCLK_SRC>;
+	assigned-clock-parents = <&clock_audss EXYNOS_I2S_BUS>;
 	status = "okay";
 };
 
+&mixer {
+	status = "okay";
+};
+
+/* eMMC flash */
 &mmc_0 {
 	status = "okay";
-	num-slots = <1>;
 	mmc-hs200-1_8v;
 	mmc-hs400-1_8v;
 	cap-mmc-highspeed;
@@ -683,9 +717,9 @@
 	bus-width = <8>;
 };
 
+/* WiFi SDIO module */
 &mmc_1 {
 	status = "okay";
-	num-slots = <1>;
 	non-removable;
 	cap-sdio-irq;
 	keep-power-in-suspend;
@@ -702,9 +736,9 @@
 	vqmmc-supply = <&buck10_reg>;
 };
 
+/* uSD card */
 &mmc_2 {
 	status = "okay";
-	num-slots = <1>;
 	cap-sd-highspeed;
 	card-detect-delay = <200>;
 	clock-frequency = <400000000>;
@@ -911,7 +945,7 @@
 	cros_ec: cros-ec@0 {
 		compatible = "google,cros-ec-spi";
 		interrupt-parent = <&gpx1>;
-		interrupts = <5 0>;
+		interrupts = <5 IRQ_TYPE_NONE>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&ec_spi_cs &ec_irq>;
 		reg = <0>;
@@ -922,7 +956,7 @@
 			samsung,spi-feedback-delay = <1>;
 		};
 
-		i2c-tunnel {
+		i2c_tunnel: i2c-tunnel {
 			compatible = "google,cros-ec-i2c-tunnel";
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -1011,6 +1045,10 @@
 
 &serial_3 {
 	status = "okay";
+};
+
+&timer {
+	arm,cpu-registers-not-fw-configured;
 };
 
 &tmu_cpu0 {

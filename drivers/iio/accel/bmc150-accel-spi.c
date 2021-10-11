@@ -1,19 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * 3-axis accelerometer driver supporting SPI Bosch-Sensortec accelerometer chip
  * Copyright © 2015 Pengutronix, Markus Pargmann <mpa@pengutronix.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/device.h>
@@ -51,6 +39,7 @@ static const struct acpi_device_id bmc150_accel_acpi_match[] = {
 	{"BMI055A",	bmi055},
 	{"BMA0255",	bma255},
 	{"BMA250E",	bma250e},
+	{"BMA222",	bma222},
 	{"BMA222E",	bma222e},
 	{"BMA0280",	bma280},
 	{ },
@@ -62,6 +51,7 @@ static const struct spi_device_id bmc150_accel_id[] = {
 	{"bmi055_accel",	bmi055},
 	{"bma255",		bma255},
 	{"bma250e",		bma250e},
+	{"bma222",		bma222},
 	{"bma222e",		bma222e},
 	{"bma280",		bma280},
 	{}

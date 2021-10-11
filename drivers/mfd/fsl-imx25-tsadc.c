@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2014-2015 Pengutronix, Markus Pargmann <mpa@pengutronix.de>
- *
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License version 2 as published by the
- * Free Software Foundation.
  */
 
 #include <linux/clk.h>
@@ -59,7 +56,7 @@ static int mx25_tsadc_domain_map(struct irq_domain *d, unsigned int irq,
 	return 0;
 }
 
-static struct irq_domain_ops mx25_tsadc_domain_ops = {
+static const struct irq_domain_ops mx25_tsadc_domain_ops = {
 	.map = mx25_tsadc_domain_map,
 	.xlate = irq_domain_xlate_onecell,
 };
@@ -72,10 +69,8 @@ static int mx25_tsadc_setup_irq(struct platform_device *pdev,
 	int irq;
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq <= 0) {
-		dev_err(dev, "Failed to get irq\n");
+	if (irq <= 0)
 		return irq;
-	}
 
 	tsadc->domain = irq_domain_add_simple(np, 2, 0, &mx25_tsadc_domain_ops,
 					      tsadc);
@@ -84,8 +79,7 @@ static int mx25_tsadc_setup_irq(struct platform_device *pdev,
 		return -ENOMEM;
 	}
 
-	irq_set_chained_handler(irq, mx25_tsadc_irq_handler);
-	irq_set_handler_data(irq, tsadc);
+	irq_set_chained_handler_and_data(irq, mx25_tsadc_irq_handler, tsadc);
 
 	return 0;
 }
@@ -129,7 +123,6 @@ static void mx25_tsadc_setup_clk(struct platform_device *pdev,
 static int mx25_tsadc_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct device_node *np = dev->of_node;
 	struct mx25_tsadc *tsadc;
 	struct resource *res;
 	int ret;
@@ -178,9 +171,7 @@ static int mx25_tsadc_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, tsadc);
 
-	of_platform_populate(np, NULL, NULL, dev);
-
-	return 0;
+	return devm_of_platform_populate(dev);
 }
 
 static int mx25_tsadc_remove(struct platform_device *pdev)
@@ -200,11 +191,12 @@ static const struct of_device_id mx25_tsadc_ids[] = {
 	{ .compatible = "fsl,imx25-tsadc" },
 	{ /* Sentinel */ }
 };
+MODULE_DEVICE_TABLE(of, mx25_tsadc_ids);
 
 static struct platform_driver mx25_tsadc_driver = {
 	.driver = {
 		.name = "mx25-tsadc",
-		.of_match_table = of_match_ptr(mx25_tsadc_ids),
+		.of_match_table = mx25_tsadc_ids,
 	},
 	.probe = mx25_tsadc_probe,
 	.remove = mx25_tsadc_remove,

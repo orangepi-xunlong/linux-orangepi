@@ -24,11 +24,17 @@
  * Authors:
  *    Jerome Glisse <glisse@freedesktop.org>
  */
+
 #include <linux/list_sort.h>
-#include <drm/drmP.h>
+#include <linux/pci.h>
+#include <linux/uaccess.h>
+
+#include <drm/drm_device.h>
+#include <drm/drm_file.h>
 #include <drm/radeon_drm.h>
-#include "radeon_reg.h"
+
 #include "radeon.h"
+#include "radeon_reg.h"
 #include "radeon_trace.h"
 
 #define RADEON_CS_MAX_PRIORITY		32u
@@ -87,7 +93,8 @@ static int radeon_cs_parser_relocs(struct radeon_cs_parser *p)
 	p->dma_reloc_idx = 0;
 	/* FIXME: we assume that each relocs use 4 dwords */
 	p->nrelocs = chunk->length_dw / 4;
-	p->relocs = drm_calloc_large(p->nrelocs, sizeof(struct radeon_bo_list));
+	p->relocs = kvcalloc(p->nrelocs, sizeof(struct radeon_bo_list),
+			GFP_KERNEL);
 	if (p->relocs == NULL) {
 		return -ENOMEM;
 	}
@@ -117,16 +124,18 @@ static int radeon_cs_parser_relocs(struct radeon_cs_parser *p)
 		priority = (r->flags & RADEON_RELOC_PRIO_MASK) * 2
 			   + !!r->write_domain;
 
-		/* the first reloc of an UVD job is the msg and that must be in
-		   VRAM, also but everything into VRAM on AGP cards and older
-		   IGP chips to avoid image corruptions */
+		/* The first reloc of an UVD job is the msg and that must be in
+		 * VRAM, the second reloc is the DPB and for WMV that must be in
+		 * VRAM as well. Also put everything into VRAM on AGP cards and older
+		 * IGP chips to avoid image corruptions
+		 */
 		if (p->ring == R600_RING_TYPE_UVD_INDEX &&
-		    (i == 0 || drm_pci_device_is_agp(p->rdev->ddev) ||
+		    (i <= 0 || pci_find_capability(p->rdev->pdev, PCI_CAP_ID_AGP) ||
 		     p->rdev->family == CHIP_RS780 ||
 		     p->rdev->family == CHIP_RS880)) {
 
 			/* TODO: is this still needed for NI+ ? */
-			p->relocs[i].prefered_domains =
+			p->relocs[i].preferred_domains =
 				RADEON_GEM_DOMAIN_VRAM;
 
 			p->relocs[i].allowed_domains =
@@ -144,14 +153,14 @@ static int radeon_cs_parser_relocs(struct radeon_cs_parser *p)
 				return -EINVAL;
 			}
 
-			p->relocs[i].prefered_domains = domain;
+			p->relocs[i].preferred_domains = domain;
 			if (domain == RADEON_GEM_DOMAIN_VRAM)
 				domain |= RADEON_GEM_DOMAIN_GTT;
 			p->relocs[i].allowed_domains = domain;
 		}
 
-		if (radeon_ttm_tt_has_userptr(p->relocs[i].robj->tbo.ttm)) {
-			uint32_t domain = p->relocs[i].prefered_domains;
+		if (radeon_ttm_tt_has_userptr(p->rdev, p->relocs[i].robj->tbo.ttm)) {
+			uint32_t domain = p->relocs[i].preferred_domains;
 			if (!(domain & RADEON_GEM_DOMAIN_GTT)) {
 				DRM_ERROR("Only RADEON_GEM_DOMAIN_GTT is "
 					  "allowed for userptr BOs\n");
@@ -159,12 +168,22 @@ static int radeon_cs_parser_relocs(struct radeon_cs_parser *p)
 			}
 			need_mmap_lock = true;
 			domain = RADEON_GEM_DOMAIN_GTT;
-			p->relocs[i].prefered_domains = domain;
+			p->relocs[i].preferred_domains = domain;
 			p->relocs[i].allowed_domains = domain;
 		}
 
+		/* Objects shared as dma-bufs cannot be moved to VRAM */
+		if (p->relocs[i].robj->prime_shared_count) {
+			p->relocs[i].allowed_domains &= ~RADEON_GEM_DOMAIN_VRAM;
+			if (!p->relocs[i].allowed_domains) {
+				DRM_ERROR("BO associated with dma-buf cannot "
+					  "be moved to VRAM\n");
+				return -EINVAL;
+			}
+		}
+
 		p->relocs[i].tv.bo = &p->relocs[i].robj->tbo;
-		p->relocs[i].tv.shared = !r->write_domain;
+		p->relocs[i].tv.num_shared = !r->write_domain;
 
 		radeon_cs_buckets_add(&buckets, &p->relocs[i].tv.head,
 				      priority);
@@ -176,12 +195,12 @@ static int radeon_cs_parser_relocs(struct radeon_cs_parser *p)
 		p->vm_bos = radeon_vm_get_bos(p->rdev, p->ib.vm,
 					      &p->validated);
 	if (need_mmap_lock)
-		down_read(&current->mm->mmap_sem);
+		mmap_read_lock(current->mm);
 
 	r = radeon_bo_list_validate(p->rdev, &p->ticket, &p->validated, p->ring);
 
 	if (need_mmap_lock)
-		up_read(&current->mm->mmap_sem);
+		mmap_read_unlock(current->mm);
 
 	return r;
 }
@@ -235,11 +254,11 @@ static int radeon_cs_sync_rings(struct radeon_cs_parser *p)
 	int r;
 
 	list_for_each_entry(reloc, &p->validated, tv.head) {
-		struct reservation_object *resv;
+		struct dma_resv *resv;
 
-		resv = reloc->robj->tbo.resv;
+		resv = reloc->robj->tbo.base.resv;
 		r = radeon_sync_resv(p->rdev, &p->ib.sync, resv,
-				     reloc->tv.shared);
+				     reloc->tv.num_shared);
 		if (r)
 			return r;
 	}
@@ -269,7 +288,7 @@ int radeon_cs_parser_init(struct radeon_cs_parser *p, void *data)
 	p->chunk_relocs = NULL;
 	p->chunk_flags = NULL;
 	p->chunk_const_ib = NULL;
-	p->chunks_array = kcalloc(cs->num_chunks, sizeof(uint64_t), GFP_KERNEL);
+	p->chunks_array = kvmalloc_array(cs->num_chunks, sizeof(uint64_t), GFP_KERNEL);
 	if (p->chunks_array == NULL) {
 		return -ENOMEM;
 	}
@@ -280,7 +299,7 @@ int radeon_cs_parser_init(struct radeon_cs_parser *p, void *data)
 	}
 	p->cs_flags = 0;
 	p->nchunks = cs->num_chunks;
-	p->chunks = kcalloc(p->nchunks, sizeof(struct radeon_cs_chunk), GFP_KERNEL);
+	p->chunks = kvcalloc(p->nchunks, sizeof(struct radeon_cs_chunk), GFP_KERNEL);
 	if (p->chunks == NULL) {
 		return -ENOMEM;
 	}
@@ -328,7 +347,7 @@ int radeon_cs_parser_init(struct radeon_cs_parser *p, void *data)
 				continue;
 		}
 
-		p->chunks[i].kdata = drm_malloc_ab(size, sizeof(uint32_t));
+		p->chunks[i].kdata = kvmalloc_array(size, sizeof(uint32_t), GFP_KERNEL);
 		size *= sizeof(uint32_t);
 		if (p->chunks[i].kdata == NULL) {
 			return -ENOMEM;
@@ -374,20 +393,22 @@ int radeon_cs_parser_init(struct radeon_cs_parser *p, void *data)
 	return 0;
 }
 
-static int cmp_size_smaller_first(void *priv, struct list_head *a,
-				  struct list_head *b)
+static int cmp_size_smaller_first(void *priv, const struct list_head *a,
+				  const struct list_head *b)
 {
 	struct radeon_bo_list *la = list_entry(a, struct radeon_bo_list, tv.head);
 	struct radeon_bo_list *lb = list_entry(b, struct radeon_bo_list, tv.head);
 
 	/* Sort A before B if A is smaller. */
-	return (int)la->robj->tbo.num_pages - (int)lb->robj->tbo.num_pages;
+	return (int)la->robj->tbo.mem.num_pages -
+		(int)lb->robj->tbo.mem.num_pages;
 }
 
 /**
  * cs_parser_fini() - clean parser states
  * @parser:	parser structure holding parsing context.
  * @error:	error number
+ * @backoff:	indicator to backoff the reservation
  *
  * If error is set than unvalidate buffer, otherwise just free memory
  * used by parsing context.
@@ -423,16 +444,16 @@ static void radeon_cs_parser_fini(struct radeon_cs_parser *parser, int error, bo
 			if (bo == NULL)
 				continue;
 
-			drm_gem_object_unreference_unlocked(&bo->gem_base);
+			drm_gem_object_put(&bo->tbo.base);
 		}
 	}
 	kfree(parser->track);
-	drm_free_large(parser->relocs);
-	drm_free_large(parser->vm_bos);
+	kvfree(parser->relocs);
+	kvfree(parser->vm_bos);
 	for (i = 0; i < parser->nchunks; i++)
-		drm_free_large(parser->chunks[i].kdata);
-	kfree(parser->chunks);
-	kfree(parser->chunks_array);
+		kvfree(parser->chunks[i].kdata);
+	kvfree(parser->chunks);
+	kvfree(parser->chunks_array);
 	radeon_ib_free(parser->rdev, &parser->ib);
 	radeon_ib_free(parser->rdev, &parser->const_ib);
 }
@@ -703,8 +724,9 @@ out:
 
 /**
  * radeon_cs_packet_parse() - parse cp packet and point ib index to next packet
- * @parser:	parser structure holding parsing context.
+ * @p:		parser structure holding parsing context.
  * @pkt:	where to store packet information
+ * @idx:	packet index
  *
  * Assume that chunk_ib_index is properly set. Will return -EINVAL
  * if packet is bigger than remaining ib size. or if packets is unknown.
@@ -809,11 +831,9 @@ void radeon_cs_dump_packet(struct radeon_cs_parser *p,
 
 /**
  * radeon_cs_packet_next_reloc() - parse next (should be reloc) packet
- * @parser:		parser structure holding parsing context.
- * @data:		pointer to relocation data
- * @offset_start:	starting offset
- * @offset_mask:	offset mask (to align start offset on)
- * @reloc:		reloc informations
+ * @p:			parser structure holding parsing context.
+ * @cs_reloc:		reloc informations
+ * @nomm:		no memory management for debugging
  *
  * Check if next packet is relocation packet3, do bo validation and compute
  * GPU offset using the provided start.

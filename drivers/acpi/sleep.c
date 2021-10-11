@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * sleep.c - ACPI sleep support.
  *
@@ -5,9 +6,6 @@
  * Copyright (c) 2004 David Shaohua Li <shaohua.li@intel.com>
  * Copyright (c) 2000-2003 Patrick Mochel
  * Copyright (c) 2003 Open Source Development Lab
- *
- * This file is released under the GPLv2.
- *
  */
 
 #include <linux/delay.h>
@@ -63,8 +61,11 @@ static struct notifier_block tts_notifier = {
 static int acpi_sleep_prepare(u32 acpi_state)
 {
 #ifdef CONFIG_ACPI_SLEEP
+	unsigned long acpi_wakeup_address;
+
 	/* do we have a wakeup address for S2 and S3? */
 	if (acpi_state == ACPI_STATE_S3) {
+		acpi_wakeup_address = acpi_get_wakeup_address();
 		if (!acpi_wakeup_address)
 			return -EFAULT;
 		acpi_set_waking_vector(acpi_wakeup_address);
@@ -79,7 +80,7 @@ static int acpi_sleep_prepare(u32 acpi_state)
 	return 0;
 }
 
-static bool acpi_sleep_state_supported(u8 sleep_state)
+bool acpi_sleep_state_supported(u8 sleep_state)
 {
 	acpi_status status;
 	u8 type_a, type_b;
@@ -160,7 +161,15 @@ static int __init init_nvs_nosave(const struct dmi_system_id *d)
 	return 0;
 }
 
-static struct dmi_system_id acpisleep_dmi_table[] __initdata = {
+bool acpi_sleep_default_s3;
+
+static int __init init_default_s3(const struct dmi_system_id *d)
+{
+	acpi_sleep_default_s3 = true;
+	return 0;
+}
+
+static const struct dmi_system_id acpisleep_dmi_table[] __initconst = {
 	{
 	.callback = init_old_suspend_ordering,
 	.ident = "Abit KN9 (nForce4 variant)",
@@ -330,6 +339,14 @@ static struct dmi_system_id acpisleep_dmi_table[] __initdata = {
 		DMI_MATCH(DMI_PRODUCT_NAME, "K54HR"),
 		},
 	},
+	{
+	.callback = init_nvs_save_s3,
+	.ident = "Asus 1025C",
+	.matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK COMPUTER INC."),
+		DMI_MATCH(DMI_PRODUCT_NAME, "1025C"),
+		},
+	},
 	/*
 	 * https://bugzilla.kernel.org/show_bug.cgi?id=189431
 	 * Lenovo G50-45 is a platform later than 2012, but needs nvs memory
@@ -343,14 +360,35 @@ static struct dmi_system_id acpisleep_dmi_table[] __initdata = {
 		DMI_MATCH(DMI_PRODUCT_NAME, "80E3"),
 		},
 	},
+	/*
+	 * ThinkPad X1 Tablet(2016) cannot do suspend-to-idle using
+	 * the Low Power S0 Idle firmware interface (see
+	 * https://bugzilla.kernel.org/show_bug.cgi?id=199057).
+	 */
+	{
+	.callback = init_default_s3,
+	.ident = "ThinkPad X1 Tablet(2016)",
+	.matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+		DMI_MATCH(DMI_PRODUCT_NAME, "20GGA00L00"),
+		},
+	},
 	{},
 };
 
+static bool ignore_blacklist;
+
+void __init acpi_sleep_no_blacklist(void)
+{
+	ignore_blacklist = true;
+}
+
 static void __init acpi_sleep_dmi_check(void)
 {
-	int year;
+	if (ignore_blacklist)
+		return;
 
-	if (dmi_get_date(DMI_BIOS_DATE, &year, NULL, NULL) && year >= 2012)
+	if (dmi_get_bios_year() >= 2012)
 		acpi_nvs_nosave_s3();
 
 	dmi_check_system(acpisleep_dmi_table);
@@ -404,14 +442,6 @@ static int acpi_pm_prepare(void)
 	return error;
 }
 
-static int find_powerf_dev(struct device *dev, void *data)
-{
-	struct acpi_device *device = to_acpi_device(dev);
-	const char *hid = acpi_device_hid(device);
-
-	return !strcmp(hid, ACPI_BUTTON_HID_POWERF);
-}
-
 /**
  *	acpi_pm_finish - Instruct the platform to leave a sleep state.
  *
@@ -420,7 +450,7 @@ static int find_powerf_dev(struct device *dev, void *data)
  */
 static void acpi_pm_finish(void)
 {
-	struct device *pwr_btn_dev;
+	struct acpi_device *pwr_btn_adev;
 	u32 acpi_state = acpi_target_sleep_state;
 
 	acpi_ec_unblock_transactions();
@@ -451,11 +481,11 @@ static void acpi_pm_finish(void)
 		return;
 
 	pwr_btn_event_pending = false;
-	pwr_btn_dev = bus_find_device(&acpi_bus_type, NULL, NULL,
-				      find_powerf_dev);
-	if (pwr_btn_dev) {
-		pm_wakeup_event(pwr_btn_dev, 0);
-		put_device(pwr_btn_dev);
+	pwr_btn_adev = acpi_dev_get_first_match_dev(ACPI_BUTTON_HID_POWERF,
+						    NULL, -1);
+	if (pwr_btn_adev) {
+		pm_wakeup_event(&pwr_btn_adev->dev, 0);
+		acpi_dev_put(pwr_btn_adev);
 	}
 }
 
@@ -474,7 +504,7 @@ static void acpi_pm_start(u32 acpi_state)
  */
 static void acpi_pm_end(void)
 {
-	acpi_turn_off_unused_power_resources();
+	acpi_turn_off_unused_power_resources(false);
 	acpi_scan_lock_release();
 	/*
 	 * This is necessary in case acpi_pm_finish() is not called during a
@@ -484,7 +514,9 @@ static void acpi_pm_end(void)
 	acpi_sleep_tts_switch(acpi_target_sleep_state);
 }
 #else /* !CONFIG_ACPI_SLEEP */
+#define sleep_no_lps0	(1)
 #define acpi_target_sleep_state	ACPI_STATE_S0
+#define acpi_sleep_default_s3	(1)
 static inline void acpi_sleep_dmi_check(void) {}
 #endif /* CONFIG_ACPI_SLEEP */
 
@@ -650,41 +682,136 @@ static const struct platform_suspend_ops acpi_suspend_ops_old = {
 	.recover = acpi_pm_finish,
 };
 
-static int acpi_freeze_begin(void)
+static bool s2idle_wakeup;
+
+int acpi_s2idle_begin(void)
 {
 	acpi_scan_lock_acquire();
 	return 0;
 }
 
-static int acpi_freeze_prepare(void)
+int acpi_s2idle_prepare(void)
 {
+	if (acpi_sci_irq_valid()) {
+		enable_irq_wake(acpi_sci_irq);
+		acpi_ec_set_gpe_wake_mask(ACPI_GPE_ENABLE);
+	}
+
 	acpi_enable_wakeup_devices(ACPI_STATE_S0);
+
+	/* Change the configuration of GPEs to avoid spurious wakeup. */
 	acpi_enable_all_wakeup_gpes();
 	acpi_os_wait_events_complete();
-	if (acpi_sci_irq_valid())
-		enable_irq_wake(acpi_sci_irq);
+
+	s2idle_wakeup = true;
 	return 0;
 }
 
-static void acpi_freeze_restore(void)
+bool acpi_s2idle_wake(void)
 {
-	acpi_disable_wakeup_devices(ACPI_STATE_S0);
-	if (acpi_sci_irq_valid())
-		disable_irq_wake(acpi_sci_irq);
-	acpi_enable_all_runtime_gpes();
+	if (!acpi_sci_irq_valid())
+		return pm_wakeup_pending();
+
+	while (pm_wakeup_pending()) {
+		/*
+		 * If IRQD_WAKEUP_ARMED is set for the SCI at this point, the
+		 * SCI has not triggered while suspended, so bail out (the
+		 * wakeup is pending anyway and the SCI is not the source of
+		 * it).
+		 */
+		if (irqd_is_wakeup_armed(irq_get_irq_data(acpi_sci_irq))) {
+			pm_pr_dbg("Wakeup unrelated to ACPI SCI\n");
+			return true;
+		}
+
+		/*
+		 * If the status bit of any enabled fixed event is set, the
+		 * wakeup is regarded as valid.
+		 */
+		if (acpi_any_fixed_event_status_set()) {
+			pm_pr_dbg("ACPI fixed event wakeup\n");
+			return true;
+		}
+
+		/* Check wakeups from drivers sharing the SCI. */
+		if (acpi_check_wakeup_handlers()) {
+			pm_pr_dbg("ACPI custom handler wakeup\n");
+			return true;
+		}
+
+		/* Check non-EC GPE wakeups and dispatch the EC GPE. */
+		if (acpi_ec_dispatch_gpe()) {
+			pm_pr_dbg("ACPI non-EC GPE wakeup\n");
+			return true;
+		}
+
+		/*
+		 * Cancel the SCI wakeup and process all pending events in case
+		 * there are any wakeup ones in there.
+		 *
+		 * Note that if any non-EC GPEs are active at this point, the
+		 * SCI will retrigger after the rearming below, so no events
+		 * should be missed by canceling the wakeup here.
+		 */
+		pm_system_cancel_wakeup();
+		acpi_os_wait_events_complete();
+
+		/*
+		 * The SCI is in the "suspended" state now and it cannot produce
+		 * new wakeup events till the rearming below, so if any of them
+		 * are pending here, they must be resulting from the processing
+		 * of EC events above or coming from somewhere else.
+		 */
+		if (pm_wakeup_pending()) {
+			pm_pr_dbg("Wakeup after ACPI Notify sync\n");
+			return true;
+		}
+
+		rearm_wake_irq(acpi_sci_irq);
+	}
+
+	return false;
 }
 
-static void acpi_freeze_end(void)
+void acpi_s2idle_restore(void)
+{
+	/*
+	 * Drain pending events before restoring the working-state configuration
+	 * of GPEs.
+	 */
+	acpi_os_wait_events_complete(); /* synchronize GPE processing */
+	acpi_ec_flush_work(); /* flush the EC driver's workqueues */
+	acpi_os_wait_events_complete(); /* synchronize Notify handling */
+
+	s2idle_wakeup = false;
+
+	acpi_enable_all_runtime_gpes();
+
+	acpi_disable_wakeup_devices(ACPI_STATE_S0);
+
+	if (acpi_sci_irq_valid()) {
+		acpi_ec_set_gpe_wake_mask(ACPI_GPE_DISABLE);
+		disable_irq_wake(acpi_sci_irq);
+	}
+}
+
+void acpi_s2idle_end(void)
 {
 	acpi_scan_lock_release();
 }
 
-static const struct platform_freeze_ops acpi_freeze_ops = {
-	.begin = acpi_freeze_begin,
-	.prepare = acpi_freeze_prepare,
-	.restore = acpi_freeze_restore,
-	.end = acpi_freeze_end,
+static const struct platform_s2idle_ops acpi_s2idle_ops = {
+	.begin = acpi_s2idle_begin,
+	.prepare = acpi_s2idle_prepare,
+	.wake = acpi_s2idle_wake,
+	.restore = acpi_s2idle_restore,
+	.end = acpi_s2idle_end,
 };
+
+void __weak acpi_s2idle_setup(void)
+{
+	s2idle_set_ops(&acpi_s2idle_ops);
+}
 
 static void acpi_sleep_suspend_setup(void)
 {
@@ -696,12 +823,19 @@ static void acpi_sleep_suspend_setup(void)
 
 	suspend_set_ops(old_suspend_ordering ?
 		&acpi_suspend_ops_old : &acpi_suspend_ops);
-	freeze_set_ops(&acpi_freeze_ops);
+
+	acpi_s2idle_setup();
 }
 
 #else /* !CONFIG_SUSPEND */
+#define s2idle_wakeup		(false)
 static inline void acpi_sleep_suspend_setup(void) {}
 #endif /* !CONFIG_SUSPEND */
+
+bool acpi_s2idle_wakeup(void)
+{
+	return s2idle_wakeup;
+}
 
 #ifdef CONFIG_PM_SLEEP
 static u32 saved_bm_rld;
@@ -728,7 +862,7 @@ static struct syscore_ops acpi_sleep_syscore_ops = {
 	.resume = acpi_restore_bm_rld,
 };
 
-void acpi_sleep_syscore_init(void)
+static void acpi_sleep_syscore_init(void)
 {
 	register_syscore_ops(&acpi_sleep_syscore_ops);
 }
@@ -746,15 +880,19 @@ void __init acpi_no_s4_hw_signature(void)
 	nosigcheck = true;
 }
 
-static int acpi_hibernation_begin(void)
+static int acpi_hibernation_begin(pm_message_t stage)
 {
-	int error;
+	if (!nvs_nosave) {
+		int error = suspend_nvs_alloc();
+		if (error)
+			return error;
+	}
 
-	error = nvs_nosave ? 0 : suspend_nvs_alloc();
-	if (!error)
-		acpi_pm_start(ACPI_STATE_S4);
+	if (stage.event == PM_EVENT_HIBERNATE)
+		pm_set_suspend_via_firmware();
 
-	return error;
+	acpi_pm_start(ACPI_STATE_S4);
+	return 0;
 }
 
 static int acpi_hibernation_enter(void)
@@ -814,7 +952,7 @@ static const struct platform_hibernation_ops acpi_hibernation_ops = {
  *		function is used if the pre-ACPI 2.0 suspend ordering has been
  *		requested.
  */
-static int acpi_hibernation_begin_old(void)
+static int acpi_hibernation_begin_old(pm_message_t stage)
 {
 	int error;
 	/*
@@ -825,16 +963,21 @@ static int acpi_hibernation_begin_old(void)
 	acpi_sleep_tts_switch(ACPI_STATE_S4);
 
 	error = acpi_sleep_prepare(ACPI_STATE_S4);
+	if (error)
+		return error;
 
-	if (!error) {
-		if (!nvs_nosave)
-			error = suspend_nvs_alloc();
-		if (!error) {
-			acpi_target_sleep_state = ACPI_STATE_S4;
-			acpi_scan_lock_acquire();
-		}
+	if (!nvs_nosave) {
+		error = suspend_nvs_alloc();
+		if (error)
+			return error;
 	}
-	return error;
+
+	if (stage.event == PM_EVENT_HIBERNATE)
+		pm_set_suspend_via_firmware();
+
+	acpi_target_sleep_state = ACPI_STATE_S4;
+	acpi_scan_lock_acquire();
+	return 0;
 }
 
 /*

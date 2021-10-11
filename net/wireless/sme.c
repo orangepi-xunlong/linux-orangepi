@@ -1,10 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * SME code for cfg80211
  * both driver SME event handling and the SME implementation
  * (for nl80211's connect() and wext)
  *
  * Copyright 2009	Johannes Berg <johannes@sipsolutions.net>
- * Copyright (C) 2009   Intel Corporation. All rights reserved.
+ * Copyright (C) 2009, 2020 Intel Corporation. All rights reserved.
+ * Copyright 2017	Intel Deutschland GmbH
  */
 
 #include <linux/etherdevice.h>
@@ -22,7 +24,7 @@
 
 /*
  * Software SME in cfg80211, using auth/assoc/deauth calls to the
- * driver. This is is for implementing nl80211's connect/disconnect
+ * driver. This is for implementing nl80211's connect/disconnect
  * and wireless extensions (if configured.)
  */
 
@@ -34,10 +36,11 @@ struct cfg80211_conn {
 		CFG80211_CONN_SCAN_AGAIN,
 		CFG80211_CONN_AUTHENTICATE_NEXT,
 		CFG80211_CONN_AUTHENTICATING,
-		CFG80211_CONN_AUTH_FAILED,
+		CFG80211_CONN_AUTH_FAILED_TIMEOUT,
 		CFG80211_CONN_ASSOCIATE_NEXT,
 		CFG80211_CONN_ASSOCIATING,
 		CFG80211_CONN_ASSOC_FAILED,
+		CFG80211_CONN_ASSOC_FAILED_TIMEOUT,
 		CFG80211_CONN_DEAUTH,
 		CFG80211_CONN_ABANDON,
 		CFG80211_CONN_CONNECTED,
@@ -64,7 +67,6 @@ static int cfg80211_conn_scan(struct wireless_dev *wdev)
 	struct cfg80211_scan_request *request;
 	int n_channels, err;
 
-	ASSERT_RTNL();
 	ASSERT_WDEV_LOCK(wdev);
 
 	if (rdev->scan_req || rdev->scan_msg)
@@ -140,7 +142,8 @@ static int cfg80211_conn_scan(struct wireless_dev *wdev)
 	return err;
 }
 
-static int cfg80211_conn_do_work(struct wireless_dev *wdev)
+static int cfg80211_conn_do_work(struct wireless_dev *wdev,
+				 enum nl80211_timeout_reason *treason)
 {
 	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wdev->wiphy);
 	struct cfg80211_connect_params *params;
@@ -171,7 +174,8 @@ static int cfg80211_conn_do_work(struct wireless_dev *wdev)
 					  NULL, 0,
 					  params->key, params->key_len,
 					  params->key_idx, NULL, 0);
-	case CFG80211_CONN_AUTH_FAILED:
+	case CFG80211_CONN_AUTH_FAILED_TIMEOUT:
+		*treason = NL80211_TIMEOUT_AUTH;
 		return -ENOTCONN;
 	case CFG80211_CONN_ASSOCIATE_NEXT:
 		if (WARN_ON(!rdev->ops->assoc))
@@ -198,6 +202,9 @@ static int cfg80211_conn_do_work(struct wireless_dev *wdev)
 					     WLAN_REASON_DEAUTH_LEAVING,
 					     false);
 		return err;
+	case CFG80211_CONN_ASSOC_FAILED_TIMEOUT:
+		*treason = NL80211_TIMEOUT_ASSOC;
+		fallthrough;
 	case CFG80211_CONN_ASSOC_FAILED:
 		cfg80211_mlme_deauth(rdev, wdev->netdev, params->bssid,
 				     NULL, 0,
@@ -207,7 +214,7 @@ static int cfg80211_conn_do_work(struct wireless_dev *wdev)
 		cfg80211_mlme_deauth(rdev, wdev->netdev, params->bssid,
 				     NULL, 0,
 				     WLAN_REASON_DEAUTH_LEAVING, false);
-		/* fall through */
+		fallthrough;
 	case CFG80211_CONN_ABANDON:
 		/* free directly, disconnected event already sent */
 		cfg80211_sme_free(wdev);
@@ -223,8 +230,9 @@ void cfg80211_conn_work(struct work_struct *work)
 		container_of(work, struct cfg80211_registered_device, conn_work);
 	struct wireless_dev *wdev;
 	u8 bssid_buf[ETH_ALEN], *bssid = NULL;
+	enum nl80211_timeout_reason treason;
 
-	rtnl_lock();
+	wiphy_lock(&rdev->wiphy);
 
 	list_for_each_entry(wdev, &rdev->wiphy.wdev_list, list) {
 		if (!wdev->netdev)
@@ -244,15 +252,20 @@ void cfg80211_conn_work(struct work_struct *work)
 			memcpy(bssid_buf, wdev->conn->params.bssid, ETH_ALEN);
 			bssid = bssid_buf;
 		}
-		if (cfg80211_conn_do_work(wdev)) {
-			__cfg80211_connect_result(
-					wdev->netdev, bssid,
-					NULL, 0, NULL, 0, -1, false, NULL);
+		treason = NL80211_TIMEOUT_UNSPECIFIED;
+		if (cfg80211_conn_do_work(wdev, &treason)) {
+			struct cfg80211_connect_resp_params cr;
+
+			memset(&cr, 0, sizeof(cr));
+			cr.status = -1;
+			cr.bssid = bssid;
+			cr.timeout_reason = treason;
+			__cfg80211_connect_result(wdev->netdev, &cr, false);
 		}
 		wdev_unlock(wdev);
 	}
 
-	rtnl_unlock();
+	wiphy_unlock(&rdev->wiphy);
 }
 
 /* Returned bss is reference counted and must be cleaned up appropriately. */
@@ -350,9 +363,13 @@ void cfg80211_sme_rx_auth(struct wireless_dev *wdev, const u8 *buf, size_t len)
 		wdev->conn->state = CFG80211_CONN_AUTHENTICATE_NEXT;
 		schedule_work(&rdev->conn_work);
 	} else if (status_code != WLAN_STATUS_SUCCESS) {
-		__cfg80211_connect_result(wdev->netdev, mgmt->bssid,
-					  NULL, 0, NULL, 0,
-					  status_code, false, NULL);
+		struct cfg80211_connect_resp_params cr;
+
+		memset(&cr, 0, sizeof(cr));
+		cr.status = status_code;
+		cr.bssid = mgmt->bssid;
+		cr.timeout_reason = NL80211_TIMEOUT_UNSPECIFIED;
+		__cfg80211_connect_result(wdev->netdev, &cr, false);
 	} else if (wdev->conn->state == CFG80211_CONN_AUTHENTICATING) {
 		wdev->conn->state = CFG80211_CONN_ASSOCIATE_NEXT;
 		schedule_work(&rdev->conn_work);
@@ -400,7 +417,7 @@ void cfg80211_sme_auth_timeout(struct wireless_dev *wdev)
 	if (!wdev->conn)
 		return;
 
-	wdev->conn->state = CFG80211_CONN_AUTH_FAILED;
+	wdev->conn->state = CFG80211_CONN_AUTH_FAILED_TIMEOUT;
 	schedule_work(&rdev->conn_work);
 }
 
@@ -422,7 +439,7 @@ void cfg80211_sme_assoc_timeout(struct wireless_dev *wdev)
 	if (!wdev->conn)
 		return;
 
-	wdev->conn->state = CFG80211_CONN_ASSOC_FAILED;
+	wdev->conn->state = CFG80211_CONN_ASSOC_FAILED_TIMEOUT;
 	schedule_work(&rdev->conn_work);
 }
 
@@ -512,7 +529,7 @@ static int cfg80211_sme_connect(struct wireless_dev *wdev,
 		cfg80211_sme_free(wdev);
 	}
 
-	if (WARN_ON(wdev->conn))
+	if (wdev->conn)
 		return -EINPROGRESS;
 
 	wdev->conn = kzalloc(sizeof(*wdev->conn), GFP_KERNEL);
@@ -559,7 +576,9 @@ static int cfg80211_sme_connect(struct wireless_dev *wdev,
 
 	/* we're good if we have a matching bss struct */
 	if (bss) {
-		err = cfg80211_conn_do_work(wdev);
+		enum nl80211_timeout_reason treason;
+
+		err = cfg80211_conn_do_work(wdev, &treason);
 		cfg80211_put_bss(wdev->wiphy, bss);
 	} else {
 		/* otherwise we'll need to scan for the AP first */
@@ -622,11 +641,15 @@ static bool cfg80211_is_all_idle(void)
 	 * All devices must be idle as otherwise if you are actively
 	 * scanning some new beacon hints could be learned and would
 	 * count as new regulatory hints.
+	 * Also if there is any other active beaconing interface we
+	 * need not issue a disconnect hint and reset any info such
+	 * as chan dfs state, etc.
 	 */
 	list_for_each_entry(rdev, &cfg80211_rdev_list, list) {
 		list_for_each_entry(wdev, &rdev->wiphy.wdev_list, list) {
 			wdev_lock(wdev);
-			if (wdev->conn || wdev->current_bss)
+			if (wdev->conn || wdev->current_bss ||
+			    cfg80211_beaconing_iface_active(wdev))
 				is_all_idle = false;
 			wdev_unlock(wdev);
 		}
@@ -643,7 +666,7 @@ static void disconnect_work(struct work_struct *work)
 	rtnl_unlock();
 }
 
-static DECLARE_WORK(cfg80211_disconnect_work, disconnect_work);
+DECLARE_WORK(cfg80211_disconnect_work, disconnect_work);
 
 
 /*
@@ -652,11 +675,9 @@ static DECLARE_WORK(cfg80211_disconnect_work, disconnect_work);
  */
 
 /* This method must consume bss one way or another */
-void __cfg80211_connect_result(struct net_device *dev, const u8 *bssid,
-			       const u8 *req_ie, size_t req_ie_len,
-			       const u8 *resp_ie, size_t resp_ie_len,
-			       int status, bool wextev,
-			       struct cfg80211_bss *bss)
+void __cfg80211_connect_result(struct net_device *dev,
+			       struct cfg80211_connect_resp_params *cr,
+			       bool wextev)
 {
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
 	const u8 *country_ie;
@@ -668,48 +689,49 @@ void __cfg80211_connect_result(struct net_device *dev, const u8 *bssid,
 
 	if (WARN_ON(wdev->iftype != NL80211_IFTYPE_STATION &&
 		    wdev->iftype != NL80211_IFTYPE_P2P_CLIENT)) {
-		cfg80211_put_bss(wdev->wiphy, bss);
+		cfg80211_put_bss(wdev->wiphy, cr->bss);
 		return;
 	}
 
-	nl80211_send_connect_result(wiphy_to_rdev(wdev->wiphy), dev,
-				    bssid, req_ie, req_ie_len,
-				    resp_ie, resp_ie_len,
-				    status, GFP_KERNEL);
+	wdev->unprot_beacon_reported = 0;
+	nl80211_send_connect_result(wiphy_to_rdev(wdev->wiphy), dev, cr,
+				    GFP_KERNEL);
 
 #ifdef CONFIG_CFG80211_WEXT
 	if (wextev) {
-		if (req_ie && status == WLAN_STATUS_SUCCESS) {
+		if (cr->req_ie && cr->status == WLAN_STATUS_SUCCESS) {
 			memset(&wrqu, 0, sizeof(wrqu));
-			wrqu.data.length = req_ie_len;
-			wireless_send_event(dev, IWEVASSOCREQIE, &wrqu, req_ie);
+			wrqu.data.length = cr->req_ie_len;
+			wireless_send_event(dev, IWEVASSOCREQIE, &wrqu,
+					    cr->req_ie);
 		}
 
-		if (resp_ie && status == WLAN_STATUS_SUCCESS) {
+		if (cr->resp_ie && cr->status == WLAN_STATUS_SUCCESS) {
 			memset(&wrqu, 0, sizeof(wrqu));
-			wrqu.data.length = resp_ie_len;
-			wireless_send_event(dev, IWEVASSOCRESPIE, &wrqu, resp_ie);
+			wrqu.data.length = cr->resp_ie_len;
+			wireless_send_event(dev, IWEVASSOCRESPIE, &wrqu,
+					    cr->resp_ie);
 		}
 
 		memset(&wrqu, 0, sizeof(wrqu));
 		wrqu.ap_addr.sa_family = ARPHRD_ETHER;
-		if (bssid && status == WLAN_STATUS_SUCCESS) {
-			memcpy(wrqu.ap_addr.sa_data, bssid, ETH_ALEN);
-			memcpy(wdev->wext.prev_bssid, bssid, ETH_ALEN);
+		if (cr->bssid && cr->status == WLAN_STATUS_SUCCESS) {
+			memcpy(wrqu.ap_addr.sa_data, cr->bssid, ETH_ALEN);
+			memcpy(wdev->wext.prev_bssid, cr->bssid, ETH_ALEN);
 			wdev->wext.prev_bssid_valid = true;
 		}
 		wireless_send_event(dev, SIOCGIWAP, &wrqu, NULL);
 	}
 #endif
 
-	if (!bss && (status == WLAN_STATUS_SUCCESS)) {
+	if (!cr->bss && (cr->status == WLAN_STATUS_SUCCESS)) {
 		WARN_ON_ONCE(!wiphy_to_rdev(wdev->wiphy)->ops->connect);
-		bss = cfg80211_get_bss(wdev->wiphy, NULL, bssid,
-				       wdev->ssid, wdev->ssid_len,
-				       wdev->conn_bss_type,
-				       IEEE80211_PRIVACY_ANY);
-		if (bss)
-			cfg80211_hold_bss(bss_from_pub(bss));
+		cr->bss = cfg80211_get_bss(wdev->wiphy, NULL, cr->bssid,
+					   wdev->ssid, wdev->ssid_len,
+					   wdev->conn_bss_type,
+					   IEEE80211_PRIVACY_ANY);
+		if (cr->bss)
+			cfg80211_hold_bss(bss_from_pub(cr->bss));
 	}
 
 	if (wdev->current_bss) {
@@ -718,28 +740,29 @@ void __cfg80211_connect_result(struct net_device *dev, const u8 *bssid,
 		wdev->current_bss = NULL;
 	}
 
-	if (status != WLAN_STATUS_SUCCESS) {
-		kzfree(wdev->connect_keys);
+	if (cr->status != WLAN_STATUS_SUCCESS) {
+		kfree_sensitive(wdev->connect_keys);
 		wdev->connect_keys = NULL;
 		wdev->ssid_len = 0;
-		if (bss) {
-			cfg80211_unhold_bss(bss_from_pub(bss));
-			cfg80211_put_bss(wdev->wiphy, bss);
+		wdev->conn_owner_nlportid = 0;
+		if (cr->bss) {
+			cfg80211_unhold_bss(bss_from_pub(cr->bss));
+			cfg80211_put_bss(wdev->wiphy, cr->bss);
 		}
 		cfg80211_sme_free(wdev);
 		return;
 	}
 
-	if (WARN_ON(!bss))
+	if (WARN_ON(!cr->bss))
 		return;
 
-	wdev->current_bss = bss_from_pub(bss);
+	wdev->current_bss = bss_from_pub(cr->bss);
 
 	if (!(wdev->wiphy->flags & WIPHY_FLAG_HAS_STATIC_WEP))
 		cfg80211_upload_connect_keys(wdev);
 
 	rcu_read_lock();
-	country_ie = ieee80211_bss_get_ie(bss, WLAN_EID_COUNTRY);
+	country_ie = ieee80211_bss_get_ie(cr->bss, WLAN_EID_COUNTRY);
 	if (!country_ie) {
 		rcu_read_unlock();
 		return;
@@ -756,68 +779,125 @@ void __cfg80211_connect_result(struct net_device *dev, const u8 *bssid,
 	 * - country_ie + 2, the start of the country ie data, and
 	 * - and country_ie[1] which is the IE length
 	 */
-	regulatory_hint_country_ie(wdev->wiphy, bss->channel->band,
+	regulatory_hint_country_ie(wdev->wiphy, cr->bss->channel->band,
 				   country_ie + 2, country_ie[1]);
 	kfree(country_ie);
 }
 
 /* Consumes bss object one way or another */
-void cfg80211_connect_bss(struct net_device *dev, const u8 *bssid,
-			  struct cfg80211_bss *bss, const u8 *req_ie,
-			  size_t req_ie_len, const u8 *resp_ie,
-			  size_t resp_ie_len, int status, gfp_t gfp)
+void cfg80211_connect_done(struct net_device *dev,
+			   struct cfg80211_connect_resp_params *params,
+			   gfp_t gfp)
 {
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
 	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wdev->wiphy);
 	struct cfg80211_event *ev;
 	unsigned long flags;
+	u8 *next;
 
-	if (bss) {
-		/* Make sure the bss entry provided by the driver is valid. */
-		struct cfg80211_internal_bss *ibss = bss_from_pub(bss);
+	if (params->bss) {
+		struct cfg80211_internal_bss *ibss = bss_from_pub(params->bss);
 
-		if (WARN_ON(list_empty(&ibss->list))) {
-			cfg80211_put_bss(wdev->wiphy, bss);
-			return;
+		if (list_empty(&ibss->list)) {
+			struct cfg80211_bss *found = NULL, *tmp = params->bss;
+
+			found = cfg80211_get_bss(wdev->wiphy, NULL,
+						 params->bss->bssid,
+						 wdev->ssid, wdev->ssid_len,
+						 wdev->conn_bss_type,
+						 IEEE80211_PRIVACY_ANY);
+			if (found) {
+				/* The same BSS is already updated so use it
+				 * instead, as it has latest info.
+				 */
+				params->bss = found;
+			} else {
+				/* Update with BSS provided by driver, it will
+				 * be freshly added and ref cnted, we can free
+				 * the old one.
+				 *
+				 * signal_valid can be false, as we are not
+				 * expecting the BSS to be found.
+				 *
+				 * keep the old timestamp to avoid confusion
+				 */
+				cfg80211_bss_update(rdev, ibss, false,
+						    ibss->ts);
+			}
+
+			cfg80211_put_bss(wdev->wiphy, tmp);
 		}
 	}
 
-	ev = kzalloc(sizeof(*ev) + req_ie_len + resp_ie_len, gfp);
+	ev = kzalloc(sizeof(*ev) + (params->bssid ? ETH_ALEN : 0) +
+		     params->req_ie_len + params->resp_ie_len +
+		     params->fils.kek_len + params->fils.pmk_len +
+		     (params->fils.pmkid ? WLAN_PMKID_LEN : 0), gfp);
 	if (!ev) {
-		cfg80211_put_bss(wdev->wiphy, bss);
+		cfg80211_put_bss(wdev->wiphy, params->bss);
 		return;
 	}
 
 	ev->type = EVENT_CONNECT_RESULT;
-	if (bssid)
-		memcpy(ev->cr.bssid, bssid, ETH_ALEN);
-	if (req_ie_len) {
-		ev->cr.req_ie = ((u8 *)ev) + sizeof(*ev);
-		ev->cr.req_ie_len = req_ie_len;
-		memcpy((void *)ev->cr.req_ie, req_ie, req_ie_len);
+	next = ((u8 *)ev) + sizeof(*ev);
+	if (params->bssid) {
+		ev->cr.bssid = next;
+		memcpy((void *)ev->cr.bssid, params->bssid, ETH_ALEN);
+		next += ETH_ALEN;
 	}
-	if (resp_ie_len) {
-		ev->cr.resp_ie = ((u8 *)ev) + sizeof(*ev) + req_ie_len;
-		ev->cr.resp_ie_len = resp_ie_len;
-		memcpy((void *)ev->cr.resp_ie, resp_ie, resp_ie_len);
+	if (params->req_ie_len) {
+		ev->cr.req_ie = next;
+		ev->cr.req_ie_len = params->req_ie_len;
+		memcpy((void *)ev->cr.req_ie, params->req_ie,
+		       params->req_ie_len);
+		next += params->req_ie_len;
 	}
-	if (bss)
-		cfg80211_hold_bss(bss_from_pub(bss));
-	ev->cr.bss = bss;
-	ev->cr.status = status;
+	if (params->resp_ie_len) {
+		ev->cr.resp_ie = next;
+		ev->cr.resp_ie_len = params->resp_ie_len;
+		memcpy((void *)ev->cr.resp_ie, params->resp_ie,
+		       params->resp_ie_len);
+		next += params->resp_ie_len;
+	}
+	if (params->fils.kek_len) {
+		ev->cr.fils.kek = next;
+		ev->cr.fils.kek_len = params->fils.kek_len;
+		memcpy((void *)ev->cr.fils.kek, params->fils.kek,
+		       params->fils.kek_len);
+		next += params->fils.kek_len;
+	}
+	if (params->fils.pmk_len) {
+		ev->cr.fils.pmk = next;
+		ev->cr.fils.pmk_len = params->fils.pmk_len;
+		memcpy((void *)ev->cr.fils.pmk, params->fils.pmk,
+		       params->fils.pmk_len);
+		next += params->fils.pmk_len;
+	}
+	if (params->fils.pmkid) {
+		ev->cr.fils.pmkid = next;
+		memcpy((void *)ev->cr.fils.pmkid, params->fils.pmkid,
+		       WLAN_PMKID_LEN);
+		next += WLAN_PMKID_LEN;
+	}
+	ev->cr.fils.update_erp_next_seq_num = params->fils.update_erp_next_seq_num;
+	if (params->fils.update_erp_next_seq_num)
+		ev->cr.fils.erp_next_seq_num = params->fils.erp_next_seq_num;
+	if (params->bss)
+		cfg80211_hold_bss(bss_from_pub(params->bss));
+	ev->cr.bss = params->bss;
+	ev->cr.status = params->status;
+	ev->cr.timeout_reason = params->timeout_reason;
 
 	spin_lock_irqsave(&wdev->event_lock, flags);
 	list_add_tail(&ev->list, &wdev->event_list);
 	spin_unlock_irqrestore(&wdev->event_lock, flags);
 	queue_work(cfg80211_wq, &rdev->event_work);
 }
-EXPORT_SYMBOL(cfg80211_connect_bss);
+EXPORT_SYMBOL(cfg80211_connect_done);
 
 /* Consumes bss object one way or another */
 void __cfg80211_roamed(struct wireless_dev *wdev,
-		       struct cfg80211_bss *bss,
-		       const u8 *req_ie, size_t req_ie_len,
-		       const u8 *resp_ie, size_t resp_ie_len)
+		       struct cfg80211_roam_info *info)
 {
 #ifdef CONFIG_CFG80211_WEXT
 	union iwreq_data wrqu;
@@ -835,97 +915,163 @@ void __cfg80211_roamed(struct wireless_dev *wdev,
 	cfg80211_put_bss(wdev->wiphy, &wdev->current_bss->pub);
 	wdev->current_bss = NULL;
 
-	cfg80211_hold_bss(bss_from_pub(bss));
-	wdev->current_bss = bss_from_pub(bss);
+	if (WARN_ON(!info->bss))
+		return;
 
+	cfg80211_hold_bss(bss_from_pub(info->bss));
+	wdev->current_bss = bss_from_pub(info->bss);
+
+	wdev->unprot_beacon_reported = 0;
 	nl80211_send_roamed(wiphy_to_rdev(wdev->wiphy),
-			    wdev->netdev, bss->bssid,
-			    req_ie, req_ie_len, resp_ie, resp_ie_len,
-			    GFP_KERNEL);
+			    wdev->netdev, info, GFP_KERNEL);
 
 #ifdef CONFIG_CFG80211_WEXT
-	if (req_ie) {
+	if (info->req_ie) {
 		memset(&wrqu, 0, sizeof(wrqu));
-		wrqu.data.length = req_ie_len;
+		wrqu.data.length = info->req_ie_len;
 		wireless_send_event(wdev->netdev, IWEVASSOCREQIE,
-				    &wrqu, req_ie);
+				    &wrqu, info->req_ie);
 	}
 
-	if (resp_ie) {
+	if (info->resp_ie) {
 		memset(&wrqu, 0, sizeof(wrqu));
-		wrqu.data.length = resp_ie_len;
+		wrqu.data.length = info->resp_ie_len;
 		wireless_send_event(wdev->netdev, IWEVASSOCRESPIE,
-				    &wrqu, resp_ie);
+				    &wrqu, info->resp_ie);
 	}
 
 	memset(&wrqu, 0, sizeof(wrqu));
 	wrqu.ap_addr.sa_family = ARPHRD_ETHER;
-	memcpy(wrqu.ap_addr.sa_data, bss->bssid, ETH_ALEN);
-	memcpy(wdev->wext.prev_bssid, bss->bssid, ETH_ALEN);
+	memcpy(wrqu.ap_addr.sa_data, info->bss->bssid, ETH_ALEN);
+	memcpy(wdev->wext.prev_bssid, info->bss->bssid, ETH_ALEN);
 	wdev->wext.prev_bssid_valid = true;
 	wireless_send_event(wdev->netdev, SIOCGIWAP, &wrqu, NULL);
 #endif
 
 	return;
 out:
-	cfg80211_put_bss(wdev->wiphy, bss);
+	cfg80211_put_bss(wdev->wiphy, info->bss);
 }
 
-void cfg80211_roamed(struct net_device *dev,
-		     struct ieee80211_channel *channel,
-		     const u8 *bssid,
-		     const u8 *req_ie, size_t req_ie_len,
-		     const u8 *resp_ie, size_t resp_ie_len, gfp_t gfp)
-{
-	struct wireless_dev *wdev = dev->ieee80211_ptr;
-	struct cfg80211_bss *bss;
-
-	bss = cfg80211_get_bss(wdev->wiphy, channel, bssid, wdev->ssid,
-			       wdev->ssid_len,
-			       wdev->conn_bss_type, IEEE80211_PRIVACY_ANY);
-	if (WARN_ON(!bss))
-		return;
-
-	cfg80211_roamed_bss(dev, bss, req_ie, req_ie_len, resp_ie,
-			    resp_ie_len, gfp);
-}
-EXPORT_SYMBOL(cfg80211_roamed);
-
-/* Consumes bss object one way or another */
-void cfg80211_roamed_bss(struct net_device *dev,
-			 struct cfg80211_bss *bss, const u8 *req_ie,
-			 size_t req_ie_len, const u8 *resp_ie,
-			 size_t resp_ie_len, gfp_t gfp)
+/* Consumes info->bss object one way or another */
+void cfg80211_roamed(struct net_device *dev, struct cfg80211_roam_info *info,
+		     gfp_t gfp)
 {
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
 	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wdev->wiphy);
 	struct cfg80211_event *ev;
 	unsigned long flags;
+	u8 *next;
 
-	if (WARN_ON(!bss))
+	if (!info->bss) {
+		info->bss = cfg80211_get_bss(wdev->wiphy, info->channel,
+					     info->bssid, wdev->ssid,
+					     wdev->ssid_len,
+					     wdev->conn_bss_type,
+					     IEEE80211_PRIVACY_ANY);
+	}
+
+	if (WARN_ON(!info->bss))
 		return;
 
-	ev = kzalloc(sizeof(*ev) + req_ie_len + resp_ie_len, gfp);
+	ev = kzalloc(sizeof(*ev) + info->req_ie_len + info->resp_ie_len +
+		     info->fils.kek_len + info->fils.pmk_len +
+		     (info->fils.pmkid ? WLAN_PMKID_LEN : 0), gfp);
 	if (!ev) {
-		cfg80211_put_bss(wdev->wiphy, bss);
+		cfg80211_put_bss(wdev->wiphy, info->bss);
 		return;
 	}
 
 	ev->type = EVENT_ROAMED;
-	ev->rm.req_ie = ((u8 *)ev) + sizeof(*ev);
-	ev->rm.req_ie_len = req_ie_len;
-	memcpy((void *)ev->rm.req_ie, req_ie, req_ie_len);
-	ev->rm.resp_ie = ((u8 *)ev) + sizeof(*ev) + req_ie_len;
-	ev->rm.resp_ie_len = resp_ie_len;
-	memcpy((void *)ev->rm.resp_ie, resp_ie, resp_ie_len);
-	ev->rm.bss = bss;
+	next = ((u8 *)ev) + sizeof(*ev);
+	if (info->req_ie_len) {
+		ev->rm.req_ie = next;
+		ev->rm.req_ie_len = info->req_ie_len;
+		memcpy((void *)ev->rm.req_ie, info->req_ie, info->req_ie_len);
+		next += info->req_ie_len;
+	}
+	if (info->resp_ie_len) {
+		ev->rm.resp_ie = next;
+		ev->rm.resp_ie_len = info->resp_ie_len;
+		memcpy((void *)ev->rm.resp_ie, info->resp_ie,
+		       info->resp_ie_len);
+		next += info->resp_ie_len;
+	}
+	if (info->fils.kek_len) {
+		ev->rm.fils.kek = next;
+		ev->rm.fils.kek_len = info->fils.kek_len;
+		memcpy((void *)ev->rm.fils.kek, info->fils.kek,
+		       info->fils.kek_len);
+		next += info->fils.kek_len;
+	}
+	if (info->fils.pmk_len) {
+		ev->rm.fils.pmk = next;
+		ev->rm.fils.pmk_len = info->fils.pmk_len;
+		memcpy((void *)ev->rm.fils.pmk, info->fils.pmk,
+		       info->fils.pmk_len);
+		next += info->fils.pmk_len;
+	}
+	if (info->fils.pmkid) {
+		ev->rm.fils.pmkid = next;
+		memcpy((void *)ev->rm.fils.pmkid, info->fils.pmkid,
+		       WLAN_PMKID_LEN);
+		next += WLAN_PMKID_LEN;
+	}
+	ev->rm.fils.update_erp_next_seq_num = info->fils.update_erp_next_seq_num;
+	if (info->fils.update_erp_next_seq_num)
+		ev->rm.fils.erp_next_seq_num = info->fils.erp_next_seq_num;
+	ev->rm.bss = info->bss;
 
 	spin_lock_irqsave(&wdev->event_lock, flags);
 	list_add_tail(&ev->list, &wdev->event_list);
 	spin_unlock_irqrestore(&wdev->event_lock, flags);
 	queue_work(cfg80211_wq, &rdev->event_work);
 }
-EXPORT_SYMBOL(cfg80211_roamed_bss);
+EXPORT_SYMBOL(cfg80211_roamed);
+
+void __cfg80211_port_authorized(struct wireless_dev *wdev, const u8 *bssid)
+{
+	ASSERT_WDEV_LOCK(wdev);
+
+	if (WARN_ON(wdev->iftype != NL80211_IFTYPE_STATION))
+		return;
+
+	if (WARN_ON(!wdev->current_bss) ||
+	    WARN_ON(!ether_addr_equal(wdev->current_bss->pub.bssid, bssid)))
+		return;
+
+	nl80211_send_port_authorized(wiphy_to_rdev(wdev->wiphy), wdev->netdev,
+				     bssid);
+}
+
+void cfg80211_port_authorized(struct net_device *dev, const u8 *bssid,
+			      gfp_t gfp)
+{
+	struct wireless_dev *wdev = dev->ieee80211_ptr;
+	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wdev->wiphy);
+	struct cfg80211_event *ev;
+	unsigned long flags;
+
+	if (WARN_ON(!bssid))
+		return;
+
+	ev = kzalloc(sizeof(*ev), gfp);
+	if (!ev)
+		return;
+
+	ev->type = EVENT_PORT_AUTHORIZED;
+	memcpy(ev->pa.bssid, bssid, ETH_ALEN);
+
+	/*
+	 * Use the wdev event list so that if there are pending
+	 * connected/roamed events, they will be reported first.
+	 */
+	spin_lock_irqsave(&wdev->event_lock, flags);
+	list_add_tail(&ev->list, &wdev->event_list);
+	spin_unlock_irqrestore(&wdev->event_lock, flags);
+	queue_work(cfg80211_wq, &rdev->event_work);
+}
+EXPORT_SYMBOL(cfg80211_port_authorized);
 
 void __cfg80211_disconnected(struct net_device *dev, const u8 *ie,
 			     size_t ie_len, u16 reason, bool from_ap)
@@ -950,6 +1096,9 @@ void __cfg80211_disconnected(struct net_device *dev, const u8 *ie,
 
 	wdev->current_bss = NULL;
 	wdev->ssid_len = 0;
+	wdev->conn_owner_nlportid = 0;
+	kfree_sensitive(wdev->connect_keys);
+	wdev->connect_keys = NULL;
 
 	nl80211_send_disconnected(rdev, dev, reason, ie, ie_len, from_ap);
 
@@ -963,9 +1112,19 @@ void __cfg80211_disconnected(struct net_device *dev, const u8 *ie,
 	 * Delete all the keys ... pairwise keys can't really
 	 * exist any more anyway, but default keys might.
 	 */
-	if (rdev->ops->del_key)
-		for (i = 0; i < 6; i++)
+	if (rdev->ops->del_key) {
+		int max_key_idx = 5;
+
+		if (wiphy_ext_feature_isset(
+			    wdev->wiphy,
+			    NL80211_EXT_FEATURE_BEACON_PROTECTION) ||
+		    wiphy_ext_feature_isset(
+			    wdev->wiphy,
+			    NL80211_EXT_FEATURE_BEACON_PROTECTION_CLIENT))
+			max_key_idx = 7;
+		for (i = 0; i <= max_key_idx; i++)
 			rdev_del_key(rdev, dev, i, false, NULL);
+	}
 
 	rdev_set_qos_map(rdev, dev, NULL);
 
@@ -1051,6 +1210,8 @@ int cfg80211_connect(struct cfg80211_registered_device *rdev,
 
 	cfg80211_oper_and_ht_capa(&connect->ht_capa_mask,
 				  rdev->wiphy.ht_capa_mod_mask);
+	cfg80211_oper_and_vht_capa(&connect->vht_capa_mask,
+				   rdev->wiphy.vht_capa_mod_mask);
 
 	if (connkeys && connkeys->def >= 0) {
 		int idx;
@@ -1119,14 +1280,16 @@ int cfg80211_disconnect(struct cfg80211_registered_device *rdev,
 
 	ASSERT_WDEV_LOCK(wdev);
 
-	kzfree(wdev->connect_keys);
+	kfree_sensitive(wdev->connect_keys);
 	wdev->connect_keys = NULL;
+
+	wdev->conn_owner_nlportid = 0;
 
 	if (wdev->conn)
 		err = cfg80211_sme_disconnect(wdev, reason);
 	else if (!rdev->ops->disconnect)
 		cfg80211_mlme_down(rdev, dev);
-	else if (wdev->current_bss)
+	else if (wdev->ssid_len)
 		err = rdev_disconnect(rdev, dev, reason);
 
 	/*
@@ -1138,4 +1301,54 @@ int cfg80211_disconnect(struct cfg80211_registered_device *rdev,
 		wdev->ssid_len = 0;
 
 	return err;
+}
+
+/*
+ * Used to clean up after the connection / connection attempt owner socket
+ * disconnects
+ */
+void cfg80211_autodisconnect_wk(struct work_struct *work)
+{
+	struct wireless_dev *wdev =
+		container_of(work, struct wireless_dev, disconnect_wk);
+	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wdev->wiphy);
+
+	wdev_lock(wdev);
+
+	if (wdev->conn_owner_nlportid) {
+		switch (wdev->iftype) {
+		case NL80211_IFTYPE_ADHOC:
+			__cfg80211_leave_ibss(rdev, wdev->netdev, false);
+			break;
+		case NL80211_IFTYPE_AP:
+		case NL80211_IFTYPE_P2P_GO:
+			__cfg80211_stop_ap(rdev, wdev->netdev, false);
+			break;
+		case NL80211_IFTYPE_MESH_POINT:
+			__cfg80211_leave_mesh(rdev, wdev->netdev);
+			break;
+		case NL80211_IFTYPE_STATION:
+		case NL80211_IFTYPE_P2P_CLIENT:
+			/*
+			 * Use disconnect_bssid if still connecting and
+			 * ops->disconnect not implemented.  Otherwise we can
+			 * use cfg80211_disconnect.
+			 */
+			if (rdev->ops->disconnect || wdev->current_bss)
+				cfg80211_disconnect(rdev, wdev->netdev,
+						    WLAN_REASON_DEAUTH_LEAVING,
+						    true);
+			else
+				cfg80211_mlme_deauth(rdev, wdev->netdev,
+						     wdev->disconnect_bssid,
+						     NULL, 0,
+						     WLAN_REASON_DEAUTH_LEAVING,
+						     false);
+			break;
+		default:
+			break;
+		}
+	}
+
+	wdev_unlock(wdev);
 }

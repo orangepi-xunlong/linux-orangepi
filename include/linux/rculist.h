@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_RCULIST_H
 #define _LINUX_RCULIST_H
 
@@ -39,25 +40,59 @@ static inline void INIT_LIST_HEAD_RCU(struct list_head *list)
  */
 #define list_next_rcu(list)	(*((struct list_head __rcu **)(&(list)->next)))
 
+/**
+ * list_tail_rcu - returns the prev pointer of the head of the list
+ * @head: the head of the list
+ *
+ * Note: This should only be used with the list header, and even then
+ * only if list_del() and similar primitives are not also used on the
+ * list header.
+ */
+#define list_tail_rcu(head)	(*((struct list_head __rcu **)(&(head)->prev)))
+
+/*
+ * Check during list traversal that we are within an RCU reader
+ */
+
+#define check_arg_count_one(dummy)
+
+#ifdef CONFIG_PROVE_RCU_LIST
+#define __list_check_rcu(dummy, cond, extra...)				\
+	({								\
+	check_arg_count_one(extra);					\
+	RCU_LOCKDEP_WARN(!(cond) && !rcu_read_lock_any_held(),		\
+			 "RCU-list traversed in non-reader section!");	\
+	})
+
+#define __list_check_srcu(cond)					 \
+	({								 \
+	RCU_LOCKDEP_WARN(!(cond),					 \
+		"RCU-list traversed without holding the required lock!");\
+	})
+#else
+#define __list_check_rcu(dummy, cond, extra...)				\
+	({ check_arg_count_one(extra); })
+
+#define __list_check_srcu(cond) ({ })
+#endif
+
 /*
  * Insert a new entry between two known consecutive entries.
  *
  * This is only for internal list manipulation where we know
  * the prev/next entries already!
  */
-#ifndef CONFIG_DEBUG_LIST
 static inline void __list_add_rcu(struct list_head *new,
 		struct list_head *prev, struct list_head *next)
 {
+	if (!__list_add_valid(new, prev, next))
+		return;
+
 	new->next = next;
 	new->prev = prev;
 	rcu_assign_pointer(list_next_rcu(prev), new);
 	next->prev = new;
 }
-#else
-void __list_add_rcu(struct list_head *new,
-		    struct list_head *prev, struct list_head *next);
-#endif
 
 /**
  * list_add_rcu - add a new entry to rcu-protected list
@@ -156,7 +191,7 @@ static inline void hlist_del_init_rcu(struct hlist_node *n)
 {
 	if (!hlist_unhashed(n)) {
 		__hlist_del(n);
-		n->pprev = NULL;
+		WRITE_ONCE(n->pprev, NULL);
 	}
 }
 
@@ -183,7 +218,7 @@ static inline void list_replace_rcu(struct list_head *old,
  * @list:	the RCU-protected list to splice
  * @prev:	points to the last element of the existing list
  * @next:	points to the first element of the existing list
- * @sync:	function to sync: synchronize_rcu(), synchronize_sched(), ...
+ * @sync:	synchronize_rcu, synchronize_rcu_expedited, ...
  *
  * The list pointed to by @prev and @next can be RCU-read traversed
  * concurrently with this function.
@@ -221,6 +256,8 @@ static inline void __list_splice_init_rcu(struct list_head *list,
 	 */
 
 	sync();
+	ASSERT_EXCLUSIVE_ACCESS(*first);
+	ASSERT_EXCLUSIVE_ACCESS(*last);
 
 	/*
 	 * Readers are finished with the source list, so perform splice.
@@ -241,7 +278,7 @@ static inline void __list_splice_init_rcu(struct list_head *list,
  *                        designed for stacks.
  * @list:	the RCU-protected list to splice
  * @head:	the place in the existing list to splice the first list into
- * @sync:	function to sync: synchronize_rcu(), synchronize_sched(), ...
+ * @sync:	synchronize_rcu, synchronize_rcu_expedited, ...
  */
 static inline void list_splice_init_rcu(struct list_head *list,
 					struct list_head *head,
@@ -256,7 +293,7 @@ static inline void list_splice_init_rcu(struct list_head *list,
  *                             list, designed for queues.
  * @list:	the RCU-protected list to splice
  * @head:	the place in the existing list to splice the first list into
- * @sync:	function to sync: synchronize_rcu(), synchronize_sched(), ...
+ * @sync:	synchronize_rcu, synchronize_rcu_expedited, ...
  */
 static inline void list_splice_tail_init_rcu(struct list_head *list,
 					     struct list_head *head,
@@ -276,9 +313,9 @@ static inline void list_splice_tail_init_rcu(struct list_head *list,
  * primitives such as list_add_rcu() as long as it's guarded by rcu_read_lock().
  */
 #define list_entry_rcu(ptr, type, member) \
-	container_of(lockless_dereference(ptr), type, member)
+	container_of(READ_ONCE(ptr), type, member)
 
-/**
+/*
  * Where are list_empty_rcu() and list_first_entry_rcu()?
  *
  * Implementing those functions following their counterparts list_empty() and
@@ -344,14 +381,35 @@ static inline void list_splice_tail_init_rcu(struct list_head *list,
  * @pos:	the type * to use as a loop cursor.
  * @head:	the head for your list.
  * @member:	the name of the list_head within the struct.
+ * @cond:	optional lockdep expression if called from non-RCU protection.
  *
  * This list-traversal primitive may safely run concurrently with
  * the _rcu list-mutation primitives such as list_add_rcu()
  * as long as the traversal is guarded by rcu_read_lock().
  */
-#define list_for_each_entry_rcu(pos, head, member) \
-	for (pos = list_entry_rcu((head)->next, typeof(*pos), member); \
-		&pos->member != (head); \
+#define list_for_each_entry_rcu(pos, head, member, cond...)		\
+	for (__list_check_rcu(dummy, ## cond, 0),			\
+	     pos = list_entry_rcu((head)->next, typeof(*pos), member);	\
+		&pos->member != (head);					\
+		pos = list_entry_rcu(pos->member.next, typeof(*pos), member))
+
+/**
+ * list_for_each_entry_srcu	-	iterate over rcu list of given type
+ * @pos:	the type * to use as a loop cursor.
+ * @head:	the head for your list.
+ * @member:	the name of the list_head within the struct.
+ * @cond:	lockdep expression for the lock required to traverse the list.
+ *
+ * This list-traversal primitive may safely run concurrently with
+ * the _rcu list-mutation primitives such as list_add_rcu()
+ * as long as the traversal is guarded by srcu_read_lock().
+ * The lockdep expression srcu_read_lock_held() can be passed as the
+ * cond argument from read side.
+ */
+#define list_for_each_entry_srcu(pos, head, member, cond)		\
+	for (__list_check_srcu(cond),					\
+	     pos = list_entry_rcu((head)->next, typeof(*pos), member);	\
+		&pos->member != (head);					\
 		pos = list_entry_rcu(pos->member.next, typeof(*pos), member))
 
 /**
@@ -360,16 +418,15 @@ static inline void list_splice_tail_init_rcu(struct list_head *list,
  * @type:       the type of the struct this is embedded in.
  * @member:     the name of the list_head within the struct.
  *
- * This primitive may safely run concurrently with the _rcu list-mutation
- * primitives such as list_add_rcu(), but requires some implicit RCU
- * read-side guarding.  One example is running within a special
- * exception-time environment where preemption is disabled and where
- * lockdep cannot be invoked (in which case updaters must use RCU-sched,
- * as in synchronize_sched(), call_rcu_sched(), and friends).  Another
- * example is when items are added to the list, but never deleted.
+ * This primitive may safely run concurrently with the _rcu
+ * list-mutation primitives such as list_add_rcu(), but requires some
+ * implicit RCU read-side guarding.  One example is running within a special
+ * exception-time environment where preemption is disabled and where lockdep
+ * cannot be invoked.  Another example is when items are added to the list,
+ * but never deleted.
  */
 #define list_entry_lockless(ptr, type, member) \
-	container_of((typeof(ptr))lockless_dereference(ptr), type, member)
+	container_of((typeof(ptr))READ_ONCE(ptr), type, member)
 
 /**
  * list_for_each_entry_lockless - iterate over rcu list of given type
@@ -377,13 +434,12 @@ static inline void list_splice_tail_init_rcu(struct list_head *list,
  * @head:	the head for your list.
  * @member:	the name of the list_struct within the struct.
  *
- * This primitive may safely run concurrently with the _rcu list-mutation
- * primitives such as list_add_rcu(), but requires some implicit RCU
- * read-side guarding.  One example is running within a special
- * exception-time environment where preemption is disabled and where
- * lockdep cannot be invoked (in which case updaters must use RCU-sched,
- * as in synchronize_sched(), call_rcu_sched(), and friends).  Another
- * example is when items are added to the list, but never deleted.
+ * This primitive may safely run concurrently with the _rcu
+ * list-mutation primitives such as list_add_rcu(), but requires some
+ * implicit RCU read-side guarding.  One example is running within a special
+ * exception-time environment where preemption is disabled and where lockdep
+ * cannot be invoked.  Another example is when items are added to the list,
+ * but never deleted.
  */
 #define list_for_each_entry_lockless(pos, head, member) \
 	for (pos = list_entry_lockless((head)->next, typeof(*pos), member); \
@@ -397,12 +453,42 @@ static inline void list_splice_tail_init_rcu(struct list_head *list,
  * @member:	the name of the list_head within the struct.
  *
  * Continue to iterate over list of given type, continuing after
- * the current position.
+ * the current position which must have been in the list when the RCU read
+ * lock was taken.
+ * This would typically require either that you obtained the node from a
+ * previous walk of the list in the same RCU read-side critical section, or
+ * that you held some sort of non-RCU reference (such as a reference count)
+ * to keep the node alive *and* in the list.
+ *
+ * This iterator is similar to list_for_each_entry_from_rcu() except
+ * this starts after the given position and that one starts at the given
+ * position.
  */
 #define list_for_each_entry_continue_rcu(pos, head, member) 		\
 	for (pos = list_entry_rcu(pos->member.next, typeof(*pos), member); \
 	     &pos->member != (head);	\
 	     pos = list_entry_rcu(pos->member.next, typeof(*pos), member))
+
+/**
+ * list_for_each_entry_from_rcu - iterate over a list from current point
+ * @pos:	the type * to use as a loop cursor.
+ * @head:	the head for your list.
+ * @member:	the name of the list_node within the struct.
+ *
+ * Iterate over the tail of a list starting from a given position,
+ * which must have been in the list when the RCU read lock was taken.
+ * This would typically require either that you obtained the node from a
+ * previous walk of the list in the same RCU read-side critical section, or
+ * that you held some sort of non-RCU reference (such as a reference count)
+ * to keep the node alive *and* in the list.
+ *
+ * This iterator is similar to list_for_each_entry_continue_rcu() except
+ * this starts from the given position and that one starts from the position
+ * after the given position.
+ */
+#define list_for_each_entry_from_rcu(pos, head, member)			\
+	for (; &(pos)->member != (head);					\
+		pos = list_entry_rcu(pos->member.next, typeof(*(pos)), member))
 
 /**
  * hlist_del_rcu - deletes entry from hash list without re-initialization
@@ -426,7 +512,7 @@ static inline void list_splice_tail_init_rcu(struct list_head *list,
 static inline void hlist_del_rcu(struct hlist_node *n)
 {
 	__hlist_del(n);
-	n->pprev = LIST_POISON2;
+	WRITE_ONCE(n->pprev, LIST_POISON2);
 }
 
 /**
@@ -442,11 +528,32 @@ static inline void hlist_replace_rcu(struct hlist_node *old,
 	struct hlist_node *next = old->next;
 
 	new->next = next;
-	new->pprev = old->pprev;
+	WRITE_ONCE(new->pprev, old->pprev);
 	rcu_assign_pointer(*(struct hlist_node __rcu **)new->pprev, new);
 	if (next)
-		new->next->pprev = &new->next;
-	old->pprev = LIST_POISON2;
+		WRITE_ONCE(new->next->pprev, &new->next);
+	WRITE_ONCE(old->pprev, LIST_POISON2);
+}
+
+/**
+ * hlists_swap_heads_rcu - swap the lists the hlist heads point to
+ * @left:  The hlist head on the left
+ * @right: The hlist head on the right
+ *
+ * The lists start out as [@left  ][node1 ... ] and
+ *                        [@right ][node2 ... ]
+ * The lists end up as    [@left  ][node2 ... ]
+ *                        [@right ][node1 ... ]
+ */
+static inline void hlists_swap_heads_rcu(struct hlist_head *left, struct hlist_head *right)
+{
+	struct hlist_node *node1 = left->first;
+	struct hlist_node *node2 = right->first;
+
+	rcu_assign_pointer(left->first, node2);
+	rcu_assign_pointer(right->first, node1);
+	WRITE_ONCE(node2->pprev, &left->first);
+	WRITE_ONCE(node1->pprev, &right->first);
 }
 
 /*
@@ -481,10 +588,10 @@ static inline void hlist_add_head_rcu(struct hlist_node *n,
 	struct hlist_node *first = h->first;
 
 	n->next = first;
-	n->pprev = &h->first;
+	WRITE_ONCE(n->pprev, &h->first);
 	rcu_assign_pointer(hlist_first_rcu(h), n);
 	if (first)
-		first->pprev = &n->next;
+		WRITE_ONCE(first->pprev, &n->next);
 }
 
 /**
@@ -511,12 +618,13 @@ static inline void hlist_add_tail_rcu(struct hlist_node *n,
 {
 	struct hlist_node *i, *last = NULL;
 
-	for (i = hlist_first_rcu(h); i; i = hlist_next_rcu(i))
+	/* Note: write side code, so rcu accessors are not needed. */
+	for (i = h->first; i; i = i->next)
 		last = i;
 
 	if (last) {
 		n->next = last->next;
-		n->pprev = &last->next;
+		WRITE_ONCE(n->pprev, &last->next);
 		rcu_assign_pointer(hlist_next_rcu(last), n);
 	} else {
 		hlist_add_head_rcu(n, h);
@@ -544,10 +652,10 @@ static inline void hlist_add_tail_rcu(struct hlist_node *n,
 static inline void hlist_add_before_rcu(struct hlist_node *n,
 					struct hlist_node *next)
 {
-	n->pprev = next->pprev;
+	WRITE_ONCE(n->pprev, next->pprev);
 	n->next = next;
 	rcu_assign_pointer(hlist_pprev_rcu(n), n);
-	next->pprev = &n->next;
+	WRITE_ONCE(next->pprev, &n->next);
 }
 
 /**
@@ -572,10 +680,10 @@ static inline void hlist_add_behind_rcu(struct hlist_node *n,
 					struct hlist_node *prev)
 {
 	n->next = prev->next;
-	n->pprev = &prev->next;
+	WRITE_ONCE(n->pprev, &prev->next);
 	rcu_assign_pointer(hlist_next_rcu(prev), n);
 	if (n->next)
-		n->next->pprev = &n->next;
+		WRITE_ONCE(n->next->pprev, &n->next);
 }
 
 #define __hlist_for_each_rcu(pos, head)				\
@@ -588,13 +696,36 @@ static inline void hlist_add_behind_rcu(struct hlist_node *n,
  * @pos:	the type * to use as a loop cursor.
  * @head:	the head for your list.
  * @member:	the name of the hlist_node within the struct.
+ * @cond:	optional lockdep expression if called from non-RCU protection.
  *
  * This list-traversal primitive may safely run concurrently with
  * the _rcu list-mutation primitives such as hlist_add_head_rcu()
  * as long as the traversal is guarded by rcu_read_lock().
  */
-#define hlist_for_each_entry_rcu(pos, head, member)			\
-	for (pos = hlist_entry_safe (rcu_dereference_raw(hlist_first_rcu(head)),\
+#define hlist_for_each_entry_rcu(pos, head, member, cond...)		\
+	for (__list_check_rcu(dummy, ## cond, 0),			\
+	     pos = hlist_entry_safe(rcu_dereference_raw(hlist_first_rcu(head)),\
+			typeof(*(pos)), member);			\
+		pos;							\
+		pos = hlist_entry_safe(rcu_dereference_raw(hlist_next_rcu(\
+			&(pos)->member)), typeof(*(pos)), member))
+
+/**
+ * hlist_for_each_entry_srcu - iterate over rcu list of given type
+ * @pos:	the type * to use as a loop cursor.
+ * @head:	the head for your list.
+ * @member:	the name of the hlist_node within the struct.
+ * @cond:	lockdep expression for the lock required to traverse the list.
+ *
+ * This list-traversal primitive may safely run concurrently with
+ * the _rcu list-mutation primitives such as hlist_add_head_rcu()
+ * as long as the traversal is guarded by srcu_read_lock().
+ * The lockdep expression srcu_read_lock_held() can be passed as the
+ * cond argument from read side.
+ */
+#define hlist_for_each_entry_srcu(pos, head, member, cond)		\
+	for (__list_check_srcu(cond),					\
+	     pos = hlist_entry_safe(rcu_dereference_raw(hlist_first_rcu(head)),\
 			typeof(*(pos)), member);			\
 		pos;							\
 		pos = hlist_entry_safe(rcu_dereference_raw(hlist_next_rcu(\
@@ -614,10 +745,10 @@ static inline void hlist_add_behind_rcu(struct hlist_node *n,
  * not do any RCU debugging or tracing.
  */
 #define hlist_for_each_entry_rcu_notrace(pos, head, member)			\
-	for (pos = hlist_entry_safe (rcu_dereference_raw_notrace(hlist_first_rcu(head)),\
+	for (pos = hlist_entry_safe(rcu_dereference_raw_check(hlist_first_rcu(head)),\
 			typeof(*(pos)), member);			\
 		pos;							\
-		pos = hlist_entry_safe(rcu_dereference_raw_notrace(hlist_next_rcu(\
+		pos = hlist_entry_safe(rcu_dereference_raw_check(hlist_next_rcu(\
 			&(pos)->member)), typeof(*(pos)), member))
 
 /**

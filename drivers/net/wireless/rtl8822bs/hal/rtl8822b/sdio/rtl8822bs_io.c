@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright(c) 2015 - 2018 Realtek Corporation.
+ * Copyright(c) 2015 - 2017 Realtek Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -447,7 +447,6 @@ void sd_int_dpc(PADAPTER adapter)
 void sd_int_hdl(PADAPTER adapter)
 {
 	PHAL_DATA_TYPE phal;
-	u8 pwr;
 
 
 	if (RTW_CANNOT_RUN(adapter))
@@ -455,8 +454,7 @@ void sd_int_hdl(PADAPTER adapter)
 
 	phal = GET_HAL_DATA(adapter);
 
-	rtw_hal_get_hwreg(adapter, HW_VAR_APFM_ON_MAC, &pwr);
-	if (pwr != _TRUE) {
+	if (!phal->sdio_himr) {
 		RTW_WARN("%s: unexpected interrupt!\n", __FUNCTION__);
 		return;
 	}

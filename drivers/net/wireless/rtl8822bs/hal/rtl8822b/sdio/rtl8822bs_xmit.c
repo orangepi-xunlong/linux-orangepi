@@ -50,10 +50,7 @@ static s32 dequeue_writeport(PADAPTER adapter)
 	}
 
 #ifdef CONFIG_CHECK_LEAVE_LPS
-	#ifdef CONFIG_LPS_CHK_BY_TP
-	if (!adapter_to_pwrctl(adapter)->lps_chk_by_tp)
-	#endif
-		traffic_check_for_leave_lps(adapter, _TRUE, pxmitbuf->agg_num);
+	traffic_check_for_leave_lps(adapter, _TRUE, pxmitbuf->agg_num);
 #endif
 
 	rtw_write_port(adapter, 0, pxmitbuf->len, (u8 *)pxmitbuf);
@@ -423,11 +420,7 @@ next:
 #ifdef CONFIG_REDUCE_TX_CPU_LOADING
 			rtw_msleep_os(1);
 #else
-#ifdef RTW_XMIT_THREAD_HIGH_PRIORITY_AGG
-			rtw_usleep_os(50);
-#else
 			rtw_yield_os();
-#endif
 #endif
 		goto next;
 	}
@@ -441,13 +434,6 @@ thread_return rtl8822bs_xmit_thread(thread_context context)
 	PADAPTER adapter;
 	struct xmit_priv *pxmitpriv;
 	u8 thread_name[20] = "RTWHALXT";
-#ifdef RTW_XMIT_THREAD_HIGH_PRIORITY_AGG
-#ifdef PLATFORM_LINUX
-	struct sched_param param = { .sched_priority = 1 };
-
-	sched_setscheduler(current, SCHED_FIFO, &param);
-#endif /* PLATFORM_LINUX */
-#endif /* RTW_XMIT_THREAD_HIGH_PRIORITY_AGG */
 
 
 	ret = _SUCCESS;

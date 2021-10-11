@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Device access for Dialog DA9055 PMICs.
  *
  * Copyright(c) 2012 Dialog Semiconductor Ltd.
  *
  * Author: David Dajun Chen <dchen@diasemi.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
  */
 
 #include <linux/module.h>
@@ -258,14 +254,14 @@ const struct regmap_config da9055_regmap_config = {
 };
 EXPORT_SYMBOL_GPL(da9055_regmap_config);
 
-static struct resource da9055_onkey_resource = {
+static const struct resource da9055_onkey_resource = {
 	.name = "ONKEY",
 	.start = DA9055_IRQ_NONKEY,
 	.end   = DA9055_IRQ_NONKEY,
 	.flags = IORESOURCE_IRQ,
 };
 
-static struct resource da9055_rtc_resource[] = {
+static const struct resource da9055_rtc_resource[] = {
 	{
 		.name = "ALM",
 		.start = DA9055_IRQ_ALARM,
@@ -280,14 +276,14 @@ static struct resource da9055_rtc_resource[] = {
 	},
 };
 
-static struct resource da9055_hwmon_resource = {
+static const struct resource da9055_hwmon_resource = {
 	.name = "HWMON",
 	.start = DA9055_IRQ_HWMON,
 	.end   = DA9055_IRQ_HWMON,
 	.flags = IORESOURCE_IRQ,
 };
 
-static struct resource da9055_ld05_6_resource = {
+static const struct resource da9055_ld05_6_resource = {
 	.name = "REGULATOR",
 	.start = DA9055_IRQ_REGULATOR,
 	.end   = DA9055_IRQ_REGULATOR,

@@ -16,6 +16,7 @@
 #include <linux/export.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
+#include <linux/memblock.h>
 #include <linux/serial.h>
 #include <linux/smp.h>
 #include <linux/types.h>
@@ -36,6 +37,9 @@
 #include <asm/mipsregs.h>
 #include <asm/bootinfo.h>
 #include <asm/sections.h>
+#include <asm/fw/fw.h>
+#include <asm/setup.h>
+#include <asm/prom.h>
 #include <asm/time.h>
 
 #include <asm/octeon/octeon.h>
@@ -71,7 +75,7 @@ static unsigned long long reserve_low_mem;
 DEFINE_SEMAPHORE(octeon_bootbus_sem);
 EXPORT_SYMBOL(octeon_bootbus_sem);
 
-struct octeon_boot_descriptor *octeon_boot_desc_ptr;
+static struct octeon_boot_descriptor *octeon_boot_desc_ptr;
 
 struct cvmx_bootinfo *octeon_bootinfo;
 EXPORT_SYMBOL(octeon_bootinfo);
@@ -95,7 +99,7 @@ static void octeon_kexec_smp_down(void *ignored)
 	"	sync						\n"
 	"	synci	($0)					\n");
 
-	relocated_kexec_smp_wait(NULL);
+	kexec_reboot();
 }
 #endif
 
@@ -350,11 +354,11 @@ EXPORT_SYMBOL(octeon_get_io_clock_rate);
  *
  * @s:	    String to write
  */
-void octeon_write_lcd(const char *s)
+static void octeon_write_lcd(const char *s)
 {
 	if (octeon_bootinfo->led_display_base_addr) {
 		void __iomem *lcd_address =
-			ioremap_nocache(octeon_bootinfo->led_display_base_addr,
+			ioremap(octeon_bootinfo->led_display_base_addr,
 					8);
 		int i;
 		for (i = 0; i < 8; i++, s++) {
@@ -372,16 +376,10 @@ void octeon_write_lcd(const char *s)
  *
  * Returns uart	  (0 or 1)
  */
-int octeon_get_boot_uart(void)
+static int octeon_get_boot_uart(void)
 {
-	int uart;
-#ifdef CONFIG_CAVIUM_OCTEON_2ND_KERNEL
-	uart = 1;
-#else
-	uart = (octeon_boot_desc_ptr->flags & OCTEON_BL_FLAG_CONSOLE_UART1) ?
+	return (octeon_boot_desc_ptr->flags & OCTEON_BL_FLAG_CONSOLE_UART1) ?
 		1 : 0;
-#endif
-	return uart;
 }
 
 /**
@@ -847,7 +845,7 @@ void __init prom_init(void)
 	 * BIST should always be enabled when doing a soft reset. L2
 	 * Cache locking for instance is not cleared unless BIST is
 	 * enabled.  Unfortunately due to a chip errata G-200 for
-	 * Cn38XX and CN31XX, BIST msut be disabled on these parts.
+	 * Cn38XX and CN31XX, BIST must be disabled on these parts.
 	 */
 	if (OCTEON_IS_MODEL(OCTEON_CN38XX_PASS2) ||
 	    OCTEON_IS_MODEL(OCTEON_CN31XX))
@@ -901,14 +899,10 @@ void __init prom_init(void)
 	}
 
 	if (strstr(arcs_cmdline, "console=") == NULL) {
-#ifdef CONFIG_CAVIUM_OCTEON_2ND_KERNEL
-		strcat(arcs_cmdline, " console=ttyS0,115200");
-#else
 		if (octeon_uart == 1)
 			strcat(arcs_cmdline, " console=ttyS1,115200");
 		else
 			strcat(arcs_cmdline, " console=ttyS0,115200");
-#endif
 	}
 
 	mips_hpt_frequency = octeon_get_clock_rate();
@@ -937,7 +931,7 @@ static __init void memory_exclude_page(u64 addr, u64 *mem, u64 *size)
 {
 	if (addr > *mem && addr < *mem + *size) {
 		u64 inc = addr - *mem;
-		add_memory_region(*mem, inc, BOOT_MEM_RAM);
+		memblock_add(*mem, inc);
 		*mem += inc;
 		*size -= inc;
 	}
@@ -949,6 +943,29 @@ static __init void memory_exclude_page(u64 addr, u64 *mem, u64 *size)
 }
 #endif /* CONFIG_CRASH_DUMP */
 
+void __init fw_init_cmdline(void)
+{
+	int i;
+
+	octeon_boot_desc_ptr = (struct octeon_boot_descriptor *)fw_arg3;
+	for (i = 0; i < octeon_boot_desc_ptr->argc; i++) {
+		const char *arg =
+			cvmx_phys_to_ptr(octeon_boot_desc_ptr->argv[i]);
+		if (strlen(arcs_cmdline) + strlen(arg) + 1 <
+			   sizeof(arcs_cmdline) - 1) {
+			strcat(arcs_cmdline, " ");
+			strcat(arcs_cmdline, arg);
+		}
+	}
+}
+
+void __init *plat_get_fdt(void)
+{
+	octeon_bootinfo =
+		cvmx_phys_to_ptr(octeon_boot_desc_ptr->cvmx_desc_vaddr);
+	return phys_to_virt(octeon_bootinfo->fdt_addr);
+}
+
 void __init plat_mem_setup(void)
 {
 	uint64_t mem_alloc_size;
@@ -956,8 +973,6 @@ void __init plat_mem_setup(void)
 	uint64_t crashk_end;
 #ifndef CONFIG_CRASH_DUMP
 	int64_t memory;
-	uint64_t kernel_start;
-	uint64_t kernel_size;
 #endif
 
 	total = 0;
@@ -976,23 +991,21 @@ void __init plat_mem_setup(void)
 
 /* Crashkernel ignores bootmem list. It relies on mem=X@Y option */
 #ifdef CONFIG_CRASH_DUMP
-	add_memory_region(reserve_low_mem, max_memory, BOOT_MEM_RAM);
+	memblock_add(reserve_low_mem, max_memory);
 	total += max_memory;
 #else
 #ifdef CONFIG_KEXEC
 	if (crashk_size > 0) {
-		add_memory_region(crashk_base, crashk_size, BOOT_MEM_RAM);
+		memblock_add(crashk_base, crashk_size);
 		crashk_end = crashk_base + crashk_size;
 	}
 #endif
 	/*
-	 * When allocating memory, we want incrementing addresses from
-	 * bootmem_alloc so the code in add_memory_region can merge
-	 * regions next to each other.
+	 * When allocating memory, we want incrementing addresses,
+	 * which is handled by memblock
 	 */
 	cvmx_bootmem_lock();
-	while ((boot_mem_map.nr_map < BOOT_MEM_MAP_MAX)
-		&& (total < max_memory)) {
+	while (total < max_memory) {
 		memory = cvmx_bootmem_phy_alloc(mem_alloc_size,
 						__pa_symbol(&_end), -1,
 						0x100000,
@@ -1024,13 +1037,9 @@ void __init plat_mem_setup(void)
 			 */
 			if (memory < crashk_base && end >  crashk_end) {
 				/* region is fully in */
-				add_memory_region(memory,
-						  crashk_base - memory,
-						  BOOT_MEM_RAM);
+				memblock_add(memory, crashk_base - memory);
 				total += crashk_base - memory;
-				add_memory_region(crashk_end,
-						  end - crashk_end,
-						  BOOT_MEM_RAM);
+				memblock_add(crashk_end, end - crashk_end);
 				total += end - crashk_end;
 				continue;
 			}
@@ -1058,7 +1067,7 @@ void __init plat_mem_setup(void)
 				 */
 				mem_alloc_size -= end - crashk_base;
 #endif
-			add_memory_region(memory, mem_alloc_size, BOOT_MEM_RAM);
+			memblock_add(memory, mem_alloc_size);
 			total += mem_alloc_size;
 			/* Recovering mem_alloc_size */
 			mem_alloc_size = 4 << 20;
@@ -1067,13 +1076,6 @@ void __init plat_mem_setup(void)
 		}
 	}
 	cvmx_bootmem_unlock();
-	/* Add the memory region for the kernel. */
-	kernel_start = (unsigned long) _text;
-	kernel_size = _end - _text;
-
-	/* Adjust for physical offset. */
-	kernel_start &= ~0xffffffff80000000ULL;
-	add_memory_region(kernel_start, kernel_size, BOOT_MEM_RAM);
 #endif /* CONFIG_CRASH_DUMP */
 
 #ifdef CONFIG_CAVIUM_RESERVE32
@@ -1095,7 +1097,7 @@ void __init plat_mem_setup(void)
  * Emit one character to the boot UART.	 Exported for use by the
  * watchdog timer.
  */
-int prom_putchar(char c)
+void prom_putchar(char c)
 {
 	uint64_t lsrval;
 
@@ -1106,13 +1108,12 @@ int prom_putchar(char c)
 
 	/* Write the byte */
 	cvmx_write_csr(CVMX_MIO_UARTX_THR(octeon_uart), c & 0xffull);
-	return 1;
 }
 EXPORT_SYMBOL(prom_putchar);
 
 void __init prom_free_prom_memory(void)
 {
-	if (CAVIUM_OCTEON_DCACHE_PREFETCH_WAR) {
+	if (OCTEON_IS_MODEL(OCTEON_CN6XXX)) {
 		/* Check for presence of Core-14449 fix.  */
 		u32 insn;
 		u32 *foo;
@@ -1141,11 +1142,7 @@ void __init prom_free_prom_memory(void)
 }
 
 void __init octeon_fill_mac_addresses(void);
-int octeon_prune_device_tree(void);
 
-extern const char __appended_dtb;
-extern const char __dtb_octeon_3xxx_begin;
-extern const char __dtb_octeon_68xx_begin;
 void __init device_tree_init(void)
 {
 	const void *fdt;

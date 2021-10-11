@@ -1,31 +1,24 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <stdio.h>
-#include <bpf/libbpf.h>
-#include <util/llvm-utils.h>
-#include <util/cache.h>
-#include "llvm.h"
+#include <stdlib.h>
+#include <string.h>
 #include "tests.h"
 #include "debug.h"
-#include "util.h"
 
 #ifdef HAVE_LIBBPF_SUPPORT
+#include <bpf/libbpf.h>
+#include <util/llvm-utils.h>
+#include "llvm.h"
 static int test__bpf_parsing(void *obj_buf, size_t obj_buf_sz)
 {
 	struct bpf_object *obj;
 
 	obj = bpf_object__open_buffer(obj_buf, obj_buf_sz, NULL);
-	if (IS_ERR(obj))
+	if (libbpf_get_error(obj))
 		return TEST_FAIL;
 	bpf_object__close(obj);
 	return TEST_OK;
 }
-#else
-static int test__bpf_parsing(void *obj_buf __maybe_unused,
-			     size_t obj_buf_sz __maybe_unused)
-{
-	pr_debug("Skip bpf parsing\n");
-	return TEST_OK;
-}
-#endif
 
 static struct {
 	const char *source;
@@ -34,19 +27,19 @@ static struct {
 } bpf_source_table[__LLVM_TESTCASE_MAX] = {
 	[LLVM_TESTCASE_BASE] = {
 		.source = test_llvm__bpf_base_prog,
-		.desc = "Basic BPF llvm compiling test",
+		.desc = "Basic BPF llvm compile",
 	},
 	[LLVM_TESTCASE_KBUILD] = {
 		.source = test_llvm__bpf_test_kbuild_prog,
-		.desc = "Test kbuild searching",
+		.desc = "kbuild searching",
 	},
 	[LLVM_TESTCASE_BPF_PROLOGUE] = {
 		.source = test_llvm__bpf_test_prologue_prog,
-		.desc = "Compile source for BPF prologue generation test",
+		.desc = "Compile source for BPF prologue generation",
 	},
 	[LLVM_TESTCASE_BPF_RELOCATION] = {
 		.source = test_llvm__bpf_test_relocation,
-		.desc = "Compile source for BPF relocation test",
+		.desc = "Compile source for BPF relocation",
 		.should_load_fail = true,
 	},
 };
@@ -76,7 +69,7 @@ test_llvm__fetch_bpf_obj(void **p_obj_buf,
 	 * Skip this test if user's .perfconfig doesn't set [llvm] section
 	 * and clang is not found in $PATH, and this is not perf test -v
 	 */
-	if (!force && (verbose == 0 &&
+	if (!force && (verbose <= 0 &&
 		       !llvm_param.user_set_param &&
 		       llvm__search_clang())) {
 		pr_debug("No clang and no verbosive, skip this test\n");
@@ -132,7 +125,7 @@ out:
 	return ret;
 }
 
-int test__llvm(int subtest)
+int test__llvm(struct test *test __maybe_unused, int subtest)
 {
 	int ret;
 	void *obj_buf = NULL;
@@ -169,3 +162,19 @@ const char *test__llvm_subtest_get_desc(int subtest)
 
 	return bpf_source_table[subtest].desc;
 }
+#else //HAVE_LIBBPF_SUPPORT
+int test__llvm(struct test *test __maybe_unused, int subtest __maybe_unused)
+{
+	return TEST_SKIP;
+}
+
+int test__llvm_subtest_get_nr(void)
+{
+	return 0;
+}
+
+const char *test__llvm_subtest_get_desc(int subtest __maybe_unused)
+{
+	return NULL;
+}
+#endif // HAVE_LIBBPF_SUPPORT

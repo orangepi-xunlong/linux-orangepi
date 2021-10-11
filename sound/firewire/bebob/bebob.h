@@ -1,9 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * bebob.h - a part of driver for BeBoB based devices
  *
  * Copyright (c) 2013-2014 Takashi Sakamoto
- *
- * Licensed under the terms of the GNU General Public License, version 2.
  */
 
 #ifndef SOUND_BEBOB_H_INCLUDED
@@ -17,6 +16,7 @@
 #include <linux/mod_devicetable.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
+#include <linux/sched/signal.h>
 
 #include <sound/core.h>
 #include <sound/initval.h>
@@ -57,7 +57,7 @@ enum snd_bebob_clock_type {
 struct snd_bebob_clock_spec {
 	unsigned int num;
 	const char *const *labels;
-	enum snd_bebob_clock_type *types;
+	const enum snd_bebob_clock_type *types;
 	int (*get)(struct snd_bebob *bebob, unsigned int *id);
 };
 struct snd_bebob_rate_spec {
@@ -92,8 +92,6 @@ struct snd_bebob {
 	unsigned int midi_input_ports;
 	unsigned int midi_output_ports;
 
-	bool connected;
-
 	struct amdtp_stream tx_stream;
 	struct amdtp_stream rx_stream;
 	struct cmp_connection out_conn;
@@ -117,6 +115,8 @@ struct snd_bebob {
 
 	/* For BeBoB version quirk. */
 	unsigned int version;
+
+	struct amdtp_domain domain;
 };
 
 static inline int
@@ -200,6 +200,8 @@ int avc_bridgeco_get_plug_ch_pos(struct fw_unit *unit,
 int avc_bridgeco_get_plug_type(struct fw_unit *unit,
 			       u8 addr[AVC_BRIDGECO_ADDR_BYTES],
 			       enum avc_bridgeco_plug_type *type);
+int avc_bridgeco_get_plug_ch_count(struct fw_unit *unit, u8 addr[AVC_BRIDGECO_ADDR_BYTES],
+				   unsigned int *ch_count);
 int avc_bridgeco_get_plug_section_type(struct fw_unit *unit,
 				       u8 addr[AVC_BRIDGECO_ADDR_BYTES],
 				       unsigned int id, u8 *type);
@@ -217,7 +219,10 @@ int snd_bebob_stream_get_clock_src(struct snd_bebob *bebob,
 				   enum snd_bebob_clock_type *src);
 int snd_bebob_stream_discover(struct snd_bebob *bebob);
 int snd_bebob_stream_init_duplex(struct snd_bebob *bebob);
-int snd_bebob_stream_start_duplex(struct snd_bebob *bebob, unsigned int rate);
+int snd_bebob_stream_reserve_duplex(struct snd_bebob *bebob, unsigned int rate,
+				    unsigned int frames_per_period,
+				    unsigned int frames_per_buffer);
+int snd_bebob_stream_start_duplex(struct snd_bebob *bebob);
 void snd_bebob_stream_stop_duplex(struct snd_bebob *bebob);
 void snd_bebob_stream_destroy_duplex(struct snd_bebob *bebob);
 

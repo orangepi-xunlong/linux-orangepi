@@ -529,24 +529,18 @@ s32 rtl8822bs_recv_hdl(_adapter *adapter)
 			d->en_napi_dynamic = 0;
 	}
 #endif /* CONFIG_RTW_NAPI_DYNAMIC */
-
+	
 	do {
 		recvbuf = rtw_dequeue_recvbuf(&recvpriv->recv_buf_pending_queue);
 		if (NULL == recvbuf)
 			break;
 
 		c2h = GET_RX_DESC_C2H_8822B(recvbuf->pdata);
-		if (c2h) {
+		if (c2h)
 			rtl8822b_c2h_handler_no_io(adapter, recvbuf->pdata, recvbuf->len);
-		} else {
-			if (adapter_to_dvobj(adapter)->processing_dev_remove != _TRUE) {
-				ret = recvbuf_handler(recvbuf);
-			} else {
-				/* drop recv buffer */
-				RTW_PRINT("%s: drop recv buffer during dev remove!\n", __func__);
-				ret = _SUCCESS;
-			}
-		}
+		else
+			ret = recvbuf_handler(recvbuf);
+
 		if (_SUCCESS != ret) {
 			rtw_enqueue_recvbuf_to_head(recvbuf, &recvpriv->recv_buf_pending_queue);
 			break;

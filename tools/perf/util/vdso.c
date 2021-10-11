@@ -1,4 +1,5 @@
-
+// SPDX-License-Identifier: GPL-2.0
+#include <errno.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
@@ -9,18 +10,21 @@
 #include <linux/kernel.h>
 
 #include "vdso.h"
-#include "util.h"
+#include "dso.h"
+#include <internal/lib.h>
+#include "map.h"
 #include "symbol.h"
 #include "machine.h"
 #include "thread.h"
 #include "linux/string.h"
+#include <linux/zalloc.h>
 #include "debug.h"
 
 /*
- * Include definition of find_vdso_map() also used in perf-read-vdso.c for
+ * Include definition of find_map() also used in perf-read-vdso.c for
  * building perf-read-vdso32 and perf-read-vdsox32.
  */
-#include "find-vdso-map.c"
+#include "find-map.c"
 
 #define VDSO__TEMP_FILE_NAME "/tmp/perf-vdso.so-XXXXXX"
 
@@ -75,7 +79,7 @@ static char *get_file(struct vdso_file *vdso_file)
 	if (vdso_file->found)
 		return vdso_file->temp_file_name;
 
-	if (vdso_file->error || find_vdso_map(&start, &end))
+	if (vdso_file->error || find_map(&start, &end, VDSO__MAP_NAME))
 		return NULL;
 
 	size = end - start;
@@ -129,6 +133,8 @@ static struct dso *__machine__addnew_vdso(struct machine *machine, const char *s
 	if (dso != NULL) {
 		__dsos__add(&machine->dsos, dso);
 		dso__set_long_name(dso, long_name, false);
+		/* Put dso here because __dsos_add already got it */
+		dso__put(dso);
 	}
 
 	return dso;
@@ -139,11 +145,9 @@ static enum dso_type machine__thread_dso_type(struct machine *machine,
 {
 	enum dso_type dso_type = DSO__TYPE_UNKNOWN;
 	struct map *map;
-	struct dso *dso;
 
-	map = map_groups__first(thread->mg, MAP__FUNCTION);
-	for (; map ; map = map_groups__next(map)) {
-		dso = map->dso;
+	maps__for_each_entry(thread->maps, map) {
+		struct dso *dso = map->dso;
 		if (!dso || dso->long_name[0] != '/')
 			continue;
 		dso_type = dso__type(dso, machine);
@@ -319,7 +323,7 @@ struct dso *machine__findnew_vdso(struct machine *machine,
 	struct vdso_info *vdso_info;
 	struct dso *dso = NULL;
 
-	pthread_rwlock_wrlock(&machine->dsos.lock);
+	down_write(&machine->dsos.lock);
 	if (!machine->vdso_info)
 		machine->vdso_info = vdso_info__new();
 
@@ -347,7 +351,7 @@ struct dso *machine__findnew_vdso(struct machine *machine,
 
 out_unlock:
 	dso__get(dso);
-	pthread_rwlock_unlock(&machine->dsos.lock);
+	up_write(&machine->dsos.lock);
 	return dso;
 }
 

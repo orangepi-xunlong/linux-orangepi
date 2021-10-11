@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Driver for s390 chsc subchannels
  *
@@ -15,7 +16,6 @@
 #include <linux/miscdevice.h>
 #include <linux/kernel_stat.h>
 
-#include <asm/compat.h>
 #include <asm/cio.h>
 #include <asm/chsc.h>
 #include <asm/isc.h>
@@ -43,11 +43,7 @@ static DEFINE_MUTEX(on_close_mutex);
 
 static void CHSC_LOG_HEX(int level, void *data, int length)
 {
-	while (length > 0) {
-		debug_event(chsc_debug_log_id, level, data, length);
-		length -= chsc_debug_log_id->buf_size;
-		data += chsc_debug_log_id->buf_size;
-	}
+	debug_event(chsc_debug_log_id, level, data, length);
 }
 
 MODULE_AUTHOR("IBM Corporation");
@@ -124,31 +120,6 @@ static void chsc_subchannel_shutdown(struct subchannel *sch)
 	cio_disable_subchannel(sch);
 }
 
-static int chsc_subchannel_prepare(struct subchannel *sch)
-{
-	int cc;
-	struct schib schib;
-	/*
-	 * Don't allow suspend while the subchannel is not idle
-	 * since we don't have a way to clear the subchannel and
-	 * cannot disable it with a request running.
-	 */
-	cc = stsch(sch->schid, &schib);
-	if (!cc && scsw_stctl(&schib.scsw))
-		return -EAGAIN;
-	return 0;
-}
-
-static int chsc_subchannel_freeze(struct subchannel *sch)
-{
-	return cio_disable_subchannel(sch);
-}
-
-static int chsc_subchannel_restore(struct subchannel *sch)
-{
-	return cio_enable_subchannel(sch, (u32)(unsigned long)sch);
-}
-
 static struct css_device_id chsc_subchannel_ids[] = {
 	{ .match_flags = 0x1, .type =SUBCHANNEL_TYPE_CHSC, },
 	{ /* end of list */ },
@@ -165,10 +136,6 @@ static struct css_driver chsc_subchannel_driver = {
 	.probe = chsc_subchannel_probe,
 	.remove = chsc_subchannel_remove,
 	.shutdown = chsc_subchannel_shutdown,
-	.prepare = chsc_subchannel_prepare,
-	.freeze = chsc_subchannel_freeze,
-	.thaw = chsc_subchannel_restore,
-	.restore = chsc_subchannel_restore,
 };
 
 static int __init chsc_init_dbfs(void)
@@ -207,7 +174,7 @@ static void chsc_cleanup_sch_driver(void)
 
 static DEFINE_SPINLOCK(chsc_lock);
 
-static int chsc_subchannel_match_next_free(struct device *dev, void *data)
+static int chsc_subchannel_match_next_free(struct device *dev, const void *data)
 {
 	struct subchannel *sch = to_subchannel(dev);
 

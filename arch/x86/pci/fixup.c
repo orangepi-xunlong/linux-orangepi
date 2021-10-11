@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Exceptions for specific devices. Usually work-arounds for fatal design flaws.
  */
@@ -374,7 +375,7 @@ static const struct dmi_system_id msi_k8t_dmi_table[] = {
  * The BIOS only gives options "DISABLED" and "AUTO". This code sets
  * the corresponding register-value to enable the soundcard.
  *
- * The soundcard is only enabled, if the mainborad is identified
+ * The soundcard is only enabled, if the mainboard is identified
  * via DMI-tables and the soundcard is detected to be off.
  */
 static void pci_fixup_msi_k8t_onboard_sound(struct pci_dev *dev)
@@ -556,12 +557,12 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x27B9, twinhead_reserve_killing_z
  * Device [8086:2fc0]
  * Erratum HSE43
  * CONFIG_TDP_NOMINAL CSR Implemented at Incorrect Offset
- * http://www.intel.com/content/www/us/en/processors/xeon/xeon-e5-v3-spec-update.html
+ * https://www.intel.com/content/www/us/en/processors/xeon/xeon-e5-v3-spec-update.html
  *
  * Devices [8086:6f60,6fa0,6fc0]
  * Erratum BDF2
  * PCI BARs in the Home Agent Will Return Non-Zero Values During Enumeration
- * http://www.intel.com/content/www/us/en/processors/xeon/xeon-e5-v4-spec-update.html
+ * https://www.intel.com/content/www/us/en/processors/xeon/xeon-e5-v4-spec-update.html
  */
 static void pci_invalid_bar(struct pci_dev *dev)
 {
@@ -571,6 +572,36 @@ DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0x2fc0, pci_invalid_bar);
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0x6f60, pci_invalid_bar);
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0x6fa0, pci_invalid_bar);
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0x6fc0, pci_invalid_bar);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0xa1ec, pci_invalid_bar);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0xa1ed, pci_invalid_bar);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0xa26c, pci_invalid_bar);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, 0xa26d, pci_invalid_bar);
+
+/*
+ * Device [1022:7808]
+ * 23. USB Wake on Connect/Disconnect with Low Speed Devices
+ * https://support.amd.com/TechDocs/46837.pdf
+ * Appendix A2
+ * https://support.amd.com/TechDocs/42413.pdf
+ */
+static void pci_fixup_amd_ehci_pme(struct pci_dev *dev)
+{
+	dev_info(&dev->dev, "PME# does not work under D3, disabling it\n");
+	dev->pme_support &= ~((PCI_PM_CAP_PME_D3hot | PCI_PM_CAP_PME_D3cold)
+		>> PCI_PM_CAP_PME_SHIFT);
+}
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_AMD, 0x7808, pci_fixup_amd_ehci_pme);
+
+/*
+ * Device [1022:7914]
+ * When in D0, PME# doesn't get asserted when plugging USB 2.0 device.
+ */
+static void pci_fixup_amd_fch_xhci_pme(struct pci_dev *dev)
+{
+	dev_info(&dev->dev, "PME# does not work under D0, disabling it\n");
+	dev->pme_support &= ~(PCI_PM_CAP_PME_D0 >> PCI_PM_CAP_PME_SHIFT);
+}
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_AMD, 0x7914, pci_fixup_amd_fch_xhci_pme);
 
 /*
  * Apple MacBook Pro: Avoid [mem 0x7fa00000-0x7fbfffff]
@@ -603,3 +634,193 @@ static void quirk_apple_mbp_poweroff(struct pci_dev *pdev)
 		dev_info(dev, "can't work around MacBook Pro poweroff issue\n");
 }
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x8c10, quirk_apple_mbp_poweroff);
+
+/*
+ * VMD-enabled root ports will change the source ID for all messages
+ * to the VMD device. Rather than doing device matching with the source
+ * ID, the AER driver should traverse the child device tree, reading
+ * AER registers to find the faulting device.
+ */
+static void quirk_no_aersid(struct pci_dev *pdev)
+{
+	/* VMD Domain */
+	if (is_vmd(pdev->bus) && pci_is_root_bus(pdev->bus))
+		pdev->bus->bus_flags |= PCI_BUS_FLAGS_NO_AERSID;
+}
+DECLARE_PCI_FIXUP_CLASS_EARLY(PCI_VENDOR_ID_INTEL, PCI_ANY_ID,
+			      PCI_CLASS_BRIDGE_PCI, 8, quirk_no_aersid);
+
+static void quirk_intel_th_dnv(struct pci_dev *dev)
+{
+	struct resource *r = &dev->resource[4];
+
+	/*
+	 * Denverton reports 2k of RTIT_BAR (intel_th resource 4), which
+	 * appears to be 4 MB in reality.
+	 */
+	if (r->end == r->start + 0x7ff) {
+		r->start = 0;
+		r->end   = 0x3fffff;
+		r->flags |= IORESOURCE_UNSET;
+	}
+}
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x19e1, quirk_intel_th_dnv);
+
+#ifdef CONFIG_PHYS_ADDR_T_64BIT
+
+#define AMD_141b_MMIO_BASE(x)	(0x80 + (x) * 0x8)
+#define AMD_141b_MMIO_BASE_RE_MASK		BIT(0)
+#define AMD_141b_MMIO_BASE_WE_MASK		BIT(1)
+#define AMD_141b_MMIO_BASE_MMIOBASE_MASK	GENMASK(31,8)
+
+#define AMD_141b_MMIO_LIMIT(x)	(0x84 + (x) * 0x8)
+#define AMD_141b_MMIO_LIMIT_MMIOLIMIT_MASK	GENMASK(31,8)
+
+#define AMD_141b_MMIO_HIGH(x)	(0x180 + (x) * 0x4)
+#define AMD_141b_MMIO_HIGH_MMIOBASE_MASK	GENMASK(7,0)
+#define AMD_141b_MMIO_HIGH_MMIOLIMIT_SHIFT	16
+#define AMD_141b_MMIO_HIGH_MMIOLIMIT_MASK	GENMASK(23,16)
+
+/*
+ * The PCI Firmware Spec, rev 3.2, notes that ACPI should optionally allow
+ * configuring host bridge windows using the _PRS and _SRS methods.
+ *
+ * But this is rarely implemented, so we manually enable a large 64bit BAR for
+ * PCIe device on AMD Family 15h (Models 00h-1fh, 30h-3fh, 60h-7fh) Processors
+ * here.
+ */
+static void pci_amd_enable_64bit_bar(struct pci_dev *dev)
+{
+	static const char *name = "PCI Bus 0000:00";
+	struct resource *res, *conflict;
+	u32 base, limit, high;
+	struct pci_dev *other;
+	unsigned i;
+
+	if (!(pci_probe & PCI_BIG_ROOT_WINDOW))
+		return;
+
+	/* Check that we are the only device of that type */
+	other = pci_get_device(dev->vendor, dev->device, NULL);
+	if (other != dev ||
+	    (other = pci_get_device(dev->vendor, dev->device, other))) {
+		/* This is a multi-socket system, don't touch it for now */
+		pci_dev_put(other);
+		return;
+	}
+
+	for (i = 0; i < 8; i++) {
+		pci_read_config_dword(dev, AMD_141b_MMIO_BASE(i), &base);
+		pci_read_config_dword(dev, AMD_141b_MMIO_HIGH(i), &high);
+
+		/* Is this slot free? */
+		if (!(base & (AMD_141b_MMIO_BASE_RE_MASK |
+			      AMD_141b_MMIO_BASE_WE_MASK)))
+			break;
+
+		base >>= 8;
+		base |= high << 24;
+
+		/* Abort if a slot already configures a 64bit BAR. */
+		if (base > 0x10000)
+			return;
+	}
+	if (i == 8)
+		return;
+
+	res = kzalloc(sizeof(*res), GFP_KERNEL);
+	if (!res)
+		return;
+
+	/*
+	 * Allocate a 256GB window directly below the 0xfd00000000 hardware
+	 * limit (see AMD Family 15h Models 30h-3Fh BKDG, sec 2.4.6).
+	 */
+	res->name = name;
+	res->flags = IORESOURCE_PREFETCH | IORESOURCE_MEM |
+		IORESOURCE_MEM_64 | IORESOURCE_WINDOW;
+	res->start = 0xbd00000000ull;
+	res->end = 0xfd00000000ull - 1;
+
+	conflict = request_resource_conflict(&iomem_resource, res);
+	if (conflict) {
+		kfree(res);
+		if (conflict->name != name)
+			return;
+
+		/* We are resuming from suspend; just reenable the window */
+		res = conflict;
+	} else {
+		dev_info(&dev->dev, "adding root bus resource %pR (tainting kernel)\n",
+			 res);
+		add_taint(TAINT_FIRMWARE_WORKAROUND, LOCKDEP_STILL_OK);
+		pci_bus_add_resource(dev->bus, res, 0);
+	}
+
+	base = ((res->start >> 8) & AMD_141b_MMIO_BASE_MMIOBASE_MASK) |
+		AMD_141b_MMIO_BASE_RE_MASK | AMD_141b_MMIO_BASE_WE_MASK;
+	limit = ((res->end + 1) >> 8) & AMD_141b_MMIO_LIMIT_MMIOLIMIT_MASK;
+	high = ((res->start >> 40) & AMD_141b_MMIO_HIGH_MMIOBASE_MASK) |
+		((((res->end + 1) >> 40) << AMD_141b_MMIO_HIGH_MMIOLIMIT_SHIFT)
+		 & AMD_141b_MMIO_HIGH_MMIOLIMIT_MASK);
+
+	pci_write_config_dword(dev, AMD_141b_MMIO_HIGH(i), high);
+	pci_write_config_dword(dev, AMD_141b_MMIO_LIMIT(i), limit);
+	pci_write_config_dword(dev, AMD_141b_MMIO_BASE(i), base);
+}
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_AMD, 0x1401, pci_amd_enable_64bit_bar);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_AMD, 0x141b, pci_amd_enable_64bit_bar);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_AMD, 0x1571, pci_amd_enable_64bit_bar);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_AMD, 0x15b1, pci_amd_enable_64bit_bar);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_AMD, 0x1601, pci_amd_enable_64bit_bar);
+DECLARE_PCI_FIXUP_RESUME(PCI_VENDOR_ID_AMD, 0x1401, pci_amd_enable_64bit_bar);
+DECLARE_PCI_FIXUP_RESUME(PCI_VENDOR_ID_AMD, 0x141b, pci_amd_enable_64bit_bar);
+DECLARE_PCI_FIXUP_RESUME(PCI_VENDOR_ID_AMD, 0x1571, pci_amd_enable_64bit_bar);
+DECLARE_PCI_FIXUP_RESUME(PCI_VENDOR_ID_AMD, 0x15b1, pci_amd_enable_64bit_bar);
+DECLARE_PCI_FIXUP_RESUME(PCI_VENDOR_ID_AMD, 0x1601, pci_amd_enable_64bit_bar);
+
+#define RS690_LOWER_TOP_OF_DRAM2	0x30
+#define RS690_LOWER_TOP_OF_DRAM2_VALID	0x1
+#define RS690_UPPER_TOP_OF_DRAM2	0x31
+#define RS690_HTIU_NB_INDEX		0xA8
+#define RS690_HTIU_NB_INDEX_WR_ENABLE	0x100
+#define RS690_HTIU_NB_DATA		0xAC
+
+/*
+ * Some BIOS implementations support RAM above 4GB, but do not configure the
+ * PCI host to respond to bus master accesses for these addresses. These
+ * implementations set the TOP_OF_DRAM_SLOT1 register correctly, so PCI DMA
+ * works as expected for addresses below 4GB.
+ *
+ * Reference: "AMD RS690 ASIC Family Register Reference Guide" (pg. 2-57)
+ * https://www.amd.com/system/files/TechDocs/43372_rs690_rrg_3.00o.pdf
+ */
+static void rs690_fix_64bit_dma(struct pci_dev *pdev)
+{
+	u32 val = 0;
+	phys_addr_t top_of_dram = __pa(high_memory - 1) + 1;
+
+	if (top_of_dram <= (1ULL << 32))
+		return;
+
+	pci_write_config_dword(pdev, RS690_HTIU_NB_INDEX,
+				RS690_LOWER_TOP_OF_DRAM2);
+	pci_read_config_dword(pdev, RS690_HTIU_NB_DATA, &val);
+
+	if (val)
+		return;
+
+	pci_info(pdev, "Adjusting top of DRAM to %pa for 64-bit DMA support\n", &top_of_dram);
+
+	pci_write_config_dword(pdev, RS690_HTIU_NB_INDEX,
+		RS690_UPPER_TOP_OF_DRAM2 | RS690_HTIU_NB_INDEX_WR_ENABLE);
+	pci_write_config_dword(pdev, RS690_HTIU_NB_DATA, top_of_dram >> 32);
+
+	pci_write_config_dword(pdev, RS690_HTIU_NB_INDEX,
+		RS690_LOWER_TOP_OF_DRAM2 | RS690_HTIU_NB_INDEX_WR_ENABLE);
+	pci_write_config_dword(pdev, RS690_HTIU_NB_DATA,
+		top_of_dram | RS690_LOWER_TOP_OF_DRAM2_VALID);
+}
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_ATI, 0x7910, rs690_fix_64bit_dma);
+
+#endif

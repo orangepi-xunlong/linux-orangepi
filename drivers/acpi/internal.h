@@ -1,32 +1,29 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * acpi/internal.h
  * For use by Linux/ACPI infrastructure, not drivers
  *
  * Copyright (c) 2009, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
  */
 
 #ifndef _ACPI_INTERNAL_H_
 #define _ACPI_INTERNAL_H_
+
+#include <linux/idr.h>
 
 #define PREFIX "ACPI: "
 
 int early_acpi_osi_init(void);
 int acpi_osi_init(void);
 acpi_status acpi_os_initialize1(void);
-void init_acpi_device_notify(void);
 int acpi_scan_init(void);
+#ifdef CONFIG_PCI
 void acpi_pci_root_init(void);
 void acpi_pci_link_init(void);
+#else
+static inline void acpi_pci_root_init(void) {}
+static inline void acpi_pci_link_init(void) {}
+#endif
 void acpi_processor_init(void);
 void acpi_platform_init(void);
 void acpi_pnp_init(void);
@@ -41,8 +38,10 @@ void acpi_gpe_apply_masked_gpes(void);
 void acpi_container_init(void);
 void acpi_memory_hotplug_init(void);
 #ifdef	CONFIG_ACPI_HOTPLUG_IOAPIC
+void pci_ioapic_remove(struct acpi_pci_root *root);
 int acpi_ioapic_remove(struct acpi_pci_root *root);
 #else
+static inline void pci_ioapic_remove(struct acpi_pci_root *root) { return; }
 static inline int acpi_ioapic_remove(struct acpi_pci_root *root) { return 0; }
 #endif
 #ifdef CONFIG_ACPI_DOCK
@@ -63,8 +62,6 @@ static inline void acpi_cmos_rtc_init(void) {}
 #endif
 int acpi_rev_override_setup(char *str);
 
-extern bool acpi_force_hot_remove;
-
 void acpi_sysfs_add_hotplug_profile(struct acpi_hotplug_profile *hotplug,
 				    const char *name);
 int acpi_scan_add_handler_with_hotplug(struct acpi_scan_handler *handler,
@@ -77,7 +74,11 @@ void acpi_debugfs_init(void);
 #else
 static inline void acpi_debugfs_init(void) { return; }
 #endif
+#ifdef CONFIG_PCI
 void acpi_lpss_init(void);
+#else
+static inline void acpi_lpss_init(void) {}
+#endif
 
 void acpi_apd_init(void);
 
@@ -97,24 +98,27 @@ void acpi_scan_table_handler(u32 event, void *table, void *context);
 
 extern struct list_head acpi_bus_id_list;
 
+#define ACPI_MAX_DEVICE_INSTANCES	4096
+
 struct acpi_device_bus_id {
-	char bus_id[15];
-	unsigned int instance_no;
+	const char *bus_id;
+	struct ida instance_ida;
 	struct list_head node;
 };
 
 int acpi_device_add(struct acpi_device *device,
 		    void (*release)(struct device *));
 void acpi_init_device_object(struct acpi_device *device, acpi_handle handle,
-			     int type, unsigned long long sta);
+			     int type);
 int acpi_device_setup_files(struct acpi_device *dev);
 void acpi_device_remove_files(struct acpi_device *dev);
 void acpi_device_add_finalize(struct acpi_device *device);
 void acpi_free_pnp_ids(struct acpi_device_pnp *pnp);
-bool acpi_device_is_present(struct acpi_device *adev);
+bool acpi_device_is_present(const struct acpi_device *adev);
 bool acpi_device_is_battery(struct acpi_device *adev);
 bool acpi_device_is_first_physical_node(struct acpi_device *adev,
 					const struct device *dev);
+int acpi_bus_register_early_device(int type);
 
 /* --------------------------------------------------------------------------
                      Device Matching and Notification
@@ -130,17 +134,25 @@ int acpi_power_init(void);
 void acpi_power_resources_list_free(struct list_head *list);
 int acpi_extract_power_resources(union acpi_object *package, unsigned int start,
 				 struct list_head *list);
-int acpi_add_power_resource(acpi_handle handle);
+struct acpi_device *acpi_add_power_resource(acpi_handle handle);
 void acpi_power_add_remove_device(struct acpi_device *adev, bool add);
 int acpi_power_wakeup_list_init(struct list_head *list, int *system_level);
 int acpi_device_sleep_wake(struct acpi_device *dev,
-                           int enable, int sleep_state, int dev_state);
+			   int enable, int sleep_state, int dev_state);
 int acpi_power_get_inferred_state(struct acpi_device *device, int *state);
 int acpi_power_on_resources(struct acpi_device *device, int state);
 int acpi_power_transition(struct acpi_device *device, int state);
+void acpi_turn_off_unused_power_resources(bool init);
 
+/* --------------------------------------------------------------------------
+                              Device Power Management
+   -------------------------------------------------------------------------- */
+int acpi_device_get_power(struct acpi_device *device, int *state);
 int acpi_wakeup_device_init(void);
 
+/* --------------------------------------------------------------------------
+                                  Processor
+   -------------------------------------------------------------------------- */
 #ifdef CONFIG_ARCH_MIGHT_HAVE_ACPI_PDC
 void acpi_early_processor_set_pdc(void);
 #else
@@ -158,7 +170,8 @@ static inline void acpi_early_processor_osc(void) {}
    -------------------------------------------------------------------------- */
 struct acpi_ec {
 	acpi_handle handle;
-	u32 gpe;
+	int gpe;
+	int irq;
 	unsigned long command_addr;
 	unsigned long data_addr;
 	bool global_lock;
@@ -182,9 +195,9 @@ extern struct acpi_ec *first_ec;
 /* External interfaces use first EC only, so remember */
 typedef int (*acpi_ec_query_func) (void *data);
 
-int acpi_ec_init(void);
-int acpi_ec_ecdt_probe(void);
-int acpi_ec_dsdt_probe(void);
+void acpi_ec_init(void);
+void acpi_ec_ecdt_probe(void);
+void acpi_ec_dsdt_probe(void);
 void acpi_ec_block_transactions(void);
 void acpi_ec_unblock_transactions(void);
 int acpi_ec_add_query_handler(struct acpi_ec *ec, u8 query_bit,
@@ -192,13 +205,20 @@ int acpi_ec_add_query_handler(struct acpi_ec *ec, u8 query_bit,
 			      void *data);
 void acpi_ec_remove_query_handler(struct acpi_ec *ec, u8 query_bit);
 
+#ifdef CONFIG_PM_SLEEP
+void acpi_ec_flush_work(void);
+bool acpi_ec_dispatch_gpe(void);
+#endif
+
 
 /*--------------------------------------------------------------------------
                                   Suspend/Resume
   -------------------------------------------------------------------------- */
 #ifdef CONFIG_ACPI_SYSTEM_POWER_STATES_SUPPORT
+extern bool acpi_s2idle_wakeup(void);
 extern int acpi_sleep_init(void);
 #else
+static inline bool acpi_s2idle_wakeup(void) { return false; }
 static inline int acpi_sleep_init(void) { return -ENXIO; }
 #endif
 
@@ -224,6 +244,12 @@ static inline void suspend_nvs_restore(void) {}
 void acpi_init_properties(struct acpi_device *adev);
 void acpi_free_properties(struct acpi_device *adev);
 
+#ifdef CONFIG_X86
+void acpi_extract_apple_properties(struct acpi_device *adev);
+#else
+static inline void acpi_extract_apple_properties(struct acpi_device *adev) {}
+#endif
+
 /*--------------------------------------------------------------------------
 				Watchdog
   -------------------------------------------------------------------------- */
@@ -232,6 +258,12 @@ void acpi_free_properties(struct acpi_device *adev);
 void acpi_watchdog_init(void);
 #else
 static inline void acpi_watchdog_init(void) {}
+#endif
+
+#ifdef CONFIG_ACPI_LPIT
+void acpi_init_lpit(void);
+#else
+static inline void acpi_init_lpit(void) { }
 #endif
 
 #endif /* _ACPI_INTERNAL_H_ */

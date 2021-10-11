@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/ceph/ceph_debug.h>
 
 #include <linux/module.h>
@@ -6,6 +7,7 @@
 #include <linux/random.h>
 #include <linux/sched.h>
 
+#include <linux/ceph/ceph_features.h>
 #include <linux/ceph/mon_client.h>
 #include <linux/ceph/libceph.h>
 #include <linux/ceph/debugfs.h>
@@ -34,55 +36,122 @@ static const struct ceph_connection_operations mon_con_ops;
 
 static int __validate_auth(struct ceph_mon_client *monc);
 
+static int decode_mon_info(void **p, void *end, bool msgr2,
+			   struct ceph_entity_addr *addr)
+{
+	void *mon_info_end;
+	u32 struct_len;
+	u8 struct_v;
+	int ret;
+
+	ret = ceph_start_decoding(p, end, 1, "mon_info_t", &struct_v,
+				  &struct_len);
+	if (ret)
+		return ret;
+
+	mon_info_end = *p + struct_len;
+	ceph_decode_skip_string(p, end, e_inval);  /* skip mon name */
+	ret = ceph_decode_entity_addrvec(p, end, msgr2, addr);
+	if (ret)
+		return ret;
+
+	*p = mon_info_end;
+	return 0;
+
+e_inval:
+	return -EINVAL;
+}
+
 /*
  * Decode a monmap blob (e.g., during mount).
+ *
+ * Assume MonMap v3 (i.e. encoding with MONNAMES and MONENC).
  */
-struct ceph_monmap *ceph_monmap_decode(void *p, void *end)
+static struct ceph_monmap *ceph_monmap_decode(void **p, void *end, bool msgr2)
 {
-	struct ceph_monmap *m = NULL;
-	int i, err = -EINVAL;
+	struct ceph_monmap *monmap = NULL;
 	struct ceph_fsid fsid;
-	u32 epoch, num_mon;
-	u16 version;
-	u32 len;
+	u32 struct_len;
+	int blob_len;
+	int num_mon;
+	u8 struct_v;
+	u32 epoch;
+	int ret;
+	int i;
 
-	ceph_decode_32_safe(&p, end, len, bad);
-	ceph_decode_need(&p, end, len, bad);
+	ceph_decode_32_safe(p, end, blob_len, e_inval);
+	ceph_decode_need(p, end, blob_len, e_inval);
 
-	dout("monmap_decode %p %p len %d\n", p, end, (int)(end-p));
+	ret = ceph_start_decoding(p, end, 6, "monmap", &struct_v, &struct_len);
+	if (ret)
+		goto fail;
 
-	ceph_decode_16_safe(&p, end, version, bad);
+	dout("%s struct_v %d\n", __func__, struct_v);
+	ceph_decode_copy_safe(p, end, &fsid, sizeof(fsid), e_inval);
+	ceph_decode_32_safe(p, end, epoch, e_inval);
+	if (struct_v >= 6) {
+		u32 feat_struct_len;
+		u8 feat_struct_v;
 
-	ceph_decode_need(&p, end, sizeof(fsid) + 2*sizeof(u32), bad);
-	ceph_decode_copy(&p, &fsid, sizeof(fsid));
-	epoch = ceph_decode_32(&p);
+		*p += sizeof(struct ceph_timespec);  /* skip last_changed */
+		*p += sizeof(struct ceph_timespec);  /* skip created */
 
-	num_mon = ceph_decode_32(&p);
-	ceph_decode_need(&p, end, num_mon*sizeof(m->mon_inst[0]), bad);
+		ret = ceph_start_decoding(p, end, 1, "mon_feature_t",
+					  &feat_struct_v, &feat_struct_len);
+		if (ret)
+			goto fail;
 
-	if (num_mon >= CEPH_MAX_MON)
-		goto bad;
-	m = kmalloc(sizeof(*m) + sizeof(m->mon_inst[0])*num_mon, GFP_NOFS);
-	if (m == NULL)
-		return ERR_PTR(-ENOMEM);
-	m->fsid = fsid;
-	m->epoch = epoch;
-	m->num_mon = num_mon;
-	ceph_decode_copy(&p, m->mon_inst, num_mon*sizeof(m->mon_inst[0]));
-	for (i = 0; i < num_mon; i++)
-		ceph_decode_addr(&m->mon_inst[i].addr);
+		*p += feat_struct_len;  /* skip persistent_features */
 
-	dout("monmap_decode epoch %d, num_mon %d\n", m->epoch,
-	     m->num_mon);
-	for (i = 0; i < m->num_mon; i++)
-		dout("monmap_decode  mon%d is %s\n", i,
-		     ceph_pr_addr(&m->mon_inst[i].addr.in_addr));
-	return m;
+		ret = ceph_start_decoding(p, end, 1, "mon_feature_t",
+					  &feat_struct_v, &feat_struct_len);
+		if (ret)
+			goto fail;
 
-bad:
-	dout("monmap_decode failed with %d\n", err);
-	kfree(m);
-	return ERR_PTR(err);
+		*p += feat_struct_len;  /* skip optional_features */
+	}
+	ceph_decode_32_safe(p, end, num_mon, e_inval);
+
+	dout("%s fsid %pU epoch %u num_mon %d\n", __func__, &fsid, epoch,
+	     num_mon);
+	if (num_mon > CEPH_MAX_MON)
+		goto e_inval;
+
+	monmap = kmalloc(struct_size(monmap, mon_inst, num_mon), GFP_NOIO);
+	if (!monmap) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+	monmap->fsid = fsid;
+	monmap->epoch = epoch;
+	monmap->num_mon = num_mon;
+
+	/* legacy_mon_addr map or mon_info map */
+	for (i = 0; i < num_mon; i++) {
+		struct ceph_entity_inst *inst = &monmap->mon_inst[i];
+
+		ceph_decode_skip_string(p, end, e_inval);  /* skip mon name */
+		inst->name.type = CEPH_ENTITY_TYPE_MON;
+		inst->name.num = cpu_to_le64(i);
+
+		if (struct_v >= 6)
+			ret = decode_mon_info(p, end, msgr2, &inst->addr);
+		else
+			ret = ceph_decode_entity_addr(p, end, &inst->addr);
+		if (ret)
+			goto fail;
+
+		dout("%s mon%d addr %s\n", __func__, i,
+		     ceph_pr_addr(&inst->addr));
+	}
+
+	return monmap;
+
+e_inval:
+	ret = -EINVAL;
+fail:
+	kfree(monmap);
+	return ERR_PTR(ret);
 }
 
 /*
@@ -92,9 +161,11 @@ int ceph_monmap_contains(struct ceph_monmap *m, struct ceph_entity_addr *addr)
 {
 	int i;
 
-	for (i = 0; i < m->num_mon; i++)
-		if (memcmp(addr, &m->mon_inst[i].addr, sizeof(*addr)) == 0)
+	for (i = 0; i < m->num_mon; i++) {
+		if (ceph_addr_equal_no_type(addr, &m->mon_inst[i].addr))
 			return 1;
+	}
+
 	return 0;
 }
 
@@ -186,10 +257,16 @@ static void __open_session(struct ceph_mon_client *monc)
 		      &monc->monmap->mon_inst[monc->cur_mon].addr);
 
 	/*
-	 * send an initial keepalive to ensure our timestamp is valid
-	 * by the time we are in an OPENED state
+	 * Queue a keepalive to ensure that in case of an early fault
+	 * the messenger doesn't put us into STANDBY state and instead
+	 * retries.  This also ensures that our timestamp is valid by
+	 * the time we finish hunting and delayed_work() checks it.
 	 */
 	ceph_con_keepalive(&monc->con);
+	if (ceph_msgr2(monc->client)) {
+		monc->pending_auth = 1;
+		return;
+	}
 
 	/* initiate authentication handshake */
 	ret = ceph_auth_build_hello(monc->auth,
@@ -203,10 +280,17 @@ static void reopen_session(struct ceph_mon_client *monc)
 {
 	if (!monc->hunting)
 		pr_info("mon%d %s session lost, hunting for new mon\n",
-		    monc->cur_mon, ceph_pr_addr(&monc->con.peer_addr.in_addr));
+		    monc->cur_mon, ceph_pr_addr(&monc->con.peer_addr));
 
 	__close_session(monc);
 	__open_session(monc);
+}
+
+void ceph_monc_reopen_session(struct ceph_mon_client *monc)
+{
+	mutex_lock(&monc->mutex);
+	reopen_session(monc);
+	mutex_unlock(&monc->mutex);
 }
 
 static void un_backoff(struct ceph_mon_client *monc)
@@ -307,6 +391,10 @@ static void handle_subscribe_ack(struct ceph_mon_client *monc,
 
 	mutex_lock(&monc->mutex);
 	if (monc->sub_renew_sent) {
+		/*
+		 * This is only needed for legacy (infernalis or older)
+		 * MONs -- see delayed_work().
+		 */
 		monc->sub_renew_after = monc->sub_renew_sent +
 					    (seconds >> 1) * HZ - 1;
 		dout("%s sent %lu duration %d renew after %lu\n", __func__,
@@ -452,7 +540,7 @@ static void ceph_monc_handle_map(struct ceph_mon_client *monc,
 				 struct ceph_msg *msg)
 {
 	struct ceph_client *client = monc->client;
-	struct ceph_monmap *monmap = NULL, *old = monc->monmap;
+	struct ceph_monmap *monmap;
 	void *p, *end;
 
 	mutex_lock(&monc->mutex);
@@ -461,20 +549,21 @@ static void ceph_monc_handle_map(struct ceph_mon_client *monc,
 	p = msg->front.iov_base;
 	end = p + msg->front.iov_len;
 
-	monmap = ceph_monmap_decode(p, end);
+	monmap = ceph_monmap_decode(&p, end, ceph_msgr2(client));
 	if (IS_ERR(monmap)) {
 		pr_err("problem decoding monmap, %d\n",
 		       (int)PTR_ERR(monmap));
+		ceph_msg_dump(msg);
 		goto out;
 	}
 
-	if (ceph_check_fsid(monc->client, &monmap->fsid) < 0) {
+	if (ceph_check_fsid(client, &monmap->fsid) < 0) {
 		kfree(monmap);
 		goto out;
 	}
 
-	client->monc.monmap = monmap;
-	kfree(old);
+	kfree(monc->monmap);
+	monc->monmap = monmap;
 
 	__ceph_monc_got_map(monc, CEPH_SUB_MONMAP, monc->monmap->epoch);
 	client->have_fsid = true;
@@ -681,7 +770,8 @@ bad:
 /*
  * Do a synchronous statfs().
  */
-int ceph_monc_do_statfs(struct ceph_mon_client *monc, struct ceph_statfs *buf)
+int ceph_monc_do_statfs(struct ceph_mon_client *monc, u64 data_pool,
+			struct ceph_statfs *buf)
 {
 	struct ceph_mon_generic_request *req;
 	struct ceph_mon_statfs *h;
@@ -701,6 +791,7 @@ int ceph_monc_do_statfs(struct ceph_mon_client *monc, struct ceph_statfs *buf)
 		goto out;
 
 	req->u.st = buf;
+	req->request->hdr.version = cpu_to_le16(2);
 
 	mutex_lock(&monc->mutex);
 	register_generic_request(req);
@@ -710,6 +801,8 @@ int ceph_monc_do_statfs(struct ceph_mon_client *monc, struct ceph_statfs *buf)
 	h->monhdr.session_mon = cpu_to_le16(-1);
 	h->monhdr.session_mon_tid = 0;
 	h->fsid = monc->monmap->fsid;
+	h->contains_data_pool = (data_pool != CEPH_NOPOOL);
+	h->data_pool = cpu_to_le64(data_pool);
 	send_generic_request(monc, req);
 	mutex_unlock(&monc->mutex);
 
@@ -876,8 +969,9 @@ bad:
 	ceph_msg_dump(msg);
 }
 
-int ceph_monc_blacklist_add(struct ceph_mon_client *monc,
-			    struct ceph_entity_addr *client_addr)
+static __printf(2, 0)
+int do_mon_command_vargs(struct ceph_mon_client *monc, const char *fmt,
+			 va_list ap)
 {
 	struct ceph_mon_generic_request *req;
 	struct ceph_mon_command *h;
@@ -905,10 +999,7 @@ int ceph_monc_blacklist_add(struct ceph_mon_client *monc,
 	h->monhdr.session_mon_tid = 0;
 	h->fsid = monc->monmap->fsid;
 	h->num_strs = cpu_to_le32(1);
-	len = sprintf(h->str, "{ \"prefix\": \"osd blacklist\", \
-		                 \"blacklistop\": \"add\", \
-				 \"addr\": \"%pISpc/%u\" }",
-		      &client_addr->in_addr, le32_to_cpu(client_addr->nonce));
+	len = vsprintf(h->str, fmt, ap);
 	h->str_len = cpu_to_le32(len);
 	send_generic_request(monc, req);
 	mutex_unlock(&monc->mutex);
@@ -918,7 +1009,55 @@ out:
 	put_generic_request(req);
 	return ret;
 }
-EXPORT_SYMBOL(ceph_monc_blacklist_add);
+
+static __printf(2, 3)
+int do_mon_command(struct ceph_mon_client *monc, const char *fmt, ...)
+{
+	va_list ap;
+	int ret;
+
+	va_start(ap, fmt);
+	ret = do_mon_command_vargs(monc, fmt, ap);
+	va_end(ap);
+	return ret;
+}
+
+int ceph_monc_blocklist_add(struct ceph_mon_client *monc,
+			    struct ceph_entity_addr *client_addr)
+{
+	int ret;
+
+	ret = do_mon_command(monc,
+			     "{ \"prefix\": \"osd blocklist\", \
+				\"blocklistop\": \"add\", \
+				\"addr\": \"%pISpc/%u\" }",
+			     &client_addr->in_addr,
+			     le32_to_cpu(client_addr->nonce));
+	if (ret == -EINVAL) {
+		/*
+		 * The monitor returns EINVAL on an unrecognized command.
+		 * Try the legacy command -- it is exactly the same except
+		 * for the name.
+		 */
+		ret = do_mon_command(monc,
+				     "{ \"prefix\": \"osd blacklist\", \
+					\"blacklistop\": \"add\", \
+					\"addr\": \"%pISpc/%u\" }",
+				     &client_addr->in_addr,
+				     le32_to_cpu(client_addr->nonce));
+	}
+	if (ret)
+		return ret;
+
+	/*
+	 * Make sure we have the osdmap that includes the blocklist
+	 * entry.  This is needed to ensure that the OSDs pick up the
+	 * new blocklist before processing any future requests from
+	 * this client.
+	 */
+	return ceph_wait_for_latest_osdmap(monc->client, 0);
+}
+EXPORT_SYMBOL(ceph_monc_blocklist_add);
 
 /*
  * Resend pending generic requests.
@@ -966,7 +1105,8 @@ static void delayed_work(struct work_struct *work)
 			un_backoff(monc);
 		}
 
-		if (is_auth) {
+		if (is_auth &&
+		    !(monc->con.peer_features & CEPH_FEATURE_MON_STATEFUL_SUB)) {
 			unsigned long now = jiffies;
 
 			dout("%s renew subs? now %lu renew after %lu\n",
@@ -985,23 +1125,27 @@ static void delayed_work(struct work_struct *work)
  */
 static int build_initial_monmap(struct ceph_mon_client *monc)
 {
+	__le32 my_type = ceph_msgr2(monc->client) ?
+		CEPH_ENTITY_ADDR_TYPE_MSGR2 : CEPH_ENTITY_ADDR_TYPE_LEGACY;
 	struct ceph_options *opt = monc->client->options;
-	struct ceph_entity_addr *mon_addr = opt->mon_addr;
 	int num_mon = opt->num_mon;
 	int i;
 
 	/* build initial monmap */
-	monc->monmap = kzalloc(sizeof(*monc->monmap) +
-			       num_mon*sizeof(monc->monmap->mon_inst[0]),
+	monc->monmap = kzalloc(struct_size(monc->monmap, mon_inst, num_mon),
 			       GFP_KERNEL);
 	if (!monc->monmap)
 		return -ENOMEM;
+
 	for (i = 0; i < num_mon; i++) {
-		monc->monmap->mon_inst[i].addr = mon_addr[i];
-		monc->monmap->mon_inst[i].addr.nonce = 0;
-		monc->monmap->mon_inst[i].name.type =
-			CEPH_ENTITY_TYPE_MON;
-		monc->monmap->mon_inst[i].name.num = cpu_to_le64(i);
+		struct ceph_entity_inst *inst = &monc->monmap->mon_inst[i];
+
+		memcpy(&inst->addr.in_addr, &opt->mon_addr[i].in_addr,
+		       sizeof(inst->addr.in_addr));
+		inst->addr.type = my_type;
+		inst->addr.nonce = 0;
+		inst->name.type = CEPH_ENTITY_TYPE_MON;
+		inst->name.num = cpu_to_le64(i);
 	}
 	monc->monmap->num_mon = num_mon;
 	return 0;
@@ -1023,8 +1167,8 @@ int ceph_monc_init(struct ceph_mon_client *monc, struct ceph_client *cl)
 
 	/* connection */
 	/* authentication */
-	monc->auth = ceph_auth_init(cl->options->name,
-				    cl->options->key);
+	monc->auth = ceph_auth_init(cl->options->name, cl->options->key,
+				    cl->options->con_modes);
 	if (IS_ERR(monc->auth)) {
 		err = PTR_ERR(monc->auth);
 		goto out_monmap;
@@ -1037,21 +1181,21 @@ int ceph_monc_init(struct ceph_mon_client *monc, struct ceph_client *cl)
 	err = -ENOMEM;
 	monc->m_subscribe_ack = ceph_msg_new(CEPH_MSG_MON_SUBSCRIBE_ACK,
 				     sizeof(struct ceph_mon_subscribe_ack),
-				     GFP_NOFS, true);
+				     GFP_KERNEL, true);
 	if (!monc->m_subscribe_ack)
 		goto out_auth;
 
-	monc->m_subscribe = ceph_msg_new(CEPH_MSG_MON_SUBSCRIBE, 128, GFP_NOFS,
-					 true);
+	monc->m_subscribe = ceph_msg_new(CEPH_MSG_MON_SUBSCRIBE, 128,
+					 GFP_KERNEL, true);
 	if (!monc->m_subscribe)
 		goto out_subscribe_ack;
 
-	monc->m_auth_reply = ceph_msg_new(CEPH_MSG_AUTH_REPLY, 4096, GFP_NOFS,
-					  true);
+	monc->m_auth_reply = ceph_msg_new(CEPH_MSG_AUTH_REPLY, 4096,
+					  GFP_KERNEL, true);
 	if (!monc->m_auth_reply)
 		goto out_subscribe;
 
-	monc->m_auth = ceph_msg_new(CEPH_MSG_AUTH, 4096, GFP_NOFS, true);
+	monc->m_auth = ceph_msg_new(CEPH_MSG_AUTH, 4096, GFP_KERNEL, true);
 	monc->pending_auth = 0;
 	if (!monc->m_auth)
 		goto out_auth_reply;
@@ -1128,30 +1272,22 @@ static void finish_hunting(struct ceph_mon_client *monc)
 	}
 }
 
-static void handle_auth_reply(struct ceph_mon_client *monc,
-			      struct ceph_msg *msg)
+static void finish_auth(struct ceph_mon_client *monc, int auth_err,
+			bool was_authed)
 {
-	int ret;
-	int was_auth = 0;
+	dout("%s auth_err %d was_authed %d\n", __func__, auth_err, was_authed);
+	WARN_ON(auth_err > 0);
 
-	mutex_lock(&monc->mutex);
-	was_auth = ceph_auth_is_authenticated(monc->auth);
 	monc->pending_auth = 0;
-	ret = ceph_handle_auth_reply(monc->auth, msg->front.iov_base,
-				     msg->front.iov_len,
-				     monc->m_auth->front.iov_base,
-				     monc->m_auth->front_alloc_len);
-	if (ret > 0) {
-		__send_prepared_auth_request(monc, ret);
-		goto out;
+	if (auth_err) {
+		monc->client->auth_err = auth_err;
+		wake_up_all(&monc->client->auth_wq);
+		return;
 	}
 
-	finish_hunting(monc);
-
-	if (ret < 0) {
-		monc->client->auth_err = ret;
-	} else if (!was_auth && ceph_auth_is_authenticated(monc->auth)) {
-		dout("authenticated, starting session\n");
+	if (!was_authed && ceph_auth_is_authenticated(monc->auth)) {
+		dout("%s authenticated, starting session global_id %llu\n",
+		     __func__, monc->auth->global_id);
 
 		monc->client->msgr.inst.name.type = CEPH_ENTITY_TYPE_CLIENT;
 		monc->client->msgr.inst.name.num =
@@ -1161,13 +1297,29 @@ static void handle_auth_reply(struct ceph_mon_client *monc,
 		__resend_generic_request(monc);
 
 		pr_info("mon%d %s session established\n", monc->cur_mon,
-			ceph_pr_addr(&monc->con.peer_addr.in_addr));
+			ceph_pr_addr(&monc->con.peer_addr));
 	}
+}
 
-out:
+static void handle_auth_reply(struct ceph_mon_client *monc,
+			      struct ceph_msg *msg)
+{
+	bool was_authed;
+	int ret;
+
+	mutex_lock(&monc->mutex);
+	was_authed = ceph_auth_is_authenticated(monc->auth);
+	ret = ceph_handle_auth_reply(monc->auth, msg->front.iov_base,
+				     msg->front.iov_len,
+				     monc->m_auth->front.iov_base,
+				     monc->m_auth->front_alloc_len);
+	if (ret > 0) {
+		__send_prepared_auth_request(monc, ret);
+	} else {
+		finish_auth(monc, ret, was_authed);
+		finish_hunting(monc);
+	}
 	mutex_unlock(&monc->mutex);
-	if (monc->client->auth_err < 0)
-		wake_up_all(&monc->client->auth_wq);
 }
 
 static int __validate_auth(struct ceph_mon_client *monc)
@@ -1196,16 +1348,95 @@ int ceph_monc_validate_auth(struct ceph_mon_client *monc)
 }
 EXPORT_SYMBOL(ceph_monc_validate_auth);
 
+static int mon_get_auth_request(struct ceph_connection *con,
+				void *buf, int *buf_len,
+				void **authorizer, int *authorizer_len)
+{
+	struct ceph_mon_client *monc = con->private;
+	int ret;
+
+	mutex_lock(&monc->mutex);
+	ret = ceph_auth_get_request(monc->auth, buf, *buf_len);
+	mutex_unlock(&monc->mutex);
+	if (ret < 0)
+		return ret;
+
+	*buf_len = ret;
+	*authorizer = NULL;
+	*authorizer_len = 0;
+	return 0;
+}
+
+static int mon_handle_auth_reply_more(struct ceph_connection *con,
+				      void *reply, int reply_len,
+				      void *buf, int *buf_len,
+				      void **authorizer, int *authorizer_len)
+{
+	struct ceph_mon_client *monc = con->private;
+	int ret;
+
+	mutex_lock(&monc->mutex);
+	ret = ceph_auth_handle_reply_more(monc->auth, reply, reply_len,
+					  buf, *buf_len);
+	mutex_unlock(&monc->mutex);
+	if (ret < 0)
+		return ret;
+
+	*buf_len = ret;
+	*authorizer = NULL;
+	*authorizer_len = 0;
+	return 0;
+}
+
+static int mon_handle_auth_done(struct ceph_connection *con,
+				u64 global_id, void *reply, int reply_len,
+				u8 *session_key, int *session_key_len,
+				u8 *con_secret, int *con_secret_len)
+{
+	struct ceph_mon_client *monc = con->private;
+	bool was_authed;
+	int ret;
+
+	mutex_lock(&monc->mutex);
+	WARN_ON(!monc->hunting);
+	was_authed = ceph_auth_is_authenticated(monc->auth);
+	ret = ceph_auth_handle_reply_done(monc->auth, global_id,
+					  reply, reply_len,
+					  session_key, session_key_len,
+					  con_secret, con_secret_len);
+	finish_auth(monc, ret, was_authed);
+	if (!ret)
+		finish_hunting(monc);
+	mutex_unlock(&monc->mutex);
+	return 0;
+}
+
+static int mon_handle_auth_bad_method(struct ceph_connection *con,
+				      int used_proto, int result,
+				      const int *allowed_protos, int proto_cnt,
+				      const int *allowed_modes, int mode_cnt)
+{
+	struct ceph_mon_client *monc = con->private;
+	bool was_authed;
+
+	mutex_lock(&monc->mutex);
+	WARN_ON(!monc->hunting);
+	was_authed = ceph_auth_is_authenticated(monc->auth);
+	ceph_auth_handle_bad_method(monc->auth, used_proto, result,
+				    allowed_protos, proto_cnt,
+				    allowed_modes, mode_cnt);
+	finish_auth(monc, -EACCES, was_authed);
+	mutex_unlock(&monc->mutex);
+	return 0;
+}
+
 /*
  * handle incoming message
  */
-static void dispatch(struct ceph_connection *con, struct ceph_msg *msg)
+static void mon_dispatch(struct ceph_connection *con, struct ceph_msg *msg)
 {
 	struct ceph_mon_client *monc = con->private;
 	int type = le16_to_cpu(msg->hdr.type);
-
-	if (!monc)
-		return;
 
 	switch (type) {
 	case CEPH_MSG_AUTH_REPLY:
@@ -1241,7 +1472,7 @@ static void dispatch(struct ceph_connection *con, struct ceph_msg *msg)
 		if (monc->client->extra_mon_dispatch &&
 		    monc->client->extra_mon_dispatch(monc->client, msg) == 0)
 			break;
-			
+
 		pr_err("received unknown message type %d %s\n", type,
 		       ceph_msg_type_name(type));
 	}
@@ -1278,9 +1509,10 @@ static struct ceph_msg *mon_alloc_msg(struct ceph_connection *con,
 
 		/*
 		 * Older OSDs don't set reply tid even if the orignal
-		 * request had a non-zero tid.  Workaround this weirdness
-		 * by falling through to the allocate case.
+		 * request had a non-zero tid.  Work around this weirdness
+		 * by allocating a new message.
 		 */
+		fallthrough;
 	case CEPH_MSG_MON_MAP:
 	case CEPH_MSG_MDS_MAP:
 	case CEPH_MSG_OSD_MAP:
@@ -1333,19 +1565,23 @@ static void mon_fault(struct ceph_connection *con)
  * will come from the messenger workqueue, which is drained prior to
  * mon_client destruction.
  */
-static struct ceph_connection *con_get(struct ceph_connection *con)
+static struct ceph_connection *mon_get_con(struct ceph_connection *con)
 {
 	return con;
 }
 
-static void con_put(struct ceph_connection *con)
+static void mon_put_con(struct ceph_connection *con)
 {
 }
 
 static const struct ceph_connection_operations mon_con_ops = {
-	.get = con_get,
-	.put = con_put,
-	.dispatch = dispatch,
-	.fault = mon_fault,
+	.get = mon_get_con,
+	.put = mon_put_con,
 	.alloc_msg = mon_alloc_msg,
+	.dispatch = mon_dispatch,
+	.fault = mon_fault,
+	.get_auth_request = mon_get_auth_request,
+	.handle_auth_reply_more = mon_handle_auth_reply_more,
+	.handle_auth_done = mon_handle_auth_done,
+	.handle_auth_bad_method = mon_handle_auth_bad_method,
 };

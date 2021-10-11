@@ -1,10 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) ST-Ericsson SA 2012
  * Copyright (c) 2012 Sony Mobile Communications AB
  *
  * Charging algorithm driver for abx500 variants
  *
- * License Terms: GNU General Public License v2
  * Authors:
  *	Johan Palsson <johan.palsson@stericsson.com>
  *	Karl Komierowski <karl.komierowski@stericsson.com>
@@ -28,9 +28,10 @@
 #include <linux/mfd/core.h>
 #include <linux/mfd/abx500.h>
 #include <linux/mfd/abx500/ab8500.h>
-#include <linux/mfd/abx500/ux500_chargalg.h>
-#include <linux/mfd/abx500/ab8500-bm.h>
 #include <linux/notifier.h>
+
+#include "ab8500-bm.h"
+#include "ab8500-chargalg.h"
 
 /* Watchdog kick interval */
 #define CHG_WD_INTERVAL			(6 * HZ)
@@ -43,9 +44,6 @@
 
 /* Five minutes expressed in seconds */
 #define FIVE_MINUTES_IN_SECONDS        300
-
-/* Plus margin for the low battery threshold */
-#define BAT_PLUS_MARGIN                (100)
 
 #define CHARGALG_CURR_STEP_LOW		0
 #define CHARGALG_CURR_STEP_HIGH	100
@@ -101,7 +99,6 @@ enum abx500_chargalg_states {
 	STATE_HW_TEMP_PROTECT_INIT,
 	STATE_HW_TEMP_PROTECT,
 	STATE_NORMAL_INIT,
-	STATE_USB_PP_PRE_CHARGE,
 	STATE_NORMAL,
 	STATE_WAIT_FOR_RECHARGE_INIT,
 	STATE_WAIT_FOR_RECHARGE,
@@ -133,7 +130,6 @@ static const char *states[] = {
 	"HW_TEMP_PROTECT_INIT",
 	"HW_TEMP_PROTECT",
 	"NORMAL_INIT",
-	"USB_PP_PRE_CHARGE",
 	"NORMAL",
 	"WAIT_FOR_RECHARGE_INIT",
 	"WAIT_FOR_RECHARGE",
@@ -359,13 +355,13 @@ static int abx500_chargalg_check_charger_enable(struct abx500_chargalg *di)
 
 	if (di->chg_info.charger_type & USB_CHG) {
 		return di->usb_chg->ops.check_enable(di->usb_chg,
-                         di->bm->bat_type[di->bm->batt_id].normal_vol_lvl,
-                         di->bm->bat_type[di->bm->batt_id].normal_cur_lvl);
+			di->bm->bat_type[di->bm->batt_id].normal_vol_lvl,
+			di->bm->bat_type[di->bm->batt_id].normal_cur_lvl);
 	} else if ((di->chg_info.charger_type & AC_CHG) &&
 		   !(di->ac_chg->external)) {
 		return di->ac_chg->ops.check_enable(di->ac_chg,
-                         di->bm->bat_type[di->bm->batt_id].normal_vol_lvl,
-                         di->bm->bat_type[di->bm->batt_id].normal_cur_lvl);
+			di->bm->bat_type[di->bm->batt_id].normal_vol_lvl,
+			di->bm->bat_type[di->bm->batt_id].normal_cur_lvl);
 	}
 	return 0;
 }
@@ -603,37 +599,6 @@ static int abx500_chargalg_usb_en(struct abx500_chargalg *di, int enable,
 	return di->usb_chg->ops.enable(di->usb_chg, enable, vset, iset);
 }
 
- /**
- * ab8540_chargalg_usb_pp_en() - Enable/ disable USB power path
- * @di:                pointer to the abx500_chargalg structure
- * @enable:    power path enable/disable
- *
- * The USB power path will be enable/ disable
- */
-static int ab8540_chargalg_usb_pp_en(struct abx500_chargalg *di, bool enable)
-{
-	if (!di->usb_chg || !di->usb_chg->ops.pp_enable)
-		return -ENXIO;
-
-	return di->usb_chg->ops.pp_enable(di->usb_chg, enable);
-}
-
-/**
- * ab8540_chargalg_usb_pre_chg_en() - Enable/ disable USB pre-charge
- * @di:                pointer to the abx500_chargalg structure
- * @enable:    USB pre-charge enable/disable
- *
- * The USB USB pre-charge will be enable/ disable
- */
-static int ab8540_chargalg_usb_pre_chg_en(struct abx500_chargalg *di,
-					  bool enable)
-{
-	if (!di->usb_chg || !di->usb_chg->ops.pre_chg_enable)
-		return -ENXIO;
-
-	return di->usb_chg->ops.pre_chg_enable(di->usb_chg, enable);
-}
-
 /**
  * abx500_chargalg_update_chg_curr() - Update charger current
  * @di:		pointer to the abx500_chargalg structure
@@ -833,9 +798,6 @@ static void abx500_chargalg_end_of_charge(struct abx500_chargalg *di)
 		di->batt_data.avg_curr > 0) {
 		if (++di->eoc_cnt >= EOC_COND_CNT) {
 			di->eoc_cnt = 0;
-			if ((di->chg_info.charger_type & USB_CHG) &&
-			   (di->usb_chg->power_path))
-				ab8540_chargalg_usb_pp_en(di, true);
 			di->charge_status = POWER_SUPPLY_STATUS_FULL;
 			di->maintenance_chg = true;
 			dev_dbg(di->dev, "EOC reached!\n");
@@ -1458,7 +1420,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 		abx500_chargalg_stop_charging(di);
 		di->charge_status = POWER_SUPPLY_STATUS_DISCHARGING;
 		abx500_chargalg_state_to(di, STATE_HANDHELD);
-		/* Intentional fallthrough */
+		fallthrough;
 
 	case STATE_HANDHELD:
 		break;
@@ -1474,7 +1436,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 		di->maintenance_chg = false;
 		abx500_chargalg_state_to(di, STATE_SUSPENDED);
 		power_supply_changed(di->chargalg_psy);
-		/* Intentional fallthrough */
+		fallthrough;
 
 	case STATE_SUSPENDED:
 		/* CHARGING is suspended */
@@ -1483,7 +1445,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 	case STATE_BATT_REMOVED_INIT:
 		abx500_chargalg_stop_charging(di);
 		abx500_chargalg_state_to(di, STATE_BATT_REMOVED);
-		/* Intentional fallthrough */
+		fallthrough;
 
 	case STATE_BATT_REMOVED:
 		if (!di->events.batt_rem)
@@ -1493,7 +1455,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 	case STATE_HW_TEMP_PROTECT_INIT:
 		abx500_chargalg_stop_charging(di);
 		abx500_chargalg_state_to(di, STATE_HW_TEMP_PROTECT);
-		/* Intentional fallthrough */
+		fallthrough;
 
 	case STATE_HW_TEMP_PROTECT:
 		if (!di->events.main_thermal_prot &&
@@ -1504,7 +1466,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 	case STATE_OVV_PROTECT_INIT:
 		abx500_chargalg_stop_charging(di);
 		abx500_chargalg_state_to(di, STATE_OVV_PROTECT);
-		/* Intentional fallthrough */
+		fallthrough;
 
 	case STATE_OVV_PROTECT:
 		if (!di->events.vbus_ovv &&
@@ -1518,7 +1480,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 	case STATE_CHG_NOT_OK_INIT:
 		abx500_chargalg_stop_charging(di);
 		abx500_chargalg_state_to(di, STATE_CHG_NOT_OK);
-		/* Intentional fallthrough */
+		fallthrough;
 
 	case STATE_CHG_NOT_OK:
 		if (!di->events.mainextchnotok &&
@@ -1529,29 +1491,13 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 	case STATE_SAFETY_TIMER_EXPIRED_INIT:
 		abx500_chargalg_stop_charging(di);
 		abx500_chargalg_state_to(di, STATE_SAFETY_TIMER_EXPIRED);
-		/* Intentional fallthrough */
+		fallthrough;
 
 	case STATE_SAFETY_TIMER_EXPIRED:
 		/* We exit this state when charger is removed */
 		break;
 
 	case STATE_NORMAL_INIT:
-		if ((di->chg_info.charger_type & USB_CHG) &&
-				di->usb_chg->power_path) {
-			if (di->batt_data.volt >
-			    (di->bm->fg_params->lowbat_threshold +
-			     BAT_PLUS_MARGIN)) {
-				ab8540_chargalg_usb_pre_chg_en(di, false);
-				ab8540_chargalg_usb_pp_en(di, false);
-			} else {
-				ab8540_chargalg_usb_pp_en(di, true);
-				ab8540_chargalg_usb_pre_chg_en(di, true);
-				abx500_chargalg_state_to(di,
-					STATE_USB_PP_PRE_CHARGE);
-				break;
-			}
-		}
-
 		if (di->curr_status.curr_step == CHARGALG_CURR_STEP_LOW)
 			abx500_chargalg_stop_charging(di);
 		else {
@@ -1575,13 +1521,6 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 
 		break;
 
-	case STATE_USB_PP_PRE_CHARGE:
-		if (di->batt_data.volt >
-			(di->bm->fg_params->lowbat_threshold +
-			BAT_PLUS_MARGIN))
-			abx500_chargalg_state_to(di, STATE_NORMAL_INIT);
-		break;
-
 	case STATE_NORMAL:
 		handle_maxim_chg_curr(di);
 		if (di->charge_status == POWER_SUPPLY_STATUS_FULL &&
@@ -1599,7 +1538,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 	case STATE_WAIT_FOR_RECHARGE_INIT:
 		abx500_chargalg_hold_charging(di);
 		abx500_chargalg_state_to(di, STATE_WAIT_FOR_RECHARGE);
-		/* Intentional fallthrough */
+		fallthrough;
 
 	case STATE_WAIT_FOR_RECHARGE:
 		if (di->batt_data.percent <=
@@ -1620,7 +1559,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 				di->bm->batt_id].maint_a_cur_lvl);
 		abx500_chargalg_state_to(di, STATE_MAINTENANCE_A);
 		power_supply_changed(di->chargalg_psy);
-		/* Intentional fallthrough*/
+		fallthrough;
 
 	case STATE_MAINTENANCE_A:
 		if (di->events.maintenance_timer_expired) {
@@ -1640,7 +1579,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 				di->bm->batt_id].maint_b_cur_lvl);
 		abx500_chargalg_state_to(di, STATE_MAINTENANCE_B);
 		power_supply_changed(di->chargalg_psy);
-		/* Intentional fallthrough*/
+		fallthrough;
 
 	case STATE_MAINTENANCE_B:
 		if (di->events.maintenance_timer_expired) {
@@ -1659,7 +1598,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 		di->charge_status = POWER_SUPPLY_STATUS_CHARGING;
 		abx500_chargalg_state_to(di, STATE_TEMP_LOWHIGH);
 		power_supply_changed(di->chargalg_psy);
-		/* Intentional fallthrough */
+		fallthrough;
 
 	case STATE_TEMP_LOWHIGH:
 		if (!di->events.btemp_lowhigh)
@@ -1669,7 +1608,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 	case STATE_WD_EXPIRED_INIT:
 		abx500_chargalg_stop_charging(di);
 		abx500_chargalg_state_to(di, STATE_WD_EXPIRED);
-		/* Intentional fallthrough */
+		fallthrough;
 
 	case STATE_WD_EXPIRED:
 		if (!di->events.ac_wd_expired &&
@@ -1680,7 +1619,7 @@ static void abx500_chargalg_algorithm(struct abx500_chargalg *di)
 	case STATE_TEMP_UNDEROVER_INIT:
 		abx500_chargalg_stop_charging(di);
 		abx500_chargalg_state_to(di, STATE_TEMP_UNDEROVER);
-		/* Intentional fallthrough */
+		fallthrough;
 
 	case STATE_TEMP_UNDEROVER:
 		if (!di->events.btemp_underover)
@@ -1885,7 +1824,7 @@ static ssize_t abx500_chargalg_en_store(struct abx500_chargalg *di,
 			"Enter 0. Disable AC/USB Charging\n"
 			"1. Enable AC charging\n"
 			"2. Enable USB Charging\n");
-	};
+	}
 	return strlen(buf);
 }
 
@@ -1975,10 +1914,9 @@ static int abx500_chargalg_sysfs_init(struct abx500_chargalg *di)
 }
 /* Exposure to the sysfs interface <<END>> */
 
-#if defined(CONFIG_PM)
-static int abx500_chargalg_resume(struct platform_device *pdev)
+static int __maybe_unused abx500_chargalg_resume(struct device *dev)
 {
-	struct abx500_chargalg *di = platform_get_drvdata(pdev);
+	struct abx500_chargalg *di = dev_get_drvdata(dev);
 
 	/* Kick charger watchdog if charging (any charger online) */
 	if (di->chg_info.online_chg)
@@ -1993,10 +1931,9 @@ static int abx500_chargalg_resume(struct platform_device *pdev)
 	return 0;
 }
 
-static int abx500_chargalg_suspend(struct platform_device *pdev,
-	pm_message_t state)
+static int __maybe_unused abx500_chargalg_suspend(struct device *dev)
 {
-	struct abx500_chargalg *di = platform_get_drvdata(pdev);
+	struct abx500_chargalg *di = dev_get_drvdata(dev);
 
 	if (di->chg_info.online_chg)
 		cancel_delayed_work_sync(&di->chargalg_wd_work);
@@ -2005,10 +1942,6 @@ static int abx500_chargalg_suspend(struct platform_device *pdev,
 
 	return 0;
 }
-#else
-#define abx500_chargalg_suspend      NULL
-#define abx500_chargalg_resume       NULL
-#endif
 
 static int abx500_chargalg_remove(struct platform_device *pdev)
 {
@@ -2048,7 +1981,6 @@ static const struct power_supply_desc abx500_chargalg_desc = {
 static int abx500_chargalg_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
-	struct abx500_bm_data *plat = pdev->dev.platform_data;
 	struct power_supply_config psy_cfg = {};
 	struct abx500_chargalg *di;
 	int ret = 0;
@@ -2059,18 +1991,12 @@ static int abx500_chargalg_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-	if (!plat) {
-		dev_err(&pdev->dev, "no battery management data supplied\n");
-		return -EINVAL;
-	}
-	di->bm = plat;
+	di->bm = &ab8500_bm_data;
 
-	if (np) {
-		ret = ab8500_bm_of_probe(&pdev->dev, np, di->bm);
-		if (ret) {
-			dev_err(&pdev->dev, "failed to get battery information\n");
-			return ret;
-		}
+	ret = ab8500_bm_of_probe(&pdev->dev, np, di->bm);
+	if (ret) {
+		dev_err(&pdev->dev, "failed to get battery information\n");
+		return ret;
 	}
 
 	/* get device struct and parent */
@@ -2142,6 +2068,8 @@ free_chargalg_wq:
 	return ret;
 }
 
+static SIMPLE_DEV_PM_OPS(abx500_chargalg_pm_ops, abx500_chargalg_suspend, abx500_chargalg_resume);
+
 static const struct of_device_id ab8500_chargalg_match[] = {
 	{ .compatible = "stericsson,ab8500-chargalg", },
 	{ },
@@ -2150,11 +2078,10 @@ static const struct of_device_id ab8500_chargalg_match[] = {
 static struct platform_driver abx500_chargalg_driver = {
 	.probe = abx500_chargalg_probe,
 	.remove = abx500_chargalg_remove,
-	.suspend = abx500_chargalg_suspend,
-	.resume = abx500_chargalg_resume,
 	.driver = {
 		.name = "ab8500-chargalg",
 		.of_match_table = ab8500_chargalg_match,
+		.pm = &abx500_chargalg_pm_ops,
 	},
 };
 

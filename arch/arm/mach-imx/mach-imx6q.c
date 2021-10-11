@@ -1,39 +1,20 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2011-2013 Freescale Semiconductor, Inc.
  * Copyright 2011 Linaro Ltd.
- *
- * The code contained herein is licensed under the GNU General Public
- * License. You may obtain a copy of the GNU General Public License
- * Version 2 or later at the following locations:
- *
- * http://www.opensource.org/licenses/gpl-license.html
- * http://www.gnu.org/copyleft/gpl.html
  */
 
 #include <linux/clk.h>
-#include <linux/clkdev.h>
-#include <linux/cpu.h>
-#include <linux/delay.h>
-#include <linux/export.h>
-#include <linux/init.h>
-#include <linux/io.h>
-#include <linux/irq.h>
 #include <linux/irqchip.h>
-#include <linux/of.h>
-#include <linux/of_address.h>
-#include <linux/of_irq.h>
 #include <linux/of_platform.h>
-#include <linux/pm_opp.h>
 #include <linux/pci.h>
 #include <linux/phy.h>
-#include <linux/reboot.h>
 #include <linux/regmap.h>
 #include <linux/micrel_phy.h>
 #include <linux/mfd/syscon.h>
 #include <linux/mfd/syscon/imx6q-iomuxc-gpr.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
-#include <asm/system_misc.h>
 
 #include "common.h"
 #include "cpuidle.h"
@@ -264,21 +245,20 @@ static void __init imx6q_axi_init(void)
 
 static void __init imx6q_init_machine(void)
 {
-	struct device *parent;
-
-	if (cpu_is_imx6q() && imx_get_soc_revision() == IMX_CHIP_REVISION_2_0)
-		imx_print_silicon_rev("i.MX6QP", IMX_CHIP_REVISION_1_0);
+	if (cpu_is_imx6q() && imx_get_soc_revision() >= IMX_CHIP_REVISION_2_0)
+		/*
+		 * SoCs that identify as i.MX6Q >= rev 2.0 are really i.MX6QP.
+		 * Quirk: i.MX6QP revision = i.MX6Q revision - (1, 0),
+		 * e.g. i.MX6QP rev 1.1 identifies as i.MX6Q rev 2.1.
+		 */
+		imx_print_silicon_rev("i.MX6QP", imx_get_soc_revision() - 0x10);
 	else
 		imx_print_silicon_rev(cpu_is_imx6dl() ? "i.MX6DL" : "i.MX6Q",
 				imx_get_soc_revision());
 
-	parent = imx_soc_device_init();
-	if (parent == NULL)
-		pr_warn("failed to initialize soc device\n");
-
 	imx6q_enet_phy_init();
 
-	of_platform_default_populate(NULL, NULL, parent);
+	of_platform_default_populate(NULL, NULL, NULL);
 
 	imx_anatop_init();
 	cpu_is_imx6q() ?  imx6q_pm_init() : imx6dl_pm_init();
@@ -286,101 +266,20 @@ static void __init imx6q_init_machine(void)
 	imx6q_axi_init();
 }
 
-#define OCOTP_CFG3			0x440
-#define OCOTP_CFG3_SPEED_SHIFT		16
-#define OCOTP_CFG3_SPEED_1P2GHZ		0x3
-#define OCOTP_CFG3_SPEED_996MHZ		0x2
-#define OCOTP_CFG3_SPEED_852MHZ		0x1
-
-static void __init imx6q_opp_check_speed_grading(struct device *cpu_dev)
-{
-	struct device_node *np;
-	void __iomem *base;
-	u32 val;
-
-	np = of_find_compatible_node(NULL, NULL, "fsl,imx6q-ocotp");
-	if (!np) {
-		pr_warn("failed to find ocotp node\n");
-		return;
-	}
-
-	base = of_iomap(np, 0);
-	if (!base) {
-		pr_warn("failed to map ocotp\n");
-		goto put_node;
-	}
-
-	/*
-	 * SPEED_GRADING[1:0] defines the max speed of ARM:
-	 * 2b'11: 1200000000Hz;
-	 * 2b'10: 996000000Hz;
-	 * 2b'01: 852000000Hz; -- i.MX6Q Only, exclusive with 996MHz.
-	 * 2b'00: 792000000Hz;
-	 * We need to set the max speed of ARM according to fuse map.
-	 */
-	val = readl_relaxed(base + OCOTP_CFG3);
-	val >>= OCOTP_CFG3_SPEED_SHIFT;
-	val &= 0x3;
-
-	if ((val != OCOTP_CFG3_SPEED_1P2GHZ) && cpu_is_imx6q())
-		if (dev_pm_opp_disable(cpu_dev, 1200000000))
-			pr_warn("failed to disable 1.2 GHz OPP\n");
-	if (val < OCOTP_CFG3_SPEED_996MHZ)
-		if (dev_pm_opp_disable(cpu_dev, 996000000))
-			pr_warn("failed to disable 996 MHz OPP\n");
-	if (cpu_is_imx6q()) {
-		if (val != OCOTP_CFG3_SPEED_852MHZ)
-			if (dev_pm_opp_disable(cpu_dev, 852000000))
-				pr_warn("failed to disable 852 MHz OPP\n");
-	}
-	iounmap(base);
-put_node:
-	of_node_put(np);
-}
-
-static void __init imx6q_opp_init(void)
-{
-	struct device_node *np;
-	struct device *cpu_dev = get_cpu_device(0);
-
-	if (!cpu_dev) {
-		pr_warn("failed to get cpu0 device\n");
-		return;
-	}
-	np = of_node_get(cpu_dev->of_node);
-	if (!np) {
-		pr_warn("failed to find cpu0 node\n");
-		return;
-	}
-
-	if (dev_pm_opp_of_add_table(cpu_dev)) {
-		pr_warn("failed to init OPP table\n");
-		goto put_node;
-	}
-
-	imx6q_opp_check_speed_grading(cpu_dev);
-
-put_node:
-	of_node_put(np);
-}
-
-static struct platform_device imx6q_cpufreq_pdev = {
-	.name = "imx6q-cpufreq",
-};
-
 static void __init imx6q_init_late(void)
 {
 	/*
-	 * WAIT mode is broken on TO 1.0 and 1.1, so there is no point
-	 * to run cpuidle on them.
+	 * WAIT mode is broken on imx6 Dual/Quad revision 1.0 and 1.1 so
+	 * there is no point to run cpuidle on them.
+	 *
+	 * It does work on imx6 Solo/DualLite starting from 1.1
 	 */
-	if (imx_get_soc_revision() > IMX_CHIP_REVISION_1_1)
+	if ((cpu_is_imx6q() && imx_get_soc_revision() > IMX_CHIP_REVISION_1_1) ||
+	    (cpu_is_imx6dl() && imx_get_soc_revision() > IMX_CHIP_REVISION_1_0))
 		imx6q_cpuidle_init();
 
-	if (IS_ENABLED(CONFIG_ARM_IMX6Q_CPUFREQ)) {
-		imx6q_opp_init();
-		platform_device_register(&imx6q_cpufreq_pdev);
-	}
+	if (IS_ENABLED(CONFIG_ARM_IMX6Q_CPUFREQ))
+		platform_device_register_simple("imx6q-cpufreq", -1, NULL, 0);
 }
 
 static void __init imx6q_map_io(void)

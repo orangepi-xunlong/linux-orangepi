@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _H8300_BITOPS_H
 #define _H8300_BITOPS_H
 
@@ -7,6 +8,10 @@
  */
 
 #include <linux/compiler.h>
+
+#include <asm-generic/bitops/fls.h>
+#include <asm-generic/bitops/__fls.h>
+#include <asm-generic/bitops/fls64.h>
 
 #ifdef __KERNEL__
 
@@ -28,11 +33,11 @@ static inline unsigned long ffz(unsigned long word)
 
 	result = -1;
 	__asm__("1:\n\t"
-		"shlr.l %2\n\t"
+		"shlr.l %1\n\t"
 		"adds #1,%0\n\t"
 		"bcs 1b"
-		: "=r"(result)
-		: "0"(result), "r"(word));
+		: "=r"(result),"=r"(word)
+		: "0"(result), "1"(word));
 	return result;
 }
 
@@ -50,12 +55,6 @@ static inline void FNAME(int nr, volatile unsigned long *addr)	\
 	}							\
 }
 
-/*
- * clear_bit() doesn't provide any barrier for the compiler.
- */
-#define smp_mb__before_clear_bit()	barrier()
-#define smp_mb__after_clear_bit()	barrier()
-
 H8300_GEN_BITOP(set_bit,    "bset")
 H8300_GEN_BITOP(clear_bit,  "bclr")
 H8300_GEN_BITOP(change_bit, "bnot")
@@ -65,7 +64,7 @@ H8300_GEN_BITOP(change_bit, "bnot")
 
 #undef H8300_GEN_BITOP
 
-static inline int test_bit(int nr, const unsigned long *addr)
+static inline int test_bit(int nr, const volatile unsigned long *addr)
 {
 	int ret = 0;
 	unsigned char *b_addr;
@@ -161,11 +160,11 @@ static inline unsigned long __ffs(unsigned long word)
 
 	result = -1;
 	__asm__("1:\n\t"
-		"shlr.l %2\n\t"
+		"shlr.l %1\n\t"
 		"adds #1,%0\n\t"
 		"bcc 1b"
-		: "=r" (result)
-		: "0"(result), "r"(word));
+		: "=r" (result),"=r"(word)
+		: "0"(result), "1"(word));
 	return result;
 }
 
@@ -177,9 +176,5 @@ static inline unsigned long __ffs(unsigned long word)
 #include <asm-generic/bitops/ext2-atomic.h>
 
 #endif /* __KERNEL__ */
-
-#include <asm-generic/bitops/fls.h>
-#include <asm-generic/bitops/__fls.h>
-#include <asm-generic/bitops/fls64.h>
 
 #endif /* _H8300_BITOPS_H */

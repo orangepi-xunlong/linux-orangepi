@@ -1,53 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB
 /*
  * Copyright (c) 2016 Mellanox Technologies Ltd. All rights reserved.
  * Copyright (c) 2015 System Fabric Works, Inc. All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * OpenIB.org BSD license below:
- *
- *	   Redistribution and use in source and binary forms, with or
- *	   without modification, are permitted provided that the following
- *	   conditions are met:
- *
- *		- Redistributions of source code must retain the above
- *		  copyright notice, this list of conditions and the following
- *		  disclaimer.
- *
- *		- Redistributions in binary form must reproduce the above
- *		  copyright notice, this list of conditions and the following
- *		  disclaimer in the documentation and/or other materials
- *		  provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
  */
 
 #include <linux/skbuff.h>
 #include <linux/delay.h>
 #include <linux/sched.h>
+#include <linux/vmalloc.h>
+#include <rdma/uverbs_ioctl.h>
 
 #include "rxe.h"
 #include "rxe_loc.h"
 #include "rxe_queue.h"
 #include "rxe_task.h"
-
-char *rxe_qp_state_name[] = {
-	[QP_STATE_RESET]	= "RESET",
-	[QP_STATE_INIT]		= "INIT",
-	[QP_STATE_READY]	= "READY",
-	[QP_STATE_DRAIN]	= "DRAIN",
-	[QP_STATE_DRAINED]	= "DRAINED",
-	[QP_STATE_ERROR]	= "ERROR",
-};
 
 static int rxe_qp_chk_cap(struct rxe_dev *rxe, struct ib_qp_cap *cap,
 			  int has_srq)
@@ -58,9 +24,9 @@ static int rxe_qp_chk_cap(struct rxe_dev *rxe, struct ib_qp_cap *cap,
 		goto err1;
 	}
 
-	if (cap->max_send_sge > rxe->attr.max_sge) {
+	if (cap->max_send_sge > rxe->attr.max_send_sge) {
 		pr_warn("invalid send sge = %d > %d\n",
-			cap->max_send_sge, rxe->attr.max_sge);
+			cap->max_send_sge, rxe->attr.max_send_sge);
 		goto err1;
 	}
 
@@ -71,9 +37,9 @@ static int rxe_qp_chk_cap(struct rxe_dev *rxe, struct ib_qp_cap *cap,
 			goto err1;
 		}
 
-		if (cap->max_recv_sge > rxe->attr.max_sge) {
+		if (cap->max_recv_sge > rxe->attr.max_recv_sge) {
 			pr_warn("invalid recv sge = %d > %d\n",
-				cap->max_recv_sge, rxe->attr.max_sge);
+				cap->max_recv_sge, rxe->attr.max_recv_sge);
 			goto err1;
 		}
 	}
@@ -96,6 +62,17 @@ int rxe_qp_chk_init(struct rxe_dev *rxe, struct ib_qp_init_attr *init)
 	struct rxe_port *port;
 	int port_num = init->port_num;
 
+	switch (init->qp_type) {
+	case IB_QPT_SMI:
+	case IB_QPT_GSI:
+	case IB_QPT_RC:
+	case IB_QPT_UC:
+	case IB_QPT_UD:
+		break;
+	default:
+		return -EOPNOTSUPP;
+	}
+
 	if (!init->recv_cq || !init->send_cq) {
 		pr_warn("missing cq\n");
 		goto err1;
@@ -105,7 +82,7 @@ int rxe_qp_chk_init(struct rxe_dev *rxe, struct ib_qp_init_attr *init)
 		goto err1;
 
 	if (init->qp_type == IB_QPT_SMI || init->qp_type == IB_QPT_GSI) {
-		if (port_num != 1) {
+		if (!rdma_is_port_valid(&rxe->ib_dev, port_num)) {
 			pr_warn("invalid port = %d\n", port_num);
 			goto err1;
 		}
@@ -224,8 +201,8 @@ static void rxe_qp_init_misc(struct rxe_dev *rxe, struct rxe_qp *qp,
 }
 
 static int rxe_qp_init_req(struct rxe_dev *rxe, struct rxe_qp *qp,
-			   struct ib_qp_init_attr *init,
-			   struct ib_ucontext *context, struct ib_udata *udata)
+			   struct ib_qp_init_attr *init, struct ib_udata *udata,
+			   struct rxe_create_qp_resp __user *uresp)
 {
 	int err;
 	int wqe_size;
@@ -235,28 +212,37 @@ static int rxe_qp_init_req(struct rxe_dev *rxe, struct rxe_qp *qp,
 		return err;
 	qp->sk->sk->sk_user_data = qp;
 
+	/* pick a source UDP port number for this QP based on
+	 * the source QPN. this spreads traffic for different QPs
+	 * across different NIC RX queues (while using a single
+	 * flow for a given QP to maintain packet order).
+	 * the port number must be in the Dynamic Ports range
+	 * (0xc000 - 0xffff).
+	 */
+	qp->src_port = RXE_ROCE_V2_SPORT +
+		(hash_32_generic(qp_num(qp), 14) & 0x3fff);
 	qp->sq.max_wr		= init->cap.max_send_wr;
-	qp->sq.max_sge		= init->cap.max_send_sge;
-	qp->sq.max_inline	= init->cap.max_inline_data;
 
-	wqe_size = max_t(int, sizeof(struct rxe_send_wqe) +
-			 qp->sq.max_sge * sizeof(struct ib_sge),
-			 sizeof(struct rxe_send_wqe) +
-			 qp->sq.max_inline);
+	/* These caps are limited by rxe_qp_chk_cap() done by the caller */
+	wqe_size = max_t(int, init->cap.max_send_sge * sizeof(struct ib_sge),
+			 init->cap.max_inline_data);
+	qp->sq.max_sge = init->cap.max_send_sge =
+		wqe_size / sizeof(struct ib_sge);
+	qp->sq.max_inline = init->cap.max_inline_data = wqe_size;
+	wqe_size += sizeof(struct rxe_send_wqe);
 
-	qp->sq.queue = rxe_queue_init(rxe,
-				      &qp->sq.max_wr,
-				      wqe_size);
+	qp->sq.queue = rxe_queue_init(rxe, &qp->sq.max_wr, wqe_size);
 	if (!qp->sq.queue)
 		return -ENOMEM;
 
-	err = do_mmap_info(rxe, udata, true,
-			   context, qp->sq.queue->buf,
-			   qp->sq.queue->buf_size, &qp->sq.queue->ip);
+	err = do_mmap_info(rxe, uresp ? &uresp->sq_mi : NULL, udata,
+			   qp->sq.queue->buf, qp->sq.queue->buf_size,
+			   &qp->sq.queue->ip);
 
 	if (err) {
-		kvfree(qp->sq.queue->buf);
+		vfree(qp->sq.queue->buf);
 		kfree(qp->sq.queue);
+		qp->sq.queue = NULL;
 		return err;
 	}
 
@@ -273,21 +259,18 @@ static int rxe_qp_init_req(struct rxe_dev *rxe, struct rxe_qp *qp,
 	rxe_init_task(rxe, &qp->comp.task, qp,
 		      rxe_completer, "comp");
 
-	init_timer(&qp->rnr_nak_timer);
-	qp->rnr_nak_timer.function = rnr_nak_timer;
-	qp->rnr_nak_timer.data = (unsigned long)qp;
-
-	init_timer(&qp->retrans_timer);
-	qp->retrans_timer.function = retransmit_timer;
-	qp->retrans_timer.data = (unsigned long)qp;
 	qp->qp_timeout_jiffies = 0; /* Can't be set for UD/UC in modify_qp */
-
+	if (init->qp_type == IB_QPT_RC) {
+		timer_setup(&qp->rnr_nak_timer, rnr_nak_timer, 0);
+		timer_setup(&qp->retrans_timer, retransmit_timer, 0);
+	}
 	return 0;
 }
 
 static int rxe_qp_init_resp(struct rxe_dev *rxe, struct rxe_qp *qp,
 			    struct ib_qp_init_attr *init,
-			    struct ib_ucontext *context, struct ib_udata *udata)
+			    struct ib_udata *udata,
+			    struct rxe_create_qp_resp __user *uresp)
 {
 	int err;
 	int wqe_size;
@@ -307,13 +290,13 @@ static int rxe_qp_init_resp(struct rxe_dev *rxe, struct rxe_qp *qp,
 		if (!qp->rq.queue)
 			return -ENOMEM;
 
-		err = do_mmap_info(rxe, udata, false, context,
-				   qp->rq.queue->buf,
-				   qp->rq.queue->buf_size,
+		err = do_mmap_info(rxe, uresp ? &uresp->rq_mi : NULL, udata,
+				   qp->rq.queue->buf, qp->rq.queue->buf_size,
 				   &qp->rq.queue->ip);
 		if (err) {
-			kvfree(qp->rq.queue->buf);
+			vfree(qp->rq.queue->buf);
 			kfree(qp->rq.queue);
+			qp->rq.queue = NULL;
 			return err;
 		}
 	}
@@ -335,14 +318,15 @@ static int rxe_qp_init_resp(struct rxe_dev *rxe, struct rxe_qp *qp,
 
 /* called by the create qp verb */
 int rxe_qp_from_init(struct rxe_dev *rxe, struct rxe_qp *qp, struct rxe_pd *pd,
-		     struct ib_qp_init_attr *init, struct ib_udata *udata,
-		     struct ib_pd *ibpd)
+		     struct ib_qp_init_attr *init,
+		     struct rxe_create_qp_resp __user *uresp,
+		     struct ib_pd *ibpd,
+		     struct ib_udata *udata)
 {
 	int err;
 	struct rxe_cq *rcq = to_rcq(init->recv_cq);
 	struct rxe_cq *scq = to_rcq(init->send_cq);
 	struct rxe_srq *srq = init->srq ? to_rsrq(init->srq) : NULL;
-	struct ib_ucontext *context = udata ? ibpd->uobject->context : NULL;
 
 	rxe_add_ref(pd);
 	rxe_add_ref(rcq);
@@ -357,11 +341,11 @@ int rxe_qp_from_init(struct rxe_dev *rxe, struct rxe_qp *qp, struct rxe_pd *pd,
 
 	rxe_qp_init_misc(rxe, qp, init);
 
-	err = rxe_qp_init_req(rxe, qp, init, context, udata);
+	err = rxe_qp_init_req(rxe, qp, init, udata, uresp);
 	if (err)
 		goto err1;
 
-	err = rxe_qp_init_resp(rxe, qp, init, context, udata);
+	err = rxe_qp_init_resp(rxe, qp, init, udata, uresp);
 	if (err)
 		goto err2;
 
@@ -373,6 +357,11 @@ int rxe_qp_from_init(struct rxe_dev *rxe, struct rxe_qp *qp, struct rxe_pd *pd,
 err2:
 	rxe_queue_cleanup(qp->sq.queue);
 err1:
+	qp->pd = NULL;
+	qp->rcq = NULL;
+	qp->scq = NULL;
+	qp->srq = NULL;
+
 	if (srq)
 		rxe_drop_ref(srq);
 	rxe_drop_ref(scq);
@@ -419,8 +408,7 @@ int rxe_qp_chk_attr(struct rxe_dev *rxe, struct rxe_qp *qp,
 	enum ib_qp_state new_state = (mask & IB_QP_STATE) ?
 					attr->qp_state : cur_state;
 
-	if (!ib_modify_qp_is_ok(cur_state, new_state, qp_type(qp), mask,
-				IB_LINK_LAYER_ETHERNET)) {
+	if (!ib_modify_qp_is_ok(cur_state, new_state, qp_type(qp), mask)) {
 		pr_warn("invalid mask or state for qp\n");
 		goto err1;
 	}
@@ -434,7 +422,7 @@ int rxe_qp_chk_attr(struct rxe_dev *rxe, struct rxe_qp *qp,
 	}
 
 	if (mask & IB_QP_PORT) {
-		if (attr->port_num != 1) {
+		if (!rdma_is_port_valid(&rxe->ib_dev, attr->port_num)) {
 			pr_warn("invalid port %d\n", attr->port_num);
 			goto err1;
 		}
@@ -449,7 +437,7 @@ int rxe_qp_chk_attr(struct rxe_dev *rxe, struct rxe_qp *qp,
 	if (mask & IB_QP_ALT_PATH) {
 		if (rxe_av_chk_attr(rxe, &attr->alt_ah_attr))
 			goto err1;
-		if (attr->alt_port_num != 1) {
+		if (!rdma_is_port_valid(&rxe->ib_dev, attr->alt_port_num))  {
 			pr_warn("invalid alt port %d\n", attr->alt_port_num);
 			goto err1;
 		}
@@ -591,20 +579,18 @@ int rxe_qp_from_attr(struct rxe_qp *qp, struct ib_qp_attr *attr, int mask,
 		     struct ib_udata *udata)
 {
 	int err;
-	struct rxe_dev *rxe = to_rdev(qp->ibqp.device);
-	union ib_gid sgid;
-	struct ib_gid_attr sgid_attr;
 
 	if (mask & IB_QP_MAX_QP_RD_ATOMIC) {
-		int max_rd_atomic = __roundup_pow_of_two(attr->max_rd_atomic);
+		int max_rd_atomic = attr->max_rd_atomic ?
+			roundup_pow_of_two(attr->max_rd_atomic) : 0;
 
 		qp->attr.max_rd_atomic = max_rd_atomic;
 		atomic_set(&qp->req.rd_atomic, max_rd_atomic);
 	}
 
 	if (mask & IB_QP_MAX_DEST_RD_ATOMIC) {
-		int max_dest_rd_atomic =
-			__roundup_pow_of_two(attr->max_dest_rd_atomic);
+		int max_dest_rd_atomic = attr->max_dest_rd_atomic ?
+			roundup_pow_of_two(attr->max_dest_rd_atomic) : 0;
 
 		qp->attr.max_dest_rd_atomic = max_dest_rd_atomic;
 
@@ -633,30 +619,11 @@ int rxe_qp_from_attr(struct rxe_qp *qp, struct ib_qp_attr *attr, int mask,
 	if (mask & IB_QP_QKEY)
 		qp->attr.qkey = attr->qkey;
 
-	if (mask & IB_QP_AV) {
-		ib_get_cached_gid(&rxe->ib_dev, 1,
-				  attr->ah_attr.grh.sgid_index, &sgid,
-				  &sgid_attr);
-		rxe_av_from_attr(rxe, attr->port_num, &qp->pri_av,
-				 &attr->ah_attr);
-		rxe_av_fill_ip_info(rxe, &qp->pri_av, &attr->ah_attr,
-				    &sgid_attr, &sgid);
-		if (sgid_attr.ndev)
-			dev_put(sgid_attr.ndev);
-	}
+	if (mask & IB_QP_AV)
+		rxe_init_av(&attr->ah_attr, &qp->pri_av);
 
 	if (mask & IB_QP_ALT_PATH) {
-		ib_get_cached_gid(&rxe->ib_dev, 1,
-				  attr->alt_ah_attr.grh.sgid_index, &sgid,
-				  &sgid_attr);
-
-		rxe_av_from_attr(rxe, attr->alt_port_num, &qp->alt_av,
-				 &attr->alt_ah_attr);
-		rxe_av_fill_ip_info(rxe, &qp->alt_av, &attr->alt_ah_attr,
-				    &sgid_attr, &sgid);
-		if (sgid_attr.ndev)
-			dev_put(sgid_attr.ndev);
-
+		rxe_init_av(&attr->alt_ah_attr, &qp->alt_av);
 		qp->attr.alt_port_num = attr->alt_port_num;
 		qp->attr.alt_pkey_index = attr->alt_pkey_index;
 		qp->attr.alt_timeout = attr->alt_timeout;
@@ -767,8 +734,6 @@ int rxe_qp_from_attr(struct rxe_qp *qp, struct ib_qp_attr *attr, int mask,
 /* called by the query qp verb */
 int rxe_qp_to_attr(struct rxe_qp *qp, struct ib_qp_attr *attr, int mask)
 {
-	struct rxe_dev *rxe = to_rdev(qp->ibqp.device);
-
 	*attr = qp->attr;
 
 	attr->rq_psn				= qp->resp.psn;
@@ -783,8 +748,8 @@ int rxe_qp_to_attr(struct rxe_qp *qp, struct ib_qp_attr *attr, int mask)
 		attr->cap.max_recv_sge		= qp->rq.max_sge;
 	}
 
-	rxe_av_to_attr(rxe, &qp->pri_av, &attr->ah_attr);
-	rxe_av_to_attr(rxe, &qp->alt_av, &attr->alt_ah_attr);
+	rxe_av_to_attr(&qp->pri_av, &attr->ah_attr);
+	rxe_av_to_attr(&qp->alt_av, &attr->alt_ah_attr);
 
 	if (qp->req.state == QP_STATE_DRAIN) {
 		attr->sq_draining = 1;
@@ -809,8 +774,10 @@ void rxe_qp_destroy(struct rxe_qp *qp)
 	qp->qp_timeout_jiffies = 0;
 	rxe_cleanup_task(&qp->resp.task);
 
-	del_timer_sync(&qp->retrans_timer);
-	del_timer_sync(&qp->rnr_nak_timer);
+	if (qp_type(qp) == IB_QPT_RC) {
+		del_timer_sync(&qp->retrans_timer);
+		del_timer_sync(&qp->rnr_nak_timer);
+	}
 
 	rxe_cleanup_task(&qp->req.task);
 	rxe_cleanup_task(&qp->comp.task);
@@ -824,9 +791,9 @@ void rxe_qp_destroy(struct rxe_qp *qp)
 }
 
 /* called when the last reference to the qp is dropped */
-void rxe_qp_cleanup(void *arg)
+static void rxe_qp_do_cleanup(struct work_struct *work)
 {
-	struct rxe_qp *qp = arg;
+	struct rxe_qp *qp = container_of(work, typeof(*qp), cleanup_work.work);
 
 	rxe_drop_all_mcast_groups(qp);
 
@@ -851,8 +818,19 @@ void rxe_qp_cleanup(void *arg)
 		qp->resp.mr = NULL;
 	}
 
+	if (qp_type(qp) == IB_QPT_RC)
+		sk_dst_reset(qp->sk->sk);
+
 	free_rd_atomic_resources(qp);
 
 	kernel_sock_shutdown(qp->sk, SHUT_RDWR);
 	sock_release(qp->sk);
+}
+
+/* called when the last reference to the qp is dropped */
+void rxe_qp_cleanup(struct rxe_pool_entry *arg)
+{
+	struct rxe_qp *qp = container_of(arg, typeof(*qp), pelem);
+
+	execute_in_process_context(rxe_qp_do_cleanup, &qp->cleanup_work);
 }

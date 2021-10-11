@@ -1,13 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * bpf_jit64.h: BPF JIT compiler for PPC64
  *
  * Copyright 2016 Naveen N. Rao <naveen.n.rao@linux.vnet.ibm.com>
  *		  IBM Corporation
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2
- * of the License.
  */
 #ifndef _BPF_JIT64_H
 #define _BPF_JIT64_H
@@ -20,32 +16,30 @@
  * with our redzone usage.
  *
  *		[	prev sp		] <-------------
- *		[   nv gpr save area	] 8*8		|
+ *		[   nv gpr save area	] 6*8		|
  *		[    tail_call_cnt	] 8		|
  *		[    local_tmp_var	] 8		|
- * fp (r31) -->	[   ebpf stack space	] 512		|
+ * fp (r31) -->	[   ebpf stack space	] upto 512	|
  *		[     frame header	] 32/112	|
  * sp (r1) --->	[    stack pointer	] --------------
  */
 
-/* for gpr non volatile registers BPG_REG_6 to 10, plus skb cache registers */
-#define BPF_PPC_STACK_SAVE	(8*8)
+/* for gpr non volatile registers BPG_REG_6 to 10 */
+#define BPF_PPC_STACK_SAVE	(6*8)
 /* for bpf JIT code internal usage */
 #define BPF_PPC_STACK_LOCALS	16
-/* Ensure this is quadword aligned */
-#define BPF_PPC_STACKFRAME	(STACK_FRAME_MIN_SIZE + MAX_BPF_STACK + \
+/* stack frame excluding BPF stack, ensure this is quadword aligned */
+#define BPF_PPC_STACKFRAME	(STACK_FRAME_MIN_SIZE + \
 				 BPF_PPC_STACK_LOCALS + BPF_PPC_STACK_SAVE)
 
 #ifndef __ASSEMBLY__
 
 /* BPF register usage */
-#define SKB_HLEN_REG	(MAX_BPF_JIT_REG + 0)
-#define SKB_DATA_REG	(MAX_BPF_JIT_REG + 1)
-#define TMP_REG_1	(MAX_BPF_JIT_REG + 2)
-#define TMP_REG_2	(MAX_BPF_JIT_REG + 3)
+#define TMP_REG_1	(MAX_BPF_JIT_REG + 0)
+#define TMP_REG_2	(MAX_BPF_JIT_REG + 1)
 
 /* BPF to ppc register mappings */
-static const int b2p[] = {
+const int b2p[MAX_BPF_JIT_REG + 2] = {
 	/* function return value */
 	[BPF_REG_0] = 8,
 	/* function arguments */
@@ -63,47 +57,34 @@ static const int b2p[] = {
 	[BPF_REG_FP] = 31,
 	/* eBPF jit internal registers */
 	[BPF_REG_AX] = 2,
-	[SKB_HLEN_REG] = 25,
-	[SKB_DATA_REG] = 26,
 	[TMP_REG_1] = 9,
 	[TMP_REG_2] = 10
 };
 
-/* PPC NVR range -- update this if we ever use NVRs below r24 */
-#define BPF_PPC_NVR_MIN		24
+/* PPC NVR range -- update this if we ever use NVRs below r27 */
+#define BPF_PPC_NVR_MIN		27
 
-/* Assembly helpers */
-#define DECLARE_LOAD_FUNC(func)	u64 func(u64 r3, u64 r4);			\
-				u64 func##_negative_offset(u64 r3, u64 r4);	\
-				u64 func##_positive_offset(u64 r3, u64 r4);
-
-DECLARE_LOAD_FUNC(sk_load_word);
-DECLARE_LOAD_FUNC(sk_load_half);
-DECLARE_LOAD_FUNC(sk_load_byte);
-
-#define CHOOSE_LOAD_FUNC(imm, func)						\
-			(imm < 0 ?						\
-			(imm >= SKF_LL_OFF ? func##_negative_offset : func) :	\
-			func##_positive_offset)
-
-#define SEEN_FUNC	0x1000 /* might call external helpers */
-#define SEEN_STACK	0x2000 /* uses BPF stack */
-#define SEEN_SKB	0x4000 /* uses sk_buff */
-#define SEEN_TAILCALL	0x8000 /* uses tail calls */
-
-struct codegen_context {
-	/*
-	 * This is used to track register usage as well
-	 * as calls to external helpers.
-	 * - register usage is tracked with corresponding
-	 *   bits (r3-r10 and r25-r31)
-	 * - rest of the bits can be used to track other
-	 *   things -- for now, we use bits 16 to 23
-	 *   encoded in SEEN_* macros above
-	 */
-	unsigned int seen;
-	unsigned int idx;
-};
+/*
+ * WARNING: These can use TMP_REG_2 if the offset is not at word boundary,
+ * so ensure that it isn't in use already.
+ */
+#define PPC_BPF_LL(r, base, i) do {					      \
+				if ((i) % 4) {				      \
+					EMIT(PPC_RAW_LI(b2p[TMP_REG_2], (i)));\
+					EMIT(PPC_RAW_LDX(r, base,	      \
+							b2p[TMP_REG_2]));     \
+				} else					      \
+					EMIT(PPC_RAW_LD(r, base, i));	      \
+				} while(0)
+#define PPC_BPF_STL(r, base, i) do {					      \
+				if ((i) % 4) {				      \
+					EMIT(PPC_RAW_LI(b2p[TMP_REG_2], (i)));\
+					EMIT(PPC_RAW_STDX(r, base,	      \
+							b2p[TMP_REG_2]));     \
+				} else					      \
+					EMIT(PPC_RAW_STD(r, base, i));	      \
+				} while(0)
+#define PPC_BPF_STLU(r, base, i) do { EMIT(PPC_RAW_STDU(r, base, i)); } while(0)
 
 #endif /* !__ASSEMBLY__ */
 

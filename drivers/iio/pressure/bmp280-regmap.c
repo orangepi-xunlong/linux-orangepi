@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/device.h>
 #include <linux/module.h>
 #include <linux/regmap.h>
@@ -12,7 +13,7 @@ static bool bmp180_is_writeable_reg(struct device *dev, unsigned int reg)
 		return true;
 	default:
 		return false;
-	};
+	}
 }
 
 static bool bmp180_is_volatile_reg(struct device *dev, unsigned int reg)
@@ -50,7 +51,7 @@ static bool bmp280_is_writeable_reg(struct device *dev, unsigned int reg)
 		return true;
 	default:
 		return false;
-	};
+	}
 }
 
 static bool bmp280_is_volatile_reg(struct device *dev, unsigned int reg)

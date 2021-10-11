@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* display7seg.c - Driver implementation for the 7-segment display
  *                 present on Sun Microsystems CP1400 and CP1500
  *
@@ -17,12 +18,11 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/atomic.h>
-#include <asm/uaccess.h>		/* put_/get_user			*/
+#include <linux/uaccess.h>		/* put_/get_user			*/
 #include <asm/io.h>
 
 #include <asm/display7seg.h>
 
-#define D7S_MINOR	193
 #define DRIVER_NAME	"d7s"
 #define PFX		DRIVER_NAME ": "
 
@@ -50,7 +50,6 @@ MODULE_PARM_DESC(sol_compat,
 MODULE_AUTHOR("Eric Brower <ebrower@usa.net>");
 MODULE_DESCRIPTION("7-Segment Display driver for Sun Microsystems CP1400/1500");
 MODULE_LICENSE("GPL");
-MODULE_SUPPORTED_DEVICE("d7s");
 
 struct d7s {
 	void __iomem	*regs;
@@ -156,7 +155,7 @@ static long d7s_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 static const struct file_operations d7s_fops = {
 	.owner =		THIS_MODULE,
 	.unlocked_ioctl =	d7s_ioctl,
-	.compat_ioctl =		d7s_ioctl,
+	.compat_ioctl =		compat_ptr_ioctl,
 	.open =			d7s_open,
 	.release =		d7s_release,
 	.llseek = noop_llseek,
@@ -186,7 +185,7 @@ static int d7s_probe(struct platform_device *op)
 	p->regs = of_ioremap(&op->resource[0], 0, sizeof(u8), "d7s");
 	if (!p->regs) {
 		printk(KERN_ERR PFX "Cannot map chip registers\n");
-		goto out_free;
+		goto out;
 	}
 
 	err = misc_register(&d7s_miscdev);
@@ -212,8 +211,8 @@ static int d7s_probe(struct platform_device *op)
 
 	writeb(regs,  p->regs);
 
-	printk(KERN_INFO PFX "7-Segment Display%s at [%s:0x%llx] %s\n",
-	       op->dev.of_node->full_name,
+	printk(KERN_INFO PFX "7-Segment Display%pOF at [%s:0x%llx] %s\n",
+	       op->dev.of_node,
 	       (regs & D7S_FLIP) ? " (FLIPPED)" : "",
 	       op->resource[0].start,
 	       sol_compat ? "in sol_compat mode" : "");
@@ -221,14 +220,13 @@ static int d7s_probe(struct platform_device *op)
 	dev_set_drvdata(&op->dev, p);
 	d7s_device = p;
 	err = 0;
+	of_node_put(opts);
 
 out:
 	return err;
 
 out_iounmap:
 	of_iounmap(&op->resource[0], p->regs, sizeof(u8));
-
-out_free:
 	goto out;
 }
 

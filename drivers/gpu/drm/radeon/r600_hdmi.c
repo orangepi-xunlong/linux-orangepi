@@ -25,11 +25,12 @@
  */
 #include <linux/hdmi.h>
 #include <linux/gcd.h>
-#include <drm/drmP.h>
+
 #include <drm/radeon_drm.h>
 #include "radeon.h"
 #include "radeon_asic.h"
 #include "radeon_audio.h"
+#include "r600.h"
 #include "r600d.h"
 #include "atom.h"
 
@@ -58,7 +59,7 @@ enum r600_hdmi_iec_status_bits {
 
 static struct r600_audio_pin r600_audio_status(struct radeon_device *rdev)
 {
-	struct r600_audio_pin status;
+	struct r600_audio_pin status = {};
 	uint32_t value;
 
 	value = RREG32(R600_AUDIO_RATE_BPS_CHANNEL);

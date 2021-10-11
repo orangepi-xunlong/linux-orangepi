@@ -16,7 +16,7 @@
 #include <linux/list.h>
 #include <linux/rbtree.h>
 #include <linux/spinlock.h>
-#include <linux/fence.h>
+#include <linux/dma-fence.h>
 
 #include <linux/sync_file.h>
 #include <uapi/linux/sync_file.h>
@@ -45,7 +45,7 @@ struct sync_timeline {
 	struct list_head	sync_timeline_list;
 };
 
-static inline struct sync_timeline *fence_parent(struct fence *fence)
+static inline struct sync_timeline *dma_fence_parent(struct dma_fence *fence)
 {
 	return container_of(fence->lock, struct sync_timeline, lock);
 }
@@ -57,12 +57,10 @@ static inline struct sync_timeline *fence_parent(struct fence *fence)
  * @node: node in the sync timeline's tree
  */
 struct sync_pt {
-	struct fence base;
+	struct dma_fence base;
 	struct list_head link;
 	struct rb_node node;
 };
-
-#ifdef CONFIG_SW_SYNC
 
 extern const struct file_operations sw_sync_debugfs_fops;
 
@@ -70,14 +68,5 @@ void sync_timeline_debug_add(struct sync_timeline *obj);
 void sync_timeline_debug_remove(struct sync_timeline *obj);
 void sync_file_debug_add(struct sync_file *fence);
 void sync_file_debug_remove(struct sync_file *fence);
-void sync_dump(void);
-
-#else
-# define sync_timeline_debug_add(obj)
-# define sync_timeline_debug_remove(obj)
-# define sync_file_debug_add(fence)
-# define sync_file_debug_remove(fence)
-# define sync_dump()
-#endif
 
 #endif /* _LINUX_SYNC_H */

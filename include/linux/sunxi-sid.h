@@ -44,8 +44,18 @@
 #define SUNXI_CHIP_SUN8IW15   (0x17550000)
 #define SUN8IW15P1_REV_A SUNXI_CHIP_REV(SUNXI_CHIP_SUN8IW15, 0x0000)
 
+#define SUNXI_CHIP_SUN8IW16   (0x18160000)
+#define SUN8IW16P1_REV_A SUNXI_CHIP_REV(SUNXI_CHIP_SUN8IW16, 0x0000)
+#define SUN8IW16P1_REV_B SUNXI_CHIP_REV(SUNXI_CHIP_SUN8IW16, 0x0001)
+
+#define SUNXI_CHIP_SUN8IW19   (0x18170000)
+#define SUN8IW19P1_REV_A SUNXI_CHIP_REV(SUNXI_CHIP_SUN8IW19, 0x0000)
+
 #define SUNXI_CHIP_SUN8IW17   (0x17080000)
 #define SUN8IW17P1_REV_A SUNXI_CHIP_REV(SUNXI_CHIP_SUN8IW17, 0x0000)
+
+#define SUNXI_CHIP_SUN8IW18   (0x18210000)
+#define SUN8IW18P1_REV_A SUNXI_CHIP_REV(SUNXI_CHIP_SUN8IW18, 0x0000)
 
 #define SUNXI_CHIP_SUN50IW1   (0x16890000)
 #define SUN50IW1P1_REV_A	SUNXI_CHIP_REV(SUNXI_CHIP_SUN50IW1, 0x0)
@@ -58,6 +68,14 @@
 
 #define SUNXI_CHIP_SUN50IW6   (0x17280000)
 #define SUN50IW6P1_REV_A	SUNXI_CHIP_REV(SUNXI_CHIP_SUN50IW6, 0x0)
+
+#define SUNXI_CHIP_SUN50IW9   (0x18230000)
+#define SUN50IW9P1_REV_A	SUNXI_CHIP_REV(SUNXI_CHIP_SUN50IW9, 0x0)
+#define SUN50IW9P1_REV_B	SUNXI_CHIP_REV(SUNXI_CHIP_SUN50IW9, 0x1)
+
+#define SUNXI_CHIP_SUN50IW10  (0x18550000)
+#define SUN50IW10P1_REV_A	SUNXI_CHIP_REV(SUNXI_CHIP_SUN50IW10, 0x0)
+
 /* The key info in Efuse */
 
 #define EFUSE_CHIPID_NAME            "chipid"
@@ -70,6 +88,12 @@
 #define EFUSE_OEM_NAME               "oem"
 #define EFUSE_ANTI_BLUSH_NAME        "anti_blushing"
 
+#define EFUSE_PSENSOR_NAME           "psensor"
+#define EFUSE_DDR_CFG_NAME           "ddr_cfg"
+#define EFUSE_LDOA_NAME              "ldoa"
+#define EFUSE_LDOB_NAME              "ldob"
+#define EFUSE_AUDIO_BIAS_NAME        "audio_bias"
+#define EFUSE_GAMMA_NAME             "gamma"
 #define EFUSE_WR_PROTECT_NAME        "write_protect"
 #define EFUSE_RD_PROTECT_NAME        "read_protect"
 #define EFUSE_IN_NAME                "in"
@@ -85,6 +109,7 @@
 #define EFUSE_NV1_NAME               "nv1"
 #define EFUSE_NV2_NAME               "nv2"
 #define EFUSE_BACKUP_KEY_NAME        "backup_key"
+#define EFUSE_BACKUP_KEY2_NAME       "backup_key2"
 #define EFUSE_TCON_PARM_NAME         "tcon_parm"
 #define EFUSE_RSAKEY_HASH_NAME       "rsakey_hash"
 #define EFUSE_RENEW_NAME             "renewability"
@@ -103,7 +128,7 @@
 #define SID_OP_LOCK			0xAC
 
 #define EFUSE_CHIPID_BASE	"allwinner,sunxi-chipid"
-#define EFUSE_SID_BASE		"allwinner,sunxi-sid"
+#define EFUSE_SID_BASE		"allwinner,sun50i-h616-sid"
 
 #define sunxi_efuse_read(key_name, read_buf) \
 		sunxi_efuse_readn(key_name, read_buf, 1024)
@@ -113,6 +138,8 @@
 unsigned int sunxi_get_soc_ver(void);
 int sunxi_get_soc_chipid(unsigned char *chipid);
 int sunxi_get_soc_chipid_str(char *chipid);
+int sunxi_get_soc_ft_zone_str(char *serial);
+int sunxi_get_soc_rotpk_status_str(char *status);
 int sunxi_get_pmu_chipid(unsigned char *chipid);
 int sunxi_get_serial(unsigned char *serial);
 unsigned int sunxi_get_soc_bin(void);

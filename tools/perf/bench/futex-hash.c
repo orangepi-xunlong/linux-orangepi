@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2013  Davidlohr Bueso <davidlohr@hp.com>
  *
@@ -9,6 +10,7 @@
  */
 
 /* For the CLR_() macros */
+#include <string.h>
 #include <pthread.h>
 
 #include <errno.h>
@@ -16,7 +18,9 @@
 #include <stdlib.h>
 #include <linux/compiler.h>
 #include <linux/kernel.h>
+#include <linux/zalloc.h>
 #include <sys/time.h>
+#include <perf/cpumap.h>
 
 #include "../util/stat.h"
 #include <subcmd/parse-options.h>
@@ -24,7 +28,6 @@
 #include "futex.h"
 
 #include <err.h>
-#include <sys/time.h>
 
 static unsigned int nthreads = 0;
 static unsigned int nsecs    = 10;
@@ -33,7 +36,7 @@ static unsigned int nfutexes = 1024;
 static bool fshared = false, done = false, silent = false;
 static int futex_flag = 0;
 
-struct timeval start, end, runtime;
+struct timeval bench__start, bench__end, bench__runtime;
 static pthread_mutex_t thread_lock;
 static unsigned int threads_starting;
 static struct stats throughput_stats;
@@ -63,8 +66,9 @@ static const char * const bench_futex_hash_usage[] = {
 static void *workerfn(void *arg)
 {
 	int ret;
-	unsigned int i;
 	struct worker *w = (struct worker *) arg;
+	unsigned int i;
+	unsigned long ops = w->ops; /* avoid cacheline bouncing */
 
 	pthread_mutex_lock(&thread_lock);
 	threads_starting--;
@@ -74,7 +78,7 @@ static void *workerfn(void *arg)
 	pthread_mutex_unlock(&thread_lock);
 
 	do {
-		for (i = 0; i < nfutexes; i++, w->ops++) {
+		for (i = 0; i < nfutexes; i++, ops++) {
 			/*
 			 * We want the futex calls to fail in order to stress
 			 * the hashing of uaddr and not measure other steps,
@@ -88,6 +92,7 @@ static void *workerfn(void *arg)
 		}
 	}  while (!done);
 
+	w->ops = ops;
 	return NULL;
 }
 
@@ -97,8 +102,8 @@ static void toggle_done(int sig __maybe_unused,
 {
 	/* inform all threads that we're done for the day */
 	done = true;
-	gettimeofday(&end, NULL);
-	timersub(&end, &start, &runtime);
+	gettimeofday(&bench__end, NULL);
+	timersub(&bench__end, &bench__start, &bench__runtime);
 }
 
 static void print_summary(void)
@@ -108,18 +113,18 @@ static void print_summary(void)
 
 	printf("%sAveraged %ld operations/sec (+- %.2f%%), total secs = %d\n",
 	       !silent ? "\n" : "", avg, rel_stddev_stats(stddev, avg),
-	       (int) runtime.tv_sec);
+	       (int)bench__runtime.tv_sec);
 }
 
-int bench_futex_hash(int argc, const char **argv,
-		     const char *prefix __maybe_unused)
+int bench_futex_hash(int argc, const char **argv)
 {
 	int ret = 0;
-	cpu_set_t cpu;
+	cpu_set_t cpuset;
 	struct sigaction act;
-	unsigned int i, ncpus;
+	unsigned int i;
 	pthread_attr_t thread_attr;
 	struct worker *worker = NULL;
+	struct perf_cpu_map *cpu;
 
 	argc = parse_options(argc, argv, options, bench_futex_hash_usage, 0);
 	if (argc) {
@@ -127,14 +132,17 @@ int bench_futex_hash(int argc, const char **argv,
 		exit(EXIT_FAILURE);
 	}
 
-	ncpus = sysconf(_SC_NPROCESSORS_ONLN);
+	cpu = perf_cpu_map__new(NULL);
+	if (!cpu)
+		goto errmem;
 
+	memset(&act, 0, sizeof(act));
 	sigfillset(&act.sa_mask);
 	act.sa_sigaction = toggle_done;
 	sigaction(SIGINT, &act, NULL);
 
 	if (!nthreads) /* default to the number of CPUs */
-		nthreads = ncpus;
+		nthreads = cpu->nr;
 
 	worker = calloc(nthreads, sizeof(*worker));
 	if (!worker)
@@ -153,17 +161,17 @@ int bench_futex_hash(int argc, const char **argv,
 
 	threads_starting = nthreads;
 	pthread_attr_init(&thread_attr);
-	gettimeofday(&start, NULL);
+	gettimeofday(&bench__start, NULL);
 	for (i = 0; i < nthreads; i++) {
 		worker[i].tid = i;
 		worker[i].futex = calloc(nfutexes, sizeof(*worker[i].futex));
 		if (!worker[i].futex)
 			goto errmem;
 
-		CPU_ZERO(&cpu);
-		CPU_SET(i % ncpus, &cpu);
+		CPU_ZERO(&cpuset);
+		CPU_SET(cpu->map[i % cpu->nr], &cpuset);
 
-		ret = pthread_attr_setaffinity_np(&thread_attr, sizeof(cpu_set_t), &cpu);
+		ret = pthread_attr_setaffinity_np(&thread_attr, sizeof(cpu_set_t), &cpuset);
 		if (ret)
 			err(EXIT_FAILURE, "pthread_attr_setaffinity_np");
 
@@ -196,7 +204,8 @@ int bench_futex_hash(int argc, const char **argv,
 	pthread_mutex_destroy(&thread_lock);
 
 	for (i = 0; i < nthreads; i++) {
-		unsigned long t = worker[i].ops/runtime.tv_sec;
+		unsigned long t = bench__runtime.tv_sec > 0 ?
+			worker[i].ops / bench__runtime.tv_sec : 0;
 		update_stats(&throughput_stats, t);
 		if (!silent) {
 			if (nfutexes == 1)
@@ -208,12 +217,13 @@ int bench_futex_hash(int argc, const char **argv,
 				       &worker[i].futex[nfutexes-1], t);
 		}
 
-		free(worker[i].futex);
+		zfree(&worker[i].futex);
 	}
 
 	print_summary();
 
 	free(worker);
+	free(cpu);
 	return ret;
 errmem:
 	err(EXIT_FAILURE, "calloc");

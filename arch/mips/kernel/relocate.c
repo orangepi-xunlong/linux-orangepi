@@ -6,7 +6,7 @@
  * Support for Kernel relocation at boot time
  *
  * Copyright (C) 2015, Imagination Technologies Ltd.
- * Authors: Matt Redfearn (matt.redfearn@imgtec.com)
+ * Authors: Matt Redfearn (matt.redfearn@mips.com)
  */
 #include <asm/bootinfo.h>
 #include <asm/cacheflush.h>
@@ -18,7 +18,7 @@
 #include <linux/kernel.h>
 #include <linux/libfdt.h>
 #include <linux/of_fdt.h>
-#include <linux/sched.h>
+#include <linux/sched/task.h>
 #include <linux/start_kernel.h>
 #include <linux/string.h>
 #include <linux/printk.h>
@@ -30,6 +30,18 @@ extern u32 _relocation_end[];	/* End relocation table */
 
 extern long __start___ex_table;	/* Start exception table */
 extern long __stop___ex_table;	/* End exception table */
+
+extern void __weak plat_fdt_relocated(void *new_location);
+
+/*
+ * This function may be defined for a platform to perform any post-relocation
+ * fixup necessary.
+ * Return non-zero to abort relocation
+ */
+int __weak plat_post_relocation(long offset)
+{
+	return 0;
+}
 
 static inline u32 __init get_synci_step(void)
 {
@@ -52,24 +64,20 @@ static void __init sync_icache(void *kbase, unsigned long kernel_length)
 			: "r" (kbase));
 
 		kbase += step;
-	} while (kbase < kend);
+	} while (step && kbase < kend);
 
 	/* Completion barrier */
 	__sync();
 }
 
-static int __init apply_r_mips_64_rel(u32 *loc_orig, u32 *loc_new, long offset)
+static void __init apply_r_mips_64_rel(u32 *loc_new, long offset)
 {
 	*(u64 *)loc_new += offset;
-
-	return 0;
 }
 
-static int __init apply_r_mips_32_rel(u32 *loc_orig, u32 *loc_new, long offset)
+static void __init apply_r_mips_32_rel(u32 *loc_new, long offset)
 {
 	*loc_new += offset;
-
-	return 0;
 }
 
 static int __init apply_r_mips_26_rel(u32 *loc_orig, u32 *loc_new, long offset)
@@ -83,7 +91,7 @@ static int __init apply_r_mips_26_rel(u32 *loc_orig, u32 *loc_new, long offset)
 
 	/* Original target address */
 	target_addr <<= 2;
-	target_addr += (unsigned long)loc_orig & ~0x03ffffff;
+	target_addr += (unsigned long)loc_orig & 0xf0000000;
 
 	/* Get the new target address */
 	target_addr += offset;
@@ -93,7 +101,7 @@ static int __init apply_r_mips_26_rel(u32 *loc_orig, u32 *loc_new, long offset)
 		return -ENOEXEC;
 	}
 
-	target_addr -= (unsigned long)loc_new & ~0x03ffffff;
+	target_addr -= (unsigned long)loc_new & 0xf0000000;
 	target_addr >>= 2;
 
 	*loc_new = (*loc_new & ~0x03ffffff) | (target_addr & 0x03ffffff);
@@ -102,7 +110,8 @@ static int __init apply_r_mips_26_rel(u32 *loc_orig, u32 *loc_new, long offset)
 }
 
 
-static int __init apply_r_mips_hi16_rel(u32 *loc_orig, u32 *loc_new, long offset)
+static void __init apply_r_mips_hi16_rel(u32 *loc_orig, u32 *loc_new,
+					 long offset)
 {
 	unsigned long insn = *loc_orig;
 	unsigned long target = (insn & 0xffff) << 16; /* high 16bits of target */
@@ -110,17 +119,33 @@ static int __init apply_r_mips_hi16_rel(u32 *loc_orig, u32 *loc_new, long offset
 	target += offset;
 
 	*loc_new = (insn & ~0xffff) | ((target >> 16) & 0xffff);
+}
+
+static int __init reloc_handler(u32 type, u32 *loc_orig, u32 *loc_new,
+				long offset)
+{
+	switch (type) {
+	case R_MIPS_64:
+		apply_r_mips_64_rel(loc_new, offset);
+		break;
+	case R_MIPS_32:
+		apply_r_mips_32_rel(loc_new, offset);
+		break;
+	case R_MIPS_26:
+		return apply_r_mips_26_rel(loc_orig, loc_new, offset);
+	case R_MIPS_HI16:
+		apply_r_mips_hi16_rel(loc_orig, loc_new, offset);
+		break;
+	default:
+		pr_err("Unhandled relocation type %d at 0x%pK\n", type,
+		       loc_orig);
+		return -ENOEXEC;
+	}
+
 	return 0;
 }
 
-static int (*reloc_handlers_rel[]) (u32 *, u32 *, long) __initdata = {
-	[R_MIPS_64]		= apply_r_mips_64_rel,
-	[R_MIPS_32]		= apply_r_mips_32_rel,
-	[R_MIPS_26]		= apply_r_mips_26_rel,
-	[R_MIPS_HI16]		= apply_r_mips_hi16_rel,
-};
-
-int __init do_relocations(void *kbase_old, void *kbase_new, long offset)
+static int __init do_relocations(void *kbase_old, void *kbase_new, long offset)
 {
 	u32 *r;
 	u32 *loc_orig;
@@ -134,17 +159,10 @@ int __init do_relocations(void *kbase_old, void *kbase_new, long offset)
 			break;
 
 		type = (*r >> 24) & 0xff;
-		loc_orig = (void *)(kbase_old + ((*r & 0x00ffffff) << 2));
+		loc_orig = kbase_old + ((*r & 0x00ffffff) << 2);
 		loc_new = RELOCATED(loc_orig);
 
-		if (reloc_handlers_rel[type] == NULL) {
-			/* Unsupported relocation */
-			pr_err("Unhandled relocation type %d at 0x%pK\n",
-			       type, loc_orig);
-			return -ENOEXEC;
-		}
-
-		res = reloc_handlers_rel[type](loc_orig, loc_new, offset);
+		res = reloc_handler(type, loc_orig, loc_new, offset);
 		if (res)
 			return res;
 	}
@@ -175,8 +193,14 @@ static int __init relocate_exception_table(long offset)
 static inline __init unsigned long rotate_xor(unsigned long hash,
 					      const void *area, size_t size)
 {
-	size_t i;
-	unsigned long *ptr = (unsigned long *)area;
+	const typeof(hash) *ptr = PTR_ALIGN(area, sizeof(hash));
+	size_t diff, i;
+
+	diff = (void *)ptr - area;
+	if (unlikely(size < diff + sizeof(hash)))
+		return hash;
+
+	size = ALIGN_DOWN(size - diff, sizeof(hash));
 
 	for (i = 0; i < size / sizeof(hash); i++) {
 		/* Rotate by odd number of bits and XOR. */
@@ -282,6 +306,20 @@ static inline int __init relocation_addr_valid(void *loc_new)
 	return 1;
 }
 
+static inline void __init update_kaslr_offset(unsigned long *addr, long offset)
+{
+	unsigned long *new_addr = (unsigned long *)RELOCATED(addr);
+
+	*new_addr = (unsigned long)offset;
+}
+
+#if defined(CONFIG_USE_OF)
+void __weak *plat_get_fdt(void)
+{
+	return NULL;
+}
+#endif
+
 void *__init relocate_kernel(void)
 {
 	void *loc_new;
@@ -291,12 +329,14 @@ void *__init relocate_kernel(void)
 	int res = 1;
 	/* Default to original kernel entry point */
 	void *kernel_entry = start_kernel;
+	void *fdt = NULL;
 
 	/* Get the command line */
 	fw_init_cmdline();
 #if defined(CONFIG_USE_OF)
 	/* Deal with the device tree */
-	early_init_dt_scan(plat_get_fdt());
+	fdt = plat_get_fdt();
+	early_init_dt_scan(fdt);
 	if (boot_command_line[0]) {
 		/* Boot command line was passed in device tree */
 		strlcpy(arcs_cmdline, boot_command_line, COMMAND_LINE_SIZE);
@@ -316,6 +356,29 @@ void *__init relocate_kernel(void)
 	arcs_cmdline[0] = '\0';
 
 	if (offset) {
+		void (*fdt_relocated_)(void *) = NULL;
+#if defined(CONFIG_USE_OF)
+		unsigned long fdt_phys = virt_to_phys(fdt);
+
+		/*
+		 * If built-in dtb is used then it will have been relocated
+		 * during kernel _text relocation. If appended DTB is used
+		 * then it will not be relocated, but it should remain
+		 * intact in the original location. If dtb is loaded by
+		 * the bootloader then it may need to be moved if it crosses
+		 * the target memory area
+		 */
+
+		if (fdt_phys >= virt_to_phys(RELOCATED(&_text)) &&
+			fdt_phys <= virt_to_phys(RELOCATED(&_end))) {
+			void *fdt_relocated =
+				RELOCATED(ALIGN((long)&_end, PAGE_SIZE));
+			memcpy(fdt_relocated, fdt, fdt_totalsize(fdt));
+			fdt = fdt_relocated;
+			fdt_relocated_ = RELOCATED(&plat_fdt_relocated);
+		}
+#endif /* CONFIG_USE_OF */
+
 		/* Copy the kernel to it's new location */
 		memcpy(loc_new, &_text, kernel_length);
 
@@ -338,11 +401,31 @@ void *__init relocate_kernel(void)
 		 */
 		memcpy(RELOCATED(&__bss_start), &__bss_start, bss_length);
 
+		/*
+		 * If fdt was stored outside of the kernel image and
+		 * had to be moved then update platform's state data
+		 * with the new fdt location
+		 */
+		if (fdt_relocated_)
+			fdt_relocated_(fdt);
+
+		/*
+		 * Last chance for the platform to abort relocation.
+		 * This may also be used by the platform to perform any
+		 * initialisation required now that the new kernel is
+		 * resident in memory and ready to be executed.
+		 */
+		if (plat_post_relocation(offset))
+			goto out;
+
 		/* The current thread is now within the relocated image */
 		__current_thread_info = RELOCATED(&init_thread_union);
 
 		/* Return the new kernel's entry point */
 		kernel_entry = RELOCATED(start_kernel);
+
+		/* Error may occur before, so keep it at last */
+		update_kaslr_offset(&__kaslr_offset, offset);
 	}
 out:
 	return kernel_entry;
@@ -351,15 +434,11 @@ out:
 /*
  * Show relocation information on panic.
  */
-void show_kernel_relocation(const char *level)
+static void show_kernel_relocation(const char *level)
 {
-	unsigned long offset;
-
-	offset = __pa_symbol(_text) - __pa_symbol(VMLINUX_LOAD_ADDRESS);
-
-	if (IS_ENABLED(CONFIG_RELOCATABLE) && offset > 0) {
+	if (__kaslr_offset > 0) {
 		printk(level);
-		pr_cont("Kernel relocated by 0x%pK\n", (void *)offset);
+		pr_cont("Kernel relocated by 0x%pK\n", (void *)__kaslr_offset);
 		pr_cont(" .text @ 0x%pK\n", _text);
 		pr_cont(" .data @ 0x%pK\n", _sdata);
 		pr_cont(" .bss  @ 0x%pK\n", __bss_start);

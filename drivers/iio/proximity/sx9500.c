@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014 Intel Corporation
  *
  * Driver for Semtech's SX9500 capacitive proximity/button solution.
  * Datasheet available at
  * <http://www.semtech.com/images/datasheet/sx9500.pdf>.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -31,9 +28,6 @@
 
 #define SX9500_DRIVER_NAME		"sx9500"
 #define SX9500_IRQ_NAME			"sx9500_event"
-
-#define SX9500_GPIO_INT			"interrupt"
-#define SX9500_GPIO_RESET		"reset"
 
 /* Register definitions. */
 #define SX9500_REG_IRQ_SRC		0x00
@@ -615,7 +609,6 @@ static const struct attribute_group sx9500_attribute_group = {
 };
 
 static const struct iio_info sx9500_info = {
-	.driver_module = THIS_MODULE,
 	.attrs = &sx9500_attribute_group,
 	.read_raw = &sx9500_read_raw,
 	.write_raw = &sx9500_write_raw,
@@ -650,7 +643,6 @@ out:
 
 static const struct iio_trigger_ops sx9500_trigger_ops = {
 	.set_trigger_state = sx9500_set_trigger_state,
-	.owner = THIS_MODULE,
 };
 
 static irqreturn_t sx9500_trigger_handler(int irq, void *private)
@@ -683,7 +675,7 @@ out:
 	return IRQ_HANDLED;
 }
 
-static int sx9500_buffer_preenable(struct iio_dev *indio_dev)
+static int sx9500_buffer_postenable(struct iio_dev *indio_dev)
 {
 	struct sx9500_data *data = iio_priv(indio_dev);
 	int ret = 0, i;
@@ -712,8 +704,6 @@ static int sx9500_buffer_predisable(struct iio_dev *indio_dev)
 	struct sx9500_data *data = iio_priv(indio_dev);
 	int ret = 0, i;
 
-	iio_triggered_buffer_predisable(indio_dev);
-
 	mutex_lock(&data->mutex);
 
 	for (i = 0; i < SX9500_NUM_CHANNELS; i++)
@@ -734,8 +724,7 @@ static int sx9500_buffer_predisable(struct iio_dev *indio_dev)
 }
 
 static const struct iio_buffer_setup_ops sx9500_buffer_setup_ops = {
-	.preenable = sx9500_buffer_preenable,
-	.postenable = iio_triggered_buffer_postenable,
+	.postenable = sx9500_buffer_postenable,
 	.predisable = sx9500_buffer_predisable,
 };
 
@@ -769,7 +758,7 @@ static const struct sx9500_reg_default sx9500_default_regs[] = {
 		.reg = SX9500_REG_PROX_CTRL5,
 		/*
 		 * Debouncer off, lowest average negative filter,
-		 * highest average postive filter.
+		 * highest average positive filter.
 		 */
 		.def = 0x0f,
 	},
@@ -868,18 +857,44 @@ static int sx9500_init_device(struct iio_dev *indio_dev)
 	return sx9500_init_compensation(indio_dev);
 }
 
+static const struct acpi_gpio_params reset_gpios = { 0, 0, false };
+static const struct acpi_gpio_params interrupt_gpios = { 2, 0, false };
+
+static const struct acpi_gpio_mapping acpi_sx9500_gpios[] = {
+	{ "reset-gpios", &reset_gpios, 1 },
+	/*
+	 * Some platforms have a bug in ACPI GPIO description making IRQ
+	 * GPIO to be output only. Ask the GPIO core to ignore this limit.
+	 */
+	{ "interrupt-gpios", &interrupt_gpios, 1, ACPI_GPIO_QUIRK_NO_IO_RESTRICTION },
+	{ },
+};
+
 static void sx9500_gpio_probe(struct i2c_client *client,
 			      struct sx9500_data *data)
 {
+	struct gpio_desc *gpiod_int;
 	struct device *dev;
+	int ret;
 
 	if (!client)
 		return;
 
 	dev = &client->dev;
 
-	data->gpiod_rst = devm_gpiod_get_index(dev, SX9500_GPIO_RESET,
-					       0, GPIOD_OUT_HIGH);
+	ret = devm_acpi_dev_add_driver_gpios(dev, acpi_sx9500_gpios);
+	if (ret)
+		dev_dbg(dev, "Unable to add GPIO mapping table\n");
+
+	if (client->irq <= 0) {
+		gpiod_int = devm_gpiod_get(dev, "interrupt", GPIOD_IN);
+		if (IS_ERR(gpiod_int))
+			dev_err(dev, "gpio get irq failed\n");
+		else
+			client->irq = gpiod_to_irq(gpiod_int);
+	}
+
+	data->gpiod_rst = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(data->gpiod_rst)) {
 		dev_warn(dev, "gpio get reset pin failed\n");
 		data->gpiod_rst = NULL;
@@ -907,7 +922,6 @@ static int sx9500_probe(struct i2c_client *client,
 	if (IS_ERR(data->regmap))
 		return PTR_ERR(data->regmap);
 
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->name = SX9500_DRIVER_NAME;
 	indio_dev->channels = sx9500_channels;
 	indio_dev->num_channels = ARRAY_SIZE(sx9500_channels);
@@ -936,7 +950,6 @@ static int sx9500_probe(struct i2c_client *client,
 		if (!data->trig)
 			return -ENOMEM;
 
-		data->trig->dev.parent = &client->dev;
 		data->trig->ops = &sx9500_trigger_ops;
 		iio_trigger_set_drvdata(data->trig, indio_dev);
 
@@ -1025,6 +1038,7 @@ static const struct dev_pm_ops sx9500_pm_ops = {
 
 static const struct acpi_device_id sx9500_acpi_match[] = {
 	{"SSX9500", 0},
+	{"SASX9500", 0},
 	{ },
 };
 MODULE_DEVICE_TABLE(acpi, sx9500_acpi_match);

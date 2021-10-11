@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * SCSI low-level driver for the 53c94 SCSI bus adaptor found
  * on Power Macintosh computers, controlling the external SCSI chain.
@@ -19,9 +20,9 @@
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/pgtable.h>
 #include <asm/dbdma.h>
 #include <asm/io.h>
-#include <asm/pgtable.h>
 #include <asm/prom.h>
 #include <asm/macio.h>
 
@@ -325,7 +326,6 @@ static void mac53c94_interrupt(int irq, void *dev_id)
 		}
 		cmd->SCp.Status = readb(&regs->fifo);
 		cmd->SCp.Message = readb(&regs->fifo);
-		cmd->result = CMD_ACCEPT_MSG;
 		writeb(CMD_ACCEPT_MSG, &regs->command);
 		state->phase = busfreeing;
 		break;
@@ -346,7 +346,7 @@ static void cmd_done(struct fsc_state *state, int result)
 	struct scsi_cmnd *cmd;
 
 	cmd = state->current_req;
-	if (cmd != 0) {
+	if (cmd) {
 		cmd->result = result;
 		(*cmd->scsi_done)(cmd);
 		state->current_req = NULL;
@@ -403,7 +403,7 @@ static struct scsi_host_template mac53c94_template = {
 	.can_queue	= 1,
 	.this_id	= 7,
 	.sg_tablesize	= SG_ALL,
-	.use_clustering	= DISABLE_CLUSTERING,
+	.max_segment_size = 65535,
 };
 
 static int mac53c94_probe(struct macio_dev *mdev, const struct of_device_id *match)
@@ -448,15 +448,14 @@ static int mac53c94_probe(struct macio_dev *mdev, const struct of_device_id *mat
 		ioremap(macio_resource_start(mdev, 1), 0x1000);
 	state->dmaintr = macio_irq(mdev, 1);
 	if (state->regs == NULL || state->dma == NULL) {
-		printk(KERN_ERR "mac53c94: ioremap failed for %s\n",
-		       node->full_name);
+		printk(KERN_ERR "mac53c94: ioremap failed for %pOF\n", node);
 		goto out_free;
 	}
 
 	clkprop = of_get_property(node, "clock-frequency", &proplen);
        	if (clkprop == NULL || proplen != sizeof(int)) {
-       		printk(KERN_ERR "%s: can't get clock frequency, "
-       		       "assuming 25MHz\n", node->full_name);
+       		printk(KERN_ERR "%pOF: can't get clock frequency, "
+       		       "assuming 25MHz\n", node);
        		state->clk_freq = 25000000;
        	} else
        		state->clk_freq = *(int *)clkprop;
@@ -465,14 +464,16 @@ static int mac53c94_probe(struct macio_dev *mdev, const struct of_device_id *mat
        	 * +1 to allow for aligning.
 	 * XXX FIXME: Use DMA consistent routines
 	 */
-       	dma_cmd_space = kmalloc((host->sg_tablesize + 2) *
-       				sizeof(struct dbdma_cmd), GFP_KERNEL);
-       	if (dma_cmd_space == 0) {
-       		printk(KERN_ERR "mac53c94: couldn't allocate dma "
-       		       "command space for %s\n", node->full_name);
+       	dma_cmd_space = kmalloc_array(host->sg_tablesize + 2,
+					     sizeof(struct dbdma_cmd),
+					     GFP_KERNEL);
+	if (!dma_cmd_space) {
+		printk(KERN_ERR "mac53c94: couldn't allocate dma "
+		       "command space for %pOF\n", node);
 		rc = -ENOMEM;
-       		goto out_free;
-       	}
+		goto out_free;
+	}
+
 	state->dma_cmds = (struct dbdma_cmd *)DBDMA_ALIGN(dma_cmd_space);
 	memset(state->dma_cmds, 0, (host->sg_tablesize + 1)
 	       * sizeof(struct dbdma_cmd));
@@ -481,8 +482,8 @@ static int mac53c94_probe(struct macio_dev *mdev, const struct of_device_id *mat
 	mac53c94_init(state);
 
 	if (request_irq(state->intr, do_mac53c94_interrupt, 0, "53C94",state)) {
-		printk(KERN_ERR "mac53C94: can't get irq %d for %s\n",
-		       state->intr, node->full_name);
+		printk(KERN_ERR "mac53C94: can't get irq %d for %pOF\n",
+		       state->intr, node);
 		goto out_free_dma;
 	}
 

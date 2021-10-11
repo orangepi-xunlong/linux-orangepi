@@ -1,16 +1,26 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * ALSA SoC TLV320AIC3X codec driver
  *
  * Author:      Vladimir Barinov, <vbarinov@embeddedalley.com>
  * Copyright:   (C) 2007 MontaVista Software, Inc., <source@mvista.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef _AIC3X_H
 #define _AIC3X_H
+
+struct device;
+struct regmap_config;
+
+extern const struct regmap_config aic3x_regmap;
+int aic3x_probe(struct device *dev, struct regmap *regmap, kernel_ulong_t driver_data);
+int aic3x_remove(struct device *dev);
+
+#define AIC3X_MODEL_3X 0
+#define AIC3X_MODEL_33 1
+#define AIC3X_MODEL_3007 2
+#define AIC3X_MODEL_3104 3
+#define AIC3X_MODEL_3106 4
 
 /* AIC3X register space */
 #define AIC3X_CACHEREGNUM		110
@@ -242,6 +252,14 @@
 /* MICBIAS Control Register */
 #define MICBIAS_LEVEL_SHIFT	(6)
 #define MICBIAS_LEVEL_MASK	(3 << 6)
+
+/* HPOUT_SC */
+#define HPOUT_SC_OCMV_MASK	(3 << 6)
+#define HPOUT_SC_OCMV_SHIFT	(6)
+#define HPOUT_SC_OCMV_1_35V	0
+#define HPOUT_SC_OCMV_1_5V	1
+#define HPOUT_SC_OCMV_1_65V	2
+#define HPOUT_SC_OCMV_1_8V	3
 
 /* headset detection / button API */
 

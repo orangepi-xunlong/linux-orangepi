@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <dt-bindings/gpio/gpio.h>
 
 / {
@@ -29,8 +30,7 @@
 };
 
 &ecspi3 {
-	fsl,spi-num-chipselects = <1>;
-	cs-gpios = <&gpio4 24 0>;
+	cs-gpios = <&gpio4 24 GPIO_ACTIVE_LOW>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_ecspi3>;
 	status = "okay";

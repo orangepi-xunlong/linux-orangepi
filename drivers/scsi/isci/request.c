@@ -207,13 +207,10 @@ static void sci_task_request_build_ssp_task_iu(struct isci_request *ireq)
 		SCI_CONTROLLER_INVALID_IO_TAG;
 }
 
-/**
+/*
  * This method is will fill in the SCU Task Context for any type of SSP request.
- * @sci_req:
- * @task_context:
- *
  */
-static void scu_ssp_reqeust_construct_task_context(
+static void scu_ssp_request_construct_task_context(
 	struct isci_request *ireq,
 	struct scu_task_context *task_context)
 {
@@ -224,7 +221,7 @@ static void scu_ssp_reqeust_construct_task_context(
 	idev = ireq->target_device;
 	iport = idev->owning_port;
 
-	/* Fill in the TC with the its required data */
+	/* Fill in the TC with its required data */
 	task_context->abort = 0;
 	task_context->priority = 0;
 	task_context->initiator_request = 1;
@@ -410,10 +407,8 @@ static void scu_ssp_ireq_dif_strip(struct isci_request *ireq, u8 type, u8 op)
 	tc->ref_tag_seed_gen = 0;
 }
 
-/**
+/*
  * This method is will fill in the SCU Task Context for a SSP IO request.
- * @sci_req:
- *
  */
 static void scu_ssp_io_request_construct_task_context(struct isci_request *ireq,
 						      enum dma_data_direction dir,
@@ -425,7 +420,7 @@ static void scu_ssp_io_request_construct_task_context(struct isci_request *ireq,
 	u8 prot_type = scsi_get_prot_type(scmd);
 	u8 prot_op = scsi_get_prot_op(scmd);
 
-	scu_ssp_reqeust_construct_task_context(ireq, task_context);
+	scu_ssp_request_construct_task_context(ireq, task_context);
 
 	task_context->ssp_command_iu_length =
 		sizeof(struct ssp_cmd_iu) / sizeof(u32);
@@ -456,23 +451,22 @@ static void scu_ssp_io_request_construct_task_context(struct isci_request *ireq,
 }
 
 /**
- * This method will fill in the SCU Task Context for a SSP Task request.  The
- *    following important settings are utilized: -# priority ==
- *    SCU_TASK_PRIORITY_HIGH.  This ensures that the task request is issued
- *    ahead of other task destined for the same Remote Node. -# task_type ==
- *    SCU_TASK_TYPE_IOREAD.  This simply indicates that a normal request type
- *    (i.e. non-raw frame) is being utilized to perform task management. -#
- *    control_frame == 1.  This ensures that the proper endianess is set so
- *    that the bytes are transmitted in the right order for a task frame.
- * @sci_req: This parameter specifies the task request object being
- *    constructed.
- *
+ * scu_ssp_task_request_construct_task_context() - This method will fill in
+ *    the SCU Task Context for a SSP Task request.  The following important
+ *    settings are utilized: -# priority == SCU_TASK_PRIORITY_HIGH.  This
+ *    ensures that the task request is issued ahead of other task destined
+ *    for the same Remote Node. -# task_type == SCU_TASK_TYPE_IOREAD.  This
+ *    simply indicates that a normal request type (i.e. non-raw frame) is
+ *    being utilized to perform task management. -#control_frame == 1.  This
+ *    ensures that the proper endianness is set so that the bytes are
+ *    transmitted in the right order for a task frame.
+ * @ireq: This parameter specifies the task request object being constructed.
  */
 static void scu_ssp_task_request_construct_task_context(struct isci_request *ireq)
 {
 	struct scu_task_context *task_context = ireq->tc;
 
-	scu_ssp_reqeust_construct_task_context(ireq, task_context);
+	scu_ssp_request_construct_task_context(ireq, task_context);
 
 	task_context->control_frame                = 1;
 	task_context->priority                     = SCU_TASK_PRIORITY_HIGH;
@@ -484,9 +478,10 @@ static void scu_ssp_task_request_construct_task_context(struct isci_request *ire
 }
 
 /**
+ * scu_sata_request_construct_task_context()
  * This method is will fill in the SCU Task Context for any type of SATA
  *    request.  This is called from the various SATA constructors.
- * @sci_req: The general IO request object which is to be used in
+ * @ireq: The general IO request object which is to be used in
  *    constructing the SCU task context.
  * @task_context: The buffer pointer for the SCU task context which is being
  *    constructed.
@@ -495,7 +490,7 @@ static void scu_ssp_task_request_construct_task_context(struct isci_request *ire
  * the command buffer is complete. none Revisit task context construction to
  * determine what is common for SSP/SMP/STP task context structures.
  */
-static void scu_sata_reqeust_construct_task_context(
+static void scu_sata_request_construct_task_context(
 	struct isci_request *ireq,
 	struct scu_task_context *task_context)
 {
@@ -506,7 +501,7 @@ static void scu_sata_reqeust_construct_task_context(
 	idev = ireq->target_device;
 	iport = idev->owning_port;
 
-	/* Fill in the TC with the its required data */
+	/* Fill in the TC with its required data */
 	task_context->abort = 0;
 	task_context->priority = SCU_TASK_PRIORITY_NORMAL;
 	task_context->initiator_request = 1;
@@ -562,7 +557,7 @@ static void scu_stp_raw_request_construct_task_context(struct isci_request *ireq
 {
 	struct scu_task_context *task_context = ireq->tc;
 
-	scu_sata_reqeust_construct_task_context(ireq, task_context);
+	scu_sata_request_construct_task_context(ireq, task_context);
 
 	task_context->control_frame         = 0;
 	task_context->priority              = SCU_TASK_PRIORITY_NORMAL;
@@ -593,9 +588,9 @@ static enum sci_status sci_stp_pio_request_construct(struct isci_request *ireq,
 	return SCI_SUCCESS;
 }
 
-/**
- *
- * @sci_req: This parameter specifies the request to be constructed as an
+/*
+ * sci_stp_optimized_request_construct()
+ * @ireq: This parameter specifies the request to be constructed as an
  *    optimized request.
  * @optimized_task_type: This parameter specifies whether the request is to be
  *    an UDMA request or a NCQ request. - A value of 0 indicates UDMA. - A
@@ -613,7 +608,7 @@ static void sci_stp_optimized_request_construct(struct isci_request *ireq,
 	struct scu_task_context *task_context = ireq->tc;
 
 	/* Build the STP task context structure */
-	scu_sata_reqeust_construct_task_context(ireq, task_context);
+	scu_sata_request_construct_task_context(ireq, task_context);
 
 	/* Copy over the SGL elements */
 	sci_request_build_sgl(ireq);
@@ -778,11 +773,11 @@ static enum sci_status sci_io_request_construct_basic_sata(struct isci_request *
 	return status;
 }
 
+#define SCU_TASK_CONTEXT_SRAM 0x200000
 /**
  * sci_req_tx_bytes - bytes transferred when reply underruns request
  * @ireq: request that was terminated early
  */
-#define SCU_TASK_CONTEXT_SRAM 0x200000
 static u32 sci_req_tx_bytes(struct isci_request *ireq)
 {
 	struct isci_host *ihost = ireq->owning_controller;
@@ -894,7 +889,7 @@ sci_io_request_terminate(struct isci_request *ireq)
 		 * and don't wait for the task response.
 		 */
 		sci_change_state(&ireq->sm, SCI_REQ_ABORTING);
-		/* Fall through and handle like ABORTING... */
+		fallthrough;	/* and handle like ABORTING */
 	case SCI_REQ_ABORTING:
 		if (!isci_remote_device_is_safe_to_abort(ireq->target_device))
 			set_bit(IREQ_PENDING_ABORT, &ireq->flags);
@@ -1396,12 +1391,12 @@ static enum sci_status sci_stp_request_pio_data_out_transmit_data(struct isci_re
 }
 
 /**
+ * sci_stp_request_pio_data_in_copy_data_buffer()
+ * @stp_req: The request that is used for the SGL processing.
+ * @data_buf: The buffer of data to be copied.
+ * @len: The length of the data transfer.
  *
- * @stp_request: The request that is used for the SGL processing.
- * @data_buffer: The buffer of data to be copied.
- * @length: The length of the data transfer.
- *
- * Copy the data from the buffer for the length specified to the IO reqeust SGL
+ * Copy the data from the buffer for the length specified to the IO request SGL
  * specified data region. enum sci_status
  */
 static enum sci_status
@@ -1443,8 +1438,8 @@ sci_stp_request_pio_data_in_copy_data_buffer(struct isci_stp_request *stp_req,
 }
 
 /**
- *
- * @sci_req: The PIO DATA IN request that is to receive the data.
+ * sci_stp_request_pio_data_in_copy_data()
+ * @stp_req: The PIO DATA IN request that is to receive the data.
  * @data_buffer: The buffer to copy from.
  *
  * Copy the data buffer to the io request data region. enum sci_status
@@ -1480,8 +1475,6 @@ static enum sci_status
 stp_request_pio_await_h2d_completion_tc_event(struct isci_request *ireq,
 					      u32 completion_code)
 {
-	enum sci_status status = SCI_SUCCESS;
-
 	switch (SCU_GET_COMPLETION_TL_STATUS(completion_code)) {
 	case SCU_MAKE_COMPLETION_STATUS(SCU_TASK_DONE_GOOD):
 		ireq->scu_status = SCU_TASK_DONE_GOOD;
@@ -1500,7 +1493,7 @@ stp_request_pio_await_h2d_completion_tc_event(struct isci_request *ireq,
 		break;
 	}
 
-	return status;
+	return SCI_SUCCESS;
 }
 
 static enum sci_status
@@ -1626,9 +1619,9 @@ static enum sci_status atapi_d2h_reg_frame_handler(struct isci_request *ireq,
 
 	if (status == SCI_SUCCESS) {
 		if (ireq->stp.rsp.status & ATA_ERR)
-			status = SCI_IO_FAILURE_RESPONSE_VALID;
+			status = SCI_FAILURE_IO_RESPONSE_VALID;
 	} else {
-		status = SCI_IO_FAILURE_RESPONSE_VALID;
+		status = SCI_FAILURE_IO_RESPONSE_VALID;
 	}
 
 	if (status != SCI_SUCCESS) {
@@ -2103,8 +2096,6 @@ sci_io_request_frame_handler(struct isci_request *ireq,
 static enum sci_status stp_request_udma_await_tc_event(struct isci_request *ireq,
 						       u32 completion_code)
 {
-	enum sci_status status = SCI_SUCCESS;
-
 	switch (SCU_GET_COMPLETION_TL_STATUS(completion_code)) {
 	case SCU_MAKE_COMPLETION_STATUS(SCU_TASK_DONE_GOOD):
 		ireq->scu_status = SCU_TASK_DONE_GOOD;
@@ -2148,14 +2139,12 @@ static enum sci_status stp_request_udma_await_tc_event(struct isci_request *ireq
 		break;
 	}
 
-	return status;
+	return SCI_SUCCESS;
 }
 
 static enum sci_status atapi_raw_completion(struct isci_request *ireq, u32 completion_code,
 						  enum sci_base_request_states next)
 {
-	enum sci_status status = SCI_SUCCESS;
-
 	switch (SCU_GET_COMPLETION_TL_STATUS(completion_code)) {
 	case SCU_MAKE_COMPLETION_STATUS(SCU_TASK_DONE_GOOD):
 		ireq->scu_status = SCU_TASK_DONE_GOOD;
@@ -2174,7 +2163,7 @@ static enum sci_status atapi_raw_completion(struct isci_request *ireq, u32 compl
 		break;
 	}
 
-	return status;
+	return SCI_SUCCESS;
 }
 
 static enum sci_status atapi_data_tc_completion_handler(struct isci_request *ireq,
@@ -2458,7 +2447,7 @@ sci_io_request_tc_completion(struct isci_request *ireq,
  * isci_request_process_response_iu() - This function sets the status and
  *    response iu, in the task struct, from the request object for the upper
  *    layer driver.
- * @sas_task: This parameter is the task struct from the upper layer driver.
+ * @task: This parameter is the task struct from the upper layer driver.
  * @resp_iu: This parameter points to the response iu of the completed request.
  * @dev: This parameter specifies the linux device struct.
  *
@@ -2473,7 +2462,7 @@ static void isci_request_process_response_iu(
 		"%s: resp_iu = %p "
 		"resp_iu->status = 0x%x,\nresp_iu->datapres = %d "
 		"resp_iu->response_data_len = %x, "
-		"resp_iu->sense_data_len = %x\nrepsonse data: ",
+		"resp_iu->sense_data_len = %x\nresponse data: ",
 		__func__,
 		resp_iu,
 		resp_iu->status,
@@ -2491,6 +2480,7 @@ static void isci_request_process_response_iu(
  * isci_request_set_open_reject_status() - This function prepares the I/O
  *    completion for OPEN_REJECT conditions.
  * @request: This parameter is the completed isci_request object.
+ * @task: This parameter is the task struct from the upper layer driver.
  * @response_ptr: This parameter specifies the service response for the I/O.
  * @status_ptr: This parameter specifies the exec status for the I/O.
  * @open_rej_reason: This parameter specifies the encoded reason for the
@@ -2515,7 +2505,9 @@ static void isci_request_set_open_reject_status(
 /**
  * isci_request_handle_controller_specific_errors() - This function decodes
  *    controller-specific I/O completion error conditions.
+ * @idev: Remote device
  * @request: This parameter is the completed isci_request object.
+ * @task: This parameter is the task struct from the upper layer driver.
  * @response_ptr: This parameter specifies the service response for the I/O.
  * @status_ptr: This parameter specifies the exec status for the I/O.
  *
@@ -3101,7 +3093,7 @@ sci_io_request_construct(struct isci_host *ihost,
 		/* pass */;
 	else if (dev_is_sata(dev))
 		memset(&ireq->stp.cmd, 0, sizeof(ireq->stp.cmd));
-	else if (dev_is_expander(dev))
+	else if (dev_is_expander(dev->dev_type))
 		/* pass */;
 	else
 		return SCI_FAILURE_UNSUPPORTED_PROTOCOL;
@@ -3235,7 +3227,7 @@ sci_io_request_construct_smp(struct device *dev,
 	iport = idev->owning_port;
 
 	/*
-	 * Fill in the TC with the its required data
+	 * Fill in the TC with its required data
 	 * 00h
 	 */
 	task_context->priority = 0;
@@ -3332,7 +3324,7 @@ static enum sci_status isci_smp_request_build(struct isci_request *ireq)
  * @ihost: This parameter specifies the ISCI host object
  * @request: This parameter points to the isci_request object allocated in the
  *    request construct function.
- * @sci_device: This parameter is the handle for the sci core's remote device
+ * @idev: This parameter is the handle for the sci core's remote device
  *    object that is the destination for this request.
  *
  * SCI_SUCCESS on successfull completion, or specific failure code.
@@ -3444,7 +3436,7 @@ struct isci_request *isci_tmf_request_from_tag(struct isci_host *ihost,
 int isci_request_execute(struct isci_host *ihost, struct isci_remote_device *idev,
 			 struct sas_task *task, u16 tag)
 {
-	enum sci_status status = SCI_FAILURE_UNSUPPORTED_PROTOCOL;
+	enum sci_status status;
 	struct isci_request *ireq;
 	unsigned long flags;
 	int ret = 0;

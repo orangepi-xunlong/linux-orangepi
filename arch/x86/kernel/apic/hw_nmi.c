@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  HW NMI watchdog support
  *
@@ -8,6 +9,7 @@
  *  Bits copied from original nmi.c file
  *
  */
+#include <linux/thread_info.h>
 #include <asm/apic.h>
 #include <asm/nmi.h>
 
@@ -19,7 +21,7 @@
 #include <linux/init.h>
 #include <linux/delay.h>
 
-#ifdef CONFIG_HARDLOCKUP_DETECTOR
+#ifdef CONFIG_HARDLOCKUP_DETECTOR_PERF
 u64 hw_nmi_get_sample_period(int watchdog_thresh)
 {
 	return (u64)(cpu_khz) * 1000 * watchdog_thresh;

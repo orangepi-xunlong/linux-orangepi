@@ -883,9 +883,9 @@ static void update_attrib_vcs_info(_adapter *padapter, struct xmit_frame *pxmitf
 #ifdef CONFIG_WMMPS_STA
 /*
  * update_attrib_trigger_frame_info
- * For Station mode, if a specific TID of driver setting and an AP support uapsd function, the data
+ * For Station mode, if a specific TID of driver setting and an AP support uapsd function, the data 
  * frame with corresponding TID will be a trigger frame when driver is in wmm power saving mode.
- *
+ * 
  * Arguments:
  * @padapter: _adapter pointer.
  * @pattrib: pkt_attrib pointer.
@@ -895,7 +895,7 @@ static void update_attrib_vcs_info(_adapter *padapter, struct xmit_frame *pxmitf
  */
 static void update_attrib_trigger_frame_info(_adapter *padapter, struct pkt_attrib *pattrib) {
 	struct mlme_priv *pmlmepriv = &padapter->mlmepriv;
-	struct pwrctrl_priv 	*pwrpriv = adapter_to_pwrctl(padapter);
+	struct pwrctrl_priv 	*pwrpriv = adapter_to_pwrctl(padapter); 
 	struct qos_priv 	*pqospriv = &pmlmepriv->qospriv;
 	u8 trigger_frame_en = 0;
 
@@ -1285,32 +1285,6 @@ inline u8 rtw_get_hwseq_no(_adapter *padapter)
 #endif /* CONFIG_CONCURRENT_MODE */
 	return hwseq_num;
 }
-#ifdef CONFIG_LPS
-#define LPS_PT_NORMAL	0
-#define LPS_PT_SP		1/* only DHCP packets is as SPECIAL_PACKET*/
-#define LPS_PT_ICMP		2
-
-/*If EAPOL , ARP , OR DHCP packet, driver must be in active mode.*/
-static u8 _rtw_lps_chk_packet_type(struct pkt_attrib *pattrib)
-{
-	u8 pkt_type = LPS_PT_NORMAL; /*normal data frame*/
-
-	#ifdef CONFIG_WAPI_SUPPORT
-	if ((pattrib->ether_type == 0x88B4) || (pattrib->ether_type == 0x0806) || (pattrib->ether_type == 0x888e) || (pattrib->dhcp_pkt == 1))
-		pkt_type = LPS_PT_SP;
-	#else /* !CONFIG_WAPI_SUPPORT */
-
-	#ifndef CONFIG_LPS_NOT_LEAVE_FOR_ICMP
-	if (pattrib->icmp_pkt == 1)
-		pkt_type = LPS_PT_ICMP;
-	else
-	#endif
-		if (pattrib->dhcp_pkt == 1)
-			pkt_type = LPS_PT_SP;
-	#endif
-	return pkt_type;
-}
-#endif
 static s32 update_attrib(_adapter *padapter, _pkt *pkt, struct pkt_attrib *pattrib)
 {
 	uint i;
@@ -1325,9 +1299,7 @@ static s32 update_attrib(_adapter *padapter, _pkt *pkt, struct pkt_attrib *pattr
 	struct qos_priv		*pqospriv = &pmlmepriv->qospriv;
 	struct xmit_priv		*pxmitpriv = &padapter->xmitpriv;
 	sint res = _SUCCESS;
-#ifdef CONFIG_LPS
-	u8 pkt_type = 0;
-#endif
+
 
 	DBG_COUNTER(padapter->tx_logs.core_tx_upd_attrib);
 
@@ -1471,23 +1443,23 @@ static s32 update_attrib(_adapter *padapter, _pkt *pkt, struct pkt_attrib *pattr
 	if ((pattrib->ether_type == 0x888e) || (pattrib->dhcp_pkt == 1))
 		rtw_mi_set_scan_deny(padapter, 3000);
 
-#ifdef RTW_IP_REACHABILITY_PATCH
-	if (check_fwstate(pmlmepriv, WIFI_STATION_STATE) &&
-		pattrib->ether_type == ETH_P_ARP &&
-		!IS_MCAST(pattrib->dst)) {
-		rtw_mi_set_scan_deny(padapter, 1000);
-		rtw_mi_scan_abort(padapter, _FALSE); /*rtw_scan_abort_no_wait*/
-	}
-#endif /* RTW_IP_REACHABILITY_PATCH */
-
 #ifdef CONFIG_LPS
-	pkt_type = _rtw_lps_chk_packet_type(pattrib);
-
-	if (pkt_type == LPS_PT_SP) {/*packet is as SPECIAL_PACKET*/
+	/* If EAPOL , ARP , OR DHCP packet, driver must be in active mode. */
+#ifdef CONFIG_WAPI_SUPPORT
+	if ((pattrib->ether_type == 0x88B4) || (pattrib->ether_type == 0x0806) || (pattrib->ether_type == 0x888e) || (pattrib->dhcp_pkt == 1))
+#else /* !CONFIG_WAPI_SUPPORT */
+#if 0
+	if ((pattrib->ether_type == 0x0806) || (pattrib->ether_type == 0x888e) || (pattrib->dhcp_pkt == 1))
+#else /* only ICMP/DHCP packets is as SPECIAL_PACKET, and leave LPS when tx IMCP/DHCP packets. */
+	/* if ((pattrib->ether_type == 0x888e) || (pattrib->dhcp_pkt == 1) ) */
+	if (pattrib->icmp_pkt == 1)
+		rtw_lps_ctrl_wk_cmd(padapter, LPS_CTRL_LEAVE, 1);
+	else if (pattrib->dhcp_pkt == 1)
+#endif
+#endif
+	{
 		DBG_COUNTER(padapter->tx_logs.core_tx_upd_attrib_active);
 		rtw_lps_ctrl_wk_cmd(padapter, LPS_CTRL_SPECIAL_PACKET, 1);
-	} else if (pkt_type == LPS_PT_ICMP) {
-		rtw_lps_ctrl_wk_cmd(padapter, LPS_CTRL_LEAVE, 1);
 	}
 #endif /* CONFIG_LPS */
 
@@ -1544,7 +1516,7 @@ static s32 update_attrib(_adapter *padapter, _pkt *pkt, struct pkt_attrib *pattr
 
 #ifdef CONFIG_WMMPS_STA
 	update_attrib_trigger_frame_info(padapter, pattrib);
-#endif /* CONFIG_WMMPS_STA */
+#endif /* CONFIG_WMMPS_STA */	
 
 	/* pattrib->priority = 5; */ /* force to used VI queue, for testing */
 	pattrib->hw_ssn_sel = pxmitpriv->hw_ssn_seq_no;
@@ -2703,23 +2675,15 @@ exit:
 	return res;
 }
 
-#if defined(CONFIG_IEEE80211W) || defined(CONFIG_RTW_MESH)
-/*
- * CCMP encryption for unicast robust mgmt frame and broadcast group privicy action
- * BIP for broadcast robust mgmt frame
- */
+#ifdef CONFIG_IEEE80211W
+/* broadcast or multicast management pkt use BIP, unicast management pkt use CCMP encryption */
 s32 rtw_mgmt_xmitframe_coalesce(_adapter *padapter, _pkt *pkt, struct xmit_frame *pxmitframe)
 {
-#define DBG_MGMT_XMIT_COALESEC_DUMP 0
-#define DBG_MGMT_XMIT_BIP_DUMP 0
-#define DBG_MGMT_XMIT_ENC_DUMP 0
-
 	struct pkt_file pktfile;
 	s32 frg_inx, frg_len, mpdu_len, llc_sz, mem_sz;
 	SIZE_PTR addr;
 	u8 *pframe, *mem_start = NULL, *tmp_buf = NULL;
 	u8 hw_hdr_offset, subtype ;
-	u8 category = 0xFF;
 	struct sta_info		*psta = NULL;
 	struct xmit_priv	*pxmitpriv = &padapter->xmitpriv;
 	struct pkt_attrib	*pattrib = &pxmitframe->attrib;
@@ -2736,284 +2700,204 @@ s32 rtw_mgmt_xmitframe_coalesce(_adapter *padapter, _pkt *pkt, struct xmit_frame
 
 	_irqL irqL;
 	u32	ori_len;
-	union pn48 *pn = NULL;
-	u8 kid;
-
-	if (pxmitframe->buf_addr == NULL) {
-		RTW_WARN(FUNC_ADPT_FMT" pxmitframe->buf_addr\n"
-			, FUNC_ADPT_ARG(padapter));
-		return _FAIL;
-	}
-
 	mem_start = pframe = (u8 *)(pxmitframe->buf_addr) + TXDESC_OFFSET;
 	pwlanhdr = (struct rtw_ieee80211_hdr *)pframe;
-	subtype = get_frame_sub_type(pframe); /* bit(7)~bit(2) */
-
-	/* check if robust mgmt frame */
-	if (subtype != WIFI_DEAUTH && subtype != WIFI_DISASSOC && subtype != WIFI_ACTION)
-		return _SUCCESS;
-	if (subtype == WIFI_ACTION) {
-		category = *(pframe + sizeof(struct rtw_ieee80211_hdr_3addr));
-		if (CATEGORY_IS_NON_ROBUST(category))
-			return _SUCCESS;
-	}
-	if (!bmcst) {
-		if (pattrib->psta)
-			psta = pattrib->psta;
-		else
-			pattrib->psta = psta = rtw_get_stainfo(&padapter->stapriv, pattrib->ra);
-		if (psta == NULL) {
-			RTW_INFO(FUNC_ADPT_FMT" unicast sta == NULL\n", FUNC_ADPT_ARG(padapter));
-			return _FAIL;
-		}
-		if (!(psta->flags & WLAN_STA_MFP)) {
-			/* peer is not MFP capable, no need to encrypt */
-			return _SUCCESS;
-		}
-		if (psta->bpairwise_key_installed != _TRUE) {
-			RTW_INFO(FUNC_ADPT_FMT" PTK is not installed\n"
-				, FUNC_ADPT_ARG(padapter));
-			return _FAIL;
-		}
-	}
 
 	ori_len = BIP_AAD_SIZE + pattrib->pktlen;
 	tmp_buf = BIP_AAD = rtw_zmalloc(ori_len);
+	subtype = get_frame_sub_type(pframe); /* bit(7)~bit(2) */
+
 	if (BIP_AAD == NULL)
 		return _FAIL;
 
 	_enter_critical_bh(&padapter->security_key_mutex, &irqL);
 
-	if (bmcst) {
-		if (subtype == WIFI_ACTION && CATEGORY_IS_GROUP_PRIVACY(category)) {
-			/* broadcast group privacy action frame */
-			#if DBG_MGMT_XMIT_COALESEC_DUMP
-			RTW_INFO(FUNC_ADPT_FMT" broadcast gp action(%u)\n"
-				, FUNC_ADPT_ARG(padapter), category);
-			#endif
 
+	/* IGTK key is not install, it may not support 802.11w */
+	if (padapter->securitypriv.binstallBIPkey != _TRUE) {
+		RTW_INFO("no instll BIP key\n");
+		goto xmitframe_coalesce_success;
+	}
+	/* station mode doesn't need TX BIP, just ready the code */
+	if (bmcst) {
+		int frame_body_len;
+		u8 mic[16];
+
+		_rtw_memset(MME, 0, _MME_IE_LENGTH_);
+
+		/* other types doesn't need the BIP */
+		if (get_frame_sub_type(pframe) != WIFI_DEAUTH && get_frame_sub_type(pframe) != WIFI_DISASSOC)
+			goto xmitframe_coalesce_fail;
+
+		MGMT_body = pframe + sizeof(struct rtw_ieee80211_hdr_3addr);
+		pframe += pattrib->pktlen;
+
+		/* octent 0 and 1 is key index ,BIP keyid is 4 or 5, LSB only need octent 0 */
+		MME[0] = padapter->securitypriv.dot11wBIPKeyid;
+		/* copy packet number */
+		_rtw_memcpy(&MME[2], &pmlmeext->mgnt_80211w_IPN, 6);
+		/* increase the packet number */
+		pmlmeext->mgnt_80211w_IPN++;
+
+		/* add MME IE with MIC all zero, MME string doesn't include element id and length */
+		pframe = rtw_set_ie(pframe, _MME_IE_ , 16 , MME, &(pattrib->pktlen));
+		pattrib->last_txcmdsz = pattrib->pktlen;
+		/* total frame length - header length */
+		frame_body_len = pattrib->pktlen - sizeof(struct rtw_ieee80211_hdr_3addr);
+
+		/* conscruct AAD, copy frame control field */
+		_rtw_memcpy(BIP_AAD, &pwlanhdr->frame_ctl, 2);
+		ClearRetry(BIP_AAD);
+		ClearPwrMgt(BIP_AAD);
+		ClearMData(BIP_AAD);
+		/* conscruct AAD, copy address 1 to address 3 */
+		_rtw_memcpy(BIP_AAD + 2, pwlanhdr->addr1, 18);
+		/* copy management fram body */
+		_rtw_memcpy(BIP_AAD + BIP_AAD_SIZE, MGMT_body, frame_body_len);
+#if 0
+		/* dump total packet include MME with zero MIC */
+		{
+			int i;
+			printk("Total packet: ");
+			for (i = 0; i < BIP_AAD_SIZE + frame_body_len; i++)
+				printk(" %02x ", BIP_AAD[i]);
+			printk("\n");
+		}
+#endif
+		/* calculate mic */
+		if (omac1_aes_128(padapter->securitypriv.dot11wBIPKey[padapter->securitypriv.dot11wBIPKeyid].skey
+			  , BIP_AAD, BIP_AAD_SIZE + frame_body_len, mic))
+			goto xmitframe_coalesce_fail;
+
+#if 0
+		/* dump calculated mic result */
+		{
+			int i;
+			printk("Calculated mic result: ");
+			for (i = 0; i < 16; i++)
+				printk(" %02x ", mic[i]);
+			printk("\n");
+		}
+#endif
+		/* copy right BIP mic value, total is 128bits, we use the 0~63 bits */
+		_rtw_memcpy(pframe - 8, mic, 8);
+		/*/dump all packet after mic ok
+		{
+			int pp;
+			printk("pattrib->pktlen = %d\n", pattrib->pktlen);
+			for(pp=0;pp< pattrib->pktlen; pp++)
+				printk(" %02x ", mem_start[pp]);
+			printk("\n");
+		}*/
+	} else { /* unicast mgmt frame TX */
+		/* start to encrypt mgmt frame */
+		if (subtype == WIFI_DEAUTH || subtype == WIFI_DISASSOC ||
+		    subtype == WIFI_REASSOCREQ || subtype == WIFI_ACTION) {
 			if (pattrib->psta)
 				psta = pattrib->psta;
 			else
-				pattrib->psta = psta = rtw_get_bcmc_stainfo(padapter);
+				psta = rtw_get_stainfo(&padapter->stapriv, pattrib->ra);
+
 			if (psta == NULL) {
-				RTW_INFO(FUNC_ADPT_FMT" broadcast sta == NULL\n"
-					, FUNC_ADPT_ARG(padapter));
-				goto xmitframe_coalesce_fail;
-			}
-			if (padapter->securitypriv.binstallGrpkey != _TRUE) {
-				RTW_INFO(FUNC_ADPT_FMT" GTK is not installed\n"
-					, FUNC_ADPT_ARG(padapter));
+
+				RTW_INFO("%s, psta==NUL\n", __func__);
 				goto xmitframe_coalesce_fail;
 			}
 
-			pn = &psta->dot11txpn;
-			kid = padapter->securitypriv.dot118021XGrpKeyid;
-		} else {
-			#ifdef CONFIG_IEEE80211W
-			/* broadcast robust mgmt frame, using BIP */
-			int frame_body_len;
-			u8 mic[16];
-
-			#if DBG_MGMT_XMIT_COALESEC_DUMP
-			if (subtype == WIFI_DEAUTH)
-				RTW_INFO(FUNC_ADPT_FMT" braodcast deauth\n", FUNC_ADPT_ARG(padapter));
-			else if (subtype == WIFI_DISASSOC)
-				RTW_INFO(FUNC_ADPT_FMT" braodcast disassoc\n", FUNC_ADPT_ARG(padapter));
-			else if (subtype == WIFI_ACTION) {
-				RTW_INFO(FUNC_ADPT_FMT" braodcast action(%u)\n"
-					, FUNC_ADPT_ARG(padapter), category);
-			}
-			#endif
-
-			/* IGTK key is not install, it may not support 802.11w */
-			if (SEC_IS_BIP_KEY_INSTALLED(&padapter->securitypriv) != _TRUE) {
-				RTW_INFO("no instll BIP key\n");
-				goto xmitframe_coalesce_success;
+			if (pxmitframe->buf_addr == NULL) {
+				RTW_INFO("%s, pxmitframe->buf_addr\n", __func__);
+				goto xmitframe_coalesce_fail;
 			}
 
-			_rtw_memset(MME, 0, _MME_IE_LENGTH_);
+			/* RTW_INFO("%s, action frame category=%d\n", __func__, pframe[WLAN_HDR_A3_LEN]); */
+			/* according 802.11-2012 standard, these five types are not robust types */
+			if (subtype == WIFI_ACTION &&
+			    (pframe[WLAN_HDR_A3_LEN] == RTW_WLAN_CATEGORY_PUBLIC ||
+			     pframe[WLAN_HDR_A3_LEN] == RTW_WLAN_CATEGORY_HT ||
+			     pframe[WLAN_HDR_A3_LEN] == RTW_WLAN_CATEGORY_UNPROTECTED_WNM ||
+			     pframe[WLAN_HDR_A3_LEN] == RTW_WLAN_CATEGORY_SELF_PROTECTED  ||
+			     pframe[WLAN_HDR_A3_LEN] == RTW_WLAN_CATEGORY_P2P))
+				goto xmitframe_coalesce_fail;
+			/* before encrypt dump the management packet content */
+			/*{
+				int i;
+				printk("Management pkt: ");
+				for(i=0; i<pattrib->pktlen; i++)
+				printk(" %02x ", pframe[i]);
+				printk("=======\n");
+			}*/
+			if (pattrib->encrypt > 0)
+				_rtw_memcpy(pattrib->dot118021x_UncstKey.skey, psta->dot118021x_UncstKey.skey, 16);
 
-			MGMT_body = pframe + sizeof(struct rtw_ieee80211_hdr_3addr);
-			pframe += pattrib->pktlen;
+			/* To use wrong key */
+			if (pattrib->key_type == IEEE80211W_WRONG_KEY) {
+				RTW_INFO("use wrong key\n");
+				pattrib->dot118021x_UncstKey.skey[0] = 0xff;
+			}
 
-			/* octent 0 and 1 is key index ,BIP keyid is 4 or 5, LSB only need octent 0 */
-			MME[0] = padapter->securitypriv.dot11wBIPKeyid;
-			/* copy packet number */
-			_rtw_memcpy(&MME[2], &pmlmeext->mgnt_80211w_IPN, 6);
-			/* increase the packet number */
-			pmlmeext->mgnt_80211w_IPN++;
+			/* bakeup original management packet */
+			_rtw_memcpy(tmp_buf, pframe, pattrib->pktlen);
+			/* move to data portion */
+			pframe += pattrib->hdrlen;
 
-			/* add MME IE with MIC all zero, MME string doesn't include element id and length */
-			pframe = rtw_set_ie(pframe, _MME_IE_ , 16 , MME, &(pattrib->pktlen));
+			/* 802.11w unicast management packet must be _AES_ */
+			pattrib->iv_len = 8;
+			/* it's MIC of AES */
+			pattrib->icv_len = 8;
+
+			switch (pattrib->encrypt) {
+			case _AES_:
+				/* set AES IV header */
+				AES_IV(pattrib->iv, psta->dot11wtxpn, 0);
+				break;
+			default:
+				goto xmitframe_coalesce_fail;
+			}
+			/* insert iv header into management frame */
+			_rtw_memcpy(pframe, pattrib->iv, pattrib->iv_len);
+			pframe += pattrib->iv_len;
+			/* copy mgmt data portion after CCMP header */
+			_rtw_memcpy(pframe, tmp_buf + pattrib->hdrlen, pattrib->pktlen - pattrib->hdrlen);
+			/* move pframe to end of mgmt pkt */
+			pframe += pattrib->pktlen - pattrib->hdrlen;
+			/* add 8 bytes CCMP IV header to length */
+			pattrib->pktlen += pattrib->iv_len;
+#if 0
+			/* dump management packet include AES IV header */
+			{
+				int i;
+				printk("Management pkt + IV: ");
+				/* for(i=0; i<pattrib->pktlen; i++) */
+
+				printk("@@@@@@@@@@@@@\n");
+			}
+#endif
+
+			if ((pattrib->icv_len > 0) && (pattrib->bswenc)) {
+				_rtw_memcpy(pframe, pattrib->icv, pattrib->icv_len);
+				pframe += pattrib->icv_len;
+			}
+			/* add 8 bytes MIC */
+			pattrib->pktlen += pattrib->icv_len;
+			/* set final tx command size */
 			pattrib->last_txcmdsz = pattrib->pktlen;
-			/* total frame length - header length */
-			frame_body_len = pattrib->pktlen - sizeof(struct rtw_ieee80211_hdr_3addr);
 
-			/* conscruct AAD, copy frame control field */
-			_rtw_memcpy(BIP_AAD, &pwlanhdr->frame_ctl, 2);
-			ClearRetry(BIP_AAD);
-			ClearPwrMgt(BIP_AAD);
-			ClearMData(BIP_AAD);
-			/* conscruct AAD, copy address 1 to address 3 */
-			_rtw_memcpy(BIP_AAD + 2, pwlanhdr->addr1, 18);
-			/* copy management fram body */
-			_rtw_memcpy(BIP_AAD + BIP_AAD_SIZE, MGMT_body, frame_body_len);
-
-			#if DBG_MGMT_XMIT_BIP_DUMP
-			/* dump total packet include MME with zero MIC */
+			/* set protected bit must be beofre SW encrypt */
+			SetPrivacy(mem_start);
+#if 0
+			/* dump management packet include AES header */
 			{
 				int i;
-				printk("Total packet: ");
-				for (i = 0; i < BIP_AAD_SIZE + frame_body_len; i++)
-					printk(" %02x ", BIP_AAD[i]);
-				printk("\n");
+				printk("prepare to enc Management pkt + IV: ");
+				for (i = 0; i < pattrib->pktlen; i++)
+					printk(" %02x ", mem_start[i]);
+				printk("@@@@@@@@@@@@@\n");
 			}
-			#endif
-
-			/* calculate mic */
-			if (omac1_aes_128(padapter->securitypriv.dot11wBIPKey[padapter->securitypriv.dot11wBIPKeyid].skey
-				  , BIP_AAD, BIP_AAD_SIZE + frame_body_len, mic))
-				goto xmitframe_coalesce_fail;
-
-			#if DBG_MGMT_XMIT_BIP_DUMP
-			/* dump calculated mic result */
-			{
-				int i;
-				printk("Calculated mic result: ");
-				for (i = 0; i < 16; i++)
-					printk(" %02x ", mic[i]);
-				printk("\n");
-			}
-			#endif
-
-			/* copy right BIP mic value, total is 128bits, we use the 0~63 bits */
-			_rtw_memcpy(pframe - 8, mic, 8);
-
-			#if DBG_MGMT_XMIT_BIP_DUMP
-			/*dump all packet after mic ok */
-			{
-				int pp;
-				printk("pattrib->pktlen = %d\n", pattrib->pktlen);
-				for(pp=0;pp< pattrib->pktlen; pp++)
-					printk(" %02x ", mem_start[pp]);
-				printk("\n");
-			}
-			#endif
-
-			#endif /* CONFIG_IEEE80211W */
-
-			goto xmitframe_coalesce_success;
+#endif
+			/* software encrypt */
+			xmitframe_swencrypt(padapter, pxmitframe);
 		}
 	}
-	else {
-		/* unicast robust mgmt frame */
-		#if DBG_MGMT_XMIT_COALESEC_DUMP
-		if (subtype == WIFI_DEAUTH) {
-			RTW_INFO(FUNC_ADPT_FMT" unicast deauth to "MAC_FMT"\n"
-				, FUNC_ADPT_ARG(padapter), MAC_ARG(pattrib->ra));
-		} else if (subtype == WIFI_DISASSOC) {
-			RTW_INFO(FUNC_ADPT_FMT" unicast disassoc to "MAC_FMT"\n"
-				, FUNC_ADPT_ARG(padapter), MAC_ARG(pattrib->ra));
-		} else if (subtype == WIFI_ACTION) {
-			RTW_INFO(FUNC_ADPT_FMT" unicast action(%u) to "MAC_FMT"\n"
-				, FUNC_ADPT_ARG(padapter), category, MAC_ARG(pattrib->ra));
-		}
-		#endif
-
-		_rtw_memcpy(pattrib->dot118021x_UncstKey.skey, psta->dot118021x_UncstKey.skey, 16);
-
-		/* To use wrong key */
-		if (pattrib->key_type == IEEE80211W_WRONG_KEY) {
-			RTW_INFO("use wrong key\n");
-			pattrib->dot118021x_UncstKey.skey[0] = 0xff;
-		}
-
-		pn = &psta->dot11txpn;
-		kid = 0;
-	}
-
-	#if DBG_MGMT_XMIT_ENC_DUMP
-	/* before encrypt dump the management packet content */
-	{
-		int i;
-		printk("Management pkt: ");
-		for(i=0; i<pattrib->pktlen; i++)
-		printk(" %02x ", pframe[i]);
-		printk("=======\n");
-	}
-	#endif
-
-	/* bakeup original management packet */
-	_rtw_memcpy(tmp_buf, pframe, pattrib->pktlen);
-	/* move to data portion */
-	pframe += pattrib->hdrlen;
-
-	/* 802.11w encrypted management packet must be _AES_ */
-	if (pattrib->key_type != IEEE80211W_NO_KEY) {
-		pattrib->encrypt = _AES_;
-		pattrib->bswenc = _TRUE;
-	}
-
-	pattrib->iv_len = 8;
-	/* it's MIC of AES */
-	pattrib->icv_len = 8;
-
-	switch (pattrib->encrypt) {
-	case _AES_:
-		/* set AES IV header */
-		AES_IV(pattrib->iv, (*pn), kid);
-		break;
-	default:
-		goto xmitframe_coalesce_fail;
-	}
-
-	/* insert iv header into management frame */
-	_rtw_memcpy(pframe, pattrib->iv, pattrib->iv_len);
-	pframe += pattrib->iv_len;
-	/* copy mgmt data portion after CCMP header */
-	_rtw_memcpy(pframe, tmp_buf + pattrib->hdrlen, pattrib->pktlen - pattrib->hdrlen);
-	/* move pframe to end of mgmt pkt */
-	pframe += pattrib->pktlen - pattrib->hdrlen;
-	/* add 8 bytes CCMP IV header to length */
-	pattrib->pktlen += pattrib->iv_len;
-
-	#if DBG_MGMT_XMIT_ENC_DUMP
-	/* dump management packet include AES IV header */
-	{
-		int i;
-		printk("Management pkt + IV: ");
-		/* for(i=0; i<pattrib->pktlen; i++) */
-
-		printk("@@@@@@@@@@@@@\n");
-	}
-	#endif
-
-	if ((pattrib->icv_len > 0) && (pattrib->bswenc)) {
-		_rtw_memcpy(pframe, pattrib->icv, pattrib->icv_len);
-		pframe += pattrib->icv_len;
-	}
-	/* add 8 bytes MIC */
-	pattrib->pktlen += pattrib->icv_len;
-	/* set final tx command size */
-	pattrib->last_txcmdsz = pattrib->pktlen;
-
-	/* set protected bit must be beofre SW encrypt */
-	SetPrivacy(mem_start);
-
-	#if DBG_MGMT_XMIT_ENC_DUMP
-	/* dump management packet include AES header */
-	{
-		int i;
-		printk("prepare to enc Management pkt + IV: ");
-		for (i = 0; i < pattrib->pktlen; i++)
-			printk(" %02x ", mem_start[i]);
-		printk("@@@@@@@@@@@@@\n");
-	}
-	#endif
-
-	/* software encrypt */
-	xmitframe_swencrypt(padapter, pxmitframe);
 
 xmitframe_coalesce_success:
 	_exit_critical_bh(&padapter->security_key_mutex, &irqL);
@@ -3026,7 +2910,7 @@ xmitframe_coalesce_fail:
 
 	return _FAIL;
 }
-#endif /* defined(CONFIG_IEEE80211W) || defined(CONFIG_RTW_MESH) */
+#endif /* CONFIG_IEEE80211W */
 
 /* Logical Link Control(LLC) SubNetwork Attachment Point(SNAP) header
  * IEEE LLC/SNAP header contains 8 octets
@@ -3127,15 +3011,11 @@ void rtw_count_tx_stats(PADAPTER padapter, struct xmit_frame *pxmitframe, int sz
 			pstats->tx_pkts += pkt_num;
 
 			pstats->tx_bytes += sz;
-			#if defined(CONFIG_CHECK_LEAVE_LPS) && defined(CONFIG_LPS_CHK_BY_TP)
-			if (adapter_to_pwrctl(padapter)->lps_chk_by_tp)
-				traffic_check_for_leave_lps_by_tp(padapter, _TRUE, psta);
-			#endif /* CONFIG_LPS */
 		}
 
 #ifdef CONFIG_CHECK_LEAVE_LPS
 		/* traffic_check_for_leave_lps(padapter, _TRUE); */
-#endif /* CONFIG_CHECK_LEAVE_LPS */
+#endif /* CONFIG_LPS */
 
 	}
 }
@@ -5292,6 +5172,60 @@ struct xmit_buf *dequeue_pending_xmitbuf(
 	return pxmitbuf;
 }
 
+static struct xmit_buf *dequeue_pending_xmitbuf_under_survey(
+	struct xmit_priv *pxmitpriv)
+{
+	_irqL irql;
+	struct xmit_buf *pxmitbuf;
+#ifdef CONFIG_USB_HCI
+	struct xmit_frame *pxmitframe;
+#endif
+	_queue *pqueue;
+
+
+	pxmitbuf = NULL;
+	pqueue = &pxmitpriv->pending_xmitbuf_queue;
+
+	_enter_critical_bh(&pqueue->lock, &irql);
+
+	if (_rtw_queue_empty(pqueue) == _FALSE) {
+		_list *plist, *phead;
+		u8 type = 0;
+
+		phead = get_list_head(pqueue);
+		plist = phead;
+		do {
+			plist = get_next(plist);
+			if (plist == phead)
+				break;
+
+			pxmitbuf = LIST_CONTAINOR(plist, struct xmit_buf, list);
+
+#ifdef CONFIG_USB_HCI
+			pxmitframe = (struct xmit_frame *)pxmitbuf->priv_data;
+			if (pxmitframe)
+				type = get_frame_sub_type(pxmitbuf->pbuf + TXDESC_SIZE + pxmitframe->pkt_offset * PACKET_OFFSET_SZ);
+			else
+				RTW_INFO("%s, !!!ERROR!!! For USB, TODO ITEM\n", __FUNCTION__);
+#else
+			type = get_frame_sub_type(pxmitbuf->pbuf + TXDESC_OFFSET);
+#endif
+
+			if ((type == WIFI_PROBEREQ) ||
+			    (type == WIFI_DATA_NULL) ||
+			    (type == WIFI_QOS_DATA_NULL)) {
+				rtw_list_delete(&pxmitbuf->list);
+				break;
+			}
+			pxmitbuf = NULL;
+		} while (1);
+	}
+
+	_exit_critical_bh(&pqueue->lock, &irql);
+
+	return pxmitbuf;
+}
+
 static struct xmit_buf *dequeue_pending_xmitbuf_ext(
 	struct xmit_priv *pxmitpriv)
 {
@@ -5338,9 +5272,13 @@ struct xmit_buf *select_and_dequeue_pending_xmitbuf(_adapter *padapter)
 	if (_TRUE == rtw_is_xmit_blocked(padapter))
 		return pxmitbuf;
 
-	pxmitbuf = dequeue_pending_xmitbuf_ext(pxmitpriv);
-	if (pxmitbuf == NULL && rtw_xmit_ac_blocked(padapter) != _TRUE)
-		pxmitbuf = dequeue_pending_xmitbuf(pxmitpriv);
+	if (rtw_xmit_ac_blocked(padapter) == _TRUE)
+		pxmitbuf = dequeue_pending_xmitbuf_under_survey(pxmitpriv);
+	else {
+		pxmitbuf = dequeue_pending_xmitbuf_ext(pxmitpriv);
+		if (pxmitbuf == NULL)
+			pxmitbuf = dequeue_pending_xmitbuf(pxmitpriv);
+	}
 
 	return pxmitbuf;
 }
@@ -5368,13 +5306,7 @@ thread_return rtw_xmit_thread(thread_context context)
 {
 	s32 err;
 	PADAPTER padapter;
-#ifdef RTW_XMIT_THREAD_HIGH_PRIORITY
-#ifdef PLATFORM_LINUX
-	struct sched_param param = { .sched_priority = 1 };
 
-	sched_setscheduler(current, SCHED_FIFO, &param);
-#endif /* PLATFORM_LINUX */
-#endif /* RTW_XMIT_THREAD_HIGH_PRIORITY */
 
 	err = _SUCCESS;
 	padapter = (PADAPTER)context;
@@ -5457,7 +5389,6 @@ bool rtw_is_xmit_blocked(_adapter *padapter)
 bool rtw_xmit_ac_blocked(_adapter *adapter)
 {
 	struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
-	struct rf_ctl_t *rfctl = adapter_to_rfctl(adapter);
 	_adapter *iface;
 	struct mlme_ext_priv *mlmeext;
 	struct mlme_ext_info *mlmeextinfo;
@@ -5474,8 +5405,6 @@ bool rtw_xmit_ac_blocked(_adapter *adapter)
 #endif/* #ifdef DBG_CONFIG_ERROR_RESET */
 #endif/* #ifdef DBG_CONFIG_ERROR_DETECT */
 
-	if (rfctl->offch_state != OFFCHS_NONE)
-		blocked = _TRUE;
 
 	for (i = 0; i < dvobj->iface_nums; i++) {
 		iface = dvobj->padapters[i];

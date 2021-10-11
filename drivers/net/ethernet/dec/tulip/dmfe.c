@@ -1,17 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
     A Davicom DM9102/DM9102A/DM9102A+DM9801/DM9102A+DM9802 NIC fast
     ethernet driver for Linux.
     Copyright (C) 1997  Sten Wang
 
-    This program is free software; you can redistribute it and/or
-    modify it under the terms of the GNU General Public License
-    as published by the Free Software Foundation; either version 2
-    of the License, or (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
 
     DAVICOM Web-Site: www.davicom.com.tw
 
@@ -64,8 +56,6 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #define DRV_NAME	"dmfe"
-#define DRV_VERSION	"1.36.4"
-#define DRV_RELDATE	"2002-01-17"
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -90,7 +80,7 @@
 #include <asm/processor.h>
 #include <asm/io.h>
 #include <asm/dma.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/irq.h>
 
 #ifdef CONFIG_TULIP_DM910X
@@ -288,10 +278,6 @@ enum dmfe_CR6_bits {
 };
 
 /* Global variable declaration ----------------------------- */
-static int printed_version;
-static const char version[] =
-	"Davicom DM9xxx net driver, version " DRV_VERSION " (" DRV_RELDATE ")";
-
 static int dmfe_debug;
 static unsigned char dmfe_media_mode = DMFE_AUTO;
 static u32 dmfe_cr6_user_set;
@@ -331,7 +317,7 @@ static void dmfe_phy_write_1bit(void __iomem *, u32);
 static u16 dmfe_phy_read_1bit(void __iomem *);
 static u8 dmfe_sense_speed(struct dmfe_board_info *);
 static void dmfe_process_mode(struct dmfe_board_info *);
-static void dmfe_timer(unsigned long);
+static void dmfe_timer(struct timer_list *);
 static inline u32 cal_CRC(unsigned char *, unsigned int, u8);
 static void dmfe_rx_packet(struct net_device *, struct dmfe_board_info *);
 static void dmfe_free_tx_pkt(struct net_device *, struct dmfe_board_info *);
@@ -352,7 +338,6 @@ static const struct net_device_ops netdev_ops = {
 	.ndo_stop		= dmfe_stop,
 	.ndo_start_xmit		= dmfe_start_xmit,
 	.ndo_set_rx_mode	= dmfe_set_filter_mode,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 #ifdef CONFIG_NET_POLL_CONTROLLER
@@ -372,9 +357,6 @@ static int dmfe_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	int i, err;
 
 	DMFE_DBUG(0, "dmfe_init_one()", 0);
-
-	if (!printed_version++)
-		pr_info("%s\n", version);
 
 	/*
 	 *	SPARC on-board DM910x chips should be handled by the main
@@ -398,7 +380,7 @@ static int dmfe_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		return -ENOMEM;
 	SET_NETDEV_DEV(dev, &pdev->dev);
 
-	if (pci_set_dma_mask(pdev, DMA_BIT_MASK(32))) {
+	if (dma_set_mask(&pdev->dev, DMA_BIT_MASK(32))) {
 		pr_warn("32-bit PCI DMA not available\n");
 		err = -ENODEV;
 		goto err_out_free;
@@ -440,15 +422,17 @@ static int dmfe_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	db = netdev_priv(dev);
 
 	/* Allocate Tx/Rx descriptor memory */
-	db->desc_pool_ptr = pci_alloc_consistent(pdev, sizeof(struct tx_desc) *
-			DESC_ALL_CNT + 0x20, &db->desc_pool_dma_ptr);
+	db->desc_pool_ptr = dma_alloc_coherent(&pdev->dev,
+					       sizeof(struct tx_desc) * DESC_ALL_CNT + 0x20,
+					       &db->desc_pool_dma_ptr, GFP_KERNEL);
 	if (!db->desc_pool_ptr) {
 		err = -ENOMEM;
 		goto err_out_res;
 	}
 
-	db->buf_pool_ptr = pci_alloc_consistent(pdev, TX_BUF_ALLOC *
-			TX_DESC_CNT + 4, &db->buf_pool_dma_ptr);
+	db->buf_pool_ptr = dma_alloc_coherent(&pdev->dev,
+					      TX_BUF_ALLOC * TX_DESC_CNT + 4,
+					      &db->buf_pool_dma_ptr, GFP_KERNEL);
 	if (!db->buf_pool_ptr) {
 		err = -ENOMEM;
 		goto err_out_free_desc;
@@ -510,11 +494,12 @@ static int dmfe_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 err_out_unmap:
 	pci_iounmap(pdev, db->ioaddr);
 err_out_free_buf:
-	pci_free_consistent(pdev, TX_BUF_ALLOC * TX_DESC_CNT + 4,
-			    db->buf_pool_ptr, db->buf_pool_dma_ptr);
+	dma_free_coherent(&pdev->dev, TX_BUF_ALLOC * TX_DESC_CNT + 4,
+			  db->buf_pool_ptr, db->buf_pool_dma_ptr);
 err_out_free_desc:
-	pci_free_consistent(pdev, sizeof(struct tx_desc) * DESC_ALL_CNT + 0x20,
-			    db->desc_pool_ptr, db->desc_pool_dma_ptr);
+	dma_free_coherent(&pdev->dev,
+			  sizeof(struct tx_desc) * DESC_ALL_CNT + 0x20,
+			  db->desc_pool_ptr, db->desc_pool_dma_ptr);
 err_out_res:
 	pci_release_regions(pdev);
 err_out_disable:
@@ -537,11 +522,12 @@ static void dmfe_remove_one(struct pci_dev *pdev)
 
 		unregister_netdev(dev);
 		pci_iounmap(db->pdev, db->ioaddr);
-		pci_free_consistent(db->pdev, sizeof(struct tx_desc) *
-					DESC_ALL_CNT + 0x20, db->desc_pool_ptr,
- 					db->desc_pool_dma_ptr);
-		pci_free_consistent(db->pdev, TX_BUF_ALLOC * TX_DESC_CNT + 4,
-					db->buf_pool_ptr, db->buf_pool_dma_ptr);
+		dma_free_coherent(&db->pdev->dev,
+				  sizeof(struct tx_desc) * DESC_ALL_CNT + 0x20,
+				  db->desc_pool_ptr, db->desc_pool_dma_ptr);
+		dma_free_coherent(&db->pdev->dev,
+				  TX_BUF_ALLOC * TX_DESC_CNT + 4,
+				  db->buf_pool_ptr, db->buf_pool_dma_ptr);
 		pci_release_regions(pdev);
 		free_netdev(dev);	/* free board information */
 	}
@@ -597,10 +583,8 @@ static int dmfe_open(struct net_device *dev)
 	netif_wake_queue(dev);
 
 	/* set and active a timer process */
-	init_timer(&db->timer);
+	timer_setup(&db->timer, dmfe_timer, 0);
 	db->timer.expires = DMFE_TIMER_WUT + HZ * 2;
-	db->timer.data = (unsigned long)dev;
-	db->timer.function = dmfe_timer;
 	add_timer(&db->timer);
 
 	return 0;
@@ -975,8 +959,8 @@ static void dmfe_rx_packet(struct net_device *dev, struct dmfe_board_info *db)
 		db->rx_avail_cnt--;
 		db->interval_rx_cnt++;
 
-		pci_unmap_single(db->pdev, le32_to_cpu(rxptr->rdes2),
-				 RX_ALLOC_SIZE, PCI_DMA_FROMDEVICE);
+		dma_unmap_single(&db->pdev->dev, le32_to_cpu(rxptr->rdes2),
+				 RX_ALLOC_SIZE, DMA_FROM_DEVICE);
 
 		if ( (rdes0 & 0x300) != 0x300) {
 			/* A packet without First/Last flag */
@@ -1092,7 +1076,6 @@ static void dmfe_ethtool_get_drvinfo(struct net_device *dev,
 	struct dmfe_board_info *np = netdev_priv(dev);
 
 	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
 	strlcpy(info->bus_info, pci_name(np->pdev), sizeof(info->bus_info));
 }
 
@@ -1131,10 +1114,10 @@ static const struct ethtool_ops netdev_ethtool_ops = {
  *	Dynamic media sense, allocate Rx buffer...
  */
 
-static void dmfe_timer(unsigned long data)
+static void dmfe_timer(struct timer_list *t)
 {
-	struct net_device *dev = (struct net_device *)data;
-	struct dmfe_board_info *db = netdev_priv(dev);
+	struct dmfe_board_info *db = from_timer(db, t, timer);
+	struct net_device *dev = pci_get_drvdata(db->pdev);
 	void __iomem *ioaddr = db->ioaddr;
 	u32 tmp_cr8;
 	unsigned char tmp_cr12;
@@ -1350,8 +1333,8 @@ static void dmfe_reuse_skb(struct dmfe_board_info *db, struct sk_buff * skb)
 
 	if (!(rxptr->rdes0 & cpu_to_le32(0x80000000))) {
 		rxptr->rx_skb_ptr = skb;
-		rxptr->rdes2 = cpu_to_le32( pci_map_single(db->pdev,
-			    skb->data, RX_ALLOC_SIZE, PCI_DMA_FROMDEVICE) );
+		rxptr->rdes2 = cpu_to_le32(dma_map_single(&db->pdev->dev, skb->data,
+							  RX_ALLOC_SIZE, DMA_FROM_DEVICE));
 		wmb();
 		rxptr->rdes0 = cpu_to_le32(0x80000000);
 		db->rx_avail_cnt++;
@@ -1565,8 +1548,8 @@ static void allocate_rx_buffer(struct net_device *dev)
 		if ( ( skb = netdev_alloc_skb(dev, RX_ALLOC_SIZE) ) == NULL )
 			break;
 		rxptr->rx_skb_ptr = skb; /* FIXME (?) */
-		rxptr->rdes2 = cpu_to_le32( pci_map_single(db->pdev, skb->data,
-				    RX_ALLOC_SIZE, PCI_DMA_FROMDEVICE) );
+		rxptr->rdes2 = cpu_to_le32(dma_map_single(&db->pdev->dev, skb->data,
+							  RX_ALLOC_SIZE, DMA_FROM_DEVICE));
 		wmb();
 		rxptr->rdes0 = cpu_to_le32(0x80000000);
 		rxptr = rxptr->next_rx_desc;
@@ -2102,14 +2085,11 @@ static const struct pci_device_id dmfe_pci_tbl[] = {
 };
 MODULE_DEVICE_TABLE(pci, dmfe_pci_tbl);
 
-
-#ifdef CONFIG_PM
-static int dmfe_suspend(struct pci_dev *pci_dev, pm_message_t state)
+static int __maybe_unused dmfe_suspend(struct device *dev_d)
 {
-	struct net_device *dev = pci_get_drvdata(pci_dev);
+	struct net_device *dev = dev_get_drvdata(dev_d);
 	struct dmfe_board_info *db = netdev_priv(dev);
 	void __iomem *ioaddr = db->ioaddr;
-	u32 tmp;
 
 	/* Disable upper layer interface */
 	netif_device_detach(dev);
@@ -2126,69 +2106,40 @@ static int dmfe_suspend(struct pci_dev *pci_dev, pm_message_t state)
 	dmfe_free_rxbuffer(db);
 
 	/* Enable WOL */
-	pci_read_config_dword(pci_dev, 0x40, &tmp);
-	tmp &= ~(DMFE_WOL_LINKCHANGE|DMFE_WOL_MAGICPACKET);
-
-	if (db->wol_mode & WAKE_PHY)
-		tmp |= DMFE_WOL_LINKCHANGE;
-	if (db->wol_mode & WAKE_MAGIC)
-		tmp |= DMFE_WOL_MAGICPACKET;
-
-	pci_write_config_dword(pci_dev, 0x40, tmp);
-
-	pci_enable_wake(pci_dev, PCI_D3hot, 1);
-	pci_enable_wake(pci_dev, PCI_D3cold, 1);
-
-	/* Power down device*/
-	pci_save_state(pci_dev);
-	pci_set_power_state(pci_dev, pci_choose_state (pci_dev, state));
+	device_wakeup_enable(dev_d);
 
 	return 0;
 }
 
-static int dmfe_resume(struct pci_dev *pci_dev)
+static int __maybe_unused dmfe_resume(struct device *dev_d)
 {
-	struct net_device *dev = pci_get_drvdata(pci_dev);
-	u32 tmp;
-
-	pci_set_power_state(pci_dev, PCI_D0);
-	pci_restore_state(pci_dev);
+	struct net_device *dev = dev_get_drvdata(dev_d);
 
 	/* Re-initialize DM910X board */
 	dmfe_init_dm910x(dev);
 
 	/* Disable WOL */
-	pci_read_config_dword(pci_dev, 0x40, &tmp);
-
-	tmp &= ~(DMFE_WOL_LINKCHANGE | DMFE_WOL_MAGICPACKET);
-	pci_write_config_dword(pci_dev, 0x40, tmp);
-
-	pci_enable_wake(pci_dev, PCI_D3hot, 0);
-	pci_enable_wake(pci_dev, PCI_D3cold, 0);
+	device_wakeup_disable(dev_d);
 
 	/* Restart upper layer interface */
 	netif_device_attach(dev);
 
 	return 0;
 }
-#else
-#define dmfe_suspend NULL
-#define dmfe_resume NULL
-#endif
+
+static SIMPLE_DEV_PM_OPS(dmfe_pm_ops, dmfe_suspend, dmfe_resume);
 
 static struct pci_driver dmfe_driver = {
 	.name		= "dmfe",
 	.id_table	= dmfe_pci_tbl,
 	.probe		= dmfe_init_one,
 	.remove		= dmfe_remove_one,
-	.suspend        = dmfe_suspend,
-	.resume         = dmfe_resume
+	.driver.pm	= &dmfe_pm_ops,
 };
 
 MODULE_AUTHOR("Sten Wang, sten_wang@davicom.com.tw");
 MODULE_DESCRIPTION("Davicom DM910X fast ethernet driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION(DRV_VERSION);
 
 module_param(debug, int, 0);
 module_param(mode, byte, 0);
@@ -2215,9 +2166,6 @@ static int __init dmfe_init_module(void)
 {
 	int rc;
 
-	pr_info("%s\n", version);
-	printed_version = 1;
-
 	DMFE_DBUG(0, "init_module() ", debug);
 
 	if (debug)
@@ -2225,15 +2173,16 @@ static int __init dmfe_init_module(void)
 	if (cr6set)
 		dmfe_cr6_user_set = cr6set;
 
- 	switch(mode) {
-   	case DMFE_10MHF:
+	switch (mode) {
+	case DMFE_10MHF:
 	case DMFE_100MHF:
 	case DMFE_10MFD:
 	case DMFE_100MFD:
 	case DMFE_1M_HPNA:
 		dmfe_media_mode = mode;
 		break;
-	default:dmfe_media_mode = DMFE_AUTO;
+	default:
+		dmfe_media_mode = DMFE_AUTO;
 		break;
 	}
 

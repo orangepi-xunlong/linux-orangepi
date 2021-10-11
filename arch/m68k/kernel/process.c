@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/arch/m68k/kernel/process.c
  *
@@ -13,6 +14,9 @@
 #include <linux/errno.h>
 #include <linux/module.h>
 #include <linux/sched.h>
+#include <linux/sched/debug.h>
+#include <linux/sched/task.h>
+#include <linux/sched/task_stack.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
@@ -26,30 +30,16 @@
 #include <linux/init_task.h>
 #include <linux/mqueue.h>
 #include <linux/rcupdate.h>
+#include <linux/syscalls.h>
+#include <linux/uaccess.h>
 
-#include <asm/uaccess.h>
 #include <asm/traps.h>
 #include <asm/machdep.h>
 #include <asm/setup.h>
-#include <asm/pgtable.h>
 
 
 asmlinkage void ret_from_fork(void);
 asmlinkage void ret_from_kernel_thread(void);
-
-
-/*
- * Return saved PC from a blocked thread
- */
-unsigned long thread_saved_pc(struct task_struct *tsk)
-{
-	struct switch_stack *sw = (struct switch_stack *)tsk->thread.ksp;
-	/* Check whether the thread is blocked in resume() */
-	if (in_sched_functions(sw->retpc))
-		return ((unsigned long *)sw->a6)[1];
-	else
-		return sw->retpc;
-}
 
 void arch_cpu_idle(void)
 {
@@ -87,17 +77,17 @@ EXPORT_SYMBOL(pm_power_off);
 
 void show_regs(struct pt_regs * regs)
 {
-	printk("\n");
-	printk("Format %02x  Vector: %04x  PC: %08lx  Status: %04x    %s\n",
-	       regs->format, regs->vector, regs->pc, regs->sr, print_tainted());
-	printk("ORIG_D0: %08lx  D0: %08lx  A2: %08lx  A1: %08lx\n",
-	       regs->orig_d0, regs->d0, regs->a2, regs->a1);
-	printk("A0: %08lx  D5: %08lx  D4: %08lx\n",
-	       regs->a0, regs->d5, regs->d4);
-	printk("D3: %08lx  D2: %08lx  D1: %08lx\n",
-	       regs->d3, regs->d2, regs->d1);
+	pr_info("Format %02x  Vector: %04x  PC: %08lx  Status: %04x    %s\n",
+		regs->format, regs->vector, regs->pc, regs->sr,
+		print_tainted());
+	pr_info("ORIG_D0: %08lx  D0: %08lx  A2: %08lx  A1: %08lx\n",
+		regs->orig_d0, regs->d0, regs->a2, regs->a1);
+	pr_info("A0: %08lx  D5: %08lx  D4: %08lx\n", regs->a0, regs->d5,
+		regs->d4);
+	pr_info("D3: %08lx  D2: %08lx  D1: %08lx\n", regs->d3, regs->d2,
+		regs->d1);
 	if (!(regs->sr & PS_S))
-		printk("USP: %08lx\n", rdusp());
+		pr_info("USP: %08lx\n", rdusp());
 }
 
 void flush_thread(void)
@@ -117,20 +107,39 @@ void flush_thread(void)
  * on top of pt_regs, which means that sys_clone() arguments would be
  * buried.  We could, of course, copy them, but it's too costly for no
  * good reason - generic clone() would have to copy them *again* for
- * do_fork() anyway.  So in this case it's actually better to pass pt_regs *
- * and extract arguments for do_fork() from there.  Eventually we might
- * go for calling do_fork() directly from the wrapper, but only after we
- * are finished with do_fork() prototype conversion.
+ * kernel_clone() anyway.  So in this case it's actually better to pass pt_regs *
+ * and extract arguments for kernel_clone() from there.  Eventually we might
+ * go for calling kernel_clone() directly from the wrapper, but only after we
+ * are finished with kernel_clone() prototype conversion.
  */
 asmlinkage int m68k_clone(struct pt_regs *regs)
 {
 	/* regs will be equal to current_pt_regs() */
-	return do_fork(regs->d1, regs->d2, 0,
-		       (int __user *)regs->d3, (int __user *)regs->d4);
+	struct kernel_clone_args args = {
+		.flags		= regs->d1 & ~CSIGNAL,
+		.pidfd		= (int __user *)regs->d3,
+		.child_tid	= (int __user *)regs->d4,
+		.parent_tid	= (int __user *)regs->d3,
+		.exit_signal	= regs->d1 & CSIGNAL,
+		.stack		= regs->d2,
+		.tls		= regs->d5,
+	};
+
+	return kernel_clone(&args);
 }
 
-int copy_thread(unsigned long clone_flags, unsigned long usp,
-		 unsigned long arg, struct task_struct *p)
+/*
+ * Because extra registers are saved on the stack after the sys_clone3()
+ * arguments, this C wrapper extracts them from pt_regs * and then calls the
+ * generic sys_clone3() implementation.
+ */
+asmlinkage int m68k_clone3(struct pt_regs *regs)
+{
+	return sys_clone3((struct clone_args __user *)regs->d1, regs->d2);
+}
+
+int copy_thread(unsigned long clone_flags, unsigned long usp, unsigned long arg,
+		struct task_struct *p, unsigned long tls)
 {
 	struct fork_frame {
 		struct switch_stack sw;
@@ -148,7 +157,7 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 	 */
 	p->thread.fs = get_fs().seg;
 
-	if (unlikely(p->flags & PF_KTHREAD)) {
+	if (unlikely(p->flags & (PF_KTHREAD | PF_IO_WORKER))) {
 		/* kernel thread */
 		memset(frame, 0, sizeof(struct fork_frame));
 		frame->regs.sr = PS_S;
@@ -165,7 +174,7 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 	p->thread.usp = usp ?: rdusp();
 
 	if (clone_flags & CLONE_SETTLS)
-		task_thread_info(p)->tp_value = frame->regs.d5;
+		task_thread_info(p)->tp_value = tls;
 
 #ifdef CONFIG_FPU
 	if (!FPU_IS_EMU) {

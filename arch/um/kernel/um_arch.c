@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2000 - 2007 Jeff Dike (jdike@{addtoit,linux.intel}.com)
- * Licensed under the GPL
  */
 
 #include <linux/delay.h>
@@ -11,8 +11,10 @@
 #include <linux/string.h>
 #include <linux/utsname.h>
 #include <linux/sched.h>
+#include <linux/sched/task.h>
 #include <linux/kmsg_dump.h>
-#include <asm/pgtable.h>
+#include <linux/suspend.h>
+
 #include <asm/processor.h>
 #include <asm/sections.h>
 #include <asm/setup.h>
@@ -24,7 +26,8 @@
 #include <mem_user.h>
 #include <os.h>
 
-#define DEFAULT_COMMAND_LINE "root=98:0"
+#define DEFAULT_COMMAND_LINE_ROOT "root=98:0"
+#define DEFAULT_COMMAND_LINE_CONSOLE "console=tty"
 
 /* Changed in add_arg and setup_arch, which run before SMP is started */
 static char __initdata command_line[COMMAND_LINE_SIZE] = { 0 };
@@ -32,7 +35,7 @@ static char __initdata command_line[COMMAND_LINE_SIZE] = { 0 };
 static void __init add_arg(char *arg)
 {
 	if (strlen(command_line) + strlen(arg) + 1 > COMMAND_LINE_SIZE) {
-		printf("add_arg: Too many command line arguments!\n");
+		os_warn("add_arg: Too many command line arguments!\n");
 		exit(1);
 	}
 	if (strlen(command_line) > 0)
@@ -51,14 +54,8 @@ struct cpuinfo_um boot_cpu_data = {
 };
 
 union thread_union cpu0_irqstack
-	__attribute__((__section__(".data..init_irqstack"))) =
-		{ INIT_THREAD_INFO(init_task) };
-
-unsigned long thread_saved_pc(struct task_struct *task)
-{
-	/* FIXME: Need to look up userspace_pid by cpu */
-	return os_process_pc(userspace_pid[0]);
-}
+	__section(".data..init_irqstack") =
+		{ .thread_info = INIT_THREAD_INFO(init_task) };
 
 /* Changed in setup_arch, which is called in early boot */
 static char host_info[(__NEW_UTS_LEN + 1) * 5];
@@ -113,10 +110,12 @@ unsigned long end_vm;
 int ncpus = 1;
 
 /* Set in early boot */
-static int have_root __initdata = 0;
+static int have_root __initdata;
+static int have_console __initdata;
 
 /* Set in uml_mem_setup and modified in linux_main */
 long long physmem_size = 32 * 1024 * 1024;
+EXPORT_SYMBOL(physmem_size);
 
 static const char *usage_string =
 "User Mode Linux v%s\n"
@@ -124,6 +123,7 @@ static const char *usage_string =
 
 static int __init uml_version_setup(char *line, int *add)
 {
+	/* Explicitly use printf() to show version in stdout */
 	printf("%s\n", init_utsname()->release);
 	exit(0);
 
@@ -152,8 +152,8 @@ __uml_setup("root=", uml_root_setup,
 
 static int __init no_skas_debug_setup(char *line, int *add)
 {
-	printf("'debug' is not necessary to gdb UML in skas mode - run \n");
-	printf("'gdb linux'\n");
+	os_warn("'debug' is not necessary to gdb UML in skas mode - run\n");
+	os_warn("'gdb linux'\n");
 
 	return 0;
 }
@@ -163,12 +163,24 @@ __uml_setup("debug", no_skas_debug_setup,
 "    this flag is not needed to run gdb on UML in skas mode\n\n"
 );
 
+static int __init uml_console_setup(char *line, int *add)
+{
+	have_console = 1;
+	return 0;
+}
+
+__uml_setup("console=", uml_console_setup,
+"console=<preferred console>\n"
+"    Specify the preferred console output driver\n\n"
+);
+
 static int __init Usage(char *line, int *add)
 {
 	const char **p;
 
 	printf(usage_string, init_utsname()->release);
 	p = &__uml_help_start;
+	/* Explicitly use printf() to show help in stdout */
 	while (p < &__uml_help_end) {
 		printf("%s", *p);
 		p++;
@@ -237,6 +249,7 @@ void uml_finishsetup(void)
 }
 
 /* Set during early boot */
+unsigned long stub_start;
 unsigned long task_size;
 EXPORT_SYMBOL(task_size);
 
@@ -265,9 +278,16 @@ int __init linux_main(int argc, char **argv)
 			add_arg(argv[i]);
 	}
 	if (have_root == 0)
-		add_arg(DEFAULT_COMMAND_LINE);
+		add_arg(DEFAULT_COMMAND_LINE_ROOT);
+
+	if (have_console == 0)
+		add_arg(DEFAULT_COMMAND_LINE_CONSOLE);
 
 	host_task_size = os_get_top_address();
+	/* reserve two pages for the stubs */
+	host_task_size -= 2 * PAGE_SIZE;
+	stub_start = host_task_size;
+
 	/*
 	 * TASK_SIZE needs to be PGDIR_SIZE aligned or else exit_mmap craps
 	 * out
@@ -287,8 +307,8 @@ int __init linux_main(int argc, char **argv)
 
 	diff = UML_ROUND_UP(brk_start) - UML_ROUND_UP(&_end);
 	if (diff > 1024 * 1024) {
-		printf("Adding %ld bytes to physical memory to account for "
-		       "exec-shield gap\n", diff);
+		os_info("Adding %ld bytes to physical memory to account for "
+			"exec-shield gap\n", diff);
 		physmem_size += UML_ROUND_UP(brk_start) - UML_ROUND_UP(&_end);
 	}
 
@@ -328,8 +348,8 @@ int __init linux_main(int argc, char **argv)
 	end_vm = start_vm + virtmem_size;
 
 	if (virtmem_size < physmem_size)
-		printf("Kernel virtual memory size shrunk to %lu bytes\n",
-		       virtmem_size);
+		os_info("Kernel virtual memory size shrunk to %lu bytes\n",
+			virtmem_size);
 
 	os_flush_stdout();
 
@@ -363,3 +383,85 @@ void __init check_bugs(void)
 void apply_alternatives(struct alt_instr *start, struct alt_instr *end)
 {
 }
+
+void *text_poke(void *addr, const void *opcode, size_t len)
+{
+	/*
+	 * In UML, the only reference to this function is in
+	 * apply_relocate_add(), which shouldn't ever actually call this
+	 * because UML doesn't have live patching.
+	 */
+	WARN_ON(1);
+
+	return memcpy(addr, opcode, len);
+}
+
+void text_poke_sync(void)
+{
+}
+
+void uml_pm_wake(void)
+{
+	pm_system_wakeup();
+}
+
+#ifdef CONFIG_PM_SLEEP
+static int um_suspend_valid(suspend_state_t state)
+{
+	return state == PM_SUSPEND_MEM;
+}
+
+static int um_suspend_prepare(void)
+{
+	um_irqs_suspend();
+	return 0;
+}
+
+static int um_suspend_enter(suspend_state_t state)
+{
+	if (WARN_ON(state != PM_SUSPEND_MEM))
+		return -EINVAL;
+
+	/*
+	 * This is identical to the idle sleep, but we've just
+	 * (during suspend) turned off all interrupt sources
+	 * except for the ones we want, so now we can only wake
+	 * up on something we actually want to wake up on. All
+	 * timing has also been suspended.
+	 */
+	um_idle_sleep();
+	return 0;
+}
+
+static void um_suspend_finish(void)
+{
+	um_irqs_resume();
+}
+
+const struct platform_suspend_ops um_suspend_ops = {
+	.valid = um_suspend_valid,
+	.prepare = um_suspend_prepare,
+	.enter = um_suspend_enter,
+	.finish = um_suspend_finish,
+};
+
+static int init_pm_wake_signal(void)
+{
+	/*
+	 * In external time-travel mode we can't use signals to wake up
+	 * since that would mess with the scheduling. We'll have to do
+	 * some additional work to support wakeup on virtio devices or
+	 * similar, perhaps implementing a fake RTC controller that can
+	 * trigger wakeup (and request the appropriate scheduling from
+	 * the external scheduler when going to suspend.)
+	 */
+	if (time_travel_mode != TT_MODE_EXTERNAL)
+		register_pm_wake_signal();
+
+	suspend_set_ops(&um_suspend_ops);
+
+	return 0;
+}
+
+late_initcall(init_pm_wake_signal);
+#endif

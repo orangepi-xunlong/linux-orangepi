@@ -1,19 +1,4 @@
-/*
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 675 Mass Ave, Cambridge, MA 02139, USA.
- */
+// SPDX-License-Identifier: GPL-2.0+
 #include <linux/jiffies.h>
 #include <linux/errno.h>
 #include <linux/module.h>
@@ -41,6 +26,7 @@
 
 MODULE_DESCRIPTION("Driver for ENE UB6250 reader");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS(USB_STORAGE);
 MODULE_FIRMWARE(SD_INIT1_FIRMWARE);
 MODULE_FIRMWARE(SD_INIT2_FIRMWARE);
 MODULE_FIRMWARE(SD_RW_FIRMWARE);
@@ -95,12 +81,12 @@ static struct us_unusual_dev ene_ub6250_unusual_dev_list[] = {
 #define REG_HW_TRAP1        0xFF89
 
 /* SRB Status */
-#define SS_SUCCESS                  0x00      /* No Sense */
-#define SS_NOT_READY                0x02
-#define SS_MEDIUM_ERR               0x03
-#define SS_HW_ERR                   0x04
-#define SS_ILLEGAL_REQUEST          0x05
-#define SS_UNIT_ATTENTION           0x06
+#define SS_SUCCESS		0x000000	/* No Sense */
+#define SS_NOT_READY		0x023A00	/* Medium not present */
+#define SS_MEDIUM_ERR		0x031100	/* Unrecovered read error */
+#define SS_HW_ERR		0x040800	/* Communication failure */
+#define SS_ILLEGAL_REQUEST	0x052000	/* Invalid command */
+#define SS_UNIT_ATTENTION	0x062900	/* Reset occurred */
 
 /* ENE Load FW Pattern */
 #define SD_INIT1_PATTERN   1
@@ -575,12 +561,40 @@ static int ene_send_scsi_cmd(struct us_data *us, u8 fDir, void *buf, int use_sg)
 		residue = min(residue, transfer_length);
 		if (us->srb != NULL)
 			scsi_set_resid(us->srb, max(scsi_get_resid(us->srb),
-								(int)residue));
+								residue));
 	}
 
 	if (bcs->Status != US_BULK_STAT_OK)
 		return USB_STOR_TRANSPORT_ERROR;
 
+	return USB_STOR_TRANSPORT_GOOD;
+}
+
+static int do_scsi_request_sense(struct us_data *us, struct scsi_cmnd *srb)
+{
+	struct ene_ub6250_info *info = (struct ene_ub6250_info *) us->extra;
+	unsigned char buf[18];
+
+	memset(buf, 0, 18);
+	buf[0] = 0x70;				/* Current error */
+	buf[2] = info->SrbStatus >> 16;		/* Sense key */
+	buf[7] = 10;				/* Additional length */
+	buf[12] = info->SrbStatus >> 8;		/* ASC */
+	buf[13] = info->SrbStatus;		/* ASCQ */
+
+	usb_stor_set_xfer_buf(buf, sizeof(buf), srb);
+	return USB_STOR_TRANSPORT_GOOD;
+}
+
+static int do_scsi_inquiry(struct us_data *us, struct scsi_cmnd *srb)
+{
+	unsigned char data_ptr[36] = {
+		0x00, 0x00, 0x02, 0x00, 0x1F, 0x00, 0x00, 0x00, 0x55,
+		0x53, 0x42, 0x32, 0x2E, 0x30, 0x20, 0x20, 0x43, 0x61,
+		0x72, 0x64, 0x52, 0x65, 0x61, 0x64, 0x65, 0x72, 0x20,
+		0x20, 0x20, 0x20, 0x20, 0x20, 0x30, 0x31, 0x30, 0x30 };
+
+	usb_stor_set_xfer_buf(data_ptr, 36, srb);
 	return USB_STOR_TRANSPORT_GOOD;
 }
 
@@ -595,18 +609,6 @@ static int sd_scsi_test_unit_ready(struct us_data *us, struct scsi_cmnd *srb)
 		return USB_STOR_TRANSPORT_GOOD;
 	}
 
-	return USB_STOR_TRANSPORT_GOOD;
-}
-
-static int sd_scsi_inquiry(struct us_data *us, struct scsi_cmnd *srb)
-{
-	unsigned char data_ptr[36] = {
-		0x00, 0x80, 0x02, 0x00, 0x1F, 0x00, 0x00, 0x00, 0x55,
-		0x53, 0x42, 0x32, 0x2E, 0x30, 0x20, 0x20, 0x43, 0x61,
-		0x72, 0x64, 0x52, 0x65, 0x61, 0x64, 0x65, 0x72, 0x20,
-		0x20, 0x20, 0x20, 0x20, 0x20, 0x30, 0x31, 0x30, 0x30 };
-
-	usb_stor_set_xfer_buf(data_ptr, 36, srb);
 	return USB_STOR_TRANSPORT_GOOD;
 }
 
@@ -806,8 +808,12 @@ static int ms_lib_alloc_logicalmap(struct us_data *us)
 	u32  i;
 	struct ene_ub6250_info *info = (struct ene_ub6250_info *) us->extra;
 
-	info->MS_Lib.Phy2LogMap = kmalloc(info->MS_Lib.NumberOfPhyBlock * sizeof(u16), GFP_KERNEL);
-	info->MS_Lib.Log2PhyMap = kmalloc(info->MS_Lib.NumberOfLogBlock * sizeof(u16), GFP_KERNEL);
+	info->MS_Lib.Phy2LogMap = kmalloc_array(info->MS_Lib.NumberOfPhyBlock,
+						sizeof(u16),
+						GFP_KERNEL);
+	info->MS_Lib.Log2PhyMap = kmalloc_array(info->MS_Lib.NumberOfLogBlock,
+						sizeof(u16),
+						GFP_KERNEL);
 
 	if ((info->MS_Lib.Phy2LogMap == NULL) || (info->MS_Lib.Log2PhyMap == NULL)) {
 		ms_lib_free_logicalmap(us);
@@ -855,6 +861,7 @@ static int ms_count_freeblock(struct us_data *us, u16 PhyBlock)
 		case MS_LB_NOT_USED:
 		case MS_LB_NOT_USED_ERASED:
 			Count++;
+			break;
 		default:
 			break;
 		}
@@ -1112,8 +1119,12 @@ static int ms_lib_alloc_writebuf(struct us_data *us)
 
 	info->MS_Lib.wrtblk = (u16)-1;
 
-	info->MS_Lib.blkpag = kmalloc(info->MS_Lib.PagesPerBlock * info->MS_Lib.BytesPerSector, GFP_KERNEL);
-	info->MS_Lib.blkext = kmalloc(info->MS_Lib.PagesPerBlock * sizeof(struct ms_lib_type_extdat), GFP_KERNEL);
+	info->MS_Lib.blkpag = kmalloc_array(info->MS_Lib.PagesPerBlock,
+					    info->MS_Lib.BytesPerSector,
+					    GFP_KERNEL);
+	info->MS_Lib.blkext = kmalloc_array(info->MS_Lib.PagesPerBlock,
+					    sizeof(struct ms_lib_type_extdat),
+					    GFP_KERNEL);
 
 	if ((info->MS_Lib.blkpag == NULL) || (info->MS_Lib.blkext == NULL)) {
 		ms_lib_free_writebuf(us);
@@ -1122,7 +1133,7 @@ static int ms_lib_alloc_writebuf(struct us_data *us)
 
 	ms_lib_clear_writebuf(us);
 
-return 0;
+	return 0;
 }
 
 static int ms_lib_force_setlogical_pair(struct us_data *us, u16 logblk, u16 phyblk)
@@ -1373,7 +1384,6 @@ static int ms_lib_read_extra(struct us_data *us, u32 PhyBlock,
 
 static int ms_libsearch_block_from_physical(struct us_data *us, u16 phyblk)
 {
-	u16 Newblk;
 	u16 blk;
 	struct ms_lib_type_extdat extdat; /* need check */
 	struct ene_ub6250_info *info = (struct ene_ub6250_info *) us->extra;
@@ -1386,7 +1396,6 @@ static int ms_libsearch_block_from_physical(struct us_data *us, u16 phyblk)
 		if ((blk & MS_PHYSICAL_BLOCKS_PER_SEGMENT_MASK) == 0)
 			blk -= MS_PHYSICAL_BLOCKS_PER_SEGMENT;
 
-		Newblk = info->MS_Lib.Phy2LogMap[blk];
 		if (info->MS_Lib.Phy2LogMap[blk] == MS_LB_NOT_USED_ERASED) {
 			return blk;
 		} else if (info->MS_Lib.Phy2LogMap[blk] == MS_LB_NOT_USED) {
@@ -1454,19 +1463,6 @@ static int ms_scsi_test_unit_ready(struct us_data *us, struct scsi_cmnd *srb)
 		return USB_STOR_TRANSPORT_GOOD;
 	}
 
-	return USB_STOR_TRANSPORT_GOOD;
-}
-
-static int ms_scsi_inquiry(struct us_data *us, struct scsi_cmnd *srb)
-{
-	/* pr_info("MS_SCSI_Inquiry\n"); */
-	unsigned char data_ptr[36] = {
-		0x00, 0x80, 0x02, 0x00, 0x1F, 0x00, 0x00, 0x00, 0x55,
-		0x53, 0x42, 0x32, 0x2E, 0x30, 0x20, 0x20, 0x43, 0x61,
-		0x72, 0x64, 0x52, 0x65, 0x61, 0x64, 0x65, 0x72, 0x20,
-		0x20, 0x20, 0x20, 0x20, 0x20, 0x30, 0x31, 0x30, 0x30};
-
-	usb_stor_set_xfer_buf(data_ptr, 36, srb);
 	return USB_STOR_TRANSPORT_GOOD;
 }
 
@@ -2227,13 +2223,15 @@ static int sd_scsi_irp(struct us_data *us, struct scsi_cmnd *srb)
 	int    result;
 	struct ene_ub6250_info *info = (struct ene_ub6250_info *)us->extra;
 
-	info->SrbStatus = SS_SUCCESS;
 	switch (srb->cmnd[0]) {
 	case TEST_UNIT_READY:
 		result = sd_scsi_test_unit_ready(us, srb);
 		break; /* 0x00 */
+	case REQUEST_SENSE:
+		result = do_scsi_request_sense(us, srb);
+		break; /* 0x03 */
 	case INQUIRY:
-		result = sd_scsi_inquiry(us, srb);
+		result = do_scsi_inquiry(us, srb);
 		break; /* 0x12 */
 	case MODE_SENSE:
 		result = sd_scsi_mode_sense(us, srb);
@@ -2257,6 +2255,8 @@ static int sd_scsi_irp(struct us_data *us, struct scsi_cmnd *srb)
 		result = USB_STOR_TRANSPORT_FAILED;
 		break;
 	}
+	if (result == USB_STOR_TRANSPORT_GOOD)
+		info->SrbStatus = SS_SUCCESS;
 	return result;
 }
 
@@ -2267,13 +2267,16 @@ static int ms_scsi_irp(struct us_data *us, struct scsi_cmnd *srb)
 {
 	int result;
 	struct ene_ub6250_info *info = (struct ene_ub6250_info *)us->extra;
-	info->SrbStatus = SS_SUCCESS;
+
 	switch (srb->cmnd[0]) {
 	case TEST_UNIT_READY:
 		result = ms_scsi_test_unit_ready(us, srb);
 		break; /* 0x00 */
+	case REQUEST_SENSE:
+		result = do_scsi_request_sense(us, srb);
+		break; /* 0x03 */
 	case INQUIRY:
-		result = ms_scsi_inquiry(us, srb);
+		result = do_scsi_inquiry(us, srb);
 		break; /* 0x12 */
 	case MODE_SENSE:
 		result = ms_scsi_mode_sense(us, srb);
@@ -2292,6 +2295,8 @@ static int ms_scsi_irp(struct us_data *us, struct scsi_cmnd *srb)
 		result = USB_STOR_TRANSPORT_FAILED;
 		break;
 	}
+	if (result == USB_STOR_TRANSPORT_GOOD)
+		info->SrbStatus = SS_SUCCESS;
 	return result;
 }
 

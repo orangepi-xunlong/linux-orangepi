@@ -1,17 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  inode.c - part of debugfs, a tiny little debug file system
  *
- *  Copyright (C) 2004 Greg Kroah-Hartman <greg@kroah.com>
+ *  Copyright (C) 2004,2019 Greg Kroah-Hartman <greg@kroah.com>
  *  Copyright (C) 2004 IBM Inc.
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License version
- *	2 as published by the Free Software Foundation.
+ *  Copyright (C) 2019 Linux Foundation <gregkh@linuxfoundation.org>
  *
  *  debugfs is for people to use instead of /proc or /sys.
- *  See Documentation/DocBook/kernel-api for more details.
- *
+ *  See ./Documentation/core-api/kernel-api.rst for more details.
  */
+
+#define pr_fmt(fmt)	"debugfs: " fmt
 
 #include <linux/module.h>
 #include <linux/fs.h>
@@ -27,6 +26,7 @@
 #include <linux/parser.h>
 #include <linux/magic.h>
 #include <linux/slab.h>
+#include <linux/security.h>
 
 #include "internal.h"
 
@@ -35,6 +35,37 @@
 static struct vfsmount *debugfs_mount;
 static int debugfs_mount_count;
 static bool debugfs_registered;
+static unsigned int debugfs_allow __ro_after_init = DEFAULT_DEBUGFS_ALLOW_BITS;
+
+/*
+ * Don't allow access attributes to be changed whilst the kernel is locked down
+ * so that we can use the file mode as part of a heuristic to determine whether
+ * to lock down individual files.
+ */
+static int debugfs_setattr(struct user_namespace *mnt_userns,
+			   struct dentry *dentry, struct iattr *ia)
+{
+	int ret;
+
+	if (ia->ia_valid & (ATTR_MODE | ATTR_UID | ATTR_GID)) {
+		ret = security_locked_down(LOCKDOWN_DEBUGFS);
+		if (ret)
+			return ret;
+	}
+	return simple_setattr(&init_user_ns, dentry, ia);
+}
+
+static const struct inode_operations debugfs_file_inode_operations = {
+	.setattr	= debugfs_setattr,
+};
+static const struct inode_operations debugfs_dir_inode_operations = {
+	.lookup		= simple_lookup,
+	.setattr	= debugfs_setattr,
+};
+static const struct inode_operations debugfs_symlink_inode_operations = {
+	.get_link	= simple_get_link,
+	.setattr	= debugfs_setattr,
+};
 
 static struct inode *debugfs_get_inode(struct super_block *sb)
 {
@@ -167,24 +198,26 @@ static int debugfs_show_options(struct seq_file *m, struct dentry *root)
 	return 0;
 }
 
-static void debugfs_evict_inode(struct inode *inode)
+static void debugfs_free_inode(struct inode *inode)
 {
-	truncate_inode_pages_final(&inode->i_data);
-	clear_inode(inode);
 	if (S_ISLNK(inode->i_mode))
 		kfree(inode->i_link);
+	free_inode_nonrcu(inode);
 }
 
 static const struct super_operations debugfs_super_operations = {
 	.statfs		= simple_statfs,
 	.remount_fs	= debugfs_remount,
 	.show_options	= debugfs_show_options,
-	.evict_inode	= debugfs_evict_inode,
+	.free_inode	= debugfs_free_inode,
 };
 
 static void debugfs_release_dentry(struct dentry *dentry)
 {
-	kfree(dentry->d_fsdata);
+	void *fsd = dentry->d_fsdata;
+
+	if (!((unsigned long)fsd & DEBUGFS_FSDATA_IS_REAL_FOPS_BIT))
+		kfree(dentry->d_fsdata);
 }
 
 static struct vfsmount *debugfs_automount(struct path *path)
@@ -202,11 +235,9 @@ static const struct dentry_operations debugfs_dops = {
 
 static int debug_fill_super(struct super_block *sb, void *data, int silent)
 {
-	static struct tree_descr debug_files[] = {{""}};
+	static const struct tree_descr debug_files[] = {{""}};
 	struct debugfs_fs_info *fsi;
 	int err;
-
-	save_mount_options(sb, data);
 
 	fsi = kzalloc(sizeof(struct debugfs_fs_info), GFP_KERNEL);
 	sb->s_fs_info = fsi;
@@ -240,6 +271,9 @@ static struct dentry *debug_mount(struct file_system_type *fs_type,
 			int flags, const char *dev_name,
 			void *data)
 {
+	if (!(debugfs_allow & DEBUGFS_ALLOW_API))
+		return ERR_PTR(-EPERM);
+
 	return mount_single(fs_type, flags, data, debug_fill_super);
 }
 
@@ -251,20 +285,57 @@ static struct file_system_type debug_fs_type = {
 };
 MODULE_ALIAS_FS("debugfs");
 
+/**
+ * debugfs_lookup() - look up an existing debugfs file
+ * @name: a pointer to a string containing the name of the file to look up.
+ * @parent: a pointer to the parent dentry of the file.
+ *
+ * This function will return a pointer to a dentry if it succeeds.  If the file
+ * doesn't exist or an error occurs, %NULL will be returned.  The returned
+ * dentry must be passed to dput() when it is no longer needed.
+ *
+ * If debugfs is not enabled in the kernel, the value -%ENODEV will be
+ * returned.
+ */
+struct dentry *debugfs_lookup(const char *name, struct dentry *parent)
+{
+	struct dentry *dentry;
+
+	if (!debugfs_initialized() || IS_ERR_OR_NULL(name) || IS_ERR(parent))
+		return NULL;
+
+	if (!parent)
+		parent = debugfs_mount->mnt_root;
+
+	dentry = lookup_positive_unlocked(name, parent, strlen(name));
+	if (IS_ERR(dentry))
+		return NULL;
+	return dentry;
+}
+EXPORT_SYMBOL_GPL(debugfs_lookup);
+
 static struct dentry *start_creating(const char *name, struct dentry *parent)
 {
 	struct dentry *dentry;
 	int error;
 
-	pr_debug("debugfs: creating file '%s'\n",name);
+	if (!(debugfs_allow & DEBUGFS_ALLOW_API))
+		return ERR_PTR(-EPERM);
+
+	if (!debugfs_initialized())
+		return ERR_PTR(-ENOENT);
+
+	pr_debug("creating file '%s'\n", name);
 
 	if (IS_ERR(parent))
 		return parent;
 
 	error = simple_pin_fs(&debug_fs_type, &debugfs_mount,
 			      &debugfs_mount_count);
-	if (error)
+	if (error) {
+		pr_err("Unable to pin filesystem for file '%s'\n", name);
 		return ERR_PTR(error);
+	}
 
 	/* If the parent is not specified, we create it in the root.
 	 * We need the root dentry to do this, which is in the super
@@ -275,8 +346,17 @@ static struct dentry *start_creating(const char *name, struct dentry *parent)
 		parent = debugfs_mount->mnt_root;
 
 	inode_lock(d_inode(parent));
-	dentry = lookup_one_len(name, parent, strlen(name));
+	if (unlikely(IS_DEADDIR(d_inode(parent))))
+		dentry = ERR_PTR(-ENOENT);
+	else
+		dentry = lookup_one_len(name, parent, strlen(name));
 	if (!IS_ERR(dentry) && d_really_is_positive(dentry)) {
+		if (d_is_dir(dentry))
+			pr_err("Directory '%s' with parent '%s' already present!\n",
+			       name, parent->d_name.name);
+		else
+			pr_err("File '%s' in directory '%s' already present!\n",
+			       name, parent->d_name.name);
 		dput(dentry);
 		dentry = ERR_PTR(-EEXIST);
 	}
@@ -294,7 +374,7 @@ static struct dentry *failed_creating(struct dentry *dentry)
 	inode_unlock(d_inode(dentry->d_parent));
 	dput(dentry);
 	simple_release_fs(&debugfs_mount, &debugfs_mount_count);
-	return NULL;
+	return ERR_PTR(-ENOMEM);
 }
 
 static struct dentry *end_creating(struct dentry *dentry)
@@ -310,35 +390,34 @@ static struct dentry *__debugfs_create_file(const char *name, umode_t mode,
 {
 	struct dentry *dentry;
 	struct inode *inode;
-	struct debugfs_fsdata *fsd;
-
-	fsd = kmalloc(sizeof(*fsd), GFP_KERNEL);
-	if (!fsd)
-		return NULL;
 
 	if (!(mode & S_IFMT))
 		mode |= S_IFREG;
 	BUG_ON(!S_ISREG(mode));
 	dentry = start_creating(name, parent);
 
-	if (IS_ERR(dentry)) {
-		kfree(fsd);
-		return NULL;
+	if (IS_ERR(dentry))
+		return dentry;
+
+	if (!(debugfs_allow & DEBUGFS_ALLOW_API)) {
+		failed_creating(dentry);
+		return ERR_PTR(-EPERM);
 	}
 
 	inode = debugfs_get_inode(dentry->d_sb);
 	if (unlikely(!inode)) {
-		kfree(fsd);
+		pr_err("out of free dentries, can not create file '%s'\n",
+		       name);
 		return failed_creating(dentry);
 	}
 
 	inode->i_mode = mode;
 	inode->i_private = data;
 
+	inode->i_op = &debugfs_file_inode_operations;
 	inode->i_fop = proxy_fops;
-	fsd->real_fops = real_fops;
-	refcount_set(&fsd->active_users, 1);
-	dentry->d_fsdata = fsd;
+	dentry->d_fsdata = (void *)((unsigned long)real_fops |
+				DEBUGFS_FSDATA_IS_REAL_FOPS_BIT);
 
 	d_instantiate(dentry, inode);
 	fsnotify_create(d_inode(dentry->d_parent), dentry);
@@ -366,7 +445,8 @@ static struct dentry *__debugfs_create_file(const char *name, umode_t mode,
  * This function will return a pointer to a dentry if it succeeds.  This
  * pointer must be passed to the debugfs_remove() function when the file is
  * to be removed (no automatic cleanup happens if your module is unloaded,
- * you are responsible here.)  If an error occurs, %NULL will be returned.
+ * you are responsible here.)  If an error occurs, ERR_PTR(-ERROR) will be
+ * returned.
  *
  * If debugfs is not enabled in the kernel, the value -%ENODEV will be
  * returned.
@@ -402,8 +482,8 @@ EXPORT_SYMBOL_GPL(debugfs_create_file);
  * debugfs core.
  *
  * It is your responsibility to protect your struct file_operation
- * methods against file removals by means of debugfs_use_file_start()
- * and debugfs_use_file_finish(). ->open() is still protected by
+ * methods against file removals by means of debugfs_file_get()
+ * and debugfs_file_put(). ->open() is still protected by
  * debugfs though.
  *
  * Any struct file_operations defined by means of
@@ -440,25 +520,16 @@ EXPORT_SYMBOL_GPL(debugfs_create_file_unsafe);
  * wide range of flexibility in creating a file, or a directory (if you want
  * to create a directory, the debugfs_create_dir() function is
  * recommended to be used instead.)
- *
- * This function will return a pointer to a dentry if it succeeds.  This
- * pointer must be passed to the debugfs_remove() function when the file is
- * to be removed (no automatic cleanup happens if your module is unloaded,
- * you are responsible here.)  If an error occurs, %NULL will be returned.
- *
- * If debugfs is not enabled in the kernel, the value -%ENODEV will be
- * returned.
  */
-struct dentry *debugfs_create_file_size(const char *name, umode_t mode,
-					struct dentry *parent, void *data,
-					const struct file_operations *fops,
-					loff_t file_size)
+void debugfs_create_file_size(const char *name, umode_t mode,
+			      struct dentry *parent, void *data,
+			      const struct file_operations *fops,
+			      loff_t file_size)
 {
 	struct dentry *de = debugfs_create_file(name, mode, parent, data, fops);
 
 	if (de)
 		d_inode(de)->i_size = file_size;
-	return de;
 }
 EXPORT_SYMBOL_GPL(debugfs_create_file_size);
 
@@ -475,7 +546,8 @@ EXPORT_SYMBOL_GPL(debugfs_create_file_size);
  * This function will return a pointer to a dentry if it succeeds.  This
  * pointer must be passed to the debugfs_remove() function when the file is
  * to be removed (no automatic cleanup happens if your module is unloaded,
- * you are responsible here.)  If an error occurs, %NULL will be returned.
+ * you are responsible here.)  If an error occurs, ERR_PTR(-ERROR) will be
+ * returned.
  *
  * If debugfs is not enabled in the kernel, the value -%ENODEV will be
  * returned.
@@ -486,14 +558,22 @@ struct dentry *debugfs_create_dir(const char *name, struct dentry *parent)
 	struct inode *inode;
 
 	if (IS_ERR(dentry))
-		return NULL;
+		return dentry;
+
+	if (!(debugfs_allow & DEBUGFS_ALLOW_API)) {
+		failed_creating(dentry);
+		return ERR_PTR(-EPERM);
+	}
 
 	inode = debugfs_get_inode(dentry->d_sb);
-	if (unlikely(!inode))
+	if (unlikely(!inode)) {
+		pr_err("out of free dentries, can not create directory '%s'\n",
+		       name);
 		return failed_creating(dentry);
+	}
 
 	inode->i_mode = S_IFDIR | S_IRWXU | S_IRUGO | S_IXUGO;
-	inode->i_op = &simple_dir_inode_operations;
+	inode->i_op = &debugfs_dir_inode_operations;
 	inode->i_fop = &simple_dir_operations;
 
 	/* directory inodes start off with i_nlink == 2 (for "." entry) */
@@ -525,11 +605,19 @@ struct dentry *debugfs_create_automount(const char *name,
 	struct inode *inode;
 
 	if (IS_ERR(dentry))
-		return NULL;
+		return dentry;
+
+	if (!(debugfs_allow & DEBUGFS_ALLOW_API)) {
+		failed_creating(dentry);
+		return ERR_PTR(-EPERM);
+	}
 
 	inode = debugfs_get_inode(dentry->d_sb);
-	if (unlikely(!inode))
+	if (unlikely(!inode)) {
+		pr_err("out of free dentries, can not create automount '%s'\n",
+		       name);
 		return failed_creating(dentry);
+	}
 
 	make_empty_dir_inode(inode);
 	inode->i_flags |= S_AUTOMOUNT;
@@ -561,8 +649,8 @@ EXPORT_SYMBOL(debugfs_create_automount);
  * This function will return a pointer to a dentry if it succeeds.  This
  * pointer must be passed to the debugfs_remove() function when the symbolic
  * link is to be removed (no automatic cleanup happens if your module is
- * unloaded, you are responsible here.)  If an error occurs, %NULL will be
- * returned.
+ * unloaded, you are responsible here.)  If an error occurs, ERR_PTR(-ERROR)
+ * will be returned.
  *
  * If debugfs is not enabled in the kernel, the value -%ENODEV will be
  * returned.
@@ -574,93 +662,56 @@ struct dentry *debugfs_create_symlink(const char *name, struct dentry *parent,
 	struct inode *inode;
 	char *link = kstrdup(target, GFP_KERNEL);
 	if (!link)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	dentry = start_creating(name, parent);
 	if (IS_ERR(dentry)) {
 		kfree(link);
-		return NULL;
+		return dentry;
 	}
 
 	inode = debugfs_get_inode(dentry->d_sb);
 	if (unlikely(!inode)) {
+		pr_err("out of free dentries, can not create symlink '%s'\n",
+		       name);
 		kfree(link);
 		return failed_creating(dentry);
 	}
 	inode->i_mode = S_IFLNK | S_IRWXUGO;
-	inode->i_op = &simple_symlink_inode_operations;
+	inode->i_op = &debugfs_symlink_inode_operations;
 	inode->i_link = link;
 	d_instantiate(dentry, inode);
 	return end_creating(dentry);
 }
 EXPORT_SYMBOL_GPL(debugfs_create_symlink);
 
-static void __debugfs_remove_file(struct dentry *dentry, struct dentry *parent)
+static void __debugfs_file_removed(struct dentry *dentry)
 {
 	struct debugfs_fsdata *fsd;
 
-	simple_unlink(d_inode(parent), dentry);
-	d_delete(dentry);
-	fsd = dentry->d_fsdata;
-	init_completion(&fsd->active_users_drained);
+	/*
+	 * Paired with the closing smp_mb() implied by a successful
+	 * cmpxchg() in debugfs_file_get(): either
+	 * debugfs_file_get() must see a dead dentry or we must see a
+	 * debugfs_fsdata instance at ->d_fsdata here (or both).
+	 */
+	smp_mb();
+	fsd = READ_ONCE(dentry->d_fsdata);
+	if ((unsigned long)fsd & DEBUGFS_FSDATA_IS_REAL_FOPS_BIT)
+		return;
 	if (!refcount_dec_and_test(&fsd->active_users))
 		wait_for_completion(&fsd->active_users_drained);
 }
 
-static int __debugfs_remove(struct dentry *dentry, struct dentry *parent)
+static void remove_one(struct dentry *victim)
 {
-	int ret = 0;
-
-	if (simple_positive(dentry)) {
-		dget(dentry);
-		if (!d_is_reg(dentry)) {
-			if (d_is_dir(dentry))
-				ret = simple_rmdir(d_inode(parent), dentry);
-			else
-				simple_unlink(d_inode(parent), dentry);
-			if (!ret)
-				d_delete(dentry);
-		} else {
-			__debugfs_remove_file(dentry, parent);
-		}
-		dput(dentry);
-	}
-	return ret;
+        if (d_is_reg(victim))
+		__debugfs_file_removed(victim);
+	simple_release_fs(&debugfs_mount, &debugfs_mount_count);
 }
 
 /**
- * debugfs_remove - removes a file or directory from the debugfs filesystem
- * @dentry: a pointer to a the dentry of the file or directory to be
- *          removed.  If this parameter is NULL or an error value, nothing
- *          will be done.
- *
- * This function removes a file or directory in debugfs that was previously
- * created with a call to another debugfs function (like
- * debugfs_create_file() or variants thereof.)
- *
- * This function is required to be called in order for the file to be
- * removed, no automatic cleanup of files will happen when a module is
- * removed, you are responsible here.
- */
-void debugfs_remove(struct dentry *dentry)
-{
-	struct dentry *parent;
-	int ret;
-
-	if (IS_ERR_OR_NULL(dentry))
-		return;
-
-	parent = dentry->d_parent;
-	inode_lock(d_inode(parent));
-	ret = __debugfs_remove(dentry, parent);
-	inode_unlock(d_inode(parent));
-	if (!ret)
-		simple_release_fs(&debugfs_mount, &debugfs_mount_count);
-}
-EXPORT_SYMBOL_GPL(debugfs_remove);
-
-/**
- * debugfs_remove_recursive - recursively removes a directory
+ * debugfs_remove - recursively removes a directory
  * @dentry: a pointer to a the dentry of the directory to be removed.  If this
  *          parameter is NULL or an error value, nothing will be done.
  *
@@ -672,65 +723,16 @@ EXPORT_SYMBOL_GPL(debugfs_remove);
  * removed, no automatic cleanup of files will happen when a module is
  * removed, you are responsible here.
  */
-void debugfs_remove_recursive(struct dentry *dentry)
+void debugfs_remove(struct dentry *dentry)
 {
-	struct dentry *child, *parent;
-
 	if (IS_ERR_OR_NULL(dentry))
 		return;
 
-	parent = dentry;
- down:
-	inode_lock(d_inode(parent));
- loop:
-	/*
-	 * The parent->d_subdirs is protected by the d_lock. Outside that
-	 * lock, the child can be unlinked and set to be freed which can
-	 * use the d_u.d_child as the rcu head and corrupt this list.
-	 */
-	spin_lock(&parent->d_lock);
-	list_for_each_entry(child, &parent->d_subdirs, d_child) {
-		if (!simple_positive(child))
-			continue;
-
-		/* perhaps simple_empty(child) makes more sense */
-		if (!list_empty(&child->d_subdirs)) {
-			spin_unlock(&parent->d_lock);
-			inode_unlock(d_inode(parent));
-			parent = child;
-			goto down;
-		}
-
-		spin_unlock(&parent->d_lock);
-
-		if (!__debugfs_remove(child, parent))
-			simple_release_fs(&debugfs_mount, &debugfs_mount_count);
-
-		/*
-		 * The parent->d_lock protects agaist child from unlinking
-		 * from d_subdirs. When releasing the parent->d_lock we can
-		 * no longer trust that the next pointer is valid.
-		 * Restart the loop. We'll skip this one with the
-		 * simple_positive() check.
-		 */
-		goto loop;
-	}
-	spin_unlock(&parent->d_lock);
-
-	inode_unlock(d_inode(parent));
-	child = parent;
-	parent = parent->d_parent;
-	inode_lock(d_inode(parent));
-
-	if (child != dentry)
-		/* go up */
-		goto loop;
-
-	if (!__debugfs_remove(child, parent))
-		simple_release_fs(&debugfs_mount, &debugfs_mount_count);
-	inode_unlock(d_inode(parent));
+	simple_pin_fs(&debug_fs_type, &debugfs_mount, &debugfs_mount_count);
+	simple_recursive_removal(dentry, remove_one);
+	simple_release_fs(&debugfs_mount, &debugfs_mount_count);
 }
-EXPORT_SYMBOL_GPL(debugfs_remove_recursive);
+EXPORT_SYMBOL_GPL(debugfs_remove);
 
 /**
  * debugfs_rename - rename a file/directory in the debugfs filesystem
@@ -758,6 +760,13 @@ struct dentry *debugfs_rename(struct dentry *old_dir, struct dentry *old_dentry,
 	struct dentry *dentry = NULL, *trap;
 	struct name_snapshot old_name;
 
+	if (IS_ERR(old_dir))
+		return old_dir;
+	if (IS_ERR(new_dir))
+		return new_dir;
+	if (IS_ERR_OR_NULL(old_dentry))
+		return old_dentry;
+
 	trap = lock_rename(new_dir, old_dir);
 	/* Source or destination directories don't exist? */
 	if (d_really_is_negative(old_dir) || d_really_is_negative(new_dir))
@@ -773,14 +782,14 @@ struct dentry *debugfs_rename(struct dentry *old_dir, struct dentry *old_dentry,
 
 	take_dentry_name_snapshot(&old_name, old_dentry);
 
-	error = simple_rename(d_inode(old_dir), old_dentry, d_inode(new_dir),
-			      dentry, 0);
+	error = simple_rename(&init_user_ns, d_inode(old_dir), old_dentry,
+			      d_inode(new_dir), dentry, 0);
 	if (error) {
 		release_dentry_name_snapshot(&old_name);
 		goto exit;
 	}
 	d_move(old_dentry, dentry);
-	fsnotify_move(d_inode(old_dir), d_inode(new_dir), old_name.name,
+	fsnotify_move(d_inode(old_dir), d_inode(new_dir), &old_name.name,
 		d_is_dir(old_dentry),
 		NULL, old_dentry);
 	release_dentry_name_snapshot(&old_name);
@@ -791,7 +800,9 @@ exit:
 	if (dentry && !IS_ERR(dentry))
 		dput(dentry);
 	unlock_rename(new_dir, old_dir);
-	return NULL;
+	if (IS_ERR(dentry))
+		return dentry;
+	return ERR_PTR(-EINVAL);
 }
 EXPORT_SYMBOL_GPL(debugfs_rename);
 
@@ -804,9 +815,26 @@ bool debugfs_initialized(void)
 }
 EXPORT_SYMBOL_GPL(debugfs_initialized);
 
+static int __init debugfs_kernel(char *str)
+{
+	if (str) {
+		if (!strcmp(str, "on"))
+			debugfs_allow = DEBUGFS_ALLOW_API | DEBUGFS_ALLOW_MOUNT;
+		else if (!strcmp(str, "no-mount"))
+			debugfs_allow = DEBUGFS_ALLOW_API;
+		else if (!strcmp(str, "off"))
+			debugfs_allow = 0;
+	}
+
+	return 0;
+}
+early_param("debugfs", debugfs_kernel);
 static int __init debugfs_init(void)
 {
 	int retval;
+
+	if (!(debugfs_allow & DEBUGFS_ALLOW_MOUNT))
+		return -EPERM;
 
 	retval = sysfs_create_mount_point(kernel_kobj, "debug");
 	if (retval)
@@ -821,4 +849,3 @@ static int __init debugfs_init(void)
 	return retval;
 }
 core_initcall(debugfs_init);
-

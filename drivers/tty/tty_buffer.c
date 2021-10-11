@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Tty buffer allocation management
  */
@@ -16,7 +17,7 @@
 #include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/ratelimit.h>
-
+#include "tty.h"
 
 #define MIN_TTYB_SIZE	256
 #define TTYB_ALIGN_MASK	255
@@ -25,7 +26,7 @@
  * Byte threshold to limit memory consumption for flip buffers.
  * The actual memory limit is > 2x this amount.
  */
-#define TTYB_DEFAULT_MEM_LIMIT	65536
+#define TTYB_DEFAULT_MEM_LIMIT	(640 * 1024UL)
 
 /*
  * We default to dicing tty buffer allocations to this many characters
@@ -41,7 +42,7 @@
  *	tty_buffer_lock_exclusive	-	gain exclusive access to buffer
  *	tty_buffer_unlock_exclusive	-	release exclusive access
  *
- *	@port - tty_port owning the flip buffer
+ *	@port: tty port owning the flip buffer
  *
  *	Guarantees safe use of the line discipline's receive_buf() method by
  *	excluding the buffer work and any pending flush from using the flip
@@ -77,7 +78,7 @@ EXPORT_SYMBOL_GPL(tty_buffer_unlock_exclusive);
 
 /**
  *	tty_buffer_space_avail	-	return unused buffer space
- *	@port - tty_port owning the flip buffer
+ *	@port: tty port owning the flip buffer
  *
  *	Returns the # of bytes which can be written by the driver without
  *	reaching the buffer limit.
@@ -106,7 +107,7 @@ static void tty_buffer_reset(struct tty_buffer *p, size_t size)
 
 /**
  *	tty_buffer_free_all		-	free buffers used by a tty
- *	@tty: tty to free from
+ *	@port: tty port to free from
  *
  *	Remove all the buffers pending on a tty whether queued with data
  *	or in the free ring. Must be called when the tty is no longer in use
@@ -117,9 +118,12 @@ void tty_buffer_free_all(struct tty_port *port)
 	struct tty_bufhead *buf = &port->buf;
 	struct tty_buffer *p, *next;
 	struct llist_node *llist;
+	unsigned int freed = 0;
+	int still_used;
 
 	while ((p = buf->head) != NULL) {
 		buf->head = p->next;
+		freed += p->size;
 		if (p->size > 0)
 			kfree(p);
 	}
@@ -131,12 +135,14 @@ void tty_buffer_free_all(struct tty_port *port)
 	buf->head = &buf->sentinel;
 	buf->tail = &buf->sentinel;
 
-	atomic_set(&buf->mem_used, 0);
+	still_used = atomic_xchg(&buf->mem_used, 0);
+	WARN(still_used != freed, "we still have not freed %d bytes!",
+			still_used - freed);
 }
 
 /**
  *	tty_buffer_alloc	-	allocate a tty buffer
- *	@tty: tty device
+ *	@port: tty port
  *	@size: desired size (characters)
  *
  *	Allocate a new tty buffer to hold the desired number of characters.
@@ -178,7 +184,7 @@ found:
 
 /**
  *	tty_buffer_free		-	free a tty buffer
- *	@tty: tty owning the buffer
+ *	@port: tty port owning the buffer
  *	@b: the buffer to free
  *
  *	Free a tty buffer, or add it to the free list according to our
@@ -237,7 +243,7 @@ void tty_buffer_flush(struct tty_struct *tty, struct tty_ldisc *ld)
 
 /**
  *	tty_buffer_request_room		-	grow tty buffer if needed
- *	@tty: tty structure
+ *	@port: tty port
  *	@size: size desired
  *	@flags: buffer flags if new buffer allocated (default = 0)
  *
@@ -448,7 +454,7 @@ EXPORT_SYMBOL_GPL(tty_prepare_flip_string);
  *
  *	Returns the number of bytes processed
  */
-int tty_ldisc_receive_buf(struct tty_ldisc *ld, unsigned char *p,
+int tty_ldisc_receive_buf(struct tty_ldisc *ld, const unsigned char *p,
 			  char *f, int count)
 {
 	if (ld->ops->receive_buf2)
@@ -463,15 +469,19 @@ int tty_ldisc_receive_buf(struct tty_ldisc *ld, unsigned char *p,
 EXPORT_SYMBOL_GPL(tty_ldisc_receive_buf);
 
 static int
-receive_buf(struct tty_ldisc *ld, struct tty_buffer *head, int count)
+receive_buf(struct tty_port *port, struct tty_buffer *head, int count)
 {
 	unsigned char *p = char_buf_ptr(head, head->read);
 	char	      *f = NULL;
+	int n;
 
 	if (~head->flags & TTYB_NORMAL)
 		f = flag_buf_ptr(head, head->read);
 
-	return tty_ldisc_receive_buf(ld, p, f, count);
+	n = port->client_ops->receive_buf(port, p, f, count);
+	if (n > 0)
+		memset(p, 0, n);
+	return n;
 }
 
 /**
@@ -491,16 +501,6 @@ static void flush_to_ldisc(struct work_struct *work)
 {
 	struct tty_port *port = container_of(work, struct tty_port, buf.work);
 	struct tty_bufhead *buf = &port->buf;
-	struct tty_struct *tty;
-	struct tty_ldisc *disc;
-
-	tty = READ_ONCE(port->itty);
-	if (tty == NULL)
-		return;
-
-	disc = tty_ldisc_ref(tty);
-	if (disc == NULL)
-		return;
 
 	mutex_lock(&buf->lock);
 
@@ -530,7 +530,7 @@ static void flush_to_ldisc(struct work_struct *work)
 			continue;
 		}
 
-		count = receive_buf(disc, head, count);
+		count = receive_buf(port, head, count);
 		if (!count)
 			break;
 		head->read += count;
@@ -538,7 +538,6 @@ static void flush_to_ldisc(struct work_struct *work)
 
 	mutex_unlock(&buf->lock);
 
-	tty_ldisc_deref(disc);
 }
 
 /**
@@ -560,7 +559,7 @@ EXPORT_SYMBOL(tty_flip_buffer_push);
 
 /**
  *	tty_buffer_init		-	prepare a tty buffer structure
- *	@tty: tty to initialise
+ *	@port: tty port to initialise
  *
  *	Set up the initial state of the buffer management for a tty device.
  *	Must be called before the other tty buffer functions are used.
@@ -584,6 +583,7 @@ void tty_buffer_init(struct tty_port *port)
 /**
  *	tty_buffer_set_limit	-	change the tty buffer memory limit
  *	@port: tty port to change
+ *	@limit: memory limit to set
  *
  *	Change the tty buffer memory limit.
  *	Must be called before the other tty buffer functions are used.

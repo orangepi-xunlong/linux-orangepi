@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * irq_comm.c: Common API for in kernel interrupt controller
  * Copyright (c) 2007, Intel Corporation.
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc., 59 Temple
- * Place - Suite 330, Boston, MA 02111-1307 USA.
  * Authors:
  *   Yaozu (Eddie) Dong <Eddie.dong@intel.com>
  *
@@ -23,9 +12,9 @@
 #include <linux/kvm_host.h>
 #include <linux/slab.h>
 #include <linux/export.h>
-#include <trace/events/kvm.h>
+#include <linux/rculist.h>
 
-#include <asm/msidef.h>
+#include <trace/events/kvm.h>
 
 #include "irq.h"
 
@@ -40,16 +29,7 @@ static int kvm_set_pic_irq(struct kvm_kernel_irq_routing_entry *e,
 			   struct kvm *kvm, int irq_source_id, int level,
 			   bool line_status)
 {
-	struct kvm_pic *pic = pic_irqchip(kvm);
-
-	/*
-	 * XXX: rejecting pic routes when pic isn't in use would be better,
-	 * but the default routing table is installed while kvm->arch.vpic is
-	 * NULL and KVM_CREATE_IRQCHIP can race with KVM_IRQ_LINE.
-	 */
-	if (!pic)
-		return -1;
-
+	struct kvm_pic *pic = kvm->arch.vpic;
 	return kvm_pic_set_irq(pic, e->irqchip.pin, irq_source_id, level);
 }
 
@@ -58,10 +38,6 @@ static int kvm_set_ioapic_irq(struct kvm_kernel_irq_routing_entry *e,
 			      bool line_status)
 {
 	struct kvm_ioapic *ioapic = kvm->arch.vioapic;
-
-	if (!ioapic)
-		return -1;
-
 	return kvm_ioapic_set_irq(ioapic, e->irqchip.pin, irq_source_id, level,
 				line_status);
 }
@@ -74,14 +50,14 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 	unsigned long dest_vcpu_bitmap[BITS_TO_LONGS(KVM_MAX_VCPUS)];
 	unsigned int dest_vcpus = 0;
 
-	if (irq->dest_mode == 0 && irq->dest_id == 0xff &&
-			kvm_lowest_prio_delivery(irq)) {
+	if (kvm_irq_delivery_to_apic_fast(kvm, src, irq, &r, dest_map))
+		return r;
+
+	if (irq->dest_mode == APIC_DEST_PHYSICAL &&
+	    irq->dest_id == 0xff && kvm_lowest_prio_delivery(irq)) {
 		printk(KERN_INFO "kvm: apic: phys broadcast and lowest prio\n");
 		irq->delivery_mode = APIC_DM_FIXED;
 	}
-
-	if (kvm_irq_delivery_to_apic_fast(kvm, src, irq, &r, dest_map))
-		return r;
 
 	memset(dest_vcpu_bitmap, 0, sizeof(dest_vcpu_bitmap));
 
@@ -97,7 +73,7 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 			if (r < 0)
 				r = 0;
 			r += kvm_apic_set_irq(vcpu, irq, dest_map);
-		} else if (kvm_lapic_enabled(vcpu)) {
+		} else if (kvm_apic_sw_enabled(vcpu->arch.apic)) {
 			if (!kvm_vector_hashing_enabled()) {
 				if (!lowest)
 					lowest = vcpu;
@@ -126,23 +102,21 @@ int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
 void kvm_set_msi_irq(struct kvm *kvm, struct kvm_kernel_irq_routing_entry *e,
 		     struct kvm_lapic_irq *irq)
 {
-	trace_kvm_msi_set_irq(e->msi.address_lo | (kvm->arch.x2apic_format ?
-	                                     (u64)e->msi.address_hi << 32 : 0),
-	                      e->msi.data);
+	struct msi_msg msg = { .address_lo = e->msi.address_lo,
+			       .address_hi = e->msi.address_hi,
+			       .data = e->msi.data };
 
-	irq->dest_id = (e->msi.address_lo &
-			MSI_ADDR_DEST_ID_MASK) >> MSI_ADDR_DEST_ID_SHIFT;
-	if (kvm->arch.x2apic_format)
-		irq->dest_id |= MSI_ADDR_EXT_DEST_ID(e->msi.address_hi);
-	irq->vector = (e->msi.data &
-			MSI_DATA_VECTOR_MASK) >> MSI_DATA_VECTOR_SHIFT;
-	irq->dest_mode = (1 << MSI_ADDR_DEST_MODE_SHIFT) & e->msi.address_lo;
-	irq->trig_mode = (1 << MSI_DATA_TRIGGER_SHIFT) & e->msi.data;
-	irq->delivery_mode = e->msi.data & 0x700;
-	irq->msi_redir_hint = ((e->msi.address_lo
-		& MSI_ADDR_REDIRECTION_LOWPRI) > 0);
+	trace_kvm_msi_set_irq(msg.address_lo | (kvm->arch.x2apic_format ?
+			      (u64)msg.address_hi << 32 : 0), msg.data);
+
+	irq->dest_id = x86_msi_msg_get_destid(&msg, kvm->arch.x2apic_format);
+	irq->vector = msg.arch_data.vector;
+	irq->dest_mode = kvm_lapic_irq_dest_mode(msg.arch_addr_lo.dest_mode_logical);
+	irq->trig_mode = msg.arch_data.is_level;
+	irq->delivery_mode = msg.arch_data.delivery_mode << 8;
+	irq->msi_redir_hint = msg.arch_addr_lo.redirect_hint;
 	irq->level = 1;
-	irq->shorthand = 0;
+	irq->shorthand = APIC_DEST_NOSHORT;
 }
 EXPORT_SYMBOL_GPL(kvm_set_msi_irq);
 
@@ -243,11 +217,11 @@ void kvm_free_irq_source_id(struct kvm *kvm, int irq_source_id)
 		goto unlock;
 	}
 	clear_bit(irq_source_id, &kvm->arch.irq_sources_bitmap);
-	if (!ioapic_in_kernel(kvm))
+	if (!irqchip_kernel(kvm))
 		goto unlock;
 
 	kvm_ioapic_clear_all(kvm->arch.vioapic, irq_source_id);
-	kvm_pic_clear_all(pic_irqchip(kvm), irq_source_id);
+	kvm_pic_clear_all(kvm->arch.vpic, irq_source_id);
 unlock:
 	mutex_unlock(&kvm->irq_lock);
 }
@@ -285,38 +259,42 @@ void kvm_fire_mask_notifiers(struct kvm *kvm, unsigned irqchip, unsigned pin,
 	srcu_read_unlock(&kvm->irq_srcu, idx);
 }
 
+bool kvm_arch_can_set_irq_routing(struct kvm *kvm)
+{
+	return irqchip_in_kernel(kvm);
+}
+
 int kvm_set_routing_entry(struct kvm *kvm,
 			  struct kvm_kernel_irq_routing_entry *e,
 			  const struct kvm_irq_routing_entry *ue)
 {
-	int r = -EINVAL;
-	int delta;
-	unsigned max_pin;
-
+	/* We can't check irqchip_in_kernel() here as some callers are
+	 * currently initializing the irqchip. Other callers should therefore
+	 * check kvm_arch_can_set_irq_routing() before calling this function.
+	 */
 	switch (ue->type) {
 	case KVM_IRQ_ROUTING_IRQCHIP:
-		delta = 0;
+		if (irqchip_split(kvm))
+			return -EINVAL;
+		e->irqchip.pin = ue->u.irqchip.pin;
 		switch (ue->u.irqchip.irqchip) {
-		case KVM_IRQCHIP_PIC_MASTER:
-			e->set = kvm_set_pic_irq;
-			max_pin = PIC_NUM_PINS;
-			break;
 		case KVM_IRQCHIP_PIC_SLAVE:
+			e->irqchip.pin += PIC_NUM_PINS / 2;
+			fallthrough;
+		case KVM_IRQCHIP_PIC_MASTER:
+			if (ue->u.irqchip.pin >= PIC_NUM_PINS / 2)
+				return -EINVAL;
 			e->set = kvm_set_pic_irq;
-			max_pin = PIC_NUM_PINS;
-			delta = 8;
 			break;
 		case KVM_IRQCHIP_IOAPIC:
-			max_pin = KVM_IOAPIC_NUM_PINS;
+			if (ue->u.irqchip.pin >= KVM_IOAPIC_NUM_PINS)
+				return -EINVAL;
 			e->set = kvm_set_ioapic_irq;
 			break;
 		default:
-			goto out;
+			return -EINVAL;
 		}
 		e->irqchip.irqchip = ue->u.irqchip.irqchip;
-		e->irqchip.pin = ue->u.irqchip.pin + delta;
-		if (e->irqchip.pin >= max_pin)
-			goto out;
 		break;
 	case KVM_IRQ_ROUTING_MSI:
 		e->set = kvm_set_msi;
@@ -325,7 +303,7 @@ int kvm_set_routing_entry(struct kvm *kvm,
 		e->msi.data = ue->u.msi.data;
 
 		if (kvm_msi_route_invalid(kvm, e))
-			goto out;
+			return -EINVAL;
 		break;
 	case KVM_IRQ_ROUTING_HV_SINT:
 		e->set = kvm_hv_set_sint;
@@ -333,12 +311,10 @@ int kvm_set_routing_entry(struct kvm *kvm,
 		e->hv_sint.sint = ue->u.hv_sint.sint;
 		break;
 	default:
-		goto out;
+		return -EINVAL;
 	}
 
-	r = 0;
-out:
-	return r;
+	return 0;
 }
 
 bool kvm_intr_is_single_vcpu(struct kvm *kvm, struct kvm_lapic_irq *irq,
@@ -409,7 +385,7 @@ int kvm_setup_empty_irq_routing(struct kvm *kvm)
 
 void kvm_arch_post_irq_routing_update(struct kvm *kvm)
 {
-	if (ioapic_in_kernel(kvm) || !irqchip_in_kernel(kvm))
+	if (!irqchip_split(kvm))
 		return;
 	kvm_make_scan_ioapic_request(kvm);
 }
@@ -436,7 +412,8 @@ void kvm_scan_ioapic_routes(struct kvm_vcpu *vcpu,
 
 			kvm_set_msi_irq(vcpu->kvm, entry, &irq);
 
-			if (irq.level && kvm_apic_match_dest(vcpu, NULL, 0,
+			if (irq.trig_mode &&
+			    kvm_apic_match_dest(vcpu, NULL, APIC_DEST_NOSHORT,
 						irq.dest_id, irq.dest_mode))
 				__set_bit(irq.vector, ioapic_handled_vectors);
 		}

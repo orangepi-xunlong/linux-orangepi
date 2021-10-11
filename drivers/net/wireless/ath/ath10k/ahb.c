@@ -1,18 +1,7 @@
+// SPDX-License-Identifier: ISC
 /*
- * Copyright (c) 2016 Qualcomm Atheros, Inc. All rights reserved.
+ * Copyright (c) 2016-2017 Qualcomm Atheros, Inc. All rights reserved.
  * Copyright (c) 2015 The Linux Foundation. All rights reserved.
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 #include <linux/module.h>
 #include <linux/of.h>
@@ -133,10 +122,7 @@ static void ath10k_ahb_clock_deinit(struct ath10k *ar)
 static int ath10k_ahb_clock_enable(struct ath10k *ar)
 {
 	struct ath10k_ahb *ar_ahb = ath10k_ahb_priv(ar);
-	struct device *dev;
 	int ret;
-
-	dev = &ar_ahb->pdev->dev;
 
 	if (IS_ERR_OR_NULL(ar_ahb->cmd_clk) ||
 	    IS_ERR_OR_NULL(ar_ahb->ref_clk) ||
@@ -180,14 +166,11 @@ static void ath10k_ahb_clock_disable(struct ath10k *ar)
 {
 	struct ath10k_ahb *ar_ahb = ath10k_ahb_priv(ar);
 
-	if (!IS_ERR_OR_NULL(ar_ahb->cmd_clk))
-		clk_disable_unprepare(ar_ahb->cmd_clk);
+	clk_disable_unprepare(ar_ahb->cmd_clk);
 
-	if (!IS_ERR_OR_NULL(ar_ahb->ref_clk))
-		clk_disable_unprepare(ar_ahb->ref_clk);
+	clk_disable_unprepare(ar_ahb->ref_clk);
 
-	if (!IS_ERR_OR_NULL(ar_ahb->rtc_clk))
-		clk_disable_unprepare(ar_ahb->rtc_clk);
+	clk_disable_unprepare(ar_ahb->rtc_clk);
 }
 
 static int ath10k_ahb_rst_ctrl_init(struct ath10k *ar)
@@ -197,35 +180,40 @@ static int ath10k_ahb_rst_ctrl_init(struct ath10k *ar)
 
 	dev = &ar_ahb->pdev->dev;
 
-	ar_ahb->core_cold_rst = devm_reset_control_get(dev, "wifi_core_cold");
+	ar_ahb->core_cold_rst = devm_reset_control_get_exclusive(dev,
+								 "wifi_core_cold");
 	if (IS_ERR(ar_ahb->core_cold_rst)) {
 		ath10k_err(ar, "failed to get core cold rst ctrl: %ld\n",
 			   PTR_ERR(ar_ahb->core_cold_rst));
 		return PTR_ERR(ar_ahb->core_cold_rst);
 	}
 
-	ar_ahb->radio_cold_rst = devm_reset_control_get(dev, "wifi_radio_cold");
+	ar_ahb->radio_cold_rst = devm_reset_control_get_exclusive(dev,
+								  "wifi_radio_cold");
 	if (IS_ERR(ar_ahb->radio_cold_rst)) {
 		ath10k_err(ar, "failed to get radio cold rst ctrl: %ld\n",
 			   PTR_ERR(ar_ahb->radio_cold_rst));
 		return PTR_ERR(ar_ahb->radio_cold_rst);
 	}
 
-	ar_ahb->radio_warm_rst = devm_reset_control_get(dev, "wifi_radio_warm");
+	ar_ahb->radio_warm_rst = devm_reset_control_get_exclusive(dev,
+								  "wifi_radio_warm");
 	if (IS_ERR(ar_ahb->radio_warm_rst)) {
 		ath10k_err(ar, "failed to get radio warm rst ctrl: %ld\n",
 			   PTR_ERR(ar_ahb->radio_warm_rst));
 		return PTR_ERR(ar_ahb->radio_warm_rst);
 	}
 
-	ar_ahb->radio_srif_rst = devm_reset_control_get(dev, "wifi_radio_srif");
+	ar_ahb->radio_srif_rst = devm_reset_control_get_exclusive(dev,
+								  "wifi_radio_srif");
 	if (IS_ERR(ar_ahb->radio_srif_rst)) {
 		ath10k_err(ar, "failed to get radio srif rst ctrl: %ld\n",
 			   PTR_ERR(ar_ahb->radio_srif_rst));
 		return PTR_ERR(ar_ahb->radio_srif_rst);
 	}
 
-	ar_ahb->cpu_init_rst = devm_reset_control_get(dev, "wifi_cpu_init");
+	ar_ahb->cpu_init_rst = devm_reset_control_get_exclusive(dev,
+								"wifi_cpu_init");
 	if (IS_ERR(ar_ahb->cpu_init_rst)) {
 		ath10k_err(ar, "failed to get cpu init rst ctrl: %ld\n",
 			   PTR_ERR(ar_ahb->cpu_init_rst));
@@ -449,12 +437,10 @@ static int ath10k_ahb_resource_init(struct ath10k *ar)
 {
 	struct ath10k_ahb *ar_ahb = ath10k_ahb_priv(ar);
 	struct platform_device *pdev;
-	struct device *dev;
 	struct resource *res;
 	int ret;
 
 	pdev = ar_ahb->pdev;
-	dev = &pdev->dev;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
@@ -472,16 +458,16 @@ static int ath10k_ahb_resource_init(struct ath10k *ar)
 
 	ar_ahb->mem_len = resource_size(res);
 
-	ar_ahb->gcc_mem = ioremap_nocache(ATH10K_GCC_REG_BASE,
-					  ATH10K_GCC_REG_SIZE);
+	ar_ahb->gcc_mem = ioremap(ATH10K_GCC_REG_BASE,
+				  ATH10K_GCC_REG_SIZE);
 	if (!ar_ahb->gcc_mem) {
 		ath10k_err(ar, "gcc mem ioremap error\n");
 		ret = -ENOMEM;
 		goto err_mem_unmap;
 	}
 
-	ar_ahb->tcsr_mem = ioremap_nocache(ATH10K_TCSR_REG_BASE,
-					   ATH10K_TCSR_REG_SIZE);
+	ar_ahb->tcsr_mem = ioremap(ATH10K_TCSR_REG_BASE,
+				   ATH10K_TCSR_REG_SIZE);
 	if (!ar_ahb->tcsr_mem) {
 		ath10k_err(ar, "tcsr mem ioremap error\n");
 		ret = -ENOMEM;
@@ -640,6 +626,7 @@ static int ath10k_ahb_hif_start(struct ath10k *ar)
 {
 	ath10k_dbg(ar, ATH10K_DBG_BOOT, "boot ahb hif start\n");
 
+	ath10k_core_napi_enable(ar);
 	ath10k_ce_enable_interrupts(ar);
 	ath10k_pci_enable_legacy_irq(ar);
 
@@ -657,13 +644,13 @@ static void ath10k_ahb_hif_stop(struct ath10k *ar)
 	ath10k_ahb_irq_disable(ar);
 	synchronize_irq(ar_ahb->irq);
 
-	ath10k_pci_flush(ar);
+	ath10k_core_napi_sync_disable(ar);
 
-	napi_synchronize(&ar->napi);
-	napi_disable(&ar->napi);
+	ath10k_pci_flush(ar);
 }
 
-static int ath10k_ahb_hif_power_up(struct ath10k *ar)
+static int ath10k_ahb_hif_power_up(struct ath10k *ar,
+				   enum ath10k_firmware_mode fw_mode)
 {
 	int ret;
 
@@ -692,7 +679,6 @@ static int ath10k_ahb_hif_power_up(struct ath10k *ar)
 		ath10k_err(ar, "could not wake up target CPU: %d\n", ret);
 		goto err_ce_deinit;
 	}
-	napi_enable(&ar->napi);
 
 	return 0;
 
@@ -753,7 +739,7 @@ static int ath10k_ahb_probe(struct platform_device *pdev)
 	enum ath10k_hw_rev hw_rev;
 	size_t size;
 	int ret;
-	u32 chip_id;
+	struct ath10k_bus_params bus_params = {};
 
 	of_id = of_match_device(ath10k_ahb_of_match, &pdev->dev);
 	if (!of_id) {
@@ -787,8 +773,9 @@ static int ath10k_ahb_probe(struct platform_device *pdev)
 	ar_pci->mem = ar_ahb->mem;
 	ar_pci->mem_len = ar_ahb->mem_len;
 	ar_pci->ar = ar;
-	ar_pci->bus_ops = &ath10k_ahb_bus_ops;
+	ar_pci->ce.bus_ops = &ath10k_ahb_bus_ops;
 	ar_pci->targ_cpu_to_ce_addr = ath10k_ahb_qca4019_targ_cpu_to_ce_addr;
+	ar->ce_priv = &ar_pci->ce;
 
 	ret = ath10k_pci_setup_resource(ar);
 	if (ret) {
@@ -808,14 +795,15 @@ static int ath10k_ahb_probe(struct platform_device *pdev)
 
 	ath10k_pci_ce_deinit(ar);
 
-	chip_id = ath10k_ahb_soc_read32(ar, SOC_CHIP_ID_ADDRESS);
-	if (chip_id == 0xffffffff) {
+	bus_params.dev_type = ATH10K_DEV_TYPE_LL;
+	bus_params.chip_id = ath10k_ahb_soc_read32(ar, SOC_CHIP_ID_ADDRESS);
+	if (bus_params.chip_id == 0xffffffff) {
 		ath10k_err(ar, "failed to get chip id\n");
 		ret = -ENODEV;
 		goto err_halt_device;
 	}
 
-	ret = ath10k_core_register(ar, chip_id);
+	ret = ath10k_core_register(ar, &bus_params);
 	if (ret) {
 		ath10k_err(ar, "failed to register driver core: %d\n", ret);
 		goto err_halt_device;
@@ -831,7 +819,7 @@ err_free_irq:
 	ath10k_ahb_release_irq_legacy(ar);
 
 err_free_pipes:
-	ath10k_pci_free_pipes(ar);
+	ath10k_pci_release_resource(ar);
 
 err_resource_deinit:
 	ath10k_ahb_resource_deinit(ar);

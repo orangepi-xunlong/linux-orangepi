@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * arch/arm/boot/compressed/string.c
  *
@@ -5,6 +6,25 @@
  */
 
 #include <linux/string.h>
+
+/*
+ * The decompressor is built without KASan but uses the same redirects as the
+ * rest of the kernel when CONFIG_KASAN is enabled, defining e.g. memcpy()
+ * to __memcpy() but since we are not linking with the main kernel string
+ * library in the decompressor, that will lead to link failures.
+ *
+ * Undefine KASan's versions, define the wrapped functions and alias them to
+ * the right names so that when e.g. __memcpy() appear in the code, it will
+ * still be linked to this local version of memcpy().
+ */
+#ifdef CONFIG_KASAN
+#undef memcpy
+#undef memmove
+#undef memset
+void *__memcpy(void *__dest, __const void *__src, size_t __n) __alias(memcpy);
+void *__memmove(void *__dest, __const void *__src, size_t count) __alias(memmove);
+void *__memset(void *s, int c, size_t count) __alias(memset);
+#endif
 
 void *memcpy(void *__dest, __const void *__src, size_t __n)
 {
@@ -120,6 +140,16 @@ char *strchr(const char *s, int c)
 	return (char *)s;
 }
 
+char *strrchr(const char *s, int c)
+{
+	const char *last = NULL;
+	do {
+		if (*s == (char)c)
+			last = s;
+	} while (*s++);
+	return (char *)last;
+}
+
 #undef memset
 
 void *memset(void *s, int c, size_t count)
@@ -128,9 +158,4 @@ void *memset(void *s, int c, size_t count)
 	while (count--)
 		*xs++ = c;
 	return s;
-}
-
-void __memzero(void *s, size_t count)
-{
-	memset(s, 0, count);
 }

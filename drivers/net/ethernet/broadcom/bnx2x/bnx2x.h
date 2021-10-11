@@ -32,8 +32,14 @@
  * (you will need to reboot afterwards) */
 /* #define BNX2X_STOP_ON_ERROR */
 
-#define DRV_MODULE_VERSION      "1.712.30-0"
-#define DRV_MODULE_RELDATE      "2014/02/10"
+/* FIXME: Delete the DRV_MODULE_VERSION below, but please be warned
+ * that it is not an easy task because such change has all chances
+ * to break this driver due to amount of abuse of in-kernel interfaces
+ * between modules and FW.
+ *
+ * DO NOT UPDATE DRV_MODULE_VERSION below.
+ */
+#define DRV_MODULE_VERSION      "1.713.36-0"
 #define BNX2X_BC_VER            0x040200
 
 #if defined(CONFIG_DCB)
@@ -165,6 +171,12 @@ do {						\
 #define REG_RD(bp, offset)		readl(REG_ADDR(bp, offset))
 #define REG_RD8(bp, offset)		readb(REG_ADDR(bp, offset))
 #define REG_RD16(bp, offset)		readw(REG_ADDR(bp, offset))
+
+#define REG_WR_RELAXED(bp, offset, val)	\
+	writel_relaxed((u32)val, REG_ADDR(bp, offset))
+
+#define REG_WR16_RELAXED(bp, offset, val) \
+	writew_relaxed((u16)val, REG_ADDR(bp, offset))
 
 #define REG_WR(bp, offset, val)		writel((u32)val, REG_ADDR(bp, offset))
 #define REG_WR8(bp, offset, val)	writeb((u8)val, REG_ADDR(bp, offset))
@@ -758,10 +770,8 @@ struct bnx2x_fastpath {
 #if (BNX2X_DB_SHIFT < BNX2X_DB_MIN_SHIFT)
 #error "Min DB doorbell stride is 8"
 #endif
-#define DOORBELL(bp, cid, val) \
-	do { \
-		writel((u32)(val), bp->doorbells + (bp->db_size * (cid))); \
-	} while (0)
+#define DOORBELL_RELAXED(bp, cid, val) \
+	writel_relaxed((u32)(val), (bp)->doorbells + ((bp)->db_size * (cid)))
 
 /* TX CSUM helpers */
 #define SKB_CS_OFF(skb)		(offsetof(struct tcphdr, check) - \
@@ -1277,7 +1287,7 @@ enum sp_rtnl_flag {
 	BNX2X_SP_RTNL_HYPERVISOR_VLAN,
 	BNX2X_SP_RTNL_TX_STOP,
 	BNX2X_SP_RTNL_GET_DRV_VERSION,
-	BNX2X_SP_RTNL_CHANGE_UDP_PORT,
+	BNX2X_SP_RTNL_UPDATE_SVID,
 };
 
 enum bnx2x_iov_flag {
@@ -1330,11 +1340,6 @@ enum bnx2x_udp_port_type {
 	BNX2X_UDP_PORT_VXLAN,
 	BNX2X_UDP_PORT_GENEVE,
 	BNX2X_UDP_PORT_MAX,
-};
-
-struct bnx2x_udp_tunnel {
-	u16 dst_port;
-	u8 count;
 };
 
 struct bnx2x {
@@ -1396,9 +1401,9 @@ struct bnx2x {
 	int			tx_ring_size;
 
 /* L2 header size + 2*VLANs (8 bytes) + LLC SNAP (8 bytes) */
-#define ETH_OVREHEAD		(ETH_HLEN + 8 + 8)
-#define ETH_MIN_PACKET_SIZE		60
-#define ETH_MAX_PACKET_SIZE		1500
+#define ETH_OVERHEAD		(ETH_HLEN + 8 + 8)
+#define ETH_MIN_PACKET_SIZE		(ETH_ZLEN - ETH_HLEN)
+#define ETH_MAX_PACKET_SIZE		ETH_DATA_LEN
 #define ETH_MAX_JUMBO_PACKET_SIZE	9600
 /* TCP with Timestamp Option (32) + IPv6 (40) */
 #define ETH_MAX_TPA_HEADER_SIZE		72
@@ -1529,6 +1534,7 @@ struct bnx2x {
 	struct link_vars	link_vars;
 	u32			link_cnt;
 	struct bnx2x_link_report_data last_reported_link;
+	bool			force_link_down;
 
 	struct mdio_if_info	mdio;
 
@@ -1843,7 +1849,7 @@ struct bnx2x {
 	bool accept_any_vlan;
 
 	/* Vxlan/Geneve related information */
-	struct bnx2x_udp_tunnel udp_tunnel_ports[BNX2X_UDP_PORT_MAX];
+	u16 udp_tunnel_ports[BNX2X_UDP_PORT_MAX];
 };
 
 /* Tx queues may be less or equal to Rx queues */
@@ -1967,6 +1973,9 @@ struct bnx2x_func_init_params {
 
 #define skip_queue(bp, idx)	(NO_FCOE(bp) && IS_FCOE_IDX(idx))
 
+/*self test*/
+int bnx2x_idle_chk(struct bnx2x *bp);
+
 /**
  * bnx2x_set_mac_one - configure a single MAC address
  *
@@ -2075,7 +2084,7 @@ void bnx2x_igu_clear_sb_gen(struct bnx2x *bp, u8 func, u8 idu_sb_id,
 			    bool is_pf);
 
 #define BNX2X_ILT_ZALLOC(x, y, size)					\
-	x = dma_zalloc_coherent(&bp->pdev->dev, size, y, GFP_KERNEL)
+	x = dma_alloc_coherent(&bp->pdev->dev, size, y, GFP_KERNEL)
 
 #define BNX2X_ILT_FREE(x, y, size) \
 	do { \
@@ -2186,6 +2195,13 @@ void bnx2x_igu_clear_sb_gen(struct bnx2x *bp, u8 func, u8 idu_sb_id,
 #define PMF_DMAE_C(bp)			(BP_PORT(bp) * MAX_DMAE_C_PER_PORT + \
 					 E1HVN_MAX)
 
+/* Following is the DMAE channel number allocation for the clients.
+ *   MFW: OCBB/OCSD implementations use DMAE channels 14/15 respectively.
+ *   Driver: 0-3 and 8-11 (for PF dmae operations)
+ *           4 and 12 (for stats requests)
+ */
+#define BNX2X_FW_DMAE_C                 13 /* Channel for FW DMAE operations */
+
 /* PCIE link and speed */
 #define PCICFG_LINK_WIDTH		0x1f00000
 #define PCICFG_LINK_WIDTH_SHIFT		20
@@ -2277,7 +2293,7 @@ void bnx2x_igu_clear_sb_gen(struct bnx2x *bp, u8 func, u8 idu_sb_id,
 				 GENERAL_ATTEN_OFFSET(LATCHED_ATTN_RBCP) | \
 				 GENERAL_ATTEN_OFFSET(LATCHED_ATTN_RSVD_GRC))
 
-#define HW_INTERRUT_ASSERT_SET_0 \
+#define HW_INTERRUPT_ASSERT_SET_0 \
 				(AEU_INPUTS_ATTN_BITS_TSDM_HW_INTERRUPT | \
 				 AEU_INPUTS_ATTN_BITS_TCM_HW_INTERRUPT | \
 				 AEU_INPUTS_ATTN_BITS_TSEMI_HW_INTERRUPT | \
@@ -2290,7 +2306,7 @@ void bnx2x_igu_clear_sb_gen(struct bnx2x *bp, u8 func, u8 idu_sb_id,
 				 AEU_INPUTS_ATTN_BITS_TSEMI_PARITY_ERROR |\
 				 AEU_INPUTS_ATTN_BITS_TCM_PARITY_ERROR |\
 				 AEU_INPUTS_ATTN_BITS_PBCLIENT_PARITY_ERROR)
-#define HW_INTERRUT_ASSERT_SET_1 \
+#define HW_INTERRUPT_ASSERT_SET_1 \
 				(AEU_INPUTS_ATTN_BITS_QM_HW_INTERRUPT | \
 				 AEU_INPUTS_ATTN_BITS_TIMERS_HW_INTERRUPT | \
 				 AEU_INPUTS_ATTN_BITS_XSDM_HW_INTERRUPT | \
@@ -2318,7 +2334,7 @@ void bnx2x_igu_clear_sb_gen(struct bnx2x *bp, u8 func, u8 idu_sb_id,
 				 AEU_INPUTS_ATTN_BITS_UPB_PARITY_ERROR | \
 				 AEU_INPUTS_ATTN_BITS_CSDM_PARITY_ERROR |\
 				 AEU_INPUTS_ATTN_BITS_CCM_PARITY_ERROR)
-#define HW_INTERRUT_ASSERT_SET_2 \
+#define HW_INTERRUPT_ASSERT_SET_2 \
 				(AEU_INPUTS_ATTN_BITS_CSEMI_HW_INTERRUPT | \
 				 AEU_INPUTS_ATTN_BITS_CDU_HW_INTERRUPT | \
 				 AEU_INPUTS_ATTN_BITS_DMAE_HW_INTERRUPT | \
@@ -2411,13 +2427,6 @@ int bnx2x_compare_fw_ver(struct bnx2x *bp, u32 load_code, bool print_err);
 #define HC_SEG_ACCESS_ATTN		4
 #define HC_SEG_ACCESS_NORM		0   /*Driver decision 0-1*/
 
-static const u32 dmae_reg_go_c[] = {
-	DMAE_REG_GO_C0, DMAE_REG_GO_C1, DMAE_REG_GO_C2, DMAE_REG_GO_C3,
-	DMAE_REG_GO_C4, DMAE_REG_GO_C5, DMAE_REG_GO_C6, DMAE_REG_GO_C7,
-	DMAE_REG_GO_C8, DMAE_REG_GO_C9, DMAE_REG_GO_C10, DMAE_REG_GO_C11,
-	DMAE_REG_GO_C12, DMAE_REG_GO_C13, DMAE_REG_GO_C14, DMAE_REG_GO_C15
-};
-
 void bnx2x_set_ethtool_ops(struct bnx2x *bp, struct net_device *netdev);
 void bnx2x_notify_link_changed(struct bnx2x *bp);
 
@@ -2508,6 +2517,7 @@ void bnx2x_update_mfw_dump(struct bnx2x *bp);
 void bnx2x_init_ptp(struct bnx2x *bp);
 int bnx2x_configure_ptp_filters(struct bnx2x *bp);
 void bnx2x_set_rx_ts(struct bnx2x *bp, struct sk_buff *skb);
+void bnx2x_register_phc(struct bnx2x *bp);
 
 #define BNX2X_MAX_PHC_DRIFT 31000000
 #define BNX2X_PTP_TX_TIMEOUT

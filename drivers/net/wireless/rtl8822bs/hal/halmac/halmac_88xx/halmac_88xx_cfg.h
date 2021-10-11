@@ -25,7 +25,7 @@
 #define HALMAC_MAJOR_VER_88XX        0x0001 /* major version, ver_1 for async_api */
 #define HALMAC_PROTOTYPE_VER_88XX    0x0004 /* For halmac_api num change or prototype change, increment prototype version */
 #define HALMAC_MINOR_VER_88XX        0x0003 /* else increment minor version */
-#define HALMAC_PATCH_VER_88XX        0x0009 /* patch version */
+#define HALMAC_PATCH_VER_88XX        0x0008 /* patch version */
 
 #define HALMAC_C2H_DATA_OFFSET_88XX             10
 #define HALMAC_RX_DESC_DUMMY_SIZE_MAX_88XX      72 /*8*9 Bytes*/
@@ -101,10 +101,10 @@
 #define HALMAC_STBC_CFEND_RATE_88XX     0xF
 
 /* Slot, SIFS, PIFS time */
-#define HALMAC_SLOT_TIME_88XX           0x09
+#define HALMAC_SLOT_TIME_88XX           0x05
 #define HALMAC_PIFS_TIME_88XX           0x19
 #define HALMAC_SIFS_CCK_CTX_88XX        0xA
-#define HALMAC_SIFS_OFDM_CTX_88XX       0xE
+#define HALMAC_SIFS_OFDM_CTX_88XX       0xA
 #define HALMAC_SIFS_CCK_TRX_88XX        0x10
 #define HALMAC_SIFS_OFDM_TRX_88XX       0x10
 

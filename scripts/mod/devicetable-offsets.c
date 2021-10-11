@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/kbuild.h>
 #include <linux/mod_devicetable.h>
 
@@ -138,8 +139,18 @@ int main(void)
 	DEVID(hv_vmbus_device_id);
 	DEVID_FIELD(hv_vmbus_device_id, guid);
 
+	DEVID(rpmsg_device_id);
+	DEVID_FIELD(rpmsg_device_id, name);
+
 	DEVID(i2c_device_id);
 	DEVID_FIELD(i2c_device_id, name);
+
+	DEVID(i3c_device_id);
+	DEVID_FIELD(i3c_device_id, match_flags);
+	DEVID_FIELD(i3c_device_id, dcr);
+	DEVID_FIELD(i3c_device_id, manuf_id);
+	DEVID_FIELD(i3c_device_id, part_id);
+	DEVID_FIELD(i3c_device_id, extra_info);
 
 	DEVID(spi_device_id);
 	DEVID_FIELD(spi_device_id, name);
@@ -202,9 +213,50 @@ int main(void)
 	DEVID_FIELD(hda_device_id, rev_id);
 	DEVID_FIELD(hda_device_id, api_version);
 
+	DEVID(sdw_device_id);
+	DEVID_FIELD(sdw_device_id, mfg_id);
+	DEVID_FIELD(sdw_device_id, part_id);
+	DEVID_FIELD(sdw_device_id, sdw_version);
+	DEVID_FIELD(sdw_device_id, class_id);
+
 	DEVID(fsl_mc_device_id);
 	DEVID_FIELD(fsl_mc_device_id, vendor);
 	DEVID_FIELD(fsl_mc_device_id, obj_type);
+
+	DEVID(tb_service_id);
+	DEVID_FIELD(tb_service_id, match_flags);
+	DEVID_FIELD(tb_service_id, protocol_key);
+	DEVID_FIELD(tb_service_id, protocol_id);
+	DEVID_FIELD(tb_service_id, protocol_version);
+	DEVID_FIELD(tb_service_id, protocol_revision);
+
+	DEVID(typec_device_id);
+	DEVID_FIELD(typec_device_id, svid);
+	DEVID_FIELD(typec_device_id, mode);
+
+	DEVID(tee_client_device_id);
+	DEVID_FIELD(tee_client_device_id, uuid);
+
+	DEVID(wmi_device_id);
+	DEVID_FIELD(wmi_device_id, guid_string);
+
+	DEVID(mhi_device_id);
+	DEVID_FIELD(mhi_device_id, chan);
+
+	DEVID(auxiliary_device_id);
+	DEVID_FIELD(auxiliary_device_id, name);
+
+	DEVID(ssam_device_id);
+	DEVID_FIELD(ssam_device_id, match_flags);
+	DEVID_FIELD(ssam_device_id, domain);
+	DEVID_FIELD(ssam_device_id, category);
+	DEVID_FIELD(ssam_device_id, target);
+	DEVID_FIELD(ssam_device_id, instance);
+	DEVID_FIELD(ssam_device_id, function);
+
+	DEVID(dfl_device_id);
+	DEVID_FIELD(dfl_device_id, type);
+	DEVID_FIELD(dfl_device_id, feature_id);
 
 	return 0;
 }

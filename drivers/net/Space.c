@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * INET		An implementation of the TCP/IP protocol suite for the LINUX
  *		operating system.  INET is implemented using the  BSD Socket
@@ -21,11 +22,6 @@
  *		Paul Gortmaker (06/98):
  *		 - sort probes in a sane way, make sure all (safe) probes
  *		   get run once & failed autoprobes don't autoprobe again.
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  */
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
@@ -63,9 +59,6 @@ static int __init probe_list2(int unit, struct devprobe2 *p, int autoprobe)
  * look for EISA/PCI cards in addition to ISA cards).
  */
 static struct devprobe2 isa_probes[] __initdata = {
-#if defined(CONFIG_HP100) && defined(CONFIG_ISA)	/* ISA, EISA */
-	{hp100_probe, 0},
-#endif
 #ifdef CONFIG_3C515
 	{tc515_probe, 0},
 #endif
@@ -113,12 +106,6 @@ static struct devprobe2 m68k_probes[] __initdata = {
 #endif
 #ifdef CONFIG_MVME147_NET	/* MVME147 internal Ethernet */
 	{mvme147lance_probe, 0},
-#endif
-#ifdef CONFIG_MAC8390           /* NuBus NS8390-based cards */
-	{mac8390_probe, 0},
-#endif
-#ifdef CONFIG_MAC89x0
-	{mac89x0_probe, 0},
 #endif
 	{NULL, 0},
 };

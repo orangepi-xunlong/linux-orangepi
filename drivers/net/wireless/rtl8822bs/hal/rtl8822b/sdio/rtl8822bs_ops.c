@@ -190,13 +190,10 @@ static void _run_thread(PADAPTER adapter)
 #ifndef CONFIG_SDIO_TX_TASKLET
 	struct xmit_priv *xmitpriv = &adapter->xmitpriv;
 
-	if (xmitpriv->SdioXmitThread == NULL) {
-		RTW_INFO(FUNC_ADPT_FMT " start RTWHALXT\n", FUNC_ADPT_ARG(adapter));
-		xmitpriv->SdioXmitThread = kthread_run(rtl8822bs_xmit_thread, adapter, "RTWHALXT");
-		if (IS_ERR(xmitpriv->SdioXmitThread)) {
-			RTW_ERR("%s: start rtl8822bs_xmit_thread FAIL!!\n", __FUNCTION__);
-			xmitpriv->SdioXmitThread = NULL;
-		}
+	xmitpriv->SdioXmitThread = kthread_run(rtl8822bs_xmit_thread, adapter, "RTWHALXT");
+	if (IS_ERR(xmitpriv->SdioXmitThread)) {
+		RTW_ERR("%s: start rtl8822bs_xmit_thread FAIL!!\n", __FUNCTION__);
+		xmitpriv->SdioXmitThread = NULL;
 	}
 #endif /* !CONFIG_SDIO_TX_TASKLET */
 }
@@ -266,6 +263,20 @@ static u8 sethwreg(PADAPTER adapter, u8 variable, u8 *val)
 		rtw_write8(adapter, REG_SDIO_HRPWM1_8822B, val8);
 		break;
 
+	case HW_VAR_SET_REQ_FW_PS:
+		/*
+		 * 1. driver write 0x8f[4]=1
+		 *    request fw ps state (only can write bit4)
+		 */
+	{
+		u8 req_fw_ps = 0;
+
+		req_fw_ps = rtw_read8(adapter, 0x8f);
+		req_fw_ps |= 0x10;
+		rtw_write8(adapter, 0x8f, req_fw_ps);
+	}
+	break;
+
 	default:
 		ret = rtl8822b_sethwreg(adapter, variable, val);
 		break;
@@ -305,6 +316,11 @@ static void gethwreg(PADAPTER adapter, u8 variable, u8 *val)
 		*val &= BIT_TOGGLE_8822B;
 		break;
 #endif
+
+	case HW_VAR_FW_PS_STATE:
+		/* driver read dword 0x88 to get fw ps state */
+		*((u16 *)val) = rtw_read16(adapter, 0x88);
+		break;
 
 	default:
 		rtl8822b_gethwreg(adapter, variable, val);

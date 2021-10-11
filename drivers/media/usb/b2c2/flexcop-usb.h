@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Linux driver for digital TV devices equipped with B2C2 FlexcopII(b)/III
  * flexcop-usb.h - header file for the USB part
@@ -14,7 +15,7 @@
 
 #define B2C2_USB_CTRL_PIPE_IN usb_rcvctrlpipe(fc_usb->udev, 0)
 #define B2C2_USB_CTRL_PIPE_OUT usb_sndctrlpipe(fc_usb->udev, 0)
-#define B2C2_USB_DATA_PIPE usb_rcvisocpipe(fc_usb->udev, 0x81)
+#define B2C2_USB_DATA_PIPE usb_rcvisocpipe(fc_usb->udev, 1)
 
 struct flexcop_usb {
 	struct usb_device *udev;

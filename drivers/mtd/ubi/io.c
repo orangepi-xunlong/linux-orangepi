@@ -1,20 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) International Business Machines Corp., 2006
  * Copyright (c) Nokia Corporation, 2006, 2007
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
- * the GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  *
  * Author: Artem Bityutskiy (Битюцкий Артём)
  */
@@ -45,7 +32,7 @@
  * About minimal I/O units. In general, UBI assumes flash device model where
  * there is only one minimal I/O unit size. E.g., in case of NOR flash it is 1,
  * in case of NAND flash it is a NAND page, etc. This is reported by MTD in the
- * @ubi->mtd->writesize field. But as an exception, UBI admits of using another
+ * @ubi->mtd->writesize field. But as an exception, UBI admits use of another
  * (smaller) minimal I/O unit size for EC and VID headers to make it possible
  * to do different optimizations.
  *
@@ -309,18 +296,6 @@ int ubi_io_write(struct ubi_device *ubi, const void *buf, int pnum, int offset,
 }
 
 /**
- * erase_callback - MTD erasure call-back.
- * @ei: MTD erase information object.
- *
- * Note, even though MTD erase interface is asynchronous, all the current
- * implementations are synchronous anyway.
- */
-static void erase_callback(struct erase_info *ei)
-{
-	wake_up_interruptible((wait_queue_head_t *)ei->priv);
-}
-
-/**
  * do_sync_erase - synchronously erase a physical eraseblock.
  * @ubi: UBI device description object
  * @pnum: the physical eraseblock number to erase
@@ -333,7 +308,6 @@ static int do_sync_erase(struct ubi_device *ubi, int pnum)
 {
 	int err, retries = 0;
 	struct erase_info ei;
-	wait_queue_head_t wq;
 
 	dbg_io("erase PEB %d", pnum);
 	ubi_assert(pnum >= 0 && pnum < ubi->peb_count);
@@ -344,14 +318,10 @@ static int do_sync_erase(struct ubi_device *ubi, int pnum)
 	}
 
 retry:
-	init_waitqueue_head(&wq);
 	memset(&ei, 0, sizeof(struct erase_info));
 
-	ei.mtd      = ubi->mtd;
 	ei.addr     = (loff_t)pnum * ubi->peb_size;
 	ei.len      = ubi->peb_size;
-	ei.callback = erase_callback;
-	ei.priv     = (unsigned long)&wq;
 
 	err = mtd_erase(ubi->mtd, &ei);
 	if (err) {
@@ -364,25 +334,6 @@ retry:
 		ubi_err(ubi, "cannot erase PEB %d, error %d", pnum, err);
 		dump_stack();
 		return err;
-	}
-
-	err = wait_event_interruptible(wq, ei.state == MTD_ERASE_DONE ||
-					   ei.state == MTD_ERASE_FAILED);
-	if (err) {
-		ubi_err(ubi, "interrupted PEB %d erasure", pnum);
-		return -EINTR;
-	}
-
-	if (ei.state == MTD_ERASE_FAILED) {
-		if (retries++ < UBI_IO_RETRIES) {
-			ubi_warn(ubi, "error while erasing PEB %d, retry",
-				 pnum);
-			yield();
-			goto retry;
-		}
-		ubi_err(ubi, "cannot erase PEB %d", pnum);
-		dump_stack();
-		return -EIO;
 	}
 
 	err = ubi_self_check_all_ff(ubi, pnum, 0, ubi->peb_size);
@@ -584,7 +535,14 @@ int ubi_io_sync_erase(struct ubi_device *ubi, int pnum, int torture)
 		return -EROFS;
 	}
 
-	if (ubi->nor_flash) {
+	/*
+	 * If the flash is ECC-ed then we have to erase the ECC block before we
+	 * can write to it. But the write is in preparation to an erase in the
+	 * first place. This means we cannot zero out EC and VID before the
+	 * erase and we just have to hope the flash starts erasing from the
+	 * start of the page.
+	 */
+	if (ubi->nor_flash && ubi->mtd->writesize == 1) {
 		err = nor_erase_prepare(ubi, pnum);
 		if (err)
 			return err;
@@ -955,12 +913,7 @@ static int validate_vid_hdr(const struct ubi_device *ubi,
 				ubi_err(ubi, "bad data_size");
 				goto bad;
 			}
-		} else if (lnum == used_ebs - 1) {
-			if (data_size == 0) {
-				ubi_err(ubi, "bad data_size at last LEB");
-				goto bad;
-			}
-		} else {
+		} else if (lnum > used_ebs - 1) {
 			ubi_err(ubi, "too high lnum");
 			goto bad;
 		}
@@ -1346,7 +1299,7 @@ static int self_check_write(struct ubi_device *ubi, const void *buf, int pnum,
 	if (!ubi_dbg_chk_io(ubi))
 		return 0;
 
-	buf1 = __vmalloc(len, GFP_NOFS, PAGE_KERNEL);
+	buf1 = __vmalloc(len, GFP_NOFS);
 	if (!buf1) {
 		ubi_err(ubi, "cannot allocate memory to check writes");
 		return 0;
@@ -1410,7 +1363,7 @@ int ubi_self_check_all_ff(struct ubi_device *ubi, int pnum, int offset, int len)
 	if (!ubi_dbg_chk_io(ubi))
 		return 0;
 
-	buf = __vmalloc(len, GFP_NOFS, PAGE_KERNEL);
+	buf = __vmalloc(len, GFP_NOFS);
 	if (!buf) {
 		ubi_err(ubi, "cannot allocate memory to check for 0xFFs");
 		return 0;

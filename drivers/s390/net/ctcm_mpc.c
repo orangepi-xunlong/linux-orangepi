@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *	Copyright IBM Corp. 2004, 2007
  *	Authors:	Belinda Thompson (belindat@us.ibm.com)
@@ -356,6 +357,7 @@ int ctc_mpc_alloc_channel(int port_num, void (*callback)(int, int))
 		/*fsm_newstate(grp->fsm, MPCG_STATE_XID2INITW);*/
 		if (callback)
 			grp->send_qllc_disc = 1;
+		fallthrough;
 	case MPCG_STATE_XID0IOWAIT:
 		fsm_deltimer(&grp->timer);
 		grp->outstanding_xid2 = 0;
@@ -653,23 +655,9 @@ static void ctcmpc_send_sweep_resp(struct channel *rch)
 		goto done;
 	}
 
-	header = kmalloc(sizeof(struct th_sweep), gfp_type());
-
-	if (!header) {
-		dev_kfree_skb_any(sweep_skb);
-		goto done;
-	}
-
-	header->th.th_seg	= 0x00 ;
+	header = skb_put_zero(sweep_skb, TH_SWEEP_LENGTH);
 	header->th.th_ch_flag	= TH_SWEEP_RESP;
-	header->th.th_blk_flag	= 0x00;
-	header->th.th_is_xid	= 0x00;
-	header->th.th_seq_num	= 0x00;
 	header->sw.th_last_seq	= ch->th_seq_num;
-
-	memcpy(skb_put(sweep_skb, TH_SWEEP_LENGTH), header, TH_SWEEP_LENGTH);
-
-	kfree(header);
 
 	netif_trans_update(dev);
 	skb_queue_tail(&ch->sweep_queue, sweep_skb);
@@ -974,9 +962,8 @@ void mpc_channel_action(struct channel *ch, int direction, int action)
 		skb_reset_tail_pointer(ch->xid_skb);
 		ch->xid_skb->len = 0;
 
-		memcpy(skb_put(ch->xid_skb, grp->xid_skb->len),
-				grp->xid_skb->data,
-				grp->xid_skb->len);
+		skb_put_data(ch->xid_skb, grp->xid_skb->data,
+			     grp->xid_skb->len);
 
 		ch->xid->xid2_dlc_type =
 			((CHANNEL_DIRECTION(ch->flags) == CTCM_READ)
@@ -1149,7 +1136,7 @@ static void ctcmpc_unpack_skb(struct channel *ch, struct sk_buff *pskb)
 				fsm_event(grp->fsm, MPCG_EVENT_INOP, dev);
 						goto done;
 			}
-			memcpy(skb_put(skb, new_len), pskb->data, new_len);
+			skb_put_data(skb, pskb->data, new_len);
 
 			skb_reset_mac_header(skb);
 			skb->dev = pskb->dev;
@@ -1176,7 +1163,7 @@ static void ctcmpc_unpack_skb(struct channel *ch, struct sk_buff *pskb)
 			skb_pull(pskb, new_len); /* point to next PDU */
 		}
 	} else {
-		mpcginfo = kmalloc(sizeof(struct mpcg_info), gfp_type());
+		mpcginfo = kmalloc(sizeof(struct mpcg_info), GFP_ATOMIC);
 		if (mpcginfo == NULL)
 					goto done;
 
@@ -1297,16 +1284,15 @@ struct mpc_group *ctcmpc_init_mpc_group(struct ctcm_priv *priv)
 	/*  base xid for all channels in group  */
 	grp->xid_skb_data = grp->xid_skb->data;
 	grp->xid_th = (struct th_header *)grp->xid_skb->data;
-	memcpy(skb_put(grp->xid_skb, TH_HEADER_LENGTH),
-			&thnorm, TH_HEADER_LENGTH);
+	skb_put_data(grp->xid_skb, &thnorm, TH_HEADER_LENGTH);
 
 	grp->xid = (struct xid2 *)skb_tail_pointer(grp->xid_skb);
-	memcpy(skb_put(grp->xid_skb, XID2_LENGTH), &init_xid, XID2_LENGTH);
+	skb_put_data(grp->xid_skb, &init_xid, XID2_LENGTH);
 	grp->xid->xid2_adj_id = jiffies | 0xfff00000;
 	grp->xid->xid2_sender_id = jiffies;
 
 	grp->xid_id = skb_tail_pointer(grp->xid_skb);
-	memcpy(skb_put(grp->xid_skb, 4), "VTAM", 4);
+	skb_put_data(grp->xid_skb, "VTAM", 4);
 
 	grp->rcvd_xid_skb =
 		__dev_alloc_skb(MPC_BUFSIZE_DEFAULT, GFP_ATOMIC|GFP_DMA);
@@ -1318,8 +1304,7 @@ struct mpc_group *ctcmpc_init_mpc_group(struct ctcm_priv *priv)
 	}
 	grp->rcvd_xid_data = grp->rcvd_xid_skb->data;
 	grp->rcvd_xid_th = (struct th_header *)grp->rcvd_xid_skb->data;
-	memcpy(skb_put(grp->rcvd_xid_skb, TH_HEADER_LENGTH),
-			&thnorm, TH_HEADER_LENGTH);
+	skb_put_data(grp->rcvd_xid_skb, &thnorm, TH_HEADER_LENGTH);
 	grp->saved_xid2 = NULL;
 	priv->xid = grp->xid;
 	priv->mpcg = grp;
@@ -1410,8 +1395,7 @@ static void mpc_action_go_inop(fsm_instance *fi, int event, void *arg)
 	skb_reset_tail_pointer(grp->rcvd_xid_skb);
 	grp->rcvd_xid_skb->len = 0;
 	grp->rcvd_xid_th = (struct th_header *)grp->rcvd_xid_skb->data;
-	memcpy(skb_put(grp->rcvd_xid_skb, TH_HEADER_LENGTH), &thnorm,
-	       TH_HEADER_LENGTH);
+	skb_put_data(grp->rcvd_xid_skb, &thnorm, TH_HEADER_LENGTH);
 
 	if (grp->send_qllc_disc == 1) {
 		grp->send_qllc_disc = 0;
@@ -1472,6 +1456,7 @@ static void mpc_action_timeout(fsm_instance *fi, int event, void *arg)
 		if ((fsm_getstate(rch->fsm) == CH_XID0_PENDING) &&
 		   (fsm_getstate(wch->fsm) == CH_XID0_PENDING))
 			break;
+		fallthrough;
 	default:
 		fsm_event(grp->fsm, MPCG_EVENT_INOP, dev);
 	}
@@ -1524,8 +1509,7 @@ void mpc_action_send_discontact(unsigned long thischan)
 	unsigned long	saveflags = 0;
 
 	spin_lock_irqsave(get_ccwdev_lock(ch->cdev), saveflags);
-	rc = ccw_device_start(ch->cdev, &ch->ccw[15],
-					(unsigned long)ch, 0xff, 0);
+	rc = ccw_device_start(ch->cdev, &ch->ccw[15], 0, 0xff, 0);
 	spin_unlock_irqrestore(get_ccwdev_lock(ch->cdev), saveflags);
 
 	if (rc != 0) {
@@ -1590,8 +1574,7 @@ static int mpc_validate_xid(struct mpcg_info *mpcginfo)
 		grp->saved_xid2 =
 			(struct xid2 *)skb_tail_pointer(grp->rcvd_xid_skb);
 
-		memcpy(skb_put(grp->rcvd_xid_skb,
-					XID2_LENGTH), xid, XID2_LENGTH);
+		skb_put_data(grp->rcvd_xid_skb, xid, XID2_LENGTH);
 		grp->rcvd_xid_skb->data = grp->rcvd_xid_data;
 
 		skb_reset_tail_pointer(grp->rcvd_xid_skb);
@@ -1799,8 +1782,7 @@ static void mpc_action_side_xid(fsm_instance *fsm, void *arg, int side)
 	}
 
 	fsm_addtimer(&ch->timer, 5000 , CTC_EVENT_TIMER, ch);
-	rc = ccw_device_start(ch->cdev, &ch->ccw[8],
-				(unsigned long)ch, 0xff, 0);
+	rc = ccw_device_start(ch->cdev, &ch->ccw[8], 0, 0xff, 0);
 
 	if (gotlock)	/* see remark above about conditional locking */
 		spin_unlock_irqrestore(get_ccwdev_lock(ch->cdev), saveflags);
@@ -1908,17 +1890,15 @@ static void mpc_action_doxid7(fsm_instance *fsm, int event, void *arg)
 				if (fsm_getstate(ch->fsm) == CH_XID7_PENDING1) {
 					fsm_newstate(ch->fsm, CH_XID7_PENDING2);
 					ch->ccw[8].cmd_code = CCW_CMD_SENSE_CMD;
-					memcpy(skb_put(ch->xid_skb,
-							TH_HEADER_LENGTH),
-					       &thdummy, TH_HEADER_LENGTH);
+					skb_put_data(ch->xid_skb, &thdummy,
+						     TH_HEADER_LENGTH);
 					send = 1;
 				}
 			} else if (fsm_getstate(ch->fsm) < CH_XID7_PENDING2) {
 					fsm_newstate(ch->fsm, CH_XID7_PENDING2);
 					ch->ccw[8].cmd_code = CCW_CMD_WRITE_CTL;
-					memcpy(skb_put(ch->xid_skb,
-						       TH_HEADER_LENGTH),
-					       &thnorm, TH_HEADER_LENGTH);
+					skb_put_data(ch->xid_skb, &thnorm,
+						     TH_HEADER_LENGTH);
 					send = 1;
 			}
 		} else {
@@ -1926,17 +1906,16 @@ static void mpc_action_doxid7(fsm_instance *fsm, int event, void *arg)
 			if (grp->roll == YSIDE) {
 				if (fsm_getstate(ch->fsm) < CH_XID7_PENDING4) {
 					fsm_newstate(ch->fsm, CH_XID7_PENDING4);
-					memcpy(skb_put(ch->xid_skb,
-						       TH_HEADER_LENGTH),
-					       &thnorm, TH_HEADER_LENGTH);
+					skb_put_data(ch->xid_skb, &thnorm,
+						     TH_HEADER_LENGTH);
 					ch->ccw[8].cmd_code = CCW_CMD_WRITE_CTL;
 					send = 1;
 				}
 			} else if (fsm_getstate(ch->fsm) == CH_XID7_PENDING3) {
 				fsm_newstate(ch->fsm, CH_XID7_PENDING4);
 				ch->ccw[8].cmd_code = CCW_CMD_SENSE_CMD;
-				memcpy(skb_put(ch->xid_skb, TH_HEADER_LENGTH),
-						&thdummy, TH_HEADER_LENGTH);
+				skb_put_data(ch->xid_skb, &thdummy,
+					     TH_HEADER_LENGTH);
 				send = 1;
 			}
 		}
@@ -2069,7 +2048,6 @@ static void mpc_action_rcvd_xid7(fsm_instance *fsm, int event, void *arg)
  */
 static int mpc_send_qllc_discontact(struct net_device *dev)
 {
-	__u32	new_len	= 0;
 	struct sk_buff   *skb;
 	struct qllc      *qllcptr;
 	struct ctcm_priv *priv = dev->ml_priv;
@@ -2096,34 +2074,23 @@ static int mpc_send_qllc_discontact(struct net_device *dev)
 			grp->estconnfunc = NULL;
 			break;
 		}
+		fallthrough;
 	case MPCG_STATE_FLOWC:
 	case MPCG_STATE_READY:
 		grp->send_qllc_disc = 2;
-		new_len = sizeof(struct qllc);
-		qllcptr = kzalloc(new_len, gfp_type() | GFP_DMA);
-		if (qllcptr == NULL) {
-			CTCM_DBF_TEXT_(MPC_ERROR, CTC_DBF_ERROR,
-				"%s(%s): qllcptr allocation error",
-						CTCM_FUNTAIL, dev->name);
-			return -ENOMEM;
-		}
 
-		qllcptr->qllc_address = 0xcc;
-		qllcptr->qllc_commands = 0x03;
-
-		skb = __dev_alloc_skb(new_len, GFP_ATOMIC);
-
+		skb = __dev_alloc_skb(sizeof(struct qllc), GFP_ATOMIC);
 		if (skb == NULL) {
 			CTCM_DBF_TEXT_(MPC_ERROR, CTC_DBF_ERROR,
 				"%s(%s): skb allocation error",
 						CTCM_FUNTAIL, dev->name);
 			priv->stats.rx_dropped++;
-			kfree(qllcptr);
 			return -ENOMEM;
 		}
 
-		memcpy(skb_put(skb, new_len), qllcptr, new_len);
-		kfree(qllcptr);
+		qllcptr = skb_put(skb, sizeof(struct qllc));
+		qllcptr->qllc_address = 0xcc;
+		qllcptr->qllc_commands = 0x03;
 
 		if (skb_headroom(skb) < 4) {
 			CTCM_DBF_TEXT_(MPC_ERROR, CTC_DBF_ERROR,

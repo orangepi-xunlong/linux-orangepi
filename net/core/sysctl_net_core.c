@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* -*- linux-c -*-
  * sysctl_net_core.c: sysctl interface to net core subsystem.
  *
@@ -14,7 +15,6 @@
 #include <linux/vmalloc.h>
 #include <linux/init.h>
 #include <linux/slab.h>
-#include <linux/kmemleak.h>
 
 #include <net/ip.h>
 #include <net/sock.h>
@@ -22,17 +22,33 @@
 #include <net/busy_poll.h>
 #include <net/pkt_sched.h>
 
-static int zero = 0;
-static int one = 1;
+static int two = 2;
+static int three = 3;
+static int int_3600 = 3600;
 static int min_sndbuf = SOCK_MIN_SNDBUF;
 static int min_rcvbuf = SOCK_MIN_RCVBUF;
 static int max_skb_frags = MAX_SKB_FRAGS;
+static long long_one __maybe_unused = 1;
+static long long_max __maybe_unused = LONG_MAX;
 
 static int net_msg_warn;	/* Unused, but still a sysctl */
 
+int sysctl_fb_tunnels_only_for_init_net __read_mostly = 0;
+EXPORT_SYMBOL(sysctl_fb_tunnels_only_for_init_net);
+
+/* 0 - Keep current behavior:
+ *     IPv4: inherit all current settings from init_net
+ *     IPv6: reset all settings to default
+ * 1 - Both inherit all current settings from init_net
+ * 2 - Both reset all settings to default
+ * 3 - Both inherit all settings from current netns
+ */
+int sysctl_devconf_inherit_init_net __read_mostly;
+EXPORT_SYMBOL(sysctl_devconf_inherit_init_net);
+
 #ifdef CONFIG_RPS
 static int rps_sock_flow_sysctl(struct ctl_table *table, int write,
-				void __user *buffer, size_t *lenp, loff_t *ppos)
+				void *buffer, size_t *lenp, loff_t *ppos)
 {
 	unsigned int orig_size, size;
 	int ret, i;
@@ -79,10 +95,13 @@ static int rps_sock_flow_sysctl(struct ctl_table *table, int write,
 
 		if (sock_table != orig_sock_table) {
 			rcu_assign_pointer(rps_sock_flow_table, sock_table);
-			if (sock_table)
-				static_key_slow_inc(&rps_needed);
+			if (sock_table) {
+				static_branch_inc(&rps_needed);
+				static_branch_inc(&rfs_needed);
+			}
 			if (orig_sock_table) {
-				static_key_slow_dec(&rps_needed);
+				static_branch_dec(&rps_needed);
+				static_branch_dec(&rfs_needed);
 				synchronize_rcu();
 				vfree(orig_sock_table);
 			}
@@ -99,8 +118,7 @@ static int rps_sock_flow_sysctl(struct ctl_table *table, int write,
 static DEFINE_MUTEX(flow_limit_update_mutex);
 
 static int flow_limit_cpu_sysctl(struct ctl_table *table, int write,
-				 void __user *buffer, size_t *lenp,
-				 loff_t *ppos)
+				 void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct sd_flow_limit *cur;
 	struct softnet_data *sd;
@@ -111,7 +129,7 @@ static int flow_limit_cpu_sysctl(struct ctl_table *table, int write,
 		return -ENOMEM;
 
 	if (write) {
-		ret = cpumask_parse_user(buffer, *lenp, mask);
+		ret = cpumask_parse(buffer, mask);
 		if (ret)
 			goto done;
 
@@ -164,10 +182,7 @@ write_unlock:
 		}
 		if (len < *lenp)
 			kbuf[len++] = '\n';
-		if (copy_to_user(buffer, kbuf, len)) {
-			ret = -EFAULT;
-			goto done;
-		}
+		memcpy(buffer, kbuf, len);
 		*lenp = len;
 		*ppos += len;
 	}
@@ -178,8 +193,7 @@ done:
 }
 
 static int flow_limit_table_len_sysctl(struct ctl_table *table, int write,
-				       void __user *buffer, size_t *lenp,
-				       loff_t *ppos)
+				       void *buffer, size_t *lenp, loff_t *ppos)
 {
 	unsigned int old, *ptr;
 	int ret;
@@ -201,7 +215,7 @@ static int flow_limit_table_len_sysctl(struct ctl_table *table, int write,
 
 #ifdef CONFIG_NET_SCHED
 static int set_default_qdisc(struct ctl_table *table, int write,
-			     void __user *buffer, size_t *lenp, loff_t *ppos)
+			     void *buffer, size_t *lenp, loff_t *ppos)
 {
 	char id[IFNAMSIZ];
 	struct ctl_table tbl = {
@@ -219,8 +233,23 @@ static int set_default_qdisc(struct ctl_table *table, int write,
 }
 #endif
 
+static int proc_do_dev_weight(struct ctl_table *table, int write,
+			   void *buffer, size_t *lenp, loff_t *ppos)
+{
+	int ret;
+
+	ret = proc_dointvec(table, write, buffer, lenp, ppos);
+	if (ret != 0)
+		return ret;
+
+	dev_rx_weight = weight_p * dev_weight_rx_bias;
+	dev_tx_weight = weight_p * dev_weight_tx_bias;
+
+	return ret;
+}
+
 static int proc_do_rss_key(struct ctl_table *table, int write,
-			   void __user *buffer, size_t *lenp, loff_t *ppos)
+			   void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct ctl_table fake_table;
 	char buf[NETDEV_RSS_KEY_LEN * 3];
@@ -231,8 +260,56 @@ static int proc_do_rss_key(struct ctl_table *table, int write,
 	return proc_dostring(&fake_table, write, buffer, lenp, ppos);
 }
 
+#ifdef CONFIG_BPF_JIT
+static int proc_dointvec_minmax_bpf_enable(struct ctl_table *table, int write,
+					   void *buffer, size_t *lenp,
+					   loff_t *ppos)
+{
+	int ret, jit_enable = *(int *)table->data;
+	struct ctl_table tmp = *table;
+
+	if (write && !capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	tmp.data = &jit_enable;
+	ret = proc_dointvec_minmax(&tmp, write, buffer, lenp, ppos);
+	if (write && !ret) {
+		if (jit_enable < 2 ||
+		    (jit_enable == 2 && bpf_dump_raw_ok(current_cred()))) {
+			*(int *)table->data = jit_enable;
+			if (jit_enable == 2)
+				pr_warn("bpf_jit_enable = 2 was set! NEVER use this in production, only for JIT debugging!\n");
+		} else {
+			ret = -EPERM;
+		}
+	}
+	return ret;
+}
+
+# ifdef CONFIG_HAVE_EBPF_JIT
+static int
+proc_dointvec_minmax_bpf_restricted(struct ctl_table *table, int write,
+				    void *buffer, size_t *lenp, loff_t *ppos)
+{
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	return proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+}
+# endif /* CONFIG_HAVE_EBPF_JIT */
+
+static int
+proc_dolongvec_minmax_bpf_restricted(struct ctl_table *table, int write,
+				     void *buffer, size_t *lenp, loff_t *ppos)
+{
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	return proc_doulongvec_minmax(table, write, buffer, lenp, ppos);
+}
+#endif
+
 static struct ctl_table net_core_table[] = {
-#ifdef CONFIG_NET
 	{
 		.procname	= "wmem_max",
 		.data		= &sysctl_wmem_max,
@@ -270,7 +347,21 @@ static struct ctl_table net_core_table[] = {
 		.data		= &weight_p,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= proc_do_dev_weight,
+	},
+	{
+		.procname	= "dev_weight_rx_bias",
+		.data		= &dev_weight_rx_bias,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_do_dev_weight,
+	},
+	{
+		.procname	= "dev_weight_tx_bias",
+		.data		= &dev_weight_tx_bias,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_do_dev_weight,
 	},
 	{
 		.procname	= "netdev_max_backlog",
@@ -292,13 +383,14 @@ static struct ctl_table net_core_table[] = {
 		.data		= &bpf_jit_enable,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-#ifndef CONFIG_BPF_JIT_ALWAYS_ON
-		.proc_handler	= proc_dointvec
-#else
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &one,
-		.extra2		= &one,
-#endif
+		.proc_handler	= proc_dointvec_minmax_bpf_enable,
+# ifdef CONFIG_BPF_JIT_ALWAYS_ON
+		.extra1		= SYSCTL_ONE,
+		.extra2		= SYSCTL_ONE,
+# else
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= &two,
+# endif
 	},
 # ifdef CONFIG_HAVE_EBPF_JIT
 	{
@@ -306,9 +398,29 @@ static struct ctl_table net_core_table[] = {
 		.data		= &bpf_jit_harden,
 		.maxlen		= sizeof(int),
 		.mode		= 0600,
-		.proc_handler	= proc_dointvec,
+		.proc_handler	= proc_dointvec_minmax_bpf_restricted,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= &two,
+	},
+	{
+		.procname	= "bpf_jit_kallsyms",
+		.data		= &bpf_jit_kallsyms,
+		.maxlen		= sizeof(int),
+		.mode		= 0600,
+		.proc_handler	= proc_dointvec_minmax_bpf_restricted,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE,
 	},
 # endif
+	{
+		.procname	= "bpf_jit_limit",
+		.data		= &bpf_jit_limit,
+		.maxlen		= sizeof(long),
+		.mode		= 0600,
+		.proc_handler	= proc_dolongvec_minmax_bpf_restricted,
+		.extra1		= &long_one,
+		.extra2		= &long_max,
+	},
 #endif
 	{
 		.procname	= "netdev_tstamp_prequeue",
@@ -344,8 +456,8 @@ static struct ctl_table net_core_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
-		.extra2		= &one
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE
 	},
 #ifdef CONFIG_RPS
 	{
@@ -376,7 +488,7 @@ static struct ctl_table net_core_table[] = {
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
+		.extra1		= SYSCTL_ZERO,
 	},
 	{
 		.procname	= "busy_read",
@@ -384,7 +496,7 @@ static struct ctl_table net_core_table[] = {
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
+		.extra1		= SYSCTL_ZERO,
 	},
 #endif
 #ifdef CONFIG_NET_SCHED
@@ -395,7 +507,6 @@ static struct ctl_table net_core_table[] = {
 		.proc_handler	= set_default_qdisc
 	},
 #endif
-#endif /* CONFIG_NET */
 	{
 		.procname	= "netdev_budget",
 		.data		= &netdev_budget,
@@ -416,8 +527,58 @@ static struct ctl_table net_core_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &one,
+		.extra1		= SYSCTL_ONE,
 		.extra2		= &max_skb_frags,
+	},
+	{
+		.procname	= "netdev_budget_usecs",
+		.data		= &netdev_budget_usecs,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+	},
+	{
+		.procname	= "fb_tunnels_only_for_init_net",
+		.data		= &sysctl_fb_tunnels_only_for_init_net,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= &two,
+	},
+	{
+		.procname	= "devconf_inherit_init_net",
+		.data		= &sysctl_devconf_inherit_init_net,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= &three,
+	},
+	{
+		.procname	= "high_order_alloc_disable",
+		.data		= &net_high_order_alloc_disable_key.key,
+		.maxlen         = sizeof(net_high_order_alloc_disable_key),
+		.mode		= 0644,
+		.proc_handler	= proc_do_static_key,
+	},
+	{
+		.procname	= "gro_normal_batch",
+		.data		= &gro_normal_batch,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ONE,
+	},
+	{
+		.procname	= "netdev_unregister_timeout_secs",
+		.data		= &netdev_unregister_timeout_secs,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ONE,
+		.extra2		= &int_3600,
 	},
 	{ }
 };
@@ -428,11 +589,24 @@ static struct ctl_table netns_core_table[] = {
 		.data		= &init_net.core.sysctl_somaxconn,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.extra1		= &zero,
+		.extra1		= SYSCTL_ZERO,
 		.proc_handler	= proc_dointvec_minmax
 	},
 	{ }
 };
+
+static int __init fb_tunnels_only_for_init_net_sysctl_setup(char *str)
+{
+	/* fallback tunnels for initns only */
+	if (!strncmp(str, "initns", 6))
+		sysctl_fb_tunnels_only_for_init_net = 1;
+	/* no fallback tunnels anywhere */
+	else if (!strncmp(str, "none", 4))
+		sysctl_fb_tunnels_only_for_init_net = 2;
+
+	return 1;
+}
+__setup("fb_tunnels=", fb_tunnels_only_for_init_net_sysctl_setup);
 
 static __net_init int sysctl_core_net_init(struct net *net)
 {

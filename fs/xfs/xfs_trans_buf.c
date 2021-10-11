@@ -1,19 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2000-2002,2005 Silicon Graphics, Inc.
  * All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it would be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write the Free Software Foundation,
- * Inc.,  51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 #include "xfs.h"
 #include "xfs_fs.h"
@@ -22,11 +10,9 @@
 #include "xfs_log_format.h"
 #include "xfs_trans_resv.h"
 #include "xfs_mount.h"
-#include "xfs_inode.h"
 #include "xfs_trans.h"
 #include "xfs_buf_item.h"
 #include "xfs_trans_priv.h"
-#include "xfs_error.h"
 #include "xfs_trace.h"
 
 /*
@@ -40,7 +26,7 @@ xfs_trans_buf_item_match(
 	struct xfs_buf_map	*map,
 	int			nmaps)
 {
-	struct xfs_log_item_desc *lidp;
+	struct xfs_log_item	*lip;
 	struct xfs_buf_log_item	*blip;
 	int			len = 0;
 	int			i;
@@ -48,8 +34,8 @@ xfs_trans_buf_item_match(
 	for (i = 0; i < nmaps; i++)
 		len += map[i].bm_len;
 
-	list_for_each_entry(lidp, &tp->t_items, lid_trans) {
-		blip = (struct xfs_buf_log_item *)lidp->lid_item;
+	list_for_each_entry(lip, &tp->t_items, li_trans) {
+		blip = (struct xfs_buf_log_item *)lip;
 		if (blip->bli_item.li_type == XFS_LI_BUF &&
 		    blip->bli_buf->b_target == target &&
 		    XFS_BUF_ADDR(blip->bli_buf) == map[0].bm_bn &&
@@ -82,12 +68,12 @@ _xfs_trans_bjoin(
 	ASSERT(bp->b_transp == NULL);
 
 	/*
-	 * The xfs_buf_log_item pointer is stored in b_fsprivate.  If
+	 * The xfs_buf_log_item pointer is stored in b_log_item.  If
 	 * it doesn't have one yet, then allocate one and initialize it.
 	 * The checks to see if one is there are in xfs_buf_item_init().
 	 */
 	xfs_buf_item_init(bp, tp->t_mountp);
-	bip = bp->b_fspriv;
+	bip = bp->b_log_item;
 	ASSERT(!(bip->bli_flags & XFS_BLI_STALE));
 	ASSERT(!(bip->__bli_format.blf_flags & XFS_BLF_CANCEL));
 	ASSERT(!(bip->bli_flags & XFS_BLI_LOGGED));
@@ -100,14 +86,10 @@ _xfs_trans_bjoin(
 	atomic_inc(&bip->bli_refcount);
 
 	/*
-	 * Get a log_item_desc to point at the new item.
+	 * Attach the item to the transaction so we can find it in
+	 * xfs_trans_get_buf() and friends.
 	 */
 	xfs_trans_add_item(tp, &bip->bli_item);
-
-	/*
-	 * Initialize b_fsprivate2 so we can find it with incore_match()
-	 * in xfs_trans_get_buf() and friends above.
-	 */
 	bp->b_transp = tp;
 
 }
@@ -118,7 +100,7 @@ xfs_trans_bjoin(
 	struct xfs_buf		*bp)
 {
 	_xfs_trans_bjoin(tp, bp, 0);
-	trace_xfs_trans_bjoin(bp->b_fspriv);
+	trace_xfs_trans_bjoin(bp->b_log_item);
 }
 
 /*
@@ -130,19 +112,22 @@ xfs_trans_bjoin(
  * If the transaction pointer is NULL, make this just a normal
  * get_buf() call.
  */
-struct xfs_buf *
+int
 xfs_trans_get_buf_map(
 	struct xfs_trans	*tp,
 	struct xfs_buftarg	*target,
 	struct xfs_buf_map	*map,
 	int			nmaps,
-	xfs_buf_flags_t		flags)
+	xfs_buf_flags_t		flags,
+	struct xfs_buf		**bpp)
 {
-	xfs_buf_t		*bp;
-	xfs_buf_log_item_t	*bip;
+	struct xfs_buf		*bp;
+	struct xfs_buf_log_item	*bip;
+	int			error;
 
+	*bpp = NULL;
 	if (!tp)
-		return xfs_buf_get_map(target, map, nmaps, flags);
+		return xfs_buf_get_map(target, map, nmaps, flags, bpp);
 
 	/*
 	 * If we find the buffer in the cache with this transaction
@@ -159,71 +144,56 @@ xfs_trans_get_buf_map(
 		}
 
 		ASSERT(bp->b_transp == tp);
-		bip = bp->b_fspriv;
+		bip = bp->b_log_item;
 		ASSERT(bip != NULL);
 		ASSERT(atomic_read(&bip->bli_refcount) > 0);
 		bip->bli_recur++;
 		trace_xfs_trans_get_buf_recur(bip);
-		return bp;
+		*bpp = bp;
+		return 0;
 	}
 
-	bp = xfs_buf_get_map(target, map, nmaps, flags);
-	if (bp == NULL) {
-		return NULL;
-	}
+	error = xfs_buf_get_map(target, map, nmaps, flags, &bp);
+	if (error)
+		return error;
 
 	ASSERT(!bp->b_error);
 
 	_xfs_trans_bjoin(tp, bp, 1);
-	trace_xfs_trans_get_buf(bp->b_fspriv);
-	return bp;
+	trace_xfs_trans_get_buf(bp->b_log_item);
+	*bpp = bp;
+	return 0;
 }
 
 /*
- * Get and lock the superblock buffer of this file system for the
- * given transaction.
- *
- * We don't need to use incore_match() here, because the superblock
- * buffer is a private buffer which we keep a pointer to in the
- * mount structure.
+ * Get and lock the superblock buffer for the given transaction.
  */
-xfs_buf_t *
-xfs_trans_getsb(xfs_trans_t	*tp,
-		struct xfs_mount *mp,
-		int		flags)
+struct xfs_buf *
+xfs_trans_getsb(
+	struct xfs_trans	*tp)
 {
-	xfs_buf_t		*bp;
-	xfs_buf_log_item_t	*bip;
+	struct xfs_buf		*bp = tp->t_mountp->m_sb_bp;
 
 	/*
-	 * Default to just trying to lock the superblock buffer
-	 * if tp is NULL.
+	 * Just increment the lock recursion count if the buffer is already
+	 * attached to this transaction.
 	 */
-	if (tp == NULL)
-		return xfs_getsb(mp, flags);
-
-	/*
-	 * If the superblock buffer already has this transaction
-	 * pointer in its b_fsprivate2 field, then we know we already
-	 * have it locked.  In this case we just increment the lock
-	 * recursion count and return the buffer to the caller.
-	 */
-	bp = mp->m_sb_bp;
 	if (bp->b_transp == tp) {
-		bip = bp->b_fspriv;
+		struct xfs_buf_log_item	*bip = bp->b_log_item;
+
 		ASSERT(bip != NULL);
 		ASSERT(atomic_read(&bip->bli_refcount) > 0);
 		bip->bli_recur++;
+
 		trace_xfs_trans_getsb_recur(bip);
-		return bp;
+	} else {
+		xfs_buf_lock(bp);
+		xfs_buf_hold(bp);
+		_xfs_trans_bjoin(tp, bp, 1);
+
+		trace_xfs_trans_getsb(bp->b_log_item);
 	}
 
-	bp = xfs_getsb(mp, flags);
-	if (bp == NULL)
-		return NULL;
-
-	_xfs_trans_bjoin(tp, bp, 1);
-	trace_xfs_trans_getsb(bp->b_fspriv);
 	return bp;
 }
 
@@ -266,7 +236,7 @@ xfs_trans_read_buf_map(
 	if (bp) {
 		ASSERT(xfs_buf_islocked(bp));
 		ASSERT(bp->b_transp == tp);
-		ASSERT(bp->b_fspriv != NULL);
+		ASSERT(bp->b_log_item != NULL);
 		ASSERT(!bp->b_error);
 		ASSERT(bp->b_flags & XBF_DONE);
 
@@ -279,45 +249,54 @@ xfs_trans_read_buf_map(
 			return -EIO;
 		}
 
-		bip = bp->b_fspriv;
+		/*
+		 * Check if the caller is trying to read a buffer that is
+		 * already attached to the transaction yet has no buffer ops
+		 * assigned.  Ops are usually attached when the buffer is
+		 * attached to the transaction, or by the read caller if
+		 * special circumstances.  That didn't happen, which is not
+		 * how this is supposed to go.
+		 *
+		 * If the buffer passes verification we'll let this go, but if
+		 * not we have to shut down.  Let the transaction cleanup code
+		 * release this buffer when it kills the tranaction.
+		 */
+		ASSERT(bp->b_ops != NULL);
+		error = xfs_buf_reverify(bp, ops);
+		if (error) {
+			xfs_buf_ioerror_alert(bp, __return_address);
+
+			if (tp->t_flags & XFS_TRANS_DIRTY)
+				xfs_force_shutdown(tp->t_mountp,
+						SHUTDOWN_META_IO_ERROR);
+
+			/* bad CRC means corrupted metadata */
+			if (error == -EFSBADCRC)
+				error = -EFSCORRUPTED;
+			return error;
+		}
+
+		bip = bp->b_log_item;
 		bip->bli_recur++;
 
 		ASSERT(atomic_read(&bip->bli_refcount) > 0);
 		trace_xfs_trans_read_buf_recur(bip);
+		ASSERT(bp->b_ops != NULL || ops == NULL);
 		*bpp = bp;
 		return 0;
 	}
 
-	bp = xfs_buf_read_map(target, map, nmaps, flags, ops);
-	if (!bp) {
-		if (!(flags & XBF_TRYLOCK))
-			return -ENOMEM;
-		return tp ? 0 : -EAGAIN;
-	}
-
-	/*
-	 * If we've had a read error, then the contents of the buffer are
-	 * invalid and should not be used. To ensure that a followup read tries
-	 * to pull the buffer from disk again, we clear the XBF_DONE flag and
-	 * mark the buffer stale. This ensures that anyone who has a current
-	 * reference to the buffer will interpret it's contents correctly and
-	 * future cache lookups will also treat it as an empty, uninitialised
-	 * buffer.
-	 */
-	if (bp->b_error) {
-		error = bp->b_error;
-		if (!XFS_FORCED_SHUTDOWN(mp))
-			xfs_buf_ioerror_alert(bp, __func__);
-		bp->b_flags &= ~XBF_DONE;
-		xfs_buf_stale(bp);
-
+	error = xfs_buf_read_map(target, map, nmaps, flags, &bp, ops,
+			__return_address);
+	switch (error) {
+	case 0:
+		break;
+	default:
 		if (tp && (tp->t_flags & XFS_TRANS_DIRTY))
 			xfs_force_shutdown(tp->t_mountp, SHUTDOWN_META_IO_ERROR);
-		xfs_buf_relse(bp);
-
-		/* bad CRC means corrupted metadata */
-		if (error == -EFSBADCRC)
-			error = -EFSCORRUPTED;
+		/* fall through */
+	case -ENOMEM:
+	case -EAGAIN:
 		return error;
 	}
 
@@ -329,56 +308,60 @@ xfs_trans_read_buf_map(
 
 	if (tp) {
 		_xfs_trans_bjoin(tp, bp, 1);
-		trace_xfs_trans_read_buf(bp->b_fspriv);
+		trace_xfs_trans_read_buf(bp->b_log_item);
 	}
+	ASSERT(bp->b_ops != NULL || ops == NULL);
 	*bpp = bp;
 	return 0;
 
 }
 
+/* Has this buffer been dirtied by anyone? */
+bool
+xfs_trans_buf_is_dirty(
+	struct xfs_buf		*bp)
+{
+	struct xfs_buf_log_item	*bip = bp->b_log_item;
+
+	if (!bip)
+		return false;
+	ASSERT(bip->bli_item.li_type == XFS_LI_BUF);
+	return test_bit(XFS_LI_DIRTY, &bip->bli_item.li_flags);
+}
+
 /*
- * Release the buffer bp which was previously acquired with one of the
- * xfs_trans_... buffer allocation routines if the buffer has not
- * been modified within this transaction.  If the buffer is modified
- * within this transaction, do decrement the recursion count but do
- * not release the buffer even if the count goes to 0.  If the buffer is not
- * modified within the transaction, decrement the recursion count and
- * release the buffer if the recursion count goes to 0.
+ * Release a buffer previously joined to the transaction. If the buffer is
+ * modified within this transaction, decrement the recursion count but do not
+ * release the buffer even if the count goes to 0. If the buffer is not modified
+ * within the transaction, decrement the recursion count and release the buffer
+ * if the recursion count goes to 0.
  *
- * If the buffer is to be released and it was not modified before
- * this transaction began, then free the buf_log_item associated with it.
+ * If the buffer is to be released and it was not already dirty before this
+ * transaction began, then also free the buf_log_item associated with it.
  *
- * If the transaction pointer is NULL, make this just a normal
- * brelse() call.
+ * If the transaction pointer is NULL, this is a normal xfs_buf_relse() call.
  */
 void
-xfs_trans_brelse(xfs_trans_t	*tp,
-		 xfs_buf_t	*bp)
+xfs_trans_brelse(
+	struct xfs_trans	*tp,
+	struct xfs_buf		*bp)
 {
-	xfs_buf_log_item_t	*bip;
-	int			freed;
+	struct xfs_buf_log_item	*bip = bp->b_log_item;
 
-	/*
-	 * Default to a normal brelse() call if the tp is NULL.
-	 */
-	if (tp == NULL) {
-		ASSERT(bp->b_transp == NULL);
+	ASSERT(bp->b_transp == tp);
+
+	if (!tp) {
 		xfs_buf_relse(bp);
 		return;
 	}
 
-	ASSERT(bp->b_transp == tp);
-	bip = bp->b_fspriv;
+	trace_xfs_trans_brelse(bip);
 	ASSERT(bip->bli_item.li_type == XFS_LI_BUF);
-	ASSERT(!(bip->bli_flags & XFS_BLI_STALE));
-	ASSERT(!(bip->__bli_format.blf_flags & XFS_BLF_CANCEL));
 	ASSERT(atomic_read(&bip->bli_refcount) > 0);
 
-	trace_xfs_trans_brelse(bip);
-
 	/*
-	 * If the release is just for a recursive lock,
-	 * then decrement the count and return.
+	 * If the release is for a recursive lookup, then decrement the count
+	 * and return.
 	 */
 	if (bip->bli_recur > 0) {
 		bip->bli_recur--;
@@ -386,64 +369,24 @@ xfs_trans_brelse(xfs_trans_t	*tp,
 	}
 
 	/*
-	 * If the buffer is dirty within this transaction, we can't
+	 * If the buffer is invalidated or dirty in this transaction, we can't
 	 * release it until we commit.
 	 */
-	if (bip->bli_item.li_desc->lid_flags & XFS_LID_DIRTY)
+	if (test_bit(XFS_LI_DIRTY, &bip->bli_item.li_flags))
 		return;
-
-	/*
-	 * If the buffer has been invalidated, then we can't release
-	 * it until the transaction commits to disk unless it is re-dirtied
-	 * as part of this transaction.  This prevents us from pulling
-	 * the item from the AIL before we should.
-	 */
 	if (bip->bli_flags & XFS_BLI_STALE)
 		return;
 
+	/*
+	 * Unlink the log item from the transaction and clear the hold flag, if
+	 * set. We wouldn't want the next user of the buffer to get confused.
+	 */
 	ASSERT(!(bip->bli_flags & XFS_BLI_LOGGED));
-
-	/*
-	 * Free up the log item descriptor tracking the released item.
-	 */
 	xfs_trans_del_item(&bip->bli_item);
+	bip->bli_flags &= ~XFS_BLI_HOLD;
 
-	/*
-	 * Clear the hold flag in the buf log item if it is set.
-	 * We wouldn't want the next user of the buffer to
-	 * get confused.
-	 */
-	if (bip->bli_flags & XFS_BLI_HOLD) {
-		bip->bli_flags &= ~XFS_BLI_HOLD;
-	}
-
-	/*
-	 * Drop our reference to the buf log item.
-	 */
-	freed = atomic_dec_and_test(&bip->bli_refcount);
-
-	/*
-	 * If the buf item is not tracking data in the log, then we must free it
-	 * before releasing the buffer back to the free pool.
-	 *
-	 * If the fs has shutdown and we dropped the last reference, it may fall
-	 * on us to release a (possibly dirty) bli if it never made it to the
-	 * AIL (e.g., the aborted unpin already happened and didn't release it
-	 * due to our reference). Since we're already shutdown and need xa_lock,
-	 * just force remove from the AIL and release the bli here.
-	 */
-	if (XFS_FORCED_SHUTDOWN(tp->t_mountp) && freed) {
-		xfs_trans_ail_remove(&bip->bli_item, SHUTDOWN_LOG_IO_ERROR);
-		xfs_buf_item_relse(bp);
-	} else if (!(bip->bli_flags & XFS_BLI_DIRTY)) {
-/***
-		ASSERT(bp->b_pincount == 0);
-***/
-		ASSERT(atomic_read(&bip->bli_refcount) == 0);
-		ASSERT(!(bip->bli_item.li_flags & XFS_LI_IN_AIL));
-		ASSERT(!(bip->bli_flags & XFS_BLI_INODE_ALLOC_BUF));
-		xfs_buf_item_relse(bp);
-	}
+	/* drop the reference to the bli */
+	xfs_buf_item_put(bip);
 
 	bp->b_transp = NULL;
 	xfs_buf_relse(bp);
@@ -451,15 +394,16 @@ xfs_trans_brelse(xfs_trans_t	*tp,
 
 /*
  * Mark the buffer as not needing to be unlocked when the buf item's
- * iop_unlock() routine is called.  The buffer must already be locked
+ * iop_committing() routine is called.  The buffer must already be locked
  * and associated with the given transaction.
  */
 /* ARGSUSED */
 void
-xfs_trans_bhold(xfs_trans_t	*tp,
-		xfs_buf_t	*bp)
+xfs_trans_bhold(
+	xfs_trans_t		*tp,
+	struct xfs_buf		*bp)
 {
-	xfs_buf_log_item_t	*bip = bp->b_fspriv;
+	struct xfs_buf_log_item	*bip = bp->b_log_item;
 
 	ASSERT(bp->b_transp == tp);
 	ASSERT(bip != NULL);
@@ -476,10 +420,11 @@ xfs_trans_bhold(xfs_trans_t	*tp,
  * for this transaction.
  */
 void
-xfs_trans_bhold_release(xfs_trans_t	*tp,
-			xfs_buf_t	*bp)
+xfs_trans_bhold_release(
+	xfs_trans_t		*tp,
+	struct xfs_buf		*bp)
 {
-	xfs_buf_log_item_t	*bip = bp->b_fspriv;
+	struct xfs_buf_log_item	*bip = bp->b_log_item;
 
 	ASSERT(bp->b_transp == tp);
 	ASSERT(bip != NULL);
@@ -500,28 +445,20 @@ xfs_trans_dirty_buf(
 	struct xfs_trans	*tp,
 	struct xfs_buf		*bp)
 {
-	struct xfs_buf_log_item	*bip = bp->b_fspriv;
+	struct xfs_buf_log_item	*bip = bp->b_log_item;
 
 	ASSERT(bp->b_transp == tp);
 	ASSERT(bip != NULL);
-	ASSERT(bp->b_iodone == NULL ||
-	       bp->b_iodone == xfs_buf_iodone_callbacks);
 
 	/*
 	 * Mark the buffer as needing to be written out eventually,
 	 * and set its iodone function to remove the buffer's buf log
 	 * item from the AIL and free it when the buffer is flushed
-	 * to disk.  See xfs_buf_attach_iodone() for more details
-	 * on li_cb and xfs_buf_iodone_callbacks().
-	 * If we end up aborting this transaction, we trap this buffer
-	 * inside the b_bdstrat callback so that this won't get written to
-	 * disk.
+	 * to disk.
 	 */
 	bp->b_flags |= XBF_DONE;
 
 	ASSERT(atomic_read(&bip->bli_refcount) > 0);
-	bp->b_iodone = xfs_buf_iodone_callbacks;
-	bip->bli_item.li_cb = xfs_buf_iodone;
 
 	/*
 	 * If we invalidated the buffer within this transaction, then
@@ -538,7 +475,7 @@ xfs_trans_dirty_buf(
 	bip->bli_flags |= XFS_BLI_DIRTY | XFS_BLI_LOGGED;
 
 	tp->t_flags |= XFS_TRANS_DIRTY;
-	bip->bli_item.li_desc->lid_flags |= XFS_LID_DIRTY;
+	set_bit(XFS_LI_DIRTY, &bip->bli_item.li_flags);
 }
 
 /*
@@ -557,7 +494,7 @@ xfs_trans_log_buf(
 	uint			first,
 	uint			last)
 {
-	struct xfs_buf_log_item	*bip = bp->b_fspriv;
+	struct xfs_buf_log_item	*bip = bp->b_log_item;
 
 	ASSERT(first <= last && last < BBTOB(bp->b_length));
 	ASSERT(!(bip->bli_flags & XFS_BLI_ORDERED));
@@ -600,10 +537,10 @@ xfs_trans_log_buf(
  */
 void
 xfs_trans_binval(
-	xfs_trans_t	*tp,
-	xfs_buf_t	*bp)
+	xfs_trans_t		*tp,
+	struct xfs_buf		*bp)
 {
-	xfs_buf_log_item_t	*bip = bp->b_fspriv;
+	struct xfs_buf_log_item	*bip = bp->b_log_item;
 	int			i;
 
 	ASSERT(bp->b_transp == tp);
@@ -622,7 +559,7 @@ xfs_trans_binval(
 		ASSERT(!(bip->__bli_format.blf_flags & XFS_BLF_INODE_BUF));
 		ASSERT(!(bip->__bli_format.blf_flags & XFS_BLFT_MASK));
 		ASSERT(bip->__bli_format.blf_flags & XFS_BLF_CANCEL);
-		ASSERT(bip->bli_item.li_desc->lid_flags & XFS_LID_DIRTY);
+		ASSERT(test_bit(XFS_LI_DIRTY, &bip->bli_item.li_flags));
 		ASSERT(tp->t_flags & XFS_TRANS_DIRTY);
 		return;
 	}
@@ -638,7 +575,7 @@ xfs_trans_binval(
 		memset(bip->bli_formats[i].blf_data_map, 0,
 		       (bip->bli_formats[i].blf_map_size * sizeof(uint)));
 	}
-	bip->bli_item.li_desc->lid_flags |= XFS_LID_DIRTY;
+	set_bit(XFS_LI_DIRTY, &bip->bli_item.li_flags);
 	tp->t_flags |= XFS_TRANS_DIRTY;
 }
 
@@ -655,16 +592,17 @@ xfs_trans_binval(
  */
 void
 xfs_trans_inode_buf(
-	xfs_trans_t	*tp,
-	xfs_buf_t	*bp)
+	xfs_trans_t		*tp,
+	struct xfs_buf		*bp)
 {
-	xfs_buf_log_item_t	*bip = bp->b_fspriv;
+	struct xfs_buf_log_item	*bip = bp->b_log_item;
 
 	ASSERT(bp->b_transp == tp);
 	ASSERT(bip != NULL);
 	ASSERT(atomic_read(&bip->bli_refcount) > 0);
 
 	bip->bli_flags |= XFS_BLI_INODE_BUF;
+	bp->b_flags |= _XBF_INODES;
 	xfs_trans_buf_set_type(tp, bp, XFS_BLFT_DINO_BUF);
 }
 
@@ -679,17 +617,17 @@ xfs_trans_inode_buf(
  */
 void
 xfs_trans_stale_inode_buf(
-	xfs_trans_t	*tp,
-	xfs_buf_t	*bp)
+	xfs_trans_t		*tp,
+	struct xfs_buf		*bp)
 {
-	xfs_buf_log_item_t	*bip = bp->b_fspriv;
+	struct xfs_buf_log_item	*bip = bp->b_log_item;
 
 	ASSERT(bp->b_transp == tp);
 	ASSERT(bip != NULL);
 	ASSERT(atomic_read(&bip->bli_refcount) > 0);
 
 	bip->bli_flags |= XFS_BLI_STALE_INODE;
-	bip->bli_item.li_cb = xfs_buf_iodone;
+	bp->b_flags |= _XBF_INODES;
 	xfs_trans_buf_set_type(tp, bp, XFS_BLFT_DINO_BUF);
 }
 
@@ -704,16 +642,17 @@ xfs_trans_stale_inode_buf(
 /* ARGSUSED */
 void
 xfs_trans_inode_alloc_buf(
-	xfs_trans_t	*tp,
-	xfs_buf_t	*bp)
+	xfs_trans_t		*tp,
+	struct xfs_buf		*bp)
 {
-	xfs_buf_log_item_t	*bip = bp->b_fspriv;
+	struct xfs_buf_log_item	*bip = bp->b_log_item;
 
 	ASSERT(bp->b_transp == tp);
 	ASSERT(bip != NULL);
 	ASSERT(atomic_read(&bip->bli_refcount) > 0);
 
 	bip->bli_flags |= XFS_BLI_INODE_ALLOC_BUF;
+	bp->b_flags |= _XBF_INODES;
 	xfs_trans_buf_set_type(tp, bp, XFS_BLFT_DINO_BUF);
 }
 
@@ -729,7 +668,7 @@ xfs_trans_ordered_buf(
 	struct xfs_trans	*tp,
 	struct xfs_buf		*bp)
 {
-	struct xfs_buf_log_item	*bip = bp->b_fspriv;
+	struct xfs_buf_log_item	*bip = bp->b_log_item;
 
 	ASSERT(bp->b_transp == tp);
 	ASSERT(bip != NULL);
@@ -759,7 +698,7 @@ xfs_trans_buf_set_type(
 	struct xfs_buf		*bp,
 	enum xfs_blft		type)
 {
-	struct xfs_buf_log_item	*bip = bp->b_fspriv;
+	struct xfs_buf_log_item	*bip = bp->b_log_item;
 
 	if (!tp)
 		return;
@@ -776,8 +715,8 @@ xfs_trans_buf_copy_type(
 	struct xfs_buf		*dst_bp,
 	struct xfs_buf		*src_bp)
 {
-	struct xfs_buf_log_item	*sbip = src_bp->b_fspriv;
-	struct xfs_buf_log_item	*dbip = dst_bp->b_fspriv;
+	struct xfs_buf_log_item	*sbip = src_bp->b_log_item;
+	struct xfs_buf_log_item	*dbip = dst_bp->b_log_item;
 	enum xfs_blft		type;
 
 	type = xfs_blft_from_flags(&sbip->__bli_format);
@@ -797,11 +736,11 @@ xfs_trans_buf_copy_type(
 /* ARGSUSED */
 void
 xfs_trans_dquot_buf(
-	xfs_trans_t	*tp,
-	xfs_buf_t	*bp,
-	uint		type)
+	xfs_trans_t		*tp,
+	struct xfs_buf		*bp,
+	uint			type)
 {
-	struct xfs_buf_log_item	*bip = bp->b_fspriv;
+	struct xfs_buf_log_item	*bip = bp->b_log_item;
 
 	ASSERT(type == XFS_BLF_UDQUOT_BUF ||
 	       type == XFS_BLF_PDQUOT_BUF ||
@@ -824,5 +763,6 @@ xfs_trans_dquot_buf(
 		break;
 	}
 
+	bp->b_flags |= _XBF_DQUOTS;
 	xfs_trans_buf_set_type(tp, bp, type);
 }

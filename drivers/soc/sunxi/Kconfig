@@ -1,41 +1,26 @@
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # Allwinner sunXi SoC drivers
 #
-menuconfig SOC_SUNXI
-	bool "SUNXI SoC drivers support"
 
-if SOC_SUNXI
+config SUNXI_MBUS
+	bool
+	default ARCH_SUNXI
+	help
+	  Say y to enable the fixups needed to support the Allwinner
+	  MBUS DMA quirks.
 
 config SUNXI_SRAM
 	bool
 	default ARCH_SUNXI
+	select REGMAP_MMIO
 	help
 	  Say y here to enable the SRAM controller support. This
 	  device is responsible on mapping the SRAM in the sunXi SoCs
 	  whether to the CPU/DMA, or to the devices.
 
-config SUNXI_SUSPEND
-	tristate "Sunxi suspend support"
-	default ARCH_SUNXI
-	depends on PM_SLEEP
+config SUNXI_SID
+	tristate "Allwinner sunxi sid support"
+	default n
 	help
-	  Say y here to enable the sunxi standby support.
-
-config SUNXI_SUSPEND_NONARISC
-	tristate "Sunxi suspend support without arisc"
-	depends on SUNXI_SUSPEND && !SUNXI_ARISC
-	default !SUNXI_ARISC
-	help
-	  Say y here to enter standby without arisc.
-
-config SUNXI_FAKE_POWEROFF
-       bool "support ir fake poweroff"
-       depends on SUNXI_ARISC && RTC_DRV_SUNXI
-       default y
-       help
-         support ir bootup feature.
-         but must has the module known as "ar100" or "cpus".
-         the feature is support power up with ir when poweroff.
-
-source "drivers/soc/sunxi/arisc/Kconfig"
-endif # SOC_SUNXI
+	 Say y here to enable the sunxi sid support.

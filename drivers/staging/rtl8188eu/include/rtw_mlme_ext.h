@@ -1,15 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2011 Realtek Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
  *
  ******************************************************************************/
 #ifndef __RTW_MLME_EXT_H_
@@ -18,7 +10,6 @@
 #include <osdep_service.h>
 #include <drv_types.h>
 #include <wlan_bssdef.h>
-
 
 /*	Commented by Albert 20101105 */
 /*	Increase the SURVEY_TO value from 100 to 150  ( 100ms to 150ms ) */
@@ -74,7 +65,6 @@
 #define _HW_STATE_STATION_	0x02
 #define _HW_STATE_AP_			0x03
 
-
 #define		_1M_RATE_	0
 #define		_2M_RATE_	1
 #define		_5M_RATE_	2
@@ -88,22 +78,17 @@
 #define		_48M_RATE_	10
 #define		_54M_RATE_	11
 
-
-extern unsigned char RTW_WPA_OUI[];
-extern unsigned char WMM_OUI[];
-extern unsigned char WPS_OUI[];
-extern unsigned char WFD_OUI[];
-extern unsigned char P2P_OUI[];
-
-extern unsigned char WMM_INFO_OUI[];
-extern unsigned char WMM_PARA_OUI[];
+extern const u8 RTW_WPA_OUI[];
+extern const u8 WPS_OUI[];
 
 /*  Channel Plan Type. */
 /*  Note: */
 /*	We just add new channel plan when the new channel plan is different
- *      from any of the following channel plan. */
+ *      from any of the following channel plan.
+ */
 /*	If you just want to customize the actions(scan period or join actions)
- *      about one of the channel plan, */
+ *      about one of the channel plan,
+ */
 /*	customize them in struct rt_channel_info in the RT_CHANNEL_LIST. */
 enum RT_CHANNEL_DOMAIN {
 	/*  old channel plan mapping =====  */
@@ -186,14 +171,6 @@ struct rt_channel_plan_map {
 	unsigned char	Index2G;
 };
 
-static const struct {
-	int channel_plan;
-	char *name;
-} channel_table[] = { { RT_CHANNEL_DOMAIN_FCC, "US" },
-	{ RT_CHANNEL_DOMAIN_ETSI, "EU" },
-	{ RT_CHANNEL_DOMAIN_MKK, "JP" },
-	{ RT_CHANNEL_DOMAIN_CHINA, "CN"} };
-
 enum Associated_AP {
 	atherosAP	= 0,
 	broadcomAP	= 1,
@@ -237,22 +214,22 @@ enum SCAN_STATE {
 };
 
 struct mlme_handler {
-	unsigned int   num;
-	char *str;
+	unsigned int num;
+	const char *str;
 	unsigned int (*func)(struct adapter *adapt, struct recv_frame *frame);
 };
 
 struct action_handler {
-	unsigned int   num;
-	char *str;
+	unsigned int num;
+	const char *str;
 	unsigned int (*func)(struct adapter *adapt, struct recv_frame *frame);
 };
 
-struct	ss_res {
-	int	state;
-	int	bss_cnt;
-	int	channel_idx;
-	int	scan_mode;
+struct ss_res {
+	int state;
+	int bss_cnt;
+	int channel_idx;
+	int scan_mode;
 	u8 ssid_num;
 	u8 ch_num;
 	struct ndis_802_11_ssid ssid[RTW_SSID_SCAN_AMOUNT];
@@ -319,7 +296,8 @@ struct mlme_ext_info {
 	u32	authModeToggle;
 	u32	enc_algo;/* encrypt algorithm; */
 	u32	key_index;	/*  this is only valid for legacy wep,
-				 *  0~3 for key id. */
+				 *  0~3 for key id.
+				 */
 	u32	iv;
 	u8	chg_txt[128];
 	u16	aid;
@@ -353,16 +331,19 @@ struct mlme_ext_info {
 	struct HT_info_element	HT_info;
 	struct wlan_bssid_ex	network;/* join network or bss_network,
 					 * if in ap mode, it is the same
-					 * as cur_network.network */
+					 * as cur_network.network
+					 */
 	struct FW_Sta_Info	FW_sta_info[NUM_STA];
 };
 
 /*  The channel information about this channel including joining,
- *  scanning, and power constraints. */
+ *  scanning, and power constraints.
+ */
 struct rt_channel_info {
 	u8	ChannelNum;	/*  The channel number. */
 	enum rt_scan_type ScanType;	/*  Scan type such as passive
-					 *  or active scan. */
+					 *  or active scan.
+					 */
 	u32	rx_count;
 };
 
@@ -413,7 +394,8 @@ struct mlme_ext_priv {
 	unsigned char	cur_wireless_mode;	/*  NETWORK_TYPE */
 
 	unsigned char	oper_channel; /* saved chan info when call
-				       * set_channel_bw */
+				       * set_channel_bw
+				       */
 	unsigned char	oper_bwmode;
 	unsigned char	oper_ch_offset;/* PRIME_CHNL_OFFSET */
 
@@ -427,7 +409,8 @@ struct mlme_ext_priv {
 	struct mlme_ext_info	mlmext_info;/* for sta/adhoc mode, including
 					     * current scan/connecting/connected
 					     * related info. For ap mode,
-					     * network includes ap's cap_info*/
+					     * network includes ap's cap_info
+					     */
 	struct timer_list survey_timer;
 	struct timer_list link_timer;
 	u16	chan_scan_time;
@@ -457,7 +440,7 @@ void init_addba_retry_timer(struct adapter *adapt, struct sta_info *sta);
 struct xmit_frame *alloc_mgtxmitframe(struct xmit_priv *pxmitpriv);
 
 unsigned char networktype_to_raid(unsigned char network_type);
-u8 judge_network_type(struct adapter *padapter, unsigned char *rate, int len);
+u8 judge_network_type(struct adapter *padapter, unsigned char *rate);
 void get_rate_set(struct adapter *padapter, unsigned char *pbssrate, int *len);
 void UpdateBrateTbl(struct adapter *padapter, u8 *mBratesOS);
 void UpdateBrateTblForSoftAP(u8 *bssrateset, u32 bssratelen);
@@ -470,9 +453,7 @@ void Set_MSR(struct adapter *padapter, u8 type);
 
 u8 rtw_get_oper_ch(struct adapter *adapter);
 void rtw_set_oper_ch(struct adapter *adapter, u8 ch);
-u8 rtw_get_oper_bw(struct adapter *adapter);
 void rtw_set_oper_bw(struct adapter *adapter, u8 bw);
-u8 rtw_get_oper_choffset(struct adapter *adapter);
 void rtw_set_oper_choffset(struct adapter *adapter, u8 offset);
 
 void set_channel_bwmode(struct adapter *padapter, unsigned char channel,
@@ -487,7 +468,6 @@ void write_cam(struct adapter *padapter, u8 entry, u16 ctrl, u8 *mac, u8 *key);
 void clear_cam_entry(struct adapter *padapter, u8 entry);
 
 void invalidate_cam_all(struct adapter *padapter);
-void CAM_empty_entry(struct adapter *Adapter, u8 ucIndex);
 
 int allocate_fw_sta_entry(struct adapter *padapter);
 void flush_all_cam_entry(struct adapter *padapter);
@@ -495,7 +475,6 @@ void flush_all_cam_entry(struct adapter *padapter);
 void update_network(struct wlan_bssid_ex *dst, struct wlan_bssid_ex *src,
 		    struct adapter *adapter, bool update_ie);
 
-int get_bsstype(unsigned short capability);
 u16 get_beacon_interval(struct wlan_bssid_ex *bss);
 
 int is_client_associated_to_ap(struct adapter *padapter);
@@ -536,8 +515,6 @@ void set_sta_rate(struct adapter *padapter, struct sta_info *psta);
 unsigned char get_highest_rate_idx(u32 mask);
 int support_short_GI(struct adapter *padapter, struct ieee80211_ht_cap *caps);
 unsigned int is_ap_in_tkip(struct adapter *padapter);
-unsigned int is_ap_in_wep(struct adapter *padapter);
-unsigned int should_forbid_n_rate(struct adapter *padapter);
 
 void report_join_res(struct adapter *padapter, int res);
 void report_survey_event(struct adapter *padapter,
@@ -548,7 +525,6 @@ void report_del_sta_event(struct adapter *padapter,
 void report_add_sta_event(struct adapter *padapter, unsigned char *addr,
 			  int cam_idx);
 
-void beacon_timing_control(struct adapter *padapter);
 u8 set_tx_beacon_cmd(struct adapter *padapter);
 unsigned int setup_beacon_frame(struct adapter *padapter,
 				unsigned char *beacon_frame);
@@ -572,9 +548,9 @@ void mlmeext_sta_add_event_callback(struct adapter *padapter,
 
 void linked_status_chk(struct adapter *padapter);
 
-void survey_timer_hdl(unsigned long data);
-void link_timer_hdl(unsigned long data);
-void addba_timer_hdl(unsigned long data);
+void survey_timer_hdl(struct timer_list *t);
+void link_timer_hdl(struct timer_list *t);
+void addba_timer_hdl(struct timer_list *t);
 
 #define set_survey_timer(mlmeext, ms) \
 	mod_timer(&mlmeext->survey_timer, jiffies +	\
@@ -583,9 +559,6 @@ void addba_timer_hdl(unsigned long data);
 #define set_link_timer(mlmeext, ms) \
 	mod_timer(&mlmeext->link_timer, jiffies +	\
 		  msecs_to_jiffies(ms))
-
-int cckrates_included(unsigned char *rate, int ratelen);
-int cckratesonly_included(unsigned char *rate, int ratelen);
 
 void process_addba_req(struct adapter *padapter, u8 *paddba_req, u8 *addr);
 
@@ -624,28 +597,6 @@ u8 led_blink_hdl(struct adapter *padapter, unsigned char *pbuf);
 /* Handling DFS channel switch announcement ie. */
 u8 set_csa_hdl(struct adapter *padapter, unsigned char *pbuf);
 u8 tdls_hdl(struct adapter *padapter, unsigned char *pbuf);
-
-#ifdef _RTW_CMD_C_
-
-static struct cmd_hdl wlancmds[] = {
-	{sizeof(struct wlan_bssid_ex), join_cmd_hdl},
-	{sizeof(struct disconnect_parm), disconnect_hdl},
-	{sizeof(struct wlan_bssid_ex), createbss_hdl},
-	{sizeof(struct setopmode_parm), setopmode_hdl},
-	{sizeof(struct sitesurvey_parm), sitesurvey_cmd_hdl},
-	{sizeof(struct setauth_parm), setauth_hdl},
-	{sizeof(struct setkey_parm), setkey_hdl},
-	{sizeof(struct set_stakey_parm), set_stakey_hdl},
-	{sizeof(struct set_assocsta_parm), NULL},
-	{sizeof(struct addBaReq_parm), add_ba_hdl},
-	{sizeof(struct set_ch_parm), set_ch_hdl},
-	{sizeof(struct wlan_bssid_ex), tx_beacon_hdl},
-	{0, mlme_evt_hdl},
-	{0, rtw_drvextra_cmd_hdl},
-	{sizeof(struct SetChannelPlan_param), set_chplan_hdl}
-};
-
-#endif
 
 struct C2HEvent_Header {
 #ifdef __LITTLE_ENDIAN
@@ -690,10 +641,10 @@ enum rtw_c2h_event {
 	_C2HBCN_EVT_,
 	_ReportPwrState_EVT_,	/* filen: only for PCIE, USB */
 	_CloseRF_EVT_,		/* filen: only for PCIE,
-					 * work around ASPM */
+				 * work around ASPM
+				 */
 	MAX_C2HEVT
 };
-
 
 #ifdef _RTW_MLME_EXT_C_
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-2.0+
 /*
  * Copyright (C) 1993, 1994, 1995, 1996, 1997 Free Software Foundation, Inc.
  * This file is part of the GNU C Library.
@@ -69,10 +70,10 @@ static const unsigned short __mon_yday[2][13] = {
 /**
  * time64_to_tm - converts the calendar time to local broken-down time
  *
- * @totalsecs	the number of seconds elapsed since 00:00:00 on January 1, 1970,
+ * @totalsecs:	the number of seconds elapsed since 00:00:00 on January 1, 1970,
  *		Coordinated Universal Time (UTC).
- * @offset	offset seconds adding to totalsecs.
- * @result	pointer to struct tm variable to receive broken-down time
+ * @offset:	offset seconds adding to totalsecs.
+ * @result:	pointer to struct tm variable to receive broken-down time
  */
 void time64_to_tm(time64_t totalsecs, int offset, struct tm *result)
 {

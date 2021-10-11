@@ -169,6 +169,8 @@ typedef enum _HW_VARIABLES {
 	HW_VAR_DL_RSVD_PAGE,
 	HW_VAR_MACID_LINK,
 	HW_VAR_MACID_NOLINK,
+	HW_VAR_MACID_SLEEP,
+	HW_VAR_MACID_WAKEUP,
 	HW_VAR_DUMP_MAC_QUEUE_INFO,
 	HW_VAR_ASIX_IOT,
 #ifdef CONFIG_MBSSID_CAM
@@ -194,7 +196,6 @@ typedef enum _HW_VARIABLES {
 	HW_VAR_PWR_CMD,
 	HW_VAR_SET_SOML_PARAM,
 	HW_VAR_ENABLE_RX_BAR,
-	HW_VAR_LPS_STATE_CHK,
 } HW_VARIABLES;
 
 typedef enum _HAL_DEF_VARIABLE {
@@ -231,6 +232,7 @@ typedef enum _HAL_DEF_VARIABLE {
 	HAL_DEF_PCI_SUUPORT_L1_BACKDOOR, /* Determine if the L1 Backdoor setting is turned on. */
 	HAL_DEF_PCI_AMD_L1_SUPPORT,
 	HAL_DEF_PCI_ASPM_OSC, /* Support for ASPM OSC, added by Roger, 2013.03.27. */
+	HAL_DEF_MACID_SLEEP, /* Support for MACID sleep */
 	HAL_DEF_DBG_DIS_PWT, /* disable Tx power training or not. */
 	HAL_DEF_EFUSE_USAGE,	/* Get current EFUSE utilization. 2008.12.19. Added by Roger. */
 	HAL_DEF_EFUSE_BYTES,
@@ -738,10 +740,8 @@ s32 rtw_hal_c2h_id_handle_directly(_adapter *adapter, u8 id, u8 seq, u8 plen, u8
 
 s32 rtw_hal_is_disable_sw_channel_plan(PADAPTER padapter);
 
-s32 rtw_hal_macid_sleep(_adapter *adapter, u8 macid);
-s32 rtw_hal_macid_wakeup(_adapter *adapter, u8 macid);
-s32 rtw_hal_macid_sleep_all_used(_adapter *adapter);
-s32 rtw_hal_macid_wakeup_all_used(_adapter *adapter);
+s32 rtw_hal_macid_sleep(PADAPTER padapter, u8 macid);
+s32 rtw_hal_macid_wakeup(PADAPTER padapter, u8 macid);
 
 s32 rtw_hal_fill_h2c_cmd(PADAPTER padapter, u8 ElementID, u32 CmdLen, u8 *pCmdBuffer);
 void rtw_hal_fill_fake_txdesc(_adapter *padapter, u8 *pDesc, u32 BufferLen,

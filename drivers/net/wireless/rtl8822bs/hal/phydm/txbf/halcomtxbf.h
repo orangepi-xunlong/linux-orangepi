@@ -59,7 +59,7 @@ struct _HAL_TXBF_INFO {
 	u8				BW;
 	u8				rate;
 
-	struct phydm_timer_list			txbf_fw_ndpa_timer;
+	struct timer_list			txbf_fw_ndpa_timer;
 #if (DM_ODM_SUPPORT_TYPE == ODM_WIN)
 	RT_WORK_ITEM		txbf_enter_work_item;
 	RT_WORK_ITEM		txbf_leave_work_item;
@@ -150,7 +150,7 @@ hal_com_txbf_rate_work_item_callback(
 
 void
 hal_com_txbf_fw_ndpa_timer_callback(
-	struct phydm_timer_list		*p_timer
+	struct timer_list		*p_timer
 );
 
 void

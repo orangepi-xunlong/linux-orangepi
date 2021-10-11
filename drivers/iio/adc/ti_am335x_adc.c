@@ -1,7 +1,7 @@
 /*
  * TI ADC MFD driver
  *
- * Copyright (C) 2012 Texas Instruments Incorporated - http://www.ti.com/
+ * Copyright (C) 2012 Texas Instruments Incorporated - https://www.ti.com/
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -30,10 +30,28 @@
 #include <linux/iio/buffer.h>
 #include <linux/iio/kfifo_buf.h>
 
+#include <linux/dmaengine.h>
+#include <linux/dma-mapping.h>
+
+#define DMA_BUFFER_SIZE		SZ_2K
+
+struct tiadc_dma {
+	struct dma_slave_config	conf;
+	struct dma_chan		*chan;
+	dma_addr_t		addr;
+	dma_cookie_t		cookie;
+	u8			*buf;
+	int			current_period;
+	int			period_size;
+	u8			fifo_thresh;
+};
+
 struct tiadc_device {
 	struct ti_tscadc_dev *mfd_tscadc;
+	struct tiadc_dma dma;
 	struct mutex fifo1_lock; /* to protect fifo access */
 	int channels;
+	int total_ch_enabled;
 	u8 channel_line[8];
 	u8 channel_step[8];
 	int buffer_en_ch_steps;
@@ -124,7 +142,10 @@ static void tiadc_step_config(struct iio_dev *indio_dev)
 			stepconfig |= STEPCONFIG_MODE_SWCNT;
 
 		tiadc_writel(adc_dev, REG_STEPCONFIG(steps),
-				stepconfig | STEPCONFIG_INP(chan));
+				stepconfig | STEPCONFIG_INP(chan) |
+				STEPCONFIG_INM_ADCREFM |
+				STEPCONFIG_RFP_VREFP |
+				STEPCONFIG_RFM_VREFN);
 
 		if (adc_dev->open_delay[i] > STEPDELAY_OPEN_MASK) {
 			dev_warn(dev, "chan %d open delay truncating to 0x3FFFF\n",
@@ -209,10 +230,71 @@ static irqreturn_t tiadc_worker_h(int irq, void *private)
 	return IRQ_HANDLED;
 }
 
+static void tiadc_dma_rx_complete(void *param)
+{
+	struct iio_dev *indio_dev = param;
+	struct tiadc_device *adc_dev = iio_priv(indio_dev);
+	struct tiadc_dma *dma = &adc_dev->dma;
+	u8 *data;
+	int i;
+
+	data = dma->buf + dma->current_period * dma->period_size;
+	dma->current_period = 1 - dma->current_period; /* swap the buffer ID */
+
+	for (i = 0; i < dma->period_size; i += indio_dev->scan_bytes) {
+		iio_push_to_buffers(indio_dev, data);
+		data += indio_dev->scan_bytes;
+	}
+}
+
+static int tiadc_start_dma(struct iio_dev *indio_dev)
+{
+	struct tiadc_device *adc_dev = iio_priv(indio_dev);
+	struct tiadc_dma *dma = &adc_dev->dma;
+	struct dma_async_tx_descriptor *desc;
+
+	dma->current_period = 0; /* We start to fill period 0 */
+	/*
+	 * Make the fifo thresh as the multiple of total number of
+	 * channels enabled, so make sure that cyclic DMA period
+	 * length is also a multiple of total number of channels
+	 * enabled. This ensures that no invalid data is reported
+	 * to the stack via iio_push_to_buffers().
+	 */
+	dma->fifo_thresh = rounddown(FIFO1_THRESHOLD + 1,
+				     adc_dev->total_ch_enabled) - 1;
+	/* Make sure that period length is multiple of fifo thresh level */
+	dma->period_size = rounddown(DMA_BUFFER_SIZE / 2,
+				    (dma->fifo_thresh + 1) * sizeof(u16));
+
+	dma->conf.src_maxburst = dma->fifo_thresh + 1;
+	dmaengine_slave_config(dma->chan, &dma->conf);
+
+	desc = dmaengine_prep_dma_cyclic(dma->chan, dma->addr,
+					 dma->period_size * 2,
+					 dma->period_size, DMA_DEV_TO_MEM,
+					 DMA_PREP_INTERRUPT);
+	if (!desc)
+		return -EBUSY;
+
+	desc->callback = tiadc_dma_rx_complete;
+	desc->callback_param = indio_dev;
+
+	dma->cookie = dmaengine_submit(desc);
+
+	dma_async_issue_pending(dma->chan);
+
+	tiadc_writel(adc_dev, REG_FIFO1THR, dma->fifo_thresh);
+	tiadc_writel(adc_dev, REG_DMA1REQ, dma->fifo_thresh);
+	tiadc_writel(adc_dev, REG_DMAENABLE_SET, DMA_FIFO1);
+
+	return 0;
+}
+
 static int tiadc_buffer_preenable(struct iio_dev *indio_dev)
 {
 	struct tiadc_device *adc_dev = iio_priv(indio_dev);
-	int i, fifo1count, read;
+	int i, fifo1count;
 
 	tiadc_writel(adc_dev, REG_IRQCLR, (IRQENB_FIFO1THRES |
 				IRQENB_FIFO1OVRRUN |
@@ -221,7 +303,7 @@ static int tiadc_buffer_preenable(struct iio_dev *indio_dev)
 	/* Flush FIFO. Needed in corner cases in simultaneous tsc/adc use */
 	fifo1count = tiadc_readl(adc_dev, REG_FIFO1CNT);
 	for (i = 0; i < fifo1count; i++)
-		read = tiadc_readl(adc_dev, REG_FIFO1);
+		tiadc_readl(adc_dev, REG_FIFO1);
 
 	return 0;
 }
@@ -229,20 +311,30 @@ static int tiadc_buffer_preenable(struct iio_dev *indio_dev)
 static int tiadc_buffer_postenable(struct iio_dev *indio_dev)
 {
 	struct tiadc_device *adc_dev = iio_priv(indio_dev);
+	struct tiadc_dma *dma = &adc_dev->dma;
+	unsigned int irq_enable;
 	unsigned int enb = 0;
 	u8 bit;
 
 	tiadc_step_config(indio_dev);
-	for_each_set_bit(bit, indio_dev->active_scan_mask, adc_dev->channels)
+	for_each_set_bit(bit, indio_dev->active_scan_mask, adc_dev->channels) {
 		enb |= (get_adc_step_bit(adc_dev, bit) << 1);
+		adc_dev->total_ch_enabled++;
+	}
 	adc_dev->buffer_en_ch_steps = enb;
+
+	if (dma->chan)
+		tiadc_start_dma(indio_dev);
 
 	am335x_tsc_se_set_cache(adc_dev->mfd_tscadc, enb);
 
 	tiadc_writel(adc_dev,  REG_IRQSTATUS, IRQENB_FIFO1THRES
 				| IRQENB_FIFO1OVRRUN | IRQENB_FIFO1UNDRFLW);
-	tiadc_writel(adc_dev,  REG_IRQENABLE, IRQENB_FIFO1THRES
-				| IRQENB_FIFO1OVRRUN);
+
+	irq_enable = IRQENB_FIFO1OVRRUN;
+	if (!dma->chan)
+		irq_enable |= IRQENB_FIFO1THRES;
+	tiadc_writel(adc_dev,  REG_IRQENABLE, irq_enable);
 
 	return 0;
 }
@@ -250,17 +342,23 @@ static int tiadc_buffer_postenable(struct iio_dev *indio_dev)
 static int tiadc_buffer_predisable(struct iio_dev *indio_dev)
 {
 	struct tiadc_device *adc_dev = iio_priv(indio_dev);
-	int fifo1count, i, read;
+	struct tiadc_dma *dma = &adc_dev->dma;
+	int fifo1count, i;
 
 	tiadc_writel(adc_dev, REG_IRQCLR, (IRQENB_FIFO1THRES |
 				IRQENB_FIFO1OVRRUN | IRQENB_FIFO1UNDRFLW));
 	am335x_tsc_se_clr(adc_dev->mfd_tscadc, adc_dev->buffer_en_ch_steps);
 	adc_dev->buffer_en_ch_steps = 0;
+	adc_dev->total_ch_enabled = 0;
+	if (dma->chan) {
+		tiadc_writel(adc_dev, REG_DMAENABLE_CLEAR, 0x2);
+		dmaengine_terminate_async(dma->chan);
+	}
 
 	/* Flush FIFO of leftover data in the time it takes to disable adc */
 	fifo1count = tiadc_readl(adc_dev, REG_FIFO1CNT);
 	for (i = 0; i < fifo1count; i++)
-		read = tiadc_readl(adc_dev, REG_FIFO1);
+		tiadc_readl(adc_dev, REG_FIFO1);
 
 	return 0;
 }
@@ -279,45 +377,25 @@ static const struct iio_buffer_setup_ops tiadc_buffer_setup_ops = {
 	.postdisable = &tiadc_buffer_postdisable,
 };
 
-static int tiadc_iio_buffered_hardware_setup(struct iio_dev *indio_dev,
+static int tiadc_iio_buffered_hardware_setup(struct device *dev,
+	struct iio_dev *indio_dev,
 	irqreturn_t (*pollfunc_bh)(int irq, void *p),
 	irqreturn_t (*pollfunc_th)(int irq, void *p),
 	int irq,
 	unsigned long flags,
 	const struct iio_buffer_setup_ops *setup_ops)
 {
-	struct iio_buffer *buffer;
 	int ret;
 
-	buffer = iio_kfifo_allocate();
-	if (!buffer)
-		return -ENOMEM;
-
-	iio_device_attach_buffer(indio_dev, buffer);
-
-	ret = request_threaded_irq(irq,	pollfunc_th, pollfunc_bh,
-				flags, indio_dev->name, indio_dev);
+	ret = devm_iio_kfifo_buffer_setup(dev, indio_dev,
+					  INDIO_BUFFER_SOFTWARE,
+					  setup_ops);
 	if (ret)
-		goto error_kfifo_free;
+		return ret;
 
-	indio_dev->setup_ops = setup_ops;
-	indio_dev->modes |= INDIO_BUFFER_SOFTWARE;
-
-	return 0;
-
-error_kfifo_free:
-	iio_kfifo_free(indio_dev->buffer);
-	return ret;
+	return devm_request_threaded_irq(dev, irq, pollfunc_th, pollfunc_bh,
+				flags, indio_dev->name, indio_dev);
 }
-
-static void tiadc_iio_buffered_hardware_remove(struct iio_dev *indio_dev)
-{
-	struct tiadc_device *adc_dev = iio_priv(indio_dev);
-
-	free_irq(adc_dev->mfd_tscadc->irq, indio_dev);
-	iio_kfifo_free(indio_dev->buffer);
-}
-
 
 static const char * const chan_name_ain[] = {
 	"AIN0",
@@ -330,7 +408,8 @@ static const char * const chan_name_ain[] = {
 	"AIN7",
 };
 
-static int tiadc_channel_init(struct iio_dev *indio_dev, int channels)
+static int tiadc_channel_init(struct device *dev, struct iio_dev *indio_dev,
+			      int channels)
 {
 	struct tiadc_device *adc_dev = iio_priv(indio_dev);
 	struct iio_chan_spec *chan_array;
@@ -338,7 +417,8 @@ static int tiadc_channel_init(struct iio_dev *indio_dev, int channels)
 	int i;
 
 	indio_dev->num_channels = channels;
-	chan_array = kcalloc(channels, sizeof(*chan_array), GFP_KERNEL);
+	chan_array = devm_kcalloc(dev, channels, sizeof(*chan_array),
+				  GFP_KERNEL);
 	if (chan_array == NULL)
 		return -ENOMEM;
 
@@ -359,11 +439,6 @@ static int tiadc_channel_init(struct iio_dev *indio_dev, int channels)
 	indio_dev->channels = chan_array;
 
 	return 0;
-}
-
-static void tiadc_channels_remove(struct iio_dev *indio_dev)
-{
-	kfree(indio_dev->channels);
 }
 
 static int tiadc_read_raw(struct iio_dev *indio_dev,
@@ -428,7 +503,7 @@ static int tiadc_read_raw(struct iio_dev *indio_dev,
 	}
 	am335x_tsc_se_adc_done(adc_dev->mfd_tscadc);
 
-	if (found == false)
+	if (!found)
 		ret =  -EBUSY;
 
 err_unlock:
@@ -438,8 +513,42 @@ err_unlock:
 
 static const struct iio_info tiadc_info = {
 	.read_raw = &tiadc_read_raw,
-	.driver_module = THIS_MODULE,
 };
+
+static int tiadc_request_dma(struct platform_device *pdev,
+			     struct tiadc_device *adc_dev)
+{
+	struct tiadc_dma	*dma = &adc_dev->dma;
+	dma_cap_mask_t		mask;
+
+	/* Default slave configuration parameters */
+	dma->conf.direction = DMA_DEV_TO_MEM;
+	dma->conf.src_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+	dma->conf.src_addr = adc_dev->mfd_tscadc->tscadc_phys_base + REG_FIFO1;
+
+	dma_cap_zero(mask);
+	dma_cap_set(DMA_CYCLIC, mask);
+
+	/* Get a channel for RX */
+	dma->chan = dma_request_chan(adc_dev->mfd_tscadc->dev, "fifo1");
+	if (IS_ERR(dma->chan)) {
+		int ret = PTR_ERR(dma->chan);
+
+		dma->chan = NULL;
+		return ret;
+	}
+
+	/* RX buffer */
+	dma->buf = dma_alloc_coherent(dma->chan->device->dev, DMA_BUFFER_SIZE,
+				      &dma->addr, GFP_KERNEL);
+	if (!dma->buf)
+		goto err;
+
+	return 0;
+err:
+	dma_release_channel(dma->chan);
+	return -ENOMEM;
+}
 
 static int tiadc_parse_dt(struct platform_device *pdev,
 			  struct tiadc_device *adc_dev)
@@ -494,7 +603,6 @@ static int tiadc_probe(struct platform_device *pdev)
 	adc_dev->mfd_tscadc = ti_tscadc_dev_get(pdev);
 	tiadc_parse_dt(pdev, adc_dev);
 
-	indio_dev->dev.parent = &pdev->dev;
 	indio_dev->name = dev_name(&pdev->dev);
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->info = &tiadc_info;
@@ -503,11 +611,11 @@ static int tiadc_probe(struct platform_device *pdev)
 	tiadc_writel(adc_dev, REG_FIFO1THR, FIFO1_THRESHOLD);
 	mutex_init(&adc_dev->fifo1_lock);
 
-	err = tiadc_channel_init(indio_dev, adc_dev->channels);
+	err = tiadc_channel_init(&pdev->dev, indio_dev, adc_dev->channels);
 	if (err < 0)
 		return err;
 
-	err = tiadc_iio_buffered_hardware_setup(indio_dev,
+	err = tiadc_iio_buffered_hardware_setup(&pdev->dev, indio_dev,
 		&tiadc_worker_h,
 		&tiadc_irq_h,
 		adc_dev->mfd_tscadc->irq,
@@ -523,12 +631,16 @@ static int tiadc_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, indio_dev);
 
+	err = tiadc_request_dma(pdev, adc_dev);
+	if (err && err == -EPROBE_DEFER)
+		goto err_dma;
+
 	return 0;
 
+err_dma:
+	iio_device_unregister(indio_dev);
 err_buffer_unregister:
-	tiadc_iio_buffered_hardware_remove(indio_dev);
 err_free_channels:
-	tiadc_channels_remove(indio_dev);
 	return err;
 }
 
@@ -536,11 +648,15 @@ static int tiadc_remove(struct platform_device *pdev)
 {
 	struct iio_dev *indio_dev = platform_get_drvdata(pdev);
 	struct tiadc_device *adc_dev = iio_priv(indio_dev);
+	struct tiadc_dma *dma = &adc_dev->dma;
 	u32 step_en;
 
+	if (dma->chan) {
+		dma_free_coherent(dma->chan->device->dev, DMA_BUFFER_SIZE,
+				  dma->buf, dma->addr);
+		dma_release_channel(dma->chan);
+	}
 	iio_device_unregister(indio_dev);
-	tiadc_iio_buffered_hardware_remove(indio_dev);
-	tiadc_channels_remove(indio_dev);
 
 	step_en = get_adc_step_mask(adc_dev);
 	am335x_tsc_se_clr(adc_dev->mfd_tscadc, step_en);
@@ -552,16 +668,12 @@ static int __maybe_unused tiadc_suspend(struct device *dev)
 {
 	struct iio_dev *indio_dev = dev_get_drvdata(dev);
 	struct tiadc_device *adc_dev = iio_priv(indio_dev);
-	struct ti_tscadc_dev *tscadc_dev;
 	unsigned int idle;
 
-	tscadc_dev = ti_tscadc_dev_get(to_platform_device(dev));
-	if (!device_may_wakeup(tscadc_dev->dev)) {
-		idle = tiadc_readl(adc_dev, REG_CTRL);
-		idle &= ~(CNTRLREG_TSCSSENB);
-		tiadc_writel(adc_dev, REG_CTRL, (idle |
-				CNTRLREG_POWERDOWN));
-	}
+	idle = tiadc_readl(adc_dev, REG_CTRL);
+	idle &= ~(CNTRLREG_TSCSSENB);
+	tiadc_writel(adc_dev, REG_CTRL, (idle |
+			CNTRLREG_POWERDOWN));
 
 	return 0;
 }

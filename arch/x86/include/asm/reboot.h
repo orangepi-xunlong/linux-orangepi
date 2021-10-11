@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_X86_REBOOT_H
 #define _ASM_X86_REBOOT_H
 
@@ -25,6 +26,7 @@ void __noreturn machine_real_restart(unsigned int type);
 #define MRR_APM		1
 
 typedef void (*nmi_shootdown_cb)(int, struct pt_regs*);
+void nmi_panic_self_stop(struct pt_regs *regs);
 void nmi_shootdown_cpus(nmi_shootdown_cb callback);
 void run_crash_ipi_callback(struct pt_regs *regs);
 

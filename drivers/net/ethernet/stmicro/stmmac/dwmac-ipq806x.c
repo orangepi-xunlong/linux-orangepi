@@ -51,15 +51,11 @@
 #define NSS_COMMON_CLK_SRC_CTRL_RGMII(x)	1
 #define NSS_COMMON_CLK_SRC_CTRL_SGMII(x)	((x >= 2) ? 1 : 0)
 
-#define NSS_COMMON_MACSEC_CTL			0x28
-#define NSS_COMMON_MACSEC_CTL_EXT_BYPASS_EN(x)	(1 << x)
-
 #define NSS_COMMON_GMAC_CTL(x)			(0x30 + (x * 4))
 #define NSS_COMMON_GMAC_CTL_CSYS_REQ		BIT(19)
 #define NSS_COMMON_GMAC_CTL_PHY_IFACE_SEL	BIT(16)
 #define NSS_COMMON_GMAC_CTL_IFG_LIMIT_OFFSET	8
 #define NSS_COMMON_GMAC_CTL_IFG_OFFSET		0
-#define NSS_COMMON_GMAC_CTL_IFG_MASK		0x3f
 
 #define NSS_COMMON_CLK_DIV_RGMII_1000		1
 #define NSS_COMMON_CLK_DIV_RGMII_100		9
@@ -67,9 +63,6 @@
 #define NSS_COMMON_CLK_DIV_SGMII_1000		0
 #define NSS_COMMON_CLK_DIV_SGMII_100		4
 #define NSS_COMMON_CLK_DIV_SGMII_10		49
-
-#define QSGMII_PCS_MODE_CTL			0x68
-#define QSGMII_PCS_MODE_CTL_AUTONEG_EN(x)	BIT((x * 8) + 7)
 
 #define QSGMII_PCS_CAL_LCKDT_CTL		0x120
 #define QSGMII_PCS_CAL_LCKDT_CTL_RST		BIT(19)
@@ -83,15 +76,10 @@
 #define QSGMII_PHY_TX_DRIVER_EN			BIT(3)
 #define QSGMII_PHY_QSGMII_EN			BIT(7)
 #define QSGMII_PHY_PHASE_LOOP_GAIN_OFFSET	12
-#define QSGMII_PHY_PHASE_LOOP_GAIN_MASK		0x7
 #define QSGMII_PHY_RX_DC_BIAS_OFFSET		18
-#define QSGMII_PHY_RX_DC_BIAS_MASK		0x3
 #define QSGMII_PHY_RX_INPUT_EQU_OFFSET		20
-#define QSGMII_PHY_RX_INPUT_EQU_MASK		0x3
 #define QSGMII_PHY_CDR_PI_SLEW_OFFSET		22
-#define QSGMII_PHY_CDR_PI_SLEW_MASK		0x3
 #define QSGMII_PHY_TX_DRV_AMP_OFFSET		28
-#define QSGMII_PHY_TX_DRV_AMP_MASK		0xf
 
 struct ipq806x_gmac {
 	struct platform_device *pdev;
@@ -201,9 +189,10 @@ static int ipq806x_gmac_set_speed(struct ipq806x_gmac *gmac, unsigned int speed)
 static int ipq806x_gmac_of_parse(struct ipq806x_gmac *gmac)
 {
 	struct device *dev = &gmac->pdev->dev;
+	int ret;
 
-	gmac->phy_mode = of_get_phy_mode(dev->of_node);
-	if (gmac->phy_mode < 0) {
+	ret = of_get_phy_mode(dev->of_node, &gmac->phy_mode);
+	if (ret) {
 		dev_err(dev, "missing phy mode property\n");
 		return -EINVAL;
 	}
@@ -217,7 +206,7 @@ static int ipq806x_gmac_of_parse(struct ipq806x_gmac *gmac)
 	 * code and keep it consistent with the Linux convention, we'll number
 	 * them from 0 to 3 here.
 	 */
-	if (gmac->id < 0 || gmac->id > 3) {
+	if (gmac->id > 3) {
 		dev_err(dev, "invalid gmac id\n");
 		return -EINVAL;
 	}
@@ -266,7 +255,7 @@ static int ipq806x_gmac_probe(struct platform_device *pdev)
 	if (val)
 		return val;
 
-	plat_dat = stmmac_probe_config_dt(pdev, &stmmac_res.mac);
+	plat_dat = stmmac_probe_config_dt(pdev, stmmac_res.mac);
 	if (IS_ERR(plat_dat))
 		return PTR_ERR(plat_dat);
 
@@ -330,6 +319,19 @@ static int ipq806x_gmac_probe(struct platform_device *pdev)
 	/* Enable PTP clock */
 	regmap_read(gmac->nss_common, NSS_COMMON_CLK_GATE, &val);
 	val |= NSS_COMMON_CLK_GATE_PTP_EN(gmac->id);
+	switch (gmac->phy_mode) {
+	case PHY_INTERFACE_MODE_RGMII:
+		val |= NSS_COMMON_CLK_GATE_RGMII_RX_EN(gmac->id) |
+			NSS_COMMON_CLK_GATE_RGMII_TX_EN(gmac->id);
+		break;
+	case PHY_INTERFACE_MODE_SGMII:
+		val |= NSS_COMMON_CLK_GATE_GMII_RX_EN(gmac->id) |
+				NSS_COMMON_CLK_GATE_GMII_TX_EN(gmac->id);
+		break;
+	default:
+		/* We don't get here; the switch above will have errored out */
+		unreachable();
+	}
 	regmap_write(gmac->nss_common, NSS_COMMON_CLK_GATE, val);
 
 	if (gmac->phy_mode == PHY_INTERFACE_MODE_SGMII) {
@@ -349,6 +351,9 @@ static int ipq806x_gmac_probe(struct platform_device *pdev)
 	plat_dat->has_gmac = true;
 	plat_dat->bsp_priv = gmac;
 	plat_dat->fix_mac_speed = ipq806x_gmac_fix_mac_speed;
+	plat_dat->multicast_filter_bins = 0;
+	plat_dat->tx_fifo_size = 8192;
+	plat_dat->rx_fifo_size = 8192;
 
 	err = stmmac_dvr_probe(&pdev->dev, plat_dat, &stmmac_res);
 	if (err)

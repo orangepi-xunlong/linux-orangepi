@@ -18,14 +18,11 @@
 	http://www.scyld.com/network/sundance.html
 	[link no longer provides useful info -jgarzik]
 	Archives of the mailing list are still available at
-	http://www.beowulf.org/pipermail/netdrivers/
+	https://www.beowulf.org/pipermail/netdrivers/
 
 */
 
 #define DRV_NAME	"sundance"
-#define DRV_VERSION	"1.2"
-#define DRV_RELDATE	"11-Sep-2006"
-
 
 /* The user-configurable values.
    These may be modified when a driver module is loaded.*/
@@ -91,7 +88,7 @@ static char *media[MAX_UNITS];
 #include <linux/skbuff.h>
 #include <linux/init.h>
 #include <linux/bitops.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/processor.h>		/* Processor type for cache alignment. */
 #include <asm/io.h>
 #include <linux/delay.h>
@@ -100,11 +97,6 @@ static char *media[MAX_UNITS];
 #include <linux/crc32.h>
 #include <linux/ethtool.h>
 #include <linux/mii.h>
-
-/* These identify the driver base version and may not be removed. */
-static const char version[] =
-	KERN_INFO DRV_NAME ".c:v" DRV_VERSION " " DRV_RELDATE
-	" Written by Donald Becker\n";
 
 MODULE_AUTHOR("Donald Becker <becker@scyld.com>");
 MODULE_DESCRIPTION("Sundance Alta Ethernet driver");
@@ -375,6 +367,7 @@ struct netdev_private {
         dma_addr_t tx_ring_dma;
         dma_addr_t rx_ring_dma;
 	struct timer_list timer;		/* Media monitoring timer. */
+	struct net_device *ndev;		/* backpointer */
 	/* ethtool extra stats */
 	struct {
 		u64 tx_multiple_collisions;
@@ -431,14 +424,14 @@ static void mdio_write(struct net_device *dev, int phy_id, int location, int val
 static int  mdio_wait_link(struct net_device *dev, int wait);
 static int  netdev_open(struct net_device *dev);
 static void check_duplex(struct net_device *dev);
-static void netdev_timer(unsigned long data);
-static void tx_timeout(struct net_device *dev);
+static void netdev_timer(struct timer_list *t);
+static void tx_timeout(struct net_device *dev, unsigned int txqueue);
 static void init_ring(struct net_device *dev);
 static netdev_tx_t start_tx(struct sk_buff *skb, struct net_device *dev);
 static int reset_tx (struct net_device *dev);
 static irqreturn_t intr_handler(int irq, void *dev_instance);
-static void rx_poll(unsigned long data);
-static void tx_poll(unsigned long data);
+static void rx_poll(struct tasklet_struct *t);
+static void tx_poll(struct tasklet_struct *t);
 static void refill_rx (struct net_device *dev);
 static void netdev_error(struct net_device *dev, int intr_status);
 static void netdev_error(struct net_device *dev, int intr_status);
@@ -516,13 +509,6 @@ static int sundance_probe1(struct pci_dev *pdev,
 #endif
 	int phy, phy_end, phy_idx = 0;
 
-/* when built into the kernel, we only print version if device is found */
-#ifndef MODULE
-	static int printed_version;
-	if (!printed_version++)
-		printk(version);
-#endif
-
 	if (pci_enable_device(pdev))
 		return -EIO;
 	pci_set_master(pdev);
@@ -546,14 +532,15 @@ static int sundance_probe1(struct pci_dev *pdev,
 			cpu_to_le16(eeprom_read(ioaddr, i + EEPROM_SA_OFFSET));
 
 	np = netdev_priv(dev);
+	np->ndev = dev;
 	np->base = ioaddr;
 	np->pci_dev = pdev;
 	np->chip_id = chip_idx;
 	np->msg_enable = (1 << debug) - 1;
 	spin_lock_init(&np->lock);
 	spin_lock_init(&np->statlock);
-	tasklet_init(&np->rx_tasklet, rx_poll, (unsigned long)dev);
-	tasklet_init(&np->tx_tasklet, tx_poll, (unsigned long)dev);
+	tasklet_setup(&np->rx_tasklet, rx_poll);
+	tasklet_setup(&np->tx_tasklet, tx_poll);
 
 	ring_space = dma_alloc_coherent(&pdev->dev, TX_TOTAL_SIZE,
 			&ring_dma, GFP_KERNEL);
@@ -579,6 +566,10 @@ static int sundance_probe1(struct pci_dev *pdev,
 	dev->netdev_ops = &netdev_ops;
 	dev->ethtool_ops = &ethtool_ops;
 	dev->watchdog_timeo = TX_TIMEOUT;
+
+	/* MTU range: 68 - 8191 */
+	dev->min_mtu = ETH_MIN_MTU;
+	dev->max_mtu = 8191;
 
 	pci_set_drvdata(pdev, dev);
 
@@ -713,8 +704,6 @@ err_out_netdev:
 
 static int change_mtu(struct net_device *dev, int new_mtu)
 {
-	if ((new_mtu < 68) || (new_mtu > 8191)) /* Set by RxDMAFrameLen */
-		return -EINVAL;
 	if (netif_running(dev))
 		return -EBUSY;
 	dev->mtu = new_mtu;
@@ -911,10 +900,8 @@ static int netdev_open(struct net_device *dev)
 			   ioread16(ioaddr + MACCtrl1), ioread16(ioaddr + MACCtrl0));
 
 	/* Set the timer to check for link beat. */
-	init_timer(&np->timer);
+	timer_setup(&np->timer, netdev_timer, 0);
 	np->timer.expires = jiffies + 3*HZ;
-	np->timer.data = (unsigned long)dev;
-	np->timer.function = netdev_timer;				/* timer handler */
 	add_timer(&np->timer);
 
 	/* Enable interrupts by setting the interrupt mask. */
@@ -951,10 +938,10 @@ static void check_duplex(struct net_device *dev)
 	}
 }
 
-static void netdev_timer(unsigned long data)
+static void netdev_timer(struct timer_list *t)
 {
-	struct net_device *dev = (struct net_device *)data;
-	struct netdev_private *np = netdev_priv(dev);
+	struct netdev_private *np = from_timer(np, t, timer);
+	struct net_device *dev = np->mii_if.dev;
 	void __iomem *ioaddr = np->base;
 	int next_tick = 10*HZ;
 
@@ -969,14 +956,14 @@ static void netdev_timer(unsigned long data)
 	add_timer(&np->timer);
 }
 
-static void tx_timeout(struct net_device *dev)
+static void tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	struct netdev_private *np = netdev_priv(dev);
 	void __iomem *ioaddr = np->base;
 	unsigned long flag;
 
 	netif_stop_queue(dev);
-	tasklet_disable(&np->tx_tasklet);
+	tasklet_disable_in_atomic(&np->tx_tasklet);
 	iowrite16(0, ioaddr + IntrEnable);
 	printk(KERN_WARNING "%s: Transmit timed out, TxStatus %2.2x "
 		   "TxFrameId %2.2x,"
@@ -1069,10 +1056,9 @@ static void init_ring(struct net_device *dev)
 	}
 }
 
-static void tx_poll (unsigned long data)
+static void tx_poll(struct tasklet_struct *t)
 {
-	struct net_device *dev = (struct net_device *)data;
-	struct netdev_private *np = netdev_priv(dev);
+	struct netdev_private *np = from_tasklet(np, t, tx_tasklet);
 	unsigned head = np->cur_task % TX_RING_SIZE;
 	struct netdev_desc *txdesc =
 		&np->tx_ring[(np->cur_tx - 1) % TX_RING_SIZE];
@@ -1193,7 +1179,6 @@ static irqreturn_t intr_handler(int irq, void *dev_instance)
 	int handled = 0;
 	int i;
 
-
 	do {
 		int intr_status = ioread16(ioaddr + IntrStatus);
 		iowrite16(intr_status, ioaddr + IntrStatus);
@@ -1286,7 +1271,7 @@ static irqreturn_t intr_handler(int irq, void *dev_instance)
 				dma_unmap_single(&np->pci_dev->dev,
 					le32_to_cpu(np->tx_ring[entry].frag[0].addr),
 					skb->len, DMA_TO_DEVICE);
-				dev_kfree_skb_irq (np->tx_skbuff[entry]);
+				dev_consume_skb_irq(np->tx_skbuff[entry]);
 				np->tx_skbuff[entry] = NULL;
 				np->tx_ring[entry].frag[0].addr = 0;
 				np->tx_ring[entry].frag[0].length = 0;
@@ -1305,7 +1290,7 @@ static irqreturn_t intr_handler(int irq, void *dev_instance)
 				dma_unmap_single(&np->pci_dev->dev,
 					le32_to_cpu(np->tx_ring[entry].frag[0].addr),
 					skb->len, DMA_TO_DEVICE);
-				dev_kfree_skb_irq (np->tx_skbuff[entry]);
+				dev_consume_skb_irq(np->tx_skbuff[entry]);
 				np->tx_skbuff[entry] = NULL;
 				np->tx_ring[entry].frag[0].addr = 0;
 				np->tx_ring[entry].frag[0].length = 0;
@@ -1328,10 +1313,10 @@ static irqreturn_t intr_handler(int irq, void *dev_instance)
 	return IRQ_RETVAL(handled);
 }
 
-static void rx_poll(unsigned long data)
+static void rx_poll(struct tasklet_struct *t)
 {
-	struct net_device *dev = (struct net_device *)data;
-	struct netdev_private *np = netdev_priv(dev);
+	struct netdev_private *np = from_tasklet(np, t, rx_tasklet);
+	struct net_device *dev = np->ndev;
 	int entry = np->cur_rx % RX_RING_SIZE;
 	int boguscnt = np->budget;
 	void __iomem *ioaddr = np->base;
@@ -1658,25 +1643,26 @@ static void get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 {
 	struct netdev_private *np = netdev_priv(dev);
 	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
 	strlcpy(info->bus_info, pci_name(np->pci_dev), sizeof(info->bus_info));
 }
 
-static int get_settings(struct net_device *dev, struct ethtool_cmd *ecmd)
+static int get_link_ksettings(struct net_device *dev,
+			      struct ethtool_link_ksettings *cmd)
 {
 	struct netdev_private *np = netdev_priv(dev);
 	spin_lock_irq(&np->lock);
-	mii_ethtool_gset(&np->mii_if, ecmd);
+	mii_ethtool_get_link_ksettings(&np->mii_if, cmd);
 	spin_unlock_irq(&np->lock);
 	return 0;
 }
 
-static int set_settings(struct net_device *dev, struct ethtool_cmd *ecmd)
+static int set_link_ksettings(struct net_device *dev,
+			      const struct ethtool_link_ksettings *cmd)
 {
 	struct netdev_private *np = netdev_priv(dev);
 	int res;
 	spin_lock_irq(&np->lock);
-	res = mii_ethtool_sset(&np->mii_if, ecmd);
+	res = mii_ethtool_set_link_ksettings(&np->mii_if, cmd);
 	spin_unlock_irq(&np->lock);
 	return res;
 }
@@ -1798,8 +1784,6 @@ static int sundance_set_wol(struct net_device *dev,
 static const struct ethtool_ops ethtool_ops = {
 	.begin = check_if_running,
 	.get_drvinfo = get_drvinfo,
-	.get_settings = get_settings,
-	.set_settings = set_settings,
 	.nway_reset = nway_reset,
 	.get_link = get_link,
 	.get_wol = sundance_get_wol,
@@ -1809,6 +1793,8 @@ static const struct ethtool_ops ethtool_ops = {
 	.get_strings = get_strings,
 	.get_sset_count = get_sset_count,
 	.get_ethtool_stats = get_ethtool_stats,
+	.get_link_ksettings = get_link_ksettings,
+	.set_link_ksettings = set_link_ksettings,
 };
 
 static int netdev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
@@ -1943,11 +1929,9 @@ static void sundance_remove1(struct pci_dev *pdev)
 	}
 }
 
-#ifdef CONFIG_PM
-
-static int sundance_suspend(struct pci_dev *pci_dev, pm_message_t state)
+static int __maybe_unused sundance_suspend(struct device *dev_d)
 {
-	struct net_device *dev = pci_get_drvdata(pci_dev);
+	struct net_device *dev = dev_get_drvdata(dev_d);
 	struct netdev_private *np = netdev_priv(dev);
 	void __iomem *ioaddr = np->base;
 
@@ -1957,29 +1941,23 @@ static int sundance_suspend(struct pci_dev *pci_dev, pm_message_t state)
 	netdev_close(dev);
 	netif_device_detach(dev);
 
-	pci_save_state(pci_dev);
 	if (np->wol_enabled) {
 		iowrite8(AcceptBroadcast | AcceptMyPhys, ioaddr + RxMode);
 		iowrite16(RxEnable, ioaddr + MACCtrl1);
 	}
-	pci_enable_wake(pci_dev, pci_choose_state(pci_dev, state),
-			np->wol_enabled);
-	pci_set_power_state(pci_dev, pci_choose_state(pci_dev, state));
+
+	device_set_wakeup_enable(dev_d, np->wol_enabled);
 
 	return 0;
 }
 
-static int sundance_resume(struct pci_dev *pci_dev)
+static int __maybe_unused sundance_resume(struct device *dev_d)
 {
-	struct net_device *dev = pci_get_drvdata(pci_dev);
+	struct net_device *dev = dev_get_drvdata(dev_d);
 	int err = 0;
 
 	if (!netif_running(dev))
 		return 0;
-
-	pci_set_power_state(pci_dev, PCI_D0);
-	pci_restore_state(pci_dev);
-	pci_enable_wake(pci_dev, PCI_D0, 0);
 
 	err = netdev_open(dev);
 	if (err) {
@@ -1994,34 +1972,14 @@ out:
 	return err;
 }
 
-#endif /* CONFIG_PM */
+static SIMPLE_DEV_PM_OPS(sundance_pm_ops, sundance_suspend, sundance_resume);
 
 static struct pci_driver sundance_driver = {
 	.name		= DRV_NAME,
 	.id_table	= sundance_pci_tbl,
 	.probe		= sundance_probe1,
 	.remove		= sundance_remove1,
-#ifdef CONFIG_PM
-	.suspend	= sundance_suspend,
-	.resume		= sundance_resume,
-#endif /* CONFIG_PM */
+	.driver.pm	= &sundance_pm_ops,
 };
 
-static int __init sundance_init(void)
-{
-/* when a module, this is printed whether or not devices are found in probe */
-#ifdef MODULE
-	printk(version);
-#endif
-	return pci_register_driver(&sundance_driver);
-}
-
-static void __exit sundance_exit(void)
-{
-	pci_unregister_driver(&sundance_driver);
-}
-
-module_init(sundance_init);
-module_exit(sundance_exit);
-
-
+module_pci_driver(sundance_driver);

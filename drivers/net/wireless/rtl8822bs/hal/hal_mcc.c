@@ -58,7 +58,7 @@ static void dump_iqk_val_table(PADAPTER padapter)
 						);
 			}
 		}
-	}
+	}	
 	RTW_INFO("=============================================\n");
 }
 
@@ -88,7 +88,7 @@ static void rtw_hal_mcc_build_p2p_noa_attr(PADAPTER padapter, u8 *ie, u32 *ie_le
 	/* attrute ID(1 byte) */
 	p2p_noa_attr_ie[p2p_noa_attr_len] = P2P_ATTR_NOA;
 	p2p_noa_attr_len = p2p_noa_attr_len + 1;
-
+	
 	/* attrute length(2 bytes) length = noa_desc_num*13 + 2 */
 	RTW_PUT_LE16(p2p_noa_attr_ie + p2p_noa_attr_len, (noa_desc_num*13 + 2));
 	p2p_noa_attr_len = p2p_noa_attr_len + 2;
@@ -165,7 +165,7 @@ static void rtw_hal_mcc_update_go_p2p_ie(PADAPTER padapter)
 	if (0) {
 		u8 i = 0;
 		RTW_INFO("p2p_go_noa_ie_len:%d\n", pmccadapriv->p2p_go_noa_ie_len);
-
+		
 		for (i = 0;i < pmccadapriv->p2p_go_noa_ie_len; i++) {
 			if ((i+1)%8 != 0)
 				printk("0x%02x ", pmccadapriv->p2p_go_noa_ie[i]);
@@ -255,7 +255,7 @@ void rtw_hal_mcc_update_switch_channel_policy_table(PADAPTER padapter)
 	}
 
 	idx = registry_par->rtw_mcc_policy_table_idx;
-
+	
 	if (registry_par->rtw_mcc_duration > 0)
 		mcc_switch_channel_policy_table[idx][MCC_DURATION_IDX] = registry_par->rtw_mcc_duration;
 
@@ -1157,17 +1157,17 @@ static void rtw_hal_mcc_sw_ch_fw_notify_hdl(PADAPTER padapter)
 		cur_mccadapriv->mcc_tp = (cur_mccadapriv->mcc_tx_bytes_from_kernel
 			- cur_mccadapriv->mcc_last_tx_bytes_from_kernel) * 10 * 8 / 1024 / 1024;
 		cur_mccadapriv->mcc_last_tx_bytes_from_kernel = cur_mccadapriv->mcc_tx_bytes_from_kernel;
-		if (NULL != next_mccadapriv) {
-			next_mccadapriv->mcc_tp = (next_mccadapriv->mcc_tx_bytes_from_kernel
-				- next_mccadapriv->mcc_last_tx_bytes_from_kernel) * 10 * 8 / 1024 / 1024;
-			next_mccadapriv->mcc_last_tx_bytes_from_kernel = next_mccadapriv->mcc_tx_bytes_from_kernel;
-		}
+
+		next_mccadapriv->mcc_tp = (next_mccadapriv->mcc_tx_bytes_from_kernel
+			- next_mccadapriv->mcc_last_tx_bytes_from_kernel) * 10 * 8 / 1024 / 1024;
+		next_mccadapriv->mcc_last_tx_bytes_from_kernel = next_mccadapriv->mcc_tx_bytes_from_kernel;
+
 		cnt = 1;
 	} else
 		cnt = 2;
 
 	/* check single TX or cuncurrnet TX */
-	if ((NULL != next_mccadapriv) && next_mccadapriv->mcc_tp < single_tx_cri) {
+	if (next_mccadapriv->mcc_tp < single_tx_cri) {
 		/* single TX, does not stop */
 		cur_mccadapriv->mcc_tx_stop = _FALSE;
 		cur_mccadapriv->mcc_tp_limit = _FALSE;
@@ -1223,12 +1223,12 @@ static void rtw_hal_mcc_update_noa_start_time_hdl(PADAPTER padapter, u8 buflen, 
 	u8 policy_idx = pmccobjpriv->policy_index;
 	u8 noa_tsf_sync_offset = mcc_switch_channel_policy_table[policy_idx][MCC_TSF_SYNC_OFFSET_IDX];
 	u8 noa_start_time_offset = mcc_switch_channel_policy_table[policy_idx][MCC_START_TIME_OFFSET_IDX];
-
+	
 	for (i = 0; i < pdvobjpriv->iface_nums; i++) {
 		iface = pdvobjpriv->padapters[i];
 		if (iface == NULL)
 			continue;
-
+		
 		pmccadapriv = &iface->mcc_adapterpriv;
 		/* GO & channel match */
 		if (pmccadapriv->role == MCC_ROLE_GO) {
@@ -1824,22 +1824,11 @@ void rtw_hal_mcc_issue_null_data(_adapter *padapter, u8 chbw_allow, u8 ps_mode)
 		/* issue null data to inform ap station will leave */
 		if (is_client_associated_to_ap(iface)) {
 			struct mlme_ext_priv *mlmeext = &iface->mlmeextpriv;
-			struct mlme_ext_info *mlmeextinfo = &mlmeext->mlmext_info;
 			u8 ch = mlmeext->cur_channel;
 			u8 bw = mlmeext->cur_bwmode;
 			u8 offset = mlmeext->cur_ch_offset;
-			struct sta_info *sta = rtw_get_stainfo(&iface->stapriv, get_my_bssid(&(mlmeextinfo->network)));
-
-			if (!sta)
-				continue;
 
 			set_channel_bwmode(iface, ch, bw, offset);
-
-			if (ps_mode)
-				rtw_hal_macid_sleep(iface, sta->cmn.mac_id);
-			else
-				rtw_hal_macid_wakeup(iface, sta->cmn.mac_id);
-
 			issue_nulldata(iface, NULL, ps_mode, 3, 50);
 		}
 	}
@@ -1852,7 +1841,7 @@ u8 *rtw_hal_mcc_append_go_p2p_ie(PADAPTER padapter, u8 *pframe, u32 *len)
 
 	if (!MCC_EN(padapter))
 		return pframe;
-
+	
 	if (!rtw_hal_check_mcc_status(padapter, MCC_STATUS_DOING_MCC))
 		return pframe;
 

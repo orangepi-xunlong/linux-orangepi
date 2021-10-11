@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * pata_atiixp.c 	- ATI PATA for new ATA layer
  *			  (C) 2005 Red Hat Inc
@@ -92,6 +93,7 @@ static int atiixp_prereset(struct ata_link *link, unsigned long deadline)
  *	atiixp_set_pio_timing	-	set initial PIO mode data
  *	@ap: ATA interface
  *	@adev: ATA device
+ *	@pio: Requested PIO
  *
  *	Called by both the pio and dma setup functions to set the controller
  *	timings for PIO transfers. We must load both the mode number and
@@ -226,7 +228,7 @@ static void atiixp_bmdma_start(struct ata_queued_cmd *qc)
 }
 
 /**
- *	atiixp_dma_stop	-	DMA stop callback
+ *	atiixp_bmdma_stop	-	DMA stop callback
  *	@qc: Command in progress
  *
  *	DMA has completed. Clear the UDMA flag as the next operations will
@@ -277,6 +279,10 @@ static int atiixp_init_one(struct pci_dev *pdev, const struct pci_device_id *id)
 		.port_ops = &atiixp_port_ops
 	};
 	const struct ata_port_info *ppi[] = { &info, &info };
+
+	/* SB600 doesn't have secondary port wired */
+	if (pdev->device == PCI_DEVICE_ID_ATI_IXP600_IDE)
+		ppi[1] = &ata_dummy_port_info;
 
 	return ata_pci_bmdma_init_one(pdev, ppi, &atiixp_sht, NULL,
 				      ATA_HOST_PARALLEL_SCAN);

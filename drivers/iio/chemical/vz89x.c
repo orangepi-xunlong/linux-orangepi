@@ -1,26 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * vz89x.c - Support for SGX Sensortech MiCS VZ89X VOC sensors
  *
- * Copyright (C) 2015 Matt Ranostay <mranostay@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
+ * Copyright (C) 2015-2018
+ * Author: Matt Ranostay <matt.ranostay@konsulko.com>
  */
 
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/init.h>
 #include <linux/i2c.h>
-#include <linux/of.h>
-#include <linux/of_device.h>
+#include <linux/mod_devicetable.h>
 
 #include <linux/iio/iio.h>
 #include <linux/iio/sysfs.h>
@@ -326,7 +316,6 @@ static int vz89x_read_raw(struct iio_dev *indio_dev,
 static const struct iio_info vz89x_info = {
 	.attrs		= &vz89x_attrs_group,
 	.read_raw	= vz89x_read_raw,
-	.driver_module	= THIS_MODULE,
 };
 
 static const struct vz89x_chip_data vz89x_chips[] = {
@@ -362,12 +351,12 @@ MODULE_DEVICE_TABLE(of, vz89x_dt_ids);
 static int vz89x_probe(struct i2c_client *client,
 		       const struct i2c_device_id *id)
 {
+	struct device *dev = &client->dev;
 	struct iio_dev *indio_dev;
 	struct vz89x_data *data;
-	const struct of_device_id *of_id;
 	int chip_id;
 
-	indio_dev = devm_iio_device_alloc(&client->dev, sizeof(*data));
+	indio_dev = devm_iio_device_alloc(dev, sizeof(*data));
 	if (!indio_dev)
 		return -ENOMEM;
 	data = iio_priv(indio_dev);
@@ -380,11 +369,10 @@ static int vz89x_probe(struct i2c_client *client,
 	else
 		return -EOPNOTSUPP;
 
-	of_id = of_match_device(vz89x_dt_ids, &client->dev);
-	if (!of_id)
+	if (!dev_fwnode(dev))
 		chip_id = id->driver_data;
 	else
-		chip_id = (unsigned long)of_id->data;
+		chip_id = (unsigned long)device_get_match_data(dev);
 
 	i2c_set_clientdata(client, indio_dev);
 	data->client = client;
@@ -392,15 +380,14 @@ static int vz89x_probe(struct i2c_client *client,
 	data->last_update = jiffies - HZ;
 	mutex_init(&data->lock);
 
-	indio_dev->dev.parent = &client->dev;
-	indio_dev->info = &vz89x_info,
-	indio_dev->name = dev_name(&client->dev);
+	indio_dev->info = &vz89x_info;
+	indio_dev->name = dev_name(dev);
 	indio_dev->modes = INDIO_DIRECT_MODE;
 
 	indio_dev->channels = data->chip->channels;
 	indio_dev->num_channels = data->chip->num_channels;
 
-	return devm_iio_device_register(&client->dev, indio_dev);
+	return devm_iio_device_register(dev, indio_dev);
 }
 
 static const struct i2c_device_id vz89x_id[] = {
@@ -413,13 +400,13 @@ MODULE_DEVICE_TABLE(i2c, vz89x_id);
 static struct i2c_driver vz89x_driver = {
 	.driver = {
 		.name	= "vz89x",
-		.of_match_table = of_match_ptr(vz89x_dt_ids),
+		.of_match_table = vz89x_dt_ids,
 	},
 	.probe = vz89x_probe,
 	.id_table = vz89x_id,
 };
 module_i2c_driver(vz89x_driver);
 
-MODULE_AUTHOR("Matt Ranostay <mranostay@gmail.com>");
+MODULE_AUTHOR("Matt Ranostay <matt.ranostay@konsulko.com>");
 MODULE_DESCRIPTION("SGX Sensortech MiCS VZ89X VOC sensors");
 MODULE_LICENSE("GPL v2");

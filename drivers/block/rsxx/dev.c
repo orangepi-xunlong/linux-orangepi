@@ -1,25 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 * Filename: dev.c
-*
 *
 * Authors: Joshua Morris <josh.h.morris@us.ibm.com>
 *	Philip Kelleher <pjk1939@linux.vnet.ibm.com>
 *
 * (C) Copyright 2013 IBM Corporation
-*
-* This program is free software; you can redistribute it and/or
-* modify it under the terms of the GNU General Public License as
-* published by the Free Software Foundation; either version 2 of the
-* License, or (at your option) any later version.
-*
-* This program is distributed in the hope that it will be useful, but
-* WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-* General Public License for more details.
-*
-* You should have received a copy of the GNU General Public License
-* along with this program; if not, write to the Free Software Foundation,
-* Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include <linux/kernel.h>
@@ -64,6 +50,8 @@ struct rsxx_bio_meta {
 
 static struct kmem_cache *bio_meta_pool;
 
+static blk_qc_t rsxx_submit_bio(struct bio *bio);
+
 /*----------------- Block Device Operations -----------------*/
 static int rsxx_blkdev_ioctl(struct block_device *bdev,
 				 fmode_t mode,
@@ -106,23 +94,10 @@ static int rsxx_getgeo(struct block_device *bdev, struct hd_geometry *geo)
 
 static const struct block_device_operations rsxx_fops = {
 	.owner		= THIS_MODULE,
+	.submit_bio	= rsxx_submit_bio,
 	.getgeo		= rsxx_getgeo,
 	.ioctl		= rsxx_blkdev_ioctl,
 };
-
-static void disk_stats_start(struct rsxx_cardinfo *card, struct bio *bio)
-{
-	generic_start_io_acct(bio_data_dir(bio), bio_sectors(bio),
-			     &card->gendisk->part0);
-}
-
-static void disk_stats_complete(struct rsxx_cardinfo *card,
-				struct bio *bio,
-				unsigned long start_time)
-{
-	generic_end_io_acct(bio_data_dir(bio), &card->gendisk->part0,
-			   start_time);
-}
 
 static void bio_dma_done_cb(struct rsxx_cardinfo *card,
 			    void *cb_data,
@@ -135,7 +110,7 @@ static void bio_dma_done_cb(struct rsxx_cardinfo *card,
 
 	if (atomic_dec_and_test(&meta->pending_dmas)) {
 		if (!card->eeh_state && card->gendisk)
-			disk_stats_complete(card, meta->bio, meta->start_time);
+			bio_end_io_acct(meta->bio, meta->start_time);
 
 		if (atomic_read(&meta->error))
 			bio_io_error(meta->bio);
@@ -145,13 +120,13 @@ static void bio_dma_done_cb(struct rsxx_cardinfo *card,
 	}
 }
 
-static blk_qc_t rsxx_make_request(struct request_queue *q, struct bio *bio)
+static blk_qc_t rsxx_submit_bio(struct bio *bio)
 {
-	struct rsxx_cardinfo *card = q->queuedata;
+	struct rsxx_cardinfo *card = bio->bi_bdev->bd_disk->private_data;
 	struct rsxx_bio_meta *bio_meta;
-	int st = -EINVAL;
+	blk_status_t st = BLK_STS_IOERR;
 
-	blk_queue_split(q, &bio, q->bio_split);
+	blk_queue_split(&bio);
 
 	might_sleep();
 
@@ -161,15 +136,11 @@ static blk_qc_t rsxx_make_request(struct request_queue *q, struct bio *bio)
 	if (bio_end_sector(bio) > get_capacity(card->gendisk))
 		goto req_err;
 
-	if (unlikely(card->halt)) {
-		st = -EFAULT;
+	if (unlikely(card->halt))
 		goto req_err;
-	}
 
-	if (unlikely(card->dma_fault)) {
-		st = (-EFAULT);
+	if (unlikely(card->dma_fault))
 		goto req_err;
-	}
 
 	if (bio->bi_iter.bi_size == 0) {
 		dev_err(CARD_TO_DEV(card), "size zero BIO!\n");
@@ -178,17 +149,16 @@ static blk_qc_t rsxx_make_request(struct request_queue *q, struct bio *bio)
 
 	bio_meta = kmem_cache_alloc(bio_meta_pool, GFP_KERNEL);
 	if (!bio_meta) {
-		st = -ENOMEM;
+		st = BLK_STS_RESOURCE;
 		goto req_err;
 	}
 
 	bio_meta->bio = bio;
 	atomic_set(&bio_meta->error, 0);
 	atomic_set(&bio_meta->pending_dmas, 0);
-	bio_meta->start_time = jiffies;
 
 	if (!unlikely(card->halt))
-		disk_stats_start(card, bio);
+		bio_meta->start_time = bio_start_io_acct(bio);
 
 	dev_dbg(CARD_TO_DEV(card), "BIO[%c]: meta: %p addr8: x%llx size: %d\n",
 		 bio_data_dir(bio) ? 'W' : 'R', bio_meta,
@@ -205,7 +175,7 @@ queue_err:
 	kmem_cache_free(bio_meta_pool, bio_meta);
 req_err:
 	if (st)
-		bio->bi_error = st;
+		bio->bi_status = st;
 	bio_endio(bio);
 	return BLK_QC_T_NONE;
 }
@@ -230,7 +200,7 @@ int rsxx_attach_dev(struct rsxx_cardinfo *card)
 			set_capacity(card->gendisk, card->size8 >> 9);
 		else
 			set_capacity(card->gendisk, 0);
-		device_add_disk(CARD_TO_DEV(card), card->gendisk);
+		device_add_disk(CARD_TO_DEV(card), card->gendisk, NULL);
 		card->bdev_attached = 1;
 	}
 
@@ -266,7 +236,7 @@ int rsxx_setup_dev(struct rsxx_cardinfo *card)
 		return -ENOMEM;
 	}
 
-	card->queue = blk_alloc_queue(GFP_KERNEL);
+	card->queue = blk_alloc_queue(NUMA_NO_NODE);
 	if (!card->queue) {
 		dev_err(CARD_TO_DEV(card), "Failed queue alloc\n");
 		unregister_blkdev(card->major, DRIVER_NAME);
@@ -287,23 +257,18 @@ int rsxx_setup_dev(struct rsxx_cardinfo *card)
 		blk_queue_logical_block_size(card->queue, blk_size);
 	}
 
-	blk_queue_make_request(card->queue, rsxx_make_request);
-	blk_queue_bounce_limit(card->queue, BLK_BOUNCE_ANY);
 	blk_queue_max_hw_sectors(card->queue, blkdev_max_hw_sectors);
 	blk_queue_physical_block_size(card->queue, RSXX_HW_BLK_SIZE);
 
-	queue_flag_set_unlocked(QUEUE_FLAG_NONROT, card->queue);
-	queue_flag_clear_unlocked(QUEUE_FLAG_ADD_RANDOM, card->queue);
+	blk_queue_flag_set(QUEUE_FLAG_NONROT, card->queue);
+	blk_queue_flag_clear(QUEUE_FLAG_ADD_RANDOM, card->queue);
 	if (rsxx_discard_supported(card)) {
-		queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, card->queue);
+		blk_queue_flag_set(QUEUE_FLAG_DISCARD, card->queue);
 		blk_queue_max_discard_sectors(card->queue,
 						RSXX_HW_BLK_SIZE >> 9);
 		card->queue->limits.discard_granularity = RSXX_HW_BLK_SIZE;
 		card->queue->limits.discard_alignment   = RSXX_HW_BLK_SIZE;
-		card->queue->limits.discard_zeroes_data = 1;
 	}
-
-	card->queue->queuedata = card;
 
 	snprintf(card->gendisk->disk_name, sizeof(card->gendisk->disk_name),
 		 "rsxx%d", card->disk_id);
@@ -325,7 +290,6 @@ void rsxx_destroy_dev(struct rsxx_cardinfo *card)
 	card->gendisk = NULL;
 
 	blk_cleanup_queue(card->queue);
-	card->queue->queuedata = NULL;
 	unregister_blkdev(card->major, DRIVER_NAME);
 }
 

@@ -111,8 +111,8 @@ static int control_read(struct usbnet *dev,
 		request_type = (USB_DIR_IN | USB_TYPE_VENDOR |
 				USB_RECIP_DEVICE);
 
-	netdev_dbg(dev->net, "Control_read() index=0x%02x size=%d\n",
-		   index, size);
+	netdev_dbg(dev->net, "%s() index=0x%02x size=%d\n",
+		   __func__, index, size);
 
 	buf = kmalloc(size, GFP_KERNEL);
 	if (!buf) {
@@ -129,8 +129,6 @@ static int control_read(struct usbnet *dev,
 	else if (err >= 0)
 		err = -EINVAL;
 	kfree(buf);
-
-	return err;
 
 err_out:
 	return err;
@@ -151,8 +149,8 @@ static int control_write(struct usbnet *dev, unsigned char request,
 		request_type = (USB_DIR_OUT | USB_TYPE_VENDOR |
 				USB_RECIP_DEVICE);
 
-	netdev_dbg(dev->net, "Control_write() index=0x%02x size=%d\n",
-		   index, size);
+	netdev_dbg(dev->net, "%s() index=0x%02x size=%d\n",
+		   __func__, index, size);
 
 	if (data) {
 		buf = kmemdup(data, size, GFP_KERNEL);
@@ -181,8 +179,8 @@ static int ch9200_mdio_read(struct net_device *netdev, int phy_id, int loc)
 	struct usbnet *dev = netdev_priv(netdev);
 	unsigned char buff[2];
 
-	netdev_dbg(netdev, "ch9200_mdio_read phy_id:%02x loc:%02x\n",
-		   phy_id, loc);
+	netdev_dbg(netdev, "%s phy_id:%02x loc:%02x\n",
+		   __func__, phy_id, loc);
 
 	if (phy_id != 0)
 		return -ENODEV;
@@ -199,8 +197,8 @@ static void ch9200_mdio_write(struct net_device *netdev,
 	struct usbnet *dev = netdev_priv(netdev);
 	unsigned char buff[2];
 
-	netdev_dbg(netdev, "ch9200_mdio_write() phy_id=%02x loc:%02x\n",
-		   phy_id, loc);
+	netdev_dbg(netdev, "%s() phy_id=%02x loc:%02x\n",
+		   __func__, phy_id, loc);
 
 	if (phy_id != 0)
 		return;
@@ -219,8 +217,8 @@ static int ch9200_link_reset(struct usbnet *dev)
 	mii_check_media(&dev->mii, 1, 1);
 	mii_ethtool_gset(&dev->mii, &ecmd);
 
-	netdev_dbg(dev->net, "link_reset() speed:%d duplex:%d\n",
-		   ecmd.speed, ecmd.duplex);
+	netdev_dbg(dev->net, "%s() speed:%d duplex:%d\n",
+		   __func__, ecmd.speed, ecmd.duplex);
 
 	return 0;
 }
@@ -254,14 +252,9 @@ static struct sk_buff *ch9200_tx_fixup(struct usbnet *dev, struct sk_buff *skb,
 	tx_overhead = 0x40;
 
 	len = skb->len;
-	if (skb_headroom(skb) < tx_overhead) {
-		struct sk_buff *skb2;
-
-		skb2 = skb_copy_expand(skb, tx_overhead, 0, flags);
+	if (skb_cow_head(skb, tx_overhead)) {
 		dev_kfree_skb_any(skb);
-		skb = skb2;
-		if (!skb)
-			return NULL;
+		return NULL;
 	}
 
 	__skb_push(skb, tx_overhead);
@@ -314,9 +307,9 @@ static int get_mac_address(struct usbnet *dev, unsigned char *data)
 	unsigned char mac_addr[0x06];
 	int rd_mac_len = 0;
 
-	netdev_dbg(dev->net, "get_mac_address:\n\tusbnet VID:%0x PID:%0x\n",
-		   dev->udev->descriptor.idVendor,
-		   dev->udev->descriptor.idProduct);
+	netdev_dbg(dev->net, "%s:\n\tusbnet VID:%0x PID:%0x\n", __func__,
+		   le16_to_cpu(dev->udev->descriptor.idVendor),
+		   le16_to_cpu(dev->udev->descriptor.idProduct));
 
 	memset(mac_addr, 0, sizeof(mac_addr));
 	rd_mac_len = control_read(dev, REQUEST_READ, 0,

@@ -1,8 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * QLogic iSCSI HBA Driver
  * Copyright (c)  2003-2013 QLogic Corporation
- *
- * See LICENSE.qla4xxx for copyright and licensing details.
  */
 
 #ifndef __QL4_DEF_H
@@ -410,19 +409,7 @@ struct qla4_8xxx_legacy_intr_set {
 };
 
 /* MSI-X Support */
-
-#define QLA_MSIX_DEFAULT	0x00
-#define QLA_MSIX_RSP_Q		0x01
-
 #define QLA_MSIX_ENTRIES	2
-#define QLA_MIDX_DEFAULT	0
-#define QLA_MIDX_RSP_Q		1
-
-struct ql4_msix_entry {
-	int have_irq;
-	uint16_t msix_vector;
-	uint16_t msix_entry;
-};
 
 /*
  * ISP Operations
@@ -448,9 +435,9 @@ struct isp_operations {
 	void (*wr_reg_direct) (struct scsi_qla_host *, ulong, uint32_t);
 	int (*rd_reg_indirect) (struct scsi_qla_host *, uint32_t, uint32_t *);
 	int (*wr_reg_indirect) (struct scsi_qla_host *, uint32_t, uint32_t);
-	int (*idc_lock) (struct scsi_qla_host *);
+	int (*idc_lock) (struct scsi_qla_host *); /* Context: task, can sleep */
 	void (*idc_unlock) (struct scsi_qla_host *);
-	void (*rom_lock_recovery) (struct scsi_qla_host *);
+	void (*rom_lock_recovery) (struct scsi_qla_host *); /* Context: task, can sleep */
 	void (*queue_mailbox_command) (struct scsi_qla_host *, uint32_t *, int);
 	void (*process_mailbox_interrupt) (struct scsi_qla_host *, int);
 };
@@ -574,9 +561,6 @@ struct scsi_qla_host {
 #define AF_IRQ_ATTACHED			10 /* 0x00000400 */
 #define AF_DISABLE_ACB_COMPLETE		11 /* 0x00000800 */
 #define AF_HA_REMOVAL			12 /* 0x00001000 */
-#define AF_INTx_ENABLED			15 /* 0x00008000 */
-#define AF_MSI_ENABLED			16 /* 0x00010000 */
-#define AF_MSIX_ENABLED			17 /* 0x00020000 */
 #define AF_MBOX_COMMAND_NOPOLL		18 /* 0x00040000 */
 #define AF_FW_RECOVERY			19 /* 0x00080000 */
 #define AF_EEH_BUSY			20 /* 0x00100000 */
@@ -763,8 +747,6 @@ struct scsi_qla_host {
 
 	struct isp_operations *isp_ops;
 	struct ql82xx_hw_data hw;
-
-	struct ql4_msix_entry msix_entries[QLA_MSIX_ENTRIES];
 
 	uint32_t nx_dev_init_timeout;
 	uint32_t nx_reset_timeout;

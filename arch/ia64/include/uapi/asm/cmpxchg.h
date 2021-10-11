@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 #ifndef _ASM_IA64_CMPXCHG_H
 #define _ASM_IA64_CMPXCHG_H
 
@@ -53,7 +54,7 @@ extern void ia64_xchg_called_with_bad_pointer(void);
 })
 
 #define xchg(ptr, x)							\
-((__typeof__(*(ptr))) __xchg((unsigned long) (x), (ptr), sizeof(*(ptr))))
+({(__typeof__(*(ptr))) __xchg((unsigned long) (x), (ptr), sizeof(*(ptr)));})
 
 /*
  * Atomic compare and exchange.  Compare OLD with MEM, if identical,

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __NETNS_NETFILTER_H
 #define __NETNS_NETFILTER_H
 
@@ -16,6 +17,16 @@ struct netns_nf {
 #ifdef CONFIG_SYSCTL
 	struct ctl_table_header *nf_log_dir_header;
 #endif
-	struct nf_hook_entry __rcu *hooks[NFPROTO_NUMPROTO][NF_MAX_HOOKS];
+	struct nf_hook_entries __rcu *hooks_ipv4[NF_INET_NUMHOOKS];
+	struct nf_hook_entries __rcu *hooks_ipv6[NF_INET_NUMHOOKS];
+#ifdef CONFIG_NETFILTER_FAMILY_ARP
+	struct nf_hook_entries __rcu *hooks_arp[NF_ARP_NUMHOOKS];
+#endif
+#ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
+	struct nf_hook_entries __rcu *hooks_bridge[NF_INET_NUMHOOKS];
+#endif
+#if IS_ENABLED(CONFIG_DECNET)
+	struct nf_hook_entries __rcu *hooks_decnet[NF_DN_NUMHOOKS];
+#endif
 };
 #endif

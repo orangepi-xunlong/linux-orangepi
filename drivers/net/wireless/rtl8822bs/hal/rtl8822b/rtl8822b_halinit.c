@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright(c) 2015 - 2018 Realtek Corporation.
+ * Copyright(c) 2015 - 2017 Realtek Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -49,12 +49,6 @@ void rtl8822b_init_hal_spec(PADAPTER adapter)
 			    ;
 
 	hal_spec->hci_type = 0;
-
-	rtw_macid_ctl_init_sleep_reg(adapter_to_macidctl(adapter)
-		, REG_MACID_SLEEP_8822B
-		, REG_MACID_SLEEP1_8822B
-		, REG_MACID_SLEEP2_8822B
-		, REG_MACID_SLEEP3_8822B);
 }
 
 u32 rtl8822b_power_on(PADAPTER adapter)
@@ -101,16 +95,16 @@ void rtl8822b_power_off(PADAPTER adapter)
 	if (bMacPwrCtrlOn == _FALSE)
 		goto out;
 
-	bMacPwrCtrlOn = _FALSE;
-	rtw_hal_set_hwreg(adapter, HW_VAR_APFM_ON_MAC, &bMacPwrCtrlOn);
-
-	GET_HAL_DATA(adapter)->bFWReady = _FALSE;
-
 	err = rtw_halmac_poweroff(d);
 	if (err) {
 		RTW_ERR("%s: Power OFF Fail!!\n", __FUNCTION__);
 		goto out;
 	}
+
+	bMacPwrCtrlOn = _FALSE;
+	rtw_hal_set_hwreg(adapter, HW_VAR_APFM_ON_MAC, &bMacPwrCtrlOn);
+
+	GET_HAL_DATA(adapter)->bFWReady = _FALSE;
 
 out:
 	return;
@@ -153,7 +147,7 @@ u8 rtl8822b_hal_init(PADAPTER adapter)
 		return _FALSE;
 	}
 
-
+	
 
 	RTW_INFO("%s Download Firmware from %s success\n", __FUNCTION__, (fw_bin) ? "file" : "array");
 	RTW_INFO("%s FW Version:%d SubVersion:%d FW size:%d\n", "NIC",
@@ -274,11 +268,6 @@ void rtl8822b_init_misc(PADAPTER adapter)
 			  ctrl_new, ctrl);
 	}
 #endif /* RTW_AMPDU_AGG_RETRY_NEW */
-
-#ifdef CONFIG_LPS_PWR_TRACKING
-	rtl8822b_set_fw_thermal_rpt_cmd(adapter, _TRUE, hal->eeprom_thermal_meter + THERMAL_DIFF_TH);
-#endif
-
 }
 
 u32 rtl8822b_init(PADAPTER adapter)

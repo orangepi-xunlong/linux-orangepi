@@ -1,8 +1,15 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (C) 1999 Cort Dougan <cort@cs.nmt.edu>
  */
 #ifndef _ASM_POWERPC_BARRIER_H
 #define _ASM_POWERPC_BARRIER_H
+
+#include <asm/asm-const.h>
+
+#ifndef __ASSEMBLY__
+#include <asm/ppc-opcode.h>
+#endif
 
 /*
  * Memory barrier.
@@ -15,8 +22,6 @@
  * mb() prevents loads and stores being reordered across this point.
  * rmb() prevents loads being reordered across this point.
  * wmb() prevents stores being reordered across this point.
- * read_barrier_depends() prevents data-dependent loads being reordered
- *	across this point (nop on PPC).
  *
  * *mb() variants without smp_ prefix must order all types of memory
  * operations with one another. sync is the only instruction sufficient
@@ -35,7 +40,7 @@
 #define wmb()  __asm__ __volatile__ ("sync" : : : "memory")
 
 /* The sub-arch has lwsync */
-#if defined(__powerpc64__) || defined(CONFIG_PPC_E500MC)
+#if defined(CONFIG_PPC64) || defined(CONFIG_PPC_E500MC)
 #    define SMPWMB      LWSYNC
 #else
 #    define SMPWMB      eieio
@@ -75,7 +80,35 @@ do {									\
 	___p1;								\
 })
 
-#define smp_mb__before_spinlock()   smp_mb()
+#ifdef CONFIG_PPC_BOOK3S_64
+#define NOSPEC_BARRIER_SLOT   nop
+#elif defined(CONFIG_PPC_FSL_BOOK3E)
+#define NOSPEC_BARRIER_SLOT   nop; nop
+#endif
+
+#ifdef CONFIG_PPC_BARRIER_NOSPEC
+/*
+ * Prevent execution of subsequent instructions until preceding branches have
+ * been fully resolved and are no longer executing speculatively.
+ */
+#define barrier_nospec_asm NOSPEC_BARRIER_FIXUP_SECTION; NOSPEC_BARRIER_SLOT
+
+// This also acts as a compiler barrier due to the memory clobber.
+#define barrier_nospec() asm (stringify_in_c(barrier_nospec_asm) ::: "memory")
+
+#else /* !CONFIG_PPC_BARRIER_NOSPEC */
+#define barrier_nospec_asm
+#define barrier_nospec()
+#endif /* CONFIG_PPC_BARRIER_NOSPEC */
+
+/*
+ * pmem_wmb() ensures that all stores for which the modification
+ * are written to persistent storage by preceding dcbfps/dcbstps
+ * instructions have updated persistent storage before any data
+ * access or data transfer caused by subsequent instructions is
+ * initiated.
+ */
+#define pmem_wmb() __asm__ __volatile__(PPC_PHWSYNC ::: "memory")
 
 #include <asm-generic/barrier.h>
 

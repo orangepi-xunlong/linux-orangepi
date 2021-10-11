@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* drivers/atm/eni.c - Efficient Networks ENI155P device driver */
  
 /* Written 1995-2000 by Werner Almesberger, EPFL LRC/ICA */
@@ -21,7 +22,7 @@
 #include <linux/slab.h>
 #include <asm/io.h>
 #include <linux/atomic.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/string.h>
 #include <asm/byteorder.h>
 
@@ -29,12 +30,6 @@
 #include "midway.h"
 #include "suni.h"
 #include "eni.h"
-
-#if !defined(__i386__) && !defined(__x86_64__)
-#ifndef ioremap_nocache
-#define ioremap_nocache(X,Y) ioremap(X,Y)
-#endif 
-#endif
 
 /*
  * TODO:
@@ -241,7 +236,8 @@ static void __iomem *eni_alloc_mem(struct eni_dev *eni_dev, unsigned long *size)
 	len = eni_dev->free_len;
 	if (*size < MID_MIN_BUF_SIZE) *size = MID_MIN_BUF_SIZE;
 	if (*size > MID_MAX_BUF_SIZE) return NULL;
-	for (order = 0; (1 << order) < *size; order++);
+	for (order = 0; (1 << order) < *size; order++)
+		;
 	DPRINTK("trying: %ld->%d\n",*size,order);
 	best_order = 65; /* we don't have more than 2^64 of anything ... */
 	index = 0; /* silence GCC */
@@ -372,7 +368,7 @@ static int do_rx_dma(struct atm_vcc *vcc,struct sk_buff *skb,
 		here = (eni_vcc->descr+skip) & (eni_vcc->words-1);
 		dma[j++] = (here << MID_DMA_COUNT_SHIFT) | (vcc->vci
 		    << MID_DMA_VCI_SHIFT) | MID_DT_JK;
-		j++;
+		dma[j++] = 0;
 	}
 	here = (eni_vcc->descr+size+skip) & (eni_vcc->words-1);
 	if (!eff) size += skip;
@@ -445,7 +441,7 @@ static int do_rx_dma(struct atm_vcc *vcc,struct sk_buff *skb,
 	if (size != eff) {
 		dma[j++] = (here << MID_DMA_COUNT_SHIFT) |
 		    (vcc->vci << MID_DMA_VCI_SHIFT) | MID_DT_JK;
-		j++;
+		dma[j++] = 0;
 	}
 	if (!j || j > 2*RX_DMA_BUF) {
 		printk(KERN_CRIT DEV_LABEL "!j or j too big!!!\n");
@@ -473,7 +469,7 @@ static int do_rx_dma(struct atm_vcc *vcc,struct sk_buff *skb,
 		ENI_PRV_POS(skb) = eni_vcc->descr+size+1;
 		skb_queue_tail(&eni_dev->rx_queue,skb);
 		eni_vcc->last = skb;
-rx_enqueued++;
+		rx_enqueued++;
 	}
 	eni_vcc->descr = here;
 	eni_out(dma_wr,MID_DMA_WR_RX);
@@ -715,7 +711,7 @@ static void get_service(struct atm_dev *dev)
 			else eni_dev->slow = vcc;
 			eni_dev->last_slow = vcc;
 		}
-putting++;
+		putting++;
 		ENI_VCC(vcc)->servicing++;
 	}
 }
@@ -744,7 +740,7 @@ static void dequeue_rx(struct atm_dev *dev)
 		}
 		EVENT("dequeued (size=%ld,pos=0x%lx)\n",ENI_PRV_SIZE(skb),
 		    ENI_PRV_POS(skb));
-rx_dequeued++;
+		rx_dequeued++;
 		vcc = ATM_SKB(skb)->vcc;
 		eni_vcc = ENI_VCC(vcc);
 		first = 0;
@@ -1038,6 +1034,7 @@ static enum enq_res do_tx(struct sk_buff *skb)
 	u32 dma_rd,dma_wr;
 	u32 size; /* in words */
 	int aal5,dma_size,i,j;
+	unsigned char skb_data3;
 
 	DPRINTK(">do_tx\n");
 	NULLCHECK(skb);
@@ -1112,6 +1109,7 @@ DPRINTK("iovcnt = %d\n",skb_shinfo(skb)->nr_frags);
 		    vcc->dev->number);
 		return enq_jam;
 	}
+	skb_data3 = skb->data[3];
 	paddr = dma_map_single(&eni_dev->pci_dev->dev,skb->data,skb->len,
 			       DMA_TO_DEVICE);
 	ENI_PRV_PADDR(skb) = paddr;
@@ -1134,7 +1132,7 @@ DPRINTK("doing direct send\n"); /* @@@ well, this doesn't work anyway */
 			else
 				put_dma(tx->index,eni_dev->dma,&j,(unsigned long)
 				    skb_frag_page(&skb_shinfo(skb)->frags[i]) +
-					skb_shinfo(skb)->frags[i].page_offset,
+					skb_frag_off(&skb_shinfo(skb)->frags[i]),
 				    skb_frag_size(&skb_shinfo(skb)->frags[i]));
 	}
 	if (skb->len & 3) {
@@ -1154,7 +1152,7 @@ DPRINTK("doing direct send\n"); /* @@@ well, this doesn't work anyway */
 	    (size/(ATM_CELL_PAYLOAD/4)),tx->send+tx->tx_pos*4);
 /*printk("dsc = 0x%08lx\n",(unsigned long) readl(tx->send+tx->tx_pos*4));*/
 	writel((vcc->vci << MID_SEG_VCI_SHIFT) |
-            (aal5 ? 0 : (skb->data[3] & 0xf)) |
+            (aal5 ? 0 : (skb_data3 & 0xf)) |
 	    (ATM_SKB(skb)->atm_options & ATM_ATMOPT_CLP ? MID_SEG_CLP : 0),
 	    tx->send+((tx->tx_pos+1) & (tx->words-1))*4);
 	DPRINTK("size: %d, len:%d\n",size,skb->len);
@@ -1174,7 +1172,7 @@ DPRINTK("doing direct send\n"); /* @@@ well, this doesn't work anyway */
 	DPRINTK("dma_wr set to %d, tx_pos is now %ld\n",dma_wr,tx->tx_pos);
 	eni_out(dma_wr,MID_DMA_WR_TX);
 	skb_queue_tail(&eni_dev->tx_queue,skb);
-queued++;
+	queued++;
 	return enq_ok;
 }
 
@@ -1195,7 +1193,7 @@ static void poll_tx(struct atm_dev *dev)
 				if (res == enq_ok) continue;
 				DPRINTK("re-queuing TX PDU\n");
 				skb_queue_head(&tx->backlog,skb);
-requeued++;
+				requeued++;
 				if (res == enq_jam) return;
 				break;
 			}
@@ -1232,7 +1230,7 @@ static void dequeue_tx(struct atm_dev *dev)
 		else dev_kfree_skb_irq(skb);
 		atomic_inc(&vcc->stats->tx);
 		wake_up(&eni_dev->tx_wait);
-dma_complete++;
+		dma_complete++;
 	}
 }
 
@@ -1555,7 +1553,7 @@ static void eni_tasklet(unsigned long data)
 	}
 	if (events & MID_TX_COMPLETE) {
 		EVENT("INT: TX COMPLETE\n",0,0);
-tx_complete++;
+		tx_complete++;
 		wake_up(&eni_dev->tx_wait);
 		/* poll_rx ? */
 	}
@@ -1723,7 +1721,7 @@ static int eni_do_init(struct atm_dev *dev)
 	}
 	printk(KERN_NOTICE DEV_LABEL "(itf %d): rev.%d,base=0x%lx,irq=%d,",
 	    dev->number,pci_dev->revision,real_base,eni_dev->irq);
-	if (!(base = ioremap_nocache(real_base,MAP_MAX_SIZE))) {
+	if (!(base = ioremap(real_base,MAP_MAX_SIZE))) {
 		printk("\n");
 		printk(KERN_ERR DEV_LABEL "(itf %d): can't set up page "
 		    "mapping\n",dev->number);
@@ -1779,7 +1777,7 @@ static int eni_do_init(struct atm_dev *dev)
 	printk(")\n");
 	printk(KERN_NOTICE DEV_LABEL "(itf %d): %s,%s\n",dev->number,
 	    eni_in(MID_RES_ID_MCON) & 0x200 ? "ASIC" : "FPGA",
-	    media_name[eni_in(MID_RES_ID_MCON) & DAUGTHER_ID]);
+	    media_name[eni_in(MID_RES_ID_MCON) & DAUGHTER_ID]);
 
 	error = suni_init(dev);
 	if (error)
@@ -2031,21 +2029,6 @@ static int eni_ioctl(struct atm_dev *dev,unsigned int cmd,void __user *arg)
 	return dev->phy->ioctl(dev,cmd,arg);
 }
 
-
-static int eni_getsockopt(struct atm_vcc *vcc,int level,int optname,
-    void __user *optval,int optlen)
-{
-	return -EINVAL;
-}
-
-
-static int eni_setsockopt(struct atm_vcc *vcc,int level,int optname,
-    void __user *optval,unsigned int optlen)
-{
-	return -EINVAL;
-}
-
-
 static int eni_send(struct atm_vcc *vcc,struct sk_buff *skb)
 {
 	enum enq_res res;
@@ -2069,14 +2052,14 @@ static int eni_send(struct atm_vcc *vcc,struct sk_buff *skb)
 		}
 		*(u32 *) skb->data = htonl(*(u32 *) skb->data);
 	}
-submitted++;
+	submitted++;
 	ATM_SKB(skb)->vcc = vcc;
-	tasklet_disable(&ENI_DEV(vcc->dev)->task);
+	tasklet_disable_in_atomic(&ENI_DEV(vcc->dev)->task);
 	res = do_tx(skb);
 	tasklet_enable(&ENI_DEV(vcc->dev)->task);
 	if (res == enq_ok) return 0;
 	skb_queue_tail(&ENI_VCC(vcc)->tx->backlog,skb);
-backlogged++;
+	backlogged++;
 	tasklet_schedule(&ENI_DEV(vcc->dev)->task);
 	return 0;
 }
@@ -2219,8 +2202,6 @@ static const struct atmdev_ops ops = {
 	.open		= eni_open,
 	.close		= eni_close,
 	.ioctl		= eni_ioctl,
-	.getsockopt	= eni_getsockopt,
-	.setsockopt	= eni_setsockopt,
 	.send		= eni_send,
 	.phy_put	= eni_phy_put,
 	.phy_get	= eni_phy_get,
@@ -2243,7 +2224,7 @@ static int eni_init_one(struct pci_dev *pci_dev,
 
 	rc = dma_set_mask_and_coherent(&pci_dev->dev, DMA_BIT_MASK(32));
 	if (rc < 0)
-		goto out;
+		goto err_disable;
 
 	rc = -ENOMEM;
 	eni_dev = kmalloc(sizeof(struct eni_dev), GFP_KERNEL);
@@ -2279,7 +2260,8 @@ out:
 	return rc;
 
 err_eni_release:
-	eni_do_release(dev);
+	dev->phy = NULL;
+	iounmap(ENI_DEV(dev)->ioaddr);
 err_unregister:
 	atm_dev_deregister(dev);
 err_free_consistent:
@@ -2292,7 +2274,7 @@ err_disable:
 }
 
 
-static struct pci_device_id eni_pci_tbl[] = {
+static const struct pci_device_id eni_pci_tbl[] = {
 	{ PCI_VDEVICE(EF, PCI_DEVICE_ID_EF_ATM_FPGA), 0 /* FPGA */ },
 	{ PCI_VDEVICE(EF, PCI_DEVICE_ID_EF_ATM_ASIC), 1 /* ASIC */ },
 	{ 0, }
@@ -2326,11 +2308,7 @@ static int __init eni_init(void)
 {
 	struct sk_buff *skb; /* dummy for sizeof */
 
-	if (sizeof(skb->cb) < sizeof(struct eni_skb_prv)) {
-		printk(KERN_ERR "eni_detect: skb->cb is too small (%Zd < %Zd)\n",
-		    sizeof(skb->cb),sizeof(struct eni_skb_prv));
-		return -EIO;
-	}
+	BUILD_BUG_ON(sizeof(skb->cb) < sizeof(struct eni_skb_prv));
 	return pci_register_driver(&eni_driver);
 }
 

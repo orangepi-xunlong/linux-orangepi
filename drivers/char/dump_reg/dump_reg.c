@@ -1,14 +1,13 @@
 /*
- * drivers/char/dump_reg/dump_reg.c
+ * dump registers sysfs driver
  *
  * Copyright(c) 2015-2018 Allwinnertech Co., Ltd.
  *      http://www.allwinnertech.com
  *
  * Author: Liugang <liugang@allwinnertech.com>
  *         Xiafeng <xiafeng@allwinnertech.com>
- *
- * dump registers sysfs driver
- *
+ *         Martin <wuyan@allwinnertech.com>
+ *         Lewis  <liuyu@allwinnertech.com>
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -25,256 +24,199 @@
 #include <linux/slab.h>
 #include <linux/miscdevice.h>
 #include <linux/seq_file.h>
-#include <asm/memory.h>
+#include <linux/platform_device.h>
+#include <linux/sysfs.h>
+#include <linux/mod_devicetable.h>
 #include "dump_reg.h"
 
-#ifdef CONFIG_ARM64
-#define SUNXI_IO_PHYS_BASE	0x01000000
-#if defined(CONFIG_ARCH_SUN50IW3) \
-	|| defined(CONFIG_ARCH_SUN50IW6) \
-	|| defined(CONFIG_ARCH_SUN50IW8)
-#define SUNXI_IO_SIZE		(SZ_128M + SZ_16M)
-#else
-#define SUNXI_IO_SIZE		SZ_16M	/* 16MB(Max) */
-#endif
-#define SUNXI_PLAT_PHYS_OFFSET	0x40000000UL
-#define SUNXI_IOMEM_VASE	0xffffff8000000000UL
-#define SUNXI_IOMEM_SIZE	SZ_2G
-#define SUNXI_MEM_PHYS_VASE	0xffffffc000000000UL
-#define PRINT_ADDR_FMT		"0x%016lx"
-#else
-#define SUNXI_PLAT_PHYS_OFFSET	0x40000000UL
-#define SUNXI_IO_PHYS_BASE	SUNXI_IO_PBASE
-#define SUNXI_MEM_PHYS_VASE	PAGE_OFFSET
-#define PRINT_ADDR_FMT		"0x%08lx"
-#endif
+/* the register and vaule to be test by dump_reg */
+static u32 test_addr;
+static u32 test_size;
+static struct class *dump_class;
 
-#undef READ
-#undef WRITE
-
-struct dump_reg {
-	unsigned long pst_addr;	/* start reg addr */
-	unsigned long ped_addr;	/* end reg addr   */
-	void __iomem *vaddr;
-};
-
-struct dump_struct {
-	struct dump_reg dump;
-	/* some registers' operate method maybe different */
-	void __iomem *(*remap)(phys_addr_t phys_addr, size_t size);
-	void (*unmap)(void __iomem *addr);
-	void __iomem *(*phys2virt)(struct dump_reg *dump, unsigned long addr);
-	 u32 (*read)(void __iomem *addr);
-	void (*write)(u32 val, void __iomem *addr);
-};
-
-/* for read and write in byte/word mode */
+/* Access in byte mode ? 1: byte-mode, 0: word-mode */
 static unsigned int rw_byte_mode;
 
 /* for dump_reg class */
-static struct dump_reg dump_para;
+static struct dump_addr dump_para;
 static struct write_group *wt_group;
 static struct compare_group *cmp_group;
 
-static u32 READ(void __iomem *addr)
+static u32 _read(void __iomem *vaddr)
 {
 	if (rw_byte_mode)
-		return readb(addr);
+		return (u32)readb(vaddr);
 	else
-		return readl(addr);
+		return readl(vaddr);
 }
 
-static void WRITE(u32 val, void __iomem *addr)
+static void _write(u32 val, void __iomem *vaddr)
 {
 	if (rw_byte_mode)
-		writeb(val, addr);
+		writeb((u8)val, vaddr);
 	else
-		writel(val, addr);
+		writel(val, vaddr);
 }
 
-static void __iomem *REMAPIO(phys_addr_t phys_addr, size_t size)
+static void __iomem *_io_remap(unsigned long paddr, size_t size)
 {
-	pr_debug("%s,%d, addr:%p, size:%zx\n", __func__, __LINE__,
-		 (void *)phys_addr, size);
-
-	return ioremap(phys_addr, size);
+	return ioremap(paddr, size);
 }
 
-static void UNMAPIO(void __iomem *addr)
+static void _io_unmap(void __iomem *vaddr)
 {
-	pr_debug("%s,%d, addr:%p\n", __func__, __LINE__, addr);
-
-	iounmap(addr);
+	iounmap(vaddr);
 }
 
-static void __iomem *REMAPMEM(phys_addr_t phys_addr, size_t size)
+static void __iomem *_mem_remap(unsigned long paddr, size_t size)
 {
-	pr_debug("%s,%d, addr:%p, size:%zx\n", __func__, __LINE__,
-		 (void *)phys_addr, size);
-
-	return (void __iomem *)phys_to_virt(phys_addr);
+	return (void __iomem *)phys_to_virt(paddr);
 }
 
-static void __iomem *GET_VADDR(struct dump_reg *dump, unsigned long addr)
+/*
+ * Convert a physical address (which is already mapped) to virtual address
+ */
+static void __iomem *_get_vaddr(struct dump_addr *dump_addr, unsigned long uaddr)
 {
-	unsigned long offset;
-	unsigned long raddr;
-
-	raddr = (unsigned long)(dump->vaddr);
-	offset = addr - dump->pst_addr;
-
-	raddr = raddr + offset;
-
-	return (void __iomem *)raddr;
+	unsigned long offset = uaddr - dump_addr->uaddr_start;
+	return (void __iomem *)(dump_addr->vaddr_start + offset);
 }
 
-static const struct dump_struct dump_table[] = {
+const struct dump_struct dump_table[] = {
 	{
-	 .dump = {
-		  .pst_addr = SUNXI_IO_PHYS_BASE,
-		  .ped_addr = SUNXI_IO_PHYS_BASE + SUNXI_IO_SIZE,
-		  .vaddr = NULL,
-		  },
-	 .remap = REMAPIO,
-	 .unmap = UNMAPIO,
-	 .phys2virt = GET_VADDR,
-	 .read = READ,
-	 .write = WRITE,
-	 },
+		.addr_start = SUNXI_IO_PHYS_START,
+		.addr_end   = SUNXI_IO_PHYS_END,
+		.remap = _io_remap,
+		.unmap = _io_unmap,
+		.get_vaddr = _get_vaddr,
+		.read  = _read,
+		.write = _write,
+	},
 	{
-	 .dump = {
-		  .pst_addr = SUNXI_PLAT_PHYS_OFFSET,
-		  .ped_addr = SUNXI_PLAT_PHYS_OFFSET + SZ_1G,
-		  .vaddr = NULL,
-		  },
-	 .remap = REMAPMEM,
-	 .unmap = NULL,
-	 .phys2virt = GET_VADDR,
-	 .read = READ,
-	 .write = WRITE,
-	 },
-#if defined(SUNXI_IOMEM_VASE)
+		.addr_start = SUNXI_PLAT_PHYS_START,
+		.addr_end   = SUNXI_PLAT_PHYS_END,
+		.remap = _mem_remap,
+		.unmap = NULL,
+		.get_vaddr = _get_vaddr,
+		.read  = _read,
+		.write = _write,
+	},
+#if defined(SUNXI_IOMEM_START)
 	{
-	 .dump = {
-		  .pst_addr = (unsigned long)SUNXI_IOMEM_VASE,
-		  .ped_addr =
-		  (unsigned long)SUNXI_IOMEM_VASE + SUNXI_IOMEM_SIZE,
-		  .vaddr = NULL,
-		  },
-	 .remap = NULL,
-	 .unmap = NULL,
-	 .phys2virt = GET_VADDR,
-	 .read = READ,
-	 .write = WRITE,
-	 },
+		.addr_start = SUNXI_IOMEM_START,
+		.addr_end   = SUNXI_IOMEM_END,
+		.remap = NULL,  /* .remap = NULL: uaddr is a virtual address */
+		.unmap = NULL,
+		.get_vaddr = _get_vaddr,
+		.read  = _read,
+		.write = _write,
+	},
 #endif
 	{
-	 .dump = {
-		  .pst_addr = SUNXI_MEM_PHYS_VASE,
-#ifdef CONFIG_ARM64
-		  .ped_addr = SUNXI_MEM_PHYS_VASE + SZ_2G,
-#else
-		  .ped_addr = SUNXI_MEM_PHYS_VASE + SZ_1G - 1,
-#endif
-		  .vaddr = NULL,
-		  },
-	 .remap = NULL,
-	 .unmap = NULL,
-	 .phys2virt = GET_VADDR,
-	 .read = READ,
-	 .write = WRITE,
-	 },
+		.addr_start = SUNXI_MEM_PHYS_START,
+		.addr_end   = SUNXI_MEM_PHYS_END,
+		.remap = NULL,  /* .remap = NULL: uaddr is a virtual address */
+		.unmap = NULL,
+		.get_vaddr = _get_vaddr,
+		.read  = _read,
+		.write = _write,
+	},
 };
+EXPORT_SYMBOL(dump_table);
 
 /**
- * __addr_valid - check if the addr is valid.
- * @addr: addr to judge.
+ * __addr_valid - check if @uaddr is valid.
+ * @uaddr: addr to judge.
  *
- * return index if the addr is register addr, -ENXIO if not.
+ * return index if @addr is valid, -ENXIO if not.
  */
-static int __addr_valid(unsigned long addr)
+int __addr_valid(unsigned long uaddr)
 {
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(dump_table); i++)
-		if (addr >= dump_table[i].dump.pst_addr &&
-			addr < dump_table[i].dump.ped_addr)
+		if (uaddr >= dump_table[i].addr_start &&
+		    uaddr <= dump_table[i].addr_end)
 			return i;
 	return -ENXIO;
 }
+EXPORT_SYMBOL(__addr_valid);
 
 /**
  * __dump_regs_ex - dump a range of registers' value, copy to buf.
- * @reg: start and end address of registers.
+ * @dump_addr: start and end address of registers.
  * @buf: store the dump info.
+ * @buf_size: buf size
  *
  * return bytes written to buf, <=0 indicate err
  */
-static ssize_t __dump_regs_ex(struct dump_reg *reg, char *buf, ssize_t len)
+ssize_t __dump_regs_ex(struct dump_addr *dump_addr, char *buf, ssize_t buf_size)
 {
 	int index;
 	ssize_t cnt = 0;
-	unsigned long paddr;
+	unsigned long uaddr;
+	unsigned long remap_size;
 	const struct dump_struct *dump;
 
-	reg->pst_addr &= (~0x3UL);
-	reg->ped_addr &= (~0x3UL);
+	/* Make the address 4-bytes aligned */
+	dump_addr->uaddr_start &= (~0x3UL);
+	dump_addr->uaddr_end &= (~0x3UL);
+	remap_size = dump_addr->uaddr_end - dump_addr->uaddr_start + 4;
 
-	index = __addr_valid(reg->pst_addr);
-	if ((index < 0) || (index != __addr_valid(reg->ped_addr)) ||
+	index = __addr_valid(dump_addr->uaddr_start);
+	if ((index < 0) || (index != __addr_valid(dump_addr->uaddr_end)) ||
 	    (buf == NULL)) {
-		pr_err("%s,%d err, invalid para, index:%d, start:0x%lx, end:0x%lx, buf:0x%p\n",
-		       __func__, __LINE__, index,
-		       reg->pst_addr, reg->ped_addr, buf);
+		pr_err("%s(): Invalid para: index=%d, start=0x%lx, end=0x%lx, buf=0x%p\n",
+		       __func__, index, dump_addr->uaddr_start, dump_addr->uaddr_end, buf);
 		return -EIO;
 	}
 
 	dump = &dump_table[index];
-	if (dump->remap)
-		reg->vaddr = dump->remap(reg->pst_addr, reg->ped_addr -
-					 reg->pst_addr + sizeof(unsigned long));
-	else
-		reg->vaddr = (void __iomem *)reg->pst_addr;
+	if (dump->remap) {
+		dump_addr->vaddr_start = dump->remap(dump_addr->uaddr_start, remap_size);
+		if (!dump_addr->vaddr_start) {
+			pr_err("%s(): remap failed\n", __func__);
+			return -EIO;
+		}
+	} else  /* if (dump->remap = NULL), then treat uaddr as a virtual address */
+		dump_addr->vaddr_start = (void __iomem *)dump_addr->uaddr_start;
 
-	/* only one to dump, so, we did not print address for
-	 * open("/sys/class/...") app call
-	 */
-	if (reg->pst_addr == reg->ped_addr) {
-		cnt = sprintf(buf, "0x%08x\n", dump->read(reg->vaddr));
+	if (dump_addr->uaddr_start == dump_addr->uaddr_end) {
+		cnt = sprintf(buf, "0x%08x\n", dump->read(dump_addr->vaddr_start));
 		goto out;
 	}
 
-	for (paddr = (reg->pst_addr & ~0x0F); paddr <= reg->ped_addr;
-	     paddr += 4) {
-		if (!(paddr & 0x0F))
-			cnt +=
-			    snprintf(buf + cnt, len - cnt,
-				     "\n" PRINT_ADDR_FMT ":", paddr);
+	for (uaddr = (dump_addr->uaddr_start & ~0x0F); uaddr <= dump_addr->uaddr_end;
+	     uaddr += 4) {
+		if (!(uaddr & 0x0F))
+			cnt += snprintf(buf + cnt, buf_size - cnt,
+				     "\n" PRINT_ADDR_FMT ":", uaddr);
 
-		if (cnt >= len) {
+		if (cnt >= buf_size) {
 			pr_warn("Range too large, strings buffer overflow\n");
-			cnt = len;
+			cnt = buf_size;
 			goto out;
 		}
 
-		if (paddr < reg->pst_addr)
+		if (uaddr < dump_addr->uaddr_start)  /* Don't show unused uaddr */
 			/* "0x12345678 ", 11 space */
-			cnt += snprintf(buf + cnt, len - cnt, "           ");
+			cnt += snprintf(buf + cnt, buf_size - cnt, "           ");
 		else
-			cnt += snprintf(buf + cnt, len - cnt, " 0x%08x",
-					dump->read(dump->
-						   phys2virt(reg, paddr)));
+			cnt += snprintf(buf + cnt, buf_size - cnt, " 0x%08x",
+				dump->read(dump->get_vaddr(dump_addr, uaddr)));
 	}
-	cnt += snprintf(buf + cnt, len - cnt, "\n");
-	pr_debug("%s,%d, start:0x%lx, end:0x%lx, return:%zd\n", __func__,
-		 __LINE__, reg->pst_addr, reg->ped_addr, cnt);
+	cnt += snprintf(buf + cnt, buf_size - cnt, "\n");
+
+	pr_debug("%s(): start=0x%lx, end=0x%lx, return=%zd\n", __func__,
+		 dump_addr->uaddr_start, dump_addr->uaddr_end, cnt);
 
 out:
 	if (dump->unmap)
-		dump->unmap(reg->vaddr);
+		dump->unmap(dump_addr->vaddr_start);
 
 	return cnt;
 }
+EXPORT_SYMBOL(__dump_regs_ex);
 
 /**
  * __parse_dump_str - parse the input string for dump attri.
@@ -285,7 +227,7 @@ out:
  *
  * return 0 if success, otherwise failed.
  */
-static int __parse_dump_str(const char *buf, size_t size,
+int __parse_dump_str(const char *buf, size_t size,
 			    unsigned long *start, unsigned long *end)
 {
 	char *ptr = NULL;
@@ -325,6 +267,7 @@ next:
 out:
 	return ret;
 }
+EXPORT_SYMBOL(__parse_dump_str);
 
 /**
  * __write_show - dump a register's value, copy to buf.
@@ -333,13 +276,8 @@ out:
  *
  * return bytes written to buf, <=0 indicate err.
  */
-static ssize_t __write_show(struct write_group *pgroup, char *buf, ssize_t len)
+ssize_t __write_show(struct write_group *pgroup, char *buf, ssize_t len)
 {
-#ifdef CONFIG_ARM64
-#define WR_PRINT_FMT "reg                 to_write    after_write\n"
-#else
-#define WR_PRINT_FMT "reg         to_write    after_write\n"
-#endif
 #define WR_DATA_FMT PRINT_ADDR_FMT"  0x%08x  %s"
 
 	int i = 0;
@@ -347,7 +285,7 @@ static ssize_t __write_show(struct write_group *pgroup, char *buf, ssize_t len)
 	unsigned long reg = 0;
 	u32 val;
 	u8 rval_buf[16];
-	struct dump_reg dump_reg;
+	struct dump_addr dump_addr;
 
 	if (!pgroup) {
 		pr_err("%s,%d err, pgroup is NULL!\n", __func__, __LINE__);
@@ -363,9 +301,9 @@ static ssize_t __write_show(struct write_group *pgroup, char *buf, ssize_t len)
 	for (i = 0; i < pgroup->num; i++) {
 		reg = pgroup->pitem[i].reg_addr;
 		val = pgroup->pitem[i].val;
-		dump_reg.pst_addr = reg;
-		dump_reg.ped_addr = reg;
-		if (__dump_regs_ex(&dump_reg, rval_buf, sizeof(rval_buf)) < 0)
+		dump_addr.uaddr_start = reg;
+		dump_addr.uaddr_end = reg;
+		if (__dump_regs_ex(&dump_addr, rval_buf, sizeof(rval_buf)) < 0)
 			return -EINVAL;
 
 		cnt +=
@@ -380,6 +318,7 @@ static ssize_t __write_show(struct write_group *pgroup, char *buf, ssize_t len)
 end:
 	return cnt;
 }
+EXPORT_SYMBOL(__write_show);
 
 /**
  * __parse_write_str - parse the input string for write attri.
@@ -429,7 +368,7 @@ out:
  *
  * return 0 if success, otherwise failed.
  */
-static int __write_item_init(struct write_group **ppgroup, const char *buf,
+int __write_item_init(struct write_group **ppgroup, const char *buf,
 			     size_t size)
 {
 	char *ptr, *ptr2;
@@ -482,13 +421,14 @@ static int __write_item_init(struct write_group **ppgroup, const char *buf,
 	*ppgroup = pgroup;
 	return 0;
 }
+EXPORT_SYMBOL(__write_item_init);
 
 /**
  * __write_item_deinit - reled_addrse memory that cred_addrted by
  *                       __write_item_init.
  * @pgroup: the write struct allocated in __write_item_init.
  */
-static void __write_item_deinit(struct write_group *pgroup)
+void __write_item_deinit(struct write_group *pgroup)
 {
 	if (pgroup != NULL) {
 		if (pgroup->pitem != NULL)
@@ -496,6 +436,7 @@ static void __write_item_deinit(struct write_group *pgroup)
 		kfree(pgroup);
 	}
 }
+EXPORT_SYMBOL(__write_item_deinit);
 
 /**
  * __compare_regs_ex - dump a range of registers' value, copy to buf.
@@ -504,14 +445,9 @@ static void __write_item_deinit(struct write_group *pgroup)
  *
  * return bytes written to buf, <= 0 indicate err.
  */
-static ssize_t __compare_regs_ex(struct compare_group *pgroup, char *buf,
+ssize_t __compare_regs_ex(struct compare_group *pgroup, char *buf,
 				 ssize_t len)
 {
-#ifdef CONFIG_ARM64
-#define CMP_PRINT_FMT "reg                 expect      actual      mask        result\n"
-#else
-#define CMP_PRINT_FMT "reg         expect      actual      mask        result\n"
-#endif
 #define CMP_DATAO_FMT PRINT_ADDR_FMT"  0x%08x  0x%08x  0x%08x  OK\n"
 #define CMP_DATAE_FMT PRINT_ADDR_FMT"  0x%08x  0x%08x  0x%08x  ERR\n"
 
@@ -520,7 +456,7 @@ static ssize_t __compare_regs_ex(struct compare_group *pgroup, char *buf,
 	unsigned long reg;
 	u32 expect, actual, mask;
 	u8 actualb[16];
-	struct dump_reg dump_reg;
+	struct dump_addr dump_addr;
 
 	if (!pgroup) {
 		pr_err("%s,%d err, pgroup is NULL!\n", __func__, __LINE__);
@@ -536,9 +472,9 @@ static ssize_t __compare_regs_ex(struct compare_group *pgroup, char *buf,
 	for (i = 0; i < pgroup->num; i++) {
 		reg = pgroup->pitem[i].reg_addr;
 		expect = pgroup->pitem[i].val_expect;
-		dump_reg.pst_addr = reg;
-		dump_reg.ped_addr = reg;
-		if (__dump_regs_ex(&dump_reg, actualb, sizeof(actualb)) < 0)
+		dump_addr.uaddr_start = reg;
+		dump_addr.uaddr_end = reg;
+		if (__dump_regs_ex(&dump_addr, actualb, sizeof(actualb)) < 0)
 			return -EINVAL;
 
 		if (kstrtou32(actualb, 16, &actual))
@@ -562,19 +498,7 @@ static ssize_t __compare_regs_ex(struct compare_group *pgroup, char *buf,
 end:
 	return cnt;
 }
-
-/**
- * __compare_item_deinit - reled_addrse memory that cred_addrted by
- *                         __compare_item_init.
- * @pgroup: the compare struct allocated in __compare_item_init.
- */
-static void __compare_item_deinit(struct compare_group *pgroup)
-{
-	if (pgroup) {
-		kfree(pgroup->pitem);
-		kfree(pgroup);
-	}
-}
+EXPORT_SYMBOL(__compare_regs_ex);
 
 /**
  * __parse_compare_str - parse the input string for compare attri.
@@ -629,7 +553,7 @@ static int __parse_compare_str(char *str, unsigned long *reg_addr,
  *
  * return 0 if success, otherwise failed.
  */
-static int __compare_item_init(struct compare_group **ppgroup,
+int __compare_item_init(struct compare_group **ppgroup,
 			       const char *buf, size_t size)
 {
 	char *ptr, *ptr2;
@@ -685,6 +609,21 @@ static int __compare_item_init(struct compare_group **ppgroup,
 
 	return 0;
 }
+EXPORT_SYMBOL(__compare_item_init);
+
+/**
+ * __compare_item_deinit - reled_addrse memory that cred_addrted by
+ *                         __compare_item_init.
+ * @pgroup: the compare struct allocated in __compare_item_init.
+ */
+void __compare_item_deinit(struct compare_group *pgroup)
+{
+	if (pgroup) {
+		kfree(pgroup->pitem);
+		kfree(pgroup);
+	}
+}
+EXPORT_SYMBOL(__compare_item_deinit);
 
 /**
  * dump_show - show func of dump attribute.
@@ -720,16 +659,16 @@ dump_store(struct class *class, struct class_attribute *attr,
 		goto err;
 	}
 
-	dump_para.pst_addr = start_reg;
-	dump_para.ped_addr = end_reg;
+	dump_para.uaddr_start = start_reg;
+	dump_para.uaddr_end = end_reg;
 	pr_debug("%s,%d, start_reg:" PRINT_ADDR_FMT ", end_reg:" PRINT_ADDR_FMT
 		 "\n", __func__, __LINE__, start_reg, end_reg);
 
 	return count;
 
 err:
-	dump_para.pst_addr = 0;
-	dump_para.ped_addr = 0;
+	dump_para.uaddr_start = 0;
+	dump_para.uaddr_end = 0;
 
 	return -EINVAL;
 }
@@ -750,7 +689,7 @@ write_store(struct class *class, struct class_attribute *attr,
 	unsigned long reg;
 	u32 val;
 	const struct dump_struct *dump;
-	struct dump_reg write_para;
+	struct dump_addr dump_addr;
 
 	/* free if not NULL */
 	if (wt_group) {
@@ -770,17 +709,17 @@ write_store(struct class *class, struct class_attribute *attr,
 	 */
 	for (i = 0; i < wt_group->num; i++) {
 		reg = wt_group->pitem[i].reg_addr;
-		write_para.pst_addr = reg;
+		dump_addr.uaddr_start = reg;
 		val = wt_group->pitem[i].val;
 		index = __addr_valid(reg);
 		dump = &dump_table[index];
 		if (dump->remap)
-			write_para.vaddr = dump->remap(reg, 4);
+			dump_addr.vaddr_start = dump->remap(reg, 4);
 		else
-			write_para.vaddr = (void __iomem *)reg;
-		dump->write(val, dump->phys2virt(&write_para, reg));
+			dump_addr.vaddr_start = (void __iomem *)reg;
+		dump->write(val, dump->get_vaddr(&dump_addr, reg));
 		if (dump->unmap)
-			dump->unmap(write_para.vaddr);
+			dump->unmap(dump_addr.vaddr_start);
 	}
 
 	return count;
@@ -834,214 +773,116 @@ out:
 	return count;
 }
 
+static ssize_t
+test_show(struct class *class, struct class_attribute *attr, char *buf)
+{
+	return sprintf(buf, "addr:0x%08x\nsize:0x%08x\n", test_addr, test_size);
+}
+
+static ssize_t
+help_show(struct class *class, struct class_attribute *attr, char *buf)
+{
+	const char *info =
+		"dump single register:          echo {addr} > dump; cat dump\n"
+		"dump multi  registers:         echo {start-addr},{end-addr} > dump; cat dump\n"
+		"write single register:         echo {addr} {val} > write; cat write\n"
+		"write multi  registers:        echo {addr1} {val1},{addr2} {val2},... > write; cat write\n"
+		"compare single register:       echo {addr} {expect-val} {mask} > compare; cat compare\n"
+		"compare multi  registers:      echo {addr1} {expect-val1} {mask1},{addr2} {expect-val2} {mask2},... > compare; cat compare\n"
+		"byte-access mode:              echo 1 > rw_byte\n"
+		"word-access mode (default):    echo 0 > rw_byte\n"
+		"show test address info:        cat test\n";
+	return sprintf(buf, info);
+}
+
 static struct class_attribute dump_class_attrs[] = {
-	__ATTR(dump, S_IWUSR | S_IRUGO, dump_show, dump_store),
-	__ATTR(write, S_IWUSR | S_IRUGO, write_show, write_store),
-	__ATTR(compare, S_IWUSR | S_IRUGO, compare_show, compare_store),
-	__ATTR(rw_byte, S_IWUSR | S_IRUGO, rw_byte_show, rw_byte_store),
-	__ATTR_NULL,
+	__ATTR(dump,     S_IWUSR | S_IRUGO, dump_show,     dump_store),
+	__ATTR(write,    S_IWUSR | S_IRUGO, write_show,    write_store),
+	__ATTR(compare,  S_IWUSR | S_IRUGO, compare_show,  compare_store),
+	__ATTR(rw_byte,  S_IWUSR | S_IRUGO, rw_byte_show,  rw_byte_store),
+	__ATTR(test,     S_IRUGO,           test_show, NULL),
+	__ATTR(help,     S_IRUGO,           help_show, NULL),
 };
 
-static struct class dump_class = {
-	.name = "sunxi_dump",
-	.owner = THIS_MODULE,
-	.class_attrs = dump_class_attrs,
+static const struct of_device_id sunxi_dump_reg_match[] = {
+	{.compatible = "allwinner,sunxi-dump-reg", },
+	{}
 };
+MODULE_DEVICE_TABLE(of, sunxi_dump_reg_match);
 
-static int __init dump_class_init(void)
+static int sunxi_dump_reg_probe(struct platform_device *pdev)
 {
-	int status;
+	struct resource *res;
+	struct device *dev = &pdev->dev;
 
-	status = class_register(&dump_class);
-	if (status < 0)
-		pr_err("%s,%d err, status:%d\n", __func__, __LINE__, status);
-	else
-		pr_info("%s,%d, success\n", __func__, __LINE__);
+	int err;
+	int i;
 
-	return status;
-}
-
-postcore_initcall(dump_class_init);
-
-#ifdef CONFIG_DUMP_REG_MISC
-/* for dump_reg misc driver */
-static struct dump_reg misc_dump_para;
-static struct write_group *misc_wt_group;
-static struct compare_group *misc_cmp_group;
-
-static ssize_t
-misc_dump_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	return __dump_regs_ex(&misc_dump_para, buf, PAGE_SIZE);
-}
-
-static ssize_t
-misc_dump_store(struct device *dev, struct device_attribute *attr,
-		const char *buf, size_t size)
-{
-	int index;
-	unsigned long start_reg = 0;
-	unsigned long end_reg = 0;
-
-	if (__parse_dump_str(buf, size, &start_reg, &end_reg)) {
-		pr_err("%s,%d err, invalid para!\n", __func__, __LINE__);
-		goto err;
+	/* sys/class/sunxi_dump */
+	dump_class = class_create(THIS_MODULE, "sunxi_dump");
+	if (IS_ERR(dump_class)) {
+		pr_err("%s:%u class_create() failed\n", __func__, __LINE__);
+		return PTR_ERR(dump_class);
 	}
 
-	index = __addr_valid(start_reg);
-	if ((index < 0) || (index != __addr_valid(end_reg))) {
-		pr_err("%s,%d err, invalid para!\n", __func__, __LINE__);
-		goto err;
+	/* sys/class/sunxi_dump/xxx */
+	for (i = 0; i < ARRAY_SIZE(dump_class_attrs); i++) {
+		err = class_create_file(dump_class, &dump_class_attrs[i]);
+		if (err) {
+			pr_err("%s:%u class_create_file() failed. err=%d\n", __func__, __LINE__, err);
+			while (i--) {
+				class_remove_file(dump_class, &dump_class_attrs[i]);
+			}
+			class_destroy(dump_class);
+			dump_class = NULL;
+			return err;
+		}
 	}
 
-	misc_dump_para.pst_addr = start_reg;
-	misc_dump_para.ped_addr = end_reg;
-	pr_debug("%s,%d, start_reg:" PRINT_ADDR_FMT ", end_reg:" PRINT_ADDR_FMT
-		 "\n", __func__, __LINE__, start_reg, end_reg);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res) {
+		dev_err(dev, "Fail to get IORESOURCE_MEM \n");
+		goto error;
+	}
 
-	return size;
+	test_addr = res->start;
+	test_size = resource_size(res);
 
-err:
-	misc_dump_para.pst_addr = 0;
-	misc_dump_para.ped_addr = 0;
-
-	return -EINVAL;
+	return 0;
+error:
+	dev_err(dev, "sunxi_dump_reg probe error\n");
+	return -1;
 }
 
-static ssize_t
-misc_write_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	/* display write result */
-	return __write_show(misc_wt_group, buf, PAGE_SIZE);
-}
-
-static ssize_t
-misc_write_store(struct device *dev, struct device_attribute *attr,
-		 const char *buf, size_t size)
+static int sunxi_dump_reg_remove(struct platform_device *pdev)
 {
 	int i;
-	int index;
-	unsigned long reg;
-	u32 val;
-	const struct dump_struct *dump;
-	struct dump_reg misc_write_para;
 
-	/* free if not NULL */
-	if (misc_wt_group) {
-		__write_item_deinit(misc_wt_group);
-		misc_wt_group = NULL;
+	for (i = 0; i < ARRAY_SIZE(dump_class_attrs); i++) {
+		class_remove_file(dump_class, &dump_class_attrs[i]);
 	}
 
-	/* parse input buf for items that will be dumped */
-	if (__write_item_init(&misc_wt_group, buf, size) < 0)
-		return -EINVAL;
-
-	/**
-	 * write reg
-	 * it is better if the regs been remaped and unmaped only once,
-	 * but we map everytime for the range between min and max address
-	 * maybe too large.
-	 */
-	for (i = 0; i < misc_wt_group->num; i++) {
-		reg = misc_wt_group->pitem[i].reg_addr;
-		misc_write_para.pst_addr = reg;
-		val = misc_wt_group->pitem[i].val;
-		index = __addr_valid(reg);
-		dump = &dump_table[index];
-		if (dump->remap)
-			misc_write_para.vaddr = dump->remap(reg, 4);
-		else
-			misc_write_para.vaddr = (void __iomem *)reg;
-		dump->write(val, dump->phys2virt(&misc_write_para, reg));
-		if (dump->unmap)
-			dump->unmap(misc_write_para.vaddr);
-	}
-
-	return size;
+	class_destroy(dump_class);
+	return 0;
 }
 
-static ssize_t
-misc_compare_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	/* dump the items */
-	return __compare_regs_ex(misc_cmp_group, buf, PAGE_SIZE);
-}
-
-static ssize_t
-misc_compare_store(struct device *dev, struct device_attribute *attr,
-		   const char *buf, size_t size)
-{
-	/* free if struct not null */
-	if (misc_cmp_group) {
-		__compare_item_deinit(misc_cmp_group);
-		misc_cmp_group = NULL;
-	}
-
-	/* parse input buf for items that will be dumped */
-	if (__compare_item_init(&misc_cmp_group, buf, size) < 0)
-		return -EINVAL;
-
-	return size;
-}
-
-static DEVICE_ATTR(dump, S_IWUSR | S_IRUGO, misc_dump_show, misc_dump_store);
-static DEVICE_ATTR(write, S_IWUSR | S_IRUGO, misc_write_show, misc_write_store);
-static DEVICE_ATTR(compare, S_IWUSR | S_IRUGO, misc_compare_show,
-		   misc_compare_store);
-
-static struct attribute *misc_attributes[] = {
-	&dev_attr_dump.attr,
-	&dev_attr_write.attr,
-	&dev_attr_compare.attr,
-	NULL,
+static struct platform_driver sunxi_dump_reg_driver = {
+	.probe  = sunxi_dump_reg_probe,
+	.remove = sunxi_dump_reg_remove,
+	.driver = {
+		.name   = "dump_reg",
+		.owner  = THIS_MODULE,
+		.of_match_table = sunxi_dump_reg_match,
+	},
 };
 
-static struct attribute_group misc_attribute_group = {
-	.name = "rw",
-	.attrs = misc_attributes,
-};
-
-static struct miscdevice dump_reg_dev = {
-	.minor = MISC_DYNAMIC_MINOR,
-	.name = "sunxi-reg",
-};
-
-static int __init misc_dump_reg_init(void)
-{
-	int err;
-
-	pr_info("misc dump reg init\n");
-	err = misc_register(&dump_reg_dev);
-	if (err) {
-		pr_err("dump register driver as misc device error!\n");
-		goto exit;
-	}
-
-	err = sysfs_create_group(&dump_reg_dev.this_device->kobj,
-				 &misc_attribute_group);
-	if (err)
-		pr_err("dump register sysfs create group failed!\n");
-
-exit:
-	return err;
-}
-
-static void __exit misc_dump_reg_exit(void)
-{
-	pr_info("misc dump reg exit\n");
-
-	misc_deregister(&dump_reg_dev);
-
-	sysfs_remove_group(&(dump_reg_dev.this_device->kobj),
-			   &misc_attribute_group);
-}
-
-module_init(misc_dump_reg_init);
-module_exit(misc_dump_reg_exit);
-#endif
+module_platform_driver(sunxi_dump_reg_driver);
 
 MODULE_ALIAS("dump reg driver");
-MODULE_LICENSE("GPL v2");
-MODULE_AUTHOR("xiafeng <xiafeng@allwinnertech.com>");
 MODULE_ALIAS("platform:dump reg");
+MODULE_LICENSE("GPL v2");
+MODULE_VERSION("1.0.3");
+MODULE_AUTHOR("xiafeng <xiafeng@allwinnertech.com>");
+MODULE_AUTHOR("Martin <wuyan@allwinnertech.com>");
+MODULE_AUTHOR("liuyu <SWCliuyus@allwinnertech.com>");
 MODULE_DESCRIPTION("dump registers driver");

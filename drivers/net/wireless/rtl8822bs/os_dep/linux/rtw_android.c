@@ -55,7 +55,6 @@ const char *android_wifi_cmd_str[ANDROID_WIFI_CMD_MAX] = {
 	"BTCOEXSCAN-START",
 	"BTCOEXSCAN-STOP",
 	"BTCOEXMODE",
-	"SETSUSPENDMODE",
 	"SETSUSPENDOPT",
 	"P2P_DEV_ADDR",
 	"SETFWPATH",
@@ -625,7 +624,11 @@ int rtw_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 		goto exit;
 	}
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0))
+	if (!access_ok(priv_cmd.buf, priv_cmd.total_len)) {
+#else
 	if (!access_ok(VERIFY_READ, priv_cmd.buf, priv_cmd.total_len)) {
+#endif
 		RTW_INFO("%s: failed to access memory\n", __FUNCTION__);
 		ret = -EFAULT;
 		goto exit;
@@ -735,9 +738,6 @@ int rtw_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 		bytes_written = wl_cfg80211_set_btcoex_dhcp(net, command);
 #endif
 #endif
-		break;
-
-	case ANDROID_WIFI_CMD_SETSUSPENDMODE:
 		break;
 
 	case ANDROID_WIFI_CMD_SETSUSPENDOPT:

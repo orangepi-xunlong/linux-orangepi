@@ -33,16 +33,20 @@
 #define __QEDR_H__
 
 #include <linux/pci.h>
+#include <linux/xarray.h>
 #include <rdma/ib_addr.h>
 #include <linux/qed/qed_if.h>
 #include <linux/qed/qed_chain.h>
-#include <linux/qed/qed_roce_if.h>
-#include <linux/qed/qede_roce.h>
-#include "qedr_hsi.h"
+#include <linux/qed/qed_rdma_if.h>
+#include <linux/qed/qede_rdma.h>
+#include <linux/qed/roce_common.h>
+#include <linux/completion.h>
+#include "qedr_hsi_rdma.h"
 
-#define QEDR_MODULE_VERSION	"8.10.10.0"
 #define QEDR_NODE_DESC "QLogic 579xx RoCE HCA"
-#define DP_NAME(dev) ((dev)->ibdev.name)
+#define DP_NAME(_dev) dev_name(&(_dev)->ibdev.dev)
+#define IS_IWARP(_dev) ((_dev)->rdma_type == QED_RDMA_TYPE_IWARP)
+#define IS_ROCE(_dev) ((_dev)->rdma_type == QED_RDMA_TYPE_ROCE)
 
 #define DP_DEBUG(dev, module, fmt, ...)					\
 	pr_debug("(%s) " module ": " fmt,				\
@@ -55,9 +59,14 @@
 #define QEDR_MSG_RQ   "  RQ"
 #define QEDR_MSG_SQ   "  SQ"
 #define QEDR_MSG_QP   "  QP"
+#define QEDR_MSG_SRQ  " SRQ"
 #define QEDR_MSG_GSI  " GSI"
+#define QEDR_MSG_IWARP  " IW"
 
-#define QEDR_CQ_MAGIC_NUMBER   (0x11223344)
+#define QEDR_CQ_MAGIC_NUMBER	(0x11223344)
+
+#define FW_PAGE_SIZE		(RDMA_RING_PAGE_SIZE)
+#define FW_PAGE_SHIFT		(12)
 
 struct qedr_dev;
 
@@ -94,7 +103,6 @@ struct qedr_device_attr {
 	u64	max_mr_size;
 	u32	max_cqe;
 	u32	max_mw;
-	u32	max_fmr;
 	u32	max_mr_mw_fmr_pbl;
 	u64	max_mr_mw_fmr_size;
 	u32	max_pd;
@@ -149,14 +157,25 @@ struct qedr_dev {
 	u32			dp_module;
 	u8			dp_level;
 	u8			num_hwfns;
+#define QEDR_IS_CMT(dev)        ((dev)->num_hwfns > 1)
+	u8			affin_hwfn_idx;
+	u8			gsi_ll2_handle;
+
 	uint			wq_multiplier;
 	u8			gsi_ll2_mac_address[ETH_ALEN];
 	int			gsi_qp_created;
 	struct qedr_cq		*gsi_sqcq;
 	struct qedr_cq		*gsi_rqcq;
 	struct qedr_qp		*gsi_qp;
+	enum qed_rdma_type	rdma_type;
+	struct xarray		qps;
+	struct xarray		srqs;
+	struct workqueue_struct *iwarp_wq;
+	u16			iwarp_max_mtu;
 
 	unsigned long enet_state;
+
+	u8 user_dpm_enabled;
 };
 
 #define QEDR_MAX_SQ_PBL			(0x8000)
@@ -210,15 +229,18 @@ struct qedr_ucontext {
 	struct ib_ucontext ibucontext;
 	struct qedr_dev *dev;
 	struct qedr_pd *pd;
-	u64 dpi_addr;
+	void __iomem *dpi_addr;
+	struct rdma_user_mmap_entry *db_mmap_entry;
 	u64 dpi_phys_addr;
 	u32 dpi_size;
 	u16 dpi;
+	bool db_rec;
+	u8 edpm_mode;
+};
 
-	struct list_head mm_head;
-
-	/* Lock to protect mm list */
-	struct mutex mm_list_lock;
+union db_prod32 {
+	struct rdma_pwm_val16_data data;
+	u32 raw;
 };
 
 union db_prod64 {
@@ -246,6 +268,13 @@ struct qedr_userq {
 	struct qedr_pbl *pbl_tbl;
 	u64 buf_addr;
 	size_t buf_len;
+
+	/* doorbell recovery */
+	void __iomem *db_addr;
+	struct qedr_user_db_rec *db_rec_data;
+	struct rdma_user_mmap_entry *db_mmap_entry;
+	void __iomem *db_rec_db2_addr;
+	union db_prod32 db_rec_db2_data;
 };
 
 struct qedr_cq {
@@ -255,9 +284,6 @@ struct qedr_cq {
 	u32 sig;
 
 	u16 icid;
-
-	/* Lock to protect completion handler */
-	spinlock_t comp_handler_lock;
 
 	/* Lock to protect multiplem CQ's */
 	spinlock_t cq_lock;
@@ -274,6 +300,8 @@ struct qedr_cq {
 	u32 cq_cons;
 
 	struct qedr_userq q;
+	u8 destroyed;
+	u16 cnq_notif;
 };
 
 struct qedr_pd {
@@ -282,17 +310,9 @@ struct qedr_pd {
 	struct qedr_ucontext *uctx;
 };
 
-struct qedr_mm {
-	struct {
-		u64 phy_addr;
-		unsigned long len;
-	} key;
-	struct list_head entry;
-};
-
-union db_prod32 {
-	struct rdma_pwm_val16_data data;
-	u32 raw;
+struct qedr_xrcd {
+	struct ib_xrcd ibxrcd;
+	u16 xrcd_id;
 };
 
 struct qedr_qp_hwq_info {
@@ -311,6 +331,9 @@ struct qedr_qp_hwq_info {
 	/* DB */
 	void __iomem *db;
 	union db_prod32 db_data;
+
+	void __iomem *iwarp_db2;
+	union db_prod32 iwarp_db2_data;
 };
 
 #define QEDR_INC_SW_IDX(p_info, index)					\
@@ -318,6 +341,35 @@ struct qedr_qp_hwq_info {
 		p_info->index = (p_info->index + 1) &			\
 				qed_chain_get_capacity(p_info->pbl)	\
 	} while (0)
+
+struct qedr_srq_hwq_info {
+	u32 max_sges;
+	u32 max_wr;
+	struct qed_chain pbl;
+	u64 p_phys_addr_tbl;
+	u32 wqe_prod;
+	u32 sge_prod;
+	u32 wr_prod_cnt;
+	atomic_t wr_cons_cnt;
+	u32 num_elems;
+
+	struct rdma_srq_producers *virt_prod_pair_addr;
+	dma_addr_t phy_prod_pair_addr;
+};
+
+struct qedr_srq {
+	struct ib_srq ibsrq;
+	struct qedr_dev *dev;
+
+	struct qedr_userq	usrq;
+	struct qedr_srq_hwq_info hw_srq;
+	struct ib_umem *prod_umem;
+	u16 srq_id;
+	u32 srq_limit;
+	bool is_xrc;
+	/* lock to protect srq recv post */
+	spinlock_t lock;
+};
 
 enum qedr_qp_err_bitmap {
 	QEDR_QP_ERR_SQ_FULL = 1,
@@ -328,10 +380,20 @@ enum qedr_qp_err_bitmap {
 	QEDR_QP_ERR_RQ_PBL_FULL = 32,
 };
 
+enum qedr_qp_create_type {
+	QEDR_QP_CREATE_NONE,
+	QEDR_QP_CREATE_USER,
+	QEDR_QP_CREATE_KERNEL,
+};
+
+enum qedr_iwarp_cm_flags {
+	QEDR_IWARP_CM_WAIT_FOR_CONNECT    = BIT(0),
+	QEDR_IWARP_CM_WAIT_FOR_DISCONNECT = BIT(1),
+};
+
 struct qedr_qp {
 	struct ib_qp ibqp;	/* must be first */
 	struct qedr_dev *dev;
-
 	struct qedr_qp_hwq_info sq;
 	struct qedr_qp_hwq_info rq;
 
@@ -346,6 +408,7 @@ struct qedr_qp {
 	u32 id;
 	struct qedr_pd *pd;
 	enum ib_qp_type qp_type;
+	enum qedr_qp_create_type create_type;
 	struct qed_rdma_qp *qed_qp;
 	u32 qp_id;
 	u16 icid;
@@ -381,18 +444,23 @@ struct qedr_qp {
 		u8 wqe_size;
 
 		u8 smac[ETH_ALEN];
-		u16 vlan_id;
+		u16 vlan;
 		int rc;
 	} *rqe_wr_id;
 
 	/* Relevant to qps created from user space only (applications) */
 	struct qedr_userq usq;
 	struct qedr_userq urq;
+
+	/* synchronization objects used with iwarp ep */
+	struct kref refcnt;
+	struct completion iwarp_cm_comp;
+	unsigned long iwarp_cm_flags; /* enum iwarp_cm_flags */
 };
 
 struct qedr_ah {
 	struct ib_ah ibah;
-	struct ib_ah_attr attr;
+	struct rdma_ah_attr attr;
 };
 
 enum qedr_mr_type {
@@ -425,13 +493,26 @@ struct qedr_mr {
 	u32 npages;
 };
 
+struct qedr_user_mmap_entry {
+	struct rdma_user_mmap_entry rdma_entry;
+	struct qedr_dev *dev;
+	union {
+		u64 io_address;
+		void *address;
+	};
+	size_t length;
+	u16 dpi;
+	u8 mmap_flag;
+};
+
 #define SET_FIELD2(value, name, flag) ((value) |= ((flag) << (name ## _SHIFT)))
 
 #define QEDR_RESP_IMM	(RDMA_CQE_RESPONDER_IMM_FLG_MASK << \
 			 RDMA_CQE_RESPONDER_IMM_FLG_SHIFT)
 #define QEDR_RESP_RDMA	(RDMA_CQE_RESPONDER_RDMA_FLG_MASK << \
 			 RDMA_CQE_RESPONDER_RDMA_FLG_SHIFT)
-#define QEDR_RESP_RDMA_IMM (QEDR_RESP_IMM | QEDR_RESP_RDMA)
+#define QEDR_RESP_INV	(RDMA_CQE_RESPONDER_INV_FLG_MASK << \
+			 RDMA_CQE_RESPONDER_INV_FLG_SHIFT)
 
 static inline void qedr_inc_sw_cons(struct qedr_qp_hwq_info *info)
 {
@@ -445,22 +526,42 @@ static inline void qedr_inc_sw_prod(struct qedr_qp_hwq_info *info)
 }
 
 static inline int qedr_get_dmac(struct qedr_dev *dev,
-				struct ib_ah_attr *ah_attr, u8 *mac_addr)
+				struct rdma_ah_attr *ah_attr, u8 *mac_addr)
 {
 	union ib_gid zero_sgid = { { 0 } };
 	struct in6_addr in6;
+	const struct ib_global_route *grh = rdma_ah_read_grh(ah_attr);
+	u8 *dmac;
 
-	if (!memcmp(&ah_attr->grh.dgid, &zero_sgid, sizeof(union ib_gid))) {
+	if (!memcmp(&grh->dgid, &zero_sgid, sizeof(union ib_gid))) {
 		DP_ERR(dev, "Local port GID not supported\n");
 		eth_zero_addr(mac_addr);
 		return -EINVAL;
 	}
 
-	memcpy(&in6, ah_attr->grh.dgid.raw, sizeof(in6));
-	ether_addr_copy(mac_addr, ah_attr->dmac);
+	memcpy(&in6, grh->dgid.raw, sizeof(in6));
+	dmac = rdma_ah_retrieve_dmac(ah_attr);
+	if (!dmac)
+		return -EINVAL;
+	ether_addr_copy(mac_addr, dmac);
 
 	return 0;
 }
+
+struct qedr_iw_listener {
+	struct qedr_dev *dev;
+	struct iw_cm_id *cm_id;
+	int		backlog;
+	void		*qed_handle;
+};
+
+struct qedr_iw_ep {
+	struct qedr_dev	*dev;
+	struct iw_cm_id	*cm_id;
+	struct qedr_qp	*qp;
+	void		*qed_context;
+	struct kref	refcnt;
+};
 
 static inline
 struct qedr_ucontext *get_qedr_ucontext(struct ib_ucontext *ibucontext)
@@ -476,6 +577,11 @@ static inline struct qedr_dev *get_qedr_dev(struct ib_device *ibdev)
 static inline struct qedr_pd *get_qedr_pd(struct ib_pd *ibpd)
 {
 	return container_of(ibpd, struct qedr_pd, ibpd);
+}
+
+static inline struct qedr_xrcd *get_qedr_xrcd(struct ib_xrcd *ibxrcd)
+{
+	return container_of(ibxrcd, struct qedr_xrcd, ibxrcd);
 }
 
 static inline struct qedr_cq *get_qedr_cq(struct ib_cq *ibcq)
@@ -496,5 +602,39 @@ static inline struct qedr_ah *get_qedr_ah(struct ib_ah *ibah)
 static inline struct qedr_mr *get_qedr_mr(struct ib_mr *ibmr)
 {
 	return container_of(ibmr, struct qedr_mr, ibmr);
+}
+
+static inline struct qedr_srq *get_qedr_srq(struct ib_srq *ibsrq)
+{
+	return container_of(ibsrq, struct qedr_srq, ibsrq);
+}
+
+static inline bool qedr_qp_has_srq(struct qedr_qp *qp)
+{
+	return qp->srq;
+}
+
+static inline bool qedr_qp_has_sq(struct qedr_qp *qp)
+{
+	if (qp->qp_type == IB_QPT_GSI || qp->qp_type == IB_QPT_XRC_TGT)
+		return false;
+
+	return true;
+}
+
+static inline bool qedr_qp_has_rq(struct qedr_qp *qp)
+{
+	if (qp->qp_type == IB_QPT_GSI || qp->qp_type == IB_QPT_XRC_INI ||
+	    qp->qp_type == IB_QPT_XRC_TGT || qedr_qp_has_srq(qp))
+		return false;
+
+	return true;
+}
+
+static inline struct qedr_user_mmap_entry *
+get_qedr_mmap_entry(struct rdma_user_mmap_entry *rdma_entry)
+{
+	return container_of(rdma_entry, struct qedr_user_mmap_entry,
+			    rdma_entry);
 }
 #endif

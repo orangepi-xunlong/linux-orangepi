@@ -3216,9 +3216,6 @@ halmac_cfg_drv_rsvd_pg_num_88xx(
 	case HALMAC_RSVD_PG_NUM128:
 		pHalmac_adapter->txff_allocation.rsvd_drv_pg_num = 128;
 		break;
-	case HALMAC_RSVD_PG_NUM256:
-		pHalmac_adapter->txff_allocation.rsvd_drv_pg_num = 256;
-		break;
 	}
 
 	PLATFORM_MSG_PRINT(pDriver_adapter, HALMAC_MSG_H2C, HALMAC_DBG_TRACE, "[TRACE]halmac_cfg_drv_rsvd_pg_num_88xx <==========\n");

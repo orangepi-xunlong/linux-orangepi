@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_POWERPC_HVCALL_H
 #define _ASM_POWERPC_HVCALL_H
 #ifdef __KERNEL__
@@ -87,6 +88,7 @@
 #define H_P8		-61
 #define H_P9		-62
 #define H_TOO_BIG	-64
+#define H_UNSUPPORTED	-67
 #define H_OVERLAP	-68
 #define H_INTERRUPT	-69
 #define H_BAD_DATA	-70
@@ -152,6 +154,14 @@
 #define H_VASI_SUSPENDED        4
 #define H_VASI_RESUMED          5
 #define H_VASI_COMPLETED        6
+
+/* VASI signal codes. Only the Cancel code is valid for H_VASI_SIGNAL. */
+#define H_VASI_SIGNAL_CANCEL    1
+#define H_VASI_SIGNAL_ABORT     2
+#define H_VASI_SIGNAL_SUSPEND   3
+#define H_VASI_SIGNAL_COMPLETE  4
+#define H_VASI_SIGNAL_ENABLE    5
+#define H_VASI_SIGNAL_FAILOVER  6
 
 /* Each control block has to be on a 4K boundary */
 #define H_CB_ALIGNMENT          4096
@@ -235,7 +245,7 @@
 #define H_CREATE_RPT            0x1A4
 #define H_REMOVE_RPT            0x1A8
 #define H_REGISTER_RPAGES       0x1AC
-#define H_DISABLE_AND_GETC      0x1B0
+#define H_DISABLE_AND_GET       0x1B0
 #define H_ERROR_DATA            0x1B4
 #define H_GET_HCA_INFO          0x1B8
 #define H_GET_PERF_COUNT        0x1BC
@@ -259,6 +269,7 @@
 #define H_ADD_CONN		0x284
 #define H_DEL_CONN		0x288
 #define H_JOIN			0x298
+#define H_VASI_SIGNAL           0x2A0
 #define H_VASI_STATE            0x2A4
 #define H_VIOCTL		0x2A8
 #define H_ENABLE_CRQ		0x2B0
@@ -276,7 +287,40 @@
 #define H_COP			0x304
 #define H_GET_MPP_X		0x314
 #define H_SET_MODE		0x31C
-#define MAX_HCALL_OPCODE	H_SET_MODE
+#define H_BLOCK_REMOVE		0x328
+#define H_CLEAR_HPT		0x358
+#define H_REQUEST_VMC		0x360
+#define H_RESIZE_HPT_PREPARE	0x36C
+#define H_RESIZE_HPT_COMMIT	0x370
+#define H_REGISTER_PROC_TBL	0x37C
+#define H_SIGNAL_SYS_RESET	0x380
+#define H_INT_GET_SOURCE_INFO   0x3A8
+#define H_INT_SET_SOURCE_CONFIG 0x3AC
+#define H_INT_GET_SOURCE_CONFIG 0x3B0
+#define H_INT_GET_QUEUE_INFO    0x3B4
+#define H_INT_SET_QUEUE_CONFIG  0x3B8
+#define H_INT_GET_QUEUE_CONFIG  0x3BC
+#define H_INT_SET_OS_REPORTING_LINE 0x3C0
+#define H_INT_GET_OS_REPORTING_LINE 0x3C4
+#define H_INT_ESB               0x3C8
+#define H_INT_SYNC              0x3CC
+#define H_INT_RESET             0x3D0
+#define H_SCM_READ_METADATA     0x3E4
+#define H_SCM_WRITE_METADATA    0x3E8
+#define H_SCM_BIND_MEM          0x3EC
+#define H_SCM_UNBIND_MEM        0x3F0
+#define H_SCM_QUERY_BLOCK_MEM_BINDING 0x3F4
+#define H_SCM_QUERY_LOGICAL_MEM_BINDING 0x3F8
+#define H_SCM_UNBIND_ALL        0x3FC
+#define H_SCM_HEALTH            0x400
+#define H_SCM_PERFORMANCE_STATS 0x418
+#define H_RPT_INVALIDATE	0x448
+#define H_SCM_FLUSH		0x44C
+#define MAX_HCALL_OPCODE	H_SCM_FLUSH
+
+/* Scope args for H_SCM_UNBIND_ALL */
+#define H_UNBIND_SCOPE_ALL (0x1)
+#define H_UNBIND_SCOPE_DRC (0x2)
 
 /* H_VIOCTL functions */
 #define H_GET_VIOA_DUMP_SIZE	0x01
@@ -291,6 +335,8 @@
 #define H_DISABLE_ALL_VIO_INTS	0x0A
 #define H_DISABLE_VIO_INTERRUPT	0x0B
 #define H_ENABLE_VIO_INTERRUPT	0x0C
+#define H_GET_SESSION_TOKEN	0x19
+#define H_SESSION_ERR_DETECTED	0x1A
 
 
 /* Platform specific hcalls, used by KVM */
@@ -301,11 +347,33 @@
 #define H_GET_24X7_DATA		0xF07C
 #define H_GET_PERF_COUNTER_INFO	0xF080
 
+/* Platform-specific hcalls used for nested HV KVM */
+#define H_SET_PARTITION_TABLE	0xF800
+#define H_ENTER_NESTED		0xF804
+#define H_TLB_INVALIDATE	0xF808
+#define H_COPY_TOFROM_GUEST	0xF80C
+
+/* Flags for H_SVM_PAGE_IN */
+#define H_PAGE_IN_SHARED        0x1
+
+/* Platform-specific hcalls used by the Ultravisor */
+#define H_SVM_PAGE_IN		0xEF00
+#define H_SVM_PAGE_OUT		0xEF04
+#define H_SVM_INIT_START	0xEF08
+#define H_SVM_INIT_DONE		0xEF0C
+#define H_SVM_INIT_ABORT	0xEF14
+
 /* Values for 2nd argument to H_SET_MODE */
 #define H_SET_MODE_RESOURCE_SET_CIABR		1
-#define H_SET_MODE_RESOURCE_SET_DAWR		2
+#define H_SET_MODE_RESOURCE_SET_DAWR0		2
 #define H_SET_MODE_RESOURCE_ADDR_TRANS_MODE	3
 #define H_SET_MODE_RESOURCE_LE			4
+#define H_SET_MODE_RESOURCE_SET_DAWR1		5
+
+/* Values for argument to H_SIGNAL_SYS_RESET */
+#define H_SIGNAL_SYS_RESET_ALL			-1
+#define H_SIGNAL_SYS_RESET_ALL_OTHERS		-2
+/* >= 0 values are CPU number */
 
 /* H_GET_CPU_CHARACTERISTICS return values */
 #define H_CPU_CHAR_SPEC_BAR_ORI31	(1ull << 63) // IBM bit 0
@@ -316,10 +384,56 @@
 #define H_CPU_CHAR_BRANCH_HINTS_HONORED	(1ull << 58) // IBM bit 5
 #define H_CPU_CHAR_THREAD_RECONFIG_CTRL	(1ull << 57) // IBM bit 6
 #define H_CPU_CHAR_COUNT_CACHE_DISABLED	(1ull << 56) // IBM bit 7
+#define H_CPU_CHAR_BCCTR_FLUSH_ASSIST	(1ull << 54) // IBM bit 9
+#define H_CPU_CHAR_BCCTR_LINK_FLUSH_ASSIST (1ull << 52) // IBM bit 11
 
 #define H_CPU_BEHAV_FAVOUR_SECURITY	(1ull << 63) // IBM bit 0
 #define H_CPU_BEHAV_L1D_FLUSH_PR	(1ull << 62) // IBM bit 1
 #define H_CPU_BEHAV_BNDS_CHK_SPEC_BAR	(1ull << 61) // IBM bit 2
+#define H_CPU_BEHAV_FAVOUR_SECURITY_H	(1ull << 60) // IBM bit 3
+#define H_CPU_BEHAV_FLUSH_COUNT_CACHE	(1ull << 58) // IBM bit 5
+#define H_CPU_BEHAV_FLUSH_LINK_STACK	(1ull << 57) // IBM bit 6
+
+/* Flag values used in H_REGISTER_PROC_TBL hcall */
+#define PROC_TABLE_OP_MASK	0x18
+#define PROC_TABLE_DEREG	0x10
+#define PROC_TABLE_NEW		0x18
+#define PROC_TABLE_TYPE_MASK	0x06
+#define PROC_TABLE_HPT_SLB	0x00
+#define PROC_TABLE_HPT_PT	0x02
+#define PROC_TABLE_RADIX	0x04
+#define PROC_TABLE_GTSE		0x01
+
+/*
+ * Defines for
+ * H_RPT_INVALIDATE - Invalidate RPT translation lookaside information.
+ */
+
+/* Type of translation to invalidate (type) */
+#define H_RPTI_TYPE_NESTED	0x0001	/* Invalidate nested guest partition-scope */
+#define H_RPTI_TYPE_TLB		0x0002	/* Invalidate TLB */
+#define H_RPTI_TYPE_PWC		0x0004	/* Invalidate Page Walk Cache */
+/* Invalidate Process Table Entries if H_RPTI_TYPE_NESTED is clear */
+#define H_RPTI_TYPE_PRT		0x0008
+/* Invalidate Partition Table Entries if H_RPTI_TYPE_NESTED is set */
+#define H_RPTI_TYPE_PAT		0x0008
+#define H_RPTI_TYPE_ALL		(H_RPTI_TYPE_TLB | H_RPTI_TYPE_PWC | \
+				 H_RPTI_TYPE_PRT)
+#define H_RPTI_TYPE_NESTED_ALL	(H_RPTI_TYPE_TLB | H_RPTI_TYPE_PWC | \
+				 H_RPTI_TYPE_PAT)
+
+/* Invalidation targets (target) */
+#define H_RPTI_TARGET_CMMU		0x01 /* All virtual processors in the partition */
+#define H_RPTI_TARGET_CMMU_LOCAL	0x02 /* Current virtual processor */
+/* All nest/accelerator agents in use by the partition */
+#define H_RPTI_TARGET_NMMU		0x04
+
+/* Page size mask (page sizes) */
+#define H_RPTI_PAGE_4K	0x01
+#define H_RPTI_PAGE_64K	0x02
+#define H_RPTI_PAGE_2M	0x04
+#define H_RPTI_PAGE_1G	0x08
+#define H_RPTI_PAGE_ALL (-1UL)
 
 #ifndef __ASSEMBLY__
 #include <linux/types.h>
@@ -333,6 +447,9 @@
  * the other plpar_hcalls.
  */
 long plpar_hcall_norets(unsigned long opcode, ...);
+
+/* Variant which does not do hcall tracing */
+long plpar_hcall_norets_notrace(unsigned long opcode, ...);
 
 /**
  * plpar_hcall: - Make a pseries hypervisor call
@@ -372,16 +489,6 @@ long plpar_hcall_raw(unsigned long opcode, unsigned long *retbuf, ...);
 #define PLPAR_HCALL9_BUFSIZE 9
 long plpar_hcall9(unsigned long opcode, unsigned long *retbuf, ...);
 long plpar_hcall9_raw(unsigned long opcode, unsigned long *retbuf, ...);
-
-/* For hcall instrumentation.  One structure per-hcall, per-CPU */
-struct hcall_stats {
-	unsigned long	num_calls;	/* number of calls (on this CPU) */
-	unsigned long	tb_total;	/* total wall time (mftb) of calls. */
-	unsigned long	purr_total;	/* total cpu time (PURR) of calls. */
-	unsigned long	tb_start;
-	unsigned long	purr_start;
-};
-#define HCALL_STAT_ARRAY_SIZE	((MAX_HCALL_OPCODE >> 2) + 1)
 
 struct hvcall_mpp_data {
 	unsigned long entitled_mem;
@@ -428,31 +535,101 @@ static inline unsigned int get_longbusy_msecs(int longbusy_rc)
 	}
 }
 
-#ifdef CONFIG_PPC_PSERIES
-extern int CMO_PrPSP;
-extern int CMO_SecPSP;
-extern unsigned long CMO_PageSize;
-
-static inline int cmo_get_primary_psp(void)
-{
-	return CMO_PrPSP;
-}
-
-static inline int cmo_get_secondary_psp(void)
-{
-	return CMO_SecPSP;
-}
-
-static inline unsigned long cmo_get_page_size(void)
-{
-	return CMO_PageSize;
-}
-#endif /* CONFIG_PPC_PSERIES */
-
 struct h_cpu_char_result {
 	u64 character;
 	u64 behaviour;
 };
+
+/*
+ * Register state for entering a nested guest with H_ENTER_NESTED.
+ * New member must be added at the end.
+ */
+struct hv_guest_state {
+	u64 version;		/* version of this structure layout, must be first */
+	u32 lpid;
+	u32 vcpu_token;
+	/* These registers are hypervisor privileged (at least for writing) */
+	u64 lpcr;
+	u64 pcr;
+	u64 amor;
+	u64 dpdes;
+	u64 hfscr;
+	s64 tb_offset;
+	u64 dawr0;
+	u64 dawrx0;
+	u64 ciabr;
+	u64 hdec_expiry;
+	u64 purr;
+	u64 spurr;
+	u64 ic;
+	u64 vtb;
+	u64 hdar;
+	u64 hdsisr;
+	u64 heir;
+	u64 asdr;
+	/* These are OS privileged but need to be set late in guest entry */
+	u64 srr0;
+	u64 srr1;
+	u64 sprg[4];
+	u64 pidr;
+	u64 cfar;
+	u64 ppr;
+	/* Version 1 ends here */
+	u64 dawr1;
+	u64 dawrx1;
+	/* Version 2 ends here */
+};
+
+/* Latest version of hv_guest_state structure */
+#define HV_GUEST_STATE_VERSION	2
+
+static inline int hv_guest_state_size(unsigned int version)
+{
+	switch (version) {
+	case 1:
+		return offsetofend(struct hv_guest_state, ppr);
+	case 2:
+		return offsetofend(struct hv_guest_state, dawrx1);
+	default:
+		return -1;
+	}
+}
+
+/*
+ * From the document "H_GetPerformanceCounterInfo Interface" v1.07
+ *
+ * H_GET_PERF_COUNTER_INFO argument
+ */
+struct hv_get_perf_counter_info_params {
+	__be32 counter_request; /* I */
+	__be32 starting_index;  /* IO */
+	__be16 secondary_index; /* IO */
+	__be16 returned_values; /* O */
+	__be32 detail_rc; /* O, only needed when called via *_norets() */
+
+	/*
+	 * O, size each of counter_value element in bytes, only set for version
+	 * >= 0x3
+	 */
+	__be16 cv_element_size;
+
+	/* I, 0 (zero) for versions < 0x3 */
+	__u8 counter_info_version_in;
+
+	/* O, 0 (zero) if version < 0x3. Must be set to 0 when making hcall */
+	__u8 counter_info_version_out;
+	__u8 reserved[0xC];
+	__u8 counter_value[];
+} __packed;
+
+#define HGPCI_REQ_BUFFER_SIZE	4096
+#define HGPCI_MAX_DATA_BYTES \
+	(HGPCI_REQ_BUFFER_SIZE - sizeof(struct hv_get_perf_counter_info_params))
+
+struct hv_gpci_request_buffer {
+	struct hv_get_perf_counter_info_params params;
+	uint8_t bytes[HGPCI_MAX_DATA_BYTES];
+} __packed;
 
 #endif /* __ASSEMBLY__ */
 #endif /* __KERNEL__ */

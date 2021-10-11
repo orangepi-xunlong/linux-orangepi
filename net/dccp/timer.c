@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  net/dccp/timer.c
  *
  *  An implementation of the DCCP protocol
  *  Arnaldo Carvalho de Melo <acme@conectiva.com.br>
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License
- *	as published by the Free Software Foundation; either version
- *	2 of the License, or (at your option) any later version.
  */
 
 #include <linux/dccp.h>
@@ -89,7 +85,7 @@ static void dccp_retransmit_timer(struct sock *sk)
 	struct inet_connection_sock *icsk = inet_csk(sk);
 
 	/*
-	 * More than than 4MSL (8 minutes) has passed, a RESET(aborted) was
+	 * More than 4MSL (8 minutes) has passed, a RESET(aborted) was
 	 * sent, no need to retransmit, this sock is dead.
 	 */
 	if (dccp_write_timeout(sk))
@@ -125,10 +121,11 @@ static void dccp_retransmit_timer(struct sock *sk)
 		__sk_dst_reset(sk);
 }
 
-static void dccp_write_timer(unsigned long data)
+static void dccp_write_timer(struct timer_list *t)
 {
-	struct sock *sk = (struct sock *)data;
-	struct inet_connection_sock *icsk = inet_csk(sk);
+	struct inet_connection_sock *icsk =
+			from_timer(icsk, t, icsk_retransmit_timer);
+	struct sock *sk = &icsk->icsk_inet.sk;
 	int event = 0;
 
 	bh_lock_sock(sk);
@@ -161,24 +158,24 @@ out:
 	sock_put(sk);
 }
 
-static void dccp_keepalive_timer(unsigned long data)
+static void dccp_keepalive_timer(struct timer_list *t)
 {
-	struct sock *sk = (struct sock *)data;
+	struct sock *sk = from_timer(sk, t, sk_timer);
 
 	pr_err("dccp should not use a keepalive timer !\n");
 	sock_put(sk);
 }
 
 /* This is the same as tcp_delack_timer, sans prequeue & mem_reclaim stuff */
-static void dccp_delack_timer(unsigned long data)
+static void dccp_delack_timer(struct timer_list *t)
 {
-	struct sock *sk = (struct sock *)data;
-	struct inet_connection_sock *icsk = inet_csk(sk);
+	struct inet_connection_sock *icsk =
+			from_timer(icsk, t, icsk_delack_timer);
+	struct sock *sk = &icsk->icsk_inet.sk;
 
 	bh_lock_sock(sk);
 	if (sock_owned_by_user(sk)) {
 		/* Try again later. */
-		icsk->icsk_ack.blocked = 1;
 		__NET_INC_STATS(sock_net(sk), LINUX_MIB_DELAYEDACKLOCKED);
 		sk_reset_timer(sk, &icsk->icsk_delack_timer,
 			       jiffies + TCP_DELACK_MIN);
@@ -197,7 +194,7 @@ static void dccp_delack_timer(unsigned long data)
 	icsk->icsk_ack.pending &= ~ICSK_ACK_TIMER;
 
 	if (inet_csk_ack_scheduled(sk)) {
-		if (!icsk->icsk_ack.pingpong) {
+		if (!inet_csk_in_pingpong_mode(sk)) {
 			/* Delayed ACK missed: inflate ATO. */
 			icsk->icsk_ack.ato = min(icsk->icsk_ack.ato << 1,
 						 icsk->icsk_rto);
@@ -205,7 +202,7 @@ static void dccp_delack_timer(unsigned long data)
 			/* Delayed ACK missed: leave pingpong mode and
 			 * deflate ATO.
 			 */
-			icsk->icsk_ack.pingpong = 0;
+			inet_csk_exit_pingpong_mode(sk);
 			icsk->icsk_ack.ato = TCP_ATO_MIN;
 		}
 		dccp_send_ack(sk);
@@ -218,11 +215,14 @@ out:
 
 /**
  * dccp_write_xmitlet  -  Workhorse for CCID packet dequeueing interface
+ * @t: pointer to the tasklet associated with this handler
+ *
  * See the comments above %ccid_dequeueing_decision for supported modes.
  */
-static void dccp_write_xmitlet(unsigned long data)
+static void dccp_write_xmitlet(struct tasklet_struct *t)
 {
-	struct sock *sk = (struct sock *)data;
+	struct dccp_sock *dp = from_tasklet(dp, t, dccps_xmitlet);
+	struct sock *sk = &dp->dccps_inet_connection.icsk_inet.sk;
 
 	bh_lock_sock(sk);
 	if (sock_owned_by_user(sk))
@@ -233,18 +233,19 @@ static void dccp_write_xmitlet(unsigned long data)
 	sock_put(sk);
 }
 
-static void dccp_write_xmit_timer(unsigned long data)
+static void dccp_write_xmit_timer(struct timer_list *t)
 {
-	dccp_write_xmitlet(data);
+	struct dccp_sock *dp = from_timer(dp, t, dccps_xmit_timer);
+
+	dccp_write_xmitlet(&dp->dccps_xmitlet);
 }
 
 void dccp_init_xmit_timers(struct sock *sk)
 {
 	struct dccp_sock *dp = dccp_sk(sk);
 
-	tasklet_init(&dp->dccps_xmitlet, dccp_write_xmitlet, (unsigned long)sk);
-	setup_timer(&dp->dccps_xmit_timer, dccp_write_xmit_timer,
-							     (unsigned long)sk);
+	tasklet_setup(&dp->dccps_xmitlet, dccp_write_xmitlet);
+	timer_setup(&dp->dccps_xmit_timer, dccp_write_xmit_timer, 0);
 	inet_csk_init_xmit_timers(sk, &dccp_write_timer, &dccp_delack_timer,
 				  &dccp_keepalive_timer);
 }

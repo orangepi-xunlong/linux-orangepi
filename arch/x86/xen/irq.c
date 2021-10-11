@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/hardirq.h>
 
 #include <asm/x86_init.h>
@@ -40,28 +41,6 @@ asmlinkage __visible unsigned long xen_save_fl(void)
 	return (-flags) & X86_EFLAGS_IF;
 }
 PV_CALLEE_SAVE_REGS_THUNK(xen_save_fl);
-
-__visible void xen_restore_fl(unsigned long flags)
-{
-	struct vcpu_info *vcpu;
-
-	/* convert from IF type flag */
-	flags = !(flags & X86_EFLAGS_IF);
-
-	/* See xen_irq_enable() for why preemption must be disabled. */
-	preempt_disable();
-	vcpu = this_cpu_read(xen_vcpu);
-	vcpu->evtchn_upcall_mask = flags;
-
-	if (flags == 0) {
-		barrier(); /* unmask then check (avoid races) */
-		if (unlikely(vcpu->evtchn_upcall_pending))
-			xen_force_evtchn_callback();
-		preempt_enable();
-	} else
-		preempt_enable_no_resched();
-}
-PV_CALLEE_SAVE_REGS_THUNK(xen_restore_fl);
 
 asmlinkage __visible void xen_irq_disable(void)
 {
@@ -117,21 +96,15 @@ static void xen_halt(void)
 
 static const struct pv_irq_ops xen_irq_ops __initconst = {
 	.save_fl = PV_CALLEE_SAVE(xen_save_fl),
-	.restore_fl = PV_CALLEE_SAVE(xen_restore_fl),
 	.irq_disable = PV_CALLEE_SAVE(xen_irq_disable),
 	.irq_enable = PV_CALLEE_SAVE(xen_irq_enable),
 
 	.safe_halt = xen_safe_halt,
 	.halt = xen_halt,
-#ifdef CONFIG_X86_64
-	.adjust_exception_frame = xen_adjust_exception_frame,
-#endif
 };
 
 void __init xen_init_irq_ops(void)
 {
-	/* For PVH we use default pv_irq_ops settings. */
-	if (!xen_feature(XENFEAT_hvm_callback_vector))
-		pv_irq_ops = xen_irq_ops;
+	pv_ops.irq = xen_irq_ops;
 	x86_init.irqs.intr_init = xen_init_IRQ;
 }

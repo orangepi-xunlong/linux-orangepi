@@ -1,24 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Process creation support for Hexagon
  *
  * Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
- * 02110-1301, USA.
  */
 
 #include <linux/sched.h>
+#include <linux/sched/debug.h>
+#include <linux/sched/task.h>
+#include <linux/sched/task_stack.h>
 #include <linux/types.h>
 #include <linux/module.h>
 #include <linux/tick.h>
@@ -54,22 +44,14 @@ void arch_cpu_idle(void)
 {
 	__vmwait();
 	/*  interrupts wake us up, but irqs are still disabled */
-	local_irq_enable();
-}
-
-/*
- *  Return saved PC of a blocked thread
- */
-unsigned long thread_saved_pc(struct task_struct *tsk)
-{
-	return 0;
+	raw_local_irq_enable();
 }
 
 /*
  * Copy architecture-specific thread state
  */
-int copy_thread(unsigned long clone_flags, unsigned long usp,
-		unsigned long arg, struct task_struct *p)
+int copy_thread(unsigned long clone_flags, unsigned long usp, unsigned long arg,
+		struct task_struct *p, unsigned long tls)
 {
 	struct thread_info *ti = task_thread_info(p);
 	struct hexagon_switch_stack *ss;
@@ -91,7 +73,7 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 						    sizeof(*ss));
 	ss->lr = (unsigned long)ret_from_fork;
 	p->thread.switch_sp = ss;
-	if (unlikely(p->flags & PF_KTHREAD)) {
+	if (unlikely(p->flags & (PF_KTHREAD | PF_IO_WORKER))) {
 		memset(childregs, 0, sizeof(struct pt_regs));
 		/* r24 <- fn, r25 <- arg */
 		ss->r24 = usp;
@@ -118,7 +100,7 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 	 * ugp is used to provide TLS support.
 	 */
 	if (clone_flags & CLONE_SETTLS)
-		childregs->ugp = childregs->r04;
+		childregs->ugp = tls;
 
 	/*
 	 * Parent sees new pid -- not necessary, not even possible at
@@ -172,15 +154,6 @@ unsigned long get_wchan(struct task_struct *p)
 }
 
 /*
- * Required placeholder.
- */
-int dump_fpu(struct pt_regs *regs, elf_fpregset_t *fpu)
-{
-	return 0;
-}
-
-
-/*
  * Called on the exit path of event entry; see vm_entry.S
  *
  * Interrupts will already be disabled.
@@ -201,13 +174,12 @@ int do_work_pending(struct pt_regs *regs, u32 thread_info_flags)
 		return 1;
 	}
 
-	if (thread_info_flags & _TIF_SIGPENDING) {
+	if (thread_info_flags & (_TIF_SIGPENDING | _TIF_NOTIFY_SIGNAL)) {
 		do_signal(regs);
 		return 1;
 	}
 
 	if (thread_info_flags & _TIF_NOTIFY_RESUME) {
-		clear_thread_flag(TIF_NOTIFY_RESUME);
 		tracehook_notify_resume(regs);
 		return 1;
 	}

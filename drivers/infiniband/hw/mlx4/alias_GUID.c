@@ -73,12 +73,12 @@ static int get_low_record_time_index(struct mlx4_ib_dev *dev, u8 port,
 				     int *resched_delay_sec);
 
 void mlx4_ib_update_cache_on_guid_change(struct mlx4_ib_dev *dev, int block_num,
-					 u8 port_num, u8 *p_data)
+					 u32 port_num, u8 *p_data)
 {
 	int i;
 	u64 guid_indexes;
 	int slave_id;
-	int port_index = port_num - 1;
+	u32 port_index = port_num - 1;
 
 	if (!mlx4_is_master(dev->dev))
 		return;
@@ -86,7 +86,7 @@ void mlx4_ib_update_cache_on_guid_change(struct mlx4_ib_dev *dev, int block_num,
 	guid_indexes = be64_to_cpu((__force __be64) dev->sriov.alias_guid.
 				   ports_guid[port_num - 1].
 				   all_rec_per_port[block_num].guid_indexes);
-	pr_debug("port: %d, guid_indexes: 0x%llx\n", port_num, guid_indexes);
+	pr_debug("port: %u, guid_indexes: 0x%llx\n", port_num, guid_indexes);
 
 	for (i = 0; i < NUM_ALIAS_GUID_IN_REC; i++) {
 		/* The location of the specific index starts from bit number 4
@@ -184,7 +184,7 @@ unlock:
  * port_number - 1 or 2
  */
 void mlx4_ib_notify_slaves_on_guid_change(struct mlx4_ib_dev *dev,
-					  int block_num, u8 port_num,
+					  int block_num, u32 port_num,
 					  u8 *p_data)
 {
 	int i;
@@ -206,7 +206,7 @@ void mlx4_ib_notify_slaves_on_guid_change(struct mlx4_ib_dev *dev,
 	guid_indexes = be64_to_cpu((__force __be64) dev->sriov.alias_guid.
 				   ports_guid[port_num - 1].
 				   all_rec_per_port[block_num].guid_indexes);
-	pr_debug("port: %d, guid_indexes: 0x%llx\n", port_num, guid_indexes);
+	pr_debug("port: %u, guid_indexes: 0x%llx\n", port_num, guid_indexes);
 
 	/*calculate the slaves and notify them*/
 	for (i = 0; i < NUM_ALIAS_GUID_IN_REC; i++) {
@@ -260,11 +260,11 @@ void mlx4_ib_notify_slaves_on_guid_change(struct mlx4_ib_dev *dev,
 			new_state = set_and_calc_slave_port_state(dev->dev, slave_id, port_num,
 								  MLX4_PORT_STATE_IB_PORT_STATE_EVENT_GID_VALID,
 								  &gen_event);
-			pr_debug("slave: %d, port: %d prev_port_state: %d,"
+			pr_debug("slave: %d, port: %u prev_port_state: %d,"
 				 " new_port_state: %d, gen_event: %d\n",
 				 slave_id, port_num, prev_state, new_state, gen_event);
 			if (gen_event == SLAVE_PORT_GEN_EVENT_UP) {
-				pr_debug("sending PORT_UP event to slave: %d, port: %d\n",
+				pr_debug("sending PORT_UP event to slave: %d, port: %u\n",
 					 slave_id, port_num);
 				mlx4_gen_port_state_change_eqe(dev->dev, slave_id,
 							       port_num, MLX4_PORT_CHANGE_SUBTYPE_ACTIVE);
@@ -274,7 +274,7 @@ void mlx4_ib_notify_slaves_on_guid_change(struct mlx4_ib_dev *dev,
 						      MLX4_PORT_STATE_IB_EVENT_GID_INVALID,
 						      &gen_event);
 			if (gen_event == SLAVE_PORT_GEN_EVENT_DOWN) {
-				pr_debug("sending PORT DOWN event to slave: %d, port: %d\n",
+				pr_debug("sending PORT DOWN event to slave: %d, port: %u\n",
 					 slave_id, port_num);
 				mlx4_gen_port_state_change_eqe(dev->dev,
 							       slave_id,
@@ -310,7 +310,7 @@ static void aliasguid_query_handler(int status,
 	if (status) {
 		pr_debug("(port: %d) failed: status = %d\n",
 			 cb_ctx->port, status);
-		rec->time_to_run = ktime_get_boot_ns() + 1 * NSEC_PER_SEC;
+		rec->time_to_run = ktime_get_boottime_ns() + 1 * NSEC_PER_SEC;
 		goto out;
 	}
 
@@ -416,7 +416,7 @@ next_entry:
 			 be64_to_cpu((__force __be64)rec->guid_indexes),
 			 be64_to_cpu((__force __be64)applied_guid_indexes),
 			 be64_to_cpu((__force __be64)declined_guid_indexes));
-		rec->time_to_run = ktime_get_boot_ns() +
+		rec->time_to_run = ktime_get_boottime_ns() +
 			resched_delay_sec * NSEC_PER_SEC;
 	} else {
 		rec->status = MLX4_GUID_INFO_STATUS_SET;
@@ -499,6 +499,7 @@ static int set_guid_rec(struct ib_device *ibdev,
 	struct list_head *head =
 		&dev->sriov.alias_guid.ports_guid[port - 1].cb_list;
 
+	memset(&attr, 0, sizeof(attr));
 	err = __mlx4_ib_query_port(ibdev, port, &attr, 1);
 	if (err) {
 		pr_debug("mlx4_ib_query_port failed (err: %d), port: %d\n",
@@ -527,7 +528,7 @@ static int set_guid_rec(struct ib_device *ibdev,
 
 	memset(&guid_info_rec, 0, sizeof (struct ib_sa_guidinfo_rec));
 
-	guid_info_rec.lid = cpu_to_be16(attr.lid);
+	guid_info_rec.lid = ib_lid_be16(attr.lid);
 	guid_info_rec.block_num = index;
 
 	memcpy(guid_info_rec.guid_info_list, rec_det->all_recs,
@@ -708,7 +709,7 @@ static int get_low_record_time_index(struct mlx4_ib_dev *dev, u8 port,
 		}
 	}
 	if (resched_delay_sec) {
-		u64 curr_time = ktime_get_boot_ns();
+		u64 curr_time = ktime_get_boottime_ns();
 
 		*resched_delay_sec = (low_record_time < curr_time) ? 0 :
 			div_u64((low_record_time - curr_time), NSEC_PER_SEC);
@@ -755,10 +756,8 @@ static void alias_guid_work(struct work_struct *work)
 	struct mlx4_ib_dev *dev = container_of(ib_sriov, struct mlx4_ib_dev, sriov);
 
 	rec = kzalloc(sizeof *rec, GFP_KERNEL);
-	if (!rec) {
-		pr_err("alias_guid_work: No Memory\n");
+	if (!rec)
 		return;
-	}
 
 	pr_debug("starting [port: %d]...\n", sriov_alias_port->port + 1);
 	ret = get_next_record_to_update(dev, sriov_alias_port->port, rec);
@@ -782,7 +781,7 @@ void mlx4_ib_init_alias_guid_work(struct mlx4_ib_dev *dev, int port)
 	spin_lock_irqsave(&dev->sriov.going_down_lock, flags);
 	spin_lock_irqsave(&dev->sriov.alias_guid.ag_work_lock, flags1);
 	if (!dev->sriov.is_going_down) {
-		/* If there is pending one should cancell then run, otherwise
+		/* If there is pending one should cancel then run, otherwise
 		  * won't run till previous one is ended as same work
 		  * struct is used.
 		  */
@@ -805,8 +804,8 @@ void mlx4_ib_destroy_alias_guid_service(struct mlx4_ib_dev *dev)
 	unsigned long flags;
 
 	for (i = 0 ; i < dev->num_ports; i++) {
-		cancel_delayed_work(&dev->sriov.alias_guid.ports_guid[i].alias_guid_work);
 		det = &sriov->alias_guid.ports_guid[i];
+		cancel_delayed_work_sync(&det->alias_guid_work);
 		spin_lock_irqsave(&sriov->alias_guid.ag_work_lock, flags);
 		while (!list_empty(&det->cb_list)) {
 			cb_ctx = list_entry(det->cb_list.next,
@@ -850,7 +849,7 @@ int mlx4_ib_init_alias_guid_service(struct mlx4_ib_dev *dev)
 	spin_lock_init(&dev->sriov.alias_guid.ag_work_lock);
 
 	for (i = 1; i <= dev->num_ports; ++i) {
-		if (dev->ib_dev.query_gid(&dev->ib_dev , i, 0, &gid)) {
+		if (dev->ib_dev.ops.query_gid(&dev->ib_dev, i, 0, &gid)) {
 			ret = -EFAULT;
 			goto err_unregister;
 		}

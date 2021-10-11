@@ -42,7 +42,7 @@
 #define CIFS_MOUNT_MULTIUSER	0x20000 /* multiuser mount */
 #define CIFS_MOUNT_STRICT_IO	0x40000 /* strict cache mode */
 #define CIFS_MOUNT_RWPIDFORWARD	0x80000 /* use pid forwarding for rw */
-#define CIFS_MOUNT_POSIXACL	0x100000 /* mirror of MS_POSIXACL in mnt_cifs_flags */
+#define CIFS_MOUNT_POSIXACL	0x100000 /* mirror of SB_POSIXACL in mnt_cifs_flags */
 #define CIFS_MOUNT_CIFS_BACKUPUID 0x200000 /* backup intent bit for a user */
 #define CIFS_MOUNT_CIFS_BACKUPGID 0x400000 /* backup intent bit for a group */
 #define CIFS_MOUNT_MAP_SFM_CHR	0x800000 /* SFM/MAC mapping for illegal chars */
@@ -50,27 +50,41 @@
 					      * root mountable
 					      */
 #define CIFS_MOUNT_UID_FROM_ACL 0x2000000 /* try to get UID via special SID */
+#define CIFS_MOUNT_NO_HANDLE_CACHE 0x4000000 /* disable caching dir handles */
+#define CIFS_MOUNT_NO_DFS 0x8000000 /* disable DFS resolving */
+#define CIFS_MOUNT_MODE_FROM_SID 0x10000000 /* retrieve mode from special ACE */
+#define CIFS_MOUNT_RO_CACHE	0x20000000  /* assumes share will not change */
+#define CIFS_MOUNT_RW_CACHE	0x40000000  /* assumes only client accessing */
+#define CIFS_MOUNT_SHUTDOWN	0x80000000
 
 struct cifs_sb_info {
 	struct rb_root tlink_tree;
 	spinlock_t tlink_tree_lock;
 	struct tcon_link *master_tlink;
 	struct nls_table *local_nls;
-	unsigned int rsize;
-	unsigned int wsize;
-	unsigned long actimeo; /* attribute cache timeout (jiffies) */
+	struct smb3_fs_context *ctx;
 	atomic_t active;
-	kuid_t	mnt_uid;
-	kgid_t	mnt_gid;
-	kuid_t	mnt_backupuid;
-	kgid_t	mnt_backupgid;
-	umode_t	mnt_file_mode;
-	umode_t	mnt_dir_mode;
 	unsigned int mnt_cifs_flags;
-	char   *mountdata; /* options received at mount time or via DFS refs */
-	struct backing_dev_info bdi;
 	struct delayed_work prune_tlinks;
 	struct rcu_head rcu;
+
+	/* only used when CIFS_MOUNT_USE_PREFIX_PATH is set */
 	char *prepath;
+
+	/*
+	 * Path initially provided by the mount call. We might connect
+	 * to something different via DFS but we want to keep it to do
+	 * failover properly.
+	 */
+	char *origin_fullpath; /* \\HOST\SHARE\[OPTIONAL PATH] */
+	/*
+	 * Indicate whether serverino option was turned off later
+	 * (cifs_autodisable_serverino) in order to match new mounts.
+	 */
+	bool mnt_cifs_serverino_autodisabled;
+	/*
+	 * Available once the mount has completed.
+	 */
+	struct dentry *root;
 };
 #endif				/* _CIFS_FS_SB_H */

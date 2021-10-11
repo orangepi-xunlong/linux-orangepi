@@ -131,10 +131,6 @@
 #define LINKRATE_30			(0x02 << 8)
 #define LINKRATE_60			(0x04 << 8)
 
-/* for phy state */
-
-#define PHY_STATE_LINK_UP_SPC		0x1
-
 /* for new SPC controllers MEMBASE III is shared between BIOS and DATA */
 #define GSM_SM_BASE			0x4F0000
 struct mpi_msg_hdr{
@@ -809,6 +805,7 @@ struct set_dev_state_resp {
 #define IO_ABORT_IN_PROGRESS				0x40
 #define IO_ABORT_DELAYED				0x41
 #define IO_INVALID_LENGTH				0x42
+#define IO_FATAL_ERROR					0x51
 
 /* WARNING: This error code must always be the last number.
  * If you add error code, modify this code also

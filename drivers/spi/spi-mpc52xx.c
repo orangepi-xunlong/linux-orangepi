@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * MPC52xx SPI bus driver.
  *
  * Copyright (C) 2008 Secret Lab Technologies Ltd.
- *
- * This file is released under the GPLv2
  *
  * This is the driver for the MPC5200's dedicated SPI controller.
  *
@@ -121,7 +120,7 @@ static void mpc52xx_spi_start_transfer(struct mpc52xx_spi *ms)
 	ms->cs_change = ms->transfer->cs_change;
 
 	/* Write out the first byte */
-	ms->wcol_tx_timestamp = get_tbl();
+	ms->wcol_tx_timestamp = mftb();
 	if (ms->tx_buf)
 		out_8(ms->regs + SPI_DATA, *ms->tx_buf++);
 	else
@@ -222,8 +221,8 @@ static int mpc52xx_spi_fsmstate_transfer(int irq, struct mpc52xx_spi *ms,
 		 * but it can also be worked around simply by retrying the
 		 * transfer which is what we do here. */
 		ms->wcol_count++;
-		ms->wcol_ticks += get_tbl() - ms->wcol_tx_timestamp;
-		ms->wcol_tx_timestamp = get_tbl();
+		ms->wcol_ticks += mftb() - ms->wcol_tx_timestamp;
+		ms->wcol_tx_timestamp = mftb();
 		data = 0;
 		if (ms->tx_buf)
 			data = *(ms->tx_buf - 1);
@@ -248,14 +247,16 @@ static int mpc52xx_spi_fsmstate_transfer(int irq, struct mpc52xx_spi *ms,
 	/* Is the transfer complete? */
 	ms->len--;
 	if (ms->len == 0) {
-		ms->timestamp = get_tbl();
-		ms->timestamp += ms->transfer->delay_usecs * tb_ticks_per_usec;
+		ms->timestamp = mftb();
+		if (ms->transfer->delay.unit == SPI_DELAY_UNIT_USECS)
+			ms->timestamp += ms->transfer->delay.value *
+					 tb_ticks_per_usec;
 		ms->state = mpc52xx_spi_fsmstate_wait;
 		return FSM_CONTINUE;
 	}
 
 	/* Write out the next byte */
-	ms->wcol_tx_timestamp = get_tbl();
+	ms->wcol_tx_timestamp = mftb();
 	if (ms->tx_buf)
 		out_8(ms->regs + SPI_DATA, *ms->tx_buf++);
 	else
@@ -277,7 +278,7 @@ mpc52xx_spi_fsmstate_wait(int irq, struct mpc52xx_spi *ms, u8 status, u8 data)
 		dev_err(&ms->master->dev, "spurious irq, status=0x%.2x\n",
 			status);
 
-	if (((int)get_tbl()) - ms->timestamp < 0)
+	if (((int)mftb()) - ms->timestamp < 0)
 		return FSM_POLL;
 
 	ms->message->actual_length += ms->transfer->len;
@@ -437,8 +438,9 @@ static int mpc52xx_spi_probe(struct platform_device *op)
 	ms->gpio_cs_count = of_gpio_count(op->dev.of_node);
 	if (ms->gpio_cs_count > 0) {
 		master->num_chipselect = ms->gpio_cs_count;
-		ms->gpio_cs = kmalloc(ms->gpio_cs_count * sizeof(unsigned int),
-				GFP_KERNEL);
+		ms->gpio_cs = kmalloc_array(ms->gpio_cs_count,
+					    sizeof(*ms->gpio_cs),
+					    GFP_KERNEL);
 		if (!ms->gpio_cs) {
 			rc = -ENOMEM;
 			goto err_alloc_gpio;
@@ -446,10 +448,9 @@ static int mpc52xx_spi_probe(struct platform_device *op)
 
 		for (i = 0; i < ms->gpio_cs_count; i++) {
 			gpio_cs = of_get_gpio(op->dev.of_node, i);
-			if (gpio_cs < 0) {
+			if (!gpio_is_valid(gpio_cs)) {
 				dev_err(&op->dev,
-					"could not parse the gpio field "
-					"in oftree\n");
+					"could not parse the gpio field in oftree\n");
 				rc = -ENODEV;
 				goto err_gpio;
 			}
@@ -457,8 +458,8 @@ static int mpc52xx_spi_probe(struct platform_device *op)
 			rc = gpio_request(gpio_cs, dev_name(&op->dev));
 			if (rc) {
 				dev_err(&op->dev,
-					"can't request spi cs gpio #%d "
-					"on gpio line %d\n", i, gpio_cs);
+					"can't request spi cs gpio #%d on gpio line %d\n",
+					i, gpio_cs);
 				goto err_gpio;
 			}
 

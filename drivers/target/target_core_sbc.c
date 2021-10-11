@@ -1,29 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * SCSI Block Commands (SBC) parsing and emulation.
  *
  * (c) Copyright 2002-2013 Datera, Inc.
  *
  * Nicholas A. Bellinger <nab@kernel.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/ratelimit.h>
 #include <linux/crc-t10dif.h>
+#include <linux/t10-pi.h>
 #include <asm/unaligned.h>
 #include <scsi/scsi_proto.h>
 #include <scsi/scsi_tcq.h>
@@ -70,14 +58,8 @@ sbc_emulate_readcapacity(struct se_cmd *cmd)
 	else
 		blocks = (u32)blocks_long;
 
-	buf[0] = (blocks >> 24) & 0xff;
-	buf[1] = (blocks >> 16) & 0xff;
-	buf[2] = (blocks >> 8) & 0xff;
-	buf[3] = blocks & 0xff;
-	buf[4] = (dev->dev_attrib.block_size >> 24) & 0xff;
-	buf[5] = (dev->dev_attrib.block_size >> 16) & 0xff;
-	buf[6] = (dev->dev_attrib.block_size >> 8) & 0xff;
-	buf[7] = dev->dev_attrib.block_size & 0xff;
+	put_unaligned_be32(blocks, &buf[0]);
+	put_unaligned_be32(dev->dev_attrib.block_size, &buf[4]);
 
 	rbuf = transport_kmap_data_sg(cmd);
 	if (rbuf) {
@@ -101,18 +83,8 @@ sbc_emulate_readcapacity_16(struct se_cmd *cmd)
 	unsigned long long blocks = dev->transport->get_blocks(dev);
 
 	memset(buf, 0, sizeof(buf));
-	buf[0] = (blocks >> 56) & 0xff;
-	buf[1] = (blocks >> 48) & 0xff;
-	buf[2] = (blocks >> 40) & 0xff;
-	buf[3] = (blocks >> 32) & 0xff;
-	buf[4] = (blocks >> 24) & 0xff;
-	buf[5] = (blocks >> 16) & 0xff;
-	buf[6] = (blocks >> 8) & 0xff;
-	buf[7] = blocks & 0xff;
-	buf[8] = (dev->dev_attrib.block_size >> 24) & 0xff;
-	buf[9] = (dev->dev_attrib.block_size >> 16) & 0xff;
-	buf[10] = (dev->dev_attrib.block_size >> 8) & 0xff;
-	buf[11] = dev->dev_attrib.block_size & 0xff;
+	put_unaligned_be64(blocks, &buf[0]);
+	put_unaligned_be32(dev->dev_attrib.block_size, &buf[8]);
 	/*
 	 * Set P_TYPE and PROT_EN bits for DIF support
 	 */
@@ -133,8 +105,8 @@ sbc_emulate_readcapacity_16(struct se_cmd *cmd)
 
 	if (dev->transport->get_alignment_offset_lbas) {
 		u16 lalba = dev->transport->get_alignment_offset_lbas(dev);
-		buf[14] = (lalba >> 8) & 0x3f;
-		buf[15] = lalba & 0xff;
+
+		put_unaligned_be16(lalba, &buf[14]);
 	}
 
 	/*
@@ -261,18 +233,17 @@ static inline u32 transport_get_sectors_6(unsigned char *cdb)
 
 static inline u32 transport_get_sectors_10(unsigned char *cdb)
 {
-	return (u32)(cdb[7] << 8) + cdb[8];
+	return get_unaligned_be16(&cdb[7]);
 }
 
 static inline u32 transport_get_sectors_12(unsigned char *cdb)
 {
-	return (u32)(cdb[6] << 24) + (cdb[7] << 16) + (cdb[8] << 8) + cdb[9];
+	return get_unaligned_be32(&cdb[6]);
 }
 
 static inline u32 transport_get_sectors_16(unsigned char *cdb)
 {
-	return (u32)(cdb[10] << 24) + (cdb[11] << 16) +
-		    (cdb[12] << 8) + cdb[13];
+	return get_unaligned_be32(&cdb[10]);
 }
 
 /*
@@ -280,29 +251,23 @@ static inline u32 transport_get_sectors_16(unsigned char *cdb)
  */
 static inline u32 transport_get_sectors_32(unsigned char *cdb)
 {
-	return (u32)(cdb[28] << 24) + (cdb[29] << 16) +
-		    (cdb[30] << 8) + cdb[31];
+	return get_unaligned_be32(&cdb[28]);
 
 }
 
 static inline u32 transport_lba_21(unsigned char *cdb)
 {
-	return ((cdb[1] & 0x1f) << 16) | (cdb[2] << 8) | cdb[3];
+	return get_unaligned_be24(&cdb[1]) & 0x1fffff;
 }
 
 static inline u32 transport_lba_32(unsigned char *cdb)
 {
-	return (cdb[2] << 24) | (cdb[3] << 16) | (cdb[4] << 8) | cdb[5];
+	return get_unaligned_be32(&cdb[2]);
 }
 
 static inline unsigned long long transport_lba_64(unsigned char *cdb)
 {
-	unsigned int __v1, __v2;
-
-	__v1 = (cdb[2] << 24) | (cdb[3] << 16) | (cdb[4] << 8) | cdb[5];
-	__v2 = (cdb[6] << 24) | (cdb[7] << 16) | (cdb[8] << 8) | cdb[9];
-
-	return ((unsigned long long)__v2) | (unsigned long long)__v1 << 32;
+	return get_unaligned_be64(&cdb[2]);
 }
 
 /*
@@ -310,12 +275,7 @@ static inline unsigned long long transport_lba_64(unsigned char *cdb)
  */
 static inline unsigned long long transport_lba_64_ext(unsigned char *cdb)
 {
-	unsigned int __v1, __v2;
-
-	__v1 = (cdb[12] << 24) | (cdb[13] << 16) | (cdb[14] << 8) | cdb[15];
-	__v2 = (cdb[16] << 24) | (cdb[17] << 16) | (cdb[18] << 8) | cdb[19];
-
-	return ((unsigned long long)__v2) | (unsigned long long)__v1 << 32;
+	return get_unaligned_be64(&cdb[12]);
 }
 
 static sense_reason_t
@@ -387,6 +347,10 @@ static sense_reason_t xdreadwrite_callback(struct se_cmd *cmd, bool success,
 	unsigned int offset;
 	sense_reason_t ret = TCM_NO_SENSE;
 	int i, count;
+
+	if (!success)
+		return 0;
+
 	/*
 	 * From sbc3r22.pdf section 5.48 XDWRITEREAD (10) command
 	 *
@@ -452,14 +416,8 @@ static sense_reason_t compare_and_write_post(struct se_cmd *cmd, bool success,
 	struct se_device *dev = cmd->se_dev;
 	sense_reason_t ret = TCM_NO_SENSE;
 
-	/*
-	 * Only set SCF_COMPARE_AND_WRITE_POST to force a response fall-through
-	 * within target_complete_ok_work() if the command was successfully
-	 * sent to the backend driver.
-	 */
 	spin_lock_irq(&cmd->t_state_lock);
-	if (cmd->transport_state & CMD_T_SENT) {
-		cmd->se_cmd_flags |= SCF_COMPARE_AND_WRITE_POST;
+	if (success) {
 		*post_ret = 1;
 
 		if (cmd->scsi_status == SAM_STAT_CHECK_CONDITION)
@@ -476,19 +434,81 @@ static sense_reason_t compare_and_write_post(struct se_cmd *cmd, bool success,
 	return ret;
 }
 
+/*
+ * compare @cmp_len bytes of @read_sgl with @cmp_sgl. On miscompare, fill
+ * @miscmp_off and return TCM_MISCOMPARE_VERIFY.
+ */
+static sense_reason_t
+compare_and_write_do_cmp(struct scatterlist *read_sgl, unsigned int read_nents,
+			 struct scatterlist *cmp_sgl, unsigned int cmp_nents,
+			 unsigned int cmp_len, unsigned int *miscmp_off)
+{
+	unsigned char *buf = NULL;
+	struct scatterlist *sg;
+	sense_reason_t ret;
+	unsigned int offset;
+	size_t rc;
+	int sg_cnt;
+
+	buf = kzalloc(cmp_len, GFP_KERNEL);
+	if (!buf) {
+		ret = TCM_OUT_OF_RESOURCES;
+		goto out;
+	}
+
+	rc = sg_copy_to_buffer(cmp_sgl, cmp_nents, buf, cmp_len);
+	if (!rc) {
+		pr_err("sg_copy_to_buffer() failed for compare_and_write\n");
+		ret = TCM_OUT_OF_RESOURCES;
+		goto out;
+	}
+	/*
+	 * Compare SCSI READ payload against verify payload
+	 */
+	offset = 0;
+	ret = TCM_NO_SENSE;
+	for_each_sg(read_sgl, sg, read_nents, sg_cnt) {
+		unsigned int len = min(sg->length, cmp_len);
+		unsigned char *addr = kmap_atomic(sg_page(sg));
+
+		if (memcmp(addr, buf + offset, len)) {
+			unsigned int i;
+
+			for (i = 0; i < len && addr[i] == buf[offset + i]; i++)
+				;
+			*miscmp_off = offset + i;
+			pr_warn("Detected MISCOMPARE at offset %u\n",
+				*miscmp_off);
+			ret = TCM_MISCOMPARE_VERIFY;
+		}
+		kunmap_atomic(addr);
+		if (ret != TCM_NO_SENSE)
+			goto out;
+
+		offset += len;
+		cmp_len -= len;
+		if (!cmp_len)
+			break;
+	}
+	pr_debug("COMPARE AND WRITE read data matches compare data\n");
+out:
+	kfree(buf);
+	return ret;
+}
+
 static sense_reason_t compare_and_write_callback(struct se_cmd *cmd, bool success,
 						 int *post_ret)
 {
 	struct se_device *dev = cmd->se_dev;
-	struct scatterlist *write_sg = NULL, *sg;
-	unsigned char *buf = NULL, *addr;
+	struct sg_table write_tbl = { };
+	struct scatterlist *write_sg;
 	struct sg_mapping_iter m;
-	unsigned int offset = 0, len;
-	unsigned int nlbas = cmd->t_task_nolb;
+	unsigned int len;
 	unsigned int block_size = dev->dev_attrib.block_size;
-	unsigned int compare_len = (nlbas * block_size);
+	unsigned int compare_len = (cmd->t_task_nolb * block_size);
+	unsigned int miscmp_off = 0;
 	sense_reason_t ret = TCM_NO_SENSE;
-	int rc, i;
+	int i;
 
 	/*
 	 * Handle early failure in transport_generic_request_failure(),
@@ -514,59 +534,33 @@ static sense_reason_t compare_and_write_callback(struct se_cmd *cmd, bool succes
 		goto out;
 	}
 
-	buf = kzalloc(cmd->data_length, GFP_KERNEL);
-	if (!buf) {
-		pr_err("Unable to allocate compare_and_write buf\n");
-		ret = TCM_OUT_OF_RESOURCES;
+	ret = compare_and_write_do_cmp(cmd->t_bidi_data_sg,
+				       cmd->t_bidi_data_nents,
+				       cmd->t_data_sg,
+				       cmd->t_data_nents,
+				       compare_len,
+				       &miscmp_off);
+	if (ret == TCM_MISCOMPARE_VERIFY) {
+		/*
+		 * SBC-4 r15: 5.3 COMPARE AND WRITE command
+		 * In the sense data (see 4.18 and SPC-5) the offset from the
+		 * start of the Data-Out Buffer to the first byte of data that
+		 * was not equal shall be reported in the INFORMATION field.
+		 */
+		cmd->sense_info = miscmp_off;
 		goto out;
-	}
+	} else if (ret)
+		goto out;
 
-	write_sg = kmalloc(sizeof(struct scatterlist) * cmd->t_data_nents,
-			   GFP_KERNEL);
-	if (!write_sg) {
+	if (sg_alloc_table(&write_tbl, cmd->t_data_nents, GFP_KERNEL) < 0) {
 		pr_err("Unable to allocate compare_and_write sg\n");
 		ret = TCM_OUT_OF_RESOURCES;
 		goto out;
 	}
-	sg_init_table(write_sg, cmd->t_data_nents);
-	/*
-	 * Setup verify and write data payloads from total NumberLBAs.
-	 */
-	rc = sg_copy_to_buffer(cmd->t_data_sg, cmd->t_data_nents, buf,
-			       cmd->data_length);
-	if (!rc) {
-		pr_err("sg_copy_to_buffer() failed for compare_and_write\n");
-		ret = TCM_OUT_OF_RESOURCES;
-		goto out;
-	}
-	/*
-	 * Compare against SCSI READ payload against verify payload
-	 */
-	for_each_sg(cmd->t_bidi_data_sg, sg, cmd->t_bidi_data_nents, i) {
-		addr = (unsigned char *)kmap_atomic(sg_page(sg));
-		if (!addr) {
-			ret = TCM_OUT_OF_RESOURCES;
-			goto out;
-		}
-
-		len = min(sg->length, compare_len);
-
-		if (memcmp(addr, buf + offset, len)) {
-			pr_warn("Detected MISCOMPARE for addr: %p buf: %p\n",
-				addr, buf + offset);
-			kunmap_atomic(addr);
-			goto miscompare;
-		}
-		kunmap_atomic(addr);
-
-		offset += len;
-		compare_len -= len;
-		if (!compare_len)
-			break;
-	}
+	write_sg = write_tbl.sgl;
 
 	i = 0;
-	len = cmd->t_task_nolb * block_size;
+	len = compare_len;
 	sg_miter_start(&m, cmd->t_data_sg, cmd->t_data_nents, SG_MITER_TO_SG);
 	/*
 	 * Currently assumes NoLB=1 and SGLs are PAGE_SIZE..
@@ -606,26 +600,20 @@ static sense_reason_t compare_and_write_callback(struct se_cmd *cmd, bool succes
 
 	spin_lock_irq(&cmd->t_state_lock);
 	cmd->t_state = TRANSPORT_PROCESSING;
-	cmd->transport_state |= CMD_T_ACTIVE|CMD_T_BUSY|CMD_T_SENT;
+	cmd->transport_state |= CMD_T_ACTIVE | CMD_T_SENT;
 	spin_unlock_irq(&cmd->t_state_lock);
 
 	__target_execute_cmd(cmd, false);
 
-	kfree(buf);
 	return ret;
 
-miscompare:
-	pr_warn("Target/%s: Send MISCOMPARE check condition and sense\n",
-		dev->transport->name);
-	ret = TCM_MISCOMPARE_VERIFY;
 out:
 	/*
 	 * In the MISCOMPARE or failure case, unlock ->caw_sem obtained in
 	 * sbc_compare_and_write() before the original READ I/O submission.
 	 */
 	up(&dev->caw_sem);
-	kfree(write_sg);
-	kfree(buf);
+	sg_free_table(&write_tbl);
 	return ret;
 }
 
@@ -777,7 +765,7 @@ sbc_check_prot(struct se_device *dev, struct se_cmd *cmd, unsigned char *cdb,
 		}
 		if (!protect)
 			return TCM_NO_SENSE;
-		/* Fallthrough */
+		fallthrough;
 	default:
 		pr_err("Unable to determine pi_prot_type for CDB: 0x%02x "
 		       "PROTECT: 0x%02x\n", cdb[0], protect);
@@ -926,6 +914,7 @@ sbc_parse_cdb(struct se_cmd *cmd, struct sbc_ops *ops)
 		cmd->execute_cmd = sbc_execute_rw;
 		break;
 	case WRITE_16:
+	case WRITE_VERIFY_16:
 		sectors = transport_get_sectors_16(cdb);
 		cmd->t_task_lba = transport_lba_64(cdb);
 
@@ -1003,6 +992,13 @@ sbc_parse_cdb(struct se_cmd *cmd, struct sbc_ops *ops)
 		break;
 	}
 	case COMPARE_AND_WRITE:
+		if (!dev->dev_attrib.emulate_caw) {
+			pr_err_ratelimited("se_device %s/%s (vpd_unit_serial %s) reject COMPARE_AND_WRITE\n",
+					   dev->se_hba->backend->ops->name,
+					   config_item_name(&dev->dev_group.cg_item),
+					   dev->t10_wwn.unit_serial);
+			return TCM_UNSUPPORTED_SCSI_OPCODE;
+		}
 		sectors = cdb[13];
 		/*
 		 * Currently enforce COMPARE_AND_WRITE for a single sector
@@ -1043,8 +1039,7 @@ sbc_parse_cdb(struct se_cmd *cmd, struct sbc_ops *ops)
 				cmd->t_task_cdb[1] & 0x1f);
 			return TCM_INVALID_CDB_FIELD;
 		}
-		size = (cdb[10] << 24) | (cdb[11] << 16) |
-		       (cdb[12] << 8) | cdb[13];
+		size = get_unaligned_be32(&cdb[10]);
 		break;
 	case SYNCHRONIZE_CACHE:
 	case SYNCHRONIZE_CACHE_16:
@@ -1237,9 +1232,11 @@ sbc_execute_unmap(struct se_cmd *cmd)
 			goto err;
 		}
 
-		ret = ops->execute_unmap(cmd, lba, range);
-		if (ret)
-			goto err;
+		if (range) {
+			ret = ops->execute_unmap(cmd, lba, range);
+			if (ret)
+				goto err;
+		}
 
 		ptr += 16;
 		size -= 16;
@@ -1448,7 +1445,7 @@ sbc_dif_verify(struct se_cmd *cmd, sector_t start, unsigned int sectors,
 				 (unsigned long long)sector, sdt->guard_tag,
 				 sdt->app_tag, be32_to_cpu(sdt->ref_tag));
 
-			if (sdt->app_tag == cpu_to_be16(0xffff)) {
+			if (sdt->app_tag == T10_PI_APP_ESCAPE) {
 				dsg_off += block_size;
 				goto next;
 			}
@@ -1473,7 +1470,7 @@ sbc_dif_verify(struct se_cmd *cmd, sector_t start, unsigned int sectors,
 			if (rc) {
 				kunmap_atomic(daddr - dsg->offset);
 				kunmap_atomic(paddr - psg->offset);
-				cmd->bad_sector = sector;
+				cmd->sense_info = sector;
 				return rc;
 			}
 next:

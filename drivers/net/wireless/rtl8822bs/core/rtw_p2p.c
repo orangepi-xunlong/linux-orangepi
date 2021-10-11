@@ -3110,7 +3110,11 @@ void restore_p2p_state_handler(_adapter	*padapter)
 
 		if (rtw_p2p_chk_state(pwdinfo, P2P_STATE_TX_PROVISION_DIS_REQ) || rtw_p2p_chk_state(pwdinfo, P2P_STATE_RX_PROVISION_DIS_RSP)) {
 			set_channel_bwmode(padapter, union_ch, union_offset, union_bw);
-			rtw_back_opch(padapter);
+			#ifdef CONFIG_AP_MODE
+			/*mac-id sleep or wake-up for AP mode*/
+			rtw_mi_buddy_ap_acdata_control(padapter, 0);
+			#endif/*CONFIG_AP_MODE*/
+			rtw_mi_buddy_issue_nulldata(padapter, NULL, 0, 3, 500);
 		}
 	}
 #endif
@@ -3174,12 +3178,6 @@ void p2p_concurrent_handler(_adapter	*padapter)
 	struct mlme_ext_info	*pmlmeinfo = &(pmlmeext->mlmext_info);
 	u8					val8;
 
-#ifdef CONFIG_IOCTL_CFG80211
-	if (pwdinfo->driver_interface == DRIVER_CFG80211
-		&& !rtw_cfg80211_get_is_roch(padapter))
-		return;
-#endif
-
 	if (rtw_mi_check_status(padapter, MI_LINKED)) {
 		u8 union_ch = rtw_mi_get_union_chan(padapter);
 		u8 union_bw = rtw_mi_get_union_bw(padapter);
@@ -3188,10 +3186,13 @@ void p2p_concurrent_handler(_adapter	*padapter)
 		pwdinfo->operating_channel = union_ch;
 
 		if (pwdinfo->driver_interface == DRIVER_CFG80211) {
-			RTW_INFO("%s, switch ch back to union=%u,%u, %u\n"
-				, __func__, union_ch, union_bw, union_offset);
+			RTW_INFO("%s, switch ch back to union_ch=%d\n", __func__, union_ch);
 			set_channel_bwmode(padapter, union_ch, union_offset, union_bw);
-			rtw_back_opch(padapter);
+			#ifdef CONFIG_AP_MODE
+			/*mac-id sleep or wake-up for AP mode*/
+			rtw_mi_buddy_ap_acdata_control(padapter, 0);
+			#endif/*CONFIG_AP_MODE*/
+			rtw_mi_buddy_issue_nulldata(padapter, NULL, 0, 3, 500);
 
 		} else if (pwdinfo->driver_interface == DRIVER_WEXT) {
 			if (rtw_p2p_chk_state(pwdinfo, P2P_STATE_IDLE)) {
@@ -3201,7 +3202,12 @@ void p2p_concurrent_handler(_adapter	*padapter)
 					RTW_INFO("[%s] P2P_STATE_IDLE, ext_listen_period = %d\n", __FUNCTION__, pwdinfo->ext_listen_period);
 
 					if (union_ch != pwdinfo->listen_channel) {
-						rtw_leave_opch(padapter);
+						#ifdef CONFIG_AP_MODE
+						/*mac-id sleep or wake-up for AP mode*/
+						rtw_mi_buddy_ap_acdata_control(padapter, 1);
+						#endif/*CONFIG_AP_MODE*/
+						/*	Will switch to listen channel so that need to send the NULL data with PW bit to AP. */
+						rtw_mi_buddy_issue_nulldata(padapter, NULL, 1, 3, 500);
 						set_channel_bwmode(padapter, pwdinfo->listen_channel, HAL_PRIME_CHNL_OFFSET_DONT_CARE, CHANNEL_WIDTH_20);
 					}
 
@@ -3214,7 +3220,6 @@ void p2p_concurrent_handler(_adapter	*padapter)
 					/*	Todo: To check the value of pwdinfo->ext_listen_period is equal to 0 or not. */
 					_set_timer(&pwdinfo->ap_p2p_switch_timer, pwdinfo->ext_listen_period);
 				}
-
 			} else if (rtw_p2p_chk_state(pwdinfo, P2P_STATE_LISTEN) ||
 				rtw_p2p_chk_state(pwdinfo, P2P_STATE_GONEGO_FAIL) ||
 				(rtw_p2p_chk_state(pwdinfo, P2P_STATE_GONEGO_ING) && pwdinfo->nego_req_info.benable == _FALSE) ||
@@ -3234,19 +3239,25 @@ void p2p_concurrent_handler(_adapter	*padapter)
 						rtw_hal_set_hwreg(padapter, HW_VAR_MLME_SITESURVEY, (u8 *)(&val8));
 					}
 					rtw_p2p_set_state(pwdinfo, P2P_STATE_IDLE);
-					rtw_back_opch(padapter);
+					#ifdef CONFIG_AP_MODE
+					/*mac-id sleep or wake-up for AP mode*/
+					rtw_mi_buddy_ap_acdata_control(padapter, 0);
+					#endif/*CONFIG_AP_MODE*/
+					rtw_mi_buddy_issue_nulldata(padapter, NULL, 0, 3, 500);
 				}
 
 				/*	Todo: To check the value of pwdinfo->ext_listen_interval is equal to 0 or not. */
 				_set_timer(&pwdinfo->ap_p2p_switch_timer, pwdinfo->ext_listen_interval);
-
 			} else if (rtw_p2p_chk_state(pwdinfo, P2P_STATE_GONEGO_OK)) {
 				/*	The driver had finished the P2P handshake successfully. */
 				val8 = 0;
 				rtw_hal_set_hwreg(padapter, HW_VAR_MLME_SITESURVEY, (u8 *)(&val8));
 				set_channel_bwmode(padapter, union_ch, union_offset, union_bw);
-				rtw_back_opch(padapter);
-
+				#ifdef CONFIG_AP_MODE
+				/*mac-id sleep or wake-up for AP mode*/
+				rtw_mi_buddy_ap_acdata_control(padapter, 0);
+				#endif/*CONFIG_AP_MODE*/
+				rtw_mi_buddy_issue_nulldata(padapter, NULL, 0, 3, 500);
 			} else if (rtw_p2p_chk_state(pwdinfo, P2P_STATE_TX_PROVISION_DIS_REQ)) {
 				val8 = 1;
 				set_channel_bwmode(padapter, pwdinfo->tx_prov_disc_info.peer_channel_num[0], HAL_PRIME_CHNL_OFFSET_DONT_CARE, CHANNEL_WIDTH_20);
@@ -3281,7 +3292,7 @@ void p2p_concurrent_handler(_adapter	*padapter)
 #endif
 
 #ifdef CONFIG_IOCTL_CFG80211
-u8 roch_stay_in_cur_chan(_adapter *padapter)
+static u8 _stay_in_cur_chan(_adapter *padapter)
 {
 	int i;
 	_adapter *iface;
@@ -3332,7 +3343,7 @@ static int ro_ch_handler(_adapter *adapter, u8 *buf)
 	if (rtw_cfg80211_get_is_roch(adapter) != _TRUE)
 		goto exit;
 
-	remain_ch = (u8)ieee80211_frequency_to_channel(roch_parm->ch.center_freq);
+	remain_ch = (u8) ieee80211_frequency_to_channel(roch_parm->ch.center_freq);
 	duration = roch_parm->duration;
 
 	RTW_INFO(FUNC_ADPT_FMT" ch:%u duration:%d, cookie:0x%llx\n"
@@ -3352,7 +3363,7 @@ static int ro_ch_handler(_adapter *adapter, u8 *buf)
 		}
 	}
 
-	if (roch_stay_in_cur_chan(adapter) == _TRUE) {
+	if (_stay_in_cur_chan(adapter) == _TRUE) {
 		remain_ch = rtw_mi_get_union_chan(adapter);
 		RTW_INFO(FUNC_ADPT_FMT" stay in union ch:%d\n", FUNC_ADPT_ARG(adapter), remain_ch);
 	}
@@ -3360,13 +3371,16 @@ static int ro_ch_handler(_adapter *adapter, u8 *buf)
 	#ifdef CONFIG_CONCURRENT_MODE
 	if (rtw_mi_check_status(adapter, MI_LINKED) && (0 != rtw_mi_get_union_chan(adapter))) {
 		if ((remain_ch != rtw_mi_get_union_chan(adapter)) && !check_fwstate(&adapter->mlmepriv, _FW_LINKED)) {
-			if (remain_ch != pmlmeext->cur_channel
+			if (
 				#ifdef RTW_ROCH_BACK_OP
-				|| ATOMIC_READ(&pwdev_priv->switch_ch_to) == 1
+				ATOMIC_READ(&pwdev_priv->switch_ch_to) == 1 ||
 				#endif
-			) {
-				rtw_leave_opch(adapter);
-
+				(remain_ch != pmlmeext->cur_channel)) {
+				#ifdef CONFIG_AP_MODE
+				/*mac-id sleep or wake-up for AP mode*/
+				rtw_mi_buddy_ap_acdata_control(adapter, 1);
+				#endif/*CONFIG_AP_MODE*/
+				rtw_mi_buddy_issue_nulldata(adapter, NULL, 1, 3, 500);
 				#ifdef RTW_ROCH_BACK_OP
 				RTW_INFO("%s, set switch ch timer, duration=%d\n", __func__, duration - pwdinfo->ext_listen_interval);
 				ATOMIC_SET(&pwdev_priv->switch_ch_to, 0);
@@ -3439,11 +3453,6 @@ static int cancel_ro_ch_handler(_adapter *padapter, u8 *buf)
 		}
 	}
 
-#if defined(RTW_ROCH_BACK_OP) && defined(CONFIG_CONCURRENT_MODE)
-	_cancel_timer_ex(&pwdinfo->ap_p2p_switch_timer);
-	ATOMIC_SET(&pwdev_priv->switch_ch_to, 1);
-#endif
-
 	if (rtw_mi_get_ch_setting_union(padapter, &ch, &bw, &offset) != 0) {
 		if (0)
 			RTW_INFO(FUNC_ADPT_FMT" back to linked/linking union - ch:%u, bw:%u, offset:%u\n",
@@ -3465,7 +3474,14 @@ static int cancel_ro_ch_handler(_adapter *padapter, u8 *buf)
 	}
 
 	set_channel_bwmode(padapter, ch, offset, bw);
-	rtw_back_opch(padapter);
+	if (rtw_mi_buddy_check_fwstate(padapter, _FW_LINKED)) {
+		#ifdef CONFIG_AP_MODE
+		/*mac-id sleep or wake-up for AP mode*/
+		rtw_mi_buddy_ap_acdata_control(padapter, 0);
+		#endif/*CONFIG_AP_MODE*/
+		rtw_mi_buddy_issue_nulldata(padapter, NULL, 0, 3, 500);
+	}
+
 
 	rtw_p2p_set_state(pwdinfo, rtw_p2p_pre_state(pwdinfo));
 #ifdef CONFIG_DEBUG_CFG80211
@@ -3476,7 +3492,7 @@ static int cancel_ro_ch_handler(_adapter *padapter, u8 *buf)
 
 	rtw_cfg80211_set_is_roch(padapter, _FALSE);
 	pcfg80211_wdinfo->ro_ch_wdev = NULL;
-	rtw_cfg80211_set_last_ro_ch_time(padapter);
+	pcfg80211_wdinfo->last_ro_ch_time = rtw_get_current_time();
 
 	rtw_cfg80211_remain_on_channel_expired(wdev
 		, pcfg80211_wdinfo->remain_on_ch_cookie

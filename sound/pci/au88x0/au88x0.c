@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ALSA driver for the Aureal Vortex family of soundprocessors.
  * Author: Manuel Jander (mjander@embedded.cl)
@@ -40,8 +41,6 @@ MODULE_PARM_DESC(pcifix, "Enable VIA-workaround for " CARD_NAME " soundcard.");
 
 MODULE_DESCRIPTION("Aureal vortex");
 MODULE_LICENSE("GPL");
-MODULE_SUPPORTED_DEVICE("{{Aureal Semiconductor Inc., Aureal Vortex Sound Processor}}");
-
 MODULE_DEVICE_TABLE(pci, snd_vortex_ids);
 
 static void vortex_fix_latency(struct pci_dev *vortex)
@@ -141,7 +140,7 @@ snd_vortex_create(struct snd_card *card, struct pci_dev *pci, vortex_t ** rchip)
 {
 	vortex_t *chip;
 	int err;
-	static struct snd_device_ops ops = {
+	static const struct snd_device_ops ops = {
 		.dev_free = snd_vortex_dev_free,
 	};
 
@@ -150,8 +149,7 @@ snd_vortex_create(struct snd_card *card, struct pci_dev *pci, vortex_t ** rchip)
 	// check PCI availability (DMA).
 	if ((err = pci_enable_device(pci)) < 0)
 		return err;
-	if (dma_set_mask(&pci->dev, DMA_BIT_MASK(32)) < 0 ||
-	    dma_set_coherent_mask(&pci->dev, DMA_BIT_MASK(32)) < 0) {
+	if (dma_set_mask_and_coherent(&pci->dev, DMA_BIT_MASK(32))) {
 		dev_err(card->dev, "error to set DMA mask\n");
 		pci_disable_device(pci);
 		return -ENXIO;
@@ -201,6 +199,7 @@ snd_vortex_create(struct snd_card *card, struct pci_dev *pci, vortex_t ** rchip)
 		goto irq_out;
 	}
 	chip->irq = pci->irq;
+	card->sync_irq = chip->irq;
 
 	pci_set_master(pci);
 	// End of PCI setup.

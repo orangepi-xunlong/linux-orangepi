@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /* ide.h: SPARC PCI specific IDE glue.
  *
  * Copyright (C) 1997  David S. Miller (davem@davemloft.net)
@@ -12,12 +13,11 @@
 
 #include <asm/io.h>
 #ifdef CONFIG_SPARC64
-#include <asm/pgalloc.h>
 #include <asm/spitfire.h>
 #include <asm/cacheflush.h>
 #include <asm/page.h>
 #else
-#include <asm/pgtable.h>
+#include <linux/pgtable.h>
 #include <asm/psr.h>
 #endif
 

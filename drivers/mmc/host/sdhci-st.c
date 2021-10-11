@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Support for SDHCI on STMicroelectronics SoCs
  *
@@ -6,16 +7,6 @@
  * Contributors: Peter Griffin <peter.griffin@linaro.org>
  *
  * Based on sdhci-cns3xxx.c
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #include <linux/io.h>
@@ -371,11 +362,10 @@ static int sdhci_st_probe(struct platform_device *pdev)
 	if (IS_ERR(icnclk))
 		icnclk = NULL;
 
-	rstc = devm_reset_control_get(&pdev->dev, NULL);
+	rstc = devm_reset_control_get_optional_exclusive(&pdev->dev, NULL);
 	if (IS_ERR(rstc))
-		rstc = NULL;
-	else
-		reset_control_deassert(rstc);
+		return PTR_ERR(rstc);
+	reset_control_deassert(rstc);
 
 	host = sdhci_pltfm_init(pdev, &sdhci_st_pdata, sizeof(*pdata));
 	if (IS_ERR(host)) {
@@ -394,17 +384,24 @@ static int sdhci_st_probe(struct platform_device *pdev)
 		goto err_of;
 	}
 
-	clk_prepare_enable(clk);
-	clk_prepare_enable(icnclk);
+	ret = clk_prepare_enable(clk);
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to prepare clock\n");
+		goto err_of;
+	}
+
+	ret = clk_prepare_enable(icnclk);
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to prepare icn clock\n");
+		goto err_icnclk;
+	}
 
 	/* Configure the FlashSS Top registers for setting eMMC TX/RX delay */
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 					   "top-mmc-delay");
 	pdata->top_ioaddr = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(pdata->top_ioaddr)) {
-		dev_warn(&pdev->dev, "FlashSS Top Dly registers not available");
+	if (IS_ERR(pdata->top_ioaddr))
 		pdata->top_ioaddr = NULL;
-	}
 
 	pltfm_host->clk = clk;
 	pdata->icnclk = icnclk;
@@ -413,12 +410,8 @@ static int sdhci_st_probe(struct platform_device *pdev)
 	st_mmcss_cconfig(np, host);
 
 	ret = sdhci_add_host(host);
-	if (ret) {
-		dev_err(&pdev->dev, "Failed sdhci_add_host\n");
+	if (ret)
 		goto err_out;
-	}
-
-	platform_set_drvdata(pdev, host);
 
 	host_version = readw_relaxed((host->ioaddr + SDHCI_HOST_VERSION));
 
@@ -431,12 +424,12 @@ static int sdhci_st_probe(struct platform_device *pdev)
 
 err_out:
 	clk_disable_unprepare(icnclk);
+err_icnclk:
 	clk_disable_unprepare(clk);
 err_of:
 	sdhci_pltfm_free(pdev);
 err_pltfm_init:
-	if (rstc)
-		reset_control_assert(rstc);
+	reset_control_assert(rstc);
 
 	return ret;
 }
@@ -453,8 +446,7 @@ static int sdhci_st_remove(struct platform_device *pdev)
 
 	clk_disable_unprepare(pdata->icnclk);
 
-	if (rstc)
-		reset_control_assert(rstc);
+	reset_control_assert(rstc);
 
 	return ret;
 }
@@ -465,13 +457,16 @@ static int sdhci_st_suspend(struct device *dev)
 	struct sdhci_host *host = dev_get_drvdata(dev);
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 	struct st_mmc_platform_data *pdata = sdhci_pltfm_priv(pltfm_host);
-	int ret = sdhci_suspend_host(host);
+	int ret;
 
+	if (host->tuning_mode != SDHCI_TUNING_MODE_3)
+		mmc_retune_needed(host->mmc);
+
+	ret = sdhci_suspend_host(host);
 	if (ret)
 		goto out;
 
-	if (pdata->rstc)
-		reset_control_assert(pdata->rstc);
+	reset_control_assert(pdata->rstc);
 
 	clk_disable_unprepare(pdata->icnclk);
 	clk_disable_unprepare(pltfm_host->clk);
@@ -485,12 +480,19 @@ static int sdhci_st_resume(struct device *dev)
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 	struct st_mmc_platform_data *pdata = sdhci_pltfm_priv(pltfm_host);
 	struct device_node *np = dev->of_node;
+	int ret;
 
-	clk_prepare_enable(pltfm_host->clk);
-	clk_prepare_enable(pdata->icnclk);
+	ret = clk_prepare_enable(pltfm_host->clk);
+	if (ret)
+		return ret;
 
-	if (pdata->rstc)
-		reset_control_deassert(pdata->rstc);
+	ret = clk_prepare_enable(pdata->icnclk);
+	if (ret) {
+		clk_disable_unprepare(pltfm_host->clk);
+		return ret;
+	}
+
+	reset_control_deassert(pdata->rstc);
 
 	st_mmcss_cconfig(np, host);
 
@@ -512,8 +514,9 @@ static struct platform_driver sdhci_st_driver = {
 	.remove = sdhci_st_remove,
 	.driver = {
 		   .name = "sdhci-st",
+		   .probe_type = PROBE_PREFER_ASYNCHRONOUS,
 		   .pm = &sdhci_st_pmops,
-		   .of_match_table = of_match_ptr(st_sdhci_match),
+		   .of_match_table = st_sdhci_match,
 		  },
 };
 

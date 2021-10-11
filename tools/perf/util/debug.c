@@ -1,35 +1,79 @@
+// SPDX-License-Identifier: GPL-2.0
 /* For general debugging purposes */
 
-#include "../perf.h"
-
+#include <inttypes.h>
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <sys/wait.h>
 #include <api/debug.h>
+#include <linux/kernel.h>
 #include <linux/time64.h>
-
-#include "cache.h"
+#include <sys/time.h>
+#ifdef HAVE_BACKTRACE_SUPPORT
+#include <execinfo.h>
+#endif
 #include "color.h"
 #include "event.h"
 #include "debug.h"
-#include "util.h"
+#include "print_binary.h"
 #include "target.h"
+#include "ui/helpline.h"
+#include "ui/ui.h"
+#include "util/parse-sublevel-options.h"
+
+#include <linux/ctype.h>
 
 int verbose;
+int debug_peo_args;
 bool dump_trace = false, quiet = false;
 int debug_ordered_events;
 static int redirect_to_stderr;
 int debug_data_convert;
+static FILE *debug_file;
+bool debug_display_time;
+
+void debug_set_file(FILE *file)
+{
+	debug_file = file;
+}
+
+void debug_set_display_time(bool set)
+{
+	debug_display_time = set;
+}
+
+static int fprintf_time(FILE *file)
+{
+	struct timeval tod;
+	struct tm ltime;
+	char date[64];
+
+	if (!debug_display_time)
+		return 0;
+
+	if (gettimeofday(&tod, NULL) != 0)
+		return 0;
+
+	if (localtime_r(&tod.tv_sec, &ltime) == NULL)
+		return 0;
+
+	strftime(date, sizeof(date),  "%F %H:%M:%S", &ltime);
+	return fprintf(file, "[%s.%06lu] ", date, (long)tod.tv_usec);
+}
 
 int veprintf(int level, int var, const char *fmt, va_list args)
 {
 	int ret = 0;
 
 	if (var >= level) {
-		if (use_browser >= 1 && !redirect_to_stderr)
+		if (use_browser >= 1 && !redirect_to_stderr) {
 			ui_helpline__vshow(fmt, args);
-		else
-			ret = vfprintf(stderr, fmt, args);
+		} else {
+			ret = fprintf_time(debug_file);
+			ret += vfprintf(debug_file, fmt, args);
+		}
 	}
 
 	return ret;
@@ -104,50 +148,53 @@ int dump_printf(const char *fmt, ...)
 	return ret;
 }
 
-static void trace_event_printer(enum binary_printer_ops op,
-				unsigned int val, void *extra)
+static int trace_event_printer(enum binary_printer_ops op,
+			       unsigned int val, void *extra, FILE *fp)
 {
 	const char *color = PERF_COLOR_BLUE;
 	union perf_event *event = (union perf_event *)extra;
 	unsigned char ch = (unsigned char)val;
+	int printed = 0;
 
 	switch (op) {
 	case BINARY_PRINT_DATA_BEGIN:
-		printf(".");
-		color_fprintf(stdout, color, "\n. ... raw event: size %d bytes\n",
-				event->header.size);
+		printed += fprintf(fp, ".");
+		printed += color_fprintf(fp, color, "\n. ... raw event: size %d bytes\n",
+					 event->header.size);
 		break;
 	case BINARY_PRINT_LINE_BEGIN:
-		printf(".");
+		printed += fprintf(fp, ".");
 		break;
 	case BINARY_PRINT_ADDR:
-		color_fprintf(stdout, color, "  %04x: ", val);
+		printed += color_fprintf(fp, color, "  %04x: ", val);
 		break;
 	case BINARY_PRINT_NUM_DATA:
-		color_fprintf(stdout, color, " %02x", val);
+		printed += color_fprintf(fp, color, " %02x", val);
 		break;
 	case BINARY_PRINT_NUM_PAD:
-		color_fprintf(stdout, color, "   ");
+		printed += color_fprintf(fp, color, "   ");
 		break;
 	case BINARY_PRINT_SEP:
-		color_fprintf(stdout, color, "  ");
+		printed += color_fprintf(fp, color, "  ");
 		break;
 	case BINARY_PRINT_CHAR_DATA:
-		color_fprintf(stdout, color, "%c",
+		printed += color_fprintf(fp, color, "%c",
 			      isprint(ch) ? ch : '.');
 		break;
 	case BINARY_PRINT_CHAR_PAD:
-		color_fprintf(stdout, color, " ");
+		printed += color_fprintf(fp, color, " ");
 		break;
 	case BINARY_PRINT_LINE_END:
-		color_fprintf(stdout, color, "\n");
+		printed += color_fprintf(fp, color, "\n");
 		break;
 	case BINARY_PRINT_DATA_END:
-		printf("\n");
+		printed += fprintf(fp, "\n");
 		break;
 	default:
 		break;
 	}
+
+	return printed;
 }
 
 void trace_event(union perf_event *event)
@@ -161,50 +208,39 @@ void trace_event(union perf_event *event)
 		     trace_event_printer, event);
 }
 
-static struct debug_variable {
-	const char *name;
-	int *ptr;
-} debug_variables[] = {
-	{ .name = "verbose",		.ptr = &verbose },
-	{ .name = "ordered-events",	.ptr = &debug_ordered_events},
-	{ .name = "stderr",		.ptr = &redirect_to_stderr},
-	{ .name = "data-convert",	.ptr = &debug_data_convert },
+static struct sublevel_option debug_opts[] = {
+	{ .name = "verbose",		.value_ptr = &verbose },
+	{ .name = "ordered-events",	.value_ptr = &debug_ordered_events},
+	{ .name = "stderr",		.value_ptr = &redirect_to_stderr},
+	{ .name = "data-convert",	.value_ptr = &debug_data_convert },
+	{ .name = "perf-event-open",	.value_ptr = &debug_peo_args },
 	{ .name = NULL, }
 };
 
 int perf_debug_option(const char *str)
 {
-	struct debug_variable *var = &debug_variables[0];
-	char *vstr, *s = strdup(str);
-	int v = 1;
+	int ret;
 
-	vstr = strchr(s, '=');
-	if (vstr)
-		*vstr++ = 0;
+	ret = perf_parse_sublevel_options(str, debug_opts);
+	if (ret)
+		return ret;
 
-	while (var->name) {
-		if (!strcmp(s, var->name))
-			break;
-		var++;
+	/* Allow only verbose value in range (0, 10), otherwise set 0. */
+	verbose = (verbose < 0) || (verbose > 10) ? 0 : verbose;
+
+	return 0;
+}
+
+int perf_quiet_option(void)
+{
+	struct sublevel_option *opt = &debug_opts[0];
+
+	/* disable all debug messages */
+	while (opt->name) {
+		*opt->value_ptr = -1;
+		opt++;
 	}
 
-	if (!var->name) {
-		pr_err("Unknown debug variable name '%s'\n", s);
-		free(s);
-		return -1;
-	}
-
-	if (vstr) {
-		v = atoi(vstr);
-		/*
-		 * Allow only values in range (0, 10),
-		 * otherwise set 0.
-		 */
-		v = (v < 0) || (v > 10) ? 0 : v;
-	}
-
-	*var->ptr = v;
-	free(s);
 	return 0;
 }
 
@@ -225,5 +261,34 @@ DEBUG_WRAPPER(debug, 1);
 
 void perf_debug_setup(void)
 {
+	debug_set_file(stderr);
 	libapi_set_print(pr_warning_wrapper, pr_warning_wrapper, pr_debug_wrapper);
+}
+
+/* Obtain a backtrace and print it to stdout. */
+#ifdef HAVE_BACKTRACE_SUPPORT
+void dump_stack(void)
+{
+	void *array[16];
+	size_t size = backtrace(array, ARRAY_SIZE(array));
+	char **strings = backtrace_symbols(array, size);
+	size_t i;
+
+	printf("Obtained %zd stack frames.\n", size);
+
+	for (i = 0; i < size; i++)
+		printf("%s\n", strings[i]);
+
+	free(strings);
+}
+#else
+void dump_stack(void) {}
+#endif
+
+void sighandler_dump_stack(int sig)
+{
+	psignal(sig, "perf");
+	dump_stack();
+	signal(sig, SIG_DFL);
+	raise(sig);
 }

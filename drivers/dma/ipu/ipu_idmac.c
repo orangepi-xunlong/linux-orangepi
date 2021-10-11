@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2008
  * Guennadi Liakhovetski, DENX Software Engineering, <lg@denx.de>
  *
  * Copyright (C) 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/dma-mapping.h>
@@ -910,7 +907,8 @@ out:
 /* Called with ichan->chan_mutex held */
 static int idmac_desc_alloc(struct idmac_channel *ichan, int n)
 {
-	struct idmac_tx_desc *desc = vmalloc(n * sizeof(struct idmac_tx_desc));
+	struct idmac_tx_desc *desc =
+		vmalloc(array_size(n, sizeof(struct idmac_tx_desc)));
 	struct idmac *idmac = to_idmac(ichan->dma_chan.device);
 
 	if (!desc)
@@ -1162,14 +1160,13 @@ static irqreturn_t idmac_interrupt(int irq, void *dev_id)
 	struct idmac_tx_desc *desc, *descnew;
 	bool done = false;
 	u32 ready0, ready1, curbuf, err;
-	unsigned long flags;
 	struct dmaengine_desc_callback cb;
 
 	/* IDMAC has cleared the respective BUFx_RDY bit, we manage the buffer */
 
 	dev_dbg(dev, "IDMAC irq %d, buf %d\n", irq, ichan->active_buffer);
 
-	spin_lock_irqsave(&ipu_data.lock, flags);
+	spin_lock(&ipu_data.lock);
 
 	ready0	= idmac_read_ipureg(&ipu_data, IPU_CHA_BUF0_RDY);
 	ready1	= idmac_read_ipureg(&ipu_data, IPU_CHA_BUF1_RDY);
@@ -1178,7 +1175,7 @@ static irqreturn_t idmac_interrupt(int irq, void *dev_id)
 
 	if (err & (1 << chan_id)) {
 		idmac_write_ipureg(&ipu_data, 1 << chan_id, IPU_INT_STAT_4);
-		spin_unlock_irqrestore(&ipu_data.lock, flags);
+		spin_unlock(&ipu_data.lock);
 		/*
 		 * Doing this
 		 * ichan->sg[0] = ichan->sg[1] = NULL;
@@ -1190,7 +1187,7 @@ static irqreturn_t idmac_interrupt(int irq, void *dev_id)
 			 chan_id, ready0, ready1, curbuf);
 		return IRQ_HANDLED;
 	}
-	spin_unlock_irqrestore(&ipu_data.lock, flags);
+	spin_unlock(&ipu_data.lock);
 
 	/* Other interrupts do not interfere with this channel */
 	spin_lock(&ichan->lock);
@@ -1253,9 +1250,9 @@ static irqreturn_t idmac_interrupt(int irq, void *dev_id)
 		if (unlikely(sgnew)) {
 			ipu_submit_buffer(ichan, descnew, sgnew, !ichan->active_buffer);
 		} else {
-			spin_lock_irqsave(&ipu_data.lock, flags);
+			spin_lock(&ipu_data.lock);
 			ipu_ic_disable_task(&ipu_data, chan_id);
-			spin_unlock_irqrestore(&ipu_data.lock, flags);
+			spin_unlock(&ipu_data.lock);
 			ichan->status = IPU_CHANNEL_READY;
 			/* Continue to check for complete descriptor */
 		}
@@ -1301,9 +1298,9 @@ static irqreturn_t idmac_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static void ipu_gc_tasklet(unsigned long arg)
+static void ipu_gc_tasklet(struct tasklet_struct *t)
 {
-	struct ipu *ipu = (struct ipu *)arg;
+	struct ipu *ipu = from_tasklet(ipu, t, tasklet);
 	int i;
 
 	for (i = 0; i < IPU_CHANNELS_NUM; i++) {
@@ -1742,7 +1739,7 @@ static int __init ipu_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto err_idmac_init;
 
-	tasklet_init(&ipu_data.tasklet, ipu_gc_tasklet, (unsigned long)&ipu_data);
+	tasklet_setup(&ipu_data.tasklet, ipu_gc_tasklet);
 
 	ipu_data.dev = &pdev->dev;
 

@@ -147,6 +147,12 @@
  */
 #define SMB3_SIGN_KEY_SIZE (16)
 
+/*
+ * Size of the smb3 encryption/decryption key storage.
+ * This size is big enough to store any cipher key types.
+ */
+#define SMB3_ENC_DEC_KEY_SIZE (32)
+
 #define CIFS_CLIENT_CHALLENGE_SIZE (8)
 #define CIFS_SERVER_CHALLENGE_SIZE (8)
 #define CIFS_HMAC_MD5_HASH_SIZE (16)
@@ -240,6 +246,8 @@
 #define SYNCHRONIZE           0x00100000  /* The file handle can waited on to */
 					  /* synchronize with the completion  */
 					  /* of an input/output request       */
+#define SYSTEM_SECURITY       0x01000000  /* The system access control list   */
+					  /* can be read and changed          */
 #define GENERIC_ALL           0x10000000
 #define GENERIC_EXECUTE       0x20000000
 #define GENERIC_WRITE         0x40000000
@@ -262,7 +270,7 @@
 				| WRITE_OWNER | SYNCHRONIZE)
 #define SET_FILE_WRITE_RIGHTS (FILE_WRITE_DATA | FILE_APPEND_DATA \
 				| FILE_READ_EA | FILE_WRITE_EA \
-				| FILE_DELETE_CHILD | FILE_READ_ATTRIBUTES \
+				| FILE_READ_ATTRIBUTES \
 				| FILE_WRITE_ATTRIBUTES \
 				| DELETE | READ_CONTROL | WRITE_DAC \
 				| WRITE_OWNER | SYNCHRONIZE)
@@ -1021,7 +1029,7 @@ typedef struct smb_com_writex_req {
 	__le16 ByteCount;
 	__u8 Pad;		/* BB check for whether padded to DWORD
 				   boundary and optimum performance here */
-	char Data[0];
+	char Data[];
 } __attribute__((packed)) WRITEX_REQ;
 
 typedef struct smb_com_write_req {
@@ -1041,7 +1049,7 @@ typedef struct smb_com_write_req {
 	__le16 ByteCount;
 	__u8 Pad;		/* BB check for whether padded to DWORD
 				   boundary and optimum performance here */
-	char Data[0];
+	char Data[];
 } __attribute__((packed)) WRITE_REQ;
 
 typedef struct smb_com_write_rsp {
@@ -1306,7 +1314,7 @@ typedef struct smb_com_ntransact_req {
 	/* SetupCount words follow then */
 	__le16 ByteCount;
 	__u8 Pad[3];
-	__u8 Parms[0];
+	__u8 Parms[];
 } __attribute__((packed)) NTRANSACT_REQ;
 
 typedef struct smb_com_ntransact_rsp {
@@ -1523,7 +1531,7 @@ struct file_notify_information {
 	__le32 NextEntryOffset;
 	__le32 Action;
 	__le32 FileNameLength;
-	__u8  FileName[0];
+	__u8  FileName[];
 } __attribute__((packed));
 
 /* For IO_REPARSE_TAG_SYMLINK */
@@ -1536,8 +1544,11 @@ struct reparse_symlink_data {
 	__le16	PrintNameOffset;
 	__le16	PrintNameLength;
 	__le32	Flags;
-	char	PathBuffer[0];
+	char	PathBuffer[];
 } __attribute__((packed));
+
+/* Flag above */
+#define SYMLINK_FLAG_RELATIVE 0x00000001
 
 /* For IO_REPARSE_TAG_NFS */
 #define NFS_SPECFILE_LNK	0x00000000014B4E4C
@@ -1550,7 +1561,7 @@ struct reparse_posix_data {
 	__le16	ReparseDataLength;
 	__u16	Reserved;
 	__le64	InodeType; /* LNK, FIFO, CHR etc. */
-	char	PathBuffer[0];
+	char	PathBuffer[];
 } __attribute__((packed));
 
 struct cifs_quota_data {
@@ -1688,6 +1699,7 @@ struct smb_t2_rsp {
 #define SMB_FIND_FILE_ID_FULL_DIR_INFO    0x105
 #define SMB_FIND_FILE_ID_BOTH_DIR_INFO    0x106
 #define SMB_FIND_FILE_UNIX                0x202
+#define SMB_FIND_FILE_POSIX_INFO          0x064
 
 typedef struct smb_com_transaction2_qpi_req {
 	struct smb_hdr hdr;	/* wct = 14+ */
@@ -1758,7 +1770,7 @@ struct set_file_rename {
 	__le32 overwrite;   /* 1 = overwrite dest */
 	__u32 root_fid;   /* zero */
 	__le32 target_name_len;
-	char  target_name[0];  /* Must be unicode */
+	char  target_name[];  /* Must be unicode */
 } __attribute__((packed));
 
 struct smb_com_transaction2_sfi_req {
@@ -1892,7 +1904,7 @@ typedef struct smb_com_transaction2_fnext_req {
 	__le16 InformationLevel;
 	__u32 ResumeKey;
 	__le16 SearchFlags;
-	char ResumeFileName[1];
+	char ResumeFileName[];
 } __attribute__((packed)) TRANSACTION2_FNEXT_REQ;
 
 typedef struct smb_com_transaction2_fnext_rsp {
@@ -2086,17 +2098,21 @@ typedef struct dfs_referral_level_3 { /* version 4 is same, + one flag bit */
 	__u8   ServiceSiteGuid[16];  /* MBZ, ignored */
 } __attribute__((packed)) REFERRAL3;
 
-typedef struct smb_com_transaction_get_dfs_refer_rsp {
-	struct smb_hdr hdr;	/* wct = 10 */
-	struct trans2_resp t2;
-	__u16 ByteCount;
-	__u8 Pad;
+struct get_dfs_referral_rsp {
 	__le16 PathConsumed;
 	__le16 NumberOfReferrals;
 	__le32 DFSFlags;
 	REFERRAL3 referrals[1];	/* array of level 3 dfs_referral structures */
 	/* followed by the strings pointed to by the referral structures */
-} __attribute__((packed)) TRANSACTION2_GET_DFS_REFER_RSP;
+} __packed;
+
+typedef struct smb_com_transaction_get_dfs_refer_rsp {
+	struct smb_hdr hdr;	/* wct = 10 */
+	struct trans2_resp t2;
+	__u16 ByteCount;
+	__u8 Pad;
+	struct get_dfs_referral_rsp dfs_data;
+} __packed TRANSACTION2_GET_DFS_REFER_RSP;
 
 /* DFS Flags */
 #define DFSREF_REFERRAL_SERVER  0x00000001 /* all targets are DFS roots */
@@ -2443,7 +2459,7 @@ struct cifs_posix_acl { /* access conrol list  (ACL) */
 	__le16	version;
 	__le16	access_entry_count;  /* access ACL - count of entries */
 	__le16	default_entry_count; /* default ACL - count of entries */
-	struct cifs_posix_ace ace_array[0];
+	struct cifs_posix_ace ace_array[];
 	/* followed by
 	struct cifs_posix_ace default_ace_arraay[] */
 } __attribute__((packed));  /* level 0x204 */
@@ -2749,7 +2765,7 @@ typedef struct file_xattr_info {
 	/* BB do we need another field for flags? BB */
 	__u32 xattr_name_len;
 	__u32 xattr_value_len;
-	char  xattr_name[0];
+	char  xattr_name[];
 	/* followed by xattr_value[xattr_value_len], no pad */
 } __attribute__((packed)) FILE_XATTR_INFO; /* extended attribute info
 					      level 0x205 */

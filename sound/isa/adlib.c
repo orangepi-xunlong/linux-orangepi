@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AdLib FM card driver.
  */
@@ -27,7 +28,7 @@ module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for " CRD_NAME " soundcard.");
 module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable " CRD_NAME " soundcard.");
-module_param_array(port, long, NULL, 0444);
+module_param_hw_array(port, long, ioport, NULL, 0444);
 MODULE_PARM_DESC(port, "Port # for " CRD_NAME " driver.");
 
 static int snd_adlib_match(struct device *dev, unsigned int n)
@@ -96,10 +97,9 @@ out:	snd_card_free(card);
 	return error;
 }
 
-static int snd_adlib_remove(struct device *dev, unsigned int n)
+static void snd_adlib_remove(struct device *dev, unsigned int n)
 {
 	snd_card_free(dev_get_drvdata(dev));
-	return 0;
 }
 
 static struct isa_driver snd_adlib_driver = {

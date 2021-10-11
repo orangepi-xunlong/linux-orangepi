@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0
 #
 # Makefile for general filesystem caching code
 #
@@ -6,6 +7,7 @@ fscache-y := \
 	cache.o \
 	cookie.o \
 	fsdef.o \
+	io.o \
 	main.o \
 	netfs.o \
 	object.o \

@@ -38,8 +38,6 @@
 #define REASSOC_LIMIT	(4)
 #define READDBA_LIMIT	(2)
 
-#define DEAUTH_DENY_TO		500 /* unit: ms */
-
 #ifdef CONFIG_GSPI_HCI
 	#define ROAMING_LIMIT	5
 #else
@@ -622,21 +620,16 @@ struct mlme_ext_priv {
 
 	u32	retry; /* retry for issue probereq */
 
-	/* Don't handle deauth in DEAUTH_DENY_TO ms after sending deauth */
-	/* value 0 means always handle deauth packet */
-	systime last_deauth_time;
-
 	u64 TSFValue;
+
+	/* for LPS-32K to adaptive bcn early and timeout */
+	u8 adaptive_tsf_done;
+	u32 bcn_delay_cnt[9];
+	u32 bcn_delay_ratio[9];
 	u32 bcn_cnt;
-	u32 last_bcn_cnt;
-	u8 cur_bcn_cnt;/*2s*/
-	u8 dtim;/*DTIM Period*/
-#ifdef DBG_RX_BCN
-	u8 tim[4];
-#endif
-#ifdef CONFIG_BCN_RECV_TIME
-	u16 bcn_rx_time;
-#endif
+	u8 DrvBcnEarly;
+	u8 DrvBcnTimeOut;
+
 #ifdef CONFIG_AP_MODE
 	unsigned char bstart_bss;
 #endif
@@ -656,13 +649,6 @@ struct mlme_ext_priv {
 #endif
 	/* set hw sync bcn tsf register or not */
 	u8 en_hw_update_tsf;
-#ifdef CONFIG_CTRL_TXSS_BY_TP
-	u8 txss_ctrl_en;
-	u16 txss_tp_th;/*Mbps*/
-	u8 txss_tp_chk_cnt;/*unit 2s*/
-	u8 txss_1ss;
-	u8 txss_momi_type_bk;
-#endif
 };
 
 static inline u8 check_mlmeinfo_state(struct mlme_ext_priv *plmeext, sint state)
@@ -672,8 +658,6 @@ static inline u8 check_mlmeinfo_state(struct mlme_ext_priv *plmeext, sint state)
 
 	return _FALSE;
 }
-
-void sitesurvey_set_offch_state(_adapter *adapter, u8 scan_state);
 
 #define mlmeext_msr(mlmeext) ((mlmeext)->mlmext_info.state & 0x03)
 #define mlmeext_scan_state(mlmeext) ((mlmeext)->sitesurvey_res.state)
@@ -685,7 +669,6 @@ void sitesurvey_set_offch_state(_adapter *adapter, u8 scan_state);
 		((mlmeext)->sitesurvey_res.next_state = (_state)); \
 		rtw_mi_update_iface_status(&((container_of(mlmeext, _adapter, mlmeextpriv)->mlmepriv)), 0); \
 		/* RTW_INFO("set_scan_state:%s\n", scan_state_str(_state)); */ \
-		sitesurvey_set_offch_state(container_of(mlmeext, _adapter, mlmeextpriv), _state); \
 	} while (0)
 
 #define mlmeext_scan_next_state(mlmeext) ((mlmeext)->sitesurvey_res.next_state)
@@ -887,7 +870,6 @@ void rtw_macid_ctl_set_bw(struct macid_ctl_t *macid_ctl, u8 id, u8 bw);
 void rtw_macid_ctl_set_vht_en(struct macid_ctl_t *macid_ctl, u8 id, u8 en);
 void rtw_macid_ctl_set_rate_bmp0(struct macid_ctl_t *macid_ctl, u8 id, u32 bmp);
 void rtw_macid_ctl_set_rate_bmp1(struct macid_ctl_t *macid_ctl, u8 id, u32 bmp);
-void rtw_macid_ctl_init_sleep_reg(struct macid_ctl_t *macid_ctl, u16 m0, u16 m1, u16 m2, u16 m3);
 void rtw_macid_ctl_init(struct macid_ctl_t *macid_ctl);
 void rtw_macid_ctl_deinit(struct macid_ctl_t *macid_ctl);
 u8 rtw_iface_bcmc_id_get(_adapter *padapter);
@@ -934,6 +916,7 @@ void issue_auth(_adapter *padapter, struct sta_info *psta, unsigned short status
 void issue_probereq(_adapter *padapter, NDIS_802_11_SSID *pssid, u8 *da);
 s32 issue_probereq_ex(_adapter *padapter, NDIS_802_11_SSID *pssid, u8 *da, u8 ch, bool append_wps, int try_cnt, int wait_ms);
 int issue_nulldata(_adapter *padapter, unsigned char *da, unsigned int power_mode, int try_cnt, int wait_ms);
+s32 issue_nulldata_in_interrupt(PADAPTER padapter, u8 *da, unsigned int power_mode);
 int issue_qos_nulldata(_adapter *padapter, unsigned char *da, u16 tid, int try_cnt, int wait_ms);
 int issue_deauth(_adapter *padapter, unsigned char *da, unsigned short reason);
 int issue_deauth_ex(_adapter *padapter, u8 *da, unsigned short reason, int try_cnt, int wait_ms);
@@ -1025,10 +1008,6 @@ void mlmeext_sta_add_event_callback(_adapter *padapter, struct sta_info *psta);
 
 void linked_status_chk(_adapter *padapter, u8 from_timer);
 
-#define rtw_get_bcn_cnt(adapter)	(adapter->mlmeextpriv.cur_bcn_cnt)
-#define rtw_get_bcn_dtim_period(adapter)	(adapter->mlmeextpriv.dtim)
-void rtw_collect_bcn_info(_adapter *adapter);
-
 void _linked_info_dump(_adapter *padapter);
 
 void survey_timer_hdl(void *ctx);
@@ -1064,9 +1043,7 @@ extern void process_addba_req(_adapter *padapter, u8 *paddba_req, u8 *addr);
 
 extern void update_TSF(struct mlme_ext_priv *pmlmeext, u8 *pframe, uint len);
 extern void correct_TSF(_adapter *padapter, struct mlme_ext_priv *pmlmeext);
-#ifdef CONFIG_BCN_RECV_TIME
-void rtw_rx_bcn_time_update(_adapter *adapter, uint bcn_len, u8 data_rate);
-#endif
+extern void adaptive_early_32k(struct mlme_ext_priv *pmlmeext, u8 *pframe, uint len);
 extern u8 traffic_status_watchdog(_adapter *padapter, u8 from_timer);
 
 void rtw_process_bar_frame(_adapter *padapter, union recv_frame *precv_frame);
@@ -1085,8 +1062,6 @@ struct cmd_hdl {
 	u8(*h2cfuns)(struct _ADAPTER *padapter, u8 *pbuf);
 };
 
-void rtw_leave_opch(_adapter *adapter);
-void rtw_back_opch(_adapter *adapter);
 
 u8 read_macreg_hdl(_adapter *padapter, u8 *pbuf);
 u8 write_macreg_hdl(_adapter *padapter, u8 *pbuf);

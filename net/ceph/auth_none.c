@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 
 #include <linux/ceph/ceph_debug.h>
 
@@ -68,13 +69,16 @@ static int build_request(struct ceph_auth_client *ac, void *buf, void *end)
  * the generic auth code decode the global_id, and we carry no actual
  * authenticate state, so nothing happens here.
  */
-static int handle_reply(struct ceph_auth_client *ac, int result,
-			void *buf, void *end)
+static int handle_reply(struct ceph_auth_client *ac, u64 global_id,
+			void *buf, void *end, u8 *session_key,
+			int *session_key_len, u8 *con_secret,
+			int *con_secret_len)
 {
 	struct ceph_auth_none_info *xi = ac->private;
 
 	xi->starting = false;
-	return result;
+	ceph_auth_set_global_id(ac, global_id);
+	return 0;
 }
 
 static void ceph_auth_none_destroy_authorizer(struct ceph_authorizer *a)
@@ -115,7 +119,6 @@ static int ceph_auth_none_create_authorizer(
 }
 
 static const struct ceph_auth_client_ops ceph_auth_none_ops = {
-	.name = "none",
 	.reset = reset,
 	.destroy = destroy,
 	.is_authenticated = is_authenticated,
@@ -141,4 +144,3 @@ int ceph_auth_none_init(struct ceph_auth_client *ac)
 	ac->ops = &ceph_auth_none_ops;
 	return 0;
 }
-

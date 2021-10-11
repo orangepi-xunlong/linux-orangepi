@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *  S390 version
  *    Copyright IBM Corp. 1999
@@ -11,24 +12,23 @@
 #ifndef __ASM_S390_PROCESSOR_H
 #define __ASM_S390_PROCESSOR_H
 
-#include <linux/const.h>
+#include <linux/bits.h>
 
-#define CIF_MCCK_PENDING	0	/* machine check handling is pending */
-#define CIF_ASCE		1	/* user asce needs fixup / uaccess */
 #define CIF_NOHZ_DELAY		2	/* delay HZ disable for a tick */
 #define CIF_FPU			3	/* restore FPU registers */
-#define CIF_IGNORE_IRQ		4	/* ignore interrupt (for udelay) */
 #define CIF_ENABLED_WAIT	5	/* in enabled wait state */
+#define CIF_MCCK_GUEST		6	/* machine check happening in guest */
+#define CIF_DEDICATED_CPU	7	/* this CPU is dedicated */
 
-#define _CIF_MCCK_PENDING	_BITUL(CIF_MCCK_PENDING)
-#define _CIF_ASCE		_BITUL(CIF_ASCE)
-#define _CIF_NOHZ_DELAY		_BITUL(CIF_NOHZ_DELAY)
-#define _CIF_FPU		_BITUL(CIF_FPU)
-#define _CIF_IGNORE_IRQ		_BITUL(CIF_IGNORE_IRQ)
-#define _CIF_ENABLED_WAIT	_BITUL(CIF_ENABLED_WAIT)
+#define _CIF_NOHZ_DELAY		BIT(CIF_NOHZ_DELAY)
+#define _CIF_FPU		BIT(CIF_FPU)
+#define _CIF_ENABLED_WAIT	BIT(CIF_ENABLED_WAIT)
+#define _CIF_MCCK_GUEST		BIT(CIF_MCCK_GUEST)
+#define _CIF_DEDICATED_CPU	BIT(CIF_DEDICATED_CPU)
 
 #ifndef __ASSEMBLY__
 
+#include <linux/cpumask.h>
 #include <linux/linkage.h>
 #include <linux/irqflags.h>
 #include <asm/cpu.h>
@@ -38,6 +38,9 @@
 #include <asm/runtime_instr.h>
 #include <asm/fpu/types.h>
 #include <asm/fpu/internal.h>
+#include <asm/irqflags.h>
+
+typedef long (*sys_call_ptr_t)(struct pt_regs *regs);
 
 static inline void set_cpu_flag(int flag)
 {
@@ -66,12 +69,6 @@ static inline int test_cpu_flag_of(int flag, int cpu)
 
 #define arch_needs_cpu() test_cpu_flag(CIF_NOHZ_DELAY)
 
-/*
- * Default implementation of macro that returns current
- * instruction pointer ("program counter").
- */
-#define current_text_addr() ({ void *pc; asm("basr %0,0" : "=a" (pc)); pc; })
-
 static inline void get_cpu_id(struct cpuid *ptr)
 {
 	asm volatile("stidp %0" : "=Q" (*ptr));
@@ -82,7 +79,6 @@ void s390_update_cpu_mhz(void);
 void cpu_detect_mhz_feature(void);
 
 extern const struct seq_operations cpuinfo_op;
-extern int sysctl_ieee_emulation_warnings;
 extern void execve_tail(void);
 extern void __bpon(void);
 
@@ -90,42 +86,50 @@ extern void __bpon(void);
  * User space process size: 2GB for 31 bit, 4TB or 8PT for 64 bit.
  */
 
-#define TASK_SIZE_OF(tsk)	((tsk)->mm ? \
-				 (tsk)->mm->context.asce_limit : TASK_MAX_SIZE)
+#define TASK_SIZE_OF(tsk)	(test_tsk_thread_flag(tsk, TIF_31BIT) ? \
+					_REGION3_SIZE : TASK_SIZE_MAX)
 #define TASK_UNMAPPED_BASE	(test_thread_flag(TIF_31BIT) ? \
-					(1UL << 30) : (1UL << 41))
+					(_REGION3_SIZE >> 1) : (_REGION2_SIZE >> 1))
 #define TASK_SIZE		TASK_SIZE_OF(current)
-#define TASK_MAX_SIZE		(1UL << 53)
+#define TASK_SIZE_MAX		(-PAGE_SIZE)
 
-#define STACK_TOP		(1UL << (test_thread_flag(TIF_31BIT) ? 31:42))
-#define STACK_TOP_MAX		(1UL << 42)
+#define STACK_TOP		(test_thread_flag(TIF_31BIT) ? \
+					_REGION3_SIZE : _REGION2_SIZE)
+#define STACK_TOP_MAX		_REGION2_SIZE
 
 #define HAVE_ARCH_PICK_MMAP_LAYOUT
-
-typedef struct {
-        __u32 ar4;
-} mm_segment_t;
 
 /*
  * Thread structure
  */
 struct thread_struct {
 	unsigned int  acrs[NUM_ACRS];
-        unsigned long ksp;              /* kernel stack pointer             */
-	mm_segment_t mm_segment;
-	unsigned long gmap_addr;	/* address of last gmap fault. */
-	unsigned int gmap_write_flag;	/* gmap fault write indication */
-	unsigned int gmap_int_code;	/* int code of last gmap fault */
-	unsigned int gmap_pfault;	/* signal of a pending guest pfault */
-	struct per_regs per_user;	/* User specified PER registers */
-	struct per_event per_event;	/* Cause of the last PER trap */
-	unsigned long per_flags;	/* Flags to control debug behavior */
-        /* pfault_wait is used to block the process on a pfault event */
+	unsigned long ksp;			/* kernel stack pointer */
+	unsigned long user_timer;		/* task cputime in user space */
+	unsigned long guest_timer;		/* task cputime in kvm guest */
+	unsigned long system_timer;		/* task cputime in kernel space */
+	unsigned long hardirq_timer;		/* task cputime in hardirq context */
+	unsigned long softirq_timer;		/* task cputime in softirq context */
+	const sys_call_ptr_t *sys_call_table;	/* system call table address */
+	unsigned long gmap_addr;		/* address of last gmap fault. */
+	unsigned int gmap_write_flag;		/* gmap fault write indication */
+	unsigned int gmap_int_code;		/* int code of last gmap fault */
+	unsigned int gmap_pfault;		/* signal of a pending guest pfault */
+
+	/* Per-thread information related to debugging */
+	struct per_regs per_user;		/* User specified PER registers */
+	struct per_event per_event;		/* Cause of the last PER trap */
+	unsigned long per_flags;		/* Flags to control debug behavior */
+	unsigned int system_call;		/* system call number in signal */
+	unsigned long last_break;		/* last breaking-event-address. */
+	/* pfault_wait is used to block the process on a pfault event */
 	unsigned long pfault_wait;
 	struct list_head list;
 	/* cpu runtime instrumentation */
 	struct runtime_instr_cb *ri_cb;
-	unsigned char trap_tdb[256];	/* Transaction abort diagnose block */
+	struct gs_cb *gs_cb;			/* Current guarded storage cb */
+	struct gs_cb *gs_bc_cb;			/* Broadcast guarded storage cb */
+	unsigned char trap_tdb[256];		/* Transaction abort diagnose block */
 	/*
 	 * Warning: 'fpu' is dynamically-sized. It *MUST* be at
 	 * the end.
@@ -145,30 +149,12 @@ struct thread_struct {
 
 typedef struct thread_struct thread_struct;
 
-/*
- * Stack layout of a C stack frame.
- */
-#ifndef __PACK_STACK
-struct stack_frame {
-	unsigned long back_chain;
-	unsigned long empty1[5];
-	unsigned long gprs[10];
-	unsigned int  empty2[8];
-};
-#else
-struct stack_frame {
-	unsigned long empty1[5];
-	unsigned int  empty2[8];
-	unsigned long gprs[10];
-	unsigned long back_chain;
-};
-#endif
-
 #define ARCH_MIN_TASKALIGN	8
 
 #define INIT_THREAD {							\
 	.ksp = sizeof(init_stack) + (unsigned long) &init_stack,	\
 	.fpu.regs = (void *) init_task.thread.fpu.fprs,			\
+	.last_break = 1,						\
 }
 
 /*
@@ -185,7 +171,6 @@ struct stack_frame {
 	regs->psw.mask	= PSW_USER_BITS | PSW_MASK_BA;			\
 	regs->psw.addr	= new_psw;					\
 	regs->gprs[15]	= new_stackp;					\
-	crst_table_downgrade(current->mm);				\
 	execve_tail();							\
 } while (0)
 
@@ -193,20 +178,17 @@ struct stack_frame {
 struct task_struct;
 struct mm_struct;
 struct seq_file;
+struct pt_regs;
 
-typedef int (*dump_trace_func_t)(void *data, unsigned long address, int reliable);
-void dump_trace(dump_trace_func_t func, void *data,
-		struct task_struct *task, unsigned long sp);
-
+void show_registers(struct pt_regs *regs);
 void show_cacheinfo(struct seq_file *m);
 
 /* Free all resources held by a thread. */
-extern void release_thread(struct task_struct *);
+static inline void release_thread(struct task_struct *tsk) { }
 
-/*
- * Return saved PC of a blocked thread.
- */
-extern unsigned long thread_saved_pc(struct task_struct *t);
+/* Free guarded storage control block */
+void guarded_storage_release(struct task_struct *tsk);
+void gs_load_bc_cb(struct pt_regs *regs);
 
 unsigned long get_wchan(struct task_struct *p);
 #define task_pt_regs(tsk) ((struct pt_regs *) \
@@ -217,7 +199,7 @@ unsigned long get_wchan(struct task_struct *p);
 /* Has task runtime instrumentation enabled ? */
 #define is_ri_task(tsk) (!!(tsk)->thread.ri_cb)
 
-static inline unsigned long current_stack_pointer(void)
+static __always_inline unsigned long current_stack_pointer(void)
 {
 	unsigned long sp;
 
@@ -225,20 +207,15 @@ static inline unsigned long current_stack_pointer(void)
 	return sp;
 }
 
-static inline unsigned short stap(void)
+static __no_kasan_or_inline unsigned short stap(void)
 {
 	unsigned short cpu_address;
 
-	asm volatile("stap %0" : "=m" (cpu_address));
+	asm volatile("stap %0" : "=Q" (cpu_address));
 	return cpu_address;
 }
 
-/*
- * Give up the time slice of the virtual PU.
- */
-void cpu_relax(void);
-
-#define cpu_relax_lowlatency()  barrier()
+#define cpu_relax() barrier()
 
 #define ECAG_CACHE_ATTRIBUTE	0
 #define ECAG_CPU_ATTRIBUTE	1
@@ -269,7 +246,7 @@ static inline void __load_psw(psw_t psw)
  * Set PSW mask to specified value, while leaving the
  * PSW addr pointing to the next instruction.
  */
-static inline void __load_psw_mask(unsigned long mask)
+static __no_kasan_or_inline void __load_psw_mask(unsigned long mask)
 {
 	unsigned long addr;
 	psw_t psw;
@@ -278,10 +255,10 @@ static inline void __load_psw_mask(unsigned long mask)
 
 	asm volatile(
 		"	larl	%0,1f\n"
-		"	stg	%0,%O1+8(%R1)\n"
-		"	lpswe	%1\n"
+		"	stg	%0,%1\n"
+		"	lpswe	%2\n"
 		"1:"
-		: "=&d" (addr), "=Q" (psw) : "Q" (psw) : "memory", "cc");
+		: "=&d" (addr), "=Q" (psw.addr) : "Q" (psw) : "memory", "cc");
 }
 
 /*
@@ -319,49 +296,43 @@ static inline unsigned long __rewind_psw(psw_t psw, unsigned long ilc)
 }
 
 /*
- * Function to stop a processor until the next interrupt occurs
- */
-void enabled_wait(void);
-
-/*
  * Function to drop a processor into disabled wait state
  */
-static inline void __noreturn disabled_wait(unsigned long code)
+static __always_inline void __noreturn disabled_wait(void)
 {
 	psw_t psw;
 
 	psw.mask = PSW_MASK_BASE | PSW_MASK_WAIT | PSW_MASK_BA | PSW_MASK_EA;
-	psw.addr = code;
+	psw.addr = _THIS_IP_;
 	__load_psw(psw);
 	while (1);
 }
 
 /*
- * Basic Machine Check/Program Check Handler.
+ * Basic Program Check Handler.
  */
-
-extern void s390_base_mcck_handler(void);
 extern void s390_base_pgm_handler(void);
-extern void s390_base_ext_handler(void);
-
-extern void (*s390_base_mcck_handler_fn)(void);
 extern void (*s390_base_pgm_handler_fn)(void);
-extern void (*s390_base_ext_handler_fn)(void);
 
 #define ARCH_LOW_ADDRESS_LIMIT	0x7fffffffUL
 
 extern int memcpy_real(void *, void *, size_t);
 extern void memcpy_absolute(void *, void *, size_t);
 
-#define mem_assign_absolute(dest, val) {			\
+#define mem_assign_absolute(dest, val) do {			\
 	__typeof__(dest) __tmp = (val);				\
 								\
 	BUILD_BUG_ON(sizeof(__tmp) != sizeof(val));		\
 	memcpy_absolute(&(dest), &__tmp, sizeof(__tmp));	\
-}
+} while (0)
 
 extern int s390_isolate_bp(void);
 extern int s390_isolate_bp_guest(void);
+
+static __always_inline bool regs_irqs_disabled(struct pt_regs *regs)
+{
+	return arch_irqs_disabled_flags(regs->psw.mask);
+}
 
 #endif /* __ASSEMBLY__ */
 

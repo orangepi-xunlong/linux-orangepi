@@ -1,34 +1,35 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * probe-file.c : operate ftrace k/uprobe events files
  *
  * Written by Masami Hiramatsu <masami.hiramatsu.pt@hitachi.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/uio.h>
-#include "util.h"
+#include <unistd.h>
+#include <linux/zalloc.h>
+#include "namespaces.h"
 #include "event.h"
 #include "strlist.h"
+#include "strfilter.h"
 #include "debug.h"
-#include "cache.h"
+#include "build-id.h"
+#include "dso.h"
 #include "color.h"
 #include "symbol.h"
-#include "thread.h"
+#include "strbuf.h"
 #include <api/fs/tracing_path.h>
 #include "probe-event.h"
 #include "probe-file.h"
 #include "session.h"
+#include "perf_regs.h"
+#include "string2.h"
 
-#define MAX_CMDLEN 256
+/* 4096 - 2 ('\n' + '\0') */
+#define MAX_CMDLEN 4094
 
 static void print_open_warning(int err, bool uprobe)
 {
@@ -70,13 +71,12 @@ static void print_both_open_warning(int kerr, int uerr)
 	}
 }
 
-static int open_probe_events(const char *trace_file, bool readwrite)
+int open_trace_file(const char *trace_file, bool readwrite)
 {
 	char buf[PATH_MAX];
 	int ret;
 
-	ret = e_snprintf(buf, PATH_MAX, "%s/%s",
-			 tracing_path, trace_file);
+	ret = e_snprintf(buf, PATH_MAX, "%s/%s", tracing_path_mount(), trace_file);
 	if (ret >= 0) {
 		pr_debug("Opening %s write=%d\n", buf, readwrite);
 		if (readwrite && !probe_event_dry_run)
@@ -92,12 +92,12 @@ static int open_probe_events(const char *trace_file, bool readwrite)
 
 static int open_kprobe_events(bool readwrite)
 {
-	return open_probe_events("kprobe_events", readwrite);
+	return open_trace_file("kprobe_events", readwrite);
 }
 
 static int open_uprobe_events(bool readwrite)
 {
-	return open_probe_events("uprobe_events", readwrite);
+	return open_trace_file("uprobe_events", readwrite);
 }
 
 int probe_file__open(int flag)
@@ -206,6 +206,9 @@ static struct strlist *__probe_file__get_namelist(int fd, bool include_group)
 		} else
 			ret = strlist__add(sl, tev.event);
 		clear_probe_trace_event(&tev);
+		/* Skip if there is same name multi-probe event in the list */
+		if (ret == -EEXIST)
+			ret = 0;
 		if (ret < 0)
 			break;
 	}
@@ -301,10 +304,15 @@ int probe_file__get_events(int fd, struct strfilter *filter,
 		p = strchr(ent->s, ':');
 		if ((p && strfilter__compare(filter, p + 1)) ||
 		    strfilter__compare(filter, ent->s)) {
-			strlist__add(plist, ent->s);
+			ret = strlist__add(plist, ent->s);
+			if (ret == -ENOMEM) {
+				pr_err("strlist__add failed with -ENOMEM\n");
+				goto out;
+			}
 			ret = 0;
 		}
 	}
+out:
 	strlist__delete(namelist);
 
 	return ret;
@@ -404,17 +412,19 @@ int probe_cache_entry__get_event(struct probe_cache_entry *entry,
 }
 
 /* For the kernel probe caches, pass target = NULL or DSO__NAME_KALLSYMS */
-static int probe_cache__open(struct probe_cache *pcache, const char *target)
+static int probe_cache__open(struct probe_cache *pcache, const char *target,
+			     struct nsinfo *nsi)
 {
 	char cpath[PATH_MAX];
 	char sbuildid[SBUILD_ID_SIZE];
 	char *dir_name = NULL;
 	bool is_kallsyms = false;
 	int ret, fd;
+	struct nscookie nsc;
 
 	if (target && build_id_cache__cached(target)) {
 		/* This is a cached buildid */
-		strncpy(sbuildid, target, SBUILD_ID_SIZE);
+		strlcpy(sbuildid, target, SBUILD_ID_SIZE);
 		dir_name = build_id_cache__linkname(sbuildid, NULL, 0);
 		goto found;
 	}
@@ -423,8 +433,11 @@ static int probe_cache__open(struct probe_cache *pcache, const char *target)
 		target = DSO__NAME_KALLSYMS;
 		is_kallsyms = true;
 		ret = sysfs__sprintf_build_id("/", sbuildid);
-	} else
+	} else {
+		nsinfo__mountns_enter(nsi, &nsc);
 		ret = filename__sprintf_build_id(target, sbuildid);
+		nsinfo__mountns_exit(&nsc);
+	}
 
 	if (ret < 0) {
 		pr_debug("Failed to get build-id from %s.\n", target);
@@ -433,7 +446,7 @@ static int probe_cache__open(struct probe_cache *pcache, const char *target)
 
 	/* If we have no buildid cache, make it */
 	if (!build_id_cache__cached(sbuildid)) {
-		ret = build_id_cache__add_s(sbuildid, target,
+		ret = build_id_cache__add_s(sbuildid, target, nsi,
 					    is_kallsyms, NULL);
 		if (ret < 0) {
 			pr_debug("Failed to add build-id cache: %s\n", target);
@@ -441,7 +454,7 @@ static int probe_cache__open(struct probe_cache *pcache, const char *target)
 		}
 	}
 
-	dir_name = build_id_cache__cachedir(sbuildid, target, is_kallsyms,
+	dir_name = build_id_cache__cachedir(sbuildid, target, nsi, is_kallsyms,
 					    false);
 found:
 	if (!dir_name) {
@@ -506,7 +519,11 @@ static int probe_cache__load(struct probe_cache *pcache)
 				ret = -EINVAL;
 				goto out;
 			}
-			strlist__add(entry->tevlist, buf);
+			ret = strlist__add(entry->tevlist, buf);
+			if (ret == -ENOMEM) {
+				pr_err("strlist__add failed with -ENOMEM\n");
+				goto out;
+			}
 		}
 	}
 out:
@@ -546,7 +563,7 @@ void probe_cache__delete(struct probe_cache *pcache)
 	free(pcache);
 }
 
-struct probe_cache *probe_cache__new(const char *target)
+struct probe_cache *probe_cache__new(const char *target, struct nsinfo *nsi)
 {
 	struct probe_cache *pcache = probe_cache__alloc();
 	int ret;
@@ -554,7 +571,7 @@ struct probe_cache *probe_cache__new(const char *target)
 	if (!pcache)
 		return NULL;
 
-	ret = probe_cache__open(pcache, target);
+	ret = probe_cache__open(pcache, target, nsi);
 	if (ret < 0) {
 		pr_debug("Cache open error: %d\n", ret);
 		goto out_err;
@@ -667,7 +684,12 @@ int probe_cache__add_entry(struct probe_cache *pcache,
 		command = synthesize_probe_trace_command(&tevs[i]);
 		if (!command)
 			goto out_err;
-		strlist__add(entry->tevlist, command);
+		ret = strlist__add(entry->tevlist, command);
+		if (ret == -ENOMEM) {
+			pr_err("strlist__add failed with -ENOMEM\n");
+			goto out_err;
+		}
+
 		free(command);
 	}
 	list_add_tail(&entry->node, &pcache->entries);
@@ -683,8 +705,168 @@ out_err:
 #ifdef HAVE_GELF_GETNOTE_SUPPORT
 static unsigned long long sdt_note__get_addr(struct sdt_note *note)
 {
-	return note->bit32 ? (unsigned long long)note->addr.a32[0]
-		 : (unsigned long long)note->addr.a64[0];
+	return note->bit32 ?
+		(unsigned long long)note->addr.a32[SDT_NOTE_IDX_LOC] :
+		(unsigned long long)note->addr.a64[SDT_NOTE_IDX_LOC];
+}
+
+static unsigned long long sdt_note__get_ref_ctr_offset(struct sdt_note *note)
+{
+	return note->bit32 ?
+		(unsigned long long)note->addr.a32[SDT_NOTE_IDX_REFCTR] :
+		(unsigned long long)note->addr.a64[SDT_NOTE_IDX_REFCTR];
+}
+
+static const char * const type_to_suffix[] = {
+	":s64", "", "", "", ":s32", "", ":s16", ":s8",
+	"", ":u8", ":u16", "", ":u32", "", "", "", ":u64"
+};
+
+/*
+ * Isolate the string number and convert it into a decimal value;
+ * this will be an index to get suffix of the uprobe name (defining
+ * the type)
+ */
+static int sdt_arg_parse_size(char *n_ptr, const char **suffix)
+{
+	long type_idx;
+
+	type_idx = strtol(n_ptr, NULL, 10);
+	if (type_idx < -8 || type_idx > 8) {
+		pr_debug4("Failed to get a valid sdt type\n");
+		return -1;
+	}
+
+	*suffix = type_to_suffix[type_idx + 8];
+	return 0;
+}
+
+static int synthesize_sdt_probe_arg(struct strbuf *buf, int i, const char *arg)
+{
+	char *op, *desc = strdup(arg), *new_op = NULL;
+	const char *suffix = "";
+	int ret = -1;
+
+	if (desc == NULL) {
+		pr_debug4("Allocation error\n");
+		return ret;
+	}
+
+	/*
+	 * Argument is in N@OP format. N is size of the argument and OP is
+	 * the actual assembly operand. N can be omitted; in that case
+	 * argument is just OP(without @).
+	 */
+	op = strchr(desc, '@');
+	if (op) {
+		op[0] = '\0';
+		op++;
+
+		if (sdt_arg_parse_size(desc, &suffix))
+			goto error;
+	} else {
+		op = desc;
+	}
+
+	ret = arch_sdt_arg_parse_op(op, &new_op);
+
+	if (ret < 0)
+		goto error;
+
+	if (ret == SDT_ARG_VALID) {
+		ret = strbuf_addf(buf, " arg%d=%s%s", i + 1, new_op, suffix);
+		if (ret < 0)
+			goto error;
+	}
+
+	ret = 0;
+error:
+	free(desc);
+	free(new_op);
+	return ret;
+}
+
+static char *synthesize_sdt_probe_command(struct sdt_note *note,
+					const char *pathname,
+					const char *sdtgrp)
+{
+	struct strbuf buf;
+	char *ret = NULL;
+	int i, args_count, err;
+	unsigned long long ref_ctr_offset;
+	char *arg;
+	int arg_idx = 0;
+
+	if (strbuf_init(&buf, 32) < 0)
+		return NULL;
+
+	err = strbuf_addf(&buf, "p:%s/%s %s:0x%llx",
+			sdtgrp, note->name, pathname,
+			sdt_note__get_addr(note));
+
+	ref_ctr_offset = sdt_note__get_ref_ctr_offset(note);
+	if (ref_ctr_offset && err >= 0)
+		err = strbuf_addf(&buf, "(0x%llx)", ref_ctr_offset);
+
+	if (err < 0)
+		goto error;
+
+	if (!note->args)
+		goto out;
+
+	if (note->args) {
+		char **args = argv_split(note->args, &args_count);
+
+		if (args == NULL)
+			goto error;
+
+		for (i = 0; i < args_count; ) {
+			/*
+			 * FIXUP: Arm64 ELF section '.note.stapsdt' uses string
+			 * format "-4@[sp, NUM]" if a probe is to access data in
+			 * the stack, e.g. below is an example for the SDT
+			 * Arguments:
+			 *
+			 *   Arguments: -4@[sp, 12] -4@[sp, 8] -4@[sp, 4]
+			 *
+			 * Since the string introduces an extra space character
+			 * in the middle of square brackets, the argument is
+			 * divided into two items.  Fixup for this case, if an
+			 * item contains sub string "[sp,", need to concatenate
+			 * the two items.
+			 */
+			if (strstr(args[i], "[sp,") && (i+1) < args_count) {
+				err = asprintf(&arg, "%s %s", args[i], args[i+1]);
+				i += 2;
+			} else {
+				err = asprintf(&arg, "%s", args[i]);
+				i += 1;
+			}
+
+			/* Failed to allocate memory */
+			if (err < 0) {
+				argv_free(args);
+				goto error;
+			}
+
+			if (synthesize_sdt_probe_arg(&buf, arg_idx, arg) < 0) {
+				free(arg);
+				argv_free(args);
+				goto error;
+			}
+
+			free(arg);
+			arg_idx++;
+		}
+
+		argv_free(args);
+	}
+
+out:
+	ret = strbuf_detach(&buf, NULL);
+error:
+	strbuf_release(&buf);
+	return ret;
 }
 
 int probe_cache__scan_sdt(struct probe_cache *pcache, const char *pathname)
@@ -723,14 +905,21 @@ int probe_cache__scan_sdt(struct probe_cache *pcache, const char *pathname)
 			entry->pev.group = strdup(sdtgrp);
 			list_add_tail(&entry->node, &pcache->entries);
 		}
-		ret = asprintf(&buf, "p:%s/%s %s:0x%llx",
-				sdtgrp, note->name, pathname,
-				sdt_note__get_addr(note));
-		if (ret < 0)
+		buf = synthesize_sdt_probe_command(note, pathname, sdtgrp);
+		if (!buf) {
+			ret = -ENOMEM;
 			break;
-		strlist__add(entry->tevlist, buf);
+		}
+
+		ret = strlist__add(entry->tevlist, buf);
+
 		free(buf);
 		entry = NULL;
+
+		if (ret == -ENOMEM) {
+			pr_err("strlist__add failed with -ENOMEM\n");
+			break;
+		}
 	}
 	if (entry) {
 		list_del_init(&entry->node);
@@ -861,7 +1050,7 @@ int probe_cache__show_all_caches(struct strfilter *filter)
 		return -EINVAL;
 	}
 	strlist__for_each_entry(nd, bidlist) {
-		pcache = probe_cache__new(nd->s);
+		pcache = probe_cache__new(nd->s, NULL);
 		if (!pcache)
 			continue;
 		if (!list_empty(&pcache->entries)) {
@@ -877,59 +1066,100 @@ int probe_cache__show_all_caches(struct strfilter *filter)
 	return 0;
 }
 
-static struct {
-	const char *pattern;
-	bool	avail;
-	bool	checked;
-} probe_type_table[] = {
-#define DEFINE_TYPE(idx, pat, def_avail)	\
-	[idx] = {.pattern = pat, .avail = (def_avail)}
-	DEFINE_TYPE(PROBE_TYPE_U, "* u8/16/32/64,*", true),
-	DEFINE_TYPE(PROBE_TYPE_S, "* s8/16/32/64,*", true),
-	DEFINE_TYPE(PROBE_TYPE_X, "* x8/16/32/64,*", false),
-	DEFINE_TYPE(PROBE_TYPE_STRING, "* string,*", true),
-	DEFINE_TYPE(PROBE_TYPE_BITFIELD,
-		    "* b<bit-width>@<bit-offset>/<container-size>", true),
+enum ftrace_readme {
+	FTRACE_README_PROBE_TYPE_X = 0,
+	FTRACE_README_KRETPROBE_OFFSET,
+	FTRACE_README_UPROBE_REF_CTR,
+	FTRACE_README_USER_ACCESS,
+	FTRACE_README_MULTIPROBE_EVENT,
+	FTRACE_README_IMMEDIATE_VALUE,
+	FTRACE_README_END,
 };
 
-bool probe_type_is_available(enum probe_type type)
+static struct {
+	const char *pattern;
+	bool avail;
+} ftrace_readme_table[] = {
+#define DEFINE_TYPE(idx, pat)			\
+	[idx] = {.pattern = pat, .avail = false}
+	DEFINE_TYPE(FTRACE_README_PROBE_TYPE_X, "*type: * x8/16/32/64,*"),
+	DEFINE_TYPE(FTRACE_README_KRETPROBE_OFFSET, "*place (kretprobe): *"),
+	DEFINE_TYPE(FTRACE_README_UPROBE_REF_CTR, "*ref_ctr_offset*"),
+	DEFINE_TYPE(FTRACE_README_USER_ACCESS, "*u]<offset>*"),
+	DEFINE_TYPE(FTRACE_README_MULTIPROBE_EVENT, "*Create/append/*"),
+	DEFINE_TYPE(FTRACE_README_IMMEDIATE_VALUE, "*\\imm-value,*"),
+};
+
+static bool scan_ftrace_readme(enum ftrace_readme type)
 {
+	int fd;
 	FILE *fp;
 	char *buf = NULL;
 	size_t len = 0;
-	bool target_line = false;
-	bool ret = probe_type_table[type].avail;
+	bool ret = false;
+	static bool scanned = false;
 
-	if (type >= PROBE_TYPE_END)
-		return false;
-	/* We don't have to check the type which supported by default */
-	if (ret || probe_type_table[type].checked)
+	if (scanned)
+		goto result;
+
+	fd = open_trace_file("README", false);
+	if (fd < 0)
 		return ret;
 
-	if (asprintf(&buf, "%s/README", tracing_path) < 0)
+	fp = fdopen(fd, "r");
+	if (!fp) {
+		close(fd);
 		return ret;
-
-	fp = fopen(buf, "r");
-	if (!fp)
-		goto end;
-
-	zfree(&buf);
-	while (getline(&buf, &len, fp) > 0 && !ret) {
-		if (!target_line) {
-			target_line = !!strstr(buf, " type: ");
-			if (!target_line)
-				continue;
-		} else if (strstr(buf, "\t          ") != buf)
-			break;
-		ret = strglobmatch(buf, probe_type_table[type].pattern);
 	}
-	/* Cache the result */
-	probe_type_table[type].checked = true;
-	probe_type_table[type].avail = ret;
+
+	while (getline(&buf, &len, fp) > 0)
+		for (enum ftrace_readme i = 0; i < FTRACE_README_END; i++)
+			if (!ftrace_readme_table[i].avail)
+				ftrace_readme_table[i].avail =
+					strglobmatch(buf, ftrace_readme_table[i].pattern);
+	scanned = true;
 
 	fclose(fp);
-end:
 	free(buf);
 
-	return ret;
+result:
+	if (type >= FTRACE_README_END)
+		return false;
+
+	return ftrace_readme_table[type].avail;
+}
+
+bool probe_type_is_available(enum probe_type type)
+{
+	if (type >= PROBE_TYPE_END)
+		return false;
+	else if (type == PROBE_TYPE_X)
+		return scan_ftrace_readme(FTRACE_README_PROBE_TYPE_X);
+
+	return true;
+}
+
+bool kretprobe_offset_is_supported(void)
+{
+	return scan_ftrace_readme(FTRACE_README_KRETPROBE_OFFSET);
+}
+
+bool uprobe_ref_ctr_is_supported(void)
+{
+	return scan_ftrace_readme(FTRACE_README_UPROBE_REF_CTR);
+}
+
+bool user_access_is_supported(void)
+{
+	return scan_ftrace_readme(FTRACE_README_USER_ACCESS);
+}
+
+bool multiprobe_event_is_supported(void)
+{
+	return scan_ftrace_readme(FTRACE_README_MULTIPROBE_EVENT);
+}
+
+bool immediate_value_is_supported(void)
+{
+	return scan_ftrace_readme(FTRACE_README_IMMEDIATE_VALUE);
 }

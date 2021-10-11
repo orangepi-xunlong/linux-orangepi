@@ -1,9 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _X_TABLES_H
 #define _X_TABLES_H
 
 
 #include <linux/netdevice.h>
 #include <linux/static_key.h>
+#include <linux/netfilter.h>
 #include <uapi/linux/netfilter/x_tables.h>
 
 /* Test a struct->invflags and a boolean for inequality */
@@ -17,14 +19,9 @@
  * @target:	the target extension
  * @matchinfo:	per-match data
  * @targetinfo:	per-target data
- * @net		network namespace through which the action was invoked
- * @in:		input netdevice
- * @out:	output netdevice
+ * @state:	pointer to hook state this packet came from
  * @fragoff:	packet is a fragment, this is the data offset
  * @thoff:	position of transport header relative to skb->data
- * @hook:	hook number given packet came from
- * @family:	Actual NFPROTO_* through which the function is invoked
- * 		(helpful when match->family == NFPROTO_UNSPEC)
  *
  * Fields written to by extensions:
  *
@@ -38,14 +35,46 @@ struct xt_action_param {
 	union {
 		const void *matchinfo, *targinfo;
 	};
-	struct net *net;
-	const struct net_device *in, *out;
+	const struct nf_hook_state *state;
 	int fragoff;
 	unsigned int thoff;
-	unsigned int hooknum;
-	u_int8_t family;
 	bool hotdrop;
 };
+
+static inline struct net *xt_net(const struct xt_action_param *par)
+{
+	return par->state->net;
+}
+
+static inline struct net_device *xt_in(const struct xt_action_param *par)
+{
+	return par->state->in;
+}
+
+static inline const char *xt_inname(const struct xt_action_param *par)
+{
+	return par->state->in->name;
+}
+
+static inline struct net_device *xt_out(const struct xt_action_param *par)
+{
+	return par->state->out;
+}
+
+static inline const char *xt_outname(const struct xt_action_param *par)
+{
+	return par->state->out->name;
+}
+
+static inline unsigned int xt_hooknum(const struct xt_action_param *par)
+{
+	return par->state->hook;
+}
+
+static inline u_int8_t xt_family(const struct xt_action_param *par)
+{
+	return par->state->pf;
+}
 
 /**
  * struct xt_mtchk_param - parameters for match extensions'
@@ -129,7 +158,7 @@ struct xt_match {
 
 	/* Called when entry of this type deleted. */
 	void (*destroy)(const struct xt_mtdtor_param *);
-#ifdef CONFIG_COMPAT
+#ifdef CONFIG_NETFILTER_XTABLES_COMPAT
 	/* Called when userspace align differs from kernel space one */
 	void (*compat_from_user)(void *dst, const void *src);
 	int (*compat_to_user)(void __user *dst, const void *src);
@@ -139,7 +168,8 @@ struct xt_match {
 
 	const char *table;
 	unsigned int matchsize;
-#ifdef CONFIG_COMPAT
+	unsigned int usersize;
+#ifdef CONFIG_NETFILTER_XTABLES_COMPAT
 	unsigned int compatsize;
 #endif
 	unsigned int hooks;
@@ -169,7 +199,7 @@ struct xt_target {
 
 	/* Called when entry of this type deleted. */
 	void (*destroy)(const struct xt_tgdtor_param *);
-#ifdef CONFIG_COMPAT
+#ifdef CONFIG_NETFILTER_XTABLES_COMPAT
 	/* Called when userspace align differs from kernel space one */
 	void (*compat_from_user)(void *dst, const void *src);
 	int (*compat_to_user)(void __user *dst, const void *src);
@@ -179,7 +209,8 @@ struct xt_target {
 
 	const char *table;
 	unsigned int targetsize;
-#ifdef CONFIG_COMPAT
+	unsigned int usersize;
+#ifdef CONFIG_NETFILTER_XTABLES_COMPAT
 	unsigned int compatsize;
 #endif
 	unsigned int hooks;
@@ -197,6 +228,9 @@ struct xt_table {
 
 	/* Man behind the curtain... */
 	struct xt_table_info *private;
+
+	/* hook ops that register the table with the netfilter core */
+	struct nf_hook_ops *ops;
 
 	/* Set this to THIS_MODULE if you are a module, otherwise NULL */
 	struct module *me;
@@ -233,7 +267,7 @@ struct xt_table_info {
 	unsigned int stacksize;
 	void ***jumpstack;
 
-	unsigned char entries[0] __aligned(8);
+	unsigned char entries[] __aligned(8);
 };
 
 int xt_register_target(struct xt_target *target);
@@ -250,19 +284,29 @@ int xt_check_entry_offsets(const void *base, const char *elems,
 			   unsigned int target_offset,
 			   unsigned int next_offset);
 
+int xt_check_table_hooks(const struct xt_table_info *info, unsigned int valid_hooks);
+
 unsigned int *xt_alloc_entry_offsets(unsigned int size);
 bool xt_find_jump_offset(const unsigned int *offsets,
 			 unsigned int target, unsigned int size);
 
 int xt_check_proc_name(const char *name, unsigned int size);
 
-int xt_check_match(struct xt_mtchk_param *, unsigned int size, u_int8_t proto,
+int xt_check_match(struct xt_mtchk_param *, unsigned int size, u16 proto,
 		   bool inv_proto);
-int xt_check_target(struct xt_tgchk_param *, unsigned int size, u_int8_t proto,
+int xt_check_target(struct xt_tgchk_param *, unsigned int size, u16 proto,
 		    bool inv_proto);
 
-void *xt_copy_counters_from_user(const void __user *user, unsigned int len,
-				 struct xt_counters_info *info, bool compat);
+int xt_match_to_user(const struct xt_entry_match *m,
+		     struct xt_entry_match __user *u);
+int xt_target_to_user(const struct xt_entry_target *t,
+		      struct xt_entry_target __user *u);
+int xt_data_to_user(void __user *dst, const void *src,
+		    int usersize, int size, int aligned_size);
+
+void *xt_copy_counters(sockptr_t arg, unsigned int len,
+		       struct xt_counters_info *info);
+struct xt_counters *xt_counters_alloc(unsigned int counters);
 
 struct xt_table *xt_register_table(struct net *net,
 				   const struct xt_table *table,
@@ -276,14 +320,16 @@ struct xt_table_info *xt_replace_table(struct xt_table *table,
 				       int *error);
 
 struct xt_match *xt_find_match(u8 af, const char *name, u8 revision);
-struct xt_target *xt_find_target(u8 af, const char *name, u8 revision);
 struct xt_match *xt_request_find_match(u8 af, const char *name, u8 revision);
 struct xt_target *xt_request_find_target(u8 af, const char *name, u8 revision);
 int xt_find_revision(u8 af, const char *name, u8 revision, int target,
 		     int *err);
 
+struct xt_table *xt_find_table(struct net *net, u8 af, const char *name);
 struct xt_table *xt_find_table_lock(struct net *net, u_int8_t af,
 				    const char *name);
+struct xt_table *xt_request_find_table_lock(struct net *net, u_int8_t af,
+					    const char *name);
 void xt_table_unlock(struct xt_table *t);
 
 int xt_proto_init(struct net *net, u_int8_t af);
@@ -294,7 +340,7 @@ void xt_free_table_info(struct xt_table_info *info);
 
 /**
  * xt_recseq - recursive seqcount for netfilter use
- * 
+ *
  * Packet processing changes the seqcount only if no recursion happened
  * get_counters() can use read_seqcount_begin()/read_seqcount_retry(),
  * because we use the normal seqcount convention :
@@ -334,7 +380,7 @@ static inline unsigned int xt_write_recseq_begin(void)
 	 * since addend is most likely 1
 	 */
 	__this_cpu_add(xt_recseq.sequence, addend);
-	smp_wmb();
+	smp_mb();
 
 	return addend;
 }
@@ -406,7 +452,7 @@ xt_get_per_cpu_counter(struct xt_counters *cnt, unsigned int cpu)
 
 struct nf_hook_ops *xt_hook_ops_alloc(const struct xt_table *, nf_hookfn *);
 
-#ifdef CONFIG_COMPAT
+#ifdef CONFIG_NETFILTER_XTABLES_COMPAT
 #include <net/compat.h>
 
 struct compat_xt_entry_match {
@@ -422,7 +468,7 @@ struct compat_xt_entry_match {
 		} kernel;
 		u_int16_t match_size;
 	} u;
-	unsigned char data[0];
+	unsigned char data[];
 };
 
 struct compat_xt_entry_target {
@@ -438,7 +484,7 @@ struct compat_xt_entry_target {
 		} kernel;
 		u_int16_t target_size;
 	} u;
-	unsigned char data[0];
+	unsigned char data[];
 };
 
 /* FIXME: this works only on 32 bit tasks
@@ -452,7 +498,7 @@ struct compat_xt_counters {
 struct compat_xt_counters_info {
 	char name[XT_TABLE_MAXNAMELEN];
 	compat_uint_t num_counters;
-	struct compat_xt_counters counters[0];
+	struct compat_xt_counters counters[];
 };
 
 struct _compat_xt_align {
@@ -469,7 +515,7 @@ void xt_compat_unlock(u_int8_t af);
 
 int xt_compat_add_offset(u_int8_t af, unsigned int offset, int delta);
 void xt_compat_flush_offsets(u_int8_t af);
-void xt_compat_init_offsets(u_int8_t af, unsigned int number);
+int xt_compat_init_offsets(u8 af, unsigned int number);
 int xt_compat_calc_jump(u_int8_t af, unsigned int offset);
 
 int xt_compat_match_offset(const struct xt_match *match);
@@ -487,5 +533,5 @@ int xt_compat_check_entry_offsets(const void *base, const char *elems,
 				  unsigned int target_offset,
 				  unsigned int next_offset);
 
-#endif /* CONFIG_COMPAT */
+#endif /* CONFIG_NETFILTER_XTABLES_COMPAT */
 #endif /* _X_TABLES_H */

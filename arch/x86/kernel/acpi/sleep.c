@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * sleep.c - x86-specific ACPI sleep support.
  *
@@ -6,13 +7,12 @@
  */
 
 #include <linux/acpi.h>
-#include <linux/bootmem.h>
 #include <linux/memblock.h>
 #include <linux/dmi.h>
 #include <linux/cpumask.h>
+#include <linux/pgtable.h>
 #include <asm/segment.h>
 #include <asm/desc.h>
-#include <asm/pgtable.h>
 #include <asm/cacheflush.h>
 #include <asm/realmode.h>
 
@@ -27,12 +27,23 @@ static char temp_stack[4096];
 #endif
 
 /**
+ * acpi_get_wakeup_address - provide physical address for S3 wakeup
+ *
+ * Returns the physical address where the kernel should be resumed after the
+ * system awakes from S3, e.g. for programming into the firmware waking vector.
+ */
+unsigned long acpi_get_wakeup_address(void)
+{
+	return ((unsigned long)(real_mode_header->wakeup_start));
+}
+
+/**
  * x86_acpi_enter_sleep_state - enter sleep state
  * @state: Sleep state to enter.
  *
- * Wrapper around acpi_enter_sleep_state() to be called by assmebly.
+ * Wrapper around acpi_enter_sleep_state() to be called by assembly.
  */
-acpi_status asmlinkage __visible x86_acpi_enter_sleep_state(u8 state)
+asmlinkage acpi_status __visible x86_acpi_enter_sleep_state(u8 state)
 {
 	return acpi_enter_sleep_state(state);
 }
@@ -101,7 +112,7 @@ int x86_acpi_suspend_lowlevel(void)
 #ifdef CONFIG_SMP
 	initial_stack = (unsigned long)temp_stack + sizeof(temp_stack);
 	early_gdt_descr.address =
-			(unsigned long)get_cpu_gdt_table(smp_processor_id());
+			(unsigned long)get_cpu_gdt_rw(smp_processor_id());
 	initial_gs = per_cpu_offset(smp_processor_id());
 #endif
 	initial_code = (unsigned long)wakeup_long64;
@@ -137,6 +148,8 @@ static int __init acpi_sleep_setup(char *str)
 			acpi_nvs_nosave_s3();
 		if (strncmp(str, "old_ordering", 12) == 0)
 			acpi_old_suspend_ordering();
+		if (strncmp(str, "nobl", 4) == 0)
+			acpi_sleep_no_blacklist();
 		str = strchr(str, ',');
 		if (str != NULL)
 			str += strspn(str, ", \t");

@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  i8042 keyboard and mouse controller driver for Linux
  *
  *  Copyright (c) 1999-2004 Vojtech Pavlik
  */
 
-/*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
@@ -25,6 +21,7 @@
 #include <linux/i8042.h>
 #include <linux/slab.h>
 #include <linux/suspend.h>
+#include <linux/property.h>
 
 #include <asm/io.h>
 
@@ -125,9 +122,11 @@ module_param_named(unmask_kbd_data, i8042_unmask_kbd_data, bool, 0600);
 MODULE_PARM_DESC(unmask_kbd_data, "Unconditional enable (may reveal sensitive data) of normally sanitize-filtered kbd data traffic debug log [pre-condition: i8042.debug=1 enabled]");
 #endif
 
+static bool i8042_present;
 static bool i8042_bypass_aux_irq_test;
 static char i8042_kbd_firmware_id[128];
 static char i8042_aux_firmware_id[128];
+static struct fwnode_handle *i8042_kbd_fwnode;
 
 #include "i8042.h"
 
@@ -312,8 +311,10 @@ static int __i8042_command(unsigned char *param, int command)
 
 	for (i = 0; i < ((command >> 12) & 0xf); i++) {
 		error = i8042_wait_write();
-		if (error)
+		if (error) {
+			dbg("     -- i8042 (wait write timeout)\n");
 			return error;
+		}
 		dbg("%02x -> i8042 (parameter)\n", param[i]);
 		i8042_write_data(param[i]);
 	}
@@ -321,7 +322,7 @@ static int __i8042_command(unsigned char *param, int command)
 	for (i = 0; i < ((command >> 8) & 0xf); i++) {
 		error = i8042_wait_read();
 		if (error) {
-			dbg("     -- i8042 (timeout)\n");
+			dbg("     -- i8042 (wait read timeout)\n");
 			return error;
 		}
 
@@ -342,6 +343,9 @@ int i8042_command(unsigned char *param, int command)
 {
 	unsigned long flags;
 	int retval;
+
+	if (!i8042_present)
+		return -1;
 
 	spin_lock_irqsave(&i8042_lock, flags);
 	retval = __i8042_command(param, command);
@@ -387,7 +391,7 @@ static int i8042_aux_write(struct serio *serio, unsigned char c)
 
 
 /*
- * i8042_aux_close attempts to clear AUX or KBD port state by disabling
+ * i8042_port_close attempts to clear AUX or KBD port state by disabling
  * and then re-enabling it.
  */
 
@@ -433,6 +437,20 @@ static void i8042_port_close(struct serio *serio)
 static int i8042_start(struct serio *serio)
 {
 	struct i8042_port *port = serio->port_data;
+
+	device_set_wakeup_capable(&serio->dev, true);
+
+	/*
+	 * On platforms using suspend-to-idle, allow the keyboard to
+	 * wake up the system from sleep by enabling keyboard wakeups
+	 * by default.  This is consistent with keyboard wakeup
+	 * behavior on many platforms using suspend-to-RAM (ACPI S3)
+	 * by default.
+	 */
+	if (pm_suspend_default_s2idle() &&
+	    serio == i8042_ports[I8042_KBD_PORT_NO].serio) {
+		device_set_wakeup_enable(&serio->dev, true);
+	}
 
 	spin_lock_irq(&i8042_lock);
 	port->exists = true;
@@ -548,7 +566,7 @@ static irqreturn_t i8042_interrupt(int irq, void *dev_id)
 						str = last_str;
 						break;
 					}
-					/* fall through - report timeout */
+					fallthrough;	/* report timeout */
 				case 0xfc:
 				case 0xfd:
 				case 0xfe: dfl = SERIO_TIMEOUT; data = 0xfe; break;
@@ -1323,6 +1341,7 @@ static int __init i8042_create_kbd_port(void)
 	strlcpy(serio->phys, I8042_KBD_PHYS_DESC, sizeof(serio->phys));
 	strlcpy(serio->firmware_id, i8042_kbd_firmware_id,
 		sizeof(serio->firmware_id));
+	set_primary_fwnode(&serio->dev, i8042_kbd_fwnode);
 
 	port->serio = serio;
 	port->irq = I8042_KBD_IRQ;
@@ -1390,15 +1409,15 @@ static void __init i8042_register_ports(void)
 	for (i = 0; i < I8042_NUM_PORTS; i++) {
 		struct serio *serio = i8042_ports[i].serio;
 
-		if (serio) {
-			printk(KERN_INFO "serio: %s at %#lx,%#lx irq %d\n",
-				serio->name,
-				(unsigned long) I8042_DATA_REG,
-				(unsigned long) I8042_COMMAND_REG,
-				i8042_ports[i].irq);
-			serio_register_port(serio);
-			device_set_wakeup_capable(&serio->dev, true);
-		}
+		if (!serio)
+			continue;
+
+		printk(KERN_INFO "serio: %s at %#lx,%#lx irq %d\n",
+			serio->name,
+			(unsigned long) I8042_DATA_REG,
+			(unsigned long) I8042_COMMAND_REG,
+			i8042_ports[i].irq);
+		serio_register_port(serio);
 	}
 }
 
@@ -1452,7 +1471,8 @@ static int __init i8042_setup_aux(void)
 	if (error)
 		goto err_free_ports;
 
-	if (aux_enable())
+	error = aux_enable();
+	if (error)
 		goto err_free_irq;
 
 	i8042_aux_irq_registered = true;
@@ -1597,11 +1617,14 @@ static int __init i8042_init(void)
 
 	err = i8042_platform_init();
 	if (err)
-		return err;
+		return (err == -ENODEV) ? 0 : err;
 
 	err = i8042_controller_check();
 	if (err)
 		goto err_platform_exit;
+
+	/* Set this before creating the dev to allow i8042_command to work right away */
+	i8042_present = true;
 
 	pdev = platform_create_bundle(&i8042_driver, i8042_probe, NULL, 0, NULL, 0);
 	if (IS_ERR(pdev)) {
@@ -1621,6 +1644,9 @@ static int __init i8042_init(void)
 
 static void __exit i8042_exit(void)
 {
+	if (!i8042_present)
+		return;
+
 	platform_device_unregister(i8042_platform_device);
 	platform_driver_unregister(&i8042_driver);
 	i8042_platform_exit();

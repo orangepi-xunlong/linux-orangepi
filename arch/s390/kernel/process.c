@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * This file handles the architecture dependent parts of process handling.
  *
@@ -11,6 +12,9 @@
 #include <linux/compiler.h>
 #include <linux/cpu.h>
 #include <linux/sched.h>
+#include <linux/sched/debug.h>
+#include <linux/sched/task.h>
+#include <linux/sched/task_stack.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/elfcore.h>
@@ -23,8 +27,10 @@
 #include <linux/compat.h>
 #include <linux/kprobes.h>
 #include <linux/random.h>
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/init_task.h>
+#include <linux/entry-common.h>
+#include <asm/cpu_mf.h>
 #include <asm/io.h>
 #include <asm/processor.h>
 #include <asm/vtimer.h>
@@ -32,57 +38,46 @@
 #include <asm/irq.h>
 #include <asm/nmi.h>
 #include <asm/smp.h>
+#include <asm/stacktrace.h>
 #include <asm/switch_to.h>
 #include <asm/runtime_instr.h>
+#include <asm/unwind.h>
 #include "entry.h"
 
-asmlinkage void ret_from_fork(void) asm ("ret_from_fork");
+void ret_from_fork(void) asm("ret_from_fork");
 
-/*
- * Return saved PC of a blocked thread. used in kernel/sched.
- * resume in entry.S does not create a new stack frame, it
- * just stores the registers %r6-%r15 to the frame given by
- * schedule. We want to return the address of the caller of
- * schedule, so we have to walk the backchain one time to
- * find the frame schedule() store its return address.
- */
-unsigned long thread_saved_pc(struct task_struct *tsk)
+void __ret_from_fork(struct task_struct *prev, struct pt_regs *regs)
 {
-	struct stack_frame *sf, *low, *high;
+	void (*func)(void *arg);
 
-	if (!tsk || !task_stack_page(tsk))
-		return 0;
-	low = task_stack_page(tsk);
-	high = (struct stack_frame *) task_pt_regs(tsk);
-	sf = (struct stack_frame *) tsk->thread.ksp;
-	if (sf <= low || sf > high)
-		return 0;
-	sf = (struct stack_frame *) sf->back_chain;
-	if (sf <= low || sf > high)
-		return 0;
-	return sf->gprs[8];
-}
+	schedule_tail(prev);
 
-extern void kernel_thread_starter(void);
-
-/*
- * Free current thread data structures etc..
- */
-void exit_thread(struct task_struct *tsk)
-{
+	if (!user_mode(regs)) {
+		/* Kernel thread */
+		func = (void *)regs->gprs[9];
+		func((void *)regs->gprs[10]);
+	}
+	clear_pt_regs_flag(regs, PIF_SYSCALL);
+	syscall_exit_to_user_mode(regs);
 }
 
 void flush_thread(void)
 {
 }
 
-void release_thread(struct task_struct *dead_task)
+void arch_setup_new_exec(void)
 {
+	if (S390_lowcore.current_pid != current->pid) {
+		S390_lowcore.current_pid = current->pid;
+		if (test_facility(40))
+			lpp(&S390_lowcore.lpp);
+	}
 }
 
 void arch_release_task_struct(struct task_struct *tsk)
 {
 	runtime_instr_release(tsk);
+	guarded_storage_release(tsk);
 }
 
 int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
@@ -100,9 +95,8 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 }
 
 int copy_thread(unsigned long clone_flags, unsigned long new_stackp,
-		unsigned long arg, struct task_struct *p)
+		unsigned long arg, struct task_struct *p, unsigned long tls)
 {
-	struct thread_info *ti;
 	struct fake_frame
 	{
 		struct stack_frame sf;
@@ -114,34 +108,38 @@ int copy_thread(unsigned long clone_flags, unsigned long new_stackp,
 	/* Save access registers to new thread structure. */
 	save_access_regs(&p->thread.acrs[0]);
 	/* start new process with ar4 pointing to the correct address space */
-	p->thread.mm_segment = get_fs();
 	/* Don't copy debug registers */
 	memset(&p->thread.per_user, 0, sizeof(p->thread.per_user));
 	memset(&p->thread.per_event, 0, sizeof(p->thread.per_event));
 	clear_tsk_thread_flag(p, TIF_SINGLE_STEP);
 	p->thread.per_flags = 0;
 	/* Initialize per thread user and system timer values */
-	ti = task_thread_info(p);
-	ti->user_timer = 0;
-	ti->system_timer = 0;
+	p->thread.user_timer = 0;
+	p->thread.guest_timer = 0;
+	p->thread.system_timer = 0;
+	p->thread.hardirq_timer = 0;
+	p->thread.softirq_timer = 0;
+	p->thread.last_break = 1;
 
 	frame->sf.back_chain = 0;
+	frame->sf.gprs[5] = (unsigned long)frame + sizeof(struct stack_frame);
+	frame->sf.gprs[6] = (unsigned long)p;
 	/* new return point is ret_from_fork */
-	frame->sf.gprs[8] = (unsigned long) ret_from_fork;
+	frame->sf.gprs[8] = (unsigned long)ret_from_fork;
 	/* fake return stack for resume(), don't go back to schedule */
-	frame->sf.gprs[9] = (unsigned long) frame;
+	frame->sf.gprs[9] = (unsigned long)frame;
 
 	/* Store access registers to kernel stack of new process. */
-	if (unlikely(p->flags & PF_KTHREAD)) {
+	if (unlikely(p->flags & (PF_KTHREAD | PF_IO_WORKER))) {
 		/* kernel thread */
 		memset(&frame->childregs, 0, sizeof(struct pt_regs));
 		frame->childregs.psw.mask = PSW_KERNEL_BITS | PSW_MASK_DAT |
 				PSW_MASK_IO | PSW_MASK_EXT | PSW_MASK_MCHECK;
 		frame->childregs.psw.addr =
-				(unsigned long) kernel_thread_starter;
+				(unsigned long)__ret_from_fork;
 		frame->childregs.gprs[9] = new_stackp; /* function */
 		frame->childregs.gprs[10] = arg;
-		frame->childregs.gprs[11] = (unsigned long) do_exit;
+		frame->childregs.gprs[11] = (unsigned long)do_exit;
 		frame->childregs.orig_gpr2 = -1;
 
 		return 0;
@@ -155,10 +153,12 @@ int copy_thread(unsigned long clone_flags, unsigned long new_stackp,
 	/* Don't copy runtime instrumentation info */
 	p->thread.ri_cb = NULL;
 	frame->childregs.psw.mask &= ~PSW_MASK_RI;
+	/* Don't copy guarded storage control block */
+	p->thread.gs_cb = NULL;
+	p->thread.gs_bc_cb = NULL;
 
 	/* Set a new TLS ?  */
 	if (clone_flags & CLONE_SETTLS) {
-		unsigned long tls = frame->childregs.gprs[6];
 		if (is_compat_task()) {
 			p->thread.acrs[0] = (unsigned int)tls;
 		} else {
@@ -169,52 +169,39 @@ int copy_thread(unsigned long clone_flags, unsigned long new_stackp,
 	return 0;
 }
 
-asmlinkage void execve_tail(void)
+void execve_tail(void)
 {
 	current->thread.fpu.fpc = 0;
 	asm volatile("sfpc %0" : : "d" (0));
 }
 
-/*
- * fill in the FPU structure for a core dump.
- */
-int dump_fpu (struct pt_regs * regs, s390_fp_regs *fpregs)
-{
-	save_fpu_regs();
-	fpregs->fpc = current->thread.fpu.fpc;
-	fpregs->pad = 0;
-	if (MACHINE_HAS_VX)
-		convert_vx_to_fp((freg_t *)&fpregs->fprs,
-				 current->thread.fpu.vxrs);
-	else
-		memcpy(&fpregs->fprs, current->thread.fpu.fprs,
-		       sizeof(fpregs->fprs));
-	return 1;
-}
-EXPORT_SYMBOL(dump_fpu);
-
 unsigned long get_wchan(struct task_struct *p)
 {
-	struct stack_frame *sf, *low, *high;
-	unsigned long return_address;
-	int count;
+	struct unwind_state state;
+	unsigned long ip = 0;
 
 	if (!p || p == current || p->state == TASK_RUNNING || !task_stack_page(p))
 		return 0;
-	low = task_stack_page(p);
-	high = (struct stack_frame *) task_pt_regs(p);
-	sf = (struct stack_frame *) p->thread.ksp;
-	if (sf <= low || sf > high)
+
+	if (!try_get_task_stack(p))
 		return 0;
-	for (count = 0; count < 16; count++) {
-		sf = (struct stack_frame *) sf->back_chain;
-		if (sf <= low || sf > high)
-			return 0;
-		return_address = sf->gprs[8];
-		if (!in_sched_functions(return_address))
-			return return_address;
+
+	unwind_for_each_frame(&state, p, NULL, 0) {
+		if (state.stack_info.type != STACK_TYPE_TASK) {
+			ip = 0;
+			break;
+		}
+
+		ip = unwind_get_return_address(&state);
+		if (!ip)
+			break;
+
+		if (!in_sched_functions(ip))
+			break;
 	}
-	return 0;
+
+	put_task_stack(p);
+	return ip;
 }
 
 unsigned long arch_align_stack(unsigned long sp)

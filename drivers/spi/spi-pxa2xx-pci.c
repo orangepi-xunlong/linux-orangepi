@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * CE4100's SPI device is more or less the same one as found on PXA
  *
@@ -5,7 +6,6 @@
  */
 #include <linux/clk-provider.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
 #include <linux/pci.h>
 #include <linux/platform_device.h>
 #include <linux/spi/pxa2xx_spi.h>
@@ -21,7 +21,8 @@ enum {
 	PORT_BSW1,
 	PORT_BSW2,
 	PORT_CE4100,
-	PORT_LPT,
+	PORT_LPT0,
+	PORT_LPT1,
 };
 
 struct pxa_spi_info {
@@ -35,11 +36,20 @@ struct pxa_spi_info {
 	void *tx_param;
 	void *rx_param;
 
+	int dma_burst_size;
+
 	int (*setup)(struct pci_dev *pdev, struct pxa_spi_info *c);
 };
 
 static struct dw_dma_slave byt_tx_param = { .dst_id = 0 };
 static struct dw_dma_slave byt_rx_param = { .src_id = 1 };
+
+static struct dw_dma_slave mrfld3_tx_param = { .dst_id = 15 };
+static struct dw_dma_slave mrfld3_rx_param = { .src_id = 14 };
+static struct dw_dma_slave mrfld5_tx_param = { .dst_id = 13 };
+static struct dw_dma_slave mrfld5_rx_param = { .src_id = 12 };
+static struct dw_dma_slave mrfld6_tx_param = { .dst_id = 11 };
+static struct dw_dma_slave mrfld6_rx_param = { .src_id = 10 };
 
 static struct dw_dma_slave bsw0_tx_param = { .dst_id = 0 };
 static struct dw_dma_slave bsw0_rx_param = { .src_id = 1 };
@@ -48,8 +58,10 @@ static struct dw_dma_slave bsw1_rx_param = { .src_id = 7 };
 static struct dw_dma_slave bsw2_tx_param = { .dst_id = 8 };
 static struct dw_dma_slave bsw2_rx_param = { .src_id = 9 };
 
-static struct dw_dma_slave lpt_tx_param = { .dst_id = 0 };
-static struct dw_dma_slave lpt_rx_param = { .src_id = 1 };
+static struct dw_dma_slave lpt1_tx_param = { .dst_id = 0 };
+static struct dw_dma_slave lpt1_rx_param = { .src_id = 1 };
+static struct dw_dma_slave lpt0_tx_param = { .dst_id = 2 };
+static struct dw_dma_slave lpt0_rx_param = { .src_id = 3 };
 
 static bool lpss_dma_filter(struct dma_chan *chan, void *param)
 {
@@ -93,22 +105,40 @@ static int lpss_spi_setup(struct pci_dev *dev, struct pxa_spi_info *c)
 
 static int mrfld_spi_setup(struct pci_dev *dev, struct pxa_spi_info *c)
 {
+	struct pci_dev *dma_dev = pci_get_slot(dev->bus, PCI_DEVFN(21, 0));
+	struct dw_dma_slave *tx, *rx;
+
 	switch (PCI_FUNC(dev->devfn)) {
 	case 0:
 		c->port_id = 3;
 		c->num_chipselect = 1;
+		c->tx_param = &mrfld3_tx_param;
+		c->rx_param = &mrfld3_rx_param;
 		break;
 	case 1:
 		c->port_id = 5;
 		c->num_chipselect = 4;
+		c->tx_param = &mrfld5_tx_param;
+		c->rx_param = &mrfld5_rx_param;
 		break;
 	case 2:
 		c->port_id = 6;
 		c->num_chipselect = 1;
+		c->tx_param = &mrfld6_tx_param;
+		c->rx_param = &mrfld6_rx_param;
 		break;
 	default:
 		return -ENODEV;
 	}
+
+	tx = c->tx_param;
+	tx->dma_dev = &dma_dev->dev;
+
+	rx = c->rx_param;
+	rx->dma_dev = &dma_dev->dev;
+
+	c->dma_filter = lpss_dma_filter;
+	c->dma_burst_size = 8;
 	return 0;
 }
 
@@ -158,12 +188,19 @@ static struct pxa_spi_info spi_info_configs[] = {
 		.num_chipselect = 1,
 		.max_clk_rate = 50000000,
 	},
-	[PORT_LPT] = {
+	[PORT_LPT0] = {
 		.type = LPSS_LPT_SSP,
 		.port_id = 0,
 		.setup = lpss_spi_setup,
-		.tx_param = &lpt_tx_param,
-		.rx_param = &lpt_rx_param,
+		.tx_param = &lpt0_tx_param,
+		.rx_param = &lpt0_rx_param,
+	},
+	[PORT_LPT1] = {
+		.type = LPSS_LPT_SSP,
+		.port_id = 1,
+		.setup = lpss_spi_setup,
+		.tx_param = &lpt1_tx_param,
+		.rx_param = &lpt1_rx_param,
 	},
 };
 
@@ -173,7 +210,7 @@ static int pxa2xx_spi_pci_probe(struct pci_dev *dev,
 	struct platform_device_info pi;
 	int ret;
 	struct platform_device *pdev;
-	struct pxa2xx_spi_master spi_pdata;
+	struct pxa2xx_spi_controller spi_pdata;
 	struct ssp_device *ssp;
 	struct pxa_spi_info *c;
 	char buf[40];
@@ -199,16 +236,23 @@ static int pxa2xx_spi_pci_probe(struct pci_dev *dev,
 	spi_pdata.tx_param = c->tx_param;
 	spi_pdata.rx_param = c->rx_param;
 	spi_pdata.enable_dma = c->rx_param && c->tx_param;
+	spi_pdata.dma_burst_size = c->dma_burst_size ? c->dma_burst_size : 1;
 
 	ssp = &spi_pdata.ssp;
 	ssp->phys_base = pci_resource_start(dev, 0);
 	ssp->mmio_base = pcim_iomap_table(dev)[0];
-	ssp->irq = dev->irq;
 	ssp->port_id = (c->port_id >= 0) ? c->port_id : dev->devfn;
 	ssp->type = c->type;
 
+	pci_set_master(dev);
+
+	ret = pci_alloc_irq_vectors(dev, 1, 1, PCI_IRQ_ALL_TYPES);
+	if (ret < 0)
+		return ret;
+	ssp->irq = pci_irq_vector(dev, 0);
+
 	snprintf(buf, sizeof(buf), "pxa2xx-spi.%d", ssp->port_id);
-	ssp->clk = clk_register_fixed_rate(&dev->dev, buf , NULL, 0,
+	ssp->clk = clk_register_fixed_rate(&dev->dev, buf, NULL, 0,
 					   c->max_clk_rate);
 	 if (IS_ERR(ssp->clk))
 		return PTR_ERR(ssp->clk);
@@ -235,7 +279,7 @@ static int pxa2xx_spi_pci_probe(struct pci_dev *dev,
 static void pxa2xx_spi_pci_remove(struct pci_dev *dev)
 {
 	struct platform_device *pdev = pci_get_drvdata(dev);
-	struct pxa2xx_spi_master *spi_pdata;
+	struct pxa2xx_spi_controller *spi_pdata;
 
 	spi_pdata = dev_get_platdata(&pdev->dev);
 
@@ -251,8 +295,11 @@ static const struct pci_device_id pxa2xx_spi_pci_devices[] = {
 	{ PCI_VDEVICE(INTEL, 0x2290), PORT_BSW1 },
 	{ PCI_VDEVICE(INTEL, 0x22ac), PORT_BSW2 },
 	{ PCI_VDEVICE(INTEL, 0x2e6a), PORT_CE4100 },
-	{ PCI_VDEVICE(INTEL, 0x9ce6), PORT_LPT },
-	{ },
+	{ PCI_VDEVICE(INTEL, 0x9c65), PORT_LPT0 },
+	{ PCI_VDEVICE(INTEL, 0x9c66), PORT_LPT1 },
+	{ PCI_VDEVICE(INTEL, 0x9ce5), PORT_LPT0 },
+	{ PCI_VDEVICE(INTEL, 0x9ce6), PORT_LPT1 },
+	{ }
 };
 MODULE_DEVICE_TABLE(pci, pxa2xx_spi_pci_devices);
 

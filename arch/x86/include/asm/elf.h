@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_X86_ELF_H
 #define _ASM_X86_ELF_H
 
@@ -9,6 +10,7 @@
 #include <asm/ptrace.h>
 #include <asm/user.h>
 #include <asm/auxvec.h>
+#include <asm/fsgsbase.h>
 
 typedef unsigned long elf_greg_t;
 
@@ -18,8 +20,6 @@ typedef elf_greg_t elf_gregset_t[ELF_NGREG];
 typedef struct user_i387_struct elf_fpregset_t;
 
 #ifdef __i386__
-
-typedef struct user_fxsr_struct elf_fpxregset_t;
 
 #define R_386_NONE	0
 #define R_386_32	1
@@ -61,8 +61,7 @@ typedef struct user_fxsr_struct elf_fpxregset_t;
 #define R_X86_64_PC16		13	/* 16 bit sign extended pc relative */
 #define R_X86_64_8		14	/* Direct 8 bit sign extended  */
 #define R_X86_64_PC8		15	/* 8 bit sign extended pc relative */
-
-#define R_X86_64_NUM		16
+#define R_X86_64_PC64		24	/* Place relative 64-bit signed */
 
 /*
  * These are used to set parameters in the core dumps.
@@ -126,15 +125,15 @@ do {						\
 	pr_reg[4] = regs->di;			\
 	pr_reg[5] = regs->bp;			\
 	pr_reg[6] = regs->ax;			\
-	pr_reg[7] = regs->ds & 0xffff;		\
-	pr_reg[8] = regs->es & 0xffff;		\
-	pr_reg[9] = regs->fs & 0xffff;		\
+	pr_reg[7] = regs->ds;			\
+	pr_reg[8] = regs->es;			\
+	pr_reg[9] = regs->fs;			\
 	pr_reg[11] = regs->orig_ax;		\
 	pr_reg[12] = regs->ip;			\
-	pr_reg[13] = regs->cs & 0xffff;		\
+	pr_reg[13] = regs->cs;			\
 	pr_reg[14] = regs->flags;		\
 	pr_reg[15] = regs->sp;			\
-	pr_reg[16] = regs->ss & 0xffff;		\
+	pr_reg[16] = regs->ss;			\
 } while (0);
 
 #define ELF_CORE_COPY_REGS(pr_reg, regs)	\
@@ -187,8 +186,9 @@ static inline void elf_common_init(struct thread_struct *t,
 #define	COMPAT_ELF_PLAT_INIT(regs, load_addr)		\
 	elf_common_init(&current->thread, regs, __USER_DS)
 
-void compat_start_thread(struct pt_regs *regs, u32 new_ip, u32 new_sp);
-#define compat_start_thread compat_start_thread
+void compat_start_thread(struct pt_regs *regs, u32 new_ip, u32 new_sp, bool x32);
+#define COMPAT_START_THREAD(ex, regs, new_ip, new_sp)	\
+	compat_start_thread(regs, new_ip, new_sp, ex->e_machine == EM_X86_64)
 
 void set_personality_ia32(bool);
 #define COMPAT_SET_PERSONALITY(ex)			\
@@ -204,7 +204,6 @@ void set_personality_ia32(bool);
 
 #define ELF_CORE_COPY_REGS(pr_reg, regs)			\
 do {								\
-	unsigned long base;					\
 	unsigned v;						\
 	(pr_reg)[0] = (regs)->r15;				\
 	(pr_reg)[1] = (regs)->r14;				\
@@ -227,8 +226,8 @@ do {								\
 	(pr_reg)[18] = (regs)->flags;				\
 	(pr_reg)[19] = (regs)->sp;				\
 	(pr_reg)[20] = (regs)->ss;				\
-	rdmsrl(MSR_FS_BASE, base); (pr_reg)[21] = base;		\
-	rdmsrl(MSR_KERNEL_GS_BASE, base); (pr_reg)[22] = base;	\
+	(pr_reg)[21] = x86_fsbase_read_cpu();			\
+	(pr_reg)[22] = x86_gsbase_read_cpu_inactive();		\
 	asm("movl %%ds,%0" : "=r" (v)); (pr_reg)[23] = v;	\
 	asm("movl %%es,%0" : "=r" (v)); (pr_reg)[24] = v;	\
 	asm("movl %%fs,%0" : "=r" (v)); (pr_reg)[25] = v;	\
@@ -252,13 +251,22 @@ extern int force_personality32;
  * space open for things that want to use the area for 32-bit pointers.
  */
 #define ELF_ET_DYN_BASE		(mmap_is_ia32() ? 0x000400000UL : \
-						  (TASK_SIZE / 3 * 2))
+						  (DEFAULT_MAP_WINDOW / 3 * 2))
 
 /* This yields a mask that user programs can use to figure out what
    instruction set this CPU supports.  This could be done in user space,
    but it's not easy, and we've already done it here.  */
 
 #define ELF_HWCAP		(boot_cpu_data.x86_capability[CPUID_1_EDX])
+
+extern u32 elf_hwcap2;
+
+/*
+ * HWCAP2 supplies mask with kernel enabled CPU features, so that
+ * the application can discover that it can safely use them.
+ * The bits are defined in uapi/asm/hwcap2.h.
+ */
+#define ELF_HWCAP2		(elf_hwcap2)
 
 /* This yields a string that ld.so will use to load implementation
    specific libraries for optimization.  This is more specific in
@@ -272,9 +280,29 @@ extern int force_personality32;
 /*
  * An executable for which elf_read_implies_exec() returns TRUE will
  * have the READ_IMPLIES_EXEC personality flag set automatically.
+ *
+ * The decision process for determining the results are:
+ *
+ *                 CPU: | lacks NX*  | has NX, ia32     | has NX, x86_64 |
+ * ELF:                 |            |                  |                |
+ * ---------------------|------------|------------------|----------------|
+ * missing PT_GNU_STACK | exec-all   | exec-all         | exec-none      |
+ * PT_GNU_STACK == RWX  | exec-stack | exec-stack       | exec-stack     |
+ * PT_GNU_STACK == RW   | exec-none  | exec-none        | exec-none      |
+ *
+ *  exec-all  : all PROT_READ user mappings are executable, except when
+ *              backed by files on a noexec-filesystem.
+ *  exec-none : only PROT_EXEC user mappings are executable.
+ *  exec-stack: only the stack and PROT_EXEC user mappings are executable.
+ *
+ *  *this column has no architectural effect: NX markings are ignored by
+ *   hardware, but may have behavioral effects when "wants X" collides with
+ *   "cannot be X" constraints in memory permission flags, as in
+ *   https://lkml.kernel.org/r/20190418055759.GA3155@mellanox.com
+ *
  */
 #define elf_read_implies_exec(ex, executable_stack)	\
-	(executable_stack != EXSTACK_DISABLE_X)
+	(mmap_is_ia32() && executable_stack == EXSTACK_DEFAULT)
 
 struct task_struct;
 
@@ -286,8 +314,24 @@ do {									\
 	}								\
 } while (0)
 
+/*
+ * True on X86_32 or when emulating IA32 on X86_64
+ */
+static inline int mmap_is_ia32(void)
+{
+	return IS_ENABLED(CONFIG_X86_32) ||
+	       (IS_ENABLED(CONFIG_COMPAT) &&
+		test_thread_flag(TIF_ADDR32));
+}
+
+extern unsigned long task_size_32bit(void);
+extern unsigned long task_size_64bit(int full_addr_space);
+extern unsigned long get_mmap_base(int is_legacy);
+extern bool mmap_address_hint_valid(unsigned long addr, unsigned long len);
+
 #ifdef CONFIG_X86_32
 
+#define __STACK_RND_MASK(is32bit) (0x7ff)
 #define STACK_RND_MASK (0x7ff)
 
 #define ARCH_DLINFO		ARCH_DLINFO_IA32
@@ -297,7 +341,8 @@ do {									\
 #else /* CONFIG_X86_32 */
 
 /* 1GB for 64bit, 8MB for 32bit */
-#define STACK_RND_MASK (test_thread_flag(TIF_ADDR32) ? 0x7ff : 0x3fffff)
+#define __STACK_RND_MASK(is32bit) ((is32bit) ? 0x7ff : 0x3fffff)
+#define STACK_RND_MASK __STACK_RND_MASK(mmap_is_ia32())
 
 #define ARCH_DLINFO							\
 do {									\
@@ -317,9 +362,9 @@ do {									\
 #define AT_SYSINFO		32
 
 #define COMPAT_ARCH_DLINFO						\
-if (test_thread_flag(TIF_X32))						\
+if (exec->e_machine == EM_X86_64)					\
 	ARCH_DLINFO_X32;						\
-else									\
+else if (IS_ENABLED(CONFIG_IA32_EMULATION))				\
 	ARCH_DLINFO_IA32
 
 #define COMPAT_ELF_ET_DYN_BASE	(TASK_UNMAPPED_BASE + 0x1000000)
@@ -338,18 +383,12 @@ struct linux_binprm;
 extern int arch_setup_additional_pages(struct linux_binprm *bprm,
 				       int uses_interp);
 extern int compat_arch_setup_additional_pages(struct linux_binprm *bprm,
-					      int uses_interp);
-#define compat_arch_setup_additional_pages compat_arch_setup_additional_pages
+					      int uses_interp, bool x32);
+#define COMPAT_ARCH_SETUP_ADDITIONAL_PAGES(bprm, ex, interpreter)	\
+	compat_arch_setup_additional_pages(bprm, interpreter,		\
+					   (ex->e_machine == EM_X86_64))
 
-/*
- * True on X86_32 or when emulating IA32 on X86_64
- */
-static inline int mmap_is_ia32(void)
-{
-	return IS_ENABLED(CONFIG_X86_32) ||
-	       (IS_ENABLED(CONFIG_COMPAT) &&
-		test_thread_flag(TIF_ADDR32));
-}
+extern bool arch_syscall_is_vdso_sigreturn(struct pt_regs *regs);
 
 /* Do not change the values. See get_align_mask() */
 enum align_flags {

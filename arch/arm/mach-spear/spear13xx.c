@@ -15,6 +15,7 @@
 
 #include <linux/amba/pl022.h>
 #include <linux/clk.h>
+#include <linux/clk/spear.h>
 #include <linux/clocksource.h>
 #include <linux/err.h>
 #include <linux/of.h>
@@ -124,5 +125,5 @@ void __init spear13xx_timer_init(void)
 	clk_put(pclk);
 
 	spear_setup_of_timer();
-	clocksource_probe();
+	timer_probe();
 }

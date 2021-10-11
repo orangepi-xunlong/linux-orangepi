@@ -1,4 +1,4 @@
-/**
+/*
  * Marvell NFC-over-SPI driver: SPI interface related functions
  *
  * Copyright (C) 2015, Marvell International Ltd.
@@ -26,7 +26,6 @@
 #include <net/nfc/nci.h>
 #include <net/nfc/nci_core.h>
 #include <linux/spi/spi.h>
-#include <linux/gpio.h>
 #include "nfcmrvl.h"
 
 #define SPI_WAIT_HANDSHAKE	1

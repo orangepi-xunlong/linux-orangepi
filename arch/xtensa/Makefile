@@ -19,12 +19,8 @@ variant-y := $(patsubst "%",%,$(CONFIG_XTENSA_VARIANT_NAME))
 VARIANT = $(variant-y)
 export VARIANT
 
-# Test for cross compiling
-
 ifneq ($(VARIANT),)
-  COMPILE_ARCH = $(shell uname -m)
-
-  ifneq ($(COMPILE_ARCH), xtensa)
+  ifdef cross_compiling
     ifndef CROSS_COMPILE
       CROSS_COMPILE = xtensa_$(VARIANT)-
     endif
@@ -42,32 +38,22 @@ export PLATFORM
 
 # temporarily until string.h is fixed
 KBUILD_CFLAGS += -ffreestanding -D__linux__
-
-KBUILD_CFLAGS += -pipe -mlongcalls
-
+KBUILD_CFLAGS += -pipe -mlongcalls -mtext-section-literals
 KBUILD_CFLAGS += $(call cc-option,-mforce-no-pic,)
+KBUILD_CFLAGS += $(call cc-option,-mno-serialize-volatile,)
+
+KBUILD_AFLAGS += -mlongcalls -mtext-section-literals
 
 ifneq ($(CONFIG_LD_NO_RELAX),)
-LDFLAGS := --no-relax
+KBUILD_LDFLAGS := --no-relax
 endif
 
-ifeq ($(shell echo __XTENSA_EB__ | $(CC) -E - | grep -v "\#"),1)
-CHECKFLAGS += -D__XTENSA_EB__
-KBUILD_CPPFLAGS += -DCONFIG_CPU_BIG_ENDIAN
-endif
-ifeq ($(shell echo __XTENSA_EL__ | $(CC) -E - | grep -v "\#"),1)
-CHECKFLAGS += -D__XTENSA_EL__
-KBUILD_CPPFLAGS += -DCONFIG_CPU_LITTLE_ENDIAN
-endif
+CHECKFLAGS += -D$(if $(CONFIG_CPU_BIG_ENDIAN),__XTENSA_EB__,__XTENSA_EL__)
 
 vardirs := $(patsubst %,arch/xtensa/variants/%/,$(variant-y))
 plfdirs := $(patsubst %,arch/xtensa/platforms/%/,$(platform-y))
 
-ifeq ($(KBUILD_SRC),)
-KBUILD_CPPFLAGS += $(patsubst %,-I%include,$(vardirs) $(plfdirs))
-else
 KBUILD_CPPFLAGS += $(patsubst %,-I$(srctree)/%include,$(vardirs) $(plfdirs))
-endif
 
 KBUILD_DEFCONFIG := iss_defconfig
 
@@ -83,30 +69,21 @@ LIBGCC := $(shell $(CC) $(KBUILD_CFLAGS) -print-libgcc-file-name)
 head-y		:= arch/xtensa/kernel/head.o
 core-y		+= arch/xtensa/kernel/ arch/xtensa/mm/
 core-y		+= $(buildvar) $(buildplf)
+core-y 		+= arch/xtensa/boot/dts/
 
 libs-y		+= arch/xtensa/lib/ $(LIBGCC)
-drivers-$(CONFIG_OPROFILE)	+= arch/xtensa/oprofile/
-
-ifneq ($(CONFIG_BUILTIN_DTB),"")
-core-$(CONFIG_OF) += arch/xtensa/boot/dts/
-endif
 
 boot		:= arch/xtensa/boot
 
-all: zImage
-
-bzImage : zImage
-
-zImage: vmlinux
+all Image zImage uImage xipImage: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $@
 
-%.dtb:
-	$(Q)$(MAKE) $(build)=$(boot)/dts $(boot)/dts/$@
-
-dtbs: scripts
-	$(Q)$(MAKE) $(build)=$(boot)/dts
+archheaders:
+	$(Q)$(MAKE) $(build)=arch/xtensa/kernel/syscalls all
 
 define archhelp
+  @echo '* Image       - Kernel ELF image with reset vector'
   @echo '* zImage      - Compressed kernel image (arch/xtensa/boot/images/zImage.*)'
-  @echo '  dtbs        - Build device tree blobs for enabled boards'
+  @echo '* uImage      - U-Boot wrapped image'
+  @echo '  xipImage    - XIP image'
 endef

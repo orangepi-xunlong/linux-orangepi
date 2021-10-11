@@ -21,7 +21,7 @@
 
 #if HALMAC_8822B_SUPPORT
 
-#define HALMAC_8822B_PWR_SEQ_VER  "V28"
+#define HALMAC_8822B_PWR_SEQ_VER  "V24"
 
 extern PHALMAC_WLAN_PWR_CFG halmac_8822b_card_disable_flow[];
 extern PHALMAC_WLAN_PWR_CFG halmac_8822b_card_enable_flow[];

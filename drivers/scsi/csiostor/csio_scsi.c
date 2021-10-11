@@ -147,9 +147,9 @@ csio_scsi_itnexus_loss_error(uint16_t error)
 	case FW_ERR_RDEV_LOST:
 	case FW_ERR_RDEV_LOGO:
 	case FW_ERR_RDEV_IMPL_LOGO:
-		return 1;
+		return true;
 	}
-	return 0;
+	return false;
 }
 
 /*
@@ -933,14 +933,14 @@ csio_scsis_aborting(struct csio_ioreq *req, enum csio_scsi_ev evt)
 		 *    abort for that I/O by the FW crossed each other.
 		 *    The FW returned FW_EINVAL. The original I/O would have
 		 *    returned with FW_SUCCESS or any other SCSI error.
-		 * 3. The FW couldnt sent the abort out on the wire, as there
+		 * 3. The FW couldn't sent the abort out on the wire, as there
 		 *    was an I-T nexus loss (link down, remote device logged
 		 *    out etc). FW sent back an appropriate IT nexus loss status
 		 *    for the abort.
 		 * 4. FW sent an abort, but abort timed out (remote device
 		 *    didnt respond). FW replied back with
 		 *    FW_SCSI_ABORT_TIMEDOUT.
-		 * 5. FW couldnt genuinely abort the request for some reason,
+		 * 5. FW couldn't genuinely abort the request for some reason,
 		 *    and sent us an error.
 		 *
 		 * The first 3 scenarios are treated as  succesful abort
@@ -1383,7 +1383,7 @@ csio_device_reset(struct device *dev,
 		return -EINVAL;
 
 	/* Delete NPIV lnodes */
-	 csio_lnodes_exit(hw, 1);
+	csio_lnodes_exit(hw, 1);
 
 	/* Block upper IOs */
 	csio_lnodes_block_request(hw);
@@ -1713,8 +1713,11 @@ csio_scsi_err_handler(struct csio_hw *hw, struct csio_ioreq *req)
 	}
 
 out:
-	if (req->nsge > 0)
+	if (req->nsge > 0) {
 		scsi_dma_unmap(cmnd);
+		if (req->dcopy && (host_status == DID_OK))
+			host_status = csio_scsi_copy_to_sgl(hw, req);
+	}
 
 	cmnd->result = (((host_status) << 16) | scsi_status);
 	cmnd->scsi_done(cmnd);
@@ -1780,16 +1783,10 @@ csio_queuecommand(struct Scsi_Host *host, struct scsi_cmnd *cmnd)
 	int nsge = 0;
 	int rv = SCSI_MLQUEUE_HOST_BUSY, nr;
 	int retval;
-	int cpu;
 	struct csio_scsi_qset *sqset;
 	struct fc_rport *rport = starget_to_rport(scsi_target(cmnd->device));
 
-	if (!blk_rq_cpu_valid(cmnd->request))
-		cpu = smp_processor_id();
-	else
-		cpu = cmnd->request->cpu;
-
-	sqset = &hw->sqset[ln->portid][cpu];
+	sqset = &hw->sqset[ln->portid][blk_mq_rq_cpu(cmnd->request)];
 
 	nr = fc_remote_port_chkready(rport);
 	if (nr) {
@@ -1862,7 +1859,7 @@ csio_queuecommand(struct Scsi_Host *host, struct scsi_cmnd *cmnd)
 	spin_unlock_irqrestore(&hw->lock, flags);
 
 	if (retval != 0) {
-		csio_err(hw, "ioreq: %p couldnt be started, status:%d\n",
+		csio_err(hw, "ioreq: %p couldn't be started, status:%d\n",
 			 ioreq, retval);
 		CSIO_INC_STATS(scsim, n_busy_error);
 		goto err_put_req;
@@ -1990,15 +1987,15 @@ inval_scmnd:
 	/* FW successfully aborted the request */
 	if (host_byte(cmnd->result) == DID_REQUEUE) {
 		csio_info(hw,
-			"Aborted SCSI command to (%d:%llu) serial#:0x%lx\n",
+			"Aborted SCSI command to (%d:%llu) tag %u\n",
 			cmnd->device->id, cmnd->device->lun,
-			cmnd->serial_number);
+			cmnd->request->tag);
 		return SUCCESS;
 	} else {
 		csio_info(hw,
-			"Failed to abort SCSI command, (%d:%llu) serial#:0x%lx\n",
+			"Failed to abort SCSI command, (%d:%llu) tag %u\n",
 			cmnd->device->id, cmnd->device->lun,
-			cmnd->serial_number);
+			cmnd->request->tag);
 		return FAILED;
 	}
 }
@@ -2270,6 +2267,7 @@ struct scsi_host_template csio_fcoe_shost_template = {
 	.name			= CSIO_DRV_DESC,
 	.proc_name		= KBUILD_MODNAME,
 	.queuecommand		= csio_queuecommand,
+	.eh_timed_out		= fc_eh_timed_out,
 	.eh_abort_handler	= csio_eh_abort_handler,
 	.eh_device_reset_handler = csio_eh_lun_reset_handler,
 	.slave_alloc		= csio_slave_alloc,
@@ -2279,7 +2277,6 @@ struct scsi_host_template csio_fcoe_shost_template = {
 	.this_id		= -1,
 	.sg_tablesize		= CSIO_SCSI_MAX_SGE,
 	.cmd_per_lun		= CSIO_MAX_CMD_PER_LUN,
-	.use_clustering		= ENABLE_CLUSTERING,
 	.shost_attrs		= csio_fcoe_lport_attrs,
 	.max_sectors		= CSIO_MAX_SECTOR_SIZE,
 };
@@ -2289,6 +2286,7 @@ struct scsi_host_template csio_fcoe_shost_vport_template = {
 	.name			= CSIO_DRV_DESC,
 	.proc_name		= KBUILD_MODNAME,
 	.queuecommand		= csio_queuecommand,
+	.eh_timed_out		= fc_eh_timed_out,
 	.eh_abort_handler	= csio_eh_abort_handler,
 	.eh_device_reset_handler = csio_eh_lun_reset_handler,
 	.slave_alloc		= csio_slave_alloc,
@@ -2298,7 +2296,6 @@ struct scsi_host_template csio_fcoe_shost_vport_template = {
 	.this_id		= -1,
 	.sg_tablesize		= CSIO_SCSI_MAX_SGE,
 	.cmd_per_lun		= CSIO_MAX_CMD_PER_LUN,
-	.use_clustering		= ENABLE_CLUSTERING,
 	.shost_attrs		= csio_fcoe_vport_attrs,
 	.max_sectors		= CSIO_MAX_SECTOR_SIZE,
 };
@@ -2347,8 +2344,8 @@ csio_scsi_alloc_ddp_bufs(struct csio_scsim *scm, struct csio_hw *hw,
 		}
 
 		/* Allocate Dma buffers for DDP */
-		ddp_desc->vaddr = pci_alloc_consistent(hw->pdev, unit_size,
-							&ddp_desc->paddr);
+		ddp_desc->vaddr = dma_alloc_coherent(&hw->pdev->dev, unit_size,
+				&ddp_desc->paddr, GFP_KERNEL);
 		if (!ddp_desc->vaddr) {
 			csio_err(hw,
 				 "SCSI response DMA buffer (ddp) allocation"
@@ -2370,8 +2367,8 @@ no_mem:
 	list_for_each(tmp, &scm->ddp_freelist) {
 		ddp_desc = (struct csio_dma_buf *) tmp;
 		tmp = csio_list_prev(tmp);
-		pci_free_consistent(hw->pdev, ddp_desc->len, ddp_desc->vaddr,
-				    ddp_desc->paddr);
+		dma_free_coherent(&hw->pdev->dev, ddp_desc->len,
+				  ddp_desc->vaddr, ddp_desc->paddr);
 		list_del_init(&ddp_desc->list);
 		kfree(ddp_desc);
 	}
@@ -2397,8 +2394,8 @@ csio_scsi_free_ddp_bufs(struct csio_scsim *scm, struct csio_hw *hw)
 	list_for_each(tmp, &scm->ddp_freelist) {
 		ddp_desc = (struct csio_dma_buf *) tmp;
 		tmp = csio_list_prev(tmp);
-		pci_free_consistent(hw->pdev, ddp_desc->len, ddp_desc->vaddr,
-				    ddp_desc->paddr);
+		dma_free_coherent(&hw->pdev->dev, ddp_desc->len,
+				  ddp_desc->vaddr, ddp_desc->paddr);
 		list_del_init(&ddp_desc->list);
 		kfree(ddp_desc);
 	}
@@ -2443,7 +2440,7 @@ csio_scsim_init(struct csio_scsim *scm, struct csio_hw *hw)
 
 		/* Allocate Dma buffers for Response Payload */
 		dma_buf = &ioreq->dma_buf;
-		dma_buf->vaddr = pci_pool_alloc(hw->scsi_pci_pool, GFP_KERNEL,
+		dma_buf->vaddr = dma_pool_alloc(hw->scsi_dma_pool, GFP_KERNEL,
 						&dma_buf->paddr);
 		if (!dma_buf->vaddr) {
 			csio_err(hw,
@@ -2483,7 +2480,7 @@ free_ioreq:
 		ioreq = (struct csio_ioreq *)tmp;
 
 		dma_buf = &ioreq->dma_buf;
-		pci_pool_free(hw->scsi_pci_pool, dma_buf->vaddr,
+		dma_pool_free(hw->scsi_dma_pool, dma_buf->vaddr,
 			      dma_buf->paddr);
 
 		kfree(ioreq);
@@ -2514,7 +2511,7 @@ csio_scsim_exit(struct csio_scsim *scm)
 		ioreq = (struct csio_ioreq *)tmp;
 
 		dma_buf = &ioreq->dma_buf;
-		pci_pool_free(scm->hw->scsi_pci_pool, dma_buf->vaddr,
+		dma_pool_free(scm->hw->scsi_dma_pool, dma_buf->vaddr,
 			      dma_buf->paddr);
 
 		kfree(ioreq);

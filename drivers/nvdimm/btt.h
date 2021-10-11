@@ -1,15 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Block Translation Table library
  * Copyright (c) 2014-2015, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 #ifndef _LINUX_BTT_H
@@ -38,6 +30,13 @@
 
 #define IB_FLAG_ERROR 0x00000001
 #define IB_FLAG_ERROR_MASK 0x00000001
+
+#define ent_lba(ent) (ent & MAP_LBA_MASK)
+#define ent_e_flag(ent) (!!(ent & MAP_ERR_MASK))
+#define ent_z_flag(ent) (!!(ent & MAP_TRIM_MASK))
+#define set_e_flag(ent) (ent |= MAP_ERR_MASK)
+/* 'normal' is both e and z flags set */
+#define ent_normal(ent) (ent_e_flag(ent) && ent_z_flag(ent))
 
 enum btt_init_state {
 	INIT_UNCHECKED = 0,
@@ -119,6 +118,7 @@ struct free_entry {
 	u32 block;
 	u8 sub;
 	u8 seq;
+	u8 has_err;
 };
 
 struct aligned_lock {
@@ -145,6 +145,7 @@ struct aligned_lock {
  *			handle incoming writes.
  * @version_major:	Metadata layout version major.
  * @version_minor:	Metadata layout version minor.
+ * @sector_size:	The Linux sector size - 512 or 4096
  * @nextoff:		Offset in bytes to the start of the next arena.
  * @infooff:		Offset in bytes to the info block of this arena.
  * @dataoff:		Offset in bytes to the data area of this arena.
@@ -158,6 +159,7 @@ struct aligned_lock {
  * @list:		List head for list of arenas
  * @debugfs_dir:	Debugfs dentry
  * @flags:		Arena flags - may signify error states.
+ * @err_lock:		Mutex for synchronizing error clearing.
  * @log_index:		Indices of the valid log entries in a log_group
  *
  * arena_info is a per-arena handle. Once an arena is narrowed down for an
@@ -173,6 +175,7 @@ struct arena_info {
 	u32 nfree;
 	u16 version_major;
 	u16 version_minor;
+	u32 sector_size;
 	/* Byte offsets to the different on-media structures */
 	u64 nextoff;
 	u64 infooff;
@@ -189,8 +192,11 @@ struct arena_info {
 	struct dentry *debugfs_dir;
 	/* Arena flags */
 	u32 flags;
+	struct mutex err_lock;
 	int log_index[2];
 };
+
+struct badblocks;
 
 /**
  * struct btt - handle for a BTT instance
@@ -209,6 +215,7 @@ struct arena_info {
  * @init_lock:		Mutex used for the BTT initialization
  * @init_state:		Flag describing the initialization state for the BTT
  * @num_arenas:		Number of arenas in the BTT instance
+ * @phys_bb:		Pointer to the namespace's badblocks structure
  */
 struct btt {
 	struct gendisk *btt_disk;
@@ -224,8 +231,11 @@ struct btt {
 	struct mutex init_lock;
 	int init_state;
 	int num_arenas;
+	struct badblocks *phys_bb;
 };
 
 bool nd_btt_arena_is_valid(struct nd_btt *nd_btt, struct btt_sb *super);
+int nd_btt_version(struct nd_btt *nd_btt, struct nd_namespace_common *ndns,
+		struct btt_sb *btt_sb);
 
 #endif

@@ -60,10 +60,10 @@ phydm_la_buffer_allocate(
 		if (!adc_smp_buf->octet)	{
 #endif
 			ret = false;
-		} else {
+		} else	{
 			adc_smp_buf->length = adc_smp_buf->buffer_size;
 			ret = true;
-		}
+		}	
 	}
 
 	return ret;
@@ -99,7 +99,7 @@ phydm_la_get_tx_pkt_buf(
 	#if (RTL8197F_SUPPORT)
 	if (p_dm->support_ic_type & ODM_RTL8197F) {
 		odm_set_bb_reg(p_dm, 0x7c0, BIT(0), 0x0);
-
+		
 		/*Stop DMA*/
 		backup_dma = odm_get_mac_reg(p_dm, 0x300, MASKLWORD);
 		odm_set_mac_reg(p_dm, 0x300, 0x7fff, 0x7fff);
@@ -120,7 +120,7 @@ phydm_la_get_tx_pkt_buf(
 	} else	 {
 		addr = adc_smp_buf->start_pos;
 		addr_8byte = addr >> 3;
-
+		
 		if (addr_8byte > finish_addr)
 			smp_number = addr_8byte - finish_addr;
 		else
@@ -144,7 +144,7 @@ phydm_la_get_tx_pkt_buf(
 			dbg_print("%08x%08x\n", data_h, data_l);
 		}
 	} else {
-
+	
 		i = 0;
 		while (addr != (finish_addr << 3)) {
 			if (page != (addr >> 12)) {
@@ -182,7 +182,7 @@ phydm_la_get_tx_pkt_buf(
 				break;
 		}
 		dbg_print("smp_cnt = ((%d))\n", smp_cnt);
-
+		
 		#if (DM_ODM_SUPPORT_TYPE & ODM_WIN)
 		RT_TRACE_EX(COMP_LA_MODE, DBG_LOUD, ("smp_cnt = ((%d))\n", smp_cnt));
 		#endif
@@ -318,7 +318,7 @@ phydm_adc_smp_start(
 	if (adc_smp->la_count == 0) {
 		dbg_print("LA Dump finished ---------->\n\n\n");
 		phydm_release_bb_dbg_port(p_dm);
-
+		
 		if ((p_dm->support_ic_type & ODM_RTL8821C) && (p_dm->cut_version >= ODM_CUT_B))
 			odm_set_bb_reg(p_dm, 0x95c, BIT(23), 0);
 
@@ -594,7 +594,7 @@ phydm_la_mode_bb_setting(
 	if (phydm_set_bb_dbg_port(p_dm, BB_DBGPORT_PRIORITY_3, dbg_port)) {
 		dbg_print("Set dbg_port((0x%x)) success\n", dbg_port);
 	}
-
+	
 	if (p_dm->support_ic_type & ODM_IC_11AC_SERIES) {
 
 		if (trig_mode == PHYDM_ADC_RF0_TRIG)
@@ -602,7 +602,7 @@ phydm_la_mode_bb_setting(
 		else if (trig_mode == PHYDM_ADC_RF1_TRIG)
 			dbg_port_header_sel = 8;	/*DBGOUT_RFC_b[31:0]*/
 		else if ((trig_mode == PHYDM_ADC_BB_TRIG) || (trig_mode == PHYDM_ADC_MAC_TRIG)) {
-
+			
 			if (adc_smp->la_mac_mask_or_hdr_sel <= 0xf) {
 				dbg_port_header_sel = adc_smp->la_mac_mask_or_hdr_sel;
 			} else {

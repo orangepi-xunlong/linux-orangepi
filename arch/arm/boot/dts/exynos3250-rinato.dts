@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Samsung's Exynos3250 based Rinato board device tree source
  *
@@ -6,10 +7,6 @@
  *
  * Device tree source file for Samsung's Rinato board which is based on
  * Samsung Exynos3250 SoC.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 /dts-v1/;
@@ -27,20 +24,24 @@
 		i2c7 = &i2c_max77836;
 	};
 
-	memory@40000000 {
-		device_type = "memory";
-		reg =  <0x40000000 0x1ff00000>;
+	chosen {
+		stdout-path = &serial_1;
 	};
 
-	firmware@0205F000 {
+	memory@40000000 {
+		device_type = "memory";
+		reg = <0x40000000 0x1ff00000>;
+	};
+
+	firmware@205f000 {
 		compatible = "samsung,secure-firmware";
 		reg = <0x0205F000 0x1000>;
 	};
 
-	gpio_keys {
+	gpio-keys {
 		compatible = "gpio-keys";
 
-		power_key {
+		power-key {
 			gpios = <&gpx2 7 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_POWER>;
 			label = "power key";
@@ -49,16 +50,22 @@
 		};
 	};
 
+	wlan_pwrseq: mshc1-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		reset-gpios = <&gpe0 4 GPIO_ACTIVE_LOW>;
+	};
+
 	i2c_max77836: i2c-gpio-0 {
 		compatible = "i2c-gpio";
-		gpios = <&gpd0 2 GPIO_ACTIVE_HIGH>, <&gpd0 3 GPIO_ACTIVE_HIGH>;
+		sda-gpios = <&gpd0 2 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpd0 3 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
 		#address-cells = <1>;
 		#size-cells = <0>;
 
-		max77836: subpmic@25 {
+		max77836: pmic@25 {
 			compatible = "maxim,max77836";
 			interrupt-parent = <&gpx1>;
-			interrupts = <5 0>;
+			interrupts = <5 IRQ_TYPE_NONE>;
 			reg = <0x25>;
 			wakeup-source;
 
@@ -115,11 +122,13 @@
 			cooling-maps {
 				map0 {
 					/* Corresponds to 500MHz */
-					cooling-device = <&cpu0 5 5>;
+					cooling-device = <&cpu0 5 5>,
+							 <&cpu1 5 5>;
 				};
 				map1 {
 					/* Corresponds to 200MHz */
-					cooling-device = <&cpu0 8 8>;
+					cooling-device = <&cpu0 8 8>,
+							 <&cpu1 8 8>;
 				};
 			};
 		};
@@ -133,7 +142,7 @@
 	assigned-clock-rates = <6000000>;
 
 	thermistor-ap {
-		compatible = "ntc,ncp15wb473";
+		compatible = "murata,ncp15wb473";
 		pullup-uv = <1800000>;
 		pullup-ohm = <100000>;
 		pulldown-ohm = <100000>;
@@ -141,7 +150,7 @@
 	};
 
 	thermistor-battery {
-		compatible = "ntc,ncp15wb473";
+		compatible = "murata,ncp15wb473";
 		pullup-uv = <1800000>;
 		pullup-ohm = <100000>;
 		pulldown-ohm = <100000>;
@@ -196,6 +205,10 @@
 	status = "okay";
 };
 
+&cmu {
+	clocks = <&xusbxti>;
+};
+
 &cpu0 {
 	cpu0-supply = <&buck2_reg>;
 };
@@ -215,59 +228,18 @@
 &dsi_0 {
 	vddcore-supply = <&ldo6_reg>;
 	vddio-supply = <&ldo6_reg>;
+	samsung,burst-clock-frequency = <250000000>;
+	samsung,esc-clock-frequency = <20000000>;
 	samsung,pll-clock-frequency = <24000000>;
 	status = "okay";
-
-	ports {
-		#address-cells = <1>;
-		#size-cells = <0>;
-
-		port@1 {
-			reg = <1>;
-
-			dsi_out: endpoint {
-				remote-endpoint = <&dsi_in>;
-				samsung,burst-clock-frequency = <250000000>;
-				samsung,esc-clock-frequency = <20000000>;
-			};
-		};
-	};
 
 	panel@0 {
 		compatible = "samsung,s6e63j0x03";
 		reg = <0>;
 		vdd3-supply = <&ldo16_reg>;
 		vci-supply = <&ldo20_reg>;
-		reset-gpios = <&gpe0 1 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpe0 1 GPIO_ACTIVE_LOW>;
 		te-gpios = <&gpx0 6 GPIO_ACTIVE_HIGH>;
-		power-on-delay= <30>;
-		power-off-delay= <120>;
-		reset-delay = <5>;
-		init-delay = <100>;
-		flip-horizontal;
-		flip-vertical;
-		panel-width-mm = <29>;
-		panel-height-mm = <29>;
-
-		display-timings {
-			timing-0 {
-				clock-frequency = <4600000>;
-				hactive = <320>;
-				vactive = <320>;
-				hfront-porch = <1>;
-				hback-porch = <1>;
-				hsync-len = <1>;
-				vfront-porch = <150>;
-				vback-porch = <1>;
-				vsync-len = <2>;
-			};
-		};
-
-		port {
-			dsi_in: endpoint {
-				remote-endpoint = <&dsi_out>;
-			};
-		};
 	};
 };
 
@@ -282,6 +254,11 @@
 	};
 };
 
+&gpu {
+	mali-supply = <&buck3_reg>;
+	status = "okay";
+};
+
 &i2c_0 {
 	#address-cells = <1>;
 	#size-cells = <0>;
@@ -290,10 +267,10 @@
 	samsung,i2c-max-bus-freq = <100000>;
 	status = "okay";
 
-	s2mps14_pmic@66 {
+	pmic@66 {
 		compatible = "samsung,s2mps14-pmic";
 		interrupt-parent = <&gpx0>;
-		interrupts = <7 0>;
+		interrupts = <7 IRQ_TYPE_LEVEL_LOW>;
 		reg = <0x66>;
 		wakeup-source;
 
@@ -624,7 +601,7 @@
 	fuelgauge@36 {
 		compatible = "maxim,max77836-battery";
 		interrupt-parent = <&gpx1>;
-		interrupts = <2 8>;
+		interrupts = <2 IRQ_TYPE_LEVEL_LOW>;
 		reg = <0x36>;
 	};
 };
@@ -638,9 +615,6 @@
 };
 
 &mshc_0 {
-	#address-cells = <1>;
-	#size-cells = <0>;
-	num-slots = <1>;
 	broken-cd;
 	non-removable;
 	cap-mmc-highspeed;
@@ -649,7 +623,7 @@
 	card-detect-delay = <200>;
 	vmmc-supply = <&ldo12_reg>;
 	clock-frequency = <100000000>;
-	clock-freq-min-max = <400000 100000000>;
+	max-frequency = <100000000>;
 	samsung,dw-mshc-ciu-div = <1>;
 	samsung,dw-mshc-sdr-timing = <0 1>;
 	samsung,dw-mshc-ddr-timing = <1 2>;
@@ -659,10 +633,48 @@
 	status = "okay";
 };
 
+&mshc_1 {
+	status = "okay";
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	non-removable;
+	cap-sd-highspeed;
+	cap-sdio-irq;
+	keep-power-in-suspend;
+	samsung,dw-mshc-ciu-div = <1>;
+	samsung,dw-mshc-sdr-timing = <0 1>;
+	samsung,dw-mshc-ddr-timing = <1 2>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sd1_clk &sd1_cmd &sd1_bus1 &sd1_bus4>;
+	bus-width = <4>;
+
+	mmc-pwrseq = <&wlan_pwrseq>;
+
+	brcmf: wifi@1 {
+		compatible = "brcm,bcm4334-fmac";
+		reg = <1>;
+
+		interrupt-parent = <&gpx1>;
+		interrupts = <1 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "host-wake";
+	};
+};
+
 &serial_0 {
 	assigned-clocks = <&cmu CLK_SCLK_UART0>;
 	assigned-clock-rates = <100000000>;
 	status = "okay";
+
+	bluetooth {
+		compatible = "brcm,bcm4330-bt";
+		max-speed = <3000000>;
+		shutdown-gpios = <&gpe0 0 GPIO_ACTIVE_HIGH>;
+		device-wakeup-gpios = <&gpx3 1 GPIO_ACTIVE_HIGH>;
+		host-wakeup-gpios = <&gpx2 6 GPIO_ACTIVE_HIGH>;
+		clocks = <&s2mps14_osc S2MPS11_CLK_BT>;
+	};
 };
 
 &serial_1 {

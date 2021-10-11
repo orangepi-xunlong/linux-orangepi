@@ -1,9 +1,7 @@
+/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-3-Clause) */
 /* QLogic qed NIC Driver
- * Copyright (c) 2015 QLogic Corporation
- *
- * This software is available under the terms of the GNU General Public License
- * (GPL) Version 2, available from the file COPYING in the main directory of
- * this source tree.
+ * Copyright (c) 2015-2017  QLogic Corporation
+ * Copyright (c) 2019-2020 Marvell International Ltd.
  */
 
 #ifndef _QED_INIT_OPS_H
@@ -55,14 +53,6 @@ int qed_init_alloc(struct qed_hwfn *p_hwfn);
  * @param p_hwfn
  */
 void qed_init_free(struct qed_hwfn *p_hwfn);
-
-/**
- * @brief qed_init_clear_rt_data - Clears the runtime init array.
- *
- *
- * @param p_hwfn
- */
-void qed_init_clear_rt_data(struct qed_hwfn *p_hwfn);
 
 /**
  * @brief qed_init_store_rt_reg - Store a configuration value in the RT array.

@@ -1,22 +1,5 @@
-/* Intel(R) Ethernet Switch Host Interface Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- */
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 2013 - 2019 Intel Corporation. */
 
 #include "fm10k.h"
 
@@ -53,7 +36,7 @@ static int fm10k_dcbnl_ieee_getets(struct net_device *dev, struct ieee_ets *ets)
 static int fm10k_dcbnl_ieee_setets(struct net_device *dev, struct ieee_ets *ets)
 {
 	u8 num_tc = 0;
-	int i, err;
+	int i;
 
 	/* verify type and determine num_tcs needed */
 	for (i = 0; i < IEEE_8021QAZ_MAX_TCS; i++) {
@@ -74,7 +57,7 @@ static int fm10k_dcbnl_ieee_setets(struct net_device *dev, struct ieee_ets *ets)
 
 	/* update TC hardware mapping if necessary */
 	if (num_tc != netdev_get_num_tc(dev)) {
-		err = fm10k_setup_tc(dev, num_tc);
+		int err = fm10k_setup_tc(dev, num_tc);
 		if (err)
 			return err;
 	}
@@ -122,7 +105,7 @@ static int fm10k_dcbnl_ieee_setpfc(struct net_device *dev, struct ieee_pfc *pfc)
 }
 
 /**
- * fm10k_dcbnl_ieee_getdcbx - get the DCBX configuration for the device
+ * fm10k_dcbnl_getdcbx - get the DCBX configuration for the device
  * @dev: netdev interface for the device
  *
  * Returns that we support only IEEE DCB for this interface
@@ -133,7 +116,7 @@ static u8 fm10k_dcbnl_getdcbx(struct net_device __always_unused *dev)
 }
 
 /**
- * fm10k_dcbnl_ieee_setdcbx - get the DCBX configuration for the device
+ * fm10k_dcbnl_setdcbx - get the DCBX configuration for the device
  * @dev: netdev interface for the device
  * @mode: new mode for this device
  *

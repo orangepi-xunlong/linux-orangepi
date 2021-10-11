@@ -1034,11 +1034,14 @@ static int FlashPoint_ProbeHostAdapter(struct sccb_mgr_info *pCardInfo)
 			temp6 >>= 1;
 			switch (temp & 0x3) {
 			case AUTO_RATE_20:	/* Synchronous, 20 mega-transfers/second */
-				temp6 |= 0x8000;	/* Fall through */
+				temp6 |= 0x8000;
+				fallthrough;
 			case AUTO_RATE_10:	/* Synchronous, 10 mega-transfers/second */
-				temp5 |= 0x8000;	/* Fall through */
+				temp5 |= 0x8000;
+				fallthrough;
 			case AUTO_RATE_05:	/* Synchronous, 5 mega-transfers/second */
-				temp2 |= 0x8000;	/* Fall through */
+				temp2 |= 0x8000;
+				fallthrough;
 			case AUTO_RATE_00:	/* Asynchronous */
 				break;
 			}
@@ -1612,7 +1615,6 @@ static int FlashPoint_AbortCCB(void *pCurrCard, struct sccb *p_Sccb)
 
 	unsigned char thisCard;
 	CALL_BK_FN callback;
-	unsigned char TID;
 	struct sccb *pSaveSCCB;
 	struct sccb_mgr_tar_info *currTar_Info;
 
@@ -1649,9 +1651,6 @@ static int FlashPoint_AbortCCB(void *pCurrCard, struct sccb *p_Sccb)
 			}
 
 			else {
-
-				TID = p_Sccb->TargID;
-
 				if (p_Sccb->Sccb_tag) {
 					MDISABLE_INT(ioport);
 					if (((struct sccb_card *)pCurrCard)->
@@ -2944,7 +2943,7 @@ static void FPT_sdecm(unsigned char message, u32 port, unsigned char p_card)
 			}
 
 			if (currSCCB->Lun == 0x00) {
-				if ((currSCCB->Sccb_scsistat == SELECT_SN_ST)) {
+				if (currSCCB->Sccb_scsistat == SELECT_SN_ST) {
 
 					currTar_Info->TarStatus |=
 					    (unsigned char)SYNC_SUPPORTED;
@@ -2953,8 +2952,8 @@ static void FPT_sdecm(unsigned char message, u32 port, unsigned char p_card)
 					    ~EE_SYNC_MASK;
 				}
 
-				else if ((currSCCB->Sccb_scsistat ==
-					  SELECT_WN_ST)) {
+				else if (currSCCB->Sccb_scsistat ==
+					  SELECT_WN_ST) {
 
 					currTar_Info->TarStatus =
 					    (currTar_Info->
@@ -4531,7 +4530,7 @@ static void FPT_phaseBusFree(u32 port, unsigned char p_card)
  *
  * Function: Auto Load Default Map
  *
- * Description: Load the Automation RAM with the defualt map values.
+ * Description: Load the Automation RAM with the default map values.
  *
  *---------------------------------------------------------------------*/
 static void FPT_autoLoadDefaultMap(u32 p_port)

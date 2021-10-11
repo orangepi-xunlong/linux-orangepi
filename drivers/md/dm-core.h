@@ -11,7 +11,9 @@
 
 #include <linux/kthread.h>
 #include <linux/ktime.h>
+#include <linux/genhd.h>
 #include <linux/blk-mq.h>
+#include <linux/keyslot-manager.h>
 
 #include <trace/events/block.h>
 
@@ -25,11 +27,16 @@ struct dm_kobject_holder {
 };
 
 /*
- * DM core internal structure that used directly by dm.c and dm-rq.c
- * DM targets must _not_ deference a mapped_device to directly access its members!
+ * DM core internal structures used directly by dm.c, dm-rq.c and dm-table.c.
+ * DM targets must _not_ deference a mapped_device or dm_table to directly
+ * access their members!
  */
+
 struct mapped_device {
 	struct mutex suspend_lock;
+
+	struct mutex table_devices_lock;
+	struct list_head table_devices;
 
 	/*
 	 * The current mapping (struct dm_table *).
@@ -38,17 +45,14 @@ struct mapped_device {
 	 */
 	void __rcu *map;
 
-	struct list_head table_devices;
-	struct mutex table_devices_lock;
-
 	unsigned long flags;
 
-	struct request_queue *queue;
-	int numa_node_id;
-
-	unsigned type;
 	/* Protect queue and type against concurrent access. */
 	struct mutex type_lock;
+	enum dm_queue_mode type;
+
+	int numa_node_id;
+	struct request_queue *queue;
 
 	atomic_t holders;
 	atomic_t open_count;
@@ -56,19 +60,19 @@ struct mapped_device {
 	struct dm_target *immutable_target;
 	struct target_type *immutable_target_type;
 
-	struct gendisk *disk;
 	char name[16];
-
-	void *interface_ptr;
+	struct gendisk *disk;
+	struct dax_device *dax_dev;
 
 	/*
 	 * A list of ios that arrived while we were suspended.
 	 */
-	atomic_t pending[2];
-	wait_queue_head_t wait;
 	struct work_struct work;
+	wait_queue_head_t wait;
 	spinlock_t deferred_lock;
 	struct bio_list deferred;
+
+	void *interface_ptr;
 
 	/*
 	 * Event handling.
@@ -83,57 +87,91 @@ struct mapped_device {
 	unsigned internal_suspend_count;
 
 	/*
+	 * io objects are allocated from here.
+	 */
+	struct bio_set io_bs;
+	struct bio_set bs;
+
+	/*
 	 * Processing queue (flush)
 	 */
 	struct workqueue_struct *wq;
 
-	/*
-	 * io objects are allocated from here.
-	 */
-	mempool_t *io_pool;
-	mempool_t *rq_pool;
-
-	struct bio_set *bs;
-
-	/*
-	 * freeze/thaw support require holding onto a super block
-	 */
-	struct super_block *frozen_sb;
-
 	/* forced geometry settings */
 	struct hd_geometry geometry;
-
-	struct block_device *bdev;
 
 	/* kobject and completion */
 	struct dm_kobject_holder kobj_holder;
 
-	/* zero-length flush that will be cloned and submitted to targets */
-	struct bio flush_bio;
+	int swap_bios;
+	struct semaphore swap_bios_semaphore;
+	struct mutex swap_bios_lock;
 
 	struct dm_stats stats;
 
-	struct kthread_worker kworker;
-	struct task_struct *kworker_task;
-
-	/* for request-based merge heuristic in dm_request_fn() */
-	unsigned seq_rq_merge_deadline_usecs;
-	int last_rq_rw;
-	sector_t last_rq_pos;
-	ktime_t last_rq_start_time;
-
 	/* for blk-mq request-based DM support */
 	struct blk_mq_tag_set *tag_set;
-	bool use_blk_mq:1;
 	bool init_tio_pdu:1;
 
 	struct srcu_struct io_barrier;
 };
 
-void dm_init_md_queue(struct mapped_device *md);
-void dm_init_normal_md_queue(struct mapped_device *md);
-int md_in_flight(struct mapped_device *md);
+void disable_discard(struct mapped_device *md);
 void disable_write_same(struct mapped_device *md);
+void disable_write_zeroes(struct mapped_device *md);
+
+static inline sector_t dm_get_size(struct mapped_device *md)
+{
+	return get_capacity(md->disk);
+}
+
+static inline struct dm_stats *dm_get_stats(struct mapped_device *md)
+{
+	return &md->stats;
+}
+
+#define DM_TABLE_MAX_DEPTH 16
+
+struct dm_table {
+	struct mapped_device *md;
+	enum dm_queue_mode type;
+
+	/* btree table */
+	unsigned int depth;
+	unsigned int counts[DM_TABLE_MAX_DEPTH]; /* in nodes */
+	sector_t *index[DM_TABLE_MAX_DEPTH];
+
+	unsigned int num_targets;
+	unsigned int num_allocated;
+	sector_t *highs;
+	struct dm_target *targets;
+
+	struct target_type *immutable_target_type;
+
+	bool integrity_supported:1;
+	bool singleton:1;
+	unsigned integrity_added:1;
+
+	/*
+	 * Indicates the rw permissions for the new logical
+	 * device.  This should be a combination of FMODE_READ
+	 * and FMODE_WRITE.
+	 */
+	fmode_t mode;
+
+	/* a list of devices used by this table */
+	struct list_head devices;
+
+	/* events get handed up using this callback */
+	void (*event_fn)(void *);
+	void *event_context;
+
+	struct dm_md_mempools *mempools;
+
+#ifdef CONFIG_BLK_INLINE_ENCRYPTION
+	struct blk_keyslot_manager *ksm;
+#endif
+};
 
 static inline struct completion *dm_get_completion_from_kobject(struct kobject *kobj)
 {
@@ -146,5 +184,9 @@ static inline bool dm_message_test_buffer_overflow(char *result, unsigned maxlen
 {
 	return !maxlen || strlen(result) + 1 >= maxlen;
 }
+
+extern atomic_t dm_global_event_nr;
+extern wait_queue_head_t dm_global_eventq;
+void dm_issue_global_event(void);
 
 #endif

@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *	LED Flash class driver for the AAT1290
  *	1.5A Step-Up Current Regulator for Flash LEDs
  *
  *	Copyright (C) 2015, Samsung Electronics Co., Ltd.
  *	Author: Jacek Anaszewski <j.anaszewski@samsung.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
  */
 
 #include <linux/delay.h>
@@ -45,6 +42,8 @@
 #define AAT1290_FLASH_TM_NUM_LEVELS	16
 #define AAT1290_MM_CURRENT_SCALE_SIZE	15
 
+#define AAT1290_NAME			"aat1290"
+
 
 struct aat1290_led_config_data {
 	/* maximum LED current in movie mode */
@@ -78,7 +77,6 @@ struct aat1290_led {
 	int *mm_current_scale;
 	/* device mode */
 	bool movie_mode;
-
 	/* brightness cache */
 	unsigned int torch_brightness;
 };
@@ -218,7 +216,6 @@ static int aat1290_led_parse_dt(struct aat1290_led *led,
 			struct aat1290_led_config_data *cfg,
 			struct device_node **sub_node)
 {
-	struct led_classdev *led_cdev = &led->fled_cdev.led_cdev;
 	struct device *dev = &led->pdev->dev;
 	struct device_node *child_node;
 #if IS_ENABLED(CONFIG_V4L2_FLASH_LED_CLASS)
@@ -251,14 +248,11 @@ static int aat1290_led_parse_dt(struct aat1290_led *led,
 	}
 #endif
 
-	child_node = of_get_next_available_child(dev->of_node, NULL);
+	child_node = of_get_next_available_child(dev_of_node(dev), NULL);
 	if (!child_node) {
 		dev_err(dev, "No DT child node found for connected LED.\n");
 		return -EINVAL;
 	}
-
-	led_cdev->name = of_get_property(child_node, "label", NULL) ? :
-						child_node->name;
 
 	ret = of_property_read_u32(child_node, "led-max-microamp",
 				&cfg->max_mm_current);
@@ -314,8 +308,10 @@ static void aat1290_led_validate_mm_current(struct aat1290_led *led,
 static int init_mm_current_scale(struct aat1290_led *led,
 			struct aat1290_led_config_data *cfg)
 {
-	int max_mm_current_percent[] = { 20, 22, 25, 28, 32, 36, 40, 45, 50, 56,
-						63, 71, 79, 89, 100 };
+	static const int max_mm_current_percent[] = {
+		20, 22, 25, 28, 32, 36, 40, 45, 50, 56,
+		63, 71, 79, 89, 100
+	};
 	int i, max_mm_current =
 			AAT1290_MAX_MM_CURRENT(cfg->max_flash_current);
 
@@ -429,10 +425,10 @@ static void aat1290_init_v4l2_flash_config(struct aat1290_led *led,
 	struct led_classdev *led_cdev = &led->fled_cdev.led_cdev;
 	struct led_flash_setting *s;
 
-	strlcpy(v4l2_sd_cfg->dev_name, led_cdev->name,
+	strlcpy(v4l2_sd_cfg->dev_name, led_cdev->dev->kobj.name,
 		sizeof(v4l2_sd_cfg->dev_name));
 
-	s = &v4l2_sd_cfg->torch_intensity;
+	s = &v4l2_sd_cfg->intensity;
 	s->min = led->mm_current_scale[0];
 	s->max = led_cfg->max_mm_current;
 	s->step = 1;
@@ -467,6 +463,7 @@ static int aat1290_led_probe(struct platform_device *pdev)
 	struct aat1290_led *led;
 	struct led_classdev *led_cdev;
 	struct led_classdev_flash *fled_cdev;
+	struct led_init_data init_data = {};
 	struct aat1290_led_config_data led_cfg = {};
 	struct v4l2_flash_config v4l2_sd_cfg = {};
 	int ret;
@@ -495,16 +492,21 @@ static int aat1290_led_probe(struct platform_device *pdev)
 
 	aat1290_init_flash_timeout(led, &led_cfg);
 
+	init_data.fwnode = of_fwnode_handle(sub_node);
+	init_data.devicename = AAT1290_NAME;
+
 	/* Register LED Flash class device */
-	ret = led_classdev_flash_register(&pdev->dev, fled_cdev);
+	ret = led_classdev_flash_register_ext(&pdev->dev, fled_cdev,
+					      &init_data);
 	if (ret < 0)
 		goto err_flash_register;
 
 	aat1290_init_v4l2_flash_config(led, &led_cfg, &v4l2_sd_cfg);
 
 	/* Create V4L2 Flash subdev. */
-	led->v4l2_flash = v4l2_flash_init(dev, sub_node, fled_cdev, NULL,
-					  &v4l2_flash_ops, &v4l2_sd_cfg);
+	led->v4l2_flash = v4l2_flash_init(dev, of_fwnode_handle(sub_node),
+					  fled_cdev, &v4l2_flash_ops,
+					  &v4l2_sd_cfg);
 	if (IS_ERR(led->v4l2_flash)) {
 		ret = PTR_ERR(led->v4l2_flash);
 		goto error_v4l2_flash_init;

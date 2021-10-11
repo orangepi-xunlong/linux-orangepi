@@ -130,7 +130,6 @@ enum bt_8822b_1ant_ext_ant_switch_ctrl_type {
 	BT_8822B_1ANT_CTRL_BY_ANTDIV	= 0x2,
 	BT_8822B_1ANT_CTRL_BY_MAC	= 0x3,
 	BT_8822B_1ANT_CTRL_BY_BT	= 0x4,
-	BT_8822B_1ANT_CTRL_BY_FW	= 0x5,
 	BT_8822B_1ANT_CTRL_MAX
 };
 
@@ -360,6 +359,8 @@ struct coex_sta_8822b_1ant {
 
 	u16	score_board_WB;
 	boolean is_hid_rcu;
+	u16	legacy_forbidden_slot;
+	u16	le_forbidden_slot;
 	u8	bt_a2dp_vendor_id;
 	u32	bt_a2dp_device_name;
 	boolean is_ble_scan_en;
@@ -375,8 +376,6 @@ struct coex_sta_8822b_1ant {
 	u8	wl_coex_mode;
 
 	u8	wl_pnp_wakeup_downcnt;
-	u32	coex_run_cnt;
-	boolean is_no_wl_5ms_extend;
 };
 
 struct rfe_type_8822b_1ant {

@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  ALSA card-level driver for Turtle Beach Wavefront cards 
  *						(Maui,Tropez,Tropez+)
  *
  *  Copyright (c) 1997-1999 by Paul Barton-Davis <pbd@op.net>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/init.h>
@@ -34,7 +21,6 @@
 MODULE_AUTHOR("Paul Barton-Davis <pbd@op.net>");
 MODULE_DESCRIPTION("Turtle Beach Wavefront");
 MODULE_LICENSE("GPL");
-MODULE_SUPPORTED_DEVICE("{{Turtle Beach,Maui/Tropez/Tropez+}}");
 
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	    /* Index 0-MAX */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	    /* ID for this card */
@@ -63,23 +49,23 @@ MODULE_PARM_DESC(enable, "Enable WaveFront soundcard.");
 module_param_array(isapnp, bool, NULL, 0444);
 MODULE_PARM_DESC(isapnp, "ISA PnP detection for WaveFront soundcards.");
 #endif
-module_param_array(cs4232_pcm_port, long, NULL, 0444);
+module_param_hw_array(cs4232_pcm_port, long, ioport, NULL, 0444);
 MODULE_PARM_DESC(cs4232_pcm_port, "Port # for CS4232 PCM interface.");
-module_param_array(cs4232_pcm_irq, int, NULL, 0444);
+module_param_hw_array(cs4232_pcm_irq, int, irq, NULL, 0444);
 MODULE_PARM_DESC(cs4232_pcm_irq, "IRQ # for CS4232 PCM interface.");
-module_param_array(dma1, int, NULL, 0444);
+module_param_hw_array(dma1, int, dma, NULL, 0444);
 MODULE_PARM_DESC(dma1, "DMA1 # for CS4232 PCM interface.");
-module_param_array(dma2, int, NULL, 0444);
+module_param_hw_array(dma2, int, dma, NULL, 0444);
 MODULE_PARM_DESC(dma2, "DMA2 # for CS4232 PCM interface.");
-module_param_array(cs4232_mpu_port, long, NULL, 0444);
+module_param_hw_array(cs4232_mpu_port, long, ioport, NULL, 0444);
 MODULE_PARM_DESC(cs4232_mpu_port, "port # for CS4232 MPU-401 interface.");
-module_param_array(cs4232_mpu_irq, int, NULL, 0444);
+module_param_hw_array(cs4232_mpu_irq, int, irq, NULL, 0444);
 MODULE_PARM_DESC(cs4232_mpu_irq, "IRQ # for CS4232 MPU-401 interface.");
-module_param_array(ics2115_irq, int, NULL, 0444);
+module_param_hw_array(ics2115_irq, int, irq, NULL, 0444);
 MODULE_PARM_DESC(ics2115_irq, "IRQ # for ICS2115.");
-module_param_array(ics2115_port, long, NULL, 0444);
+module_param_hw_array(ics2115_port, long, ioport, NULL, 0444);
 MODULE_PARM_DESC(ics2115_port, "Port # for ICS2115.");
-module_param_array(fm_port, long, NULL, 0444);
+module_param_hw_array(fm_port, long, ioport, NULL, 0444);
 MODULE_PARM_DESC(fm_port, "FM port #.");
 module_param_array(use_cs4232_midi, bool, NULL, 0444);
 MODULE_PARM_DESC(use_cs4232_midi, "Use CS4232 MPU-401 interface (inaccessibly located inside your computer)");
@@ -88,7 +74,7 @@ MODULE_PARM_DESC(use_cs4232_midi, "Use CS4232 MPU-401 interface (inaccessibly lo
 static int isa_registered;
 static int pnp_registered;
 
-static struct pnp_card_device_id snd_wavefront_pnpids[] = {
+static const struct pnp_card_device_id snd_wavefront_pnpids[] = {
 	/* Tropez */
 	{ .id = "CSC7532", .devs = { { "CSC0000" }, { "CSC0010" }, { "PnPb006" }, { "CSC0004" } } },
 	/* Tropez+ */
@@ -422,6 +408,7 @@ snd_wavefront_probe (struct snd_card *card, int dev)
 	}
 	
 	acard->wavefront.irq = ics2115_irq[dev];
+	card->sync_irq = acard->wavefront.irq;
 	acard->wavefront.base = ics2115_port[dev];
 
 	wavefront_synth = snd_wavefront_new_synth(card, hw_dev, acard);
@@ -577,11 +564,10 @@ static int snd_wavefront_isa_probe(struct device *pdev,
 	return 0;
 }
 
-static int snd_wavefront_isa_remove(struct device *devptr,
+static void snd_wavefront_isa_remove(struct device *devptr,
 				    unsigned int dev)
 {
 	snd_card_free(dev_get_drvdata(devptr));
-	return 0;
 }
 
 #define DEV_NAME "wavefront"

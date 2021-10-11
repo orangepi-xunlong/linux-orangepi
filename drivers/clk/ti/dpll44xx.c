@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * OMAP4-specific DPLL control functions
  *
  * Copyright (C) 2011 Texas Instruments, Inc.
  * Rajendra Nayak
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -42,17 +39,17 @@ static void omap4_dpllmx_allow_gatectrl(struct clk_hw_omap *clk)
 	u32 v;
 	u32 mask;
 
-	if (!clk || !clk->clksel_reg)
+	if (!clk)
 		return;
 
 	mask = clk->flags & CLOCK_CLKOUTX2 ?
 			OMAP4430_DPLL_CLKOUTX2_GATE_CTRL_MASK :
 			OMAP4430_DPLL_CLKOUT_GATE_CTRL_MASK;
 
-	v = ti_clk_ll_ops->clk_readl(clk->clksel_reg);
+	v = ti_clk_ll_ops->clk_readl(&clk->clksel_reg);
 	/* Clear the bit to allow gatectrl */
 	v &= ~mask;
-	ti_clk_ll_ops->clk_writel(v, clk->clksel_reg);
+	ti_clk_ll_ops->clk_writel(v, &clk->clksel_reg);
 }
 
 static void omap4_dpllmx_deny_gatectrl(struct clk_hw_omap *clk)
@@ -60,17 +57,17 @@ static void omap4_dpllmx_deny_gatectrl(struct clk_hw_omap *clk)
 	u32 v;
 	u32 mask;
 
-	if (!clk || !clk->clksel_reg)
+	if (!clk)
 		return;
 
 	mask = clk->flags & CLOCK_CLKOUTX2 ?
 			OMAP4430_DPLL_CLKOUTX2_GATE_CTRL_MASK :
 			OMAP4430_DPLL_CLKOUT_GATE_CTRL_MASK;
 
-	v = ti_clk_ll_ops->clk_readl(clk->clksel_reg);
+	v = ti_clk_ll_ops->clk_readl(&clk->clksel_reg);
 	/* Set the bit to deny gatectrl */
 	v |= mask;
-	ti_clk_ll_ops->clk_writel(v, clk->clksel_reg);
+	ti_clk_ll_ops->clk_writel(v, &clk->clksel_reg);
 }
 
 const struct clk_hw_omap_ops clkhwops_omap4_dpllmx = {
@@ -105,7 +102,8 @@ static void omap4_dpll_lpmode_recalc(struct dpll_data *dd)
 
 /**
  * omap4_dpll_regm4xen_recalc - compute DPLL rate, considering REGM4XEN bit
- * @clk: struct clk * of the DPLL to compute the rate for
+ * @hw: pointer to the clock to compute the rate for
+ * @parent_rate: clock rate of the DPLL parent
  *
  * Compute the output rate for the OMAP4 DPLL represented by @clk.
  * Takes the REGM4XEN bit into consideration, which is needed for the
@@ -128,7 +126,7 @@ unsigned long omap4_dpll_regm4xen_recalc(struct clk_hw *hw,
 	rate = omap2_get_dpll_rate(clk);
 
 	/* regm4xen adds a multiplier of 4 to DPLL calculations */
-	v = ti_clk_ll_ops->clk_readl(dd->control_reg);
+	v = ti_clk_ll_ops->clk_readl(&dd->control_reg);
 	if (v & OMAP4430_DPLL_REGM4XEN_MASK)
 		rate *= OMAP4430_REGM4XEN_MULT;
 
@@ -137,8 +135,9 @@ unsigned long omap4_dpll_regm4xen_recalc(struct clk_hw *hw,
 
 /**
  * omap4_dpll_regm4xen_round_rate - round DPLL rate, considering REGM4XEN bit
- * @clk: struct clk * of the DPLL to round a rate for
+ * @hw: struct hw_clk containing the struct clk * of the DPLL to round a rate for
  * @target_rate: the desired rate of the DPLL
+ * @parent_rate: clock rate of the DPLL parent
  *
  * Compute the rate that would be programmed into the DPLL hardware
  * for @clk if set_rate() were to be provided with the rate

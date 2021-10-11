@@ -25,8 +25,13 @@
  * Authors: Thomas Hellström <thomas-at-tungstengraphics-dot-com>
  */
 
-#include <drm/drmP.h>
+#include <linux/slab.h>
+
+#include <drm/drm_device.h>
+#include <drm/drm_file.h>
+#include <drm/drm_irq.h>
 #include <drm/via_drm.h>
+
 #include "via_drv.h"
 
 #define VIA_MM_ALIGN_SHIFT 4
@@ -124,9 +129,9 @@ int via_mem_alloc(struct drm_device *dev, void *data,
 	mutex_lock(&dev->struct_mutex);
 	if (0 == ((mem->type == VIA_MEM_VIDEO) ? dev_priv->vram_initialized :
 		      dev_priv->agp_initialized)) {
+		mutex_unlock(&dev->struct_mutex);
 		DRM_ERROR
 		    ("Attempt to allocate from uninitialized memory manager.\n");
-		mutex_unlock(&dev->struct_mutex);
 		return -EINVAL;
 	}
 
@@ -140,11 +145,11 @@ int via_mem_alloc(struct drm_device *dev, void *data,
 	if (mem->type == VIA_MEM_AGP)
 		retval = drm_mm_insert_node(&dev_priv->agp_mm,
 					    &item->mm_node,
-					    tmpSize, 0, DRM_MM_SEARCH_DEFAULT);
+					    tmpSize);
 	else
 		retval = drm_mm_insert_node(&dev_priv->vram_mm,
 					    &item->mm_node,
-					    tmpSize, 0, DRM_MM_SEARCH_DEFAULT);
+					    tmpSize);
 	if (retval)
 		goto fail_alloc;
 

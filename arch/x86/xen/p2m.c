@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0
+
 /*
  * Xen leaves the responsibility for maintaining p2m mappings to the
  * guests themselves, but it must also access and update the p2m array
@@ -65,13 +67,13 @@
 #include <linux/hash.h>
 #include <linux/sched.h>
 #include <linux/seq_file.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 
 #include <asm/cache.h>
 #include <asm/setup.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include <asm/xen/page.h>
 #include <asm/xen/hypercall.h>
@@ -96,8 +98,8 @@ EXPORT_SYMBOL_GPL(xen_p2m_size);
 unsigned long xen_max_p2m_pfn __read_mostly;
 EXPORT_SYMBOL_GPL(xen_max_p2m_pfn);
 
-#ifdef CONFIG_XEN_BALLOON_MEMORY_HOTPLUG_LIMIT
-#define P2M_LIMIT CONFIG_XEN_BALLOON_MEMORY_HOTPLUG_LIMIT
+#ifdef CONFIG_XEN_MEMORY_HOTPLUG_LIMIT
+#define P2M_LIMIT CONFIG_XEN_MEMORY_HOTPLUG_LIMIT
 #else
 #define P2M_LIMIT 0
 #endif
@@ -179,8 +181,15 @@ static void p2m_init_identity(unsigned long *p2m, unsigned long pfn)
 
 static void * __ref alloc_p2m_page(void)
 {
-	if (unlikely(!slab_is_available()))
-		return alloc_bootmem_align(PAGE_SIZE, PAGE_SIZE);
+	if (unlikely(!slab_is_available())) {
+		void *ptr = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
+
+		if (!ptr)
+			panic("%s: Failed to allocate %lu bytes align=0x%lx\n",
+			      __func__, PAGE_SIZE, PAGE_SIZE);
+
+		return ptr;
+	}
 
 	return (void *)__get_free_page(GFP_KERNEL);
 }
@@ -188,7 +197,7 @@ static void * __ref alloc_p2m_page(void)
 static void __ref free_p2m_page(void *p)
 {
 	if (unlikely(!slab_is_available())) {
-		free_bootmem((unsigned long)p, PAGE_SIZE);
+		memblock_free((unsigned long)p, PAGE_SIZE);
 		return;
 	}
 
@@ -212,8 +221,7 @@ void __ref xen_build_mfn_list_list(void)
 	unsigned int level, topidx, mididx;
 	unsigned long *mid_mfn_p;
 
-	if (xen_feature(XENFEAT_auto_translated_physmap) ||
-	    xen_start_info->flags & SIF_VIRT_P2M_4TOOLS)
+	if (xen_start_info->flags & SIF_VIRT_P2M_4TOOLS)
 		return;
 
 	/* Pre-initialize p2m_top_mfn to be completely missing */
@@ -269,9 +277,6 @@ void __ref xen_build_mfn_list_list(void)
 
 void xen_setup_mfn_list_list(void)
 {
-	if (xen_feature(XENFEAT_auto_translated_physmap))
-		return;
-
 	BUG_ON(HYPERVISOR_shared_info == &xen_dummy_shared_info);
 
 	if (xen_start_info->flags & SIF_VIRT_P2M_4TOOLS)
@@ -290,9 +295,6 @@ void xen_setup_mfn_list_list(void)
 void __init xen_build_dynamic_phys_to_machine(void)
 {
 	unsigned long pfn;
-
-	 if (xen_feature(XENFEAT_auto_translated_physmap))
-		return;
 
 	xen_p2m_addr = (unsigned long *)xen_start_info->mfn_list;
 	xen_p2m_size = ALIGN(xen_start_info->nr_pages, P2M_PER_PAGE);
@@ -377,12 +379,8 @@ static void __init xen_rebuild_p2m_list(unsigned long *p2m)
 
 		if (type == P2M_TYPE_PFN || i < chunk) {
 			/* Use initial p2m page contents. */
-#ifdef CONFIG_X86_64
 			mfns = alloc_p2m_page();
 			copy_page(mfns, xen_p2m_addr + pfn);
-#else
-			mfns = xen_p2m_addr + pfn;
-#endif
 			ptep = populate_extra_pte((unsigned long)(p2m + pfn));
 			set_pte(ptep,
 				pfn_pte(PFN_DOWN(__pa(mfns)), PAGE_KERNEL));
@@ -465,7 +463,7 @@ EXPORT_SYMBOL_GPL(get_phys_to_machine);
  * Allocate new pmd(s). It is checked whether the old pmd is still in place.
  * If not, nothing is changed. This is okay as the only reason for allocating
  * a new pmd is to replace p2m_missing_pte or p2m_identity_pte by a individual
- * pmd. In case of PAE/x86-32 there are multiple pmds to allocate!
+ * pmd.
  */
 static pte_t *alloc_p2m_pmd(unsigned long addr, pte_t *pte_pg)
 {
@@ -540,9 +538,6 @@ int xen_alloc_p2m_entry(unsigned long pfn)
 	unsigned long addr = (unsigned long)(xen_p2m_addr + pfn);
 	unsigned long p2m_pfn;
 
-	if (xen_feature(XENFEAT_auto_translated_physmap))
-		return 0;
-
 	ptep = lookup_address(addr, &level);
 	BUG_ON(!ptep || level != PG_LEVEL_4K);
 	pte_pg = (pte_t *)((unsigned long)ptep & ~(PAGE_SIZE - 1));
@@ -557,7 +552,7 @@ int xen_alloc_p2m_entry(unsigned long pfn)
 	if (p2m_top_mfn && pfn < MAX_P2M_PFN) {
 		topidx = p2m_top_index(pfn);
 		top_mfn_p = &p2m_top_mfn[topidx];
-		mid_mfn = ACCESS_ONCE(p2m_top_mfn_p[topidx]);
+		mid_mfn = READ_ONCE(p2m_top_mfn_p[topidx]);
 
 		BUG_ON(virt_to_mfn(mid_mfn) != *top_mfn_p);
 
@@ -640,9 +635,6 @@ unsigned long __init set_phys_range_identity(unsigned long pfn_s,
 	if (unlikely(pfn_s >= xen_p2m_size))
 		return 0;
 
-	if (unlikely(xen_feature(XENFEAT_auto_translated_physmap)))
-		return pfn_e - pfn_s;
-
 	if (pfn_s > pfn_e)
 		return 0;
 
@@ -660,19 +652,13 @@ bool __set_phys_to_machine(unsigned long pfn, unsigned long mfn)
 	pte_t *ptep;
 	unsigned int level;
 
-	/* don't track P2M changes in autotranslate guests */
-	if (unlikely(xen_feature(XENFEAT_auto_translated_physmap)))
-		return true;
-
-	if (unlikely(pfn >= xen_p2m_size)) {
-		BUG_ON(mfn != INVALID_P2M_ENTRY);
-		return true;
-	}
+	/* Only invalid entries allowed above the highest p2m covered frame. */
+	if (unlikely(pfn >= xen_p2m_size))
+		return mfn == INVALID_P2M_ENTRY;
 
 	/*
 	 * The interface requires atomic updates on p2m elements.
-	 * xen_safe_write_ulong() is using __put_user which does an atomic
-	 * store via asm().
+	 * xen_safe_write_ulong() is using an atomic store via asm().
 	 */
 	if (likely(!xen_safe_write_ulong(xen_p2m_addr + pfn, mfn)))
 		return true;
@@ -723,9 +709,12 @@ int set_foreign_p2m_mapping(struct gnttab_map_grant_ref *map_ops,
 
 	for (i = 0; i < count; i++) {
 		unsigned long mfn, pfn;
+		struct gnttab_unmap_grant_ref unmap[2];
+		int rc;
 
 		/* Do not add to override if the map failed. */
-		if (map_ops[i].status)
+		if (map_ops[i].status != GNTST_okay ||
+		    (kmap_ops && kmap_ops[i].status != GNTST_okay))
 			continue;
 
 		if (map_ops[i].flags & GNTMAP_contains_pte) {
@@ -739,16 +728,51 @@ int set_foreign_p2m_mapping(struct gnttab_map_grant_ref *map_ops,
 
 		WARN(pfn_to_mfn(pfn) != INVALID_P2M_ENTRY, "page must be ballooned");
 
-		if (unlikely(!set_phys_to_machine(pfn, FOREIGN_FRAME(mfn)))) {
-			ret = -ENOMEM;
-			goto out;
+		if (likely(set_phys_to_machine(pfn, FOREIGN_FRAME(mfn))))
+			continue;
+
+		/*
+		 * Signal an error for this slot. This in turn requires
+		 * immediate unmapping.
+		 */
+		map_ops[i].status = GNTST_general_error;
+		unmap[0].host_addr = map_ops[i].host_addr,
+		unmap[0].handle = map_ops[i].handle;
+		map_ops[i].handle = INVALID_GRANT_HANDLE;
+		if (map_ops[i].flags & GNTMAP_device_map)
+			unmap[0].dev_bus_addr = map_ops[i].dev_bus_addr;
+		else
+			unmap[0].dev_bus_addr = 0;
+
+		if (kmap_ops) {
+			kmap_ops[i].status = GNTST_general_error;
+			unmap[1].host_addr = kmap_ops[i].host_addr,
+			unmap[1].handle = kmap_ops[i].handle;
+			kmap_ops[i].handle = INVALID_GRANT_HANDLE;
+			if (kmap_ops[i].flags & GNTMAP_device_map)
+				unmap[1].dev_bus_addr = kmap_ops[i].dev_bus_addr;
+			else
+				unmap[1].dev_bus_addr = 0;
 		}
+
+		/*
+		 * Pre-populate both status fields, to be recognizable in
+		 * the log message below.
+		 */
+		unmap[0].status = 1;
+		unmap[1].status = 1;
+
+		rc = HYPERVISOR_grant_table_op(GNTTABOP_unmap_grant_ref,
+					       unmap, 1 + !!kmap_ops);
+		if (rc || unmap[0].status != GNTST_okay ||
+		    unmap[1].status != GNTST_okay)
+			pr_err_once("gnttab unmap failed: rc=%d st0=%d st1=%d\n",
+				    rc, unmap[0].status, unmap[1].status);
 	}
 
 out:
 	return ret;
 }
-EXPORT_SYMBOL_GPL(set_foreign_p2m_mapping);
 
 int clear_foreign_p2m_mapping(struct gnttab_unmap_grant_ref *unmap_ops,
 			      struct gnttab_unmap_grant_ref *kunmap_ops,
@@ -763,20 +787,17 @@ int clear_foreign_p2m_mapping(struct gnttab_unmap_grant_ref *unmap_ops,
 		unsigned long mfn = __pfn_to_mfn(page_to_pfn(pages[i]));
 		unsigned long pfn = page_to_pfn(pages[i]);
 
-		if (mfn == INVALID_P2M_ENTRY || !(mfn & FOREIGN_FRAME_BIT)) {
+		if (mfn != INVALID_P2M_ENTRY && (mfn & FOREIGN_FRAME_BIT))
+			set_phys_to_machine(pfn, INVALID_P2M_ENTRY);
+		else
 			ret = -EINVAL;
-			goto out;
-		}
-
-		set_phys_to_machine(pfn, INVALID_P2M_ENTRY);
 	}
 	if (kunmap_ops)
 		ret = HYPERVISOR_grant_table_op(GNTTABOP_unmap_grant_ref,
-						kunmap_ops, count);
-out:
+						kunmap_ops, count) ?: ret;
+
 	return ret;
 }
-EXPORT_SYMBOL_GPL(clear_foreign_p2m_mapping);
 
 #ifdef CONFIG_XEN_DEBUG_FS
 #include <linux/debugfs.h>
@@ -808,26 +829,13 @@ static int p2m_dump_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-static int p2m_dump_open(struct inode *inode, struct file *filp)
-{
-	return single_open(filp, p2m_dump_show, NULL);
-}
-
-static const struct file_operations p2m_dump_fops = {
-	.open		= p2m_dump_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+DEFINE_SHOW_ATTRIBUTE(p2m_dump);
 
 static struct dentry *d_mmu_debug;
 
 static int __init xen_p2m_debugfs(void)
 {
 	struct dentry *d_xen = xen_init_debugfs();
-
-	if (d_xen == NULL)
-		return -ENOMEM;
 
 	d_mmu_debug = debugfs_create_dir("mmu", d_xen);
 

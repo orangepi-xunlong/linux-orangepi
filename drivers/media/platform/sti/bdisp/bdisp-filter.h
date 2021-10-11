@@ -1,7 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (C) STMicroelectronics SA 2014
  * Authors: Fabien Dessenne <fabien.dessenne@st.com> for STMicroelectronics.
- * License terms:  GNU General Public License (GPL), version 2
  */
 
 #define BDISP_HF_NB             64
@@ -12,7 +12,7 @@
  *
  * @min:        min scale factor for this filter (6.10 fixed point)
  * @max:        max scale factor for this filter (6.10 fixed point)
- * coef:        filter coefficients
+ * @coef:       filter coefficients
  */
 struct bdisp_filter_h_spec {
 	const u16 min;
@@ -24,7 +24,7 @@ struct bdisp_filter_h_spec {
  *
  * @min:	min scale factor for this filter (6.10 fixed point)
  * @max:	max scale factor for this filter (6.10 fixed point)
- * coef:	filter coefficients
+ * @coef:	filter coefficients
  */
 struct bdisp_filter_v_spec {
 	const u16 min;

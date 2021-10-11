@@ -1,11 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2016 Imagination Technologies
- * Author: Paul Burton <paul.burton@imgtec.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
+ * Author: Paul Burton <paul.burton@mips.com>
  */
 
 #include <generated/utsrelease.h>
@@ -97,7 +93,7 @@ static struct img_ascii_lcd_config boston_config = {
 static void malta_update(struct img_ascii_lcd_ctx *ctx)
 {
 	unsigned int i;
-	int err;
+	int err = 0;
 
 	for (i = 0; i < ctx->cfg->num_chars; i++) {
 		err = regmap_write(ctx->regmap,
@@ -180,7 +176,7 @@ static int sead3_wait_lcd_idle(struct img_ascii_lcd_ctx *ctx)
 static void sead3_update(struct img_ascii_lcd_ctx *ctx)
 {
 	unsigned int i;
-	int err;
+	int err = 0;
 
 	for (i = 0; i < ctx->cfg->num_chars; i++) {
 		err = sead3_wait_lcd_idle(ctx);
@@ -220,17 +216,18 @@ static const struct of_device_id img_ascii_lcd_matches[] = {
 	{ .compatible = "mti,sead3-lcd", .data = &sead3_config },
 	{ /* sentinel */ }
 };
+MODULE_DEVICE_TABLE(of, img_ascii_lcd_matches);
 
 /**
  * img_ascii_lcd_scroll() - scroll the display by a character
- * @arg: really a pointer to the private data structure
+ * @t: really a pointer to the private data structure
  *
  * Scroll the current message along the LCD by one character, rearming the
  * timer if required.
  */
-static void img_ascii_lcd_scroll(unsigned long arg)
+static void img_ascii_lcd_scroll(struct timer_list *t)
 {
-	struct img_ascii_lcd_ctx *ctx = (struct img_ascii_lcd_ctx *)arg;
+	struct img_ascii_lcd_ctx *ctx = from_timer(ctx, t, timer);
 	unsigned int i, ch = ctx->scroll_pos;
 	unsigned int num_chars = ctx->cfg->num_chars;
 
@@ -298,7 +295,7 @@ static int img_ascii_lcd_display(struct img_ascii_lcd_ctx *ctx,
 	ctx->scroll_pos = 0;
 
 	/* update the LCD */
-	img_ascii_lcd_scroll((unsigned long)ctx);
+	img_ascii_lcd_scroll(&ctx->timer);
 
 	return 0;
 }
@@ -359,7 +356,6 @@ static int img_ascii_lcd_probe(struct platform_device *pdev)
 	const struct of_device_id *match;
 	const struct img_ascii_lcd_config *cfg;
 	struct img_ascii_lcd_ctx *ctx;
-	struct resource *res;
 	int err;
 
 	match = of_match_device(img_ascii_lcd_matches, &pdev->dev);
@@ -381,8 +377,7 @@ static int img_ascii_lcd_probe(struct platform_device *pdev)
 					 &ctx->offset))
 			return -EINVAL;
 	} else {
-		res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-		ctx->base = devm_ioremap_resource(&pdev->dev, res);
+		ctx->base = devm_platform_ioremap_resource(pdev, 0);
 		if (IS_ERR(ctx->base))
 			return PTR_ERR(ctx->base);
 	}
@@ -394,9 +389,7 @@ static int img_ascii_lcd_probe(struct platform_device *pdev)
 	ctx->scroll_rate = HZ / 2;
 
 	/* initialise a timer for scrolling the message */
-	init_timer(&ctx->timer);
-	ctx->timer.function = img_ascii_lcd_scroll;
-	ctx->timer.data = (unsigned long)ctx;
+	timer_setup(&ctx->timer, img_ascii_lcd_scroll, 0);
 
 	platform_set_drvdata(pdev, ctx);
 

@@ -1,7 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
  *
  * Parts of this file are based on Ralink's 2.6.21 BSP
  *
@@ -12,7 +10,6 @@
 
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <linux/module.h>
 
 #include <asm/mipsregs.h>
 #include <asm/mach-ralink/ralink_regs.h>
@@ -65,6 +62,7 @@ void __init ralink_clk_init(void)
 	ralink_clk_add("300100.timer", cpu_rate / 2);
 	ralink_clk_add("300120.watchdog", cpu_rate / 2);
 	ralink_clk_add("300500.uart", cpu_rate / 2);
+	ralink_clk_add("300900.i2c", cpu_rate / 2);
 	ralink_clk_add("300c00.uartlite", cpu_rate / 2);
 	ralink_clk_add("400000.ethernet", cpu_rate / 2);
 	ralink_clk_add("480000.wmac", wmac_rate);
@@ -79,7 +77,7 @@ void __init ralink_of_remap(void)
 		panic("Failed to remap core resources");
 }
 
-void prom_soc_init(struct ralink_soc_info *soc_info)
+void __init prom_soc_init(struct ralink_soc_info *soc_info)
 {
 	void __iomem *sysc = (void __iomem *) KSEG1ADDR(RT2880_SYSC_BASE);
 	const char *name;

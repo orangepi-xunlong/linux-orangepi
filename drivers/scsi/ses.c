@@ -1,25 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * SCSI Enclosure Services
  *
  * Copyright (C) 2008 James Bottomley <James.Bottomley@HansenPartnership.com>
- *
-**-----------------------------------------------------------------------------
-**
-**  This program is free software; you can redistribute it and/or
-**  modify it under the terms of the GNU General Public License
-**  version 2 as published by the Free Software Foundation.
-**
-**  This program is distributed in the hope that it will be useful,
-**  but WITHOUT ANY WARRANTY; without even the implied warranty of
-**  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-**  GNU General Public License for more details.
-**
-**  You should have received a copy of the GNU General Public License
-**  along with this program; if not, write to the Free Software
-**  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-**
-**-----------------------------------------------------------------------------
-*/
+ */
 
 #include <linux/slab.h>
 #include <linux/module.h>
@@ -50,6 +34,13 @@ struct ses_device {
 struct ses_component {
 	u64 addr;
 };
+
+static bool ses_page2_supported(struct enclosure_device *edev)
+{
+	struct ses_device *ses_dev = edev->scratch;
+
+	return (ses_dev->page2 != NULL);
+}
 
 static int ses_probe(struct device *dev)
 {
@@ -99,7 +90,7 @@ static int ses_recv_diag(struct scsi_device *sdev, int page_code,
 
 	ret =  scsi_execute_req(sdev, cmd, DMA_FROM_DEVICE, buf, bufflen,
 				NULL, SES_TIMEOUT, SES_RETRIES, NULL);
-	if (unlikely(!ret))
+	if (unlikely(ret))
 		return ret;
 
 	recv_page_code = ((unsigned char *)buf)[0];
@@ -179,7 +170,8 @@ static unsigned char *ses_get_page2_descriptor(struct enclosure_device *edev,
 	unsigned char *type_ptr = ses_dev->page1_types;
 	unsigned char *desc_ptr = ses_dev->page2 + 8;
 
-	ses_recv_diag(sdev, 2, ses_dev->page2, ses_dev->page2_len);
+	if (ses_recv_diag(sdev, 2, ses_dev->page2, ses_dev->page2_len) < 0)
+		return NULL;
 
 	for (i = 0; i < ses_dev->page1_num_types; i++, type_ptr += 4) {
 		for (j = 0; j < type_ptr[1]; j++) {
@@ -203,6 +195,10 @@ static void ses_get_fault(struct enclosure_device *edev,
 {
 	unsigned char *desc;
 
+	if (!ses_page2_supported(edev)) {
+		ecomp->fault = 0;
+		return;
+	}
 	desc = ses_get_page2_descriptor(edev, ecomp);
 	if (desc)
 		ecomp->fault = (desc[3] & 0x60) >> 4;
@@ -214,6 +210,9 @@ static int ses_set_fault(struct enclosure_device *edev,
 {
 	unsigned char desc[4];
 	unsigned char *desc_ptr;
+
+	if (!ses_page2_supported(edev))
+		return -EINVAL;
 
 	desc_ptr = ses_get_page2_descriptor(edev, ecomp);
 
@@ -242,6 +241,10 @@ static void ses_get_status(struct enclosure_device *edev,
 {
 	unsigned char *desc;
 
+	if (!ses_page2_supported(edev)) {
+		ecomp->status = 0;
+		return;
+	}
 	desc = ses_get_page2_descriptor(edev, ecomp);
 	if (desc)
 		ecomp->status = (desc[0] & 0x0f);
@@ -252,6 +255,10 @@ static void ses_get_locate(struct enclosure_device *edev,
 {
 	unsigned char *desc;
 
+	if (!ses_page2_supported(edev)) {
+		ecomp->locate = 0;
+		return;
+	}
 	desc = ses_get_page2_descriptor(edev, ecomp);
 	if (desc)
 		ecomp->locate = (desc[2] & 0x02) ? 1 : 0;
@@ -263,6 +270,9 @@ static int ses_set_locate(struct enclosure_device *edev,
 {
 	unsigned char desc[4];
 	unsigned char *desc_ptr;
+
+	if (!ses_page2_supported(edev))
+		return -EINVAL;
 
 	desc_ptr = ses_get_page2_descriptor(edev, ecomp);
 
@@ -291,6 +301,9 @@ static int ses_set_active(struct enclosure_device *edev,
 {
 	unsigned char desc[4];
 	unsigned char *desc_ptr;
+
+	if (!ses_page2_supported(edev))
+		return -EINVAL;
 
 	desc_ptr = ses_get_page2_descriptor(edev, ecomp);
 
@@ -328,6 +341,11 @@ static void ses_get_power_status(struct enclosure_device *edev,
 {
 	unsigned char *desc;
 
+	if (!ses_page2_supported(edev)) {
+		ecomp->power_status = 0;
+		return;
+	}
+
 	desc = ses_get_page2_descriptor(edev, ecomp);
 	if (desc)
 		ecomp->power_status = (desc[3] & 0x10) ? 0 : 1;
@@ -339,6 +357,9 @@ static int ses_set_power_status(struct enclosure_device *edev,
 {
 	unsigned char desc[4];
 	unsigned char *desc_ptr;
+
+	if (!ses_page2_supported(edev))
+		return -EINVAL;
 
 	desc_ptr = ses_get_page2_descriptor(edev, ecomp);
 
@@ -604,7 +625,7 @@ static int ses_intf_add(struct device *cdev,
 {
 	struct scsi_device *sdev = to_scsi_device(cdev->parent);
 	struct scsi_device *tmp_sdev;
-	unsigned char *buf = NULL, *hdr_buf, *type_ptr;
+	unsigned char *buf = NULL, *hdr_buf, *type_ptr, page;
 	struct ses_device *ses_dev;
 	u32 result;
 	int i, types, len, components = 0;
@@ -633,7 +654,8 @@ static int ses_intf_add(struct device *cdev,
 	if (!hdr_buf || !ses_dev)
 		goto err_init_free;
 
-	result = ses_recv_diag(sdev, 1, hdr_buf, INIT_ALLOC_SIZE);
+	page = 1;
+	result = ses_recv_diag(sdev, page, hdr_buf, INIT_ALLOC_SIZE);
 	if (result)
 		goto recv_failed;
 
@@ -642,7 +664,7 @@ static int ses_intf_add(struct device *cdev,
 	if (!buf)
 		goto err_free;
 
-	result = ses_recv_diag(sdev, 1, buf, len);
+	result = ses_recv_diag(sdev, page, buf, len);
 	if (result)
 		goto recv_failed;
 
@@ -672,9 +694,10 @@ static int ses_intf_add(struct device *cdev,
 	ses_dev->page1_len = len;
 	buf = NULL;
 
-	result = ses_recv_diag(sdev, 2, hdr_buf, INIT_ALLOC_SIZE);
+	page = 2;
+	result = ses_recv_diag(sdev, page, hdr_buf, INIT_ALLOC_SIZE);
 	if (result)
-		goto recv_failed;
+		goto page2_not_supported;
 
 	len = (hdr_buf[2] << 8) + hdr_buf[3] + 4;
 	buf = kzalloc(len, GFP_KERNEL);
@@ -691,7 +714,8 @@ static int ses_intf_add(struct device *cdev,
 
 	/* The additional information page --- allows us
 	 * to match up the devices */
-	result = ses_recv_diag(sdev, 10, hdr_buf, INIT_ALLOC_SIZE);
+	page = 10;
+	result = ses_recv_diag(sdev, page, hdr_buf, INIT_ALLOC_SIZE);
 	if (!result) {
 
 		len = (hdr_buf[2] << 8) + hdr_buf[3] + 4;
@@ -699,14 +723,15 @@ static int ses_intf_add(struct device *cdev,
 		if (!buf)
 			goto err_free;
 
-		result = ses_recv_diag(sdev, 10, buf, len);
+		result = ses_recv_diag(sdev, page, buf, len);
 		if (result)
 			goto recv_failed;
 		ses_dev->page10 = buf;
 		ses_dev->page10_len = len;
 		buf = NULL;
 	}
-	scomp = kzalloc(sizeof(struct ses_component) * components, GFP_KERNEL);
+page2_not_supported:
+	scomp = kcalloc(components, sizeof(struct ses_component), GFP_KERNEL);
 	if (!scomp)
 		goto err_free;
 
@@ -737,7 +762,7 @@ static int ses_intf_add(struct device *cdev,
 
  recv_failed:
 	sdev_printk(KERN_ERR, sdev, "Failed to get diagnostic page 0x%x\n",
-		    result);
+		    page);
 	err = -ENODEV;
  err_free:
 	kfree(buf);
@@ -780,8 +805,6 @@ static void ses_intf_remove_enclosure(struct scsi_device *sdev)
 	if (!edev)
 		return;
 
-	enclosure_unregister(edev);
-
 	ses_dev = edev->scratch;
 	edev->scratch = NULL;
 
@@ -793,6 +816,7 @@ static void ses_intf_remove_enclosure(struct scsi_device *sdev)
 	kfree(edev->component[0].scratch);
 
 	put_device(&edev->edev);
+	enclosure_unregister(edev);
 }
 
 static void ses_intf_remove(struct device *cdev,

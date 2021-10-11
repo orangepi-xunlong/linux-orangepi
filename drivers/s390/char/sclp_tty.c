@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *    SCLP line mode terminal driver.
  *
@@ -7,7 +8,6 @@
  *		 Martin Schwidefsky <schwidefsky@de.ibm.com>
  */
 
-#include <linux/module.h>
 #include <linux/kmod.h>
 #include <linux/tty.h>
 #include <linux/tty_driver.h>
@@ -16,7 +16,7 @@
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/gfp.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include "ctrlchar.h"
 #include "sclp.h"
@@ -35,11 +35,11 @@
  */
 
 /* Lock to guard over changes to global variables. */
-static spinlock_t sclp_tty_lock;
+static DEFINE_SPINLOCK(sclp_tty_lock);
 /* List of free pages that can be used for console output buffering. */
-static struct list_head sclp_tty_pages;
+static LIST_HEAD(sclp_tty_pages);
 /* List of full struct sclp_buffer structures ready for output. */
-static struct list_head sclp_tty_outqueue;
+static LIST_HEAD(sclp_tty_outqueue);
 /* Counter how many buffers are emitted. */
 static int sclp_tty_buffer_count;
 /* Pointer to current console buffer. */
@@ -54,8 +54,8 @@ static unsigned short int sclp_tty_chars_count;
 struct tty_driver *sclp_tty_driver;
 
 static int sclp_tty_tolower;
-static int sclp_tty_columns = 80;
 
+#define SCLP_TTY_COLUMNS 320
 #define SPACES_PER_TAB 8
 #define CASE_DELIMITER 0x6c /* to separate upper and lower case (% in EBCDIC) */
 
@@ -65,7 +65,6 @@ sclp_tty_open(struct tty_struct *tty, struct file *filp)
 {
 	tty_port_tty_set(&sclp_port, tty);
 	tty->driver_data = NULL;
-	sclp_port.low_latency = 0;
 	return 0;
 }
 
@@ -151,7 +150,7 @@ __sclp_ttybuf_emit(struct sclp_buffer *buffer)
  * temporary write buffer.
  */
 static void
-sclp_tty_timeout(unsigned long data)
+sclp_tty_timeout(struct timer_list *unused)
 {
 	unsigned long flags;
 	struct sclp_buffer *buf;
@@ -194,7 +193,7 @@ static int sclp_tty_write_string(const unsigned char *str, int count, int may_fa
 			}
 			page = sclp_tty_pages.next;
 			list_del((struct list_head *) page);
-			sclp_ttybuf = sclp_make_buffer(page, sclp_tty_columns,
+			sclp_ttybuf = sclp_make_buffer(page, SCLP_TTY_COLUMNS,
 						       SPACES_PER_TAB);
 		}
 		/* try to write the string to the current output buffer */
@@ -218,11 +217,7 @@ static int sclp_tty_write_string(const unsigned char *str, int count, int may_fa
 	/* Setup timer to output current console buffer after 1/10 second */
 	if (sclp_ttybuf && sclp_chars_in_buffer(sclp_ttybuf) &&
 	    !timer_pending(&sclp_tty_timer)) {
-		init_timer(&sclp_tty_timer);
-		sclp_tty_timer.function = sclp_tty_timeout;
-		sclp_tty_timer.data = 0UL;
-		sclp_tty_timer.expires = jiffies + HZ/10;
-		add_timer(&sclp_tty_timer);
+		mod_timer(&sclp_tty_timer, jiffies + HZ / 10);
 	}
 	spin_unlock_irqrestore(&sclp_tty_lock, flags);
 out:
@@ -506,7 +501,10 @@ sclp_tty_init(void)
 	int i;
 	int rc;
 
-	if (!CONSOLE_IS_SCLP)
+	/* z/VM multiplexes the line mode output on the 32xx screen */
+	if (MACHINE_IS_VM && !CONSOLE_IS_SCLP)
+		return 0;
+	if (!sclp.has_linemode)
 		return 0;
 	driver = alloc_tty_driver(1);
 	if (!driver)
@@ -518,7 +516,6 @@ sclp_tty_init(void)
 		return rc;
 	}
 	/* Allocate pages for output buffering */
-	INIT_LIST_HEAD(&sclp_tty_pages);
 	for (i = 0; i < MAX_KMEM_PAGES; i++) {
 		page = (void *) get_zeroed_page(GFP_KERNEL | GFP_DMA);
 		if (page == NULL) {
@@ -527,17 +524,10 @@ sclp_tty_init(void)
 		}
 		list_add_tail((struct list_head *) page, &sclp_tty_pages);
 	}
-	INIT_LIST_HEAD(&sclp_tty_outqueue);
-	spin_lock_init(&sclp_tty_lock);
-	init_timer(&sclp_tty_timer);
+	timer_setup(&sclp_tty_timer, sclp_tty_timeout, 0);
 	sclp_ttybuf = NULL;
 	sclp_tty_buffer_count = 0;
 	if (MACHINE_IS_VM) {
-		/*
-		 * save 4 characters for the CPU number
-		 * written at start of each line by VM/CP
-		 */
-		sclp_tty_columns = 76;
 		/* case input lines to lowercase */
 		sclp_tty_tolower = 1;
 	}
@@ -573,4 +563,4 @@ sclp_tty_init(void)
 	sclp_tty_driver = driver;
 	return 0;
 }
-module_init(sclp_tty_init);
+device_initcall(sclp_tty_init);

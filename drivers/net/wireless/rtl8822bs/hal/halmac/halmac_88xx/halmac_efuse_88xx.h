@@ -170,13 +170,6 @@ halmac_parse_h2c_ack_phy_efuse_88xx(
 	IN u32 c2h_size
 );
 
-HALMAC_RET_STATUS
-halmac_eeprom_parser_88xx(
-	IN PHALMAC_ADAPTER pHalmac_adapter,
-	IN u8 *pPhysical_efuse_map,
-	OUT u8 *pLogical_efuse_map
-);
-
 #endif /* HALMAC_88XX_SUPPORT */
 
 #endif/* _HALMAC_EFUSE_88XX_H_ */

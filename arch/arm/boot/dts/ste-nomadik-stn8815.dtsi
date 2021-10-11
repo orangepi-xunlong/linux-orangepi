@@ -1,20 +1,21 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Device Tree for the ST-Ericsson Nomadik 8815 STn8815 SoC
  */
 
 #include <dt-bindings/gpio/gpio.h>
-#include "skeleton.dtsi"
 
 / {
 	#address-cells = <1>;
 	#size-cells = <1>;
 
 	memory {
+		device_type = "memory";
 		reg = <0x00000000 0x04000000>,
 		    <0x08000000 0x04000000>;
 	};
 
-	L2: l2-cache {
+	L2: cache-controller {
 		compatible = "arm,l210-cache";
 		reg = <0x10210000 0x1000>;
 		interrupt-parent = <&vica>;
@@ -660,7 +661,6 @@
 		reg-names = "fsmc_regs", "nand_data", "nand_addr", "nand_cmd";
 		clocks = <&hclksmc>;
 		status = "okay";
-		timings = /bits/ 8 <0 0 0 0x10 0x0a 0>;
 
 		partition@0 {
 		label = "X-Loader(NAND)";
@@ -825,7 +825,7 @@
 			interrupts = <10>;
 		};
 
-		mmcsd: sdi@101f6000 {
+		mmcsd: mmc@101f6000 {
 			compatible = "arm,pl18x", "arm,primecell";
 			reg = <0x101f6000 0x1000>;
 			clocks = <&sdiclk>, <&pclksdi>;

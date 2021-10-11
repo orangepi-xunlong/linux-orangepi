@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * at25.c -- support most SPI EEPROMs, such as Atmel AT25 models
  *
  * Copyright (C) 2006 David Brownell
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -26,6 +22,9 @@
  * mean that some AT25 products are EEPROMs, and others are FLASH.
  * Handle FLASH chips with the drivers/mtd/devices/m25p80.c driver,
  * not this one!
+ *
+ * EEPROMs that can be used with this driver include, for example:
+ *   AT25M02, AT25128B
  */
 
 struct at25_data {
@@ -94,15 +93,17 @@ static int at25_ee_read(void *priv, unsigned int offset,
 	switch (at25->addrlen) {
 	default:	/* case 3 */
 		*cp++ = offset >> 16;
+		fallthrough;
 	case 2:
 		*cp++ = offset >> 8;
+		fallthrough;
 	case 1:
 	case 0:	/* can't happen: for better codegen */
 		*cp++ = offset >> 0;
 	}
 
 	spi_message_init(&m);
-	memset(t, 0, sizeof t);
+	memset(t, 0, sizeof(t));
 
 	t[0].tx_buf = command;
 	t[0].len = at25->addrlen + 1;
@@ -180,8 +181,10 @@ static int at25_ee_write(void *priv, unsigned int off, void *val, size_t count)
 		switch (at25->addrlen) {
 		default:	/* case 3 */
 			*cp++ = offset >> 16;
+			fallthrough;
 		case 2:
 			*cp++ = offset >> 8;
+			fallthrough;
 		case 1:
 		case 0:	/* can't happen: for better codegen */
 			*cp++ = offset >> 0;
@@ -261,7 +264,7 @@ static int at25_fw_to_chip(struct device *dev, struct spi_eeprom *chip)
 
 	if (device_property_read_u32(dev, "pagesize", &val) == 0 ||
 	    device_property_read_u32(dev, "at25,page-size", &val) == 0) {
-		chip->page_size = (u16)val;
+		chip->page_size = val;
 	} else {
 		dev_err(dev, "Error: missing \"pagesize\" property\n");
 		return -ENODEV;
@@ -276,6 +279,9 @@ static int at25_fw_to_chip(struct device *dev, struct spi_eeprom *chip)
 			return -ENODEV;
 		}
 		switch (val) {
+		case 9:
+			chip->flags |= EE_INSTR_BIT3_IS_ADDR;
+			fallthrough;
 		case 8:
 			chip->flags |= EE_ADDR1;
 			break;
@@ -345,6 +351,7 @@ static int at25_probe(struct spi_device *spi)
 	spi_set_drvdata(spi, at25);
 	at25->addrlen = addrlen;
 
+	at25->nvmem_config.type = NVMEM_TYPE_EEPROM;
 	at25->nvmem_config.name = dev_name(&spi->dev);
 	at25->nvmem_config.dev = &spi->dev;
 	at25->nvmem_config.read_only = chip.flags & EE_READONLY;
@@ -355,11 +362,11 @@ static int at25_probe(struct spi_device *spi)
 	at25->nvmem_config.reg_read = at25_ee_read;
 	at25->nvmem_config.reg_write = at25_ee_write;
 	at25->nvmem_config.priv = at25;
-	at25->nvmem_config.stride = 4;
+	at25->nvmem_config.stride = 1;
 	at25->nvmem_config.word_size = 1;
 	at25->nvmem_config.size = chip.byte_len;
 
-	at25->nvmem = nvmem_register(&at25->nvmem_config);
+	at25->nvmem = devm_nvmem_register(&spi->dev, &at25->nvmem_config);
 	if (IS_ERR(at25->nvmem))
 		return PTR_ERR(at25->nvmem);
 
@@ -369,16 +376,6 @@ static int at25_probe(struct spi_device *spi)
 		at25->chip.name,
 		(chip.flags & EE_READONLY) ? " (readonly)" : "",
 		at25->chip.page_size);
-	return 0;
-}
-
-static int at25_remove(struct spi_device *spi)
-{
-	struct at25_data	*at25;
-
-	at25 = spi_get_drvdata(spi);
-	nvmem_unregister(at25->nvmem);
-
 	return 0;
 }
 
@@ -396,7 +393,6 @@ static struct spi_driver at25_driver = {
 		.of_match_table = at25_of_match,
 	},
 	.probe		= at25_probe,
-	.remove		= at25_remove,
 };
 
 module_spi_driver(at25_driver);

@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 
 /* The industrial I/O core
  *
  * Copyright (c) 2008 Jonathan Cameron
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 #ifndef _INDUSTRIAL_IO_H_
 #define _INDUSTRIAL_IO_H_
@@ -19,34 +16,6 @@
  * Provide means of adjusting timer accuracy.
  * Currently assumes nano seconds.
  */
-
-enum iio_chan_info_enum {
-	IIO_CHAN_INFO_RAW = 0,
-	IIO_CHAN_INFO_PROCESSED,
-	IIO_CHAN_INFO_SCALE,
-	IIO_CHAN_INFO_OFFSET,
-	IIO_CHAN_INFO_CALIBSCALE,
-	IIO_CHAN_INFO_CALIBBIAS,
-	IIO_CHAN_INFO_PEAK,
-	IIO_CHAN_INFO_PEAK_SCALE,
-	IIO_CHAN_INFO_QUADRATURE_CORRECTION_RAW,
-	IIO_CHAN_INFO_AVERAGE_RAW,
-	IIO_CHAN_INFO_LOW_PASS_FILTER_3DB_FREQUENCY,
-	IIO_CHAN_INFO_HIGH_PASS_FILTER_3DB_FREQUENCY,
-	IIO_CHAN_INFO_SAMP_FREQ,
-	IIO_CHAN_INFO_FREQUENCY,
-	IIO_CHAN_INFO_PHASE,
-	IIO_CHAN_INFO_HARDWAREGAIN,
-	IIO_CHAN_INFO_HYSTERESIS,
-	IIO_CHAN_INFO_INT_TIME,
-	IIO_CHAN_INFO_ENABLE,
-	IIO_CHAN_INFO_CALIBHEIGHT,
-	IIO_CHAN_INFO_CALIBWEIGHT,
-	IIO_CHAN_INFO_DEBOUNCE_COUNT,
-	IIO_CHAN_INFO_DEBOUNCE_TIME,
-	IIO_CHAN_INFO_CALIBEMISSIVITY,
-	IIO_CHAN_INFO_OVERSAMPLING_RATIO,
-};
 
 enum iio_shared_by {
 	IIO_SEPARATE,
@@ -158,8 +127,8 @@ struct iio_mount_matrix {
 
 ssize_t iio_show_mount_matrix(struct iio_dev *indio_dev, uintptr_t priv,
 			      const struct iio_chan_spec *chan, char *buf);
-int of_iio_read_mount_matrix(const struct device *dev, const char *propname,
-			     struct iio_mount_matrix *matrix);
+int iio_read_mount_matrix(struct device *dev, const char *propname,
+			  struct iio_mount_matrix *matrix);
 
 typedef const struct iio_mount_matrix *
 	(iio_get_mount_matrix_t)(const struct iio_dev *indio_dev,
@@ -211,26 +180,36 @@ struct iio_event_spec {
  * @address:		Driver specific identifier.
  * @scan_index:		Monotonic index to give ordering in scans when read
  *			from a buffer.
- * @scan_type:		sign:		's' or 'u' to specify signed or unsigned
- *			realbits:	Number of valid bits of data
- *			storagebits:	Realbits + padding
- *			shift:		Shift right by this before masking out
- *					realbits.
- *			repeat:		Number of times real/storage bits
- *					repeats. When the repeat element is
- *					more than 1, then the type element in
- *					sysfs will show a repeat value.
- *					Otherwise, the number of repetitions is
- *					omitted.
- *			endianness:	little or big endian
+ * @scan_type:		struct describing the scan type
+ * @scan_type.sign:		's' or 'u' to specify signed or unsigned
+ * @scan_type.realbits:		Number of valid bits of data
+ * @scan_type.storagebits:	Realbits + padding
+ * @scan_type.shift:		Shift right by this before masking out
+ *				realbits.
+ * @scan_type.repeat:		Number of times real/storage bits repeats.
+ *				When the repeat element is more than 1, then
+ *				the type element in sysfs will show a repeat
+ *				value. Otherwise, the number of repetitions
+ *				is omitted.
+ * @scan_type.endianness:	little or big endian
  * @info_mask_separate: What information is to be exported that is specific to
  *			this channel.
+ * @info_mask_separate_available: What availability information is to be
+ *			exported that is specific to this channel.
  * @info_mask_shared_by_type: What information is to be exported that is shared
  *			by all channels of the same type.
+ * @info_mask_shared_by_type_available: What availability information is to be
+ *			exported that is shared by all channels of the same
+ *			type.
  * @info_mask_shared_by_dir: What information is to be exported that is shared
  *			by all channels of the same direction.
+ * @info_mask_shared_by_dir_available: What availability information is to be
+ *			exported that is shared by all channels of the same
+ *			direction.
  * @info_mask_shared_by_all: What information is to be exported that is shared
  *			by all channels.
+ * @info_mask_shared_by_all_available: What availability information is to be
+ *			exported that is shared by all channels.
  * @event_spec:		Array of events which should be registered for this
  *			channel.
  * @num_event_specs:	Size of the event_spec array.
@@ -269,9 +248,13 @@ struct iio_chan_spec {
 		enum iio_endian endianness;
 	} scan_type;
 	long			info_mask_separate;
+	long			info_mask_separate_available;
 	long			info_mask_shared_by_type;
+	long			info_mask_shared_by_type_available;
 	long			info_mask_shared_by_dir;
+	long			info_mask_shared_by_dir_available;
 	long			info_mask_shared_by_all;
+	long			info_mask_shared_by_all_available;
 	const struct iio_event_spec *event_spec;
 	unsigned int		num_event_specs;
 	const struct iio_chan_spec_ext_info *ext_info;
@@ -301,6 +284,23 @@ static inline bool iio_channel_has_info(const struct iio_chan_spec *chan,
 		(chan->info_mask_shared_by_all & BIT(type));
 }
 
+/**
+ * iio_channel_has_available() - Checks if a channel has an available attribute
+ * @chan: The channel to be queried
+ * @type: Type of the available attribute to be checked
+ *
+ * Returns true if the channel supports reporting available values for the
+ * given attribute type, false otherwise.
+ */
+static inline bool iio_channel_has_available(const struct iio_chan_spec *chan,
+					     enum iio_chan_info_enum type)
+{
+	return (chan->info_mask_separate_available & BIT(type)) |
+		(chan->info_mask_shared_by_type_available & BIT(type)) |
+		(chan->info_mask_shared_by_dir_available & BIT(type)) |
+		(chan->info_mask_shared_by_all_available & BIT(type));
+}
+
 #define IIO_CHAN_SOFT_TIMESTAMP(_si) {					\
 	.type = IIO_TIMESTAMP,						\
 	.channel = -1,							\
@@ -321,19 +321,22 @@ unsigned int iio_get_time_res(const struct iio_dev *indio_dev);
 #define INDIO_BUFFER_SOFTWARE		0x04
 #define INDIO_BUFFER_HARDWARE		0x08
 #define INDIO_EVENT_TRIGGERED		0x10
+#define INDIO_HARDWARE_TRIGGERED	0x20
 
 #define INDIO_ALL_BUFFER_MODES					\
 	(INDIO_BUFFER_TRIGGERED | INDIO_BUFFER_HARDWARE | INDIO_BUFFER_SOFTWARE)
 
+#define INDIO_ALL_TRIGGERED_MODES	\
+	(INDIO_BUFFER_TRIGGERED		\
+	 | INDIO_EVENT_TRIGGERED	\
+	 | INDIO_HARDWARE_TRIGGERED)
+
 #define INDIO_MAX_RAW_ELEMENTS		4
 
 struct iio_trigger; /* forward declaration */
-struct iio_dev;
 
 /**
  * struct iio_info - constant information about device
- * @driver_module:	module structure used to ensure correct
- *			ownership of chrdevs etc
  * @event_attrs:	event control attributes
  * @attrs:		general purpose device attributes
  * @read_raw:		function to request a value from the device.
@@ -349,8 +352,18 @@ struct iio_dev;
  *			max_len specifies maximum number of elements
  *			vals pointer can contain. val_len is used to return
  *			length of valid elements in vals.
+ * @read_avail:		function to return the available values from the device.
+ *			mask specifies which value. Note 0 means the available
+ *			values for the channel in question.  Return value
+ *			specifies if a IIO_AVAIL_LIST or a IIO_AVAIL_RANGE is
+ *			returned in vals. The type of the vals are returned in
+ *			type and the number of vals is returned in length. For
+ *			ranges, there are always three vals returned; min, step
+ *			and max. For lists, all possible values are enumerated.
  * @write_raw:		function to write a value to the device.
  *			Parameters are the same as for read_raw.
+ * @read_label:		function to request label name for a specified label,
+ *			for better channel identification.
  * @write_raw_get_fmt:	callback function to query the expected
  *			format/precision. If not set by the driver, write_raw
  *			returns IIO_VAL_INT_PLUS_MICRO.
@@ -380,8 +393,7 @@ struct iio_dev;
  *			were flushed and there was an error.
  **/
 struct iio_info {
-	struct module			*driver_module;
-	struct attribute_group		*event_attrs;
+	const struct attribute_group	*event_attrs;
 	const struct attribute_group	*attrs;
 
 	int (*read_raw)(struct iio_dev *indio_dev,
@@ -397,11 +409,22 @@ struct iio_info {
 			int *val_len,
 			long mask);
 
+	int (*read_avail)(struct iio_dev *indio_dev,
+			  struct iio_chan_spec const *chan,
+			  const int **vals,
+			  int *type,
+			  int *length,
+			  long mask);
+
 	int (*write_raw)(struct iio_dev *indio_dev,
 			 struct iio_chan_spec const *chan,
 			 int val,
 			 int val2,
 			 long mask);
+
+	int (*read_label)(struct iio_dev *indio_dev,
+			 struct iio_chan_spec const *chan,
+			 char *label);
 
 	int (*write_raw_get_fmt)(struct iio_dev *indio_dev,
 			 struct iio_chan_spec const *chan,
@@ -466,15 +489,14 @@ struct iio_buffer_setup_ops {
 /**
  * struct iio_dev - industrial I/O device
  * @id:			[INTERN] used to identify device internally
+ * @driver_module:	[INTERN] used to make it harder to undercut users
  * @modes:		[DRIVER] operating modes supported by device
  * @currentmode:	[DRIVER] current operating mode
  * @dev:		[DRIVER] device structure, should be assigned a parent
  *			and owner
- * @event_interface:	[INTERN] event chrdevs associated with interrupt lines
  * @buffer:		[DRIVER] any buffer present
- * @buffer_list:	[INTERN] list of all buffers currently attached
  * @scan_bytes:		[INTERN] num bytes captured to be fed to buffer demux
- * @mlock:		[DRIVER] lock used to prevent simultaneous device state
+ * @mlock:		[INTERN] lock used to prevent simultaneous device state
  *			changes
  * @available_scan_masks: [DRIVER] optional array of allowed bitmasks
  * @masklength:		[INTERN] the length of the mask established from
@@ -483,38 +505,32 @@ struct iio_buffer_setup_ops {
  * @scan_timestamp:	[INTERN] set if any buffers have requested timestamp
  * @scan_index_timestamp:[INTERN] cache of the index to the timestamp
  * @trig:		[INTERN] current device trigger (buffer modes)
- * @trig_readonly	[INTERN] mark the current trigger immutable
+ * @trig_readonly:	[INTERN] mark the current trigger immutable
  * @pollfunc:		[DRIVER] function run on trigger being received
  * @pollfunc_event:	[DRIVER] function run on events trigger being received
  * @channels:		[DRIVER] channel specification structure table
  * @num_channels:	[DRIVER] number of channels specified in @channels.
- * @channel_attr_list:	[INTERN] keep track of automatically created channel
- *			attributes
- * @chan_attr_group:	[INTERN] group for all attrs in base directory
  * @name:		[DRIVER] name of the device.
+ * @label:              [DRIVER] unique name to identify which device this is
  * @info:		[DRIVER] callbacks and constant info from driver
  * @clock_id:		[INTERN] timestamping clock posix identifier
  * @info_exist_lock:	[INTERN] lock to prevent use during removal
  * @setup_ops:		[DRIVER] callbacks to call before and after buffer
  *			enable/disable
  * @chrdev:		[INTERN] associated character device
- * @groups:		[INTERN] attribute groups
- * @groupcounter:	[INTERN] index of next attribute group
  * @flags:		[INTERN] file ops related flags including busy flag.
- * @debugfs_dentry:	[INTERN] device specific debugfs dentry.
- * @cached_reg_addr:	[INTERN] cached register address for debugfs reads.
+ * @priv:		[DRIVER] reference to driver's private information
+ *			**MUST** be accessed **ONLY** via iio_priv() helper
  */
 struct iio_dev {
 	int				id;
+	struct module			*driver_module;
 
 	int				modes;
 	int				currentmode;
 	struct device			dev;
 
-	struct iio_event_interface	*event_interface;
-
 	struct iio_buffer		*buffer;
-	struct list_head		buffer_list;
 	int				scan_bytes;
 	struct mutex			mlock;
 
@@ -531,31 +547,45 @@ struct iio_dev {
 	struct iio_chan_spec const	*channels;
 	int				num_channels;
 
-	struct list_head		channel_attr_list;
-	struct attribute_group		chan_attr_group;
 	const char			*name;
+	const char			*label;
 	const struct iio_info		*info;
 	clockid_t			clock_id;
 	struct mutex			info_exist_lock;
 	const struct iio_buffer_setup_ops	*setup_ops;
 	struct cdev			chrdev;
-#define IIO_MAX_GROUPS 6
-	const struct attribute_group	*groups[IIO_MAX_GROUPS + 1];
-	int				groupcounter;
 
 	unsigned long			flags;
-#if defined(CONFIG_DEBUG_FS)
-	struct dentry			*debugfs_dentry;
-	unsigned			cached_reg_addr;
-#endif
+	void				*priv;
 };
 
 const struct iio_chan_spec
 *iio_find_channel_from_si(struct iio_dev *indio_dev, int si);
-int iio_device_register(struct iio_dev *indio_dev);
+/**
+ * iio_device_register() - register a device with the IIO subsystem
+ * @indio_dev:		Device structure filled by the device driver
+ **/
+#define iio_device_register(indio_dev) \
+	__iio_device_register((indio_dev), THIS_MODULE)
+int __iio_device_register(struct iio_dev *indio_dev, struct module *this_mod);
 void iio_device_unregister(struct iio_dev *indio_dev);
-int devm_iio_device_register(struct device *dev, struct iio_dev *indio_dev);
-void devm_iio_device_unregister(struct device *dev, struct iio_dev *indio_dev);
+/**
+ * devm_iio_device_register - Resource-managed iio_device_register()
+ * @dev:	Device to allocate iio_dev for
+ * @indio_dev:	Device structure filled by the device driver
+ *
+ * Managed iio_device_register.  The IIO device registered with this
+ * function is automatically unregistered on driver detach. This function
+ * calls iio_device_register() internally. Refer to that function for more
+ * information.
+ *
+ * RETURNS:
+ * 0 on success, negative error number on failure.
+ */
+#define devm_iio_device_register(dev, indio_dev) \
+	__devm_iio_device_register((dev), (indio_dev), THIS_MODULE)
+int __devm_iio_device_register(struct device *dev, struct iio_dev *indio_dev,
+			       struct module *this_mod);
 int iio_push_event(struct iio_dev *indio_dev, u64 ev_code, s64 timestamp);
 int iio_device_claim_direct_mode(struct iio_dev *indio_dev);
 void iio_device_release_direct_mode(struct iio_dev *indio_dev);
@@ -581,6 +611,8 @@ static inline clockid_t iio_device_get_clock(const struct iio_dev *indio_dev)
 	return indio_dev->clock_id;
 }
 
+int iio_device_set_clock(struct iio_dev *indio_dev, clockid_t clock_id);
+
 /**
  * dev_to_iio_dev() - Get IIO device struct from a device struct
  * @dev: 		The device embedded in the IIO device
@@ -603,6 +635,26 @@ static inline struct iio_dev *iio_device_get(struct iio_dev *indio_dev)
 	return indio_dev ? dev_to_iio_dev(get_device(&indio_dev->dev)) : NULL;
 }
 
+/**
+ * iio_device_set_parent() - assign parent device to the IIO device object
+ * @indio_dev: 		IIO device structure
+ * @parent:		reference to parent device object
+ *
+ * This utility must be called between IIO device allocation
+ * (via devm_iio_device_alloc()) & IIO device registration
+ * (via iio_device_register() and devm_iio_device_register())).
+ * By default, the device allocation will also assign a parent device to
+ * the IIO device object. In cases where devm_iio_device_alloc() is used,
+ * sometimes the parent device must be different than the device used to
+ * manage the allocation.
+ * In that case, this helper should be used to change the parent, hence the
+ * requirement to call this between allocation & registration.
+ **/
+static inline void iio_device_set_parent(struct iio_dev *indio_dev,
+					 struct device *parent)
+{
+	indio_dev->dev.parent = parent;
+}
 
 /**
  * iio_device_set_drvdata() - Set device driver data
@@ -623,34 +675,26 @@ static inline void iio_device_set_drvdata(struct iio_dev *indio_dev, void *data)
  *
  * Returns the data previously set with iio_device_set_drvdata()
  */
-static inline void *iio_device_get_drvdata(struct iio_dev *indio_dev)
+static inline void *iio_device_get_drvdata(const struct iio_dev *indio_dev)
 {
 	return dev_get_drvdata(&indio_dev->dev);
 }
 
 /* Can we make this smaller? */
 #define IIO_ALIGN L1_CACHE_BYTES
-struct iio_dev *iio_device_alloc(int sizeof_priv);
+struct iio_dev *iio_device_alloc(struct device *parent, int sizeof_priv);
 
+/* The information at the returned address is guaranteed to be cacheline aligned */
 static inline void *iio_priv(const struct iio_dev *indio_dev)
 {
-	return (char *)indio_dev + ALIGN(sizeof(struct iio_dev), IIO_ALIGN);
-}
-
-static inline struct iio_dev *iio_priv_to_dev(void *priv)
-{
-	return (struct iio_dev *)((char *)priv -
-				  ALIGN(sizeof(struct iio_dev), IIO_ALIGN));
+	return indio_dev->priv;
 }
 
 void iio_device_free(struct iio_dev *indio_dev);
-int devm_iio_device_match(struct device *dev, void *res, void *data);
-struct iio_dev *devm_iio_device_alloc(struct device *dev, int sizeof_priv);
-void devm_iio_device_free(struct device *dev, struct iio_dev *indio_dev);
-struct iio_trigger *devm_iio_trigger_alloc(struct device *dev,
-						const char *fmt, ...);
-void devm_iio_trigger_free(struct device *dev, struct iio_trigger *iio_trig);
-
+struct iio_dev *devm_iio_device_alloc(struct device *parent, int sizeof_priv);
+__printf(2, 3)
+struct iio_trigger *devm_iio_trigger_alloc(struct device *parent,
+					   const char *fmt, ...);
 /**
  * iio_buffer_enabled() - helper function to test if the buffer is enabled
  * @indio_dev:		IIO device structure for device
@@ -667,10 +711,7 @@ static inline bool iio_buffer_enabled(struct iio_dev *indio_dev)
  * @indio_dev:		IIO device structure for device
  **/
 #if defined(CONFIG_DEBUG_FS)
-static inline struct dentry *iio_get_debugfs_dentry(struct iio_dev *indio_dev)
-{
-	return indio_dev->debugfs_dentry;
-}
+struct dentry *iio_get_debugfs_dentry(struct iio_dev *indio_dev);
 #else
 static inline struct dentry *iio_get_debugfs_dentry(struct iio_dev *indio_dev)
 {

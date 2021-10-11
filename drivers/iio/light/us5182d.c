@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015 Intel Corporation
  *
  * Driver for UPISEMI us5182d Proximity and Ambient Light Sensor.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  *
  * To do: Interrupt support.
  */
@@ -454,8 +446,8 @@ static int us5182d_read_raw(struct iio_dev *indio_dev,
 
 /**
  * us5182d_update_dark_th - update Darh_Th registers
- * @data	us5182d_data structure
- * @index	index in us5182d_dark_ths array to use for the updated value
+ * @data:	us5182d_data structure
+ * @index:	index in us5182d_dark_ths array to use for the updated value
  *
  * Function needs to be called with a lock held because it needs two i2c write
  * byte operations as these registers (0x27 0x28) don't work in word mode
@@ -477,8 +469,8 @@ static int us5182d_update_dark_th(struct us5182d_data *data, int index)
 
 /**
  * us5182d_apply_scale - update the ALS scale
- * @data	us5182d_data structure
- * @index	index in us5182d_scales array to use for the updated value
+ * @data:	us5182d_data structure
+ * @index:	index in us5182d_scales array to use for the updated value
  *
  * Function needs to be called with a lock held as we're having more than one
  * i2c operation.
@@ -714,7 +706,6 @@ err:
 }
 
 static const struct iio_info us5182d_info = {
-	.driver_module	= THIS_MODULE,
 	.read_raw = us5182d_read_raw,
 	.write_raw = us5182d_write_raw,
 	.attrs = &us5182d_attr_group,
@@ -860,7 +851,6 @@ static int us5182d_probe(struct i2c_client *client,
 
 	mutex_init(&data->lock);
 
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->info = &us5182d_info;
 	indio_dev->name = US5182D_DRV_NAME;
 	indio_dev->channels = us5182d_channels;
@@ -972,10 +962,17 @@ static const struct i2c_device_id us5182d_id[] = {
 
 MODULE_DEVICE_TABLE(i2c, us5182d_id);
 
+static const struct of_device_id us5182d_of_match[] = {
+	{ .compatible = "upisemi,usd5182" },
+	{}
+};
+MODULE_DEVICE_TABLE(of, us5182d_of_match);
+
 static struct i2c_driver us5182d_driver = {
 	.driver = {
 		.name = US5182D_DRV_NAME,
 		.pm = &us5182d_pm_ops,
+		.of_match_table = us5182d_of_match,
 		.acpi_match_table = ACPI_PTR(us5182d_acpi_match),
 	},
 	.probe = us5182d_probe,

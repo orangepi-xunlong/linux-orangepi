@@ -188,7 +188,7 @@
 #define HW_ASSISTED_I2C_STATUS_FAILURE     2
 #define HW_ASSISTED_I2C_STATUS_SUCCESS     1
 
-#pragma pack(1)                                       // BIOS data must use byte aligment
+#pragma pack(1)                                       // BIOS data must use byte alignment
 
 // Define offset to location of ROM header.
 #define OFFSET_TO_POINTER_TO_ATOM_ROM_HEADER         0x00000048L
@@ -631,6 +631,13 @@ typedef struct _COMPUTE_MEMORY_CLOCK_PARAM_PARAMETERS_V2_2
   COMPUTE_MEMORY_ENGINE_PLL_PARAMETERS_V4 ulClock;
   ULONG ulReserved;
 }COMPUTE_MEMORY_CLOCK_PARAM_PARAMETERS_V2_2;
+
+typedef struct _COMPUTE_MEMORY_CLOCK_PARAM_PARAMETERS_V2_3
+{
+  COMPUTE_MEMORY_ENGINE_PLL_PARAMETERS_V4 ulClock;
+  USHORT  usMclk_fcw_frac;                  //fractional divider of fcw = usSclk_fcw_frac/65536
+  USHORT  usMclk_fcw_int;                   //integer divider of fcwc
+}COMPUTE_MEMORY_CLOCK_PARAM_PARAMETERS_V2_3;
 
 //Input parameter of DynamicMemorySettingsTable
 //when ATOM_COMPUTE_CLOCK_FREQ.ulComputeClockFlag = COMPUTE_MEMORY_PLL_PARAM
@@ -1980,9 +1987,9 @@ typedef struct _PIXEL_CLOCK_PARAMETERS_V6
 #define PIXEL_CLOCK_V6_MISC_HDMI_BPP_MASK           0x0c
 #define PIXEL_CLOCK_V6_MISC_HDMI_24BPP              0x00
 #define PIXEL_CLOCK_V6_MISC_HDMI_36BPP              0x04
-#define PIXEL_CLOCK_V6_MISC_HDMI_36BPP_V6           0x08    //for V6, the correct defintion for 36bpp should be 2 for 36bpp(2:1)
+#define PIXEL_CLOCK_V6_MISC_HDMI_36BPP_V6           0x08    //for V6, the correct definition for 36bpp should be 2 for 36bpp(2:1)
 #define PIXEL_CLOCK_V6_MISC_HDMI_30BPP              0x08
-#define PIXEL_CLOCK_V6_MISC_HDMI_30BPP_V6           0x04    //for V6, the correct defintion for 30bpp should be 1 for 36bpp(5:4)
+#define PIXEL_CLOCK_V6_MISC_HDMI_30BPP_V6           0x04    //for V6, the correct definition for 30bpp should be 1 for 36bpp(5:4)
 #define PIXEL_CLOCK_V6_MISC_HDMI_48BPP              0x0c
 #define PIXEL_CLOCK_V6_MISC_REF_DIV_SRC             0x10
 #define PIXEL_CLOCK_V6_MISC_GEN_DPREFCLK            0x40
@@ -4099,7 +4106,7 @@ typedef struct  _ATOM_LCD_MODE_CONTROL_CAP
 typedef struct _ATOM_FAKE_EDID_PATCH_RECORD
 {
   UCHAR ucRecordType;
-  UCHAR ucFakeEDIDLength;       // = 128 means EDID lenght is 128 bytes, otherwise the EDID length = ucFakeEDIDLength*128
+  UCHAR ucFakeEDIDLength;       // = 128 means EDID length is 128 bytes, otherwise the EDID length = ucFakeEDIDLength*128
   UCHAR ucFakeEDIDString[1];    // This actually has ucFakeEdidLength elements.
 } ATOM_FAKE_EDID_PATCH_RECORD;
 
@@ -4292,6 +4299,7 @@ typedef struct _ATOM_DPCD_INFO
 #define ATOM_VRAM_OPERATION_FLAGS_SHIFT        30
 #define   ATOM_VRAM_BLOCK_NEEDS_NO_RESERVATION   0x1
 #define   ATOM_VRAM_BLOCK_NEEDS_RESERVATION      0x0
+#define   ATOM_VRAM_BLOCK_SRIOV_MSG_SHARE_RESERVATION 0x2
 
 /***********************************************************************************/
 // Structure used in VRAM_UsageByFirmwareTable
@@ -4361,7 +4369,7 @@ typedef struct _ATOM_GPIO_PIN_ASSIGNMENT
 // GPIO use to control PCIE_VDDC in certain SLT board
 #define PCIE_VDDC_CONTROL_GPIO_PINID        56
 
-//from SMU7.x, if ucGPIO_ID=PP_AC_DC_SWITCH_GPIO_PINID in GPIO_LUTTable, AC/DC swithing feature is enable
+//from SMU7.x, if ucGPIO_ID=PP_AC_DC_SWITCH_GPIO_PINID in GPIO_LUTTable, AC/DC switching feature is enable
 #define PP_AC_DC_SWITCH_GPIO_PINID          60
 //from SMU7.x, if ucGPIO_ID=VDDC_REGULATOR_VRHOT_GPIO_PINID in GPIO_LUTable, VRHot feature is enable
 #define VDDC_VRHOT_GPIO_PINID               61
@@ -5628,7 +5636,9 @@ typedef struct  _ATOM_SMU_INFO_V2_1
 {
   ATOM_COMMON_TABLE_HEADER         asHeader;
   UCHAR ucSclkEntryNum;            // for potential future extend, indicate the number of ATOM_SCLK_FCW_RANGE_ENTRY_V1
-  UCHAR ucReserved[3];
+  UCHAR ucSMUVer;
+  UCHAR ucSharePowerSource;
+  UCHAR ucReserved;
   ATOM_SCLK_FCW_RANGE_ENTRY_V1     asSclkFcwRangeEntry[8];
 }ATOM_SMU_INFO_V2_1;
 
@@ -5647,6 +5657,22 @@ typedef struct  _ATOM_GFX_INFO_V2_1
   UCHAR max_texture_channel_caches;
 }ATOM_GFX_INFO_V2_1;
 
+typedef struct  _ATOM_GFX_INFO_V2_3
+{
+  ATOM_COMMON_TABLE_HEADER asHeader;
+  UCHAR GfxIpMinVer;
+  UCHAR GfxIpMajVer;
+  UCHAR max_shader_engines;
+  UCHAR max_tile_pipes;
+  UCHAR max_cu_per_sh;
+  UCHAR max_sh_per_se;
+  UCHAR max_backends_per_se;
+  UCHAR max_texture_channel_caches;
+  USHORT usHiLoLeakageThreshold;
+  USHORT usEdcDidtLoDpm7TableOffset; //offset of DPM7 low leakage table _ATOM_EDC_DIDT_TABLE_V1
+  USHORT usEdcDidtHiDpm7TableOffset; //offset of DPM7 high leakage table _ATOM_EDC_DIDT_TABLE_V1
+  USHORT usReserverd[3];
+}ATOM_GFX_INFO_V2_3;
 
 typedef struct _ATOM_POWER_SOURCE_OBJECT
 {
@@ -9180,7 +9206,7 @@ typedef struct  _ATOM_POWERPLAY_INFO_V3
 
 /*********************************************************************************/
 
-#pragma pack() // BIOS data must use byte aligment
+#pragma pack() // BIOS data must use byte alignment
 
 #pragma pack(1)
 
@@ -9211,7 +9237,7 @@ typedef struct _ATOM_SERVICE_INFO
 
 
 
-#pragma pack() // BIOS data must use byte aligment
+#pragma pack() // BIOS data must use byte alignment
 
 //
 // AMD ACPI Table

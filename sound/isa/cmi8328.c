@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for C-Media CMI8328-based soundcards, such as AudioExcel AV500
  * Copyright (c) 2012 Ondrej Zary
@@ -26,12 +27,12 @@ MODULE_AUTHOR("Ondrej Zary <linux@rainbow-software.org>");
 MODULE_DESCRIPTION("C-Media CMI8328");
 MODULE_LICENSE("GPL");
 
-#if defined(CONFIG_GAMEPORT) || defined(CONFIG_GAMEPORT_MODULE)
+#if IS_ENABLED(CONFIG_GAMEPORT)
 #define SUPPORT_JOYSTICK 1
 #endif
 
 /* I/O port is configured by jumpers on the card to one of these */
-static int cmi8328_ports[] = { 0x530, 0xe80, 0xf40, 0x604 };
+static const int cmi8328_ports[] = { 0x530, 0xe80, 0xf40, 0x604 };
 #define CMI8328_MAX	ARRAY_SIZE(cmi8328_ports)
 
 static int index[CMI8328_MAX] =     {[0 ... (CMI8328_MAX-1)] = -1};
@@ -51,18 +52,18 @@ MODULE_PARM_DESC(index, "Index value for CMI8328 soundcard.");
 module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for CMI8328 soundcard.");
 
-module_param_array(port, long, NULL, 0444);
+module_param_hw_array(port, long, ioport, NULL, 0444);
 MODULE_PARM_DESC(port, "Port # for CMI8328 driver.");
-module_param_array(irq, int, NULL, 0444);
+module_param_hw_array(irq, int, irq, NULL, 0444);
 MODULE_PARM_DESC(irq, "IRQ # for CMI8328 driver.");
-module_param_array(dma1, int, NULL, 0444);
+module_param_hw_array(dma1, int, dma, NULL, 0444);
 MODULE_PARM_DESC(dma1, "DMA1 for CMI8328 driver.");
-module_param_array(dma2, int, NULL, 0444);
+module_param_hw_array(dma2, int, dma, NULL, 0444);
 MODULE_PARM_DESC(dma2, "DMA2 for CMI8328 driver.");
 
-module_param_array(mpuport, long, NULL, 0444);
+module_param_hw_array(mpuport, long, ioport, NULL, 0444);
 MODULE_PARM_DESC(mpuport, "MPU-401 port # for CMI8328 driver.");
-module_param_array(mpuirq, int, NULL, 0444);
+module_param_hw_array(mpuirq, int, irq, NULL, 0444);
 MODULE_PARM_DESC(mpuirq, "IRQ # for CMI8328 MPU-401 port.");
 #ifdef SUPPORT_JOYSTICK
 module_param_array(gameport, bool, NULL, 0444);
@@ -192,7 +193,7 @@ static int snd_cmi8328_mixer(struct snd_wss *chip)
 }
 
 /* find index of an item in "-1"-ended array */
-int array_find(int array[], int item)
+static int array_find(const int array[], int item)
 {
 	int i;
 
@@ -203,7 +204,7 @@ int array_find(int array[], int item)
 	return -1;
 }
 /* the same for long */
-int array_find_l(long array[], long item)
+static int array_find_l(const long array[], long item)
 {
 	int i;
 
@@ -223,16 +224,16 @@ static int snd_cmi8328_probe(struct device *pdev, unsigned int ndev)
 	struct resource *res;
 #endif
 	int err, pos;
-	static long mpu_ports[] = { 0x330, 0x300, 0x310, 0x320, 0x332, 0x334,
+	static const long mpu_ports[] = { 0x330, 0x300, 0x310, 0x320, 0x332, 0x334,
 				   0x336, -1 };
-	static u8 mpu_port_bits[] = { 3, 0, 1, 2, 4, 5, 6 };
-	static int mpu_irqs[] = { 9, 7, 5, 3, -1 };
-	static u8 mpu_irq_bits[] = { 3, 2, 1, 0 };
-	static int irqs[] = { 9, 10, 11, 7, -1 };
-	static u8 irq_bits[] = { 2, 3, 4, 1 };
-	static int dma1s[] = { 3, 1, 0, -1 };
-	static u8 dma_bits[] = { 3, 2, 1 };
-	static int dma2s[][2] = { {1, -1}, {0, -1}, {-1, -1}, {0, -1} };
+	static const u8 mpu_port_bits[] = { 3, 0, 1, 2, 4, 5, 6 };
+	static const int mpu_irqs[] = { 9, 7, 5, 3, -1 };
+	static const u8 mpu_irq_bits[] = { 3, 2, 1, 0 };
+	static const int irqs[] = { 9, 10, 11, 7, -1 };
+	static const u8 irq_bits[] = { 2, 3, 4, 1 };
+	static const int dma1s[] = { 3, 1, 0, -1 };
+	static const u8 dma_bits[] = { 3, 2, 1 };
+	static const int dma2s[][2] = { {1, -1}, {0, -1}, {-1, -1}, {0, -1} };
 	u16 port = cmi8328_ports[ndev];
 	u8 val;
 
@@ -402,7 +403,7 @@ error:
 	return err;
 }
 
-static int snd_cmi8328_remove(struct device *pdev, unsigned int dev)
+static void snd_cmi8328_remove(struct device *pdev, unsigned int dev)
 {
 	struct snd_card *card = dev_get_drvdata(pdev);
 	struct snd_cmi8328 *cmi = card->private_data;
@@ -419,7 +420,6 @@ static int snd_cmi8328_remove(struct device *pdev, unsigned int dev)
 	snd_cmi8328_cfg_write(cmi->port, CFG2, 0);
 	snd_cmi8328_cfg_write(cmi->port, CFG3, 0);
 	snd_card_free(card);
-	return 0;
 }
 
 #ifdef CONFIG_PM
@@ -434,7 +434,6 @@ static int snd_cmi8328_suspend(struct device *pdev, unsigned int n,
 	cmi = card->private_data;
 	snd_cmi8328_cfg_save(cmi->port, cmi->cfg);
 	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
-	snd_pcm_suspend_all(cmi->wss->pcm);
 	cmi->wss->suspend(cmi->wss);
 
 	return 0;

@@ -1,19 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Block Translation Table
  * Copyright (c) 2014-2015, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 #include <linux/highmem.h>
 #include <linux/debugfs.h>
 #include <linux/blkdev.h>
+#include <linux/pagemap.h>
 #include <linux/module.h>
 #include <linux/device.h>
 #include <linux/mutex.h>
@@ -23,6 +16,7 @@
 #include <linux/ndctl.h>
 #include <linux/fs.h>
 #include <linux/nd.h>
+#include <linux/backing-dev.h>
 #include "btt.h"
 #include "nd.h"
 
@@ -31,46 +25,65 @@ enum log_ent_request {
 	LOG_OLD_ENT
 };
 
+static struct device *to_dev(struct arena_info *arena)
+{
+	return &arena->nd_btt->dev;
+}
+
+static u64 adjust_initial_offset(struct nd_btt *nd_btt, u64 offset)
+{
+	return offset + nd_btt->initial_offset;
+}
+
 static int arena_read_bytes(struct arena_info *arena, resource_size_t offset,
-		void *buf, size_t n)
+		void *buf, size_t n, unsigned long flags)
 {
 	struct nd_btt *nd_btt = arena->nd_btt;
 	struct nd_namespace_common *ndns = nd_btt->ndns;
 
-	/* arena offsets are 4K from the base of the device */
-	offset += SZ_4K;
-	return nvdimm_read_bytes(ndns, offset, buf, n);
+	/* arena offsets may be shifted from the base of the device */
+	offset = adjust_initial_offset(nd_btt, offset);
+	return nvdimm_read_bytes(ndns, offset, buf, n, flags);
 }
 
 static int arena_write_bytes(struct arena_info *arena, resource_size_t offset,
-		void *buf, size_t n)
+		void *buf, size_t n, unsigned long flags)
 {
 	struct nd_btt *nd_btt = arena->nd_btt;
 	struct nd_namespace_common *ndns = nd_btt->ndns;
 
-	/* arena offsets are 4K from the base of the device */
-	offset += SZ_4K;
-	return nvdimm_write_bytes(ndns, offset, buf, n);
+	/* arena offsets may be shifted from the base of the device */
+	offset = adjust_initial_offset(nd_btt, offset);
+	return nvdimm_write_bytes(ndns, offset, buf, n, flags);
 }
 
 static int btt_info_write(struct arena_info *arena, struct btt_sb *super)
 {
 	int ret;
 
+	/*
+	 * infooff and info2off should always be at least 512B aligned.
+	 * We rely on that to make sure rw_bytes does error clearing
+	 * correctly, so make sure that is the case.
+	 */
+	dev_WARN_ONCE(to_dev(arena), !IS_ALIGNED(arena->infooff, 512),
+		"arena->infooff: %#llx is unaligned\n", arena->infooff);
+	dev_WARN_ONCE(to_dev(arena), !IS_ALIGNED(arena->info2off, 512),
+		"arena->info2off: %#llx is unaligned\n", arena->info2off);
+
 	ret = arena_write_bytes(arena, arena->info2off, super,
-			sizeof(struct btt_sb));
+			sizeof(struct btt_sb), 0);
 	if (ret)
 		return ret;
 
 	return arena_write_bytes(arena, arena->infooff, super,
-			sizeof(struct btt_sb));
+			sizeof(struct btt_sb), 0);
 }
 
 static int btt_info_read(struct arena_info *arena, struct btt_sb *super)
 {
-	WARN_ON(!super);
 	return arena_read_bytes(arena, arena->infooff, super,
-			sizeof(struct btt_sb));
+			sizeof(struct btt_sb), 0);
 }
 
 /*
@@ -79,16 +92,20 @@ static int btt_info_read(struct arena_info *arena, struct btt_sb *super)
  *   mapping is in little-endian
  *   mapping contains 'E' and 'Z' flags as desired
  */
-static int __btt_map_write(struct arena_info *arena, u32 lba, __le32 mapping)
+static int __btt_map_write(struct arena_info *arena, u32 lba, __le32 mapping,
+		unsigned long flags)
 {
 	u64 ns_off = arena->mapoff + (lba * MAP_ENT_SIZE);
 
-	WARN_ON(lba >= arena->external_nlba);
-	return arena_write_bytes(arena, ns_off, &mapping, MAP_ENT_SIZE);
+	if (unlikely(lba >= arena->external_nlba))
+		dev_err_ratelimited(to_dev(arena),
+			"%s: lba %#x out of range (max: %#x)\n",
+			__func__, lba, arena->external_nlba);
+	return arena_write_bytes(arena, ns_off, &mapping, MAP_ENT_SIZE, flags);
 }
 
 static int btt_map_write(struct arena_info *arena, u32 lba, u32 mapping,
-			u32 z_flag, u32 e_flag)
+			u32 z_flag, u32 e_flag, unsigned long rwb_flags)
 {
 	u32 ze;
 	__le32 mapping_le;
@@ -97,7 +114,7 @@ static int btt_map_write(struct arena_info *arena, u32 lba, u32 mapping,
 	 * This 'mapping' is supposed to be just the LBA mapping, without
 	 * any flags set, so strip the flag bits.
 	 */
-	mapping &= MAP_LBA_MASK;
+	mapping = ent_lba(mapping);
 
 	ze = (z_flag << 1) + e_flag;
 	switch (ze) {
@@ -122,34 +139,38 @@ static int btt_map_write(struct arena_info *arena, u32 lba, u32 mapping,
 		 * construed as a valid 'normal' case, but we decide not to,
 		 * to avoid confusion
 		 */
-		WARN_ONCE(1, "Invalid use of Z and E flags\n");
+		dev_err_ratelimited(to_dev(arena),
+			"Invalid use of Z and E flags\n");
 		return -EIO;
 	}
 
 	mapping_le = cpu_to_le32(mapping);
-	return __btt_map_write(arena, lba, mapping_le);
+	return __btt_map_write(arena, lba, mapping_le, rwb_flags);
 }
 
 static int btt_map_read(struct arena_info *arena, u32 lba, u32 *mapping,
-			int *trim, int *error)
+			int *trim, int *error, unsigned long rwb_flags)
 {
 	int ret;
 	__le32 in;
 	u32 raw_mapping, postmap, ze, z_flag, e_flag;
 	u64 ns_off = arena->mapoff + (lba * MAP_ENT_SIZE);
 
-	WARN_ON(lba >= arena->external_nlba);
+	if (unlikely(lba >= arena->external_nlba))
+		dev_err_ratelimited(to_dev(arena),
+			"%s: lba %#x out of range (max: %#x)\n",
+			__func__, lba, arena->external_nlba);
 
-	ret = arena_read_bytes(arena, ns_off, &in, MAP_ENT_SIZE);
+	ret = arena_read_bytes(arena, ns_off, &in, MAP_ENT_SIZE, rwb_flags);
 	if (ret)
 		return ret;
 
 	raw_mapping = le32_to_cpu(in);
 
-	z_flag = (raw_mapping & MAP_TRIM_MASK) >> MAP_TRIM_SHIFT;
-	e_flag = (raw_mapping & MAP_ERR_MASK) >> MAP_ERR_SHIFT;
+	z_flag = ent_z_flag(raw_mapping);
+	e_flag = ent_e_flag(raw_mapping);
 	ze = (z_flag << 1) + e_flag;
-	postmap = raw_mapping & MAP_LBA_MASK;
+	postmap = ent_lba(raw_mapping);
 
 	/* Reuse the {z,e}_flag variables for *trim and *error */
 	z_flag = 0;
@@ -186,10 +207,9 @@ static int btt_map_read(struct arena_info *arena, u32 lba, u32 *mapping,
 static int btt_log_group_read(struct arena_info *arena, u32 lane,
 			struct log_group *log)
 {
-	WARN_ON(!log);
 	return arena_read_bytes(arena,
 			arena->logoff + (lane * LOG_GRP_SIZE), log,
-			LOG_GRP_SIZE);
+			LOG_GRP_SIZE, 0);
 }
 
 static struct dentry *debugfs_root;
@@ -299,11 +319,6 @@ static int btt_log_get_old(struct arena_info *a, struct log_group *log)
 	return old;
 }
 
-static struct device *to_dev(struct arena_info *arena)
-{
-	return &arena->nd_btt->dev;
-}
-
 /*
  * This function copies the desired (old/new) log entry into ent if
  * it is not NULL. It returns the sub-slot number (0 or 1)
@@ -323,7 +338,7 @@ static int btt_log_read(struct arena_info *arena, u32 lane,
 
 	old_ent = btt_log_get_old(arena, &log);
 	if (old_ent < 0 || old_ent > 1) {
-		dev_info(to_dev(arena),
+		dev_err(to_dev(arena),
 				"log corruption (%d): lane %d seq [%d, %d]\n",
 				old_ent, lane, log.ent[arena->log_index[0]].seq,
 				log.ent[arena->log_index[1]].seq);
@@ -345,7 +360,7 @@ static int btt_log_read(struct arena_info *arena, u32 lane,
  * btt_flog_write is the wrapper for updating the freelist elements
  */
 static int __btt_log_write(struct arena_info *arena, u32 lane,
-			u32 sub, struct log_entry *ent)
+			u32 sub, struct log_entry *ent, unsigned long flags)
 {
 	int ret;
 	u32 group_slot = arena->log_index[sub];
@@ -356,13 +371,13 @@ static int __btt_log_write(struct arena_info *arena, u32 lane,
 	ns_off = arena->logoff + (lane * LOG_GRP_SIZE) +
 		(group_slot * LOG_ENT_SIZE);
 	/* split the 16B write into atomic, durable halves */
-	ret = arena_write_bytes(arena, ns_off, src, log_half);
+	ret = arena_write_bytes(arena, ns_off, src, log_half, flags);
 	if (ret)
 		return ret;
 
 	ns_off += log_half;
 	src += log_half;
-	return arena_write_bytes(arena, ns_off, src, log_half);
+	return arena_write_bytes(arena, ns_off, src, log_half, flags);
 }
 
 static int btt_flog_write(struct arena_info *arena, u32 lane, u32 sub,
@@ -370,7 +385,7 @@ static int btt_flog_write(struct arena_info *arena, u32 lane, u32 sub,
 {
 	int ret;
 
-	ret = __btt_log_write(arena, lane, sub, ent);
+	ret = __btt_log_write(arena, lane, sub, ent, NVDIMM_IO_ATOMIC);
 	if (ret)
 		return ret;
 
@@ -378,7 +393,9 @@ static int btt_flog_write(struct arena_info *arena, u32 lane, u32 sub,
 	arena->freelist[lane].sub = 1 - arena->freelist[lane].sub;
 	if (++(arena->freelist[lane].seq) == 4)
 		arena->freelist[lane].seq = 1;
-	arena->freelist[lane].block = le32_to_cpu(ent->old_map);
+	if (ent_e_flag(le32_to_cpu(ent->old_map)))
+		arena->freelist[lane].has_err = 1;
+	arena->freelist[lane].block = ent_lba(le32_to_cpu(ent->old_map));
 
 	return ret;
 }
@@ -399,11 +416,21 @@ static int btt_map_init(struct arena_info *arena)
 	if (!zerobuf)
 		return -ENOMEM;
 
+	/*
+	 * mapoff should always be at least 512B  aligned. We rely on that to
+	 * make sure rw_bytes does error clearing correctly, so make sure that
+	 * is the case.
+	 */
+	dev_WARN_ONCE(to_dev(arena), !IS_ALIGNED(arena->mapoff, 512),
+		"arena->mapoff: %#llx is unaligned\n", arena->mapoff);
+
 	while (mapsize) {
 		size_t size = min(mapsize, chunk_size);
 
+		dev_WARN_ONCE(to_dev(arena), size < 512,
+			"chunk size: %#zx is unaligned\n", size);
 		ret = arena_write_bytes(arena, arena->mapoff + offset, zerobuf,
-				size);
+				size, 0);
 		if (ret)
 			goto free;
 
@@ -423,33 +450,93 @@ static int btt_map_init(struct arena_info *arena)
  */
 static int btt_log_init(struct arena_info *arena)
 {
+	size_t logsize = arena->info2off - arena->logoff;
+	size_t chunk_size = SZ_4K, offset = 0;
+	struct log_entry ent;
+	void *zerobuf;
 	int ret;
 	u32 i;
-	struct log_entry ent, zerolog;
 
-	memset(&zerolog, 0, sizeof(zerolog));
+	zerobuf = kzalloc(chunk_size, GFP_KERNEL);
+	if (!zerobuf)
+		return -ENOMEM;
+	/*
+	 * logoff should always be at least 512B  aligned. We rely on that to
+	 * make sure rw_bytes does error clearing correctly, so make sure that
+	 * is the case.
+	 */
+	dev_WARN_ONCE(to_dev(arena), !IS_ALIGNED(arena->logoff, 512),
+		"arena->logoff: %#llx is unaligned\n", arena->logoff);
+
+	while (logsize) {
+		size_t size = min(logsize, chunk_size);
+
+		dev_WARN_ONCE(to_dev(arena), size < 512,
+			"chunk size: %#zx is unaligned\n", size);
+		ret = arena_write_bytes(arena, arena->logoff + offset, zerobuf,
+				size, 0);
+		if (ret)
+			goto free;
+
+		offset += size;
+		logsize -= size;
+		cond_resched();
+	}
 
 	for (i = 0; i < arena->nfree; i++) {
 		ent.lba = cpu_to_le32(i);
 		ent.old_map = cpu_to_le32(arena->external_nlba + i);
 		ent.new_map = cpu_to_le32(arena->external_nlba + i);
 		ent.seq = cpu_to_le32(LOG_SEQ_INIT);
-		ret = __btt_log_write(arena, i, 0, &ent);
+		ret = __btt_log_write(arena, i, 0, &ent, 0);
 		if (ret)
-			return ret;
-		ret = __btt_log_write(arena, i, 1, &zerolog);
-		if (ret)
-			return ret;
+			goto free;
 	}
 
-	return 0;
+ free:
+	kfree(zerobuf);
+	return ret;
+}
+
+static u64 to_namespace_offset(struct arena_info *arena, u64 lba)
+{
+	return arena->dataoff + ((u64)lba * arena->internal_lbasize);
+}
+
+static int arena_clear_freelist_error(struct arena_info *arena, u32 lane)
+{
+	int ret = 0;
+
+	if (arena->freelist[lane].has_err) {
+		void *zero_page = page_address(ZERO_PAGE(0));
+		u32 lba = arena->freelist[lane].block;
+		u64 nsoff = to_namespace_offset(arena, lba);
+		unsigned long len = arena->sector_size;
+
+		mutex_lock(&arena->err_lock);
+
+		while (len) {
+			unsigned long chunk = min(len, PAGE_SIZE);
+
+			ret = arena_write_bytes(arena, nsoff, zero_page,
+				chunk, 0);
+			if (ret)
+				break;
+			len -= chunk;
+			nsoff += chunk;
+			if (len == 0)
+				arena->freelist[lane].has_err = 0;
+		}
+		mutex_unlock(&arena->err_lock);
+	}
+	return ret;
 }
 
 static int btt_freelist_init(struct arena_info *arena)
 {
-	int old, new, ret;
-	u32 i, map_entry;
-	struct log_entry log_new, log_old;
+	int new, ret;
+	struct log_entry log_new;
+	u32 i, map_entry, log_oldmap, log_newmap;
 
 	arena->freelist = kcalloc(arena->nfree, sizeof(struct free_entry),
 					GFP_KERNEL);
@@ -457,40 +544,59 @@ static int btt_freelist_init(struct arena_info *arena)
 		return -ENOMEM;
 
 	for (i = 0; i < arena->nfree; i++) {
-		old = btt_log_read(arena, i, &log_old, LOG_OLD_ENT);
-		if (old < 0)
-			return old;
-
 		new = btt_log_read(arena, i, &log_new, LOG_NEW_ENT);
 		if (new < 0)
 			return new;
 
+		/* old and new map entries with any flags stripped out */
+		log_oldmap = ent_lba(le32_to_cpu(log_new.old_map));
+		log_newmap = ent_lba(le32_to_cpu(log_new.new_map));
+
 		/* sub points to the next one to be overwritten */
 		arena->freelist[i].sub = 1 - new;
 		arena->freelist[i].seq = nd_inc_seq(le32_to_cpu(log_new.seq));
-		arena->freelist[i].block = le32_to_cpu(log_new.old_map);
+		arena->freelist[i].block = log_oldmap;
+
+		/*
+		 * FIXME: if error clearing fails during init, we want to make
+		 * the BTT read-only
+		 */
+		if (ent_e_flag(le32_to_cpu(log_new.old_map)) &&
+		    !ent_normal(le32_to_cpu(log_new.old_map))) {
+			arena->freelist[i].has_err = 1;
+			ret = arena_clear_freelist_error(arena, i);
+			if (ret)
+				dev_err_ratelimited(to_dev(arena),
+					"Unable to clear known errors\n");
+		}
 
 		/* This implies a newly created or untouched flog entry */
-		if (log_new.old_map == log_new.new_map)
+		if (log_oldmap == log_newmap)
 			continue;
 
 		/* Check if map recovery is needed */
 		ret = btt_map_read(arena, le32_to_cpu(log_new.lba), &map_entry,
-				NULL, NULL);
+				NULL, NULL, 0);
 		if (ret)
 			return ret;
-		if ((le32_to_cpu(log_new.new_map) != map_entry) &&
-				(le32_to_cpu(log_new.old_map) == map_entry)) {
+
+		/*
+		 * The map_entry from btt_read_map is stripped of any flag bits,
+		 * so use the stripped out versions from the log as well for
+		 * testing whether recovery is needed. For restoration, use the
+		 * 'raw' version of the log entries as that captured what we
+		 * were going to write originally.
+		 */
+		if ((log_newmap != map_entry) && (log_oldmap == map_entry)) {
 			/*
 			 * Last transaction wrote the flog, but wasn't able
 			 * to complete the map write. So fix up the map.
 			 */
 			ret = btt_map_write(arena, le32_to_cpu(log_new.lba),
-					le32_to_cpu(log_new.new_map), 0, 0);
+					le32_to_cpu(log_new.new_map), 0, 0, 0);
 			if (ret)
 				return ret;
 		}
-
 	}
 
 	return 0;
@@ -648,6 +754,8 @@ static struct arena_info *alloc_arena(struct btt *btt, size_t size,
 	if (!arena)
 		return NULL;
 	arena->nd_btt = btt->nd_btt;
+	arena->sector_size = btt->sector_size;
+	mutex_init(&arena->err_lock);
 
 	if (!size)
 		return arena;
@@ -658,8 +766,8 @@ static struct arena_info *alloc_arena(struct btt *btt, size_t size,
 	arena->internal_lbasize = roundup(arena->external_lbasize,
 					INT_LBASIZE_ALIGNMENT);
 	arena->nfree = BTT_DEFAULT_NFREE;
-	arena->version_major = 1;
-	arena->version_minor = 1;
+	arena->version_major = btt->nd_btt->version_major;
+	arena->version_minor = btt->nd_btt->version_minor;
 
 	if (available % BTT_PG_SIZE)
 		available -= (available % BTT_PG_SIZE);
@@ -769,7 +877,7 @@ static int discover_arenas(struct btt *btt)
 				dev_info(to_dev(arena), "No existing arenas\n");
 				goto out;
 			} else {
-				dev_info(to_dev(arena),
+				dev_err(to_dev(arena),
 						"Found corrupted metadata!\n");
 				ret = -ENODEV;
 				goto out;
@@ -996,11 +1104,6 @@ static void unlock_map(struct arena_info *arena, u32 premap)
 	spin_unlock(&arena->map_locks[idx].lock);
 }
 
-static u64 to_namespace_offset(struct arena_info *arena, u64 lba)
-{
-	return arena->dataoff + ((u64)lba * arena->internal_lbasize);
-}
-
 static int btt_data_read(struct arena_info *arena, struct page *page,
 			unsigned int off, u32 lba, u32 len)
 {
@@ -1008,7 +1111,7 @@ static int btt_data_read(struct arena_info *arena, struct page *page,
 	u64 nsoff = to_namespace_offset(arena, lba);
 	void *mem = kmap_atomic(page);
 
-	ret = arena_read_bytes(arena, nsoff, mem + off, len);
+	ret = arena_read_bytes(arena, nsoff, mem + off, len, NVDIMM_IO_ATOMIC);
 	kunmap_atomic(mem);
 
 	return ret;
@@ -1021,7 +1124,7 @@ static int btt_data_write(struct arena_info *arena, u32 lba,
 	u64 nsoff = to_namespace_offset(arena, lba);
 	void *mem = kmap_atomic(page);
 
-	ret = arena_write_bytes(arena, nsoff, mem + off, len);
+	ret = arena_write_bytes(arena, nsoff, mem + off, len, NVDIMM_IO_ATOMIC);
 	kunmap_atomic(mem);
 
 	return ret;
@@ -1064,10 +1167,12 @@ static int btt_rw_integrity(struct btt *btt, struct bio_integrity_payload *bip,
 		mem = kmap_atomic(bv.bv_page);
 		if (rw)
 			ret = arena_write_bytes(arena, meta_nsoff,
-					mem + bv.bv_offset, cur_len);
+					mem + bv.bv_offset, cur_len,
+					NVDIMM_IO_ATOMIC);
 		else
 			ret = arena_read_bytes(arena, meta_nsoff,
-					mem + bv.bv_offset, cur_len);
+					mem + bv.bv_offset, cur_len,
+					NVDIMM_IO_ATOMIC);
 
 		kunmap_atomic(mem);
 		if (ret)
@@ -1075,7 +1180,8 @@ static int btt_rw_integrity(struct btt *btt, struct bio_integrity_payload *bip,
 
 		len -= cur_len;
 		meta_nsoff += cur_len;
-		bvec_iter_advance(bip->bip_vec, &bip->bip_iter, cur_len);
+		if (!bvec_iter_advance(bip->bip_vec, &bip->bip_iter, cur_len))
+			return -EIO;
 	}
 
 	return ret;
@@ -1109,7 +1215,8 @@ static int btt_read_pg(struct btt *btt, struct bio_integrity_payload *bip,
 
 		cur_len = min(btt->sector_size, len);
 
-		ret = btt_map_read(arena, premap, &postmap, &t_flag, &e_flag);
+		ret = btt_map_read(arena, premap, &postmap, &t_flag, &e_flag,
+				NVDIMM_IO_ATOMIC);
 		if (ret)
 			goto out_lane;
 
@@ -1120,6 +1227,7 @@ static int btt_read_pg(struct btt *btt, struct bio_integrity_payload *bip,
 		 */
 		while (1) {
 			u32 new_map;
+			int new_t, new_e;
 
 			if (t_flag) {
 				zero_fill_data(page, off, cur_len);
@@ -1138,20 +1246,29 @@ static int btt_read_pg(struct btt *btt, struct bio_integrity_payload *bip,
 			 */
 			barrier();
 
-			ret = btt_map_read(arena, premap, &new_map, &t_flag,
-						&e_flag);
+			ret = btt_map_read(arena, premap, &new_map, &new_t,
+						&new_e, NVDIMM_IO_ATOMIC);
 			if (ret)
 				goto out_rtt;
 
-			if (postmap == new_map)
+			if ((postmap == new_map) && (t_flag == new_t) &&
+					(e_flag == new_e))
 				break;
 
 			postmap = new_map;
+			t_flag = new_t;
+			e_flag = new_e;
 		}
 
 		ret = btt_data_read(arena, page, off, postmap, cur_len);
-		if (ret)
+		if (ret) {
+			/* Media error - set the e_flag */
+			if (btt_map_write(arena, premap, postmap, 0, 1, NVDIMM_IO_ATOMIC))
+				dev_warn_ratelimited(to_dev(arena),
+					"Error persistently tracking bad blocks at %#x\n",
+					premap);
 			goto out_rtt;
+		}
 
 		if (bip) {
 			ret = btt_rw_integrity(btt, bip, arena, postmap, READ);
@@ -1176,6 +1293,21 @@ static int btt_read_pg(struct btt *btt, struct bio_integrity_payload *bip,
 	return ret;
 }
 
+/*
+ * Normally, arena_{read,write}_bytes will take care of the initial offset
+ * adjustment, but in the case of btt_is_badblock, where we query is_bad_pmem,
+ * we need the final, raw namespace offset here
+ */
+static bool btt_is_badblock(struct btt *btt, struct arena_info *arena,
+		u32 postmap)
+{
+	u64 nsoff = adjust_initial_offset(arena->nd_btt,
+			to_namespace_offset(arena, postmap));
+	sector_t phys_sector = nsoff >> 9;
+
+	return is_bad_pmem(btt->phys_bb, phys_sector, arena->internal_lbasize);
+}
+
 static int btt_write_pg(struct btt *btt, struct bio_integrity_payload *bip,
 			sector_t sector, struct page *page, unsigned int off,
 			unsigned int len)
@@ -1188,7 +1320,9 @@ static int btt_write_pg(struct btt *btt, struct bio_integrity_payload *bip,
 
 	while (len) {
 		u32 cur_len;
+		int e_flag;
 
+ retry:
 		lane = nd_region_acquire_lane(btt->nd_region);
 
 		ret = lba_to_arena(btt, sector, &premap, &arena);
@@ -1199,6 +1333,21 @@ static int btt_write_pg(struct btt *btt, struct bio_integrity_payload *bip,
 		if ((arena->flags & IB_FLAG_ERROR_MASK) != 0) {
 			ret = -EIO;
 			goto out_lane;
+		}
+
+		if (btt_is_badblock(btt, arena, arena->freelist[lane].block))
+			arena->freelist[lane].has_err = 1;
+
+		if (mutex_is_locked(&arena->err_lock)
+				|| arena->freelist[lane].has_err) {
+			nd_region_release_lane(btt->nd_region, lane);
+
+			ret = arena_clear_freelist_error(arena, lane);
+			if (ret)
+				return ret;
+
+			/* OK to acquire a different lane/free block */
+			goto retry;
 		}
 
 		new_postmap = arena->freelist[lane].block;
@@ -1226,13 +1375,16 @@ static int btt_write_pg(struct btt *btt, struct bio_integrity_payload *bip,
 		}
 
 		lock_map(arena, premap);
-		ret = btt_map_read(arena, premap, &old_postmap, NULL, NULL);
+		ret = btt_map_read(arena, premap, &old_postmap, NULL, &e_flag,
+				NVDIMM_IO_ATOMIC);
 		if (ret)
 			goto out_map;
 		if (old_postmap >= arena->internal_nlba) {
 			ret = -EIO;
 			goto out_map;
 		}
+		if (e_flag)
+			set_e_flag(old_postmap);
 
 		log.lba = cpu_to_le32(premap);
 		log.old_map = cpu_to_le32(old_postmap);
@@ -1243,12 +1395,19 @@ static int btt_write_pg(struct btt *btt, struct bio_integrity_payload *bip,
 		if (ret)
 			goto out_map;
 
-		ret = btt_map_write(arena, premap, new_postmap, 0, 0);
+		ret = btt_map_write(arena, premap, new_postmap, 0, 0,
+			NVDIMM_IO_ATOMIC);
 		if (ret)
 			goto out_map;
 
 		unlock_map(arena, premap);
 		nd_region_release_lane(btt->nd_region, lane);
+
+		if (e_flag) {
+			ret = arena_clear_freelist_error(arena, lane);
+			if (ret)
+				return ret;
+		}
 
 		len -= cur_len;
 		off += cur_len;
@@ -1266,11 +1425,11 @@ static int btt_write_pg(struct btt *btt, struct bio_integrity_payload *bip,
 
 static int btt_do_bvec(struct btt *btt, struct bio_integrity_payload *bip,
 			struct page *page, unsigned int len, unsigned int off,
-			bool is_write, sector_t sector)
+			unsigned int op, sector_t sector)
 {
 	int ret;
 
-	if (!is_write) {
+	if (!op_is_write(op)) {
 		ret = btt_read_pg(btt, bip, page, off, sector, len);
 		flush_dcache_page(page);
 	} else {
@@ -1281,66 +1440,61 @@ static int btt_do_bvec(struct btt *btt, struct bio_integrity_payload *bip,
 	return ret;
 }
 
-static blk_qc_t btt_make_request(struct request_queue *q, struct bio *bio)
+static blk_qc_t btt_submit_bio(struct bio *bio)
 {
 	struct bio_integrity_payload *bip = bio_integrity(bio);
-	struct btt *btt = q->queuedata;
+	struct btt *btt = bio->bi_bdev->bd_disk->private_data;
 	struct bvec_iter iter;
 	unsigned long start;
 	struct bio_vec bvec;
 	int err = 0;
 	bool do_acct;
 
-	/*
-	 * bio_integrity_enabled also checks if the bio already has an
-	 * integrity payload attached. If it does, we *don't* do a
-	 * bio_integrity_prep here - the payload has been generated by
-	 * another kernel subsystem, and we just pass it through.
-	 */
-	if (bio_integrity_enabled(bio) && bio_integrity_prep(bio)) {
-		bio->bi_error = -EIO;
-		goto out;
-	}
+	if (!bio_integrity_prep(bio))
+		return BLK_QC_T_NONE;
 
-	do_acct = nd_iostat_start(bio, &start);
+	do_acct = blk_queue_io_stat(bio->bi_bdev->bd_disk->queue);
+	if (do_acct)
+		start = bio_start_io_acct(bio);
 	bio_for_each_segment(bvec, bio, iter) {
 		unsigned int len = bvec.bv_len;
 
-		BUG_ON(len > PAGE_SIZE);
-		/* Make sure len is in multiples of sector size. */
-		/* XXX is this right? */
-		BUG_ON(len < btt->sector_size);
-		BUG_ON(len % btt->sector_size);
+		if (len > PAGE_SIZE || len < btt->sector_size ||
+				len % btt->sector_size) {
+			dev_err_ratelimited(&btt->nd_btt->dev,
+				"unaligned bio segment (len: %d)\n", len);
+			bio->bi_status = BLK_STS_IOERR;
+			break;
+		}
 
 		err = btt_do_bvec(btt, bip, bvec.bv_page, len, bvec.bv_offset,
-				  op_is_write(bio_op(bio)), iter.bi_sector);
+				  bio_op(bio), iter.bi_sector);
 		if (err) {
-			dev_info(&btt->nd_btt->dev,
+			dev_err(&btt->nd_btt->dev,
 					"io error in %s sector %lld, len %d,\n",
 					(op_is_write(bio_op(bio))) ? "WRITE" :
 					"READ",
 					(unsigned long long) iter.bi_sector, len);
-			bio->bi_error = err;
+			bio->bi_status = errno_to_blk_status(err);
 			break;
 		}
 	}
 	if (do_acct)
-		nd_iostat_end(bio, start);
+		bio_end_io_acct(bio, start);
 
-out:
 	bio_endio(bio);
 	return BLK_QC_T_NONE;
 }
 
 static int btt_rw_page(struct block_device *bdev, sector_t sector,
-		struct page *page, bool is_write)
+		struct page *page, unsigned int op)
 {
 	struct btt *btt = bdev->bd_disk->private_data;
 	int rc;
 
-	rc = btt_do_bvec(btt, NULL, page, PAGE_SIZE, 0, is_write, sector);
+	rc = btt_do_bvec(btt, NULL, page, thp_size(page), 0, op, sector);
 	if (rc == 0)
-		page_endio(page, is_write, 0);
+		page_endio(page, op_is_write(op), 0);
 
 	return rc;
 }
@@ -1357,9 +1511,9 @@ static int btt_getgeo(struct block_device *bd, struct hd_geometry *geo)
 
 static const struct block_device_operations btt_fops = {
 	.owner =		THIS_MODULE,
+	.submit_bio =		btt_submit_bio,
 	.rw_page =		btt_rw_page,
 	.getgeo =		btt_getgeo,
-	.revalidate_disk =	nvdimm_revalidate_disk,
 };
 
 static int btt_blk_init(struct btt *btt)
@@ -1368,7 +1522,7 @@ static int btt_blk_init(struct btt *btt)
 	struct nd_namespace_common *ndns = nd_btt->ndns;
 
 	/* create a new disk and request queue for btt */
-	btt->btt_queue = blk_alloc_queue(GFP_KERNEL);
+	btt->btt_queue = blk_alloc_queue(NUMA_NO_NODE);
 	if (!btt->btt_queue)
 		return -ENOMEM;
 
@@ -1385,12 +1539,9 @@ static int btt_blk_init(struct btt *btt)
 	btt->btt_disk->queue = btt->btt_queue;
 	btt->btt_disk->flags = GENHD_FL_EXT_DEVT;
 
-	blk_queue_make_request(btt->btt_queue, btt_make_request);
 	blk_queue_logical_block_size(btt->btt_queue, btt->sector_size);
 	blk_queue_max_hw_sectors(btt->btt_queue, UINT_MAX);
-	blk_queue_bounce_limit(btt->btt_queue, BLK_BOUNCE_ANY);
-	queue_flag_set_unlocked(QUEUE_FLAG_NONROT, btt->btt_queue);
-	btt->btt_queue->queuedata = btt;
+	blk_queue_flag_set(QUEUE_FLAG_NONROT, btt->btt_queue);
 
 	if (btt_meta_size(btt)) {
 		int rc = nd_integrity_init(btt->btt_disk, btt_meta_size(btt));
@@ -1403,9 +1554,9 @@ static int btt_blk_init(struct btt *btt)
 		}
 	}
 	set_capacity(btt->btt_disk, btt->nlba * btt->sector_size >> 9);
-	device_add_disk(&btt->nd_btt->dev, btt->btt_disk);
+	device_add_disk(&btt->nd_btt->dev, btt->btt_disk, NULL);
 	btt->nd_btt->size = btt->nlba * (u64)btt->sector_size;
-	revalidate_disk(btt->btt_disk);
+	nvdimm_check_and_set_ro(btt->btt_disk);
 
 	return 0;
 }
@@ -1439,6 +1590,7 @@ static struct btt *btt_init(struct nd_btt *nd_btt, unsigned long long rawsize,
 {
 	int ret;
 	struct btt *btt;
+	struct nd_namespace_io *nsio;
 	struct device *dev = &nd_btt->dev;
 
 	btt = devm_kzalloc(dev, sizeof(struct btt), GFP_KERNEL);
@@ -1452,6 +1604,8 @@ static struct btt *btt_init(struct nd_btt *nd_btt, unsigned long long rawsize,
 	INIT_LIST_HEAD(&btt->arena_list);
 	mutex_init(&btt->init_lock);
 	btt->nd_region = nd_region;
+	nsio = to_nd_namespace_io(&nd_btt->ndns->dev);
+	btt->phys_bb = &nsio->bb;
 
 	ret = discover_arenas(btt);
 	if (ret) {
@@ -1460,7 +1614,7 @@ static struct btt *btt_init(struct nd_btt *nd_btt, unsigned long long rawsize,
 	}
 
 	if (btt->init_state != INIT_READY && nd_region->ro) {
-		dev_info(dev, "%s is read-only, unable to init btt metadata\n",
+		dev_warn(dev, "%s is read-only, unable to init btt metadata\n",
 				dev_name(&nd_region->dev));
 		return NULL;
 	} else if (btt->init_state != INIT_READY) {
@@ -1515,18 +1669,38 @@ int nvdimm_namespace_attach_btt(struct nd_namespace_common *ndns)
 {
 	struct nd_btt *nd_btt = to_nd_btt(ndns->claim);
 	struct nd_region *nd_region;
+	struct btt_sb *btt_sb;
 	struct btt *btt;
-	size_t rawsize;
+	size_t size, rawsize;
+	int rc;
 
 	if (!nd_btt->uuid || !nd_btt->ndns || !nd_btt->lbasize) {
 		dev_dbg(&nd_btt->dev, "incomplete btt configuration\n");
 		return -ENODEV;
 	}
 
-	rawsize = nvdimm_namespace_capacity(ndns) - SZ_4K;
+	btt_sb = devm_kzalloc(&nd_btt->dev, sizeof(*btt_sb), GFP_KERNEL);
+	if (!btt_sb)
+		return -ENOMEM;
+
+	size = nvdimm_namespace_capacity(ndns);
+	rc = devm_namespace_enable(&nd_btt->dev, ndns, size);
+	if (rc)
+		return rc;
+
+	/*
+	 * If this returns < 0, that is ok as it just means there wasn't
+	 * an existing BTT, and we're creating a new one. We still need to
+	 * call this as we need the version dependent fields in nd_btt to be
+	 * set correctly based on the holder class
+	 */
+	nd_btt_version(nd_btt, ndns, btt_sb);
+
+	rawsize = size - nd_btt->initial_offset;
 	if (rawsize < ARENA_MIN_SIZE) {
 		dev_dbg(&nd_btt->dev, "%s must be at least %ld bytes\n",
-				dev_name(&ndns->dev), ARENA_MIN_SIZE + SZ_4K);
+				dev_name(&ndns->dev),
+				ARENA_MIN_SIZE + nd_btt->initial_offset);
 		return -ENXIO;
 	}
 	nd_region = to_nd_region(nd_btt->dev.parent);

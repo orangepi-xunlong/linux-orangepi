@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*  linux/include/linux/clocksource.h
  *
  *  This file contains the structure definitions for clocksources.
@@ -16,24 +17,38 @@
 #include <linux/timer.h>
 #include <linux/init.h>
 #include <linux/of.h>
+#include <linux/clocksource_ids.h>
 #include <asm/div64.h>
 #include <asm/io.h>
 
 struct clocksource;
 struct module;
 
-#ifdef CONFIG_ARCH_CLOCKSOURCE_DATA
+#if defined(CONFIG_ARCH_CLOCKSOURCE_DATA) || \
+    defined(CONFIG_GENERIC_GETTIMEOFDAY)
 #include <asm/clocksource.h>
 #endif
+
+#include <vdso/clocksource.h>
 
 /**
  * struct clocksource - hardware abstraction for a free running counter
  *	Provides mostly state-free accessors to the underlying hardware.
  *	This is the structure used for system time.
  *
- * @name:		ptr to clocksource name
- * @list:		list head for registration
- * @rating:		rating value for selection (higher is better)
+ * @read:		Returns a cycle value, passes clocksource as argument
+ * @mask:		Bitmask for two's complement
+ *			subtraction of non 64 bit counters
+ * @mult:		Cycle to nanosecond multiplier
+ * @shift:		Cycle to nanosecond divisor (power of two)
+ * @max_idle_ns:	Maximum idle time permitted by the clocksource (nsecs)
+ * @maxadj:		Maximum adjustment value to mult (~11%)
+ * @archdata:		Optional arch-specific data
+ * @max_cycles:		Maximum safe cycle value which won't overflow on
+ *			multiplication
+ * @name:		Pointer to clocksource name
+ * @list:		List head for registration (internal)
+ * @rating:		Rating value for selection (higher is better)
  *			To avoid rating inflation the following
  *			list should give you a guide as to how
  *			to assign your clocksource a rating
@@ -48,25 +63,27 @@ struct module;
  *			400-499: Perfect
  *				The ideal clocksource. A must-use where
  *				available.
- * @read:		returns a cycle value, passes clocksource as argument
- * @enable:		optional function to enable the clocksource
- * @disable:		optional function to disable the clocksource
- * @mask:		bitmask for two's complement
- *			subtraction of non 64 bit counters
- * @mult:		cycle to nanosecond multiplier
- * @shift:		cycle to nanosecond divisor (power of two)
- * @max_idle_ns:	max idle time permitted by the clocksource (nsecs)
- * @maxadj:		maximum adjustment value to mult (~11%)
- * @max_cycles:		maximum safe cycle value which won't overflow on multiplication
- * @flags:		flags describing special properties
- * @archdata:		arch-specific data
- * @suspend:		suspend function for the clocksource, if necessary
- * @resume:		resume function for the clocksource, if necessary
- * @owner:		module reference, must be set by clocksource in modules
+ * @id:			Defaults to CSID_GENERIC. The id value is captured
+ *			in certain snapshot functions to allow callers to
+ *			validate the clocksource from which the snapshot was
+ *			taken.
+ * @flags:		Flags describing special properties
+ * @enable:		Optional function to enable the clocksource
+ * @disable:		Optional function to disable the clocksource
+ * @suspend:		Optional suspend function for the clocksource
+ * @resume:		Optional resume function for the clocksource
+ * @mark_unstable:	Optional function to inform the clocksource driver that
+ *			the watchdog marked the clocksource unstable
+ * @tick_stable:        Optional function called periodically from the watchdog
+ *			code to provide stable synchronization points
+ * @wd_list:		List head to enqueue into the watchdog list (internal)
+ * @cs_last:		Last clocksource value for clocksource watchdog
+ * @wd_last:		Last watchdog value corresponding to @cs_last
+ * @owner:		Module reference, must be set by clocksource in modules
  *
  * Note: This struct is not used in hotpathes of the timekeeping code
  * because the timekeeper caches the hot path fields in its own data
- * structure, so no line cache alignment is required,
+ * structure, so no cache line alignment is required,
  *
  * The pointer to the clocksource itself is handed to the read
  * callback. If you need extra information there you can wrap struct
@@ -75,33 +92,38 @@ struct module;
  * structure.
  */
 struct clocksource {
-	cycle_t (*read)(struct clocksource *cs);
-	cycle_t mask;
-	u32 mult;
-	u32 shift;
-	u64 max_idle_ns;
-	u32 maxadj;
+	u64			(*read)(struct clocksource *cs);
+	u64			mask;
+	u32			mult;
+	u32			shift;
+	u64			max_idle_ns;
+	u32			maxadj;
 #ifdef CONFIG_ARCH_CLOCKSOURCE_DATA
 	struct arch_clocksource_data archdata;
 #endif
-	u64 max_cycles;
-	const char *name;
-	struct list_head list;
-	int rating;
-	int (*enable)(struct clocksource *cs);
-	void (*disable)(struct clocksource *cs);
-	unsigned long flags;
-	void (*suspend)(struct clocksource *cs);
-	void (*resume)(struct clocksource *cs);
+	u64			max_cycles;
+	const char		*name;
+	struct list_head	list;
+	int			rating;
+	enum clocksource_ids	id;
+	enum vdso_clock_mode	vdso_clock_mode;
+	unsigned long		flags;
+
+	int			(*enable)(struct clocksource *cs);
+	void			(*disable)(struct clocksource *cs);
+	void			(*suspend)(struct clocksource *cs);
+	void			(*resume)(struct clocksource *cs);
+	void			(*mark_unstable)(struct clocksource *cs);
+	void			(*tick_stable)(struct clocksource *cs);
 
 	/* private: */
 #ifdef CONFIG_CLOCKSOURCE_WATCHDOG
 	/* Watchdog related data, used by the framework */
-	struct list_head wd_list;
-	cycle_t cs_last;
-	cycle_t wd_last;
+	struct list_head	wd_list;
+	u64			cs_last;
+	u64			wd_last;
 #endif
-	struct module *owner;
+	struct module		*owner;
 };
 
 /*
@@ -169,11 +191,14 @@ static inline u32 clocksource_hz2mult(u32 hz, u32 shift_constant)
  * @mult:	cycle to nanosecond multiplier
  * @shift:	cycle to nanosecond divisor (power of two)
  *
- * Converts cycles to nanoseconds, using the given mult and shift.
+ * Converts clocksource cycles to nanoseconds, using the given @mult and @shift.
+ * The code is optimized for performance and is not intended to work
+ * with absolute clocksource cycles (as those will easily overflow),
+ * but is only intended to be used with relative (delta) clocksource cycles.
  *
  * XXX - This could use some mult_lxl_ll() asm optimization
  */
-static inline s64 clocksource_cyc2ns(cycle_t cycles, u32 mult, u32 shift)
+static inline s64 clocksource_cyc2ns(u64 cycles, u32 mult, u32 shift)
 {
 	return ((u64) cycles * mult) >> shift;
 }
@@ -186,6 +211,9 @@ extern void clocksource_suspend(void);
 extern void clocksource_resume(void);
 extern struct clocksource * __init clocksource_default_clock(void);
 extern void clocksource_mark_unstable(struct clocksource *cs);
+extern void
+clocksource_start_suspend_timing(struct clocksource *cs, u64 start_cycles);
+extern u64 clocksource_stop_suspend_timing(struct clocksource *cs, u64 now);
 
 extern u64
 clocks_calc_max_nsecs(u32 mult, u32 shift, u32 maxadj, u64 mask, u64 *max_cycles);
@@ -230,29 +258,34 @@ static inline void __clocksource_update_freq_khz(struct clocksource *cs, u32 khz
 	__clocksource_update_freq_scale(cs, 1000, khz);
 }
 
+#ifdef CONFIG_ARCH_CLOCKSOURCE_INIT
+extern void clocksource_arch_init(struct clocksource *cs);
+#else
+static inline void clocksource_arch_init(struct clocksource *cs) { }
+#endif
 
 extern int timekeeping_notify(struct clocksource *clock);
 
-extern cycle_t clocksource_mmio_readl_up(struct clocksource *);
-extern cycle_t clocksource_mmio_readl_down(struct clocksource *);
-extern cycle_t clocksource_mmio_readw_up(struct clocksource *);
-extern cycle_t clocksource_mmio_readw_down(struct clocksource *);
+extern u64 clocksource_mmio_readl_up(struct clocksource *);
+extern u64 clocksource_mmio_readl_down(struct clocksource *);
+extern u64 clocksource_mmio_readw_up(struct clocksource *);
+extern u64 clocksource_mmio_readw_down(struct clocksource *);
 
 extern int clocksource_mmio_init(void __iomem *, const char *,
-	unsigned long, int, unsigned, cycle_t (*)(struct clocksource *));
+	unsigned long, int, unsigned, u64 (*)(struct clocksource *));
 
 extern int clocksource_i8253_init(void);
 
-#define CLOCKSOURCE_OF_DECLARE(name, compat, fn) \
-	OF_DECLARE_1_RET(clksrc, name, compat, fn)
+#define TIMER_OF_DECLARE(name, compat, fn) \
+	OF_DECLARE_1_RET(timer, name, compat, fn)
 
-#ifdef CONFIG_CLKSRC_PROBE
-extern void clocksource_probe(void);
+#ifdef CONFIG_TIMER_PROBE
+extern void timer_probe(void);
 #else
-static inline void clocksource_probe(void) {}
+static inline void timer_probe(void) {}
 #endif
 
-#define CLOCKSOURCE_ACPI_DECLARE(name, table_id, fn)		\
-	ACPI_DECLARE_PROBE_ENTRY(clksrc, name, table_id, 0, NULL, 0, fn)
+#define TIMER_ACPI_DECLARE(name, table_id, fn)		\
+	ACPI_DECLARE_PROBE_ENTRY(timer, name, table_id, 0, NULL, 0, fn)
 
 #endif /* _LINUX_CLOCKSOURCE_H */

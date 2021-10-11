@@ -38,6 +38,7 @@
 #include <linux/types.h>
 #include <linux/mutex.h>
 #include <linux/virtio.h>
+#include <linux/cdev.h>
 #include <linux/completion.h>
 #include <linux/idr.h>
 #include <linux/of.h>
@@ -73,7 +74,7 @@ struct resource_table {
 	u32 ver;
 	u32 num;
 	u32 reserved[2];
-	u32 offset[0];
+	u32 offset[];
 } __packed;
 
 /**
@@ -87,7 +88,7 @@ struct resource_table {
  */
 struct fw_rsc_hdr {
 	u32 type;
-	u8 data[0];
+	u8 data[];
 } __packed;
 
 /**
@@ -100,7 +101,9 @@ struct fw_rsc_hdr {
  *		    the remote processor will be writing logs.
  * @RSC_VDEV:       declare support for a virtio device, and serve as its
  *		    virtio header.
- * @RSC_LAST:       just keep this one at the end
+ * @RSC_LAST:       just keep this one at the end of standard resources
+ * @RSC_VENDOR_START:	start of the vendor specific resource types range
+ * @RSC_VENDOR_END:	end of the vendor specific resource types range
  *
  * For more details regarding a specific resource type, please see its
  * dedicated structure below.
@@ -111,11 +114,13 @@ struct fw_rsc_hdr {
  * please update it as needed.
  */
 enum fw_resource_type {
-	RSC_CARVEOUT	= 0,
-	RSC_DEVMEM	= 1,
-	RSC_TRACE	= 2,
-	RSC_VDEV	= 3,
-	RSC_LAST	= 4,
+	RSC_CARVEOUT		= 0,
+	RSC_DEVMEM		= 1,
+	RSC_TRACE		= 2,
+	RSC_VDEV		= 3,
+	RSC_LAST		= 4,
+	RSC_VENDOR_START	= 128,
+	RSC_VENDOR_END		= 512,
 };
 
 #define FW_RSC_ADDR_ANY (-1)
@@ -302,41 +307,102 @@ struct fw_rsc_vdev {
 	u8 status;
 	u8 num_of_vrings;
 	u8 reserved[2];
-	struct fw_rsc_vdev_vring vring[0];
+	struct fw_rsc_vdev_vring vring[];
 } __packed;
-
-/**
- * struct rproc_mem_entry - memory entry descriptor
- * @va:	virtual address
- * @dma: dma address
- * @len: length, in bytes
- * @da: device address
- * @priv: associated data
- * @node: list node
- */
-struct rproc_mem_entry {
-	void *va;
-	dma_addr_t dma;
-	int len;
-	u32 da;
-	void *priv;
-	struct list_head node;
-};
 
 struct rproc;
 
 /**
+ * struct rproc_mem_entry - memory entry descriptor
+ * @va:	virtual address
+ * @is_iomem: io memory
+ * @dma: dma address
+ * @len: length, in bytes
+ * @da: device address
+ * @release: release associated memory
+ * @priv: associated data
+ * @name: associated memory region name (optional)
+ * @node: list node
+ * @rsc_offset: offset in resource table
+ * @flags: iommu protection flags
+ * @of_resm_idx: reserved memory phandle index
+ * @alloc: specific memory allocator function
+ */
+struct rproc_mem_entry {
+	void *va;
+	bool is_iomem;
+	dma_addr_t dma;
+	size_t len;
+	u32 da;
+	void *priv;
+	char name[32];
+	struct list_head node;
+	u32 rsc_offset;
+	u32 flags;
+	u32 of_resm_idx;
+	int (*alloc)(struct rproc *rproc, struct rproc_mem_entry *mem);
+	int (*release)(struct rproc *rproc, struct rproc_mem_entry *mem);
+};
+
+struct firmware;
+
+/**
+ * enum rsc_handling_status - return status of rproc_ops handle_rsc hook
+ * @RSC_HANDLED:	resource was handled
+ * @RSC_IGNORED:	resource was ignored
+ */
+enum rsc_handling_status {
+	RSC_HANDLED	= 0,
+	RSC_IGNORED	= 1,
+};
+
+/**
  * struct rproc_ops - platform-specific device handlers
+ * @prepare:	prepare device for code loading
+ * @unprepare:	unprepare device after stop
  * @start:	power on the device and boot it
  * @stop:	power off the device
+ * @attach:	attach to a device that his already powered up
+ * @detach:	detach from a device, leaving it powered up
  * @kick:	kick a virtqueue (virtqueue id given as a parameter)
  * @da_to_va:	optional platform hook to perform address translations
+ * @parse_fw:	parse firmware to extract information (e.g. resource table)
+ * @handle_rsc:	optional platform hook to handle vendor resources. Should return
+ * RSC_HANDLED if resource was handled, RSC_IGNORED if not handled and a
+ * negative value on error
+ * @load_rsc_table:	load resource table from firmware image
+ * @find_loaded_rsc_table: find the loaded resource table from firmware image
+ * @get_loaded_rsc_table: get resource table installed in memory
+ *			  by external entity
+ * @load:		load firmware to memory, where the remote processor
+ *			expects to find it
+ * @sanity_check:	sanity check the fw image
+ * @get_boot_addr:	get boot address to entry point specified in firmware
+ * @panic:	optional callback to react to system panic, core will delay
+ *		panic at least the returned number of milliseconds
+ * @coredump:	  collect firmware dump after the subsystem is shutdown
  */
 struct rproc_ops {
+	int (*prepare)(struct rproc *rproc);
+	int (*unprepare)(struct rproc *rproc);
 	int (*start)(struct rproc *rproc);
 	int (*stop)(struct rproc *rproc);
+	int (*attach)(struct rproc *rproc);
+	int (*detach)(struct rproc *rproc);
 	void (*kick)(struct rproc *rproc, int vqid);
-	void * (*da_to_va)(struct rproc *rproc, u64 da, int len);
+	void * (*da_to_va)(struct rproc *rproc, u64 da, size_t len, bool *is_iomem);
+	int (*parse_fw)(struct rproc *rproc, const struct firmware *fw);
+	int (*handle_rsc)(struct rproc *rproc, u32 rsc_type, void *rsc,
+			  int offset, int avail);
+	struct resource_table *(*find_loaded_rsc_table)(
+				struct rproc *rproc, const struct firmware *fw);
+	struct resource_table *(*get_loaded_rsc_table)(
+				struct rproc *rproc, size_t *size);
+	int (*load)(struct rproc *rproc, const struct firmware *fw);
+	int (*sanity_check)(struct rproc *rproc, const struct firmware *fw);
+	u64 (*get_boot_addr)(struct rproc *rproc, const struct firmware *fw);
+	unsigned long (*panic)(struct rproc *rproc);
+	void (*coredump)(struct rproc *rproc);
 };
 
 /**
@@ -346,6 +412,11 @@ struct rproc_ops {
  *			a message.
  * @RPROC_RUNNING:	device is up and running
  * @RPROC_CRASHED:	device has crashed; need to start recovery
+ * @RPROC_DELETED:	device is deleted
+ * @RPROC_ATTACHED:	device has been booted by another entity and the core
+ *			has attached to it
+ * @RPROC_DETACHED:	device has been booted by another entity and waiting
+ *			for the core to attach to it
  * @RPROC_LAST:		just keep this one at the end
  *
  * Please note that the values of these states are used as indices
@@ -359,7 +430,10 @@ enum rproc_state {
 	RPROC_SUSPENDED	= 1,
 	RPROC_RUNNING	= 2,
 	RPROC_CRASHED	= 3,
-	RPROC_LAST	= 4,
+	RPROC_DELETED	= 4,
+	RPROC_ATTACHED	= 5,
+	RPROC_DETACHED	= 6,
+	RPROC_LAST	= 7,
 };
 
 /**
@@ -380,6 +454,41 @@ enum rproc_crash_type {
 };
 
 /**
+ * enum rproc_dump_mechanism - Coredump options for core
+ * @RPROC_COREDUMP_DISABLED:	Don't perform any dump
+ * @RPROC_COREDUMP_ENABLED:	Copy dump to separate buffer and carry on with
+				recovery
+ * @RPROC_COREDUMP_INLINE:	Read segments directly from device memory. Stall
+				recovery until all segments are read
+ */
+enum rproc_dump_mechanism {
+	RPROC_COREDUMP_DISABLED,
+	RPROC_COREDUMP_ENABLED,
+	RPROC_COREDUMP_INLINE,
+};
+
+/**
+ * struct rproc_dump_segment - segment info from ELF header
+ * @node:	list node related to the rproc segment list
+ * @da:		device address of the segment
+ * @size:	size of the segment
+ * @priv:	private data associated with the dump_segment
+ * @dump:	custom dump function to fill device memory segment associated
+ *		with coredump
+ */
+struct rproc_dump_segment {
+	struct list_head node;
+
+	dma_addr_t da;
+	size_t size;
+
+	void *priv;
+	void (*dump)(struct rproc *rproc, struct rproc_dump_segment *segment,
+		     void *dest, size_t offset, size_t size);
+	loff_t offset;
+};
+
+/**
  * struct rproc - represents a physical remote processor device
  * @node: list node of this rproc object
  * @domain: iommu domain
@@ -388,28 +497,35 @@ enum rproc_crash_type {
  * @priv: private data which belongs to the platform-specific rproc module
  * @ops: platform-specific start/stop rproc handlers
  * @dev: virtual device for refcounting and common remoteproc behavior
- * @fw_ops: firmware-specific handlers
  * @power: refcount of users who need this rproc powered up
  * @state: state of the device
+ * @dump_conf: Currently selected coredump configuration
  * @lock: lock which protects concurrent manipulations of the rproc
  * @dbg_dir: debugfs directory of this rproc device
  * @traces: list of trace buffers
  * @num_traces: number of trace buffers
  * @carveouts: list of physically contiguous memory allocations
  * @mappings: list of iommu mappings we initiated, needed on shutdown
- * @firmware_loading_complete: marks e/o asynchronous firmware loading
  * @bootaddr: address of first instruction to boot rproc with (optional)
  * @rvdevs: list of remote virtio devices
+ * @subdevs: list of subdevices, to following the running state
  * @notifyids: idr for dynamically assigning rproc-wide unique notify ids
  * @index: index of this rproc device
  * @crash_handler: workqueue for handling a crash
  * @crash_cnt: crash counter
- * @crash_comp: completion used to sync crash handler and the rproc reload
  * @recovery_disabled: flag that state if recovery was disabled
  * @max_notifyid: largest allocated notify id.
  * @table_ptr: pointer to the resource table in effect
+ * @clean_table: copy of the resource table without modifications.  Used
+ *		 when a remote processor is attached or detached from the core
  * @cached_table: copy of the resource table
+ * @table_sz: size of @cached_table
  * @has_iommu: flag to indicate if remote processor is behind an MMU
+ * @auto_boot: flag to indicate if remote processor should be auto-started
+ * @dump_segments: list of segments in the firmware
+ * @nb_vdev: number of vdev currently handled by rproc
+ * @char_dev: character device of the rproc
+ * @cdev_put_on_release: flag to indicate if remoteproc should be shutdown on @char_dev release
  */
 struct rproc {
 	struct list_head node;
@@ -417,31 +533,56 @@ struct rproc {
 	const char *name;
 	const char *firmware;
 	void *priv;
-	const struct rproc_ops *ops;
+	struct rproc_ops *ops;
 	struct device dev;
-	const struct rproc_fw_ops *fw_ops;
 	atomic_t power;
 	unsigned int state;
+	enum rproc_dump_mechanism dump_conf;
 	struct mutex lock;
 	struct dentry *dbg_dir;
 	struct list_head traces;
 	int num_traces;
 	struct list_head carveouts;
 	struct list_head mappings;
-	struct completion firmware_loading_complete;
-	u32 bootaddr;
+	u64 bootaddr;
 	struct list_head rvdevs;
+	struct list_head subdevs;
 	struct idr notifyids;
 	int index;
 	struct work_struct crash_handler;
 	unsigned int crash_cnt;
-	struct completion crash_comp;
 	bool recovery_disabled;
 	int max_notifyid;
 	struct resource_table *table_ptr;
+	struct resource_table *clean_table;
 	struct resource_table *cached_table;
+	size_t table_sz;
 	bool has_iommu;
 	bool auto_boot;
+	struct list_head dump_segments;
+	int nb_vdev;
+	u8 elf_class;
+	u16 elf_machine;
+	struct cdev cdev;
+	bool cdev_put_on_release;
+};
+
+/**
+ * struct rproc_subdev - subdevice tied to a remoteproc
+ * @node: list node related to the rproc subdevs list
+ * @prepare: prepare function, called before the rproc is started
+ * @start: start function, called after the rproc has been started
+ * @stop: stop function, called before the rproc is stopped; the @crashed
+ *	    parameter indicates if this originates from a recovery
+ * @unprepare: unprepare function, called after the rproc has been stopped
+ */
+struct rproc_subdev {
+	struct list_head node;
+
+	int (*prepare)(struct rproc_subdev *subdev);
+	int (*start)(struct rproc_subdev *subdev);
+	void (*stop)(struct rproc_subdev *subdev, bool crashed);
+	void (*unprepare)(struct rproc_subdev *subdev);
 };
 
 /* we currently support only two vrings per rvdev */
@@ -451,7 +592,6 @@ struct rproc {
 /**
  * struct rproc_vring - remoteproc vring state
  * @va:	virtual address
- * @dma: dma address
  * @len: length, in bytes
  * @da: device address
  * @align: vring alignment
@@ -461,7 +601,6 @@ struct rproc {
  */
 struct rproc_vring {
 	void *va;
-	dma_addr_t dma;
 	int len;
 	u32 da;
 	u32 align;
@@ -472,21 +611,33 @@ struct rproc_vring {
 
 /**
  * struct rproc_vdev - remoteproc state for a supported virtio device
+ * @refcount: reference counter for the vdev and vring allocations
+ * @subdev: handle for registering the vdev as a rproc subdevice
+ * @id: virtio device id (as in virtio_ids.h)
  * @node: list node
  * @rproc: the rproc handle
  * @vdev: the virio device
  * @vring: the vrings for this vdev
  * @rsc_offset: offset of the vdev's resource entry
+ * @index: vdev position versus other vdev declared in resource table
  */
 struct rproc_vdev {
+	struct kref refcount;
+
+	struct rproc_subdev subdev;
+	struct device dev;
+
+	unsigned int id;
 	struct list_head node;
 	struct rproc *rproc;
-	struct virtio_device vdev;
 	struct rproc_vring vring[RVDEV_NUM_VRINGS];
 	u32 rsc_offset;
+	u32 index;
 };
 
 struct rproc *rproc_get_by_phandle(phandle phandle);
+struct rproc *rproc_get_by_child(struct device *dev);
+
 struct rproc *rproc_alloc(struct device *dev, const char *name,
 			  const struct rproc_ops *ops,
 			  const char *firmware, int len);
@@ -494,14 +645,45 @@ void rproc_put(struct rproc *rproc);
 int rproc_add(struct rproc *rproc);
 int rproc_del(struct rproc *rproc);
 void rproc_free(struct rproc *rproc);
+void rproc_resource_cleanup(struct rproc *rproc);
+
+struct rproc *devm_rproc_alloc(struct device *dev, const char *name,
+			       const struct rproc_ops *ops,
+			       const char *firmware, int len);
+int devm_rproc_add(struct device *dev, struct rproc *rproc);
+
+void rproc_add_carveout(struct rproc *rproc, struct rproc_mem_entry *mem);
+
+struct rproc_mem_entry *
+rproc_mem_entry_init(struct device *dev,
+		     void *va, dma_addr_t dma, size_t len, u32 da,
+		     int (*alloc)(struct rproc *, struct rproc_mem_entry *),
+		     int (*release)(struct rproc *, struct rproc_mem_entry *),
+		     const char *name, ...);
+
+struct rproc_mem_entry *
+rproc_of_resm_mem_entry_init(struct device *dev, u32 of_resm_idx, size_t len,
+			     u32 da, const char *name, ...);
 
 int rproc_boot(struct rproc *rproc);
 void rproc_shutdown(struct rproc *rproc);
+int rproc_detach(struct rproc *rproc);
+int rproc_set_firmware(struct rproc *rproc, const char *fw_name);
 void rproc_report_crash(struct rproc *rproc, enum rproc_crash_type type);
+void rproc_coredump_using_sections(struct rproc *rproc);
+int rproc_coredump_add_segment(struct rproc *rproc, dma_addr_t da, size_t size);
+int rproc_coredump_add_custom_segment(struct rproc *rproc,
+				      dma_addr_t da, size_t size,
+				      void (*dumpfn)(struct rproc *rproc,
+						     struct rproc_dump_segment *segment,
+						     void *dest, size_t offset,
+						     size_t size),
+				      void *priv);
+int rproc_coredump_set_elf_info(struct rproc *rproc, u8 class, u16 machine);
 
 static inline struct rproc_vdev *vdev_to_rvdev(struct virtio_device *vdev)
 {
-	return container_of(vdev, struct rproc_vdev, vdev);
+	return container_of(vdev->dev.parent, struct rproc_vdev, dev);
 }
 
 static inline struct rproc *vdev_to_rproc(struct virtio_device *vdev)
@@ -510,5 +692,9 @@ static inline struct rproc *vdev_to_rproc(struct virtio_device *vdev)
 
 	return rvdev->rproc;
 }
+
+void rproc_add_subdev(struct rproc *rproc, struct rproc_subdev *subdev);
+
+void rproc_remove_subdev(struct rproc *rproc, struct rproc_subdev *subdev);
 
 #endif /* REMOTEPROC_H */

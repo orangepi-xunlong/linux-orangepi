@@ -1,7 +1,7 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
+# SPDX-License-Identifier: GPL-2.0
 #
 # Copyright 2005-2009 - Steven Rostedt
-# Licensed under the terms of the GNU GPL License version 2
 #
 #  It's simple enough to figure out how this works.
 #  If not, then you can ask me at stripconfig@goodmis.org
@@ -21,7 +21,7 @@
 #  1. Boot up the kernel that you want to stream line the config on.
 #  2. Change directory to the directory holding the source of the
 #       kernel that you just booted.
-#  3. Copy the configuraton file to this directory as .config
+#  3. Copy the configuration file to this directory as .config
 #  4. Have all your devices that you need modules for connected and
 #      operational (make sure that their corresponding modules are loaded)
 #  5. Run this script redirecting the output to some other file
@@ -42,6 +42,7 @@
 #    mv config_strip .config
 #    make oldconfig
 #
+use warnings;
 use strict;
 use Getopt::Long;
 
@@ -54,8 +55,6 @@ sub dprint {
     return if (!$debugprint);
     print STDERR @_;
 }
-
-my $config = ".config";
 
 my $uname = `uname -r`;
 chomp $uname;
@@ -144,6 +143,7 @@ my %depends;
 my %selects;
 my %prompts;
 my %objects;
+my %config2kfile;
 my $var;
 my $iflevel = 0;
 my @ifdeps;
@@ -164,10 +164,10 @@ sub read_kconfig {
     my $last_source = "";
 
     # Check for any environment variables used
-    while ($source =~ /\$(\w+)/ && $last_source ne $source) {
+    while ($source =~ /\$\((\w+)\)/ && $last_source ne $source) {
 	my $env = $1;
 	$last_source = $source;
-	$source =~ s/\$$env/$ENV{$env}/;
+	$source =~ s/\$\($env\)/$ENV{$env}/;
     }
 
     open(my $kinfile, '<', $source) || die "Can't open $kconfig";
@@ -202,6 +202,7 @@ sub read_kconfig {
 	if (/^\s*(menu)?config\s+(\S+)\s*$/) {
 	    $state = "NEW";
 	    $config = $2;
+	    $config2kfile{"CONFIG_$config"} = $kconfig;
 
 	    # Add depends for 'if' nesting
 	    for (my $i = 0; $i < $iflevel; $i++) {
@@ -373,7 +374,7 @@ if (defined($lsmod_file)) {
 	    $lsmod = "$dir/lsmod";
 	    last;
 	}
-}
+    }
     if (!defined($lsmod)) {
 	# try just the path
 	$lsmod = "lsmod";
@@ -480,7 +481,7 @@ sub parse_config_depends
 # The idea is we look at all the configs that select it. If one
 # is already in our list of configs to enable, then there's nothing
 # else to do. If there isn't, we pick the first config that was
-# enabled in the orignal config and use that.
+# enabled in the original config and use that.
 sub parse_config_selects
 {
     my ($config, $p) = @_;
@@ -592,6 +593,23 @@ while ($repeat) {
 }
 
 my %setconfigs;
+my @preserved_kconfigs;
+if (defined($ENV{'LMC_KEEP'})) {
+	@preserved_kconfigs = split(/:/,$ENV{LMC_KEEP});
+}
+
+sub in_preserved_kconfigs {
+    my $kconfig = $config2kfile{$_[0]};
+    if (!defined($kconfig)) {
+        return 0;
+    }
+    foreach my $excl (@preserved_kconfigs) {
+        if($kconfig =~ /^$excl/) {
+            return 1;
+        }
+    }
+    return 0;
+}
 
 # Finally, read the .config file and turn off any module enabled that
 # we could not find a reason to keep enabled.
@@ -645,6 +663,11 @@ foreach my $line (@config_file) {
     }
 
     if (/^(CONFIG.*)=(m|y)/) {
+        if (in_preserved_kconfigs($1)) {
+            dprint "Preserve config $1";
+            print;
+            next;
+        }
 	if (defined($configs{$1})) {
 	    if ($localyesconfig) {
 	        $setconfigs{$1} = 'y';

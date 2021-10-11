@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  ebtables
  *
@@ -8,11 +9,6 @@
  *
  *  This code is strongly inspired by the iptables code which is
  *  Copyright (C) 1999 Paul `Rusty' Russell & Michael J. Neuling
- *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version
- *  2 of the License, or (at your option) any later version.
  */
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/kmod.h>
@@ -23,17 +19,14 @@
 #include <linux/spinlock.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/smp.h>
 #include <linux/cpumask.h>
 #include <linux/audit.h>
 #include <net/sock.h>
+#include <net/netns/generic.h>
 /* needed for logical [in,out]-dev filtering */
 #include "../br_private.h"
-
-#define BUGPRINT(format, args...) printk("kernel msg: ebtables bug: please "\
-					 "report to author: "format, ## args)
-/* #define BUGPRINT(format, args...) */
 
 /* Each cpu has its own set of counters, so there is no need for write_lock in
  * the softirq
@@ -47,11 +40,14 @@
 #define COUNTER_BASE(c, n, cpu) ((struct ebt_counter *)(((char *)c) + \
 				 COUNTER_OFFSET(n) * cpu))
 
+struct ebt_pernet {
+	struct list_head tables;
+};
 
-
+static unsigned int ebt_pernet_id __read_mostly;
 static DEFINE_MUTEX(ebt_mutex);
 
-#ifdef CONFIG_COMPAT
+#ifdef CONFIG_NETFILTER_XTABLES_COMPAT
 static void ebt_standard_compat_from_user(void *dst, const void *src)
 {
 	int v = *(compat_int_t *)src;
@@ -77,7 +73,7 @@ static struct xt_target ebt_standard_target = {
 	.revision   = 0,
 	.family     = NFPROTO_BRIDGE,
 	.targetsize = sizeof(int),
-#ifdef CONFIG_COMPAT
+#ifdef CONFIG_NETFILTER_XTABLES_COMPAT
 	.compatsize = sizeof(compat_int_t),
 	.compat_from_user = ebt_standard_compat_from_user,
 	.compat_to_user =  ebt_standard_compat_to_user,
@@ -101,7 +97,7 @@ ebt_do_match(struct ebt_entry_match *m, const struct sk_buff *skb,
 {
 	par->match     = m->u.match;
 	par->matchinfo = m->data;
-	return m->u.match->match(skb, par) ? EBT_MATCH : EBT_NOMATCH;
+	return !m->u.match->match(skb, par);
 }
 
 static inline int
@@ -177,6 +173,12 @@ struct ebt_entry *ebt_next_entry(const struct ebt_entry *entry)
 	return (void *)entry + entry->next_offset;
 }
 
+static inline const struct ebt_entry_target *
+ebt_get_target_c(const struct ebt_entry *e)
+{
+	return ebt_get_target((struct ebt_entry *)e);
+}
+
 /* Do some firewalling */
 unsigned int ebt_do_table(struct sk_buff *skb,
 			  const struct nf_hook_state *state,
@@ -194,12 +196,8 @@ unsigned int ebt_do_table(struct sk_buff *skb,
 	const struct ebt_table_info *private;
 	struct xt_action_param acpar;
 
-	acpar.family  = NFPROTO_BRIDGE;
-	acpar.net     = state->net;
-	acpar.in      = state->in;
-	acpar.out     = state->out;
+	acpar.state   = state;
 	acpar.hotdrop = false;
-	acpar.hooknum = hook;
 
 	read_lock_bh(&table->lock);
 	private = table->private;
@@ -227,17 +225,14 @@ unsigned int ebt_do_table(struct sk_buff *skb,
 			return NF_DROP;
 		}
 
-		/* increase counter */
-		(*(counter_base + i)).pcnt++;
-		(*(counter_base + i)).bcnt += skb->len;
+		ADD_COUNTER(*(counter_base + i), skb->len, 1);
 
 		/* these should only watch: not modify, nor tell us
 		 * what to do with the packet
 		 */
 		EBT_WATCHER_ITERATE(point, ebt_do_watcher, skb, &acpar);
 
-		t = (struct ebt_entry_target *)
-		   (((char *)point) + point->target_offset);
+		t = ebt_get_target_c(point);
 		/* standard target */
 		if (!t->u.target->target)
 			verdict = ((struct ebt_standard_target *)t)->verdict;
@@ -256,13 +251,11 @@ unsigned int ebt_do_table(struct sk_buff *skb,
 		}
 		if (verdict == EBT_RETURN) {
 letsreturn:
-#ifdef CONFIG_NETFILTER_DEBUG
-			if (sp == 0) {
-				BUGPRINT("RETURN on base chain");
+			if (WARN(sp == 0, "RETURN on base chain")) {
 				/* act like this is EBT_CONTINUE */
 				goto letscontinue;
 			}
-#endif
+
 			sp--;
 			/* put all the local variables right */
 			i = cs[sp].n;
@@ -275,26 +268,24 @@ letsreturn:
 		}
 		if (verdict == EBT_CONTINUE)
 			goto letscontinue;
-#ifdef CONFIG_NETFILTER_DEBUG
-		if (verdict < 0) {
-			BUGPRINT("bogus standard verdict\n");
+
+		if (WARN(verdict < 0, "bogus standard verdict\n")) {
 			read_unlock_bh(&table->lock);
 			return NF_DROP;
 		}
-#endif
+
 		/* jump to a udc */
 		cs[sp].n = i + 1;
 		cs[sp].chaininfo = chaininfo;
 		cs[sp].e = ebt_next_entry(point);
 		i = 0;
 		chaininfo = (struct ebt_entries *) (base + verdict);
-#ifdef CONFIG_NETFILTER_DEBUG
-		if (chaininfo->distinguisher) {
-			BUGPRINT("jump to non-chain\n");
+
+		if (WARN(chaininfo->distinguisher, "jump to non-chain\n")) {
 			read_unlock_bh(&table->lock);
 			return NF_DROP;
 		}
-#endif
+
 		nentries = chaininfo->nentries;
 		point = (struct ebt_entry *)chaininfo->data;
 		counter_base = cb_base + chaininfo->counter_offset;
@@ -349,10 +340,22 @@ static inline struct ebt_table *
 find_table_lock(struct net *net, const char *name, int *error,
 		struct mutex *mutex)
 {
-	return find_inlist_lock(&net->xt.tables[NFPROTO_BRIDGE], name,
+	struct ebt_pernet *ebt_net = net_generic(net, ebt_pernet_id);
+
+	return find_inlist_lock(&ebt_net->tables, name,
 				"ebtable_", error, mutex);
 }
 
+static inline void ebt_free_table_info(struct ebt_table_info *info)
+{
+	int i;
+
+	if (info->chainstack) {
+		for_each_possible_cpu(i)
+			vfree(info->chainstack[i]);
+		vfree(info->chainstack);
+	}
+}
 static inline int
 ebt_check_match(struct ebt_entry_match *m, struct xt_mtchk_param *par,
 		unsigned int *cnt)
@@ -366,12 +369,12 @@ ebt_check_match(struct ebt_entry_match *m, struct xt_mtchk_param *par,
 	    left - sizeof(struct ebt_entry_match) < m->match_size)
 		return -EINVAL;
 
-	match = xt_find_match(NFPROTO_BRIDGE, m->u.name, 0);
+	match = xt_find_match(NFPROTO_BRIDGE, m->u.name, m->u.revision);
 	if (IS_ERR(match) || match->family != NFPROTO_BRIDGE) {
 		if (!IS_ERR(match))
 			module_put(match->me);
 		request_module("ebt_%s", m->u.name);
-		match = xt_find_match(NFPROTO_BRIDGE, m->u.name, 0);
+		match = xt_find_match(NFPROTO_BRIDGE, m->u.name, m->u.revision);
 	}
 	if (IS_ERR(match))
 		return PTR_ERR(match);
@@ -380,7 +383,7 @@ ebt_check_match(struct ebt_entry_match *m, struct xt_mtchk_param *par,
 	par->match     = match;
 	par->matchinfo = m->data;
 	ret = xt_check_match(par, m->match_size,
-	      e->ethproto, e->invflags & EBT_IPROTO);
+	      ntohs(e->ethproto), e->invflags & EBT_IPROTO);
 	if (ret < 0) {
 		module_put(match->me);
 		return ret;
@@ -417,7 +420,7 @@ ebt_check_watcher(struct ebt_entry_watcher *w, struct xt_tgchk_param *par,
 	par->target   = watcher;
 	par->targinfo = w->data;
 	ret = xt_check_target(par, w->watcher_size,
-	      e->ethproto, e->invflags & EBT_IPROTO);
+	      ntohs(e->ethproto), e->invflags & EBT_IPROTO);
 	if (ret < 0) {
 		module_put(watcher->me);
 		return ret;
@@ -461,8 +464,6 @@ static int ebt_verify_pointers(const struct ebt_replace *repl,
 				/* we make userspace set this right,
 				 * so there is no misunderstanding
 				 */
-				BUGPRINT("EBT_ENTRY_OR_ENTRIES shouldn't be set "
-					 "in distinguisher\n");
 				return -EINVAL;
 			}
 			if (i != NF_BR_NUMHOOKS)
@@ -480,18 +481,14 @@ static int ebt_verify_pointers(const struct ebt_replace *repl,
 			offset += e->next_offset;
 		}
 	}
-	if (offset != limit) {
-		BUGPRINT("entries_size too small\n");
+	if (offset != limit)
 		return -EINVAL;
-	}
 
 	/* check if all valid hooks have a chain */
 	for (i = 0; i < NF_BR_NUMHOOKS; i++) {
 		if (!newinfo->hook_entry[i] &&
-		   (valid_hooks & (1 << i))) {
-			BUGPRINT("Valid hook without chain\n");
+		   (valid_hooks & (1 << i)))
 			return -EINVAL;
-		}
 	}
 	return 0;
 }
@@ -518,26 +515,20 @@ ebt_check_entry_size_and_hooks(const struct ebt_entry *e,
 		/* this checks if the previous chain has as many entries
 		 * as it said it has
 		 */
-		if (*n != *cnt) {
-			BUGPRINT("nentries does not equal the nr of entries "
-				 "in the chain\n");
+		if (*n != *cnt)
 			return -EINVAL;
-		}
+
 		if (((struct ebt_entries *)e)->policy != EBT_DROP &&
 		   ((struct ebt_entries *)e)->policy != EBT_ACCEPT) {
 			/* only RETURN from udc */
 			if (i != NF_BR_NUMHOOKS ||
-			   ((struct ebt_entries *)e)->policy != EBT_RETURN) {
-				BUGPRINT("bad policy\n");
+			   ((struct ebt_entries *)e)->policy != EBT_RETURN)
 				return -EINVAL;
-			}
 		}
 		if (i == NF_BR_NUMHOOKS) /* it's a user defined chain */
 			(*udc_cnt)++;
-		if (((struct ebt_entries *)e)->counter_offset != *totalcnt) {
-			BUGPRINT("counter_offset != totalcnt");
+		if (((struct ebt_entries *)e)->counter_offset != *totalcnt)
 			return -EINVAL;
-		}
 		*n = ((struct ebt_entries *)e)->nentries;
 		*cnt = 0;
 		return 0;
@@ -545,15 +536,13 @@ ebt_check_entry_size_and_hooks(const struct ebt_entry *e,
 	/* a plain old entry, heh */
 	if (sizeof(struct ebt_entry) > e->watchers_offset ||
 	   e->watchers_offset > e->target_offset ||
-	   e->target_offset >= e->next_offset) {
-		BUGPRINT("entry offsets not in right order\n");
+	   e->target_offset >= e->next_offset)
 		return -EINVAL;
-	}
+
 	/* this is not checked anywhere else */
-	if (e->next_offset - e->target_offset < sizeof(struct ebt_entry_target)) {
-		BUGPRINT("target size too small\n");
+	if (e->next_offset - e->target_offset < sizeof(struct ebt_entry_target))
 		return -EINVAL;
-	}
+
 	(*cnt)++;
 	(*totalcnt)++;
 	return 0;
@@ -643,7 +632,7 @@ ebt_cleanup_entry(struct ebt_entry *e, struct net *net, unsigned int *cnt)
 		return 1;
 	EBT_WATCHER_ITERATE(e, ebt_cleanup_watcher, net, NULL);
 	EBT_MATCH_ITERATE(e, ebt_cleanup_match, net, NULL);
-	t = (struct ebt_entry_target *)(((char *)e) + e->target_offset);
+	t = ebt_get_target(e);
 
 	par.net      = net;
 	par.target   = t->u.target;
@@ -673,18 +662,15 @@ ebt_check_entry(struct ebt_entry *e, struct net *net,
 	if (e->bitmask == 0)
 		return 0;
 
-	if (e->bitmask & ~EBT_F_MASK) {
-		BUGPRINT("Unknown flag for bitmask\n");
+	if (e->bitmask & ~EBT_F_MASK)
 		return -EINVAL;
-	}
-	if (e->invflags & ~EBT_INV_MASK) {
-		BUGPRINT("Unknown flag for inv bitmask\n");
+
+	if (e->invflags & ~EBT_INV_MASK)
 		return -EINVAL;
-	}
-	if ((e->bitmask & EBT_NOPROTO) && (e->bitmask & EBT_802_3)) {
-		BUGPRINT("NOPROTO & 802_3 not allowed\n");
+
+	if ((e->bitmask & EBT_NOPROTO) && (e->bitmask & EBT_802_3))
 		return -EINVAL;
-	}
+
 	/* what hook do we belong to? */
 	for (i = 0; i < NF_BR_NUMHOOKS; i++) {
 		if (!newinfo->hook_entry[i])
@@ -724,7 +710,7 @@ ebt_check_entry(struct ebt_entry *e, struct net *net,
 	ret = EBT_WATCHER_ITERATE(e, ebt_check_watcher, &tgpar, &j);
 	if (ret != 0)
 		goto cleanup_watchers;
-	t = (struct ebt_entry_target *)(((char *)e) + e->target_offset);
+	t = ebt_get_target(e);
 	gap = e->next_offset - e->target_offset;
 
 	target = xt_request_find_target(NFPROTO_BRIDGE, t->u.name, 0);
@@ -743,13 +729,11 @@ ebt_check_entry(struct ebt_entry *e, struct net *net,
 	t->u.target = target;
 	if (t->u.target == &ebt_standard_target) {
 		if (gap < sizeof(struct ebt_standard_target)) {
-			BUGPRINT("Standard target size too big\n");
 			ret = -EFAULT;
 			goto cleanup_watchers;
 		}
 		if (((struct ebt_standard_target *)t)->verdict <
 		   -NUM_STANDARD_TARGETS) {
-			BUGPRINT("Invalid standard target\n");
 			ret = -EFAULT;
 			goto cleanup_watchers;
 		}
@@ -762,7 +746,7 @@ ebt_check_entry(struct ebt_entry *e, struct net *net,
 	tgpar.target   = target;
 	tgpar.targinfo = t->data;
 	ret = xt_check_target(&tgpar, t->target_size,
-	      e->ethproto, e->invflags & EBT_IPROTO);
+	      ntohs(e->ethproto), e->invflags & EBT_IPROTO);
 	if (ret < 0) {
 		module_put(target->me);
 		goto cleanup_watchers;
@@ -804,15 +788,13 @@ static int check_chainloops(const struct ebt_entries *chain, struct ebt_cl_stack
 			if (pos == nentries)
 				continue;
 		}
-		t = (struct ebt_entry_target *)
-		   (((char *)e) + e->target_offset);
+		t = ebt_get_target_c(e);
 		if (strcmp(t->u.name, EBT_STANDARD_TARGET))
 			goto letscontinue;
 		if (e->target_offset + sizeof(struct ebt_standard_target) >
-		   e->next_offset) {
-			BUGPRINT("Standard target size too big\n");
+		   e->next_offset)
 			return -1;
-		}
+
 		verdict = ((struct ebt_standard_target *)t)->verdict;
 		if (verdict >= 0) { /* jump to another chain */
 			struct ebt_entries *hlp2 =
@@ -821,14 +803,12 @@ static int check_chainloops(const struct ebt_entries *chain, struct ebt_cl_stack
 				if (hlp2 == cl_s[i].cs.chaininfo)
 					break;
 			/* bad destination or loop */
-			if (i == udc_cnt) {
-				BUGPRINT("bad destination\n");
+			if (i == udc_cnt)
 				return -1;
-			}
-			if (cl_s[i].cs.n) {
-				BUGPRINT("loop\n");
+
+			if (cl_s[i].cs.n)
 				return -1;
-			}
+
 			if (cl_s[i].hookmask & (1 << hooknr))
 				goto letscontinue;
 			/* this can't be 0, so the loop test is correct */
@@ -861,24 +841,21 @@ static int translate_table(struct net *net, const char *name,
 	i = 0;
 	while (i < NF_BR_NUMHOOKS && !newinfo->hook_entry[i])
 		i++;
-	if (i == NF_BR_NUMHOOKS) {
-		BUGPRINT("No valid hooks specified\n");
+	if (i == NF_BR_NUMHOOKS)
 		return -EINVAL;
-	}
-	if (newinfo->hook_entry[i] != (struct ebt_entries *)newinfo->entries) {
-		BUGPRINT("Chains don't start at beginning\n");
+
+	if (newinfo->hook_entry[i] != (struct ebt_entries *)newinfo->entries)
 		return -EINVAL;
-	}
+
 	/* make sure chains are ordered after each other in same order
 	 * as their corresponding hooks
 	 */
 	for (j = i + 1; j < NF_BR_NUMHOOKS; j++) {
 		if (!newinfo->hook_entry[j])
 			continue;
-		if (newinfo->hook_entry[j] <= newinfo->hook_entry[i]) {
-			BUGPRINT("Hook order must be followed\n");
+		if (newinfo->hook_entry[j] <= newinfo->hook_entry[i])
 			return -EINVAL;
-		}
+
 		i = j;
 	}
 
@@ -896,15 +873,11 @@ static int translate_table(struct net *net, const char *name,
 	if (ret != 0)
 		return ret;
 
-	if (i != j) {
-		BUGPRINT("nentries does not equal the nr of entries in the "
-			 "(last) chain\n");
+	if (i != j)
 		return -EINVAL;
-	}
-	if (k != newinfo->nentries) {
-		BUGPRINT("Total nentries is wrong\n");
+
+	if (k != newinfo->nentries)
 		return -EINVAL;
-	}
 
 	/* get the location of the udc, put them in an array
 	 * while we're at it, allocate the chainstack
@@ -914,12 +887,13 @@ static int translate_table(struct net *net, const char *name,
 		 * if an error occurs
 		 */
 		newinfo->chainstack =
-			vmalloc(nr_cpu_ids * sizeof(*(newinfo->chainstack)));
+			vmalloc(array_size(nr_cpu_ids,
+					   sizeof(*(newinfo->chainstack))));
 		if (!newinfo->chainstack)
 			return -ENOMEM;
 		for_each_possible_cpu(i) {
 			newinfo->chainstack[i] =
-			  vmalloc(udc_cnt * sizeof(*(newinfo->chainstack[0])));
+			  vmalloc(array_size(udc_cnt, sizeof(*(newinfo->chainstack[0]))));
 			if (!newinfo->chainstack[i]) {
 				while (i)
 					vfree(newinfo->chainstack[--i]);
@@ -929,7 +903,7 @@ static int translate_table(struct net *net, const char *name,
 			}
 		}
 
-		cl_s = vmalloc(udc_cnt * sizeof(*cl_s));
+		cl_s = vmalloc(array_size(udc_cnt, sizeof(*cl_s)));
 		if (!cl_s)
 			return -ENOMEM;
 		i = 0; /* the i'th udc */
@@ -937,7 +911,6 @@ static int translate_table(struct net *net, const char *name,
 		   ebt_get_udc_positions, newinfo, &i, cl_s);
 		/* sanity check */
 		if (i != udc_cnt) {
-			BUGPRINT("i != udc_cnt\n");
 			vfree(cl_s);
 			return -EFAULT;
 		}
@@ -991,17 +964,16 @@ static void get_counters(const struct ebt_counter *oldcounters,
 		if (cpu == 0)
 			continue;
 		counter_base = COUNTER_BASE(oldcounters, nentries, cpu);
-		for (i = 0; i < nentries; i++) {
-			counters[i].pcnt += counter_base[i].pcnt;
-			counters[i].bcnt += counter_base[i].bcnt;
-		}
+		for (i = 0; i < nentries; i++)
+			ADD_COUNTER(counters[i], counter_base[i].bcnt,
+				    counter_base[i].pcnt);
 	}
 }
 
 static int do_replace_finish(struct net *net, struct ebt_replace *repl,
 			      struct ebt_table_info *newinfo)
 {
-	int ret, i;
+	int ret;
 	struct ebt_counter *counterstmp = NULL;
 	/* used to be able to unlock earlier */
 	struct ebt_table_info *table;
@@ -1038,7 +1010,6 @@ static int do_replace_finish(struct net *net, struct ebt_replace *repl,
 		goto free_unlock;
 
 	if (repl->num_counters && repl->num_counters != t->private->nentries) {
-		BUGPRINT("Wrong nr. of counters requested\n");
 		ret = -EINVAL;
 		goto free_unlock;
 	}
@@ -1077,28 +1048,12 @@ static int do_replace_finish(struct net *net, struct ebt_replace *repl,
 			  ebt_cleanup_entry, net, NULL);
 
 	vfree(table->entries);
-	if (table->chainstack) {
-		for_each_possible_cpu(i)
-			vfree(table->chainstack[i]);
-		vfree(table->chainstack);
-	}
+	ebt_free_table_info(table);
 	vfree(table);
-
 	vfree(counterstmp);
 
-#ifdef CONFIG_AUDIT
-	if (audit_enabled) {
-		struct audit_buffer *ab;
-
-		ab = audit_log_start(current->audit_context, GFP_KERNEL,
-				     AUDIT_NETFILTER_CFG);
-		if (ab) {
-			audit_log_format(ab, "table=%s family=%u entries=%u",
-					 repl->name, AF_BRIDGE, repl->nentries);
-			audit_log_end(ab);
-		}
-	}
-#endif
+	audit_log_nfcfg(repl->name, AF_BRIDGE, repl->nentries,
+			AUDIT_XT_OP_REPLACE, GFP_KERNEL);
 	return ret;
 
 free_unlock:
@@ -1109,34 +1064,26 @@ free_iterate:
 free_counterstmp:
 	vfree(counterstmp);
 	/* can be initialized in translate_table() */
-	if (newinfo->chainstack) {
-		for_each_possible_cpu(i)
-			vfree(newinfo->chainstack[i]);
-		vfree(newinfo->chainstack);
-	}
+	ebt_free_table_info(newinfo);
 	return ret;
 }
 
 /* replace the table */
-static int do_replace(struct net *net, const void __user *user,
-		      unsigned int len)
+static int do_replace(struct net *net, sockptr_t arg, unsigned int len)
 {
 	int ret, countersize;
 	struct ebt_table_info *newinfo;
 	struct ebt_replace tmp;
 
-	if (copy_from_user(&tmp, user, sizeof(tmp)) != 0)
+	if (copy_from_sockptr(&tmp, arg, sizeof(tmp)) != 0)
 		return -EFAULT;
 
-	if (len != sizeof(tmp) + tmp.entries_size) {
-		BUGPRINT("Wrong len argument\n");
+	if (len != sizeof(tmp) + tmp.entries_size)
 		return -EINVAL;
-	}
 
-	if (tmp.entries_size == 0) {
-		BUGPRINT("Entries_size never zero\n");
+	if (tmp.entries_size == 0)
 		return -EINVAL;
-	}
+
 	/* overflow check */
 	if (tmp.nentries >= ((INT_MAX - sizeof(struct ebt_table_info)) /
 			NR_CPUS - SMP_CACHE_BYTES) / sizeof(struct ebt_counter))
@@ -1147,21 +1094,20 @@ static int do_replace(struct net *net, const void __user *user,
 	tmp.name[sizeof(tmp.name) - 1] = 0;
 
 	countersize = COUNTER_OFFSET(tmp.nentries) * nr_cpu_ids;
-	newinfo = vmalloc(sizeof(*newinfo) + countersize);
+	newinfo = __vmalloc(sizeof(*newinfo) + countersize, GFP_KERNEL_ACCOUNT);
 	if (!newinfo)
 		return -ENOMEM;
 
 	if (countersize)
 		memset(newinfo->counters, 0, countersize);
 
-	newinfo->entries = vmalloc(tmp.entries_size);
+	newinfo->entries = __vmalloc(tmp.entries_size, GFP_KERNEL_ACCOUNT);
 	if (!newinfo->entries) {
 		ret = -ENOMEM;
 		goto free_newinfo;
 	}
 	if (copy_from_user(
 	   newinfo->entries, tmp.entries, tmp.entries_size) != 0) {
-		BUGPRINT("Couldn't copy entries from userspace\n");
 		ret = -EFAULT;
 		goto free_entries;
 	}
@@ -1176,21 +1122,40 @@ free_newinfo:
 	return ret;
 }
 
-struct ebt_table *
-ebt_register_table(struct net *net, const struct ebt_table *input_table)
+static void __ebt_unregister_table(struct net *net, struct ebt_table *table)
 {
+	mutex_lock(&ebt_mutex);
+	list_del(&table->list);
+	mutex_unlock(&ebt_mutex);
+	audit_log_nfcfg(table->name, AF_BRIDGE, table->private->nentries,
+			AUDIT_XT_OP_UNREGISTER, GFP_KERNEL);
+	EBT_ENTRY_ITERATE(table->private->entries, table->private->entries_size,
+			  ebt_cleanup_entry, net, NULL);
+	if (table->private->nentries)
+		module_put(table->me);
+	vfree(table->private->entries);
+	ebt_free_table_info(table->private);
+	vfree(table->private);
+	kfree(table->ops);
+	kfree(table);
+}
+
+int ebt_register_table(struct net *net, const struct ebt_table *input_table,
+		       const struct nf_hook_ops *template_ops)
+{
+	struct ebt_pernet *ebt_net = net_generic(net, ebt_pernet_id);
 	struct ebt_table_info *newinfo;
 	struct ebt_table *t, *table;
+	struct nf_hook_ops *ops;
+	unsigned int num_ops;
 	struct ebt_replace_kernel *repl;
 	int ret, i, countersize;
 	void *p;
 
 	if (input_table == NULL || (repl = input_table->table) == NULL ||
 	    repl->entries == NULL || repl->entries_size == 0 ||
-	    repl->counters != NULL || input_table->private != NULL) {
-		BUGPRINT("Bad table data for ebt_register_table!!!\n");
-		return ERR_PTR(-EINVAL);
-	}
+	    repl->counters != NULL || input_table->private != NULL)
+		return -EINVAL;
 
 	/* Don't add one table to multiple lists. */
 	table = kmemdup(input_table, sizeof(struct ebt_table), GFP_KERNEL);
@@ -1228,13 +1193,10 @@ ebt_register_table(struct net *net, const struct ebt_table *input_table)
 				((char *)repl->hook_entry[i] - repl->entries);
 	}
 	ret = translate_table(net, repl->name, newinfo);
-	if (ret != 0) {
-		BUGPRINT("Translate_table failed\n");
+	if (ret != 0)
 		goto free_chainstack;
-	}
 
 	if (table->check && table->check(newinfo, table->valid_hooks)) {
-		BUGPRINT("The table doesn't like its own initial data, lol\n");
 		ret = -EINVAL;
 		goto free_chainstack;
 	}
@@ -1242,10 +1204,9 @@ ebt_register_table(struct net *net, const struct ebt_table *input_table)
 	table->private = newinfo;
 	rwlock_init(&table->lock);
 	mutex_lock(&ebt_mutex);
-	list_for_each_entry(t, &net->xt.tables[NFPROTO_BRIDGE], list) {
+	list_for_each_entry(t, &ebt_net->tables, list) {
 		if (strcmp(t->name, table->name) == 0) {
 			ret = -EEXIST;
-			BUGPRINT("Table name already exists\n");
 			goto free_unlock;
 		}
 	}
@@ -1255,56 +1216,87 @@ ebt_register_table(struct net *net, const struct ebt_table *input_table)
 		ret = -ENOENT;
 		goto free_unlock;
 	}
-	list_add(&table->list, &net->xt.tables[NFPROTO_BRIDGE]);
+
+	num_ops = hweight32(table->valid_hooks);
+	if (num_ops == 0) {
+		ret = -EINVAL;
+		goto free_unlock;
+	}
+
+	ops = kmemdup(template_ops, sizeof(*ops) * num_ops, GFP_KERNEL);
+	if (!ops) {
+		ret = -ENOMEM;
+		if (newinfo->nentries)
+			module_put(table->me);
+		goto free_unlock;
+	}
+
+	for (i = 0; i < num_ops; i++)
+		ops[i].priv = table;
+
+	list_add(&table->list, &ebt_net->tables);
 	mutex_unlock(&ebt_mutex);
-	return table;
+
+	table->ops = ops;
+	ret = nf_register_net_hooks(net, ops, num_ops);
+	if (ret)
+		__ebt_unregister_table(net, table);
+
+	audit_log_nfcfg(repl->name, AF_BRIDGE, repl->nentries,
+			AUDIT_XT_OP_REGISTER, GFP_KERNEL);
+	return ret;
 free_unlock:
 	mutex_unlock(&ebt_mutex);
 free_chainstack:
-	if (newinfo->chainstack) {
-		for_each_possible_cpu(i)
-			vfree(newinfo->chainstack[i]);
-		vfree(newinfo->chainstack);
-	}
+	ebt_free_table_info(newinfo);
 	vfree(newinfo->entries);
 free_newinfo:
 	vfree(newinfo);
 free_table:
 	kfree(table);
 out:
-	return ERR_PTR(ret);
+	return ret;
 }
 
-void ebt_unregister_table(struct net *net, struct ebt_table *table)
+static struct ebt_table *__ebt_find_table(struct net *net, const char *name)
 {
-	int i;
+	struct ebt_pernet *ebt_net = net_generic(net, ebt_pernet_id);
+	struct ebt_table *t;
 
-	if (!table) {
-		BUGPRINT("Request to unregister NULL table!!!\n");
-		return;
-	}
 	mutex_lock(&ebt_mutex);
-	list_del(&table->list);
-	mutex_unlock(&ebt_mutex);
-	EBT_ENTRY_ITERATE(table->private->entries, table->private->entries_size,
-			  ebt_cleanup_entry, net, NULL);
-	if (table->private->nentries)
-		module_put(table->me);
-	vfree(table->private->entries);
-	if (table->private->chainstack) {
-		for_each_possible_cpu(i)
-			vfree(table->private->chainstack[i]);
-		vfree(table->private->chainstack);
+
+	list_for_each_entry(t, &ebt_net->tables, list) {
+		if (strcmp(t->name, name) == 0) {
+			mutex_unlock(&ebt_mutex);
+			return t;
+		}
 	}
-	vfree(table->private);
-	kfree(table);
+
+	mutex_unlock(&ebt_mutex);
+	return NULL;
+}
+
+void ebt_unregister_table_pre_exit(struct net *net, const char *name)
+{
+	struct ebt_table *table = __ebt_find_table(net, name);
+
+	if (table)
+		nf_unregister_net_hooks(net, table->ops, hweight32(table->valid_hooks));
+}
+EXPORT_SYMBOL(ebt_unregister_table_pre_exit);
+
+void ebt_unregister_table(struct net *net, const char *name)
+{
+	struct ebt_table *table = __ebt_find_table(net, name);
+
+	if (table)
+		__ebt_unregister_table(net, table);
 }
 
 /* userspace just supplied us with counters */
 static int do_update_counters(struct net *net, const char *name,
-				struct ebt_counter __user *counters,
-				unsigned int num_counters,
-				const void __user *user, unsigned int len)
+			      struct ebt_counter __user *counters,
+			      unsigned int num_counters, unsigned int len)
 {
 	int i, ret;
 	struct ebt_counter *tmp;
@@ -1313,7 +1305,7 @@ static int do_update_counters(struct net *net, const char *name,
 	if (num_counters == 0)
 		return -EINVAL;
 
-	tmp = vmalloc(num_counters * sizeof(*tmp));
+	tmp = vmalloc(array_size(num_counters, sizeof(*tmp)));
 	if (!tmp)
 		return -ENOMEM;
 
@@ -1322,7 +1314,6 @@ static int do_update_counters(struct net *net, const char *name,
 		goto free_tmp;
 
 	if (num_counters != t->private->nentries) {
-		BUGPRINT("Wrong nr of counters\n");
 		ret = -EINVAL;
 		goto unlock_mutex;
 	}
@@ -1336,10 +1327,8 @@ static int do_update_counters(struct net *net, const char *name,
 	write_lock_bh(&t->lock);
 
 	/* we add to the counters of the first cpu */
-	for (i = 0; i < num_counters; i++) {
-		t->private->counters[i].pcnt += tmp[i].pcnt;
-		t->private->counters[i].bcnt += tmp[i].bcnt;
-	}
+	for (i = 0; i < num_counters; i++)
+		ADD_COUNTER(t->private->counters[i], tmp[i].bcnt, tmp[i].pcnt);
 
 	write_unlock_bh(&t->lock);
 	ret = 0;
@@ -1350,71 +1339,91 @@ free_tmp:
 	return ret;
 }
 
-static int update_counters(struct net *net, const void __user *user,
-			    unsigned int len)
+static int update_counters(struct net *net, sockptr_t arg, unsigned int len)
 {
 	struct ebt_replace hlp;
 
-	if (copy_from_user(&hlp, user, sizeof(hlp)))
+	if (copy_from_sockptr(&hlp, arg, sizeof(hlp)))
 		return -EFAULT;
 
 	if (len != sizeof(hlp) + hlp.num_counters * sizeof(struct ebt_counter))
 		return -EINVAL;
 
 	return do_update_counters(net, hlp.name, hlp.counters,
-				hlp.num_counters, user, len);
+				  hlp.num_counters, len);
 }
 
-static inline int ebt_make_matchname(const struct ebt_entry_match *m,
-				     const char *base, char __user *ubase)
+static inline int ebt_obj_to_user(char __user *um, const char *_name,
+				  const char *data, int entrysize,
+				  int usersize, int datasize, u8 revision)
 {
-	char __user *hlp = ubase + ((char *)m - base);
-	char name[EBT_FUNCTION_MAXNAMELEN] = {};
+	char name[EBT_EXTENSION_MAXNAMELEN] = {0};
 
-	/* ebtables expects 32 bytes long names but xt_match names are 29 bytes
+	/* ebtables expects 31 bytes long names but xt_match names are 29 bytes
 	 * long. Copy 29 bytes and fill remaining bytes with zeroes.
 	 */
-	strlcpy(name, m->u.match->name, sizeof(name));
-	if (copy_to_user(hlp, name, EBT_FUNCTION_MAXNAMELEN))
+	strlcpy(name, _name, sizeof(name));
+	if (copy_to_user(um, name, EBT_EXTENSION_MAXNAMELEN) ||
+	    put_user(revision, (u8 __user *)(um + EBT_EXTENSION_MAXNAMELEN)) ||
+	    put_user(datasize, (int __user *)(um + EBT_EXTENSION_MAXNAMELEN + 1)) ||
+	    xt_data_to_user(um + entrysize, data, usersize, datasize,
+			    XT_ALIGN(datasize)))
 		return -EFAULT;
+
 	return 0;
 }
 
-static inline int ebt_make_watchername(const struct ebt_entry_watcher *w,
-				       const char *base, char __user *ubase)
+static inline int ebt_match_to_user(const struct ebt_entry_match *m,
+				    const char *base, char __user *ubase)
 {
-	char __user *hlp = ubase + ((char *)w - base);
-	char name[EBT_FUNCTION_MAXNAMELEN] = {};
-
-	strlcpy(name, w->u.watcher->name, sizeof(name));
-	if (copy_to_user(hlp, name, EBT_FUNCTION_MAXNAMELEN))
-		return -EFAULT;
-	return 0;
+	return ebt_obj_to_user(ubase + ((char *)m - base),
+			       m->u.match->name, m->data, sizeof(*m),
+			       m->u.match->usersize, m->match_size,
+			       m->u.match->revision);
 }
 
-static inline int ebt_make_names(struct ebt_entry *e, const char *base,
-				 char __user *ubase)
+static inline int ebt_watcher_to_user(const struct ebt_entry_watcher *w,
+				      const char *base, char __user *ubase)
+{
+	return ebt_obj_to_user(ubase + ((char *)w - base),
+			       w->u.watcher->name, w->data, sizeof(*w),
+			       w->u.watcher->usersize, w->watcher_size,
+			       w->u.watcher->revision);
+}
+
+static inline int ebt_entry_to_user(struct ebt_entry *e, const char *base,
+				    char __user *ubase)
 {
 	int ret;
 	char __user *hlp;
 	const struct ebt_entry_target *t;
-	char name[EBT_FUNCTION_MAXNAMELEN] = {};
 
-	if (e->bitmask == 0)
+	if (e->bitmask == 0) {
+		/* special case !EBT_ENTRY_OR_ENTRIES */
+		if (copy_to_user(ubase + ((char *)e - base), e,
+				 sizeof(struct ebt_entries)))
+			return -EFAULT;
 		return 0;
+	}
+
+	if (copy_to_user(ubase + ((char *)e - base), e, sizeof(*e)))
+		return -EFAULT;
 
 	hlp = ubase + (((char *)e + e->target_offset) - base);
-	t = (struct ebt_entry_target *)(((char *)e) + e->target_offset);
+	t = ebt_get_target_c(e);
 
-	ret = EBT_MATCH_ITERATE(e, ebt_make_matchname, base, ubase);
+	ret = EBT_MATCH_ITERATE(e, ebt_match_to_user, base, ubase);
 	if (ret != 0)
 		return ret;
-	ret = EBT_WATCHER_ITERATE(e, ebt_make_watchername, base, ubase);
+	ret = EBT_WATCHER_ITERATE(e, ebt_watcher_to_user, base, ubase);
 	if (ret != 0)
 		return ret;
-	strlcpy(name, t->u.target->name, sizeof(name));
-	if (copy_to_user(hlp, name, EBT_FUNCTION_MAXNAMELEN))
-		return -EFAULT;
+	ret = ebt_obj_to_user(hlp, t->u.target->name, t->data, sizeof(*t),
+			      t->u.target->usersize, t->target_size,
+			      t->u.target->revision);
+	if (ret != 0)
+		return ret;
+
 	return 0;
 }
 
@@ -1430,12 +1439,10 @@ static int copy_counters_to_user(struct ebt_table *t,
 	if (num_counters == 0)
 		return 0;
 
-	if (num_counters != nentries) {
-		BUGPRINT("Num_counters wrong\n");
+	if (num_counters != nentries)
 		return -EINVAL;
-	}
 
-	counterstmp = vmalloc(nentries * sizeof(*counterstmp));
+	counterstmp = vmalloc(array_size(nentries, sizeof(*counterstmp)));
 	if (!counterstmp)
 		return -ENOMEM;
 
@@ -1479,112 +1486,23 @@ static int copy_everything_to_user(struct ebt_table *t, void __user *user,
 	   (tmp.num_counters ? nentries * sizeof(struct ebt_counter) : 0))
 		return -EINVAL;
 
-	if (tmp.nentries != nentries) {
-		BUGPRINT("Nentries wrong\n");
+	if (tmp.nentries != nentries)
 		return -EINVAL;
-	}
 
-	if (tmp.entries_size != entries_size) {
-		BUGPRINT("Wrong size\n");
+	if (tmp.entries_size != entries_size)
 		return -EINVAL;
-	}
 
 	ret = copy_counters_to_user(t, oldcounters, tmp.counters,
 					tmp.num_counters, nentries);
 	if (ret)
 		return ret;
 
-	if (copy_to_user(tmp.entries, entries, entries_size)) {
-		BUGPRINT("Couldn't copy entries to userspace\n");
-		return -EFAULT;
-	}
 	/* set the match/watcher/target names right */
 	return EBT_ENTRY_ITERATE(entries, entries_size,
-	   ebt_make_names, entries, tmp.entries);
+	   ebt_entry_to_user, entries, tmp.entries);
 }
 
-static int do_ebt_set_ctl(struct sock *sk,
-	int cmd, void __user *user, unsigned int len)
-{
-	int ret;
-	struct net *net = sock_net(sk);
-
-	if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
-		return -EPERM;
-
-	switch (cmd) {
-	case EBT_SO_SET_ENTRIES:
-		ret = do_replace(net, user, len);
-		break;
-	case EBT_SO_SET_COUNTERS:
-		ret = update_counters(net, user, len);
-		break;
-	default:
-		ret = -EINVAL;
-	}
-	return ret;
-}
-
-static int do_ebt_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
-{
-	int ret;
-	struct ebt_replace tmp;
-	struct ebt_table *t;
-	struct net *net = sock_net(sk);
-
-	if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
-		return -EPERM;
-
-	if (copy_from_user(&tmp, user, sizeof(tmp)))
-		return -EFAULT;
-
-	tmp.name[sizeof(tmp.name) - 1] = '\0';
-
-	t = find_table_lock(net, tmp.name, &ret, &ebt_mutex);
-	if (!t)
-		return ret;
-
-	switch (cmd) {
-	case EBT_SO_GET_INFO:
-	case EBT_SO_GET_INIT_INFO:
-		if (*len != sizeof(struct ebt_replace)) {
-			ret = -EINVAL;
-			mutex_unlock(&ebt_mutex);
-			break;
-		}
-		if (cmd == EBT_SO_GET_INFO) {
-			tmp.nentries = t->private->nentries;
-			tmp.entries_size = t->private->entries_size;
-			tmp.valid_hooks = t->valid_hooks;
-		} else {
-			tmp.nentries = t->table->nentries;
-			tmp.entries_size = t->table->entries_size;
-			tmp.valid_hooks = t->table->valid_hooks;
-		}
-		mutex_unlock(&ebt_mutex);
-		if (copy_to_user(user, &tmp, *len) != 0) {
-			BUGPRINT("c2u Didn't work\n");
-			ret = -EFAULT;
-			break;
-		}
-		ret = 0;
-		break;
-
-	case EBT_SO_GET_ENTRIES:
-	case EBT_SO_GET_INIT_ENTRIES:
-		ret = copy_everything_to_user(t, user, len, cmd);
-		mutex_unlock(&ebt_mutex);
-		break;
-
-	default:
-		mutex_unlock(&ebt_mutex);
-		ret = -EINVAL;
-	}
-
-	return ret;
-}
-
-#ifdef CONFIG_COMPAT
+#ifdef CONFIG_NETFILTER_XTABLES_COMPAT
 /* 32 bit-userspace compatibility definitions. */
 struct compat_ebt_replace {
 	char name[EBT_TABLE_MAXNAMELEN];
@@ -1603,20 +1521,23 @@ struct compat_ebt_replace {
 /* struct ebt_entry_match, _target and _watcher have same layout */
 struct compat_ebt_entry_mwt {
 	union {
-		char name[EBT_FUNCTION_MAXNAMELEN];
+		struct {
+			char name[EBT_EXTENSION_MAXNAMELEN];
+			u8 revision;
+		};
 		compat_uptr_t ptr;
 	} u;
 	compat_uint_t match_size;
-	compat_uint_t data[0];
+	compat_uint_t data[] __aligned(__alignof__(struct compat_ebt_replace));
 };
 
 /* account for possible padding between match_size and ->data */
 static int ebt_compat_entry_padsize(void)
 {
-	BUILD_BUG_ON(XT_ALIGN(sizeof(struct ebt_entry_match)) <
-			COMPAT_XT_ALIGN(sizeof(struct compat_ebt_entry_mwt)));
-	return (int) XT_ALIGN(sizeof(struct ebt_entry_match)) -
-			COMPAT_XT_ALIGN(sizeof(struct compat_ebt_entry_mwt));
+	BUILD_BUG_ON(sizeof(struct ebt_entry_match) <
+			sizeof(struct compat_ebt_entry_mwt));
+	return (int) sizeof(struct ebt_entry_match) -
+			sizeof(struct compat_ebt_entry_mwt);
 }
 
 static int ebt_compat_match_offset(const struct xt_match *match,
@@ -1643,15 +1564,19 @@ static int compat_match_to_user(struct ebt_entry_match *m, void __user **dstptr,
 	if (WARN_ON(off >= m->match_size))
 		return -EINVAL;
 
-	if (copy_to_user(cm->u.name, match->name,
-	    strlen(match->name) + 1) || put_user(msize, &cm->match_size))
+	if (copy_to_user(cm->u.name, match->name, strlen(match->name) + 1) ||
+	    put_user(match->revision, &cm->u.revision) ||
+	    put_user(msize, &cm->match_size))
 		return -EFAULT;
 
 	if (match->compat_to_user) {
 		if (match->compat_to_user(cm->data, m->data))
 			return -EFAULT;
-	} else if (copy_to_user(cm->data, m->data, msize))
+	} else {
+		if (xt_data_to_user(cm->data, m->data, match->usersize, msize,
+				    COMPAT_XT_ALIGN(msize)))
 			return -EFAULT;
+	}
 
 	*size -= ebt_compat_entry_padsize() + off;
 	*dstptr = cm->data;
@@ -1671,15 +1596,19 @@ static int compat_target_to_user(struct ebt_entry_target *t,
 	if (WARN_ON(off >= t->target_size))
 		return -EINVAL;
 
-	if (copy_to_user(cm->u.name, target->name,
-	    strlen(target->name) + 1) || put_user(tsize, &cm->match_size))
+	if (copy_to_user(cm->u.name, target->name, strlen(target->name) + 1) ||
+	    put_user(target->revision, &cm->u.revision) ||
+	    put_user(tsize, &cm->match_size))
 		return -EFAULT;
 
 	if (target->compat_to_user) {
 		if (target->compat_to_user(cm->data, t->data))
 			return -EFAULT;
-	} else if (copy_to_user(cm->data, t->data, tsize))
-		return -EFAULT;
+	} else {
+		if (xt_data_to_user(cm->data, t->data, target->usersize, tsize,
+				    COMPAT_XT_ALIGN(tsize)))
+			return -EFAULT;
+	}
 
 	*size -= ebt_compat_entry_padsize() + off;
 	*dstptr = cm->data;
@@ -1718,7 +1647,7 @@ static int compat_copy_entry_to_user(struct ebt_entry *e, void __user **dstptr,
 	if (*size < sizeof(*ce))
 		return -EINVAL;
 
-	ce = (struct ebt_entry __user *)*dstptr;
+	ce = *dstptr;
 	if (copy_to_user(ce, e, sizeof(*ce)))
 		return -EFAULT;
 
@@ -1735,7 +1664,7 @@ static int compat_copy_entry_to_user(struct ebt_entry *e, void __user **dstptr,
 		return ret;
 	target_offset = e->target_offset - (origsize - *size);
 
-	t = (struct ebt_entry_target *) ((char *) e + e->target_offset);
+	t = ebt_get_target(e);
 
 	ret = compat_target_to_user(t, dstptr, size);
 	if (ret)
@@ -1783,7 +1712,7 @@ static int compat_calc_entry(const struct ebt_entry *e,
 	EBT_MATCH_ITERATE(e, compat_calc_match, &off);
 	EBT_WATCHER_ITERATE(e, compat_calc_watcher, &off);
 
-	t = (const struct ebt_entry_target *) ((char *) e + e->target_offset);
+	t = ebt_get_target_c(e);
 
 	off += xt_compat_target_offset(t->u.target);
 	off += ebt_compat_entry_padsize();
@@ -1808,16 +1737,29 @@ static int compat_calc_entry(const struct ebt_entry *e,
 	return 0;
 }
 
+static int ebt_compat_init_offsets(unsigned int number)
+{
+	if (number > INT_MAX)
+		return -EINVAL;
+
+	/* also count the base chain policies */
+	number += NF_BR_NUMHOOKS;
+
+	return xt_compat_init_offsets(NFPROTO_BRIDGE, number);
+}
 
 static int compat_table_info(const struct ebt_table_info *info,
 			     struct compat_ebt_replace *newinfo)
 {
 	unsigned int size = info->entries_size;
 	const void *entries = info->entries;
+	int ret;
 
 	newinfo->entries_size = size;
+	ret = ebt_compat_init_offsets(info->nentries);
+	if (ret)
+		return ret;
 
-	xt_compat_init_offsets(NFPROTO_BRIDGE, info->nentries);
 	return EBT_ENTRY_ITERATE(entries, size, compat_calc_entry, info,
 							entries, newinfo);
 }
@@ -1892,7 +1834,7 @@ static int ebt_buf_count(struct ebt_entries_buf_state *state, unsigned int sz)
 }
 
 static int ebt_buf_add(struct ebt_entries_buf_state *state,
-		       void *data, unsigned int sz)
+		       const void *data, unsigned int sz)
 {
 	if (state->buf_kern_start == NULL)
 		goto count_only;
@@ -1926,12 +1868,12 @@ enum compat_mwt {
 	EBT_COMPAT_TARGET,
 };
 
-static int compat_mtw_from_user(struct compat_ebt_entry_mwt *mwt,
+static int compat_mtw_from_user(const struct compat_ebt_entry_mwt *mwt,
 				enum compat_mwt compat_mwt,
 				struct ebt_entries_buf_state *state,
 				const unsigned char *base)
 {
-	char name[EBT_FUNCTION_MAXNAMELEN];
+	char name[EBT_EXTENSION_MAXNAMELEN];
 	struct xt_match *match;
 	struct xt_target *wt;
 	void *dst = NULL;
@@ -1946,7 +1888,8 @@ static int compat_mtw_from_user(struct compat_ebt_entry_mwt *mwt,
 
 	switch (compat_mwt) {
 	case EBT_COMPAT_MATCH:
-		match = xt_request_find_match(NFPROTO_BRIDGE, name, 0);
+		match = xt_request_find_match(NFPROTO_BRIDGE, name,
+					      mwt->u.revision);
 		if (IS_ERR(match))
 			return PTR_ERR(match);
 
@@ -1963,9 +1906,10 @@ static int compat_mtw_from_user(struct compat_ebt_entry_mwt *mwt,
 			size_kern = match_size;
 		module_put(match->me);
 		break;
-	case EBT_COMPAT_WATCHER: /* fallthrough */
+	case EBT_COMPAT_WATCHER:
 	case EBT_COMPAT_TARGET:
-		wt = xt_request_find_target(NFPROTO_BRIDGE, name, 0);
+		wt = xt_request_find_target(NFPROTO_BRIDGE, name,
+					    mwt->u.revision);
 		if (IS_ERR(wt))
 			return PTR_ERR(wt);
 		off = xt_compat_target_offset(wt);
@@ -2002,21 +1946,22 @@ static int compat_mtw_from_user(struct compat_ebt_entry_mwt *mwt,
 /* return size of all matches, watchers or target, including necessary
  * alignment and padding.
  */
-static int ebt_size_mwt(struct compat_ebt_entry_mwt *match32,
+static int ebt_size_mwt(const struct compat_ebt_entry_mwt *match32,
 			unsigned int size_left, enum compat_mwt type,
 			struct ebt_entries_buf_state *state, const void *base)
 {
+	const char *buf = (const char *)match32;
 	int growth = 0;
-	char *buf;
 
 	if (size_left == 0)
 		return 0;
 
-	buf = (char *) match32;
-
-	while (size_left >= sizeof(*match32)) {
+	do {
 		struct ebt_entry_match *match_kern;
 		int ret;
+
+		if (size_left < sizeof(*match32))
+			return -EINVAL;
 
 		match_kern = (struct ebt_entry_match *) state->buf_kern_start;
 		if (match_kern) {
@@ -2054,21 +1999,18 @@ static int ebt_size_mwt(struct compat_ebt_entry_mwt *match32,
 		if (match_kern)
 			match_kern->match_size = ret;
 
-		if (WARN_ON(type == EBT_COMPAT_TARGET && size_left))
-			return -EINVAL;
-
 		match32 = (struct compat_ebt_entry_mwt *) buf;
-	}
+	} while (size_left);
 
 	return growth;
 }
 
 /* called for all ebt_entry structures. */
-static int size_entry_mwt(struct ebt_entry *entry, const unsigned char *base,
+static int size_entry_mwt(const struct ebt_entry *entry, const unsigned char *base,
 			  unsigned int *total,
 			  struct ebt_entries_buf_state *state)
 {
-	unsigned int i, j, startoff, new_offset = 0;
+	unsigned int i, j, startoff, next_expected_off, new_offset = 0;
 	/* stores match/watchers/targets & offset of next struct ebt_entry: */
 	unsigned int offsets[4];
 	unsigned int *offsets_update = NULL;
@@ -2128,9 +2070,8 @@ static int size_entry_mwt(struct ebt_entry *entry, const unsigned char *base,
 	for (i = 0, j = 1 ; j < 4 ; j++, i++) {
 		struct compat_ebt_entry_mwt *match32;
 		unsigned int size;
-		char *buf = buf_start;
+		char *buf = buf_start + offsets[i];
 
-		buf = buf_start + offsets[i];
 		if (offsets[i] > offsets[j])
 			return -EINVAL;
 
@@ -2155,11 +2096,13 @@ static int size_entry_mwt(struct ebt_entry *entry, const unsigned char *base,
 			return ret;
 	}
 
-	startoff = state->buf_user_offset - startoff;
-
-	if (WARN_ON(*total < startoff))
+	next_expected_off = state->buf_user_offset - startoff;
+	if (next_expected_off != entry->next_offset)
 		return -EINVAL;
-	*total -= startoff;
+
+	if (*total < entry->next_offset)
+		return -EINVAL;
+	*total -= entry->next_offset;
 	return 0;
 }
 
@@ -2180,13 +2123,15 @@ static int compat_copy_entries(unsigned char *data, unsigned int size_user,
 	if (ret < 0)
 		return ret;
 
-	WARN_ON(size_remaining);
+	if (size_remaining)
+		return -EINVAL;
+
 	return state->buf_kern_offset;
 }
 
 
 static int compat_copy_ebt_replace_from_user(struct ebt_replace *repl,
-					    void __user *user, unsigned int len)
+					     sockptr_t arg, unsigned int len)
 {
 	struct compat_ebt_replace tmp;
 	int i;
@@ -2194,7 +2139,7 @@ static int compat_copy_ebt_replace_from_user(struct ebt_replace *repl,
 	if (len < sizeof(tmp))
 		return -EINVAL;
 
-	if (copy_from_user(&tmp, user, sizeof(tmp)))
+	if (copy_from_sockptr(&tmp, arg, sizeof(tmp)))
 		return -EFAULT;
 
 	if (len != sizeof(tmp) + tmp.entries_size)
@@ -2221,8 +2166,7 @@ static int compat_copy_ebt_replace_from_user(struct ebt_replace *repl,
 	return 0;
 }
 
-static int compat_do_replace(struct net *net, void __user *user,
-			     unsigned int len)
+static int compat_do_replace(struct net *net, sockptr_t arg, unsigned int len)
 {
 	int ret, i, countersize, size64;
 	struct ebt_table_info *newinfo;
@@ -2230,10 +2174,10 @@ static int compat_do_replace(struct net *net, void __user *user,
 	struct ebt_entries_buf_state state;
 	void *entries_tmp;
 
-	ret = compat_copy_ebt_replace_from_user(&tmp, user, len);
+	ret = compat_copy_ebt_replace_from_user(&tmp, arg, len);
 	if (ret) {
 		/* try real handler in case userland supplied needed padding */
-		if (ret == -EINVAL && do_replace(net, user, len) == 0)
+		if (ret == -EINVAL && do_replace(net, arg, len) == 0)
 			ret = 0;
 		return ret;
 	}
@@ -2263,7 +2207,10 @@ static int compat_do_replace(struct net *net, void __user *user,
 
 	xt_compat_lock(NFPROTO_BRIDGE);
 
-	xt_compat_init_offsets(NFPROTO_BRIDGE, tmp.nentries);
+	ret = ebt_compat_init_offsets(tmp.nentries);
+	if (ret < 0)
+		goto out_unlock;
+
 	ret = compat_copy_entries(entries_tmp, tmp.entries_size, &state);
 	if (ret < 0)
 		goto out_unlock;
@@ -2285,8 +2232,10 @@ static int compat_do_replace(struct net *net, void __user *user,
 	state.buf_kern_len = size64;
 
 	ret = compat_copy_entries(entries_tmp, tmp.entries_size, &state);
-	if (WARN_ON(ret < 0))
+	if (WARN_ON(ret < 0)) {
+		vfree(entries_tmp);
 		goto out_unlock;
+	}
 
 	vfree(entries_tmp);
 	tmp.entries_size = size64;
@@ -2319,42 +2268,20 @@ out_unlock:
 	goto free_entries;
 }
 
-static int compat_update_counters(struct net *net, void __user *user,
+static int compat_update_counters(struct net *net, sockptr_t arg,
 				  unsigned int len)
 {
 	struct compat_ebt_replace hlp;
 
-	if (copy_from_user(&hlp, user, sizeof(hlp)))
+	if (copy_from_sockptr(&hlp, arg, sizeof(hlp)))
 		return -EFAULT;
 
 	/* try real handler in case userland supplied needed padding */
 	if (len != sizeof(hlp) + hlp.num_counters * sizeof(struct ebt_counter))
-		return update_counters(net, user, len);
+		return update_counters(net, arg, len);
 
 	return do_update_counters(net, hlp.name, compat_ptr(hlp.counters),
-					hlp.num_counters, user, len);
-}
-
-static int compat_do_ebt_set_ctl(struct sock *sk,
-		int cmd, void __user *user, unsigned int len)
-{
-	int ret;
-	struct net *net = sock_net(sk);
-
-	if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
-		return -EPERM;
-
-	switch (cmd) {
-	case EBT_SO_SET_ENTRIES:
-		ret = compat_do_replace(net, user, len);
-		break;
-	case EBT_SO_SET_COUNTERS:
-		ret = compat_update_counters(net, user, len);
-		break;
-	default:
-		ret = -EINVAL;
-	}
-	return ret;
+				  hlp.num_counters, len);
 }
 
 static int compat_do_ebt_get_ctl(struct sock *sk, int cmd,
@@ -2365,13 +2292,9 @@ static int compat_do_ebt_get_ctl(struct sock *sk, int cmd,
 	struct ebt_table *t;
 	struct net *net = sock_net(sk);
 
-	if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
-		return -EPERM;
-
-	/* try real handler in case userland supplied needed padding */
-	if ((cmd == EBT_SO_GET_INFO ||
-	     cmd == EBT_SO_GET_INIT_INFO) && *len != sizeof(tmp))
-			return do_ebt_get_ctl(sk, cmd, user, len);
+	if ((cmd == EBT_SO_GET_INFO || cmd == EBT_SO_GET_INIT_INFO) &&
+	    *len != sizeof(struct compat_ebt_replace))
+		return -EINVAL;
 
 	if (copy_from_user(&tmp, user, sizeof(tmp)))
 		return -EFAULT;
@@ -2434,21 +2357,127 @@ static int compat_do_ebt_get_ctl(struct sock *sk, int cmd,
 }
 #endif
 
+static int do_ebt_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
+{
+	struct net *net = sock_net(sk);
+	struct ebt_replace tmp;
+	struct ebt_table *t;
+	int ret;
+
+	if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
+		return -EPERM;
+
+#ifdef CONFIG_NETFILTER_XTABLES_COMPAT
+	/* try real handler in case userland supplied needed padding */
+	if (in_compat_syscall() &&
+	    ((cmd != EBT_SO_GET_INFO && cmd != EBT_SO_GET_INIT_INFO) ||
+	     *len != sizeof(tmp)))
+		return compat_do_ebt_get_ctl(sk, cmd, user, len);
+#endif
+
+	if (copy_from_user(&tmp, user, sizeof(tmp)))
+		return -EFAULT;
+
+	tmp.name[sizeof(tmp.name) - 1] = '\0';
+
+	t = find_table_lock(net, tmp.name, &ret, &ebt_mutex);
+	if (!t)
+		return ret;
+
+	switch (cmd) {
+	case EBT_SO_GET_INFO:
+	case EBT_SO_GET_INIT_INFO:
+		if (*len != sizeof(struct ebt_replace)) {
+			ret = -EINVAL;
+			mutex_unlock(&ebt_mutex);
+			break;
+		}
+		if (cmd == EBT_SO_GET_INFO) {
+			tmp.nentries = t->private->nentries;
+			tmp.entries_size = t->private->entries_size;
+			tmp.valid_hooks = t->valid_hooks;
+		} else {
+			tmp.nentries = t->table->nentries;
+			tmp.entries_size = t->table->entries_size;
+			tmp.valid_hooks = t->table->valid_hooks;
+		}
+		mutex_unlock(&ebt_mutex);
+		if (copy_to_user(user, &tmp, *len) != 0) {
+			ret = -EFAULT;
+			break;
+		}
+		ret = 0;
+		break;
+
+	case EBT_SO_GET_ENTRIES:
+	case EBT_SO_GET_INIT_ENTRIES:
+		ret = copy_everything_to_user(t, user, len, cmd);
+		mutex_unlock(&ebt_mutex);
+		break;
+
+	default:
+		mutex_unlock(&ebt_mutex);
+		ret = -EINVAL;
+	}
+
+	return ret;
+}
+
+static int do_ebt_set_ctl(struct sock *sk, int cmd, sockptr_t arg,
+		unsigned int len)
+{
+	struct net *net = sock_net(sk);
+	int ret;
+
+	if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
+		return -EPERM;
+
+	switch (cmd) {
+	case EBT_SO_SET_ENTRIES:
+#ifdef CONFIG_NETFILTER_XTABLES_COMPAT
+		if (in_compat_syscall())
+			ret = compat_do_replace(net, arg, len);
+		else
+#endif
+			ret = do_replace(net, arg, len);
+		break;
+	case EBT_SO_SET_COUNTERS:
+#ifdef CONFIG_NETFILTER_XTABLES_COMPAT
+		if (in_compat_syscall())
+			ret = compat_update_counters(net, arg, len);
+		else
+#endif
+			ret = update_counters(net, arg, len);
+		break;
+	default:
+		ret = -EINVAL;
+	}
+	return ret;
+}
+
 static struct nf_sockopt_ops ebt_sockopts = {
 	.pf		= PF_INET,
 	.set_optmin	= EBT_BASE_CTL,
 	.set_optmax	= EBT_SO_SET_MAX + 1,
 	.set		= do_ebt_set_ctl,
-#ifdef CONFIG_COMPAT
-	.compat_set	= compat_do_ebt_set_ctl,
-#endif
 	.get_optmin	= EBT_BASE_CTL,
 	.get_optmax	= EBT_SO_GET_MAX + 1,
 	.get		= do_ebt_get_ctl,
-#ifdef CONFIG_COMPAT
-	.compat_get	= compat_do_ebt_get_ctl,
-#endif
 	.owner		= THIS_MODULE,
+};
+
+static int __net_init ebt_pernet_init(struct net *net)
+{
+	struct ebt_pernet *ebt_net = net_generic(net, ebt_pernet_id);
+
+	INIT_LIST_HEAD(&ebt_net->tables);
+	return 0;
+}
+
+static struct pernet_operations ebt_net_ops = {
+	.init = ebt_pernet_init,
+	.id   = &ebt_pernet_id,
+	.size = sizeof(struct ebt_pernet),
 };
 
 static int __init ebtables_init(void)
@@ -2464,15 +2493,21 @@ static int __init ebtables_init(void)
 		return ret;
 	}
 
-	printk(KERN_INFO "Ebtables v2.0 registered\n");
+	ret = register_pernet_subsys(&ebt_net_ops);
+	if (ret < 0) {
+		nf_unregister_sockopt(&ebt_sockopts);
+		xt_unregister_target(&ebt_standard_target);
+		return ret;
+	}
+
 	return 0;
 }
 
-static void __exit ebtables_fini(void)
+static void ebtables_fini(void)
 {
 	nf_unregister_sockopt(&ebt_sockopts);
 	xt_unregister_target(&ebt_standard_target);
-	printk(KERN_INFO "Ebtables v2.0 unregistered\n");
+	unregister_pernet_subsys(&ebt_net_ops);
 }
 
 EXPORT_SYMBOL(ebt_register_table);

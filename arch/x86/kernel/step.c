@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * x86 single-step support code, common to 32-bit and 64-bit.
  */
 #include <linux/sched.h>
+#include <linux/sched/task_stack.h>
 #include <linux/mm.h>
 #include <linux/ptrace.h>
 #include <asm/desc.h>
@@ -12,7 +14,7 @@ unsigned long convert_ip_to_linear(struct task_struct *child, struct pt_regs *re
 	unsigned long addr, seg;
 
 	addr = regs->ip;
-	seg = regs->cs & 0xffff;
+	seg = regs->cs;
 	if (v8086_mode(regs)) {
 		addr = (addr & 0xffff) + (seg << 4);
 		return addr;
@@ -33,7 +35,7 @@ unsigned long convert_ip_to_linear(struct task_struct *child, struct pt_regs *re
 
 		mutex_lock(&child->mm->context.lock);
 		if (unlikely(!child->mm->context.ldt ||
-			     seg >= child->mm->context.ldt->size))
+			     seg >= child->mm->context.ldt->nr_entries))
 			addr = -1L; /* bogus selector, access would fault */
 		else {
 			desc = &child->mm->context.ldt->entries[seg];
@@ -125,11 +127,16 @@ static int enable_single_step(struct task_struct *child)
 		regs->flags |= X86_EFLAGS_TF;
 
 	/*
-	 * Always set TIF_SINGLESTEP - this guarantees that
-	 * we single-step system calls etc..  This will also
+	 * Always set TIF_SINGLESTEP.  This will also
 	 * cause us to set TF when returning to user mode.
 	 */
 	set_tsk_thread_flag(child, TIF_SINGLESTEP);
+
+	/*
+	 * Ensure that a trap is triggered once stepping out of a system
+	 * call prior to executing any user instruction.
+	 */
+	set_task_syscall_work(child, SYSCALL_EXIT_TRAP);
 
 	oflags = regs->flags;
 
@@ -228,6 +235,7 @@ void user_disable_single_step(struct task_struct *child)
 
 	/* Always clear TIF_SINGLESTEP... */
 	clear_tsk_thread_flag(child, TIF_SINGLESTEP);
+	clear_task_syscall_work(child, SYSCALL_EXIT_TRAP);
 
 	/* But touch TF only if it was set by us.. */
 	if (test_and_clear_tsk_thread_flag(child, TIF_FORCED_TF))

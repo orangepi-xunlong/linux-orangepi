@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Universal Interface for Intel High Definition Audio Codec
  *
@@ -8,20 +9,6 @@
  *
  * Based on patch_cmedia.c and patch_realtek.c
  * Copyright (c) 2004 Takashi Iwai <tiwai@suse.de>
- *
- *  This driver is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This driver is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/init.h>
@@ -32,7 +19,7 @@
 #include <linux/module.h>
 #include <sound/core.h>
 #include <sound/jack.h>
-#include "hda_codec.h"
+#include <sound/hda_codec.h>
 #include "hda_local.h"
 #include "hda_auto_parser.h"
 #include "hda_beep.h"
@@ -77,6 +64,7 @@ enum {
 	STAC_DELL_M6_BOTH,
 	STAC_DELL_EQ,
 	STAC_ALIENWARE_M17X,
+	STAC_ELO_VUPOINT_15MX,
 	STAC_92HD89XX_HP_FRONT_JACK,
 	STAC_92HD89XX_HP_Z1_G2_RIGHT_MIC_JACK,
 	STAC_92HD73XX_ASUS_MOBO,
@@ -166,6 +154,7 @@ enum {
 	STAC_D965_VERBS,
 	STAC_DELL_3ST,
 	STAC_DELL_BIOS,
+	STAC_NEMO_DEFAULT,
 	STAC_DELL_BIOS_AMIC,
 	STAC_DELL_BIOS_SPDIF,
 	STAC_927X_DELL_DMIC,
@@ -331,33 +320,18 @@ static void stac_gpio_set(struct hda_codec *codec, unsigned int mask,
 }
 
 /* hook for controlling mic-mute LED GPIO */
-static void stac_capture_led_hook(struct hda_codec *codec,
-				  struct snd_kcontrol *kcontrol,
-				  struct snd_ctl_elem_value *ucontrol)
+static int stac_capture_led_update(struct led_classdev *led_cdev,
+				   enum led_brightness brightness)
 {
+	struct hda_codec *codec = dev_to_hda_codec(led_cdev->dev->parent);
 	struct sigmatel_spec *spec = codec->spec;
-	unsigned int mask;
-	bool cur_mute, prev_mute;
 
-	if (!kcontrol || !ucontrol)
-		return;
-
-	mask = 1U << snd_ctl_get_ioffidx(kcontrol, &ucontrol->id);
-	prev_mute = !spec->mic_enabled;
-	if (ucontrol->value.integer.value[0] ||
-	    ucontrol->value.integer.value[1])
-		spec->mic_enabled |= mask;
+	if (brightness)
+		spec->gpio_data |= spec->mic_mute_led_gpio;
 	else
-		spec->mic_enabled &= ~mask;
-	cur_mute = !spec->mic_enabled;
-	if (cur_mute != prev_mute) {
-		if (cur_mute)
-			spec->gpio_data |= spec->mic_mute_led_gpio;
-		else
-			spec->gpio_data &= ~spec->mic_mute_led_gpio;
-		stac_gpio_set(codec, spec->gpio_mask,
-			      spec->gpio_dir, spec->gpio_data);
-	}
+		spec->gpio_data &= ~spec->mic_mute_led_gpio;
+	stac_gpio_set(codec, spec->gpio_mask, spec->gpio_dir, spec->gpio_data);
+	return 0;
 }
 
 static int stac_vrefout_set(struct hda_codec *codec,
@@ -395,10 +369,9 @@ static unsigned int stac_vref_led_power_filter(struct hda_codec *codec,
 }
 
 /* update mute-LED accoring to the master switch */
-static void stac_update_led_status(struct hda_codec *codec, int enabled)
+static void stac_update_led_status(struct hda_codec *codec, bool muted)
 {
 	struct sigmatel_spec *spec = codec->spec;
-	int muted = !enabled;
 
 	if (!spec->gpio_led)
 		return;
@@ -422,9 +395,13 @@ static void stac_update_led_status(struct hda_codec *codec, int enabled)
 }
 
 /* vmaster hook to update mute LED */
-static void stac_vmaster_hook(void *private_data, int val)
+static int stac_vmaster_hook(struct led_classdev *led_cdev,
+			     enum led_brightness brightness)
 {
-	stac_update_led_status(private_data, val);
+	struct hda_codec *codec = dev_to_hda_codec(led_cdev->dev->parent);
+
+	stac_update_led_status(codec, brightness);
+	return 0;
 }
 
 /* automute hook to handle GPIO mute and EAPD updates */
@@ -824,7 +801,7 @@ static int find_mute_led_cfg(struct hda_codec *codec, int default_polarity)
 static bool has_builtin_speaker(struct hda_codec *codec)
 {
 	struct sigmatel_spec *spec = codec->spec;
-	hda_nid_t *nid_pin;
+	const hda_nid_t *nid_pin;
 	int nids, i;
 
 	if (spec->gen.autocfg.line_out_type == AUTO_PIN_SPEAKER_OUT) {
@@ -854,14 +831,14 @@ static int stac_auto_create_beep_ctls(struct hda_codec *codec,
 	struct sigmatel_spec *spec = codec->spec;
 	u32 caps = query_amp_caps(codec, nid, HDA_OUTPUT);
 	struct snd_kcontrol_new *knew;
-	static struct snd_kcontrol_new abeep_mute_ctl =
+	static const struct snd_kcontrol_new abeep_mute_ctl =
 		HDA_CODEC_MUTE(NULL, 0, 0, 0);
-	static struct snd_kcontrol_new dbeep_mute_ctl =
+	static const struct snd_kcontrol_new dbeep_mute_ctl =
 		HDA_CODEC_MUTE_BEEP(NULL, 0, 0, 0);
-	static struct snd_kcontrol_new beep_vol_ctl =
+	static const struct snd_kcontrol_new beep_vol_ctl =
 		HDA_CODEC_VOLUME(NULL, 0, 0, 0);
 
-	/* check for mute support for the the amp */
+	/* check for mute support for the amp */
 	if ((caps & AC_AMPCAP_MUTE) >> AC_AMPCAP_MUTE_SHIFT) {
 		const struct snd_kcontrol_new *temp;
 		if (spec->anabeep_nid == nid)
@@ -960,7 +937,7 @@ static int stac_smux_enum_put(struct snd_kcontrol *kcontrol,
 				     &spec->cur_smux[smux_idx]);
 }
 
-static struct snd_kcontrol_new stac_smux_mixer = {
+static const struct snd_kcontrol_new stac_smux_mixer = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name = "IEC958 Playback Source",
 	/* count set later */
@@ -1003,15 +980,6 @@ static int stac_create_spdif_mux_ctls(struct hda_codec *codec)
 
 	return 0;
 }
-
-/*
- */
-
-static const struct hda_verb stac9200_core_init[] = {
-	/* set dac0mux for dac converter */
-	{ 0x07, AC_VERB_SET_CONNECT_SEL, 0x00},
-	{}
-};
 
 static const struct hda_verb stac9200_eapd_init[] = {
 	/* set dac0mux for dac converter */
@@ -1360,6 +1328,27 @@ static const struct hda_pintbl oqo9200_pin_configs[] = {
 	{}
 };
 
+/*
+ *  STAC 92HD700
+ *  18881000 Amigaone X1000
+ */
+static const struct hda_pintbl nemo_pin_configs[] = {
+	{ 0x0a, 0x02214020 },	/* Front panel HP socket */
+	{ 0x0b, 0x02a19080 },	/* Front Mic */
+	{ 0x0c, 0x0181304e },	/* Line in */
+	{ 0x0d, 0x01014010 },	/* Line out */
+	{ 0x0e, 0x01a19040 },	/* Rear Mic */
+	{ 0x0f, 0x01011012 },	/* Rear speakers */
+	{ 0x10, 0x01016011 },	/* Center speaker */
+	{ 0x11, 0x01012014 },	/* Side speakers (7.1) */
+	{ 0x12, 0x103301f0 },	/* Motherboard CD line in connector */
+	{ 0x13, 0x411111f0 },	/* Unused */
+	{ 0x14, 0x411111f0 },	/* Unused */
+	{ 0x21, 0x01442170 },	/* S/PDIF line out */
+	{ 0x22, 0x411111f0 },	/* Unused */
+	{ 0x23, 0x411111f0 },	/* Unused */
+	{}
+};
 
 static void stac9200_fixup_panasonic(struct hda_codec *codec,
 				     const struct hda_fixup *fix, int action)
@@ -1875,6 +1864,18 @@ static void stac92hd73xx_fixup_no_jd(struct hda_codec *codec,
 		codec->no_jack_detect = 1;
 }
 
+
+static void stac92hd73xx_disable_automute(struct hda_codec *codec,
+				     const struct hda_fixup *fix, int action)
+{
+	struct sigmatel_spec *spec = codec->spec;
+
+	if (action != HDA_FIXUP_ACT_PRE_PROBE)
+		return;
+
+	spec->gen.suppress_auto_mute = 1;
+}
+
 static const struct hda_fixup stac92hd73xx_fixups[] = {
 	[STAC_92HD73XX_REF] = {
 		.type = HDA_FIXUP_FUNC,
@@ -1899,6 +1900,10 @@ static const struct hda_fixup stac92hd73xx_fixups[] = {
 	[STAC_ALIENWARE_M17X] = {
 		.type = HDA_FIXUP_FUNC,
 		.v.func = stac92hd73xx_fixup_alienware_m17x,
+	},
+	[STAC_ELO_VUPOINT_15MX] = {
+		.type = HDA_FIXUP_FUNC,
+		.v.func = stac92hd73xx_disable_automute,
 	},
 	[STAC_92HD73XX_INTEL] = {
 		.type = HDA_FIXUP_PINS,
@@ -1938,6 +1943,7 @@ static const struct hda_model_fixup stac92hd73xx_models[] = {
 	{ .id = STAC_DELL_M6_BOTH, .name = "dell-m6" },
 	{ .id = STAC_DELL_EQ, .name = "dell-eq" },
 	{ .id = STAC_ALIENWARE_M17X, .name = "alienware" },
+	{ .id = STAC_ELO_VUPOINT_15MX, .name = "elo-vupoint-15mx" },
 	{ .id = STAC_92HD73XX_ASUS_MOBO, .name = "asus-mobo" },
 	{}
 };
@@ -1987,6 +1993,8 @@ static const struct snd_pci_quirk stac92hd73xx_fixup_tbl[] = {
 		      "Alienware M17x", STAC_ALIENWARE_M17X),
 	SND_PCI_QUIRK(PCI_VENDOR_ID_DELL, 0x0490,
 		      "Alienware M17x R3", STAC_DELL_EQ),
+	SND_PCI_QUIRK(0x1059, 0x1011,
+		      "ELO VuPoint 15MX", STAC_ELO_VUPOINT_15MX),
 	SND_PCI_QUIRK(PCI_VENDOR_ID_HP, 0x1927,
 				"HP Z1 G2", STAC_92HD89XX_HP_Z1_G2_RIGHT_MIC_JACK),
 	SND_PCI_QUIRK(PCI_VENDOR_ID_HP, 0x2b17,
@@ -2180,7 +2188,7 @@ static void hp_envy_ts_fixup_dac_bind(struct hda_codec *codec,
 					    int action)
 {
 	struct sigmatel_spec *spec = codec->spec;
-	static hda_nid_t preferred_pairs[] = {
+	static const hda_nid_t preferred_pairs[] = {
 		0xd, 0x13,
 		0
 	};
@@ -3127,7 +3135,7 @@ static void fixup_hp_headphone(struct hda_codec *codec, hda_nid_t pin)
 	unsigned int pin_cfg = snd_hda_codec_get_pincfg(codec, pin);
 
 	/* It was changed in the BIOS to just satisfy MS DTM.
-	 * Lets turn it back into slaved HP
+	 * Lets turn it back into follower HP
 	 */
 	pin_cfg = (pin_cfg & (~AC_DEFCFG_DEVICE)) |
 		(AC_JACK_HP_OUT << AC_DEFCFG_DEVICE_SHIFT);
@@ -3885,6 +3893,10 @@ static const struct hda_fixup stac927x_fixups[] = {
 		.type = HDA_FIXUP_PINS,
 		.v.pins = d965_5st_no_fp_pin_configs,
 	},
+	[STAC_NEMO_DEFAULT] = {
+		.type = HDA_FIXUP_PINS,
+		.v.pins = nemo_pin_configs,
+	},
 	[STAC_DELL_3ST] = {
 		.type = HDA_FIXUP_PINS,
 		.v.pins = dell_3st_pin_configs,
@@ -3941,6 +3953,7 @@ static const struct hda_model_fixup stac927x_models[] = {
 	{ .id = STAC_D965_5ST_NO_FP, .name = "5stack-no-fp" },
 	{ .id = STAC_DELL_3ST, .name = "dell-3stack" },
 	{ .id = STAC_DELL_BIOS, .name = "dell-bios" },
+	{ .id = STAC_NEMO_DEFAULT, .name = "nemo-default" },
 	{ .id = STAC_DELL_BIOS_AMIC, .name = "dell-bios-amic" },
 	{ .id = STAC_927X_VOLKNOB, .name = "volknob" },
 	{}
@@ -3979,6 +3992,8 @@ static const struct snd_pci_quirk stac927x_fixup_tbl[] = {
 			   "Intel D965", STAC_D965_5ST),
 	SND_PCI_QUIRK_MASK(PCI_VENDOR_ID_INTEL, 0xff00, 0x2500,
 			   "Intel D965", STAC_D965_5ST),
+	/* Nemo */
+	SND_PCI_QUIRK(0x1888, 0x1000, "AmigaOne X1000", STAC_NEMO_DEFAULT),
 	/* volume-knob fixes */
 	SND_PCI_QUIRK_VENDOR(0x10cf, "FSC", STAC_927X_VOLKNOB),
 	{} /* terminator */
@@ -4262,6 +4277,9 @@ static int stac_parse_auto_config(struct hda_codec *codec)
 
 	spec->gen.automute_hook = stac_update_outputs;
 
+	if (spec->gpio_led)
+		snd_hda_gen_add_mute_led_cdev(codec, stac_vmaster_hook);
+
 	err = snd_hda_gen_parse_auto_config(codec, &spec->gen.autocfg);
 	if (err < 0)
 		return err;
@@ -4302,9 +4320,6 @@ static int stac_parse_auto_config(struct hda_codec *codec)
 		}
 	}
 #endif
-
-	if (spec->gpio_led)
-		spec->gen.vmaster_mute.hook = stac_vmaster_hook;
 
 	if (spec->aloopback_ctl &&
 	    snd_hda_get_bool_hint(codec, "loopback") == 1) {
@@ -4627,8 +4642,7 @@ static void stac_setup_gpio(struct hda_codec *codec)
 		spec->gpio_dir |= spec->mic_mute_led_gpio;
 		spec->mic_enabled = 0;
 		spec->gpio_data |= spec->mic_mute_led_gpio;
-
-		spec->gen.cap_sync_hook = stac_capture_led_hook;
+		snd_hda_gen_add_micmute_led_cdev(codec, stac_capture_led_update);
 	}
 }
 
@@ -4900,7 +4914,7 @@ static int patch_stac927x(struct hda_codec *codec)
 	 * The below flag enables the longer delay (see get_response
 	 * in hda_intel.c).
 	 */
-	codec->bus->needs_damn_long_delay = 1;
+	codec->bus->core.needs_damn_long_delay = 1;
 
 	snd_hda_apply_fixup(codec, HDA_FIXUP_ACT_PROBE);
 
@@ -5038,6 +5052,7 @@ static const struct hda_device_id snd_hda_id_sigmatel[] = {
 	HDA_CODEC_ENTRY(0x83847683, "STAC9221D A2", patch_stac922x),
 	HDA_CODEC_ENTRY(0x83847618, "STAC9227", patch_stac927x),
 	HDA_CODEC_ENTRY(0x83847619, "STAC9227", patch_stac927x),
+	HDA_CODEC_ENTRY(0x83847638, "STAC92HD700", patch_stac927x),
 	HDA_CODEC_ENTRY(0x83847616, "STAC9228", patch_stac927x),
 	HDA_CODEC_ENTRY(0x83847617, "STAC9228", patch_stac927x),
 	HDA_CODEC_ENTRY(0x83847614, "STAC9229", patch_stac927x),

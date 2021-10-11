@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Pid namespaces
  *
@@ -12,72 +13,49 @@
 #include <linux/pid_namespace.h>
 #include <linux/user_namespace.h>
 #include <linux/syscalls.h>
+#include <linux/cred.h>
 #include <linux/err.h>
 #include <linux/acct.h>
 #include <linux/slab.h>
 #include <linux/proc_ns.h>
 #include <linux/reboot.h>
 #include <linux/export.h>
+#include <linux/sched/task.h>
+#include <linux/sched/signal.h>
+#include <linux/idr.h>
 
-struct pid_cache {
-	int nr_ids;
-	char name[16];
-	struct kmem_cache *cachep;
-	struct list_head list;
-};
-
-static LIST_HEAD(pid_caches_lh);
 static DEFINE_MUTEX(pid_caches_mutex);
 static struct kmem_cache *pid_ns_cachep;
+/* Write once array, filled from the beginning. */
+static struct kmem_cache *pid_cache[MAX_PID_NS_LEVEL];
 
 /*
  * creates the kmem cache to allocate pids from.
- * @nr_ids: the number of numerical ids this pid will have to carry
+ * @level: pid namespace level
  */
 
-static struct kmem_cache *create_pid_cachep(int nr_ids)
+static struct kmem_cache *create_pid_cachep(unsigned int level)
 {
-	struct pid_cache *pcache;
-	struct kmem_cache *cachep;
+	/* Level 0 is init_pid_ns.pid_cachep */
+	struct kmem_cache **pkc = &pid_cache[level - 1];
+	struct kmem_cache *kc;
+	char name[4 + 10 + 1];
+	unsigned int len;
 
+	kc = READ_ONCE(*pkc);
+	if (kc)
+		return kc;
+
+	snprintf(name, sizeof(name), "pid_%u", level + 1);
+	len = sizeof(struct pid) + level * sizeof(struct upid);
 	mutex_lock(&pid_caches_mutex);
-	list_for_each_entry(pcache, &pid_caches_lh, list)
-		if (pcache->nr_ids == nr_ids)
-			goto out;
-
-	pcache = kmalloc(sizeof(struct pid_cache), GFP_KERNEL);
-	if (pcache == NULL)
-		goto err_alloc;
-
-	snprintf(pcache->name, sizeof(pcache->name), "pid_%d", nr_ids);
-	cachep = kmem_cache_create(pcache->name,
-			sizeof(struct pid) + (nr_ids - 1) * sizeof(struct upid),
-			0, SLAB_HWCACHE_ALIGN, NULL);
-	if (cachep == NULL)
-		goto err_cachep;
-
-	pcache->nr_ids = nr_ids;
-	pcache->cachep = cachep;
-	list_add(&pcache->list, &pid_caches_lh);
-out:
+	/* Name collision forces to do allocation under mutex. */
+	if (!*pkc)
+		*pkc = kmem_cache_create(name, len, 0, SLAB_HWCACHE_ALIGN, 0);
 	mutex_unlock(&pid_caches_mutex);
-	return pcache->cachep;
-
-err_cachep:
-	kfree(pcache);
-err_alloc:
-	mutex_unlock(&pid_caches_mutex);
-	return NULL;
+	/* current can fail, but someone else can succeed. */
+	return READ_ONCE(*pkc);
 }
-
-static void proc_cleanup_work(struct work_struct *work)
-{
-	struct pid_namespace *ns = container_of(work, struct pid_namespace, proc_work);
-	pid_ns_release_proc(ns);
-}
-
-/* MAX_PID_NS_LEVEL is needed for limiting size of 'struct pid' */
-#define MAX_PID_NS_LEVEL 32
 
 static struct ucounts *inc_pid_namespaces(struct user_namespace *ns)
 {
@@ -95,8 +73,11 @@ static struct pid_namespace *create_pid_namespace(struct user_namespace *user_ns
 	struct pid_namespace *ns;
 	unsigned int level = parent_pid_ns->level + 1;
 	struct ucounts *ucounts;
-	int i;
 	int err;
+
+	err = -EINVAL;
+	if (!in_userns(parent_pid_ns->user_ns, user_ns))
+		goto out;
 
 	err = -ENOSPC;
 	if (level > MAX_PID_NS_LEVEL)
@@ -110,38 +91,28 @@ static struct pid_namespace *create_pid_namespace(struct user_namespace *user_ns
 	if (ns == NULL)
 		goto out_dec;
 
-	ns->pidmap[0].page = kzalloc(PAGE_SIZE, GFP_KERNEL);
-	if (!ns->pidmap[0].page)
-		goto out_free;
+	idr_init(&ns->idr);
 
-	ns->pid_cachep = create_pid_cachep(level + 1);
+	ns->pid_cachep = create_pid_cachep(level);
 	if (ns->pid_cachep == NULL)
-		goto out_free_map;
+		goto out_free_idr;
 
 	err = ns_alloc_inum(&ns->ns);
 	if (err)
-		goto out_free_map;
+		goto out_free_idr;
 	ns->ns.ops = &pidns_operations;
 
-	kref_init(&ns->kref);
+	refcount_set(&ns->ns.count, 1);
 	ns->level = level;
 	ns->parent = get_pid_ns(parent_pid_ns);
 	ns->user_ns = get_user_ns(user_ns);
 	ns->ucounts = ucounts;
-	ns->nr_hashed = PIDNS_HASH_ADDING;
-	INIT_WORK(&ns->proc_work, proc_cleanup_work);
-
-	set_bit(0, ns->pidmap[0].page);
-	atomic_set(&ns->pidmap[0].nr_free, BITS_PER_PAGE - 1);
-
-	for (i = 1; i < PIDMAP_ENTRIES; i++)
-		atomic_set(&ns->pidmap[i].nr_free, BITS_PER_PAGE);
+	ns->pid_allocated = PIDNS_ADDING;
 
 	return ns;
 
-out_free_map:
-	kfree(ns->pidmap[0].page);
-out_free:
+out_free_idr:
+	idr_destroy(&ns->idr);
 	kmem_cache_free(pid_ns_cachep, ns);
 out_dec:
 	dec_pid_namespaces(ucounts);
@@ -161,11 +132,9 @@ static void delayed_free_pidns(struct rcu_head *p)
 
 static void destroy_pid_namespace(struct pid_namespace *ns)
 {
-	int i;
-
 	ns_free_inum(&ns->ns);
-	for (i = 0; i < PIDMAP_ENTRIES; i++)
-		kfree(ns->pidmap[i].page);
+
+	idr_destroy(&ns->idr);
 	call_rcu(&ns->rcu, delayed_free_pidns);
 }
 
@@ -179,22 +148,15 @@ struct pid_namespace *copy_pid_ns(unsigned long flags,
 	return create_pid_namespace(user_ns, old_ns);
 }
 
-static void free_pid_ns(struct kref *kref)
-{
-	struct pid_namespace *ns;
-
-	ns = container_of(kref, struct pid_namespace, kref);
-	destroy_pid_namespace(ns);
-}
-
 void put_pid_ns(struct pid_namespace *ns)
 {
 	struct pid_namespace *parent;
 
 	while (ns != &init_pid_ns) {
 		parent = ns->parent;
-		if (!kref_put(&ns->kref, free_pid_ns))
+		if (!refcount_dec_and_test(&ns->ns.count))
 			break;
+		destroy_pid_namespace(ns);
 		ns = parent;
 	}
 }
@@ -206,6 +168,7 @@ void zap_pid_ns_processes(struct pid_namespace *pid_ns)
 	int rc;
 	struct task_struct *task, *me = current;
 	int init_pids = thread_group_leader(me) ? 1 : 2;
+	struct pid *pid;
 
 	/* Don't allow any more processes into the pid namespace */
 	disable_pid_allocation(pid_ns);
@@ -232,50 +195,53 @@ void zap_pid_ns_processes(struct pid_namespace *pid_ns)
 	 * 	  maintain a tasklist for each pid namespace.
 	 *
 	 */
+	rcu_read_lock();
 	read_lock(&tasklist_lock);
-	nr = next_pidmap(pid_ns, 1);
-	while (nr > 0) {
-		rcu_read_lock();
-
-		task = pid_task(find_vpid(nr), PIDTYPE_PID);
+	nr = 2;
+	idr_for_each_entry_continue(&pid_ns->idr, pid, nr) {
+		task = pid_task(pid, PIDTYPE_PID);
 		if (task && !__fatal_signal_pending(task))
-			send_sig_info(SIGKILL, SEND_SIG_FORCED, task);
-
-		rcu_read_unlock();
-
-		nr = next_pidmap(pid_ns, nr);
+			group_send_sig_info(SIGKILL, SEND_SIG_PRIV, task, PIDTYPE_MAX);
 	}
 	read_unlock(&tasklist_lock);
+	rcu_read_unlock();
 
 	/*
 	 * Reap the EXIT_ZOMBIE children we had before we ignored SIGCHLD.
-	 * sys_wait4() will also block until our children traced from the
+	 * kernel_wait4() will also block until our children traced from the
 	 * parent namespace are detached and become EXIT_DEAD.
 	 */
 	do {
 		clear_thread_flag(TIF_SIGPENDING);
-		rc = sys_wait4(-1, NULL, __WALL, NULL);
+		rc = kernel_wait4(-1, NULL, __WALL, NULL);
 	} while (rc != -ECHILD);
 
 	/*
-	 * sys_wait4() above can't reap the EXIT_DEAD children but we do not
-	 * really care, we could reparent them to the global init. We could
-	 * exit and reap ->child_reaper even if it is not the last thread in
-	 * this pid_ns, free_pid(nr_hashed == 0) calls proc_cleanup_work(),
-	 * pid_ns can not go away until proc_kill_sb() drops the reference.
+	 * kernel_wait4() misses EXIT_DEAD children, and EXIT_ZOMBIE
+	 * process whose parents processes are outside of the pid
+	 * namespace.  Such processes are created with setns()+fork().
 	 *
-	 * But this ns can also have other tasks injected by setns()+fork().
-	 * Again, ignoring the user visible semantics we do not really need
-	 * to wait until they are all reaped, but they can be reparented to
-	 * us and thus we need to ensure that pid->child_reaper stays valid
-	 * until they all go away. See free_pid()->wake_up_process().
+	 * If those EXIT_ZOMBIE processes are not reaped by their
+	 * parents before their parents exit, they will be reparented
+	 * to pid_ns->child_reaper.  Thus pidns->child_reaper needs to
+	 * stay valid until they all go away.
 	 *
-	 * We rely on ignored SIGCHLD, an injected zombie must be autoreaped
-	 * if reparented.
+	 * The code relies on the pid_ns->child_reaper ignoring
+	 * SIGCHILD to cause those EXIT_ZOMBIE processes to be
+	 * autoreaped if reparented.
+	 *
+	 * Semantically it is also desirable to wait for EXIT_ZOMBIE
+	 * processes before allowing the child_reaper to be reaped, as
+	 * that gives the invariant that when the init process of a
+	 * pid namespace is reaped all of the processes in the pid
+	 * namespace are gone.
+	 *
+	 * Once all of the other tasks are gone from the pid_namespace
+	 * free_pid() will awaken this task.
 	 */
 	for (;;) {
 		set_current_state(TASK_INTERRUPTIBLE);
-		if (pid_ns->nr_hashed == init_pids)
+		if (pid_ns->pid_allocated == init_pids)
 			break;
 		schedule();
 	}
@@ -290,12 +256,13 @@ void zap_pid_ns_processes(struct pid_namespace *pid_ns)
 
 #ifdef CONFIG_CHECKPOINT_RESTORE
 static int pid_ns_ctl_handler(struct ctl_table *table, int write,
-		void __user *buffer, size_t *lenp, loff_t *ppos)
+		void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct pid_namespace *pid_ns = task_active_pid_ns(current);
 	struct ctl_table tmp = *table;
+	int ret, next;
 
-	if (write && !ns_capable(pid_ns->user_ns, CAP_SYS_ADMIN))
+	if (write && !checkpoint_restore_ns_capable(pid_ns->user_ns))
 		return -EPERM;
 
 	/*
@@ -304,19 +271,24 @@ static int pid_ns_ctl_handler(struct ctl_table *table, int write,
 	 * it should synchronize its usage with external means.
 	 */
 
-	tmp.data = &pid_ns->last_pid;
-	return proc_dointvec_minmax(&tmp, write, buffer, lenp, ppos);
+	next = idr_get_cursor(&pid_ns->idr) - 1;
+
+	tmp.data = &next;
+	ret = proc_dointvec_minmax(&tmp, write, buffer, lenp, ppos);
+	if (!ret && write)
+		idr_set_cursor(&pid_ns->idr, next + 1);
+
+	return ret;
 }
 
 extern int pid_max;
-static int zero = 0;
 static struct ctl_table pid_ns_ctl_table[] = {
 	{
 		.procname = "ns_last_pid",
 		.maxlen = sizeof(int),
 		.mode = 0666, /* permissions are checked in the handler */
 		.proc_handler = pid_ns_ctl_handler,
-		.extra1 = &zero,
+		.extra1 = SYSCTL_ZERO,
 		.extra2 = &pid_max,
 	},
 	{ }
@@ -344,7 +316,7 @@ int reboot_pid_ns(struct pid_namespace *pid_ns, int cmd)
 	}
 
 	read_lock(&tasklist_lock);
-	force_sig(SIGKILL, pid_ns->child_reaper);
+	send_sig(SIGKILL, pid_ns->child_reaper, 1);
 	read_unlock(&tasklist_lock);
 
 	do_exit(0);
@@ -371,18 +343,42 @@ static struct ns_common *pidns_get(struct task_struct *task)
 	return ns ? &ns->ns : NULL;
 }
 
+static struct ns_common *pidns_for_children_get(struct task_struct *task)
+{
+	struct pid_namespace *ns = NULL;
+
+	task_lock(task);
+	if (task->nsproxy) {
+		ns = task->nsproxy->pid_ns_for_children;
+		get_pid_ns(ns);
+	}
+	task_unlock(task);
+
+	if (ns) {
+		read_lock(&tasklist_lock);
+		if (!ns->child_reaper) {
+			put_pid_ns(ns);
+			ns = NULL;
+		}
+		read_unlock(&tasklist_lock);
+	}
+
+	return ns ? &ns->ns : NULL;
+}
+
 static void pidns_put(struct ns_common *ns)
 {
 	put_pid_ns(to_pid_ns(ns));
 }
 
-static int pidns_install(struct nsproxy *nsproxy, struct ns_common *ns)
+static int pidns_install(struct nsset *nsset, struct ns_common *ns)
 {
+	struct nsproxy *nsproxy = nsset->nsproxy;
 	struct pid_namespace *active = task_active_pid_ns(current);
 	struct pid_namespace *ancestor, *new = to_pid_ns(ns);
 
 	if (!ns_capable(new->user_ns, CAP_SYS_ADMIN) ||
-	    !ns_capable(current_user_ns(), CAP_SYS_ADMIN))
+	    !ns_capable(nsset->cred->user_ns, CAP_SYS_ADMIN))
 		return -EPERM;
 
 	/*
@@ -434,6 +430,17 @@ const struct proc_ns_operations pidns_operations = {
 	.name		= "pid",
 	.type		= CLONE_NEWPID,
 	.get		= pidns_get,
+	.put		= pidns_put,
+	.install	= pidns_install,
+	.owner		= pidns_owner,
+	.get_parent	= pidns_get_parent,
+};
+
+const struct proc_ns_operations pidns_for_children_operations = {
+	.name		= "pid_for_children",
+	.real_ns_name	= "pid",
+	.type		= CLONE_NEWPID,
+	.get		= pidns_for_children_get,
 	.put		= pidns_put,
 	.install	= pidns_install,
 	.owner		= pidns_owner,

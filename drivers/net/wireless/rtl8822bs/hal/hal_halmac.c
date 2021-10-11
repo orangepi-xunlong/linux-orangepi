@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright(c) 2015 - 2018 Realtek Corporation.
+ * Copyright(c) 2015 - 2017 Realtek Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -2442,7 +2442,7 @@ void dump_trx_share_mode(void *sel, _adapter *adapter)
 }
 #endif
 
-static enum _HALMAC_DRV_RSVD_PG_NUM _rsvd_page_num_drv2halmac(u16 num)
+static enum _HALMAC_DRV_RSVD_PG_NUM _rsvd_page_num_drv2halmac(u8 num)
 {
 	if (num <= 8)
 		return HALMAC_RSVD_PG_NUM8;
@@ -2454,20 +2454,18 @@ static enum _HALMAC_DRV_RSVD_PG_NUM _rsvd_page_num_drv2halmac(u16 num)
 		return HALMAC_RSVD_PG_NUM32;
 	if (num <= 64)
 		return HALMAC_RSVD_PG_NUM64;
-	if (num <= 128)
-		return HALMAC_RSVD_PG_NUM128;
 
-	if (num > 256)
+	if (num > 128)
 		RTW_WARN("%s: Fail to allocate RSVD page(%d)!!"
-			 " The MAX RSVD page number is 256...\n",
+			 " The MAX RSVD page number is 128...\n",
 			 __FUNCTION__, num);
 
-	return HALMAC_RSVD_PG_NUM256;
+	return HALMAC_RSVD_PG_NUM128;
 }
 
-static u16 _rsvd_page_num_halmac2drv(HALMAC_DRV_RSVD_PG_NUM rsvd_page_number)
+static u8 _rsvd_page_num_halmac2drv(HALMAC_DRV_RSVD_PG_NUM rsvd_page_number)
 {
-	u16 num = 0;
+	u8 num = 0;
 
 
 	switch (rsvd_page_number) {
@@ -2493,10 +2491,6 @@ static u16 _rsvd_page_num_halmac2drv(HALMAC_DRV_RSVD_PG_NUM rsvd_page_number)
 
 	case HALMAC_RSVD_PG_NUM128:
 		num = 128;
-		break;
-
-	case HALMAC_RSVD_PG_NUM256:
-		num = 256;
 		break;
 	}
 
@@ -2689,7 +2683,11 @@ static int _send_general_info(struct dvobj_priv *d)
 	case HALMAC_RET_NO_DLFW:
 		RTW_WARN("%s: halmac_send_general_info() fail because fw not dl!\n",
 			 __FUNCTION__);
-		/* go through */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0)
+	__attribute__ ((fallthrough));
+#else
+			__attribute__ ((__fallthrough__));
+#endif
 	default:
 		return -1;
 	}
@@ -2712,7 +2710,7 @@ static int _cfg_drv_rsvd_pg_num(struct dvobj_priv *d)
 	PHALMAC_API api;
 	enum _HALMAC_DRV_RSVD_PG_NUM rsvd_page_number;
 	HALMAC_RET_STATUS status;
-	u16 drv_rsvd_num;
+	u8 drv_rsvd_num;
 
 
 	a = dvobj_get_primary_adapter(d);

@@ -23,7 +23,6 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #define DRV_NAME	"3c589_cs"
-#define DRV_VERSION	"1.162-ac"
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -163,7 +162,7 @@ static void tc589_release(struct pcmcia_device *link);
 
 static u16 read_eeprom(unsigned int ioaddr, int index);
 static void tc589_reset(struct net_device *dev);
-static void media_check(unsigned long arg);
+static void media_check(struct timer_list *t);
 static int el3_config(struct net_device *dev, struct ifmap *map);
 static int el3_open(struct net_device *dev);
 static netdev_tx_t el3_start_xmit(struct sk_buff *skb,
@@ -173,7 +172,7 @@ static void update_stats(struct net_device *dev);
 static struct net_device_stats *el3_get_stats(struct net_device *dev);
 static int el3_rx(struct net_device *dev);
 static int el3_close(struct net_device *dev);
-static void el3_tx_timeout(struct net_device *dev);
+static void el3_tx_timeout(struct net_device *dev, unsigned int txqueue);
 static void set_rx_mode(struct net_device *dev);
 static void set_multicast_list(struct net_device *dev);
 static const struct ethtool_ops netdev_ethtool_ops;
@@ -188,7 +187,6 @@ static const struct net_device_ops el3_netdev_ops = {
 	.ndo_set_config		= el3_config,
 	.ndo_get_stats		= el3_get_stats,
 	.ndo_set_rx_mode	= set_multicast_list,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -483,7 +481,6 @@ static void netdev_get_drvinfo(struct net_device *dev,
 			       struct ethtool_drvinfo *info)
 {
 	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
 	snprintf(info->bus_info, sizeof(info->bus_info),
 		"PCMCIA 0x%lx", dev->base_addr);
 }
@@ -518,7 +515,7 @@ static int el3_open(struct net_device *dev)
 	netif_start_queue(dev);
 
 	tc589_reset(dev);
-	setup_timer(&lp->media, media_check, (unsigned long)dev);
+	timer_setup(&lp->media, media_check, 0);
 	mod_timer(&lp->media, jiffies + HZ);
 
 	dev_dbg(&link->dev, "%s: opened, status %4.4x.\n",
@@ -527,7 +524,7 @@ static int el3_open(struct net_device *dev)
 	return 0;
 }
 
-static void el3_tx_timeout(struct net_device *dev)
+static void el3_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	unsigned int ioaddr = dev->base_addr;
 
@@ -677,10 +674,10 @@ static irqreturn_t el3_interrupt(int irq, void *dev_id)
 	return IRQ_RETVAL(handled);
 }
 
-static void media_check(unsigned long arg)
+static void media_check(struct timer_list *t)
 {
-	struct net_device *dev = (struct net_device *)(arg);
-	struct el3_private *lp = netdev_priv(dev);
+	struct el3_private *lp = from_timer(lp, t, media);
+	struct net_device *dev = lp->p_dev->priv;
 	unsigned int ioaddr = dev->base_addr;
 	u16 media, errs;
 	unsigned long flags;

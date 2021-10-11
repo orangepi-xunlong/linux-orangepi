@@ -1,33 +1,32 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * genelf.c
  * Copyright (C) 2014, Google, Inc
  *
  * Contributed by:
  * 	Stephane Eranian <eranian@gmail.com>
- *
- * Released under the GPL v2. (and only v2, not any later version)
  */
 
 #include <sys/types.h>
-#include <stdio.h>
-#include <getopt.h>
 #include <stddef.h>
 #include <libelf.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <inttypes.h>
-#include <limits.h>
 #include <fcntl.h>
 #include <err.h>
 #ifdef HAVE_DWARF_SUPPORT
 #include <dwarf.h>
 #endif
 
-#include "perf.h"
 #include "genelf.h"
 #include "../util/jitdump.h"
+#include <linux/compiler.h>
 
-#define JVMTI
+#ifndef NT_GNU_BUILD_ID
+#define NT_GNU_BUILD_ID 3
+#endif
 
 #define BUILD_ID_URANDOM /* different uuid for each run */
 
@@ -69,6 +68,8 @@ static char shd_string_table[] = {
 	'.', 'd', 'e', 'b', 'u', 'g', '_', 'l', 'i', 'n', 'e', 0, /* 52 */
 	'.', 'd', 'e', 'b', 'u', 'g', '_', 'i', 'n', 'f', 'o', 0, /* 64 */
 	'.', 'd', 'e', 'b', 'u', 'g', '_', 'a', 'b', 'b', 'r', 'e', 'v', 0, /* 76 */
+	'.', 'e', 'h', '_', 'f', 'r', 'a', 'm', 'e', '_', 'h', 'd', 'r', 0, /* 90 */
+	'.', 'e', 'h', '_', 'f', 'r', 'a', 'm', 'e', 0, /* 104 */
 };
 
 static struct buildid_note {
@@ -108,7 +109,7 @@ gen_build_id(struct buildid_note *note,
 
 	fd = open("/dev/urandom", O_RDONLY);
 	if (fd == -1)
-		err(1, "cannot access /dev/urandom for builid");
+		err(1, "cannot access /dev/urandom for buildid");
 
 	sret = read(fd, note->build_id, sz);
 
@@ -149,6 +150,86 @@ gen_build_id(struct buildid_note *note, unsigned long load_addr, const void *cod
 }
 #endif
 
+static int
+jit_add_eh_frame_info(Elf *e, void* unwinding, uint64_t unwinding_header_size,
+		      uint64_t unwinding_size, uint64_t base_offset)
+{
+	Elf_Data *d;
+	Elf_Scn *scn;
+	Elf_Shdr *shdr;
+	uint64_t unwinding_table_size = unwinding_size - unwinding_header_size;
+
+	/*
+	 * setup eh_frame section
+	 */
+	scn = elf_newscn(e);
+	if (!scn) {
+		warnx("cannot create section");
+		return -1;
+	}
+
+	d = elf_newdata(scn);
+	if (!d) {
+		warnx("cannot get new data");
+		return -1;
+	}
+
+	d->d_align = 8;
+	d->d_off = 0LL;
+	d->d_buf = unwinding;
+	d->d_type = ELF_T_BYTE;
+	d->d_size = unwinding_table_size;
+	d->d_version = EV_CURRENT;
+
+	shdr = elf_getshdr(scn);
+	if (!shdr) {
+		warnx("cannot get section header");
+		return -1;
+	}
+
+	shdr->sh_name = 104;
+	shdr->sh_type = SHT_PROGBITS;
+	shdr->sh_addr = base_offset;
+	shdr->sh_flags = SHF_ALLOC;
+	shdr->sh_entsize = 0;
+
+	/*
+	 * setup eh_frame_hdr section
+	 */
+	scn = elf_newscn(e);
+	if (!scn) {
+		warnx("cannot create section");
+		return -1;
+	}
+
+	d = elf_newdata(scn);
+	if (!d) {
+		warnx("cannot get new data");
+		return -1;
+	}
+
+	d->d_align = 4;
+	d->d_off = 0LL;
+	d->d_buf = unwinding + unwinding_table_size;
+	d->d_type = ELF_T_BYTE;
+	d->d_size = unwinding_header_size;
+	d->d_version = EV_CURRENT;
+
+	shdr = elf_getshdr(scn);
+	if (!shdr) {
+		warnx("cannot get section header");
+		return -1;
+	}
+
+	shdr->sh_name = 90;
+	shdr->sh_type = SHT_PROGBITS;
+	shdr->sh_addr = base_offset + unwinding_table_size;
+	shdr->sh_flags = SHF_ALLOC;
+	shdr->sh_entsize = 0;
+
+	return 0;
+}
+
 /*
  * fd: file descriptor open for writing for the output file
  * load_addr: code load address (could be zero, just used for buildid)
@@ -159,13 +240,15 @@ gen_build_id(struct buildid_note *note, unsigned long load_addr, const void *cod
 int
 jit_write_elf(int fd, uint64_t load_addr, const char *sym,
 	      const void *code, int csize,
-	      void *debug __maybe_unused, int nr_debug_entries __maybe_unused)
+	      void *debug __maybe_unused, int nr_debug_entries __maybe_unused,
+	      void *unwinding, uint64_t unwinding_header_size, uint64_t unwinding_size)
 {
 	Elf *e;
 	Elf_Data *d;
 	Elf_Scn *scn;
 	Elf_Ehdr *ehdr;
 	Elf_Shdr *shdr;
+	uint64_t eh_frame_base_offset;
 	char *strsym = NULL;
 	int symlen;
 	int retval = -1;
@@ -196,7 +279,7 @@ jit_write_elf(int fd, uint64_t load_addr, const char *sym,
 	ehdr->e_type = ET_DYN;
 	ehdr->e_entry = GEN_ELF_TEXT_OFFSET;
 	ehdr->e_version = EV_CURRENT;
-	ehdr->e_shstrndx= 2; /* shdr index for section name */
+	ehdr->e_shstrndx= unwinding ? 4 : 2; /* shdr index for section name */
 
 	/*
 	 * setup text section
@@ -231,6 +314,18 @@ jit_write_elf(int fd, uint64_t load_addr, const char *sym,
 	shdr->sh_addr = GEN_ELF_TEXT_OFFSET;
 	shdr->sh_flags = SHF_EXECINSTR | SHF_ALLOC;
 	shdr->sh_entsize = 0;
+
+	/*
+	 * Setup .eh_frame_hdr and .eh_frame
+	 */
+	if (unwinding) {
+		eh_frame_base_offset = ALIGN_8(GEN_ELF_TEXT_OFFSET + csize);
+		retval = jit_add_eh_frame_info(e, unwinding,
+					       unwinding_header_size, unwinding_size,
+					       eh_frame_base_offset);
+		if (retval)
+			goto error;
+	}
 
 	/*
 	 * setup section headers string table
@@ -300,7 +395,7 @@ jit_write_elf(int fd, uint64_t load_addr, const char *sym,
 	shdr->sh_type = SHT_SYMTAB;
 	shdr->sh_flags = 0;
 	shdr->sh_entsize = sizeof(Elf_Sym);
-	shdr->sh_link = 4; /* index of .strtab section */
+	shdr->sh_link = unwinding ? 6 : 4; /* index of .strtab section */
 
 	/*
 	 * setup symbols string table
@@ -411,44 +506,3 @@ error:
 
 	return retval;
 }
-
-#ifndef JVMTI
-
-static unsigned char x86_code[] = {
-    0xBB, 0x2A, 0x00, 0x00, 0x00, /* movl $42, %ebx */
-    0xB8, 0x01, 0x00, 0x00, 0x00, /* movl $1, %eax */
-    0xCD, 0x80            /* int $0x80 */
-};
-
-static struct options options;
-
-int main(int argc, char **argv)
-{
-	int c, fd, ret;
-
-	while ((c = getopt(argc, argv, "o:h")) != -1) {
-		switch (c) {
-		case 'o':
-			options.output = optarg;
-			break;
-		case 'h':
-			printf("Usage: genelf -o output_file [-h]\n");
-			return 0;
-		default:
-			errx(1, "unknown option");
-		}
-	}
-
-	fd = open(options.output, O_CREAT|O_TRUNC|O_RDWR, 0666);
-	if (fd == -1)
-		err(1, "cannot create file %s", options.output);
-
-	ret = jit_write_elf(fd, "main", x86_code, sizeof(x86_code));
-	close(fd);
-
-	if (ret != 0)
-		unlink(options.output);
-
-	return ret;
-}
-#endif

@@ -674,144 +674,72 @@ int rtw_parse_wpa_ie(u8 *wpa_ie, int wpa_ie_len, int *group_cipher, int *pairwis
 
 }
 
-int rtw_rsne_info_parse(const u8 *ie, uint ie_len, struct rsne_info *info)
+int rtw_parse_wpa2_ie(u8 *rsn_ie, int rsn_ie_len, int *group_cipher, int *pairwise_cipher, int *is_8021x)
 {
-	int i;
-	const u8 *pos = ie;
-	u16 cnt;
-
-	_rtw_memset(info, 0, sizeof(struct rsne_info));
-
-	if (ie + ie_len < pos + 4)
-		goto err;
-
-	if (*ie != WLAN_EID_RSN || *(ie + 1) != ie_len - 2)
-		goto err;
-	pos += 2 + 2;
-
-	/* Group CS */
-	if (ie + ie_len < pos + 4) {
-		if (ie + ie_len != pos)
-			goto err;
-		goto exit;
-	}
-	info->gcs = (u8 *)pos;
-	pos += 4;
-
-	/* Pairwise CS */
-	if (ie + ie_len < pos + 2) {
-		if (ie + ie_len != pos)
-			goto err;
-		goto exit;
-	}
-	cnt = RTW_GET_LE16(pos);
-	pos += 2;
-	if (ie + ie_len < pos + 4 * cnt) {
-		if (ie + ie_len != pos)
-			goto err;
-		goto exit;
-	}
-	info->pcs_cnt = cnt;
-	info->pcs_list = (u8 *)pos;
-	pos += 4 * cnt;
-
-	/* AKM */
-	if (ie + ie_len < pos + 2) {
-		if (ie + ie_len != pos)
-			goto err;
-		goto exit;
-	}
-	cnt = RTW_GET_LE16(pos);
-	pos += 2;
-	if (ie + ie_len < pos + 4 * cnt) {
-		if (ie + ie_len != pos)
-			goto err;
-		goto exit;
-	}
-	info->akm_cnt = cnt;
-	info->akm_list = (u8 *)pos;
-	pos += 4 * cnt;
-
-	/* RSN cap */
-	if (ie + ie_len < pos + 2) {
-		if (ie + ie_len != pos)
-			goto err;
-		goto exit;
-	}
-	info->cap = (u8 *)pos;
-	pos += 2;
-
-	/* PMKID */
-	if (ie + ie_len < pos + 2) {
-		if (ie + ie_len != pos)
-			goto err;
-		goto exit;
-	}
-	cnt = RTW_GET_LE16(pos);
-	pos += 2;
-	if (ie + ie_len < pos + 16 * cnt) {
-		if (ie + ie_len != pos)
-			goto err;
-		goto exit;
-	}
-	info->pmkid_cnt = cnt;
-	info->pmkid_list = (u8 *)pos;
-	pos += 16 * cnt;
-
-	/* Group Mgmt CS */
-	if (ie + ie_len < pos + 4) {
-		if (ie + ie_len != pos)
-			goto err;
-		goto exit;
-	}
-	info->gmcs = (u8 *)pos;
-
-exit:
-	return _SUCCESS;
-
-err:
-	info->err = 1;
-	return _FAIL;
-}
-
-int rtw_parse_wpa2_ie(u8 *rsn_ie, int rsn_ie_len, int *group_cipher, int *pairwise_cipher, int *is_8021x, u8 *mfp_opt)
-{
-	struct rsne_info info;
 	int i, ret = _SUCCESS;
+	int left, count;
+	u8 *pos;
 	u8 SUITE_1X[4] = {0x00, 0x0f, 0xac, 0x01};
 
-	ret = rtw_rsne_info_parse(rsn_ie, rsn_ie_len, &info);
-	if (ret != _SUCCESS)
-		goto exit;
-
-	if (group_cipher) {
-		if (info.gcs)
-			*group_cipher = rtw_get_wpa2_cipher_suite(info.gcs);
-		else
-			*group_cipher = 0;
+	if (rsn_ie_len <= 0) {
+		/* No RSN IE - fail silently */
+		return _FAIL;
 	}
 
-	if (pairwise_cipher) {
-		*pairwise_cipher = 0;
-		for (i = 0; i < info.pcs_cnt; i++)
-			*pairwise_cipher |= rtw_get_wpa2_cipher_suite(info.pcs_list + 4 * i);
+
+	if ((*rsn_ie != _WPA2_IE_ID_) || (*(rsn_ie + 1) != (u8)(rsn_ie_len - 2)))
+		return _FAIL;
+
+	pos = rsn_ie;
+	pos += 4;
+	left = rsn_ie_len - 4;
+
+	/* group_cipher */
+	if (left >= RSN_SELECTOR_LEN) {
+
+		*group_cipher = rtw_get_wpa2_cipher_suite(pos);
+
+		pos += RSN_SELECTOR_LEN;
+		left -= RSN_SELECTOR_LEN;
+
+	} else if (left > 0) {
+		return _FAIL;
+	}
+
+	/* pairwise_cipher */
+	if (left >= 2) {
+		/* count = le16_to_cpu(*(u16*)pos); */
+		count = RTW_GET_LE16(pos);
+		pos += 2;
+		left -= 2;
+
+		if (count == 0 || left < count * RSN_SELECTOR_LEN) {
+			return _FAIL;
+		}
+
+		for (i = 0; i < count; i++) {
+			*pairwise_cipher |= rtw_get_wpa2_cipher_suite(pos);
+
+			pos += RSN_SELECTOR_LEN;
+			left -= RSN_SELECTOR_LEN;
+		}
+
+	} else if (left == 1) {
+
+		return _FAIL;
 	}
 
 	if (is_8021x) {
-		*is_8021x = 0;
-		/* here only check the first AKM suite */
-		if (info.akm_cnt && _rtw_memcmp(SUITE_1X, info.akm_list, 4) == _TRUE)
-			*is_8021x = 1;
+		if (left >= 6) {
+			pos += 2;
+			if (_rtw_memcmp(pos, SUITE_1X, 4) == 1) {
+				*is_8021x = 1;
+			}
+		}
 	}
 
-	if (mfp_opt) {
-		*mfp_opt = MFP_NO;
-		if (info.cap)
-			*mfp_opt = GET_RSN_CAP_MFP_OPTION(info.cap);
-	}
-
-exit:
 	return ret;
+
 }
 
 /* #ifdef CONFIG_WAPI_SUPPORT */
@@ -1442,7 +1370,6 @@ func_exit:
 }
 
 extern char *rtw_initmac;
-extern int get_wifi_custom_mac_address(char *addr_str);
 /**
  * rtw_macaddr_cfg - Decide the mac address used
  * @out: buf to store mac address decided
@@ -1452,7 +1379,6 @@ void rtw_macaddr_cfg(u8 *out, const u8 *hw_mac_addr)
 {
 #define DEFAULT_RANDOM_MACADDR 1
 	u8 mac[ETH_ALEN];
-	u8 addr_str[20];
 
 	if (out == NULL) {
 		rtw_warn_on(1);
@@ -1474,12 +1400,6 @@ void rtw_macaddr_cfg(u8 *out, const u8 *hw_mac_addr)
 	if (rtw_get_mac_addr_intel(mac) == 0)
 		goto err_chk;
 #endif
-
-	if (get_wifi_custom_mac_address(addr_str) != -1) {
-		sscanf(addr_str, "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
-				&mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
-		goto err_chk;
-	}
 
 	/* Use the mac address stored in the Efuse */
 	if (hw_mac_addr) {
@@ -2616,7 +2536,7 @@ int rtw_get_cipher_info(struct wlan_network *pnetwork)
 		pbuf = rtw_get_wpa2_ie(&pnetwork->network.IEs[12], &wpa_ielen, pnetwork->network.IELength - 12);
 
 		if (pbuf && (wpa_ielen > 0)) {
-			if (_SUCCESS == rtw_parse_wpa2_ie(pbuf, wpa_ielen + 2, &group_cipher, &pairwise_cipher, &is8021x, NULL)) {
+			if (_SUCCESS == rtw_parse_wpa2_ie(pbuf, wpa_ielen + 2, &group_cipher, &pairwise_cipher, &is8021x)) {
 				pnetwork->BcnInfo.pairwise_cipher = pairwise_cipher;
 				pnetwork->BcnInfo.group_cipher = group_cipher;
 				pnetwork->BcnInfo.is_8021x = is8021x;

@@ -25,23 +25,23 @@
 #if 0
 u32 _sqrt(u64 n)
 {
-	u64	ans = 0, q = 0;
+	u64	ans = 0, q = 0; 
 	s64	i;
 
 	/*for (i = sizeof(n) * 8 - 2; i > -1; i = i - 2) {*/
 	for (i = 8 * 8 - 2; i > -1; i = i - 2) {
-		q = (q << 2) | ((n & (3 << i)) >> i);
-		if (q >= ((ans << 2) | 1))
-		{
-			q = q - ((ans << 2) | 1);
-			ans = (ans << 1) | 1;
-		}
-		else
-			ans = ans << 1;
+		q = (q << 2) | ((n & (3 << i)) >> i); 
+		if (q >= ((ans << 2) | 1)) 
+		{ 
+			q = q - ((ans << 2) | 1); 
+			ans = (ans << 1) | 1; 
+		} 
+		else 
+			ans = ans << 1; 
 	}
 	DbgPrint("ans=0x%x\n", ans);
 
-	return (u32)ans;
+	return (u32)ans; 
 }
 #endif
 
@@ -110,12 +110,12 @@ halrf_get_psd_data(
 	}
 
 	psd_val = odm_get_bb_reg(p_dm, psd_reg, MASKDWORD);
-
+		
 	psd_val &= psd_point;
 	psd_val |= point;
 
 	odm_set_bb_reg(p_dm, psd_reg, MASKDWORD, psd_val);
-
+	
 	psd_val |= psd_start;
 
 	odm_set_bb_reg(p_dm, psd_reg, MASKDWORD, psd_val);
@@ -148,7 +148,7 @@ halrf_psd(
 	struct	PHY_DM_STRUCT	*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
 	struct _hal_rf_			*p_rf = &(p_dm->rf_table);
 	struct _halrf_psd_data	*p_psd = &(p_rf->halrf_psd_data);
-
+	
 	u32 i = 0, j = 0, k = 0;
 	u32 psd_reg, avg_org, point_temp, average_tmp;
 	u64 data_tatal = 0, data_temp[64] = {0};
@@ -172,7 +172,7 @@ halrf_psd(
 
 	for (i = 0; i < p_psd->buf_size; i++)
 		p_psd->psd_data[i] = 0;
-
+	
 	if (p_dm->support_ic_type & ODM_RTL8710B)
 		avg_org = odm_get_bb_reg(p_dm, psd_reg, 0x30000);
 	else
@@ -200,12 +200,12 @@ halrf_psd(
 	i = start_point;
 	while (i < stop_point) {
 		data_tatal = 0;
-
+	
 		if (i >= point)
 			point_temp = i - point;
 		else
 			point_temp = i;
-
+		
 		for (k = 0; k < average_tmp; k++) {
 			data_temp[k] = halrf_get_psd_data(p_dm, point_temp);
 			data_tatal = data_tatal + (data_temp[k] * data_temp[k]);
@@ -213,7 +213,7 @@ halrf_psd(
 #if 0
 			if ((k % 20) == 0)
 				dbg_print("\n ");
-
+			
 			dbg_print("0x%x ", data_temp[k]);
 #endif
 		}
@@ -230,7 +230,7 @@ halrf_psd(
 	for (i = 0; i < p_psd->buf_size; i++) {
 		if ((i % 20) == 0)
 			dbg_print("\n ");
-
+			
 		dbg_print("0x%x ", p_psd->psd_data[i]);
 	}
 	dbg_print("\n\n");

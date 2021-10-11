@@ -193,18 +193,18 @@
 #define XEN_ELFNOTE_SUPPORTED_FEATURES 17
 
 /*
- * The number of the highest elfnote defined.
+ * Physical entry point into the kernel.
+ *
+ * 32bit entry point into the kernel. When requested to launch the
+ * guest kernel in a HVM container, Xen will use this entry point to
+ * launch the guest in 32bit protected mode with paging disabled.
+ * Ignored otherwise.
  */
-#define XEN_ELFNOTE_MAX XEN_ELFNOTE_SUPPORTED_FEATURES
-
-#endif /* __XEN_PUBLIC_ELFNOTE_H__ */
+#define XEN_ELFNOTE_PHYS32_ENTRY 18
 
 /*
- * Local variables:
- * mode: C
- * c-set-style: "BSD"
- * c-basic-offset: 4
- * tab-width: 4
- * indent-tabs-mode: nil
- * End:
+ * The number of the highest elfnote defined.
  */
+#define XEN_ELFNOTE_MAX XEN_ELFNOTE_PHYS32_ENTRY
+
+#endif /* __XEN_PUBLIC_ELFNOTE_H__ */

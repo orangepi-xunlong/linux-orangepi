@@ -39,12 +39,12 @@ phydm_dig_up_bound_lmt_en(
 		(p_dm->adaptivity_enable == false)
 	) {
 		p_adaptivity->igi_up_bound_lmt_cnt = 0;
-		p_adaptivity->igi_lmt_en = false;
+		p_adaptivity->igi_lmt_en = false;	
 		return;
 	}
 
 	if (p_dm->total_tp > 1) {
-		p_adaptivity->igi_lmt_en = true;
+		p_adaptivity->igi_lmt_en = true;			
 		p_adaptivity->igi_up_bound_lmt_cnt = p_adaptivity->igi_up_bound_lmt_val;
 		PHYDM_DBG(p_dm, DBG_ADPTVTY,
 			("TP >1, Start limit IGI upper bound\n"));
@@ -70,7 +70,7 @@ phydm_check_adaptivity(
 		p_dm->adaptivity_enable = false;
 		return;
 	}
-
+	
 #if (DM_ODM_SUPPORT_TYPE == ODM_WIN)
 	if (p_dm->ap_total_num > adaptivity->ap_num_th) {
 		p_dm->adaptivity_enable = false;
@@ -87,7 +87,7 @@ phydm_check_adaptivity(
 		return;
 	}
 #endif
-
+	
 	p_dm->adaptivity_enable = true;
 }
 
@@ -599,7 +599,7 @@ phydm_adaptivity_init(
 	/*phydm_set_edcca_threshold_api(p_dm, p_dig_t->cur_ig_value);*/
 
 	p_dm->adaptivity_flag = (p_dm->support_ic_type & ODM_IC_GAIN_IDX_EDCCA) ? false : true;
-
+	
 #if (DM_ODM_SUPPORT_TYPE == ODM_AP)
 	adaptivity->igi_up_bound_lmt_val = 180;
 #else
@@ -619,7 +619,7 @@ phydm_adaptivity(
 	struct PHY_DM_STRUCT		*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
 	struct phydm_dig_struct			*p_dig_t = &p_dm->dm_dig_table;
 	u8			igi = p_dig_t->cur_ig_value;
-	s8			th_l2h_dmc = 0, th_h2l_dmc = 0;
+	s8			th_l2h_dmc, th_h2l_dmc;
 	s8			diff = 0, igi_target = 0x32;
 	struct phydm_adaptivity_struct	*adaptivity = (struct phydm_adaptivity_struct *)phydm_get_structure(p_dm, PHYDM_ADAPTIVITY);
 #if (DM_ODM_SUPPORT_TYPE == ODM_WIN)
@@ -858,7 +858,7 @@ phydm_set_edcca_threshold_api(
 {
 	struct PHY_DM_STRUCT	*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
 	struct phydm_adaptivity_struct	*adaptivity = (struct phydm_adaptivity_struct *)phydm_get_structure(p_dm, PHYDM_ADAPTIVITY);
-	s8			th_l2h_dmc = 0, th_h2l_dmc = 0;
+	s8			th_l2h_dmc, th_h2l_dmc;
 	s8			diff = 0, igi_target = 0x32;
 
 	if (p_dm->support_ability & ODM_BB_ADAPTIVITY) {

@@ -277,7 +277,6 @@ static irqreturn_t berlin2_adc_tsen_irq(int irq, void *private)
 }
 
 static const struct iio_info berlin2_adc_info = {
-	.driver_module	= THIS_MODULE,
 	.read_raw	= berlin2_adc_read_raw,
 };
 
@@ -322,7 +321,6 @@ static int berlin2_adc_probe(struct platform_device *pdev)
 	init_waitqueue_head(&priv->wq);
 	mutex_init(&priv->lock);
 
-	indio_dev->dev.parent = &pdev->dev;
 	indio_dev->name = dev_name(&pdev->dev);
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->info = &berlin2_adc_info;

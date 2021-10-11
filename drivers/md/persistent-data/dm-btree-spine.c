@@ -30,8 +30,6 @@ static void node_prepare_for_write(struct dm_block_validator *v,
 	h->csum = cpu_to_le32(dm_bm_checksum(&h->flags,
 					     block_size - sizeof(__le32),
 					     BTREE_CSUM_XOR));
-
-	BUG_ON(node_check(v, b, 4096));
 }
 
 static int node_check(struct dm_block_validator *v,
@@ -132,15 +130,13 @@ void init_ro_spine(struct ro_spine *s, struct dm_btree_info *info)
 	s->nodes[1] = NULL;
 }
 
-int exit_ro_spine(struct ro_spine *s)
+void exit_ro_spine(struct ro_spine *s)
 {
-	int r = 0, i;
+	int i;
 
 	for (i = 0; i < s->count; i++) {
 		unlock_block(s->info, s->nodes[i]);
 	}
-
-	return r;
 }
 
 int ro_step(struct ro_spine *s, dm_block_t new_child)
@@ -185,15 +181,13 @@ void init_shadow_spine(struct shadow_spine *s, struct dm_btree_info *info)
 	s->count = 0;
 }
 
-int exit_shadow_spine(struct shadow_spine *s)
+void exit_shadow_spine(struct shadow_spine *s)
 {
-	int r = 0, i;
+	int i;
 
 	for (i = 0; i < s->count; i++) {
 		unlock_block(s->info, s->nodes[i]);
 	}
-
-	return r;
 }
 
 int shadow_step(struct shadow_spine *s, dm_block_t b,
@@ -237,7 +231,7 @@ int shadow_has_parent(struct shadow_spine *s)
 	return s->count >= 2;
 }
 
-int shadow_root(struct shadow_spine *s)
+dm_block_t shadow_root(struct shadow_spine *s)
 {
 	return s->root;
 }

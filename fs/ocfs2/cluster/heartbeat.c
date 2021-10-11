@@ -1,22 +1,6 @@
-/* -*- mode: c; c-basic-offset: 8; -*-
- * vim: noexpandtab sw=8 ts=8 sts=0:
- *
+// SPDX-License-Identifier: GPL-2.0-or-later
+/*
  * Copyright (C) 2004, 2005 Oracle.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public
- * License along with this program; if not, write to the
- * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 021110-1307, USA.
  */
 
 #include <linux/kernel.h>
@@ -106,10 +90,6 @@ static struct o2hb_debug_buf *o2hb_db_failedregions;
 #define O2HB_DEBUG_REGION_PINNED	"pinned"
 
 static struct dentry *o2hb_debug_dir;
-static struct dentry *o2hb_debug_livenodes;
-static struct dentry *o2hb_debug_liveregions;
-static struct dentry *o2hb_debug_quorumregions;
-static struct dentry *o2hb_debug_failedregions;
 
 static LIST_HEAD(o2hb_all_regions);
 
@@ -119,21 +99,19 @@ static struct o2hb_callback {
 
 static struct o2hb_callback *hbcall_from_type(enum o2hb_callback_type type);
 
-#define O2HB_DEFAULT_BLOCK_BITS       9
-
 enum o2hb_heartbeat_modes {
 	O2HB_HEARTBEAT_LOCAL		= 0,
 	O2HB_HEARTBEAT_GLOBAL,
 	O2HB_HEARTBEAT_NUM_MODES,
 };
 
-char *o2hb_heartbeat_mode_desc[O2HB_HEARTBEAT_NUM_MODES] = {
-		"local",	/* O2HB_HEARTBEAT_LOCAL */
-		"global",	/* O2HB_HEARTBEAT_GLOBAL */
+static const char *o2hb_heartbeat_mode_desc[O2HB_HEARTBEAT_NUM_MODES] = {
+	"local",	/* O2HB_HEARTBEAT_LOCAL */
+	"global",	/* O2HB_HEARTBEAT_GLOBAL */
 };
 
 unsigned int o2hb_dead_threshold = O2HB_DEFAULT_DEAD_THRESHOLD;
-unsigned int o2hb_heartbeat_mode = O2HB_HEARTBEAT_LOCAL;
+static unsigned int o2hb_heartbeat_mode = O2HB_HEARTBEAT_LOCAL;
 
 /*
  * o2hb_dependent_users tracks the number of registered callbacks that depend
@@ -141,7 +119,7 @@ unsigned int o2hb_heartbeat_mode = O2HB_HEARTBEAT_LOCAL;
  * However only o2dlm depends on the heartbeat. It does not want the heartbeat
  * to stop while a dlm domain is still active.
  */
-unsigned int o2hb_dependent_users;
+static unsigned int o2hb_dependent_users;
 
 /*
  * In global heartbeat mode, all regions are pinned if there are one or more
@@ -243,10 +221,6 @@ struct o2hb_region {
 	unsigned int		hr_region_num;
 
 	struct dentry		*hr_debug_dir;
-	struct dentry		*hr_debug_livenodes;
-	struct dentry		*hr_debug_regnum;
-	struct dentry		*hr_debug_elapsed_time;
-	struct dentry		*hr_debug_pinned;
 	struct o2hb_debug_buf	*hr_db_livenodes;
 	struct o2hb_debug_buf	*hr_db_regnum;
 	struct o2hb_debug_buf	*hr_db_elapsed_time;
@@ -505,8 +479,7 @@ static inline void o2hb_bio_wait_dec(struct o2hb_bio_wait_ctxt *wc,
 	}
 }
 
-static void o2hb_wait_on_io(struct o2hb_region *reg,
-			    struct o2hb_bio_wait_ctxt *wc)
+static void o2hb_wait_on_io(struct o2hb_bio_wait_ctxt *wc)
 {
 	o2hb_bio_wait_dec(wc, 1);
 	wait_for_completion(&wc->wc_io_complete);
@@ -516,9 +489,9 @@ static void o2hb_bio_end_io(struct bio *bio)
 {
 	struct o2hb_bio_wait_ctxt *wc = bio->bi_private;
 
-	if (bio->bi_error) {
-		mlog(ML_ERROR, "IO Error %d\n", bio->bi_error);
-		wc->wc_error = bio->bi_error;
+	if (bio->bi_status) {
+		mlog(ML_ERROR, "IO Error %d\n", bio->bi_status);
+		wc->wc_error = blk_status_to_errno(bio->bi_status);
 	}
 
 	o2hb_bio_wait_dec(wc, 1);
@@ -554,7 +527,7 @@ static struct bio *o2hb_setup_one_bio(struct o2hb_region *reg,
 
 	/* Must put everything in 512 byte sectors for the bio... */
 	bio->bi_iter.bi_sector = (reg->hr_start_block + cs) << (bits - 9);
-	bio->bi_bdev = reg->hr_bdev;
+	bio_set_dev(bio, reg->hr_bdev);
 	bio->bi_private = wc;
 	bio->bi_end_io = o2hb_bio_end_io;
 	bio_set_op_attrs(bio, op, op_flags);
@@ -583,9 +556,10 @@ bail:
 }
 
 static int o2hb_read_slots(struct o2hb_region *reg,
+			   unsigned int begin_slot,
 			   unsigned int max_slots)
 {
-	unsigned int current_slot=0;
+	unsigned int current_slot = begin_slot;
 	int status;
 	struct o2hb_bio_wait_ctxt wc;
 	struct bio *bio;
@@ -608,7 +582,7 @@ static int o2hb_read_slots(struct o2hb_region *reg,
 	status = 0;
 
 bail_and_wait:
-	o2hb_wait_on_io(reg, &wc);
+	o2hb_wait_on_io(&wc);
 	if (wc.wc_error && !status)
 		status = wc.wc_error;
 
@@ -627,7 +601,7 @@ static int o2hb_issue_node_write(struct o2hb_region *reg,
 	slot = o2nm_this_node();
 
 	bio = o2hb_setup_one_bio(reg, write_wc, &slot, slot+1, REQ_OP_WRITE,
-				 WRITE_SYNC);
+				 REQ_SYNC);
 	if (IS_ERR(bio)) {
 		status = PTR_ERR(bio);
 		mlog_errno(status);
@@ -741,7 +715,7 @@ static inline void o2hb_prepare_block(struct o2hb_region *reg,
 	hb_block = (struct o2hb_disk_heartbeat_block *)slot->ds_raw_block;
 	memset(hb_block, 0, reg->hr_block_bytes);
 	/* TODO: time stuff */
-	cputime = CURRENT_TIME.tv_sec;
+	cputime = ktime_get_real_seconds();
 	if (!cputime)
 		cputime = 1;
 
@@ -1094,9 +1068,14 @@ static int o2hb_highest_node(unsigned long *nodes, int numbits)
 	return find_last_bit(nodes, numbits);
 }
 
+static int o2hb_lowest_node(unsigned long *nodes, int numbits)
+{
+	return find_first_bit(nodes, numbits);
+}
+
 static int o2hb_do_disk_heartbeat(struct o2hb_region *reg)
 {
-	int i, ret, highest_node;
+	int i, ret, highest_node, lowest_node;
 	int membership_change = 0, own_slot_ok = 0;
 	unsigned long configured_nodes[BITS_TO_LONGS(O2NM_MAX_NODES)];
 	unsigned long live_node_bitmap[BITS_TO_LONGS(O2NM_MAX_NODES)];
@@ -1121,7 +1100,8 @@ static int o2hb_do_disk_heartbeat(struct o2hb_region *reg)
 	}
 
 	highest_node = o2hb_highest_node(configured_nodes, O2NM_MAX_NODES);
-	if (highest_node >= O2NM_MAX_NODES) {
+	lowest_node = o2hb_lowest_node(configured_nodes, O2NM_MAX_NODES);
+	if (highest_node >= O2NM_MAX_NODES || lowest_node >= O2NM_MAX_NODES) {
 		mlog(ML_NOTICE, "o2hb: No configured nodes found!\n");
 		ret = -EINVAL;
 		goto bail;
@@ -1131,7 +1111,7 @@ static int o2hb_do_disk_heartbeat(struct o2hb_region *reg)
 	 * yet. Of course, if the node definitions have holes in them
 	 * then we're reading an empty slot anyway... Consider this
 	 * best-effort. */
-	ret = o2hb_read_slots(reg, highest_node + 1);
+	ret = o2hb_read_slots(reg, lowest_node, highest_node + 1);
 	if (ret < 0) {
 		mlog_errno(ret);
 		goto bail;
@@ -1162,7 +1142,7 @@ static int o2hb_do_disk_heartbeat(struct o2hb_region *reg)
 	 * before we can go to steady state.  This ensures that
 	 * people we find in our steady state have seen us.
 	 */
-	o2hb_wait_on_io(reg, &write_wc);
+	o2hb_wait_on_io(&write_wc);
 	if (write_wc.wc_error) {
 		/* Do not re-arm the write timeout on I/O error - we
 		 * can't be sure that the new block ever made it to
@@ -1192,7 +1172,7 @@ bail:
 	if (atomic_read(&reg->hr_steady_iterations) != 0) {
 		if (atomic_dec_and_test(&reg->hr_unsteady_iterations)) {
 			printk(KERN_NOTICE "o2hb: Unable to stabilize "
-			       "heartbeart on region %s (%s)\n",
+			       "heartbeat on region %s (%s)\n",
 			       config_item_name(&reg->hr_item),
 			       reg->hr_dev_name);
 			atomic_set(&reg->hr_steady_iterations, 0);
@@ -1250,7 +1230,7 @@ static int o2hb_thread(void *data)
 
 		mlog(ML_HEARTBEAT,
 		     "start = %lld, end = %lld, msec = %u, ret = %d\n",
-		     before_hb.tv64, after_hb.tv64, elapsed_msec, ret);
+		     before_hb, after_hb, elapsed_msec, ret);
 
 		if (!kthread_should_stop() &&
 		    elapsed_msec < reg->hr_timeout_ms) {
@@ -1275,7 +1255,7 @@ static int o2hb_thread(void *data)
 		o2hb_prepare_block(reg, 0);
 		ret = o2hb_issue_node_write(reg, &write_wc);
 		if (ret == 0)
-			o2hb_wait_on_io(reg, &write_wc);
+			o2hb_wait_on_io(&write_wc);
 		else
 			mlog_errno(ret);
 	}
@@ -1325,7 +1305,7 @@ static int o2hb_debug_open(struct inode *inode, struct file *file)
 
 	case O2HB_DB_TYPE_REGION_NUMBER:
 		reg = (struct o2hb_region *)db->db_data;
-		out += snprintf(buf + out, PAGE_SIZE - out, "%d\n",
+		out += scnprintf(buf + out, PAGE_SIZE - out, "%d\n",
 				reg->hr_region_num);
 		goto done;
 
@@ -1335,12 +1315,12 @@ static int o2hb_debug_open(struct inode *inode, struct file *file)
 		/* If 0, it has never been set before */
 		if (lts)
 			lts = jiffies_to_msecs(jiffies - lts);
-		out += snprintf(buf + out, PAGE_SIZE - out, "%lu\n", lts);
+		out += scnprintf(buf + out, PAGE_SIZE - out, "%lu\n", lts);
 		goto done;
 
 	case O2HB_DB_TYPE_REGION_PINNED:
 		reg = (struct o2hb_region *)db->db_data;
-		out += snprintf(buf + out, PAGE_SIZE - out, "%u\n",
+		out += scnprintf(buf + out, PAGE_SIZE - out, "%u\n",
 				!!reg->hr_item_pinned);
 		goto done;
 
@@ -1349,8 +1329,8 @@ static int o2hb_debug_open(struct inode *inode, struct file *file)
 	}
 
 	while ((i = find_next_bit(map, db->db_len, i + 1)) < db->db_len)
-		out += snprintf(buf + out, PAGE_SIZE - out, "%d ", i);
-	out += snprintf(buf + out, PAGE_SIZE - out, "\n");
+		out += scnprintf(buf + out, PAGE_SIZE - out, "%d ", i);
+	out += scnprintf(buf + out, PAGE_SIZE - out, "\n");
 
 done:
 	i_size_write(inode, out);
@@ -1399,107 +1379,60 @@ static const struct file_operations o2hb_debug_fops = {
 
 void o2hb_exit(void)
 {
-	debugfs_remove(o2hb_debug_failedregions);
-	debugfs_remove(o2hb_debug_quorumregions);
-	debugfs_remove(o2hb_debug_liveregions);
-	debugfs_remove(o2hb_debug_livenodes);
-	debugfs_remove(o2hb_debug_dir);
+	debugfs_remove_recursive(o2hb_debug_dir);
 	kfree(o2hb_db_livenodes);
 	kfree(o2hb_db_liveregions);
 	kfree(o2hb_db_quorumregions);
 	kfree(o2hb_db_failedregions);
 }
 
-static struct dentry *o2hb_debug_create(const char *name, struct dentry *dir,
-					struct o2hb_debug_buf **db, int db_len,
-					int type, int size, int len, void *data)
+static void o2hb_debug_create(const char *name, struct dentry *dir,
+			      struct o2hb_debug_buf **db, int db_len, int type,
+			      int size, int len, void *data)
 {
 	*db = kmalloc(db_len, GFP_KERNEL);
 	if (!*db)
-		return NULL;
+		return;
 
 	(*db)->db_type = type;
 	(*db)->db_size = size;
 	(*db)->db_len = len;
 	(*db)->db_data = data;
 
-	return debugfs_create_file(name, S_IFREG|S_IRUSR, dir, *db,
-				   &o2hb_debug_fops);
+	debugfs_create_file(name, S_IFREG|S_IRUSR, dir, *db, &o2hb_debug_fops);
 }
 
-static int o2hb_debug_init(void)
+static void o2hb_debug_init(void)
 {
-	int ret = -ENOMEM;
-
 	o2hb_debug_dir = debugfs_create_dir(O2HB_DEBUG_DIR, NULL);
-	if (!o2hb_debug_dir) {
-		mlog_errno(ret);
-		goto bail;
-	}
 
-	o2hb_debug_livenodes = o2hb_debug_create(O2HB_DEBUG_LIVENODES,
-						 o2hb_debug_dir,
-						 &o2hb_db_livenodes,
-						 sizeof(*o2hb_db_livenodes),
-						 O2HB_DB_TYPE_LIVENODES,
-						 sizeof(o2hb_live_node_bitmap),
-						 O2NM_MAX_NODES,
-						 o2hb_live_node_bitmap);
-	if (!o2hb_debug_livenodes) {
-		mlog_errno(ret);
-		goto bail;
-	}
+	o2hb_debug_create(O2HB_DEBUG_LIVENODES, o2hb_debug_dir,
+			  &o2hb_db_livenodes, sizeof(*o2hb_db_livenodes),
+			  O2HB_DB_TYPE_LIVENODES, sizeof(o2hb_live_node_bitmap),
+			  O2NM_MAX_NODES, o2hb_live_node_bitmap);
 
-	o2hb_debug_liveregions = o2hb_debug_create(O2HB_DEBUG_LIVEREGIONS,
-						   o2hb_debug_dir,
-						   &o2hb_db_liveregions,
-						   sizeof(*o2hb_db_liveregions),
-						   O2HB_DB_TYPE_LIVEREGIONS,
-						   sizeof(o2hb_live_region_bitmap),
-						   O2NM_MAX_REGIONS,
-						   o2hb_live_region_bitmap);
-	if (!o2hb_debug_liveregions) {
-		mlog_errno(ret);
-		goto bail;
-	}
+	o2hb_debug_create(O2HB_DEBUG_LIVEREGIONS, o2hb_debug_dir,
+			  &o2hb_db_liveregions, sizeof(*o2hb_db_liveregions),
+			  O2HB_DB_TYPE_LIVEREGIONS,
+			  sizeof(o2hb_live_region_bitmap), O2NM_MAX_REGIONS,
+			  o2hb_live_region_bitmap);
 
-	o2hb_debug_quorumregions =
-			o2hb_debug_create(O2HB_DEBUG_QUORUMREGIONS,
-					  o2hb_debug_dir,
-					  &o2hb_db_quorumregions,
-					  sizeof(*o2hb_db_quorumregions),
-					  O2HB_DB_TYPE_QUORUMREGIONS,
-					  sizeof(o2hb_quorum_region_bitmap),
-					  O2NM_MAX_REGIONS,
-					  o2hb_quorum_region_bitmap);
-	if (!o2hb_debug_quorumregions) {
-		mlog_errno(ret);
-		goto bail;
-	}
+	o2hb_debug_create(O2HB_DEBUG_QUORUMREGIONS, o2hb_debug_dir,
+			  &o2hb_db_quorumregions,
+			  sizeof(*o2hb_db_quorumregions),
+			  O2HB_DB_TYPE_QUORUMREGIONS,
+			  sizeof(o2hb_quorum_region_bitmap), O2NM_MAX_REGIONS,
+			  o2hb_quorum_region_bitmap);
 
-	o2hb_debug_failedregions =
-			o2hb_debug_create(O2HB_DEBUG_FAILEDREGIONS,
-					  o2hb_debug_dir,
-					  &o2hb_db_failedregions,
-					  sizeof(*o2hb_db_failedregions),
-					  O2HB_DB_TYPE_FAILEDREGIONS,
-					  sizeof(o2hb_failed_region_bitmap),
-					  O2NM_MAX_REGIONS,
-					  o2hb_failed_region_bitmap);
-	if (!o2hb_debug_failedregions) {
-		mlog_errno(ret);
-		goto bail;
-	}
-
-	ret = 0;
-bail:
-	if (ret)
-		o2hb_exit();
-
-	return ret;
+	o2hb_debug_create(O2HB_DEBUG_FAILEDREGIONS, o2hb_debug_dir,
+			  &o2hb_db_failedregions,
+			  sizeof(*o2hb_db_failedregions),
+			  O2HB_DB_TYPE_FAILEDREGIONS,
+			  sizeof(o2hb_failed_region_bitmap), O2NM_MAX_REGIONS,
+			  o2hb_failed_region_bitmap);
 }
 
-int o2hb_init(void)
+void o2hb_init(void)
 {
 	int i;
 
@@ -1519,7 +1452,7 @@ int o2hb_init(void)
 
 	o2hb_dependent_users = 0;
 
-	return o2hb_debug_init();
+	o2hb_debug_init();
 }
 
 /* if we're already in a callback then we're already serialized by the sem */
@@ -1583,11 +1516,7 @@ static void o2hb_region_release(struct config_item *item)
 
 	kfree(reg->hr_slots);
 
-	debugfs_remove(reg->hr_debug_livenodes);
-	debugfs_remove(reg->hr_debug_regnum);
-	debugfs_remove(reg->hr_debug_elapsed_time);
-	debugfs_remove(reg->hr_debug_pinned);
-	debugfs_remove(reg->hr_debug_dir);
+	debugfs_remove_recursive(reg->hr_debug_dir);
 	kfree(reg->hr_db_livenodes);
 	kfree(reg->hr_db_regnum);
 	kfree(reg->hr_db_elapsed_time);
@@ -1802,7 +1731,7 @@ static int o2hb_populate_slot_data(struct o2hb_region *reg)
 	struct o2hb_disk_slot *slot;
 	struct o2hb_disk_heartbeat_block *hb_block;
 
-	ret = o2hb_read_slots(reg, reg->hr_blocks);
+	ret = o2hb_read_slots(reg, 0, reg->hr_blocks);
 	if (ret)
 		goto out;
 
@@ -1835,7 +1764,6 @@ static ssize_t o2hb_region_dev_store(struct config_item *item,
 	int sectsize;
 	char *p = (char *)page;
 	struct fd f;
-	struct inode *inode;
 	ssize_t ret = -EINVAL;
 	int live_threshold;
 
@@ -1862,20 +1790,16 @@ static ssize_t o2hb_region_dev_store(struct config_item *item,
 	    reg->hr_block_bytes == 0)
 		goto out2;
 
-	inode = igrab(f.file->f_mapping->host);
-	if (inode == NULL)
+	if (!S_ISBLK(f.file->f_mapping->host->i_mode))
 		goto out2;
 
-	if (!S_ISBLK(inode->i_mode))
-		goto out3;
-
-	reg->hr_bdev = I_BDEV(f.file->f_mapping->host);
-	ret = blkdev_get(reg->hr_bdev, FMODE_WRITE | FMODE_READ, NULL);
-	if (ret) {
+	reg->hr_bdev = blkdev_get_by_dev(f.file->f_mapping->host->i_rdev,
+					 FMODE_WRITE | FMODE_READ, NULL);
+	if (IS_ERR(reg->hr_bdev)) {
+		ret = PTR_ERR(reg->hr_bdev);
 		reg->hr_bdev = NULL;
-		goto out3;
+		goto out2;
 	}
-	inode = NULL;
 
 	bdevname(reg->hr_bdev, reg->hr_dev_name);
 
@@ -1978,16 +1902,13 @@ static ssize_t o2hb_region_dev_store(struct config_item *item,
 		       config_item_name(&reg->hr_item), reg->hr_dev_name);
 
 out3:
-	iput(inode);
+	if (ret < 0) {
+		blkdev_put(reg->hr_bdev, FMODE_READ | FMODE_WRITE);
+		reg->hr_bdev = NULL;
+	}
 out2:
 	fdput(f);
 out:
-	if (ret < 0) {
-		if (reg->hr_bdev) {
-			blkdev_put(reg->hr_bdev, FMODE_READ|FMODE_WRITE);
-			reg->hr_bdev = NULL;
-		}
-	}
 	return ret;
 }
 
@@ -2026,7 +1947,7 @@ static struct configfs_item_operations o2hb_region_item_ops = {
 	.release		= o2hb_region_release,
 };
 
-static struct config_item_type o2hb_region_type = {
+static const struct config_item_type o2hb_region_type = {
 	.ct_item_ops	= &o2hb_region_item_ops,
 	.ct_attrs	= o2hb_region_attrs,
 	.ct_owner	= THIS_MODULE,
@@ -2046,69 +1967,33 @@ static struct o2hb_heartbeat_group *to_o2hb_heartbeat_group(struct config_group 
 		: NULL;
 }
 
-static int o2hb_debug_region_init(struct o2hb_region *reg, struct dentry *dir)
+static void o2hb_debug_region_init(struct o2hb_region *reg,
+				   struct dentry *parent)
 {
-	int ret = -ENOMEM;
+	struct dentry *dir;
 
-	reg->hr_debug_dir =
-		debugfs_create_dir(config_item_name(&reg->hr_item), dir);
-	if (!reg->hr_debug_dir) {
-		mlog_errno(ret);
-		goto bail;
-	}
+	dir = debugfs_create_dir(config_item_name(&reg->hr_item), parent);
+	reg->hr_debug_dir = dir;
 
-	reg->hr_debug_livenodes =
-			o2hb_debug_create(O2HB_DEBUG_LIVENODES,
-					  reg->hr_debug_dir,
-					  &(reg->hr_db_livenodes),
-					  sizeof(*(reg->hr_db_livenodes)),
-					  O2HB_DB_TYPE_REGION_LIVENODES,
-					  sizeof(reg->hr_live_node_bitmap),
-					  O2NM_MAX_NODES, reg);
-	if (!reg->hr_debug_livenodes) {
-		mlog_errno(ret);
-		goto bail;
-	}
+	o2hb_debug_create(O2HB_DEBUG_LIVENODES, dir, &(reg->hr_db_livenodes),
+			  sizeof(*(reg->hr_db_livenodes)),
+			  O2HB_DB_TYPE_REGION_LIVENODES,
+			  sizeof(reg->hr_live_node_bitmap), O2NM_MAX_NODES,
+			  reg);
 
-	reg->hr_debug_regnum =
-			o2hb_debug_create(O2HB_DEBUG_REGION_NUMBER,
-					  reg->hr_debug_dir,
-					  &(reg->hr_db_regnum),
-					  sizeof(*(reg->hr_db_regnum)),
-					  O2HB_DB_TYPE_REGION_NUMBER,
-					  0, O2NM_MAX_NODES, reg);
-	if (!reg->hr_debug_regnum) {
-		mlog_errno(ret);
-		goto bail;
-	}
+	o2hb_debug_create(O2HB_DEBUG_REGION_NUMBER, dir, &(reg->hr_db_regnum),
+			  sizeof(*(reg->hr_db_regnum)),
+			  O2HB_DB_TYPE_REGION_NUMBER, 0, O2NM_MAX_NODES, reg);
 
-	reg->hr_debug_elapsed_time =
-			o2hb_debug_create(O2HB_DEBUG_REGION_ELAPSED_TIME,
-					  reg->hr_debug_dir,
-					  &(reg->hr_db_elapsed_time),
-					  sizeof(*(reg->hr_db_elapsed_time)),
-					  O2HB_DB_TYPE_REGION_ELAPSED_TIME,
-					  0, 0, reg);
-	if (!reg->hr_debug_elapsed_time) {
-		mlog_errno(ret);
-		goto bail;
-	}
+	o2hb_debug_create(O2HB_DEBUG_REGION_ELAPSED_TIME, dir,
+			  &(reg->hr_db_elapsed_time),
+			  sizeof(*(reg->hr_db_elapsed_time)),
+			  O2HB_DB_TYPE_REGION_ELAPSED_TIME, 0, 0, reg);
 
-	reg->hr_debug_pinned =
-			o2hb_debug_create(O2HB_DEBUG_REGION_PINNED,
-					  reg->hr_debug_dir,
-					  &(reg->hr_db_pinned),
-					  sizeof(*(reg->hr_db_pinned)),
-					  O2HB_DB_TYPE_REGION_PINNED,
-					  0, 0, reg);
-	if (!reg->hr_debug_pinned) {
-		mlog_errno(ret);
-		goto bail;
-	}
+	o2hb_debug_create(O2HB_DEBUG_REGION_PINNED, dir, &(reg->hr_db_pinned),
+			  sizeof(*(reg->hr_db_pinned)),
+			  O2HB_DB_TYPE_REGION_PINNED, 0, 0, reg);
 
-	ret = 0;
-bail:
-	return ret;
 }
 
 static struct config_item *o2hb_heartbeat_group_make_item(struct config_group *group,
@@ -2155,7 +2040,7 @@ static struct config_item *o2hb_heartbeat_group_make_item(struct config_group *g
 			o2hb_nego_timeout_handler,
 			reg, NULL, &reg->hr_handler_list);
 	if (ret)
-		goto free;
+		goto remove_item;
 
 	ret = o2net_register_handler(O2HB_NEGO_APPROVE_MSG, reg->hr_key,
 			sizeof(struct o2hb_nego_msg),
@@ -2164,16 +2049,18 @@ static struct config_item *o2hb_heartbeat_group_make_item(struct config_group *g
 	if (ret)
 		goto unregister_handler;
 
-	ret = o2hb_debug_region_init(reg, o2hb_debug_dir);
-	if (ret) {
-		config_item_put(&reg->hr_item);
-		goto unregister_handler;
-	}
+	o2hb_debug_region_init(reg, o2hb_debug_dir);
 
 	return &reg->hr_item;
 
 unregister_handler:
 	o2net_unregister_handler_list(&reg->hr_handler_list);
+remove_item:
+	spin_lock(&o2hb_live_lock);
+	list_del(&reg->hr_all_item);
+	if (o2hb_global_heartbeat_active())
+		clear_bit(reg->hr_region_num, o2hb_region_bitmap);
+	spin_unlock(&o2hb_live_lock);
 free:
 	kfree(reg);
 	return ERR_PTR(ret);
@@ -2311,7 +2198,7 @@ static struct configfs_group_operations o2hb_heartbeat_group_group_ops = {
 	.drop_item	= o2hb_heartbeat_group_drop_item,
 };
 
-static struct config_item_type o2hb_heartbeat_group_type = {
+static const struct config_item_type o2hb_heartbeat_group_type = {
 	.ct_group_ops	= &o2hb_heartbeat_group_group_ops,
 	.ct_attrs	= o2hb_heartbeat_group_attrs,
 	.ct_owner	= THIS_MODULE,
@@ -2487,7 +2374,7 @@ unlock:
 	return ret;
 }
 
-void o2hb_region_dec_user(const char *region_uuid)
+static void o2hb_region_dec_user(const char *region_uuid)
 {
 	spin_lock(&o2hb_live_lock);
 
@@ -2576,22 +2463,6 @@ void o2hb_unregister_callback(const char *region_uuid,
 }
 EXPORT_SYMBOL_GPL(o2hb_unregister_callback);
 
-int o2hb_check_node_heartbeating(u8 node_num)
-{
-	unsigned long testing_map[BITS_TO_LONGS(O2NM_MAX_NODES)];
-
-	o2hb_fill_node_map(testing_map, sizeof(testing_map));
-	if (!test_bit(node_num, testing_map)) {
-		mlog(ML_HEARTBEAT,
-		     "node (%u) does not have heartbeating enabled.\n",
-		     node_num);
-		return 0;
-	}
-
-	return 1;
-}
-EXPORT_SYMBOL_GPL(o2hb_check_node_heartbeating);
-
 int o2hb_check_node_heartbeating_no_sem(u8 node_num)
 {
 	unsigned long testing_map[BITS_TO_LONGS(O2NM_MAX_NODES)];
@@ -2625,23 +2496,6 @@ int o2hb_check_node_heartbeating_from_callback(u8 node_num)
 	return 1;
 }
 EXPORT_SYMBOL_GPL(o2hb_check_node_heartbeating_from_callback);
-
-/* Makes sure our local node is configured with a node number, and is
- * heartbeating. */
-int o2hb_check_local_node_heartbeating(void)
-{
-	u8 node_num;
-
-	/* if this node was set then we have networking */
-	node_num = o2nm_this_node();
-	if (node_num == O2NM_MAX_NODES) {
-		mlog(ML_HEARTBEAT, "this node has not been configured.\n");
-		return 0;
-	}
-
-	return o2hb_check_node_heartbeating(node_num);
-}
-EXPORT_SYMBOL_GPL(o2hb_check_local_node_heartbeating);
 
 /*
  * this is just a hack until we get the plumbing which flips file systems

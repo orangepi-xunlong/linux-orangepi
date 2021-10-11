@@ -83,7 +83,7 @@ void rtw_hal_def_value_init(_adapter *padapter)
 		padapter->hal_func.init_default_value(padapter);
 
 		rtw_init_hal_com_default_value(padapter);
-
+		
 	#ifdef CONFIG_FW_MULTI_PORT_SUPPORT
 		adapter_to_dvobj(padapter)->dft.port_id = 0xFF;
 		adapter_to_dvobj(padapter)->dft.mac_id = 0xFF;
@@ -475,18 +475,38 @@ s32	rtw_hal_xmit(_adapter *padapter, struct xmit_frame *pxmitframe)
 s32	rtw_hal_mgnt_xmit(_adapter *padapter, struct xmit_frame *pmgntframe)
 {
 	s32 ret = _FAIL;
+	u8	*pframe, subtype;
+	struct rtw_ieee80211_hdr	*pwlanhdr;
+	struct sta_info	*psta;
+	struct sta_priv		*pstapriv = &padapter->stapriv;
 
 	update_mgntframe_attrib_addr(padapter, pmgntframe);
+	pframe = (u8 *)(pmgntframe->buf_addr) + TXDESC_OFFSET;
+	subtype = get_frame_sub_type(pframe); /* bit(7)~bit(2) */
 
-#if defined(CONFIG_IEEE80211W) || defined(CONFIG_RTW_MESH)
-	if ((!MLME_IS_MESH(padapter) && SEC_IS_BIP_KEY_INSTALLED(&padapter->securitypriv) == _TRUE)
-		#ifdef CONFIG_RTW_MESH
-		|| (MLME_IS_MESH(padapter) && padapter->mesh_info.mesh_auth_id)
-		#endif
-	)
+	/* pwlanhdr = (struct rtw_ieee80211_hdr *)pframe; */
+	/* _rtw_memcpy(pmgntframe->attrib.ra, pwlanhdr->addr1, ETH_ALEN); */
+
+#ifdef CONFIG_IEEE80211W
+	if (padapter->securitypriv.binstallBIPkey == _TRUE && (subtype == WIFI_DEAUTH || subtype == WIFI_DISASSOC ||
+			subtype == WIFI_ACTION)) {
+		if (IS_MCAST(pmgntframe->attrib.ra) && pmgntframe->attrib.key_type != IEEE80211W_NO_KEY) {
+			pmgntframe->attrib.encrypt = _BIP_;
+			/* pmgntframe->attrib.bswenc = _TRUE; */
+		} else if (pmgntframe->attrib.key_type != IEEE80211W_NO_KEY) {
+			psta = rtw_get_stainfo(pstapriv, pmgntframe->attrib.ra);
+			if (psta && psta->bpairwise_key_installed == _TRUE) {
+				pmgntframe->attrib.encrypt = _AES_;
+				pmgntframe->attrib.bswenc = _TRUE;
+			} else {
+				RTW_INFO("%s, %d, bpairwise_key_installed is FALSE\n", __func__, __LINE__);
+				goto no_mgmt_coalesce;
+			}
+		}
+		RTW_INFO("encrypt=%d, bswenc=%d\n", pmgntframe->attrib.encrypt, pmgntframe->attrib.bswenc);
 		rtw_mgmt_xmitframe_coalesce(padapter, pmgntframe->pkt, pmgntframe);
-#endif
-
+	}
+#endif /* CONFIG_IEEE80211W */
 no_mgmt_coalesce:
 	ret = padapter->hal_func.mgnt_xmit(padapter, pmgntframe);
 	return ret;
@@ -927,8 +947,11 @@ s32 c2h_handler(_adapter *adapter, u8 id, u8 seq, u8 plen, u8 *payload)
 
 	case C2H_EXTEND:
 		sub_id = payload[0];
-		/* no handle, goto default */
-
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0)
+	__attribute__ ((fallthrough));
+#else
+			__attribute__ ((__fallthrough__));
+#endif
 	default:
 		if (phydm_c2H_content_parsing(adapter_to_phydm(adapter), id, plen, payload) != TRUE)
 			ret = _FAIL;
@@ -981,154 +1004,48 @@ s32 rtw_hal_is_disable_sw_channel_plan(PADAPTER padapter)
 	return GET_HAL_DATA(padapter)->bDisableSWChannelPlan;
 }
 
-static s32 _rtw_hal_macid_sleep(_adapter *adapter, u8 macid, u8 sleep)
+s32 rtw_hal_macid_sleep(PADAPTER padapter, u8 macid)
 {
-	struct macid_ctl_t *macid_ctl = adapter_to_macidctl(adapter);
-	u16 reg_sleep;
-	u8 bit_shift;
-	u32 val32;
-	s32 ret = _FAIL;
+	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
+	struct macid_ctl_t *macid_ctl = dvobj_to_macidctl(dvobj);
+	u8 support;
+
+	support = _FALSE;
+	rtw_hal_get_def_var(padapter, HAL_DEF_MACID_SLEEP, &support);
+	if (_FALSE == support)
+		return _FAIL;
 
 	if (macid >= macid_ctl->num) {
-		RTW_ERR(ADPT_FMT" %s invalid macid(%u)\n"
-			, ADPT_ARG(adapter), sleep ? "sleep" : "wakeup" , macid);
-		goto exit;
+		RTW_ERR(FUNC_ADPT_FMT": Invalid macid(%u)\n",
+			FUNC_ADPT_ARG(padapter), macid);
+		return _FAIL;
 	}
 
-	if (macid < 32) {
-		reg_sleep = macid_ctl->reg_sleep_m0;
-		bit_shift = macid;
-	#if (MACID_NUM_SW_LIMIT > 32)
-	} else if (macid < 64) {
-		reg_sleep = macid_ctl->reg_sleep_m1;
-		bit_shift = macid - 32;
-	#endif
-	#if (MACID_NUM_SW_LIMIT > 64)
-	} else if (macid < 96) {
-		reg_sleep = macid_ctl->reg_sleep_m2;
-		bit_shift = macid - 64;
-	#endif
-	#if (MACID_NUM_SW_LIMIT > 96)
-	} else if (macid < 128) {
-		reg_sleep = macid_ctl->reg_sleep_m3;
-		bit_shift = macid - 96;
-	#endif
-	} else {
-		rtw_warn_on(1);
-		goto exit;
-	}
-
-	if (!reg_sleep) {
-		rtw_warn_on(1);
-		goto exit;
-	}
-
-	val32 = rtw_read32(adapter, reg_sleep);
-	RTW_INFO(ADPT_FMT" %s macid=%d, ori reg_0x%03x=0x%08x\n"
-		, ADPT_ARG(adapter), sleep ? "sleep" : "wakeup"
-		, macid, reg_sleep, val32);
-
-	ret = _SUCCESS;
-
-	if (sleep) {
-		if (val32 & BIT(bit_shift))
-			goto exit;
-		val32 |= BIT(bit_shift);
-	} else {
-		if (!(val32 & BIT(bit_shift)))
-			goto exit;
-		val32 &= ~BIT(bit_shift);
-	}
-
-	rtw_write32(adapter, reg_sleep, val32);
-
-exit:
-	return ret;
-}
-
-inline s32 rtw_hal_macid_sleep(_adapter *adapter, u8 macid)
-{
-	return _rtw_hal_macid_sleep(adapter, macid, 1);
-}
-
-inline s32 rtw_hal_macid_wakeup(_adapter *adapter, u8 macid)
-{
-	return _rtw_hal_macid_sleep(adapter, macid, 0);
-}
-
-static s32 _rtw_hal_macid_bmp_sleep(_adapter *adapter, struct macid_bmp *bmp, u8 sleep)
-{
-	struct macid_ctl_t *macid_ctl = adapter_to_macidctl(adapter);
-	u16 reg_sleep;
-	u32 *m = &bmp->m0;
-	u8 mid = 0;
-	u32 val32;
-
-	do {
-		if (*m == 0)
-			goto move_next;
-
-		if (mid == 0)
-			reg_sleep = macid_ctl->reg_sleep_m0;
-		#if (MACID_NUM_SW_LIMIT > 32)
-		else if (mid == 1)
-			reg_sleep = macid_ctl->reg_sleep_m1;
-		#endif
-		#if (MACID_NUM_SW_LIMIT > 64)
-		else if (mid == 2)
-			reg_sleep = macid_ctl->reg_sleep_m2;
-		#endif
-		#if (MACID_NUM_SW_LIMIT > 96)
-		else if (mid == 3)
-			reg_sleep = macid_ctl->reg_sleep_m3;
-		#endif
-		else {
-			rtw_warn_on(1);
-			break;
-		}
-
-		if (!reg_sleep) {
-			rtw_warn_on(1);
-			break;
-		}
-
-		val32 = rtw_read32(adapter, reg_sleep);
-		RTW_INFO(ADPT_FMT" %s m%u=0x%08x, ori reg_0x%03x=0x%08x\n"
-			, ADPT_ARG(adapter), sleep ? "sleep" : "wakeup"
-			, mid, *m, reg_sleep, val32);
-
-		if (sleep) {
-			if ((val32 & *m) == *m)
-				goto move_next;
-			val32 |= *m;
-		} else {
-			if ((val32 & *m) == 0)
-				goto move_next;
-			val32 &= ~(*m);
-		}
-
-		rtw_write32(adapter, reg_sleep, val32);
-
-move_next:
-		m++;
-		mid++;
-	} while (mid * 32 < MACID_NUM_SW_LIMIT);
+	rtw_hal_set_hwreg(padapter, HW_VAR_MACID_SLEEP, &macid);
 
 	return _SUCCESS;
 }
 
-inline s32 rtw_hal_macid_sleep_all_used(_adapter *adapter)
+s32 rtw_hal_macid_wakeup(PADAPTER padapter, u8 macid)
 {
-	struct macid_ctl_t *macid_ctl = adapter_to_macidctl(adapter);
+	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
+	struct macid_ctl_t *macid_ctl = dvobj_to_macidctl(dvobj);
+	u8 support;
 
-	return _rtw_hal_macid_bmp_sleep(adapter, &macid_ctl->used, 1);
-}
+	support = _FALSE;
+	rtw_hal_get_def_var(padapter, HAL_DEF_MACID_SLEEP, &support);
+	if (_FALSE == support)
+		return _FAIL;
 
-inline s32 rtw_hal_macid_wakeup_all_used(_adapter *adapter)
-{
-	struct macid_ctl_t *macid_ctl = adapter_to_macidctl(adapter);
+	if (macid >= macid_ctl->num) {
+		RTW_ERR(FUNC_ADPT_FMT": Invalid macid(%u)\n",
+			FUNC_ADPT_ARG(padapter), macid);
+		return _FAIL;
+	}
 
-	return _rtw_hal_macid_bmp_sleep(adapter, &macid_ctl->used, 0);
+	rtw_hal_set_hwreg(padapter, HW_VAR_MACID_WAKEUP, &macid);
+
+	return _SUCCESS;
 }
 
 s32 rtw_hal_fill_h2c_cmd(PADAPTER padapter, u8 ElementID, u32 CmdLen, u8 *pCmdBuffer)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/hfsplus/inode.c
  *
@@ -14,12 +15,13 @@
 #include <linux/pagemap.h>
 #include <linux/mpage.h>
 #include <linux/sched.h>
+#include <linux/cred.h>
 #include <linux/uio.h>
+#include <linux/fileattr.h>
 
 #include "hfsplus_fs.h"
 #include "hfsplus_raw.h"
 #include "xattr.h"
-#include "acl.h"
 
 static int hfsplus_readpage(struct file *file, struct page *page)
 {
@@ -240,12 +242,13 @@ static int hfsplus_file_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static int hfsplus_setattr(struct dentry *dentry, struct iattr *attr)
+static int hfsplus_setattr(struct user_namespace *mnt_userns,
+			   struct dentry *dentry, struct iattr *attr)
 {
 	struct inode *inode = d_inode(dentry);
 	int error;
 
-	error = setattr_prepare(dentry, attr);
+	error = setattr_prepare(&init_user_ns, dentry, attr);
 	if (error)
 		return error;
 
@@ -260,17 +263,33 @@ static int hfsplus_setattr(struct dentry *dentry, struct iattr *attr)
 		}
 		truncate_setsize(inode, attr->ia_size);
 		hfsplus_file_truncate(inode);
+		inode->i_mtime = inode->i_ctime = current_time(inode);
 	}
 
-	setattr_copy(inode, attr);
+	setattr_copy(&init_user_ns, inode, attr);
 	mark_inode_dirty(inode);
 
-	if (attr->ia_valid & ATTR_MODE) {
-		error = posix_acl_chmod(inode, inode->i_mode);
-		if (unlikely(error))
-			return error;
-	}
+	return 0;
+}
 
+int hfsplus_getattr(struct user_namespace *mnt_userns, const struct path *path,
+		    struct kstat *stat, u32 request_mask,
+		    unsigned int query_flags)
+{
+	struct inode *inode = d_inode(path->dentry);
+	struct hfsplus_inode_info *hip = HFSPLUS_I(inode);
+
+	if (inode->i_flags & S_APPEND)
+		stat->attributes |= STATX_ATTR_APPEND;
+	if (inode->i_flags & S_IMMUTABLE)
+		stat->attributes |= STATX_ATTR_IMMUTABLE;
+	if (hip->userflags & HFSPLUS_FLG_NODUMP)
+		stat->attributes |= STATX_ATTR_NODUMP;
+
+	stat->attributes_mask |= STATX_ATTR_APPEND | STATX_ATTR_IMMUTABLE |
+				 STATX_ATTR_NODUMP;
+
+	generic_fillattr(&init_user_ns, inode, stat);
 	return 0;
 }
 
@@ -282,7 +301,7 @@ int hfsplus_file_fsync(struct file *file, loff_t start, loff_t end,
 	struct hfsplus_sb_info *sbi = HFSPLUS_SB(inode->i_sb);
 	int error = 0, error2;
 
-	error = filemap_write_and_wait_range(inode->i_mapping, start, end);
+	error = file_write_and_wait_range(file, start, end);
 	if (error)
 		return error;
 	inode_lock(inode);
@@ -324,7 +343,7 @@ int hfsplus_file_fsync(struct file *file, loff_t start, loff_t end,
 	}
 
 	if (!test_bit(HFSPLUS_SB_NOBARRIER, &sbi->flags))
-		blkdev_issue_flush(inode->i_sb->s_bdev, GFP_KERNEL, NULL);
+		blkdev_issue_flush(inode->i_sb->s_bdev);
 
 	inode_unlock(inode);
 
@@ -333,11 +352,10 @@ int hfsplus_file_fsync(struct file *file, loff_t start, loff_t end,
 
 static const struct inode_operations hfsplus_file_inode_operations = {
 	.setattr	= hfsplus_setattr,
+	.getattr	= hfsplus_getattr,
 	.listxattr	= hfsplus_listxattr,
-#ifdef CONFIG_HFSPLUS_FS_POSIX_ACL
-	.get_acl	= hfsplus_get_posix_acl,
-	.set_acl	= hfsplus_set_posix_acl,
-#endif
+	.fileattr_get	= hfsplus_fileattr_get,
+	.fileattr_set	= hfsplus_fileattr_set,
 };
 
 static const struct file_operations hfsplus_file_operations = {
@@ -352,7 +370,8 @@ static const struct file_operations hfsplus_file_operations = {
 	.unlocked_ioctl = hfsplus_ioctl,
 };
 
-struct inode *hfsplus_new_inode(struct super_block *sb, umode_t mode)
+struct inode *hfsplus_new_inode(struct super_block *sb, struct inode *dir,
+				umode_t mode)
 {
 	struct hfsplus_sb_info *sbi = HFSPLUS_SB(sb);
 	struct inode *inode = new_inode(sb);
@@ -362,9 +381,7 @@ struct inode *hfsplus_new_inode(struct super_block *sb, umode_t mode)
 		return NULL;
 
 	inode->i_ino = sbi->next_cnid++;
-	inode->i_mode = mode;
-	inode->i_uid = current_fsuid();
-	inode->i_gid = current_fsgid();
+	inode_init_owner(&init_user_ns, inode, dir, mode);
 	set_nlink(inode, 1);
 	inode->i_mtime = inode->i_atime = inode->i_ctime = current_time(inode);
 
@@ -612,5 +629,56 @@ int hfsplus_cat_write_inode(struct inode *inode)
 	set_bit(HFSPLUS_I_CAT_DIRTY, &HFSPLUS_I(inode)->flags);
 out:
 	hfs_find_exit(&fd);
+	return 0;
+}
+
+int hfsplus_fileattr_get(struct dentry *dentry, struct fileattr *fa)
+{
+	struct inode *inode = d_inode(dentry);
+	struct hfsplus_inode_info *hip = HFSPLUS_I(inode);
+	unsigned int flags = 0;
+
+	if (inode->i_flags & S_IMMUTABLE)
+		flags |= FS_IMMUTABLE_FL;
+	if (inode->i_flags & S_APPEND)
+		flags |= FS_APPEND_FL;
+	if (hip->userflags & HFSPLUS_FLG_NODUMP)
+		flags |= FS_NODUMP_FL;
+
+	fileattr_fill_flags(fa, flags);
+
+	return 0;
+}
+
+int hfsplus_fileattr_set(struct user_namespace *mnt_userns,
+			 struct dentry *dentry, struct fileattr *fa)
+{
+	struct inode *inode = d_inode(dentry);
+	struct hfsplus_inode_info *hip = HFSPLUS_I(inode);
+	unsigned int new_fl = 0;
+
+	if (fileattr_has_fsx(fa))
+		return -EOPNOTSUPP;
+
+	/* don't silently ignore unsupported ext2 flags */
+	if (fa->flags & ~(FS_IMMUTABLE_FL|FS_APPEND_FL|FS_NODUMP_FL))
+		return -EOPNOTSUPP;
+
+	if (fa->flags & FS_IMMUTABLE_FL)
+		new_fl |= S_IMMUTABLE;
+
+	if (fa->flags & FS_APPEND_FL)
+		new_fl |= S_APPEND;
+
+	inode_set_flags(inode, new_fl, S_IMMUTABLE | S_APPEND);
+
+	if (fa->flags & FS_NODUMP_FL)
+		hip->userflags |= HFSPLUS_FLG_NODUMP;
+	else
+		hip->userflags &= ~HFSPLUS_FLG_NODUMP;
+
+	inode->i_ctime = current_time(inode);
+	mark_inode_dirty(inode);
+
 	return 0;
 }

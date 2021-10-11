@@ -1,11 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_DMA_MAPPING_H
 #define _LINUX_DMA_MAPPING_H
 
 #ifdef CONFIG_HAS_DMA
 # error Virtio userspace code does not support CONFIG_HAS_DMA
 #endif
-
-#define PCI_DMA_BUS_IS_PHYS 1
 
 enum dma_data_direction {
 	DMA_BIDIRECTIONAL = 0,
@@ -29,5 +28,7 @@ enum dma_data_direction {
 
 #define dma_unmap_single(...) do { } while (0)
 #define dma_unmap_page(...) do { } while (0)
+
+#define dma_max_mapping_size(...) SIZE_MAX
 
 #endif

@@ -42,7 +42,7 @@
 #include <rdma/ib_cache.h>
 #include "sa.h"
 
-static void mcast_add_one(struct ib_device *device);
+static int mcast_add_one(struct ib_device *device);
 static void mcast_remove_one(struct ib_device *device, void *client_data);
 
 static struct ib_client mcast_client = {
@@ -63,7 +63,7 @@ struct mcast_port {
 	struct rb_root		table;
 	atomic_t		refcount;
 	struct completion	comp;
-	u8			port_num;
+	u32			port_num;
 };
 
 struct mcast_device {
@@ -71,7 +71,7 @@ struct mcast_device {
 	struct ib_event_handler	event_handler;
 	int			start_port;
 	int			end_port;
-	struct mcast_port	port[0];
+	struct mcast_port	port[];
 };
 
 enum mcast_state {
@@ -605,7 +605,7 @@ found:
  */
 struct ib_sa_multicast *
 ib_sa_join_multicast(struct ib_sa_client *client,
-		     struct ib_device *device, u8 port_num,
+		     struct ib_device *device, u32 port_num,
 		     struct ib_sa_mcmember_rec *rec,
 		     ib_sa_comp_mask comp_mask, gfp_t gfp_mask,
 		     int (*callback)(int status,
@@ -690,7 +690,7 @@ void ib_sa_free_multicast(struct ib_sa_multicast *multicast)
 }
 EXPORT_SYMBOL(ib_sa_free_multicast);
 
-int ib_sa_get_mcmember_rec(struct ib_device *device, u8 port_num,
+int ib_sa_get_mcmember_rec(struct ib_device *device, u32 port_num,
 			   union ib_gid *mgid, struct ib_sa_mcmember_rec *rec)
 {
 	struct mcast_device *dev;
@@ -716,14 +716,29 @@ int ib_sa_get_mcmember_rec(struct ib_device *device, u8 port_num,
 }
 EXPORT_SYMBOL(ib_sa_get_mcmember_rec);
 
-int ib_init_ah_from_mcmember(struct ib_device *device, u8 port_num,
+/**
+ * ib_init_ah_from_mcmember - Initialize AH attribute from multicast
+ * member record and gid of the device.
+ * @device:	RDMA device
+ * @port_num:	Port of the rdma device to consider
+ * @rec:	Multicast member record to use
+ * @ndev:	Optional netdevice, applicable only for RoCE
+ * @gid_type:	GID type to consider
+ * @ah_attr:	AH attribute to fillup on successful completion
+ *
+ * ib_init_ah_from_mcmember() initializes AH attribute based on multicast
+ * member record and other device properties. On success the caller is
+ * responsible to call rdma_destroy_ah_attr on the ah_attr. Returns 0 on
+ * success or appropriate error code.
+ *
+ */
+int ib_init_ah_from_mcmember(struct ib_device *device, u32 port_num,
 			     struct ib_sa_mcmember_rec *rec,
 			     struct net_device *ndev,
 			     enum ib_gid_type gid_type,
-			     struct ib_ah_attr *ah_attr)
+			     struct rdma_ah_attr *ah_attr)
 {
-	int ret;
-	u16 gid_index;
+	const struct ib_gid_attr *sgid_attr;
 
 	/* GID table is not based on the netdevice for IB link layer,
 	 * so ignore ndev during search.
@@ -733,27 +748,22 @@ int ib_init_ah_from_mcmember(struct ib_device *device, u8 port_num,
 	else if (!rdma_protocol_roce(device, port_num))
 		return -EINVAL;
 
-	ret = ib_find_cached_gid_by_port(device, &rec->port_gid,
-					 gid_type, port_num,
-					 ndev,
-					 &gid_index);
-	if (ret)
-		return ret;
+	sgid_attr = rdma_find_gid_by_port(device, &rec->port_gid,
+					  gid_type, port_num, ndev);
+	if (IS_ERR(sgid_attr))
+		return PTR_ERR(sgid_attr);
 
-	memset(ah_attr, 0, sizeof *ah_attr);
-	ah_attr->dlid = be16_to_cpu(rec->mlid);
-	ah_attr->sl = rec->sl;
-	ah_attr->port_num = port_num;
-	ah_attr->static_rate = rec->rate;
+	memset(ah_attr, 0, sizeof(*ah_attr));
+	ah_attr->type = rdma_ah_find_type(device, port_num);
 
-	ah_attr->ah_flags = IB_AH_GRH;
-	ah_attr->grh.dgid = rec->mgid;
-
-	ah_attr->grh.sgid_index = (u8) gid_index;
-	ah_attr->grh.flow_label = be32_to_cpu(rec->flow_label);
-	ah_attr->grh.hop_limit = rec->hop_limit;
-	ah_attr->grh.traffic_class = rec->traffic_class;
-
+	rdma_ah_set_dlid(ah_attr, be16_to_cpu(rec->mlid));
+	rdma_ah_set_sl(ah_attr, rec->sl);
+	rdma_ah_set_port_num(ah_attr, port_num);
+	rdma_ah_set_static_rate(ah_attr, rec->rate);
+	rdma_move_grh_sgid_attr(ah_attr, &rec->mgid,
+				be32_to_cpu(rec->flow_label),
+				rec->hop_limit,	rec->traffic_class,
+				sgid_attr);
 	return 0;
 }
 EXPORT_SYMBOL(ib_init_ah_from_mcmember);
@@ -795,7 +805,6 @@ static void mcast_event_handler(struct ib_event_handler *handler,
 	switch (event->event) {
 	case IB_EVENT_PORT_ERR:
 	case IB_EVENT_LID_CHANGE:
-	case IB_EVENT_SM_CHANGE:
 	case IB_EVENT_CLIENT_REREGISTER:
 		mcast_groups_event(&dev->port[index], MCAST_GROUP_ERROR);
 		break;
@@ -807,17 +816,17 @@ static void mcast_event_handler(struct ib_event_handler *handler,
 	}
 }
 
-static void mcast_add_one(struct ib_device *device)
+static int mcast_add_one(struct ib_device *device)
 {
 	struct mcast_device *dev;
 	struct mcast_port *port;
 	int i;
 	int count = 0;
 
-	dev = kmalloc(sizeof *dev + device->phys_port_cnt * sizeof *port,
+	dev = kmalloc(struct_size(dev, port, device->phys_port_cnt),
 		      GFP_KERNEL);
 	if (!dev)
-		return;
+		return -ENOMEM;
 
 	dev->start_port = rdma_start_port(device);
 	dev->end_port = rdma_end_port(device);
@@ -837,7 +846,7 @@ static void mcast_add_one(struct ib_device *device)
 
 	if (!count) {
 		kfree(dev);
-		return;
+		return -EOPNOTSUPP;
 	}
 
 	dev->device = device;
@@ -845,6 +854,7 @@ static void mcast_add_one(struct ib_device *device)
 
 	INIT_IB_EVENT_HANDLER(&dev->event_handler, device, mcast_event_handler);
 	ib_register_event_handler(&dev->event_handler);
+	return 0;
 }
 
 static void mcast_remove_one(struct ib_device *device, void *client_data)
@@ -852,9 +862,6 @@ static void mcast_remove_one(struct ib_device *device, void *client_data)
 	struct mcast_device *dev = client_data;
 	struct mcast_port *port;
 	int i;
-
-	if (!dev)
-		return;
 
 	ib_unregister_event_handler(&dev->event_handler);
 	flush_workqueue(mcast_wq);

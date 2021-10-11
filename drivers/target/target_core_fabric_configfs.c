@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*******************************************************************************
 * Filename: target_core_fabric_configfs.c
  *
@@ -8,15 +9,6 @@
  *
  * Nicholas A. Bellinger <nab@linux-iscsi.org>
 *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  ****************************************************************************/
 
 #include <linux/module.h>
@@ -34,6 +26,7 @@
 #include <linux/configfs.h>
 
 #include <target/target_core_base.h>
+#include <target/target_core_backend.h>
 #include <target/target_core_fabric.h>
 
 #include "target_core_internal.h"
@@ -65,6 +58,8 @@ static void target_fabric_setup_##_name##_cit(struct target_fabric_configfs *tf)
 	pr_debug("Setup generic %s\n", __stringify(_name));		\
 }
 
+static struct configfs_item_operations target_fabric_port_item_ops;
+
 /* Start of tfc_tpg_mappedlun_cit */
 
 static int target_fabric_mappedlun_link(
@@ -72,19 +67,20 @@ static int target_fabric_mappedlun_link(
 	struct config_item *lun_ci)
 {
 	struct se_dev_entry *deve;
-	struct se_lun *lun = container_of(to_config_group(lun_ci),
-			struct se_lun, lun_group);
+	struct se_lun *lun;
 	struct se_lun_acl *lacl = container_of(to_config_group(lun_acl_ci),
 			struct se_lun_acl, se_lun_group);
 	struct se_portal_group *se_tpg;
 	struct config_item *nacl_ci, *tpg_ci, *tpg_ci_s, *wwn_ci, *wwn_ci_s;
 	bool lun_access_ro;
 
-	if (lun->lun_link_magic != SE_LUN_LINK_MAGIC) {
-		pr_err("Bad lun->lun_link_magic, not a valid lun_ci pointer:"
-			" %p to struct lun: %p\n", lun_ci, lun);
+	if (!lun_ci->ci_type ||
+	    lun_ci->ci_type->ct_item_ops != &target_fabric_port_item_ops) {
+		pr_err("Bad lun_ci, not a valid lun_ci pointer: %p\n", lun_ci);
 		return -EFAULT;
 	}
+	lun = container_of(to_config_group(lun_ci), struct se_lun, lun_group);
+
 	/*
 	 * Ensure that the source port exists
 	 */
@@ -142,7 +138,7 @@ static int target_fabric_mappedlun_link(
 	return core_dev_add_initiator_node_lun_acl(se_tpg, lacl, lun, lun_access_ro);
 }
 
-static int target_fabric_mappedlun_unlink(
+static void target_fabric_mappedlun_unlink(
 	struct config_item *lun_acl_ci,
 	struct config_item *lun_ci)
 {
@@ -151,7 +147,7 @@ static int target_fabric_mappedlun_unlink(
 	struct se_lun *lun = container_of(to_config_group(lun_ci),
 			struct se_lun, lun_group);
 
-	return core_dev_del_initiator_node_lun_acl(lun, lacl);
+	core_dev_del_initiator_node_lun_acl(lun, lacl);
 }
 
 static struct se_lun_acl *item_to_lun_acl(struct config_item *item)
@@ -199,7 +195,7 @@ static ssize_t target_fabric_mappedlun_write_protect_store(
 
 	pr_debug("%s_ConfigFS: Changed Initiator ACL: %s"
 		" Mapped LUN: %llu Write Protect bit to %s\n",
-		se_tpg->se_tpg_tfo->get_fabric_name(),
+		se_tpg->se_tpg_tfo->fabric_name,
 		se_nacl->initiatorname, lacl->mapped_lun, (wp) ? "ON" : "OFF");
 
 	return count;
@@ -628,18 +624,18 @@ static int target_fabric_port_link(
 	struct se_lun *lun = container_of(to_config_group(lun_ci),
 				struct se_lun, lun_group);
 	struct se_portal_group *se_tpg;
-	struct se_device *dev =
-		container_of(to_config_group(se_dev_ci), struct se_device, dev_group);
+	struct se_device *dev;
 	struct target_fabric_configfs *tf;
 	int ret;
 
-	if (dev->dev_link_magic != SE_DEV_LINK_MAGIC) {
-		pr_err("Bad dev->dev_link_magic, not a valid se_dev_ci pointer:"
-			" %p to struct se_device: %p\n", se_dev_ci, dev);
+	if (!se_dev_ci->ci_type ||
+	    se_dev_ci->ci_type->ct_item_ops != &target_core_dev_item_ops) {
+		pr_err("Bad se_dev_ci, not a valid se_dev_ci pointer: %p\n", se_dev_ci);
 		return -EFAULT;
 	}
+	dev = container_of(to_config_group(se_dev_ci), struct se_device, dev_group);
 
-	if (!(dev->dev_flags & DF_CONFIGURED)) {
+	if (!target_dev_configured(dev)) {
 		pr_err("se_device not configured yet, cannot port link\n");
 		return -ENODEV;
 	}
@@ -674,7 +670,7 @@ out:
 	return ret;
 }
 
-static int target_fabric_port_unlink(
+static void target_fabric_port_unlink(
 	struct config_item *lun_ci,
 	struct config_item *se_dev_ci)
 {
@@ -693,7 +689,6 @@ static int target_fabric_port_unlink(
 	}
 
 	core_dev_del_lun(se_tpg, lun);
-	return 0;
 }
 
 static void target_fabric_port_release(struct config_item *item)
@@ -839,7 +834,7 @@ static struct config_group *target_fabric_make_tpg(
 		return ERR_PTR(-ENOSYS);
 	}
 
-	se_tpg = tf->tf_ops->fabric_make_tpg(wwn, group, name);
+	se_tpg = tf->tf_ops->fabric_make_tpg(wwn, name);
 	if (!se_tpg || IS_ERR(se_tpg))
 		return ERR_PTR(-EINVAL);
 
@@ -897,6 +892,7 @@ static void target_fabric_release_wwn(struct config_item *item)
 	struct target_fabric_configfs *tf = wwn->wwn_tf;
 
 	configfs_remove_default_groups(&wwn->fabric_stat_group);
+	configfs_remove_default_groups(&wwn->param_group);
 	tf->tf_ops->fabric_drop_wwn(wwn);
 }
 
@@ -923,6 +919,57 @@ TF_CIT_SETUP(wwn_fabric_stats, NULL, NULL, NULL);
 
 /* End of tfc_wwn_fabric_stats_cit */
 
+static ssize_t
+target_fabric_wwn_cmd_completion_affinity_show(struct config_item *item,
+					       char *page)
+{
+	struct se_wwn *wwn = container_of(to_config_group(item), struct se_wwn,
+					  param_group);
+	return sprintf(page, "%d\n",
+		       wwn->cmd_compl_affinity == WORK_CPU_UNBOUND ?
+		       SE_COMPL_AFFINITY_CURR_CPU : wwn->cmd_compl_affinity);
+}
+
+static ssize_t
+target_fabric_wwn_cmd_completion_affinity_store(struct config_item *item,
+						const char *page, size_t count)
+{
+	struct se_wwn *wwn = container_of(to_config_group(item), struct se_wwn,
+					  param_group);
+	int compl_val;
+
+	if (kstrtoint(page, 0, &compl_val))
+		return -EINVAL;
+
+	switch (compl_val) {
+	case SE_COMPL_AFFINITY_CPUID:
+		wwn->cmd_compl_affinity = compl_val;
+		break;
+	case SE_COMPL_AFFINITY_CURR_CPU:
+		wwn->cmd_compl_affinity = WORK_CPU_UNBOUND;
+		break;
+	default:
+		if (compl_val < 0 || compl_val >= nr_cpu_ids ||
+		    !cpu_online(compl_val)) {
+			pr_err("Command completion value must be between %d and %d or an online CPU.\n",
+			       SE_COMPL_AFFINITY_CPUID,
+			       SE_COMPL_AFFINITY_CURR_CPU);
+			return -EINVAL;
+		}
+		wwn->cmd_compl_affinity = compl_val;
+	}
+
+	return count;
+}
+CONFIGFS_ATTR(target_fabric_wwn_, cmd_completion_affinity);
+
+static struct configfs_attribute *target_fabric_wwn_param_attrs[] = {
+	&target_fabric_wwn_attr_cmd_completion_affinity,
+	NULL,
+};
+
+TF_CIT_SETUP(wwn_param, NULL, NULL, target_fabric_wwn_param_attrs);
+
 /* Start of tfc_wwn_cit */
 
 static struct config_group *target_fabric_make_wwn(
@@ -942,6 +989,7 @@ static struct config_group *target_fabric_make_wwn(
 	if (!wwn || IS_ERR(wwn))
 		return ERR_PTR(-EINVAL);
 
+	wwn->cmd_compl_affinity = SE_COMPL_AFFINITY_CPUID;
 	wwn->wwn_tf = tf;
 
 	config_group_init_type_name(&wwn->wwn_group, name, &tf->tf_tpg_cit);
@@ -949,6 +997,10 @@ static struct config_group *target_fabric_make_wwn(
 	config_group_init_type_name(&wwn->fabric_stat_group, "fabric_statistics",
 			&tf->tf_wwn_fabric_stats_cit);
 	configfs_add_default_group(&wwn->fabric_stat_group, &wwn->wwn_group);
+
+	config_group_init_type_name(&wwn->param_group, "param",
+			&tf->tf_wwn_param_cit);
+	configfs_add_default_group(&wwn->param_group, &wwn->wwn_group);
 
 	if (tf->tf_ops->add_wwn_groups)
 		tf->tf_ops->add_wwn_groups(wwn);
@@ -979,6 +1031,7 @@ int target_fabric_setup_cits(struct target_fabric_configfs *tf)
 	target_fabric_setup_discovery_cit(tf);
 	target_fabric_setup_wwn_cit(tf);
 	target_fabric_setup_wwn_fabric_stats_cit(tf);
+	target_fabric_setup_wwn_param_cit(tf);
 	target_fabric_setup_tpg_cit(tf);
 	target_fabric_setup_tpg_base_cit(tf);
 	target_fabric_setup_tpg_port_cit(tf);

@@ -54,6 +54,7 @@ static void i40iw_free_vmalloc_mem(struct i40iw_hw *hw, struct i40iw_chunk *chun
 
 /**
  * i40iw_destroy_pble_pool - destroy pool during module unload
+ * @dev: i40iw_sc_dev struct
  * @pble_rsrc:	pble resources
  */
 void i40iw_destroy_pble_pool(struct i40iw_sc_dev *dev, struct i40iw_hmc_pble_rsrc *pble_rsrc)
@@ -112,8 +113,8 @@ enum i40iw_status_code i40iw_hmc_init_pble(struct i40iw_sc_dev *dev,
 
 /**
  * get_sd_pd_idx -  Returns sd index, pd index and rel_pd_idx from fpm address
- * @ pble_rsrc:	structure containing fpm address
- * @ idx: where to return indexes
+ * @pble_rsrc:	structure containing fpm address
+ * @idx: where to return indexes
  */
 static inline void get_sd_pd_idx(struct i40iw_hmc_pble_rsrc *pble_rsrc,
 				 struct sd_pd_idx *idx)
@@ -167,7 +168,7 @@ static enum i40iw_status_code add_sd_direct(struct i40iw_sc_dev *dev,
  */
 static void i40iw_free_vmalloc_mem(struct i40iw_hw *hw, struct i40iw_chunk *chunk)
 {
-	struct pci_dev *pcidev = (struct pci_dev *)hw->dev_context;
+	struct pci_dev *pcidev = hw->pcidev;
 	int i;
 
 	if (!chunk->pg_cnt)
@@ -193,7 +194,7 @@ static enum i40iw_status_code i40iw_get_vmalloc_mem(struct i40iw_hw *hw,
 						    struct i40iw_chunk *chunk,
 						    int pg_cnt)
 {
-	struct pci_dev *pcidev = (struct pci_dev *)hw->dev_context;
+	struct pci_dev *pcidev = hw->pcidev;
 	struct page *page;
 	u8 *addr;
 	u32 size;
@@ -269,10 +270,8 @@ static enum i40iw_status_code add_bp_pages(struct i40iw_sc_dev *dev,
 	status = i40iw_add_sd_table_entry(dev->hw, hmc_info,
 					  info->idx.sd_idx, I40IW_SD_TYPE_PAGED,
 					  I40IW_HMC_DIRECT_BP_SIZE);
-	if (status) {
-		i40iw_free_vmalloc_mem(dev->hw, chunk);
-		return status;
-	}
+	if (status)
+		goto error;
 	if (!dev->is_pf) {
 		status = i40iw_vchnl_vf_add_hmc_objs(dev, I40IW_HMC_IW_PBLE,
 						     fpm_to_idx(pble_rsrc,
@@ -280,8 +279,7 @@ static enum i40iw_status_code add_bp_pages(struct i40iw_sc_dev *dev,
 						     (info->pages << PBLE_512_SHIFT));
 		if (status) {
 			i40iw_pr_err("allocate PBLEs in the PF.  Error %i\n", status);
-			i40iw_free_vmalloc_mem(dev->hw, chunk);
-			return status;
+			goto error;
 		}
 	}
 	addr = chunk->vaddr;
@@ -353,10 +351,6 @@ static enum i40iw_status_code add_pble_pool(struct i40iw_sc_dev *dev,
 	pages = (idx->rel_pd_idx) ? (I40IW_HMC_PD_CNT_IN_SD -
 			idx->rel_pd_idx) : I40IW_HMC_PD_CNT_IN_SD;
 	pages = min(pages, pble_rsrc->unallocated_pble >> PBLE_512_SHIFT);
-	if (!pages) {
-		ret_code = I40IW_ERR_NO_PBLCHUNKS_AVAILABLE;
-		goto error;
-	}
 	info.chunk = chunk;
 	info.hmc_info = hmc_info;
 	info.pages = pages;
@@ -399,12 +393,9 @@ static enum i40iw_status_code add_pble_pool(struct i40iw_sc_dev *dev,
 	i40iw_debug(dev, I40IW_DEBUG_PBLE, "next_fpm_addr = %llx chunk_size[%u] = 0x%x\n",
 		    pble_rsrc->next_fpm_addr, chunk->size, chunk->size);
 	pble_rsrc->unallocated_pble -= (chunk->size >> 3);
-	list_add(&chunk->list, &pble_rsrc->pinfo.clist);
 	sd_reg_val = (sd_entry_type == I40IW_SD_TYPE_PAGED) ?
 			sd_entry->u.pd_table.pd_page_addr.pa : sd_entry->u.bp.addr.pa;
-	if (sd_entry->valid)
-		return 0;
-	if (dev->is_pf) {
+	if (dev->is_pf && !sd_entry->valid) {
 		ret_code = i40iw_hmc_sd_one(dev, hmc_info->hmc_fn_id,
 					    sd_reg_val, idx->sd_idx,
 					    sd_entry->entry_type, true);
@@ -415,6 +406,7 @@ static enum i40iw_status_code add_pble_pool(struct i40iw_sc_dev *dev,
 	}
 
 	sd_entry->valid = true;
+	list_add(&chunk->list, &pble_rsrc->pinfo.clist);
 	return 0;
  error:
 	kfree(chunk);

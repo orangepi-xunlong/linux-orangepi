@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/acorn/scsi/acornscsi.c
  *
  *  Acorn SCSI 3 driver
  *  By R.M.King.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Abandoned using the Select and Transfer command since there were
  * some nasty races between our software and the target devices that
@@ -146,12 +143,6 @@
 #define VER_MAJOR 2
 #define VER_MINOR 0
 #define VER_PATCH 6
-
-#ifndef ABORT_TAG
-#define ABORT_TAG 0xd
-#else
-#error "Yippee!  ABORT TAG is now defined!  Remove this error!"
-#endif
 
 #ifdef USE_DMAC
 /*
@@ -1070,7 +1061,7 @@ void acornscsi_dma_setup(AS_Host *host, dmadir_t direction)
  * Purpose : ensure that all DMA transfers are up-to-date & host->scsi.SCp is correct
  * Params  : host - host to finish
  * Notes   : This is called when a command is:
- *		terminating, RESTORE_POINTERS, SAVE_POINTERS, DISCONECT
+ *		terminating, RESTORE_POINTERS, SAVE_POINTERS, DISCONNECT
  *	   : This must not return until all transfers are completed.
  */
 static
@@ -1493,8 +1484,8 @@ void acornscsi_message(AS_Host *host)
     }
 
     switch (message[0]) {
-    case ABORT:
-    case ABORT_TAG:
+    case ABORT_TASK_SET:
+    case ABORT_TASK:
     case COMMAND_COMPLETE:
 	if (host->scsi.phase != PHASE_STATUSIN) {
 	    printk(KERN_ERR "scsi%d.%c: command complete following non-status in phase?\n",
@@ -1597,10 +1588,6 @@ void acornscsi_message(AS_Host *host)
 	default:
 	    break;
 	}
-	break;
-
-    case QUEUE_FULL:
-	/* TODO: target queue is full */
 	break;
 
     case SIMPLE_QUEUE_TAG:
@@ -1819,7 +1806,7 @@ int acornscsi_reconnect(AS_Host *host)
 }
 
 /*
- * Function: int acornscsi_reconect_finish(AS_Host *host)
+ * Function: int acornscsi_reconnect_finish(AS_Host *host)
  * Purpose : finish reconnecting a command
  * Params  : host - host to complete
  * Returns : 0 if failed
@@ -2725,7 +2712,7 @@ int acornscsi_abort(struct scsi_cmnd *SCpnt)
  * Params   : SCpnt  - command causing reset
  * Returns  : one of SCSI_RESET_ macros
  */
-int acornscsi_bus_reset(struct scsi_cmnd *SCpnt)
+int acornscsi_host_reset(struct scsi_cmnd *SCpnt)
 {
 	AS_Host *host = (AS_Host *)SCpnt->device->host->hostdata;
 	struct scsi_cmnd *SCptr;
@@ -2734,14 +2721,15 @@ int acornscsi_bus_reset(struct scsi_cmnd *SCpnt)
 
 #if (DEBUG & DEBUG_RESET)
     {
-	int asr, ssr;
+	int asr, ssr, devidx;
 
 	asr = sbic_arm_read(host, SBIC_ASR);
 	ssr = sbic_arm_read(host, SBIC_SSR);
 
 	printk(KERN_WARNING "acornscsi_reset: ");
 	print_sbic_status(asr, ssr, host->scsi.phase);
-	acornscsi_dumplog(host, SCpnt->device->id);
+	for (devidx = 0; devidx < 9; devidx++)
+	    acornscsi_dumplog(host, devidx);
     }
 #endif
 
@@ -2884,12 +2872,12 @@ static struct scsi_host_template acornscsi_template = {
 	.info			= acornscsi_info,
 	.queuecommand		= acornscsi_queuecmd,
 	.eh_abort_handler	= acornscsi_abort,
-	.eh_bus_reset_handler	= acornscsi_bus_reset,
+	.eh_host_reset_handler	= acornscsi_host_reset,
 	.can_queue		= 16,
 	.this_id		= 7,
 	.sg_tablesize		= SG_ALL,
 	.cmd_per_lun		= 2,
-	.use_clustering		= DISABLE_CLUSTERING,
+	.dma_boundary		= PAGE_SIZE - 1,
 	.proc_name		= "acornscsi",
 };
 
@@ -2913,8 +2901,10 @@ static int acornscsi_probe(struct expansion_card *ec, const struct ecard_id *id)
 
 	ashost->base = ecardm_iomap(ec, ECARD_RES_MEMC, 0, 0);
 	ashost->fast = ecardm_iomap(ec, ECARD_RES_IOCFAST, 0, 0);
-	if (!ashost->base || !ashost->fast)
+	if (!ashost->base || !ashost->fast) {
+		ret = -ENOMEM;
 		goto out_put;
+	}
 
 	host->irq = ec->irq;
 	ashost->host = host;

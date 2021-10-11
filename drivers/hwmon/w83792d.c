@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * w83792d.c - Part of lm_sensors, Linux kernel modules for hardware
  *	       monitoring
  * Copyright (C) 2004, 2005 Winbond Electronics Corp.
  *			    Shane Huang,
  *			    Rudolf Marek <r.marek@assembler.cz>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  * Note:
  * 1. This driver is only for 2.6 kernel, 2.4 kernel need a different driver.
@@ -299,8 +286,7 @@ struct w83792d_data {
 	u8 sf2_levels[3][4];	/* Smart FanII: Fan1,2,3 duty cycle levels */
 };
 
-static int w83792d_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id);
+static int w83792d_probe(struct i2c_client *client);
 static int w83792d_detect(struct i2c_client *client,
 			  struct i2c_board_info *info);
 static int w83792d_remove(struct i2c_client *client);
@@ -323,7 +309,7 @@ static struct i2c_driver w83792d_driver = {
 	.driver = {
 		.name = "w83792d",
 	},
-	.probe		= w83792d_probe,
+	.probe_new	= w83792d_probe,
 	.remove		= w83792d_remove,
 	.id_table	= w83792d_id,
 	.detect		= w83792d_detect,
@@ -578,7 +564,7 @@ static ssize_t store_temp23(struct device *dev, struct device_attribute *attr,
 
 /* get realtime status of all sensors items: voltage, temp, fan */
 static ssize_t
-show_alarms_reg(struct device *dev, struct device_attribute *attr, char *buf)
+alarms_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct w83792d_data *data = w83792d_update_device(dev);
 	return sprintf(buf, "%d\n", data->alarms);
@@ -735,16 +721,16 @@ store_pwm_mode(struct device *dev, struct device_attribute *attr,
 }
 
 static ssize_t
-show_chassis_clear(struct device *dev, struct device_attribute *attr,
-			char *buf)
+intrusion0_alarm_show(struct device *dev, struct device_attribute *attr,
+		      char *buf)
 {
 	struct w83792d_data *data = w83792d_update_device(dev);
 	return sprintf(buf, "%d\n", data->chassis);
 }
 
 static ssize_t
-store_chassis_clear(struct device *dev, struct device_attribute *attr,
-			const char *buf, size_t count)
+intrusion0_alarm_store(struct device *dev, struct device_attribute *attr,
+		       const char *buf, size_t count)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct w83792d_data *data = i2c_get_clientdata(client);
@@ -937,7 +923,7 @@ store_sf2_level(struct device *dev, struct device_attribute *attr,
 static int
 w83792d_detect_subclients(struct i2c_client *new_client)
 {
-	int i, id, err;
+	int i, id;
 	int address = new_client->addr;
 	u8 val;
 	struct i2c_adapter *adapter = new_client->adapter;
@@ -951,8 +937,7 @@ w83792d_detect_subclients(struct i2c_client *new_client)
 				dev_err(&new_client->dev,
 					"invalid subclient address %d; must be 0x48-0x4f\n",
 					force_subclients[i]);
-				err = -ENODEV;
-				goto ERROR_SC_0;
+				return -ENODEV;
 			}
 		}
 		w83792d_write_value(new_client, W83792D_REG_I2C_SUBADDR,
@@ -962,29 +947,21 @@ w83792d_detect_subclients(struct i2c_client *new_client)
 
 	val = w83792d_read_value(new_client, W83792D_REG_I2C_SUBADDR);
 	if (!(val & 0x08))
-		data->lm75[0] = i2c_new_dummy(adapter, 0x48 + (val & 0x7));
+		data->lm75[0] = devm_i2c_new_dummy_device(&new_client->dev, adapter,
+							  0x48 + (val & 0x7));
 	if (!(val & 0x80)) {
-		if ((data->lm75[0] != NULL) &&
+		if (!IS_ERR(data->lm75[0]) &&
 			((val & 0x7) == ((val >> 4) & 0x7))) {
 			dev_err(&new_client->dev,
 				"duplicate addresses 0x%x, use force_subclient\n",
 				data->lm75[0]->addr);
-			err = -ENODEV;
-			goto ERROR_SC_1;
+			return -ENODEV;
 		}
-		data->lm75[1] = i2c_new_dummy(adapter,
-					      0x48 + ((val >> 4) & 0x7));
+		data->lm75[1] = devm_i2c_new_dummy_device(&new_client->dev, adapter,
+							  0x48 + ((val >> 4) & 0x7));
 	}
 
 	return 0;
-
-/* Undo inits in case of errors */
-
-ERROR_SC_1:
-	if (data->lm75[0] != NULL)
-		i2c_unregister_device(data->lm75[0]);
-ERROR_SC_0:
-	return err;
 }
 
 static SENSOR_DEVICE_ATTR(in0_input, S_IRUGO, show_in, NULL, 0);
@@ -1047,7 +1024,7 @@ static SENSOR_DEVICE_ATTR_2(temp2_max_hyst, S_IRUGO | S_IWUSR,
 			show_temp23, store_temp23, 0, 4);
 static SENSOR_DEVICE_ATTR_2(temp3_max_hyst, S_IRUGO | S_IWUSR,
 			show_temp23, store_temp23, 1, 4);
-static DEVICE_ATTR(alarms, S_IRUGO, show_alarms_reg, NULL);
+static DEVICE_ATTR_RO(alarms);
 static SENSOR_DEVICE_ATTR(in0_alarm, S_IRUGO, show_alarm, NULL, 0);
 static SENSOR_DEVICE_ATTR(in1_alarm, S_IRUGO, show_alarm, NULL, 1);
 static SENSOR_DEVICE_ATTR(temp1_alarm, S_IRUGO, show_alarm, NULL, 2);
@@ -1067,8 +1044,7 @@ static SENSOR_DEVICE_ATTR(in8_alarm, S_IRUGO, show_alarm, NULL, 20);
 static SENSOR_DEVICE_ATTR(fan4_alarm, S_IRUGO, show_alarm, NULL, 21);
 static SENSOR_DEVICE_ATTR(fan5_alarm, S_IRUGO, show_alarm, NULL, 22);
 static SENSOR_DEVICE_ATTR(fan6_alarm, S_IRUGO, show_alarm, NULL, 23);
-static DEVICE_ATTR(intrusion0_alarm, S_IRUGO | S_IWUSR,
-			show_chassis_clear, store_chassis_clear);
+static DEVICE_ATTR_RW(intrusion0_alarm);
 static SENSOR_DEVICE_ATTR(pwm1, S_IWUSR | S_IRUGO, show_pwm, store_pwm, 0);
 static SENSOR_DEVICE_ATTR(pwm2, S_IWUSR | S_IRUGO, show_pwm, store_pwm, 1);
 static SENSOR_DEVICE_ATTR(pwm3, S_IWUSR | S_IRUGO, show_pwm, store_pwm, 2);
@@ -1382,7 +1358,7 @@ w83792d_detect(struct i2c_client *client, struct i2c_board_info *info)
 }
 
 static int
-w83792d_probe(struct i2c_client *client, const struct i2c_device_id *id)
+w83792d_probe(struct i2c_client *client)
 {
 	struct w83792d_data *data;
 	struct device *dev = &client->dev;
@@ -1411,7 +1387,7 @@ w83792d_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	/* Register sysfs hooks */
 	err = sysfs_create_group(&dev->kobj, &w83792d_group);
 	if (err)
-		goto exit_i2c_unregister;
+		return err;
 
 	/*
 	 * Read GPIO enable register to check if pins for fan 4,5 are used as
@@ -1456,11 +1432,6 @@ exit_remove_files:
 	sysfs_remove_group(&dev->kobj, &w83792d_group);
 	for (i = 0; i < ARRAY_SIZE(w83792d_group_fan); i++)
 		sysfs_remove_group(&dev->kobj, &w83792d_group_fan[i]);
-exit_i2c_unregister:
-	if (data->lm75[0] != NULL)
-		i2c_unregister_device(data->lm75[0]);
-	if (data->lm75[1] != NULL)
-		i2c_unregister_device(data->lm75[1]);
 	return err;
 }
 
@@ -1475,11 +1446,6 @@ w83792d_remove(struct i2c_client *client)
 	for (i = 0; i < ARRAY_SIZE(w83792d_group_fan); i++)
 		sysfs_remove_group(&client->dev.kobj,
 				   &w83792d_group_fan[i]);
-
-	if (data->lm75[0] != NULL)
-		i2c_unregister_device(data->lm75[0]);
-	if (data->lm75[1] != NULL)
-		i2c_unregister_device(data->lm75[1]);
 
 	return 0;
 }

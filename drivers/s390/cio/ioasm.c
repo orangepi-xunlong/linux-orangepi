@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Channel subsystem I/O instructions.
  */
@@ -11,6 +12,7 @@
 #include "ioasm.h"
 #include "orb.h"
 #include "cio.h"
+#include "cio_inject.h"
 
 static inline int __stsch(struct subchannel_id schid, struct schib *addr)
 {
@@ -182,30 +184,6 @@ int chsc(void *chsc_area)
 }
 EXPORT_SYMBOL(chsc);
 
-static inline int __rchp(struct chp_id chpid)
-{
-	register struct chp_id reg1 asm ("1") = chpid;
-	int ccode;
-
-	asm volatile(
-		"	lr	1,%1\n"
-		"	rchp\n"
-		"	ipm	%0\n"
-		"	srl	%0,28"
-		: "=d" (ccode) : "d" (reg1) : "cc");
-	return ccode;
-}
-
-int rchp(struct chp_id chpid)
-{
-	int ccode;
-
-	ccode = __rchp(chpid);
-	trace_s390_cio_rchp(chpid, ccode);
-
-	return ccode;
-}
-
 static inline int __rsch(struct subchannel_id schid)
 {
 	register struct subchannel_id reg1 asm("1") = schid;
@@ -256,6 +234,7 @@ int hsch(struct subchannel_id schid)
 
 	return ccode;
 }
+EXPORT_SYMBOL(hsch);
 
 static inline int __xsch(struct subchannel_id schid)
 {
@@ -282,7 +261,7 @@ int xsch(struct subchannel_id schid)
 	return ccode;
 }
 
-int stcrw(struct crw *crw)
+static inline int __stcrw(struct crw *crw)
 {
 	int ccode;
 
@@ -293,6 +272,26 @@ int stcrw(struct crw *crw)
 		: "=d" (ccode), "=m" (*crw)
 		: "a" (crw)
 		: "cc");
+	return ccode;
+}
+
+static inline int _stcrw(struct crw *crw)
+{
+#ifdef CONFIG_CIO_INJECT
+	if (static_branch_unlikely(&cio_inject_enabled)) {
+		if (stcrw_get_injected(crw) == 0)
+			return 0;
+	}
+#endif
+
+	return __stcrw(crw);
+}
+
+int stcrw(struct crw *crw)
+{
+	int ccode;
+
+	ccode = _stcrw(crw);
 	trace_s390_cio_stcrw(crw, ccode);
 
 	return ccode;

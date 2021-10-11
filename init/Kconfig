@@ -1,29 +1,95 @@
-config ARCH
+# SPDX-License-Identifier: GPL-2.0-only
+config CC_VERSION_TEXT
 	string
-	option env="ARCH"
+	default "$(CC_VERSION_TEXT)"
+	help
+	  This is used in unclear ways:
 
-config KERNELVERSION
-	string
-	option env="KERNELVERSION"
+	  - Re-run Kconfig when the compiler is updated
+	    The 'default' property references the environment variable,
+	    CC_VERSION_TEXT so it is recorded in include/config/auto.conf.cmd.
+	    When the compiler is updated, Kconfig will be invoked.
 
-config DEFCONFIG_LIST
-	string
-	depends on !UML
-	option defconfig_list
-	default "/lib/modules/$UNAME_RELEASE/.config"
-	default "/etc/kernel-config"
-	default "/boot/config-$UNAME_RELEASE"
-	default "$ARCH_DEFCONFIG"
-	default "arch/$ARCH/defconfig"
+	  - Ensure full rebuild when the compiler is updated
+	    include/linux/compiler-version.h contains this option in the comment
+	    line so fixdep adds include/config/CC_VERSION_TEXT into the
+	    auto-generated dependency. When the compiler is updated, syncconfig
+	    will touch it and then every file will be rebuilt.
+
+config CC_IS_GCC
+	def_bool $(success,test "$(cc-name)" = GCC)
+
+config GCC_VERSION
+	int
+	default $(cc-version) if CC_IS_GCC
+	default 0
+
+config CC_IS_CLANG
+	def_bool $(success,test "$(cc-name)" = Clang)
+
+config CLANG_VERSION
+	int
+	default $(cc-version) if CC_IS_CLANG
+	default 0
+
+config AS_IS_GNU
+	def_bool $(success,test "$(as-name)" = GNU)
+
+config AS_IS_LLVM
+	def_bool $(success,test "$(as-name)" = LLVM)
+
+config AS_VERSION
+	int
+	# Use clang version if this is the integrated assembler
+	default CLANG_VERSION if AS_IS_LLVM
+	default $(as-version)
+
+config LD_IS_BFD
+	def_bool $(success,test "$(ld-name)" = BFD)
+
+config LD_VERSION
+	int
+	default $(ld-version) if LD_IS_BFD
+	default 0
+
+config LD_IS_LLD
+	def_bool $(success,test "$(ld-name)" = LLD)
+
+config LLD_VERSION
+	int
+	default $(ld-version) if LD_IS_LLD
+	default 0
+
+config CC_CAN_LINK
+	bool
+	default $(success,$(srctree)/scripts/cc-can-link.sh $(CC) $(CLANG_FLAGS) $(m64-flag)) if 64BIT
+	default $(success,$(srctree)/scripts/cc-can-link.sh $(CC) $(CLANG_FLAGS) $(m32-flag))
+
+config CC_CAN_LINK_STATIC
+	bool
+	default $(success,$(srctree)/scripts/cc-can-link.sh $(CC) $(CLANG_FLAGS) $(m64-flag) -static) if 64BIT
+	default $(success,$(srctree)/scripts/cc-can-link.sh $(CC) $(CLANG_FLAGS) $(m32-flag) -static)
+
+config CC_HAS_ASM_GOTO
+	def_bool $(success,$(srctree)/scripts/gcc-goto.sh $(CC))
+
+config CC_HAS_ASM_GOTO_OUTPUT
+	depends on CC_HAS_ASM_GOTO
+	def_bool $(success,echo 'int foo(int x) { asm goto ("": "=r"(x) ::: bar); return x; bar: return 0; }' | $(CC) -x c - -c -o /dev/null)
+
+config TOOLS_SUPPORT_RELR
+	def_bool $(success,env "CC=$(CC)" "LD=$(LD)" "NM=$(NM)" "OBJCOPY=$(OBJCOPY)" $(srctree)/scripts/tools-support-relr.sh)
+
+config CC_HAS_ASM_INLINE
+	def_bool $(success,echo 'void foo(void) { asm inline (""); }' | $(CC) -x c - -c -o /dev/null)
 
 config CONSTRUCTORS
 	bool
-	depends on !UML
 
 config IRQ_WORK
 	bool
 
-config BUILDTIME_EXTABLE_SORT
+config BUILDTIME_TABLE_SORT
 	bool
 
 config THREAD_INFO_IN_TASK
@@ -54,19 +120,9 @@ config INIT_ENV_ARG_LIMIT
 	  Maximum of each of the number of arguments and environment
 	  variables passed to init from the kernel command line.
 
-
-config CROSS_COMPILE
-	string "Cross-compiler tool prefix"
-	help
-	  Same as running 'make CROSS_COMPILE=prefix-' but stored for
-	  default make runs in this kernel build directory.  You don't
-	  need to set this unless you want the configured kernel build
-	  directory to select the cross-compiler automatically.
-
 config COMPILE_TEST
 	bool "Compile also drivers which will not load"
-	depends on !UML
-	default n
+	depends on HAS_IOMEM
 	help
 	  Some drivers can be compiled on a different platform than they are
 	  intended to be run on. Despite they cannot be loaded there (or even
@@ -77,6 +133,16 @@ config COMPILE_TEST
 	  If you are a developer and want to build everything available, say Y
 	  here. If you are a user/distributor, say N here to exclude useless
 	  drivers to be distributed.
+
+config UAPI_HEADER_TEST
+	bool "Compile test UAPI headers"
+	depends on HEADERS_INSTALL && CC_CAN_LINK
+	help
+	  Compile test headers exported to user-space to ensure they are
+	  self-contained, i.e. compilable as standalone units.
+
+	  If you are a developer or tester and want to ensure the exported
+	  headers are self-contained, say Y here. Otherwise, choose N.
 
 config LOCALVERSION
 	string "Local version - append to kernel release"
@@ -109,6 +175,15 @@ config LOCALVERSION_AUTO
 
 	  which is done within the script "scripts/setlocalversion".)
 
+config BUILD_SALT
+	string "Build ID Salt"
+	default ""
+	help
+	  The build ID is used to link binaries and their debug info. Setting
+	  this option will use the value in the calculation of the build id.
+	  This is mostly useful for distributions which want to ensure the
+	  build is unique between builds. It's safe to leave the default.
+
 config HAVE_KERNEL_GZIP
 	bool
 
@@ -127,10 +202,16 @@ config HAVE_KERNEL_LZO
 config HAVE_KERNEL_LZ4
 	bool
 
+config HAVE_KERNEL_ZSTD
+	bool
+
+config HAVE_KERNEL_UNCOMPRESSED
+	bool
+
 choice
 	prompt "Kernel compression mode"
 	default KERNEL_GZIP
-	depends on HAVE_KERNEL_GZIP || HAVE_KERNEL_BZIP2 || HAVE_KERNEL_LZMA || HAVE_KERNEL_XZ || HAVE_KERNEL_LZO || HAVE_KERNEL_LZ4
+	depends on HAVE_KERNEL_GZIP || HAVE_KERNEL_BZIP2 || HAVE_KERNEL_LZMA || HAVE_KERNEL_XZ || HAVE_KERNEL_LZO || HAVE_KERNEL_LZ4 || HAVE_KERNEL_ZSTD || HAVE_KERNEL_UNCOMPRESSED
 	help
 	  The linux kernel is a kind of self-extracting executable.
 	  Several compression algorithms are available, which differ
@@ -209,7 +290,37 @@ config KERNEL_LZ4
 	  is about 8% bigger than LZO. But the decompression speed is
 	  faster than LZO.
 
+config KERNEL_ZSTD
+	bool "ZSTD"
+	depends on HAVE_KERNEL_ZSTD
+	help
+	  ZSTD is a compression algorithm targeting intermediate compression
+	  with fast decompression speed. It will compress better than GZIP and
+	  decompress around the same speed as LZO, but slower than LZ4. You
+	  will need at least 192 KB RAM or more for booting. The zstd command
+	  line tool is required for compression.
+
+config KERNEL_UNCOMPRESSED
+	bool "None"
+	depends on HAVE_KERNEL_UNCOMPRESSED
+	help
+	  Produce uncompressed kernel image. This option is usually not what
+	  you want. It is useful for debugging the kernel in slow simulation
+	  environments, where decompressing and moving the kernel is awfully
+	  slow. This option allows early boot code to skip the decompressor
+	  and jump right at uncompressed kernel image.
+
 endchoice
+
+config DEFAULT_INIT
+	string "Default init path"
+	default ""
+	help
+	  This option determines the default init for the system if no init=
+	  option is passed on the kernel command line. If the requested path is
+	  not present, we will still then move on to attempting further
+	  locations (e.g. /sbin/init, etc). If this is empty, we will just use
+	  the fallback list when init= is not passed.
 
 config DEFAULT_HOSTNAME
 	string "Default hostname"
@@ -220,9 +331,16 @@ config DEFAULT_HOSTNAME
 	  but you may wish to use a different default here to make a minimal
 	  system more usable with less configuration.
 
+#
+# For some reason microblaze and nios2 hard code SWAP=n.  Hopefully we can
+# add proper SWAP support to them, in which case this can be remove.
+#
+config ARCH_NO_SWAP
+	bool
+
 config SWAP
 	bool "Support for paging of anonymous memory (swap)"
-	depends on MMU && BLOCK
+	depends on MMU && BLOCK && !ARCH_NO_SWAP
 	default y
 	help
 	  This option allows you to choose whether you want to have support
@@ -232,7 +350,7 @@ config SWAP
 
 config SYSVIPC
 	bool "System V IPC"
-	---help---
+	help
 	  Inter Process Communication is a suite of library functions and
 	  system calls which let processes (running programs) synchronize and
 	  exchange information. It is generally considered to be a good thing,
@@ -254,7 +372,7 @@ config SYSVIPC_SYSCTL
 config POSIX_MQUEUE
 	bool "POSIX Message Queues"
 	depends on NET
-	---help---
+	help
 	  POSIX variant of message queues is a part of IPC. In POSIX message
 	  queues every message has a priority which decides about succession
 	  of receiving it by a process. If you want to compile and run
@@ -273,6 +391,18 @@ config POSIX_MQUEUE_SYSCTL
 	depends on SYSCTL
 	default y
 
+config WATCH_QUEUE
+	bool "General notification queue"
+	default n
+	help
+
+	  This is a general notification queue for the kernel to pass events to
+	  userspace by splicing them into pipes.  It can be used in conjunction
+	  with watches for key/keyring change notifications and device
+	  notifications.
+
+	  See Documentation/watch_queue.rst
+
 config CROSS_MEMORY_ATTACH
 	bool "Enable process_vm_readv/writev syscalls"
 	depends on MMU
@@ -282,19 +412,6 @@ config CROSS_MEMORY_ATTACH
 	  process_vm_writev which allow a process with the correct privileges
 	  to directly read from or write to another process' address space.
 	  See the man page for more details.
-
-config FHANDLE
-	bool "open by fhandle syscalls" if EXPERT
-	select EXPORTFS
-	default y
-	help
-	  If you say Y here, a user level program will be able to map
-	  file names to handle and then later use the handle for
-	  different file system operations. This is useful in implementing
-	  userspace file servers, which now track files using handles instead
-	  of names. The handle would remain the same even if file names
-	  get renamed. Enables open_by_handle_at(2) and name_to_handle_at(2)
-	  syscalls.
 
 config USELIB
 	bool "uselib syscall"
@@ -321,19 +438,12 @@ config HAVE_ARCH_AUDITSYSCALL
 config AUDITSYSCALL
 	def_bool y
 	depends on AUDIT && HAVE_ARCH_AUDITSYSCALL
-
-config AUDIT_WATCH
-	def_bool y
-	depends on AUDITSYSCALL
-	select FSNOTIFY
-
-config AUDIT_TREE
-	def_bool y
-	depends on AUDITSYSCALL
 	select FSNOTIFY
 
 source "kernel/irq/Kconfig"
 source "kernel/time/Kconfig"
+source "kernel/bpf/Kconfig"
+source "kernel/Kconfig.preempt"
 
 menu "CPU/Task time and stats accounting"
 
@@ -373,6 +483,7 @@ config VIRT_CPU_ACCOUNTING_GEN
 	bool "Full dynticks CPU time accounting"
 	depends on HAVE_CONTEXT_TRACKING
 	depends on HAVE_VIRT_CPU_ACCOUNTING_GEN
+	depends on GENERIC_CLOCKEVENTS
 	select VIRT_CPU_ACCOUNTING
 	select CONTEXT_TRACKING
 	help
@@ -400,14 +511,29 @@ config IRQ_TIME_ACCOUNTING
 
 	  If in doubt, say N here.
 
-config SCHED_WALT
-        bool "Support window based load tracking"
-        depends on SMP
-        help
-        This feature will allow the scheduler to maintain a tunable window
-	based set of metrics for tasks and runqueues. These metrics can be
-	used to guide task placement as well as task frequency requirements
-	for cpufreq governors.
+config HAVE_SCHED_AVG_IRQ
+	def_bool y
+	depends on IRQ_TIME_ACCOUNTING || PARAVIRT_TIME_ACCOUNTING
+	depends on SMP
+
+config SCHED_THERMAL_PRESSURE
+	bool
+	default y if ARM && ARM_CPU_TOPOLOGY
+	default y if ARM64
+	depends on SMP
+	depends on CPU_FREQ_THERMAL
+	help
+	  Select this option to enable thermal pressure accounting in the
+	  scheduler. Thermal pressure is the value conveyed to the scheduler
+	  that reflects the reduction in CPU compute capacity resulted from
+	  thermal throttling. Thermal throttling occurs when the performance of
+	  a CPU is capped due to high operating temperatures.
+
+	  If selected, the scheduler will be able to balance tasks accordingly,
+	  i.e. put less load on throttled CPUs than on non/less throttled ones.
+
+	  This requires the architecture to implement
+	  arch_set_thermal_pressure() and arch_scale_thermal_pressure().
 
 config BSD_PROCESS_ACCT
 	bool "BSD Process Accounting"
@@ -430,7 +556,7 @@ config BSD_PROCESS_ACCT_V3
 	help
 	  If you say Y here, the process accounting information is written
 	  in a new file format that also logs the process IDs of each
-	  process and it's parent. Note that this file format is incompatible
+	  process and its parent. Note that this file format is incompatible
 	  with previous v0/v1/v2 file formats, so you will need updated tools
 	  for processing it. A preliminary version of these tools is available
 	  at <http://www.gnu.org/software/acct/>.
@@ -479,331 +605,60 @@ config TASK_IO_ACCOUNTING
 
 	  Say N if unsure.
 
+config PSI
+	bool "Pressure stall information tracking"
+	help
+	  Collect metrics that indicate how overcommitted the CPU, memory,
+	  and IO capacity are in the system.
+
+	  If you say Y here, the kernel will create /proc/pressure/ with the
+	  pressure statistics files cpu, memory, and io. These will indicate
+	  the share of walltime in which some or all tasks in the system are
+	  delayed due to contention of the respective resource.
+
+	  In kernels with cgroup support, cgroups (cgroup2 only) will
+	  have cpu.pressure, memory.pressure, and io.pressure files,
+	  which aggregate pressure stalls for the grouped tasks only.
+
+	  For more details see Documentation/accounting/psi.rst.
+
+	  Say N if unsure.
+
+config PSI_DEFAULT_DISABLED
+	bool "Require boot parameter to enable pressure stall information tracking"
+	default n
+	depends on PSI
+	help
+	  If set, pressure stall information tracking will be disabled
+	  per default but can be enabled through passing psi=1 on the
+	  kernel commandline during boot.
+
+	  This feature adds some code to the task wakeup and sleep
+	  paths of the scheduler. The overhead is too low to affect
+	  common scheduling-intense workloads in practice (such as
+	  webservers, memcache), but it does show up in artificial
+	  scheduler stress tests, such as hackbench.
+
+	  If you are paranoid and not sure what the kernel will be
+	  used for, say Y.
+
+	  Say N if unsure.
+
 endmenu # "CPU/Task time and stats accounting"
 
-menu "RCU Subsystem"
-
-config TREE_RCU
-	bool
-	default y if !PREEMPT && SMP
+config CPU_ISOLATION
+	bool "CPU isolation"
+	depends on SMP || COMPILE_TEST
+	default y
 	help
-	  This option selects the RCU implementation that is
-	  designed for very large SMP system with hundreds or
-	  thousands of CPUs.  It also scales down nicely to
-	  smaller systems.
+	  Make sure that CPUs running critical tasks are not disturbed by
+	  any source of "noise" such as unbound workqueues, timers, kthreads...
+	  Unbound jobs get offloaded to housekeeping CPUs. This is driven by
+	  the "isolcpus=" boot parameter.
 
-config PREEMPT_RCU
-	bool
-	default y if PREEMPT
-	help
-	  This option selects the RCU implementation that is
-	  designed for very large SMP systems with hundreds or
-	  thousands of CPUs, but for which real-time response
-	  is also required.  It also scales down nicely to
-	  smaller systems.
+	  Say Y if unsure.
 
-	  Select this option if you are unsure.
-
-config TINY_RCU
-	bool
-	default y if !PREEMPT && !SMP
-	help
-	  This option selects the RCU implementation that is
-	  designed for UP systems from which real-time response
-	  is not required.  This option greatly reduces the
-	  memory footprint of RCU.
-
-config RCU_EXPERT
-	bool "Make expert-level adjustments to RCU configuration"
-	default n
-	help
-	  This option needs to be enabled if you wish to make
-	  expert-level adjustments to RCU configuration.  By default,
-	  no such adjustments can be made, which has the often-beneficial
-	  side-effect of preventing "make oldconfig" from asking you all
-	  sorts of detailed questions about how you would like numerous
-	  obscure RCU options to be set up.
-
-	  Say Y if you need to make expert-level adjustments to RCU.
-
-	  Say N if you are unsure.
-
-config SRCU
-	bool
-	help
-	  This option selects the sleepable version of RCU. This version
-	  permits arbitrary sleeping or blocking within RCU read-side critical
-	  sections.
-
-config TASKS_RCU
-	bool
-	default n
-	depends on !UML
-	select SRCU
-	help
-	  This option enables a task-based RCU implementation that uses
-	  only voluntary context switch (not preemption!), idle, and
-	  user-mode execution as quiescent states.
-
-config RCU_STALL_COMMON
-	def_bool ( TREE_RCU || PREEMPT_RCU || RCU_TRACE )
-	help
-	  This option enables RCU CPU stall code that is common between
-	  the TINY and TREE variants of RCU.  The purpose is to allow
-	  the tiny variants to disable RCU CPU stall warnings, while
-	  making these warnings mandatory for the tree variants.
-
-config CONTEXT_TRACKING
-       bool
-
-config CONTEXT_TRACKING_FORCE
-	bool "Force context tracking"
-	depends on CONTEXT_TRACKING
-	default y if !NO_HZ_FULL
-	help
-	  The major pre-requirement for full dynticks to work is to
-	  support the context tracking subsystem. But there are also
-	  other dependencies to provide in order to make the full
-	  dynticks working.
-
-	  This option stands for testing when an arch implements the
-	  context tracking backend but doesn't yet fullfill all the
-	  requirements to make the full dynticks feature working.
-	  Without the full dynticks, there is no way to test the support
-	  for context tracking and the subsystems that rely on it: RCU
-	  userspace extended quiescent state and tickless cputime
-	  accounting. This option copes with the absence of the full
-	  dynticks subsystem by forcing the context tracking on all
-	  CPUs in the system.
-
-	  Say Y only if you're working on the development of an
-	  architecture backend for the context tracking.
-
-	  Say N otherwise, this option brings an overhead that you
-	  don't want in production.
-
-
-config RCU_FANOUT
-	int "Tree-based hierarchical RCU fanout value"
-	range 2 64 if 64BIT
-	range 2 32 if !64BIT
-	depends on (TREE_RCU || PREEMPT_RCU) && RCU_EXPERT
-	default 64 if 64BIT
-	default 32 if !64BIT
-	help
-	  This option controls the fanout of hierarchical implementations
-	  of RCU, allowing RCU to work efficiently on machines with
-	  large numbers of CPUs.  This value must be at least the fourth
-	  root of NR_CPUS, which allows NR_CPUS to be insanely large.
-	  The default value of RCU_FANOUT should be used for production
-	  systems, but if you are stress-testing the RCU implementation
-	  itself, small RCU_FANOUT values allow you to test large-system
-	  code paths on small(er) systems.
-
-	  Select a specific number if testing RCU itself.
-	  Take the default if unsure.
-
-config RCU_FANOUT_LEAF
-	int "Tree-based hierarchical RCU leaf-level fanout value"
-	range 2 64 if 64BIT
-	range 2 32 if !64BIT
-	depends on (TREE_RCU || PREEMPT_RCU) && RCU_EXPERT
-	default 16
-	help
-	  This option controls the leaf-level fanout of hierarchical
-	  implementations of RCU, and allows trading off cache misses
-	  against lock contention.  Systems that synchronize their
-	  scheduling-clock interrupts for energy-efficiency reasons will
-	  want the default because the smaller leaf-level fanout keeps
-	  lock contention levels acceptably low.  Very large systems
-	  (hundreds or thousands of CPUs) will instead want to set this
-	  value to the maximum value possible in order to reduce the
-	  number of cache misses incurred during RCU's grace-period
-	  initialization.  These systems tend to run CPU-bound, and thus
-	  are not helped by synchronized interrupts, and thus tend to
-	  skew them, which reduces lock contention enough that large
-	  leaf-level fanouts work well.
-
-	  Select a specific number if testing RCU itself.
-
-	  Select the maximum permissible value for large systems.
-
-	  Take the default if unsure.
-
-config RCU_FAST_NO_HZ
-	bool "Accelerate last non-dyntick-idle CPU's grace periods"
-	depends on NO_HZ_COMMON && SMP && RCU_EXPERT
-	default n
-	help
-	  This option permits CPUs to enter dynticks-idle state even if
-	  they have RCU callbacks queued, and prevents RCU from waking
-	  these CPUs up more than roughly once every four jiffies (by
-	  default, you can adjust this using the rcutree.rcu_idle_gp_delay
-	  parameter), thus improving energy efficiency.  On the other
-	  hand, this option increases the duration of RCU grace periods,
-	  for example, slowing down synchronize_rcu().
-
-	  Say Y if energy efficiency is critically important, and you
-	  	don't care about increased grace-period durations.
-
-	  Say N if you are unsure.
-
-config TREE_RCU_TRACE
-	def_bool RCU_TRACE && ( TREE_RCU || PREEMPT_RCU )
-	select DEBUG_FS
-	help
-	  This option provides tracing for the TREE_RCU and
-	  PREEMPT_RCU implementations, permitting Makefile to
-	  trivially select kernel/rcutree_trace.c.
-
-config RCU_BOOST
-	bool "Enable RCU priority boosting"
-	depends on RT_MUTEXES && PREEMPT_RCU && RCU_EXPERT
-	default n
-	help
-	  This option boosts the priority of preempted RCU readers that
-	  block the current preemptible RCU grace period for too long.
-	  This option also prevents heavy loads from blocking RCU
-	  callback invocation for all flavors of RCU.
-
-	  Say Y here if you are working with real-time apps or heavy loads
-	  Say N here if you are unsure.
-
-config RCU_KTHREAD_PRIO
-	int "Real-time priority to use for RCU worker threads"
-	range 1 99 if RCU_BOOST
-	range 0 99 if !RCU_BOOST
-	default 1 if RCU_BOOST
-	default 0 if !RCU_BOOST
-	depends on RCU_EXPERT
-	help
-	  This option specifies the SCHED_FIFO priority value that will be
-	  assigned to the rcuc/n and rcub/n threads and is also the value
-	  used for RCU_BOOST (if enabled). If you are working with a
-	  real-time application that has one or more CPU-bound threads
-	  running at a real-time priority level, you should set
-	  RCU_KTHREAD_PRIO to a priority higher than the highest-priority
-	  real-time CPU-bound application thread.  The default RCU_KTHREAD_PRIO
-	  value of 1 is appropriate in the common case, which is real-time
-	  applications that do not have any CPU-bound threads.
-
-	  Some real-time applications might not have a single real-time
-	  thread that saturates a given CPU, but instead might have
-	  multiple real-time threads that, taken together, fully utilize
-	  that CPU.  In this case, you should set RCU_KTHREAD_PRIO to
-	  a priority higher than the lowest-priority thread that is
-	  conspiring to prevent the CPU from running any non-real-time
-	  tasks.  For example, if one thread at priority 10 and another
-	  thread at priority 5 are between themselves fully consuming
-	  the CPU time on a given CPU, then RCU_KTHREAD_PRIO should be
-	  set to priority 6 or higher.
-
-	  Specify the real-time priority, or take the default if unsure.
-
-config RCU_BOOST_DELAY
-	int "Milliseconds to delay boosting after RCU grace-period start"
-	range 0 3000
-	depends on RCU_BOOST
-	default 500
-	help
-	  This option specifies the time to wait after the beginning of
-	  a given grace period before priority-boosting preempted RCU
-	  readers blocking that grace period.  Note that any RCU reader
-	  blocking an expedited RCU grace period is boosted immediately.
-
-	  Accept the default if unsure.
-
-config RCU_NOCB_CPU
-	bool "Offload RCU callback processing from boot-selected CPUs"
-	depends on TREE_RCU || PREEMPT_RCU
-	depends on RCU_EXPERT || NO_HZ_FULL
-	default n
-	help
-	  Use this option to reduce OS jitter for aggressive HPC or
-	  real-time workloads.	It can also be used to offload RCU
-	  callback invocation to energy-efficient CPUs in battery-powered
-	  asymmetric multiprocessors.
-
-	  This option offloads callback invocation from the set of
-	  CPUs specified at boot time by the rcu_nocbs parameter.
-	  For each such CPU, a kthread ("rcuox/N") will be created to
-	  invoke callbacks, where the "N" is the CPU being offloaded,
-	  and where the "x" is "b" for RCU-bh, "p" for RCU-preempt, and
-	  "s" for RCU-sched.  Nothing prevents this kthread from running
-	  on the specified CPUs, but (1) the kthreads may be preempted
-	  between each callback, and (2) affinity or cgroups can be used
-	  to force the kthreads to run on whatever set of CPUs is desired.
-
-	  Say Y here if you want to help to debug reduced OS jitter.
-	  Say N here if you are unsure.
-
-choice
-	prompt "Build-forced no-CBs CPUs"
-	default RCU_NOCB_CPU_NONE
-	depends on RCU_NOCB_CPU
-	help
-	  This option allows no-CBs CPUs (whose RCU callbacks are invoked
-	  from kthreads rather than from softirq context) to be specified
-	  at build time.  Additional no-CBs CPUs may be specified by
-	  the rcu_nocbs= boot parameter.
-
-config RCU_NOCB_CPU_NONE
-	bool "No build_forced no-CBs CPUs"
-	help
-	  This option does not force any of the CPUs to be no-CBs CPUs.
-	  Only CPUs designated by the rcu_nocbs= boot parameter will be
-	  no-CBs CPUs, whose RCU callbacks will be invoked by per-CPU
-	  kthreads whose names begin with "rcuo".  All other CPUs will
-	  invoke their own RCU callbacks in softirq context.
-
-	  Select this option if you want to choose no-CBs CPUs at
-	  boot time, for example, to allow testing of different no-CBs
-	  configurations without having to rebuild the kernel each time.
-
-config RCU_NOCB_CPU_ZERO
-	bool "CPU 0 is a build_forced no-CBs CPU"
-	help
-	  This option forces CPU 0 to be a no-CBs CPU, so that its RCU
-	  callbacks are invoked by a per-CPU kthread whose name begins
-	  with "rcuo".	Additional CPUs may be designated as no-CBs
-	  CPUs using the rcu_nocbs= boot parameter will be no-CBs CPUs.
-	  All other CPUs will invoke their own RCU callbacks in softirq
-	  context.
-
-	  Select this if CPU 0 needs to be a no-CBs CPU for real-time
-	  or energy-efficiency reasons, but the real reason it exists
-	  is to ensure that randconfig testing covers mixed systems.
-
-config RCU_NOCB_CPU_ALL
-	bool "All CPUs are build_forced no-CBs CPUs"
-	help
-	  This option forces all CPUs to be no-CBs CPUs.  The rcu_nocbs=
-	  boot parameter will be ignored.  All CPUs' RCU callbacks will
-	  be executed in the context of per-CPU rcuo kthreads created for
-	  this purpose.  Assuming that the kthreads whose names start with
-	  "rcuo" are bound to "housekeeping" CPUs, this reduces OS jitter
-	  on the remaining CPUs, but might decrease memory locality during
-	  RCU-callback invocation, thus potentially degrading throughput.
-
-	  Select this if all CPUs need to be no-CBs CPUs for real-time
-	  or energy-efficiency reasons.
-
-endchoice
-
-config RCU_EXPEDITE_BOOT
-	bool
-	default n
-	help
-	  This option enables expedited grace periods at boot time,
-	  as if rcu_expedite_gp() had been invoked early in boot.
-	  The corresponding rcu_unexpedite_gp() is invoked from
-	  rcu_end_inkernel_boot(), which is intended to be invoked
-	  at the end of the kernel-only boot sequence, just before
-	  init is exec'ed.
-
-	  Accept the default if unsure.
-
-endmenu # "RCU Subsystem"
+source "kernel/rcu/Kconfig"
 
 config BUILD_BIN2C
 	bool
@@ -811,8 +666,7 @@ config BUILD_BIN2C
 
 config IKCONFIG
 	tristate "Kernel .config support"
-	select BUILD_BIN2C
-	---help---
+	help
 	  This option enables the complete Linux kernel ".config" file
 	  contents to be saved in the kernel. It provides documentation
 	  of which kernel options are used in a running kernel or in an
@@ -825,13 +679,23 @@ config IKCONFIG
 config IKCONFIG_PROC
 	bool "Enable access to .config through /proc/config.gz"
 	depends on IKCONFIG && PROC_FS
-	---help---
+	help
 	  This option enables access to the kernel configuration file
 	  through /proc/config.gz.
 
+config IKHEADERS
+	tristate "Enable kernel headers through /sys/kernel/kheaders.tar.xz"
+	depends on SYSFS
+	help
+	  This option enables access to the in-kernel headers that are generated during
+	  the build process. These can be used to build eBPF tracing programs,
+	  or similar programs.  If you build the headers as a module, a module called
+	  kheaders.ko is built which can be loaded on-demand to get access to headers.
+
 config LOG_BUF_SHIFT
 	int "Kernel log buffer size (16 => 64KB, 17 => 128KB)"
-	range 12 25
+	range 12 25 if !H8300
+	range 12 19 if H8300
 	default 17
 	depends on PRINTK
 	help
@@ -867,7 +731,7 @@ config LOG_CPU_MAX_BUF_SHIFT
 	  with more CPUs. Therefore this value is used only when the sum of
 	  contributions is greater than the half of the default kernel ring
 	  buffer as defined by LOG_BUF_SHIFT. The default values are set
-	  so that more than 64 CPUs are needed to trigger the allocation.
+	  so that more than 16 CPUs are needed to trigger the allocation.
 
 	  Also this option is ignored when "log_buf_len" kernel parameter is
 	  used as it forces an exact (power of two) size of the ring buffer.
@@ -884,17 +748,19 @@ config LOG_CPU_MAX_BUF_SHIFT
 		     13 =>   8 KB for each CPU
 		     12 =>   4 KB for each CPU
 
-config NMI_LOG_BUF_SHIFT
-	int "Temporary per-CPU NMI log buffer size (12 => 4KB, 13 => 8KB)"
+config PRINTK_SAFE_LOG_BUF_SHIFT
+	int "Temporary per-CPU printk log buffer size (12 => 4KB, 13 => 8KB)"
 	range 10 21
 	default 13
-	depends on PRINTK_NMI
+	depends on PRINTK
 	help
-	  Select the size of a per-CPU buffer where NMI messages are temporary
-	  stored. They are copied to the main log buffer in a safe context
-	  to avoid a deadlock. The value defines the size as a power of 2.
+	  Select the size of an alternate printk per-CPU buffer where messages
+	  printed from usafe contexts are temporary stored. One example would
+	  be NMI messages, another one - printk recursion. The messages are
+	  copied to the main log buffer in a safe context to avoid a deadlock.
+	  The value defines the size as a power of 2.
 
-	  NMI messages are rare and limited. The largest one is when
+	  Those messages are rare and limited. The largest one is when
 	  a backtrace is printed. It usually fits into 4KB. Select
 	  8KB if you want to be on the safe side.
 
@@ -915,6 +781,59 @@ config HAVE_UNSTABLE_SCHED_CLOCK
 config GENERIC_SCHED_CLOCK
 	bool
 
+menu "Scheduler features"
+
+config UCLAMP_TASK
+	bool "Enable utilization clamping for RT/FAIR tasks"
+	depends on CPU_FREQ_GOV_SCHEDUTIL
+	help
+	  This feature enables the scheduler to track the clamped utilization
+	  of each CPU based on RUNNABLE tasks scheduled on that CPU.
+
+	  With this option, the user can specify the min and max CPU
+	  utilization allowed for RUNNABLE tasks. The max utilization defines
+	  the maximum frequency a task should use while the min utilization
+	  defines the minimum frequency it should use.
+
+	  Both min and max utilization clamp values are hints to the scheduler,
+	  aiming at improving its frequency selection policy, but they do not
+	  enforce or grant any specific bandwidth for tasks.
+
+	  If in doubt, say N.
+
+config UCLAMP_BUCKETS_COUNT
+	int "Number of supported utilization clamp buckets"
+	range 5 20
+	default 5
+	depends on UCLAMP_TASK
+	help
+	  Defines the number of clamp buckets to use. The range of each bucket
+	  will be SCHED_CAPACITY_SCALE/UCLAMP_BUCKETS_COUNT. The higher the
+	  number of clamp buckets the finer their granularity and the higher
+	  the precision of clamping aggregation and tracking at run-time.
+
+	  For example, with the minimum configuration value we will have 5
+	  clamp buckets tracking 20% utilization each. A 25% boosted tasks will
+	  be refcounted in the [20..39]% bucket and will set the bucket clamp
+	  effective value to 25%.
+	  If a second 30% boosted task should be co-scheduled on the same CPU,
+	  that task will be refcounted in the same bucket of the first task and
+	  it will boost the bucket clamp effective value to 30%.
+	  The clamp effective value of a bucket is reset to its nominal value
+	  (20% in the example above) when there are no more tasks refcounted in
+	  that bucket.
+
+	  An additional boost/capping margin can be added to some tasks. In the
+	  example above the 25% task will be boosted to 30% until it exits the
+	  CPU. If that should be considered not acceptable on certain systems,
+	  it's always possible to reduce the margin by increasing the number of
+	  clamp buckets to trade off used memory for run-time tracking
+	  precision.
+
+	  If in doubt, use the default value.
+
+endmenu
+
 #
 # For architectures that want to enable the support for NUMA-affine scheduler
 # balancing logic:
@@ -931,6 +850,9 @@ config ARCH_SUPPORTS_NUMA_BALANCING
 # and the refill costs are offset by the savings of sending fewer IPIs.
 config ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH
 	bool
+
+config CC_HAS_INT128
+	def_bool !$(cc-option,$(m64-flag) -D__SIZEOF_INT128__=0) && 64BIT
 
 #
 # For architectures that know their GCC __int128 support is sound
@@ -972,92 +894,16 @@ menuconfig CGROUPS
 	  use with process control subsystems such as Cpusets, CFS, memory
 	  controls or device isolation.
 	  See
-		- Documentation/scheduler/sched-design-CFS.txt	(CFS)
-		- Documentation/cgroup-v1/ (features for grouping, isolation
+		- Documentation/scheduler/sched-design-CFS.rst	(CFS)
+		- Documentation/admin-guide/cgroup-v1/ (features for grouping, isolation
 					  and resource control)
 
 	  Say N if unsure.
 
 if CGROUPS
 
-config CGROUP_DEBUG
-	bool "Example debug cgroup subsystem"
-	default n
-	help
-	  This option enables a simple cgroup subsystem that
-	  exports useful debugging information about the cgroups
-	  framework.
-
-	  Say N if unsure.
-
-config CGROUP_FREEZER
-	bool "Freezer cgroup subsystem"
-	help
-	  Provides a way to freeze and unfreeze all tasks in a
-	  cgroup.
-
-config CGROUP_PIDS
-	bool "PIDs cgroup subsystem"
-	help
-	  Provides enforcement of process number limits in the scope of a
-	  cgroup. Any attempt to fork more processes than is allowed in the
-	  cgroup will fail. PIDs are fundamentally a global resource because it
-	  is fairly trivial to reach PID exhaustion before you reach even a
-	  conservative kmemcg limit. As a result, it is possible to grind a
-	  system to halt without being limited by other cgroup policies. The
-	  PIDs cgroup subsystem is designed to stop this from happening.
-
-	  It should be noted that organisational operations (such as attaching
-	  to a cgroup hierarchy will *not* be blocked by the PIDs subsystem),
-	  since the PIDs limit only affects a process's ability to fork, not to
-	  attach to a cgroup.
-
-config CGROUP_DEVICE
-	bool "Device controller for cgroups"
-	help
-	  Provides a cgroup implementing whitelists for devices which
-	  a process in the cgroup can mknod or open.
-
-config CPUSETS
-	bool "Cpuset support"
-	help
-	  This option will let you create and manage CPUSETs which
-	  allow dynamically partitioning a system into sets of CPUs and
-	  Memory Nodes and assigning tasks to run only within those sets.
-	  This is primarily useful on large SMP or NUMA systems.
-
-	  Say N if unsure.
-
-config PROC_PID_CPUSET
-	bool "Include legacy /proc/<pid>/cpuset file"
-	depends on CPUSETS
-	default y
-
-config CGROUP_CPUACCT
-	bool "Simple CPU accounting cgroup subsystem"
-	help
-	  Provides a simple Resource Controller for monitoring the
-	  total CPU consumed by the tasks in a cgroup.
-
-config CGROUP_SCHEDTUNE
-	bool "CFS tasks boosting cgroup subsystem (EXPERIMENTAL)"
-	depends on SCHED_TUNE
-	help
-	  This option provides the "schedtune" controller which improves the
-	  flexibility of the task boosting mechanism by introducing the support
-	  to define "per task" boost values.
-
-	  This new controller:
-	  1. allows only a two layers hierarchy, where the root defines the
-	     system-wide boost value and its direct childrens define each one a
-	     different "class of tasks" to be boosted with a different value
-	  2. supports up to 16 different task classes, each one which could be
-	     configured with a different boost value
-
-	  Say N if unsure.
-
 config PAGE_COUNTER
-       bool
+	bool
 
 config MEMCG
 	bool "Memory controller"
@@ -1067,30 +913,20 @@ config MEMCG
 	  Provides control over the memory footprint of tasks in a cgroup.
 
 config MEMCG_SWAP
-	bool "Swap controller"
+	bool
 	depends on MEMCG && SWAP
-	help
-	  Provides control over the swap space consumed by tasks in a cgroup.
-
-config MEMCG_SWAP_ENABLED
-	bool "Swap controller enabled by default"
-	depends on MEMCG_SWAP
 	default y
-	help
-	  Memory Resource Controller Swap Extension comes with its price in
-	  a bigger memory consumption. General purpose distribution kernels
-	  which want to enable the feature but keep it disabled by default
-	  and let the user enable it by swapaccount=1 boot command line
-	  parameter should have this option unselected.
-	  For those who want to have the feature enabled by default should
-	  select this option (if, for some reason, they need to disable it
-	  then swapaccount=0 does the trick).
+
+config MEMCG_KMEM
+	bool
+	depends on MEMCG && !SLOB
+	default y
 
 config BLK_CGROUP
 	bool "IO controller"
 	depends on BLOCK
 	default n
-	---help---
+	help
 	Generic block IO controller cgroup interface. This is the common
 	cgroup interface which should be used by various IO controlling
 	policies.
@@ -1103,18 +939,10 @@ config BLK_CGROUP
 	This option only enables generic Block IO controller infrastructure.
 	One needs to also enable actual IO controlling logic/policy. For
 	enabling proportional weight division of disk bandwidth in CFQ, set
-	CONFIG_CFQ_GROUP_IOSCHED=y; for enabling throttling policy, set
+	CONFIG_BFQ_GROUP_IOSCHED=y; for enabling throttling policy, set
 	CONFIG_BLK_DEV_THROTTLING=y.
 
-	See Documentation/cgroup-v1/blkio-controller.txt for more information.
-
-config DEBUG_BLK_CGROUP
-	bool "IO controller debugging"
-	depends on BLK_CGROUP
-	default n
-	---help---
-	Enable some debugging help. Currently it exports additional stat
-	files in a cgroup which can be useful for debugging.
+	See Documentation/admin-guide/cgroup-v1/blkio-controller.rst for more information.
 
 config CGROUP_WRITEBACK
 	bool
@@ -1144,7 +972,7 @@ config CFS_BANDWIDTH
 	  tasks running within the fair group scheduler.  Groups with no limit
 	  set are considered to be unconstrained and will run with no
 	  restriction.
-	  See tip/Documentation/scheduler/sched-bwc.txt for more information.
+	  See Documentation/scheduler/sched-bwc.rst for more information.
 
 config RT_GROUP_SCHED
 	bool "Group scheduling for SCHED_RR/FIFO"
@@ -1155,9 +983,31 @@ config RT_GROUP_SCHED
 	  to task groups. If enabled, it will also make it impossible to
 	  schedule realtime tasks for non-root users until you allocate
 	  realtime bandwidth for them.
-	  See Documentation/scheduler/sched-rt-group.txt for more information.
+	  See Documentation/scheduler/sched-rt-group.rst for more information.
 
 endif #CGROUP_SCHED
+
+config UCLAMP_TASK_GROUP
+	bool "Utilization clamping per group of tasks"
+	depends on CGROUP_SCHED
+	depends on UCLAMP_TASK
+	default n
+	help
+	  This feature enables the scheduler to track the clamped utilization
+	  of each CPU based on RUNNABLE tasks currently scheduled on that CPU.
+
+	  When this option is enabled, the user can specify a min and max
+	  CPU bandwidth which is allowed for each single task in a group.
+	  The max bandwidth allows to clamp the maximum frequency a task
+	  can use, while the min bandwidth allows to define a minimum
+	  frequency a task will always use.
+
+	  When task group based utilization clamping is enabled, an eventually
+	  specified task-specific clamp value is constrained by the cgroup
+	  specified clamp value. Both minimum and maximum task clamping cannot
+	  be bigger than the corresponding clamping defined at task group level.
+
+	  If in doubt, say N.
 
 config CGROUP_PIDS
 	bool "PIDs controller"
@@ -1171,9 +1021,19 @@ config CGROUP_PIDS
 	  PIDs controller is designed to stop this from happening.
 
 	  It should be noted that organisational operations (such as attaching
-	  to a cgroup hierarchy will *not* be blocked by the PIDs controller),
+	  to a cgroup hierarchy) will *not* be blocked by the PIDs controller,
 	  since the PIDs limit only affects a process's ability to fork, not to
 	  attach to a cgroup.
+
+config CGROUP_RDMA
+	bool "RDMA controller"
+	help
+	  Provides enforcement of RDMA resources defined by IB stack.
+	  It is fairly easy for consumers to exhaust RDMA resources, which
+	  can result into resource unavailability to other consumers.
+	  RDMA controller is designed to stop this from happening.
+	  Attaching processes with active RDMA resources to the cgroup
+	  hierarchy is allowed even if can cross the hierarchy's limit.
 
 config CGROUP_FREEZER
 	bool "Freezer controller"
@@ -1204,6 +1064,7 @@ config CGROUP_HUGETLB
 
 config CPUSETS
 	bool "Cpuset controller"
+	depends on SMP
 	help
 	  This option will let you create and manage CPUSETs which
 	  allow dynamically partitioning a system into sets of CPUs and
@@ -1235,7 +1096,8 @@ config CGROUP_PERF
 	help
 	  This option extends the perf per-cpu mode to restrict monitoring
 	  to threads which belong to the cgroup specified and run on the
-	  designated cpu.
+	  designated cpu.  Or this can be used to have cgroup ID in samples
+	  so that it can monitor performance events among cgroups.
 
 	  Say N if unsure.
 
@@ -1252,12 +1114,29 @@ config CGROUP_BPF
 	  BPF_CGROUP_INET_INGRESS will be executed on the ingress path of
 	  inet sockets.
 
-config CGROUP_DEBUG
-	bool "Example controller"
+config CGROUP_MISC
+	bool "Misc resource controller"
 	default n
 	help
+	  Provides a controller for miscellaneous resources on a host.
+
+	  Miscellaneous scalar resources are the resources on the host system
+	  which cannot be abstracted like the other cgroups. This controller
+	  tracks and limits the miscellaneous resources used by a process
+	  attached to a cgroup hierarchy.
+
+	  For more information, please check misc cgroup section in
+	  /Documentation/admin-guide/cgroup-v2.rst.
+
+config CGROUP_DEBUG
+	bool "Debug controller"
+	default n
+	depends on DEBUG_KERNEL
+	help
 	  This option enables a simple controller that exports
-	  debugging information about the cgroups framework.
+	  debugging information about the cgroups framework. This
+	  controller is for control cgroup debugging only. Its
+	  interfaces are not stable.
 
 	  Say N.
 
@@ -1266,18 +1145,6 @@ config SOCK_CGROUP_DATA
 	default n
 
 endif # CGROUPS
-
-config CHECKPOINT_RESTORE
-	bool "Checkpoint/restore support" if EXPERT
-	select PROC_CHILDREN
-	default n
-	help
-	  Enables additional kernel features in a sake of checkpoint/restore.
-	  In particular it adds auxiliary prctl codes to setup process text,
-	  data and heap segment sizes, and a few additional /proc filesystem
-	  entries.
-
-	  If unsure, say N here.
 
 menuconfig NAMESPACES
 	bool "Namespaces support" if EXPERT
@@ -1297,6 +1164,14 @@ config UTS_NS
 	help
 	  In this namespace tasks see different info provided with the
 	  uname() system call
+
+config TIME_NS
+	bool "TIME namespace"
+	depends on GENERIC_VDSO_TIME_NS
+	default y
+	help
+	  In this namespace boottime and monotonic clocks can be set.
+	  The time will keep going with the same pace.
 
 config IPC_NS
 	bool "IPC namespace"
@@ -1338,6 +1213,19 @@ config NET_NS
 
 endif # NAMESPACES
 
+config CHECKPOINT_RESTORE
+	bool "Checkpoint/restore support"
+	select PROC_CHILDREN
+	select KCMP
+	default n
+	help
+	  Enables additional kernel features in a sake of checkpoint/restore.
+	  In particular it adds auxiliary prctl codes to setup process text,
+	  data and heap segment sizes, and a few additional /proc filesystem
+	  entries.
+
+	  If unsure, say N here.
+
 config SCHED_AUTOGROUP
 	bool "Automatic process group scheduling"
 	select CGROUPS
@@ -1349,43 +1237,6 @@ config SCHED_AUTOGROUP
 	  of workloads isolates aggressive CPU burners (like build jobs) from
 	  desktop applications.  Task group autogeneration is currently based
 	  upon task session.
-
-config SCHED_TUNE
-	bool "Boosting for CFS tasks (EXPERIMENTAL)"
-	depends on SMP
-	help
-	  This option enables the system-wide support for task boosting.
-	  When this support is enabled a new sysctl interface is exposed to
-	  userspace via:
-	     /proc/sys/kernel/sched_cfs_boost
-	  which allows to set a system-wide boost value in range [0..100].
-
-	  The currently boosting strategy is implemented in such a way that:
-	  - a 0% boost value requires to operate in "standard" mode by
-	    scheduling all tasks at the minimum capacities required by their
-	    workload demand
-	  - a 100% boost value requires to push at maximum the task
-	    performances, "regardless" of the incurred energy consumption
-
-	  A boost value in between these two boundaries is used to bias the
-	  power/performance trade-off, the higher the boost value the more the
-	  scheduler is biased toward performance boosting instead of energy
-	  efficiency.
-
-	  Since this support exposes a single system-wide knob, the specified
-	  boost value is applied to all (CFS) tasks in the system.
-
-	  If unsure, say N.
-
-config DEFAULT_USE_ENERGY_AWARE
-	bool "Default to enabling the Energy Aware Scheduler feature"
-	default n
-	help
-	  This option defaults the ENERGY_AWARE scheduling feature to true,
-	  as without SCHED_DEBUG set this feature can't be enabled or disabled
-	  via sysctl.
-
-	  Say N if unsure.
 
 config SYSFS_DEPRECATED
 	bool "Enable deprecated sysfs features to support old userspace tools"
@@ -1439,13 +1290,12 @@ config RELAY
 
 config BLK_DEV_INITRD
 	bool "Initial RAM filesystem and RAM disk (initramfs/initrd) support"
-	depends on BROKEN || !FRV
 	help
 	  The initial RAM filesystem is a ramfs which is loaded by the
 	  boot loader (loadlin or lilo) and that is mounted as root
 	  before the normal boot procedure. It is typically used to
 	  load modules needed to mount the "real" root file system,
-	  etc. See <file:Documentation/initrd.txt> for details.
+	  etc. See <file:Documentation/admin-guide/initrd.rst> for details.
 
 	  If RAM disk support (BLK_DEV_RAM) is also included, this
 	  also enables initial RAM disk (initrd) support and adds
@@ -1459,31 +1309,79 @@ source "usr/Kconfig"
 
 endif
 
+config BOOT_CONFIG
+	bool "Boot config support"
+	select BLK_DEV_INITRD
+	help
+	  Extra boot config allows system admin to pass a config file as
+	  complemental extension of kernel cmdline when booting.
+	  The boot config file must be attached at the end of initramfs
+	  with checksum, size and magic word.
+	  See <file:Documentation/admin-guide/bootconfig.rst> for details.
+
+	  If unsure, say Y.
+
 choice
 	prompt "Compiler optimization level"
-	default CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
+	default CC_OPTIMIZE_FOR_PERFORMANCE
 
 config CC_OPTIMIZE_FOR_PERFORMANCE
-	bool "Optimize for performance"
+	bool "Optimize for performance (-O2)"
 	help
 	  This is the default optimization level for the kernel, building
 	  with the "-O2" compiler flag for best performance and most
 	  helpful compile-time warnings.
 
-config CC_OPTIMIZE_FOR_SIZE
-	bool "Optimize for size"
+config CC_OPTIMIZE_FOR_PERFORMANCE_O3
+	bool "Optimize more for performance (-O3)"
+	depends on ARC
 	help
-	  Enabling this option will pass "-Os" instead of "-O2" to
-	  your compiler resulting in a smaller kernel.
+	  Choosing this option will pass "-O3" to your compiler to optimize
+	  the kernel yet more for performance.
 
-	  If unsure, say N.
+config CC_OPTIMIZE_FOR_SIZE
+	bool "Optimize for size (-Os)"
+	help
+	  Choosing this option will pass "-Os" to your compiler resulting
+	  in a smaller kernel.
 
 endchoice
 
-config SYSCTL
+config HAVE_LD_DEAD_CODE_DATA_ELIMINATION
 	bool
+	help
+	  This requires that the arch annotates or otherwise protects
+	  its external entry points from being discarded. Linker scripts
+	  must also merge .text.*, .data.*, and .bss.* correctly into
+	  output sections. Care must be taken not to pull in unrelated
+	  sections (e.g., '.text.init'). Typically '.' in section names
+	  is used to distinguish them from label names / C identifiers.
 
-config ANON_INODES
+config LD_DEAD_CODE_DATA_ELIMINATION
+	bool "Dead code and data elimination (EXPERIMENTAL)"
+	depends on HAVE_LD_DEAD_CODE_DATA_ELIMINATION
+	depends on EXPERT
+	depends on $(cc-option,-ffunction-sections -fdata-sections)
+	depends on $(ld-option,--gc-sections)
+	help
+	  Enable this if you want to do dead code and data elimination with
+	  the linker by compiling with -ffunction-sections -fdata-sections,
+	  and linking with --gc-sections.
+
+	  This can reduce on disk and in-memory size of the kernel
+	  code and static data, particularly for small configs and
+	  on small systems. This has the possibility of introducing
+	  silently broken kernel if the required annotations are not
+	  present. This option is not well tested yet, so use at your
+	  own risk.
+
+config LD_ORPHAN_WARN
+	def_bool y
+	depends on ARCH_WANT_LD_ORPHAN_WARN
+	depends on !LD_IS_LLD || LLD_VERSION >= 110000
+	depends on $(ld-option,--orphan-handling=warn)
+
+config SYSCTL
 	bool
 
 config HAVE_UID16
@@ -1522,9 +1420,9 @@ menuconfig EXPERT
 	select DEBUG_KERNEL
 	help
 	  This option allows certain base kernel options and settings
-          to be disabled or tweaked. This is for specialized
-          environments which can tolerate a "non-standard" kernel.
-          Only use this if you really know what you are doing.
+	  to be disabled or tweaked. This is for specialized
+	  environments which can tolerate a "non-standard" kernel.
+	  Only use this if you really know what you are doing.
 
 config UID16
 	bool "Enable 16-bit UID system calls" if EXPERT
@@ -1549,8 +1447,8 @@ config MULTIUSER
 
 config SGETMASK_SYSCALL
 	bool "sgetmask/ssetmask syscalls support" if EXPERT
-	def_bool PARISC || MN10300 || BLACKFIN || M68K || PPC || MIPS || X86 || SPARC || CRIS || MICROBLAZE || SUPERH
-	---help---
+	def_bool PARISC || M68K || PPC || MIPS || X86 || SPARC || MICROBLAZE || SUPERH
+	help
 	  sys_sgetmask and sys_ssetmask are obsolete system calls
 	  no longer supported in libc but still enabled by default in some
 	  architectures.
@@ -1560,77 +1458,42 @@ config SGETMASK_SYSCALL
 config SYSFS_SYSCALL
 	bool "Sysfs syscall support" if EXPERT
 	default y
-	---help---
+	help
 	  sys_sysfs is an obsolete system call no longer supported in libc.
 	  Note that disabling this option is more secure but might break
 	  compatibility with some systems.
 
 	  If unsure say Y here.
 
-config SYSCTL_SYSCALL
-	bool "Sysctl syscall support" if EXPERT
-	depends on PROC_SYSCTL
-	default n
-	select SYSCTL
-	---help---
-	  sys_sysctl uses binary paths that have been found challenging
-	  to properly maintain and use.  The interface in /proc/sys
-	  using paths with ascii names is now the primary path to this
-	  information.
-
-	  Almost nothing using the binary sysctl interface so if you are
-	  trying to save some space it is probably safe to disable this,
-	  making your kernel marginally smaller.
-
-	  If unsure say N here.
-
-config KALLSYMS
-	 bool "Load all symbols for debugging/ksymoops" if EXPERT
-	 default y
-	 help
-	   Say Y here to let the kernel print out symbolic crash information and
-	   symbolic stack backtraces. This increases the size of the kernel
-	   somewhat, as all symbols have to be loaded into the kernel image.
-
-config KALLSYMS_ALL
-	bool "Include all symbols in kallsyms"
-	depends on DEBUG_KERNEL && KALLSYMS
+config FHANDLE
+	bool "open by fhandle syscalls" if EXPERT
+	select EXPORTFS
+	default y
 	help
-	   Normally kallsyms only contains the symbols of functions for nicer
-	   OOPS messages and backtraces (i.e., symbols from the text and inittext
-	   sections). This is sufficient for most cases. And only in very rare
-	   cases (e.g., when a debugger is used) all symbols are required (e.g.,
-	   names of variables from the data sections, etc).
+	  If you say Y here, a user level program will be able to map
+	  file names to handle and then later use the handle for
+	  different file system operations. This is useful in implementing
+	  userspace file servers, which now track files using handles instead
+	  of names. The handle would remain the same even if file names
+	  get renamed. Enables open_by_handle_at(2) and name_to_handle_at(2)
+	  syscalls.
 
-	   This option makes sure that all symbols are loaded into the kernel
-	   image (i.e., symbols from all sections) in cost of increased kernel
-	   size (depending on the kernel configuration, it may be 300KiB or
-	   something like this).
-
-	   Say N unless you really need all symbols.
-
-config KALLSYMS_ABSOLUTE_PERCPU
-	bool
-	depends on KALLSYMS
-	default X86_64 && SMP
-
-config KALLSYMS_BASE_RELATIVE
-	bool
-	depends on KALLSYMS
-	default !IA64 && !(TILE && 64BIT)
+config POSIX_TIMERS
+	bool "Posix Clocks & timers" if EXPERT
+	default y
 	help
-	  Instead of emitting them as absolute values in the native word size,
-	  emit the symbol references in the kallsyms table as 32-bit entries,
-	  each containing a relative value in the range [base, base + U32_MAX]
-	  or, when KALLSYMS_ABSOLUTE_PERCPU is in effect, each containing either
-	  an absolute value in the range [0, S32_MAX] or a relative value in the
-	  range [base, base + S32_MAX], where base is the lowest relative symbol
-	  address encountered in the image.
+	  This includes native support for POSIX timers to the kernel.
+	  Some embedded systems have no use for them and therefore they
+	  can be configured out to reduce the size of the kernel image.
 
-	  On 64-bit builds, this reduces the size of the address table by 50%,
-	  but more importantly, it results in entries whose values are build
-	  time constants, and no relocation pass is required at runtime to fix
-	  up the entries based on the runtime load address of the kernel.
+	  When this option is disabled, the following syscalls won't be
+	  available: timer_create, timer_gettime: timer_getoverrun,
+	  timer_settime, timer_delete, clock_adjtime, getitimer,
+	  setitimer, alarm. Furthermore, the clock_settime, clock_gettime,
+	  clock_getres and clock_nanosleep syscalls will be limited to
+	  CLOCK_REALTIME, CLOCK_MONOTONIC and CLOCK_BOOTTIME only.
+
+	  If unsure say y.
 
 config PRINTK
 	default y
@@ -1652,11 +1515,11 @@ config BUG
 	bool "BUG() support" if EXPERT
 	default y
 	help
-          Disabling this option eliminates support for BUG and WARN, reducing
-          the size of your kernel image and potentially quietly ignoring
-          numerous fatal conditions. You should only consider disabling this
-          option for embedded systems with no facilities for reporting errors.
-          Just say Y.
+	  Disabling this option eliminates support for BUG and WARN, reducing
+	  the size of your kernel image and potentially quietly ignoring
+	  numerous fatal conditions. You should only consider disabling this
+	  option for embedded systems with no facilities for reporting errors.
+	  Just say Y.
 
 config ELF_CORE
 	depends on COREDUMP
@@ -1672,8 +1535,8 @@ config PCSPKR_PLATFORM
 	select I8253_LOCK
 	default y
 	help
-          This option allows to disable the internal PC-Speaker
-          support, saving some memory.
+	  This option allows to disable the internal PC-Speaker
+	  support, saving some memory.
 
 config BASE_FULL
 	default y
@@ -1686,11 +1549,16 @@ config BASE_FULL
 config FUTEX
 	bool "Enable futex support" if EXPERT
 	default y
-	select RT_MUTEXES
+	imply RT_MUTEXES
 	help
 	  Disabling this option will cause the kernel to be built without
 	  support for "fast userspace mutexes".  The resulting kernel may not
 	  run glibc-based applications correctly.
+
+config FUTEX_PI
+	bool
+	depends on FUTEX && RT_MUTEXES
+	default y
 
 config HAVE_FUTEX_CMPXCHG
 	bool
@@ -1703,14 +1571,12 @@ config HAVE_FUTEX_CMPXCHG
 config EPOLL
 	bool "Enable eventpoll support" if EXPERT
 	default y
-	select ANON_INODES
 	help
 	  Disabling this option will cause the kernel to be built without
 	  support for epoll family of system calls.
 
 config SIGNALFD
 	bool "Enable signalfd() system call" if EXPERT
-	select ANON_INODES
 	default y
 	help
 	  Enable the signalfd() system call that allows to receive signals
@@ -1720,7 +1586,6 @@ config SIGNALFD
 
 config TIMERFD
 	bool "Enable timerfd() system call" if EXPERT
-	select ANON_INODES
 	default y
 	help
 	  Enable the timerfd() system call that allows to receive timer
@@ -1730,30 +1595,12 @@ config TIMERFD
 
 config EVENTFD
 	bool "Enable eventfd() system call" if EXPERT
-	select ANON_INODES
 	default y
 	help
 	  Enable the eventfd() system call that allows to receive both
 	  kernel notification (ie. KAIO) or userspace notifications.
 
 	  If unsure, say Y.
-
-# syscall, maps, verifier
-config BPF_SYSCALL
-	bool "Enable bpf() system call"
-	select ANON_INODES
-	select BPF
-	default n
-	help
-	  Enable the bpf() system call that allows to manipulate eBPF
-	  programs and maps via file descriptors.
-
-config BPF_JIT_ALWAYS_ON
-	bool "Permanently enable BPF JIT and remove BPF interpreter"
-	depends on BPF_SYSCALL && HAVE_EBPF_JIT && BPF_JIT
-	help
-	  Enables BPF JIT and removes BPF interpreter to avoid
-	  speculative execution of BPF instructions by the interpreter
 
 config SHMEM
 	bool "Use full shmem filesystem" if EXPERT
@@ -1774,6 +1621,15 @@ config AIO
 	  by some high performance threaded applications. Disabling
 	  this option saves about 7k.
 
+config IO_URING
+	bool "Enable IO uring support" if EXPERT
+	select IO_WQ
+	default y
+	help
+	  This option enables support for the io_uring interface, enabling
+	  applications to submit and complete IO through submission and
+	  completion rings that are shared between the kernel and application.
+
 config ADVISE_SYSCALLS
 	bool "Enable madvise/fadvise syscalls" if EXPERT
 	default y
@@ -1784,22 +1640,15 @@ config ADVISE_SYSCALLS
 	  applications use these syscalls, you can disable this option to save
 	  space.
 
-config USERFAULTFD
-	bool "Enable userfaultfd() system call"
-	select ANON_INODES
-	depends on MMU
+config HAVE_ARCH_USERFAULTFD_WP
+	bool
 	help
-	  Enable the userfaultfd() system call that allows to intercept and
-	  handle page faults in userland.
+	  Arch has userfaultfd write protection support
 
-config PCI_QUIRKS
-	default y
-	bool "Enable PCI quirk workarounds" if EXPERT
-	depends on PCI
+config HAVE_ARCH_USERFAULTFD_MINOR
+	bool
 	help
-	  This enables workarounds for various PCI chipset
-	  bugs/quirks. Disable this only if your target machine is
-	  unaffected by PCI quirks.
+	  Arch has userfaultfd minor fault support
 
 config MEMBARRIER
 	bool "Enable membarrier() system call" if EXPERT
@@ -1813,9 +1662,106 @@ config MEMBARRIER
 
 	  If unsure, say Y.
 
+config KALLSYMS
+	bool "Load all symbols for debugging/ksymoops" if EXPERT
+	default y
+	help
+	  Say Y here to let the kernel print out symbolic crash information and
+	  symbolic stack backtraces. This increases the size of the kernel
+	  somewhat, as all symbols have to be loaded into the kernel image.
+
+config KALLSYMS_ALL
+	bool "Include all symbols in kallsyms"
+	depends on DEBUG_KERNEL && KALLSYMS
+	help
+	  Normally kallsyms only contains the symbols of functions for nicer
+	  OOPS messages and backtraces (i.e., symbols from the text and inittext
+	  sections). This is sufficient for most cases. And only in very rare
+	  cases (e.g., when a debugger is used) all symbols are required (e.g.,
+	  names of variables from the data sections, etc).
+
+	  This option makes sure that all symbols are loaded into the kernel
+	  image (i.e., symbols from all sections) in cost of increased kernel
+	  size (depending on the kernel configuration, it may be 300KiB or
+	  something like this).
+
+	  Say N unless you really need all symbols.
+
+config KALLSYMS_ABSOLUTE_PERCPU
+	bool
+	depends on KALLSYMS
+	default X86_64 && SMP
+
+config KALLSYMS_BASE_RELATIVE
+	bool
+	depends on KALLSYMS
+	default !IA64
+	help
+	  Instead of emitting them as absolute values in the native word size,
+	  emit the symbol references in the kallsyms table as 32-bit entries,
+	  each containing a relative value in the range [base, base + U32_MAX]
+	  or, when KALLSYMS_ABSOLUTE_PERCPU is in effect, each containing either
+	  an absolute value in the range [0, S32_MAX] or a relative value in the
+	  range [base, base + S32_MAX], where base is the lowest relative symbol
+	  address encountered in the image.
+
+	  On 64-bit builds, this reduces the size of the address table by 50%,
+	  but more importantly, it results in entries whose values are build
+	  time constants, and no relocation pass is required at runtime to fix
+	  up the entries based on the runtime load address of the kernel.
+
+# end of the "standard kernel features (expert users)" menu
+
+# syscall, maps, verifier
+
+config USERFAULTFD
+	bool "Enable userfaultfd() system call"
+	depends on MMU
+	help
+	  Enable the userfaultfd() system call that allows to intercept and
+	  handle page faults in userland.
+
+config ARCH_HAS_MEMBARRIER_CALLBACKS
+	bool
+
+config ARCH_HAS_MEMBARRIER_SYNC_CORE
+	bool
+
+config KCMP
+	bool "Enable kcmp() system call" if EXPERT
+	help
+	  Enable the kernel resource comparison system call. It provides
+	  user-space with the ability to compare two processes to see if they
+	  share a common resource, such as a file descriptor or even virtual
+	  memory space.
+
+	  If unsure, say N.
+
+config RSEQ
+	bool "Enable rseq() system call" if EXPERT
+	default y
+	depends on HAVE_RSEQ
+	select MEMBARRIER
+	help
+	  Enable the restartable sequences system call. It provides a
+	  user-space cache for the current CPU number value, which
+	  speeds up getting the current CPU number from user-space,
+	  as well as an ABI to speed up user-space operations on
+	  per-CPU data.
+
+	  If unsure, say Y.
+
+config DEBUG_RSEQ
+	default n
+	bool "Enabled debugging of rseq() system call" if EXPERT
+	depends on RSEQ && DEBUG_KERNEL
+	help
+	  Enable extra debugging checks for the rseq system call.
+
+	  If unsure, say N.
+
 config EMBEDDED
 	bool "Embedded system"
-	option allnoconfig_y
 	select EXPERT
 	help
 	  This option should be enabled if compiling the kernel for
@@ -1832,13 +1778,19 @@ config PERF_USE_VMALLOC
 	help
 	  See tools/perf/design.txt for details
 
+config PC104
+	bool "PC/104 support" if EXPERT
+	help
+	  Expose PC/104 form factor device drivers and options available for
+	  selection and configuration. Enable this option if your target
+	  machine has a PC/104 bus.
+
 menu "Kernel Performance Events And Counters"
 
 config PERF_EVENTS
 	bool "Kernel performance events and counters"
 	default y if PROFILING
 	depends on HAVE_PERF_EVENTS
-	select ANON_INODES
 	select IRQ_WORK
 	select SRCU
 	help
@@ -1870,12 +1822,12 @@ config DEBUG_PERF_USE_VMALLOC
 	depends on PERF_EVENTS && DEBUG_KERNEL && !PPC
 	select PERF_USE_VMALLOC
 	help
-	 Use vmalloc memory to back perf mmap() buffers.
+	  Use vmalloc memory to back perf mmap() buffers.
 
-	 Mostly useful for debugging the vmalloc code on platforms
-	 that don't require it.
+	  Mostly useful for debugging the vmalloc code on platforms
+	  that don't require it.
 
-	 Say N if unsure.
+	  Say N if unsure.
 
 endmenu
 
@@ -1945,21 +1897,69 @@ config SLOB
 
 endchoice
 
+config SLAB_MERGE_DEFAULT
+	bool "Allow slab caches to be merged"
+	default y
+	help
+	  For reduced kernel memory fragmentation, slab caches can be
+	  merged when they share the same size and other characteristics.
+	  This carries a risk of kernel heap overflows being able to
+	  overwrite objects from merged caches (and more easily control
+	  cache layout), which makes such heap attacks easier to exploit
+	  by attackers. By keeping caches unmerged, these kinds of exploits
+	  can usually only damage objects in the same cache. To disable
+	  merging at runtime, "slab_nomerge" can be passed on the kernel
+	  command line.
+
 config SLAB_FREELIST_RANDOM
-	default n
+	bool "Randomize slab freelist"
 	depends on SLAB || SLUB
-	bool "SLAB freelist randomization"
 	help
 	  Randomizes the freelist order used on creating new pages. This
 	  security feature reduces the predictability of the kernel slab
 	  allocator against heap overflows.
+
+config SLAB_FREELIST_HARDENED
+	bool "Harden slab freelist metadata"
+	depends on SLAB || SLUB
+	help
+	  Many kernel heap attacks try to target slab cache metadata and
+	  other infrastructure. This options makes minor performance
+	  sacrifices to harden the kernel slab allocator against common
+	  freelist exploit methods. Some slab implementations have more
+	  sanity-checking than others. This option is most effective with
+	  CONFIG_SLUB.
+
+config SHUFFLE_PAGE_ALLOCATOR
+	bool "Page allocator randomization"
+	default SLAB_FREELIST_RANDOM && ACPI_NUMA
+	help
+	  Randomization of the page allocator improves the average
+	  utilization of a direct-mapped memory-side-cache. See section
+	  5.2.27 Heterogeneous Memory Attribute Table (HMAT) in the ACPI
+	  6.2a specification for an example of how a platform advertises
+	  the presence of a memory-side-cache. There are also incidental
+	  security benefits as it reduces the predictability of page
+	  allocations to compliment SLAB_FREELIST_RANDOM, but the
+	  default granularity of shuffling on the "MAX_ORDER - 1" i.e,
+	  10th order of pages is selected based on cache utilization
+	  benefits on x86.
+
+	  While the randomization improves cache utilization it may
+	  negatively impact workloads on platforms without a cache. For
+	  this reason, by default, the randomization is enabled only
+	  after runtime detection of a direct-mapped memory-side-cache.
+	  Otherwise, the randomization may be force enabled with the
+	  'page_alloc.shuffle' kernel command line parameter.
+
+	  Say Y if unsure.
 
 config SLUB_CPU_PARTIAL
 	default y
 	depends on SLUB && SMP
 	bool "SLUB per cpu partial cache"
 	help
-	  Per cpu partial caches accellerate objects allocation and freeing
+	  Per cpu partial caches accelerate objects allocation and freeing
 	  that is local to a processor at the price of more indeterminism
 	  in the latency of the free. On overflow these caches will be cleared
 	  which requires the taking of locks that may cause latency spikes.
@@ -1971,7 +1971,7 @@ config MMAP_ALLOW_UNINITIALIZED
 	default n
 	help
 	  Normally, and according to the Linux spec, anonymous memory obtained
-	  from mmap() has it's contents cleared before it is passed to
+	  from mmap() has its contents cleared before it is passed to
 	  userspace.  Enabling this config option allows you to request that
 	  mmap() skip that if it is given an MAP_UNINITIALIZED flag, thus
 	  providing a huge performance boost.  If this option is not enabled,
@@ -1985,7 +1985,7 @@ config MMAP_ALLOW_UNINITIALIZED
 	  userspace.  Since that isn't generally a problem on no-MMU systems,
 	  it is normally safe to say Y here.
 
-	  See Documentation/nommu-mmap.txt for more information.
+	  See Documentation/admin-guide/mm/nommu-mmap.rst for more information.
 
 config SYSTEM_DATA_VERIFICATION
 	def_bool n
@@ -2009,7 +2009,7 @@ config PROFILING
 	bool "Profiling support"
 	help
 	  Say Y here to enable the extended profiling support mechanisms used
-	  by profilers such as OProfile.
+	  by profilers.
 
 #
 # Place an empty function call at each tracepoint site. Can be
@@ -2018,19 +2018,9 @@ config PROFILING
 config TRACEPOINTS
 	bool
 
-source "arch/Kconfig"
-
 endmenu		# General setup
 
-config HAVE_GENERIC_DMA_COHERENT
-	bool
-	default n
-
-config SLABINFO
-	bool
-	depends on PROC_FS
-	depends on SLAB || SLUB_DEBUG
-	default y
+source "arch/Kconfig"
 
 config RT_MUTEXES
 	bool
@@ -2040,9 +2030,13 @@ config BASE_SMALL
 	default 0 if BASE_FULL
 	default 1 if !BASE_FULL
 
+config MODULE_SIG_FORMAT
+	def_bool n
+	select SYSTEM_DATA_VERIFICATION
+
 menuconfig MODULES
 	bool "Enable loadable module support"
-	option modules
+	modules
 	help
 	  Kernel modules are small pieces of compiled code which can
 	  be inserted in the running kernel, rather than being
@@ -2099,6 +2093,18 @@ config MODVERSIONS
 	  make them incompatible with the kernel you are running.  If
 	  unsure, say N.
 
+config ASM_MODVERSIONS
+	bool
+	default HAVE_ASM_MODVERSIONS && MODVERSIONS
+	help
+	  This enables module versioning for exported symbols also from
+	  assembly. This can be enabled only when the target architecture
+	  supports it.
+
+config MODULE_REL_CRCS
+	bool
+	depends on MODVERSIONS
+
 config MODULE_SRCVERSION_ALL
 	bool "Source checksum for all modules"
 	help
@@ -2112,16 +2118,20 @@ config MODULE_SRCVERSION_ALL
 
 config MODULE_SIG
 	bool "Module signature verification"
-	depends on MODULES
-	select SYSTEM_DATA_VERIFICATION
+	select MODULE_SIG_FORMAT
 	help
 	  Check modules for valid signatures upon load: the signature
 	  is simply appended to the module. For more information see
-	  Documentation/module-signing.txt.
+	  <file:Documentation/admin-guide/module-signing.rst>.
 
 	  Note that this option adds the OpenSSL development packages as a
 	  kernel build dependency so that the signing tool can use its crypto
 	  library.
+
+	  You should enable this option if you wish to use either
+	  CONFIG_SECURITY_LOCKDOWN_LSM or lockdown functionality imposed via
+	  another LSM - otherwise unsigned modules will be loadable regardless
+	  of the lockdown policy.
 
 	  !!!WARNING!!!  If you enable this option, you MUST make sure that the
 	  module DOES NOT get stripped after being signed.  This includes the
@@ -2138,7 +2148,7 @@ config MODULE_SIG_FORCE
 config MODULE_SIG_ALL
 	bool "Automatically sign all modules"
 	default y
-	depends on MODULE_SIG
+	depends on MODULE_SIG || IMA_APPRAISE_MODSIG
 	help
 	  Sign all modules during make modules_install. Without this option,
 	  modules must be signed manually, using the scripts/sign-file tool.
@@ -2148,7 +2158,7 @@ comment "Do not forget to sign required modules with scripts/sign-file"
 
 choice
 	prompt "Which hash algorithm should modules be signed with?"
-	depends on MODULE_SIG
+	depends on MODULE_SIG || IMA_APPRAISE_MODSIG
 	help
 	  This determines which sort of hashing algorithm will be used during
 	  signature generation.  This algorithm _must_ be built into the kernel
@@ -2180,54 +2190,91 @@ endchoice
 
 config MODULE_SIG_HASH
 	string
-	depends on MODULE_SIG
+	depends on MODULE_SIG || IMA_APPRAISE_MODSIG
 	default "sha1" if MODULE_SIG_SHA1
 	default "sha224" if MODULE_SIG_SHA224
 	default "sha256" if MODULE_SIG_SHA256
 	default "sha384" if MODULE_SIG_SHA384
 	default "sha512" if MODULE_SIG_SHA512
 
-config MODULE_COMPRESS
-	bool "Compress modules on installation"
-	depends on MODULES
-	help
-
-	  Compresses kernel modules when 'make modules_install' is run; gzip or
-	  xz depending on "Compression algorithm" below.
-
-	  module-init-tools MAY support gzip, and kmod MAY support gzip and xz.
-
-	  Out-of-tree kernel modules installed using Kbuild will also be
-	  compressed upon installation.
-
-	  Note: for modules inside an initrd or initramfs, it's more efficient
-	  to compress the whole initrd or initramfs instead.
-
-	  Note: This is fully compatible with signed modules.
-
-	  If in doubt, say N.
-
 choice
-	prompt "Compression algorithm"
-	depends on MODULE_COMPRESS
-	default MODULE_COMPRESS_GZIP
+	prompt "Module compression mode"
 	help
-	  This determines which sort of compression will be used during
-	  'make modules_install'.
+	  This option allows you to choose the algorithm which will be used to
+	  compress modules when 'make modules_install' is run. (or, you can
+	  choose to not compress modules at all.)
 
-	  GZIP (default) and XZ are supported.
+	  External modules will also be compressed in the same way during the
+	  installation.
+
+	  For modules inside an initrd or initramfs, it's more efficient to
+	  compress the whole initrd or initramfs instead.
+
+	  This is fully compatible with signed modules.
+
+	  Please note that the tool used to load modules needs to support the
+	  corresponding algorithm. module-init-tools MAY support gzip, and kmod
+	  MAY support gzip, xz and zstd.
+
+	  Your build system needs to provide the appropriate compression tool
+	  to compress the modules.
+
+	  If in doubt, select 'None'.
+
+config MODULE_COMPRESS_NONE
+	bool "None"
+	help
+	  Do not compress modules. The installed modules are suffixed
+	  with .ko.
 
 config MODULE_COMPRESS_GZIP
 	bool "GZIP"
+	help
+	  Compress modules with GZIP. The installed modules are suffixed
+	  with .ko.gz.
 
 config MODULE_COMPRESS_XZ
 	bool "XZ"
+	help
+	  Compress modules with XZ. The installed modules are suffixed
+	  with .ko.xz.
+
+config MODULE_COMPRESS_ZSTD
+	bool "ZSTD"
+	help
+	  Compress modules with ZSTD. The installed modules are suffixed
+	  with .ko.zst.
 
 endchoice
 
+config MODULE_ALLOW_MISSING_NAMESPACE_IMPORTS
+	bool "Allow loading of modules with missing namespace imports"
+	help
+	  Symbols exported with EXPORT_SYMBOL_NS*() are considered exported in
+	  a namespace. A module that makes use of a symbol exported with such a
+	  namespace is required to import the namespace via MODULE_IMPORT_NS().
+	  There is no technical reason to enforce correct namespace imports,
+	  but it creates consistency between symbols defining namespaces and
+	  users importing namespaces they make use of. This option relaxes this
+	  requirement and lifts the enforcement when loading a module.
+
+	  If unsure, say N.
+
+config MODPROBE_PATH
+	string "Path to modprobe binary"
+	default "/sbin/modprobe"
+	help
+	  When kernel code requests a module, it does so by calling
+	  the "modprobe" userspace utility. This option allows you to
+	  set the path where that binary is found. This can be changed
+	  at runtime via the sysctl file
+	  /proc/sys/kernel/modprobe. Setting this to the empty string
+	  removes the kernel's ability to request modules (but
+	  userspace can still load modules explicitly).
+
 config TRIM_UNUSED_KSYMS
-	bool "Trim unused exported kernel symbols"
-	depends on MODULES && !UNUSED_SYMBOLS
+	bool "Trim unused exported kernel symbols" if EXPERT
+	depends on !COMPILE_TEST
 	help
 	  The kernel and some modules make many symbols available for
 	  other modules to use via EXPORT_SYMBOL() and variants. Depending
@@ -2240,6 +2287,19 @@ config TRIM_UNUSED_KSYMS
 	  binary size.  This might have some security advantages as well.
 
 	  If unsure, or if you need to build out-of-tree modules, say N.
+
+config UNUSED_KSYMS_WHITELIST
+	string "Whitelist of symbols to keep in ksymtab"
+	depends on TRIM_UNUSED_KSYMS
+	help
+	  By default, all unused exported symbols will be un-exported from the
+	  build when TRIM_UNUSED_KSYMS is selected.
+
+	  UNUSED_KSYMS_WHITELIST allows to whitelist symbols that must be kept
+	  exported at all times, even in absence of in-tree users. The value to
+	  set here is the path to a text file containing the list of symbols,
+	  one per line. The path can be absolute, or relative to the kernel
+	  source tree.
 
 endif # MODULES
 
@@ -2274,3 +2334,19 @@ config ASN1
 	  functions to call on what tags.
 
 source "kernel/Kconfig.locks"
+
+config ARCH_HAS_NON_OVERLAPPING_ADDRESS_SPACE
+	bool
+
+config ARCH_HAS_SYNC_CORE_BEFORE_USERMODE
+	bool
+
+# It may be useful for an architecture to override the definitions of the
+# SYSCALL_DEFINE() and __SYSCALL_DEFINEx() macros in <linux/syscalls.h>
+# and the COMPAT_ variants in <linux/compat.h>, in particular to use a
+# different calling convention for syscalls. They can also override the
+# macros for not-implemented syscalls in kernel/sys_ni.c and
+# kernel/time/posix-stubs.c. All these overrides need to be available in
+# <asm/syscall_wrapper.h>.
+config ARCH_HAS_SYSCALL_WRAPPER
+	def_bool n

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* DVB USB compliant linux driver for Technotrend DVB USB boxes and clones
  * (e.g. Pinnacle 400e DVB-S USB2.0).
  *
@@ -16,11 +17,7 @@
  * Copyright (c) 2003 Felix Domke <tmbinc@elitedvb.net>
  * Copyright (C) 2005-6 Patrick Boettcher <pb@linuxtv.org>
  *
- *	This program is free software; you can redistribute it and/or modify it
- *	under the terms of the GNU General Public License as published by the Free
- *	Software Foundation, version 2.
- *
- * see Documentation/dvb/README.dvb-usb for more information
+ * see Documentation/driver-api/media/drivers/dvb-usb.rst for more information
  */
 #define DVB_USB_LOG_PREFIX "ttusb2"
 #include "dvb-usb.h"
@@ -34,7 +31,7 @@
 #include "tda827x.h"
 #include "lnbp21.h"
 /* CA */
-#include "dvb_ca_en50221.h"
+#include <media/dvb_ca_en50221.h>
 
 /* debug */
 static int dvb_usb_ttusb2_debug;
@@ -459,7 +456,7 @@ static int tt3650_rc_query(struct dvb_usb_device *d)
 		/* got a "press" event */
 		st->last_rc_key = RC_SCANCODE_RC5(rx[3], rx[2]);
 		deb_info("%s: cmd=0x%02x sys=0x%02x\n", __func__, rx[2], rx[3]);
-		rc_keydown(d->rc_dev, RC_TYPE_RC5, st->last_rc_key, rx[1]);
+		rc_keydown(d->rc_dev, RC_PROTO_RC5, st->last_rc_key, rx[1]);
 	} else if (st->last_rc_key) {
 		rc_keyup(d->rc_dev);
 		st->last_rc_key = 0;
@@ -470,9 +467,10 @@ static int tt3650_rc_query(struct dvb_usb_device *d)
 
 
 /* Callbacks for DVB USB */
-static int ttusb2_identify_state (struct usb_device *udev, struct
-		dvb_usb_device_properties *props, struct dvb_usb_device_description **desc,
-		int *cold)
+static int ttusb2_identify_state(struct usb_device *udev,
+				 const struct dvb_usb_device_properties *props,
+				 const struct dvb_usb_device_description **desc,
+				 int *cold)
 {
 	*cold = udev->descriptor.iManufacturer == 0 && udev->descriptor.iProduct == 0;
 	return 0;
@@ -766,7 +764,7 @@ static struct dvb_usb_device_properties ttusb2_properties_ct3650 = {
 		.rc_interval      = 150, /* Less than IR_KEYPRESS_TIMEOUT */
 		.rc_codes         = RC_MAP_TT_1500,
 		.rc_query         = tt3650_rc_query,
-		.allowed_protos   = RC_BIT_RC5,
+		.allowed_protos   = RC_PROTO_BIT_RC5,
 	},
 
 	.num_adapters = 1,

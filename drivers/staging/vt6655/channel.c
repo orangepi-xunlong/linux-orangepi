@@ -1,20 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (c) 1996, 2003 VIA Networking Technologies, Inc.
  * All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  *
  * File: channel.c
  *
@@ -127,40 +114,38 @@ static struct ieee80211_supported_band vnt_supported_5ghz_band = {
 	.n_bitrates = ARRAY_SIZE(vnt_rates_a),
 };
 
-void vnt_init_bands(struct vnt_private *priv)
+static void vnt_init_band(struct vnt_private *priv,
+			  struct ieee80211_supported_band *supported_band,
+			  enum nl80211_band band)
 {
-	struct ieee80211_channel *ch;
 	int i;
 
+	for (i = 0; i < supported_band->n_channels; i++) {
+		supported_band->channels[i].max_power = 0x3f;
+		supported_band->channels[i].flags =
+			IEEE80211_CHAN_NO_HT40;
+	}
+
+	priv->hw->wiphy->bands[band] = supported_band;
+}
+
+void vnt_init_bands(struct vnt_private *priv)
+{
 	switch (priv->byRFType) {
 	case RF_AIROHA7230:
 	case RF_UW2452:
 	case RF_NOTHING:
 	default:
-		ch = vnt_channels_5ghz;
-
-		for (i = 0; i < ARRAY_SIZE(vnt_channels_5ghz); i++) {
-			ch[i].max_power = 0x3f;
-			ch[i].flags = IEEE80211_CHAN_NO_HT40;
-		}
-
-		priv->hw->wiphy->bands[NL80211_BAND_5GHZ] =
-						&vnt_supported_5ghz_band;
-	/* fallthrough */
+		vnt_init_band(priv, &vnt_supported_5ghz_band,
+			      NL80211_BAND_5GHZ);
+		fallthrough;
 	case RF_RFMD2959:
 	case RF_AIROHA:
 	case RF_AL2230S:
 	case RF_UW2451:
 	case RF_VT3226:
-		ch = vnt_channels_2ghz;
-
-		for (i = 0; i < ARRAY_SIZE(vnt_channels_2ghz); i++) {
-			ch[i].max_power = 0x3f;
-			ch[i].flags = IEEE80211_CHAN_NO_HT40;
-		}
-
-		priv->hw->wiphy->bands[NL80211_BAND_2GHZ] =
-						&vnt_supported_2ghz_band;
+		vnt_init_band(priv, &vnt_supported_2ghz_band,
+			      NL80211_BAND_2GHZ);
 		break;
 	}
 }
@@ -168,8 +153,8 @@ void vnt_init_bands(struct vnt_private *priv)
 /**
  * set_channel() - Set NIC media channel
  *
- * @pDeviceHandler: The adapter to be set
- * @uConnectionChannel: Channel to be set
+ * @priv: The adapter to be set
+ * @ch: Channel to be set
  *
  * Return Value: true if succeeded; false if failed.
  *
@@ -186,7 +171,7 @@ bool set_channel(struct vnt_private *priv, struct ieee80211_channel *ch)
 	    priv->byBBVGACurrent != priv->abyBBVGA[0]) {
 		priv->byBBVGACurrent = priv->abyBBVGA[0];
 
-		BBvSetVGAGainOffset(priv, priv->byBBVGACurrent);
+		bb_set_vga_gain_offset(priv, priv->byBBVGACurrent);
 	}
 
 	/* clear NAV */
@@ -208,7 +193,7 @@ bool set_channel(struct vnt_private *priv, struct ieee80211_channel *ch)
 	if (priv->bEnablePSMode)
 		RFvWriteWakeProgSyn(priv, priv->byRFType, ch->hw_value);
 
-	BBvSoftwareReset(priv);
+	bb_software_reset(priv);
 
 	if (priv->byLocalID > REV_ID_VT3253_B1) {
 		unsigned long flags;

@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Xilinx XADC driver
  *
  * Copyright 2013 Analog Devices Inc.
- *  Author: Lars-Peter Clauen <lars@metafoo.de>
- *
- * Licensed under the GPL-2.
+ *  Author: Lars-Peter Clausen <lars@metafoo.de>
  */
 
 #include <linux/iio/events.h>
@@ -68,7 +67,7 @@ void xadc_handle_events(struct iio_dev *indio_dev, unsigned long events)
 		xadc_handle_event(indio_dev, i);
 }
 
-static unsigned xadc_get_threshold_offset(const struct iio_chan_spec *chan,
+static unsigned int xadc_get_threshold_offset(const struct iio_chan_spec *chan,
 	enum iio_event_direction dir)
 {
 	unsigned int offset;
@@ -90,26 +89,24 @@ static unsigned xadc_get_threshold_offset(const struct iio_chan_spec *chan,
 
 static unsigned int xadc_get_alarm_mask(const struct iio_chan_spec *chan)
 {
-	if (chan->type == IIO_TEMP) {
+	if (chan->type == IIO_TEMP)
 		return XADC_ALARM_OT_MASK;
-	} else {
-		switch (chan->channel) {
-		case 0:
-			return XADC_ALARM_VCCINT_MASK;
-		case 1:
-			return XADC_ALARM_VCCAUX_MASK;
-		case 2:
-			return XADC_ALARM_VCCBRAM_MASK;
-		case 3:
-			return XADC_ALARM_VCCPINT_MASK;
-		case 4:
-			return XADC_ALARM_VCCPAUX_MASK;
-		case 5:
-			return XADC_ALARM_VCCODDR_MASK;
-		default:
-			/* We will never get here */
-			return 0;
-		}
+	switch (chan->channel) {
+	case 0:
+		return XADC_ALARM_VCCINT_MASK;
+	case 1:
+		return XADC_ALARM_VCCAUX_MASK;
+	case 2:
+		return XADC_ALARM_VCCBRAM_MASK;
+	case 3:
+		return XADC_ALARM_VCCPINT_MASK;
+	case 4:
+		return XADC_ALARM_VCCPAUX_MASK;
+	case 5:
+		return XADC_ALARM_VCCODDR_MASK;
+	default:
+		/* We will never get here */
+		return 0;
 	}
 }
 
@@ -158,9 +155,6 @@ err_out:
 	return ret;
 }
 
-/* Register value is msb aligned, the lower 4 bits are ignored */
-#define XADC_THRESHOLD_VALUE_SHIFT 4
-
 int xadc_read_event_value(struct iio_dev *indio_dev,
 	const struct iio_chan_spec *chan, enum iio_event_type type,
 	enum iio_event_direction dir, enum iio_event_info info,
@@ -180,7 +174,8 @@ int xadc_read_event_value(struct iio_dev *indio_dev,
 		return -EINVAL;
 	}
 
-	*val >>= XADC_THRESHOLD_VALUE_SHIFT;
+	/* MSB aligned */
+	*val >>= 16 - chan->scan_type.realbits;
 
 	return IIO_VAL_INT;
 }
@@ -194,7 +189,8 @@ int xadc_write_event_value(struct iio_dev *indio_dev,
 	struct xadc *xadc = iio_priv(indio_dev);
 	int ret = 0;
 
-	val <<= XADC_THRESHOLD_VALUE_SHIFT;
+	/* MSB aligned */
+	val <<= 16 - chan->scan_type.realbits;
 
 	if (val < 0 || val > 0xffff)
 		return -EINVAL;

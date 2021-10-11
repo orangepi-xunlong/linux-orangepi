@@ -1,15 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/fs/pnode.c
  *
  * (C) Copyright IBM Corporation 2005.
- *	Released under GPL v2.
  *	Author : Ram Pai (linuxram@us.ibm.com)
- *
  */
 #include <linux/mnt_namespace.h>
 #include <linux/mount.h>
 #include <linux/fs.h>
 #include <linux/nsproxy.h>
+#include <uapi/linux/mount.h>
 #include "internal.h"
 #include "pnode.h"
 
@@ -72,49 +72,47 @@ int get_dominating_id(struct mount *mnt, const struct path *root)
 
 static int do_make_slave(struct mount *mnt)
 {
-	struct mount *peer_mnt = mnt, *master = mnt->mnt_master;
-	struct mount *slave_mnt;
+	struct mount *master, *slave_mnt;
 
-	/*
-	 * slave 'mnt' to a peer mount that has the
-	 * same root dentry. If none is available then
-	 * slave it to anything that is available.
-	 */
-	while ((peer_mnt = next_peer(peer_mnt)) != mnt &&
-	       peer_mnt->mnt.mnt_root != mnt->mnt.mnt_root) ;
-
-	if (peer_mnt == mnt) {
-		peer_mnt = next_peer(mnt);
-		if (peer_mnt == mnt)
-			peer_mnt = NULL;
-	}
-	if (mnt->mnt_group_id && IS_MNT_SHARED(mnt) &&
-	    list_empty(&mnt->mnt_share))
-		mnt_release_group_id(mnt);
-
-	list_del_init(&mnt->mnt_share);
-	mnt->mnt_group_id = 0;
-
-	if (peer_mnt)
-		master = peer_mnt;
-
-	if (master) {
-		list_for_each_entry(slave_mnt, &mnt->mnt_slave_list, mnt_slave)
-			slave_mnt->mnt_master = master;
-		list_move(&mnt->mnt_slave, &master->mnt_slave_list);
-		list_splice(&mnt->mnt_slave_list, master->mnt_slave_list.prev);
-		INIT_LIST_HEAD(&mnt->mnt_slave_list);
-	} else {
-		struct list_head *p = &mnt->mnt_slave_list;
-		while (!list_empty(p)) {
-                        slave_mnt = list_first_entry(p,
-					struct mount, mnt_slave);
-			list_del_init(&slave_mnt->mnt_slave);
-			slave_mnt->mnt_master = NULL;
+	if (list_empty(&mnt->mnt_share)) {
+		if (IS_MNT_SHARED(mnt)) {
+			mnt_release_group_id(mnt);
+			CLEAR_MNT_SHARED(mnt);
 		}
+		master = mnt->mnt_master;
+		if (!master) {
+			struct list_head *p = &mnt->mnt_slave_list;
+			while (!list_empty(p)) {
+				slave_mnt = list_first_entry(p,
+						struct mount, mnt_slave);
+				list_del_init(&slave_mnt->mnt_slave);
+				slave_mnt->mnt_master = NULL;
+			}
+			return 0;
+		}
+	} else {
+		struct mount *m;
+		/*
+		 * slave 'mnt' to a peer mount that has the
+		 * same root dentry. If none is available then
+		 * slave it to anything that is available.
+		 */
+		for (m = master = next_peer(mnt); m != mnt; m = next_peer(m)) {
+			if (m->mnt.mnt_root == mnt->mnt.mnt_root) {
+				master = m;
+				break;
+			}
+		}
+		list_del_init(&mnt->mnt_share);
+		mnt->mnt_group_id = 0;
+		CLEAR_MNT_SHARED(mnt);
 	}
+	list_for_each_entry(slave_mnt, &mnt->mnt_slave_list, mnt_slave)
+		slave_mnt->mnt_master = master;
+	list_move(&mnt->mnt_slave, &master->mnt_slave_list);
+	list_splice(&mnt->mnt_slave_list, master->mnt_slave_list.prev);
+	INIT_LIST_HEAD(&mnt->mnt_slave_list);
 	mnt->mnt_master = master;
-	CLEAR_MNT_SHARED(mnt);
 	return 0;
 }
 
@@ -215,7 +213,6 @@ static struct mount *next_group(struct mount *m, struct mount *origin)
 }
 
 /* all accesses are serialized by namespace_sem */
-static struct user_namespace *user_ns;
 static struct mount *last_dest, *first_source, *last_source, *dest_master;
 static struct mountpoint *mp;
 static struct hlist_head *list;
@@ -261,21 +258,16 @@ static int propagate_one(struct mount *m)
 			type |= CL_MAKE_SHARED;
 	}
 		
-	/* Notice when we are propagating across user namespaces */
-	if (m->mnt_ns->user_ns != user_ns)
-		type |= CL_UNPRIVILEGED;
 	child = copy_tree(last_source, last_source->mnt.mnt_root, type);
 	if (IS_ERR(child))
 		return PTR_ERR(child);
-	child->mnt.mnt_flags &= ~MNT_LOCKED;
+	read_seqlock_excl(&mount_lock);
 	mnt_set_mountpoint(m, mp, child);
+	if (m->mnt_master != dest_master)
+		SET_MNT_MARK(m->mnt_master);
+	read_sequnlock_excl(&mount_lock);
 	last_dest = m;
 	last_source = child;
-	if (m->mnt_master != dest_master) {
-		read_seqlock_excl(&mount_lock);
-		SET_MNT_MARK(m->mnt_master);
-		read_sequnlock_excl(&mount_lock);
-	}
 	hlist_add_head(&child->mnt_hash, list);
 	return count_mounts(m->mnt_ns, child);
 }
@@ -304,7 +296,6 @@ int propagate_mnt(struct mount *dest_mnt, struct mountpoint *dest_mp,
 	 * propagate_one(); everything is serialized by namespace_sem,
 	 * so globals will do just fine.
 	 */
-	user_ns = current->nsproxy->mnt_ns->user_ns;
 	last_dest = dest_mnt;
 	first_source = source_mnt;
 	last_source = source_mnt;
@@ -608,38 +599,4 @@ int propagate_umount(struct list_head *list)
 	list_splice_tail(&to_umount, list);
 
 	return 0;
-}
-
-/*
- *  Iterates over all slaves, and slaves of slaves.
- */
-static struct mount *next_descendent(struct mount *root, struct mount *cur)
-{
-	if (!IS_MNT_NEW(cur) && !list_empty(&cur->mnt_slave_list))
-		return first_slave(cur);
-	do {
-		struct mount *master = cur->mnt_master;
-
-		if (!master || cur->mnt_slave.next != &master->mnt_slave_list) {
-			struct mount *next = next_slave(cur);
-
-			return (next == root) ? NULL : next;
-		}
-		cur = master;
-	} while (cur != root);
-	return NULL;
-}
-
-void propagate_remount(struct mount *mnt)
-{
-	struct mount *m = mnt;
-	struct super_block *sb = mnt->mnt.mnt_sb;
-
-	if (sb->s_op->copy_mnt_data) {
-		m = next_descendent(mnt, m);
-		while (m) {
-			sb->s_op->copy_mnt_data(m->mnt.data, mnt->mnt.data);
-			m = next_descendent(mnt, m);
-		}
-	}
 }

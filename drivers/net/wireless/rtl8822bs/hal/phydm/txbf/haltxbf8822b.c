@@ -1049,7 +1049,7 @@ phydm_8822btxbf_rfmode(
 		/*for 8814 19ac(idx 1), 19b4(idx 0), different Tx ant setting*/
 		odm_set_bb_reg(p_dm, REG_BB_TXBF_ANT_SET_BF1_8822B, BIT(28) | BIT29, 0x2);	/*enable BB TxBF ant mapping register*/
 		odm_set_bb_reg(p_dm, REG_BB_TXBF_ANT_SET_BF1_8822B, BIT(31), 1);			/*ignore user since 8822B only 2Tx*/
-
+		
 
 		/*Nsts = 2	AB*/
 		odm_set_bb_reg(p_dm, REG_BB_TXBF_ANT_SET_BF1_8822B, 0xffff, 0x0433);

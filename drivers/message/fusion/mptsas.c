@@ -129,7 +129,7 @@ static void mptsas_expander_delete(MPT_ADAPTER *ioc,
 static void mptsas_send_expander_event(struct fw_event_work *fw_event);
 static void mptsas_not_responding_devices(MPT_ADAPTER *ioc);
 static void mptsas_scan_sas_topology(MPT_ADAPTER *ioc);
-static void mptsas_broadcast_primative_work(struct fw_event_work *fw_event);
+static void mptsas_broadcast_primitive_work(struct fw_event_work *fw_event);
 static void mptsas_handle_queue_full_event(struct fw_event_work *fw_event);
 static void mptsas_volume_delete(MPT_ADAPTER *ioc, u8 id);
 void	mptsas_schedule_target_reset(void *ioc);
@@ -289,6 +289,7 @@ mptsas_add_fw_event(MPT_ADAPTER *ioc, struct fw_event_work *fw_event,
 
 	spin_lock_irqsave(&ioc->fw_event_lock, flags);
 	list_add_tail(&fw_event->list, &ioc->fw_event_list);
+	fw_event->users = 1;
 	INIT_DELAYED_WORK(&fw_event->work, mptsas_firmware_event_work);
 	devtprintk(ioc, printk(MYIOC_s_DEBUG_FMT "%s: add (fw_event=0x%p)"
 		"on cpuid %d\n", ioc->name, __func__,
@@ -314,6 +315,15 @@ mptsas_requeue_fw_event(MPT_ADAPTER *ioc, struct fw_event_work *fw_event,
 	spin_unlock_irqrestore(&ioc->fw_event_lock, flags);
 }
 
+static void __mptsas_free_fw_event(MPT_ADAPTER *ioc,
+				   struct fw_event_work *fw_event)
+{
+	devtprintk(ioc, printk(MYIOC_s_DEBUG_FMT "%s: kfree (fw_event=0x%p)\n",
+	    ioc->name, __func__, fw_event));
+	list_del(&fw_event->list);
+	kfree(fw_event);
+}
+
 /* free memory associated to a sas firmware event */
 static void
 mptsas_free_fw_event(MPT_ADAPTER *ioc, struct fw_event_work *fw_event)
@@ -321,10 +331,9 @@ mptsas_free_fw_event(MPT_ADAPTER *ioc, struct fw_event_work *fw_event)
 	unsigned long flags;
 
 	spin_lock_irqsave(&ioc->fw_event_lock, flags);
-	devtprintk(ioc, printk(MYIOC_s_DEBUG_FMT "%s: kfree (fw_event=0x%p)\n",
-	    ioc->name, __func__, fw_event));
-	list_del(&fw_event->list);
-	kfree(fw_event);
+	fw_event->users--;
+	if (!fw_event->users)
+		__mptsas_free_fw_event(ioc, fw_event);
 	spin_unlock_irqrestore(&ioc->fw_event_lock, flags);
 }
 
@@ -333,9 +342,10 @@ mptsas_free_fw_event(MPT_ADAPTER *ioc, struct fw_event_work *fw_event)
 static void
 mptsas_cleanup_fw_event_q(MPT_ADAPTER *ioc)
 {
-	struct fw_event_work *fw_event, *next;
+	struct fw_event_work *fw_event;
 	struct mptsas_target_reset_event *target_reset_list, *n;
 	MPT_SCSI_HOST	*hd = shost_priv(ioc->sh);
+	unsigned long flags;
 
 	/* flush the target_reset_list */
 	if (!list_empty(&hd->target_reset_list)) {
@@ -350,14 +360,29 @@ mptsas_cleanup_fw_event_q(MPT_ADAPTER *ioc)
 		}
 	}
 
-	if (list_empty(&ioc->fw_event_list) ||
-	     !ioc->fw_event_q || in_interrupt())
+	if (list_empty(&ioc->fw_event_list) || !ioc->fw_event_q)
 		return;
 
-	list_for_each_entry_safe(fw_event, next, &ioc->fw_event_list, list) {
-		if (cancel_delayed_work(&fw_event->work))
-			mptsas_free_fw_event(ioc, fw_event);
+	spin_lock_irqsave(&ioc->fw_event_lock, flags);
+
+	while (!list_empty(&ioc->fw_event_list)) {
+		bool canceled = false;
+
+		fw_event = list_first_entry(&ioc->fw_event_list,
+					    struct fw_event_work, list);
+		fw_event->users++;
+		spin_unlock_irqrestore(&ioc->fw_event_lock, flags);
+		if (cancel_delayed_work_sync(&fw_event->work))
+			canceled = true;
+
+		spin_lock_irqsave(&ioc->fw_event_lock, flags);
+		if (canceled)
+			fw_event->users--;
+		fw_event->users--;
+		WARN_ON_ONCE(fw_event->users);
+		__mptsas_free_fw_event(ioc, fw_event);
 	}
+	spin_unlock_irqrestore(&ioc->fw_event_lock, flags);
 }
 
 
@@ -755,13 +780,11 @@ static void
 mptsas_add_device_component_starget(MPT_ADAPTER *ioc,
 	struct scsi_target *starget)
 {
-	VirtTarget	*vtarget;
 	struct sas_rphy	*rphy;
 	struct mptsas_phyinfo	*phy_info = NULL;
 	struct mptsas_enclosure	enclosure_info;
 
 	rphy = dev_to_rphy(starget->dev.parent);
-	vtarget = starget->hostdata;
 	phy_info = mptsas_find_phyinfo_by_sas_address(ioc,
 			rphy->identify.sas_address);
 	if (!phy_info)
@@ -1165,7 +1188,6 @@ mptsas_schedule_target_reset(void *iocp)
 	 * issue target reset to next device in the queue
 	 */
 
-	head = &hd->target_reset_list;
 	if (list_empty(head))
 		return;
 
@@ -1666,7 +1688,7 @@ mptsas_firmware_event_work(struct work_struct *work)
 		mptsas_free_fw_event(ioc, fw_event);
 		break;
 	case MPI_EVENT_SAS_BROADCAST_PRIMITIVE:
-		mptsas_broadcast_primative_work(fw_event);
+		mptsas_broadcast_primitive_work(fw_event);
 		break;
 	case MPI_EVENT_SAS_EXPANDER_STATUS_CHANGE:
 		mptsas_send_expander_event(fw_event);
@@ -1930,7 +1952,7 @@ static enum blk_eh_timer_return mptsas_eh_timed_out(struct scsi_cmnd *sc)
 	MPT_SCSI_HOST *hd;
 	MPT_ADAPTER   *ioc;
 	VirtDevice    *vdevice;
-	enum blk_eh_timer_return rc = BLK_EH_NOT_HANDLED;
+	enum blk_eh_timer_return rc = BLK_EH_DONE;
 
 	hd = shost_priv(sc->device->host);
 	if (hd == NULL) {
@@ -1983,6 +2005,7 @@ static struct scsi_host_template mptsas_driver_template = {
 	.target_destroy			= mptsas_target_destroy,
 	.slave_destroy			= mptscsih_slave_destroy,
 	.change_queue_depth 		= mptscsih_change_queue_depth,
+	.eh_timed_out			= mptsas_eh_timed_out,
 	.eh_abort_handler		= mptscsih_abort,
 	.eh_device_reset_handler	= mptscsih_dev_reset,
 	.eh_host_reset_handler		= mptscsih_host_reset,
@@ -1992,7 +2015,6 @@ static struct scsi_host_template mptsas_driver_template = {
 	.sg_tablesize			= MPT_SCSI_SG_DEPTH,
 	.max_sectors			= 8192,
 	.cmd_per_lun			= 7,
-	.use_clustering			= ENABLE_CLUSTERING,
 	.shost_attrs			= mptscsih_host_attrs,
 	.no_write_same			= 1,
 };
@@ -2210,33 +2232,26 @@ mptsas_get_bay_identifier(struct sas_rphy *rphy)
 	return rc;
 }
 
-static int mptsas_smp_handler(struct Scsi_Host *shost, struct sas_rphy *rphy,
-			      struct request *req)
+static void mptsas_smp_handler(struct bsg_job *job, struct Scsi_Host *shost,
+		struct sas_rphy *rphy)
 {
 	MPT_ADAPTER *ioc = ((MPT_SCSI_HOST *) shost->hostdata)->ioc;
 	MPT_FRAME_HDR *mf;
 	SmpPassthroughRequest_t *smpreq;
-	struct request *rsp = req->next_rq;
-	int ret;
 	int flagsLength;
 	unsigned long timeleft;
 	char *psge;
-	dma_addr_t dma_addr_in = 0;
-	dma_addr_t dma_addr_out = 0;
 	u64 sas_address = 0;
-
-	if (!rsp) {
-		printk(MYIOC_s_ERR_FMT "%s: the smp response space is missing\n",
-		    ioc->name, __func__);
-		return -EINVAL;
-	}
+	unsigned int reslen = 0;
+	int ret = -EINVAL;
 
 	/* do we need to support multiple segments? */
-	if (bio_multiple_segments(req->bio) ||
-	    bio_multiple_segments(rsp->bio)) {
+	if (job->request_payload.sg_cnt > 1 ||
+	    job->reply_payload.sg_cnt > 1) {
 		printk(MYIOC_s_ERR_FMT "%s: multiple segments req %u, rsp %u\n",
-		    ioc->name, __func__, blk_rq_bytes(req), blk_rq_bytes(rsp));
-		return -EINVAL;
+		    ioc->name, __func__, job->request_payload.payload_len,
+		    job->reply_payload.payload_len);
+		goto out;
 	}
 
 	ret = mutex_lock_interruptible(&ioc->sas_mgmt.mutex);
@@ -2252,7 +2267,8 @@ static int mptsas_smp_handler(struct Scsi_Host *shost, struct sas_rphy *rphy,
 	smpreq = (SmpPassthroughRequest_t *)mf;
 	memset(smpreq, 0, sizeof(*smpreq));
 
-	smpreq->RequestDataLength = cpu_to_le16(blk_rq_bytes(req) - 4);
+	smpreq->RequestDataLength =
+		cpu_to_le16(job->request_payload.payload_len - 4);
 	smpreq->Function = MPI_FUNCTION_SMP_PASSTHROUGH;
 
 	if (rphy)
@@ -2278,13 +2294,14 @@ static int mptsas_smp_handler(struct Scsi_Host *shost, struct sas_rphy *rphy,
 		       MPI_SGE_FLAGS_END_OF_BUFFER |
 		       MPI_SGE_FLAGS_DIRECTION)
 		       << MPI_SGE_FLAGS_SHIFT;
-	flagsLength |= (blk_rq_bytes(req) - 4);
 
-	dma_addr_out = pci_map_single(ioc->pcidev, bio_data(req->bio),
-				      blk_rq_bytes(req), PCI_DMA_BIDIRECTIONAL);
-	if (pci_dma_mapping_error(ioc->pcidev, dma_addr_out))
+	if (!dma_map_sg(&ioc->pcidev->dev, job->request_payload.sg_list,
+			1, PCI_DMA_BIDIRECTIONAL))
 		goto put_mf;
-	ioc->add_sge(psge, flagsLength, dma_addr_out);
+
+	flagsLength |= (sg_dma_len(job->request_payload.sg_list) - 4);
+	ioc->add_sge(psge, flagsLength,
+			sg_dma_address(job->request_payload.sg_list));
 	psge += ioc->SGE_size;
 
 	/* response */
@@ -2294,12 +2311,13 @@ static int mptsas_smp_handler(struct Scsi_Host *shost, struct sas_rphy *rphy,
 		MPI_SGE_FLAGS_END_OF_BUFFER;
 
 	flagsLength = flagsLength << MPI_SGE_FLAGS_SHIFT;
-	flagsLength |= blk_rq_bytes(rsp) + 4;
-	dma_addr_in =  pci_map_single(ioc->pcidev, bio_data(rsp->bio),
-				      blk_rq_bytes(rsp), PCI_DMA_BIDIRECTIONAL);
-	if (pci_dma_mapping_error(ioc->pcidev, dma_addr_in))
-		goto unmap;
-	ioc->add_sge(psge, flagsLength, dma_addr_in);
+
+	if (!dma_map_sg(&ioc->pcidev->dev, job->reply_payload.sg_list,
+			1, PCI_DMA_BIDIRECTIONAL))
+		goto unmap_out;
+	flagsLength |= sg_dma_len(job->reply_payload.sg_list) + 4;
+	ioc->add_sge(psge, flagsLength,
+			sg_dma_address(job->reply_payload.sg_list));
 
 	INITIALIZE_MGMT_STATUS(ioc->sas_mgmt.status)
 	mpt_put_msg_frame(mptsasMgmtCtx, ioc, mf);
@@ -2310,10 +2328,10 @@ static int mptsas_smp_handler(struct Scsi_Host *shost, struct sas_rphy *rphy,
 		mpt_free_msg_frame(ioc, mf);
 		mf = NULL;
 		if (ioc->sas_mgmt.status & MPT_MGMT_STATUS_DID_IOCRESET)
-			goto unmap;
+			goto unmap_in;
 		if (!timeleft)
 			mpt_Soft_Hard_ResetHandler(ioc, CAN_SLEEP);
-		goto unmap;
+		goto unmap_in;
 	}
 	mf = NULL;
 
@@ -2321,23 +2339,22 @@ static int mptsas_smp_handler(struct Scsi_Host *shost, struct sas_rphy *rphy,
 		SmpPassthroughReply_t *smprep;
 
 		smprep = (SmpPassthroughReply_t *)ioc->sas_mgmt.reply;
-		memcpy(req->sense, smprep, sizeof(*smprep));
-		req->sense_len = sizeof(*smprep);
-		req->resid_len = 0;
-		rsp->resid_len -= smprep->ResponseDataLength;
+		memcpy(job->reply, smprep, sizeof(*smprep));
+		job->reply_len = sizeof(*smprep);
+		reslen = smprep->ResponseDataLength;
 	} else {
 		printk(MYIOC_s_ERR_FMT
 		    "%s: smp passthru reply failed to be returned\n",
 		    ioc->name, __func__);
 		ret = -ENXIO;
 	}
-unmap:
-	if (dma_addr_out)
-		pci_unmap_single(ioc->pcidev, dma_addr_out, blk_rq_bytes(req),
-				 PCI_DMA_BIDIRECTIONAL);
-	if (dma_addr_in)
-		pci_unmap_single(ioc->pcidev, dma_addr_in, blk_rq_bytes(rsp),
-				 PCI_DMA_BIDIRECTIONAL);
+
+unmap_in:
+	dma_unmap_sg(&ioc->pcidev->dev, job->reply_payload.sg_list, 1,
+			PCI_DMA_BIDIRECTIONAL);
+unmap_out:
+	dma_unmap_sg(&ioc->pcidev->dev, job->request_payload.sg_list, 1,
+			PCI_DMA_BIDIRECTIONAL);
 put_mf:
 	if (mf)
 		mpt_free_msg_frame(ioc, mf);
@@ -2345,7 +2362,7 @@ out_unlock:
 	CLEAR_MGMT_STATUS(ioc->sas_mgmt.status)
 	mutex_unlock(&ioc->sas_mgmt.mutex);
 out:
-	return ret;
+	bsg_job_done(job, ret, reslen);
 }
 
 static struct sas_function_template mptsas_transport_functions = {
@@ -2934,27 +2951,27 @@ mptsas_exp_repmanufacture_info(MPT_ADAPTER *ioc,
 	if (ioc->sas_mgmt.status & MPT_MGMT_STATUS_RF_VALID) {
 		u8 *tmp;
 
-	smprep = (SmpPassthroughReply_t *)ioc->sas_mgmt.reply;
-	if (le16_to_cpu(smprep->ResponseDataLength) !=
-		sizeof(struct rep_manu_reply))
+		smprep = (SmpPassthroughReply_t *)ioc->sas_mgmt.reply;
+		if (le16_to_cpu(smprep->ResponseDataLength) !=
+		    sizeof(struct rep_manu_reply))
 			goto out_free;
 
-	manufacture_reply = data_out + sizeof(struct rep_manu_request);
-	strncpy(edev->vendor_id, manufacture_reply->vendor_id,
-		SAS_EXPANDER_VENDOR_ID_LEN);
-	strncpy(edev->product_id, manufacture_reply->product_id,
-		SAS_EXPANDER_PRODUCT_ID_LEN);
-	strncpy(edev->product_rev, manufacture_reply->product_rev,
-		SAS_EXPANDER_PRODUCT_REV_LEN);
-	edev->level = manufacture_reply->sas_format;
-	if (manufacture_reply->sas_format) {
-		strncpy(edev->component_vendor_id,
-			manufacture_reply->component_vendor_id,
+		manufacture_reply = data_out + sizeof(struct rep_manu_request);
+		strncpy(edev->vendor_id, manufacture_reply->vendor_id,
+			SAS_EXPANDER_VENDOR_ID_LEN);
+		strncpy(edev->product_id, manufacture_reply->product_id,
+			SAS_EXPANDER_PRODUCT_ID_LEN);
+		strncpy(edev->product_rev, manufacture_reply->product_rev,
+			SAS_EXPANDER_PRODUCT_REV_LEN);
+		edev->level = manufacture_reply->sas_format;
+		if (manufacture_reply->sas_format) {
+			strncpy(edev->component_vendor_id,
+				manufacture_reply->component_vendor_id,
 				SAS_EXPANDER_COMPONENT_VENDOR_ID_LEN);
-		tmp = (u8 *)&manufacture_reply->component_id;
-		edev->component_id = tmp[0] << 8 | tmp[1];
-		edev->component_revision_id =
-			manufacture_reply->component_revision_id;
+			tmp = (u8 *)&manufacture_reply->component_id;
+			edev->component_id = tmp[0] << 8 | tmp[1];
+			edev->component_revision_id =
+				manufacture_reply->component_revision_id;
 		}
 	} else {
 		printk(MYIOC_s_ERR_FMT
@@ -2973,7 +2990,7 @@ out_unlock:
 	mutex_unlock(&ioc->sas_mgmt.mutex);
 out:
 	return ret;
- }
+}
 
 static void
 mptsas_parse_device_info(struct sas_identify *identify,
@@ -3423,14 +3440,12 @@ mptsas_expander_event_add(MPT_ADAPTER *ioc,
 	__le64 sas_address;
 
 	port_info = kzalloc(sizeof(struct mptsas_portinfo), GFP_KERNEL);
-	if (!port_info)
-		BUG();
+	BUG_ON(!port_info);
 	port_info->num_phys = (expander_data->NumPhys) ?
 	    expander_data->NumPhys : 1;
 	port_info->phy_info = kcalloc(port_info->num_phys,
 	    sizeof(struct mptsas_phyinfo), GFP_KERNEL);
-	if (!port_info->phy_info)
-		BUG();
+	BUG_ON(!port_info->phy_info);
 	memcpy(&sas_address, &expander_data->SASAddress, sizeof(__le64));
 	for (i = 0; i < port_info->num_phys; i++) {
 		port_info->phy_info[i].portinfo = port_info;
@@ -3762,7 +3777,7 @@ mptsas_send_link_status_event(struct fw_event_work *fw_event)
 						printk(MYIOC_s_DEBUG_FMT
 						"SDEV OUTSTANDING CMDS"
 						"%d\n", ioc->name,
-						atomic_read(&sdev->device_busy)));
+						scsi_device_busy(sdev)));
 				}
 
 			}
@@ -4325,13 +4340,14 @@ mptsas_hotplug_work(MPT_ADAPTER *ioc, struct fw_event_work *fw_event,
 			if (ioc->raid_data.pIocPg2->RaidVolume[i].VolumeID ==
 			    hot_plug_info->id) {
 				printk(MYIOC_s_WARN_FMT "firmware bug: unable "
-				    "to add hidden disk - target_id matchs "
+				    "to add hidden disk - target_id matches "
 				    "volume_id\n", ioc->name);
 				mptsas_free_fw_event(ioc, fw_event);
 				return;
 			}
 		}
 		mpt_findImVolumes(ioc);
+		fallthrough;
 
 	case MPTSAS_ADD_DEVICE:
 		memset(&sas_device, 0, sizeof(struct mptsas_devinfo));
@@ -4352,11 +4368,10 @@ mptsas_hotplug_work(MPT_ADAPTER *ioc, struct fw_event_work *fw_event,
 			return;
 
 		phy_info = mptsas_refreshing_device_handles(ioc, &sas_device);
-		/* Only For SATA Device ADD */
-		if (!phy_info && (sas_device.device_info &
-				MPI_SAS_DEVICE_INFO_SATA_DEVICE)) {
+		/* Device hot plug */
+		if (!phy_info) {
 			devtprintk(ioc, printk(MYIOC_s_DEBUG_FMT
-				"%s %d SATA HOT PLUG: "
+				"%s %d HOT PLUG: "
 				"parent handle of device %x\n", ioc->name,
 				__func__, __LINE__, sas_device.handle_parent));
 			port_info = mptsas_find_portinfo_by_handle(ioc,
@@ -4831,13 +4846,13 @@ mptsas_issue_tm(MPT_ADAPTER *ioc, u8 type, u8 channel, u8 id, u64 lun,
 }
 
 /**
- *	mptsas_broadcast_primative_work - Handle broadcast primitives
+ *	mptsas_broadcast_primitive_work - Handle broadcast primitives
  *	@work: work queue payload containing info describing the event
  *
  *	this will be handled in workqueue context.
  */
 static void
-mptsas_broadcast_primative_work(struct fw_event_work *fw_event)
+mptsas_broadcast_primitive_work(struct fw_event_work *fw_event)
 {
 	MPT_ADAPTER *ioc = fw_event->ioc;
 	MPT_FRAME_HDR	*mf;
@@ -5399,7 +5414,6 @@ mptsas_init(void)
 	    sas_attach_transport(&mptsas_transport_functions);
 	if (!mptsas_transport_template)
 		return -ENODEV;
-	mptsas_transport_template->eh_timed_out = mptsas_eh_timed_out;
 
 	mptsasDoneCtx = mpt_register(mptscsih_io_done, MPTSAS_DRIVER,
 	    "mptscsih_io_done");

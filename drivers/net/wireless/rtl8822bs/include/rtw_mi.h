@@ -139,8 +139,8 @@ u8 rtw_mi_buddy_netif_caron_qstart(_adapter *padapter);
 
 void rtw_mi_scan_abort(_adapter *adapter, bool bwait);
 void rtw_mi_buddy_scan_abort(_adapter *adapter, bool bwait);
-u32 rtw_mi_start_drv_threads(_adapter *adapter);
-u32 rtw_mi_buddy_start_drv_threads(_adapter *adapter);
+void rtw_mi_start_drv_threads(_adapter *adapter);
+void rtw_mi_buddy_start_drv_threads(_adapter *adapter);
 void rtw_mi_stop_drv_threads(_adapter *adapter);
 void rtw_mi_buddy_stop_drv_threads(_adapter *adapter);
 void rtw_mi_cancel_all_timer(_adapter *adapter);
@@ -168,6 +168,9 @@ void rtw_mi_buddy_set_scan_deny(_adapter *adapter, u32 ms);
 
 u8 rtw_mi_is_scan_deny(_adapter *adapter);
 u8 rtw_mi_buddy_is_scan_deny(_adapter *adapter);
+
+u8 rtw_mi_issue_nulldata(_adapter *padapter, unsigned char *da, unsigned int power_mode, int try_cnt, int wait_ms);
+u8 rtw_mi_buddy_issue_nulldata(_adapter *padapter, unsigned char *da, unsigned int power_mode, int try_cnt, int wait_ms);
 
 void rtw_mi_beacon_update(_adapter *padapter);
 void rtw_mi_buddy_beacon_update(_adapter *padapter);
@@ -277,5 +280,10 @@ _adapter *rtw_mi_get_ap_adapter(_adapter *padapter);
 #endif
 
 void rtw_mi_update_ap_bmc_camid(_adapter *padapter, u8 camid_a, u8 camid_b);
+
+#ifdef CONFIG_AP_MODE
+void rtw_mi_ap_acdata_control(_adapter *padapter, u8 power_mode);
+void rtw_mi_buddy_ap_acdata_control(_adapter *padapter, u8 power_mode);
+#endif /*CONFIG_AP_MODE*/
 
 #endif /*__RTW_MI_H_*/

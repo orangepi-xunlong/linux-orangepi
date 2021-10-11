@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *    Copyright IBM Corp. 1999,2013
  *
@@ -14,14 +15,6 @@
  * The bitop functions are defined to work on unsigned longs, so the bits
  * end up numbered:
  *   |63..............0|127............64|191...........128|255...........192|
- *
- * There are a few little-endian macros used mostly for filesystem
- * bitmaps, these work on similar bit array layouts, but byte-oriented:
- *   |7...0|15...8|23...16|31...24|39...32|47...40|55...48|63...56|
- *
- * The main difference is that bit 3-5 in the bit number field needs to be
- * reversed compared to the big-endian bit fields. This can be achieved by
- * XOR with 0x38.
  *
  * We also have special functions which work with an MSB0 encoding.
  * The bits are numbered:
@@ -42,61 +35,14 @@
 
 #include <linux/typecheck.h>
 #include <linux/compiler.h>
+#include <linux/types.h>
+#include <asm/atomic_ops.h>
 #include <asm/barrier.h>
-
-#define __BITOPS_NO_BARRIER	"\n"
-
-#ifdef CONFIG_HAVE_MARCH_Z196_FEATURES
-
-#define __BITOPS_OR		"laog"
-#define __BITOPS_AND		"lang"
-#define __BITOPS_XOR		"laxg"
-#define __BITOPS_BARRIER	"bcr	14,0\n"
-
-#define __BITOPS_LOOP(__addr, __val, __op_string, __barrier)	\
-({								\
-	unsigned long __old;					\
-								\
-	typecheck(unsigned long *, (__addr));			\
-	asm volatile(						\
-		__op_string "	%0,%2,%1\n"			\
-		__barrier					\
-		: "=d" (__old),	"+Q" (*(__addr))		\
-		: "d" (__val)					\
-		: "cc", "memory");				\
-	__old;							\
-})
-
-#else /* CONFIG_HAVE_MARCH_Z196_FEATURES */
-
-#define __BITOPS_OR		"ogr"
-#define __BITOPS_AND		"ngr"
-#define __BITOPS_XOR		"xgr"
-#define __BITOPS_BARRIER	"\n"
-
-#define __BITOPS_LOOP(__addr, __val, __op_string, __barrier)	\
-({								\
-	unsigned long __old, __new;				\
-								\
-	typecheck(unsigned long *, (__addr));			\
-	asm volatile(						\
-		"	lg	%0,%2\n"			\
-		"0:	lgr	%1,%0\n"			\
-		__op_string "	%1,%3\n"			\
-		"	csg	%0,%1,%2\n"			\
-		"	jl	0b"				\
-		: "=&d" (__old), "=&d" (__new), "+Q" (*(__addr))\
-		: "d" (__val)					\
-		: "cc", "memory");				\
-	__old;							\
-})
-
-#endif /* CONFIG_HAVE_MARCH_Z196_FEATURES */
 
 #define __BITOPS_WORDS(bits) (((bits) + BITS_PER_LONG - 1) / BITS_PER_LONG)
 
 static inline unsigned long *
-__bitops_word(unsigned long nr, volatile unsigned long *ptr)
+__bitops_word(unsigned long nr, const volatile unsigned long *ptr)
 {
 	unsigned long addr;
 
@@ -104,193 +50,165 @@ __bitops_word(unsigned long nr, volatile unsigned long *ptr)
 	return (unsigned long *)addr;
 }
 
-static inline unsigned char *
-__bitops_byte(unsigned long nr, volatile unsigned long *ptr)
+static inline unsigned long __bitops_mask(unsigned long nr)
 {
-	return ((unsigned char *)ptr) + ((nr ^ (BITS_PER_LONG - 8)) >> 3);
+	return 1UL << (nr & (BITS_PER_LONG - 1));
 }
 
-static inline void set_bit(unsigned long nr, volatile unsigned long *ptr)
-{
-	unsigned long *addr = __bitops_word(nr, ptr);
-	unsigned long mask;
-
-#ifdef CONFIG_HAVE_MARCH_ZEC12_FEATURES
-	if (__builtin_constant_p(nr)) {
-		unsigned char *caddr = __bitops_byte(nr, ptr);
-
-		asm volatile(
-			"oi	%0,%b1\n"
-			: "+Q" (*caddr)
-			: "i" (1 << (nr & 7))
-			: "cc", "memory");
-		return;
-	}
-#endif
-	mask = 1UL << (nr & (BITS_PER_LONG - 1));
-	__BITOPS_LOOP(addr, mask, __BITOPS_OR, __BITOPS_NO_BARRIER);
-}
-
-static inline void clear_bit(unsigned long nr, volatile unsigned long *ptr)
+static __always_inline void arch_set_bit(unsigned long nr, volatile unsigned long *ptr)
 {
 	unsigned long *addr = __bitops_word(nr, ptr);
-	unsigned long mask;
+	unsigned long mask = __bitops_mask(nr);
 
-#ifdef CONFIG_HAVE_MARCH_ZEC12_FEATURES
-	if (__builtin_constant_p(nr)) {
-		unsigned char *caddr = __bitops_byte(nr, ptr);
-
-		asm volatile(
-			"ni	%0,%b1\n"
-			: "+Q" (*caddr)
-			: "i" (~(1 << (nr & 7)))
-			: "cc", "memory");
-		return;
-	}
-#endif
-	mask = ~(1UL << (nr & (BITS_PER_LONG - 1)));
-	__BITOPS_LOOP(addr, mask, __BITOPS_AND, __BITOPS_NO_BARRIER);
+	__atomic64_or(mask, (long *)addr);
 }
 
-static inline void change_bit(unsigned long nr, volatile unsigned long *ptr)
+static __always_inline void arch_clear_bit(unsigned long nr, volatile unsigned long *ptr)
 {
 	unsigned long *addr = __bitops_word(nr, ptr);
-	unsigned long mask;
+	unsigned long mask = __bitops_mask(nr);
 
-#ifdef CONFIG_HAVE_MARCH_ZEC12_FEATURES
-	if (__builtin_constant_p(nr)) {
-		unsigned char *caddr = __bitops_byte(nr, ptr);
-
-		asm volatile(
-			"xi	%0,%b1\n"
-			: "+Q" (*caddr)
-			: "i" (1 << (nr & 7))
-			: "cc", "memory");
-		return;
-	}
-#endif
-	mask = 1UL << (nr & (BITS_PER_LONG - 1));
-	__BITOPS_LOOP(addr, mask, __BITOPS_XOR, __BITOPS_NO_BARRIER);
+	__atomic64_and(~mask, (long *)addr);
 }
 
-static inline int
-test_and_set_bit(unsigned long nr, volatile unsigned long *ptr)
+static __always_inline void arch_change_bit(unsigned long nr,
+					    volatile unsigned long *ptr)
 {
 	unsigned long *addr = __bitops_word(nr, ptr);
-	unsigned long old, mask;
+	unsigned long mask = __bitops_mask(nr);
 
-	mask = 1UL << (nr & (BITS_PER_LONG - 1));
-	old = __BITOPS_LOOP(addr, mask, __BITOPS_OR, __BITOPS_BARRIER);
-	return (old & mask) != 0;
+	__atomic64_xor(mask, (long *)addr);
 }
 
-static inline int
-test_and_clear_bit(unsigned long nr, volatile unsigned long *ptr)
+static inline bool arch_test_and_set_bit(unsigned long nr,
+					 volatile unsigned long *ptr)
 {
 	unsigned long *addr = __bitops_word(nr, ptr);
-	unsigned long old, mask;
+	unsigned long mask = __bitops_mask(nr);
+	unsigned long old;
 
-	mask = ~(1UL << (nr & (BITS_PER_LONG - 1)));
-	old = __BITOPS_LOOP(addr, mask, __BITOPS_AND, __BITOPS_BARRIER);
-	return (old & ~mask) != 0;
+	old = __atomic64_or_barrier(mask, (long *)addr);
+	return old & mask;
 }
 
-static inline int
-test_and_change_bit(unsigned long nr, volatile unsigned long *ptr)
+static inline bool arch_test_and_clear_bit(unsigned long nr,
+					   volatile unsigned long *ptr)
 {
 	unsigned long *addr = __bitops_word(nr, ptr);
-	unsigned long old, mask;
+	unsigned long mask = __bitops_mask(nr);
+	unsigned long old;
 
-	mask = 1UL << (nr & (BITS_PER_LONG - 1));
-	old = __BITOPS_LOOP(addr, mask, __BITOPS_XOR, __BITOPS_BARRIER);
-	return (old & mask) != 0;
+	old = __atomic64_and_barrier(~mask, (long *)addr);
+	return old & mask;
 }
 
-static inline void __set_bit(unsigned long nr, volatile unsigned long *ptr)
+static inline bool arch_test_and_change_bit(unsigned long nr,
+					    volatile unsigned long *ptr)
 {
-	unsigned char *addr = __bitops_byte(nr, ptr);
+	unsigned long *addr = __bitops_word(nr, ptr);
+	unsigned long mask = __bitops_mask(nr);
+	unsigned long old;
 
-	*addr |= 1 << (nr & 7);
+	old = __atomic64_xor_barrier(mask, (long *)addr);
+	return old & mask;
 }
 
-static inline void 
-__clear_bit(unsigned long nr, volatile unsigned long *ptr)
+static inline void arch___set_bit(unsigned long nr, volatile unsigned long *ptr)
 {
-	unsigned char *addr = __bitops_byte(nr, ptr);
+	unsigned long *addr = __bitops_word(nr, ptr);
+	unsigned long mask = __bitops_mask(nr);
 
-	*addr &= ~(1 << (nr & 7));
+	*addr |= mask;
 }
 
-static inline void __change_bit(unsigned long nr, volatile unsigned long *ptr)
-{
-	unsigned char *addr = __bitops_byte(nr, ptr);
-
-	*addr ^= 1 << (nr & 7);
-}
-
-static inline int
-__test_and_set_bit(unsigned long nr, volatile unsigned long *ptr)
-{
-	unsigned char *addr = __bitops_byte(nr, ptr);
-	unsigned char ch;
-
-	ch = *addr;
-	*addr |= 1 << (nr & 7);
-	return (ch >> (nr & 7)) & 1;
-}
-
-static inline int
-__test_and_clear_bit(unsigned long nr, volatile unsigned long *ptr)
-{
-	unsigned char *addr = __bitops_byte(nr, ptr);
-	unsigned char ch;
-
-	ch = *addr;
-	*addr &= ~(1 << (nr & 7));
-	return (ch >> (nr & 7)) & 1;
-}
-
-static inline int
-__test_and_change_bit(unsigned long nr, volatile unsigned long *ptr)
-{
-	unsigned char *addr = __bitops_byte(nr, ptr);
-	unsigned char ch;
-
-	ch = *addr;
-	*addr ^= 1 << (nr & 7);
-	return (ch >> (nr & 7)) & 1;
-}
-
-static inline int test_bit(unsigned long nr, const volatile unsigned long *ptr)
-{
-	const volatile unsigned char *addr;
-
-	addr = ((const volatile unsigned char *)ptr);
-	addr += (nr ^ (BITS_PER_LONG - 8)) >> 3;
-	return (*addr >> (nr & 7)) & 1;
-}
-
-static inline int test_and_set_bit_lock(unsigned long nr,
-					volatile unsigned long *ptr)
-{
-	if (test_bit(nr, ptr))
-		return 1;
-	return test_and_set_bit(nr, ptr);
-}
-
-static inline void clear_bit_unlock(unsigned long nr,
+static inline void arch___clear_bit(unsigned long nr,
 				    volatile unsigned long *ptr)
 {
-	smp_mb__before_atomic();
-	clear_bit(nr, ptr);
+	unsigned long *addr = __bitops_word(nr, ptr);
+	unsigned long mask = __bitops_mask(nr);
+
+	*addr &= ~mask;
 }
 
-static inline void __clear_bit_unlock(unsigned long nr,
-				      volatile unsigned long *ptr)
+static inline void arch___change_bit(unsigned long nr,
+				     volatile unsigned long *ptr)
+{
+	unsigned long *addr = __bitops_word(nr, ptr);
+	unsigned long mask = __bitops_mask(nr);
+
+	*addr ^= mask;
+}
+
+static inline bool arch___test_and_set_bit(unsigned long nr,
+					   volatile unsigned long *ptr)
+{
+	unsigned long *addr = __bitops_word(nr, ptr);
+	unsigned long mask = __bitops_mask(nr);
+	unsigned long old;
+
+	old = *addr;
+	*addr |= mask;
+	return old & mask;
+}
+
+static inline bool arch___test_and_clear_bit(unsigned long nr,
+					     volatile unsigned long *ptr)
+{
+	unsigned long *addr = __bitops_word(nr, ptr);
+	unsigned long mask = __bitops_mask(nr);
+	unsigned long old;
+
+	old = *addr;
+	*addr &= ~mask;
+	return old & mask;
+}
+
+static inline bool arch___test_and_change_bit(unsigned long nr,
+					      volatile unsigned long *ptr)
+{
+	unsigned long *addr = __bitops_word(nr, ptr);
+	unsigned long mask = __bitops_mask(nr);
+	unsigned long old;
+
+	old = *addr;
+	*addr ^= mask;
+	return old & mask;
+}
+
+static inline bool arch_test_bit(unsigned long nr,
+				 const volatile unsigned long *ptr)
+{
+	const volatile unsigned long *addr = __bitops_word(nr, ptr);
+	unsigned long mask = __bitops_mask(nr);
+
+	return *addr & mask;
+}
+
+static inline bool arch_test_and_set_bit_lock(unsigned long nr,
+					      volatile unsigned long *ptr)
+{
+	if (arch_test_bit(nr, ptr))
+		return 1;
+	return arch_test_and_set_bit(nr, ptr);
+}
+
+static inline void arch_clear_bit_unlock(unsigned long nr,
+					 volatile unsigned long *ptr)
+{
+	smp_mb__before_atomic();
+	arch_clear_bit(nr, ptr);
+}
+
+static inline void arch___clear_bit_unlock(unsigned long nr,
+					   volatile unsigned long *ptr)
 {
 	smp_mb();
-	__clear_bit(nr, ptr);
+	arch___clear_bit(nr, ptr);
 }
+
+#include <asm-generic/bitops/instrumented-atomic.h>
+#include <asm-generic/bitops/instrumented-non-atomic.h>
+#include <asm-generic/bitops/instrumented-lock.h>
 
 /*
  * Functions which use MSB0 bit numbering.
@@ -301,6 +219,11 @@ unsigned long find_first_bit_inv(const unsigned long *addr, unsigned long size);
 unsigned long find_next_bit_inv(const unsigned long *addr, unsigned long size,
 				unsigned long offset);
 
+#define for_each_set_bit_inv(bit, addr, size)				\
+	for ((bit) = find_first_bit_inv((addr), (size));		\
+	     (bit) < (size);						\
+	     (bit) = find_next_bit_inv((addr), (size), (bit) + 1))
+
 static inline void set_bit_inv(unsigned long nr, volatile unsigned long *ptr)
 {
 	return set_bit(nr ^ (BITS_PER_LONG - 1), ptr);
@@ -309,6 +232,12 @@ static inline void set_bit_inv(unsigned long nr, volatile unsigned long *ptr)
 static inline void clear_bit_inv(unsigned long nr, volatile unsigned long *ptr)
 {
 	return clear_bit(nr ^ (BITS_PER_LONG - 1), ptr);
+}
+
+static inline bool test_and_clear_bit_inv(unsigned long nr,
+					  volatile unsigned long *ptr)
+{
+	return test_and_clear_bit(nr ^ (BITS_PER_LONG - 1), ptr);
 }
 
 static inline void __set_bit_inv(unsigned long nr, volatile unsigned long *ptr)
@@ -321,8 +250,8 @@ static inline void __clear_bit_inv(unsigned long nr, volatile unsigned long *ptr
 	return __clear_bit(nr ^ (BITS_PER_LONG - 1), ptr);
 }
 
-static inline int test_bit_inv(unsigned long nr,
-			       const volatile unsigned long *ptr)
+static inline bool test_bit_inv(unsigned long nr,
+				const volatile unsigned long *ptr)
 {
 	return test_bit(nr ^ (BITS_PER_LONG - 1), ptr);
 }
@@ -442,9 +371,9 @@ static inline int fls64(unsigned long word)
  * This is defined the same way as ffs.
  * Note fls(0) = 0, fls(1) = 1, fls(0x80000000) = 32.
  */
-static inline int fls(int word)
+static inline int fls(unsigned int word)
 {
-	return fls64((unsigned int)word);
+	return fls64(word);
 }
 
 #else /* CONFIG_HAVE_MARCH_Z9_109_FEATURES */

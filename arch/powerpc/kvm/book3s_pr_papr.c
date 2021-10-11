@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2011. Freescale Inc. All rights reserved.
  *
@@ -9,15 +10,11 @@
  *
  * Hypercall handling for running PAPR guests in PR KVM on Book 3S
  * processors.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation.
  */
 
 #include <linux/anon_inodes.h>
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/kvm_ppc.h>
 #include <asm/kvm_book3s.h>
 
@@ -262,20 +259,6 @@ static int kvmppc_h_pr_protect(struct kvm_vcpu *vcpu)
 	return EMULATE_DONE;
 }
 
-static int kvmppc_h_pr_put_tce(struct kvm_vcpu *vcpu)
-{
-	unsigned long liobn = kvmppc_get_gpr(vcpu, 4);
-	unsigned long ioba = kvmppc_get_gpr(vcpu, 5);
-	unsigned long tce = kvmppc_get_gpr(vcpu, 6);
-	long rc;
-
-	rc = kvmppc_h_put_tce(vcpu, liobn, ioba, tce);
-	if (rc == H_TOO_HARD)
-		return EMULATE_FAIL;
-	kvmppc_set_gpr(vcpu, 3, rc);
-	return EMULATE_DONE;
-}
-
 static int kvmppc_h_pr_logical_ci_load(struct kvm_vcpu *vcpu)
 {
 	long rc;
@@ -292,6 +275,21 @@ static int kvmppc_h_pr_logical_ci_store(struct kvm_vcpu *vcpu)
 	long rc;
 
 	rc = kvmppc_h_logical_ci_store(vcpu);
+	if (rc == H_TOO_HARD)
+		return EMULATE_FAIL;
+	kvmppc_set_gpr(vcpu, 3, rc);
+	return EMULATE_DONE;
+}
+
+#ifdef CONFIG_SPAPR_TCE_IOMMU
+static int kvmppc_h_pr_put_tce(struct kvm_vcpu *vcpu)
+{
+	unsigned long liobn = kvmppc_get_gpr(vcpu, 4);
+	unsigned long ioba = kvmppc_get_gpr(vcpu, 5);
+	unsigned long tce = kvmppc_get_gpr(vcpu, 6);
+	long rc;
+
+	rc = kvmppc_h_put_tce(vcpu, liobn, ioba, tce);
 	if (rc == H_TOO_HARD)
 		return EMULATE_FAIL;
 	kvmppc_set_gpr(vcpu, 3, rc);
@@ -329,6 +327,23 @@ static int kvmppc_h_pr_stuff_tce(struct kvm_vcpu *vcpu)
 	return EMULATE_DONE;
 }
 
+#else /* CONFIG_SPAPR_TCE_IOMMU */
+static int kvmppc_h_pr_put_tce(struct kvm_vcpu *vcpu)
+{
+	return EMULATE_FAIL;
+}
+
+static int kvmppc_h_pr_put_tce_indirect(struct kvm_vcpu *vcpu)
+{
+	return EMULATE_FAIL;
+}
+
+static int kvmppc_h_pr_stuff_tce(struct kvm_vcpu *vcpu)
+{
+	return EMULATE_FAIL;
+}
+#endif /* CONFIG_SPAPR_TCE_IOMMU */
+
 static int kvmppc_h_pr_xics_hcall(struct kvm_vcpu *vcpu, u32 cmd)
 {
 	long rc = kvmppc_xics_hcall(vcpu, cmd);
@@ -362,7 +377,7 @@ int kvmppc_h_pr(struct kvm_vcpu *vcpu, unsigned long cmd)
 	case H_CEDE:
 		kvmppc_set_msr_fast(vcpu, kvmppc_get_msr(vcpu) | MSR_EE);
 		kvm_vcpu_block(vcpu);
-		clear_bit(KVM_REQ_UNHALT, &vcpu->requests);
+		kvm_clear_request(KVM_REQ_UNHALT, vcpu);
 		vcpu->stat.halt_wakeup++;
 		return EMULATE_DONE;
 	case H_LOGICAL_CI_LOAD:
@@ -401,6 +416,8 @@ int kvmppc_hcall_impl_pr(unsigned long cmd)
 	case H_PROTECT:
 	case H_BULK_REMOVE:
 	case H_PUT_TCE:
+	case H_PUT_TCE_INDIRECT:
+	case H_STUFF_TCE:
 	case H_CEDE:
 	case H_LOGICAL_CI_LOAD:
 	case H_LOGICAL_CI_STORE:

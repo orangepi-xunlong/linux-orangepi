@@ -216,7 +216,7 @@ void sd_c2h_hisr_hdl(_adapter *adapter)
 
 	if (rtw_hal_c2h_reg_hdr_parse(adapter, c2h_evt, &id, &seq, &plen, &payload) != _SUCCESS)
 		goto exit;
-
+		
 	if (rtw_hal_c2h_id_handle_directly(adapter, id, seq, plen, payload)) {
 		/* Handle directly */
 		rtw_hal_c2h_handler(adapter, id, seq, plen, payload);

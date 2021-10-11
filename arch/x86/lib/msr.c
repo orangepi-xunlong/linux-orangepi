@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/export.h>
 #include <linux/percpu.h>
 #include <linux/preempt.h>
@@ -35,7 +36,7 @@ EXPORT_SYMBOL(msrs_free);
  * argument @m.
  *
  */
-int msr_read(u32 msr, struct msr *m)
+static int msr_read(u32 msr, struct msr *m)
 {
 	int err;
 	u64 val;
@@ -53,7 +54,7 @@ int msr_read(u32 msr, struct msr *m)
  * @msr: MSR to write
  * @m: value to write
  */
-int msr_write(u32 msr, struct msr *m)
+static int msr_write(u32 msr, struct msr *m)
 {
 	return wrmsrl_safe(msr, m->q);
 }
@@ -113,14 +114,14 @@ int msr_clear_bit(u32 msr, u8 bit)
 }
 
 #ifdef CONFIG_TRACEPOINTS
-void do_trace_write_msr(unsigned msr, u64 val, int failed)
+void do_trace_write_msr(unsigned int msr, u64 val, int failed)
 {
 	trace_write_msr(msr, val, failed);
 }
 EXPORT_SYMBOL(do_trace_write_msr);
 EXPORT_TRACEPOINT_SYMBOL(write_msr);
 
-void do_trace_read_msr(unsigned msr, u64 val, int failed)
+void do_trace_read_msr(unsigned int msr, u64 val, int failed)
 {
 	trace_read_msr(msr, val, failed);
 }

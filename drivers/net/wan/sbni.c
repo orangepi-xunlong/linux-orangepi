@@ -63,7 +63,7 @@
 #include <asm/types.h>
 #include <asm/byteorder.h>
 #include <asm/irq.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include "sbni.h"
 
@@ -71,6 +71,7 @@
 
 struct net_local {
 	struct timer_list	watchdog;
+	struct net_device	*watchdog_dev;
 
 	spinlock_t	lock;
 	struct sk_buff  *rx_buf_p;		/* receive buffer ptr */
@@ -128,7 +129,7 @@ static void  send_frame( struct net_device * );
 static int   upload_data( struct net_device *,
 			  unsigned, unsigned, unsigned, u32 );
 static void  download_data( struct net_device *, u32 * );
-static void  sbni_watchdog( unsigned long );
+static void  sbni_watchdog(struct timer_list *);
 static void  interpret_ack( struct net_device *, unsigned );
 static int   append_frame_to_pkt( struct net_device *, unsigned, u32 );
 static void  indicate_pkt( struct net_device * );
@@ -211,7 +212,6 @@ static const struct net_device_ops sbni_netdev_ops = {
 	.ndo_start_xmit		= sbni_start_xmit,
 	.ndo_set_rx_mode	= set_multicast_list,
 	.ndo_do_ioctl		= sbni_ioctl,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -260,11 +260,12 @@ static int __init sbni_init(struct net_device *dev)
 		return  sbni_isa_probe( dev );
 	/* otherwise we have to perform search our adapter */
 
-	if( io[ num ] != -1 )
-		dev->base_addr	= io[ num ],
+	if( io[ num ] != -1 ) {
+		dev->base_addr	= io[ num ];
 		dev->irq	= irq[ num ];
-	else if( scandone  ||  io[ 0 ] != -1 )
+	} else if( scandone  ||  io[ 0 ] != -1 ) {
 		return  -ENODEV;
+	}
 
 	/* if io[ num ] contains non-zero address, then that is on ISA bus */
 	if( dev->base_addr )
@@ -399,12 +400,13 @@ sbni_probe1( struct net_device  *dev,  unsigned long  ioaddr,  int  irq )
 	nl->maxframe  = DEFAULT_FRAME_LEN;
 	nl->csr1.rate = baud[ num ];
 
-	if( (nl->cur_rxl_index = rxl[ num ]) == -1 )
+	if( (nl->cur_rxl_index = rxl[ num ]) == -1 ) {
 		/* autotune rxl */
-		nl->cur_rxl_index = DEF_RXL,
+		nl->cur_rxl_index = DEF_RXL;
 		nl->delta_rxl = DEF_RXL_DELTA;
-	else
+	} else {
 		nl->delta_rxl = 0;
+	}
 	nl->csr1.rxl  = rxl_tab[ nl->cur_rxl_index ];
 	if( inb( ioaddr + CSR0 ) & 0x01 )
 		nl->state |= FL_SLOW_MODE;
@@ -512,13 +514,15 @@ sbni_interrupt( int  irq,  void  *dev_id )
 
 	do {
 		repeat = 0;
-		if( inb( dev->base_addr + CSR0 ) & (RC_RDY | TR_RDY) )
-			handle_channel( dev ),
+		if( inb( dev->base_addr + CSR0 ) & (RC_RDY | TR_RDY) ) {
+			handle_channel( dev );
 			repeat = 1;
+		}
 		if( nl->second  && 	/* second channel present */
-		    (inb( nl->second->base_addr+CSR0 ) & (RC_RDY | TR_RDY)) )
-			handle_channel( nl->second ),
+		    (inb( nl->second->base_addr+CSR0 ) & (RC_RDY | TR_RDY)) ) {
+			handle_channel( nl->second );
 			repeat = 1;
+		}
 	} while( repeat );
 
 	if( nl->second )
@@ -610,11 +614,12 @@ recv_frame( struct net_device  *dev )
 		nl->state |= FL_PREV_OK;
 		if( framelen > 4 )
 			nl->in_stats.all_rx_number++;
-	} else
-		nl->state &= ~FL_PREV_OK,
-		change_level( dev ),
-		nl->in_stats.all_rx_number++,
+	} else {
+		nl->state &= ~FL_PREV_OK;
+		change_level( dev );
+		nl->in_stats.all_rx_number++;
 		nl->in_stats.bad_rx_number++;
+	}
 
 	return  !frame_ok  ||  framelen > 4;
 }
@@ -689,9 +694,10 @@ download_data( struct net_device  *dev,  u32  *crc_p )
 	*crc_p = calc_crc32( *crc_p, skb->data + nl->outpos, len );
 
 	/* if packet too short we should write some more bytes to pad */
-	for( len = nl->framelen - len;  len--; )
-		outb( 0, dev->base_addr + DAT ),
+	for( len = nl->framelen - len;  len--; ) {
+		outb( 0, dev->base_addr + DAT );
 		*crc_p = CRC32( 0, *crc_p );
+	}
 }
 
 
@@ -703,9 +709,10 @@ upload_data( struct net_device  *dev,  unsigned  framelen,  unsigned  frameno,
 
 	int  frame_ok;
 
-	if( is_first )
-		nl->wait_frameno = frameno,
+	if( is_first ) {
+		nl->wait_frameno = frameno;
 		nl->inppos = 0;
+	}
 
 	if( nl->wait_frameno == frameno ) {
 
@@ -717,33 +724,35 @@ upload_data( struct net_device  *dev,  unsigned  framelen,  unsigned  frameno,
 		 * error was occurred... drop entire packet
 		 */
 		else if( (frame_ok = skip_tail( dev->base_addr, framelen, crc ))
-			 != 0 )
-			nl->wait_frameno = 0,
-			nl->inppos = 0,
+			 != 0 ) {
+			nl->wait_frameno = 0;
+			nl->inppos = 0;
 #ifdef CONFIG_SBNI_MULTILINE
-			nl->master->stats.rx_errors++,
+			nl->master->stats.rx_errors++;
 			nl->master->stats.rx_missed_errors++;
 #else
-		        dev->stats.rx_errors++,
+		        dev->stats.rx_errors++;
 			dev->stats.rx_missed_errors++;
 #endif
+		}
 			/* now skip all frames until is_first != 0 */
 	} else
 		frame_ok = skip_tail( dev->base_addr, framelen, crc );
 
-	if( is_first  &&  !frame_ok )
+	if( is_first  &&  !frame_ok ) {
 		/*
 		 * Frame has been broken, but we had already stored
 		 * is_first... Drop entire packet.
 		 */
-		nl->wait_frameno = 0,
+		nl->wait_frameno = 0;
 #ifdef CONFIG_SBNI_MULTILINE
-		nl->master->stats.rx_errors++,
+		nl->master->stats.rx_errors++;
 		nl->master->stats.rx_crc_errors++;
 #else
-		dev->stats.rx_errors++,
+		dev->stats.rx_errors++;
 		dev->stats.rx_crc_errors++;
 #endif
+	}
 
 	return  frame_ok;
 }
@@ -761,7 +770,7 @@ send_complete( struct net_device *dev )
 	dev->stats.tx_packets++;
 	dev->stats.tx_bytes += nl->tx_buf_p->len;
 #endif
-	dev_kfree_skb_irq( nl->tx_buf_p );
+	dev_consume_skb_irq(nl->tx_buf_p);
 
 	nl->tx_buf_p = NULL;
 
@@ -782,17 +791,18 @@ interpret_ack( struct net_device  *dev,  unsigned  ack )
 		if( nl->state & FL_WAIT_ACK ) {
 			nl->outpos += nl->framelen;
 
-			if( --nl->tx_frameno )
+			if( --nl->tx_frameno ) {
 				nl->framelen = min_t(unsigned int,
 						   nl->maxframe,
 						   nl->tx_buf_p->len - nl->outpos);
-			else
-				send_complete( dev ),
+			} else {
+				send_complete( dev );
 #ifdef CONFIG_SBNI_MULTILINE
 				netif_wake_queue( nl->master );
 #else
 				netif_wake_queue( dev );
 #endif
+			}
 		}
 	}
 
@@ -872,16 +882,17 @@ drop_xmit_queue( struct net_device  *dev )
 {
 	struct net_local  *nl = netdev_priv(dev);
 
-	if( nl->tx_buf_p )
-		dev_kfree_skb_any( nl->tx_buf_p ),
-		nl->tx_buf_p = NULL,
+	if( nl->tx_buf_p ) {
+		dev_kfree_skb_any( nl->tx_buf_p );
+		nl->tx_buf_p = NULL;
 #ifdef CONFIG_SBNI_MULTILINE
-		nl->master->stats.tx_errors++,
+		nl->master->stats.tx_errors++;
 		nl->master->stats.tx_carrier_errors++;
 #else
-		dev->stats.tx_errors++,
+		dev->stats.tx_errors++;
 		dev->stats.tx_carrier_errors++;
 #endif
+	}
 
 	nl->tx_frameno	= 0;
 	nl->framelen	= 0;
@@ -1030,11 +1041,10 @@ indicate_pkt( struct net_device  *dev )
  */
 
 static void
-sbni_watchdog( unsigned long  arg )
+sbni_watchdog(struct timer_list *t)
 {
-	struct net_device  *dev = (struct net_device *) arg;
-	struct net_local   *nl  = netdev_priv(dev);
-	struct timer_list  *w   = &nl->watchdog; 
+	struct net_local   *nl  = from_timer(nl, t, watchdog);
+	struct net_device  *dev = nl->watchdog_dev;
 	unsigned long	   flags;
 	unsigned char	   csr0;
 
@@ -1061,11 +1071,7 @@ sbni_watchdog( unsigned long  arg )
 
 	outb( csr0 | RC_CHK, dev->base_addr + CSR0 ); 
 
-	init_timer( w );
-	w->expires	= jiffies + SBNI_TIMEOUT;
-	w->data		= arg;
-	w->function	= sbni_watchdog;
-	add_timer( w );
+	mod_timer(t, jiffies + SBNI_TIMEOUT);
 
 	spin_unlock_irqrestore( &nl->lock, flags );
 }
@@ -1196,10 +1202,9 @@ handler_attached:
 	netif_start_queue( dev );
 
 	/* set timer watchdog */
-	init_timer( w );
+	nl->watchdog_dev = dev;
+	timer_setup(w, sbni_watchdog, 0);
 	w->expires	= jiffies + SBNI_TIMEOUT;
-	w->data		= (unsigned long) dev;
-	w->function	= sbni_watchdog;
 	add_timer( w );
    
 	spin_unlock( &nl->lock );
@@ -1333,12 +1338,13 @@ sbni_ioctl( struct net_device  *dev,  struct ifreq  *ifr,  int  cmd )
 
 		spin_lock( &nl->lock );
 		flags = *(struct sbni_flags*) &ifr->ifr_ifru;
-		if( flags.fixed_rxl )
-			nl->delta_rxl = 0,
+		if( flags.fixed_rxl ) {
+			nl->delta_rxl = 0;
 			nl->cur_rxl_index = flags.rxl;
-		else
-			nl->delta_rxl = DEF_RXL_DELTA,
+		} else {
+			nl->delta_rxl = DEF_RXL_DELTA;
 			nl->cur_rxl_index = DEF_RXL;
+		}
 
 		nl->csr1.rxl = rxl_tab[ nl->cur_rxl_index ];
 		nl->csr1.rate = flags.rate;
@@ -1464,8 +1470,8 @@ set_multicast_list( struct net_device  *dev )
 
 
 #ifdef MODULE
-module_param_array(io, int, NULL, 0);
-module_param_array(irq, int, NULL, 0);
+module_param_hw_array(io, int, ioport, NULL, 0);
+module_param_hw_array(irq, int, irq, NULL, 0);
 module_param_array(baud, int, NULL, 0);
 module_param_array(rxl, int, NULL, 0);
 module_param_array(mac, int, NULL, 0);
@@ -1529,16 +1535,19 @@ sbni_setup( char  *p )
 		goto  bad_param;
 
 	for( n = 0, parm = 0;  *p  &&  n < 8; ) {
-		(*dest[ parm ])[ n ] = simple_strtol( p, &p, 0 );
+		(*dest[ parm ])[ n ] = simple_strtoul( p, &p, 0 );
 		if( !*p  ||  *p == ')' )
 			return 1;
-		if( *p == ';' )
-			++p, ++n, parm = 0;
-		else if( *p++ != ',' )
+		if( *p == ';' ) {
+			++p;
+			++n;
+			parm = 0;
+		} else if( *p++ != ',' ) {
 			break;
-		else
+		} else {
 			if( ++parm >= 5 )
 				break;
+		}
 	}
 bad_param:
 	pr_err("Error in sbni kernel parameter!\n");
