@@ -163,12 +163,6 @@ config ARCH_MEDIATEK
 	  This enables support for MediaTek MT27xx, MT65xx, MT76xx
 	  & MT81xx ARMv8 SoCs
 
-config SUNXI_SOC_NAME
-        string "The name of SUNXI SoC"
-        default ""
-        help
-          Used for /sysfs/.../sysinfo.
-
 config ARCH_MESON
 	bool "Amlogic Platforms"
 	select COMMON_CLK

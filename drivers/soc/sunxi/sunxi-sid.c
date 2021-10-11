@@ -32,6 +32,8 @@
 #define SUNXI_SECURITY_SUPPORT	1
 //#endif
 
+#define CONFIG_SUNXI_SOC_NAME "sun50iw9"
+
 #define SUNXI_VER_MAX_NUM	8
 struct soc_ver_map {
 	u32 id;
