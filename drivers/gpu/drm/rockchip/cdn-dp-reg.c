@@ -181,7 +181,7 @@ static int cdn_dp_mailbox_send(struct cdn_dp_device *dp, u8 module_id,
 	return 0;
 }
 
-static int cdn_dp_reg_write(struct cdn_dp_device *dp, u16 addr, u32 val)
+int cdn_dp_reg_write(struct cdn_dp_device *dp, u16 addr, u32 val)
 {
 	u8 msg[6];
 
@@ -588,7 +588,7 @@ static int cdn_dp_get_training_status(struct cdn_dp_device *dp)
 	if (ret)
 		goto err_get_training_status;
 
-	dp->max_rate = drm_dp_bw_code_to_link_rate(status[0]);
+	dp->max_rate = status[0];
 	dp->max_lanes = status[1];
 
 err_get_training_status:
@@ -601,6 +601,31 @@ int cdn_dp_train_link(struct cdn_dp_device *dp)
 {
 	int ret;
 
+	/*
+	 * DP firmware uses fixed phy config values to do training, but some
+	 * boards need to adjust these values to fit for their unique hardware
+	 * design. So if the phy is using custom config values, do software
+	 * link training instead of relying on firmware, if software training
+	 * fail, keep firmware training as a fallback if sw training fails.
+	 */
+	ret = cdn_dp_software_train_link(dp);
+	if (ret) {
+		DRM_DEV_ERROR(dp->dev,
+			"Failed to do software training %d\n", ret);
+		goto do_fw_training;
+	}
+	ret = cdn_dp_reg_write(dp, SOURCE_HDTX_CAR, 0xf);
+	if (ret) {
+		DRM_DEV_ERROR(dp->dev,
+			"Failed to write SOURCE_HDTX_CAR register %d\n", ret);
+		goto do_fw_training;
+	}
+	dp->use_fw_training = false;
+	return 0;
+
+do_fw_training:
+	dp->use_fw_training = true;
+	DRM_DEV_DEBUG_KMS(dp->dev, "use fw training\n");
 	ret = cdn_dp_training_start(dp);
 	if (ret) {
 		DRM_DEV_ERROR(dp->dev, "Failed to start training %d\n", ret);
@@ -692,7 +717,7 @@ int cdn_dp_config_video(struct cdn_dp_device *dp)
 	bit_per_pix = (video->color_fmt == YCBCR_4_2_2) ?
 		      (video->color_depth * 2) : (video->color_depth * 3);
 
-	link_rate = dp->max_rate / 1000;
+	link_rate = drm_dp_bw_code_to_link_rate(dp->max_rate) / 1000;
 
 	ret = cdn_dp_reg_write(dp, BND_HSYNC2VSYNC, VIF_BYPASS_INTERLACE);
 	if (ret)
