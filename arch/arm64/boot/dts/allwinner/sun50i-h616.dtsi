@@ -1001,6 +1001,11 @@
 			reg = <0x0 0x03001000 0x0 0x0f20>;
 			status = "okay";
 		};
+
+		sunxi-info {
+			compatible = "allwinner,sun50i-h616-sys-info";
+			status = "okay";
+		};
 	};
 
 	thermal-zones {

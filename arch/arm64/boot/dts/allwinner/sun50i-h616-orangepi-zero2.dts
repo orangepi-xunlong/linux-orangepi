@@ -36,18 +36,6 @@
 		};
 	};
 
-	sram_ctrl {
-		device_type = "sram_ctrl";
-		compatible = "allwinner,sram_ctrl";
-		reg = <0x0 0x3000000 0x0 0x100>;
-	};
-
-	sunxi-chipid@03006200 {
-		compatible = "allwinner,sunxi-chipid";
-		device_type = "chipid";
-		reg = <0x0 0x3006200 0x0 0x200>;
-	};
-
 	leds {
 		compatible = "gpio-leds";
 
