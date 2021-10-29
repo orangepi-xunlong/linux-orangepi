@@ -550,7 +550,7 @@ u8 rtw_btcoex_btinfo_cmd(_adapter *adapter, u8 *buf, u16 len)
 	pdrvextra_cmd_parm->size = len;
 	pdrvextra_cmd_parm->pbuf = btinfo;
 
-	_rtw_memcpy(btinfo, buf, len);
+	memcpy(btinfo, buf, len);
 
 	init_h2fwcmd_w_parm_no_rsp(ph2c, pdrvextra_cmd_parm, GEN_CMD_CODE(_Set_Drv_Extra));
 
@@ -624,7 +624,7 @@ u8 rtw_btcoex_parse_BT_info_notify_cmd(_adapter *padapter, u8 *pcmd, u16 cmdlen)
 	RTW_INFO("%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n"
 		,pcmd[4],pcmd[5],pcmd[6],pcmd[7],pcmd[8],pcmd[9],pcmd[10],pcmd[11]);*/
 
-	_rtw_memset(btinfo, 0, BT_INFO_LENGTH);
+	memset(btinfo, 0, BT_INFO_LENGTH);
 
 #if 1
 	if (BT_INFO_LENGTH != btInfoLen) {
@@ -635,7 +635,7 @@ u8 rtw_btcoex_parse_BT_info_notify_cmd(_adapter *padapter, u8 *pcmd, u16 cmdlen)
 #endif
 	{
 		if (0x1 == btInfoReason || 0x2 == btInfoReason) {
-			_rtw_memcpy(btinfo, &pcmd[4], btInfoLen);
+			memcpy(btinfo, &pcmd[4], btInfoLen);
 			btinfo[0] = btInfoReason;
 			rtw_btcoex_btinfo_cmd(padapter, btinfo, btInfoLen);
 		} else
@@ -1322,8 +1322,8 @@ void rtw_btcoex_recvmsgbysocket(void *data)
 
 		/*important: cut the udp header from skb->data! header length is 8 byte*/
 		recv_length = skb->len - 8;
-		_rtw_memset(recv_data, 0, sizeof(recv_data));
-		_rtw_memcpy(recv_data, skb->data + 8, recv_length);
+		memset(recv_data, 0, sizeof(recv_data));
+		memcpy(recv_data, skb->data + 8, recv_length);
 
 		parse_res = rtw_btcoex_parse_recv_data(recv_data, recv_length);
 #if 0
@@ -1516,12 +1516,12 @@ u8 rtw_btcoex_create_kernel_socket(_adapter *padapter)
 		RTW_INFO("Error during creation of socket error:%d\n", kernel_socket_err);
 		status = _FAIL;
 	} else {
-		_rtw_memset(&(pcoex_info->wifi_sockaddr), 0, sizeof(pcoex_info->wifi_sockaddr));
+		memset(&(pcoex_info->wifi_sockaddr), 0, sizeof(pcoex_info->wifi_sockaddr));
 		pcoex_info->wifi_sockaddr.sin_family = AF_INET;
 		pcoex_info->wifi_sockaddr.sin_port = htons(CONNECT_PORT);
 		pcoex_info->wifi_sockaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
-		_rtw_memset(&(pcoex_info->bt_sockaddr), 0, sizeof(pcoex_info->bt_sockaddr));
+		memset(&(pcoex_info->bt_sockaddr), 0, sizeof(pcoex_info->bt_sockaddr));
 		pcoex_info->bt_sockaddr.sin_family = AF_INET;
 		pcoex_info->bt_sockaddr.sin_port = htons(CONNECT_PORT_BT);
 		pcoex_info->bt_sockaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -1570,7 +1570,7 @@ void rtw_btcoex_init_socket(_adapter *padapter)
 	struct bt_coex_info *pcoex_info = &padapter->coex_info;
 	RTW_INFO("%s\n", __func__);
 	if (_FALSE == pcoex_info->is_exist) {
-		_rtw_memset(pcoex_info, 0, sizeof(struct bt_coex_info));
+		memset(pcoex_info, 0, sizeof(struct bt_coex_info));
 		pcoex_info->btcoex_wq = create_workqueue("BTCOEX");
 		INIT_DELAYED_WORK(&pcoex_info->recvmsg_work,
 				  (void *)rtw_btcoex_recvmsgbysocket);
@@ -1650,7 +1650,7 @@ void rtw_btcoex_SendEventExtBtCoexControl(PADAPTER padapter, u8 bNeedDbgRsp, u8 
 
 	/* Return parameters starts from here */
 	pRetPar = &pEvent->Data[len];
-	_rtw_memcpy(&pRetPar[0], pData, dataLen);
+	memcpy(&pRetPar[0], pData, dataLen);
 
 	len += dataLen;
 
@@ -1692,7 +1692,7 @@ void rtw_btcoex_SendEventExtBtInfoControl(PADAPTER padapter, u8 dataLen, void *p
 
 	/* Return parameters starts from here */
 	pRetPar = &pEvent->Data[len];
-	_rtw_memcpy(&pRetPar[0], pData, dataLen);
+	memcpy(&pRetPar[0], pData, dataLen);
 
 	len += dataLen;
 

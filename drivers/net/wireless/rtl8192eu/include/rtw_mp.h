@@ -39,13 +39,7 @@ struct mp_xmit_frame {
 	u8 *mem_addr;
 	u32 sz[8];
 
-#if defined(PLATFORM_OS_XP) || defined(PLATFORM_LINUX)
 	PURB pxmit_urb[8];
-#endif
-
-#ifdef PLATFORM_OS_XP
-	PIRP pxmit_irp[8];
-#endif
 
 	u8 bpending[8];
 	sint ac_tag[8];
@@ -65,21 +59,6 @@ struct mp_wiparam {
 };
 
 typedef void(*wi_act_func)(void *padapter);
-
-#ifdef PLATFORM_WINDOWS
-struct mp_wi_cntx {
-	u8 bmpdrv_unload;
-
-	/* Work Item */
-	NDIS_WORK_ITEM mp_wi;
-	NDIS_EVENT mp_wi_evt;
-	_lock mp_wi_lock;
-	u8 bmp_wi_progress;
-	wi_act_func curractfunc;
-	/* Variable needed in each implementation of CurrActFunc. */
-	struct mp_wiparam param;
-};
-#endif
 
 struct mp_tx {
 	u8 stop;
@@ -383,31 +362,6 @@ struct mp_priv {
 	struct wlan_network mp_network;
 	NDIS_802_11_MAC_ADDRESS network_macaddr;
 
-#ifdef PLATFORM_WINDOWS
-	u32 rx_testcnt;
-	u32 rx_testcnt1;
-	u32 rx_testcnt2;
-	u32 tx_testcnt;
-	u32 tx_testcnt1;
-
-	struct mp_wi_cntx wi_cntx;
-
-	u8 h2c_result;
-	u8 h2c_seqnum;
-	u16 h2c_cmdcode;
-	u8 h2c_resp_parambuf[512];
-	_lock h2c_lock;
-	_lock wkitm_lock;
-	u32 h2c_cmdcnt;
-	NDIS_EVENT h2c_cmd_evt;
-	NDIS_EVENT c2h_set;
-	NDIS_EVENT h2c_clr;
-	NDIS_EVENT cpwm_int;
-
-	NDIS_EVENT scsir_full_evt;
-	NDIS_EVENT scsiw_empty_evt;
-#endif
-
 	u8 *pallocated_mp_xmitframe_buf;
 	u8 *pmp_xmtframe_buf;
 	_queue free_mp_xmitqueue;
@@ -700,8 +654,6 @@ extern void mp_stop_test(PADAPTER padapter);
 extern u32 _read_rfreg(PADAPTER padapter, u8 rfpath, u32 addr, u32 bitmask);
 extern void _write_rfreg(PADAPTER padapter, u8 rfpath, u32 addr, u32 bitmask, u32 val);
 
-extern u32 read_macreg(_adapter *padapter, u32 addr, u32 sz);
-extern void write_macreg(_adapter *padapter, u32 addr, u32 val, u32 sz);
 extern u32 read_bbreg(_adapter *padapter, u32 addr, u32 bitmask);
 extern void write_bbreg(_adapter *padapter, u32 addr, u32 bitmask, u32 val);
 extern u32 read_rfreg(PADAPTER padapter, u8 rfpath, u32 addr);

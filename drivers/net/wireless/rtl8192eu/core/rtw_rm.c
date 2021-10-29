@@ -282,7 +282,7 @@ u8 rm_add_nb_req(_adapter *padapter, struct sta_info *psta)
 	}
 
 	prm->psta = psta;
-	prm->q.category = RTW_WLAN_CATEGORY_RADIO_MEAS;
+	prm->q.category = WLAN_CATEGORY_RADIO_MEASUREMENT;
 	prm->q.diag_token = pmlmeinfo->dialogToken++;
 	prm->q.m_token = 1;
 
@@ -319,7 +319,7 @@ static u8 *build_wlan_hdr(_adapter *padapter, struct xmit_frame *pmgntframe,
 	u8 *pframe;
 	u16 *fctrl;
 	struct pkt_attrib *pattr;
-	struct rtw_ieee80211_hdr *pwlanhdr;
+	struct ieee80211_hdr *pwlanhdr;
 	struct mlme_ext_priv *pmlmeext = &padapter->mlmeextpriv;
 	struct mlme_ext_info *pmlmeinfo = &pmlmeext->mlmext_info;
 
@@ -328,17 +328,17 @@ static u8 *build_wlan_hdr(_adapter *padapter, struct xmit_frame *pmgntframe,
 	pattr = &pmgntframe->attrib;
 	update_mgntframe_attrib(padapter, pattr);
 
-	_rtw_memset(pmgntframe->buf_addr, 0, WLANHDR_OFFSET + TXDESC_OFFSET);
+	memset(pmgntframe->buf_addr, 0, WLANHDR_OFFSET + TXDESC_OFFSET);
 
 	pframe = (u8 *)(pmgntframe->buf_addr) + TXDESC_OFFSET;
-	pwlanhdr = (struct rtw_ieee80211_hdr *)pframe;
+	pwlanhdr = (struct ieee80211_hdr *)pframe;
 
-	fctrl = &(pwlanhdr->frame_ctl);
+	fctrl =&pwlanhdr->frame_control;
 	*(fctrl) = 0;
 
-	_rtw_memcpy(pwlanhdr->addr1, psta->cmn.mac_addr, ETH_ALEN);
-	_rtw_memcpy(pwlanhdr->addr2, adapter_mac_addr(padapter), ETH_ALEN);
-	_rtw_memcpy(pwlanhdr->addr3,
+	memcpy(pwlanhdr->addr1, psta->cmn.mac_addr, ETH_ALEN);
+	memcpy(pwlanhdr->addr2, adapter_mac_addr(padapter), ETH_ALEN);
+	memcpy(pwlanhdr->addr3,
 		get_my_bssid(&(pmlmeinfo->network)),ETH_ALEN);
 
 	RTW_INFO("RM: dst = " MAC_FMT "\n", MAC_ARG(pwlanhdr->addr1));
@@ -347,10 +347,10 @@ static u8 *build_wlan_hdr(_adapter *padapter, struct xmit_frame *pmgntframe,
 	pmlmeext->mgnt_seq++;
 	SetFragNum(pframe, 0);
 
-	set_frame_sub_type(pframe, WIFI_ACTION);
+	set_frame_sub_type(pframe, IEEE80211_STYPE_ACTION);
 
-	pframe += sizeof(struct rtw_ieee80211_hdr_3addr);
-	pattr->pktlen = sizeof(struct rtw_ieee80211_hdr_3addr);
+	pframe += sizeof(struct ieee80211_hdr_3addr);
+	pattr->pktlen = sizeof(struct ieee80211_hdr_3addr);
 
 	return pframe;
 }
@@ -410,7 +410,7 @@ int issue_null_reply(struct rm_obj *prm)
 		return _FALSE;
 	}
 	pattr = &pmgntframe->attrib;
-	pframe = build_wlan_hdr(padapter, pmgntframe, prm->psta, WIFI_ACTION);
+	pframe = build_wlan_hdr(padapter, pmgntframe, prm->psta, IEEE80211_STYPE_ACTION);
 	pframe = rtw_set_fixed_ie(pframe, 3, &prm->p.category, &pattr->pktlen);
 
 	my_len = 0;
@@ -455,7 +455,7 @@ int rm_sitesurvey(struct rm_obj *prm)
 
 	pch_set = &prm->q.ch_set[0];
 
-	_rtw_memset(pch_set, 0,
+	memset(pch_set, 0,
 		sizeof(struct rtw_ieee80211_channel) * MAX_OP_CHANNEL_SET_NUM);
 
 	if (prm->q.ch_num == 0) {
@@ -474,11 +474,11 @@ int rm_sitesurvey(struct rm_obj *prm)
 	meas_ch_num = rm_get_ch_set(pch_set, op_class, ch_num);
 	prm->q.ch_set_ch_amount = meas_ch_num;
 
-	_rtw_memset(&parm, 0, sizeof(struct sitesurvey_parm));
-	_rtw_memcpy(parm.ch, pch_set,
+	memset(&parm, 0, sizeof(struct sitesurvey_parm));
+	memcpy(parm.ch, pch_set,
 		sizeof(struct rtw_ieee80211_channel) * MAX_OP_CHANNEL_SET_NUM);
 
-	_rtw_memcpy(&parm.ssid[0], &prm->q.opt.bcn.ssid, IW_ESSID_MAX_SIZE);
+	memcpy(&parm.ssid[0], &prm->q.opt.bcn.ssid, IW_ESSID_MAX_SIZE);
 
 	parm.ssid_num = 1;
 	parm.scan_mode = prm->q.m_mode;
@@ -529,7 +529,7 @@ static int rm_parse_ch_load_s_elem(struct rm_obj *prm, u8 *pbody, int req_len)
 			/* check RM_EN */
 			rm_en_cap_chk_and_set(prm, RM_CH_LOAD_CAP_EN);
 
-			_rtw_memcpy(&(prm->q.opt.clm.rep_cond),
+			memcpy(&(prm->q.opt.clm.rep_cond),
 				&pbody[p+2], sizeof(prm->q.opt.clm.rep_cond));
 
 			RTW_INFO("RM: ch_load_rep_info=%u:%u\n",
@@ -569,7 +569,7 @@ static int rm_parse_noise_histo_s_elem(struct rm_obj *prm,
 			/* check RM_EN */
 			rm_en_cap_chk_and_set(prm, RM_NOISE_HISTO_CAP_EN);
 
-			_rtw_memcpy(&(prm->q.opt.nhm.rep_cond),
+			memcpy(&(prm->q.opt.nhm.rep_cond),
 				&pbody[p+2], sizeof(prm->q.opt.nhm.rep_cond));
 
 			RTW_INFO("RM: noise_histo_rep_info=%u:%u\n",
@@ -618,12 +618,12 @@ static int rm_parse_bcn_req_s_elem(struct rm_obj *prm, u8 *pbody, int req_len)
 			RTW_INFO("DBG set ssid to %s\n",DBG_BCN_REQ_SSID_NAME);
 			i = strlen(DBG_BCN_REQ_SSID_NAME);
 			prm->q.opt.bcn.ssid.SsidLength = i;
-			_rtw_memcpy(&(prm->q.opt.bcn.ssid.Ssid),
+			memcpy(&(prm->q.opt.bcn.ssid.Ssid),
 				DBG_BCN_REQ_SSID_NAME, i);
 
 #else /* original */
 			prm->q.opt.bcn.ssid.SsidLength = pbody[p+1];
-			_rtw_memcpy(&(prm->q.opt.bcn.ssid.Ssid),
+			memcpy(&(prm->q.opt.bcn.ssid.Ssid),
 				&pbody[p+2], pbody[p+1]);
 #endif
 #endif
@@ -638,7 +638,7 @@ static int rm_parse_bcn_req_s_elem(struct rm_obj *prm, u8 *pbody, int req_len)
 			/* check RM_EN */
 			rm_en_cap_chk_and_set(prm, RM_BCN_MEAS_REP_COND_CAP_EN);
 
-			_rtw_memcpy(&(prm->q.opt.bcn.rep_cond),
+			memcpy(&(prm->q.opt.bcn.rep_cond),
 				&pbody[p+2], sizeof(prm->q.opt.bcn.rep_cond));
 
 			RTW_INFO("bcn_req_rep_info=%u:%u\n",
@@ -726,7 +726,7 @@ static int rm_parse_meas_req(struct rm_obj *prm, u8 *pbody)
 		prm->q.m_mode = pbody[p++];
 
 		/* BSSID */
-		_rtw_memcpy(&(prm->q.bssid), &pbody[p], 6);
+		memcpy(&(prm->q.bssid), &pbody[p], 6);
 		p+=6;
 
 		/*
@@ -763,7 +763,7 @@ int rm_recv_radio_mens_req(_adapter *padapter,
 	struct rm_obj *prm;
 	struct rm_priv *prmpriv = &padapter->rmpriv;
 	u8 *pdiag_body = (u8 *)(precv_frame->u.hdr.rx_data +
-		sizeof(struct rtw_ieee80211_hdr_3addr));
+		sizeof(struct ieee80211_hdr_3addr));
 	u8 *pmeas_body = &pdiag_body[5];
 	u8 rmid, update = 0;
 
@@ -812,7 +812,7 @@ int rm_recv_radio_mens_req(_adapter *padapter,
 	RTW_INFO("RM: meas_type = %d\n", prm->q.m_type);
 #endif
 
-	if (prm->q.e_id != _MEAS_REQ_IE_) /* 38 */
+	if (prm->q.e_id != WLAN_EID_MEASURE_REQUEST) /* 38 */
 		return _FALSE;
 
 	switch (prm->q.m_type) {
@@ -863,7 +863,7 @@ int rm_recv_radio_mens_rep(_adapter *padapter,
 	struct rm_obj *prm;
 	u32 rmid;
 	u8 *pdiag_body = (u8 *)(precv_frame->u.hdr.rx_data +
-		sizeof(struct rtw_ieee80211_hdr_3addr));
+		sizeof(struct ieee80211_hdr_3addr));
 	u8 *pmeas_body = &pdiag_body[3];
 
 
@@ -894,7 +894,7 @@ int rm_recv_radio_mens_rep(_adapter *padapter,
 	RTW_INFO("RM: meas_mode = %d\n", prm->p.m_mode);
 	RTW_INFO("RM: meas_type = %d\n", prm->p.m_type);
 #endif
-	if (prm->p.e_id != _MEAS_RSP_IE_) /* 39 */
+	if (prm->p.e_id != WLAN_EID_MEASURE_REPORT) /* 39 */
 		return _FALSE;
 
 	RTW_INFO("RM: recv %s\n", rm_type_rep_name(prm->p.m_type));
@@ -907,7 +907,7 @@ int rm_radio_mens_nb_rep(_adapter *padapter,
 	union recv_frame *precv_frame, struct sta_info *psta)
 {
 	u8 *pdiag_body = (u8 *)(precv_frame->u.hdr.rx_data +
-		sizeof(struct rtw_ieee80211_hdr_3addr));
+		sizeof(struct ieee80211_hdr_3addr));
 	u8 *pmeas_body = &pdiag_body[3];
 	u32 len = precv_frame->u.hdr.len;
 	u32 rmid;
@@ -938,7 +938,7 @@ int rm_radio_mens_nb_rep(_adapter *padapter,
 #ifdef CONFIG_LAYER2_ROAMING
 	if (rtw_wnm_btm_candidates_survey(padapter
 			,(pdiag_body + 3)
-			,(len - sizeof(struct rtw_ieee80211_hdr_3addr))
+			,(len - sizeof(struct ieee80211_hdr_3addr))
 			,_FALSE) == _FAIL)
 		return _FALSE;
 #endif
@@ -954,7 +954,7 @@ unsigned int rm_on_action(_adapter *padapter, union recv_frame *precv_frame)
 	u8 *pframe_body = NULL;
 	u8 action_code = 0;
 	u8 diag_token = 0;
-	struct rtw_ieee80211_hdr_3addr *whdr;
+	struct ieee80211_hdr_3addr *whdr;
 	struct sta_info *psta;
 
 
@@ -965,7 +965,7 @@ unsigned int rm_on_action(_adapter *padapter, union recv_frame *precv_frame)
 		GetAddr1Ptr(pframe), ETH_ALEN))
 		goto exit;
 
-	whdr = (struct rtw_ieee80211_hdr_3addr *)pframe;
+	whdr = (struct ieee80211_hdr_3addr *)pframe;
 	RTW_INFO("RM: %s bssid = " MAC_FMT "\n",
 		__func__, MAC_ARG(whdr->addr2));
 
@@ -977,7 +977,7 @@ unsigned int rm_on_action(_adapter *padapter, union recv_frame *precv_frame)
         }
 
 	pframe_body = (unsigned char *)(pframe +
-		sizeof(struct rtw_ieee80211_hdr_3addr));
+		sizeof(struct ieee80211_hdr_3addr));
 
 	/* Figure 8-438 radio measurement request frame Action field format */
 	/* Category = pframe_body[0] = 5 (Radio Measurement) */
@@ -1082,7 +1082,7 @@ static u8 *rm_gen_bcn_detail_elem(_adapter *padapter, u8 *pframe,
 #if (RM_MORE_DBG_MSG)
 			RTW_INFO("RM: bcn_req_ssid\n");
 #endif
-			pframe = rtw_set_ie(pframe, _SSID_IE_,
+			pframe = rtw_set_ie(pframe, WLAN_EID_SSID,
 				pbss->Ssid.SsidLength,
 				pbss->Ssid.Ssid, &my_len);
 			break;
@@ -1103,11 +1103,11 @@ static u8 *rm_gen_bcn_detail_elem(_adapter *padapter, u8 *pframe,
 					continue;
 #if (RM_MORE_DBG_MSG)
 				switch (eid) {
-				case EID_QBSSLoad:
-					RTW_INFO("RM: EID_QBSSLoad\n");
+				case WLAN_EID_QBSS_LOAD:
+					RTW_INFO("RM: WLAN_EID_QBSS_LOAD\n");
 					break;
-				case EID_HTCapability:
-					RTW_INFO("RM: EID_HTCapability\n");
+				case WLAN_EID_HT_CAPABILITY:
+					RTW_INFO("RM: WLAN_EID_HT_CAPABILITY\n");
 					break;
 				case _MDIE_:
 					RTW_INFO("RM: EID_MobilityDomain\n");
@@ -1220,7 +1220,7 @@ static u8 *rm_bcn_rep_fill_scan_resule (struct rm_obj *prm,
 
 	my_len = 0;
 	/* meas ID */
-	val8 = EID_MeasureReport;
+	val8 = WLAN_EID_MEASURE_REPORT;
 	pframe = rtw_set_fixed_ie(pframe, 1, &val8, &my_len);
 
 	/* remember position form elelment length */
@@ -1423,7 +1423,7 @@ static int retrieve_scan_result(struct rm_obj *prm)
 	/* search scan queue to find requested SSID */
 	while (1) {
 
-		if (rtw_end_of_queue_search(phead, plist) == _TRUE)
+		if (phead == plist)
 			break;
 
 		pnetwork = LIST_CONTAINOR(plist, struct wlan_network, list);
@@ -1488,7 +1488,7 @@ static int retrieve_scan_result(struct rm_obj *prm)
 				MAC_ARG(pbss->MacAddress));
 
 			len = 0;
-			_rtw_memset(tmp_buf, 0, MAX_XMIT_EXTBUF_SZ);
+			memset(tmp_buf, 0, MAX_XMIT_EXTBUF_SZ);
 			rm_gen_bcn_rep_ie(prm, tmp_buf, pnetwork, &len);
 new_packet:
 			if (my_len == 0) {
@@ -1556,7 +1556,7 @@ int issue_beacon_rep(struct rm_obj *prm)
 		}
 		pattr = &pmgntframe->attrib;
 		pframe = build_wlan_hdr(padapter,
-			pmgntframe, prm->psta, WIFI_ACTION);
+			pmgntframe, prm->psta, IEEE80211_STYPE_ACTION);
 		pframe = rtw_set_fixed_ie(pframe,
 			3, &prm->p.category, &pattr->pktlen);
 
@@ -1600,7 +1600,7 @@ int issue_nb_req(struct rm_obj *prm)
 		return _FALSE;
 	}
 	pattr = &pmgntframe->attrib;
-	pframe = build_wlan_hdr(padapter, pmgntframe, psta, WIFI_ACTION);
+	pframe = build_wlan_hdr(padapter, pmgntframe, psta, IEEE80211_STYPE_ACTION);
 	pframe = rtw_set_fixed_ie(pframe,
 		3, &prm->q.category, &pattr->pktlen);
 
@@ -1617,7 +1617,7 @@ int issue_nb_req(struct rm_obj *prm)
 		sub_ie[0] = 0; /*SSID*/
 		sub_ie[1] = val8;
 
-		_rtw_memcpy(pie, prm->q.pssid, val8);
+		memcpy(pie, prm->q.pssid, val8);
 
 		pframe = rtw_set_fixed_ie(pframe, val8 + 2,
 			sub_ie, &pattr->pktlen);
@@ -1637,7 +1637,7 @@ int issue_nb_req(struct rm_obj *prm)
 			sub_ie[0] = 0; /*SSID*/
 			sub_ie[1] = pmlmepriv->cur_network.network.Ssid.SsidLength;
 
-			_rtw_memcpy(pie, pmlmepriv->cur_network.network.Ssid.Ssid,
+			memcpy(pie, pmlmepriv->cur_network.network.Ssid.Ssid,
 				pmlmepriv->cur_network.network.Ssid.SsidLength);
 
 			pframe = rtw_set_fixed_ie(pframe,
@@ -1743,7 +1743,7 @@ int issue_radio_meas_req(struct rm_obj *prm)
 		return _FALSE;
 	}
 	pattr = &pmgntframe->attrib;
-	pframe = build_wlan_hdr(padapter, pmgntframe, prm->psta, WIFI_ACTION);
+	pframe = build_wlan_hdr(padapter, pmgntframe, prm->psta, IEEE80211_STYPE_ACTION);
 	pframe = rtw_set_fixed_ie(pframe, 3, &prm->q.category, &pattr->pktlen);
 
 	/* repeat */
@@ -1917,7 +1917,7 @@ int issue_radio_meas_rep(struct rm_obj *prm)
 		return _FALSE;
 	}
 	pattr = &pmgntframe->attrib;
-	pframe = build_wlan_hdr(padapter, pmgntframe, psta, WIFI_ACTION);
+	pframe = build_wlan_hdr(padapter, pmgntframe, psta, IEEE80211_STYPE_ACTION);
 	pframe = rtw_set_fixed_ie(pframe, 3,
 		&prm->p.category, &pattr->pktlen);
 
@@ -1978,7 +1978,7 @@ void rtw_ap_parse_sta_rm_en_cap(_adapter *padapter,
 	if (elem->rm_en_cap) {
 		RTW_INFO("assoc.rm_en_cap="RM_CAP_FMT"\n",
 			RM_CAP_ARG(elem->rm_en_cap));
-		_rtw_memcpy(psta->rm_en_cap,
+		memcpy(psta->rm_en_cap,
 			(elem->rm_en_cap), elem->rm_en_cap_len);
 	}
 }
@@ -1987,7 +1987,7 @@ void RM_IE_handler(_adapter *padapter, PNDIS_802_11_VARIABLE_IEs pIE)
 {
 	int i;
 
-	_rtw_memcpy(&padapter->rmpriv.rm_en_cap_assoc, pIE->data, pIE->Length);
+	memcpy(&padapter->rmpriv.rm_en_cap_assoc, pIE->data, pIE->Length);
 	RTW_INFO("assoc.rm_en_cap="RM_CAP_FMT"\n", RM_CAP_ARG(pIE->data));
 }
 
@@ -2050,7 +2050,7 @@ void rm_dbg_list_sta(_adapter *padapter, char *s)
 		phead = &(pstapriv->sta_hash[i]);
 		plist = get_next(phead);
 
-		while ((rtw_end_of_queue_search(phead, plist)) == _FALSE) {
+		while (phead != plist) {
 			psta = LIST_CONTAINOR(plist,
 				struct sta_info, hash_list);
 
@@ -2106,7 +2106,7 @@ struct sta_info *rm_get_sta(_adapter *padapter, u16 aid, u8* pbssid)
 		phead = &(pstapriv->sta_hash[i]);
 		plist = get_next(phead);
 
-		while ((rtw_end_of_queue_search(phead, plist)) == _FALSE) {
+		while (phead != plist) {
 			psta = LIST_CONTAINOR(plist,
 				struct sta_info, hash_list);
 
@@ -2279,8 +2279,8 @@ static void rm_dbg_add_meas(_adapter *padapter, char *s)
 		prmpriv->prm_sel = NULL;
 		return;
 	}
-	prm->q.category = RTW_WLAN_CATEGORY_RADIO_MEAS;
-	prm->q.e_id = _MEAS_REQ_IE_; /* 38 */
+	prm->q.category = WLAN_CATEGORY_RADIO_MEASUREMENT;
+	prm->q.e_id = WLAN_EID_MEASURE_REQUEST; /* 38 */
 
 	if (prm->q.action_code == RM_ACT_RADIO_MEAS_REQ)
 		sprintf(pstr(s), "\nAdd rmid=%x, meas_type=%s ok\n",
@@ -2374,7 +2374,7 @@ static void rm_dbg_show_meas(struct rm_obj *prm, char *s)
 			psta->cmn.aid, MAC_ARG(psta->cmn.mac_addr));
 
 	sprintf(pstr(s), "clock=%d, state=%s, rpt=%u/%u\n",
-		(int)ATOMIC_READ(&prm->pclock->counter),
+		(int)atomic_read(&prm->pclock->counter),
 		rm_state_name(prm->state), prm->p.rpt, prm->q.rpt);
 }
 
@@ -2395,7 +2395,7 @@ static void rm_dbg_list_meas(_adapter *padapter, char *s)
 	plist = get_next(phead);
 	meas_amount = 0;
 
-	while ((rtw_end_of_queue_search(phead, plist)) == _FALSE) {
+	while (phead != plist) {
 		prm = LIST_CONTAINOR(plist, struct rm_obj, list);
 		meas_amount++;
 		plist = get_next(plist);

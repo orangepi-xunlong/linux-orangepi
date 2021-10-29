@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2005-2020 Junjiro R. Okajima
+ * Copyright (C) 2005-2021 Junjiro R. Okajima
  *
  * This program, aufs is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -73,7 +73,7 @@ struct au_do_lookup_args {
 /* dentry.c */
 extern const struct dentry_operations aufs_dop, aufs_dop_noreval;
 struct au_branch;
-struct dentry *au_sio_lkup_one(struct qstr *name, struct dentry *parent);
+struct dentry *au_sio_lkup_one(struct qstr *name, struct path *ppath);
 int au_h_verify(struct dentry *h_dentry, unsigned int udba, struct inode *h_dir,
 		struct dentry *h_parent, struct au_branch *br);
 

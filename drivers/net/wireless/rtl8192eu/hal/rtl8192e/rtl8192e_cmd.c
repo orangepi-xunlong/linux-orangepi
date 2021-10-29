@@ -40,7 +40,7 @@ static u8 _is_fw_read_cmd_down(_adapter *padapter, u8 msgbox_num)
 		if (0 == valid)
 			read_down = _TRUE;
 		else
-			rtw_msleep_os(1);
+			msleep(1);
 	} while ((!read_down) && (retry_cnts--));
 
 	return read_down;
@@ -100,10 +100,10 @@ s32 FillH2CCmd_8192E(PADAPTER padapter, u8 ElementID, u32 CmdLen, u8 *pCmdBuffer
 		*(u8 *)(&h2c_cmd) = ElementID;
 
 		if (CmdLen <= 3)
-			_rtw_memcpy((u8 *)(&h2c_cmd) + 1, pCmdBuffer, CmdLen);
+			memcpy((u8 *)(&h2c_cmd) + 1, pCmdBuffer, CmdLen);
 		else {
-			_rtw_memcpy((u8 *)(&h2c_cmd) + 1, pCmdBuffer, 3);
-			_rtw_memcpy((u8 *)(&h2c_cmd_ex), pCmdBuffer + 3, CmdLen - 3);
+			memcpy((u8 *)(&h2c_cmd) + 1, pCmdBuffer, 3);
+			memcpy((u8 *)(&h2c_cmd_ex), pCmdBuffer + 3, CmdLen - 3);
 		}
 
 		/* Write Ext command */
@@ -353,8 +353,8 @@ void rtl8192e_download_rsvd_page(PADAPTER padapter, u8 mstatus)
 			rtw_hal_set_fw_rsvd_page(padapter, _FALSE);
 			DLBcnCount++;
 			do {
-				rtw_yield_os();
-				/* rtw_mdelay_os(10); */
+				yield();
+				/* mdelay(10); */
 				/* check rsvd page download OK. */
 				rtw_hal_get_hwreg(padapter, HW_VAR_BCN_VALID, (u8 *)(&bcn_valid));
 				poll++;
@@ -441,7 +441,7 @@ void rtl8192e_set_p2p_ps_offload_cmd(_adapter *padapter, u8 p2p_ps_state)
 	switch (p2p_ps_state) {
 	case P2P_PS_DISABLE:
 		RTW_INFO("P2P_PS_DISABLE\n");
-		_rtw_memset(p2p_ps_offload, 0, 1);
+		memset(p2p_ps_offload, 0, 1);
 		break;
 	case P2P_PS_ENABLE:
 		RTW_INFO("P2P_PS_ENABLE\n");

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2020 Junjiro R. Okajima
+ * Copyright (C) 2005-2021 Junjiro R. Okajima
  *
  * This program, aufs is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -740,11 +740,13 @@ static int au_do_ren_after_cpup(struct au_cp_generic *cpg, struct path *h_path)
 {
 	int err;
 	struct dentry *dentry, *h_dentry, *h_parent, *parent;
+	struct path h_ppath;
 	struct inode *h_dir;
 	aufs_bindex_t bdst;
 
 	dentry = cpg->dentry;
 	bdst = cpg->bdst;
+	h_ppath.mnt = au_sbr_mnt(dentry->d_sb, bdst);
 	h_dentry = au_h_dptr(dentry, bdst);
 	if (!au_ftest_cpup(cpg->flags, OVERWRITE)) {
 		dget(h_dentry);
@@ -756,9 +758,9 @@ static int au_do_ren_after_cpup(struct au_cp_generic *cpg, struct path *h_path)
 	} else {
 		err = 0;
 		parent = dget_parent(dentry);
-		h_parent = au_h_dptr(parent, bdst);
+		h_ppath.dentry = au_h_dptr(parent, bdst);
 		dput(parent);
-		h_path->dentry = vfsub_lkup_one(&dentry->d_name, h_parent);
+		h_path->dentry = vfsub_lkup_one(&dentry->d_name, &h_ppath);
 		if (IS_ERR(h_path->dentry))
 			err = PTR_ERR(h_path->dentry);
 	}

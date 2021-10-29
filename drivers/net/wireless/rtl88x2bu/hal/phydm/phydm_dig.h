@@ -26,7 +26,7 @@
 #ifndef __PHYDMDIG_H__
 #define __PHYDMDIG_H__
 
-#define DIG_VERSION "2.3"
+#define DIG_VERSION "2.5" /* @Add new fa_cnt for VHT-SIGA/VHT-SIGB*/
 
 #define	DIG_HW		0
 #define DIG_LIMIT_PERIOD 60 /*@60 sec*/
@@ -92,6 +92,17 @@ enum phydm_dig_mode {
 	PHYDM_DIG_COVERAGE_MODE		= 1,
 };
 
+#ifdef PHYDM_TDMA_DIG_SUPPORT
+enum upd_type {
+	ENABLE_TDMA,
+	MODE_DECISION
+};
+
+enum tdma_opmode {
+	MODE_PERFORMANCE = 1,
+	MODE_COVERAGE = 2
+};
+
 #ifdef IS_USE_NEW_TDMA
 enum tdma_dig_timer {
 	INIT_TDMA_DIG_TIMMER,
@@ -104,6 +115,7 @@ enum tdma_dig_state {
 	TDMA_DIG_HIGH_STATE = 1,
 	NORMAL_DIG = 2
 };
+#endif
 #endif
 
 /*@--------------------Define Struct-----------------------------------*/
@@ -131,21 +143,21 @@ struct phydm_dig_struct {
 #endif
 	boolean		is_dbg_fa_th;
 	u8		cur_ig_value;
-	u8		rvrt_val;
+	u32		rvrt_val; /*all rvrt_val for pause API must set to u32*/
 	u8		igi_backup;
 	u8		rx_gain_range_max;	/*@dig_dynamic_max*/
 	u8		rx_gain_range_min;	/*@dig_dynamic_min*/
 	u8		dm_dig_max;		/*@Absolutly upper bound*/
 	u8		dm_dig_min;		/*@Absolutly lower bound*/
 	u8		dig_max_of_min;		/*@Absolutly max of min*/
-	boolean		is_media_connect;
 	u32		ant_div_rssi_max;
 	u8		*is_p2p_in_process;
 	enum dig_goupcheck_level	go_up_chk_lv;
 	u16		fa_th[3];
 #if (RTL8822B_SUPPORT || RTL8197F_SUPPORT || RTL8821C_SUPPORT ||\
 	RTL8198F_SUPPORT || RTL8192F_SUPPORT || RTL8195B_SUPPORT ||\
-	RTL8822C_SUPPORT || RTL8814B_SUPPORT || RTL8721D_SUPPORT)
+	RTL8822C_SUPPORT || RTL8814B_SUPPORT || RTL8721D_SUPPORT ||\
+	RTL8710C_SUPPORT || RTL8812F_SUPPORT || RTL8197G_SUPPORT)
 	u8		rf_gain_idx;
 	u8		agc_table_idx;
 	u8		big_jump_lmt[16];
@@ -161,7 +173,7 @@ struct phydm_dig_struct {
 	u8		cur_ig_value_tdma;
 	u8		low_ig_value;
 	u8		tdma_dig_state;	/*@To distinguish which state is now.(L-sate or H-state)*/
-	u8		tdma_dig_cnt;	/*@for phydm_tdma_dig_timer_check use*/
+	u32		tdma_dig_cnt;	/*@for phydm_tdma_dig_timer_check use*/
 	u8		pre_tdma_dig_cnt;
 	u8		sec_factor;
 	u32		cur_timestamp;
@@ -184,7 +196,8 @@ struct phydm_fa_struct {
 	u32		cnt_parity_fail;
 	u32		cnt_rate_illegal;
 	u32		cnt_crc8_fail;
-	u32		cnt_crc8_fail_vht;
+	u32		cnt_crc8_fail_vhta;
+	u32		cnt_crc8_fail_vhtb;
 	u32		cnt_mcs_fail;
 	u32		cnt_mcs_fail_vht;
 	u32		cnt_ofdm_fail;
@@ -290,6 +303,8 @@ void phydm_false_alarm_counter_reset(void *dm_void);
 void phydm_false_alarm_counter_acc(void *dm_void, boolean rssi_dump_en);
 
 void phydm_false_alarm_counter_acc_reset(void *dm_void);
+
+void phydm_tdma_dig_para_upd(void *dm_void, enum upd_type type, u8 input);
 
 #ifdef IS_USE_NEW_TDMA
 void phydm_tdma_dig_timers(void *dm_void, u8 state);

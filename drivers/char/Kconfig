@@ -131,6 +131,7 @@ config POWERNV_OP_PANEL
 	  If unsure, say M here to build it as a module called powernv-op-panel.
 
 source "drivers/char/ipmi/Kconfig"
+source "drivers/char/sunxi-sysinfo/Kconfig"
 
 config DS1620
 	tristate "NetWinder thermometer support"
@@ -496,3 +497,5 @@ config RANDOM_TRUST_BOOTLOADER
 	booloader is trustworthy so it will be added to the kernel's entropy
 	pool. Otherwise, say N here so it will be regarded as device input that
 	only mixes the entropy pool.
+
+source "drivers/char/dump_reg/Kconfig"

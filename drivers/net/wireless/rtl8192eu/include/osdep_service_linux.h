@@ -50,7 +50,6 @@
 #include <linux/rtnetlink.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>	/* for struct tasklet_struct */
-#include <linux/ip.h>
 #include <linux/kthread.h>
 #include <linux/list.h>
 #include <linux/vmalloc.h>
@@ -513,7 +512,7 @@ static inline int rtw_merge_string(char *dst, int dst_len, const char *src1, con
 #define PATH_LENGTH_MAX PATH_MAX
 
 /* Atomic integer operations */
-#define ATOMIC_T atomic_t
+#define atomic_t atomic_t
 
 #define rtw_netdev_priv(netdev) (((struct rtw_netdev_priv_indicator *)netdev_priv(netdev))->priv)
 

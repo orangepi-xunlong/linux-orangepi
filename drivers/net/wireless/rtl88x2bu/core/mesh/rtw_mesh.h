@@ -106,6 +106,7 @@ extern const char *_rtw_mesh_ps_str[];
 #define RTW_PREQ_Q_F_REFRESH	0x2
 #define RTW_PREQ_Q_F_CHK	0x4
 #define RTW_PREQ_Q_F_PEER_AKA	0x8
+#define RTW_PREQ_Q_F_BCAST_PREQ	0x10 /* force path_dicover using broadcast */
 struct rtw_mesh_preq_queue {
 	_list list;
 	u8 dst[ETH_ALEN];
@@ -391,7 +392,7 @@ struct rtw_mesh_info {
 
 	_queue mpath_tx_queue;
 	u32 mpath_tx_queue_len;
-	struct tasklet_struct mpath_tx_tasklet;
+	_tasklet mpath_tx_tasklet;
 
 	struct rtw_mrc *mrc;
 
@@ -454,7 +455,7 @@ void dump_mesh_networks(void *sel, _adapter *adapter);
 
 void rtw_mesh_adjust_chbw(u8 req_ch, u8 *req_bw, u8 *req_offset);
 
-int rtw_sae_check_frames(_adapter *adapter, const u8 *buf, u32 len, u8 tx);
+void rtw_mesh_sae_check_frames(_adapter *adapter, const u8 *buf, u32 len, u8 tx, u16 alg, u16 seq, u16 status);
 int rtw_mesh_check_frames_tx(_adapter *adapter, const u8 **buf, size_t *len);
 int rtw_mesh_check_frames_rx(_adapter *adapter, const u8 *buf, size_t len);
 

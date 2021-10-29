@@ -58,7 +58,7 @@ static s32 update_txdesc(struct xmit_frame *pxmitframe, u8 *pmem, s32 sz , u8 ba
 	u8	*ptxdesc =  pmem;
 	struct mlme_ext_priv	*pmlmeext = &padapter->mlmeextpriv;
 	struct mlme_ext_info	*pmlmeinfo = &(pmlmeext->mlmext_info);
-	sint	bmcst = IS_MCAST(pattrib->ra);
+	bool bmcst = is_multicast_ether_addr(pattrib->ra);
 
 #ifndef CONFIG_USE_USB_BUFFER_ALLOC_TX
 	if (padapter->registrypriv.mp_mode == 0) {
@@ -71,7 +71,7 @@ static s32 update_txdesc(struct xmit_frame *pxmitframe, u8 *pmem, s32 sz , u8 ba
 	}
 #endif /* CONFIG_USE_USB_BUFFER_ALLOC_TX */
 
-	_rtw_memset(ptxdesc, 0, TXDESC_SIZE);
+	memset(ptxdesc, 0, TXDESC_SIZE);
 
 	/* 4 offset 0 */
 
@@ -568,12 +568,12 @@ s32 rtl8192eu_xmitframe_complete(_adapter *padapter, struct xmit_priv *pxmitpriv
 
 	sta_phead = get_list_head(phwxmit->sta_queue);
 	sta_plist = get_next(sta_phead);
-	single_sta_in_queue = rtw_end_of_queue_search(sta_phead, get_next(sta_plist));
+	single_sta_in_queue = (sta_phead == get_next(sta_plist));
 
 	xmitframe_phead = get_list_head(&ptxservq->sta_pending);
 	xmitframe_plist = get_next(xmitframe_phead);
 
-	while (rtw_end_of_queue_search(xmitframe_phead, xmitframe_plist) == _FALSE) {
+	while (xmitframe_phead != xmitframe_plist) {
 		pxmitframe = LIST_CONTAINOR(xmitframe_plist, struct xmit_frame, list);
 		xmitframe_plist = get_next(xmitframe_plist);
 
@@ -918,12 +918,12 @@ s32 rtl8192eu_hostap_mgnt_xmit_entry(_adapter *padapter, _pkt *pkt)
 	/* #ifdef PLATFORM_LINUX */
 	u16 fc;
 	int rc, len, pipe;
-	unsigned int bmcst, tid, qsel;
+	bool bmcst, tid, qsel;
 	struct sk_buff *skb, *pxmit_skb;
 	struct urb *urb;
 	unsigned char *pxmitbuf;
 	struct tx_desc *ptxdesc;
-	struct rtw_ieee80211_hdr *tx_hdr;
+	struct ieee80211_hdr *tx_hdr;
 	struct hostapd_priv *phostapdpriv = padapter->phostapdpriv;
 	struct net_device *pnetdev = padapter->pnetdev;
 	HAL_DATA_TYPE *pHalData = GET_HAL_DATA(padapter);
@@ -935,11 +935,11 @@ s32 rtl8192eu_hostap_mgnt_xmit_entry(_adapter *padapter, _pkt *pkt)
 	skb = pkt;
 
 	len = skb->len;
-	tx_hdr = (struct rtw_ieee80211_hdr *)(skb->data);
-	fc = le16_to_cpu(tx_hdr->frame_ctl);
-	bmcst = IS_MCAST(tx_hdr->addr1);
+	tx_hdr = (struct ieee80211_hdr *)(skb->data);
+	fc = le16_to_cpu(tx_hdr->frame_control);
+	bmcst = is_multicast_ether_addr(tx_hdr->addr1);
 
-	if ((fc & RTW_IEEE80211_FCTL_FTYPE) != RTW_IEEE80211_FTYPE_MGMT)
+	if ((fc &  IEEE80211_FCTL_FTYPE) != IEEE80211_FTYPE_MGMT)
 		goto _exit;
 
 	pxmit_skb = rtw_skb_alloc(len + TXDESC_SIZE);
@@ -955,7 +955,7 @@ s32 rtl8192eu_hostap_mgnt_xmit_entry(_adapter *padapter, _pkt *pkt)
 
 	/* ----- fill tx desc -----	 */
 	ptxdesc = (struct tx_desc *)pxmitbuf;
-	_rtw_memset(ptxdesc, 0, sizeof(*ptxdesc));
+	memset(ptxdesc, 0, sizeof(*ptxdesc));
 
 	/* offset 0	 */
 	ptxdesc->txdw0 |= cpu_to_le32(len & 0x0000ffff);

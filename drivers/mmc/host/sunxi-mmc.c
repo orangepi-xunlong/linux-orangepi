@@ -1219,6 +1219,7 @@ static const struct of_device_id sunxi_mmc_of_match[] = {
 	{ .compatible = "allwinner,sun9i-a80-mmc", .data = &sun9i_a80_cfg },
 	{ .compatible = "allwinner,sun50i-a64-mmc", .data = &sun50i_a64_cfg },
 	{ .compatible = "allwinner,sun50i-a64-emmc", .data = &sun50i_a64_emmc_cfg },
+	{ .compatible = "allwinner,sun50i-h6-emmc", .data = &sun50i_a64_emmc_cfg },
 	{ .compatible = "allwinner,sun50i-h5-emmc", .data = &sun50i_h5_emmc_cfg },
 	{ .compatible = "allwinner,sun50i-a100-mmc", .data = &sun50i_a100_cfg },
 	{ .compatible = "allwinner,sun50i-a100-emmc", .data = &sun50i_a100_emmc_cfg },
@@ -1433,7 +1434,7 @@ static int sunxi_mmc_probe(struct platform_device *pdev)
 				  MMC_CAP_SDIO_IRQ;
 
 	/*
-	 * Some H5 devices do not have signal traces precise enough to
+	 * Some H5 and H6 devices do not have signal traces precise enough to
 	 * use HS DDR mode for their eMMC chips.
 	 *
 	 * We still enable HS DDR modes for all the other controller
@@ -1442,6 +1443,8 @@ static int sunxi_mmc_probe(struct platform_device *pdev)
 	if ((host->cfg->clk_delays || host->use_new_timings) &&
 	    !of_device_is_compatible(pdev->dev.of_node,
 				     "allwinner,sun50i-h5-emmc") &&
+	    !of_device_is_compatible(pdev->dev.of_node,
+				     "allwinner,sun50i-h6-emmc") &&
 	    !of_machine_is_compatible("allwinner,sun7i-a20") &&
 	    !of_machine_is_compatible("olimex,a64-olinuxino-2ge8g"))
 		mmc->caps      |= MMC_CAP_1_8V_DDR | MMC_CAP_3_3V_DDR;

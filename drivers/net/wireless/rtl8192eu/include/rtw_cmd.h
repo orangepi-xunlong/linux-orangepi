@@ -26,11 +26,7 @@
 #define MAX_RSPSZ	512
 #define MAX_EVTSZ	1024
 
-#ifdef PLATFORM_OS_CE
-	#define CMDBUFF_ALIGN_SZ 4
-#else
-	#define CMDBUFF_ALIGN_SZ 512
-#endif
+#define CMDBUFF_ALIGN_SZ 512
 
 struct cmd_obj {
 	_adapter *padapter;
@@ -66,7 +62,7 @@ struct cmd_priv {
 	u32	cmd_issued_cnt;
 	u32	cmd_done_cnt;
 	u32	rsp_cnt;
-	ATOMIC_T cmdthd_running;
+	atomic_t cmdthd_running;
 	/* u8 cmdthd_running; */
 
 	_adapter *padapter;
@@ -107,16 +103,13 @@ struct	evt_priv {
 	u8	lbkevt_num;
 	u8	*cmdevt_parm;
 #endif
-	ATOMIC_T event_seq;
+	atomic_t event_seq;
 	u8	*evt_buf;	/* shall be non-paged, and 4 bytes aligned		 */
 	u8	*evt_allocated_buf;
 	u32	evt_done_cnt;
 #if defined(CONFIG_SDIO_HCI) || defined(CONFIG_GSPI_HCI)
 	u8	*c2h_mem;
 	u8	*allocated_c2h_mem;
-#ifdef PLATFORM_OS_XP
-	PMDL	pc2h_mdl;
-#endif
 #endif
 
 };

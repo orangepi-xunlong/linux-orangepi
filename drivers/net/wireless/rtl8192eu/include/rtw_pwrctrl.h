@@ -156,7 +156,6 @@ __inline static void _init_pwrlock(_pwrlock *plock)
 
 __inline static void _free_pwrlock(_pwrlock *plock)
 {
-	_rtw_free_sema(plock);
 }
 
 
@@ -291,9 +290,9 @@ typedef struct lps_poff_info {
 	u32	tx_bndy_dynamic;
 	u16	ConfLenForPTK;
 	u16	ConfLenForGTK;
-	ATOMIC_T bEnterPOFF;
-	ATOMIC_T bTxBoundInProgress;
-	ATOMIC_T bSetPOFFParm;
+	atomic_t bEnterPOFF;
+	atomic_t bTxBoundInProgress;
+	atomic_t bSetPOFFParm;
 } lps_poff_info_t;
 #endif /*CONFIG_LPS_POFF*/
 

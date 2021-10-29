@@ -189,7 +189,7 @@ void rtw_mi_status_by_ifbmp(struct dvobj_priv *dvobj, u8 ifbmp, struct mi_state 
 	_adapter *iface;
 	int i;
 
-	_rtw_memset(mstate, 0, sizeof(struct mi_state));
+	memset(mstate, 0, sizeof(struct mi_state));
 
 	for (i = 0; i < dvobj->iface_nums; i++) {
 		iface = dvobj->padapters[i];
@@ -378,7 +378,7 @@ inline void rtw_mi_update_iface_status(struct mlme_priv *pmlmepriv, sint state)
 		RTW_INFO("%s => will change or clean state to 0x%08x\n", __func__, state);
 
 	rtw_mi_status(adapter, &tmp_mstate);
-	_rtw_memcpy(iface_state, &tmp_mstate, sizeof(struct mi_state));
+	memcpy(iface_state, &tmp_mstate, sizeof(struct mi_state));
 
 	if (rtw_mi_get_ch_setting_union(adapter, &u_ch, &u_bw, &u_offset))
 		rtw_mi_update_union_chan_inf(adapter , u_ch, u_offset , u_bw);
@@ -949,25 +949,25 @@ static void rtw_dbg_dump_fwstate(_adapter *padapter, sint state)
 	u8 buf[32] = {0};
 
 	if (state & WIFI_FW_NULL_STATE) {
-		_rtw_memset(buf, 0, 32);
+		memset(buf, 0, 32);
 		sprintf(buf, "WIFI_FW_NULL_STATE");
 		RTW_INFO(FUNC_ADPT_FMT"fwstate-%s\n", FUNC_ADPT_ARG(padapter), buf);
 	}
 
 	if (state & _FW_LINKED) {
-		_rtw_memset(buf, 0, 32);
+		memset(buf, 0, 32);
 		sprintf(buf, "_FW_LINKED");
 		RTW_INFO(FUNC_ADPT_FMT"fwstate-%s\n", FUNC_ADPT_ARG(padapter), buf);
 	}
 
 	if (state & _FW_UNDER_LINKING) {
-		_rtw_memset(buf, 0, 32);
+		memset(buf, 0, 32);
 		sprintf(buf, "_FW_UNDER_LINKING");
 		RTW_INFO(FUNC_ADPT_FMT"fwstate-%s\n", FUNC_ADPT_ARG(padapter), buf);
 	}
 
 	if (state & _FW_UNDER_SURVEY) {
-		_rtw_memset(buf, 0, 32);
+		memset(buf, 0, 32);
 		sprintf(buf, "_FW_UNDER_SURVEY");
 		RTW_INFO(FUNC_ADPT_FMT"fwstate-%s\n", FUNC_ADPT_ARG(padapter), buf);
 	}
@@ -1403,7 +1403,7 @@ static s32 _rtw_mi_buddy_clone_bcmc_packet(_adapter *adapter, union recv_frame *
 		pcloneframe->u.hdr.precvbuf = NULL;	/*can't access the precvbuf for new arch.*/
 		pcloneframe->u.hdr.len = 0;
 
-		_rtw_memcpy(&pcloneframe->u.hdr.attrib, &precvframe->u.hdr.attrib, sizeof(struct rx_pkt_attrib));
+		memcpy(&pcloneframe->u.hdr.attrib, &precvframe->u.hdr.attrib, sizeof(struct rx_pkt_attrib));
 
 		pattrib = &pcloneframe->u.hdr.attrib;
 #ifdef CONFIG_SKB_ALLOCATED
@@ -1451,7 +1451,7 @@ void rtw_mi_buddy_clone_bcmc_packet(_adapter *padapter, union recv_frame *precvf
 			continue;
 		if (rtw_is_adapter_up(iface) == _FALSE || iface->registered == 0)
 			continue;
-		if (type == WIFI_DATA_TYPE && !adapter_allow_bmc_data_rx(iface))
+		if (type == IEEE80211_FTYPE_DATA && !adapter_allow_bmc_data_rx(iface))
 			continue;
 
 		pcloneframe = rtw_alloc_recvframe(pfree_recv_queue);

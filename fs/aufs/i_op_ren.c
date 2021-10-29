@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2020 Junjiro R. Okajima
+ * Copyright (C) 2005-2021 Junjiro R. Okajima
  *
  * This program, aufs is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -150,9 +150,12 @@ static void au_ren_rev_rename(int err, struct au_ren_args *a)
 {
 	int rerr;
 	struct inode *delegated;
+	struct path h_ppath = {
+		.dentry	= a->src_h_parent,
+		.mnt	= a->h_path.mnt
+	};
 
-	a->h_path.dentry = vfsub_lkup_one(&a->src_dentry->d_name,
-					  a->src_h_parent);
+	a->h_path.dentry = vfsub_lkup_one(&a->src_dentry->d_name, &h_ppath);
 	rerr = PTR_ERR(a->h_path.dentry);
 	if (IS_ERR(a->h_path.dentry)) {
 		RevertFailure("lkup one %pd", a->src_dentry);
@@ -179,9 +182,12 @@ static void au_ren_rev_whtmp(int err, struct au_ren_args *a)
 {
 	int rerr;
 	struct inode *delegated;
+	struct path h_ppath = {
+		.dentry	= a->dst_h_parent,
+		.mnt	= a->h_path.mnt
+	};
 
-	a->h_path.dentry = vfsub_lkup_one(&a->dst_dentry->d_name,
-					  a->dst_h_parent);
+	a->h_path.dentry = vfsub_lkup_one(&a->dst_dentry->d_name, &h_ppath);
 	rerr = PTR_ERR(a->h_path.dentry);
 	if (IS_ERR(a->h_path.dentry)) {
 		RevertFailure("lkup one %pd", a->dst_dentry);

@@ -95,6 +95,7 @@ const char *android_wifi_cmd_str[ANDROID_WIFI_CMD_MAX] = {
 /*	Private command for	P2P disable*/
 	"P2P_DISABLE",
 	"SET_AEK",
+	"EXT_AUTH_STATUS",
 	"DRIVER_VERSION"
 };
 
@@ -662,7 +663,6 @@ int rtw_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 		ret = -ENOMEM;
 		goto exit;
 	}
-
 	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0))
 	if (!access_ok(priv_cmd.buf, priv_cmd.total_len)) {
 	#else
@@ -936,6 +936,12 @@ int rtw_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 		break;
 #endif
 
+	case ANDROID_WIFI_CMD_EXT_AUTH_STATUS: {
+		rtw_set_external_auth_status(padapter,
+			command + strlen("EXT_AUTH_STATUS "),
+			priv_cmd.total_len - strlen("EXT_AUTH_STATUS "));
+		break;
+	}
 	case ANDROID_WIFI_CMD_DRIVERVERSION: {
 		bytes_written = strlen(DRIVERVERSION);
 		snprintf(command, bytes_written + 1, DRIVERVERSION);
@@ -967,7 +973,7 @@ response:
 exit:
 	rtw_unlock_suspend();
 	if (command)
-		rtw_mfree(command, priv_cmd.total_len);
+		rtw_mfree(command, priv_cmd.total_len + 1);
 
 	return ret;
 }
@@ -1068,13 +1074,21 @@ int wifi_get_mac_addr(unsigned char *buf)
 #endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35)) */
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 39)) || defined(COMPAT_KERNEL_RELEASE)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0))
+void *wifi_get_country_code(char *ccode, u32 flags)
+#else /* Linux kernel < 3.18 */
 void *wifi_get_country_code(char *ccode)
+#endif /* Linux kernel < 3.18 */
 {
 	RTW_INFO("%s\n", __FUNCTION__);
 	if (!ccode)
 		return NULL;
 	if (wifi_control_data && wifi_control_data->get_country_code)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0))
+		return wifi_control_data->get_country_code(ccode, flags);
+#else /* Linux kernel < 3.18 */
 		return wifi_control_data->get_country_code(ccode);
+#endif /* Linux kernel < 3.18 */
 	return NULL;
 }
 #endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 39)) */

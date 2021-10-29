@@ -90,7 +90,7 @@ static void rtw_hal_mcc_build_p2p_noa_attr(PADAPTER padapter, u8 *ie, u32 *ie_le
 	noa_interval = mcc_switch_channel_policy_table[mcc_policy_idx][MCC_INTERVAL_IDX] * TU;
 
 	/* P2P OUI(4 bytes) */
-	_rtw_memcpy(p2p_noa_attr_ie, P2P_OUI, 4);
+	memcpy(p2p_noa_attr_ie, P2P_OUI, 4);
 	p2p_noa_attr_len = p2p_noa_attr_len + 4;
 
 	/* attrute ID(1 byte) */
@@ -98,7 +98,7 @@ static void rtw_hal_mcc_build_p2p_noa_attr(PADAPTER padapter, u8 *ie, u32 *ie_le
 	p2p_noa_attr_len = p2p_noa_attr_len + 1;
 	
 	/* attrute length(2 bytes) length = noa_desc_num*13 + 2 */
-	RTW_PUT_LE16(p2p_noa_attr_ie + p2p_noa_attr_len, (noa_desc_num * 13 + 2));
+	*(u16 *) (p2p_noa_attr_ie + p2p_noa_attr_len) = cpu_to_le16(noa_desc_num * 13 + 2);
 	p2p_noa_attr_len = p2p_noa_attr_len + 2;
 
 	/* Index (1 byte) */
@@ -132,7 +132,7 @@ static void rtw_hal_mcc_build_p2p_noa_attr(PADAPTER padapter, u8 *ie, u32 *ie_le
 		, p2p_noa_attr_ie[p2p_noa_attr_len + 3]);
 
 	p2p_noa_attr_len = p2p_noa_attr_len + 4;
-	rtw_set_ie(ie, _VENDOR_SPECIFIC_IE_, p2p_noa_attr_len, (u8 *)p2p_noa_attr_ie, ie_len);
+	rtw_set_ie(ie, WLAN_EID_VENDOR_SPECIFIC, p2p_noa_attr_len, (u8 *)p2p_noa_attr_ie, ie_len);
 }
 
 
@@ -183,7 +183,7 @@ static void rtw_hal_mcc_update_go_p2p_ie(PADAPTER padapter)
 		RTW_INFO("p2p_go_noa_ie_len:%d\n", pmccadapriv->p2p_go_noa_ie_len);
 		RTW_INFO_DUMP("\n", pmccadapriv->p2p_go_noa_ie, pmccadapriv->p2p_go_noa_ie_len);
 	}
-	update_beacon(padapter, _VENDOR_SPECIFIC_IE_, P2P_OUI, _TRUE);
+	update_beacon(padapter, WLAN_EID_VENDOR_SPECIFIC, P2P_OUI, _TRUE);
 }
 
 /**
@@ -200,7 +200,7 @@ static void rtw_hal_mcc_remove_go_p2p_ie(PADAPTER padapter)
 		return;
 
 	pmccadapriv->p2p_go_noa_ie_len = 0;
-	update_beacon(padapter, _VENDOR_SPECIFIC_IE_, P2P_OUI, _TRUE);
+	update_beacon(padapter, WLAN_EID_VENDOR_SPECIFIC, P2P_OUI, _TRUE);
 }
 
 /* restore IQK value for all interface */
@@ -459,7 +459,7 @@ static void rtw_hal_config_mcc_role_setting(PADAPTER padapter, u8 order)
 			plist = get_next(phead);
 			pmccadapriv->mcc_macid_bitmap = 0;
 	
-			while ((rtw_end_of_queue_search(phead, plist)) == _FALSE) {
+			while (phead != plist) {
 				psta = LIST_CONTAINOR(plist, struct sta_info, asoc_list);
 				plist = get_next(plist);
 				pmccadapriv->mcc_macid_bitmap |= BIT(psta->cmn.mac_id);
@@ -753,11 +753,11 @@ static u8 rtw_hal_mcc_update_timing_parameters(PADAPTER padapter, u8 force_updat
 		/* selecet policy table according TSF diff */
 		tsf0 = tsf[0];
 		beaconperiod_0 = pmccobjpriv->iface[0]->mlmepriv.cur_network.network.Configuration.BeaconPeriod;
-		tsf0 = rtw_modular64(tsf0, (beaconperiod_0 * TU));
+		tsf0 = do_div(tsf0, (beaconperiod_0 * TU));
 
 		tsf1 = tsf[1];
 		beaconperiod_1 = pmccobjpriv->iface[1]->mlmepriv.cur_network.network.Configuration.BeaconPeriod;
-		tsf1 = rtw_modular64(tsf1, (beaconperiod_1 * TU));
+		tsf1 = do_div(tsf1, (beaconperiod_1 * TU));
 
 		if (tsf0 > tsf1)
 			tsfdiff = tsf0- tsf1;
@@ -984,8 +984,6 @@ exit:
 
 static void rtw_hal_construct_CTS(PADAPTER padapter, u8 *pframe, u32 *pLength)
 {
-	u8 broadcast_addr[ETH_ALEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-
 	/* frame type, length = 1*/
 	set_frame_sub_type(pframe, WIFI_RTS);
 
@@ -997,9 +995,9 @@ static void rtw_hal_construct_CTS(PADAPTER padapter, u8 *pframe, u32 *pLength)
 	*(pframe + 3) = 0x78;
 
 	/* frame recvaddr, length = 6 */
-	_rtw_memcpy((pframe + 4), broadcast_addr, ETH_ALEN);
-	_rtw_memcpy((pframe + 4 + ETH_ALEN), adapter_mac_addr(padapter), ETH_ALEN);
-	_rtw_memcpy((pframe + 4 + ETH_ALEN*2), adapter_mac_addr(padapter), ETH_ALEN);
+	eth_broadcast_addr((pframe + 4));
+	memcpy((pframe + 4 + ETH_ALEN), adapter_mac_addr(padapter), ETH_ALEN);
+	memcpy((pframe + 4 + ETH_ALEN*2), adapter_mac_addr(padapter), ETH_ALEN);
 	*pLength = 22;
 }
 
@@ -1174,7 +1172,7 @@ u8 rtw_hal_dl_mcc_fw_rsvd_page(_adapter *adapter, u8 *pframe, u16 *index,
 		rtw_hal_mcc_upadate_chnl_bw(iface, ch, bw_offset, bw, _TRUE);
 
 		start = &pframe[*index - tx_desc];
-		_rtw_memset(start, 0, page_size);
+		memset(start, 0, page_size);
 		pmccobjpriv->mcc_pwr_idx_rsvd_page[i] = *total_page_num;
 		RTW_INFO(ADPT_FMT" order:%d, pwr_idx_rsvd_page location[%d]: %d\n",
 			ADPT_ARG(iface), mccadapriv->order,
@@ -1609,7 +1607,7 @@ static void rtw_hal_set_mcc_IQK_offload_cmd(PADAPTER padapter)
 
 		for (rf_path_idx = 0; rf_path_idx < total_rf_path; rf_path_idx ++) {
 
-			_rtw_memset(cmd, 0, H2C_MCC_IQK_PARAM_LEN);
+			memset(cmd, 0, H2C_MCC_IQK_PARAM_LEN);
 			TX_X = pmccadapriv->mcc_iqk_arr[rf_path_idx].TX_X & 0x7ff;/* [10:0]  */
 			TX_Y = pmccadapriv->mcc_iqk_arr[rf_path_idx].TX_Y & 0x7ff;/* [10:0]  */
 			RX_X = pmccadapriv->mcc_iqk_arr[rf_path_idx].RX_X & 0x3ff;/* [9:0]  */
@@ -2249,7 +2247,7 @@ static u8 rtw_hal_set_mcc_setting(PADAPTER padapter, u8 status)
 	u8 ret = _FAIL;
 	struct mcc_obj_priv *pmccobjpriv = &(adapter_to_dvobj(padapter)->mcc_objpriv);
 	u8 stop = (status < MCC_SETCMD_STATUS_START_CONNECT) ? _TRUE : _FALSE;
-	u32 start_time = rtw_get_current_time();
+	u32 start_time = jiffies;
 
 	RTW_INFO("===> "FUNC_ADPT_FMT"\n", FUNC_ADPT_ARG(padapter));
 
@@ -2538,7 +2536,7 @@ void rtw_hal_mcc_c2h_handler(PADAPTER padapter, u8 buflen, u8 *tmpBuf)
 	case MCC_RPT_READY:
 		_enter_critical_bh(&pmccobjpriv->mcc_lock, &irqL);
 		/* initialize counter & time */
-		pmccobjpriv->mcc_launch_time = rtw_get_current_time();
+		pmccobjpriv->mcc_launch_time = jiffies;
 		pmccobjpriv->mcc_c2h_status = MCC_RPT_READY;
 		pmccobjpriv->cur_mcc_success_cnt = 0;
 		pmccobjpriv->prev_mcc_success_cnt = 0;
@@ -3236,7 +3234,7 @@ void rtw_hal_mcc_issue_null_data(_adapter *padapter, u8 chbw_allow, u8 ps_mode)
 {
 	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
 	_adapter *iface = NULL;
-	systime start = rtw_get_current_time();
+	systime start = jiffies;
 	u8 i = 0;
 
 	if (!MCC_EN(padapter))
@@ -3288,7 +3286,7 @@ u8 *rtw_hal_mcc_append_go_p2p_ie(PADAPTER padapter, u8 *pframe, u32 *len)
 	if (pmccadapriv->p2p_go_noa_ie_len == 0)
 		return pframe;
 
-	_rtw_memcpy(pframe, pmccadapriv->p2p_go_noa_ie, pmccadapriv->p2p_go_noa_ie_len);
+	memcpy(pframe, pmccadapriv->p2p_go_noa_ie, pmccadapriv->p2p_go_noa_ie_len);
 	*len = *len + pmccadapriv->p2p_go_noa_ie_len;
 
 	return pframe + pmccadapriv->p2p_go_noa_ie_len;
@@ -3476,7 +3474,7 @@ u8 rtw_set_mcc_duration_cmd(_adapter *adapter, u8 type, u8 val)
 	pdrvextra_cmd_parm->size = 1;
 	pdrvextra_cmd_parm->pbuf = mcc_duration;
 
-	_rtw_memcpy(mcc_duration, &val, 1);
+	memcpy(mcc_duration, &val, 1);
 
 	init_h2fwcmd_w_parm_no_rsp(cmdobj, pdrvextra_cmd_parm, GEN_CMD_CODE(_Set_Drv_Extra));
 	res = rtw_enqueue_cmd(pcmdpriv, cmdobj);

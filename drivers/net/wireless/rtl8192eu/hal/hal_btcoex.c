@@ -220,7 +220,7 @@ static void DBG_BT_INFO_INIT(PBTCDBGINFO pinfo, u8 *pbuf, u32 size)
 	if (NULL == pinfo)
 		return;
 
-	_rtw_memset(pinfo, 0, sizeof(BTCDBGINFO));
+	memset(pinfo, 0, sizeof(BTCDBGINFO));
 
 	if (pbuf && size) {
 		pinfo->info = pbuf;
@@ -245,7 +245,7 @@ void DBG_BT_INFO(u8 *dbgmsg)
 		return;
 
 	pbuf = pinfo->info + pinfo->len;
-	_rtw_memcpy(pbuf, dbgmsg, msglen);
+	memcpy(pbuf, dbgmsg, msglen);
 	pinfo->len += msglen;
 }
 
@@ -266,15 +266,6 @@ static void halbtcoutsrc_DbgInit(void)
 
 	for (i = 0; i < COMP_MAX; i++)
 		GLBtcDbgType[i] = 0;
-}
-
-static u8 halbtcoutsrc_IsCsrBtCoex(PBTC_COEXIST pBtCoexist)
-{
-	if (pBtCoexist->board_info.bt_chip_type == BTC_CHIP_CSR_BC4
-	    || pBtCoexist->board_info.bt_chip_type == BTC_CHIP_CSR_BC8
-	   )
-		return _TRUE;
-	return _FALSE;
 }
 
 static void halbtcoutsrc_EnterPwrLock(PBTC_COEXIST pBtCoexist)
@@ -403,7 +394,7 @@ void halbtcoutsrc_LeaveLowPower(PBTC_COEXIST pBtCoexist)
 	if (GLBtcBtCoexAliveRegistered == _TRUE)
 		return;
 
-	stime = rtw_get_current_time();
+	stime = jiffies;
 	do {
 		ready = rtw_register_task_alive(padapter, BTCOEX_ALIVE);
 		if (_SUCCESS == ready)
@@ -413,7 +404,7 @@ void halbtcoutsrc_LeaveLowPower(PBTC_COEXIST pBtCoexist)
 		if (utime > timeout)
 			break;
 
-		rtw_msleep_os(1);
+		msleep(1);
 	} while (1);
 
 	GLBtcBtCoexAliveRegistered = _TRUE;
@@ -463,7 +454,7 @@ void halbtcoutsrc_AggregationCheck(PBTC_COEXIST pBtCoexist)
 	/* It can only be called after 8 seconds. */
 	/* ===================================== */
 
-	curTime = rtw_systime_to_ms(rtw_get_current_time());
+	curTime = jiffies_to_msecs(jiffies);
 	if ((curTime - preTime) < HALBTCOUTSRC_AGG_CHK_WINDOW_IN_MS)	/* over 8 seconds you can execute this function again. */
 		return;
 	else
@@ -756,7 +747,7 @@ static u8 _btmpoper_cmd(PBTC_COEXIST pBtCoexist, u8 opcode, u8 opcodever, u8 *cm
 	buf[0] = (opcodever & 0xF) | (seq << 4);
 	buf[1] = opcode;
 	if (cmd && size)
-		_rtw_memcpy(buf + 2, cmd, size);
+		memcpy(buf + 2, cmd, size);
 
 	GLBtcBtMpRptWait = _TRUE;
 	GLBtcBtMpRptWiFiOK = _FALSE;
@@ -1495,7 +1486,7 @@ u8 halbtcoutsrc_Set(void *pBtcContext, u8 setType, void *pInBuf)
 			u8 dataLen = *pU1Tmp;
 			u8 tmpBuf[BTC_TMP_BUF_SHORT];
 			if (dataLen)
-				_rtw_memcpy(tmpBuf, pU1Tmp + 1, dataLen);
+				memcpy(tmpBuf, pU1Tmp + 1, dataLen);
 			BT_SendEventExtBtInfoControl(padapter, dataLen, &tmpBuf[0]);
 		}
 #else /* !CONFIG_BT_COEXIST_SOCKET_TRX */
@@ -1509,7 +1500,7 @@ u8 halbtcoutsrc_Set(void *pBtcContext, u8 setType, void *pInBuf)
 			u8 dataLen = *pU1Tmp;
 			u8 tmpBuf[BTC_TMP_BUF_SHORT];
 			if (dataLen)
-				_rtw_memcpy(tmpBuf, pU1Tmp + 1, dataLen);
+				memcpy(tmpBuf, pU1Tmp + 1, dataLen);
 			BT_SendEventExtBtCoexControl(padapter, _FALSE, dataLen, &tmpBuf[0]);
 		}
 #else /* !CONFIG_BT_COEXIST_SOCKET_TRX */
@@ -2313,7 +2304,7 @@ static COL_H2C_STATUS halbtcoutsrc_check_c2h_ack(PADAPTER Adapter, PCOL_SINGLE_H
 	}
 	/* else */
 	{
-		_rtw_memmove(&pH2cRecord->c2h_ack_buf[0], &gl_coex_offload.c2h_ack_buf[req_num], gl_coex_offload.c2h_ack_len[req_num]);
+		memmove(&pH2cRecord->c2h_ack_buf[0], &gl_coex_offload.c2h_ack_buf[req_num], gl_coex_offload.c2h_ack_len[req_num]);
 		pH2cRecord->c2h_ack_len = gl_coex_offload.c2h_ack_len[req_num];
 	}
 
@@ -2346,7 +2337,7 @@ COL_H2C_STATUS halbtcoutsrc_CoexH2cProcess(void *pBtCoexist,
 	gl_coex_offload.h2c_req_num++;
 	gl_coex_offload.h2c_req_num %= 16;
 
-	_rtw_memmove(&pcol_h2c->buf[0], ph2c_par, h2c_par_len);
+	memmove(&pcol_h2c->buf[0], ph2c_par, h2c_par_len);
 
 
 	col_h2c_len = h2c_par_len + 2;	/* 2=sizeof(OPCode, OPCode_version and  Request number) */
@@ -2356,7 +2347,7 @@ COL_H2C_STATUS halbtcoutsrc_CoexH2cProcess(void *pBtCoexist,
 
 	gl_coex_offload.h2c_record[opcode].count++;
 	gl_coex_offload.h2c_record[opcode].h2c_len = col_h2c_len;
-	_rtw_memmove((PVOID)&gl_coex_offload.h2c_record[opcode].h2c_buf[0], (PVOID)pcol_h2c, col_h2c_len);
+	memmove((PVOID)&gl_coex_offload.h2c_record[opcode].h2c_buf[0], (PVOID)pcol_h2c, col_h2c_len);
 
 	h2c_status = halbtcoutsrc_send_h2c(Adapter, pcol_h2c, col_h2c_len);
 
@@ -2387,8 +2378,6 @@ u8 halbtcoutsrc_GetAntDetValFromBt(void *pBtcContext)
 	BOOLEAN				status = false;
 
 	status = NDBG_GetAntDetValFromBt(Adapter, opcodeVer, &AntDetVal);
-
-	RT_TRACE(COMP_DBG, DBG_LOUD, ("$$$ halbtcoutsrc_GetAntDetValFromBt(): status = %d, feature = %x\n", status, AntDetVal));
 
 	return AntDetVal;
 #else
@@ -2628,7 +2617,7 @@ static void BT_CoexOffloadC2hAckCheck(PADAPTER	Adapter, u8 *tmpBuf, u8 length)
 		p_c2h_ack = (PCOL_C2H_ACK)tmpBuf;
 		req_num = p_c2h_ack->req_num;
 
-		_rtw_memmove(&gl_coex_offload.c2h_ack_buf[req_num][0], tmpBuf, length);
+		memmove(&gl_coex_offload.c2h_ack_buf[req_num][0], tmpBuf, length);
 		gl_coex_offload.c2h_ack_len[req_num] = length;
 
 		complete(&gl_coex_offload.c2h_event[req_num]);
@@ -2659,13 +2648,13 @@ static void BT_CoexOffloadC2hIndCheck(PADAPTER Adapter, u8 *tmpBuf, u8 length)
 		ind_version = p_c2h_ind->version;
 		ind_length = p_c2h_ind->length;
 
-		_rtw_memmove(&gl_coex_offload.c2h_ind_buf[0], tmpBuf, length);
+		memmove(&gl_coex_offload.c2h_ind_buf[0], tmpBuf, length);
 		gl_coex_offload.c2h_ind_len = length;
 
 		/* log */
 		gl_coex_offload.c2h_ind_record[ind_type].count++;
 		gl_coex_offload.c2h_ind_record[ind_type].status[COL_STATUS_C2H_OK]++;
-		_rtw_memmove(&gl_coex_offload.c2h_ind_record[ind_type].ind_buf[0], tmpBuf, length);
+		memmove(&gl_coex_offload.c2h_ind_record[ind_type].ind_buf[0], tmpBuf, length);
 		gl_coex_offload.c2h_ind_record[ind_type].ind_len = length;
 
 		gl_coex_offload.c2h_ind_status[COL_STATUS_C2H_OK]++;
@@ -2842,7 +2831,7 @@ u8 EXhalbtcoutsrc_InitlizeVariables(void *padapter)
 	_rtw_init_sema(&GLBtcBtMpRptSema, 0);
 	GLBtcBtMpRptSeq = 0;
 	GLBtcBtMpRptStatus = 0;
-	_rtw_memset(GLBtcBtMpRptRsp, 0, C2H_MAX_SIZE);
+	memset(GLBtcBtMpRptRsp, 0, C2H_MAX_SIZE);
 	GLBtcBtMpRptRspSize = 0;
 	GLBtcBtMpRptWait = _FALSE;
 	GLBtcBtMpRptWiFiOK = _FALSE;
@@ -4874,53 +4863,6 @@ u8 EXhalbtcoutsrc_rate_id_to_btc_rate_id(u8 rate_id)
 	return btc_rate_id;
 }
 
-static void halbt_init_hw_config92C(PADAPTER padapter)
-{
-	PHAL_DATA_TYPE pHalData;
-	u8 u1Tmp;
-
-
-	pHalData = GET_HAL_DATA(padapter);
-	if ((pHalData->bt_coexist.btChipType == BT_CSR_BC4) ||
-	    (pHalData->bt_coexist.btChipType == BT_CSR_BC8)) {
-		if (pHalData->rf_type == RF_1T1R) {
-			/* Config to 1T1R */
-			u1Tmp = rtw_read8(padapter, rOFDM0_TRxPathEnable);
-			u1Tmp &= ~BIT(1);
-			rtw_write8(padapter, rOFDM0_TRxPathEnable, u1Tmp);
-			RT_DISP(FBT, BT_TRACE, ("[BTCoex], BT write 0xC04 = 0x%x\n", u1Tmp));
-
-			u1Tmp = rtw_read8(padapter, rOFDM1_TRxPathEnable);
-			u1Tmp &= ~BIT(1);
-			rtw_write8(padapter, rOFDM1_TRxPathEnable, u1Tmp);
-			RT_DISP(FBT, BT_TRACE, ("[BTCoex], BT write 0xD04 = 0x%x\n", u1Tmp));
-		}
-	}
-}
-
-static void halbt_init_hw_config92D(PADAPTER padapter)
-{
-	PHAL_DATA_TYPE pHalData;
-	u8 u1Tmp;
-
-	pHalData = GET_HAL_DATA(padapter);
-	if ((pHalData->bt_coexist.btChipType == BT_CSR_BC4) ||
-	    (pHalData->bt_coexist.btChipType == BT_CSR_BC8)) {
-		if (pHalData->rf_type == RF_1T1R) {
-			/* Config to 1T1R */
-			u1Tmp = rtw_read8(padapter, rOFDM0_TRxPathEnable);
-			u1Tmp &= ~BIT(1);
-			rtw_write8(padapter, rOFDM0_TRxPathEnable, u1Tmp);
-			RT_DISP(FBT, BT_TRACE, ("[BTCoex], BT write 0xC04 = 0x%x\n", u1Tmp));
-
-			u1Tmp = rtw_read8(padapter, rOFDM1_TRxPathEnable);
-			u1Tmp &= ~BIT(1);
-			rtw_write8(padapter, rOFDM1_TRxPathEnable, u1Tmp);
-			RT_DISP(FBT, BT_TRACE, ("[BTCoex], BT write 0xD04 = 0x%x\n", u1Tmp));
-		}
-	}
-}
-
 /*
  * Description:
  *	Run BT-Coexist mechansim or not
@@ -4985,7 +4927,7 @@ u8 hal_btcoex_Initialize(PADAPTER padapter)
 	HAL_DATA_TYPE	*pHalData = GET_HAL_DATA(padapter);
 	u8 ret;
 
-	_rtw_memset(&GLBtCoexist, 0, sizeof(GLBtCoexist));
+	memset(&GLBtCoexist, 0, sizeof(GLBtCoexist));
 
 	ret = EXhalbtcoutsrc_InitlizeVariables((void *)padapter);
 
@@ -5116,7 +5058,7 @@ void hal_btcoex_BtMpRptNotify(PADAPTER padapter, u8 length, u8 *tmpBuf)
 
 		GLBtcBtMpRptSeq = seq;
 		GLBtcBtMpRptStatus = status;
-		_rtw_memcpy(GLBtcBtMpRptRsp, tmpBuf + 3, len);
+		memcpy(GLBtcBtMpRptRsp, tmpBuf + 3, len);
 		GLBtcBtMpRptRspSize = len;
 
 		break;
@@ -5278,7 +5220,7 @@ u32 hal_btcoex_GetRaMask(PADAPTER padapter)
 void hal_btcoex_RecordPwrMode(PADAPTER padapter, u8 *pCmdBuf, u8 cmdLen)
 {
 
-	_rtw_memcpy(GLBtCoexist.pwrModeVal, pCmdBuf, cmdLen);
+	memcpy(GLBtCoexist.pwrModeVal, pCmdBuf, cmdLen);
 }
 
 void hal_btcoex_DisplayBtCoexInfo(PADAPTER padapter, u8 *pbuf, u32 bufsize)
@@ -5566,7 +5508,7 @@ hal_btcoex_ParseAntIsolationConfigFile(
 							RTW_INFO("Fail to parse parameters , format error!\n");
 							break;
 						}
-						_rtw_memset((PVOID)param_value_string , 0 , 10);
+						memset((PVOID)param_value_string , 0 , 10);
 						if (!ParseQualifiedString(szLine , &i , param_value_string , '"' , '"')) {
 							RTW_INFO("Fail to parse parameters\n");
 							return _FAIL;
@@ -5616,7 +5558,7 @@ hal_btcoex_AntIsolationConfig_ParaFile(
 	HAL_DATA_TYPE *pHalData = GET_HAL_DATA(Adapter);
 	int	rlen = 0 , rtStatus = _FAIL;
 
-	_rtw_memset(pHalData->para_file_buf , 0 , MAX_PARA_FILE_BUF_LEN);
+	memset(pHalData->para_file_buf , 0 , MAX_PARA_FILE_BUF_LEN);
 
 	rtw_get_phy_file_path(Adapter, pFileName);
 	if (rtw_is_file_readable(rtw_phy_para_file_path) == _TRUE) {

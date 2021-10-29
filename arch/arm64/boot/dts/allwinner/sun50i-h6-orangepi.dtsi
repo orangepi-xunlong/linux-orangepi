@@ -45,13 +45,13 @@
 
 		power {
 			label = "orangepi:red:power";
-			gpios = <&r_pio 0 7 GPIO_ACTIVE_HIGH>; /* PL7 */
+			gpios = <&r_pio 0 4 GPIO_ACTIVE_HIGH>; /* PL4 */
 			default-state = "on";
 		};
 
 		status {
 			label = "orangepi:green:status";
-			gpios = <&r_pio 0 4 GPIO_ACTIVE_HIGH>; /* PL4 */
+			gpios = <&r_pio 0 7 GPIO_ACTIVE_HIGH>; /* PL7 */
 		};
 	};
 

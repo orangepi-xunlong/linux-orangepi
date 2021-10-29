@@ -46,14 +46,14 @@
 		compatible = "gpio-leds";
 
 		power {
-			label = "orangepi:red:power";
-			gpios = <&r_pio 0 7 GPIO_ACTIVE_HIGH>; /* PL7 */
+			label = "red-led";
+			gpios = <&r_pio 0 4 GPIO_ACTIVE_HIGH>; /* PL4 */
 			default-state = "on";
 		};
 
 		status {
-			label = "orangepi:green:status";
-			gpios = <&r_pio 0 4 GPIO_ACTIVE_HIGH>; /* PL4 */
+			label = "green-led";
+			gpios = <&r_pio 0 7 GPIO_ACTIVE_HIGH>; /* PL7 */
 		};
 	};
 
@@ -201,15 +201,6 @@
 };
 
 &mmc2 {
-	vmmc-supply = <&reg_cldo1>;
-	vqmmc-supply = <&reg_bldo2>;
-	cap-mmc-hw-reset;
-	non-removable;
-	bus-width = <8>;
-	status = "okay";
-};
-
-&mmc2 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&mmc2_pins>;
 	vmmc-supply = <&reg_cldo1>;
@@ -217,6 +208,7 @@
 	bus-width = <8>;
 	non-removable;
 	cap-mmc-hw-reset;
+	mmc-hs200-1_8v;
 	status = "okay";
 };
 

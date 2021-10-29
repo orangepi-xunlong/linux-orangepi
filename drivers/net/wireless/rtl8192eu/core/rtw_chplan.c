@@ -476,7 +476,7 @@ u8 init_channel_set(_adapter *padapter, u8 ChannelPlan, RT_CHANNEL_INFO *channel
 		return chanset_size;
 	}
 
-	_rtw_memset(channel_set, 0, sizeof(RT_CHANNEL_INFO) * MAX_CHANNEL_NUM);
+	memset(channel_set, 0, sizeof(RT_CHANNEL_INFO) * MAX_CHANNEL_NUM);
 
 	if (IsSupported24G(regsty->wireless_mode) && hal_chk_band_cap(padapter, BAND_CAP_2G))
 		b2_4GBand = _TRUE;
@@ -569,7 +569,7 @@ u8 init_channel_set(_adapter *padapter, u8 ChannelPlan, RT_CHANNEL_INFO *channel
 
 	#ifdef CONFIG_DFS_MASTER
 	for (i = 0; i < chanset_size; i++)
-		channel_set[i].non_ocp_end_time = rtw_get_current_time();
+		channel_set[i].non_ocp_end_time = jiffies;
 	#endif
 #endif /* CONFIG_IEEE80211_BAND_5GHZ */
 

@@ -568,8 +568,7 @@
 		};
 
 		mmc2: mmc@4022000 {
-			compatible = "allwinner,sun50i-h6-emmc",
-				     "allwinner,sun50i-a64-emmc";
+			compatible = "allwinner,sun50i-h6-emmc";
 			reg = <0x04022000 0x1000>;
 			clocks = <&ccu CLK_BUS_MMC2>, <&ccu CLK_MMC2>;
 			clock-names = "ahb", "mmc";
@@ -1163,6 +1162,17 @@
 			nvmem-cells = <&ths_calibration>;
 			nvmem-cell-names = "calibration";
 			#thermal-sensor-cells = <1>;
+		};
+
+		sunxi-info {
+			compatible = "allwinner,sun50i-h6-sys-info";
+			status = "okay";
+		};
+
+		dump_reg: dump_reg@20000 {
+			compatible = "allwinner,sunxi-dump-reg";
+			reg = <0x0 0x03001000 0x0 0x0f20>;
+			status = "okay";
 		};
 	};
 

@@ -237,8 +237,6 @@
 
 #define ENABLE_USB_DROP_INCORRECT_OUT
 
-
-#define DISABLE_BB_RF	0
 #define RTW_CONFIG_RFREG18_WA
 /* #define RTL8191C_FPGA_NETWORKTYPE_ADHOC 0 */
 
@@ -286,7 +284,6 @@
 
 /* #define DBG_CMD_QUEUE */
 /* #define DBG_IO */
-/* #define DBG_DELAY_OS */
 /* #define DBG_MEM_ALLOC */
 /* #define DBG_IOCTL */
 

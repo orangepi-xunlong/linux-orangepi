@@ -392,7 +392,7 @@ void rtw_rfctl_deinit(_adapter *adapter);
 
 #ifdef CONFIG_DFS_MASTER
 struct rf_ctl_t;
-#define CH_IS_NON_OCP(rt_ch_info) (rtw_time_after((rt_ch_info)->non_ocp_end_time, rtw_get_current_time()))
+#define CH_IS_NON_OCP(rt_ch_info) (rtw_time_after((rt_ch_info)->non_ocp_end_time, jiffies))
 bool rtw_is_cac_reset_needed(struct rf_ctl_t *rfctl, u8 ch, u8 bw, u8 offset);
 bool _rtw_rfctl_overlap_radar_detect_ch(struct rf_ctl_t *rfctl, u8 ch, u8 bw, u8 offset);
 bool rtw_rfctl_overlap_radar_detect_ch(struct rf_ctl_t *rfctl);
@@ -482,7 +482,7 @@ struct p2p_oper_class_map {
 struct mlme_ext_priv {
 	_adapter	*padapter;
 	u8	mlmeext_init;
-	ATOMIC_T		event_seq;
+	atomic_t event_seq;
 	u16	mgnt_seq;
 #ifdef CONFIG_IEEE80211W
 	u16	sa_query_seq;
@@ -838,7 +838,6 @@ void rtw_macid_ctl_set_rate_bmp0(struct macid_ctl_t *macid_ctl, u8 id, u32 bmp);
 void rtw_macid_ctl_set_rate_bmp1(struct macid_ctl_t *macid_ctl, u8 id, u32 bmp);
 void rtw_macid_ctl_init_sleep_reg(struct macid_ctl_t *macid_ctl, u16 m0, u16 m1, u16 m2, u16 m3);
 void rtw_macid_ctl_init(struct macid_ctl_t *macid_ctl);
-void rtw_macid_ctl_deinit(struct macid_ctl_t *macid_ctl);
 u8 rtw_iface_bcmc_id_get(_adapter *padapter);
 void rtw_iface_bcmc_id_set(_adapter *padapter, u8 mac_id);
 #if defined(DBG_CONFIG_ERROR_RESET) && defined(CONFIG_CONCURRENT_MODE)

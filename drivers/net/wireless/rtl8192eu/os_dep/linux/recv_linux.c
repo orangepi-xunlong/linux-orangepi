@@ -96,7 +96,7 @@ int rtw_os_alloc_recvframe(_adapter *padapter, union recv_frame *precvframe, u8 
 		precvframe->u.hdr.rx_end = pkt_copy->data + alloc_sz;
 		skb_reserve(pkt_copy, 8 - ((SIZE_PTR)(pkt_copy->data) & 7));  /* force pkt_copy->data at 8-byte alignment address */
 		skb_reserve(pkt_copy, shift_sz);/* force ip_hdr at 8-byte alignment address according to shift_sz. */
-		_rtw_memcpy(pkt_copy->data, pdata, skb_len);
+		memcpy(pkt_copy->data, pdata, skb_len);
 		precvframe->u.hdr.rx_data = precvframe->u.hdr.rx_tail = pkt_copy->data;
 	} else {
 #if 0
@@ -296,7 +296,7 @@ _pkt *rtw_os_alloc_msdu_pkt(union recv_frame *prframe, const u8 *da, const u8 *s
 	if (sub_skb) {
 		skb_reserve(sub_skb, 14);
 		data_ptr = (u8 *)skb_put(sub_skb, msdu_len);
-		_rtw_memcpy(data_ptr, msdu, msdu_len);
+		memcpy(data_ptr, msdu, msdu_len);
 	} else
 #endif /* CONFIG_SKB_COPY */
 	{
@@ -320,16 +320,16 @@ _pkt *rtw_os_alloc_msdu_pkt(union recv_frame *prframe, const u8 *da, const u8 *s
 	) {
 		/* remove RFC1042 or Bridge-Tunnel encapsulation and replace EtherType */
 		skb_pull(sub_skb, SNAP_SIZE);
-		_rtw_memcpy(skb_push(sub_skb, ETH_ALEN), sa, ETH_ALEN);
-		_rtw_memcpy(skb_push(sub_skb, ETH_ALEN), da, ETH_ALEN);
+		memcpy(skb_push(sub_skb, ETH_ALEN), sa, ETH_ALEN);
+		memcpy(skb_push(sub_skb, ETH_ALEN), da, ETH_ALEN);
 	} else {
 		/* Leave Ethernet header part of hdr and full payload */
 		u16 len;
 
 		len = htons(sub_skb->len);
-		_rtw_memcpy(skb_push(sub_skb, 2), &len, 2);
-		_rtw_memcpy(skb_push(sub_skb, ETH_ALEN), sa, ETH_ALEN);
-		_rtw_memcpy(skb_push(sub_skb, ETH_ALEN), da, ETH_ALEN);
+		memcpy(skb_push(sub_skb, 2), &len, 2);
+		memcpy(skb_push(sub_skb, ETH_ALEN), sa, ETH_ALEN);
+		memcpy(skb_push(sub_skb, ETH_ALEN), da, ETH_ALEN);
 	}
 
 	return sub_skb;
@@ -442,7 +442,7 @@ void rtw_os_recv_indicate_pkt(_adapter *padapter, _pkt *pkt, union recv_frame *r
 			_pkt *pskb2 = NULL;
 			struct sta_info *psta = NULL;
 			struct sta_priv *pstapriv = &padapter->stapriv;
-			int bmcast = IS_MCAST(ehdr->h_dest);
+			bool bmcast = is_multicast_ether_addr(ehdr->h_dest);
 
 			/* RTW_INFO("bmcast=%d\n", bmcast); */
 
@@ -562,16 +562,16 @@ void rtw_handle_tkip_mic_err(_adapter *padapter, struct sta_info *sta, u8 bgroup
 	systime cur_time = 0;
 
 	if (psecuritypriv->last_mic_err_time == 0)
-		psecuritypriv->last_mic_err_time = rtw_get_current_time();
+		psecuritypriv->last_mic_err_time = jiffies;
 	else {
-		cur_time = rtw_get_current_time();
+		cur_time = jiffies;
 
 		if (cur_time - psecuritypriv->last_mic_err_time < 60 * HZ) {
 			psecuritypriv->btkip_countermeasure = _TRUE;
 			psecuritypriv->last_mic_err_time = 0;
 			psecuritypriv->btkip_countermeasure_time = cur_time;
 		} else
-			psecuritypriv->last_mic_err_time = rtw_get_current_time();
+			psecuritypriv->last_mic_err_time = jiffies;
 	}
 
 #ifdef CONFIG_IOCTL_CFG80211
@@ -583,16 +583,16 @@ void rtw_handle_tkip_mic_err(_adapter *padapter, struct sta_info *sta, u8 bgroup
 	cfg80211_michael_mic_failure(padapter->pnetdev, sta->cmn.mac_addr, key_type, -1, NULL, GFP_ATOMIC);
 #endif
 
-	_rtw_memset(&ev, 0x00, sizeof(ev));
+	memset(&ev, 0x00, sizeof(ev));
 	if (bgroup)
 		ev.flags |= IW_MICFAILURE_GROUP;
 	else
 		ev.flags |= IW_MICFAILURE_PAIRWISE;
 
 	ev.src_addr.sa_family = ARPHRD_ETHER;
-	_rtw_memcpy(ev.src_addr.sa_data, sta->cmn.mac_addr, ETH_ALEN);
+	memcpy(ev.src_addr.sa_data, sta->cmn.mac_addr, ETH_ALEN);
 
-	_rtw_memset(&wrqu, 0x00, sizeof(wrqu));
+	memset(&wrqu, 0x00, sizeof(wrqu));
 	wrqu.data.length = sizeof(ev);
 
 #ifndef CONFIG_IOCTL_CFG80211
@@ -632,7 +632,7 @@ void rtw_hostapd_mlme_rx(_adapter *padapter, union recv_frame *precv_frame)
 	skb_reset_mac_header(skb);
 
 	/* skb_pull(skb, 24); */
-	_rtw_memset(skb->cb, 0, sizeof(skb->cb));
+	memset(skb->cb, 0, sizeof(skb->cb));
 
 	rtw_netif_rx(pmgnt_netdev, skb);
 

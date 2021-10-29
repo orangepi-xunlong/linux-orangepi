@@ -1338,10 +1338,10 @@ static int retriveFromFile(const char *path, u8 *buf, u32 sz)
 #ifdef set_fs
 			oldfs = get_fs();
 			set_fs(KERNEL_DS);
+#endif
 			ret = readFile(fp, buf, sz);
+#ifdef set_fs
 			set_fs(oldfs);
-#else
-			ret = readFile(fp, buf, sz);
 #endif
 			closeFile(fp);
 
@@ -1379,10 +1379,10 @@ static int storeToFile(const char *path, u8 *buf, u32 sz)
 #ifdef set_fs
 			oldfs = get_fs();
 			set_fs(KERNEL_DS);
+#endif
 			ret = writeFile(fp, buf, sz);
+#ifdef set_fs
 			set_fs(oldfs);
-#else
-			ret = writeFile(fp, buf, sz);
 #endif
 			closeFile(fp);
 

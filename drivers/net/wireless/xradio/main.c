@@ -515,10 +515,12 @@ int xradio_core_init(struct sdio_func* func)
 	hw_priv->sdio_func = func;
 	sdio_set_drvdata(func, hw_priv);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0)
 	// fill in mac addresses
 	if (hw_priv->pdev->of_node) {
 		addr = of_get_mac_address(hw_priv->pdev->of_node);
 	}
+#endif
 	if (!addr) {
 		dev_warn(hw_priv->pdev, "no mac address provided, using random\n");
 		eth_random_addr(randomaddr);

@@ -31,32 +31,6 @@
  * Global var
  * ************************************************************ */
 
-
-static VOID
-dm_CheckProtection(
-	IN	PADAPTER	Adapter
-)
-{
-#if 0
-	PMGNT_INFO		pMgntInfo = &(Adapter->MgntInfo);
-	u1Byte			CurRate, RateThreshold;
-
-	if (pMgntInfo->pHTInfo->bCurBW40MHz)
-		RateThreshold = MGN_MCS1;
-	else
-		RateThreshold = MGN_MCS3;
-
-	if (Adapter->TxStats.CurrentInitTxRate <= RateThreshold) {
-		pMgntInfo->bDmDisableProtect = TRUE;
-		DbgPrint("Forced disable protect: %x\n", Adapter->TxStats.CurrentInitTxRate);
-	} else {
-		pMgntInfo->bDmDisableProtect = FALSE;
-		DbgPrint("Enable protect: %x\n", Adapter->TxStats.CurrentInitTxRate);
-	}
-#endif
-}
-
-
 #ifdef CONFIG_SUPPORT_HW_WPS_PBC
 static void dm_CheckPbcGPIO(_adapter *padapter)
 {
@@ -326,6 +300,5 @@ void rtl8192e_deinit_dm_priv(IN PADAPTER Adapter)
 {
 	PHAL_DATA_TYPE	pHalData = GET_HAL_DATA(Adapter);
 	struct dm_struct		*podmpriv = &pHalData->odmpriv;
-	/* _rtw_spinlock_free(&pHalData->odm_stainfo_lock);		 */
 	odm_cancel_all_timers(podmpriv);
 }

@@ -32,13 +32,13 @@ static void _rtw_bss_nums_count(_adapter *adapter, u8 *pbss_nums)
 		RTW_ERR("%s pbss_nums is null pointer\n", __func__);
 		return;
 	}
-	_rtw_memset(pbss_nums, 0, MAX_CHANNEL_NUM);
+	memset(pbss_nums, 0, MAX_CHANNEL_NUM);
 
 	_enter_critical_bh(&(pmlmepriv->scanned_queue.lock), &irqL);
 	phead = get_list_head(queue);
 	plist = get_next(phead);
 	while (1) {
-		if (rtw_end_of_queue_search(phead, plist) == _TRUE)
+		if (phead == plist)
 			break;
 
 		pnetwork = LIST_CONTAINOR(plist, struct wlan_network, list);
@@ -94,7 +94,7 @@ void rtw_acs_reset(_adapter *adapter)
 	HAL_DATA_TYPE *hal_data = GET_HAL_DATA(adapter);
 	struct auto_chan_sel *pacs = &hal_data->acs;
 
-	_rtw_memset(pacs, 0, sizeof(struct auto_chan_sel));
+	memset(pacs, 0, sizeof(struct auto_chan_sel));
 	#ifdef CONFIG_RTW_ACS_DBG
 	rtw_acs_adv_reset(adapter);
 	#endif /*CONFIG_RTW_ACS_DBG*/
@@ -204,7 +204,7 @@ void rtw_acs_get_rst(_adapter *adapter)
 			(rpt.nhm_rpt_stamp == hal_data->acs.trig_rpt.nhm_rpt_stamp)){
 			hal_data->acs.clm_ratio[chan_idx] = rpt.clm_ratio;
 			hal_data->acs.nhm_ratio[chan_idx] = rpt.nhm_ratio;
-			_rtw_memcpy(&hal_data->acs.nhm[chan_idx][0], rpt.nhm_result, NHM_RPT_NUM);
+			memcpy(&hal_data->acs.nhm[chan_idx][0], rpt.nhm_result, NHM_RPT_NUM);
 
 			/*RTW_INFO("[ACS] get_rst success (rst = 0x%02x, clm_stamp:%d:%d, nhm_stamp:%d:%d)\n",
 			rst,

@@ -17,13 +17,6 @@
 #include <drv_types.h>
 #include <hal_data.h>
 
-#if defined(PLATFORM_LINUX) && defined (PLATFORM_WINDOWS)
-
-	#error "Shall be Linux or Windows, but not both!\n"
-
-#endif
-
-
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Realtek Wireless Lan Driver");
 MODULE_AUTHOR("Realtek Semiconductor Corp.");
@@ -900,7 +893,7 @@ uint loadparam(_adapter *padapter)
 	/* registry_par->hci = (u8)hci; */
 	registry_par->network_mode  = (u8)rtw_network_mode;
 
-	_rtw_memcpy(registry_par->ssid.Ssid, "ANY", 3);
+	memcpy(registry_par->ssid.Ssid, "ANY", 3);
 	registry_par->ssid.SsidLength = 3;
 
 	registry_par->channel = (u8)rtw_channel;
@@ -1009,9 +1002,9 @@ uint loadparam(_adapter *padapter)
 	) {
 		if (rtw_country_code != rtw_country_unspecified)
 			RTW_ERR("%s discard rtw_country_code not in alpha2\n", __func__);
-		_rtw_memset(registry_par->alpha2, 0xFF, 2);
+		memset(registry_par->alpha2, 0xFF, 2);
 	} else
-		_rtw_memcpy(registry_par->alpha2, rtw_country_code, 2);
+		memcpy(registry_par->alpha2, rtw_country_code, 2);
 
 	registry_par->channel_plan = (u8)rtw_channel_plan;
 	rtw_regsty_load_excl_chs(registry_par);
@@ -1249,8 +1242,8 @@ static int rtw_net_set_mac_address(struct net_device *pnetdev, void *addr)
 		return ret;
 	}
 
-	_rtw_memcpy(adapter_mac_addr(padapter), sa->sa_data, ETH_ALEN); /* set mac addr to adapter */
-	_rtw_memcpy(pnetdev->dev_addr, sa->sa_data, ETH_ALEN); /* set mac addr to net_device */
+	memcpy(adapter_mac_addr(padapter), sa->sa_data, ETH_ALEN); /* set mac addr to adapter */
+	memcpy(pnetdev->dev_addr, sa->sa_data, ETH_ALEN); /* set mac addr to net_device */
 
 #if 0
 	if (rtw_is_hw_init_completed(padapter)) {
@@ -1366,7 +1359,7 @@ u16 rtw_recv_select_queue(struct sk_buff *skb)
 	u32 priority;
 	u8 *pdata = skb->data;
 
-	_rtw_memcpy(&eth_type, pdata + (ETH_ALEN << 1), 2);
+	memcpy(&eth_type, pdata + (ETH_ALEN << 1), 2);
 
 	switch (eth_type) {
 	case htons(ETH_P_IP):
@@ -1696,7 +1689,7 @@ int rtw_os_ndev_register(_adapter *adapter, const char *name)
 	/* alloc netdev name */
 	rtw_init_netdev_name(ndev, name);
 
-	_rtw_memcpy(ndev->dev_addr, adapter_mac_addr(adapter), ETH_ALEN);
+	memcpy(ndev->dev_addr, adapter_mac_addr(adapter), ETH_ALEN);
 
 	/* Tell the network stack we exist */
 
@@ -2129,12 +2122,12 @@ struct dvobj_priv *devobj_init(void)
 #endif
 #ifdef CONFIG_RTW_CUSTOMER_STR
 	_rtw_mutex_init(&pdvobj->customer_str_mutex);
-	_rtw_memset(pdvobj->customer_str, 0xFF, RTW_CUSTOMER_STR_LEN);
+	memset(pdvobj->customer_str, 0xFF, RTW_CUSTOMER_STR_LEN);
 #endif
 
 	pdvobj->processing_dev_remove = _FALSE;
 
-	ATOMIC_SET(&pdvobj->disable_func, 0);
+	atomic_set(&pdvobj->disable_func, 0);
 
 	rtw_macid_ctl_init(&pdvobj->macid_ctl);
 #ifdef CONFIG_CLIENT_PORT_CFG
@@ -2199,7 +2192,6 @@ void devobj_deinit(struct dvobj_priv *pdvobj)
 #ifdef CONFIG_MCC_MODE
 	_rtw_mutex_free(&(pdvobj->mcc_objpriv.mcc_mutex));
 	_rtw_mutex_free(&(pdvobj->mcc_objpriv.mcc_tsf_req_mutex));
-	_rtw_spinlock_free(&pdvobj->mcc_objpriv.mcc_lock);
 #endif /* CONFIG_MCC_MODE */
 
 	_rtw_mutex_free(&pdvobj->hw_init_mutex);
@@ -2219,22 +2211,10 @@ void devobj_deinit(struct dvobj_priv *pdvobj)
 	_rtw_mutex_free(&pdvobj->syson_indirect_access_mutex);
 #endif
 
-	rtw_macid_ctl_deinit(&pdvobj->macid_ctl);
-#ifdef CONFIG_CLIENT_PORT_CFG
-	rtw_clt_port_deinit(&pdvobj->clt_port);
-#endif
-
-	_rtw_spinlock_free(&pdvobj->cam_ctl.lock);
 	_rtw_mutex_free(&pdvobj->cam_ctl.sec_cam_access_mutex);
 
-#if defined(RTK_129X_PLATFORM) && defined(CONFIG_PCI_HCI)
-	_rtw_spinlock_free(&pdvobj->io_reg_lock);
-#endif
 #ifdef CONFIG_MBSSID_CAM
 	rtw_mbid_cam_deinit(pdvobj);
-#endif
-#ifdef CONFIG_SUPPORT_MULTI_BCN
-	_rtw_spinlock_free(&(pdvobj->ap_if_q.lock));
 #endif
 	rtw_mfree((u8 *)pdvobj, sizeof(*pdvobj));
 }
@@ -2409,8 +2389,8 @@ u8 rtw_init_drv_sw(_adapter *padapter)
 	/* add for CONFIG_IEEE80211W, none 11w also can use */
 	_rtw_spinlock_init(&padapter->security_key_mutex);
 
-	/* We don't need to memset padapter->XXX to zero, because adapter is allocated by rtw_zvmalloc(). */
-	/* _rtw_memset((unsigned char *)&padapter->securitypriv, 0, sizeof (struct security_priv)); */
+	/* We don't need to memset padapter->XXX to zero, because adapter is allocated by vzalloc(). */
+	/* memset((unsigned char *)&padapter->securitypriv, 0, sizeof (struct security_priv)); */
 
 	if (_rtw_init_sta_priv(&padapter->stapriv) == _FAIL) {
 		RTW_INFO("Can't _rtw_init_sta_priv\n");
@@ -2437,7 +2417,7 @@ u8 rtw_init_drv_sw(_adapter *padapter)
 
 	rtw_init_pwrctrl_priv(padapter);
 
-	/* _rtw_memset((u8 *)&padapter->qospriv, 0, sizeof (struct qos_priv)); */ /* move to mlme_priv */
+	/* memset((u8 *)&padapter->qospriv, 0, sizeof (struct qos_priv)); */ /* move to mlme_priv */
 
 #ifdef CONFIG_MP_INCLUDED
 	if (init_mp_priv(padapter) == _FAIL)
@@ -2580,11 +2560,6 @@ u8 rtw_free_drv_sw(_adapter *padapter)
 	}
 	#endif
 	/* add for CONFIG_IEEE80211W, none 11w also can use */
-	_rtw_spinlock_free(&padapter->security_key_mutex);
-
-#ifdef CONFIG_BR_EXT
-	_rtw_spinlock_free(&padapter->br_ext_lock);
-#endif /* CONFIG_BR_EXT */
 
 #ifdef CONFIG_INTEL_WIDI
 	rtw_free_intel_widi(padapter);
@@ -2657,7 +2632,7 @@ int _netdev_vir_if_open(struct net_device *pnetdev)
 		if (primary_padapter->bup == _FALSE)
 			rtw_macaddr_cfg(adapter_mac_addr(primary_padapter), get_hal_mac_addr(primary_padapter));
 
-		_rtw_memcpy(mac, adapter_mac_addr(primary_padapter), ETH_ALEN);
+		memcpy(mac, adapter_mac_addr(primary_padapter), ETH_ALEN);
 
 		/*
 		* If the BIT1 is 0, the address is universally administered.
@@ -2665,13 +2640,13 @@ int _netdev_vir_if_open(struct net_device *pnetdev)
 		*/
 		mac[0] |= BIT(1);
 
-		_rtw_memcpy(adapter_mac_addr(padapter), mac, ETH_ALEN);
+		memcpy(adapter_mac_addr(padapter), mac, ETH_ALEN);
 
 #ifdef CONFIG_MI_WITH_MBSSID_CAM
 		rtw_mbid_camid_alloc(padapter, adapter_mac_addr(padapter));
 #endif
 		rtw_init_wifidirect_addrs(padapter, adapter_mac_addr(padapter), adapter_mac_addr(padapter));
-		_rtw_memcpy(pnetdev->dev_addr, adapter_mac_addr(padapter), ETH_ALEN);
+		memcpy(pnetdev->dev_addr, adapter_mac_addr(padapter), ETH_ALEN);
 	}
 #endif /*CONFIG_PLATFORM_INTEL_BYT*/
 
@@ -2823,14 +2798,14 @@ _adapter *rtw_drv_add_vir_if(_adapter *primary_padapter,
 	u8 mac[ETH_ALEN];
 
 	/****** init adapter ******/
-	padapter = (_adapter *)rtw_zvmalloc(sizeof(*padapter));
+	padapter = (_adapter *)vzalloc(sizeof(*padapter));
 	if (padapter == NULL)
 		goto exit;
 
 	if (loadparam(padapter) != _SUCCESS)
 		goto free_adapter;
 
-	_rtw_memcpy(padapter, primary_padapter, sizeof(_adapter));
+	memcpy(padapter, primary_padapter, sizeof(_adapter));
 
 	/*  */
 	padapter->bup = _FALSE;
@@ -2868,7 +2843,7 @@ _adapter *rtw_drv_add_vir_if(_adapter *primary_padapter,
 
 
 	/*get mac address from primary_padapter*/
-	_rtw_memcpy(mac, adapter_mac_addr(primary_padapter), ETH_ALEN);
+	memcpy(mac, adapter_mac_addr(primary_padapter), ETH_ALEN);
 
 	/*
 	* If the BIT1 is 0, the address is universally administered.
@@ -2878,7 +2853,7 @@ _adapter *rtw_drv_add_vir_if(_adapter *primary_padapter,
 	if (padapter->iface_id > IFACE_ID1)
 		mac[4] ^= BIT(padapter->iface_id);
 
-	_rtw_memcpy(adapter_mac_addr(padapter), mac, ETH_ALEN);
+	memcpy(adapter_mac_addr(padapter), mac, ETH_ALEN);
 	/* update mac-address to mbsid-cam cache*/
 #ifdef CONFIG_MI_WITH_MBSSID_CAM
 	rtw_mbid_camid_alloc(padapter, adapter_mac_addr(padapter));
@@ -2898,7 +2873,7 @@ free_drv_sw:
 		rtw_free_drv_sw(padapter);
 free_adapter:
 	if (res != _SUCCESS && padapter) {
-		rtw_vmfree((u8 *)padapter, sizeof(*padapter));
+		vfree((u8 *)padapter);
 		padapter = NULL;
 	}
 exit:
@@ -2958,7 +2933,7 @@ void rtw_drv_free_vir_if(_adapter *padapter)
 	/* TODO: use rtw_os_ndevs_deinit instead at the first stage of driver's dev deinit function */
 	rtw_os_ndev_free(padapter);
 
-	rtw_vmfree((u8 *)padapter, sizeof(_adapter));
+	vfree(padapter);
 }
 
 
@@ -3009,13 +2984,13 @@ static int rtw_inetaddr_notifier_call(struct notifier_block *nb,
 
 	switch (action) {
 	case NETDEV_UP:
-		_rtw_memcpy(pmlmeinfo->ip_addr, &ifa->ifa_address,
+		memcpy(pmlmeinfo->ip_addr, &ifa->ifa_address,
 					RTW_IP_ADDR_LEN);
 		RTW_DBG("%s[%s]: up IP: %pI4\n", __func__,
 					ifa->ifa_label, pmlmeinfo->ip_addr);
 	break;
 	case NETDEV_DOWN:
-		_rtw_memset(pmlmeinfo->ip_addr, 0, RTW_IP_ADDR_LEN);
+		memset(pmlmeinfo->ip_addr, 0, RTW_IP_ADDR_LEN);
 		RTW_DBG("%s[%s]: down IP: %pI4\n", __func__,
 					ifa->ifa_label, pmlmeinfo->ip_addr);
 	break;
@@ -3062,7 +3037,7 @@ static int rtw_inet6addr_notifier_call(struct notifier_block *nb,
 #ifdef CONFIG_WOWLAN
 		pwrctl->wowlan_ns_offload_en = _TRUE;
 #endif
-		_rtw_memcpy(pmlmeinfo->ip6_addr, &inet6_ifa->addr,
+		memcpy(pmlmeinfo->ip6_addr, &inet6_ifa->addr,
 					RTW_IPv6_ADDR_LEN);
 		RTW_DBG("%s: up IPv6 addrs: %pI6\n", __func__,
 					pmlmeinfo->ip6_addr);
@@ -3071,7 +3046,7 @@ static int rtw_inet6addr_notifier_call(struct notifier_block *nb,
 #ifdef CONFIG_WOWLAN
 		pwrctl->wowlan_ns_offload_en = _FALSE;
 #endif
-		_rtw_memset(pmlmeinfo->ip6_addr, 0, RTW_IPv6_ADDR_LEN);
+		memset(pmlmeinfo->ip6_addr, 0, RTW_IPv6_ADDR_LEN);
 		RTW_DBG("%s: down IPv6 addrs: %pI6\n", __func__,
 					pmlmeinfo->ip6_addr);
 		break;
@@ -3420,7 +3395,7 @@ int _netdev_open(struct net_device *pnetdev)
 		rtw_mbid_camid_alloc(padapter, adapter_mac_addr(padapter));
 #endif
 		rtw_init_wifidirect_addrs(padapter, adapter_mac_addr(padapter), adapter_mac_addr(padapter));
-		_rtw_memcpy(pnetdev->dev_addr, adapter_mac_addr(padapter), ETH_ALEN);
+		memcpy(pnetdev->dev_addr, adapter_mac_addr(padapter), ETH_ALEN);
 #endif /* CONFIG_PLATFORM_INTEL_BYT */
 
 		rtw_clr_surprise_removed(padapter);
@@ -3510,8 +3485,8 @@ netdev_open_normal_process:
 #endif
 
 #ifdef CONFIG_RTW_CFGVEDNOR_LLSTATS
-	pwrctrlpriv->radio_on_start_time = rtw_get_current_time();
-	pwrctrlpriv->pwr_saving_start_time = rtw_get_current_time();
+	pwrctrlpriv->radio_on_start_time = jiffies;
+	pwrctrlpriv->pwr_saving_start_time = jiffies;
 	pwrctrlpriv->pwr_saving_time = 0;
 	pwrctrlpriv->on_time = 0;
 	pwrctrlpriv->tx_time = 0;
@@ -3632,7 +3607,7 @@ int rtw_ips_pwr_up(_adapter *padapter)
 	struct sreset_priv *psrtpriv = &pHalData->srestpriv;
 #endif/* #ifdef DBG_CONFIG_ERROR_DETECT */
 #endif /* defined(CONFIG_SWLPS_IN_IPS) || defined(CONFIG_FWLPS_IN_IPS) */
-	systime start_time = rtw_get_current_time();
+	systime start_time = jiffies;
 	RTW_INFO("===>  rtw_ips_pwr_up..............\n");
 
 #if defined(CONFIG_SWLPS_IN_IPS) || defined(CONFIG_FWLPS_IN_IPS)
@@ -3653,7 +3628,7 @@ int rtw_ips_pwr_up(_adapter *padapter)
 
 void rtw_ips_pwr_down(_adapter *padapter)
 {
-	systime start_time = rtw_get_current_time();
+	systime start_time = jiffies;
 	RTW_INFO("===> rtw_ips_pwr_down...................\n");
 
 	padapter->net_closed = _TRUE;
@@ -3900,7 +3875,7 @@ static int netdev_close(struct net_device *pnetdev)
 
 	RTW_INFO("netdev_close, bips_processing=%d\n", pwrctl->bips_processing);
 	while (pwrctl->bips_processing == _TRUE) /* waiting for ips_processing done before call rtw_dev_unload() */
-		rtw_msleep_os(1);
+		msleep(1);
 
 	rtw_dev_unload(padapter);
 	rtw_sdio_set_power(0);
@@ -4178,7 +4153,7 @@ static int arp_query(unsigned char *haddr, u32 paddr,
 	if (neighbor_entry != NULL) {
 		neighbor_entry->used = jiffies;
 		if (neighbor_entry->nud_state & NUD_VALID) {
-			_rtw_memcpy(haddr, neighbor_entry->ha, dev->addr_len);
+			memcpy(haddr, neighbor_entry->ha, dev->addr_len);
 			ret = 1;
 		}
 		neigh_release(neighbor_entry);
@@ -4231,7 +4206,7 @@ int	rtw_gw_addr_query(_adapter *padapter)
 		pmlmepriv->gw_ip[1] = (gw_addr & 0xff00) >> 8;
 		pmlmepriv->gw_ip[2] = (gw_addr & 0xff0000) >> 16;
 		pmlmepriv->gw_ip[3] = (gw_addr & 0xff000000) >> 24;
-		_rtw_memcpy(pmlmepriv->gw_mac_addr, gw_mac, ETH_ALEN);
+		memcpy(pmlmepriv->gw_mac_addr, gw_mac, ETH_ALEN);
 		RTW_INFO("%s Gateway Mac:\t" MAC_FMT "\n", __FUNCTION__, MAC_ARG(pmlmepriv->gw_mac_addr));
 		RTW_INFO("%s Gateway IP:\t" IP_FMT "\n", __FUNCTION__, IP_ARG(pmlmepriv->gw_ip));
 	} else
@@ -4273,7 +4248,7 @@ void rtw_dev_unload(PADAPTER padapter)
 		{
 			rtw_stop_drv_threads(padapter);
 
-			if (ATOMIC_READ(&(pcmdpriv->cmdthd_running)) == _TRUE) {
+			if (atomic_read(&(pcmdpriv->cmdthd_running)) == _TRUE) {
 				RTW_ERR("cmd_thread not stop !!\n");
 				rtw_warn_on(1);
 			}
@@ -4654,7 +4629,7 @@ int rtw_suspend_common(_adapter *padapter)
 #endif
 
 	int ret = 0;
-	systime start_time = rtw_get_current_time();
+	systime start_time = jiffies;
 
 	RTW_PRINT(" suspend start\n");
 	RTW_INFO("==> %s (%s:%d)\n", __FUNCTION__, current->comm, current->pid);
@@ -4664,7 +4639,7 @@ int rtw_suspend_common(_adapter *padapter)
 	pwrpriv->bInSuspend = _TRUE;
 
 	while (pwrpriv->bips_processing == _TRUE)
-		rtw_msleep_os(1);
+		msleep(1);
 
 #ifdef CONFIG_IOL_READ_EFUSE_MAP
 	if (!padapter->bup) {
@@ -5121,7 +5096,7 @@ exit:
 int rtw_resume_common(_adapter *padapter)
 {
 	int ret = 0;
-	systime start_time = rtw_get_current_time();
+	systime start_time = jiffies;
 	struct pwrctrl_priv *pwrpriv = adapter_to_pwrctl(padapter);
 
 	if (pwrpriv->bInSuspend == _FALSE)

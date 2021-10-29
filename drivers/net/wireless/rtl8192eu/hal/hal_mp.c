@@ -90,7 +90,7 @@ void hal_mpt_SwitchRfSetting(PADAPTER	pAdapter)
 		pMptCtx->backup0x52_RF_A = (u1Byte)phy_query_rf_reg(pAdapter, RF_PATH_A, RF_0x52, 0x000F0);
 		pMptCtx->backup0x52_RF_B = (u1Byte)phy_query_rf_reg(pAdapter, RF_PATH_B, RF_0x52, 0x000F0);
 
-		if ((PlatformEFIORead4Byte(pAdapter, 0xF4) & BIT29) == BIT29) {
+		if ((rtw_read32(pAdapter, 0xF4) & BIT29) == BIT29) {
 			phy_set_rf_reg(pAdapter, RF_PATH_A, RF_0x52, 0x000F0, 0xB);
 			phy_set_rf_reg(pAdapter, RF_PATH_B, RF_0x52, 0x000F0, 0xB);
 		} else {
@@ -1631,12 +1631,12 @@ void hal_mpt_GetThermalMeter(PADAPTER pAdapter, u8 *value)
 {
 #if 0
 	fw_cmd(pAdapter, IOCMD_GET_THERMAL_METER);
-	rtw_msleep_os(1000);
+	msleep(1000);
 	fw_cmd_data(pAdapter, value, 1);
 	*value &= 0xFF;
 #else
 	hal_mpt_TriggerRFThermalMeter(pAdapter);
-	rtw_msleep_os(1000);
+	msleep(1000);
 	*value = hal_mpt_ReadRFThermalMeter(pAdapter);
 #endif
 
@@ -1680,7 +1680,7 @@ void hal_mpt_SetSingleCarrierTx(PADAPTER pAdapter, u8 bStart)
 #endif /* CONFIG_RTL8812A || CONFIG_RTL8821A || CONFIG_RTL8814A || CONFIG_RTL8822B || CONFIG_RTL8821C */
 			phy_set_bb_reg(pAdapter, rOFDM1_LSTF, BIT30 | BIT29 | BIT28, OFDM_ALL_OFF);
 
-		rtw_msleep_os(10);
+		msleep(10);
 		/*/BB Reset*/
 		phy_set_bb_reg(pAdapter, rPMAC_Reset, bBBResetB, 0x0);
 		phy_set_bb_reg(pAdapter, rPMAC_Reset, bBBResetB, 0x1);
@@ -2055,7 +2055,7 @@ static	VOID mpt_StopOfdmContTx(
 	else
 		phy_set_bb_reg(pAdapter, rOFDM1_LSTF, BIT30 | BIT29 | BIT28, OFDM_ALL_OFF);
 
-	rtw_mdelay_os(10);
+	mdelay(10);
 
 	if (!IS_HARDWARE_TYPE_JAGUAR(pAdapter) && !IS_HARDWARE_TYPE_JAGUAR2(pAdapter)) {
 		phy_set_bb_reg(pAdapter, 0xa14, 0x300, 0x0);			/* 0xa15[1:0] = 0*/
@@ -2270,7 +2270,7 @@ void mpt_ProSetPMacTx(PADAPTER	Adapter)
 		u4bTmp = PMacTxInfo.VHT_SIG_A[3] | ((PMacTxInfo.VHT_SIG_A[4]) << 8) | ((PMacTxInfo.VHT_SIG_A[5]) << 16);
 		phy_set_bb_reg(Adapter, 0xb10, 0xffffff, u4bTmp);
 
-		_rtw_memcpy(&u4bTmp, PMacTxInfo.VHT_SIG_B, 4);
+		memcpy(&u4bTmp, PMacTxInfo.VHT_SIG_B, 4);
 		phy_set_bb_reg(Adapter, 0xb14, bMaskDWord, u4bTmp);
 	}
 
@@ -2278,7 +2278,7 @@ void mpt_ProSetPMacTx(PADAPTER	Adapter)
 		u4bTmp = (PMacTxInfo.VHT_SIG_B_CRC << 24) | PMacTxInfo.PacketPeriod;	/* for TX interval */
 		phy_set_bb_reg(Adapter, 0xb20, bMaskDWord, u4bTmp);
 
-		_rtw_memcpy(&u4bTmp, PMacTxInfo.VHT_Delimiter, 4);
+		memcpy(&u4bTmp, PMacTxInfo.VHT_Delimiter, 4);
 		phy_set_bb_reg(Adapter, 0xb24, bMaskDWord, u4bTmp);
 
 		/* 0xb28 - 0xb34 24 byte Probe Request MAC Header*/

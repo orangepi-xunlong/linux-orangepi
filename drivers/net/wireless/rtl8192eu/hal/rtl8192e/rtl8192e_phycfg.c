@@ -51,10 +51,6 @@ PHY_QueryBBReg8192E(
 {
 	u32	ReturnValue = 0, OriginalValue, BitShift;
 
-#if (DISABLE_BB_RF == 1)
-	return 0;
-#endif
-
 	/* RTW_INFO("--->PHY_QueryBBReg8812(): RegAddr(%#x), BitMask(%#x)\n", RegAddr, BitMask); */
 
 
@@ -76,10 +72,6 @@ PHY_SetBBReg8192E(
 )
 {
 	u4Byte			OriginalValue, BitShift;
-
-#if (DISABLE_BB_RF == 1)
-	return;
-#endif
 
 	if (BitMask != bMaskDWord) {
 		/* if not "double word" write */
@@ -140,11 +132,11 @@ phy_RFSerialRead(
 	phy_set_bb_reg(Adapter, rFPGA0_XA_HSSIParameter2 | MaskforPhySet, bMaskDWord, tmplong2 & (~bLSSIReadEdge));
 	phy_set_bb_reg(Adapter, rFPGA0_XA_HSSIParameter2 | MaskforPhySet, bMaskDWord, tmplong2 | bLSSIReadEdge);
 
-	rtw_udelay_os(10);/* PlatformStallExecution(10); */
+	udelay(10);/* PlatformStallExecution(10); */
 
 	/* for(i=0;i<2;i++) */
 	/*	PlatformStallExecution(MAX_STALL_TIME);	 */
-	rtw_udelay_os(10);/* PlatformStallExecution(10); */
+	udelay(10);/* PlatformStallExecution(10); */
 
 	if (eRFPath == RF_PATH_A)
 		RfPiEnable = (u1Byte)phy_query_bb_reg(Adapter, rFPGA0_XA_HSSIParameter1 | MaskforPhySet, BIT8);
@@ -230,10 +222,6 @@ PHY_QueryRFReg8192E(
 {
 	u32				Original_Value, Readback_Value, BitShift;
 
-#if (DISABLE_BB_RF == 1)
-	return 0;
-#endif
-
 	Original_Value = phy_RFSerialRead(Adapter, eRFPath, RegAddr);
 
 	BitShift =  PHY_CalculateBitShift(BitMask);
@@ -252,9 +240,6 @@ PHY_SetRFReg8192E(
 )
 {
 	u32			Original_Value, BitShift;
-#if (DISABLE_BB_RF == 1)
-	return;
-#endif
 
 	if (BitMask == 0)
 		return;
@@ -930,8 +915,8 @@ phy_SpurCalibration_8192E(
 		phy_set_bb_reg(Adapter, rFPGA0_TxInfo, bMaskByte0, 0x3);
 		phy_set_bb_reg(Adapter, rFPGA0_PSDFunction, bMaskDWord, 0xfccd);
 		phy_set_bb_reg(Adapter, rFPGA0_PSDFunction, bMaskDWord, 0x40fccd);
-		/* rtw_msleep_os(30); */
-		rtw_mdelay_os(30);
+		/* msleep(30); */
+		mdelay(30);
 		PSDReport = phy_query_bb_reg(Adapter, rFPGA0_PSDReport, bMaskDWord);
 		/* RTW_INFO(" Path A== PSDReport = 0x%x (%d)\n",PSDReport,PSDReport); */
 		if (PSDReport < 0x16)
@@ -945,8 +930,8 @@ phy_SpurCalibration_8192E(
 		phy_set_bb_reg(Adapter, rFPGA0_TxInfo, bMaskByte0, 0x13);
 		phy_set_bb_reg(Adapter, rFPGA0_PSDFunction, bMaskDWord, 0xfccd);
 		phy_set_bb_reg(Adapter, rFPGA0_PSDFunction, bMaskDWord, 0x40fccd);
-		/* rtw_msleep_os(30); */
-		rtw_mdelay_os(30);
+		/* msleep(30); */
+		mdelay(30);
 		PSDReport = phy_query_bb_reg(Adapter, rFPGA0_PSDReport, bMaskDWord);
 		/* RTW_INFO(" Path B== PSDReport = 0x%x (%d)\n",PSDReport,PSDReport); */
 		if (PSDReport < 0x16)
@@ -1114,7 +1099,7 @@ phy_SwChnlAndSetBwMode8192E(
 #ifdef CONFIG_TDLS
 #ifdef CONFIG_TDLS_CH_SW
 	/* It takes too much time of setting tx power, influence channel switch */
-	if ((ATOMIC_READ(&Adapter->tdlsinfo.chsw_info.chsw_on) == _FALSE))
+	if ((atomic_read(&Adapter->tdlsinfo.chsw_info.chsw_on) == _FALSE))
 #endif
 #endif /* CONFIG_TDLS */
 		PHY_SetTxPowerLevel8192E(Adapter, pHalData->current_channel);

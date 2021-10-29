@@ -762,6 +762,8 @@ int ceph_fill_inode(struct inode *inode, struct page *locked_page,
 	bool new_version = false;
 	bool fill_inline = false;
 
+	lockdep_assert_held(&mdsc->snap_rwsem);
+
 	dout("%s %p ino %llx.%llx v %llu had %llu\n", __func__,
 	     inode, ceph_vinop(inode), le64_to_cpu(info->version),
 	     ci->i_version);
@@ -1119,8 +1121,7 @@ static inline void update_dentry_lease(struct inode *dir, struct dentry *dentry,
 	__update_dentry_lease(dir, dentry, lease, session, from_time,
 			      &old_lease_session);
 	spin_unlock(&dentry->d_lock);
-	if (old_lease_session)
-		ceph_put_mds_session(old_lease_session);
+	ceph_put_mds_session(old_lease_session);
 }
 
 /*
@@ -1165,8 +1166,7 @@ static void update_dentry_lease_careful(struct dentry *dentry,
 			      from_time, &old_lease_session);
 out_unlock:
 	spin_unlock(&dentry->d_lock);
-	if (old_lease_session)
-		ceph_put_mds_session(old_lease_session);
+	ceph_put_mds_session(old_lease_session);
 }
 
 /*

@@ -23,13 +23,8 @@
 #ifdef PLATFORM_LINUX
 #define rsprintf snprintf
 #define rstrncat(dst, src, src_size) strncat(dst, src, src_size)
-#elif defined(PLATFORM_WINDOWS)
-#define rsprintf sprintf_s
 #endif
-
 #define DCMD_Printf			DBG_BT_INFO
-
-#define delay_ms(ms)		rtw_mdelay_os(ms)
 
 #ifdef bEnable
 #undef bEnable

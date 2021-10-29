@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2020 Junjiro R. Okajima
+ * Copyright (C) 2005-2021 Junjiro R. Okajima
  *
  * This program, aufs is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -383,7 +383,10 @@ void __au_dbg_verify_dinode(struct dentry *dentry, const char *func, int line)
 			AuDbgDentry(dentry);
 			AuDbgInode(inode);
 			au_debug_off();
-			BUG();
+			if (au_test_fuse(h_inode->i_sb))
+				WARN_ON_ONCE(1);
+			else
+				BUG();
 		}
 	}
 }

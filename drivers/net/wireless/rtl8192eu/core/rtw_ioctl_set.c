@@ -20,13 +20,6 @@
 
 extern void indicate_wx_scan_complete_event(_adapter *padapter);
 
-#define IS_MAC_ADDRESS_BROADCAST(addr) \
-	(\
-	 ((addr[0] == 0xff) && (addr[1] == 0xff) && \
-	  (addr[2] == 0xff) && (addr[3] == 0xff) && \
-	  (addr[4] == 0xff) && (addr[5] == 0xff)) ? _TRUE : _FALSE \
-	)
-
 u8 rtw_validate_bssid(u8 *bssid)
 {
 	u8 ret = _TRUE;
@@ -95,7 +88,7 @@ u8 rtw_do_join(_adapter *padapter)
 	pmlmepriv->to_join = _TRUE;
 
 	rtw_init_sitesurvey_parm(padapter, &parm);
-	_rtw_memcpy(&parm.ssid[0], &pmlmepriv->assoc_ssid, sizeof(NDIS_802_11_SSID));
+	memcpy(&parm.ssid[0], &pmlmepriv->assoc_ssid, sizeof(NDIS_802_11_SSID));
 	parm.ssid_num = 1;
 
 	if (_rtw_queue_empty(queue) == _TRUE) {
@@ -145,8 +138,8 @@ u8 rtw_do_join(_adapter *padapter)
 
 				pibss = padapter->registrypriv.dev_network.MacAddress;
 
-				_rtw_memset(&pdev_network->Ssid, 0, sizeof(NDIS_802_11_SSID));
-				_rtw_memcpy(&pdev_network->Ssid, &pmlmepriv->assoc_ssid, sizeof(NDIS_802_11_SSID));
+				memset(&pdev_network->Ssid, 0, sizeof(NDIS_802_11_SSID));
+				memcpy(&pdev_network->Ssid, &pmlmepriv->assoc_ssid, sizeof(NDIS_802_11_SSID));
 
 				rtw_update_registrypriv_dev_network(padapter);
 
@@ -196,84 +189,6 @@ exit:
 
 	return ret;
 }
-
-#ifdef PLATFORM_WINDOWS
-u8 rtw_pnp_set_power_wakeup(_adapter *padapter)
-{
-	u8 res = _SUCCESS;
-
-
-
-	res = rtw_setstandby_cmd(padapter, 0);
-
-
-
-	return res;
-}
-
-u8 rtw_pnp_set_power_sleep(_adapter *padapter)
-{
-	u8 res = _SUCCESS;
-
-
-	/* DbgPrint("+rtw_pnp_set_power_sleep\n"); */
-
-	res = rtw_setstandby_cmd(padapter, 1);
-
-
-
-	return res;
-}
-
-u8 rtw_set_802_11_reload_defaults(_adapter *padapter, NDIS_802_11_RELOAD_DEFAULTS reloadDefaults)
-{
-
-
-
-	/* SecClearAllKeys(Adapter); */
-	/* 8711 CAM was not for En/Decrypt only */
-	/* so, we can't clear all keys. */
-	/* should we disable WPAcfg (ox0088) bit 1-2, instead of clear all CAM */
-
-	/* TO DO... */
-
-
-	return _TRUE;
-}
-
-u8 set_802_11_test(_adapter *padapter, NDIS_802_11_TEST *test)
-{
-	u8 ret = _TRUE;
-
-
-	switch (test->Type) {
-	case 1:
-		NdisMIndicateStatus(padapter->hndis_adapter, NDIS_STATUS_MEDIA_SPECIFIC_INDICATION, (PVOID)&test->AuthenticationEvent, test->Length - 8);
-		NdisMIndicateStatusComplete(padapter->hndis_adapter);
-		break;
-
-	case 2:
-		NdisMIndicateStatus(padapter->hndis_adapter, NDIS_STATUS_MEDIA_SPECIFIC_INDICATION, (PVOID)&test->RssiTrigger, sizeof(NDIS_802_11_RSSI));
-		NdisMIndicateStatusComplete(padapter->hndis_adapter);
-		break;
-
-	default:
-		ret = _FALSE;
-		break;
-	}
-
-
-	return ret;
-}
-
-u8	rtw_set_802_11_pmkid(_adapter	*padapter, NDIS_802_11_PMKID *pmkid)
-{
-	u8	ret = _SUCCESS;
-
-	return ret;
-}
-
-#endif
 
 u8 rtw_set_802_11_bssid(_adapter *padapter, u8 *bssid)
 {
@@ -327,8 +242,8 @@ handle_tkip_countermeasure:
 		goto release_mlme_lock;
 	}
 
-	_rtw_memset(&pmlmepriv->assoc_ssid, 0, sizeof(NDIS_802_11_SSID));
-	_rtw_memcpy(&pmlmepriv->assoc_bssid, bssid, ETH_ALEN);
+	memset(&pmlmepriv->assoc_ssid, 0, sizeof(NDIS_802_11_SSID));
+	memcpy(&pmlmepriv->assoc_bssid, bssid, ETH_ALEN);
 	pmlmepriv->assoc_by_bssid = _TRUE;
 
 	if (check_fwstate(pmlmepriv, _FW_UNDER_SURVEY) == _TRUE)
@@ -424,7 +339,7 @@ handle_tkip_countermeasure:
 		goto release_mlme_lock;
 	}
 
-	_rtw_memcpy(&pmlmepriv->assoc_ssid, ssid, sizeof(NDIS_802_11_SSID));
+	memcpy(&pmlmepriv->assoc_ssid, ssid, sizeof(NDIS_802_11_SSID));
 	pmlmepriv->assoc_by_bssid = _FALSE;
 
 	if (check_fwstate(pmlmepriv, _FW_UNDER_SURVEY) == _TRUE)
@@ -486,12 +401,12 @@ handle_tkip_countermeasure:
 	}
 
 	if (ssid && ssid_valid)
-		_rtw_memcpy(&pmlmepriv->assoc_ssid, ssid, sizeof(NDIS_802_11_SSID));
+		memcpy(&pmlmepriv->assoc_ssid, ssid, sizeof(NDIS_802_11_SSID));
 	else
-		_rtw_memset(&pmlmepriv->assoc_ssid, 0, sizeof(NDIS_802_11_SSID));
+		memset(&pmlmepriv->assoc_ssid, 0, sizeof(NDIS_802_11_SSID));
 
 	if (bssid && bssid_valid) {
-		_rtw_memcpy(&pmlmepriv->assoc_bssid, bssid, ETH_ALEN);
+		memcpy(&pmlmepriv->assoc_bssid, bssid, ETH_ALEN);
 		pmlmepriv->assoc_by_bssid = _TRUE;
 	} else
 		pmlmepriv->assoc_by_bssid = _FALSE;
@@ -756,7 +671,7 @@ u8 rtw_set_802_11_add_wep(_adapter *padapter, NDIS_802_11_WEP *wep)
 	}
 
 
-	_rtw_memcpy(&(psecuritypriv->dot11DefKey[keyid].skey[0]), &(wep->KeyMaterial), wep->KeyLength);
+	memcpy(&(psecuritypriv->dot11DefKey[keyid].skey[0]), &(wep->KeyMaterial), wep->KeyLength);
 
 	psecuritypriv->dot11DefKeylen[keyid] = wep->KeyLength;
 
@@ -818,7 +733,7 @@ u16 rtw_get_cur_max_rate(_adapter *adapter)
 		max_rate = rtw_mcs_rate(rf_type
 			, (psta->cmn.bw_mode == CHANNEL_WIDTH_40) ? 1 : 0
 			, short_GI
-			, psta->htpriv.ht_cap.supp_mcs_set
+			, psta->htpriv.ht_cap.mcs.rx_mask
 		);
 	}
 #ifdef CONFIG_80211AC_VHT

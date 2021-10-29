@@ -4,13 +4,8 @@ EXTRA_CFLAGS += $(USER_EXTRA_CFLAGS)
 EXTRA_CFLAGS += -O2
 ##################### Compile-time Warnings #######################
 EXTRA_CFLAGS += -Wno-unused-variable
-EXTRA_CFLAGS += -Wno-unused-value
 EXTRA_CFLAGS += -Wno-unused-label
-EXTRA_CFLAGS += -Wno-unused-parameter
 EXTRA_CFLAGS += -Wno-unused-function
-EXTRA_CFLAGS += -Wno-unused
-#EXTRA_CFLAGS += -Wno-vla
-EXTRA_CFLAGS += -Wno-date-time
 
 GCC_VER_49 := $(shell echo `$(CC) -dumpversion | cut -f1-2 -d.` \>= 4.9 | bc )
 ifeq ($(GCC_VER_49),1)
@@ -2226,7 +2221,6 @@ rtk_core :=	core/rtw_cmd.o \
 		core/rtw_security.o \
 		core/rtw_debug.o \
 		core/rtw_io.o \
-		core/rtw_ioctl_query.o \
 		core/rtw_ioctl_set.o \
 		core/rtw_ieee80211.o \
 		core/rtw_mlme.o \

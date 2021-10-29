@@ -54,7 +54,7 @@ u8 rtw_hal_read_chip_info(_adapter *padapter)
 {
 	u8 rtn = _SUCCESS;
 	u8 hci_type = rtw_get_intf_type(padapter);
-	systime start = rtw_get_current_time();
+	systime start = jiffies;
 
 	/*  before access eFuse, make sure card enable has been called */
 	if ((hci_type == RTW_SDIO || hci_type == RTW_GSPI)
@@ -147,7 +147,7 @@ u8 rtw_hal_data_init(_adapter *padapter)
 {
 	if (is_primary_adapter(padapter)) {
 		padapter->hal_data_sz = sizeof(HAL_DATA_TYPE);
-		padapter->HalData = rtw_zvmalloc(padapter->hal_data_sz);
+		padapter->HalData = vzalloc(padapter->hal_data_sz);
 		if (padapter->HalData == NULL) {
 			RTW_INFO("cant not alloc memory for HAL DATA\n");
 			return _FAIL;
@@ -164,7 +164,7 @@ void rtw_hal_data_deinit(_adapter *padapter)
 #ifdef CONFIG_LOAD_PHY_PARA_FROM_FILE
 			phy_free_filebuf(padapter);
 #endif
-			rtw_vmfree(padapter->HalData, padapter->hal_data_sz);
+			vfree(padapter->HalData);
 			padapter->HalData = NULL;
 			padapter->hal_data_sz = 0;
 		}
@@ -195,7 +195,6 @@ void rtw_hal_dm_deinit(_adapter *padapter)
 
 		padapter->hal_func.dm_deinit(padapter);
 
-		_rtw_spinlock_free(&pHalData->IQKSpinLock);
 	}
 }
 
@@ -250,7 +249,7 @@ void rtw_hal_power_off(_adapter *padapter)
 {
 	struct macid_ctl_t *macid_ctl = &padapter->dvobj->macid_ctl;
 
-	_rtw_memset(macid_ctl->h2c_msr, 0, MACID_NUM_SW_LIMIT);
+	memset(macid_ctl->h2c_msr, 0, MACID_NUM_SW_LIMIT);
 
 #ifdef CONFIG_BT_COEXIST
 	rtw_btcoex_PowerOffSetting(padapter);
@@ -473,7 +472,7 @@ s32 rtw_hal_fw_dl(_adapter *padapter, u8 wowlan)
 #ifdef RTW_HALMAC
 s32 rtw_hal_fw_mem_dl(_adapter *padapter, enum fw_mem mem)
 {
-	systime dlfw_start_time = rtw_get_current_time();
+	systime dlfw_start_time = jiffies;
 	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
 	struct debug_priv *pdbgpriv = &dvobj->drv_dbg;
 	s32 rst = _FALSE;
@@ -740,7 +739,7 @@ void rtw_hal_write_rfreg(_adapter *padapter, enum rf_path eRFPath, u32 RegAddr, 
 
 #ifdef CONFIG_PCI_HCI
 		if (!IS_HARDWARE_TYPE_JAGUAR_AND_JAGUAR2(padapter)) /*For N-Series IC, suggest by Jenyu*/
-			rtw_udelay_os(2);
+			udelay(2);
 #endif
 	}
 }
@@ -1077,7 +1076,7 @@ s32 c2h_handler(_adapter *adapter, u8 id, u8 seq, u8 plen, u8 *payload)
 	case C2H_EXTEND:
 		sub_id = payload[0];
 		/* no handle, goto default */
-  /* fallthrough */
+  		__attribute__((__fallthrough__));
 
 	default:
 		if (phydm_c2H_content_parsing(adapter_to_phydm(adapter), id, plen, payload) != TRUE)

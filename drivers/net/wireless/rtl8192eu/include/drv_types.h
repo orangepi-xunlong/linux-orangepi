@@ -34,27 +34,6 @@
 	#include <net/arp.h>
 #endif
 
-#ifdef PLATFORM_OS_XP
-	#include <drv_types_xp.h>
-#endif
-
-#ifdef PLATFORM_OS_CE
-	#include <drv_types_ce.h>
-#endif
-
-#ifdef PLATFORM_LINUX
-	#include <drv_types_linux.h>
-#endif
-
-enum _NIC_VERSION {
-
-	RTL8711_NIC,
-	RTL8712_NIC,
-	RTL8713_NIC,
-	RTL8716_NIC
-
-};
-
 typedef struct _ADAPTER _adapter, ADAPTER, *PADAPTER;
 
 #include <rtw_debug.h>
@@ -75,7 +54,6 @@ typedef struct _ADAPTER _adapter, ADAPTER, *PADAPTER;
 #endif
 
 #include <rtw_cmd.h>
-#include <cmd_osdep.h>
 #include <rtw_security.h>
 #include <rtw_xmit.h>
 #include <xmit_osdep.h>
@@ -101,7 +79,6 @@ typedef struct _ADAPTER _adapter, ADAPTER, *PADAPTER;
 #include <rtw_io.h>
 #include <rtw_ioctl.h>
 #include <rtw_ioctl_set.h>
-#include <rtw_ioctl_query.h>
 #include <rtw_ioctl_rtl.h>
 #include <osdep_intf.h>
 #include <rtw_eeprom.h>
@@ -143,9 +120,6 @@ typedef struct _ADAPTER _adapter, ADAPTER, *PADAPTER;
 	#include <rtw_iol.h>
 #endif /* CONFIG_IOL */
 
-#include <ip.h>
-#include <if_ether.h>
-#include <ethernet.h>
 #include <circ_buf.h>
 
 #include <rtw_android.h>
@@ -933,8 +907,8 @@ struct rf_ctl_t {
 #define RTW_CAC_STOPPED 0
 #ifdef CONFIG_DFS_MASTER
 #define IS_CAC_STOPPED(rfctl) ((rfctl)->cac_end_time == RTW_CAC_STOPPED)
-#define IS_CH_WAITING(rfctl) (!IS_CAC_STOPPED(rfctl) && rtw_time_after((rfctl)->cac_end_time, rtw_get_current_time()))
-#define IS_UNDER_CAC(rfctl) (IS_CH_WAITING(rfctl) && rtw_time_after(rtw_get_current_time(), (rfctl)->cac_start_time))
+#define IS_CH_WAITING(rfctl) (!IS_CAC_STOPPED(rfctl) && rtw_time_after((rfctl)->cac_end_time, jiffies))
+#define IS_UNDER_CAC(rfctl) (IS_CH_WAITING(rfctl) && rtw_time_after(jiffies, (rfctl)->cac_start_time))
 #define IS_RADAR_DETECTED(rfctl) ((rfctl)->radar_detected)
 #else
 #define IS_CAC_STOPPED(rfctl) 1
@@ -955,7 +929,7 @@ struct rf_ctl_t {
 struct mbid_cam_ctl_t {
 	_lock lock;
 	u8 bitmap;
-	ATOMIC_T mbid_entry_num;
+	atomic_t mbid_entry_num;
 };
 struct mbid_cam_cache {
 	u8 iface_id;
@@ -1008,8 +982,8 @@ struct dvobj_priv {
 	u8	HardwareType;
 	u8	interface_type;/*USB,SDIO,SPI,PCI*/
 
-	ATOMIC_T	bSurpriseRemoved;
-	ATOMIC_T	bDriverStopped;
+	atomic_t	bSurpriseRemoved;
+	atomic_t	bDriverStopped;
 
 	s32	processing_dev_remove;
 
@@ -1089,9 +1063,9 @@ struct dvobj_priv {
 	u8	Queue2Pipe[HW_QUEUE_ENTRY];/* for out pipe mapping */
 
 	u8	irq_alloc;
-	ATOMIC_T continual_io_error;
+	atomic_t continual_io_error;
 
-	ATOMIC_T disable_func;
+	atomic_t disable_func;
 
 	u8 xmit_block;
 	_lock xmit_block_lock;
@@ -1163,40 +1137,12 @@ struct dvobj_priv {
 	u8 *usb_vendor_req_buf;
 #endif
 
-#ifdef PLATFORM_WINDOWS
-	/* related device objects */
-	PDEVICE_OBJECT	pphysdevobj;/* pPhysDevObj; */
-	PDEVICE_OBJECT	pfuncdevobj;/* pFuncDevObj; */
-	PDEVICE_OBJECT	pnextdevobj;/* pNextDevObj; */
-
-	u8	nextdevstacksz;/* unsigned char NextDeviceStackSize;	 */ /* = (CHAR)CEdevice->pUsbDevObj->StackSize + 1; */
-
-	/* urb for control diescriptor request */
-
-#ifdef PLATFORM_OS_XP
-	struct _URB_CONTROL_DESCRIPTOR_REQUEST descriptor_urb;
-	PUSB_CONFIGURATION_DESCRIPTOR	pconfig_descriptor;/* UsbConfigurationDescriptor; */
-#endif
-
-#ifdef PLATFORM_OS_CE
-	WCHAR			active_path[MAX_ACTIVE_REG_PATH];	/* adapter regpath */
-	USB_EXTENSION	usb_extension;
-
-	_nic_hdl		pipehdls_r8192c[0x10];
-#endif
-
-	u32	config_descriptor_len;/* ULONG UsbConfigurationDescriptorLength; */
-#endif/* PLATFORM_WINDOWS */
 
 #ifdef PLATFORM_LINUX
 	struct usb_interface *pusbintf;
 	struct usb_device *pusbdev;
 #endif/* PLATFORM_LINUX */
 
-#ifdef PLATFORM_FREEBSD
-	struct usb_interface *pusbintf;
-	struct usb_device *pusbdev;
-#endif/* PLATFORM_FREEBSD */
 
 #endif/* CONFIG_USB_HCI */
 
@@ -1261,7 +1207,6 @@ struct dvobj_priv {
 #endif 
 	/* also for RTK T/P Testing Mode */ 
 	u8 scan_deny;
-
 };
 
 #define DEV_STA_NUM(_dvobj)			MSTATE_STA_NUM(&((_dvobj)->iface_state))
@@ -1299,22 +1244,22 @@ struct dvobj_priv {
 
 static inline void dev_set_surprise_removed(struct dvobj_priv *dvobj)
 {
-	ATOMIC_SET(&dvobj->bSurpriseRemoved, _TRUE);
+	atomic_set(&dvobj->bSurpriseRemoved, _TRUE);
 }
 static inline void dev_clr_surprise_removed(struct dvobj_priv *dvobj)
 {
-	ATOMIC_SET(&dvobj->bSurpriseRemoved, _FALSE);
+	atomic_set(&dvobj->bSurpriseRemoved, _FALSE);
 }
 static inline void dev_set_drv_stopped(struct dvobj_priv *dvobj)
 {
-	ATOMIC_SET(&dvobj->bDriverStopped, _TRUE);
+	atomic_set(&dvobj->bDriverStopped, _TRUE);
 }
 static inline void dev_clr_drv_stopped(struct dvobj_priv *dvobj)
 {
-	ATOMIC_SET(&dvobj->bDriverStopped, _FALSE);
+	atomic_set(&dvobj->bDriverStopped, _FALSE);
 }
-#define dev_is_surprise_removed(dvobj)	(ATOMIC_READ(&dvobj->bSurpriseRemoved) == _TRUE)
-#define dev_is_drv_stopped(dvobj)		(ATOMIC_READ(&dvobj->bDriverStopped) == _TRUE)
+#define dev_is_surprise_removed(dvobj)	(atomic_read(&dvobj->bSurpriseRemoved) == _TRUE)
+#define dev_is_drv_stopped(dvobj)		(atomic_read(&dvobj->bDriverStopped) == _TRUE)
 
 #ifdef PLATFORM_LINUX
 static inline struct device *dvobj_to_dev(struct dvobj_priv *dvobj)
@@ -1461,7 +1406,7 @@ struct _ADAPTER {
 #endif /* CONFIG_P2P */
 #endif /* CONFIG_IOCTL_CFG80211 */
 	u32	setband;
-	ATOMIC_T bandskip;
+	atomic_t bandskip;
 
 #ifdef CONFIG_P2P
 	struct wifidirect_info	wdinfo;
@@ -1528,16 +1473,6 @@ struct _ADAPTER {
 	void (*intf_start)(_adapter *adapter);
 	void (*intf_stop)(_adapter *adapter);
 
-#ifdef PLATFORM_WINDOWS
-	_nic_hdl		hndis_adapter;/* hNdisAdapter(NDISMiniportAdapterHandle); */
-	_nic_hdl		hndis_config;/* hNdisConfiguration; */
-	NDIS_STRING fw_img;
-
-	u32	NdisPacketFilter;
-	u8	MCList[MAX_MCAST_LIST_NUM][6];
-	u32	MCAddrCount;
-#endif /* end of PLATFORM_WINDOWS */
-
 
 #ifdef PLATFORM_LINUX
 	_nic_hdl pnetdev;
@@ -1574,11 +1509,6 @@ struct _ADAPTER {
 
 #endif /* PLATFORM_LINUX */
 
-#ifdef PLATFORM_FREEBSD
-	_nic_hdl pifp;
-	int bup;
-	_lock glock;
-#endif /* PLATFORM_FREEBSD */
 	u8 mac_addr[ETH_ALEN];
 	int net_closed;
 
@@ -1754,27 +1684,27 @@ static inline void rtw_clr_drv_stopped(_adapter *padapter)
 #define DF_RX_BIT		BIT1			/*read_port_cancel*/
 #define DF_IO_BIT		BIT2
 
-/* #define RTW_DISABLE_FUNC(padapter, func) (ATOMIC_ADD(&adapter_to_dvobj(padapter)->disable_func, (func))) */
-/* #define RTW_ENABLE_FUNC(padapter, func) (ATOMIC_SUB(&adapter_to_dvobj(padapter)->disable_func, (func))) */
+/* #define RTW_DISABLE_FUNC(padapter, func) (atomic_add(&adapter_to_dvobj(padapter)->disable_func, (func))) */
+/* #define RTW_ENABLE_FUNC(padapter, func) (atomic_sub(&adapter_to_dvobj(padapter)->disable_func, (func))) */
 __inline static void RTW_DISABLE_FUNC(_adapter *padapter, int func_bit)
 {
-	int	df = ATOMIC_READ(&adapter_to_dvobj(padapter)->disable_func);
+	int	df = atomic_read(&adapter_to_dvobj(padapter)->disable_func);
 	df |= func_bit;
-	ATOMIC_SET(&adapter_to_dvobj(padapter)->disable_func, df);
+	atomic_set(&adapter_to_dvobj(padapter)->disable_func, df);
 }
 
 __inline static void RTW_ENABLE_FUNC(_adapter *padapter, int func_bit)
 {
-	int	df = ATOMIC_READ(&adapter_to_dvobj(padapter)->disable_func);
+	int	df = atomic_read(&adapter_to_dvobj(padapter)->disable_func);
 	df &= ~(func_bit);
-	ATOMIC_SET(&adapter_to_dvobj(padapter)->disable_func, df);
+	atomic_set(&adapter_to_dvobj(padapter)->disable_func, df);
 }
 
 #define RTW_CANNOT_RUN(padapter) \
 	(rtw_is_surprise_removed(padapter) || \
 	 rtw_is_drv_stopped(padapter))
 
-#define RTW_IS_FUNC_DISABLED(padapter, func_bit) (ATOMIC_READ(&adapter_to_dvobj(padapter)->disable_func) & (func_bit))
+#define RTW_IS_FUNC_DISABLED(padapter, func_bit) (atomic_read(&adapter_to_dvobj(padapter)->disable_func) & (func_bit))
 
 #define RTW_CANNOT_IO(padapter) \
 	(rtw_is_surprise_removed(padapter) || \
@@ -1805,7 +1735,6 @@ int rtw_suspend_free_assoc_resource(_adapter *padapter);
 
 /* HCI Related header file */
 #ifdef CONFIG_USB_HCI
-	#include <usb_osintf.h>
 	#include <usb_ops.h>
 	#include <usb_hal.h>
 #endif

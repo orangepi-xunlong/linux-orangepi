@@ -825,6 +825,7 @@ void ext4_ext_tree_init(handle_t *handle, struct inode *inode)
 	eh->eh_entries = 0;
 	eh->eh_magic = EXT4_EXT_MAGIC;
 	eh->eh_max = cpu_to_le16(ext4_ext_space_root(inode, 0));
+	eh->eh_generation = 0;
 	ext4_mark_inode_dirty(handle, inode);
 }
 
@@ -1090,6 +1091,7 @@ static int ext4_ext_split(handle_t *handle, struct inode *inode,
 	neh->eh_max = cpu_to_le16(ext4_ext_space_block(inode, 0));
 	neh->eh_magic = EXT4_EXT_MAGIC;
 	neh->eh_depth = 0;
+	neh->eh_generation = 0;
 
 	/* move remainder of path[depth] to the new leaf */
 	if (unlikely(path[depth].p_hdr->eh_entries !=
@@ -1167,6 +1169,7 @@ static int ext4_ext_split(handle_t *handle, struct inode *inode,
 		neh->eh_magic = EXT4_EXT_MAGIC;
 		neh->eh_max = cpu_to_le16(ext4_ext_space_block_idx(inode, 0));
 		neh->eh_depth = cpu_to_le16(depth - i);
+		neh->eh_generation = 0;
 		fidx = EXT_FIRST_INDEX(neh);
 		fidx->ei_block = border;
 		ext4_idx_store_pblock(fidx, oldblock);
@@ -5904,7 +5907,7 @@ void ext4_ext_replay_shrink_inode(struct inode *inode, ext4_lblk_t end)
 }
 
 /* Check if *cur is a hole and if it is, skip it */
-static void skip_hole(struct inode *inode, ext4_lblk_t *cur)
+static int skip_hole(struct inode *inode, ext4_lblk_t *cur)
 {
 	int ret;
 	struct ext4_map_blocks map;
@@ -5913,9 +5916,12 @@ static void skip_hole(struct inode *inode, ext4_lblk_t *cur)
 	map.m_len = ((inode->i_size) >> inode->i_sb->s_blocksize_bits) - *cur;
 
 	ret = ext4_map_blocks(NULL, inode, &map, 0);
+	if (ret < 0)
+		return ret;
 	if (ret != 0)
-		return;
+		return 0;
 	*cur = *cur + map.m_len;
+	return 0;
 }
 
 /* Count number of blocks used by this inode and update i_blocks */
@@ -5964,7 +5970,9 @@ int ext4_ext_replay_set_iblocks(struct inode *inode)
 	 * iblocks by total number of differences found.
 	 */
 	cur = 0;
-	skip_hole(inode, &cur);
+	ret = skip_hole(inode, &cur);
+	if (ret < 0)
+		goto out;
 	path = ext4_find_extent(inode, cur, NULL, 0);
 	if (IS_ERR(path))
 		goto out;
@@ -5983,8 +5991,12 @@ int ext4_ext_replay_set_iblocks(struct inode *inode)
 		}
 		cur = max(cur + 1, le32_to_cpu(ex->ee_block) +
 					ext4_ext_get_actual_len(ex));
-		skip_hole(inode, &cur);
-
+		ret = skip_hole(inode, &cur);
+		if (ret < 0) {
+			ext4_ext_drop_refs(path);
+			kfree(path);
+			break;
+		}
 		path2 = ext4_find_extent(inode, cur, NULL, 0);
 		if (IS_ERR(path2)) {
 			ext4_ext_drop_refs(path);

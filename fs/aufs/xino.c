@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2020 Junjiro R. Okajima
+ * Copyright (C) 2005-2021 Junjiro R. Okajima
  *
  * This program, aufs is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -235,22 +235,23 @@ struct file *au_xino_create2(struct super_block *sb, struct path *base,
 			     struct file *copy_src)
 {
 	struct file *file;
-	struct dentry *dentry, *parent;
+	struct dentry *dentry;
 	struct inode *dir, *delegated;
 	struct qstr *name;
-	struct path path;
+	struct path ppath, path;
 	int err, do_unlock;
 	struct au_xino_lock_dir ldir;
 
 	do_unlock = 1;
 	au_xino_lock_dir(sb, base, &ldir);
 	dentry = base->dentry;
-	parent = dentry->d_parent; /* dir inode is locked */
-	dir = d_inode(parent);
+	ppath.dentry = dentry->d_parent; /* dir inode is locked */
+	ppath.mnt = base->mnt;
+	dir = d_inode(ppath.dentry);
 	IMustLock(dir);
 
 	name = &dentry->d_name;
-	path.dentry = vfsub_lookup_one_len(name->name, parent, name->len);
+	path.dentry = vfsub_lookup_one_len(name->name, &ppath, name->len);
 	if (IS_ERR(path.dentry)) {
 		file = (void *)path.dentry;
 		pr_err("%pd lookup err %ld\n", dentry, PTR_ERR(path.dentry));

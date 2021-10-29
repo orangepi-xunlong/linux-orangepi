@@ -10,7 +10,14 @@
 
 static u16 hclge_errno_to_resp(int errno)
 {
-	return abs(errno);
+	int resp = abs(errno);
+
+	/* The status for pf to vf msg cmd is u16, constrainted by HW.
+	 * We need to keep the same type with it.
+	 * The intput errno is the stander error code, it's safely to
+	 * use a u16 to store the abs(errno).
+	 */
+	return (u16)resp;
 }
 
 /* hclge_gen_resp_to_vf: used to generate a synchronous response to VF when PF
@@ -47,6 +54,7 @@ static int hclge_gen_resp_to_vf(struct hclge_vport *vport,
 
 	resp_pf_to_vf->dest_vfid = vf_to_pf_req->mbx_src_vfid;
 	resp_pf_to_vf->msg_len = vf_to_pf_req->msg_len;
+	resp_pf_to_vf->match_id = vf_to_pf_req->match_id;
 
 	resp_pf_to_vf->msg.code = HCLGE_MBX_PF_VF_RESP;
 	resp_pf_to_vf->msg.vf_mbx_msg_code = vf_to_pf_req->msg.code;
@@ -573,9 +581,17 @@ static void hclge_get_queue_id_in_pf(struct hclge_vport *vport,
 				     struct hclge_mbx_vf_to_pf_cmd *mbx_req,
 				     struct hclge_respond_to_vf_msg *resp_msg)
 {
+	struct hnae3_handle *handle = &vport->nic;
+	struct hclge_dev *hdev = vport->back;
 	u16 queue_id, qid_in_pf;
 
 	memcpy(&queue_id, mbx_req->msg.data, sizeof(queue_id));
+	if (queue_id >= handle->kinfo.num_tqps) {
+		dev_err(&hdev->pdev->dev, "Invalid queue id(%u) from VF %u\n",
+			queue_id, mbx_req->mbx_src_vfid);
+		return;
+	}
+
 	qid_in_pf = hclge_covert_handle_qid_global(&vport->nic, queue_id);
 	memcpy(resp_msg->data, &qid_in_pf, sizeof(qid_in_pf));
 	resp_msg->len = sizeof(qid_in_pf);

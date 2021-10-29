@@ -23,10 +23,6 @@
 #error "CONFIG_USB_HCI shall be on!\n"
 #endif
 
-#if defined(PLATFORM_LINUX) && defined (PLATFORM_WINDOWS)
-#error "Shall be Linux or Windows, but not both!\n"
-#endif
-
 #ifdef CONFIG_80211N_HT
 extern int rtw_ht_enable;
 extern int rtw_bw_mode;
@@ -79,7 +75,7 @@ static void rtw_dev_shutdown(struct device *dev)
 					}
 				}
 			}
-			ATOMIC_SET(&dvobj->continual_io_error, MAX_CONTINUAL_IO_ERR + 1);
+			atomic_set(&dvobj->continual_io_error, MAX_CONTINUAL_IO_ERR + 1);
 		}
 	}
 }
@@ -686,7 +682,7 @@ static void usb_dvobj_deinit(struct usb_interface *usb_intf)
 		devobj_deinit(dvobj);
 	}
 
-	/* RTW_INFO("%s %d\n", __func__, ATOMIC_READ(&usb_intf->dev.kobj.kref.refcount)); */
+	/* RTW_INFO("%s %d\n", __func__, atomic_read(&usb_intf->dev.kobj.kref.refcount)); */
 	usb_put_dev(interface_to_usbdev(usb_intf));
 
 }
@@ -1126,7 +1122,7 @@ static int rtw_resume(struct usb_interface *pusb_intf)
 		}
 	}
 
-	pmlmeext->last_scan_time = rtw_get_current_time();
+	pmlmeext->last_scan_time = jiffies;
 	RTW_INFO("<========  %s return %d\n", __FUNCTION__, ret);
 
 	return ret;
@@ -1270,7 +1266,7 @@ _adapter *rtw_usb_primary_adapter_init(struct dvobj_priv *dvobj,
 	_adapter *padapter = NULL;
 	int status = _FAIL;
 
-	padapter = (_adapter *)rtw_zvmalloc(sizeof(*padapter));
+	padapter = (_adapter *)vzalloc(sizeof(*padapter));
 	if (padapter == NULL)
 		goto exit;
 
@@ -1399,7 +1395,7 @@ free_adapter:
 		#ifdef RTW_HALMAC
 		rtw_halmac_deinit_adapter(dvobj);
 		#endif
-		rtw_vmfree((u8 *)padapter, sizeof(*padapter));
+		vfree((u8 *)padapter);
 		padapter = NULL;
 	}
 exit:
@@ -1459,7 +1455,7 @@ static void rtw_usb_primary_adapter_deinit(_adapter *padapter)
 	rtw_halmac_deinit_adapter(adapter_to_dvobj(padapter));
 #endif /* RTW_HALMAC */
 
-	rtw_vmfree((u8 *)padapter, sizeof(_adapter));
+	vfree(padapter);
 
 #ifdef CONFIG_PLATFORM_RTD2880B
 	RTW_INFO("wlan link down\n");
@@ -1471,7 +1467,6 @@ static void rtw_usb_primary_adapter_deinit(_adapter *padapter)
 static int rtw_drv_init(struct usb_interface *pusb_intf, const struct usb_device_id *pdid)
 {
 	_adapter *padapter = NULL;
-	int status = _FAIL;
 	struct dvobj_priv *dvobj;
 #ifdef CONFIG_CONCURRENT_MODE
 	int i;
@@ -1484,8 +1479,8 @@ static int rtw_drv_init(struct usb_interface *pusb_intf, const struct usb_device
 
 	/* Initialize dvobj_priv */
 	dvobj = usb_dvobj_init(pusb_intf, pdid);
-	if (dvobj == NULL) {
-		goto exit;
+	if (!dvobj) {
+		goto err;
 	}
 
 	padapter = rtw_usb_primary_adapter_init(dvobj, pusb_intf);
@@ -1534,30 +1529,21 @@ static int rtw_drv_init(struct usb_interface *pusb_intf, const struct usb_device
 #endif
 
 
-	status = _SUCCESS;
+	return 0;
 
-#if 0 /* not used now */
-os_ndevs_deinit:
-	if (status != _SUCCESS)
-		rtw_os_ndevs_deinit(dvobj);
-#endif
 free_if_vir:
-	if (status != _SUCCESS) {
-		#ifdef CONFIG_CONCURRENT_MODE
-		rtw_drv_stop_vir_ifaces(dvobj);
-		rtw_drv_free_vir_ifaces(dvobj);
-		#endif
-	}
+	#ifdef CONFIG_CONCURRENT_MODE
+	rtw_drv_stop_vir_ifaces(dvobj);
+	rtw_drv_free_vir_ifaces(dvobj);
+	#endif
 
 free_if_prim:
-	if (status != _SUCCESS && padapter)
-		rtw_usb_primary_adapter_deinit(padapter);
+	rtw_usb_primary_adapter_deinit(padapter);
 
 free_dvobj:
-	if (status != _SUCCESS)
-		usb_dvobj_deinit(pusb_intf);
-exit:
-	return status == _SUCCESS ? 0 : -ENODEV;
+	usb_dvobj_deinit(pusb_intf);
+err:
+	return -ENODEV;
 }
 
 /*

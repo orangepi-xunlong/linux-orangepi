@@ -9,8 +9,8 @@
 #include <dt-bindings/gpio/gpio.h>
 
 / {
-	model = "OrangePi 3";
-	compatible = "xunlong,orangepi-3", "allwinner,sun50i-h6";
+	model = "OrangePi 3 LTS";
+	compatible = "xunlong,orangepi-3-lts", "allwinner,sun50i-h6";
 
 	aliases {
 		serial0 = &uart0;
@@ -46,13 +46,13 @@
 		compatible = "gpio-leds";
 
 		power {
-			label = "orangepi:red:power";
+			label = "red-led";
 			gpios = <&r_pio 0 7 GPIO_ACTIVE_HIGH>; /* PL7 */
 			default-state = "on";
 		};
 
 		status {
-			label = "orangepi:green:status";
+			label = "green-led";
 			gpios = <&r_pio 0 4 GPIO_ACTIVE_HIGH>; /* PL4 */
 		};
 	};
@@ -81,8 +81,8 @@
 		regulator-name = "vcc33-wifi";
 		regulator-min-microvolt = <3300000>;
 		regulator-max-microvolt = <3300000>;
-		regulator-always-on;
-		vin-supply = <&reg_vcc5v>;
+		enable-active-high;
+		gpio = <&pio 7 7 GPIO_ACTIVE_HIGH>; /* PH7 */
 	};
 
 	reg_vcc_wifi_io: vcc-wifi-io {
@@ -190,23 +190,6 @@
 	bus-width = <4>;
 	non-removable;
 	status = "okay";
-
-	//brcm: sdio-wifi@1 {
-	//	reg = <1>;
-	//	compatible = "brcm,bcm4329-fmac";
-	//	interrupt-parent = <&r_pio>;
-	//	interrupts = <1 0 IRQ_TYPE_LEVEL_LOW>; /* PM0 */
-	//	interrupt-names = "host-wake";
-	//};
-};
-
-&mmc2 {
-	vmmc-supply = <&reg_cldo1>;
-	vqmmc-supply = <&reg_bldo2>;
-	cap-mmc-hw-reset;
-	non-removable;
-	bus-width = <8>;
-	status = "okay";
 };
 
 &mmc2 {
@@ -217,6 +200,7 @@
 	bus-width = <8>;
 	non-removable;
 	cap-mmc-hw-reset;
+	mmc-hs200-1_8v;
 	status = "okay";
 };
 
@@ -367,22 +351,11 @@
 	status = "okay";
 };
 
-/* There's the BT part of the AP6256 connected to that UART */
 &uart1 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&uart1_pins>, <&uart1_rts_cts_pins>;
 	uart-has-rtscts;
-	status = "okay";
-
-	bluetooth {
-		compatible = "brcm,bcm4345c5";
-		clocks = <&rtc 1>;
-		clock-names = "lpo";
-		device-wakeup-gpios = <&r_pio 1 2 GPIO_ACTIVE_HIGH>; /* PM2 */
-		host-wakeup-gpios = <&r_pio 1 1 GPIO_ACTIVE_HIGH>; /* PM1 */
-		shutdown-gpios = <&r_pio 1 4 GPIO_ACTIVE_HIGH>; /* PM4 */
-		max-speed = <1500000>;
-	};
+	status = "disabled";
 };
 
 &usb2otg {
