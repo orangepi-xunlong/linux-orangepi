@@ -640,7 +640,7 @@ static int sii902x_bridge_attach(struct drm_bridge *bridge,
 				 enum drm_bridge_attach_flags flags)
 {
 	struct sii902x *sii902x = bridge_to_sii902x(bridge);
-	u32 bus_format = MEDIA_BUS_FMT_RGB888_1X24;
+	u32 bus_format = sii902x->bus_format;
 	struct drm_device *drm = bridge->dev;
 	int ret;
 
