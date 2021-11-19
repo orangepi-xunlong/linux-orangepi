@@ -239,8 +239,7 @@ config MICROSEMI_PHY
 config MOTORCOMM_PHY
 	tristate "Motorcomm PHYs"
 	help
-	  Enables support for Motorcomm network PHYs.
-	  Currently supports the YT8511 gigabit PHY.
+	  Supports the YT8010, YT8510, YT8511, YT8512 PHYs.
 
 config NATIONAL_PHY
 	tristate "National Semiconductor PHYs"
