@@ -48,7 +48,7 @@
 &mach {
     hwrev = <2>;
     machine = "ORANGEPI-R1PLUS-LTS";
-    model = "OrangePi R1PLUS LTS";
+    model = "OrangePi R1 PLUS LTS";
 };
 
 &emmc {
@@ -68,6 +68,7 @@
 		label = "wan_led";
 		linux,default-trigger = "stmmac-0:00:link";
 	};
+
 };
 
 &rk805 {
@@ -110,6 +111,30 @@
     };
 };
 
+/delete-node/ &rtl8211f;
+&gmac2io {
+        phy-handle = <&ethphy3>;
+        snps,reset-delays-us = <0 15000 50000>;
+        tx_delay = <0x19>;
+        rx_delay = <0x05>;
+        status = "okay";
+
+        mdio {
+                compatible = "snps,dwmac-mdio";
+                #address-cells = <1>;
+                #size-cells = <0>;
+
+                ethphy3: ethernet-phy@1 {
+                        reg = <0x1>;
+                        //interrupt-parent = <&gpio1>;
+                        //interrupts = <RK_PC4 IRQ_TYPE_EDGE_FALLING>;
+                        keep-clkout-on;
+			reset-gpios = <&gpio1 RK_PC2 GPIO_ACTIVE_LOW>;
+                };
+        };
+};
+
+
 &pinctrl {
 	pmic {
 		pmic_int_l: pmic-int-l {
@@ -131,5 +156,20 @@
 		usb30_en_drv: usb30-en-drv {
 			rockchip,pins = <2 RK_PC6 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
+	};
+};
+
+&dmc_opp_table {
+	opp-1056000000 {
+		status = "disabled";
+	};
+	opp-924000000 {
+		status = "disabled";
+	};
+	opp-840000000 {
+		status = "disabled";
+	};
+	opp-798000000 {
+		status = "disabled";
 	};
 };
