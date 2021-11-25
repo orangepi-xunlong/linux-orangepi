@@ -14,6 +14,7 @@
 #define _RTC_SUNXI_H_
 
 #define SUNXI_LOSC_CTRL				0x0000
+#define SUNXI_LOSC_CTRL_SRC_SEL			BIT(0)
 #define SUNXI_LOSC_CTRL_RTC_HMS_ACC		BIT(8)
 #define SUNXI_LOSC_CTRL_RTC_YMD_ACC		BIT(7)
 #define REG_LOSCCTRL_MAGIC			0x16aa0000
@@ -23,6 +24,10 @@
 #define EXT_LOSC_GSM				0x00000008
 #define SUNXI_ALARM_CONFIG                      0x0050
 #define SUNXI_ALRM_WAKEUP_OUTPUT_EN             BIT(0)
+#define SUNXI_INTOSC_CLK_AUTO_CALI	0xc
+#define SUNXI_RC_CALI_EN			BIT(1)
+#define SUNXI_RC_CALI_FN_EN			BIT(0)
+
 
 /* alarm0 which based on seconds can power on system,
  * while alarm1 can't, so alarm1 is not used.

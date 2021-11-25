@@ -236,7 +236,7 @@ static int sunxi_gsensor_init(enum input_sensor_type *gsensor_type)
 	if (data->sensor_power) {
 		data->sensor_power_ldo = regulator_get(NULL,
 							data->sensor_power);
-		if (!data->sensor_power_ldo) {
+		if (IS_ERR(data->sensor_power_ldo)) {
 			pr_err("%s: could not get ctp ldo '%s' ,check"
 					, __func__, data->sensor_power);
 			pr_err("if ctp independent power supply by ldo,ignore firstly\n");
@@ -491,10 +491,11 @@ static int sunxi_ls_init(enum input_sensor_type *ls_type)
 	/* enalbe ldo if it exist */
 	if (data->sensor_power) {
 		data->sensor_power_ldo = regulator_get(NULL, data->sensor_power);
-		if (!data->sensor_power_ldo) {
+		if (IS_ERR(data->sensor_power_ldo)) {
 			pr_err("%s: could not get sensor power ldo '%s' in probe,",
 							__func__, data->sensor_power);
 			pr_err("maybe config error, ignore firstly !!!!!!!\n");
+			return -1;
 		}
 		/*regulator_set_voltage(ldo, 3000000, 3000000);*/
 		if (0 != regulator_enable(data->sensor_power_ldo))
@@ -703,7 +704,7 @@ int input_set_power_enable(enum input_sensor_type *input_type, u32 enable)
 	if ((enable != 0) && (enable != 1))
 		return ret;
 
-	if (ldo) {
+	if (!IS_ERR(ldo)) {
 		if (enable) {
 			if (regulator_enable(ldo) != 0)
 				pr_err("%s: enable ldo error!\n", __func__);

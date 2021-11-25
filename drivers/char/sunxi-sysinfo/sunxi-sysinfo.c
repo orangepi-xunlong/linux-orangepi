@@ -77,10 +77,23 @@ static long soc_info_ioctl(struct file *file, unsigned int ioctl_num,
 	return ret;
 }
 
+#ifdef CONFIG_COMPAT
+static long soc_info_compat_ioctl(struct file *filp, unsigned int cmd,
+		unsigned long arg)
+{
+	unsigned long translated_arg = (unsigned long)compat_ptr(arg);
+
+	return soc_info_ioctl(filp, cmd, translated_arg);
+}
+#endif
+
 static const struct file_operations soc_info_ops = {
 	.owner   = THIS_MODULE,
 	.open    = soc_info_open,
 	.release = soc_info_release,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl   = soc_info_compat_ioctl,
+#endif
 	.unlocked_ioctl = soc_info_ioctl,
 };
 

@@ -264,11 +264,31 @@ static int sunxi_rtc_getalarm(struct device *dev, struct rtc_wkalrm *wkalrm)
 	return 0;
 }
 
+static int rtc_valid_tm_o(struct rtc_time *tm)
+{
+	if (tm->tm_year < 70
+	    || tm->tm_year > 130
+	    || ((unsigned)tm->tm_mon) >= 12
+	    || tm->tm_mday < 1
+	    || tm->tm_mday > rtc_month_days(tm->tm_mon, tm->tm_year + 1900)
+	    || ((unsigned)tm->tm_hour) >= 24
+	    || ((unsigned)tm->tm_min) >= 60
+	    || ((unsigned)tm->tm_sec) >= 60) {
+		pr_err("rtc: error rtc_valid_tm\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int sunxi_rtc_settime(struct device *dev, struct rtc_time *rtc_tm);
 static int sunxi_rtc_gettime(struct device *dev, struct rtc_time *rtc_tm)
 {
 	struct sunxi_rtc_dev *chip = dev_get_drvdata(dev);
+	int err;
 	u32 date, time;
-
+	/* we use this to avoid rtc time unavailable */
+	static struct rtc_time rtc_btime;
 	/*
 	 * read again in case it changes
 	 */
@@ -294,11 +314,30 @@ static int sunxi_rtc_gettime(struct device *dev, struct rtc_time *rtc_tm)
 	 */
 	rtc_tm->tm_year += SUNXI_YEAR_OFF(chip->data_year);
 
+	if (rtc_valid_tm_o(rtc_tm)) {
+		if (!rtc_valid_tm_o(&rtc_btime)) {
+			sunxi_rtc_settime(dev, &rtc_btime);
+			*rtc_tm = rtc_btime;
+		} else {
+			rtc_tm->tm_year = 2020 - 1900;
+			rtc_tm->tm_mon = 0;
+			rtc_tm->tm_mday = 1;
+			rtc_tm->tm_hour = 0;
+			rtc_tm->tm_min = 0;
+			rtc_tm->tm_sec = 0;
+			sunxi_rtc_settime(dev, rtc_tm);
+		}
+	} else {
+		rtc_btime = *rtc_tm;
+	}
+
 	dev_dbg(dev, "Read hardware RTC time %04d-%02d-%02d %02d:%02d:%02d\n",
 		rtc_tm->tm_year + 1900, rtc_tm->tm_mon + 1, rtc_tm->tm_mday,
 		rtc_tm->tm_hour, rtc_tm->tm_min, rtc_tm->tm_sec);
 
-	return rtc_valid_tm(rtc_tm);
+	err = rtc_valid_tm(rtc_tm);
+	dev_dbg(dev, "rtc get_timer return %d\n", err);
+	return err;
 }
 
 static int sunxi_rtc_setalarm(struct device *dev, struct rtc_wkalrm *wkalrm)
@@ -654,7 +693,8 @@ static int sunxi_rtc_probe(struct platform_device *pdev)
 	writel(tmp_data, chip->base + SUNXI_LOSC_CTRL);
 
 	tmp_data = readl(chip->base + SUNXI_LOSC_CTRL);
-	tmp_data |= (RTC_SOURCE_EXTERNAL | REG_LOSCCTRL_MAGIC);
+	tmp_data &= (~SUNXI_LOSC_CTRL_SRC_SEL);
+	tmp_data |= (REG_LOSCCTRL_MAGIC);
 	writel(tmp_data, chip->base + SUNXI_LOSC_CTRL);
 
 	/* We need to set GSM after change clock source */
@@ -662,6 +702,13 @@ static int sunxi_rtc_probe(struct platform_device *pdev)
 	tmp_data = readl(chip->base + SUNXI_LOSC_CTRL);
 	tmp_data |= (EXT_LOSC_GSM | REG_LOSCCTRL_MAGIC);
 	writel(tmp_data, chip->base + SUNXI_LOSC_CTRL);
+
+	/* Open internal OSC clk auto calibration */
+	tmp_data = readl(chip->base + SUNXI_INTOSC_CLK_AUTO_CALI);
+	tmp_data |= SUNXI_RC_CALI_EN;
+	tmp_data |= SUNXI_RC_CALI_FN_EN;
+	writel(tmp_data, chip->base + SUNXI_INTOSC_CLK_AUTO_CALI);
+
 
 	device_init_wakeup(&pdev->dev, 1);
 

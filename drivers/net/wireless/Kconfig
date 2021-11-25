@@ -105,6 +105,7 @@ config USB_NET_RNDIS_WLAN
 source "drivers/net/wireless/bcmdhd/Kconfig"
 source "drivers/net/wireless/rtl8723cs/Kconfig"
 source "drivers/net/wireless/rtl8723bs_vq0/Kconfig"
+source "drivers/net/wireless/uwe5622/Kconfig"
 source "drivers/net/wireless/rtl8822bs/Kconfig"
 
 endif # WLAN

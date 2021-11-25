@@ -37,11 +37,15 @@
 #include <linux/sunxi-sid.h>
 #include <linux/sunxi-gpio.h>
 #include "sunxi-gmac.h"
+#include <linux/phy.h>
 
 #define DMA_DESC_RX	256
 #define DMA_DESC_TX	256
 #define BUDGET		(dma_desc_rx / 4)
 #define TX_THRESH	(dma_desc_tx / 4)
+
+#define RTL_8211F_PHY_ID  0x001cc916
+#define RTL_YT8531_PHY_ID 0x4f51e91b
 
 #define HASH_TABLE_SIZE	64
 #define MAX_BUF_SZ	(SZ_2K - 1)
@@ -509,6 +513,7 @@ static int geth_phy_init(struct net_device *ndev)
 			if (phydev_tmp && (phydev_tmp->phy_id != 0x00)) {
 				phydev = phydev_tmp;
 				g_phy_addr = addr;
+				break;
 			}
 		}
 	}
@@ -1864,6 +1869,34 @@ static void geth_hw_release(struct platform_device *pdev)
 		clk_put(priv->ephy_clk);
 }
 
+static int phy_rtl8211f_led_fixup(struct phy_device *phydev)
+{
+
+	printk("%s in\n", __func__);
+
+	phy_write(phydev, 31, 0x0d04);
+	phy_write(phydev, 16, 0x2f60);
+	phy_write(phydev, 17, 0x0000);
+	phy_write(phydev,31,0x0000);
+
+	return 0;
+}
+
+static int phy_yt8531_led_fixup(struct phy_device *phydev)
+{
+       printk("%s in\n", __func__);
+       phy_write(phydev, 0x1e, 0xa00d);
+       phy_write(phydev, 0x1f, 0x670);
+
+       phy_write(phydev, 0x1e, 0xa00e);
+       phy_write(phydev, 0x1f, 0x2070);
+
+       phy_write(phydev, 0x1e, 0xa00f);
+       phy_write(phydev, 0x1f, 0x7e);
+
+       return 0;
+}
+
 /**
  * geth_probe
  * @pdev: platform device pointer
@@ -1944,6 +1977,14 @@ static int geth_probe(struct platform_device *pdev)
 #ifdef CONFIG_PM
 	INIT_WORK(&priv->eth_work, geth_resume_work);
 #endif
+	/* register the PHY board fixup */
+	ret = phy_register_fixup_for_uid(RTL_8211F_PHY_ID, 0xffffffff, phy_rtl8211f_led_fixup);
+        if (ret)
+                dev_warn(&pdev->dev, "Cannot register PHY board fixup.\n");
+
+	ret = phy_register_fixup_for_uid(RTL_YT8531_PHY_ID, 0xffffffff, phy_yt8531_led_fixup);
+	if (ret)
+		pr_warn("Cannot register PHY board fixup.\n");
 
 	return 0;
 
@@ -1972,6 +2013,20 @@ static int geth_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static void geth_shutdown(struct platform_device *pdev)
+{
+	struct net_device *ndev = platform_get_drvdata(pdev);
+	struct geth_priv *priv = netdev_priv(ndev);
+
+	device_remove_file(&pdev->dev, &dev_attr_gphy_test);
+
+	netif_napi_del(&priv->napi);
+	unregister_netdev(ndev);
+	geth_hw_release(pdev);
+	platform_set_drvdata(pdev, NULL);
+	free_netdev(ndev);
+}
+
 static const struct of_device_id geth_of_match[] = {
 	{.compatible = "allwinner,sunxi-gmac",},
 	{},
@@ -1981,6 +2036,7 @@ MODULE_DEVICE_TABLE(of, geth_of_match);
 static struct platform_driver geth_driver = {
 	.probe	= geth_probe,
 	.remove = geth_remove,
+	.shutdown = geth_shutdown,
 	.driver = {
 		   .name = "sunxi-gmac",
 		   .owner = THIS_MODULE,

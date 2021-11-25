@@ -120,3 +120,4 @@ all.config
 
 # ignore gator md5 data
 drivers/gator/gator_src_md5.h
+bin2hex

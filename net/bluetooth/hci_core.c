@@ -811,7 +811,11 @@ static int __hci_init(struct hci_dev *hdev)
 
 	err = __hci_req_sync(hdev, hci_init3_req, 0, HCI_INIT_TIMEOUT, NULL);
 	if (err < 0)
+#if defined(CONFIG_AW_WIFI_DEVICE_UWE5622)
+		pr_err("%s(%d), err = %d, EINVAL.\n", __func__, __LINE__, err);
+#else
 		return err;
+#endif
 
 	err = __hci_req_sync(hdev, hci_init4_req, 0, HCI_INIT_TIMEOUT, NULL);
 	if (err < 0) {
