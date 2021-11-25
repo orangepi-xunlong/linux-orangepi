@@ -115,6 +115,7 @@ static void stmmac_exit_fs(struct net_device *dev);
 
 #define RTL_8211E_PHY_ID  0x001cc915
 #define RTL_8211F_PHY_ID  0x001cc916
+#define RTL_YT8531_PHY_ID 0x4f51e91b
 
 /**
  * stmmac_verify_args - verify the driver parameters.
@@ -4786,59 +4787,6 @@ static int stmmac_hw_init(struct stmmac_priv *priv)
 	return 0;
 }
 
-static int phy_rtl8211e_led_fixup(struct phy_device *phydev)
-{
-	int val;
-
-	printk("%s in\n", __func__);
-
-	/*switch to extension page44*/
-	phy_write(phydev, 31, 0x07);
-	phy_write(phydev, 30, 0x2c);
-
-	/*set led1(yellow) act*/
-	val = phy_read(phydev, 26);
-	val &= (~(1<<4));// bit4=0
-	val |= (1<<5);// bit5=1
-	val &= (~(1<<6));// bit6=0
-	phy_write(phydev, 26, val);
-
-	/*set led0(green) link*/
-	val = phy_read(phydev, 28);
-	val |= (7<<0);// bit0,1,2=1
-	val &= (~(7<<4));// bit4,5,6=0
-	val &= (~(7<<8));// bit8,9,10=0
-	phy_write(phydev, 28, val);
-
-	/*switch back to page0*/
-	phy_write(phydev,31,0x00);
-
-	return 0;
-}
-
-static int phy_rtl8211f_led_fixup(struct phy_device *phydev)
-{
-	int val;
-
-	printk("%s in\n", __func__);
-
-	/*switch to extension page 0xd04*/
-	phy_write(phydev, 31, 0xd04);
-
-
-	/*set led1(yellow) act*/
-	/*set led2(green) link*/
-	val = 0xae00;
-	phy_write(phydev, 16, val);
-
-    val = 0x0;
-    phy_write(phydev, 17, val);
-	/*switch back to page0*/
-	phy_write(phydev,31,0x00);
-
-	return 0;
-}
-
 static void stmmac_napi_add(struct net_device *dev)
 {
 	struct stmmac_priv *priv = netdev_priv(dev);
@@ -4918,6 +4866,69 @@ int stmmac_reinit_ringparam(struct net_device *dev, u32 rx_size, u32 tx_size)
 		ret = stmmac_open(dev);
 
 	return ret;
+}
+
+static int phy_rtl8211e_led_fixup(struct phy_device *phydev)
+{
+       //int val;
+
+       printk("%s in\n", __func__);
+
+       /*switch to extension page44*/
+       phy_write(phydev, 31, 0x07);
+       phy_write(phydev, 30, 0x2c);
+
+       /*set led1(yellow) act
+       val = phy_read(phydev, 26);
+       val &= (~(1<<4));// bit4=0
+       val |= (1<<5);// bit5=1
+       val &= (~(1<<6));// bit6=0*/
+       phy_write(phydev, 26, 0x20);
+
+       /*set led0(green) link
+       val = phy_read(phydev, 28);
+       val |= (7<<0);// bit0,1,2=1
+       val &= (~(7<<4));// bit4,5,6=0
+       val &= (~(7<<8));// bit8,9,10=0*/
+       phy_write(phydev, 28, 0x07);
+
+       /*switch back to page0*/
+       phy_write(phydev,31,0x00);
+
+       return 0;
+}
+
+static int phy_rtl8211f_led_fixup(struct phy_device *phydev)
+{
+       printk("%s in\n", __func__);
+
+       /*switch to extension page44*/
+       phy_write(phydev, 31, 0xd04);
+
+       /*set led1(yellow) act */
+       /*set led2(green) link*/
+       phy_write(phydev, 16, 0xae00);
+
+       phy_write(phydev, 17, 0);
+       /*switch back to page0*/
+       phy_write(phydev,31,0x00);
+
+       return 0;
+}
+
+static int phy_yt8531_led_fixup(struct phy_device *phydev)
+{
+       printk("%s in\n", __func__);
+       phy_write(phydev, 0x1e, 0xa00d);
+       phy_write(phydev, 0x1f, 0x670);
+
+       phy_write(phydev, 0x1e, 0xa00e);
+       phy_write(phydev, 0x1f, 0x2070);
+
+       phy_write(phydev, 0x1e, 0xa00f);
+       phy_write(phydev, 0x1f, 0x7e);
+
+       return 0;
 }
 
 /**
@@ -5146,6 +5157,10 @@ int stmmac_dvr_probe(struct device *device,
 		pr_warn("Cannot register PHY board fixup.\n");
 
 	ret = phy_register_fixup_for_uid(RTL_8211F_PHY_ID, 0xffffffff, phy_rtl8211f_led_fixup);
+	if (ret)
+		pr_warn("Cannot register PHY board fixup.\n");
+
+	ret = phy_register_fixup_for_uid(RTL_YT8531_PHY_ID, 0xffffffff, phy_yt8531_led_fixup);
 	if (ret)
 		pr_warn("Cannot register PHY board fixup.\n");
 

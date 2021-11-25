@@ -161,7 +161,7 @@
 	phy-supply = <&reg_aldo2>;
 	phy-io-supply = <&reg_gmac_2v5>;
 	allwinner,rx-delay-ps = <200>;
-	allwinner,tx-delay-ps = <200>;
+	allwinner,tx-delay-ps = <300>;
 	status = "okay";
 };
 
