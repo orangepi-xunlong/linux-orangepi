@@ -124,8 +124,8 @@
                 #address-cells = <1>;
                 #size-cells = <0>;
 
-                ethphy3: ethernet-phy@1 {
-                        reg = <0x1>;
+                ethphy3: ethernet-phy@0 {
+                        reg = <0x0>;
                         //interrupt-parent = <&gpio1>;
                         //interrupts = <RK_PC4 IRQ_TYPE_EDGE_FALLING>;
                         keep-clkout-on;
