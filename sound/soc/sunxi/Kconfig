@@ -18,6 +18,17 @@ config SND_SUN50IW9_CODEC
 	  Select Y or M to add support for the Codec embedded in the Allwinner
 	  H616 and affiliated SoCs.
 
+#config SND_SOC_SUN50I_ES8316
+#	tristate "ASoc support for Allwinner H616 boards using a ES8316 codec"
+#	depends on I2C && GPIOLIB && CLKDEV_LOOKUP
+#	depends on SND_SOC_ES8316
+#	select SND_SOC_GENERIC_DMAENGINE_PCM
+#	select SND_SUNXI_SOC_AHUB
+#	select REGMAP_MMIO
+#	help
+#          Say Y or M here if you want to add support for SoC audio on Allwinner H616
+#          boards using the ES8316 codec.
+
 config SND_SUN8I_CODEC
 	tristate "Allwinner SUN8I audio codec"
 	depends on OF
@@ -67,5 +78,23 @@ config SND_SUN4I_SPDIF
 config SND_SUN8I_ADDA_PR_REGMAP
 	tristate
 	select REGMAP
+
+config SND_SOC_SUN50I_AHUB
+	bool "Allwinner H616 Audio Hub Support for ASoc"
+	select REGMAP_MMIO
+	default n
+	help
+          Say Y or M if you want to using ahub module.
+
+config SND_SOC_SUN50I_HDMI
+        bool "ASoc support for Allwinner H616 HDMI"
+        select SND_SOC_GENERIC_DMAENGINE_PCM
+        select DRM_DW_HDMI_I2S_AUDIO
+        select SND_SOC_HDMI_CODEC
+        select REGMAP_MMIO
+        default n
+        help
+           Say Y or M here if you want to add support for SoC hdmi audio on Allwinner
+	   H616 boards, such as Orange Pi Zero 2.
 
 endmenu

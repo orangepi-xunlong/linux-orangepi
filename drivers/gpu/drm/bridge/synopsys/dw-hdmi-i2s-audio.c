@@ -118,7 +118,9 @@ static int dw_hdmi_i2s_audio_startup(struct device *dev, void *data)
 	struct dw_hdmi_i2s_audio_data *audio = data;
 	struct dw_hdmi *hdmi = audio->hdmi;
 
+#if ! defined(CONFIG_SND_SOC_SUN50I_HDMI)
 	dw_hdmi_audio_enable(hdmi);
+#endif
 
 	return 0;
 }
@@ -128,7 +130,9 @@ static void dw_hdmi_i2s_audio_shutdown(struct device *dev, void *data)
 	struct dw_hdmi_i2s_audio_data *audio = data;
 	struct dw_hdmi *hdmi = audio->hdmi;
 
+#if ! defined(CONFIG_SND_SOC_SUN50I_HDMI)
 	dw_hdmi_audio_disable(hdmi);
+#endif
 }
 
 static int dw_hdmi_i2s_get_eld(struct device *dev, void *data, uint8_t *buf,
@@ -204,6 +208,10 @@ static int snd_dw_hdmi_probe(struct platform_device *pdev)
 		return PTR_ERR(platform);
 
 	dev_set_drvdata(&pdev->dev, platform);
+
+#if defined(CONFIG_SND_SOC_SUN50I_HDMI)
+	dw_hdmi_audio_enable(audio->hdmi);
+#endif
 
 	return 0;
 }

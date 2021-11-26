@@ -1,7 +1,18 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
-* Based on the Allwinner SDK driver and sun4i-codec.c
-*/
+ * Copyright 2014 Emilio López <emilio@elopez.com.ar>
+ * Copyright 2014 Jon Smirl <jonsmirl@gmail.com>
+ * Copyright 2015 Maxime Ripard <maxime.ripard@free-electrons.com>
+ * Copyright 2015 Adam Sampson <ats@offog.org>
+ * Copyright 2016 Chen-Yu Tsai <wens@csie.org>
+ * Copyright 2021 gryzun <gryzun_an@rambler.ru>
+ *
+ * (C) Copyright 2021
+ * Shenzhen Xunlong Software Co., Ltd. <www.orangepi.org>
+ * Leeboby <leeboby@aliyun.com>
+ *
+ * Based on the Allwinner SDK driver, released under the GPL.
+ */
 
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -475,11 +486,9 @@ static int sunxi_lineout_event(struct snd_soc_dapm_widget *w,
 				  struct snd_kcontrol *k, int event)
 {
 	struct sun50i_h616_codec *scodec = snd_soc_card_get_drvdata(w->dapm->card);
-	printk("lee sunxi lineout event\n");
 
 	switch (event) {
 	case	SND_SOC_DAPM_POST_PMU:
-		printk("lee sunxi lineout event PMU\n");
 
 		regmap_update_bits(scodec->regmap, SUNXI_DAC_AC_RAMP_REG,
 			(0x1 << SUNXI_RDEN), (0x1 << SUNXI_RDEN));
@@ -490,7 +499,6 @@ static int sunxi_lineout_event(struct snd_soc_dapm_widget *w,
 				(0x1 << SUNXI_LINEOUTL_EN) | (0x1 << SUNXI_LINEOUTR_EN));
 		break;
 	case	SND_SOC_DAPM_PRE_PMD:
-		printk("lee sunxi lineout event PMD\n");
 
 		regmap_update_bits(scodec->regmap, SUNXI_DAC_AC_RAMP_REG,
 					(0x1 << SUNXI_RDEN), (0x0 << SUNXI_RDEN));
@@ -1031,4 +1039,9 @@ static struct platform_driver sun50i_h616_codec_driver = {
 module_platform_driver(sun50i_h616_codec_driver);
 
 MODULE_DESCRIPTION("Allwinner H616 codec driver");
+MODULE_AUTHOR("Emilio López <emilio@elopez.com.ar>");
+MODULE_AUTHOR("Jon Smirl <jonsmirl@gmail.com>");
+MODULE_AUTHOR("Maxime Ripard <maxime.ripard@free-electrons.com>");
+MODULE_AUTHOR("Chen-Yu Tsai <wens@csie.org>");
+MODULE_AUTHOR("Leeboby <leeboby@aliyun.com>");
 MODULE_LICENSE("GPL");

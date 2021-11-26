@@ -7,3 +7,12 @@ obj-$(CONFIG_SND_SUN4I_SPDIF) += sun4i-spdif.o
 obj-$(CONFIG_SND_SUN50I_CODEC_ANALOG) += sun50i-codec-analog.o
 obj-$(CONFIG_SND_SUN8I_CODEC) += sun8i-codec.o
 obj-$(CONFIG_SND_SUN8I_ADDA_PR_REGMAP) += sun8i-adda-pr-regmap.o
+
+# audio hub
+obj-$(CONFIG_SND_SOC_SUN50I_AHUB) += sun50i-ahub.o
+obj-$(CONFIG_SND_SOC_SUN50I_AHUB) += sun50i-ahub-cpudai.o
+obj-$(CONFIG_SND_SOC_SUN50I_AHUB) += sun50i-ahub-daudio.o
+# ahub machine
+obj-$(CONFIG_SND_SOC_SUN50I_AHUB) += sun50i-sndahub.o
+#obj-$(CONFIG_SND_SOC_SUN50I_ES8316) += sun50iw9-sndes8316.o
+obj-$(CONFIG_SND_SOC_SUN50I_HDMI) += sun50i-sndhdmi.o
