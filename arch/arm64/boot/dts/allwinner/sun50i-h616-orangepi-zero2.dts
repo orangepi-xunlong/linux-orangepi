@@ -267,8 +267,8 @@
 
 			reg_dcdcd: dcdcd {
 				regulator-always-on;
-				regulator-min-microvolt = <1500000>;
-				regulator-max-microvolt = <1500000>;
+				regulator-min-microvolt = <1400000>;
+				regulator-max-microvolt = <1400000>;
 				regulator-name = "vdd-dram";
 			};
 
