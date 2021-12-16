@@ -102,6 +102,12 @@ int rockchip_pcie_parse_dt(struct rockchip_pcie *rockchip)
 		return dev_err_probe(dev, rockchip->num_clks,
 				     "failed to get clocks\n");
 
+	err = of_property_read_u32(node, "bus-scan-delay-ms", &rockchip->bus_scan_delay);
+	if (err) {
+		dev_info(dev, "no bus scan delay, default to 0 ms\n");
+		rockchip->bus_scan_delay = 0;
+	}
+
 	return 0;
 }
 EXPORT_SYMBOL_GPL(rockchip_pcie_parse_dt);
