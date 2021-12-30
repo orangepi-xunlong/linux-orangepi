@@ -45,6 +45,7 @@
 #define TX_THRESH	(dma_desc_tx / 4)
 
 #define RTL_8211F_PHY_ID  0x001cc916
+#define YT_8531C_PHY_ID   0x4f51e91b
 
 #define HASH_TABLE_SIZE	64
 #define MAX_BUF_SZ	(SZ_2K - 1)
@@ -1859,15 +1860,26 @@ static void geth_hw_release(struct platform_device *pdev)
 
 static int phy_rtl8211f_led_fixup(struct phy_device *phydev)
 {
-
-	printk("%s in\n", __func__);
-
 	phy_write(phydev, 31, 0x0d04);
 	phy_write(phydev, 16, 0x2f60);
 	phy_write(phydev, 17, 0x0000);
 	phy_write(phydev,31,0x0000);
 
 	return 0;
+}
+
+static int phy_yt8531_led_fixup(struct phy_device *phydev)
+{
+       phy_write(phydev, 0x1e, 0xa00d);
+       phy_write(phydev, 0x1f, 0x670);
+
+       phy_write(phydev, 0x1e, 0xa00e);
+       phy_write(phydev, 0x1f, 0x2070);
+
+       phy_write(phydev, 0x1e, 0xa00f);
+       phy_write(phydev, 0x1f, 0x7e);
+
+       return 0;
 }
 
 /**
@@ -1955,6 +1967,9 @@ static int geth_probe(struct platform_device *pdev)
         if (ret)
                 dev_warn(&pdev->dev, "Cannot register PHY board fixup.\n");
 
+	ret = phy_register_fixup_for_uid(YT_8531C_PHY_ID, 0xffffffff, phy_yt8531_led_fixup);
+	if (ret)
+                dev_warn(&pdev->dev, "Cannot register PHY board fixup.\n");
 
 	return 0;
 
