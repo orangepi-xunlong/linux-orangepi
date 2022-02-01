@@ -355,7 +355,8 @@ DTC_FLAGS += -Wnode_name_chars_strict \
 	-Winterrupt_provider
 endif
 
-DTC_FLAGS += $(DTC_FLAGS_$(basetarget))
+DTC_FLAGS += $(DTC_FLAGS_$(basetarget)) \
+	-@
 
 # Set -@ if the target is a base DTB that overlay is applied onto
 DTC_FLAGS += $(if $(filter $(patsubst $(obj)/%,%,$@), $(base-dtb-y)), -@)
