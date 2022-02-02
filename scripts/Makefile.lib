@@ -88,6 +88,9 @@ base-dtb-y := $(foreach m, $(multi-dtb-y), $(firstword $(call suffix-search, $m,
 
 always-y			+= $(dtb-y)
 
+# Overlay targets
+extra-y				+= $(dtbo-y) $(scr-y) $(dtbotxt-y)
+
 # Add subdir path
 
 ifneq ($(obj),.)
