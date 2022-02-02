@@ -692,6 +692,7 @@ static const struct file_operations spidev_fops = {
 static struct class *spidev_class;
 
 static const struct spi_device_id spidev_spi_ids[] = {
+	{ .name = "spi-dev" },
 	{ .name = "dh2228fv" },
 	{ .name = "ltc2488" },
 	{ .name = "sx1301" },
@@ -714,10 +715,12 @@ static int spidev_of_check(struct device *dev)
 		return 0;
 
 	dev_err(dev, "spidev listed directly in DT is not supported\n");
+	dev_info(dev, "Use a compatible alias string like spi-dev in DT\n");
 	return -EINVAL;
 }
 
 static const struct of_device_id spidev_dt_ids[] = {
+	{ .compatible = "orangepi,spi-dev", .data = &spidev_of_check },
 	{ .compatible = "rohm,dh2228fv", .data = &spidev_of_check },
 	{ .compatible = "lineartechnology,ltc2488", .data = &spidev_of_check },
 	{ .compatible = "semtech,sx1301", .data = &spidev_of_check },
