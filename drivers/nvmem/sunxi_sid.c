@@ -40,7 +40,7 @@ struct sunxi_sid {
 static unsigned int sunxi_soc_chipid[4];
 static unsigned int sunxi_serial[4];
 
-int sunxi_get_soc_chipid(unsigned       char *chipid)
+int sunxi_get_soc_chipid(unsigned char *chipid)
 {
 	memcpy(chipid, sunxi_soc_chipid, 16);
 
