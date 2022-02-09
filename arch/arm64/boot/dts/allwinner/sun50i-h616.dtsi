@@ -1126,6 +1126,14 @@
 			compatible = "allwinner,sun50i-h616-sys-info";
 			status = "okay";
 		};
+
+		addr_mgt: addr-mgt {
+			compatible = "allwinner,sunxi-addr_mgt";
+			type_addr_wifi = <0x2>;
+			type_addr_bt = <0x2>;
+			type_addr_eth = <0x2>;
+			status = "okay";
+		};
 	};
 
 	thermal-zones {
