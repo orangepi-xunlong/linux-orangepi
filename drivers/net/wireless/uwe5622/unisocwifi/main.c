@@ -1129,8 +1129,8 @@ random_mac:
 	return 0;
 }
 
-#ifdef CONFIG_SUNXI_ADDR_MGT
-extern int get_wifi_custom_mac_address(char *addr_str);
+#if IS_ENABLED(CONFIG_SUNXI_ADDR_MGT)
+extern int get_custom_mac_address(int fmt, char *name, char *addr);
 #endif
 static void sprdwl_set_mac_addr(struct sprdwl_vif *vif, u8 *pending_addr,
 				u8 *addr)
@@ -1147,13 +1147,8 @@ static void sprdwl_set_mac_addr(struct sprdwl_vif *vif, u8 *pending_addr,
 	if (!addr) {
 		return;
 	}
-#ifdef CONFIG_SUNXI_ADDR_MGT
-	ret = get_wifi_custom_mac_address(addr_str);
-	if (ret != -1) {
-		sscanf(addr_str, "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
-				&custom_mac[0], &custom_mac[1], &custom_mac[2],
-				&custom_mac[3], &custom_mac[4], &custom_mac[5]);
-	}
+#if IS_ENABLED(CONFIG_SUNXI_ADDR_MGT)
+	get_custom_mac_address(1, "wifi", custom_mac);
 #endif
 
 	if (is_valid_ether_addr(custom_mac)) {
