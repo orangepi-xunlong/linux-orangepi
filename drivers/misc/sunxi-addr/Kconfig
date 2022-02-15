@@ -1,0 +1,6 @@
+config SUNXI_ADDR_MGT
+  tristate "Allwinner Network MAC Addess Manager"
+  depends on BT || ETHERNET || WLAN
+  depends on NVMEM_SUNXI_SID
+  help
+    allwinner network mac address management
