@@ -1169,6 +1169,14 @@
 			status = "okay";
 		};
 
+		addr_mgt: addr-mgt {
+			compatible = "allwinner,sunxi-addr_mgt";
+			type_addr_wifi = <0x2>;
+			type_addr_bt = <0x2>;
+			type_addr_eth = <0x2>;
+			status = "okay";
+		};
+
 		dump_reg: dump_reg@20000 {
 			compatible = "allwinner,sunxi-dump-reg";
 			reg = <0x0 0x03001000 0x0 0x0f20>;
