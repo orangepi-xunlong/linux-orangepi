@@ -115,7 +115,6 @@ static void stmmac_exit_fs(struct net_device *dev);
 
 #define RTL_8211E_PHY_ID  0x001cc915
 #define RTL_8211F_PHY_ID  0x001cc916
-#define RTL_YT8531_PHY_ID 0x4f51e91b
 
 /**
  * stmmac_verify_args - verify the driver parameters.
@@ -4828,22 +4827,6 @@ static int phy_rtl8211f_led_fixup(struct phy_device *phydev)
 	return 0;
 }
 
-static int phy_yt8531_led_fixup(struct phy_device *phydev)
-{
-	printk("%s in\n", __func__);
-	phy_write(phydev, 0x1e, 0xa00d);
-	phy_write(phydev, 0x1f, 0x670);
-
-	phy_write(phydev, 0x1e, 0xa00e);
-	phy_write(phydev, 0x1f, 0x2070);
-
-	phy_write(phydev, 0x1e, 0xa00f);
-	phy_write(phydev, 0x1f, 0x7e);
-
-	return 0;
-}
-
-
 static void stmmac_napi_add(struct net_device *dev)
 {
 	struct stmmac_priv *priv = netdev_priv(dev);
@@ -5150,9 +5133,6 @@ int stmmac_dvr_probe(struct device *device,
 	if (ret)
 		pr_warn("Cannot register PHY board fixup.\n");
 	ret = phy_register_fixup_for_uid(RTL_8211F_PHY_ID, 0xffffffff, phy_rtl8211f_led_fixup);
-	if (ret)
-		pr_warn("Cannot register PHY board fixup.\n");
-	ret = phy_register_fixup_for_uid(RTL_YT8531_PHY_ID, 0xffffffff, phy_yt8531_led_fixup);
 	if (ret)
 		pr_warn("Cannot register PHY board fixup.\n");
 

@@ -84,9 +84,26 @@ static int link_mode_8614[4] = {0}; //0: no link; 1: utp; 32: fiber. traced that
 static unsigned int yt_mport_base_phy_addr = 0xff; //0xff: invalid; for 8618
 static unsigned int yt_mport_base_phy_addr_8614 = 0xff; //0xff: invalid;
 
+int phy_yt8531_led_fixup(struct mii_bus *bus, int addr);
+int yt8511_config_out_125m(struct mii_bus *bus, int phy_id);
+
 #if ( LINUX_VERSION_CODE > KERNEL_VERSION(5,0,0) )
 int genphy_config_init(struct phy_device *phydev)
 {
+	int ret;
+
+	printk (KERN_INFO "yzhang..read phyaddr=%d, phyid=%08x\n",phydev->mdio.addr, phydev->phy_id);
+
+	if(phydev->phy_id == 0x4f51e91b)
+	{
+		printk (KERN_INFO "yzhang..get YT8511, abt to set 125m clk out, phyaddr=%d, phyid=%08x\n",phydev->mdio.addr, phydev->phy_id);
+		ret = yt8511_config_out_125m(phydev->mdio.bus, phydev->mdio.addr);
+		printk (KERN_INFO "yzhang..8511 set 125m clk out, reg=%#04x\n",phydev->mdio.bus->read(phydev->mdio.bus,phydev->mdio.addr,0x1f)/*double check as delay*/);
+		if (ret<0)
+			printk (KERN_INFO "yzhang..failed to set 125m clk out, ret=%d\n",ret);
+
+		phy_yt8531_led_fixup(phydev->mdio.bus, phydev->mdio.addr);
+	}
 	return  genphy_read_abilities(phydev);
 }
 #endif
@@ -373,15 +390,27 @@ int yt8511_config_dis_txdelay(struct mii_bus *bus, int phy_id)
     return ret;
 }
 
+int phy_yt8531_led_fixup(struct mii_bus *bus, int addr)
+{
+	printk("%s in\n", __func__);
 
-int yt8511_config_out_125m(struct mii_bus *bus, int phy_id)
+	ytphy_mii_wr_ext(bus, addr, 0xa00d, 0x670);
+	ytphy_mii_wr_ext(bus, addr, 0xa00e, 0x2070);
+	ytphy_mii_wr_ext(bus, addr, 0xa00f, 0x7e);
+
+	return 0;
+}
+
+int yt8511_config_out_125m(struct mii_bus *bus, int addr)
 {
 	int ret;
 	int val;
 
-	ret = ytphy_mii_wr_ext(bus, phy_id, 0xa012, 0xd0);
 	mdelay(100);
-	val = ytphy_mii_rd_ext(bus, phy_id, 0xa012);
+	ret = ytphy_mii_wr_ext(bus, addr, 0xa012, 0xd0);
+
+	mdelay(100);
+	val = ytphy_mii_rd_ext(bus, addr, 0xa012);
 
 	if(val != 0xd0)
 	{
@@ -390,18 +419,18 @@ int yt8511_config_out_125m(struct mii_bus *bus, int phy_id)
 	}
 
 	/* disable auto sleep */
-	val = ytphy_mii_rd_ext(bus, phy_id, 0x27);
+	val = ytphy_mii_rd_ext(bus, addr, 0x27);
 	if (val < 0)
 	        return val;
 
 	val &= (~BIT(15));
 
-	ret = ytphy_mii_wr_ext(bus, phy_id, 0x27, val);
+	ret = ytphy_mii_wr_ext(bus, addr, 0x27, val);
 	if (ret < 0)
 	        return ret;
 
 	/* enable RXC clock when no wire plug */
-	val = ytphy_mii_rd_ext(bus, phy_id, 0xc);
+	val = ytphy_mii_rd_ext(bus, addr, 0xc);
 	if (val < 0)
 	        return val;
 
@@ -412,10 +441,8 @@ int yt8511_config_out_125m(struct mii_bus *bus, int phy_id)
 	11----125M from pll(here set to this value)
 	*/
 	val |= (3 << 1);
-	ret = ytphy_mii_wr_ext(bus, phy_id, 0xc, val);
+	ret = ytphy_mii_wr_ext(bus, addr, 0xc, val);
 	printk("yt8511_config_out_125m, phy clk out, val=%#08x\n",val);
-
-	//ret = ytphy_mii_wr_ext(bus, phy_id, 0xa012, 0x70);
 
 #if 0
 	/* for customer, please enable it based on demand.
