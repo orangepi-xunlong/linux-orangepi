@@ -399,6 +399,7 @@ extern const struct spi_nor_manufacturer spi_nor_winbond;
 extern const struct spi_nor_manufacturer spi_nor_xilinx;
 extern const struct spi_nor_manufacturer spi_nor_xmc;
 extern const struct spi_nor_manufacturer spi_nor_xtx;
+extern const struct spi_nor_manufacturer spi_nor_zbit;
 
 int spi_nor_write_enable(struct spi_nor *nor);
 int spi_nor_write_disable(struct spi_nor *nor);
