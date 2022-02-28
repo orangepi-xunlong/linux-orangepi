@@ -512,10 +512,68 @@ phy_has_fixups_show(struct device *dev, struct device_attribute *attr,
 }
 static DEVICE_ATTR_RO(phy_has_fixups);
 
+static ssize_t
+phy_registers_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct phy_device *phydev = to_phy_device(dev);
+	int index;
+
+	for (index = 0; index < 32; index++)
+		sprintf(buf, "%s%2d: 0x%x\n", buf, index,
+			phy_read(phydev, index));
+
+	return strlen(buf);
+}
+
+static ssize_t
+phy_registers_store(struct device *dev,
+		    struct device_attribute *attr,
+		    const char *buf, size_t count)
+{
+	struct phy_device *phydev = to_phy_device(dev);
+	int index = 0, val = 0;
+	char tmp[32];
+	char *data;
+
+	if (count >= sizeof(tmp))
+		goto out;
+
+	memset(tmp, 0, sizeof(tmp));
+	memcpy(tmp, buf, count);
+
+	data = tmp;
+	data = strstr(data, " ");
+	if (!data)
+		goto out;
+	*data = 0;
+	data++;
+
+	if (kstrtoint(tmp, 0, &index) || index >= 32)
+		goto out;
+
+	if (kstrtoint(data, 0, &val) || val > 0xffff)
+		goto out;
+
+	pr_info("Set Ethernet PHY register %d to 0x%x\n", (int)index, (int)val);
+
+	phy_write(phydev, index, val);
+
+	return count;
+
+out:
+	pr_err("wrong register value input\n");
+	pr_err("usage: <reg index> <value>\n");
+
+	return count;
+}
+
+static DEVICE_ATTR_RW(phy_registers);
+
 static struct attribute *phy_dev_attrs[] = {
 	&dev_attr_phy_id.attr,
 	&dev_attr_phy_interface.attr,
 	&dev_attr_phy_has_fixups.attr,
+	&dev_attr_phy_registers.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(phy_dev);
@@ -816,8 +874,6 @@ static int get_phy_c22_id(struct mii_bus *bus, int addr, u32 *phy_id)
 	return 0;
 }
 
-int yt8511_config_out_125m(struct mii_bus *bus, int phy_id);
-
 /**
  * get_phy_device - reads the specified PHY device and returns its @phy_device
  *		    struct
@@ -854,18 +910,6 @@ struct phy_device *get_phy_device(struct mii_bus *bus, int addr, bool is_c45)
 
 	if (r)
 		return ERR_PTR(r);
-
-	printk (KERN_INFO "yzhang..read phyaddr=%d, phyid=%08x\n",addr, phy_id);
-	if(phy_id == 0x4f51e91b)
-	{
-	        printk (KERN_INFO "yzhang..get YT8511, abt to set 125m clk out, phyaddr=%d, phyid=%08x\n",addr, phy_id);
-	        r = yt8511_config_out_125m(bus, addr);
-	        printk (KERN_INFO "yzhang..8511 set 125m clk out, reg=%#04x\n",bus->read(bus,addr,0x1f)/*double check as delay*/);
-	        if (r<0)
-	        {
-	                printk (KERN_INFO "yzhang..failed to set 125m clk out, ret=%d\n",r);
-	        }
-	}
 
 	return phy_device_create(bus, addr, phy_id, is_c45, &c45_ids);
 }
