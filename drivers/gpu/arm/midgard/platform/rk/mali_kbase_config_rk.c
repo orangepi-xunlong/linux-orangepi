@@ -23,6 +23,7 @@
 #include <linux/nvmem-consumer.h>
 #include <linux/rockchip/cpu.h>
 #include <linux/soc/rockchip/pvtm.h>
+#include <linux/rockchip/cpu.h>
 #include <linux/thermal.h>
 #include <soc/rockchip/rockchip_opp_select.h>
 
@@ -432,50 +433,78 @@ static void kbase_platform_rk_remove_sysfs_files(struct device *dev)
 }
 
 static int rk3288_get_soc_info(struct device *dev, struct device_node *np,
-			       int *bin, int *process)
+                              int *bin, int *process)
 {
-	int ret = -EINVAL, value = -EINVAL;
-	char *name;
+       int ret = -EINVAL, value = -EINVAL;
+       char *name;
 
-	if (!bin)
-		goto out;
+       if (!bin)
+               goto out;
 
-	if (soc_is_rk3288w())
-		name = "performance-w";
-	else
-		name = "performance";
-	if (of_property_match_string(np, "nvmem-cell-names", name) >= 0) {
-		ret = rockchip_get_efuse_value(np, name, &value);
-		if (ret) {
-			dev_err(dev, "Failed to get soc performance value\n");
-			goto out;
-		}
-		if (value & 0x2)
-			*bin = 3;
-		else if (value & 0x01)
-			*bin = 2;
-		else
-			*bin = 0;
-	} else {
-		dev_err(dev, "Failed to get bin config\n");
-	}
-	if (*bin >= 0)
-		dev_info(dev, "bin=%d\n", *bin);
+       if (soc_is_rk3288w())
+               name = "performance-w";
+       else
+               name = "performance";
+       if (of_property_match_string(np, "nvmem-cell-names", name) >= 0) {
+               ret = rockchip_get_efuse_value(np, name, &value);
+               if (ret) {
+                       dev_err(dev, "Failed to get soc performance value\n");
+                       goto out;
+               }
+               if (value & 0x2)
+                       *bin = 3;
+               else if (value & 0x01)
+                       *bin = 2;
+               else
+                       *bin = 0;
+       } else {
+               dev_err(dev, "Failed to get bin config\n");
+       }
+       if (*bin >= 0)
+               dev_info(dev, "bin=%d\n", *bin);
 
 out:
-	return ret;
+       return ret;
+}
+
+static int rk3399_get_soc_info(struct device *dev, struct device_node *np,
+                              int *bin, int *process)
+{
+       int ret = 0, value = -EINVAL;
+       if (!bin)
+               return 0;
+       if (of_property_match_string(np, "nvmem-cell-names",
+                                    "performance") >= 0) {
+               ret = rockchip_get_efuse_value(np, "performance", &value);
+               if (ret) {
+                       dev_err(dev, "Failed to get soc performance value\n");
+                       goto out;
+               }
+               if (value == 0x01)
+                       *bin = 2;
+               else
+                       *bin = 0;
+       }
+       if (*bin >= 0)
+               dev_info(dev, "bin=%d\n", *bin);
+out:
+       return ret;
 }
 
 static const struct of_device_id rockchip_mali_of_match[] = {
-	{
-		.compatible = "rockchip,rk3288",
-		.data = (void *)&rk3288_get_soc_info,
-	},
-	{
-		.compatible = "rockchip,rk3288w",
-		.data = (void *)&rk3288_get_soc_info,
-	},
-	{},
+       {
+               .compatible = "rockchip,rk3288",
+               .data = (void *)&rk3288_get_soc_info,
+       },
+       {
+               .compatible = "rockchip,rk3288w",
+               .data = (void *)&rk3288_get_soc_info,
+       },
+       {
+               .compatible = "rockchip,rk3399",
+               .data = (void *)&rk3399_get_soc_info,
+       },
+       {},
 };
 
 int kbase_platform_rk_init_opp_table(struct kbase_device *kbdev)

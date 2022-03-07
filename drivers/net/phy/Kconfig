@@ -111,6 +111,11 @@ config BCM7XXX_PHY
 	  Currently supports the BCM7366, BCM7439, BCM7445, and
 	  40nm and 65nm generation of BCM7xxx Set Top Box SoCs.
 
+config MOTORCOMM_PHY
+        tristate "Motorcomm PHYs"
+        help
+          Supports the YT8010, YT8510, YT8511, YT8512 PHYs.
+
 config BCM87XX_PHY
 	tristate "Driver for Broadcom BCM8706 and BCM8727 PHYs"
 	help

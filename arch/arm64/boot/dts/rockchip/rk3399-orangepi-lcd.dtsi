@@ -22,8 +22,8 @@
                 reg = <0x14>;
                 touch-gpio = <&gpio4 29 IRQ_TYPE_LEVEL_LOW>;
                 reset-gpio = <&gpio4 26 GPIO_ACTIVE_HIGH>;
-                max-x = <800>;
-                max-y = <1280>;
+                max-x = <1280>;
+                max-y = <800>;
                 tp-size = <101>;   // <911> for 8 inch // <101> for 10 inch
         	status = "disabled";
 	};
@@ -37,8 +37,8 @@
                 reg = <0x14>;
                 touch-gpio = <&gpio4 24 IRQ_TYPE_LEVEL_LOW>;
                 reset-gpio = <&gpio4 25 GPIO_ACTIVE_HIGH>;
-                max-x = <800>;
-                max-y = <1280>;
+                max-x = <1280>;
+                max-y = <800>;
                 tp-size = <101>;   // <911> for 8 inch // <101> for 10 inch
                 status = "disabled";
         };

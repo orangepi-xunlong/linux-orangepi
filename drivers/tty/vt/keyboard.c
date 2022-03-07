@@ -65,6 +65,8 @@ static inline int kbd_defleds(void)
 
 #define KBD_DEFLOCK 0
 
+#define KBD_LOCKSTATE_OFFSET 8
+
 /*
  * Handler Tables.
  */
@@ -132,6 +134,10 @@ static int shift_state = 0;
 
 static unsigned int ledstate = -1U;			/* undefined */
 static unsigned char ledioctl;
+static bool caps_as_controlllock;
+static bool task_caps_as_controlllock;
+
+static int saved_cur_kbd_console = -1;
 
 /*
  * Notifier list for console keyboard events
@@ -979,7 +985,7 @@ static void kbd_led_trigger_activate(struct led_classdev *cdev)
 	}
 
 #define KBD_LOCKSTATE_TRIGGER(_led_bit, _name)		\
-	KBD_LED_TRIGGER((_led_bit) + 8, _name)
+	KBD_LED_TRIGGER((_led_bit) + KBD_LOCKSTATE_OFFSET, _name)
 
 static struct kbd_led_trigger kbd_led_triggers[] = {
 	KBD_LED_TRIGGER(VC_SCROLLOCK, "kbd-scrolllock"),
@@ -1003,6 +1009,18 @@ static void kbd_propagate_led_state(unsigned int old_state,
 	struct kbd_led_trigger *trigger;
 	unsigned int changed = old_state ^ new_state;
 	int i;
+
+	/*
+	 * special case where user space uses its own caps lock implementation
+	 * through ControlL_Lock.
+	 */
+	if (task_caps_as_controlllock) {
+		trigger = &kbd_led_triggers[VC_CAPSLOCK];
+		trigger->mask |= BIT(VC_CTRLLLOCK) << KBD_LOCKSTATE_OFFSET;
+	} else {
+		trigger = &kbd_led_triggers[VC_CAPSLOCK];
+		trigger->mask &= ~(BIT(VC_CTRLLLOCK) << KBD_LOCKSTATE_OFFSET);
+	}
 
 	for (i = 0; i < ARRAY_SIZE(kbd_led_triggers); i++) {
 		trigger = &kbd_led_triggers[i];
@@ -1044,9 +1062,9 @@ static int kbd_update_leds_helper(struct input_handle *handle, void *data)
 	unsigned int leds = *(unsigned int *)data;
 
 	if (test_bit(EV_LED, handle->dev->evbit)) {
-		input_inject_event(handle, EV_LED, LED_SCROLLL, !!(leds & 0x01));
-		input_inject_event(handle, EV_LED, LED_NUML,    !!(leds & 0x02));
-		input_inject_event(handle, EV_LED, LED_CAPSL,   !!(leds & 0x04));
+		input_inject_event(handle, EV_LED, LED_SCROLLL, !!(leds & BIT(VC_SCROLLOCK)));
+		input_inject_event(handle, EV_LED, LED_NUML,    !!(leds & BIT(VC_NUMLOCK)));
+		input_inject_event(handle, EV_LED, LED_CAPSL,   !!(leds & BIT(VC_CAPSLOCK)));
 		input_inject_event(handle, EV_SYN, SYN_REPORT, 0);
 	}
 
@@ -1188,7 +1206,8 @@ static void kbd_bh(unsigned long dummy)
 
 	spin_lock_irqsave(&led_lock, flags);
 	leds = getleds();
-	leds |= (unsigned int)kbd->lockstate << 8;
+	leds |= (unsigned int)kbd->lockstate << KBD_LOCKSTATE_OFFSET;
+	task_caps_as_controlllock = caps_as_controlllock;
 	spin_unlock_irqrestore(&led_lock, flags);
 
 	if (leds != ledstate) {
@@ -1457,6 +1476,12 @@ static void kbd_event(struct input_handle *handle, unsigned int event_type,
 	/* We are called with interrupts disabled, just take the lock */
 	spin_lock(&kbd_event_lock);
 
+	/* reset the led state on console switch */
+	if (saved_cur_kbd_console != fg_console) {
+		ledstate = -1U;
+		saved_cur_kbd_console = fg_console;
+	}
+
 	if (event_type == EV_MSC && event_code == MSC_RAW && HW_RAW(handle->dev))
 		kbd_rawcode(value);
 	if (event_type == EV_KEY)
@@ -1694,16 +1719,12 @@ int vt_do_diacrit(unsigned int cmd, void __user *udp, int perm)
 			return -EINVAL;
 
 		if (ct) {
-			dia = kmalloc(sizeof(struct kbdiacr) * ct,
-								GFP_KERNEL);
-			if (!dia)
-				return -ENOMEM;
 
-			if (copy_from_user(dia, a->kbdiacr,
-					sizeof(struct kbdiacr) * ct)) {
-				kfree(dia);
-				return -EFAULT;
-			}
+			dia = memdup_user(a->kbdiacr,
+					sizeof(struct kbdiacr) * ct);
+			if (IS_ERR(dia))
+				return PTR_ERR(dia);
+
 		}
 
 		spin_lock_irqsave(&kbd_event_lock, flags);
@@ -1737,16 +1758,10 @@ int vt_do_diacrit(unsigned int cmd, void __user *udp, int perm)
 			return -EINVAL;
 
 		if (ct) {
-			buf = kmalloc(ct * sizeof(struct kbdiacruc),
-								GFP_KERNEL);
-			if (buf == NULL)
-				return -ENOMEM;
-
-			if (copy_from_user(buf, a->kbdiacruc,
-					ct * sizeof(struct kbdiacruc))) {
-				kfree(buf);
-				return -EFAULT;
-			}
+			buf = memdup_user(a->kbdiacruc,
+					  ct * sizeof(struct kbdiacruc));
+			if (IS_ERR(buf))
+				return PTR_ERR(buf);
 		} 
 		spin_lock_irqsave(&kbd_event_lock, flags);
 		if (ct)
@@ -1949,6 +1964,18 @@ int vt_do_kdsk_ioctl(int cmd, struct kbentry __user *user_kbe, int perm,
 			spin_unlock_irqrestore(&kbd_event_lock, flags);
 			return -EPERM;
 		}
+
+		/*
+		 * See https://bugzilla.kernel.org/show_bug.cgi?id=7746#c24
+		 *
+		 * The kernel can't properly deal with all keymaps/capslock
+		 * interactions, so userspace (ckbcomp) may use ControlL_Lock
+		 * as a replacement for Caps_Lock.
+		 * It works but breaks the LED, so mark it there that we need
+		 * to forward proper Caps Lock LED on K_CTRLLLOCK.
+		 */
+		if (i == KEY_CAPSLOCK)
+			caps_as_controlllock = (v == K_CTRLLLOCK);
 		key_map[i] = U(v);
 		if (!s && (KTYP(ov) == KT_SHIFT || KTYP(v) == KT_SHIFT))
 			do_compute_shiftstate();

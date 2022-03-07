@@ -46,6 +46,7 @@ struct input_led {
 
 struct input_leds {
 	struct input_handle handle;
+	struct delayed_work init_work;
 	unsigned int num_leds;
 	struct input_led leds[];
 };
@@ -83,6 +84,33 @@ static int input_leds_get_count(struct input_dev *dev)
 	return count;
 }
 
+#ifdef CONFIG_LEDS_TRIGGERS
+static void leds_init_work(struct work_struct *work)
+{
+	struct input_leds *leds = container_of(work, struct input_leds,
+					       init_work.work);
+	struct input_led *led;
+	unsigned int led_code;
+	int led_no = 0;
+
+	for_each_set_bit(led_code, leds->handle.dev->ledbit, LED_CNT) {
+		led = &leds->leds[led_no];
+
+		down_read(&led->cdev.trigger_lock);
+		if (led->cdev.trigger && led->cdev.trigger->activate) {
+			led_set_brightness(&led->cdev, LED_OFF);
+			led->cdev.trigger->activate(&led->cdev);
+		}
+		up_read(&led->cdev.trigger_lock);
+		led_no++;
+	}
+}
+#else  /* !CONFIG_LEDS_TRIGGERS */
+static void leds_init_work(struct work_struct *work)
+{
+}
+#endif
+
 static int input_leds_connect(struct input_handler *handler,
 			      struct input_dev *dev,
 			      const struct input_device_id *id)
@@ -109,6 +137,7 @@ static int input_leds_connect(struct input_handler *handler,
 	leds->handle.handler = handler;
 	leds->handle.name = "leds";
 	leds->handle.private = leds;
+	INIT_DELAYED_WORK(&leds->init_work, leds_init_work);
 
 	error = input_register_handle(&leds->handle);
 	if (error)
@@ -151,6 +180,8 @@ static int input_leds_connect(struct input_handler *handler,
 		led_no++;
 	}
 
+	schedule_delayed_work(&leds->init_work, msecs_to_jiffies(1000));
+
 	return 0;
 
 err_unregister_leds:
@@ -175,6 +206,8 @@ static void input_leds_disconnect(struct input_handle *handle)
 {
 	struct input_leds *leds = handle->private;
 	int i;
+
+	cancel_delayed_work_sync(&leds->init_work);
 
 	for (i = 0; i < leds->num_leds; i++) {
 		struct input_led *led = &leds->leds[i];

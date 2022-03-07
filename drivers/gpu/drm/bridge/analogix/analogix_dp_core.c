@@ -839,7 +839,8 @@ static int analogix_dp_get_modes(struct drm_connector *connector)
 	struct edid *edid;
 	int num_modes = 0;
 
-	if (dp->plat_data->panel) {
+	//if (dp->plat_data->panel) {
+	if (0) {
 		num_modes += drm_panel_get_modes(dp->plat_data->panel);
 	} else {
 		pm_runtime_get_sync(dp->dev);

@@ -14,3 +14,11 @@ obj-$(CONFIG_MVL88W8977)	+= mvl88w8977/
 obj-$(CONFIG_WL_ROCKCHIP)	+= wifi_sys/rkwifi_sys_iface.o
 obj-$(CONFIG_WL_ROCKCHIP)	+= rkwifi/rk_wifi_config.o
 obj-$(CONFIG_CYW_BCMDHD)	+= cywdhd/
+
+obj-$(CONFIG_SPRDWL_NG)                += unisocwifi/
+UNISOCWCN_DIR := $(shell cd $(srctree)/drivers/misc/unisocwcn/ && /bin/pwd)
+UNISOC_BSP_INCLUDE := $(UNISOCWCN_DIR)/include
+export UNISOC_BSP_INCLUDE
+
+UNISOC_DBG_PATH_CONFIG := "/dev/unisoc_dbg"
+export UNISOC_DBG_PATH_CONFIG

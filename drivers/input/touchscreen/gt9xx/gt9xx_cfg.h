@@ -45,7 +45,7 @@ u8 gtp_dat_10_1[] = {
 	/* TODO:Puts your update firmware data here! */
 	/* <1200, 1920> 10.1 */
 //	#include "WGJ10187_GT9271_Config_20140623_104014_0X41.cfg"
-	#include "QX101-002C1F1-LXT-GT9271-1280X800.cfg"
+	#include "DH-10283A3_GT9271(1070)_Ver66_ID0_1280X800_Config_20200506_121054.cfg"
 };
 
 u8 gtp_dat_7[] = {

@@ -1,0 +1,168 @@
+/*
+ * Copyright (c) 2016 Fuzhou Rockchip Electronics Co., Ltd
+ *
+ * This file is dual-licensed: you can use it either under the terms
+ * of the GPL or the X11 license, at your option. Note that this dual
+ * licensing only applies to this file, and not this project as a
+ * whole.
+ *
+ *  a) This file is free software; you can redistribute it and/or
+ *     modify it under the terms of the GNU General Public License as
+ *     published by the Free Software Foundation; either version 2 of the
+ *     License, or (at your option) any later version.
+ *
+ *     This file is distributed in the hope that it will be useful,
+ *     but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *     GNU General Public License for more details.
+ *
+ * Or, alternatively,
+ *
+ *  b) Permission is hereby granted, free of charge, to any person
+ *     obtaining a copy of this software and associated documentation
+ *     files (the "Software"), to deal in the Software without
+ *     restriction, including without limitation the rights to use,
+ *     copy, modify, merge, publish, distribute, sublicense, and/or
+ *     sell copies of the Software, and to permit persons to whom the
+ *     Software is furnished to do so, subject to the following
+ *     conditions:
+ *
+ *     The above copyright notice and this permission notice shall be
+ *     included in all copies or substantial portions of the Software.
+ *
+ *     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ *     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+ *     OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ *     NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+ *     HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ *     WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ *     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ *     OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+/dts-v1/;
+#include "rk3399-orangepi-4.dts"
+
+/ {
+	model = "OrangePi 4 LTS";
+	
+	heaadphones-sound {
+	    status = "okay";
+	    compatible = "simple-audio-card";
+	    simple-audio-card,format = "i2s";
+	    simple-audio-card,name = "rockchip-es8316c";
+	    simple-audio-card,mclk-fs = <256>;
+	    simple-audio-card,cpu {
+	        sound-dai = <&i2s0>;
+	    };
+	    simple-audio-card,codec {
+	        sound-dai = <&es8316>;
+	    };
+	};
+
+	sprd-wlan {
+	        compatible = "sprd,uwe5622-wifi";
+	        status = "okay";
+	};
+
+	unisoc_uwe_bsp: uwe-bsp {
+	        compatible = "unisoc,uwe_bsp";
+	        wl-reg-on = <&gpio0 RK_PB2 GPIO_ACTIVE_HIGH>;
+	        bt-reg-on = <&gpio0 RK_PB1 GPIO_ACTIVE_HIGH>;
+	        wl-wake-host-gpio = <&gpio0 RK_PA3 GPIO_ACTIVE_HIGH>;
+	        bt-wake-host-gpio = <&gpio0 RK_PA4 GPIO_ACTIVE_HIGH>;
+	        sdio-ext-int-gpio = <&gpio3 RK_PD6 GPIO_ACTIVE_HIGH>;
+	        //unisoc,btwf-file-name = "/lib/firmware/uwe5621ds/wcnmodem.bin";
+	        unisoc,btwf-file-name = "/lib/firmware/wcnmodem.bin";
+	        //adma-tx;
+	        //adma-rx;
+	        data-irq;
+	        blksz-512;
+	        keep-power-on;
+	        status = "okay";
+	};
+	
+	sprd-mtty {
+	        compatible = "sprd,mtty";
+	        sprd,name = "ttyBT";
+	        status = "okay";
+	};
+
+        rga: rga@ff680000 {
+                compatible = "rockchip,rga2";
+                dev_mode = <1>;
+                reg = <0x0 0xff680000 0x0 0x1000>;
+                interrupts = <GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH 0>;
+                clocks = <&cru ACLK_RGA>, <&cru HCLK_RGA>, <&cru SCLK_RGA_CORE>;
+                clock-names = "aclk_rga", "hclk_rga", "clk_rga";
+                power-domains = <&power RK3399_PD_RGA>;
+                dma-coherent;
+                status = "disabled";
+        };
+};
+
+/delete-node/ &rk_wlan;
+/delete-node/ &rk_bluetooth;
+
+&rt5651_card {
+	status = "disabled";
+};
+
+&rt5651 {
+	status = "disabled";
+};
+
+&i2s0 {
+        status = "okay";
+        rockchip,i2s-broken-burst-len;
+        rockchip,playback-channels = <8>;
+        rockchip,capture-channels = <8>;
+        #sound-dai-cells = <0>;
+};
+
+&i2s1 {
+	status = "disabled";
+};
+
+&i2c1 {
+	status = "okay";
+
+	es8316: es8316@11 {
+		#sound-dai-cells = <0>;
+		compatible = "everest,es8316";
+		reg = <0x11>;
+		clocks = <&cru SCLK_I2S_8CH_OUT>;
+		clock-names = "mclk";
+		pinctrl-names = "default";
+		pinctrl-0 = <&i2s_8ch_mclk>;
+		hp-det-gpio = <&gpio4 RK_PD4 GPIO_ACTIVE_LOW>;
+	};
+};
+
+&sdio0 {
+        clock-frequency = <150000000>;
+        clock-freq-min-max = <200000 150000000>;
+};
+
+&i2c8 {
+	status = "okay";
+};
+
+&pmic_int_l {
+	rockchip,pins = <2 10 RK_FUNC_GPIO &pcfg_pull_up>;
+};
+
+&rk808 {
+	/delete-property/ interrupt-parent;
+	/delete-property/ interrupts;
+	interrupt-parent = <&gpio2>;
+	interrupts = <10 IRQ_TYPE_LEVEL_LOW>;
+};
+
+&dmc {
+	status = "disabled";
+};
+
+&rga {
+	status = "okay";
+};

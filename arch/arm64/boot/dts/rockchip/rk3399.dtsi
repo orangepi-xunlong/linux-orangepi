@@ -1266,6 +1266,9 @@
 			 <&cru SRST_A_PCIE>;
 		reset-names = "core", "mgmt", "mgmt-sticky", "pipe",
 			      "pm", "pclk", "aclk";
+
+		nvmem-cells = <&cpu_performance>;
+		nvmem-cell-names = "performance";
 		status = "disabled";
 		pcie0_intc: interrupt-controller {
 			interrupt-controller;
@@ -1490,6 +1493,18 @@
 		};
 		wafer_info: wafer-info@1c {
 			reg = <0x1c 0x1>;
+		};
+		cpu_performance: cpu-performance@1e {
+			reg = <0x1e 0x1>;
+			bits = <3 3>;
+		};
+		gpu_performance: gpu-performance@1e {
+			reg = <0x1e 0x1>;
+			bits = <6 2>;
+		};
+		customer_demand: customer-demand@22 {
+			reg = <0x22 0x1>;
+			bits = <4 4>;
 		};
 	};
 
@@ -2550,6 +2565,15 @@
 		};
 
 		i2s0 {
+			i2s0_2ch_bus: i2s0-2ch-bus {
+				rockchip,pins =
+					<3 RK_PD0 1 &pcfg_pull_none>,
+					<3 RK_PD1 1 &pcfg_pull_none>,
+					<3 RK_PD2 1 &pcfg_pull_none>,
+					<3 RK_PD3 1 &pcfg_pull_none>,
+					<3 RK_PD7 1 &pcfg_pull_none>;
+			};
+
 			i2s0_8ch_bus: i2s0-8ch-bus {
 				rockchip,pins =
 					<3 24 RK_FUNC_1 &pcfg_pull_none>,

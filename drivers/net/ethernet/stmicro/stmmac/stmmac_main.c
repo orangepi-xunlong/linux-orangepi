@@ -124,6 +124,13 @@ static void stmmac_exit_fs(struct net_device *dev);
 
 #define STMMAC_COAL_TIMER(x) (jiffies + usecs_to_jiffies(x))
 
+static int phy_disable_eee(struct phy_device *phydev);
+
+#define RTL_8201F_PHY_ID  0x001cc816
+#define RTL_8211E_PHY_ID  0x001cc915
+#define DP_83848_PHY_ID   0x20005c90
+#define RTL_8211F_PHY_ID  0x001cc916
+
 /**
  * stmmac_verify_args - verify the driver parameters.
  * Description: it checks the driver parameters and set a default in case of
@@ -873,6 +880,8 @@ static int stmmac_init_phy(struct net_device *dev)
 		 " Link = %d\n", dev->name, phydev->phy_id, phydev->link);
 
 	priv->phydev = phydev;
+
+	phy_disable_eee(phydev);
 
 	return 0;
 }
@@ -2750,6 +2759,36 @@ static const struct net_device_ops stmmac_netdev_ops = {
 	.ndo_set_mac_address = stmmac_set_mac_address,
 };
 
+static int phy_disable_eee(struct phy_device *phydev)
+{
+	if (phydev->phy_id == 0x001cc816) { // rtl8201
+		printk("%s in\n", __func__);
+		phy_write(phydev, 31, 0x0004);
+		mdelay(10);
+		phy_write(phydev, 16, 0x4077);
+		phy_write(phydev, 31, 0x0000);
+		phy_write(phydev, 13, 0x0007);
+		phy_write(phydev, 14, 0x003C);
+		phy_write(phydev, 13, 0x4007);
+		phy_write(phydev, 14, 0x0000);
+		phy_write(phydev, 0, 0x1200);
+	} else if (phydev->phy_id == 0x001cc915) { // rtl8211e
+		printk("%s in\n", __func__);
+		phy_write(phydev, 31, 0x0000);
+		phy_write(phydev,  0, 0x8000);
+		mdelay(20);
+		phy_write(phydev, 31, 0x0a4b);
+		phy_write(phydev, 17, 0x1110);
+		phy_write(phydev, 31, 0x0000);
+		phy_write(phydev, 13, 0x0007);
+		phy_write(phydev, 14, 0x003c);
+		phy_write(phydev, 13, 0x4007);
+		phy_write(phydev, 14, 0x0000);
+	}
+
+	return 0;
+}
+
 /**
  *  stmmac_hw_init - Init the MAC device
  *  @priv: driver private structure
@@ -2836,6 +2875,107 @@ static int stmmac_hw_init(struct stmmac_priv *priv)
 	return 0;
 }
 
+static int phy_dp83848_led_fixup(struct phy_device *phydev)
+{
+        int value;
+
+	if (phydev->phy_id != DP_83848_PHY_ID)
+		return 0;
+
+        printk("%s in\n", __func__);
+
+	value = phy_read(phydev, 0x18);
+	value &= ~(1<<2);
+	phy_write(phydev, 0x18, value);
+
+	value = phy_read(phydev, 0x19);
+	value &= ~(1<<5);
+	phy_write(phydev, 0x19, value);
+
+	return 0;
+}
+
+static int phy_rtl8201f_led_fixup(struct phy_device *phydev)
+{
+	int value;
+
+	printk("%s in\n", __func__);
+
+	/* switch to page 7 */
+	value = phy_read(phydev, 31);
+	value &= 0xff00;
+	value |= 0x0007;
+	value = phy_write(phydev, 31, value);
+
+	/* set customized led enable */
+	value = phy_read(phydev, 19);
+	value |= (0x1<<3);
+	phy_write(phydev, 19, value);
+
+	value &= 0x0000;
+	value |= (0x1<<1);
+	value |= (0x1<<7);
+	phy_write(phydev, 17, value);
+
+	/* back to page 0 */
+	value = phy_read(phydev, 31);
+	value &= 0x0000;
+	value = phy_write(phydev, 31, value);
+
+	return 0;
+}
+
+static int phy_rtl8211e_led_fixup(struct phy_device *phydev)
+{
+	int val;
+
+	printk("%s in\n", __func__);
+
+	/*switch to extension page44*/
+	phy_write(phydev, 31, 0x07);
+	phy_write(phydev, 30, 0x2c);
+
+	/*set led1(yellow) act*/
+	val = phy_read(phydev, 26);
+	val &= (~(1<<4));// bit4=0
+	val |= (1<<5);// bit5=1
+	val &= (~(1<<6));// bit6=0
+	phy_write(phydev, 26, val);
+
+	/*set led0(green) link*/
+	val = phy_read(phydev, 28);
+	val |= (7<<0);// bit0,1,2=1
+	val &= (~(7<<4));// bit4,5,6=0
+	val &= (~(7<<8));// bit8,9,10=0
+	phy_write(phydev, 28, val);
+
+	/*switch back to page0*/
+	phy_write(phydev,31,0x00);
+
+	return 0;
+}
+
+static int phy_rtl8211f_led_fixup(struct phy_device *phydev)
+{
+	int val;
+
+	printk("%s in\n", __func__);
+
+	/*switch to extension page 0xd04*/
+	phy_write(phydev, 31, 0xd04);
+
+
+	/*set led1(yellow) act*/
+	/*set led2(green) link*/
+	val = 0xae00;
+	phy_write(phydev, 16, val);
+
+	/*switch back to page0*/
+	phy_write(phydev,31,0x00);
+
+	return 0;
+}
+
 /**
  * stmmac_dvr_probe
  * @device: device pointer
@@ -2850,6 +2990,7 @@ int stmmac_dvr_probe(struct device *device,
 		     struct plat_stmmacenet_data *plat_dat,
 		     struct stmmac_resources *res)
 {
+
 	int ret = 0;
 	struct net_device *ndev = NULL;
 	struct stmmac_priv *priv;
@@ -2986,7 +3127,22 @@ int stmmac_dvr_probe(struct device *device,
 		}
 	}
 
+	/* register the PHY board fixup */
+	ret = phy_register_fixup_for_uid(RTL_8211E_PHY_ID, 0xffffffff, phy_rtl8211e_led_fixup);
+	if (ret)
+		pr_warn("Cannot register PHY board fixup.\n");
+	ret = phy_register_fixup_for_uid(RTL_8201F_PHY_ID, 0xffffffff, phy_rtl8201f_led_fixup);
+	if (ret)
+		pr_warn("Cannot register PHY board fixup.\n");
+	ret = phy_register_fixup_for_uid(DP_83848_PHY_ID, 0xffffffff, phy_dp83848_led_fixup);
+	if (ret)
+		pr_warn("Cannot register PHY board fixup.\n");
+	ret = phy_register_fixup_for_uid(RTL_8211F_PHY_ID, 0xffffffff, phy_rtl8211f_led_fixup);
+	if (ret)
+		pr_warn("Cannot register PHY board fixup.\n");
+
 	ret = register_netdev(ndev);
+
 	if (ret) {
 		netdev_err(priv->dev, "%s: ERROR %i registering the device\n",
 			   __func__, ret);
@@ -3151,6 +3307,8 @@ int stmmac_resume(struct device *dev)
 
 	if (priv->phydev)
 		phy_start(priv->phydev);
+
+	phy_disable_eee(priv->phydev);
 
 	return 0;
 }
