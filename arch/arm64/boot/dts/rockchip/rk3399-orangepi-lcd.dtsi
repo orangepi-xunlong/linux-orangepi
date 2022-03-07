@@ -1,0 +1,111 @@
+/*
+* This program is free software; you can redistribute it and/or
+* modify it under the terms of the GNU General Public License
+* as published by the Free Software Foundation; either version 2
+* of the License, or (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program; if not, you can access it online at
+* http://www.gnu.org/licenses/gpl-2.0.html.
+*/
+
+&i2c1 {
+	status = "okay";
+	//TouchScreen Gt9xx 8 inch & 10 inch
+        gt9xx_1:touchscreen@14 {
+                compatible = "goodix,gt9271";
+                reg = <0x14>;
+                interrupt-parent = <&gpio4>;
+                interrupts = <RK_PD5 IRQ_TYPE_LEVEL_LOW>;
+                irq-gpios = <&gpio4 RK_PD5 IRQ_TYPE_LEVEL_LOW>;
+                reset-gpios = <&gpio4 RK_PD2 GPIO_ACTIVE_HIGH>;
+                touchscreen-inverted-x;
+                //touchscreen-inverted-y;
+                touchscreen-swapped-x-y;
+                touchscreen-size-x = <1280>;
+                touchscreen-size-y = <800>;
+                status = "disabled";
+        };
+};
+
+&i2c2 {
+	status = "okay";
+	//TouchScreen Gt9xx 8 inch & 10 inch
+	gt9xx:touchscreen@14 {
+		compatible = "goodix,gt9271";
+		reg = <0x14>;
+                interrupt-parent = <&gpio4>;
+                interrupts = <RK_PD0 IRQ_TYPE_LEVEL_LOW>;
+		irq-gpios = <&gpio4 RK_PD0 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&gpio4 RK_PD1 GPIO_ACTIVE_HIGH>;
+		touchscreen-inverted-x;
+		//touchscreen-inverted-y;
+		touchscreen-swapped-x-y;
+		touchscreen-size-x = <1280>;
+		touchscreen-size-y = <800>;
+		status = "disabled";
+	};
+
+};
+
+&dsi {
+        status = "disabled";
+	ports {
+		mipi_out: port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			mipi_out_panel: endpoint {
+				remote-endpoint = <&panel_in_mipi>;
+			};
+		};
+	};
+
+	panel@0 {
+		compatible = "innolux,sl101-pn27d1665";
+		reg = <0>;
+		backlight = <&pwm_bl>;
+		enable-gpios = <&gpio0 RK_PB4 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio1 RK_PB5 GPIO_ACTIVE_LOW>;
+
+		port {
+			panel_in_mipi: endpoint {
+				remote-endpoint = <&mipi_out_panel>;
+			};
+		};
+	};
+};
+
+&dsi1 {
+        status = "disabled";
+        ports {
+                mipi_out1: port@1 {
+                        reg = <1>;
+                        #address-cells = <1>;
+                        #size-cells = <0>;
+                        mipi_out_panel1: endpoint {
+                                remote-endpoint = <&panel_in_mipi1>;
+                        };
+                };
+        };
+
+        panel1@0 {
+                compatible = "innolux,sl101-pn27d1665";
+                reg = <0>;
+                backlight = <&pwm_bl>;
+                enable-gpios = <&gpio4 30 GPIO_ACTIVE_HIGH>;
+                reset-gpios = <&gpio0 8 GPIO_ACTIVE_LOW>;
+
+
+                port {
+                        panel_in_mipi1: endpoint {
+                                remote-endpoint = <&mipi_out_panel1>;
+                        };
+                };
+        };
+};

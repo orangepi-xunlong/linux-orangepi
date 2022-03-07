@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_HIGHMEM_H
 #define _LINUX_HIGHMEM_H
 
@@ -31,11 +32,92 @@ static inline void invalidate_kernel_vmap_range(void *vaddr, int size)
 #include <asm/kmap_types.h>
 
 #ifdef CONFIG_HIGHMEM
+extern void *kmap_atomic_high_prot(struct page *page, pgprot_t prot);
+extern void kunmap_atomic_high(void *kvaddr);
 #include <asm/highmem.h>
+
+#ifndef ARCH_HAS_KMAP_FLUSH_TLB
+static inline void kmap_flush_tlb(unsigned long addr) { }
+#endif
+
+#ifndef kmap_prot
+#define kmap_prot PAGE_KERNEL
+#endif
+
+void *kmap_high(struct page *page);
+static inline void *kmap(struct page *page)
+{
+	void *addr;
+
+	might_sleep();
+	if (!PageHighMem(page))
+		addr = page_address(page);
+	else
+		addr = kmap_high(page);
+	kmap_flush_tlb((unsigned long)addr);
+	return addr;
+}
+
+void kunmap_high(struct page *page);
+
+static inline void kunmap(struct page *page)
+{
+	might_sleep();
+	if (!PageHighMem(page))
+		return;
+	kunmap_high(page);
+}
+
+/*
+ * kmap_atomic/kunmap_atomic is significantly faster than kmap/kunmap because
+ * no global lock is needed and because the kmap code must perform a global TLB
+ * invalidation when the kmap pool wraps.
+ *
+ * However when holding an atomic kmap it is not legal to sleep, so atomic
+ * kmaps are appropriate for short, tight code paths only.
+ *
+ * The use of kmap_atomic/kunmap_atomic is discouraged - kmap/kunmap
+ * gives a more generic (and caching) interface. But kmap_atomic can
+ * be used in IRQ contexts, so in some (very limited) cases we need
+ * it.
+ */
+static inline void *kmap_atomic_prot(struct page *page, pgprot_t prot)
+{
+	preempt_disable();
+	pagefault_disable();
+	if (!PageHighMem(page))
+		return page_address(page);
+	return kmap_atomic_high_prot(page, prot);
+}
+#define kmap_atomic(page)	kmap_atomic_prot(page, kmap_prot)
 
 /* declarations for linux/mm/highmem.c */
 unsigned int nr_free_highpages(void);
-extern unsigned long totalhigh_pages;
+extern atomic_long_t _totalhigh_pages;
+static inline unsigned long totalhigh_pages(void)
+{
+	return (unsigned long)atomic_long_read(&_totalhigh_pages);
+}
+
+static inline void totalhigh_pages_inc(void)
+{
+	atomic_long_inc(&_totalhigh_pages);
+}
+
+static inline void totalhigh_pages_dec(void)
+{
+	atomic_long_dec(&_totalhigh_pages);
+}
+
+static inline void totalhigh_pages_add(long count)
+{
+	atomic_long_add(count, &_totalhigh_pages);
+}
+
+static inline void totalhigh_pages_set(long val)
+{
+	atomic_long_set(&_totalhigh_pages, val);
+}
 
 void kmap_flush_unused(void);
 
@@ -50,17 +132,23 @@ static inline struct page *kmap_to_page(void *addr)
 	return virt_to_page(addr);
 }
 
-#define totalhigh_pages 0UL
+static inline unsigned long totalhigh_pages(void) { return 0UL; }
 
-#ifndef ARCH_HAS_KMAP
 static inline void *kmap(struct page *page)
 {
 	might_sleep();
 	return page_address(page);
 }
 
+static inline void kunmap_high(struct page *page)
+{
+}
+
 static inline void kunmap(struct page *page)
 {
+#ifdef ARCH_HAS_FLUSH_ON_KUNMAP
+	kunmap_flush_on_unmap(page_address(page));
+#endif
 }
 
 static inline void *kmap_atomic(struct page *page)
@@ -71,16 +159,20 @@ static inline void *kmap_atomic(struct page *page)
 }
 #define kmap_atomic_prot(page, prot)	kmap_atomic(page)
 
-static inline void __kunmap_atomic(void *addr)
+static inline void kunmap_atomic_high(void *addr)
 {
-	pagefault_enable();
-	preempt_enable();
+	/*
+	 * Mostly nothing to do in the CONFIG_HIGHMEM=n case as kunmap_atomic()
+	 * handles re-enabling faults + preemption
+	 */
+#ifdef ARCH_HAS_FLUSH_ON_KUNMAP
+	kunmap_flush_on_unmap(addr);
+#endif
 }
 
 #define kmap_atomic_pfn(pfn)	kmap_atomic(pfn_to_page(pfn))
 
 #define kmap_flush_unused()	do {} while(0)
-#endif
 
 #endif /* CONFIG_HIGHMEM */
 
@@ -124,7 +216,9 @@ static inline void kmap_atomic_idx_pop(void)
 #define kunmap_atomic(addr)                                     \
 do {                                                            \
 	BUILD_BUG_ON(__same_type((addr), struct page *));       \
-	__kunmap_atomic(addr);                                  \
+	kunmap_atomic_high(addr);                                  \
+	pagefault_enable();                                     \
+	preempt_enable();                                       \
 } while (0)
 
 
@@ -138,28 +232,24 @@ static inline void clear_user_highpage(struct page *page, unsigned long vaddr)
 }
 #endif
 
-#ifndef __HAVE_ARCH_ALLOC_ZEROED_USER_HIGHPAGE
+#ifndef __HAVE_ARCH_ALLOC_ZEROED_USER_HIGHPAGE_MOVABLE
 /**
- * __alloc_zeroed_user_highpage - Allocate a zeroed HIGHMEM page for a VMA with caller-specified movable GFP flags
- * @movableflags: The GFP flags related to the pages future ability to move like __GFP_MOVABLE
+ * alloc_zeroed_user_highpage_movable - Allocate a zeroed HIGHMEM page for a VMA that the caller knows can move
  * @vma: The VMA the page is to be allocated for
  * @vaddr: The virtual address the page will be inserted into
  *
- * This function will allocate a page for a VMA but the caller is expected
- * to specify via movableflags whether the page will be movable in the
- * future or not
+ * This function will allocate a page for a VMA that the caller knows will
+ * be able to migrate in the future using move_pages() or reclaimed
  *
  * An architecture may override this function by defining
- * __HAVE_ARCH_ALLOC_ZEROED_USER_HIGHPAGE and providing their own
+ * __HAVE_ARCH_ALLOC_ZEROED_USER_HIGHPAGE_MOVABLE and providing their own
  * implementation.
  */
 static inline struct page *
-__alloc_zeroed_user_highpage(gfp_t movableflags,
-			struct vm_area_struct *vma,
-			unsigned long vaddr)
+alloc_zeroed_user_highpage_movable(struct vm_area_struct *vma,
+				   unsigned long vaddr)
 {
-	struct page *page = alloc_page_vma(GFP_HIGHUSER | movableflags,
-			vma, vaddr);
+	struct page *page = alloc_page_vma(GFP_HIGHUSER_MOVABLE | __GFP_CMA, vma, vaddr);
 
 	if (page)
 		clear_user_highpage(page, vaddr);
@@ -168,27 +258,20 @@ __alloc_zeroed_user_highpage(gfp_t movableflags,
 }
 #endif
 
-/**
- * alloc_zeroed_user_highpage_movable - Allocate a zeroed HIGHMEM page for a VMA that the caller knows can move
- * @vma: The VMA the page is to be allocated for
- * @vaddr: The virtual address the page will be inserted into
- *
- * This function will allocate a page for a VMA that the caller knows will
- * be able to migrate in the future using move_pages() or reclaimed
- */
-static inline struct page *
-alloc_zeroed_user_highpage_movable(struct vm_area_struct *vma,
-					unsigned long vaddr)
-{
-	return __alloc_zeroed_user_highpage(__GFP_MOVABLE, vma, vaddr);
-}
-
 static inline void clear_highpage(struct page *page)
 {
 	void *kaddr = kmap_atomic(page);
 	clear_page(kaddr);
 	kunmap_atomic(kaddr);
 }
+
+#ifndef __HAVE_ARCH_TAG_CLEAR_HIGHPAGE
+
+static inline void tag_clear_highpage(struct page *page)
+{
+}
+
+#endif
 
 static inline void zero_user_segments(struct page *page,
 	unsigned start1, unsigned end1,
@@ -236,6 +319,8 @@ static inline void copy_user_highpage(struct page *to, struct page *from,
 
 #endif
 
+#ifndef __HAVE_ARCH_COPY_HIGHPAGE
+
 static inline void copy_highpage(struct page *to, struct page *from)
 {
 	char *vfrom, *vto;
@@ -246,5 +331,7 @@ static inline void copy_highpage(struct page *to, struct page *from)
 	kunmap_atomic(vto);
 	kunmap_atomic(vfrom);
 }
+
+#endif
 
 #endif /* _LINUX_HIGHMEM_H */

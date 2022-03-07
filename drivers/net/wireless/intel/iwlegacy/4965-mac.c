@@ -1,25 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /******************************************************************************
  *
  * Copyright(c) 2003 - 2011 Intel Corporation. All rights reserved.
  *
  * Portions of this file are derived from the ipw3945 project, as well
  * as portions of the ieee80211 subsystem header files.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
  *
  * Contact Information:
  *  Intel Linux Wireless <ilw@linux.intel.com>
@@ -33,7 +18,6 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/pci.h>
-#include <linux/pci-aspm.h>
 #include <linux/slab.h>
 #include <linux/dma-mapping.h>
 #include <linux/delay.h>
@@ -43,6 +27,7 @@
 #include <linux/firmware.h>
 #include <linux/etherdevice.h>
 #include <linux/if_arp.h>
+#include <linux/units.h>
 
 #include <net/mac80211.h>
 
@@ -241,7 +226,7 @@ il4965_hw_nic_init(struct il_priv *il)
 	return 0;
 }
 
-/**
+/*
  * il4965_dma_addr2rbd_ptr - convert a DMA address to a uCode read buffer ptr
  */
 static inline __le32
@@ -250,7 +235,7 @@ il4965_dma_addr2rbd_ptr(struct il_priv *il, dma_addr_t dma_addr)
 	return cpu_to_le32((u32) (dma_addr >> 8));
 }
 
-/**
+/*
  * il4965_rx_queue_restock - refill RX queue from pre-allocated pool
  *
  * If there are slots in the RX queue that need to be restocked,
@@ -303,7 +288,7 @@ il4965_rx_queue_restock(struct il_priv *il)
 	}
 }
 
-/**
+/*
  * il4965_rx_replenish - Move all used packet from rx_used to rx_free
  *
  * When moving to rx_free an SKB is allocated for the slot.
@@ -559,7 +544,7 @@ il4965_translate_rx_status(struct il_priv *il, u32 decrypt_in)
 			decrypt_out |= RX_RES_STATUS_BAD_KEY_TTAK;
 			break;
 		}
-		/* fall through if TTAK OK */
+		fallthrough;	/* if TTAK OK */
 	default:
 		if (!(decrypt_in & RX_MPDU_RES_STATUS_ICV_OK))
 			decrypt_out |= RX_RES_STATUS_BAD_ICV_MIC;
@@ -606,7 +591,7 @@ il4965_pass_packet_to_mac80211(struct il_priv *il, struct ieee80211_hdr *hdr,
 	}
 
 	if (len <= SMALL_PACKET_SIZE) {
-		memcpy(skb_put(skb, len), hdr, len);
+		skb_put_data(skb, hdr, len);
 	} else {
 		skb_add_rx_frag(skb, 0, rxb->page, (void *)hdr - rxb_addr(rxb),
 				len, PAGE_SIZE << il->hw_params.rx_page_order);
@@ -728,15 +713,17 @@ il4965_hdl_rx(struct il_priv *il, struct il_rx_buf *rxb)
 
 	/* set the preamble flag if appropriate */
 	if (phy_res->phy_flags & RX_RES_PHY_FLAGS_SHORT_PREAMBLE_MSK)
-		rx_status.flag |= RX_FLAG_SHORTPRE;
+		rx_status.enc_flags |= RX_ENC_FLAG_SHORTPRE;
 
 	/* Set up the HT phy flags */
 	if (rate_n_flags & RATE_MCS_HT_MSK)
-		rx_status.flag |= RX_FLAG_HT;
+		rx_status.encoding = RX_ENC_HT;
 	if (rate_n_flags & RATE_MCS_HT40_MSK)
-		rx_status.flag |= RX_FLAG_40MHZ;
+		rx_status.bw = RATE_INFO_BW_40;
+	else
+		rx_status.bw = RATE_INFO_BW_20;
 	if (rate_n_flags & RATE_MCS_SGI_MSK)
-		rx_status.flag |= RX_FLAG_SHORT_GI;
+		rx_status.enc_flags |= RX_ENC_FLAG_SHORT_GI;
 
 	if (phy_res->phy_flags & RX_RES_PHY_FLAGS_AGG_MSK) {
 		/* We know which subframes of an A-MPDU belong
@@ -1140,7 +1127,7 @@ il4965_count_chain_bitmap(u32 chain_bitmap)
 	return res;
 }
 
-/**
+/*
  * il4965_set_rxon_chain - Set up Rx chain usage in "staging" RXON image
  *
  * Selects how many and which Rx receivers/antennas/chains to use.
@@ -1336,15 +1323,12 @@ il4965_accumulative_stats(struct il_priv *il, __le32 * stats)
 	u32 *accum_stats;
 	u32 *delta, *max_delta;
 	struct stats_general_common *general, *accum_general;
-	struct stats_tx *tx, *accum_tx;
 
 	prev_stats = (__le32 *) &il->_4965.stats;
 	accum_stats = (u32 *) &il->_4965.accum_stats;
 	size = sizeof(struct il_notif_stats);
 	general = &il->_4965.stats.general.common;
 	accum_general = &il->_4965.accum_stats.general.common;
-	tx = &il->_4965.stats.tx;
-	accum_tx = &il->_4965.accum_stats.tx;
 	delta = (u32 *) &il->_4965.delta_stats;
 	max_delta = (u32 *) &il->_4965.max_delta;
 
@@ -1431,7 +1415,7 @@ il4965_hdl_c_stats(struct il_priv *il, struct il_rx_buf *rxb)
 /*
  * mac80211 queues, ACs, hardware queues, FIFOs.
  *
- * Cf. http://wireless.kernel.org/en/developers/Documentation/mac80211/queues
+ * Cf. https://wireless.wiki.kernel.org/en/developers/Documentation/mac80211/queues
  *
  * Mac80211 uses the following numbers, which we get as from it
  * by way of skb_get_queue_mapping(skb):
@@ -1478,7 +1462,7 @@ il4965_get_ac_from_tid(u16 tid)
 static inline int
 il4965_get_fifo_from_tid(u16 tid)
 {
-	const u8 ac_to_fifo[] = {
+	static const u8 ac_to_fifo[] = {
 		IL_TX_FIFO_VO,
 		IL_TX_FIFO_VI,
 		IL_TX_FIFO_BE,
@@ -1633,7 +1617,7 @@ il4965_tx_cmd_build_hwcrypto(struct il_priv *il, struct ieee80211_tx_info *info,
 
 	case WLAN_CIPHER_SUITE_WEP104:
 		tx_cmd->sec_ctl |= TX_CMD_SEC_KEY128;
-		/* fall through */
+		fallthrough;
 	case WLAN_CIPHER_SUITE_WEP40:
 		tx_cmd->sec_ctl |=
 		    (TX_CMD_SEC_WEP | (keyconf->keyidx & TX_CMD_SEC_MSK) <<
@@ -1949,7 +1933,7 @@ il4965_free_dma_ptr(struct il_priv *il, struct il_dma_ptr *ptr)
 	memset(ptr, 0, sizeof(*ptr));
 }
 
-/**
+/*
  * il4965_hw_txq_ctx_free - Free TXQ Context
  *
  * Destroy all TX DMA queues and structures
@@ -1975,12 +1959,9 @@ il4965_hw_txq_ctx_free(struct il_priv *il)
 	il_free_txq_mem(il);
 }
 
-/**
+/*
  * il4965_txq_ctx_alloc - allocate TX queue context
  * Allocate all Tx DMA structures and initialize them
- *
- * @param il
- * @return error code
  */
 int
 il4965_txq_ctx_alloc(struct il_priv *il)
@@ -2076,7 +2057,7 @@ il4965_txq_ctx_unmap(struct il_priv *il)
 			il_tx_queue_unmap(il, txq_id);
 }
 
-/**
+/*
  * il4965_txq_ctx_stop - Stop all Tx DMA channels
  */
 void
@@ -2117,7 +2098,7 @@ il4965_txq_ctx_activate_free(struct il_priv *il)
 	return -1;
 }
 
-/**
+/*
  * il4965_tx_queue_stop_scheduler - Stop queue, but keep configuration
  */
 static void
@@ -2130,7 +2111,7 @@ il4965_tx_queue_stop_scheduler(struct il_priv *il, u16 txq_id)
 		   (1 << IL49_SCD_QUEUE_STTS_REG_POS_SCD_ACT_EN));
 }
 
-/**
+/*
  * il4965_tx_queue_set_q2ratid - Map unique receiver/tid combination to a queue
  */
 static int
@@ -2157,7 +2138,7 @@ il4965_tx_queue_set_q2ratid(struct il_priv *il, u16 ra_tid, u16 txq_id)
 	return 0;
 }
 
-/**
+/*
  * il4965_tx_queue_agg_enable - Set up & enable aggregation for selected queue
  *
  * NOTE:  txq_id must be greater than IL49_FIRST_AMPDU_QUEUE,
@@ -2282,7 +2263,7 @@ il4965_tx_agg_start(struct il_priv *il, struct ieee80211_vif *vif,
 	if (tid_data->tfds_in_queue == 0) {
 		D_HT("HW queue is empty\n");
 		tid_data->agg.state = IL_AGG_ON;
-		ieee80211_start_tx_ba_cb_irqsafe(vif, sta->addr, tid);
+		ret = IEEE80211_AMPDU_TX_START_IMMEDIATE;
 	} else {
 		D_HT("HW queue is NOT empty: %d packets in HW queue\n",
 		     tid_data->tfds_in_queue);
@@ -2292,7 +2273,7 @@ il4965_tx_agg_start(struct il_priv *il, struct ieee80211_vif *vif,
 	return ret;
 }
 
-/**
+/*
  * txq_id must be greater than IL49_FIRST_AMPDU_QUEUE
  * il->lock must be held by the caller
  */
@@ -2504,7 +2485,7 @@ il4965_tx_queue_reclaim(struct il_priv *il, int txq_id, int idx)
 	return nfreed;
 }
 
-/**
+/*
  * il4965_tx_status_reply_compressed_ba - Update tx status from block-ack
  *
  * Go through block-ack's bitmap of ACK'd frames, update driver's record of
@@ -2657,7 +2638,7 @@ il4965_tx_status_to_mac80211(u32 status)
 	}
 }
 
-/**
+/*
  * il4965_tx_status_reply_tx - Handle Tx response for frames in aggregation queue
  */
 static int
@@ -2769,7 +2750,7 @@ il4965_tx_status_reply_tx(struct il_priv *il, struct il_ht_agg *agg,
 	return 0;
 }
 
-/**
+/*
  * il4965_hdl_tx - Handle standard (non-aggregation) Tx response
  */
 static void
@@ -2785,7 +2766,7 @@ il4965_hdl_tx(struct il_priv *il, struct il_rx_buf *rxb)
 	struct ieee80211_tx_info *info;
 	struct il4965_tx_resp *tx_resp = (void *)&pkt->u.raw[0];
 	u32 status = le32_to_cpu(tx_resp->u.status);
-	int uninitialized_var(tid);
+	int tid;
 	int sta_id;
 	int freed;
 	u8 *qc = NULL;
@@ -2889,7 +2870,7 @@ il4965_hdl_tx(struct il_priv *il, struct il_rx_buf *rxb)
 	spin_unlock_irqrestore(&il->sta_lock, flags);
 }
 
-/**
+/*
  * translate ucode response to mac80211 tx status control values
  */
 void
@@ -2913,7 +2894,7 @@ il4965_hwrate_to_tx_control(struct il_priv *il, u32 rate_n_flags,
 	r->idx = il4965_hwrate_to_mac80211_idx(rate_n_flags, info->band);
 }
 
-/**
+/*
  * il4965_hdl_compressed_ba - Handler for N_COMPRESSED_BA
  *
  * Handles block-acknowledge notification from device, which reports success
@@ -3348,7 +3329,6 @@ il4965_set_tkip_dynamic_key_info(struct il_priv *il,
 				 struct ieee80211_key_conf *keyconf, u8 sta_id)
 {
 	unsigned long flags;
-	int ret = 0;
 	__le16 key_flags = 0;
 
 	key_flags |= (STA_KEY_FLG_TKIP | STA_KEY_FLG_MAP_KEY_MSK);
@@ -3385,7 +3365,7 @@ il4965_set_tkip_dynamic_key_info(struct il_priv *il,
 
 	spin_unlock_irqrestore(&il->sta_lock, flags);
 
-	return ret;
+	return 0;
 }
 
 void
@@ -3519,7 +3499,7 @@ il4965_set_dynamic_key(struct il_priv *il, struct ieee80211_key_conf *keyconf,
 	return ret;
 }
 
-/**
+/*
  * il4965_alloc_bcast_station - add broadcast station into driver's station table.
  *
  * This adds the broadcast station into the driver's station table
@@ -3560,7 +3540,7 @@ il4965_alloc_bcast_station(struct il_priv *il)
 	return 0;
 }
 
-/**
+/*
  * il4965_update_bcast_station - update broadcast station's LQ command
  *
  * Only used by iwl4965. Placed here to have all bcast station management
@@ -3596,7 +3576,7 @@ il4965_update_bcast_stations(struct il_priv *il)
 	return il4965_update_bcast_station(il);
 }
 
-/**
+/*
  * il4965_sta_tx_modify_enable_tid - Enable Tx for this TID in station table
  */
 int
@@ -3920,10 +3900,8 @@ il4965_tfd_get_num_tbs(struct il_tfd *tfd)
 	return tfd->num_tbs & 0x1f;
 }
 
-/**
+/*
  * il4965_hw_txq_free_tfd - Free all chunks referenced by TFD [txq->q.read_ptr]
- * @il - driver ilate data
- * @txq - tx queue
  *
  * Does NOT advance any TFD circular buffer read/write idxes
  * Does NOT free the TFD itself (which is within circular buffer)
@@ -4061,7 +4039,7 @@ il4965_hdl_alive(struct il_priv *il, struct il_rx_buf *rxb)
 		IL_WARN("uCode did not respond OK.\n");
 }
 
-/**
+/*
  * il4965_bg_stats_periodic - Timer callback to queue stats
  *
  * This callback is provided in order to send a stats request.
@@ -4072,9 +4050,9 @@ il4965_hdl_alive(struct il_priv *il, struct il_rx_buf *rxb)
  * used for calibrating the TXPOWER.
  */
 static void
-il4965_bg_stats_periodic(unsigned long data)
+il4965_bg_stats_periodic(struct timer_list *t)
 {
-	struct il_priv *il = (struct il_priv *)data;
+	struct il_priv *il = from_timer(il, t, stats_periodic);
 
 	if (test_bit(S_EXIT_PENDING, &il->status))
 		return;
@@ -4172,7 +4150,7 @@ il4965_hdl_card_state(struct il_priv *il, struct il_rx_buf *rxb)
 		wake_up(&il->wait_command_queue);
 }
 
-/**
+/*
  * il4965_setup_handlers - Initialize Rx handler callbacks
  *
  * Setup the RX handlers for each of the reply types sent from the uCode
@@ -4216,7 +4194,7 @@ il4965_setup_handlers(struct il_priv *il)
 	il->handlers[C_TX] = il4965_hdl_tx;
 }
 
-/**
+/*
  * il4965_rx_handle - Main entry function for receiving responses from uCode
  *
  * Uses the il->handlers callback function array to invoke
@@ -4361,8 +4339,9 @@ il4965_synchronize_irq(struct il_priv *il)
 }
 
 static void
-il4965_irq_tasklet(struct il_priv *il)
+il4965_irq_tasklet(struct tasklet_struct *t)
 {
+	struct il_priv *il = from_tasklet(il, t, irq_tasklet);
 	u32 inta, handled = 0;
 	u32 inta_fh;
 	unsigned long flags;
@@ -4589,7 +4568,7 @@ il4965_store_debug_level(struct device *d, struct device_attribute *attr,
 	return strnlen(buf, count);
 }
 
-static DEVICE_ATTR(debug_level, S_IWUSR | S_IRUGO, il4965_show_debug_level,
+static DEVICE_ATTR(debug_level, 0644, il4965_show_debug_level,
 		   il4965_store_debug_level);
 
 #endif /* CONFIG_IWLEGACY_DEBUG */
@@ -4606,7 +4585,7 @@ il4965_show_temperature(struct device *d, struct device_attribute *attr,
 	return sprintf(buf, "%d\n", il->temperature);
 }
 
-static DEVICE_ATTR(temperature, S_IRUGO, il4965_show_temperature, NULL);
+static DEVICE_ATTR(temperature, 0444, il4965_show_temperature, NULL);
 
 static ssize_t
 il4965_show_tx_power(struct device *d, struct device_attribute *attr, char *buf)
@@ -4640,7 +4619,7 @@ il4965_store_tx_power(struct device *d, struct device_attribute *attr,
 	return ret;
 }
 
-static DEVICE_ATTR(tx_power, S_IWUSR | S_IRUGO, il4965_show_tx_power,
+static DEVICE_ATTR(tx_power, 0644, il4965_show_tx_power,
 		   il4965_store_tx_power);
 
 static struct attribute *il_sysfs_entries[] = {
@@ -4652,7 +4631,7 @@ static struct attribute *il_sysfs_entries[] = {
 	NULL
 };
 
-static struct attribute_group il_attribute_group = {
+static const struct attribute_group il_attribute_group = {
 	.name = NULL,		/* put in device directory */
 	.attrs = il_sysfs_entries,
 };
@@ -4772,7 +4751,7 @@ il4965_load_firmware(struct il_priv *il, const struct firmware *ucode_raw,
 	return 0;
 }
 
-/**
+/*
  * il4965_ucode_callback - callback when firmware was loaded
  *
  * If loaded successfully, copies the firmware into buffers
@@ -4782,7 +4761,6 @@ static void
 il4965_ucode_callback(const struct firmware *ucode_raw, void *context)
 {
 	struct il_priv *il = context;
-	struct il_ucode_header *ucode;
 	int err;
 	struct il4965_firmware_pieces pieces;
 	const unsigned int api_max = il->cfg->ucode_api_max;
@@ -4812,8 +4790,6 @@ il4965_ucode_callback(const struct firmware *ucode_raw, void *context)
 	}
 
 	/* Data from ucode file:  header followed by uCode images */
-	ucode = (struct il_ucode_header *)ucode_raw->data;
-
 	err = il4965_load_firmware(il, ucode_raw, &pieces);
 
 	if (err)
@@ -4855,39 +4831,39 @@ il4965_ucode_callback(const struct firmware *ucode_raw, void *context)
 	 */
 
 	D_INFO("f/w package hdr ucode version raw = 0x%x\n", il->ucode_ver);
-	D_INFO("f/w package hdr runtime inst size = %Zd\n", pieces.inst_size);
-	D_INFO("f/w package hdr runtime data size = %Zd\n", pieces.data_size);
-	D_INFO("f/w package hdr init inst size = %Zd\n", pieces.init_size);
-	D_INFO("f/w package hdr init data size = %Zd\n", pieces.init_data_size);
-	D_INFO("f/w package hdr boot inst size = %Zd\n", pieces.boot_size);
+	D_INFO("f/w package hdr runtime inst size = %zd\n", pieces.inst_size);
+	D_INFO("f/w package hdr runtime data size = %zd\n", pieces.data_size);
+	D_INFO("f/w package hdr init inst size = %zd\n", pieces.init_size);
+	D_INFO("f/w package hdr init data size = %zd\n", pieces.init_data_size);
+	D_INFO("f/w package hdr boot inst size = %zd\n", pieces.boot_size);
 
 	/* Verify that uCode images will fit in card's SRAM */
 	if (pieces.inst_size > il->hw_params.max_inst_size) {
-		IL_ERR("uCode instr len %Zd too large to fit in\n",
+		IL_ERR("uCode instr len %zd too large to fit in\n",
 		       pieces.inst_size);
 		goto try_again;
 	}
 
 	if (pieces.data_size > il->hw_params.max_data_size) {
-		IL_ERR("uCode data len %Zd too large to fit in\n",
+		IL_ERR("uCode data len %zd too large to fit in\n",
 		       pieces.data_size);
 		goto try_again;
 	}
 
 	if (pieces.init_size > il->hw_params.max_inst_size) {
-		IL_ERR("uCode init instr len %Zd too large to fit in\n",
+		IL_ERR("uCode init instr len %zd too large to fit in\n",
 		       pieces.init_size);
 		goto try_again;
 	}
 
 	if (pieces.init_data_size > il->hw_params.max_data_size) {
-		IL_ERR("uCode init data len %Zd too large to fit in\n",
+		IL_ERR("uCode init data len %zd too large to fit in\n",
 		       pieces.init_data_size);
 		goto try_again;
 	}
 
 	if (pieces.boot_size > il->hw_params.max_bsm_size) {
-		IL_ERR("uCode boot instr len %Zd too large to fit in\n",
+		IL_ERR("uCode boot instr len %zd too large to fit in\n",
 		       pieces.boot_size);
 		goto try_again;
 	}
@@ -4938,7 +4914,7 @@ il4965_ucode_callback(const struct firmware *ucode_raw, void *context)
 	/* Copy images into buffers for card's bus-master reads ... */
 
 	/* Runtime instructions (first block of data in file) */
-	D_INFO("Copying (but not loading) uCode instr len %Zd\n",
+	D_INFO("Copying (but not loading) uCode instr len %zd\n",
 	       pieces.inst_size);
 	memcpy(il->ucode_code.v_addr, pieces.inst, pieces.inst_size);
 
@@ -4949,28 +4925,28 @@ il4965_ucode_callback(const struct firmware *ucode_raw, void *context)
 	 * Runtime data
 	 * NOTE:  Copy into backup buffer will be done in il_up()
 	 */
-	D_INFO("Copying (but not loading) uCode data len %Zd\n",
+	D_INFO("Copying (but not loading) uCode data len %zd\n",
 	       pieces.data_size);
 	memcpy(il->ucode_data.v_addr, pieces.data, pieces.data_size);
 	memcpy(il->ucode_data_backup.v_addr, pieces.data, pieces.data_size);
 
 	/* Initialization instructions */
 	if (pieces.init_size) {
-		D_INFO("Copying (but not loading) init instr len %Zd\n",
+		D_INFO("Copying (but not loading) init instr len %zd\n",
 		       pieces.init_size);
 		memcpy(il->ucode_init.v_addr, pieces.init, pieces.init_size);
 	}
 
 	/* Initialization data */
 	if (pieces.init_data_size) {
-		D_INFO("Copying (but not loading) init data len %Zd\n",
+		D_INFO("Copying (but not loading) init data len %zd\n",
 		       pieces.init_data_size);
 		memcpy(il->ucode_init_data.v_addr, pieces.init_data,
 		       pieces.init_data_size);
 	}
 
 	/* Bootstrap instructions */
-	D_INFO("Copying (but not loading) boot instr len %Zd\n",
+	D_INFO("Copying (but not loading) boot instr len %zd\n",
 	       pieces.boot_size);
 	memcpy(il->ucode_boot.v_addr, pieces.boot, pieces.boot_size);
 
@@ -4992,10 +4968,7 @@ il4965_ucode_callback(const struct firmware *ucode_raw, void *context)
 	if (err)
 		goto out_unbind;
 
-	err = il_dbgfs_register(il, DRV_NAME);
-	if (err)
-		IL_ERR("failed to create debugfs files. Ignoring error: %d\n",
-		       err);
+	il_dbgfs_register(il, DRV_NAME);
 
 	err = sysfs_create_group(&il->pci_dev->dev.kobj, &il_attribute_group);
 	if (err) {
@@ -5281,7 +5254,7 @@ il4965_alive_notify(struct il_priv *il)
 	return 0;
 }
 
-/**
+/*
  * il4965_alive_start - called after N_ALIVE notification received
  *                   from protocol/runtime uCode (initialization uCode's
  *                   Alive gets handled by il_init_alive_start()).
@@ -5799,6 +5772,8 @@ il4965_mac_setup_register(struct il_priv *il, u32 max_probe_length)
 
 	il_leds_init(il);
 
+	wiphy_ext_feature_set(il->hw->wiphy, NL80211_EXT_FEATURE_CQM_RSSI_LIST);
+
 	ret = ieee80211_register_hw(il->hw);
 	if (ret) {
 		IL_ERR("Failed to register hw (error %d)\n", ret);
@@ -6254,14 +6229,11 @@ il4965_setup_deferred_work(struct il_priv *il)
 
 	INIT_WORK(&il->txpower_work, il4965_bg_txpower_work);
 
-	setup_timer(&il->stats_periodic, il4965_bg_stats_periodic,
-		    (unsigned long)il);
+	timer_setup(&il->stats_periodic, il4965_bg_stats_periodic, 0);
 
-	setup_timer(&il->watchdog, il_bg_watchdog, (unsigned long)il);
+	timer_setup(&il->watchdog, il_bg_watchdog, 0);
 
-	tasklet_init(&il->irq_tasklet,
-		     (void (*)(unsigned long))il4965_irq_tasklet,
-		     (unsigned long)il);
+	tasklet_setup(&il->irq_tasklet, il4965_irq_tasklet);
 }
 
 static void
@@ -6490,7 +6462,7 @@ il4965_set_hw_params(struct il_priv *il)
 	il->hw_params.valid_rx_ant = il->cfg->valid_rx_ant;
 
 	il->hw_params.ct_kill_threshold =
-	   CELSIUS_TO_KELVIN(CT_KILL_THRESHOLD_LEGACY);
+	   celsius_to_kelvin(CT_KILL_THRESHOLD_LEGACY);
 
 	il->hw_params.sens = &il4965_sensitivity;
 	il->hw_params.beacon_time_tsf_bits = IL4965_EXT_BEACON_TIME_POS;
@@ -6856,18 +6828,17 @@ module_exit(il4965_exit);
 module_init(il4965_init);
 
 #ifdef CONFIG_IWLEGACY_DEBUG
-module_param_named(debug, il_debug_level, uint, S_IRUGO | S_IWUSR);
+module_param_named(debug, il_debug_level, uint, 0644);
 MODULE_PARM_DESC(debug, "debug output mask");
 #endif
 
-module_param_named(swcrypto, il4965_mod_params.sw_crypto, int, S_IRUGO);
+module_param_named(swcrypto, il4965_mod_params.sw_crypto, int, 0444);
 MODULE_PARM_DESC(swcrypto, "using crypto in software (default 0 [hardware])");
-module_param_named(queues_num, il4965_mod_params.num_of_queues, int, S_IRUGO);
+module_param_named(queues_num, il4965_mod_params.num_of_queues, int, 0444);
 MODULE_PARM_DESC(queues_num, "number of hw queues.");
-module_param_named(11n_disable, il4965_mod_params.disable_11n, int, S_IRUGO);
+module_param_named(11n_disable, il4965_mod_params.disable_11n, int, 0444);
 MODULE_PARM_DESC(11n_disable, "disable 11n functionality");
-module_param_named(amsdu_size_8K, il4965_mod_params.amsdu_size_8K, int,
-		   S_IRUGO);
+module_param_named(amsdu_size_8K, il4965_mod_params.amsdu_size_8K, int, 0444);
 MODULE_PARM_DESC(amsdu_size_8K, "enable 8K amsdu size (default 0 [disabled])");
-module_param_named(fw_restart, il4965_mod_params.restart_fw, int, S_IRUGO);
+module_param_named(fw_restart, il4965_mod_params.restart_fw, int, 0444);
 MODULE_PARM_DESC(fw_restart, "restart firmware in case of error");

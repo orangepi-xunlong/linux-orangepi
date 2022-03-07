@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 #ifndef __NVKM_SUBDEV_H__
 #define __NVKM_SUBDEV_H__
 #include <core/device.h>
@@ -16,24 +17,28 @@ struct nvkm_subdev_func {
 	void *(*dtor)(struct nvkm_subdev *);
 	int (*preinit)(struct nvkm_subdev *);
 	int (*oneinit)(struct nvkm_subdev *);
+	int (*info)(struct nvkm_subdev *, u64 mthd, u64 *data);
 	int (*init)(struct nvkm_subdev *);
 	int (*fini)(struct nvkm_subdev *, bool suspend);
 	void (*intr)(struct nvkm_subdev *);
 };
 
 extern const char *nvkm_subdev_name[NVKM_SUBDEV_NR];
+int nvkm_subdev_new_(const struct nvkm_subdev_func *, struct nvkm_device *,
+		     int index, struct nvkm_subdev **);
 void nvkm_subdev_ctor(const struct nvkm_subdev_func *, struct nvkm_device *,
 		      int index, struct nvkm_subdev *);
 void nvkm_subdev_del(struct nvkm_subdev **);
 int  nvkm_subdev_preinit(struct nvkm_subdev *);
 int  nvkm_subdev_init(struct nvkm_subdev *);
 int  nvkm_subdev_fini(struct nvkm_subdev *, bool suspend);
+int  nvkm_subdev_info(struct nvkm_subdev *, u64, u64 *);
 void nvkm_subdev_intr(struct nvkm_subdev *);
 
 /* subdev logging */
 #define nvkm_printk_(s,l,p,f,a...) do {                                        \
-	struct nvkm_subdev *_subdev = (s);                                     \
-	if (_subdev->debug >= (l)) {                                           \
+	const struct nvkm_subdev *_subdev = (s);                               \
+	if (CONFIG_NOUVEAU_DEBUG >= (l) && _subdev->debug >= (l)) {            \
 		dev_##p(_subdev->device->dev, "%s: "f,                         \
 			nvkm_subdev_name[_subdev->index], ##a);                \
 	}                                                                      \

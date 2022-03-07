@@ -1,17 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * max30100.c - Support for MAX30100 heart rate and pulse oximeter sensor
  *
- * Copyright (C) 2015 Matt Ranostay <mranostay@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
+ * Copyright (C) 2015, 2018
+ * Author: Matt Ranostay <matt.ranostay@konsulko.com>
  *
  * TODO: enable pulse length controls via device tree properties
  */
@@ -24,7 +16,7 @@
 #include <linux/irq.h>
 #include <linux/i2c.h>
 #include <linux/mutex.h>
-#include <linux/of.h>
+#include <linux/property.h>
 #include <linux/regmap.h>
 #include <linux/iio/iio.h>
 #include <linux/iio/buffer.h>
@@ -275,11 +267,10 @@ static int max30100_get_current_idx(unsigned int val, int *reg)
 static int max30100_led_init(struct max30100_data *data)
 {
 	struct device *dev = &data->client->dev;
-	struct device_node *np = dev->of_node;
 	unsigned int val[2];
 	int reg, ret;
 
-	ret = of_property_read_u32_array(np, "maxim,led-current-microamp",
+	ret = device_property_read_u32_array(dev, "maxim,led-current-microamp",
 					(unsigned int *) &val, 2);
 	if (ret) {
 		/* Default to 24 mA RED LED, 50 mA IR LED */
@@ -378,7 +369,7 @@ static int max30100_get_temp(struct max30100_data *data, int *val)
 	if (ret)
 		return ret;
 
-	usleep_range(35000, 50000);
+	msleep(35);
 
 	return max30100_read_temp(data, val);
 }
@@ -420,7 +411,6 @@ static int max30100_read_raw(struct iio_dev *indio_dev,
 }
 
 static const struct iio_info max30100_info = {
-	.driver_module = THIS_MODULE,
 	.read_raw = max30100_read_raw,
 };
 
@@ -510,7 +500,7 @@ MODULE_DEVICE_TABLE(of, max30100_dt_ids);
 static struct i2c_driver max30100_driver = {
 	.driver = {
 		.name	= MAX30100_DRV_NAME,
-		.of_match_table	= of_match_ptr(max30100_dt_ids),
+		.of_match_table	= max30100_dt_ids,
 	},
 	.probe		= max30100_probe,
 	.remove		= max30100_remove,
@@ -518,6 +508,6 @@ static struct i2c_driver max30100_driver = {
 };
 module_i2c_driver(max30100_driver);
 
-MODULE_AUTHOR("Matt Ranostay <mranostay@gmail.com>");
+MODULE_AUTHOR("Matt Ranostay <matt.ranostay@konsulko.com>");
 MODULE_DESCRIPTION("MAX30100 heart rate and pulse oximeter sensor");
 MODULE_LICENSE("GPL");

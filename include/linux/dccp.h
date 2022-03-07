@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_DCCP_H
 #define _LINUX_DCCP_H
 
@@ -197,7 +198,7 @@ enum dccp_role {
 
 struct dccp_service_list {
 	__u32	dccpsl_nr;
-	__be32	dccpsl_list[0];
+	__be32	dccpsl_list[];
 };
 
 #define DCCP_SERVICE_INVALID_VALUE htonl((__u32)-1)

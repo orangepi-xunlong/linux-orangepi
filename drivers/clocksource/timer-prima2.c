@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * System timer for CSR SiRFprimaII
  *
  * Copyright (c) 2011 Cambridge Silicon Radio Limited, a CSR plc group company.
- *
- * Licensed under GPLv2 or later.
  */
 
 #include <linux/kernel.h>
@@ -72,7 +71,7 @@ static irqreturn_t sirfsoc_timer_interrupt(int irq, void *dev_id)
 }
 
 /* read 64-bit timer counter */
-static cycle_t notrace sirfsoc_timer_read(struct clocksource *cs)
+static u64 notrace sirfsoc_timer_read(struct clocksource *cs)
 {
 	u64 cycles;
 
@@ -166,14 +165,6 @@ static struct clocksource sirfsoc_clocksource = {
 	.resume = sirfsoc_clocksource_resume,
 };
 
-static struct irqaction sirfsoc_timer_irq = {
-	.name = "sirfsoc_timer0",
-	.flags = IRQF_TIMER,
-	.irq = 0,
-	.handler = sirfsoc_timer_interrupt,
-	.dev_id = &sirfsoc_clockevent,
-};
-
 /* Overwrite weak default sched_clock with more precise one */
 static u64 notrace sirfsoc_read_sched_clock(void)
 {
@@ -191,25 +182,26 @@ static void __init sirfsoc_clockevent_init(void)
 static int __init sirfsoc_prima2_timer_init(struct device_node *np)
 {
 	unsigned long rate;
+	unsigned int irq;
 	struct clk *clk;
 	int ret;
 
 	clk = of_clk_get(np, 0);
 	if (IS_ERR(clk)) {
-		pr_err("Failed to get clock");
+		pr_err("Failed to get clock\n");
 		return PTR_ERR(clk);
 	}
 
 	ret = clk_prepare_enable(clk);
 	if (ret) {
-		pr_err("Failed to enable clock");
+		pr_err("Failed to enable clock\n");
 		return ret;
 	}
 
 	rate = clk_get_rate(clk);
 
 	if (rate < PRIMA2_CLOCK_FREQ || rate % PRIMA2_CLOCK_FREQ) {
-		pr_err("Invalid clock rate");
+		pr_err("Invalid clock rate\n");
 		return -EINVAL;
 	}
 
@@ -219,7 +211,7 @@ static int __init sirfsoc_prima2_timer_init(struct device_node *np)
 		return -ENXIO;
 	}
 
-	sirfsoc_timer_irq.irq = irq_of_parse_and_map(np, 0);
+	irq = irq_of_parse_and_map(np, 0);
 
 	writel_relaxed(rate / PRIMA2_CLOCK_FREQ / 2 - 1,
 		sirfsoc_timer_base + SIRFSOC_TIMER_DIV);
@@ -229,15 +221,16 @@ static int __init sirfsoc_prima2_timer_init(struct device_node *np)
 
 	ret = clocksource_register_hz(&sirfsoc_clocksource, PRIMA2_CLOCK_FREQ);
 	if (ret) {
-		pr_err("Failed to register clocksource");
+		pr_err("Failed to register clocksource\n");
 		return ret;
 	}
 
 	sched_clock_register(sirfsoc_read_sched_clock, 64, PRIMA2_CLOCK_FREQ);
 
-	ret = setup_irq(sirfsoc_timer_irq.irq, &sirfsoc_timer_irq);
+	ret = request_irq(irq, sirfsoc_timer_interrupt, IRQF_TIMER,
+			  "sirfsoc_timer0", &sirfsoc_clockevent);
 	if (ret) {
-		pr_err("Failed to setup irq");
+		pr_err("Failed to setup irq\n");
 		return ret;
 	}
 
@@ -245,5 +238,5 @@ static int __init sirfsoc_prima2_timer_init(struct device_node *np)
 
 	return 0;
 }
-CLOCKSOURCE_OF_DECLARE(sirfsoc_prima2_timer,
+TIMER_OF_DECLARE(sirfsoc_prima2_timer,
 	"sirf,prima2-tick", sirfsoc_prima2_timer_init);

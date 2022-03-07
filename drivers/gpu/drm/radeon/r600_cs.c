@@ -26,8 +26,9 @@
  *          Jerome Glisse
  */
 #include <linux/kernel.h>
-#include <drm/drmP.h>
+
 #include "radeon.h"
+#include "radeon_asic.h"
 #include "r600d.h"
 #include "r600_reg_safe.h"
 
@@ -349,7 +350,7 @@ static void r600_cs_track_init(struct r600_cs_track *track)
 static int r600_cs_track_validate_cb(struct radeon_cs_parser *p, int i)
 {
 	struct r600_cs_track *track = p->track;
-	u32 slice_tile_max, size, tmp;
+	u32 slice_tile_max, tmp;
 	u32 height, height_align, pitch, pitch_align, depth_align;
 	u64 base_offset, base_align;
 	struct array_mode_checker array_check;
@@ -359,7 +360,6 @@ static int r600_cs_track_validate_cb(struct radeon_cs_parser *p, int i)
 	/* When resolve is used, the second colorbuffer has always 1 sample. */
 	unsigned nsamples = track->is_resolve && i == 1 ? 1 : track->nsamples;
 
-	size = radeon_bo_size(track->cb_color_bo[i]) - track->cb_color_bo_offset[i];
 	format = G_0280A0_FORMAT(track->cb_color_info[i]);
 	if (!r600_fmt_is_valid_color(format)) {
 		dev_warn(p->dev, "%s:%d cb invalid format %d for %d (0x%08X)\n",
@@ -487,7 +487,7 @@ static int r600_cs_track_validate_cb(struct radeon_cs_parser *p, int i)
 				return -EINVAL;
 			}
 		}
-		/* fall through */
+		fallthrough;
 	case V_0280A0_CLEAR_ENABLE:
 	{
 		uint32_t block_max = G_028100_CMASK_BLOCK_MAX(track->cb_color_mask[i]);
@@ -516,7 +516,7 @@ static int r600_cs_track_validate_cb(struct radeon_cs_parser *p, int i)
 static int r600_cs_track_validate_db(struct radeon_cs_parser *p)
 {
 	struct r600_cs_track *track = p->track;
-	u32 nviews, bpe, ntiles, size, slice_tile_max, tmp;
+	u32 nviews, bpe, ntiles, slice_tile_max, tmp;
 	u32 height_align, pitch_align, depth_align;
 	u32 pitch = 8192;
 	u32 height = 8192;
@@ -563,7 +563,6 @@ static int r600_cs_track_validate_db(struct radeon_cs_parser *p)
 		}
 		ib[track->db_depth_size_idx] = S_028000_SLICE_TILE_MAX(tmp - 1) | (track->db_depth_size & 0x3FF);
 	} else {
-		size = radeon_bo_size(track->db_bo);
 		/* pitch in pixels */
 		pitch = (G_028000_PITCH_TILE_MAX(track->db_depth_size) + 1) * 8;
 		slice_tile_max = G_028000_SLICE_TILE_MAX(track->db_depth_size) + 1;
@@ -886,7 +885,7 @@ int r600_cs_common_vline_parse(struct radeon_cs_parser *p,
 	crtc_id = radeon_get_ib_value(p, h_idx + 2 + 7 + 1);
 	reg = R600_CP_PACKET0_GET_REG(header);
 
-	crtc = drm_crtc_find(p->rdev->ddev, crtc_id);
+	crtc = drm_crtc_find(p->rdev->ddev, p->filp, crtc_id);
 	if (!crtc) {
 		DRM_ERROR("cannot find crtc %d\n", crtc_id);
 		return -ENOENT;
@@ -931,8 +930,7 @@ static int r600_packet0_check(struct radeon_cs_parser *p,
 		}
 		break;
 	default:
-		printk(KERN_ERR "Forbidden register 0x%04X in cs at %d\n",
-		       reg, idx);
+		pr_err("Forbidden register 0x%04X in cs at %d\n", reg, idx);
 		return -EINVAL;
 	}
 	return 0;
@@ -1537,7 +1535,7 @@ static int r600_check_texture_resource(struct radeon_cs_parser *p,  u32 idx,
 		break;
 	case V_038000_SQ_TEX_DIM_2D_ARRAY_MSAA:
 		is_array = true;
-		/* fall through */
+		fallthrough;
 	case V_038000_SQ_TEX_DIM_2D_MSAA:
 		array_check.nsamples = 1 << llevel;
 		llevel = 0;
@@ -2319,7 +2317,7 @@ int r600_cs_parse(struct radeon_cs_parser *p)
 	} while (p->idx < p->chunk_ib->length_dw);
 #if 0
 	for (r = 0; r < p->ib.length_dw; r++) {
-		printk(KERN_INFO "%05d  0x%08X\n", r, p->ib.ptr[r]);
+		pr_info("%05d  0x%08X\n", r, p->ib.ptr[r]);
 		mdelay(1);
 	}
 #endif
@@ -2342,7 +2340,6 @@ int r600_cs_parse(struct radeon_cs_parser *p)
 int r600_dma_cs_next_reloc(struct radeon_cs_parser *p,
 			   struct radeon_bo_list **cs_reloc)
 {
-	struct radeon_cs_chunk *relocs_chunk;
 	unsigned idx;
 
 	*cs_reloc = NULL;
@@ -2350,7 +2347,6 @@ int r600_dma_cs_next_reloc(struct radeon_cs_parser *p,
 		DRM_ERROR("No relocation chunk !\n");
 		return -EINVAL;
 	}
-	relocs_chunk = p->chunk_relocs;
 	idx = p->dma_reloc_idx;
 	if (idx >= p->nrelocs) {
 		DRM_ERROR("Relocs at %d after relocations chunk end %d !\n",
@@ -2527,7 +2523,7 @@ int r600_dma_cs_parse(struct radeon_cs_parser *p)
 	} while (p->idx < p->chunk_ib->length_dw);
 #if 0
 	for (r = 0; r < p->ib->length_dw; r++) {
-		printk(KERN_INFO "%05d  0x%08X\n", r, p->ib.ptr[r]);
+		pr_info("%05d  0x%08X\n", r, p->ib.ptr[r]);
 		mdelay(1);
 	}
 #endif

@@ -1,21 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) STMicroelectronics SA 2014
  * Authors: Benjamin Gaignard <benjamin.gaignard@st.com>
  *          Vincent Abriou <vincent.abriou@st.com>
  *          for STMicroelectronics.
- * License terms:  GNU General Public License (GPL), version 2
  */
 
 #include <linux/clk.h>
 #include <linux/component.h>
+#include <linux/io.h>
 #include <linux/module.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/reset.h>
 #include <linux/seq_file.h>
 
-#include <drm/drmP.h>
-#include <drm/drm_crtc_helper.h>
+#include <drm/drm_atomic_helper.h>
+#include <drm/drm_debugfs.h>
+#include <drm/drm_device.h>
+#include <drm/drm_file.h>
+#include <drm/drm_print.h>
 
 #include "sti_crtc.h"
 #include "sti_drv.h"
@@ -153,9 +157,9 @@ static void tvout_write(struct sti_tvout *tvout, u32 val, int offset)
  *
  * @tvout: tvout structure
  * @reg: register to set
- * @cr_r:
- * @y_g:
- * @cb_b:
+ * @cr_r: red chroma or red order
+ * @y_g: y or green order
+ * @cb_b: blue chroma or blue order
  */
 static void tvout_vip_set_color_order(struct sti_tvout *tvout, int reg,
 				      u32 cr_r, u32 y_g, u32 cb_b)
@@ -210,7 +214,7 @@ static void tvout_vip_set_rnd(struct sti_tvout *tvout, int reg, u32 rnd)
  * @tvout: tvout structure
  * @reg: register to set
  * @main_path: main or auxiliary path
- * @sel_input: selected_input (main/aux + conv)
+ * @video_out: selected_input (main/aux + conv)
  */
 static void tvout_vip_set_sel_input(struct sti_tvout *tvout,
 				    int reg,
@@ -247,7 +251,7 @@ static void tvout_vip_set_sel_input(struct sti_tvout *tvout,
  *
  * @tvout: tvout structure
  * @reg: register to set
- * @in_vid_signed: used video input format
+ * @in_vid_fmt: used video input format
  */
 static void tvout_vip_set_in_vid_fmt(struct sti_tvout *tvout,
 		int reg, u32 in_vid_fmt)
@@ -459,7 +463,7 @@ static void tvout_dbg_vip(struct seq_file *s, int val)
 				   "Aux (color matrix by-passed)",
 				   "", "", "", "", "", "Force value"};
 
-	seq_puts(s, "\t");
+	seq_putc(s, '\t');
 	mask = TVO_VIP_REORDER_MASK << TVO_VIP_REORDER_R_SHIFT;
 	r = (val & mask) >> TVO_VIP_REORDER_R_SHIFT;
 	mask = TVO_VIP_REORDER_MASK << TVO_VIP_REORDER_G_SHIFT;
@@ -558,8 +562,7 @@ static int tvout_dbg_show(struct seq_file *s, void *data)
 	DBGFS_DUMP(TVO_CSC_AUX_M6);
 	DBGFS_DUMP(TVO_CSC_AUX_M7);
 	DBGFS_DUMP(TVO_AUX_IN_VID_FORMAT);
-	seq_puts(s, "\n");
-
+	seq_putc(s, '\n');
 	return 0;
 }
 
@@ -567,23 +570,16 @@ static struct drm_info_list tvout_debugfs_files[] = {
 	{ "tvout", tvout_dbg_show, 0, NULL },
 };
 
-static void tvout_debugfs_exit(struct sti_tvout *tvout, struct drm_minor *minor)
-{
-	drm_debugfs_remove_files(tvout_debugfs_files,
-				 ARRAY_SIZE(tvout_debugfs_files),
-				 minor);
-}
-
-static int tvout_debugfs_init(struct sti_tvout *tvout, struct drm_minor *minor)
+static void tvout_debugfs_init(struct sti_tvout *tvout, struct drm_minor *minor)
 {
 	unsigned int i;
 
 	for (i = 0; i < ARRAY_SIZE(tvout_debugfs_files); i++)
 		tvout_debugfs_files[i].data = tvout;
 
-	return drm_debugfs_create_files(tvout_debugfs_files,
-					ARRAY_SIZE(tvout_debugfs_files),
-					minor->debugfs_root, minor);
+	drm_debugfs_create_files(tvout_debugfs_files,
+				 ARRAY_SIZE(tvout_debugfs_files),
+				 minor->debugfs_root, minor);
 }
 
 static void sti_tvout_encoder_dpms(struct drm_encoder *encoder, int mode)
@@ -607,14 +603,11 @@ static void sti_tvout_encoder_destroy(struct drm_encoder *encoder)
 static int sti_tvout_late_register(struct drm_encoder *encoder)
 {
 	struct sti_tvout *tvout = to_sti_tvout(encoder);
-	int ret;
 
 	if (tvout->debugfs_registered)
 		return 0;
 
-	ret = tvout_debugfs_init(tvout, encoder->dev->primary);
-	if (ret)
-		return ret;
+	tvout_debugfs_init(tvout, encoder->dev->primary);
 
 	tvout->debugfs_registered = true;
 	return 0;
@@ -627,7 +620,6 @@ static void sti_tvout_early_unregister(struct drm_encoder *encoder)
 	if (!tvout->debugfs_registered)
 		return;
 
-	tvout_debugfs_exit(tvout, encoder->dev->primary);
 	tvout->debugfs_registered = false;
 }
 
@@ -674,10 +666,9 @@ sti_tvout_create_dvo_encoder(struct drm_device *dev,
 
 	encoder->tvout = tvout;
 
-	drm_encoder = (struct drm_encoder *)encoder;
+	drm_encoder = &encoder->encoder;
 
 	drm_encoder->possible_crtcs = ENCODER_CRTC_MASK;
-	drm_encoder->possible_clones = 1 << 0;
 
 	drm_encoder_init(dev, drm_encoder,
 			 &sti_tvout_encoder_funcs, DRM_MODE_ENCODER_LVDS,
@@ -727,10 +718,9 @@ static struct drm_encoder *sti_tvout_create_hda_encoder(struct drm_device *dev,
 
 	encoder->tvout = tvout;
 
-	drm_encoder = (struct drm_encoder *) encoder;
+	drm_encoder = &encoder->encoder;
 
 	drm_encoder->possible_crtcs = ENCODER_CRTC_MASK;
-	drm_encoder->possible_clones = 1 << 0;
 
 	drm_encoder_init(dev, drm_encoder,
 			&sti_tvout_encoder_funcs, DRM_MODE_ENCODER_DAC, NULL);
@@ -776,10 +766,9 @@ static struct drm_encoder *sti_tvout_create_hdmi_encoder(struct drm_device *dev,
 
 	encoder->tvout = tvout;
 
-	drm_encoder = (struct drm_encoder *) encoder;
+	drm_encoder = &encoder->encoder;
 
 	drm_encoder->possible_crtcs = ENCODER_CRTC_MASK;
-	drm_encoder->possible_clones = 1 << 1;
 
 	drm_encoder_init(dev, drm_encoder,
 			&sti_tvout_encoder_funcs, DRM_MODE_ENCODER_TMDS, NULL);
@@ -795,6 +784,13 @@ static void sti_tvout_create_encoders(struct drm_device *dev,
 	tvout->hdmi = sti_tvout_create_hdmi_encoder(dev, tvout);
 	tvout->hda = sti_tvout_create_hda_encoder(dev, tvout);
 	tvout->dvo = sti_tvout_create_dvo_encoder(dev, tvout);
+
+	tvout->hdmi->possible_clones = drm_encoder_mask(tvout->hdmi) |
+		drm_encoder_mask(tvout->hda) | drm_encoder_mask(tvout->dvo);
+	tvout->hda->possible_clones = drm_encoder_mask(tvout->hdmi) |
+		drm_encoder_mask(tvout->hda) | drm_encoder_mask(tvout->dvo);
+	tvout->dvo->possible_clones = drm_encoder_mask(tvout->hdmi) |
+		drm_encoder_mask(tvout->hda) | drm_encoder_mask(tvout->dvo);
 }
 
 static void sti_tvout_destroy_encoders(struct sti_tvout *tvout)
@@ -855,13 +851,13 @@ static int sti_tvout_probe(struct platform_device *pdev)
 
 	tvout->dev = dev;
 
-	/* get Memory ressources */
+	/* get memory resources */
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "tvout-reg");
 	if (!res) {
 		DRM_ERROR("Invalid glue resource\n");
 		return -ENOMEM;
 	}
-	tvout->regs = devm_ioremap_nocache(dev, res->start, resource_size(res));
+	tvout->regs = devm_ioremap(dev, res->start, resource_size(res));
 	if (!tvout->regs)
 		return -ENOMEM;
 

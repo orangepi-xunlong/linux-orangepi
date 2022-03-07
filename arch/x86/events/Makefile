@@ -1,11 +1,8 @@
-obj-y			+= core.o
-
-obj-$(CONFIG_CPU_SUP_AMD)               += amd/core.o amd/uncore.o
-obj-$(CONFIG_PERF_EVENTS_AMD_POWER)	+= amd/power.o
-obj-$(CONFIG_X86_LOCAL_APIC)            += amd/ibs.o msr.o
-ifdef CONFIG_AMD_IOMMU
-obj-$(CONFIG_CPU_SUP_AMD)               += amd/iommu.o
-endif
-
-obj-$(CONFIG_CPU_SUP_INTEL)		+= msr.o
+# SPDX-License-Identifier: GPL-2.0-only
+obj-y					+= core.o probe.o
+obj-$(CONFIG_PERF_EVENTS_INTEL_RAPL)	+= rapl.o
+obj-y					+= amd/
+obj-$(CONFIG_X86_LOCAL_APIC)            += msr.o
 obj-$(CONFIG_CPU_SUP_INTEL)		+= intel/
+obj-$(CONFIG_CPU_SUP_CENTAUR)		+= zhaoxin/
+obj-$(CONFIG_CPU_SUP_ZHAOXIN)		+= zhaoxin/

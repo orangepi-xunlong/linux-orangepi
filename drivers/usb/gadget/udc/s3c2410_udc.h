@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * linux/drivers/usb/gadget/s3c2410_udc.h
  * Samsung on-chip full speed USB device controllers
  *
  * Copyright (C) 2004-2007 Herbert Pötzl - Arnaud Patard
  *	Additional cleanups by Ben Dooks <ben-linux@fluff.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef _S3C2410_UDC_H
@@ -94,6 +90,7 @@ struct s3c2410_udc {
 	unsigned			req_pending : 1;
 	u8				vbus;
 	struct dentry			*regs_info;
+	int				irq;
 };
 #define to_s3c2410(g)	(container_of((g), struct s3c2410_udc, gadget))
 

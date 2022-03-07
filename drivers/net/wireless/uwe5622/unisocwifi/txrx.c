@@ -23,7 +23,9 @@
 #include "cmdevt.h"
 #include "intf_ops.h"
 #include "work.h"
+#if defined(UWE5621_FTR)
 #include "wl_intf.h"
+#endif
 #include "rx_msg.h"
 #include "tcp_ack.h"
 #include "wl_core.h"
@@ -35,17 +37,44 @@ int sprdwl_send_data(struct sprdwl_vif *vif, struct sprdwl_msg_buf *msg,
 		     struct sk_buff *skb, u8 offset)
 {
 	int ret;
+	int delta;
+	unsigned long align_addr;
 	unsigned char *buf = NULL;
+/*TODO temp for MARLIN2*/
+#ifndef UWE5621_FTR
+	struct sprdwl_data_hdr *hdr;
+#endif
 	struct sprdwl_intf *intf;
 	unsigned int plen = cpu_to_le16(skb->len);
 
 	intf = (struct sprdwl_intf *)vif->priv->hw_priv;
 	buf = skb->data;
-
+/*TODO temp for MARLIN2*/
+#ifndef UWE5621_FTR
+	skb_push(skb, sizeof(*hdr) + offset);
+	hdr = (struct sprdwl_data_hdr *)skb->data;
+	memset(hdr, 0, sizeof(*hdr));
+	hdr->common.type = SPRDWL_TYPE_DATA;
+	hdr->common.ctx_id = vif->ctx_id;
+	hdr->plen = cpu_to_le16(skb->len);
+#else
 	if (sprdwl_intf_fill_msdu_dscr(vif, skb, SPRDWL_TYPE_DATA, offset))
 		return -EPERM;
+#endif /* UWE5621_FTR */
 #ifdef OTT_UWE
 	skb_push(skb, 3);
+	if ((unsigned long)skb->data & 0x3) {
+		if (!skb_pad(skb, 8)) {
+			align_addr = roundup((unsigned long)skb->data, 4);
+			delta = align_addr - (unsigned long)skb->data;
+			memmove((void *)align_addr, skb->data, skb->len);
+			skb_pull(skb, delta);
+			skb_put(skb, delta);
+		} else {
+			wl_err("addr not aligned\n");
+			return -1;
+		}
+	}
 #endif
 	sprdwl_fill_msg(msg, skb, skb->data, skb->len);
 
@@ -91,6 +120,10 @@ int sprdwl_send_cmd(struct sprdwl_priv *priv, struct sprdwl_msg_buf *msg)
 	ret = sprdwl_intf_tx(priv, msg);
 	if (ret) {
 		wl_err("%s TX cmd Err: %d\n", __func__, ret);
+		/* now cmd msg droped */
+#if !defined(UWE5621_FTR)
+		dev_kfree_skb(skb);
+#endif
 	}
 
 	return ret;

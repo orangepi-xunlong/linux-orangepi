@@ -34,7 +34,7 @@
 		Phone (337) 232-1234 or 1-800-738-2226
 		Fax   (337) 232-1297
 
-		http://www.hospiceacadiana.com/
+		https://www.hospiceacadiana.com/
 
 	Manuel
  */
@@ -51,6 +51,7 @@
 #endif /* STATIC */
 
 #include <linux/decompress/mm.h>
+#include <linux/crc32poly.h>
 
 #ifndef INT_MAX
 #define INT_MAX 0x7fffffff
@@ -389,7 +390,7 @@ static int INIT get_next_block(struct bunzip_data *bd)
 		j = (bd->inbufBits >> bd->inbufBitCount)&
 			((1 << hufGroup->maxLen)-1);
 got_huff_bits:
-		/* Figure how how many bits are in next symbol and
+		/* Figure how many bits are in next symbol and
 		 * unget extras */
 		i = hufGroup->minLen;
 		while (j > limit[i])
@@ -654,7 +655,7 @@ static int INIT start_bunzip(struct bunzip_data **bdp, void *inbuf, long len,
 	for (i = 0; i < 256; i++) {
 		c = i << 24;
 		for (j = 8; j; j--)
-			c = c&0x80000000 ? (c << 1)^0x04c11db7 : (c << 1);
+			c = c&0x80000000 ? (c << 1)^(CRC32_POLY_BE) : (c << 1);
 		bd->crc32Table[i] = c;
 	}
 

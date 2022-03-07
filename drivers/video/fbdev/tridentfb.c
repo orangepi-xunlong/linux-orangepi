@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Frame buffer driver for Trident TGUI, Blade and Image series
  *
@@ -777,9 +778,6 @@ static int get_nativex(struct tridentfb_par *par)
 	case 3:
 		x = 800; y = 600;
 		break;
-	case 4:
-		x = 1400; y = 1050;
-		break;
 	case 1:
 	default:
 		x = 640;  y = 480;
@@ -1445,7 +1443,7 @@ static int tridentfb_blank(int blank_mode, struct fb_info *info)
 	return (blank_mode == FB_BLANK_NORMAL) ? 1 : 0;
 }
 
-static struct fb_ops tridentfb_ops = {
+static const struct fb_ops tridentfb_ops = {
 	.owner = THIS_MODULE,
 	.fb_setcolreg = tridentfb_setcolreg,
 	.fb_pan_display = tridentfb_pan_display,
@@ -1558,7 +1556,7 @@ static int trident_pci_probe(struct pci_dev *dev,
 		return -1;
 	}
 
-	default_par->io_virt = ioremap_nocache(tridentfb_fix.mmio_start,
+	default_par->io_virt = ioremap(tridentfb_fix.mmio_start,
 					       tridentfb_fix.mmio_len);
 
 	if (!default_par->io_virt) {
@@ -1581,7 +1579,7 @@ static int trident_pci_probe(struct pci_dev *dev,
 		goto out_unmap1;
 	}
 
-	info->screen_base = ioremap_nocache(tridentfb_fix.smem_start,
+	info->screen_base = ioremap(tridentfb_fix.smem_start,
 					    tridentfb_fix.smem_len);
 
 	if (!info->screen_base) {
@@ -1737,7 +1735,7 @@ static void trident_pci_remove(struct pci_dev *dev)
 }
 
 /* List of boards that we are trying to support */
-static struct pci_device_id trident_devices[] = {
+static const struct pci_device_id trident_devices[] = {
 	{PCI_VENDOR_ID_TRIDENT,	BLADE3D, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
 	{PCI_VENDOR_ID_TRIDENT,	CYBERBLADEi7, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
 	{PCI_VENDOR_ID_TRIDENT,	CYBERBLADEi7D, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},

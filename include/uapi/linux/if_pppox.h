@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0+ WITH Linux-syscall-note */
 /***************************************************************************
  * Linux PPP over X - Generic PPP transport layer sockets
  * Linux PPP over Ethernet (PPPoE) Socket Implementation (RFC 2516) 
@@ -24,8 +25,6 @@
 #include <linux/if.h>
 #include <linux/if_ether.h>
 #include <linux/if_pppol2tp.h>
-#include <linux/if_pppolac.h>
-#include <linux/if_pppopns.h>
 #include <linux/in.h>
 #include <linux/in6.h>
 
@@ -61,9 +60,7 @@ struct pptp_addr {
 #define PX_PROTO_OE    0 /* Currently just PPPoE */
 #define PX_PROTO_OL2TP 1 /* Now L2TP also */
 #define PX_PROTO_PPTP  2
-#define PX_PROTO_OLAC  3
-#define PX_PROTO_OPNS  4
-#define PX_MAX_PROTO   5
+#define PX_MAX_PROTO   3
 
 struct sockaddr_pppox {
 	__kernel_sa_family_t sa_family;       /* address family, AF_PPPOX */

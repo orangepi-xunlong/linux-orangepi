@@ -99,61 +99,6 @@ long int mdbg_send_atcmd(char *buf, long int len, enum atcmd_owner owner)
 	return sent_size;
 }
 
-/* copy from function: kdb_gmtime */
-static void wcn_gmtime(struct timespec *tv, struct wcn_tm *tm)
-{
-	/* This will work from 1970-2099, 2100 is not a leap year */
-	static int mon_day[] = { 31, 29, 31, 30, 31, 30, 31,
-				 31, 30, 31, 30, 31 };
-	memset(tm, 0, sizeof(*tm));
-	tm->tm_msec =  tv->tv_nsec/1000000;
-	tm->tm_sec  = tv->tv_sec % (24 * 60 * 60);
-	tm->tm_mday = tv->tv_sec / (24 * 60 * 60) +
-		(2 * 365 + 1); /* shift base from 1970 to 1968 */
-	tm->tm_min =  tm->tm_sec / 60 % 60;
-	tm->tm_hour = tm->tm_sec / 60 / 60;
-	tm->tm_sec =  tm->tm_sec % 60;
-	tm->tm_year = 68 + 4*(tm->tm_mday / (4*365+1));
-	tm->tm_mday %= (4*365+1);
-	mon_day[1] = 29;
-	while (tm->tm_mday >= mon_day[tm->tm_mon]) {
-		tm->tm_mday -= mon_day[tm->tm_mon];
-		if (++tm->tm_mon == 12) {
-			tm->tm_mon = 0;
-			++tm->tm_year;
-			mon_day[1] = 28;
-		}
-	}
-	++tm->tm_mday;
-}
-
-/* AP notify BTWF time by at+aptime=... cmd */
-long int wcn_ap_notify_btwf_time(void)
-{
-	struct timespec now;
-	struct wcn_tm tm;
-	char aptime[64];
-	long int send_cnt = 0;
-
-	/* get ap kernel time and transfer to China-BeiJing Time */
-	now = current_kernel_time();
-	wcn_gmtime(&now, &tm);
-	tm.tm_hour = (tm.tm_hour + WCN_BTWF_TIME_OFFSET) % 24;
-
-	/* save time with string: month,day,hour,min,sec,mili-sec */
-	memset(aptime, 0, 64);
-	sprintf(aptime, "at+aptime=%d,%d,%d,%d,%d,%d\r",
-		tm.tm_mon+1, tm.tm_mday,
-		tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_msec);
-
-	/* send to BTWF CP2 */
-	send_cnt = mdbg_send_atcmd((void *)aptime, strlen(aptime),
-		   WCN_ATCMD_KERNEL);
-	WCN_INFO("%s, send_cnt=%ld", aptime, send_cnt);
-
-	return send_cnt;
-}
-
 /*
  * Only marlin poweron and marlin starts to run,
  * it can call this function.

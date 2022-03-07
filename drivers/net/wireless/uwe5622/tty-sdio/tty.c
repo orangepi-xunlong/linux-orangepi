@@ -37,9 +37,7 @@
 
 #include <marlin_platform.h>
 #include "tty.h"
-#include "lpm.h"
 #include "rfkill.h"
-#include "dump.h"
 #include "woble.h"
 #include "alignment/sitm.h"
 
@@ -81,79 +79,6 @@ struct mtty_device {
 static struct mtty_device *mtty_dev;
 static unsigned int que_task = 1;
 static int que_sche = 1;
-
-static bool is_dumped;
-static bool is_user_debug;
-bt_host_data_dump *data_dump;
-
-static ssize_t dumpmem_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-	if (buf[0] == 2) {
-		pr_info("Set is_user_debug true!\n");
-		is_user_debug = true;
-		return 0;
-	}
-
-	if (is_dumped == false) {
-		pr_info("mtty BT start dump cp mem !\n");
-		//mdbg_assert_interface("BT command timeout assert !!!");
-		bt_host_data_printf();
-		if (data_dump != NULL) {
-			data_dump = NULL;
-			vfree(data_dump);
-		}
-	} else {
-		pr_info("mtty BT has dumped cp mem, pls restart phone!\n");
-	}
-	is_dumped = true;
-
-	return 0;
-}
-
-static DEVICE_ATTR_WO(dumpmem);
-
-static struct attribute *bluetooth_attrs[] = {
-	&dev_attr_dumpmem.attr,
-	NULL,
-};
-
-static struct attribute_group bluetooth_group = {
-	.name = NULL,
-	.attrs = bluetooth_attrs,
-};
-
-#ifdef KERNEL_VERSION_414
-static ssize_t chipid_show(struct device *dev,
-	   struct device_attribute *attr, char *buf)
-{
-	int i = 0, id;
-	const char *id_str = NULL;
-
-	id = wcn_get_chip_type();
-	id_str = wcn_get_chip_name();
-	pr_info("%s: chipid: %d, chipid_str: %s", __func__, id, id_str);
-
-	i = scnprintf(buf, PAGE_SIZE, "%d/", id);
-	pr_info("%s: buf: %s, i = %d", __func__, buf, i);
-	strcat(buf, id_str);
-	i += scnprintf(buf + i, PAGE_SIZE - i, buf + i);
-	pr_info("%s: buf: %s, i = %d", __func__, buf, i);
-	return i;
-}
-
-static DEVICE_ATTR_RO(chipid);
-
-static struct attribute *bluetooth_attrs[] = {
-	&dev_attr_chipid.attr,
-	NULL,
-};
-
-static struct attribute_group bluetooth_group = {
-	.name = NULL,
-	.attrs = bluetooth_attrs,
-};
-#endif
 
 static void hex_dump(unsigned char *bin, size_t binsz)
 {
@@ -269,9 +194,6 @@ static int mtty_rx_cb(int chn, struct mbuf_t *head, struct mbuf_t *tail, int num
 		BT_VER("%s dump block %d\n", __func__, block_size);
 		hex_dump_block((unsigned char *)head->buf + BT_SDIO_HEAD_LEN, block_size);
 	}
-	if (is_user_debug) {
-		bt_host_data_save((unsigned char *)head->buf + BT_SDIO_HEAD_LEN, block_size, BT_DATA_IN);
-	}
 
 	woble_data_recv((unsigned char *)head->buf + BT_SDIO_HEAD_LEN, block_size);
 
@@ -359,8 +281,6 @@ static int mtty_open(struct tty_struct *tty, struct file *filp)
 {
 	struct mtty_device *mtty = NULL;
 	struct tty_driver *driver = NULL;
-	data_dump = (bt_host_data_dump *)vmalloc(sizeof(bt_host_data_dump));
-	memset(data_dump, 0, sizeof(bt_host_data_dump));
 	if (tty == NULL) {
 		pr_err("mtty open input tty is NULL!\n");
 		return -ENOMEM;
@@ -401,10 +321,6 @@ static void mtty_close(struct tty_struct *tty, struct file *filp)
 	atomic_set(&mtty->state, MTTY_STATE_CLOSE);
 	sitm_cleanup();
 
-	if (data_dump != NULL) {
-		vfree(data_dump);
-		data_dump = NULL;
-	}
 	pr_info("mtty_close device success !\n");
 }
 
@@ -417,9 +333,6 @@ static int mtty_write(struct tty_struct *tty,
 
 	BT_VER("%s +++\n", __func__);
 
-	if (is_user_debug) {
-		bt_host_data_save(buf, count, BT_DATA_OUT);
-	}
 	if (log_level == MTTY_LOG_LEVEL_VER) {
 		BT_VER("%s dump size: %d\n", __func__, count);
 		hex_dump_block((unsigned char *)buf, count);
@@ -474,9 +387,9 @@ static void mtty_flush_chars(struct tty_struct *tty)
 {
 }
 
-static int mtty_write_room(struct tty_struct *tty)
+static unsigned int mtty_write_room(struct tty_struct *tty)
 {
-	return INT_MAX;
+	return UINT_MAX;
 }
 
 static const struct tty_operations mtty_ops = {
@@ -508,8 +421,8 @@ static int mtty_tty_driver_init(struct mtty_device *device)
 	if (!device->port)
 		return -ENOMEM;
 
-	driver = alloc_tty_driver(MTTY_DEV_MAX_NR * 2);
-	if (!driver)
+	driver = tty_alloc_driver(MTTY_DEV_MAX_NR * 2, 0);
+	if (!IS_ERR(driver))
 		return -ENOMEM;
 
 	/*
@@ -532,7 +445,7 @@ static int mtty_tty_driver_init(struct mtty_device *device)
 	tty_port_link_device(device->port, driver, 0);
 	ret = tty_register_driver(driver);
 	if (ret) {
-		put_tty_driver(driver);
+		tty_driver_kref_put(driver);
 		tty_port_destroy(device->port);
 		return ret;
 	}
@@ -544,7 +457,7 @@ static void mtty_tty_driver_exit(struct mtty_device *device)
 	struct tty_driver *driver = device->driver;
 
 	tty_unregister_driver(driver);
-	put_tty_driver(driver);
+	tty_driver_kref_put(driver);
 	tty_port_destroy(device->port);
 }
 
@@ -579,14 +492,12 @@ error:
 
 static inline void mtty_destroy_pdata(struct mtty_init_data **init)
 {
-#if (defined CONFIG_OF) && !(defined OTT_UWE)
+#if (defined CONFIG_OF)
 	struct mtty_init_data *pdata = *init;
 
 	kfree(pdata);
 
 	*init = NULL;
-#else
-	return;
 #endif
 }
 
@@ -630,13 +541,7 @@ static int  mtty_probe(struct platform_device *pdev)
 					pdev->dev.platform_data;
 	struct mtty_device *mtty;
 	int rval = 0;
-#ifdef OTT_UWE
-	static struct mtty_init_data mtty_driver_data = {
-		.name = "ttyBT",
-	};
 
-	pdata = &mtty_driver_data;
-#else
 	if (pdev->dev.of_node && !pdata) {
 		rval = mtty_parse_dt(&pdata, &pdev->dev);
 		if (rval) {
@@ -645,7 +550,6 @@ static int  mtty_probe(struct platform_device *pdev)
 			return rval;
 		}
 	}
-#endif
 
 	mtty = kzalloc(sizeof(struct mtty_device), GFP_KERNEL);
 	if (mtty == NULL) {
@@ -683,14 +587,7 @@ static int  mtty_probe(struct platform_device *pdev)
 
 	mtty_dev = mtty;
 
-//#ifdef KERNEL_VERSION_414
-	if (sysfs_create_group(&pdev->dev.kobj, &bluetooth_group)) {
-		pr_err("%s failed to create bluetooth tty attributes.\n", __func__);
-	}
-//#endif
-
 	rfkill_bluetooth_init(pdev);
-	bluesleep_init();
 	woble_init();
 	sprdwcn_bus_chn_init(&bt_rx_ops);
 	sprdwcn_bus_chn_init(&bt_tx_ops);
@@ -783,10 +680,6 @@ static int  mtty_remove(struct platform_device *pdev)
 	/*tasklet_kill(&mtty->rx_task);*/
 	kfree(mtty);
 	platform_set_drvdata(pdev, NULL);
-//#ifdef KERNEL_VERSION_414
-	sysfs_remove_group(&pdev->dev.kobj, &bluetooth_group);
-//#endif
-	bluesleep_exit();
 
 	return 0;
 }
@@ -807,32 +700,7 @@ static struct platform_driver mtty_driver = {
 	.shutdown = mtty_shutdown,
 };
 
-#ifdef OTT_UWE
-static struct platform_device *mtty_pdev;
-static int __init mtty_pdev_init(void)
-{
-	int ret;
-	ret = platform_driver_register(&mtty_driver);
-	if (!ret) {
-		mtty_pdev = platform_device_alloc("mtty", -1);
-		if (platform_device_add(mtty_pdev) != 0)
-			pr_err("register platform device unisoc mtty failed\n");
-	}
-
-	return ret;
-}
-
-static void __exit mtty_pdev_exit(void)
-{
-	platform_driver_unregister(&mtty_driver);
-	platform_device_del(mtty_pdev);
-}
-
-module_init(mtty_pdev_init);
-module_exit(mtty_pdev_exit);
-#else
 module_platform_driver(mtty_driver);
-#endif
 
 MODULE_AUTHOR("Unisoc wcn bt");
 MODULE_DESCRIPTION("Unisoc marlin tty driver");

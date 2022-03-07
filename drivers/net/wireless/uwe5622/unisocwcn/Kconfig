@@ -53,33 +53,6 @@ config SC2366
 	  Please say "y".
 	  Thanks.
 
-config WCN_BSP_DRIVER_BUILDIN
-	bool "buildin bsp driver for unisoc chip"
-	default n
-	help
-	  This is support wcn chip for incard board.
-	  if you want to buildin bsp driver.
-	  please say "y".
-	  Thanks.
-
-config RK_WIFI_DEVICE_UWE5621
-	bool "rockchip board Support for uwe5621"
-	default n
-	help
-	  This is support wcn chip for rockchip board.
-	  if you want to support rockchip board.
-	  please say "y".
-	  Thanks.
-
-config RK_WIFI_DEVICE_UWE5622
-	bool "rockchip board Support for uwe5622"
-	default n
-	help
-	  This is support wcn chip for rockchip board.
-	  if you want to support rockchip board.
-	  please say "y".
-	  Thanks.
-
 config AW_WIFI_DEVICE_UWE5622
 	bool "allwinner board Support for uwe5622"
 	default n
@@ -114,13 +87,7 @@ config AW_BIND_VERIFY
 # sprd's sleep device driver based on SC2355...,etc
 #source "drivers/misc/sprdwcn/sleep/Kconfig"
 
-# sprd's PCIe device driver based on SC2355...,etc
-#source "drivers/misc/sprdwcn/pcie/Kconfig"
-
 # sprd's wcn platform driver based on SC2355/SC2342...,etc
 #source "drivers/misc/sprdwcn/platform/Kconfig"
-
-# sprd's USB device driver based on SC2355...,etc
-#source "drivers/misc/sprdwcn/usb/Kconfig"
 
 endmenu

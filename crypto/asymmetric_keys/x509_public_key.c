@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Instantiate a public key crypto key from an X.509 Certificate
  *
  * Copyright (C) 2012 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public Licence
- * as published by the Free Software Foundation; either version
- * 2 of the Licence, or (at your option) any later version.
  */
 
 #define pr_fmt(fmt) "X.509: "fmt
@@ -33,6 +29,9 @@ int x509_get_sig_params(struct x509_certificate *cert)
 	int ret;
 
 	pr_devel("==>%s()\n", __func__);
+
+	sig->data = cert->tbs;
+	sig->data_size = cert->tbs_size;
 
 	if (!cert->pub->pkey_algo)
 		cert->unsupported_key = true;
@@ -77,13 +76,18 @@ int x509_get_sig_params(struct x509_certificate *cert)
 		goto error;
 
 	desc->tfm = tfm;
-	desc->flags = CRYPTO_TFM_REQ_MAY_SLEEP;
 
-	ret = crypto_shash_init(desc);
+	ret = crypto_shash_digest(desc, cert->tbs, cert->tbs_size, sig->digest);
 	if (ret < 0)
 		goto error_2;
-	might_sleep();
-	ret = crypto_shash_finup(desc, cert->tbs, cert->tbs_size, sig->digest);
+
+	ret = is_hash_blacklisted(sig->digest, sig->digest_size, "tbs");
+	if (ret == -EKEYREJECTED) {
+		pr_err("Cert %*phN is blacklisted\n",
+		       sig->digest_size, sig->digest);
+		cert->blacklisted = true;
+		ret = 0;
+	}
 
 error_2:
 	kfree(desc);
@@ -186,6 +190,11 @@ static int x509_key_preparse(struct key_preparsed_payload *prep)
 			 cert->sig->pkey_algo, cert->sig->hash_algo);
 	}
 
+	/* Don't permit addition of blacklisted keys */
+	ret = -EKEYREJECTED;
+	if (cert->blacklisted)
+		goto error_free_cert;
+
 	/* Propose a description */
 	sulen = strlen(cert->subject);
 	if (cert->raw_skid) {
@@ -260,4 +269,5 @@ module_init(x509_key_init);
 module_exit(x509_key_exit);
 
 MODULE_DESCRIPTION("X.509 certificate parser");
+MODULE_AUTHOR("Red Hat, Inc.");
 MODULE_LICENSE("GPL");

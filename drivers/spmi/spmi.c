@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -466,27 +458,25 @@ static void of_spmi_register_devices(struct spmi_controller *ctrl)
 		struct spmi_device *sdev;
 		u32 reg[2];
 
-		dev_dbg(&ctrl->dev, "adding child %s\n", node->full_name);
+		dev_dbg(&ctrl->dev, "adding child %pOF\n", node);
 
 		err = of_property_read_u32_array(node, "reg", reg, 2);
 		if (err) {
 			dev_err(&ctrl->dev,
-				"node %s err (%d) does not have 'reg' property\n",
-				node->full_name, err);
+				"node %pOF err (%d) does not have 'reg' property\n",
+				node, err);
 			continue;
 		}
 
 		if (reg[1] != SPMI_USID) {
 			dev_err(&ctrl->dev,
-				"node %s contains unsupported 'reg' entry\n",
-				node->full_name);
+				"node %pOF contains unsupported 'reg' entry\n",
+				node);
 			continue;
 		}
 
 		if (reg[0] >= SPMI_MAX_SLAVE_ID) {
-			dev_err(&ctrl->dev,
-				"invalid usid on node %s\n",
-				node->full_name);
+			dev_err(&ctrl->dev, "invalid usid on node %pOF\n", node);
 			continue;
 		}
 

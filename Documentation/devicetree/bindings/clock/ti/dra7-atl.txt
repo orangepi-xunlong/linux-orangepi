@@ -43,7 +43,7 @@ Configuration of ATL instances:
 	- aws : Audio word select signal selection
 };
 
-For valid word select signals, see the dt-bindings/clk/ti-dra7-atl.h include
+For valid word select signals, see the dt-bindings/clock/ti-dra7-atl.h include
 file.
 
 Examples:
@@ -81,13 +81,11 @@ atl: atl@4843c000 {
 				<&atl_clkin2_ck>, <&atl_clkin3_ck>;
 	clocks = <&atl_gfclk_mux>;
 	clock-names = "fck";
-	status = "disabled";
 };
 
-#include <dt-bindings/clk/ti-dra7-atl.h>
+#include <dt-bindings/clock/ti-dra7-atl.h>
 
 &atl {
-	status = "okay";
 
 	atl2 {
 		bws = <DRA7_ATL_WS_MCASP2_FSX>;

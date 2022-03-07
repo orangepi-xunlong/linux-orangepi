@@ -28,8 +28,6 @@
 #define SLP_MGR_DBG(fmt, args...)	\
 	pr_debug(SLP_MGR_HEADER fmt "\n", ## args)
 
-/* #define SLP_MGR_TEST */
-
 /* cp2 sleep status */
 #define	STAY_SLPING		0
 #define	STAY_AWAKING	1
@@ -44,9 +42,6 @@ struct slp_mgr_t {
 	atomic_t  cp2_state;
 };
 
-#ifdef SLP_MGR_TEST
-int slp_test_init(void);
-#endif
 struct slp_mgr_t *slp_get_info(void);
 int slp_mgr_init(void);
 int slp_mgr_deinit(void);

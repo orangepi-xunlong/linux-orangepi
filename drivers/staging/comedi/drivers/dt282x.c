@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * dt282x.c
  * Comedi driver for Data Translation DT2821 series
  *
  * COMEDI - Linux Control and Measurement Device Interface
  * Copyright (C) 1997-8 David A. Schleef <ds@schleef.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 /*
@@ -493,14 +484,7 @@ static void dt282x_ai_dma_interrupt(struct comedi_device *dev,
 		s->async->events |= COMEDI_CB_EOA;
 		return;
 	}
-#if 0
-	/* clear the dual dma flag, making this the last dma segment */
-	/* XXX probably wrong */
-	if (!devpriv->ntrig) {
-		devpriv->supcsr &= ~DT2821_SUPCSR_DDMA;
-		outw(devpriv->supcsr, dev->iobase + DT2821_SUPCSR_REG);
-	}
-#endif
+
 	/* restart the channel */
 	dt282x_prep_ai_dma(dev, dma->cur_dma, 0);
 
@@ -543,30 +527,10 @@ static irqreturn_t dt282x_interrupt(int irq, void *d)
 		s_ao->async->events |= COMEDI_CB_ERROR;
 		handled = 1;
 	}
-#if 0
-	if (adcsr & DT2821_ADCSR_ADDONE) {
-		unsigned short data;
 
-		data = inw(dev->iobase + DT2821_ADDAT_REG);
-		data &= s->maxdata;
-		if (devpriv->ad_2scomp)
-			data = comedi_offset_munge(s, data);
-
-		comedi_buf_write_samples(s, &data, 1);
-
-		devpriv->nread--;
-		if (!devpriv->nread) {
-			s->async->events |= COMEDI_CB_EOA;
-		} else {
-			if (supcsr & DT2821_SUPCSR_SCDN)
-				outw(devpriv->supcsr | DT2821_SUPCSR_STRIG,
-				     dev->iobase + DT2821_SUPCSR_REG);
-		}
-		handled = 1;
-	}
-#endif
 	comedi_handle_events(dev, s);
-	comedi_handle_events(dev, s_ao);
+	if (s_ao)
+		comedi_handle_events(dev, s_ao);
 
 	return IRQ_RETVAL(handled);
 }
@@ -1062,6 +1026,8 @@ static void dt282x_alloc_dma(struct comedi_device *dev,
 					   PAGE_SIZE, 0);
 	if (!devpriv->dma)
 		free_irq(irq_num, dev);
+	else
+		dev->irq = irq_num;
 }
 
 static void dt282x_free_dma(struct comedi_device *dev)
@@ -1201,6 +1167,6 @@ static struct comedi_driver dt282x_driver = {
 };
 module_comedi_driver(dt282x_driver);
 
-MODULE_AUTHOR("Comedi http://www.comedi.org");
+MODULE_AUTHOR("Comedi https://www.comedi.org");
 MODULE_DESCRIPTION("Comedi driver for Data Translation DT2821 series");
 MODULE_LICENSE("GPL");

@@ -1,39 +1,31 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ARC PGU DRM driver.
  *
  * Copyright (C) 2016 Synopsys, Inc. (www.synopsys.com)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #include <linux/clk.h>
-#include <drm/drm_crtc_helper.h>
-#include <drm/drm_fb_cma_helper.h>
-#include <drm/drm_gem_cma_helper.h>
 #include <drm/drm_atomic_helper.h>
+#include <drm/drm_debugfs.h>
+#include <drm/drm_device.h>
+#include <drm/drm_drv.h>
+#include <drm/drm_fb_cma_helper.h>
+#include <drm/drm_fb_helper.h>
+#include <drm/drm_gem_cma_helper.h>
+#include <drm/drm_gem_framebuffer_helper.h>
+#include <drm/drm_of.h>
+#include <drm/drm_probe_helper.h>
+#include <linux/dma-mapping.h>
+#include <linux/module.h>
 #include <linux/of_reserved_mem.h>
+#include <linux/platform_device.h>
 
 #include "arcpgu.h"
 #include "arcpgu_regs.h"
 
-static void arcpgu_fb_output_poll_changed(struct drm_device *dev)
-{
-	struct arcpgu_drm_private *arcpgu = dev->dev_private;
-
-	drm_fbdev_cma_hotplug_event(arcpgu->fbdev);
-}
-
-static struct drm_mode_config_funcs arcpgu_drm_modecfg_funcs = {
-	.fb_create  = drm_fb_cma_create,
-	.output_poll_changed = arcpgu_fb_output_poll_changed,
+static const struct drm_mode_config_funcs arcpgu_drm_modecfg_funcs = {
+	.fb_create  = drm_gem_fb_create,
 	.atomic_check = drm_atomic_helper_check,
 	.atomic_commit = drm_atomic_helper_commit,
 };
@@ -48,44 +40,13 @@ static void arcpgu_setup_mode_config(struct drm_device *drm)
 	drm->mode_config.funcs = &arcpgu_drm_modecfg_funcs;
 }
 
-static int arcpgu_gem_mmap(struct file *filp, struct vm_area_struct *vma)
-{
-	int ret;
-
-	ret = drm_gem_mmap(filp, vma);
-	if (ret)
-		return ret;
-
-	vma->vm_page_prot = pgprot_noncached(vm_get_page_prot(vma->vm_flags));
-	return 0;
-}
-
-static const struct file_operations arcpgu_drm_ops = {
-	.owner = THIS_MODULE,
-	.open = drm_open,
-	.release = drm_release,
-	.unlocked_ioctl = drm_ioctl,
-#ifdef CONFIG_COMPAT
-	.compat_ioctl = drm_compat_ioctl,
-#endif
-	.poll = drm_poll,
-	.read = drm_read,
-	.llseek = no_llseek,
-	.mmap = arcpgu_gem_mmap,
-};
-
-static void arcpgu_lastclose(struct drm_device *drm)
-{
-	struct arcpgu_drm_private *arcpgu = drm->dev_private;
-
-	drm_fbdev_cma_restore_mode(arcpgu->fbdev);
-}
+DEFINE_DRM_GEM_CMA_FOPS(arcpgu_drm_ops);
 
 static int arcpgu_load(struct drm_device *drm)
 {
 	struct platform_device *pdev = to_platform_device(drm->dev);
 	struct arcpgu_drm_private *arcpgu;
-	struct device_node *encoder_node;
+	struct device_node *encoder_node = NULL, *endpoint_node = NULL;
 	struct resource *res;
 	int ret;
 
@@ -120,14 +81,23 @@ static int arcpgu_load(struct drm_device *drm)
 	if (arc_pgu_setup_crtc(drm) < 0)
 		return -ENODEV;
 
-	/* find the encoder node and initialize it */
-	encoder_node = of_parse_phandle(drm->dev->of_node, "encoder-slave", 0);
+	/*
+	 * There is only one output port inside each device. It is linked with
+	 * encoder endpoint.
+	 */
+	endpoint_node = of_graph_get_next_endpoint(pdev->dev.of_node, NULL);
+	if (endpoint_node) {
+		encoder_node = of_graph_get_remote_port_parent(endpoint_node);
+		of_node_put(endpoint_node);
+	}
+
 	if (encoder_node) {
 		ret = arcpgu_drm_hdmi_init(drm, encoder_node);
 		of_node_put(encoder_node);
 		if (ret < 0)
 			return ret;
 	} else {
+		dev_info(drm->dev, "no encoder found. Assumed virtual LCD on simulation platform\n");
 		ret = arcpgu_drm_sim_init(drm, NULL);
 		if (ret < 0)
 			return ret;
@@ -136,60 +106,58 @@ static int arcpgu_load(struct drm_device *drm)
 	drm_mode_config_reset(drm);
 	drm_kms_helper_poll_init(drm);
 
-	arcpgu->fbdev = drm_fbdev_cma_init(drm, 16,
-					      drm->mode_config.num_crtc,
-					      drm->mode_config.num_connector);
-	if (IS_ERR(arcpgu->fbdev)) {
-		ret = PTR_ERR(arcpgu->fbdev);
-		arcpgu->fbdev = NULL;
-		return -ENODEV;
-	}
-
-	platform_set_drvdata(pdev, arcpgu);
+	platform_set_drvdata(pdev, drm);
 	return 0;
 }
 
 static int arcpgu_unload(struct drm_device *drm)
 {
-	struct arcpgu_drm_private *arcpgu = drm->dev_private;
-
-	if (arcpgu->fbdev) {
-		drm_fbdev_cma_fini(arcpgu->fbdev);
-		arcpgu->fbdev = NULL;
-	}
 	drm_kms_helper_poll_fini(drm);
-	drm_vblank_cleanup(drm);
+	drm_atomic_helper_shutdown(drm);
 	drm_mode_config_cleanup(drm);
 
 	return 0;
 }
 
+#ifdef CONFIG_DEBUG_FS
+static int arcpgu_show_pxlclock(struct seq_file *m, void *arg)
+{
+	struct drm_info_node *node = (struct drm_info_node *)m->private;
+	struct drm_device *drm = node->minor->dev;
+	struct arcpgu_drm_private *arcpgu = drm->dev_private;
+	unsigned long clkrate = clk_get_rate(arcpgu->clk);
+	unsigned long mode_clock = arcpgu->crtc.mode.crtc_clock * 1000;
+
+	seq_printf(m, "hw  : %lu\n", clkrate);
+	seq_printf(m, "mode: %lu\n", mode_clock);
+	return 0;
+}
+
+static struct drm_info_list arcpgu_debugfs_list[] = {
+	{ "clocks", arcpgu_show_pxlclock, 0 },
+};
+
+static void arcpgu_debugfs_init(struct drm_minor *minor)
+{
+	drm_debugfs_create_files(arcpgu_debugfs_list,
+				 ARRAY_SIZE(arcpgu_debugfs_list),
+				 minor->debugfs_root, minor);
+}
+#endif
+
 static struct drm_driver arcpgu_drm_driver = {
-	.driver_features = DRIVER_MODESET | DRIVER_GEM | DRIVER_PRIME |
-			   DRIVER_ATOMIC,
-	.lastclose = arcpgu_lastclose,
-	.name = "drm-arcpgu",
+	.driver_features = DRIVER_MODESET | DRIVER_GEM | DRIVER_ATOMIC,
+	.name = "arcpgu",
 	.desc = "ARC PGU Controller",
 	.date = "20160219",
 	.major = 1,
 	.minor = 0,
 	.patchlevel = 0,
 	.fops = &arcpgu_drm_ops,
-	.dumb_create = drm_gem_cma_dumb_create,
-	.dumb_map_offset = drm_gem_cma_dumb_map_offset,
-	.dumb_destroy = drm_gem_dumb_destroy,
-	.get_vblank_counter = drm_vblank_no_hw_counter,
-	.prime_handle_to_fd = drm_gem_prime_handle_to_fd,
-	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
-	.gem_free_object_unlocked = drm_gem_cma_free_object,
-	.gem_vm_ops = &drm_gem_cma_vm_ops,
-	.gem_prime_export = drm_gem_prime_export,
-	.gem_prime_import = drm_gem_prime_import,
-	.gem_prime_get_sg_table = drm_gem_cma_prime_get_sg_table,
-	.gem_prime_import_sg_table = drm_gem_cma_prime_import_sg_table,
-	.gem_prime_vmap = drm_gem_cma_prime_vmap,
-	.gem_prime_vunmap = drm_gem_cma_prime_vunmap,
-	.gem_prime_mmap = drm_gem_cma_prime_mmap,
+	DRM_GEM_CMA_DRIVER_OPS,
+#ifdef CONFIG_DEBUG_FS
+	.debugfs_init = arcpgu_debugfs_init,
+#endif
 };
 
 static int arcpgu_probe(struct platform_device *pdev)
@@ -209,13 +177,15 @@ static int arcpgu_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_unload;
 
+	drm_fbdev_generic_setup(drm, 16);
+
 	return 0;
 
 err_unload:
 	arcpgu_unload(drm);
 
 err_unref:
-	drm_dev_unref(drm);
+	drm_dev_put(drm);
 
 	return ret;
 }
@@ -226,7 +196,7 @@ static int arcpgu_remove(struct platform_device *pdev)
 
 	drm_dev_unregister(drm);
 	arcpgu_unload(drm);
-	drm_dev_unref(drm);
+	drm_dev_put(drm);
 
 	return 0;
 }

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0+ WITH Linux-syscall-note */
 /*
  * INET		An implementation of the TCP/IP protocol suite for the LINUX
  *		operating system.  INET is implemented using the  BSD Socket
@@ -24,10 +25,15 @@
 #include <linux/socket.h>		/* for "struct sockaddr" et al	*/
 #include <linux/compiler.h>		/* for "__user" et al           */
 
+#ifndef __KERNEL__
+#include <sys/socket.h>			/* for struct sockaddr.		*/
+#endif
+
 #if __UAPI_DEF_IF_IFNAMSIZ
 #define	IFNAMSIZ	16
 #endif /* __UAPI_DEF_IF_IFNAMSIZ */
 #define	IFALIASZ	256
+#define	ALTIFNAMSIZ	128
 #include <linux/hdlc/ioctl.h>
 
 /* For glibc compatibility. An empty enum does not compile. */
@@ -172,6 +178,7 @@ enum {
 enum {
 	IF_LINK_MODE_DEFAULT,
 	IF_LINK_MODE_DORMANT,	/* limit upward transition to dormant */
+	IF_LINK_MODE_TESTING,	/* limit upward transition to testing */
 };
 
 /*
@@ -207,6 +214,7 @@ struct if_settings {
 		fr_proto		__user *fr;
 		fr_proto_pvc		__user *fr_pvc;
 		fr_proto_pvc_info	__user *fr_pvc_info;
+		x25_hdlc_proto		__user *x25;
 
 		/* interface settings */
 		sync_serial_settings	__user *sync;

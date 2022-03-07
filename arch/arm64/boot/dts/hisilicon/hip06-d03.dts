@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /**
  * dts file for Hisilicon D03 Development Board
  *
  * Copyright (C) 2016 Hisilicon Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * publishhed by the Free Software Foundation.
- *
  */
 
 /dts-v1/;
@@ -17,7 +13,7 @@
 	model = "Hisilicon Hip06 D03 Development Board";
 	compatible = "hisilicon,hip06-d03";
 
-	memory@00000000 {
+	memory@0 {
 		device_type = "memory";
 		reg = <0x0 0x00000000 0x0 0x40000000>;
 	};
@@ -25,38 +21,38 @@
 	chosen { };
 };
 
+&ipmi0 {
+	status = "okay";
+};
+
+&uart0 {
+	status = "okay";
+};
+
 &eth0 {
-	status = "ok";
+	status = "okay";
 };
 
 &eth1 {
-	status = "ok";
+	status = "okay";
 };
 
 &eth2 {
-	status = "ok";
+	status = "okay";
 };
 
 &eth3 {
-	status = "ok";
-};
-
-&sas0 {
-	status = "ok";
+	status = "okay";
 };
 
 &sas1 {
-	status = "ok";
-};
-
-&sas2 {
-	status = "ok";
+	status = "okay";
 };
 
 &usb_ohci {
-	status = "ok";
+	status = "okay";
 };
 
 &usb_ehci {
-	status = "ok";
+	status = "okay";
 };

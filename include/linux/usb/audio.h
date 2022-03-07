@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * <linux/usb/audio.h> -- USB Audio definitions.
  *
@@ -30,6 +31,7 @@ struct usb_audio_control {
 	int data[5];
 	int (*set)(struct usb_audio_control *con, u8 cmd, int value);
 	int (*get)(struct usb_audio_control *con, u8 cmd);
+	void *context;
 };
 
 struct usb_audio_control_selector {

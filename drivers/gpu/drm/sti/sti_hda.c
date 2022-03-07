@@ -1,18 +1,23 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) STMicroelectronics SA 2014
  * Author: Fabien Dessenne <fabien.dessenne@st.com> for STMicroelectronics.
- * License terms:  GNU General Public License (GPL), version 2
  */
 
 #include <linux/clk.h>
 #include <linux/component.h>
+#include <linux/io.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/seq_file.h>
 
-#include <drm/drmP.h>
 #include <drm/drm_atomic_helper.h>
-#include <drm/drm_crtc_helper.h>
+#include <drm/drm_bridge.h>
+#include <drm/drm_debugfs.h>
+#include <drm/drm_device.h>
+#include <drm/drm_file.h>
+#include <drm/drm_print.h>
+#include <drm/drm_probe_helper.h>
 
 /* HDformatter registers */
 #define HDA_ANA_CFG                     0x0000
@@ -226,7 +231,7 @@ static const struct sti_hda_video_config hda_supported_modes[] = {
 	 AWGi_720x480p_60, NN_720x480p_60, VID_ED}
 };
 
-/**
+/*
  * STI hd analog structure
  *
  * @dev: driver device
@@ -320,8 +325,7 @@ static void hda_dbg_awg_microcode(struct seq_file *s, void __iomem *reg)
 {
 	unsigned int i;
 
-	seq_puts(s, "\n\n");
-	seq_puts(s, "  HDA AWG microcode:");
+	seq_puts(s, "\n\n  HDA AWG microcode:");
 	for (i = 0; i < AWG_MAX_INST; i++) {
 		if (i % 8 == 0)
 			seq_printf(s, "\n  %04X:", i);
@@ -333,8 +337,7 @@ static void hda_dbg_video_dacs_ctrl(struct seq_file *s, void __iomem *reg)
 {
 	u32 val = readl(reg);
 
-	seq_puts(s, "\n");
-	seq_printf(s, "\n  %-25s 0x%08X", "VIDEO_DACS_CONTROL", val);
+	seq_printf(s, "\n\n  %-25s 0x%08X", "VIDEO_DACS_CONTROL", val);
 	seq_puts(s, "\tHD DACs ");
 	seq_puts(s, val & DAC_CFG_HD_HZUVW_OFF_MASK ? "disabled" : "enabled");
 }
@@ -356,8 +359,7 @@ static int hda_dbg_show(struct seq_file *s, void *data)
 	hda_dbg_awg_microcode(s, hda->regs + HDA_SYNC_AWGI);
 	if (hda->video_dacs_ctrl)
 		hda_dbg_video_dacs_ctrl(s, hda->video_dacs_ctrl);
-	seq_puts(s, "\n");
-
+	seq_putc(s, '\n');
 	return 0;
 }
 
@@ -365,23 +367,16 @@ static struct drm_info_list hda_debugfs_files[] = {
 	{ "hda", hda_dbg_show, 0, NULL },
 };
 
-static void hda_debugfs_exit(struct sti_hda *hda, struct drm_minor *minor)
-{
-	drm_debugfs_remove_files(hda_debugfs_files,
-				 ARRAY_SIZE(hda_debugfs_files),
-				 minor);
-}
-
-static int hda_debugfs_init(struct sti_hda *hda, struct drm_minor *minor)
+static void hda_debugfs_init(struct sti_hda *hda, struct drm_minor *minor)
 {
 	unsigned int i;
 
 	for (i = 0; i < ARRAY_SIZE(hda_debugfs_files); i++)
 		hda_debugfs_files[i].data = hda;
 
-	return drm_debugfs_create_files(hda_debugfs_files,
-					ARRAY_SIZE(hda_debugfs_files),
-					minor->debugfs_root, minor);
+	drm_debugfs_create_files(hda_debugfs_files,
+				 ARRAY_SIZE(hda_debugfs_files),
+				 minor->debugfs_root, minor);
 }
 
 /**
@@ -518,8 +513,8 @@ static void sti_hda_pre_enable(struct drm_bridge *bridge)
 }
 
 static void sti_hda_set_mode(struct drm_bridge *bridge,
-		struct drm_display_mode *mode,
-		struct drm_display_mode *adjusted_mode)
+			     const struct drm_display_mode *mode,
+			     const struct drm_display_mode *adjusted_mode)
 {
 	struct sti_hda *hda = bridge->driver_private;
 	u32 mode_idx;
@@ -591,7 +586,6 @@ static int sti_hda_connector_get_modes(struct drm_connector *connector)
 					&hda_supported_modes[i].mode);
 		if (!mode)
 			continue;
-		mode->vrefresh = drm_mode_vrefresh(mode);
 
 		/* the first mode is the preferred mode */
 		if (i == 0)
@@ -642,30 +636,19 @@ struct drm_connector_helper_funcs sti_hda_connector_helper_funcs = {
 	.mode_valid = sti_hda_connector_mode_valid,
 };
 
-static enum drm_connector_status
-sti_hda_connector_detect(struct drm_connector *connector, bool force)
-{
-	return connector_status_connected;
-}
-
 static int sti_hda_late_register(struct drm_connector *connector)
 {
 	struct sti_hda_connector *hda_connector
 		= to_sti_hda_connector(connector);
 	struct sti_hda *hda = hda_connector->hda;
 
-	if (hda_debugfs_init(hda, hda->drm_dev->primary)) {
-		DRM_ERROR("HDA debugfs setup failed\n");
-		return -EINVAL;
-	}
+	hda_debugfs_init(hda, hda->drm_dev->primary);
 
 	return 0;
 }
 
 static const struct drm_connector_funcs sti_hda_connector_funcs = {
-	.dpms = drm_atomic_helper_connector_dpms,
 	.fill_modes = drm_helper_probe_single_connector_modes,
-	.detect = sti_hda_connector_detect,
 	.destroy = drm_connector_cleanup,
 	.reset = drm_atomic_helper_connector_reset,
 	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
@@ -714,9 +697,8 @@ static int sti_hda_bind(struct device *dev, struct device *master, void *data)
 
 	bridge->driver_private = hda;
 	bridge->funcs = &sti_hda_bridge_funcs;
-	drm_bridge_attach(drm_dev, bridge);
+	drm_bridge_attach(encoder, bridge, NULL, 0);
 
-	encoder->bridge = bridge;
 	connector->encoder = encoder;
 
 	drm_connector = (struct drm_connector *)connector;
@@ -728,7 +710,7 @@ static int sti_hda_bind(struct device *dev, struct device *master, void *data)
 	drm_connector_helper_add(drm_connector,
 			&sti_hda_connector_helper_funcs);
 
-	err = drm_mode_connector_attach_encoder(drm_connector, encoder);
+	err = drm_connector_attach_encoder(drm_connector, encoder);
 	if (err) {
 		DRM_ERROR("Failed to attach a connector to a encoder\n");
 		goto err_sysfs;
@@ -740,17 +722,12 @@ static int sti_hda_bind(struct device *dev, struct device *master, void *data)
 	return 0;
 
 err_sysfs:
-	drm_bridge_remove(bridge);
 	return -EINVAL;
 }
 
 static void sti_hda_unbind(struct device *dev,
 		struct device *master, void *data)
 {
-	struct sti_hda *hda = dev_get_drvdata(dev);
-	struct drm_device *drm_dev = data;
-
-	hda_debugfs_exit(hda, drm_dev->primary);
 }
 
 static const struct component_ops sti_hda_ops = {
@@ -778,14 +755,14 @@ static int sti_hda_probe(struct platform_device *pdev)
 		DRM_ERROR("Invalid hda resource\n");
 		return -ENOMEM;
 	}
-	hda->regs = devm_ioremap_nocache(dev, res->start, resource_size(res));
+	hda->regs = devm_ioremap(dev, res->start, resource_size(res));
 	if (!hda->regs)
 		return -ENOMEM;
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 			"video-dacs-ctrl");
 	if (res) {
-		hda->video_dacs_ctrl = devm_ioremap_nocache(dev, res->start,
+		hda->video_dacs_ctrl = devm_ioremap(dev, res->start,
 				resource_size(res));
 		if (!hda->video_dacs_ctrl)
 			return -ENOMEM;

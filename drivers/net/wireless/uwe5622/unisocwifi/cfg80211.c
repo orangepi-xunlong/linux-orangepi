@@ -29,7 +29,7 @@
 #include "work.h"
 #include "ibss.h"
 #include "intf_ops.h"
-#include "softap_hook.h"
+#include "dbg_ini_util.h"
 #include "tx_msg.h"
 #ifdef RND_MAC_SUPPORT
 #include "rnd_mac_addr.h"
@@ -822,11 +822,15 @@ static int sprdwl_cfg80211_start_ap(struct wiphy *wiphy,
 				    struct cfg80211_ap_settings *settings)
 {
 	struct sprdwl_vif *vif = netdev_priv(ndev);
+	struct sprdwl_intf *intf = (struct sprdwl_intf *)vif->priv->hw_priv;
 	struct cfg80211_beacon_data *beacon = &settings->beacon;
 	struct ieee80211_mgmt *mgmt;
 	u16 mgmt_len, index = 0, hidden_index;
 	u8 *data = NULL;
 	int ret;
+	u16 chn = 0;
+	u8 *head, *tail;
+	int head_len, tail_len;
 
 	wl_ndev_log(L_DBG, ndev, "%s\n", __func__);
 
@@ -849,29 +853,69 @@ static int sprdwl_cfg80211_start_ap(struct wiphy *wiphy,
 	strncpy(vif->ssid, settings->ssid, settings->ssid_len);
 	vif->ssid_len = settings->ssid_len;
 
-	sprdwl_hook_reset_channel(wiphy, settings);
+#ifdef STA_SOFTAP_SCC_MODE
+	chn = intf->sta_home_channel;
+#endif
+	if (intf->ini_cfg.softap_channel > 0)
+		chn = intf->ini_cfg.softap_channel;
+
+	if (NULL == beacon->head || NULL == beacon->tail) {
+		wl_ndev_log(L_ERR, ndev, "%s Beacon info is NULL\n", __func__);
+		return -EINVAL;
+	}
+
+	head = kmalloc(settings->beacon.head_len + 32, GFP_KERNEL);
+	if (head == NULL) {
+		wl_ndev_log(L_ERR, ndev, "%s malloc failed!\n", __func__);
+		return -ENOMEM;
+	}
+
+	tail = kmalloc(settings->beacon.tail_len + 32, GFP_KERNEL);
+	if (tail == NULL) {
+		wl_ndev_log(L_ERR, ndev, "%s malloc failed!\n", __func__);
+		kfree(head);
+		return -ENOMEM;
+	}
+
+	if (is_valid_channel(wiphy, chn)) {
+		head_len = sprdwl_dbg_new_beacon_head(beacon->head,
+				beacon->head_len, head, chn);
+
+		tail_len = sprdwl_dbg_new_beacon_tail(beacon->tail,
+				beacon->tail_len, tail, chn);
+	} else {
+		memcpy(head, beacon->head, beacon->head_len);
+		memcpy(tail, beacon->tail, beacon->tail_len);
+		head_len = beacon->head_len;
+		tail_len = beacon->tail_len;
+	}
 
 	sprdwl_change_beacon(vif, beacon);
 
-	if (!beacon->head)
-		return -EINVAL;
+	if (!beacon->head) {
+		ret = -EINVAL;
+		goto err_start;
+	}
 
-	mgmt_len = beacon->head_len;
+	mgmt_len = head_len;
 	/* add 1 byte for hidden ssid flag */
 	mgmt_len += 1;
 	if (settings->hidden_ssid != 0)
 		mgmt_len += settings->ssid_len;
 
 	if (beacon->tail)
-		mgmt_len += beacon->tail_len;
+		mgmt_len += tail_len;
 
 	mgmt = kmalloc(mgmt_len, GFP_KERNEL);
-	if (!mgmt)
-		return -ENOMEM;
+	if (!mgmt) {
+		ret = -ENOMEM;
+		goto err_start;
+	}
+
 	data = (u8 *)mgmt;
 
 #define SSID_LEN_OFFSET		(37)
-	memcpy(data, beacon->head, SSID_LEN_OFFSET);
+	memcpy(data, head, SSID_LEN_OFFSET);
 	index += SSID_LEN_OFFSET;
 	/* modify ssid_len */
 	*(data + index) = (u8)(settings->ssid_len + 1);
@@ -888,17 +932,18 @@ static int sprdwl_cfg80211_start_ap(struct wiphy *wiphy,
 	else
 		hidden_index = index;
 
-	memcpy(data + index, beacon->head + hidden_index - 1,
-	       beacon->head_len + 1 - hidden_index);
+	memcpy(data + index, head + hidden_index - 1,
+	       head_len + 1 - hidden_index);
 
 	if (beacon->tail)
-		memcpy(data + beacon->head_len + 1 +
+		memcpy(data + head_len + 1 +
 			(settings->hidden_ssid != 0 ? settings->ssid_len : 0),
-		       beacon->tail, beacon->tail_len);
+		       tail, tail_len);
 
 	ret = sprdwl_start_ap(vif->priv, vif->ctx_id, (unsigned char *)mgmt,
 			      mgmt_len);
 	kfree(mgmt);
+
 #ifdef DFS_MASTER
 	if (!netif_carrier_ok(vif->ndev))
 		netif_carrier_on(vif->ndev);
@@ -909,6 +954,10 @@ static int sprdwl_cfg80211_start_ap(struct wiphy *wiphy,
 		wl_ndev_log(L_ERR, ndev, "%s failed to start AP!\n", __func__);
 	else
 		netif_carrier_on(vif->ndev);
+
+err_start:
+	kfree(head);
+	kfree(tail);
 
 	return ret;
 }
@@ -1174,7 +1223,7 @@ void sprdwl_report_softap(struct sprdwl_vif *vif, u8 is_connect, u8 *addr,
 }
 
 /* Station related stuff */
-static void sprdwl_cancel_scan(struct sprdwl_vif *vif)
+void sprdwl_cancel_scan(struct sprdwl_vif *vif)
 {
 	struct sprdwl_priv *priv = vif->priv;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0)
@@ -1222,7 +1271,7 @@ static void sprdwl_cancel_scan(struct sprdwl_vif *vif)
 #endif
 }
 
-static void sprdwl_cancel_sched_scan(struct sprdwl_vif *vif)
+void sprdwl_cancel_sched_scan(struct sprdwl_vif *vif)
 {
 	struct sprdwl_priv *priv = vif->priv;
 
@@ -1358,8 +1407,14 @@ static int sprdwl_cfg80211_scan(struct wiphy *wiphy,
 #endif
 	struct sprdwl_intf *intf;
 	intf = (struct sprdwl_intf *)(priv->hw_priv);
+
+#ifndef CP2_RESET_SUPPORT
 	if (intf->cp_asserted)
 		return -EIO;
+#else
+	if (intf->cp_asserted || priv->sync.scan_not_allowed)
+		return -EIO;
+#endif
 
 	wl_ndev_log(L_DBG, vif->ndev, "%s n_channels %u\n", __func__,
 		    request->n_channels);
@@ -1379,7 +1434,7 @@ static int sprdwl_cfg80211_scan(struct wiphy *wiphy,
 	if (vif->mode == SPRDWL_MODE_STATION) {
 		if (!random_mac_set) {
 			random_mac_addr(rand_addr);
-			random_mac_set = 1;
+			random_mac_set = SPRDWL_ENABLE_SCAN_RANDOM_ADDR;
 		}
 		if (flags & (1<<3)) {
 			random_mac_flag = 1;
@@ -1388,7 +1443,7 @@ static int sprdwl_cfg80211_scan(struct wiphy *wiphy,
 			wl_info("random mac addr: %pM\n", rand_addr);
 		} else {
 			wl_info("random mac feature disabled\n");
-			random_mac_flag = 0;
+			random_mac_flag = SPRDWL_DISABLE_SCAN_RANDOM_ADDR;
 		}
 		if (random_mac_flag != old_mac_flag) {
 			old_mac_flag = random_mac_flag;
@@ -1564,7 +1619,7 @@ static int sprdwl_cfg80211_sched_scan_start(struct wiphy *wiphy,
 	sscan_buf = kzalloc(sizeof(*sscan_buf), GFP_KERNEL);
 	if (!sscan_buf)
 		return -ENOMEM;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 83)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0)
 	scan_plans = request->scan_plans;
 	sscan_buf->interval = scan_plans->interval;
 #else
@@ -1666,6 +1721,20 @@ static int sprdwl_cfg80211_sched_scan_stop(struct wiphy *wiphy,
 #ifdef SYNC_DISCONNECT
 void sprdwl_disconnect_handle(struct sprdwl_vif *vif)
 {
+	u16 reason_code = 0;
+	if ((vif->sm_state == SPRDWL_CONNECTED) ||
+			(vif->sm_state == SPRDWL_DISCONNECTING)) {
+		cfg80211_disconnected(vif->ndev, reason_code,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 83)
+			NULL, 0, true, GFP_KERNEL);
+#else
+			NULL, 0, GFP_KERNEL);
+#endif
+		wl_ndev_log(L_DBG, vif->ndev,
+			"%s %s, reason_code %d\n", __func__,
+			vif->ssid, reason_code);
+	}
+
 	vif->sm_state = SPRDWL_DISCONNECTED;
 
 	/* Clear bssid & ssid */
@@ -1693,10 +1762,12 @@ static int sprdwl_cfg80211_disconnect(struct wiphy *wiphy,
 	enum sm_state old_state = vif->sm_state;
 	int ret;
 #ifdef SYNC_DISCONNECT
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 9, 60)
 	u32 msec;
 	ktime_t kt;
 #endif
+#ifdef STA_SOFTAP_SCC_MODE
+	struct sprdwl_intf *intf = (struct sprdwl_intf *)vif->priv->hw_priv;
+	intf->sta_home_channel = 0;
 #endif
 
 	wl_ndev_log(L_DBG, ndev, "%s %s reason: %d\n", __func__, vif->ssid,
@@ -1713,17 +1784,19 @@ static int sprdwl_cfg80211_disconnect(struct wiphy *wiphy,
 		goto out;
 	}
 #ifdef SYNC_DISCONNECT
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 9, 60)
 	if (!sprdwl_sync_disconnect_event(vif, msecs_to_jiffies(1000))) {
 		kt = ktime_get();
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
+		msec = (u32)(div_u64(kt, NSEC_PER_MSEC));
+#else
 		msec = (u32)(div_u64(kt.tv64, NSEC_PER_MSEC));
+#endif
 		wl_err("Wait disconnect event timeout. [mstime = %d]\n",
 		       cpu_to_le32(msec));
 	} else {
 		sprdwl_disconnect_handle(vif);
 	}
 	atomic_set(&vif->sync_disconnect_event, 0);
-#endif
 #endif
 	trace_deauth_reason(vif->mode, reason_code, LOCAL_EVENT);
 out:
@@ -1734,10 +1807,14 @@ static int sprdwl_cfg80211_connect(struct wiphy *wiphy, struct net_device *ndev,
 				   struct cfg80211_connect_params *sme)
 {
 	struct sprdwl_vif *vif = netdev_priv(ndev);
+#ifdef STA_SOFTAP_SCC_MODE
+	struct sprdwl_intf *intf = (struct sprdwl_intf *)vif->priv->hw_priv;
+#endif
 	struct sprdwl_cmd_connect con;
 	enum sm_state old_state = vif->sm_state;
 	int is_wep = (sme->crypto.cipher_group == WLAN_CIPHER_SUITE_WEP40) ||
 	    (sme->crypto.cipher_group == WLAN_CIPHER_SUITE_WEP104);
+	int random_mac_flag;
 	int ret = -EPERM;
 
 	/*workround for bug 795430*/
@@ -1745,6 +1822,16 @@ static int sprdwl_cfg80211_connect(struct wiphy *wiphy, struct net_device *ndev,
 		wl_err("%s, %d, error!mode%d connect after closed not allowed",
 		       __func__, __LINE__, vif->mode);
 		goto err;
+	}
+
+	if (vif->mode == SPRDWL_MODE_STATION) {
+		if (vif->has_rand_mac) {
+			 random_mac_flag = SPRDWL_CONNECT_RANDOM_ADDR;
+			 ret = wlan_cmd_set_rand_mac(vif->priv, vif->ctx_id,
+					       random_mac_flag, vif->random_mac);
+			 if (ret)
+				 netdev_info(ndev, "Set random mac failed!\n");
+		}
 	}
 
 	memset(&con, 0, sizeof(con));
@@ -1845,6 +1932,9 @@ static int sprdwl_cfg80211_connect(struct wiphy *wiphy, struct net_device *ndev,
 
 	/* Auth RX unencrypted EAPOL is not implemented, do nothing */
 	/* Set channel */
+#ifdef STA_SOFTAP_SCC_MODE
+	intf->sta_home_channel = 0;
+#endif
 	if (!sme->channel) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 15, 0)
 		if (sme->channel_hint) {
@@ -1853,6 +1943,10 @@ static int sprdwl_cfg80211_connect(struct wiphy *wiphy, struct net_device *ndev,
 			con.channel =
 			    ieee80211_frequency_to_channel(center_freq);
 			wl_ndev_log(L_DBG, ndev, "channel_hint %d\n", con.channel);
+#ifdef STA_SOFTAP_SCC_MODE
+			if (sme->channel_hint->flags != IEEE80211_CHAN_RADAR)
+				intf->sta_home_channel = con.channel;
+#endif
 		} else
 #endif
 		{
@@ -1862,6 +1956,10 @@ static int sprdwl_cfg80211_connect(struct wiphy *wiphy, struct net_device *ndev,
 		con.channel =
 		    ieee80211_frequency_to_channel(sme->channel->center_freq);
 		wl_ndev_log(L_DBG, ndev, "channel %d\n", con.channel);
+#ifdef STA_SOFTAP_SCC_MODE
+		if (sme->channel->flags != IEEE80211_CHAN_RADAR)
+			intf->sta_home_channel = con.channel;
+#endif
 	}
 
 	/* Set BSSID */
@@ -1928,6 +2026,9 @@ static int sprdwl_cfg80211_connect(struct wiphy *wiphy, struct net_device *ndev,
 err:
 	wl_ndev_log(L_ERR, ndev, "%s failed\n", __func__);
 	vif->sm_state = old_state;
+#ifdef STA_SOFTAP_SCC_MODE
+	intf->sta_home_channel = 0;
+#endif
 	return ret;
 }
 
@@ -2075,7 +2176,11 @@ void sprdwl_report_scan_result(struct sprdwl_vif *vif, u16 chan, s16 rssi,
 	struct ieee80211_mgmt *mgmt = (struct ieee80211_mgmt *)frame;
 	struct ieee80211_channel *channel;
 	struct cfg80211_bss *bss;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 20, 0)
 	struct timespec ts;
+#else
+	struct timespec64 ts;
+#endif
 	u16 capability, beacon_interval;
 	u32 freq;
 	s32 signal;
@@ -2123,7 +2228,11 @@ void sprdwl_report_scan_result(struct sprdwl_vif *vif, u16 chan, s16 rssi,
 	ie = mgmt->u.probe_resp.variable;
 	ielen = len - offsetof(struct ieee80211_mgmt, u.probe_resp.variable);
 	/* framework use system bootup time */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 20, 0)
 	get_monotonic_boottime(&ts);
+#else
+	ktime_get_boottime_ts64(&ts);
+#endif
 	tsf = (u64)ts.tv_sec * 1000000 + div_u64(ts.tv_nsec, 1000);
 	beacon_interval = le16_to_cpu(mgmt->u.probe_resp.beacon_int);
 	capability = le16_to_cpu(mgmt->u.probe_resp.capab_info);
@@ -2172,7 +2281,11 @@ void sprdwl_report_connection(struct sprdwl_vif *vif,
 	struct ieee80211_channel *channel;
 	struct ieee80211_mgmt *mgmt;
 	struct cfg80211_bss *bss = NULL;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 20, 0)
 	struct timespec ts;
+#else
+	struct timespec64 ts;
+#endif
 #ifdef WMMAC_WFA_CERTIFICATION
 	struct wmm_params_element *wmm_params;
 	int i;
@@ -2182,6 +2295,9 @@ void sprdwl_report_connection(struct sprdwl_vif *vif,
 	u64 tsf;
 	u8 *ie;
 	size_t ielen;
+#ifdef STA_SOFTAP_SCC_MODE
+	struct sprdwl_intf *intf = (struct sprdwl_intf *)vif->priv->hw_priv;
+#endif
 
 	if (vif->sm_state != SPRDWL_CONNECTING &&
 	    vif->sm_state != SPRDWL_CONNECTED) {
@@ -2245,7 +2361,11 @@ void sprdwl_report_connection(struct sprdwl_vif *vif,
 		ielen = conn_info->bea_ie_len - offsetof(struct ieee80211_mgmt,
 						 u.probe_resp.variable);
 		/* framework use system bootup time */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 20, 0)
 		get_monotonic_boottime(&ts);
+#else
+		ktime_get_boottime_ts64(&ts);
+#endif
 		tsf = (u64)ts.tv_sec * 1000000 + div_u64(ts.tv_nsec, 1000);
 		beacon_interval = le16_to_cpu(mgmt->u.probe_resp.beacon_int);
 		capability = le16_to_cpu(mgmt->u.probe_resp.capab_info);
@@ -2349,6 +2469,9 @@ void sprdwl_report_connection(struct sprdwl_vif *vif,
 			"connect" : "roam", vif->ssid, vif->bssid);
 	return;
 err:
+#ifdef STA_SOFTAP_SCC_MODE
+	intf->sta_home_channel = 0;
+#endif
 	if (status_code == WLAN_STATUS_SUCCESS)
 		status_code = WLAN_STATUS_UNSPECIFIED_FAILURE;
 	if (vif->sm_state == SPRDWL_CONNECTING)
@@ -2591,12 +2714,17 @@ static int sprdwl_cfg80211_mgmt_tx(struct wiphy *wiphy,
 
 static void sprdwl_cfg80211_mgmt_frame_register(struct wiphy *wiphy,
 						struct wireless_dev *wdev,
-						u16 frame_type, bool reg)
+						struct mgmt_frame_regs *upd)
 {
 	struct sprdwl_vif *vif = container_of(wdev, struct sprdwl_vif, wdev);
 	struct sprdwl_work *misc_work;
 	struct sprdwl_reg_mgmt *reg_mgmt;
 	u16 mgmt_type;
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+	u16 frame_type = BIT(upd->global_stypes << 4);
+	bool reg = false;
+#endif
 
 	if (vif->mode == SPRDWL_MODE_NONE)
 		return;
@@ -3152,7 +3280,7 @@ static struct cfg80211_ops sprdwl_cfg80211_ops = {
 	.remain_on_channel = sprdwl_cfg80211_remain_on_channel,
 	.cancel_remain_on_channel = sprdwl_cfg80211_cancel_remain_on_channel,
 	.mgmt_tx = sprdwl_cfg80211_mgmt_tx,
-	.mgmt_frame_register = sprdwl_cfg80211_mgmt_frame_register,
+	.update_mgmt_frame_registrations = sprdwl_cfg80211_mgmt_frame_register,
 	.set_power_mgmt = sprdwl_cfg80211_set_power_mgmt,
 	.set_cqm_rssi_config = sprdwl_cfg80211_set_cqm_rssi_config,
 	.sched_scan_start = sprdwl_cfg80211_sched_scan_start,
@@ -3230,6 +3358,7 @@ static void sprdwl_reg_notify(struct wiphy *wiphy,
 			      struct regulatory_request *request)
 {
 	struct sprdwl_priv *priv = wiphy_priv(wiphy);
+	struct sprdwl_intf *intf = (struct sprdwl_intf *)priv->hw_priv;
 	struct ieee80211_supported_band *sband;
 	struct ieee80211_channel *chan;
 	const struct ieee80211_freq_range *freq_range;
@@ -3307,6 +3436,10 @@ static void sprdwl_reg_notify(struct wiphy *wiphy,
 			if (chan->flags & IEEE80211_CHAN_DISABLED)
 				continue;
 
+#ifdef STA_SOFTAP_SCC_MODE
+			if (intf->sta_home_channel && chan->flags & IEEE80211_CHAN_RADAR)
+				intf->sta_home_channel = 0;
+#endif
 			reg_rule =
 			    freq_reg_info(wiphy, MHZ_TO_KHZ(chan->center_freq));
 			if (IS_ERR(reg_rule))
@@ -3341,10 +3474,13 @@ static void sprdwl_reg_notify(struct wiphy *wiphy,
 	}
 }
 #else
-static void sprdwl_reg_notify(struct wiphy *wiphy,
+void sprdwl_reg_notify(struct wiphy *wiphy,
 			      struct regulatory_request *request)
 {
 	struct sprdwl_priv *priv = wiphy_priv(wiphy);
+#ifdef STA_SOFTAP_SCC_MODE
+	struct sprdwl_intf *intf = (struct sprdwl_intf *)priv->hw_priv;
+#endif
 	struct ieee80211_supported_band *sband;
 	struct ieee80211_channel *chan;
 	const struct ieee80211_freq_range *freq_range;
@@ -3363,6 +3499,11 @@ static void sprdwl_reg_notify(struct wiphy *wiphy,
 		wl_err("%s(): Wiphy = NULL\n", __func__);
 		return;
 	}
+
+#ifdef CP2_RESET_SUPPORT
+	if(NL80211_REGDOM_SET_BY_COUNTRY_IE == request->initiator)
+		memcpy(&priv->sync.request, request, sizeof(struct regulatory_request));
+#endif
 
 	pRegdom = getRegdomainFromSprdDB(request->alpha2);
 	if (!pRegdom) {
@@ -3441,6 +3582,11 @@ static void sprdwl_reg_notify(struct wiphy *wiphy,
 
 			if (chan->flags & IEEE80211_CHAN_DISABLED)
 				continue;
+
+#ifdef STA_SOFTAP_SCC_MODE
+			if (intf->sta_home_channel && chan->flags & IEEE80211_CHAN_RADAR)
+				intf->sta_home_channel = 0;
+#endif
 
 			reg_rule =
 			     sprd_freq_reg_info_regd(MHZ_TO_KHZ(chan->center_freq), pRegdom);
@@ -3617,25 +3763,6 @@ void sprdwl_setup_wiphy(struct wiphy *wiphy, struct sprdwl_priv *priv)
 #endif
 	wiphy->features |= NL80211_FEATURE_CELL_BASE_REG_HINTS;
 
-	if (priv->fw_std & SPRDWL_STD_11D) {
-		wl_info("\tIEEE802.11d supported\n");
-		wiphy->reg_notifier = sprdwl_reg_notify;
-
-#if !defined (CONFIG_CFG80211_INTERNAL_REGDB) || defined(CUSTOM_REGDOMAIN)
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0))
-	wiphy->regulatory_flags |= REGULATORY_CUSTOM_REG;
-#else
-	wiphy->flags |= WIPHY_FLAG_CUSTOM_REGULATORY;
-#endif
-		alpha2[0] = '0';
-		alpha2[1] = '0';
-		pRegdom = getRegdomainFromSprdDB((char *)alpha2);
-		if (pRegdom) {
-			apply_custom_regulatory(wiphy, pRegdom);
-			ShowChannel(wiphy);
-		}
-#endif
-	}
 #if 0
 	if (priv->fw_std & SPRDWL_STD_11E) {
 		wl_info("\tIEEE802.11e supported\n");
@@ -3682,6 +3809,26 @@ void sprdwl_setup_wiphy(struct wiphy *wiphy, struct sprdwl_priv *priv)
 #endif
 			sprdwl_vht_cap_update(vht_info, priv);
 		}
+	}
+
+	if (priv->fw_std & SPRDWL_STD_11D) {
+		wl_info("\tIEEE802.11d supported\n");
+		wiphy->reg_notifier = sprdwl_reg_notify;
+
+#if !defined (CONFIG_CFG80211_INTERNAL_REGDB) || defined(CUSTOM_REGDOMAIN)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0))
+	wiphy->regulatory_flags |= REGULATORY_CUSTOM_REG;
+#else
+	wiphy->flags |= WIPHY_FLAG_CUSTOM_REGULATORY;
+#endif
+		alpha2[0] = '0';
+		alpha2[1] = '0';
+		pRegdom = getRegdomainFromSprdDB((char *)alpha2);
+		if (pRegdom) {
+			apply_custom_regulatory(wiphy, pRegdom);
+			ShowChannel(wiphy);
+		}
+#endif
 	}
 
 	if (priv->fw_capa & SPRDWL_CAPA_MCC) {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ispvideo.c
  *
@@ -7,13 +8,8 @@
  *
  * Contacts: Laurent Pinchart <laurent.pinchart@ideasonboard.com>
  *	     Sakari Ailus <sakari.ailus@iki.fi>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
-#include <asm/cacheflush.h>
 #include <linux/clk.h>
 #include <linux/mm.h>
 #include <linux/module.h>
@@ -225,22 +221,22 @@ isp_video_remote_subdev(struct isp_video *video, u32 *pad)
 static int isp_video_get_graph_data(struct isp_video *video,
 				    struct isp_pipeline *pipe)
 {
-	struct media_entity_graph graph;
+	struct media_graph graph;
 	struct media_entity *entity = &video->video.entity;
 	struct media_device *mdev = entity->graph_obj.mdev;
 	struct isp_video *far_end = NULL;
 	int ret;
 
 	mutex_lock(&mdev->graph_mutex);
-	ret = media_entity_graph_walk_init(&graph, entity->graph_obj.mdev);
+	ret = media_graph_walk_init(&graph, mdev);
 	if (ret) {
 		mutex_unlock(&mdev->graph_mutex);
 		return ret;
 	}
 
-	media_entity_graph_walk_start(&graph, entity);
+	media_graph_walk_start(&graph, entity);
 
-	while ((entity = media_entity_graph_walk_next(&graph))) {
+	while ((entity = media_graph_walk_next(&graph))) {
 		struct isp_video *__video;
 
 		media_entity_enum_set(&pipe->ent_enum, entity);
@@ -261,7 +257,7 @@ static int isp_video_get_graph_data(struct isp_video *video,
 
 	mutex_unlock(&mdev->graph_mutex);
 
-	media_entity_graph_walk_cleanup(&graph);
+	media_graph_walk_cleanup(&graph);
 
 	if (video->type == V4L2_BUF_TYPE_VIDEO_CAPTURE) {
 		pipe->input = far_end;
@@ -654,17 +650,13 @@ isp_video_querycap(struct file *file, void *fh, struct v4l2_capability *cap)
 {
 	struct isp_video *video = video_drvdata(file);
 
-	strlcpy(cap->driver, ISP_VIDEO_DRIVER_NAME, sizeof(cap->driver));
-	strlcpy(cap->card, video->video.name, sizeof(cap->card));
-	strlcpy(cap->bus_info, "media", sizeof(cap->bus_info));
+	strscpy(cap->driver, ISP_VIDEO_DRIVER_NAME, sizeof(cap->driver));
+	strscpy(cap->card, video->video.name, sizeof(cap->card));
+	strscpy(cap->bus_info, "media", sizeof(cap->bus_info));
 
 	cap->capabilities = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_VIDEO_OUTPUT
 		| V4L2_CAP_STREAMING | V4L2_CAP_DEVICE_CAPS;
 
-	if (video->type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
-		cap->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING;
-	else
-		cap->device_caps = V4L2_CAP_VIDEO_OUTPUT | V4L2_CAP_STREAMING;
 
 	return 0;
 }
@@ -711,7 +703,7 @@ isp_video_set_format(struct file *file, void *fh, struct v4l2_format *format)
 		 * requested.
 		 */
 		format->fmt.pix.field = V4L2_FIELD_INTERLACED_TB;
-		/* Fall-through */
+		fallthrough;
 	case V4L2_FIELD_INTERLACED_TB:
 	case V4L2_FIELD_INTERLACED_BT:
 		/* Interlaced orders are only supported at the CCDC output. */
@@ -940,7 +932,7 @@ isp_video_qbuf(struct file *file, void *fh, struct v4l2_buffer *b)
 	int ret;
 
 	mutex_lock(&video->queue_lock);
-	ret = vb2_qbuf(&vfh->queue, b);
+	ret = vb2_qbuf(&vfh->queue, video->video.v4l2_dev->mdev, b);
 	mutex_unlock(&video->queue_lock);
 
 	return ret;
@@ -1027,8 +1019,8 @@ static int isp_video_check_external_subdevs(struct isp_video *video,
 
 	ctrls.count = 1;
 	ctrls.controls = &ctrl;
-
-	ret = v4l2_g_ext_ctrls(pipe->external->ctrl_handler, &ctrls);
+	ret = v4l2_g_ext_ctrls(pipe->external->ctrl_handler, &video->video,
+			       NULL, &ctrls);
 	if (ret < 0) {
 		dev_warn(isp->dev, "no pixel rate control in subdev %s\n",
 			 pipe->external->name);
@@ -1112,7 +1104,7 @@ isp_video_streamon(struct file *file, void *fh, enum v4l2_buf_type type)
 	pipe->l3_ick = clk_get_rate(video->isp->clock[ISP_CLK_L3_ICK]);
 	pipe->max_rate = pipe->l3_ick;
 
-	ret = media_entity_pipeline_start(&video->video.entity, &pipe->pipe);
+	ret = media_pipeline_start(&video->video.entity, &pipe->pipe);
 	if (ret < 0)
 		goto err_pipeline_start;
 
@@ -1169,7 +1161,7 @@ isp_video_streamon(struct file *file, void *fh, enum v4l2_buf_type type)
 	return 0;
 
 err_check_format:
-	media_entity_pipeline_stop(&video->video.entity);
+	media_pipeline_stop(&video->video.entity);
 err_pipeline_start:
 	/* TODO: Implement PM QoS */
 	/* The DMA queue must be emptied here, otherwise CCDC interrupts that
@@ -1236,7 +1228,7 @@ isp_video_streamoff(struct file *file, void *fh, enum v4l2_buf_type type)
 	video->error = false;
 
 	/* TODO: Implement PM QoS */
-	media_entity_pipeline_stop(&video->video.entity);
+	media_pipeline_stop(&video->video.entity);
 
 	media_entity_enum_cleanup(&pipe->ent_enum);
 
@@ -1251,7 +1243,7 @@ isp_video_enum_input(struct file *file, void *fh, struct v4l2_input *input)
 	if (input->index > 0)
 		return -EINVAL;
 
-	strlcpy(input->name, "camera", sizeof(input->name));
+	strscpy(input->name, "camera", sizeof(input->name));
 	input->type = V4L2_INPUT_TYPE_CAMERA;
 
 	return 0;
@@ -1318,7 +1310,7 @@ static int isp_video_open(struct file *file)
 		goto done;
 	}
 
-	ret = v4l2_pipeline_pm_use(&video->video.entity, 1);
+	ret = v4l2_pipeline_pm_get(&video->video.entity);
 	if (ret < 0) {
 		omap3isp_put(video->isp);
 		goto done;
@@ -1350,6 +1342,7 @@ static int isp_video_open(struct file *file)
 done:
 	if (ret < 0) {
 		v4l2_fh_del(&handle->vfh);
+		v4l2_fh_exit(&handle->vfh);
 		kfree(handle);
 	}
 
@@ -1369,10 +1362,11 @@ static int isp_video_release(struct file *file)
 	vb2_queue_release(&handle->queue);
 	mutex_unlock(&video->queue_lock);
 
-	v4l2_pipeline_pm_use(&video->video.entity, 0);
+	v4l2_pipeline_pm_put(&video->video.entity);
 
 	/* Release the file handle. */
 	v4l2_fh_del(vfh);
+	v4l2_fh_exit(vfh);
 	kfree(handle);
 	file->private_data = NULL;
 
@@ -1381,11 +1375,11 @@ static int isp_video_release(struct file *file)
 	return 0;
 }
 
-static unsigned int isp_video_poll(struct file *file, poll_table *wait)
+static __poll_t isp_video_poll(struct file *file, poll_table *wait)
 {
 	struct isp_video_fh *vfh = to_isp_video_fh(file->private_data);
 	struct isp_video *video = video_drvdata(file);
-	int ret;
+	__poll_t ret;
 
 	mutex_lock(&video->queue_lock);
 	ret = vb2_poll(&vfh->queue, file, wait);
@@ -1401,7 +1395,7 @@ static int isp_video_mmap(struct file *file, struct vm_area_struct *vma)
 	return vb2_mmap(&vfh->queue, vma);
 }
 
-static struct v4l2_file_operations isp_video_fops = {
+static const struct v4l2_file_operations isp_video_fops = {
 	.owner = THIS_MODULE,
 	.unlocked_ioctl = video_ioctl2,
 	.open = isp_video_open,
@@ -1458,9 +1452,16 @@ int omap3isp_video_init(struct isp_video *video, const char *name)
 	video->video.fops = &isp_video_fops;
 	snprintf(video->video.name, sizeof(video->video.name),
 		 "OMAP3 ISP %s %s", name, direction);
-	video->video.vfl_type = VFL_TYPE_GRABBER;
+	video->video.vfl_type = VFL_TYPE_VIDEO;
 	video->video.release = video_device_release_empty;
 	video->video.ioctl_ops = &isp_video_ioctl_ops;
+	if (video->type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
+		video->video.device_caps = V4L2_CAP_VIDEO_CAPTURE
+					 | V4L2_CAP_STREAMING;
+	else
+		video->video.device_caps = V4L2_CAP_VIDEO_OUTPUT
+					 | V4L2_CAP_STREAMING;
+
 	video->pipe.stream_state = ISP_PIPELINE_STREAM_STOPPED;
 
 	video_set_drvdata(&video->video, video);
@@ -1482,7 +1483,7 @@ int omap3isp_video_register(struct isp_video *video, struct v4l2_device *vdev)
 
 	video->video.v4l2_dev = vdev;
 
-	ret = video_register_device(&video->video, VFL_TYPE_GRABBER, -1);
+	ret = video_register_device(&video->video, VFL_TYPE_VIDEO, -1);
 	if (ret < 0)
 		dev_err(video->isp->dev,
 			"%s: could not register video device (%d)\n",
@@ -1493,6 +1494,5 @@ int omap3isp_video_register(struct isp_video *video, struct v4l2_device *vdev)
 
 void omap3isp_video_unregister(struct isp_video *video)
 {
-	if (video_is_registered(&video->video))
-		video_unregister_device(&video->video);
+	video_unregister_device(&video->video);
 }

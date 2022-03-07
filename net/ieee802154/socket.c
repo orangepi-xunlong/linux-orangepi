@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * IEEE802154.4 socket interface
  *
  * Copyright 2007, 2008 Siemens AG
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * Written by:
  * Sergey Lapin <slapin@ossfans.org>
@@ -25,6 +17,7 @@
 #include <linux/termios.h>	/* For TIOCOUTQ/INQ */
 #include <linux/list.h>
 #include <linux/slab.h>
+#include <linux/socket.h>
 #include <net/datalink.h>
 #include <net/psnap.h>
 #include <net/sock.h>
@@ -163,10 +156,6 @@ static int ieee802154_sock_ioctl(struct socket *sock, unsigned int cmd,
 	struct sock *sk = sock->sk;
 
 	switch (cmd) {
-	case SIOCGSTAMP:
-		return sock_get_timestamp(sk, (struct timeval __user *)arg);
-	case SIOCGSTAMPNS:
-		return sock_get_timestampns(sk, (struct timespec __user *)arg);
 	case SIOCGIFADDR:
 	case SIOCSIFADDR:
 		return ieee802154_dev_ioctl(sk, (struct ifreq __user *)arg,
@@ -279,7 +268,7 @@ static int raw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 	pr_debug("name = %s, mtu = %u\n", dev->name, mtu);
 
 	if (size > mtu) {
-		pr_debug("size = %Zu, mtu = %u\n", size, mtu);
+		pr_debug("size = %zu, mtu = %u\n", size, mtu);
 		err = -EMSGSIZE;
 		goto out_dev;
 	}
@@ -301,7 +290,6 @@ static int raw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 		goto out_skb;
 
 	skb->dev = dev;
-	skb->sk  = sk;
 	skb->protocol = htons(ETH_P_IEEE802154);
 
 	err = dev_queue_xmit(skb);
@@ -394,7 +382,7 @@ static int raw_getsockopt(struct sock *sk, int level, int optname,
 }
 
 static int raw_setsockopt(struct sock *sk, int level, int optname,
-			  char __user *optval, unsigned int optlen)
+			  sockptr_t optval, unsigned int optlen)
 {
 	return -EOPNOTSUPP;
 }
@@ -426,6 +414,7 @@ static const struct proto_ops ieee802154_raw_ops = {
 	.getname	   = sock_no_getname,
 	.poll		   = datagram_poll,
 	.ioctl		   = ieee802154_sock_ioctl,
+	.gettstamp	   = sock_gettstamp,
 	.listen		   = sock_no_listen,
 	.shutdown	   = sock_no_shutdown,
 	.setsockopt	   = sock_common_setsockopt,
@@ -434,10 +423,6 @@ static const struct proto_ops ieee802154_raw_ops = {
 	.recvmsg	   = sock_common_recvmsg,
 	.mmap		   = sock_no_mmap,
 	.sendpage	   = sock_no_sendpage,
-#ifdef CONFIG_COMPAT
-	.compat_setsockopt = compat_sock_common_setsockopt,
-	.compat_getsockopt = compat_sock_common_getsockopt,
-#endif
 };
 
 /* DGRAM Sockets (802.15.4 dataframes) */
@@ -453,6 +438,7 @@ struct dgram_sock {
 	unsigned int bound:1;
 	unsigned int connected:1;
 	unsigned int want_ack:1;
+	unsigned int want_lqi:1;
 	unsigned int secen:1;
 	unsigned int secen_override:1;
 	unsigned int seclevel:3;
@@ -487,6 +473,7 @@ static int dgram_init(struct sock *sk)
 	struct dgram_sock *ro = dgram_sk(sk);
 
 	ro->want_ack = 1;
+	ro->want_lqi = 0;
 	return 0;
 }
 
@@ -645,7 +632,7 @@ static int dgram_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 	pr_debug("name = %s, mtu = %u\n", dev->name, mtu);
 
 	if (size > mtu) {
-		pr_debug("size = %Zu, mtu = %u\n", size, mtu);
+		pr_debug("size = %zu, mtu = %u\n", size, mtu);
 		err = -EMSGSIZE;
 		goto out_dev;
 	}
@@ -690,7 +677,6 @@ static int dgram_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 		goto out_skb;
 
 	skb->dev = dev;
-	skb->sk  = sk;
 	skb->protocol = htons(ETH_P_IEEE802154);
 
 	err = dev_queue_xmit(skb);
@@ -715,6 +701,7 @@ static int dgram_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 	size_t copied = 0;
 	int err = -EOPNOTSUPP;
 	struct sk_buff *skb;
+	struct dgram_sock *ro = dgram_sk(sk);
 	DECLARE_SOCKADDR(struct sockaddr_ieee802154 *, saddr, msg->msg_name);
 
 	skb = skb_recv_datagram(sk, flags, noblock, &err);
@@ -744,6 +731,13 @@ static int dgram_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		saddr->family = AF_IEEE802154;
 		ieee802154_addr_to_sa(&saddr->addr, &mac_cb(skb)->source);
 		*addr_len = sizeof(*saddr);
+	}
+
+	if (ro->want_lqi) {
+		err = put_cmsg(msg, SOL_IEEE802154, WPAN_WANTLQI,
+			       sizeof(uint8_t), &(mac_cb(skb)->lqi));
+		if (err)
+			goto done;
 	}
 
 	if (flags & MSG_TRUNC)
@@ -849,6 +843,9 @@ static int dgram_getsockopt(struct sock *sk, int level, int optname,
 	case WPAN_WANTACK:
 		val = ro->want_ack;
 		break;
+	case WPAN_WANTLQI:
+		val = ro->want_lqi;
+		break;
 	case WPAN_SECURITY:
 		if (!ro->secen_override)
 			val = WPAN_SECURITY_DEFAULT;
@@ -875,7 +872,7 @@ static int dgram_getsockopt(struct sock *sk, int level, int optname,
 }
 
 static int dgram_setsockopt(struct sock *sk, int level, int optname,
-			    char __user *optval, unsigned int optlen)
+			    sockptr_t optval, unsigned int optlen)
 {
 	struct dgram_sock *ro = dgram_sk(sk);
 	struct net *net = sock_net(sk);
@@ -885,7 +882,7 @@ static int dgram_setsockopt(struct sock *sk, int level, int optname,
 	if (optlen < sizeof(int))
 		return -EINVAL;
 
-	if (get_user(val, (int __user *)optval))
+	if (copy_from_sockptr(&val, optval, sizeof(int)))
 		return -EFAULT;
 
 	lock_sock(sk);
@@ -893,6 +890,9 @@ static int dgram_setsockopt(struct sock *sk, int level, int optname,
 	switch (optname) {
 	case WPAN_WANTACK:
 		ro->want_ack = !!val;
+		break;
+	case WPAN_WANTLQI:
+		ro->want_lqi = !!val;
 		break;
 	case WPAN_SECURITY:
 		if (!ns_capable(net->user_ns, CAP_NET_ADMIN) &&
@@ -973,6 +973,7 @@ static const struct proto_ops ieee802154_dgram_ops = {
 	.getname	   = sock_no_getname,
 	.poll		   = datagram_poll,
 	.ioctl		   = ieee802154_sock_ioctl,
+	.gettstamp	   = sock_gettstamp,
 	.listen		   = sock_no_listen,
 	.shutdown	   = sock_no_shutdown,
 	.setsockopt	   = sock_common_setsockopt,
@@ -981,10 +982,6 @@ static const struct proto_ops ieee802154_dgram_ops = {
 	.recvmsg	   = sock_common_recvmsg,
 	.mmap		   = sock_no_mmap,
 	.sendpage	   = sock_no_sendpage,
-#ifdef CONFIG_COMPAT
-	.compat_setsockopt = compat_sock_common_setsockopt,
-	.compat_getsockopt = compat_sock_common_getsockopt,
-#endif
 };
 
 /* Create a socket. Initialise the socket, blank the addresses
@@ -1003,6 +1000,9 @@ static int ieee802154_create(struct net *net, struct socket *sock,
 
 	switch (sock->type) {
 	case SOCK_RAW:
+		rc = -EPERM;
+		if (!capable(CAP_NET_RAW))
+			goto out;
 		proto = &ieee802154_raw_prot;
 		ops = &ieee802154_raw_ops;
 		break;
@@ -1087,7 +1087,7 @@ static struct packet_type ieee802154_packet_type = {
 
 static int __init af_ieee802154_init(void)
 {
-	int rc = -EINVAL;
+	int rc;
 
 	rc = proto_register(&ieee802154_raw_prot, 1);
 	if (rc)

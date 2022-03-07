@@ -25,7 +25,12 @@
 
 #include <linux/list.h>
 #include <linux/ctype.h>
+#include <drm/drm_crtc.h>
+#include <drm/drm_mode.h>
 #include <drm/drm_mode_object.h>
+#include <drm/drm_util.h>
+
+struct drm_encoder;
 
 /**
  * struct drm_encoder_funcs - encoder controls
@@ -71,7 +76,7 @@ struct drm_encoder_funcs {
 	 *
 	 * This optional hook should be used to unregister the additional
 	 * userspace interfaces attached to the encoder from
-	 * late_unregister(). It is called from drm_dev_unregister(),
+	 * @late_register. It is called from drm_dev_unregister(),
 	 * early in the driver unload sequence to disable userspace access
 	 * before data structures are torndown.
 	 */
@@ -84,7 +89,6 @@ struct drm_encoder_funcs {
  * @head: list management
  * @base: base KMS object
  * @name: human readable name, can be overwritten by the driver
- * @crtc: currently bound CRTC
  * @bridge: bridge associated to the encoder
  * @funcs: control functions
  * @helper_private: mid-layer private data
@@ -136,9 +140,9 @@ struct drm_encoder {
 	 * @possible_crtcs: Bitmask of potential CRTC bindings, using
 	 * drm_crtc_index() as the index into the bitfield. The driver must set
 	 * the bits for all &drm_crtc objects this encoder can be connected to
-	 * before calling drm_encoder_init().
+	 * before calling drm_dev_register().
 	 *
-	 * In reality almost every driver gets this wrong.
+	 * You will get a WARN if you get this wrong in the driver.
 	 *
 	 * Note that since CRTC objects can't be hotplugged the assigned indices
 	 * are stable and hence known before registering all objects.
@@ -150,20 +154,35 @@ struct drm_encoder {
 	 * using drm_encoder_index() as the index into the bitfield. The driver
 	 * must set the bits for all &drm_encoder objects which can clone a
 	 * &drm_crtc together with this encoder before calling
-	 * drm_encoder_init(). Drivers should set the bit representing the
+	 * drm_dev_register(). Drivers should set the bit representing the
 	 * encoder itself, too. Cloning bits should be set such that when two
 	 * encoders can be used in a cloned configuration, they both should have
 	 * each another bits set.
 	 *
-	 * In reality almost every driver gets this wrong.
+	 * As an exception to the above rule if the driver doesn't implement
+	 * any cloning it can leave @possible_clones set to 0. The core will
+	 * automagically fix this up by setting the bit for the encoder itself.
+	 *
+	 * You will get a WARN if you get this wrong in the driver.
 	 *
 	 * Note that since encoder objects can't be hotplugged the assigned indices
 	 * are stable and hence known before registering all objects.
 	 */
 	uint32_t possible_clones;
 
+	/**
+	 * @crtc: Currently bound CRTC, only really meaningful for non-atomic
+	 * drivers.  Atomic drivers should instead check
+	 * &drm_connector_state.crtc.
+	 */
 	struct drm_crtc *crtc;
-	struct drm_bridge *bridge;
+
+	/**
+	 * @bridge_chain: Bridges attached to this encoder. Drivers shall not
+	 * access this field directly.
+	 */
+	struct list_head bridge_chain;
+
 	const struct drm_encoder_funcs *funcs;
 	const struct drm_encoder_helper_funcs *helper_private;
 };
@@ -183,13 +202,22 @@ int drm_encoder_init(struct drm_device *dev,
  * Given a registered encoder, return the index of that encoder within a DRM
  * device's list of encoders.
  */
-static inline unsigned int drm_encoder_index(struct drm_encoder *encoder)
+static inline unsigned int drm_encoder_index(const struct drm_encoder *encoder)
 {
 	return encoder->index;
 }
 
-/* FIXME: We have an include file mess still, drm_crtc.h needs untangling. */
-static inline uint32_t drm_crtc_mask(struct drm_crtc *crtc);
+/**
+ * drm_encoder_mask - find the mask of a registered encoder
+ * @encoder: encoder to find mask for
+ *
+ * Given a registered encoder, return the mask bit of that encoder for an
+ * encoder's possible_clones field.
+ */
+static inline u32 drm_encoder_mask(const struct drm_encoder *encoder)
+{
+	return 1 << drm_encoder_index(encoder);
+}
 
 /**
  * drm_encoder_crtc_ok - can a given crtc drive a given encoder?
@@ -207,17 +235,19 @@ static inline bool drm_encoder_crtc_ok(struct drm_encoder *encoder,
 /**
  * drm_encoder_find - find a &drm_encoder
  * @dev: DRM device
+ * @file_priv: drm file to check for lease against.
  * @id: encoder id
  *
  * Returns the encoder with @id, NULL if it doesn't exist. Simple wrapper around
  * drm_mode_object_find().
  */
 static inline struct drm_encoder *drm_encoder_find(struct drm_device *dev,
+						   struct drm_file *file_priv,
 						   uint32_t id)
 {
 	struct drm_mode_object *mo;
 
-	mo = drm_mode_object_find(dev, id, DRM_MODE_OBJECT_ENCODER);
+	mo = drm_mode_object_find(dev, file_priv, id, DRM_MODE_OBJECT_ENCODER);
 
 	return mo ? obj_to_encoder(mo) : NULL;
 }
@@ -234,7 +264,7 @@ void drm_encoder_cleanup(struct drm_encoder *encoder);
  */
 #define drm_for_each_encoder_mask(encoder, dev, encoder_mask) \
 	list_for_each_entry((encoder), &(dev)->mode_config.encoder_list, head) \
-		for_each_if ((encoder_mask) & (1 << drm_encoder_index(encoder)))
+		for_each_if ((encoder_mask) & drm_encoder_mask(encoder))
 
 /**
  * drm_for_each_encoder - iterate over all encoders

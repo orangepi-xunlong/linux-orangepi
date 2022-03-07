@@ -10,7 +10,7 @@
  * warranty of any kind, whether express or implied.
  */
 
-#include <linux/module.h>
+#include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
@@ -721,6 +721,8 @@ static const struct sunxi_pinctrl_desc sun9i_a80_pinctrl_data = {
 	.pins = sun9i_a80_pins,
 	.npins = ARRAY_SIZE(sun9i_a80_pins),
 	.irq_banks = 5,
+	.disable_strict_mode = true,
+	.io_bias_cfg_variant = BIAS_VOLTAGE_GRP_CONFIG,
 };
 
 static int sun9i_a80_pinctrl_probe(struct platform_device *pdev)
@@ -733,7 +735,6 @@ static const struct of_device_id sun9i_a80_pinctrl_match[] = {
 	{ .compatible = "allwinner,sun9i-a80-pinctrl", },
 	{}
 };
-MODULE_DEVICE_TABLE(of, sun9i_a80_pinctrl_match);
 
 static struct platform_driver sun9i_a80_pinctrl_driver = {
 	.probe	= sun9i_a80_pinctrl_probe,
@@ -742,8 +743,4 @@ static struct platform_driver sun9i_a80_pinctrl_driver = {
 		.of_match_table	= sun9i_a80_pinctrl_match,
 	},
 };
-module_platform_driver(sun9i_a80_pinctrl_driver);
-
-MODULE_AUTHOR("Maxime Ripard <maxime.ripard@free-electrons.com>");
-MODULE_DESCRIPTION("Allwinner A80 pinctrl driver");
-MODULE_LICENSE("GPL");
+builtin_platform_driver(sun9i_a80_pinctrl_driver);

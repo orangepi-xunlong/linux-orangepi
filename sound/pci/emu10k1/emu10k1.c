@@ -1,26 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  The driver for the EMU10K1 (SB Live!) based soundcards
  *  Copyright (c) by Jaroslav Kysela <perex@perex.cz>
  *
  *  Copyright (c) by James Courtier-Dutton <James@superbug.demon.co.uk>
  *      Added support for Audigy 2 Value.
- *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
- * 
  */
 
 #include <linux/init.h>
@@ -37,7 +21,7 @@ MODULE_LICENSE("GPL");
 MODULE_SUPPORTED_DEVICE("{{Creative Labs,SB Live!/PCI512/E-mu APS},"
 	       "{Creative Labs,SB Audigy}}");
 
-#if defined(CONFIG_SND_SEQUENCER) || (defined(MODULE) && defined(CONFIG_SND_SEQUENCER_MODULE))
+#if IS_ENABLED(CONFIG_SND_SEQUENCER)
 #define ENABLE_SYNTH
 #include <sound/emu10k1_synth.h>
 #endif
@@ -140,8 +124,9 @@ static int snd_card_emu10k1_probe(struct pci_dev *pci,
 		goto error;
 	/* This stores the periods table. */
 	if (emu->card_capabilities->ca0151_chip) { /* P16V */	
-		if ((err = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, snd_dma_pci_data(pci),
-					       1024, &emu->p16v_buffer)) < 0)
+		err = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, &pci->dev,
+					  1024, &emu->p16v_buffer);
+		if (err < 0)
 			goto error;
 	}
 
@@ -194,6 +179,9 @@ static int snd_card_emu10k1_probe(struct pci_dev *pci,
 	if ((err = snd_card_register(card)) < 0)
 		goto error;
 
+	if (emu->card_capabilities->emu_model)
+		schedule_delayed_work(&emu->emu1010.firmware_work, 0);
+
 	pci_set_drvdata(pci, card);
 	dev++;
 	return 0;
@@ -219,11 +207,7 @@ static int snd_emu10k1_suspend(struct device *dev)
 
 	emu->suspend = 1;
 
-	snd_pcm_suspend_all(emu->pcm);
-	snd_pcm_suspend_all(emu->pcm_mic);
-	snd_pcm_suspend_all(emu->pcm_efx);
-	snd_pcm_suspend_all(emu->pcm_multi);
-	snd_pcm_suspend_all(emu->pcm_p16v);
+	cancel_delayed_work_sync(&emu->emu1010.firmware_work);
 
 	snd_ac97_suspend(emu->ac97);
 
@@ -252,6 +236,10 @@ static int snd_emu10k1_resume(struct device *dev)
 	emu->suspend = 0;
 
 	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
+
+	if (emu->card_capabilities->emu_model)
+		schedule_delayed_work(&emu->emu1010.firmware_work, 0);
+
 	return 0;
 }
 

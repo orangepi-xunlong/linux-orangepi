@@ -1,7 +1,7 @@
 /*
  * TI81XX Clock Domain data.
  *
- * Copyright (C) 2010 Texas Instruments, Inc. - http://www.ti.com/
+ * Copyright (C) 2010 Texas Instruments, Inc. - https://www.ti.com/
  * Copyright (C) 2013 SKTB SKiT, http://www.skitlab.ru/
  *
  * This program is free software; you can redistribute it and/or
@@ -91,6 +91,14 @@ static struct clockdomain default_l3_slow_81xx_clkdm = {
 	.flags		= CLKDM_CAN_SWSUP,
 };
 
+static struct clockdomain default_sata_81xx_clkdm = {
+	.name		= "default_clkdm",
+	.pwrdm		= { .name = "default_pwrdm" },
+	.cm_inst	= TI81XX_CM_DEFAULT_MOD,
+	.clkdm_offs	= TI816X_CM_DEFAULT_SATA_CLKDM,
+	.flags		= CLKDM_CAN_SWSUP,
+};
+
 /* 816x only */
 
 static struct clockdomain alwon_mpu_816x_clkdm = {
@@ -173,6 +181,7 @@ static struct clockdomain *clockdomains_ti814x[] __initdata = {
 	&mmu_81xx_clkdm,
 	&mmu_cfg_81xx_clkdm,
 	&default_l3_slow_81xx_clkdm,
+	&default_sata_81xx_clkdm,
 	NULL,
 };
 
@@ -200,6 +209,7 @@ static struct clockdomain *clockdomains_ti816x[] __initdata = {
 	&default_ducati_816x_clkdm,
 	&default_pci_816x_clkdm,
 	&default_l3_slow_81xx_clkdm,
+	&default_sata_81xx_clkdm,
 	NULL,
 };
 

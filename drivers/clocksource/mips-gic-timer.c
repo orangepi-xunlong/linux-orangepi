@@ -5,30 +5,69 @@
  *
  * Copyright (C) 2012 MIPS Technologies, Inc.  All rights reserved.
  */
+
+#define pr_fmt(fmt) "mips-gic-timer: " fmt
+
 #include <linux/clk.h>
 #include <linux/clockchips.h>
 #include <linux/cpu.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
-#include <linux/irqchip/mips-gic.h>
 #include <linux/notifier.h>
 #include <linux/of_irq.h>
 #include <linux/percpu.h>
+#include <linux/sched_clock.h>
 #include <linux/smp.h>
 #include <linux/time.h>
+#include <asm/mips-cps.h>
 
 static DEFINE_PER_CPU(struct clock_event_device, gic_clockevent_device);
 static int gic_timer_irq;
 static unsigned int gic_frequency;
+static bool __read_mostly gic_clock_unstable;
+
+static void gic_clocksource_unstable(char *reason);
+
+static u64 notrace gic_read_count_2x32(void)
+{
+	unsigned int hi, hi2, lo;
+
+	do {
+		hi = read_gic_counter_32h();
+		lo = read_gic_counter_32l();
+		hi2 = read_gic_counter_32h();
+	} while (hi2 != hi);
+
+	return (((u64) hi) << 32) + lo;
+}
+
+static u64 notrace gic_read_count_64(void)
+{
+	return read_gic_counter();
+}
+
+static u64 notrace gic_read_count(void)
+{
+	if (mips_cm_is64)
+		return gic_read_count_64();
+
+	return gic_read_count_2x32();
+}
 
 static int gic_next_event(unsigned long delta, struct clock_event_device *evt)
 {
+	int cpu = cpumask_first(evt->cpumask);
 	u64 cnt;
 	int res;
 
 	cnt = gic_read_count();
 	cnt += (u64)delta;
-	gic_write_cpu_compare(cnt, cpumask_first(evt->cpumask));
+	if (cpu == raw_smp_processor_id()) {
+		write_gic_vl_compare(cnt);
+	} else {
+		write_gic_vl_other(mips_cm_vp_id(cpu));
+		write_gic_vo_compare(cnt);
+	}
 	res = ((int)(gic_read_count() - cnt) >= 0) ? -ETIME : 0;
 	return res;
 }
@@ -37,12 +76,12 @@ static irqreturn_t gic_compare_interrupt(int irq, void *dev_id)
 {
 	struct clock_event_device *cd = dev_id;
 
-	gic_write_compare(gic_read_compare());
+	write_gic_vl_compare(read_gic_vl_compare());
 	cd->event_handler(cd);
 	return IRQ_HANDLED;
 }
 
-struct irqaction gic_compare_irqaction = {
+static struct irqaction gic_compare_irqaction = {
 	.handler = gic_compare_interrupt,
 	.percpu_dev_id = &gic_clockevent_device,
 	.flags = IRQF_PERCPU | IRQF_TIMER,
@@ -89,8 +128,10 @@ static int gic_clk_notifier(struct notifier_block *nb, unsigned long action,
 {
 	struct clk_notifier_data *cnd = data;
 
-	if (action == POST_RATE_CHANGE)
+	if (action == POST_RATE_CHANGE) {
+		gic_clocksource_unstable("ref clock rate change");
 		on_each_cpu(gic_update_frequency, (void *)cnd->new_rate, 1);
+	}
 
 	return NOTIFY_OK;
 }
@@ -114,57 +155,60 @@ static int gic_clockevent_init(void)
 
 	ret = setup_percpu_irq(gic_timer_irq, &gic_compare_irqaction);
 	if (ret < 0) {
-		pr_err("GIC timer IRQ %d setup failed: %d\n",
-		       gic_timer_irq, ret);
+		pr_err("IRQ %d setup failed (%d)\n", gic_timer_irq, ret);
 		return ret;
 	}
 
 	cpuhp_setup_state(CPUHP_AP_MIPS_GIC_TIMER_STARTING,
-			  "AP_MIPS_GIC_TIMER_STARTING", gic_starting_cpu,
-			  gic_dying_cpu);
+			  "clockevents/mips/gic/timer:starting",
+			  gic_starting_cpu, gic_dying_cpu);
 	return 0;
 }
 
-static cycle_t gic_hpt_read(struct clocksource *cs)
+static u64 gic_hpt_read(struct clocksource *cs)
 {
 	return gic_read_count();
 }
 
 static struct clocksource gic_clocksource = {
-	.name		= "GIC",
-	.read		= gic_hpt_read,
-	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
-	.archdata	= { .vdso_clock_mode = VDSO_CLOCK_GIC },
+	.name			= "GIC",
+	.read			= gic_hpt_read,
+	.flags			= CLOCK_SOURCE_IS_CONTINUOUS,
+	.vdso_clock_mode	= VDSO_CLOCKMODE_GIC,
 };
+
+static void gic_clocksource_unstable(char *reason)
+{
+	if (gic_clock_unstable)
+		return;
+
+	gic_clock_unstable = true;
+
+	pr_info("GIC timer is unstable due to %s\n", reason);
+
+	clocksource_mark_unstable(&gic_clocksource);
+}
 
 static int __init __gic_clocksource_init(void)
 {
+	unsigned int count_width;
 	int ret;
 
 	/* Set clocksource mask. */
-	gic_clocksource.mask = CLOCKSOURCE_MASK(gic_get_count_width());
+	count_width = read_gic_config() & GIC_CONFIG_COUNTBITS;
+	count_width >>= __ffs(GIC_CONFIG_COUNTBITS);
+	count_width *= 4;
+	count_width += 32;
+	gic_clocksource.mask = CLOCKSOURCE_MASK(count_width);
 
 	/* Calculate a somewhat reasonable rating value. */
 	gic_clocksource.rating = 200 + gic_frequency / 10000000;
 
 	ret = clocksource_register_hz(&gic_clocksource, gic_frequency);
 	if (ret < 0)
-		pr_warn("GIC: Unable to register clocksource\n");
+		pr_warn("Unable to register clocksource\n");
 
 	return ret;
-}
-
-void __init gic_clocksource_init(unsigned int frequency)
-{
-	gic_frequency = frequency;
-	gic_timer_irq = MIPS_GIC_IRQ_BASE +
-		GIC_LOCAL_TO_HWIRQ(GIC_LOCAL_INT_COMPARE);
-
-	__gic_clocksource_init();
-	gic_clockevent_init();
-
-	/* And finally start the counter */
-	gic_start_count();
 }
 
 static int __init gic_clocksource_of_init(struct device_node *node)
@@ -172,30 +216,31 @@ static int __init gic_clocksource_of_init(struct device_node *node)
 	struct clk *clk;
 	int ret;
 
-	if (!gic_present || !node->parent ||
+	if (!mips_gic_present() || !node->parent ||
 	    !of_device_is_compatible(node->parent, "mti,gic")) {
-		pr_warn("No DT definition for the mips gic driver");
+		pr_warn("No DT definition\n");
 		return -ENXIO;
 	}
 
 	clk = of_clk_get(node, 0);
 	if (!IS_ERR(clk)) {
-		if (clk_prepare_enable(clk) < 0) {
-			pr_err("GIC failed to enable clock\n");
+		ret = clk_prepare_enable(clk);
+		if (ret < 0) {
+			pr_err("Failed to enable clock\n");
 			clk_put(clk);
-			return PTR_ERR(clk);
+			return ret;
 		}
 
 		gic_frequency = clk_get_rate(clk);
 	} else if (of_property_read_u32(node, "clock-frequency",
 					&gic_frequency)) {
-		pr_err("GIC frequency not specified.\n");
-		return -EINVAL;;
+		pr_err("Frequency not specified\n");
+		return -EINVAL;
 	}
 	gic_timer_irq = irq_of_parse_and_map(node, 0);
 	if (!gic_timer_irq) {
-		pr_err("GIC timer IRQ not specified.\n");
-		return -EINVAL;;
+		pr_err("IRQ not specified\n");
+		return -EINVAL;
 	}
 
 	ret = __gic_clocksource_init();
@@ -205,13 +250,25 @@ static int __init gic_clocksource_of_init(struct device_node *node)
 	ret = gic_clockevent_init();
 	if (!ret && !IS_ERR(clk)) {
 		if (clk_notifier_register(clk, &gic_clk_nb) < 0)
-			pr_warn("GIC: Unable to register clock notifier\n");
+			pr_warn("Unable to register clock notifier\n");
 	}
 
 	/* And finally start the counter */
-	gic_start_count();
+	clear_gic_config(GIC_CONFIG_COUNTSTOP);
+
+	/*
+	 * It's safe to use the MIPS GIC timer as a sched clock source only if
+	 * its ticks are stable, which is true on either the platforms with
+	 * stable CPU frequency or on the platforms with CM3 and CPU frequency
+	 * change performed by the CPC core clocks divider.
+	 */
+	if (mips_cm_revision() >= CM_REV_CM3 || !IS_ENABLED(CONFIG_CPU_FREQ)) {
+		sched_clock_register(mips_cm_is64 ?
+				     gic_read_count_64 : gic_read_count_2x32,
+				     64, gic_frequency);
+	}
 
 	return 0;
 }
-CLOCKSOURCE_OF_DECLARE(mips_gic_timer, "mti,gic-timer",
+TIMER_OF_DECLARE(mips_gic_timer, "mti,gic-timer",
 		       gic_clocksource_of_init);

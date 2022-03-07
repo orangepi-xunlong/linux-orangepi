@@ -1,22 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Hardware dependent layer
  *  Copyright (c) by Jaroslav Kysela <perex@perex.cz>
- *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 #include <linux/major.h>
@@ -25,6 +10,7 @@
 #include <linux/time.h>
 #include <linux/mutex.h>
 #include <linux/module.h>
+#include <linux/sched/signal.h>
 #include <sound/core.h>
 #include <sound/control.h>
 #include <sound/minors.h>
@@ -84,7 +70,7 @@ static int snd_hwdep_open(struct inode *inode, struct file * file)
 	int major = imajor(inode);
 	struct snd_hwdep *hw;
 	int err;
-	wait_queue_t wait;
+	wait_queue_entry_t wait;
 
 	if (major == snd_major) {
 		hw = snd_lookup_minor_data(iminor(inode),
@@ -176,7 +162,7 @@ static int snd_hwdep_release(struct inode *inode, struct file * file)
 	return err;
 }
 
-static unsigned int snd_hwdep_poll(struct file * file, poll_table * wait)
+static __poll_t snd_hwdep_poll(struct file * file, poll_table * wait)
 {
 	struct snd_hwdep *hw = file->private_data;
 	if (hw->ops.poll)
@@ -217,27 +203,34 @@ static int snd_hwdep_dsp_status(struct snd_hwdep *hw,
 }
 
 static int snd_hwdep_dsp_load(struct snd_hwdep *hw,
-			      struct snd_hwdep_dsp_image __user *_info)
+			      struct snd_hwdep_dsp_image *info)
 {
-	struct snd_hwdep_dsp_image info;
 	int err;
 	
 	if (! hw->ops.dsp_load)
 		return -ENXIO;
-	memset(&info, 0, sizeof(info));
-	if (copy_from_user(&info, _info, sizeof(info)))
-		return -EFAULT;
+	if (info->index >= 32)
+		return -EINVAL;
 	/* check whether the dsp was already loaded */
-	if (hw->dsp_loaded & (1 << info.index))
+	if (hw->dsp_loaded & (1u << info->index))
 		return -EBUSY;
-	if (!access_ok(VERIFY_READ, info.image, info.length))
-		return -EFAULT;
-	err = hw->ops.dsp_load(hw, &info);
+	err = hw->ops.dsp_load(hw, info);
 	if (err < 0)
 		return err;
-	hw->dsp_loaded |= (1 << info.index);
+	hw->dsp_loaded |= (1u << info->index);
 	return 0;
 }
+
+static int snd_hwdep_dsp_load_user(struct snd_hwdep *hw,
+				   struct snd_hwdep_dsp_image __user *_info)
+{
+	struct snd_hwdep_dsp_image info = {};
+
+	if (copy_from_user(&info, _info, sizeof(info)))
+		return -EFAULT;
+	return snd_hwdep_dsp_load(hw, &info);
+}
+
 
 static long snd_hwdep_ioctl(struct file * file, unsigned int cmd,
 			    unsigned long arg)
@@ -252,7 +245,7 @@ static long snd_hwdep_ioctl(struct file * file, unsigned int cmd,
 	case SNDRV_HWDEP_IOCTL_DSP_STATUS:
 		return snd_hwdep_dsp_status(hw, argp);
 	case SNDRV_HWDEP_IOCTL_DSP_LOAD:
-		return snd_hwdep_dsp_load(hw, argp);
+		return snd_hwdep_dsp_load_user(hw, argp);
 	}
 	if (hw->ops.ioctl)
 		return hw->ops.ioctl(hw, file, cmd, arg);
@@ -367,7 +360,7 @@ int snd_hwdep_new(struct snd_card *card, char *id, int device,
 {
 	struct snd_hwdep *hwdep;
 	int err;
-	static struct snd_device_ops ops = {
+	static const struct snd_device_ops ops = {
 		.dev_free = snd_hwdep_dev_free,
 		.dev_register = snd_hwdep_dev_register,
 		.dev_disconnect = snd_hwdep_dev_disconnect,

@@ -29,7 +29,6 @@
 #include <linux/platform_device.h>
 #include <linux/spinlock.h>
 #include <linux/version.h>
-//#include <linux/wakelock.h>
 #include <wcn_bus.h>
 #include "../sdio/sdiohal.h"
 #include "slp_mgr.h"
@@ -182,9 +181,6 @@ int slp_mgr_init(void)
 	mutex_init(&(slp_mgr.wakeup_lock));
 	init_completion(&(slp_mgr.wakeup_ack_completion));
 	slp_pub_int_RegCb();
-#ifdef SLP_MGR_TEST
-	slp_test_init();
-#endif
 
 	SLP_MGR_DBG("%s ok!\n", __func__);
 

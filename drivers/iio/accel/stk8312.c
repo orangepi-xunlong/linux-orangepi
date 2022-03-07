@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /**
  * Sensortek STK8312 3-Axis Accelerometer
  *
  * Copyright (c) 2015, Intel Corporation.
- *
- * This file is subject to the terms and conditions of version 2 of
- * the GNU General Public License. See the file COPYING in the main
- * directory of this archive for more details.
  *
  * IIO driver for STK8312; 7-bit I2C address: 0x3D.
  */
@@ -237,7 +234,6 @@ static int stk8312_data_rdy_trigger_set_state(struct iio_trigger *trig,
 
 static const struct iio_trigger_ops stk8312_trigger_ops = {
 	.set_trigger_state = stk8312_data_rdy_trigger_set_state,
-	.owner = THIS_MODULE,
 };
 
 static int stk8312_set_sample_rate(struct stk8312_data *data, u8 rate)
@@ -421,7 +417,6 @@ static int stk8312_write_raw(struct iio_dev *indio_dev,
 }
 
 static const struct iio_info stk8312_info = {
-	.driver_module		= THIS_MODULE,
 	.read_raw		= stk8312_read_raw,
 	.write_raw		= stk8312_write_raw,
 	.attrs			= &stk8312_attribute_group,
@@ -497,8 +492,6 @@ static int stk8312_buffer_postdisable(struct iio_dev *indio_dev)
 
 static const struct iio_buffer_setup_ops stk8312_buffer_setup_ops = {
 	.preenable   = stk8312_buffer_preenable,
-	.postenable  = iio_triggered_buffer_postenable,
-	.predisable  = iio_triggered_buffer_predisable,
 	.postdisable = stk8312_buffer_postdisable,
 };
 
@@ -520,7 +513,6 @@ static int stk8312_probe(struct i2c_client *client,
 	i2c_set_clientdata(client, indio_dev);
 	mutex_init(&data->lock);
 
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->info = &stk8312_info;
 	indio_dev->name = STK8312_DRIVER_NAME;
 	indio_dev->modes = INDIO_DIRECT_MODE;

@@ -1,6 +1,8 @@
 #ifndef _LOOPCHECK
 #define _LOOPCHECK
 
+#include <linux/types.h>
+
 void switch_cp2_log(bool flag);
 int get_board_ant_num(void);
 void get_cp2_version(void);

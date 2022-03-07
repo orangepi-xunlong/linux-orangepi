@@ -2,8 +2,6 @@
 #define __UWE562X_GLB_H__
 
 #include "../sleep/slp_mgr.h"
-#include "mem_pd_mgr.h"
-#include "rdc_debug.h"
 
 static inline unsigned int reg_value(unsigned int marlin3reg,
 	unsigned int marlin3lreg, unsigned int marlin3ereg) {
@@ -78,11 +76,7 @@ static inline unsigned int reg_value(unsigned int marlin3reg,
 #define MARLIN3E_AC_CHIPID 0x56630002
 #define MARLIN3E_AD_CHIPID 0x56630003
 
-#ifdef CONFIG_WCN_USB
-#define CARD_DETECT_WAIT_MS	30000
-#else   //ELSE CONFIG_WCN_USB
 #define CARD_DETECT_WAIT_MS	3000
-#endif //EOF CONFIG_WCN_USB
 
 #define DCACHE_CMD_ISSUE_START 0X80000000
 #define DCACHE_CMD_CLEAN_ALL 0X00000000

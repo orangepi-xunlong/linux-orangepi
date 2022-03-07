@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
   * icom.c
   *
@@ -6,21 +7,6 @@
   * Serial device driver.
   *
   * Based on code from serial.c
-  *
-  * This program is free software; you can redistribute it and/or modify
-  * it under the terms of the GNU General Public License as published by
-  * the Free Software Foundation; either version 2 of the License, or
-  * (at your option) any later version.
-  *
-  * This program is distributed in the hope that it will be useful,
-  * but WITHOUT ANY WARRANTY; without even the implied warranty of
-  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  * GNU General Public License for more details.
-  *
-  * You should have received a copy of the GNU General Public License
-  * along with this program; if not, write to the Free Software
-  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
-  *
   */
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -53,7 +39,7 @@
 
 #include <asm/io.h>
 #include <asm/irq.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include "icom.h"
 
@@ -152,24 +138,24 @@ static void free_port_memory(struct icom_port *icom_port)
 
 	trace(icom_port, "RET_PORT_MEM", 0);
 	if (icom_port->recv_buf) {
-		pci_free_consistent(dev, 4096, icom_port->recv_buf,
-				    icom_port->recv_buf_pci);
+		dma_free_coherent(&dev->dev, 4096, icom_port->recv_buf,
+				  icom_port->recv_buf_pci);
 		icom_port->recv_buf = NULL;
 	}
 	if (icom_port->xmit_buf) {
-		pci_free_consistent(dev, 4096, icom_port->xmit_buf,
-				    icom_port->xmit_buf_pci);
+		dma_free_coherent(&dev->dev, 4096, icom_port->xmit_buf,
+				  icom_port->xmit_buf_pci);
 		icom_port->xmit_buf = NULL;
 	}
 	if (icom_port->statStg) {
-		pci_free_consistent(dev, 4096, icom_port->statStg,
-				    icom_port->statStg_pci);
+		dma_free_coherent(&dev->dev, 4096, icom_port->statStg,
+				  icom_port->statStg_pci);
 		icom_port->statStg = NULL;
 	}
 
 	if (icom_port->xmitRestart) {
-		pci_free_consistent(dev, 4096, icom_port->xmitRestart,
-				    icom_port->xmitRestart_pci);
+		dma_free_coherent(&dev->dev, 4096, icom_port->xmitRestart,
+				  icom_port->xmitRestart_pci);
 		icom_port->xmitRestart = NULL;
 	}
 }
@@ -183,7 +169,8 @@ static int get_port_memory(struct icom_port *icom_port)
 	struct pci_dev *dev = icom_port->adapter->pci_dev;
 
 	icom_port->xmit_buf =
-	    pci_alloc_consistent(dev, 4096, &icom_port->xmit_buf_pci);
+	    dma_alloc_coherent(&dev->dev, 4096, &icom_port->xmit_buf_pci,
+			       GFP_KERNEL);
 	if (!icom_port->xmit_buf) {
 		dev_err(&dev->dev, "Can not allocate Transmit buffer\n");
 		return -ENOMEM;
@@ -193,7 +180,8 @@ static int get_port_memory(struct icom_port *icom_port)
 	      (unsigned long) icom_port->xmit_buf);
 
 	icom_port->recv_buf =
-	    pci_alloc_consistent(dev, 4096, &icom_port->recv_buf_pci);
+	    dma_alloc_coherent(&dev->dev, 4096, &icom_port->recv_buf_pci,
+			       GFP_KERNEL);
 	if (!icom_port->recv_buf) {
 		dev_err(&dev->dev, "Can not allocate Receive buffer\n");
 		free_port_memory(icom_port);
@@ -203,7 +191,8 @@ static int get_port_memory(struct icom_port *icom_port)
 	      (unsigned long) icom_port->recv_buf);
 
 	icom_port->statStg =
-	    pci_alloc_consistent(dev, 4096, &icom_port->statStg_pci);
+	    dma_alloc_coherent(&dev->dev, 4096, &icom_port->statStg_pci,
+			       GFP_KERNEL);
 	if (!icom_port->statStg) {
 		dev_err(&dev->dev, "Can not allocate Status buffer\n");
 		free_port_memory(icom_port);
@@ -213,15 +202,14 @@ static int get_port_memory(struct icom_port *icom_port)
 	      (unsigned long) icom_port->statStg);
 
 	icom_port->xmitRestart =
-	    pci_alloc_consistent(dev, 4096, &icom_port->xmitRestart_pci);
+	    dma_alloc_coherent(&dev->dev, 4096, &icom_port->xmitRestart_pci,
+			       GFP_KERNEL);
 	if (!icom_port->xmitRestart) {
 		dev_err(&dev->dev,
 			"Can not allocate xmit Restart buffer\n");
 		free_port_memory(icom_port);
 		return -ENOMEM;
 	}
-
-	memset(icom_port->statStg, 0, 4096);
 
 	/* FODs: Frame Out Descriptor Queue, this is a FIFO queue that
            indicates that frames are to be transmitted
@@ -430,7 +418,7 @@ static void load_code(struct icom_port *icom_port)
 	/*Set up data in icom DRAM to indicate where personality
 	 *code is located and its length.
 	 */
-	new_page = pci_alloc_consistent(dev, 4096, &temp_pci);
+	new_page = dma_alloc_coherent(&dev->dev, 4096, &temp_pci, GFP_KERNEL);
 
 	if (!new_page) {
 		dev_err(&dev->dev, "Can not allocate DMA buffer\n");
@@ -510,7 +498,7 @@ static void load_code(struct icom_port *icom_port)
 	}
 
 	if (new_page != NULL)
-		pci_free_consistent(dev, 4096, new_page, temp_pci);
+		dma_free_coherent(&dev->dev, 4096, new_page, temp_pci);
 }
 
 static int startup(struct icom_port *icom_port)
@@ -1286,7 +1274,7 @@ static void icom_config_port(struct uart_port *port, int flags)
 	port->type = PORT_ICOM;
 }
 
-static struct uart_ops icom_ops = {
+static const struct uart_ops icom_ops = {
 	.tx_empty = icom_tx_empty,
 	.set_mctrl = icom_set_mctrl,
 	.get_mctrl = icom_get_mctrl,

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/arch/h8300/mm/fault.c
  *
@@ -17,7 +18,6 @@
 #include <linux/kernel.h>
 #include <linux/ptrace.h>
 
-#include <asm/pgtable.h>
 
 void die(const char *str, struct pt_regs *fp, unsigned long err);
 

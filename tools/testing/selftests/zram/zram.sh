@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
 TCID="zram.sh"
 
 # Kselftest framework requirement - SKIP code is 4.

@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * comedi/drivers/ni_labpc.c
  * Driver for National Instruments Lab-PC series boards and compatibles
  * Copyright (C) 2001-2003 Frank Mori Hess <fmhess@users.sourceforge.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 /*
@@ -36,7 +27,7 @@
  * Kernel-level ISA plug-and-play support for the lab-pc-1200 boards
  * has not yet been added to the driver, mainly due to the fact that
  * I don't know the device id numbers. If you have one of these boards,
- * please file a bug report at http://comedi.org/ so I can get the
+ * please file a bug report at https://comedi.org/ so I can get the
  * necessary information from you.
  *
  * The 1200 series boards have onboard calibration dacs for correcting
@@ -120,6 +111,6 @@ static struct comedi_driver labpc_driver = {
 };
 module_comedi_driver(labpc_driver);
 
-MODULE_AUTHOR("Comedi http://www.comedi.org");
+MODULE_AUTHOR("Comedi https://www.comedi.org");
 MODULE_DESCRIPTION("Comedi driver for NI Lab-PC ISA boards");
 MODULE_LICENSE("GPL");

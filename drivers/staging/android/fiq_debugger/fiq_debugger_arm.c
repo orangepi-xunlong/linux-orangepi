@@ -91,6 +91,36 @@ static void __naked get_mode_regs(struct mode_regs *regs)
 {
 	asm volatile (
 	"mrs	r1, cpsr\n"
+#ifdef CONFIG_THUMB2_KERNEL
+	"mov	r3, #0xd3 @(SVC_MODE | PSR_I_BIT | PSR_F_BIT)\n"
+	"msr	cpsr_c, r3\n"
+	"str	r13, [r0], 4\n"
+	"str	r14, [r0], 4\n"
+	"mrs	r2, spsr\n"
+	"mov	r3, #0xd7 @(ABT_MODE | PSR_I_BIT | PSR_F_BIT)\n"
+	"msr	cpsr_c, r3\n"
+	"str	r2, [r0], 4\n"
+	"str	r13, [r0], 4\n"
+	"str	r14, [r0], 4\n"
+	"mrs	r2, spsr\n"
+	"mov	r3, #0xdb @(UND_MODE | PSR_I_BIT | PSR_F_BIT)\n"
+	"msr	cpsr_c, r3\n"
+	"str	r2, [r0], 4\n"
+	"str	r13, [r0], 4\n"
+	"str	r14, [r0], 4\n"
+	"mrs	r2, spsr\n"
+	"mov	r3, #0xd2 @(IRQ_MODE | PSR_I_BIT | PSR_F_BIT)\n"
+	"msr	cpsr_c, r3\n"
+	"str	r2, [r0], 4\n"
+	"str	r13, [r0], 4\n"
+	"str	r14, [r0], 4\n"
+	"mrs	r2, spsr\n"
+	"mov	r3, #0xd1 @(FIQ_MODE | PSR_I_BIT | PSR_F_BIT)\n"
+	"msr	cpsr_c, r3\n"
+	"stmia	r0!, {r2, r8 - r12}\n"
+	"str	r13, [r0], 4\n"
+	"str	r14, [r0], 4\n"
+#else
 	"msr	cpsr_c, #0xd3 @(SVC_MODE | PSR_I_BIT | PSR_F_BIT)\n"
 	"stmia	r0!, {r13 - r14}\n"
 	"mrs	r2, spsr\n"
@@ -105,6 +135,7 @@ static void __naked get_mode_regs(struct mode_regs *regs)
 	"mrs	r2, spsr\n"
 	"msr	cpsr_c, #0xd1 @(FIQ_MODE | PSR_I_BIT | PSR_F_BIT)\n"
 	"stmia	r0!, {r2, r8 - r14}\n"
+#endif
 	"mrs	r2, spsr\n"
 	"stmia	r0!, {r2}\n"
 	"msr	cpsr_c, r1\n"
@@ -158,7 +189,7 @@ static int report_trace(struct stackframe *frame, void *d)
 
 	if (sts->depth) {
 		sts->output->printf(sts->output,
-			"  pc: %p (%pF), lr %p (%pF), sp %p, fp %p\n",
+			"  pc: %px (%pF), lr %px (%pF), sp %px, fp %px\n",
 			frame->pc, frame->pc, frame->lr, frame->lr,
 			frame->sp, frame->fp);
 		sts->depth--;
@@ -169,6 +200,7 @@ static int report_trace(struct stackframe *frame, void *d)
 	return sts->depth == 0;
 }
 
+#ifndef CONFIG_FIQ_DEBUGGER_MODULE
 struct frame_tail {
 	struct frame_tail *fp;
 	unsigned long sp;
@@ -181,18 +213,18 @@ static struct frame_tail *user_backtrace(struct fiq_debugger_output *output,
 	struct frame_tail buftail[2];
 
 	/* Also check accessibility of one struct frame_tail beyond */
-	if (!access_ok(VERIFY_READ, tail, sizeof(buftail))) {
-		output->printf(output, "  invalid frame pointer %p\n",
+	if (!access_ok(tail, sizeof(buftail))) {
+		output->printf(output, "  invalid frame pointer %px\n",
 				tail);
 		return NULL;
 	}
 	if (__copy_from_user_inatomic(buftail, tail, sizeof(buftail))) {
 		output->printf(output,
-			"  failed to copy frame pointer %p\n", tail);
+			"  failed to copy frame pointer %px\n", tail);
 		return NULL;
 	}
 
-	output->printf(output, "  %p\n", buftail[0].lr);
+	output->printf(output, "  %px\n", buftail[0].lr);
 
 	/* frame pointers should strictly progress back up the stack
 	 * (towards higher addresses) */
@@ -227,7 +259,7 @@ void fiq_debugger_dump_stacktrace(struct fiq_debugger_output *output,
 		frame.lr = regs->ARM_lr;
 		frame.pc = regs->ARM_pc;
 		output->printf(output,
-			"  pc: %p (%pF), lr %p (%pF), sp %p, fp %p\n",
+			"  pc: %px (%pF), lr %px (%pF), sp %px, fp %px\n",
 			regs->ARM_pc, regs->ARM_pc, regs->ARM_lr, regs->ARM_lr,
 			regs->ARM_sp, regs->ARM_fp);
 		walk_stackframe(&frame, report_trace, &sts);
@@ -238,3 +270,4 @@ void fiq_debugger_dump_stacktrace(struct fiq_debugger_output *output,
 	while (depth-- && tail && !((unsigned long) tail & 3))
 		tail = user_backtrace(output, tail);
 }
+#endif

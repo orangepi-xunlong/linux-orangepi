@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * COMEDI driver for generic PCI based 8255 digital i/o boards
  * Copyright (C) 2012 H Hartley Sweeten <hsweeten@visionengravers.com>
@@ -9,16 +10,6 @@
  *
  * COMEDI - Linux Control and Measurement Device Interface
  * Copyright (C) 2000 David A. Schleef <ds@schleef.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 /*
@@ -300,5 +291,5 @@ static struct pci_driver pci_8255_pci_driver = {
 module_comedi_pci_driver(pci_8255_driver, pci_8255_pci_driver);
 
 MODULE_DESCRIPTION("COMEDI - Generic PCI based 8255 Digital I/O boards");
-MODULE_AUTHOR("Comedi http://www.comedi.org");
+MODULE_AUTHOR("Comedi https://www.comedi.org");
 MODULE_LICENSE("GPL");

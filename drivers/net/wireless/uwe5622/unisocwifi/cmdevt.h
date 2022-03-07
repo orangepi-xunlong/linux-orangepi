@@ -794,6 +794,12 @@ struct sprdwl_cmd_ba {
 	unsigned char success;
 } __packed;
 
+struct sprdwl_ba_event_data{
+	struct sprdwl_cmd_ba addba_rsp;
+	struct sprdwl_rx_ba_entry *ba_entry;
+	u8 sta_lut_index;
+} __packed;
+
 struct win_param {
 	unsigned short win_start;
 	unsigned short win_size;
@@ -901,6 +907,7 @@ struct sprdwl_tlv_data {
 /* TLV type list */
 #define GET_INFO_TLV_TP_OTT	1
 #define NOTIFY_AP_VERSION	2
+#define NOTIFY_CREDIT_VIA_RX_DATA 5
 
 struct ap_version_tlv_elmt {
 #define NOTIFY_AP_VERSION_USER 0

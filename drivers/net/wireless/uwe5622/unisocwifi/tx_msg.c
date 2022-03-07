@@ -862,6 +862,11 @@ static int sprdwl_handle_to_send_list(struct sprdwl_intf *intf,
 	struct sprdwl_msg_list *list = &tx_msg->tx_list_qos_pool;
 	u8 coex_bt_on = intf->coex_bt_on;
 
+#ifdef CP2_RESET_SUPPORT
+	if(intf->cp_asserted == 1)
+		return 0;
+#endif
+
 	if (!list_empty(&tx_msg->xmit_msg_list.to_send_list)) {
 		to_send_list = &tx_msg->xmit_msg_list.to_send_list;
 		t_lock = &tx_msg->xmit_msg_list.send_lock;
@@ -1053,7 +1058,7 @@ static int sprdwl_tx_eachmode_data(struct sprdwl_intf *intf,
 	return ret;
 }
 
-static void sprdwl_flush_all_txlist(struct sprdwl_tx_msg *sprdwl_tx_dev)
+void sprdwl_flush_all_txlist(struct sprdwl_tx_msg *sprdwl_tx_dev)
 {
 	sprdwl_sdio_flush_txlist(&sprdwl_tx_dev->tx_list_cmd);
 	sprdwl_flush_data_txlist(sprdwl_tx_dev);
@@ -1075,6 +1080,10 @@ int sprdwl_sdio_process_credit(void *pdev, void *data)
 
 	if (common->type == SPRDWL_TYPE_DATA_SPECIAL) {
 		int offset = (size_t)&((struct rx_msdu_desc *)0)->rsvd5;
+
+		if (intf->priv->hw_type == SPRDWL_HW_USB) {
+			return -2;
+		}
 
 		flow = data + offset;
 		goto out;
@@ -1543,7 +1552,7 @@ static inline unsigned short from32to16(unsigned int x)
 	return x;
 }
 
-static unsigned int do_csum(const unsigned char *buff, int len)
+unsigned int do_csum(const unsigned char *buff, int len)
 {
 	int odd;
 	unsigned int result = 0;

@@ -34,31 +34,6 @@
 #include "sdiohal.h"
 #include "wcn_glb.h"
 
-#ifdef CONFIG_HISI_BOARD
-#include "mach/hardware.h"
-#endif
-
-#ifdef CONFIG_AML_BOARD
-#include <linux/amlogic/aml_gpio_consumer.h>
-
-extern int wifi_irq_num(void);
-extern int wifi_irq_trigger_level(void);
-extern void sdio_reinit(void);
-extern void sdio_clk_always_on(int on);
-extern void sdio_set_max_reqsz(unsigned int size);
-#endif
-
-#ifdef CONFIG_RK_BOARD
-extern int rockchip_wifi_set_carddetect(int val);
-#endif
-
-#ifdef CONFIG_AW_BOARD
-extern void sunxi_mmc_rescan_card(unsigned int ids);
-extern int sunxi_wlan_get_bus_index(void);
-extern int sunxi_wlan_get_oob_irq(void);
-extern int sunxi_wlan_get_oob_irq_flags(void);
-#endif
-
 #ifndef MMC_CAP2_SDIO_IRQ_NOTHREAD
 #define MMC_CAP2_SDIO_IRQ_NOTHREAD (1 << 17)
 #endif
@@ -73,9 +48,9 @@ extern int sunxi_wlan_get_oob_irq_flags(void);
 #define IS_BYPASS_WAKE(addr) (false)
 #endif
 
-static int (*scan_card_notify)(void);
 struct sdiohal_data_t *sdiohal_data;
 static struct sdio_driver sdiohal_driver;
+static struct mmc_host *host;
 
 static int sdiohal_card_lock(struct sdiohal_data_t *p_data,
 	const char *func)
@@ -236,11 +211,11 @@ int sdiohal_sdio_pt_write(unsigned char *src, unsigned int datalen)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 	int ret = 0;
-	struct timespec tm_begin, tm_end;
+	struct timespec64 tm_begin, tm_end;
 	static long time_total_ns;
 	static int times_count;
 
-	getnstimeofday(&tm_begin);
+	ktime_get_real_ts64(&tm_begin);
 	if (unlikely(p_data->card_dump_flag == true)) {
 		sdiohal_err("%s line %d dump happened\n", __func__, __LINE__);
 		return -ENODEV;
@@ -267,8 +242,8 @@ int sdiohal_sdio_pt_write(unsigned char *src, unsigned int datalen)
 	sdiohal_op_leave();
 	sdiohal_card_unlock(p_data);
 
-	getnstimeofday(&tm_end);
-	time_total_ns += timespec_to_ns(&tm_end) - timespec_to_ns(&tm_begin);
+	ktime_get_real_ts64(&tm_end);
+	time_total_ns += timespec64_to_ns(&tm_end) - timespec64_to_ns(&tm_begin);
 	times_count++;
 	if (!(times_count % PERFORMANCE_COUNT)) {
 		sdiohal_pr_perf("tx avg time:%ld len=%d\n",
@@ -284,11 +259,11 @@ int sdiohal_sdio_pt_read(unsigned char *src, unsigned int datalen)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 	int ret = 0;
-	struct timespec tm_begin, tm_end;
+	struct timespec64 tm_begin, tm_end;
 	static long time_total_ns;
 	static int times_count;
 
-	getnstimeofday(&tm_begin);
+	ktime_get_real_ts64(&tm_begin);
 
 	if (unlikely(p_data->card_dump_flag == true)) {
 		sdiohal_err("%s line %d dump happened\n", __func__, __LINE__);
@@ -309,8 +284,8 @@ int sdiohal_sdio_pt_read(unsigned char *src, unsigned int datalen)
 	sdiohal_op_leave();
 	sdiohal_card_unlock(p_data);
 
-	getnstimeofday(&tm_end);
-	time_total_ns += timespec_to_ns(&tm_end) - timespec_to_ns(&tm_begin);
+	ktime_get_real_ts64(&tm_end);
+	time_total_ns += timespec64_to_ns(&tm_end) - timespec64_to_ns(&tm_begin);
 	times_count++;
 	if (!(times_count % PERFORMANCE_COUNT)) {
 		sdiohal_pr_perf("rx avg time:%ld len=%d\n",
@@ -456,11 +431,11 @@ int sdiohal_adma_pt_write(struct sdiohal_list_t *data_list)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 	int ret = 0;
-	struct timespec tm_begin, tm_end;
+	struct timespec64 tm_begin, tm_end;
 	static long time_total_ns;
 	static int times_count;
 
-	getnstimeofday(&tm_begin);
+	ktime_get_real_ts64(&tm_begin);
 
 	if (unlikely(p_data->card_dump_flag == true)) {
 		sdiohal_err("%s line %d dump happened\n", __func__, __LINE__);
@@ -483,8 +458,8 @@ int sdiohal_adma_pt_write(struct sdiohal_list_t *data_list)
 	sdiohal_op_leave();
 	sdiohal_card_unlock(p_data);
 
-	getnstimeofday(&tm_end);
-	time_total_ns += timespec_to_ns(&tm_end) - timespec_to_ns(&tm_begin);
+	ktime_get_real_ts64(&tm_end);
+	time_total_ns += timespec64_to_ns(&tm_end) - timespec64_to_ns(&tm_begin);
 	times_count++;
 	if (!(times_count % PERFORMANCE_COUNT)) {
 		sdiohal_pr_perf("tx avg time:%ld\n",
@@ -500,11 +475,11 @@ int sdiohal_adma_pt_read(struct sdiohal_list_t *data_list)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 	int ret = 0;
-	struct timespec tm_begin, tm_end;
+	struct timespec64 tm_begin, tm_end;
 	static long time_total_ns;
 	static int times_count;
 
-	getnstimeofday(&tm_begin);
+	ktime_get_real_ts64(&tm_begin);
 
 	if (unlikely(p_data->card_dump_flag == true)) {
 		sdiohal_err("%s line %d dump happened\n", __func__, __LINE__);
@@ -525,8 +500,8 @@ int sdiohal_adma_pt_read(struct sdiohal_list_t *data_list)
 	sdiohal_op_leave();
 	sdiohal_card_unlock(p_data);
 
-	getnstimeofday(&tm_end);
-	time_total_ns += timespec_to_ns(&tm_end) - timespec_to_ns(&tm_begin);
+	ktime_get_real_ts64(&tm_end);
+	time_total_ns += timespec64_to_ns(&tm_end) - timespec64_to_ns(&tm_begin);
 	times_count++;
 	if (!(times_count % PERFORMANCE_COUNT)) {
 		sdiohal_pr_perf("rx avg time:%ld\n",
@@ -1169,7 +1144,7 @@ static irqreturn_t sdiohal_irq_handler(int irq, void *para)
 	sdiohal_lock_rx_ws();
 	sdiohal_disable_rx_irq(irq);
 
-	getnstimeofday(&p_data->tm_begin_irq);
+	ktime_get_real_ts64(&p_data->tm_begin_irq);
 	sdiohal_rx_up();
 
 	return IRQ_HANDLED;
@@ -1208,18 +1183,6 @@ static int sdiohal_host_irq_init(unsigned int irq_gpio_num)
 
 	sdiohal_debug("%s enter\n", __func__);
 
-#ifdef CONFIG_AML_BOARD
-	/* As for amlogic platform, gpio trigger type low will request fail. */
-	p_data->irq_num = wifi_irq_num();
-	if (wifi_irq_trigger_level() == GPIO_IRQ_LOW)
-		p_data->irq_trigger_type = IRQF_TRIGGER_LOW;
-	else
-		p_data->irq_trigger_type = IRQF_TRIGGER_HIGH;
-	sdiohal_info("%s sdio gpio irq num:%d, trigger_type:%s\n",
-		     __func__, p_data->irq_num,
-		     ((p_data->irq_trigger_type == IRQF_TRIGGER_LOW) ?
-		     "low" : "high"));
-#else
 	if (irq_gpio_num == 0)
 		return ret;
 
@@ -1237,7 +1200,6 @@ static int sdiohal_host_irq_init(unsigned int irq_gpio_num)
 
 	p_data->irq_num = gpio_to_irq(irq_gpio_num);
 	p_data->irq_trigger_type = IRQF_TRIGGER_HIGH;
-#endif
 
 	return ret;
 }
@@ -1265,43 +1227,11 @@ static int sdiohal_get_dev_func(struct sdio_func *func)
 	return 0;
 }
 
-#ifdef CONFIG_WCN_PARSE_DTS
-static struct mmc_host *sdiohal_dev_get_host(struct device_node *np_node)
-{
-	void *drv_data;
-	struct mmc_host *host_mmc;
-	struct platform_device *pdev;
-
-	pdev = of_find_device_by_node(np_node);
-	if (pdev == NULL) {
-		sdiohal_err("sdio dev get platform device failed!!!");
-		return NULL;
-	}
-
-	drv_data = platform_get_drvdata(pdev);
-	if (drv_data == NULL) {
-		sdiohal_err("sdio dev get drv data failed!!!");
-		return NULL;
-	}
-
-	host_mmc = drv_data;
-	sdiohal_info("host_mmc:%p private data:0x%lx containerof:%p\n",
-		     host_mmc, *(host_mmc->private),
-		     container_of(drv_data, struct mmc_host, private));
-
-	if (*(host_mmc->private) == (unsigned long)host_mmc)
-		return host_mmc;
-	else
-		return container_of(drv_data, struct mmc_host, private);
-}
-#endif
-
 static int sdiohal_parse_dt(void)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 #ifdef CONFIG_WCN_PARSE_DTS
 	struct device_node *np;
-	struct device_node *sdio_node;
 
 	np = of_find_node_by_name(NULL, "uwe-bsp");
 	if (!np) {
@@ -1381,23 +1311,12 @@ static int sdiohal_parse_dt(void)
 		     "data" : "polling"))), p_data->gpio_num,
 		     sprdwcn_bus_get_blk_size());
 
-#ifdef CONFIG_WCN_PARSE_DTS
-	sdio_node = of_parse_phandle(np, "sdhci-name", 0);
-	if (sdio_node == NULL)
-		sdiohal_info("not config sdio host node.");
-
-#if (defined(CONFIG_RK_BOARD) || defined(CONFIG_AW_BOARD))
-	/* will get host at sdiohal_probe */
-	return 0;
-#endif
-
-	p_data->sdio_dev_host = sdiohal_dev_get_host(sdio_node);
+	p_data->sdio_dev_host = host;
 	if (p_data->sdio_dev_host == NULL) {
 		sdiohal_err("get host failed!!!");
 		return -1;
 	}
 	sdiohal_info("get host ok!!!");
-#endif /* end of CONFIG_WCN_PARSE_DTS */
 
 	return 0;
 }
@@ -1761,12 +1680,7 @@ int sdiohal_runtime_put(void)
 		disable_irq(p_data->irq_num);
 
 	if (WCN_CARD_EXIST(&p_data->xmit_cnt)) {
-#ifndef CONFIG_AML_BOARD
-		/* As for amlogic platform, NOT remove card
-		 * after chip power off. So won't probe again.
-		 */
 		atomic_set(&p_data->xmit_start, 0);
-#endif
 		xmit_cnt = atomic_read(&p_data->xmit_cnt);
 		while ((xmit_cnt > 0) &&
 			(xmit_cnt < SDIOHAL_REMOVE_CARD_VAL)) {
@@ -1857,24 +1771,6 @@ void sdiohal_reset(bool full_reset)
 }
 #endif
 
-#ifdef CONFIG_HISI_BOARD
-#define REG_BASE_CTRL __io_address(0xf8a20008)
-void sdiohal_set_card_present(bool enable)
-{
-	u32 regval;
-
-	sdiohal_info("%s enable:%d\n", __func__, enable);
-
-	/*set card_detect low to detect card*/
-	regval = readl(REG_BASE_CTRL);
-	if (enable)
-		regval |= 0x1;
-	else
-		regval &= ~0x1;
-	writel(regval, REG_BASE_CTRL);
-}
-#endif
-
 static int sdiohal_probe(struct sdio_func *func,
 	const struct sdio_device_id *id)
 {
@@ -1886,18 +1782,6 @@ static int sdiohal_probe(struct sdio_func *func,
 		     "func_num=0x%04x, clock=%d\n",
 		     __func__, func->class, func->vendor, func->device,
 		     func->num, host->ios.clock);
-
-#ifdef CONFIG_AML_BOARD
-	if (p_data->irq_type == SDIOHAL_RX_INBAND_IRQ) {
-		/* disable auto clock, sdio clock will be always on. */
-		sdio_clk_always_on(1);
-	}
-	/*
-	 * setting sdio max request size to 512kB
-	 * to improve transmission efficiency.
-	 */
-	sdio_set_max_reqsz(0x80000);
-#endif
 
 	ret = sdiohal_get_dev_func(func);
 	if (ret < 0) {
@@ -1959,20 +1843,7 @@ static int sdiohal_probe(struct sdio_func *func,
 
 	/* the card is nonremovable */
 	p_data->sdio_dev_host->caps |= MMC_CAP_NONREMOVABLE;
-#ifdef CONFIG_RK_BOARD
-	/* Some RK platform, if config caps with MMC_CAP_SDIO_IRQ, will set
-	 * caps2 with MMC_CAP2_SDIO_IRQ_NOTHREAD at the same time.
-	 * This is unexpected. So clear this status.
-	 */
-	if (p_data->irq_type == SDIOHAL_RX_INBAND_IRQ)
-		p_data->sdio_dev_host->caps2 &= ~MMC_CAP2_SDIO_IRQ_NOTHREAD;
-#endif
 
-	/* calling rescan callback to inform download */
-	if (scan_card_notify != NULL)
-		scan_card_notify();
-
-	sdiohal_debug("rescan callback:%p\n", scan_card_notify);
 	sdiohal_info("probe ok\n");
 
 	return 0;
@@ -1983,10 +1854,6 @@ static void sdiohal_remove(struct sdio_func *func)
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 
 	sdiohal_info("[%s]enter\n", __func__);
-
-#ifdef CONFIG_HISI_BOARD
-	sdiohal_set_card_present(0);
-#endif
 
 	if (WCN_CARD_EXIST(&p_data->xmit_cnt))
 		atomic_add(SDIOHAL_REMOVE_CARD_VAL, &p_data->xmit_cnt);
@@ -2050,29 +1917,12 @@ static const struct sdio_device_id sdiohal_ids[] = {
 	{SDIO_DEVICE(0, 0)},
 	{},
 };
-
-static struct sdio_driver sdiohal_driver = {
-	.probe = sdiohal_probe,
-	.remove = sdiohal_remove,
-	.name = "sdiohal",
-	.id_table = sdiohal_ids,
-	.drv = {
-		.pm = &sdiohal_pm_ops,
-	},
-};
+MODULE_DEVICE_TABLE(sdio, sdiohal_ids);
 
 #define WCN_SDIO_CARD_REMOVED	BIT(4)
 void sdiohal_remove_card(void)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
-#ifdef CONFIG_AW_BOARD
-	int wlan_bus_index = sunxi_wlan_get_bus_index();
-#endif
-
-#ifdef CONFIG_AML_BOARD
-	/* As for amlogic platform, don't need to remove sdio card. */
-	return;
-#endif
 
 	if (!WCN_CARD_EXIST(&p_data->xmit_cnt))
 		return;
@@ -2084,18 +1934,6 @@ void sdiohal_remove_card(void)
 		usleep_range(4000, 6000);
 
 	init_completion(&p_data->remove_done);
-
-#ifdef CONFIG_HISI_BOARD
-	sdiohal_set_card_present(0);
-#endif
-
-#ifdef CONFIG_RK_BOARD
-	rockchip_wifi_set_carddetect(0);
-#endif
-
-#ifdef CONFIG_AW_BOARD
-	sunxi_mmc_rescan_card(wlan_bus_index);
-#endif
 
 	p_data->sdio_dev_host->card->state |= WCN_SDIO_CARD_REMOVED;
 
@@ -2110,130 +1948,6 @@ void sdiohal_remove_card(void)
 
 	sdio_unregister_driver(&sdiohal_driver);
 	sdiohal_unlock_scan_ws();
-}
-
-int sdiohal_scan_card(void)
-{
-	struct sdiohal_data_t *p_data = sdiohal_get_data();
-	int ret = 0;
-#ifdef CONFIG_AML_BOARD
-	struct sdio_func *func = p_data->sdio_func[FUNC_1];
-#endif
-#ifdef CONFIG_AW_BOARD
-	int wlan_bus_index;
-#endif
-
-	sdiohal_info("sdiohal_scan_card\n");
-
-#ifdef CONFIG_AML_BOARD
-	if (p_data->irq_type == SDIOHAL_RX_INBAND_IRQ)
-		sdio_clk_always_on(0);
-	/* As for amlogic platform, Not remove sdio card.
-	 * When system is booting up, amlogic platform will power
-	 * up and get wifi module sdio id to know which vendor.
-	 * Then power down. In order to not rescan sdio card,
-	 * reset and reinit sdio host and slave is needed.
-	 */
-	sdio_reinit();
-#endif
-
-	if (WCN_CARD_EXIST(&p_data->xmit_cnt)) {
-		sdiohal_info("Already exist card!, xmit_cnt=0x%x\n",
-			     atomic_read(&p_data->xmit_cnt));
-#ifdef CONFIG_AML_BOARD
-		/* As for amlogic platform, Not remove sdio card.
-		 * But will reset sdio host, sdio slave need to be reset.
-		 * If reset pin NC, don't need to reset sdio slave.
-		 */
-		if (p_data->sdio_dev_host != NULL)
-			mmc_power_restore_host(p_data->sdio_dev_host);
-		if (p_data->irq_type == SDIOHAL_RX_INBAND_IRQ) {
-			/* disable auto clock, sdio clock will be always on. */
-			sdio_clk_always_on(1);
-		}
-		/*
-		 * setting sdio max request size to 512kB
-		 * to improve transmission efficiency.
-		 */
-		sdio_set_max_reqsz(0x80000);
-
-		if (!p_data->pwrseq) {
-			/* Enable Function 1 */
-			sdio_claim_host(p_data->sdio_func[FUNC_1]);
-			ret = sdio_enable_func(p_data->sdio_func[FUNC_1]);
-			sdio_set_block_size(p_data->sdio_func[FUNC_1],
-					SDIOHAL_BLK_SIZE);
-			p_data->sdio_func[FUNC_1]->max_blksize =
-				SDIOHAL_BLK_SIZE;
-			sdio_release_host(p_data->sdio_func[FUNC_1]);
-			if (ret < 0) {
-				sdiohal_err("enable func1 err!!! ret is %d\n",
-					    ret);
-				return ret;
-			}
-			sdiohal_info("enable func1 ok\n");
-		} else
-			pm_runtime_put_noidle(&func->dev);
-		/* calling rescan callback to inform download */
-		if (scan_card_notify != NULL)
-			scan_card_notify();
-		sdiohal_info("scan end!\n");
-		return 0;
-#endif
-
-		sdiohal_remove_card();
-		msleep(100);
-	}
-
-#ifdef CONFIG_HISI_BOARD
-	/* only for hisi mv300 scan card mechanism */
-	sdiohal_set_card_present(1);
-#endif
-
-#ifdef CONFIG_RK_BOARD
-	rockchip_wifi_set_carddetect(1);
-#endif
-
-#ifdef CONFIG_AW_BOARD
-	wlan_bus_index = sunxi_wlan_get_bus_index();
-	if (wlan_bus_index < 0) {
-		ret = wlan_bus_index;
-		sdiohal_err("%s sunxi_wlan_get_bus_index=%d err!",
-			    __func__, ret);
-		return ret;
-	}
-	sunxi_mmc_rescan_card(wlan_bus_index);
-#endif
-
-	sdiohal_lock_scan_ws();
-	sdiohal_resume_check();
-	init_completion(&p_data->scan_done);
-	ret = sdio_register_driver(&sdiohal_driver);
-	if (ret != 0) {
-		sdiohal_err("sdio_register_driver error :%d\n", ret);
-		return ret;
-	}
-	if (wait_for_completion_timeout(&p_data->scan_done,
-		msecs_to_jiffies(2500)) == 0) {
-		sdiohal_unlock_scan_ws();
-		sdiohal_err("wait scan card time out\n");
-		return -ENODEV;
-	}
-	if (!p_data->sdio_dev_host) {
-		sdiohal_unlock_scan_ws();
-		sdiohal_err("sdio_dev_host is NULL!\n");
-		return -ENODEV;
-	}
-
-	sdiohal_unlock_scan_ws();
-	sdiohal_info("scan end!\n");
-
-	return ret;
-}
-
-void sdiohal_register_scan_notify(void *func)
-{
-	scan_card_notify = func;
 }
 
 int sdiohal_init(void)
@@ -2306,3 +2020,50 @@ void sdiohal_exit(void)
 	sdiohal_info("sdiohal_exit ok\n");
 }
 
+int marlin_probe(struct device *dev);
+int marlin_remove(struct device *dev);
+void marlin_shutdown(void);
+int sprdwl_probe(struct device *dev);
+int sprdwl_remove(struct device *dev);
+
+static int marlin_sdio_probe(struct sdio_func *sdio_func,
+		   const struct sdio_device_id *id)
+{
+	struct device *dev = &sdio_func->dev;
+	int ret;
+
+	host = sdio_func->card->host;
+	ret = marlin_probe(dev);
+	if (ret)
+		return ret;
+	ret = sdiohal_probe(sdio_func, id);
+	if (ret)
+		return ret;
+	return sprdwl_probe(dev);
+}
+
+static void marlin_sdio_remove(struct sdio_func *sdio_func)
+{
+	struct device *dev = &sdio_func->dev;
+
+	sprdwl_remove(dev);
+	sdiohal_remove(sdio_func);
+	marlin_remove(dev);
+}
+
+static void marlin_sdio_shutdown(struct device *dev)
+{
+	marlin_shutdown();
+}
+
+static struct sdio_driver uwe5622_driver = {
+	.name = "uwe5622",
+	.probe = marlin_sdio_probe,
+	.remove = marlin_sdio_remove,
+	.id_table = sdiohal_ids,
+	.drv = {
+		.pm = &sdiohal_pm_ops,
+		.shutdown = marlin_sdio_shutdown,
+	}
+};
+module_sdio_driver(uwe5622_driver);

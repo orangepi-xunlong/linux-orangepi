@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /**************************************************************************************************
  * Procedure:    Init boot code/firmware code/data session
  *
@@ -10,7 +11,7 @@
  * Returns:
  *        NDIS_STATUS_FAILURE - the following initialization process should be terminated
  *        NDIS_STATUS_SUCCESS - if firmware initialization process success
-**************************************************************************************************/
+ **************************************************************************************************/
 
 #include "r8192U.h"
 #include "r8192U_hw.h"
@@ -23,7 +24,7 @@ static void firmware_init_param(struct net_device *dev)
 	struct r8192_priv	*priv = ieee80211_priv(dev);
 	rt_firmware		*pfirmware = priv->pFirmware;
 
-	pfirmware->cmdpacket_frag_thresold = GET_COMMAND_PACKET_FRAG_THRESHOLD(MAX_TRANSMIT_BUFFER_SIZE);
+	pfirmware->cmdpacket_frag_threshold = GET_COMMAND_PACKET_FRAG_THRESHOLD(MAX_TRANSMIT_BUFFER_SIZE);
 }
 
 /*
@@ -42,32 +43,30 @@ static bool fw_download_code(struct net_device *dev, u8 *code_virtual_address,
 	rt_firmware	    *pfirmware = priv->pFirmware;
 	struct sk_buff	    *skb;
 	unsigned char	    *seg_ptr;
-	cb_desc		    *tcb_desc;
+	struct cb_desc		    *tcb_desc;
 	u8                  bLastIniPkt;
 	u8		    index;
 
 	firmware_init_param(dev);
 	/* Fragmentation might be required */
-	frag_threshold = pfirmware->cmdpacket_frag_thresold;
+	frag_threshold = pfirmware->cmdpacket_frag_threshold;
 	do {
 		if ((buffer_len - frag_offset) > frag_threshold) {
 			frag_length = frag_threshold;
 			bLastIniPkt = 0;
-
 		} else {
 			frag_length = buffer_len - frag_offset;
 			bLastIniPkt = 1;
-
 		}
 
 		/* Allocate skb buffer to contain firmware info and tx descriptor info
 		 * add 4 to avoid packet appending overflow.
-		 * */
+		 */
 		skb  = dev_alloc_skb(USB_HWDESC_HEADER_LEN + frag_length + 4);
 		if (!skb)
 			return false;
 		memcpy((unsigned char *)(skb->cb), &dev, sizeof(dev));
-		tcb_desc = (cb_desc *)(skb->cb + MAX_DEV_ADDR_SIZE);
+		tcb_desc = (struct cb_desc *)(skb->cb + MAX_DEV_ADDR_SIZE);
 		tcb_desc->queue_index = TXCMD_QUEUE;
 		tcb_desc->bCmdOrInit = DESC_PACKET_TYPE_INIT;
 		tcb_desc->bLastIniPkt = bLastIniPkt;
@@ -103,7 +102,6 @@ static bool fw_download_code(struct net_device *dev, u8 *code_virtual_address,
 	} while (frag_offset < buffer_len);
 
 	return rt_status;
-
 }
 
 /*
@@ -171,7 +169,6 @@ CPUCheckMainCodeOKAndTurnOnCPU_Fail:
 
 static bool CPUcheck_firmware_ready(struct net_device *dev)
 {
-
 	bool		rt_status = true;
 	int		check_time = 200000;
 	u32		CPU_status = 0;
@@ -196,7 +193,6 @@ CPUCheckFirmwareReady_Fail:
 	RT_TRACE(COMP_ERR, "ERR in %s()\n", __func__);
 	rt_status = false;
 	return rt_status;
-
 }
 
 bool init_firmware(struct net_device *dev)
@@ -207,8 +203,8 @@ bool init_firmware(struct net_device *dev)
 	u32			file_length = 0;
 	u8			*mapped_file = NULL;
 	u32			init_step = 0;
-	opt_rst_type_e	rst_opt = OPT_SYSTEM_RESET;
-	firmware_init_step_e	starting_state = FW_INIT_STEP0_BOOT;
+	enum opt_rst_type_e	   rst_opt = OPT_SYSTEM_RESET;
+	enum firmware_init_step_e  starting_state = FW_INIT_STEP0_BOOT;
 
 	rt_firmware		*pfirmware = priv->pFirmware;
 	const struct firmware	*fw_entry;
@@ -230,7 +226,7 @@ bool init_firmware(struct net_device *dev)
 		rst_opt = OPT_FIRMWARE_RESET;
 		starting_state = FW_INIT_STEP2_DATA;
 	} else {
-		 RT_TRACE(COMP_FIRMWARE, "PlatformInitFirmware: undefined firmware state\n");
+		RT_TRACE(COMP_FIRMWARE, "PlatformInitFirmware: undefined firmware state\n");
 	}
 
 	/*
@@ -277,7 +273,7 @@ bool init_firmware(struct net_device *dev)
 		 * 2. each packet segment will be put in the skb_buff packet.
 		 * 3. each skb_buff packet data content will already include the firmware info
 		 *   and Tx descriptor info
-		 * */
+		 */
 		rt_status = fw_download_code(dev, mapped_file, file_length);
 		if (rst_opt == OPT_SYSTEM_RESET)
 			release_firmware(fw_entry);
@@ -337,7 +333,6 @@ download_firmware_fail:
 	RT_TRACE(COMP_ERR, "ERR in %s()\n", __func__);
 	rt_status = false;
 	return rt_status;
-
 }
 
 MODULE_FIRMWARE("RTL8192U/boot.img");

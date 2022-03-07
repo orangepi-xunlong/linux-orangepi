@@ -6,7 +6,6 @@
 
 #include "sprdwl.h"
 #include "wl_core.h"
-#define SOFTAP_INI_PATH "/data/misc/wifi/softap.ini"
 
 static bool is_valid_channel(struct wiphy *wiphy, int chn)
 {
@@ -30,45 +29,6 @@ static bool is_valid_channel(struct wiphy *wiphy, int chn)
 	return false;
 }
 
-static int sprdwl_get_softap_chan(u8 *path)
-{
-	int ret;
-	int chn;
-	struct file *fp = NULL;
-	mm_segment_t fs;
-	char buf[64] = {0};
-
-	if (path == NULL)
-		return -EINVAL;
-
-	fp = filp_open(path, O_RDONLY, 0);
-	if (IS_ERR(fp)) {
-		wl_err("Open file: %s failed(%ld)\n", path, PTR_ERR(fp));
-		return -EINVAL;
-	}
-
-	fs = get_fs();
-	set_fs(get_ds());
-
-	ret = vfs_read(fp, buf, sizeof(buf), &fp->f_pos);
-
-	filp_close(fp, NULL);
-	set_fs(fs);
-
-	if (ret <= 0) {
-		wl_err("read file failed, ret = %d\n", ret);
-		return -EINVAL;
-	}
-
-	ret = sscanf(buf, "channel=%d\n", &chn);
-	if (ret != 1) {
-		wl_err("Keywords channel not found in %s\n", path);
-		return -EINVAL;
-	}
-
-	return chn;
-}
-
 void sprdwl_hook_reset_channel(struct wiphy *wiphy,
 			       struct cfg80211_ap_settings *settings)
 {
@@ -77,9 +37,9 @@ void sprdwl_hook_reset_channel(struct wiphy *wiphy,
 	struct ieee80211_mgmt *mgmt;
 	struct ieee80211_ht_operation *oper;
 
-	/* Read channel from file /data/misc/wifi/softap.ini */
-	channel = sprdwl_get_softap_chan(SOFTAP_INI_PATH);
-	if (channel < 0)
+	channel = ieee80211_frequency_to_channel(
+		settings->chandef.chan->center_freq);
+	if (channel == 0)
 		return;
 
 	if (!is_valid_channel(wiphy, channel)) {

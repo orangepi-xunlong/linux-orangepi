@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TCP Vegas congestion control
  *
@@ -292,10 +293,10 @@ size_t tcp_vegas_get_info(struct sock *sk, u32 ext, int *attr,
 	const struct vegas *ca = inet_csk_ca(sk);
 
 	if (ext & (1 << (INET_DIAG_VEGASINFO - 1))) {
-		info->vegas.tcpv_enabled = ca->doing_vegas_now,
-		info->vegas.tcpv_rttcnt = ca->cntRTT,
-		info->vegas.tcpv_rtt = ca->baseRTT,
-		info->vegas.tcpv_minrtt = ca->minRTT,
+		info->vegas.tcpv_enabled = ca->doing_vegas_now;
+		info->vegas.tcpv_rttcnt = ca->cntRTT;
+		info->vegas.tcpv_rtt = ca->baseRTT;
+		info->vegas.tcpv_minrtt = ca->minRTT;
 
 		*attr = INET_DIAG_VEGASINFO;
 		return sizeof(struct tcpvegas_info);
@@ -307,6 +308,7 @@ EXPORT_SYMBOL_GPL(tcp_vegas_get_info);
 static struct tcp_congestion_ops tcp_vegas __read_mostly = {
 	.init		= tcp_vegas_init,
 	.ssthresh	= tcp_reno_ssthresh,
+	.undo_cwnd	= tcp_reno_undo_cwnd,
 	.cong_avoid	= tcp_vegas_cong_avoid,
 	.pkts_acked	= tcp_vegas_pkts_acked,
 	.set_state	= tcp_vegas_state,

@@ -12,6 +12,8 @@
  * GNU General Public License version 2 for more details.
  */
 
+#include <linux/bitmap.h>
+#include <linux/bitops.h>
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/gpio/driver.h>
@@ -63,7 +65,7 @@ static int pisosr_gpio_get_direction(struct gpio_chip *chip,
 				     unsigned offset)
 {
 	/* This device always input */
-	return 1;
+	return GPIO_LINE_DIRECTION_IN;
 }
 
 static int pisosr_gpio_direction_input(struct gpio_chip *chip,
@@ -90,6 +92,25 @@ static int pisosr_gpio_get(struct gpio_chip *chip, unsigned offset)
 	return (gpio->buffer[offset / 8] >> (offset % 8)) & 0x1;
 }
 
+static int pisosr_gpio_get_multiple(struct gpio_chip *chip,
+				    unsigned long *mask, unsigned long *bits)
+{
+	struct pisosr_gpio *gpio = gpiochip_get_data(chip);
+	unsigned long offset;
+	unsigned long gpio_mask;
+	unsigned long buffer_state;
+
+	pisosr_gpio_refresh(gpio);
+
+	bitmap_zero(bits, chip->ngpio);
+	for_each_set_clump8(offset, gpio_mask, mask, chip->ngpio) {
+		buffer_state = gpio->buffer[offset / 8] & gpio_mask;
+		bitmap_set_value8(bits, buffer_state, offset);
+	}
+
+	return 0;
+}
+
 static const struct gpio_chip template_chip = {
 	.label			= "pisosr-gpio",
 	.owner			= THIS_MODULE,
@@ -97,6 +118,7 @@ static const struct gpio_chip template_chip = {
 	.direction_input	= pisosr_gpio_direction_input,
 	.direction_output	= pisosr_gpio_direction_output,
 	.get			= pisosr_gpio_get,
+	.get_multiple		= pisosr_gpio_get_multiple,
 	.base			= -1,
 	.ngpio			= DEFAULT_NGPIO,
 	.can_sleep		= true,
@@ -126,12 +148,9 @@ static int pisosr_gpio_probe(struct spi_device *spi)
 		return -ENOMEM;
 
 	gpio->load_gpio = devm_gpiod_get_optional(dev, "load", GPIOD_OUT_LOW);
-	if (IS_ERR(gpio->load_gpio)) {
-		ret = PTR_ERR(gpio->load_gpio);
-		if (ret != -EPROBE_DEFER)
-			dev_err(dev, "Unable to allocate load GPIO\n");
-		return ret;
-	}
+	if (IS_ERR(gpio->load_gpio))
+		return dev_err_probe(dev, PTR_ERR(gpio->load_gpio),
+				     "Unable to allocate load GPIO\n");
 
 	mutex_init(&gpio->lock);
 

@@ -1,31 +1,5 @@
-/******************************************************************************
- *
- * Copyright(c) 2009-2012  Realtek Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- * wlanfae <wlanfae@realtek.com>
- * Realtek Corporation, No. 2, Innovation Road II, Hsinchu Science Park,
- * Hsinchu 300, Taiwan.
- *
- * Larry Finger <Larry.Finger@lwfinger.net>
- *
- *****************************************************************************/
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 2009-2012  Realtek Corporation.*/
 
 #include "../wifi.h"
 #include "reg.h"
@@ -49,9 +23,9 @@ void rtl92d_phy_rf6052_set_bandwidth(struct ieee80211_hw *hw, u8 bandwidth)
 			rtl_set_rfreg(hw, rfpath, RF_CHNLBW, BIT(10) |
 				      BIT(11), 0x01);
 
-			RT_TRACE(rtlpriv, COMP_RF, DBG_LOUD,
-				 "20M RF 0x18 = 0x%x\n",
-				 rtlphy->rfreg_chnlval[rfpath]);
+			rtl_dbg(rtlpriv, COMP_RF, DBG_LOUD,
+				"20M RF 0x18 = 0x%x\n",
+				rtlphy->rfreg_chnlval[rfpath]);
 		}
 
 		break;
@@ -61,14 +35,13 @@ void rtl92d_phy_rf6052_set_bandwidth(struct ieee80211_hw *hw, u8 bandwidth)
 			    ((rtlphy->rfreg_chnlval[rfpath] & 0xfffff3ff));
 			rtl_set_rfreg(hw, rfpath, RF_CHNLBW, BIT(10) | BIT(11),
 				      0x00);
-			RT_TRACE(rtlpriv, COMP_RF, DBG_LOUD,
-				 "40M RF 0x18 = 0x%x\n",
-				 rtlphy->rfreg_chnlval[rfpath]);
+			rtl_dbg(rtlpriv, COMP_RF, DBG_LOUD,
+				"40M RF 0x18 = 0x%x\n",
+				rtlphy->rfreg_chnlval[rfpath]);
 		}
 		break;
 	default:
-		RT_TRACE(rtlpriv, COMP_ERR, DBG_EMERG,
-			 "unknown bandwidth: %#X\n", bandwidth);
+		pr_err("unknown bandwidth: %#X\n", bandwidth);
 		break;
 	}
 }
@@ -418,11 +391,11 @@ bool rtl92d_phy_enable_anotherphy(struct ieee80211_hw *hw, bool bmac0)
 
 	rtlhal->during_mac0init_radiob = false;
 	rtlhal->during_mac1init_radioa = false;
-	RT_TRACE(rtlpriv, COMP_RF, DBG_LOUD, "===>\n");
+	rtl_dbg(rtlpriv, COMP_RF, DBG_LOUD, "===>\n");
 	/* MAC0 Need PHY1 load radio_b.txt . Driver use DBI to write. */
 	u1btmp = rtl_read_byte(rtlpriv, mac_reg);
 	if (!(u1btmp & mac_on_bit)) {
-		RT_TRACE(rtlpriv, COMP_INIT, DBG_LOUD, "enable BB & RF\n");
+		rtl_dbg(rtlpriv, COMP_INIT, DBG_LOUD, "enable BB & RF\n");
 		/* Enable BB and RF power */
 		rtl92de_write_dword_dbi(hw, REG_SYS_ISO_CTRL,
 			rtl92de_read_dword_dbi(hw, REG_SYS_ISO_CTRL, direct) |
@@ -432,7 +405,7 @@ bool rtl92d_phy_enable_anotherphy(struct ieee80211_hw *hw, bool bmac0)
 		 * and radio_b.txt has been load. */
 		bresult = false;
 	}
-	RT_TRACE(rtlpriv, COMP_RF, DBG_LOUD, "<===\n");
+	rtl_dbg(rtlpriv, COMP_RF, DBG_LOUD, "<===\n");
 	return bresult;
 
 }
@@ -448,17 +421,17 @@ void rtl92d_phy_powerdown_anotherphy(struct ieee80211_hw *hw, bool bmac0)
 
 	rtlhal->during_mac0init_radiob = false;
 	rtlhal->during_mac1init_radioa = false;
-	RT_TRACE(rtlpriv, COMP_RF, DBG_LOUD, "====>\n");
+	rtl_dbg(rtlpriv, COMP_RF, DBG_LOUD, "====>\n");
 	/* check MAC0 enable or not again now, if
 	 * enabled, not power down radio A. */
 	u1btmp = rtl_read_byte(rtlpriv, mac_reg);
 	if (!(u1btmp & mac_on_bit)) {
-		RT_TRACE(rtlpriv, COMP_INIT, DBG_LOUD, "power down\n");
+		rtl_dbg(rtlpriv, COMP_INIT, DBG_LOUD, "power down\n");
 		/* power down RF radio A according to YuNan's advice. */
 		rtl92de_write_dword_dbi(hw, RFPGA0_XA_LSSIPARAMETER,
 					0x00000000, direct);
 	}
-	RT_TRACE(rtlpriv, COMP_RF, DBG_LOUD, "<====\n");
+	rtl_dbg(rtlpriv, COMP_RF, DBG_LOUD, "<====\n");
 }
 
 bool rtl92d_phy_rf6052_config(struct ieee80211_hw *hw)
@@ -600,8 +573,8 @@ bool rtl92d_phy_rf6052_config(struct ieee80211_hw *hw)
 			break;
 		}
 		if (!rtstatus) {
-			RT_TRACE(rtlpriv, COMP_INIT, DBG_TRACE,
-				 "Radio[%d] Fail!!\n", rfpath);
+			rtl_dbg(rtlpriv, COMP_INIT, DBG_TRACE,
+				"Radio[%d] Fail!!\n", rfpath);
 			goto phy_rf_cfg_fail;
 		}
 
@@ -615,7 +588,7 @@ bool rtl92d_phy_rf6052_config(struct ieee80211_hw *hw)
 		rtl92d_phy_powerdown_anotherphy(hw, false);
 	else if (need_pwrdown_radiob)
 		rtl92d_phy_powerdown_anotherphy(hw, true);
-	RT_TRACE(rtlpriv, COMP_INIT, DBG_TRACE, "<---\n");
+	rtl_dbg(rtlpriv, COMP_INIT, DBG_TRACE, "<---\n");
 	return rtstatus;
 
 phy_rf_cfg_fail:

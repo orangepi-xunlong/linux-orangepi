@@ -1,24 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ARC PGU DRM driver.
  *
  * Copyright (C) 2016 Synopsys, Inc. (www.synopsys.com)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #include <drm/drm_atomic_helper.h>
-#include <drm/drm_crtc_helper.h>
+#include <drm/drm_device.h>
 #include <drm/drm_fb_cma_helper.h>
 #include <drm/drm_gem_cma_helper.h>
 #include <drm/drm_plane_helper.h>
+#include <drm/drm_probe_helper.h>
 #include <linux/clk.h>
 #include <linux/platform_data/simplefb.h>
 
@@ -27,31 +19,35 @@
 
 #define ENCODE_PGU_XY(x, y)	((((x) - 1) << 16) | ((y) - 1))
 
-static struct simplefb_format supported_formats[] = {
-	{ "r5g6b5", 16, {11, 5}, {5, 6}, {0, 5}, {0, 0}, DRM_FORMAT_RGB565 },
-	{ "r8g8b8", 24, {16, 8}, {8, 8}, {0, 8}, {0, 0}, DRM_FORMAT_RGB888 },
+static const u32 arc_pgu_supported_formats[] = {
+	DRM_FORMAT_RGB565,
+	DRM_FORMAT_XRGB8888,
+	DRM_FORMAT_ARGB8888,
 };
 
 static void arc_pgu_set_pxl_fmt(struct drm_crtc *crtc)
 {
 	struct arcpgu_drm_private *arcpgu = crtc_to_arcpgu_priv(crtc);
-	uint32_t pixel_format = crtc->primary->state->fb->pixel_format;
-	struct simplefb_format *format = NULL;
+	const struct drm_framebuffer *fb = crtc->primary->state->fb;
+	uint32_t pixel_format = fb->format->format;
+	u32 format = DRM_FORMAT_INVALID;
 	int i;
+	u32 reg_ctrl;
 
-	for (i = 0; i < ARRAY_SIZE(supported_formats); i++) {
-		if (supported_formats[i].fourcc == pixel_format)
-			format = &supported_formats[i];
+	for (i = 0; i < ARRAY_SIZE(arc_pgu_supported_formats); i++) {
+		if (arc_pgu_supported_formats[i] == pixel_format)
+			format = arc_pgu_supported_formats[i];
 	}
 
-	if (WARN_ON(!format))
+	if (WARN_ON(format == DRM_FORMAT_INVALID))
 		return;
 
-	if (format->fourcc == DRM_FORMAT_RGB888)
-		arc_pgu_write(arcpgu, ARCPGU_REG_CTRL,
-			      arc_pgu_read(arcpgu, ARCPGU_REG_CTRL) |
-					   ARCPGU_MODE_RGB888_MASK);
-
+	reg_ctrl = arc_pgu_read(arcpgu, ARCPGU_REG_CTRL);
+	if (format == DRM_FORMAT_RGB565)
+		reg_ctrl &= ~ARCPGU_MODE_XRGB8888;
+	else
+		reg_ctrl |= ARCPGU_MODE_XRGB8888;
+	arc_pgu_write(arcpgu, ARCPGU_REG_CTRL, reg_ctrl);
 }
 
 static const struct drm_crtc_funcs arc_pgu_crtc_funcs = {
@@ -62,6 +58,20 @@ static const struct drm_crtc_funcs arc_pgu_crtc_funcs = {
 	.atomic_duplicate_state = drm_atomic_helper_crtc_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_crtc_destroy_state,
 };
+
+static enum drm_mode_status arc_pgu_crtc_mode_valid(struct drm_crtc *crtc,
+						    const struct drm_display_mode *mode)
+{
+	struct arcpgu_drm_private *arcpgu = crtc_to_arcpgu_priv(crtc);
+	long rate, clk_rate = mode->clock * 1000;
+	long diff = clk_rate / 200; /* +-0.5% allowed by HDMI spec */
+
+	rate = clk_round_rate(arcpgu->clk, clk_rate);
+	if ((max(rate, clk_rate) - min(rate, clk_rate) < diff) && (rate > 0))
+		return MODE_OK;
+
+	return MODE_NOCLOCK;
+}
 
 static void arc_pgu_crtc_mode_set_nofb(struct drm_crtc *crtc)
 {
@@ -105,7 +115,8 @@ static void arc_pgu_crtc_mode_set_nofb(struct drm_crtc *crtc)
 	clk_set_rate(arcpgu->clk, m->crtc_clock * 1000);
 }
 
-static void arc_pgu_crtc_enable(struct drm_crtc *crtc)
+static void arc_pgu_crtc_atomic_enable(struct drm_crtc *crtc,
+				       struct drm_crtc_state *old_state)
 {
 	struct arcpgu_drm_private *arcpgu = crtc_to_arcpgu_priv(crtc);
 
@@ -115,12 +126,10 @@ static void arc_pgu_crtc_enable(struct drm_crtc *crtc)
 		      ARCPGU_CTRL_ENABLE_MASK);
 }
 
-static void arc_pgu_crtc_disable(struct drm_crtc *crtc)
+static void arc_pgu_crtc_atomic_disable(struct drm_crtc *crtc,
+					struct drm_crtc_state *old_state)
 {
 	struct arcpgu_drm_private *arcpgu = crtc_to_arcpgu_priv(crtc);
-
-	if (!crtc->primary->fb)
-		return;
 
 	clk_disable_unprepare(arcpgu->clk);
 	arc_pgu_write(arcpgu, ARCPGU_REG_CTRL,
@@ -128,44 +137,11 @@ static void arc_pgu_crtc_disable(struct drm_crtc *crtc)
 			      ~ARCPGU_CTRL_ENABLE_MASK);
 }
 
-static int arc_pgu_crtc_atomic_check(struct drm_crtc *crtc,
-				     struct drm_crtc_state *state)
-{
-	struct arcpgu_drm_private *arcpgu = crtc_to_arcpgu_priv(crtc);
-	struct drm_display_mode *mode = &state->adjusted_mode;
-	long rate, clk_rate = mode->clock * 1000;
-
-	rate = clk_round_rate(arcpgu->clk, clk_rate);
-	if (rate != clk_rate)
-		return -EINVAL;
-
-	return 0;
-}
-
-static void arc_pgu_crtc_atomic_begin(struct drm_crtc *crtc,
-				      struct drm_crtc_state *state)
-{
-	struct drm_pending_vblank_event *event = crtc->state->event;
-
-	if (event) {
-		crtc->state->event = NULL;
-
-		spin_lock_irq(&crtc->dev->event_lock);
-		drm_crtc_send_vblank_event(crtc, event);
-		spin_unlock_irq(&crtc->dev->event_lock);
-	}
-}
-
 static const struct drm_crtc_helper_funcs arc_pgu_crtc_helper_funcs = {
-	.mode_set	= drm_helper_crtc_mode_set,
-	.mode_set_base	= drm_helper_crtc_mode_set_base,
+	.mode_valid	= arc_pgu_crtc_mode_valid,
 	.mode_set_nofb	= arc_pgu_crtc_mode_set_nofb,
-	.enable		= arc_pgu_crtc_enable,
-	.disable	= arc_pgu_crtc_disable,
-	.prepare	= arc_pgu_crtc_disable,
-	.commit		= arc_pgu_crtc_enable,
-	.atomic_check	= arc_pgu_crtc_atomic_check,
-	.atomic_begin	= arc_pgu_crtc_atomic_begin,
+	.atomic_enable	= arc_pgu_crtc_atomic_enable,
+	.atomic_disable	= arc_pgu_crtc_atomic_disable,
 };
 
 static void arc_pgu_plane_atomic_update(struct drm_plane *plane,
@@ -188,7 +164,6 @@ static const struct drm_plane_helper_funcs arc_pgu_plane_helper_funcs = {
 
 static void arc_pgu_plane_destroy(struct drm_plane *plane)
 {
-	drm_plane_helper_disable(plane);
 	drm_plane_cleanup(plane);
 }
 
@@ -205,18 +180,16 @@ static struct drm_plane *arc_pgu_plane_init(struct drm_device *drm)
 {
 	struct arcpgu_drm_private *arcpgu = drm->dev_private;
 	struct drm_plane *plane = NULL;
-	u32 formats[ARRAY_SIZE(supported_formats)], i;
 	int ret;
 
 	plane = devm_kzalloc(drm->dev, sizeof(*plane), GFP_KERNEL);
 	if (!plane)
 		return ERR_PTR(-ENOMEM);
 
-	for (i = 0; i < ARRAY_SIZE(supported_formats); i++)
-		formats[i] = supported_formats[i].fourcc;
-
 	ret = drm_universal_plane_init(drm, plane, 0xff, &arc_pgu_plane_funcs,
-				       formats, ARRAY_SIZE(formats),
+				       arc_pgu_supported_formats,
+				       ARRAY_SIZE(arc_pgu_supported_formats),
+				       NULL,
 				       DRM_PLANE_TYPE_PRIMARY, NULL);
 	if (ret)
 		return ERR_PTR(ret);

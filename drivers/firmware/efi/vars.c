@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Originally from efivars.c
  *
  * Copyright (C) 2001,2003,2004 Dell <Matt_Domsch@dell.com>
  * Copyright (C) 2004 Intel Corporation <matthew.e.tolentino@intel.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/capability.h>
@@ -44,10 +31,6 @@ static struct efivars *__efivars;
  * 3) (un)registration of __efivars
  */
 static DEFINE_SEMAPHORE(efivars_lock);
-
-static bool efivar_wq_enabled = true;
-DECLARE_WORK(efivar_work, NULL);
-EXPORT_SYMBOL_GPL(efivar_work);
 
 static bool
 validate_device_path(efi_char16_t *var_name, int match, u8 *buffer,
@@ -404,13 +387,6 @@ static void dup_variable_bug(efi_char16_t *str16, efi_guid_t *vendor_guid,
 	size_t i, len8 = len16 / sizeof(efi_char16_t);
 	char *str8;
 
-	/*
-	 * Disable the workqueue since the algorithm it uses for
-	 * detecting new variables won't work with this buggy
-	 * implementation of GetNextVariableName().
-	 */
-	efivar_wq_enabled = false;
-
 	str8 = kzalloc(len8, GFP_KERNEL);
 	if (!str8)
 		return;
@@ -427,7 +403,6 @@ static void dup_variable_bug(efi_char16_t *str16, efi_guid_t *vendor_guid,
  * efivar_init - build the initial list of EFI variables
  * @func: callback function to invoke for every variable
  * @data: function-specific data to pass to @func
- * @atomic: do we need to execute the @func-loop atomically?
  * @duplicates: error if we encounter duplicates on @head?
  * @head: initialised head of variable list
  *
@@ -509,6 +484,10 @@ int efivar_init(int (*func)(efi_char16_t *, efi_guid_t, unsigned long, void *),
 				}
 			}
 
+			break;
+		case EFI_UNSUPPORTED:
+			err = -EOPNOTSUPP;
+			status = EFI_NOT_FOUND;
 			break;
 		case EFI_NOT_FOUND:
 			break;
@@ -1084,7 +1063,7 @@ EXPORT_SYMBOL_GPL(efivar_entry_iter_end);
  * entry on the list. It is safe for @func to remove entries in the
  * list via efivar_entry_delete().
  *
- * You MUST call efivar_enter_iter_begin() before this function, and
+ * You MUST call efivar_entry_iter_begin() before this function, and
  * efivar_entry_iter_end() afterwards.
  *
  * It is possible to begin iteration from an arbitrary entry within
@@ -1171,16 +1150,6 @@ struct kobject *efivars_kobject(void)
 EXPORT_SYMBOL_GPL(efivars_kobject);
 
 /**
- * efivar_run_worker - schedule the efivar worker thread
- */
-void efivar_run_worker(void)
-{
-	if (efivar_wq_enabled)
-		schedule_work(&efivar_work);
-}
-EXPORT_SYMBOL_GPL(efivar_run_worker);
-
-/**
  * efivars_register - register an efivars
  * @efivars: efivars to register
  * @ops: efivars operations
@@ -1242,3 +1211,9 @@ out:
 	return rv;
 }
 EXPORT_SYMBOL_GPL(efivars_unregister);
+
+int efivar_supports_writes(void)
+{
+	return __efivars && __efivars->ops->set_variable;
+}
+EXPORT_SYMBOL_GPL(efivar_supports_writes);

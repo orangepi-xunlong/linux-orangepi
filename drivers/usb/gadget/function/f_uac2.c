@@ -1,29 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * f_uac2.c -- USB Audio Class 2.0 Function
  *
  * Copyright (C) 2011
  *    Yadwinder Singh (yadi.brar01@gmail.com)
  *    Jaswinder Singh (jaswinder.singh@linaro.org)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * Copyright (C) 2017 Julian Scheel <julian@jusst.de>
  */
 
 #include <linux/usb/audio.h>
 #include <linux/usb/audio-v2.h>
-#include <linux/platform_device.h>
 #include <linux/module.h>
 
-#include <sound/core.h>
-#include <sound/pcm.h>
-#include <sound/pcm_params.h>
-
-#include "u_uac2.h"
-
-/* Keep everyone on toes */
-#define USB_XFERS	2
+#include "u_audio.h"
+#include "u_uac.h"
 
 /*
  * The driver implements a simple UAC_2 topology.
@@ -33,12 +23,8 @@
  *  controlled by two clock sources :
  *    CLK_5 := c_srate, and CLK_6 := p_srate
  */
-#define USB_OUT_IT_ID	1
-#define IO_IN_IT_ID	2
-#define IO_OUT_OT_ID	3
-#define USB_IN_OT_ID	4
-#define USB_OUT_CLK_ID	5
-#define USB_IN_CLK_ID	6
+#define USB_OUT_CLK_ID	(out_clk_src_desc.bClockID)
+#define USB_IN_CLK_ID	(in_clk_src_desc.bClockID)
 
 #define CONTROL_ABSENT	0
 #define CONTROL_RDONLY	1
@@ -54,504 +40,6 @@
 #define UNFLW_CTRL	8
 #define OVFLW_CTRL	10
 
-static const char *uac2_name = "snd_uac2";
-
-struct uac2_req {
-	struct uac2_rtd_params *pp; /* parent param */
-	struct usb_request *req;
-};
-
-struct uac2_rtd_params {
-	struct snd_uac2_chip *uac2; /* parent chip */
-	bool ep_enabled; /* if the ep is enabled */
-	/* Size of the ring buffer */
-	size_t dma_bytes;
-	unsigned char *dma_area;
-
-	struct snd_pcm_substream *ss;
-
-	/* Ring buffer */
-	ssize_t hw_ptr;
-
-	void *rbuf;
-
-	size_t period_size;
-
-	unsigned max_psize;
-	struct uac2_req ureq[USB_XFERS];
-
-	spinlock_t lock;
-};
-
-struct snd_uac2_chip {
-	struct platform_device pdev;
-	struct platform_driver pdrv;
-
-	struct uac2_rtd_params p_prm;
-	struct uac2_rtd_params c_prm;
-
-	struct snd_card *card;
-	struct snd_pcm *pcm;
-
-	/* timekeeping for the playback endpoint */
-	unsigned int p_interval;
-	unsigned int p_residue;
-
-	/* pre-calculated values for playback iso completion */
-	unsigned int p_pktsize;
-	unsigned int p_pktsize_residue;
-	unsigned int p_framesize;
-};
-
-#define BUFF_SIZE_MAX	(PAGE_SIZE * 16)
-#define PRD_SIZE_MAX	PAGE_SIZE
-#define MIN_PERIODS	4
-
-static struct snd_pcm_hardware uac2_pcm_hardware = {
-	.info = SNDRV_PCM_INFO_INTERLEAVED | SNDRV_PCM_INFO_BLOCK_TRANSFER
-		 | SNDRV_PCM_INFO_MMAP | SNDRV_PCM_INFO_MMAP_VALID
-		 | SNDRV_PCM_INFO_PAUSE | SNDRV_PCM_INFO_RESUME,
-	.rates = SNDRV_PCM_RATE_CONTINUOUS,
-	.periods_max = BUFF_SIZE_MAX / PRD_SIZE_MAX,
-	.buffer_bytes_max = BUFF_SIZE_MAX,
-	.period_bytes_max = PRD_SIZE_MAX,
-	.periods_min = MIN_PERIODS,
-};
-
-struct audio_dev {
-	u8 ac_intf, ac_alt;
-	u8 as_out_intf, as_out_alt;
-	u8 as_in_intf, as_in_alt;
-
-	struct usb_ep *in_ep, *out_ep;
-	struct usb_function func;
-
-	/* The ALSA Sound Card it represents on the USB-Client side */
-	struct snd_uac2_chip uac2;
-};
-
-static inline
-struct audio_dev *func_to_agdev(struct usb_function *f)
-{
-	return container_of(f, struct audio_dev, func);
-}
-
-static inline
-struct audio_dev *uac2_to_agdev(struct snd_uac2_chip *u)
-{
-	return container_of(u, struct audio_dev, uac2);
-}
-
-static inline
-struct snd_uac2_chip *pdev_to_uac2(struct platform_device *p)
-{
-	return container_of(p, struct snd_uac2_chip, pdev);
-}
-
-static inline
-struct f_uac2_opts *agdev_to_uac2_opts(struct audio_dev *agdev)
-{
-	return container_of(agdev->func.fi, struct f_uac2_opts, func_inst);
-}
-
-static inline
-uint num_channels(uint chanmask)
-{
-	uint num = 0;
-
-	while (chanmask) {
-		num += (chanmask & 1);
-		chanmask >>= 1;
-	}
-
-	return num;
-}
-
-static void
-agdev_iso_complete(struct usb_ep *ep, struct usb_request *req)
-{
-	unsigned pending;
-	unsigned long flags;
-	unsigned int hw_ptr;
-	bool update_alsa = false;
-	int status = req->status;
-	struct uac2_req *ur = req->context;
-	struct snd_pcm_substream *substream;
-	struct uac2_rtd_params *prm = ur->pp;
-	struct snd_uac2_chip *uac2 = prm->uac2;
-
-	/* i/f shutting down */
-	if (!prm->ep_enabled || req->status == -ESHUTDOWN)
-		return;
-
-	/*
-	 * We can't really do much about bad xfers.
-	 * Afterall, the ISOCH xfers could fail legitimately.
-	 */
-	if (status)
-		pr_debug("%s: iso_complete status(%d) %d/%d\n",
-			__func__, status, req->actual, req->length);
-
-	substream = prm->ss;
-
-	/* Do nothing if ALSA isn't active */
-	if (!substream)
-		goto exit;
-
-	spin_lock_irqsave(&prm->lock, flags);
-
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		/*
-		 * For each IN packet, take the quotient of the current data
-		 * rate and the endpoint's interval as the base packet size.
-		 * If there is a residue from this division, add it to the
-		 * residue accumulator.
-		 */
-		req->length = uac2->p_pktsize;
-		uac2->p_residue += uac2->p_pktsize_residue;
-
-		/*
-		 * Whenever there are more bytes in the accumulator than we
-		 * need to add one more sample frame, increase this packet's
-		 * size and decrease the accumulator.
-		 */
-		if (uac2->p_residue / uac2->p_interval >= uac2->p_framesize) {
-			req->length += uac2->p_framesize;
-			uac2->p_residue -= uac2->p_framesize *
-					   uac2->p_interval;
-		}
-
-		req->actual = req->length;
-	}
-
-	pending = prm->hw_ptr % prm->period_size;
-	pending += req->actual;
-	if (pending >= prm->period_size)
-		update_alsa = true;
-
-	hw_ptr = prm->hw_ptr;
-	prm->hw_ptr = (prm->hw_ptr + req->actual) % prm->dma_bytes;
-
-	spin_unlock_irqrestore(&prm->lock, flags);
-
-	/* Pack USB load in ALSA ring buffer */
-	pending = prm->dma_bytes - hw_ptr;
-
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		if (unlikely(pending < req->actual)) {
-			memcpy(req->buf, prm->dma_area + hw_ptr, pending);
-			memcpy(req->buf + pending, prm->dma_area,
-			       req->actual - pending);
-		} else {
-			memcpy(req->buf, prm->dma_area + hw_ptr, req->actual);
-		}
-	} else {
-		if (unlikely(pending < req->actual)) {
-			memcpy(prm->dma_area + hw_ptr, req->buf, pending);
-			memcpy(prm->dma_area, req->buf + pending,
-			       req->actual - pending);
-		} else {
-			memcpy(prm->dma_area + hw_ptr, req->buf, req->actual);
-		}
-	}
-
-exit:
-	if (usb_ep_queue(ep, req, GFP_ATOMIC))
-		dev_err(&uac2->pdev.dev, "%d Error!\n", __LINE__);
-
-	if (update_alsa)
-		snd_pcm_period_elapsed(substream);
-
-	return;
-}
-
-static int
-uac2_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
-{
-	struct snd_uac2_chip *uac2 = snd_pcm_substream_chip(substream);
-	struct uac2_rtd_params *prm;
-	unsigned long flags;
-	int err = 0;
-
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		prm = &uac2->p_prm;
-	else
-		prm = &uac2->c_prm;
-
-	spin_lock_irqsave(&prm->lock, flags);
-
-	/* Reset */
-	prm->hw_ptr = 0;
-
-	switch (cmd) {
-	case SNDRV_PCM_TRIGGER_START:
-	case SNDRV_PCM_TRIGGER_RESUME:
-		prm->ss = substream;
-		break;
-	case SNDRV_PCM_TRIGGER_STOP:
-	case SNDRV_PCM_TRIGGER_SUSPEND:
-		prm->ss = NULL;
-		break;
-	default:
-		err = -EINVAL;
-	}
-
-	spin_unlock_irqrestore(&prm->lock, flags);
-
-	/* Clear buffer after Play stops */
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK && !prm->ss)
-		memset(prm->rbuf, 0, prm->max_psize * USB_XFERS);
-
-	return err;
-}
-
-static snd_pcm_uframes_t uac2_pcm_pointer(struct snd_pcm_substream *substream)
-{
-	struct snd_uac2_chip *uac2 = snd_pcm_substream_chip(substream);
-	struct uac2_rtd_params *prm;
-
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		prm = &uac2->p_prm;
-	else
-		prm = &uac2->c_prm;
-
-	return bytes_to_frames(substream->runtime, prm->hw_ptr);
-}
-
-static int uac2_pcm_hw_params(struct snd_pcm_substream *substream,
-			       struct snd_pcm_hw_params *hw_params)
-{
-	struct snd_uac2_chip *uac2 = snd_pcm_substream_chip(substream);
-	struct uac2_rtd_params *prm;
-	int err;
-
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		prm = &uac2->p_prm;
-	else
-		prm = &uac2->c_prm;
-
-	err = snd_pcm_lib_malloc_pages(substream,
-					params_buffer_bytes(hw_params));
-	if (err >= 0) {
-		prm->dma_bytes = substream->runtime->dma_bytes;
-		prm->dma_area = substream->runtime->dma_area;
-		prm->period_size = params_period_bytes(hw_params);
-	}
-
-	return err;
-}
-
-static int uac2_pcm_hw_free(struct snd_pcm_substream *substream)
-{
-	struct snd_uac2_chip *uac2 = snd_pcm_substream_chip(substream);
-	struct uac2_rtd_params *prm;
-
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		prm = &uac2->p_prm;
-	else
-		prm = &uac2->c_prm;
-
-	prm->dma_area = NULL;
-	prm->dma_bytes = 0;
-	prm->period_size = 0;
-
-	return snd_pcm_lib_free_pages(substream);
-}
-
-static int uac2_pcm_open(struct snd_pcm_substream *substream)
-{
-	struct snd_uac2_chip *uac2 = snd_pcm_substream_chip(substream);
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct audio_dev *audio_dev;
-	struct f_uac2_opts *opts;
-	int p_ssize, c_ssize;
-	int p_srate, c_srate;
-	int p_chmask, c_chmask;
-
-	audio_dev = uac2_to_agdev(uac2);
-	opts = container_of(audio_dev->func.fi, struct f_uac2_opts, func_inst);
-	p_ssize = opts->p_ssize;
-	c_ssize = opts->c_ssize;
-	p_srate = opts->p_srate;
-	c_srate = opts->c_srate;
-	p_chmask = opts->p_chmask;
-	c_chmask = opts->c_chmask;
-	uac2->p_residue = 0;
-
-	runtime->hw = uac2_pcm_hardware;
-
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		spin_lock_init(&uac2->p_prm.lock);
-		runtime->hw.rate_min = p_srate;
-		switch (p_ssize) {
-		case 3:
-			runtime->hw.formats = SNDRV_PCM_FMTBIT_S24_3LE;
-			break;
-		case 4:
-			runtime->hw.formats = SNDRV_PCM_FMTBIT_S32_LE;
-			break;
-		default:
-			runtime->hw.formats = SNDRV_PCM_FMTBIT_S16_LE;
-			break;
-		}
-		runtime->hw.channels_min = num_channels(p_chmask);
-		runtime->hw.period_bytes_min = 2 * uac2->p_prm.max_psize
-						/ runtime->hw.periods_min;
-	} else {
-		spin_lock_init(&uac2->c_prm.lock);
-		runtime->hw.rate_min = c_srate;
-		switch (c_ssize) {
-		case 3:
-			runtime->hw.formats = SNDRV_PCM_FMTBIT_S24_3LE;
-			break;
-		case 4:
-			runtime->hw.formats = SNDRV_PCM_FMTBIT_S32_LE;
-			break;
-		default:
-			runtime->hw.formats = SNDRV_PCM_FMTBIT_S16_LE;
-			break;
-		}
-		runtime->hw.channels_min = num_channels(c_chmask);
-		runtime->hw.period_bytes_min = 2 * uac2->c_prm.max_psize
-						/ runtime->hw.periods_min;
-	}
-
-	runtime->hw.rate_max = runtime->hw.rate_min;
-	runtime->hw.channels_max = runtime->hw.channels_min;
-
-	snd_pcm_hw_constraint_integer(runtime, SNDRV_PCM_HW_PARAM_PERIODS);
-
-	return 0;
-}
-
-/* ALSA cries without these function pointers */
-static int uac2_pcm_null(struct snd_pcm_substream *substream)
-{
-	return 0;
-}
-
-static struct snd_pcm_ops uac2_pcm_ops = {
-	.open = uac2_pcm_open,
-	.close = uac2_pcm_null,
-	.ioctl = snd_pcm_lib_ioctl,
-	.hw_params = uac2_pcm_hw_params,
-	.hw_free = uac2_pcm_hw_free,
-	.trigger = uac2_pcm_trigger,
-	.pointer = uac2_pcm_pointer,
-	.prepare = uac2_pcm_null,
-};
-
-static int snd_uac2_probe(struct platform_device *pdev)
-{
-	struct snd_uac2_chip *uac2 = pdev_to_uac2(pdev);
-	struct snd_card *card;
-	struct snd_pcm *pcm;
-	struct audio_dev *audio_dev;
-	struct f_uac2_opts *opts;
-	int err;
-	int p_chmask, c_chmask;
-
-	audio_dev = uac2_to_agdev(uac2);
-	opts = container_of(audio_dev->func.fi, struct f_uac2_opts, func_inst);
-	p_chmask = opts->p_chmask;
-	c_chmask = opts->c_chmask;
-
-	/* Choose any slot, with no id */
-	err = snd_card_new(&pdev->dev, -1, NULL, THIS_MODULE, 0, &card);
-	if (err < 0)
-		return err;
-
-	uac2->card = card;
-
-	/*
-	 * Create first PCM device
-	 * Create a substream only for non-zero channel streams
-	 */
-	err = snd_pcm_new(uac2->card, "UAC2 PCM", 0,
-			       p_chmask ? 1 : 0, c_chmask ? 1 : 0, &pcm);
-	if (err < 0)
-		goto snd_fail;
-
-	strcpy(pcm->name, "UAC2 PCM");
-	pcm->private_data = uac2;
-
-	uac2->pcm = pcm;
-
-	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK, &uac2_pcm_ops);
-	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_CAPTURE, &uac2_pcm_ops);
-
-	strcpy(card->driver, "UAC2_Gadget");
-	strcpy(card->shortname, "UAC2_Gadget");
-	sprintf(card->longname, "UAC2_Gadget %i", pdev->id);
-
-	snd_pcm_lib_preallocate_pages_for_all(pcm, SNDRV_DMA_TYPE_CONTINUOUS,
-		snd_dma_continuous_data(GFP_KERNEL), 0, BUFF_SIZE_MAX);
-
-	err = snd_card_register(card);
-	if (!err) {
-		platform_set_drvdata(pdev, card);
-		return 0;
-	}
-
-snd_fail:
-	snd_card_free(card);
-
-	uac2->pcm = NULL;
-	uac2->card = NULL;
-
-	return err;
-}
-
-static int snd_uac2_remove(struct platform_device *pdev)
-{
-	struct snd_card *card = platform_get_drvdata(pdev);
-
-	if (card)
-		return snd_card_free(card);
-
-	return 0;
-}
-
-static void snd_uac2_release(struct device *dev)
-{
-	dev_dbg(dev, "releasing '%s'\n", dev_name(dev));
-}
-
-static int alsa_uac2_init(struct audio_dev *agdev)
-{
-	struct snd_uac2_chip *uac2 = &agdev->uac2;
-	int err;
-
-	uac2->pdrv.probe = snd_uac2_probe;
-	uac2->pdrv.remove = snd_uac2_remove;
-	uac2->pdrv.driver.name = uac2_name;
-
-	uac2->pdev.id = 0;
-	uac2->pdev.name = uac2_name;
-	uac2->pdev.dev.release = snd_uac2_release;
-
-	/* Register snd_uac2 driver */
-	err = platform_driver_register(&uac2->pdrv);
-	if (err)
-		return err;
-
-	/* Register snd_uac2 device */
-	err = platform_device_register(&uac2->pdev);
-	if (err)
-		platform_driver_unregister(&uac2->pdrv);
-
-	return err;
-}
-
-static void alsa_uac2_exit(struct audio_dev *agdev)
-{
-	struct snd_uac2_chip *uac2 = &agdev->uac2;
-
-	platform_driver_unregister(&uac2->pdrv);
-	platform_device_unregister(&uac2->pdev);
-}
-
-
 /* --------- USB Function Interface ------------- */
 
 enum {
@@ -561,6 +49,8 @@ enum {
 	STR_CLKSRC_OUT,
 	STR_USB_IT,
 	STR_IO_IT,
+	STR_USB_OT_FU,
+	STR_IO_OT_FU,
 	STR_USB_OT,
 	STR_IO_OT,
 	STR_AS_OUT_ALT0,
@@ -569,16 +59,15 @@ enum {
 	STR_AS_IN_ALT1,
 };
 
-static char clksrc_in[8];
-static char clksrc_out[8];
-
 static struct usb_string strings_fn[] = {
 	[STR_ASSOC].s = "Source/Sink",
 	[STR_IF_CTRL].s = "Topology Control",
-	[STR_CLKSRC_IN].s = clksrc_in,
-	[STR_CLKSRC_OUT].s = clksrc_out,
+	[STR_CLKSRC_IN].s = "Input clock",
+	[STR_CLKSRC_OUT].s = "Output clock",
 	[STR_USB_IT].s = "USBH Out",
 	[STR_IO_IT].s = "USBD Out",
+	[STR_USB_OT_FU].s = "USBH In Feature Unit",
+	[STR_IO_OT_FU].s = "USBD In Feature Unit",
 	[STR_USB_OT].s = "USBH In",
 	[STR_IO_OT].s = "USBD In",
 	[STR_AS_OUT_ALT0].s = "Playback Inactive",
@@ -627,9 +116,9 @@ static struct uac_clock_source_descriptor in_clk_src_desc = {
 	.bDescriptorType = USB_DT_CS_INTERFACE,
 
 	.bDescriptorSubtype = UAC2_CLOCK_SOURCE,
-	.bClockID = USB_IN_CLK_ID,
+	/* .bClockID = DYNAMIC */
 	.bmAttributes = UAC_CLOCK_SOURCE_TYPE_INT_FIXED,
-	.bmControls = (CONTROL_RDONLY << CLK_FREQ_CTRL),
+	.bmControls = (CONTROL_RDWR << CLK_FREQ_CTRL),
 	.bAssocTerminal = 0,
 };
 
@@ -639,9 +128,9 @@ static struct uac_clock_source_descriptor out_clk_src_desc = {
 	.bDescriptorType = USB_DT_CS_INTERFACE,
 
 	.bDescriptorSubtype = UAC2_CLOCK_SOURCE,
-	.bClockID = USB_OUT_CLK_ID,
+	/* .bClockID = DYNAMIC */
 	.bmAttributes = UAC_CLOCK_SOURCE_TYPE_INT_FIXED,
-	.bmControls = (CONTROL_RDONLY << CLK_FREQ_CTRL),
+	.bmControls = (CONTROL_RDWR << CLK_FREQ_CTRL),
 	.bAssocTerminal = 0,
 };
 
@@ -651,12 +140,12 @@ static struct uac2_input_terminal_descriptor usb_out_it_desc = {
 	.bDescriptorType = USB_DT_CS_INTERFACE,
 
 	.bDescriptorSubtype = UAC_INPUT_TERMINAL,
-	.bTerminalID = USB_OUT_IT_ID,
+	/* .bTerminalID = DYNAMIC */
 	.wTerminalType = cpu_to_le16(UAC_TERMINAL_STREAMING),
 	.bAssocTerminal = 0,
-	.bCSourceID = USB_OUT_CLK_ID,
+	/* .bCSourceID = DYNAMIC */
 	.iChannelNames = 0,
-	.bmControls = (CONTROL_RDWR << COPY_CTRL),
+	.bmControls = cpu_to_le16(CONTROL_RDWR << COPY_CTRL),
 };
 
 /* Input Terminal for I/O-In */
@@ -665,12 +154,87 @@ static struct uac2_input_terminal_descriptor io_in_it_desc = {
 	.bDescriptorType = USB_DT_CS_INTERFACE,
 
 	.bDescriptorSubtype = UAC_INPUT_TERMINAL,
-	.bTerminalID = IO_IN_IT_ID,
-	.wTerminalType = cpu_to_le16(UAC_INPUT_TERMINAL_UNDEFINED),
+	/* .bTerminalID = DYNAMIC */
+	.wTerminalType = cpu_to_le16(UAC_INPUT_TERMINAL_MICROPHONE),
 	.bAssocTerminal = 0,
-	.bCSourceID = USB_IN_CLK_ID,
+	/* .bCSourceID = DYNAMIC */
 	.iChannelNames = 0,
-	.bmControls = (CONTROL_RDWR << COPY_CTRL),
+	.bmControls = cpu_to_le16(CONTROL_RDWR << COPY_CTRL),
+};
+
+DECLARE_UAC2_FEATURE_UNIT_DESCRIPTOR(0);
+
+/* Feature Unit for I/O-out */
+static struct uac2_feature_unit_descriptor_0 io_out_ot_fu_desc = {
+
+	.bLength = UAC2_DT_FEATURE_UNIT_SIZE(0),
+	.bDescriptorType = USB_DT_CS_INTERFACE,
+
+	.bDescriptorSubtype = UAC_FEATURE_UNIT,
+	/* .bUnitID = DYNAMIC */
+	/* .bSourceID = DYNAMIC */
+	.bmaControls[0] = (UAC2_CONTROL_BIT_RW(UAC_FU_MUTE) |
+			   UAC2_CONTROL_BIT_RW(UAC_FU_VOLUME)),
+};
+
+static struct usb_audio_control c_mute_control = {
+	.list = LIST_HEAD_INIT(c_mute_control.list),
+	.name = "Capture Mute",
+	.type = UAC_FU_MUTE,
+	.set = u_audio_fu_set_cmd,
+	.get = u_audio_fu_get_cmd,
+};
+
+static struct usb_audio_control c_volume_control = {
+	.list = LIST_HEAD_INIT(c_volume_control.list),
+	.name = "Capture Volume",
+	.type = UAC_FU_VOLUME,
+	.set = u_audio_fu_set_cmd,
+	.get = u_audio_fu_get_cmd,
+};
+
+static struct usb_audio_control_selector c_feature_unit = {
+	.list = LIST_HEAD_INIT(c_feature_unit.list),
+	/* .id = DYNAMIC */
+	.name = "Capture Mute & Volume Control",
+	.type = UAC_FEATURE_UNIT,
+	.desc = (struct usb_descriptor_header *)&io_out_ot_fu_desc,
+};
+
+/* Feature Unit for USB_IN */
+static struct uac2_feature_unit_descriptor_0 usb_in_ot_fu_desc = {
+	.bLength = UAC2_DT_FEATURE_UNIT_SIZE(0),
+	.bDescriptorType = USB_DT_CS_INTERFACE,
+
+	.bDescriptorSubtype = UAC_FEATURE_UNIT,
+	/* .bUnitID = DYNAMIC */
+	/* .bSourceID = DYNAMIC */
+	.bmaControls[0] = (UAC2_CONTROL_BIT_RW(UAC_FU_MUTE) |
+			   UAC2_CONTROL_BIT_RW(UAC_FU_VOLUME)),
+};
+
+static struct usb_audio_control p_mute_control = {
+	.list = LIST_HEAD_INIT(p_mute_control.list),
+	.name = "Playback Mute",
+	.type = UAC_FU_MUTE,
+	.set = u_audio_fu_set_cmd,
+	.get = u_audio_fu_get_cmd,
+};
+
+static struct usb_audio_control p_volume_control = {
+	.list = LIST_HEAD_INIT(p_volume_control.list),
+	.name = "Playback Volume",
+	.type = UAC_FU_VOLUME,
+	.set = u_audio_fu_set_cmd,
+	.get = u_audio_fu_get_cmd,
+};
+
+static struct usb_audio_control_selector p_feature_unit = {
+	.list = LIST_HEAD_INIT(p_feature_unit.list),
+	/* .id = DYNAMIC */
+	.name = "Playback Mute & Volume Control",
+	.type = UAC_FEATURE_UNIT,
+	.desc = (struct usb_descriptor_header *)&usb_in_ot_fu_desc,
 };
 
 /* Ouput Terminal for USB_IN */
@@ -679,12 +243,12 @@ static struct uac2_output_terminal_descriptor usb_in_ot_desc = {
 	.bDescriptorType = USB_DT_CS_INTERFACE,
 
 	.bDescriptorSubtype = UAC_OUTPUT_TERMINAL,
-	.bTerminalID = USB_IN_OT_ID,
+	/* .bTerminalID = DYNAMIC */
 	.wTerminalType = cpu_to_le16(UAC_TERMINAL_STREAMING),
 	.bAssocTerminal = 0,
-	.bSourceID = IO_IN_IT_ID,
-	.bCSourceID = USB_IN_CLK_ID,
-	.bmControls = (CONTROL_RDWR << COPY_CTRL),
+	/* .bSourceID = DYNAMIC */
+	/* .bCSourceID = DYNAMIC */
+	.bmControls = cpu_to_le16(CONTROL_RDWR << COPY_CTRL),
 };
 
 /* Ouput Terminal for I/O-Out */
@@ -693,24 +257,26 @@ static struct uac2_output_terminal_descriptor io_out_ot_desc = {
 	.bDescriptorType = USB_DT_CS_INTERFACE,
 
 	.bDescriptorSubtype = UAC_OUTPUT_TERMINAL,
-	.bTerminalID = IO_OUT_OT_ID,
-	.wTerminalType = cpu_to_le16(UAC_OUTPUT_TERMINAL_UNDEFINED),
+	/* .bTerminalID = DYNAMIC */
+	.wTerminalType = cpu_to_le16(UAC_OUTPUT_TERMINAL_SPEAKER),
 	.bAssocTerminal = 0,
-	.bSourceID = USB_OUT_IT_ID,
-	.bCSourceID = USB_OUT_CLK_ID,
-	.bmControls = (CONTROL_RDWR << COPY_CTRL),
+	/* .bSourceID = DYNAMIC */
+	/* .bCSourceID = DYNAMIC */
+	.bmControls = cpu_to_le16(CONTROL_RDWR << COPY_CTRL),
 };
 
 static struct uac2_ac_header_descriptor ac_hdr_desc = {
 	.bLength = sizeof ac_hdr_desc,
 	.bDescriptorType = USB_DT_CS_INTERFACE,
 
-	.bDescriptorSubtype = UAC_MS_HEADER,
+	.bDescriptorSubtype = UAC_HEADER,
 	.bcdADC = cpu_to_le16(0x200),
 	.bCategory = UAC2_FUNCTION_IO_BOX,
-	.wTotalLength = sizeof in_clk_src_desc + sizeof out_clk_src_desc
-			 + sizeof usb_out_it_desc + sizeof io_in_it_desc
-			+ sizeof usb_in_ot_desc + sizeof io_out_ot_desc,
+	.wTotalLength = cpu_to_le16(sizeof ac_hdr_desc + sizeof in_clk_src_desc
+			+ sizeof out_clk_src_desc + sizeof usb_out_it_desc
+			+ sizeof io_in_it_desc + sizeof usb_in_ot_desc
+			+ sizeof io_out_ot_desc + sizeof usb_in_ot_fu_desc
+			+ sizeof io_out_ot_fu_desc),
 	.bmControls = 0,
 };
 
@@ -744,7 +310,7 @@ static struct uac2_as_header_descriptor as_out_hdr_desc = {
 	.bDescriptorType = USB_DT_CS_INTERFACE,
 
 	.bDescriptorSubtype = UAC_AS_GENERAL,
-	.bTerminalLink = USB_OUT_IT_ID,
+	/* .bTerminalLink = DYNAMIC */
 	.bmControls = 0,
 	.bFormatType = UAC_FORMAT_TYPE_I,
 	.bmFormats = cpu_to_le32(UAC_FORMAT_TYPE_I_PCM),
@@ -765,8 +331,8 @@ static struct usb_endpoint_descriptor fs_epout_desc = {
 	.bDescriptorType = USB_DT_ENDPOINT,
 
 	.bEndpointAddress = USB_DIR_OUT,
-	.bmAttributes = USB_ENDPOINT_XFER_ISOC | USB_ENDPOINT_SYNC_ASYNC,
-	.wMaxPacketSize = cpu_to_le16(1023),
+	.bmAttributes = USB_ENDPOINT_XFER_ISOC | USB_ENDPOINT_SYNC_ADAPTIVE,
+	/* .wMaxPacketSize = DYNAMIC */
 	.bInterval = 1,
 };
 
@@ -774,9 +340,27 @@ static struct usb_endpoint_descriptor hs_epout_desc = {
 	.bLength = USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType = USB_DT_ENDPOINT,
 
-	.bmAttributes = USB_ENDPOINT_XFER_ISOC | USB_ENDPOINT_SYNC_ASYNC,
-	.wMaxPacketSize = cpu_to_le16(1024),
+	.bmAttributes = USB_ENDPOINT_XFER_ISOC | USB_ENDPOINT_SYNC_ADAPTIVE,
+	/* .wMaxPacketSize = DYNAMIC */
 	.bInterval = 4,
+};
+
+static struct usb_endpoint_descriptor ss_epout_desc = {
+	.bLength = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType = USB_DT_ENDPOINT,
+
+	.bEndpointAddress = USB_DIR_OUT,
+	.bmAttributes = USB_ENDPOINT_XFER_ISOC | USB_ENDPOINT_SYNC_ADAPTIVE,
+	/* .wMaxPacketSize = DYNAMIC */
+	.bInterval = 4,
+};
+
+static struct usb_ss_ep_comp_descriptor ss_epout_desc_comp = {
+	.bLength		= sizeof(ss_epout_desc_comp),
+	.bDescriptorType	= USB_DT_SS_ENDPOINT_COMP,
+	.bMaxBurst		= 0,
+	.bmAttributes		= 0,
+	/* wBytesPerInterval = DYNAMIC */
 };
 
 /* CS AS ISO OUT Endpoint */
@@ -821,7 +405,7 @@ static struct uac2_as_header_descriptor as_in_hdr_desc = {
 	.bDescriptorType = USB_DT_CS_INTERFACE,
 
 	.bDescriptorSubtype = UAC_AS_GENERAL,
-	.bTerminalLink = USB_IN_OT_ID,
+	/* .bTerminalLink = DYNAMIC */
 	.bmControls = 0,
 	.bFormatType = UAC_FORMAT_TYPE_I,
 	.bmFormats = cpu_to_le32(UAC_FORMAT_TYPE_I_PCM),
@@ -842,8 +426,8 @@ static struct usb_endpoint_descriptor fs_epin_desc = {
 	.bDescriptorType = USB_DT_ENDPOINT,
 
 	.bEndpointAddress = USB_DIR_IN,
-	.bmAttributes = USB_ENDPOINT_XFER_ISOC | USB_ENDPOINT_SYNC_ASYNC,
-	.wMaxPacketSize = cpu_to_le16(1023),
+	.bmAttributes = USB_ENDPOINT_XFER_ISOC | USB_ENDPOINT_SYNC_SYNC,
+	/* .wMaxPacketSize = DYNAMIC */
 	.bInterval = 1,
 };
 
@@ -851,9 +435,27 @@ static struct usb_endpoint_descriptor hs_epin_desc = {
 	.bLength = USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType = USB_DT_ENDPOINT,
 
-	.bmAttributes = USB_ENDPOINT_XFER_ISOC | USB_ENDPOINT_SYNC_ASYNC,
-	.wMaxPacketSize = cpu_to_le16(1024),
+	.bmAttributes = USB_ENDPOINT_XFER_ISOC | USB_ENDPOINT_SYNC_SYNC,
+	/* .wMaxPacketSize = DYNAMIC */
 	.bInterval = 4,
+};
+
+static struct usb_endpoint_descriptor ss_epin_desc = {
+	.bLength = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType = USB_DT_ENDPOINT,
+
+	.bEndpointAddress = USB_DIR_IN,
+	.bmAttributes = USB_ENDPOINT_XFER_ISOC | USB_ENDPOINT_SYNC_ASYNC,
+	/* .wMaxPacketSize = DYNAMIC */
+	.bInterval = 4,
+};
+
+static struct usb_ss_ep_comp_descriptor ss_epin_desc_comp = {
+	.bLength		= sizeof(ss_epin_desc_comp),
+	.bDescriptorType	= USB_DT_SS_ENDPOINT_COMP,
+	.bMaxBurst		= 0,
+	.bmAttributes		= 0,
+	/* wBytesPerInterval = DYNAMIC */
 };
 
 /* CS AS ISO IN Endpoint */
@@ -877,6 +479,8 @@ static struct usb_descriptor_header *fs_audio_desc[] = {
 	(struct usb_descriptor_header *)&out_clk_src_desc,
 	(struct usb_descriptor_header *)&usb_out_it_desc,
 	(struct usb_descriptor_header *)&io_in_it_desc,
+	(struct usb_descriptor_header *)&usb_in_ot_fu_desc,
+	(struct usb_descriptor_header *)&io_out_ot_fu_desc,
 	(struct usb_descriptor_header *)&usb_in_ot_desc,
 	(struct usb_descriptor_header *)&io_out_ot_desc,
 
@@ -907,6 +511,8 @@ static struct usb_descriptor_header *hs_audio_desc[] = {
 	(struct usb_descriptor_header *)&out_clk_src_desc,
 	(struct usb_descriptor_header *)&usb_out_it_desc,
 	(struct usb_descriptor_header *)&io_in_it_desc,
+	(struct usb_descriptor_header *)&usb_in_ot_fu_desc,
+	(struct usb_descriptor_header *)&io_out_ot_fu_desc,
 	(struct usb_descriptor_header *)&usb_in_ot_desc,
 	(struct usb_descriptor_header *)&io_out_ot_desc,
 
@@ -928,78 +534,281 @@ static struct usb_descriptor_header *hs_audio_desc[] = {
 	NULL,
 };
 
+static struct usb_descriptor_header *ss_audio_desc[] = {
+	(struct usb_descriptor_header *)&iad_desc,
+	(struct usb_descriptor_header *)&std_ac_if_desc,
+
+	(struct usb_descriptor_header *)&ac_hdr_desc,
+	(struct usb_descriptor_header *)&in_clk_src_desc,
+	(struct usb_descriptor_header *)&out_clk_src_desc,
+	(struct usb_descriptor_header *)&usb_out_it_desc,
+	(struct usb_descriptor_header *)&io_in_it_desc,
+	(struct usb_descriptor_header *)&usb_in_ot_fu_desc,
+	(struct usb_descriptor_header *)&io_out_ot_fu_desc,
+	(struct usb_descriptor_header *)&usb_in_ot_desc,
+	(struct usb_descriptor_header *)&io_out_ot_desc,
+
+	(struct usb_descriptor_header *)&std_as_out_if0_desc,
+	(struct usb_descriptor_header *)&std_as_out_if1_desc,
+
+	(struct usb_descriptor_header *)&as_out_hdr_desc,
+	(struct usb_descriptor_header *)&as_out_fmt1_desc,
+	(struct usb_descriptor_header *)&ss_epout_desc,
+	(struct usb_descriptor_header *)&ss_epout_desc_comp,
+	(struct usb_descriptor_header *)&as_iso_out_desc,
+
+	(struct usb_descriptor_header *)&std_as_in_if0_desc,
+	(struct usb_descriptor_header *)&std_as_in_if1_desc,
+
+	(struct usb_descriptor_header *)&as_in_hdr_desc,
+	(struct usb_descriptor_header *)&as_in_fmt1_desc,
+	(struct usb_descriptor_header *)&ss_epin_desc,
+	(struct usb_descriptor_header *)&ss_epin_desc_comp,
+	(struct usb_descriptor_header *)&as_iso_in_desc,
+	NULL,
+};
+
+struct cntrl_cur_lay2 {
+	__le16	dCUR;
+};
+
+struct cntrl_range_lay2 {
+	__le16	wNumSubRanges;
+	__le16	dMIN;
+	__le16	dMAX;
+	__le16	dRES;
+} __packed;
+
 struct cntrl_cur_lay3 {
 	__le32	dCUR;
 };
 
 struct cntrl_range_lay3 {
-	__le16	wNumSubRanges;
 	__le32	dMIN;
 	__le32	dMAX;
 	__le32	dRES;
 } __packed;
 
-static inline void
-free_ep(struct uac2_rtd_params *prm, struct usb_ep *ep)
+#define ranges_size(c) (sizeof(c.wNumSubRanges) + c.wNumSubRanges \
+		* sizeof(struct cntrl_ranges_lay3))
+struct cntrl_ranges_lay3 {
+	__u16	wNumSubRanges;
+	struct cntrl_range_lay3 r[UAC_MAX_RATES];
+} __packed;
+
+static int set_ep_max_packet_size(const struct f_uac_opts *uac2_opts,
+	struct usb_endpoint_descriptor *ep_desc,
+	enum usb_device_speed speed, bool is_playback)
 {
-	struct snd_uac2_chip *uac2 = prm->uac2;
+	int chmask, srate = 0, ssize;
+	u16 max_size_bw, max_size_ep;
+	unsigned int factor;
 	int i;
 
-	if (!prm->ep_enabled)
-		return;
+	switch (speed) {
+	case USB_SPEED_FULL:
+		max_size_ep = 1023;
+		factor = 1000;
+		break;
 
-	prm->ep_enabled = false;
+	case USB_SPEED_HIGH:
+	case USB_SPEED_SUPER:
+		max_size_ep = 1024;
+		factor = 8000;
+		break;
 
-	for (i = 0; i < USB_XFERS; i++) {
-		if (prm->ureq[i].req) {
-			usb_ep_dequeue(ep, prm->ureq[i].req);
-			usb_ep_free_request(ep, prm->ureq[i].req);
-			prm->ureq[i].req = NULL;
-		}
+	default:
+		return -EINVAL;
 	}
-
-	if (usb_ep_disable(ep))
-		dev_err(&uac2->pdev.dev,
-			"%s:%d Error!\n", __func__, __LINE__);
-}
-
-static void set_ep_max_packet_size(const struct f_uac2_opts *uac2_opts,
-	struct usb_endpoint_descriptor *ep_desc,
-	unsigned int factor, bool is_playback)
-{
-	int chmask, srate, ssize;
-	u16 max_packet_size;
 
 	if (is_playback) {
 		chmask = uac2_opts->p_chmask;
-		srate = uac2_opts->p_srate;
+		for (i = 0; i < UAC_MAX_RATES; i++) {
+			if (uac2_opts->p_srate[i] == 0)
+				break;
+			if (uac2_opts->p_srate[i] > srate)
+				srate = uac2_opts->p_srate[i];
+		}
 		ssize = uac2_opts->p_ssize;
 	} else {
 		chmask = uac2_opts->c_chmask;
-		srate = uac2_opts->c_srate;
+		for (i = 0; i < UAC_MAX_RATES; i++) {
+			if (uac2_opts->c_srate[i] == 0)
+				break;
+			if (uac2_opts->c_srate[i] > srate)
+				srate = uac2_opts->c_srate[i];
+		}
 		ssize = uac2_opts->c_ssize;
 	}
 
-	max_packet_size = num_channels(chmask) * ssize *
-		DIV_ROUND_UP(srate, factor / (1 << (ep_desc->bInterval - 1)));
-	ep_desc->wMaxPacketSize = cpu_to_le16(min_t(u16, max_packet_size,
-				le16_to_cpu(ep_desc->wMaxPacketSize)));
+	max_size_bw = num_channels(chmask) * ssize *
+		((srate / (factor / (1 << (ep_desc->bInterval - 1)))) + 1);
+	ep_desc->wMaxPacketSize = cpu_to_le16(min_t(u16, max_size_bw,
+						    max_size_ep));
+
+	return 0;
+}
+
+/* Use macro to overcome line length limitation */
+#define USBDHDR(p) (struct usb_descriptor_header *)(p)
+
+static void setup_headers(struct f_uac_opts *opts,
+			  struct usb_descriptor_header **headers,
+			  enum usb_device_speed speed)
+{
+	struct usb_ss_ep_comp_descriptor *epout_desc_comp = NULL;
+	struct usb_ss_ep_comp_descriptor *epin_desc_comp = NULL;
+	struct usb_endpoint_descriptor *epout_desc;
+	struct usb_endpoint_descriptor *epin_desc;
+	int i;
+
+	switch (speed) {
+	case USB_SPEED_FULL:
+		epout_desc = &fs_epout_desc;
+		epin_desc = &fs_epin_desc;
+		break;
+	case USB_SPEED_HIGH:
+		epout_desc = &hs_epout_desc;
+		epin_desc = &hs_epin_desc;
+		break;
+	default:
+		epout_desc = &ss_epout_desc;
+		epin_desc = &ss_epin_desc;
+		epout_desc_comp = &ss_epout_desc_comp;
+		epin_desc_comp = &ss_epin_desc_comp;
+	}
+
+	i = 0;
+	headers[i++] = USBDHDR(&iad_desc);
+	headers[i++] = USBDHDR(&std_ac_if_desc);
+	headers[i++] = USBDHDR(&ac_hdr_desc);
+	if (EPIN_EN(opts))
+		headers[i++] = USBDHDR(&in_clk_src_desc);
+	if (EPOUT_EN(opts)) {
+		headers[i++] = USBDHDR(&out_clk_src_desc);
+		headers[i++] = USBDHDR(&usb_out_it_desc);
+	}
+	if (EPIN_EN(opts)) {
+		headers[i++] = USBDHDR(&io_in_it_desc);
+		if (EPIN_FU(opts))
+			headers[i++] = USBDHDR(&usb_in_ot_fu_desc);
+		headers[i++] = USBDHDR(&usb_in_ot_desc);
+	}
+	if (EPOUT_EN(opts)) {
+		if (EPOUT_FU(opts))
+			headers[i++] = USBDHDR(&io_out_ot_fu_desc);
+		headers[i++] = USBDHDR(&io_out_ot_desc);
+		headers[i++] = USBDHDR(&std_as_out_if0_desc);
+		headers[i++] = USBDHDR(&std_as_out_if1_desc);
+		headers[i++] = USBDHDR(&as_out_hdr_desc);
+		headers[i++] = USBDHDR(&as_out_fmt1_desc);
+		headers[i++] = USBDHDR(epout_desc);
+		if (epout_desc_comp)
+			headers[i++] = USBDHDR(epout_desc_comp);
+
+		headers[i++] = USBDHDR(&as_iso_out_desc);
+	}
+	if (EPIN_EN(opts)) {
+		headers[i++] = USBDHDR(&std_as_in_if0_desc);
+		headers[i++] = USBDHDR(&std_as_in_if1_desc);
+		headers[i++] = USBDHDR(&as_in_hdr_desc);
+		headers[i++] = USBDHDR(&as_in_fmt1_desc);
+		headers[i++] = USBDHDR(epin_desc);
+		if (epin_desc_comp)
+			headers[i++] = USBDHDR(epin_desc_comp);
+
+		headers[i++] = USBDHDR(&as_iso_in_desc);
+	}
+	headers[i] = NULL;
+}
+
+static void setup_descriptor(struct f_uac_opts *opts)
+{
+	/* patch descriptors */
+	int i = 1; /* ID's start with 1 */
+
+	if (EPOUT_EN(opts))
+		usb_out_it_desc.bTerminalID = i++;
+	if (EPIN_EN(opts))
+		io_in_it_desc.bTerminalID = i++;
+	if (EPOUT_EN(opts) && EPOUT_FU(opts))
+		io_out_ot_fu_desc.bUnitID = i++;
+	if (EPIN_EN(opts) && EPIN_FU(opts))
+		usb_in_ot_fu_desc.bUnitID = i++;
+	if (EPOUT_EN(opts))
+		io_out_ot_desc.bTerminalID = i++;
+	if (EPIN_EN(opts))
+		usb_in_ot_desc.bTerminalID = i++;
+	if (EPOUT_EN(opts))
+		out_clk_src_desc.bClockID = i++;
+	if (EPIN_EN(opts))
+		in_clk_src_desc.bClockID = i++;
+
+	usb_out_it_desc.bCSourceID = out_clk_src_desc.bClockID;
+	if (EPIN_FU(opts)) {
+		usb_in_ot_fu_desc.bSourceID = io_in_it_desc.bTerminalID;
+		usb_in_ot_desc.bSourceID = usb_in_ot_fu_desc.bUnitID;
+		p_feature_unit.id = usb_in_ot_fu_desc.bUnitID;
+	} else {
+		usb_in_ot_desc.bSourceID = io_in_it_desc.bTerminalID;
+	}
+	usb_in_ot_desc.bCSourceID = in_clk_src_desc.bClockID;
+	io_in_it_desc.bCSourceID = in_clk_src_desc.bClockID;
+	io_out_ot_desc.bCSourceID = out_clk_src_desc.bClockID;
+	if (EPOUT_FU(opts)) {
+		io_out_ot_fu_desc.bSourceID = usb_out_it_desc.bTerminalID;
+		io_out_ot_desc.bSourceID = io_out_ot_fu_desc.bUnitID;
+		c_feature_unit.id = io_out_ot_fu_desc.bUnitID;
+	} else {
+		io_out_ot_desc.bSourceID = usb_out_it_desc.bTerminalID;
+	}
+	as_out_hdr_desc.bTerminalLink = usb_out_it_desc.bTerminalID;
+	as_in_hdr_desc.bTerminalLink = usb_in_ot_desc.bTerminalID;
+
+	iad_desc.bInterfaceCount = 1;
+	ac_hdr_desc.wTotalLength = cpu_to_le16(sizeof(ac_hdr_desc));
+
+	if (EPIN_EN(opts)) {
+		u16 len = le16_to_cpu(ac_hdr_desc.wTotalLength);
+
+		len += sizeof(in_clk_src_desc);
+		len += sizeof(usb_in_ot_desc);
+		if (EPIN_FU(opts))
+			len += sizeof(usb_in_ot_fu_desc);
+		len += sizeof(io_in_it_desc);
+		ac_hdr_desc.wTotalLength = cpu_to_le16(len);
+		iad_desc.bInterfaceCount++;
+	}
+	if (EPOUT_EN(opts)) {
+		u16 len = le16_to_cpu(ac_hdr_desc.wTotalLength);
+
+		len += sizeof(out_clk_src_desc);
+		len += sizeof(usb_out_it_desc);
+		if (EPOUT_FU(opts))
+			len += sizeof(io_out_ot_fu_desc);
+		len += sizeof(io_out_ot_desc);
+		ac_hdr_desc.wTotalLength = cpu_to_le16(len);
+		iad_desc.bInterfaceCount++;
+	}
+
+	setup_headers(opts, fs_audio_desc, USB_SPEED_FULL);
+	setup_headers(opts, hs_audio_desc, USB_SPEED_HIGH);
+	setup_headers(opts, ss_audio_desc, USB_SPEED_SUPER);
 }
 
 static int
 afunc_bind(struct usb_configuration *cfg, struct usb_function *fn)
 {
-	struct audio_dev *agdev = func_to_agdev(fn);
-	struct snd_uac2_chip *uac2 = &agdev->uac2;
+	struct f_uac *uac2 = func_to_uac(fn);
+	struct g_audio *agdev = func_to_g_audio(fn);
 	struct usb_composite_dev *cdev = cfg->cdev;
 	struct usb_gadget *gadget = cdev->gadget;
-	struct device *dev = &uac2->pdev.dev;
-	struct uac2_rtd_params *prm;
-	struct f_uac2_opts *uac2_opts;
+	struct device *dev = &gadget->dev;
+	struct f_uac_opts *uac2_opts;
 	struct usb_string *us;
 	int ret;
 
-	uac2_opts = container_of(fn->fi, struct f_uac2_opts, func_inst);
+	uac2_opts = container_of(fn->fi, struct f_uac_opts, func_inst);
 
 	us = usb_gstrings_attach(cdev, fn_strings, ARRAY_SIZE(strings_fn));
 	if (IS_ERR(us))
@@ -1010,6 +819,8 @@ afunc_bind(struct usb_configuration *cfg, struct usb_function *fn)
 	out_clk_src_desc.iClockSource = us[STR_CLKSRC_OUT].id;
 	usb_out_it_desc.iTerminal = us[STR_USB_IT].id;
 	io_in_it_desc.iTerminal = us[STR_IO_IT].id;
+	usb_in_ot_fu_desc.iFeature = us[STR_USB_OT_FU].id;
+	io_out_ot_fu_desc.iFeature = us[STR_IO_OT_FU].id;
 	usb_in_ot_desc.iTerminal = us[STR_USB_OT].id;
 	io_out_ot_desc.iTerminal = us[STR_IO_OT].id;
 	std_as_out_if0_desc.iInterface = us[STR_AS_OUT_ALT0].id;
@@ -1032,9 +843,6 @@ afunc_bind(struct usb_configuration *cfg, struct usb_function *fn)
 	as_in_fmt1_desc.bSubslotSize = uac2_opts->p_ssize;
 	as_in_fmt1_desc.bBitResolution = uac2_opts->p_ssize * 8;
 
-	snprintf(clksrc_in, sizeof(clksrc_in), "%uHz", uac2_opts->p_srate);
-	snprintf(clksrc_out, sizeof(clksrc_out), "%uHz", uac2_opts->c_srate);
-
 	ret = usb_interface_id(cfg, fn);
 	if (ret < 0) {
 		dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
@@ -1043,99 +851,153 @@ afunc_bind(struct usb_configuration *cfg, struct usb_function *fn)
 	iad_desc.bFirstInterface = ret;
 
 	std_ac_if_desc.bInterfaceNumber = ret;
-	agdev->ac_intf = ret;
-	agdev->ac_alt = 0;
+	uac2->ac_intf = ret;
+	uac2->ac_alt = 0;
 
-	ret = usb_interface_id(cfg, fn);
-	if (ret < 0) {
-		dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
-		return ret;
-	}
-	std_as_out_if0_desc.bInterfaceNumber = ret;
-	std_as_out_if1_desc.bInterfaceNumber = ret;
-	agdev->as_out_intf = ret;
-	agdev->as_out_alt = 0;
-
-	ret = usb_interface_id(cfg, fn);
-	if (ret < 0) {
-		dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
-		return ret;
-	}
-	std_as_in_if0_desc.bInterfaceNumber = ret;
-	std_as_in_if1_desc.bInterfaceNumber = ret;
-	agdev->as_in_intf = ret;
-	agdev->as_in_alt = 0;
-
-	agdev->out_ep = usb_ep_autoconfig(gadget, &fs_epout_desc);
-	if (!agdev->out_ep) {
-		dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
-		return ret;
+	if (EPOUT_EN(uac2_opts)) {
+		ret = usb_interface_id(cfg, fn);
+		if (ret < 0) {
+			dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
+			return ret;
+		}
+		std_as_out_if0_desc.bInterfaceNumber = ret;
+		std_as_out_if1_desc.bInterfaceNumber = ret;
+		uac2->as_out_intf = ret;
+		uac2->as_out_alt = 0;
 	}
 
-	agdev->in_ep = usb_ep_autoconfig(gadget, &fs_epin_desc);
-	if (!agdev->in_ep) {
-		dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
-		return ret;
+	if (EPIN_EN(uac2_opts)) {
+		ret = usb_interface_id(cfg, fn);
+		if (ret < 0) {
+			dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
+			return ret;
+		}
+		std_as_in_if0_desc.bInterfaceNumber = ret;
+		std_as_in_if1_desc.bInterfaceNumber = ret;
+		uac2->as_in_intf = ret;
+		uac2->as_in_alt = 0;
 	}
-
-	uac2->p_prm.uac2 = uac2;
-	uac2->c_prm.uac2 = uac2;
 
 	/* Calculate wMaxPacketSize according to audio bandwidth */
-	set_ep_max_packet_size(uac2_opts, &fs_epin_desc, 1000, true);
-	set_ep_max_packet_size(uac2_opts, &fs_epout_desc, 1000, false);
-	set_ep_max_packet_size(uac2_opts, &hs_epin_desc, 8000, true);
-	set_ep_max_packet_size(uac2_opts, &hs_epout_desc, 8000, false);
+	ret = set_ep_max_packet_size(uac2_opts, &fs_epin_desc, USB_SPEED_FULL,
+				     true);
+	if (ret < 0) {
+		dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
+		return ret;
+	}
+
+	ret = set_ep_max_packet_size(uac2_opts, &fs_epout_desc, USB_SPEED_FULL,
+				     false);
+	if (ret < 0) {
+		dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
+		return ret;
+	}
+
+	ret = set_ep_max_packet_size(uac2_opts, &hs_epin_desc, USB_SPEED_HIGH,
+				     true);
+	if (ret < 0) {
+		dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
+		return ret;
+	}
+
+	ret = set_ep_max_packet_size(uac2_opts, &hs_epout_desc, USB_SPEED_HIGH,
+				     false);
+	if (ret < 0) {
+		dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
+		return ret;
+	}
+
+	ret = set_ep_max_packet_size(uac2_opts, &ss_epin_desc, USB_SPEED_SUPER,
+				     true);
+	if (ret < 0) {
+		dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
+		return ret;
+	}
+
+	ss_epin_desc_comp.wBytesPerInterval = ss_epin_desc.wMaxPacketSize;
+
+	ret = set_ep_max_packet_size(uac2_opts, &ss_epout_desc, USB_SPEED_SUPER,
+				     false);
+	if (ret < 0) {
+		dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
+		return ret;
+	}
+
+	ss_epout_desc_comp.wBytesPerInterval = ss_epout_desc.wMaxPacketSize;
+
+	if (EPOUT_EN(uac2_opts)) {
+		agdev->out_ep = usb_ep_autoconfig(gadget, &fs_epout_desc);
+		if (!agdev->out_ep) {
+			dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
+			return -ENODEV;
+		}
+	}
+
+	if (EPIN_EN(uac2_opts)) {
+		agdev->in_ep = usb_ep_autoconfig(gadget, &fs_epin_desc);
+		if (!agdev->in_ep) {
+			dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
+			return -ENODEV;
+		}
+		agdev->in_ep->maxpacket = usb_endpoint_maxp(&fs_epin_desc);
+	}
+
+	agdev->in_ep_maxpsize = max_t(u16,
+				le16_to_cpu(fs_epin_desc.wMaxPacketSize),
+				le16_to_cpu(hs_epin_desc.wMaxPacketSize));
+	agdev->out_ep_maxpsize = max_t(u16,
+				le16_to_cpu(fs_epout_desc.wMaxPacketSize),
+				le16_to_cpu(hs_epout_desc.wMaxPacketSize));
+
+	agdev->in_ep_maxpsize = max_t(u16, agdev->in_ep_maxpsize,
+				le16_to_cpu(ss_epin_desc.wMaxPacketSize));
+	agdev->out_ep_maxpsize = max_t(u16, agdev->out_ep_maxpsize,
+				le16_to_cpu(ss_epout_desc.wMaxPacketSize));
 
 	hs_epout_desc.bEndpointAddress = fs_epout_desc.bEndpointAddress;
 	hs_epin_desc.bEndpointAddress = fs_epin_desc.bEndpointAddress;
+	ss_epout_desc.bEndpointAddress = fs_epout_desc.bEndpointAddress;
+	ss_epin_desc.bEndpointAddress = fs_epin_desc.bEndpointAddress;
 
-	ret = usb_assign_descriptors(fn, fs_audio_desc, hs_audio_desc, NULL,
-				     NULL);
+	setup_descriptor(uac2_opts);
+
+	ret = usb_assign_descriptors(fn, fs_audio_desc, hs_audio_desc, ss_audio_desc,
+				     ss_audio_desc);
 	if (ret)
 		return ret;
 
-	prm = &agdev->uac2.c_prm;
-	prm->max_psize = hs_epout_desc.wMaxPacketSize;
-	prm->rbuf = kzalloc(prm->max_psize * USB_XFERS, GFP_KERNEL);
-	if (!prm->rbuf) {
-		prm->max_psize = 0;
-		goto err_free_descs;
-	}
+	agdev->gadget = gadget;
 
-	prm = &agdev->uac2.p_prm;
-	prm->max_psize = hs_epin_desc.wMaxPacketSize;
-	prm->rbuf = kzalloc(prm->max_psize * USB_XFERS, GFP_KERNEL);
-	if (!prm->rbuf) {
-		prm->max_psize = 0;
-		goto err;
-	}
-
-	ret = alsa_uac2_init(agdev);
+	agdev->params.p_chmask = uac2_opts->p_chmask;
+	memcpy(agdev->params.p_srate, uac2_opts->p_srate,
+			sizeof(agdev->params.p_srate));
+	agdev->params.p_srate_active = uac2_opts->p_srate_active;
+	agdev->params.p_ssize = uac2_opts->p_ssize;
+	agdev->params.c_chmask = uac2_opts->c_chmask;
+	memcpy(agdev->params.c_srate, uac2_opts->c_srate,
+			sizeof(agdev->params.c_srate));
+	agdev->params.c_srate_active = uac2_opts->c_srate_active;
+	agdev->params.c_ssize = uac2_opts->c_ssize;
+	agdev->params.req_number = uac2_opts->req_number;
+	ret = g_audio_setup(agdev, "UAC2 PCM", "UAC2_Gadget");
 	if (ret)
-		goto err;
+		goto err_free_descs;
 	return 0;
 
-err:
-	kfree(agdev->uac2.p_prm.rbuf);
-	kfree(agdev->uac2.c_prm.rbuf);
 err_free_descs:
 	usb_free_all_descriptors(fn);
-	return -EINVAL;
+	agdev->gadget = NULL;
+	return ret;
 }
 
 static int
 afunc_set_alt(struct usb_function *fn, unsigned intf, unsigned alt)
 {
 	struct usb_composite_dev *cdev = fn->config->cdev;
-	struct audio_dev *agdev = func_to_agdev(fn);
-	struct snd_uac2_chip *uac2 = &agdev->uac2;
+	struct f_uac *uac2 = func_to_uac(fn);
 	struct usb_gadget *gadget = cdev->gadget;
-	struct device *dev = &uac2->pdev.dev;
-	struct usb_request *req;
-	struct usb_ep *ep;
-	struct uac2_rtd_params *prm;
-	int req_len, i;
+	struct device *dev = &gadget->dev;
+	int ret = 0;
 
 	/* No i/f has more than 2 alt settings */
 	if (alt > 1) {
@@ -1143,7 +1005,7 @@ afunc_set_alt(struct usb_function *fn, unsigned intf, unsigned alt)
 		return -EINVAL;
 	}
 
-	if (intf == agdev->ac_intf) {
+	if (intf == uac2->ac_intf) {
 		/* Control I/f has only 1 AltSetting - 0 */
 		if (alt) {
 			dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
@@ -1152,96 +1014,42 @@ afunc_set_alt(struct usb_function *fn, unsigned intf, unsigned alt)
 		return 0;
 	}
 
-	if (intf == agdev->as_out_intf) {
-		ep = agdev->out_ep;
-		prm = &uac2->c_prm;
-		config_ep_by_speed(gadget, fn, ep);
-		agdev->as_out_alt = alt;
-		req_len = prm->max_psize;
-	} else if (intf == agdev->as_in_intf) {
-		struct f_uac2_opts *opts = agdev_to_uac2_opts(agdev);
-		unsigned int factor, rate;
-		struct usb_endpoint_descriptor *ep_desc;
+	if (intf == uac2->as_out_intf) {
+		uac2->as_out_alt = alt;
 
-		ep = agdev->in_ep;
-		prm = &uac2->p_prm;
-		config_ep_by_speed(gadget, fn, ep);
-		agdev->as_in_alt = alt;
-
-		/* pre-calculate the playback endpoint's interval */
-		if (gadget->speed == USB_SPEED_FULL) {
-			ep_desc = &fs_epin_desc;
-			factor = 1000;
-		} else {
-			ep_desc = &hs_epin_desc;
-			factor = 8000;
-		}
-
-		/* pre-compute some values for iso_complete() */
-		uac2->p_framesize = opts->p_ssize *
-				    num_channels(opts->p_chmask);
-		rate = opts->p_srate * uac2->p_framesize;
-		uac2->p_interval = factor / (1 << (ep_desc->bInterval - 1));
-		uac2->p_pktsize = min_t(unsigned int, rate / uac2->p_interval,
-					prm->max_psize);
-
-		if (uac2->p_pktsize < prm->max_psize)
-			uac2->p_pktsize_residue = rate % uac2->p_interval;
+		if (alt)
+			ret = u_audio_start_capture(&uac2->g_audio);
 		else
-			uac2->p_pktsize_residue = 0;
+			u_audio_stop_capture(&uac2->g_audio);
+	} else if (intf == uac2->as_in_intf) {
+		uac2->as_in_alt = alt;
 
-		req_len = uac2->p_pktsize;
-		uac2->p_residue = 0;
+		if (alt)
+			ret = u_audio_start_playback(&uac2->g_audio);
+		else
+			u_audio_stop_playback(&uac2->g_audio);
 	} else {
 		dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
 		return -EINVAL;
 	}
 
-	if (alt == 0) {
-		free_ep(prm, ep);
-		return 0;
-	}
-
-	prm->ep_enabled = true;
-	usb_ep_enable(ep);
-
-	for (i = 0; i < USB_XFERS; i++) {
-		if (!prm->ureq[i].req) {
-			req = usb_ep_alloc_request(ep, GFP_ATOMIC);
-			if (req == NULL)
-				return -ENOMEM;
-
-			prm->ureq[i].req = req;
-			prm->ureq[i].pp = prm;
-
-			req->zero = 0;
-			req->context = &prm->ureq[i];
-			req->length = req_len;
-			req->complete = agdev_iso_complete;
-			req->buf = prm->rbuf + i * prm->max_psize;
-		}
-
-		if (usb_ep_queue(ep, prm->ureq[i].req, GFP_ATOMIC))
-			dev_err(dev, "%s:%d Error!\n", __func__, __LINE__);
-	}
-
-	return 0;
+	return ret;
 }
 
 static int
 afunc_get_alt(struct usb_function *fn, unsigned intf)
 {
-	struct audio_dev *agdev = func_to_agdev(fn);
-	struct snd_uac2_chip *uac2 = &agdev->uac2;
+	struct f_uac *uac2 = func_to_uac(fn);
+	struct g_audio *agdev = func_to_g_audio(fn);
 
-	if (intf == agdev->ac_intf)
-		return agdev->ac_alt;
-	else if (intf == agdev->as_out_intf)
-		return agdev->as_out_alt;
-	else if (intf == agdev->as_in_intf)
-		return agdev->as_in_alt;
+	if (intf == uac2->ac_intf)
+		return uac2->ac_alt;
+	else if (intf == uac2->as_out_intf)
+		return uac2->as_out_alt;
+	else if (intf == uac2->as_in_intf)
+		return uac2->as_in_alt;
 	else
-		dev_err(&uac2->pdev.dev,
+		dev_err(&agdev->gadget->dev,
 			"%s:%d Invalid Interface %d!\n",
 			__func__, __LINE__, intf);
 
@@ -1251,23 +1059,20 @@ afunc_get_alt(struct usb_function *fn, unsigned intf)
 static void
 afunc_disable(struct usb_function *fn)
 {
-	struct audio_dev *agdev = func_to_agdev(fn);
-	struct snd_uac2_chip *uac2 = &agdev->uac2;
+	struct f_uac *uac2 = func_to_uac(fn);
 
-	free_ep(&uac2->p_prm, agdev->in_ep);
-	agdev->as_in_alt = 0;
-
-	free_ep(&uac2->c_prm, agdev->out_ep);
-	agdev->as_out_alt = 0;
+	uac2->as_in_alt = 0;
+	uac2->as_out_alt = 0;
+	u_audio_stop_capture(&uac2->g_audio);
+	u_audio_stop_playback(&uac2->g_audio);
 }
 
 static int
-in_rq_cur(struct usb_function *fn, const struct usb_ctrlrequest *cr)
+in_rq_cs_cur(struct usb_function *fn, const struct usb_ctrlrequest *cr)
 {
 	struct usb_request *req = fn->config->cdev->req;
-	struct audio_dev *agdev = func_to_agdev(fn);
-	struct snd_uac2_chip *uac2 = &agdev->uac2;
-	struct f_uac2_opts *opts;
+	struct g_audio *agdev = func_to_g_audio(fn);
+	struct f_uac_opts *opts;
 	u16 w_length = le16_to_cpu(cr->wLength);
 	u16 w_index = le16_to_cpu(cr->wIndex);
 	u16 w_value = le16_to_cpu(cr->wValue);
@@ -1276,9 +1081,9 @@ in_rq_cur(struct usb_function *fn, const struct usb_ctrlrequest *cr)
 	int value = -EOPNOTSUPP;
 	int p_srate, c_srate;
 
-	opts = agdev_to_uac2_opts(agdev);
-	p_srate = opts->p_srate;
-	c_srate = opts->c_srate;
+	opts = g_audio_to_uac_opts(agdev);
+	p_srate = opts->p_srate_active;
+	c_srate = opts->c_srate_active;
 
 	if (control_selector == UAC2_CS_CONTROL_SAM_FREQ) {
 		struct cntrl_cur_lay3 c;
@@ -1289,13 +1094,14 @@ in_rq_cur(struct usb_function *fn, const struct usb_ctrlrequest *cr)
 		else if (entity_id == USB_OUT_CLK_ID)
 			c.dCUR = cpu_to_le32(c_srate);
 
+		DBG(fn->config->cdev, "%s(): %d\n", __func__, c.dCUR);
 		value = min_t(unsigned, w_length, sizeof c);
 		memcpy(req->buf, &c, value);
 	} else if (control_selector == UAC2_CS_CONTROL_CLOCK_VALID) {
 		*(u8 *)req->buf = 1;
 		value = min_t(unsigned, w_length, 1);
 	} else {
-		dev_err(&uac2->pdev.dev,
+		dev_err(&agdev->gadget->dev,
 			"%s:%d control_selector=%d TODO!\n",
 			__func__, __LINE__, control_selector);
 	}
@@ -1304,41 +1110,52 @@ in_rq_cur(struct usb_function *fn, const struct usb_ctrlrequest *cr)
 }
 
 static int
-in_rq_range(struct usb_function *fn, const struct usb_ctrlrequest *cr)
+in_rq_cs_range(struct usb_function *fn, const struct usb_ctrlrequest *cr)
 {
 	struct usb_request *req = fn->config->cdev->req;
-	struct audio_dev *agdev = func_to_agdev(fn);
-	struct snd_uac2_chip *uac2 = &agdev->uac2;
-	struct f_uac2_opts *opts;
+	struct g_audio *agdev = func_to_g_audio(fn);
+	struct f_uac_opts *opts;
 	u16 w_length = le16_to_cpu(cr->wLength);
 	u16 w_index = le16_to_cpu(cr->wIndex);
 	u16 w_value = le16_to_cpu(cr->wValue);
 	u8 entity_id = (w_index >> 8) & 0xff;
 	u8 control_selector = w_value >> 8;
-	struct cntrl_range_lay3 r;
+	struct cntrl_ranges_lay3 rs;
 	int value = -EOPNOTSUPP;
-	int p_srate, c_srate;
+	int srate = 0;
+	int i;
 
-	opts = agdev_to_uac2_opts(agdev);
-	p_srate = opts->p_srate;
-	c_srate = opts->c_srate;
+	opts = g_audio_to_uac_opts(agdev);
 
 	if (control_selector == UAC2_CS_CONTROL_SAM_FREQ) {
-		if (entity_id == USB_IN_CLK_ID)
-			r.dMIN = cpu_to_le32(p_srate);
-		else if (entity_id == USB_OUT_CLK_ID)
-			r.dMIN = cpu_to_le32(c_srate);
-		else
-			return -EOPNOTSUPP;
+		rs.wNumSubRanges = 0;
+		for (i = 0; i < UAC_MAX_RATES; i++) {
+			if (entity_id == USB_IN_CLK_ID)
+				srate = opts->p_srate[i];
+			else if (entity_id == USB_OUT_CLK_ID)
+				srate = opts->c_srate[i];
+			else
+				return -EOPNOTSUPP;
 
-		r.dMAX = r.dMIN;
-		r.dRES = 0;
-		r.wNumSubRanges = cpu_to_le16(1);
+			if (srate == 0)
+				break;
 
-		value = min_t(unsigned, w_length, sizeof r);
-		memcpy(req->buf, &r, value);
+			rs.r[rs.wNumSubRanges].dMIN = srate;
+			rs.r[rs.wNumSubRanges].dMAX = srate;
+			rs.r[rs.wNumSubRanges].dRES = 0;
+			rs.wNumSubRanges++;
+			DBG(fn->config->cdev,
+					"%s(): clk %d: report rate %d. %d\n",
+					__func__, entity_id, rs.wNumSubRanges,
+					srate);
+		}
+
+		value = min_t(unsigned int, w_length, ranges_size(rs));
+		DBG(fn->config->cdev, "%s(): send %d rates, size %d\n",
+				__func__, rs.wNumSubRanges, value);
+		memcpy(req->buf, &rs, value);
 	} else {
-		dev_err(&uac2->pdev.dev,
+		dev_err(&agdev->gadget->dev,
 			"%s:%d control_selector=%d TODO!\n",
 			__func__, __LINE__, control_selector);
 	}
@@ -1347,25 +1164,194 @@ in_rq_range(struct usb_function *fn, const struct usb_ctrlrequest *cr)
 }
 
 static int
-ac_rq_in(struct usb_function *fn, const struct usb_ctrlrequest *cr)
+in_rq_fu(struct usb_function *fn, const struct usb_ctrlrequest *cr)
 {
-	if (cr->bRequest == UAC2_CS_CUR)
-		return in_rq_cur(fn, cr);
-	else if (cr->bRequest == UAC2_CS_RANGE)
-		return in_rq_range(fn, cr);
-	else
-		return -EOPNOTSUPP;
+	struct f_uac *uac2 = func_to_uac(fn);
+	struct usb_request *req = fn->config->cdev->req;
+	u16 w_length = le16_to_cpu(cr->wLength);
+	struct usb_audio_control *con = uac2->get_con;
+	u8 cmd = uac2->get_cmd;
+	char c1;
+	struct cntrl_cur_lay2 c2;
+	struct cntrl_range_lay2 r;
+	int value = -EOPNOTSUPP;
+
+	if (cmd == UAC2_CS_CUR && con->type == UAC_FU_MUTE) {
+		c1 = con->get(con, UAC__CUR);
+		value = min_t(unsigned int, w_length, 1);
+		memcpy(req->buf, &c1, value);
+	} else if (cmd == UAC2_CS_CUR && con->type == UAC_FU_VOLUME) {
+		c2.dCUR = cpu_to_le16(con->get(con, UAC__CUR));
+		value = min_t(unsigned int, w_length, sizeof(c2));
+		memcpy(req->buf, &c2, value);
+	} else if (cmd == UAC2_CS_RANGE) {
+		r.wNumSubRanges = cpu_to_le16(1);
+		r.dMIN = cpu_to_le16(con->get(con, UAC__MIN));
+		r.dMAX = cpu_to_le16(con->get(con, UAC__MAX));
+		r.dRES = cpu_to_le16(con->get(con, UAC__RES));
+		value = min_t(unsigned int, w_length, sizeof(r));
+		memcpy(req->buf, &r, value);
+	}
+
+	DBG(fn->config->cdev, "%s(): send size %d\n", __func__, value);
+
+	return value;
+}
+
+static void uac2_fu_control_complt(struct usb_ep *ep, struct usb_request *req)
+{
+	struct f_uac *uac2 = req->context;
+	struct usb_audio_control *con = uac2->set_con;
+	u8 cmd = uac2->set_cmd;
+	int status = req->status;
+	char c1;
+	struct cntrl_cur_lay2 c2;
+	struct cntrl_range_lay2 r;
+
+	switch (status) {
+	case 0:				/* normal completion? */
+		if (!con)
+			break;
+
+		if (cmd == UAC2_CS_CUR && con->type == UAC_FU_MUTE) {
+			memcpy(&c1, req->buf, 1);
+			con->set(con, UAC__CUR, c1);
+		} else if (cmd == UAC2_CS_CUR && con->type == UAC_FU_VOLUME) {
+			memcpy(&c2, req->buf, sizeof(c2));
+			con->set(con, UAC__CUR, le16_to_cpu(c2.dCUR));
+		} else if (cmd == UAC2_CS_RANGE) {
+			memcpy(&r, req->buf, sizeof(r));
+			con->set(con, UAC__MIN, le16_to_cpu(r.dMIN));
+			con->set(con, UAC__MAX, le16_to_cpu(r.dMAX));
+			con->set(con, UAC__RES, le16_to_cpu(r.dRES));
+		}
+
+		uac2->set_con = NULL;
+		break;
+	default:
+		break;
+	}
 }
 
 static int
-out_rq_cur(struct usb_function *fn, const struct usb_ctrlrequest *cr)
+ac_rq_in(struct usb_function *fn, const struct usb_ctrlrequest *cr)
 {
-	u16 w_length = le16_to_cpu(cr->wLength);
+	struct f_uac *uac2 = func_to_uac(fn);
+	struct usb_composite_dev *cdev = fn->config->cdev;
+	struct usb_request *req = cdev->req;
+	u8 id = ((le16_to_cpu(cr->wIndex) >> 8) & 0xFF);
+	u16 len = le16_to_cpu(cr->wLength);
 	u16 w_value = le16_to_cpu(cr->wValue);
-	u8 control_selector = w_value >> 8;
+	u8 con_sel = (w_value >> 8) & 0xFF;
+	u8 cmd = (cr->bRequest & 0x0F);
+	struct usb_audio_control_selector *cs;
+	struct usb_audio_control *con;
 
-	if (control_selector == UAC2_CS_CONTROL_SAM_FREQ)
+	DBG(cdev, "bRequest in 0x%x, w_value 0x%04x, len %d, entity %d\n",
+			cr->bRequest, w_value, len, id);
+
+	if (id == USB_OUT_CLK_ID || id == USB_IN_CLK_ID) {
+		if (cr->bRequest == UAC2_CS_CUR)
+			return in_rq_cs_cur(fn, cr);
+		else if (cr->bRequest == UAC2_CS_RANGE)
+			return in_rq_cs_range(fn, cr);
+	}
+
+	list_for_each_entry(cs, &uac2->cs, list)
+		if (cs->id == id)
+			list_for_each_entry(con, &cs->control, list)
+				if (con->type == con_sel) {
+					req->context = uac2;
+					uac2->get_con = con;
+					uac2->get_cmd = cmd;
+					req->complete = uac2_fu_control_complt;
+					return in_rq_fu(fn, cr);
+				}
+
+	return -EOPNOTSUPP;
+}
+
+static void uac2_cs_control_sam_freq(struct usb_ep *ep, struct usb_request *req)
+{
+	struct usb_function *fn = ep->driver_data;
+	struct usb_composite_dev *cdev = fn->config->cdev;
+	struct g_audio *agdev = func_to_g_audio(fn);
+	struct f_uac *uac2 = func_to_uac(fn);
+	struct f_uac_opts *opts = g_audio_to_uac_opts(agdev);
+	u32 val;
+
+	if (req->actual != 4) {
+		WARN(cdev, "Invalid data size for UAC2_CS_CONTROL_SAM_FREQ.\n");
+		return;
+	}
+
+	val = le32_to_cpu(*((u32 *)req->buf));
+	if (uac2->ctl_id == USB_IN_CLK_ID) {
+		opts->p_srate_active = val;
+		u_audio_set_playback_srate(agdev, opts->p_srate_active);
+	} else if (uac2->ctl_id == USB_OUT_CLK_ID) {
+		opts->c_srate_active = val;
+		u_audio_set_capture_srate(agdev, opts->c_srate_active);
+	}
+}
+
+static int
+out_rq_cs_cur(struct usb_function *fn, const struct usb_ctrlrequest *cr)
+{
+	struct usb_composite_dev *cdev = fn->config->cdev;
+	struct usb_request *req = cdev->req;
+	u16 w_length = le16_to_cpu(cr->wLength);
+	struct f_uac *uac2 = func_to_uac(fn);
+	u16 w_value = le16_to_cpu(cr->wValue);
+	u16 w_index = le16_to_cpu(cr->wIndex);
+	u8 control_selector = w_value >> 8;
+	u8 clock_id = w_index >> 8;
+
+	if (control_selector == UAC2_CS_CONTROL_SAM_FREQ) {
+		DBG(cdev, "control_selector UAC2_CS_CONTROL_SAM_FREQ, clock: %d\n",
+				clock_id);
+		cdev->gadget->ep0->driver_data = fn;
+		uac2->ctl_id = clock_id;
+		req->complete = uac2_cs_control_sam_freq;
 		return w_length;
+	}
+
+	return -EOPNOTSUPP;
+}
+
+static int
+ac_rq_out(struct usb_function *fn, const struct usb_ctrlrequest *cr)
+{
+	struct f_uac *uac2 = func_to_uac(fn);
+	struct usb_composite_dev *cdev = fn->config->cdev;
+	struct usb_request *req = cdev->req;
+	u16 w_index = le16_to_cpu(cr->wIndex);
+	u16 w_value = le16_to_cpu(cr->wValue);
+	u16 w_length = le16_to_cpu(cr->wLength);
+	u8 id = (w_index >> 8) & 0xff;
+	u8 con_sel = (w_value >> 8) & 0xff;
+	u8 cmd = (cr->bRequest & 0x0f);
+	struct usb_audio_control_selector *cs;
+	struct usb_audio_control *con;
+
+	DBG(cdev, "bRequest out 0x%x, w_value 0x%04x, len %d, entity %d\n",
+			cr->bRequest, w_value, w_length, id);
+
+	if (id == USB_OUT_CLK_ID || id == USB_IN_CLK_ID) {
+		if (cr->bRequest == UAC2_CS_CUR)
+			return out_rq_cs_cur(fn, cr);
+	}
+
+	list_for_each_entry(cs, &uac2->cs, list)
+		if (cs->id == id)
+			list_for_each_entry(con, &cs->control, list)
+				if (con->type == con_sel) {
+					req->context = uac2;
+					uac2->set_con = con;
+					uac2->set_cmd = cmd;
+					req->complete = uac2_fu_control_complt;
+					return w_length;
+				}
 
 	return -EOPNOTSUPP;
 }
@@ -1373,31 +1359,28 @@ out_rq_cur(struct usb_function *fn, const struct usb_ctrlrequest *cr)
 static int
 setup_rq_inf(struct usb_function *fn, const struct usb_ctrlrequest *cr)
 {
-	struct audio_dev *agdev = func_to_agdev(fn);
-	struct snd_uac2_chip *uac2 = &agdev->uac2;
+	struct f_uac *uac2 = func_to_uac(fn);
+	struct g_audio *agdev = func_to_g_audio(fn);
 	u16 w_index = le16_to_cpu(cr->wIndex);
 	u8 intf = w_index & 0xff;
 
-	if (intf != agdev->ac_intf) {
-		dev_err(&uac2->pdev.dev,
+	if (intf != uac2->ac_intf) {
+		dev_err(&agdev->gadget->dev,
 			"%s:%d Error!\n", __func__, __LINE__);
 		return -EOPNOTSUPP;
 	}
 
 	if (cr->bRequestType & USB_DIR_IN)
 		return ac_rq_in(fn, cr);
-	else if (cr->bRequest == UAC2_CS_CUR)
-		return out_rq_cur(fn, cr);
-
-	return -EOPNOTSUPP;
+	else
+		return ac_rq_out(fn, cr);
 }
 
 static int
 afunc_setup(struct usb_function *fn, const struct usb_ctrlrequest *cr)
 {
 	struct usb_composite_dev *cdev = fn->config->cdev;
-	struct audio_dev *agdev = func_to_agdev(fn);
-	struct snd_uac2_chip *uac2 = &agdev->uac2;
+	struct g_audio *agdev = func_to_g_audio(fn);
 	struct usb_request *req = cdev->req;
 	u16 w_length = le16_to_cpu(cr->wLength);
 	int value = -EOPNOTSUPP;
@@ -1409,14 +1392,15 @@ afunc_setup(struct usb_function *fn, const struct usb_ctrlrequest *cr)
 	if ((cr->bRequestType & USB_RECIP_MASK) == USB_RECIP_INTERFACE)
 		value = setup_rq_inf(fn, cr);
 	else
-		dev_err(&uac2->pdev.dev, "%s:%d Error!\n", __func__, __LINE__);
+		dev_err(&agdev->gadget->dev, "%s:%d Error!\n",
+				__func__, __LINE__);
 
 	if (value >= 0) {
 		req->length = value;
 		req->zero = value < w_length;
 		value = usb_ep_queue(cdev->gadget->ep0, req, GFP_ATOMIC);
 		if (value < 0) {
-			dev_err(&uac2->pdev.dev,
+			dev_err(&agdev->gadget->dev,
 				"%s:%d Error!\n", __func__, __LINE__);
 			req->status = 0;
 		}
@@ -1425,82 +1409,35 @@ afunc_setup(struct usb_function *fn, const struct usb_ctrlrequest *cr)
 	return value;
 }
 
-static inline struct f_uac2_opts *to_f_uac2_opts(struct config_item *item)
-{
-	return container_of(to_config_group(item), struct f_uac2_opts,
-			    func_inst.group);
-}
-
-static void f_uac2_attr_release(struct config_item *item)
-{
-	struct f_uac2_opts *opts = to_f_uac2_opts(item);
-
-	usb_put_function_instance(&opts->func_inst);
-}
-
 static struct configfs_item_operations f_uac2_item_ops = {
-	.release	= f_uac2_attr_release,
+	.release	= f_uac_attr_release,
 };
 
-#define UAC2_ATTRIBUTE(name)						\
-static ssize_t f_uac2_opts_##name##_show(struct config_item *item,	\
-					 char *page)			\
-{									\
-	struct f_uac2_opts *opts = to_f_uac2_opts(item);		\
-	int result;							\
-									\
-	mutex_lock(&opts->lock);					\
-	result = sprintf(page, "%u\n", opts->name);			\
-	mutex_unlock(&opts->lock);					\
-									\
-	return result;							\
-}									\
-									\
-static ssize_t f_uac2_opts_##name##_store(struct config_item *item,	\
-					  const char *page, size_t len)	\
-{									\
-	struct f_uac2_opts *opts = to_f_uac2_opts(item);		\
-	int ret;							\
-	u32 num;							\
-									\
-	mutex_lock(&opts->lock);					\
-	if (opts->refcnt) {						\
-		ret = -EBUSY;						\
-		goto end;						\
-	}								\
-									\
-	ret = kstrtou32(page, 0, &num);					\
-	if (ret)							\
-		goto end;						\
-									\
-	opts->name = num;						\
-	ret = len;							\
-									\
-end:									\
-	mutex_unlock(&opts->lock);					\
-	return ret;							\
-}									\
-									\
-CONFIGFS_ATTR(f_uac2_opts_, name)
+UAC_ATTRIBUTE(p_chmask);
+UAC_ATTRIBUTE(p_ssize);
+UAC_ATTRIBUTE(p_feature_unit);
+UAC_ATTRIBUTE(c_chmask);
+UAC_ATTRIBUTE(c_ssize);
+UAC_ATTRIBUTE(c_feature_unit);
+UAC_ATTRIBUTE(req_number);
 
-UAC2_ATTRIBUTE(p_chmask);
-UAC2_ATTRIBUTE(p_srate);
-UAC2_ATTRIBUTE(p_ssize);
-UAC2_ATTRIBUTE(c_chmask);
-UAC2_ATTRIBUTE(c_srate);
-UAC2_ATTRIBUTE(c_ssize);
+UAC_RATE_ATTRIBUTE(p_srate);
+UAC_RATE_ATTRIBUTE(c_srate);
 
 static struct configfs_attribute *f_uac2_attrs[] = {
-	&f_uac2_opts_attr_p_chmask,
-	&f_uac2_opts_attr_p_srate,
-	&f_uac2_opts_attr_p_ssize,
-	&f_uac2_opts_attr_c_chmask,
-	&f_uac2_opts_attr_c_srate,
-	&f_uac2_opts_attr_c_ssize,
+	&f_uac_opts_attr_p_chmask,
+	&f_uac_opts_attr_p_srate,
+	&f_uac_opts_attr_p_ssize,
+	&f_uac_opts_attr_p_feature_unit,
+	&f_uac_opts_attr_c_chmask,
+	&f_uac_opts_attr_c_srate,
+	&f_uac_opts_attr_c_ssize,
+	&f_uac_opts_attr_c_feature_unit,
+	&f_uac_opts_attr_req_number,
 	NULL,
 };
 
-static struct config_item_type f_uac2_func_type = {
+static const struct config_item_type f_uac2_func_type = {
 	.ct_item_ops	= &f_uac2_item_ops,
 	.ct_attrs	= f_uac2_attrs,
 	.ct_owner	= THIS_MODULE,
@@ -1508,15 +1445,15 @@ static struct config_item_type f_uac2_func_type = {
 
 static void afunc_free_inst(struct usb_function_instance *f)
 {
-	struct f_uac2_opts *opts;
+	struct f_uac_opts *opts;
 
-	opts = container_of(f, struct f_uac2_opts, func_inst);
+	opts = container_of(f, struct f_uac_opts, func_inst);
 	kfree(opts);
 }
 
 static struct usb_function_instance *afunc_alloc_inst(void)
 {
-	struct f_uac2_opts *opts;
+	struct f_uac_opts *opts;
 
 	opts = kzalloc(sizeof(*opts), GFP_KERNEL);
 	if (!opts)
@@ -1528,22 +1465,27 @@ static struct usb_function_instance *afunc_alloc_inst(void)
 	config_group_init_type_name(&opts->func_inst.group, "",
 				    &f_uac2_func_type);
 
-	opts->p_chmask = UAC2_DEF_PCHMASK;
-	opts->p_srate = UAC2_DEF_PSRATE;
-	opts->p_ssize = UAC2_DEF_PSSIZE;
-	opts->c_chmask = UAC2_DEF_CCHMASK;
-	opts->c_srate = UAC2_DEF_CSRATE;
-	opts->c_ssize = UAC2_DEF_CSSIZE;
+	opts->p_chmask = UAC_DEF_PCHMASK;
+	opts->p_srate[0] = UAC_DEF_PSRATE;
+	opts->p_srate_active = UAC_DEF_PSRATE;
+	opts->p_ssize = UAC_DEF_PSSIZE;
+	opts->p_feature_unit = UAC_DEF_PFU;
+	opts->c_chmask = UAC_DEF_CCHMASK;
+	opts->c_srate[0] = UAC_DEF_CSRATE;
+	opts->c_srate_active = UAC_DEF_CSRATE;
+	opts->c_ssize = UAC_DEF_CSSIZE;
+	opts->c_feature_unit = UAC_DEF_CFU;
+	opts->req_number = UAC_DEF_REQ_NUM;
 	return &opts->func_inst;
 }
 
 static void afunc_free(struct usb_function *f)
 {
-	struct audio_dev *agdev;
-	struct f_uac2_opts *opts;
+	struct g_audio *agdev;
+	struct f_uac_opts *opts;
 
-	agdev = func_to_agdev(f);
-	opts = container_of(f->fi, struct f_uac2_opts, func_inst);
+	agdev = func_to_g_audio(f);
+	opts = container_of(f->fi, struct f_uac_opts, func_inst);
 	kfree(agdev);
 	mutex_lock(&opts->lock);
 	--opts->refcnt;
@@ -1552,43 +1494,79 @@ static void afunc_free(struct usb_function *f)
 
 static void afunc_unbind(struct usb_configuration *c, struct usb_function *f)
 {
-	struct audio_dev *agdev = func_to_agdev(f);
-	struct uac2_rtd_params *prm;
+	struct g_audio *agdev = func_to_g_audio(f);
 
-	alsa_uac2_exit(agdev);
-
-	prm = &agdev->uac2.p_prm;
-	kfree(prm->rbuf);
-
-	prm = &agdev->uac2.c_prm;
-	kfree(prm->rbuf);
+	g_audio_cleanup(agdev);
 	usb_free_all_descriptors(f);
+
+	agdev->gadget = NULL;
 }
+
+/* Todo: add more control selecotor dynamically */
+static int control_selector_init(struct f_uac *uac2)
+{
+	INIT_LIST_HEAD(&uac2->cs);
+
+	/* playback feature unit */
+	list_add(&p_feature_unit.list, &uac2->cs);
+
+	INIT_LIST_HEAD(&p_feature_unit.control);
+	list_add(&p_mute_control.list, &p_feature_unit.control);
+	list_add(&p_volume_control.list, &p_feature_unit.control);
+
+	p_volume_control.data[UAC__CUR] = UAC_VOLUME_CUR;
+	p_volume_control.data[UAC__MIN] = UAC_VOLUME_MIN;
+	p_volume_control.data[UAC__MAX] = UAC_VOLUME_MAX;
+	p_volume_control.data[UAC__RES] = UAC_VOLUME_RES;
+
+	p_volume_control.context = &uac2->g_audio;
+	p_mute_control.context = &uac2->g_audio;
+
+	/* capture feature unit */
+	list_add(&c_feature_unit.list, &uac2->cs);
+
+	INIT_LIST_HEAD(&c_feature_unit.control);
+	list_add(&c_mute_control.list, &c_feature_unit.control);
+	list_add(&c_volume_control.list, &c_feature_unit.control);
+
+	c_volume_control.data[UAC__CUR] = UAC_VOLUME_CUR;
+	c_volume_control.data[UAC__MIN] = UAC_VOLUME_MIN;
+	c_volume_control.data[UAC__MAX] = UAC_VOLUME_MAX;
+	c_volume_control.data[UAC__RES] = UAC_VOLUME_RES;
+
+	c_volume_control.context = &uac2->g_audio;
+	c_mute_control.context = &uac2->g_audio;
+
+	return 0;
+}
+
 
 static struct usb_function *afunc_alloc(struct usb_function_instance *fi)
 {
-	struct audio_dev *agdev;
-	struct f_uac2_opts *opts;
+	struct f_uac	*uac2;
+	struct f_uac_opts *opts;
 
-	agdev = kzalloc(sizeof(*agdev), GFP_KERNEL);
-	if (agdev == NULL)
+	uac2 = kzalloc(sizeof(*uac2), GFP_KERNEL);
+	if (uac2 == NULL)
 		return ERR_PTR(-ENOMEM);
 
-	opts = container_of(fi, struct f_uac2_opts, func_inst);
+	opts = container_of(fi, struct f_uac_opts, func_inst);
 	mutex_lock(&opts->lock);
 	++opts->refcnt;
 	mutex_unlock(&opts->lock);
 
-	agdev->func.name = "uac2_func";
-	agdev->func.bind = afunc_bind;
-	agdev->func.unbind = afunc_unbind;
-	agdev->func.set_alt = afunc_set_alt;
-	agdev->func.get_alt = afunc_get_alt;
-	agdev->func.disable = afunc_disable;
-	agdev->func.setup = afunc_setup;
-	agdev->func.free_func = afunc_free;
+	uac2->g_audio.func.name = "uac2_func";
+	uac2->g_audio.func.bind = afunc_bind;
+	uac2->g_audio.func.unbind = afunc_unbind;
+	uac2->g_audio.func.set_alt = afunc_set_alt;
+	uac2->g_audio.func.get_alt = afunc_get_alt;
+	uac2->g_audio.func.disable = afunc_disable;
+	uac2->g_audio.func.setup = afunc_setup;
+	uac2->g_audio.func.free_func = afunc_free;
 
-	return &agdev->func;
+	control_selector_init(uac2);
+
+	return &uac2->g_audio.func;
 }
 
 DECLARE_USB_FUNCTION_INIT(uac2, afunc_alloc_inst, afunc_alloc);

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_S390_TOPOLOGY_H
 #define _ASM_S390_TOPOLOGY_H
 
@@ -15,39 +16,47 @@ struct cpu_topology_s390 {
 	unsigned short socket_id;
 	unsigned short book_id;
 	unsigned short drawer_id;
-	unsigned short node_id;
+	unsigned short dedicated : 1;
+	int booted_cores;
 	cpumask_t thread_mask;
 	cpumask_t core_mask;
 	cpumask_t book_mask;
 	cpumask_t drawer_mask;
 };
 
-DECLARE_PER_CPU(struct cpu_topology_s390, cpu_topology);
+extern struct cpu_topology_s390 cpu_topology[NR_CPUS];
 
-#define topology_physical_package_id(cpu) (per_cpu(cpu_topology, cpu).socket_id)
-#define topology_thread_id(cpu)		  (per_cpu(cpu_topology, cpu).thread_id)
-#define topology_sibling_cpumask(cpu) \
-		(&per_cpu(cpu_topology, cpu).thread_mask)
-#define topology_core_id(cpu)		  (per_cpu(cpu_topology, cpu).core_id)
-#define topology_core_cpumask(cpu)	  (&per_cpu(cpu_topology, cpu).core_mask)
-#define topology_book_id(cpu)		  (per_cpu(cpu_topology, cpu).book_id)
-#define topology_book_cpumask(cpu)	  (&per_cpu(cpu_topology, cpu).book_mask)
-#define topology_drawer_id(cpu)		  (per_cpu(cpu_topology, cpu).drawer_id)
-#define topology_drawer_cpumask(cpu)	  (&per_cpu(cpu_topology, cpu).drawer_mask)
+#define topology_physical_package_id(cpu) (cpu_topology[cpu].socket_id)
+#define topology_thread_id(cpu)		  (cpu_topology[cpu].thread_id)
+#define topology_sibling_cpumask(cpu)	  (&cpu_topology[cpu].thread_mask)
+#define topology_core_id(cpu)		  (cpu_topology[cpu].core_id)
+#define topology_core_cpumask(cpu)	  (&cpu_topology[cpu].core_mask)
+#define topology_book_id(cpu)		  (cpu_topology[cpu].book_id)
+#define topology_book_cpumask(cpu)	  (&cpu_topology[cpu].book_mask)
+#define topology_drawer_id(cpu)		  (cpu_topology[cpu].drawer_id)
+#define topology_drawer_cpumask(cpu)	  (&cpu_topology[cpu].drawer_mask)
+#define topology_cpu_dedicated(cpu)	  (cpu_topology[cpu].dedicated)
+#define topology_booted_cores(cpu)	  (cpu_topology[cpu].booted_cores)
 
 #define mc_capable() 1
 
+void topology_init_early(void);
 int topology_cpu_init(struct cpu *);
 int topology_set_cpu_management(int fc);
 void topology_schedule_update(void);
 void store_topology(struct sysinfo_15_1_x *info);
+void update_cpu_masks(void);
 void topology_expect_change(void);
 const struct cpumask *cpu_coregroup_mask(int cpu);
 
 #else /* CONFIG_SCHED_TOPOLOGY */
 
+static inline void topology_init_early(void) { }
 static inline void topology_schedule_update(void) { }
 static inline int topology_cpu_init(struct cpu *cpu) { return 0; }
+static inline int topology_cpu_dedicated(int cpu_nr) { return 0; }
+static inline int topology_booted_cores(int cpu_nr) { return 1; }
+static inline void update_cpu_masks(void) { }
 static inline void topology_expect_change(void) { }
 
 #endif /* CONFIG_SCHED_TOPOLOGY */
@@ -65,25 +74,17 @@ static inline void topology_expect_change(void) { }
 #define cpu_to_node cpu_to_node
 static inline int cpu_to_node(int cpu)
 {
-	return per_cpu(cpu_topology, cpu).node_id;
+	return 0;
 }
 
 /* Returns a pointer to the cpumask of CPUs on node 'node'. */
 #define cpumask_of_node cpumask_of_node
 static inline const struct cpumask *cpumask_of_node(int node)
 {
-	return &node_to_cpumask_map[node];
+	return cpu_possible_mask;
 }
 
-/*
- * Returns the number of the node containing node 'node'. This
- * architecture is flat, so it is a pretty simple function!
- */
-#define parent_node(node) (node)
-
 #define pcibus_to_node(bus) __pcibus_to_node(bus)
-
-#define node_distance(a, b) __node_distance(a, b)
 
 #else /* !CONFIG_NUMA */
 

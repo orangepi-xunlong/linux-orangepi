@@ -125,23 +125,6 @@ int get_board_ant_num(void)
 
 	WCN_DEBUG("%s entry!\n", __func__);
 
-	/* 1. uwe5621 module on RK board(rk3368):
-	 * Antenna num is fixed to one.
-	 */
-#ifdef CONFIG_RK_BOARD
-#ifndef CONFIG_CHECK_DRIVER_BY_CHIPID
-#ifdef CONFIG_UWE5621
-	WCN_INFO("%s [one_ant]\n", __func__);
-	return MARLIN_ONE_ANT;
-#endif
-#else /*CONFIG_CHECK_DRIVER_BY_CHIPID*/
-	if (wcn_get_chip_model() == WCN_CHIP_MARLIN3) {
-		WCN_INFO("%s [one_ant]\n", __func__);
-		return MARLIN_ONE_ANT;
-	}
-#endif
-#endif /* CONFIG_RK_BOARD */
-
 	/* 2. uwe5622 module:
 	 * Antenna num is fixed to one.
 	 */

@@ -53,10 +53,10 @@
 #include <linux/init.h>
 #include <linux/bitops.h>
 #include <linux/gfp.h>
+#include <linux/pgtable.h>
 
 #include <asm/io.h>
 #include <asm/dma.h>
-#include <asm/pgtable.h>
 #include <asm/cacheflush.h>
 
 static char version[] __initdata =
@@ -363,7 +363,7 @@ static netdev_tx_t i596_start_xmit(struct sk_buff *skb, struct net_device *dev);
 static irqreturn_t i596_interrupt(int irq, void *dev_id);
 static int i596_close(struct net_device *dev);
 static void i596_add_cmd(struct net_device *dev, struct i596_cmd *cmd);
-static void i596_tx_timeout (struct net_device *dev);
+static void i596_tx_timeout (struct net_device *dev, unsigned int txqueue);
 static void print_eth(unsigned char *buf, char *str);
 static void set_multicast_list(struct net_device *dev);
 
@@ -809,7 +809,8 @@ memory_squeeze:
 				if (!rx_in_place) {
 					/* 16 byte align the data fields */
 					skb_reserve(skb, 2);
-					memcpy(skb_put(skb,pkt_len), rbd->v_data, pkt_len);
+					skb_put_data(skb, rbd->v_data,
+						     pkt_len);
 				}
 				skb->protocol=eth_type_trans(skb,dev);
 				skb->len = pkt_len;
@@ -1018,7 +1019,7 @@ err_irq_dev:
 	return res;
 }
 
-static void i596_tx_timeout (struct net_device *dev)
+static void i596_tx_timeout (struct net_device *dev, unsigned int txqueue)
 {
 	struct i596_private *lp = dev->ml_priv;
 	int ioaddr = dev->base_addr;
@@ -1118,7 +1119,6 @@ static const struct net_device_ops i596_netdev_ops = {
 	.ndo_start_xmit		= i596_start_xmit,
 	.ndo_set_rx_mode	= set_multicast_list,
 	.ndo_tx_timeout		= i596_tx_timeout,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -1310,7 +1310,7 @@ static irqreturn_t i596_interrupt(int irq, void *dev_id)
 						dev->stats.tx_aborted_errors++;
 				}
 
-				dev_kfree_skb_irq(skb);
+				dev_consume_skb_irq(skb);
 
 				tx_cmd->cmd.command = 0; /* Mark free */
 				break;

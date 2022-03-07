@@ -28,19 +28,18 @@
  *  Alon Levy <alevy@redhat.com>
  */
 
-#include <linux/debugfs.h>
+#include <drm/drm_debugfs.h>
+#include <drm/drm_file.h>
 
-#include "drmP.h"
 #include "qxl_drv.h"
 #include "qxl_object.h"
-
 
 #if defined(CONFIG_DEBUG_FS)
 static int
 qxl_debugfs_irq_received(struct seq_file *m, void *data)
 {
 	struct drm_info_node *node = (struct drm_info_node *) m->private;
-	struct qxl_device *qdev = node->minor->dev->dev_private;
+	struct qxl_device *qdev = to_qxl(node->minor->dev);
 
 	seq_printf(m, "%d\n", atomic_read(&qdev->irq_received));
 	seq_printf(m, "%d\n", atomic_read(&qdev->irq_received_display));
@@ -54,20 +53,20 @@ static int
 qxl_debugfs_buffers_info(struct seq_file *m, void *data)
 {
 	struct drm_info_node *node = (struct drm_info_node *) m->private;
-	struct qxl_device *qdev = node->minor->dev->dev_private;
+	struct qxl_device *qdev = to_qxl(node->minor->dev);
 	struct qxl_bo *bo;
 
 	list_for_each_entry(bo, &qdev->gem.objects, list) {
-		struct reservation_object_list *fobj;
+		struct dma_resv_list *fobj;
 		int rel;
 
 		rcu_read_lock();
-		fobj = rcu_dereference(bo->tbo.resv->fence);
+		fobj = rcu_dereference(bo->tbo.base.resv->fence);
 		rel = fobj ? fobj->shared_count : 0;
 		rcu_read_unlock();
 
 		seq_printf(m, "size %ld, pc %d, num releases %d\n",
-			   (unsigned long)bo->gem_base.size,
+			   (unsigned long)bo->tbo.base.size,
 			   bo->pin_count, rel);
 	}
 	return 0;
@@ -80,35 +79,29 @@ static struct drm_info_list qxl_debugfs_list[] = {
 #define QXL_DEBUGFS_ENTRIES ARRAY_SIZE(qxl_debugfs_list)
 #endif
 
-int
+void
 qxl_debugfs_init(struct drm_minor *minor)
 {
 #if defined(CONFIG_DEBUG_FS)
+	struct qxl_device *dev = to_qxl(minor->dev);
+
 	drm_debugfs_create_files(qxl_debugfs_list, QXL_DEBUGFS_ENTRIES,
 				 minor->debugfs_root, minor);
-#endif
-	return 0;
-}
 
-void
-qxl_debugfs_takedown(struct drm_minor *minor)
-{
-#if defined(CONFIG_DEBUG_FS)
-	drm_debugfs_remove_files(qxl_debugfs_list, QXL_DEBUGFS_ENTRIES,
-				 minor);
+	qxl_ttm_debugfs_init(dev);
 #endif
 }
 
-int qxl_debugfs_add_files(struct qxl_device *qdev,
-			  struct drm_info_list *files,
-			  unsigned nfiles)
+void qxl_debugfs_add_files(struct qxl_device *qdev,
+			   struct drm_info_list *files,
+			   unsigned int nfiles)
 {
-	unsigned i;
+	unsigned int i;
 
 	for (i = 0; i < qdev->debugfs_count; i++) {
 		if (qdev->debugfs[i].files == files) {
 			/* Already registered */
-			return 0;
+			return;
 		}
 	}
 
@@ -116,34 +109,14 @@ int qxl_debugfs_add_files(struct qxl_device *qdev,
 	if (i > QXL_DEBUGFS_MAX_COMPONENTS) {
 		DRM_ERROR("Reached maximum number of debugfs components.\n");
 		DRM_ERROR("Report so we increase QXL_DEBUGFS_MAX_COMPONENTS.\n");
-		return -EINVAL;
+		return;
 	}
 	qdev->debugfs[qdev->debugfs_count].files = files;
 	qdev->debugfs[qdev->debugfs_count].num_files = nfiles;
 	qdev->debugfs_count = i;
 #if defined(CONFIG_DEBUG_FS)
 	drm_debugfs_create_files(files, nfiles,
-				 qdev->ddev->control->debugfs_root,
-				 qdev->ddev->control);
-	drm_debugfs_create_files(files, nfiles,
-				 qdev->ddev->primary->debugfs_root,
-				 qdev->ddev->primary);
-#endif
-	return 0;
-}
-
-void qxl_debugfs_remove_files(struct qxl_device *qdev)
-{
-#if defined(CONFIG_DEBUG_FS)
-	unsigned i;
-
-	for (i = 0; i < qdev->debugfs_count; i++) {
-		drm_debugfs_remove_files(qdev->debugfs[i].files,
-					 qdev->debugfs[i].num_files,
-					 qdev->ddev->control);
-		drm_debugfs_remove_files(qdev->debugfs[i].files,
-					 qdev->debugfs[i].num_files,
-					 qdev->ddev->primary);
-	}
+				 qdev->ddev.primary->debugfs_root,
+				 qdev->ddev.primary);
 #endif
 }

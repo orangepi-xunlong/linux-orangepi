@@ -1,38 +1,13 @@
-/*******************************************************************************
- *
- * Intel Ethernet Controller XL710 Family Linux Driver
- * Copyright(c) 2013 - 2014 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- ******************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Copyright(c) 2013 - 2018 Intel Corporation. */
 
 #ifndef _I40E_DCB_H_
 #define _I40E_DCB_H_
 
 #include "i40e_type.h"
 
-#define I40E_DCBX_STATUS_NOT_STARTED	0
 #define I40E_DCBX_STATUS_IN_PROGRESS	1
 #define I40E_DCBX_STATUS_DONE		2
-#define I40E_DCBX_STATUS_MULTIPLE_PEERS	3
 #define I40E_DCBX_STATUS_DISABLED	7
 
 #define I40E_TLV_TYPE_END		0
@@ -47,12 +22,16 @@
 #define I40E_CEE_DCBX_OUI		0x001b21
 #define I40E_CEE_DCBX_TYPE		2
 
-#define I40E_CEE_SUBTYPE_CTRL		1
 #define I40E_CEE_SUBTYPE_PG_CFG		2
 #define I40E_CEE_SUBTYPE_PFC_CFG	3
 #define I40E_CEE_SUBTYPE_APP_PRI	4
 
 #define I40E_CEE_MAX_FEAT_TYPE		3
+#define I40E_LLDP_CURRENT_STATUS_XL710_OFFSET	0x2B
+#define I40E_LLDP_CURRENT_STATUS_X722_OFFSET	0x31
+#define I40E_LLDP_CURRENT_STATUS_OFFSET		1
+#define I40E_LLDP_CURRENT_STATUS_SIZE		1
+
 /* Defines for LLDP TLV header */
 #define I40E_LLDP_TLV_LEN_SHIFT		0
 #define I40E_LLDP_TLV_LEN_MASK		(0x01FF << I40E_LLDP_TLV_LEN_SHIFT)
@@ -123,9 +102,7 @@ struct i40e_cee_ctrl_tlv {
 struct i40e_cee_feat_tlv {
 	struct i40e_cee_tlv_hdr hdr;
 	u8 en_will_err; /* Bits: |En|Will|Err|Reserved(5)| */
-#define I40E_CEE_FEAT_TLV_ENABLE_MASK	0x80
 #define I40E_CEE_FEAT_TLV_WILLING_MASK	0x40
-#define I40E_CEE_FEAT_TLV_ERR_MASK	0x20
 	u8 subtype;
 	u8 tlvinfo[1];
 };
@@ -147,5 +124,5 @@ i40e_status i40e_aq_get_dcb_config(struct i40e_hw *hw, u8 mib_type,
 					     u8 bridgetype,
 					     struct i40e_dcbx_config *dcbcfg);
 i40e_status i40e_get_dcb_config(struct i40e_hw *hw);
-i40e_status i40e_init_dcb(struct i40e_hw *hw);
+i40e_status i40e_init_dcb(struct i40e_hw *hw, bool enable_mib_change);
 #endif /* _I40E_DCB_H_ */

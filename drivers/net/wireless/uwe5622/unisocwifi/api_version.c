@@ -449,7 +449,11 @@ int sprdwl_api_available_check(struct sprdwl_priv *priv,
 	u8 drv_ver = 0, fw_ver = 0;
 	u32 min_ver = 255;
 
+#if defined(UWE5621_FTR)
 	hdr = (struct sprdwl_cmd_hdr *)(msg->tran_data + priv->hw_offset);
+#else
+	hdr = (struct sprdwl_cmd_hdr *)msg->skb->data;
+#endif
 	cmd_id = hdr->cmd_id;
 	if (cmd_id == WIFI_CMD_SYNC_VERSION)
 		return 0;

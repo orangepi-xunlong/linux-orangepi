@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Definitions for diskquota-operations. When diskquota is configured these
  * macros expand to the right source-code.
@@ -21,7 +22,7 @@ static inline struct quota_info *sb_dqopt(struct super_block *sb)
 /* i_mutex must being held */
 static inline bool is_quota_modification(struct inode *inode, struct iattr *ia)
 {
-	return (ia->ia_valid & ATTR_SIZE && ia->ia_size != inode->i_size) ||
+	return (ia->ia_valid & ATTR_SIZE) ||
 		(ia->ia_valid & ATTR_UID && !uid_eq(ia->ia_uid, inode->i_uid)) ||
 		(ia->ia_valid & ATTR_GID && !gid_eq(ia->ia_gid, inode->i_gid));
 }
@@ -38,12 +39,8 @@ void __quota_error(struct super_block *sb, const char *func,
 /*
  * declaration of quota_function calls in kernel.
  */
-void inode_add_rsv_space(struct inode *inode, qsize_t number);
-void inode_claim_rsv_space(struct inode *inode, qsize_t number);
-void inode_sub_rsv_space(struct inode *inode, qsize_t number);
-void inode_reclaim_rsv_space(struct inode *inode, qsize_t number);
-
 int dquot_initialize(struct inode *inode);
+bool dquot_initialize_needed(struct inode *inode);
 void dquot_drop(struct inode *inode);
 struct dquot *dqget(struct super_block *sb, struct kqid qid);
 static inline struct dquot *dqgrab(struct dquot *dquot)
@@ -54,6 +51,16 @@ static inline struct dquot *dqgrab(struct dquot *dquot)
 	atomic_inc(&dquot->dq_count);
 	return dquot;
 }
+
+static inline bool dquot_is_busy(struct dquot *dquot)
+{
+	if (test_bit(DQ_MOD_B, &dquot->dq_flags))
+		return true;
+	if (atomic_read(&dquot->dq_count) > 1)
+		return true;
+	return false;
+}
+
 void dqput(struct dquot *dquot);
 int dquot_scan_active(struct super_block *sb,
 		      int (*fn)(struct dquot *dquot, unsigned long priv),
@@ -87,10 +94,12 @@ int dquot_mark_dquot_dirty(struct dquot *dquot);
 
 int dquot_file_open(struct inode *inode, struct file *file);
 
-int dquot_enable(struct inode *inode, int type, int format_id,
+int dquot_load_quota_sb(struct super_block *sb, int type, int format_id,
+	unsigned int flags);
+int dquot_load_quota_inode(struct inode *inode, int type, int format_id,
 	unsigned int flags);
 int dquot_quota_on(struct super_block *sb, int type, int format_id,
- 	struct path *path);
+	const struct path *path);
 int dquot_quota_on_mount(struct super_block *sb, char *qf_name,
  	int format_id, int type);
 int dquot_quota_off(struct super_block *sb, int type);
@@ -162,7 +171,6 @@ static inline bool sb_has_quota_active(struct super_block *sb, int type)
  * Operations supported for diskquotas.
  */
 extern const struct dquot_operations dquot_operations;
-extern const struct quotactl_ops dquot_quotactl_ops;
 extern const struct quotactl_ops dquot_quotactl_sysfile_ops;
 
 #else
@@ -206,6 +214,11 @@ static inline int sb_has_quota_active(struct super_block *sb, int type)
 static inline int dquot_initialize(struct inode *inode)
 {
 	return 0;
+}
+
+static inline bool dquot_initialize_needed(struct inode *inode)
+{
+	return false;
 }
 
 static inline void dquot_drop(struct inode *inode)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Watchdog driver for z/VM and LPAR using the diag 288 interface.
  *
@@ -25,13 +26,11 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/slab.h>
-#include <linux/miscdevice.h>
 #include <linux/watchdog.h>
 #include <linux/suspend.h>
 #include <asm/ebcdic.h>
 #include <asm/diag.h>
 #include <linux/io.h>
-#include <linux/uaccess.h>
 
 #define MAX_CMDLEN 240
 #define DEFAULT_CMD "SYSTEM RESTART"
@@ -69,7 +68,6 @@ MODULE_PARM_DESC(conceal, "Enable the CONCEAL CP option while the watchdog is ac
 module_param_named(nowayout, nowayout_info, bool, 0444);
 MODULE_PARM_DESC(nowayout, "Watchdog cannot be stopped once started (default = CONFIG_WATCHDOG_NOWAYOUT)");
 
-MODULE_ALIAS_MISCDEV(WATCHDOG_MINOR);
 MODULE_ALIAS("vmwatchdog");
 
 static int __diag288(unsigned int func, unsigned int timeout,
@@ -205,7 +203,7 @@ static int wdt_set_timeout(struct watchdog_device * dev, unsigned int new_to)
 	return wdt_ping(dev);
 }
 
-static struct watchdog_ops wdt_ops = {
+static const struct watchdog_ops wdt_ops = {
 	.owner = THIS_MODULE,
 	.start = wdt_start,
 	.stop = wdt_stop,
@@ -213,7 +211,7 @@ static struct watchdog_ops wdt_ops = {
 	.set_timeout = wdt_set_timeout,
 };
 
-static struct watchdog_info wdt_info = {
+static const struct watchdog_info wdt_info = {
 	.options = WDIOF_SETTIMEOUT | WDIOF_KEEPALIVEPING | WDIOF_MAGICCLOSE,
 	.firmware_version = 0,
 	.identity = "z Watchdog",

@@ -1,15 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2011 Realtek Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
  *
  ******************************************************************************/
 #ifndef _RTW_XMIT_H_
@@ -50,22 +42,21 @@ do {\
 	pattrib_iv[0] = dot11txpn._byte_.TSC0;\
 	pattrib_iv[1] = dot11txpn._byte_.TSC1;\
 	pattrib_iv[2] = dot11txpn._byte_.TSC2;\
-	pattrib_iv[3] = ((keyidx & 0x3)<<6);\
-	dot11txpn.val = (dot11txpn.val == 0xffffff) ? 0 : (dot11txpn.val+1);\
+	pattrib_iv[3] = ((keyidx & 0x3) << 6);\
+	dot11txpn.val = (dot11txpn.val == 0xffffff) ? 0 : (dot11txpn.val + 1);\
 } while (0)
-
 
 #define TKIP_IV(pattrib_iv, dot11txpn, keyidx)\
 do {\
 	pattrib_iv[0] = dot11txpn._byte_.TSC1;\
 	pattrib_iv[1] = (dot11txpn._byte_.TSC1 | 0x20) & 0x7f;\
 	pattrib_iv[2] = dot11txpn._byte_.TSC0;\
-	pattrib_iv[3] = BIT(5) | ((keyidx & 0x3)<<6);\
+	pattrib_iv[3] = BIT(5) | ((keyidx & 0x3) << 6);\
 	pattrib_iv[4] = dot11txpn._byte_.TSC2;\
 	pattrib_iv[5] = dot11txpn._byte_.TSC3;\
 	pattrib_iv[6] = dot11txpn._byte_.TSC4;\
 	pattrib_iv[7] = dot11txpn._byte_.TSC5;\
-	dot11txpn.val = dot11txpn.val == 0xffffffffffffULL ? 0 : (dot11txpn.val+1);\
+	dot11txpn.val = dot11txpn.val == 0xffffffffffffULL ? 0 : (dot11txpn.val + 1);\
 } while (0)
 
 #define AES_IV(pattrib_iv, dot11txpn, keyidx)\
@@ -73,12 +64,12 @@ do {							\
 	pattrib_iv[0] = dot11txpn._byte_.TSC0;		\
 	pattrib_iv[1] = dot11txpn._byte_.TSC1;		\
 	pattrib_iv[2] = 0;				\
-	pattrib_iv[3] = BIT(5) | ((keyidx & 0x3)<<6);	\
+	pattrib_iv[3] = BIT(5) | ((keyidx & 0x3) << 6);	\
 	pattrib_iv[4] = dot11txpn._byte_.TSC2;		\
 	pattrib_iv[5] = dot11txpn._byte_.TSC3;		\
 	pattrib_iv[6] = dot11txpn._byte_.TSC4;		\
 	pattrib_iv[7] = dot11txpn._byte_.TSC5;		\
-	dot11txpn.val = dot11txpn.val == 0xffffffffffffULL ? 0 : (dot11txpn.val+1);\
+	dot11txpn.val = dot11txpn.val == 0xffffffffffffULL ? 0 : (dot11txpn.val + 1);\
 } while (0)
 
 #define HWXMIT_ENTRY	4
@@ -115,11 +106,13 @@ struct pkt_attrib {
 	u16	seqnum;
 	u16	hdrlen;		/* the WLAN Header Len */
 	u32	pktlen;		/* the original 802.3 pkt raw_data len (not include
-				 * ether_hdr data) */
+				 * ether_hdr data)
+				 */
 	u32	last_txcmdsz;
 	u8	nr_frags;
 	u8	encrypt;	/* when 0 indicate no encrypt. when non-zero,
-				 * indicate the encrypt algorith */
+				 * indicate the encrypt algorithm
+				 */
 	u8	iv_len;
 	u8	icv_len;
 	u8	iv[18];
@@ -200,14 +193,9 @@ struct xmit_buf {
 	void *priv_data;
 	u16 ext_tag; /*  0: Normal xmitbuf, 1: extension xmitbuf. */
 	u16 flags;
-	u32 alloc_sz;
 	u32  len;
 	struct submit_ctx *sctx;
-	u32	ff_hwaddr;
 	struct urb *pxmit_urb[8];
-	dma_addr_t dma_transfer_addr;	/* (in) dma addr for transfer_buffer */
-	u8 bpending[8];
-	int last[8];
 };
 
 struct xmit_frame {
@@ -234,7 +222,8 @@ struct sta_xmit_priv {
 	spinlock_t lock;
 	int	option;
 	int	apsd_setting;	/* When bit mask is on, the associated edca
-				 * queue supports APSD. */
+				 * queue supports APSD.
+				 */
 	struct tx_servq	be_q;			/* priority == 0,3 */
 	struct tx_servq	bk_q;			/* priority == 1,2 */
 	struct tx_servq	vi_q;			/* priority == 4,5 */
@@ -280,7 +269,8 @@ struct	xmit_priv {
 	u8	hwxmit_entry;
 	u8	wmm_para_seq[4];/* sequence for wmm ac parameter strength
 				 * from large to small. it's value is 0->vo,
-				 * 1->vi, 2->be, 3->bk. */
+				 * 1->vi, 2->be, 3->bk.
+				 */
 	u8		txirp_cnt;/*  */
 	struct tasklet_struct xmit_tasklet;
 	/* per AC pending irp */
@@ -330,8 +320,6 @@ struct xmit_frame *rtw_dequeue_xframe(struct xmit_priv *pxmitpriv,
 
 s32 rtw_xmit_classifier(struct adapter *padapter,
 			struct xmit_frame *pxmitframe);
-u32 rtw_calculate_wlan_pkt_size_by_attribue(struct pkt_attrib *pattrib);
-#define rtw_wlan_pkt_size(f) rtw_calculate_wlan_pkt_size_by_attribue(&f->attrib)
 s32 rtw_xmitframe_coalesce(struct adapter *padapter, struct sk_buff *pkt,
 			   struct xmit_frame *pxmitframe);
 s32 _rtw_init_hw_txqueue(struct hw_txqueue *phw_txqueue, u8 ac_tag);
@@ -342,7 +330,7 @@ s32 rtw_txframes_sta_ac_pending(struct adapter *padapter,
 void rtw_init_hwxmits(struct hw_xmit *phwxmit, int entry);
 s32 _rtw_init_xmit_priv(struct xmit_priv *pxmitpriv, struct adapter *padapter);
 void _rtw_free_xmit_priv(struct xmit_priv *pxmitpriv);
-void rtw_alloc_hwxmits(struct adapter *padapter);
+s32 rtw_alloc_hwxmits(struct adapter *padapter);
 void rtw_free_hwxmits(struct adapter *padapter);
 s32 rtw_xmit(struct adapter *padapter, struct sk_buff **pkt);
 

@@ -552,8 +552,14 @@ void wmm_ac_init(struct sprdwl_priv *priv)
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
 	timer_setup(&priv->wmmac.wmmac_edcaf_timer, update_wmmac_edcaftime_timeout, 0);
+	timer_setup(&priv->wmmac.wmmac_vo_timer, update_wmmac_vo_timeout, 0);
+	timer_setup(&priv->wmmac.wmmac_vi_timer, update_wmmac_vi_timeout, 0);
 #else
 	setup_timer(&priv->wmmac.wmmac_edcaf_timer, update_wmmac_edcaftime_timeout,
+		    (unsigned long)priv);
+	setup_timer(&priv->wmmac.wmmac_vo_timer, update_wmmac_vo_timeout,
+		    (unsigned long)priv);
+	setup_timer(&priv->wmmac.wmmac_vi_timer, update_wmmac_vi_timeout,
 		    (unsigned long)priv);
 #endif
 	memset(&priv->wmmac.ac[0], 0, 4*sizeof(struct wmm_ac_params));
@@ -569,6 +575,12 @@ void reset_wmmac_parameters(struct sprdwl_priv *priv)
 	}
 	if (timer_pending(&priv->wmmac.wmmac_edcaf_timer))
 		del_timer_sync(&priv->wmmac.wmmac_edcaf_timer);
+
+	if (timer_pending(&priv->wmmac.wmmac_vo_timer))
+		del_timer_sync(&priv->wmmac.wmmac_vo_timer);
+
+	if (timer_pending(&priv->wmmac.wmmac_vi_timer))
+		del_timer_sync(&priv->wmmac.wmmac_vi_timer);
 
 	memset(&priv->wmmac.ac[0], 0, 4*sizeof(struct wmm_ac_params));
 }
@@ -685,6 +697,14 @@ void update_admitted_time(struct sprdwl_priv *priv, u8 tsid, u16 medium_time, bo
 		g_wmmac_admittedtime[ac] += (medium_time<<5);
 		mod_timer(&priv->wmmac.wmmac_edcaf_timer,
 				jiffies + WMMAC_EDCA_TIMEOUT_MS * HZ / 1000);
+
+		/*replace the usedtime logic method with timer counter, just for simplify for the WFA certification*/
+		if (ac == AC_VO)
+			mod_timer(&priv->wmmac.wmmac_vo_timer,
+				jiffies + usecs_to_jiffies(g_wmmac_admittedtime[ac] * WMMAC_TIME_RATIO));
+		else if (ac == AC_VI)
+			mod_timer(&priv->wmmac.wmmac_vi_timer,
+				jiffies + usecs_to_jiffies(g_wmmac_admittedtime[ac] * WMMAC_TIME_RATIO));
 	} else {
 		if (g_wmmac_admittedtime[ac] > (medium_time<<5))
 			g_wmmac_admittedtime[ac] -= (medium_time<<5);
@@ -692,6 +712,12 @@ void update_admitted_time(struct sprdwl_priv *priv, u8 tsid, u16 medium_time, bo
 			g_wmmac_admittedtime[ac] = 0;
 			if (timer_pending(&priv->wmmac.wmmac_edcaf_timer))
 				del_timer_sync(&priv->wmmac.wmmac_edcaf_timer);
+
+			if (timer_pending(&priv->wmmac.wmmac_vo_timer))
+				del_timer_sync(&priv->wmmac.wmmac_vo_timer);
+
+			if (timer_pending(&priv->wmmac.wmmac_vi_timer))
+				del_timer_sync(&priv->wmmac.wmmac_vi_timer);
 		}
 	}
 
@@ -712,11 +738,36 @@ void update_wmmac_edcaftime_timeout(unsigned long data)
 	if (g_wmmac_admittedtime[AC_VO] > 0) {
 		g_wmmac_usedtime[AC_VO] = 0;
 		g_wmmac_available[AC_VO] = true;
+		mod_timer(&priv->wmmac.wmmac_vo_timer,
+			jiffies + usecs_to_jiffies(g_wmmac_admittedtime[AC_VO] * WMMAC_TIME_RATIO));
 	}
 	if (g_wmmac_admittedtime[AC_VI] > 0) {
 		g_wmmac_usedtime[AC_VI] = 0;
 		g_wmmac_available[AC_VI] = true;
+		mod_timer(&priv->wmmac.wmmac_vi_timer,
+			jiffies + usecs_to_jiffies(g_wmmac_admittedtime[AC_VI] * WMMAC_TIME_RATIO));
 	}
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
+void update_wmmac_vo_timeout(struct timer_list *t)
+#else
+void update_wmmac_vo_timeout(unsigned long data)
+#endif
+{
+	g_wmmac_usedtime[AC_VO] = g_wmmac_admittedtime[AC_VO];
+	g_wmmac_available[AC_VO] = false;
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
+void update_wmmac_vi_timeout(struct timer_list *t)
+#else
+void update_wmmac_vi_timeout(unsigned long data)
+#endif
+{
+	g_wmmac_usedtime[AC_VI] = g_wmmac_admittedtime[AC_VI];
+	g_wmmac_available[AC_VI] = false;
+
 }
 
 /*change priority according to the g_wmmac_available value */

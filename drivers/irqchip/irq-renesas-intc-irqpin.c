@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Renesas INTC External IRQ Pin Driver
  *
  *  Copyright (C) 2013 Magnus Damm
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include <linux/clk.h>
 #include <linux/init.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
@@ -78,16 +65,13 @@ struct intc_irqpin_priv {
 	struct platform_device *pdev;
 	struct irq_chip irq_chip;
 	struct irq_domain *irq_domain;
-	struct clk *clk;
+	atomic_t wakeup_path;
 	unsigned shared_irqs:1;
-	unsigned needs_clk:1;
 	u8 shared_irq_mask;
 };
 
 struct intc_irqpin_config {
-	unsigned int irlm_bit;
-	unsigned needs_irlm:1;
-	unsigned needs_clk:1;
+	int irlm_bit;		/* -1 if non-existent */
 };
 
 static unsigned long intc_irqpin_read32(void __iomem *iomem)
@@ -287,14 +271,10 @@ static int intc_irqpin_irq_set_wake(struct irq_data *d, unsigned int on)
 	int hw_irq = irqd_to_hwirq(d);
 
 	irq_set_irq_wake(p->irq[hw_irq].requested_irq, on);
-
-	if (!p->clk)
-		return 0;
-
 	if (on)
-		clk_enable(p->clk);
+		atomic_inc(&p->wakeup_path);
 	else
-		clk_disable(p->clk);
+		atomic_dec(&p->wakeup_path);
 
 	return 0;
 }
@@ -342,6 +322,9 @@ static irqreturn_t intc_irqpin_shared_irq_handler(int irq, void *dev_id)
  */
 static struct lock_class_key intc_irqpin_irq_lock_class;
 
+/* And this is for the request mutex */
+static struct lock_class_key intc_irqpin_irq_request_class;
+
 static int intc_irqpin_irq_domain_map(struct irq_domain *h, unsigned int virq,
 				      irq_hw_number_t hw)
 {
@@ -352,7 +335,8 @@ static int intc_irqpin_irq_domain_map(struct irq_domain *h, unsigned int virq,
 
 	intc_irqpin_dbg(&p->irq[hw], "map");
 	irq_set_chip_data(virq, h->host_data);
-	irq_set_lockdep_class(virq, &intc_irqpin_irq_lock_class);
+	irq_set_lockdep_class(virq, &intc_irqpin_irq_lock_class,
+			      &intc_irqpin_irq_request_class);
 	irq_set_chip_and_handler(virq, &p->irq_chip, handle_level_irq);
 	return 0;
 }
@@ -364,13 +348,10 @@ static const struct irq_domain_ops intc_irqpin_irq_domain_ops = {
 
 static const struct intc_irqpin_config intc_irqpin_irlm_r8a777x = {
 	.irlm_bit = 23, /* ICR0.IRLM0 */
-	.needs_irlm = 1,
-	.needs_clk = 0,
 };
 
 static const struct intc_irqpin_config intc_irqpin_rmobile = {
-	.needs_irlm = 0,
-	.needs_clk = 1,
+	.irlm_bit = -1,
 };
 
 static const struct of_device_id intc_irqpin_dt_ids[] = {
@@ -389,9 +370,8 @@ MODULE_DEVICE_TABLE(of, intc_irqpin_dt_ids);
 
 static int intc_irqpin_probe(struct platform_device *pdev)
 {
-	const struct intc_irqpin_config *config = NULL;
+	const struct intc_irqpin_config *config;
 	struct device *dev = &pdev->dev;
-	const struct of_device_id *of_id;
 	struct intc_irqpin_priv *p;
 	struct intc_irqpin_iomem *i;
 	struct resource *io[INTC_IRQPIN_REG_NR];
@@ -407,10 +387,8 @@ static int intc_irqpin_probe(struct platform_device *pdev)
 	int k;
 
 	p = devm_kzalloc(dev, sizeof(*p), GFP_KERNEL);
-	if (!p) {
-		dev_err(dev, "failed to allocate driver data\n");
+	if (!p)
 		return -ENOMEM;
-	}
 
 	/* deal with driver instance configuration */
 	of_property_read_u32(dev->of_node, "sense-bitfield-width",
@@ -422,21 +400,7 @@ static int intc_irqpin_probe(struct platform_device *pdev)
 	p->pdev = pdev;
 	platform_set_drvdata(pdev, p);
 
-	of_id = of_match_device(intc_irqpin_dt_ids, dev);
-	if (of_id && of_id->data) {
-		config = of_id->data;
-		p->needs_clk = config->needs_clk;
-	}
-
-	p->clk = devm_clk_get(dev, NULL);
-	if (IS_ERR(p->clk)) {
-		if (p->needs_clk) {
-			dev_err(dev, "unable to get clock\n");
-			ret = PTR_ERR(p->clk);
-			goto err0;
-		}
-		p->clk = NULL;
-	}
+	config = of_device_get_match_data(dev);
 
 	pm_runtime_enable(dev);
 	pm_runtime_get_sync(dev);
@@ -494,8 +458,8 @@ static int intc_irqpin_probe(struct platform_device *pdev)
 			goto err0;
 		}
 
-		i->iomem = devm_ioremap_nocache(dev, io[k]->start,
-						resource_size(io[k]));
+		i->iomem = devm_ioremap(dev, io[k]->start,
+					resource_size(io[k]));
 		if (!i->iomem) {
 			dev_err(dev, "failed to remap IOMEM\n");
 			ret = -ENXIO;
@@ -504,7 +468,7 @@ static int intc_irqpin_probe(struct platform_device *pdev)
 	}
 
 	/* configure "individual IRQ mode" where needed */
-	if (config && config->needs_irlm) {
+	if (config && config->irlm_bit >= 0) {
 		if (io[INTC_IRQPIN_REG_IRLM])
 			intc_irqpin_read_modify_write(p, INTC_IRQPIN_REG_IRLM,
 						      config->irlm_bit, 1, 1);
@@ -542,7 +506,8 @@ static int intc_irqpin_probe(struct platform_device *pdev)
 	}
 
 	irq_chip = &p->irq_chip;
-	irq_chip->name = name;
+	irq_chip->name = "intc-irqpin";
+	irq_chip->parent_device = dev;
 	irq_chip->irq_mask = disable_fn;
 	irq_chip->irq_unmask = enable_fn;
 	irq_chip->irq_set_type = intc_irqpin_irq_set_type;
@@ -605,12 +570,25 @@ static int intc_irqpin_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static int __maybe_unused intc_irqpin_suspend(struct device *dev)
+{
+	struct intc_irqpin_priv *p = dev_get_drvdata(dev);
+
+	if (atomic_read(&p->wakeup_path))
+		device_set_wakeup_path(dev);
+
+	return 0;
+}
+
+static SIMPLE_DEV_PM_OPS(intc_irqpin_pm_ops, intc_irqpin_suspend, NULL);
+
 static struct platform_driver intc_irqpin_device_driver = {
 	.probe		= intc_irqpin_probe,
 	.remove		= intc_irqpin_remove,
 	.driver		= {
 		.name	= "renesas_intc_irqpin",
 		.of_match_table = intc_irqpin_dt_ids,
+		.pm	= &intc_irqpin_pm_ops,
 	}
 };
 

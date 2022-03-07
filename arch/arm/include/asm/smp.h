@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  arch/arm/include/asm/smp.h
  *
  *  Copyright (C) 2004-2005 ARM Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #ifndef __ASM_ARM_SMP_H
 #define __ASM_ARM_SMP_H
@@ -42,11 +39,10 @@ void handle_IPI(int ipinr, struct pt_regs *regs);
  */
 extern void smp_init_cpus(void);
 
-
 /*
- * Provide a function to raise an IPI cross call on CPUs in callmap.
+ * Register IPI interrupts with the arch SMP code
  */
-extern void set_smp_cross_call(void (*)(const struct cpumask *, unsigned int));
+extern void set_smp_ipi_range(int ipi_base, int nr_ipi);
 
 /*
  * Called from platform specific assembly code, this is the
@@ -60,14 +56,13 @@ asmlinkage void secondary_start_kernel(void);
  */
 struct secondary_data {
 	union {
-		unsigned long mpu_rgn_szr;
+		struct mpu_rgn_info *mpu_rgn_info;
 		u64 pgdir;
 	};
 	unsigned long swapper_pg_dir;
 	void *stack;
 };
 extern struct secondary_data secondary_data;
-extern volatile int pen_release;
 extern void secondary_startup(void);
 extern void secondary_startup_arm(void);
 
@@ -117,7 +112,7 @@ struct of_cpu_method {
 
 #define CPU_METHOD_OF_DECLARE(name, _method, _ops)			\
 	static const struct of_cpu_method __cpu_method_of_table_##name	\
-		__used __section(__cpu_method_of_table)			\
+		__used __section("__cpu_method_of_table")		\
 		= { .method = _method, .ops = _ops }
 /*
  * set platform specific SMP operations

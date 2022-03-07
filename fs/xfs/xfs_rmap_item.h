@@ -1,21 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (C) 2016 Oracle.  All Rights Reserved.
- *
  * Author: Darrick J. Wong <darrick.wong@oracle.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it would be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write the Free Software Foundation,
- * Inc.,  51 Franklin St, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 #ifndef	__XFS_RMAP_ITEM_H__
 #define	__XFS_RMAP_ITEM_H__
@@ -50,11 +36,6 @@ struct kmem_zone;
 #define	XFS_RUI_MAX_FAST_EXTENTS	16
 
 /*
- * Define RUI flag bits. Manipulated by set/clear/test_bit operators.
- */
-#define	XFS_RUI_RECOVERED		1
-
-/*
  * This is the "rmap update intent" log item.  It is used to log the fact that
  * some reverse mappings need to change.  It is used in conjunction with the
  * "rmap update done" log item described below.
@@ -66,7 +47,6 @@ struct xfs_rui_log_item {
 	struct xfs_log_item		rui_item;
 	atomic_t			rui_refcount;
 	atomic_t			rui_next_extent;
-	unsigned long			rui_flags;	/* misc flags */
 	struct xfs_rui_log_format	rui_format;
 };
 
@@ -90,14 +70,5 @@ struct xfs_rud_log_item {
 
 extern struct kmem_zone	*xfs_rui_zone;
 extern struct kmem_zone	*xfs_rud_zone;
-
-struct xfs_rui_log_item *xfs_rui_init(struct xfs_mount *, uint);
-struct xfs_rud_log_item *xfs_rud_init(struct xfs_mount *,
-		struct xfs_rui_log_item *);
-int xfs_rui_copy_format(struct xfs_log_iovec *buf,
-		struct xfs_rui_log_format *dst_rui_fmt);
-void xfs_rui_item_free(struct xfs_rui_log_item *);
-void xfs_rui_release(struct xfs_rui_log_item *);
-int xfs_rui_recover(struct xfs_mount *mp, struct xfs_rui_log_item *ruip);
 
 #endif	/* __XFS_RMAP_ITEM_H__ */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  fs/partitions/sun.c
  *
@@ -8,7 +9,14 @@
  */
 
 #include "check.h"
-#include "sun.h"
+
+#define SUN_LABEL_MAGIC          0xDABE
+#define SUN_VTOC_SANITY          0x600DDEEE
+
+enum {
+	SUN_WHOLE_DISK = 5,
+	LINUX_RAID_PARTITION = 0xfd,	/* autodetect RAID partition */
+};
 
 int sun_partition(struct parsed_partitions *state)
 {

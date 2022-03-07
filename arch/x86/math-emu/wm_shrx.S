@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 	.file	"wm_shrx.S"
 /*---------------------------------------------------------------------------+
  |  wm_shrx.S                                                                |
@@ -32,7 +33,7 @@
  |   Results returned in the 64 bit arg and eax.                             |
  +---------------------------------------------------------------------------*/
 
-ENTRY(FPU_shrx)
+SYM_FUNC_START(FPU_shrx)
 	push	%ebp
 	movl	%esp,%ebp
 	pushl	%esi
@@ -92,6 +93,7 @@ L_more_than_95:
 	popl	%esi
 	leave
 	ret
+SYM_FUNC_END(FPU_shrx)
 
 
 /*---------------------------------------------------------------------------+
@@ -110,7 +112,7 @@ L_more_than_95:
  |   part which has been shifted out of the arg.                             |
  |   Results returned in the 64 bit arg and eax.                             |
  +---------------------------------------------------------------------------*/
-ENTRY(FPU_shrxs)
+SYM_FUNC_START(FPU_shrxs)
 	push	%ebp
 	movl	%esp,%ebp
 	pushl	%esi
@@ -202,3 +204,4 @@ Ls_more_than_95:
 	popl	%esi
 	leave
 	ret
+SYM_FUNC_END(FPU_shrxs)

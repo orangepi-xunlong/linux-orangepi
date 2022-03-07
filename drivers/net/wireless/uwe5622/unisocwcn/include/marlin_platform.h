@@ -81,8 +81,6 @@ enum marlin_wake_host_en {
 	WL_WAKE_HOST
 };
 
-enum wcn_clock_type wcn_get_xtal_26m_clk_type(void);
-enum wcn_clock_mode wcn_get_xtal_26m_clk_mode(void);
 unsigned int marlin_get_wcn_chipid(void);
 const char *wcn_get_chip_name(void);
 enum wcn_chip_model wcn_get_chip_model(void);
@@ -93,8 +91,6 @@ int marlin_get_wcn_module_vendor(void);
 int marlin_get_ant_num(void);
 void marlin_power_off(enum marlin_sub_sys subsys);
 int marlin_get_power(enum marlin_sub_sys subsys);
-int marlin_set_wakeup(enum marlin_sub_sys subsys);
-int marlin_set_sleep(enum marlin_sub_sys subsys, bool enable);
 int marlin_reset_reg(void);
 int start_marlin(u32 subsys);
 int stop_marlin(u32 subsys);

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_GENERIC_DIV64_H
 #define _ASM_GENERIC_DIV64_H
 /*
@@ -25,6 +26,20 @@
 
 #if BITS_PER_LONG == 64
 
+/**
+ * do_div - returns 2 values: calculate remainder and update new dividend
+ * @n: uint64_t dividend (will be updated)
+ * @base: uint32_t divisor
+ *
+ * Summary:
+ * ``uint32_t remainder = n % base;``
+ * ``n = n / base;``
+ *
+ * Return: (uint32_t)remainder
+ *
+ * NOTE: macro parameter @n is evaluated multiple times,
+ * beware of side effects!
+ */
 # define do_div(n,base) ({					\
 	uint32_t __base = (base);				\
 	uint32_t __rem;						\
@@ -163,7 +178,8 @@ static inline uint64_t __arch_xprod_64(const uint64_t m, uint64_t n, bool bias)
 	uint32_t m_hi = m >> 32;
 	uint32_t n_lo = n;
 	uint32_t n_hi = n >> 32;
-	uint64_t res, tmp;
+	uint64_t res;
+	uint32_t res_lo, res_hi, tmp;
 
 	if (!bias) {
 		res = ((uint64_t)m_lo * n_lo) >> 32;
@@ -172,8 +188,9 @@ static inline uint64_t __arch_xprod_64(const uint64_t m, uint64_t n, bool bias)
 		res = (m + (uint64_t)m_lo * n_lo) >> 32;
 	} else {
 		res = m + (uint64_t)m_lo * n_lo;
-		tmp = (res < m) ? (1ULL << 32) : 0;
-		res = (res >> 32) + tmp;
+		res_lo = res >> 32;
+		res_hi = (res_lo < m_hi);
+		res = res_lo | ((uint64_t)res_hi << 32);
 	}
 
 	if (!(m & ((1ULL << 63) | (1ULL << 31)))) {
@@ -182,10 +199,12 @@ static inline uint64_t __arch_xprod_64(const uint64_t m, uint64_t n, bool bias)
 		res += (uint64_t)m_hi * n_lo;
 		res >>= 32;
 	} else {
-		tmp = res += (uint64_t)m_lo * n_hi;
+		res += (uint64_t)m_lo * n_hi;
+		tmp = res >> 32;
 		res += (uint64_t)m_hi * n_lo;
-		tmp = (res < tmp) ? (1ULL << 32) : 0;
-		res = (res >> 32) + tmp;
+		res_lo = res >> 32;
+		res_hi = (res_lo < tmp);
+		res = res_lo | ((uint64_t)res_hi << 32);
 	}
 
 	res += (uint64_t)m_hi * n_hi;

@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * PLX NET2272 high/full speed USB device controller
  *
  * Copyright (C) 2005-2006 PLX Technology, Inc.
  * Copyright (C) 2006-2011 Analog Devices, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #ifndef __NET2272_H__
@@ -118,11 +105,6 @@
 #define USBTEST				0x32
 #define 	TEST_MODE_SELECT			0
 #define 		NORMAL_OPERATION			0
-#define 		TEST_J					1
-#define 		TEST_K					2
-#define 		TEST_SE0_NAK				3
-#define 		TEST_PACKET				4
-#define 		TEST_FORCE_ENABLE			5
 #define XCVRDIAG			0x33
 #define 	FORCE_FULL_SPEED			2
 #define 	FORCE_HIGH_SPEED			3
@@ -459,6 +441,7 @@ struct net2272 {
 	unsigned protocol_stall:1,
 	         softconnect:1,
 	         wakeup:1,
+		 added:1,
 	         dma_eot_polarity:1,
 	         dma_dack_polarity:1,
 	         dma_dreq_polarity:1,
@@ -472,7 +455,7 @@ struct net2272 {
 	unsigned int base_shift;
 	u16 __iomem *base_addr;
 	union {
-#ifdef CONFIG_PCI
+#ifdef CONFIG_USB_PCI
 		struct {
 			void __iomem *plx9054_base_addr;
 			void __iomem *epld_base_addr;

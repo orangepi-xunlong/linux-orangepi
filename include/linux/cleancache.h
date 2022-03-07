@@ -1,9 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_CLEANCACHE_H
 #define _LINUX_CLEANCACHE_H
 
 #include <linux/fs.h>
 #include <linux/exportfs.h>
 #include <linux/mm.h>
+#include <linux/android_vendor.h>
 
 #define CLEANCACHE_NO_POOL		-1
 #define CLEANCACHE_NO_BACKEND		-2
@@ -27,7 +29,7 @@ struct cleancache_filekey {
 
 struct cleancache_ops {
 	int (*init_fs)(size_t);
-	int (*init_shared_fs)(char *uuid, size_t);
+	int (*init_shared_fs)(uuid_t *uuid, size_t);
 	int (*get_page)(int, struct cleancache_filekey,
 			pgoff_t, struct page *);
 	void (*put_page)(int, struct cleancache_filekey,
@@ -35,6 +37,7 @@ struct cleancache_ops {
 	void (*invalidate_page)(int, struct cleancache_filekey, pgoff_t);
 	void (*invalidate_inode)(int, struct cleancache_filekey);
 	void (*invalidate_fs)(int);
+	ANDROID_OEM_DATA(1);
 };
 
 extern int cleancache_register_ops(const struct cleancache_ops *ops);

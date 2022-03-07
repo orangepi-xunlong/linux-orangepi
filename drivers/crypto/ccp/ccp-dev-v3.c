@@ -1,19 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AMD Cryptographic Coprocessor (CCP) driver
  *
- * Copyright (C) 2013,2016 Advanced Micro Devices, Inc.
+ * Copyright (C) 2013,2017 Advanced Micro Devices, Inc.
  *
  * Author: Tom Lendacky <thomas.lendacky@amd.com>
  * Author: Gary R Hook <gary.hook@amd.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/pci.h>
 #include <linux/kthread.h>
 #include <linux/interrupt.h>
 #include <linux/ccp.h>
@@ -359,8 +355,7 @@ static void ccp_irq_bh(unsigned long data)
 
 static irqreturn_t ccp_irq_handler(int irq, void *data)
 {
-	struct device *dev = data;
-	struct ccp_device *ccp = dev_get_drvdata(dev);
+	struct ccp_device *ccp = (struct ccp_device *)data;
 
 	ccp_disable_queue_interrupts(ccp);
 	if (ccp->use_tasklet)
@@ -383,7 +378,7 @@ static int ccp_init(struct ccp_device *ccp)
 	/* Find available queues */
 	ccp->qim = 0;
 	qmr = ioread32(ccp->io_regs + Q_MASK_REG);
-	for (i = 0; i < MAX_HW_QUEUES; i++) {
+	for (i = 0; (i < MAX_HW_QUEUES) && (ccp->cmd_q_count < ccp->max_q_count); i++) {
 		if (!(qmr & (1 << i)))
 			continue;
 
@@ -454,15 +449,11 @@ static int ccp_init(struct ccp_device *ccp)
 	iowrite32(ccp->qim, ccp->io_regs + IRQ_STATUS_REG);
 
 	/* Request an irq */
-	ret = ccp->get_irq(ccp);
+	ret = sp_request_ccp_irq(ccp->sp, ccp_irq_handler, ccp->name, ccp);
 	if (ret) {
 		dev_err(dev, "unable to allocate an IRQ\n");
 		goto e_pool;
 	}
-
-	/* Initialize the queues used to wait for KSB space and suspend */
-	init_waitqueue_head(&ccp->sb_queue);
-	init_waitqueue_head(&ccp->suspend_queue);
 
 	/* Initialize the ISR tasklet? */
 	if (ccp->use_tasklet)
@@ -515,7 +506,7 @@ e_kthread:
 		if (ccp->cmd_q[i].kthread)
 			kthread_stop(ccp->cmd_q[i].kthread);
 
-	ccp->free_irq(ccp);
+	sp_free_ccp_irq(ccp->sp, ccp);
 
 e_pool:
 	for (i = 0; i < ccp->cmd_q_count; i++)
@@ -554,7 +545,7 @@ static void ccp_destroy(struct ccp_device *ccp)
 		if (ccp->cmd_q[i].kthread)
 			kthread_stop(ccp->cmd_q[i].kthread);
 
-	ccp->free_irq(ccp);
+	sp_free_ccp_irq(ccp->sp, ccp);
 
 	for (i = 0; i < ccp->cmd_q_count; i++)
 		dma_pool_destroy(ccp->cmd_q[i].dma_pool);
@@ -577,6 +568,7 @@ static void ccp_destroy(struct ccp_device *ccp)
 static const struct ccp_actions ccp3_actions = {
 	.aes = ccp_perform_aes,
 	.xts_aes = ccp_perform_xts_aes,
+	.des3 = NULL,
 	.sha = ccp_perform_sha,
 	.rsa = ccp_perform_rsa,
 	.passthru = ccp_perform_passthru,
@@ -589,10 +581,18 @@ static const struct ccp_actions ccp3_actions = {
 	.irqhandler = ccp_irq_handler,
 };
 
+const struct ccp_vdata ccpv3_platform = {
+	.version = CCP_VERSION(3, 0),
+	.setup = NULL,
+	.perform = &ccp3_actions,
+	.offset = 0,
+	.rsamax = CCP_RSA_MAX_WIDTH,
+};
+
 const struct ccp_vdata ccpv3 = {
 	.version = CCP_VERSION(3, 0),
 	.setup = NULL,
 	.perform = &ccp3_actions,
-	.bar = 2,
 	.offset = 0x20000,
+	.rsamax = CCP_RSA_MAX_WIDTH,
 };

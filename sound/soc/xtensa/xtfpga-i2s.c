@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Xtfpga I2S controller driver
  *
  * Copyright (c) 2014 Cadence Design Systems Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/clk.h>
@@ -165,7 +162,7 @@ static bool xtfpga_pcm_push_tx(struct xtfpga_i2s *i2s)
 	tx_substream = rcu_dereference(i2s->tx_substream);
 	tx_active = tx_substream && snd_pcm_running(tx_substream);
 	if (tx_active) {
-		unsigned tx_ptr = ACCESS_ONCE(i2s->tx_ptr);
+		unsigned tx_ptr = READ_ONCE(i2s->tx_ptr);
 		unsigned new_tx_ptr = i2s->tx_fn(i2s, tx_substream->runtime,
 						 tx_ptr);
 
@@ -368,29 +365,31 @@ static const struct snd_pcm_hardware xtfpga_pcm_hardware = {
 	.fifo_size		= 16,
 };
 
-static int xtfpga_pcm_open(struct snd_pcm_substream *substream)
+static int xtfpga_pcm_open(struct snd_soc_component *component,
+			   struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	void *p;
 
 	snd_soc_set_runtime_hwparams(substream, &xtfpga_pcm_hardware);
-	p = snd_soc_dai_get_dma_data(rtd->cpu_dai, substream);
+	p = snd_soc_dai_get_dma_data(asoc_rtd_to_cpu(rtd, 0), substream);
 	runtime->private_data = p;
 
 	return 0;
 }
 
-static int xtfpga_pcm_close(struct snd_pcm_substream *substream)
+static int xtfpga_pcm_close(struct snd_soc_component *component,
+			    struct snd_pcm_substream *substream)
 {
 	synchronize_rcu();
 	return 0;
 }
 
-static int xtfpga_pcm_hw_params(struct snd_pcm_substream *substream,
+static int xtfpga_pcm_hw_params(struct snd_soc_component *component,
+				struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *hw_params)
 {
-	int ret;
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct xtfpga_i2s *i2s = runtime->private_data;
 	unsigned channels = params_channels(hw_params);
@@ -422,12 +421,11 @@ static int xtfpga_pcm_hw_params(struct snd_pcm_substream *substream,
 		return -EINVAL;
 	}
 
-	ret = snd_pcm_lib_malloc_pages(substream,
-				       params_buffer_bytes(hw_params));
-	return ret;
+	return 0;
 }
 
-static int xtfpga_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
+static int xtfpga_pcm_trigger(struct snd_soc_component *component,
+			      struct snd_pcm_substream *substream, int cmd)
 {
 	int ret = 0;
 	struct snd_pcm_runtime *runtime = substream->runtime;
@@ -437,7 +435,7 @@ static int xtfpga_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-		ACCESS_ONCE(i2s->tx_ptr) = 0;
+		WRITE_ONCE(i2s->tx_ptr, 0);
 		rcu_assign_pointer(i2s->tx_substream, substream);
 		xtfpga_pcm_refill_fifo(i2s);
 		break;
@@ -455,41 +453,35 @@ static int xtfpga_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	return ret;
 }
 
-static snd_pcm_uframes_t xtfpga_pcm_pointer(struct snd_pcm_substream *substream)
+static snd_pcm_uframes_t xtfpga_pcm_pointer(struct snd_soc_component *component,
+					    struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct xtfpga_i2s *i2s = runtime->private_data;
-	snd_pcm_uframes_t pos = ACCESS_ONCE(i2s->tx_ptr);
+	snd_pcm_uframes_t pos = READ_ONCE(i2s->tx_ptr);
 
 	return pos < runtime->buffer_size ? pos : 0;
 }
 
-static int xtfpga_pcm_new(struct snd_soc_pcm_runtime *rtd)
+static int xtfpga_pcm_new(struct snd_soc_component *component,
+			  struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_card *card = rtd->card->snd_card;
 	size_t size = xtfpga_pcm_hardware.buffer_bytes_max;
 
-	return snd_pcm_lib_preallocate_pages_for_all(rtd->pcm,
-						     SNDRV_DMA_TYPE_DEV,
-						     card->dev, size, size);
+	snd_pcm_set_managed_buffer_all(rtd->pcm, SNDRV_DMA_TYPE_DEV,
+				       card->dev, size, size);
+	return 0;
 }
-
-static const struct snd_pcm_ops xtfpga_pcm_ops = {
-	.open		= xtfpga_pcm_open,
-	.close		= xtfpga_pcm_close,
-	.ioctl		= snd_pcm_lib_ioctl,
-	.hw_params	= xtfpga_pcm_hw_params,
-	.trigger	= xtfpga_pcm_trigger,
-	.pointer	= xtfpga_pcm_pointer,
-};
-
-static const struct snd_soc_platform_driver xtfpga_soc_platform = {
-	.pcm_new	= xtfpga_pcm_new,
-	.ops		= &xtfpga_pcm_ops,
-};
 
 static const struct snd_soc_component_driver xtfpga_i2s_component = {
 	.name		= DRV_NAME,
+	.open		= xtfpga_pcm_open,
+	.close		= xtfpga_pcm_close,
+	.hw_params	= xtfpga_pcm_hw_params,
+	.trigger	= xtfpga_pcm_trigger,
+	.pointer	= xtfpga_pcm_pointer,
+	.pcm_construct	= xtfpga_pcm_new,
 };
 
 static const struct snd_soc_dai_ops xtfpga_i2s_dai_ops = {
@@ -537,7 +529,6 @@ static int xtfpga_i2s_runtime_resume(struct device *dev)
 static int xtfpga_i2s_probe(struct platform_device *pdev)
 {
 	struct xtfpga_i2s *i2s;
-	struct resource *mem;
 	int err, irq;
 
 	i2s = devm_kzalloc(&pdev->dev, sizeof(*i2s), GFP_KERNEL);
@@ -549,8 +540,7 @@ static int xtfpga_i2s_probe(struct platform_device *pdev)
 	i2s->dev = &pdev->dev;
 	dev_dbg(&pdev->dev, "dev: %p, i2s: %p\n", &pdev->dev, i2s);
 
-	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	i2s->regs = devm_ioremap_resource(&pdev->dev, mem);
+	i2s->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(i2s->regs)) {
 		err = PTR_ERR(i2s->regs);
 		goto err;
@@ -578,7 +568,6 @@ static int xtfpga_i2s_probe(struct platform_device *pdev)
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
-		dev_err(&pdev->dev, "No IRQ resource\n");
 		err = irq;
 		goto err;
 	}
@@ -591,18 +580,13 @@ static int xtfpga_i2s_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-	err = snd_soc_register_platform(&pdev->dev, &xtfpga_soc_platform);
-	if (err < 0) {
-		dev_err(&pdev->dev, "couldn't register platform\n");
-		goto err;
-	}
 	err = devm_snd_soc_register_component(&pdev->dev,
 					      &xtfpga_i2s_component,
 					      xtfpga_i2s_dai,
 					      ARRAY_SIZE(xtfpga_i2s_dai));
 	if (err < 0) {
 		dev_err(&pdev->dev, "couldn't register component\n");
-		goto err_unregister_platform;
+		goto err;
 	}
 
 	pm_runtime_enable(&pdev->dev);
@@ -615,8 +599,6 @@ static int xtfpga_i2s_probe(struct platform_device *pdev)
 
 err_pm_disable:
 	pm_runtime_disable(&pdev->dev);
-err_unregister_platform:
-	snd_soc_unregister_platform(&pdev->dev);
 err:
 	dev_err(&pdev->dev, "%s: err = %d\n", __func__, err);
 	return err;
@@ -626,7 +608,6 @@ static int xtfpga_i2s_remove(struct platform_device *pdev)
 {
 	struct xtfpga_i2s *i2s = dev_get_drvdata(&pdev->dev);
 
-	snd_soc_unregister_platform(&pdev->dev);
 	if (i2s->regmap && !IS_ERR(i2s->regmap)) {
 		regmap_write(i2s->regmap, XTFPGA_I2S_CONFIG, 0);
 		regmap_write(i2s->regmap, XTFPGA_I2S_INT_MASK, 0);

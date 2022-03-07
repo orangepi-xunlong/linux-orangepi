@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/init.h>
 #include <linux/fs.h>
 #include <linux/file.h>
@@ -18,10 +19,6 @@ static int load_binary(struct linux_binprm *bprm)
 	if (bprm->loader)
 		return -ENOEXEC;
 
-	allow_write_access(bprm->file);
-	fput(bprm->file);
-	bprm->file = NULL;
-
 	loader = bprm->vma->vm_end - sizeof(void *);
 
 	file = open_exec("/sbin/loader");
@@ -32,12 +29,9 @@ static int load_binary(struct linux_binprm *bprm)
 	/* Remember if the application is TASO.  */
 	bprm->taso = eh->ah.entry < 0x100000000UL;
 
-	bprm->file = file;
+	bprm->interpreter = file;
 	bprm->loader = loader;
-	retval = prepare_binprm(bprm);
-	if (retval < 0)
-		return retval;
-	return search_binary_handler(bprm);
+	return 0;
 }
 
 static struct linux_binfmt loader_format = {

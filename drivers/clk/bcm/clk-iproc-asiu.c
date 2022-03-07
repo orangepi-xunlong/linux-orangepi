@@ -119,7 +119,7 @@ static long iproc_asiu_clk_round_rate(struct clk_hw *hw, unsigned long rate,
 	if (rate == *parent_rate)
 		return *parent_rate;
 
-	div = DIV_ROUND_UP(*parent_rate, rate);
+	div = DIV_ROUND_CLOSEST(*parent_rate, rate);
 	if (div < 2)
 		return *parent_rate;
 
@@ -145,7 +145,7 @@ static int iproc_asiu_clk_set_rate(struct clk_hw *hw, unsigned long rate,
 		return 0;
 	}
 
-	div = DIV_ROUND_UP(parent_rate, rate);
+	div = DIV_ROUND_CLOSEST(parent_rate, rate);
 	if (div < 2)
 		return -EINVAL;
 
@@ -197,8 +197,8 @@ void __init iproc_asiu_setup(struct device_node *node,
 	if (WARN_ON(!asiu))
 		return;
 
-	asiu->clk_data = kzalloc(sizeof(*asiu->clk_data->hws) * num_clks +
-				 sizeof(*asiu->clk_data), GFP_KERNEL);
+	asiu->clk_data = kzalloc(struct_size(asiu->clk_data, hws, num_clks),
+				 GFP_KERNEL);
 	if (WARN_ON(!asiu->clk_data))
 		goto err_clks;
 	asiu->clk_data->num = num_clks;

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (C) 1995, 1996, 1997 Olaf Kirch <okir@monad.swb.de>
  *
@@ -10,6 +11,7 @@
 #include <linux/crc32.h>
 #include <linux/sunrpc/svc.h>
 #include <uapi/linux/nfsd/nfsfh.h>
+#include <linux/iversion.h>
 
 static inline __u32 ino_t_to_u32(ino_t ino)
 {
@@ -33,15 +35,15 @@ typedef struct svc_fh {
 
 	bool			fh_locked;	/* inode locked by us */
 	bool			fh_want_write;	/* remount protection taken */
-
+	int			fh_flags;	/* FH flags */
 #ifdef CONFIG_NFSD_V3
 	bool			fh_post_saved;	/* post-op attrs saved */
 	bool			fh_pre_saved;	/* pre-op attrs saved */
 
 	/* Pre-op attributes saved during fh_lock */
 	__u64			fh_pre_size;	/* size before operation */
-	struct timespec		fh_pre_mtime;	/* mtime before oper */
-	struct timespec		fh_pre_ctime;	/* ctime before oper */
+	struct timespec64	fh_pre_mtime;	/* mtime before oper */
+	struct timespec64	fh_pre_ctime;	/* ctime before oper */
 	/*
 	 * pre-op nfsv4 change attr: note must check IS_I_VERSION(inode)
 	 *  to find out if it is valid.
@@ -54,6 +56,9 @@ typedef struct svc_fh {
 #endif /* CONFIG_NFSD_V3 */
 
 } svc_fh;
+#define NFSD4_FH_FOREIGN (1<<0)
+#define SET_FH_FLAG(c, f) ((c)->fh_flags |= (f))
+#define HAS_FH_FLAG(c, f) ((c)->fh_flags & (f))
 
 enum nfsd_fsid {
 	FSID_DEV = 0,
@@ -241,24 +246,30 @@ fh_clear_wcc(struct svc_fh *fhp)
 }
 
 /*
- * Fill in the pre_op attr for the wcc data
+ * We could use i_version alone as the change attribute.  However,
+ * i_version can go backwards after a reboot.  On its own that doesn't
+ * necessarily cause a problem, but if i_version goes backwards and then
+ * is incremented again it could reuse a value that was previously used
+ * before boot, and a client who queried the two values might
+ * incorrectly assume nothing changed.
+ *
+ * By using both ctime and the i_version counter we guarantee that as
+ * long as time doesn't go backwards we never reuse an old value.
  */
-static inline void
-fill_pre_wcc(struct svc_fh *fhp)
+static inline u64 nfsd4_change_attribute(struct kstat *stat,
+					 struct inode *inode)
 {
-	struct inode    *inode;
+	u64 chattr;
 
-	inode = d_inode(fhp->fh_dentry);
-	if (!fhp->fh_pre_saved) {
-		fhp->fh_pre_mtime = inode->i_mtime;
-		fhp->fh_pre_ctime = inode->i_ctime;
-		fhp->fh_pre_size  = inode->i_size;
-		fhp->fh_pre_change = inode->i_version;
-		fhp->fh_pre_saved = true;
-	}
+	chattr =  stat->ctime.tv_sec;
+	chattr <<= 30;
+	chattr += stat->ctime.tv_nsec;
+	chattr += inode_query_iversion(inode);
+	return chattr;
 }
 
-extern void fill_post_wcc(struct svc_fh *);
+extern void fill_pre_wcc(struct svc_fh *fhp);
+extern void fill_post_wcc(struct svc_fh *fhp);
 #else
 #define fh_clear_wcc(ignored)
 #define fill_pre_wcc(ignored)

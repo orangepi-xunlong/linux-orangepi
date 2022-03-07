@@ -1,10 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- *	PCI searching functions.
+ * PCI searching functions
  *
- *	Copyright (C) 1993 -- 1997 Drew Eckhardt, Frederic Potter,
+ * Copyright (C) 1993 -- 1997 Drew Eckhardt, Frederic Potter,
  *					David Mosberger-Tang
- *	Copyright (C) 1997 -- 2000 Martin Mares <mj@ucw.cz>
- *	Copyright (C) 2003 -- 2004 Greg Kroah-Hartman <greg@kroah.com>
+ * Copyright (C) 1997 -- 2000 Martin Mares <mj@ucw.cz>
+ * Copyright (C) 2003 -- 2004 Greg Kroah-Hartman <greg@kroah.com>
  */
 
 #include <linux/pci.h>
@@ -14,7 +15,6 @@
 #include "pci.h"
 
 DECLARE_RWSEM(pci_bus_sem);
-EXPORT_SYMBOL_GPL(pci_bus_sem);
 
 /*
  * pci_for_each_dma_alias - Iterate over DMA aliases for a device
@@ -32,7 +32,13 @@ int pci_for_each_dma_alias(struct pci_dev *pdev,
 	struct pci_bus *bus;
 	int ret;
 
-	ret = fn(pdev, PCI_DEVID(pdev->bus->number, pdev->devfn), data);
+	/*
+	 * The device may have an explicit alias requester ID for DMA where the
+	 * requester is on another PCI bus.
+	 */
+	pdev = pci_real_dma_dev(pdev);
+
+	ret = fn(pdev, pci_dev_id(pdev), data);
 	if (ret)
 		return ret;
 
@@ -41,9 +47,9 @@ int pci_for_each_dma_alias(struct pci_dev *pdev,
 	 * DMA, iterate over that too.
 	 */
 	if (unlikely(pdev->dma_alias_mask)) {
-		u8 devfn;
+		unsigned int devfn;
 
-		for_each_set_bit(devfn, pdev->dma_alias_mask, U8_MAX) {
+		for_each_set_bit(devfn, pdev->dma_alias_mask, MAX_NR_DEVFNS) {
 			ret = fn(pdev, PCI_DEVID(pdev->bus->number, devfn),
 				 data);
 			if (ret)
@@ -59,6 +65,10 @@ int pci_for_each_dma_alias(struct pci_dev *pdev,
 			continue;
 
 		tmp = bus->self;
+
+		/* stop at bridge where translation unit is associated */
+		if (tmp->dev_flags & PCI_DEV_FLAGS_BRIDGE_XLATE_ROOT)
+			return ret;
 
 		/*
 		 * PCIe-to-PCI/X bridges alias transactions from downstream
@@ -83,9 +93,7 @@ int pci_for_each_dma_alias(struct pci_dev *pdev,
 					return ret;
 				continue;
 			case PCI_EXP_TYPE_PCIE_BRIDGE:
-				ret = fn(tmp,
-					 PCI_DEVID(tmp->bus->number,
-						   tmp->devfn), data);
+				ret = fn(tmp, pci_dev_id(tmp), data);
 				if (ret)
 					return ret;
 				continue;
@@ -96,9 +104,7 @@ int pci_for_each_dma_alias(struct pci_dev *pdev,
 					 PCI_DEVID(tmp->subordinate->number,
 						   PCI_DEVFN(0, 0)), data);
 			else
-				ret = fn(tmp,
-					 PCI_DEVID(tmp->bus->number,
-						   tmp->devfn), data);
+				ret = fn(tmp, pci_dev_id(tmp), data);
 			if (ret)
 				return ret;
 		}
@@ -235,10 +241,10 @@ struct pci_dev *pci_get_domain_bus_and_slot(int domain, unsigned int bus,
 }
 EXPORT_SYMBOL(pci_get_domain_bus_and_slot);
 
-static int match_pci_dev_by_id(struct device *dev, void *data)
+static int match_pci_dev_by_id(struct device *dev, const void *data)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
-	struct pci_device_id *id = data;
+	const struct pci_device_id *id = data;
 
 	if (pci_match_one_device(id, pdev))
 		return 1;

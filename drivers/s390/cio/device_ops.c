@@ -1,10 +1,11 @@
+// SPDX-License-Identifier: GPL-1.0+
 /*
  * Copyright IBM Corp. 2002, 2009
  *
  * Author(s): Martin Schwidefsky (schwidefsky@de.ibm.com)
  *	      Cornelia Huck (cornelia.huck@de.ibm.com)
  */
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/init.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
@@ -123,9 +124,7 @@ EXPORT_SYMBOL(ccw_device_is_multipath);
 /**
  * ccw_device_clear() - terminate I/O request processing
  * @cdev: target ccw device
- * @intparm: interruption parameter; value is only used if no I/O is
- *	     outstanding, otherwise the intparm associated with the I/O request
- *	     is returned
+ * @intparm: interruption parameter to be returned upon conclusion of csch
  *
  * ccw_device_clear() calls csch on @cdev's subchannel.
  * Returns:
@@ -178,6 +177,9 @@ int ccw_device_clear(struct ccw_device *cdev, unsigned long intparm)
  * completed during the time specified by @expires. If a timeout occurs, the
  * channel program is terminated via xsch, hsch or csch, and the device's
  * interrupt handler will be called with an irb containing ERR_PTR(-%ETIMEDOUT).
+ * The interruption handler will echo back the @intparm specified here, unless
+ * another interruption parameter is specified by a subsequent invocation of
+ * ccw_device_halt() or ccw_device_clear().
  * Returns:
  *  %0, if the operation was successful;
  *  -%EBUSY, if the device is busy, or status pending;
@@ -255,6 +257,9 @@ int ccw_device_start_timeout_key(struct ccw_device *cdev, struct ccw1 *cpa,
  * Start a S/390 channel program. When the interrupt arrives, the
  * IRQ handler is called, either immediately, delayed (dev-end missing,
  * or sense required) or never (no IRQ handler registered).
+ * The interruption handler will echo back the @intparm specified here, unless
+ * another interruption parameter is specified by a subsequent invocation of
+ * ccw_device_halt() or ccw_device_clear().
  * Returns:
  *  %0, if the operation was successful;
  *  -%EBUSY, if the device is busy, or status pending;
@@ -286,6 +291,9 @@ int ccw_device_start_key(struct ccw_device *cdev, struct ccw1 *cpa,
  * Start a S/390 channel program. When the interrupt arrives, the
  * IRQ handler is called, either immediately, delayed (dev-end missing,
  * or sense required) or never (no IRQ handler registered).
+ * The interruption handler will echo back the @intparm specified here, unless
+ * another interruption parameter is specified by a subsequent invocation of
+ * ccw_device_halt() or ccw_device_clear().
  * Returns:
  *  %0, if the operation was successful;
  *  -%EBUSY, if the device is busy, or status pending;
@@ -321,6 +329,9 @@ int ccw_device_start(struct ccw_device *cdev, struct ccw1 *cpa,
  * completed during the time specified by @expires. If a timeout occurs, the
  * channel program is terminated via xsch, hsch or csch, and the device's
  * interrupt handler will be called with an irb containing ERR_PTR(-%ETIMEDOUT).
+ * The interruption handler will echo back the @intparm specified here, unless
+ * another interruption parameter is specified by a subsequent invocation of
+ * ccw_device_halt() or ccw_device_clear().
  * Returns:
  *  %0, if the operation was successful;
  *  -%EBUSY, if the device is busy, or status pending;
@@ -342,11 +353,12 @@ int ccw_device_start_timeout(struct ccw_device *cdev, struct ccw1 *cpa,
 /**
  * ccw_device_halt() - halt I/O request processing
  * @cdev: target ccw device
- * @intparm: interruption parameter; value is only used if no I/O is
- *	     outstanding, otherwise the intparm associated with the I/O request
- *	     is returned
+ * @intparm: interruption parameter to be returned upon conclusion of hsch
  *
  * ccw_device_halt() calls hsch on @cdev's subchannel.
+ * The interruption handler will echo back the @intparm specified here, unless
+ * another interruption parameter is specified by a subsequent invocation of
+ * ccw_device_clear().
  * Returns:
  *  %0 on success,
  *  -%ENODEV on device not operational,
@@ -428,8 +440,8 @@ struct ciw *ccw_device_get_ciw(struct ccw_device *cdev, __u32 ct)
 	if (cdev->private->flags.esid == 0)
 		return NULL;
 	for (ciw_cnt = 0; ciw_cnt < MAX_CIWS; ciw_cnt++)
-		if (cdev->private->senseid.ciw[ciw_cnt].ct == ct)
-			return cdev->private->senseid.ciw + ciw_cnt;
+		if (cdev->private->dma_area->senseid.ciw[ciw_cnt].ct == ct)
+			return cdev->private->dma_area->senseid.ciw + ciw_cnt;
 	return NULL;
 }
 
@@ -459,8 +471,8 @@ __u8 ccw_device_get_path_mask(struct ccw_device *cdev)
  * On success return a newly allocated copy of the channel-path description
  * data associated with the given channel path. Return %NULL on error.
  */
-struct channel_path_desc *ccw_device_get_chp_desc(struct ccw_device *cdev,
-						  int chp_idx)
+struct channel_path_desc_fmt0 *ccw_device_get_chp_desc(struct ccw_device *cdev,
+						       int chp_idx)
 {
 	struct subchannel *sch;
 	struct chp_id chpid;
@@ -469,6 +481,36 @@ struct channel_path_desc *ccw_device_get_chp_desc(struct ccw_device *cdev,
 	chp_id_init(&chpid);
 	chpid.id = sch->schib.pmcw.chpid[chp_idx];
 	return chp_get_chp_desc(chpid);
+}
+
+/**
+ * ccw_device_get_util_str() - return newly allocated utility strings
+ * @cdev: device to obtain the utility strings for
+ * @chp_idx: index of the channel path
+ *
+ * On success return a newly allocated copy of the utility strings
+ * associated with the given channel path. Return %NULL on error.
+ */
+u8 *ccw_device_get_util_str(struct ccw_device *cdev, int chp_idx)
+{
+	struct subchannel *sch = to_subchannel(cdev->dev.parent);
+	struct channel_path *chp;
+	struct chp_id chpid;
+	u8 *util_str;
+
+	chp_id_init(&chpid);
+	chpid.id = sch->schib.pmcw.chpid[chp_idx];
+	chp = chpid_to_chp(chpid);
+
+	util_str = kmalloc(sizeof(chp->desc_fmt3.util_str), GFP_KERNEL);
+	if (!util_str)
+		return NULL;
+
+	mutex_lock(&chp->lock);
+	memcpy(util_str, chp->desc_fmt3.util_str, sizeof(chp->desc_fmt3.util_str));
+	mutex_unlock(&chp->lock);
+
+	return util_str;
 }
 
 /**
@@ -593,7 +635,7 @@ EXPORT_SYMBOL(ccw_device_tm_start_timeout);
  * @mask: mask of paths to use
  *
  * Return the number of 64K-bytes blocks all paths at least support
- * for a transport command. Return values <= 0 indicate failures.
+ * for a transport command. Return value 0 indicates failure.
  */
 int ccw_device_get_mdc(struct ccw_device *cdev, u8 mask)
 {
@@ -668,7 +710,131 @@ void ccw_device_get_schid(struct ccw_device *cdev, struct subchannel_id *schid)
 }
 EXPORT_SYMBOL_GPL(ccw_device_get_schid);
 
-MODULE_LICENSE("GPL");
+/**
+ * ccw_device_pnso() - Perform Network-Subchannel Operation
+ * @cdev:		device on which PNSO is performed
+ * @pnso_area:		request and response block for the operation
+ * @oc:			Operation Code
+ * @resume_token:	resume token for multiblock response
+ * @cnc:		Boolean change-notification control
+ *
+ * pnso_area must be allocated by the caller with get_zeroed_page(GFP_KERNEL)
+ *
+ * Returns 0 on success.
+ */
+int ccw_device_pnso(struct ccw_device *cdev,
+		    struct chsc_pnso_area *pnso_area, u8 oc,
+		    struct chsc_pnso_resume_token resume_token, int cnc)
+{
+	struct subchannel_id schid;
+
+	ccw_device_get_schid(cdev, &schid);
+	return chsc_pnso(schid, pnso_area, oc, resume_token, cnc);
+}
+EXPORT_SYMBOL_GPL(ccw_device_pnso);
+
+/**
+ * ccw_device_get_cssid() - obtain Channel Subsystem ID
+ * @cdev: device to obtain the CSSID for
+ * @cssid: The resulting Channel Subsystem ID
+ */
+int ccw_device_get_cssid(struct ccw_device *cdev, u8 *cssid)
+{
+	struct device *sch_dev = cdev->dev.parent;
+	struct channel_subsystem *css = to_css(sch_dev->parent);
+
+	if (css->id_valid)
+		*cssid = css->cssid;
+	return css->id_valid ? 0 : -ENODEV;
+}
+EXPORT_SYMBOL_GPL(ccw_device_get_cssid);
+
+/**
+ * ccw_device_get_iid() - obtain MIF-image ID
+ * @cdev: device to obtain the MIF-image ID for
+ * @iid: The resulting MIF-image ID
+ */
+int ccw_device_get_iid(struct ccw_device *cdev, u8 *iid)
+{
+	struct device *sch_dev = cdev->dev.parent;
+	struct channel_subsystem *css = to_css(sch_dev->parent);
+
+	if (css->id_valid)
+		*iid = css->iid;
+	return css->id_valid ? 0 : -ENODEV;
+}
+EXPORT_SYMBOL_GPL(ccw_device_get_iid);
+
+/**
+ * ccw_device_get_chpid() - obtain Channel Path ID
+ * @cdev: device to obtain the Channel Path ID for
+ * @chp_idx: Index of the channel path
+ * @chpid: The resulting Channel Path ID
+ */
+int ccw_device_get_chpid(struct ccw_device *cdev, int chp_idx, u8 *chpid)
+{
+	struct subchannel *sch = to_subchannel(cdev->dev.parent);
+	int mask;
+
+	if ((chp_idx < 0) || (chp_idx > 7))
+		return -EINVAL;
+	mask = 0x80 >> chp_idx;
+	if (!(sch->schib.pmcw.pim & mask))
+		return -ENODEV;
+
+	*chpid = sch->schib.pmcw.chpid[chp_idx];
+	return 0;
+}
+EXPORT_SYMBOL_GPL(ccw_device_get_chpid);
+
+/**
+ * ccw_device_get_chid() - obtain Channel ID associated with specified CHPID
+ * @cdev: device to obtain the Channel ID for
+ * @chp_idx: Index of the channel path
+ * @chid: The resulting Channel ID
+ */
+int ccw_device_get_chid(struct ccw_device *cdev, int chp_idx, u16 *chid)
+{
+	struct chp_id cssid_chpid;
+	struct channel_path *chp;
+	int rc;
+
+	chp_id_init(&cssid_chpid);
+	rc = ccw_device_get_chpid(cdev, chp_idx, &cssid_chpid.id);
+	if (rc)
+		return rc;
+	chp = chpid_to_chp(cssid_chpid);
+	if (!chp)
+		return -ENODEV;
+
+	mutex_lock(&chp->lock);
+	if (chp->desc_fmt1.flags & 0x10)
+		*chid = chp->desc_fmt1.chid;
+	else
+		rc = -ENODEV;
+	mutex_unlock(&chp->lock);
+
+	return rc;
+}
+EXPORT_SYMBOL_GPL(ccw_device_get_chid);
+
+/*
+ * Allocate zeroed dma coherent 31 bit addressable memory using
+ * the subchannels dma pool. Maximal size of allocation supported
+ * is PAGE_SIZE.
+ */
+void *ccw_device_dma_zalloc(struct ccw_device *cdev, size_t size)
+{
+	return cio_gp_dma_zalloc(cdev->private->dma_pool, &cdev->dev, size);
+}
+EXPORT_SYMBOL(ccw_device_dma_zalloc);
+
+void ccw_device_dma_free(struct ccw_device *cdev, void *cpu_addr, size_t size)
+{
+	cio_gp_dma_free(cdev->private->dma_pool, cpu_addr, size);
+}
+EXPORT_SYMBOL(ccw_device_dma_free);
+
 EXPORT_SYMBOL(ccw_device_set_options_mask);
 EXPORT_SYMBOL(ccw_device_set_options);
 EXPORT_SYMBOL(ccw_device_clear_options);
@@ -682,3 +848,4 @@ EXPORT_SYMBOL(ccw_device_start_key);
 EXPORT_SYMBOL(ccw_device_get_ciw);
 EXPORT_SYMBOL(ccw_device_get_path_mask);
 EXPORT_SYMBOL_GPL(ccw_device_get_chp_desc);
+EXPORT_SYMBOL_GPL(ccw_device_get_util_str);

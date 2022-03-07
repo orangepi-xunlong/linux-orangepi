@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* $Id: cosa.c,v 1.31 2000/03/08 17:47:16 kas Exp $ */
 
 /*
  *  Copyright (C) 1995-1997  Jan "Yenya" Kasprzak <kas@fi.muni.cz>
  *  Generic HDLC port Copyright (C) 2008 Krzysztof Halasa <khc@pm.waw.pl>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 /*
@@ -25,7 +12,7 @@
  * HARDWARE INFO
  *
  * Both cards are developed at the Institute of Computer Science,
- * Masaryk University (http://www.ics.muni.cz/). The hardware is
+ * Masaryk University (https://www.ics.muni.cz/). The hardware is
  * developed by Jiri Novotny <novotny@ics.muni.cz>. More information
  * and the photo of both cards is available at
  * http://www.pavoucek.cz/cosa.html. The card documentation, firmwares
@@ -48,7 +35,7 @@
  *
  * SOFTWARE INFO
  *
- * The homepage of the Linux driver is at http://www.fi.muni.cz/~kas/cosa/.
+ * The homepage of the Linux driver is at https://www.fi.muni.cz/~kas/cosa/.
  * The CVS tree of Linux driver can be viewed there, as well as the
  * firmware binaries and user-space utilities for downloading the firmware
  * into the card and setting up the card.
@@ -78,7 +65,7 @@
 
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/sched.h>
+#include <linux/sched/signal.h>
 #include <linux/slab.h>
 #include <linux/poll.h>
 #include <linux/fs.h>
@@ -232,11 +219,11 @@ static int irq[MAX_CARDS+1] = { -1, -1, -1, -1, -1, -1, 0, };
 static struct class *cosa_class;
 
 #ifdef MODULE
-module_param_array(io, int, NULL, 0);
+module_param_hw_array(io, int, ioport, NULL, 0);
 MODULE_PARM_DESC(io, "The I/O bases of the COSA or SRP cards");
-module_param_array(irq, int, NULL, 0);
+module_param_hw_array(irq, int, irq, NULL, 0);
 MODULE_PARM_DESC(irq, "The IRQ lines of the COSA or SRP cards");
-module_param_array(dma, int, NULL, 0);
+module_param_hw_array(dma, int, dma, NULL, 0);
 MODULE_PARM_DESC(dma, "The DMA channels of the COSA or SRP cards");
 
 MODULE_AUTHOR("Jan \"Yenya\" Kasprzak, <kas@fi.muni.cz>");
@@ -281,7 +268,7 @@ static int cosa_net_attach(struct net_device *dev, unsigned short encoding,
 			   unsigned short parity);
 static int cosa_net_open(struct net_device *d);
 static int cosa_net_close(struct net_device *d);
-static void cosa_net_timeout(struct net_device *d);
+static void cosa_net_timeout(struct net_device *d, unsigned int txqueue);
 static netdev_tx_t cosa_net_tx(struct sk_buff *skb, struct net_device *d);
 static char *cosa_net_setup_rx(struct channel_data *channel, int size);
 static int cosa_net_rx_done(struct channel_data *channel);
@@ -432,7 +419,6 @@ module_exit(cosa_exit);
 static const struct net_device_ops cosa_ops = {
 	.ndo_open       = cosa_net_open,
 	.ndo_stop       = cosa_net_close,
-	.ndo_change_mtu = hdlc_change_mtu,
 	.ndo_start_xmit = hdlc_start_xmit,
 	.ndo_do_ioctl   = cosa_net_ioctl,
 	.ndo_tx_timeout = cosa_net_timeout,
@@ -684,7 +670,7 @@ static netdev_tx_t cosa_net_tx(struct sk_buff *skb,
 	return NETDEV_TX_OK;
 }
 
-static void cosa_net_timeout(struct net_device *dev)
+static void cosa_net_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	struct channel_data *chan = dev_to_chan(dev);
 
@@ -770,7 +756,7 @@ static int cosa_net_tx_done(struct channel_data *chan, int size)
 		chan->netdev->stats.tx_aborted_errors++;
 		return 1;
 	}
-	dev_kfree_skb_irq(chan->tx_skb);
+	dev_consume_skb_irq(chan->tx_skb);
 	chan->tx_skb = NULL;
 	chan->netdev->stats.tx_packets++;
 	chan->netdev->stats.tx_bytes += size;
@@ -903,6 +889,7 @@ static ssize_t cosa_write(struct file *file,
 			chan->tx_status = 1;
 			spin_unlock_irqrestore(&cosa->lock, flags);
 			up(&chan->wsem);
+			kfree(kbuf);
 			return -ERESTARTSYS;
 		}
 	}
@@ -925,7 +912,7 @@ static int chrdev_tx_done(struct channel_data *chan, int size)
 	return 1;
 }
 
-static unsigned int cosa_poll(struct file *file, poll_table *poll)
+static __poll_t cosa_poll(struct file *file, poll_table *poll)
 {
 	pr_info("cosa_poll is here\n");
 	return 0;

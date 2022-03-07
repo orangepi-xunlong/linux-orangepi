@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0
 # Makefile for the Sparc boot stuff.
 #
 # Copyright (C) 1995 David S. Miller (davem@caip.rutgers.edu)
@@ -6,7 +7,7 @@
 ROOT_IMG	:= /usr/src/root.img
 ELFTOAOUT	:= elftoaout
 
-hostprogs-y	:= piggyback
+hostprogs	:= piggyback
 targets		:= tftpboot.img image zImage vmlinux.aout
 clean-files	:= System.map
 

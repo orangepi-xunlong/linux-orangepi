@@ -12,23 +12,20 @@
  * 19 Jan 2007
  */
 
-#include <linux/module.h>
-#include <linux/types.h>
-#include <linux/smp.h>
-#include <linux/init.h>
-#include <linux/sysctl.h>
-#include <linux/highmem.h>
-#include <linux/timer.h>
-#include <linux/slab.h>
-#include <linux/jiffies.h>
-#include <linux/spinlock.h>
-#include <linux/list.h>
-#include <linux/ctype.h>
-#include <linux/workqueue.h>
-#include <asm/uaccess.h>
 #include <asm/page.h>
+#include <linux/uaccess.h>
+#include <linux/ctype.h>
+#include <linux/highmem.h>
+#include <linux/init.h>
+#include <linux/jiffies.h>
+#include <linux/module.h>
+#include <linux/slab.h>
+#include <linux/smp.h>
+#include <linux/spinlock.h>
+#include <linux/sysctl.h>
+#include <linux/timer.h>
 
-#include "edac_core.h"
+#include "edac_device.h"
 #include "edac_module.h"
 
 /* lock for the list: 'edac_device_list', manipulation of this list
@@ -50,21 +47,6 @@ static void edac_device_dump_device(struct edac_device_ctl_info *edac_dev)
 }
 #endif				/* CONFIG_EDAC_DEBUG */
 
-
-/*
- * edac_device_alloc_ctl_info()
- *	Allocate a new edac device control info structure
- *
- *	The control structure is allocated in complete chunk
- *	from the OS. It is in turn sub allocated to the
- *	various objects that compose the structure
- *
- *	The structure has a 'nr_instance' array within itself.
- *	Each instance represents a major component
- *		Example:  L1 cache and L2 cache are 2 instance components
- *
- *	Within each instance is an array of 'nr_blocks' blockoffsets
- */
 struct edac_device_ctl_info *edac_device_alloc_ctl_info(
 	unsigned sz_private,
 	char *edac_device_name, unsigned nr_instances,
@@ -244,11 +226,6 @@ struct edac_device_ctl_info *edac_device_alloc_ctl_info(
 }
 EXPORT_SYMBOL_GPL(edac_device_alloc_ctl_info);
 
-/*
- * edac_device_free_ctl_info()
- *	frees the memory allocated by the edac_device_alloc_ctl_info()
- *	function
- */
 void edac_device_free_ctl_info(struct edac_device_ctl_info *ctl_info)
 {
 	edac_device_unregister_sysfs_main_kobj(ctl_info);
@@ -460,12 +437,6 @@ void edac_device_reset_delay_period(struct edac_device_ctl_info *edac_dev,
 	edac_mod_work(&edac_dev->work, jiffs);
 }
 
-/*
- * edac_device_alloc_index: Allocate a unique device index number
- *
- * Return:
- *	allocated index number
- */
 int edac_device_alloc_index(void)
 {
 	static atomic_t device_indexes = ATOMIC_INIT(0);
@@ -474,17 +445,6 @@ int edac_device_alloc_index(void)
 }
 EXPORT_SYMBOL_GPL(edac_device_alloc_index);
 
-/**
- * edac_device_add_device: Insert the 'edac_dev' structure into the
- * edac_device global list and create sysfs entries associated with
- * edac_device structure.
- * @edac_device: pointer to the edac_device structure to be added to the list
- * 'edac_device' structure.
- *
- * Return:
- *	0	Success
- *	!0	Failure
- */
 int edac_device_add_device(struct edac_device_ctl_info *edac_dev)
 {
 	edac_dbg(0, "\n");
@@ -541,19 +501,6 @@ fail0:
 }
 EXPORT_SYMBOL_GPL(edac_device_add_device);
 
-/**
- * edac_device_del_device:
- *	Remove sysfs entries for specified edac_device structure and
- *	then remove edac_device structure from global list
- *
- * @dev:
- *	Pointer to 'struct device' representing edac_device
- *	structure to remove.
- *
- * Return:
- *	Pointer to removed edac_device structure,
- *	OR NULL if device not found.
- */
 struct edac_device_ctl_info *edac_device_del_device(struct device *dev)
 {
 	struct edac_device_ctl_info *edac_dev;
@@ -608,15 +555,15 @@ static inline int edac_device_get_panic_on_ue(struct edac_device_ctl_info
 	return edac_dev->panic_on_ue;
 }
 
-/*
- * edac_device_handle_ce
- *	perform a common output and handling of an 'edac_dev' CE event
- */
-void edac_device_handle_ce(struct edac_device_ctl_info *edac_dev,
-			int inst_nr, int block_nr, const char *msg)
+void edac_device_handle_ce_count(struct edac_device_ctl_info *edac_dev,
+				 unsigned int count, int inst_nr, int block_nr,
+				 const char *msg)
 {
 	struct edac_device_instance *instance;
 	struct edac_device_block *block = NULL;
+
+	if (!count)
+		return;
 
 	if ((inst_nr >= edac_dev->nr_instances) || (inst_nr < 0)) {
 		edac_device_printk(edac_dev, KERN_ERR,
@@ -639,30 +586,30 @@ void edac_device_handle_ce(struct edac_device_ctl_info *edac_dev,
 
 	if (instance->nr_blocks > 0) {
 		block = instance->blocks + block_nr;
-		block->counters.ce_count++;
+		block->counters.ce_count += count;
 	}
 
 	/* Propagate the count up the 'totals' tree */
-	instance->counters.ce_count++;
-	edac_dev->counters.ce_count++;
+	instance->counters.ce_count += count;
+	edac_dev->counters.ce_count += count;
 
 	if (edac_device_get_log_ce(edac_dev))
 		edac_device_printk(edac_dev, KERN_WARNING,
-				"CE: %s instance: %s block: %s '%s'\n",
-				edac_dev->ctl_name, instance->name,
-				block ? block->name : "N/A", msg);
+				   "CE: %s instance: %s block: %s count: %d '%s'\n",
+				   edac_dev->ctl_name, instance->name,
+				   block ? block->name : "N/A", count, msg);
 }
-EXPORT_SYMBOL_GPL(edac_device_handle_ce);
+EXPORT_SYMBOL_GPL(edac_device_handle_ce_count);
 
-/*
- * edac_device_handle_ue
- *	perform a common output and handling of an 'edac_dev' UE event
- */
-void edac_device_handle_ue(struct edac_device_ctl_info *edac_dev,
-			int inst_nr, int block_nr, const char *msg)
+void edac_device_handle_ue_count(struct edac_device_ctl_info *edac_dev,
+				 unsigned int count, int inst_nr, int block_nr,
+				 const char *msg)
 {
 	struct edac_device_instance *instance;
 	struct edac_device_block *block = NULL;
+
+	if (!count)
+		return;
 
 	if ((inst_nr >= edac_dev->nr_instances) || (inst_nr < 0)) {
 		edac_device_printk(edac_dev, KERN_ERR,
@@ -685,22 +632,22 @@ void edac_device_handle_ue(struct edac_device_ctl_info *edac_dev,
 
 	if (instance->nr_blocks > 0) {
 		block = instance->blocks + block_nr;
-		block->counters.ue_count++;
+		block->counters.ue_count += count;
 	}
 
 	/* Propagate the count up the 'totals' tree */
-	instance->counters.ue_count++;
-	edac_dev->counters.ue_count++;
+	instance->counters.ue_count += count;
+	edac_dev->counters.ue_count += count;
 
 	if (edac_device_get_log_ue(edac_dev))
 		edac_device_printk(edac_dev, KERN_EMERG,
-				"UE: %s instance: %s block: %s '%s'\n",
-				edac_dev->ctl_name, instance->name,
-				block ? block->name : "N/A", msg);
+				   "UE: %s instance: %s block: %s count: %d '%s'\n",
+				   edac_dev->ctl_name, instance->name,
+				   block ? block->name : "N/A", count, msg);
 
 	if (edac_device_get_panic_on_ue(edac_dev))
-		panic("EDAC %s: UE instance: %s block %s '%s'\n",
-			edac_dev->ctl_name, instance->name,
-			block ? block->name : "N/A", msg);
+		panic("EDAC %s: UE instance: %s block %s count: %d '%s'\n",
+		      edac_dev->ctl_name, instance->name,
+		      block ? block->name : "N/A", count, msg);
 }
-EXPORT_SYMBOL_GPL(edac_device_handle_ue);
+EXPORT_SYMBOL_GPL(edac_device_handle_ue_count);

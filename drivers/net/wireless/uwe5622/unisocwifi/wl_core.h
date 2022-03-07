@@ -17,7 +17,7 @@
 
 #ifndef __WL_CORE_H__
 #define __WL_CORE_H__
-
+#include "wcn_wrapper.h"
 #include <linux/types.h>
 #include <linux/wait.h>
 #include <linux/spinlock.h>
@@ -182,7 +182,9 @@ struct sprdwl_intf {
 
 	int fw_power_down;
 	int fw_awake;
-
+#ifdef UNISOC_WIFI_PS
+	struct completion suspend_completed;
+#endif
 	/*for pkt log function*/
 	loff_t lp;
 	struct file *pfile;
@@ -196,6 +198,9 @@ struct sprdwl_intf {
 	u8 boost;
 	unsigned int txnum_level;
 	unsigned int rxnum_level;
+#ifdef STA_SOFTAP_SCC_MODE
+	int sta_home_channel;
+#endif
 };
 
 /* HashTable */

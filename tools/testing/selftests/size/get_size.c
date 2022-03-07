@@ -1,7 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2014 Sony Mobile Communications Inc.
- *
- * Licensed under the terms of the GNU GPL License version 2
  *
  * Selftest for runtime system size
  *
@@ -12,23 +11,35 @@
  * own execution.  It also attempts to have as few dependencies
  * on kernel features as possible.
  *
- * It should be statically linked, with startup libs avoided.
- * It uses no library calls, and only the following 3 syscalls:
+ * It should be statically linked, with startup libs avoided.  It uses
+ * no library calls except the syscall() function for the following 3
+ * syscalls:
  *   sysinfo(), write(), and _exit()
  *
  * For output, it avoids printf (which in some C libraries
  * has large external dependencies) by  implementing it's own
  * number output and print routines, and using __builtin_strlen()
+ *
+ * The test may crash if any of the above syscalls fails because in some
+ * libc implementations (e.g. the GNU C Library) errno is saved in
+ * thread-local storage, which does not get initialized due to avoiding
+ * startup libs.
  */
 
 #include <sys/sysinfo.h>
 #include <unistd.h>
+#include <sys/syscall.h>
 
 #define STDOUT_FILENO 1
 
 static int print(const char *s)
 {
-	return write(STDOUT_FILENO, s, __builtin_strlen(s));
+	size_t len = 0;
+
+	while (s[len] != '\0')
+		len++;
+
+	return syscall(SYS_write, STDOUT_FILENO, s, len);
 }
 
 static inline char *num_to_str(unsigned long num, char *buf, int len)
@@ -75,26 +86,31 @@ void _start(void)
 	int ccode;
 	struct sysinfo info;
 	unsigned long used;
+	static const char *test_name = " get runtime memory use\n";
 
-	print("Testing system size.\n");
-	print("1..1\n");
+	print("TAP version 13\n");
+	print("# Testing system size.\n");
 
-	ccode = sysinfo(&info);
+	ccode = syscall(SYS_sysinfo, &info);
 	if (ccode < 0) {
-		print("not ok 1 get runtime memory use\n");
-		print("# could not get sysinfo\n");
-		_exit(ccode);
+		print("not ok 1");
+		print(test_name);
+		print(" ---\n reason: \"could not get sysinfo\"\n ...\n");
+		syscall(SYS_exit, ccode);
 	}
+	print("ok 1");
+	print(test_name);
+
 	/* ignore cache complexities for now */
 	used = info.totalram - info.freeram - info.bufferram;
-	print_k_value("ok 1 get runtime memory use # size = ", used,
-		info.mem_unit);
-
 	print("# System runtime memory report (units in Kilobytes):\n");
-	print_k_value("#   Total:  ", info.totalram, info.mem_unit);
-	print_k_value("#   Free:   ", info.freeram, info.mem_unit);
-	print_k_value("#   Buffer: ", info.bufferram, info.mem_unit);
-	print_k_value("#   In use: ", used, info.mem_unit);
+	print(" ---\n");
+	print_k_value(" Total:  ", info.totalram, info.mem_unit);
+	print_k_value(" Free:   ", info.freeram, info.mem_unit);
+	print_k_value(" Buffer: ", info.bufferram, info.mem_unit);
+	print_k_value(" In use: ", used, info.mem_unit);
+	print(" ...\n");
+	print("1..1\n");
 
-	_exit(0);
+	syscall(SYS_exit, 0);
 }

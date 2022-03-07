@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for Digigram miXart soundcards
  *
  * mixer callbacks
  *
  * Copyright (c) 2003 by Digigram <alsa@digigram.com>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/time.h>
@@ -33,7 +20,7 @@
 #include <sound/tlv.h>
 #include "mixart_mixer.h"
 
-static u32 mixart_analog_level[256] = {
+static const u32 mixart_analog_level[256] = {
 	0xc2c00000,		/* [000] -96.0 dB */
 	0xc2bf0000,		/* [001] -95.5 dB */
 	0xc2be0000,		/* [002] -95.0 dB */
@@ -404,7 +391,7 @@ static int mixart_analog_vol_put(struct snd_kcontrol *kcontrol, struct snd_ctl_e
 
 static const DECLARE_TLV_DB_SCALE(db_scale_analog, -9600, 50, 0);
 
-static struct snd_kcontrol_new mixart_control_analog_level = {
+static const struct snd_kcontrol_new mixart_control_analog_level = {
 	.iface =	SNDRV_CTL_ELEM_IFACE_MIXER,
 	.access = (SNDRV_CTL_ELEM_ACCESS_READWRITE |
 		   SNDRV_CTL_ELEM_ACCESS_TLV_READ),
@@ -448,7 +435,7 @@ static int mixart_audio_sw_put(struct snd_kcontrol *kcontrol, struct snd_ctl_ele
 	return changed;
 }
 
-static struct snd_kcontrol_new mixart_control_output_switch = {
+static const struct snd_kcontrol_new mixart_control_output_switch = {
 	.iface =	SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name =         "Master Playback Switch",
 	.info =         mixart_sw_info,		/* shared */
@@ -456,7 +443,7 @@ static struct snd_kcontrol_new mixart_control_output_switch = {
 	.put =          mixart_audio_sw_put
 };
 
-static u32 mixart_digital_level[256] = {
+static const u32 mixart_digital_level[256] = {
 	0x00000000,		/* [000] = 0.00e+000 = mute if <= -109.5dB */
 	0x366e1c7a,		/* [001] = 3.55e-006 = pow(10.0, 0.05 * -109.0dB) */
 	0x367c3860,		/* [002] = 3.76e-006 = pow(10.0, 0.05 * -108.5dB) */
@@ -897,7 +884,7 @@ static int mixart_pcm_vol_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem
 
 static const DECLARE_TLV_DB_SCALE(db_scale_digital, -10950, 50, 0);
 
-static struct snd_kcontrol_new snd_mixart_pcm_vol =
+static const struct snd_kcontrol_new snd_mixart_pcm_vol =
 {
 	.iface =        SNDRV_CTL_ELEM_IFACE_MIXER,
 	.access = (SNDRV_CTL_ELEM_ACCESS_READWRITE |
@@ -951,7 +938,7 @@ static int mixart_pcm_sw_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_
 	return changed;
 }
 
-static struct snd_kcontrol_new mixart_control_pcm_switch = {
+static const struct snd_kcontrol_new mixart_control_pcm_switch = {
 	.iface =	SNDRV_CTL_ELEM_IFACE_MIXER,
 	/* name will be filled later */
 	.count =        MIXART_PLAYBACK_STREAMS,
@@ -1024,7 +1011,7 @@ static int mixart_monitor_vol_put(struct snd_kcontrol *kcontrol, struct snd_ctl_
 	return changed;
 }
 
-static struct snd_kcontrol_new mixart_control_monitor_vol = {
+static const struct snd_kcontrol_new mixart_control_monitor_vol = {
 	.iface =	SNDRV_CTL_ELEM_IFACE_MIXER,
 	.access = (SNDRV_CTL_ELEM_ACCESS_READWRITE |
 		   SNDRV_CTL_ELEM_ACCESS_TLV_READ),
@@ -1091,7 +1078,7 @@ static int mixart_monitor_sw_put(struct snd_kcontrol *kcontrol, struct snd_ctl_e
 	return (changed != 0);
 }
 
-static struct snd_kcontrol_new mixart_control_monitor_sw = {
+static const struct snd_kcontrol_new mixart_control_monitor_sw = {
 	.iface =	SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name =         "Monitoring Switch",
 	.info =         mixart_sw_info,		/* shared */

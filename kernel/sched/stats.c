@@ -1,38 +1,16 @@
-
-#include <linux/slab.h>
-#include <linux/fs.h>
-#include <linux/seq_file.h>
-#include <linux/proc_fs.h>
-
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * /proc/schedstat implementation
+ */
 #include "sched.h"
 
 /*
- * bump this up when changing the output format or the meaning of an existing
+ * Current schedstat API version.
+ *
+ * Bump this up when changing the output format or the meaning of an existing
  * format, so that tools can adapt (or abort)
  */
 #define SCHEDSTAT_VERSION 15
-
-#ifdef CONFIG_SMP
-static inline void show_easstat(struct seq_file *seq, struct eas_stats *stats)
-{
-	/* eas-specific runqueue stats */
-	seq_printf(seq, "eas %llu %llu %llu %llu %llu %llu ",
-	    stats->sis_attempts, stats->sis_idle, stats->sis_cache_affine,
-	    stats->sis_suff_cap, stats->sis_idle_cpu, stats->sis_count);
-
-	seq_printf(seq, "%llu %llu %llu %llu %llu %llu %llu ",
-	    stats->secb_attempts, stats->secb_sync, stats->secb_idle_bt,
-	    stats->secb_insuff_cap, stats->secb_no_nrg_sav,
-	    stats->secb_nrg_sav, stats->secb_count);
-
-	seq_printf(seq, "%llu %llu %llu %llu %llu ",
-	    stats->fbt_attempts, stats->fbt_no_cpu, stats->fbt_no_sd,
-	    stats->fbt_pref_idle, stats->fbt_count);
-
-	seq_printf(seq, "%llu %llu\n",
-	    stats->cas_attempts, stats->cas_count);
-}
-#endif
 
 static int show_schedstat(struct seq_file *seq, void *v)
 {
@@ -62,8 +40,6 @@ static int show_schedstat(struct seq_file *seq, void *v)
 		seq_printf(seq, "\n");
 
 #ifdef CONFIG_SMP
-		show_easstat(seq, &rq->eas_stats);
-
 		/* domain-specific stats */
 		rcu_read_lock();
 		for_each_domain(cpu, sd) {
@@ -90,8 +66,6 @@ static int show_schedstat(struct seq_file *seq, void *v)
 			    sd->sbf_count, sd->sbf_balanced, sd->sbf_pushed,
 			    sd->ttwu_wake_remote, sd->ttwu_move_affine,
 			    sd->ttwu_move_balance);
-
-			show_easstat(seq, &sd->eas_stats);
 		}
 		rcu_read_unlock();
 #endif
@@ -103,8 +77,8 @@ static int show_schedstat(struct seq_file *seq, void *v)
  * This itererator needs some explanation.
  * It returns 1 for the header position.
  * This means 2 is cpu 0.
- * In a hotplugged system some cpus, including cpu 0, may be missing so we have
- * to use cpumask_* to iterate over the cpus.
+ * In a hotplugged system some CPUs, including cpu 0, may be missing so we have
+ * to use cpumask_* to iterate over the CPUs.
  */
 static void *schedstat_start(struct seq_file *file, loff_t *offset)
 {
@@ -124,12 +98,14 @@ static void *schedstat_start(struct seq_file *file, loff_t *offset)
 
 	if (n < nr_cpu_ids)
 		return (void *)(unsigned long)(n + 2);
+
 	return NULL;
 }
 
 static void *schedstat_next(struct seq_file *file, void *data, loff_t *offset)
 {
 	(*offset)++;
+
 	return schedstat_start(file, offset);
 }
 
@@ -144,21 +120,9 @@ static const struct seq_operations schedstat_sops = {
 	.show  = show_schedstat,
 };
 
-static int schedstat_open(struct inode *inode, struct file *file)
-{
-	return seq_open(file, &schedstat_sops);
-}
-
-static const struct file_operations proc_schedstat_operations = {
-	.open    = schedstat_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = seq_release,
-};
-
 static int __init proc_schedstat_init(void)
 {
-	proc_create("schedstat", 0, NULL, &proc_schedstat_operations);
+	proc_create_seq("schedstat", 0, NULL, &schedstat_sops);
 	return 0;
 }
 subsys_initcall(proc_schedstat_init);

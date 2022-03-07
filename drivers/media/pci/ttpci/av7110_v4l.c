@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * av7110_v4l.c: av7110 video4linux interface for DVB and Siemens DVB-C analog module
  *
@@ -6,21 +7,6 @@
  *
  * originally based on code by:
  * Copyright (C) 1998,1999 Christian Theiss <mistert@rz.fh-augsburg.de>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
- * Or, point your browser to http://www.gnu.org/copyleft/gpl.html
  *
  * the project's page is at https://linuxtv.org
  */
@@ -174,9 +160,9 @@ static int ves1820_set_tv_freq(struct saa7146_dev *dev, u32 freq)
 	buf[1] = div & 0xff;
 	buf[2] = 0x8e;
 
-	if (freq < (u32) (16 * 168.25))
+	if (freq < 16U * 16825 / 100)
 		config = 0xa0;
-	else if (freq < (u32) (16 * 447.25))
+	else if (freq < 16U * 44725 / 100)
 		config = 0x90;
 	else
 		config = 0x30;
@@ -221,7 +207,7 @@ static struct saa7146_standard analog_standard[];
 static struct saa7146_standard dvb_standard[];
 static struct saa7146_standard standard[];
 
-static struct v4l2_audio msp3400_v4l2_audio = {
+static const struct v4l2_audio msp3400_v4l2_audio = {
 	.index = 0,
 	.name = "Television",
 	.capability = V4L2_AUDCAP_STEREO
@@ -335,7 +321,7 @@ static int vidioc_g_tuner(struct file *file, void *fh, struct v4l2_tuner *t)
 		return -EINVAL;
 
 	memset(t, 0, sizeof(*t));
-	strcpy((char *)t->name, "Television");
+	strscpy((char *)t->name, "Television", sizeof(t->name));
 
 	t->type = V4L2_TUNER_ANALOG_TV;
 	t->capability = V4L2_TUNER_CAP_NORM | V4L2_TUNER_CAP_STEREO |
@@ -845,7 +831,7 @@ int av7110_init_v4l(struct av7110 *av7110)
 	if (FW_VERSION(av7110->arm_app) < 0x2623)
 		vv_data->capabilities &= ~V4L2_CAP_SLICED_VBI_OUTPUT;
 
-	if (saa7146_register_device(&av7110->v4l_dev, dev, "av7110", VFL_TYPE_GRABBER)) {
+	if (saa7146_register_device(&av7110->v4l_dev, dev, "av7110", VFL_TYPE_VIDEO)) {
 		ERR("cannot register capture device. skipping\n");
 		saa7146_vv_release(dev);
 		return -ENODEV;

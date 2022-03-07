@@ -1,7 +1,6 @@
-/*
- * vcan.c - Virtual CAN interface
+/* vcan.c - Virtual CAN interface
  *
- * Copyright (c) 2002-2007 Volkswagen Group Electronic Research
+ * Copyright (c) 2002-2017 Volkswagen Group Electronic Research
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -39,32 +38,35 @@
  *
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/netdevice.h>
 #include <linux/if_arp.h>
 #include <linux/if_ether.h>
 #include <linux/can.h>
+#include <linux/can/can-ml.h>
 #include <linux/can/dev.h>
 #include <linux/can/skb.h>
 #include <linux/slab.h>
 #include <net/rtnetlink.h>
 
+#define DRV_NAME "vcan"
+
 MODULE_DESCRIPTION("virtual CAN interface");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("Urs Thuermann <urs.thuermann@volkswagen.de>");
+MODULE_ALIAS_RTNL_LINK(DRV_NAME);
 
-
-/*
- * CAN test feature:
+/* CAN test feature:
  * Enable the echo on driver level for testing the CAN core echo modes.
- * See Documentation/networking/can.txt for details.
+ * See Documentation/networking/can.rst for details.
  */
 
 static bool echo; /* echo testing. Default: 0 (Off) */
-module_param(echo, bool, S_IRUGO);
+module_param(echo, bool, 0444);
 MODULE_PARM_DESC(echo, "Echo sent frames (for testing). Default: 0 (Off)");
-
 
 static void vcan_rx(struct sk_buff *skb, struct net_device *dev)
 {
@@ -98,10 +100,8 @@ static netdev_tx_t vcan_tx(struct sk_buff *skb, struct net_device *dev)
 
 	if (!echo) {
 		/* no echo handling available inside this driver */
-
 		if (loop) {
-			/*
-			 * only count the packets here, because the
+			/* only count the packets here, because the
 			 * CAN core already did the echo for us
 			 */
 			stats->rx_packets++;
@@ -114,7 +114,6 @@ static netdev_tx_t vcan_tx(struct sk_buff *skb, struct net_device *dev)
 	/* perform standard echo handling for CAN network interfaces */
 
 	if (loop) {
-
 		skb = can_create_echo_skb(skb);
 		if (!skb)
 			return NETDEV_TX_OK;
@@ -149,31 +148,33 @@ static const struct net_device_ops vcan_netdev_ops = {
 static void vcan_setup(struct net_device *dev)
 {
 	dev->type		= ARPHRD_CAN;
-	dev->mtu		= CAN_MTU;
+	dev->mtu		= CANFD_MTU;
 	dev->hard_header_len	= 0;
 	dev->addr_len		= 0;
 	dev->tx_queue_len	= 0;
 	dev->flags		= IFF_NOARP;
+	can_set_ml_priv(dev, netdev_priv(dev));
 
 	/* set flags according to driver capabilities */
 	if (echo)
 		dev->flags |= IFF_ECHO;
 
 	dev->netdev_ops		= &vcan_netdev_ops;
-	dev->destructor		= free_netdev;
+	dev->needs_free_netdev	= true;
 }
 
 static struct rtnl_link_ops vcan_link_ops __read_mostly = {
-	.kind	= "vcan",
-	.setup	= vcan_setup,
+	.kind = DRV_NAME,
+	.priv_size = sizeof(struct can_ml_priv),
+	.setup = vcan_setup,
 };
 
 static __init int vcan_init_module(void)
 {
-	pr_info("vcan: Virtual CAN interface driver\n");
+	pr_info("Virtual CAN interface driver\n");
 
 	if (echo)
-		printk(KERN_INFO "vcan: enabled echo on driver level.\n");
+		pr_info("enabled echo on driver level.\n");
 
 	return rtnl_link_register(&vcan_link_ops);
 }

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
 # Runs copy_to/from_user infrastructure using test_user_copy kernel module
 
 # Kselftest framework requirement - SKIP code is 4.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * PCTV 452e DVB driver
  *
@@ -5,11 +6,6 @@
  *
  * TT connect S2-3650-CI Common Interface support, MAC readout
  * Copyright (C) 2008 Michael H. Schimek <mschimek@gmx.at>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
  */
 
 /* dvb usb framework */
@@ -24,9 +20,10 @@
 #include "stb6100.h"
 #include "stb6100_cfg.h"
 /* FE Power */
+#include "isl6423.h"
 #include "lnbp22.h"
 
-#include "dvb_ca_en50221.h"
+#include <media/dvb_ca_en50221.h>
 #include "ttpci-eeprom.h"
 
 static int debug;
@@ -85,6 +82,13 @@ enum {
 static struct stb0899_postproc pctv45e_postproc[] = {
 	{ PCTV_LED_GPIO, STB0899_GPIOPULLUP },
 	{ 0, 0 }
+};
+
+static struct isl6423_config pctv452e_isl6423_config = {
+	.current_max		= SEC_CURRENT_515m,
+	.curlim			= SEC_CURRENT_LIM_ON,
+	.mod_extern		= 1,
+	.addr			= 0x08,
 };
 
 /*
@@ -528,13 +532,13 @@ static int pctv452e_power_ctrl(struct dvb_usb_device *d, int i)
 
 	rx = b0 + 5;
 
-	/* hmm where shoud this should go? */
+	/* hmm where should this should go? */
 	ret = usb_set_interface(d->udev, 0, ISOC_INTERFACE_ALTERNATIVE);
 	if (ret != 0)
 		info("%s: Warning set interface returned: %d\n",
 			__func__, ret);
 
-	/* this is a one-time initialization, dont know where to put */
+	/* this is a one-time initialization, don't know where to put */
 	b0[0] = 0xaa;
 	b0[1] = state->c++;
 	b0[2] = PCTV_CMD_RESET;
@@ -600,7 +604,7 @@ static int pctv452e_rc_query(struct dvb_usb_device *d)
 			info("%s: cmd=0x%02x sys=0x%02x\n",
 				__func__, rx[6], rx[7]);
 
-		rc_keydown(d->rc_dev, RC_TYPE_RC5, state->last_rc_key, 0);
+		rc_keydown(d->rc_dev, RC_PROTO_RC5, state->last_rc_key, 0);
 	} else if (state->last_rc_key) {
 		rc_keyup(d->rc_dev);
 		state->last_rc_key = 0;
@@ -913,15 +917,23 @@ static int pctv452e_frontend_attach(struct dvb_usb_adapter *a)
 						&a->dev->i2c_adap);
 	if (!a->fe_adap[0].fe)
 		return -ENODEV;
-	if ((dvb_attach(lnbp22_attach, a->fe_adap[0].fe,
-					&a->dev->i2c_adap)) == NULL)
-		err("Cannot attach lnbp22\n");
 
 	id = a->dev->desc->warm_ids[0];
-	if (USB_VID_TECHNOTREND == id->idVendor
-	    && USB_PID_TECHNOTREND_CONNECT_S2_3650_CI == id->idProduct)
+	if (id->idVendor == USB_VID_TECHNOTREND &&
+	    id->idProduct == USB_PID_TECHNOTREND_CONNECT_S2_3650_CI) {
+		if (dvb_attach(lnbp22_attach,
+			       a->fe_adap[0].fe,
+			       &a->dev->i2c_adap) == NULL) {
+			err("Cannot attach lnbp22\n");
+		}
 		/* Error ignored. */
 		tt3650_ci_init(a);
+	} else if (dvb_attach(isl6423_attach,
+			      a->fe_adap[0].fe,
+			      &a->dev->i2c_adap,
+			      &pctv452e_isl6423_config) == NULL) {
+		err("Cannot attach isl6423\n");
+	}
 
 	return 0;
 }
@@ -958,7 +970,7 @@ static struct dvb_usb_device_properties pctv452e_properties = {
 
 	.rc.core = {
 		.rc_codes	= RC_MAP_DIB0700_RC5_TABLE,
-		.allowed_protos	= RC_BIT_RC5,
+		.allowed_protos	= RC_PROTO_BIT_RC5,
 		.rc_query	= pctv452e_rc_query,
 		.rc_interval	= 100,
 	},
@@ -1011,7 +1023,7 @@ static struct dvb_usb_device_properties tt_connect_s2_3600_properties = {
 
 	.rc.core = {
 		.rc_codes	= RC_MAP_TT_1500,
-		.allowed_protos	= RC_BIT_RC5,
+		.allowed_protos	= RC_PROTO_BIT_RC5,
 		.rc_query	= pctv452e_rc_query,
 		.rc_interval	= 100,
 	},

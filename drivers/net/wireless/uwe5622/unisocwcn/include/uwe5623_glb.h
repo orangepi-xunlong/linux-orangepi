@@ -2,8 +2,6 @@
 #define __UWE5623_GLB_H__
 
 #include "../sleep/slp_mgr.h"
-#include "mem_pd_mgr.h"
-#include "rdc_debug.h"
 
 /* log buf size */
 #define MDBG_RX_RING_SIZE		(64*1024)
@@ -34,11 +32,7 @@
 #define MARLIN3L_AA_CHIPID	0
 #define MARLIN3E_AA_CHIPID	MARLIN_AA_CHIPID
 
-#ifdef CONFIG_WCN_USB
-#define CARD_DETECT_WAIT_MS	30000
-#else
 #define CARD_DETECT_WAIT_MS	3000
-#endif
 
 #define DCACHE_CMD_ISSUE_START 0X80000000
 #define DCACHE_CMD_CLEAN_ALL 0X00000000

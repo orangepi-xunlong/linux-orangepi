@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/bad_inode.c
  *
@@ -14,6 +15,7 @@
 #include <linux/time.h>
 #include <linux/namei.h>
 #include <linux/poll.h>
+#include <linux/fiemap.h>
 
 static int bad_file_open(struct inode *inode, struct file *filp)
 {
@@ -89,8 +91,8 @@ static int bad_inode_permission(struct inode *inode, int mask)
 	return -EIO;
 }
 
-static int bad_inode_getattr(struct vfsmount *mnt, struct dentry *dentry,
-			struct kstat *stat)
+static int bad_inode_getattr(const struct path *path, struct kstat *stat,
+			     u32 request_mask, unsigned int query_flags)
 {
 	return -EIO;
 }
@@ -125,7 +127,7 @@ static int bad_inode_fiemap(struct inode *inode,
 	return -EIO;
 }
 
-static int bad_inode_update_time(struct inode *inode, struct timespec *time,
+static int bad_inode_update_time(struct inode *inode, struct timespec64 *time,
 				 int flags)
 {
 	return -EIO;
@@ -133,7 +135,7 @@ static int bad_inode_update_time(struct inode *inode, struct timespec *time,
 
 static int bad_inode_atomic_open(struct inode *inode, struct dentry *dentry,
 				 struct file *file, unsigned int open_flag,
-				 umode_t create_mode, int *opened)
+				 umode_t create_mode)
 {
 	return -EIO;
 }

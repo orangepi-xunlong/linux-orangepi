@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * SH7785 Setup
  *
  *  Copyright (C) 2007  Paul Mundt
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 #include <linux/platform_device.h>
 #include <linux/init.h>
@@ -17,11 +14,11 @@
 #include <linux/sh_timer.h>
 #include <linux/sh_intc.h>
 #include <asm/mmzone.h>
+#include <asm/platform_early.h>
 #include <cpu/dma-register.h>
 
 static struct plat_sci_port scif0_platform_data = {
-	.flags		= UPF_BOOT_AUTOCONF,
-	.scscr		= SCSCR_RE | SCSCR_TE | SCSCR_REIE | SCSCR_CKE1,
+	.scscr		= SCSCR_REIE | SCSCR_CKE1,
 	.type		= PORT_SCIF,
 	.regtype	= SCIx_SH4_SCIF_FIFODATA_REGTYPE,
 };
@@ -42,8 +39,7 @@ static struct platform_device scif0_device = {
 };
 
 static struct plat_sci_port scif1_platform_data = {
-	.flags		= UPF_BOOT_AUTOCONF,
-	.scscr		= SCSCR_RE | SCSCR_TE | SCSCR_REIE | SCSCR_CKE1,
+	.scscr		= SCSCR_REIE | SCSCR_CKE1,
 	.type		= PORT_SCIF,
 	.regtype	= SCIx_SH4_SCIF_FIFODATA_REGTYPE,
 };
@@ -64,8 +60,7 @@ static struct platform_device scif1_device = {
 };
 
 static struct plat_sci_port scif2_platform_data = {
-	.flags		= UPF_BOOT_AUTOCONF,
-	.scscr		= SCSCR_RE | SCSCR_TE | SCSCR_REIE | SCSCR_CKE1,
+	.scscr		= SCSCR_REIE | SCSCR_CKE1,
 	.type		= PORT_SCIF,
 	.regtype	= SCIx_SH4_SCIF_FIFODATA_REGTYPE,
 };
@@ -86,8 +81,7 @@ static struct platform_device scif2_device = {
 };
 
 static struct plat_sci_port scif3_platform_data = {
-	.flags		= UPF_BOOT_AUTOCONF,
-	.scscr		= SCSCR_RE | SCSCR_TE | SCSCR_REIE | SCSCR_CKE1,
+	.scscr		= SCSCR_REIE | SCSCR_CKE1,
 	.type		= PORT_SCIF,
 	.regtype	= SCIx_SH4_SCIF_FIFODATA_REGTYPE,
 };
@@ -108,8 +102,7 @@ static struct platform_device scif3_device = {
 };
 
 static struct plat_sci_port scif4_platform_data = {
-	.flags		= UPF_BOOT_AUTOCONF,
-	.scscr		= SCSCR_RE | SCSCR_TE | SCSCR_REIE | SCSCR_CKE1,
+	.scscr		= SCSCR_REIE | SCSCR_CKE1,
 	.type		= PORT_SCIF,
 	.regtype	= SCIx_SH4_SCIF_FIFODATA_REGTYPE,
 };
@@ -130,8 +123,7 @@ static struct platform_device scif4_device = {
 };
 
 static struct plat_sci_port scif5_platform_data = {
-	.flags		= UPF_BOOT_AUTOCONF,
-	.scscr		= SCSCR_RE | SCSCR_TE | SCSCR_REIE | SCSCR_CKE1,
+	.scscr		= SCSCR_REIE | SCSCR_CKE1,
 	.type		= PORT_SCIF,
 	.regtype	= SCIx_SH4_SCIF_FIFODATA_REGTYPE,
 };
@@ -362,7 +354,7 @@ static struct platform_device *sh7785_early_devices[] __initdata = {
 
 void __init plat_early_device_setup(void)
 {
-	early_platform_add_devices(sh7785_early_devices,
+	sh_early_platform_add_devices(sh7785_early_devices,
 				   ARRAY_SIZE(sh7785_early_devices));
 }
 

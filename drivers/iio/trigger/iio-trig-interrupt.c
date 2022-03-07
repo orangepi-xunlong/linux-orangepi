@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Industrial I/O - generic interrupt based trigger support
  *
  * Copyright (c) 2008-2013 Jonathan Cameron
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -29,7 +26,6 @@ static irqreturn_t iio_interrupt_trigger_poll(int irq, void *private)
 }
 
 static const struct iio_trigger_ops iio_interrupt_trigger_ops = {
-	.owner = THIS_MODULE,
 };
 
 static int iio_interrupt_trigger_probe(struct platform_device *pdev)

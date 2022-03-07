@@ -1,51 +1,16 @@
+// SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
 /*******************************************************************************
  *
  * Module Name: dbnames - Debugger commands for the acpi namespace
  *
  ******************************************************************************/
 
-/*
- * Copyright (C) 2000 - 2016, Intel Corp.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions, and the following disclaimer,
- *    without modification.
- * 2. Redistributions in binary form must reproduce at minimum a disclaimer
- *    substantially similar to the "NO WARRANTY" disclaimer below
- *    ("Disclaimer") and any redistribution must be conditioned upon
- *    including a substantially similar Disclaimer requirement for further
- *    binary redistribution.
- * 3. Neither the names of the above-listed copyright holders nor the names
- *    of any contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
- *
- * NO WARRANTY
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDERS OR CONTRIBUTORS BE LIABLE FOR SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
- * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGES.
- */
-
 #include <acpi/acpi.h>
 #include "accommon.h"
 #include "acnamesp.h"
 #include "acdebug.h"
 #include "acpredef.h"
+#include "acinterp.h"
 
 #define _COMPONENT          ACPI_CA_DEBUGGER
 ACPI_MODULE_NAME("dbnames")
@@ -225,9 +190,15 @@ void acpi_db_dump_namespace(char *start_arg, char *depth_arg)
 	}
 
 	acpi_db_set_output_destination(ACPI_DB_DUPLICATE_OUTPUT);
-	acpi_os_printf("ACPI Namespace (from %4.4s (%p) subtree):\n",
-		       ((struct acpi_namespace_node *)subtree_entry)->name.
-		       ascii, subtree_entry);
+
+	if (((struct acpi_namespace_node *)subtree_entry)->parent) {
+		acpi_os_printf("ACPI Namespace (from %4.4s (%p) subtree):\n",
+			       ((struct acpi_namespace_node *)subtree_entry)->
+			       name.ascii, subtree_entry);
+	} else {
+		acpi_os_printf("ACPI Namespace (from %s):\n",
+			       ACPI_NAMESPACE_ROOT);
+	}
 
 	/* Display the subtree */
 
@@ -352,6 +323,7 @@ acpi_db_walk_and_match_name(acpi_handle obj_handle,
 		acpi_os_printf("Could Not get pathname for object %p\n",
 			       obj_handle);
 	} else {
+		info.count = 0;
 		info.owner_id = ACPI_OWNER_ID_MAX;
 		info.debug_level = ACPI_UINT32_MAX;
 		info.display_type = ACPI_DISPLAY_SUMMARY | ACPI_DISPLAY_SHORT;
@@ -383,7 +355,7 @@ acpi_status acpi_db_find_name_in_namespace(char *name_arg)
 	char acpi_name[5] = "____";
 	char *acpi_name_ptr = acpi_name;
 
-	if (strlen(name_arg) > ACPI_NAME_SIZE) {
+	if (strlen(name_arg) > ACPI_NAMESEG_SIZE) {
 		acpi_os_printf("Name must be no longer than 4 characters\n");
 		return (AE_OK);
 	}
@@ -533,6 +505,86 @@ acpi_db_walk_for_object_counts(acpi_handle obj_handle,
 
 /*******************************************************************************
  *
+ * FUNCTION:    acpi_db_walk_for_fields
+ *
+ * PARAMETERS:  Callback from walk_namespace
+ *
+ * RETURN:      Status
+ *
+ * DESCRIPTION: Display short info about objects in the namespace
+ *
+ ******************************************************************************/
+
+static acpi_status
+acpi_db_walk_for_fields(acpi_handle obj_handle,
+			u32 nesting_level, void *context, void **return_value)
+{
+	union acpi_object *ret_value;
+	struct acpi_region_walk_info *info =
+	    (struct acpi_region_walk_info *)context;
+	struct acpi_buffer buffer;
+	acpi_status status;
+	struct acpi_namespace_node *node = acpi_ns_validate_handle(obj_handle);
+
+	if (!node) {
+		return (AE_OK);
+	}
+	if (node->object->field.region_obj->region.space_id !=
+	    info->address_space_id) {
+		return (AE_OK);
+	}
+
+	info->count++;
+
+	/* Get and display the full pathname to this object */
+
+	buffer.length = ACPI_ALLOCATE_LOCAL_BUFFER;
+	status = acpi_ns_handle_to_pathname(obj_handle, &buffer, TRUE);
+	if (ACPI_FAILURE(status)) {
+		acpi_os_printf("Could Not get pathname for object %p\n",
+			       obj_handle);
+		return (AE_OK);
+	}
+
+	acpi_os_printf("%s ", (char *)buffer.pointer);
+	ACPI_FREE(buffer.pointer);
+
+	buffer.length = ACPI_ALLOCATE_LOCAL_BUFFER;
+	acpi_evaluate_object(obj_handle, NULL, NULL, &buffer);
+
+	/*
+	 * Since this is a field unit, surround the output in braces
+	 */
+	acpi_os_printf("{");
+
+	ret_value = (union acpi_object *)buffer.pointer;
+	switch (ret_value->type) {
+	case ACPI_TYPE_INTEGER:
+
+		acpi_os_printf("%8.8X%8.8X",
+			       ACPI_FORMAT_UINT64(ret_value->integer.value));
+		break;
+
+	case ACPI_TYPE_BUFFER:
+
+		acpi_ut_dump_buffer(ret_value->buffer.pointer,
+				    ret_value->buffer.length,
+				    DB_DISPLAY_DATA_ONLY | DB_BYTE_DISPLAY, 0);
+		break;
+
+	default:
+
+		break;
+	}
+	acpi_os_printf("}\n");
+
+	ACPI_FREE(buffer.pointer);
+
+	return (AE_OK);
+}
+
+/*******************************************************************************
+ *
  * FUNCTION:    acpi_db_walk_for_specific_objects
  *
  * PARAMETERS:  Callback from walk_namespace
@@ -654,6 +706,39 @@ acpi_status acpi_db_display_objects(char *obj_type_arg, char *display_count_arg)
 	     info.count, acpi_ut_get_type_name(type));
 
 	acpi_db_set_output_destination(ACPI_DB_CONSOLE_OUTPUT);
+	return (AE_OK);
+}
+
+/*******************************************************************************
+ *
+ * FUNCTION:    acpi_db_display_fields
+ *
+ * PARAMETERS:  obj_type_arg        - Type of object to display
+ *              display_count_arg   - Max depth to display
+ *
+ * RETURN:      None
+ *
+ * DESCRIPTION: Display objects in the namespace of the requested type
+ *
+ ******************************************************************************/
+
+acpi_status acpi_db_display_fields(u32 address_space_id)
+{
+	struct acpi_region_walk_info info;
+
+	info.count = 0;
+	info.owner_id = ACPI_OWNER_ID_MAX;
+	info.debug_level = ACPI_UINT32_MAX;
+	info.display_type = ACPI_DISPLAY_SUMMARY | ACPI_DISPLAY_SHORT;
+	info.address_space_id = address_space_id;
+
+	/* Walk the namespace from the root */
+
+	(void)acpi_walk_namespace(ACPI_TYPE_LOCAL_REGION_FIELD,
+				  ACPI_ROOT_OBJECT, ACPI_UINT32_MAX,
+				  acpi_db_walk_for_fields, NULL, (void *)&info,
+				  NULL);
+
 	return (AE_OK);
 }
 
@@ -933,7 +1018,7 @@ acpi_db_bus_walk(acpi_handle obj_handle,
  *
  * RETURN:      None
  *
- * DESCRIPTION: Display info about system busses.
+ * DESCRIPTION: Display info about system buses.
  *
  ******************************************************************************/
 

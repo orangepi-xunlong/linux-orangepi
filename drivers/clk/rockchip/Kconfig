@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: GPL-2.0
+# common clock support for ROCKCHIP SoC family.
+
+config COMMON_CLK_ROCKCHIP
+	tristate "Rockchip clock controller common support"
+	depends on ARCH_ROCKCHIP
+	default ARCH_ROCKCHIP
+	help
+	  Say y here to enable common clock controller for Rockchip platforms.
+
+if COMMON_CLK_ROCKCHIP
+config CLK_PX30
+	tristate "Rockchip PX30 clock controller support"
+	depends on ARM64 || COMPILE_TEST
+	default y
+	help
+	  Build the driver for PX30 Clock Driver.
+
+config CLK_RV110X
+	tristate "Rockchip RV110x clock controller support"
+	depends on ARM || COMPILE_TEST
+	default y
+	help
+	  Build the driver for RV110x Clock Driver.
+
+config CLK_RV1126
+	tristate "Rockchip RV1126 clock controller support"
+	depends on ARM || COMPILE_TEST
+	default y
+	help
+	  Build the driver for RV1126 Clock Driver.
+
+config CLK_RK1808
+	tristate "Rockchip RK1808 clock controller support"
+	depends on ARM64 || COMPILE_TEST
+	default y
+	help
+	  Build the driver for RK1808 Clock Driver.
+
+config CLK_RK3036
+	tristate "Rockchip RK3036 clock controller support"
+	depends on ARM || COMPILE_TEST
+	default y
+	help
+	  Build the driver for RK3036 Clock Driver.
+
+config CLK_RK312X
+	tristate "Rockchip RK312x clock controller support"
+	depends on ARM || COMPILE_TEST
+	default y
+	help
+	  Build the driver for RK312x Clock Driver.
+
+config CLK_RK3188
+	tristate "Rockchip RK3188 clock controller support"
+	depends on ARM || COMPILE_TEST
+	default y
+	help
+	  Build the driver for RK3188 Clock Driver.
+
+config CLK_RK322X
+	tristate "Rockchip RK322x clock controller support"
+	depends on ARM || COMPILE_TEST
+	default y
+	help
+	  Build the driver for RK322x Clock Driver.
+
+config CLK_RK3288
+	tristate "Rockchip RK3288 clock controller support"
+	depends on ARM || COMPILE_TEST
+	default y
+	help
+	  Build the driver for RK3288 Clock Driver.
+
+config CLK_RK3308
+	tristate "Rockchip RK3308 clock controller support"
+	depends on ARM64 || COMPILE_TEST
+	default y
+	help
+	  Build the driver for RK3308 Clock Driver.
+
+config CLK_RK3328
+	tristate "Rockchip RK3328 clock controller support"
+	depends on ARM64 || COMPILE_TEST
+	default y
+	help
+	  Build the driver for RK3328 Clock Driver.
+
+config CLK_RK3368
+	tristate "Rockchip RK3368 clock controller support"
+	depends on ARM64 || COMPILE_TEST
+	default y
+	help
+	  Build the driver for RK3368 Clock Driver.
+
+config CLK_RK3399
+	tristate "Rockchip RK3399 clock controller support"
+	depends on ARM64 || COMPILE_TEST
+	default y
+	help
+	  Build the driver for RK3399 Clock Driver.
+
+config CLK_RK3568
+	tristate "Rockchip RK3568 clock controller support"
+	depends on ARM64 || COMPILE_TEST
+	default y
+	help
+	  Build the driver for RK3568 Clock Driver.
+
+config CLK_RK3588
+	tristate "Rockchip RK3588 clock controller support"
+	depends on ARM64 || COMPILE_TEST
+	default y
+	help
+	  Build the driver for RK3588 Clock Driver.
+
+config ROCKCHIP_CLK_COMPENSATION
+	bool "Rockchip Clk Compensation"
+	help
+	  Say y here to enable clk compensation(+/- 1000 ppm).
+
+source "drivers/clk/rockchip/regmap/Kconfig"
+
+endif

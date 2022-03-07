@@ -1,10 +1,12 @@
-#include <linux/sched.h>
+// SPDX-License-Identifier: GPL-2.0
+#include <linux/sched/signal.h>
 #include <linux/errno.h>
 #include <linux/dcache.h>
 #include <linux/path.h>
 #include <linux/fdtable.h>
 #include <linux/namei.h>
 #include <linux/pid.h>
+#include <linux/ptrace.h>
 #include <linux/security.h>
 #include <linux/file.h>
 #include <linux/seq_file.h>
@@ -52,9 +54,10 @@ static int seq_show(struct seq_file *m, void *v)
 	if (ret)
 		return ret;
 
-	seq_printf(m, "pos:\t%lli\nflags:\t0%o\nmnt_id:\t%i\n",
+	seq_printf(m, "pos:\t%lli\nflags:\t0%o\nmnt_id:\t%i\nino:\t%lu\n",
 		   (long long)file->f_pos, f_flags,
-		   real_mount(file->f_path.mnt)->mnt_id);
+		   real_mount(file->f_path.mnt)->mnt_id,
+		   file_inode(file)->i_ino);
 
 	show_fd_locks(m, file, files);
 	if (seq_has_overflowed(m))
@@ -68,8 +71,30 @@ out:
 	return 0;
 }
 
+static int proc_fdinfo_access_allowed(struct inode *inode)
+{
+	bool allowed = false;
+	struct task_struct *task = get_proc_task(inode);
+
+	if (!task)
+		return -ESRCH;
+
+	allowed = ptrace_may_access(task, PTRACE_MODE_READ_FSCREDS);
+	put_task_struct(task);
+
+	if (!allowed)
+		return -EACCES;
+
+	return 0;
+}
+
 static int seq_fdinfo_open(struct inode *inode, struct file *file)
 {
+	int ret = proc_fdinfo_access_allowed(inode);
+
+	if (ret)
+		return ret;
+
 	return single_open(file, seq_show, inode);
 }
 
@@ -80,11 +105,42 @@ static const struct file_operations proc_fdinfo_file_operations = {
 	.release	= single_release,
 };
 
+static bool tid_fd_mode(struct task_struct *task, unsigned fd, fmode_t *mode)
+{
+	struct files_struct *files = get_files_struct(task);
+	struct file *file;
+
+	if (!files)
+		return false;
+
+	rcu_read_lock();
+	file = fcheck_files(files, fd);
+	if (file)
+		*mode = file->f_mode;
+	rcu_read_unlock();
+	put_files_struct(files);
+	return !!file;
+}
+
+static void tid_fd_update_inode(struct task_struct *task, struct inode *inode,
+				fmode_t f_mode)
+{
+	task_dump_owner(task, 0, &inode->i_uid, &inode->i_gid);
+
+	if (S_ISLNK(inode->i_mode)) {
+		unsigned i_mode = S_IFLNK;
+		if (f_mode & FMODE_READ)
+			i_mode |= S_IRUSR | S_IXUSR;
+		if (f_mode & FMODE_WRITE)
+			i_mode |= S_IWUSR | S_IXUSR;
+		inode->i_mode = i_mode;
+	}
+	security_task_to_inode(task, inode);
+}
+
 static int tid_fd_revalidate(struct dentry *dentry, unsigned int flags)
 {
-	struct files_struct *files;
 	struct task_struct *task;
-	const struct cred *cred;
 	struct inode *inode;
 	unsigned int fd;
 
@@ -96,44 +152,11 @@ static int tid_fd_revalidate(struct dentry *dentry, unsigned int flags)
 	fd = proc_fd(inode);
 
 	if (task) {
-		files = get_files_struct(task);
-		if (files) {
-			struct file *file;
-
-			rcu_read_lock();
-			file = fcheck_files(files, fd);
-			if (file) {
-				unsigned f_mode = file->f_mode;
-
-				rcu_read_unlock();
-				put_files_struct(files);
-
-				if (task_dumpable(task)) {
-					rcu_read_lock();
-					cred = __task_cred(task);
-					inode->i_uid = cred->euid;
-					inode->i_gid = cred->egid;
-					rcu_read_unlock();
-				} else {
-					inode->i_uid = GLOBAL_ROOT_UID;
-					inode->i_gid = GLOBAL_ROOT_GID;
-				}
-
-				if (S_ISLNK(inode->i_mode)) {
-					unsigned i_mode = S_IFLNK;
-					if (f_mode & FMODE_READ)
-						i_mode |= S_IRUSR | S_IXUSR;
-					if (f_mode & FMODE_WRITE)
-						i_mode |= S_IWUSR | S_IXUSR;
-					inode->i_mode = i_mode;
-				}
-
-				security_task_to_inode(task, inode);
-				put_task_struct(task);
-				return 1;
-			}
-			rcu_read_unlock();
-			put_files_struct(files);
+		fmode_t f_mode;
+		if (tid_fd_mode(task, fd, &f_mode)) {
+			tid_fd_update_inode(task, inode, f_mode);
+			put_task_struct(task);
+			return 1;
 		}
 		put_task_struct(task);
 	}
@@ -175,35 +198,33 @@ static int proc_fd_link(struct dentry *dentry, struct path *path)
 	return ret;
 }
 
-static int
-proc_fd_instantiate(struct inode *dir, struct dentry *dentry,
-		    struct task_struct *task, const void *ptr)
+struct fd_data {
+	fmode_t mode;
+	unsigned fd;
+};
+
+static struct dentry *proc_fd_instantiate(struct dentry *dentry,
+	struct task_struct *task, const void *ptr)
 {
-	unsigned fd = (unsigned long)ptr;
+	const struct fd_data *data = ptr;
 	struct proc_inode *ei;
 	struct inode *inode;
 
-	inode = proc_pid_make_inode(dir->i_sb, task);
+	inode = proc_pid_make_inode(dentry->d_sb, task, S_IFLNK);
 	if (!inode)
-		goto out;
+		return ERR_PTR(-ENOENT);
 
 	ei = PROC_I(inode);
-	ei->fd = fd;
+	ei->fd = data->fd;
 
-	inode->i_mode = S_IFLNK;
 	inode->i_op = &proc_pid_link_inode_operations;
 	inode->i_size = 64;
 
 	ei->op.proc_get_link = proc_fd_link;
+	tid_fd_update_inode(task, inode, data->mode);
 
 	d_set_d_op(dentry, &tid_fd_dentry_operations);
-	d_add(dentry, inode);
-
-	/* Close the race of the process dying before we return the dentry */
-	if (tid_fd_revalidate(dentry, 0))
-		return 0;
- out:
-	return -ENOENT;
+	return d_splice_alias(inode, dentry);
 }
 
 static struct dentry *proc_lookupfd_common(struct inode *dir,
@@ -211,19 +232,21 @@ static struct dentry *proc_lookupfd_common(struct inode *dir,
 					   instantiate_t instantiate)
 {
 	struct task_struct *task = get_proc_task(dir);
-	int result = -ENOENT;
-	unsigned fd = name_to_int(&dentry->d_name);
+	struct fd_data data = {.fd = name_to_int(&dentry->d_name)};
+	struct dentry *result = ERR_PTR(-ENOENT);
 
 	if (!task)
 		goto out_no_task;
-	if (fd == ~0U)
+	if (data.fd == ~0U)
+		goto out;
+	if (!tid_fd_mode(task, data.fd, &data.mode))
 		goto out;
 
-	result = instantiate(dir, dentry, task, (void *)(unsigned long)fd);
+	result = instantiate(dentry, task, &data);
 out:
 	put_task_struct(task);
 out_no_task:
-	return ERR_PTR(result);
+	return result;
 }
 
 static int proc_readfd_common(struct file *file, struct dir_context *ctx,
@@ -246,17 +269,22 @@ static int proc_readfd_common(struct file *file, struct dir_context *ctx,
 	for (fd = ctx->pos - 2;
 	     fd < files_fdtable(files)->max_fds;
 	     fd++, ctx->pos++) {
-		char name[PROC_NUMBUF];
-		int len;
+		struct file *f;
+		struct fd_data data;
+		char name[10 + 1];
+		unsigned int len;
 
-		if (!fcheck_files(files, fd))
+		f = fcheck_files(files, fd);
+		if (!f)
 			continue;
+		data.mode = f->f_mode;
 		rcu_read_unlock();
+		data.fd = fd;
 
 		len = snprintf(name, sizeof(name), "%u", fd);
 		if (!proc_fill_cache(file, ctx,
 				     name, len, instantiate, p,
-				     (void *)(unsigned long)fd))
+				     &data))
 			goto out_fd_loop;
 		cond_resched();
 		rcu_read_lock();
@@ -314,32 +342,25 @@ const struct inode_operations proc_fd_inode_operations = {
 	.setattr	= proc_setattr,
 };
 
-static int
-proc_fdinfo_instantiate(struct inode *dir, struct dentry *dentry,
-			struct task_struct *task, const void *ptr)
+static struct dentry *proc_fdinfo_instantiate(struct dentry *dentry,
+	struct task_struct *task, const void *ptr)
 {
-	unsigned fd = (unsigned long)ptr;
+	const struct fd_data *data = ptr;
 	struct proc_inode *ei;
 	struct inode *inode;
 
-	inode = proc_pid_make_inode(dir->i_sb, task);
+	inode = proc_pid_make_inode(dentry->d_sb, task, S_IFREG | S_IRUGO);
 	if (!inode)
-		goto out;
+		return ERR_PTR(-ENOENT);
 
 	ei = PROC_I(inode);
-	ei->fd = fd;
+	ei->fd = data->fd;
 
-	inode->i_mode = S_IFREG | S_IRUSR;
 	inode->i_fop = &proc_fdinfo_file_operations;
+	tid_fd_update_inode(task, inode, 0);
 
 	d_set_d_op(dentry, &tid_fd_dentry_operations);
-	d_add(dentry, inode);
-
-	/* Close the race of the process dying before we return the dentry */
-	if (tid_fd_revalidate(dentry, 0))
-		return 0;
- out:
-	return -ENOENT;
+	return d_splice_alias(inode, dentry);
 }
 
 static struct dentry *
@@ -354,12 +375,23 @@ static int proc_readfdinfo(struct file *file, struct dir_context *ctx)
 				  proc_fdinfo_instantiate);
 }
 
+static int proc_open_fdinfo(struct inode *inode, struct file *file)
+{
+	int ret = proc_fdinfo_access_allowed(inode);
+
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
 const struct inode_operations proc_fdinfo_inode_operations = {
 	.lookup		= proc_lookupfdinfo,
 	.setattr	= proc_setattr,
 };
 
 const struct file_operations proc_fdinfo_operations = {
+	.open		= proc_open_fdinfo,
 	.read		= generic_read_dir,
 	.iterate_shared	= proc_readfdinfo,
 	.llseek		= generic_file_llseek,

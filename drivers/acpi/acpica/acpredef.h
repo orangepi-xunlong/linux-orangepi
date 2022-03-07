@@ -1,45 +1,11 @@
+/* SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0 */
 /******************************************************************************
  *
  * Name: acpredef - Information table for ACPI predefined methods and objects
  *
+ * Copyright (C) 2000 - 2020, Intel Corp.
+ *
  *****************************************************************************/
-
-/*
- * Copyright (C) 2000 - 2016, Intel Corp.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions, and the following disclaimer,
- *    without modification.
- * 2. Redistributions in binary form must reproduce at minimum a disclaimer
- *    substantially similar to the "NO WARRANTY" disclaimer below
- *    ("Disclaimer") and any redistribution must be conditioned upon
- *    including a substantially similar Disclaimer requirement for further
- *    binary redistribution.
- * 3. Neither the names of the above-listed copyright holders nor the names
- *    of any contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
- *
- * NO WARRANTY
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDERS OR CONTRIBUTORS BE LIABLE FOR SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
- * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGES.
- */
 
 #ifndef __ACPREDEF_H__
 #define __ACPREDEF_H__
@@ -135,7 +101,7 @@ enum acpi_return_package_types {
 
 /* Support macros for users of the predefined info table */
 
-#define METHOD_PREDEF_ARGS_MAX          4
+#define METHOD_PREDEF_ARGS_MAX          5
 #define METHOD_ARG_BIT_WIDTH            3
 #define METHOD_ARG_MASK                 0x0007
 #define ARG_COUNT_IS_MINIMUM            0x8000
@@ -151,6 +117,7 @@ enum acpi_return_package_types {
 #define METHOD_2ARGS(a1,a2)             (2 | (a1 << 3) | (a2 << 6))
 #define METHOD_3ARGS(a1,a2,a3)          (3 | (a1 << 3) | (a2 << 6) | (a3 << 9))
 #define METHOD_4ARGS(a1,a2,a3,a4)       (4 | (a1 << 3) | (a2 << 6) | (a3 << 9) | (a4 << 12))
+#define METHOD_5ARGS(a1,a2,a3,a4,a5)    (5 | (a1 << 3) | (a2 << 6) | (a3 << 9) | (a4 << 12) | (a5 << 15))
 
 #define METHOD_RETURNS(type)            (type)
 #define METHOD_NO_RETURN_VALUE          0
@@ -581,6 +548,9 @@ const union acpi_predefined_info acpi_gbl_predefined_methods[] = {
 	{{"_HID", METHOD_0ARGS,
 	  METHOD_RETURNS(ACPI_RTYPE_INTEGER | ACPI_RTYPE_STRING)}},
 
+	{{"_HMA", METHOD_0ARGS,
+	  METHOD_RETURNS(ACPI_RTYPE_BUFFER)}},
+
 	{{"_HOT", METHOD_0ARGS,
 	  METHOD_RETURNS(ACPI_RTYPE_INTEGER)}},
 
@@ -626,6 +596,19 @@ const union acpi_predefined_info acpi_gbl_predefined_methods[] = {
 		     ACPI_RTYPE_INTEGER | ACPI_RTYPE_BUFFER | ACPI_RTYPE_STRING,
 		     10, 0),
 
+	{{"_LSI", METHOD_0ARGS,
+	  METHOD_RETURNS(ACPI_RTYPE_PACKAGE)}},
+	PACKAGE_INFO(ACPI_PTYPE1_FIXED, ACPI_RTYPE_INTEGER, 3, 0, 0, 0),
+
+	{{"_LSR", METHOD_2ARGS(ACPI_TYPE_INTEGER, ACPI_TYPE_INTEGER),
+	  METHOD_RETURNS(ACPI_RTYPE_PACKAGE)}},
+	PACKAGE_INFO(ACPI_PTYPE1_FIXED, ACPI_RTYPE_INTEGER, 1,
+		     ACPI_RTYPE_BUFFER, 1, 0),
+
+	{{"_LSW",
+	  METHOD_3ARGS(ACPI_TYPE_INTEGER, ACPI_TYPE_INTEGER, ACPI_TYPE_BUFFER),
+	  METHOD_RETURNS(ACPI_RTYPE_INTEGER)}},
+
 	{{"_MAT", METHOD_0ARGS,
 	  METHOD_RETURNS(ACPI_RTYPE_BUFFER)}},
 
@@ -648,6 +631,21 @@ const union acpi_predefined_info acpi_gbl_predefined_methods[] = {
 
 	{{"_MTL", METHOD_0ARGS,	/* ACPI 6.0 */
 	  METHOD_RETURNS(ACPI_RTYPE_INTEGER)}},
+
+	{{"_NBS", METHOD_0ARGS,	/* ACPI 6.3 */
+	  METHOD_RETURNS(ACPI_RTYPE_BUFFER)}},
+
+	{{"_NCH", METHOD_0ARGS,	/* ACPI 6.3 */
+	  METHOD_RETURNS(ACPI_RTYPE_BUFFER)}},
+
+	{{"_NIC", METHOD_0ARGS,	/* ACPI 6.3 */
+	  METHOD_RETURNS(ACPI_RTYPE_BUFFER)}},
+
+	{{"_NIG", METHOD_0ARGS, /* ACPI 6.3 */
+	  METHOD_RETURNS(ACPI_RTYPE_BUFFER)}},
+
+	{{"_NIH", METHOD_1ARGS(ACPI_TYPE_BUFFER), /* ACPI 6.3 */
+	  METHOD_RETURNS(ACPI_RTYPE_BUFFER)}},
 
 	{{"_NTT", METHOD_0ARGS,
 	  METHOD_RETURNS(ACPI_RTYPE_INTEGER)}},
@@ -905,8 +903,38 @@ const union acpi_predefined_info acpi_gbl_predefined_methods[] = {
 	{{"_S4W", METHOD_0ARGS,
 	  METHOD_RETURNS(ACPI_RTYPE_INTEGER)}},
 
+	{{"_SBA", METHOD_0ARGS,
+	  METHOD_RETURNS(ACPI_RTYPE_PACKAGE)}},	/* Fixed-length (4 Int) */
+	PACKAGE_INFO(ACPI_PTYPE1_FIXED, ACPI_RTYPE_INTEGER, 4, 0, 0, 0),
+
+	{{"_SBI", METHOD_0ARGS,
+	  METHOD_RETURNS(ACPI_RTYPE_PACKAGE)}},	/* Fixed-length (1 Int, 1 Buf) */
+	PACKAGE_INFO(ACPI_PTYPE1_FIXED, ACPI_RTYPE_INTEGER, 1,
+		     ACPI_RTYPE_BUFFER, 1, 0),
+
+	{{"_SBR",
+	  METHOD_3ARGS(ACPI_TYPE_INTEGER, ACPI_TYPE_INTEGER,
+			ACPI_TYPE_INTEGER),
+	   METHOD_RETURNS(ACPI_RTYPE_PACKAGE)}},	/* Fixed-length (2 Int) */
+	PACKAGE_INFO(ACPI_PTYPE1_FIXED, ACPI_RTYPE_INTEGER, 2,
+		     ACPI_RTYPE_BUFFER | ACPI_RTYPE_INTEGER, 1, 0),
+
 	{{"_SBS", METHOD_0ARGS,
 	  METHOD_RETURNS(ACPI_RTYPE_INTEGER)}},
+
+	{{"_SBT",
+	  METHOD_4ARGS(ACPI_TYPE_INTEGER, ACPI_TYPE_INTEGER, ACPI_TYPE_INTEGER,
+			ACPI_TYPE_ANY),
+	   METHOD_RETURNS(ACPI_RTYPE_PACKAGE)}},	/* Fixed-length (2 Int, 1 Buf | Int) */
+	PACKAGE_INFO(ACPI_PTYPE1_FIXED, ACPI_RTYPE_INTEGER, 2,
+		     ACPI_RTYPE_BUFFER | ACPI_RTYPE_INTEGER, 1, 0),
+
+	{{"_SBW",
+	  METHOD_5ARGS(ACPI_TYPE_INTEGER, ACPI_TYPE_INTEGER, ACPI_TYPE_INTEGER,
+			ACPI_TYPE_INTEGER, ACPI_TYPE_ANY),
+	   METHOD_RETURNS(ACPI_RTYPE_PACKAGE)}},
+	PACKAGE_INFO(ACPI_PTYPE1_FIXED, ACPI_RTYPE_BUFFER | ACPI_RTYPE_INTEGER,
+		     1, 0, 0, 0),
 
 	{{"_SCP", METHOD_1ARGS(ACPI_TYPE_INTEGER) | ARG_COUNT_IS_MINIMUM,
 	  METHOD_NO_RETURN_VALUE}},	/* Acpi 1.0 allowed 1 integer arg. Acpi 3.0 expanded to 3 args. Allow both. */

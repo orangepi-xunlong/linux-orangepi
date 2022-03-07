@@ -212,7 +212,7 @@ static void kvm_pit_ack_irq(struct kvm_irq_ack_notifier *kian)
 	 */
 	smp_mb();
 	if (atomic_dec_if_positive(&ps->pending) > 0)
-		kthread_queue_work(&pit->worker, &pit->expired);
+		kthread_queue_work(pit->worker, &pit->expired);
 }
 
 void __kvm_migrate_pit_timer(struct kvm_vcpu *vcpu)
@@ -272,7 +272,7 @@ static enum hrtimer_restart pit_timer_fn(struct hrtimer *data)
 	if (atomic_read(&ps->reinject))
 		atomic_inc(&ps->pending);
 
-	kthread_queue_work(&pt->worker, &pt->expired);
+	kthread_queue_work(pt->worker, &pt->expired);
 
 	if (ps->is_periodic) {
 		hrtimer_add_expires_ns(&ps->timer, ps->period);
@@ -295,12 +295,24 @@ void kvm_pit_set_reinject(struct kvm_pit *pit, bool reinject)
 	if (atomic_read(&ps->reinject) == reinject)
 		return;
 
+	/*
+	 * AMD SVM AVIC accelerates EOI write and does not trap.
+	 * This cause in-kernel PIT re-inject mode to fail
+	 * since it checks ps->irq_ack before kvm_set_irq()
+	 * and relies on the ack notifier to timely queue
+	 * the pt->worker work iterm and reinject the missed tick.
+	 * So, deactivate APICv when PIT is in reinject mode.
+	 */
 	if (reinject) {
+		kvm_request_apicv_update(kvm, false,
+					 APICV_INHIBIT_REASON_PIT_REINJ);
 		/* The initial state is preserved while ps->reinject == 0. */
 		kvm_pit_reset_reinject(pit);
 		kvm_register_irq_ack_notifier(kvm, &ps->irq_ack_notifier);
 		kvm_register_irq_mask_notifier(kvm, 0, &pit->mask_notifier);
 	} else {
+		kvm_request_apicv_update(kvm, true,
+					 APICV_INHIBIT_REASON_PIT_REINJ);
 		kvm_unregister_irq_ack_notifier(kvm, &ps->irq_ack_notifier);
 		kvm_unregister_irq_mask_notifier(kvm, 0, &pit->mask_notifier);
 	}
@@ -355,7 +367,7 @@ static void pit_load_count(struct kvm_pit *pit, int channel, u32 val)
 {
 	struct kvm_kpit_state *ps = &pit->pit_state;
 
-	pr_debug("load_count val is %d, channel is %d\n", val, channel);
+	pr_debug("load_count val is %u, channel is %d\n", val, channel);
 
 	/*
 	 * The largest possible initial count is 0; this is equivalent
@@ -450,7 +462,6 @@ static int pit_ioport_write(struct kvm_vcpu *vcpu,
 		if (channel == 3) {
 			/* Read-Back Command. */
 			for (channel = 0; channel < 3; channel++) {
-				s = &pit_state->channels[channel];
 				if (val & (2 << channel)) {
 					if (!(val & 0x20))
 						pit_latch_count(pit, channel);
@@ -653,7 +664,7 @@ struct kvm_pit *kvm_create_pit(struct kvm *kvm, u32 flags)
 	pid_t pid_nr;
 	int ret;
 
-	pit = kzalloc(sizeof(struct kvm_pit), GFP_KERNEL);
+	pit = kzalloc(sizeof(struct kvm_pit), GFP_KERNEL_ACCOUNT);
 	if (!pit)
 		return NULL;
 
@@ -667,10 +678,8 @@ struct kvm_pit *kvm_create_pit(struct kvm *kvm, u32 flags)
 	pid_nr = pid_vnr(pid);
 	put_pid(pid);
 
-	kthread_init_worker(&pit->worker);
-	pit->worker_task = kthread_run(kthread_worker_fn, &pit->worker,
-				       "kvm-pit/%d", pid_nr);
-	if (IS_ERR(pit->worker_task))
+	pit->worker = kthread_create_worker(0, "kvm-pit/%d", pid_nr);
+	if (IS_ERR(pit->worker))
 		goto fail_kthread;
 
 	kthread_init_work(&pit->expired, pit_do_work);
@@ -713,7 +722,7 @@ fail_register_speaker:
 fail_register_pit:
 	mutex_unlock(&kvm->slots_lock);
 	kvm_pit_set_reinject(pit, false);
-	kthread_stop(pit->worker_task);
+	kthread_destroy_worker(pit->worker);
 fail_kthread:
 	kvm_free_irq_source_id(kvm, pit->irq_source_id);
 fail_request:
@@ -726,12 +735,13 @@ void kvm_free_pit(struct kvm *kvm)
 	struct kvm_pit *pit = kvm->arch.vpit;
 
 	if (pit) {
+		mutex_lock(&kvm->slots_lock);
 		kvm_io_bus_unregister_dev(kvm, KVM_PIO_BUS, &pit->dev);
 		kvm_io_bus_unregister_dev(kvm, KVM_PIO_BUS, &pit->speaker_dev);
+		mutex_unlock(&kvm->slots_lock);
 		kvm_pit_set_reinject(pit, false);
 		hrtimer_cancel(&pit->pit_state.timer);
-		kthread_flush_work(&pit->expired);
-		kthread_stop(pit->worker_task);
+		kthread_destroy_worker(pit->worker);
 		kvm_free_irq_source_id(kvm, pit->irq_source_id);
 		kfree(pit);
 	}

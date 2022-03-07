@@ -228,7 +228,7 @@ static void bnx2i_setup_cmd_wqe_template(struct bnx2i_cmd *cmd)
 /**
  * bnx2i_bind_conn_to_iscsi_cid - bind conn structure to 'iscsi_cid'
  * @hba:	pointer to adapter instance
- * @conn:	pointer to iscsi connection
+ * @bnx2i_conn:	pointer to iscsi connection
  * @iscsi_cid:	iscsi context ID, range 0 - (MAX_CONN - 1)
  *
  * update iscsi cid table entry with connection pointer. This enables
@@ -463,7 +463,6 @@ static int bnx2i_alloc_bdt(struct bnx2i_hba *hba, struct iscsi_session *session,
  * bnx2i_destroy_cmd_pool - destroys iscsi command pool and release BD table
  * @hba:	adapter instance pointer
  * @session:	iscsi session pointer
- * @cmd:	iscsi command structure
  */
 static void bnx2i_destroy_cmd_pool(struct bnx2i_hba *hba,
 				   struct iscsi_session *session)
@@ -577,13 +576,12 @@ static void bnx2i_free_mp_bdt(struct bnx2i_hba *hba)
 				  hba->dummy_buffer, hba->dummy_buf_dma);
 		hba->dummy_buffer = NULL;
 	}
-		return;
+	return;
 }
 
 /**
  * bnx2i_drop_session - notifies iscsid of connection error.
- * @hba:	adapter instance pointer
- * @session:	iscsi session pointer
+ * @cls_session:	iscsi cls session pointer
  *
  * This notifies iscsid that there is a error, so it can initiate
  * recovery.
@@ -915,12 +913,12 @@ void bnx2i_free_hba(struct bnx2i_hba *hba)
 	INIT_LIST_HEAD(&hba->ep_ofld_list);
 	INIT_LIST_HEAD(&hba->ep_active_list);
 	INIT_LIST_HEAD(&hba->ep_destroy_list);
-	pci_dev_put(hba->pcidev);
 
 	if (hba->regview) {
 		pci_iounmap(hba->pcidev, hba->regview);
 		hba->regview = NULL;
 	}
+	pci_dev_put(hba->pcidev);
 	bnx2i_free_mp_bdt(hba);
 	bnx2i_release_free_cid_que(hba);
 	iscsi_host_free(shost);
@@ -1277,7 +1275,8 @@ static int bnx2i_task_xmit(struct iscsi_task *task)
 
 /**
  * bnx2i_session_create - create a new iscsi session
- * @cmds_max:		max commands supported
+ * @ep:		pointer to iscsi endpoint
+ * @cmds_max:		user specified maximum commands
  * @qdepth:		scsi queue depth to support
  * @initial_cmdsn:	initial iscsi CMDSN to be used for this session
  *
@@ -1611,9 +1610,8 @@ static int bnx2i_conn_start(struct iscsi_cls_conn *cls_conn)
 	 * this should normally not sleep for a long time so it should
 	 * not disrupt the caller.
 	 */
+	timer_setup(&bnx2i_conn->ep->ofld_timer, bnx2i_ep_ofld_timer, 0);
 	bnx2i_conn->ep->ofld_timer.expires = 1 * HZ + jiffies;
-	bnx2i_conn->ep->ofld_timer.function = bnx2i_ep_ofld_timer;
-	bnx2i_conn->ep->ofld_timer.data = (unsigned long) bnx2i_conn->ep;
 	add_timer(&bnx2i_conn->ep->ofld_timer);
 	/* update iSCSI context for this conn, wait for CNIC to complete */
 	wait_event_interruptible(bnx2i_conn->ep->ofld_wait,
@@ -1729,10 +1727,8 @@ static int bnx2i_tear_down_conn(struct bnx2i_hba *hba,
 	}
 
 	ep->state = EP_STATE_CLEANUP_START;
-	init_timer(&ep->ofld_timer);
+	timer_setup(&ep->ofld_timer, bnx2i_ep_ofld_timer, 0);
 	ep->ofld_timer.expires = hba->conn_ctx_destroy_tmo + jiffies;
-	ep->ofld_timer.function = bnx2i_ep_ofld_timer;
-	ep->ofld_timer.data = (unsigned long) ep;
 	add_timer(&ep->ofld_timer);
 
 	bnx2i_ep_destroy_list_add(hba, ep);
@@ -1835,10 +1831,8 @@ static struct iscsi_endpoint *bnx2i_ep_connect(struct Scsi_Host *shost,
 	bnx2i_ep->state = EP_STATE_OFLD_START;
 	bnx2i_ep_ofld_list_add(hba, bnx2i_ep);
 
-	init_timer(&bnx2i_ep->ofld_timer);
+	timer_setup(&bnx2i_ep->ofld_timer, bnx2i_ep_ofld_timer, 0);
 	bnx2i_ep->ofld_timer.expires = 2 * HZ + jiffies;
-	bnx2i_ep->ofld_timer.function = bnx2i_ep_ofld_timer;
-	bnx2i_ep->ofld_timer.data = (unsigned long) bnx2i_ep;
 	add_timer(&bnx2i_ep->ofld_timer);
 
 	if (bnx2i_send_conn_ofld_req(hba, bnx2i_ep)) {
@@ -1909,7 +1903,8 @@ static struct iscsi_endpoint *bnx2i_ep_connect(struct Scsi_Host *shost,
 
 	bnx2i_ep_active_list_add(hba, bnx2i_ep);
 
-	if (bnx2i_map_ep_dbell_regs(bnx2i_ep))
+	rc = bnx2i_map_ep_dbell_regs(bnx2i_ep);
+	if (rc)
 		goto del_active_ep;
 
 	mutex_unlock(&hba->net_dev_lock);
@@ -1975,7 +1970,7 @@ static int bnx2i_ep_poll(struct iscsi_endpoint *ep, int timeout_ms)
 
 /**
  * bnx2i_ep_tcp_conn_active - check EP state transition
- * @ep:		endpoint pointer
+ * @bnx2i_ep:		endpoint pointer
  *
  * check if underlying TCP connection is active
  */
@@ -2018,9 +2013,9 @@ static int bnx2i_ep_tcp_conn_active(struct bnx2i_endpoint *bnx2i_ep)
 }
 
 
-/*
+/**
  * bnx2i_hw_ep_disconnect - executes TCP connection teardown process in the hw
- * @ep:		TCP connection (bnx2i endpoint) handle
+ * @bnx2i_ep:		TCP connection (bnx2i endpoint) handle
  *
  * executes  TCP connection teardown process
  */
@@ -2053,10 +2048,8 @@ int bnx2i_hw_ep_disconnect(struct bnx2i_endpoint *bnx2i_ep)
 		session = conn->session;
 	}
 
-	init_timer(&bnx2i_ep->ofld_timer);
+	timer_setup(&bnx2i_ep->ofld_timer, bnx2i_ep_ofld_timer, 0);
 	bnx2i_ep->ofld_timer.expires = hba->conn_teardown_tmo + jiffies;
-	bnx2i_ep->ofld_timer.function = bnx2i_ep_ofld_timer;
-	bnx2i_ep->ofld_timer.data = (unsigned long) bnx2i_ep;
 	add_timer(&bnx2i_ep->ofld_timer);
 
 	if (!test_bit(BNX2I_CNIC_REGISTERED, &hba->reg_with_cnic))
@@ -2177,8 +2170,8 @@ out:
 
 /**
  * bnx2i_nl_set_path - ISCSI_UEVENT_PATH_UPDATE user message handler
- * @buf:	pointer to buffer containing iscsi path message
- *
+ * @shost:	scsi host pointer
+ * @params:	pointer to buffer containing iscsi path message
  */
 static int bnx2i_nl_set_path(struct Scsi_Host *shost, struct iscsi_path *params)
 {
@@ -2259,6 +2252,7 @@ static struct scsi_host_template bnx2i_host_template = {
 	.name			= "QLogic Offload iSCSI Initiator",
 	.proc_name		= "bnx2i",
 	.queuecommand		= iscsi_queuecommand,
+	.eh_timed_out		= iscsi_eh_cmd_timed_out,
 	.eh_abort_handler	= iscsi_eh_abort,
 	.eh_device_reset_handler = iscsi_eh_device_reset,
 	.eh_target_reset_handler = iscsi_eh_recover_target,
@@ -2268,7 +2262,6 @@ static struct scsi_host_template bnx2i_host_template = {
 	.max_sectors		= 127,
 	.cmd_per_lun		= 128,
 	.this_id		= -1,
-	.use_clustering		= ENABLE_CLUSTERING,
 	.sg_tablesize		= ISCSI_MAX_BDS_PER_CMD,
 	.shost_attrs		= bnx2i_dev_attributes,
 	.track_queue_depth	= 1,

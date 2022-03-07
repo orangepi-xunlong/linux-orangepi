@@ -1,24 +1,13 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* delayacct.h - per-task delay accounting
  *
  * Copyright (C) Shailabh Nagar, IBM Corp. 2006
- *
- * This program is free software;  you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY;  without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
- * the GNU General Public License for more details.
- *
  */
 
 #ifndef _LINUX_DELAYACCT_H
 #define _LINUX_DELAYACCT_H
 
-#include <linux/sched.h>
-#include <linux/slab.h>
+#include <uapi/linux/taskstats.h>
 
 /*
  * Per-task flags relevant to delay accounting
@@ -30,7 +19,7 @@
 
 #ifdef CONFIG_TASK_DELAY_ACCT
 struct task_delay_info {
-	spinlock_t	lock;
+	raw_spinlock_t	lock;
 	unsigned int	flags;	/* Private per-task flags */
 
 	/* For each stat XXX, add following, aligned appropriately
@@ -77,7 +66,7 @@ extern void delayacct_init(void);
 extern void __delayacct_tsk_init(struct task_struct *);
 extern void __delayacct_tsk_exit(struct task_struct *);
 extern void __delayacct_blkio_start(void);
-extern void __delayacct_blkio_end(void);
+extern void __delayacct_blkio_end(struct task_struct *);
 extern int __delayacct_add_tsk(struct taskstats *, struct task_struct *);
 extern __u64 __delayacct_blkio_ticks(struct task_struct *);
 extern void __delayacct_freepages_start(void);
@@ -130,10 +119,10 @@ static inline void delayacct_blkio_start(void)
 		__delayacct_blkio_start();
 }
 
-static inline void delayacct_blkio_end(void)
+static inline void delayacct_blkio_end(struct task_struct *p)
 {
-	if (current->delays)
-		__delayacct_blkio_end();
+	if (p->delays)
+		__delayacct_blkio_end(p);
 	delayacct_clear_flag(DELAYACCT_PF_BLKIO);
 }
 
@@ -189,7 +178,7 @@ static inline void delayacct_tsk_free(struct task_struct *tsk)
 {}
 static inline void delayacct_blkio_start(void)
 {}
-static inline void delayacct_blkio_end(void)
+static inline void delayacct_blkio_end(struct task_struct *p)
 {}
 static inline int delayacct_add_tsk(struct taskstats *d,
 					struct task_struct *tsk)

@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ms5637.c - Support for Measurement-Specialties MS5637, MS5805
  *            MS5837 and MS8607 pressure & temperature sensor
  *
  * Copyright (c) 2015 Measurement-Specialties
- *
- * Licensed under the GPL-2.
  *
  * (7-bit I2C slave address 0x76)
  *
@@ -23,6 +22,7 @@
 #include <linux/kernel.h>
 #include <linux/stat.h>
 #include <linux/module.h>
+#include <linux/mod_devicetable.h>
 #include <linux/i2c.h>
 #include <linux/iio/iio.h>
 #include <linux/iio/sysfs.h>
@@ -124,7 +124,6 @@ static const struct iio_info ms5637_info = {
 	.read_raw = ms5637_read_raw,
 	.write_raw = ms5637_write_raw,
 	.attrs = &ms5637_attribute_group,
-	.driver_module = THIS_MODULE,
 };
 
 static int ms5637_probe(struct i2c_client *client,
@@ -154,7 +153,6 @@ static int ms5637_probe(struct i2c_client *client,
 
 	indio_dev->info = &ms5637_info;
 	indio_dev->name = id->name;
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels = ms5637_channels;
 	indio_dev->num_channels = ARRAY_SIZE(ms5637_channels);
@@ -181,11 +179,21 @@ static const struct i2c_device_id ms5637_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, ms5637_id);
 
+static const struct of_device_id ms5637_of_match[] = {
+	{ .compatible = "meas,ms5637", },
+	{ .compatible = "meas,ms5805", },
+	{ .compatible = "meas,ms5837", },
+	{ .compatible = "meas,ms8607-temppressure", },
+	{ },
+};
+MODULE_DEVICE_TABLE(of, ms5637_of_match);
+
 static struct i2c_driver ms5637_driver = {
 	.probe = ms5637_probe,
 	.id_table = ms5637_id,
 	.driver = {
-		   .name = "ms5637"
+		   .name = "ms5637",
+		   .of_match_table = ms5637_of_match,
 		   },
 };
 

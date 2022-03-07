@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include "reiserfs.h"
 #include <linux/errno.h>
 #include <linux/fs.h>
@@ -8,7 +9,8 @@
 
 static int
 user_get(const struct xattr_handler *handler, struct dentry *unused,
-	 struct inode *inode, const char *name, void *buffer, size_t size)
+	 struct inode *inode, const char *name, void *buffer, size_t size,
+	 int flags)
 {
 	if (!reiserfs_xattrs_user(inode->i_sb))
 		return -EOPNOTSUPP;

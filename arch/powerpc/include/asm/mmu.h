@@ -1,11 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_POWERPC_MMU_H_
 #define _ASM_POWERPC_MMU_H_
 #ifdef __KERNEL__
 
 #include <linux/types.h>
 
-#include <asm/asm-compat.h>
-#include <asm/feature-fixups.h>
+#include <asm/asm-const.h>
 
 /*
  * MMU features bit definitions
@@ -29,6 +29,23 @@
  */
 
 /*
+ * Support for KUEP feature.
+ */
+#define MMU_FTR_KUEP			ASM_CONST(0x00000400)
+
+/*
+ * Support for memory protection keys.
+ */
+#define MMU_FTR_PKEY			ASM_CONST(0x00000800)
+
+/* Guest Translation Shootdown Enable */
+#define MMU_FTR_GTSE			ASM_CONST(0x00001000)
+
+/*
+ * Support for 68 bit VA space. We added that from ISA 2.05
+ */
+#define MMU_FTR_68_BIT_VA		ASM_CONST(0x00002000)
+/*
  * Kernel read only support.
  * We added the ppp value 0b110 in ISA 2.04.
  */
@@ -44,7 +61,7 @@
 #define MMU_FTR_USE_HIGH_BATS		ASM_CONST(0x00010000)
 
 /* Enable >32-bit physical addresses on 32-bit processor, only used
- * by CONFIG_6xx currently as BookE supports that from day 1
+ * by CONFIG_PPC_BOOK3S_32 currently as BookE supports that from day 1
  */
 #define MMU_FTR_BIG_PHYS		ASM_CONST(0x00020000)
 
@@ -103,16 +120,22 @@
  */
 #define MMU_FTR_1T_SEGMENT		ASM_CONST(0x40000000)
 
+/*
+ * Supports KUAP (key 0 controlling userspace addresses) on radix
+ */
+#define MMU_FTR_RADIX_KUAP		ASM_CONST(0x80000000)
+
 /* MMU feature bit sets for various CPUs */
 #define MMU_FTRS_DEFAULT_HPTE_ARCH_V2	\
 	MMU_FTR_HPTE_TABLE | MMU_FTR_PPCAS_ARCH_V2
-#define MMU_FTRS_POWER4		MMU_FTRS_DEFAULT_HPTE_ARCH_V2
-#define MMU_FTRS_PPC970		MMU_FTRS_POWER4 | MMU_FTR_TLBIE_CROP_VA
-#define MMU_FTRS_POWER5		MMU_FTRS_POWER4 | MMU_FTR_LOCKLESS_TLBIE
-#define MMU_FTRS_POWER6		MMU_FTRS_POWER4 | MMU_FTR_LOCKLESS_TLBIE | MMU_FTR_KERNEL_RO
-#define MMU_FTRS_POWER7		MMU_FTRS_POWER4 | MMU_FTR_LOCKLESS_TLBIE | MMU_FTR_KERNEL_RO
-#define MMU_FTRS_POWER8		MMU_FTRS_POWER4 | MMU_FTR_LOCKLESS_TLBIE | MMU_FTR_KERNEL_RO
-#define MMU_FTRS_POWER9		MMU_FTRS_POWER4 | MMU_FTR_LOCKLESS_TLBIE | MMU_FTR_KERNEL_RO
+#define MMU_FTRS_POWER		MMU_FTRS_DEFAULT_HPTE_ARCH_V2
+#define MMU_FTRS_PPC970		MMU_FTRS_POWER | MMU_FTR_TLBIE_CROP_VA
+#define MMU_FTRS_POWER5		MMU_FTRS_POWER | MMU_FTR_LOCKLESS_TLBIE
+#define MMU_FTRS_POWER6		MMU_FTRS_POWER5 | MMU_FTR_KERNEL_RO | MMU_FTR_68_BIT_VA
+#define MMU_FTRS_POWER7		MMU_FTRS_POWER6
+#define MMU_FTRS_POWER8		MMU_FTRS_POWER6
+#define MMU_FTRS_POWER9		MMU_FTRS_POWER6
+#define MMU_FTRS_POWER10	MMU_FTRS_POWER6
 #define MMU_FTRS_CELL		MMU_FTRS_DEFAULT_HPTE_ARCH_V2 | \
 				MMU_FTR_CI_LARGE_PAGE
 #define MMU_FTRS_PA6T		MMU_FTRS_DEFAULT_HPTE_ARCH_V2 | \
@@ -120,6 +143,9 @@
 #ifndef __ASSEMBLY__
 #include <linux/bug.h>
 #include <asm/cputable.h>
+#include <asm/page.h>
+
+typedef pte_t *pgtable_t;
 
 #ifdef CONFIG_PPC_FSL_BOOK3E
 #include <asm/percpu.h>
@@ -127,19 +153,51 @@ DECLARE_PER_CPU(int, next_tlbcam_idx);
 #endif
 
 enum {
-	MMU_FTRS_POSSIBLE = MMU_FTR_HPTE_TABLE | MMU_FTR_TYPE_8xx |
-		MMU_FTR_TYPE_40x | MMU_FTR_TYPE_44x | MMU_FTR_TYPE_FSL_E |
-		MMU_FTR_TYPE_47x | MMU_FTR_USE_HIGH_BATS | MMU_FTR_BIG_PHYS |
-		MMU_FTR_USE_TLBIVAX_BCAST | MMU_FTR_USE_TLBILX |
-		MMU_FTR_LOCK_BCAST_INVAL | MMU_FTR_NEED_DTLB_SW_LRU |
+	MMU_FTRS_POSSIBLE =
+#ifdef CONFIG_PPC_BOOK3S
+		MMU_FTR_HPTE_TABLE |
+#endif
+#ifdef CONFIG_PPC_8xx
+		MMU_FTR_TYPE_8xx |
+#endif
+#ifdef CONFIG_40x
+		MMU_FTR_TYPE_40x |
+#endif
+#ifdef CONFIG_44x
+		MMU_FTR_TYPE_44x |
+#endif
+#if defined(CONFIG_E200) || defined(CONFIG_E500)
+		MMU_FTR_TYPE_FSL_E | MMU_FTR_BIG_PHYS | MMU_FTR_USE_TLBILX |
+#endif
+#ifdef CONFIG_PPC_47x
+		MMU_FTR_TYPE_47x | MMU_FTR_USE_TLBIVAX_BCAST | MMU_FTR_LOCK_BCAST_INVAL |
+#endif
+#ifdef CONFIG_PPC_BOOK3S_32
+		MMU_FTR_USE_HIGH_BATS | MMU_FTR_NEED_DTLB_SW_LRU |
+#endif
+#ifdef CONFIG_PPC_BOOK3E_64
 		MMU_FTR_USE_TLBRSRV | MMU_FTR_USE_PAIRED_MAS |
+#endif
+#ifdef CONFIG_PPC_BOOK3S_64
 		MMU_FTR_NO_SLBIE_B | MMU_FTR_16M_PAGE | MMU_FTR_TLBIEL |
 		MMU_FTR_LOCKLESS_TLBIE | MMU_FTR_CI_LARGE_PAGE |
 		MMU_FTR_1T_SEGMENT | MMU_FTR_TLBIE_CROP_VA |
-		MMU_FTR_KERNEL_RO |
+		MMU_FTR_KERNEL_RO | MMU_FTR_68_BIT_VA |
+#endif
 #ifdef CONFIG_PPC_RADIX_MMU
 		MMU_FTR_TYPE_RADIX |
+		MMU_FTR_GTSE |
+#ifdef CONFIG_PPC_KUAP
+		MMU_FTR_RADIX_KUAP |
+#endif /* CONFIG_PPC_KUAP */
+#endif /* CONFIG_PPC_RADIX_MMU */
+#ifdef CONFIG_PPC_MEM_KEYS
+	MMU_FTR_PKEY |
 #endif
+#ifdef CONFIG_PPC_KUEP
+	MMU_FTR_KUEP |
+#endif /* CONFIG_PPC_KUAP */
+
 		0,
 };
 
@@ -217,6 +275,11 @@ extern u64 ppc64_rma_size;
 /* Cleanup function used by kexec */
 extern void mmu_cleanup_all(void);
 extern void radix__mmu_cleanup_all(void);
+
+/* Functions for creating and updating partition table on POWER9 */
+extern void mmu_partition_table_init(void);
+extern void mmu_partition_table_set_entry(unsigned int lpid, unsigned long dw0,
+					  unsigned long dw1, bool flush);
 #endif /* CONFIG_PPC64 */
 
 struct mm_struct;
@@ -250,6 +313,17 @@ static inline bool early_radix_enabled(void)
 }
 #endif
 
+#ifdef CONFIG_STRICT_KERNEL_RWX
+static inline bool strict_kernel_rwx_enabled(void)
+{
+	return rodata_enabled;
+}
+#else
+static inline bool strict_kernel_rwx_enabled(void)
+{
+	return false;
+}
+#endif
 #endif /* !__ASSEMBLY__ */
 
 /* The kernel use the constants below to index in the page sizes array.
@@ -273,19 +347,23 @@ static inline bool early_radix_enabled(void)
 #define MMU_PAGE_64K	2
 #define MMU_PAGE_64K_AP	3	/* "Admixed pages" (hash64 only) */
 #define MMU_PAGE_256K	4
-#define MMU_PAGE_1M	5
-#define MMU_PAGE_2M	6
-#define MMU_PAGE_4M	7
-#define MMU_PAGE_8M	8
-#define MMU_PAGE_16M	9
-#define MMU_PAGE_64M	10
-#define MMU_PAGE_256M	11
-#define MMU_PAGE_1G	12
-#define MMU_PAGE_16G	13
-#define MMU_PAGE_64G	14
+#define MMU_PAGE_512K	5
+#define MMU_PAGE_1M	6
+#define MMU_PAGE_2M	7
+#define MMU_PAGE_4M	8
+#define MMU_PAGE_8M	9
+#define MMU_PAGE_16M	10
+#define MMU_PAGE_64M	11
+#define MMU_PAGE_256M	12
+#define MMU_PAGE_1G	13
+#define MMU_PAGE_16G	14
+#define MMU_PAGE_64G	15
 
-/* N.B. we need to change the type of hpte_page_sizes if this gets to be > 16 */
-#define MMU_PAGE_COUNT	15
+/*
+ * N.B. we need to change the type of hpte_page_sizes if this gets to be > 16
+ * Also we need to change he type of mm_context.low/high_slices_psize.
+ */
+#define MMU_PAGE_COUNT	16
 
 #ifdef CONFIG_PPC_BOOK3S_64
 #include <asm/book3s/64/mmu.h>
@@ -298,24 +376,18 @@ extern void early_init_mmu_secondary(void);
 extern void setup_initial_memory_limit(phys_addr_t first_memblock_base,
 				       phys_addr_t first_memblock_size);
 static inline void mmu_early_init_devtree(void) { }
+
+static inline void pkey_early_init_devtree(void) {}
+
+extern void *abatron_pteptrs[2];
 #endif /* __ASSEMBLY__ */
 #endif
 
-#if defined(CONFIG_PPC_STD_MMU_32)
+#if defined(CONFIG_PPC_BOOK3S_32)
 /* 32-bit classic hash table MMU */
 #include <asm/book3s/32/mmu-hash.h>
-#elif defined(CONFIG_40x)
-/* 40x-style software loaded TLB */
-#  include <asm/mmu-40x.h>
-#elif defined(CONFIG_44x)
-/* 44x-style software loaded TLB */
-#  include <asm/mmu-44x.h>
-#elif defined(CONFIG_PPC_BOOK3E_MMU)
-/* Freescale Book-E software loaded TLB or Book-3e (ISA 2.06+) MMU */
-#  include <asm/mmu-book3e.h>
-#elif defined (CONFIG_PPC_8xx)
-/* Motorola/Freescale 8xx software loaded TLB */
-#  include <asm/mmu-8xx.h>
+#elif defined(CONFIG_PPC_MMU_NOHASH)
+#include <asm/nohash/mmu.h>
 #endif
 
 #endif /* __KERNEL__ */

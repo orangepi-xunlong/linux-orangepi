@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include "hfa384x_usb.c"
 #include "prism2mgmt.c"
 #include "prism2mib.c"
@@ -60,10 +61,15 @@ static int prism2sta_probe_usb(struct usb_interface *interface,
 			       const struct usb_device_id *id)
 {
 	struct usb_device *dev;
-
+	struct usb_endpoint_descriptor *bulk_in, *bulk_out;
+	struct usb_host_interface *iface_desc = interface->cur_altsetting;
 	struct wlandevice *wlandev = NULL;
 	struct hfa384x *hw = NULL;
 	int result = 0;
+
+	result = usb_find_common_endpoints(iface_desc, &bulk_in, &bulk_out, NULL, NULL);
+	if (result)
+		goto failed;
 
 	dev = interface_to_usbdev(interface);
 	wlandev = create_wlan();
@@ -81,6 +87,8 @@ static int prism2sta_probe_usb(struct usb_interface *interface,
 	}
 
 	/* Initialize the hw data */
+	hw->endp_in = usb_rcvbulkpipe(dev, bulk_in->bEndpointAddress);
+	hw->endp_out = usb_sndbulkpipe(dev, bulk_out->bEndpointAddress);
 	hfa384x_create(hw, dev);
 	hw->wlandev = wlandev;
 
@@ -136,7 +144,7 @@ static void prism2sta_disconnect_usb(struct usb_interface *interface)
 {
 	struct wlandevice *wlandev;
 
-	wlandev = (struct wlandevice *)usb_get_intfdata(interface);
+	wlandev = usb_get_intfdata(interface);
 	if (wlandev) {
 		LIST_HEAD(cleanlist);
 		struct hfa384x_usbctlx *ctlx, *temp;
@@ -179,6 +187,7 @@ static void prism2sta_disconnect_usb(struct usb_interface *interface)
 
 		cancel_work_sync(&hw->link_bh);
 		cancel_work_sync(&hw->commsqual_bh);
+		cancel_work_sync(&hw->usb_work);
 
 		/* Now we complete any outstanding commands
 		 * and tell everyone who is waiting for their
@@ -221,7 +230,7 @@ static int prism2sta_suspend(struct usb_interface *interface,
 	struct hfa384x *hw = NULL;
 	struct wlandevice *wlandev;
 
-	wlandev = (struct wlandevice *)usb_get_intfdata(interface);
+	wlandev = usb_get_intfdata(interface);
 	if (!wlandev)
 		return -ENODEV;
 
@@ -244,7 +253,7 @@ static int prism2sta_resume(struct usb_interface *interface)
 	struct hfa384x *hw = NULL;
 	struct wlandevice *wlandev;
 
-	wlandev = (struct wlandevice *)usb_get_intfdata(interface);
+	wlandev = usb_get_intfdata(interface);
 	if (!wlandev)
 		return -ENODEV;
 

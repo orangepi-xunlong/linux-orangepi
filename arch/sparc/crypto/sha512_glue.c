@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Glue code for SHA512 hashing optimized for sparc64 crypto opcodes.
  *
  * This is based largely upon crypto/sha512_generic.c
@@ -13,7 +14,6 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/mm.h>
-#include <linux/cryptohash.h>
 #include <linux/types.h>
 #include <crypto/sha.h>
 
@@ -154,7 +154,6 @@ static struct shash_alg sha512 = {
 		.cra_name	=	"sha512",
 		.cra_driver_name=	"sha512-sparc64",
 		.cra_priority	=	SPARC_CR_OPCODE_PRIORITY,
-		.cra_flags	=	CRYPTO_ALG_TYPE_SHASH,
 		.cra_blocksize	=	SHA512_BLOCK_SIZE,
 		.cra_module	=	THIS_MODULE,
 	}
@@ -170,7 +169,6 @@ static struct shash_alg sha384 = {
 		.cra_name	=	"sha384",
 		.cra_driver_name=	"sha384-sparc64",
 		.cra_priority	=	SPARC_CR_OPCODE_PRIORITY,
-		.cra_flags	=	CRYPTO_ALG_TYPE_SHASH,
 		.cra_blocksize	=	SHA384_BLOCK_SIZE,
 		.cra_module	=	THIS_MODULE,
 	}

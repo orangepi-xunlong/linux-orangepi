@@ -110,7 +110,7 @@ static void do_fm_api(struct esas2r_adapter *a, struct esas2r_flash_img *fi)
 {
 	struct esas2r_request *rq;
 
-	if (down_interruptible(&a->fm_api_semaphore)) {
+	if (mutex_lock_interruptible(&a->fm_api_mutex)) {
 		fi->status = FI_STAT_BUSY;
 		return;
 	}
@@ -173,7 +173,7 @@ all_done:
 free_req:
 	esas2r_free_request(a, (struct esas2r_request *)rq);
 free_sem:
-	up(&a->fm_api_semaphore);
+	mutex_unlock(&a->fm_api_mutex);
 	return;
 
 }
@@ -757,7 +757,6 @@ static int hba_ioctl_callback(struct esas2r_adapter *a,
 
 		struct atto_hba_get_adapter_info *gai =
 			&hi->data.get_adap_info;
-		int pcie_cap_reg;
 
 		if (hi->flags & HBAF_TUNNEL) {
 			hi->status = ATTO_STS_UNSUPPORTED;
@@ -784,17 +783,14 @@ static int hba_ioctl_callback(struct esas2r_adapter *a,
 		gai->pci.dev_num = PCI_SLOT(a->pcid->devfn);
 		gai->pci.func_num = PCI_FUNC(a->pcid->devfn);
 
-		pcie_cap_reg = pci_find_capability(a->pcid, PCI_CAP_ID_EXP);
-		if (pcie_cap_reg) {
+		if (pci_is_pcie(a->pcid)) {
 			u16 stat;
 			u32 caps;
 
-			pci_read_config_word(a->pcid,
-					     pcie_cap_reg + PCI_EXP_LNKSTA,
-					     &stat);
-			pci_read_config_dword(a->pcid,
-					      pcie_cap_reg + PCI_EXP_LNKCAP,
-					      &caps);
+			pcie_capability_read_word(a->pcid, PCI_EXP_LNKSTA,
+						  &stat);
+			pcie_capability_read_dword(a->pcid, PCI_EXP_LNKCAP,
+						   &caps);
 
 			gai->pci.link_speed_curr =
 				(u8)(stat & PCI_EXP_LNKSTA_CLS);
@@ -1274,7 +1270,7 @@ int esas2r_write_params(struct esas2r_adapter *a, struct esas2r_request *rq,
 
 
 /* This function only cares about ATTO-specific ioctls (atto_express_ioctl) */
-int esas2r_ioctl_handler(void *hostdata, int cmd, void __user *arg)
+int esas2r_ioctl_handler(void *hostdata, unsigned int cmd, void __user *arg)
 {
 	struct atto_express_ioctl *ioctl = NULL;
 	struct esas2r_adapter *a;
@@ -1289,32 +1285,12 @@ int esas2r_ioctl_handler(void *hostdata, int cmd, void __user *arg)
 	    || (cmd > EXPRESS_IOCTL_MAX))
 		return -ENOTSUPP;
 
-	if (!access_ok(VERIFY_WRITE, arg, sizeof(struct atto_express_ioctl))) {
+	ioctl = memdup_user(arg, sizeof(struct atto_express_ioctl));
+	if (IS_ERR(ioctl)) {
 		esas2r_log(ESAS2R_LOG_WARN,
-			   "ioctl_handler access_ok failed for cmd %d, "
-			   "address %p", cmd,
-			   arg);
-		return -EFAULT;
-	}
-
-	/* allocate a kernel memory buffer for the IOCTL data */
-	ioctl = kzalloc(sizeof(struct atto_express_ioctl), GFP_KERNEL);
-	if (ioctl == NULL) {
-		esas2r_log(ESAS2R_LOG_WARN,
-			   "ioctl_handler kzalloc failed for %d bytes",
-			   sizeof(struct atto_express_ioctl));
-		return -ENOMEM;
-	}
-
-	err = __copy_from_user(ioctl, arg, sizeof(struct atto_express_ioctl));
-	if (err != 0) {
-		esas2r_log(ESAS2R_LOG_WARN,
-			   "copy_from_user didn't copy everything (err %d, cmd %d)",
-			   err,
-			   cmd);
-		kfree(ioctl);
-
-		return -EFAULT;
+			   "ioctl_handler access_ok failed for cmd %u, address %p",
+			   cmd, arg);
+		return PTR_ERR(ioctl);
 	}
 
 	/* verify the signature */
@@ -1512,7 +1488,7 @@ int esas2r_ioctl_handler(void *hostdata, int cmd, void __user *arg)
 ioctl_done:
 
 	if (err < 0) {
-		esas2r_log(ESAS2R_LOG_WARN, "err %d on ioctl cmd %d", err,
+		esas2r_log(ESAS2R_LOG_WARN, "err %d on ioctl cmd %u", err,
 			   cmd);
 
 		switch (err) {
@@ -1534,12 +1510,11 @@ ioctl_done:
 	}
 
 	/* Always copy the buffer back, if only to pick up the status */
-	err = __copy_to_user(arg, ioctl, sizeof(struct atto_express_ioctl));
+	err = copy_to_user(arg, ioctl, sizeof(struct atto_express_ioctl));
 	if (err != 0) {
 		esas2r_log(ESAS2R_LOG_WARN,
-			   "ioctl_handler copy_to_user didn't copy "
-			   "everything (err %d, cmd %d)", err,
-			   cmd);
+			   "ioctl_handler copy_to_user didn't copy everything (err %d, cmd %u)",
+			   err, cmd);
 		kfree(ioctl);
 
 		return -EFAULT;
@@ -1550,7 +1525,7 @@ ioctl_done:
 	return 0;
 }
 
-int esas2r_ioctl(struct scsi_device *sd, int cmd, void __user *arg)
+int esas2r_ioctl(struct scsi_device *sd, unsigned int cmd, void __user *arg)
 {
 	return esas2r_ioctl_handler(sd->host->hostdata, cmd, arg);
 }
@@ -1573,11 +1548,10 @@ static int allocate_fw_buffers(struct esas2r_adapter *a, u32 length)
 
 	a->firmware.orig_len = length;
 
-	a->firmware.data = (u8 *)dma_alloc_coherent(&a->pcid->dev,
-						    (size_t)length,
-						    (dma_addr_t *)&a->firmware.
-						    phys,
-						    GFP_KERNEL);
+	a->firmware.data = dma_alloc_coherent(&a->pcid->dev,
+					      (size_t)length,
+					      (dma_addr_t *)&a->firmware.phys,
+					      GFP_KERNEL);
 
 	if (!a->firmware.data) {
 		esas2r_debug("buffer alloc failed!");
@@ -1868,7 +1842,7 @@ int esas2r_read_vda(struct esas2r_adapter *a, char *buf, long off, int count)
 		/* allocate a request */
 		rq = esas2r_alloc_request(a);
 		if (rq == NULL) {
-			esas2r_debug("esas2r_read_vda: out of requestss");
+			esas2r_debug("esas2r_read_vda: out of requests");
 			return -EBUSY;
 		}
 
@@ -1920,11 +1894,11 @@ int esas2r_write_vda(struct esas2r_adapter *a, const char *buf, long off,
 
 	if (!a->vda_buffer) {
 		dma_addr_t dma_addr;
-		a->vda_buffer = (u8 *)dma_alloc_coherent(&a->pcid->dev,
-							 (size_t)
-							 VDA_MAX_BUFFER_SIZE,
-							 &dma_addr,
-							 GFP_KERNEL);
+		a->vda_buffer = dma_alloc_coherent(&a->pcid->dev,
+						   (size_t)
+						   VDA_MAX_BUFFER_SIZE,
+						   &dma_addr,
+						   GFP_KERNEL);
 
 		a->ppvda_buffer = dma_addr;
 	}
@@ -1981,7 +1955,7 @@ int esas2r_read_fs(struct esas2r_adapter *a, char *buf, long off, int count)
 			(struct esas2r_ioctl_fs *)a->fs_api_buffer;
 
 		/* If another flash request is already in progress, return. */
-		if (down_interruptible(&a->fs_api_semaphore)) {
+		if (mutex_lock_interruptible(&a->fs_api_mutex)) {
 busy:
 			fs->status = ATTO_STS_OUT_OF_RSRC;
 			return -EBUSY;
@@ -1997,7 +1971,7 @@ busy:
 		rq = esas2r_alloc_request(a);
 		if (rq == NULL) {
 			esas2r_debug("esas2r_read_fs: out of requests");
-			up(&a->fs_api_semaphore);
+			mutex_unlock(&a->fs_api_mutex);
 			goto busy;
 		}
 
@@ -2025,7 +1999,7 @@ busy:
 		;
 dont_wait:
 		/* Free the request and keep going */
-		up(&a->fs_api_semaphore);
+		mutex_unlock(&a->fs_api_mutex);
 		esas2r_free_request(a, (struct esas2r_request *)rq);
 
 		/* Pick up possible error code from above */
@@ -2089,11 +2063,10 @@ int esas2r_write_fs(struct esas2r_adapter *a, const char *buf, long off,
 re_allocate_buffer:
 			a->fs_api_buffer_size = length;
 
-			a->fs_api_buffer = (u8 *)dma_alloc_coherent(
-				&a->pcid->dev,
-				(size_t)a->fs_api_buffer_size,
-				(dma_addr_t *)&a->ppfs_api_buffer,
-				GFP_KERNEL);
+			a->fs_api_buffer = dma_alloc_coherent(&a->pcid->dev,
+							      (size_t)a->fs_api_buffer_size,
+							      (dma_addr_t *)&a->ppfs_api_buffer,
+							      GFP_KERNEL);
 		}
 	}
 

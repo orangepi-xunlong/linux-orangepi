@@ -1,22 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* -*- mode: c; c-basic-offset: 8; -*-
  * vim: noexpandtab sw=8 ts=8 sts=0:
  *
  * Copyright (C) 2004, 2005 Oracle.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public
- * License along with this program; if not, write to the
- * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 021110-1307, USA.
  */
 
 #include <linux/slab.h>
@@ -35,9 +21,9 @@
  * cluster references throughout where nodes are looked up */
 struct o2nm_cluster *o2nm_single_cluster = NULL;
 
-char *o2nm_fence_method_desc[O2NM_FENCE_METHODS] = {
-		"reset",	/* O2NM_FENCE_RESET */
-		"panic",	/* O2NM_FENCE_PANIC */
+static const char *o2nm_fence_method_desc[O2NM_FENCE_METHODS] = {
+	"reset",	/* O2NM_FENCE_RESET */
+	"panic",	/* O2NM_FENCE_PANIC */
 };
 
 static inline void o2nm_lock_subsystem(void);
@@ -415,7 +401,7 @@ static struct configfs_item_operations o2nm_node_item_ops = {
 	.release		= o2nm_node_release,
 };
 
-static struct config_item_type o2nm_node_type = {
+static const struct config_item_type o2nm_node_type = {
 	.ct_item_ops	= &o2nm_node_item_ops,
 	.ct_attrs	= o2nm_node_attrs,
 	.ct_owner	= THIS_MODULE,
@@ -658,7 +644,7 @@ static struct configfs_group_operations o2nm_node_group_group_ops = {
 	.drop_item	= o2nm_node_group_drop_item,
 };
 
-static struct config_item_type o2nm_node_group_type = {
+static const struct config_item_type o2nm_node_group_type = {
 	.ct_group_ops	= &o2nm_node_group_group_ops,
 	.ct_owner	= THIS_MODULE,
 };
@@ -676,7 +662,7 @@ static struct configfs_item_operations o2nm_cluster_item_ops = {
 	.release	= o2nm_cluster_release,
 };
 
-static struct config_item_type o2nm_cluster_type = {
+static const struct config_item_type o2nm_cluster_type = {
 	.ct_item_ops	= &o2nm_cluster_item_ops,
 	.ct_attrs	= o2nm_cluster_attrs,
 	.ct_owner	= THIS_MODULE,
@@ -761,7 +747,7 @@ static struct configfs_group_operations o2nm_cluster_group_group_ops = {
 	.drop_item	= o2nm_cluster_group_drop_item,
 };
 
-static struct config_item_type o2nm_cluster_group_type = {
+static const struct config_item_type o2nm_cluster_group_type = {
 	.ct_group_ops	= &o2nm_cluster_group_group_ops,
 	.ct_owner	= THIS_MODULE,
 };
@@ -842,9 +828,7 @@ static int __init init_o2nm(void)
 {
 	int ret = -1;
 
-	ret = o2hb_init();
-	if (ret)
-		goto out;
+	o2hb_init();
 
 	ret = o2net_init();
 	if (ret)

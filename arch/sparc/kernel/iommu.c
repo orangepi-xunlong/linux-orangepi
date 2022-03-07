@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* iommu.c: Generic sparc64 IOMMU support.
  *
  * Copyright (C) 1999, 2007, 2008 David S. Miller (davem@davemloft.net)
@@ -9,11 +10,11 @@
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/device.h>
-#include <linux/dma-mapping.h>
+#include <linux/dma-map-ops.h>
 #include <linux/errno.h>
 #include <linux/iommu-helper.h>
 #include <linux/bitmap.h>
-#include <linux/iommu-common.h>
+#include <asm/iommu-common.h>
 
 #ifdef CONFIG_PCI
 #include <linux/pci.h>
@@ -107,10 +108,9 @@ int iommu_table_init(struct iommu *iommu, int tsbsize,
 	/* Allocate and initialize the free area map.  */
 	sz = num_tsb_entries / 8;
 	sz = (sz + 7UL) & ~7UL;
-	iommu->tbl.map = kmalloc_node(sz, GFP_KERNEL, numa_node);
+	iommu->tbl.map = kzalloc_node(sz, GFP_KERNEL, numa_node);
 	if (!iommu->tbl.map)
 		return -ENOMEM;
-	memset(iommu->tbl.map, 0, sz);
 
 	iommu_tbl_pool_init(&iommu->tbl, num_tsb_entries, IO_PAGE_SHIFT,
 			    (tlb_type != hypervisor ? iommu_flushall : NULL),
@@ -314,7 +314,7 @@ bad:
 bad_no_ctx:
 	if (printk_ratelimit())
 		WARN_ON(1);
-	return DMA_ERROR_CODE;
+	return DMA_MAPPING_ERROR;
 }
 
 static void strbuf_flush(struct strbuf *strbuf, struct iommu *iommu,
@@ -415,7 +415,7 @@ static void dma_4u_unmap_page(struct device *dev, dma_addr_t bus_addr,
 		ctx = (iopte_val(*base) & IOPTE_CONTEXT) >> 47UL;
 
 	/* Step 1: Kick data out of streaming buffers if necessary. */
-	if (strbuf->strbuf_enabled)
+	if (strbuf->strbuf_enabled && !(attrs & DMA_ATTR_SKIP_CPU_SYNC))
 		strbuf_flush(strbuf, iommu, bus_addr, ctx,
 			     npages, direction);
 
@@ -472,8 +472,7 @@ static int dma_4u_map_sg(struct device *dev, struct scatterlist *sglist,
 	outs->dma_length = 0;
 
 	max_seg_size = dma_get_max_seg_size(dev);
-	seg_boundary_size = ALIGN(dma_get_seg_boundary(dev) + 1,
-				  IO_PAGE_SIZE) >> IO_PAGE_SHIFT;
+	seg_boundary_size = dma_get_seg_boundary_nr_pages(dev, IO_PAGE_SHIFT);
 	base_shift = iommu->tbl.table_map_base >> IO_PAGE_SHIFT;
 	for_each_sg(sglist, s, nelems, i) {
 		unsigned long paddr, npages, entry, out_entry = 0, slen;
@@ -547,7 +546,7 @@ static int dma_4u_map_sg(struct device *dev, struct scatterlist *sglist,
 
 	if (outcount < incount) {
 		outs = sg_next(outs);
-		outs->dma_address = DMA_ERROR_CODE;
+		outs->dma_address = DMA_MAPPING_ERROR;
 		outs->dma_length = 0;
 	}
 
@@ -573,7 +572,7 @@ iommu_map_failed:
 			iommu_tbl_range_free(&iommu->tbl, vaddr, npages,
 					     IOMMU_ERROR_CODE);
 
-			s->dma_address = DMA_ERROR_CODE;
+			s->dma_address = DMA_MAPPING_ERROR;
 			s->dma_length = 0;
 		}
 		if (s == outs)
@@ -640,7 +639,7 @@ static void dma_4u_unmap_sg(struct device *dev, struct scatterlist *sglist,
 		base = iommu->page_table + entry;
 
 		dma_handle &= IO_PAGE_MASK;
-		if (strbuf->strbuf_enabled)
+		if (strbuf->strbuf_enabled && !(attrs & DMA_ATTR_SKIP_CPU_SYNC))
 			strbuf_flush(strbuf, iommu, dma_handle, ctx,
 				     npages, direction);
 
@@ -741,7 +740,19 @@ static void dma_4u_sync_sg_for_cpu(struct device *dev,
 	spin_unlock_irqrestore(&iommu->lock, flags);
 }
 
-static struct dma_map_ops sun4u_dma_ops = {
+static int dma_4u_supported(struct device *dev, u64 device_mask)
+{
+	struct iommu *iommu = dev->archdata.iommu;
+
+	if (ali_sound_dma_hack(dev, device_mask))
+		return 1;
+
+	if (device_mask < iommu->dma_addr_mask)
+		return 0;
+	return 1;
+}
+
+static const struct dma_map_ops sun4u_dma_ops = {
 	.alloc			= dma_4u_alloc_coherent,
 	.free			= dma_4u_free_coherent,
 	.map_page		= dma_4u_map_page,
@@ -750,31 +761,8 @@ static struct dma_map_ops sun4u_dma_ops = {
 	.unmap_sg		= dma_4u_unmap_sg,
 	.sync_single_for_cpu	= dma_4u_sync_single_for_cpu,
 	.sync_sg_for_cpu	= dma_4u_sync_sg_for_cpu,
+	.dma_supported		= dma_4u_supported,
 };
 
-struct dma_map_ops *dma_ops = &sun4u_dma_ops;
+const struct dma_map_ops *dma_ops = &sun4u_dma_ops;
 EXPORT_SYMBOL(dma_ops);
-
-int dma_supported(struct device *dev, u64 device_mask)
-{
-	struct iommu *iommu = dev->archdata.iommu;
-	u64 dma_addr_mask = iommu->dma_addr_mask;
-
-	if (device_mask > DMA_BIT_MASK(32)) {
-		if (iommu->atu)
-			dma_addr_mask = iommu->atu->dma_addr_mask;
-		else
-			return 0;
-	}
-
-	if ((device_mask & dma_addr_mask) == dma_addr_mask)
-		return 1;
-
-#ifdef CONFIG_PCI
-	if (dev_is_pci(dev))
-		return pci64_dma_supported(to_pci_dev(dev), device_mask);
-#endif
-
-	return 0;
-}
-EXPORT_SYMBOL(dma_supported);
