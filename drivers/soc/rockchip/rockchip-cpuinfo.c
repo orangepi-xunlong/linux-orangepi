@@ -83,13 +83,13 @@ static int rockchip_cpuinfo_probe(struct platform_device *pdev)
 
 	dev_info(dev, "SoC\t\t: %lx\n", rockchip_soc_id);
 
-#ifdef CONFIG_NO_GKI
+//#ifdef CONFIG_NO_GKI
 	system_serial_low = crc32(0, buf, 8);
 	system_serial_high = crc32(system_serial_low, buf + 8, 8);
 
 	dev_info(dev, "Serial\t\t: %08x%08x\n",
 		 system_serial_high, system_serial_low);
-#endif
+//#endif
 
 	return 0;
 }
