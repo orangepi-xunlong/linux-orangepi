@@ -66,13 +66,14 @@
 		regulator-always-on;
 	};
 
-	reg_gmac_2v5: gmac-2v5 {
+	reg_gmac_3v3: gmac-3v3 {
 		compatible = "regulator-fixed";
-		regulator-name = "gmac-2v5";
-		regulator-min-microvolt = <2500000>;
-		regulator-max-microvolt = <2500000>;
+		regulator-name = "vcc-gmac-3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		startup-delay-us = <100000>;
+		gpio = <&pio 3 6 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
-		gpio = <&pio 3 6 GPIO_ACTIVE_HIGH>; /* PD6 */
 	};
 
 	reg_vcc33_wifi: vcc33-wifi {
@@ -101,6 +102,28 @@
 		clock-names = "ext_clock";
 		reset-gpios = <&r_pio 1 3 GPIO_ACTIVE_LOW>; /* PM3 */
 		post-power-on-delay-ms = <200>;
+	};
+
+	ac200-sound {
+		status = "okay";
+		compatible = "simple-audio-card";
+		simple-audio-card,format		= "i2s";
+		simple-audio-card,frame-master		= <&i2s3_master>;
+		simple-audio-card,bitclock-master	= <&i2s3_master>;
+		simple-audio-card,name = "allwinner,ac200-codec";
+		simple-audio-card,mclk-fs = <512>;
+		i2s3_master: simple-audio-card,cpu {
+			sound-dai = <&i2s3>;
+			system-clock-frequency = <22579200>;
+			dai-tdm-slot-num = <2>;
+			dai-tdm-slot-width = <32>;
+		};
+		simple-audio-card,codec {
+			sound-dai = <&ac200_codec>;
+			system-clock-frequency = <22579200>;
+			dai-tdm-slot-num = <2>;
+			dai-tdm-slot-width = <32>;
+		};
 	};
 };
 
@@ -152,14 +175,7 @@
 	pinctrl-0 = <&ext_rgmii_pins>;
 	phy-mode = "rgmii-id";
 	phy-handle = <&ext_rgmii_phy>;
-	/*
-	 * The board uses 2.5V RGMII signalling. Power sequence to enable
-	 * the phy is to enable GMAC-2V5 and GMAC-3V (aldo2) power rails
-	 * at the same time and to wait 100ms. The driver enables phy-io
-	 * first. Delay is achieved with enable-ramp-delay on reg_aldo2.
-	 */
-	phy-supply = <&reg_aldo2>;
-	phy-io-supply = <&reg_gmac_2v5>;
+	phy-supply = <&reg_gmac_3v3>;
 	allwinner,rx-delay-ps = <200>;
 	allwinner,tx-delay-ps = <300>;
 	status = "okay";
@@ -247,6 +263,7 @@
 			};
 
 			reg_aldo2: aldo2 {
+				regulator-always-on;
 				regulator-min-microvolt = <3300000>;
 				regulator-max-microvolt = <3300000>;
 				regulator-name = "vcc33-audio-tv-ephy-mac";
@@ -333,6 +350,22 @@
 			};
 		};
 	};
+};
+
+&pwm {
+	status = "okay";
+};
+
+&ac200_pwm_clk {
+	status = "okay";
+};
+
+&i2s3 {
+	status = "okay";
+};
+
+&i2c3 {
+	status = "okay";
 };
 
 &r_ir {

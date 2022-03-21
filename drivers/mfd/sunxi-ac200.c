@@ -41,6 +41,7 @@ static const struct regmap_range_cfg ac200_range_cfg[] = {
 };
 
 static const struct regmap_config ac200_regmap_config = {
+	.name = "ac200",
 	.reg_bits	= 8,
 	.val_bits	= 16,
 	.ranges		= ac200_range_cfg,
@@ -75,6 +76,10 @@ static const struct mfd_cell ac200_cells[] = {
 		.resources	= ephy_resource,
 		.of_compatible	= "x-powers,ac200-ephy",
 	},
+	{
+		.name = "acx00-codec",
+		.of_compatible	= "x-powers,ac200-codec",
+	},
 };
 
 static int ac200_i2c_probe(struct i2c_client *i2c,
@@ -97,8 +102,17 @@ static int ac200_i2c_probe(struct i2c_client *i2c,
 		return ret;
 	}
 
-	/* do a reset to put chip in a known state */
+	ac200->clk = devm_clk_get(dev, NULL);
+	if (IS_ERR(ac200->clk)) {
+	      dev_err(dev, "Can't obtain the clock!\n");
+	      return PTR_ERR(ac200->clk);
+	}
 
+	ret = clk_prepare_enable(ac200->clk);
+	if (ret)
+	      return ret;
+
+	/* do a reset to put chip in a known state */
 	ret = regmap_write(ac200->regmap, AC200_SYS_CONTROL, 0);
 	if (ret)
 		return ret;
