@@ -5,3 +5,4 @@ Image.gz
 dts/allwinner/overlay/sun50i-a64-fixup.scr
 dts/allwinner/overlay/sun50i-h5-fixup.scr
 dts/allwinner/overlay/sun50i-h6-fixup.scr
+*.dtbo
