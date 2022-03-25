@@ -141,6 +141,9 @@ static void stmmac_exit_fs(struct net_device *dev);
 
 #define STMMAC_COAL_TIMER(x) (ns_to_ktime((x) * NSEC_PER_USEC))
 
+#define RTL_8211E_PHY_ID  0x001cc915
+#define RTL_8211F_PHY_ID  0x001cc916
+
 int stmmac_bus_clks_config(struct stmmac_priv *priv, bool enabled)
 {
 	int ret = 0;
@@ -6976,6 +6979,54 @@ void stmmac_fpe_handshake(struct stmmac_priv *priv, bool enable)
 	}
 }
 
+static int phy_rtl8211e_led_fixup(struct phy_device *phydev)
+{
+       //int val;
+
+       printk("%s in\n", __func__);
+
+       /*switch to extension page44*/
+       phy_write(phydev, 31, 0x07);
+       phy_write(phydev, 30, 0x2c);
+
+       /*set led1(yellow) act
+       val = phy_read(phydev, 26);
+       val &= (~(1<<4));// bit4=0
+       val |= (1<<5);// bit5=1
+       val &= (~(1<<6));// bit6=0*/
+       phy_write(phydev, 26, 0x20);
+
+       /*set led0(green) link
+       val = phy_read(phydev, 28);
+       val |= (7<<0);// bit0,1,2=1
+       val &= (~(7<<4));// bit4,5,6=0
+       val &= (~(7<<8));// bit8,9,10=0*/
+       phy_write(phydev, 28, 0x07);
+
+       /*switch back to page0*/
+       phy_write(phydev,31,0x00);
+
+       return 0;
+}
+
+static int phy_rtl8211f_led_fixup(struct phy_device *phydev)
+{
+       printk("%s in\n", __func__);
+
+       /*switch to extension page44*/
+       phy_write(phydev, 31, 0xd04);
+
+       /*set led1(yellow) act */
+       /*set led2(green) link*/
+       phy_write(phydev, 16, 0xae00);
+
+       phy_write(phydev, 17, 0);
+       /*switch back to page0*/
+       phy_write(phydev,31,0x00);
+
+       return 0;
+}
+
 /**
  * stmmac_dvr_probe
  * @device: device pointer
@@ -7233,6 +7284,15 @@ int stmmac_dvr_probe(struct device *device,
 		netdev_err(ndev, "failed to setup phy (%d)\n", ret);
 		goto error_phy_setup;
 	}
+
+	/* register the PHY board fixup */
+	ret = phy_register_fixup_for_uid(RTL_8211E_PHY_ID, 0xffffffff, phy_rtl8211e_led_fixup);
+	if (ret)
+		pr_warn("Cannot register PHY board fixup.\n");
+
+	ret = phy_register_fixup_for_uid(RTL_8211F_PHY_ID, 0xffffffff, phy_rtl8211f_led_fixup);
+	if (ret)
+		pr_warn("Cannot register PHY board fixup.\n");
 
 	ret = register_netdev(ndev);
 	if (ret) {
