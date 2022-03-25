@@ -91,6 +91,13 @@
 		clock-output-names = "osc24M";
 	};
 
+	ext_osc32k: ext_osc32k_clk {
+		#clock-cells = <0>;
+		compatible = "fixed-clock";
+		clock-frequency = <32768>;
+		clock-output-names = "ext_osc32k";
+	};
+
 	pmu {
 		compatible = "arm,cortex-a53-pmu";
 		interrupts = <GIC_SPI 140 IRQ_TYPE_LEVEL_HIGH>,
@@ -123,6 +130,28 @@
 
 		cpu {
 			sound-dai = <&i2s1>;
+		};
+	};
+
+	sound_ac200: sound_ac200 {
+		status = "disabled";
+		compatible = "simple-audio-card";
+		simple-audio-card,format		= "i2s";
+		simple-audio-card,frame-master		= <&i2s3_master>;
+		simple-audio-card,bitclock-master	= <&i2s3_master>;
+		simple-audio-card,name = "allwinner,ac200-codec";
+		simple-audio-card,mclk-fs = <512>;
+		i2s3_master: simple-audio-card,cpu {
+			sound-dai = <&i2s3>;
+			system-clock-frequency = <22579200>;
+			dai-tdm-slot-num = <2>;
+			dai-tdm-slot-width = <32>;
+		};
+		simple-audio-card,codec {
+			sound-dai = <&ac200_codec>;
+			system-clock-frequency = <22579200>;
+			dai-tdm-slot-num = <2>;
+			dai-tdm-slot-width = <32>;
 		};
 	};
 
@@ -370,7 +399,6 @@
 		pio: pinctrl@300b000 {
 			compatible = "allwinner,sun50i-h6-pinctrl";
 			reg = <0x0300b000 0x400>;
-			interrupt-parent = <&r_intc>;
 			interrupts = <GIC_SPI 51 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 53 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 54 IRQ_TYPE_LEVEL_HIGH>,
@@ -519,6 +547,11 @@
 			uart3_rts_cts_pins: uart3-rts-cts-pins {
 				pins = "PD25", "PD26";
 				function = "uart3";
+			};
+
+			i2s3_pins: i2s3-pins {
+				pins = "PB12", "PB13", "PB14", "PB15", "PB16";
+				function = "i2s3";
 			};
 		};
 
@@ -718,6 +751,7 @@
 			ac200: mfd@10 {
 				compatible = "x-powers,ac200";
 				reg = <0x10>;
+				clocks = <&ac200_pwm_clk>;
 				interrupt-parent = <&pio>;
 				interrupts = <1 20 IRQ_TYPE_LEVEL_LOW>;
 				interrupt-controller;
@@ -725,10 +759,15 @@
 
 				ac200_ephy: phy {
 					compatible = "x-powers,ac200-ephy";
-					clocks = <&ac200_pwm_clk>;
 					nvmem-cells = <&ephy_calibration>;
 					nvmem-cell-names = "calibration";
 					status = "disabled";
+				};
+
+				ac200_codec: codec {
+					#sound-dai-cells = <0>;
+					compatible = "x-powers,ac200-codec";
+					status = "okay";
 				};
 			};
 		};
@@ -763,6 +802,21 @@
 			dmas = <&dma 4>, <&dma 4>;
 			resets = <&ccu RST_BUS_I2S1>;
 			dma-names = "rx", "tx";
+			status = "disabled";
+		};
+
+		i2s3: i2s@508f000 {
+			#sound-dai-cells = <0>;
+			compatible = "allwinner,sun50i-h6-i2s";
+			reg = <0x0508f000 0x1000>;
+			interrupts = <GIC_SPI 30 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_I2S3>, <&ccu CLK_I2S3>;
+			clock-names = "apb", "mod";
+			dmas = <&dma 6>, <&dma 6>;
+			resets = <&ccu RST_BUS_I2S3>;
+			dma-names = "rx", "tx";
+			pinctrl-names = "default";
+			pinctrl-0 = <&i2s3_pins>;
 			status = "disabled";
 		};
 
@@ -1061,6 +1115,7 @@
 			interrupts = <GIC_SPI 101 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 102 IRQ_TYPE_LEVEL_HIGH>;
 			clock-output-names = "osc32k", "osc32k-out", "iosc";
+			clocks = <&ext_osc32k>;
 			#clock-cells = <1>;
 		};
 
@@ -1126,17 +1181,18 @@
 		};
 
 		r_ir: ir@7040000 {
-				compatible = "allwinner,sun50i-h6-ir",
-					     "allwinner,sun6i-a31-ir";
-				reg = <0x07040000 0x400>;
-				interrupts = <GIC_SPI 109 IRQ_TYPE_LEVEL_HIGH>;
-				clocks = <&r_ccu CLK_R_APB1_IR>,
-					 <&r_ccu CLK_IR>;
-				clock-names = "apb", "ir";
-				resets = <&r_ccu RST_R_APB1_IR>;
-				pinctrl-names = "default";
-				pinctrl-0 = <&r_ir_rx_pin>;
-				status = "disabled";
+			compatible = "allwinner,sun50i-h6-ir",
+				     "allwinner,sun6i-a31-ir";
+			reg = <0x07040000 0x400>;
+			interrupt-parent = <&r_intc>;
+			interrupts = <GIC_SPI 109 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&r_ccu CLK_R_APB1_IR>,
+				 <&r_ccu CLK_IR>;
+			clock-names = "apb", "ir";
+			resets = <&r_ccu RST_R_APB1_IR>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&r_ir_rx_pin>;
+			status = "disabled";
 		};
 
 		r_i2c: i2c@7081400 {
@@ -1177,6 +1233,25 @@
 			nvmem-cells = <&ths_calibration>;
 			nvmem-cell-names = "calibration";
 			#thermal-sensor-cells = <1>;
+		};
+
+		sunxi-info {
+			compatible = "allwinner,sun50i-h6-sys-info";
+			status = "okay";
+		};
+
+		addr_mgt: addr-mgt {
+			compatible = "allwinner,sunxi-addr_mgt";
+			type_addr_wifi = <0x2>;
+			type_addr_bt = <0x2>;
+			type_addr_eth = <0x2>;
+			status = "okay";
+		};
+
+		dump_reg: dump_reg@20000 {
+			compatible = "allwinner,sunxi-dump-reg";
+			reg = <0x0 0x03001000 0x0 0x0f20>;
+			status = "okay";
 		};
 	};
 
