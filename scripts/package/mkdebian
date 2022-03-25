@@ -147,14 +147,14 @@ extra_build_depends="$extra_build_depends, $(if_enabled_echo CONFIG_SYSTEM_TRUST
 cat <<EOF > debian/changelog
 $sourcename ($packageversion) $distribution; urgency=low
 
-  * Armbian built Linux kernel. $BRANCH
+  * OrangePi built Linux kernel. $BRANCH
 
  -- $maintainer  $(date -R)
 EOF
 
 # Generate copyright file
 cat <<EOF > debian/copyright
-This is a packacked armbian patches version of the Linux kernel.
+This is a packacked orangepi patches version of the Linux kernel.
 
 The sources may be found at most Linux archive sites, including:
 https://www.kernel.org/pub/linux/kernel
@@ -183,8 +183,8 @@ Homepage: https://www.kernel.org/
 
 Package: $packagename
 Architecture: $debarch
-Provides: linux-image, linux-image-armbian, armbian-$BRANCH
-Description: Linux kernel, armbian version $version $BRANCH
+Provides: linux-image, linux-image-orangepi, orangepi-$BRANCH
+Description: Linux kernel, orangepi version $version $BRANCH
  This package contains the Linux kernel, modules and corresponding other
  files, version: $version.
 
@@ -194,15 +194,15 @@ Provides: linux-kernel-headers
 Conflicts: linux-kernel-headers
 Replaces: linux-kernel-headers
 Architecture: $debarch
-Description: Armbian Linux support headers for userspace development
+Description: OrangePi Linux support headers for userspace development
  This package provides userspaces headers from the Linux kernel.  These headers
  are used by the installed headers for GNU glibc and other system libraries.
 Multi-Arch: same
 
 Package: $dtb_packagename
 Architecture: $debarch
-Provides: linux-dtb, linux-dtb-armbian, armbian-$BRANCH
-Description: Armbian Linux DTB, version $version $BRANCH
+Provides: linux-dtb, linux-dtb-orangepi, orangepi-$BRANCH
+Description: OrangePi Linux DTB, version $version $BRANCH
  This package contains device blobs from the Linux kernel, version $version
 EOF
 
@@ -212,7 +212,7 @@ cat <<EOF >> debian/control
 Package: $kernel_headers_packagename
 Section: devel
 Architecture: $debarch
-Provides: linux-headers, linux-headers-armbian, armbian-$BRANCH
+Provides: linux-headers, linux-headers-orangepi, orangepi-$BRANCH
 Depends: make, gcc, libc6-dev, bison, flex, libssl-dev
 Description: Linux kernel headers for $version on $debarch $BRANCH
  This package provides kernel header files for $version on $debarch
