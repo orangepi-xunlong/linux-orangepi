@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * apds9300.c - IIO driver for Avago APDS9300 ambient light sensor
  *
  * Copyright 2013 Oleksandr Kravchenko <o.v.kravchenko@globallogic.com>
- *
- * This file is subject to the terms and conditions of version 2 of
- * the GNU General Public License.  See the file COPYING in the main
- * directory of this archive for more details.
  */
 
 #include <linux/module.h>
@@ -337,12 +334,10 @@ static int apds9300_write_interrupt_config(struct iio_dev *indio_dev,
 }
 
 static const struct iio_info apds9300_info_no_irq = {
-	.driver_module	= THIS_MODULE,
 	.read_raw	= apds9300_read_raw,
 };
 
 static const struct iio_info apds9300_info = {
-	.driver_module		= THIS_MODULE,
 	.read_raw		= apds9300_read_raw,
 	.read_event_value	= apds9300_read_thresh,
 	.write_event_value	= apds9300_write_thresh,
@@ -424,7 +419,6 @@ static int apds9300_probe(struct i2c_client *client,
 
 	mutex_init(&data->mutex);
 
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->channels = apds9300_channels;
 	indio_dev->num_channels = ARRAY_SIZE(apds9300_channels);
 	indio_dev->name = APDS9300_DRV_NAME;
@@ -505,7 +499,7 @@ static SIMPLE_DEV_PM_OPS(apds9300_pm_ops, apds9300_suspend, apds9300_resume);
 #define APDS9300_PM_OPS NULL
 #endif
 
-static struct i2c_device_id apds9300_id[] = {
+static const struct i2c_device_id apds9300_id[] = {
 	{ APDS9300_DRV_NAME, 0 },
 	{ }
 };

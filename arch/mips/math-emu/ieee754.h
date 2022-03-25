@@ -1,19 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * MIPS floating point support
  * Copyright (C) 1994-2000 Algorithmics Ltd.
- *
- *  This program is free software; you can distribute it and/or modify it
- *  under the terms of the GNU General Public License (Version 2) as
- *  published by the Free Software Foundation.
- *
- *  This program is distributed in the hope it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- *  for more details.
- *
- *  You should have received a copy of the GNU General Public License along
- *  with this program; if not, write to the Free Software Foundation, Inc.,
- *  51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA.
  *
  *  Nov 7, 2000
  *  Modification to allow integration with Linux kernel
@@ -67,6 +55,7 @@ union ieee754sp ieee754sp_div(union ieee754sp x, union ieee754sp y);
 union ieee754sp ieee754sp_fint(int x);
 union ieee754sp ieee754sp_flong(s64 x);
 union ieee754sp ieee754sp_fdp(union ieee754dp x);
+union ieee754sp ieee754sp_rint(union ieee754sp x);
 
 int ieee754sp_tint(union ieee754sp x);
 s64 ieee754sp_tlong(union ieee754sp x);
@@ -78,6 +67,14 @@ union ieee754sp ieee754sp_sqrt(union ieee754sp x);
 union ieee754sp ieee754sp_maddf(union ieee754sp z, union ieee754sp x,
 				union ieee754sp y);
 union ieee754sp ieee754sp_msubf(union ieee754sp z, union ieee754sp x,
+				union ieee754sp y);
+union ieee754sp ieee754sp_madd(union ieee754sp z, union ieee754sp x,
+				union ieee754sp y);
+union ieee754sp ieee754sp_msub(union ieee754sp z, union ieee754sp x,
+				union ieee754sp y);
+union ieee754sp ieee754sp_nmadd(union ieee754sp z, union ieee754sp x,
+				union ieee754sp y);
+union ieee754sp ieee754sp_nmsub(union ieee754sp z, union ieee754sp x,
 				union ieee754sp y);
 int ieee754sp_2008class(union ieee754sp x);
 union ieee754sp ieee754sp_fmin(union ieee754sp x, union ieee754sp y);
@@ -101,6 +98,7 @@ union ieee754dp ieee754dp_neg(union ieee754dp x);
 union ieee754dp ieee754dp_fint(int x);
 union ieee754dp ieee754dp_flong(s64 x);
 union ieee754dp ieee754dp_fsp(union ieee754sp x);
+union ieee754dp ieee754dp_rint(union ieee754dp x);
 
 int ieee754dp_tint(union ieee754dp x);
 s64 ieee754dp_tlong(union ieee754dp x);
@@ -112,6 +110,14 @@ union ieee754dp ieee754dp_sqrt(union ieee754dp x);
 union ieee754dp ieee754dp_maddf(union ieee754dp z, union ieee754dp x,
 				union ieee754dp y);
 union ieee754dp ieee754dp_msubf(union ieee754dp z, union ieee754dp x,
+				union ieee754dp y);
+union ieee754dp ieee754dp_madd(union ieee754dp z, union ieee754dp x,
+				union ieee754dp y);
+union ieee754dp ieee754dp_msub(union ieee754dp z, union ieee754dp x,
+				union ieee754dp y);
+union ieee754dp ieee754dp_nmadd(union ieee754dp z, union ieee754dp x,
+				union ieee754dp y);
+union ieee754dp ieee754dp_nmsub(union ieee754dp z, union ieee754dp x,
 				union ieee754dp y);
 int ieee754dp_2008class(union ieee754dp x);
 union ieee754dp ieee754dp_fmin(union ieee754dp x, union ieee754dp y);
@@ -163,11 +169,12 @@ struct _ieee754_csr {
 };
 #define ieee754_csr (*(struct _ieee754_csr *)(&current->thread.fpu.fcr31))
 
-static inline unsigned ieee754_getrm(void)
+static inline unsigned int ieee754_getrm(void)
 {
 	return (ieee754_csr.rm);
 }
-static inline unsigned ieee754_setrm(unsigned rm)
+
+static inline unsigned int ieee754_setrm(unsigned int rm)
 {
 	return (ieee754_csr.rm = rm);
 }
@@ -175,14 +182,14 @@ static inline unsigned ieee754_setrm(unsigned rm)
 /*
  * get current exceptions
  */
-static inline unsigned ieee754_getcx(void)
+static inline unsigned int ieee754_getcx(void)
 {
 	return (ieee754_csr.cx);
 }
 
 /* test for current exception condition
  */
-static inline int ieee754_cxtest(unsigned n)
+static inline int ieee754_cxtest(unsigned int n)
 {
 	return (ieee754_csr.cx & n);
 }
@@ -190,21 +197,21 @@ static inline int ieee754_cxtest(unsigned n)
 /*
  * get sticky exceptions
  */
-static inline unsigned ieee754_getsx(void)
+static inline unsigned int ieee754_getsx(void)
 {
 	return (ieee754_csr.sx);
 }
 
 /* clear sticky conditions
 */
-static inline unsigned ieee754_clrsx(void)
+static inline unsigned int ieee754_clrsx(void)
 {
 	return (ieee754_csr.sx = 0);
 }
 
 /* test for sticky exception condition
  */
-static inline int ieee754_sxtest(unsigned n)
+static inline int ieee754_sxtest(unsigned int n)
 {
 	return (ieee754_csr.sx & n);
 }

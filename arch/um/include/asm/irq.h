@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __UM_IRQ_H
 #define __UM_IRQ_H
 
@@ -17,7 +18,26 @@
 #define XTERM_IRQ 		13
 #define RANDOM_IRQ 		14
 
-#define LAST_IRQ RANDOM_IRQ
-#define NR_IRQS (LAST_IRQ + 1)
+#ifdef CONFIG_UML_NET_VECTOR
 
+#define VECTOR_BASE_IRQ		(RANDOM_IRQ + 1)
+#define VECTOR_IRQ_SPACE	8
+
+#define UM_FIRST_DYN_IRQ (VECTOR_IRQ_SPACE + VECTOR_BASE_IRQ)
+
+#else
+
+#define UM_FIRST_DYN_IRQ (RANDOM_IRQ + 1)
+
+#endif
+
+#define UM_LAST_SIGNAL_IRQ	64
+/* If we have (simulated) PCI MSI, allow 64 more interrupt numbers for it */
+#ifdef CONFIG_PCI_MSI
+#define NR_IRQS			(UM_LAST_SIGNAL_IRQ + 64)
+#else
+#define NR_IRQS			UM_LAST_SIGNAL_IRQ
+#endif /* CONFIG_PCI_MSI */
+
+#include <asm-generic/irq.h>
 #endif

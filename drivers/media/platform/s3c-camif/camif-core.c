@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * s3c24xx/s3c64xx SoC series Camera Interface (CAMIF) driver
  *
  * Copyright (C) 2012 Sylwester Nawrocki <sylvester.nawrocki@gmail.com>
  * Copyright (C) 2012 Tomasz Figa <tomasz.figa@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published
- * by the Free Software Foundation, either version 2 of the License,
- * or (at your option) any later version.
  */
 #define pr_fmt(fmt) "%s:%d " fmt, __func__, __LINE__
 
@@ -27,7 +23,6 @@
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
 #include <linux/types.h>
-#include <linux/version.h>
 
 #include <media/media-device.h>
 #include <media/v4l2-ctrls.h>
@@ -46,7 +41,6 @@ static char *camif_clocks[CLK_MAX_NUM] = {
 
 static const struct camif_fmt camif_formats[] = {
 	{
-		.name		= "YUV 4:2:2 planar, Y/Cb/Cr",
 		.fourcc		= V4L2_PIX_FMT_YUV422P,
 		.depth		= 16,
 		.ybpp		= 1,
@@ -55,7 +49,6 @@ static const struct camif_fmt camif_formats[] = {
 		.flags		= FMT_FL_S3C24XX_CODEC |
 				  FMT_FL_S3C64XX,
 	}, {
-		.name		= "YUV 4:2:0 planar, Y/Cb/Cr",
 		.fourcc		= V4L2_PIX_FMT_YUV420,
 		.depth		= 12,
 		.ybpp		= 1,
@@ -64,7 +57,6 @@ static const struct camif_fmt camif_formats[] = {
 		.flags		= FMT_FL_S3C24XX_CODEC |
 				  FMT_FL_S3C64XX,
 	}, {
-		.name		= "YVU 4:2:0 planar, Y/Cr/Cb",
 		.fourcc		= V4L2_PIX_FMT_YVU420,
 		.depth		= 12,
 		.ybpp		= 1,
@@ -73,7 +65,6 @@ static const struct camif_fmt camif_formats[] = {
 		.flags		= FMT_FL_S3C24XX_CODEC |
 				  FMT_FL_S3C64XX,
 	}, {
-		.name		= "RGB565, 16 bpp",
 		.fourcc		= V4L2_PIX_FMT_RGB565X,
 		.depth		= 16,
 		.ybpp		= 2,
@@ -82,7 +73,6 @@ static const struct camif_fmt camif_formats[] = {
 		.flags		= FMT_FL_S3C24XX_PREVIEW |
 				  FMT_FL_S3C64XX,
 	}, {
-		.name		= "XRGB8888, 32 bpp",
 		.fourcc		= V4L2_PIX_FMT_RGB32,
 		.depth		= 32,
 		.ybpp		= 4,
@@ -91,7 +81,6 @@ static const struct camif_fmt camif_formats[] = {
 		.flags		= FMT_FL_S3C24XX_PREVIEW |
 				  FMT_FL_S3C64XX,
 	}, {
-		.name		= "BGR666",
 		.fourcc		= V4L2_PIX_FMT_BGR666,
 		.depth		= 32,
 		.ybpp		= 4,
@@ -103,6 +92,7 @@ static const struct camif_fmt camif_formats[] = {
 
 /**
  * s3c_camif_find_format() - lookup camif color format by fourcc or an index
+ * @vp: video path (DMA) description (codec/preview)
  * @pixelformat: fourcc to match, ignored if null
  * @index: index to the camif_formats array, ignored if negative
  */
@@ -140,11 +130,13 @@ static int camif_get_scaler_factor(u32 src, u32 tar, u32 *ratio, u32 *shift)
 	while (sh--) {
 		unsigned int tmp = 1 << sh;
 		if (src >= tar * tmp) {
-			*shift = sh, *ratio = tmp;
+			*shift = sh;
+			*ratio = tmp;
 			return 0;
 		}
 	}
-	*shift = 0, *ratio = 1;
+	*shift = 0;
+	*ratio = 1;
 	return 0;
 }
 
@@ -313,15 +305,14 @@ static int camif_media_dev_init(struct camif_dev *camif)
 	int ret;
 
 	memset(md, 0, sizeof(*md));
-	snprintf(md->model, sizeof(md->model), "SAMSUNG S3C%s CAMIF",
+	snprintf(md->model, sizeof(md->model), "Samsung S3C%s CAMIF",
 		 ip_rev == S3C6410_CAMIF_IP_REV ? "6410" : "244X");
-	strlcpy(md->bus_info, "platform", sizeof(md->bus_info));
+	strscpy(md->bus_info, "platform", sizeof(md->bus_info));
 	md->hw_revision = ip_rev;
-	md->driver_version = KERNEL_VERSION(1, 0, 0);
 
 	md->dev = camif->dev;
 
-	strlcpy(v4l2_dev->name, "s3c-camif", sizeof(v4l2_dev->name));
+	strscpy(v4l2_dev->name, "s3c-camif", sizeof(v4l2_dev->name));
 	v4l2_dev->mdev = md;
 
 	media_device_init(md);
@@ -390,10 +381,8 @@ static int camif_request_irqs(struct platform_device *pdev,
 		init_waitqueue_head(&vp->irq_queue);
 
 		irq = platform_get_irq(pdev, i);
-		if (irq <= 0) {
-			dev_err(&pdev->dev, "failed to get IRQ %d\n", i);
+		if (irq <= 0)
 			return -ENXIO;
-		}
 
 		ret = devm_request_irq(&pdev->dev, irq, s3c_camif_irq_handler,
 				       0, dev_name(&pdev->dev), vp);
@@ -412,7 +401,6 @@ static int s3c_camif_probe(struct platform_device *pdev)
 	struct s3c_camif_plat_data *pdata = dev->platform_data;
 	struct s3c_camif_drvdata *drvdata;
 	struct camif_dev *camif;
-	struct resource *mres;
 	int ret = 0;
 
 	camif = devm_kzalloc(dev, sizeof(*camif), GFP_KERNEL);
@@ -433,9 +421,7 @@ static int s3c_camif_probe(struct platform_device *pdev)
 	drvdata = (void *)platform_get_device_id(pdev)->driver_data;
 	camif->variant = drvdata->variant;
 
-	mres = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-
-	camif->io_base = devm_ioremap_resource(dev, mres);
+	camif->io_base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(camif->io_base))
 		return PTR_ERR(camif->io_base);
 
@@ -470,13 +456,13 @@ static int s3c_camif_probe(struct platform_device *pdev)
 
 	pm_runtime_enable(dev);
 
-	ret = pm_runtime_get_sync(dev);
+	ret = pm_runtime_resume_and_get(dev);
 	if (ret < 0)
-		goto err_pm;
+		goto err_disable;
 
 	ret = camif_media_dev_init(camif);
 	if (ret < 0)
-		goto err_alloc;
+		goto err_pm;
 
 	ret = camif_register_sensor(camif);
 	if (ret < 0)
@@ -510,10 +496,10 @@ err_sens:
 	media_device_unregister(&camif->media_dev);
 	media_device_cleanup(&camif->media_dev);
 	camif_unregister_media_entities(camif);
-err_alloc:
-	pm_runtime_put(dev);
-	pm_runtime_disable(dev);
 err_pm:
+	pm_runtime_put(dev);
+err_disable:
+	pm_runtime_disable(dev);
 	camif_clk_put(camif);
 err_clk:
 	s3c_camif_unregister_subdev(camif);

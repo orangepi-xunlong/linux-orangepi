@@ -1,19 +1,11 @@
-/**
+// SPDX-License-Identifier: GPL-2.0
+/*
  * dwc3-omap.c - OMAP Specific Glue layer
  *
- * Copyright (C) 2010-2011 Texas Instruments Incorporated - http://www.ti.com
+ * Copyright (C) 2010-2011 Texas Instruments Incorporated - https://www.ti.com
  *
  * Authors: Felipe Balbi <balbi@ti.com>,
  *	    Sebastian Andrzej Siewior <bigeasy@linutronix.de>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2  of
- * the License as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -22,7 +14,6 @@
 #include <linux/irq.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
-#include <linux/platform_data/dwc3-omap.h>
 #include <linux/pm_runtime.h>
 #include <linux/dma-mapping.h>
 #include <linux/ioport.h>
@@ -79,40 +70,46 @@
 #define USBOTGSS_DEBUG_OFFSET			0x0600
 
 /* SYSCONFIG REGISTER */
-#define USBOTGSS_SYSCONFIG_DMADISABLE		(1 << 16)
+#define USBOTGSS_SYSCONFIG_DMADISABLE		BIT(16)
 
 /* IRQ_EOI REGISTER */
-#define USBOTGSS_IRQ_EOI_LINE_NUMBER		(1 << 0)
+#define USBOTGSS_IRQ_EOI_LINE_NUMBER		BIT(0)
 
 /* IRQS0 BITS */
-#define USBOTGSS_IRQO_COREIRQ_ST		(1 << 0)
+#define USBOTGSS_IRQO_COREIRQ_ST		BIT(0)
 
 /* IRQMISC BITS */
-#define USBOTGSS_IRQMISC_DMADISABLECLR		(1 << 17)
-#define USBOTGSS_IRQMISC_OEVT			(1 << 16)
-#define USBOTGSS_IRQMISC_DRVVBUS_RISE		(1 << 13)
-#define USBOTGSS_IRQMISC_CHRGVBUS_RISE		(1 << 12)
-#define USBOTGSS_IRQMISC_DISCHRGVBUS_RISE	(1 << 11)
-#define USBOTGSS_IRQMISC_IDPULLUP_RISE		(1 << 8)
-#define USBOTGSS_IRQMISC_DRVVBUS_FALL		(1 << 5)
-#define USBOTGSS_IRQMISC_CHRGVBUS_FALL		(1 << 4)
-#define USBOTGSS_IRQMISC_DISCHRGVBUS_FALL		(1 << 3)
-#define USBOTGSS_IRQMISC_IDPULLUP_FALL		(1 << 0)
+#define USBOTGSS_IRQMISC_DMADISABLECLR		BIT(17)
+#define USBOTGSS_IRQMISC_OEVT			BIT(16)
+#define USBOTGSS_IRQMISC_DRVVBUS_RISE		BIT(13)
+#define USBOTGSS_IRQMISC_CHRGVBUS_RISE		BIT(12)
+#define USBOTGSS_IRQMISC_DISCHRGVBUS_RISE	BIT(11)
+#define USBOTGSS_IRQMISC_IDPULLUP_RISE		BIT(8)
+#define USBOTGSS_IRQMISC_DRVVBUS_FALL		BIT(5)
+#define USBOTGSS_IRQMISC_CHRGVBUS_FALL		BIT(4)
+#define USBOTGSS_IRQMISC_DISCHRGVBUS_FALL		BIT(3)
+#define USBOTGSS_IRQMISC_IDPULLUP_FALL		BIT(0)
 
 /* UTMI_OTG_STATUS REGISTER */
-#define USBOTGSS_UTMI_OTG_STATUS_DRVVBUS	(1 << 5)
-#define USBOTGSS_UTMI_OTG_STATUS_CHRGVBUS	(1 << 4)
-#define USBOTGSS_UTMI_OTG_STATUS_DISCHRGVBUS	(1 << 3)
-#define USBOTGSS_UTMI_OTG_STATUS_IDPULLUP	(1 << 0)
+#define USBOTGSS_UTMI_OTG_STATUS_DRVVBUS	BIT(5)
+#define USBOTGSS_UTMI_OTG_STATUS_CHRGVBUS	BIT(4)
+#define USBOTGSS_UTMI_OTG_STATUS_DISCHRGVBUS	BIT(3)
+#define USBOTGSS_UTMI_OTG_STATUS_IDPULLUP	BIT(0)
 
 /* UTMI_OTG_CTRL REGISTER */
-#define USBOTGSS_UTMI_OTG_CTRL_SW_MODE		(1 << 31)
-#define USBOTGSS_UTMI_OTG_CTRL_POWERPRESENT	(1 << 9)
-#define USBOTGSS_UTMI_OTG_CTRL_TXBITSTUFFENABLE (1 << 8)
-#define USBOTGSS_UTMI_OTG_CTRL_IDDIG		(1 << 4)
-#define USBOTGSS_UTMI_OTG_CTRL_SESSEND		(1 << 3)
-#define USBOTGSS_UTMI_OTG_CTRL_SESSVALID	(1 << 2)
-#define USBOTGSS_UTMI_OTG_CTRL_VBUSVALID	(1 << 1)
+#define USBOTGSS_UTMI_OTG_CTRL_SW_MODE		BIT(31)
+#define USBOTGSS_UTMI_OTG_CTRL_POWERPRESENT	BIT(9)
+#define USBOTGSS_UTMI_OTG_CTRL_TXBITSTUFFENABLE BIT(8)
+#define USBOTGSS_UTMI_OTG_CTRL_IDDIG		BIT(4)
+#define USBOTGSS_UTMI_OTG_CTRL_SESSEND		BIT(3)
+#define USBOTGSS_UTMI_OTG_CTRL_SESSVALID	BIT(2)
+#define USBOTGSS_UTMI_OTG_CTRL_VBUSVALID	BIT(1)
+
+enum dwc3_omap_utmi_mode {
+	DWC3_OMAP_UTMI_MODE_UNKNOWN = 0,
+	DWC3_OMAP_UTMI_MODE_HW,
+	DWC3_OMAP_UTMI_MODE_SW,
+};
 
 struct dwc3_omap {
 	struct device		*dev;
@@ -393,7 +390,7 @@ static void dwc3_omap_set_utmi_mode(struct dwc3_omap *omap)
 {
 	u32			reg;
 	struct device_node	*node = omap->dev->of_node;
-	int			utmi_mode = 0;
+	u32			utmi_mode = 0;
 
 	reg = dwc3_omap_read_utmi_ctrl(omap);
 
@@ -427,21 +424,26 @@ static int dwc3_omap_extcon_register(struct dwc3_omap *omap)
 		}
 
 		omap->vbus_nb.notifier_call = dwc3_omap_vbus_notifier;
-		ret = extcon_register_notifier(edev, EXTCON_USB,
-						&omap->vbus_nb);
+		ret = devm_extcon_register_notifier(omap->dev, edev,
+						EXTCON_USB, &omap->vbus_nb);
 		if (ret < 0)
 			dev_vdbg(omap->dev, "failed to register notifier for USB\n");
 
 		omap->id_nb.notifier_call = dwc3_omap_id_notifier;
-		ret = extcon_register_notifier(edev, EXTCON_USB_HOST,
-						&omap->id_nb);
+		ret = devm_extcon_register_notifier(omap->dev, edev,
+						EXTCON_USB_HOST, &omap->id_nb);
 		if (ret < 0)
 			dev_vdbg(omap->dev, "failed to register notifier for USB-HOST\n");
 
-		if (extcon_get_cable_state_(edev, EXTCON_USB) == true)
+		if (extcon_get_state(edev, EXTCON_USB) == true)
 			dwc3_omap_set_mailbox(omap, OMAP_DWC3_VBUS_VALID);
-		if (extcon_get_cable_state_(edev, EXTCON_USB_HOST) == true)
+		else
+			dwc3_omap_set_mailbox(omap, OMAP_DWC3_VBUS_OFF);
+
+		if (extcon_get_state(edev, EXTCON_USB_HOST) == true)
 			dwc3_omap_set_mailbox(omap, OMAP_DWC3_ID_GROUND);
+		else
+			dwc3_omap_set_mailbox(omap, OMAP_DWC3_ID_FLOAT);
 
 		omap->edev = edev;
 	}
@@ -454,14 +456,11 @@ static int dwc3_omap_probe(struct platform_device *pdev)
 	struct device_node	*node = pdev->dev.of_node;
 
 	struct dwc3_omap	*omap;
-	struct resource		*res;
 	struct device		*dev = &pdev->dev;
 	struct regulator	*vbus_reg = NULL;
 
 	int			ret;
 	int			irq;
-
-	u32			reg;
 
 	void __iomem		*base;
 
@@ -477,13 +476,10 @@ static int dwc3_omap_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, omap);
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(dev, "missing IRQ resource\n");
-		return -EINVAL;
-	}
+	if (irq < 0)
+		return irq;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	base = devm_ioremap_resource(dev, res);
+	base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 
@@ -510,18 +506,6 @@ static int dwc3_omap_probe(struct platform_device *pdev)
 	dwc3_omap_map_offset(omap);
 	dwc3_omap_set_utmi_mode(omap);
 
-	/* check the DMA Status */
-	reg = dwc3_omap_readl(omap->base, USBOTGSS_SYSCONFIG);
-	irq_set_status_flags(omap->irq, IRQ_NOAUTOEN);
-	ret = devm_request_threaded_irq(dev, omap->irq, dwc3_omap_interrupt,
-					dwc3_omap_interrupt_thread, IRQF_SHARED,
-					"dwc3-omap", omap);
-	if (ret) {
-		dev_err(dev, "failed to request IRQ #%d --> %d\n",
-				omap->irq, ret);
-		goto err1;
-	}
-
 	ret = dwc3_omap_extcon_register(omap);
 	if (ret < 0)
 		goto err1;
@@ -529,16 +513,19 @@ static int dwc3_omap_probe(struct platform_device *pdev)
 	ret = of_platform_populate(node, NULL, NULL, dev);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to create dwc3 core\n");
-		goto err2;
+		goto err1;
 	}
 
+	ret = devm_request_threaded_irq(dev, omap->irq, dwc3_omap_interrupt,
+					dwc3_omap_interrupt_thread, IRQF_SHARED,
+					"dwc3-omap", omap);
+	if (ret) {
+		dev_err(dev, "failed to request IRQ #%d --> %d\n",
+			omap->irq, ret);
+		goto err1;
+	}
 	dwc3_omap_enable_irqs(omap);
-	enable_irq(omap->irq);
 	return 0;
-
-err2:
-	extcon_unregister_notifier(omap->edev, EXTCON_USB, &omap->vbus_nb);
-	extcon_unregister_notifier(omap->edev, EXTCON_USB_HOST, &omap->id_nb);
 
 err1:
 	pm_runtime_put_sync(dev);
@@ -551,8 +538,6 @@ static int dwc3_omap_remove(struct platform_device *pdev)
 {
 	struct dwc3_omap	*omap = platform_get_drvdata(pdev);
 
-	extcon_unregister_notifier(omap->edev, EXTCON_USB, &omap->vbus_nb);
-	extcon_unregister_notifier(omap->edev, EXTCON_USB_HOST, &omap->id_nb);
 	dwc3_omap_disable_irqs(omap);
 	disable_irq(omap->irq);
 	of_platform_depopulate(omap->dev);

@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2013 Heiko Stuebner <heiko@sntech.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Common Clock Framework support for s3c24xx external clock output.
  */
@@ -12,13 +9,11 @@
 #include <linux/slab.h>
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
+#include <linux/io.h>
 #include <linux/platform_device.h>
+#include <linux/platform_data/clk-s3c2410.h>
 #include <linux/module.h>
 #include "clk.h"
-
-/* legacy access to misccr, until dt conversion is finished */
-#include <mach/hardware.h>
-#include <mach/regs-gpio.h>
 
 #define MUX_DCLK0	0
 #define MUX_DCLK1	1
@@ -54,6 +49,7 @@ struct s3c24xx_clkout {
 	struct clk_hw		hw;
 	u32			mask;
 	u8			shift;
+	unsigned int (*modify_misccr)(unsigned int clr, unsigned int chg);
 };
 
 #define to_s3c24xx_clkout(_hw) container_of(_hw, struct s3c24xx_clkout, hw)
@@ -64,7 +60,7 @@ static u8 s3c24xx_clkout_get_parent(struct clk_hw *hw)
 	int num_parents = clk_hw_get_num_parents(hw);
 	u32 val;
 
-	val = readl_relaxed(S3C24XX_MISCCR) >> clkout->shift;
+	val = clkout->modify_misccr(0, 0) >> clkout->shift;
 	val >>= clkout->shift;
 	val &= clkout->mask;
 
@@ -78,7 +74,7 @@ static int s3c24xx_clkout_set_parent(struct clk_hw *hw, u8 index)
 {
 	struct s3c24xx_clkout *clkout = to_s3c24xx_clkout(hw);
 
-	s3c2410_modify_misccr((clkout->mask << clkout->shift),
+	clkout->modify_misccr((clkout->mask << clkout->shift),
 			      (index << clkout->shift));
 
 	return 0;
@@ -90,13 +86,17 @@ static const struct clk_ops s3c24xx_clkout_ops = {
 	.determine_rate = __clk_mux_determine_rate,
 };
 
-static struct clk *s3c24xx_register_clkout(struct device *dev, const char *name,
-		const char **parent_names, u8 num_parents,
+static struct clk_hw *s3c24xx_register_clkout(struct device *dev,
+		const char *name, const char **parent_names, u8 num_parents,
 		u8 shift, u32 mask)
 {
+	struct s3c2410_clk_platform_data *pdata = dev_get_platdata(dev);
 	struct s3c24xx_clkout *clkout;
-	struct clk *clk;
 	struct clk_init_data init;
+	int ret;
+
+	if (!pdata)
+		return ERR_PTR(-EINVAL);
 
 	/* allocate the clkout */
 	clkout = kzalloc(sizeof(*clkout), GFP_KERNEL);
@@ -105,17 +105,20 @@ static struct clk *s3c24xx_register_clkout(struct device *dev, const char *name,
 
 	init.name = name;
 	init.ops = &s3c24xx_clkout_ops;
-	init.flags = CLK_IS_BASIC;
+	init.flags = 0;
 	init.parent_names = parent_names;
 	init.num_parents = num_parents;
 
 	clkout->shift = shift;
 	clkout->mask = mask;
 	clkout->hw.init = &init;
+	clkout->modify_misccr = pdata->modify_misccr;
 
-	clk = clk_register(dev, &clkout->hw);
+	ret = clk_hw_register(dev, &clkout->hw);
+	if (ret)
+		return ERR_PTR(ret);
 
-	return clk;
+	return &clkout->hw;
 }
 
 /*
@@ -125,11 +128,12 @@ static struct clk *s3c24xx_register_clkout(struct device *dev, const char *name,
 struct s3c24xx_dclk {
 	struct device *dev;
 	void __iomem *base;
-	struct clk_onecell_data clk_data;
 	struct notifier_block dclk0_div_change_nb;
 	struct notifier_block dclk1_div_change_nb;
 	spinlock_t dclk_lock;
 	unsigned long reg_save;
+	/* clk_data must be the last entry in the structure */
+	struct clk_hw_onecell_data clk_data;
 };
 
 #define to_s3c24xx_dclk0(x) \
@@ -216,8 +220,7 @@ static int s3c24xx_dclk1_div_notify(struct notifier_block *nb,
 #ifdef CONFIG_PM_SLEEP
 static int s3c24xx_dclk_suspend(struct device *dev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct s3c24xx_dclk *s3c24xx_dclk = platform_get_drvdata(pdev);
+	struct s3c24xx_dclk *s3c24xx_dclk = dev_get_drvdata(dev);
 
 	s3c24xx_dclk->reg_save = readl_relaxed(s3c24xx_dclk->base);
 	return 0;
@@ -225,8 +228,7 @@ static int s3c24xx_dclk_suspend(struct device *dev)
 
 static int s3c24xx_dclk_resume(struct device *dev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct s3c24xx_dclk *s3c24xx_dclk = platform_get_drvdata(pdev);
+	struct s3c24xx_dclk *s3c24xx_dclk = dev_get_drvdata(dev);
 
 	writel_relaxed(s3c24xx_dclk->reg_save, s3c24xx_dclk->base);
 	return 0;
@@ -239,31 +241,25 @@ static SIMPLE_DEV_PM_OPS(s3c24xx_dclk_pm_ops,
 static int s3c24xx_dclk_probe(struct platform_device *pdev)
 {
 	struct s3c24xx_dclk *s3c24xx_dclk;
-	struct resource *mem;
-	struct clk **clk_table;
 	struct s3c24xx_dclk_drv_data *dclk_variant;
+	struct clk_hw **clk_table;
 	int ret, i;
 
-	s3c24xx_dclk = devm_kzalloc(&pdev->dev, sizeof(*s3c24xx_dclk),
+	s3c24xx_dclk = devm_kzalloc(&pdev->dev,
+				    struct_size(s3c24xx_dclk, clk_data.hws,
+						DCLK_MAX_CLKS),
 				    GFP_KERNEL);
 	if (!s3c24xx_dclk)
 		return -ENOMEM;
 
+	clk_table = s3c24xx_dclk->clk_data.hws;
+
 	s3c24xx_dclk->dev = &pdev->dev;
+	s3c24xx_dclk->clk_data.num = DCLK_MAX_CLKS;
 	platform_set_drvdata(pdev, s3c24xx_dclk);
 	spin_lock_init(&s3c24xx_dclk->dclk_lock);
 
-	clk_table = devm_kzalloc(&pdev->dev,
-				 sizeof(struct clk *) * DCLK_MAX_CLKS,
-				 GFP_KERNEL);
-	if (!clk_table)
-		return -ENOMEM;
-
-	s3c24xx_dclk->clk_data.clks = clk_table;
-	s3c24xx_dclk->clk_data.clk_num = DCLK_MAX_CLKS;
-
-	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	s3c24xx_dclk->base = devm_ioremap_resource(&pdev->dev, mem);
+	s3c24xx_dclk->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(s3c24xx_dclk->base))
 		return PTR_ERR(s3c24xx_dclk->base);
 
@@ -271,29 +267,29 @@ static int s3c24xx_dclk_probe(struct platform_device *pdev)
 				platform_get_device_id(pdev)->driver_data;
 
 
-	clk_table[MUX_DCLK0] = clk_register_mux(&pdev->dev, "mux_dclk0",
+	clk_table[MUX_DCLK0] = clk_hw_register_mux(&pdev->dev, "mux_dclk0",
 				dclk_variant->mux_parent_names,
 				dclk_variant->mux_num_parents, 0,
 				s3c24xx_dclk->base, 1, 1, 0,
 				&s3c24xx_dclk->dclk_lock);
-	clk_table[MUX_DCLK1] = clk_register_mux(&pdev->dev, "mux_dclk1",
+	clk_table[MUX_DCLK1] = clk_hw_register_mux(&pdev->dev, "mux_dclk1",
 				dclk_variant->mux_parent_names,
 				dclk_variant->mux_num_parents, 0,
 				s3c24xx_dclk->base, 17, 1, 0,
 				&s3c24xx_dclk->dclk_lock);
 
-	clk_table[DIV_DCLK0] = clk_register_divider(&pdev->dev, "div_dclk0",
+	clk_table[DIV_DCLK0] = clk_hw_register_divider(&pdev->dev, "div_dclk0",
 				"mux_dclk0", 0, s3c24xx_dclk->base,
 				4, 4, 0, &s3c24xx_dclk->dclk_lock);
-	clk_table[DIV_DCLK1] = clk_register_divider(&pdev->dev, "div_dclk1",
+	clk_table[DIV_DCLK1] = clk_hw_register_divider(&pdev->dev, "div_dclk1",
 				"mux_dclk1", 0, s3c24xx_dclk->base,
 				20, 4, 0, &s3c24xx_dclk->dclk_lock);
 
-	clk_table[GATE_DCLK0] = clk_register_gate(&pdev->dev, "gate_dclk0",
+	clk_table[GATE_DCLK0] = clk_hw_register_gate(&pdev->dev, "gate_dclk0",
 				"div_dclk0", CLK_SET_RATE_PARENT,
 				s3c24xx_dclk->base, 0, 0,
 				&s3c24xx_dclk->dclk_lock);
-	clk_table[GATE_DCLK1] = clk_register_gate(&pdev->dev, "gate_dclk1",
+	clk_table[GATE_DCLK1] = clk_hw_register_gate(&pdev->dev, "gate_dclk1",
 				"div_dclk1", CLK_SET_RATE_PARENT,
 				s3c24xx_dclk->base, 16, 0,
 				&s3c24xx_dclk->dclk_lock);
@@ -312,15 +308,16 @@ static int s3c24xx_dclk_probe(struct platform_device *pdev)
 			goto err_clk_register;
 		}
 
-	ret = clk_register_clkdev(clk_table[MUX_DCLK0], "dclk0", NULL);
+	ret = clk_hw_register_clkdev(clk_table[MUX_DCLK0], "dclk0", NULL);
 	if (!ret)
-		ret = clk_register_clkdev(clk_table[MUX_DCLK1], "dclk1", NULL);
+		ret = clk_hw_register_clkdev(clk_table[MUX_DCLK1], "dclk1",
+					     NULL);
 	if (!ret)
-		ret = clk_register_clkdev(clk_table[MUX_CLKOUT0],
-					  "clkout0", NULL);
+		ret = clk_hw_register_clkdev(clk_table[MUX_CLKOUT0],
+					     "clkout0", NULL);
 	if (!ret)
-		ret = clk_register_clkdev(clk_table[MUX_CLKOUT1],
-					  "clkout1", NULL);
+		ret = clk_hw_register_clkdev(clk_table[MUX_CLKOUT1],
+					     "clkout1", NULL);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to register aliases, %d\n", ret);
 		goto err_clk_register;
@@ -332,12 +329,12 @@ static int s3c24xx_dclk_probe(struct platform_device *pdev)
 	s3c24xx_dclk->dclk1_div_change_nb.notifier_call =
 						s3c24xx_dclk1_div_notify;
 
-	ret = clk_notifier_register(clk_table[DIV_DCLK0],
+	ret = clk_notifier_register(clk_table[DIV_DCLK0]->clk,
 				    &s3c24xx_dclk->dclk0_div_change_nb);
 	if (ret)
 		goto err_clk_register;
 
-	ret = clk_notifier_register(clk_table[DIV_DCLK1],
+	ret = clk_notifier_register(clk_table[DIV_DCLK1]->clk,
 				    &s3c24xx_dclk->dclk1_div_change_nb);
 	if (ret)
 		goto err_dclk_notify;
@@ -345,12 +342,12 @@ static int s3c24xx_dclk_probe(struct platform_device *pdev)
 	return 0;
 
 err_dclk_notify:
-	clk_notifier_unregister(clk_table[DIV_DCLK0],
+	clk_notifier_unregister(clk_table[DIV_DCLK0]->clk,
 				&s3c24xx_dclk->dclk0_div_change_nb);
 err_clk_register:
 	for (i = 0; i < DCLK_MAX_CLKS; i++)
 		if (clk_table[i] && !IS_ERR(clk_table[i]))
-			clk_unregister(clk_table[i]);
+			clk_hw_unregister(clk_table[i]);
 
 	return ret;
 }
@@ -358,16 +355,16 @@ err_clk_register:
 static int s3c24xx_dclk_remove(struct platform_device *pdev)
 {
 	struct s3c24xx_dclk *s3c24xx_dclk = platform_get_drvdata(pdev);
-	struct clk **clk_table = s3c24xx_dclk->clk_data.clks;
+	struct clk_hw **clk_table = s3c24xx_dclk->clk_data.hws;
 	int i;
 
-	clk_notifier_unregister(clk_table[DIV_DCLK1],
+	clk_notifier_unregister(clk_table[DIV_DCLK1]->clk,
 				&s3c24xx_dclk->dclk1_div_change_nb);
-	clk_notifier_unregister(clk_table[DIV_DCLK0],
+	clk_notifier_unregister(clk_table[DIV_DCLK0]->clk,
 				&s3c24xx_dclk->dclk0_div_change_nb);
 
 	for (i = 0; i < DCLK_MAX_CLKS; i++)
-		clk_unregister(clk_table[i]);
+		clk_hw_unregister(clk_table[i]);
 
 	return 0;
 }

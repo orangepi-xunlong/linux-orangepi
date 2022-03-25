@@ -1,17 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2010 IBM Corporation
  * Copyright (C) 2010 Politecnico di Torino, Italy
- *                    TORSEC group -- http://security.polito.it
+ *                    TORSEC group -- https://security.polito.it
  *
  * Authors:
  * Mimi Zohar <zohar@us.ibm.com>
  * Roberto Sassu <roberto.sassu@polito.it>
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, version 2 of the License.
- *
- * See Documentation/security/keys-trusted-encrypted.txt
+ * See Documentation/security/keys/trusted-encrypted.rst
  */
 
 #include <linux/uaccess.h>
@@ -30,8 +27,9 @@
 #include <linux/scatterlist.h>
 #include <linux/ctype.h>
 #include <crypto/aes.h>
+#include <crypto/algapi.h>
 #include <crypto/hash.h>
-#include <crypto/sha.h>
+#include <crypto/sha2.h>
 #include <crypto/skcipher.h>
 
 #include "encrypted.h"
@@ -44,6 +42,7 @@ static const char hmac_alg[] = "hmac(sha256)";
 static const char blkcipher_alg[] = "cbc(aes)";
 static const char key_format_default[] = "default";
 static const char key_format_ecryptfs[] = "ecryptfs";
+static const char key_format_enc32[] = "enc32";
 static unsigned int ivsize;
 static int blksize;
 
@@ -53,26 +52,22 @@ static int blksize;
 #define HASH_SIZE SHA256_DIGEST_SIZE
 #define MAX_DATA_SIZE 4096
 #define MIN_DATA_SIZE  20
+#define KEY_ENC32_PAYLOAD_LEN 32
 
-struct sdesc {
-	struct shash_desc shash;
-	char ctx[];
-};
-
-static struct crypto_shash *hashalg;
-static struct crypto_shash *hmacalg;
+static struct crypto_shash *hash_tfm;
 
 enum {
-	Opt_err = -1, Opt_new, Opt_load, Opt_update
+	Opt_new, Opt_load, Opt_update, Opt_err
 };
 
 enum {
-	Opt_error = -1, Opt_default, Opt_ecryptfs
+	Opt_default, Opt_ecryptfs, Opt_enc32, Opt_error
 };
 
 static const match_table_t key_format_tokens = {
 	{Opt_default, "default"},
 	{Opt_ecryptfs, "ecryptfs"},
+	{Opt_enc32, "enc32"},
 	{Opt_error, NULL}
 };
 
@@ -200,6 +195,7 @@ static int datablob_parse(char *datablob, const char **format,
 	key_format = match_token(p, key_format_tokens, args);
 	switch (key_format) {
 	case Opt_ecryptfs:
+	case Opt_enc32:
 	case Opt_default:
 		*format = p;
 		*master_desc = strsep(&datablob, " \t");
@@ -327,53 +323,24 @@ error:
 	return ukey;
 }
 
-static struct sdesc *alloc_sdesc(struct crypto_shash *alg)
-{
-	struct sdesc *sdesc;
-	int size;
-
-	size = sizeof(struct shash_desc) + crypto_shash_descsize(alg);
-	sdesc = kmalloc(size, GFP_KERNEL);
-	if (!sdesc)
-		return ERR_PTR(-ENOMEM);
-	sdesc->shash.tfm = alg;
-	sdesc->shash.flags = 0x0;
-	return sdesc;
-}
-
 static int calc_hmac(u8 *digest, const u8 *key, unsigned int keylen,
 		     const u8 *buf, unsigned int buflen)
 {
-	struct sdesc *sdesc;
-	int ret;
+	struct crypto_shash *tfm;
+	int err;
 
-	sdesc = alloc_sdesc(hmacalg);
-	if (IS_ERR(sdesc)) {
-		pr_info("encrypted_key: can't alloc %s\n", hmac_alg);
-		return PTR_ERR(sdesc);
+	tfm = crypto_alloc_shash(hmac_alg, 0, 0);
+	if (IS_ERR(tfm)) {
+		pr_err("encrypted_key: can't alloc %s transform: %ld\n",
+		       hmac_alg, PTR_ERR(tfm));
+		return PTR_ERR(tfm);
 	}
 
-	ret = crypto_shash_setkey(hmacalg, key, keylen);
-	if (!ret)
-		ret = crypto_shash_digest(&sdesc->shash, buf, buflen, digest);
-	kfree(sdesc);
-	return ret;
-}
-
-static int calc_hash(u8 *digest, const u8 *buf, unsigned int buflen)
-{
-	struct sdesc *sdesc;
-	int ret;
-
-	sdesc = alloc_sdesc(hashalg);
-	if (IS_ERR(sdesc)) {
-		pr_info("encrypted_key: can't alloc %s\n", hash_alg);
-		return PTR_ERR(sdesc);
-	}
-
-	ret = crypto_shash_digest(&sdesc->shash, buf, buflen, digest);
-	kfree(sdesc);
-	return ret;
+	err = crypto_shash_setkey(tfm, key, keylen);
+	if (!err)
+		err = crypto_shash_tfm_digest(tfm, buf, buflen, digest);
+	crypto_free_shash(tfm);
+	return err;
 }
 
 enum derived_key_type { ENC_KEY, AUTH_KEY };
@@ -391,10 +358,9 @@ static int get_derived_key(u8 *derived_key, enum derived_key_type key_type,
 		derived_buf_len = HASH_SIZE;
 
 	derived_buf = kzalloc(derived_buf_len, GFP_KERNEL);
-	if (!derived_buf) {
-		pr_err("encrypted_key: out of memory\n");
+	if (!derived_buf)
 		return -ENOMEM;
-	}
+
 	if (key_type)
 		strcpy(derived_buf, "AUTH_KEY");
 	else
@@ -402,8 +368,9 @@ static int get_derived_key(u8 *derived_key, enum derived_key_type key_type,
 
 	memcpy(derived_buf + strlen(derived_buf) + 1, master_key,
 	       master_keylen);
-	ret = calc_hash(derived_key, derived_buf, derived_buf_len);
-	kfree(derived_buf);
+	ret = crypto_shash_tfm_digest(hash_tfm, derived_buf, derived_buf_len,
+				      derived_key);
+	kfree_sensitive(derived_buf);
 	return ret;
 }
 
@@ -535,6 +502,7 @@ static int datablob_hmac_append(struct encrypted_key_payload *epayload,
 	if (!ret)
 		dump_hmac(NULL, digest, HASH_SIZE);
 out:
+	memzero_explicit(derived_key, sizeof(derived_key));
 	return ret;
 }
 
@@ -563,8 +531,8 @@ static int datablob_hmac_verify(struct encrypted_key_payload *epayload,
 	ret = calc_hmac(digest, derived_key, sizeof derived_key, p, len);
 	if (ret < 0)
 		goto out;
-	ret = memcmp(digest, epayload->format + epayload->datablob_len,
-		     sizeof digest);
+	ret = crypto_memneq(digest, epayload->format + epayload->datablob_len,
+			    sizeof(digest));
 	if (ret) {
 		ret = -EINVAL;
 		dump_hmac("datablob",
@@ -573,6 +541,7 @@ static int datablob_hmac_verify(struct encrypted_key_payload *epayload,
 		dump_hmac("calc", digest, HASH_SIZE);
 	}
 out:
+	memzero_explicit(derived_key, sizeof(derived_key));
 	return ret;
 }
 
@@ -644,15 +613,22 @@ static struct encrypted_key_payload *encrypted_key_alloc(struct key *key,
 	format_len = (!format) ? strlen(key_format_default) : strlen(format);
 	decrypted_datalen = dlen;
 	payload_datalen = decrypted_datalen;
-	if (format && !strcmp(format, key_format_ecryptfs)) {
-		if (dlen != ECRYPTFS_MAX_KEY_BYTES) {
-			pr_err("encrypted_key: keylen for the ecryptfs format "
-			       "must be equal to %d bytes\n",
-			       ECRYPTFS_MAX_KEY_BYTES);
-			return ERR_PTR(-EINVAL);
+	if (format) {
+		if (!strcmp(format, key_format_ecryptfs)) {
+			if (dlen != ECRYPTFS_MAX_KEY_BYTES) {
+				pr_err("encrypted_key: keylen for the ecryptfs format must be equal to %d bytes\n",
+					ECRYPTFS_MAX_KEY_BYTES);
+				return ERR_PTR(-EINVAL);
+			}
+			decrypted_datalen = ECRYPTFS_MAX_KEY_BYTES;
+			payload_datalen = sizeof(struct ecryptfs_auth_tok);
+		} else if (!strcmp(format, key_format_enc32)) {
+			if (decrypted_datalen != KEY_ENC32_PAYLOAD_LEN) {
+				pr_err("encrypted_key: enc32 key payload incorrect length: %d\n",
+						decrypted_datalen);
+				return ERR_PTR(-EINVAL);
+			}
 		}
-		decrypted_datalen = ECRYPTFS_MAX_KEY_BYTES;
-		payload_datalen = sizeof(struct ecryptfs_auth_tok);
 	}
 
 	encrypted_datalen = roundup(decrypted_datalen, blksize);
@@ -729,6 +705,7 @@ static int encrypted_key_decrypt(struct encrypted_key_payload *epayload,
 out:
 	up_read(&mkey->sem);
 	key_put(mkey);
+	memzero_explicit(derived_key, sizeof(derived_key));
 	return ret;
 }
 
@@ -835,13 +812,13 @@ static int encrypted_instantiate(struct key *key,
 	ret = encrypted_init(epayload, key->description, format, master_desc,
 			     decrypted_datalen, hex_encoded_iv);
 	if (ret < 0) {
-		kfree(epayload);
+		kfree_sensitive(epayload);
 		goto out;
 	}
 
 	rcu_assign_keypointer(key, epayload);
 out:
-	kfree(datablob);
+	kfree_sensitive(datablob);
 	return ret;
 }
 
@@ -850,8 +827,7 @@ static void encrypted_rcu_free(struct rcu_head *rcu)
 	struct encrypted_key_payload *epayload;
 
 	epayload = container_of(rcu, struct encrypted_key_payload, rcu);
-	memset(epayload->decrypted_data, 0, epayload->decrypted_datalen);
-	kfree(epayload);
+	kfree_sensitive(epayload);
 }
 
 /*
@@ -909,19 +885,19 @@ static int encrypted_update(struct key *key, struct key_preparsed_payload *prep)
 	rcu_assign_keypointer(key, new_epayload);
 	call_rcu(&epayload->rcu, encrypted_rcu_free);
 out:
-	kfree(buf);
+	kfree_sensitive(buf);
 	return ret;
 }
 
 /*
- * encrypted_read - format and copy the encrypted data to userspace
+ * encrypted_read - format and copy out the encrypted data
  *
  * The resulting datablob format is:
  * <master-key name> <decrypted data length> <encrypted iv> <encrypted data>
  *
  * On success, return to userspace the encrypted key datablob size.
  */
-static long encrypted_read(const struct key *key, char __user *buffer,
+static long encrypted_read(const struct key *key, char *buffer,
 			   size_t buflen)
 {
 	struct encrypted_key_payload *epayload;
@@ -967,33 +943,25 @@ static long encrypted_read(const struct key *key, char __user *buffer,
 
 	up_read(&mkey->sem);
 	key_put(mkey);
+	memzero_explicit(derived_key, sizeof(derived_key));
 
-	if (copy_to_user(buffer, ascii_buf, asciiblob_len) != 0)
-		ret = -EFAULT;
-	kfree(ascii_buf);
+	memcpy(buffer, ascii_buf, asciiblob_len);
+	kfree_sensitive(ascii_buf);
 
 	return asciiblob_len;
 out:
 	up_read(&mkey->sem);
 	key_put(mkey);
+	memzero_explicit(derived_key, sizeof(derived_key));
 	return ret;
 }
 
 /*
- * encrypted_destroy - before freeing the key, clear the decrypted data
- *
- * Before freeing the key, clear the memory containing the decrypted
- * key data.
+ * encrypted_destroy - clear and free the key's payload
  */
 static void encrypted_destroy(struct key *key)
 {
-	struct encrypted_key_payload *epayload = key->payload.data[0];
-
-	if (!epayload)
-		return;
-
-	memset(epayload->decrypted_data, 0, epayload->decrypted_datalen);
-	kfree(key->payload.data[0]);
+	kfree_sensitive(key->payload.data[0]);
 }
 
 struct key_type key_type_encrypted = {
@@ -1006,47 +974,17 @@ struct key_type key_type_encrypted = {
 };
 EXPORT_SYMBOL_GPL(key_type_encrypted);
 
-static void encrypted_shash_release(void)
-{
-	if (hashalg)
-		crypto_free_shash(hashalg);
-	if (hmacalg)
-		crypto_free_shash(hmacalg);
-}
-
-static int __init encrypted_shash_alloc(void)
-{
-	int ret;
-
-	hmacalg = crypto_alloc_shash(hmac_alg, 0, CRYPTO_ALG_ASYNC);
-	if (IS_ERR(hmacalg)) {
-		pr_info("encrypted_key: could not allocate crypto %s\n",
-			hmac_alg);
-		return PTR_ERR(hmacalg);
-	}
-
-	hashalg = crypto_alloc_shash(hash_alg, 0, CRYPTO_ALG_ASYNC);
-	if (IS_ERR(hashalg)) {
-		pr_info("encrypted_key: could not allocate crypto %s\n",
-			hash_alg);
-		ret = PTR_ERR(hashalg);
-		goto hashalg_fail;
-	}
-
-	return 0;
-
-hashalg_fail:
-	crypto_free_shash(hmacalg);
-	return ret;
-}
-
 static int __init init_encrypted(void)
 {
 	int ret;
 
-	ret = encrypted_shash_alloc();
-	if (ret < 0)
-		return ret;
+	hash_tfm = crypto_alloc_shash(hash_alg, 0, 0);
+	if (IS_ERR(hash_tfm)) {
+		pr_err("encrypted_key: can't allocate %s transform: %ld\n",
+		       hash_alg, PTR_ERR(hash_tfm));
+		return PTR_ERR(hash_tfm);
+	}
+
 	ret = aes_get_sizes();
 	if (ret < 0)
 		goto out;
@@ -1055,14 +993,14 @@ static int __init init_encrypted(void)
 		goto out;
 	return 0;
 out:
-	encrypted_shash_release();
+	crypto_free_shash(hash_tfm);
 	return ret;
 
 }
 
 static void __exit cleanup_encrypted(void)
 {
-	encrypted_shash_release();
+	crypto_free_shash(hash_tfm);
 	unregister_key_type(&key_type_encrypted);
 }
 

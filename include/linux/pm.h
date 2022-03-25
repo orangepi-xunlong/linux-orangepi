@@ -1,21 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *  pm.h - Power management interface
  *
  *  Copyright (C) 2000 Andrew Henroid
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #ifndef _LINUX_PM_H
@@ -26,6 +13,7 @@
 #include <linux/spinlock.h>
 #include <linux/wait.h>
 #include <linux/timer.h>
+#include <linux/hrtimer.h>
 #include <linux/completion.h>
 
 /*
@@ -51,7 +39,6 @@ static inline void pm_vt_switch_unregister(struct device *dev)
  * Device power management
  */
 
-struct device;
 
 #ifdef CONFIG_PM
 extern const char power_group_name[];		/* = "power" */
@@ -64,24 +51,7 @@ typedef struct pm_message {
 } pm_message_t;
 
 /**
- * struct dev_pm_ops - device PM callbacks
- *
- * Several device power state transitions are externally visible, affecting
- * the state of pending I/O queues and (for drivers that touch hardware)
- * interrupts, wakeups, DMA, and other hardware state.  There may also be
- * internal transitions to various low-power modes which are transparent
- * to the rest of the driver stack (such as a driver that's ON gating off
- * clocks which are not in active use).
- *
- * The externally visible transitions are handled with the help of callbacks
- * included in this structure in such a way that two levels of callbacks are
- * involved.  First, the PM core executes callbacks provided by PM domains,
- * device types, classes and bus types.  They are the subsystem-level callbacks
- * supposed to execute callbacks provided by device drivers, although they may
- * choose not to do that.  If the driver callbacks are executed, they have to
- * collaborate with the subsystem-level callbacks to achieve the goals
- * appropriate for the given system transition, given transition phase and the
- * subsystem the device belongs to.
+ * struct dev_pm_ops - device PM callbacks.
  *
  * @prepare: The principal role of this callback is to prevent new children of
  *	the device from being registered after it has returned (the driver's
@@ -240,34 +210,6 @@ typedef struct pm_message {
  *	driver's interrupt handler, which is guaranteed not to run while
  *	@restore_noirq() is being executed.  Analogous to @resume_noirq().
  *
- * All of the above callbacks, except for @complete(), return error codes.
- * However, the error codes returned by the resume operations, @resume(),
- * @thaw(), @restore(), @resume_noirq(), @thaw_noirq(), and @restore_noirq(), do
- * not cause the PM core to abort the resume transition during which they are
- * returned.  The error codes returned in those cases are only printed by the PM
- * core to the system logs for debugging purposes.  Still, it is recommended
- * that drivers only return error codes from their resume methods in case of an
- * unrecoverable failure (i.e. when the device being handled refuses to resume
- * and becomes unusable) to allow us to modify the PM core in the future, so
- * that it can avoid attempting to handle devices that failed to resume and
- * their children.
- *
- * It is allowed to unregister devices while the above callbacks are being
- * executed.  However, a callback routine must NOT try to unregister the device
- * it was called for, although it may unregister children of that device (for
- * example, if it detects that a child was unplugged while the system was
- * asleep).
- *
- * Refer to Documentation/power/devices.txt for more information about the role
- * of the above callbacks in the system suspend process.
- *
- * There also are callbacks related to runtime power management of devices.
- * Again, these callbacks are executed by the PM core only for subsystems
- * (PM domains, device types, classes and bus types) and the subsystem-level
- * callbacks are supposed to invoke the driver callbacks.  Moreover, the exact
- * actions to be performed by a device driver's callbacks generally depend on
- * the platform and subsystem the device belongs to.
- *
  * @runtime_suspend: Prepare the device for a condition in which it won't be
  *	able to communicate with the CPU(s) and RAM due to power management.
  *	This need not mean that the device should be put into a low-power state.
@@ -287,11 +229,51 @@ typedef struct pm_message {
  *	Check these conditions, and return 0 if it's appropriate to let the PM
  *	core queue a suspend request for the device.
  *
- * Refer to Documentation/power/runtime_pm.txt for more information about the
- * role of the above callbacks in device runtime power management.
+ * Several device power state transitions are externally visible, affecting
+ * the state of pending I/O queues and (for drivers that touch hardware)
+ * interrupts, wakeups, DMA, and other hardware state.  There may also be
+ * internal transitions to various low-power modes which are transparent
+ * to the rest of the driver stack (such as a driver that's ON gating off
+ * clocks which are not in active use).
  *
+ * The externally visible transitions are handled with the help of callbacks
+ * included in this structure in such a way that, typically, two levels of
+ * callbacks are involved.  First, the PM core executes callbacks provided by PM
+ * domains, device types, classes and bus types.  They are the subsystem-level
+ * callbacks expected to execute callbacks provided by device drivers, although
+ * they may choose not to do that.  If the driver callbacks are executed, they
+ * have to collaborate with the subsystem-level callbacks to achieve the goals
+ * appropriate for the given system transition, given transition phase and the
+ * subsystem the device belongs to.
+ *
+ * All of the above callbacks, except for @complete(), return error codes.
+ * However, the error codes returned by @resume(), @thaw(), @restore(),
+ * @resume_noirq(), @thaw_noirq(), and @restore_noirq(), do not cause the PM
+ * core to abort the resume transition during which they are returned.  The
+ * error codes returned in those cases are only printed to the system logs for
+ * debugging purposes.  Still, it is recommended that drivers only return error
+ * codes from their resume methods in case of an unrecoverable failure (i.e.
+ * when the device being handled refuses to resume and becomes unusable) to
+ * allow the PM core to be modified in the future, so that it can avoid
+ * attempting to handle devices that failed to resume and their children.
+ *
+ * It is allowed to unregister devices while the above callbacks are being
+ * executed.  However, a callback routine MUST NOT try to unregister the device
+ * it was called for, although it may unregister children of that device (for
+ * example, if it detects that a child was unplugged while the system was
+ * asleep).
+ *
+ * There also are callbacks related to runtime power management of devices.
+ * Again, as a rule these callbacks are executed by the PM core for subsystems
+ * (PM domains, device types, classes and bus types) and the subsystem-level
+ * callbacks are expected to invoke the driver callbacks.  Moreover, the exact
+ * actions to be performed by a device driver's callbacks generally depend on
+ * the platform and subsystem the device belongs to.
+ *
+ * Refer to Documentation/power/runtime_pm.rst for more information about the
+ * role of the @runtime_suspend(), @runtime_resume() and @runtime_idle()
+ * callbacks in device runtime power management.
  */
-
 struct dev_pm_ops {
 	int (*prepare)(struct device *dev);
 	void (*complete)(struct device *dev);
@@ -368,7 +350,7 @@ struct dev_pm_ops {
  * to RAM and hibernation.
  */
 #define SIMPLE_DEV_PM_OPS(name, suspend_fn, resume_fn) \
-const struct dev_pm_ops name = { \
+const struct dev_pm_ops __maybe_unused name = { \
 	SET_SYSTEM_SLEEP_PM_OPS(suspend_fn, resume_fn) \
 }
 
@@ -386,12 +368,18 @@ const struct dev_pm_ops name = { \
  * .runtime_resume(), respectively (and analogously for hibernation).
  */
 #define UNIVERSAL_DEV_PM_OPS(name, suspend_fn, resume_fn, idle_fn) \
-const struct dev_pm_ops name = { \
+const struct dev_pm_ops __maybe_unused name = { \
 	SET_SYSTEM_SLEEP_PM_OPS(suspend_fn, resume_fn) \
 	SET_RUNTIME_PM_OPS(suspend_fn, resume_fn, idle_fn) \
 }
 
-/**
+#ifdef CONFIG_PM
+#define pm_ptr(_ptr) (_ptr)
+#else
+#define pm_ptr(_ptr) NULL
+#endif
+
+/*
  * PM_EVENT_ messages
  *
  * The following PM_EVENT_ messages are defined for the internal use of the PM
@@ -487,7 +475,7 @@ const struct dev_pm_ops name = { \
 
 #define PMSG_IS_AUTO(msg)	(((msg).event & PM_EVENT_AUTO) != 0)
 
-/**
+/*
  * Device run-time power management status.
  *
  * These status labels are used internally by the PM core to indicate the
@@ -517,7 +505,7 @@ enum rpm_status {
 	RPM_SUSPENDING,
 };
 
-/**
+/*
  * Device run-time power management request types.
  *
  * RPM_REQ_NONE		Do nothing.
@@ -548,6 +536,8 @@ struct pm_subsys_data {
 	spinlock_t lock;
 	unsigned int refcount;
 #ifdef CONFIG_PM_CLK
+	unsigned int clock_op_might_sleep;
+	struct mutex clock_mutex;
 	struct list_head clock_list;
 #endif
 #ifdef CONFIG_PM_GENERIC_DOMAINS
@@ -555,17 +545,37 @@ struct pm_subsys_data {
 #endif
 };
 
+/*
+ * Driver flags to control system suspend/resume behavior.
+ *
+ * These flags can be set by device drivers at the probe time.  They need not be
+ * cleared by the drivers as the driver core will take care of that.
+ *
+ * NO_DIRECT_COMPLETE: Do not apply direct-complete optimization to the device.
+ * SMART_PREPARE: Take the driver ->prepare callback return value into account.
+ * SMART_SUSPEND: Avoid resuming the device from runtime suspend.
+ * MAY_SKIP_RESUME: Allow driver "noirq" and "early" callbacks to be skipped.
+ *
+ * See Documentation/driver-api/pm/devices.rst for details.
+ */
+#define DPM_FLAG_NO_DIRECT_COMPLETE	BIT(0)
+#define DPM_FLAG_SMART_PREPARE		BIT(1)
+#define DPM_FLAG_SMART_SUSPEND		BIT(2)
+#define DPM_FLAG_MAY_SKIP_RESUME	BIT(3)
+
 struct dev_pm_info {
 	pm_message_t		power_state;
 	unsigned int		can_wakeup:1;
 	unsigned int		async_suspend:1;
+	bool			in_dpm_list:1;	/* Owned by the PM core */
 	bool			is_prepared:1;	/* Owned by the PM core */
 	bool			is_suspended:1;	/* Ditto */
 	bool			is_noirq_suspended:1;
 	bool			is_late_suspended:1;
-	bool			is_runtime_disabled:1;
+	bool			no_pm:1;
 	bool			early_init:1;	/* Owned by the PM core */
 	bool			direct_complete:1;	/* Owned by the PM core */
+	u32			driver_flags;
 	spinlock_t		lock;
 #ifdef CONFIG_PM_SLEEP
 	struct list_head	entry;
@@ -574,12 +584,14 @@ struct dev_pm_info {
 	bool			wakeup_path:1;
 	bool			syscore:1;
 	bool			no_pm_callbacks:1;	/* Owned by the PM core */
+	unsigned int		must_resume:1;	/* Owned by the PM core */
+	unsigned int		may_skip_resume:1;	/* Set by subsystems */
 #else
 	unsigned int		should_wakeup:1;
 #endif
 #ifdef CONFIG_PM
-	struct timer_list	suspend_timer;
-	unsigned long		timer_expires;
+	struct hrtimer		suspend_timer;
+	u64			timer_expires;
 	struct work_struct	work;
 	wait_queue_head_t	wait_queue;
 	struct wake_irq		*wakeirq;
@@ -589,7 +601,7 @@ struct dev_pm_info {
 	unsigned int		idle_notification:1;
 	unsigned int		request_pending:1;
 	unsigned int		deferred_resume:1;
-	unsigned int		run_wake:1;
+	unsigned int		needs_force_resume:1;
 	unsigned int		runtime_auto:1;
 	bool			ignore_children:1;
 	unsigned int		no_callbacks:1;
@@ -597,36 +609,41 @@ struct dev_pm_info {
 	unsigned int		use_autosuspend:1;
 	unsigned int		timer_autosuspends:1;
 	unsigned int		memalloc_noio:1;
+	unsigned int		links_count;
 	enum rpm_request	request;
 	enum rpm_status		runtime_status;
 	int			runtime_error;
 	int			autosuspend_delay;
-	unsigned long		last_busy;
-	unsigned long		active_jiffies;
-	unsigned long		suspended_jiffies;
-	unsigned long		accounting_timestamp;
+	u64			last_busy;
+	u64			active_time;
+	u64			suspended_time;
+	u64			accounting_timestamp;
 #endif
 	struct pm_subsys_data	*subsys_data;  /* Owned by the subsystem. */
 	void (*set_latency_tolerance)(struct device *, s32);
 	struct dev_pm_qos	*qos;
 };
 
-extern void update_pm_runtime_accounting(struct device *dev);
 extern int dev_pm_get_subsys_data(struct device *dev);
 extern void dev_pm_put_subsys_data(struct device *dev);
 
-/*
- * Power domains provide callbacks that are executed during system suspend,
- * hibernation, system resume and during runtime PM transitions along with
- * subsystem-level and driver-level callbacks.
+/**
+ * struct dev_pm_domain - power management domain representation.
  *
+ * @ops: Power management operations associated with this domain.
+ * @start: Called when a user needs to start the device via the domain.
  * @detach: Called when removing a device from the domain.
  * @activate: Called before executing probe routines for bus types and drivers.
  * @sync: Called after successful driver probe.
  * @dismiss: Called after unsuccessful driver probe and after driver removal.
+ *
+ * Power domains provide callbacks that are executed during system suspend,
+ * hibernation, system resume and during runtime PM transitions instead of
+ * subsystem-level and driver-level callbacks.
  */
 struct dev_pm_domain {
 	struct dev_pm_ops	ops;
+	int (*start)(struct device *dev);
 	void (*detach)(struct device *dev, bool power_off);
 	int (*activate)(struct device *dev);
 	void (*sync)(struct device *dev);
@@ -734,7 +751,9 @@ extern int pm_generic_poweroff_noirq(struct device *dev);
 extern int pm_generic_poweroff_late(struct device *dev);
 extern int pm_generic_poweroff(struct device *dev);
 extern void pm_generic_complete(struct device *dev);
-extern void pm_complete_with_resume_check(struct device *dev);
+
+extern bool dev_pm_skip_resume(struct device *dev);
+extern bool dev_pm_skip_suspend(struct device *dev);
 
 #else /* !CONFIG_PM_SLEEP */
 

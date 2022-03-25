@@ -47,7 +47,6 @@ MODULE_DESCRIPTION("Support for Cisco/Aironet 802.11 wireless ethernet "
 		   "cards.  This is the module that links the PCMCIA card "
 		   "with the airo module.");
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_SUPPORTED_DEVICE("Aironet 4500, 4800 and Cisco 340 PCMCIA cards");
 
 /*====================================================================*/
 
@@ -102,10 +101,7 @@ static int airo_cs_config_check(struct pcmcia_device *p_dev, void *priv_data)
 
 static int airo_config(struct pcmcia_device *link)
 {
-	struct local_info *dev;
 	int ret;
-
-	dev = link->priv;
 
 	dev_dbg(&link->dev, "airo_config\n");
 

@@ -182,8 +182,9 @@
 #include <linux/soundcard.h>
 #include <linux/poll.h>
 #include <linux/mutex.h>
+#include <linux/sched/signal.h>
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include "dmasound.h"
 
@@ -354,8 +355,8 @@ static int mixer_ioctl(struct file *file, u_int cmd, u_long arg)
 		{
 		    mixer_info info;
 		    memset(&info, 0, sizeof(info));
-		    strlcpy(info.id, dmasound.mach.name2, sizeof(info.id));
-		    strlcpy(info.name, dmasound.mach.name2, sizeof(info.name));
+		    strscpy(info.id, dmasound.mach.name2, sizeof(info.id));
+		    strscpy(info.name, dmasound.mach.name2, sizeof(info.name));
 		    info.modify_counter = mixer.modify_counter;
 		    if (copy_to_user((void __user *)arg, &info, sizeof(info)))
 			    return -EFAULT;
@@ -383,6 +384,7 @@ static const struct file_operations mixer_fops =
 	.owner		= THIS_MODULE,
 	.llseek		= no_llseek,
 	.unlocked_ioctl	= mixer_unlocked_ioctl,
+	.compat_ioctl	= compat_ptr_ioctl,
 	.open		= mixer_open,
 	.release	= mixer_release,
 };
@@ -419,7 +421,7 @@ static int sq_allocate_buffers(struct sound_queue *sq, int num, int size)
 		return 0;
 	sq->numBufs = num;
 	sq->bufSize = size;
-	sq->buffers = kmalloc (num * sizeof(char *), GFP_KERNEL);
+	sq->buffers = kmalloc_array (num, sizeof(char *), GFP_KERNEL);
 	if (!sq->buffers)
 		return -ENOMEM;
 	for (i = 0; i < num; i++) {
@@ -669,9 +671,9 @@ static ssize_t sq_write(struct file *file, const char __user *src, size_t uLeft,
 	return uUsed < 0? uUsed: uWritten;
 }
 
-static unsigned int sq_poll(struct file *file, struct poll_table_struct *wait)
+static __poll_t sq_poll(struct file *file, struct poll_table_struct *wait)
 {
-	unsigned int mask = 0;
+	__poll_t mask = 0;
 	int retVal;
 	
 	if (write_sq.locked == 0) {
@@ -683,7 +685,7 @@ static unsigned int sq_poll(struct file *file, struct poll_table_struct *wait)
 		poll_wait(file, &write_sq.action_queue, wait);
 	if (file->f_mode & FMODE_WRITE)
 		if (write_sq.count < write_sq.max_active || write_sq.block_size - write_sq.rear_size > 0)
-			mask |= POLLOUT | POLLWRNORM;
+			mask |= EPOLLOUT | EPOLLWRNORM;
 	return mask;
 
 }
@@ -997,11 +999,9 @@ static int sq_ioctl(struct file *file, u_int cmd, u_long arg)
 	case SNDCTL_DSP_RESET:
 		sq_reset();
 		return 0;
-		break ;
 	case SNDCTL_DSP_GETFMTS:
 		fmt = dmasound.mach.hardware_afmts ; /* this is what OSS says.. */
 		return IOCTL_OUT(arg, fmt);
-		break ;
 	case SNDCTL_DSP_GETBLKSIZE:
 		/* this should tell the caller about bytes that the app can
 		   read/write - the app doesn't care about our internal buffers.
@@ -1018,7 +1018,6 @@ static int sq_ioctl(struct file *file, u_int cmd, u_long arg)
 			size = write_sq.user_frag_size ;
 		}
 		return IOCTL_OUT(arg, size);
-		break ;
 	case SNDCTL_DSP_POST:
 		/* all we are going to do is to tell the LL that any
 		   partial frags can be queued for output.
@@ -1042,7 +1041,6 @@ static int sq_ioctl(struct file *file, u_int cmd, u_long arg)
 		if (file->f_mode & shared_resource_owner)
 			shared_resources_initialised = 0 ;
 		return result ;
-		break ;
 	case SOUND_PCM_READ_RATE:
 		return IOCTL_OUT(arg, dmasound.soft.speed);
 	case SNDCTL_DSP_SPEED:
@@ -1121,7 +1119,6 @@ static int sq_ioctl(struct file *file, u_int cmd, u_long arg)
 		   the value is 'random' and that the user _must_ check the actual
 		   frags values using SNDCTL_DSP_GETBLKSIZE or similar */
 		return IOCTL_OUT(arg, data);
-		break ;
 	case SNDCTL_DSP_GETOSPACE:
 		/*
 		*/
@@ -1166,6 +1163,7 @@ static const struct file_operations sq_fops =
 	.write		= sq_write,
 	.poll		= sq_poll,
 	.unlocked_ioctl	= sq_unlocked_ioctl,
+	.compat_ioctl	= compat_ptr_ioctl,
 	.open		= sq_open,
 	.release	= sq_release,
 };
@@ -1231,31 +1229,22 @@ static char *get_afmt_string(int afmt)
         switch(afmt) {
             case AFMT_MU_LAW:
                 return "mu-law";
-                break;
             case AFMT_A_LAW:
                 return "A-law";
-                break;
             case AFMT_U8:
                 return "unsigned 8 bit";
-                break;
             case AFMT_S8:
                 return "signed 8 bit";
-                break;
             case AFMT_S16_BE:
                 return "signed 16 bit BE";
-                break;
             case AFMT_U16_BE:
                 return "unsigned 16 bit BE";
-                break;
             case AFMT_S16_LE:
                 return "signed 16 bit LE";
-                break;
             case AFMT_U16_LE:
                 return "unsigned 16 bit LE";
-                break;
 	    case 0:
 		return "format not set" ;
-		break ;
             default:
                 break ;
         }
@@ -1475,13 +1464,13 @@ static int dmasound_setup(char *str)
 			printk("dmasound_setup: invalid catch radius, using default = %d\n", catchRadius);
 		else
 			catchRadius = ints[3];
-		/* fall through */
+		fallthrough;
 	case 2:
 		if (ints[1] < MIN_BUFFERS)
 			printk("dmasound_setup: invalid number of buffers, using default = %d\n", numWriteBufs);
 		else
 			numWriteBufs = ints[1];
-		/* fall through */
+		fallthrough;
 	case 1:
 		if ((size = ints[2]) < 256) /* check for small buffer specs */
 			size <<= 10 ;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  This file contains quirk handling code for PnP devices
  *  Some devices do not report all their resources, and need to have extra
@@ -20,7 +21,6 @@
 #include <linux/slab.h>
 #include <linux/pnp.h>
 #include <linux/io.h>
-#include <linux/kallsyms.h>
 #include "base.h"
 
 static void quirk_awe32_add_ports(struct pnp_dev *dev,
@@ -225,8 +225,6 @@ static void quirk_ad1815_mpu_resources(struct pnp_dev *dev)
 	irq->flags |= IORESOURCE_IRQ_OPTIONAL;
 	dev_info(&dev->dev, "made independent IRQ optional\n");
 }
-
-#include <linux/pci.h>
 
 static void quirk_system_pci_resources(struct pnp_dev *dev)
 {
@@ -458,7 +456,7 @@ void pnp_fixup_device(struct pnp_dev *dev)
 	for (f = pnp_fixups; *f->id; f++) {
 		if (!compare_pnp_id(dev->id, f->id))
 			continue;
-		pnp_dbg(&dev->dev, "%s: calling %pF\n", f->id,
+		pnp_dbg(&dev->dev, "%s: calling %pS\n", f->id,
 			f->quirk_function);
 		f->quirk_function(dev);
 	}

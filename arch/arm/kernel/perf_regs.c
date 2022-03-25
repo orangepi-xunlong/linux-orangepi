@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 
 #include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/perf_event.h>
 #include <linux/bug.h>
+#include <linux/sched/task_stack.h>
 #include <asm/perf_regs.h>
 #include <asm/ptrace.h>
 
@@ -30,8 +32,7 @@ u64 perf_reg_abi(struct task_struct *task)
 }
 
 void perf_get_regs_user(struct perf_regs *regs_user,
-			struct pt_regs *regs,
-			struct pt_regs *regs_user_copy)
+			struct pt_regs *regs)
 {
 	regs_user->regs = task_pt_regs(current);
 	regs_user->abi = perf_reg_abi(current);

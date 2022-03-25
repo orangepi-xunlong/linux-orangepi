@@ -1,33 +1,48 @@
+// SPDX-License-Identifier: LGPL-2.1
 /*
- *   fs/cifs/fscache.c - CIFS filesystem cache interface
+ *   CIFS filesystem cache interface
  *
  *   Copyright (c) 2010 Novell, Inc.
  *   Author(s): Suresh Jayaraman <sjayaraman@suse.de>
  *
- *   This library is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU Lesser General Public License as published
- *   by the Free Software Foundation; either version 2.1 of the License, or
- *   (at your option) any later version.
- *
- *   This library is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
- *   the GNU Lesser General Public License for more details.
- *
- *   You should have received a copy of the GNU Lesser General Public License
- *   along with this library; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 #include "fscache.h"
 #include "cifsglob.h"
 #include "cifs_debug.h"
 #include "cifs_fs_sb.h"
+#include "cifsproto.h"
 
+/*
+ * Key layout of CIFS server cache index object
+ */
+struct cifs_server_key {
+	__u64 conn_id;
+} __packed;
+
+/*
+ * Get a cookie for a server object keyed by {IPaddress,port,family} tuple
+ */
 void cifs_fscache_get_client_cookie(struct TCP_Server_Info *server)
 {
+	struct cifs_server_key key;
+
+	/*
+	 * Check if cookie was already initialized so don't reinitialize it.
+	 * In the future, as we integrate with newer fscache features,
+	 * we may want to instead add a check if cookie has changed
+	 */
+	if (server->fscache)
+		return;
+
+	memset(&key, 0, sizeof(key));
+	key.conn_id = server->conn_id;
+
 	server->fscache =
 		fscache_acquire_cookie(cifs_fscache_netfs.primary_index,
-				&cifs_fscache_server_index_def, server, true);
+				       &cifs_fscache_server_index_def,
+				       &key, sizeof(key),
+				       NULL, 0,
+				       server, 0, true);
 	cifs_dbg(FYI, "%s: (0x%p/0x%p)\n",
 		 __func__, server, server->fscache);
 }
@@ -36,26 +51,79 @@ void cifs_fscache_release_client_cookie(struct TCP_Server_Info *server)
 {
 	cifs_dbg(FYI, "%s: (0x%p/0x%p)\n",
 		 __func__, server, server->fscache);
-	fscache_relinquish_cookie(server->fscache, 0);
+	fscache_relinquish_cookie(server->fscache, NULL, false);
 	server->fscache = NULL;
 }
 
 void cifs_fscache_get_super_cookie(struct cifs_tcon *tcon)
 {
 	struct TCP_Server_Info *server = tcon->ses->server;
+	char *sharename;
+	struct cifs_fscache_super_auxdata auxdata;
+
+	/*
+	 * Check if cookie was already initialized so don't reinitialize it.
+	 * In the future, as we integrate with newer fscache features,
+	 * we may want to instead add a check if cookie has changed
+	 */
+	if (tcon->fscache)
+		return;
+
+	sharename = extract_sharename(tcon->treeName);
+	if (IS_ERR(sharename)) {
+		cifs_dbg(FYI, "%s: couldn't extract sharename\n", __func__);
+		tcon->fscache = NULL;
+		return;
+	}
+
+	memset(&auxdata, 0, sizeof(auxdata));
+	auxdata.resource_id = tcon->resource_id;
+	auxdata.vol_create_time = tcon->vol_create_time;
+	auxdata.vol_serial_number = tcon->vol_serial_number;
 
 	tcon->fscache =
 		fscache_acquire_cookie(server->fscache,
-				&cifs_fscache_super_index_def, tcon, true);
+				       &cifs_fscache_super_index_def,
+				       sharename, strlen(sharename),
+				       &auxdata, sizeof(auxdata),
+				       tcon, 0, true);
+	kfree(sharename);
 	cifs_dbg(FYI, "%s: (0x%p/0x%p)\n",
 		 __func__, server->fscache, tcon->fscache);
 }
 
 void cifs_fscache_release_super_cookie(struct cifs_tcon *tcon)
 {
+	struct cifs_fscache_super_auxdata auxdata;
+
+	memset(&auxdata, 0, sizeof(auxdata));
+	auxdata.resource_id = tcon->resource_id;
+	auxdata.vol_create_time = tcon->vol_create_time;
+	auxdata.vol_serial_number = tcon->vol_serial_number;
+
 	cifs_dbg(FYI, "%s: (0x%p)\n", __func__, tcon->fscache);
-	fscache_relinquish_cookie(tcon->fscache, 0);
+	fscache_relinquish_cookie(tcon->fscache, &auxdata, false);
 	tcon->fscache = NULL;
+}
+
+static void cifs_fscache_acquire_inode_cookie(struct cifsInodeInfo *cifsi,
+					      struct cifs_tcon *tcon)
+{
+	struct cifs_fscache_inode_auxdata auxdata;
+
+	memset(&auxdata, 0, sizeof(auxdata));
+	auxdata.eof = cifsi->server_eof;
+	auxdata.last_write_time_sec = cifsi->vfs_inode.i_mtime.tv_sec;
+	auxdata.last_change_time_sec = cifsi->vfs_inode.i_ctime.tv_sec;
+	auxdata.last_write_time_nsec = cifsi->vfs_inode.i_mtime.tv_nsec;
+	auxdata.last_change_time_nsec = cifsi->vfs_inode.i_ctime.tv_nsec;
+
+	cifsi->fscache =
+		fscache_acquire_cookie(tcon->fscache,
+				       &cifs_fscache_inode_object_def,
+				       &cifsi->uniqueid, sizeof(cifsi->uniqueid),
+				       &auxdata, sizeof(auxdata),
+				       cifsi, cifsi->vfs_inode.i_size, true);
 }
 
 static void cifs_fscache_enable_inode_cookie(struct inode *inode)
@@ -67,59 +135,71 @@ static void cifs_fscache_enable_inode_cookie(struct inode *inode)
 	if (cifsi->fscache)
 		return;
 
-	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_FSCACHE) {
-		cifsi->fscache = fscache_acquire_cookie(tcon->fscache,
-				&cifs_fscache_inode_object_def, cifsi, true);
-		cifs_dbg(FYI, "%s: got FH cookie (0x%p/0x%p)\n",
-			 __func__, tcon->fscache, cifsi->fscache);
-	}
+	if (!(cifs_sb->mnt_cifs_flags & CIFS_MOUNT_FSCACHE))
+		return;
+
+	cifs_fscache_acquire_inode_cookie(cifsi, tcon);
+
+	cifs_dbg(FYI, "%s: got FH cookie (0x%p/0x%p)\n",
+		 __func__, tcon->fscache, cifsi->fscache);
 }
 
 void cifs_fscache_release_inode_cookie(struct inode *inode)
 {
+	struct cifs_fscache_inode_auxdata auxdata;
 	struct cifsInodeInfo *cifsi = CIFS_I(inode);
 
 	if (cifsi->fscache) {
+		memset(&auxdata, 0, sizeof(auxdata));
+		auxdata.eof = cifsi->server_eof;
+		auxdata.last_write_time_sec = cifsi->vfs_inode.i_mtime.tv_sec;
+		auxdata.last_change_time_sec = cifsi->vfs_inode.i_ctime.tv_sec;
+		auxdata.last_write_time_nsec = cifsi->vfs_inode.i_mtime.tv_nsec;
+		auxdata.last_change_time_nsec = cifsi->vfs_inode.i_ctime.tv_nsec;
+
 		cifs_dbg(FYI, "%s: (0x%p)\n", __func__, cifsi->fscache);
-		fscache_relinquish_cookie(cifsi->fscache, 0);
+		/* fscache_relinquish_cookie does not seem to update auxdata */
+		fscache_update_cookie(cifsi->fscache, &auxdata);
+		fscache_relinquish_cookie(cifsi->fscache, &auxdata, false);
 		cifsi->fscache = NULL;
 	}
 }
 
-static void cifs_fscache_disable_inode_cookie(struct inode *inode)
+void cifs_fscache_update_inode_cookie(struct inode *inode)
 {
+	struct cifs_fscache_inode_auxdata auxdata;
 	struct cifsInodeInfo *cifsi = CIFS_I(inode);
 
 	if (cifsi->fscache) {
+		memset(&auxdata, 0, sizeof(auxdata));
+		auxdata.eof = cifsi->server_eof;
+		auxdata.last_write_time_sec = cifsi->vfs_inode.i_mtime.tv_sec;
+		auxdata.last_change_time_sec = cifsi->vfs_inode.i_ctime.tv_sec;
+		auxdata.last_write_time_nsec = cifsi->vfs_inode.i_mtime.tv_nsec;
+		auxdata.last_change_time_nsec = cifsi->vfs_inode.i_ctime.tv_nsec;
+
 		cifs_dbg(FYI, "%s: (0x%p)\n", __func__, cifsi->fscache);
-		fscache_uncache_all_inode_pages(cifsi->fscache, inode);
-		fscache_relinquish_cookie(cifsi->fscache, 1);
-		cifsi->fscache = NULL;
+		fscache_update_cookie(cifsi->fscache, &auxdata);
 	}
 }
 
 void cifs_fscache_set_inode_cookie(struct inode *inode, struct file *filp)
 {
-	if ((filp->f_flags & O_ACCMODE) != O_RDONLY)
-		cifs_fscache_disable_inode_cookie(inode);
-	else
-		cifs_fscache_enable_inode_cookie(inode);
+	cifs_fscache_enable_inode_cookie(inode);
 }
 
 void cifs_fscache_reset_inode_cookie(struct inode *inode)
 {
 	struct cifsInodeInfo *cifsi = CIFS_I(inode);
 	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
+	struct cifs_tcon *tcon = cifs_sb_master_tcon(cifs_sb);
 	struct fscache_cookie *old = cifsi->fscache;
 
 	if (cifsi->fscache) {
 		/* retire the current fscache cache and get a new one */
-		fscache_relinquish_cookie(cifsi->fscache, 1);
+		fscache_relinquish_cookie(cifsi->fscache, NULL, true);
 
-		cifsi->fscache = fscache_acquire_cookie(
-					cifs_sb_master_tcon(cifs_sb)->fscache,
-					&cifs_fscache_inode_object_def,
-					cifsi, true);
+		cifs_fscache_acquire_inode_cookie(cifsi, tcon);
 		cifs_dbg(FYI, "%s: new cookie 0x%p oldcookie 0x%p\n",
 			 __func__, cifsi->fscache, old);
 	}
@@ -214,13 +294,17 @@ int __cifs_readpages_from_fscache(struct inode *inode,
 
 void __cifs_readpage_to_fscache(struct inode *inode, struct page *page)
 {
+	struct cifsInodeInfo *cifsi = CIFS_I(inode);
 	int ret;
 
+	WARN_ON(!cifsi->fscache);
+
 	cifs_dbg(FYI, "%s: (fsc: %p, p: %p, i: %p)\n",
-		 __func__, CIFS_I(inode)->fscache, page, inode);
-	ret = fscache_write_page(CIFS_I(inode)->fscache, page, GFP_KERNEL);
+		 __func__, cifsi->fscache, page, inode);
+	ret = fscache_write_page(cifsi->fscache, page,
+				 cifsi->vfs_inode.i_size, GFP_KERNEL);
 	if (ret != 0)
-		fscache_uncache_page(CIFS_I(inode)->fscache, page);
+		fscache_uncache_page(cifsi->fscache, page);
 }
 
 void __cifs_fscache_readpages_cancel(struct inode *inode, struct list_head *pages)
@@ -240,3 +324,20 @@ void __cifs_fscache_invalidate_page(struct page *page, struct inode *inode)
 	fscache_uncache_page(cookie, page);
 }
 
+void __cifs_fscache_wait_on_page_write(struct inode *inode, struct page *page)
+{
+	struct cifsInodeInfo *cifsi = CIFS_I(inode);
+	struct fscache_cookie *cookie = cifsi->fscache;
+
+	cifs_dbg(FYI, "%s: (0x%p/0x%p)\n", __func__, page, cookie);
+	fscache_wait_on_page_write(cookie, page);
+}
+
+void __cifs_fscache_uncache_page(struct inode *inode, struct page *page)
+{
+	struct cifsInodeInfo *cifsi = CIFS_I(inode);
+	struct fscache_cookie *cookie = cifsi->fscache;
+
+	cifs_dbg(FYI, "%s: (0x%p/0x%p)\n", __func__, page, cookie);
+	fscache_uncache_page(cookie, page);
+}

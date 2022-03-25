@@ -1,27 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- *  linux/fs/9p/vfs_super.c
- *
- * This file contians superblock ops for 9P2000. It is intended that
- * you mount this file system on directories.
  *
  *  Copyright (C) 2004 by Eric Van Hensbergen <ericvh@gmail.com>
  *  Copyright (C) 2002 by Ron Minnich <rminnich@lanl.gov>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2
- *  as published by the Free Software Foundation.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to:
- *  Free Software Foundation
- *  51 Franklin Street, Fifth Floor
- *  Boston, MA  02111-1301  USA
- *
  */
 
 #include <linux/kernel.h>
@@ -33,7 +14,6 @@
 #include <linux/string.h>
 #include <linux/inet.h>
 #include <linux/pagemap.h>
-#include <linux/seq_file.h>
 #include <linux/mount.h>
 #include <linux/idr.h>
 #include <linux/sched.h>
@@ -72,10 +52,12 @@ static int v9fs_set_super(struct super_block *s, void *data)
  *
  */
 
-static void
+static int
 v9fs_fill_super(struct super_block *sb, struct v9fs_session_info *v9ses,
-		int flags, void *data)
+		int flags)
 {
+	int ret;
+
 	sb->s_maxbytes = MAX_LFS_FILESIZE;
 	sb->s_blocksize_bits = fls(v9ses->maxdata - 1);
 	sb->s_blocksize = 1 << sb->s_blocksize_bits;
@@ -83,22 +65,35 @@ v9fs_fill_super(struct super_block *sb, struct v9fs_session_info *v9ses,
 	if (v9fs_proto_dotl(v9ses)) {
 		sb->s_op = &v9fs_super_ops_dotl;
 		sb->s_xattr = v9fs_xattr_handlers;
-	} else
+	} else {
 		sb->s_op = &v9fs_super_ops;
-	sb->s_bdi = &v9ses->bdi;
-	if (v9ses->cache)
-		sb->s_bdi->ra_pages = (VM_MAX_READAHEAD * 1024)/PAGE_SIZE;
+		sb->s_time_max = U32_MAX;
+	}
 
-	sb->s_flags |= MS_ACTIVE | MS_DIRSYNC | MS_NOATIME;
+	sb->s_time_min = 0;
+
+	ret = super_setup_bdi(sb);
+	if (ret)
+		return ret;
+
+	if (!v9ses->cache) {
+		sb->s_bdi->ra_pages = 0;
+		sb->s_bdi->io_pages = 0;
+	} else {
+		sb->s_bdi->ra_pages = v9ses->maxdata >> PAGE_SHIFT;
+		sb->s_bdi->io_pages = v9ses->maxdata >> PAGE_SHIFT;
+	}
+
+	sb->s_flags |= SB_ACTIVE | SB_DIRSYNC;
 	if (!v9ses->cache)
-		sb->s_flags |= MS_SYNCHRONOUS;
+		sb->s_flags |= SB_SYNCHRONOUS;
 
 #ifdef CONFIG_9P_FS_POSIX_ACL
 	if ((v9ses->flags & V9FS_ACL_MASK) == V9FS_POSIX_ACL)
-		sb->s_flags |= MS_POSIXACL;
+		sb->s_flags |= SB_POSIXACL;
 #endif
 
-	save_mount_options(sb, data);
+	return 0;
 }
 
 /**
@@ -117,7 +112,7 @@ static struct dentry *v9fs_mount(struct file_system_type *fs_type, int flags,
 	struct inode *inode = NULL;
 	struct dentry *root = NULL;
 	struct v9fs_session_info *v9ses = NULL;
-	umode_t mode = S_IRWXUGO | S_ISVTX;
+	umode_t mode = 0777 | S_ISVTX;
 	struct p9_fid *fid;
 	int retval = 0;
 
@@ -138,7 +133,9 @@ static struct dentry *v9fs_mount(struct file_system_type *fs_type, int flags,
 		retval = PTR_ERR(sb);
 		goto clunk_fid;
 	}
-	v9fs_fill_super(sb, v9ses, flags, data);
+	retval = v9fs_fill_super(sb, v9ses, flags);
+	if (retval)
+		goto release_sb;
 
 	if (v9ses->cache == CACHE_LOOSE || v9ses->cache == CACHE_FSCACHE)
 		sb->s_d_op = &v9fs_cached_dentry_operations;
@@ -159,16 +156,18 @@ static struct dentry *v9fs_mount(struct file_system_type *fs_type, int flags,
 	sb->s_root = root;
 	if (v9fs_proto_dotl(v9ses)) {
 		struct p9_stat_dotl *st = NULL;
+
 		st = p9_client_getattr_dotl(fid, P9_STATS_BASIC);
 		if (IS_ERR(st)) {
 			retval = PTR_ERR(st);
 			goto release_sb;
 		}
 		d_inode(root)->i_ino = v9fs_qid2ino(&st->qid);
-		v9fs_stat2inode_dotl(st, d_inode(root));
+		v9fs_stat2inode_dotl(st, d_inode(root), 0);
 		kfree(st);
 	} else {
 		struct p9_wstat *st = NULL;
+
 		st = p9_client_stat(fid);
 		if (IS_ERR(st)) {
 			retval = PTR_ERR(st);
@@ -176,7 +175,7 @@ static struct dentry *v9fs_mount(struct file_system_type *fs_type, int flags,
 		}
 
 		d_inode(root)->i_ino = v9fs_qid2ino(&st->qid);
-		v9fs_stat2inode(st, d_inode(root), sb);
+		v9fs_stat2inode(st, d_inode(root), sb, 0);
 
 		p9stat_free(st);
 		kfree(st);
@@ -262,8 +261,7 @@ static int v9fs_statfs(struct dentry *dentry, struct kstatfs *buf)
 			buf->f_bavail = rs.bavail;
 			buf->f_files = rs.files;
 			buf->f_ffree = rs.ffree;
-			buf->f_fsid.val[0] = rs.fsid & 0xFFFFFFFFUL;
-			buf->f_fsid.val[1] = (rs.fsid >> 32) & 0xFFFFFFFFUL;
+			buf->f_fsid = u64_to_fsid(rs.fsid);
 			buf->f_namelen = rs.namelen;
 		}
 		if (res != -ENOSYS)
@@ -271,18 +269,20 @@ static int v9fs_statfs(struct dentry *dentry, struct kstatfs *buf)
 	}
 	res = simple_statfs(dentry, buf);
 done:
+	p9_client_clunk(fid);
 	return res;
 }
 
 static int v9fs_drop_inode(struct inode *inode)
 {
 	struct v9fs_session_info *v9ses;
+
 	v9ses = v9fs_inode2v9ses(inode);
 	if (v9ses->cache == CACHE_LOOSE || v9ses->cache == CACHE_FSCACHE)
 		return generic_drop_inode(inode);
 	/*
 	 * in case of non cached mode always drop the
-	 * the inode because we want the inode attribute
+	 * inode because we want the inode attribute
 	 * to always match that on the server.
 	 */
 	return 1;
@@ -337,21 +337,21 @@ static int v9fs_write_inode_dotl(struct inode *inode,
 
 static const struct super_operations v9fs_super_ops = {
 	.alloc_inode = v9fs_alloc_inode,
-	.destroy_inode = v9fs_destroy_inode,
+	.free_inode = v9fs_free_inode,
 	.statfs = simple_statfs,
 	.evict_inode = v9fs_evict_inode,
-	.show_options = generic_show_options,
+	.show_options = v9fs_show_options,
 	.umount_begin = v9fs_umount_begin,
 	.write_inode = v9fs_write_inode,
 };
 
 static const struct super_operations v9fs_super_ops_dotl = {
 	.alloc_inode = v9fs_alloc_inode,
-	.destroy_inode = v9fs_destroy_inode,
+	.free_inode = v9fs_free_inode,
 	.statfs = v9fs_statfs,
 	.drop_inode = v9fs_drop_inode,
 	.evict_inode = v9fs_evict_inode,
-	.show_options = generic_show_options,
+	.show_options = v9fs_show_options,
 	.umount_begin = v9fs_umount_begin,
 	.write_inode = v9fs_write_inode_dotl,
 };

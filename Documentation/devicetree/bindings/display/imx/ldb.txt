@@ -30,8 +30,8 @@ Required properties:
                 "di2_sel" - IPU2 DI0 mux
                 "di3_sel" - IPU2 DI1 mux
         The needed clock numbers for each are documented in
-        Documentation/devicetree/bindings/clock/imx5-clock.txt, and in
-        Documentation/devicetree/bindings/clock/imx6q-clock.txt.
+        Documentation/devicetree/bindings/clock/imx5-clock.yaml, and in
+        Documentation/devicetree/bindings/clock/imx6q-clock.yaml.
 
 Optional properties:
  - pinctrl-names : should be "default" on i.MX53, not used on i.MX6q
@@ -64,7 +64,7 @@ Required properties:
 Optional properties (required if display-timings are used):
  - ddc-i2c-bus: phandle of an I2C controller used for DDC EDID probing
  - display-timings : A node that describes the display timings as defined in
-   Documentation/devicetree/bindings/display/display-timing.txt.
+   Documentation/devicetree/bindings/display/panel/display-timing.txt.
  - fsl,data-mapping : should be "spwg" or "jeida"
                       This describes how the color bits are laid out in the
                       serialized LVDS signal.

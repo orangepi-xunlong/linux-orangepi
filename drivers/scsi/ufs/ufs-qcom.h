@@ -1,18 +1,12 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #ifndef UFS_QCOM_H_
 #define UFS_QCOM_H_
+
+#include <linux/reset-controller.h>
+#include <linux/reset.h>
 
 #define MAX_UFS_QCOM_HOSTS	1
 #define MAX_U32                 (~(u32)0)
@@ -33,18 +27,7 @@
 #define SLOW 1
 #define FAST 2
 
-#define UFS_QCOM_LIMIT_NUM_LANES_RX	2
-#define UFS_QCOM_LIMIT_NUM_LANES_TX	2
-#define UFS_QCOM_LIMIT_HSGEAR_RX	UFS_HS_G3
-#define UFS_QCOM_LIMIT_HSGEAR_TX	UFS_HS_G3
-#define UFS_QCOM_LIMIT_PWMGEAR_RX	UFS_PWM_G4
-#define UFS_QCOM_LIMIT_PWMGEAR_TX	UFS_PWM_G4
-#define UFS_QCOM_LIMIT_RX_PWR_PWM	SLOW_MODE
-#define UFS_QCOM_LIMIT_TX_PWR_PWM	SLOW_MODE
-#define UFS_QCOM_LIMIT_RX_PWR_HS	FAST_MODE
-#define UFS_QCOM_LIMIT_TX_PWR_HS	FAST_MODE
 #define UFS_QCOM_LIMIT_HS_RATE		PA_HS_MODE_B
-#define UFS_QCOM_LIMIT_DESIRED_MODE	FAST
 
 /* QCOM UFS host controller vendor specific registers */
 enum {
@@ -92,9 +75,11 @@ enum {
 #define UFS_CNTLR_3_x_x_VEN_REGS_OFFSET(x)	(0x400 + x)
 
 /* bit definitions for REG_UFS_CFG1 register */
-#define QUNIPRO_SEL	UFS_BIT(0)
+#define QUNIPRO_SEL		0x1
+#define UTP_DBG_RAMS_EN		0x20000
 #define TEST_BUS_EN		BIT(18)
 #define TEST_BUS_SEL		GENMASK(22, 19)
+#define UFS_REG_TEST_BUS_EN	BIT(30)
 
 /* bit definitions for REG_UFS_CFG2 register */
 #define UAWM_HW_CGC_EN		(1 << 0)
@@ -125,11 +110,6 @@ enum {
 	MASK_UFS_PHY_SOFT_RESET             = 0x2,
 	MASK_TX_SYMBOL_CLK_1US_REG          = 0x3FF,
 	MASK_CLK_NS_REG                     = 0xFFFC00,
-};
-
-enum ufs_qcom_phy_init_type {
-	UFS_PHY_INIT_FULL,
-	UFS_PHY_INIT_CFG_RESTORE,
 };
 
 /* QCOM UFS debug print bit mask */
@@ -183,16 +163,6 @@ static inline void ufs_qcom_deassert_reset(struct ufs_hba *hba)
 	mb();
 }
 
-struct ufs_qcom_bus_vote {
-	uint32_t client_handle;
-	uint32_t curr_vote;
-	int min_bw_vote;
-	int max_bw_vote;
-	int saved_vote;
-	bool is_max_bw_needed;
-	struct device_attribute max_bus_bw;
-};
-
 /* Host controller hardware version: major.minor.step */
 struct ufs_hw_version {
 	u16 step;
@@ -205,6 +175,8 @@ struct ufs_qcom_testbus {
 	u8 select_minor;
 };
 
+struct gpio_desc;
+
 struct ufs_qcom_host {
 	/*
 	 * Set this capability if host controller supports the QUniPro mode
@@ -212,18 +184,17 @@ struct ufs_qcom_host {
 	 * Note: By default this capability will be kept enabled if host
 	 * controller supports the QUniPro mode.
 	 */
-	#define UFS_QCOM_CAP_QUNIPRO	UFS_BIT(0)
+	#define UFS_QCOM_CAP_QUNIPRO	0x1
 
 	/*
 	 * Set this capability if host controller can retain the secure
 	 * configuration even after UFS controller core power collapse.
 	 */
-	#define UFS_QCOM_CAP_RETAIN_SEC_CFG_AFTER_PWR_COLLAPSE	UFS_BIT(1)
+	#define UFS_QCOM_CAP_RETAIN_SEC_CFG_AFTER_PWR_COLLAPSE	0x2
 	u32 caps;
 
 	struct phy *generic_phy;
 	struct ufs_hba *hba;
-	struct ufs_qcom_bus_vote bus_vote;
 	struct ufs_pa_layer_attr dev_req_params;
 	struct clk *rx_l0_sync_clk;
 	struct clk *tx_l0_sync_clk;
@@ -234,12 +205,21 @@ struct ufs_qcom_host {
 	void __iomem *dev_ref_clk_ctrl_mmio;
 	bool is_dev_ref_clk_enabled;
 	struct ufs_hw_version hw_ver;
+#ifdef CONFIG_SCSI_UFS_CRYPTO
+	void __iomem *ice_mmio;
+#endif
 
 	u32 dev_ref_clk_en_mask;
 
 	/* Bitmask for enabling debug prints */
 	u32 dbg_print_en;
 	struct ufs_qcom_testbus testbus;
+
+	/* Reset control of HCI */
+	struct reset_control *core_reset;
+	struct reset_controller_dev rcdev;
+
+	struct gpio_desc *device_reset;
 };
 
 static inline u32
@@ -264,5 +244,29 @@ static inline bool ufs_qcom_cap_qunipro(struct ufs_qcom_host *host)
 	else
 		return false;
 }
+
+/* ufs-qcom-ice.c */
+
+#ifdef CONFIG_SCSI_UFS_CRYPTO
+int ufs_qcom_ice_init(struct ufs_qcom_host *host);
+int ufs_qcom_ice_enable(struct ufs_qcom_host *host);
+int ufs_qcom_ice_resume(struct ufs_qcom_host *host);
+int ufs_qcom_ice_program_key(struct ufs_hba *hba,
+			     const union ufs_crypto_cfg_entry *cfg, int slot);
+#else
+static inline int ufs_qcom_ice_init(struct ufs_qcom_host *host)
+{
+	return 0;
+}
+static inline int ufs_qcom_ice_enable(struct ufs_qcom_host *host)
+{
+	return 0;
+}
+static inline int ufs_qcom_ice_resume(struct ufs_qcom_host *host)
+{
+	return 0;
+}
+#define ufs_qcom_ice_program_key NULL
+#endif /* !CONFIG_SCSI_UFS_CRYPTO */
 
 #endif /* UFS_QCOM_H_ */

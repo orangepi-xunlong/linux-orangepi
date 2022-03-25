@@ -71,7 +71,7 @@ static void stnic_init (struct net_device *dev);
 
 static u32 stnic_msg_enable;
 
-module_param_named(msg_enable, stnic_msg_enable, uint, (S_IRUSR|S_IRGRP|S_IROTH));
+module_param_named(msg_enable, stnic_msg_enable, uint, 0444);
 MODULE_PARM_DESC(msg_enable, "Debug message level (see linux/netdevice.h for bitmap)");
 
 /* SH7750 specific read/write io. */
@@ -104,8 +104,8 @@ STNIC_WRITE (int reg, byte val)
 static int __init stnic_probe(void)
 {
   struct net_device *dev;
-  int i, err;
   struct ei_device *ei_local;
+  int err;
 
   /* If we are not running on a SolutionEngine, give up now */
   if (! MACH_SE)
@@ -114,13 +114,12 @@ static int __init stnic_probe(void)
   /* New style probing API */
   dev = alloc_ei_netdev();
   if (!dev)
-  	return -ENOMEM;
+	return -ENOMEM;
 
 #ifdef CONFIG_SH_STANDARD_BIOS
   sh_bios_get_node_addr (stnic_eadr);
 #endif
-  for (i = 0; i < ETH_ALEN; i++)
-    dev->dev_addr[i] = stnic_eadr[i];
+  eth_hw_addr_set(dev, stnic_eadr);
 
   /* Set the base address to point to the NIC, not the "real" base! */
   dev->base_addr = 0x1000;

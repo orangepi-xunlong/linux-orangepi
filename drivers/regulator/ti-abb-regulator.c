@@ -173,19 +173,14 @@ static int ti_abb_wait_txdone(struct device *dev, struct ti_abb *abb)
 	while (timeout++ <= abb->settling_time) {
 		status = ti_abb_check_txdone(abb);
 		if (status)
-			break;
+			return 0;
 
 		udelay(1);
 	}
 
-	if (timeout > abb->settling_time) {
-		dev_warn_ratelimited(dev,
-				     "%s:TRANXDONE timeout(%duS) int=0x%08x\n",
-				     __func__, timeout, readl(abb->int_base));
-		return -ETIMEDOUT;
-	}
-
-	return 0;
+	dev_warn_ratelimited(dev, "%s:TRANXDONE timeout(%duS) int=0x%08x\n",
+			     __func__, timeout, readl(abb->int_base));
+	return -ETIMEDOUT;
 }
 
 /**
@@ -205,19 +200,14 @@ static int ti_abb_clear_all_txdone(struct device *dev, const struct ti_abb *abb)
 
 		status = ti_abb_check_txdone(abb);
 		if (!status)
-			break;
+			return 0;
 
 		udelay(1);
 	}
 
-	if (timeout > abb->settling_time) {
-		dev_warn_ratelimited(dev,
-				     "%s:TRANXDONE timeout(%duS) int=0x%08x\n",
-				     __func__, timeout, readl(abb->int_base));
-		return -ETIMEDOUT;
-	}
-
-	return 0;
+	dev_warn_ratelimited(dev, "%s:TRANXDONE timeout(%duS) int=0x%08x\n",
+			     __func__, timeout, readl(abb->int_base));
+	return -ETIMEDOUT;
 }
 
 /**
@@ -352,8 +342,17 @@ static int ti_abb_set_voltage_sel(struct regulator_dev *rdev, unsigned sel)
 		return ret;
 	}
 
-	/* If data is exactly the same, then just update index, no change */
 	info = &abb->info[sel];
+	/*
+	 * When Linux kernel is starting up, we are'nt sure of the
+	 * Bias configuration that bootloader has configured.
+	 * So, we get to know the actual setting the first time
+	 * we are asked to transition.
+	 */
+	if (abb->current_info_idx == -EINVAL)
+		goto just_set_abb;
+
+	/* If data is exactly the same, then just update index, no change */
 	oinfo = &abb->info[abb->current_info_idx];
 	if (!memcmp(info, oinfo, sizeof(*info))) {
 		dev_dbg(dev, "%s: Same data new idx=%d, old idx=%d\n", __func__,
@@ -361,6 +360,7 @@ static int ti_abb_set_voltage_sel(struct regulator_dev *rdev, unsigned sel)
 		goto out;
 	}
 
+just_set_abb:
 	ret = ti_abb_set_opp(rdev, abb, info);
 
 out:
@@ -532,13 +532,13 @@ static int ti_abb_init_table(struct device *dev, struct ti_abb *abb,
 	}
 	num_entries /= num_values;
 
-	info = devm_kzalloc(dev, sizeof(*info) * num_entries, GFP_KERNEL);
+	info = devm_kcalloc(dev, num_entries, sizeof(*info), GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
 
 	abb->info = info;
 
-	volt_table = devm_kzalloc(dev, sizeof(unsigned int) * num_entries,
+	volt_table = devm_kcalloc(dev, num_entries, sizeof(unsigned int),
 				  GFP_KERNEL);
 	if (!volt_table)
 		return -ENOMEM;
@@ -629,7 +629,7 @@ check_abb:
 	return 0;
 }
 
-static struct regulator_ops ti_abb_reg_ops = {
+static const struct regulator_ops ti_abb_reg_ops = {
 	.list_voltage = regulator_list_voltage_table,
 
 	.set_voltage_sel = ti_abb_set_voltage_sel,
@@ -725,9 +725,7 @@ static int ti_abb_probe(struct platform_device *pdev)
 
 	/* Map ABB resources */
 	if (abb->regs->setup_off || abb->regs->control_off) {
-		pname = "base-address";
-		res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
-		abb->base = devm_ioremap_resource(dev, res);
+		abb->base = devm_platform_ioremap_resource_byname(pdev, "base-address");
 		if (IS_ERR(abb->base))
 			return PTR_ERR(abb->base);
 
@@ -735,35 +733,18 @@ static int ti_abb_probe(struct platform_device *pdev)
 		abb->control_reg = abb->base + abb->regs->control_off;
 
 	} else {
-		pname = "control-address";
-		res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
-		abb->control_reg = devm_ioremap_resource(dev, res);
+		abb->control_reg = devm_platform_ioremap_resource_byname(pdev, "control-address");
 		if (IS_ERR(abb->control_reg))
 			return PTR_ERR(abb->control_reg);
 
-		pname = "setup-address";
-		res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
-		abb->setup_reg = devm_ioremap_resource(dev, res);
+		abb->setup_reg = devm_platform_ioremap_resource_byname(pdev, "setup-address");
 		if (IS_ERR(abb->setup_reg))
 			return PTR_ERR(abb->setup_reg);
 	}
 
-	pname = "int-address";
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
-	if (!res) {
-		dev_err(dev, "Missing '%s' IO resource\n", pname);
-		return -ENODEV;
-	}
-	/*
-	 * We may have shared interrupt register offsets which are
-	 * write-1-to-clear between domains ensuring exclusivity.
-	 */
-	abb->int_base = devm_ioremap_nocache(dev, res->start,
-					     resource_size(res));
-	if (!abb->int_base) {
-		dev_err(dev, "Unable to map '%s'\n", pname);
-		return -ENOMEM;
-	}
+	abb->int_base = devm_platform_ioremap_resource_byname(pdev, "int-address");
+	if (IS_ERR(abb->int_base))
+		return PTR_ERR(abb->int_base);
 
 	/* Map Optional resources */
 	pname = "efuse-address";
@@ -778,7 +759,7 @@ static int ti_abb_probe(struct platform_device *pdev)
 	 * We may have shared efuse register offsets which are read-only
 	 * between domains
 	 */
-	abb->efuse_base = devm_ioremap_nocache(dev, res->start,
+	abb->efuse_base = devm_ioremap(dev, res->start,
 					       resource_size(res));
 	if (!abb->efuse_base) {
 		dev_err(dev, "Unable to map '%s'\n", pname);

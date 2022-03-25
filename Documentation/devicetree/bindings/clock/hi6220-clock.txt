@@ -4,13 +4,14 @@ Clock control registers reside in different Hi6220 system controllers,
 please refer the following document to know more about the binding rules
 for these system controllers:
 
-Documentation/devicetree/bindings/arm/hisilicon/hisilicon.txt
+Documentation/devicetree/bindings/arm/hisilicon/hisilicon.yaml
 
 Required Properties:
 
 - compatible: the compatible should be one of the following strings to
 	indicate the clock controller functionality.
 
+	- "hisilicon,hi6220-acpu-sctrl"
 	- "hisilicon,hi6220-aoctrl"
 	- "hisilicon,hi6220-sysctrl"
 	- "hisilicon,hi6220-mediactrl"

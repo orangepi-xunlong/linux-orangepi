@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * GSS Proxy upcall module
  *
  *  Copyright (C) 2012 Simo Sorce <simo@redhat.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/sunrpc/svcauth.h>
@@ -44,7 +31,7 @@ static int gssx_dec_bool(struct xdr_stream *xdr, u32 *v)
 }
 
 static int gssx_enc_buffer(struct xdr_stream *xdr,
-			   gssx_buffer *buf)
+			   const gssx_buffer *buf)
 {
 	__be32 *p;
 
@@ -56,7 +43,7 @@ static int gssx_enc_buffer(struct xdr_stream *xdr,
 }
 
 static int gssx_enc_in_token(struct xdr_stream *xdr,
-			     struct gssp_in_token *in)
+			     const struct gssp_in_token *in)
 {
 	__be32 *p;
 
@@ -130,7 +117,7 @@ static int gssx_dec_option(struct xdr_stream *xdr,
 }
 
 static int dummy_enc_opt_array(struct xdr_stream *xdr,
-				struct gssx_option_array *oa)
+				const struct gssx_option_array *oa)
 {
 	__be32 *p;
 
@@ -349,7 +336,7 @@ static int gssx_dec_status(struct xdr_stream *xdr,
 }
 
 static int gssx_enc_call_ctx(struct xdr_stream *xdr,
-			     struct gssx_call_ctx *ctx)
+			     const struct gssx_call_ctx *ctx)
 {
 	struct gssx_option opt;
 	__be32 *p;
@@ -734,8 +721,9 @@ static int gssx_enc_cb(struct xdr_stream *xdr, struct gssx_cb *cb)
 
 void gssx_enc_accept_sec_context(struct rpc_rqst *req,
 				 struct xdr_stream *xdr,
-				 struct gssx_arg_accept_sec_context *arg)
+				 const void *data)
 {
+	const struct gssx_arg_accept_sec_context *arg = data;
 	int err;
 
 	err = gssx_enc_call_ctx(xdr, &arg->call_ctx);
@@ -790,8 +778,9 @@ done:
 
 int gssx_dec_accept_sec_context(struct rpc_rqst *rqstp,
 				struct xdr_stream *xdr,
-				struct gssx_res_accept_sec_context *res)
+				void *data)
 {
+	struct gssx_res_accept_sec_context *res = data;
 	u32 value_follows;
 	int err;
 	struct page *scratch;
@@ -799,7 +788,7 @@ int gssx_dec_accept_sec_context(struct rpc_rqst *rqstp,
 	scratch = alloc_page(GFP_KERNEL);
 	if (!scratch)
 		return -ENOMEM;
-	xdr_set_scratch_buffer(xdr, page_address(scratch), PAGE_SIZE);
+	xdr_set_scratch_page(xdr, scratch);
 
 	/* res->status */
 	err = gssx_dec_status(xdr, &res->status);

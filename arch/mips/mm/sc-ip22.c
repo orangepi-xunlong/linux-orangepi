@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * sc-ip22.c: Indy cache management functions.
  *
@@ -11,7 +12,6 @@
 
 #include <asm/bcache.h>
 #include <asm/page.h>
-#include <asm/pgtable.h>
 #include <asm/bootinfo.h>
 #include <asm/sgi/ip22.h>
 #include <asm/sgi/mc.h>

@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * FB driver for the HX8347D LCD Controller
  *
  * Copyright (C) 2013 Christian Vogelgsang
  *
  * Based on driver code found here: https://github.com/watterott/r61505u-Adapter
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -77,9 +68,6 @@ static int init_display(struct fbtft_par *par)
 	mdelay(40);
 	write_reg(par, 0x28, 0x3C);
 
-	/* orientation */
-	write_reg(par, 0x16, 0x60 | (par->bgr << 3));
-
 	return 0;
 }
 
@@ -96,15 +84,40 @@ static void set_addr_win(struct fbtft_par *par, int xs, int ys, int xe, int ye)
 	write_reg(par, 0x22);
 }
 
+#define MEM_Y   BIT(7) /* MY row address order */
+#define MEM_X   BIT(6) /* MX column address order */
+#define MEM_V   BIT(5) /* MV row / column exchange */
+#define MEM_L   BIT(4) /* ML vertical refresh order */
+#define MEM_BGR (3) /* RGB-BGR Order */
+static int set_var(struct fbtft_par *par)
+{
+	switch (par->info->var.rotate) {
+	case 0:
+		write_reg(par, 0x16, MEM_V | MEM_X | (par->bgr << MEM_BGR));
+		break;
+	case 270:
+		write_reg(par, 0x16, par->bgr << MEM_BGR);
+		break;
+	case 180:
+		write_reg(par, 0x16, MEM_V | MEM_Y | (par->bgr << MEM_BGR));
+		break;
+	case 90:
+		write_reg(par, 0x16, MEM_X | MEM_Y | (par->bgr << MEM_BGR));
+		break;
+	}
+
+	return 0;
+}
+
 /*
  * Gamma string format:
  *   VRP0 VRP1 VRP2 VRP3 VRP4 VRP5 PRP0 PRP1 PKP0 PKP1 PKP2 PKP3 PKP4 CGM
  *   VRN0 VRN1 VRN2 VRN3 VRN4 VRN5 PRN0 PRN1 PKN0 PKN1 PKN2 PKN3 PKN4 CGM
  */
-#define CURVE(num, idx)  curves[num * par->gamma.num_values + idx]
-static int set_gamma(struct fbtft_par *par, unsigned long *curves)
+#define CURVE(num, idx)  curves[(num) * par->gamma.num_values + (idx)]
+static int set_gamma(struct fbtft_par *par, u32 *curves)
 {
-	unsigned long mask[] = {
+	static const unsigned long mask[] = {
 		0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x7f, 0x7f, 0x1f, 0x1f,
 		0x1f, 0x1f, 0x1f, 0x0f,
 	};
@@ -153,6 +166,7 @@ static struct fbtft_display display = {
 	.fbtftops = {
 		.init_display = init_display,
 		.set_addr_win = set_addr_win,
+		.set_var = set_var,
 		.set_gamma = set_gamma,
 	},
 };

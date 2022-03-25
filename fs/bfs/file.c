@@ -1,7 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *	fs/bfs/file.c
  *	BFS file operations.
- *	Copyright (C) 1999,2000 Tigran Aivazian <tigran@veritas.com>
+ *	Copyright (C) 1999-2018 Tigran Aivazian <aivazian.tigran@gmail.com>
  *
  *	Make the file block allocation algorithm understand the size
  *	of the underlying block device.
@@ -187,6 +188,7 @@ static sector_t bfs_bmap(struct address_space *mapping, sector_t block)
 }
 
 const struct address_space_operations bfs_aops = {
+	.set_page_dirty	= __set_page_dirty_buffers,
 	.readpage	= bfs_readpage,
 	.writepage	= bfs_writepage,
 	.write_begin	= bfs_write_begin,

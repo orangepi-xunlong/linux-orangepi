@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * If TRACE_SYSTEM is defined, that will be the directory created
  * in the ftrace directory under /sys/kernel/tracing/events/<system>
@@ -95,7 +96,7 @@
  *         __entry->bar.x = y;
 
  *   __array: There are three fields (type, name, size). The type is the
- *         type of elements in teh array, the name is the name of the array.
+ *         type of elements in the array, the name is the name of the array.
  *         size is the number of items in the array (not the total size).
  *
  *         __array( char, foo, 10) is the same as saying: char foo[10];
@@ -112,7 +113,7 @@
  *         type is the type of the element, name is the name of the array.
  *         The size is different than __array. It is not a static number,
  *         but the algorithm to figure out the length of the array for the
- *         specific instance of tracepoint. Again, size is the numebr of
+ *         specific instance of tracepoint. Again, size is the number of
  *         items in the array, not the total length in bytes.
  *
  *         __dynamic_array( int, foo, bar) is similar to: int foo[bar];
@@ -125,9 +126,9 @@
  *         Notice, that "__entry" is not needed here.
  *
  *   __string: This is a special kind of __dynamic_array. It expects to
- *         have a nul terminated character array passed to it (it allows
+ *         have a null terminated character array passed to it (it allows
  *         for NULL too, which would be converted into "(null)"). __string
- *         takes two paramenter (name, src), where name is the name of
+ *         takes two parameter (name, src), where name is the name of
  *         the string saved, and src is the string to copy into the
  *         ring buffer.
  *
@@ -139,6 +140,33 @@
  *
  *         In most cases, the __assign_str() macro will take the same
  *         parameters as the __string() macro had to declare the string.
+ *
+ *   __string_len: This is a helper to a __dynamic_array, but it understands
+ *	   that the array has characters in it, and with the combined
+ *         use of __assign_str_len(), it will allocate 'len' + 1 bytes
+ *         in the ring buffer and add a '\0' to the string. This is
+ *         useful if the string being saved has no terminating '\0' byte.
+ *         It requires that the length of the string is known as it acts
+ *         like a memcpy().
+ *
+ *         Declared with:
+ *
+ *         __string_len(foo, bar, len)
+ *
+ *         To assign this string, use the helper macro __assign_str_len().
+ *
+ *         __assign_str(foo, bar, len);
+ *
+ *         Then len + 1 is allocated to the ring buffer, and a nul terminating
+ *         byte is added. This is similar to:
+ *
+ *         memcpy(__get_str(foo), bar, len);
+ *         __get_str(foo)[len] = 0;
+ *
+ *        The advantage of using this over __dynamic_array, is that it
+ *        takes care of allocating the extra byte on the ring buffer
+ *        for the '\0' terminating byte, and __get_str(foo) can be used
+ *        in the TP_printk().
  *
  *   __bitmask: This is another kind of __dynamic_array, but it expects
  *         an array of longs, and the number of bits to parse. It takes
@@ -354,7 +382,7 @@ TRACE_EVENT_CONDITION(foo_bar_with_cond,
 	TP_printk("foo %s %d", __get_str(foo), __entry->bar)
 );
 
-void foo_bar_reg(void);
+int foo_bar_reg(void);
 void foo_bar_unreg(void);
 
 /*
@@ -415,7 +443,7 @@ TRACE_EVENT_FN(foo_bar_with_fn,
  * Note, TRACE_EVENT() itself is simply defined as:
  *
  * #define TRACE_EVENT(name, proto, args, tstruct, assign, printk)  \
- *  DEFINE_EVENT_CLASS(name, proto, args, tstruct, assign, printk); \
+ *  DECLARE_EVENT_CLASS(name, proto, args, tstruct, assign, printk); \
  *  DEFINE_EVENT(name, name, proto, args)
  *
  * The DEFINE_EVENT() also can be declared with conditions and reg functions:
@@ -444,7 +472,7 @@ DECLARE_EVENT_CLASS(foo_template,
 
 /*
  * Here's a better way for the previous samples (except, the first
- * exmaple had more fields and could not be used here).
+ * example had more fields and could not be used here).
  */
 DEFINE_EVENT(foo_template, foo_with_template_simple,
 	TP_PROTO(const char *foo, int bar),

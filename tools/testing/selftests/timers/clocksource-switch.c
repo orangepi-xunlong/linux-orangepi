@@ -3,7 +3,7 @@
  *		(C) Copyright IBM 2012
  *		Licensed under the GPLv2
  *
- *  NOTE: This is a meta-test which quickly changes the clocksourc and
+ *  NOTE: This is a meta-test which quickly changes the clocksource and
  *  then uses other tests to detect problems. Thus this test requires
  *  that the inconsistency-check and nanosleep tests be present in the
  *  same directory it is run from.
@@ -34,18 +34,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <sys/wait.h>
-#ifdef KTEST
 #include "../kselftest.h"
-#else
-static inline int ksft_exit_pass(void)
-{
-	exit(0);
-}
-static inline int ksft_exit_fail(void)
-{
-	exit(1);
-}
-#endif
 
 
 int get_clocksources(char list[][30])
@@ -61,7 +50,7 @@ int get_clocksources(char list[][30])
 
 	close(fd);
 
-	for (i = 0; i < 30; i++)
+	for (i = 0; i < 10; i++)
 		list[i][0] = '\0';
 
 	head = buf;
@@ -145,7 +134,7 @@ int main(int argv, char **argc)
 		return -1;
 	}
 
-	/* Check everything is sane before we start switching asyncrhonously */
+	/* Check everything is sane before we start switching asynchronously */
 	for (i = 0; i < count; i++) {
 		printf("Validating clocksource %s\n", clocksource_list[i]);
 		if (change_clocksource(clocksource_list[i])) {
@@ -159,7 +148,7 @@ int main(int argv, char **argc)
 	}
 
 
-	printf("Running Asyncrhonous Switching Tests...\n");
+	printf("Running Asynchronous Switching Tests...\n");
 	pid = fork();
 	if (!pid)
 		return run_tests(60);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *	crash_dump.c - Memory preserving reboot related code.
  *
@@ -7,7 +8,7 @@
 #include <linux/errno.h>
 #include <linux/crash_dump.h>
 #include <linux/io.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 /**
  * copy_oldmem_page - copy one page from "oldmem"
@@ -25,7 +26,7 @@
 ssize_t copy_oldmem_page(unsigned long pfn, char *buf,
                                size_t csize, unsigned long offset, int userbuf)
 {
-	void  *vaddr;
+	void  __iomem *vaddr;
 
 	if (!csize)
 		return 0;
@@ -33,7 +34,7 @@ ssize_t copy_oldmem_page(unsigned long pfn, char *buf,
 	vaddr = ioremap(pfn << PAGE_SHIFT, PAGE_SIZE);
 
 	if (userbuf) {
-		if (copy_to_user(buf, (vaddr + offset), csize)) {
+		if (copy_to_user((void __user *)buf, (vaddr + offset), csize)) {
 			iounmap(vaddr);
 			return -EFAULT;
 		}

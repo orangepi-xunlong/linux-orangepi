@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /***************************************************************************/
 
 /*
@@ -8,6 +9,7 @@
 
 /***************************************************************************/
 
+#include <linux/clkdev.h>
 #include <linux/kernel.h>
 #include <linux/param.h>
 #include <linux/init.h>
@@ -22,21 +24,17 @@
 
 DEFINE_CLK(pll, "pll.0", MCF_CLK);
 DEFINE_CLK(sys, "sys.0", MCF_BUSCLK);
-DEFINE_CLK(mcftmr0, "mcftmr.0", MCF_BUSCLK);
-DEFINE_CLK(mcftmr1, "mcftmr.1", MCF_BUSCLK);
-DEFINE_CLK(mcfuart0, "mcfuart.0", MCF_BUSCLK);
-DEFINE_CLK(mcfuart1, "mcfuart.1", MCF_BUSCLK);
-DEFINE_CLK(mcfqspi0, "mcfqspi.0", MCF_BUSCLK);
 
-struct clk *mcf_clks[] = {
-	&clk_pll,
-	&clk_sys,
-	&clk_mcftmr0,
-	&clk_mcftmr1,
-	&clk_mcfuart0,
-	&clk_mcfuart1,
-	&clk_mcfqspi0,
-	NULL
+struct clk_lookup m5249_clk_lookup[] = {
+	CLKDEV_INIT(NULL, "pll.0", &clk_pll),
+	CLKDEV_INIT(NULL, "sys.0", &clk_sys),
+	CLKDEV_INIT("mcftmr.0", NULL, &clk_sys),
+	CLKDEV_INIT("mcftmr.1", NULL, &clk_sys),
+	CLKDEV_INIT("mcfuart.0", NULL, &clk_sys),
+	CLKDEV_INIT("mcfuart.1", NULL, &clk_sys),
+	CLKDEV_INIT("mcfqspi.0", NULL, &clk_sys),
+	CLKDEV_INIT("imx1-i2c.0", NULL, &clk_sys),
+	CLKDEV_INIT("imx1-i2c.1", NULL, &clk_sys),
 };
 
 /***************************************************************************/
@@ -85,6 +83,26 @@ static void __init m5249_qspi_init(void)
 
 /***************************************************************************/
 
+static void __init m5249_i2c_init(void)
+{
+#if IS_ENABLED(CONFIG_I2C_IMX)
+	u32 r;
+
+	/* first I2C controller uses regular irq setup */
+	writeb(MCFSIM_ICR_AUTOVEC | MCFSIM_ICR_LEVEL5 | MCFSIM_ICR_PRI0,
+	       MCFSIM_I2CICR);
+	mcf_mapirq2imr(MCF_IRQ_I2C0, MCFINTC_I2C);
+
+	/* second I2C controller is completely different */
+	r = readl(MCFINTC2_INTPRI_REG(MCF_IRQ_I2C1));
+	r &= ~MCFINTC2_INTPRI_BITS(0xf, MCF_IRQ_I2C1);
+	r |= MCFINTC2_INTPRI_BITS(0x5, MCF_IRQ_I2C1);
+	writel(r, MCFINTC2_INTPRI_REG(MCF_IRQ_I2C1));
+#endif /* CONFIG_I2C_IMX */
+}
+
+/***************************************************************************/
+
 #ifdef CONFIG_M5249C3
 
 static void __init m5249_smc91x_init(void)
@@ -111,6 +129,9 @@ void __init config_BSP(char *commandp, int size)
 	m5249_smc91x_init();
 #endif
 	m5249_qspi_init();
+	m5249_i2c_init();
+
+	clkdev_add_table(m5249_clk_lookup, ARRAY_SIZE(m5249_clk_lookup));
 }
 
 /***************************************************************************/

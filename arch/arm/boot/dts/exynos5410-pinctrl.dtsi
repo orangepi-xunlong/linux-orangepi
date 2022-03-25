@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Exynos5410 SoC pin-mux and pin-config device tree source
  *
  * Copyright (c) 2013 Hardkernel Co., Ltd.
- *              http://www.hardkernel.com
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ *              https://www.hardkernel.com
  */
 
 #include <dt-bindings/pinctrl/samsung.h>
@@ -238,13 +235,13 @@
 		interrupt-parent = <&combiner>;
 		#interrupt-cells = <2>;
 		interrupts = <23 0>,
-		             <24 0>,
-		             <25 0>,
-		             <25 1>,
-		             <26 0>,
-		             <26 1>,
-		             <27 0>,
-		             <27 1>;
+			     <24 0>,
+			     <25 0>,
+			     <25 1>,
+			     <26 0>,
+			     <26 1>,
+			     <27 0>,
+			     <27 1>;
 	};
 
 	gpx1: gpx1 {
@@ -255,13 +252,13 @@
 		interrupt-parent = <&combiner>;
 		#interrupt-cells = <2>;
 		interrupts = <28 0>,
-		             <28 1>,
-		             <29 0>,
-		             <29 1>,
-		             <30 0>,
-		             <30 1>,
-		             <31 0>,
-		             <31 1>;
+			     <28 1>,
+			     <29 0>,
+			     <29 1>,
+			     <30 0>,
+			     <30 1>,
+			     <31 0>,
+			     <31 1>;
 	};
 
 	gpx2: gpx2 {
@@ -563,6 +560,34 @@
 		interrupt-controller;
 		#interrupt-cells = <2>;
 	};
+
+	usb3_1_oc: usb3-1-oc {
+		samsung,pins = "gpk2-4", "gpk2-5";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_2>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
+		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
+	};
+
+	usb3_1_vbusctrl: usb3-1-vbusctrl {
+		samsung,pins = "gpk2-6", "gpk2-7";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_2>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
+		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
+	};
+
+	usb3_0_oc: usb3-0-oc {
+		samsung,pins = "gpk3-0", "gpk3-1";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_2>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
+		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
+	};
+
+	usb3_0_vbusctrl: usb3-0-vbusctrl {
+		samsung,pins = "gpk3-2", "gpk3-3";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_2>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
+		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
+	};
 };
 
 &pinctrl_2 {
@@ -615,4 +640,13 @@
 		interrupt-controller;
 		#interrupt-cells = <2>;
 	};
+
+	audi2s0_bus: audi2s0-bus {
+		samsung,pins = "gpz-0", "gpz-1", "gpz-2", "gpz-3",
+				"gpz-4";
+		samsung,pin-function = <2>;
+		samsung,pin-pud = <0>;
+		samsung,pin-drv = <0>;
+	};
+
 };

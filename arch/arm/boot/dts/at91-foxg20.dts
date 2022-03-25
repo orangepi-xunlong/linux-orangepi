@@ -1,11 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * at91-foxg20.dts - Device Tree file for Acme Systems FoxG20 board
  *
  * Based on DT files for at91sam9g20ek evaluation board (AT91SAM9G20 SoC)
  *
  * Copyright (C) 2013 Douglas Gilbert <dgilbert@interlog.com>
- *
- * Licensed under GPLv2 or later.
  */
 /dts-v1/;
 #include "at91sam9g20.dtsi"
@@ -18,7 +17,7 @@
 		bootargs = "console=ttyS0,115200 root=/dev/mmcblk0p2 rw rootwait";
 	};
 
-	memory {
+	memory@20000000 {
 		reg = <0x20000000 0x4000000>;
 	};
 
@@ -34,6 +33,18 @@
 
 	ahb {
 		apb {
+			tcb0: timer@fffa0000 {
+				timer@0 {
+					compatible = "atmel,tcb-timer";
+					reg = <0>, <1>;
+				};
+
+				timer@2 {
+					compatible = "atmel,tcb-timer";
+					reg = <2>;
+				};
+			};
+
 			usb1: gadget@fffa4000 {
 				atmel,vbus-gpio = <&pioC 6 GPIO_ACTIVE_HIGH>;
 				status = "okay";
@@ -44,6 +55,7 @@
 					&pinctrl_mmc0_clk
 					&pinctrl_mmc0_slot1_cmd_dat0
 					&pinctrl_mmc0_slot1_dat1_3>;
+				pinctrl-names = "default";
 				status = "okay";
 
 				slot@1 {

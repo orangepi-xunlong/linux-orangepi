@@ -42,6 +42,10 @@ COMMON OPTIONS
 --dump-raw-trace::
         Dump raw trace in ASCII.
 
+-f::
+--force::
+	Don't complain, do it.
+
 REPORT OPTIONS
 --------------
 

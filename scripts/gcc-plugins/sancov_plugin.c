@@ -11,7 +11,7 @@
  *
  * You can read about it more here:
  *  https://gcc.gnu.org/viewcvs/gcc?limit_changes=0&view=revision&revision=231296
- *  http://lwn.net/Articles/674854/
+ *  https://lwn.net/Articles/674854/
  *  https://github.com/google/syzkaller
  *  https://lwn.net/Articles/677764/
  *
@@ -80,16 +80,13 @@ static void sancov_start_unit(void __unused *gcc_data, void __unused *user_data)
 	nothrow_attr = tree_cons(get_identifier("nothrow"), NULL, NULL);
 	decl_attributes(&sancov_fndecl, nothrow_attr, 0);
 	gcc_assert(TREE_NOTHROW(sancov_fndecl));
-#if BUILDING_GCC_VERSION > 4005
 	leaf_attr = tree_cons(get_identifier("leaf"), NULL, NULL);
 	decl_attributes(&sancov_fndecl, leaf_attr, 0);
-#endif
 }
 
 __visible int plugin_init(struct plugin_name_args *plugin_info, struct plugin_gcc_version *version)
 {
 	int i;
-	struct register_pass_info sancov_plugin_pass_info;
 	const char * const plugin_name = plugin_info->base_name;
 	const int argc = plugin_info->argc;
 	const struct plugin_argument * const argv = plugin_info->argv;
@@ -107,14 +104,7 @@ __visible int plugin_init(struct plugin_name_args *plugin_info, struct plugin_gc
 	};
 
 	/* BBs can be split afterwards?? */
-	sancov_plugin_pass_info.pass				= make_sancov_pass();
-#if BUILDING_GCC_VERSION >= 4009
-	sancov_plugin_pass_info.reference_pass_name		= "asan";
-#else
-	sancov_plugin_pass_info.reference_pass_name		= "nrv";
-#endif
-	sancov_plugin_pass_info.ref_pass_instance_number	= 0;
-	sancov_plugin_pass_info.pos_op				= PASS_POS_INSERT_BEFORE;
+	PASS_INFO(sancov, "asan", 0, PASS_POS_INSERT_BEFORE);
 
 	if (!plugin_default_version_check(version, &gcc_version)) {
 		error(G_("incompatible gcc/plugin versions"));
@@ -126,7 +116,7 @@ __visible int plugin_init(struct plugin_name_args *plugin_info, struct plugin_gc
 			enable = false;
 			continue;
 		}
-		error(G_("unkown option '-fplugin-arg-%s-%s'"), plugin_name, argv[i].key);
+		error(G_("unknown option '-fplugin-arg-%s-%s'"), plugin_name, argv[i].key);
 	}
 
 	register_callback(plugin_name, PLUGIN_INFO, NULL, &sancov_plugin_info);
@@ -137,7 +127,7 @@ __visible int plugin_init(struct plugin_name_args *plugin_info, struct plugin_gc
 #if BUILDING_GCC_VERSION < 6000
 	register_callback(plugin_name, PLUGIN_START_UNIT, &sancov_start_unit, NULL);
 	register_callback(plugin_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)&gt_ggc_r_gt_sancov);
-	register_callback(plugin_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &sancov_plugin_pass_info);
+	register_callback(plugin_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &sancov_pass_info);
 #endif
 
 	return 0;

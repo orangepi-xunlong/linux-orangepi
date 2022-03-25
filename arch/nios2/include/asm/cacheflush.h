@@ -28,7 +28,7 @@ extern void flush_cache_range(struct vm_area_struct *vma, unsigned long start,
 extern void flush_cache_page(struct vm_area_struct *vma, unsigned long vmaddr,
 	unsigned long pfn);
 #define ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE 1
-extern void flush_dcache_page(struct page *page);
+void flush_dcache_page(struct page *page);
 
 extern void flush_icache_range(unsigned long start, unsigned long end);
 extern void flush_icache_page(struct vm_area_struct *vma, struct page *page);
@@ -46,7 +46,7 @@ extern void copy_from_user_page(struct vm_area_struct *vma, struct page *page,
 extern void flush_dcache_range(unsigned long start, unsigned long end);
 extern void invalidate_dcache_range(unsigned long start, unsigned long end);
 
-#define flush_dcache_mmap_lock(mapping)		do { } while (0)
-#define flush_dcache_mmap_unlock(mapping)	do { } while (0)
+#define flush_dcache_mmap_lock(mapping)		xa_lock_irq(&mapping->i_pages)
+#define flush_dcache_mmap_unlock(mapping)	xa_unlock_irq(&mapping->i_pages)
 
 #endif /* _ASM_NIOS2_CACHEFLUSH_H */

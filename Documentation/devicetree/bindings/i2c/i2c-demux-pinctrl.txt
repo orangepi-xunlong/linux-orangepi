@@ -27,7 +27,7 @@ Required properties:
 - i2c-bus-name: The name of this bus. Also needed as pinctrl-name for the I2C
 		parents.
 
-Furthermore, I2C mux properties and child nodes. See i2c-mux.txt in this
+Furthermore, I2C mux properties and child nodes. See i2c-mux.yaml in this
 directory.
 
 Example:
@@ -102,7 +102,6 @@ And for clarification, here are the snipplets for the i2c-parents:
 		#address-cells = <1>;
 		#size-cells = <0>;
 		compatible = "i2c-gpio";
-		status = "disabled";
 		gpios = <&gpio5 6 GPIO_ACTIVE_HIGH /* sda */
 			 &gpio5 5 GPIO_ACTIVE_HIGH /* scl */
 			>;

@@ -1,11 +1,14 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _NFT_META_H_
 #define _NFT_META_H_
+
+#include <net/netfilter/nf_tables.h>
 
 struct nft_meta {
 	enum nft_meta_keys	key:8;
 	union {
-		enum nft_registers	dreg:8;
-		enum nft_registers	sreg:8;
+		u8		dreg;
+		u8		sreg;
 	};
 };
 

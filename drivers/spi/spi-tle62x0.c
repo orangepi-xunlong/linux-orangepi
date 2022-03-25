@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Support Infineon TLE62x0 driver chips
  *
  * Copyright (c) 2007 Simtec Electronics
  *	Ben Dooks, <ben@simtec.co.uk>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/device.h>
@@ -144,7 +141,7 @@ static ssize_t tle62x0_gpio_show(struct device *dev,
 	value = (st->gpio_state >> gpio_num) & 1;
 	mutex_unlock(&st->lock);
 
-	return snprintf(buf, PAGE_SIZE, "%d", value);
+	return sysfs_emit(buf, "%d", value);
 }
 
 static ssize_t tle62x0_gpio_store(struct device *dev,

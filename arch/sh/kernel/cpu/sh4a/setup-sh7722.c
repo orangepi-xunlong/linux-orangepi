@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * SH7722 Setup
  *
  *  Copyright (C) 2006 - 2008  Paul Mundt
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 #include <linux/init.h>
 #include <linux/mm.h>
@@ -21,6 +18,7 @@
 #include <asm/clock.h>
 #include <asm/mmzone.h>
 #include <asm/siu.h>
+#include <asm/platform_early.h>
 
 #include <cpu/dma-register.h>
 #include <cpu/sh7722.h>
@@ -179,8 +177,7 @@ struct platform_device dma_device = {
 
 /* Serial */
 static struct plat_sci_port scif0_platform_data = {
-	.flags          = UPF_BOOT_AUTOCONF,
-	.scscr		= SCSCR_RE | SCSCR_TE | SCSCR_REIE,
+	.scscr		= SCSCR_REIE,
 	.type           = PORT_SCIF,
 	.ops		= &sh7722_sci_port_ops,
 	.regtype	= SCIx_SH4_SCIF_NO_SCSPTR_REGTYPE,
@@ -202,8 +199,7 @@ static struct platform_device scif0_device = {
 };
 
 static struct plat_sci_port scif1_platform_data = {
-	.flags          = UPF_BOOT_AUTOCONF,
-	.scscr		= SCSCR_RE | SCSCR_TE | SCSCR_REIE,
+	.scscr		= SCSCR_REIE,
 	.type           = PORT_SCIF,
 	.ops		= &sh7722_sci_port_ops,
 	.regtype	= SCIx_SH4_SCIF_NO_SCSPTR_REGTYPE,
@@ -225,8 +221,7 @@ static struct platform_device scif1_device = {
 };
 
 static struct plat_sci_port scif2_platform_data = {
-	.flags          = UPF_BOOT_AUTOCONF,
-	.scscr		= SCSCR_RE | SCSCR_TE | SCSCR_REIE,
+	.scscr		= SCSCR_REIE,
 	.type           = PORT_SCIF,
 	.ops		= &sh7722_sci_port_ops,
 	.regtype	= SCIx_SH4_SCIF_NO_SCSPTR_REGTYPE,
@@ -518,7 +513,7 @@ static struct platform_device *sh7722_early_devices[] __initdata = {
 
 void __init plat_early_device_setup(void)
 {
-	early_platform_add_devices(sh7722_early_devices,
+	sh_early_platform_add_devices(sh7722_early_devices,
 				   ARRAY_SIZE(sh7722_early_devices));
 }
 

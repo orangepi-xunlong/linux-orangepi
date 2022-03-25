@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * platform_sst_audio.h:  sst audio platform data header file
  *
@@ -5,16 +6,9 @@
  * Author: Jeeja KP <jeeja.kp@intel.com>
  * 	Omair Mohammed Abdullah <omair.m.abdullah@intel.com>
  *	Vinod Koul ,vinod.koul@intel.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2
- * of the License.
  */
 #ifndef _PLATFORM_SST_AUDIO_H_
 #define _PLATFORM_SST_AUDIO_H_
-
-#include <linux/sfi.h>
 
 #define MAX_NUM_STREAMS_MRFLD	25
 #define MAX_NUM_STREAMS	MAX_NUM_STREAMS_MRFLD
@@ -135,6 +129,7 @@ struct sst_platform_info {
 	const struct sst_res_info *res_info;
 	const struct sst_lib_dnld_info *lib_info;
 	const char *platform;
+	bool streams_lost_on_suspend;
 };
 int add_sst_platform_device(void);
 #endif

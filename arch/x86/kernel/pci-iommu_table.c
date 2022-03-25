@@ -1,10 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/dma-mapping.h>
 #include <asm/iommu_table.h>
 #include <linux/string.h>
 #include <linux/kallsyms.h>
-
-
-#define DEBUG 1
 
 static struct iommu_table_entry * __init
 find_dependents_of(struct iommu_table_entry *start,
@@ -59,7 +57,7 @@ void __init check_iommu_entries(struct iommu_table_entry *start,
 			printk(KERN_ERR "CYCLIC DEPENDENCY FOUND! %pS depends on %pS and vice-versa. BREAKING IT.\n",
 			       p->detect, q->detect);
 			/* Heavy handed way..*/
-			x->depend = 0;
+			x->depend = NULL;
 		}
 	}
 

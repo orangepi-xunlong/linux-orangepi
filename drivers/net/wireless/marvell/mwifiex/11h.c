@@ -1,10 +1,10 @@
 /*
- * Marvell Wireless LAN device driver: 802.11h
+ * NXP Wireless LAN device driver: 802.11h
  *
- * Copyright (C) 2013-2014, Marvell International Ltd.
+ * Copyright 2011-2020 NXP
  *
- * This software file (the "File") is distributed by Marvell International
- * Ltd. under the terms of the GNU General Public License Version 2, June 1991
+ * This software file (the "File") is distributed by NXP
+ * under the terms of the GNU General Public License Version 2, June 1991
  * (the "License").  You may use, redistribute and/or modify this File in
  * accordance with the terms and conditions of the License, a copy of which
  * is available by writing to the Free Software Foundation, Inc.,
@@ -128,9 +128,6 @@ void mwifiex_dfs_cac_work_queue(struct work_struct *work)
 			container_of(delayed_work, struct mwifiex_private,
 				     dfs_cac_work);
 
-	if (WARN_ON(!priv))
-		return;
-
 	chandef = priv->dfs_chandef;
 	if (priv->wdev.cac_started) {
 		mwifiex_dbg(priv->adapter, MSG,
@@ -153,7 +150,8 @@ int mwifiex_cmd_issue_chan_report_request(struct mwifiex_private *priv,
 
 	cmd->command = cpu_to_le16(HostCmd_CMD_CHAN_REPORT_REQUEST);
 	cmd->size = cpu_to_le16(S_DS_GEN);
-	le16_add_cpu(&cmd->size, sizeof(struct host_cmd_ds_chan_rpt_req));
+	le16_unaligned_add_cpu(&cmd->size,
+			       sizeof(struct host_cmd_ds_chan_rpt_req));
 
 	cr_req->chan_desc.start_freq = cpu_to_le16(MWIFIEX_A_BAND_START_FREQ);
 	cr_req->chan_desc.chan_num = radar_params->chandef->chan->hw_value;
@@ -287,9 +285,6 @@ void mwifiex_dfs_chan_sw_work_queue(struct work_struct *work)
 	struct mwifiex_private *priv =
 			container_of(delayed_work, struct mwifiex_private,
 				     dfs_chan_sw_work);
-
-	if (WARN_ON(!priv))
-		return;
 
 	bss_cfg = &priv->bss_cfg;
 	if (!bss_cfg->beacon_period) {

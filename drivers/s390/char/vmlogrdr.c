@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *	character device driver for reading z/VM system service records
  *
@@ -21,7 +22,7 @@
 #include <linux/interrupt.h>
 #include <linux/spinlock.h>
 #include <linux/atomic.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/cpcmd.h>
 #include <asm/debug.h>
 #include <asm/ebcdic.h>
@@ -152,7 +153,7 @@ static struct vmlogrdr_priv_t sys_ser[] = {
 	}
 };
 
-#define MAXMINOR  (sizeof(sys_ser)/sizeof(struct vmlogrdr_priv_t))
+#define MAXMINOR  ARRAY_SIZE(sys_ser)
 
 static char FENCE[] = {"EOR"};
 static int vmlogrdr_major = 0;
@@ -641,10 +642,8 @@ static ssize_t vmlogrdr_recording_store(struct device * dev,
 static DEVICE_ATTR(recording, 0200, NULL, vmlogrdr_recording_store);
 
 
-static ssize_t vmlogrdr_recording_status_show(struct device_driver *driver,
-					      char *buf)
+static ssize_t recording_status_show(struct device_driver *driver, char *buf)
 {
-
 	static const char cp_command[] = "QUERY RECORDING ";
 	int len;
 
@@ -652,8 +651,7 @@ static ssize_t vmlogrdr_recording_status_show(struct device_driver *driver,
 	len = strlen(buf);
 	return len;
 }
-static DRIVER_ATTR(recording_status, 0444, vmlogrdr_recording_status_show,
-		   NULL);
+static DRIVER_ATTR_RO(recording_status);
 static struct attribute *vmlogrdr_drv_attrs[] = {
 	&driver_attr_recording_status.attr,
 	NULL,
@@ -681,34 +679,10 @@ static const struct attribute_group *vmlogrdr_attr_groups[] = {
 	NULL,
 };
 
-static int vmlogrdr_pm_prepare(struct device *dev)
-{
-	int rc;
-	struct vmlogrdr_priv_t *priv = dev_get_drvdata(dev);
-
-	rc = 0;
-	if (priv) {
-		spin_lock_bh(&priv->priv_lock);
-		if (priv->dev_in_use)
-			rc = -EBUSY;
-		spin_unlock_bh(&priv->priv_lock);
-	}
-	if (rc)
-		pr_err("vmlogrdr: device %s is busy. Refuse to suspend.\n",
-		       dev_name(dev));
-	return rc;
-}
-
-
-static const struct dev_pm_ops vmlogrdr_pm_ops = {
-	.prepare = vmlogrdr_pm_prepare,
-};
-
 static struct class *vmlogrdr_class;
 static struct device_driver vmlogrdr_driver = {
 	.name = "vmlogrdr",
 	.bus  = &iucv_bus,
-	.pm = &vmlogrdr_pm_ops,
 	.groups = vmlogrdr_drv_attr_groups,
 };
 
@@ -815,8 +789,7 @@ static int vmlogrdr_register_cdev(dev_t dev)
 	}
 	vmlogrdr_cdev->owner = THIS_MODULE;
 	vmlogrdr_cdev->ops = &vmlogrdr_fops;
-	vmlogrdr_cdev->dev = dev;
-	rc = cdev_add(vmlogrdr_cdev, vmlogrdr_cdev->dev, MAXMINOR);
+	rc = cdev_add(vmlogrdr_cdev, dev, MAXMINOR);
 	if (!rc)
 		return 0;
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * This header provides constants for binding nvidia,tegra210-car.
  *
@@ -39,7 +40,7 @@
 /* 20 (register bit affects vi and vi_sensor) */
 /* 21 */
 #define TEGRA210_CLK_USBD 22
-#define TEGRA210_CLK_ISP 23
+#define TEGRA210_CLK_ISPA 23
 /* 24 */
 /* 25 */
 #define TEGRA210_CLK_DISP2 26
@@ -94,7 +95,7 @@
 #define TEGRA210_CLK_CSITE 73
 /* 74 */
 /* 75 */
-/* 76 */
+#define TEGRA210_CLK_LA 76
 /* 77 */
 #define TEGRA210_CLK_SOC_THERM 78
 #define TEGRA210_CLK_DTV 79
@@ -156,7 +157,7 @@
 /* 133 */
 /* 134 */
 /* 135 */
-/* 136 */
+#define TEGRA210_CLK_CEC 136
 /* 137 */
 /* 138 */
 /* 139 */
@@ -173,7 +174,7 @@
 #define TEGRA210_CLK_ENTROPY 149
 /* 150 */
 /* 151 */
-/* 152 */
+#define TEGRA210_CLK_DP2 152
 /* 153 */
 /* 154 */
 /* 155 (bit affects dfll_ref and dfll_soc) */
@@ -210,7 +211,7 @@
 #define TEGRA210_CLK_DBGAPB 185
 /* 186 */
 #define TEGRA210_CLK_PLL_P_OUT_ADSP 187
-/* 188 */
+/* 188 ((bit affects pll_a_out_adsp and pll_a_out0_out_adsp)*/
 #define TEGRA210_CLK_PLL_G_REF 189
 /* 190 */
 /* 191 */
@@ -222,7 +223,7 @@
 /* 196 */
 #define TEGRA210_CLK_DMIC3 197
 #define TEGRA210_CLK_APE 198
-/* 199 */
+#define TEGRA210_CLK_ADSP 199
 /* 200 */
 /* 201 */
 #define TEGRA210_CLK_MAUD 202
@@ -241,10 +242,10 @@
 /* 215 */
 /* 216 */
 /* 217 */
-/* 218 */
+#define TEGRA210_CLK_ADSP_NEON 218
 #define TEGRA210_CLK_NVENC 219
-/* 220 */
-/* 221 */
+#define TEGRA210_CLK_IQC2 220
+#define TEGRA210_CLK_IQC1 221
 #define TEGRA210_CLK_SOR_SAFE 222
 #define TEGRA210_CLK_PLL_P_OUT_CPU 223
 
@@ -261,6 +262,8 @@
 #define TEGRA210_CLK_CLK_M 233
 #define TEGRA210_CLK_CLK_M_DIV2 234
 #define TEGRA210_CLK_CLK_M_DIV4 235
+#define TEGRA210_CLK_OSC_DIV2 234
+#define TEGRA210_CLK_OSC_DIV4 235
 #define TEGRA210_CLK_PLL_REF 236
 #define TEGRA210_CLK_PLL_C 237
 #define TEGRA210_CLK_PLL_C_OUT1 238
@@ -303,12 +306,13 @@
 #define TEGRA210_CLK_AUDIO3 274
 #define TEGRA210_CLK_AUDIO4 275
 #define TEGRA210_CLK_SPDIF 276
-#define TEGRA210_CLK_CLK_OUT_1 277
-#define TEGRA210_CLK_CLK_OUT_2 278
-#define TEGRA210_CLK_CLK_OUT_3 279
-#define TEGRA210_CLK_BLINK 280
-/* 281 */
-#define TEGRA210_CLK_SOR1_SRC 282
+/* 277 */
+#define TEGRA210_CLK_QSPI_PM 278
+/* 279 */
+/* 280 */
+#define TEGRA210_CLK_SOR0_LVDS 281 /* deprecated */
+#define TEGRA210_CLK_SOR0_OUT 281
+#define TEGRA210_CLK_SOR1_OUT 282
 /* 283 */
 #define TEGRA210_CLK_XUSB_HOST_SRC 284
 #define TEGRA210_CLK_XUSB_FALCON_SRC 285
@@ -347,14 +351,14 @@
 #define TEGRA210_CLK_PLL_P_OUT_XUSB 317
 #define TEGRA210_CLK_XUSB_SSP_SRC 318
 #define TEGRA210_CLK_PLL_RE_OUT1 319
-/* 320 */
-/* 321 */
-/* 322 */
-/* 323 */
-/* 324 */
+#define TEGRA210_CLK_PLL_MB_UD 320
+#define TEGRA210_CLK_PLL_P_UD 321
+#define TEGRA210_CLK_ISP 322
+#define TEGRA210_CLK_PLL_A_OUT_ADSP 323
+#define TEGRA210_CLK_PLL_A_OUT0_OUT_ADSP 324
 /* 325 */
-/* 326 */
-/* 327 */
+#define TEGRA210_CLK_OSC 326
+#define TEGRA210_CLK_CSI_TPG 327
 /* 328 */
 /* 329 */
 /* 330 */
@@ -384,18 +388,27 @@
 #define TEGRA210_CLK_AUDIO3_MUX 353
 #define TEGRA210_CLK_AUDIO4_MUX 354
 #define TEGRA210_CLK_SPDIF_MUX 355
-#define TEGRA210_CLK_CLK_OUT_1_MUX 356
-#define TEGRA210_CLK_CLK_OUT_2_MUX 357
-#define TEGRA210_CLK_CLK_OUT_3_MUX 358
+/* 356 */
+/* 357 */
+/* 358 */
 #define TEGRA210_CLK_DSIA_MUX 359
 #define TEGRA210_CLK_DSIB_MUX 360
-#define TEGRA210_CLK_SOR0_LVDS 361
+/* 361 */
 #define TEGRA210_CLK_XUSB_SS_DIV2 362
 
 #define TEGRA210_CLK_PLL_M_UD 363
 #define TEGRA210_CLK_PLL_C_UD 364
 #define TEGRA210_CLK_SCLK_MUX 365
 
-#define TEGRA210_CLK_CLK_MAX 366
+#define TEGRA210_CLK_ACLK 370
+
+#define TEGRA210_CLK_DMIC1_SYNC_CLK 388
+#define TEGRA210_CLK_DMIC1_SYNC_CLK_MUX 389
+#define TEGRA210_CLK_DMIC2_SYNC_CLK 390
+#define TEGRA210_CLK_DMIC2_SYNC_CLK_MUX 391
+#define TEGRA210_CLK_DMIC3_SYNC_CLK 392
+#define TEGRA210_CLK_DMIC3_SYNC_CLK_MUX 393
+
+#define TEGRA210_CLK_CLK_MAX 394
 
 #endif	/* _DT_BINDINGS_CLOCK_TEGRA210_CAR_H */

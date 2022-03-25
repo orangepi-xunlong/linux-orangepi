@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_X86_VM86_H
 #define _ASM_X86_VM86_H
 
@@ -35,7 +36,6 @@ struct vm86 {
 	unsigned long saved_sp0;
 
 	unsigned long flags;
-	unsigned long screen_bitmap;
 	unsigned long cpu_type;
 	struct revectored_struct int_revectored;
 	struct revectored_struct int21_revectored;

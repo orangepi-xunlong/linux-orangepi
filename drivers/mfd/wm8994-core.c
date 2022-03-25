@@ -1,15 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * wm8994-core.c  --  Device access for Wolfson WM8994
  *
  * Copyright 2009 Wolfson Microelectronics PLC.
  *
  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
  */
 
 #include <linux/kernel.h>
@@ -21,7 +16,6 @@
 #include <linux/mfd/core.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/of_gpio.h>
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
@@ -46,7 +40,7 @@ static const struct mfd_cell wm8994_regulator_devs[] = {
 	},
 };
 
-static struct resource wm8994_codec_resources[] = {
+static const struct resource wm8994_codec_resources[] = {
 	{
 		.start = WM8994_IRQ_TEMP_SHUT,
 		.end   = WM8994_IRQ_TEMP_WARN,
@@ -54,7 +48,7 @@ static struct resource wm8994_codec_resources[] = {
 	},
 };
 
-static struct resource wm8994_gpio_resources[] = {
+static const struct resource wm8994_gpio_resources[] = {
 	{
 		.start = WM8994_IRQ_GPIO(1),
 		.end   = WM8994_IRQ_GPIO(11),
@@ -302,13 +296,9 @@ static int wm8994_set_pdata_from_of(struct wm8994 *wm8994)
 	if (of_find_property(np, "wlf,ldoena-always-driven", NULL))
 		pdata->lineout2fb = true;
 
-	pdata->ldo[0].enable = of_get_named_gpio(np, "wlf,ldo1ena", 0);
-	if (pdata->ldo[0].enable < 0)
-		pdata->ldo[0].enable = 0;
+	pdata->spkmode_pu = of_property_read_bool(np, "wlf,spkmode-pu");
 
-	pdata->ldo[1].enable = of_get_named_gpio(np, "wlf,ldo2ena", 0);
-	if (pdata->ldo[1].enable < 0)
-		pdata->ldo[1].enable = 0;
+	pdata->csnaddr_pd = of_property_read_bool(np, "wlf,csnaddr-pd");
 
 	return 0;
 }
@@ -368,9 +358,10 @@ static int wm8994_device_init(struct wm8994 *wm8994, int irq)
 		goto err;
 	}
 
-	wm8994->supplies = devm_kzalloc(wm8994->dev,
-					sizeof(struct regulator_bulk_data) *
-					wm8994->num_supplies, GFP_KERNEL);
+	wm8994->supplies = devm_kcalloc(wm8994->dev,
+					wm8994->num_supplies,
+					sizeof(struct regulator_bulk_data),
+					GFP_KERNEL);
 	if (!wm8994->supplies) {
 		ret = -ENOMEM;
 		goto err;
@@ -402,12 +393,13 @@ static int wm8994_device_init(struct wm8994 *wm8994, int irq)
 	ret = regulator_bulk_get(wm8994->dev, wm8994->num_supplies,
 				 wm8994->supplies);
 	if (ret != 0) {
-		dev_err(wm8994->dev, "Failed to get supplies: %d\n", ret);
+		if (ret != -EPROBE_DEFER)
+			dev_err(wm8994->dev, "Failed to get supplies: %d\n",
+				ret);
 		goto err;
 	}
 
-	ret = regulator_bulk_enable(wm8994->num_supplies,
-				    wm8994->supplies);
+	ret = regulator_bulk_enable(wm8994->num_supplies, wm8994->supplies);
 	if (ret != 0) {
 		dev_err(wm8994->dev, "Failed to enable supplies: %d\n", ret);
 		goto err_regulator_free;
@@ -513,14 +505,15 @@ static int wm8994_device_init(struct wm8994 *wm8994, int irq)
 		break;
 	default:
 		dev_err(wm8994->dev, "Unknown device type %d\n", wm8994->type);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto err_enable;
 	}
 
 	ret = regmap_reinit_cache(wm8994->regmap, regmap_config);
 	if (ret != 0) {
 		dev_err(wm8994->dev, "Failed to reinit register cache: %d\n",
 			ret);
-		return ret;
+		goto err_enable;
 	}
 
 	/* Explicitly put the device into reset in case regulators
@@ -531,7 +524,7 @@ static int wm8994_device_init(struct wm8994 *wm8994, int irq)
 			       wm8994_reg_read(wm8994, WM8994_SOFTWARE_RESET));
 	if (ret != 0) {
 		dev_err(wm8994->dev, "Failed to reset device: %d\n", ret);
-		return ret;
+		goto err_enable;
 	}
 
 	if (regmap_patch) {
@@ -540,7 +533,7 @@ static int wm8994_device_init(struct wm8994 *wm8994, int irq)
 		if (ret != 0) {
 			dev_err(wm8994->dev, "Failed to register patch: %d\n",
 				ret);
-			goto err;
+			goto err_enable;
 		}
 	}
 
@@ -559,6 +552,8 @@ static int wm8994_device_init(struct wm8994 *wm8994, int irq)
 
 	if (pdata->spkmode_pu)
 		pulls |= WM8994_SPKMODE_PU;
+	if (pdata->csnaddr_pd)
+		pulls |= WM8994_CSNADDR_PD;
 
 	/* Disable unneeded pulls */
 	wm8994_set_bits(wm8994, WM8994_PULL_CONTROL_2,
@@ -591,6 +586,7 @@ static int wm8994_device_init(struct wm8994 *wm8994, int irq)
 		goto err_irq;
 	}
 
+	pm_runtime_set_active(wm8994->dev);
 	pm_runtime_enable(wm8994->dev);
 	pm_runtime_idle(wm8994->dev);
 
@@ -610,10 +606,11 @@ err:
 
 static void wm8994_device_exit(struct wm8994 *wm8994)
 {
+	pm_runtime_get_sync(wm8994->dev);
 	pm_runtime_disable(wm8994->dev);
+	pm_runtime_put_noidle(wm8994->dev);
 	wm8994_irq_exit(wm8994);
-	regulator_bulk_disable(wm8994->num_supplies,
-			       wm8994->supplies);
+	regulator_bulk_disable(wm8994->num_supplies, wm8994->supplies);
 	regulator_bulk_free(wm8994->num_supplies, wm8994->supplies);
 	mfd_remove_devices(wm8994->dev);
 }
@@ -686,7 +683,7 @@ static struct i2c_driver wm8994_i2c_driver = {
 	.driver = {
 		.name = "wm8994",
 		.pm = &wm8994_pm_ops,
-		.of_match_table = of_match_ptr(wm8994_of_match),
+		.of_match_table = wm8994_of_match,
 	},
 	.probe = wm8994_i2c_probe,
 	.remove = wm8994_i2c_remove,
@@ -698,3 +695,4 @@ module_i2c_driver(wm8994_i2c_driver);
 MODULE_DESCRIPTION("Core support for the WM8994 audio CODEC");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Mark Brown <broonie@opensource.wolfsonmicro.com>");
+MODULE_SOFTDEP("pre: wm8994_regulator");

@@ -1,25 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
     Montage Technology TS2020 - Silicon Tuner driver
     Copyright (C) 2009-2012 Konstantin Dimitrov <kosio.dimitrov@gmail.com>
 
     Copyright (C) 2009-2012 TurboSight.com
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#include "dvb_frontend.h"
+#include <media/dvb_frontend.h>
 #include "ts2020.h"
 #include <linux/regmap.h>
 #include <linux/math64.h>
@@ -56,7 +44,7 @@ struct ts2020_reg_val {
 
 static void ts2020_stat_work(struct work_struct *work);
 
-static int ts2020_release(struct dvb_frontend *fe)
+static void ts2020_release(struct dvb_frontend *fe)
 {
 	struct ts2020_priv *priv = fe->tuner_priv;
 	struct i2c_client *client = priv->client;
@@ -64,7 +52,6 @@ static int ts2020_release(struct dvb_frontend *fe)
 	dev_dbg(&client->dev, "\n");
 
 	i2c_unregister_device(client);
-	return 0;
 }
 
 static int ts2020_sleep(struct dvb_frontend *fe)
@@ -181,6 +168,9 @@ static int ts2020_set_tuner_rf(struct dvb_frontend *fe)
 	unsigned int utmp;
 
 	ret = regmap_read(dev->regmap, 0x3d, &utmp);
+	if (ret)
+		return ret;
+
 	utmp &= 0x7f;
 	if (utmp < 0x16)
 		utmp = 0xa1;
@@ -499,8 +489,8 @@ static int ts2020_read_signal_strength(struct dvb_frontend *fe,
 static const struct dvb_tuner_ops ts2020_tuner_ops = {
 	.info = {
 		.name = "TS2020",
-		.frequency_min = 950000,
-		.frequency_max = 2150000
+		.frequency_min_hz =  950 * MHz,
+		.frequency_max_hz = 2150 * MHz
 	},
 	.init = ts2020_init,
 	.release = ts2020_release,
@@ -526,11 +516,11 @@ struct dvb_frontend *ts2020_attach(struct dvb_frontend *fe,
 	pdata.attach_in_use = true;
 
 	memset(&board_info, 0, sizeof(board_info));
-	strlcpy(board_info.type, "ts2020", I2C_NAME_SIZE);
+	strscpy(board_info.type, "ts2020", I2C_NAME_SIZE);
 	board_info.addr = config->tuner_address;
 	board_info.platform_data = &pdata;
-	client = i2c_new_device(i2c, &board_info);
-	if (!client || !client->dev.driver)
+	client = i2c_new_client_device(i2c, &board_info);
+	if (!i2c_client_has_driver(client))
 		return NULL;
 
 	return fe;
@@ -579,11 +569,11 @@ static int ts2020_probe(struct i2c_client *client,
 
 	/* create regmap */
 	mutex_init(&dev->regmap_mutex);
-	dev->regmap_config.reg_bits = 8,
-	dev->regmap_config.val_bits = 8,
-	dev->regmap_config.lock = ts2020_regmap_lock,
-	dev->regmap_config.unlock = ts2020_regmap_unlock,
-	dev->regmap_config.lock_arg = dev,
+	dev->regmap_config.reg_bits = 8;
+	dev->regmap_config.val_bits = 8;
+	dev->regmap_config.lock = ts2020_regmap_lock;
+	dev->regmap_config.unlock = ts2020_regmap_unlock;
+	dev->regmap_config.lock_arg = dev;
 	dev->regmap = regmap_init_i2c(client, &dev->regmap_config);
 	if (IS_ERR(dev->regmap)) {
 		ret = PTR_ERR(dev->regmap);

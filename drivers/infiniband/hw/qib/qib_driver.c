@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2021 Cornelis Networks. All rights reserved.
  * Copyright (c) 2013 Intel Corporation. All rights reserved.
  * Copyright (c) 2006, 2007, 2008, 2009 QLogic Corporation. All rights reserved.
  * Copyright (c) 2003, 2004, 2005, 2006 PathScale, Inc. All rights reserved.
@@ -49,8 +50,6 @@
  */
 const char ib_qib_version[] = QIB_DRIVER_VERSION "\n";
 
-DEFINE_SPINLOCK(qib_devs_lock);
-LIST_HEAD(qib_dev_list);
 DEFINE_MUTEX(qib_mutex);	/* general driver use */
 
 unsigned qib_ibmtu;
@@ -64,9 +63,8 @@ MODULE_PARM_DESC(compat_ddr_negotiate,
 		 "Attempt pre-IBTA 1.2 DDR speed negotiation");
 
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_AUTHOR("Intel <ibsupport@intel.com>");
-MODULE_DESCRIPTION("Intel IB driver");
-MODULE_VERSION(QIB_DRIVER_VERSION);
+MODULE_AUTHOR("Cornelis <support@cornelisnetworks.com>");
+MODULE_DESCRIPTION("Cornelis IB driver");
 
 /*
  * QIB_PIO_MAXIBHDR is the max IB header size allowed for in our
@@ -81,22 +79,6 @@ MODULE_VERSION(QIB_DRIVER_VERSION);
 #define QIB_MAX_PKT_RECV 64
 
 struct qlogic_ib_stats qib_stats;
-
-const char *qib_get_unit_name(int unit)
-{
-	static char iname[16];
-
-	snprintf(iname, sizeof(iname), "infinipath%u", unit);
-	return iname;
-}
-
-const char *qib_get_card_name(struct rvt_dev_info *rdi)
-{
-	struct qib_ibdev *ibdev = container_of(rdi, struct qib_ibdev, rdi);
-	struct qib_devdata *dd = container_of(ibdev,
-					      struct qib_devdata, verbs_dev);
-	return qib_get_unit_name(dd->unit);
-}
 
 struct pci_dev *qib_get_pci_dev(struct rvt_dev_info *rdi)
 {
@@ -113,11 +95,11 @@ int qib_count_active_units(void)
 {
 	struct qib_devdata *dd;
 	struct qib_pportdata *ppd;
-	unsigned long flags;
+	unsigned long index, flags;
 	int pidx, nunits_active = 0;
 
-	spin_lock_irqsave(&qib_devs_lock, flags);
-	list_for_each_entry(dd, &qib_dev_list, list) {
+	xa_lock_irqsave(&qib_dev_table, flags);
+	xa_for_each(&qib_dev_table, index, dd) {
 		if (!(dd->flags & QIB_PRESENT) || !dd->kregbase)
 			continue;
 		for (pidx = 0; pidx < dd->num_pports; ++pidx) {
@@ -129,7 +111,7 @@ int qib_count_active_units(void)
 			}
 		}
 	}
-	spin_unlock_irqrestore(&qib_devs_lock, flags);
+	xa_unlock_irqrestore(&qib_dev_table, flags);
 	return nunits_active;
 }
 
@@ -142,13 +124,12 @@ int qib_count_units(int *npresentp, int *nupp)
 {
 	int nunits = 0, npresent = 0, nup = 0;
 	struct qib_devdata *dd;
-	unsigned long flags;
+	unsigned long index, flags;
 	int pidx;
 	struct qib_pportdata *ppd;
 
-	spin_lock_irqsave(&qib_devs_lock, flags);
-
-	list_for_each_entry(dd, &qib_dev_list, list) {
+	xa_lock_irqsave(&qib_dev_table, flags);
+	xa_for_each(&qib_dev_table, index, dd) {
 		nunits++;
 		if ((dd->flags & QIB_PRESENT) && dd->kregbase)
 			npresent++;
@@ -159,8 +140,7 @@ int qib_count_units(int *npresentp, int *nupp)
 				nup++;
 		}
 	}
-
-	spin_unlock_irqrestore(&qib_devs_lock, flags);
+	xa_unlock_irqrestore(&qib_dev_table, flags);
 
 	if (npresentp)
 		*npresentp = npresent;
@@ -172,7 +152,7 @@ int qib_count_units(int *npresentp, int *nupp)
 
 /**
  * qib_wait_linkstate - wait for an IB link state change to occur
- * @dd: the qlogic_ib device
+ * @ppd: the qlogic_ib device
  * @state: the state to wait for
  * @msecs: the number of milliseconds to wait
  *
@@ -420,8 +400,7 @@ static u32 qib_rcv_hdrerr(struct qib_ctxtdata *rcd, struct qib_pportdata *ppd,
 						if (list_empty(&qp->rspwait)) {
 							qp->r_flags |=
 								RVT_R_RSP_NAK;
-							atomic_inc(
-								&qp->refcount);
+							rvt_get_qp(qp);
 							list_add_tail(
 							 &qp->rspwait,
 							 &rcd->qp_wait_list);
@@ -684,9 +663,10 @@ int qib_set_lid(struct qib_pportdata *ppd, u32 lid, u8 lmc)
 /* Below is "non-zero" to force override, but both actual LEDs are off */
 #define LED_OVER_BOTH_OFF (8)
 
-static void qib_run_led_override(unsigned long opaque)
+static void qib_run_led_override(struct timer_list *t)
 {
-	struct qib_pportdata *ppd = (struct qib_pportdata *)opaque;
+	struct qib_pportdata *ppd = from_timer(ppd, t,
+						    led_override_timer);
 	struct qib_devdata *dd = ppd->dd;
 	int timeoff;
 	int ph_idx;
@@ -737,9 +717,7 @@ void qib_set_led_override(struct qib_pportdata *ppd, unsigned int val)
 	 */
 	if (atomic_inc_return(&ppd->led_override_timer_active) == 1) {
 		/* Need to start timer */
-		init_timer(&ppd->led_override_timer);
-		ppd->led_override_timer.function = qib_run_led_override;
-		ppd->led_override_timer.data = (unsigned long) ppd;
+		timer_setup(&ppd->led_override_timer, qib_run_led_override, 0);
 		ppd->led_override_timer.expires = jiffies + 1;
 		add_timer(&ppd->led_override_timer);
 	} else {

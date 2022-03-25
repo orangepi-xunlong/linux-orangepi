@@ -1,7 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (C) STMicroelectronics SA 2014
  * Authors: Fabien Dessenne <fabien.dessenne@st.com> for STMicroelectronics.
- * License terms:  GNU General Public License (GPL), version 2
  */
 
 #include <linux/clk.h>
@@ -209,6 +209,6 @@ int bdisp_hw_get_and_clear_irq(struct bdisp_dev *bdisp);
 int bdisp_hw_update(struct bdisp_ctx *ctx);
 
 void bdisp_debugfs_remove(struct bdisp_dev *bdisp);
-int bdisp_debugfs_create(struct bdisp_dev *bdisp);
+void bdisp_debugfs_create(struct bdisp_dev *bdisp);
 void bdisp_dbg_perf_begin(struct bdisp_dev *bdisp);
 void bdisp_dbg_perf_end(struct bdisp_dev *bdisp);

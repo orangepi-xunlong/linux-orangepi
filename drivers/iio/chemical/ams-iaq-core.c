@@ -1,21 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * ams-iaq-core.c - Support for AMS iAQ-Core VOC sensors
  *
- * Copyright (C) 2015 Matt Ranostay <mranostay@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
+ * Copyright (C) 2015, 2018
+ * Author: Matt Ranostay <matt.ranostay@konsulko.com>
  */
 
 #include <linux/module.h>
+#include <linux/mod_devicetable.h>
 #include <linux/mutex.h>
 #include <linux/init.h>
 #include <linux/i2c.h>
@@ -141,7 +133,6 @@ err_out:
 
 static const struct iio_info ams_iaqcore_info = {
 	.read_raw	= ams_iaqcore_read_raw,
-	.driver_module	= THIS_MODULE,
 };
 
 static int ams_iaqcore_probe(struct i2c_client *client,
@@ -162,8 +153,7 @@ static int ams_iaqcore_probe(struct i2c_client *client,
 	data->last_update = jiffies - HZ;
 	mutex_init(&data->lock);
 
-	indio_dev->dev.parent = &client->dev;
-	indio_dev->info = &ams_iaqcore_info,
+	indio_dev->info = &ams_iaqcore_info;
 	indio_dev->name = dev_name(&client->dev);
 	indio_dev->modes = INDIO_DIRECT_MODE;
 
@@ -188,13 +178,13 @@ MODULE_DEVICE_TABLE(of, ams_iaqcore_dt_ids);
 static struct i2c_driver ams_iaqcore_driver = {
 	.driver = {
 		.name	= "ams-iaq-core",
-		.of_match_table = of_match_ptr(ams_iaqcore_dt_ids),
+		.of_match_table = ams_iaqcore_dt_ids,
 	},
 	.probe = ams_iaqcore_probe,
 	.id_table = ams_iaqcore_id,
 };
 module_i2c_driver(ams_iaqcore_driver);
 
-MODULE_AUTHOR("Matt Ranostay <mranostay@gmail.com>");
+MODULE_AUTHOR("Matt Ranostay <matt.ranostay@konsulko.com>");
 MODULE_DESCRIPTION("AMS iAQ-Core VOC sensors");
 MODULE_LICENSE("GPL v2");

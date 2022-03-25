@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/virtio.h>
 #include <linux/spinlock.h>
 #include <linux/virtio_config.h>
 #include <linux/module.h>
 #include <linux/idr.h>
+#include <linux/of.h>
 #include <uapi/linux/virtio_ids.h>
 
 /* Unique numbering for virtio devices. */
@@ -100,11 +102,6 @@ static int virtio_uevent(struct device *_dv, struct kobj_uevent_env *env)
 			      dev->id.device, dev->id.vendor);
 }
 
-static void add_status(struct virtio_device *dev, unsigned status)
-{
-	dev->config->set_status(dev, dev->config->get_status(dev) | status);
-}
-
 void virtio_check_driver_offered_feature(const struct virtio_device *vdev,
 					 unsigned int fbit)
 {
@@ -162,18 +159,40 @@ static void virtio_config_enable(struct virtio_device *dev)
 	spin_unlock_irq(&dev->config_lock);
 }
 
-static int virtio_finalize_features(struct virtio_device *dev)
+void virtio_add_status(struct virtio_device *dev, unsigned int status)
 {
-	int ret = dev->config->finalize_features(dev);
-	unsigned status;
+	might_sleep();
+	dev->config->set_status(dev, dev->config->get_status(dev) | status);
+}
+EXPORT_SYMBOL_GPL(virtio_add_status);
 
-	if (ret)
-		return ret;
+/* Do some validation, then set FEATURES_OK */
+static int virtio_features_ok(struct virtio_device *dev)
+{
+	unsigned status;
+	int ret;
+
+	might_sleep();
+
+	ret = arch_has_restricted_virtio_memory_access();
+	if (ret) {
+		if (!virtio_has_feature(dev, VIRTIO_F_VERSION_1)) {
+			dev_warn(&dev->dev,
+				 "device must provide VIRTIO_F_VERSION_1\n");
+			return -ENODEV;
+		}
+
+		if (!virtio_has_feature(dev, VIRTIO_F_ACCESS_PLATFORM)) {
+			dev_warn(&dev->dev,
+				 "device must provide VIRTIO_F_ACCESS_PLATFORM\n");
+			return -ENODEV;
+		}
+	}
 
 	if (!virtio_has_feature(dev, VIRTIO_F_VERSION_1))
 		return 0;
 
-	add_status(dev, VIRTIO_CONFIG_S_FEATURES_OK);
+	virtio_add_status(dev, VIRTIO_CONFIG_S_FEATURES_OK);
 	status = dev->config->get_status(dev);
 	if (!(status & VIRTIO_CONFIG_S_FEATURES_OK)) {
 		dev_err(&dev->dev, "virtio: device refuses features: %x\n",
@@ -193,7 +212,7 @@ static int virtio_dev_probe(struct device *_d)
 	u64 driver_features_legacy;
 
 	/* We have a driver! */
-	add_status(dev, VIRTIO_CONFIG_S_DRIVER);
+	virtio_add_status(dev, VIRTIO_CONFIG_S_DRIVER);
 
 	/* Figure out what features the device supports. */
 	device_features = dev->config->get_features(dev);
@@ -228,7 +247,26 @@ static int virtio_dev_probe(struct device *_d)
 		if (device_features & (1ULL << i))
 			__virtio_set_bit(dev, i);
 
-	err = virtio_finalize_features(dev);
+	err = dev->config->finalize_features(dev);
+	if (err)
+		goto err;
+
+	if (drv->validate) {
+		u64 features = dev->features;
+
+		err = drv->validate(dev);
+		if (err)
+			goto err;
+
+		/* Did validation change any features? Then write them again. */
+		if (features != dev->features) {
+			err = dev->config->finalize_features(dev);
+			if (err)
+				goto err;
+		}
+	}
+
+	err = virtio_features_ok(dev);
 	if (err)
 		goto err;
 
@@ -247,12 +285,12 @@ static int virtio_dev_probe(struct device *_d)
 
 	return 0;
 err:
-	add_status(dev, VIRTIO_CONFIG_S_FAILED);
+	virtio_add_status(dev, VIRTIO_CONFIG_S_FAILED);
 	return err;
 
 }
 
-static int virtio_dev_remove(struct device *_d)
+static void virtio_dev_remove(struct device *_d)
 {
 	struct virtio_device *dev = dev_to_virtio(_d);
 	struct virtio_driver *drv = drv_to_virtio(dev->dev.driver);
@@ -265,8 +303,9 @@ static int virtio_dev_remove(struct device *_d)
 	WARN_ON_ONCE(dev->config->get_status(dev));
 
 	/* Acknowledge the device's existence again. */
-	add_status(dev, VIRTIO_CONFIG_S_ACKNOWLEDGE);
-	return 0;
+	virtio_add_status(dev, VIRTIO_CONFIG_S_ACKNOWLEDGE);
+
+	of_node_put(dev->dev.of_node);
 }
 
 static struct bus_type virtio_bus = {
@@ -293,11 +332,63 @@ void unregister_virtio_driver(struct virtio_driver *driver)
 }
 EXPORT_SYMBOL_GPL(unregister_virtio_driver);
 
+static int virtio_device_of_init(struct virtio_device *dev)
+{
+	struct device_node *np, *pnode = dev_of_node(dev->dev.parent);
+	char compat[] = "virtio,deviceXXXXXXXX";
+	int ret, count;
+
+	if (!pnode)
+		return 0;
+
+	count = of_get_available_child_count(pnode);
+	if (!count)
+		return 0;
+
+	/* There can be only 1 child node */
+	if (WARN_ON(count > 1))
+		return -EINVAL;
+
+	np = of_get_next_available_child(pnode, NULL);
+	if (WARN_ON(!np))
+		return -ENODEV;
+
+	ret = snprintf(compat, sizeof(compat), "virtio,device%x", dev->id.device);
+	BUG_ON(ret >= sizeof(compat));
+
+	/*
+	 * On powerpc/pseries virtio devices are PCI devices so PCI
+	 * vendor/device ids play the role of the "compatible" property.
+	 * Simply don't init of_node in this case.
+	 */
+	if (!of_device_is_compatible(np, compat)) {
+		ret = 0;
+		goto out;
+	}
+
+	dev->dev.of_node = np;
+	return 0;
+
+out:
+	of_node_put(np);
+	return ret;
+}
+
+/**
+ * register_virtio_device - register virtio device
+ * @dev        : virtio device to be registered
+ *
+ * On error, the caller must call put_device on &@dev->dev (and not kfree),
+ * as another code path may have obtained a reference to @dev.
+ *
+ * Returns: 0 on suceess, -error on failure
+ */
 int register_virtio_device(struct virtio_device *dev)
 {
 	int err;
 
 	dev->dev.bus = &virtio_bus;
+	device_initialize(&dev->dev);
 
 	/* Assign a unique device index and hence name. */
 	err = ida_simple_get(&virtio_index_ida, 0, 0, GFP_KERNEL);
@@ -306,6 +397,10 @@ int register_virtio_device(struct virtio_device *dev)
 
 	dev->index = err;
 	dev_set_name(&dev->dev, "virtio%u", dev->index);
+
+	err = virtio_device_of_init(dev);
+	if (err)
+		goto out_ida_remove;
 
 	spin_lock_init(&dev->config_lock);
 	dev->config_enabled = false;
@@ -316,21 +411,36 @@ int register_virtio_device(struct virtio_device *dev)
 	dev->config->reset(dev);
 
 	/* Acknowledge that we've seen the device. */
-	add_status(dev, VIRTIO_CONFIG_S_ACKNOWLEDGE);
+	virtio_add_status(dev, VIRTIO_CONFIG_S_ACKNOWLEDGE);
 
 	INIT_LIST_HEAD(&dev->vqs);
+	spin_lock_init(&dev->vqs_list_lock);
 
-	/* device_register() causes the bus infrastructure to look for a
-	 * matching driver. */
-	err = device_register(&dev->dev);
+	/*
+	 * device_add() causes the bus infrastructure to look for a matching
+	 * driver.
+	 */
+	err = device_add(&dev->dev);
 	if (err)
-		ida_simple_remove(&virtio_index_ida, dev->index);
+		goto out_of_node_put;
+
+	return 0;
+
+out_of_node_put:
+	of_node_put(dev->dev.of_node);
+out_ida_remove:
+	ida_simple_remove(&virtio_index_ida, dev->index);
 out:
-	if (err)
-		add_status(dev, VIRTIO_CONFIG_S_FAILED);
+	virtio_add_status(dev, VIRTIO_CONFIG_S_FAILED);
 	return err;
 }
 EXPORT_SYMBOL_GPL(register_virtio_device);
+
+bool is_virtio_device(struct device *dev)
+{
+	return dev->bus == &virtio_bus;
+}
+EXPORT_SYMBOL_GPL(is_virtio_device);
 
 void unregister_virtio_device(struct virtio_device *dev)
 {
@@ -367,20 +477,24 @@ int virtio_device_restore(struct virtio_device *dev)
 	dev->config->reset(dev);
 
 	/* Acknowledge that we've seen the device. */
-	add_status(dev, VIRTIO_CONFIG_S_ACKNOWLEDGE);
+	virtio_add_status(dev, VIRTIO_CONFIG_S_ACKNOWLEDGE);
 
 	/* Maybe driver failed before freeze.
 	 * Restore the failed status, for debugging. */
 	if (dev->failed)
-		add_status(dev, VIRTIO_CONFIG_S_FAILED);
+		virtio_add_status(dev, VIRTIO_CONFIG_S_FAILED);
 
 	if (!drv)
 		return 0;
 
 	/* We have a driver! */
-	add_status(dev, VIRTIO_CONFIG_S_DRIVER);
+	virtio_add_status(dev, VIRTIO_CONFIG_S_DRIVER);
 
-	ret = virtio_finalize_features(dev);
+	ret = dev->config->finalize_features(dev);
+	if (ret)
+		goto err;
+
+	ret = virtio_features_ok(dev);
 	if (ret)
 		goto err;
 
@@ -391,14 +505,14 @@ int virtio_device_restore(struct virtio_device *dev)
 	}
 
 	/* Finally, tell the device we're all set */
-	add_status(dev, VIRTIO_CONFIG_S_DRIVER_OK);
+	virtio_add_status(dev, VIRTIO_CONFIG_S_DRIVER_OK);
 
 	virtio_config_enable(dev);
 
 	return 0;
 
 err:
-	add_status(dev, VIRTIO_CONFIG_S_FAILED);
+	virtio_add_status(dev, VIRTIO_CONFIG_S_FAILED);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(virtio_device_restore);

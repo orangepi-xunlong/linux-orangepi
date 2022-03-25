@@ -1,9 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) ST-Ericsson SA 2012
  *
  * Battery temperature driver for AB8500
  *
- * License Terms: GNU General Public License v2
  * Author:
  *	Johan Palsson <johan.palsson@stericsson.com>
  *	Karl Komierowski <karl.komierowski@stericsson.com>
@@ -13,6 +13,7 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/device.h>
+#include <linux/component.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
@@ -25,8 +26,10 @@
 #include <linux/mfd/core.h>
 #include <linux/mfd/abx500.h>
 #include <linux/mfd/abx500/ab8500.h>
-#include <linux/mfd/abx500/ab8500-bm.h>
-#include <linux/mfd/abx500/ab8500-gpadc.h>
+#include <linux/iio/consumer.h>
+#include <linux/fixp-arith.h>
+
+#include "ab8500-bm.h"
 
 #define VTVOUT_V			1800
 
@@ -76,10 +79,11 @@ struct ab8500_btemp_ranges {
  * @dev:		Pointer to the structure device
  * @node:		List of AB8500 BTEMPs, hence prepared for reentrance
  * @curr_source:	What current source we use, in uA
- * @bat_temp:		Dispatched battery temperature in degree Celcius
- * @prev_bat_temp	Last measured battery temperature in degree Celcius
+ * @bat_temp:		Dispatched battery temperature in degree Celsius
+ * @prev_bat_temp	Last measured battery temperature in degree Celsius
  * @parent:		Pointer to the struct ab8500
- * @gpadc:		Pointer to the struct gpadc
+ * @adc_btemp_ball:	ADC channel for the battery ball temperature
+ * @adc_bat_ctrl:	ADC channel for the battery control
  * @fg:			Pointer to the struct fg
  * @bm:           	Platform specific battery management information
  * @btemp_psy:		Structure for BTEMP specific battery properties
@@ -96,9 +100,10 @@ struct ab8500_btemp {
 	int bat_temp;
 	int prev_bat_temp;
 	struct ab8500 *parent;
-	struct ab8500_gpadc *gpadc;
+	struct iio_channel *btemp_ball;
+	struct iio_channel *bat_ctrl;
 	struct ab8500_fg *fg;
-	struct abx500_bm_data *bm;
+	struct ab8500_bm_data *bm;
 	struct power_supply *btemp_psy;
 	struct ab8500_btemp_events events;
 	struct ab8500_btemp_ranges btemp_ranges;
@@ -116,19 +121,6 @@ static enum power_supply_property ab8500_btemp_props[] = {
 };
 
 static LIST_HEAD(ab8500_btemp_list);
-
-/**
- * ab8500_btemp_get() - returns a reference to the primary AB8500 BTEMP
- * (i.e. the first BTEMP in the instance list)
- */
-struct ab8500_btemp *ab8500_btemp_get(void)
-{
-	struct ab8500_btemp *btemp;
-	btemp = list_first_entry(&ab8500_btemp_list, struct ab8500_btemp, node);
-
-	return btemp;
-}
-EXPORT_SYMBOL(ab8500_btemp_get);
 
 /**
  * ab8500_btemp_batctrl_volt_to_res() - convert batctrl voltage to resistance
@@ -153,7 +145,7 @@ static int ab8500_btemp_batctrl_volt_to_res(struct ab8500_btemp *di,
 		return (450000 * (v_batctrl)) / (1800 - v_batctrl);
 	}
 
-	if (di->bm->adc_therm == ABx500_ADC_THERM_BATCTRL) {
+	if (di->bm->adc_therm == AB8500_ADC_THERM_BATCTRL) {
 		/*
 		 * If the battery has internal NTC, we use the current
 		 * source to calculate the resistance.
@@ -180,13 +172,13 @@ static int ab8500_btemp_batctrl_volt_to_res(struct ab8500_btemp *di,
  */
 static int ab8500_btemp_read_batctrl_voltage(struct ab8500_btemp *di)
 {
-	int vbtemp;
+	int vbtemp, ret;
 	static int prev;
 
-	vbtemp = ab8500_gpadc_convert(di->gpadc, BAT_CTRL);
-	if (vbtemp < 0) {
+	ret = iio_read_channel_processed(di->bat_ctrl, &vbtemp);
+	if (ret < 0) {
 		dev_err(di->dev,
-			"%s gpadc conversion failed, using previous value",
+			"%s ADC conversion failed, using previous value",
 			__func__);
 		return prev;
 	}
@@ -215,24 +207,12 @@ static int ab8500_btemp_curr_source_enable(struct ab8500_btemp *di,
 		return 0;
 
 	/* Only do this for batteries with internal NTC */
-	if (di->bm->adc_therm == ABx500_ADC_THERM_BATCTRL && enable) {
+	if (di->bm->adc_therm == AB8500_ADC_THERM_BATCTRL && enable) {
 
-		if (is_ab8540(di->parent)) {
-			if (di->curr_source == BTEMP_BATCTRL_CURR_SRC_60UA)
-				curr = BAT_CTRL_60U_ENA;
-			else
-				curr = BAT_CTRL_120U_ENA;
-		} else if (is_ab9540(di->parent) || is_ab8505(di->parent)) {
-			if (di->curr_source == BTEMP_BATCTRL_CURR_SRC_16UA)
-				curr = BAT_CTRL_16U_ENA;
-			else
-				curr = BAT_CTRL_18U_ENA;
-		} else {
-			if (di->curr_source == BTEMP_BATCTRL_CURR_SRC_7UA)
-				curr = BAT_CTRL_7U_ENA;
-			else
-				curr = BAT_CTRL_20U_ENA;
-		}
+		if (di->curr_source == BTEMP_BATCTRL_CURR_SRC_7UA)
+			curr = BAT_CTRL_7U_ENA;
+		else
+			curr = BAT_CTRL_20U_ENA;
 
 		dev_dbg(di->dev, "Set BATCTRL %duA\n", di->curr_source);
 
@@ -260,31 +240,15 @@ static int ab8500_btemp_curr_source_enable(struct ab8500_btemp *di,
 				__func__);
 			goto disable_curr_source;
 		}
-	} else if (di->bm->adc_therm == ABx500_ADC_THERM_BATCTRL && !enable) {
+	} else if (di->bm->adc_therm == AB8500_ADC_THERM_BATCTRL && !enable) {
 		dev_dbg(di->dev, "Disable BATCTRL curr source\n");
 
-		if (is_ab8540(di->parent)) {
-			/* Write 0 to the curr bits */
-			ret = abx500_mask_and_set_register_interruptible(
-				di->dev,
-				AB8500_CHARGER, AB8500_BAT_CTRL_CURRENT_SOURCE,
-				BAT_CTRL_60U_ENA | BAT_CTRL_120U_ENA,
-				~(BAT_CTRL_60U_ENA | BAT_CTRL_120U_ENA));
-		} else if (is_ab9540(di->parent) || is_ab8505(di->parent)) {
-			/* Write 0 to the curr bits */
-			ret = abx500_mask_and_set_register_interruptible(
-				di->dev,
-				AB8500_CHARGER, AB8500_BAT_CTRL_CURRENT_SOURCE,
-				BAT_CTRL_16U_ENA | BAT_CTRL_18U_ENA,
-				~(BAT_CTRL_16U_ENA | BAT_CTRL_18U_ENA));
-		} else {
-			/* Write 0 to the curr bits */
-			ret = abx500_mask_and_set_register_interruptible(
-				di->dev,
-				AB8500_CHARGER, AB8500_BAT_CTRL_CURRENT_SOURCE,
-				BAT_CTRL_7U_ENA | BAT_CTRL_20U_ENA,
-				~(BAT_CTRL_7U_ENA | BAT_CTRL_20U_ENA));
-		}
+		/* Write 0 to the curr bits */
+		ret = abx500_mask_and_set_register_interruptible(
+			di->dev,
+			AB8500_CHARGER, AB8500_BAT_CTRL_CURRENT_SOURCE,
+			BAT_CTRL_7U_ENA | BAT_CTRL_20U_ENA,
+			~(BAT_CTRL_7U_ENA | BAT_CTRL_20U_ENA));
 
 		if (ret) {
 			dev_err(di->dev, "%s failed disabling current source\n",
@@ -327,25 +291,11 @@ static int ab8500_btemp_curr_source_enable(struct ab8500_btemp *di,
 	 * if we got an error above
 	 */
 disable_curr_source:
-	if (is_ab8540(di->parent)) {
-		/* Write 0 to the curr bits */
-		ret = abx500_mask_and_set_register_interruptible(di->dev,
-			AB8500_CHARGER, AB8500_BAT_CTRL_CURRENT_SOURCE,
-			BAT_CTRL_60U_ENA | BAT_CTRL_120U_ENA,
-			~(BAT_CTRL_60U_ENA | BAT_CTRL_120U_ENA));
-	} else if (is_ab9540(di->parent) || is_ab8505(di->parent)) {
-		/* Write 0 to the curr bits */
-		ret = abx500_mask_and_set_register_interruptible(di->dev,
-			AB8500_CHARGER, AB8500_BAT_CTRL_CURRENT_SOURCE,
-			BAT_CTRL_16U_ENA | BAT_CTRL_18U_ENA,
-			~(BAT_CTRL_16U_ENA | BAT_CTRL_18U_ENA));
-	} else {
-		/* Write 0 to the curr bits */
-		ret = abx500_mask_and_set_register_interruptible(di->dev,
-			AB8500_CHARGER, AB8500_BAT_CTRL_CURRENT_SOURCE,
-			BAT_CTRL_7U_ENA | BAT_CTRL_20U_ENA,
-			~(BAT_CTRL_7U_ENA | BAT_CTRL_20U_ENA));
-	}
+	/* Write 0 to the curr bits */
+	ret = abx500_mask_and_set_register_interruptible(di->dev,
+		AB8500_CHARGER, AB8500_BAT_CTRL_CURRENT_SOURCE,
+		BAT_CTRL_7U_ENA | BAT_CTRL_20U_ENA,
+		~(BAT_CTRL_7U_ENA | BAT_CTRL_20U_ENA));
 
 	if (ret) {
 		dev_err(di->dev, "%s failed disabling current source\n",
@@ -464,13 +414,13 @@ static int ab8500_btemp_get_batctrl_res(struct ab8500_btemp *di)
  * @tbl_size:	size of the resistance to temperature table
  * @res:	resistance to calculate the temperature from
  *
- * This function returns the battery temperature in degrees Celcius
+ * This function returns the battery temperature in degrees Celsius
  * based on the NTC resistance.
  */
 static int ab8500_btemp_res_to_temp(struct ab8500_btemp *di,
-	const struct abx500_res_to_temp *tbl, int tbl_size, int res)
+	const struct ab8500_res_to_temp *tbl, int tbl_size, int res)
 {
-	int i, temp;
+	int i;
 	/*
 	 * Calculate the formula for the straight line
 	 * Simple interpolation if we are within
@@ -488,9 +438,9 @@ static int ab8500_btemp_res_to_temp(struct ab8500_btemp *di,
 			i++;
 	}
 
-	temp = tbl[i].temp + ((tbl[i + 1].temp - tbl[i].temp) *
-		(res - tbl[i].resist)) / (tbl[i + 1].resist - tbl[i].resist);
-	return temp;
+	return fixp_linear_interpolate(tbl[i].resist, tbl[i].temp,
+				       tbl[i + 1].resist, tbl[i + 1].temp,
+				       res);
 }
 
 /**
@@ -501,14 +451,14 @@ static int ab8500_btemp_res_to_temp(struct ab8500_btemp *di,
  */
 static int ab8500_btemp_measure_temp(struct ab8500_btemp *di)
 {
-	int temp;
+	int temp, ret;
 	static int prev;
 	int rbat, rntc, vntc;
 	u8 id;
 
 	id = di->bm->batt_id;
 
-	if (di->bm->adc_therm == ABx500_ADC_THERM_BATCTRL &&
+	if (di->bm->adc_therm == AB8500_ADC_THERM_BATCTRL &&
 			id != BATTERY_UNKNOWN) {
 
 		rbat = ab8500_btemp_get_batctrl_res(di);
@@ -526,10 +476,10 @@ static int ab8500_btemp_measure_temp(struct ab8500_btemp *di)
 			di->bm->bat_type[id].r_to_t_tbl,
 			di->bm->bat_type[id].n_temp_tbl_elements, rbat);
 	} else {
-		vntc = ab8500_gpadc_convert(di->gpadc, BTEMP_BALL);
-		if (vntc < 0) {
+		ret = iio_read_channel_processed(di->btemp_ball, &vntc);
+		if (ret < 0) {
 			dev_err(di->dev,
-				"%s gpadc conversion failed,"
+				"%s ADC conversion failed,"
 				" using previous value\n", __func__);
 			return prev;
 		}
@@ -560,13 +510,8 @@ static int ab8500_btemp_id(struct ab8500_btemp *di)
 {
 	int res;
 	u8 i;
-	if (is_ab8540(di->parent))
-		di->curr_source = BTEMP_BATCTRL_CURR_SRC_60UA;
-	else if (is_ab9540(di->parent) || is_ab8505(di->parent))
-		di->curr_source = BTEMP_BATCTRL_CURR_SRC_16UA;
-	else
-		di->curr_source = BTEMP_BATCTRL_CURR_SRC_7UA;
 
+	di->curr_source = BTEMP_BATCTRL_CURR_SRC_7UA;
 	di->bm->batt_id = BATTERY_UNKNOWN;
 
 	res =  ab8500_btemp_get_batctrl_res(di);
@@ -582,7 +527,7 @@ static int ab8500_btemp_id(struct ab8500_btemp *di)
 			dev_dbg(di->dev, "Battery detected on %s"
 				" low %d < res %d < high: %d"
 				" index: %d\n",
-				di->bm->adc_therm == ABx500_ADC_THERM_BATCTRL ?
+				di->bm->adc_therm == AB8500_ADC_THERM_BATCTRL ?
 				"BATCTRL" : "BATTEMP",
 				di->bm->bat_type[i].resis_low, res,
 				di->bm->bat_type[i].resis_high, i);
@@ -602,20 +547,10 @@ static int ab8500_btemp_id(struct ab8500_btemp *di)
 	 * We only have to change current source if the
 	 * detected type is Type 1.
 	 */
-	if (di->bm->adc_therm == ABx500_ADC_THERM_BATCTRL &&
+	if (di->bm->adc_therm == AB8500_ADC_THERM_BATCTRL &&
 	    di->bm->batt_id == 1) {
-		if (is_ab8540(di->parent)) {
-			dev_dbg(di->dev,
-				"Set BATCTRL current source to 60uA\n");
-			di->curr_source = BTEMP_BATCTRL_CURR_SRC_60UA;
-		} else if (is_ab9540(di->parent) || is_ab8505(di->parent)) {
-			dev_dbg(di->dev,
-				"Set BATCTRL current source to 16uA\n");
-			di->curr_source = BTEMP_BATCTRL_CURR_SRC_16UA;
-		} else {
-			dev_dbg(di->dev, "Set BATCTRL current source to 20uA\n");
-			di->curr_source = BTEMP_BATCTRL_CURR_SRC_20UA;
-		}
+		dev_dbg(di->dev, "Set BATCTRL current source to 20uA\n");
+		di->curr_source = BTEMP_BATCTRL_CURR_SRC_20UA;
 	}
 
 	return di->bm->batt_id;
@@ -813,7 +748,7 @@ static void ab8500_btemp_periodic(struct ab8500_btemp *di,
  *
  * Returns battery temperature
  */
-int ab8500_btemp_get_temp(struct ab8500_btemp *di)
+static int ab8500_btemp_get_temp(struct ab8500_btemp *di)
 {
 	int temp = 0;
 
@@ -849,19 +784,6 @@ int ab8500_btemp_get_temp(struct ab8500_btemp *di)
 	}
 	return temp;
 }
-EXPORT_SYMBOL(ab8500_btemp_get_temp);
-
-/**
- * ab8500_btemp_get_batctrl_temp() - get the temperature
- * @btemp:      pointer to the btemp structure
- *
- * Returns the batctrl temperature in millidegrees
- */
-int ab8500_btemp_get_batctrl_temp(struct ab8500_btemp *btemp)
-{
-	return btemp->bat_temp * 1000;
-}
-EXPORT_SYMBOL(ab8500_btemp_get_batctrl_temp);
 
 /**
  * ab8500_btemp_get_property() - get the btemp properties
@@ -995,46 +917,20 @@ static struct ab8500_btemp_interrupts ab8500_btemp_irq[] = {
 	{"BTEMP_MEDIUM_HIGH", ab8500_btemp_medhigh_handler},
 };
 
-#if defined(CONFIG_PM)
-static int ab8500_btemp_resume(struct platform_device *pdev)
+static int __maybe_unused ab8500_btemp_resume(struct device *dev)
 {
-	struct ab8500_btemp *di = platform_get_drvdata(pdev);
+	struct ab8500_btemp *di = dev_get_drvdata(dev);
 
 	ab8500_btemp_periodic(di, true);
 
 	return 0;
 }
 
-static int ab8500_btemp_suspend(struct platform_device *pdev,
-	pm_message_t state)
+static int __maybe_unused ab8500_btemp_suspend(struct device *dev)
 {
-	struct ab8500_btemp *di = platform_get_drvdata(pdev);
+	struct ab8500_btemp *di = dev_get_drvdata(dev);
 
 	ab8500_btemp_periodic(di, false);
-
-	return 0;
-}
-#else
-#define ab8500_btemp_suspend      NULL
-#define ab8500_btemp_resume       NULL
-#endif
-
-static int ab8500_btemp_remove(struct platform_device *pdev)
-{
-	struct ab8500_btemp *di = platform_get_drvdata(pdev);
-	int i, irq;
-
-	/* Disable interrupts */
-	for (i = 0; i < ARRAY_SIZE(ab8500_btemp_irq); i++) {
-		irq = platform_get_irq_byname(pdev, ab8500_btemp_irq[i].name);
-		free_irq(irq, di);
-	}
-
-	/* Delete the work queue */
-	destroy_workqueue(di->btemp_wq);
-
-	flush_scheduled_work();
-	power_supply_unregister(di->btemp_psy);
 
 	return 0;
 }
@@ -1053,53 +949,77 @@ static const struct power_supply_desc ab8500_btemp_desc = {
 	.external_power_changed	= ab8500_btemp_external_power_changed,
 };
 
+static int ab8500_btemp_bind(struct device *dev, struct device *master,
+			     void *data)
+{
+	struct ab8500_btemp *di = dev_get_drvdata(dev);
+
+	/* Create a work queue for the btemp */
+	di->btemp_wq =
+		alloc_workqueue("ab8500_btemp_wq", WQ_MEM_RECLAIM, 0);
+	if (di->btemp_wq == NULL) {
+		dev_err(dev, "failed to create work queue\n");
+		return -ENOMEM;
+	}
+
+	/* Kick off periodic temperature measurements */
+	ab8500_btemp_periodic(di, true);
+
+	return 0;
+}
+
+static void ab8500_btemp_unbind(struct device *dev, struct device *master,
+				void *data)
+{
+	struct ab8500_btemp *di = dev_get_drvdata(dev);
+
+	/* Delete the work queue */
+	destroy_workqueue(di->btemp_wq);
+	flush_scheduled_work();
+}
+
+static const struct component_ops ab8500_btemp_component_ops = {
+	.bind = ab8500_btemp_bind,
+	.unbind = ab8500_btemp_unbind,
+};
+
 static int ab8500_btemp_probe(struct platform_device *pdev)
 {
-	struct device_node *np = pdev->dev.of_node;
-	struct abx500_bm_data *plat = pdev->dev.platform_data;
 	struct power_supply_config psy_cfg = {};
+	struct device *dev = &pdev->dev;
 	struct ab8500_btemp *di;
 	int irq, i, ret = 0;
 	u8 val;
 
-	di = devm_kzalloc(&pdev->dev, sizeof(*di), GFP_KERNEL);
-	if (!di) {
-		dev_err(&pdev->dev, "%s no mem for ab8500_btemp\n", __func__);
+	di = devm_kzalloc(dev, sizeof(*di), GFP_KERNEL);
+	if (!di)
 		return -ENOMEM;
-	}
 
-	if (!plat) {
-		dev_err(&pdev->dev, "no battery management data supplied\n");
-		return -EINVAL;
-	}
-	di->bm = plat;
-
-	if (np) {
-		ret = ab8500_bm_of_probe(&pdev->dev, np, di->bm);
-		if (ret) {
-			dev_err(&pdev->dev, "failed to get battery information\n");
-			return ret;
-		}
-	}
+	di->bm = &ab8500_bm_data;
 
 	/* get parent data */
-	di->dev = &pdev->dev;
+	di->dev = dev;
 	di->parent = dev_get_drvdata(pdev->dev.parent);
-	di->gpadc = ab8500_gpadc_get("ab8500-gpadc.0");
+
+	/* Get ADC channels */
+	di->btemp_ball = devm_iio_channel_get(dev, "btemp_ball");
+	if (IS_ERR(di->btemp_ball)) {
+		ret = dev_err_probe(dev, PTR_ERR(di->btemp_ball),
+				    "failed to get BTEMP BALL ADC channel\n");
+		return ret;
+	}
+	di->bat_ctrl = devm_iio_channel_get(dev, "bat_ctrl");
+	if (IS_ERR(di->bat_ctrl)) {
+		ret = dev_err_probe(dev, PTR_ERR(di->bat_ctrl),
+				    "failed to get BAT CTRL ADC channel\n");
+		return ret;
+	}
 
 	di->initialized = false;
 
 	psy_cfg.supplied_to = supply_interface;
 	psy_cfg.num_supplicants = ARRAY_SIZE(supply_interface);
 	psy_cfg.drv_data = di;
-
-	/* Create a work queue for the btemp */
-	di->btemp_wq =
-		alloc_workqueue("ab8500_btemp_wq", WQ_MEM_RECLAIM, 0);
-	if (di->btemp_wq == NULL) {
-		dev_err(di->dev, "failed to create work queue\n");
-		return -ENOMEM;
-	}
 
 	/* Init work for measuring temperature periodically */
 	INIT_DEFERRABLE_WORK(&di->btemp_periodic_work,
@@ -1109,11 +1029,11 @@ static int ab8500_btemp_probe(struct platform_device *pdev)
 	di->btemp_ranges.btemp_low_limit = BTEMP_THERMAL_LOW_LIMIT;
 	di->btemp_ranges.btemp_med_limit = BTEMP_THERMAL_MED_LIMIT;
 
-	ret = abx500_get_register_interruptible(di->dev, AB8500_CHARGER,
+	ret = abx500_get_register_interruptible(dev, AB8500_CHARGER,
 		AB8500_BTEMP_HIGH_TH, &val);
 	if (ret < 0) {
-		dev_err(di->dev, "%s ab8500 read failed\n", __func__);
-		goto free_btemp_wq;
+		dev_err(dev, "%s ab8500 read failed\n", __func__);
+		return ret;
 	}
 	switch (val) {
 	case BTEMP_HIGH_TH_57_0:
@@ -1132,80 +1052,64 @@ static int ab8500_btemp_probe(struct platform_device *pdev)
 	}
 
 	/* Register BTEMP power supply class */
-	di->btemp_psy = power_supply_register(di->dev, &ab8500_btemp_desc,
-					      &psy_cfg);
+	di->btemp_psy = devm_power_supply_register(dev, &ab8500_btemp_desc,
+						   &psy_cfg);
 	if (IS_ERR(di->btemp_psy)) {
-		dev_err(di->dev, "failed to register BTEMP psy\n");
-		ret = PTR_ERR(di->btemp_psy);
-		goto free_btemp_wq;
+		dev_err(dev, "failed to register BTEMP psy\n");
+		return PTR_ERR(di->btemp_psy);
 	}
 
 	/* Register interrupts */
 	for (i = 0; i < ARRAY_SIZE(ab8500_btemp_irq); i++) {
 		irq = platform_get_irq_byname(pdev, ab8500_btemp_irq[i].name);
-		ret = request_threaded_irq(irq, NULL, ab8500_btemp_irq[i].isr,
-			IRQF_SHARED | IRQF_NO_SUSPEND,
+		if (irq < 0)
+			return irq;
+
+		ret = devm_request_threaded_irq(dev, irq, NULL,
+			ab8500_btemp_irq[i].isr,
+			IRQF_SHARED | IRQF_NO_SUSPEND | IRQF_ONESHOT,
 			ab8500_btemp_irq[i].name, di);
 
 		if (ret) {
-			dev_err(di->dev, "failed to request %s IRQ %d: %d\n"
+			dev_err(dev, "failed to request %s IRQ %d: %d\n"
 				, ab8500_btemp_irq[i].name, irq, ret);
-			goto free_irq;
+			return ret;
 		}
-		dev_dbg(di->dev, "Requested %s IRQ %d: %d\n",
+		dev_dbg(dev, "Requested %s IRQ %d: %d\n",
 			ab8500_btemp_irq[i].name, irq, ret);
 	}
 
 	platform_set_drvdata(pdev, di);
 
-	/* Kick off periodic temperature measurements */
-	ab8500_btemp_periodic(di, true);
 	list_add_tail(&di->node, &ab8500_btemp_list);
 
-	return ret;
-
-free_irq:
-	power_supply_unregister(di->btemp_psy);
-
-	/* We also have to free all successfully registered irqs */
-	for (i = i - 1; i >= 0; i--) {
-		irq = platform_get_irq_byname(pdev, ab8500_btemp_irq[i].name);
-		free_irq(irq, di);
-	}
-free_btemp_wq:
-	destroy_workqueue(di->btemp_wq);
-	return ret;
+	return component_add(dev, &ab8500_btemp_component_ops);
 }
+
+static int ab8500_btemp_remove(struct platform_device *pdev)
+{
+	component_del(&pdev->dev, &ab8500_btemp_component_ops);
+
+	return 0;
+}
+
+static SIMPLE_DEV_PM_OPS(ab8500_btemp_pm_ops, ab8500_btemp_suspend, ab8500_btemp_resume);
 
 static const struct of_device_id ab8500_btemp_match[] = {
 	{ .compatible = "stericsson,ab8500-btemp", },
 	{ },
 };
+MODULE_DEVICE_TABLE(of, ab8500_btemp_match);
 
-static struct platform_driver ab8500_btemp_driver = {
+struct platform_driver ab8500_btemp_driver = {
 	.probe = ab8500_btemp_probe,
 	.remove = ab8500_btemp_remove,
-	.suspend = ab8500_btemp_suspend,
-	.resume = ab8500_btemp_resume,
 	.driver = {
 		.name = "ab8500-btemp",
 		.of_match_table = ab8500_btemp_match,
+		.pm = &ab8500_btemp_pm_ops,
 	},
 };
-
-static int __init ab8500_btemp_init(void)
-{
-	return platform_driver_register(&ab8500_btemp_driver);
-}
-
-static void __exit ab8500_btemp_exit(void)
-{
-	platform_driver_unregister(&ab8500_btemp_driver);
-}
-
-device_initcall(ab8500_btemp_init);
-module_exit(ab8500_btemp_exit);
-
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Johan Palsson, Karl Komierowski, Arun R Murthy");
 MODULE_ALIAS("platform:ab8500-btemp");

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __ASM_SYNC_BITOPS_H__
 #define __ASM_SYNC_BITOPS_H__
 
@@ -20,7 +21,7 @@
 #define sync_test_and_clear_bit(nr, p)	_test_and_clear_bit(nr, p)
 #define sync_test_and_change_bit(nr, p)	_test_and_change_bit(nr, p)
 #define sync_test_bit(nr, addr)		test_bit(nr, addr)
-#define sync_cmpxchg			cmpxchg
+#define arch_sync_cmpxchg		arch_cmpxchg
 
 
 #endif

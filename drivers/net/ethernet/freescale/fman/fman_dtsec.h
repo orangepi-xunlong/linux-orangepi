@@ -37,7 +37,7 @@
 
 struct fman_mac *dtsec_config(struct fman_mac_params *params);
 int dtsec_set_promiscuous(struct fman_mac *dtsec, bool new_val);
-int dtsec_modify_mac_address(struct fman_mac *dtsec, enet_addr_t *enet_addr);
+int dtsec_modify_mac_address(struct fman_mac *dtsec, const enet_addr_t *enet_addr);
 int dtsec_adjust_link(struct fman_mac *dtsec,
 		      u16 speed);
 int dtsec_restart_autoneg(struct fman_mac *dtsec);
@@ -55,5 +55,7 @@ int dtsec_set_exception(struct fman_mac *dtsec,
 int dtsec_add_hash_mac_address(struct fman_mac *dtsec, enet_addr_t *eth_addr);
 int dtsec_del_hash_mac_address(struct fman_mac *dtsec, enet_addr_t *eth_addr);
 int dtsec_get_version(struct fman_mac *dtsec, u32 *mac_version);
+int dtsec_set_allmulti(struct fman_mac *dtsec, bool enable);
+int dtsec_set_tstamp(struct fman_mac *dtsec, bool enable);
 
 #endif /* __DTSEC_H */

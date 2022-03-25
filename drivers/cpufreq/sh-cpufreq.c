@@ -23,7 +23,6 @@
 #include <linux/cpumask.h>
 #include <linux/cpu.h>
 #include <linux/smp.h>
-#include <linux/sched.h>	/* set_cpus_allowed() */
 #include <linux/clk.h>
 #include <linux/percpu.h>
 #include <linux/sh_clk.h>
@@ -87,7 +86,7 @@ static int sh_cpufreq_target(struct cpufreq_policy *policy,
 	return work_on_cpu(policy->cpu, __sh_cpufreq_target, &data);
 }
 
-static int sh_cpufreq_verify(struct cpufreq_policy *policy)
+static int sh_cpufreq_verify(struct cpufreq_policy_data *policy)
 {
 	struct clk *cpuclk = &per_cpu(sh_cpuclk, policy->cpu);
 	struct cpufreq_frequency_table *freq_table;
@@ -122,11 +121,7 @@ static int sh_cpufreq_cpu_init(struct cpufreq_policy *policy)
 
 	freq_table = cpuclk->nr_freqs ? cpuclk->freq_table : NULL;
 	if (freq_table) {
-		int result;
-
-		result = cpufreq_table_validate_and_show(policy, freq_table);
-		if (result)
-			return result;
+		policy->freq_table = freq_table;
 	} else {
 		dev_notice(dev, "no frequency table found, falling back "
 			   "to rate rounding.\n");
@@ -136,13 +131,6 @@ static int sh_cpufreq_cpu_init(struct cpufreq_policy *policy)
 		policy->max = policy->cpuinfo.max_freq =
 			(clk_round_rate(cpuclk, ~0UL) + 500) / 1000;
 	}
-
-	policy->cpuinfo.transition_latency = CPUFREQ_ETERNAL;
-
-	dev_info(dev, "CPU Frequencies - Minimum %u.%03u MHz, "
-	       "Maximum %u.%03u MHz.\n",
-	       policy->min / 1000, policy->min % 1000,
-	       policy->max / 1000, policy->max % 1000);
 
 	return 0;
 }
@@ -159,6 +147,7 @@ static int sh_cpufreq_cpu_exit(struct cpufreq_policy *policy)
 
 static struct cpufreq_driver sh_cpufreq_driver = {
 	.name		= "sh",
+	.flags		= CPUFREQ_NO_AUTO_DYNAMIC_SWITCHING,
 	.get		= sh_cpufreq_get,
 	.target		= sh_cpufreq_target,
 	.verify		= sh_cpufreq_verify,

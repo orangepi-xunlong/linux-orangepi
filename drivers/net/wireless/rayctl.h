@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _RAYCTL_H_
 #define _RAYCTL_H_
 
@@ -569,7 +570,7 @@ struct phy_header {
 };
 struct ray_rx_msg {
     struct mac_header mac;
-    UCHAR  var[0];
+	UCHAR	var[];
 };
 
 struct tx_msg {

@@ -1,7 +1,7 @@
 Atmel SPI device
 
 Required properties:
-- compatible : should be "atmel,at91rm9200-spi".
+- compatible : should be "atmel,at91rm9200-spi" or "microchip,sam9x60-spi".
 - reg: Address and length of the register set for the device
 - interrupts: Should contain spi interrupt
 - cs-gpios: chipselects (optional for SPI controller version >= 2 with the
@@ -26,7 +26,6 @@ spi1: spi@fffcc000 {
 	clock-names = "spi_clk";
 	cs-gpios = <&pioB 3 0>;
 	atmel,fifo-size = <32>;
-	status = "okay";
 
 	mmc-slot@0 {
 		compatible = "mmc-spi-slot";

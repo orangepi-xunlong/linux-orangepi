@@ -1,9 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * This file setups defines to compile arch specific binary from the
  * generic one.
  *
  * The function 'LIBUNWIND__ARCH_REG_ID' name is set according to arch
- * name and the defination of this function is included directly from
+ * name and the definition of this function is included directly from
  * 'arch/arm64/util/unwind-libunwind.c', to make sure that this function
  * is defined no matter what arch the host is.
  *
@@ -21,7 +22,6 @@
 #define LIBUNWIND__ARCH_REG_SP PERF_REG_ARM64_SP
 
 #include "unwind.h"
-#include "debug.h"
 #include "libunwind-aarch64.h"
 #include <../../../../arch/arm64/include/uapi/asm/perf_regs.h>
 #include "../../arch/arm64/util/unwind-libunwind.c"

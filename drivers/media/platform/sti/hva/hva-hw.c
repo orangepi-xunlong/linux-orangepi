@@ -1,14 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) STMicroelectronics SA 2015
  * Authors: Yannick Fertre <yannick.fertre@st.com>
  *          Hugues Fruchet <hugues.fruchet@st.com>
- * License terms:  GNU General Public License (GPL), version 2
  */
 
 #include <linux/clk.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#ifdef CONFIG_VIDEO_STI_HVA_DEBUGFS
+#include <linux/seq_file.h>
+#endif
 
 #include "hva.h"
 #include "hva-hw.h"
@@ -127,8 +130,7 @@ static irqreturn_t hva_hw_its_irq_thread(int irq, void *arg)
 	ctx_id = (hva->sts_reg & 0xFF00) >> 8;
 	if (ctx_id >= HVA_MAX_INSTANCES) {
 		dev_err(dev, "%s     %s: bad context identifier: %d\n",
-			ctx->name, __func__, ctx_id);
-		ctx->hw_err = true;
+			HVA_PREFIX, __func__, ctx_id);
 		goto out;
 	}
 
@@ -245,7 +247,7 @@ static irqreturn_t hva_hw_err_irq_thread(int irq, void *arg)
 		ctx->hw_err = true;
 	}
 
-	if (hva->lmi_err_reg) {
+	if (hva->emi_err_reg) {
 		dev_err(dev, "%s     external memory interface error: 0x%08x\n",
 			ctx->name, hva->emi_err_reg);
 		ctx->hw_err = true;
@@ -267,7 +269,7 @@ static unsigned long int hva_hw_get_ip_version(struct hva_dev *hva)
 	struct device *dev = hva_to_dev(hva);
 	unsigned long int version;
 
-	if (pm_runtime_get_sync(dev) < 0) {
+	if (pm_runtime_resume_and_get(dev) < 0) {
 		dev_err(dev, "%s     failed to get pm_runtime\n", HVA_PREFIX);
 		mutex_unlock(&hva->protect_mutex);
 		return -EFAULT;
@@ -296,15 +298,13 @@ static unsigned long int hva_hw_get_ip_version(struct hva_dev *hva)
 int hva_hw_probe(struct platform_device *pdev, struct hva_dev *hva)
 {
 	struct device *dev = &pdev->dev;
-	struct resource *regs;
 	struct resource *esram;
 	int ret;
 
 	WARN_ON(!hva);
 
 	/* get memory for registers */
-	regs = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	hva->regs = devm_ioremap_resource(dev, regs);
+	hva->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(hva->regs)) {
 		dev_err(dev, "%s     failed to get regs\n", HVA_PREFIX);
 		return PTR_ERR(hva->regs);
@@ -338,10 +338,8 @@ int hva_hw_probe(struct platform_device *pdev, struct hva_dev *hva)
 
 	/* get status interruption resource */
 	ret  = platform_get_irq(pdev, 0);
-	if (ret < 0) {
-		dev_err(dev, "%s     failed to get status IRQ\n", HVA_PREFIX);
+	if (ret < 0)
 		goto err_clk;
-	}
 	hva->irq_its = ret;
 
 	ret = devm_request_threaded_irq(dev, hva->irq_its, hva_hw_its_interrupt,
@@ -357,10 +355,8 @@ int hva_hw_probe(struct platform_device *pdev, struct hva_dev *hva)
 
 	/* get error interruption resource */
 	ret = platform_get_irq(pdev, 1);
-	if (ret < 0) {
-		dev_err(dev, "%s     failed to get error IRQ\n", HVA_PREFIX);
+	if (ret < 0)
 		goto err_clk;
-	}
 	hva->irq_err = ret;
 
 	ret = devm_request_threaded_irq(dev, hva->irq_err, hva_hw_err_interrupt,
@@ -386,7 +382,7 @@ int hva_hw_probe(struct platform_device *pdev, struct hva_dev *hva)
 	pm_runtime_set_suspended(dev);
 	pm_runtime_enable(dev);
 
-	ret = pm_runtime_get_sync(dev);
+	ret = pm_runtime_resume_and_get(dev);
 	if (ret < 0) {
 		dev_err(dev, "%s     failed to set PM\n", HVA_PREFIX);
 		goto err_clk;
@@ -447,6 +443,7 @@ int hva_hw_runtime_resume(struct device *dev)
 	if (clk_set_rate(hva->clk, CLK_RATE)) {
 		dev_err(dev, "%s     failed to set clock frequency\n",
 			HVA_PREFIX);
+		clk_disable_unprepare(hva->clk);
 		return -EINVAL;
 	}
 
@@ -461,6 +458,7 @@ int hva_hw_execute_task(struct hva_ctx *ctx, enum hva_hw_cmd_type cmd,
 	u8 client_id = ctx->id;
 	int ret;
 	u32 reg = 0;
+	bool got_pm = false;
 
 	mutex_lock(&hva->protect_mutex);
 
@@ -468,11 +466,13 @@ int hva_hw_execute_task(struct hva_ctx *ctx, enum hva_hw_cmd_type cmd,
 	enable_irq(hva->irq_its);
 	enable_irq(hva->irq_err);
 
-	if (pm_runtime_get_sync(dev) < 0) {
+	if (pm_runtime_resume_and_get(dev) < 0) {
 		dev_err(dev, "%s     failed to get pm_runtime\n", ctx->name);
+		ctx->sys_errors++;
 		ret = -EFAULT;
 		goto out;
 	}
+	got_pm = true;
 
 	reg = readl_relaxed(hva->regs + HVA_HIF_REG_CLK_GATING);
 	switch (cmd) {
@@ -481,6 +481,7 @@ int hva_hw_execute_task(struct hva_ctx *ctx, enum hva_hw_cmd_type cmd,
 		break;
 	default:
 		dev_dbg(dev, "%s     unknown command 0x%x\n", ctx->name, cmd);
+		ctx->encode_errors++;
 		ret = -EFAULT;
 		goto out;
 	}
@@ -511,12 +512,15 @@ int hva_hw_execute_task(struct hva_ctx *ctx, enum hva_hw_cmd_type cmd,
 					 msecs_to_jiffies(2000))) {
 		dev_err(dev, "%s     %s: time out on completion\n", ctx->name,
 			__func__);
+		ctx->encode_errors++;
 		ret = -EFAULT;
 		goto out;
 	}
 
 	/* get encoding status */
 	ret = ctx->hw_err ? -EFAULT : 0;
+
+	ctx->encode_errors += ctx->hw_err ? 1 : 0;
 
 out:
 	disable_irq(hva->irq_its);
@@ -531,8 +535,49 @@ out:
 		dev_dbg(dev, "%s     unknown command 0x%x\n", ctx->name, cmd);
 	}
 
-	pm_runtime_put_autosuspend(dev);
+	if (got_pm)
+		pm_runtime_put_autosuspend(dev);
 	mutex_unlock(&hva->protect_mutex);
 
 	return ret;
 }
+
+#ifdef CONFIG_VIDEO_STI_HVA_DEBUGFS
+#define DUMP(reg) seq_printf(s, "%-30s: 0x%08X\n",\
+			     #reg, readl_relaxed(hva->regs + reg))
+
+void hva_hw_dump_regs(struct hva_dev *hva, struct seq_file *s)
+{
+	struct device *dev = hva_to_dev(hva);
+
+	mutex_lock(&hva->protect_mutex);
+
+	if (pm_runtime_resume_and_get(dev) < 0) {
+		seq_puts(s, "Cannot wake up IP\n");
+		mutex_unlock(&hva->protect_mutex);
+		return;
+	}
+
+	seq_printf(s, "Registers:\nReg @ = 0x%p\n", hva->regs);
+
+	DUMP(HVA_HIF_REG_RST);
+	DUMP(HVA_HIF_REG_RST_ACK);
+	DUMP(HVA_HIF_REG_MIF_CFG);
+	DUMP(HVA_HIF_REG_HEC_MIF_CFG);
+	DUMP(HVA_HIF_REG_CFL);
+	DUMP(HVA_HIF_REG_SFL);
+	DUMP(HVA_HIF_REG_LMI_ERR);
+	DUMP(HVA_HIF_REG_EMI_ERR);
+	DUMP(HVA_HIF_REG_HEC_MIF_ERR);
+	DUMP(HVA_HIF_REG_HEC_STS);
+	DUMP(HVA_HIF_REG_HVC_STS);
+	DUMP(HVA_HIF_REG_HJE_STS);
+	DUMP(HVA_HIF_REG_CNT);
+	DUMP(HVA_HIF_REG_HEC_CHKSYN_DIS);
+	DUMP(HVA_HIF_REG_CLK_GATING);
+	DUMP(HVA_HIF_REG_VERSION);
+
+	pm_runtime_put_autosuspend(dev);
+	mutex_unlock(&hva->protect_mutex);
+}
+#endif

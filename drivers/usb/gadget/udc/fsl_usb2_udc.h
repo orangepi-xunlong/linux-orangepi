@@ -1,11 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (C) 2004,2012 Freescale Semiconductor, Inc
  * All rights reserved.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  *
  * Freescale USB device/endpoint management registers
  */
@@ -554,7 +550,7 @@ static void dump_msg(const char *label, const u8 * buf, unsigned int length)
 #endif
 
 #define ERR(stuff...)		pr_err("udc: " stuff)
-#define WARNING(stuff...)		pr_warning("udc: " stuff)
+#define WARNING(stuff...)	pr_warn("udc: " stuff)
 #define INFO(stuff...)		pr_info("udc: " stuff)
 
 /*-------------------------------------------------------------------------*/
@@ -591,24 +587,5 @@ static inline struct ep_queue_head *get_qh_by_ep(struct fsl_ep *ep)
 		return &ep->udc->ep_qh[(ep->udc->ep0_dir ==
 				USB_DIR_IN) ? 1 : 0];
 }
-
-struct platform_device;
-#ifdef CONFIG_ARCH_MXC
-int fsl_udc_clk_init(struct platform_device *pdev);
-int fsl_udc_clk_finalize(struct platform_device *pdev);
-void fsl_udc_clk_release(void);
-#else
-static inline int fsl_udc_clk_init(struct platform_device *pdev)
-{
-	return 0;
-}
-static inline int fsl_udc_clk_finalize(struct platform_device *pdev)
-{
-	return 0;
-}
-static inline void fsl_udc_clk_release(void)
-{
-}
-#endif
 
 #endif

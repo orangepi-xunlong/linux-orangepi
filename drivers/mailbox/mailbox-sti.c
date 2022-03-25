@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * STi Mailbox
  *
@@ -7,11 +8,6 @@
  *
  * Based on the original driver written by;
  *   Alexandre Torgue, Olivier Lebreton and Loic Pallardy
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/err.h>
@@ -40,12 +36,7 @@
 #define MBOX_BASE(mdev, inst)   ((mdev)->base + ((inst) * 4))
 
 /**
- * STi Mailbox device data
- *
- * An IP Mailbox is currently composed of 4 instances
- * Each instance is currently composed of 32 channels
- * This means that we have 128 channels per Mailbox
- * A channel an be used for TX or RX
+ * struct sti_mbox_device - STi Mailbox device data
  *
  * @dev:	Device to which it is attached
  * @mbox:	Representation of a communication channel controller
@@ -53,6 +44,11 @@
  * @name:	Name of the mailbox
  * @enabled:	Local copy of enabled channels
  * @lock:	Mutex protecting enabled status
+ *
+ * An IP Mailbox is currently composed of 4 instances
+ * Each instance is currently composed of 32 channels
+ * This means that we have 128 channels per Mailbox
+ * A channel an be used for TX or RX
  */
 struct sti_mbox_device {
 	struct device		*dev;
@@ -64,7 +60,7 @@ struct sti_mbox_device {
 };
 
 /**
- * STi Mailbox platform specific configuration
+ * struct sti_mbox_pdata - STi Mailbox platform specific configuration
  *
  * @num_inst:	Maximum number of instances in one HW Mailbox
  * @num_chan:	Maximum number of channel per instance
@@ -75,7 +71,7 @@ struct sti_mbox_pdata {
 };
 
 /**
- * STi Mailbox allocated channel information
+ * struct sti_channel - STi Mailbox allocated channel information
  *
  * @mdev:	Pointer to parent Mailbox device
  * @instance:	Instance number channel resides in
@@ -403,6 +399,7 @@ static const struct of_device_id sti_mailbox_match[] = {
 	},
 	{ }
 };
+MODULE_DEVICE_TABLE(of, sti_mailbox_match);
 
 static int sti_mbox_probe(struct platform_device *pdev)
 {
@@ -411,7 +408,6 @@ static int sti_mbox_probe(struct platform_device *pdev)
 	struct sti_mbox_device *mdev;
 	struct device_node *np = pdev->dev.of_node;
 	struct mbox_chan *chans;
-	struct resource *res;
 	int irq;
 	int ret;
 
@@ -428,8 +424,7 @@ static int sti_mbox_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, mdev);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	mdev->base = devm_ioremap_resource(&pdev->dev, res);
+	mdev->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(mdev->base))
 		return PTR_ERR(mdev->base);
 
@@ -441,8 +436,8 @@ static int sti_mbox_probe(struct platform_device *pdev)
 	if (!mbox)
 		return -ENOMEM;
 
-	chans = devm_kzalloc(&pdev->dev,
-			     sizeof(*chans) * STI_MBOX_CHAN_MAX, GFP_KERNEL);
+	chans = devm_kcalloc(&pdev->dev,
+			     STI_MBOX_CHAN_MAX, sizeof(*chans), GFP_KERNEL);
 	if (!chans)
 		return -ENOMEM;
 
@@ -461,7 +456,7 @@ static int sti_mbox_probe(struct platform_device *pdev)
 	mbox->chans		= chans;
 	mbox->num_chans		= STI_MBOX_CHAN_MAX;
 
-	ret = mbox_controller_register(mbox);
+	ret = devm_mbox_controller_register(&pdev->dev, mbox);
 	if (ret)
 		return ret;
 
@@ -479,7 +474,6 @@ static int sti_mbox_probe(struct platform_device *pdev)
 					IRQF_ONESHOT, mdev->name, mdev);
 	if (ret) {
 		dev_err(&pdev->dev, "Can't claim IRQ %d\n", irq);
-		mbox_controller_unregister(mbox);
 		return -EINVAL;
 	}
 
@@ -488,18 +482,8 @@ static int sti_mbox_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int sti_mbox_remove(struct platform_device *pdev)
-{
-	struct sti_mbox_device *mdev = platform_get_drvdata(pdev);
-
-	mbox_controller_unregister(mdev->mbox);
-
-	return 0;
-}
-
 static struct platform_driver sti_mbox_driver = {
 	.probe = sti_mbox_probe,
-	.remove = sti_mbox_remove,
 	.driver = {
 		.name = "sti-mailbox",
 		.of_match_table = sti_mailbox_match,

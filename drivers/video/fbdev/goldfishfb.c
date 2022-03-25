@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2007 Google, Inc.
  * Copyright (C) 2012 Intel, Inc.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #include <linux/module.h>
@@ -125,6 +116,7 @@ static int goldfish_fb_check_var(struct fb_var_screeninfo *var,
 static int goldfish_fb_set_par(struct fb_info *info)
 {
 	struct goldfish_fb *fb = container_of(info, struct goldfish_fb, fb);
+
 	if (fb->rotation != fb->fb.var.rotate) {
 		info->fix.line_length = info->var.xres * 2;
 		fb->rotation = fb->fb.var.rotate;
@@ -149,13 +141,14 @@ static int goldfish_fb_pan_display(struct fb_var_screeninfo *var,
 	wait_event_timeout(fb->wait,
 			fb->base_update_count != base_update_count, HZ / 15);
 	if (fb->base_update_count == base_update_count)
-		pr_err("goldfish_fb_pan_display: timeout waiting for base update\n");
+		pr_err("%s: timeout waiting for base update\n", __func__);
 	return 0;
 }
 
 static int goldfish_fb_blank(int blank, struct fb_info *info)
 {
 	struct goldfish_fb *fb = container_of(info, struct goldfish_fb, fb);
+
 	switch (blank) {
 	case FB_BLANK_NORMAL:
 		writel(1, fb->reg_base + FB_SET_BLANK);
@@ -167,7 +160,7 @@ static int goldfish_fb_blank(int blank, struct fb_info *info)
 	return 0;
 }
 
-static struct fb_ops goldfish_fb_ops = {
+static const struct fb_ops goldfish_fb_ops = {
 	.owner          = THIS_MODULE,
 	.fb_check_var   = goldfish_fb_check_var,
 	.fb_set_par     = goldfish_fb_set_par,
@@ -302,6 +295,7 @@ static int goldfish_fb_remove(struct platform_device *pdev)
 	dma_free_coherent(&pdev->dev, framesize, (void *)fb->fb.screen_base,
 						fb->fb.fix.smem_start);
 	iounmap(fb->reg_base);
+	kfree(fb);
 	return 0;
 }
 
@@ -311,11 +305,13 @@ static const struct of_device_id goldfish_fb_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, goldfish_fb_of_match);
 
+#ifdef CONFIG_ACPI
 static const struct acpi_device_id goldfish_fb_acpi_match[] = {
 	{ "GFSH0004", 0 },
 	{ },
 };
 MODULE_DEVICE_TABLE(acpi, goldfish_fb_acpi_match);
+#endif
 
 static struct platform_driver goldfish_fb_driver = {
 	.probe		= goldfish_fb_probe,

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_X86_HW_IRQ_H
 #define _ASM_X86_HW_IRQ_H
 
@@ -15,6 +16,8 @@
 
 #include <asm/irq_vectors.h>
 
+#define IRQ_MATRIX_BITS		NR_VECTORS
+
 #ifndef __ASSEMBLY__
 
 #include <linux/percpu.h>
@@ -25,45 +28,6 @@
 #include <asm/irq.h>
 #include <asm/sections.h>
 
-/* Interrupt handlers registered during init_IRQ */
-extern asmlinkage void apic_timer_interrupt(void);
-extern asmlinkage void x86_platform_ipi(void);
-extern asmlinkage void kvm_posted_intr_ipi(void);
-extern asmlinkage void kvm_posted_intr_wakeup_ipi(void);
-extern asmlinkage void error_interrupt(void);
-extern asmlinkage void irq_work_interrupt(void);
-
-extern asmlinkage void spurious_interrupt(void);
-extern asmlinkage void thermal_interrupt(void);
-extern asmlinkage void reschedule_interrupt(void);
-
-extern asmlinkage void irq_move_cleanup_interrupt(void);
-extern asmlinkage void reboot_interrupt(void);
-extern asmlinkage void threshold_interrupt(void);
-extern asmlinkage void deferred_error_interrupt(void);
-
-extern asmlinkage void call_function_interrupt(void);
-extern asmlinkage void call_function_single_interrupt(void);
-
-#ifdef CONFIG_TRACING
-/* Interrupt handlers registered during init_IRQ */
-extern void trace_apic_timer_interrupt(void);
-extern void trace_x86_platform_ipi(void);
-extern void trace_error_interrupt(void);
-extern void trace_irq_work_interrupt(void);
-extern void trace_spurious_interrupt(void);
-extern void trace_thermal_interrupt(void);
-extern void trace_reschedule_interrupt(void);
-extern void trace_threshold_interrupt(void);
-extern void trace_deferred_error_interrupt(void);
-extern void trace_call_function_interrupt(void);
-extern void trace_call_function_single_interrupt(void);
-#define trace_irq_move_cleanup_interrupt  irq_move_cleanup_interrupt
-#define trace_reboot_interrupt  reboot_interrupt
-#define trace_kvm_posted_intr_ipi kvm_posted_intr_ipi
-#define trace_kvm_posted_intr_wakeup_ipi kvm_posted_intr_wakeup_ipi
-#endif /* CONFIG_TRACING */
-
 #ifdef	CONFIG_X86_LOCAL_APIC
 struct irq_data;
 struct pci_dev;
@@ -72,83 +36,66 @@ struct msi_desc;
 enum irq_alloc_type {
 	X86_IRQ_ALLOC_TYPE_IOAPIC = 1,
 	X86_IRQ_ALLOC_TYPE_HPET,
-	X86_IRQ_ALLOC_TYPE_MSI,
-	X86_IRQ_ALLOC_TYPE_MSIX,
+	X86_IRQ_ALLOC_TYPE_PCI_MSI,
+	X86_IRQ_ALLOC_TYPE_PCI_MSIX,
 	X86_IRQ_ALLOC_TYPE_DMAR,
+	X86_IRQ_ALLOC_TYPE_AMDVI,
 	X86_IRQ_ALLOC_TYPE_UV,
 };
 
+struct ioapic_alloc_info {
+	int		pin;
+	int		node;
+	u32		is_level	: 1;
+	u32		active_low	: 1;
+	u32		valid		: 1;
+};
+
+struct uv_alloc_info {
+	int		limit;
+	int		blade;
+	unsigned long	offset;
+	char		*name;
+
+};
+
+/**
+ * irq_alloc_info - X86 specific interrupt allocation info
+ * @type:	X86 specific allocation type
+ * @flags:	Flags for allocation tweaks
+ * @devid:	Device ID for allocations
+ * @hwirq:	Associated hw interrupt number in the domain
+ * @mask:	CPU mask for vector allocation
+ * @desc:	Pointer to msi descriptor
+ * @data:	Allocation specific data
+ *
+ * @ioapic:	IOAPIC specific allocation data
+ * @uv:		UV specific allocation data
+*/
 struct irq_alloc_info {
 	enum irq_alloc_type	type;
 	u32			flags;
-	const struct cpumask	*mask;	/* CPU mask for vector allocation */
+	u32			devid;
+	irq_hw_number_t		hwirq;
+	const struct cpumask	*mask;
+	struct msi_desc		*desc;
+	void			*data;
+
 	union {
-		int		unused;
-#ifdef	CONFIG_HPET_TIMER
-		struct {
-			int		hpet_id;
-			int		hpet_index;
-			void		*hpet_data;
-		};
-#endif
-#ifdef	CONFIG_PCI_MSI
-		struct {
-			struct pci_dev	*msi_dev;
-			irq_hw_number_t	msi_hwirq;
-		};
-#endif
-#ifdef	CONFIG_X86_IO_APIC
-		struct {
-			int		ioapic_id;
-			int		ioapic_pin;
-			int		ioapic_node;
-			u32		ioapic_trigger : 1;
-			u32		ioapic_polarity : 1;
-			u32		ioapic_valid : 1;
-			struct IO_APIC_route_entry *ioapic_entry;
-		};
-#endif
-#ifdef	CONFIG_DMAR_TABLE
-		struct {
-			int		dmar_id;
-			void		*dmar_data;
-		};
-#endif
-#ifdef	CONFIG_HT_IRQ
-		struct {
-			int		ht_pos;
-			int		ht_idx;
-			struct pci_dev	*ht_dev;
-			void		*ht_update;
-		};
-#endif
-#ifdef	CONFIG_X86_UV
-		struct {
-			int		uv_limit;
-			int		uv_blade;
-			unsigned long	uv_offset;
-			char		*uv_name;
-		};
-#endif
-#if IS_ENABLED(CONFIG_VMD)
-		struct {
-			struct msi_desc *desc;
-		};
-#endif
+		struct ioapic_alloc_info	ioapic;
+		struct uv_alloc_info		uv;
 	};
 };
 
 struct irq_cfg {
 	unsigned int		dest_apicid;
-	u8			vector;
-	u8			old_vector;
+	unsigned int		vector;
 };
 
 extern struct irq_cfg *irq_cfg(unsigned int irq);
 extern struct irq_cfg *irqd_cfg(struct irq_data *irq_data);
 extern void lock_vector_lock(void);
 extern void unlock_vector_lock(void);
-extern void setup_vector_irq(int cpu);
 #ifdef CONFIG_SMP
 extern void send_cleanup_vector(struct irq_cfg *);
 extern void irq_complete_move(struct irq_cfg *cfg);
@@ -174,11 +121,14 @@ extern char irq_entries_start[];
 #define trace_irq_entries_start irq_entries_start
 #endif
 
+extern char spurious_entries_start[];
+
 #define VECTOR_UNUSED		NULL
-#define VECTOR_RETRIGGERED	((void *)~0UL)
+#define VECTOR_SHUTDOWN		((void *)-1L)
+#define VECTOR_RETRIGGERED	((void *)-2L)
 
 typedef struct irq_desc* vector_irq_t[NR_VECTORS];
-DECLARE_PER_CPU_USER_MAPPED(vector_irq_t, vector_irq);
+DECLARE_PER_CPU(vector_irq_t, vector_irq);
 
 #endif /* !ASSEMBLY_ */
 

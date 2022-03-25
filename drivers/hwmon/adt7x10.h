@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __HWMON_ADT7X10_H__
 #define __HWMON_ADT7X10_H__
 
@@ -25,7 +26,7 @@ struct adt7x10_ops {
 
 int adt7x10_probe(struct device *dev, const char *name, int irq,
 	const struct adt7x10_ops *ops);
-int adt7x10_remove(struct device *dev, int irq);
+void adt7x10_remove(struct device *dev, int irq);
 
 #ifdef CONFIG_PM_SLEEP
 extern const struct dev_pm_ops adt7x10_dev_pm_ops;

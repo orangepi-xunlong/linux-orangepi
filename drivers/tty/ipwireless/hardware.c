@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * IPWireless 3G PCMCIA Network Driver
  *
@@ -32,7 +33,7 @@ static void handle_received_SETUP_packet(struct ipw_hardware *ipw,
 					 unsigned int address,
 					 const unsigned char *data, int len,
 					 int is_last);
-static void ipwireless_setup_timer(unsigned long data);
+static void ipwireless_setup_timer(struct timer_list *t);
 static void handle_received_CTRL_packet(struct ipw_hardware *hw,
 		unsigned int channel_idx, const unsigned char *data, int len);
 
@@ -1005,9 +1006,9 @@ static int send_pending_packet(struct ipw_hardware *hw, int priority_limit)
 /*
  * Send and receive all queued packets.
  */
-static void ipwireless_do_tasklet(unsigned long hw_)
+static void ipwireless_do_tasklet(struct tasklet_struct *t)
 {
-	struct ipw_hardware *hw = (struct ipw_hardware *) hw_;
+	struct ipw_hardware *hw = from_tasklet(hw, t, tasklet);
 	unsigned long flags;
 
 	spin_lock_irqsave(&hw->lock, flags);
@@ -1515,6 +1516,8 @@ static void ipw_send_setup_packet(struct ipw_hardware *hw)
 			sizeof(struct ipw_setup_get_version_query_packet),
 			ADDR_SETUP_PROT, TL_PROTOCOLID_SETUP,
 			TL_SETUP_SIGNO_GET_VERSION_QRY);
+	if (!ver_packet)
+		return;
 	ver_packet->header.length = sizeof(struct tl_setup_get_version_qry);
 
 	/*
@@ -1632,10 +1635,9 @@ struct ipw_hardware *ipwireless_hardware_create(void)
 	INIT_LIST_HEAD(&hw->rx_queue);
 	INIT_LIST_HEAD(&hw->rx_pool);
 	spin_lock_init(&hw->lock);
-	tasklet_init(&hw->tasklet, ipwireless_do_tasklet, (unsigned long) hw);
+	tasklet_setup(&hw->tasklet, ipwireless_do_tasklet);
 	INIT_WORK(&hw->work_rx, ipw_receive_data_work);
-	setup_timer(&hw->setup_timer, ipwireless_setup_timer,
-			(unsigned long) hw);
+	timer_setup(&hw->setup_timer, ipwireless_setup_timer, 0);
 
 	return hw;
 }
@@ -1669,12 +1671,12 @@ void ipwireless_init_hardware_v2_v3(struct ipw_hardware *hw)
 	hw->init_loops = 0;
 	printk(KERN_INFO IPWIRELESS_PCCARD_NAME
 	       ": waiting for card to start up...\n");
-	ipwireless_setup_timer((unsigned long) hw);
+	ipwireless_setup_timer(&hw->setup_timer);
 }
 
-static void ipwireless_setup_timer(unsigned long data)
+static void ipwireless_setup_timer(struct timer_list *t)
 {
-	struct ipw_hardware *hw = (struct ipw_hardware *) data;
+	struct ipw_hardware *hw = from_timer(hw, t, setup_timer);
 
 	hw->init_loops++;
 

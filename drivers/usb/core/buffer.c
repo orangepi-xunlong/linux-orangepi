@@ -1,8 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * DMA memory management for framework level HCD code (hc_driver)
  *
  * This implementation plugs in through generic "usb_bus" level methods,
  * and should work with all USB controllers, regardless of bus type.
+ *
+ * Released under the GPLv2 only.
  */
 
 #include <linux/module.h>
@@ -13,6 +16,7 @@
 #include <linux/io.h>
 #include <linux/dma-mapping.h>
 #include <linux/dmapool.h>
+#include <linux/genalloc.h>
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
 
@@ -47,7 +51,8 @@ void __init usb_init_pool_max(void)
 /**
  * hcd_buffer_create - initialize buffer pools
  * @hcd: the bus whose buffer pools are to be initialized
- * Context: !in_interrupt()
+ *
+ * Context: task context, might sleep
  *
  * Call this as part of initializing a host controller that uses the dma
  * memory allocators.  It initializes some pools of dma-coherent memory that
@@ -62,9 +67,7 @@ int hcd_buffer_create(struct usb_hcd *hcd)
 	char		name[16];
 	int		i, size;
 
-	if (!IS_ENABLED(CONFIG_HAS_DMA) ||
-	    (!hcd->self.controller->dma_mask &&
-	     !(hcd->driver->flags & HCD_LOCAL_MEM)))
+	if (hcd->localmem_pool || !hcd_uses_dma(hcd))
 		return 0;
 
 	for (i = 0; i < HCD_BUFFER_POOLS; i++) {
@@ -72,7 +75,7 @@ int hcd_buffer_create(struct usb_hcd *hcd)
 		if (!size)
 			continue;
 		snprintf(name, sizeof(name), "buffer-%d", size);
-		hcd->pool[i] = dma_pool_create(name, hcd->self.controller,
+		hcd->pool[i] = dma_pool_create(name, hcd->self.sysdev,
 				size, size, 0);
 		if (!hcd->pool[i]) {
 			hcd_buffer_destroy(hcd);
@@ -86,7 +89,8 @@ int hcd_buffer_create(struct usb_hcd *hcd)
 /**
  * hcd_buffer_destroy - deallocate buffer pools
  * @hcd: the bus whose buffer pools are to be destroyed
- * Context: !in_interrupt()
+ *
+ * Context: task context, might sleep
  *
  * This frees the buffer pools created by hcd_buffer_create().
  */
@@ -98,12 +102,8 @@ void hcd_buffer_destroy(struct usb_hcd *hcd)
 		return;
 
 	for (i = 0; i < HCD_BUFFER_POOLS; i++) {
-		struct dma_pool *pool = hcd->pool[i];
-
-		if (pool) {
-			dma_pool_destroy(pool);
-			hcd->pool[i] = NULL;
-		}
+		dma_pool_destroy(hcd->pool[i]);
+		hcd->pool[i] = NULL;
 	}
 }
 
@@ -125,10 +125,11 @@ void *hcd_buffer_alloc(
 	if (size == 0)
 		return NULL;
 
+	if (hcd->localmem_pool)
+		return gen_pool_dma_alloc(hcd->localmem_pool, size, dma);
+
 	/* some USB hosts just use PIO */
-	if (!IS_ENABLED(CONFIG_HAS_DMA) ||
-	    (!bus->controller->dma_mask &&
-	     !(hcd->driver->flags & HCD_LOCAL_MEM))) {
+	if (!hcd_uses_dma(hcd)) {
 		*dma = ~(dma_addr_t) 0;
 		return kmalloc(size, mem_flags);
 	}
@@ -137,7 +138,7 @@ void *hcd_buffer_alloc(
 		if (size <= pool_max[i])
 			return dma_pool_alloc(hcd->pool[i], mem_flags, dma);
 	}
-	return dma_alloc_coherent(hcd->self.controller, size, dma, mem_flags);
+	return dma_alloc_coherent(hcd->self.sysdev, size, dma, mem_flags);
 }
 
 void hcd_buffer_free(
@@ -153,9 +154,12 @@ void hcd_buffer_free(
 	if (!addr)
 		return;
 
-	if (!IS_ENABLED(CONFIG_HAS_DMA) ||
-	    (!bus->controller->dma_mask &&
-	     !(hcd->driver->flags & HCD_LOCAL_MEM))) {
+	if (hcd->localmem_pool) {
+		gen_pool_free(hcd->localmem_pool, (unsigned long)addr, size);
+		return;
+	}
+
+	if (!hcd_uses_dma(hcd)) {
 		kfree(addr);
 		return;
 	}
@@ -166,5 +170,5 @@ void hcd_buffer_free(
 			return;
 		}
 	}
-	dma_free_coherent(hcd->self.controller, size, addr, dma);
+	dma_free_coherent(hcd->self.sysdev, size, addr, dma);
 }

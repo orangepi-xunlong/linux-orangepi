@@ -1,7 +1,0 @@
-config SUNXI_NAND
-	tristate  "The sunxi nand driver"
-	default n
-	help
-	  The nand used on the platform.
-
-	  If unsure, say m.

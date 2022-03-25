@@ -35,9 +35,6 @@
 #include <linux/workqueue.h>
 #include <acpi/video.h>
 
-ACPI_MODULE_NAME("video");
-#define _COMPONENT		ACPI_VIDEO_COMPONENT
-
 void acpi_video_unregister_backlight(void);
 
 static bool backlight_notifier_registered;
@@ -103,16 +100,22 @@ static int video_detect_force_native(const struct dmi_system_id *d)
 	return 0;
 }
 
+static int video_detect_force_none(const struct dmi_system_id *d)
+{
+	acpi_backlight_dmi = acpi_backlight_none;
+	return 0;
+}
+
 static const struct dmi_system_id video_detect_dmi_table[] = {
 	/* On Samsung X360, the BIOS will set a flag (VDRV) if generic
 	 * ACPI backlight device is used. This flag will definitively break
-	 * the backlight interface (even the vendor interface) untill next
+	 * the backlight interface (even the vendor interface) until next
 	 * reboot. It's why we should prevent video.ko from being used here
 	 * and we can't rely on a later call to acpi_video_unregister().
 	 */
 	{
 	 .callback = video_detect_force_vendor,
-	 .ident = "X360",
+	 /* X360 */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "SAMSUNG ELECTRONICS CO., LTD."),
 		DMI_MATCH(DMI_PRODUCT_NAME, "X360"),
@@ -121,7 +124,7 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	},
 	{
 	.callback = video_detect_force_vendor,
-	.ident = "Asus UL30VT",
+	/* Asus UL30VT */
 	.matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK Computer Inc."),
 		DMI_MATCH(DMI_PRODUCT_NAME, "UL30VT"),
@@ -129,10 +132,34 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	},
 	{
 	.callback = video_detect_force_vendor,
-	.ident = "Asus UL30A",
+	/* Asus UL30A */
 	.matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK Computer Inc."),
 		DMI_MATCH(DMI_PRODUCT_NAME, "UL30A"),
+		},
+	},
+	{
+	.callback = video_detect_force_vendor,
+	/* GIGABYTE GB-BXBT-2807 */
+	.matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "GIGABYTE"),
+		DMI_MATCH(DMI_PRODUCT_NAME, "GB-BXBT-2807"),
+		},
+	},
+	{
+	.callback = video_detect_force_vendor,
+	/* Sony VPCEH3U1E */
+	.matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "Sony Corporation"),
+		DMI_MATCH(DMI_PRODUCT_NAME, "VPCEH3U1E"),
+		},
+	},
+	{
+	.callback = video_detect_force_vendor,
+	/* Xiaomi Mi Pad 2 */
+	.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Xiaomi Inc"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "Mipad2"),
 		},
 	},
 
@@ -145,7 +172,7 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	 */
 	{
 	 .callback = video_detect_force_video,
-	 .ident = "ThinkPad T420",
+	 /* ThinkPad T420 */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
 		DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad T420"),
@@ -153,7 +180,7 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	},
 	{
 	 .callback = video_detect_force_video,
-	 .ident = "ThinkPad T520",
+	 /* ThinkPad T520 */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
 		DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad T520"),
@@ -161,26 +188,26 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	},
 	{
 	 .callback = video_detect_force_video,
-	 .ident = "ThinkPad X201s",
+	 /* ThinkPad X201s */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
 		DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad X201s"),
 		},
 	},
-        {
-         .callback = video_detect_force_video,
-         .ident = "ThinkPad X201T",
-         .matches = {
-                DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
-                DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad X201T"),
-                },
-        },
+	{
+	 .callback = video_detect_force_video,
+	 /* ThinkPad X201T */
+	 .matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+		DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad X201T"),
+		},
+	},
 
 	/* The native backlight controls do not work on some older machines */
 	{
 	 /* https://bugs.freedesktop.org/show_bug.cgi?id=81515 */
 	 .callback = video_detect_force_video,
-	 .ident = "HP ENVY 15 Notebook",
+	 /* HP ENVY 15 Notebook */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "Hewlett-Packard"),
 		DMI_MATCH(DMI_PRODUCT_NAME, "HP ENVY 15 Notebook PC"),
@@ -188,7 +215,7 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	},
 	{
 	 .callback = video_detect_force_video,
-	 .ident = "SAMSUNG 870Z5E/880Z5E/680Z5E",
+	 /* SAMSUNG 870Z5E/880Z5E/680Z5E */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "SAMSUNG ELECTRONICS CO., LTD."),
 		DMI_MATCH(DMI_PRODUCT_NAME, "870Z5E/880Z5E/680Z5E"),
@@ -196,7 +223,7 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	},
 	{
 	 .callback = video_detect_force_video,
-	 .ident = "SAMSUNG 370R4E/370R4V/370R5E/3570RE/370R5V",
+	 /* SAMSUNG 370R4E/370R4V/370R5E/3570RE/370R5V */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "SAMSUNG ELECTRONICS CO., LTD."),
 		DMI_MATCH(DMI_PRODUCT_NAME,
@@ -206,7 +233,7 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	{
 	 /* https://bugzilla.redhat.com/show_bug.cgi?id=1186097 */
 	 .callback = video_detect_force_video,
-	 .ident = "SAMSUNG 3570R/370R/470R/450R/510R/4450RV",
+	 /* SAMSUNG 3570R/370R/470R/450R/510R/4450RV */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "SAMSUNG ELECTRONICS CO., LTD."),
 		DMI_MATCH(DMI_PRODUCT_NAME,
@@ -216,7 +243,7 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	{
 	 /* https://bugzilla.redhat.com/show_bug.cgi?id=1557060 */
 	 .callback = video_detect_force_video,
-	 .ident = "SAMSUNG 670Z5E",
+	 /* SAMSUNG 670Z5E */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "SAMSUNG ELECTRONICS CO., LTD."),
 		DMI_MATCH(DMI_PRODUCT_NAME, "670Z5E"),
@@ -225,7 +252,7 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	{
 	 /* https://bugzilla.redhat.com/show_bug.cgi?id=1094948 */
 	 .callback = video_detect_force_video,
-	 .ident = "SAMSUNG 730U3E/740U3E",
+	 /* SAMSUNG 730U3E/740U3E */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "SAMSUNG ELECTRONICS CO., LTD."),
 		DMI_MATCH(DMI_PRODUCT_NAME, "730U3E/740U3E"),
@@ -234,7 +261,7 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	{
 	 /* https://bugs.freedesktop.org/show_bug.cgi?id=87286 */
 	 .callback = video_detect_force_video,
-	 .ident = "SAMSUNG 900X3C/900X3D/900X3E/900X4C/900X4D",
+	 /* SAMSUNG 900X3C/900X3D/900X3E/900X4C/900X4D */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "SAMSUNG ELECTRONICS CO., LTD."),
 		DMI_MATCH(DMI_PRODUCT_NAME,
@@ -244,7 +271,7 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	{
 	 /* https://bugzilla.redhat.com/show_bug.cgi?id=1272633 */
 	 .callback = video_detect_force_video,
-	 .ident = "Dell XPS14 L421X",
+	 /* Dell XPS14 L421X */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
 		DMI_MATCH(DMI_PRODUCT_NAME, "XPS L421X"),
@@ -253,7 +280,7 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	{
 	 /* https://bugzilla.redhat.com/show_bug.cgi?id=1163574 */
 	 .callback = video_detect_force_video,
-	 .ident = "Dell XPS15 L521X",
+	 /* Dell XPS15 L521X */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
 		DMI_MATCH(DMI_PRODUCT_NAME, "XPS L521X"),
@@ -262,10 +289,19 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	{
 	 /* https://bugzilla.kernel.org/show_bug.cgi?id=108971 */
 	 .callback = video_detect_force_video,
-	 .ident = "SAMSUNG 530U4E/540U4E",
+	 /* SAMSUNG 530U4E/540U4E */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "SAMSUNG ELECTRONICS CO., LTD."),
 		DMI_MATCH(DMI_PRODUCT_NAME, "530U4E/540U4E"),
+		},
+	},
+	/* https://bugs.launchpad.net/bugs/1894667 */
+	{
+	 .callback = video_detect_force_video,
+	 /* HP 635 Notebook */
+	 .matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "Hewlett-Packard"),
+		DMI_MATCH(DMI_PRODUCT_NAME, "HP 635 Notebook PC"),
 		},
 	},
 
@@ -273,7 +309,7 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	{
 	 /* https://bugzilla.redhat.com/show_bug.cgi?id=1201530 */
 	 .callback = video_detect_force_native,
-	 .ident = "Lenovo Ideapad S405",
+	 /* Lenovo Ideapad S405 */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
 		DMI_MATCH(DMI_BOARD_NAME, "Lenovo IdeaPad S405"),
@@ -282,16 +318,32 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	{
 	 /* https://bugzilla.redhat.com/show_bug.cgi?id=1187004 */
 	 .callback = video_detect_force_native,
-	 .ident = "Lenovo Ideapad Z570",
+	 /* Lenovo Ideapad Z570 */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
 		DMI_MATCH(DMI_PRODUCT_NAME, "102434U"),
 		},
 	},
 	{
+	 .callback = video_detect_force_native,
+	 /* Lenovo E41-25 */
+	 .matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+		DMI_MATCH(DMI_PRODUCT_NAME, "81FS"),
+		},
+	},
+	{
+	 .callback = video_detect_force_native,
+	 /* Lenovo E41-45 */
+	 .matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+		DMI_MATCH(DMI_PRODUCT_NAME, "82BK"),
+		},
+	},
+	{
 	 /* https://bugzilla.redhat.com/show_bug.cgi?id=1217249 */
 	 .callback = video_detect_force_native,
-	 .ident = "Apple MacBook Pro 12,1",
+	 /* Apple MacBook Pro 12,1 */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "Apple Inc."),
 		DMI_MATCH(DMI_PRODUCT_NAME, "MacBookPro12,1"),
@@ -299,7 +351,7 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	},
 	{
 	 .callback = video_detect_force_native,
-	 .ident = "Dell Vostro V131",
+	 /* Dell Vostro V131 */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
 		DMI_MATCH(DMI_PRODUCT_NAME, "Vostro V131"),
@@ -308,23 +360,84 @@ static const struct dmi_system_id video_detect_dmi_table[] = {
 	{
 	 /* https://bugzilla.redhat.com/show_bug.cgi?id=1123661 */
 	 .callback = video_detect_force_native,
-	 .ident = "Dell XPS 17 L702X",
+	 /* Dell XPS 17 L702X */
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
 		DMI_MATCH(DMI_PRODUCT_NAME, "Dell System XPS L702X"),
 		},
 	},
 	{
-	/* https://bugzilla.redhat.com/show_bug.cgi?id=1204476 */
-	/* https://bugs.launchpad.net/ubuntu/+source/linux-lts-trusty/+bug/1416940 */
+	 .callback = video_detect_force_native,
+	 /* Dell Precision 7510 */
+	 .matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
+		DMI_MATCH(DMI_PRODUCT_NAME, "Precision 7510"),
+		},
+	},
+	{
+	 .callback = video_detect_force_native,
+	 /* Acer Aspire 5738z */
+	 .matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
+		DMI_MATCH(DMI_PRODUCT_NAME, "Aspire 5738"),
+		DMI_MATCH(DMI_BOARD_NAME, "JV50"),
+		},
+	},
+	{
+	 /* https://bugzilla.kernel.org/show_bug.cgi?id=207835 */
+	 .callback = video_detect_force_native,
+	 /* Acer TravelMate 5735Z */
+	 .matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
+		DMI_MATCH(DMI_PRODUCT_NAME, "TravelMate 5735Z"),
+		DMI_MATCH(DMI_BOARD_NAME, "BA51_MV"),
+		},
+	},
+	{
 	.callback = video_detect_force_native,
-	.ident = "HP Pavilion dv6",
+	/* ASUSTeK COMPUTER INC. GA401 */
 	.matches = {
-		DMI_MATCH(DMI_SYS_VENDOR, "Hewlett-Packard"),
-		DMI_MATCH(DMI_PRODUCT_NAME, "HP Pavilion dv6 Notebook PC"),
+		DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK COMPUTER INC."),
+		DMI_MATCH(DMI_PRODUCT_NAME, "GA401"),
+		},
+	},
+	{
+	.callback = video_detect_force_native,
+	/* ASUSTeK COMPUTER INC. GA502 */
+	.matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK COMPUTER INC."),
+		DMI_MATCH(DMI_PRODUCT_NAME, "GA502"),
+		},
+	},
+	{
+	.callback = video_detect_force_native,
+	/* ASUSTeK COMPUTER INC. GA503 */
+	.matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK COMPUTER INC."),
+		DMI_MATCH(DMI_PRODUCT_NAME, "GA503"),
 		},
 	},
 
+	/*
+	 * Desktops which falsely report a backlight and which our heuristics
+	 * for this do not catch.
+	 */
+	{
+	 .callback = video_detect_force_none,
+	 /* Dell OptiPlex 9020M */
+	 .matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
+		DMI_MATCH(DMI_PRODUCT_NAME, "OptiPlex 9020M"),
+		},
+	},
+	{
+	 .callback = video_detect_force_none,
+	 /* MSI MS-7721 */
+	 .matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "MSI"),
+		DMI_MATCH(DMI_PRODUCT_NAME, "MS-7721"),
+		},
+	},
 	{ },
 };
 

@@ -1,105 +1,115 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/extable.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
+#include <linux/sched/debug.h>
+#include <xen/xen.h>
+
+#include <asm/fpu/api.h>
+#include <asm/sev.h>
 #include <asm/traps.h>
 #include <asm/kdebug.h>
-
-typedef bool (*ex_handler_t)(const struct exception_table_entry *,
-			    struct pt_regs *, int);
 
 static inline unsigned long
 ex_fixup_addr(const struct exception_table_entry *x)
 {
 	return (unsigned long)&x->fixup + x->fixup;
 }
-static inline ex_handler_t
-ex_fixup_handler(const struct exception_table_entry *x)
-{
-	return (ex_handler_t)((unsigned long)&x->handler + x->handler);
-}
 
-bool ex_handler_default(const struct exception_table_entry *fixup,
-		       struct pt_regs *regs, int trapnr)
+static bool ex_handler_default(const struct exception_table_entry *fixup,
+			       struct pt_regs *regs)
 {
 	regs->ip = ex_fixup_addr(fixup);
 	return true;
 }
-EXPORT_SYMBOL(ex_handler_default);
 
-bool ex_handler_fault(const struct exception_table_entry *fixup,
-		     struct pt_regs *regs, int trapnr)
-{
-	regs->ip = ex_fixup_addr(fixup);
-	regs->ax = trapnr;
-	return true;
-}
-EXPORT_SYMBOL_GPL(ex_handler_fault);
-
-bool ex_handler_ext(const struct exception_table_entry *fixup,
-		   struct pt_regs *regs, int trapnr)
-{
-	/* Special hack for uaccess_err */
-	current->thread.uaccess_err = 1;
-	regs->ip = ex_fixup_addr(fixup);
-	return true;
-}
-EXPORT_SYMBOL(ex_handler_ext);
-
-bool ex_handler_rdmsr_unsafe(const struct exception_table_entry *fixup,
+static bool ex_handler_fault(const struct exception_table_entry *fixup,
 			     struct pt_regs *regs, int trapnr)
 {
-	if (pr_warn_once("unchecked MSR access error: RDMSR from 0x%x at rIP: 0x%lx (%pF)\n",
+	regs->ax = trapnr;
+	return ex_handler_default(fixup, regs);
+}
+
+/*
+ * Handler for when we fail to restore a task's FPU state.  We should never get
+ * here because the FPU state of a task using the FPU (task->thread.fpu.state)
+ * should always be valid.  However, past bugs have allowed userspace to set
+ * reserved bits in the XSAVE area using PTRACE_SETREGSET or sys_rt_sigreturn().
+ * These caused XRSTOR to fail when switching to the task, leaking the FPU
+ * registers of the task previously executing on the CPU.  Mitigate this class
+ * of vulnerability by restoring from the initial state (essentially, zeroing
+ * out all the FPU registers) if we can't restore from the task's FPU state.
+ */
+static bool ex_handler_fprestore(const struct exception_table_entry *fixup,
+				 struct pt_regs *regs)
+{
+	regs->ip = ex_fixup_addr(fixup);
+
+	WARN_ONCE(1, "Bad FPU state detected at %pB, reinitializing FPU registers.",
+		  (void *)instruction_pointer(regs));
+
+	fpu_reset_from_exception_fixup();
+	return true;
+}
+
+static bool ex_handler_uaccess(const struct exception_table_entry *fixup,
+			       struct pt_regs *regs, int trapnr)
+{
+	WARN_ONCE(trapnr == X86_TRAP_GP, "General protection fault in user access. Non-canonical address?");
+	return ex_handler_default(fixup, regs);
+}
+
+static bool ex_handler_copy(const struct exception_table_entry *fixup,
+			    struct pt_regs *regs, int trapnr)
+{
+	WARN_ONCE(trapnr == X86_TRAP_GP, "General protection fault in user access. Non-canonical address?");
+	return ex_handler_fault(fixup, regs, trapnr);
+}
+
+static bool ex_handler_rdmsr_unsafe(const struct exception_table_entry *fixup,
+				    struct pt_regs *regs)
+{
+	if (pr_warn_once("unchecked MSR access error: RDMSR from 0x%x at rIP: 0x%lx (%pS)\n",
 			 (unsigned int)regs->cx, regs->ip, (void *)regs->ip))
 		show_stack_regs(regs);
 
 	/* Pretend that the read succeeded and returned 0. */
-	regs->ip = ex_fixup_addr(fixup);
 	regs->ax = 0;
 	regs->dx = 0;
-	return true;
+	return ex_handler_default(fixup, regs);
 }
-EXPORT_SYMBOL(ex_handler_rdmsr_unsafe);
 
-bool ex_handler_wrmsr_unsafe(const struct exception_table_entry *fixup,
-			     struct pt_regs *regs, int trapnr)
+static bool ex_handler_wrmsr_unsafe(const struct exception_table_entry *fixup,
+				    struct pt_regs *regs)
 {
-	if (pr_warn_once("unchecked MSR access error: WRMSR to 0x%x (tried to write 0x%08x%08x) at rIP: 0x%lx (%pF)\n",
+	if (pr_warn_once("unchecked MSR access error: WRMSR to 0x%x (tried to write 0x%08x%08x) at rIP: 0x%lx (%pS)\n",
 			 (unsigned int)regs->cx, (unsigned int)regs->dx,
 			 (unsigned int)regs->ax,  regs->ip, (void *)regs->ip))
 		show_stack_regs(regs);
 
 	/* Pretend that the write succeeded. */
-	regs->ip = ex_fixup_addr(fixup);
-	return true;
+	return ex_handler_default(fixup, regs);
 }
-EXPORT_SYMBOL(ex_handler_wrmsr_unsafe);
 
-bool ex_handler_clear_fs(const struct exception_table_entry *fixup,
-			 struct pt_regs *regs, int trapnr)
+static bool ex_handler_clear_fs(const struct exception_table_entry *fixup,
+				struct pt_regs *regs)
 {
 	if (static_cpu_has(X86_BUG_NULL_SEG))
 		asm volatile ("mov %0, %%fs" : : "rm" (__USER_DS));
 	asm volatile ("mov %0, %%fs" : : "rm" (0));
-	return ex_handler_default(fixup, regs, trapnr);
-}
-EXPORT_SYMBOL(ex_handler_clear_fs);
-
-bool ex_has_fault_handler(unsigned long ip)
-{
-	const struct exception_table_entry *e;
-	ex_handler_t handler;
-
-	e = search_exception_tables(ip);
-	if (!e)
-		return false;
-	handler = ex_fixup_handler(e);
-
-	return handler == ex_handler_fault;
+	return ex_handler_default(fixup, regs);
 }
 
-int fixup_exception(struct pt_regs *regs, int trapnr)
+int ex_get_fixup_type(unsigned long ip)
+{
+	const struct exception_table_entry *e = search_exception_tables(ip);
+
+	return e ? e->type : EX_TYPE_NONE;
+}
+
+int fixup_exception(struct pt_regs *regs, int trapnr, unsigned long error_code,
+		    unsigned long fault_addr)
 {
 	const struct exception_table_entry *e;
-	ex_handler_t handler;
 
 #ifdef CONFIG_PNPBIOS
 	if (unlikely(SEGMENT_IS_PNP_CODE(regs->cs))) {
@@ -119,8 +129,35 @@ int fixup_exception(struct pt_regs *regs, int trapnr)
 	if (!e)
 		return 0;
 
-	handler = ex_fixup_handler(e);
-	return handler(e, regs, trapnr);
+	switch (e->type) {
+	case EX_TYPE_DEFAULT:
+	case EX_TYPE_DEFAULT_MCE_SAFE:
+		return ex_handler_default(e, regs);
+	case EX_TYPE_FAULT:
+	case EX_TYPE_FAULT_MCE_SAFE:
+		return ex_handler_fault(e, regs, trapnr);
+	case EX_TYPE_UACCESS:
+		return ex_handler_uaccess(e, regs, trapnr);
+	case EX_TYPE_COPY:
+		return ex_handler_copy(e, regs, trapnr);
+	case EX_TYPE_CLEAR_FS:
+		return ex_handler_clear_fs(e, regs);
+	case EX_TYPE_FPU_RESTORE:
+		return ex_handler_fprestore(e, regs);
+	case EX_TYPE_RDMSR:
+		return ex_handler_rdmsr_unsafe(e, regs);
+	case EX_TYPE_WRMSR:
+		return ex_handler_wrmsr_unsafe(e, regs);
+	case EX_TYPE_BPF:
+		return ex_handler_bpf(e, regs);
+	case EX_TYPE_RDMSR_IN_MCE:
+		ex_handler_msr_mce(regs, false);
+		break;
+	case EX_TYPE_WRMSR_IN_MCE:
+		ex_handler_msr_mce(regs, true);
+		break;
+	}
+	BUG();
 }
 
 extern unsigned int early_recursion_flag;
@@ -139,8 +176,9 @@ void __init early_fixup_exception(struct pt_regs *regs, int trapnr)
 	 * Old CPUs leave the high bits of CS on the stack
 	 * undefined.  I'm not sure which CPUs do this, but at least
 	 * the 486 DX works this way.
+	 * Xen pv domains are not using the default __KERNEL_CS.
 	 */
-	if ((regs->cs & 0xFFFF) != __KERNEL_CS)
+	if (!xen_pv_domain() && regs->cs != __KERNEL_CS)
 		goto fail;
 
 	/*
@@ -155,10 +193,24 @@ void __init early_fixup_exception(struct pt_regs *regs, int trapnr)
 	 * result in a hard-to-debug panic.
 	 *
 	 * Keep in mind that not all vectors actually get here.  Early
-	 * fage faults, for example, are special.
+	 * page faults, for example, are special.
 	 */
-	if (fixup_exception(regs, trapnr))
+	if (fixup_exception(regs, trapnr, regs->orig_ax, 0))
 		return;
+
+	if (trapnr == X86_TRAP_UD) {
+		if (report_bug(regs->ip, regs) == BUG_TRAP_TYPE_WARN) {
+			/* Skip the ud2. */
+			regs->ip += LEN_UD2;
+			return;
+		}
+
+		/*
+		 * If this was a BUG and report_bug returns or if this
+		 * was just a normal #UD, we want to continue onward and
+		 * crash.
+		 */
+	}
 
 fail:
 	early_printk("PANIC: early exception 0x%02x IP %lx:%lx error %lx cr2 0x%lx\n",

@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * ADT7310/ADT7310 digital temperature sensor driver
  *
  * Copyright 2012-2013 Analog Devices Inc.
  *   Author: Lars-Peter Clausen <lars@metafoo.de>
- *
- * Licensed under the GPL-2 or later.
  */
 
 #include <linux/module.h>
@@ -91,7 +90,8 @@ static int adt7310_spi_probe(struct spi_device *spi)
 
 static int adt7310_spi_remove(struct spi_device *spi)
 {
-	return adt7x10_remove(&spi->dev, spi->irq);
+	adt7x10_remove(&spi->dev, spi->irq);
+	return 0;
 }
 
 static const struct spi_device_id adt7310_id[] = {

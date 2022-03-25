@@ -1,35 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * MUSB OTG driver virtual root hub support
  *
  * Copyright 2005 Mentor Graphics Corporation
  * Copyright (C) 2005-2006 by Texas Instruments
  * Copyright (C) 2006-2007 Nokia Corporation
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
- * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN
- * NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
- * USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
  */
 
 #include <linux/module.h>
@@ -136,7 +111,6 @@ int musb_port_suspend(struct musb *musb, bool do_suspend)
 
 		musb_dbg(musb, "Root port resuming, power %02x", power);
 
-		/* later, GetPortStatus will stop RESUME signaling */
 		musb->port1_status |= MUSB_PORT_STAT_RESUME;
 		schedule_delayed_work(&musb->finish_resume_work,
 				      msecs_to_jiffies(USB_RESUME_TIMEOUT));
@@ -237,7 +211,7 @@ void musb_root_disconnect(struct musb *musb)
 			musb->g.is_a_peripheral = 1;
 			break;
 		}
-		/* FALLTHROUGH */
+		fallthrough;
 	case OTG_STATE_A_HOST:
 		musb->xceiv->otg->state = OTG_STATE_A_WAIT_BCON;
 		musb->is_active = 0;
@@ -280,7 +254,7 @@ static int musb_has_gadget(struct musb *musb)
 #ifdef CONFIG_USB_MUSB_HOST
 	return 1;
 #else
-	return musb->port_mode == MUSB_PORT_MODE_HOST;
+	return musb->port_mode == MUSB_HOST;
 #endif
 }
 
@@ -411,25 +385,25 @@ int musb_hub_control(
 
 			wIndex >>= 8;
 			switch (wIndex) {
-			case 1:
-				pr_debug("TEST_J\n");
+			case USB_TEST_J:
+				pr_debug("USB_TEST_J\n");
 				temp = MUSB_TEST_J;
 				break;
-			case 2:
-				pr_debug("TEST_K\n");
+			case USB_TEST_K:
+				pr_debug("USB_TEST_K\n");
 				temp = MUSB_TEST_K;
 				break;
-			case 3:
-				pr_debug("TEST_SE0_NAK\n");
+			case USB_TEST_SE0_NAK:
+				pr_debug("USB_TEST_SE0_NAK\n");
 				temp = MUSB_TEST_SE0_NAK;
 				break;
-			case 4:
-				pr_debug("TEST_PACKET\n");
+			case USB_TEST_PACKET:
+				pr_debug("USB_TEST_PACKET\n");
 				temp = MUSB_TEST_PACKET;
 				musb_load_testpacket(musb);
 				break;
-			case 5:
-				pr_debug("TEST_FORCE_ENABLE\n");
+			case USB_TEST_FORCE_ENABLE:
+				pr_debug("USB_TEST_FORCE_ENABLE\n");
 				temp = MUSB_TEST_FORCE_HOST
 					| MUSB_TEST_FORCE_HS;
 

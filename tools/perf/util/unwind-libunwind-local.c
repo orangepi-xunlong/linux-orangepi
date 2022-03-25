@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Post mortem Dwarf CFI based unwinding on top of regs and stack dumps.
  *
@@ -16,12 +17,15 @@
  */
 
 #include <elf.h>
+#include <errno.h>
 #include <gelf.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/mman.h>
 #include <linux/list.h>
+#include <linux/zalloc.h>
 #ifndef REMOTE_UNWIND_LIBUNWIND
 #include <libunwind.h>
 #include <libunwind-ptrace.h>
@@ -31,10 +35,11 @@
 #include "session.h"
 #include "perf_regs.h"
 #include "unwind.h"
+#include "map.h"
 #include "symbol.h"
-#include "util.h"
 #include "debug.h"
 #include "asm/bug.h"
+#include "dso.h"
 
 extern int
 UNW_OBJ(dwarf_search_unwind_table) (unw_addr_space_t as,
@@ -77,7 +82,7 @@ UNW_OBJ(dwarf_find_debug_frame) (int found, unw_dyn_info_t *di_debug,
 #define DW_EH_PE_funcrel	0x40	/* start-of-procedure-relative */
 #define DW_EH_PE_aligned	0x50	/* aligned pointer */
 
-/* Flags intentionaly not handled, since they're not needed:
+/* Flags intentionally not handled, since they're not needed:
  * #define DW_EH_PE_indirect      0x80
  * #define DW_EH_PE_uleb128       0x01
  * #define DW_EH_PE_udata2        0x02
@@ -238,7 +243,7 @@ struct eh_frame_hdr {
 	 *    encoded_t fde_addr;
 	 * } binary_search_table[fde_count];
 	 */
-	char data[0];
+	char data[];
 } __packed;
 
 static int unwind_spec_ehframe(struct dso *dso, struct machine *machine,
@@ -297,15 +302,58 @@ static int read_unwind_spec_debug_frame(struct dso *dso,
 	int fd;
 	u64 ofs = dso->data.debug_frame_offset;
 
+	/* debug_frame can reside in:
+	 *  - dso
+	 *  - debug pointed by symsrc_filename
+	 *  - gnu_debuglink, which doesn't necessary
+	 *    has to be pointed by symsrc_filename
+	 */
 	if (ofs == 0) {
 		fd = dso__data_get_fd(dso, machine);
-		if (fd < 0)
-			return -EINVAL;
+		if (fd >= 0) {
+			ofs = elf_section_offset(fd, ".debug_frame");
+			dso__data_put_fd(dso);
+		}
 
-		/* Check the .debug_frame section for unwinding info */
-		ofs = elf_section_offset(fd, ".debug_frame");
+		if (ofs <= 0) {
+			fd = open(dso->symsrc_filename, O_RDONLY);
+			if (fd >= 0) {
+				ofs = elf_section_offset(fd, ".debug_frame");
+				close(fd);
+			}
+		}
+
+		if (ofs <= 0) {
+			char *debuglink = malloc(PATH_MAX);
+			int ret = 0;
+
+			ret = dso__read_binary_type_filename(
+				dso, DSO_BINARY_TYPE__DEBUGLINK,
+				machine->root_dir, debuglink, PATH_MAX);
+			if (!ret) {
+				fd = open(debuglink, O_RDONLY);
+				if (fd >= 0) {
+					ofs = elf_section_offset(fd,
+							".debug_frame");
+					close(fd);
+				}
+			}
+			if (ofs > 0) {
+				if (dso->symsrc_filename != NULL) {
+					pr_warning(
+						"%s: overwrite symsrc(%s,%s)\n",
+							__func__,
+							dso->symsrc_filename,
+							debuglink);
+					zfree(&dso->symsrc_filename);
+				}
+				dso->symsrc_filename = debuglink;
+			} else {
+				free(debuglink);
+			}
+		}
+
 		dso->data.debug_frame_offset = ofs;
-		dso__data_put_fd(dso);
 	}
 
 	*offset = ofs;
@@ -319,19 +367,7 @@ static int read_unwind_spec_debug_frame(struct dso *dso,
 static struct map *find_map(unw_word_t ip, struct unwind_info *ui)
 {
 	struct addr_location al;
-
-	thread__find_addr_map(ui->thread, PERF_RECORD_MISC_USER,
-			      MAP__FUNCTION, ip, &al);
-	if (!al.map) {
-		/*
-		 * We've seen cases (softice) where DWARF unwinder went
-		 * through non executable mmaps, which we need to lookup
-		 * in MAP__VARIABLE tree.
-		 */
-		thread__find_addr_map(ui->thread, PERF_RECORD_MISC_USER,
-				      MAP__VARIABLE, ip, &al);
-	}
-	return al.map;
+	return thread__find_map(ui->thread, PERF_RECORD_MISC_USER, ip, &al);
 }
 
 static int
@@ -357,8 +393,8 @@ find_proc_info(unw_addr_space_t as, unw_word_t ip, unw_proc_info_t *pi,
 		di.format   = UNW_INFO_FORMAT_REMOTE_TABLE;
 		di.start_ip = map->start;
 		di.end_ip   = map->end;
-		di.u.rti.segbase    = map->start + segbase;
-		di.u.rti.table_data = map->start + table_data;
+		di.u.rti.segbase    = map->start + segbase - map->pgoff;
+		di.u.rti.table_data = map->start + table_data - map->pgoff;
 		di.u.rti.table_len  = fde_count * sizeof(struct table_entry)
 				      / sizeof(unw_word_t);
 		ret = dwarf_search_unwind_table(as, ip, &di, pi,
@@ -539,12 +575,10 @@ static int entry(u64 ip, struct thread *thread,
 	struct unwind_entry e;
 	struct addr_location al;
 
-	thread__find_addr_location(thread, PERF_RECORD_MISC_USER,
-				   MAP__FUNCTION, ip, &al);
-
-	e.ip = al.addr;
-	e.map = al.map;
-	e.sym = al.sym;
+	e.ms.sym = thread__find_symbol(thread, PERF_RECORD_MISC_USER, ip, &al);
+	e.ip     = ip;
+	e.ms.map = al.map;
+	e.ms.maps = al.maps;
 
 	pr_debug("unwind: %s:ip = 0x%" PRIx64 " (0x%" PRIx64 ")\n",
 		 al.sym ? al.sym->name : "''",
@@ -582,35 +616,26 @@ static unw_accessors_t accessors = {
 	.get_proc_name		= get_proc_name,
 };
 
-static int _unwind__prepare_access(struct thread *thread)
+static int _unwind__prepare_access(struct maps *maps)
 {
-	if (callchain_param.record_mode != CALLCHAIN_DWARF)
-		return 0;
-
-	thread->addr_space = unw_create_addr_space(&accessors, 0);
-	if (!thread->addr_space) {
+	maps->addr_space = unw_create_addr_space(&accessors, 0);
+	if (!maps->addr_space) {
 		pr_err("unwind: Can't create unwind address space.\n");
 		return -ENOMEM;
 	}
 
-	unw_set_caching_policy(thread->addr_space, UNW_CACHE_GLOBAL);
+	unw_set_caching_policy(maps->addr_space, UNW_CACHE_GLOBAL);
 	return 0;
 }
 
-static void _unwind__flush_access(struct thread *thread)
+static void _unwind__flush_access(struct maps *maps)
 {
-	if (callchain_param.record_mode != CALLCHAIN_DWARF)
-		return;
-
-	unw_flush_cache(thread->addr_space, 0, 0);
+	unw_flush_cache(maps->addr_space, 0, 0);
 }
 
-static void _unwind__finish_access(struct thread *thread)
+static void _unwind__finish_access(struct maps *maps)
 {
-	if (callchain_param.record_mode != CALLCHAIN_DWARF)
-		return;
-
-	unw_destroy_addr_space(thread->addr_space);
+	unw_destroy_addr_space(maps->addr_space);
 }
 
 static int get_entries(struct unwind_info *ui, unwind_entry_cb_t cb,
@@ -635,7 +660,7 @@ static int get_entries(struct unwind_info *ui, unwind_entry_cb_t cb,
 	 */
 	if (max_stack - 1 > 0) {
 		WARN_ONCE(!ui->thread, "WARNING: ui->thread is NULL");
-		addr_space = ui->thread->addr_space;
+		addr_space = ui->thread->maps->addr_space;
 
 		if (addr_space == NULL)
 			return -1;
@@ -684,7 +709,7 @@ static int _unwind__get_entries(unwind_entry_cb_t cb, void *arg,
 	struct unwind_info ui = {
 		.sample       = data,
 		.thread       = thread,
-		.machine      = thread->mg->machine,
+		.machine      = thread->maps->machine,
 	};
 
 	if (!data->user_regs.regs)

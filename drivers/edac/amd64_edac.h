@@ -18,23 +18,17 @@
 #include <linux/edac.h>
 #include <asm/cpu_device_id.h>
 #include <asm/msr.h>
-#include "edac_core.h"
+#include "edac_module.h"
 #include "mce_amd.h"
-
-#define amd64_debug(fmt, arg...) \
-	edac_printk(KERN_DEBUG, "amd64", fmt, ##arg)
 
 #define amd64_info(fmt, arg...) \
 	edac_printk(KERN_INFO, "amd64", fmt, ##arg)
 
-#define amd64_notice(fmt, arg...) \
-	edac_printk(KERN_NOTICE, "amd64", fmt, ##arg)
-
 #define amd64_warn(fmt, arg...) \
-	edac_printk(KERN_WARNING, "amd64", fmt, ##arg)
+	edac_printk(KERN_WARNING, "amd64", "Warning: " fmt, ##arg)
 
 #define amd64_err(fmt, arg...) \
-	edac_printk(KERN_ERR, "amd64", fmt, ##arg)
+	edac_printk(KERN_ERR, "amd64", "Error: " fmt, ##arg)
 
 #define amd64_mc_warn(mci, fmt, arg...) \
 	edac_mc_chipset_printk(mci, KERN_WARNING, "amd64", fmt, ##arg)
@@ -91,7 +85,7 @@
  *         sections 3.5.4 and 3.5.5 for more information.
  */
 
-#define EDAC_AMD64_VERSION		"3.4.0"
+#define EDAC_AMD64_VERSION		"3.5.0"
 #define EDAC_MOD_STR			"amd64_edac"
 
 /* Extended Model from CPUID, for CPU Revision numbers */
@@ -102,6 +96,7 @@
 /* Hardware limit on ChipSelect rows per MC and processors per system */
 #define NUM_CHIPSELECTS			8
 #define DRAM_RANGES			8
+#define NUM_CONTROLLERS			8
 
 #define ON true
 #define OFF false
@@ -119,6 +114,18 @@
 #define PCI_DEVICE_ID_AMD_16H_NB_F2	0x1532
 #define PCI_DEVICE_ID_AMD_16H_M30H_NB_F1 0x1581
 #define PCI_DEVICE_ID_AMD_16H_M30H_NB_F2 0x1582
+#define PCI_DEVICE_ID_AMD_17H_DF_F0	0x1460
+#define PCI_DEVICE_ID_AMD_17H_DF_F6	0x1466
+#define PCI_DEVICE_ID_AMD_17H_M10H_DF_F0 0x15e8
+#define PCI_DEVICE_ID_AMD_17H_M10H_DF_F6 0x15ee
+#define PCI_DEVICE_ID_AMD_17H_M30H_DF_F0 0x1490
+#define PCI_DEVICE_ID_AMD_17H_M30H_DF_F6 0x1496
+#define PCI_DEVICE_ID_AMD_17H_M60H_DF_F0 0x1448
+#define PCI_DEVICE_ID_AMD_17H_M60H_DF_F6 0x144e
+#define PCI_DEVICE_ID_AMD_17H_M70H_DF_F0 0x1440
+#define PCI_DEVICE_ID_AMD_17H_M70H_DF_F6 0x1446
+#define PCI_DEVICE_ID_AMD_19H_DF_F0	0x1650
+#define PCI_DEVICE_ID_AMD_19H_DF_F6	0x1656
 
 /*
  * Function 1 - Address Map
@@ -168,7 +175,8 @@
 #define DCSM0				0x60
 #define DCSM1				0x160
 
-#define csrow_enabled(i, dct, pvt)	((pvt)->csels[(dct)].csbases[(i)] & DCSB_CS_ENABLE)
+#define csrow_enabled(i, dct, pvt)	((pvt)->csels[(dct)].csbases[(i)]     & DCSB_CS_ENABLE)
+#define csrow_sec_enabled(i, dct, pvt)	((pvt)->csels[(dct)].csbases_sec[(i)] & DCSB_CS_ENABLE)
 
 #define DRAM_CONTROL			0x78
 
@@ -203,6 +211,8 @@
 #define DCT_SEL_HI			0x114
 
 #define F15H_M60H_SCRCTRL		0x1C8
+#define F17H_SCR_BASE_ADDR		0x48
+#define F17H_SCR_LIMIT_ADDR		0x4C
 
 /*
  * Function 3 - Misc Control
@@ -249,6 +259,31 @@
 /* MSRs */
 #define MSR_MCGCTL_NBE			BIT(4)
 
+/* F17h */
+
+/* F0: */
+#define DF_DHAR				0x104
+
+/* UMC CH register offsets */
+#define UMCCH_BASE_ADDR			0x0
+#define UMCCH_BASE_ADDR_SEC		0x10
+#define UMCCH_ADDR_MASK			0x20
+#define UMCCH_ADDR_MASK_SEC		0x28
+#define UMCCH_ADDR_CFG			0x30
+#define UMCCH_DIMM_CFG			0x80
+#define UMCCH_UMC_CFG			0x100
+#define UMCCH_SDP_CTRL			0x104
+#define UMCCH_ECC_CTRL			0x14C
+#define UMCCH_ECC_BAD_SYMBOL		0xD90
+#define UMCCH_UMC_CAP			0xDF0
+#define UMCCH_UMC_CAP_HI		0xDF4
+
+/* UMC CH bitfields */
+#define UMC_ECC_CHIPKILL_CAP		BIT(31)
+#define UMC_ECC_ENABLED			BIT(30)
+
+#define UMC_SDP_INIT			BIT(31)
+
 enum amd_families {
 	K8_CPUS = 0,
 	F10_CPUS,
@@ -257,6 +292,12 @@ enum amd_families {
 	F15_M60H_CPUS,
 	F16_CPUS,
 	F16_M30H_CPUS,
+	F17_CPUS,
+	F17_M10H_CPUS,
+	F17_M30H_CPUS,
+	F17_M60H_CPUS,
+	F17_M70H_CPUS,
+	F19_CPUS,
 	NUM_FAMILIES,
 };
 
@@ -283,17 +324,27 @@ struct dram_range {
 /* A DCT chip selects collection */
 struct chip_select {
 	u32 csbases[NUM_CHIPSELECTS];
+	u32 csbases_sec[NUM_CHIPSELECTS];
 	u8 b_cnt;
 
 	u32 csmasks[NUM_CHIPSELECTS];
+	u32 csmasks_sec[NUM_CHIPSELECTS];
 	u8 m_cnt;
+};
+
+struct amd64_umc {
+	u32 dimm_cfg;		/* DIMM Configuration reg */
+	u32 umc_cfg;		/* Configuration reg */
+	u32 sdp_ctrl;		/* SDP Control reg */
+	u32 ecc_ctrl;		/* DRAM ECC Control reg */
+	u32 umc_cap_hi;		/* Capabilities High reg */
 };
 
 struct amd64_pvt {
 	struct low_ops *ops;
 
 	/* pci_device handles which we utilize */
-	struct pci_dev *F1, *F2, *F3;
+	struct pci_dev *F0, *F1, *F2, *F3, *F6;
 
 	u16 mc_node_id;		/* MC index of this MC node */
 	u8 fam;			/* CPU family */
@@ -315,8 +366,8 @@ struct amd64_pvt {
 	u32 dbam0;		/* DRAM Base Address Mapping reg for DCT0 */
 	u32 dbam1;		/* DRAM Base Address Mapping reg for DCT1 */
 
-	/* one for each DCT */
-	struct chip_select csels[2];
+	/* one for each DCT/UMC */
+	struct chip_select csels[NUM_CONTROLLERS];
 
 	/* DRAM base and limit pairs F1x[78,70,68,60,58,50,48,40] */
 	struct dram_range ranges[DRAM_RANGES];
@@ -328,7 +379,7 @@ struct amd64_pvt {
 	u32 dct_sel_hi;		/* DRAM Controller Select High */
 	u32 online_spare;	/* On-Line spare Reg */
 
-	/* x4 or x8 syndromes in use */
+	/* x4, x8, or x16 syndromes in use */
 	u8 ecc_sym_sz;
 
 	/* place to store error injection parameters prior to issue */
@@ -336,6 +387,8 @@ struct amd64_pvt {
 
 	/* cache the dram_type */
 	enum mem_type dram_type;
+
+	struct amd64_umc *umc;	/* UMC registers */
 };
 
 enum err_codes {
@@ -343,6 +396,8 @@ enum err_codes {
 	ERR_NODE	= -1,
 	ERR_CSROW	= -2,
 	ERR_CHANNEL	= -3,
+	ERR_SYND	= -4,
+	ERR_NORM_ADDR	= -5,
 };
 
 struct err_info {
@@ -354,6 +409,12 @@ struct err_info {
 	u32 page;
 	u32 offset;
 };
+
+static inline u32 get_umc_base(u8 channel)
+{
+	/* chY: 0xY50000 */
+	return 0x50000 + (channel << 20);
+}
 
 static inline u64 get_dram_base(struct amd64_pvt *pvt, u8 i)
 {
@@ -401,14 +462,6 @@ struct ecc_settings {
 	} flags;
 };
 
-#ifdef CONFIG_EDAC_DEBUG
-extern const struct attribute_group amd64_edac_dbg_group;
-#endif
-
-#ifdef CONFIG_EDAC_AMD64_ERROR_INJECTION
-extern const struct attribute_group amd64_edac_inj_group;
-#endif
-
 /*
  * Each of the PCI Device IDs types have their own set of hardware accessor
  * functions and per device encoding/decoding logic.
@@ -423,7 +476,9 @@ struct low_ops {
 
 struct amd64_family_type {
 	const char *ctl_name;
-	u16 f1_id, f2_id;
+	u16 f0_id, f1_id, f2_id, f6_id;
+	/* Maximum number of memory controllers per die/node. */
+	u8 max_mcs;
 	struct low_ops ops;
 };
 
@@ -437,9 +492,6 @@ int __amd64_write_pci_cfg_dword(struct pci_dev *pdev, int offset,
 
 #define amd64_write_pci_cfg(pdev, offset, val)	\
 	__amd64_write_pci_cfg_dword(pdev, offset, val, __func__)
-
-int amd64_get_dram_hole_info(struct mem_ctl_info *mci, u64 *hole_base,
-			     u64 *hole_offset, u64 *hole_size);
 
 #define to_mci(k) container_of(k, struct mem_ctl_info, dev)
 

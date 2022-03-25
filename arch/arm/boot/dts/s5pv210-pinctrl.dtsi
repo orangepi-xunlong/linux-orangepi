@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Samsung's S5PV210 SoC device tree source
  *
@@ -13,13 +14,16 @@
  * Note: This file does not include device nodes for all the controllers in
  * S5PV210 SoC. As device tree coverage for S5PV210 increases, additional
  * nodes can be added to this file.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <dt-bindings/pinctrl/samsung.h>
+
+#define PIN_SLP(_pin, _mode, _pull)					\
+	_pin {								\
+		samsung,pins = #_pin;					\
+		samsung,pin-con-pdn = <EXYNOS_PIN_PDN_ ##_mode>;	\
+		samsung,pin-pud-pdn = <S3C64XX_PIN_PULL_ ##_pull>;	\
+	}
 
 &pinctrl0 {
 	gpa0: gpa0 {
@@ -198,7 +202,7 @@
 		#interrupt-cells = <2>;
 	};
 
-	gpgi: gpgi {
+	gpi: gpi {
 		gpio-controller;
 		#gpio-cells = <2>;
 	};
@@ -261,12 +265,16 @@
 	gph2: gph2 {
 		gpio-controller;
 		#gpio-cells = <2>;
+
+		interrupt-controller;
 		#interrupt-cells = <2>;
 	};
 
 	gph3: gph3 {
 		gpio-controller;
 		#gpio-cells = <2>;
+
+		interrupt-controller;
 		#interrupt-cells = <2>;
 	};
 

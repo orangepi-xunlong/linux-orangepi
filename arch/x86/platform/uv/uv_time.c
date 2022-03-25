@@ -1,20 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * SGI RTC clock/timer routines.
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
+ *  (C) Copyright 2020 Hewlett Packard Enterprise Development LP
  *  Copyright (c) 2009-2013 Silicon Graphics, Inc.  All Rights Reserved.
  *  Copyright (c) Dimitri Sivanich
  */
@@ -30,7 +18,7 @@
 
 #define RTC_NAME		"sgi_rtc"
 
-static cycle_t uv_read_rtc(struct clocksource *cs);
+static u64 uv_read_rtc(struct clocksource *cs);
 static int uv_rtc_next_event(unsigned long, struct clock_event_device *);
 static int uv_rtc_shutdown(struct clock_event_device *evt);
 
@@ -38,7 +26,7 @@ static struct clocksource clocksource_uv = {
 	.name		= RTC_NAME,
 	.rating		= 299,
 	.read		= uv_read_rtc,
-	.mask		= (cycle_t)UVH_RTC_REAL_TIME_CLOCK_MASK,
+	.mask		= (u64)UVH_RTC_REAL_TIME_CLOCK_MASK,
 	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
 };
 
@@ -65,7 +53,7 @@ struct uv_rtc_timer_head {
 	struct {
 		int	lcpu;		/* systemwide logical cpu number */
 		u64	expires;	/* next timer expiration for this cpu */
-	} cpu[1];
+	} cpu[];
 };
 
 /*
@@ -87,7 +75,6 @@ static void uv_rtc_send_IPI(int cpu)
 
 	apicid = cpu_physical_id(cpu);
 	pnode = uv_apicid_to_pnode(apicid);
-	apicid |= uv_apicid_hibits;
 	val = (1UL << UVH_IPI_INT_SEND_SHFT) |
 	      (apicid << UVH_IPI_INT_APIC_ID_SHFT) |
 	      (X86_PLATFORM_IPI_VECTOR << UVH_IPI_INT_VECTOR_SHFT);
@@ -98,32 +85,23 @@ static void uv_rtc_send_IPI(int cpu)
 /* Check for an RTC interrupt pending */
 static int uv_intr_pending(int pnode)
 {
-	if (is_uv1_hub())
-		return uv_read_global_mmr64(pnode, UVH_EVENT_OCCURRED0) &
-			UV1H_EVENT_OCCURRED0_RTC1_MASK;
-	else if (is_uvx_hub())
-		return uv_read_global_mmr64(pnode, UVXH_EVENT_OCCURRED2) &
-			UVXH_EVENT_OCCURRED2_RTC_1_MASK;
-	return 0;
+	return uv_read_global_mmr64(pnode, UVH_EVENT_OCCURRED2) &
+		UVH_EVENT_OCCURRED2_RTC_1_MASK;
 }
 
 /* Setup interrupt and return non-zero if early expiration occurred. */
 static int uv_setup_intr(int cpu, u64 expires)
 {
 	u64 val;
-	unsigned long apicid = cpu_physical_id(cpu) | uv_apicid_hibits;
+	unsigned long apicid = cpu_physical_id(cpu);
 	int pnode = uv_cpu_to_pnode(cpu);
 
 	uv_write_global_mmr64(pnode, UVH_RTC1_INT_CONFIG,
 		UVH_RTC1_INT_CONFIG_M_MASK);
 	uv_write_global_mmr64(pnode, UVH_INT_CMPB, -1L);
 
-	if (is_uv1_hub())
-		uv_write_global_mmr64(pnode, UVH_EVENT_OCCURRED0_ALIAS,
-				UV1H_EVENT_OCCURRED0_RTC1_MASK);
-	else
-		uv_write_global_mmr64(pnode, UVXH_EVENT_OCCURRED2_ALIAS,
-				UVXH_EVENT_OCCURRED2_RTC_1_MASK);
+	uv_write_global_mmr64(pnode, UVH_EVENT_OCCURRED2_ALIAS,
+			      UVH_EVENT_OCCURRED2_RTC_1_MASK);
 
 	val = (X86_PLATFORM_IPI_VECTOR << UVH_RTC1_INT_CONFIG_VECTOR_SHFT) |
 		((u64)apicid << UVH_RTC1_INT_CONFIG_APIC_ID_SHFT);
@@ -158,7 +136,7 @@ static __init int uv_rtc_allocate_timers(void)
 {
 	int cpu;
 
-	blade_info = kzalloc(uv_possible_blades * sizeof(void *), GFP_KERNEL);
+	blade_info = kcalloc(uv_possible_blades, sizeof(void *), GFP_KERNEL);
 	if (!blade_info)
 		return -ENOMEM;
 
@@ -169,9 +147,8 @@ static __init int uv_rtc_allocate_timers(void)
 		struct uv_rtc_timer_head *head = blade_info[bid];
 
 		if (!head) {
-			head = kmalloc_node(sizeof(struct uv_rtc_timer_head) +
-				(uv_blade_nr_possible_cpus(bid) *
-					2 * sizeof(u64)),
+			head = kmalloc_node(struct_size(head, cpu,
+				uv_blade_nr_possible_cpus(bid)),
 				GFP_KERNEL, nid);
 			if (!head) {
 				uv_rtc_deallocate_timers();
@@ -296,7 +273,7 @@ static int uv_rtc_unset_timer(int cpu, int force)
  * cachelines of it's own page.  This allows faster simultaneous reads
  * from a given socket.
  */
-static cycle_t uv_read_rtc(struct clocksource *cs)
+static u64 uv_read_rtc(struct clocksource *cs)
 {
 	unsigned long offset;
 
@@ -305,7 +282,7 @@ static cycle_t uv_read_rtc(struct clocksource *cs)
 	else
 		offset = (uv_blade_processor_id() * L1_CACHE_BYTES) % PAGE_SIZE;
 
-	return (cycle_t)uv_read_local_mmr(UVH_RTC | offset);
+	return (u64)uv_read_local_mmr(UVH_RTC | offset);
 }
 
 /*
@@ -390,9 +367,11 @@ static __init int uv_rtc_setup_clock(void)
 
 	clock_event_device_uv.min_delta_ns = NSEC_PER_SEC /
 						sn_rtc_cycles_per_second;
+	clock_event_device_uv.min_delta_ticks = 1;
 
 	clock_event_device_uv.max_delta_ns = clocksource_uv.mask *
 				(NSEC_PER_SEC / sn_rtc_cycles_per_second);
+	clock_event_device_uv.max_delta_ticks = clocksource_uv.mask;
 
 	rc = schedule_on_each_cpu(uv_rtc_register_clockevents);
 	if (rc) {

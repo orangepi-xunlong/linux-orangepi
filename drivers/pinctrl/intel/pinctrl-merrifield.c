@@ -1,18 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Intel Merrifield SoC pinctrl driver
  *
  * Copyright (C) 2016, Intel Corporation
  * Author: Andy Shevchenko <andriy.shevchenko@linux.intel.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
-#include <linux/bitops.h>
+#include <linux/bits.h>
 #include <linux/err.h>
 #include <linux/io.h>
 #include <linux/module.h>
+#include <linux/mod_devicetable.h>
 #include <linux/platform_device.h>
 #include <linux/pinctrl/pinconf.h>
 #include <linux/pinctrl/pinconf-generic.h>
@@ -137,7 +135,7 @@ static const struct pinctrl_pin_desc mrfld_pins[] = {
 	PINCTRL_PIN(43, "GP83_SD_D3"),
 	PINCTRL_PIN(44, "GP84_SD_LS_CLK_FB"),
 	PINCTRL_PIN(45, "GP85_SD_LS_CMD_DIR"),
-	PINCTRL_PIN(46, "GP86_SD_LVL_D_DIR"),
+	PINCTRL_PIN(46, "GP86_SD_LS_D_DIR"),
 	PINCTRL_PIN(47, "GP88_SD_LS_SEL"),
 	PINCTRL_PIN(48, "GP87_SD_PD"),
 	PINCTRL_PIN(49, "GP89_SD_WP"),
@@ -173,28 +171,28 @@ static const struct pinctrl_pin_desc mrfld_pins[] = {
 	PINCTRL_PIN(77, "GP42_I2S_2_RXD"),
 	PINCTRL_PIN(78, "GP43_I2S_2_TXD"),
 	/* Family 6: GP SSP (22 pins) */
-	PINCTRL_PIN(79, "GP120_SPI_3_CLK"),
-	PINCTRL_PIN(80, "GP121_SPI_3_SS"),
-	PINCTRL_PIN(81, "GP122_SPI_3_RXD"),
-	PINCTRL_PIN(82, "GP123_SPI_3_TXD"),
-	PINCTRL_PIN(83, "GP102_SPI_4_CLK"),
-	PINCTRL_PIN(84, "GP103_SPI_4_SS_0"),
-	PINCTRL_PIN(85, "GP104_SPI_4_SS_1"),
-	PINCTRL_PIN(86, "GP105_SPI_4_SS_2"),
-	PINCTRL_PIN(87, "GP106_SPI_4_SS_3"),
-	PINCTRL_PIN(88, "GP107_SPI_4_RXD"),
-	PINCTRL_PIN(89, "GP108_SPI_4_TXD"),
-	PINCTRL_PIN(90, "GP109_SPI_5_CLK"),
-	PINCTRL_PIN(91, "GP110_SPI_5_SS_0"),
-	PINCTRL_PIN(92, "GP111_SPI_5_SS_1"),
-	PINCTRL_PIN(93, "GP112_SPI_5_SS_2"),
-	PINCTRL_PIN(94, "GP113_SPI_5_SS_3"),
-	PINCTRL_PIN(95, "GP114_SPI_5_RXD"),
-	PINCTRL_PIN(96, "GP115_SPI_5_TXD"),
-	PINCTRL_PIN(97, "GP116_SPI_6_CLK"),
-	PINCTRL_PIN(98, "GP117_SPI_6_SS"),
-	PINCTRL_PIN(99, "GP118_SPI_6_RXD"),
-	PINCTRL_PIN(100, "GP119_SPI_6_TXD"),
+	PINCTRL_PIN(79, "GP120_SPI_0_CLK"),
+	PINCTRL_PIN(80, "GP121_SPI_0_SS"),
+	PINCTRL_PIN(81, "GP122_SPI_0_RXD"),
+	PINCTRL_PIN(82, "GP123_SPI_0_TXD"),
+	PINCTRL_PIN(83, "GP102_SPI_1_CLK"),
+	PINCTRL_PIN(84, "GP103_SPI_1_SS0"),
+	PINCTRL_PIN(85, "GP104_SPI_1_SS1"),
+	PINCTRL_PIN(86, "GP105_SPI_1_SS2"),
+	PINCTRL_PIN(87, "GP106_SPI_1_SS3"),
+	PINCTRL_PIN(88, "GP107_SPI_1_RXD"),
+	PINCTRL_PIN(89, "GP108_SPI_1_TXD"),
+	PINCTRL_PIN(90, "GP109_SPI_2_CLK"),
+	PINCTRL_PIN(91, "GP110_SPI_2_SS0"),
+	PINCTRL_PIN(92, "GP111_SPI_2_SS1"),
+	PINCTRL_PIN(93, "GP112_SPI_2_SS2"),
+	PINCTRL_PIN(94, "GP113_SPI_2_SS3"),
+	PINCTRL_PIN(95, "GP114_SPI_2_RXD"),
+	PINCTRL_PIN(96, "GP115_SPI_2_TXD"),
+	PINCTRL_PIN(97, "GP116_SPI_3_CLK"),
+	PINCTRL_PIN(98, "GP117_SPI_3_SS"),
+	PINCTRL_PIN(99, "GP118_SPI_3_RXD"),
+	PINCTRL_PIN(100, "GP119_SPI_3_TXD"),
 	/* Family 7: I2C (14 pins) */
 	PINCTRL_PIN(101, "GP19_I2C_1_SCL"),
 	PINCTRL_PIN(102, "GP20_I2C_1_SDA"),
@@ -342,6 +340,7 @@ static const struct pinctrl_pin_desc mrfld_pins[] = {
 };
 
 static const unsigned int mrfld_sdio_pins[] = { 50, 51, 52, 53, 54, 55, 56 };
+static const unsigned int mrfld_i2s2_pins[] = { 75, 76, 77, 78 };
 static const unsigned int mrfld_spi5_pins[] = { 90, 91, 92, 93, 94, 95, 96 };
 static const unsigned int mrfld_uart0_pins[] = { 115, 116, 117, 118 };
 static const unsigned int mrfld_uart1_pins[] = { 119, 120, 121, 122 };
@@ -353,6 +352,7 @@ static const unsigned int mrfld_pwm3_pins[] = { 133 };
 
 static const struct intel_pingroup mrfld_groups[] = {
 	PIN_GROUP("sdio_grp", mrfld_sdio_pins, 1),
+	PIN_GROUP("i2s2_grp", mrfld_i2s2_pins, 1),
 	PIN_GROUP("spi5_grp", mrfld_spi5_pins, 1),
 	PIN_GROUP("uart0_grp", mrfld_uart0_pins, 1),
 	PIN_GROUP("uart1_grp", mrfld_uart1_pins, 1),
@@ -364,6 +364,7 @@ static const struct intel_pingroup mrfld_groups[] = {
 };
 
 static const char * const mrfld_sdio_groups[] = { "sdio_grp" };
+static const char * const mrfld_i2s2_groups[] = { "i2s2_grp" };
 static const char * const mrfld_spi5_groups[] = { "spi5_grp" };
 static const char * const mrfld_uart0_groups[] = { "uart0_grp" };
 static const char * const mrfld_uart1_groups[] = { "uart1_grp" };
@@ -375,6 +376,7 @@ static const char * const mrfld_pwm3_groups[] = { "pwm3_grp" };
 
 static const struct intel_function mrfld_functions[] = {
 	FUNCTION("sdio", mrfld_sdio_groups),
+	FUNCTION("i2s2", mrfld_i2s2_groups),
 	FUNCTION("spi5", mrfld_spi5_groups),
 	FUNCTION("uart0", mrfld_uart0_groups),
 	FUNCTION("uart1", mrfld_uart1_groups),
@@ -478,6 +480,34 @@ static void __iomem *mrfld_get_bufcfg(struct mrfld_pinctrl *mp, unsigned int pin
 	return family->regs + BUFCFG_OFFSET + bufno * 4;
 }
 
+static int mrfld_read_bufcfg(struct mrfld_pinctrl *mp, unsigned int pin, u32 *value)
+{
+	void __iomem *bufcfg;
+
+	if (!mrfld_buf_available(mp, pin))
+		return -EBUSY;
+
+	bufcfg = mrfld_get_bufcfg(mp, pin);
+	*value = readl(bufcfg);
+
+	return 0;
+}
+
+static void mrfld_update_bufcfg(struct mrfld_pinctrl *mp, unsigned int pin,
+				u32 bits, u32 mask)
+{
+	void __iomem *bufcfg;
+	u32 value;
+
+	bufcfg = mrfld_get_bufcfg(mp, pin);
+	value = readl(bufcfg);
+
+	value &= ~mask;
+	value |= bits & mask;
+
+	writel(value, bufcfg);
+}
+
 static int mrfld_get_groups_count(struct pinctrl_dev *pctldev)
 {
 	struct mrfld_pinctrl *mp = pinctrl_dev_get_drvdata(pctldev);
@@ -507,16 +537,14 @@ static void mrfld_pin_dbg_show(struct pinctrl_dev *pctldev, struct seq_file *s,
 			       unsigned int pin)
 {
 	struct mrfld_pinctrl *mp = pinctrl_dev_get_drvdata(pctldev);
-	void __iomem *bufcfg;
 	u32 value, mode;
+	int ret;
 
-	if (!mrfld_buf_available(mp, pin)) {
+	ret = mrfld_read_bufcfg(mp, pin, &value);
+	if (ret) {
 		seq_puts(s, "not available");
 		return;
 	}
-
-	bufcfg = mrfld_get_bufcfg(mp, pin);
-	value = readl(bufcfg);
 
 	mode = (value & BUFCFG_PINMODE_MASK) >> BUFCFG_PINMODE_SHIFT;
 	if (!mode)
@@ -559,21 +587,6 @@ static int mrfld_get_function_groups(struct pinctrl_dev *pctldev,
 	*groups = mp->functions[function].groups;
 	*ngroups = mp->functions[function].ngroups;
 	return 0;
-}
-
-static void mrfld_update_bufcfg(struct mrfld_pinctrl *mp, unsigned int pin,
-				u32 bits, u32 mask)
-{
-	void __iomem *bufcfg;
-	u32 value;
-
-	bufcfg = mrfld_get_bufcfg(mp, pin);
-	value = readl(bufcfg);
-
-	value &= ~mask;
-	value |= bits & mask;
-
-	writel(value, bufcfg);
 }
 
 static int mrfld_pinmux_set_mux(struct pinctrl_dev *pctldev,
@@ -639,11 +652,12 @@ static int mrfld_config_get(struct pinctrl_dev *pctldev, unsigned int pin,
 	enum pin_config_param param = pinconf_to_config_param(*config);
 	u32 value, term;
 	u16 arg = 0;
+	int ret;
 
-	if (!mrfld_buf_available(mp, pin))
+	ret = mrfld_read_bufcfg(mp, pin, &value);
+	if (ret)
 		return -ENOTSUPP;
 
-	value = readl(mrfld_get_bufcfg(mp, pin));
 	term = (value & BUFCFG_PUPD_VAL_MASK) >> BUFCFG_PUPD_VAL_SHIFT;
 
 	switch (param) {
@@ -731,6 +745,10 @@ static int mrfld_config_set_pin(struct mrfld_pinctrl *mp, unsigned int pin,
 		mask |= BUFCFG_Px_EN_MASK | BUFCFG_PUPD_VAL_MASK;
 		bits |= BUFCFG_PU_EN;
 
+		/* Set default strength value in case none is given */
+		if (arg == 1)
+			arg = 20000;
+
 		switch (arg) {
 		case 50000:
 			bits |= BUFCFG_PUPD_VAL_50K << BUFCFG_PUPD_VAL_SHIFT;
@@ -750,6 +768,10 @@ static int mrfld_config_set_pin(struct mrfld_pinctrl *mp, unsigned int pin,
 	case PIN_CONFIG_BIAS_PULL_DOWN:
 		mask |= BUFCFG_Px_EN_MASK | BUFCFG_PUPD_VAL_MASK;
 		bits |= BUFCFG_PD_EN;
+
+		/* Set default strength value in case none is given */
+		if (arg == 1)
+			arg = 20000;
 
 		switch (arg) {
 		case 50000:
@@ -817,10 +839,51 @@ static int mrfld_config_set(struct pinctrl_dev *pctldev, unsigned int pin,
 	return 0;
 }
 
+static int mrfld_config_group_get(struct pinctrl_dev *pctldev,
+				  unsigned int group, unsigned long *config)
+{
+	const unsigned int *pins;
+	unsigned int npins;
+	int ret;
+
+	ret = mrfld_get_group_pins(pctldev, group, &pins, &npins);
+	if (ret)
+		return ret;
+
+	ret = mrfld_config_get(pctldev, pins[0], config);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int mrfld_config_group_set(struct pinctrl_dev *pctldev,
+				  unsigned int group, unsigned long *configs,
+				  unsigned int num_configs)
+{
+	const unsigned int *pins;
+	unsigned int npins;
+	int i, ret;
+
+	ret = mrfld_get_group_pins(pctldev, group, &pins, &npins);
+	if (ret)
+		return ret;
+
+	for (i = 0; i < npins; i++) {
+		ret = mrfld_config_set(pctldev, pins[i], configs, num_configs);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
 static const struct pinconf_ops mrfld_pinconf_ops = {
 	.is_generic = true,
 	.pin_config_get = mrfld_config_get,
 	.pin_config_set = mrfld_config_set,
+	.pin_config_group_get = mrfld_config_group_get,
+	.pin_config_group_set = mrfld_config_group_set,
 };
 
 static const struct pinctrl_desc mrfld_pinctrl_desc = {
@@ -834,7 +897,6 @@ static int mrfld_pinctrl_probe(struct platform_device *pdev)
 {
 	struct mrfld_family *families;
 	struct mrfld_pinctrl *mp;
-	struct resource *mem;
 	void __iomem *regs;
 	size_t nfamilies;
 	unsigned int i;
@@ -846,8 +908,7 @@ static int mrfld_pinctrl_probe(struct platform_device *pdev)
 	mp->dev = &pdev->dev;
 	raw_spin_lock_init(&mp->lock);
 
-	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	regs = devm_ioremap_resource(&pdev->dev, mem);
+	regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(regs))
 		return PTR_ERR(regs);
 
@@ -890,10 +951,17 @@ static int mrfld_pinctrl_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static const struct acpi_device_id mrfld_acpi_table[] = {
+	{ "INTC1002" },
+	{ }
+};
+MODULE_DEVICE_TABLE(acpi, mrfld_acpi_table);
+
 static struct platform_driver mrfld_pinctrl_driver = {
 	.probe = mrfld_pinctrl_probe,
 	.driver = {
 		.name = "pinctrl-merrifield",
+		.acpi_match_table = mrfld_acpi_table,
 	},
 };
 

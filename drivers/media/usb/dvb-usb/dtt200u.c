@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* DVB USB library compliant Linux driver for the WideView/ Yakumo/ Hama/
  * Typhoon/ Yuan/ Miglia DVB-T USB2.0 receiver.
  *
@@ -5,11 +6,7 @@
  *
  * Thanks to Steve Chang from WideView for providing support for the WT-220U.
  *
- *	This program is free software; you can redistribute it and/or modify it
- *	under the terms of the GNU General Public License as published by the Free
- *	Software Foundation, version 2.
- *
- * see Documentation/dvb/README.dvb-usb for more information
+ * see Documentation/driver-api/media/drivers/dvb-usb.rst for more information
  */
 #include "dtt200u.h"
 
@@ -100,14 +97,14 @@ static int dtt200u_rc_query(struct dvb_usb_device *d)
 		goto ret;
 
 	if (st->data[0] == 1) {
-		enum rc_type proto = RC_TYPE_NEC;
+		enum rc_proto proto = RC_PROTO_NEC;
 
 		scancode = st->data[1];
 		if ((u8) ~st->data[1] != st->data[2]) {
 			/* Extended NEC */
 			scancode = scancode << 8;
 			scancode |= st->data[2];
-			proto = RC_TYPE_NECX;
+			proto = RC_PROTO_NECX;
 		}
 		scancode = scancode << 8;
 		scancode |= st->data[3];
@@ -213,7 +210,7 @@ static struct dvb_usb_device_properties dtt200u_properties = {
 		.rc_interval     = 300,
 		.rc_codes        = RC_MAP_DTT200U,
 		.rc_query        = dtt200u_rc_query,
-		.allowed_protos  = RC_BIT_NEC,
+		.allowed_protos  = RC_PROTO_BIT_NEC,
 	},
 
 	.generic_bulk_ctrl_endpoint = 0x01,
@@ -265,7 +262,7 @@ static struct dvb_usb_device_properties wt220u_properties = {
 		.rc_interval     = 300,
 		.rc_codes        = RC_MAP_DTT200U,
 		.rc_query        = dtt200u_rc_query,
-		.allowed_protos  = RC_BIT_NEC,
+		.allowed_protos  = RC_PROTO_BIT_NEC,
 	},
 
 	.generic_bulk_ctrl_endpoint = 0x01,
@@ -317,7 +314,7 @@ static struct dvb_usb_device_properties wt220u_fc_properties = {
 		.rc_interval     = 300,
 		.rc_codes        = RC_MAP_DTT200U,
 		.rc_query        = dtt200u_rc_query,
-		.allowed_protos  = RC_BIT_NEC,
+		.allowed_protos  = RC_PROTO_BIT_NEC,
 	},
 
 	.generic_bulk_ctrl_endpoint = 0x01,
@@ -369,7 +366,7 @@ static struct dvb_usb_device_properties wt220u_zl0353_properties = {
 		.rc_interval     = 300,
 		.rc_codes        = RC_MAP_DTT200U,
 		.rc_query        = dtt200u_rc_query,
-		.allowed_protos  = RC_BIT_NEC,
+		.allowed_protos  = RC_PROTO_BIT_NEC,
 	},
 
 	.generic_bulk_ctrl_endpoint = 0x01,
