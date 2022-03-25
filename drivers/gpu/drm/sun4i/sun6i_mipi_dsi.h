@@ -31,6 +31,8 @@ struct sun6i_dsi {
 	struct mipi_dsi_device	*device;
 	struct drm_device	*drm;
 	struct drm_panel	*panel;
+	
+	bool hw_preconfigured;
 };
 
 static inline struct sun6i_dsi *host_to_sun6i_dsi(struct mipi_dsi_host *host)

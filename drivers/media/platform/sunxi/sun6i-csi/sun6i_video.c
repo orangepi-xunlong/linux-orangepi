@@ -48,6 +48,8 @@ static const u32 supported_pixformats[] = {
 	V4L2_PIX_FMT_YVYU,
 	V4L2_PIX_FMT_UYVY,
 	V4L2_PIX_FMT_VYUY,
+	V4L2_PIX_FMT_RGB565,
+	V4L2_PIX_FMT_RGB555,
 	V4L2_PIX_FMT_NV12_16L16,
 	V4L2_PIX_FMT_NV12,
 	V4L2_PIX_FMT_NV21,
@@ -136,6 +138,7 @@ static int sun6i_video_start_streaming(struct vb2_queue *vq, unsigned int count)
 	struct sun6i_csi_buffer *next_buf;
 	struct sun6i_csi_config config;
 	struct v4l2_subdev *subdev;
+	struct sun6i_csi_async_subdev* casd;
 	unsigned long flags;
 	int ret;
 
@@ -156,13 +159,15 @@ static int sun6i_video_start_streaming(struct vb2_queue *vq, unsigned int count)
 		goto stop_media_pipeline;
 	}
 
+	casd = container_of(subdev->asd, struct sun6i_csi_async_subdev, asd);
+
 	config.pixelformat = video->fmt.fmt.pix.pixelformat;
 	config.code = video->mbus_code;
 	config.field = video->fmt.fmt.pix.field;
 	config.width = video->fmt.fmt.pix.width;
 	config.height = video->fmt.fmt.pix.height;
 
-	ret = sun6i_csi_update_config(video->csi, &config);
+	ret = sun6i_csi_update_config(video->csi, &config, &casd->vep);
 	if (ret < 0)
 		goto stop_media_pipeline;
 
@@ -354,6 +359,7 @@ static int sun6i_video_try_fmt(struct sun6i_video *video,
 {
 	struct v4l2_pix_format *pixfmt = &f->fmt.pix;
 	int bpp;
+	u32 bpl_packed;
 
 	if (!is_pixformat_valid(pixfmt->pixelformat))
 		pixfmt->pixelformat = supported_pixformats[0];
@@ -362,7 +368,13 @@ static int sun6i_video_try_fmt(struct sun6i_video *video,
 			      &pixfmt->height, MIN_HEIGHT, MAX_WIDTH, 1, 1);
 
 	bpp = sun6i_csi_get_bpp(pixfmt->pixelformat);
-	pixfmt->bytesperline = (pixfmt->width * bpp) >> 3;
+        bpl_packed = (pixfmt->width * bpp) / 8;
+
+	//XXX: only allow for YUYV and friends
+	if (pixfmt->bytesperline < bpl_packed
+	    || pixfmt->bytesperline > bpl_packed + 256)
+		pixfmt->bytesperline = bpl_packed;
+
 	pixfmt->sizeimage = pixfmt->bytesperline * pixfmt->height;
 
 	if (pixfmt->field == V4L2_FIELD_ANY)
@@ -408,6 +420,8 @@ static int vidioc_try_fmt_vid_cap(struct file *file, void *priv,
 	return sun6i_video_try_fmt(video, f);
 }
 
+//XXX: allow to change cameras/media graph setup via this api?
+// probably pointless...
 static int vidioc_enum_input(struct file *file, void *fh,
 			     struct v4l2_input *inp)
 {
@@ -435,6 +449,32 @@ static int vidioc_s_input(struct file *file, void *fh, unsigned int i)
 	return 0;
 }
 
+static int vidioc_g_parm(struct file *file, void *priv,
+			 struct v4l2_streamparm *p)
+{
+	struct sun6i_video *video = video_drvdata(file);
+	struct v4l2_subdev *subdev;
+
+	subdev = sun6i_video_remote_subdev(video, NULL);
+	if (!subdev)
+		return -ENXIO;
+
+	return v4l2_g_parm_cap(video_devdata(file), subdev, p);
+}
+
+static int vidioc_s_parm(struct file *file, void *priv,
+			 struct v4l2_streamparm *p)
+{
+	struct sun6i_video *video = video_drvdata(file);
+	struct v4l2_subdev *subdev;
+
+	subdev = sun6i_video_remote_subdev(video, NULL);
+	if (!subdev)
+		return -ENXIO;
+
+	return v4l2_s_parm_cap(video_devdata(file), subdev, p);
+}
+
 static const struct v4l2_ioctl_ops sun6i_video_ioctl_ops = {
 	.vidioc_querycap		= vidioc_querycap,
 	.vidioc_enum_fmt_vid_cap	= vidioc_enum_fmt_vid_cap,
@@ -445,6 +485,9 @@ static const struct v4l2_ioctl_ops sun6i_video_ioctl_ops = {
 	.vidioc_enum_input		= vidioc_enum_input,
 	.vidioc_s_input			= vidioc_s_input,
 	.vidioc_g_input			= vidioc_g_input,
+
+	.vidioc_g_parm			= vidioc_g_parm,
+	.vidioc_s_parm			= vidioc_s_parm,
 
 	.vidioc_reqbufs			= vb2_ioctl_reqbufs,
 	.vidioc_querybuf		= vb2_ioctl_querybuf,
@@ -531,27 +574,17 @@ static const struct v4l2_file_operations sun6i_video_fops = {
 /* -----------------------------------------------------------------------------
  * Media Operations
  */
-static int sun6i_video_link_validate_get_format(struct media_pad *pad,
-						struct v4l2_subdev_format *fmt)
-{
-	if (is_media_entity_v4l2_subdev(pad->entity)) {
-		struct v4l2_subdev *sd =
-				media_entity_to_v4l2_subdev(pad->entity);
-
-		fmt->which = V4L2_SUBDEV_FORMAT_ACTIVE;
-		fmt->pad = pad->index;
-		return v4l2_subdev_call(sd, pad, get_fmt, NULL, fmt);
-	}
-
-	return -EINVAL;
-}
 
 static int sun6i_video_link_validate(struct media_link *link)
 {
 	struct video_device *vdev = container_of(link->sink->entity,
 						 struct video_device, entity);
+	struct v4l2_subdev *sd =
+			media_entity_to_v4l2_subdev(link->source->entity);
+	struct sun6i_csi_async_subdev* casd =
+			container_of(sd->asd, struct sun6i_csi_async_subdev, asd);
 	struct sun6i_video *video = video_get_drvdata(vdev);
-	struct v4l2_subdev_format source_fmt;
+	struct v4l2_subdev_format source_fmt = {};
 	int ret;
 
 	video->mbus_code = 0;
@@ -562,13 +595,20 @@ static int sun6i_video_link_validate(struct media_link *link)
 		return -ENOLINK;
 	}
 
-	ret = sun6i_video_link_validate_get_format(link->source, &source_fmt);
+	if (!is_media_entity_v4l2_subdev(link->source->entity))
+		return -EINVAL;
+
+	source_fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
+	source_fmt.pad = link->source->index;
+
+	ret = v4l2_subdev_call(sd, pad, get_fmt, NULL, &source_fmt);
 	if (ret < 0)
 		return ret;
 
 	if (!sun6i_csi_is_format_supported(video->csi,
 					   video->fmt.fmt.pix.pixelformat,
-					   source_fmt.format.code)) {
+					   source_fmt.format.code,
+					   &casd->vep)) {
 		dev_err(video->csi->dev,
 			"Unsupported pixformat: 0x%x with mbus code: 0x%x!\n",
 			video->fmt.fmt.pix.pixelformat,
@@ -590,8 +630,21 @@ static int sun6i_video_link_validate(struct media_link *link)
 	return 0;
 }
 
+static int sun6i_video_link_setup(struct media_entity *entity,
+				  const struct media_pad *local,
+				  const struct media_pad *remote, u32 flags)
+{
+        if (flags & MEDIA_LNK_FL_ENABLED) {
+                if (media_entity_remote_pad(local))
+                        return -EBUSY;
+	}
+
+	return 0;
+}
+
 static const struct media_entity_operations sun6i_video_media_ops = {
-	.link_validate = sun6i_video_link_validate
+	.link_validate = sun6i_video_link_validate,
+	.link_setup = sun6i_video_link_setup,
 };
 
 int sun6i_video_init(struct sun6i_video *video, struct sun6i_csi *csi,

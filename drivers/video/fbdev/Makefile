@@ -132,3 +132,7 @@ obj-$(CONFIG_FB_SIMPLE)           += simplefb.o
 
 # the test framebuffer is last
 obj-$(CONFIG_FB_VIRTUAL)          += vfb.o
+
+obj-$(CONFIG_FB_SUN5I_EINK)       += sun5ieink.o
+sun5ieink-objs = sun5i-eink.o sun5i-eink-neon.o
+CFLAGS_sun5i-eink-neon.o	  += -march=armv7-a -mfloat-abi=softfp -mfpu=neon -ffreestanding -isystem $(shell $(CC) -print-file-name=include)

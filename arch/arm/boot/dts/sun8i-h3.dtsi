@@ -44,9 +44,21 @@
 #include <dt-bindings/thermal/thermal.h>
 
 / {
+	aliases {
+		mmc0 = &mmc0;
+		mmc1 = &mmc1;
+		mmc2 = &mmc2;
+	};
+
 	cpu0_opp_table: opp-table-cpu {
 		compatible = "operating-points-v2";
 		opp-shared;
+
+		opp-480000000 {
+			opp-hz = /bits/ 64 <480000000>;
+			opp-microvolt = <1040000 1040000 1300000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+		};
 
 		opp-648000000 {
 			opp-hz = /bits/ 64 <648000000>;
@@ -60,9 +72,39 @@
 			clock-latency-ns = <244144>; /* 8 32k periods */
 		};
 
+		opp-960000000 {
+			opp-hz = /bits/ 64 <960000000>;
+			opp-microvolt = <1200000 1200000 1300000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+		};
+
 		opp-1008000000 {
 			opp-hz = /bits/ 64 <1008000000>;
 			opp-microvolt = <1200000 1200000 1300000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+		};
+
+		opp-1104000000 {
+			opp-hz = /bits/ 64 <1104000000>;
+			opp-microvolt = <1320000 1320000 1320000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+		};
+
+		opp-1200000000 {
+			opp-hz = /bits/ 64 <1200000000>;
+			opp-microvolt = <1320000 1320000 1320000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+		};
+
+		opp-1296000000 {
+			opp-hz = /bits/ 64 <1296000000>;
+			opp-microvolt = <1340000 1340000 1340000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+		};
+
+		opp-1368000000 {
+			opp-hz = /bits/ 64 <1368000000>;
+			opp-microvolt = <1400000 1400000 1400000>;
 			clock-latency-ns = <244144>; /* 8 32k periods */
 		};
 	};
@@ -170,6 +212,19 @@
 			#size-cells = <1>;
 			ranges;
 
+			sram_a2: sram@40000 {
+				compatible = "mmio-sram";
+				reg = <0x00040000 0xc000>;
+				#address-cells = <1>;
+				#size-cells = <1>;
+				ranges = <0 0x00040000 0xc000>;
+
+				scpi_sram: scp-shmem@bc00 {
+					compatible = "arm,scp-shmem";
+					reg = <0xbc00 0x200>;
+				};
+			};
+
 			sram_c: sram@1d00000 {
 				compatible = "mmio-sram";
 				reg = <0x01d00000 0x80000>;
@@ -242,32 +297,74 @@
 	};
 
 	thermal-zones {
-		cpu_thermal: cpu-thermal {
-			polling-delay-passive = <0>;
-			polling-delay = <0>;
-			thermal-sensors = <&ths 0>;
+		cpu_thermal {
+			/* milliseconds */
+			polling-delay-passive = <250>;
+			polling-delay = <1000>;
+			thermal-sensors = <&ths>;
 
 			trips {
-				cpu_hot_trip: cpu-hot {
+				cpu_warm: cpu_warm {
+					temperature = <75000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				cpu_hot_pre: cpu_hot_pre {
 					temperature = <80000>;
 					hysteresis = <2000>;
 					type = "passive";
 				};
 
-				cpu_very_hot_trip: cpu-very-hot {
-					temperature = <100000>;
-					hysteresis = <0>;
+				cpu_hot: cpu_hot {
+					temperature = <85000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				cpu_very_hot_pre: cpu_very_hot_pre {
+					temperature = <90000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				cpu_very_hot: cpu_very_hot {
+					temperature = <95000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				cpu_crit: cpu_crit {
+					temperature = <105000>;
+					hysteresis = <2000>;
 					type = "critical";
 				};
 			};
 
 			cooling-maps {
-				cpu-hot-limit {
-					trip = <&cpu_hot_trip>;
-					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
-							 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
-							 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
-							 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				cpu_warm_limit_cpu {
+					trip = <&cpu_warm>;
+					cooling-device = <&cpu0 THERMAL_NO_LIMIT 2>;
+				};
+
+				cpu_hot_pre_limit_cpu {
+					trip = <&cpu_hot_pre>;
+					cooling-device = <&cpu0 2 3>;
+				};
+
+				cpu_hot_limit_cpu {
+					trip = <&cpu_hot>;
+					cooling-device = <&cpu0 3 4>;
+				};
+
+				cpu_very_hot_pre_limit_cpu {
+					trip = <&cpu_very_hot_pre>;
+					cooling-device = <&cpu0 5 6>;
+				};
+
+				cpu_very_hot_limit_cpu {
+					trip = <&cpu_very_hot>;
+					cooling-device = <&cpu0 7 THERMAL_NO_LIMIT>;
 				};
 			};
 		};
@@ -280,6 +377,10 @@
 
 &display_clocks {
 	compatible = "allwinner,sun8i-h3-de2-clk";
+};
+
+&mbus {
+	compatible = "allwinner,sun8i-h3-mbus";
 };
 
 &mmc0 {

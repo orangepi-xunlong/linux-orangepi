@@ -900,6 +900,14 @@ static int mv64xxx_i2c_init_recovery_info(struct mv64xxx_i2c_data *drv_data,
 		return -ENODEV;
 	}
 
+	if (IS_ERR(pinctrl_lookup_state(rinfo->pinctrl, "gpio")) &&
+		IS_ERR(pinctrl_lookup_state(rinfo->pinctrl, "recovery"))) {
+		/* No recovery state is vailable in pinctrl. */
+		devm_pinctrl_put(rinfo->pinctrl);
+		rinfo->pinctrl = NULL;
+		return 0;
+	}
+
 	drv_data->adapter.bus_recovery_info = rinfo;
 	return 0;
 }

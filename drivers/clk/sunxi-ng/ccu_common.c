@@ -84,6 +84,28 @@ int ccu_pll_notifier_register(struct ccu_pll_nb *pll_nb)
 				     &pll_nb->clk_nb);
 }
 
+static int ccu_rate_reset_notifier_cb(struct notifier_block *nb,
+				      unsigned long event, void *data)
+{
+	struct ccu_rate_reset_nb *rate_reset = to_ccu_rate_reset_nb(nb);
+
+	if (event == PRE_RATE_CHANGE) {
+		rate_reset->saved_rate = clk_get_rate(rate_reset->target_clk);
+	} else if (event == POST_RATE_CHANGE) {
+		clk_set_rate(rate_reset->target_clk, rate_reset->saved_rate);
+	}
+
+	return NOTIFY_DONE;
+}
+
+int ccu_rate_reset_notifier_register(struct ccu_rate_reset_nb *rate_reset_nb)
+{
+	rate_reset_nb->clk_nb.notifier_call = ccu_rate_reset_notifier_cb;
+
+	return clk_notifier_register(rate_reset_nb->common->hw.clk,
+				     &rate_reset_nb->clk_nb);
+}
+
 static int sunxi_ccu_probe(struct sunxi_ccu *ccu, struct device *dev,
 			   struct device_node *node, void __iomem *reg,
 			   const struct sunxi_ccu_desc *desc)

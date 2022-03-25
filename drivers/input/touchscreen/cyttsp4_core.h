@@ -24,6 +24,8 @@
 #include <linux/stringify.h>
 #include <linux/types.h>
 #include <linux/platform_data/cyttsp4.h>
+#include <linux/regulator/consumer.h>
+#include <linux/gpio.h>
 
 #define CY_REG_BASE			0x00
 
@@ -60,7 +62,7 @@ enum cyttsp_cmd_bits {
 };
 
 /* Timeout in ms. */
-#define CY_WATCHDOG_TIMEOUT		1000
+#define CY_WATCHDOG_TIMEOUT		10000
 
 #define CY_MAX_PRINT_SIZE		512
 #ifdef VERBOSE_DEBUG
@@ -305,16 +307,6 @@ struct cyttsp4_sysinfo {
 	u8 *xy_data;			/* operational touch regs */
 };
 
-struct cyttsp4_mt_data {
-	struct cyttsp4_mt_platform_data *pdata;
-	struct cyttsp4_sysinfo *si;
-	struct input_dev *input;
-	struct mutex report_lock;
-	bool is_suspended;
-	char phys[NAME_MAX];
-	int num_prv_tch;
-};
-
 struct cyttsp4 {
 	struct device *dev;
 	struct mutex system_lock;
@@ -324,6 +316,7 @@ struct cyttsp4 {
 	enum cyttsp4_startup_state startup_state;
 	int int_status;
 	wait_queue_head_t wait_q;
+	struct workqueue_struct *wq;
 	int irq;
 	struct work_struct startup_work;
 	struct work_struct watchdog_work;
@@ -333,14 +326,25 @@ struct cyttsp4 {
 	int exclusive_waits;
 	atomic_t ignore_irq;
 	bool invalid_touch_app;
-	struct cyttsp4_mt_data md;
-	struct cyttsp4_platform_data *pdata;
-	struct cyttsp4_core_platform_data *cpdata;
+	struct cyttsp4_sysinfo *si;
+	struct input_dev *input;
+	struct mutex report_lock;
+	bool is_suspended;
+	char phys[NAME_MAX];
+	int num_prv_tch;
 	const struct cyttsp4_bus_ops *bus_ops;
 	u8 *xfer_buf;
 #ifdef VERBOSE_DEBUG
 	u8 pr_buf[CY_MAX_PRBUF_SIZE];
 #endif
+	int flags;
+	int n_signals;
+	struct cyttsp4_signal_def *signals;
+	int n_keys;
+	struct cyttsp4_virtual_key* keys;
+	struct gpio_desc *reset_gpio;
+	struct gpio_desc *power_gpio;
+	struct regulator *vdd_supply;
 };
 
 struct cyttsp4_bus_ops {
@@ -361,32 +365,6 @@ enum cyttsp4_hst_mode_bits {
 	CY_HST_LOWPOW      = (1 << 2),
 	CY_HST_SLEEP       = (1 << 1),
 	CY_HST_RESET       = (1 << 0),
-};
-
-/* abs settings */
-#define CY_IGNORE_VALUE			0xFFFF
-
-/* abs signal capabilities offsets in the frameworks array */
-enum cyttsp4_sig_caps {
-	CY_SIGNAL_OST,
-	CY_MIN_OST,
-	CY_MAX_OST,
-	CY_FUZZ_OST,
-	CY_FLAT_OST,
-	CY_NUM_ABS_SET	/* number of signal capability fields */
-};
-
-/* abs axis signal offsets in the framworks array  */
-enum cyttsp4_sig_ost {
-	CY_ABS_X_OST,
-	CY_ABS_Y_OST,
-	CY_ABS_P_OST,
-	CY_ABS_W_OST,
-	CY_ABS_ID_OST,
-	CY_ABS_MAJ_OST,
-	CY_ABS_MIN_OST,
-	CY_ABS_OR_OST,
-	CY_NUM_ABS_OST	/* number of abs signals */
 };
 
 enum cyttsp4_flags {
@@ -423,6 +401,31 @@ enum cyttsp4_event_id {
 
 /* y-axis, 0:origin is on top side of panel, 1: bottom */
 #define CY_PCFG_ORIGIN_Y_MASK		0x80
+
+/* abs axis signal offsets in the signals array  */
+enum cyttsp4_sig_ost {
+	CY_ABS_X_OST,
+	CY_ABS_Y_OST,
+	CY_ABS_P_OST,
+	CY_ABS_W_OST,
+	CY_ABS_ID_OST,
+	CY_ABS_MAJ_OST,
+	CY_ABS_MIN_OST,
+	CY_ABS_OR_OST,
+	CY_NUM_ABS_OST	/* number of abs signals */
+};
+
+struct cyttsp4_virtual_key {
+	int code;
+};
+
+struct cyttsp4_signal_def {
+	int signal;
+	int min;
+	int max;
+	int fuzz;
+	int flat;
+};
 
 static inline int cyttsp4_adap_read(struct cyttsp4 *ts, u16 addr, int size,
 		void *buf)

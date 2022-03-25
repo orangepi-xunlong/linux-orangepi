@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 // Copyright (C) 2018 Jagan Teki <jagan@openedev.com>
+// Copyright (C) 2021 Igor Pecovnik <igor@armbian.com>
 
 #include "sun50i-h6-orangepi.dtsi"
 
@@ -9,6 +10,16 @@
 
 	aliases {
 		serial1 = &uart1; /* BT-UART */
+	};
+
+	reg_usb_vbus: vbus {
+		compatible = "regulator-fixed";
+		regulator-name = "usb-vbus";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		startup-delay-us = <100000>;
+		gpio = <&r_pio 0 5 GPIO_ACTIVE_HIGH>; /* PL5 USB0-DRVVBUS */
+		enable-active-high;
 	};
 
 	wifi_pwrseq: wifi_pwrseq {
@@ -71,4 +82,19 @@
 		shutdown-gpios = <&r_pio 1 4 GPIO_ACTIVE_HIGH>; /* PM4 */
 		max-speed = <1500000>;
 	};
+};
+
+&spi0 {
+       pinctrl-names = "default";
+       pinctrl-0 = <&spi0_pins>;
+       status = "disabled";
+};
+
+&usb3phy {
+       phy-supply = <&reg_usb_vbus>;
+       status = "okay";
+};
+
+&dwc3 {
+       status = "okay";
 };

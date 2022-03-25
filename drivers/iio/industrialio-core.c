@@ -33,6 +33,16 @@
 #include <linux/iio/buffer.h>
 #include <linux/iio/buffer_impl.h>
 
+static int ignore_mount_matrix = 0;
+
+static int __init ignore_matrix(char *str)
+{
+	ignore_mount_matrix = 1;
+	return 1;
+}
+
+__setup("ignore_mount_matrix", ignore_matrix);
+
 /* IDA to assign each registered device a unique id */
 static DEFINE_IDA(iio_ida);
 
@@ -629,6 +639,7 @@ int iio_read_mount_matrix(struct device *dev, struct iio_mount_matrix *matrix)
 	size_t len = ARRAY_SIZE(iio_mount_idmatrix.rotation);
 	int err;
 
+	if (!ignore_mount_matrix) {
 	err = device_property_read_string_array(dev, "mount-matrix", matrix->rotation, len);
 	if (err == len)
 		return 0;
@@ -640,6 +651,7 @@ int iio_read_mount_matrix(struct device *dev, struct iio_mount_matrix *matrix)
 	if (err != -EINVAL)
 		/* Invalid matrix declaration format. */
 		return err;
+	}
 
 	/* Matrix was not declared at all: fallback to identity. */
 	return iio_setup_mount_idmatrix(dev, matrix);

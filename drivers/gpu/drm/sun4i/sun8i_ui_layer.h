@@ -63,5 +63,6 @@ plane_to_sun8i_ui_layer(struct drm_plane *plane)
 
 struct sun8i_ui_layer *sun8i_ui_layer_init_one(struct drm_device *drm,
 					       struct sun8i_mixer *mixer,
-					       int index);
+					       int index,
+					       enum drm_plane_type type);
 #endif /* _SUN8I_UI_LAYER_H_ */

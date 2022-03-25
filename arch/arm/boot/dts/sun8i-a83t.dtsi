@@ -57,6 +57,12 @@
 	#address-cells = <1>;
 	#size-cells = <1>;
 
+	aliases {
+		mmc0 = &mmc0;
+		mmc1 = &mmc1;
+		mmc2 = &mmc2;
+	};
+
 	cpus {
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -150,6 +156,20 @@
 		};
 	};
 
+	sound_hdmi: sound_hdmi {
+		compatible = "allwinner,sun9i-a80-hdmi-audio",
+			     "allwinner,sun8i-a83t-hdmi-audio";
+		status = "disabled";
+
+		codec {
+			sound-dai = <&hdmi>;
+		};
+
+		cpu {
+			sound-dai = <&i2s2>;
+		};
+	};
+
 	timer {
 		compatible = "arm,armv7-timer";
 		interrupts = <GIC_PPI 13 (GIC_CPU_MASK_SIMPLE(8) | IRQ_TYPE_LEVEL_LOW)>,
@@ -210,45 +230,27 @@
 			clock-latency-ns = <244144>; /* 8 32k periods */
 		};
 
-		opp-600000000 {
-			opp-hz = /bits/ 64 <600000000>;
-			opp-microvolt = <840000>;
-			clock-latency-ns = <244144>; /* 8 32k periods */
-		};
-
-		opp-720000000 {
-			opp-hz = /bits/ 64 <720000000>;
-			opp-microvolt = <840000>;
-			clock-latency-ns = <244144>; /* 8 32k periods */
-		};
-
-		opp-864000000 {
-			opp-hz = /bits/ 64 <864000000>;
-			opp-microvolt = <840000>;
-			clock-latency-ns = <244144>; /* 8 32k periods */
-		};
-
-		opp-912000000 {
-			opp-hz = /bits/ 64 <912000000>;
-			opp-microvolt = <840000>;
-			clock-latency-ns = <244144>; /* 8 32k periods */
-		};
-
 		opp-1008000000 {
 			opp-hz = /bits/ 64 <1008000000>;
 			opp-microvolt = <840000>;
 			clock-latency-ns = <244144>; /* 8 32k periods */
 		};
 
-		opp-1128000000 {
-			opp-hz = /bits/ 64 <1128000000>;
-			opp-microvolt = <840000>;
+		opp-1412000000 {
+			opp-hz = /bits/ 64 <1412000000>;
+			opp-microvolt = <920000>;
 			clock-latency-ns = <244144>; /* 8 32k periods */
 		};
 
-		opp-1200000000 {
-			opp-hz = /bits/ 64 <1200000000>;
-			opp-microvolt = <840000>;
+		opp-1608000000 {
+			opp-hz = /bits/ 64 <1608000000>;
+			opp-microvolt = <1000000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+		};
+
+		opp-1800000000 {
+			opp-hz = /bits/ 64 <1800000000>;
+			opp-microvolt = <1080000>;
 			clock-latency-ns = <244144>; /* 8 32k periods */
 		};
 	};
@@ -263,47 +265,36 @@
 			clock-latency-ns = <244144>; /* 8 32k periods */
 		};
 
-		opp-600000000 {
-			opp-hz = /bits/ 64 <600000000>;
-			opp-microvolt = <840000>;
-			clock-latency-ns = <244144>; /* 8 32k periods */
-		};
-
-		opp-720000000 {
-			opp-hz = /bits/ 64 <720000000>;
-			opp-microvolt = <840000>;
-			clock-latency-ns = <244144>; /* 8 32k periods */
-		};
-
-		opp-864000000 {
-			opp-hz = /bits/ 64 <864000000>;
-			opp-microvolt = <840000>;
-			clock-latency-ns = <244144>; /* 8 32k periods */
-		};
-
-		opp-912000000 {
-			opp-hz = /bits/ 64 <912000000>;
-			opp-microvolt = <840000>;
-			clock-latency-ns = <244144>; /* 8 32k periods */
-		};
-
 		opp-1008000000 {
 			opp-hz = /bits/ 64 <1008000000>;
 			opp-microvolt = <840000>;
 			clock-latency-ns = <244144>; /* 8 32k periods */
 		};
 
-		opp-1128000000 {
-			opp-hz = /bits/ 64 <1128000000>;
-			opp-microvolt = <840000>;
+		opp-1412000000 {
+			opp-hz = /bits/ 64 <1412000000>;
+			opp-microvolt = <920000>;
 			clock-latency-ns = <244144>; /* 8 32k periods */
 		};
 
-		opp-1200000000 {
-			opp-hz = /bits/ 64 <1200000000>;
-			opp-microvolt = <840000>;
+		opp-1608000000 {
+			opp-hz = /bits/ 64 <1608000000>;
+			opp-microvolt = <1000000>;
 			clock-latency-ns = <244144>; /* 8 32k periods */
 		};
+
+		opp-1800000000 {
+			opp-hz = /bits/ 64 <1800000000>;
+			opp-microvolt = <1080000>;
+			clock-latency-ns = <244144>; /* 8 32k periods */
+		};
+	};
+
+	scpi_protocol: scpi {
+		compatible = "arm,scpi";
+		mboxes = <&msgbox 0>, <&msgbox 1>;
+		mbox-names = "tx", "rx";
+		shmem = <&scpi_sram>;
 	};
 
 	soc {
@@ -439,6 +430,33 @@
 			compatible = "allwinner,sun8i-a83t-system-controller",
 				"syscon";
 			reg = <0x01c00000 0x1000>;
+                        #address-cells = <1>;
+                        #size-cells = <1>;
+                        ranges;
+
+			sram_a2: sram@40000 {
+				compatible = "mmio-sram";
+				reg = <0x00040000 0x14000>;
+				#address-cells = <1>;
+				#size-cells = <1>;
+				ranges = <0 0x00040000 0x14000>;
+
+				scpi_sram: scp-shmem@13c00 {
+					compatible = "arm,scp-shmem";
+					reg = <0x13e00 0x200>;
+				};
+			};
+
+		};
+
+		video-codec@01c0e000 {
+			compatible = "allwinner,sun8i-a83t-video-engine";
+			reg = <0x01c0e000 0x1000>;
+			clocks = <&ccu CLK_BUS_VE>, <&ccu CLK_VE>,
+				 <&ccu CLK_DRAM_VE>;
+			clock-names = "ahb", "mod", "ram";
+			resets = <&ccu RST_BUS_VE>;
+			interrupts = <GIC_SPI 58 IRQ_TYPE_LEVEL_HIGH>;
 		};
 
 		dma: dma-controller@1c02000 {
@@ -702,6 +720,7 @@
 			reg = <0x01c20000 0x400>;
 			clocks = <&osc24M>, <&osc16Md512>;
 			clock-names = "hosc", "losc";
+			protected-clocks = <CLK_BUS_MSGBOX>;
 			#clock-cells = <1>;
 			#reset-cells = <1>;
 		};
@@ -819,6 +838,11 @@
 				function = "spdif";
 			};
 
+			i2s0_pins: i2s0-pins {
+				pins = "PB4", "PB5", "PB6", "PB7", "PB8";
+				function = "i2s0";
+			};
+
 			uart0_pb_pins: uart0-pb-pins {
 				pins = "PB9", "PB10";
 				function = "uart0";
@@ -933,6 +957,7 @@
 			interrupts = <GIC_SPI 0 IRQ_TYPE_LEVEL_HIGH>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
+			fifo-size = <64>;
 			clocks = <&ccu CLK_BUS_UART0>;
 			resets = <&ccu RST_BUS_UART0>;
 			status = "disabled";
@@ -944,6 +969,7 @@
 			interrupts = <GIC_SPI 1 IRQ_TYPE_LEVEL_HIGH>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
+			fifo-size = <64>;
 			clocks = <&ccu CLK_BUS_UART1>;
 			resets = <&ccu RST_BUS_UART1>;
 			status = "disabled";
@@ -955,6 +981,7 @@
 			interrupts = <GIC_SPI 2 IRQ_TYPE_LEVEL_HIGH>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
+			fifo-size = <64>;
 			clocks = <&ccu CLK_BUS_UART2>;
 			resets = <&ccu RST_BUS_UART2>;
 			status = "disabled";
@@ -966,6 +993,7 @@
 			interrupts = <GIC_SPI 3 IRQ_TYPE_LEVEL_HIGH>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
+			fifo-size = <64>;
 			clocks = <&ccu CLK_BUS_UART3>;
 			resets = <&ccu RST_BUS_UART3>;
 			status = "disabled";
@@ -977,6 +1005,7 @@
 			interrupts = <GIC_SPI 4 IRQ_TYPE_LEVEL_HIGH>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
+			fifo-size = <64>;
 			clocks = <&ccu CLK_BUS_UART4>;
 			resets = <&ccu RST_BUS_UART4>;
 			status = "disabled";
@@ -1041,6 +1070,21 @@
 			};
 		};
 
+		mbus: dram-controller@1c62000 {
+			compatible = "allwinner,sun8i-a83t-mbus";
+			reg = <0x01c62000 0x1000>,
+			      <0x01c63000 0x1000>;
+			reg-names = "mbus", "dram";
+			clocks = <&ccu CLK_BUS_DRAM>,
+				 <&ccu CLK_DRAM>,
+				 <&ccu CLK_MBUS>;
+			clock-names = "apb", "dram", "mbus";
+			#address-cells = <1>;
+			#size-cells = <1>;
+			dma-ranges = <0x00000000 0x40000000 0xc0000000>;
+			#interconnect-cells = <1>;
+		};
+
 		gic: interrupt-controller@1c81000 {
 			compatible = "arm,gic-400";
 			reg = <0x01c81000 0x1000>,
@@ -1065,6 +1109,7 @@
 		};
 
 		hdmi: hdmi@1ee0000 {
+			#sound-dai-cells = <0>;
 			compatible = "allwinner,sun8i-a83t-dw-hdmi";
 			reg = <0x01ee0000 0x10000>;
 			reg-io-width = <1>;
@@ -1123,6 +1168,7 @@
 			clocks = <&osc24M>, <&osc16Md512>, <&osc16M>,
 				 <&ccu CLK_PLL_PERIPH>;
 			clock-names = "hosc", "losc", "iosc", "pll-periph";
+			protected-clocks = <CLK_APB0_TWD>;
 			#clock-cells = <1>;
 			#reset-cells = <1>;
 		};

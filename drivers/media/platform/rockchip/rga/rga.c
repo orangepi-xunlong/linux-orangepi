@@ -815,8 +815,10 @@ static int rga_probe(struct platform_device *pdev)
 	mutex_init(&rga->mutex);
 
 	ret = rga_parse_dt(rga);
-	if (ret)
+	if (ret) {
 		dev_err(&pdev->dev, "Unable to parse OF data\n");
+		return ret;
+	}
 
 	pm_runtime_enable(rga->dev);
 
@@ -892,7 +894,7 @@ static int rga_probe(struct platform_device *pdev)
 	}
 	rga->dst_mmu_pages =
 		(unsigned int *)__get_free_pages(GFP_KERNEL | __GFP_ZERO, 3);
-	if (rga->dst_mmu_pages) {
+	if (!rga->dst_mmu_pages) {
 		ret = -ENOMEM;
 		goto free_src_pages;
 	}

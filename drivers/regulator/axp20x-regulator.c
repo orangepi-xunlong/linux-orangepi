@@ -93,6 +93,8 @@
 #define AXP22X_WORKMODE_DCDCX_MASK(x)	BIT_MASK(x)
 
 #define AXP22X_MISC_N_VBUSEN_FUNC	BIT(4)
+#define AXP22X_MISC_16S_RESET_FUNC	BIT(3)
+#define AXP22X_MISC_OTP			BIT(2)
 
 #define AXP22X_DCDC1_V_OUT_MASK		GENMASK(4, 0)
 #define AXP22X_DCDC2_V_OUT_MASK		GENMASK(5, 0)
@@ -1344,18 +1346,55 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 						&dcdc5_name);
 	}
 
+	if (!drivevbus &&
+	    of_property_read_bool(pdev->dev.parent->of_node, "x-powers,sense-vbus-en")) {
+		/* make N_VBUSEN an input */
+		regmap_update_bits(axp20x->regmap, AXP20X_OVER_TMP,
+				   AXP22X_MISC_N_VBUSEN_FUNC,
+				   AXP22X_MISC_N_VBUSEN_FUNC);
+	}
+
 	if (drivevbus) {
+		struct regulator_desc *new_desc;
+		bool drivevbus_vin = false;
+		struct device_node *nr, *nd;
+
+		nr = of_get_child_by_name(pdev->dev.parent->of_node, "regulators");
+		if (nr) {
+			nd = of_get_child_by_name(nr, "drivevbus");
+			if (nd) {
+				drivevbus_vin = !!of_find_property(nd, "vin-supply", NULL);
+				of_node_put(nd);
+			}
+
+			of_node_put(nr);
+		}
+
+		new_desc = devm_kzalloc(&pdev->dev, sizeof(*new_desc), GFP_KERNEL);
+		if (!new_desc)
+			return -ENOMEM;
+
+		*new_desc = axp22x_drivevbus_regulator;
+
+		if (drivevbus_vin) {
+			new_desc->supply_name = "vin";
+			dev_info(&pdev->dev, "drivevbus has vin\n");
+		}
+
 		/* Change N_VBUSEN sense pin to DRIVEVBUS output pin */
 		regmap_update_bits(axp20x->regmap, AXP20X_OVER_TMP,
 				   AXP22X_MISC_N_VBUSEN_FUNC, 0);
-		rdev = devm_regulator_register(&pdev->dev,
-					       &axp22x_drivevbus_regulator,
-					       &config);
+		rdev = devm_regulator_register(&pdev->dev, new_desc, &config);
 		if (IS_ERR(rdev)) {
 			dev_err(&pdev->dev, "Failed to register drivevbus\n");
 			return PTR_ERR(rdev);
 		}
 	}
+
+	// enable 16s power-on reset and over-temperature protection
+	regmap_update_bits(axp20x->regmap, AXP20X_OVER_TMP,
+			   AXP22X_MISC_16S_RESET_FUNC | AXP22X_MISC_OTP,
+			   AXP22X_MISC_16S_RESET_FUNC | AXP22X_MISC_OTP);
 
 	return 0;
 }

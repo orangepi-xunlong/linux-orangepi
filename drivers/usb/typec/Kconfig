@@ -52,6 +52,17 @@ source "drivers/usb/typec/ucsi/Kconfig"
 
 source "drivers/usb/typec/tipd/Kconfig"
 
+config TYPEC_ANX7688
+	tristate "Analogix ANX7688 Type-C DRP Port controller and mux driver"
+	depends on I2C
+	depends on USB_ROLE_SWITCH
+	help
+	  Say Y or M here if your system has Analogix ANX7688 Type-C Bridge
+	  controller driver.
+
+	  If you choose to build this driver as a dynamically linked module, the
+	  module will be called anx7688.ko.
+
 config TYPEC_HD3SS3220
 	tristate "TI HD3SS3220 Type-C DRP Port controller driver"
 	depends on I2C
@@ -87,6 +98,13 @@ config TYPEC_QCOM_PMIC
 
 	  It will also enable the VBUS output to connected devices when a
 	  DFP connection is made.
+
+config TYPEC_EXTCON
+	tristate "Type-C switch/mux -> extcon interface bridge driver"
+	depends on USB_ROLE_SWITCH
+	help
+	  Say Y or M here if your system needs bridging between typec class
+	  and extcon interfaces.
 
 source "drivers/usb/typec/mux/Kconfig"
 

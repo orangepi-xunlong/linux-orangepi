@@ -10,8 +10,11 @@
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/leds/common.h>
 #include <dt-bindings/pwm/pwm.h>
+#include <dt-bindings/usb/pd.h>
 
 / {
+	chassis-type = "handset";
+
 	aliases {
 		ethernet0 = &rtl8723cs;
 		serial0 = &uart0;
@@ -25,13 +28,179 @@
 		/* Backlight configuration differs per PinePhone revision. */
 	};
 
+        bat: battery {
+                compatible = "simple-battery";
+                voltage-min-design-microvolt = <3000000>;
+                voltage-max-design-microvolt = <4350000>;
+                energy-full-design-microwatt-hours = <12000000>;
+                charge-full-design-microamp-hours = <2750000>;
+                precharge-current-microamp = <130000>;
+                charge-term-current-microamp = <50000>;
+                constant-charge-current-max-microamp = <1300000>;
+                constant-charge-voltage-max-microvolt = <4350000>;
+                factory-internal-resistance-micro-ohms = <150000>;
+                resistance-temp-table = <20 150>;
+                ocv-capacity-celsius = <20>;
+                ocv-capacity-table-0 =
+                	<4334000 100>,
+			<4319700 99>,
+			<4304300 98>,
+			<4292200 97>,
+			<4280100 96>,
+			<4269100 95>,
+			<4253700 94>,
+			<4242700 93>,
+			<4232800 92>,
+			<4222900 91>,
+			<4211900 90>,
+			<4203100 89>,
+			<4192100 88>,
+			<4177800 87>,
+			<4167900 86>,
+			<4155800 85>,
+			<4147000 84>,
+			<4136000 83>,
+			<4126100 82>,
+			<4111800 81>,
+			<4102999 80>,
+			<4093100 79>,
+			<4084300 78>,
+			<4075500 77>,
+			<4064500 76>,
+			<4054600 75>,
+			<4042500 74>,
+			<4035900 73>,
+			<4029300 72>,
+			<4018300 71>,
+			<4006200 70>,
+			<3993000 69>,
+			<3974300 68>,
+			<3964400 67>,
+			<3956700 66>,
+			<3949000 65>,
+			<3943500 64>,
+			<3938000 63>,
+			<3931400 62>,
+			<3923700 61>,
+			<3917100 60>,
+			<3903900 59>,
+			<3895100 58>,
+			<3887400 57>,
+			<3878600 56>,
+			<3870900 55>,
+			<3863200 54>,
+			<3855500 53>,
+			<3848900 52>,
+			<3837900 51>,
+			<3830200 50>,
+			<3825800 49>,
+			<3821400 48>,
+			<3815900 47>,
+			<3810400 46>,
+			<3806000 45>,
+			<3801600 44>,
+			<3797200 43>,
+			<3792800 42>,
+			<3789500 41>,
+			<3786200 40>,
+			<3781800 39>,
+			<3778500 38>,
+			<3775200 37>,
+			<3770800 36>,
+			<3764200 35>,
+			<3760900 34>,
+			<3758700 33>,
+			<3755400 32>,
+			<3754300 31>,
+			<3752100 30>,
+			<3748800 29>,
+			<3749900 28>,
+			<3745500 27>,
+			<3742200 26>,
+			<3741100 25>,
+			<3737800 24>,
+			<3734500 23>,
+			<3731200 22>,
+			<3730100 21>,
+			<3724600 20>,
+			<3722400 19>,
+			<3718000 18>,
+			<3713600 17>,
+			<3708100 16>,
+			<3701500 15>,
+			<3689400 14>,
+			<3682800 13>,
+			<3674000 12>,
+			<3666300 11>,
+			<3659700 10>,
+			<3653100 9>,
+			<3647600 8>,
+			<3641000 7>,
+			<3625600 6>,
+			<3613500 5>,
+			<3591500 4>,
+			<3554100 3>,
+			<3489200 2>,
+			<3393500 1>,
+			<3256000 0>;
+                x-powers,ocv-capacity-table =
+                	<0xc0 0>,
+			<0xc1 1>,
+			<0xc2 1>,
+			<0xc3 2>,
+			<0xc4 2>,
+			<0xc5 4>,
+			<0xc6 4>,
+			<0xc7 5>,
+			<0xc8 6>,
+			<0xc9 8>,
+			<0xca 11>,
+			<0xcb 15>,
+			<0xcc 22>,
+			<0xcd 36>,
+			<0xce 44>,
+			<0xcf 48>,
+			<0xd0 51>,
+			<0xd1 53>,
+			<0xd2 56>,
+			<0xd3 60>,
+			<0xd4 64>,
+			<0xd5 69>,
+			<0xd6 71>,
+			<0xd7 75>,
+			<0xd8 78>,
+			<0xd9 82>,
+			<0xda 84>,
+			<0xdb 85>,
+			<0xdc 88>,
+			<0xdd 92>,
+			<0xde 95>,
+			<0xdf 98>;
+        };
+
 	bt_sco_codec: bt-sco-codec {
 		#sound-dai-cells = <1>;
 		compatible = "linux,bt-sco";
+		sound-name-prefix = "Bluetooth";
 	};
 
 	chosen {
 		stdout-path = "serial0:115200n8";
+	};
+
+	ec25_codec: ec25-codec {
+		#sound-dai-cells = <1>;
+		compatible = "quectel,ec25";
+		sound-name-prefix = "Modem";
+	};
+
+	i2c_csi: i2c-csi {
+		compatible = "i2c-gpio";
+		sda-gpios = <&pio 4 13 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>; /* PE13 */
+		scl-gpios = <&pio 4 12 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>; /* PE12 */
+		i2c-gpio,delay-us = <3>;
+		#address-cells = <1>;
+		#size-cells = <0>;
 	};
 
 	leds {
@@ -41,19 +210,40 @@
 			function = LED_FUNCTION_INDICATOR;
 			color = <LED_COLOR_ID_BLUE>;
 			gpios = <&pio 3 20 GPIO_ACTIVE_HIGH>; /* PD20 */
+			retain-state-suspended;
 		};
 
 		led-1 {
 			function = LED_FUNCTION_INDICATOR;
 			color = <LED_COLOR_ID_GREEN>;
 			gpios = <&pio 3 18 GPIO_ACTIVE_HIGH>; /* PD18 */
+			retain-state-suspended;
 		};
 
 		led-2 {
 			function = LED_FUNCTION_INDICATOR;
 			color = <LED_COLOR_ID_RED>;
 			gpios = <&pio 3 19 GPIO_ACTIVE_HIGH>; /* PD19 */
+			retain-state-suspended;
 		};
+	};
+
+	hdmi-connector {
+		compatible = "hdmi-connector";
+		type = "a";
+
+		port {
+			hdmi_con_in: endpoint {
+				remote-endpoint = <&hdmi_out_con>;
+			};
+		};
+	};
+
+	reg_anx1v0: anx1v0 {
+		compatible = "regulator-fixed";
+		regulator-name = "anx1v0";
+		regulator-min-microvolt = <1000000>;
+		regulator-max-microvolt = <1000000>;
 	};
 
 	reg_ps: ps-regulator {
@@ -64,11 +254,39 @@
 		regulator-boot-on;
 	};
 
+	reg_usb_5v: usb-5v {
+		compatible = "regulator-fixed";
+		regulator-name = "usb-5v";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		gpio = <&pio 3 8 GPIO_ACTIVE_HIGH>; /* PD8 */
+		enable-active-high;
+	};
+
+	reg_vbat_bb: vbat-bb {
+		compatible = "regulator-fixed";
+		regulator-name = "vbat-bb";
+		regulator-min-microvolt = <3500000>;
+		regulator-max-microvolt = <3500000>;
+		gpio = <&r_pio 0 7 GPIO_ACTIVE_HIGH>; /* PL7 */
+		enable-active-high;
+	};
+
 	reg_vbat_wifi: vbat-wifi {
 		compatible = "regulator-fixed";
 		regulator-min-microvolt = <3300000>;
 		regulator-max-microvolt = <3300000>;
 		regulator-name = "vbat-wifi";
+	};
+
+	/* This is a charge pump for CC1 and CC2 pins on USB-C connector. */
+	reg_vconn5v0: vconn5v0 {
+		compatible = "regulator-fixed";
+		regulator-name = "vconn5v0";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		gpio = <&pio 3 9 GPIO_ACTIVE_HIGH>; /* PD9 */
+		enable-active-high;
 	};
 
 	sgm3140: led-controller {
@@ -80,6 +298,34 @@
 			color = <LED_COLOR_ID_WHITE>;
 			flash-max-timeout-us = <250000>;
 		};
+	};
+
+	/* PinePhone specific reboot modes for p-boot. */
+	reboot-mode {
+		compatible = "nvmem-reboot-mode";
+		nvmem-cells = <&reboot_mode>;
+		nvmem-cell-names = "reboot-mode";
+
+		mode-normal     = <0x0>;
+		mode-fel        = <0xb0010fe1>;
+		mode-emmc-egon  = <0xb001e33c>;
+		mode-sd1        = <0xb0010020>;
+		mode-sd2        = <0xb0010021>;
+		mode-sd3        = <0xb0010022>;
+		mode-sd4        = <0xb0010023>;
+		mode-sd5        = <0xb0010024>;
+		mode-sd6        = <0xb0010025>;
+		mode-sd7        = <0xb0010026>;
+		mode-sd8        = <0xb0010027>;
+		mode-emmc1      = <0xb0010000>;
+		mode-emmc2      = <0xb0010001>;
+		mode-emmc3      = <0xb0010002>;
+		mode-emmc4      = <0xb0010003>;
+		mode-emmc5      = <0xb0010004>;
+		mode-emmc6      = <0xb0010005>;
+		mode-emmc7      = <0xb0010006>;
+		mode-emmc8      = <0xb0010007>;
+		mode-menu       = <0xb00100ff>;
 	};
 
 	speaker_amp: audio-amplifier {
@@ -97,7 +343,7 @@
 
 &codec {
 	pinctrl-names = "default";
-	pinctrl-0 = <&aif3_pins>;
+	pinctrl-0 = <&aif2_pins>, <&aif3_pins>;
 	status = "okay";
 };
 
@@ -120,6 +366,36 @@
 
 &cpu3 {
 	cpu-supply = <&reg_dcdc2>;
+};
+
+&csi {
+	pinctrl-0 = <&csi_pins>, <&csi_mclk_pin>;
+	status = "okay";
+
+	port {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		csi_ov5640_ep: endpoint@0 {
+			reg = <0>;
+			remote-endpoint = <&ov5640_ep>;
+			bus-width = <8>;
+			hsync-active = <1>; /* Active high */
+			vsync-active = <0>; /* Active low */
+			data-active = <1>;  /* Active high */
+			pclk-sample = <1>;  /* Rising */
+		};
+
+		csi_gc2145_ep: endpoint@1 {
+			reg = <1>;
+			remote-endpoint = <&gc2145_ep>;
+			bus-width = <8>;
+			hsync-active = <1>;
+			vsync-active = <1>;
+			data-active = <1>;
+			pclk-sample = <1>;
+		};
+	};
 };
 
 &dai {
@@ -156,8 +432,74 @@
 	status = "okay";
 };
 
+&hdmi {
+	hvcc-supply = <&reg_dldo1>;
+	status = "okay";
+};
+
+&hdmi_out {
+	hdmi_out_con: endpoint {
+		remote-endpoint = <&hdmi_con_in>;
+	};
+};
+
+&sound_hdmi {
+	status = "okay";
+};
+
+&i2c_csi {
+	gc2145: front-camera@3c {
+		compatible = "galaxycore,gc2145";
+		reg = <0x3c>;
+		clocks = <&ccu CLK_CSI_MCLK>;
+		clock-names = "xclk";
+
+		AVDD-supply = <&reg_dldo3>;
+		DVDD-supply = <&reg_aldo1>;
+		IOVDD-supply = <&reg_eldo3>;
+		reset-gpios = <&pio 4 16 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>; /* PE16 */
+		enable-gpios = <&pio 4 17 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>; /* PE17 */
+
+		port {
+			gc2145_ep: endpoint {
+				remote-endpoint = <&csi_gc2145_ep>;
+				bus-width = <8>;
+				hsync-active = <1>;
+				vsync-active = <1>;
+				data-active = <1>;
+				pclk-sample = <1>;
+			};
+		};
+	};
+
+	ov5640: rear-camera@4c {
+		compatible = "ovti,ov5640";
+		reg = <0x4c>;
+		clocks = <&ccu CLK_CSI_MCLK>;
+		clock-names = "xclk";
+
+		AVDD-supply = <&reg_dldo3>;
+		DOVDD-supply = <&reg_aldo1>; /* shared with AFVCC */
+		DVDD-supply = <&reg_eldo3>;
+		reset-gpios = <&pio 3 3 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>; /* PD3 */
+		powerdown-gpios = <&pio 2 0 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>; /* PC0 */
+
+		port {
+			ov5640_ep: endpoint {
+				remote-endpoint = <&csi_ov5640_ep>;
+				bus-width = <8>;
+				hsync-active = <1>; /* Active high */
+				vsync-active = <0>; /* Active low */
+				data-active = <1>;  /* Active high */
+				pclk-sample = <1>;  /* Rising */
+			};
+		};
+	};
+};
+
 &i2c0 {
 	status = "okay";
+	clock-frequency = <400000>;
 
 	touchscreen@5d {
 		compatible = "goodix,gt917s";
@@ -170,11 +512,13 @@
 		VDDIO-supply = <&reg_ldo_io0>;
 		touchscreen-size-x = <720>;
 		touchscreen-size-y = <1440>;
+		poweroff-in-suspend;
 	};
 };
 
 &i2c1 {
 	status = "okay";
+	clock-frequency = <400000>;
 
 	/* Magnetometer */
 	lis3mdl: magnetometer@1e {
@@ -200,17 +544,33 @@
 		interrupts = <7 5 IRQ_TYPE_EDGE_RISING>; /* PH5 */
 		vdd-supply = <&reg_dldo1>;
 		vddio-supply = <&reg_dldo1>;
+		mount-matrix = "0", "1", "0",
+				"-1", "0", "0",
+				"0", "0", "-1";
 	};
 };
 
 /* Connected to pogo pins (external spring based pinheader for user addons) */
 &i2c2 {
 	status = "okay";
+
+	keyboard@15 {
+		compatible = "pine64,kb151";
+		reg = <0x15>;
+		interrupt-parent = <&r_pio>;
+		interrupts = <0 12 IRQ_TYPE_EDGE_FALLING>; /* PL12 */
+		vbat-supply = <&reg_usb_5v>;
+		wakeup-source;
+	};
+};
+
+&i2s2 {
+	status = "okay";
 };
 
 &lradc {
 	vref-supply = <&reg_aldo3>;
-	wakeup-source;
+//	wakeup-source;
 	status = "okay";
 
 	button-200 {
@@ -236,6 +596,7 @@
 	cd-gpios = <&pio 5 6 GPIO_ACTIVE_LOW>; /* PF6 */
 	disable-wp;
 	bus-width = <4>;
+	post-power-on-delay-ms = <1>; /* power is already turned on by the bootloader */
 	status = "okay";
 };
 
@@ -246,10 +607,14 @@
 	vqmmc-supply = <&reg_dldo4>;
 	bus-width = <4>;
 	non-removable;
+	post-power-on-delay-ms = <1>; /* wifi power is always on */
 	status = "okay";
+	keep-power-in-suspend;
 
 	rtl8723cs: wifi@1 {
 		reg = <1>;
+		interrupt-parent = <&r_pio>;
+		interrupts = <0 3 IRQ_TYPE_EDGE_FALLING>; /* PL3 */
 	};
 };
 
@@ -261,6 +626,7 @@
 	bus-width = <8>;
 	non-removable;
 	cap-mmc-hw-reset;
+	post-power-on-delay-ms = <1>; /* power is already turned on by the bootloader */
 	status = "okay";
 };
 
@@ -311,6 +677,7 @@
 
 &battery_power_supply {
 	status = "okay";
+	monitored-battery = <&bat>;
 };
 
 &reg_aldo1 {
@@ -431,6 +798,15 @@
 	regulator-name = "vcc-rtc";
 };
 
+&rtc {
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	reboot_mode: reboot-mode@4 {
+		reg = <0x4 0x4>;
+	};
+};
+
 &sound {
 	status = "okay";
 	simple-audio-card,name = "PinePhone";
@@ -455,6 +831,23 @@
 			"MIC1", "Internal Microphone",
 			"Headset Microphone", "HBIAS",
 			"MIC2", "Headset Microphone";
+
+	simple-audio-card,dai-link@1 {
+		format = "dsp_a";
+		frame-master = <&link1_codec>;
+		bitclock-master = <&link1_codec>;
+		bitclock-inversion;
+
+		link1_cpu: cpu {
+			sound-dai = <&ec25_codec 0>;
+		};
+
+		link1_codec: codec {
+			sound-dai = <&codec 1>;
+			dai-tdm-slot-num = <1>;
+			dai-tdm-slot-width = <32>;
+		};
+	};
 
 	simple-audio-card,dai-link@2 {
 		format = "dsp_a";
@@ -501,7 +894,7 @@
 };
 
 &usb_otg {
-	dr_mode = "peripheral";
+	dr_mode = "otg";
 	status = "okay";
 };
 

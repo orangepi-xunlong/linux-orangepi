@@ -58,6 +58,8 @@ enum v4l2_mpeg_video_hevc_start_code {
 /* The controls are not stable at the moment and will likely be reworked. */
 struct v4l2_ctrl_hevc_sps {
 	/* ISO/IEC 23008-2, ITU-T Rec. H.265: Sequence parameter set */
+	__u8	video_parameter_set_id;
+	__u8	seq_parameter_set_id;
 	__u16	pic_width_in_luma_samples;
 	__u16	pic_height_in_luma_samples;
 	__u8	bit_depth_luma_minus8;
@@ -80,6 +82,9 @@ struct v4l2_ctrl_hevc_sps {
 	__u8	num_long_term_ref_pics_sps;
 	__u8	chroma_format_idc;
 	__u8	sps_max_sub_layers_minus1;
+
+	__u8	num_slices;
+	__u8	padding[5];
 
 	__u64	flags;
 };
@@ -108,6 +113,7 @@ struct v4l2_ctrl_hevc_sps {
 
 struct v4l2_ctrl_hevc_pps {
 	/* ISO/IEC 23008-2, ITU-T Rec. H.265: Picture parameter set */
+	__u8	pic_parameter_set_id;
 	__u8	num_extra_slice_header_bits;
 	__u8	num_ref_idx_l0_default_active_minus1;
 	__u8	num_ref_idx_l1_default_active_minus1;
@@ -123,7 +129,7 @@ struct v4l2_ctrl_hevc_pps {
 	__s8	pps_tc_offset_div2;
 	__u8	log2_parallel_merge_level_minus2;
 
-	__u8	padding[4];
+	__u8	padding;
 	__u64	flags;
 };
 
@@ -202,7 +208,12 @@ struct v4l2_ctrl_hevc_slice_params {
 	__u8	ref_idx_l0[V4L2_HEVC_DPB_ENTRIES_NUM_MAX];
 	__u8	ref_idx_l1[V4L2_HEVC_DPB_ENTRIES_NUM_MAX];
 
-	__u8	padding;
+	__u16	short_term_ref_pic_set_size;
+	__u16	long_term_ref_pic_set_size;
+
+	__u32	num_entry_point_offsets;
+	__u32	entry_point_offset_minus1[256];
+	__u8	padding[8];
 
 	/* ISO/IEC 23008-2, ITU-T Rec. H.265: Weighted prediction parameter */
 	struct v4l2_hevc_pred_weight_table pred_weight_table;

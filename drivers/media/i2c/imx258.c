@@ -79,7 +79,9 @@
 #define REG_CONFIG_FLIP_TEST_PATTERN	0x02
 
 /* Input clock frequency in Hz */
+#define IMX258_INPUT_CLOCK_FREQ_MIN	19000000
 #define IMX258_INPUT_CLOCK_FREQ		19200000
+#define IMX258_INPUT_CLOCK_FREQ_MAX	19400000
 
 struct imx258_reg {
 	u16 address;
@@ -600,6 +602,15 @@ static const struct imx258_mode supported_modes[] = {
 	},
 };
 
+/* regulator supplies */
+static const char * const imx258_supply_names[] = {
+	"vana", /* Analog (2.8V) supply */
+	"vdig", /* Digital Core (1.5V) supply */
+	"vif",  /* Digital I/O (1.8V) supply */
+};
+
+#define IMX258_SUPPLY_COUNT ARRAY_SIZE(imx258_supply_names)
+
 struct imx258 {
 	struct v4l2_subdev sd;
 	struct media_pad pad;
@@ -611,6 +622,10 @@ struct imx258 {
 	struct v4l2_ctrl *vblank;
 	struct v4l2_ctrl *hblank;
 	struct v4l2_ctrl *exposure;
+
+	struct gpio_desc *pwdn_gpio;
+	struct gpio_desc *reset_gpio;
+	struct regulator_bulk_data supplies[IMX258_SUPPLY_COUNT];
 
 	/* Current mode */
 	const struct imx258_mode *cur_mode;
@@ -1010,11 +1025,32 @@ static int imx258_power_on(struct device *dev)
 	struct imx258 *imx258 = to_imx258(sd);
 	int ret;
 
-	ret = clk_prepare_enable(imx258->clk);
-	if (ret)
-		dev_err(dev, "failed to enable clock\n");
+	ret = regulator_bulk_enable(IMX258_SUPPLY_COUNT, imx258->supplies);
+	if (ret) {
+		dev_err(dev, "failed to enable regulators\n");
+		return ret;
+	}
 
-	return ret;
+	mdelay(20);
+
+	gpiod_set_value_cansleep(imx258->pwdn_gpio, 0);
+
+	mdelay(5);
+
+	ret = clk_prepare_enable(imx258->clk);
+	if (ret) {
+		dev_err(dev, "failed to enable clock\n");
+		regulator_bulk_disable(IMX258_SUPPLY_COUNT, imx258->supplies);
+		return ret;
+	}
+
+	usleep_range(1000, 2000);
+
+	gpiod_set_value_cansleep(imx258->reset_gpio, 0);
+
+	usleep_range(400, 500);
+
+	return 0;
 }
 
 static int imx258_power_off(struct device *dev)
@@ -1023,6 +1059,11 @@ static int imx258_power_off(struct device *dev)
 	struct imx258 *imx258 = to_imx258(sd);
 
 	clk_disable_unprepare(imx258->clk);
+
+	gpiod_set_value_cansleep(imx258->reset_gpio, 1);
+	gpiod_set_value_cansleep(imx258->pwdn_gpio, 1);
+
+	regulator_bulk_disable(IMX258_SUPPLY_COUNT, imx258->supplies);
 
 	return 0;
 }
@@ -1252,7 +1293,7 @@ static void imx258_free_controls(struct imx258 *imx258)
 static int imx258_probe(struct i2c_client *client)
 {
 	struct imx258 *imx258;
-	int ret;
+	int ret, i;
 	u32 val = 0;
 
 	imx258 = devm_kzalloc(&client->dev, sizeof(*imx258), GFP_KERNEL);
@@ -1271,8 +1312,11 @@ static int imx258_probe(struct i2c_client *client)
 	} else {
 		val = clk_get_rate(imx258->clk);
 	}
-	if (val != IMX258_INPUT_CLOCK_FREQ) {
-		dev_err(&client->dev, "input clock frequency not supported\n");
+
+	if (val < IMX258_INPUT_CLOCK_FREQ_MIN
+		|| val > IMX258_INPUT_CLOCK_FREQ_MAX) {
+		dev_err(&client->dev, "input clock frequency %u not supported\n",
+			val);
 		return -EINVAL;
 	}
 
@@ -1283,6 +1327,26 @@ static int imx258_probe(struct i2c_client *client)
 	ret = device_property_read_u32(&client->dev, "rotation", &val);
 	if (ret || val != 180)
 		return -EINVAL;
+
+	for (i = 0; i < IMX258_SUPPLY_COUNT; i++)
+		imx258->supplies[i].supply = imx258_supply_names[i];
+	ret = devm_regulator_bulk_get(&client->dev,
+				      IMX258_SUPPLY_COUNT,
+				      imx258->supplies);
+	if (ret)
+		return dev_err_probe(&client->dev, ret, "Failed to get supplies\n");
+
+	/* request optional power down pin */
+	imx258->pwdn_gpio = devm_gpiod_get_optional(&client->dev, "powerdown",
+						    GPIOD_OUT_HIGH);
+	if (IS_ERR(imx258->pwdn_gpio))
+		return PTR_ERR(imx258->pwdn_gpio);
+
+	/* request optional reset pin */
+	imx258->reset_gpio = devm_gpiod_get_optional(&client->dev, "reset",
+						    GPIOD_OUT_HIGH);
+	if (IS_ERR(imx258->reset_gpio))
+		return PTR_ERR(imx258->reset_gpio);
 
 	/* Initialize subdev */
 	v4l2_i2c_subdev_init(&imx258->sd, client, &imx258_subdev_ops);

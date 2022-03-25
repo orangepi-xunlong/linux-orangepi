@@ -116,10 +116,9 @@
 #define CLK_USB_HSIC		79
 #define CLK_USB_HSIC_12M	80
 #define CLK_USB_OHCI0		81
-
+#define CLK_DRAM		82
 #define CLK_DRAM_VE		83
 #define CLK_DRAM_CSI		84
-
 #define CLK_TCON0		85
 #define CLK_TCON1		86
 #define CLK_CSI_MISC		87
@@ -130,7 +129,7 @@
 #define CLK_AVS			92
 #define CLK_HDMI		93
 #define CLK_HDMI_SLOW		94
-
+#define CLK_MBUS		95
 #define CLK_MIPI_DSI0		96
 #define CLK_MIPI_DSI1		97
 #define CLK_GPU_CORE		98

@@ -48,7 +48,8 @@ static inline struct sun6i_csi_dev *sun6i_csi_to_dev(struct sun6i_csi *csi)
 
 /* TODO add 10&12 bit YUV, RGB support */
 bool sun6i_csi_is_format_supported(struct sun6i_csi *csi,
-				   u32 pixformat, u32 mbus_code)
+				   u32 pixformat, u32 mbus_code,
+				   struct v4l2_fwnode_endpoint* vep)
 {
 	struct sun6i_csi_dev *sdev = sun6i_csi_to_dev(csi);
 
@@ -57,9 +58,9 @@ bool sun6i_csi_is_format_supported(struct sun6i_csi *csi,
 	 * 8bit and 16bit bus width.
 	 * Identify the media bus format from device tree.
 	 */
-	if ((sdev->csi.v4l2_ep.bus_type == V4L2_MBUS_PARALLEL
-	     || sdev->csi.v4l2_ep.bus_type == V4L2_MBUS_BT656)
-	     && sdev->csi.v4l2_ep.bus.parallel.bus_width == 16) {
+	if ((vep->bus_type == V4L2_MBUS_PARALLEL
+	     || vep->bus_type == V4L2_MBUS_BT656)
+	     && vep->bus.parallel.bus_width == 16) {
 		switch (pixformat) {
 		case V4L2_PIX_FMT_NV12_16L16:
 		case V4L2_PIX_FMT_NV12:
@@ -123,7 +124,8 @@ bool sun6i_csi_is_format_supported(struct sun6i_csi *csi,
 		return (mbus_code == MEDIA_BUS_FMT_UYVY8_2X8);
 	case V4L2_PIX_FMT_VYUY:
 		return (mbus_code == MEDIA_BUS_FMT_VYUY8_2X8);
-
+	case V4L2_PIX_FMT_RGB555:
+		return mbus_code == MEDIA_BUS_FMT_RGB555_2X8_PADHI_LE;
 	case V4L2_PIX_FMT_NV12_16L16:
 	case V4L2_PIX_FMT_NV12:
 	case V4L2_PIX_FMT_NV21:
@@ -359,6 +361,9 @@ static enum csi_input_seq get_csi_input_seq(struct sun6i_csi_dev *sdev,
 		break;
 
 	case V4L2_PIX_FMT_YUYV:
+	case V4L2_PIX_FMT_YVYU:
+	case V4L2_PIX_FMT_UYVY:
+	case V4L2_PIX_FMT_VYUY:
 		return CSI_INPUT_SEQ_YUYV;
 
 	default:
@@ -370,9 +375,9 @@ static enum csi_input_seq get_csi_input_seq(struct sun6i_csi_dev *sdev,
 	return CSI_INPUT_SEQ_YUYV;
 }
 
-static void sun6i_csi_setup_bus(struct sun6i_csi_dev *sdev)
+static void sun6i_csi_setup_bus(struct sun6i_csi_dev *sdev,
+				struct v4l2_fwnode_endpoint* vep)
 {
-	struct v4l2_fwnode_endpoint *endpoint = &sdev->csi.v4l2_ep;
 	struct sun6i_csi *csi = &sdev->csi;
 	unsigned char bus_width;
 	u32 flags;
@@ -384,7 +389,7 @@ static void sun6i_csi_setup_bus(struct sun6i_csi_dev *sdev)
 	    || csi->config.field == V4L2_FIELD_INTERLACED_BT)
 		input_interlaced = true;
 
-	bus_width = endpoint->bus.parallel.bus_width;
+	bus_width = vep->bus.parallel.bus_width;
 
 	regmap_read(sdev->regmap, CSI_IF_CFG_REG, &cfg);
 
@@ -399,11 +404,11 @@ static void sun6i_csi_setup_bus(struct sun6i_csi_dev *sdev)
 	else
 		cfg |= CSI_IF_CFG_SRC_TYPE_PROGRESSED;
 
-	switch (endpoint->bus_type) {
+	switch (vep->bus_type) {
 	case V4L2_MBUS_PARALLEL:
 		cfg |= CSI_IF_CFG_MIPI_IF_CSI;
 
-		flags = endpoint->bus.parallel.flags;
+		flags = vep->bus.parallel.flags;
 
 		cfg |= (bus_width == 16) ? CSI_IF_CFG_CSI_IF_YUV422_16BIT :
 					   CSI_IF_CFG_CSI_IF_YUV422_INTLV;
@@ -422,7 +427,7 @@ static void sun6i_csi_setup_bus(struct sun6i_csi_dev *sdev)
 	case V4L2_MBUS_BT656:
 		cfg |= CSI_IF_CFG_MIPI_IF_CSI;
 
-		flags = endpoint->bus.parallel.flags;
+		flags = vep->bus.parallel.flags;
 
 		cfg |= (bus_width == 16) ? CSI_IF_CFG_CSI_IF_BT1120 :
 					   CSI_IF_CFG_CSI_IF_BT656;
@@ -435,7 +440,7 @@ static void sun6i_csi_setup_bus(struct sun6i_csi_dev *sdev)
 		break;
 	default:
 		dev_warn(sdev->dev, "Unsupported bus type: %d\n",
-			 endpoint->bus_type);
+			 vep->bus_type);
 		break;
 	}
 
@@ -509,6 +514,8 @@ static void sun6i_csi_set_window(struct sun6i_csi_dev *sdev)
 	case V4L2_PIX_FMT_YVYU:
 	case V4L2_PIX_FMT_UYVY:
 	case V4L2_PIX_FMT_VYUY:
+	case V4L2_PIX_FMT_RGB565:
+	case V4L2_PIX_FMT_RGB555:
 		dev_dbg(sdev->dev,
 			"Horizontal length should be 2 times of width for packed YUV formats!\n");
 		hor_len = width * 2;
@@ -555,8 +562,7 @@ static void sun6i_csi_set_window(struct sun6i_csi_dev *sdev)
 		dev_dbg(sdev->dev,
 			"Calculating pixelformat(0x%x)'s bytesperline as a packed format\n",
 			config->pixelformat);
-		bytesperline_y = (sun6i_csi_get_bpp(config->pixelformat) *
-				  config->width) / 8;
+		bytesperline_y = sdev->csi.video.fmt.fmt.pix.bytesperline;
 		bytesperline_c = 0;
 		planar_offset[1] = -1;
 		planar_offset[2] = -1;
@@ -569,7 +575,8 @@ static void sun6i_csi_set_window(struct sun6i_csi_dev *sdev)
 }
 
 int sun6i_csi_update_config(struct sun6i_csi *csi,
-			    struct sun6i_csi_config *config)
+			    struct sun6i_csi_config *config,
+			    struct v4l2_fwnode_endpoint* vep)
 {
 	struct sun6i_csi_dev *sdev = sun6i_csi_to_dev(csi);
 
@@ -578,7 +585,7 @@ int sun6i_csi_update_config(struct sun6i_csi *csi,
 
 	memcpy(&csi->config, config, sizeof(csi->config));
 
-	sun6i_csi_setup_bus(sdev);
+	sun6i_csi_setup_bus(sdev, vep);
 	sun6i_csi_set_format(sdev);
 	sun6i_csi_set_window(sdev);
 
@@ -626,37 +633,29 @@ void sun6i_csi_set_stream(struct sun6i_csi *csi, bool enable)
 /* -----------------------------------------------------------------------------
  * Media Controller and V4L2
  */
-static int sun6i_csi_link_entity(struct sun6i_csi *csi,
-				 struct media_entity *entity,
-				 struct fwnode_handle *fwnode)
+static int sun6i_csi_link_subdev(struct sun6i_csi *csi, struct v4l2_subdev *sd,
+				 int link_flags)
 {
-	struct media_entity *sink;
-	struct media_pad *sink_pad;
-	int src_pad_index;
-	int ret;
+	struct media_entity *source = &sd->entity;
+	struct media_entity *sink = &csi->video.vdev.entity;
+	int src_pad, sink_pad = csi->video.pad.index, ret;
 
-	ret = media_entity_get_fwnode_pad(entity, fwnode, MEDIA_PAD_FL_SOURCE);
-	if (ret < 0) {
+	src_pad = media_entity_get_fwnode_pad(source, sd->fwnode,
+					      MEDIA_PAD_FL_SOURCE);
+	if (src_pad < 0) {
 		dev_err(csi->dev, "%s: no source pad in external entity %s\n",
-			__func__, entity->name);
+			__func__, source->name);
 		return -EINVAL;
 	}
 
-	src_pad_index = ret;
+	dev_info(csi->dev, "creating %s:%u -> %s:%u link\n",
+		 source->name, src_pad, sink->name, sink_pad);
 
-	sink = &csi->video.vdev.entity;
-	sink_pad = &csi->video.pad;
-
-	dev_dbg(csi->dev, "creating %s:%u -> %s:%u link\n",
-		entity->name, src_pad_index, sink->name, sink_pad->index);
-	ret = media_create_pad_link(entity, src_pad_index, sink,
-				    sink_pad->index,
-				    MEDIA_LNK_FL_ENABLED |
-				    MEDIA_LNK_FL_IMMUTABLE);
+	ret = media_create_pad_link(source, src_pad, sink, sink_pad,
+				    link_flags);
 	if (ret < 0) {
 		dev_err(csi->dev, "failed to create %s:%u -> %s:%u link\n",
-			entity->name, src_pad_index,
-			sink->name, sink_pad->index);
+			source->name, src_pad, sink->name, sink_pad);
 		return ret;
 	}
 
@@ -669,21 +668,23 @@ static int sun6i_subdev_notify_complete(struct v4l2_async_notifier *notifier)
 					     notifier);
 	struct v4l2_device *v4l2_dev = &csi->v4l2_dev;
 	struct v4l2_subdev *sd;
-	int ret;
+	int ret, link_flags = MEDIA_LNK_FL_ENABLED;
 
 	dev_dbg(csi->dev, "notify complete, all subdevs registered\n");
-
-	sd = list_first_entry(&v4l2_dev->subdevs, struct v4l2_subdev, list);
-	if (!sd)
-		return -EINVAL;
-
-	ret = sun6i_csi_link_entity(csi, &sd->entity, sd->fwnode);
-	if (ret < 0)
-		return ret;
 
 	ret = v4l2_device_register_subdev_nodes(&csi->v4l2_dev);
 	if (ret < 0)
 		return ret;
+
+	// link subdevs source pads to the controller sink pad, enable
+	// the first link
+	list_for_each_entry(sd, &v4l2_dev->subdevs, list) {
+		ret = sun6i_csi_link_subdev(csi, sd, link_flags);
+		if (ret < 0)
+			return ret;
+
+		link_flags = 0;
+	}
 
 	return media_device_register(&csi->media_dev);
 }
@@ -692,24 +693,41 @@ static const struct v4l2_async_notifier_operations sun6i_csi_async_ops = {
 	.complete = sun6i_subdev_notify_complete,
 };
 
+static const struct media_device_ops sun6i_csi_media_ops = {
+	.link_notify = v4l2_pipeline_link_notify,
+};
+
+/* CSI module has one port that can support multiple endpoints.
+ * Typically front and back camera on a tablet.
+ *
+ * Multiple endpoints are supported by selectively enabling only
+ * one of the endpoint devices at a time and shutting down the
+ * rest.
+ */
 static int sun6i_csi_fwnode_parse(struct device *dev,
 				  struct v4l2_fwnode_endpoint *vep,
 				  struct v4l2_async_subdev *asd)
 {
-	struct sun6i_csi *csi = dev_get_drvdata(dev);
+	struct sun6i_csi_async_subdev* casd =
+		container_of(asd, struct sun6i_csi_async_subdev, asd);
 
-	if (vep->base.port || vep->base.id) {
-		dev_warn(dev, "Only support a single port with one endpoint\n");
+	if (vep->base.port) {
+		dev_warn(dev, "Too many ports\n");
+		return -ENOTCONN;
+	}
+
+	if (vep->base.id >= MAX_ENDPOINTS) {
+		dev_warn(dev, "Too many endpoints\n");
 		return -ENOTCONN;
 	}
 
 	switch (vep->bus_type) {
 	case V4L2_MBUS_PARALLEL:
 	case V4L2_MBUS_BT656:
-		csi->v4l2_ep = *vep;
+		casd->vep = *vep;
 		return 0;
 	default:
-		dev_err(dev, "Unsupported media bus type\n");
+		dev_warn(dev, "Unsupported media bus type\n");
 		return -ENOTCONN;
 	}
 }
@@ -733,21 +751,23 @@ static int sun6i_csi_v4l2_init(struct sun6i_csi *csi)
 	strscpy(csi->media_dev.model, "Allwinner Video Capture Device",
 		sizeof(csi->media_dev.model));
 	csi->media_dev.hw_revision = 0;
+	csi->media_dev.ops = &sun6i_csi_media_ops;
 	snprintf(csi->media_dev.bus_info, sizeof(csi->media_dev.bus_info),
 		 "platform:%s", dev_name(csi->dev));
 
 	media_device_init(&csi->media_dev);
 	v4l2_async_nf_init(&csi->notifier);
 
+	/*
 	ret = v4l2_ctrl_handler_init(&csi->ctrl_handler, 0);
 	if (ret) {
 		dev_err(csi->dev, "V4L2 controls handler init failed (%d)\n",
 			ret);
 		goto clean_media;
 	}
-
+          */
 	csi->v4l2_dev.mdev = &csi->media_dev;
-	csi->v4l2_dev.ctrl_handler = &csi->ctrl_handler;
+	//csi->v4l2_dev.ctrl_handler = &csi->ctrl_handler;
 	ret = v4l2_device_register(csi->dev, &csi->v4l2_dev);
 	if (ret) {
 		dev_err(csi->dev, "V4L2 device registration failed (%d)\n",
@@ -782,8 +802,8 @@ clean_video:
 unreg_v4l2:
 	v4l2_device_unregister(&csi->v4l2_dev);
 free_ctrl:
-	v4l2_ctrl_handler_free(&csi->ctrl_handler);
-clean_media:
+	//v4l2_ctrl_handler_free(&csi->ctrl_handler);
+//clean_media:
 	v4l2_async_nf_cleanup(&csi->notifier);
 	media_device_cleanup(&csi->media_dev);
 

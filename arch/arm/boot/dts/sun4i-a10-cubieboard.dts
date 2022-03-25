@@ -83,7 +83,7 @@
 		led-1 {
 			label = "cubieboard:green:usr";
 			gpios = <&pio 7 20 GPIO_ACTIVE_HIGH>; /* LED2 */
-			linux,default-trigger = "heartbeat";
+			linux,default-trigger = "mmc0";
 		};
 	};
 };

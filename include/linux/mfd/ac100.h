@@ -80,6 +80,7 @@ struct ac100_dev {
 #define AC100_ERPOUT_CTRL		0x57
 #define AC100_SPKOUT_CTRL		0x58
 #define AC100_LINEOUT_CTRL		0x59
+#define AC100_ADDA_TUNE1 		0x5a
 
 /* ADC digital audio processing (high pass filter & auto gain control */
 #define AC100_ADC_DAP_L_STA		0x80

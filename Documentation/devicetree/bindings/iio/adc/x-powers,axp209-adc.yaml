@@ -58,6 +58,11 @@ properties:
   "#io-channel-cells":
     const: 1
 
+  x-powers,ts-as-gpadc:
+    description: |
+      Boolean. Defines whether the TS pin should be used
+      as GPADC rather than battery temperature sensor pin.
+
 additionalProperties: false
 
 examples:

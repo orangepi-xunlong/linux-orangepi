@@ -6,6 +6,10 @@
 	compatible = "rockchip,rk3566";
 };
 
+&pipegrf {
+	compatible = "rockchip,rk3566-pipegrf", "syscon";
+};
+
 &power {
 	power-domain@RK3568_PD_PIPE {
 		reg = <RK3568_PD_PIPE>;
@@ -17,4 +21,12 @@
 			 <&qos_usb3_1>;
 		#power-domain-cells = <0>;
 	};
+};
+
+&usbdrd_dwc3 {
+	phys = <&u2phy0_otg>;
+	phy-names = "usb2-phy";
+	extcon = <&usb2phy0>;
+	maximum-speed = "high-speed";
+	snps,dis_u2_susphy_quirk;
 };

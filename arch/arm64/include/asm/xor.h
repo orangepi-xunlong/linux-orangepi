@@ -50,21 +50,15 @@ xor_neon_5(unsigned long bytes, unsigned long *p1, unsigned long *p2,
 	kernel_neon_end();
 }
 
-static struct xor_block_template xor_block_arm64 = {
+static struct xor_block_template xor_block_arm64 __maybe_unused = {
 	.name   = "arm64_neon",
 	.do_2   = xor_neon_2,
 	.do_3   = xor_neon_3,
 	.do_4   = xor_neon_4,
 	.do_5	= xor_neon_5
 };
-#undef XOR_TRY_TEMPLATES
-#define XOR_TRY_TEMPLATES           \
-	do {        \
-		xor_speed(&xor_block_8regs);    \
-		xor_speed(&xor_block_32regs);    \
-		if (cpu_has_neon()) { \
-			xor_speed(&xor_block_arm64);\
-		} \
-	} while (0)
+
+#define XOR_SELECT_TEMPLATE(x)	\
+	(&xor_block_32regs)
 
 #endif /* ! CONFIG_KERNEL_MODE_NEON */

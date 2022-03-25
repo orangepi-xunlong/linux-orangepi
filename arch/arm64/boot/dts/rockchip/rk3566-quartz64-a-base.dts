@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+
+// Base DT with optional board features disabled to avoid boot log errors and slowdowns.
+// SATA is selected by default, because USB3 is broken on early Quartz64 boards.
+
+//#define USE_USB3
+//#define USE_WIFI
+//#define USE_EMMC
+
+#include "rk3566-quartz64-a.dts"

@@ -52,6 +52,13 @@
 #define AXP20X_ADC_EN1_VBUS_VOLT	BIT(3)
 
 #define AXP20X_VBUS_MON_VBUS_VALID	BIT(3)
+#define AXP813_CHRG_CTRL3_VBUS_CUR_LIMIT_MASK GENMASK(7, 4)
+#define AXP813_CHRG_CTRL3_VBUS_CUR_LIMIT_OFFSET 4
+
+#define AXP813_BC_RESULT_MASK		GENMASK(7, 5)
+#define AXP813_BC_RESULT_SDP		(1 << 5)
+#define AXP813_BC_RESULT_CDP		(2 << 5)
+#define AXP813_BC_RESULT_DCP		(3 << 5)
 
 #define AXP813_BC_EN		BIT(0)
 
@@ -175,6 +182,110 @@ static int axp813_get_current_max(struct axp20x_usb_power *power, int *val)
 	return 0;
 }
 
+static int
+axp813_usb_power_get_input_current_limit(struct axp20x_usb_power *power,
+					 int *intval)
+{
+	unsigned int v;
+	int ret = regmap_read(power->regmap, AXP813_CHRG_CTRL3, &v);
+
+	if (ret)
+		return ret;
+
+	v &= AXP813_CHRG_CTRL3_VBUS_CUR_LIMIT_MASK;
+	v >>= AXP813_CHRG_CTRL3_VBUS_CUR_LIMIT_OFFSET;
+
+	switch (v) {
+	case 0:
+		*intval = 100000;
+		return 0;
+	case 1:
+		*intval = 500000;
+		return 0;
+	case 2:
+		*intval = 900000;
+		return 0;
+	case 3:
+		*intval = 1500000;
+		return 0;
+	case 4:
+		*intval = 2000000;
+		return 0;
+	case 5:
+		*intval = 2500000;
+		return 0;
+	case 6:
+		*intval = 3000000;
+		return 0;
+	case 7:
+		*intval = 3500000;
+		return 0;
+	default:
+		*intval = 4000000;
+		return 0;
+	}
+}
+
+static int
+axp813_get_usb_bc_enabled(struct axp20x_usb_power *power, int *intval)
+{
+	unsigned int reg;
+	int ret;
+
+	ret = regmap_read(power->regmap, AXP288_BC_GLOBAL, &reg);
+	if (ret)
+		return ret;
+
+	*intval = !!(reg & AXP813_BC_EN);
+	return 0;
+}
+
+static enum power_supply_usb_type axp813_usb_types[] = {
+	POWER_SUPPLY_USB_TYPE_PD,
+	POWER_SUPPLY_USB_TYPE_SDP,
+	POWER_SUPPLY_USB_TYPE_DCP,
+	POWER_SUPPLY_USB_TYPE_CDP,
+	POWER_SUPPLY_USB_TYPE_UNKNOWN,
+};
+
+static int axp813_get_usb_type(struct axp20x_usb_power *power,
+			       union power_supply_propval *val)
+{
+	unsigned int reg;
+	int ret;
+
+	ret = regmap_read(power->regmap, AXP288_BC_GLOBAL, &reg);
+	if (ret)
+		return ret;
+
+	if (!(reg & AXP813_BC_EN)) {
+		val->intval = POWER_SUPPLY_USB_TYPE_PD;
+		return 0;
+	}
+
+	ret = regmap_read(power->regmap, AXP288_BC_DET_STAT, &reg);
+	if (ret)
+		return ret;
+
+	switch (reg & AXP813_BC_RESULT_MASK) {
+	case AXP813_BC_RESULT_SDP:
+		val->intval = POWER_SUPPLY_USB_TYPE_SDP;
+		break;
+	case AXP813_BC_RESULT_CDP:
+		val->intval = POWER_SUPPLY_USB_TYPE_CDP;
+		break;
+	case AXP813_BC_RESULT_DCP:
+		val->intval = POWER_SUPPLY_USB_TYPE_DCP;
+		break;
+	default:
+		val->intval = POWER_SUPPLY_USB_TYPE_UNKNOWN;
+		break;
+	}
+
+	return 0;
+}
+
+
 static int axp20x_usb_power_get_property(struct power_supply *psy,
 	enum power_supply_property psp, union power_supply_propval *val)
 {
@@ -213,8 +324,6 @@ static int axp20x_usb_power_get_property(struct power_supply *psy,
 		val->intval = ret * 1700; /* 1 step = 1.7 mV */
 		return 0;
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
-		if (power->axp20x_id == AXP813_ID)
-			return axp813_get_current_max(power, &val->intval);
 		return axp20x_get_current_max(power, &val->intval);
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
 		if (IS_ENABLED(CONFIG_AXP20X_ADC)) {
@@ -273,6 +382,30 @@ static int axp20x_usb_power_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_ONLINE:
 		val->intval = !!(input & AXP20X_PWR_STATUS_VBUS_USED);
 		break;
+
+	case POWER_SUPPLY_PROP_USB_TYPE:
+		if (power->axp20x_id == AXP813_ID)
+			return axp813_get_usb_type(power, val);
+
+		return -EINVAL;
+
+	case POWER_SUPPLY_PROP_USB_BC_ENABLED:
+		if (power->axp20x_id == AXP813_ID)
+			return axp813_get_usb_bc_enabled(power, &val->intval);
+
+		return -EINVAL;
+
+	case POWER_SUPPLY_PROP_USB_DCP_INPUT_CURRENT_LIMIT:
+		if (power->axp20x_id == AXP813_ID)
+			return axp813_get_current_max(power, &val->intval);
+
+		return -EINVAL;
+
+	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
+		if (power->axp20x_id == AXP813_ID)
+			return axp813_usb_power_get_input_current_limit(power,
+								&val->intval);
+		fallthrough;
 	default:
 		return -EINVAL;
 	}
@@ -314,6 +447,37 @@ static int axp20x_usb_power_set_voltage_min(struct axp20x_usb_power *power,
 	}
 
 	return -EINVAL;
+}
+
+static const unsigned axp813_input_current_limits_table[] = {
+	100000,
+	500000,
+	900000,
+	1500000,
+	2000000,
+	2500000,
+	3000000,
+	3500000,
+	4000000,
+};
+
+static int
+axp813_usb_power_set_input_current_limit(struct axp20x_usb_power *power,
+					 int intval)
+{
+	unsigned int reg;
+
+	if (intval < 100000)
+		return -EINVAL;
+
+	for (reg = ARRAY_SIZE(axp813_input_current_limits_table) - 1; reg > 0; reg--)
+		if (intval >= axp813_input_current_limits_table[reg])
+			break;
+
+	return regmap_update_bits(power->regmap,
+				  AXP813_CHRG_CTRL3,
+				  AXP813_CHRG_CTRL3_VBUS_CUR_LIMIT_MASK,
+				  reg << AXP813_CHRG_CTRL3_VBUS_CUR_LIMIT_OFFSET);
 }
 
 static int axp813_usb_power_set_current_max(struct axp20x_usb_power *power,
@@ -364,6 +528,14 @@ static int axp20x_usb_power_set_current_max(struct axp20x_usb_power *power,
 	return -EINVAL;
 }
 
+static int
+axp813_set_usb_bc_enabled(struct axp20x_usb_power *power, int val)
+{
+	return regmap_update_bits(power->regmap, AXP288_BC_GLOBAL,
+				  AXP813_BC_EN,
+				  val ? AXP813_BC_EN : 0);
+}
+
 static int axp20x_usb_power_set_property(struct power_supply *psy,
 					 enum power_supply_property psp,
 					 const union power_supply_propval *val)
@@ -380,11 +552,26 @@ static int axp20x_usb_power_set_property(struct power_supply *psy,
 		return axp20x_usb_power_set_voltage_min(power, val->intval);
 
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
+		return axp20x_usb_power_set_current_max(power, val->intval);
+
+	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
+		if (power->axp20x_id == AXP813_ID)
+			return axp813_usb_power_set_input_current_limit(power,
+								val->intval);
+		return -EINVAL;
+
+	case POWER_SUPPLY_PROP_USB_BC_ENABLED:
+		if (power->axp20x_id == AXP813_ID)
+			return axp813_set_usb_bc_enabled(power, val->intval);
+
+		return -EINVAL;
+
+	case POWER_SUPPLY_PROP_USB_DCP_INPUT_CURRENT_LIMIT:
 		if (power->axp20x_id == AXP813_ID)
 			return axp813_usb_power_set_current_max(power,
 								val->intval);
-		return axp20x_usb_power_set_current_max(power, val->intval);
 
+		return -EINVAL;
 	default:
 		return -EINVAL;
 	}
@@ -408,7 +595,10 @@ static int axp20x_usb_power_prop_writeable(struct power_supply *psy,
 		return power->axp20x_id == AXP813_ID;
 
 	return psp == POWER_SUPPLY_PROP_VOLTAGE_MIN ||
-	       psp == POWER_SUPPLY_PROP_CURRENT_MAX;
+	       psp == POWER_SUPPLY_PROP_CURRENT_MAX ||
+	       psp == POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT ||
+	       psp == POWER_SUPPLY_PROP_USB_BC_ENABLED ||
+	       psp == POWER_SUPPLY_PROP_USB_DCP_INPUT_CURRENT_LIMIT;
 }
 
 static enum power_supply_property axp20x_usb_power_properties[] = {
@@ -427,6 +617,18 @@ static enum power_supply_property axp22x_usb_power_properties[] = {
 	POWER_SUPPLY_PROP_ONLINE,
 	POWER_SUPPLY_PROP_VOLTAGE_MIN,
 	POWER_SUPPLY_PROP_CURRENT_MAX,
+	POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
+};
+
+static enum power_supply_property axp813_usb_power_properties[] = {
+	POWER_SUPPLY_PROP_HEALTH,
+	POWER_SUPPLY_PROP_PRESENT,
+	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_VOLTAGE_MIN,
+	POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
+	POWER_SUPPLY_PROP_USB_BC_ENABLED,
+	POWER_SUPPLY_PROP_USB_DCP_INPUT_CURRENT_LIMIT,
+	POWER_SUPPLY_PROP_USB_TYPE,
 };
 
 static const struct power_supply_desc axp20x_usb_power_desc = {
@@ -449,6 +651,18 @@ static const struct power_supply_desc axp22x_usb_power_desc = {
 	.set_property = axp20x_usb_power_set_property,
 };
 
+static const struct power_supply_desc axp813_usb_power_desc = {
+	.name = "axp20x-usb",
+	.type = POWER_SUPPLY_TYPE_USB,
+	.properties = axp813_usb_power_properties,
+	.num_properties = ARRAY_SIZE(axp813_usb_power_properties),
+	.property_is_writeable = axp20x_usb_power_prop_writeable,
+	.get_property = axp20x_usb_power_get_property,
+	.set_property = axp20x_usb_power_set_property,
+	.usb_types = axp813_usb_types,
+	.num_usb_types = ARRAY_SIZE(axp813_usb_types),
+};
+
 static const char * const axp20x_irq_names[] = {
 	"VBUS_PLUGIN",
 	"VBUS_REMOVAL",
@@ -459,6 +673,13 @@ static const char * const axp20x_irq_names[] = {
 static const char * const axp22x_irq_names[] = {
 	"VBUS_PLUGIN",
 	"VBUS_REMOVAL",
+};
+
+static const char * const axp813_irq_names[] = {
+	"VBUS_PLUGIN",
+	"VBUS_REMOVAL",
+	"BC_USB_CHNG",
+	"MV_CHNG",
 };
 
 struct axp_data {
@@ -490,9 +711,9 @@ static const struct axp_data axp223_data = {
 };
 
 static const struct axp_data axp813_data = {
-	.power_desc	= &axp22x_usb_power_desc,
-	.irq_names	= axp22x_irq_names,
-	.num_irq_names	= ARRAY_SIZE(axp22x_irq_names),
+	.power_desc	= &axp813_usb_power_desc,
+	.irq_names	= axp813_irq_names,
+	.num_irq_names	= ARRAY_SIZE(axp813_irq_names),
 	.axp20x_id	= AXP813_ID,
 };
 
@@ -621,6 +842,18 @@ static int axp20x_usb_power_probe(struct platform_device *pdev)
 		/* Enable USB Battery Charging specification detection */
 		ret = regmap_update_bits(axp20x->regmap, AXP288_BC_GLOBAL,
 				   AXP813_BC_EN, AXP813_BC_EN);
+		if (ret)
+			return ret;
+	}
+
+	/*TODO: Re-work this into a supply property with OF based default value */
+	if (of_machine_is_compatible("pine64,pinephone-1.2") > 0 ||
+		of_machine_is_compatible("pine64,pinephone-1.1") > 0 ||
+		of_machine_is_compatible("pine64,pinephone-1.0") > 0) {
+
+		dev_info(&pdev->dev, "Increasing Vbus hold voltage to 4.5V\n");
+
+		ret = regmap_update_bits(axp20x->regmap, 0x30, 0x7 << 3, 0x5 << 3);
 		if (ret)
 			return ret;
 	}

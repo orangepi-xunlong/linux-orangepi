@@ -4301,6 +4301,37 @@ struct clk *devm_clk_hw_get_clk(struct device *dev, struct clk_hw *hw,
 EXPORT_SYMBOL_GPL(devm_clk_hw_get_clk);
 
 /*
+ * clk-conf helpers
+ */
+
+int __clk_protect(struct clk *clk)
+{
+	struct clk_core *core = clk->core;
+	int ret = 0;
+
+	clk_prepare_lock();
+
+	/*
+	 * If CLK_IS_CRITICAL was set in the clock's init data, then
+	 * the clock was already prepared/enabled when it was added.
+	 */
+	if (core->flags & CLK_IS_CRITICAL)
+		goto out;
+
+	core->flags |= CLK_IS_CRITICAL;
+	ret = clk_core_prepare(core);
+	if (ret)
+		goto out;
+
+	ret = clk_core_enable_lock(core);
+
+out:
+	clk_prepare_unlock();
+
+	return ret;
+}
+
+/*
  * clkdev helpers
  */
 

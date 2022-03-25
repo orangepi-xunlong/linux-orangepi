@@ -5,6 +5,7 @@
 /dts-v1/;
 
 #include "sun50i-h6.dtsi"
+#include "sun50i-h6-cpu-opp.dtsi"
 
 #include <dt-bindings/gpio/gpio.h>
 
@@ -64,6 +65,10 @@
 	};
 };
 
+&cpu0 {
+        cpu-supply = <&reg_dcdca>;
+};
+
 &de {
 	status = "okay";
 };
@@ -89,6 +94,10 @@
 	hdmi_out_con: endpoint {
 		remote-endpoint = <&hdmi_con_in>;
 	};
+};
+
+&i2s1 {
+	status = "okay";
 };
 
 &mmc0 {
@@ -208,7 +217,7 @@
 			reg_dcdca: dcdca {
 				regulator-always-on;
 				regulator-min-microvolt = <810000>;
-				regulator-max-microvolt = <1080000>;
+				regulator-max-microvolt = <1160000>;
 				regulator-name = "vdd-cpu";
 			};
 
@@ -242,6 +251,10 @@
 
 &rtc {
 	clocks = <&ext_osc32k>;
+};
+
+&sound_hdmi {
+	status = "okay";
 };
 
 &uart0 {

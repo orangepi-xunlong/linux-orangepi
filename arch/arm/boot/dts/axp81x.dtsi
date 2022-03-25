@@ -74,6 +74,11 @@
 		};
 	};
 
+	axp_led: led {
+		compatible = "x-powers,axp20x-led";
+		status = "disabled";
+	};
+
 	battery_power_supply: battery-power {
 		compatible = "x-powers,axp813-battery-power-supply";
 		status = "disabled";
@@ -174,5 +179,10 @@
 
 	usb_power_supply: usb-power {
 		compatible = "x-powers,axp813-usb-power-supply";
+	};
+
+	charger_led: charger-led {
+		compatible = "x-powers,axp813-charger-led";
+		status = "disabled";
 	};
 };

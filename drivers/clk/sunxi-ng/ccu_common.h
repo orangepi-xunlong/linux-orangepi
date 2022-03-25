@@ -68,4 +68,16 @@ int devm_sunxi_ccu_probe(struct device *dev, void __iomem *reg,
 void of_sunxi_ccu_probe(struct device_node *node, void __iomem *reg,
 			const struct sunxi_ccu_desc *desc);
 
+struct ccu_rate_reset_nb {
+	struct notifier_block	clk_nb;
+	struct ccu_common	*common;
+
+	struct clk		*target_clk;
+	unsigned long		saved_rate;
+};
+
+#define to_ccu_rate_reset_nb(_nb) container_of(_nb, struct ccu_rate_reset_nb, clk_nb)
+
+int ccu_rate_reset_notifier_register(struct ccu_rate_reset_nb *rate_reset_nb);
+
 #endif /* _COMMON_H_ */

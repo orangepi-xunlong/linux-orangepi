@@ -48,3 +48,8 @@
 	model = "Banana Pi BPI-M2-Plus H3";
 	compatible = "sinovoip,bpi-m2-plus", "allwinner,sun8i-h3";
 };
+
+&wifi_pwrseq {
+		clocks = <&rtc 1>;
+		clock-names = "ext_clock";
+};

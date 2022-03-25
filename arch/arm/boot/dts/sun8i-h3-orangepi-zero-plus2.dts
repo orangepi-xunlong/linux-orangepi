@@ -117,6 +117,10 @@
 	};
 };
 
+&i2s2 {
+	status = "okay";
+};
+
 &mmc0 {
 	vmmc-supply = <&reg_vcc3v3>;
 	bus-width = <4>;
@@ -152,6 +156,10 @@
 };
 
 &ohci0 {
+	status = "okay";
+};
+
+&sound_hdmi {
 	status = "okay";
 };
 

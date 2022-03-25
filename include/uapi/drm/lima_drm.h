@@ -37,7 +37,12 @@ struct drm_lima_get_param {
  * due to lack of heap memory. size field of heap buffer is an up bound of
  * the backup memory which can be set to a fairly large value.
  */
-#define LIMA_BO_FLAG_HEAP  (1 << 0)
+#define LIMA_BO_FLAG_HEAP        (1 << 0)
+/*
+ * force buffer GPU virtual address to be drm_lima_gem_create.va, this is
+ * used to replay some task with fixed GPU virtual address
+ */
+#define LIMA_BO_FLAG_FORCE_VA    (1 << 1)
 
 /**
  * create a buffer for used by GPU
@@ -46,7 +51,7 @@ struct drm_lima_gem_create {
 	__u32 size;    /* in, buffer size */
 	__u32 flags;   /* in, buffer flags */
 	__u32 handle;  /* out, GEM buffer handle */
-	__u32 pad;     /* pad, must be zero */
+	__u32 va;      /* in, buffer va */
 };
 
 /**

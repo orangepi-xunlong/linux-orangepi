@@ -60,6 +60,17 @@
 		stdout-path = "serial0:115200n8";
 	};
 
+	hdmi-connector {
+		compatible = "hdmi-connector";
+		type = "a";
+
+		port {
+			hdmi_con_in: endpoint {
+				remote-endpoint = <&hdmi_out_con>;
+			};
+		};
+	};
+
 	leds {
 		compatible = "gpio-leds";
 
@@ -91,10 +102,15 @@
 };
 
 &ahci {
+	target-supply = <&reg_ahci_5v>;
 	status = "okay";
 };
 
 &codec {
+	status = "okay";
+};
+
+&de {
 	status = "okay";
 };
 
@@ -113,6 +129,16 @@
 	phy-mode = "rgmii-id";
 	phy-supply = <&reg_gmac_3v3>;
 	status = "okay";
+};
+
+&hdmi {
+	status = "okay";
+};
+
+&hdmi_out {
+	hdmi_out_con: endpoint {
+		remote-endpoint = <&hdmi_con_in>;
+	};
 };
 
 &i2c0 {
@@ -162,9 +188,19 @@
 	brcmf: wifi@1 {
 		reg = <1>;
 		compatible = "brcm,bcm4329-fmac";
-		interrupt-parent = <&pio>;
-		interrupts = <7 15 IRQ_TYPE_LEVEL_LOW>;
-		interrupt-names = "host-wake";
+		/*
+		 * OOB interrupt support is broken ATM, often the first irq
+		 * does not get seen resulting in the drv probe failing with:
+		 *
+		 * brcmfmac: brcmf_sdio_bus_rxctl: resumed on timeout
+		 * brcmfmac: brcmf_bus_started: failed: -110
+		 * brcmfmac: brcmf_attach: dongle is not responding: err=-110
+		 * brcmfmac: brcmf_sdio_firmware_callback: brcmf_attach failed
+		 *
+		 * interrupt-parent = <&pio>;
+		 * interrupts = <7 15 IRQ_TYPE_LEVEL_LOW>;
+		 * interrupt-names = "host-wake";
+		 */
 	};
 };
 

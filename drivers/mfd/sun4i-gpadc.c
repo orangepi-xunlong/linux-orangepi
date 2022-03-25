@@ -54,6 +54,7 @@ static struct mfd_cell sun4i_gpadc_cells[] = {
 static struct mfd_cell sun5i_gpadc_cells[] = {
 	{
 		.name	= "sun5i-a13-gpadc-iio",
+		.of_compatible	= "allwinner,sun5i-a13-gpadc-iio",
 		.resources = adc_resources,
 		.num_resources = ARRAY_SIZE(adc_resources),
 	},

@@ -63,6 +63,13 @@ config SFP
 
 comment "MII PHY device drivers"
 
+config AC200_PHY
+	tristate "AC200 EPHY"
+	depends on NVMEM
+	depends on OF
+	help
+	  Fast ethernet PHY as found in X-Powers AC200 multi-function device.
+
 config AMD_PHY
 	tristate "AMD PHYs"
 	help

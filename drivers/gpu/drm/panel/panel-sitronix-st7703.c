@@ -58,6 +58,7 @@ struct st7703 {
 
 	struct dentry *debugfs;
 	const struct st7703_panel_desc *desc;
+	bool hw_preenabled;
 };
 
 struct st7703_panel_desc {
@@ -290,7 +291,6 @@ static int xbd599_init_sequence(struct st7703 *ctx)
 	dsi_dcs_write_seq(dsi, ST7703_CMD_SETBGP,
 			  0x07, /* VREF_SEL = 4.2V */
 			  0x07  /* NVREF_SEL = 4.2V */);
-	msleep(20);
 
 	dsi_dcs_write_seq(dsi, ST7703_CMD_SETVCOM,
 			  0x2C, /* VCOMDC_F = -0.67V */
@@ -334,14 +334,14 @@ static int xbd599_init_sequence(struct st7703 *ctx)
 
 static const struct drm_display_mode xbd599_mode = {
 	.hdisplay    = 720,
-	.hsync_start = 720 + 40,
-	.hsync_end   = 720 + 40 + 40,
-	.htotal	     = 720 + 40 + 40 + 40,
+	.hsync_start = 720 + 30,
+	.hsync_end   = 720 + 30 + 28,
+	.htotal	     = 720 + 30 + 28 + 30,
 	.vdisplay    = 1440,
 	.vsync_start = 1440 + 18,
 	.vsync_end   = 1440 + 18 + 10,
 	.vtotal	     = 1440 + 18 + 10 + 17,
-	.clock	     = 69000,
+	.clock	     = 72000,
 	.flags	     = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
 	.width_mm    = 68,
 	.height_mm   = 136,
@@ -361,13 +361,16 @@ static int st7703_enable(struct drm_panel *panel)
 	struct mipi_dsi_device *dsi = to_mipi_dsi_device(ctx->dev);
 	int ret;
 
+	if (ctx->hw_preenabled) {
+		ctx->hw_preenabled = false;
+		return 0;
+	}
+
 	ret = ctx->desc->init_sequence(ctx);
 	if (ret < 0) {
 		dev_err(ctx->dev, "Panel init sequence failed: %d\n", ret);
 		return ret;
 	}
-
-	msleep(20);
 
 	ret = mipi_dsi_dcs_exit_sleep_mode(dsi);
 	if (ret < 0) {
@@ -375,8 +378,8 @@ static int st7703_enable(struct drm_panel *panel)
 		return ret;
 	}
 
-	/* Panel is operational 120 msec after reset */
-	msleep(60);
+	/* Display on can be issued 120 msec after sleep out */
+	msleep(120);
 
 	ret = mipi_dsi_dcs_set_display_on(dsi);
 	if (ret)
@@ -400,6 +403,9 @@ static int st7703_disable(struct drm_panel *panel)
 	ret = mipi_dsi_dcs_enter_sleep_mode(dsi);
 	if (ret < 0)
 		dev_err(ctx->dev, "Failed to enter sleep mode: %d\n", ret);
+
+	/* Display needs to be drained of charge, in order to work correctly on next power on. */
+	msleep(120);
 
 	return 0;
 }
@@ -427,30 +433,35 @@ static int st7703_prepare(struct drm_panel *panel)
 	if (ctx->prepared)
 		return 0;
 
+	if (!ctx->hw_preenabled) {
 	dev_dbg(ctx->dev, "Resetting the panel\n");
-	ret = regulator_enable(ctx->vcc);
-	if (ret < 0) {
-		dev_err(ctx->dev, "Failed to enable vcc supply: %d\n", ret);
-		return ret;
+	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
 	}
+
 	ret = regulator_enable(ctx->iovcc);
 	if (ret < 0) {
 		dev_err(ctx->dev, "Failed to enable iovcc supply: %d\n", ret);
-		goto disable_vcc;
+		return ret;
 	}
 
-	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
-	usleep_range(20, 40);
+	ret = regulator_enable(ctx->vcc);
+	if (ret < 0) {
+		dev_err(ctx->dev, "Failed to enable vcc supply: %d\n", ret);
+		regulator_disable(ctx->iovcc);
+		return ret;
+	}
+
+	/* Give power supplies time to stabilize before deasserting reset. */
+	if (!ctx->hw_preenabled) {
+	usleep_range(10000, 20000);
+
 	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
-	msleep(20);
+	usleep_range(15000, 20000);
+	}
 
 	ctx->prepared = true;
 
 	return 0;
-
-disable_vcc:
-	regulator_disable(ctx->vcc);
-	return ret;
 }
 
 static const u32 mantix_bus_formats[] = {
@@ -531,11 +542,18 @@ static int st7703_probe(struct mipi_dsi_device *dsi)
 {
 	struct device *dev = &dsi->dev;
 	struct st7703 *ctx;
+	u32 fb_start;
 	int ret;
 
 	ctx = devm_kzalloc(dev, sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
+
+	ret = of_property_read_u32_index(of_chosen, "p-boot,framebuffer-start", 0, &fb_start);
+	if (ret == 0) {
+		/* the display pipeline is already initialized by p-boot */
+		ctx->hw_preenabled = true;
+	}
 
 	ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_LOW);
 	if (IS_ERR(ctx->reset_gpio))
@@ -570,7 +588,7 @@ static int st7703_probe(struct mipi_dsi_device *dsi)
 
 	ret = mipi_dsi_attach(dsi);
 	if (ret < 0) {
-		dev_err(dev, "mipi_dsi_attach failed (%d). Is host ready?\n", ret);
+		dev_err_probe(dev, ret, "mipi_dsi_attach failed\n");
 		drm_panel_remove(&ctx->panel);
 		return ret;
 	}

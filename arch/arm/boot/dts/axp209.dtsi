@@ -69,6 +69,11 @@
 		#gpio-cells = <2>;
 	};
 
+	axp_led: led {
+		compatible = "x-powers,axp20x-led";
+		status = "disabled";
+	};
+
 	battery_power_supply: battery-power {
 		compatible = "x-powers,axp209-battery-power-supply";
 		status = "disabled";

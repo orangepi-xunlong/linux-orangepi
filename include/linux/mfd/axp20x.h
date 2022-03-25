@@ -130,6 +130,7 @@ enum axp20x_variants {
 
 /* Other DCDC regulator control registers are the same as AXP803 */
 #define AXP813_DCDC7_V_OUT		0x26
+#define AXP813_CHRG_CTRL3		0x35
 
 /* Interrupt */
 #define AXP152_IRQ1_EN			0x40

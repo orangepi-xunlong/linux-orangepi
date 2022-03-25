@@ -1139,6 +1139,7 @@ static struct i2c_driver bma180_driver = {
 		.name	= "bma180",
 		.pm	= BMA180_PM_OPS,
 		.of_match_table = bma180_of_match,
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 	},
 	.probe		= bma180_probe,
 	.remove		= bma180_remove,

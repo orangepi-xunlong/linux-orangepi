@@ -247,7 +247,7 @@
 
 &reg_dcdc2 {
 	regulator-always-on;
-	regulator-min-microvolt = <1000000>;
+	regulator-min-microvolt = <1300000>;
 	regulator-max-microvolt = <1400000>;
 	regulator-name = "vdd-cpu";
 };

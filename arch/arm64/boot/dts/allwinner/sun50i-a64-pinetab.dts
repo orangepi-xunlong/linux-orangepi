@@ -54,12 +54,35 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
-		/* Rear camera */
-		ov5640: camera@3c {
-			compatible = "ovti,ov5640";
+		/* Front camera */
+		gc2145: front-camera@3c {
+			compatible = "galaxycore,gc2145";
 			reg = <0x3c>;
-			pinctrl-names = "default";
-			pinctrl-0 = <&csi_mclk_pin>;
+			clocks = <&ccu CLK_CSI_MCLK>;
+			clock-names = "xclk";
+
+			AVDD-supply = <&reg_dldo3>;
+			DVDD-supply = <&reg_aldo1>;
+			IOVDD-supply = <&reg_eldo3>;
+			reset-gpios = <&pio 4 16 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>; /* PE16 */
+			enable-gpios = <&pio 4 17 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>; /* PE17 */
+
+			port {
+				gc2145_ep: endpoint {
+					remote-endpoint = <&csi_gc2145_ep>;
+					bus-width = <8>;
+					hsync-active = <1>;
+					vsync-active = <1>;
+					data-active = <1>;
+					pclk-sample = <1>;
+				};
+			};
+		};
+
+		/* Rear camera */
+		ov5640: rear-camera@4c {
+			compatible = "ovti,ov5640";
+			reg = <0x4c>;
 			clocks = <&ccu CLK_CSI_MCLK>;
 			clock-names = "xclk";
 
@@ -71,7 +94,7 @@
 
 			port {
 				ov5640_ep: endpoint {
-					remote-endpoint = <&csi_ep>;
+					remote-endpoint = <&csi_ov5640_ep>;
 					bus-width = <8>;
 					hsync-active = <1>; /* Active high */
 					vsync-active = <0>; /* Active low */
@@ -130,14 +153,29 @@
 };
 
 &csi {
+	pinctrl-0 = <&csi_pins>, <&csi_mclk_pin>;
 	status = "okay";
 
 	port {
-		csi_ep: endpoint {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		csi_ov5640_ep: endpoint@0 {
+			reg = <0>;
 			remote-endpoint = <&ov5640_ep>;
 			bus-width = <8>;
 			hsync-active = <1>; /* Active high */
 			vsync-active = <0>; /* Active low */
+			data-active = <1>;  /* Active high */
+			pclk-sample = <1>;  /* Rising */
+		};
+
+		csi_gc2145_ep: endpoint@1 {
+			reg = <1>;
+			remote-endpoint = <&gc2145_ep>;
+			bus-width=<8>;
+			hsync-active = <1>; /* Active high */
+			vsync-active = <1>; /* Active high */
 			data-active = <1>;  /* Active high */
 			pclk-sample = <1>;  /* Rising */
 		};
@@ -161,12 +199,10 @@
 	status = "okay";
 
 	panel@0 {
-		compatible = "feixin,k101-im2ba02";
+		compatible = "feixin,k101-im2byl02";
 		reg = <0>;
-		avdd-supply = <&reg_dc1sw>;
-		dvdd-supply = <&reg_dc1sw>;
-		cvdd-supply = <&reg_ldo_io1>;
-		reset-gpios = <&pio 3 24 GPIO_ACTIVE_HIGH>; /* PD24 */
+		power-supply = <&reg_dc1sw>;
+		reset-gpios = <&pio 3 24 GPIO_ACTIVE_LOW>; /* PD24 */
 		backlight = <&backlight>;
 	};
 };

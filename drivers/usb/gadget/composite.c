@@ -2547,7 +2547,7 @@ EXPORT_SYMBOL_GPL(usb_composite_setup_continue);
 
 static char *composite_default_mfr(struct usb_gadget *gadget)
 {
-	return kasprintf(GFP_KERNEL, "%s %s with %s", init_utsname()->sysname,
+	return kasprintf(GFP_KERNEL, "%s %s with %s", "Armbian Linux",
 			 init_utsname()->release, gadget->name);
 }
 

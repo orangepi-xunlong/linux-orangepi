@@ -39,6 +39,8 @@
 #include "sun8i_tcon_top.h"
 #include "sunxi_engine.h"
 
+static bool hw_preconfigured;
+
 static struct drm_connector *sun4i_tcon_get_connector(const struct drm_encoder *encoder)
 {
 	struct drm_connector *connector;
@@ -107,9 +109,11 @@ static void sun4i_tcon_channel_set_status(struct sun4i_tcon *tcon, int channel,
 
 	if (enabled) {
 		clk_prepare_enable(clk);
-		clk_rate_exclusive_get(clk);
+		if (!tcon->quirks->clk_kept_by_ccu)
+			clk_rate_exclusive_get(clk);
 	} else {
-		clk_rate_exclusive_put(clk);
+		if (!tcon->quirks->clk_kept_by_ccu)
+			clk_rate_exclusive_put(clk);
 		clk_disable_unprepare(clk);
 	}
 }
@@ -239,6 +243,34 @@ void sun4i_tcon_enable_vblank(struct sun4i_tcon *tcon, bool enable)
 }
 EXPORT_SYMBOL(sun4i_tcon_enable_vblank);
 
+void sun4i_tcon_load_gamma_lut(struct sun4i_tcon *tcon,
+			       struct drm_color_lut *lut)
+{
+	int i;
+
+	for (i = 0; i < SUN4I_TCON_GAMMA_LUT_SIZE; i++) {
+		u32 r, g, b;
+
+		r = drm_color_lut_extract(lut[i].red, 8);
+		g = drm_color_lut_extract(lut[i].green, 8);
+		b = drm_color_lut_extract(lut[i].blue, 8);
+
+		regmap_write(tcon->regs, SUN4I_TCON_GAMMA_TABLE_REG + 4 * i,
+			     SUN4I_TCON_GAMMA_TABLE_R(r) |
+			     SUN4I_TCON_GAMMA_TABLE_G(g) |
+			     SUN4I_TCON_GAMMA_TABLE_B(b));
+	}
+}
+EXPORT_SYMBOL(sun4i_tcon_load_gamma_lut);
+
+void sun4i_tcon_enable_gamma(struct sun4i_tcon *tcon, bool enable)
+{
+	regmap_update_bits(tcon->regs, SUN4I_TCON_GCTL_REG,
+			   SUN4I_TCON_GCTL_GAMMA_ENABLE,
+			   enable ? SUN4I_TCON_GCTL_GAMMA_ENABLE : 0);
+}
+EXPORT_SYMBOL(sun4i_tcon_enable_gamma);
+
 /*
  * This function is a helper for TCON output muxing. The TCON output
  * muxing control register in earlier SoCs (without the TCON TOP block)
@@ -288,18 +320,6 @@ static int sun4i_tcon_get_clk_delay(const struct drm_display_mode *mode,
 	DRM_DEBUG_DRIVER("TCON %d clock delay %u\n", channel, delay);
 
 	return delay;
-}
-
-static void sun4i_tcon0_mode_set_common(struct sun4i_tcon *tcon,
-					const struct drm_display_mode *mode)
-{
-	/* Configure the dot clock */
-	clk_set_rate(tcon->dclk, mode->crtc_clock * 1000);
-
-	/* Set the resolution */
-	regmap_write(tcon->regs, SUN4I_TCON0_BASIC0_REG,
-		     SUN4I_TCON0_BASIC0_X(mode->crtc_hdisplay) |
-		     SUN4I_TCON0_BASIC0_Y(mode->crtc_vdisplay));
 }
 
 static void sun4i_tcon0_mode_set_dithering(struct sun4i_tcon *tcon,
@@ -364,12 +384,18 @@ static void sun4i_tcon0_mode_set_cpu(struct sun4i_tcon *tcon,
 	u8 bpp = mipi_dsi_pixel_format_to_bpp(device->format);
 	u8 lanes = device->lanes;
 	u32 block_space, start_delay;
-	u32 tcon_div;
 
 	tcon->dclk_min_div = SUN6I_DSI_TCON_DIV;
 	tcon->dclk_max_div = SUN6I_DSI_TCON_DIV;
 
-	sun4i_tcon0_mode_set_common(tcon, mode);
+	/* Configure the dot clock */
+	clk_set_rate(tcon->dclk, mode->crtc_clock * 1000
+				 * bpp / (lanes * SUN6I_DSI_TCON_DIV));
+
+        /* Set the resolution */
+	regmap_write(tcon->regs, SUN4I_TCON0_BASIC0_REG,
+		     SUN4I_TCON0_BASIC0_X(mode->crtc_hdisplay) |
+		     SUN4I_TCON0_BASIC0_Y(mode->crtc_vdisplay));
 
 	/* Set dithering if needed */
 	sun4i_tcon0_mode_set_dithering(tcon, sun4i_tcon_get_connector(encoder));
@@ -393,9 +419,7 @@ static void sun4i_tcon0_mode_set_cpu(struct sun4i_tcon *tcon,
 	 * The datasheet says that this should be set higher than 20 *
 	 * pixel cycle, but it's not clear what a pixel cycle is.
 	 */
-	regmap_read(tcon->regs, SUN4I_TCON0_DCLK_REG, &tcon_div);
-	tcon_div &= GENMASK(6, 0);
-	block_space = mode->htotal * bpp / (tcon_div * lanes);
+	block_space = mode->htotal * bpp / (SUN6I_DSI_TCON_DIV * lanes);
 	block_space -= mode->hdisplay + 40;
 
 	regmap_write(tcon->regs, SUN4I_TCON0_CPU_TRI0_REG,
@@ -437,7 +461,14 @@ static void sun4i_tcon0_mode_set_lvds(struct sun4i_tcon *tcon,
 
 	tcon->dclk_min_div = 7;
 	tcon->dclk_max_div = 7;
-	sun4i_tcon0_mode_set_common(tcon, mode);
+
+	/* Configure the dot clock */
+	clk_set_rate(tcon->dclk, mode->crtc_clock * 1000);
+
+        /* Set the resolution */
+	regmap_write(tcon->regs, SUN4I_TCON0_BASIC0_REG,
+		     SUN4I_TCON0_BASIC0_X(mode->crtc_hdisplay) |
+		     SUN4I_TCON0_BASIC0_Y(mode->crtc_vdisplay));
 
 	/* Set dithering if needed */
 	sun4i_tcon0_mode_set_dithering(tcon, sun4i_tcon_get_connector(encoder));
@@ -474,7 +505,9 @@ static void sun4i_tcon0_mode_set_lvds(struct sun4i_tcon *tcon,
 		     SUN4I_TCON0_BASIC2_V_TOTAL(mode->crtc_vtotal * 2) |
 		     SUN4I_TCON0_BASIC2_V_BACKPORCH(bp));
 
-	reg = SUN4I_TCON0_LVDS_IF_CLK_SEL_TCON0;
+	reg = SUN4I_TCON0_LVDS_IF_CLK_SEL_TCON0 |
+		SUN4I_TCON0_LVDS_IF_DATA_POL_NORMAL |
+		SUN4I_TCON0_LVDS_IF_CLK_POL_NORMAL;
 	if (sun4i_tcon_get_pixel_depth(encoder) == 24)
 		reg |= SUN4I_TCON0_LVDS_IF_BITWIDTH_24BITS;
 	else
@@ -514,7 +547,14 @@ static void sun4i_tcon0_mode_set_rgb(struct sun4i_tcon *tcon,
 
 	tcon->dclk_min_div = tcon->quirks->dclk_min_div;
 	tcon->dclk_max_div = 127;
-	sun4i_tcon0_mode_set_common(tcon, mode);
+
+	/* Configure the dot clock */
+	clk_set_rate(tcon->dclk, mode->crtc_clock * 1000);
+
+	/* Set the resolution */
+	regmap_write(tcon->regs, SUN4I_TCON0_BASIC0_REG,
+		     SUN4I_TCON0_BASIC0_X(mode->crtc_hdisplay) |
+		     SUN4I_TCON0_BASIC0_Y(mode->crtc_vdisplay));
 
 	/* Set dithering if needed */
 	sun4i_tcon0_mode_set_dithering(tcon, connector);
@@ -706,6 +746,13 @@ void sun4i_tcon_mode_set(struct sun4i_tcon *tcon,
 			 const struct drm_encoder *encoder,
 			 const struct drm_display_mode *mode)
 {
+	if (tcon->hw_preconfigured) {
+		// avoid the first modeset
+		tcon->hw_preconfigured = false;
+		hw_preconfigured = false;
+		return;
+	}
+
 	switch (encoder->encoder_type) {
 	case DRM_MODE_ENCODER_DSI:
 		/* DSI is tied to special case of CPU interface */
@@ -790,8 +837,8 @@ static int sun4i_tcon_init_clocks(struct device *dev,
 			dev_err(dev, "Couldn't get the TCON channel 0 clock\n");
 			return PTR_ERR(tcon->sclk0);
 		}
+		clk_prepare_enable(tcon->sclk0);
 	}
-	clk_prepare_enable(tcon->sclk0);
 
 	if (tcon->quirks->has_channel_1) {
 		tcon->sclk1 = devm_clk_get(dev, "tcon-ch1");
@@ -854,6 +901,7 @@ static int sun4i_tcon_init_regmap(struct device *dev,
 		return PTR_ERR(tcon->regs);
 	}
 
+	if (!tcon->hw_preconfigured) {
 	/* Make sure the TCON is disabled and all IRQs are off */
 	regmap_write(tcon->regs, SUN4I_TCON_GCTL_REG, 0);
 	regmap_write(tcon->regs, SUN4I_TCON_GINT0_REG, 0);
@@ -862,6 +910,7 @@ static int sun4i_tcon_init_regmap(struct device *dev,
 	/* Disable IO lines and set them to tristate */
 	regmap_write(tcon->regs, SUN4I_TCON0_IO_TRI_REG, ~0);
 	regmap_write(tcon->regs, SUN4I_TCON1_IO_TRI_REG, ~0);
+	}
 
 	return 0;
 }
@@ -1133,6 +1182,9 @@ static int sun4i_tcon_bind(struct device *dev, struct device *master,
 	tcon->dev = dev;
 	tcon->id = engine->id;
 	tcon->quirks = of_device_get_match_data(dev);
+	
+	if (tcon->id == 0)
+		tcon->hw_preconfigured = hw_preconfigured;
 
 	tcon->lcd_rst = devm_reset_control_get(dev, "lcd");
 	if (IS_ERR(tcon->lcd_rst)) {
@@ -1154,11 +1206,13 @@ static int sun4i_tcon_bind(struct device *dev, struct device *master,
 		}
 	}
 
+	if (!tcon->hw_preconfigured) {
 	/* Make sure our TCON is reset */
 	ret = reset_control_reset(tcon->lcd_rst);
 	if (ret) {
 		dev_err(dev, "Couldn't deassert our reset line\n");
 		return ret;
+	}
 	}
 
 	if (tcon->quirks->supports_lvds) {
@@ -1287,6 +1341,11 @@ static int sun4i_tcon_bind(struct device *dev, struct device *master,
 
 	list_add_tail(&tcon->list, &drv->tcon_list);
 
+	drm_mode_crtc_set_gamma_size(&tcon->crtc->crtc,
+				     SUN4I_TCON_GAMMA_LUT_SIZE);
+	drm_crtc_enable_color_mgmt(&tcon->crtc->crtc, 0, false,
+				   tcon->crtc->crtc.gamma_size);
+
 	return 0;
 
 err_free_dotclock:
@@ -1321,7 +1380,14 @@ static int sun4i_tcon_probe(struct platform_device *pdev)
 	const struct sun4i_tcon_quirks *quirks;
 	struct drm_bridge *bridge;
 	struct drm_panel *panel;
+	u32 fb_start;
 	int ret;
+
+	ret = of_property_read_u32_index(of_chosen, "p-boot,framebuffer-start", 0, &fb_start);
+	if (ret == 0) {
+		/* the display pipeline is already initialized by p-boot */
+		hw_preconfigured = true;
+	}
 
 	quirks = of_device_get_match_data(&pdev->dev);
 
@@ -1509,6 +1575,14 @@ static const struct sun4i_tcon_quirks sun8i_a33_quirks = {
 	.supports_lvds		= true,
 };
 
+static const struct sun4i_tcon_quirks sun50i_a64_lcd_quirks = {
+	.supports_lvds		= true,
+	.has_channel_0		= true,
+	.clk_kept_by_ccu	= true,
+	.dclk_min_div		= 1,
+	.setup_lvds_phy		= sun6i_tcon_setup_lvds_phy,
+};
+
 static const struct sun4i_tcon_quirks sun8i_a83t_lcd_quirks = {
 	.supports_lvds		= true,
 	.has_channel_0		= true,
@@ -1559,6 +1633,7 @@ const struct of_device_id sun4i_tcon_of_table[] = {
 	{ .compatible = "allwinner,sun8i-v3s-tcon", .data = &sun8i_v3s_quirks },
 	{ .compatible = "allwinner,sun9i-a80-tcon-lcd", .data = &sun9i_a80_tcon_lcd_quirks },
 	{ .compatible = "allwinner,sun9i-a80-tcon-tv", .data = &sun9i_a80_tcon_tv_quirks },
+	{ .compatible = "allwinner,sun50i-a64-tcon-lcd", .data = &sun50i_a64_lcd_quirks },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, sun4i_tcon_of_table);

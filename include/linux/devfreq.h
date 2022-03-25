@@ -239,6 +239,8 @@ void devfreq_resume(void);
 int update_devfreq(struct devfreq *devfreq);
 
 /* Helper functions for devfreq user device driver with OPP. */
+void devfreq_recommended_freq(struct devfreq *devfreq,
+			      unsigned long *freq, u32 flags);
 struct dev_pm_opp *devfreq_recommended_opp(struct device *dev,
 				unsigned long *freq, u32 flags);
 int devfreq_register_opp_notifier(struct device *dev,

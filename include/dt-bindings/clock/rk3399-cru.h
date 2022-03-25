@@ -125,6 +125,7 @@
 #define SCLK_DDRC			168
 #define SCLK_TESTCLKOUT1		169
 #define SCLK_TESTCLKOUT2		170
+#define SCLK_CIF_OUT_SRC		171
 
 #define DCLK_VOP0			180
 #define DCLK_VOP1			181

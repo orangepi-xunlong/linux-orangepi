@@ -197,6 +197,10 @@
 	};
 };
 
+&i2s2 {
+	status = "okay";
+};
+
 &mdio {
 	rgmii_phy: ethernet-phy@1 {
 		compatible = "ethernet-phy-ieee802.3-c22";
@@ -415,6 +419,10 @@
 
 &reg_sw {
 	regulator-name = "vcc-wifi-io";
+};
+
+&sound_hdmi {
+	status = "okay";
 };
 
 &spdif {

@@ -332,6 +332,13 @@ static struct gpio_desc *i2c_gpio_get_desc(struct device *dev,
 		return retdesc;
 	}
 
+	/* return early so that EPROBE_DEFER is not ignored on named gpios */
+	if (PTR_ERR(retdesc) == -EPROBE_DEFER) {
+		dev_err_probe(dev, PTR_ERR(retdesc),
+			      "error trying to get descriptor\n");
+		return retdesc;
+	}
+
 	retdesc = devm_gpiod_get_index(dev, NULL, index, gflags);
 	if (!IS_ERR(retdesc)) {
 		dev_dbg(dev, "got GPIO from index %u\n", index);
@@ -348,8 +355,8 @@ static struct gpio_desc *i2c_gpio_get_desc(struct device *dev,
 	if (ret == -ENOENT)
 		retdesc = ERR_PTR(-EPROBE_DEFER);
 
-	if (PTR_ERR(retdesc) != -EPROBE_DEFER)
-		dev_err(dev, "error trying to get descriptor: %d\n", ret);
+	dev_err_probe(dev, PTR_ERR(retdesc),
+		      "error trying to get descriptor\n");
 
 	return retdesc;
 }

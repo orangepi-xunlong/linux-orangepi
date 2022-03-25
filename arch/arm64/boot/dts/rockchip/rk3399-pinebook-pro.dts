@@ -345,7 +345,7 @@
 
 	/* Regulators supplied by vcc5v0_usb */
 	/* Type C port power supply regulator */
-	vbus_5vout: vbus_typec: vbus-5vout {
+	vbus_5vout: vbus-5vout {
 		compatible = "regulator-fixed";
 		enable-active-high;
 		gpio = <&gpio1 RK_PA3 GPIO_ACTIVE_HIGH>;
@@ -384,6 +384,14 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&dc_det_pin>;
 	};
+
+	typec_extcon_bridge: typec-extcon {
+		compatible = "linux,typec-extcon-bridge";
+		usb-role-switch;
+		orientation-switch;
+		mode-switch;
+		svid = /bits/ 16 <0xff01>;
+	};
 };
 
 &cpu_b0 {
@@ -410,10 +418,14 @@
 	cpu-supply = <&vdd_cpu_l>;
 };
 
+&cdn_dp {
+	status = "okay";
+	extcon = <&typec_extcon_bridge>;
+	phys = <&tcphy0_dp>;
+};
+
 &edp {
 	force-hpd;
-	pinctrl-names = "default";
-	pinctrl-0 = <&edp_hpd>;
 	status = "okay";
 
 	ports {
@@ -436,10 +448,6 @@
 
 &gpu {
 	mali-supply = <&vdd_gpu>;
-	status = "okay";
-};
-
-&hdmi_sound {
 	status = "okay";
 };
 
@@ -704,7 +712,9 @@
 		interrupts = <RK_PA2 IRQ_TYPE_LEVEL_LOW>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&fusb0_int_pin>;
-		vbus-supply = <&vbus_typec>;
+		vbus-supply = <&vbus_5vout>;
+		usb-role-switch = <&typec_extcon_bridge>;
+		extcon = <&typec_extcon_bridge>;
 
 		connector {
 			compatible = "usb-c-connector";
@@ -713,10 +723,19 @@
 			op-sink-microwatt = <1000000>;
 			power-role = "dual";
 			sink-pdos =
-				<PDO_FIXED(5000, 2500, PDO_FIXED_USB_COMM)>;
+				<PDO_FIXED(5000, 2500, PDO_FIXED_USB_COMM | PDO_FIXED_DUAL_ROLE | PDO_FIXED_DATA_SWAP)>;
 			source-pdos =
-				<PDO_FIXED(5000, 1400, PDO_FIXED_USB_COMM)>;
+				<PDO_FIXED(5000, 1400, PDO_FIXED_USB_COMM | PDO_FIXED_DUAL_ROLE | PDO_FIXED_DATA_SWAP)>;
 			try-power-role = "sink";
+			mode-switch = <&typec_extcon_bridge>;
+			orientation-switch = <&typec_extcon_bridge>;
+
+			altmodes {
+				dp {
+					svid = <0xff01>;
+					vdo = <0x0c0046>;
+				};
+			};
 
 			ports {
 				#address-cells = <1>;
@@ -787,7 +806,7 @@
 };
 
 &pcie_phy {
-	status = "okay";
+	//status = "okay";
 };
 
 &pcie0 {
@@ -799,7 +818,7 @@
 	vpcie0v9-supply = <&vcca0v9_s3>;
 	vpcie1v8-supply = <&vcca1v8_s3>;
 	vpcie3v3-supply = <&vcc3v3_ssd>;
-	status = "okay";
+	//status = "okay";
 };
 
 &pinctrl {
@@ -984,6 +1003,7 @@
 };
 
 &tcphy0 {
+	extcon = <&typec_extcon_bridge>;
 	status = "okay";
 };
 
@@ -1017,13 +1037,21 @@
 
 &u2phy0 {
 	status = "okay";
+	extcon = <&typec_extcon_bridge>;
+	extcon,ignore-usb;
 
 	u2phy0_otg: otg-port {
+		/*
+		 * Type-C port on the left side of the chasis.
+		 */
 		status = "okay";
 	};
 
 	u2phy0_host: host-port {
-		phy-supply = <&vcc5v0_otg>;
+		/*
+		 * USB 2.0 host port for the keyboard (internally connected).
+		 */
+		phy-supply = <&vcc5v0_usb>;
 		status = "okay";
 	};
 
@@ -1038,11 +1066,18 @@
 	status = "okay";
 
 	u2phy1_otg: otg-port {
+		/*
+		 * USB 3.0 A port on the left side of the chasis.
+		 */
 		status = "okay";
 	};
 
 	u2phy1_host: host-port {
-		phy-supply = <&vcc5v0_otg>;
+		/*
+		 * To the HUB that has USB camera and USB 2.0 port on the right
+		 * side of the chasis.
+		 */
+		phy-supply = <&vcc5v0_usb>;
 		status = "okay";
 	};
 };
@@ -1093,7 +1128,8 @@
 };
 
 &usbdrd_dwc3_0 {
-	dr_mode = "host";
+	dr_mode = "otg";
+	extcon = <&typec_extcon_bridge>;
 	status = "okay";
 };
 

@@ -112,7 +112,11 @@ enum ov5640_mode_id {
 };
 
 enum ov5640_frame_rate {
-	OV5640_15_FPS = 0,
+	OV5640_2_FPS = 0,
+	OV5640_3_FPS,
+	OV5640_5_FPS,
+	OV5640_7_FPS,
+	OV5640_15_FPS,
 	OV5640_30_FPS,
 	OV5640_60_FPS,
 	OV5640_NUM_FRAMERATES,
@@ -156,6 +160,10 @@ MODULE_PARM_DESC(virtual_channel,
 		 "MIPI CSI-2 virtual channel (0..3), default 0");
 
 static const int ov5640_framerates[] = {
+	[OV5640_2_FPS] = 2,
+	[OV5640_3_FPS] = 3,
+	[OV5640_5_FPS] = 5,
+	[OV5640_7_FPS] = 7,
 	[OV5640_15_FPS] = 15,
 	[OV5640_30_FPS] = 30,
 	[OV5640_60_FPS] = 60,
@@ -1764,6 +1772,7 @@ static int ov5640_set_mode(struct ov5640_dev *sensor)
 	bool auto_exp =  sensor->ctrls.auto_exp->val == V4L2_EXPOSURE_AUTO;
 	unsigned long rate;
 	int ret;
+	u8 tmp;
 
 	dn_mode = mode->dn_mode;
 	orig_dn_mode = orig_mode->dn_mode;
@@ -1834,6 +1843,22 @@ static int ov5640_set_mode(struct ov5640_dev *sensor)
 		return ret;
 	ret = ov5640_set_virtual_channel(sensor);
 	if (ret < 0)
+		return ret;
+
+	ret = ov5640_read_reg(sensor, 0x5308, &tmp);
+	if (ret)
+		return ret;
+
+	ret = ov5640_write_reg(sensor, 0x5308, tmp | 0x10 | 0x40);
+	if (ret)
+		return ret;
+
+	ret = ov5640_write_reg(sensor, 0x5306, 0);
+	if (ret)
+		return ret;
+
+	ret = ov5640_write_reg(sensor, 0x5302, 0);
+	if (ret)
 		return ret;
 
 	sensor->pending_mode_change = false;
@@ -1907,6 +1932,7 @@ static void ov5640_reset(struct ov5640_dev *sensor)
 static int ov5640_set_power_on(struct ov5640_dev *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
+	u16 chip_id;
 	int ret;
 
 	ret = clk_prepare_enable(sensor->xclk);
@@ -1931,6 +1957,13 @@ static int ov5640_set_power_on(struct ov5640_dev *sensor)
 	if (ret)
 		goto power_off;
 
+	ret = ov5640_read_reg16(sensor, OV5640_REG_CHIP_ID, &chip_id);
+	if (ret) {
+		dev_err(&client->dev, "%s: failed to read chip identifier\n",
+			__func__);
+		goto power_off;
+	}
+
 	return 0;
 
 power_off:
@@ -1946,6 +1979,7 @@ static void ov5640_set_power_off(struct ov5640_dev *sensor)
 	ov5640_power(sensor, false);
 	regulator_bulk_disable(OV5640_NUM_SUPPLIES, sensor->supplies);
 	clk_disable_unprepare(sensor->xclk);
+	msleep(100);
 }
 
 static int ov5640_set_power_mipi(struct ov5640_dev *sensor, bool on)
@@ -2193,11 +2227,11 @@ static int ov5640_try_frame_interval(struct ov5640_dev *sensor,
 				     u32 width, u32 height)
 {
 	const struct ov5640_mode_info *mode;
-	enum ov5640_frame_rate rate = OV5640_15_FPS;
+	enum ov5640_frame_rate rate = OV5640_2_FPS;
 	int minfps, maxfps, best_fps, fps;
 	int i;
 
-	minfps = ov5640_framerates[OV5640_15_FPS];
+	minfps = ov5640_framerates[OV5640_2_FPS];
 	maxfps = ov5640_framerates[OV5640_60_FPS];
 
 	if (fi->numerator == 0) {
@@ -3013,34 +3047,6 @@ static int ov5640_get_regulators(struct ov5640_dev *sensor)
 				       sensor->supplies);
 }
 
-static int ov5640_check_chip_id(struct ov5640_dev *sensor)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	int ret = 0;
-	u16 chip_id;
-
-	ret = ov5640_set_power_on(sensor);
-	if (ret)
-		return ret;
-
-	ret = ov5640_read_reg16(sensor, OV5640_REG_CHIP_ID, &chip_id);
-	if (ret) {
-		dev_err(&client->dev, "%s: failed to read chip identifier\n",
-			__func__);
-		goto power_off;
-	}
-
-	if (chip_id != 0x5640) {
-		dev_err(&client->dev, "%s: wrong chip identifier, expected 0x5640, got 0x%x\n",
-			__func__, chip_id);
-		ret = -ENXIO;
-	}
-
-power_off:
-	ov5640_set_power_off(sensor);
-	return ret;
-}
-
 static int ov5640_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
@@ -3076,7 +3082,7 @@ static int ov5640_probe(struct i2c_client *client)
 		&ov5640_mode_data[OV5640_MODE_VGA_640_480];
 	sensor->last_mode = sensor->current_mode;
 
-	sensor->ae_target = 52;
+	sensor->ae_target = 28;
 
 	/* optional indication of physical rotation of sensor */
 	ret = fwnode_property_read_u32(dev_fwnode(&client->dev), "rotation",
@@ -3153,22 +3159,22 @@ static int ov5640_probe(struct i2c_client *client)
 		return ret;
 
 	ret = ov5640_get_regulators(sensor);
-	if (ret)
+	if (ret) {
+		dev_err_probe(dev, ret, "Failed to get regulators\n");
 		return ret;
+	}
 
 	mutex_init(&sensor->lock);
-
-	ret = ov5640_check_chip_id(sensor);
-	if (ret)
-		goto entity_cleanup;
 
 	ret = ov5640_init_controls(sensor);
 	if (ret)
 		goto entity_cleanup;
 
 	ret = v4l2_async_register_subdev_sensor(&sensor->sd);
-	if (ret)
+	if (ret) {
+		dev_err_probe(dev, ret, "Failed to register sensor\n");
 		goto free_ctrls;
+	}
 
 	return 0;
 

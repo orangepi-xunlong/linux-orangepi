@@ -8,28 +8,132 @@
 / {
 	model = "Pine64 PinePhone Braveheart (1.1)";
 	compatible = "pine64,pinephone-1.1", "pine64,pinephone", "allwinner,sun50i-a64";
+
+	reg_vbus: usb0-vbus {
+		compatible = "regulator-fixed";
+		regulator-name = "usb0-vbus";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		gpio = <&pio 3 6 GPIO_ACTIVE_HIGH>; /* PD6 */
+		enable-active-high;
+		vin-supply = <&reg_drivevbus>;
+	};
+};
+
+&axp803 {
+	x-powers,drive-vbus-en;
 };
 
 &backlight {
 	power-supply = <&reg_ldo_io0>;
-	/*
-	 * PWM backlight circuit on this PinePhone revision was changed since
-	 * 1.0, and the lowest PWM duty cycle that doesn't lead to backlight
-	 * being off is around 20%. Duty cycle for the lowest brightness level
-	 * also varries quite a bit between individual boards, so the lowest
-	 * value here was chosen as a safe default.
-	 */
-	brightness-levels = <
-		774  793  814  842
-		882  935  1003 1088
-		1192 1316 1462 1633
-		1830 2054 2309 2596
-		2916 3271 3664 4096>;
-	num-interpolated-steps = <50>;
-	default-brightness-level = <400>;
+	lth-brightness = <10>;
+};
+
+&codec_analog {
+	allwinner,internal-bias-resistor;
+};
+
+&i2c0 {
+	anx7688: hdmi-bridge@28 {
+		compatible = "analogix,anx7688";
+		reg = <0x28>;
+
+		interrupt-parent = <&r_pio>;
+		interrupts = <0 11 IRQ_TYPE_EDGE_FALLING>; /* PL11 */
+
+		enable-gpios = <&pio 3 10 GPIO_ACTIVE_LOW>; /* PD10 */
+		reset-gpios = <&r_pio 0 9 GPIO_ACTIVE_HIGH>; /* PL9 */
+
+		cabledet-gpios = <&r_pio 0 8 GPIO_ACTIVE_HIGH>; /* PL8 */
+
+		avdd10-supply = <&reg_anx1v0>;
+		dvdd10-supply = <&reg_anx1v0>;
+		/* This is for the HW hack variant, but will also work for non-modified version. */
+		avdd18-supply = <&reg_ldo_io1>;
+		dvdd18-supply = <&reg_ldo_io1>;
+		avdd33-supply = <&reg_dldo1>;
+		i2c-supply = <&reg_ldo_io0>;
+		vconn-supply = <&reg_vconn5v0>;
+		hdmi_vt-supply = <&reg_dldo1>;
+
+		source-caps = <
+			PDO_FIXED(5000, 500, PDO_FIXED_DATA_SWAP | PDO_FIXED_USB_COMM | PDO_FIXED_DUAL_ROLE)
+		>;
+
+		sink-caps = <
+			PDO_FIXED(5000, 3000, PDO_FIXED_DATA_SWAP | PDO_FIXED_USB_COMM | PDO_FIXED_DUAL_ROLE)
+		>;
+
+		/*
+		 * ANX7688 can't enable/disable USB-5V <-> DCIN switch by
+		 * itself, and PMIC's N_VBUSEN is not connected anywhere either,
+		 * so we need to configure everything in software:
+		 *
+		 * - get the VBUS status from ANX7688 via I2C
+		 * - configure PMIC to let it know vbus drive status (via
+		 *   reg_drivevbus)
+		 * - enable VBUS switch and USB-5V regulator (via reg_vbus
+		 *   and reg_usb_5v)
+		 */
+		vbus-supply = <&reg_vbus>;
+		vbus_in-supply = <&usb_power_supply>;
+
+		port {
+			typec0_dr_sw: endpoint {
+				remote-endpoint = <&usb0_drd_sw>;
+			};
+		};
+	};
+};
+
+/*
+ * The N_VBUSEN pin is disconnected, but we need to inform the PMIC about
+ * the VBUS status anyway. To avoid the pin from floating and to inform
+ * the PMIC, about VBUS status, we couple reg_drivevbus with reg_vbus.
+ */
+&reg_drivevbus {
+	vin-supply = <&reg_usb_5v>;
+	status = "okay";
 };
 
 &sgm3140 {
 	enable-gpios = <&pio 3 24 GPIO_ACTIVE_HIGH>; /* PD24 */
 	flash-gpios = <&pio 2 3 GPIO_ACTIVE_HIGH>; /* PC3 */
+};
+
+&uart3 {
+	modem {
+		compatible = "quectel,eg25";
+		char-device-name = "modem-power";
+
+		power-supply = <&reg_vbat_bb>; /* PL7 */
+
+		enable-gpios = <&pio 7 8 GPIO_ACTIVE_LOW>; /* PH8 */
+		reset-gpios = <&pio 2 4 GPIO_ACTIVE_HIGH>; /* PC4 */
+		pwrkey-gpios = <&pio 1 3 GPIO_ACTIVE_HIGH>; /* PB3 */
+		//status-pwrkey-multiplexed; /* status acts as pwrkey */
+
+		sleep-gpios = <&pio 7 7 GPIO_ACTIVE_HIGH>; /* PH7 */
+		wakeup-gpios = <&pio 1 2 GPIO_ACTIVE_HIGH>; /* PB2-RI */
+
+		dtr-gpios = <&r_pio 0 6 GPIO_ACTIVE_HIGH>; /* PL6-DTR */
+		cts-gpios = <&pio 3 5 GPIO_ACTIVE_HIGH>; /* PD5-CTS */
+		rts-gpios = <&pio 3 4 GPIO_ACTIVE_HIGH>; /* PD4-RTS */
+
+		quectel,qdai = "1,1,0,1,0,0,1,1";
+	};
+};
+
+&usbphy {
+	usb-role-switch;
+
+	port {
+		usb0_drd_sw: endpoint {
+			remote-endpoint = <&typec0_dr_sw>;
+		};
+	};
+};
+
+&hdmi {
+	extcon = <&anx7688 0>;
 };

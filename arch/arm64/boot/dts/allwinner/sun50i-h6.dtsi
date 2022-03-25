@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 // Copyright (C) 2017 Icenowy Zheng <icenowy@aosc.io>
+// Copyright (C) 2020 Igor Pecovnik <igor@armbian.com>
 
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/clock/sun50i-h6-ccu.h>
@@ -15,6 +16,22 @@
 	interrupt-parent = <&gic>;
 	#address-cells = <1>;
 	#size-cells = <1>;
+
+	aliases {
+		mmc0 = &mmc0;
+		mmc1 = &mmc1;
+		mmc2 = &mmc2;
+	};
+
+	ac200_pwm_clk: ac200_clk {
+		compatible = "pwm-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pwm1_pin>;
+		pwms = <&pwm 1 42 0>;
+		status = "disabled";
+	};
 
 	cpus {
 		#address-cells = <1>;
@@ -86,6 +103,27 @@
 	psci {
 		compatible = "arm,psci-0.2";
 		method = "smc";
+	};
+
+	scpi_protocol: scpi {
+		compatible = "arm,scpi";
+		mboxes = <&msgbox 2>, <&msgbox 3>;
+		mbox-names = "tx", "rx";
+		shmem = <&scpi_sram>;
+	};
+
+	sound_hdmi: sound_hdmi {
+		compatible = "allwinner,sun9i-a80-hdmi-audio",
+			     "allwinner,sun50i-h6-hdmi-audio";
+		status = "disabled";
+
+		codec {
+			sound-dai = <&hdmi>;
+		};
+
+		cpu {
+			sound-dai = <&i2s1>;
+		};
 	};
 
 	timer {
@@ -196,6 +234,19 @@
 			#size-cells = <1>;
 			ranges;
 
+			sram_a2: sram@100000 {
+				compatible = "mmio-sram";
+				reg = <0x00100000 0x18000>;
+				#address-cells = <1>;
+				#size-cells = <1>;
+				ranges = <0 0x00100000 0x18000>;
+
+				scpi_sram: scp-shmem@17c00 {
+					compatible = "arm,scp-shmem";
+					reg = <0x17c00 0x200>;
+				};
+			};
+
 			sram_c: sram@28000 {
 				compatible = "mmio-sram";
 				reg = <0x00028000 0x1e000>;
@@ -230,6 +281,7 @@
 			reg = <0x03001000 0x1000>;
 			clocks = <&osc24M>, <&rtc 0>, <&rtc 2>;
 			clock-names = "hosc", "losc", "iosc";
+			protected-clocks = <CLK_BUS_MSGBOX>;
 			#clock-cells = <1>;
 			#reset-cells = <1>;
 		};
@@ -256,6 +308,17 @@
 			#mbox-cells = <1>;
 		};
 
+		gic: interrupt-controller@3021000 {
+			compatible = "arm,gic-400";
+			reg = <0x03021000 0x1000>,
+			      <0x03022000 0x2000>,
+			      <0x03024000 0x2000>,
+			      <0x03026000 0x2000>;
+			interrupts = <GIC_PPI 9 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_HIGH)>;
+			interrupt-controller;
+			#interrupt-cells = <3>;
+		};
+
 		sid: efuse@3006000 {
 			compatible = "allwinner,sun50i-h6-sid";
 			reg = <0x03006000 0x400>;
@@ -264,6 +327,10 @@
 
 			ths_calibration: thermal-sensor-calibration@14 {
 				reg = <0x14 0x8>;
+			};
+
+			ephy_calibration: ephy-calibration@2c {
+				reg = <0x2c 0x2>;
 			};
 
 			cpu_speed_grade: cpu-speed-grade@1c {
@@ -315,10 +382,19 @@
 			interrupt-controller;
 			#interrupt-cells = <3>;
 
+			/omit-if-no-ref/
 			ext_rgmii_pins: rgmii-pins {
 				pins = "PD0", "PD1", "PD2", "PD3", "PD4",
 				       "PD5", "PD7", "PD8", "PD9", "PD10",
 				       "PD11", "PD12", "PD13", "PD19", "PD20";
+				function = "emac";
+				drive-strength = <40>;
+			};
+
+			/omit-if-no-ref/
+			ext_rmii_pins: rmii_pins {
+				pins = "PA0", "PA1", "PA2", "PA3", "PA4",
+				       "PA5", "PA6", "PA7", "PA8", "PA9";
 				function = "emac";
 				drive-strength = <40>;
 			};
@@ -343,6 +419,11 @@
 				function = "i2c2";
 			};
 
+			i2c3_pins: i2c3-pins {
+				pins = "PB17", "PB18";
+				function = "i2c3";
+			};
+
 			mmc0_pins: mmc0-pins {
 				pins = "PF0", "PF1", "PF2", "PF3",
 				       "PF4", "PF5";
@@ -360,6 +441,12 @@
 				bias-pull-up;
 			};
 
+			pwm1_pin: pwm1-pin {
+				pins = "PB19";
+				function = "pwm1";
+			};
+
+			/omit-if-no-ref/
 			mmc2_pins: mmc2-pins {
 				pins = "PC1", "PC4", "PC5", "PC6",
 				       "PC7", "PC8", "PC9", "PC10",
@@ -413,17 +500,26 @@
 				pins = "PG8", "PG9";
 				function = "uart1";
 			};
-		};
 
-		gic: interrupt-controller@3021000 {
-			compatible = "arm,gic-400";
-			reg = <0x03021000 0x1000>,
-			      <0x03022000 0x2000>,
-			      <0x03024000 0x2000>,
-			      <0x03026000 0x2000>;
-			interrupts = <GIC_PPI 9 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_HIGH)>;
-			interrupt-controller;
-			#interrupt-cells = <3>;
+			uart2_pins: uart2-pins {
+				pins = "PD19", "PD20";
+				function = "uart2";
+			};
+
+			uart2_rts_cts_pins: uart2-rts-cts-pins {
+				pins = "PD21", "PD22";
+				function = "uart2";
+			};
+
+			uart3_pins: uart3-pins {
+				pins = "PD23", "PD24";
+				function = "uart3";
+			};
+
+			uart3_rts_cts_pins: uart3-rts-cts-pins {
+				pins = "PD25", "PD26";
+				function = "uart3";
+			};
 		};
 
 		iommu: iommu@30f0000 {
@@ -581,6 +677,8 @@
 			clock-names = "ahb", "mod";
 			dmas = <&dma 22>, <&dma 22>;
 			dma-names = "rx", "tx";
+			pinctrl-names = "default";
+			pinctrl-0 = <&spi0_pins>, <&spi0_cs_pin>;
 			resets = <&ccu RST_BUS_SPI0>;
 			status = "disabled";
 			#address-cells = <1>;
@@ -596,10 +694,43 @@
 			clock-names = "ahb", "mod";
 			dmas = <&dma 23>, <&dma 23>;
 			dma-names = "rx", "tx";
+			pinctrl-names = "default";
+			pinctrl-0 = <&spi1_pins>, <&spi1_cs_pin>;
 			resets = <&ccu RST_BUS_SPI1>;
 			status = "disabled";
 			#address-cells = <1>;
 			#size-cells = <0>;
+		};
+
+		i2c3: i2c@5002c00 {
+			compatible = "allwinner,sun50i-h6-i2c",
+				     "allwinner,sun6i-a31-i2c";
+			reg = <0x05002c00 0x400>;
+			interrupts = <GIC_SPI 7 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_I2C3>;
+			resets = <&ccu RST_BUS_I2C3>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&i2c3_pins>;
+			status = "disabled";
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			ac200: mfd@10 {
+				compatible = "x-powers,ac200";
+				reg = <0x10>;
+				interrupt-parent = <&pio>;
+				interrupts = <1 20 IRQ_TYPE_LEVEL_LOW>;
+				interrupt-controller;
+				#interrupt-cells = <1>;
+
+				ac200_ephy: phy {
+					compatible = "x-powers,ac200-ephy";
+					clocks = <&ac200_pwm_clk>;
+					nvmem-cells = <&ephy_calibration>;
+					nvmem-cell-names = "calibration";
+					status = "disabled";
+				};
+			};
 		};
 
 		emac: ethernet@5020000 {
@@ -769,6 +900,7 @@
 		};
 
 		hdmi: hdmi@6000000 {
+			#sound-dai-cells = <0>;
 			compatible = "allwinner,sun50i-h6-dw-hdmi";
 			reg = <0x06000000 0x10000>;
 			reg-io-width = <1>;
@@ -909,6 +1041,19 @@
 			};
 		};
 
+		r_uart: serial@7080000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x07080000 0x400>;
+			interrupts = <GIC_SPI 106 IRQ_TYPE_LEVEL_HIGH>;
+			reg-shift = <2>;
+			reg-io-width = <4>;
+			clocks = <&r_ccu CLK_R_APB2_UART>;
+			resets = <&r_ccu RST_R_APB2_UART>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&r_uart_pins>;
+			status = "disabled";
+		};
+
 		rtc: rtc@7000000 {
 			compatible = "allwinner,sun50i-h6-rtc";
 			reg = <0x07000000 0x400>;
@@ -925,6 +1070,7 @@
 			clocks = <&osc24M>, <&rtc 0>, <&rtc 2>,
 				 <&ccu CLK_PLL_PERIPH0>;
 			clock-names = "hosc", "losc", "iosc", "pll-periph";
+			protected-clocks = <CLK_R_APB1_TWD>;
 			#clock-cells = <1>;
 			#reset-cells = <1>;
 		};
@@ -971,6 +1117,11 @@
 			r_rsb_pins: r-rsb-pins {
 				pins = "PL0", "PL1";
 				function = "s_rsb";
+			};
+
+			r_uart_pins: r-uart-pins {
+				pins = "PL2", "PL3";
+				function = "s_uart";
 			};
 		};
 
@@ -1031,33 +1182,74 @@
 
 	thermal-zones {
 		cpu-thermal {
-			polling-delay-passive = <0>;
-			polling-delay = <0>;
+			polling-delay-passive = <250>;
+			polling-delay = <1000>;
 			thermal-sensors = <&ths 0>;
 
 			trips {
-				cpu_alert: cpu-alert {
+				cpu_warm: cpu_warm {
+					temperature = <75000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				cpu_hot_pre: cpu_hot_pre {
+					temperature = <80000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				cpu_hot: cpu_hot {
 					temperature = <85000>;
 					hysteresis = <2000>;
 					type = "passive";
 				};
 
-				cpu-crit {
-					temperature = <100000>;
-					hysteresis = <0>;
+				cpu_very_hot_pre: cpu_very_hot_pre {
+					temperature = <90000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				cpu_very_hot: cpu_very_hot {
+					temperature = <95000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				cpu_crit: cpu_crit {
+					temperature = <105000>;
+					hysteresis = <2000>;
 					type = "critical";
 				};
 			};
 
 			cooling-maps {
-				map0 {
-					trip = <&cpu_alert>;
-					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
-							 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
-							 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
-							 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				cpu_warm_limit_cpu {
+					trip = <&cpu_warm>;
+					cooling-device = <&cpu0 THERMAL_NO_LIMIT 2>;
 				};
-			};
+
+				cpu_hot_pre_limit_cpu {
+					trip = <&cpu_hot_pre>;
+					cooling-device = <&cpu0 2 3>;
+				};
+
+				cpu_hot_limit_cpu {
+					trip = <&cpu_hot>;
+					cooling-device = <&cpu0 3 4>;
+				};
+
+				cpu_very_hot_pre_limit_cpu {
+					trip = <&cpu_very_hot_pre>;
+					cooling-device = <&cpu0 5 6>;
+				};
+
+				cpu_very_hot_limit_cpu {
+					trip = <&cpu_very_hot>;
+					cooling-device = <&cpu0 7 THERMAL_NO_LIMIT>;
+				};
+		       };
 		};
 
 		gpu-thermal {

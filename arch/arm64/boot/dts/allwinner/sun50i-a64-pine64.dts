@@ -35,6 +35,11 @@
 			};
 		};
 	};
+
+	wifi_pwrseq: wifi_pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		reset-gpios = <&r_pio 0 2 GPIO_ACTIVE_LOW>; /* PL2 */
+	};
 };
 
 &codec {
@@ -107,6 +112,10 @@
 	bias-pull-up;
 };
 
+&i2s2 {
+	status = "okay";
+};
+
 &mdio {
 	ext_rmii_phy1: ethernet-phy@1 {
 		compatible = "ethernet-phy-ieee802.3-c22";
@@ -120,6 +129,17 @@
 	vmmc-supply = <&reg_dcdc1>;
 	cd-gpios = <&pio 5 6 GPIO_ACTIVE_LOW>;
 	disable-wp;
+	bus-width = <4>;
+	status = "okay";
+};
+
+&mmc1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mmc1_pins>;
+	vmmc-supply = <&reg_dldo4>;
+	vqmmc-supply = <&reg_eldo1>;
+	mmc-pwrseq = <&wifi_pwrseq>;
+	non-removable;
 	bus-width = <4>;
 	status = "okay";
 };
@@ -270,6 +290,10 @@
 	status = "okay";
 };
 
+&sound_hdmi {
+	status = "okay";
+};
+
 /* On Euler connector */
 &spdif {
 	status = "disabled";
@@ -286,7 +310,15 @@
 &uart1 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&uart1_pins>, <&uart1_rts_cts_pins>;
-	status = "disabled";
+	status = "okay";
+
+	bluetooth {
+		compatible = "realtek,rtl8723bs-bt";
+		reset-gpios = <&r_pio 0 4 GPIO_ACTIVE_LOW>; /* PL4 */
+		device-wake-gpios = <&r_pio 0 5 GPIO_ACTIVE_HIGH>; /* PL5 */
+		host-wake-gpios = <&r_pio 0 6 GPIO_ACTIVE_HIGH>; /* PL6 */
+		firmware-postfix = "pine64";
+	};
 };
 
 /* On Pi-2 connector */
@@ -317,4 +349,33 @@
 
 &usbphy {
 	status = "okay";
+};
+
+&spi0 {
+        status = "okay";
+        spi-flash@0 {
+                #address-cells = <1>;
+                #size-cells = <0>;
+                compatible = "jedec,spi-nor";
+                reg = <0>; /* Chip select 0 */
+                spi-max-frequency = <10000000>;
+                status = "disabled";
+                partitions {
+                        compatible = "fixed-partitions";
+                        #address-cells = <1>;
+                        #size-cells = <1>;
+                        partition@0 {
+                                label = "uboot";
+                                reg = <0x0 0x100000>;
+                        };
+                        partition@100000 {
+                                label = "env";
+                                reg = <0x100000 0x100000>;
+                        };
+                        partition@200000 {
+                                label = "data";
+                                reg = <0x200000 0x200000>;
+                        };
+                };
+        };
 };

@@ -19,6 +19,7 @@
 	axp_adc: adc {
 		compatible = "x-powers,axp803-adc", "x-powers,axp813-adc";
 		#io-channel-cells = <1>;
+		#thermal-sensor-cells = <0>;
 	};
 
 	axp_gpio: gpio {
@@ -35,6 +36,11 @@
 			pins = "GPIO1";
 			function = "ldo";
 		};
+	};
+
+	axp_led: led {
+		compatible = "x-powers,axp20x-led";
+		status = "disabled";
 	};
 
 	battery_power_supply: battery-power {

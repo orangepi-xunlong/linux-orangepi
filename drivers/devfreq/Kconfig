@@ -132,6 +132,14 @@ config ARM_RK3399_DMC_DEVFREQ
 	  It sets the frequency for the memory controller and reads the usage counts
 	  from hardware.
 
+config ARM_SUN8I_MBUS_DEVFREQ
+	tristate "sun8i/sun50i MBUS DEVFREQ Driver"
+	depends on ARCH_SUNXI || COMPILE_TEST
+	select DEVFREQ_GOV_SIMPLE_ONDEMAND
+	help
+	  This adds the DEVFREQ driver for the MBUS/DRAM controller in
+	  Allwinner sun8i and sun50i SoCs.
+
 source "drivers/devfreq/event/Kconfig"
 
 endif # PM_DEVFREQ

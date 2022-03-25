@@ -3360,7 +3360,7 @@ vm_fault_t filemap_page_mkwrite(struct vm_fault *vmf)
 	vm_fault_t ret = VM_FAULT_LOCKED;
 
 	sb_start_pagefault(mapping->host->i_sb);
-	file_update_time(vmf->vma->vm_file);
+	vma_file_update_time(vmf->vma);
 	lock_page(page);
 	if (page->mapping != mapping) {
 		unlock_page(page);

@@ -108,6 +108,12 @@ static int sun50i_h5_calc_temp(struct ths_device *tmdev,
 		return -1590 * reg / 10 + 276000;
 }
 
+static int sun50i_h616_calc_temp(struct ths_device *tmdev,
+			       int id, int reg)
+{
+	return (reg + tmdev->chip->offset) * tmdev->chip->scale;
+}
+
 static int sun8i_ths_get_temp(void *data, int *temp)
 {
 	struct tsensor *s = data;
@@ -278,6 +284,64 @@ static int sun50i_h6_ths_calibrate(struct ths_device *tmdev,
 	return 0;
 }
 
+static int sun50i_h616_ths_calibrate(struct ths_device *tmdev,
+				   u16 *caldata, int callen)
+{
+	struct device *dev = tmdev->dev;
+	int i, ft_temp;
+
+	if (!caldata[0])
+		return -EINVAL;
+
+	/*
+	 * h616 efuse THS calibration data layout:
+	 *
+	 * 0      11  16     27   32     43   48    57
+	 * +----------+-----------+-----------+-----------+
+	 * |  temp |  |sensor0|   |sensor1|   |sensor2|   |
+	 * +----------+-----------+-----------+-----------+
+	 *                      ^           ^           ^
+	 *                      |           |           |
+	 *                      |           |           sensor3[11:8]
+	 *                      |           sensor3[7:4]
+	 *                      sensor3[3:0]
+	 *
+	 * The calibration data on the H616 is the ambient temperature and
+	 * sensor values that are filled during the factory test stage.
+	 *
+	 * The unit of stored FT temperature is 0.1 degreee celusis.
+	 */
+	ft_temp = caldata[0] & FT_TEMP_MASK;
+
+	for (i = 0; i < tmdev->chip->sensor_num; i++) {
+		int delta, cdata, offset, reg;
+
+		if (i == 3)
+			reg = (caldata[1] >> 12)
+			      | (caldata[2] >> 12 << 4)
+			      | (caldata[3] >> 12 << 8);
+		else
+			reg = (int)caldata[i + 1] & TEMP_CALIB_MASK;
+
+		delta = (ft_temp * 100 - tmdev->chip->calc_temp(tmdev, i, reg))
+			/ tmdev->chip->scale;
+		cdata = CALIBRATE_DEFAULT - delta;
+		if (cdata & ~TEMP_CALIB_MASK) {
+			dev_warn(dev, "sensor%d is not calibrated.\n", i);
+
+			continue;
+		}
+		
+		offset = (i % 2) * 16;
+		regmap_update_bits(tmdev->regmap,
+				   SUN50I_H6_THS_TEMP_CALIB + (i / 2 * 4),
+				   0xfff << offset,
+				   cdata << offset);
+	}
+
+	return 0;
+}
+
 static int sun8i_ths_calibrate(struct ths_device *tmdev)
 {
 	struct nvmem_cell *calcell;
@@ -288,8 +352,13 @@ static int sun8i_ths_calibrate(struct ths_device *tmdev)
 
 	calcell = devm_nvmem_cell_get(dev, "calibration");
 	if (IS_ERR(calcell)) {
+		dev_err_probe(dev, PTR_ERR(calcell),
+			      "Failed to get calibration nvmem cell (%pe)\n",
+			      calcell);
+
 		if (PTR_ERR(calcell) == -EPROBE_DEFER)
 			return -EPROBE_DEFER;
+
 		/*
 		 * Even if the external calibration data stored in sid is
 		 * not accessible, the THS hardware can still work, although
@@ -309,6 +378,8 @@ static int sun8i_ths_calibrate(struct ths_device *tmdev)
 	caldata = nvmem_cell_read(calcell, &callen);
 	if (IS_ERR(caldata)) {
 		ret = PTR_ERR(caldata);
+		dev_err(dev, "Failed to read calibration data (%pe)\n",
+			caldata);
 		goto out;
 	}
 
@@ -331,23 +402,33 @@ static int sun8i_ths_resource_init(struct ths_device *tmdev)
 		return PTR_ERR(base);
 
 	tmdev->regmap = devm_regmap_init_mmio(dev, base, &config);
-	if (IS_ERR(tmdev->regmap))
+	if (IS_ERR(tmdev->regmap)) {
+		dev_err(dev, "Failed to init regmap (%pe)\n", tmdev->regmap);
 		return PTR_ERR(tmdev->regmap);
+	}
 
 	if (tmdev->chip->has_bus_clk_reset) {
 		tmdev->reset = devm_reset_control_get(dev, NULL);
-		if (IS_ERR(tmdev->reset))
+		if (IS_ERR(tmdev->reset)) {
+			dev_err(dev, "Failed to get reset (%pe)\n", tmdev->reset);
 			return PTR_ERR(tmdev->reset);
+		}
 
 		tmdev->bus_clk = devm_clk_get(&pdev->dev, "bus");
-		if (IS_ERR(tmdev->bus_clk))
+		if (IS_ERR(tmdev->bus_clk)) {
+			dev_err(dev, "Failed to get bus clock (%pe)\n",
+				tmdev->bus_clk);
 			return PTR_ERR(tmdev->bus_clk);
+		}
 	}
 
 	if (tmdev->chip->has_mod_clk) {
 		tmdev->mod_clk = devm_clk_get(&pdev->dev, "mod");
-		if (IS_ERR(tmdev->mod_clk))
+		if (IS_ERR(tmdev->mod_clk)) {
+			dev_err(dev, "Failed to get mod clock (%pe)\n",
+				tmdev->mod_clk);
 			return PTR_ERR(tmdev->mod_clk);
+		}
 	}
 
 	ret = reset_control_deassert(tmdev->reset);
@@ -460,6 +541,30 @@ static int sun50i_h6_thermal_init(struct ths_device *tmdev)
 	return 0;
 }
 
+static int sun50i_h616_thermal_init(struct ths_device *tmdev)
+{
+	int val;
+
+	/*
+	 * For sun50iw9p1:
+	 * It is necessary that reg[0x03000000] bit[16] is 0.
+	 */
+	regmap_write(tmdev->regmap, SUN50I_THS_CTRL0,
+		     SUN8I_THS_CTRL0_T_ACQ0(47) | SUN8I_THS_CTRL2_T_ACQ1(479));
+	regmap_write(tmdev->regmap, SUN50I_H6_THS_MFC,
+		     SUN50I_THS_FILTER_EN |
+		     SUN50I_THS_FILTER_TYPE(1));
+	regmap_write(tmdev->regmap, SUN50I_H6_THS_PC,
+		     SUN50I_H6_THS_PC_TEMP_PERIOD(365));
+	val = GENMASK(tmdev->chip->sensor_num - 1, 0);
+	regmap_write(tmdev->regmap, SUN50I_H6_THS_ENABLE, val);
+	/* thermal data interrupt enable */
+	val = GENMASK(tmdev->chip->sensor_num - 1, 0);
+	regmap_write(tmdev->regmap, SUN50I_H6_THS_DIC, val);
+
+	return 0;
+}
+
 static int sun8i_ths_register(struct ths_device *tmdev)
 {
 	int i;
@@ -472,8 +577,12 @@ static int sun8i_ths_register(struct ths_device *tmdev)
 							     i,
 							     &tmdev->sensor[i],
 							     &ths_ops);
-		if (IS_ERR(tmdev->sensor[i].tzd))
+		if (IS_ERR(tmdev->sensor[i].tzd)) {
+			dev_err(tmdev->dev,
+				"Failed to register sensor %d (%pe)\n",
+				i, tmdev->sensor[i].tzd);
 			return PTR_ERR(tmdev->sensor[i].tzd);
+		}
 
 		if (devm_thermal_add_hwmon_sysfs(tmdev->sensor[i].tzd))
 			dev_warn(tmdev->dev,
@@ -524,8 +633,10 @@ static int sun8i_ths_probe(struct platform_device *pdev)
 	ret = devm_request_threaded_irq(dev, irq, NULL,
 					sun8i_irq_thread,
 					IRQF_ONESHOT, "ths", tmdev);
-	if (ret)
+	if (ret) {
+		dev_err(dev, "Failed to request irq (%d)\n", ret);
 		return ret;
+	}
 
 	return 0;
 }
@@ -628,6 +739,19 @@ static const struct ths_thermal_chip sun50i_h6_ths = {
 	.calc_temp = sun8i_ths_calc_temp,
 };
 
+static const struct ths_thermal_chip sun50i_h616_ths = {
+	.sensor_num = 4,
+	.has_bus_clk_reset = true,
+	.ft_deviation = 8000,
+	.offset = -3255,
+	.scale = -81,
+	.temp_data_base = SUN50I_H6_THS_TEMP_DATA,
+	.calibrate = sun50i_h616_ths_calibrate,
+	.init = sun50i_h616_thermal_init,
+	.irq_ack = sun50i_h6_irq_ack,
+	.calc_temp = sun50i_h616_calc_temp,
+};
+
 static const struct of_device_id of_ths_match[] = {
 	{ .compatible = "allwinner,sun8i-a83t-ths", .data = &sun8i_a83t_ths },
 	{ .compatible = "allwinner,sun8i-h3-ths", .data = &sun8i_h3_ths },
@@ -636,6 +760,7 @@ static const struct of_device_id of_ths_match[] = {
 	{ .compatible = "allwinner,sun50i-a100-ths", .data = &sun50i_a100_ths },
 	{ .compatible = "allwinner,sun50i-h5-ths", .data = &sun50i_h5_ths },
 	{ .compatible = "allwinner,sun50i-h6-ths", .data = &sun50i_h6_ths },
+	{ .compatible = "allwinner,sun50i-h616-ths", .data = &sun50i_h616_ths },
 	{ /* sentinel */ },
 };
 MODULE_DEVICE_TABLE(of, of_ths_match);

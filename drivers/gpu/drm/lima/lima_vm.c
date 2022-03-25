@@ -3,6 +3,7 @@
 
 #include <linux/slab.h>
 #include <linux/dma-mapping.h>
+#include <drm/lima_drm.h>
 
 #include "lima_device.h"
 #include "lima_vm.h"
@@ -93,6 +94,7 @@ int lima_vm_bo_add(struct lima_vm *vm, struct lima_bo *bo, bool create)
 	struct lima_bo_va *bo_va;
 	struct sg_dma_page_iter sg_iter;
 	int offset = 0, err;
+	u64 start, end;
 
 	mutex_lock(&bo->lock);
 
@@ -120,7 +122,16 @@ int lima_vm_bo_add(struct lima_vm *vm, struct lima_bo *bo, bool create)
 
 	mutex_lock(&vm->lock);
 
-	err = drm_mm_insert_node(&vm->mm, &bo_va->node, lima_bo_size(bo));
+	if (bo->flags & LIMA_BO_FLAG_FORCE_VA) {
+		start = bo->force_va;
+		end = start + lima_bo_size(bo);
+	} else {
+		start = 0;
+		end = U64_MAX;
+	}
+
+	err = drm_mm_insert_node_in_range(&vm->mm, &bo_va->node, lima_bo_size(bo),
+					  0, 0, start, end, 0);
 	if (err)
 		goto err_out1;
 

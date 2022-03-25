@@ -23,6 +23,17 @@ config DRM_SUN4I_HDMI
 	  Choose this option if you have an Allwinner SoC with an HDMI
 	  controller.
 
+config DRM_SUN4I_HDMI_AUDIO
+	bool "Allwinner A10 HDMI Audio Support"
+	default y
+	depends on DRM_SUN4I_HDMI
+	depends on SND_SOC=y || SND_SOC=DRM_SUN4I_HDMI
+	select SND_PCM_ELD
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	help
+	  Choose this option if you have an Allwinner SoC with an HDMI
+	  controller and want to use audio.
+
 config DRM_SUN4I_HDMI_CEC
 	bool "Allwinner A10 HDMI CEC Support"
 	depends on DRM_SUN4I_HDMI

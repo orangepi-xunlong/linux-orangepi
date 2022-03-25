@@ -15,6 +15,7 @@
 
 	aliases {
 		ethernet0 = &emac;
+		ethernet1 = &brcmf;
 		serial0 = &uart0;
 		serial1 = &uart1;
 		serial2 = &uart2;
@@ -135,6 +136,10 @@
 	hdmi_out_con: endpoint {
 		remote-endpoint = <&hdmi_con_in>;
 	};
+};
+
+&i2s2 {
+	status = "okay";
 };
 
 &mdio {
@@ -338,6 +343,10 @@
 			"MIC2", "Microphone Jack",
 			"Onboard Microphone", "MBIAS",
 			"MIC1", "Onboard Microphone";
+};
+
+&sound_hdmi {
+	status = "okay";
 };
 
 &spi0 {

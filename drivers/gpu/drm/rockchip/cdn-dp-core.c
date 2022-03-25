@@ -934,6 +934,7 @@ static void cdn_dp_pd_event_work(struct work_struct *work)
 		DRM_DEV_INFO(dp->dev, "Not connected. Disabling cdn\n");
 		dp->connected = false;
 
+		cdn_dp_disable(dp);
 	/* Connected but not enabled, enable the block */
 	} else if (!dp->active) {
 		DRM_DEV_INFO(dp->dev, "Connected, not enabled. Enabling cdn\n");

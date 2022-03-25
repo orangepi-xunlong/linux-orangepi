@@ -58,6 +58,20 @@
 	};
 };
 
+
+&i2s0 {
+       status = "okay";
+};
+
+&codec {
+	allwinner,audio-routing =
+		"Speaker", "LINEOUT",
+		"MIC1", "Mic",
+		"Mic",  "MBIAS";
+	allwinner,pa-gpios = <&pio 6 6 GPIO_ACTIVE_HIGH>; /* PG6 */
+	status = "okay";
+};
+
 &csi1 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&csi1_8bit_pins>;

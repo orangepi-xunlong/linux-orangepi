@@ -15,6 +15,8 @@ struct lima_bo {
 	struct mutex lock;
 	struct list_head va;
 
+	u32 flags;
+	u32 force_va;
 	size_t heap_size;
 };
 
@@ -37,7 +39,7 @@ static inline struct dma_resv *lima_bo_resv(struct lima_bo *bo)
 int lima_heap_alloc(struct lima_bo *bo, struct lima_vm *vm);
 struct drm_gem_object *lima_gem_create_object(struct drm_device *dev, size_t size);
 int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
-			   u32 size, u32 flags, u32 *handle);
+			   u32 size, u32 flags, u32 *handle, u32 va);
 int lima_gem_get_info(struct drm_file *file, u32 handle, u32 *va, u64 *offset);
 int lima_gem_submit(struct drm_file *file, struct lima_submit *submit);
 int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, s64 timeout_ns);

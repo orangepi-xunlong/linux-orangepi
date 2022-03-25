@@ -135,4 +135,7 @@ obj-$(CONFIG_VIDEO_MAX9271_LIB)	+= max9271.o
 obj-$(CONFIG_VIDEO_RDACM20)	+= rdacm20.o
 obj-$(CONFIG_VIDEO_RDACM21)	+= rdacm21.o
 obj-$(CONFIG_VIDEO_ST_MIPID02) += st-mipid02.o
+obj-$(CONFIG_VIDEO_HM5065)	+= hm5065.o
+obj-$(CONFIG_VIDEO_GC2145)	+= gc2145.o
+
 obj-$(CONFIG_SDR_MAX2175) += max2175.o

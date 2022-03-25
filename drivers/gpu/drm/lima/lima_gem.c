@@ -100,7 +100,7 @@ int lima_heap_alloc(struct lima_bo *bo, struct lima_vm *vm)
 }
 
 int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
-			   u32 size, u32 flags, u32 *handle)
+			   u32 size, u32 flags, u32 *handle, u32 va)
 {
 	int err;
 	gfp_t mask;
@@ -121,8 +121,11 @@ int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
 	mask |= __GFP_DMA32;
 	mapping_set_gfp_mask(obj->filp->f_mapping, mask);
 
+	bo = to_lima_bo(obj);
+	bo->flags = flags;
+	bo->force_va = va;
+
 	if (is_heap) {
-		bo = to_lima_bo(obj);
 		err = lima_heap_alloc(bo, NULL);
 		if (err)
 			goto out;

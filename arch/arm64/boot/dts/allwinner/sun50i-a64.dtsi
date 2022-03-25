@@ -17,6 +17,12 @@
 	#address-cells = <1>;
 	#size-cells = <1>;
 
+	aliases {
+		mmc0 = &mmc0;
+		mmc1 = &mmc1;
+		mmc2 = &mmc2;
+	};
+
 	chosen {
 		#address-cells = <1>;
 		#size-cells = <1>;
@@ -54,6 +60,7 @@
 			clocks = <&ccu CLK_CPUX>;
 			clock-names = "cpu";
 			#cooling-cells = <2>;
+			cpu-idle-states = <&cpu_sleep>, <&cluster_sleep>;
 		};
 
 		cpu1: cpu@1 {
@@ -65,6 +72,7 @@
 			clocks = <&ccu CLK_CPUX>;
 			clock-names = "cpu";
 			#cooling-cells = <2>;
+			cpu-idle-states = <&cpu_sleep>, <&cluster_sleep>;
 		};
 
 		cpu2: cpu@2 {
@@ -76,6 +84,7 @@
 			clocks = <&ccu CLK_CPUX>;
 			clock-names = "cpu";
 			#cooling-cells = <2>;
+			cpu-idle-states = <&cpu_sleep>, <&cluster_sleep>;
 		};
 
 		cpu3: cpu@3 {
@@ -87,6 +96,29 @@
 			clocks = <&ccu CLK_CPUX>;
 			clock-names = "cpu";
 			#cooling-cells = <2>;
+			cpu-idle-states = <&cpu_sleep>, <&cluster_sleep>;
+		};
+
+		idle-states {
+			entry-method = "psci";
+
+			cpu_sleep: cpu-sleep {
+				compatible = "arm,idle-state";
+				local-timer-stop;
+				entry-latency-us = <800>;
+				exit-latency-us = <1500>;
+				min-residency-us = <25000>;
+				arm,psci-suspend-param = <0x00010003>;
+			};
+
+			cluster_sleep: cluster-sleep {
+				compatible = "arm,idle-state";
+				local-timer-stop;
+				entry-latency-us = <850>;
+				exit-latency-us = <1500>;
+				min-residency-us = <50000>;
+				arm,psci-suspend-param = <0x01010013>;
+			};
 		};
 
 		L2: l2-cache {
@@ -146,6 +178,13 @@
 		method = "smc";
 	};
 
+	scpi_protocol: scpi {
+		compatible = "arm,scpi";
+		mboxes = <&msgbox 2>, <&msgbox 3>;
+		mbox-names = "tx", "rx";
+		shmem = <&scpi_sram>;
+	};
+
 	sound: sound {
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -172,6 +211,20 @@
 			link0_codec: codec {
 				sound-dai = <&codec 0>;
 			};
+		};
+	};
+
+	sound_hdmi: sound_hdmi {
+		compatible = "allwinner,sun9i-a80-hdmi-audio",
+			     "allwinner,sun50i-a64-hdmi-audio";
+		status = "disabled";
+
+		codec {
+			sound-dai = <&hdmi>;
+		};
+
+		cpu {
+			sound-dai = <&i2s2>;
 		};
 	};
 
@@ -216,21 +269,21 @@
 			trips {
 				cpu_alert0: cpu_alert0 {
 					/* milliCelsius */
-					temperature = <75000>;
+					temperature = <70000>;
 					hysteresis = <2000>;
 					type = "passive";
 				};
 
 				cpu_alert1: cpu_alert1 {
 					/* milliCelsius */
-					temperature = <90000>;
+					temperature = <80000>;
 					hysteresis = <2000>;
 					type = "hot";
 				};
 
 				cpu_crit: cpu_crit {
 					/* milliCelsius */
-					temperature = <110000>;
+					temperature = <90000>;
 					hysteresis = <2000>;
 					type = "critical";
 				};
@@ -359,6 +412,19 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 			ranges;
+
+			sram_a2: sram@40000 {
+				compatible = "mmio-sram";
+				reg = <0x00040000 0x14000>;
+				#address-cells = <1>;
+				#size-cells = <1>;
+				ranges = <0 0x00040000 0x14000>;
+
+				scpi_sram: scp-shmem@13c00 {
+					compatible = "arm,scp-shmem";
+					reg = <0x13c00 0x200>;
+				};
+			};
 
 			sram_c: sram@18000 {
 				compatible = "mmio-sram";
@@ -509,6 +575,7 @@
 			interrupts = <GIC_SPI 60 IRQ_TYPE_LEVEL_HIGH>;
 			max-frequency = <150000000>;
 			status = "disabled";
+			bus-width = <0x4>;
 			#address-cells = <1>;
 			#size-cells = <0>;
 		};
@@ -662,6 +729,7 @@
 			reg = <0x01c20000 0x400>;
 			clocks = <&osc24M>, <&rtc 0>;
 			clock-names = "hosc", "losc";
+			protected-clocks = <CLK_BUS_MSGBOX>;
 			#clock-cells = <1>;
 			#reset-cells = <1>;
 		};
@@ -867,7 +935,7 @@
 
 		lradc: lradc@1c21800 {
 			compatible = "allwinner,sun50i-a64-lradc",
-				     "allwinner,sun8i-a83t-r-lradc";
+				     "allwinner,sun4i-a10-lradc-keys";
 			reg = <0x01c21800 0x400>;
 			interrupt-parent = <&r_intc>;
 			interrupts = <GIC_SPI 30 IRQ_TYPE_LEVEL_HIGH>;
@@ -958,6 +1026,7 @@
 			interrupts = <GIC_SPI 0 IRQ_TYPE_LEVEL_HIGH>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
+			fifo-size = <64>;
 			clocks = <&ccu CLK_BUS_UART0>;
 			resets = <&ccu RST_BUS_UART0>;
 			status = "disabled";
@@ -969,6 +1038,7 @@
 			interrupts = <GIC_SPI 1 IRQ_TYPE_LEVEL_HIGH>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
+			fifo-size = <64>;
 			clocks = <&ccu CLK_BUS_UART1>;
 			resets = <&ccu RST_BUS_UART1>;
 			status = "disabled";
@@ -980,6 +1050,7 @@
 			interrupts = <GIC_SPI 2 IRQ_TYPE_LEVEL_HIGH>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
+			fifo-size = <64>;
 			clocks = <&ccu CLK_BUS_UART2>;
 			resets = <&ccu RST_BUS_UART2>;
 			status = "disabled";
@@ -991,6 +1062,7 @@
 			interrupts = <GIC_SPI 3 IRQ_TYPE_LEVEL_HIGH>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
+			fifo-size = <64>;
 			clocks = <&ccu CLK_BUS_UART3>;
 			resets = <&ccu RST_BUS_UART3>;
 			status = "disabled";
@@ -1002,6 +1074,7 @@
 			interrupts = <GIC_SPI 4 IRQ_TYPE_LEVEL_HIGH>;
 			reg-shift = <2>;
 			reg-io-width = <4>;
+			fifo-size = <64>;
 			clocks = <&ccu CLK_BUS_UART4>;
 			resets = <&ccu RST_BUS_UART4>;
 			status = "disabled";
@@ -1134,8 +1207,7 @@
 		};
 
 		pwm: pwm@1c21400 {
-			compatible = "allwinner,sun50i-a64-pwm",
-				     "allwinner,sun5i-a13-pwm";
+			compatible = "allwinner,sun50i-a64-pwm";
 			reg = <0x01c21400 0x400>;
 			clocks = <&osc24M>;
 			pinctrl-names = "default";
@@ -1146,8 +1218,14 @@
 
 		mbus: dram-controller@1c62000 {
 			compatible = "allwinner,sun50i-a64-mbus";
-			reg = <0x01c62000 0x1000>;
-			clocks = <&ccu 112>;
+			reg = <0x01c62000 0x1000>,
+			      <0x01c63000 0x1000>;
+			reg-names = "mbus", "dram";
+			clocks = <&ccu CLK_BUS_DRAM>,
+				 <&ccu CLK_DRAM>,
+				 <&ccu CLK_MBUS>;
+			clock-names = "apb", "dram", "mbus";
+			interrupts = <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>;
 			#address-cells = <1>;
 			#size-cells = <1>;
 			dma-ranges = <0x00000000 0x40000000 0xc0000000>;
@@ -1214,6 +1292,7 @@
 		};
 
 		hdmi: hdmi@1ee0000 {
+			#sound-dai-cells = <0>;
 			compatible = "allwinner,sun50i-a64-dw-hdmi",
 				     "allwinner,sun8i-a83t-dw-hdmi";
 			reg = <0x01ee0000 0x10000>;
@@ -1284,6 +1363,7 @@
 			clocks = <&osc24M>, <&rtc 0>, <&rtc 2>,
 				 <&ccu CLK_PLL_PERIPH0>;
 			clock-names = "hosc", "losc", "iosc", "pll-periph";
+			protected-clocks = <CLK_APB0_TWD>;
 			#clock-cells = <1>;
 			#reset-cells = <1>;
 		};
@@ -1320,8 +1400,7 @@
 		};
 
 		r_pwm: pwm@1f03800 {
-			compatible = "allwinner,sun50i-a64-pwm",
-				     "allwinner,sun5i-a13-pwm";
+			compatible = "allwinner,sun50i-a64-pwm";
 			reg = <0x01f03800 0x400>;
 			clocks = <&osc24M>;
 			pinctrl-names = "default";

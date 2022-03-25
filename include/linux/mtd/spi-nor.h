@@ -10,6 +10,7 @@
 #include <linux/mtd/cfi.h>
 #include <linux/mtd/mtd.h>
 #include <linux/spi/spi-mem.h>
+#include <linux/regulator/consumer.h>
 
 /*
  * Note on opcode nomenclature: some opcodes have a format like
@@ -421,6 +422,8 @@ struct spi_nor {
 		struct spi_mem_dirmap_desc *rdesc;
 		struct spi_mem_dirmap_desc *wdesc;
 	} dirmap;
+
+	struct regulator* reg_vdd;
 
 	void *priv;
 };

@@ -578,6 +578,7 @@ static const struct sunxi_pinctrl_desc a64_pinctrl_data = {
 	.pins = a64_pins,
 	.npins = ARRAY_SIZE(a64_pins),
 	.irq_banks = 3,
+	.disable_strict_mode = true,
 };
 
 static int a64_pinctrl_probe(struct platform_device *pdev)

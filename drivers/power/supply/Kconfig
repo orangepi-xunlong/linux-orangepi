@@ -51,6 +51,14 @@ config GENERIC_ADC_BATTERY
 	  Say Y here to enable support for the generic battery driver
 	  which uses IIO framework to read adc.
 
+config IP5XXX_POWER
+	tristate "Injoinic IP5xxx charger driver"
+	depends on I2C
+	select REGMAP_I2C
+	help
+	  Say Y to include support for Injoinic IP5xxx (including IP5209)
+	  charger ICs.
+
 config MAX8925_POWER
 	tristate "MAX8925 battery charger support"
 	depends on MFD_MAX8925
@@ -853,5 +861,21 @@ config CHARGER_SURFACE
 	  Say M or Y here to include AC status support for 7th-generation
 	  Microsoft Surface devices, i.e. Surface Pro 7, Surface Laptop 3,
 	  Surface Book 3, and Surface Laptop Go.
+
+config BATTERY_RK818
+	bool "RK818 Battery driver"
+	depends on MFD_RK808
+	default n
+	help
+	  If you say yes here you will get support for the battery of RK818 PMIC.
+	  This driver can give support for Rk818 Battery Charge Interface.
+
+config CHARGER_RK818
+	bool "RK818 Charger driver"
+	depends on MFD_RK808
+	default n
+	help
+	  If you say yes here you will get support for the charger of RK818 PMIC.
+	  This driver can give support for Rk818 Charger Interface.
 
 endif # POWER_SUPPLY

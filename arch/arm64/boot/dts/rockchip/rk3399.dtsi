@@ -373,6 +373,7 @@
 		status = "disabled";
 	};
 
+/*
 	debug@fe430000 {
 		compatible = "arm,coresight-cpu-debug", "arm,primecell";
 		reg = <0 0xfe430000 0 0x1000>;
@@ -420,6 +421,7 @@
 		clock-names = "apb_pclk";
 		cpu = <&cpu_b1>;
 	};
+*/
 
 	usbdrd3_0: usb@fe800000 {
 		compatible = "rockchip,rk3399-dwc3";

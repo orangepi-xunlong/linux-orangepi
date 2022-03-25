@@ -51,6 +51,12 @@
 	#address-cells = <1>;
 	#size-cells = <1>;
 
+	aliases {
+		mmc0 = &mmc0;
+		mmc1 = &mmc1;
+		mmc2 = &mmc2;
+	};
+
 	cpus {
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -123,7 +129,7 @@
 		};
 	};
 
-	soc {
+	soc: soc {
 		compatible = "simple-bus";
 		#address-cells = <1>;
 		#size-cells = <1>;
@@ -648,6 +654,11 @@
 			reg = <0x01c25000 0x100>;
 			interrupts = <29>;
 			#thermal-sensor-cells = <0>;
+
+			rtp_adc: adc {
+				compatible = "allwinner,sun5i-a13-gpadc-iio";
+				#io-channel-cells = <1>;
+			};
 		};
 
 		uart0: serial@1c28000 {

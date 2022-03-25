@@ -1263,10 +1263,10 @@ void *fwnode_connection_find_match(struct fwnode_handle *fwnode,
 	if (!fwnode || !match)
 		return NULL;
 
-	ret = fwnode_graph_devcon_match(fwnode, con_id, data, match);
+	ret = fwnode_devcon_match(fwnode, con_id, data, match);
 	if (ret)
 		return ret;
 
-	return fwnode_devcon_match(fwnode, con_id, data, match);
+	return fwnode_graph_devcon_match(fwnode, con_id, data, match);
 }
 EXPORT_SYMBOL_GPL(fwnode_connection_find_match);

@@ -17,7 +17,9 @@ static const struct snd_soc_dapm_widget bt_sco_widgets[] = {
 
 static const struct snd_soc_dapm_route bt_sco_routes[] = {
 	{ "Capture", NULL, "RX" },
+	{ "Wideband Capture", NULL, "RX" },
 	{ "TX", NULL, "Playback" },
+	{ "TX", NULL, "Wideband Playback" },
 };
 
 static struct snd_soc_dai_driver bt_sco_dai[] = {
@@ -41,14 +43,14 @@ static struct snd_soc_dai_driver bt_sco_dai[] = {
 	{
 		.name = "bt-sco-pcm-wb",
 		.playback = {
-			.stream_name = "Playback",
+			.stream_name = "Wideband Playback",
 			.channels_min = 1,
 			.channels_max = 1,
 			.rates = SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_16000,
 			.formats = SNDRV_PCM_FMTBIT_S16_LE,
 		},
 		.capture = {
-			 .stream_name = "Capture",
+			 .stream_name = "Wideband Capture",
 			.channels_min = 1,
 			.channels_max = 1,
 			.rates = SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_16000,

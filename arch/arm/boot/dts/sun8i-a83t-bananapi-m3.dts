@@ -147,6 +147,10 @@
 	};
 };
 
+&i2s2 {
+	status = "okay";
+};
+
 &mdio {
 	rgmii_phy: ethernet-phy@1 {
 		compatible = "ethernet-phy-ieee802.3-c22";
@@ -363,6 +367,10 @@
 	 */
 	regulator-enable-ramp-delay = <100000>;
 	regulator-name = "vcc-ephy";
+};
+
+&sound_hdmi {
+	status = "okay";
 };
 
 &uart0 {

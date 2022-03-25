@@ -147,6 +147,9 @@ static int sunxi_cpu_power_switch_set(unsigned int cpu, unsigned int cluster,
 
 static void sunxi_cpu0_hotplug_support_set(bool enable)
 {
+	if (is_a83t)
+		return;
+
 	if (enable) {
 		writel(CPU0_SUPPORT_HOTPLUG_MAGIC0, sram_b_smp_base);
 		writel(CPU0_SUPPORT_HOTPLUG_MAGIC1, sram_b_smp_base + 0x4);

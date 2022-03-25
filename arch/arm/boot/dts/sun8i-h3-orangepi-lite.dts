@@ -120,6 +120,10 @@
 	};
 };
 
+&i2s2 {
+	status = "okay";
+};
+
 &ir {
 	pinctrl-names = "default";
 	pinctrl-0 = <&r_ir_rx_pin>;
@@ -153,6 +157,10 @@
 };
 
 &ohci2 {
+	status = "okay";
+};
+
+&sound_hdmi {
 	status = "okay";
 };
 

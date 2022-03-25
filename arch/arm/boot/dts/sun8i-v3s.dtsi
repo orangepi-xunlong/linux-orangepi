@@ -469,6 +469,20 @@
 			reg = <0x01c23000 0x4>;
 		};
 
+
+               i2s0: i2s@1c22000 {
+                       #sound-dai-cells = <0>;
+                       compatible = "allwinner,sun8i-h3-i2s";
+                       reg = <0x01c22000 0x400>;
+                       interrupts = <GIC_SPI 13 IRQ_TYPE_LEVEL_HIGH>;
+                       clocks = <&ccu CLK_BUS_I2S0>, <&ccu CLK_I2S0>;
+                       clock-names = "apb", "mod";
+                       dmas = <&dma 3>, <&dma 3>;
+                       resets = <&ccu RST_BUS_I2S0>; /* TODO: Areset/sun8i-v3s-ccu says this isn't available on V3s */
+                       dma-names = "rx", "tx";
+                       status = "disabled";
+               };
+
 		uart0: serial@1c28000 {
 			compatible = "snps,dw-apb-uart";
 			reg = <0x01c28000 0x400>;

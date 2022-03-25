@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0
+config RTL8723CS
+	tristate "Realtek RTL8723CS SDIO or SPI WiFi driver (2020)"
+	depends on WLAN && MMC && CFG80211
+	select WIRELESS_EXT
+	select WEXT_PRIV
+	help
+	  Help message of RTL8723CS

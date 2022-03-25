@@ -872,6 +872,18 @@ config FB_ATMEL
 	help
 	  This enables support for the AT91 LCD Controller.
 
+config FB_SUN5I_EINK
+	tristate "eInk display Framebuffer Support (A13 based eBook readers)"
+	depends on FB
+	select FB_MODE_HELPERS
+	select FB_CFB_FILLRECT
+	select FB_CFB_COPYAREA
+	select FB_CFB_IMAGEBLIT
+	select BITREVERSE
+	help
+	  This driver supports PocketBook Touch Lux 3 e-paper display.
+
+
 config FB_NVIDIA
 	tristate "nVidia Framebuffer Support"
 	depends on FB && PCI

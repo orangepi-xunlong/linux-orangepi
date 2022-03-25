@@ -408,6 +408,14 @@ static int dw_mipi_dsi_phy_init(void *priv_data)
 	 */
 	vco = (dsi->lane_mbps < 200) ? 0 : (dsi->lane_mbps + 100) / 200;
 
+	if (dsi->cdata->lanecfg1_grf_reg) {
+		regmap_write(dsi->grf_regmap, dsi->cdata->lanecfg1_grf_reg,
+					      dsi->cdata->lanecfg1);
+
+	  dev_info(dsi->dev, "dw_mipi_dsi_phy_init / dw_mipi_dsi_rockchip_config: %08x => set=%08x\n",
+			dsi->cdata->lanecfg1_grf_reg, dsi->cdata->lanecfg1);
+	}
+
 	i = max_mbps_to_parameter(dsi->lane_mbps);
 	if (i < 0) {
 		DRM_DEV_ERROR(dsi->dev,
@@ -606,7 +614,7 @@ dw_mipi_dsi_get_lane_mbps(void *priv_data, const struct drm_display_mode *mode,
 			continue;
 
 		delta = abs(fout - tmp);
-		if (delta < min_delta) {
+		if (delta < min_delta && fout < tmp) {
 			best_prediv = _prediv;
 			best_fbdiv = _fbdiv;
 			min_delta = delta;

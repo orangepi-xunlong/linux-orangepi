@@ -80,7 +80,7 @@
 &emac {
 	pinctrl-names = "default";
 	pinctrl-0 = <&rgmii_pins>;
-	phy-mode = "rgmii";
+	phy-mode = "rgmii-id";
 	phy-handle = <&ext_rgmii_phy>;
 	phy-supply = <&reg_dcdc1>;
 	status = "okay";
@@ -100,6 +100,10 @@
 /* i2c1 connected with gpio headers like pine64, bananapi */
 &i2c1_pins {
 	bias-pull-up;
+};
+
+&i2s2 {
+	status = "okay";
 };
 
 &mdio {
@@ -250,6 +254,10 @@
 
 &simplefb_hdmi {
 	vcc-hdmi-supply = <&reg_dldo1>;
+};
+
+&sound_hdmi {
+	status = "okay";
 };
 
 &uart0 {

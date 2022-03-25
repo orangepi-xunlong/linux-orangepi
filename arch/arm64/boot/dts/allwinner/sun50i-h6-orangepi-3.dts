@@ -15,6 +15,8 @@
 	aliases {
 		serial0 = &uart0;
 		serial1 = &uart1;
+		serial9 = &r_uart;
+		ethernet0 = &emac;
 	};
 
 	chosen {
@@ -62,6 +64,15 @@
 		regulator-min-microvolt = <5000000>;
 		regulator-max-microvolt = <5000000>;
 		regulator-always-on;
+	};
+
+	reg_gmac_2v5: gmac-2v5 {
+		compatible = "regulator-fixed";
+		regulator-name = "gmac-2v5";
+		regulator-min-microvolt = <2500000>;
+		regulator-max-microvolt = <2500000>;
+		enable-active-high;
+		gpio = <&pio 3 6 GPIO_ACTIVE_HIGH>; /* PD6 */
 	};
 
 	reg_vcc33_wifi: vcc33-wifi {
@@ -126,6 +137,39 @@
 	hdmi_out_con: endpoint {
 		remote-endpoint = <&hdmi_con_in>;
 	};
+};
+
+&emac {
+	pinctrl-names = "default";
+	pinctrl-0 = <&ext_rgmii_pins>;
+	phy-mode = "rgmii-id";
+	phy-handle = <&ext_rgmii_phy>;
+	/*
+	 * The board uses 2.5V RGMII signalling. Power sequence to enable
+	 * the phy is to enable GMAC-2V5 and GMAC-3V (aldo2) power rails
+	 * at the same time and to wait 100ms. The driver enables phy-io
+	 * first. Delay is achieved with enable-ramp-delay on reg_aldo2.
+	 */
+	phy-supply = <&reg_aldo2>;
+	phy-io-supply = <&reg_gmac_2v5>;
+	allwinner,rx-delay-ps = <200>;
+	allwinner,tx-delay-ps = <200>;
+	status = "okay";
+};
+
+&mdio {
+	ext_rgmii_phy: ethernet-phy@1 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <1>;
+
+		reset-gpios = <&pio 3 14 GPIO_ACTIVE_LOW>; /* PD14 */
+		reset-assert-us = <15000>;
+		reset-deassert-us = <40000>;
+	};
+};
+
+&i2s1 {
+	status = "okay";
 };
 
 &mmc0 {
@@ -211,6 +255,7 @@
 				regulator-min-microvolt = <3300000>;
 				regulator-max-microvolt = <3300000>;
 				regulator-name = "vcc33-audio-tv-ephy-mac";
+				regulator-enable-ramp-delay = <100000>;
 			};
 
 			/* ALDO3 is shorted to CLDO1 */
@@ -298,6 +343,12 @@
 &rtc {
 	clocks = <&ext_osc32k>;
 };
+
+&sound_hdmi {
+	status = "okay";
+};
+
+/delete-node/ &spi0;
 
 &uart0 {
 	pinctrl-names = "default";

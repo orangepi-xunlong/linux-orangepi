@@ -70,3 +70,11 @@
 &i2c1 {
 	status = "okay";
 };
+
+&i2s2 {
+	status = "okay";
+};
+
+&sound_hdmi {
+	status = "okay";
+};

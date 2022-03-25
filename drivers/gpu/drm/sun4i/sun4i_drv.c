@@ -23,6 +23,8 @@
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_vblank.h>
 
+#include <uapi/drm/sun4i_drm.h>
+
 #include "sun4i_drv.h"
 #include "sun4i_frontend.h"
 #include "sun4i_framebuffer.h"
@@ -41,6 +43,27 @@ static int drm_sun4i_gem_dumb_create(struct drm_file *file_priv,
 
 DEFINE_DRM_GEM_CMA_FOPS(sun4i_drv_fops);
 
+static int sun4i_gem_create_ioctl(struct drm_device *drm, void *data,
+				  struct drm_file *file_priv)
+{
+	struct drm_sun4i_gem_create *args = data;
+	struct drm_gem_cma_object *cma_obj;
+	size_t size;
+
+	/* The Mali requires a 64 bytes alignment */
+	size = ALIGN(args->size, 64);
+
+	cma_obj = drm_gem_cma_create_with_handle(file_priv, drm, size,
+						 &args->handle);
+
+	return PTR_ERR_OR_ZERO(cma_obj);
+}
+
+static const struct drm_ioctl_desc sun4i_drv_ioctls[] = {
+	DRM_IOCTL_DEF_DRV(SUN4I_GEM_CREATE, sun4i_gem_create_ioctl,
+			  DRM_UNLOCKED | DRM_AUTH),
+};
+
 static const struct drm_driver sun4i_drv_driver = {
 	.driver_features	= DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC,
 
@@ -51,6 +74,10 @@ static const struct drm_driver sun4i_drv_driver = {
 	.date			= "20150629",
 	.major			= 1,
 	.minor			= 0,
+
+	/* Custom ioctls */
+	.ioctls			= sun4i_drv_ioctls,
+	.num_ioctls		= ARRAY_SIZE(sun4i_drv_ioctls),
 
 	/* GEM Operations */
 	DRM_GEM_CMA_DRIVER_OPS_VMAP_WITH_DUMB_CREATE(drm_sun4i_gem_dumb_create),

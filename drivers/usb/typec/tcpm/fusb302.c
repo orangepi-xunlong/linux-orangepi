@@ -68,7 +68,7 @@ static const u8 rd_mda_value[] = {
 };
 
 #define LOG_BUFFER_ENTRIES	1024
-#define LOG_BUFFER_ENTRY_SIZE	128
+#define LOG_BUFFER_ENTRY_SIZE	256
 
 struct fusb302_chip {
 	struct device *dev;
@@ -207,6 +207,81 @@ static int fusb302_debug_show(struct seq_file *s, void *v)
 }
 DEFINE_SHOW_ATTRIBUTE(fusb302_debug);
 
+static const char * const typec_cc_status_name[];
+static const char * const cc_polarity_name[];
+static const char * const toggling_mode_name[] = {
+	[TOGGLING_MODE_OFF] = "Off",
+	[TOGGLING_MODE_DRP] = "DRP",
+	[TOGGLING_MODE_SNK] = "SNK",
+	[TOGGLING_MODE_SRC] = "SRC",
+};
+static const char * const src_current_status_name[] = {
+	[SRC_CURRENT_DEFAULT] = "Default",
+	[SRC_CURRENT_MEDIUM] = "Medium",
+	[SRC_CURRENT_HIGH] = "High",
+};
+
+#define FUSB_REG(n) { n, #n },
+struct fusb_reg {
+	u8 addr;
+	const char* name;
+} fusb_regs[] = {
+	FUSB_REG(FUSB_REG_DEVICE_ID)
+	FUSB_REG(FUSB_REG_SWITCHES0)
+	FUSB_REG(FUSB_REG_SWITCHES1)
+	FUSB_REG(FUSB_REG_MEASURE)
+	FUSB_REG(FUSB_REG_CONTROL0)
+	FUSB_REG(FUSB_REG_CONTROL1)
+	FUSB_REG(FUSB_REG_CONTROL2)
+	FUSB_REG(FUSB_REG_CONTROL3)
+	FUSB_REG(FUSB_REG_MASK)
+	FUSB_REG(FUSB_REG_POWER)
+	FUSB_REG(FUSB_REG_RESET)
+	FUSB_REG(FUSB_REG_MASKA)
+	FUSB_REG(FUSB_REG_MASKB)
+	FUSB_REG(FUSB_REG_STATUS0A)
+	FUSB_REG(FUSB_REG_STATUS1A)
+	FUSB_REG(FUSB_REG_INTERRUPTA)
+	FUSB_REG(FUSB_REG_INTERRUPTB)
+	FUSB_REG(FUSB_REG_STATUS0)
+	FUSB_REG(FUSB_REG_STATUS1)
+	FUSB_REG(FUSB_REG_INTERRUPT)
+};
+
+static int fusb302_i2c_read(struct fusb302_chip *chip,
+			    u8 address, u8 *data);
+
+static int fusb302_debug_regs_show(struct seq_file *s, void *v)
+{
+	struct fusb302_chip *chip = (struct fusb302_chip *)s->private;
+	int i, ret;
+
+	seq_printf(s, "chip->intr_togdone = %d\n", chip->intr_togdone);
+	seq_printf(s, "chip->intr_bc_lvl = %d\n", chip->intr_bc_lvl);
+	seq_printf(s, "chip->intr_comp_chng = %d\n", chip->intr_comp_chng);
+	seq_printf(s, "chip->vconn_on = %d\n", chip->vconn_on);
+	seq_printf(s, "chip->vbus_on = %d\n", chip->vbus_on);
+	seq_printf(s, "chip->charge_on = %d\n", chip->charge_on);
+	seq_printf(s, "chip->vbus_present = %d\n", chip->vbus_present);
+	seq_printf(s, "chip->cc_polarity = %s\n", cc_polarity_name[chip->cc_polarity]);
+	seq_printf(s, "chip->cc1 = %s\n", typec_cc_status_name[chip->cc1]);
+	seq_printf(s, "chip->cc2 = %s\n", typec_cc_status_name[chip->cc2]);
+	seq_printf(s, "chip->toggling_mode = %s\n", toggling_mode_name[chip->toggling_mode]);
+	seq_printf(s, "chip->src_current_status = %s\n", src_current_status_name[chip->src_current_status]);
+
+	seq_printf(s, "\nRegisters:\n");
+        for (i = 0; i < ARRAY_SIZE(fusb_regs); i++) {
+		u8 val = 0;
+
+		ret = fusb302_i2c_read(chip, fusb_regs[i].addr, &val);
+		if (ret >= 0)
+			seq_printf(s, "%s = %02hhx\n", fusb_regs[i].name, val);
+	}
+
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(fusb302_debug_regs);
+
 static void fusb302_debugfs_init(struct fusb302_chip *chip)
 {
 	char name[NAME_MAX];
@@ -216,6 +291,9 @@ static void fusb302_debugfs_init(struct fusb302_chip *chip)
 	chip->dentry = debugfs_create_dir(name, usb_debug_root);
 	debugfs_create_file("log", S_IFREG | 0444, chip->dentry, chip,
 			    &fusb302_debug_fops);
+
+	debugfs_create_file("regs", S_IFREG | 0444, chip->dentry, chip,
+			    &fusb302_debug_regs_fops);
 }
 
 static void fusb302_debugfs_exit(struct fusb302_chip *chip)
@@ -440,14 +518,24 @@ static int tcpm_get_current_limit(struct tcpc_dev *dev)
 	int current_limit = 0;
 	unsigned long timeout;
 
+	/*
+	 * To avoid cycles in OF dependencies, we get extcon when necessary
+	 * outside of probe function.
+	 */
+	if (of_property_read_bool(chip->dev->of_node, "extcon") && !chip->extcon) {
+		chip->extcon = extcon_get_edev_by_phandle(chip->dev, 0);
+		if (IS_ERR(chip->extcon))
+			chip->extcon = NULL;
+	}
+
 	if (!chip->extcon)
 		return 0;
 
 	/*
 	 * USB2 Charger detection may still be in progress when we get here,
-	 * this can take upto 600ms, wait 800ms max.
+	 * this can take upto 600ms, wait 1000ms max.
 	 */
-	timeout = jiffies + msecs_to_jiffies(800);
+	timeout = jiffies + msecs_to_jiffies(1000);
 	do {
 		if (extcon_get_state(chip->extcon, EXTCON_CHG_USB_SDP) == 1)
 			current_limit = 500;
@@ -498,6 +586,7 @@ static int fusb302_set_toggling(struct fusb302_chip *chip,
 				enum toggling_mode mode)
 {
 	int ret = 0;
+	u8 reg;
 
 	/* first disable toggling */
 	ret = fusb302_i2c_clear_bits(chip, FUSB_REG_CONTROL2,
@@ -556,6 +645,12 @@ static int fusb302_set_toggling(struct fusb302_chip *chip,
 	} else {
 		/* Datasheet says vconn MUST be off when toggling */
 		WARN(chip->vconn_on, "Vconn is on during toggle start");
+
+		/* clear interrupts */
+                ret = fusb302_i2c_read(chip, FUSB_REG_INTERRUPT, &reg);
+		if (ret < 0)
+			return ret;
+
 		/* unmask TOGDONE interrupt */
 		ret = fusb302_i2c_clear_bits(chip, FUSB_REG_MASKA,
 					     FUSB_REG_MASKA_TOGDONE);
@@ -635,6 +730,14 @@ static int tcpm_set_cc(struct tcpc_dev *dev, enum typec_cc_status cc)
 		goto done;
 	}
 
+	/* adjust current for SRC */
+	ret = fusb302_set_src_current(chip, cc_src_current[cc]);
+	if (ret < 0) {
+		fusb302_log(chip, "cannot set src current %s, ret=%d",
+			    typec_cc_status_name[cc], ret);
+		goto done;
+	}
+
 	ret = fusb302_i2c_mask_write(chip, FUSB_REG_SWITCHES0,
 				     switches0_mask, switches0_data);
 	if (ret < 0) {
@@ -644,14 +747,6 @@ static int tcpm_set_cc(struct tcpc_dev *dev, enum typec_cc_status cc)
 	/* reset the cc status */
 	chip->cc1 = TYPEC_CC_OPEN;
 	chip->cc2 = TYPEC_CC_OPEN;
-
-	/* adjust current for SRC */
-	ret = fusb302_set_src_current(chip, cc_src_current[cc]);
-	if (ret < 0) {
-		fusb302_log(chip, "cannot set src current %s, ret=%d",
-			    typec_cc_status_name[cc], ret);
-		goto done;
-	}
 
 	/* enable/disable interrupts, BC_LVL for SNK and COMP_CHNG for SRC */
 	switch (cc) {
@@ -709,7 +804,7 @@ static int tcpm_get_cc(struct tcpc_dev *dev, enum typec_cc_status *cc1,
 	mutex_lock(&chip->lock);
 	*cc1 = chip->cc1;
 	*cc2 = chip->cc2;
-	fusb302_log(chip, "cc1=%s, cc2=%s", typec_cc_status_name[*cc1],
+	fusb302_log(chip, "tcpm_get_cc => cc1=%s, cc2=%s (cached)", typec_cc_status_name[*cc1],
 		    typec_cc_status_name[*cc2]);
 	mutex_unlock(&chip->lock);
 
@@ -995,8 +1090,8 @@ static int fusb302_pd_send_message(struct fusb302_chip *chip,
 	ret = fusb302_i2c_block_write(chip, FUSB_REG_FIFOS, pos, buf);
 	if (ret < 0)
 		return ret;
-	fusb302_log(chip, "sending PD message header: %x", msg->header);
-	fusb302_log(chip, "sending PD message len: %d", len);
+	//fusb302_log(chip, "sending PD message header: %x", msg->header);
+	//fusb302_log(chip, "sending PD message len: %d", len);
 
 	return ret;
 }
@@ -1239,6 +1334,36 @@ static int fusb302_handle_togdone_snk(struct fusb302_chip *chip,
 	return ret;
 }
 
+static int fusb302_get_status0_stable(struct fusb302_chip *chip, u8 *status0)
+{
+	int ret, tries = 0;
+	u8 reg;
+
+try_again:
+	ret = fusb302_i2c_read(chip, FUSB_REG_STATUS0, &reg);
+	if (ret < 0)
+		return ret;
+
+	if (reg & FUSB_REG_STATUS0_ACTIVITY) {
+		fusb302_log(chip, "activity reading CC status");
+		if (++tries == 5) {
+			fusb302_log(chip, "failed to read stable status0 value");
+
+			/*
+			 * The best we can do is to return at least something.
+			 */
+			*status0 = reg;
+			return 0;
+		}
+
+		usleep_range(50, 100);
+		goto try_again;
+	}
+
+	*status0 = reg;
+	return 0;
+}
+
 /* On error returns < 0, otherwise a typec_cc_status value */
 static int fusb302_get_src_cc_status(struct fusb302_chip *chip,
 				     enum typec_cc_polarity cc_polarity,
@@ -1257,8 +1382,10 @@ static int fusb302_get_src_cc_status(struct fusb302_chip *chip,
 	if (ret < 0)
 		return ret;
 
+	//XXX resolve activity conflicts while measuring
+
 	fusb302_i2c_read(chip, FUSB_REG_SWITCHES0, &status0);
-	fusb302_log(chip, "get_src_cc_status switches: 0x%0x", status0);
+	//fusb302_log(chip, "get_src_cc_status switches: 0x%0x", status0);
 
 	/* Step 2: Set compararator volt to differentiate between Open and Rd */
 	ret = fusb302_i2c_write(chip, FUSB_REG_MEASURE, rd_mda);
@@ -1266,11 +1393,11 @@ static int fusb302_get_src_cc_status(struct fusb302_chip *chip,
 		return ret;
 
 	usleep_range(50, 100);
-	ret = fusb302_i2c_read(chip, FUSB_REG_STATUS0, &status0);
+	ret = fusb302_get_status0_stable(chip, &status0);
 	if (ret < 0)
 		return ret;
 
-	fusb302_log(chip, "get_src_cc_status rd_mda status0: 0x%0x", status0);
+	//fusb302_log(chip, "get_src_cc_status rd_mda status0: 0x%0x", status0);
 	if (status0 & FUSB_REG_STATUS0_COMP) {
 		*cc = TYPEC_CC_OPEN;
 		return 0;
@@ -1282,11 +1409,11 @@ static int fusb302_get_src_cc_status(struct fusb302_chip *chip,
 		return ret;
 
 	usleep_range(50, 100);
-	ret = fusb302_i2c_read(chip, FUSB_REG_STATUS0, &status0);
+	ret = fusb302_get_status0_stable(chip, &status0);
 	if (ret < 0)
 		return ret;
 
-	fusb302_log(chip, "get_src_cc_status ra_mda status0: 0x%0x", status0);
+	//fusb302_log(chip, "get_src_cc_status ra_mda status0: 0x%0x", status0);
 	if (status0 & FUSB_REG_STATUS0_COMP)
 		*cc = TYPEC_CC_RD;
 	else
@@ -1451,8 +1578,8 @@ static int fusb302_pd_read_message(struct fusb302_chip *chip,
 	ret = fusb302_i2c_block_read(chip, FUSB_REG_FIFOS, 4, crc);
 	if (ret < 0)
 		return ret;
-	fusb302_log(chip, "PD message header: %x", msg->header);
-	fusb302_log(chip, "PD message len: %d", len);
+	//fusb302_log(chip, "PD message header: %x", msg->header);
+	//fusb302_log(chip, "PD message len: %d", len);
 
 	/*
 	 * Check if we've read off a GoodCRC message. If so then indicate to
@@ -1490,6 +1617,84 @@ static irqreturn_t fusb302_irq_intn(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+static void fusb302_print_state(struct fusb302_chip *chip)
+{
+	u8 ctl0, ctl2, measure, status0, status1a, sw0, mask;
+	int ret;
+
+	ret = fusb302_i2c_read(chip, FUSB_REG_CONTROL0, &ctl0);
+	if (ret < 0)
+		return;
+	ret = fusb302_i2c_read(chip, FUSB_REG_CONTROL2, &ctl2);
+	if (ret < 0)
+		return;
+	ret = fusb302_i2c_read(chip, FUSB_REG_MEASURE, &measure);
+	if (ret < 0)
+		return;
+	ret = fusb302_i2c_read(chip, FUSB_REG_STATUS0, &status0);
+	if (ret < 0)
+		return;
+	ret = fusb302_i2c_read(chip, FUSB_REG_STATUS1A, &status1a);
+	if (ret < 0)
+		return;
+	ret = fusb302_i2c_read(chip, FUSB_REG_SWITCHES0, &sw0);
+	if (ret < 0)
+		return;
+	ret = fusb302_i2c_read(chip, FUSB_REG_MASK, &mask);
+	if (ret < 0)
+		return;
+
+	//FUSB_REG(FUSB_REG_POWER) // power control
+
+	const char* host_cur = "?";
+	switch ((ctl0 >> 2) & 3) {
+	case 0: host_cur = "none"; break;
+	case 1: host_cur = "80uA"; break;
+	case 2: host_cur = "160uA"; break;
+	case 3: host_cur = "330uA"; break;
+	}
+
+	const char* bc_lvl = "?";
+	switch (status0 & 3) {
+	case 0: bc_lvl = "0-200mV"; break;
+	case 1: bc_lvl = "200-660mV"; break;
+	case 2: bc_lvl = "660-1230mV"; break;
+	case 3: bc_lvl = ">1230mV"; break;
+	}
+
+	// status0
+	unsigned vbusok = !!(status0 & BIT(7));
+	unsigned activity = !!(status0 & BIT(6));
+	unsigned comp = !!(status0 & BIT(5));
+	unsigned wake = !!(status0 & BIT(2));
+
+	// measure
+	unsigned mdac = ((measure & 0x3f) + 1) * 42 * (measure & BIT(6) ? 10 : 1);
+
+	// status1a
+	unsigned togss = (status1a >> 3) & 7;
+	const char* togss_s = "?";
+	switch (togss) {
+	case 0: togss_s = "running"; break;
+	case 1: togss_s = "src1"; break;
+	case 2: togss_s = "src2"; break;
+	case 5: togss_s = "snk1"; break;
+	case 6: togss_s = "snk2"; break;
+	case 7: togss_s = "audio"; break;
+	}
+
+	// ctl2 print as is
+
+#define SW(n) (!!(sw0 & BIT(n)))
+
+	fusb302_log(chip, "state: cc(puen=%u%u vconn=%u%u meas=%u%u pdwn=%u%u) "
+		    "host_cur=%s mdac=%umV comp=%u bc_lvl=%s vbusok=%u act=%u "
+		    "wake=%u togss=%s ctl2=0x%02x mask=0x%02x",
+		    SW(6), SW(7), SW(4), SW(5), SW(2), SW(3), SW(0), SW(1),
+		    host_cur, mdac, comp, bc_lvl, vbusok, activity,
+		    wake, togss_s, ctl2, mask);
+}
+
 static void fusb302_irq_work(struct work_struct *work)
 {
 	struct fusb302_chip *chip = container_of(work, struct fusb302_chip,
@@ -1499,6 +1704,7 @@ static void fusb302_irq_work(struct work_struct *work)
 	u8 interrupta;
 	u8 interruptb;
 	u8 status0;
+	u8 mda;
 	bool vbus_present;
 	bool comp_result;
 	bool intr_togdone;
@@ -1524,46 +1730,56 @@ static void fusb302_irq_work(struct work_struct *work)
 	ret = fusb302_i2c_read(chip, FUSB_REG_STATUS0, &status0);
 	if (ret < 0)
 		goto done;
-	fusb302_log(chip,
-		    "IRQ: 0x%02x, a: 0x%02x, b: 0x%02x, status0: 0x%02x",
-		    interrupt, interrupta, interruptb, status0);
+	fusb302_log(chip, "IRQ: 0x%02x, a: 0x%02x, b: 0x%02x",
+		    interrupt, interrupta, interruptb);
 
-	if (interrupt & FUSB_REG_INTERRUPT_VBUSOK) {
-		vbus_present = !!(status0 & FUSB_REG_STATUS0_VBUSOK);
+	fusb302_print_state(chip);
+
+	vbus_present = !!(status0 & FUSB_REG_STATUS0_VBUSOK);
+	if (interrupt & FUSB_REG_INTERRUPT_VBUSOK)
 		fusb302_log(chip, "IRQ: VBUS_OK, vbus=%s",
 			    vbus_present ? "On" : "Off");
-		if (vbus_present != chip->vbus_present) {
-			chip->vbus_present = vbus_present;
-			tcpm_vbus_change(chip->tcpm_port);
-		}
+	if (vbus_present != chip->vbus_present) {
+		chip->vbus_present = vbus_present;
+		if (!(interrupt & FUSB_REG_INTERRUPT_VBUSOK))
+		fusb302_log(chip, "IRQ: VBUS changed without interrupt, vbus=%s",
+			    vbus_present ? "On" : "Off");
+		tcpm_vbus_change(chip->tcpm_port);
 	}
 
-	if ((interrupta & FUSB_REG_INTERRUPTA_TOGDONE) && intr_togdone) {
+	if (interrupta & FUSB_REG_INTERRUPTA_TOGDONE) {
 		fusb302_log(chip, "IRQ: TOGDONE");
-		ret = fusb302_handle_togdone(chip);
-		if (ret < 0) {
-			fusb302_log(chip,
-				    "handle togdone error, ret=%d", ret);
-			goto done;
+		if (intr_togdone) {
+			ret = fusb302_handle_togdone(chip);
+			if (ret < 0) {
+				fusb302_log(chip,
+					    "handle togdone error, ret=%d", ret);
+				goto done;
+			}
 		}
 	}
 
-	if ((interrupt & FUSB_REG_INTERRUPT_BC_LVL) && intr_bc_lvl) {
+	if (interrupt & FUSB_REG_INTERRUPT_BC_LVL) {
 		fusb302_log(chip, "IRQ: BC_LVL, handler pending");
 		/*
 		 * as BC_LVL interrupt can be affected by PD activity,
 		 * apply delay to for the handler to wait for the PD
 		 * signaling to finish.
 		 */
-		mod_delayed_work(chip->wq, &chip->bc_lvl_handler,
-				 msecs_to_jiffies(T_BC_LVL_DEBOUNCE_DELAY_MS));
+		if (intr_bc_lvl)
+			mod_delayed_work(chip->wq, &chip->bc_lvl_handler,
+					 msecs_to_jiffies(T_BC_LVL_DEBOUNCE_DELAY_MS));
 	}
 
-	if ((interrupt & FUSB_REG_INTERRUPT_COMP_CHNG) && intr_comp_chng) {
+	if (interrupt & FUSB_REG_INTERRUPT_COMP_CHNG) {
+		ret = fusb302_i2c_read(chip, FUSB_REG_MEASURE, &mda);
+		if (ret < 0)
+			goto done;
+
 		comp_result = !!(status0 & FUSB_REG_STATUS0_COMP);
-		fusb302_log(chip, "IRQ: COMP_CHNG, comp=%s",
-			    comp_result ? "true" : "false");
-		if (comp_result) {
+		fusb302_log(chip, "IRQ: COMP_CHNG, cc* %s mdac (%u mV)",
+			    comp_result ? ">" : "<", ((mda & 0x3f) + 1) * 42 * (mda & BIT(6) ? 10 : 1));
+		if (comp_result && intr_comp_chng) {
 			/* cc level > Rd_threshold, detach */
 			chip->cc1 = TYPEC_CC_OPEN;
 			chip->cc2 = TYPEC_CC_OPEN;

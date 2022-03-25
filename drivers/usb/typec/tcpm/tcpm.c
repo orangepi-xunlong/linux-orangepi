@@ -776,7 +776,7 @@ static void tcpm_debugfs_exit(const struct tcpm_port *port) { }
 
 static void tcpm_set_cc(struct tcpm_port *port, enum typec_cc_status cc)
 {
-	tcpm_log(port, "cc:=%d", cc);
+	//tcpm_log(port, "cc:=%d", cc);
 	port->cc_req = cc;
 	port->tcpc->set_cc(port->tcpc, cc);
 }
@@ -869,10 +869,12 @@ static int tcpm_pd_transmit(struct tcpm_port *port,
 	unsigned long timeout;
 	int ret;
 
+	/*
 	if (msg)
 		tcpm_log(port, "PD TX, header: %#x", le16_to_cpu(msg->header));
 	else
 		tcpm_log(port, "PD TX, type: %#x", type);
+          */
 
 	reinit_completion(&port->tx_complete);
 	ret = port->tcpc->pd_transmit(port->tcpc, type, msg, port->negotiated_rev);
@@ -918,7 +920,7 @@ static int tcpm_pd_transmit(struct tcpm_port *port,
 void tcpm_pd_transmit_complete(struct tcpm_port *port,
 			       enum tcpm_transmit_status status)
 {
-	tcpm_log(port, "PD TX complete, status: %u", status);
+	//tcpm_log(port, "PD TX complete, status: %u", status);
 	port->tx_status = status;
 	complete(&port->tx_complete);
 }
@@ -951,7 +953,7 @@ static int tcpm_set_polarity(struct tcpm_port *port,
 {
 	int ret;
 
-	tcpm_log(port, "polarity %d", polarity);
+	//tcpm_log(port, "polarity %d", polarity);
 
 	ret = port->tcpc->set_polarity(port->tcpc, polarity);
 	if (ret < 0)
@@ -966,7 +968,7 @@ static int tcpm_set_vconn(struct tcpm_port *port, bool enable)
 {
 	int ret;
 
-	tcpm_log(port, "vconn:=%d", enable);
+	//tcpm_log(port, "vconn:=%d", enable);
 
 	ret = port->tcpc->set_vconn(port->tcpc, enable);
 	if (!ret) {
@@ -2871,8 +2873,8 @@ static void tcpm_pd_rx_handler(struct kthread_work *work)
 
 	mutex_lock(&port->lock);
 
-	tcpm_log(port, "PD RX, header: %#x [%d]", le16_to_cpu(msg->header),
-		 port->attached);
+	//tcpm_log(port, "PD RX, header: %#x [%d]", le16_to_cpu(msg->header),
+		 //port->attached);
 
 	if (port->attached) {
 		enum pd_ctrl_msg_type type = pd_header_type_le(msg->header);
@@ -5041,7 +5043,7 @@ static void _tcpm_cc_change(struct tcpm_port *port, enum typec_cc_status cc1,
 
 static void _tcpm_pd_vbus_on(struct tcpm_port *port)
 {
-	tcpm_log_force(port, "VBUS on");
+	tcpm_log_force(port, "VBUS event received: on");
 	port->vbus_present = true;
 	/*
 	 * When vbus_present is true i.e. Voltage at VBUS is greater than VSAFE5V implicitly
@@ -5131,7 +5133,7 @@ static void _tcpm_pd_vbus_on(struct tcpm_port *port)
 
 static void _tcpm_pd_vbus_off(struct tcpm_port *port)
 {
-	tcpm_log_force(port, "VBUS off");
+	tcpm_log_force(port, "VBUS event received: off");
 	port->vbus_present = false;
 	port->vbus_never_low = false;
 	switch (port->state) {

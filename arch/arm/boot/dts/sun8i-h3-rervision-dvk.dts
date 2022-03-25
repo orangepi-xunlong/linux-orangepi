@@ -69,6 +69,10 @@
 	};
 };
 
+&i2s2 {
+	status = "okay";
+};
+
 &mmc0 {
 	bus-width = <4>;
 	cd-gpios = <&pio 5 6 GPIO_ACTIVE_LOW>; /* PF6 */
@@ -95,6 +99,10 @@
 };
 
 &ohci3 {
+	status = "okay";
+};
+
+&sound_hdmi {
 	status = "okay";
 };
 

@@ -149,6 +149,10 @@
 	};
 };
 
+&i2s2 {
+	status = "okay";
+};
+
 &mixer0 {
 	status = "okay";
 };
@@ -354,6 +358,10 @@
 			"MIC1", "Internal Microphone",
 			"Headset Microphone", "HBIAS",
 			"MIC2", "Headset Microphone";
+	status = "okay";
+};
+
+&sound_hdmi {
 	status = "okay";
 };
 

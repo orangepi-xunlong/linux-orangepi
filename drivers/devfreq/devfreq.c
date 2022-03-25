@@ -130,16 +130,10 @@ static void get_freq_range(struct devfreq *devfreq,
 
 	/*
 	 * Initialize minimum/maximum frequency from freq table.
-	 * The devfreq drivers can initialize this in either ascending or
-	 * descending order and devfreq core supports both.
+	 * The devfreq drivers should initialize this in ascending order.
 	 */
-	if (freq_table[0] < freq_table[devfreq->profile->max_state - 1]) {
-		*min_freq = freq_table[0];
-		*max_freq = freq_table[devfreq->profile->max_state - 1];
-	} else {
-		*min_freq = freq_table[devfreq->profile->max_state - 1];
-		*max_freq = freq_table[0];
-	}
+	*min_freq = freq_table[0];
+	*max_freq = freq_table[devfreq->profile->max_state - 1];
 
 	/* Apply constraints from PM QoS */
 	qos_min_freq = dev_pm_qos_read_value(devfreq->dev.parent,
@@ -835,24 +829,28 @@ struct devfreq *devfreq_add_device(struct device *dev,
 		mutex_lock(&devfreq->lock);
 	}
 
-	devfreq->scaling_min_freq = find_available_min_freq(devfreq);
-	if (!devfreq->scaling_min_freq) {
-		mutex_unlock(&devfreq->lock);
-		err = -EINVAL;
-		goto err_dev;
-	}
-
-	devfreq->scaling_max_freq = find_available_max_freq(devfreq);
-	if (!devfreq->scaling_max_freq) {
-		mutex_unlock(&devfreq->lock);
-		err = -EINVAL;
-		goto err_dev;
-	}
-
-	devfreq->suspend_freq = dev_pm_opp_get_suspend_opp_freq(dev);
 	devfreq->opp_table = dev_pm_opp_get_opp_table(dev);
-	if (IS_ERR(devfreq->opp_table))
+	if (IS_ERR(devfreq->opp_table)) {
 		devfreq->opp_table = NULL;
+		devfreq->scaling_min_freq = 0;
+		devfreq->scaling_max_freq = ULONG_MAX;
+	} else {
+		devfreq->scaling_min_freq = find_available_min_freq(devfreq);
+		if (!devfreq->scaling_min_freq) {
+			mutex_unlock(&devfreq->lock);
+			err = -EINVAL;
+			goto err_dev;
+		}
+
+		devfreq->scaling_max_freq = find_available_max_freq(devfreq);
+		if (!devfreq->scaling_max_freq) {
+			mutex_unlock(&devfreq->lock);
+			err = -EINVAL;
+			goto err_dev;
+		}
+
+		devfreq->suspend_freq = dev_pm_opp_get_suspend_opp_freq(dev);
+	}
 
 	atomic_set(&devfreq->suspend_count, 0);
 
@@ -2011,6 +2009,31 @@ subsys_initcall(devfreq_init);
  * The following are helper functions for devfreq user device drivers with
  * OPP framework.
  */
+
+/**
+ * devfreq_recommended_freq() - Helper function to get the proper frequency from
+ *			        freq_table for the value given to target callback.
+ * @devfreq:	The devfreq device.
+ * @freq:	The frequency given to target function.
+ * @flags:	Flags handed from devfreq framework.
+ */
+void devfreq_recommended_freq(struct devfreq *devfreq,
+			      unsigned long *freq, u32 flags)
+{
+	const unsigned long *min = devfreq->profile->freq_table;
+	const unsigned long *max = min + devfreq->profile->max_state - 1;
+	const unsigned long *f;
+
+	if (flags & DEVFREQ_FLAG_LEAST_UPPER_BOUND) {
+		/* Find the first item lower than freq, or else min. */
+		for (f = max; f > min && *f > *freq; --f);
+	} else {
+		/* Find the first item higher than freq, or else max. */
+		for (f = min; f < max && *f < *freq; ++f);
+	}
+	*freq = *f;
+}
+EXPORT_SYMBOL(devfreq_recommended_freq);
 
 /**
  * devfreq_recommended_opp() - Helper function to get proper OPP for the

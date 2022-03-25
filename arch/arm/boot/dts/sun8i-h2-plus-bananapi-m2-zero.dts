@@ -132,6 +132,10 @@
 	};
 };
 
+&i2s2 {
+	status = "okay";
+};
+
 &mmc0 {
 	vmmc-supply = <&reg_vcc3v3>;
 	bus-width = <4>;
@@ -253,6 +257,10 @@
 		"PWR-STB", "PWR-DRAM", "PWR-LED", "IR-RX", "", "", "", "",
 		"", "", "", "", "", "", "", "",
 		"", "", "", "", "", "", "", "";
+};
+
+&sound_hdmi {
+	status = "okay";
 };
 
 &usb_otg {

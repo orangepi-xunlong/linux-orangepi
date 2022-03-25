@@ -12,10 +12,14 @@
 #include <linux/init.h>
 #include <linux/of_clk.h>
 #include <linux/platform_device.h>
+#include <linux/of_platform.h>
 #include <linux/reset/sunxi.h>
+#include <linux/scpi_protocol.h>
+#include <linux/suspend.h>
 
 #include <asm/mach/arch.h>
 #include <asm/secure_cntvoff.h>
+#include <asm/suspend.h>
 
 static const char * const sunxi_board_dt_compat[] = {
 	"allwinner,sun4i-a10",
@@ -86,10 +90,63 @@ static const char * const sun8i_a83t_cntvoff_board_dt_compat[] = {
 	NULL,
 };
 
+#ifdef CONFIG_PM_SLEEP
+static int sun8i_a83t_pm_valid(suspend_state_t state)
+{
+	return state == PM_SUSPEND_MEM;
+}
+
+static int sun8i_a83t_suspend_finish(unsigned long val)
+{
+	struct scpi_ops *scpi;
+
+	scpi = get_scpi_ops();
+	if (scpi && scpi->sys_set_power_state) {
+		//HACK: use invalid state to mean: suspend last CPU and the system
+		scpi->sys_set_power_state(3);
+		cpu_do_idle();
+	} else {
+		// don't do much if scpi is not available
+		cpu_do_idle();
+	}
+
+	return 0;
+}
+
+static int sun8i_a83t_pm_enter(suspend_state_t state)
+{
+	switch (state) {
+	case PM_SUSPEND_MEM:
+		cpu_suspend(0, sun8i_a83t_suspend_finish);
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static const struct platform_suspend_ops sun8i_a83t_pm_ops = {
+	.enter = sun8i_a83t_pm_enter,
+	.valid = sun8i_a83t_pm_valid,
+};
+#define SUN8I_A83T_PM_OPS &sun8i_a83t_pm_ops
+#else
+#define SUN8I_A83T_PM_OPS NULL
+#endif
+
+static void __init sun8i_a83t_init_machine(void)
+{
+	suspend_set_ops(SUN8I_A83T_PM_OPS);
+
+	of_platform_default_populate(NULL, NULL, NULL);
+}
+
 DT_MACHINE_START(SUN8I_A83T_CNTVOFF_DT, "Allwinner A83t board")
 	.init_early	= sun8i_a83t_cntvoff_init,
 	.init_time	= sun6i_timer_init,
 	.dt_compat	= sun8i_a83t_cntvoff_board_dt_compat,
+	.init_machine	= sun8i_a83t_init_machine,
 MACHINE_END
 
 static const char * const sun9i_board_dt_compat[] = {

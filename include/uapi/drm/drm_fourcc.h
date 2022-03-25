@@ -1133,6 +1133,15 @@ drm_fourcc_canonicalize_nvidia_format_mod(__u64 modifier)
 #define AFRC_FORMAT_MOD_LAYOUT_SCAN (1ULL << 8)
 
 /*
+ * ARM tiled format
+ *
+ * This is used by ARM Mali Utgard/Midgard GPU. It divides buffer into
+ * 16x16 pixel blocks. Blocks are stored linearly in order, but pixels
+ * in the block are reordered.
+ */
+#define DRM_FORMAT_MOD_ARM_TILED fourcc_mod_code(ARM, 1)
+
+/*
  * Arm 16x16 Block U-Interleaved modifier
  *
  * This is used by Arm Mali Utgard and Midgard GPUs. It divides the image

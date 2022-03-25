@@ -153,6 +153,10 @@
 	};
 };
 
+&i2s2 {
+	status = "okay";
+};
+
 &ir {
 	linux,rc-map-name = "rc-tanix-tx3mini";
 	pinctrl-names = "default";
@@ -204,6 +208,10 @@
 
 &reg_usb0_vbus {
 	gpio = <&r_pio 0 2 GPIO_ACTIVE_HIGH>; /* PL2 */
+	status = "okay";
+};
+
+&sound_hdmi {
 	status = "okay";
 };
 

@@ -80,6 +80,9 @@ static struct mfd_cell ac100_cells[] = {
 		.name		= "ac100-codec",
 		.of_compatible	= "x-powers,ac100-codec",
 	}, {
+		.name		= "ac100-codec-analog",
+		.of_compatible	= "x-powers,ac100-codec-analog",
+	}, {
 		.name		= "ac100-rtc",
 		.of_compatible	= "x-powers,ac100-rtc",
 	},

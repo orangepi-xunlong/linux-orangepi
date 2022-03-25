@@ -23,6 +23,7 @@
  * 21-08-02: Converted to input API, major cleanup. (Vojtech Pavlik)
  */
 
+#include <linux/bootsplash.h>
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/consolemap.h>
@@ -1422,6 +1423,28 @@ static void kbd_keycode(unsigned int keycode, int down, bool hw_raw)
 		sun_do_break();
 	}
 #endif
+
+	/* Trap keys when bootsplash is shown */
+	if (bootsplash_would_render_now()) {
+		/* Deactivate bootsplash on ESC or Alt+Fxx VT switch */
+		if (keycode >= KEY_F1 && keycode <= KEY_F12) {
+			bootsplash_disable();
+
+			/*
+			 * No return here since we want to actually
+			 * perform the VT switch.
+			 */
+		} else {
+			if (keycode == KEY_ESC)
+				bootsplash_disable();
+
+			/*
+			 * Just drop any other keys.
+			 * Their effect would be hidden by the splash.
+			 */
+			return;
+		}
+	}
 
 	if (kbd->kbdmode == VC_MEDIUMRAW) {
 		/*
