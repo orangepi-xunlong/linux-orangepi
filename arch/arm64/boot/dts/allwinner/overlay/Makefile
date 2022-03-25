@@ -38,6 +38,7 @@ dtbo-$(CONFIG_ARCH_SUNXI) += \
 	sun50i-h6-i2c0.dtbo \
 	sun50i-h6-i2c1.dtbo \
 	sun50i-h6-i2c2.dtbo \
+	sun50i-h6-pwm.dtbo \
 	sun50i-h6-ruart.dtbo \
 	sun50i-h6-spi-add-cs1.dtbo \
 	sun50i-h6-spi-jedec-nor.dtbo \
