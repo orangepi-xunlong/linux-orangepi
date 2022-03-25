@@ -54,20 +54,6 @@ if test "${param_pps_falling_edge}" = "1"; then
 	fdt set /pps@0 assert-falling-edge
 fi
 
-for f in ${overlays}; do
-	if test "${f}" = "pwm"; then
-		setenv bootargs_new ""
-		for arg in ${bootargs}; do
-			if test "${arg}" = "console=ttyS0,115200"; then
-				echo "Warning: Disabling ttyS0 console due to enabled PWM overlay"
-			else
-				setenv bootargs_new "${bootargs_new} ${arg}"
-			fi
-		done
-		setenv bootargs "${bootargs_new}"
-	fi
-done
-
 if test -n "${param_w1_pin}"; then
 	setenv tmp_bank "${param_w1_pin}"
 	setenv tmp_pin "${param_w1_pin}"
