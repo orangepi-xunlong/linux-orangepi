@@ -132,6 +132,8 @@ config POWERNV_OP_PANEL
 	  If unsure, say M here to build it as a module called powernv-op-panel.
 
 source "drivers/char/ipmi/Kconfig"
+source "drivers/char/sunxi-sysinfo/Kconfig"
+source "drivers/char/dump_reg/Kconfig"
 
 config DS1620
 	tristate "NetWinder thermometer support"

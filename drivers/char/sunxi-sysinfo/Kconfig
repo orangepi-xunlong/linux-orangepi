@@ -1,0 +1,10 @@
+#
+# sunxi system information driver.
+#
+
+config SUNXI_SYS_INFO
+	tristate "sunxi system info driver"
+	default y
+	help
+	  This driver is used for query system information.
+	  If you don't know whether need it, please select y.
