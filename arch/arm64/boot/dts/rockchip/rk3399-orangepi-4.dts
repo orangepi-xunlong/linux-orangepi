@@ -383,12 +383,12 @@
 };
 
 &spi1 {
-	status = "disable";
+	status = "okay";
 	pinctrl-names = "default", "sleep";
 	pinctrl-1 = <&spi1_gpio>;
 
 	spidev0: spidev@0 {
-		compatible = "rockchip,spidev";
+		compatible = "rohm,dh2228fv";
 		reg = <0>;
 		spi-max-frequency = <10000000>;
 		status = "okay";
@@ -1117,7 +1117,190 @@
 &dp_in_vopb {
 	status = "disable";
 };
+
 &dp_in_vopl {
 	status = "okay";
 };
 
+&i2c2 {
+        status = "okay";
+
+        ov13850p0: ov13850@10 {
+                compatible = "ovti,ov13850";
+                reg = <0x10>;
+                clocks = <&cru SCLK_CIF_OUT>;
+                clock-names = "xvclk";
+
+                power-gpios = <&gpio1 RK_PA4 GPIO_ACTIVE_HIGH>;
+                reset-gpios = <&gpio0 RK_PA6 GPIO_ACTIVE_HIGH>;
+                pwdn-gpios = <&gpio2 RK_PD3 GPIO_ACTIVE_HIGH>;
+                pinctrl-names = "rockchip,camera_default";
+                pinctrl-0 = <&cif_clkout_a>;
+
+                port {
+                        ucam_out0a: endpoint {
+                                remote-endpoint = <&mipi_in_ucam0a>;
+                                data-lanes = <1 2>;
+                        };
+                };
+        };
+
+        //TouchScreen Gt9xx 8 inch & 10 inch
+        gt9xx:touchscreen@14 {
+                compatible = "goodix,gt9271";
+                reg = <0x14>;
+                interrupt-parent = <&gpio4>;
+                interrupts = <RK_PD0 IRQ_TYPE_LEVEL_LOW>;
+                irq-gpios = <&gpio4 RK_PD0 IRQ_TYPE_LEVEL_LOW>;
+                reset-gpios = <&gpio4 RK_PD1 GPIO_ACTIVE_HIGH>;
+                touchscreen-inverted-x;
+                //touchscreen-inverted-y;
+                touchscreen-swapped-x-y;
+                touchscreen-size-x = <1280>;
+                touchscreen-size-y = <800>;
+                status = "disabled";
+        };
+};
+
+&i2c1 {
+        status = "okay";
+
+        ov13850p1: ov13850@10 {
+                compatible = "ovti,ov13850";
+                reg = <0x10>;
+                clocks = <&cru SCLK_CIF_OUT>;
+                clock-names = "xvclk";
+
+                power-gpios = <&gpio4 RK_PD2 GPIO_ACTIVE_HIGH>;
+                reset-gpios = <&gpio0 RK_PB0 GPIO_ACTIVE_HIGH>;
+                pwdn-gpios = <&gpio0 RK_PB5 GPIO_ACTIVE_HIGH>;
+                pinctrl-names = "rockchip,camera_default";
+                pinctrl-0 = <&cif_clkout_a>;
+
+                port {
+                        ucam_out1a: endpoint {
+                                remote-endpoint = <&mipi_in_ucam1a>;
+                                data-lanes = <1 2>;
+                        };
+                };
+        };
+
+        //TouchScreen Gt9xx 8 inch & 10 inch
+        gt9xx_1:touchscreen@14 {
+                compatible = "goodix,gt9271";
+                reg = <0x14>;
+                interrupt-parent = <&gpio4>;
+                interrupts = <RK_PD5 IRQ_TYPE_LEVEL_LOW>;
+                irq-gpios = <&gpio4 RK_PD5 IRQ_TYPE_LEVEL_LOW>;
+                reset-gpios = <&gpio4 RK_PD2 GPIO_ACTIVE_HIGH>;
+                touchscreen-inverted-x;
+                //touchscreen-inverted-y;
+                touchscreen-swapped-x-y;
+                touchscreen-size-x = <1280>;
+                touchscreen-size-y = <800>;
+                status = "disabled";
+        };
+};
+
+&isp0 {
+        status = "okay";
+
+        ports {
+                port@0 {
+                        mipi_in_ucam0a: endpoint@0 {
+                                reg = <0>;
+                                remote-endpoint = <&ucam_out0a>;
+                                data-lanes = <1 2>;
+                        };
+                };
+        };
+};
+
+&isp1 {
+        status = "okay";
+
+        ports {
+                port@0 {
+                        mipi_in_ucam1a: endpoint@0 {
+                                reg = <0>;
+                                remote-endpoint = <&ucam_out1a>;
+                                data-lanes = <1 2>;
+                        };
+                };
+        };
+};
+
+&mipi_dphy_rx0 {
+        status = "okay";
+};
+
+&mipi_dsi1 {
+        status = "okay";
+};
+
+&isp0_mmu {
+        status = "okay";
+};
+
+//&isp1_mmu {
+//        status = "okay";
+//};
+
+&mipi_dsi {
+        status = "disabled";
+        ports {
+                mipi_out: port@1 {
+                        reg = <1>;
+                        #address-cells = <1>;
+                        #size-cells = <0>;
+                        mipi_out_panel: endpoint {
+                                remote-endpoint = <&panel_in_mipi>;
+                        };
+                };
+        };
+
+        panel@0 {
+                compatible = "innolux,sl101-pn27d1665";
+                reg = <0>;
+                backlight = <&pwm_bl>;
+                enable-gpios = <&gpio0 RK_PB4 GPIO_ACTIVE_HIGH>;
+                reset-gpios = <&gpio1 RK_PB5 GPIO_ACTIVE_LOW>;
+
+                port {
+                        panel_in_mipi: endpoint {
+                                remote-endpoint = <&mipi_out_panel>;
+                        };
+                };
+        };
+};
+
+/*
+&mipi_dsi1 {
+        status = "disabled";
+        ports {
+                mipi_out1: port@1 {
+                        reg = <1>;
+                        #address-cells = <1>;
+                        #size-cells = <0>;
+                        mipi_out_panel1: endpoint {
+                                remote-endpoint = <&panel_in_mipi1>;
+                        };
+                };
+        };
+
+        panel1@0 {
+                compatible = "innolux,sl101-pn27d1665";
+                reg = <0>;
+                backlight = <&pwm_bl>;
+                enable-gpios = <&gpio4 30 GPIO_ACTIVE_HIGH>;
+                reset-gpios = <&gpio0 8 GPIO_ACTIVE_LOW>;
+
+
+                port {
+                        panel_in_mipi1: endpoint {
+                                remote-endpoint = <&mipi_out_panel1>;
+                        };
+                };
+        };
+};
+*/
