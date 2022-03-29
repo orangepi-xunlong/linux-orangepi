@@ -271,6 +271,11 @@
 				function = "i2c3";
 			};
 
+			i2c4_ph_pins: i2c4-ph-pins {
+				pins = "PH6", "PH7";
+				function = "i2c4";
+			};
+
 			i2s3_pins: i2s3-pins {
 				pins = "PH5", "PH6", "PH7", "PH8", "PH9";
 				function = "i2s3";
@@ -334,6 +339,11 @@
 			uart1_rts_cts_pins: uart1-rts-cts-pins {
 				pins = "PG8", "PG9";
 				function = "uart1";
+			};
+
+			uart2_ph_pins: uart2-ph-pins {
+				pins = "PH5", "PH6";
+				function = "uart2";
 			};
 
 			uart5_ph_pins: uart5-ph-pins {

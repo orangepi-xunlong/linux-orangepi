@@ -137,8 +137,8 @@
 	phy-mode = "rgmii";
 	phy-handle = <&ext_rgmii_phy>;
 	phy-supply = <&reg_dcdce>;
-	allwinner,rx-delay-ps = <3100>;
-	allwinner,tx-delay-ps = <700>;
+	allwinner,rx-delay-ps = <100>;
+	allwinner,tx-delay-ps = <500>;
 	status = "okay";
 };
 
@@ -227,8 +227,11 @@
 				regulator-name = "vcc1v8";
 			};
 
-			bldo2 {
-				/* unused */
+			reg_bldo2: bldo2 {
+				regulator-always-on;
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+				regulator-name = "vcc1v8";
 			};
 
 			bldo3 {
@@ -239,8 +242,11 @@
 				/* unused */
 			};
 
-			cldo1 {
-				/* reserved */
+			reg_cldo1: cldo1 {
+				regulator-always-on;
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+				regulator-name = "vcc-pg";
 			};
 
 			cldo2 {
@@ -328,13 +334,25 @@
 &i2c3 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2c3_ph_pins>;
-	status = "okay";
+	status = "disabled";
+};
+
+&i2c4 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c4_ph_pins>;
+	status = "disabled";
+};
+
+&uart2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart2_ph_pins>;
+	status = "disabled";
 };
 
 &uart5 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&uart5_ph_pins>;
-	status = "okay";
+	status = "disabled";
 };
 
 &ir {
@@ -346,11 +364,11 @@
 &spi1 {
 	#address-cells = <1>;
 	#size-cells = <0>;
-	status = "okay";
+	status = "disabled";
 
 	spidev@1 {
 		compatible = "spidev";
-		status = "okay";
+		status = "disabled";
 		reg = <0>;
 		spi-max-frequency = <1000000>;
 	};
