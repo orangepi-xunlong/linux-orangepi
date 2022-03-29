@@ -1075,7 +1075,7 @@ static int write_mac_addr(char *mac_file, u8 *addr)
 #ifdef CUSTOMIZE_WIFI_MAC_FILE
 #define WIFI_MAC_ADDR_PATH  CUSTOMIZE_WIFI_MAC_FILE
 #else
-#define WIFI_MAC_ADDR_PATH "/data/misc/wifi/wifimac.txt"
+#define WIFI_MAC_ADDR_PATH "/lib/firmware/rockchip/wifimac.txt"
 #endif
 static int sprdwl_get_mac_from_file(struct sprdwl_vif *vif, u8 *addr)
 {
@@ -1169,7 +1169,8 @@ static void sprdwl_set_mac_addr(struct sprdwl_vif *vif, u8 *pending_addr,
 		sprdwl_get_mac_from_file(vif, addr);
 	}
 
-	eth_random_addr(addr);
+	//rockchip_wifi_mac_addr(addr);
+	sprdwl_get_mac_from_file(vif, addr);
 
 	switch (type) {
 	case NL80211_IFTYPE_STATION:
