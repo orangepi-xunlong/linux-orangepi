@@ -9,5 +9,7 @@ dtb-$(CONFIG_ARCH_SUNXI) += sun50i-h6-orangepi-3-lts.dtb
 dtb-$(CONFIG_ARCH_SUNXI) += sun50i-h6-orangepi-lite2.dtb
 dtb-$(CONFIG_ARCH_SUNXI) += sun50i-h6-orangepi-one-plus.dtb
 dtb-$(CONFIG_ARCH_SUNXI) += sun50i-h616-orangepi-zero2.dtb
+dtb-$(CONFIG_ARCH_SUNXI) += sun50i-h616-orangepi-zero2-lts.dtb
+dtb-$(CONFIG_ARCH_SUNXI) += sun50i-h616-orangepi-zero2-b.dtb
 
 subdir-y	:= $(dts-dirs) overlay

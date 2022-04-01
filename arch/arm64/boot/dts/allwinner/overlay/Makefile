@@ -50,6 +50,8 @@ dtbo-$(CONFIG_ARCH_SUNXI) += \
 	sun50i-h6-w1-gpio.dtbo \
 	sun50i-h616-uart2.dtbo \
 	sun50i-h616-uart5.dtbo \
+	sun50i-h616-i2c1.dtbo \
+	sun50i-h616-i2c2.dtbo \
 	sun50i-h616-i2c3.dtbo \
 	sun50i-h616-i2c4.dtbo \
 	sun50i-h616-spi-spidev.dtbo

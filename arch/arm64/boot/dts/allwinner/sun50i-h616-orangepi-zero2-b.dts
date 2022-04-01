@@ -12,8 +12,8 @@
 #include <dt-bindings/leds/common.h>
 
 / {
-	model = "OrangePi Zero2";
-	compatible = "xunlong,orangepi-zero2", "allwinner,sun50i-h616";
+	model = "OrangePi Zero2 B";
+	compatible = "xunlong,orangepi-zero2-b", "allwinner,sun50i-h616";
 
 	aliases {
 		ethernet0 = &emac0;
@@ -146,8 +146,8 @@
 	phy-mode = "rgmii";
 	phy-handle = <&ext_rgmii_phy>;
 	phy-supply = <&reg_dcdce>;
-	allwinner,rx-delay-ps = <3100>;
-	allwinner,tx-delay-ps = <700>;
+	allwinner,rx-delay-ps = <100>;
+	allwinner,tx-delay-ps = <500>;
 	status = "okay";
 };
 
@@ -240,8 +240,11 @@
 				regulator-name = "vcc1v8";
 			};
 
-			bldo2 {
-				/* unused */
+			reg_bldo2: bldo2 {
+				regulator-always-on;
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+				regulator-name = "vcc1v8";
 			};
 
 			bldo3 {
@@ -252,8 +255,11 @@
 				/* unused */
 			};
 
-			cldo1 {
-				/* reserved */
+			reg_cldo1: cldo1 {
+				regulator-always-on;
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+				regulator-name = "vcc-pg";
 			};
 
 			cldo2 {
@@ -280,8 +286,8 @@
 
 			reg_dcdcd: dcdcd {
 				regulator-always-on;
-				regulator-min-microvolt = <1400000>;
-				regulator-max-microvolt = <1400000>;
+				regulator-min-microvolt = <1200000>;
+				regulator-max-microvolt = <1200000>;
 				regulator-name = "vdd-dram";
 			};
 
