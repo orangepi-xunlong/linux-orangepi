@@ -161,3 +161,4 @@ x509.genkey
 
 # Documentation toolchain
 sphinx_*/
+kernel/kheaders_data.tar.xz.tmp
