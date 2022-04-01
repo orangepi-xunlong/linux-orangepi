@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
 obj-$(CONFIG_SND_SUN8I_CODEC_ANALOG) += sun8i-codec-analog.o
 obj-$(CONFIG_SND_SUN4I_CODEC) += sun4i-codec.o
+obj-$(CONFIG_SND_SUN50IW9_CODEC) += sun50iw9-codec.o
 obj-$(CONFIG_SND_SUN4I_I2S) += sun4i-i2s.o
 obj-$(CONFIG_SND_SUN4I_SPDIF) += sun4i-spdif.o
 obj-$(CONFIG_SND_SUN50I_CODEC_ANALOG) += sun50i-codec-analog.o
@@ -8,3 +9,11 @@ obj-$(CONFIG_SND_SUN8I_CODEC) += sun8i-codec.o
 obj-$(CONFIG_SND_SUN8I_ADDA_PR_REGMAP) += sun8i-adda-pr-regmap.o
 obj-$(CONFIG_SND_SUN9I_HDMI_AUDIO) += sun9i-hdmi-audio.o
 obj-$(CONFIG_SND_AC100_CODEC) += ac100-codec.o
+
+# audio hub
+obj-$(CONFIG_SND_SOC_SUN50I_AHUB) += sun50i-ahub.o
+obj-$(CONFIG_SND_SOC_SUN50I_AHUB) += sun50i-ahub-cpudai.o
+obj-$(CONFIG_SND_SOC_SUN50I_AHUB) += sun50i-ahub-daudio.o
+# ahub machine
+obj-$(CONFIG_SND_SOC_SUN50I_AHUB) += sun50i-sndahub.o
+obj-$(CONFIG_SND_SOC_SUN50I_HDMI) += sun50i-sndhdmi.o

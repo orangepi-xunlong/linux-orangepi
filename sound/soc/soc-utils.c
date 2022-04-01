@@ -76,10 +76,12 @@ static int dummy_dma_open(struct snd_soc_component *component,
 	 * If there are other components associated with rtd, we shouldn't
 	 * override their hwparams
 	 */
+#if ! defined(CONFIG_SND_SOC_SUN50I_HDMI)
 	for_each_rtd_components(rtd, i, component) {
 		if (component->driver == &dummy_platform)
 			return 0;
 	}
+#endif
 
 	/* BE's dont need dummy params */
 	if (!rtd->dai_link->no_pcm)
