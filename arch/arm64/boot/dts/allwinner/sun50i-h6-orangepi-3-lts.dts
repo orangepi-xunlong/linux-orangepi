@@ -266,7 +266,7 @@
 				regulator-name = "vcc-efuse-pcie-hdmi-pc";
 			};
 
-			reg_blod3: bldo3 {
+			reg_bldo3: bldo3 {
 				regulator-always-on;
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
