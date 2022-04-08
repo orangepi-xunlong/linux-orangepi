@@ -10,6 +10,7 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/leds/common.h>
+#include "sun50i-h616-cpu-opp.dtsi"
 
 / {
 	model = "OrangePi Zero2";
@@ -191,15 +192,15 @@
 	status = "okay";
 };
 
-&r_rsb {
+&r_i2c {
 	status = "okay";
 
-	axp305: pmic@745 {
+	axp305: pmic@36 {
 		compatible = "x-powers,axp305", "x-powers,axp805",
 			     "x-powers,axp806";
 		interrupt-controller;
 		#interrupt-cells = <1>;
-		reg = <0x745>;
+		reg = <0x36>;
 
 		x-powers,self-working-mode;
 		vina-supply = <&reg_vcc5v>;
@@ -267,7 +268,7 @@
 			reg_dcdca: dcdca {
 				regulator-always-on;
 				regulator-min-microvolt = <810000>;
-				regulator-max-microvolt = <1080000>;
+				regulator-max-microvolt = <1160000>;
 				regulator-name = "vdd-cpu";
 			};
 
@@ -297,6 +298,10 @@
 			};
 		};
 	};
+};
+
+&cpu0 {
+        cpu-supply = <&reg_dcdca>;
 };
 
 &spi0  {
