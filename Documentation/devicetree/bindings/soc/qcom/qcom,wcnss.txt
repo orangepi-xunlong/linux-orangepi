@@ -24,6 +24,13 @@ block and a BT, WiFi and FM radio block, all using SMD as command channels.
 		    "qcom,riva",
 		    "qcom,pronto"
 
+- firmware-name:
+	Usage: optional
+	Value type: <string>
+	Definition: specifies the relative firmware image path for the WLAN NV
+		    blob. Defaults to "wlan/prima/WCNSS_qcom_wlan_nv.bin" if
+		    not specified.
+
 = SUBNODES
 The subnodes of the wcnss node are optional and describe the individual blocks in
 the WCNSS.
@@ -36,6 +43,11 @@ The following properties are defined to the bluetooth node:
 	Value type: <string>
 	Definition: must be:
 		    "qcom,wcnss-bt"
+
+- local-bd-address:
+	Usage: optional
+	Value type: <u8 array>
+	Definition: see Documentation/devicetree/bindings/net/bluetooth.txt
 
 == WiFi
 The following properties are defined to the WiFi node:
@@ -91,6 +103,9 @@ smd {
 
 			bt {
 				compatible = "qcom,wcnss-bt";
+
+				/* BD address 00:11:22:33:44:55 */
+				local-bd-address = [ 55 44 33 22 11 00 ];
 			};
 
 			wlan {

@@ -38,7 +38,7 @@
 
 /* mlx4_en_read_clock - read raw cycle counter (to be used by time counter)
  */
-static cycle_t mlx4_en_read_clock(const struct cyclecounter *tc)
+static u64 mlx4_en_read_clock(const struct cyclecounter *tc)
 {
 	struct mlx4_en_dev *mdev =
 		container_of(tc, struct mlx4_en_dev, cycles);
@@ -62,12 +62,13 @@ void mlx4_en_fill_hwtstamps(struct mlx4_en_dev *mdev,
 			    struct skb_shared_hwtstamps *hwts,
 			    u64 timestamp)
 {
-	unsigned long flags;
+	unsigned int seq;
 	u64 nsec;
 
-	read_lock_irqsave(&mdev->clock_lock, flags);
-	nsec = timecounter_cyc2time(&mdev->clock, timestamp);
-	read_unlock_irqrestore(&mdev->clock_lock, flags);
+	do {
+		seq = read_seqbegin(&mdev->clock_lock);
+		nsec = timecounter_cyc2time(&mdev->clock, timestamp);
+	} while (read_seqretry(&mdev->clock_lock, seq));
 
 	memset(hwts, 0, sizeof(struct skb_shared_hwtstamps));
 	hwts->hwtstamp = ns_to_ktime(nsec);
@@ -102,9 +103,9 @@ void mlx4_en_ptp_overflow_check(struct mlx4_en_dev *mdev)
 	unsigned long flags;
 
 	if (timeout) {
-		write_lock_irqsave(&mdev->clock_lock, flags);
+		write_seqlock_irqsave(&mdev->clock_lock, flags);
 		timecounter_read(&mdev->clock);
-		write_unlock_irqrestore(&mdev->clock_lock, flags);
+		write_sequnlock_irqrestore(&mdev->clock_lock, flags);
 		mdev->last_overflow_check = jiffies;
 	}
 }
@@ -135,10 +136,10 @@ static int mlx4_en_phc_adjfreq(struct ptp_clock_info *ptp, s32 delta)
 	adj *= delta;
 	diff = div_u64(adj, 1000000000ULL);
 
-	write_lock_irqsave(&mdev->clock_lock, flags);
+	write_seqlock_irqsave(&mdev->clock_lock, flags);
 	timecounter_read(&mdev->clock);
 	mdev->cycles.mult = neg_adj ? mult - diff : mult + diff;
-	write_unlock_irqrestore(&mdev->clock_lock, flags);
+	write_sequnlock_irqrestore(&mdev->clock_lock, flags);
 
 	return 0;
 }
@@ -156,9 +157,9 @@ static int mlx4_en_phc_adjtime(struct ptp_clock_info *ptp, s64 delta)
 						ptp_clock_info);
 	unsigned long flags;
 
-	write_lock_irqsave(&mdev->clock_lock, flags);
+	write_seqlock_irqsave(&mdev->clock_lock, flags);
 	timecounter_adjtime(&mdev->clock, delta);
-	write_unlock_irqrestore(&mdev->clock_lock, flags);
+	write_sequnlock_irqrestore(&mdev->clock_lock, flags);
 
 	return 0;
 }
@@ -179,9 +180,9 @@ static int mlx4_en_phc_gettime(struct ptp_clock_info *ptp,
 	unsigned long flags;
 	u64 ns;
 
-	write_lock_irqsave(&mdev->clock_lock, flags);
+	write_seqlock_irqsave(&mdev->clock_lock, flags);
 	ns = timecounter_read(&mdev->clock);
-	write_unlock_irqrestore(&mdev->clock_lock, flags);
+	write_sequnlock_irqrestore(&mdev->clock_lock, flags);
 
 	*ts = ns_to_timespec64(ns);
 
@@ -205,9 +206,9 @@ static int mlx4_en_phc_settime(struct ptp_clock_info *ptp,
 	unsigned long flags;
 
 	/* reset the timecounter */
-	write_lock_irqsave(&mdev->clock_lock, flags);
+	write_seqlock_irqsave(&mdev->clock_lock, flags);
 	timecounter_init(&mdev->clock, &mdev->cycles, ns);
-	write_unlock_irqrestore(&mdev->clock_lock, flags);
+	write_sequnlock_irqrestore(&mdev->clock_lock, flags);
 
 	return 0;
 }
@@ -271,7 +272,7 @@ void mlx4_en_init_timestamp(struct mlx4_en_dev *mdev)
 	if (mdev->ptp_clock)
 		return;
 
-	rwlock_init(&mdev->clock_lock);
+	seqlock_init(&mdev->clock_lock);
 
 	memset(&mdev->cycles, 0, sizeof(mdev->cycles));
 	mdev->cycles.read = mlx4_en_read_clock;
@@ -281,10 +282,10 @@ void mlx4_en_init_timestamp(struct mlx4_en_dev *mdev)
 		clocksource_khz2mult(1000 * dev->caps.hca_core_clock, mdev->cycles.shift);
 	mdev->nominal_c_mult = mdev->cycles.mult;
 
-	write_lock_irqsave(&mdev->clock_lock, flags);
+	write_seqlock_irqsave(&mdev->clock_lock, flags);
 	timecounter_init(&mdev->clock, &mdev->cycles,
 			 ktime_to_ns(ktime_get_real()));
-	write_unlock_irqrestore(&mdev->clock_lock, flags);
+	write_sequnlock_irqrestore(&mdev->clock_lock, flags);
 
 	/* Configure the PHC */
 	mdev->ptp_clock_info = mlx4_en_ptp_clock_info;

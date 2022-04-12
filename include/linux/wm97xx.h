@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 
 /*
  * Register bits and API for Wolfson WM97xx series of codecs
@@ -293,7 +294,6 @@ struct wm97xx {
 struct wm97xx_batt_pdata {
 	int	batt_aux;
 	int	temp_aux;
-	int	charge_gpio;
 	int	min_voltage;
 	int	max_voltage;
 	int	batt_div;

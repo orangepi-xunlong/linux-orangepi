@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include "qcom-msm8974.dtsi"
 #include "qcom-pm8841.dtsi"
 #include "qcom-pm8941.dtsi"
@@ -18,13 +19,13 @@
 
 	soc {
 		serial@f991e000 {
-			status = "ok";
+			status = "okay";
 		};
 
 		sdhci@f9824900 {
 			bus-width = <8>;
 			non-removable;
-			status = "ok";
+			status = "okay";
 
 			vmmc-supply = <&pm8941_l20>;
 			vqmmc-supply = <&pm8941_s3>;
@@ -38,10 +39,30 @@
 			pinctrl-names = "default";
 			pinctrl-0 = <&sdhc2_pin_a>, <&sdhc2_cd_pin_a>;
 			bus-width = <4>;
-			status = "ok";
+			status = "okay";
 
 			vmmc-supply = <&pm8941_l21>;
 			vqmmc-supply = <&pm8941_l13>;
+		};
+
+		usb@f9a55000 {
+			status = "okay";
+			phys = <&usb_hs2_phy>;
+			phy-select = <&tcsr 0xb000 1>;
+			extcon = <&smbb>, <&usb_id>;
+			vbus-supply = <&chg_otg>;
+			hnp-disable;
+			srp-disable;
+			adp-disable;
+			ulpi {
+				phy@b {
+					status = "okay";
+					v3p3-supply = <&pm8941_l24>;
+					v1p8-supply = <&pm8941_l6>;
+					extcon = <&smbb>;
+					qcom,init-seq = /bits/ 8 <0x1 0x63>;
+				};
+			};
 		};
 
 

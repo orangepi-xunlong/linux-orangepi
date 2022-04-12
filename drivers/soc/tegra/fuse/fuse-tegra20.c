@@ -1,17 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2013-2014, NVIDIA CORPORATION.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  * Based on drivers/misc/eeprom/sunxi_sid.c
  */
@@ -27,6 +16,7 @@
 #include <linux/kobject.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
+#include <linux/pm_runtime.h>
 #include <linux/random.h>
 
 #include <soc/tegra/fuse.h>
@@ -57,9 +47,13 @@ static u32 tegra20_fuse_read(struct tegra_fuse *fuse, unsigned int offset)
 	u32 value = 0;
 	int err;
 
+	err = pm_runtime_resume_and_get(fuse->dev);
+	if (err)
+		return err;
+
 	mutex_lock(&fuse->apbdma.lock);
 
-	fuse->apbdma.config.src_addr = fuse->apbdma.phys + FUSE_BEGIN + offset;
+	fuse->apbdma.config.src_addr = fuse->phys + FUSE_BEGIN + offset;
 
 	err = dmaengine_slave_config(fuse->apbdma.chan, &fuse->apbdma.config);
 	if (err)
@@ -77,8 +71,6 @@ static u32 tegra20_fuse_read(struct tegra_fuse *fuse, unsigned int offset)
 
 	reinit_completion(&fuse->apbdma.wait);
 
-	clk_prepare_enable(fuse->clk);
-
 	dmaengine_submit(dma_desc);
 	dma_async_issue_pending(fuse->apbdma.chan);
 	time_left = wait_for_completion_timeout(&fuse->apbdma.wait,
@@ -89,11 +81,17 @@ static u32 tegra20_fuse_read(struct tegra_fuse *fuse, unsigned int offset)
 	else
 		value = *fuse->apbdma.virt;
 
-	clk_disable_unprepare(fuse->clk);
-
 out:
 	mutex_unlock(&fuse->apbdma.lock);
+	pm_runtime_put(fuse->dev);
 	return value;
+}
+
+static bool dma_filter(struct dma_chan *chan, void *filter_param)
+{
+	struct device_node *np = chan->device->dev->of_node;
+
+	return of_device_is_compatible(np, "nvidia,tegra20-apbdma");
 }
 
 static int tegra20_fuse_probe(struct tegra_fuse *fuse)
@@ -103,7 +101,7 @@ static int tegra20_fuse_probe(struct tegra_fuse *fuse)
 	dma_cap_zero(mask);
 	dma_cap_set(DMA_SLAVE, mask);
 
-	fuse->apbdma.chan = dma_request_channel(mask, NULL, NULL);
+	fuse->apbdma.chan = dma_request_channel(mask, dma_filter, NULL);
 	if (!fuse->apbdma.chan)
 		return -EPROBE_DEFER;
 
@@ -119,6 +117,8 @@ static int tegra20_fuse_probe(struct tegra_fuse *fuse)
 	fuse->apbdma.config.dst_addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
 	fuse->apbdma.config.src_maxburst = 1;
 	fuse->apbdma.config.dst_maxburst = 1;
+	fuse->apbdma.config.direction = DMA_DEV_TO_MEM;
+	fuse->apbdma.config.device_fc = false;
 
 	init_completion(&fuse->apbdma.wait);
 	mutex_init(&fuse->apbdma.lock);
@@ -166,4 +166,6 @@ const struct tegra_fuse_soc tegra20_fuse_soc = {
 	.speedo_init = tegra20_init_speedo_data,
 	.probe = tegra20_fuse_probe,
 	.info = &tegra20_fuse_info,
+	.soc_attr_group = &tegra_soc_attr_group,
+	.clk_suspend_on = false,
 };

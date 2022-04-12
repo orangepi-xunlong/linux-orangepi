@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Synopsys G210 Test Chip driver
  *
  * Copyright (C) 2015-2016 Synopsys, Inc. (www.synopsys.com)
  *
  * Authors: Joao Pinto <jpinto@synopsys.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -20,7 +17,7 @@
 #include "ufshcd-dwc.h"
 #include "tc-dwc-g210.h"
 
-/**
+/*
  * UFS DWC specific variant operations
  */
 static struct ufs_hba_variant_ops tc_dwc_g210_20bit_pltfm_hba_vops = {
@@ -87,11 +84,8 @@ static int tc_dwc_g210_pltfm_remove(struct platform_device *pdev)
 }
 
 static const struct dev_pm_ops tc_dwc_g210_pltfm_pm_ops = {
-	.suspend	= ufshcd_pltfrm_suspend,
-	.resume		= ufshcd_pltfrm_resume,
-	.runtime_suspend = ufshcd_pltfrm_runtime_suspend,
-	.runtime_resume  = ufshcd_pltfrm_runtime_resume,
-	.runtime_idle    = ufshcd_pltfrm_runtime_idle,
+	SET_SYSTEM_SLEEP_PM_OPS(ufshcd_system_suspend, ufshcd_system_resume)
+	SET_RUNTIME_PM_OPS(ufshcd_runtime_suspend, ufshcd_runtime_resume, NULL)
 };
 
 static struct platform_driver tc_dwc_g210_pltfm_driver = {

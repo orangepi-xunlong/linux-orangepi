@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * bdc_udc.c - BRCM BDC USB3.0 device controller gagdet ops
  *
@@ -6,12 +7,6 @@
  * Author: Ashwini Pahuja
  *
  * Based on drivers under drivers/usb/gadget/udc/
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
- *
  */
 #include <linux/module.h>
 #include <linux/pci.h>
@@ -169,7 +164,7 @@ static void bdc_func_wake_timer(struct work_struct *work)
 	/*
 	 * Check if host has started transferring on endpoints
 	 * FUNC_WAKE_ISSUED is cleared when transfer has started after resume
-	*/
+	 */
 	if (bdc->devstatus & FUNC_WAKE_ISSUED) {
 		dev_dbg(bdc->dev, "FUNC_WAKE_ISSUED FLAG IS STILL SET\n");
 		/* flag is still set, so again send func wake */
@@ -200,7 +195,7 @@ static void handle_link_state_change(struct bdc *bdc, u32 uspc)
 		break;
 	case BDC_LINK_STATE_U0:
 		if (bdc->devstatus & REMOTE_WAKEUP_ISSUED) {
-					bdc->devstatus &= ~REMOTE_WAKEUP_ISSUED;
+			bdc->devstatus &= ~REMOTE_WAKEUP_ISSUED;
 			if (bdc->gadget.speed == USB_SPEED_SUPER) {
 				bdc_function_wake_fh(bdc, 0);
 				bdc->devstatus |= FUNC_WAKE_ISSUED;
@@ -210,7 +205,7 @@ static void handle_link_state_change(struct bdc *bdc, u32 uspc)
 				 * if not then send function wake again every
 				 * TNotification secs until host initiates
 				 * transfer to BDC, USB3 spec Table 8.13
-				*/
+				 */
 				schedule_delayed_work(
 						&bdc->func_wake_notify,
 						msecs_to_jiffies(BDC_TNOTIFY));
@@ -249,6 +244,7 @@ void bdc_sr_uspc(struct bdc *bdc, struct bdc_sr *sreport)
 			disconn = true;
 		else if ((uspc & BDC_PCS) && !BDC_PST(uspc))
 			connected = true;
+		clear_flags |= BDC_PCC;
 	}
 
 	/* Change in VBus and VBus is present */
@@ -259,16 +255,16 @@ void bdc_sr_uspc(struct bdc *bdc, struct bdc_sr *sreport)
 			bdc_softconn(bdc);
 			usb_gadget_set_state(&bdc->gadget, USB_STATE_POWERED);
 		}
-		clear_flags = BDC_VBC;
+		clear_flags |= BDC_VBC;
 	} else if ((uspc & BDC_PRS) || (uspc & BDC_PRC) || disconn) {
 		/* Hot reset, warm reset, 2.0 bus reset or disconn */
 		dev_dbg(bdc->dev, "Port reset or disconn\n");
 		bdc_uspc_disconnected(bdc, disconn);
-		clear_flags = BDC_PCC|BDC_PCS|BDC_PRS|BDC_PRC;
+		clear_flags |= BDC_PRC;
 	} else if ((uspc & BDC_PSC) && (uspc & BDC_PCS)) {
 		/* Change in Link state */
 		handle_link_state_change(bdc, uspc);
-		clear_flags = BDC_PSC|BDC_PCS;
+		clear_flags |= BDC_PSC;
 	}
 
 	/*
@@ -383,7 +379,7 @@ static int bdc_udc_start(struct usb_gadget *gadget,
 	 * Run the controller from here and when BDC is connected to
 	 * Host then driver will receive a USPC SR with VBUS present
 	 * and then driver will do a softconnect.
-	*/
+	 */
 	ret = bdc_run(bdc);
 	if (ret) {
 		dev_err(bdc->dev, "%s bdc run fail\n", __func__);
@@ -534,7 +530,7 @@ int bdc_udc_init(struct bdc *bdc)
 
 	bdc->gadget.name = BRCM_BDC_NAME;
 	ret = devm_request_irq(bdc->dev, bdc->irq, bdc_udc_interrupt,
-				IRQF_SHARED , BRCM_BDC_NAME, bdc);
+				IRQF_SHARED, BRCM_BDC_NAME, bdc);
 	if (ret) {
 		dev_err(bdc->dev,
 			"failed to request irq #%d %d\n",

@@ -34,7 +34,7 @@ g84_mc_reset[] = {
 	{}
 };
 
-const struct nvkm_mc_map
+static const struct nvkm_mc_map
 g84_mc_intr[] = {
 	{ 0x04000000, NVKM_ENGINE_DISP },
 	{ 0x00020000, NVKM_ENGINE_VP },
@@ -62,7 +62,7 @@ g84_mc = {
 };
 
 int
-g84_mc_new(struct nvkm_device *device, int index, struct nvkm_mc **pmc)
+g84_mc_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst, struct nvkm_mc **pmc)
 {
-	return nvkm_mc_new_(&g84_mc, device, index, pmc);
+	return nvkm_mc_new_(&g84_mc, device, type, inst, pmc);
 }

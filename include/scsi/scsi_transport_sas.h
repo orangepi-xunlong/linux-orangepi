@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef SCSI_TRANSPORT_SAS_H
 #define SCSI_TRANSPORT_SAS_H
 
@@ -5,6 +6,7 @@
 #include <linux/types.h>
 #include <linux/mutex.h>
 #include <scsi/sas.h>
+#include <linux/bsg-lib.h>
 
 struct scsi_transport_template;
 struct sas_rphy;
@@ -39,6 +41,7 @@ enum sas_linkrate {
 	SAS_LINK_RATE_G2 = SAS_LINK_RATE_3_0_GBPS,
 	SAS_LINK_RATE_6_0_GBPS = 10,
 	SAS_LINK_RATE_12_0_GBPS = 11,
+	SAS_LINK_RATE_22_5_GBPS = 12,
 	/* These are virtual to the transport class and may never
 	 * be signalled normally since the standard defined field
 	 * is only 4 bits */
@@ -154,6 +157,7 @@ struct sas_port {
 
 	struct mutex		phy_list_mutex;
 	struct list_head	phy_list;
+	struct list_head	del_list; /* libsas only */
 };
 
 #define dev_to_sas_port(d) \
@@ -176,7 +180,8 @@ struct sas_function_template {
 	int (*phy_setup)(struct sas_phy *);
 	void (*phy_release)(struct sas_phy *);
 	int (*set_phy_speed)(struct sas_phy *, struct sas_phy_linkrates *);
-	int (*smp_handler)(struct Scsi_Host *, struct sas_rphy *, struct request *);
+	void (*smp_handler)(struct bsg_job *, struct Scsi_Host *,
+			struct sas_rphy *);
 };
 
 

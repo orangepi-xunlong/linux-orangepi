@@ -128,7 +128,10 @@ struct mlx4_dev_cap {
 	u32 dmfs_high_rate_qpn_base;
 	u32 dmfs_high_rate_qpn_range;
 	struct mlx4_rate_limit_caps rl_caps;
+	u32 health_buffer_addrs;
 	struct mlx4_port_cap port_cap[MLX4_MAX_PORTS + 1];
+	bool wol_port[MLX4_MAX_PORTS + 1];
+	bool map_clock_to_user;
 };
 
 struct mlx4_func_cap {
@@ -143,11 +146,7 @@ struct mlx4_func_cap {
 	int	max_eq;
 	int	reserved_eq;
 	int	mcg_quota;
-	u32	qp0_qkey;
-	u32	qp0_tunnel_qpn;
-	u32	qp0_proxy_qpn;
-	u32	qp1_tunnel_qpn;
-	u32	qp1_proxy_qpn;
+	struct mlx4_spec_qps spec_qps;
 	u32	reserved_lkey;
 	u8	physical_port;
 	u8	flags0;
@@ -184,8 +183,8 @@ struct mlx4_init_hca_param {
 	u64 cmpt_base;
 	u64 mtt_base;
 	u64 global_caps;
-	u16 log_mc_entry_sz;
-	u16 log_mc_hash_sz;
+	u8 log_mc_entry_sz;
+	u8 log_mc_hash_sz;
 	u16 hca_core_clock; /* Internal Clock Frequency (in MHz) */
 	u8  log_num_qps;
 	u8  log_num_srqs;

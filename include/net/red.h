@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __NET_SCHED_RED_H
 #define __NET_SCHED_RED_H
 
@@ -167,15 +168,63 @@ static inline void red_set_vars(struct red_vars *v)
 	v->qcount	= -1;
 }
 
-static inline bool red_check_params(u32 qth_min, u32 qth_max, u8 Wlog)
+static inline bool red_check_params(u32 qth_min, u32 qth_max, u8 Wlog,
+				    u8 Scell_log, u8 *stab)
 {
-	if (fls(qth_min) + Wlog > 32)
+	if (fls(qth_min) + Wlog >= 32)
 		return false;
-	if (fls(qth_max) + Wlog > 32)
+	if (fls(qth_max) + Wlog >= 32)
+		return false;
+	if (Scell_log >= 32)
 		return false;
 	if (qth_max < qth_min)
 		return false;
+	if (stab) {
+		int i;
+
+		for (i = 0; i < RED_STAB_SIZE; i++)
+			if (stab[i] >= 32)
+				return false;
+	}
 	return true;
+}
+
+static inline int red_get_flags(unsigned char qopt_flags,
+				unsigned char historic_mask,
+				struct nlattr *flags_attr,
+				unsigned char supported_mask,
+				struct nla_bitfield32 *p_flags,
+				unsigned char *p_userbits,
+				struct netlink_ext_ack *extack)
+{
+	struct nla_bitfield32 flags;
+
+	if (qopt_flags && flags_attr) {
+		NL_SET_ERR_MSG_MOD(extack, "flags should be passed either through qopt, or through a dedicated attribute");
+		return -EINVAL;
+	}
+
+	if (flags_attr) {
+		flags = nla_get_bitfield32(flags_attr);
+	} else {
+		flags.selector = historic_mask;
+		flags.value = qopt_flags & historic_mask;
+	}
+
+	*p_flags = flags;
+	*p_userbits = qopt_flags & ~historic_mask;
+	return 0;
+}
+
+static inline int red_validate_flags(unsigned char flags,
+				     struct netlink_ext_ack *extack)
+{
+	if ((flags & TC_RED_NODROP) && !(flags & TC_RED_ECN)) {
+		NL_SET_ERR_MSG_MOD(extack, "nodrop mode is only meaningful with ECN");
+		return -EINVAL;
+	}
+
+	return 0;
 }
 
 static inline void red_set_parms(struct red_parms *p,
@@ -218,7 +267,7 @@ static inline void red_set_parms(struct red_parms *p,
 
 static inline int red_is_idling(const struct red_vars *v)
 {
-	return v->qidlestart.tv64 != 0;
+	return v->qidlestart != 0;
 }
 
 static inline void red_start_of_idle_period(struct red_vars *v)
@@ -228,7 +277,7 @@ static inline void red_start_of_idle_period(struct red_vars *v)
 
 static inline void red_end_of_idle_period(struct red_vars *v)
 {
-	v->qidlestart.tv64 = 0;
+	v->qidlestart = 0;
 }
 
 static inline void red_restart(struct red_vars *v)
@@ -246,7 +295,7 @@ static inline unsigned long red_calc_qavg_from_idle_time(const struct red_parms 
 	int  shift;
 
 	/*
-	 * The problem: ideally, average length queue recalcultion should
+	 * The problem: ideally, average length queue recalculation should
 	 * be done over constant clock intervals. This is too expensive, so
 	 * that the calculation is driven by outgoing packets.
 	 * When the queue is idle we have to model this clock by hand.

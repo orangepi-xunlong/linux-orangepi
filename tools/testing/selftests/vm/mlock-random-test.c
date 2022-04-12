@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * It tests the mlock/mlock2() when they are invoked
  * on randomly memory region.
@@ -69,7 +70,7 @@ int get_proc_locked_vm_size(void)
 		}
 	}
 
-	perror("cann't parse VmLck in /proc/self/status\n");
+	perror("cannot parse VmLck in /proc/self/status\n");
 	fclose(f);
 	return -1;
 }

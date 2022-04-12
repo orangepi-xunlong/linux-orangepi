@@ -17,12 +17,12 @@
 #include <asm/pdc.h>
 	
 #include <asm/assembly.h>
-#include <asm/pgtable.h>
 
 #include <linux/linkage.h>
 #include <linux/init.h>
+#include <linux/pgtable.h>
 
-	.level	LEVEL
+	.level	PA_ASM_LEVEL
 
 	__INITDATA
 ENTRY(boot_args)
@@ -35,7 +35,8 @@ END(boot_args)
 	__HEAD
 
 	.align	4
-	.import init_thread_union,data
+	.import init_task,data
+	.import init_stack,data
 	.import fault_vector_20,code    /* IVA parisc 2.0 32 bit */
 #ifndef CONFIG_64BIT
         .import fault_vector_11,code    /* IVA parisc 1.1 32 bit */
@@ -123,12 +124,12 @@ $pgt_fill_loop:
 	load32		start_parisc,%r11
 
 	/* And the initial task pointer */
-	load32		init_thread_union,%r6
+	load32		init_task,%r6
 	mtctl           %r6,%cr30
 
 	/* And the stack pointer too */
-	ldo             THREAD_SZ_ALGN(%r6),%sp
-
+	load32		init_stack,%sp
+	tophys_r1	%sp
 #if defined(CONFIG_64BIT) && defined(CONFIG_FUNCTION_TRACER)
 	.import _mcount,data
 	/* initialize mcount FPTR */
@@ -137,6 +138,16 @@ $pgt_fill_loop:
 	load32		PA(_mcount), %r10
 	std		%dp,0x18(%r10)
 #endif
+
+#ifdef CONFIG_64BIT
+	/* Get PDCE_PROC for monarch CPU. */
+#define MEM_PDC_LO 0x388
+#define MEM_PDC_HI 0x35C
+	ldw             MEM_PDC_LO(%r0),%r3
+	ldw             MEM_PDC_HI(%r0),%r10
+	depd            %r10, 31, 32, %r3        /* move to upper word */
+#endif
+
 
 #ifdef CONFIG_SMP
 	/* Set the smp rendezvous address into page zero.
@@ -176,12 +187,11 @@ common_stext:
 #endif /*CONFIG_SMP*/
 
 #ifdef CONFIG_64BIT
-	tophys_r1	%sp
+	mfctl		%cr30,%r6		/* PCX-W2 firmware bug */
+	tophys_r1	%r6
 
 	/* Save the rfi target address */
-	ldd             TI_TASK-THREAD_SZ_ALGN(%sp), %r10
-	tophys_r1       %r10
-	std             %r11,  TASK_PT_GR11(%r10)
+	STREG		%r11,  TASK_PT_GR11(%r6)
 	/* Switch to wide mode Superdome doesn't support narrow PDC
 	** calls.
 	*/
@@ -196,13 +206,6 @@ common_stext:
         ** Someday, palo might not do this for the Monarch either.
         */
 2:
-#define MEM_PDC_LO 0x388
-#define MEM_PDC_HI 0x35C
-	ldw             MEM_PDC_LO(%r0),%r3
-	ldw             MEM_PDC_HI(%r0),%r6
-	depd            %r6, 31, 32, %r3        /* move to upper word */
-
-	mfctl		%cr30,%r6		/* PCX-W2 firmware bug */
 
 	ldo             PDC_PSW(%r0),%arg0              /* 21 */
 	ldo             PDC_PSW_SET_DEFAULTS(%r0),%arg1 /* 2 */
@@ -212,13 +215,9 @@ common_stext:
 	copy            %r0,%arg3
 
 stext_pdc_ret:
+	LDREG		TASK_PT_GR11(%r6), %r11
+	tovirt_r1	%r6
 	mtctl		%r6,%cr30		/* restore task thread info */
-
-	/* restore rfi target address*/
-	ldd             TI_TASK-THREAD_SZ_ALGN(%sp), %r10
-	tophys_r1       %r10
-	ldd             TASK_PT_GR11(%r10), %r11
-	tovirt_r1       %sp
 #endif
 	
 	/* PARANOID: clear user scratch/user space SR's */
@@ -254,7 +253,7 @@ stext_pdc_ret:
 	ldo		R%PA(fault_vector_11)(%r10),%r10
 
 $is_pa20:
-	.level		LEVEL /* restore 1.1 || 2.0w */
+	.level		PA_ASM_LEVEL /* restore 1.1 || 2.0w */
 #endif /*!CONFIG_64BIT*/
 	load32		PA(fault_vector_20),%r10
 
@@ -267,6 +266,8 @@ $install_iva:
 	.align 128
 aligned_rfi:
 	pcxt_ssm_bug
+
+	copy		%r3, %arg0	/* PDCE_PROC for smp_callin() */
 
 	rsm		PSW_SM_QUIET,%r0	/* off troublesome PSW bits */
 	/* Don't need NOPs, have 8 compliant insn before rfi */
@@ -281,7 +282,9 @@ aligned_rfi:
 
 	load32		KERNEL_PSW,%r10
 	mtctl		%r10,%ipsw
-	
+
+	tovirt_r1	%sp
+
 	/* Jump through hyperspace to Virt Mode */
 	rfi
 	nop
@@ -323,13 +326,27 @@ smp_slave_stext:
 	mtsp	   %r0,%sr6
 	mtsp	   %r0,%sr7
 
+#ifdef CONFIG_64BIT
+	/*
+	 *  Enable Wide mode early, in case the task_struct for the idle
+	 *  task in smp_init_current_idle_task was allocated above 4GB.
+	 */
+1:	mfia            %rp             /* clear upper part of pcoq */
+	ldo             2f-1b(%rp),%rp
+	depdi           0,31,32,%rp
+	bv              (%rp)
+	ssm             PSW_SM_W,%r0
+2:
+#endif
+
 	/*  Initialize the SP - monarch sets up smp_init_current_idle_task */
-	load32		PA(smp_init_current_idle_task),%sp
-	LDREG		0(%sp),%sp	/* load task address */
+	load32		PA(smp_init_current_idle_task),%r6
+	LDREG		0(%r6),%r6
+	mtctl		%r6,%cr30
+	tophys_r1	%r6
+	LDREG           TASK_STACK(%r6),%sp
 	tophys_r1	%sp
-	LDREG		TASK_THREAD_INFO(%sp),%sp
-	mtctl           %sp,%cr30       /* store in cr30 */
-	ldo             THREAD_SZ_ALGN(%sp),%sp
+	ldo		FRAME_SIZE(%sp),%sp
 
 	/* point CPU to kernel page tables */
 	load32		PA(swapper_pg_dir),%r4
@@ -357,7 +374,7 @@ smp_slave_stext:
 ENDPROC(parisc_kernel_start)
 
 #ifndef CONFIG_64BIT
-	.section .data..read_mostly
+	.section .data..ro_after_init
 
 	.align	4
 	.export	$global$,data

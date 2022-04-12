@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Xilinx Test Pattern Generator
  *
@@ -6,10 +7,6 @@
  *
  * Contacts: Hyun Kwon <hyun.kwon@xilinx.com>
  *           Laurent Pinchart <laurent.pinchart@ideasonboard.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/device.h>
@@ -254,12 +251,13 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 
 static struct v4l2_mbus_framefmt *
 __xtpg_get_pad_format(struct xtpg_device *xtpg,
-		      struct v4l2_subdev_pad_config *cfg,
+		      struct v4l2_subdev_state *sd_state,
 		      unsigned int pad, u32 which)
 {
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_get_try_format(&xtpg->xvip.subdev, cfg, pad);
+		return v4l2_subdev_get_try_format(&xtpg->xvip.subdev,
+						  sd_state, pad);
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		return &xtpg->formats[pad];
 	default:
@@ -268,25 +266,26 @@ __xtpg_get_pad_format(struct xtpg_device *xtpg,
 }
 
 static int xtpg_get_format(struct v4l2_subdev *subdev,
-			   struct v4l2_subdev_pad_config *cfg,
+			   struct v4l2_subdev_state *sd_state,
 			   struct v4l2_subdev_format *fmt)
 {
 	struct xtpg_device *xtpg = to_tpg(subdev);
 
-	fmt->format = *__xtpg_get_pad_format(xtpg, cfg, fmt->pad, fmt->which);
+	fmt->format = *__xtpg_get_pad_format(xtpg, sd_state, fmt->pad,
+					     fmt->which);
 
 	return 0;
 }
 
 static int xtpg_set_format(struct v4l2_subdev *subdev,
-			   struct v4l2_subdev_pad_config *cfg,
+			   struct v4l2_subdev_state *sd_state,
 			   struct v4l2_subdev_format *fmt)
 {
 	struct xtpg_device *xtpg = to_tpg(subdev);
 	struct v4l2_mbus_framefmt *__format;
 	u32 bayer_phase;
 
-	__format = __xtpg_get_pad_format(xtpg, cfg, fmt->pad, fmt->which);
+	__format = __xtpg_get_pad_format(xtpg, sd_state, fmt->pad, fmt->which);
 
 	/* In two pads mode the source pad format is always identical to the
 	 * sink pad format.
@@ -309,7 +308,8 @@ static int xtpg_set_format(struct v4l2_subdev *subdev,
 
 	/* Propagate the format to the source pad. */
 	if (xtpg->npads == 2) {
-		__format = __xtpg_get_pad_format(xtpg, cfg, 1, fmt->which);
+		__format = __xtpg_get_pad_format(xtpg, sd_state, 1,
+						 fmt->which);
 		*__format = fmt->format;
 	}
 
@@ -321,12 +321,12 @@ static int xtpg_set_format(struct v4l2_subdev *subdev,
  */
 
 static int xtpg_enum_frame_size(struct v4l2_subdev *subdev,
-				struct v4l2_subdev_pad_config *cfg,
+				struct v4l2_subdev_state *sd_state,
 				struct v4l2_subdev_frame_size_enum *fse)
 {
 	struct v4l2_mbus_framefmt *format;
 
-	format = v4l2_subdev_get_try_format(subdev, cfg, fse->pad);
+	format = v4l2_subdev_get_try_format(subdev, sd_state, fse->pad);
 
 	if (fse->index || fse->code != format->code)
 		return -EINVAL;
@@ -354,11 +354,11 @@ static int xtpg_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
 	struct xtpg_device *xtpg = to_tpg(subdev);
 	struct v4l2_mbus_framefmt *format;
 
-	format = v4l2_subdev_get_try_format(subdev, fh->pad, 0);
+	format = v4l2_subdev_get_try_format(subdev, fh->state, 0);
 	*format = xtpg->default_format;
 
 	if (xtpg->npads == 2) {
-		format = v4l2_subdev_get_try_format(subdev, fh->pad, 1);
+		format = v4l2_subdev_get_try_format(subdev, fh->state, 1);
 		*format = xtpg->default_format;
 	}
 
@@ -460,21 +460,21 @@ static const struct v4l2_ctrl_ops xtpg_ctrl_ops = {
 	.s_ctrl	= xtpg_s_ctrl,
 };
 
-static struct v4l2_subdev_core_ops xtpg_core_ops = {
+static const struct v4l2_subdev_core_ops xtpg_core_ops = {
 };
 
-static struct v4l2_subdev_video_ops xtpg_video_ops = {
+static const struct v4l2_subdev_video_ops xtpg_video_ops = {
 	.s_stream = xtpg_s_stream,
 };
 
-static struct v4l2_subdev_pad_ops xtpg_pad_ops = {
+static const struct v4l2_subdev_pad_ops xtpg_pad_ops = {
 	.enum_mbus_code		= xvip_enum_mbus_code,
 	.enum_frame_size	= xtpg_enum_frame_size,
 	.get_fmt		= xtpg_get_format,
 	.set_fmt		= xtpg_set_format,
 };
 
-static struct v4l2_subdev_ops xtpg_ops = {
+static const struct v4l2_subdev_ops xtpg_ops = {
 	.core   = &xtpg_core_ops,
 	.video  = &xtpg_video_ops,
 	.pad    = &xtpg_pad_ops,
@@ -725,7 +725,7 @@ static int xtpg_parse_of(struct xtpg_device *xtpg)
 		const struct xvip_video_format *format;
 		struct device_node *endpoint;
 
-		if (!port->name || of_node_cmp(port->name, "port"))
+		if (!of_node_name_eq(port, "port"))
 			continue;
 
 		format = xvip_of_get_format(port);
@@ -833,7 +833,7 @@ static int xtpg_probe(struct platform_device *pdev)
 	v4l2_subdev_init(subdev, &xtpg_ops);
 	subdev->dev = &pdev->dev;
 	subdev->internal_ops = &xtpg_internal_ops;
-	strlcpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
+	strscpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
 	v4l2_set_subdevdata(subdev, xtpg);
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	subdev->entity.ops = &xtpg_media_ops;

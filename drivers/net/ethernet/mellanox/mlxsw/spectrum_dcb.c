@@ -1,36 +1,5 @@
-/*
- * drivers/net/ethernet/mellanox/mlxsw/spectrum_dcb.c
- * Copyright (c) 2016 Mellanox Technologies. All rights reserved.
- * Copyright (c) 2016 Ido Schimmel <idosch@mellanox.com>
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. Neither the names of the copyright holders nor the names of its
- *    contributors may be used to endorse or promote products derived from
- *    this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
+// SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
+/* Copyright (c) 2016-2018 Mellanox Technologies. All rights reserved */
 
 #include <linux/netdevice.h>
 #include <linux/string.h>
@@ -95,87 +64,28 @@ static int mlxsw_sp_port_ets_validate(struct mlxsw_sp_port *mlxsw_sp_port,
 	return 0;
 }
 
-static int mlxsw_sp_port_pg_prio_map(struct mlxsw_sp_port *mlxsw_sp_port,
-				     u8 *prio_tc)
+static int mlxsw_sp_port_headroom_ets_set(struct mlxsw_sp_port *mlxsw_sp_port,
+					  struct ieee_ets *ets)
 {
-	char pptb_pl[MLXSW_REG_PPTB_LEN];
-	int i;
-
-	mlxsw_reg_pptb_pack(pptb_pl, mlxsw_sp_port->local_port);
-	for (i = 0; i < IEEE_8021QAZ_MAX_TCS; i++)
-		mlxsw_reg_pptb_prio_to_buff_pack(pptb_pl, i, prio_tc[i]);
-
-	return mlxsw_reg_write(mlxsw_sp_port->mlxsw_sp->core, MLXSW_REG(pptb),
-			       pptb_pl);
-}
-
-static bool mlxsw_sp_ets_has_pg(u8 *prio_tc, u8 pg)
-{
-	int i;
-
-	for (i = 0; i < IEEE_8021QAZ_MAX_TCS; i++)
-		if (prio_tc[i] == pg)
-			return true;
-	return false;
-}
-
-static int mlxsw_sp_port_pg_destroy(struct mlxsw_sp_port *mlxsw_sp_port,
-				    u8 *old_prio_tc, u8 *new_prio_tc)
-{
-	struct mlxsw_sp *mlxsw_sp = mlxsw_sp_port->mlxsw_sp;
-	char pbmc_pl[MLXSW_REG_PBMC_LEN];
-	int err, i;
-
-	mlxsw_reg_pbmc_pack(pbmc_pl, mlxsw_sp_port->local_port, 0, 0);
-	err = mlxsw_reg_query(mlxsw_sp->core, MLXSW_REG(pbmc), pbmc_pl);
-	if (err)
-		return err;
-
-	for (i = 0; i < IEEE_8021QAZ_MAX_TCS; i++) {
-		u8 pg = old_prio_tc[i];
-
-		if (!mlxsw_sp_ets_has_pg(new_prio_tc, pg))
-			mlxsw_reg_pbmc_lossy_buffer_pack(pbmc_pl, pg, 0);
-	}
-
-	return mlxsw_reg_write(mlxsw_sp->core, MLXSW_REG(pbmc), pbmc_pl);
-}
-
-static int mlxsw_sp_port_headroom_set(struct mlxsw_sp_port *mlxsw_sp_port,
-				      struct ieee_ets *ets)
-{
-	bool pause_en = mlxsw_sp_port_is_pause_en(mlxsw_sp_port);
-	struct ieee_ets *my_ets = mlxsw_sp_port->dcb.ets;
 	struct net_device *dev = mlxsw_sp_port->dev;
+	struct mlxsw_sp_hdroom hdroom;
+	int prio;
 	int err;
 
-	/* Create the required PGs, but don't destroy existing ones, as
-	 * traffic is still directed to them.
-	 */
-	err = __mlxsw_sp_port_headroom_set(mlxsw_sp_port, dev->mtu,
-					   ets->prio_tc, pause_en,
-					   mlxsw_sp_port->dcb.pfc);
+	hdroom = *mlxsw_sp_port->hdroom;
+	for (prio = 0; prio < IEEE_8021QAZ_MAX_TCS; prio++)
+		hdroom.prios.prio[prio].ets_buf_idx = ets->prio_tc[prio];
+	mlxsw_sp_hdroom_prios_reset_buf_idx(&hdroom);
+	mlxsw_sp_hdroom_bufs_reset_lossiness(&hdroom);
+	mlxsw_sp_hdroom_bufs_reset_sizes(mlxsw_sp_port, &hdroom);
+
+	err = mlxsw_sp_hdroom_configure(mlxsw_sp_port, &hdroom);
 	if (err) {
 		netdev_err(dev, "Failed to configure port's headroom\n");
 		return err;
 	}
 
-	err = mlxsw_sp_port_pg_prio_map(mlxsw_sp_port, ets->prio_tc);
-	if (err) {
-		netdev_err(dev, "Failed to set PG-priority mapping\n");
-		goto err_port_prio_pg_map;
-	}
-
-	err = mlxsw_sp_port_pg_destroy(mlxsw_sp_port, my_ets->prio_tc,
-				       ets->prio_tc);
-	if (err)
-		netdev_warn(dev, "Failed to remove ununsed PGs\n");
-
 	return 0;
-
-err_port_prio_pg_map:
-	mlxsw_sp_port_pg_destroy(mlxsw_sp_port, ets->prio_tc, my_ets->prio_tc);
-	return err;
 }
 
 static int __mlxsw_sp_dcbnl_ieee_setets(struct mlxsw_sp_port *mlxsw_sp_port,
@@ -191,7 +101,7 @@ static int __mlxsw_sp_dcbnl_ieee_setets(struct mlxsw_sp_port *mlxsw_sp_port,
 		u8 weight = ets->tc_tx_bw[i];
 
 		err = mlxsw_sp_port_ets_set(mlxsw_sp_port,
-					    MLXSW_REG_QEEC_HIERARCY_SUBGROUP, i,
+					    MLXSW_REG_QEEC_HR_SUBGROUP, i,
 					    0, dwrr, weight);
 		if (err) {
 			netdev_err(dev, "Failed to link subgroup ETS element %d to group\n",
@@ -211,7 +121,7 @@ static int __mlxsw_sp_dcbnl_ieee_setets(struct mlxsw_sp_port *mlxsw_sp_port,
 	}
 
 	/* Ingress configuration. */
-	err = mlxsw_sp_port_headroom_set(mlxsw_sp_port, ets);
+	err = mlxsw_sp_port_headroom_ets_set(mlxsw_sp_port, ets);
 	if (err)
 		goto err_port_headroom_set;
 
@@ -229,7 +139,7 @@ err_port_ets_set:
 		u8 weight = my_ets->tc_tx_bw[i];
 
 		err = mlxsw_sp_port_ets_set(mlxsw_sp_port,
-					    MLXSW_REG_QEEC_HIERARCY_SUBGROUP, i,
+					    MLXSW_REG_QEEC_HR_SUBGROUP, i,
 					    0, dwrr, weight);
 	}
 	return err;
@@ -255,6 +165,287 @@ static int mlxsw_sp_dcbnl_ieee_setets(struct net_device *dev,
 	return 0;
 }
 
+static int mlxsw_sp_dcbnl_app_validate(struct net_device *dev,
+				       struct dcb_app *app)
+{
+	int prio;
+
+	if (app->priority >= IEEE_8021QAZ_MAX_TCS) {
+		netdev_err(dev, "APP entry with priority value %u is invalid\n",
+			   app->priority);
+		return -EINVAL;
+	}
+
+	switch (app->selector) {
+	case IEEE_8021QAZ_APP_SEL_DSCP:
+		if (app->protocol >= 64) {
+			netdev_err(dev, "DSCP APP entry with protocol value %u is invalid\n",
+				   app->protocol);
+			return -EINVAL;
+		}
+
+		/* Warn about any DSCP APP entries with the same PID. */
+		prio = fls(dcb_ieee_getapp_mask(dev, app));
+		if (prio--) {
+			if (prio < app->priority)
+				netdev_warn(dev, "Choosing priority %d for DSCP %d in favor of previously-active value of %d\n",
+					    app->priority, app->protocol, prio);
+			else if (prio > app->priority)
+				netdev_warn(dev, "Ignoring new priority %d for DSCP %d in favor of current value of %d\n",
+					    app->priority, app->protocol, prio);
+		}
+		break;
+
+	case IEEE_8021QAZ_APP_SEL_ETHERTYPE:
+		if (app->protocol) {
+			netdev_err(dev, "EtherType APP entries with protocol value != 0 not supported\n");
+			return -EINVAL;
+		}
+		break;
+
+	default:
+		netdev_err(dev, "APP entries with selector %u not supported\n",
+			   app->selector);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static u8
+mlxsw_sp_port_dcb_app_default_prio(struct mlxsw_sp_port *mlxsw_sp_port)
+{
+	u8 prio_mask;
+
+	prio_mask = dcb_ieee_getapp_default_prio_mask(mlxsw_sp_port->dev);
+	if (prio_mask)
+		/* Take the highest configured priority. */
+		return fls(prio_mask) - 1;
+
+	return 0;
+}
+
+static void
+mlxsw_sp_port_dcb_app_dscp_prio_map(struct mlxsw_sp_port *mlxsw_sp_port,
+				    u8 default_prio,
+				    struct dcb_ieee_app_dscp_map *map)
+{
+	int i;
+
+	dcb_ieee_getapp_dscp_prio_mask_map(mlxsw_sp_port->dev, map);
+	for (i = 0; i < ARRAY_SIZE(map->map); ++i) {
+		if (map->map[i])
+			map->map[i] = fls(map->map[i]) - 1;
+		else
+			map->map[i] = default_prio;
+	}
+}
+
+static bool
+mlxsw_sp_port_dcb_app_prio_dscp_map(struct mlxsw_sp_port *mlxsw_sp_port,
+				    struct dcb_ieee_app_prio_map *map)
+{
+	bool have_dscp = false;
+	int i;
+
+	dcb_ieee_getapp_prio_dscp_mask_map(mlxsw_sp_port->dev, map);
+	for (i = 0; i < ARRAY_SIZE(map->map); ++i) {
+		if (map->map[i]) {
+			map->map[i] = fls64(map->map[i]) - 1;
+			have_dscp = true;
+		}
+	}
+
+	return have_dscp;
+}
+
+static int
+mlxsw_sp_port_dcb_app_update_qpts(struct mlxsw_sp_port *mlxsw_sp_port,
+				  enum mlxsw_reg_qpts_trust_state ts)
+{
+	struct mlxsw_sp *mlxsw_sp = mlxsw_sp_port->mlxsw_sp;
+	char qpts_pl[MLXSW_REG_QPTS_LEN];
+
+	mlxsw_reg_qpts_pack(qpts_pl, mlxsw_sp_port->local_port, ts);
+	return mlxsw_reg_write(mlxsw_sp->core, MLXSW_REG(qpts), qpts_pl);
+}
+
+static int
+mlxsw_sp_port_dcb_app_update_qrwe(struct mlxsw_sp_port *mlxsw_sp_port,
+				  bool rewrite_dscp)
+{
+	struct mlxsw_sp *mlxsw_sp = mlxsw_sp_port->mlxsw_sp;
+	char qrwe_pl[MLXSW_REG_QRWE_LEN];
+
+	mlxsw_reg_qrwe_pack(qrwe_pl, mlxsw_sp_port->local_port,
+			    false, rewrite_dscp);
+	return mlxsw_reg_write(mlxsw_sp->core, MLXSW_REG(qrwe), qrwe_pl);
+}
+
+static int
+mlxsw_sp_port_dcb_toggle_trust(struct mlxsw_sp_port *mlxsw_sp_port,
+			       enum mlxsw_reg_qpts_trust_state ts)
+{
+	bool rewrite_dscp = ts == MLXSW_REG_QPTS_TRUST_STATE_DSCP;
+	int err;
+
+	if (mlxsw_sp_port->dcb.trust_state == ts)
+		return 0;
+
+	err = mlxsw_sp_port_dcb_app_update_qpts(mlxsw_sp_port, ts);
+	if (err)
+		return err;
+
+	err = mlxsw_sp_port_dcb_app_update_qrwe(mlxsw_sp_port, rewrite_dscp);
+	if (err)
+		goto err_update_qrwe;
+
+	mlxsw_sp_port->dcb.trust_state = ts;
+	return 0;
+
+err_update_qrwe:
+	mlxsw_sp_port_dcb_app_update_qpts(mlxsw_sp_port,
+					  mlxsw_sp_port->dcb.trust_state);
+	return err;
+}
+
+static int
+mlxsw_sp_port_dcb_app_update_qpdp(struct mlxsw_sp_port *mlxsw_sp_port,
+				  u8 default_prio)
+{
+	struct mlxsw_sp *mlxsw_sp = mlxsw_sp_port->mlxsw_sp;
+	char qpdp_pl[MLXSW_REG_QPDP_LEN];
+
+	mlxsw_reg_qpdp_pack(qpdp_pl, mlxsw_sp_port->local_port, default_prio);
+	return mlxsw_reg_write(mlxsw_sp->core, MLXSW_REG(qpdp), qpdp_pl);
+}
+
+static int
+mlxsw_sp_port_dcb_app_update_qpdpm(struct mlxsw_sp_port *mlxsw_sp_port,
+				   struct dcb_ieee_app_dscp_map *map)
+{
+	struct mlxsw_sp *mlxsw_sp = mlxsw_sp_port->mlxsw_sp;
+	char qpdpm_pl[MLXSW_REG_QPDPM_LEN];
+	short int i;
+
+	mlxsw_reg_qpdpm_pack(qpdpm_pl, mlxsw_sp_port->local_port);
+	for (i = 0; i < ARRAY_SIZE(map->map); ++i)
+		mlxsw_reg_qpdpm_dscp_pack(qpdpm_pl, i, map->map[i]);
+	return mlxsw_reg_write(mlxsw_sp->core, MLXSW_REG(qpdpm), qpdpm_pl);
+}
+
+static int
+mlxsw_sp_port_dcb_app_update_qpdsm(struct mlxsw_sp_port *mlxsw_sp_port,
+				   struct dcb_ieee_app_prio_map *map)
+{
+	struct mlxsw_sp *mlxsw_sp = mlxsw_sp_port->mlxsw_sp;
+	char qpdsm_pl[MLXSW_REG_QPDSM_LEN];
+	short int i;
+
+	mlxsw_reg_qpdsm_pack(qpdsm_pl, mlxsw_sp_port->local_port);
+	for (i = 0; i < ARRAY_SIZE(map->map); ++i)
+		mlxsw_reg_qpdsm_prio_pack(qpdsm_pl, i, map->map[i]);
+	return mlxsw_reg_write(mlxsw_sp->core, MLXSW_REG(qpdsm), qpdsm_pl);
+}
+
+static int mlxsw_sp_port_dcb_app_update(struct mlxsw_sp_port *mlxsw_sp_port)
+{
+	struct dcb_ieee_app_prio_map prio_map;
+	struct dcb_ieee_app_dscp_map dscp_map;
+	u8 default_prio;
+	bool have_dscp;
+	int err;
+
+	default_prio = mlxsw_sp_port_dcb_app_default_prio(mlxsw_sp_port);
+	err = mlxsw_sp_port_dcb_app_update_qpdp(mlxsw_sp_port, default_prio);
+	if (err) {
+		netdev_err(mlxsw_sp_port->dev, "Couldn't configure port default priority\n");
+		return err;
+	}
+
+	have_dscp = mlxsw_sp_port_dcb_app_prio_dscp_map(mlxsw_sp_port,
+							&prio_map);
+
+	mlxsw_sp_port_dcb_app_dscp_prio_map(mlxsw_sp_port, default_prio,
+					    &dscp_map);
+	err = mlxsw_sp_port_dcb_app_update_qpdpm(mlxsw_sp_port,
+						 &dscp_map);
+	if (err) {
+		netdev_err(mlxsw_sp_port->dev, "Couldn't configure priority map\n");
+		return err;
+	}
+
+	err = mlxsw_sp_port_dcb_app_update_qpdsm(mlxsw_sp_port,
+						 &prio_map);
+	if (err) {
+		netdev_err(mlxsw_sp_port->dev, "Couldn't configure DSCP rewrite map\n");
+		return err;
+	}
+
+	if (!have_dscp) {
+		err = mlxsw_sp_port_dcb_toggle_trust(mlxsw_sp_port,
+					MLXSW_REG_QPTS_TRUST_STATE_PCP);
+		if (err)
+			netdev_err(mlxsw_sp_port->dev, "Couldn't switch to trust L2\n");
+		return err;
+	}
+
+	err = mlxsw_sp_port_dcb_toggle_trust(mlxsw_sp_port,
+					     MLXSW_REG_QPTS_TRUST_STATE_DSCP);
+	if (err) {
+		/* A failure to set trust DSCP means that the QPDPM and QPDSM
+		 * maps installed above are not in effect. And since we are here
+		 * attempting to set trust DSCP, we couldn't have attempted to
+		 * switch trust to PCP. Thus no cleanup is necessary.
+		 */
+		netdev_err(mlxsw_sp_port->dev, "Couldn't switch to trust L3\n");
+		return err;
+	}
+
+	return 0;
+}
+
+static int mlxsw_sp_dcbnl_ieee_setapp(struct net_device *dev,
+				      struct dcb_app *app)
+{
+	struct mlxsw_sp_port *mlxsw_sp_port = netdev_priv(dev);
+	int err;
+
+	err = mlxsw_sp_dcbnl_app_validate(dev, app);
+	if (err)
+		return err;
+
+	err = dcb_ieee_setapp(dev, app);
+	if (err)
+		return err;
+
+	err = mlxsw_sp_port_dcb_app_update(mlxsw_sp_port);
+	if (err)
+		goto err_update;
+
+	return 0;
+
+err_update:
+	dcb_ieee_delapp(dev, app);
+	return err;
+}
+
+static int mlxsw_sp_dcbnl_ieee_delapp(struct net_device *dev,
+				      struct dcb_app *app)
+{
+	struct mlxsw_sp_port *mlxsw_sp_port = netdev_priv(dev);
+	int err;
+
+	err = dcb_ieee_delapp(dev, app);
+	if (err)
+		return err;
+
+	err = mlxsw_sp_port_dcb_app_update(mlxsw_sp_port);
+	if (err)
+		netdev_err(dev, "Failed to update DCB APP configuration\n");
+	return 0;
+}
+
 static int mlxsw_sp_dcbnl_ieee_getmaxrate(struct net_device *dev,
 					  struct ieee_maxrate *maxrate)
 {
@@ -274,9 +465,9 @@ static int mlxsw_sp_dcbnl_ieee_setmaxrate(struct net_device *dev,
 
 	for (i = 0; i < IEEE_8021QAZ_MAX_TCS; i++) {
 		err = mlxsw_sp_port_ets_maxrate_set(mlxsw_sp_port,
-						    MLXSW_REG_QEEC_HIERARCY_SUBGROUP,
+						    MLXSW_REG_QEEC_HR_SUBGROUP,
 						    i, 0,
-						    maxrate->tc_maxrate[i]);
+						    maxrate->tc_maxrate[i], 0);
 		if (err) {
 			netdev_err(dev, "Failed to set maxrate for TC %d\n", i);
 			goto err_port_ets_maxrate_set;
@@ -290,8 +481,9 @@ static int mlxsw_sp_dcbnl_ieee_setmaxrate(struct net_device *dev,
 err_port_ets_maxrate_set:
 	for (i--; i >= 0; i--)
 		mlxsw_sp_port_ets_maxrate_set(mlxsw_sp_port,
-					      MLXSW_REG_QEEC_HIERARCY_SUBGROUP,
-					      i, 0, my_maxrate->tc_maxrate[i]);
+					      MLXSW_REG_QEEC_HR_SUBGROUP,
+					      i, 0,
+					      my_maxrate->tc_maxrate[i], 0);
 	return err;
 }
 
@@ -354,6 +546,9 @@ static int mlxsw_sp_dcbnl_ieee_setpfc(struct net_device *dev,
 {
 	struct mlxsw_sp_port *mlxsw_sp_port = netdev_priv(dev);
 	bool pause_en = mlxsw_sp_port_is_pause_en(mlxsw_sp_port);
+	struct mlxsw_sp_hdroom orig_hdroom;
+	struct mlxsw_sp_hdroom hdroom;
+	int prio;
 	int err;
 
 	if (pause_en && pfc->pfc_en) {
@@ -361,9 +556,21 @@ static int mlxsw_sp_dcbnl_ieee_setpfc(struct net_device *dev,
 		return -EINVAL;
 	}
 
-	err = __mlxsw_sp_port_headroom_set(mlxsw_sp_port, dev->mtu,
-					   mlxsw_sp_port->dcb.ets->prio_tc,
-					   pause_en, pfc);
+	orig_hdroom = *mlxsw_sp_port->hdroom;
+
+	hdroom = orig_hdroom;
+	if (pfc->pfc_en)
+		hdroom.delay_bytes = DIV_ROUND_UP(pfc->delay, BITS_PER_BYTE);
+	else
+		hdroom.delay_bytes = 0;
+
+	for (prio = 0; prio < IEEE_8021QAZ_MAX_TCS; prio++)
+		hdroom.prios.prio[prio].lossy = !(pfc->pfc_en & BIT(prio));
+
+	mlxsw_sp_hdroom_bufs_reset_lossiness(&hdroom);
+	mlxsw_sp_hdroom_bufs_reset_sizes(mlxsw_sp_port, &hdroom);
+
+	err = mlxsw_sp_hdroom_configure(mlxsw_sp_port, &hdroom);
 	if (err) {
 		netdev_err(dev, "Failed to configure port's headroom for PFC\n");
 		return err;
@@ -381,10 +588,64 @@ static int mlxsw_sp_dcbnl_ieee_setpfc(struct net_device *dev,
 	return 0;
 
 err_port_pfc_set:
-	__mlxsw_sp_port_headroom_set(mlxsw_sp_port, dev->mtu,
-				     mlxsw_sp_port->dcb.ets->prio_tc, pause_en,
-				     mlxsw_sp_port->dcb.pfc);
+	mlxsw_sp_hdroom_configure(mlxsw_sp_port, &orig_hdroom);
 	return err;
+}
+
+static int mlxsw_sp_dcbnl_getbuffer(struct net_device *dev, struct dcbnl_buffer *buf)
+{
+	struct mlxsw_sp_port *mlxsw_sp_port = netdev_priv(dev);
+	struct mlxsw_sp_hdroom *hdroom = mlxsw_sp_port->hdroom;
+	struct mlxsw_sp *mlxsw_sp = mlxsw_sp_port->mlxsw_sp;
+	int prio;
+	int i;
+
+	buf->total_size = 0;
+
+	BUILD_BUG_ON(DCBX_MAX_BUFFERS > MLXSW_SP_PB_COUNT);
+	for (i = 0; i < MLXSW_SP_PB_COUNT; i++) {
+		u32 bytes = mlxsw_sp_cells_bytes(mlxsw_sp, hdroom->bufs.buf[i].size_cells);
+
+		if (i < DCBX_MAX_BUFFERS)
+			buf->buffer_size[i] = bytes;
+		buf->total_size += bytes;
+	}
+
+	buf->total_size += mlxsw_sp_cells_bytes(mlxsw_sp, hdroom->int_buf.size_cells);
+
+	for (prio = 0; prio < IEEE_8021Q_MAX_PRIORITIES; prio++)
+		buf->prio2buffer[prio] = hdroom->prios.prio[prio].buf_idx;
+
+	return 0;
+}
+
+static int mlxsw_sp_dcbnl_setbuffer(struct net_device *dev, struct dcbnl_buffer *buf)
+{
+	struct mlxsw_sp_port *mlxsw_sp_port = netdev_priv(dev);
+	struct mlxsw_sp *mlxsw_sp = mlxsw_sp_port->mlxsw_sp;
+	struct mlxsw_sp_hdroom hdroom;
+	int prio;
+	int i;
+
+	hdroom = *mlxsw_sp_port->hdroom;
+
+	if (hdroom.mode != MLXSW_SP_HDROOM_MODE_TC) {
+		netdev_err(dev, "The use of dcbnl_setbuffer is only allowed if egress is configured using TC\n");
+		return -EINVAL;
+	}
+
+	for (prio = 0; prio < IEEE_8021Q_MAX_PRIORITIES; prio++)
+		hdroom.prios.prio[prio].set_buf_idx = buf->prio2buffer[prio];
+
+	BUILD_BUG_ON(DCBX_MAX_BUFFERS > MLXSW_SP_PB_COUNT);
+	for (i = 0; i < DCBX_MAX_BUFFERS; i++)
+		hdroom.bufs.buf[i].set_size_cells = mlxsw_sp_bytes_cells(mlxsw_sp,
+									 buf->buffer_size[i]);
+
+	mlxsw_sp_hdroom_prios_reset_buf_idx(&hdroom);
+	mlxsw_sp_hdroom_bufs_reset_lossiness(&hdroom);
+	mlxsw_sp_hdroom_bufs_reset_sizes(mlxsw_sp_port, &hdroom);
+	return mlxsw_sp_hdroom_configure(mlxsw_sp_port, &hdroom);
 }
 
 static const struct dcbnl_rtnl_ops mlxsw_sp_dcbnl_ops = {
@@ -394,9 +655,14 @@ static const struct dcbnl_rtnl_ops mlxsw_sp_dcbnl_ops = {
 	.ieee_setmaxrate	= mlxsw_sp_dcbnl_ieee_setmaxrate,
 	.ieee_getpfc		= mlxsw_sp_dcbnl_ieee_getpfc,
 	.ieee_setpfc		= mlxsw_sp_dcbnl_ieee_setpfc,
+	.ieee_setapp		= mlxsw_sp_dcbnl_ieee_setapp,
+	.ieee_delapp		= mlxsw_sp_dcbnl_ieee_delapp,
 
 	.getdcbx		= mlxsw_sp_dcbnl_getdcbx,
 	.setdcbx		= mlxsw_sp_dcbnl_setdcbx,
+
+	.dcbnl_getbuffer	= mlxsw_sp_dcbnl_getbuffer,
+	.dcbnl_setbuffer	= mlxsw_sp_dcbnl_setbuffer,
 };
 
 static int mlxsw_sp_port_ets_init(struct mlxsw_sp_port *mlxsw_sp_port)
@@ -467,6 +733,7 @@ int mlxsw_sp_port_dcb_init(struct mlxsw_sp_port *mlxsw_sp_port)
 	if (err)
 		goto err_port_pfc_init;
 
+	mlxsw_sp_port->dcb.trust_state = MLXSW_REG_QPTS_TRUST_STATE_PCP;
 	mlxsw_sp_port->dev->dcbnl_ops = &mlxsw_sp_dcbnl_ops;
 
 	return 0;

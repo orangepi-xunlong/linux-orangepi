@@ -36,7 +36,6 @@
 #include <linux/io.h>
 #include <linux/rbtree.h>
 #include <asm/setup.h>
-#include <asm/pgalloc.h>
 #include <asm/hypervisor.h>
 #include <xen/grant_table.h>
 #include <xen/page.h>
@@ -233,16 +232,6 @@ struct xen_vbd {
 
 struct backend_info;
 
-/* Number of available flags */
-#define PERSISTENT_GNT_FLAGS_SIZE	2
-/* This persistent grant is currently in use */
-#define PERSISTENT_GNT_ACTIVE		0
-/*
- * This persistent grant has been used, this flag is set when we remove the
- * PERSISTENT_GNT_ACTIVE, to know that this grant has been used recently.
- */
-#define PERSISTENT_GNT_WAS_ACTIVE	1
-
 /* Number of requests that we can fit in a ring */
 #define XEN_BLKIF_REQS_PER_PAGE		32
 
@@ -250,7 +239,8 @@ struct persistent_gnt {
 	struct page *page;
 	grant_ref_t gnt;
 	grant_handle_t handle;
-	DECLARE_BITMAP(flags, PERSISTENT_GNT_FLAGS_SIZE);
+	unsigned long last_used;
+	bool active;
 	struct rb_node node;
 	struct list_head remove_node;
 };
@@ -278,7 +268,6 @@ struct xen_blkif_ring {
 	wait_queue_head_t	pending_free_wq;
 
 	/* Tree to store persistent grants. */
-	spinlock_t		pers_gnts_lock;
 	struct rb_root		persistent_gnts;
 	unsigned int		persistent_gnt_c;
 	atomic_t		persistent_gnt_in_use;
@@ -299,9 +288,7 @@ struct xen_blkif_ring {
 	struct work_struct	persistent_purge_work;
 
 	/* Buffer of free pages to map grant refs. */
-	spinlock_t		free_pages_lock;
-	int			free_pages_num;
-	struct list_head	free_pages;
+	struct gnttab_page_cache free_pages;
 
 	struct work_struct	free_work;
 	/* Thread shutdown wait queue. */
@@ -326,9 +313,11 @@ struct xen_blkif {
 
 	struct work_struct	free_work;
 	unsigned int 		nr_ring_pages;
+	bool			multi_ref;
 	/* All rings for this device. */
 	struct xen_blkif_ring	*rings;
 	unsigned int		nr_rings;
+	unsigned long		buffer_squeeze_end;
 };
 
 struct seg_buf {
@@ -368,9 +357,7 @@ struct pending_req {
 };
 
 
-#define vbd_sz(_v)	((_v)->bdev->bd_part ? \
-			 (_v)->bdev->bd_part->nr_sects : \
-			  get_capacity((_v)->bdev->bd_disk))
+#define vbd_sz(_v)	bdev_nr_sectors((_v)->bdev)
 
 #define xen_blkif_get(_b) (atomic_inc(&(_b)->refcnt))
 #define xen_blkif_put(_b)				\
@@ -385,9 +372,12 @@ struct phys_req {
 	struct block_device	*bdev;
 	blkif_sector_t		sector_number;
 };
+
 int xen_blkif_interface_init(void);
+void xen_blkif_interface_fini(void);
 
 int xen_blkif_xenbus_init(void);
+void xen_blkif_xenbus_fini(void);
 
 irqreturn_t xen_blkif_be_int(int irq, void *dev_id);
 int xen_blkif_schedule(void *arg);

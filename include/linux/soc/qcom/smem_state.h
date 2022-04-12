@@ -1,7 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __QCOM_SMEM_STATE__
 #define __QCOM_SMEM_STATE__
 
-#include <linux/errno.h>
+#include <linux/err.h>
 
 struct device_node;
 struct qcom_smem_state;
@@ -13,6 +14,7 @@ struct qcom_smem_state_ops {
 #ifdef CONFIG_QCOM_SMEM_STATE
 
 struct qcom_smem_state *qcom_smem_state_get(struct device *dev, const char *con_id, unsigned *bit);
+struct qcom_smem_state *devm_qcom_smem_state_get(struct device *dev, const char *con_id, unsigned *bit);
 void qcom_smem_state_put(struct qcom_smem_state *);
 
 int qcom_smem_state_update_bits(struct qcom_smem_state *state, u32 mask, u32 value);
@@ -24,6 +26,13 @@ void qcom_smem_state_unregister(struct qcom_smem_state *state);
 
 static inline struct qcom_smem_state *qcom_smem_state_get(struct device *dev,
 	const char *con_id, unsigned *bit)
+{
+	return ERR_PTR(-EINVAL);
+}
+
+static inline struct qcom_smem_state *devm_qcom_smem_state_get(struct device *dev,
+							       const char *con_id,
+							       unsigned *bit)
 {
 	return ERR_PTR(-EINVAL);
 }

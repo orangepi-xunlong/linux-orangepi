@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for Digigram miXart soundcards
  *
  * DSP firmware management
  *
  * Copyright (c) 2003 by Digigram <alsa@digigram.com>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/interrupt.h>
@@ -35,7 +22,8 @@
 
 
 /**
- * wait for a value on a peudo register, exit with a timeout
+ * mixart_wait_nice_for_register_value - wait for a value on a peudo register,
+ * exit with a timeout
  *
  * @mgr: pointer to miXart manager structure
  * @offset: unsigned pseudo_register base + offset of value
@@ -73,30 +61,30 @@ static int mixart_wait_nice_for_register_value(struct mixart_mgr *mgr,
  */
 struct snd_mixart_elf32_ehdr {
 	u8      e_ident[16];
-	u16     e_type;
-	u16     e_machine;
-	u32     e_version;
-	u32     e_entry;
-	u32     e_phoff;
-	u32     e_shoff;
-	u32     e_flags;
-	u16     e_ehsize;
-	u16     e_phentsize;
-	u16     e_phnum;
-	u16     e_shentsize;
-	u16     e_shnum;
-	u16     e_shstrndx;
+	__be16  e_type;
+	__be16  e_machine;
+	__be32  e_version;
+	__be32  e_entry;
+	__be32  e_phoff;
+	__be32  e_shoff;
+	__be32  e_flags;
+	__be16  e_ehsize;
+	__be16  e_phentsize;
+	__be16  e_phnum;
+	__be16  e_shentsize;
+	__be16  e_shnum;
+	__be16  e_shstrndx;
 };
 
 struct snd_mixart_elf32_phdr {
-	u32     p_type;
-	u32     p_offset;
-	u32     p_vaddr;
-	u32     p_paddr;
-	u32     p_filesz;
-	u32     p_memsz;
-	u32     p_flags;
-	u32     p_align;
+	__be32  p_type;
+	__be32  p_offset;
+	__be32  p_vaddr;
+	__be32  p_paddr;
+	__be32  p_filesz;
+	__be32  p_memsz;
+	__be32  p_flags;
+	__be32  p_align;
 };
 
 static int mixart_load_elf(struct mixart_mgr *mgr, const struct firmware *dsp )
@@ -318,9 +306,13 @@ static int mixart_first_init(struct mixart_mgr *mgr)
 	int err;
 	struct mixart_msg request;
 
-	if((err = mixart_enum_connectors(mgr)) < 0) return err;
+	err = mixart_enum_connectors(mgr);
+	if (err < 0)
+		return err;
 
-	if((err = mixart_enum_physio(mgr)) < 0) return err;
+	err = mixart_enum_physio(mgr);
+	if (err < 0)
+		return err;
 
 	/* send a synchro command to card (necessary to do this before first MSG_STREAM_START_STREAM_GRP_PACKET) */
 	/* though why not here */
@@ -540,15 +532,18 @@ static int mixart_dsp_load(struct mixart_mgr* mgr, int index, const struct firmw
         for (card_index = 0; card_index < mgr->num_cards; card_index++) {
 		struct snd_mixart *chip = mgr->chip[card_index];
 
-		if ((err = snd_mixart_create_pcm(chip)) < 0)
+		err = snd_mixart_create_pcm(chip);
+		if (err < 0)
 			return err;
 
 		if (card_index == 0) {
-			if ((err = snd_mixart_create_mixer(chip->mgr)) < 0)
+			err = snd_mixart_create_mixer(chip->mgr);
+			if (err < 0)
 	        		return err;
 		}
 
-		if ((err = snd_card_register(chip->card)) < 0)
+		err = snd_card_register(chip->card);
+		if (err < 0)
 			return err;
 	}
 
@@ -561,7 +556,7 @@ static int mixart_dsp_load(struct mixart_mgr* mgr, int index, const struct firmw
 
 int snd_mixart_setup_firmware(struct mixart_mgr *mgr)
 {
-	static char *fw_files[3] = {
+	static const char * const fw_files[3] = {
 		"miXart8.xlx", "miXart8.elf", "miXart8AES.xlx"
 	};
 	char path[32];

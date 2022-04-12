@@ -1,20 +1,20 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2008-2009 Patrick McHardy <kaber@trash.net>
  * Copyright (c) 2012-2014 Pablo Neira Ayuso <pablo@netfilter.org>
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  * Development of this code funded by Astaro AG (http://www.astaro.com/)
  */
 
+#include <linux/audit.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/netlink.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter/nf_tables.h>
+#include <net/ipv6.h>
+#include <net/ip.h>
 #include <net/netfilter/nf_tables.h>
 #include <net/netfilter/nf_log.h>
 #include <linux/netdevice.h>
@@ -26,14 +26,96 @@ struct nft_log {
 	char			*prefix;
 };
 
+static bool audit_ip4(struct audit_buffer *ab, struct sk_buff *skb)
+{
+	struct iphdr _iph;
+	const struct iphdr *ih;
+
+	ih = skb_header_pointer(skb, skb_network_offset(skb), sizeof(_iph), &_iph);
+	if (!ih)
+		return false;
+
+	audit_log_format(ab, " saddr=%pI4 daddr=%pI4 proto=%hhu",
+			 &ih->saddr, &ih->daddr, ih->protocol);
+
+	return true;
+}
+
+static bool audit_ip6(struct audit_buffer *ab, struct sk_buff *skb)
+{
+	struct ipv6hdr _ip6h;
+	const struct ipv6hdr *ih;
+	u8 nexthdr;
+	__be16 frag_off;
+
+	ih = skb_header_pointer(skb, skb_network_offset(skb), sizeof(_ip6h), &_ip6h);
+	if (!ih)
+		return false;
+
+	nexthdr = ih->nexthdr;
+	ipv6_skip_exthdr(skb, skb_network_offset(skb) + sizeof(_ip6h), &nexthdr, &frag_off);
+
+	audit_log_format(ab, " saddr=%pI6c daddr=%pI6c proto=%hhu",
+			 &ih->saddr, &ih->daddr, nexthdr);
+
+	return true;
+}
+
+static void nft_log_eval_audit(const struct nft_pktinfo *pkt)
+{
+	struct sk_buff *skb = pkt->skb;
+	struct audit_buffer *ab;
+	int fam = -1;
+
+	if (!audit_enabled)
+		return;
+
+	ab = audit_log_start(NULL, GFP_ATOMIC, AUDIT_NETFILTER_PKT);
+	if (!ab)
+		return;
+
+	audit_log_format(ab, "mark=%#x", skb->mark);
+
+	switch (nft_pf(pkt)) {
+	case NFPROTO_BRIDGE:
+		switch (eth_hdr(skb)->h_proto) {
+		case htons(ETH_P_IP):
+			fam = audit_ip4(ab, skb) ? NFPROTO_IPV4 : -1;
+			break;
+		case htons(ETH_P_IPV6):
+			fam = audit_ip6(ab, skb) ? NFPROTO_IPV6 : -1;
+			break;
+		}
+		break;
+	case NFPROTO_IPV4:
+		fam = audit_ip4(ab, skb) ? NFPROTO_IPV4 : -1;
+		break;
+	case NFPROTO_IPV6:
+		fam = audit_ip6(ab, skb) ? NFPROTO_IPV6 : -1;
+		break;
+	}
+
+	if (fam == -1)
+		audit_log_format(ab, " saddr=? daddr=? proto=-1");
+
+	audit_log_end(ab);
+}
+
 static void nft_log_eval(const struct nft_expr *expr,
 			 struct nft_regs *regs,
 			 const struct nft_pktinfo *pkt)
 {
 	const struct nft_log *priv = nft_expr_priv(expr);
 
-	nf_log_packet(pkt->net, pkt->pf, pkt->hook, pkt->skb, pkt->in,
-		      pkt->out, &priv->loginfo, "%s", priv->prefix);
+	if (priv->loginfo.type == NF_LOG_TYPE_LOG &&
+	    priv->loginfo.u.log.level == NFT_LOGLEVEL_AUDIT) {
+		nft_log_eval_audit(pkt);
+		return;
+	}
+
+	nf_log_packet(nft_net(pkt), nft_pf(pkt), nft_hook(pkt), pkt->skb,
+		      nft_in(pkt), nft_out(pkt), &priv->loginfo, "%s",
+		      priv->prefix);
 }
 
 static const struct nla_policy nft_log_policy[NFTA_LOG_MAX + 1] = {
@@ -45,6 +127,20 @@ static const struct nla_policy nft_log_policy[NFTA_LOG_MAX + 1] = {
 	[NFTA_LOG_LEVEL]	= { .type = NLA_U32 },
 	[NFTA_LOG_FLAGS]	= { .type = NLA_U32 },
 };
+
+static int nft_log_modprobe(struct net *net, enum nf_log_type t)
+{
+	switch (t) {
+	case NF_LOG_TYPE_LOG:
+		return nft_request_module(net, "%s", "nf_log_syslog");
+	case NF_LOG_TYPE_ULOG:
+		return nft_request_module(net, "%s", "nfnetlink_log");
+	case NF_LOG_TYPE_MAX:
+		break;
+	}
+
+	return -ENOENT;
+}
 
 static int nft_log_init(const struct nft_ctx *ctx,
 			const struct nft_expr *expr,
@@ -70,7 +166,7 @@ static int nft_log_init(const struct nft_ctx *ctx,
 		priv->prefix = kmalloc(nla_len(nla) + 1, GFP_KERNEL);
 		if (priv->prefix == NULL)
 			return -ENOMEM;
-		nla_strlcpy(priv->prefix, nla, nla_len(nla) + 1);
+		nla_strscpy(priv->prefix, nla, nla_len(nla) + 1);
 	} else {
 		priv->prefix = (char *)nft_log_null_prefix;
 	}
@@ -81,9 +177,9 @@ static int nft_log_init(const struct nft_ctx *ctx,
 			li->u.log.level =
 				ntohl(nla_get_be32(tb[NFTA_LOG_LEVEL]));
 		} else {
-			li->u.log.level = LOGLEVEL_WARNING;
+			li->u.log.level = NFT_LOGLEVEL_WARNING;
 		}
-		if (li->u.log.level > LOGLEVEL_DEBUG) {
+		if (li->u.log.level > NFT_LOGLEVEL_AUDIT) {
 			err = -EINVAL;
 			goto err1;
 		}
@@ -111,9 +207,16 @@ static int nft_log_init(const struct nft_ctx *ctx,
 		break;
 	}
 
-	err = nf_logger_find_get(ctx->afi->family, li->type);
-	if (err < 0)
+	if (li->u.log.level == NFT_LOGLEVEL_AUDIT)
+		return 0;
+
+	err = nf_logger_find_get(ctx->family, li->type);
+	if (err < 0) {
+		if (nft_log_modprobe(ctx->net, li->type) == -EAGAIN)
+			err = -EAGAIN;
+
 		goto err1;
+	}
 
 	return 0;
 
@@ -132,7 +235,10 @@ static void nft_log_destroy(const struct nft_ctx *ctx,
 	if (priv->prefix != nft_log_null_prefix)
 		kfree(priv->prefix);
 
-	nf_logger_put(ctx->afi->family, li->type);
+	if (li->u.log.level == NFT_LOGLEVEL_AUDIT)
+		return;
+
+	nf_logger_put(ctx->family, li->type);
 }
 
 static int nft_log_dump(struct sk_buff *skb, const struct nft_expr *expr)
@@ -210,3 +316,4 @@ module_exit(nft_log_module_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Patrick McHardy <kaber@trash.net>");
 MODULE_ALIAS_NFT_EXPR("log");
+MODULE_DESCRIPTION("Netfilter nf_tables log module");

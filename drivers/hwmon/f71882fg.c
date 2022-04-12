@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /***************************************************************************
  *   Copyright (C) 2006 by Hans Edgington <hans@edgington.nl>              *
  *   Copyright (C) 2007-2011 Hans de Goede <hdegoede@redhat.com>           *
  *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation; either version 2 of the License, or     *
- *   (at your option) any later version.                                   *
- *                                                                         *
- *   This program is distributed in the hope that it will be useful,       *
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
- *                                                                         *
- *   You should have received a copy of the GNU General Public License     *
- *   along with this program; if not, write to the                         *
- *   Free Software Foundation, Inc.,                                       *
- *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -266,7 +253,7 @@ struct f71882fg_data {
 
 	struct mutex update_lock;
 	int temp_start;			/* temp numbering start (0 or 1) */
-	char valid;			/* !=0 if following fields are valid */
+	bool valid;			/* true if following fields are valid */
 	char auto_point_temp_signed;
 	unsigned long last_updated;	/* In jiffies */
 	unsigned long last_limits;	/* In jiffies */
@@ -390,7 +377,7 @@ static ssize_t show_pwm_auto_point_temp(struct device *dev,
 static ssize_t store_pwm_auto_point_temp(struct device *dev,
 	struct device_attribute *devattr, const char *buf, size_t count);
 /* Sysfs misc */
-static ssize_t show_name(struct device *dev, struct device_attribute *devattr,
+static ssize_t name_show(struct device *dev, struct device_attribute *devattr,
 	char *buf);
 
 static int f71882fg_probe(struct platform_device *pdev);
@@ -404,7 +391,7 @@ static struct platform_driver f71882fg_driver = {
 	.remove		= f71882fg_remove,
 };
 
-static DEVICE_ATTR(name, S_IRUGO, show_name, NULL);
+static DEVICE_ATTR_RO(name);
 
 /*
  * Temp attr for the f71858fg, the f71858fg is special as it has its
@@ -1298,7 +1285,7 @@ static struct f71882fg_data *f71882fg_update_device(struct device *dev)
 				data->pwm_auto_point_pwm[nr][0] =
 					f71882fg_read8(data,
 						F71882FG_REG_POINT_PWM(nr, 0));
-				/* Fall through */
+				fallthrough;
 			case f71862fg:
 				data->pwm_auto_point_pwm[nr][1] =
 					f71882fg_read8(data,
@@ -1372,7 +1359,7 @@ static struct f71882fg_data *f71882fg_update_device(struct device *dev)
 							F71882FG_REG_IN(nr));
 
 		data->last_updated = jiffies;
-		data->valid = 1;
+		data->valid = true;
 	}
 
 	mutex_unlock(&data->update_lock);
@@ -2212,7 +2199,7 @@ static ssize_t store_pwm_auto_point_temp(struct device *dev,
 	return count;
 }
 
-static ssize_t show_name(struct device *dev, struct device_attribute *devattr,
+static ssize_t name_show(struct device *dev, struct device_attribute *devattr,
 	char *buf)
 {
 	struct f71882fg_data *data = dev_get_drvdata(dev);
@@ -2455,7 +2442,7 @@ static int f71882fg_probe(struct platform_device *pdev)
 		case f71869a:
 			/* These always have signed auto point temps */
 			data->auto_point_temp_signed = 1;
-			/* Fall through to select correct fan/pwm reg bank! */
+			fallthrough;	/* to select correct fan/pwm reg bank! */
 		case f71889fg:
 		case f71889ed:
 		case f71889a:

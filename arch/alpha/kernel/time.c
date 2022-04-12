@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/arch/alpha/kernel/time.c
  *
@@ -34,7 +35,7 @@
 #include <linux/profile.h>
 #include <linux/irq_work.h>
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/io.h>
 #include <asm/hwrpb.h>
 
@@ -133,7 +134,7 @@ init_rtc_clockevent(void)
  * The QEMU clock as a clocksource primitive.
  */
 
-static cycle_t
+static u64
 qemu_cs_read(struct clocksource *cs)
 {
 	return qemu_get_vmtime();
@@ -241,7 +242,7 @@ common_init_rtc(void)
 	outb(0x31, 0x42);
 	outb(0x13, 0x42);
 
-	init_rtc_irq();
+	init_rtc_irq(NULL);
 }
 
 
@@ -260,7 +261,7 @@ common_init_rtc(void)
  * use this method when WTINT is in use.
  */
 
-static cycle_t read_rpcc(struct clocksource *cs)
+static u64 read_rpcc(struct clocksource *cs)
 {
 	return rpcc();
 }
@@ -395,9 +396,7 @@ time_init(void)
 	if (alpha_using_qemu) {
 		clocksource_register_hz(&qemu_cs, NSEC_PER_SEC);
 		init_qemu_clockevent();
-
-		timer_irqaction.handler = qemu_timer_interrupt;
-		init_rtc_irq();
+		init_rtc_irq(qemu_timer_interrupt);
 		return;
 	}
 

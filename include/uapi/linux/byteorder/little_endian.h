@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 #ifndef _UAPI_LINUX_BYTEORDER_LITTLE_ENDIAN_H
 #define _UAPI_LINUX_BYTEORDER_LITTLE_ENDIAN_H
 
@@ -8,6 +9,7 @@
 #define __LITTLE_ENDIAN_BITFIELD
 #endif
 
+#include <linux/stddef.h>
 #include <linux/types.h>
 #include <linux/swab.h>
 

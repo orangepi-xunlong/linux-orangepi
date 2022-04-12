@@ -1,77 +1,81 @@
-/*
- * Secondary CPU startup routine source file.
+/* SPDX-License-Identifier: GPL-2.0
  *
- * Copyright (c) Allwinner.  All rights reserved.
+ * Copyright (c) 2018 Chen-Yu Tsai
+ * Copyright (c) 2018 Bootlin
  *
- * Sugar <shuge@allwinnertech.com>
+ * Chen-Yu Tsai <wens@csie.org>
+ * Mylène Josserand <mylene.josserand@bootlin.com>
  *
- * Interface functions needed for the SMP. This file is based on arm
- * realview smp platform.
- * Copyright (c) 2003 ARM Limited.
+ * SMP support for sunxi based systems with Cortex A7/A15
  *
- * This program is free software,you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/linkage.h>
-#include <linux/init.h>
+#include <asm/assembler.h>
+#include <asm/cputype.h>
 
-	.text
-	.align 4
+ENTRY(sunxi_mc_smp_cluster_cache_enable)
+	.arch	armv7-a
+	/*
+	 * Enable cluster-level coherency, in preparation for turning on the MMU.
+	 *
+	 * Also enable regional clock gating and L2 data latency settings for
+	 * Cortex-A15. These settings are from the vendor kernel.
+	 */
+	mrc	p15, 0, r1, c0, c0, 0
+	movw	r2, #(ARM_CPU_PART_MASK & 0xffff)
+	movt	r2, #(ARM_CPU_PART_MASK >> 16)
+	and	r1, r1, r2
+	movw	r2, #(ARM_CPU_PART_CORTEX_A15 & 0xffff)
+	movt	r2, #(ARM_CPU_PART_CORTEX_A15 >> 16)
+	cmp	r1, r2
+	bne	not_a15
 
-ENTRY(sunxi_secondary_startup)
-	msr	cpsr_fsxc, #0xd3	@ switch to SVC mode, disable IRQ
+	/* The following is Cortex-A15 specific */
 
-	mrc	p15, 0, r0, c0, c0, 5	@ get core id
-	and	r0, r0, #0x3
+	/* ACTLR2: Enable CPU regional clock gates */
+	mrc p15, 1, r1, c15, c0, 4
+	orr r1, r1, #(0x1 << 31)
+	mcr p15, 1, r1, c15, c0, 4
 
-	adr	r1, _cpus_boot_entry
-	ldmia	r1, {r2, r3}		@ address to jump to after
-	sub	lr, r1, r2		@ offset between Virt and Phy address
-	add	r3, r0, lsl #2
-	ldr	r2, [r3, lr]		@ get address of secondary function
+	/* L2ACTLR */
+	mrc p15, 1, r1, c15, c0, 0
+	/* Enable L2, GIC, and Timer regional clock gates */
+	orr r1, r1, #(0x1 << 26)
+	/* Disable clean/evict from being pushed to external */
+	orr r1, r1, #(0x1<<3)
+	mcr p15, 1, r1, c15, c0, 0
 
-	mov	r0, #0
-	ldr	r1, =0x104d		@ Does secondary function need it?
+	/* L2CTRL: L2 data RAM latency */
+	mrc p15, 1, r1, c9, c0, 2
+	bic r1, r1, #(0x7 << 0)
+	orr r1, r1, #(0x3 << 0)
+	mcr p15, 1, r1, c9, c0, 2
 
-	bx	r2
-ENDPROC(sunxi_secondary_startup)
+	/* End of Cortex-A15 specific setup */
+	not_a15:
 
-	.align
-_cpus_boot_entry:
-	.long .
-	.long cpus_boot_entry
+	/* Get value of sunxi_mc_smp_first_comer */
+	adr	r1, first
+	ldr	r0, [r1]
+	ldr	r0, [r1, r0]
 
-#ifdef CONFIG_ARM_SUNXI_CPUIDLE
-	.text
-	.align 4
+	/* Skip cci_enable_port_for_self if not first comer */
+	cmp	r0, #0
+	bxeq	lr
+	b	cci_enable_port_for_self
 
-ENTRY(sunxi_cpux_entry_judge)
-	msr	cpsr_fsxc, #0xd3	@ switch to SVC mode, disable IRQ
+	.align 2
+	first: .word sunxi_mc_smp_first_comer - .
+ENDPROC(sunxi_mc_smp_cluster_cache_enable)
 
-	mrc	p15, 0, r0, c0, c0, 5	@ get core id
-	and	r0, r0, #0x3
+ENTRY(sunxi_mc_smp_secondary_startup)
+	bl	sunxi_mc_smp_cluster_cache_enable
+	bl	secure_cntvoff_init
+	b	secondary_startup
+ENDPROC(sunxi_mc_smp_secondary_startup)
 
-	adr	r1, _cpux_entry_flag_array
-	ldmia	r1, {r2, r3}		@ address to jump to after
-	sub	lr, r1, r2		@ offset between Virt and Phy address
-	add	r3, r0, lsl #2
-	ldr	r2, [r3, lr]		@ get address of secondary function
-	ldr	r3, [r2]
-	cmp	r3, #1
-	bne	__cpu_resume
-	b	sunxi_secondary_startup
-__cpu_resume:
-	mrc	p15, 0, r1, c1, c0, 1	@ switch to SMP mode
-	orr	r1, r1, #0x40
-	mcr	p15, 0, r1, c1, c0, 1
-	isb
-	b cpu_resume
-ENDPROC(sunxi_cpux_entry_judge)
-
-	.align
-_cpux_entry_flag_array:
-	.long .
-	.long cpux_flag_entry
-#endif
+ENTRY(sunxi_mc_smp_resume)
+	bl	sunxi_mc_smp_cluster_cache_enable
+	b	cpu_resume
+ENDPROC(sunxi_mc_smp_resume)

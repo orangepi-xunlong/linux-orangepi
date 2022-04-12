@@ -1,31 +1,18 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0+
 #
 # Shell functions for the rest of the scripts.
 #
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, you can access it online at
-# http://www.gnu.org/licenses/gpl-2.0.html.
-#
 # Copyright (C) IBM Corporation, 2013
 #
-# Authors: Paul E. McKenney <paulmck@linux.vnet.ibm.com>
+# Authors: Paul E. McKenney <paulmck@linux.ibm.com>
 
 # bootparam_hotplug_cpu bootparam-string
 #
 # Returns 1 if the specified boot-parameter string tells rcutorture to
 # test CPU-hotplug operations.
 bootparam_hotplug_cpu () {
-	echo "$1" | grep -q "rcutorture\.onoff_"
+	echo "$1" | grep -q "torture\.onoff_"
 }
 
 # checkarg --argname argtype $# arg mustmatch cannotmatch
@@ -66,8 +53,33 @@ configfrag_boot_params () {
 
 # configfrag_boot_cpus bootparam-string config-fragment-file config-cpus
 #
-# Decreases number of CPUs based on any maxcpus= boot parameters specified.
+# Decreases number of CPUs based on any nr_cpus= boot parameters specified.
 configfrag_boot_cpus () {
+	local bootargs="`configfrag_boot_params "$1" "$2"`"
+	local nr_cpus
+	if echo "${bootargs}" | grep -q 'nr_cpus=[0-9]'
+	then
+		nr_cpus="`echo "${bootargs}" | sed -e 's/^.*nr_cpus=\([0-9]*\).*$/\1/'`"
+		if test "$3" -gt "$nr_cpus"
+		then
+			echo $nr_cpus
+		else
+			echo $3
+		fi
+	else
+		echo $3
+	fi
+}
+
+# configfrag_boot_maxcpus bootparam-string config-fragment-file config-cpus
+#
+# Decreases number of CPUs based on any maxcpus= boot parameters specified.
+# This allows tests where additional CPUs come online later during the
+# test run.  However, the torture parameters will be set based on the
+# number of CPUs initially present, so the scripting should schedule
+# test runs based on the maxcpus= boot parameter controlling the initial
+# number of CPUs instead of on the ultimate number of CPUs.
+configfrag_boot_maxcpus () {
 	local bootargs="`configfrag_boot_params "$1" "$2"`"
 	local maxcpus
 	if echo "${bootargs}" | grep -q 'maxcpus=[0-9]'
@@ -96,6 +108,39 @@ configfrag_hotplug_cpu () {
 	grep -q '^CONFIG_HOTPLUG_CPU=y$' "$1"
 }
 
+# get_starttime
+#
+# Returns a cookie identifying the current time.
+get_starttime () {
+	awk 'BEGIN { print systime() }' < /dev/null
+}
+
+# get_starttime_duration starttime
+#
+# Given the return value from get_starttime, compute a human-readable
+# string denoting the time since get_starttime.
+get_starttime_duration () {
+	awk -v starttime=$1 '
+	BEGIN {
+		ts = systime() - starttime; 
+		tm = int(ts / 60);
+		th = int(ts / 3600);
+		td = int(ts / 86400);
+		d = td;
+		h = th - td * 24;
+		m = tm - th * 60;
+		s = ts - tm * 60;
+		if (d >= 1)
+			printf "%dd %d:%02d:%02d\n", d, h, m, s
+		else if (h >= 1)
+			printf "%d:%02d:%02d\n", h, m, s
+		else if (m >= 1)
+			printf "%d:%02d.0\n", m, s
+		else
+			print s " seconds"
+	}' < /dev/null
+}
+
 # identify_boot_image qemu-cmd
 #
 # Returns the relative path to the kernel build image.  This will be
@@ -110,6 +155,9 @@ identify_boot_image () {
 		case "$1" in
 		qemu-system-x86_64|qemu-system-i386)
 			echo arch/x86/boot/bzImage
+			;;
+		qemu-system-aarch64)
+			echo arch/arm64/boot/Image
 			;;
 		*)
 			echo vmlinux
@@ -133,6 +181,9 @@ identify_qemu () {
 	elif echo $u | grep -q "Intel 80386"
 	then
 		echo qemu-system-i386
+	elif echo $u | grep -q aarch64
+	then
+		echo qemu-system-aarch64
 	elif uname -a | grep -q ppc64
 	then
 		echo qemu-system-ppc64
@@ -151,16 +202,22 @@ identify_qemu () {
 # Output arguments for the qemu "-append" string based on CPU type
 # and the TORTURE_QEMU_INTERACTIVE environment variable.
 identify_qemu_append () {
+	echo debug_boot_weak_hash
+	echo panic=-1
+	local console=ttyS0
 	case "$1" in
 	qemu-system-x86_64|qemu-system-i386)
-		echo noapic selinux=0 initcall_debug debug
+		echo selinux=0 initcall_debug debug
+		;;
+	qemu-system-aarch64)
+		console=ttyAMA0
 		;;
 	esac
 	if test -n "$TORTURE_QEMU_INTERACTIVE"
 	then
 		echo root=/dev/sda
 	else
-		echo console=ttyS0
+		echo console=$console
 	fi
 }
 
@@ -169,8 +226,22 @@ identify_qemu_append () {
 # Output arguments for qemu arguments based on the TORTURE_QEMU_MAC
 # and TORTURE_QEMU_INTERACTIVE environment variables.
 identify_qemu_args () {
+	local KVM_CPU=""
+	case "$1" in
+	qemu-system-x86_64)
+		KVM_CPU=kvm64
+		;;
+	qemu-system-i386)
+		KVM_CPU=kvm32
+		;;
+	esac
 	case "$1" in
 	qemu-system-x86_64|qemu-system-i386)
+		echo -machine q35,accel=kvm
+		echo -cpu ${KVM_CPU}
+		;;
+	qemu-system-aarch64)
+		echo -machine virt,gic-version=host -cpu host
 		;;
 	qemu-system-ppc64)
 		echo -enable-kvm -M pseries -nodefaults
@@ -179,9 +250,6 @@ identify_qemu_args () {
 		then
 			echo -device spapr-vlan,netdev=net0,mac=$TORTURE_QEMU_MAC
 			echo -netdev bridge,br=br0,id=net0
-		elif test -n "$TORTURE_QEMU_INTERACTIVE"
-		then
-			echo -net nic -net user
 		fi
 		;;
 	esac
@@ -198,7 +266,7 @@ identify_qemu_args () {
 # Returns the number of virtual CPUs available to the aggregate of the
 # guest OSes.
 identify_qemu_vcpus () {
-	lscpu | grep '^CPU(s):' | sed -e 's/CPU(s)://'
+	getconf _NPROCESSORS_ONLN
 }
 
 # print_bug
@@ -229,7 +297,7 @@ specify_qemu_cpus () {
 		echo $2
 	else
 		case "$1" in
-		qemu-system-x86_64|qemu-system-i386)
+		qemu-system-x86_64|qemu-system-i386|qemu-system-aarch64)
 			echo $2 -smp $3
 			;;
 		qemu-system-ppc64)
@@ -237,5 +305,23 @@ specify_qemu_cpus () {
 			echo $2 -smp cores=`expr \( $3 + $nt - 1 \) / $nt`,threads=$nt
 			;;
 		esac
+	fi
+}
+
+# specify_qemu_net qemu-args
+#
+# Appends a string containing "-net none" to qemu-args, unless the incoming
+# qemu-args already contains "-smp" or unless the TORTURE_QEMU_INTERACTIVE
+# environment variable is set, in which case the string that is be added is
+# instead "-net nic -net user".
+specify_qemu_net () {
+	if echo $1 | grep -q -e -net
+	then
+		echo $1
+	elif test -n "$TORTURE_QEMU_INTERACTIVE"
+	then
+		echo $1 -net nic -net user
+	else
+		echo $1 -net none
 	fi
 }

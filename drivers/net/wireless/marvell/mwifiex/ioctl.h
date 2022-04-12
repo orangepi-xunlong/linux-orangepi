@@ -1,10 +1,10 @@
 /*
- * Marvell Wireless LAN device driver: ioctl data structures & APIs
+ * NXP Wireless LAN device driver: ioctl data structures & APIs
  *
- * Copyright (C) 2011-2014, Marvell International Ltd.
+ * Copyright 2011-2020 NXP
  *
- * This software file (the "File") is distributed by Marvell International
- * Ltd. under the terms of the GNU General Public License Version 2, June 1991
+ * This software file (the "File") is distributed by NXP
+ * under the terms of the GNU General Public License Version 2, June 1991
  * (the "License").  You may use, redistribute and/or modify this File in
  * accordance with the terms and conditions of the License, a copy of which
  * is available by writing to the Free Software Foundation, Inc.,
@@ -91,6 +91,8 @@ struct wep_key {
 #define MWIFIEX_TDLS_DEF_QOS_CAPAB		0xf
 #define MWIFIEX_PRIO_BK				2
 #define MWIFIEX_PRIO_VI				5
+#define MWIFIEX_SUPPORTED_CHANNELS		2
+#define MWIFIEX_OPERATING_CLASSES		16
 
 struct mwifiex_uap_bss_param {
 	u8 channel;
@@ -265,6 +267,7 @@ struct mwifiex_ds_encrypt_key {
 
 struct mwifiex_power_cfg {
 	u32 is_power_auto;
+	u32 is_power_fixed;
 	u32 power_level;
 };
 

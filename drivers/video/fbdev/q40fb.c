@@ -18,12 +18,11 @@
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/setup.h>
 #include <asm/q40_master.h>
 #include <linux/fb.h>
 #include <linux/module.h>
-#include <asm/pgtable.h>
 
 #define Q40_PHYS_SCREEN_ADDR 0xFE800000
 
@@ -36,7 +35,7 @@ static struct fb_fix_screeninfo q40fb_fix = {
 	.accel		= FB_ACCEL_NONE,
 };
 
-static struct fb_var_screeninfo q40fb_var = {
+static const struct fb_var_screeninfo q40fb_var = {
 	.xres		= 1024,
 	.yres		= 512,
 	.xres_virtual	= 1024,
@@ -75,7 +74,7 @@ static int q40fb_setcolreg(unsigned regno, unsigned red, unsigned green,
     return 0;
 }
 
-static struct fb_ops q40fb_ops = {
+static const struct fb_ops q40fb_ops = {
 	.owner		= THIS_MODULE,
 	.fb_setcolreg	= q40fb_setcolreg,
 	.fb_fillrect	= cfb_fillrect,

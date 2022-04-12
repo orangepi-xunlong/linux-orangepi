@@ -229,6 +229,8 @@ static int dma;
 #include <linux/bitops.h>
 #include <linux/gfp.h>
 
+#include <net/Space.h>
+
 #include <asm/dma.h>
 #include <asm/io.h>
 
@@ -582,11 +584,13 @@ loop:
 						printk("%02x ",ltdmacbuf[i]);
 					printk("\n");
 				}
+
 				handlecommand(dev);
-					if(0xfa==inb_p(base+6)) {
-						/* we timed out, so return */
-						goto done;
-					} 
+
+				if (0xfa == inb_p(base + 6)) {
+					/* we timed out, so return */
+					goto done;
+				}
 			} else {
 				/* we don't seem to have a command */
 				if (!mboxinuse[0]) {
@@ -694,6 +698,7 @@ static int do_read(struct net_device *dev, void *cbuf, int cbuflen,
 /* end of idle handlers -- what should be seen is do_read, do_write */
 
 static struct timer_list ltpc_timer;
+static struct net_device *ltpc_timer_dev;
 
 static netdev_tx_t ltpc_xmit(struct sk_buff *skb, struct net_device *dev);
 
@@ -841,9 +846,8 @@ static int ltpc_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 			set_30 (dev,ltflags);  
 
 			dev->broadcast[0] = 0xFF;
-			dev->dev_addr[0] = aa->s_node;
-
 			dev->addr_len=1;
+			dev_addr_set(dev, &aa->s_node);
    
 			return 0;
 
@@ -867,10 +871,8 @@ static void set_multicast_list(struct net_device *dev)
 
 static int ltpc_poll_counter;
 
-static void ltpc_poll(unsigned long l)
+static void ltpc_poll(struct timer_list *unused)
 {
-	struct net_device *dev = (struct net_device *) l;
-
 	del_timer(&ltpc_timer);
 
 	if(debug & DEBUG_VERBOSE) {
@@ -880,14 +882,10 @@ static void ltpc_poll(unsigned long l)
 		}
 		ltpc_poll_counter--;
 	}
-  
-	if (!dev)
-		return;  /* we've been downed */
 
 	/* poll 20 times per second */
-	idle(dev);
+	idle(ltpc_timer_dev);
 	ltpc_timer.expires = jiffies + HZ/20;
-	
 	add_timer(&ltpc_timer);
 }
 
@@ -938,10 +936,10 @@ static netdev_tx_t ltpc_xmit(struct sk_buff *skb, struct net_device *dev)
 static int __init ltpc_probe_dma(int base, int dma)
 {
 	int want = (dma == 3) ? 2 : (dma == 1) ? 1 : 3;
-  	unsigned long timeout;
-  	unsigned long f;
+	unsigned long timeout;
+	unsigned long f;
   
-  	if (want & 1) {
+	if (want & 1) {
 		if (request_dma(1,"ltpc")) {
 			want &= ~1;
 		} else {
@@ -1016,7 +1014,7 @@ static const struct net_device_ops ltpc_netdev = {
 	.ndo_set_rx_mode	= set_multicast_list,
 };
 
-struct net_device * __init ltpc_probe(void)
+static struct net_device * __init ltpc_probe(void)
 {
 	struct net_device *dev;
 	int err = -ENOMEM;
@@ -1165,9 +1163,8 @@ struct net_device * __init ltpc_probe(void)
 		dev->irq = 0;
 		/* polled mode -- 20 times per second */
 		/* this is really, really slow... should it poll more often? */
-		init_timer(&ltpc_timer);
-		ltpc_timer.function=ltpc_poll;
-		ltpc_timer.data = (unsigned long) dev;
+		ltpc_timer_dev = dev;
+		timer_setup(&ltpc_timer, ltpc_poll, 0);
 
 		ltpc_timer.expires = jiffies + HZ/20;
 		add_timer(&ltpc_timer);
@@ -1223,17 +1220,15 @@ static int __init ltpc_setup(char *str)
 }
 
 __setup("ltpc=", ltpc_setup);
-#endif /* MODULE */
+#endif
 
 static struct net_device *dev_ltpc;
 
-#ifdef MODULE
-
 MODULE_LICENSE("GPL");
 module_param(debug, int, 0);
-module_param(io, int, 0);
-module_param(irq, int, 0);
-module_param(dma, int, 0);
+module_param_hw(io, int, ioport, 0);
+module_param_hw(irq, int, irq, 0);
+module_param_hw(dma, int, dma, 0);
 
 
 static int __init ltpc_module_init(void)
@@ -1246,15 +1241,12 @@ static int __init ltpc_module_init(void)
 	return PTR_ERR_OR_ZERO(dev_ltpc);
 }
 module_init(ltpc_module_init);
-#endif
 
 static void __exit ltpc_cleanup(void)
 {
 
 	if(debug & DEBUG_VERBOSE) printk("unregister_netdev\n");
 	unregister_netdev(dev_ltpc);
-
-	ltpc_timer.data = 0;  /* signal the poll routine that we're done */
 
 	del_timer_sync(&ltpc_timer);
 

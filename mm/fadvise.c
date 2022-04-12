@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * mm/fadvise.c
  *
@@ -21,13 +22,15 @@
 
 #include <asm/unistd.h>
 
+#include "internal.h"
+
 /*
  * POSIX_FADV_WILLNEED could set PG_Referenced, and POSIX_FADV_NOREUSE could
  * deactivate the pages and clear PG_Referenced.
  */
-SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
+
+int generic_fadvise(struct file *file, loff_t offset, loff_t len, int advice)
 {
-	struct fd f = fdget(fd);
 	struct inode *inode;
 	struct address_space *mapping;
 	struct backing_dev_info *bdi;
@@ -35,24 +38,18 @@ SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
 	pgoff_t start_index;
 	pgoff_t end_index;
 	unsigned long nrpages;
-	int ret = 0;
 
-	if (!f.file)
-		return -EBADF;
+	inode = file_inode(file);
+	if (S_ISFIFO(inode->i_mode))
+		return -ESPIPE;
 
-	inode = file_inode(f.file);
-	if (S_ISFIFO(inode->i_mode)) {
-		ret = -ESPIPE;
-		goto out;
-	}
+	mapping = file->f_mapping;
+	if (!mapping || len < 0)
+		return -EINVAL;
 
-	mapping = f.file->f_mapping;
-	if (!mapping || len < 0) {
-		ret = -EINVAL;
-		goto out;
-	}
+	bdi = inode_to_bdi(mapping->host);
 
-	if (IS_DAX(inode)) {
+	if (IS_DAX(inode) || (bdi == &noop_backing_dev_info)) {
 		switch (advice) {
 		case POSIX_FADV_NORMAL:
 		case POSIX_FADV_RANDOM:
@@ -63,37 +60,39 @@ SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
 			/* no bad return value, but ignore advice */
 			break;
 		default:
-			ret = -EINVAL;
+			return -EINVAL;
 		}
-		goto out;
+		return 0;
 	}
 
-	/* Careful about overflows. Len == 0 means "as much as possible" */
-	endbyte = offset + len;
+	/*
+	 * Careful about overflows. Len == 0 means "as much as possible".  Use
+	 * unsigned math because signed overflows are undefined and UBSan
+	 * complains.
+	 */
+	endbyte = (u64)offset + (u64)len;
 	if (!len || endbyte < len)
 		endbyte = -1;
 	else
 		endbyte--;		/* inclusive */
 
-	bdi = inode_to_bdi(mapping->host);
-
 	switch (advice) {
 	case POSIX_FADV_NORMAL:
-		f.file->f_ra.ra_pages = bdi->ra_pages;
-		spin_lock(&f.file->f_lock);
-		f.file->f_mode &= ~FMODE_RANDOM;
-		spin_unlock(&f.file->f_lock);
+		file->f_ra.ra_pages = bdi->ra_pages;
+		spin_lock(&file->f_lock);
+		file->f_mode &= ~FMODE_RANDOM;
+		spin_unlock(&file->f_lock);
 		break;
 	case POSIX_FADV_RANDOM:
-		spin_lock(&f.file->f_lock);
-		f.file->f_mode |= FMODE_RANDOM;
-		spin_unlock(&f.file->f_lock);
+		spin_lock(&file->f_lock);
+		file->f_mode |= FMODE_RANDOM;
+		spin_unlock(&file->f_lock);
 		break;
 	case POSIX_FADV_SEQUENTIAL:
-		f.file->f_ra.ra_pages = bdi->ra_pages * 2;
-		spin_lock(&f.file->f_lock);
-		f.file->f_mode &= ~FMODE_RANDOM;
-		spin_unlock(&f.file->f_lock);
+		file->f_ra.ra_pages = bdi->ra_pages * 2;
+		spin_lock(&file->f_lock);
+		file->f_mode &= ~FMODE_RANDOM;
+		spin_unlock(&file->f_lock);
 		break;
 	case POSIX_FADV_WILLNEED:
 		/* First and last PARTIAL page! */
@@ -105,12 +104,7 @@ SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
 		if (!nrpages)
 			nrpages = ~0UL;
 
-		/*
-		 * Ignore return value because fadvise() shall return
-		 * success even if filesystem can't retrieve a hint,
-		 */
-		force_page_cache_readahead(mapping, f.file, start_index,
-					   nrpages);
+		force_page_cache_readahead(mapping, file, start_index, nrpages);
 		break;
 	case POSIX_FADV_NOREUSE:
 		break;
@@ -147,8 +141,22 @@ SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
 		}
 
 		if (end_index >= start_index) {
-			unsigned long count = invalidate_mapping_pages(mapping,
-						start_index, end_index);
+			unsigned long nr_pagevec = 0;
+
+			/*
+			 * It's common to FADV_DONTNEED right after
+			 * the read or write that instantiates the
+			 * pages, in which case there will be some
+			 * sitting on the local LRU cache. Try to
+			 * avoid the expensive remote drain and the
+			 * second cache tree walk below by flushing
+			 * them out right away.
+			 */
+			lru_add_drain();
+
+			invalidate_mapping_pagevec(mapping,
+						start_index, end_index,
+						&nr_pagevec);
 
 			/*
 			 * If fewer pages were invalidated than expected then
@@ -156,7 +164,7 @@ SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
 			 * a per-cpu pagevec for a remote CPU. Drain all
 			 * pagevecs and try again.
 			 */
-			if (count < (end_index - start_index + 1)) {
+			if (nr_pagevec) {
 				lru_add_drain_all();
 				invalidate_mapping_pages(mapping, start_index,
 						end_index);
@@ -164,18 +172,48 @@ SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
 		}
 		break;
 	default:
-		ret = -EINVAL;
+		return -EINVAL;
 	}
-out:
+	return 0;
+}
+EXPORT_SYMBOL(generic_fadvise);
+
+int vfs_fadvise(struct file *file, loff_t offset, loff_t len, int advice)
+{
+	if (file->f_op->fadvise)
+		return file->f_op->fadvise(file, offset, len, advice);
+
+	return generic_fadvise(file, offset, len, advice);
+}
+EXPORT_SYMBOL(vfs_fadvise);
+
+#ifdef CONFIG_ADVISE_SYSCALLS
+
+int ksys_fadvise64_64(int fd, loff_t offset, loff_t len, int advice)
+{
+	struct fd f = fdget(fd);
+	int ret;
+
+	if (!f.file)
+		return -EBADF;
+
+	ret = vfs_fadvise(f.file, offset, len, advice);
+
 	fdput(f);
 	return ret;
+}
+
+SYSCALL_DEFINE4(fadvise64_64, int, fd, loff_t, offset, loff_t, len, int, advice)
+{
+	return ksys_fadvise64_64(fd, offset, len, advice);
 }
 
 #ifdef __ARCH_WANT_SYS_FADVISE64
 
 SYSCALL_DEFINE4(fadvise64, int, fd, loff_t, offset, size_t, len, int, advice)
 {
-	return sys_fadvise64_64(fd, offset, len, advice);
+	return ksys_fadvise64_64(fd, offset, len, advice);
 }
 
+#endif
 #endif

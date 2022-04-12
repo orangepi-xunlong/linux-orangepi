@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * arch/arm/mach-iop32x/irq.c
  *
@@ -5,10 +6,6 @@
  *
  * Author: Rory Bolt <rorybolt@pacbell.net>
  * Copyright (C) 2002 Rory Bolt
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/init.h>
@@ -16,8 +13,9 @@
 #include <linux/list.h>
 #include <asm/mach/irq.h>
 #include <asm/irq.h>
-#include <mach/hardware.h>
 #include <asm/mach-types.h>
+
+#include "hardware.h"
 
 static u32 iop32x_mask;
 
@@ -34,14 +32,14 @@ static void intstr_write(u32 val)
 static void
 iop32x_irq_mask(struct irq_data *d)
 {
-	iop32x_mask &= ~(1 << d->irq);
+	iop32x_mask &= ~(1 << (d->irq - 1));
 	intctl_write(iop32x_mask);
 }
 
 static void
 iop32x_irq_unmask(struct irq_data *d)
 {
-	iop32x_mask |= 1 << d->irq;
+	iop32x_mask |= 1 << (d->irq - 1);
 	intctl_write(iop32x_mask);
 }
 
@@ -67,7 +65,7 @@ void __init iop32x_init_irq(void)
 	    machine_is_em7210())
 		*IOP3XX_PCIIRSR = 0x0f;
 
-	for (i = 0; i < NR_IRQS; i++) {
+	for (i = 1; i < NR_IRQS; i++) {
 		irq_set_chip_and_handler(i, &ext_chip, handle_level_irq);
 		irq_clear_status_flags(i, IRQ_NOREQUEST | IRQ_NOPROBE);
 	}

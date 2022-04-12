@@ -1,5 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef ___ASM_SPARC_UACCESS_H
 #define ___ASM_SPARC_UACCESS_H
+
+#include <asm/extable.h>
+
 #if defined(__sparc__) && defined(__arch64__)
 #include <asm/uaccess_64.h>
 #else
@@ -7,7 +11,7 @@
 #endif
 
 #define user_addr_max() \
-	(segment_eq(get_fs(), USER_DS) ? TASK_SIZE : ~0UL)
+	(uaccess_kernel() ? ~0UL : TASK_SIZE)
 
 long strncpy_from_user(char *dest, const char __user *src, long count);
 

@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Tegra host1x Interrupt Management
  *
  * Copyright (c) 2010-2013, NVIDIA Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/clk.h>
@@ -24,6 +13,7 @@
 #include <trace/events/host1x.h>
 #include "channel.h"
 #include "dev.h"
+#include "fence.h"
 #include "intr.h"
 
 /* Wait list management */
@@ -116,7 +106,6 @@ static void action_submit_complete(struct host1x_waitlist *waiter)
 	/*  Add nr_completed to trace */
 	trace_host1x_channel_submit_complete(dev_name(channel->dev),
 					     waiter->count, waiter->thresh);
-
 }
 
 static void action_wakeup(struct host1x_waitlist *waiter)
@@ -133,18 +122,26 @@ static void action_wakeup_interruptible(struct host1x_waitlist *waiter)
 	wake_up_interruptible(wq);
 }
 
+static void action_signal_fence(struct host1x_waitlist *waiter)
+{
+	struct host1x_syncpt_fence *f = waiter->data;
+
+	host1x_fence_signal(f);
+}
+
 typedef void (*action_handler)(struct host1x_waitlist *waiter);
 
 static const action_handler action_handlers[HOST1X_INTR_ACTION_COUNT] = {
 	action_submit_complete,
 	action_wakeup,
 	action_wakeup_interruptible,
+	action_signal_fence,
 };
 
 static void run_handlers(struct list_head completed[HOST1X_INTR_ACTION_COUNT])
 {
 	struct list_head *head = completed;
-	int i;
+	unsigned int i;
 
 	for (i = 0; i < HOST1X_INTR_ACTION_COUNT; ++i, ++head) {
 		action_handler handler = action_handlers[i];
@@ -211,11 +208,11 @@ static void syncpt_thresh_work(struct work_struct *work)
 				host1x_syncpt_load(host->syncpt + id));
 }
 
-int host1x_intr_add_action(struct host1x *host, unsigned int id, u32 thresh,
-			   enum host1x_intr_action action, void *data,
-			   struct host1x_waitlist *waiter, void **ref)
+int host1x_intr_add_action(struct host1x *host, struct host1x_syncpt *syncpt,
+			   u32 thresh, enum host1x_intr_action action,
+			   void *data, struct host1x_waitlist *waiter,
+			   void **ref)
 {
-	struct host1x_syncpt *syncpt;
 	int queue_was_empty;
 
 	if (waiter == NULL) {
@@ -234,40 +231,50 @@ int host1x_intr_add_action(struct host1x *host, unsigned int id, u32 thresh,
 	waiter->data = data;
 	waiter->count = 1;
 
-	syncpt = host->syncpt + id;
-
 	spin_lock(&syncpt->intr.lock);
 
 	queue_was_empty = list_empty(&syncpt->intr.wait_head);
 
 	if (add_waiter_to_queue(waiter, &syncpt->intr.wait_head)) {
 		/* added at head of list - new threshold value */
-		host1x_hw_intr_set_syncpt_threshold(host, id, thresh);
+		host1x_hw_intr_set_syncpt_threshold(host, syncpt->id, thresh);
 
 		/* added as first waiter - enable interrupt */
 		if (queue_was_empty)
-			host1x_hw_intr_enable_syncpt_intr(host, id);
+			host1x_hw_intr_enable_syncpt_intr(host, syncpt->id);
 	}
-
-	spin_unlock(&syncpt->intr.lock);
 
 	if (ref)
 		*ref = waiter;
+
+	spin_unlock(&syncpt->intr.lock);
+
 	return 0;
 }
 
-void host1x_intr_put_ref(struct host1x *host, unsigned int id, void *ref)
+void host1x_intr_put_ref(struct host1x *host, unsigned int id, void *ref,
+			 bool flush)
 {
 	struct host1x_waitlist *waiter = ref;
 	struct host1x_syncpt *syncpt;
 
-	while (atomic_cmpxchg(&waiter->state, WLS_PENDING, WLS_CANCELLED) ==
-	       WLS_REMOVED)
-		schedule();
+	atomic_cmpxchg(&waiter->state, WLS_PENDING, WLS_CANCELLED);
 
 	syncpt = host->syncpt + id;
-	(void)process_wait_list(host, syncpt,
-				host1x_syncpt_load(host->syncpt + id));
+
+	spin_lock(&syncpt->intr.lock);
+	if (atomic_cmpxchg(&waiter->state, WLS_CANCELLED, WLS_HANDLED) ==
+	    WLS_CANCELLED) {
+		list_del(&waiter->list);
+		kref_put(&waiter->refcount, waiter_release);
+	}
+	spin_unlock(&syncpt->intr.lock);
+
+	if (flush) {
+		/* Wait until any concurrently executing handler has finished. */
+		while (atomic_read(&waiter->state) != WLS_HANDLED)
+			schedule();
+	}
 
 	kref_put(&waiter->refcount, waiter_release);
 }

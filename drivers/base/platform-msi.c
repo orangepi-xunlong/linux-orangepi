@@ -1,20 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * MSI framework for platform devices
  *
  * Copyright (C) 2015 ARM Limited, All Rights Reserved.
  * Author: Marc Zyngier <marc.zyngier@arm.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/device.h>
@@ -32,11 +21,12 @@
  * and the callback to write the MSI message.
  */
 struct platform_msi_priv_data {
-	struct device		*dev;
-	void 			*host_data;
-	msi_alloc_info_t	arg;
-	irq_write_msi_msg_t	write_msg;
-	int			devid;
+	struct device			*dev;
+	void				*host_data;
+	const struct attribute_group    **msi_irq_groups;
+	msi_alloc_info_t		arg;
+	irq_write_msi_msg_t		write_msg;
+	int				devid;
 };
 
 /* The devid allocator */
@@ -70,9 +60,15 @@ static int platform_msi_init(struct irq_domain *domain,
 	return irq_domain_set_hwirq_and_chip(domain, virq, hwirq,
 					     info->chip, info->chip_data);
 }
+
+static void platform_msi_set_proxy_dev(msi_alloc_info_t *arg)
+{
+	arg->flags |= MSI_ALLOC_FLAGS_PROXY_DEVICE;
+}
 #else
 #define platform_msi_set_desc		NULL
 #define platform_msi_init		NULL
+#define platform_msi_set_proxy_dev(x)	do {} while(0)
 #endif
 
 static void platform_msi_update_dom_ops(struct msi_domain_info *info)
@@ -112,6 +108,9 @@ static void platform_msi_update_chip_ops(struct msi_domain_info *info)
 		chip->irq_set_affinity = msi_domain_set_affinity;
 	if (!chip->irq_write_msi_msg)
 		chip->irq_write_msi_msg = platform_msi_write_msg;
+	if (WARN_ON((info->flags & MSI_FLAG_LEVEL_CAPABLE) &&
+		    !(chip->flags & IRQCHIP_SUPPORTS_LEVEL_MSI)))
+		info->flags &= ~MSI_FLAG_LEVEL_CAPABLE;
 }
 
 static void platform_msi_free_descs(struct device *dev, int base, int nvec)
@@ -195,7 +194,7 @@ struct irq_domain *platform_msi_create_irq_domain(struct fwnode_handle *fwnode,
 
 	domain = msi_create_irq_domain(fwnode, info, parent);
 	if (domain)
-		domain->bus_token = DOMAIN_BUS_PLATFORM_MSI;
+		irq_domain_update_bus_token(domain, DOMAIN_BUS_PLATFORM_MSI);
 
 	return domain;
 }
@@ -206,7 +205,7 @@ platform_msi_alloc_priv_data(struct device *dev, unsigned int nvec,
 {
 	struct platform_msi_priv_data *datap;
 	/*
-	 * Limit the number of interrupts to 256 per device. Should we
+	 * Limit the number of interrupts to 2048 per device. Should we
 	 * need to bump this up, DEV_ID_SHIFT should be adjusted
 	 * accordingly (which would impact the max number of MSI
 	 * capable devices).
@@ -274,8 +273,16 @@ int platform_msi_domain_alloc_irqs(struct device *dev, unsigned int nvec,
 	if (err)
 		goto out_free_desc;
 
+	priv_data->msi_irq_groups = msi_populate_sysfs(dev);
+	if (IS_ERR(priv_data->msi_irq_groups)) {
+		err = PTR_ERR(priv_data->msi_irq_groups);
+		goto out_free_irqs;
+	}
+
 	return 0;
 
+out_free_irqs:
+	msi_domain_free_irqs(dev->msi_domain, dev);
 out_free_desc:
 	platform_msi_free_descs(dev, 0, nvec);
 out_free_priv_data:
@@ -295,6 +302,7 @@ void platform_msi_domain_free_irqs(struct device *dev)
 		struct msi_desc *desc;
 
 		desc = first_msi_entry(dev);
+		msi_destroy_sysfs(dev, desc->platform.msi_priv_data->msi_irq_groups);
 		platform_msi_free_priv_data(desc->platform.msi_priv_data);
 	}
 
@@ -318,10 +326,11 @@ void *platform_msi_get_host_data(struct irq_domain *domain)
 }
 
 /**
- * platform_msi_create_device_domain - Create a platform-msi domain
+ * __platform_msi_create_device_domain - Create a platform-msi domain
  *
  * @dev:		The device generating the MSIs
  * @nvec:		The number of MSIs that need to be allocated
+ * @is_tree:		flag to indicate tree hierarchy
  * @write_msi_msg:	Callback to write an interrupt message for @dev
  * @ops:		The hierarchy domain operations to use
  * @host_data:		Private data associated to this domain
@@ -329,11 +338,12 @@ void *platform_msi_get_host_data(struct irq_domain *domain)
  * Returns an irqdomain for @nvec interrupts
  */
 struct irq_domain *
-platform_msi_create_device_domain(struct device *dev,
-				  unsigned int nvec,
-				  irq_write_msi_msg_t write_msi_msg,
-				  const struct irq_domain_ops *ops,
-				  void *host_data)
+__platform_msi_create_device_domain(struct device *dev,
+				    unsigned int nvec,
+				    bool is_tree,
+				    irq_write_msi_msg_t write_msi_msg,
+				    const struct irq_domain_ops *ops,
+				    void *host_data)
 {
 	struct platform_msi_priv_data *data;
 	struct irq_domain *domain;
@@ -344,12 +354,13 @@ platform_msi_create_device_domain(struct device *dev,
 		return NULL;
 
 	data->host_data = host_data;
-	domain = irq_domain_create_hierarchy(dev->msi_domain, 0, nvec,
-					     of_node_to_fwnode(dev->of_node),
-					     ops, data);
+	domain = irq_domain_create_hierarchy(dev->msi_domain, 0,
+					     is_tree ? 0 : nvec,
+					     dev->fwnode, ops, data);
 	if (!domain)
 		goto free_priv;
 
+	platform_msi_set_proxy_dev(&data->arg);
 	err = msi_domain_prepare_irqs(domain->parent, dev, nvec, &data->arg);
 	if (err)
 		goto free_domain;
@@ -375,14 +386,16 @@ void platform_msi_domain_free(struct irq_domain *domain, unsigned int virq,
 			      unsigned int nvec)
 {
 	struct platform_msi_priv_data *data = domain->host_data;
-	struct msi_desc *desc;
-	for_each_msi_entry(desc, data->dev) {
+	struct msi_desc *desc, *tmp;
+	for_each_msi_entry_safe(desc, tmp, data->dev) {
 		if (WARN_ON(!desc->irq || desc->nvec_used != 1))
 			return;
 		if (!(desc->irq >= virq && desc->irq < (virq + nvec)))
 			continue;
 
 		irq_domain_free_irqs_common(domain, desc->irq, 1);
+		list_del(&desc->list);
+		free_msi_entry(desc);
 	}
 }
 
@@ -392,7 +405,7 @@ void platform_msi_domain_free(struct irq_domain *domain, unsigned int virq,
  *
  * @domain:	The platform-msi domain
  * @virq:	The base irq from which to perform the allocate operation
- * @nvec:	How many interrupts to free from @virq
+ * @nr_irqs:	How many interrupts to free from @virq
  *
  * Return 0 on success, or an error code on failure. Must be called
  * with irq_domain_mutex held (which can only be done as part of a

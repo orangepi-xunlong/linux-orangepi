@@ -26,6 +26,7 @@
  * 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 #include <linux/gpio.h>
+#include <linux/gpio/machine.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
@@ -38,7 +39,7 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
 #include <linux/mtd/physmap.h>
-#include <linux/i2c/tps65010.h>
+#include <linux/mfd/tps65010.h>
 #include <linux/platform_data/gpio-omap.h>
 #include <linux/platform_data/omap1_bl.h>
 
@@ -54,6 +55,9 @@
 #include <mach/usb.h>
 
 #include "common.h"
+
+/* Name of the GPIO chip used by the OMAP for GPIOs 0..15 */
+#define OMAP_GPIO_LABEL		"gpio-0-15"
 
 /* At OMAP5912 OSK the Ethernet is directly connected to CS1 */
 #define OMAP_OSK_ETHR_START		0x04800300
@@ -167,7 +171,7 @@ static struct platform_device *osk5912_devices[] __initdata = {
 	&osk5912_cf_device,
 };
 
-static struct gpio_led tps_leds[] = {
+static const struct gpio_led tps_leds[] = {
 	/* NOTE:  D9 and D2 have hardware blink support.
 	 * Also, D9 requires non-battery power.
 	 */
@@ -199,6 +203,8 @@ static int osk_tps_setup(struct i2c_client *client, void *context)
 	 */
 	gpio_request(OSK_TPS_GPIO_USB_PWR_EN, "n_vbus_en");
 	gpio_direction_output(OSK_TPS_GPIO_USB_PWR_EN, 1);
+	/* Free the GPIO again as the driver will request it */
+	gpio_free(OSK_TPS_GPIO_USB_PWR_EN);
 
 	/* Set GPIO 2 high so LED D3 is off by default */
 	tps65010_set_gpio_out_value(GPIO2, HIGH);
@@ -240,7 +246,9 @@ static struct tps65010_board tps_board = {
 
 static struct i2c_board_info __initdata osk_i2c_board_info[] = {
 	{
+		/* This device will get the name "i2c-tps65010" */
 		I2C_BOARD_INFO("tps65010", 0x48),
+		.dev_name = "tps65010",
 		.platform_data	= &tps_board,
 
 	},
@@ -278,6 +286,16 @@ static void __init osk_init_cf(void)
 	irq_set_irq_type(gpio_to_irq(62), IRQ_TYPE_EDGE_FALLING);
 }
 
+static struct gpiod_lookup_table osk_usb_gpio_table = {
+	.dev_id = "ohci",
+	.table = {
+		/* Power GPIO on the I2C-attached TPS65010 */
+		GPIO_LOOKUP("tps65010", 0, "power", GPIO_ACTIVE_HIGH),
+		GPIO_LOOKUP(OMAP_GPIO_LABEL, 9, "overcurrent",
+			    GPIO_ACTIVE_HIGH),
+	},
+};
+
 static struct omap_usb_config osk_usb_config __initdata = {
 	/* has usb host connector (A) ... for development it can also
 	 * be used, with a NONSTANDARD gender-bending cable/dongle, as
@@ -295,7 +313,7 @@ static struct omap_usb_config osk_usb_config __initdata = {
 };
 
 #ifdef	CONFIG_OMAP_OSK_MISTRAL
-static struct omap_lcd_config osk_lcd_config __initdata = {
+static const struct omap_lcd_config osk_lcd_config __initconst = {
 	.ctrl_name	= "internal",
 };
 #endif
@@ -303,22 +321,26 @@ static struct omap_lcd_config osk_lcd_config __initdata = {
 #ifdef	CONFIG_OMAP_OSK_MISTRAL
 
 #include <linux/input.h>
-#include <linux/platform_data/at24.h>
+#include <linux/property.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/ads7846.h>
 
 #include <linux/platform_data/keypad-omap.h>
 
-static struct at24_platform_data at24c04 = {
-	.byte_len	= SZ_4K / 8,
-	.page_size	= 16,
+static const struct property_entry mistral_at24_properties[] = {
+	PROPERTY_ENTRY_U32("pagesize", 16),
+	{ }
+};
+
+static const struct software_node mistral_at24_node = {
+	.properties = mistral_at24_properties,
 };
 
 static struct i2c_board_info __initdata mistral_i2c_board_info[] = {
 	{
 		/* NOTE:  powered from LCD supply */
 		I2C_BOARD_INFO("24c04", 0x50),
-		.platform_data	= &at24c04,
+		.swnode = &mistral_at24_node,
 	},
 	/* TODO when driver support is ready:
 	 *  - optionally ov9640 camera sensor at 0x30
@@ -385,7 +407,7 @@ static struct platform_device osk5912_lcd_device = {
 	.id		= -1,
 };
 
-static struct gpio_led mistral_gpio_led_pins[] = {
+static const struct gpio_led mistral_gpio_led_pins[] = {
 	{
 		.name		= "mistral:red",
 		.default_trigger = "heartbeat",
@@ -441,13 +463,11 @@ static struct spi_board_info __initdata mistral_boardinfo[] = { {
 	.chip_select		= 0,
 } };
 
-#ifdef	CONFIG_PM
 static irqreturn_t
 osk_mistral_wake_interrupt(int irq, void *ignored)
 {
 	return IRQ_HANDLED;
 }
-#endif
 
 static void __init osk_mistral_init(void)
 {
@@ -515,7 +535,6 @@ static void __init osk_mistral_init(void)
 
 		gpio_direction_input(OMAP_MPUIO(2));
 		irq_set_irq_type(irq, IRQ_TYPE_EDGE_RISING);
-#ifdef	CONFIG_PM
 		/* share the IRQ in case someone wants to use the
 		 * button for more than wakeup from system sleep.
 		 */
@@ -529,7 +548,6 @@ static void __init osk_mistral_init(void)
 				ret);
 		} else
 			enable_irq_wake(irq);
-#endif
 	} else
 		printk(KERN_ERR "OSK+Mistral: wakeup button is awol\n");
 
@@ -585,6 +603,7 @@ static void __init osk_init(void)
 	l |= (3 << 1);
 	omap_writel(l, USB_TRANSCEIVER_CTRL);
 
+	gpiod_add_lookup_table(&osk_usb_gpio_table);
 	omap1_usb_init(&osk_usb_config);
 
 	/* irq for tps65010 chip */

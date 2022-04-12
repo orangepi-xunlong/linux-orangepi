@@ -22,8 +22,6 @@
  * SOFTWARE.
  */
 
-#include <drm/drmP.h>
-
 #include "nouveau_drv.h"
 #include "nouveau_reg.h"
 #include "dispnv04/hw.h"
@@ -112,6 +110,9 @@ static int call_lvds_manufacturer_script(struct drm_device *dev, struct dcb_outp
 	struct nvbios *bios = &drm->vbios;
 	uint8_t sub = bios->data[bios->fp.xlated_entry + script] + (bios->fp.link_c_increment && dcbent->or & DCB_OUTPUT_C ? 1 : 0);
 	uint16_t scriptofs = ROM16(bios->data[bios->init_script_tbls_ptr + sub * 2]);
+#ifdef __powerpc__
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
+#endif
 
 	if (!bios->fp.xlated_entry || !sub || !scriptofs)
 		return -EINVAL;
@@ -125,8 +126,8 @@ static int call_lvds_manufacturer_script(struct drm_device *dev, struct dcb_outp
 #ifdef __powerpc__
 	/* Powerbook specific quirks */
 	if (script == LVDS_RESET &&
-	    (dev->pdev->device == 0x0179 || dev->pdev->device == 0x0189 ||
-	     dev->pdev->device == 0x0329))
+	    (pdev->device == 0x0179 || pdev->device == 0x0189 ||
+	     pdev->device == 0x0329))
 		nv_write_tmds(dev, dcbent->or, 0, 0x02, 0x72);
 #endif
 
@@ -215,7 +216,7 @@ int call_lvds_script(struct drm_device *dev, struct dcb_output *dcbent, int head
 	 */
 
 	struct nouveau_drm *drm = nouveau_drm(dev);
-	struct nvif_object *device = &drm->device.object;
+	struct nvif_object *device = &drm->client.device.object;
 	struct nvbios *bios = &drm->vbios;
 	uint8_t lvds_ver = bios->data[bios->fp.lvdsmanufacturerpointer];
 	uint32_t sel_clk_binding, sel_clk;
@@ -319,7 +320,7 @@ static int
 get_fp_strap(struct drm_device *dev, struct nvbios *bios)
 {
 	struct nouveau_drm *drm = nouveau_drm(dev);
-	struct nvif_object *device = &drm->device.object;
+	struct nvif_object *device = &drm->client.device.object;
 
 	/*
 	 * The fp strap is normally dictated by the "User Strap" in
@@ -333,10 +334,10 @@ get_fp_strap(struct drm_device *dev, struct nvbios *bios)
 	if (bios->major_version < 5 && bios->data[0x48] & 0x4)
 		return NVReadVgaCrtc5758(dev, 0, 0xf) & 0xf;
 
-	if (drm->device.info.family >= NV_DEVICE_INFO_V0_MAXWELL)
+	if (drm->client.device.info.family >= NV_DEVICE_INFO_V0_MAXWELL)
 		return nvif_rd32(device, 0x001800) & 0x0000000f;
 	else
-	if (drm->device.info.family >= NV_DEVICE_INFO_V0_TESLA)
+	if (drm->client.device.info.family >= NV_DEVICE_INFO_V0_TESLA)
 		return (nvif_rd32(device, NV_PEXTDEV_BOOT_0) >> 24) & 0xf;
 	else
 		return (nvif_rd32(device, NV_PEXTDEV_BOOT_0) >> 16) & 0xf;
@@ -351,11 +352,8 @@ static int parse_fp_mode_table(struct drm_device *dev, struct nvbios *bios)
 	struct lvdstableheader lth;
 
 	if (bios->fp.fptablepointer == 0x0) {
-		/* Apple cards don't have the fp table; the laptops use DDC */
-		/* The table is also missing on some x86 IGPs */
-#ifndef __powerpc__
-		NV_ERROR(drm, "Pointer to flat panel table invalid\n");
-#endif
+		/* Most laptop cards lack an fp table. They use DDC. */
+		NV_DEBUG(drm, "Pointer to flat panel table invalid\n");
 		bios->digital_min_front_porch = 0x4b;
 		return 0;
 	}
@@ -638,7 +636,7 @@ int run_tmds_table(struct drm_device *dev, struct dcb_output *dcbent, int head, 
 	 */
 
 	struct nouveau_drm *drm = nouveau_drm(dev);
-	struct nvif_object *device = &drm->device.object;
+	struct nvif_object *device = &drm->client.device.object;
 	struct nvbios *bios = &drm->vbios;
 	int cv = bios->chip_version;
 	uint16_t clktable = 0, scriptptr;
@@ -938,7 +936,7 @@ static int parse_bit_tmds_tbl_entry(struct drm_device *dev, struct nvbios *bios,
 
 	tmdstableptr = ROM16(bios->data[bitentry->offset]);
 	if (!tmdstableptr) {
-		NV_ERROR(drm, "Pointer to TMDS table invalid\n");
+		NV_INFO(drm, "Pointer to TMDS table not found\n");
 		return -EINVAL;
 	}
 
@@ -1255,7 +1253,7 @@ olddcb_table(struct drm_device *dev)
 	struct nouveau_drm *drm = nouveau_drm(dev);
 	u8 *dcb = NULL;
 
-	if (drm->device.info.family > NV_DEVICE_INFO_V0_TNT)
+	if (drm->client.device.info.family > NV_DEVICE_INFO_V0_TNT)
 		dcb = ROMPTR(dev, drm->vbios.data[0x36]);
 	if (!dcb) {
 		NV_WARN(drm, "No DCB data found in VBIOS\n");
@@ -1481,8 +1479,12 @@ parse_dcb20_entry(struct drm_device *dev, struct dcb_table *dcb,
 		case 1:
 			entry->dpconf.link_bw = 270000;
 			break;
-		default:
+		case 2:
 			entry->dpconf.link_bw = 540000;
+			break;
+		case 3:
+		default:
+			entry->dpconf.link_bw = 810000;
 			break;
 		}
 		switch ((conf & 0x0f000000) >> 24) {
@@ -1533,7 +1535,8 @@ parse_dcb20_entry(struct drm_device *dev, struct dcb_table *dcb,
 	if (conf & 0x100000)
 		entry->i2c_upper_default = true;
 
-	entry->hasht = (entry->location << 4) | entry->type;
+	entry->hasht = (entry->extdev << 8) | (entry->location << 4) |
+			entry->type;
 	entry->hashm = (entry->heads << 8) | (link << 6) | entry->or;
 	return true;
 }
@@ -1918,7 +1921,7 @@ static int load_nv17_hwsq_ucode_entry(struct drm_device *dev, struct nvbios *bio
 	 */
 
 	struct nouveau_drm *drm = nouveau_drm(dev);
-	struct nvif_object *device = &drm->device.object;
+	struct nvif_object *device = &drm->client.device.object;
 	uint8_t bytes_to_write;
 	uint16_t hwsq_entry_offset;
 	int i;
@@ -1966,7 +1969,7 @@ static int load_nv17_hw_sequencer_ucode(struct drm_device *dev,
 	 * The microcode entries are found by the "HWSQ" signature.
 	 */
 
-	const uint8_t hwsq_signature[] = { 'H', 'W', 'S', 'Q' };
+	static const uint8_t hwsq_signature[] = { 'H', 'W', 'S', 'Q' };
 	const int sz = sizeof(hwsq_signature);
 	int hwsq_offset;
 
@@ -1982,7 +1985,7 @@ uint8_t *nouveau_bios_embedded_edid(struct drm_device *dev)
 {
 	struct nouveau_drm *drm = nouveau_drm(dev);
 	struct nvbios *bios = &drm->vbios;
-	const uint8_t edid_sig[] = {
+	static const uint8_t edid_sig[] = {
 			0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00 };
 	uint16_t offset = 0;
 	uint16_t newoffset;
@@ -2012,7 +2015,7 @@ uint8_t *nouveau_bios_embedded_edid(struct drm_device *dev)
 static bool NVInitVBIOS(struct drm_device *dev)
 {
 	struct nouveau_drm *drm = nouveau_drm(dev);
-	struct nvkm_bios *bios = nvxx_bios(&drm->device);
+	struct nvkm_bios *bios = nvxx_bios(&drm->client.device);
 	struct nvbios *legacy = &drm->vbios;
 
 	memset(legacy, 0, sizeof(struct nvbios));
@@ -2064,7 +2067,7 @@ nouveau_bios_posted(struct drm_device *dev)
 	struct nouveau_drm *drm = nouveau_drm(dev);
 	unsigned htotal;
 
-	if (drm->device.info.family >= NV_DEVICE_INFO_V0_TESLA)
+	if (drm->client.device.info.family >= NV_DEVICE_INFO_V0_TESLA)
 		return true;
 
 	htotal  = NVReadVgaCrtc(dev, 0, 0x06);
@@ -2083,7 +2086,7 @@ nouveau_bios_init(struct drm_device *dev)
 	int ret;
 
 	/* only relevant for PCI devices */
-	if (!dev->pdev)
+	if (!dev_is_pci(dev->dev))
 		return 0;
 
 	if (!NVInitVBIOS(dev))

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * Details of the "wire" protocol between Xen Store Daemon and client
  * library or guest kernel.

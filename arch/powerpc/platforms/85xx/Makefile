@@ -1,8 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0
 #
 # Makefile for the PowerPC 85xx linux kernel.
 #
 obj-$(CONFIG_SMP) += smp.o
-obj-$(CONFIG_FSL_PMC)		  += mpc85xx_pm_ops.o
+ifneq ($(CONFIG_FSL_CORENET_RCPM),y)
+obj-$(CONFIG_SMP) += mpc85xx_pm_ops.o
+endif
 
 obj-y += common.o
 
@@ -22,9 +25,9 @@ obj-$(CONFIG_P1022_RDK)   += p1022_rdk.o
 obj-$(CONFIG_P1023_RDB)   += p1023_rdb.o
 obj-$(CONFIG_TWR_P102x)   += twr_p102x.o
 obj-$(CONFIG_CORENET_GENERIC)   += corenet_generic.o
+obj-$(CONFIG_FB_FSL_DIU)	+= t1042rdb_diu.o
 obj-$(CONFIG_STX_GP3)	  += stx_gp3.o
 obj-$(CONFIG_TQM85xx)	  += tqm85xx.o
-obj-$(CONFIG_SBC8548)     += sbc8548.o
 obj-$(CONFIG_PPA8548)     += ppa8548.o
 obj-$(CONFIG_SOCRATES)    += socrates.o socrates_fpga_pic.o
 obj-$(CONFIG_KSI8560)	  += ksi8560.o

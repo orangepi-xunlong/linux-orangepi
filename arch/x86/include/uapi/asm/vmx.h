@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  * vmx.h: VMX Architecture related definitions
  * Copyright (c) 2004, Intel Corporation.
@@ -26,12 +27,15 @@
 
 
 #define VMX_EXIT_REASONS_FAILED_VMENTRY         0x80000000
+#define VMX_EXIT_REASONS_SGX_ENCLAVE_MODE	0x08000000
 
 #define EXIT_REASON_EXCEPTION_NMI       0
 #define EXIT_REASON_EXTERNAL_INTERRUPT  1
 #define EXIT_REASON_TRIPLE_FAULT        2
+#define EXIT_REASON_INIT_SIGNAL			3
+#define EXIT_REASON_SIPI_SIGNAL         4
 
-#define EXIT_REASON_PENDING_INTERRUPT   7
+#define EXIT_REASON_INTERRUPT_WINDOW    7
 #define EXIT_REASON_NMI_WINDOW          8
 #define EXIT_REASON_TASK_SWITCH         9
 #define EXIT_REASON_CPUID               10
@@ -65,6 +69,8 @@
 #define EXIT_REASON_TPR_BELOW_THRESHOLD 43
 #define EXIT_REASON_APIC_ACCESS         44
 #define EXIT_REASON_EOI_INDUCED         45
+#define EXIT_REASON_GDTR_IDTR           46
+#define EXIT_REASON_LDTR_TR             47
 #define EXIT_REASON_EPT_VIOLATION       48
 #define EXIT_REASON_EPT_MISCONFIG       49
 #define EXIT_REASON_INVEPT              50
@@ -74,20 +80,30 @@
 #define EXIT_REASON_WBINVD              54
 #define EXIT_REASON_XSETBV              55
 #define EXIT_REASON_APIC_WRITE          56
+#define EXIT_REASON_RDRAND              57
 #define EXIT_REASON_INVPCID             58
+#define EXIT_REASON_VMFUNC              59
+#define EXIT_REASON_ENCLS               60
+#define EXIT_REASON_RDSEED              61
 #define EXIT_REASON_PML_FULL            62
 #define EXIT_REASON_XSAVES              63
 #define EXIT_REASON_XRSTORS             64
+#define EXIT_REASON_UMWAIT              67
+#define EXIT_REASON_TPAUSE              68
+#define EXIT_REASON_BUS_LOCK            74
 
 #define VMX_EXIT_REASONS \
 	{ EXIT_REASON_EXCEPTION_NMI,         "EXCEPTION_NMI" }, \
 	{ EXIT_REASON_EXTERNAL_INTERRUPT,    "EXTERNAL_INTERRUPT" }, \
 	{ EXIT_REASON_TRIPLE_FAULT,          "TRIPLE_FAULT" }, \
-	{ EXIT_REASON_PENDING_INTERRUPT,     "PENDING_INTERRUPT" }, \
+	{ EXIT_REASON_INIT_SIGNAL,           "INIT_SIGNAL" }, \
+	{ EXIT_REASON_SIPI_SIGNAL,           "SIPI_SIGNAL" }, \
+	{ EXIT_REASON_INTERRUPT_WINDOW,      "INTERRUPT_WINDOW" }, \
 	{ EXIT_REASON_NMI_WINDOW,            "NMI_WINDOW" }, \
 	{ EXIT_REASON_TASK_SWITCH,           "TASK_SWITCH" }, \
 	{ EXIT_REASON_CPUID,                 "CPUID" }, \
 	{ EXIT_REASON_HLT,                   "HLT" }, \
+	{ EXIT_REASON_INVD,                  "INVD" }, \
 	{ EXIT_REASON_INVLPG,                "INVLPG" }, \
 	{ EXIT_REASON_RDPMC,                 "RDPMC" }, \
 	{ EXIT_REASON_RDTSC,                 "RDTSC" }, \
@@ -106,6 +122,8 @@
 	{ EXIT_REASON_IO_INSTRUCTION,        "IO_INSTRUCTION" }, \
 	{ EXIT_REASON_MSR_READ,              "MSR_READ" }, \
 	{ EXIT_REASON_MSR_WRITE,             "MSR_WRITE" }, \
+	{ EXIT_REASON_INVALID_STATE,         "INVALID_STATE" }, \
+	{ EXIT_REASON_MSR_LOAD_FAIL,         "MSR_LOAD_FAIL" }, \
 	{ EXIT_REASON_MWAIT_INSTRUCTION,     "MWAIT_INSTRUCTION" }, \
 	{ EXIT_REASON_MONITOR_TRAP_FLAG,     "MONITOR_TRAP_FLAG" }, \
 	{ EXIT_REASON_MONITOR_INSTRUCTION,   "MONITOR_INSTRUCTION" }, \
@@ -113,22 +131,35 @@
 	{ EXIT_REASON_MCE_DURING_VMENTRY,    "MCE_DURING_VMENTRY" }, \
 	{ EXIT_REASON_TPR_BELOW_THRESHOLD,   "TPR_BELOW_THRESHOLD" }, \
 	{ EXIT_REASON_APIC_ACCESS,           "APIC_ACCESS" }, \
+	{ EXIT_REASON_EOI_INDUCED,           "EOI_INDUCED" }, \
+	{ EXIT_REASON_GDTR_IDTR,             "GDTR_IDTR" }, \
+	{ EXIT_REASON_LDTR_TR,               "LDTR_TR" }, \
 	{ EXIT_REASON_EPT_VIOLATION,         "EPT_VIOLATION" }, \
 	{ EXIT_REASON_EPT_MISCONFIG,         "EPT_MISCONFIG" }, \
 	{ EXIT_REASON_INVEPT,                "INVEPT" }, \
+	{ EXIT_REASON_RDTSCP,                "RDTSCP" }, \
 	{ EXIT_REASON_PREEMPTION_TIMER,      "PREEMPTION_TIMER" }, \
-	{ EXIT_REASON_WBINVD,                "WBINVD" }, \
-	{ EXIT_REASON_APIC_WRITE,            "APIC_WRITE" }, \
-	{ EXIT_REASON_EOI_INDUCED,           "EOI_INDUCED" }, \
-	{ EXIT_REASON_INVALID_STATE,         "INVALID_STATE" }, \
-	{ EXIT_REASON_MSR_LOAD_FAIL,         "MSR_LOAD_FAIL" }, \
-	{ EXIT_REASON_INVD,                  "INVD" }, \
 	{ EXIT_REASON_INVVPID,               "INVVPID" }, \
+	{ EXIT_REASON_WBINVD,                "WBINVD" }, \
+	{ EXIT_REASON_XSETBV,                "XSETBV" }, \
+	{ EXIT_REASON_APIC_WRITE,            "APIC_WRITE" }, \
+	{ EXIT_REASON_RDRAND,                "RDRAND" }, \
 	{ EXIT_REASON_INVPCID,               "INVPCID" }, \
+	{ EXIT_REASON_VMFUNC,                "VMFUNC" }, \
+	{ EXIT_REASON_ENCLS,                 "ENCLS" }, \
+	{ EXIT_REASON_RDSEED,                "RDSEED" }, \
+	{ EXIT_REASON_PML_FULL,              "PML_FULL" }, \
 	{ EXIT_REASON_XSAVES,                "XSAVES" }, \
-	{ EXIT_REASON_XRSTORS,               "XRSTORS" }
+	{ EXIT_REASON_XRSTORS,               "XRSTORS" }, \
+	{ EXIT_REASON_UMWAIT,                "UMWAIT" }, \
+	{ EXIT_REASON_TPAUSE,                "TPAUSE" }, \
+	{ EXIT_REASON_BUS_LOCK,              "BUS_LOCK" }
+
+#define VMX_EXIT_REASON_FLAGS \
+	{ VMX_EXIT_REASONS_FAILED_VMENTRY,	"FAILED_VMENTRY" }
 
 #define VMX_ABORT_SAVE_GUEST_MSR_FAIL        1
+#define VMX_ABORT_LOAD_HOST_PDPTE_FAIL       2
 #define VMX_ABORT_LOAD_HOST_MSR_FAIL         4
 
 #endif /* _UAPIVMX_H */

@@ -1,9 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * max98926.c -- ALSA SoC MAX98926 driver
  * Copyright 2013-15 Maxim Integrated Products
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/delay.h>
 #include <linux/i2c.h>
@@ -20,15 +18,6 @@
 static const char * const max98926_boost_voltage_txt[] = {
 	"8.5V", "8.25V", "8.0V", "7.75V", "7.5V", "7.25V", "7.0V", "6.75V",
 	"6.5V", "6.5V", "6.5V", "6.5V", "6.5V", "6.5V", "6.5V", "6.5V"
-};
-
-static const char * const max98926_boost_current_txt[] = {
-	"0.6", "0.8", "1.0", "1.2", "1.4", "1.6", "1.8", "2.0",
-	"2.2", "2.4", "2.6", "2.8", "3.2", "3.6", "4.0", "4.4"
-};
-
-static const char *const max98926_dai_txt[] = {
-	"Left", "Right", "LeftRight", "LeftRightDiv2",
 };
 
 static const char *const max98926_pdm_ch_text[] = {
@@ -213,8 +202,8 @@ static bool max98926_readable_register(struct device *dev, unsigned int reg)
 	}
 };
 
-DECLARE_TLV_DB_SCALE(max98926_spk_tlv, -600, 100, 0);
-DECLARE_TLV_DB_RANGE(max98926_current_tlv,
+static DECLARE_TLV_DB_SCALE(max98926_spk_tlv, -600, 100, 0);
+static DECLARE_TLV_DB_RANGE(max98926_current_tlv,
 	0, 11, TLV_DB_SCALE_ITEM(20, 20, 0),
 	12, 15, TLV_DB_SCALE_ITEM(320, 40, 0),
 );
@@ -336,18 +325,18 @@ static void max98926_set_sense_data(struct max98926_priv *max98926)
 static int max98926_dai_set_fmt(struct snd_soc_dai *codec_dai,
 		unsigned int fmt)
 {
-	struct snd_soc_codec *codec = codec_dai->codec;
-	struct max98926_priv *max98926 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component = codec_dai->component;
+	struct max98926_priv *max98926 = snd_soc_component_get_drvdata(component);
 	unsigned int invert = 0;
 
-	dev_dbg(codec->dev, "%s: fmt 0x%08X\n", __func__, fmt);
+	dev_dbg(component->dev, "%s: fmt 0x%08X\n", __func__, fmt);
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
 	case SND_SOC_DAIFMT_CBS_CFS:
 		max98926_set_sense_data(max98926);
 		break;
 	default:
-		dev_err(codec->dev, "DAI clock mode unsupported\n");
+		dev_err(component->dev, "DAI clock mode unsupported\n");
 		return -EINVAL;
 	}
 
@@ -364,7 +353,7 @@ static int max98926_dai_set_fmt(struct snd_soc_dai *codec_dai,
 		invert = MAX98926_DAI_BCI_MASK | MAX98926_DAI_WCI_MASK;
 		break;
 	default:
-		dev_err(codec->dev, "DAI invert mode unsupported\n");
+		dev_err(component->dev, "DAI invert mode unsupported\n");
 		return -EINVAL;
 	}
 
@@ -381,8 +370,8 @@ static int max98926_dai_hw_params(struct snd_pcm_substream *substream,
 {
 	int dai_sr = -EINVAL;
 	int rate = params_rate(params), i;
-	struct snd_soc_codec *codec = dai->codec;
-	struct max98926_priv *max98926 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component = dai->component;
+	struct max98926_priv *max98926 = snd_soc_component_get_drvdata(component);
 	int blr_clk_ratio;
 
 	switch (params_format(params)) {
@@ -408,7 +397,7 @@ static int max98926_dai_hw_params(struct snd_pcm_substream *substream,
 		max98926->ch_size = 32;
 		break;
 	default:
-		dev_dbg(codec->dev, "format unsupported %d\n",
+		dev_dbg(component->dev, "format unsupported %d\n",
 			params_format(params));
 		return -EINVAL;
 	}
@@ -459,7 +448,7 @@ static int max98926_dai_hw_params(struct snd_pcm_substream *substream,
 #define MAX98926_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | \
 		SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S32_LE)
 
-static struct snd_soc_dai_ops max98926_dai_ops = {
+static const struct snd_soc_dai_ops max98926_dai_ops = {
 	.set_fmt = max98926_dai_set_fmt,
 	.hw_params = max98926_dai_hw_params,
 };
@@ -485,27 +474,29 @@ static struct snd_soc_dai_driver max98926_dai[] = {
 }
 };
 
-static int max98926_probe(struct snd_soc_codec *codec)
+static int max98926_probe(struct snd_soc_component *component)
 {
-	struct max98926_priv *max98926 = snd_soc_codec_get_drvdata(codec);
+	struct max98926_priv *max98926 = snd_soc_component_get_drvdata(component);
 
-	max98926->codec = codec;
-	codec->control_data = max98926->regmap;
+	max98926->component = component;
+
 	/* Hi-Z all the slots */
 	regmap_write(max98926->regmap, MAX98926_DOUT_HIZ_CFG4, 0xF0);
 	return 0;
 }
 
-static struct snd_soc_codec_driver soc_codec_dev_max98926 = {
-	.probe	= max98926_probe,
-	.component_driver = {
-		.controls		= max98926_snd_controls,
-		.num_controls		= ARRAY_SIZE(max98926_snd_controls),
-		.dapm_routes		= max98926_audio_map,
-		.num_dapm_routes	= ARRAY_SIZE(max98926_audio_map),
-		.dapm_widgets		= max98926_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(max98926_dapm_widgets),
-	},
+static const struct snd_soc_component_driver soc_component_dev_max98926 = {
+	.probe			= max98926_probe,
+	.controls		= max98926_snd_controls,
+	.num_controls		= ARRAY_SIZE(max98926_snd_controls),
+	.dapm_routes		= max98926_audio_map,
+	.num_dapm_routes	= ARRAY_SIZE(max98926_audio_map),
+	.dapm_widgets		= max98926_dapm_widgets,
+	.num_dapm_widgets	= ARRAY_SIZE(max98926_dapm_widgets),
+	.idle_bias_on		= 1,
+	.use_pmdown_time	= 1,
+	.endianness		= 1,
+	.non_legacy_dai_naming	= 1,
 };
 
 static const struct regmap_config max98926_regmap = {
@@ -563,20 +554,15 @@ static int max98926_i2c_probe(struct i2c_client *i2c,
 		return ret;
 	}
 
-	ret = snd_soc_register_codec(&i2c->dev, &soc_codec_dev_max98926,
+	ret = devm_snd_soc_register_component(&i2c->dev,
+			&soc_component_dev_max98926,
 			max98926_dai, ARRAY_SIZE(max98926_dai));
 	if (ret < 0)
 		dev_err(&i2c->dev,
-				"Failed to register codec: %d\n", ret);
+				"Failed to register component: %d\n", ret);
 	dev_info(&i2c->dev, "device version: %x\n", reg);
 err_out:
 	return ret;
-}
-
-static int max98926_i2c_remove(struct i2c_client *client)
-{
-	snd_soc_unregister_codec(&client->dev);
-	return 0;
 }
 
 static const struct i2c_device_id max98926_i2c_id[] = {
@@ -585,20 +571,20 @@ static const struct i2c_device_id max98926_i2c_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, max98926_i2c_id);
 
+#ifdef CONFIG_OF
 static const struct of_device_id max98926_of_match[] = {
 	{ .compatible = "maxim,max98926", },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, max98926_of_match);
+#endif
 
 static struct i2c_driver max98926_i2c_driver = {
 	.driver = {
 		.name = "max98926",
 		.of_match_table = of_match_ptr(max98926_of_match),
-		.pm = NULL,
 	},
 	.probe	= max98926_i2c_probe,
-	.remove = max98926_i2c_remove,
 	.id_table = max98926_i2c_id,
 };
 

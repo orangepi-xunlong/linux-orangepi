@@ -1,6 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <linux/string.h>
 #include <termios.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
@@ -63,12 +65,14 @@ void exclude_cmds(struct cmdnames *cmds, struct cmdnames *excludes)
 	ci = cj = ei = 0;
 	while (ci < cmds->cnt && ei < excludes->cnt) {
 		cmp = strcmp(cmds->names[ci]->name, excludes->names[ei]->name);
-		if (cmp < 0)
+		if (cmp < 0) {
 			cmds->names[cj++] = cmds->names[ci++];
-		else if (cmp == 0)
-			ci++, ei++;
-		else if (cmp > 0)
+		} else if (cmp == 0) {
+			ci++;
 			ei++;
+		} else if (cmp > 0) {
+			ei++;
+		}
 	}
 
 	while (ci < cmds->cnt)
@@ -170,7 +174,7 @@ static void list_commands_in_dir(struct cmdnames *cmds,
 	while ((de = readdir(dir)) != NULL) {
 		int entlen;
 
-		if (prefixcmp(de->d_name, prefix))
+		if (!strstarts(de->d_name, prefix))
 			continue;
 
 		astrcat(&buf, de->d_name);

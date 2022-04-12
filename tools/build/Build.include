@@ -66,22 +66,23 @@ dep-cmd = $(if $(wildcard $(fixdep)),                                           
            printf '$(pound) cannot find fixdep (%s)\n' $(fixdep) > $(dot-target).cmd; \
            printf '$(pound) using basic dep data\n\n' >> $(dot-target).cmd;           \
            cat $(depfile) >> $(dot-target).cmd;                                 \
-           printf '%s\n' 'cmd_$@ := $(make-cmd)' >> $(dot-target).cmd)
+           printf '\n%s\n' 'cmd_$@ := $(make-cmd)' >> $(dot-target).cmd)
 
 ###
 # if_changed_dep  - execute command if any prerequisite is newer than
 #                   target, or command line has changed and update
 #                   dependencies in the cmd file
 if_changed_dep = $(if $(strip $(any-prereq) $(arg-check)),         \
-	@set -e;                                                   \
-	$(echo-cmd) $(cmd_$(1)) && $(dep-cmd))
+                  @set -e;                                         \
+                  $(echo-cmd) $(cmd_$(1));                         \
+                  $(dep-cmd))
 
 # if_changed      - execute command if any prerequisite is newer than
 #                   target, or command line has changed
-if_changed = $(if $(strip $(any-prereq) $(arg-check)),             \
-	@set -e;                                                   \
-	$(echo-cmd) $(cmd_$(1));                                   \
-	printf '%s\n' 'cmd_$@ := $(make-cmd)' > $(dot-target).cmd)
+if_changed = $(if $(strip $(any-prereq) $(arg-check)),                   \
+              @set -e;                                                   \
+              $(echo-cmd) $(cmd_$(1));                                   \
+              printf '%s\n' 'cmd_$@ := $(make-cmd)' > $(dot-target).cmd)
 
 ###
 # C flags to be used in rule definitions, includes:
@@ -90,10 +91,36 @@ if_changed = $(if $(strip $(any-prereq) $(arg-check)),             \
 # - per target C flags
 # - per object C flags
 # - BUILD_STR macro to allow '-D"$(variable)"' constructs
-c_flags = -Wp,-MD,$(depfile),-MT,$@ $(CFLAGS) -D"BUILD_STR(s)=\#s" $(CFLAGS_$(basetarget).o) $(CFLAGS_$(obj))
-cxx_flags = -Wp,-MD,$(depfile),-MT,$@ $(CXXFLAGS) -D"BUILD_STR(s)=\#s" $(CXXFLAGS_$(basetarget).o) $(CXXFLAGS_$(obj))
+c_flags_1 = -Wp,-MD,$(depfile) -Wp,-MT,$@ $(CFLAGS) -D"BUILD_STR(s)=\#s" $(CFLAGS_$(basetarget).o) $(CFLAGS_$(obj))
+c_flags_2 = $(filter-out $(CFLAGS_REMOVE_$(basetarget).o), $(c_flags_1))
+c_flags   = $(filter-out $(CFLAGS_REMOVE_$(obj)), $(c_flags_2))
+cxx_flags = -Wp,-MD,$(depfile) -Wp,-MT,$@ $(CXXFLAGS) -D"BUILD_STR(s)=\#s" $(CXXFLAGS_$(basetarget).o) $(CXXFLAGS_$(obj))
 
 ###
 ## HOSTCC C flags
 
-host_c_flags = -Wp,-MD,$(depfile),-MT,$@ $(CHOSTFLAGS) -D"BUILD_STR(s)=\#s" $(CHOSTFLAGS_$(basetarget).o) $(CHOSTFLAGS_$(obj))
+host_c_flags = -Wp,-MD,$(depfile) -Wp,-MT,$@ $(KBUILD_HOSTCFLAGS) -D"BUILD_STR(s)=\#s" $(HOSTCFLAGS_$(basetarget).o) $(HOSTCFLAGS_$(obj))
+
+# output directory for tests below
+TMPOUT = .tmp_$$$$
+
+# try-run
+# Usage: option = $(call try-run, $(CC)...-o "$$TMP",option-ok,otherwise)
+# Exit code chooses option. "$$TMP" serves as a temporary file and is
+# automatically cleaned up.
+try-run = $(shell set -e;		\
+	TMP=$(TMPOUT)/tmp;		\
+	mkdir -p $(TMPOUT);		\
+	trap "rm -rf $(TMPOUT)" EXIT;	\
+	if ($(1)) >/dev/null 2>&1;	\
+	then echo "$(2)";		\
+	else echo "$(3)";		\
+	fi)
+
+# cc-option
+# Usage: cflags-y += $(call cc-option,-march=winchip-c6,-march=i586)
+cc-option = $(call try-run, \
+	$(CC) -Werror $(1) -c -x c /dev/null -o "$$TMP",$(1),$(2))
+
+# delete partially updated (i.e. corrupted) files on error
+.DELETE_ON_ERROR:

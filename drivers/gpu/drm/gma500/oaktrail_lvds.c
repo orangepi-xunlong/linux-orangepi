@@ -1,18 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright © 2006-2009 Intel Corporation
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
  *
  * Authors:
  *	Eric Anholt <eric@anholt.net>
@@ -21,15 +9,17 @@
  */
 
 #include <linux/i2c.h>
-#include <drm/drmP.h>
+#include <linux/pm_runtime.h>
+
 #include <asm/intel-mid.h>
 
+#include <drm/drm_simple_kms_helper.h>
+
 #include "intel_bios.h"
+#include "power.h"
 #include "psb_drv.h"
 #include "psb_intel_drv.h"
 #include "psb_intel_reg.h"
-#include "power.h"
-#include <linux/pm_runtime.h>
 
 /* The max/min PWM frequency in BPCR[31:17] - */
 /* The smallest number is 1 (not 0) that can fit in the
@@ -39,7 +29,7 @@
 #define MRST_BLC_MAX_PWM_REG_FREQ	    0xFFFF
 #define BRIGHTNESS_MAX_LEVEL 100
 
-/**
+/*
  * Sets the power state for the panel.
  */
 static void oaktrail_lvds_set_power(struct drm_device *dev,
@@ -47,7 +37,7 @@ static void oaktrail_lvds_set_power(struct drm_device *dev,
 				bool on)
 {
 	u32 pp_status;
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 
 	if (!gma_power_begin(dev, true))
 		return;
@@ -70,7 +60,7 @@ static void oaktrail_lvds_set_power(struct drm_device *dev,
 			pp_status = REG_READ(PP_STATUS);
 		} while (pp_status & PP_ON);
 		dev_priv->is_lvds_on = false;
-		pm_request_idle(&dev->pdev->dev);
+		pm_request_idle(dev->dev);
 	}
 	gma_power_end(dev);
 }
@@ -93,7 +83,7 @@ static void oaktrail_lvds_mode_set(struct drm_encoder *encoder,
 			       struct drm_display_mode *adjusted_mode)
 {
 	struct drm_device *dev = encoder->dev;
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	struct psb_intel_mode_device *mode_dev = &dev_priv->mode_dev;
 	struct drm_mode_config *mode_config = &dev->mode_config;
 	struct drm_connector *connector = NULL;
@@ -123,12 +113,13 @@ static void oaktrail_lvds_mode_set(struct drm_encoder *encoder,
 
 	/* Find the connector we're trying to set up */
 	list_for_each_entry(connector, &mode_config->connector_list, head) {
-		if (!connector->encoder || connector->encoder->crtc != crtc)
-			continue;
+		if (connector->encoder && connector->encoder->crtc == crtc)
+			break;
 	}
 
-	if (!connector) {
+	if (list_entry_is_head(connector, &mode_config->connector_list, head)) {
 		DRM_ERROR("Couldn't find connector when setting mode");
+		gma_power_end(dev);
 		return;
 	}
 
@@ -164,7 +155,7 @@ static void oaktrail_lvds_mode_set(struct drm_encoder *encoder,
 static void oaktrail_lvds_prepare(struct drm_encoder *encoder)
 {
 	struct drm_device *dev = encoder->dev;
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	struct gma_encoder *gma_encoder = to_gma_encoder(encoder);
 	struct psb_intel_mode_device *mode_dev = &dev_priv->mode_dev;
 
@@ -180,7 +171,7 @@ static void oaktrail_lvds_prepare(struct drm_encoder *encoder)
 
 static u32 oaktrail_lvds_get_max_backlight(struct drm_device *dev)
 {
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	u32 ret;
 
 	if (gma_power_begin(dev, false)) {
@@ -200,7 +191,7 @@ static u32 oaktrail_lvds_get_max_backlight(struct drm_device *dev)
 static void oaktrail_lvds_commit(struct drm_encoder *encoder)
 {
 	struct drm_device *dev = encoder->dev;
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	struct gma_encoder *gma_encoder = to_gma_encoder(encoder);
 	struct psb_intel_mode_device *mode_dev = &dev_priv->mode_dev;
 
@@ -224,7 +215,7 @@ static void oaktrail_lvds_get_configuration_mode(struct drm_device *dev,
 					struct psb_intel_mode_device *mode_dev)
 {
 	struct drm_display_mode *mode = NULL;
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	struct oaktrail_timing_info *ti = &dev_priv->gct_data.DTD;
 
 	mode_dev->panel_fixed_mode = NULL;
@@ -255,15 +246,15 @@ static void oaktrail_lvds_get_configuration_mode(struct drm_device *dev,
 				((ti->vblank_hi << 8) | ti->vblank_lo);
 		mode->clock = ti->pixel_clock * 10;
 #if 0
-		printk(KERN_INFO "hdisplay is %d\n", mode->hdisplay);
-		printk(KERN_INFO "vdisplay is %d\n", mode->vdisplay);
-		printk(KERN_INFO "HSS is %d\n", mode->hsync_start);
-		printk(KERN_INFO "HSE is %d\n", mode->hsync_end);
-		printk(KERN_INFO "htotal is %d\n", mode->htotal);
-		printk(KERN_INFO "VSS is %d\n", mode->vsync_start);
-		printk(KERN_INFO "VSE is %d\n", mode->vsync_end);
-		printk(KERN_INFO "vtotal is %d\n", mode->vtotal);
-		printk(KERN_INFO "clock is %d\n", mode->clock);
+		pr_info("hdisplay is %d\n", mode->hdisplay);
+		pr_info("vdisplay is %d\n", mode->vdisplay);
+		pr_info("HSS is %d\n", mode->hsync_start);
+		pr_info("HSE is %d\n", mode->hsync_end);
+		pr_info("htotal is %d\n", mode->htotal);
+		pr_info("VSS is %d\n", mode->vsync_start);
+		pr_info("VSE is %d\n", mode->vsync_end);
+		pr_info("vtotal is %d\n", mode->vtotal);
+		pr_info("clock is %d\n", mode->clock);
 #endif
 		mode_dev->panel_fixed_mode = mode;
 	}
@@ -291,6 +282,7 @@ static void oaktrail_lvds_get_configuration_mode(struct drm_device *dev,
 /**
  * oaktrail_lvds_init - setup LVDS connectors on this device
  * @dev: drm device
+ * @mode_dev: PSB mode device
  *
  * Create the connector, register the LVDS DDC bus, and try to figure out what
  * modes we can display on the LVDS panel (if present).
@@ -302,7 +294,7 @@ void oaktrail_lvds_init(struct drm_device *dev,
 	struct gma_connector *gma_connector;
 	struct drm_connector *connector;
 	struct drm_encoder *encoder;
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	struct edid *edid;
 	struct i2c_adapter *i2c_adap;
 	struct drm_display_mode *scan;	/* *modes, *bios_mode; */
@@ -322,8 +314,7 @@ void oaktrail_lvds_init(struct drm_device *dev,
 			   &psb_intel_lvds_connector_funcs,
 			   DRM_MODE_CONNECTOR_LVDS);
 
-	drm_encoder_init(dev, encoder, &psb_intel_lvds_enc_funcs,
-			 DRM_MODE_ENCODER_LVDS, NULL);
+	drm_simple_encoder_init(dev, encoder, DRM_MODE_ENCODER_LVDS);
 
 	gma_connector_attach_encoder(gma_connector, gma_encoder);
 	gma_encoder->type = INTEL_OUTPUT_LVDS;
@@ -376,7 +367,7 @@ void oaktrail_lvds_init(struct drm_device *dev,
 	 * preferred mode is the right one.
 	 */
 	if (edid) {
-		drm_mode_connector_update_edid_property(connector, edid);
+		drm_connector_update_edid_property(connector, edid);
 		drm_add_edid_modes(connector, edid);
 		kfree(edid);
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Goramo MultiLink router platform code
  * Copyright (C) 2006-2009 Krzysztof Halasa <khc@pm.waw.pl>
@@ -6,17 +7,19 @@
 #include <linux/delay.h>
 #include <linux/gpio.h>
 #include <linux/hdlc.h>
-#include <linux/i2c-gpio.h>
 #include <linux/io.h>
 #include <linux/irq.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
+#include <linux/platform_data/wan_ixp4xx_hss.h>
 #include <linux/serial_8250.h>
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/flash.h>
 #include <asm/mach/pci.h>
 #include <asm/system_info.h>
+
+#include "irqs.h"
 
 #define SLOT_ETHA		0x0B	/* IDSEL = AD21 */
 #define SLOT_ETHB		0x0C	/* IDSEL = AD20 */
@@ -78,6 +81,12 @@
 static u32 hw_bits = 0xFFFFFFFD;    /* assume all hardware present */;
 static u8 control_value;
 
+/*
+ * FIXME: this is reimplementing I2C bit-bangining. Move this
+ * over to using driver/i2c/busses/i2c-gpio.c like all other boards
+ * and register proper I2C device(s) on the bus for this. (See
+ * other IXP4xx boards for examples.)
+ */
 static void set_scl(u8 value)
 {
 	gpio_set_value(GPIO_SCL, !!value);
@@ -216,20 +225,6 @@ static struct platform_device device_flash = {
 	.resource	= &flash_resource,
 };
 
-
-/* I^2C interface */
-static struct i2c_gpio_platform_data i2c_data = {
-	.sda_pin	= GPIO_SDA,
-	.scl_pin	= GPIO_SCL,
-};
-
-static struct platform_device device_i2c = {
-	.name		= "i2c-gpio",
-	.id		= 0,
-	.dev		= { .platform_data = &i2c_data },
-};
-
-
 /* IXP425 2 UART ports */
 static struct resource uart_resources[] = {
 	{
@@ -278,6 +273,22 @@ static struct platform_device device_uarts = {
 
 
 /* Built-in 10/100 Ethernet MAC interfaces */
+static struct resource eth_npeb_resources[] = {
+	{
+		.start		= IXP4XX_EthB_BASE_PHYS,
+		.end		= IXP4XX_EthB_BASE_PHYS + 0x0fff,
+		.flags		= IORESOURCE_MEM,
+	},
+};
+
+static struct resource eth_npec_resources[] = {
+	{
+		.start		= IXP4XX_EthC_BASE_PHYS,
+		.end		= IXP4XX_EthC_BASE_PHYS + 0x0fff,
+		.flags		= IORESOURCE_MEM,
+	},
+};
+
 static struct eth_plat_info eth_plat[] = {
 	{
 		.phy		= 0,
@@ -295,10 +306,14 @@ static struct platform_device device_eth_tab[] = {
 		.name			= "ixp4xx_eth",
 		.id			= IXP4XX_ETH_NPEB,
 		.dev.platform_data	= eth_plat,
+		.num_resources		= ARRAY_SIZE(eth_npeb_resources),
+		.resource		= eth_npeb_resources,
 	}, {
 		.name			= "ixp4xx_eth",
 		.id			= IXP4XX_ETH_NPEC,
 		.dev.platform_data	= eth_plat + 1,
+		.num_resources		= ARRAY_SIZE(eth_npec_resources),
+		.resource		= eth_npec_resources,
 	}
 };
 
@@ -411,8 +426,8 @@ static void __init gmlr_init(void)
 	if (hw_bits & CFG_HW_HAS_HSS1)
 		device_tab[devices++] = &device_hss_tab[1]; /* max index 5 */
 
-	if (hw_bits & CFG_HW_HAS_EEPROM)
-		device_tab[devices++] = &device_i2c; /* max index 6 */
+	hss_plat[0].timer_freq = ixp4xx_timer_freq;
+	hss_plat[1].timer_freq = ixp4xx_timer_freq;
 
 	gpio_request(GPIO_SCL, "SCL/clock");
 	gpio_request(GPIO_SDA, "SDA/data");

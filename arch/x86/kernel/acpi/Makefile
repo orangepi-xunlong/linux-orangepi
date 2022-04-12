@@ -1,4 +1,4 @@
-OBJECT_FILES_NON_STANDARD_wakeup_$(BITS).o := y
+# SPDX-License-Identifier: GPL-2.0
 
 obj-$(CONFIG_ACPI)		+= boot.o
 obj-$(CONFIG_ACPI_SLEEP)	+= sleep.o wakeup_$(BITS).o

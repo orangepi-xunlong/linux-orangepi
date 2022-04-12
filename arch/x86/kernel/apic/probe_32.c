@@ -1,56 +1,20 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Default generic APIC driver. This handles up to 8 CPUs.
  *
  * Copyright 2003 Andi Kleen, SuSE Labs.
- * Subject to the GNU Public License, v.2
  *
  * Generic x86 APIC driver probe layer.
  */
-#include <linux/threads.h>
-#include <linux/cpumask.h>
 #include <linux/export.h>
-#include <linux/string.h>
-#include <linux/kernel.h>
-#include <linux/ctype.h>
-#include <linux/init.h>
 #include <linux/errno.h>
-#include <asm/fixmap.h>
-#include <asm/mpspec.h>
-#include <asm/apicdef.h>
-#include <asm/apic.h>
-#include <asm/setup.h>
-
 #include <linux/smp.h>
-#include <asm/ipi.h>
 
-#include <linux/interrupt.h>
+#include <asm/io_apic.h>
+#include <asm/apic.h>
 #include <asm/acpi.h>
-#include <asm/e820.h>
 
-#ifdef CONFIG_HOTPLUG_CPU
-#define DEFAULT_SEND_IPI	(1)
-#else
-#define DEFAULT_SEND_IPI	(0)
-#endif
-
-int no_broadcast = DEFAULT_SEND_IPI;
-
-static __init int no_ipi_broadcast(char *str)
-{
-	get_option(&str, &no_broadcast);
-	pr_info("Using %s mode\n",
-		no_broadcast ? "No IPI Broadcast" : "IPI Broadcast");
-	return 1;
-}
-__setup("no_ipi_broadcast=", no_ipi_broadcast);
-
-static int __init print_ipi_mode(void)
-{
-	pr_info("Using IPI %s mode\n",
-		no_broadcast ? "No-Shortcut" : "Shortcut");
-	return 0;
-}
-late_initcall(print_ipi_mode);
+#include "local.h"
 
 static int default_x86_32_early_logical_apicid(int cpu)
 {
@@ -64,6 +28,31 @@ static void setup_apic_flat_routing(void)
 		"Enabling APIC mode:  Flat.  Using %d I/O APICs\n",
 		nr_ioapics);
 #endif
+}
+
+static int default_apic_id_registered(void)
+{
+	return physid_isset(read_apic_id(), phys_cpu_present_map);
+}
+
+/*
+ * Set up the logical destination ID.  Intel recommends to set DFR, LDR and
+ * TPR before enabling an APIC.  See e.g. "AP-388 82489DX User's Manual"
+ * (Intel document number 292116).
+ */
+static void default_init_apic_ldr(void)
+{
+	unsigned long val;
+
+	apic_write(APIC_DFR, APIC_DFR_VALUE);
+	val = apic_read(APIC_LDR) & ~APIC_LDR_MASK;
+	val |= SET_APIC_LOGICAL_ID(1UL << smp_processor_id());
+	apic_write(APIC_LDR, val);
+}
+
+static int default_phys_pkg_id(int cpuid_apic, int index_msb)
+{
+	return cpuid_apic >> index_msb;
 }
 
 /* should be called last. */
@@ -80,18 +69,13 @@ static struct apic apic_default __ro_after_init = {
 	.apic_id_valid			= default_apic_id_valid,
 	.apic_id_registered		= default_apic_id_registered,
 
-	.irq_delivery_mode		= dest_LowestPrio,
-	/* logical delivery broadcast to all CPUs: */
-	.irq_dest_mode			= 1,
+	.delivery_mode			= APIC_DELIVERY_MODE_FIXED,
+	.dest_mode_logical		= true,
 
-	.target_cpus			= default_target_cpus,
 	.disable_esr			= 0,
-	.dest_logical			= APIC_DEST_LOGICAL,
+
 	.check_apicid_used		= default_check_apicid_used,
-
-	.vector_allocation_domain	= flat_vector_allocation_domain,
 	.init_apic_ldr			= default_init_apic_ldr,
-
 	.ioapic_phys_id_map		= default_ioapic_phys_id_map,
 	.setup_apic_routing		= setup_apic_flat_routing,
 	.cpu_present_to_apicid		= default_cpu_present_to_apicid,
@@ -102,7 +86,7 @@ static struct apic apic_default __ro_after_init = {
 	.get_apic_id			= default_get_apic_id,
 	.set_apic_id			= NULL,
 
-	.cpu_mask_to_apicid_and		= flat_cpu_mask_to_apicid_and,
+	.calc_dest_apicid		= apic_flat_calc_apicid,
 
 	.send_IPI			= default_send_IPI_single,
 	.send_IPI_mask			= default_send_IPI_mask_logical,
@@ -161,7 +145,9 @@ void __init default_setup_apic_routing(void)
 				def_to_bigsmp = 0;
 				break;
 			}
-			/* If P4 and above fall through */
+			/* P4 and above */
+			fallthrough;
+		case X86_VENDOR_HYGON:
 		case X86_VENDOR_AMD:
 			def_to_bigsmp = 1;
 		}
@@ -181,9 +167,6 @@ void __init default_setup_apic_routing(void)
 
 	if (apic->setup_apic_routing)
 		apic->setup_apic_routing();
-
-	if (x86_platform.apic_post_init)
-		x86_platform.apic_post_init();
 }
 
 void __init generic_apic_probe(void)

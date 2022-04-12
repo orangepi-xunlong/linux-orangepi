@@ -1,22 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef _ASM_POWERPC_MODULE_H
 #define _ASM_POWERPC_MODULE_H
 #ifdef __KERNEL__
 
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
- */
-
 #include <linux/list.h>
 #include <asm/bug.h>
 #include <asm-generic/module.h>
-
-
-#ifdef CC_USING_MPROFILE_KERNEL
-#define MODULE_ARCH_VERMAGIC	"mprofile-kernel"
-#endif
 
 #ifndef __powerpc64__
 /*
@@ -40,19 +29,22 @@ struct mod_arch_specific {
 	unsigned int stubs_section;	/* Index of stubs section in module */
 	unsigned int toc_section;	/* What section is the TOC? */
 	bool toc_fixed;			/* Have we fixed up .TOC.? */
-#ifdef CONFIG_DYNAMIC_FTRACE
-	unsigned long toc;
-	unsigned long tramp;
-#endif
 
+	/* For module function descriptor dereference */
+	unsigned long start_opd;
+	unsigned long end_opd;
 #else /* powerpc64 */
 	/* Indices of PLT sections within module. */
 	unsigned int core_plt_section;
 	unsigned int init_plt_section;
+#endif /* powerpc64 */
+
 #ifdef CONFIG_DYNAMIC_FTRACE
 	unsigned long tramp;
+#ifdef CONFIG_DYNAMIC_FTRACE_WITH_REGS
+	unsigned long tramp_regs;
 #endif
-#endif /* powerpc64 */
+#endif
 
 	/* List of BUG addresses, source line numbers and filenames */
 	struct list_head bug_list;
@@ -80,12 +72,9 @@ struct mod_arch_specific {
 #    ifdef MODULE
 	asm(".section .ftrace.tramp,\"ax\",@nobits; .align 3; .previous");
 #    endif	/* MODULE */
-#endif
 
 int module_trampoline_target(struct module *mod, unsigned long trampoline,
 			     unsigned long *target);
-
-#ifdef CONFIG_DYNAMIC_FTRACE
 int module_finalize_ftrace(struct module *mod, const Elf_Shdr *sechdrs);
 #else
 static inline int module_finalize_ftrace(struct module *mod, const Elf_Shdr *sechdrs)
@@ -94,13 +83,5 @@ static inline int module_finalize_ftrace(struct module *mod, const Elf_Shdr *sec
 }
 #endif
 
-struct exception_table_entry;
-void sort_ex_table(struct exception_table_entry *start,
-		   struct exception_table_entry *finish);
-
-#if defined(CONFIG_MODVERSIONS) && defined(CONFIG_PPC64)
-#define ARCH_RELOCATES_KCRCTAB
-#define reloc_start PHYSICAL_START
-#endif
 #endif /* __KERNEL__ */
 #endif	/* _ASM_POWERPC_MODULE_H */

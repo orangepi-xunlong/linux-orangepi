@@ -396,7 +396,7 @@
 			   <earl@exis.net>.
 			  Updated the PCI interface to conform with the latest
 			   version. I hope nothing is broken...
-          		  Add TX done interrupt modification from suggestion
+			  Add TX done interrupt modification from suggestion
 			   by <Austin.Donnelly@cl.cam.ac.uk>.
 			  Fix is_anc_capable() bug reported by
 			   <Austin.Donnelly@cl.cam.ac.uk>.
@@ -443,6 +443,7 @@
     =========================================================================
 */
 
+#include <linux/compat.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
@@ -472,7 +473,7 @@
 #include <asm/dma.h>
 #include <asm/byteorder.h>
 #include <asm/unaligned.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #ifdef CONFIG_PPC_PMAC
 #include <asm/machdep.h>
 #endif /* CONFIG_PPC_PMAC */
@@ -902,7 +903,8 @@ static int     de4x5_close(struct net_device *dev);
 static struct  net_device_stats *de4x5_get_stats(struct net_device *dev);
 static void    de4x5_local_stats(struct net_device *dev, char *buf, int pkt_len);
 static void    set_multicast_list(struct net_device *dev);
-static int     de4x5_ioctl(struct net_device *dev, struct ifreq *rq, int cmd);
+static int     de4x5_siocdevprivate(struct net_device *dev, struct ifreq *rq,
+				    void __user *data, int cmd);
 
 /*
 ** Private functions
@@ -912,7 +914,7 @@ static int     de4x5_init(struct net_device *dev);
 static int     de4x5_sw_reset(struct net_device *dev);
 static int     de4x5_rx(struct net_device *dev);
 static int     de4x5_tx(struct net_device *dev);
-static void    de4x5_ast(struct net_device *dev);
+static void    de4x5_ast(struct timer_list *t);
 static int     de4x5_txur(struct net_device *dev);
 static int     de4x5_rx_ovfc(struct net_device *dev);
 
@@ -951,7 +953,7 @@ static void    reset_init_sia(struct net_device *dev, s32 sicr, s32 strr, s32 si
 static int     test_ans(struct net_device *dev, s32 irqs, s32 irq_mask, s32 msec);
 static int     test_tp(struct net_device *dev, s32 msec);
 static int     EISA_signature(char *name, struct device *device);
-static int     PCI_signature(char *name, struct de4x5_private *lp);
+static void    PCI_signature(char *name, struct de4x5_private *lp);
 static void    DevicePresent(struct net_device *dev, u_long iobase);
 static void    enet_addr_rst(u_long aprom_addr);
 static int     de4x5_bad_srom(struct de4x5_private *lp);
@@ -1015,7 +1017,7 @@ static int     compact_infoblock(struct net_device *dev, u_char count, u_char *p
 
 static int io=0x0;/* EDIT THIS LINE FOR YOUR CONFIGURATION IF NEEDED        */
 
-module_param(io, int, 0);
+module_param_hw(io, int, ioport, 0);
 module_param(de4x5_debug, int, 0);
 module_param(dec_only, int, 0);
 module_param(args, charp, 0);
@@ -1084,8 +1086,7 @@ static const struct net_device_ops de4x5_netdev_ops = {
     .ndo_start_xmit	= de4x5_queue_pkt,
     .ndo_get_stats	= de4x5_get_stats,
     .ndo_set_rx_mode	= set_multicast_list,
-    .ndo_do_ioctl	= de4x5_ioctl,
-    .ndo_change_mtu	= eth_change_mtu,
+    .ndo_siocdevprivate	= de4x5_siocdevprivate,
     .ndo_set_mac_address= eth_mac_addr,
     .ndo_validate_addr	= eth_validate_addr,
 };
@@ -1148,9 +1149,7 @@ de4x5_hw_init(struct net_device *dev, u_long iobase, struct device *gendev)
 	lp->timeout = -1;
 	lp->gendev = gendev;
 	spin_lock_init(&lp->lock);
-	init_timer(&lp->timer);
-	lp->timer.function = (void (*)(unsigned long))de4x5_ast;
-	lp->timer.data = (unsigned long)dev;
+	timer_setup(&lp->timer, de4x5_ast, 0);
 	de4x5_parse_params(dev);
 
 	/*
@@ -1502,7 +1501,7 @@ de4x5_queue_pkt(struct sk_buff *skb, struct net_device *dev)
 	    spin_lock_irqsave(&lp->lock, flags);
 	    netif_stop_queue(dev);
 	    load_packet(dev, skb->data, TD_IC | TD_LS | TD_FS | skb->len, skb);
- 	    lp->stats.tx_bytes += skb->len;
+	    lp->stats.tx_bytes += skb->len;
 	    outl(POLL_DEMAND, DE4X5_TPD);/* Start the TX */
 
 	    lp->tx_new = (lp->tx_new + 1) % lp->txRingSize;
@@ -1654,7 +1653,7 @@ de4x5_rx(struct net_device *dev)
 
 		    /* Update stats */
 		    lp->stats.rx_packets++;
- 		    lp->stats.rx_bytes += pkt_len;
+		    lp->stats.rx_bytes += pkt_len;
 		}
 	    }
 
@@ -1743,9 +1742,10 @@ de4x5_tx(struct net_device *dev)
 }
 
 static void
-de4x5_ast(struct net_device *dev)
+de4x5_ast(struct timer_list *t)
 {
-	struct de4x5_private *lp = netdev_priv(dev);
+	struct de4x5_private *lp = from_timer(lp, t, timer);
+	struct net_device *dev = dev_get_drvdata(lp->gendev);
 	int next_tick = DE4X5_AUTOSENSE_MS;
 	int dt;
 
@@ -2095,7 +2095,7 @@ static int de4x5_eisa_remove(struct device *device)
 	return 0;
 }
 
-static struct eisa_device_id de4x5_eisa_ids[] = {
+static const struct eisa_device_id de4x5_eisa_ids[] = {
         { "DEC4250", 0 },	/* 0 is the board name index... */
         { "" }
 };
@@ -2109,7 +2109,6 @@ static struct eisa_driver de4x5_eisa_driver = {
 		.remove  = de4x5_eisa_remove,
         }
 };
-MODULE_DEVICE_TABLE(eisa, de4x5_eisa_ids);
 #endif
 
 #ifdef CONFIG_PCI
@@ -2371,7 +2370,7 @@ autoconf_media(struct net_device *dev)
 	lp->media = INIT;
 	lp->tcount = 0;
 
-	de4x5_ast(dev);
+	de4x5_ast(&lp->timer);
 
 	return lp->media;
 }
@@ -3206,6 +3205,8 @@ srom_map_media(struct net_device *dev)
       case SROM_10BASETF:
 	if (!lp->params.fdx) return -1;
 	lp->fdx = true;
+	fallthrough;
+
       case SROM_10BASET:
 	if (lp->params.fdx && !lp->fdx) return -1;
 	if ((lp->chipset == DC21140) || ((lp->chipset & ~0x00ff) == DC2114x)) {
@@ -3226,6 +3227,8 @@ srom_map_media(struct net_device *dev)
       case SROM_100BASETF:
         if (!lp->params.fdx) return -1;
 	lp->fdx = true;
+	fallthrough;
+
       case SROM_100BASET:
 	if (lp->params.fdx && !lp->fdx) return -1;
 	lp->media = _100Mb;
@@ -3238,6 +3241,8 @@ srom_map_media(struct net_device *dev)
       case SROM_100BASEFF:
 	if (!lp->params.fdx) return -1;
 	lp->fdx = true;
+	fallthrough;
+
       case SROM_100BASEF:
 	if (lp->params.fdx && !lp->fdx) return -1;
 	lp->media = _100Mb;
@@ -3625,10 +3630,10 @@ de4x5_alloc_rx_buff(struct net_device *dev, int index, int len)
     skb_reserve(p, 2);	                               /* Align */
     if (index < lp->rx_old) {                          /* Wrapped buffer */
 	short tlen = (lp->rxRingSize - lp->rx_old) * RX_BUFF_SZ;
-	memcpy(skb_put(p,tlen),lp->rx_bufs + lp->rx_old * RX_BUFF_SZ,tlen);
-	memcpy(skb_put(p,len-tlen),lp->rx_bufs,len-tlen);
+	skb_put_data(p, lp->rx_bufs + lp->rx_old * RX_BUFF_SZ, tlen);
+	skb_put_data(p, lp->rx_bufs, len - tlen);
     } else {                                           /* Linear buffer */
-	memcpy(skb_put(p,len),lp->rx_bufs + lp->rx_old * RX_BUFF_SZ,len);
+	skb_put_data(p, lp->rx_bufs + lp->rx_old * RX_BUFF_SZ, len);
     }
 
     return p;
@@ -3899,14 +3904,14 @@ EISA_signature(char *name, struct device *device)
 /*
 ** Look for a particular board name in the PCI configuration space
 */
-static int
+static void
 PCI_signature(char *name, struct de4x5_private *lp)
 {
-    int i, status = 0, siglen = ARRAY_SIZE(de4x5_signatures);
+    int i, siglen = ARRAY_SIZE(de4x5_signatures);
 
     if (lp->chipset == DC21040) {
 	strcpy(name, "DE434/5");
-	return status;
+	return;
     } else {                           /* Search for a DEC name in the SROM */
 	int tmp = *((char *)&lp->srom + 19) * 3;
 	strncpy(name, (char *)&lp->srom + 26 + tmp, 8);
@@ -3932,8 +3937,6 @@ PCI_signature(char *name, struct de4x5_private *lp)
     } else if ((lp->chipset & ~0x00ff) == DC2114x) {
 	lp->useSROM = true;
     }
-
-    return status;
 }
 
 /*
@@ -4028,6 +4031,7 @@ get_hw_addr(struct net_device *dev)
     int broken, i, k, tmp, status = 0;
     u_short j,chksum;
     struct de4x5_private *lp = netdev_priv(dev);
+    u8 addr[ETH_ALEN];
 
     broken = de4x5_bad_srom(lp);
 
@@ -4039,27 +4043,29 @@ get_hw_addr(struct net_device *dev)
 	    if (lp->chipset == DC21040) {
 		while ((tmp = inl(DE4X5_APROM)) < 0);
 		k += (u_char) tmp;
-		dev->dev_addr[i++] = (u_char) tmp;
+		addr[i++] = (u_char) tmp;
 		while ((tmp = inl(DE4X5_APROM)) < 0);
 		k += (u_short) (tmp << 8);
-		dev->dev_addr[i++] = (u_char) tmp;
+		addr[i++] = (u_char) tmp;
 	    } else if (!broken) {
-		dev->dev_addr[i] = (u_char) lp->srom.ieee_addr[i]; i++;
-		dev->dev_addr[i] = (u_char) lp->srom.ieee_addr[i]; i++;
+		addr[i] = (u_char) lp->srom.ieee_addr[i]; i++;
+		addr[i] = (u_char) lp->srom.ieee_addr[i]; i++;
 	    } else if ((broken == SMC) || (broken == ACCTON)) {
-		dev->dev_addr[i] = *((u_char *)&lp->srom + i); i++;
-		dev->dev_addr[i] = *((u_char *)&lp->srom + i); i++;
+		addr[i] = *((u_char *)&lp->srom + i); i++;
+		addr[i] = *((u_char *)&lp->srom + i); i++;
 	    }
 	} else {
 	    k += (u_char) (tmp = inb(EISA_APROM));
-	    dev->dev_addr[i++] = (u_char) tmp;
+	    addr[i++] = (u_char) tmp;
 	    k += (u_short) ((tmp = inb(EISA_APROM)) << 8);
-	    dev->dev_addr[i++] = (u_char) tmp;
+	    addr[i++] = (u_char) tmp;
 	}
 
 	if (k > 0xffff) k-=0xffff;
     }
     if (k == 0xffff) k=0;
+
+    eth_hw_addr_set(dev, addr);
 
     if (lp->bus == PCI) {
 	if (lp->chipset == DC21040) {
@@ -4092,8 +4098,9 @@ get_hw_addr(struct net_device *dev)
 		    int x = dev->dev_addr[i];
 		    x = ((x & 0xf) << 4) + ((x & 0xf0) >> 4);
 		    x = ((x & 0x33) << 2) + ((x & 0xcc) >> 2);
-		    dev->dev_addr[i] = ((x & 0x55) << 1) + ((x & 0xaa) >> 1);
+		    addr[i] = ((x & 0x55) << 1) + ((x & 0xaa) >> 1);
 	    }
+	    eth_hw_addr_set(dev, addr);
     }
 #endif /* CONFIG_PPC_PMAC */
 
@@ -4155,12 +4162,9 @@ test_bad_enet(struct net_device *dev, int status)
     if ((tmp == 0) || (tmp == 0x5fa)) {
 	if ((lp->chipset == last.chipset) &&
 	    (lp->bus_num == last.bus) && (lp->bus_num > 0)) {
-	    for (i=0; i<ETH_ALEN; i++) dev->dev_addr[i] = last.addr[i];
-	    for (i=ETH_ALEN-1; i>2; --i) {
-		dev->dev_addr[i] += 1;
-		if (dev->dev_addr[i] != 0) break;
-	    }
-	    for (i=0; i<ETH_ALEN; i++) last.addr[i] = dev->dev_addr[i];
+	    eth_addr_inc(last.addr);
+	    eth_hw_addr_set(dev, last.addr);
+
 	    if (!an_exception(lp)) {
 		dev->irq = last.irq;
 	    }
@@ -4705,6 +4709,10 @@ type3_infoblock(struct net_device *dev, u_char count, u_char *p)
         lp->ibn = 3;
         lp->active = *p++;
 	if (MOTO_SROM_BUG) lp->active = 0;
+	/* if (MOTO_SROM_BUG) statement indicates lp->active could
+	 * be 8 (i.e. the size of array lp->phy) */
+	if (WARN_ON(lp->active >= ARRAY_SIZE(lp->phy)))
+		return -EINVAL;
 	lp->phy[lp->active].gep = (*p ? p : NULL); p += (2 * (*p) + 1);
 	lp->phy[lp->active].rst = (*p ? p : NULL); p += (2 * (*p) + 1);
 	lp->phy[lp->active].mc  = get_unaligned_le16(p); p += 2;
@@ -4924,11 +4932,11 @@ mii_get_oui(u_char phyaddr, u_long ioaddr)
 	u_char breg[2];
     } a;
     int i, r2, r3, ret=0;*/
-    int r2, r3;
+    int r2;
 
     /* Read r2 and r3 */
     r2 = mii_rd(MII_ID0, phyaddr, ioaddr);
-    r3 = mii_rd(MII_ID1, phyaddr, ioaddr);
+    mii_rd(MII_ID1, phyaddr, ioaddr);
                                                 /* SEEQ and Cypress way * /
     / * Shuffle r2 and r3 * /
     a.reg=0;
@@ -4996,19 +5004,23 @@ mii_get_phy(struct net_device *dev)
 	}
 	if ((j == limit) && (i < DE4X5_MAX_MII)) {
 	    for (k=0; k < DE4X5_MAX_PHY && lp->phy[k].id; k++);
-	    lp->phy[k].addr = i;
-	    lp->phy[k].id = id;
-	    lp->phy[k].spd.reg = GENERIC_REG;      /* ANLPA register         */
-	    lp->phy[k].spd.mask = GENERIC_MASK;    /* 100Mb/s technologies   */
-	    lp->phy[k].spd.value = GENERIC_VALUE;  /* TX & T4, H/F Duplex    */
-	    lp->mii_cnt++;
-	    lp->active++;
-	    printk("%s: Using generic MII device control. If the board doesn't operate,\nplease mail the following dump to the author:\n", dev->name);
-	    j = de4x5_debug;
-	    de4x5_debug |= DEBUG_MII;
-	    de4x5_dbg_mii(dev, k);
-	    de4x5_debug = j;
-	    printk("\n");
+	    if (k < DE4X5_MAX_PHY) {
+		lp->phy[k].addr = i;
+		lp->phy[k].id = id;
+		lp->phy[k].spd.reg = GENERIC_REG;      /* ANLPA register         */
+		lp->phy[k].spd.mask = GENERIC_MASK;    /* 100Mb/s technologies   */
+		lp->phy[k].spd.value = GENERIC_VALUE;  /* TX & T4, H/F Duplex    */
+		lp->mii_cnt++;
+		lp->active++;
+		printk("%s: Using generic MII device control. If the board doesn't operate,\nplease mail the following dump to the author:\n", dev->name);
+		j = de4x5_debug;
+		de4x5_debug |= DEBUG_MII;
+		de4x5_dbg_mii(dev, k);
+		de4x5_debug = j;
+		printk("\n");
+	    } else {
+		goto purgatory;
+	    }
 	}
     }
   purgatory:
@@ -5356,7 +5368,7 @@ de4x5_dbg_rx(struct sk_buff *skb, int len)
 ** this function is only used for my testing.
 */
 static int
-de4x5_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
+de4x5_siocdevprivate(struct net_device *dev, struct ifreq *rq, void __user *data, int cmd)
 {
     struct de4x5_private *lp = netdev_priv(dev);
     struct de4x5_ioctl *ioc = (struct de4x5_ioctl *) &rq->ifr_ifru;
@@ -5369,6 +5381,9 @@ de4x5_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	u32 lval[36];
     } tmp;
     u_long flags = 0;
+
+    if (cmd != SIOCDEVPRIVATE || in_compat_syscall())
+	return -EOPNOTSUPP;
 
     switch(ioc->cmd) {
     case DE4X5_GET_HWADDR:           /* Get the hardware address */
@@ -5385,9 +5400,7 @@ de4x5_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	if (netif_queue_stopped(dev))
 		return -EBUSY;
 	netif_stop_queue(dev);
-	for (i=0; i<ETH_ALEN; i++) {
-	    dev->dev_addr[i] = tmp.addr[i];
-	}
+	eth_hw_addr_set(dev, tmp.addr);
 	build_setup_frame(dev, PHYS_ADDR_ONLY);
 	/* Set up the descriptor and give ownership to the card */
 	load_packet(dev, lp->setup_frame, TD_IC | PERFECT_F | TD_SET |

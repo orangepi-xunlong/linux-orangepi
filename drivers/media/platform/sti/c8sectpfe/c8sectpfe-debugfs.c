@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * c8sectpfe-debugfs.c - C8SECTPFE STi DVB driver
  *
@@ -5,14 +6,6 @@
  *
  * Author: Peter Griffin <peter.griffin@linaro.org>
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2  of
- * the License as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 #include <linux/debugfs.h>
 #include <linux/device.h>
@@ -232,36 +225,16 @@ static const struct debugfs_reg32 fei_sys_regs[] = {
 
 void c8sectpfe_debugfs_init(struct c8sectpfei *fei)
 {
-	struct dentry		*root;
-	struct dentry		*file;
-
-	root = debugfs_create_dir("c8sectpfe", NULL);
-	if (!root)
-		goto err;
-
-	fei->root = root;
-
 	fei->regset =  devm_kzalloc(fei->dev, sizeof(*fei->regset), GFP_KERNEL);
 	if (!fei->regset)
-		goto err;
+		return;
 
 	fei->regset->regs = fei_sys_regs;
 	fei->regset->nregs = ARRAY_SIZE(fei_sys_regs);
 	fei->regset->base = fei->io;
 
-	file = debugfs_create_regset32("registers", S_IRUGO, root,
-				fei->regset);
-	if (!file) {
-		dev_err(fei->dev,
-			"%s not able to create 'registers' debugfs\n"
-			, __func__);
-		goto err;
-	}
-
-	return;
-
-err:
-	debugfs_remove_recursive(root);
+	fei->root = debugfs_create_dir("c8sectpfe", NULL);
+	debugfs_create_regset32("registers", S_IRUGO, fei->root, fei->regset);
 }
 
 void c8sectpfe_debugfs_exit(struct c8sectpfei *fei)

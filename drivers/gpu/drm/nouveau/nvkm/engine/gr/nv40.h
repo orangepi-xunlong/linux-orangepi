@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 #ifndef __NV40_GR_H__
 #define __NV40_GR_H__
 #define nv40_gr(p) container_of((p), struct nv40_gr, base)
@@ -9,13 +10,14 @@ struct nv40_gr {
 	struct list_head chan;
 };
 
-int nv40_gr_new_(const struct nvkm_gr_func *, struct nvkm_device *, int index,
+int nv40_gr_new_(const struct nvkm_gr_func *, struct nvkm_device *, enum nvkm_subdev_type, int,
 		 struct nvkm_gr **);
 int nv40_gr_init(struct nvkm_gr *);
 void nv40_gr_intr(struct nvkm_gr *);
 u64 nv40_gr_units(struct nvkm_gr *);
 
 #define nv40_gr_chan(p) container_of((p), struct nv40_gr_chan, object)
+#include <core/object.h>
 
 struct nv40_gr_chan {
 	struct nvkm_object object;

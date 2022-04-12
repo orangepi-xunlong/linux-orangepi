@@ -1,11 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	IPV4 GSO/GRO offload support
  *	Linux INET implementation
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License
- *	as published by the Free Software Foundation; either version
- *	2 of the License, or (at your option) any later version.
  *
  *	GRE GSO support
  */
@@ -19,12 +15,12 @@ static struct sk_buff *gre_gso_segment(struct sk_buff *skb,
 				       netdev_features_t features)
 {
 	int tnl_hlen = skb_inner_mac_header(skb) - skb_transport_header(skb);
+	bool need_csum, offload_csum, gso_partial, need_ipsec;
 	struct sk_buff *segs = ERR_PTR(-EINVAL);
 	u16 mac_offset = skb->mac_header;
 	__be16 protocol = skb->protocol;
 	u16 mac_len = skb->mac_len;
 	int gre_offset, outer_hlen;
-	bool need_csum, ufo, gso_partial;
 
 	if (!skb->encapsulation)
 		goto out;
@@ -47,19 +43,14 @@ static struct sk_buff *gre_gso_segment(struct sk_buff *skb,
 	need_csum = !!(skb_shinfo(skb)->gso_type & SKB_GSO_GRE_CSUM);
 	skb->encap_hdr_csum = need_csum;
 
-	ufo = !!(skb_shinfo(skb)->gso_type & SKB_GSO_UDP);
-
 	features &= skb->dev->hw_enc_features;
+	if (need_csum)
+		features &= ~NETIF_F_SCTP_CRC;
 
-	/* The only checksum offload we care about from here on out is the
-	 * outer one so strip the existing checksum feature flags based
-	 * on the fact that we will be computing our checksum in software.
-	 */
-	if (ufo) {
-		features &= ~NETIF_F_CSUM_MASK;
-		if (!need_csum)
-			features |= NETIF_F_HW_CSUM;
-	}
+	need_ipsec = skb_dst(skb) && dst_xfrm(skb_dst(skb));
+	/* Try to offload checksum if possible */
+	offload_csum = !!(need_csum && !need_ipsec &&
+			  (skb->dev->features & NETIF_F_HW_CSUM));
 
 	/* segment inner packet. */
 	segs = skb_mac_gso_segment(skb, features);
@@ -114,16 +105,22 @@ static struct sk_buff *gre_gso_segment(struct sk_buff *skb,
 		}
 
 		*(pcsum + 1) = 0;
-		*pcsum = gso_make_checksum(skb, 0);
+		if (skb->encapsulation || !offload_csum) {
+			*pcsum = gso_make_checksum(skb, 0);
+		} else {
+			skb->ip_summed = CHECKSUM_PARTIAL;
+			skb->csum_start = skb_transport_header(skb) - skb->head;
+			skb->csum_offset = sizeof(*greh);
+		}
 	} while ((skb = skb->next));
 out:
 	return segs;
 }
 
-static struct sk_buff **gre_gro_receive(struct sk_buff **head,
-					struct sk_buff *skb)
+static struct sk_buff *gre_gro_receive(struct list_head *head,
+				       struct sk_buff *skb)
 {
-	struct sk_buff **pp = NULL;
+	struct sk_buff *pp = NULL;
 	struct sk_buff *p;
 	const struct gre_base_hdr *greh;
 	unsigned int hlen, grehlen;
@@ -190,11 +187,11 @@ static struct sk_buff **gre_gro_receive(struct sk_buff **head,
 		if (skb_gro_checksum_simple_validate(skb))
 			goto out_unlock;
 
-		skb_gro_checksum_try_convert(skb, IPPROTO_GRE, 0,
+		skb_gro_checksum_try_convert(skb, IPPROTO_GRE,
 					     null_compute_pseudo);
 	}
 
-	for (p = *head; p; p = p->next) {
+	list_for_each_entry(p, head, list) {
 		const struct gre_base_hdr *greh2;
 
 		if (!NAPI_GRO_CB(p)->same_flow)
@@ -235,7 +232,7 @@ static struct sk_buff **gre_gro_receive(struct sk_buff **head,
 out_unlock:
 	rcu_read_unlock();
 out:
-	NAPI_GRO_CB(skb)->flush |= flush;
+	skb_gro_flush_final(skb, pp, flush);
 
 	return pp;
 }

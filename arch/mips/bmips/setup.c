@@ -9,12 +9,12 @@
 
 #include <linux/init.h>
 #include <linux/bitops.h>
-#include <linux/bootmem.h>
-#include <linux/clk-provider.h>
+#include <linux/memblock.h>
 #include <linux/ioport.h>
 #include <linux/kernel.h>
 #include <linux/io.h>
 #include <linux/of.h>
+#include <linux/of_clk.h>
 #include <linux/of_fdt.h>
 #include <linux/of_platform.h>
 #include <linux/libfdt.h>
@@ -129,10 +129,6 @@ void __init prom_init(void)
 	register_bmips_smp_ops();
 }
 
-void __init prom_free_prom_memory(void)
-{
-}
-
 const char *get_system_type(void)
 {
 	return "Generic BMIPS kernel";
@@ -153,8 +149,6 @@ void __init plat_time_init(void)
 	mips_hpt_frequency = freq;
 }
 
-extern const char __appended_dtb;
-
 void __init plat_mem_setup(void)
 {
 	void *dtb;
@@ -164,19 +158,13 @@ void __init plat_mem_setup(void)
 	ioport_resource.start = 0;
 	ioport_resource.end = ~0;
 
-#ifdef CONFIG_MIPS_ELF_APPENDED_DTB
-	if (!fdt_check_header(&__appended_dtb))
-		dtb = (void *)&__appended_dtb;
-	else
-#endif
-	/* intended to somewhat resemble ARM; see Documentation/arm/Booting */
+	/* intended to somewhat resemble ARM; see Documentation/arm/booting.rst */
 	if (fw_arg0 == 0 && fw_arg1 == 0xffffffff)
 		dtb = phys_to_virt(fw_arg2);
-	else if (fw_passed_dtb) /* UHI interface */
-		dtb = (void *)fw_passed_dtb;
-	else if (__dtb_start != __dtb_end)
-		dtb = (void *)__dtb_start;
 	else
+		dtb = get_fdt();
+
+	if (!dtb)
 		panic("no dtb found");
 
 	__dt_setup_arch(dtb);
@@ -202,17 +190,10 @@ void __init device_tree_init(void)
 	of_node_put(np);
 }
 
-int __init plat_of_setup(void)
-{
-	return __dt_register_buses("simple-bus", NULL);
-}
-
-arch_initcall(plat_of_setup);
-
 static int __init plat_dev_init(void)
 {
 	of_clk_init(NULL);
 	return 0;
 }
 
-device_initcall(plat_dev_init);
+arch_initcall(plat_dev_init);

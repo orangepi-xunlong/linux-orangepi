@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  sst.h - Intel SST Driver for audio engine
  *
@@ -7,15 +8,6 @@
  *		Dharageswari R <dharageswari.r@intel.com>
  *		KP Jeeja <jeeja.kp@intel.com>
  *  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; version 2 of the License.
- *
- *  This program is distributed in the hope that it will be useful, but
- *  WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  General Public License for more details.
  *
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *
@@ -42,6 +34,13 @@
 #define MRFLD_FW_FEATURE_BASE_OFFSET 0x4
 #define MRFLD_FW_BSS_RESET_BIT 0
 
+/* SST Shim register map */
+#define SST_CSR			0x00
+#define SST_ISRX		0x18
+#define SST_IMRX		0x28
+#define SST_IPCX		0x38 /* IPC IA -> SST */
+#define SST_IPCD		0x40 /* IPC SST -> IA */
+
 extern const struct dev_pm_ops intel_sst_pm;
 enum sst_states {
 	SST_FW_LOADING = 1,
@@ -65,9 +64,7 @@ enum sst_stream_states {
 	STREAM_UN_INIT	= 0,	/* Freed/Not used stream */
 	STREAM_RUNNING	= 1,	/* Running */
 	STREAM_PAUSED	= 2,	/* Paused stream */
-	STREAM_DECODE	= 3,	/* stream is in decoding only state */
-	STREAM_INIT	= 4,	/* stream init, waiting for data */
-	STREAM_RESET	= 5,	/* force reset on recovery */
+	STREAM_INIT	= 3,	/* stream init, waiting for data */
 };
 
 enum sst_ram_type {
@@ -181,22 +178,22 @@ struct sst_block {
  *
  * @status : stream current state
  * @prev : stream prev state
- * @ops : stream operation pb/cp/drm...
- * @bufs: stream buffer list
+ * @resume_status : stream current state to restore on resume
+ * @resume_prev : stream prev state to restore on resume
  * @lock : stream mutex for protecting state
+ * @alloc_param : parameters used for stream (re-)allocation
  * @pcm_substream : PCM substream
  * @period_elapsed : PCM period elapsed callback
  * @sfreq : stream sampling freq
- * @str_type : stream type
  * @cumm_bytes : cummulative bytes decoded
- * @str_type : stream type
- * @src : stream source
  */
 struct stream_info {
 	unsigned int		status;
 	unsigned int		prev;
-	unsigned int		ops;
+	unsigned int		resume_status;
+	unsigned int		resume_prev;
 	struct mutex		lock;
+	struct snd_sst_alloc_mrfld alloc_param;
 
 	void			*pcm_substream;
 	void (*period_elapsed)(void *pcm_substream);
@@ -212,7 +209,6 @@ struct stream_info {
 
 	unsigned int		num_ch;
 	unsigned int		pipe_id;
-	unsigned int		str_id;
 	unsigned int		task_id;
 };
 
@@ -317,31 +313,11 @@ struct sst_ipc_reg {
 	int ipcd;
 };
 
-struct sst_shim_regs64 {
-	u64 csr;
-	u64 pisr;
-	u64 pimr;
-	u64 isrx;
-	u64 isrd;
-	u64 imrx;
-	u64 imrd;
-	u64 ipcx;
-	u64 ipcd;
-	u64 isrsc;
-	u64 isrlpesc;
-	u64 imrsc;
-	u64 imrlpesc;
-	u64 ipcsc;
-	u64 ipclpesc;
-	u64 clkctl;
-	u64 csr2;
-};
-
 struct sst_fw_save {
-	void *iram;
-	void *dram;
-	void *sram;
-	void *ddr;
+	void *iram;	/* allocated via kvmalloc() */
+	void *dram;	/* allocated via kvmalloc() */
+	void *sram;	/* allocated via kvmalloc() */
+	void *ddr;	/* allocated via kvmalloc() */
 };
 
 /**
@@ -356,7 +332,6 @@ struct sst_fw_save {
  * @dram : SST DRAM pointer
  * @pdata : SST info passed as a part of pci platform data
  * @shim_phy_add : SST shim phy addr
- * @shim_regs64: Struct to save shim registers
  * @ipc_dispatch_list : ipc messages dispatched
  * @rx_list : to copy the process_reply/process_msg from DSP
  * @ipc_post_msg_wq : wq to post IPC messages context
@@ -398,7 +373,6 @@ struct intel_sst_drv {
 	unsigned int		ddr_end;
 	unsigned int		ddr_base;
 	unsigned int		mailbox_recv_offset;
-	struct sst_shim_regs64	*shim_regs64;
 	struct list_head        block_list;
 	struct list_head	ipc_dispatch_list;
 	struct sst_platform_info *pdata;
@@ -436,6 +410,7 @@ struct intel_sst_drv {
 	 */
 	char firmware_name[FW_NAME_SIZE];
 
+	struct snd_sst_fw_version fw_version;
 	struct sst_fw_save	*fw_save;
 };
 
@@ -459,34 +434,35 @@ struct intel_sst_ops {
 	void (*post_download)(struct intel_sst_drv *sst);
 };
 
-int sst_pause_stream(struct intel_sst_drv *sst_drv_ctx, int id);
-int sst_resume_stream(struct intel_sst_drv *sst_drv_ctx, int id);
-int sst_drop_stream(struct intel_sst_drv *sst_drv_ctx, int id);
-int sst_free_stream(struct intel_sst_drv *sst_drv_ctx, int id);
+int sst_realloc_stream(struct intel_sst_drv *sst_drv_ctx, int str_id);
+int sst_pause_stream(struct intel_sst_drv *sst_drv_ctx, int str_id);
+int sst_resume_stream(struct intel_sst_drv *sst_drv_ctx, int str_id);
+int sst_drop_stream(struct intel_sst_drv *sst_drv_ctx, int str_id);
+int sst_free_stream(struct intel_sst_drv *sst_drv_ctx, int str_id);
 int sst_start_stream(struct intel_sst_drv *sst_drv_ctx, int str_id);
-int sst_send_byte_stream_mrfld(struct intel_sst_drv *ctx,
-			struct snd_sst_bytes_v2 *sbytes);
+int sst_send_byte_stream_mrfld(struct intel_sst_drv *sst_drv_ctx,
+			struct snd_sst_bytes_v2 *bytes);
 int sst_set_stream_param(int str_id, struct snd_sst_params *str_param);
 int sst_set_metadata(int str_id, char *params);
-int sst_get_stream(struct intel_sst_drv *sst_drv_ctx,
+int sst_get_stream(struct intel_sst_drv *ctx,
 		struct snd_sst_params *str_param);
 int sst_get_stream_allocated(struct intel_sst_drv *ctx,
 		struct snd_sst_params *str_param,
 		struct snd_sst_lib_download **lib_dnld);
 int sst_drain_stream(struct intel_sst_drv *sst_drv_ctx,
 		int str_id, bool partial_drain);
-int sst_post_message_mrfld(struct intel_sst_drv *ctx,
-		struct ipc_post *msg, bool sync);
-void sst_process_reply_mrfld(struct intel_sst_drv *ctx, struct ipc_post *msg);
-int sst_start_mrfld(struct intel_sst_drv *ctx);
-int intel_sst_reset_dsp_mrfld(struct intel_sst_drv *ctx);
-void intel_sst_clear_intr_mrfld(struct intel_sst_drv *ctx);
+int sst_post_message_mrfld(struct intel_sst_drv *sst_drv_ctx,
+		struct ipc_post *ipc_msg, bool sync);
+void sst_process_reply_mrfld(struct intel_sst_drv *sst_drv_ctx, struct ipc_post *msg);
+int sst_start_mrfld(struct intel_sst_drv *sst_drv_ctx);
+int intel_sst_reset_dsp_mrfld(struct intel_sst_drv *sst_drv_ctx);
+void intel_sst_clear_intr_mrfld(struct intel_sst_drv *sst_drv_ctx);
 
-int sst_load_fw(struct intel_sst_drv *ctx);
+int sst_load_fw(struct intel_sst_drv *sst_drv_ctx);
 int sst_load_library(struct snd_sst_lib_download *lib, u8 ops);
 void sst_post_download_mrfld(struct intel_sst_drv *ctx);
 int sst_get_block_stream(struct intel_sst_drv *sst_drv_ctx);
-void sst_memcpy_free_resources(struct intel_sst_drv *ctx);
+void sst_memcpy_free_resources(struct intel_sst_drv *sst_drv_ctx);
 
 int sst_wait_interruptible(struct intel_sst_drv *sst_drv_ctx,
 				struct sst_block *block);
@@ -521,9 +497,7 @@ int sst_prepare_and_post_msg(struct intel_sst_drv *sst,
 		bool large, bool fill_dsp, bool sync, bool response);
 
 void sst_process_pending_msg(struct work_struct *work);
-int sst_assign_pvt_id(struct intel_sst_drv *sst_drv_ctx);
-void sst_init_stream(struct stream_info *stream,
-		int codec, int sst_id, int ops, u8 slot);
+int sst_assign_pvt_id(struct intel_sst_drv *drv);
 int sst_validate_strid(struct intel_sst_drv *sst_drv_ctx, int str_id);
 struct stream_info *get_stream_info(struct intel_sst_drv *sst_drv_ctx,
 		int str_id);

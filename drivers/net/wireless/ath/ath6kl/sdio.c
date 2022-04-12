@@ -75,6 +75,8 @@ struct ath6kl_sdio {
 #define CMD53_ARG_FIXED_ADDRESS 0
 #define CMD53_ARG_INCR_ADDRESS  1
 
+static int ath6kl_sdio_config(struct ath6kl *ar);
+
 static inline struct ath6kl_sdio *ath6kl_sdio_priv(struct ath6kl *ar)
 {
 	return ar->hif_priv;
@@ -526,8 +528,15 @@ static int ath6kl_sdio_power_on(struct ath6kl *ar)
 	 */
 	msleep(10);
 
+	ret = ath6kl_sdio_config(ar);
+	if (ret) {
+		ath6kl_err("Failed to config sdio: %d\n", ret);
+		goto out;
+	}
+
 	ar_sdio->is_disabled = false;
 
+out:
 	return ret;
 }
 
@@ -703,8 +712,10 @@ static void ath6kl_sdio_cleanup_scatter(struct ath6kl *ar)
 		 * ath6kl_hif_rw_comp_handler() with status -ECANCELED so
 		 * that the packet is properly freed?
 		 */
-		if (s_req->busrequest)
+		if (s_req->busrequest) {
+			s_req->busrequest->scat_req = NULL;
 			ath6kl_sdio_free_bus_req(ar_sdio, s_req->busrequest);
+		}
 		kfree(s_req->virt_dma_buf);
 		kfree(s_req->sgentries);
 		kfree(s_req);
@@ -712,6 +723,8 @@ static void ath6kl_sdio_cleanup_scatter(struct ath6kl *ar)
 		spin_lock_bh(&ar_sdio->scat_lock);
 	}
 	spin_unlock_bh(&ar_sdio->scat_lock);
+
+	ar_sdio->scatter_enabled = false;
 }
 
 /* setup of HIF scatter resources */
@@ -786,8 +799,7 @@ static int ath6kl_sdio_config(struct ath6kl *ar)
 
 	sdio_claim_host(func);
 
-	if ((ar_sdio->id->device & MANUFACTURER_ID_ATH6KL_BASE_MASK) >=
-	    MANUFACTURER_ID_AR6003_BASE) {
+	if (ar_sdio->id->device >= SDIO_DEVICE_ID_ATHEROS_AR6003_00) {
 		/* enable 4-bit ASYNC interrupt on AR6003 or later */
 		ret = ath6kl_sdio_func0_cmd52_wr_byte(func->card,
 						CCCR_SDIO_IRQ_MODE_REG,
@@ -1396,12 +1408,13 @@ static void ath6kl_sdio_remove(struct sdio_func *func)
 }
 
 static const struct sdio_device_id ath6kl_sdio_devices[] = {
-	{SDIO_DEVICE(MANUFACTURER_CODE, (MANUFACTURER_ID_AR6003_BASE | 0x0))},
-	{SDIO_DEVICE(MANUFACTURER_CODE, (MANUFACTURER_ID_AR6003_BASE | 0x1))},
-	{SDIO_DEVICE(MANUFACTURER_CODE, (MANUFACTURER_ID_AR6004_BASE | 0x0))},
-	{SDIO_DEVICE(MANUFACTURER_CODE, (MANUFACTURER_ID_AR6004_BASE | 0x1))},
-	{SDIO_DEVICE(MANUFACTURER_CODE, (MANUFACTURER_ID_AR6004_BASE | 0x2))},
-	{SDIO_DEVICE(MANUFACTURER_CODE, (MANUFACTURER_ID_AR6004_BASE | 0x18))},
+	{SDIO_DEVICE(SDIO_VENDOR_ID_ATHEROS, SDIO_DEVICE_ID_ATHEROS_AR6003_00)},
+	{SDIO_DEVICE(SDIO_VENDOR_ID_ATHEROS, SDIO_DEVICE_ID_ATHEROS_AR6003_01)},
+	{SDIO_DEVICE(SDIO_VENDOR_ID_ATHEROS, SDIO_DEVICE_ID_ATHEROS_AR6004_00)},
+	{SDIO_DEVICE(SDIO_VENDOR_ID_ATHEROS, SDIO_DEVICE_ID_ATHEROS_AR6004_01)},
+	{SDIO_DEVICE(SDIO_VENDOR_ID_ATHEROS, SDIO_DEVICE_ID_ATHEROS_AR6004_02)},
+	{SDIO_DEVICE(SDIO_VENDOR_ID_ATHEROS, SDIO_DEVICE_ID_ATHEROS_AR6004_18)},
+	{SDIO_DEVICE(SDIO_VENDOR_ID_ATHEROS, SDIO_DEVICE_ID_ATHEROS_AR6004_19)},
 	{},
 };
 

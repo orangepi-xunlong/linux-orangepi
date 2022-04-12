@@ -37,7 +37,7 @@
 
 struct fman_mac *tgec_config(struct fman_mac_params *params);
 int tgec_set_promiscuous(struct fman_mac *tgec, bool new_val);
-int tgec_modify_mac_address(struct fman_mac *tgec, enet_addr_t *enet_addr);
+int tgec_modify_mac_address(struct fman_mac *tgec, const enet_addr_t *enet_addr);
 int tgec_cfg_max_frame_len(struct fman_mac *tgec, u16 new_val);
 int tgec_enable(struct fman_mac *tgec, enum comm_mode mode);
 int tgec_disable(struct fman_mac *tgec, enum comm_mode mode);
@@ -51,5 +51,7 @@ int tgec_set_exception(struct fman_mac *tgec,
 int tgec_add_hash_mac_address(struct fman_mac *tgec, enet_addr_t *eth_addr);
 int tgec_del_hash_mac_address(struct fman_mac *tgec, enet_addr_t *eth_addr);
 int tgec_get_version(struct fman_mac *tgec, u32 *mac_version);
+int tgec_set_allmulti(struct fman_mac *tgec, bool enable);
+int tgec_set_tstamp(struct fman_mac *tgec, bool enable);
 
 #endif /* __TGEC_H */

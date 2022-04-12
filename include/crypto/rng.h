@@ -1,14 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * RNG: Random Number Generator  algorithms under the crypto API
  *
  * Copyright (c) 2008 Neil Horman <nhorman@tuxdriver.com>
  * Copyright (c) 2015 Herbert Xu <herbert@gondor.apana.org.au>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
- *
  */
 
 #ifndef _CRYPTO_RNG_H
@@ -116,6 +111,8 @@ static inline struct rng_alg *crypto_rng_alg(struct crypto_rng *tfm)
 /**
  * crypto_free_rng() - zeroize and free RNG handle
  * @tfm: cipher handle to be freed
+ *
+ * If @tfm is a NULL or error pointer, this function does nothing.
  */
 static inline void crypto_free_rng(struct crypto_rng *tfm)
 {
@@ -140,7 +137,13 @@ static inline int crypto_rng_generate(struct crypto_rng *tfm,
 				      const u8 *src, unsigned int slen,
 				      u8 *dst, unsigned int dlen)
 {
-	return crypto_rng_alg(tfm)->generate(tfm, src, slen, dst, dlen);
+	struct crypto_alg *alg = tfm->base.__crt_alg;
+	int ret;
+
+	crypto_stats_get(alg);
+	ret = crypto_rng_alg(tfm)->generate(tfm, src, slen, dst, dlen);
+	crypto_stats_rng_generate(alg, dlen, ret);
+	return ret;
 }
 
 /**

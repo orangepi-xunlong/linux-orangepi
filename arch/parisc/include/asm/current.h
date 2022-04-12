@@ -1,15 +1,19 @@
-#ifndef _PARISC_CURRENT_H
-#define _PARISC_CURRENT_H
+/* SPDX-License-Identifier: GPL-2.0 */
+#ifndef _ASM_PARISC_CURRENT_H
+#define _ASM_PARISC_CURRENT_H
 
-#include <linux/thread_info.h>
+#include <asm/special_insns.h>
 
+#ifndef __ASSEMBLY__
 struct task_struct;
 
-static inline struct task_struct * get_current(void)
+static __always_inline struct task_struct *get_current(void)
 {
-	return current_thread_info()->task;
+	return (struct task_struct *) mfctl(30);
 }
- 
+
 #define current get_current()
 
-#endif /* !(_PARISC_CURRENT_H) */
+#endif /* __ASSEMBLY__ */
+
+#endif /* _ASM_PARISC_CURRENT_H */

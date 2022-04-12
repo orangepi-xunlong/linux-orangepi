@@ -1,9 +1,7 @@
+/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-3-Clause) */
 /* QLogic qed NIC Driver
- * Copyright (c) 2015 QLogic Corporation
- *
- * This software is available under the terms of the GNU General Public License
- * (GPL) Version 2, available from the file COPYING in the main directory of
- * this source tree.
+ * Copyright (c) 2015-2017  QLogic Corporation
+ * Copyright (c) 2019-2020 Marvell International Ltd.
  */
 
 #ifndef _QED_DEV_API_H
@@ -17,153 +15,194 @@
 #include "qed_int.h"
 
 /**
- * @brief qed_init_dp - initialize the debug level
+ * qed_init_dp(): Initialize the debug level.
  *
- * @param cdev
- * @param dp_module
- * @param dp_level
+ * @cdev: Qed dev pointer.
+ * @dp_module: Module debug parameter.
+ * @dp_level: Module debug level.
+ *
+ * Return: Void.
  */
 void qed_init_dp(struct qed_dev *cdev,
 		 u32 dp_module,
 		 u8 dp_level);
 
 /**
- * @brief qed_init_struct - initialize the device structure to
- *        its defaults
+ * qed_init_struct(): Initialize the device structure to
+ *                    its defaults.
  *
- * @param cdev
+ * @cdev: Qed dev pointer.
+ *
+ * Return: Void.
  */
 void qed_init_struct(struct qed_dev *cdev);
 
 /**
- * @brief qed_resc_free -
+ * qed_resc_free: Free device resources.
  *
- * @param cdev
+ * @cdev: Qed dev pointer.
+ *
+ * Return: Void.
  */
 void qed_resc_free(struct qed_dev *cdev);
 
 /**
- * @brief qed_resc_alloc -
+ * qed_resc_alloc(): Alloc device resources.
  *
- * @param cdev
+ * @cdev: Qed dev pointer.
  *
- * @return int
+ * Return: Int.
  */
 int qed_resc_alloc(struct qed_dev *cdev);
 
 /**
- * @brief qed_resc_setup -
+ * qed_resc_setup(): Setup device resources.
  *
- * @param cdev
+ * @cdev: Qed dev pointer.
+ *
+ * Return: Void.
  */
 void qed_resc_setup(struct qed_dev *cdev);
 
-/**
- * @brief qed_hw_init -
- *
- * @param cdev
- * @param p_tunn
- * @param b_hw_start
- * @param int_mode - interrupt mode [msix, inta, etc.] to use.
- * @param allow_npar_tx_switch - npar tx switching to be used
- *	  for vports configured for tx-switching.
- * @param bin_fw_data - binary fw data pointer in binary fw file.
- *			Pass NULL if not using binary fw file.
- *
- * @return int
- */
-int qed_hw_init(struct qed_dev *cdev,
-		struct qed_tunn_start_params *p_tunn,
-		bool b_hw_start,
-		enum qed_int_mode int_mode,
-		bool allow_npar_tx_switch,
-		const u8 *bin_fw_data);
+enum qed_override_force_load {
+	QED_OVERRIDE_FORCE_LOAD_NONE,
+	QED_OVERRIDE_FORCE_LOAD_ALWAYS,
+	QED_OVERRIDE_FORCE_LOAD_NEVER,
+};
+
+struct qed_drv_load_params {
+	/* Indicates whether the driver is running over a crash kernel.
+	 * As part of the load request, this will be used for providing the
+	 * driver role to the MFW.
+	 * In case of a crash kernel over PDA - this should be set to false.
+	 */
+	bool is_crash_kernel;
+
+	/* The timeout value that the MFW should use when locking the engine for
+	 * the driver load process.
+	 * A value of '0' means the default value, and '255' means no timeout.
+	 */
+	u8 mfw_timeout_val;
+#define QED_LOAD_REQ_LOCK_TO_DEFAULT    0
+#define QED_LOAD_REQ_LOCK_TO_NONE       255
+
+	/* Avoid engine reset when first PF loads on it */
+	bool avoid_eng_reset;
+
+	/* Allow overriding the default force load behavior */
+	enum qed_override_force_load override_force_load;
+};
+
+struct qed_hw_init_params {
+	/* Tunneling parameters */
+	struct qed_tunnel_info *p_tunn;
+
+	bool b_hw_start;
+
+	/* Interrupt mode [msix, inta, etc.] to use */
+	enum qed_int_mode int_mode;
+
+	/* NPAR tx switching to be used for vports for tx-switching */
+	bool allow_npar_tx_switch;
+
+	/* Binary fw data pointer in binary fw file */
+	const u8 *bin_fw_data;
+
+	/* Driver load parameters */
+	struct qed_drv_load_params *p_drv_load_params;
+};
 
 /**
- * @brief qed_hw_timers_stop_all - stop the timers HW block
+ * qed_hw_init(): Init Qed hardware.
  *
- * @param cdev
+ * @cdev: Qed dev pointer.
+ * @p_params: Pointers to params.
  *
- * @return void
+ * Return: Int.
+ */
+int qed_hw_init(struct qed_dev *cdev, struct qed_hw_init_params *p_params);
+
+/**
+ * qed_hw_timers_stop_all(): Stop the timers HW block.
+ *
+ * @cdev: Qed dev pointer.
+ *
+ * Return: void.
  */
 void qed_hw_timers_stop_all(struct qed_dev *cdev);
 
 /**
- * @brief qed_hw_stop -
+ * qed_hw_stop(): Stop Qed hardware.
  *
- * @param cdev
+ * @cdev: Qed dev pointer.
  *
- * @return int
+ * Return: int.
  */
 int qed_hw_stop(struct qed_dev *cdev);
 
 /**
- * @brief qed_hw_stop_fastpath -should be called incase
- *		slowpath is still required for the device,
- *		but fastpath is not.
+ * qed_hw_stop_fastpath(): Should be called incase
+ *		           slowpath is still required for the device,
+ *		           but fastpath is not.
  *
- * @param cdev
+ * @cdev: Qed dev pointer.
  *
+ * Return: Int.
  */
-void qed_hw_stop_fastpath(struct qed_dev *cdev);
+int qed_hw_stop_fastpath(struct qed_dev *cdev);
 
 /**
- * @brief qed_hw_start_fastpath -restart fastpath traffic,
- *		only if hw_stop_fastpath was called
+ * qed_hw_start_fastpath(): Restart fastpath traffic,
+ *		            only if hw_stop_fastpath was called.
  *
- * @param cdev
+ * @p_hwfn: HW device data.
  *
+ * Return: Int.
  */
-void qed_hw_start_fastpath(struct qed_hwfn *p_hwfn);
+int qed_hw_start_fastpath(struct qed_hwfn *p_hwfn);
 
 /**
- * @brief qed_hw_reset -
+ * qed_hw_prepare(): Prepare Qed hardware.
  *
- * @param cdev
+ * @cdev: Qed dev pointer.
+ * @personality: Personality to initialize.
  *
- * @return int
- */
-int qed_hw_reset(struct qed_dev *cdev);
-
-/**
- * @brief qed_hw_prepare -
- *
- * @param cdev
- * @param personality - personality to initialize
- *
- * @return int
+ * Return: Int.
  */
 int qed_hw_prepare(struct qed_dev *cdev,
 		   int personality);
 
 /**
- * @brief qed_hw_remove -
+ * qed_hw_remove(): Remove Qed hardware.
  *
- * @param cdev
+ * @cdev: Qed dev pointer.
+ *
+ * Return: Void.
  */
 void qed_hw_remove(struct qed_dev *cdev);
 
 /**
- * @brief qed_ptt_acquire - Allocate a PTT window
+ * qed_ptt_acquire(): Allocate a PTT window.
+ *
+ * @p_hwfn: HW device data.
+ *
+ * Return: struct qed_ptt.
  *
  * Should be called at the entry point to the driver (at the beginning of an
- * exported function)
- *
- * @param p_hwfn
- *
- * @return struct qed_ptt
+ * exported function).
  */
 struct qed_ptt *qed_ptt_acquire(struct qed_hwfn *p_hwfn);
 
 /**
- * @brief qed_ptt_release - Release PTT Window
+ * qed_ptt_release(): Release PTT Window.
+ *
+ * @p_hwfn: HW device data.
+ * @p_ptt: P_ptt.
+ *
+ * Return: Void.
  *
  * Should be called at the end of a flow - at the end of the function that
  * acquired the PTT.
- *
- *
- * @param p_hwfn
- * @param p_ptt
  */
 void qed_ptt_release(struct qed_hwfn *p_hwfn,
 		     struct qed_ptt *p_ptt);
@@ -175,34 +214,18 @@ enum qed_dmae_address_type_t {
 	QED_DMAE_ADDRESS_GRC
 };
 
-/* value of flags If QED_DMAE_FLAG_RW_REPL_SRC flag is set and the
- * source is a block of length DMAE_MAX_RW_SIZE and the
- * destination is larger, the source block will be duplicated as
- * many times as required to fill the destination block. This is
- * used mostly to write a zeroed buffer to destination address
- * using DMA
- */
-#define QED_DMAE_FLAG_RW_REPL_SRC	0x00000001
-#define QED_DMAE_FLAG_VF_SRC		0x00000002
-#define QED_DMAE_FLAG_VF_DST		0x00000004
-#define QED_DMAE_FLAG_COMPLETION_DST	0x00000008
-
-struct qed_dmae_params {
-	u32 flags; /* consists of QED_DMAE_FLAG_* values */
-	u8 src_vfid;
-	u8 dst_vfid;
-};
-
 /**
- * @brief qed_dmae_host2grc - copy data from source addr to
- * dmae registers using the given ptt
+ * qed_dmae_host2grc(): Copy data from source addr to
+ *                      dmae registers using the given ptt.
  *
- * @param p_hwfn
- * @param p_ptt
- * @param source_addr
- * @param grc_addr (dmae_data_offset)
- * @param size_in_dwords
- * @param flags (one of the flags defined above)
+ * @p_hwfn: HW device data.
+ * @p_ptt: P_ptt.
+ * @source_addr: Source address.
+ * @grc_addr: GRC address (dmae_data_offset).
+ * @size_in_dwords: Size.
+ * @p_params: (default parameters will be used in case of NULL).
+ *
+ * Return: Int.
  */
 int
 qed_dmae_host2grc(struct qed_hwfn *p_hwfn,
@@ -210,32 +233,37 @@ qed_dmae_host2grc(struct qed_hwfn *p_hwfn,
 		  u64 source_addr,
 		  u32 grc_addr,
 		  u32 size_in_dwords,
-		  u32 flags);
+		  struct qed_dmae_params *p_params);
 
  /**
- * @brief qed_dmae_grc2host - Read data from dmae data offset
- * to source address using the given ptt
+ * qed_dmae_grc2host(): Read data from dmae data offset
+ *                      to source address using the given ptt.
  *
- * @param p_ptt
- * @param grc_addr (dmae_data_offset)
- * @param dest_addr
- * @param size_in_dwords
- * @param flags - one of the flags defined above
+ * @p_ptt: P_ptt.
+ * @grc_addr: GRC address (dmae_data_offset).
+ * @dest_addr: Destination Address.
+ * @size_in_dwords: Size.
+ * @p_params: (default parameters will be used in case of NULL).
+ *
+ * Return: Int.
  */
 int qed_dmae_grc2host(struct qed_hwfn *p_hwfn, struct qed_ptt *p_ptt,
 		      u32 grc_addr, dma_addr_t dest_addr, u32 size_in_dwords,
-		      u32 flags);
+		      struct qed_dmae_params *p_params);
 
 /**
- * @brief qed_dmae_host2host - copy data from to source address
- * to a destination adress (for SRIOV) using the given ptt
+ * qed_dmae_host2host(): Copy data from to source address
+ *                       to a destination adrress (for SRIOV) using the given
+ *                       ptt.
  *
- * @param p_hwfn
- * @param p_ptt
- * @param source_addr
- * @param dest_addr
- * @param size_in_dwords
- * @param params
+ * @p_hwfn: HW device data.
+ * @p_ptt: P_ptt.
+ * @source_addr: Source address.
+ * @dest_addr: Destination address.
+ * @size_in_dwords: size.
+ * @p_params: (default parameters will be used in case of NULL).
+ *
+ * Return: Int.
  */
 int qed_dmae_host2host(struct qed_hwfn *p_hwfn,
 		       struct qed_ptt *p_ptt,
@@ -243,136 +271,243 @@ int qed_dmae_host2host(struct qed_hwfn *p_hwfn,
 		       dma_addr_t dest_addr,
 		       u32 size_in_dwords, struct qed_dmae_params *p_params);
 
-/**
- * @brief qed_chain_alloc - Allocate and initialize a chain
- *
- * @param p_hwfn
- * @param intended_use
- * @param mode
- * @param num_elems
- * @param elem_size
- * @param p_chain
- *
- * @return int
- */
-int
-qed_chain_alloc(struct qed_dev *cdev,
-		enum qed_chain_use_mode intended_use,
-		enum qed_chain_mode mode,
-		enum qed_chain_cnt_type cnt_type,
-		u32 num_elems, size_t elem_size, struct qed_chain *p_chain);
+int qed_chain_alloc(struct qed_dev *cdev, struct qed_chain *chain,
+		    struct qed_chain_init_params *params);
+void qed_chain_free(struct qed_dev *cdev, struct qed_chain *chain);
 
 /**
- * @brief qed_chain_free - Free chain DMA memory
+ * qed_fw_l2_queue(): Get absolute L2 queue ID.
  *
- * @param p_hwfn
- * @param p_chain
- */
-void qed_chain_free(struct qed_dev *cdev, struct qed_chain *p_chain);
-
-/**
- * @@brief qed_fw_l2_queue - Get absolute L2 queue ID
+ * @p_hwfn: HW device data.
+ * @src_id: Relative to p_hwfn.
+ * @dst_id: Absolute per engine.
  *
- *  @param p_hwfn
- *  @param src_id - relative to p_hwfn
- *  @param dst_id - absolute per engine
- *
- *  @return int
+ * Return: Int.
  */
 int qed_fw_l2_queue(struct qed_hwfn *p_hwfn,
 		    u16 src_id,
 		    u16 *dst_id);
 
 /**
- * @@brief qed_fw_vport - Get absolute vport ID
+ * qed_fw_vport(): Get absolute vport ID.
  *
- *  @param p_hwfn
- *  @param src_id - relative to p_hwfn
- *  @param dst_id - absolute per engine
+ * @p_hwfn: HW device data.
+ * @src_id: Relative to p_hwfn.
+ * @dst_id: Absolute per engine.
  *
- *  @return int
+ * Return: Int.
  */
 int qed_fw_vport(struct qed_hwfn *p_hwfn,
 		 u8 src_id,
 		 u8 *dst_id);
 
 /**
- * @@brief qed_fw_rss_eng - Get absolute RSS engine ID
+ * qed_fw_rss_eng(): Get absolute RSS engine ID.
  *
- *  @param p_hwfn
- *  @param src_id - relative to p_hwfn
- *  @param dst_id - absolute per engine
+ * @p_hwfn: HW device data.
+ * @src_id: Relative to p_hwfn.
+ * @dst_id: Absolute per engine.
  *
- *  @return int
+ * Return: Int.
  */
 int qed_fw_rss_eng(struct qed_hwfn *p_hwfn,
 		   u8 src_id,
 		   u8 *dst_id);
 
 /**
- * @brief qed_llh_add_mac_filter - configures a MAC filter in llh
+ * qed_llh_get_num_ppfid(): Return the allocated number of LLH filter
+ *	                    banks that are allocated to the PF.
  *
- * @param p_hwfn
- * @param p_ptt
- * @param p_filter - MAC to add
+ * @cdev: Qed dev pointer.
+ *
+ * Return: u8 Number of LLH filter banks.
  */
-int qed_llh_add_mac_filter(struct qed_hwfn *p_hwfn,
-			   struct qed_ptt *p_ptt, u8 *p_filter);
+u8 qed_llh_get_num_ppfid(struct qed_dev *cdev);
+
+enum qed_eng {
+	QED_ENG0,
+	QED_ENG1,
+	QED_BOTH_ENG,
+};
 
 /**
- * @brief qed_llh_remove_mac_filter - removes a MAC filter from llh
+ * qed_llh_set_ppfid_affinity(): Set the engine affinity for the given
+ *	                         LLH filter bank.
  *
- * @param p_hwfn
- * @param p_ptt
- * @param p_filter - MAC to remove
+ * @cdev: Qed dev pointer.
+ * @ppfid: Relative within the allocated ppfids ('0' is the default one).
+ * @eng: Engine.
+ *
+ * Return: Int.
  */
-void qed_llh_remove_mac_filter(struct qed_hwfn *p_hwfn,
-			       struct qed_ptt *p_ptt, u8 *p_filter);
+int qed_llh_set_ppfid_affinity(struct qed_dev *cdev,
+			       u8 ppfid, enum qed_eng eng);
 
 /**
- * *@brief Cleanup of previous driver remains prior to load
+ * qed_llh_set_roce_affinity(): Set the RoCE engine affinity.
  *
- * @param p_hwfn
- * @param p_ptt
- * @param id - For PF, engine-relative. For VF, PF-relative.
- * @param is_vf - true iff cleanup is made for a VF.
+ * @cdev: Qed dev pointer.
+ * @eng: Engine.
  *
- * @return int
+ * Return: Int.
+ */
+int qed_llh_set_roce_affinity(struct qed_dev *cdev, enum qed_eng eng);
+
+/**
+ * qed_llh_add_mac_filter(): Add a LLH MAC filter into the given filter
+ *	                     bank.
+ *
+ * @cdev: Qed dev pointer.
+ * @ppfid: Relative within the allocated ppfids ('0' is the default one).
+ * @mac_addr: MAC to add.
+ *
+ * Return: Int.
+ */
+int qed_llh_add_mac_filter(struct qed_dev *cdev,
+			   u8 ppfid, const u8 mac_addr[ETH_ALEN]);
+
+/**
+ * qed_llh_remove_mac_filter(): Remove a LLH MAC filter from the given
+ *	                        filter bank.
+ *
+ * @cdev: Qed dev pointer.
+ * @ppfid: Ppfid.
+ * @mac_addr: MAC to remove
+ *
+ * Return: Void.
+ */
+void qed_llh_remove_mac_filter(struct qed_dev *cdev,
+			       u8 ppfid, u8 mac_addr[ETH_ALEN]);
+
+enum qed_llh_prot_filter_type_t {
+	QED_LLH_FILTER_ETHERTYPE,
+	QED_LLH_FILTER_TCP_SRC_PORT,
+	QED_LLH_FILTER_TCP_DEST_PORT,
+	QED_LLH_FILTER_TCP_SRC_AND_DEST_PORT,
+	QED_LLH_FILTER_UDP_SRC_PORT,
+	QED_LLH_FILTER_UDP_DEST_PORT,
+	QED_LLH_FILTER_UDP_SRC_AND_DEST_PORT
+};
+
+/**
+ * qed_llh_add_protocol_filter(): Add a LLH protocol filter into the
+ *	                          given filter bank.
+ *
+ * @cdev: Qed dev pointer.
+ * @ppfid: Relative within the allocated ppfids ('0' is the default one).
+ * @type: Type of filters and comparing.
+ * @source_port_or_eth_type: Source port or ethertype to add.
+ * @dest_port: Destination port to add.
+ *
+ * Return: Int.
+ */
+int
+qed_llh_add_protocol_filter(struct qed_dev *cdev,
+			    u8 ppfid,
+			    enum qed_llh_prot_filter_type_t type,
+			    u16 source_port_or_eth_type, u16 dest_port);
+
+/**
+ * qed_llh_remove_protocol_filter(): Remove a LLH protocol filter from
+ *	                             the given filter bank.
+ *
+ * @cdev: Qed dev pointer.
+ * @ppfid: Relative within the allocated ppfids ('0' is the default one).
+ * @type: Type of filters and comparing.
+ * @source_port_or_eth_type: Source port or ethertype to add.
+ * @dest_port: Destination port to add.
+ */
+void
+qed_llh_remove_protocol_filter(struct qed_dev *cdev,
+			       u8 ppfid,
+			       enum qed_llh_prot_filter_type_t type,
+			       u16 source_port_or_eth_type, u16 dest_port);
+
+/**
+ * qed_final_cleanup(): Cleanup of previous driver remains prior to load.
+ *
+ * @p_hwfn: HW device data.
+ * @p_ptt: P_ptt.
+ * @id: For PF, engine-relative. For VF, PF-relative.
+ * @is_vf: True iff cleanup is made for a VF.
+ *
+ * Return: Int.
  */
 int qed_final_cleanup(struct qed_hwfn *p_hwfn,
 		      struct qed_ptt *p_ptt, u16 id, bool is_vf);
 
 /**
- * @brief qed_set_rxq_coalesce - Configure coalesce parameters for an Rx queue
- * The fact that we can configure coalescing to up to 511, but on varying
- * accuracy [the bigger the value the less accurate] up to a mistake of 3usec
- * for the highest values.
+ * qed_get_queue_coalesce(): Retrieve coalesce value for a given queue.
  *
- * @param p_hwfn
- * @param p_ptt
- * @param coalesce - Coalesce value in micro seconds.
- * @param qid - Queue index.
- * @param qid - SB Id
+ * @p_hwfn: HW device data.
+ * @coal: Store coalesce value read from the hardware.
+ * @handle: P_handle.
  *
- * @return int
- */
-int qed_set_rxq_coalesce(struct qed_hwfn *p_hwfn, struct qed_ptt *p_ptt,
-			 u16 coalesce, u8 qid, u16 sb_id);
+ * Return: Int.
+ **/
+int qed_get_queue_coalesce(struct qed_hwfn *p_hwfn, u16 *coal, void *handle);
 
 /**
- * @brief qed_set_txq_coalesce - Configure coalesce parameters for a Tx queue
- * While the API allows setting coalescing per-qid, all tx queues sharing a
- * SB should be in same range [i.e., either 0-0x7f, 0x80-0xff or 0x100-0x1ff]
- * otherwise configuration would break.
+ * qed_set_queue_coalesce(): Configure coalesce parameters for Rx and
+ *    Tx queue. The fact that we can configure coalescing to up to 511, but on
+ *    varying accuracy [the bigger the value the less accurate] up to a mistake
+ *    of 3usec for the highest values.
+ *    While the API allows setting coalescing per-qid, all queues sharing a SB
+ *    should be in same range [i.e., either 0-0x7f, 0x80-0xff or 0x100-0x1ff]
+ *    otherwise configuration would break.
  *
- * @param p_hwfn
- * @param p_ptt
- * @param coalesce - Coalesce value in micro seconds.
- * @param qid - Queue index.
- * @param qid - SB Id
+ * @rx_coal: Rx Coalesce value in micro seconds.
+ * @tx_coal: TX Coalesce value in micro seconds.
+ * @p_handle: P_handle.
  *
- * @return int
+ * Return: Int.
+ **/
+int
+qed_set_queue_coalesce(u16 rx_coal, u16 tx_coal, void *p_handle);
+
+/**
+ * qed_pglueb_set_pfid_enable(): Enable or disable PCI BUS MASTER.
+ *
+ * @p_hwfn: HW device data.
+ * @p_ptt: P_ptt.
+ * @b_enable: True/False.
+ *
+ * Return: Int.
  */
-int qed_set_txq_coalesce(struct qed_hwfn *p_hwfn, struct qed_ptt *p_ptt,
-			 u16 coalesce, u8 qid, u16 sb_id);
+int qed_pglueb_set_pfid_enable(struct qed_hwfn *p_hwfn,
+			       struct qed_ptt *p_ptt, bool b_enable);
+
+/**
+ * qed_db_recovery_add(): add doorbell information to the doorbell
+ *                    recovery mechanism.
+ *
+ * @cdev: Qed dev pointer.
+ * @db_addr: Doorbell address.
+ * @db_data: Address of where db_data is stored.
+ * @db_width: Doorbell is 32b pr 64b.
+ * @db_space: Doorbell recovery addresses are user or kernel space.
+ *
+ * Return: Int.
+ */
+int qed_db_recovery_add(struct qed_dev *cdev,
+			void __iomem *db_addr,
+			void *db_data,
+			enum qed_db_rec_width db_width,
+			enum qed_db_rec_space db_space);
+
+/**
+ * qed_db_recovery_del() - remove doorbell information from the doorbell
+ * recovery mechanism. db_data serves as key (db_addr is not unique).
+ *
+ * @cdev: Qed dev pointer.
+ * @db_addr: doorbell address.
+ * @db_data: address where db_data is stored. Serves as key for the
+ *                  entry to delete.
+ *
+ * Return: Int.
+ */
+int qed_db_recovery_del(struct qed_dev *cdev,
+			void __iomem *db_addr, void *db_data);
+
+const char *qed_hw_get_resc_name(enum qed_resources res_id);
 #endif

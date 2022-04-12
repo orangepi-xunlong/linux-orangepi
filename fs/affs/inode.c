@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/affs/inode.c
  *
@@ -10,6 +11,7 @@
  *  (C) 1991  Linus Torvalds - minix filesystem
  */
 #include <linux/sched.h>
+#include <linux/cred.h>
 #include <linux/gfp.h>
 #include "affs.h"
 
@@ -69,7 +71,7 @@ struct inode *affs_iget(struct super_block *sb, unsigned long ino)
 	if (affs_test_opt(sbi->s_flags, SF_SETMODE))
 		inode->i_mode = sbi->s_mode;
 	else
-		inode->i_mode = prot_to_mode(prot);
+		inode->i_mode = affs_prot_to_mode(prot);
 
 	id = be16_to_cpu(tail->uid);
 	if (id == 0 || affs_test_opt(sbi->s_flags, SF_SETUID))
@@ -91,7 +93,7 @@ struct inode *affs_iget(struct super_block *sb, unsigned long ino)
 	case ST_ROOT:
 		inode->i_uid = sbi->s_uid;
 		inode->i_gid = sbi->s_gid;
-		/* fall through */
+		fallthrough;
 	case ST_USERDIR:
 		if (be32_to_cpu(tail->stype) == ST_USERDIR ||
 		    affs_test_opt(sbi->s_flags, SF_SETMODE)) {
@@ -139,6 +141,7 @@ struct inode *affs_iget(struct super_block *sb, unsigned long ino)
 		inode->i_fop = &affs_file_operations;
 		break;
 	case ST_SOFTLINK:
+		inode->i_size = strlen((char *)AFFS_HEAD(bh)->table);
 		inode->i_mode |= S_IFLNK;
 		inode_nohighmem(inode);
 		inode->i_op = &affs_symlink_inode_operations;
@@ -147,10 +150,10 @@ struct inode *affs_iget(struct super_block *sb, unsigned long ino)
 	}
 
 	inode->i_mtime.tv_sec = inode->i_atime.tv_sec = inode->i_ctime.tv_sec
-		       = (be32_to_cpu(tail->change.days) * (24 * 60 * 60) +
+		       = (be32_to_cpu(tail->change.days) * 86400LL +
 		         be32_to_cpu(tail->change.mins) * 60 +
 			 be32_to_cpu(tail->change.ticks) / 50 +
-			 ((8 * 365 + 2) * 24 * 60 * 60)) +
+			 AFFS_EPOCH_DELTA) +
 			 sys_tz.tz_minuteswest * 60;
 	inode->i_mtime.tv_nsec = inode->i_ctime.tv_nsec = inode->i_atime.tv_nsec = 0;
 	affs_brelse(bh);
@@ -184,11 +187,12 @@ affs_write_inode(struct inode *inode, struct writeback_control *wbc)
 	}
 	tail = AFFS_TAIL(sb, bh);
 	if (tail->stype == cpu_to_be32(ST_ROOT)) {
-		secs_to_datestamp(inode->i_mtime.tv_sec,&AFFS_ROOT_TAIL(sb, bh)->root_change);
+		affs_secs_to_datestamp(inode->i_mtime.tv_sec,
+				       &AFFS_ROOT_TAIL(sb, bh)->root_change);
 	} else {
 		tail->protect = cpu_to_be32(AFFS_I(inode)->i_protect);
 		tail->size = cpu_to_be32(inode->i_size);
-		secs_to_datestamp(inode->i_mtime.tv_sec,&tail->change);
+		affs_secs_to_datestamp(inode->i_mtime.tv_sec, &tail->change);
 		if (!(inode->i_ino == AFFS_SB(sb)->s_root_block)) {
 			uid = i_uid_read(inode);
 			gid = i_gid_read(inode);
@@ -212,14 +216,15 @@ affs_write_inode(struct inode *inode, struct writeback_control *wbc)
 }
 
 int
-affs_notify_change(struct dentry *dentry, struct iattr *attr)
+affs_notify_change(struct user_namespace *mnt_userns, struct dentry *dentry,
+		   struct iattr *attr)
 {
 	struct inode *inode = d_inode(dentry);
 	int error;
 
 	pr_debug("notify_change(%lu,0x%x)\n", inode->i_ino, attr->ia_valid);
 
-	error = setattr_prepare(dentry, attr);
+	error = setattr_prepare(&init_user_ns, dentry, attr);
 	if (error)
 		goto out;
 
@@ -245,11 +250,11 @@ affs_notify_change(struct dentry *dentry, struct iattr *attr)
 		affs_truncate(inode);
 	}
 
-	setattr_copy(inode, attr);
+	setattr_copy(&init_user_ns, inode, attr);
 	mark_inode_dirty(inode);
 
 	if (attr->ia_valid & ATTR_MODE)
-		mode_to_prot(inode);
+		affs_mode_to_prot(inode);
 out:
 	return error;
 }

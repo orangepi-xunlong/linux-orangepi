@@ -1,13 +1,4 @@
-/*
- * Many of the syscalls used in this file expect some of the arguments
- * to be __user pointers not __kernel pointers.  To limit the sparse
- * noise, turn off sparse checking for this file.
- */
-#ifdef __CHECKER__
-#undef __CHECKER__
-#warning "Sparse checking disabled for this file"
-#endif
-
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/unistd.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
@@ -17,6 +8,7 @@
 #include <linux/sched.h>
 #include <linux/freezer.h>
 #include <linux/kmod.h>
+#include <uapi/linux/mount.h>
 
 #include "do_mounts.h"
 
@@ -24,6 +16,9 @@ unsigned long initrd_start, initrd_end;
 int initrd_below_start_ok;
 unsigned int real_root_dev;	/* do_proc_dointvec cannot handle kdev_t */
 static int __initdata mount_initrd = 1;
+
+phys_addr_t phys_initrd_start __initdata;
+unsigned long phys_initrd_size __initdata;
 
 static int __init no_initrd(char *str)
 {
@@ -33,18 +28,38 @@ static int __init no_initrd(char *str)
 
 __setup("noinitrd", no_initrd);
 
-static int init_linuxrc(struct subprocess_info *info, struct cred *new)
+static int __init early_initrdmem(char *p)
 {
-	sys_unshare(CLONE_FS | CLONE_FILES);
-	/* stdin/stdout/stderr for /linuxrc */
-	sys_open("/dev/console", O_RDWR, 0);
-	sys_dup(0);
-	sys_dup(0);
+	phys_addr_t start;
+	unsigned long size;
+	char *endp;
+
+	start = memparse(p, &endp);
+	if (*endp == ',') {
+		size = memparse(endp + 1, NULL);
+
+		phys_initrd_start = start;
+		phys_initrd_size = size;
+	}
+	return 0;
+}
+early_param("initrdmem", early_initrdmem);
+
+static int __init early_initrd(char *p)
+{
+	return early_initrdmem(p);
+}
+early_param("initrd", early_initrd);
+
+static int __init init_linuxrc(struct subprocess_info *info, struct cred *new)
+{
+	ksys_unshare(CLONE_FS | CLONE_FILES);
+	console_on_rootfs();
 	/* move initrd over / and chdir/chroot in initrd root */
-	sys_chdir("/root");
-	sys_mount(".", "/", NULL, MS_MOVE, NULL);
-	sys_chroot(".");
-	sys_setsid();
+	init_chdir("/root");
+	init_mount(".", "/", NULL, MS_MOVE, NULL);
+	init_chroot(".");
+	ksys_setsid();
 	return 0;
 }
 
@@ -55,15 +70,14 @@ static void __init handle_initrd(void)
 	extern char *envp_init[];
 	int error;
 
+	pr_warn("using deprecated initrd support, will be removed in 2021.\n");
+
 	real_root_dev = new_encode_dev(ROOT_DEV);
 	create_dev("/dev/root.old", Root_RAM0);
 	/* mount initrd on rootfs' /root */
 	mount_block_root("/dev/root.old", root_mountflags & ~MS_RDONLY);
-	sys_mkdir("/old", 0700);
-	sys_chdir("/old");
-
-	/* try loading default modules from initrd */
-	load_default_modules();
+	init_mkdir("/old", 0700);
+	init_chdir("/old");
 
 	/*
 	 * In case that a resume from disk is carried out by linuxrc or one of
@@ -80,39 +94,30 @@ static void __init handle_initrd(void)
 	current->flags &= ~PF_FREEZER_SKIP;
 
 	/* move initrd to rootfs' /old */
-	sys_mount("..", ".", NULL, MS_MOVE, NULL);
+	init_mount("..", ".", NULL, MS_MOVE, NULL);
 	/* switch root and cwd back to / of rootfs */
-	sys_chroot("..");
+	init_chroot("..");
 
 	if (new_decode_dev(real_root_dev) == Root_RAM0) {
-		sys_chdir("/old");
+		init_chdir("/old");
 		return;
 	}
 
-	sys_chdir("/");
+	init_chdir("/");
 	ROOT_DEV = new_decode_dev(real_root_dev);
 	mount_root();
 
 	printk(KERN_NOTICE "Trying to move old root to /initrd ... ");
-	error = sys_mount("/old", "/root/initrd", NULL, MS_MOVE, NULL);
+	error = init_mount("/old", "/root/initrd", NULL, MS_MOVE, NULL);
 	if (!error)
 		printk("okay\n");
 	else {
-		int fd = sys_open("/dev/root.old", O_RDWR, 0);
 		if (error == -ENOENT)
 			printk("/initrd does not exist. Ignored.\n");
 		else
 			printk("failed\n");
 		printk(KERN_NOTICE "Unmounting old root\n");
-		sys_umount("/old", MNT_DETACH);
-		printk(KERN_NOTICE "Trying to free ramdisk memory ... ");
-		if (fd < 0) {
-			error = fd;
-		} else {
-			error = sys_ioctl(fd, BLKFLSBUF, 0);
-			sys_close(fd);
-		}
-		printk(!error ? "okay\n" : "failed\n");
+		init_umount("/old", MNT_DETACH);
 	}
 }
 
@@ -127,11 +132,11 @@ bool __init initrd_load(void)
 		 * mounted in the normal path.
 		 */
 		if (rd_load_image("/initrd.image") && ROOT_DEV != Root_RAM0) {
-			sys_unlink("/initrd.image");
+			init_unlink("/initrd.image");
 			handle_initrd();
 			return true;
 		}
 	}
-	sys_unlink("/initrd.image");
+	init_unlink("/initrd.image");
 	return false;
 }

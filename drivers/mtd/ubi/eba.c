@@ -1,19 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) International Business Machines Corp., 2006
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
- * the GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  *
  * Author: Artem Bityutskiy (Битюцкий Артём)
  */
@@ -155,7 +142,6 @@ struct ubi_eba_table *ubi_eba_create_table(struct ubi_volume *vol,
 	return tbl;
 
 err:
-	kfree(tbl->entries);
 	kfree(tbl);
 
 	return ERR_PTR(err);
@@ -384,7 +370,7 @@ static int leb_write_lock(struct ubi_device *ubi, int vol_id, int lnum)
 }
 
 /**
- * leb_write_lock - lock logical eraseblock for writing.
+ * leb_write_trylock - try to lock logical eraseblock for writing.
  * @ubi: UBI device description object
  * @vol_id: volume ID
  * @lnum: logical eraseblock number
@@ -513,8 +499,12 @@ static int check_mapping(struct ubi_device *ubi, struct ubi_volume *vol, int lnu
 {
 	int err;
 	struct ubi_vid_io_buf *vidb;
+	struct ubi_vid_hdr *vid_hdr;
 
 	if (!ubi->fast_attach)
+		return 0;
+
+	if (!vol->checkmap || test_bit(lnum, vol->checkmap))
 		return 0;
 
 	vidb = ubi_alloc_vid_buf(ubi, GFP_NOFS);
@@ -549,8 +539,25 @@ static int check_mapping(struct ubi_device *ubi, struct ubi_volume *vol, int lnu
 			*pnum, err);
 
 		goto out_free;
+	} else {
+		int found_vol_id, found_lnum;
+
+		ubi_assert(err == 0 || err == UBI_IO_BITFLIPS);
+
+		vid_hdr = ubi_get_vid_hdr(vidb);
+		found_vol_id = be32_to_cpu(vid_hdr->vol_id);
+		found_lnum = be32_to_cpu(vid_hdr->lnum);
+
+		if (found_lnum != lnum || found_vol_id != vol->vol_id) {
+			ubi_err(ubi, "EBA mismatch! PEB %i is LEB %i:%i instead of LEB %i:%i",
+				*pnum, found_vol_id, found_lnum, vol->vol_id, lnum);
+			ubi_ro_mode(ubi);
+			err = -EINVAL;
+			goto out_free;
+		}
 	}
 
+	set_bit(lnum, vol->checkmap);
 	err = 0;
 
 out_free:
@@ -591,7 +598,7 @@ int ubi_eba_read_leb(struct ubi_device *ubi, struct ubi_volume *vol, int lnum,
 	int err, pnum, scrub = 0, vol_id = vol->vol_id;
 	struct ubi_vid_io_buf *vidb;
 	struct ubi_vid_hdr *vid_hdr;
-	uint32_t uninitialized_var(crc);
+	uint32_t crc;
 
 	err = leb_read_lock(ubi, vol_id, lnum);
 	if (err)
@@ -1282,7 +1289,7 @@ static int is_error_sane(int err)
  * @ubi: UBI device description object
  * @from: physical eraseblock number from where to copy
  * @to: physical eraseblock number where to copy
- * @vid_hdr: VID header of the @from physical eraseblock
+ * @vidb: data structure from where the VID header is derived
  *
  * This function copies logical eraseblock from physical eraseblock @from to
  * physical eraseblock @to. The @vid_hdr buffer may be changed by this
@@ -1455,6 +1462,7 @@ out_unlock_leb:
 /**
  * print_rsvd_warning - warn about not having enough reserved PEBs.
  * @ubi: UBI device description object
+ * @ai: UBI attach info object
  *
  * This is a helper function for 'ubi_eba_init()' which is called when UBI
  * cannot reserve enough PEBs for bad block handling. This function makes a
@@ -1515,11 +1523,11 @@ int self_check_eba(struct ubi_device *ubi, struct ubi_attach_info *ai_fastmap,
 
 	num_volumes = ubi->vtbl_slots + UBI_INT_VOL_COUNT;
 
-	scan_eba = kmalloc(sizeof(*scan_eba) * num_volumes, GFP_KERNEL);
+	scan_eba = kmalloc_array(num_volumes, sizeof(*scan_eba), GFP_KERNEL);
 	if (!scan_eba)
 		return -ENOMEM;
 
-	fm_eba = kmalloc(sizeof(*fm_eba) * num_volumes, GFP_KERNEL);
+	fm_eba = kmalloc_array(num_volumes, sizeof(*fm_eba), GFP_KERNEL);
 	if (!fm_eba) {
 		kfree(scan_eba);
 		return -ENOMEM;
@@ -1530,15 +1538,17 @@ int self_check_eba(struct ubi_device *ubi, struct ubi_attach_info *ai_fastmap,
 		if (!vol)
 			continue;
 
-		scan_eba[i] = kmalloc(vol->reserved_pebs * sizeof(**scan_eba),
-				      GFP_KERNEL);
+		scan_eba[i] = kmalloc_array(vol->reserved_pebs,
+					    sizeof(**scan_eba),
+					    GFP_KERNEL);
 		if (!scan_eba[i]) {
 			ret = -ENOMEM;
 			goto out_free;
 		}
 
-		fm_eba[i] = kmalloc(vol->reserved_pebs * sizeof(**fm_eba),
-				    GFP_KERNEL);
+		fm_eba[i] = kmalloc_array(vol->reserved_pebs,
+					  sizeof(**fm_eba),
+					  GFP_KERNEL);
 		if (!fm_eba[i]) {
 			ret = -ENOMEM;
 			goto out_free;

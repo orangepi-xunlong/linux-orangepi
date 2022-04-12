@@ -1,46 +1,12 @@
+// SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
 /******************************************************************************
  *
  * Module Name: nsrepair2 - Repair for objects returned by specific
  *                          predefined methods
  *
+ * Copyright (C) 2000 - 2021, Intel Corp.
+ *
  *****************************************************************************/
-
-/*
- * Copyright (C) 2000 - 2016, Intel Corp.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions, and the following disclaimer,
- *    without modification.
- * 2. Redistributions in binary form must reproduce at minimum a disclaimer
- *    substantially similar to the "NO WARRANTY" disclaimer below
- *    ("Disclaimer") and any redistribution must be conditioned upon
- *    including a substantially similar Disclaimer requirement for further
- *    binary redistribution.
- * 3. Neither the names of the above-listed copyright holders nor the names
- *    of any contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
- *
- * NO WARRANTY
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDERS OR CONTRIBUTORS BE LIABLE FOR SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
- * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGES.
- */
 
 #include <acpi/acpi.h>
 #include "accommon.h"
@@ -59,7 +25,7 @@ acpi_status (*acpi_repair_function) (struct acpi_evaluate_info * info,
 				     return_object_ptr);
 
 typedef struct acpi_repair_info {
-	char name[ACPI_NAME_SIZE];
+	char name[ACPI_NAMESEG_SIZE];
 	acpi_repair_function repair_function;
 
 } acpi_repair_info;
@@ -160,7 +126,7 @@ static const struct acpi_repair_info acpi_ns_repairable_names[] = {
 
 #define ACPI_FDE_FIELD_COUNT        5
 #define ACPI_FDE_BYTE_BUFFER_SIZE   5
-#define ACPI_FDE_DWORD_BUFFER_SIZE  (ACPI_FDE_FIELD_COUNT * sizeof (u32))
+#define ACPI_FDE_DWORD_BUFFER_SIZE  (ACPI_FDE_FIELD_COUNT * (u32) sizeof (u32))
 
 /******************************************************************************
  *
@@ -189,15 +155,17 @@ acpi_ns_complex_repairs(struct acpi_evaluate_info *info,
 	const struct acpi_repair_info *predefined;
 	acpi_status status;
 
+	ACPI_FUNCTION_TRACE(ns_complex_repairs);
+
 	/* Check if this name is in the list of repairable names */
 
 	predefined = acpi_ns_match_complex_repair(node);
 	if (!predefined) {
-		return (validate_status);
+		return_ACPI_STATUS(validate_status);
 	}
 
 	status = predefined->repair_function(info, return_object_ptr);
-	return (status);
+	return_ACPI_STATUS(status);
 }
 
 /******************************************************************************
@@ -222,7 +190,7 @@ static const struct acpi_repair_info *acpi_ns_match_complex_repair(struct
 
 	this_name = acpi_ns_repairable_names;
 	while (this_name->repair_function) {
-		if (ACPI_COMPARE_NAME(node->name.ascii, this_name->name)) {
+		if (ACPI_COMPARE_NAMESEG(node->name.ascii, this_name->name)) {
 			return (this_name);
 		}
 
@@ -378,17 +346,19 @@ acpi_ns_repair_CID(struct acpi_evaluate_info *info,
 	u16 original_ref_count;
 	u32 i;
 
+	ACPI_FUNCTION_TRACE(ns_repair_CID);
+
 	/* Check for _CID as a simple string */
 
 	if (return_object->common.type == ACPI_TYPE_STRING) {
 		status = acpi_ns_repair_HID(info, return_object_ptr);
-		return (status);
+		return_ACPI_STATUS(status);
 	}
 
 	/* Exit if not a Package */
 
 	if (return_object->common.type != ACPI_TYPE_PACKAGE) {
-		return (AE_OK);
+		return_ACPI_STATUS(AE_OK);
 	}
 
 	/* Examine each element of the _CID package */
@@ -400,25 +370,21 @@ acpi_ns_repair_CID(struct acpi_evaluate_info *info,
 
 		status = acpi_ns_repair_HID(info, element_ptr);
 		if (ACPI_FAILURE(status)) {
-			return (status);
+			return_ACPI_STATUS(status);
 		}
-
-		/* Take care with reference counts */
 
 		if (original_element != *element_ptr) {
 
-			/* Element was replaced */
+			/* Update reference count of new object */
 
 			(*element_ptr)->common.reference_count =
 			    original_ref_count;
-
-			acpi_ut_remove_reference(original_element);
 		}
 
 		element_ptr++;
 	}
 
-	return (AE_OK);
+	return_ACPI_STATUS(AE_OK);
 }
 
 /******************************************************************************
@@ -538,7 +504,7 @@ acpi_ns_repair_HID(struct acpi_evaluate_info *info,
 	/* We only care about string _HID objects (not integers) */
 
 	if (return_object->common.type != ACPI_TYPE_STRING) {
-		return (AE_OK);
+		return_ACPI_STATUS(AE_OK);
 	}
 
 	if (return_object->string.length == 0) {
@@ -549,14 +515,14 @@ acpi_ns_repair_HID(struct acpi_evaluate_info *info,
 		/* Return AE_OK anyway, let driver handle it */
 
 		info->return_flags |= ACPI_OBJECT_REPAIRED;
-		return (AE_OK);
+		return_ACPI_STATUS(AE_OK);
 	}
 
 	/* It is simplest to always create a new string object */
 
 	new_string = acpi_ut_create_string_object(return_object->string.length);
 	if (!new_string) {
-		return (AE_NO_MEMORY);
+		return_ACPI_STATUS(AE_NO_MEMORY);
 	}
 
 	/*
@@ -589,7 +555,7 @@ acpi_ns_repair_HID(struct acpi_evaluate_info *info,
 
 	acpi_ut_remove_reference(return_object);
 	*return_object_ptr = new_string;
-	return (AE_OK);
+	return_ACPI_STATUS(AE_OK);
 }
 
 /******************************************************************************

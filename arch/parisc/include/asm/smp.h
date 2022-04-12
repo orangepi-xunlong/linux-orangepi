@@ -1,6 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __ASM_SMP_H
 #define __ASM_SMP_H
 
+extern int init_per_cpu(int cpuid);
 
 #if defined(CONFIG_SMP)
 
@@ -30,9 +32,9 @@ extern void smp_send_all_nop(void);
 extern void arch_send_call_function_single_ipi(int cpu);
 extern void arch_send_call_function_ipi_mask(const struct cpumask *mask);
 
-#endif /* !ASSEMBLY */
+#define raw_smp_processor_id()		(current_thread_info()->cpu)
 
-#define raw_smp_processor_id()	(current_thread_info()->cpu)
+#endif /* !ASSEMBLY */
 
 #else /* CONFIG_SMP */
 

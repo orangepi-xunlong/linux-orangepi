@@ -299,7 +299,6 @@ struct snic {
 
 	/* pci related */
 	struct pci_dev *pdev;
-	struct msix_entry msix_entry[SNIC_MSIX_INTR_MAX];
 	struct snic_msix_entry msix[SNIC_MSIX_INTR_MAX];
 
 	/* io related info */
@@ -375,7 +374,7 @@ int snic_glob_init(void);
 void snic_glob_cleanup(void);
 
 extern struct workqueue_struct *snic_event_queue;
-extern struct device_attribute *snic_attrs[];
+extern const struct attribute_group *snic_host_groups[];
 
 int snic_queuecommand(struct Scsi_Host *, struct scsi_cmnd *);
 int snic_abort_cmd(struct scsi_cmnd *);
@@ -400,7 +399,7 @@ void snic_handle_link_event(struct snic *);
 void snic_handle_link(struct work_struct *);
 
 int snic_queue_exch_ver_req(struct snic *);
-int snic_io_exch_ver_cmpl_handler(struct snic *, struct snic_fw_req *);
+void snic_io_exch_ver_cmpl_handler(struct snic *, struct snic_fw_req *);
 
 int snic_queue_wq_desc(struct snic *, void *os_buf, u16 len);
 

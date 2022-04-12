@@ -26,7 +26,7 @@ static struct ath_dfs_pool_stats dfs_pool_stats = { 0 };
 
 #define ATH9K_DFS_STAT(s, p) \
 	len += scnprintf(buf + len, size - len, "%28s : %10u\n", s, \
-			 sc->debug.stats.dfs_stats.p);
+			 sc->debug.stats.dfs_stats.p)
 #define ATH9K_DFS_POOL_STAT(s, p) \
 	len += scnprintf(buf + len, size - len, "%28s : %10u\n", s, \
 			 dfs_pool_stats.p);
@@ -144,8 +144,8 @@ static const struct file_operations fops_dfs_stats = {
 
 void ath9k_dfs_init_debug(struct ath_softc *sc)
 {
-	debugfs_create_file("dfs_stats", S_IRUSR,
+	debugfs_create_file("dfs_stats", 0400,
 			    sc->debug.debugfs_phy, sc, &fops_dfs_stats);
-	debugfs_create_file("dfs_simulate_radar", S_IWUSR,
+	debugfs_create_file("dfs_simulate_radar", 0200,
 			    sc->debug.debugfs_phy, sc, &fops_simulate_radar);
 }

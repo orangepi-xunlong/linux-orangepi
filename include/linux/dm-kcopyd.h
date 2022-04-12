@@ -20,6 +20,7 @@
 #define DM_KCOPYD_MAX_REGIONS 8
 
 #define DM_KCOPYD_IGNORE_ERROR 1
+#define DM_KCOPYD_WRITE_SEQ    2
 
 struct dm_kcopyd_throttle {
 	unsigned throttle;
@@ -50,6 +51,7 @@ MODULE_PARM_DESC(name, description)
 struct dm_kcopyd_client;
 struct dm_kcopyd_client *dm_kcopyd_client_create(struct dm_kcopyd_throttle *throttle);
 void dm_kcopyd_client_destroy(struct dm_kcopyd_client *kc);
+void dm_kcopyd_client_flush(struct dm_kcopyd_client *kc);
 
 /*
  * Submit a copy job to kcopyd.  This is built on top of the
@@ -61,9 +63,9 @@ void dm_kcopyd_client_destroy(struct dm_kcopyd_client *kc);
 typedef void (*dm_kcopyd_notify_fn)(int read_err, unsigned long write_err,
 				    void *context);
 
-int dm_kcopyd_copy(struct dm_kcopyd_client *kc, struct dm_io_region *from,
-		   unsigned num_dests, struct dm_io_region *dests,
-		   unsigned flags, dm_kcopyd_notify_fn fn, void *context);
+void dm_kcopyd_copy(struct dm_kcopyd_client *kc, struct dm_io_region *from,
+		    unsigned num_dests, struct dm_io_region *dests,
+		    unsigned flags, dm_kcopyd_notify_fn fn, void *context);
 
 /*
  * Prepare a callback and submit it via the kcopyd thread.
@@ -80,9 +82,9 @@ void *dm_kcopyd_prepare_callback(struct dm_kcopyd_client *kc,
 				 dm_kcopyd_notify_fn fn, void *context);
 void dm_kcopyd_do_callback(void *job, int read_err, unsigned long write_err);
 
-int dm_kcopyd_zero(struct dm_kcopyd_client *kc,
-		   unsigned num_dests, struct dm_io_region *dests,
-		   unsigned flags, dm_kcopyd_notify_fn fn, void *context);
+void dm_kcopyd_zero(struct dm_kcopyd_client *kc,
+		    unsigned num_dests, struct dm_io_region *dests,
+		    unsigned flags, dm_kcopyd_notify_fn fn, void *context);
 
 #endif	/* __KERNEL__ */
 #endif	/* _LINUX_DM_KCOPYD_H */

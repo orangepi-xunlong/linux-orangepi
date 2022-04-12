@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * consolemap.c
  *
@@ -9,6 +10,17 @@
  * Support for multiple unimaps by Jakub Jelinek <jj@ultra.linux.cz>, July 1998
  *
  * Fix bug in inverse translation. Stanislav Voronyi <stas@cnti.uanet.kharkov.ua>, Dec 1998
+ *
+ * In order to prevent the following circular lock dependency:
+ *   &mm->mmap_lock --> cpu_hotplug.lock --> console_lock --> &mm->mmap_lock
+ *
+ * We cannot allow page fault to happen while holding the console_lock.
+ * Therefore, all the userspace copy operations have to be done outside
+ * the console_lock critical sections.
+ *
+ * As all the affected functions are all called directly from vt_ioctl(), we
+ * can allocate some small buffers directly on stack without worrying about
+ * stack overflow.
  */
 
 #include <linux/module.h>
@@ -18,10 +30,11 @@
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/tty.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/console.h>
 #include <linux/consolemap.h>
 #include <linux/vt_kern.h>
+#include <linux/string.h>
 
 static unsigned short translations[][256] = {
   /* 8-bit Latin-1 mapped to Unicode -- trivial mapping */
@@ -218,7 +231,7 @@ static void set_inverse_trans_unicode(struct vc_data *conp,
 	q = p->inverse_trans_unicode;
 	if (!q) {
 		q = p->inverse_trans_unicode =
-			kmalloc(MAX_GLYPH * sizeof(u16), GFP_KERNEL);
+			kmalloc_array(MAX_GLYPH, sizeof(u16), GFP_KERNEL);
 		if (!q)
 			return;
 	}
@@ -255,7 +268,7 @@ unsigned short *set_translate(int m, struct vc_data *vc)
  *    was active.
  * Still, it is now possible to a certain extent to cut and paste non-ASCII.
  */
-u16 inverse_translate(struct vc_data *conp, int glyph, int use_unicode)
+u16 inverse_translate(const struct vc_data *conp, int glyph, int use_unicode)
 {
 	struct uni_pagedir *p;
 	int m;
@@ -309,18 +322,17 @@ static void update_user_maps(void)
 int con_set_trans_old(unsigned char __user * arg)
 {
 	int i;
-	unsigned short *p = translations[USER_MAP];
+	unsigned short inbuf[E_TABSZ];
+	unsigned char ubuf[E_TABSZ];
 
-	if (!access_ok(VERIFY_READ, arg, E_TABSZ))
+	if (copy_from_user(ubuf, arg, E_TABSZ))
 		return -EFAULT;
 
-	console_lock();
-	for (i=0; i<E_TABSZ ; i++) {
-		unsigned char uc;
-		__get_user(uc, arg+i);
-		p[i] = UNI_DIRECT_BASE | uc;
-	}
+	for (i = 0; i < E_TABSZ ; i++)
+		inbuf[i] = UNI_DIRECT_BASE | ubuf[i];
 
+	console_lock();
+	memcpy(translations[USER_MAP], inbuf, sizeof(inbuf));
 	update_user_maps();
 	console_unlock();
 	return 0;
@@ -330,35 +342,28 @@ int con_get_trans_old(unsigned char __user * arg)
 {
 	int i, ch;
 	unsigned short *p = translations[USER_MAP];
-
-	if (!access_ok(VERIFY_WRITE, arg, E_TABSZ))
-		return -EFAULT;
+	unsigned char outbuf[E_TABSZ];
 
 	console_lock();
-	for (i=0; i<E_TABSZ ; i++)
+	for (i = 0; i < E_TABSZ ; i++)
 	{
 		ch = conv_uni_to_pc(vc_cons[fg_console].d, p[i]);
-		__put_user((ch & ~0xff) ? 0 : ch, arg+i);
+		outbuf[i] = (ch & ~0xff) ? 0 : ch;
 	}
 	console_unlock();
-	return 0;
+
+	return copy_to_user(arg, outbuf, sizeof(outbuf)) ? -EFAULT : 0;
 }
 
 int con_set_trans_new(ushort __user * arg)
 {
-	int i;
-	unsigned short *p = translations[USER_MAP];
+	unsigned short inbuf[E_TABSZ];
 
-	if (!access_ok(VERIFY_READ, arg, E_TABSZ*sizeof(unsigned short)))
+	if (copy_from_user(inbuf, arg, sizeof(inbuf)))
 		return -EFAULT;
 
 	console_lock();
-	for (i=0; i<E_TABSZ ; i++) {
-		unsigned short us;
-		__get_user(us, arg+i);
-		p[i] = us;
-	}
-
+	memcpy(translations[USER_MAP], inbuf, sizeof(inbuf));
 	update_user_maps();
 	console_unlock();
 	return 0;
@@ -366,18 +371,13 @@ int con_set_trans_new(ushort __user * arg)
 
 int con_get_trans_new(ushort __user * arg)
 {
-	int i;
-	unsigned short *p = translations[USER_MAP];
-
-	if (!access_ok(VERIFY_WRITE, arg, E_TABSZ*sizeof(unsigned short)))
-		return -EFAULT;
+	unsigned short outbuf[E_TABSZ];
 
 	console_lock();
-	for (i=0; i<E_TABSZ ; i++)
-	  __put_user(p[i], arg+i);
+	memcpy(outbuf, translations[USER_MAP], sizeof(outbuf));
 	console_unlock();
-	
-	return 0;
+
+	return copy_to_user(arg, outbuf, sizeof(outbuf)) ? -EFAULT : 0;
 }
 
 /*
@@ -479,7 +479,8 @@ con_insert_unipair(struct uni_pagedir *p, u_short unicode, u_short fontpos)
 
 	p1 = p->uni_pgdir[n = unicode >> 11];
 	if (!p1) {
-		p1 = p->uni_pgdir[n] = kmalloc(32*sizeof(u16 *), GFP_KERNEL);
+		p1 = p->uni_pgdir[n] = kmalloc_array(32, sizeof(u16 *),
+						     GFP_KERNEL);
 		if (!p1) return -ENOMEM;
 		for (i = 0; i < 32; i++)
 			p1[i] = NULL;
@@ -487,14 +488,14 @@ con_insert_unipair(struct uni_pagedir *p, u_short unicode, u_short fontpos)
 
 	p2 = p1[n = (unicode >> 6) & 0x1f];
 	if (!p2) {
-		p2 = p1[n] = kmalloc(64*sizeof(u16), GFP_KERNEL);
+		p2 = p1[n] = kmalloc_array(64, sizeof(u16), GFP_KERNEL);
 		if (!p2) return -ENOMEM;
 		memset(p2, 0xff, 64*sizeof(u16)); /* No glyphs for the characters (yet) */
 	}
 
 	p2[unicode & 0x3f] = fontpos;
 	
-	p->sum += (fontpos << 20) + unicode;
+	p->sum += (fontpos << 20U) + unicode;
 
 	return 0;
 }
@@ -536,9 +537,14 @@ int con_set_unimap(struct vc_data *vc, ushort ct, struct unipair __user *list)
 {
 	int err = 0, err1, i;
 	struct uni_pagedir *p, *q;
+	struct unipair *unilist, *plist;
 
 	if (!ct)
 		return 0;
+
+	unilist = vmemdup_user(list, array_size(sizeof(struct unipair), ct));
+	if (IS_ERR(unilist))
+		return PTR_ERR(unilist);
 
 	console_lock();
 
@@ -557,8 +563,8 @@ int con_set_unimap(struct vc_data *vc, ushort ct, struct unipair __user *list)
 		
 		err1 = con_do_clear_unimap(vc);
 		if (err1) {
-			console_unlock();
-			return err1;
+			err = err1;
+			goto out_unlock;
 		}
 		
 		/*
@@ -592,8 +598,8 @@ int con_set_unimap(struct vc_data *vc, ushort ct, struct unipair __user *list)
 						*vc->vc_uni_pagedir_loc = p;
 						con_release_unimap(q);
 						kfree(q);
-						console_unlock();
-						return err1; 
+						err = err1;
+						goto out_unlock;
 					}
 				}
 			} else {
@@ -617,22 +623,17 @@ int con_set_unimap(struct vc_data *vc, ushort ct, struct unipair __user *list)
 	/*
 	 * Insert user specified unicode pairs into new table.
 	 */
-	while (ct--) {
-		unsigned short unicode, fontpos;
-		__get_user(unicode, &list->unicode);
-		__get_user(fontpos, &list->fontpos);
-		if ((err1 = con_insert_unipair(p, unicode,fontpos)) != 0)
+	for (plist = unilist; ct; ct--, plist++) {
+		err1 = con_insert_unipair(p, plist->unicode, plist->fontpos);
+		if (err1)
 			err = err1;
-		list++;
 	}
 	
 	/*
 	 * Merge with fontmaps of any other virtual consoles.
 	 */
-	if (con_unify_unimap(vc, p)) {
-		console_unlock();
-		return err;
-	}
+	if (con_unify_unimap(vc, p))
+		goto out_unlock;
 
 	for (i = 0; i <= 3; i++)
 		set_inverse_transl(vc, p, i); /* Update inverse translations */
@@ -640,6 +641,7 @@ int con_set_unimap(struct vc_data *vc, ushort ct, struct unipair __user *list)
 
 out_unlock:
 	console_unlock();
+	kvfree(unilist);
 	return err;
 }
 
@@ -706,7 +708,7 @@ EXPORT_SYMBOL(con_set_default_unimap);
 /**
  *	con_copy_unimap		-	copy unimap between two vts
  *	@dst_vc: target
- *	@src_vt: source
+ *	@src_vc: source
  *
  *	The caller must hold the console lock when invoking this method
  */
@@ -726,18 +728,23 @@ int con_copy_unimap(struct vc_data *dst_vc, struct vc_data *src_vc)
 }
 EXPORT_SYMBOL(con_copy_unimap);
 
-/**
+/*
  *	con_get_unimap		-	get the unicode map
- *	@vc: the console to read from
  *
  *	Read the console unicode data for this console. Called from the ioctl
  *	handlers.
  */
 int con_get_unimap(struct vc_data *vc, ushort ct, ushort __user *uct, struct unipair __user *list)
 {
-	int i, j, k, ect;
+	int i, j, k, ret = 0;
+	ushort ect;
 	u16 **p1, *p2;
 	struct uni_pagedir *p;
+	struct unipair *unilist;
+
+	unilist = kvmalloc_array(ct, sizeof(struct unipair), GFP_KERNEL);
+	if (!unilist)
+		return -ENOMEM;
 
 	console_lock();
 
@@ -750,22 +757,25 @@ int con_get_unimap(struct vc_data *vc, ushort ct, ushort __user *uct, struct uni
 			for (j = 0; j < 32; j++) {
 			p2 = *(p1++);
 			if (p2)
-				for (k = 0; k < 64; k++) {
-					if (*p2 < MAX_GLYPH && ect++ < ct) {
-						__put_user((u_short)((i<<11)+(j<<6)+k),
-							   &list->unicode);
-						__put_user((u_short) *p2, 
-							   &list->fontpos);
-						list++;
+				for (k = 0; k < 64; k++, p2++) {
+					if (*p2 >= MAX_GLYPH)
+						continue;
+					if (ect < ct) {
+						unilist[ect].unicode =
+							(i<<11)+(j<<6)+k;
+						unilist[ect].fontpos = *p2;
 					}
-					p2++;
+					ect++;
 				}
 			}
 		}
 	}
-	__put_user(ect, uct);
 	console_unlock();
-	return ((ect <= ct) ? 0 : -ENOMEM);
+	if (copy_to_user(list, unilist, min(ect, ct) * sizeof(struct unipair)))
+		ret = -EFAULT;
+	put_user(ect, uct);
+	kvfree(unilist);
+	return ret ? ret : (ect <= ct) ? 0 : -ENOMEM;
 }
 
 /*

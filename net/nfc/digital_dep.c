@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * NFC Digital Protocol stack
  * Copyright (c) 2013, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
  */
 
 #define pr_fmt(fmt) "digital: %s: " fmt, __func__
@@ -47,9 +38,6 @@
 
 #define DIGITAL_GB_BIT	0x02
 
-#define DIGITAL_NFC_DEP_REQ_RES_HEADROOM	2 /* SoD: [SB (NFC-A)] + LEN */
-#define DIGITAL_NFC_DEP_REQ_RES_TAILROOM	2 /* EoD: 2-byte CRC */
-
 #define DIGITAL_NFC_DEP_PFB_TYPE(pfb) ((pfb) & 0xE0)
 
 #define DIGITAL_NFC_DEP_PFB_TIMEOUT_BIT 0x10
@@ -80,7 +68,7 @@ struct digital_atr_req {
 	u8 bs;
 	u8 br;
 	u8 pp;
-	u8 gb[0];
+	u8 gb[];
 } __packed;
 
 struct digital_atr_res {
@@ -92,7 +80,7 @@ struct digital_atr_res {
 	u8 br;
 	u8 to;
 	u8 pp;
-	u8 gb[0];
+	u8 gb[];
 } __packed;
 
 struct digital_psl_req {
@@ -151,7 +139,7 @@ static const u8 digital_payload_bits_map[4] = {
  *  0 <= wt <= 14 (given by the target by the TO field of ATR_RES response)
  */
 #define DIGITAL_NFC_DEP_IN_MAX_WT 14
-#define DIGITAL_NFC_DEP_TG_MAX_WT 8
+#define DIGITAL_NFC_DEP_TG_MAX_WT 14
 static const u16 digital_rwt_map[DIGITAL_NFC_DEP_IN_MAX_WT + 1] = {
 	100,  101,  101,  102,  105,
 	110,  119,  139,  177,  255,
@@ -185,7 +173,7 @@ static void digital_skb_push_dep_sod(struct nfc_digital_dev *ddev,
 	skb->data[0] = skb->len;
 
 	if (ddev->curr_rf_tech == NFC_DIGITAL_RF_TECH_106A)
-		*skb_push(skb, sizeof(u8)) = DIGITAL_NFC_DEP_NFCA_SOD_SB;
+		*(u8 *)skb_push(skb, sizeof(u8)) = DIGITAL_NFC_DEP_NFCA_SOD_SB;
 }
 
 static int digital_skb_pull_dep_sod(struct nfc_digital_dev *ddev,
@@ -226,8 +214,7 @@ digital_send_dep_data_prep(struct nfc_digital_dev *ddev, struct sk_buff *skb,
 			return ERR_PTR(-ENOMEM);
 		}
 
-		memcpy(skb_put(new_skb, ddev->remote_payload_max), skb->data,
-		       ddev->remote_payload_max);
+		skb_put_data(new_skb, skb->data, ddev->remote_payload_max);
 		skb_pull(skb, ddev->remote_payload_max);
 
 		ddev->chaining_skb = skb;
@@ -277,8 +264,7 @@ digital_recv_dep_data_gather(struct nfc_digital_dev *ddev, u8 pfb,
 			ddev->chaining_skb = new_skb;
 		}
 
-		memcpy(skb_put(ddev->chaining_skb, resp->len), resp->data,
-		       resp->len);
+		skb_put_data(ddev->chaining_skb, resp->data, resp->len);
 
 		kfree_skb(resp);
 		resp = NULL;
@@ -525,7 +511,7 @@ int digital_in_send_atr_req(struct nfc_digital_dev *ddev,
 
 	if (gb_len) {
 		atr_req->pp |= DIGITAL_GB_BIT;
-		memcpy(skb_put(skb, gb_len), gb, gb_len);
+		skb_put_data(skb, gb, gb_len);
 	}
 
 	digital_skb_push_dep_sod(ddev, skb);
@@ -656,7 +642,7 @@ static int digital_in_send_rtox(struct nfc_digital_dev *ddev,
 	if (!skb)
 		return -ENOMEM;
 
-	*skb_put(skb, 1) = rtox;
+	skb_put_u8(skb, rtox);
 
 	skb_push(skb, sizeof(struct digital_dep_req_res));
 
@@ -1012,8 +998,7 @@ static int digital_tg_send_ack(struct nfc_digital_dev *ddev,
 	if (ddev->did) {
 		dep_res->pfb |= DIGITAL_NFC_DEP_PFB_DID_BIT;
 
-		memcpy(skb_put(skb, sizeof(ddev->did)), &ddev->did,
-		       sizeof(ddev->did));
+		skb_put_data(skb, &ddev->did, sizeof(ddev->did));
 	}
 
 	ddev->curr_nfc_dep_pni =
@@ -1057,8 +1042,7 @@ static int digital_tg_send_atn(struct nfc_digital_dev *ddev)
 	if (ddev->did) {
 		dep_res->pfb |= DIGITAL_NFC_DEP_PFB_DID_BIT;
 
-		memcpy(skb_put(skb, sizeof(ddev->did)), &ddev->did,
-		       sizeof(ddev->did));
+		skb_put_data(skb, &ddev->did, sizeof(ddev->did));
 	}
 
 	digital_skb_push_dep_sod(ddev, skb);
@@ -1233,7 +1217,7 @@ static void digital_tg_recv_dep_req(struct nfc_digital_dev *ddev, void *arg,
 
 		/* ACK */
 		if (ddev->atn_count) {
-			/* The target has previously recevied one or more ATN
+			/* The target has previously received one or more ATN
 			 * PDUs.
 			 */
 			ddev->atn_count = 0;
@@ -1289,6 +1273,8 @@ static void digital_tg_recv_dep_req(struct nfc_digital_dev *ddev, void *arg,
 	}
 
 	rc = nfc_tm_data_received(ddev->nfc_dev, resp);
+	if (rc)
+		resp = NULL;
 
 exit:
 	kfree_skb(ddev->chaining_skb);
@@ -1325,8 +1311,7 @@ int digital_tg_send_dep_res(struct nfc_digital_dev *ddev, struct sk_buff *skb)
 	if (ddev->did) {
 		dep_res->pfb |= DIGITAL_NFC_DEP_PFB_DID_BIT;
 
-		memcpy(skb_put(skb, sizeof(ddev->did)), &ddev->did,
-		       sizeof(ddev->did));
+		skb_put_data(skb, &ddev->did, sizeof(ddev->did));
 	}
 
 	ddev->curr_nfc_dep_pni =

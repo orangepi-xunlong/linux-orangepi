@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Framebuffer driver for TI OMAP boards
  *
@@ -9,20 +10,6 @@
  *   Juha Yrjola <juha.yrjola@nokia.com>   - Original driver and improvements
  *   Dirk Behme <dirk.behme@de.bosch.com>  - changes for 2.6 kernel API
  *   Texas Instruments                     - H3 support
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  */
 #include <linux/platform_device.h>
 #include <linux/mm.h>
@@ -47,11 +34,7 @@ static unsigned long	def_vyres;
 static unsigned int	def_rotate;
 static unsigned int	def_mirror;
 
-#ifdef CONFIG_FB_OMAP_MANUAL_UPDATE
-static bool		manual_update = 1;
-#else
-static bool		manual_update;
-#endif
+static bool	manual_update = IS_BUILTIN(CONFIG_FB_OMAP_MANUAL_UPDATE);
 
 static struct platform_device	*fbdev_pdev;
 static struct lcd_panel		*fbdev_panel;
@@ -62,7 +45,7 @@ struct caps_table_struct {
 	const char *name;
 };
 
-static struct caps_table_struct ctrl_caps[] = {
+static const struct caps_table_struct ctrl_caps[] = {
 	{ OMAPFB_CAPS_MANUAL_UPDATE,  "manual update" },
 	{ OMAPFB_CAPS_TEARSYNC,       "tearing synchronization" },
 	{ OMAPFB_CAPS_PLANE_RELOCATE_MEM, "relocate plane memory" },
@@ -74,7 +57,7 @@ static struct caps_table_struct ctrl_caps[] = {
 	{ OMAPFB_CAPS_SET_BACKLIGHT,  "backlight setting" },
 };
 
-static struct caps_table_struct color_caps[] = {
+static const struct caps_table_struct color_caps[] = {
 	{ 1 << OMAPFB_COLOR_RGB565,	"RGB565", },
 	{ 1 << OMAPFB_COLOR_YUV422,	"YUV422", },
 	{ 1 << OMAPFB_COLOR_YUV420,	"YUV420", },
@@ -270,7 +253,7 @@ static int _setcolreg(struct fb_info *info, u_int regno, u_int red, u_int green,
 		if (fbdev->ctrl->setcolreg)
 			r = fbdev->ctrl->setcolreg(regno, red, green, blue,
 							transp, update_hw_pal);
-		/* Fallthrough */
+		fallthrough;
 	case OMAPFB_COLOR_RGB565:
 	case OMAPFB_COLOR_RGB444:
 		if (r != 0)
@@ -337,7 +320,8 @@ static int omapfb_blank(int blank, struct fb_info *fbi)
 		if (fbdev->state == OMAPFB_SUSPENDED) {
 			if (fbdev->ctrl->resume)
 				fbdev->ctrl->resume();
-			fbdev->panel->enable(fbdev->panel);
+			if (fbdev->panel->enable)
+				fbdev->panel->enable(fbdev->panel);
 			fbdev->state = OMAPFB_ACTIVE;
 			if (fbdev->ctrl->get_update_mode() ==
 					OMAPFB_MANUAL_UPDATE)
@@ -346,7 +330,8 @@ static int omapfb_blank(int blank, struct fb_info *fbi)
 		break;
 	case FB_BLANK_POWERDOWN:
 		if (fbdev->state == OMAPFB_ACTIVE) {
-			fbdev->panel->disable(fbdev->panel);
+			if (fbdev->panel->disable)
+				fbdev->panel->disable(fbdev->panel);
 			if (fbdev->ctrl->suspend)
 				fbdev->ctrl->suspend();
 			fbdev->state = OMAPFB_SUSPENDED;
@@ -458,6 +443,7 @@ static int set_color_mode(struct omapfb_plane_struct *plane,
 		return 0;
 	case 12:
 		var->bits_per_pixel = 16;
+		fallthrough;
 	case 16:
 		if (plane->fbdev->panel->bpp == 12)
 			plane->color_mode = OMAPFB_COLOR_RGB444;
@@ -956,7 +942,7 @@ int omapfb_register_client(struct omapfb_notifier_block *omapfb_nb,
 {
 	int r;
 
-	if ((unsigned)omapfb_nb->plane_idx > OMAPFB_PLANE_NUM)
+	if ((unsigned)omapfb_nb->plane_idx >= OMAPFB_PLANE_NUM)
 		return -EINVAL;
 
 	if (!notifier_inited) {
@@ -1030,7 +1016,8 @@ static void omapfb_get_caps(struct omapfb_device *fbdev, int plane,
 {
 	memset(caps, 0, sizeof(*caps));
 	fbdev->ctrl->get_caps(plane, caps);
-	caps->ctrl |= fbdev->panel->get_caps(fbdev->panel);
+	if (fbdev->panel->get_caps)
+		caps->ctrl |= fbdev->panel->get_caps(fbdev->panel);
 }
 
 /* For lcd testing */
@@ -1061,7 +1048,7 @@ static int omapfb_ioctl(struct fb_info *fbi, unsigned int cmd,
 {
 	struct omapfb_plane_struct *plane = fbi->par;
 	struct omapfb_device	*fbdev = plane->fbdev;
-	struct fb_ops		*ops = fbi->fbops;
+	const struct fb_ops *ops = fbi->fbops;
 	union {
 		struct omapfb_update_window	update_window;
 		struct omapfb_plane_info	plane_info;
@@ -1256,7 +1243,7 @@ static ssize_t omapfb_show_caps_num(struct device *dev,
 	size = 0;
 	while (size < PAGE_SIZE && plane < OMAPFB_PLANE_NUM) {
 		omapfb_get_caps(fbdev, plane, &caps);
-		size += snprintf(&buf[size], PAGE_SIZE - size,
+		size += scnprintf(&buf[size], PAGE_SIZE - size,
 			"plane#%d %#010x %#010x %#010x\n",
 			plane, caps.ctrl, caps.plane_color, caps.wnd_color);
 		plane++;
@@ -1277,28 +1264,28 @@ static ssize_t omapfb_show_caps_text(struct device *dev,
 	size = 0;
 	while (size < PAGE_SIZE && plane < OMAPFB_PLANE_NUM) {
 		omapfb_get_caps(fbdev, plane, &caps);
-		size += snprintf(&buf[size], PAGE_SIZE - size,
+		size += scnprintf(&buf[size], PAGE_SIZE - size,
 				 "plane#%d:\n", plane);
 		for (i = 0; i < ARRAY_SIZE(ctrl_caps) &&
 		     size < PAGE_SIZE; i++) {
 			if (ctrl_caps[i].flag & caps.ctrl)
-				size += snprintf(&buf[size], PAGE_SIZE - size,
+				size += scnprintf(&buf[size], PAGE_SIZE - size,
 					" %s\n", ctrl_caps[i].name);
 		}
-		size += snprintf(&buf[size], PAGE_SIZE - size,
+		size += scnprintf(&buf[size], PAGE_SIZE - size,
 				 " plane colors:\n");
 		for (i = 0; i < ARRAY_SIZE(color_caps) &&
 		     size < PAGE_SIZE; i++) {
 			if (color_caps[i].flag & caps.plane_color)
-				size += snprintf(&buf[size], PAGE_SIZE - size,
+				size += scnprintf(&buf[size], PAGE_SIZE - size,
 					"  %s\n", color_caps[i].name);
 		}
-		size += snprintf(&buf[size], PAGE_SIZE - size,
+		size += scnprintf(&buf[size], PAGE_SIZE - size,
 				 " window colors:\n");
 		for (i = 0; i < ARRAY_SIZE(color_caps) &&
 		     size < PAGE_SIZE; i++) {
 			if (color_caps[i].flag & caps.wnd_color)
-				size += snprintf(&buf[size], PAGE_SIZE - size,
+				size += scnprintf(&buf[size], PAGE_SIZE - size,
 					"  %s\n", color_caps[i].name);
 		}
 
@@ -1381,7 +1368,7 @@ static struct attribute *panel_attrs[] = {
 	NULL,
 };
 
-static struct attribute_group panel_attr_grp = {
+static const struct attribute_group panel_attr_grp = {
 	.name  = "panel",
 	.attrs = panel_attrs,
 };
@@ -1403,7 +1390,7 @@ static struct attribute *ctrl_attrs[] = {
 	NULL,
 };
 
-static struct attribute_group ctrl_attr_grp = {
+static const struct attribute_group ctrl_attr_grp = {
 	.name  = "ctrl",
 	.attrs = ctrl_attrs,
 };
@@ -1512,8 +1499,6 @@ static int planes_init(struct omapfb_device *fbdev)
 		fbi = framebuffer_alloc(sizeof(struct omapfb_plane_struct),
 					fbdev->dev);
 		if (fbi == NULL) {
-			dev_err(fbdev->dev,
-				"unable to allocate memory for plane info\n");
 			planes_cleanup(fbdev);
 			return -ENOMEM;
 		}
@@ -1546,18 +1531,27 @@ static void omapfb_free_resources(struct omapfb_device *fbdev, int state)
 	case OMAPFB_ACTIVE:
 		for (i = 0; i < fbdev->mem_desc.region_cnt; i++)
 			unregister_framebuffer(fbdev->fb_info[i]);
+		fallthrough;
 	case 7:
 		omapfb_unregister_sysfs(fbdev);
+		fallthrough;
 	case 6:
-		fbdev->panel->disable(fbdev->panel);
+		if (fbdev->panel->disable)
+			fbdev->panel->disable(fbdev->panel);
+		fallthrough;
 	case 5:
 		omapfb_set_update_mode(fbdev, OMAPFB_UPDATE_DISABLED);
+		fallthrough;
 	case 4:
 		planes_cleanup(fbdev);
+		fallthrough;
 	case 3:
 		ctrl_cleanup(fbdev);
+		fallthrough;
 	case 2:
-		fbdev->panel->cleanup(fbdev->panel);
+		if (fbdev->panel->cleanup)
+			fbdev->panel->cleanup(fbdev->panel);
+		fallthrough;
 	case 1:
 		dev_set_drvdata(fbdev->dev, NULL);
 		kfree(fbdev);
@@ -1603,19 +1597,6 @@ static int omapfb_find_ctrl(struct omapfb_device *fbdev)
 	return 0;
 }
 
-static void check_required_callbacks(struct omapfb_device *fbdev)
-{
-#define _C(x) (fbdev->ctrl->x != NULL)
-#define _P(x) (fbdev->panel->x != NULL)
-	BUG_ON(fbdev->ctrl == NULL || fbdev->panel == NULL);
-	BUG_ON(!(_C(init) && _C(cleanup) && _C(get_caps) &&
-		 _C(set_update_mode) && _C(setup_plane) && _C(enable_plane) &&
-		 _P(init) && _P(cleanup) && _P(enable) && _P(disable) &&
-		 _P(get_caps)));
-#undef _P
-#undef _C
-}
-
 /*
  * Called by LDM binding to probe and attach a new device.
  * Initialization sequence:
@@ -1653,7 +1634,7 @@ static int omapfb_do_probe(struct platform_device *pdev,
 		goto cleanup;
 	}
 
-	fbdev = kzalloc(sizeof(struct omapfb_device), GFP_KERNEL);
+	fbdev = kzalloc(sizeof(*fbdev), GFP_KERNEL);
 	if (fbdev == NULL) {
 		dev_err(&pdev->dev,
 			"unable to allocate memory for device info\n");
@@ -1680,9 +1661,11 @@ static int omapfb_do_probe(struct platform_device *pdev,
 		goto cleanup;
 	}
 
-	r = fbdev->panel->init(fbdev->panel, fbdev);
-	if (r)
-		goto cleanup;
+	if (fbdev->panel->init) {
+		r = fbdev->panel->init(fbdev->panel, fbdev);
+		if (r)
+			goto cleanup;
+	}
 
 	pr_info("omapfb: configured for panel %s\n", fbdev->panel->name);
 
@@ -1697,8 +1680,6 @@ static int omapfb_do_probe(struct platform_device *pdev,
 	if (fbdev->ctrl->mmap != NULL)
 		omapfb_ops.fb_mmap = omapfb_mmap;
 	init_state++;
-
-	check_required_callbacks(fbdev);
 
 	r = planes_init(fbdev);
 	if (r)
@@ -1725,9 +1706,11 @@ static int omapfb_do_probe(struct platform_device *pdev,
 				   OMAPFB_MANUAL_UPDATE : OMAPFB_AUTO_UPDATE);
 	init_state++;
 
-	r = fbdev->panel->enable(fbdev->panel);
-	if (r)
-		goto cleanup;
+	if (fbdev->panel->enable) {
+		r = fbdev->panel->enable(fbdev->panel);
+		if (r)
+			goto cleanup;
+	}
 	init_state++;
 
 	r = omapfb_register_sysfs(fbdev);
@@ -1871,7 +1854,7 @@ static int __init omapfb_setup(char *options)
 			case 'm':
 			case 'M':
 				vram *= 1024;
-				/* Fall through */
+				fallthrough;
 			case 'k':
 			case 'K':
 				vram *= 1024;

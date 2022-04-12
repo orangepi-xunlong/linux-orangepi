@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *  fs/partitions/atari.h
  *  Moved by Russell King from:
@@ -33,4 +34,3 @@ struct rootsector
   u16 checksum;			/* checksum for bootable disks */
 } __packed;
 
-int atari_partition(struct parsed_partitions *state);

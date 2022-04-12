@@ -22,20 +22,24 @@
 #include "gk104.h"
 #include "changk104.h"
 
+#include <nvif/class.h>
+
 static const struct gk104_fifo_func
 gm20b_fifo = {
+	.intr.fault = gm107_fifo_intr_fault,
+	.pbdma = &gm200_fifo_pbdma,
+	.fault.access = gk104_fifo_fault_access,
 	.fault.engine = gm107_fifo_fault_engine,
 	.fault.reason = gk104_fifo_fault_reason,
 	.fault.hubclient = gk104_fifo_fault_hubclient,
 	.fault.gpcclient = gk104_fifo_fault_gpcclient,
-	.chan = {
-		&gm200_fifo_gpfifo_oclass,
-		NULL
-	},
+	.runlist = &gm107_fifo_runlist,
+	.chan = {{0,0,MAXWELL_CHANNEL_GPFIFO_A}, gk104_fifo_gpfifo_new },
 };
 
 int
-gm20b_fifo_new(struct nvkm_device *device, int index, struct nvkm_fifo **pfifo)
+gm20b_fifo_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst,
+	       struct nvkm_fifo **pfifo)
 {
-	return gk104_fifo_new_(&gm20b_fifo, device, index, 512, pfifo);
+	return gk104_fifo_new_(&gm20b_fifo, device, type, inst, 512, pfifo);
 }

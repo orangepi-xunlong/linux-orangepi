@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ispccp2.c
  *
@@ -8,10 +9,6 @@
  *
  * Contacts: Laurent Pinchart <laurent.pinchart@ideasonboard.com>
  *	     Sakari Ailus <sakari.ailus@iki.fi>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/delay.h>
@@ -213,14 +210,17 @@ static int ccp2_phyif_config(struct isp_ccp2_device *ccp2,
 	struct isp_device *isp = to_isp_device(ccp2);
 	u32 val;
 
-	/* CCP2B mode */
 	val = isp_reg_readl(isp, OMAP3_ISP_IOMEM_CCP2, ISPCCP2_CTRL) |
-			    ISPCCP2_CTRL_IO_OUT_SEL | ISPCCP2_CTRL_MODE;
+			    ISPCCP2_CTRL_MODE;
 	/* Data/strobe physical layer */
 	BIT_SET(val, ISPCCP2_CTRL_PHY_SEL_SHIFT, ISPCCP2_CTRL_PHY_SEL_MASK,
 		buscfg->phy_layer);
+	BIT_SET(val, ISPCCP2_CTRL_IO_OUT_SEL_SHIFT,
+		ISPCCP2_CTRL_IO_OUT_SEL_MASK, buscfg->ccp2_mode);
 	BIT_SET(val, ISPCCP2_CTRL_INV_SHIFT, ISPCCP2_CTRL_INV_MASK,
 		buscfg->strobe_clk_pol);
+	BIT_SET(val, ISPCCP2_CTRL_VP_CLK_POL_SHIFT,
+		ISPCCP2_CTRL_VP_CLK_POL_MASK, buscfg->vp_clk_pol);
 	isp_reg_writel(isp, val, OMAP3_ISP_IOMEM_CCP2, ISPCCP2_CTRL);
 
 	val = isp_reg_readl(isp, OMAP3_ISP_IOMEM_CCP2, ISPCCP2_CTRL);
@@ -347,6 +347,7 @@ static void ccp2_lcx_config(struct isp_ccp2_device *ccp2,
  */
 static int ccp2_if_configure(struct isp_ccp2_device *ccp2)
 {
+	struct isp_pipeline *pipe = to_isp_pipeline(&ccp2->subdev.entity);
 	const struct isp_bus_cfg *buscfg;
 	struct v4l2_mbus_framefmt *format;
 	struct media_pad *pad;
@@ -358,7 +359,7 @@ static int ccp2_if_configure(struct isp_ccp2_device *ccp2)
 
 	pad = media_entity_remote_pad(&ccp2->pads[CCP2_PAD_SINK]);
 	sensor = media_entity_to_v4l2_subdev(pad->entity);
-	buscfg = sensor->host_priv;
+	buscfg = v4l2_subdev_to_bus_cfg(pipe->external);
 
 	ret = ccp2_phyif_config(ccp2, &buscfg->bus.ccp2);
 	if (ret < 0)
@@ -617,11 +618,13 @@ static const unsigned int ccp2_fmts[] = {
  * return format structure or NULL on error
  */
 static struct v4l2_mbus_framefmt *
-__ccp2_get_format(struct isp_ccp2_device *ccp2, struct v4l2_subdev_pad_config *cfg,
-		     unsigned int pad, enum v4l2_subdev_format_whence which)
+__ccp2_get_format(struct isp_ccp2_device *ccp2,
+		  struct v4l2_subdev_state *sd_state,
+		  unsigned int pad, enum v4l2_subdev_format_whence which)
 {
 	if (which == V4L2_SUBDEV_FORMAT_TRY)
-		return v4l2_subdev_get_try_format(&ccp2->subdev, cfg, pad);
+		return v4l2_subdev_get_try_format(&ccp2->subdev, sd_state,
+						  pad);
 	else
 		return &ccp2->formats[pad];
 }
@@ -635,7 +638,8 @@ __ccp2_get_format(struct isp_ccp2_device *ccp2, struct v4l2_subdev_pad_config *c
  * @which : wanted subdev format
  */
 static void ccp2_try_format(struct isp_ccp2_device *ccp2,
-			       struct v4l2_subdev_pad_config *cfg, unsigned int pad,
+			       struct v4l2_subdev_state *sd_state,
+			       unsigned int pad,
 			       struct v4l2_mbus_framefmt *fmt,
 			       enum v4l2_subdev_format_whence which)
 {
@@ -669,7 +673,8 @@ static void ccp2_try_format(struct isp_ccp2_device *ccp2,
 		 * When CCP2 write to memory feature will be added this
 		 * should be changed properly.
 		 */
-		format = __ccp2_get_format(ccp2, cfg, CCP2_PAD_SINK, which);
+		format = __ccp2_get_format(ccp2, sd_state, CCP2_PAD_SINK,
+					   which);
 		memcpy(fmt, format, sizeof(*fmt));
 		fmt->code = MEDIA_BUS_FMT_SGRBG10_1X10;
 		break;
@@ -687,7 +692,7 @@ static void ccp2_try_format(struct isp_ccp2_device *ccp2,
  * return -EINVAL or zero on success
  */
 static int ccp2_enum_mbus_code(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_pad_config *cfg,
+				  struct v4l2_subdev_state *sd_state,
 				  struct v4l2_subdev_mbus_code_enum *code)
 {
 	struct isp_ccp2_device *ccp2 = v4l2_get_subdevdata(sd);
@@ -702,8 +707,8 @@ static int ccp2_enum_mbus_code(struct v4l2_subdev *sd,
 		if (code->index != 0)
 			return -EINVAL;
 
-		format = __ccp2_get_format(ccp2, cfg, CCP2_PAD_SINK,
-					      code->which);
+		format = __ccp2_get_format(ccp2, sd_state, CCP2_PAD_SINK,
+					   code->which);
 		code->code = format->code;
 	}
 
@@ -711,7 +716,7 @@ static int ccp2_enum_mbus_code(struct v4l2_subdev *sd,
 }
 
 static int ccp2_enum_frame_size(struct v4l2_subdev *sd,
-				   struct v4l2_subdev_pad_config *cfg,
+				   struct v4l2_subdev_state *sd_state,
 				   struct v4l2_subdev_frame_size_enum *fse)
 {
 	struct isp_ccp2_device *ccp2 = v4l2_get_subdevdata(sd);
@@ -723,7 +728,7 @@ static int ccp2_enum_frame_size(struct v4l2_subdev *sd,
 	format.code = fse->code;
 	format.width = 1;
 	format.height = 1;
-	ccp2_try_format(ccp2, cfg, fse->pad, &format, fse->which);
+	ccp2_try_format(ccp2, sd_state, fse->pad, &format, fse->which);
 	fse->min_width = format.width;
 	fse->min_height = format.height;
 
@@ -733,7 +738,7 @@ static int ccp2_enum_frame_size(struct v4l2_subdev *sd,
 	format.code = fse->code;
 	format.width = -1;
 	format.height = -1;
-	ccp2_try_format(ccp2, cfg, fse->pad, &format, fse->which);
+	ccp2_try_format(ccp2, sd_state, fse->pad, &format, fse->which);
 	fse->max_width = format.width;
 	fse->max_height = format.height;
 
@@ -747,13 +752,14 @@ static int ccp2_enum_frame_size(struct v4l2_subdev *sd,
  * @fmt   : pointer to v4l2 subdev format structure
  * return -EINVAL or zero on success
  */
-static int ccp2_get_format(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config *cfg,
-			      struct v4l2_subdev_format *fmt)
+static int ccp2_get_format(struct v4l2_subdev *sd,
+			   struct v4l2_subdev_state *sd_state,
+			   struct v4l2_subdev_format *fmt)
 {
 	struct isp_ccp2_device *ccp2 = v4l2_get_subdevdata(sd);
 	struct v4l2_mbus_framefmt *format;
 
-	format = __ccp2_get_format(ccp2, cfg, fmt->pad, fmt->which);
+	format = __ccp2_get_format(ccp2, sd_state, fmt->pad, fmt->which);
 	if (format == NULL)
 		return -EINVAL;
 
@@ -768,25 +774,27 @@ static int ccp2_get_format(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config
  * @fmt   : pointer to v4l2 subdev format structure
  * returns zero
  */
-static int ccp2_set_format(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config *cfg,
-			      struct v4l2_subdev_format *fmt)
+static int ccp2_set_format(struct v4l2_subdev *sd,
+			   struct v4l2_subdev_state *sd_state,
+			   struct v4l2_subdev_format *fmt)
 {
 	struct isp_ccp2_device *ccp2 = v4l2_get_subdevdata(sd);
 	struct v4l2_mbus_framefmt *format;
 
-	format = __ccp2_get_format(ccp2, cfg, fmt->pad, fmt->which);
+	format = __ccp2_get_format(ccp2, sd_state, fmt->pad, fmt->which);
 	if (format == NULL)
 		return -EINVAL;
 
-	ccp2_try_format(ccp2, cfg, fmt->pad, &fmt->format, fmt->which);
+	ccp2_try_format(ccp2, sd_state, fmt->pad, &fmt->format, fmt->which);
 	*format = fmt->format;
 
 	/* Propagate the format from sink to source */
 	if (fmt->pad == CCP2_PAD_SINK) {
-		format = __ccp2_get_format(ccp2, cfg, CCP2_PAD_SOURCE,
+		format = __ccp2_get_format(ccp2, sd_state, CCP2_PAD_SOURCE,
 					   fmt->which);
 		*format = fmt->format;
-		ccp2_try_format(ccp2, cfg, CCP2_PAD_SOURCE, format, fmt->which);
+		ccp2_try_format(ccp2, sd_state, CCP2_PAD_SOURCE, format,
+				fmt->which);
 	}
 
 	return 0;
@@ -811,7 +819,7 @@ static int ccp2_init_formats(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	format.format.code = MEDIA_BUS_FMT_SGRBG10_1X10;
 	format.format.width = 4096;
 	format.format.height = 4096;
-	ccp2_set_format(sd, fh ? fh->pad : NULL, &format);
+	ccp2_set_format(sd, fh ? fh->state : NULL, &format);
 
 	return 0;
 }
@@ -838,7 +846,7 @@ static int ccp2_s_stream(struct v4l2_subdev *sd, int enable)
 	switch (enable) {
 	case ISP_PIPELINE_STREAM_CONTINUOUS:
 		if (ccp2->phy) {
-			ret = omap3isp_csiphy_acquire(ccp2->phy);
+			ret = omap3isp_csiphy_acquire(ccp2->phy, &sd->entity);
 			if (ret < 0)
 				return ret;
 		}
@@ -1030,6 +1038,7 @@ int omap3isp_ccp2_register_entities(struct isp_ccp2_device *ccp2,
 	int ret;
 
 	/* Register the subdev and video nodes. */
+	ccp2->subdev.dev = vdev->mdev->dev;
 	ret = v4l2_device_register_subdev(vdev, &ccp2->subdev);
 	if (ret < 0)
 		goto error;
@@ -1066,7 +1075,7 @@ static int ccp2_init_entities(struct isp_ccp2_device *ccp2)
 
 	v4l2_subdev_init(sd, &ccp2_sd_ops);
 	sd->internal_ops = &ccp2_sd_internal_ops;
-	strlcpy(sd->name, "OMAP3 ISP CCP2", sizeof(sd->name));
+	strscpy(sd->name, "OMAP3 ISP CCP2", sizeof(sd->name));
 	sd->grp_id = 1 << 16;   /* group ID for isp subdevs */
 	v4l2_set_subdevdata(sd, ccp2);
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
@@ -1137,10 +1146,16 @@ int omap3isp_ccp2_init(struct isp_device *isp)
 	if (isp->revision == ISP_REVISION_2_0) {
 		ccp2->vdds_csib = devm_regulator_get(isp->dev, "vdds_csib");
 		if (IS_ERR(ccp2->vdds_csib)) {
+			if (PTR_ERR(ccp2->vdds_csib) == -EPROBE_DEFER) {
+				dev_dbg(isp->dev,
+					"Can't get regulator vdds_csib, deferring probing\n");
+				return -EPROBE_DEFER;
+			}
 			dev_dbg(isp->dev,
 				"Could not get regulator vdds_csib\n");
 			ccp2->vdds_csib = NULL;
 		}
+		ccp2->phy = &isp->isp_csiphy2;
 	} else if (isp->revision == ISP_REVISION_15_0) {
 		ccp2->phy = &isp->isp_csiphy1;
 	}

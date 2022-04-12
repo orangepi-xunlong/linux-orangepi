@@ -1,7 +1,7 @@
 /*
  * Clock domain register offsets for TI81XX.
  *
- * Copyright (C) 2010 Texas Instruments, Inc. - http://www.ti.com/
+ * Copyright (C) 2010 Texas Instruments, Inc. - https://www.ti.com/
  * Copyright (C) 2013 SKTB SKiT, http://www.skitlab.ru/
  *
  * This program is free software; you can redistribute it and/or
@@ -57,5 +57,6 @@
 #define TI816X_CM_DEFAULT_PCI_CLKDM		0x0010
 #define TI816X_CM_DEFAULT_L3_SLOW_CLKDM		0x0014
 #define TI816X_CM_DEFAULT_DUCATI_CLKDM		0x0018
+#define TI816X_CM_DEFAULT_SATA_CLKDM		0x0060
 
 #endif
