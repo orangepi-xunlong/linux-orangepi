@@ -88,7 +88,7 @@ int btbcm_check_bdaddr(struct hci_dev *hdev)
 	    !bacmp(&bda->bdaddr, BDADDR_BCM43341B)) {
 		bt_dev_info(hdev, "BCM: Using default device address (%pMR)",
 			    &bda->bdaddr);
-		set_bit(HCI_QUIRK_INVALID_BDADDR, &hdev->quirks);
+		//set_bit(HCI_QUIRK_INVALID_BDADDR, &hdev->quirks);
 	}
 
 	kfree_skb(skb);

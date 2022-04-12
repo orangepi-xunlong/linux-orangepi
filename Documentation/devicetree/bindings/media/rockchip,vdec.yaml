@@ -20,6 +20,9 @@ properties:
       - items:
           - const: rockchip,rk3228-vdec
           - const: rockchip,rk3399-vdec
+      - items:
+          - const: rockchip,rk3328-vdec
+          - const: rockchip,rk3399-vdec
 
   reg:
     maxItems: 1

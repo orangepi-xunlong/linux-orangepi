@@ -6,6 +6,7 @@
 
 #include <linux/clk.h>
 #include <linux/dmaengine.h>
+#include <linux/gpio.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -194,6 +195,10 @@ struct rockchip_spi {
 	bool cs_asserted[ROCKCHIP_SPI_MAX_CS_NUM];
 
 	bool slave_abort;
+};
+
+struct rockchip_spi_data {
+       bool cs_gpio_requested;
 };
 
 static inline void spi_enable_chip(struct rockchip_spi *rs, bool enable)
@@ -490,6 +495,50 @@ static int rockchip_spi_prepare_dma(struct rockchip_spi *rs,
 	return 1;
 }
 
+static int rockchip_spi_setup(struct spi_device *spi)
+{
+	int ret = 0;
+	unsigned long flags = (spi->mode & SPI_CS_HIGH) ?
+			      GPIOF_OUT_INIT_LOW : GPIOF_OUT_INIT_HIGH;
+	struct rockchip_spi_data *data = spi_get_ctldata(spi);
+
+	if (!gpio_is_valid(spi->cs_gpio))
+		return 0;
+
+	if (!data) {
+		data = kzalloc(sizeof(*data), GFP_KERNEL);
+		if (!data)
+			return -ENOMEM;
+		spi_set_ctldata(spi, data);
+	}
+
+	if (!data->cs_gpio_requested) {
+		ret = gpio_request_one(spi->cs_gpio, flags,
+				       dev_name(&spi->dev));
+		if (!ret)
+			data->cs_gpio_requested = 1;
+	} else
+		ret = gpio_direction_output(spi->cs_gpio, flags);
+
+	if (ret < 0)
+		dev_err(&spi->dev, "Failed to setup cs gpio(%d): %d\n",
+			spi->cs_gpio, ret);
+
+	return ret;
+}
+
+static void rockchip_spi_cleanup(struct spi_device *spi)
+{
+	struct rockchip_spi_data *data = spi_get_ctldata(spi);
+
+	if (data) {
+		if (data->cs_gpio_requested)
+			gpio_free(spi->cs_gpio);
+		kfree(data);
+		spi_set_ctldata(spi, NULL);
+	}
+}
+
 static int rockchip_spi_config(struct rockchip_spi *rs,
 		struct spi_device *spi, struct spi_transfer *xfer,
 		bool use_dma, bool slave_mode)
@@ -781,6 +830,8 @@ static int rockchip_spi_probe(struct platform_device *pdev)
 	ctlr->max_speed_hz = min(rs->freq / BAUDR_SCKDV_MIN, MAX_SCLK_OUT);
 
 	ctlr->set_cs = rockchip_spi_set_cs;
+	ctlr->setup = rockchip_spi_setup;
+	ctlr->cleanup = rockchip_spi_cleanup;
 	ctlr->transfer_one = rockchip_spi_transfer_one;
 	ctlr->max_transfer_size = rockchip_spi_max_transfer_size;
 	ctlr->handle_err = rockchip_spi_handle_err;

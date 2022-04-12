@@ -686,7 +686,7 @@ static void es8316_disable_jack_detect(struct snd_soc_component *component)
 	snd_soc_component_update_bits(component, ES8316_GPIO_DEBOUNCE,
 				      ES8316_GPIO_ENABLE_INTERRUPT, 0);
 
-	if (es8316->jack->status & SND_JACK_MICROPHONE) {
+	if (es8316->jack && (es8316->jack->status & SND_JACK_MICROPHONE)) {
 		es8316_disable_micbias_for_mic_gnd_short_detect(component);
 		snd_soc_jack_report(es8316->jack, 0, SND_JACK_BTN_0);
 	}

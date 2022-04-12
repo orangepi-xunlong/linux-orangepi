@@ -24,6 +24,7 @@
 		i2c1 = &i2c1;
 		i2c2 = &i2c2;
 		i2c3 = &i2c3;
+		ethernet0 = &gmac;
 		serial0 = &uart0;
 		serial1 = &uart1;
 		serial2 = &uart2;
@@ -135,6 +136,12 @@
 		interrupt-affinity = <&cpu0>, <&cpu1>, <&cpu2>, <&cpu3>;
 	};
 
+	cpuinfo {
+		compatible = "rockchip,cpuinfo";
+		nvmem-cells = <&cpu_id>;
+		nvmem-cell-names = "id";
+	};
+
 	mac_clkin: external-mac-clock {
 		compatible = "fixed-clock";
 		clock-frequency = <50000000>;
@@ -142,9 +149,52 @@
 		#clock-cells = <0>;
 	};
 
+	otp: otp@ff210000 {
+		compatible = "rockchip,rk3308-otp";
+		reg = <0x0 0xff210000 0x0 0x4000>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		clocks = <&cru SCLK_OTP_USR>, <&cru PCLK_OTP_NS>,
+			 <&cru PCLK_OTP_PHY>;
+		clock-names = "otp", "apb_pclk", "phy";
+		resets = <&cru SRST_OTP_PHY>;
+		reset-names = "phy";
+
+		/* Data cells */
+		cpu_id: id@7 {
+			reg = <0x07 0x10>;
+		};
+		cpu_leakage: cpu-leakage@17 {
+			reg = <0x17 0x1>;
+		};
+		logic_leakage: logic-leakage@18 {
+			reg = <0x18 0x1>;
+		};
+	};
+
 	psci {
 		compatible = "arm,psci-1.0";
 		method = "smc";
+	};
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		drm_logo: drm-logo@00000000 {
+			compatible = "rockchip,drm-logo";
+			reg = <0x0 0x0 0x0 0x0>;
+		};
+
+		ramoops: ramoops@110000 {
+			compatible = "ramoops";
+			reg = <0x0 0x110000 0x0 0xf0000>;
+			record-size = <0x30000>;
+			console-size = <0xc0000>;
+			ftrace-size = <0x00000>;
+			pmsg-size = <0x00000>;
+		};
 	};
 
 	timer {
@@ -537,6 +587,15 @@
 		clock-names = "pclk", "timer";
 	};
 
+	rk_timer_rtc: rk-timer-rtc@ff1a0020 {
+		compatible = "rockchip,rk3308-timer-rtc";
+		reg = <0x0 0xff1a0020 0x0 0x20>;
+		interrupts = <GIC_SPI 26 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru PCLK_TIMER>, <&cru SCLK_TIMER1>;
+		clock-names = "pclk", "timer";
+		status = "disabled";
+	};
+
 	saradc: saradc@ff1e0000 {
 		compatible = "rockchip,rk3308-saradc", "rockchip,rk3399-saradc";
 		reg = <0x0 0xff1e0000 0x0 0x100>;
@@ -546,6 +605,70 @@
 		#io-channel-cells = <1>;
 		resets = <&cru SRST_SARADC_P>;
 		reset-names = "saradc-apb";
+		status = "disabled";
+	};
+
+	thermal_zones: thermal-zones {
+
+		soc_thermal: soc-thermal {
+			polling-delay-passive = <20>;
+			polling-delay = <1000>;
+			sustainable-power = <300>;
+
+			thermal-sensors = <&tsadc 1>;
+
+			trips {
+				threshold: trip-point-0 {
+					temperature = <70000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+				target: trip-point-1 {
+					temperature = <85000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+				soc_crit: soc-crit {
+					temperature = <115000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&target>;
+					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+					contribution = <4096>;
+				};
+			};
+
+		};
+
+		logic_thermal: logic-thermal {
+			polling-delay-passive = <100>; /* milliseconds */
+			polling-delay = <1000>; /* milliseconds */
+
+			thermal-sensors = <&tsadc 0>;
+		};
+	};
+
+	tsadc: tsadc@ff1f0000 {
+		compatible = "rockchip,rk3308-tsadc";
+		reg = <0x0 0xff1f0000 0x0 0x100>;
+		interrupts = <GIC_SPI 38 IRQ_TYPE_LEVEL_HIGH>;
+		rockchip,grf = <&grf>;
+		clocks = <&cru SCLK_TSADC>, <&cru PCLK_TSADC>;
+		clock-names = "tsadc", "apb_pclk";
+		assigned-clocks = <&cru SCLK_TSADC>;
+		assigned-clock-rates = <50000>;
+		resets = <&cru SRST_TSADC>;
+		reset-names = "tsadc-apb";
+		pinctrl-names = "gpio", "otpout";
+		pinctrl-0 = <&tsadc_otp_pin>;
+		pinctrl-1 = <&tsadc_otp_out>;
+		#thermal-sensor-cells = <1>;
+		rockchip,hw-tshut-temp = <120000>;
 		status = "disabled";
 	};
 
@@ -569,6 +692,109 @@
 		clocks = <&cru ACLK_DMAC1>;
 		clock-names = "apb_pclk";
 		#dma-cells = <1>;
+	};
+
+	i2s_8ch_0: i2s@ff300000 {
+		compatible = "rockchip,rk3308-i2s-tdm";
+		reg = <0x0 0xff300000 0x0 0x1000>;
+		interrupts = <GIC_SPI 48 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru SCLK_I2S0_8CH_TX>, <&cru SCLK_I2S0_8CH_RX>, <&cru HCLK_I2S0_8CH>,
+			 <&cru SCLK_I2S0_8CH_TX_SRC>,
+			 <&cru SCLK_I2S0_8CH_RX_SRC>,
+			 <&cru PLL_VPLL0>,
+			 <&cru PLL_VPLL1>;
+		clock-names = "mclk_tx", "mclk_rx", "hclk",
+						"mclk_tx_src", "mclk_rx_src",
+						"mclk_root0", "mclk_root1";
+		dmas = <&dmac1 0>, <&dmac1 1>;
+		dma-names = "tx", "rx";
+		resets = <&cru SRST_I2S0_8CH_TX_M>, <&cru SRST_I2S0_8CH_RX_M>;
+		reset-names = "tx-m", "rx-m";
+		rockchip,cru = <&cru>;
+		rockchip,grf = <&grf>;
+		rockchip,mclk-calibrate;
+		pinctrl-names = "default";
+		pinctrl-0 = <&i2s_8ch_0_sclktx
+					 &i2s_8ch_0_sclkrx
+					 &i2s_8ch_0_lrcktx
+					 &i2s_8ch_0_lrckrx
+					 &i2s_8ch_0_sdi0
+					 &i2s_8ch_0_sdi1
+					 &i2s_8ch_0_sdi2
+					 &i2s_8ch_0_sdi3
+					 &i2s_8ch_0_sdo0
+					 &i2s_8ch_0_sdo1
+					 &i2s_8ch_0_sdo2
+					 &i2s_8ch_0_sdo3
+					 &i2s_8ch_0_mclk>;
+		status = "disabled";
+	};
+
+	i2s_8ch_1: i2s@ff310000 {
+		compatible = "rockchip,rk3308-i2s-tdm";
+		reg = <0x0 0xff310000 0x0 0x1000>;
+		interrupts = <GIC_SPI 49 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru SCLK_I2S1_8CH_TX>, <&cru SCLK_I2S1_8CH_RX>, <&cru HCLK_I2S1_8CH>,
+			 <&cru SCLK_I2S1_8CH_TX_SRC>,
+			 <&cru SCLK_I2S1_8CH_RX_SRC>,
+			 <&cru PLL_VPLL0>,
+			 <&cru PLL_VPLL1>;
+		clock-names = "mclk_tx", "mclk_rx", "hclk",
+						"mclk_tx_src", "mclk_rx_src",
+						"mclk_root0", "mclk_root1";
+		dmas = <&dmac1 2>, <&dmac1 3>;
+		dma-names = "tx", "rx";
+		resets = <&cru SRST_I2S1_8CH_TX_M>, <&cru SRST_I2S1_8CH_RX_M>;
+		reset-names = "tx-m", "rx-m";
+		rockchip,cru = <&cru>;
+		rockchip,grf = <&grf>;
+		rockchip,mclk-calibrate;
+		rockchip,io-multiplex;
+		status = "disabled";
+	};
+
+	i2s_8ch_2: i2s@ff320000 {
+		compatible = "rockchip,rk3308-i2s-tdm";
+		reg = <0x0 0xff320000 0x0 0x1000>;
+		interrupts = <GIC_SPI 50 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru SCLK_I2S2_8CH_TX>, <&cru SCLK_I2S2_8CH_RX>, <&cru HCLK_I2S2_8CH>,
+			 <&cru SCLK_I2S2_8CH_TX_SRC>,
+			 <&cru SCLK_I2S2_8CH_RX_SRC>,
+			 <&cru PLL_VPLL0>,
+			 <&cru PLL_VPLL1>;
+		clock-names = "mclk_tx", "mclk_rx", "hclk",
+						"mclk_tx_src", "mclk_rx_src",
+						"mclk_root0", "mclk_root1";
+		dmas = <&dmac1 4>, <&dmac1 5>;
+		dma-names = "tx", "rx";
+		resets = <&cru SRST_I2S2_8CH_TX_M>, <&cru SRST_I2S2_8CH_RX_M>;
+		reset-names = "tx-m", "rx-m";
+		rockchip,cru = <&cru>;
+		rockchip,grf = <&grf>;
+		rockchip,mclk-calibrate;
+		status = "disabled";
+	};
+
+	i2s_8ch_3: i2s@ff330000 {
+		compatible = "rockchip,rk3308-i2s-tdm";
+		reg = <0x0 0xff330000 0x0 0x1000>;
+		interrupts = <GIC_SPI 51 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru SCLK_I2S3_8CH_TX>, <&cru SCLK_I2S3_8CH_RX>, <&cru HCLK_I2S3_8CH>,
+			 <&cru SCLK_I2S3_8CH_TX_SRC>,
+			 <&cru SCLK_I2S3_8CH_RX_SRC>,
+			 <&cru PLL_VPLL0>,
+			 <&cru PLL_VPLL1>;
+		clock-names = "mclk_tx", "mclk_rx", "hclk",
+						"mclk_tx_src", "mclk_rx_src",
+						"mclk_root0", "mclk_root1";
+		dmas = <&dmac1 7>;
+		dma-names = "rx";
+		resets = <&cru SRST_I2S3_8CH_TX_M>, <&cru SRST_I2S3_8CH_RX_M>;
+		reset-names = "tx-m", "rx-m";
+		rockchip,cru = <&cru>;
+		rockchip,grf = <&grf>;
+		rockchip,mclk-calibrate;
+		status = "disabled";
 	};
 
 	i2s_2ch_0: i2s@ff350000 {
@@ -752,6 +978,22 @@
 		assigned-clocks = <&cru SCLK_RTC32K>;
 		assigned-clock-rates = <32768>;
 	};
+
+	acodec: acodec@ff560000 {
+		compatible = "rockchip,rk3308-codec";
+		reg = <0x0 0xff560000 0x0 0x10000>;
+		rockchip,grf = <&grf>;
+		rockchip,detect-grf = <&detect_grf>;
+		interrupts = <GIC_SPI 114 IRQ_TYPE_LEVEL_HIGH>,
+				 			   <GIC_SPI 115 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru PCLK_ACODEC>,
+			 			 <&cru SCLK_I2S2_8CH_TX_OUT>,
+			 		 	 <&cru SCLK_I2S2_8CH_RX_OUT>;
+		clock-names = "acodec", "mclk_tx", "mclk_rx";
+		resets = <&cru SRST_ACODEC_P>;
+		reset-names = "acodec-reset";
+		status = "disabled";
+};
 
 	gic: interrupt-controller@ff580000 {
 		compatible = "arm,gic-400";

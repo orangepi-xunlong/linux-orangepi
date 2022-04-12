@@ -1498,6 +1498,22 @@ static void bcm_serdev_remove(struct serdev_device *serdev)
 	hci_uart_unregister_device(&bcmdev->serdev_hu);
 }
 
+static void bcm_serdev_shutdown(struct serdev_device *serdev)
+{
+	struct bcm_device *bcmdev = serdev_device_get_drvdata(serdev);
+
+/*
+	if (test_bit(HCI_UART_REGISTERED, &bcmdev->hu->flags)) {
+		hci_uart_unregister_device(&bcmdev->serdev_hu);
+	}
+*/
+	dev_info(bcmdev->dev, "Cutting power to bluetooth module\n");
+	if (bcm_gpio_set_power(bcmdev, false)) {
+		dev_err(bcmdev->dev, "Failed to power down\n");
+	}
+	usleep_range(500000, 1000000);
+}
+
 #ifdef CONFIG_OF
 static struct bcm_device_data bcm4354_device_data = {
 	.no_early_set_baudrate = true,
@@ -1525,6 +1541,7 @@ MODULE_DEVICE_TABLE(of, bcm_bluetooth_of_match);
 static struct serdev_device_driver bcm_serdev_driver = {
 	.probe = bcm_serdev_probe,
 	.remove = bcm_serdev_remove,
+    .shutdown = bcm_serdev_shutdown,
 	.driver = {
 		.name = "hci_uart_bcm",
 		.of_match_table = of_match_ptr(bcm_bluetooth_of_match),

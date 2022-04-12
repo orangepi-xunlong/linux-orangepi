@@ -17,6 +17,7 @@
 	};
 
 	chosen {
+		bootargs = "mmc_cmdqueue=0 earlycon=uart8250,mmio32,0xff1a0000";
 		stdout-path = "serial2:1500000n8";
 	};
 
@@ -56,7 +57,7 @@
 
 		work_led: led-0 {
 			label = "work";
-			default-state = "on";
+			linux,default-trigger = "heartbeat";
 			gpios = <&gpio0 RK_PB3 GPIO_ACTIVE_HIGH>;
 		};
 
@@ -290,7 +291,7 @@
 	snps,reset-active-low;
 	snps,reset-delays-us = <0 10000 50000>;
 	tx_delay = <0x28>;
-	rx_delay = <0x11>;
+	rx_delay = <0x20>;
 	status = "okay";
 };
 
@@ -607,6 +608,7 @@
 	pinctrl-0 = <&pcie_perst>;
 	vpcie12v-supply = <&vcc12v_dcin>;
 	vpcie3v3-supply = <&vcc3v3_pcie>;
+	bus-scan-delay-ms = <1000>;
 	status = "okay";
 };
 
@@ -758,6 +760,7 @@
 
 &sdhci {
 	bus-width = <8>;
+	keep-power-in-suspend;
 	mmc-hs200-1_8v;
 	non-removable;
 	status = "okay";
@@ -779,7 +782,7 @@
 	flash@0 {
 		compatible = "jedec,spi-nor";
 		reg = <0>;
-		spi-max-frequency = <10000000>;
+		spi-max-frequency = <3000000>;
 	};
 };
 

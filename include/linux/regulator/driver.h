@@ -641,6 +641,9 @@ struct regulator_dev {
 
 	/* time when this regulator was disabled last time */
 	ktime_t last_off;
+
+	/* state when resuming */
+	int resume_state;
 	int cached_err;
 	bool use_cached_err;
 	spinlock_t err_lock;

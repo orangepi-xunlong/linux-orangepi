@@ -33,6 +33,7 @@ properties:
               - rockchip,rk3308-usb2phy-grf
               - rockchip,rk3328-grf
               - rockchip,rk3328-usb2phy-grf
+              - rockchip,rk3328-u3phy-grf
               - rockchip,rk3368-grf
               - rockchip,rk3368-pmugrf
               - rockchip,rk3399-grf

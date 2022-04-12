@@ -66,6 +66,15 @@ config PHY_ROCKCHIP_INNO_DSIDPHY
 	  Enable this to support the Rockchip MIPI/LVDS/TTL PHY with
 	  Innosilicon IP block.
 
+config PHY_ROCKCHIP_INNO_USB3
+	tristate "Rockchip INNO USB 3.0 PHY Driver"
+	depends on (ARCH_ROCKCHIP || COMPILE_TEST) && OF
+	depends on USB_SUPPORT
+	select GENERIC_PHY
+	select USB_PHY
+	help
+	  Support for Rockchip USB 3.0 PHY with Innosilicon IP block.
+
 config PHY_ROCKCHIP_PCIE
 	tristate "Rockchip PCIe PHY Driver"
 	depends on (ARCH_ROCKCHIP && OF) || COMPILE_TEST

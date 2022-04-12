@@ -1,0 +1,4 @@
+config HFLPS170
+	tristate "hi-flying HF-LPS170 SDIO WiFi"
+	help
+	  Help message of HFLPS170

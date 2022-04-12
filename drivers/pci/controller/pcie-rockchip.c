@@ -118,8 +118,7 @@ int rockchip_pcie_parse_dt(struct rockchip_pcie *rockchip)
 	}
 
 	if (rockchip->is_rc) {
-		rockchip->ep_gpio = devm_gpiod_get_optional(dev, "ep",
-							    GPIOD_OUT_HIGH);
+		rockchip->ep_gpio = devm_gpiod_get_optional(dev, "ep", GPIOD_OUT_HIGH);
 		if (IS_ERR(rockchip->ep_gpio))
 			return dev_err_probe(dev, PTR_ERR(rockchip->ep_gpio),
 					     "failed to get ep GPIO\n");
@@ -147,6 +146,12 @@ int rockchip_pcie_parse_dt(struct rockchip_pcie *rockchip)
 	if (IS_ERR(rockchip->clk_pcie_pm)) {
 		dev_err(dev, "pm clock not found\n");
 		return PTR_ERR(rockchip->clk_pcie_pm);
+	}
+
+	err = of_property_read_u32(node, "bus-scan-delay-ms", &rockchip->bus_scan_delay);
+	if (err) {
+		dev_info(dev, "no bus scan delay, default to 0 ms\n");
+		rockchip->bus_scan_delay = 0;
 	}
 
 	return 0;

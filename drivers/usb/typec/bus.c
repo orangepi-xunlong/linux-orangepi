@@ -156,8 +156,14 @@ EXPORT_SYMBOL_GPL(typec_altmode_exit);
  */
 void typec_altmode_attention(struct typec_altmode *adev, u32 vdo)
 {
-	struct typec_altmode *pdev = &to_altmode(adev)->partner->adev;
+	struct typec_altmode *pdev;
+	WARN_ONCE(!adev, "typec bus attention: adev is NULL!");
+	WARN_ONCE(!to_altmode(adev)->partner, "typec bus attention: partner is NULL!");
+	if(!adev || !to_altmode(adev)->partner) {
+		return;
+	}
 
+    pdev = &to_altmode(adev)->partner->adev;
 	if (pdev->ops && pdev->ops->attention)
 		pdev->ops->attention(pdev, vdo);
 }

@@ -529,7 +529,7 @@
 	status = "okay";
 
 	fusb1: usb-typec@22 {
-		compatible = "fcs,fusb302";
+		compatible = "fairchild,fusb302";
 		reg = <0x22>;
 		interrupt-parent = <&gpio1>;
 		interrupts = <1 IRQ_TYPE_LEVEL_LOW>;
@@ -546,7 +546,7 @@
 	status = "okay";
 
 	fusb0: usb-typec@22 {
-		compatible = "fcs,fusb302";
+		compatible = "fairchild,fusb302";
 		reg = <0x22>;
 		interrupt-parent = <&gpio1>;
 		interrupts = <2 IRQ_TYPE_LEVEL_LOW>;

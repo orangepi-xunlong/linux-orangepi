@@ -80,10 +80,8 @@ static void mmc_pwrseq_simple_post_power_on(struct mmc_host *host)
 		msleep(pwrseq->post_power_on_delay_ms);
 }
 
-static void mmc_pwrseq_simple_power_off(struct mmc_host *host)
+static void __mmc_pwrseq_simple_power_off(struct mmc_pwrseq_simple *pwrseq)
 {
-	struct mmc_pwrseq_simple *pwrseq = to_pwrseq_simple(host->pwrseq);
-
 	mmc_pwrseq_simple_set_gpios_value(pwrseq, 1);
 
 	if (pwrseq->power_off_delay_us)
@@ -94,6 +92,12 @@ static void mmc_pwrseq_simple_power_off(struct mmc_host *host)
 		clk_disable_unprepare(pwrseq->ext_clk);
 		pwrseq->clk_enabled = false;
 	}
+}
+
+static void mmc_pwrseq_simple_power_off(struct mmc_host *host)
+{
+	struct mmc_pwrseq_simple *pwrseq = to_pwrseq_simple(host->pwrseq);
+	__mmc_pwrseq_simple_power_off(pwrseq);
 }
 
 static const struct mmc_pwrseq_ops mmc_pwrseq_simple_ops = {
@@ -151,9 +155,18 @@ static int mmc_pwrseq_simple_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static void mmc_pwrseq_simple_shutdown(struct platform_device *pdev)
+{
+	struct mmc_pwrseq_simple *pwrseq = platform_get_drvdata(pdev);
+
+	dev_info(&pdev->dev, "Turning off mmc\n");
+	__mmc_pwrseq_simple_power_off(pwrseq);
+}
+
 static struct platform_driver mmc_pwrseq_simple_driver = {
 	.probe = mmc_pwrseq_simple_probe,
 	.remove = mmc_pwrseq_simple_remove,
+    .shutdown = mmc_pwrseq_simple_shutdown,
 	.driver = {
 		.name = "pwrseq_simple",
 		.of_match_table = mmc_pwrseq_simple_of_match,

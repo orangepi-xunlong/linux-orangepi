@@ -4,6 +4,7 @@
  */
 
 /dts-v1/;
+#include "rk3328-dram-renegade-timing.dtsi"
 #include "rk3328.dtsi"
 
 / {
@@ -19,6 +20,32 @@
 		stdout-path = "serial2:1500000n8";
 	};
 
+	/delete-node/ dmc-opp-table;
+	dmc_opp_table: dmc-opp-table {
+		compatible = "operating-points-v2";
+
+		opp-786000000 {
+			opp-hz = /bits/ 64 <786000000>;
+			opp-microvolt = <1075000 1075000 12000000>;
+		};
+		opp-798000000 {
+			opp-hz = /bits/ 64 <798000000>;
+			opp-microvolt = <1075000 1075000 12000000>;
+		};
+		opp-840000000 {
+			opp-hz = /bits/ 64 <840000000>;
+			opp-microvolt = <1075000 1075000 12000000>;
+		};
+		opp-924000000 {
+			opp-hz = /bits/ 64 <924000000>;
+			opp-microvolt = <1100000 1100000 12000000>;
+		};
+		opp-1068000000 {
+			opp-hz = /bits/ 64 <1068000000>;
+			opp-microvolt = <1175000 1175000 12000000>;
+		};
+	};
+
 	gmac_clkin: external-gmac-clock {
 		compatible = "fixed-clock";
 		clock-frequency = <125000000>;
@@ -26,18 +53,9 @@
 		#clock-cells = <0>;
 	};
 
-	dc_12v: dc-12v {
-		compatible = "regulator-fixed";
-		regulator-name = "dc_12v";
-		regulator-always-on;
-		regulator-boot-on;
-		regulator-min-microvolt = <12000000>;
-		regulator-max-microvolt = <12000000>;
-	};
-
 	vcc_sd: sdmmc-regulator {
 		compatible = "regulator-fixed";
-		gpio = <&gpio0 RK_PD6 GPIO_ACTIVE_LOW>;
+		gpio = <&gpio0 RK_PD6 GPIO_ACTIVE_HIGH>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&sdmmc0m1_pin>;
 		regulator-boot-on;
@@ -47,12 +65,12 @@
 		vin-supply = <&vcc_io>;
 	};
 
-	vcc_sdio: sdmmcio-regulator {
+	vccio_sd: sdmmcio-regulator {
 		compatible = "regulator-gpio";
 		gpios = <&grf_gpio 0 GPIO_ACTIVE_HIGH>;
 		states = <1800000 0x1>,
 			 <3300000 0x0>;
-		regulator-name = "vcc_sdio";
+		regulator-name = "vccio_sd";
 		regulator-type = "voltage";
 		regulator-min-microvolt = <1800000>;
 		regulator-max-microvolt = <3300000>;
@@ -74,11 +92,8 @@
 	vcc_sys: vcc-sys {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc_sys";
-		regulator-always-on;
-		regulator-boot-on;
 		regulator-min-microvolt = <5000000>;
 		regulator-max-microvolt = <5000000>;
-		vin-supply = <&dc_12v>;
 	};
 
 	vcc_phy: vcc-phy-regulator {
@@ -107,7 +122,24 @@
 			mode = <0x05>;
 		};
 	};
+
+	ir-receiver {
+		compatible = "gpio-ir-receiver";
+		gpios = <&gpio2 RK_PA2 GPIO_ACTIVE_LOW>;
+		pinctrl-0 = <&ir_int>;
+		pinctrl-names = "default";
+	};
 };
+
+&analog_sound {
+	simple-audio-card,name = "TRS Jack";
+	status = "okay";
+};
+
+&codec {
+	status = "okay";
+};
+
 
 &analog_sound {
 	status = "okay";
@@ -116,6 +148,17 @@
 &codec {
 	status = "okay";
 };
+
+&dfi {
+	status = "okay";
+};
+
+&dmc {
+	center-supply = <&vdd_logic>;
+	ddr_timing = <&ddr_timing>;
+	status = "okay";
+};
+
 
 &cpu0 {
 	cpu-supply = <&vdd_arm>;
@@ -136,7 +179,6 @@
 &emmc {
 	bus-width = <8>;
 	cap-mmc-highspeed;
-	max-frequency = <150000000>;
 	mmc-ddr-1_8v;
 	mmc-hs200-1_8v;
 	non-removable;
@@ -166,11 +208,19 @@
 	status = "okay";
 };
 
+&gpu {
+	mali-supply = <&vdd_logic>;
+};
+
 &hdmi {
 	status = "okay";
 };
 
 &hdmiphy {
+	status = "okay";
+};
+
+&hdmi_sound {
 	status = "okay";
 };
 
@@ -205,8 +255,9 @@
 		regulators {
 			vdd_logic: DCDC_REG1 {
 				regulator-name = "vdd_logic";
-				regulator-min-microvolt = <712500>;
-				regulator-max-microvolt = <1450000>;
+				regulator-min-microvolt = <900000>;
+				regulator-max-microvolt = <1175000>;
+				regulator-ramp-delay = <12500>;
 				regulator-always-on;
 				regulator-boot-on;
 				regulator-state-mem {
@@ -217,8 +268,9 @@
 
 			vdd_arm: DCDC_REG2 {
 				regulator-name = "vdd_arm";
-				regulator-min-microvolt = <712500>;
+				regulator-min-microvolt = <950000>;
 				regulator-max-microvolt = <1450000>;
+				regulator-ramp-delay = <12500>;
 				regulator-always-on;
 				regulator-boot-on;
 				regulator-state-mem {
@@ -295,12 +347,20 @@
 	status = "okay";
 };
 
+&i2s0 {
+	status = "okay";
+};
+
+&i2s1 {
+	status = "okay";
+};
+
 &io_domains {
 	status = "okay";
 
 	vccio1-supply = <&vcc_io>;
 	vccio2-supply = <&vcc18_emmc>;
-	vccio3-supply = <&vcc_sdio>;
+	vccio3-supply = <&vccio_sd>;
 	vccio4-supply = <&vcc_18>;
 	vccio5-supply = <&vcc_io>;
 	vccio6-supply = <&vcc_io>;
@@ -308,6 +368,12 @@
 };
 
 &pinctrl {
+	ir {
+		ir_int: ir-int {
+			rockchip,pins = <2 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
 	pmic {
 		pmic_int_l: pmic-int-l {
 			rockchip,pins = <1 RK_PD0 RK_FUNC_GPIO &pcfg_pull_up>;
@@ -334,11 +400,26 @@
 	sd-uhs-sdr50;
 	sd-uhs-sdr104;
 	vmmc-supply = <&vcc_sd>;
-	vqmmc-supply = <&vcc_sdio>;
+	vqmmc-supply = <&vccio_sd>;
+	status = "okay";
+};
+
+&spdif {
+	pinctrl-0 = <&spdifm0_tx>;
+	status = "okay";
+};
+
+&spdif_out {
+	status = "okay";
+};
+
+&spdif_sound {
 	status = "okay";
 };
 
 &tsadc {
+	rockchip,hw-tshut-mode = <0>;
+	rockchip,hw-tshut-polarity = <0>;
 	status = "okay";
 };
 
@@ -351,6 +432,18 @@
 };
 
 &u2phy_otg {
+	status = "okay";
+};
+
+&u3phy {
+	status = "okay";
+};
+
+&u3phy_utmi {
+	status = "okay";
+};
+
+&u3phy_pipe {
 	status = "okay";
 };
 
@@ -373,6 +466,16 @@
 };
 
 &usb_host0_ohci {
+	status = "okay";
+};
+
+&usbdrd3 {
+	dr_mode = "host";
+	status = "okay";
+};
+
+&usbdrd3 {
+	dr_mode = "host";
 	status = "okay";
 };
 

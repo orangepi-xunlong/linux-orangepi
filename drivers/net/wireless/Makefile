@@ -18,6 +18,7 @@ obj-$(CONFIG_WLAN_VENDOR_REALTEK) += realtek/
 obj-$(CONFIG_WLAN_VENDOR_RSI) += rsi/
 obj-$(CONFIG_WLAN_VENDOR_ST) += st/
 obj-$(CONFIG_WLAN_VENDOR_TI) += ti/
+obj-$(CONFIG_HFLPS170) += hflps170/
 obj-$(CONFIG_WLAN_VENDOR_ZYDAS) += zydas/
 obj-$(CONFIG_WLAN_VENDOR_QUANTENNA) += quantenna/
 
@@ -30,3 +31,13 @@ obj-$(CONFIG_USB_NET_RNDIS_WLAN)	+= rndis_wlan.o
 obj-$(CONFIG_MAC80211_HWSIM)	+= mac80211_hwsim.o
 
 obj-$(CONFIG_VIRT_WIFI)	+= virt_wifi.o
+obj-$(CONFIG_RTL8189ES) += rtl8189es/
+obj-$(CONFIG_RTL8189FS) += rtl8189fs/
+obj-$(CONFIG_RTL8192EU) += rtl8192eu/
+obj-$(CONFIG_88XXAU) += rtl8812au/
+obj-$(CONFIG_RTL8821CU) += rtl8811cu/
+obj-$(CONFIG_RTL8822BU) += rtl88x2bu/
+obj-$(CONFIG_RTL8822CS) += rtl88x2cs/
+obj-$(CONFIG_RTL8723DS) += rtl8723ds/
+obj-$(CONFIG_RTL8723DU) += rtl8723du/
+obj-$(CONFIG_RTL8822BS) += rtl8822bs/

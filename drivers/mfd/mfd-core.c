@@ -215,7 +215,7 @@ static int mfd_add_device(struct device *parent, int id,
 		}
 
 		if (!pdev->dev.of_node)
-			pr_warn("%s: Failed to locate of_node [id: %d]\n",
+			pr_debug("%s: Failed to locate of_node [id: %d]\n",
 				cell->name, platform_id);
 	}
 

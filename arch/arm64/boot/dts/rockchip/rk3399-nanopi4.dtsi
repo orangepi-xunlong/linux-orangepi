@@ -132,6 +132,27 @@
 		};
 	};
 
+	rt5651-sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "realtek,rt5651-codec";
+		simple-audio-card,format = "i2s";
+		simple-audio-card,mclk-fs = <256>;
+		simple-audio-card,widgets =
+			"Microphone", "Mic Jack",
+			"Headphone", "Headphone Jack";
+		simple-audio-card,routing =
+			"Mic Jack", "micbias1",
+			"IN1P", "Mic Jack",
+			"Headphone Jack", "HPOL",
+			"Headphone Jack", "HPOR";
+		simple-audio-card,cpu {
+			sound-dai = <&i2s1>;
+		};
+		simple-audio-card,codec {
+			sound-dai = <&rt5651>;
+		};
+	};
+
 	sdio_pwrseq: sdio-pwrseq {
 		compatible = "mmc-pwrseq-simple";
 		clocks = <&rk808 1>;
@@ -208,6 +229,10 @@
 	ddc-i2c-bus = <&i2c7>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&hdmi_cec>;
+	status = "okay";
+};
+
+&hdmi_sound {
 	status = "okay";
 };
 
@@ -463,6 +488,16 @@
 	i2c-scl-rising-time-ns = <150>;
 	i2c-scl-falling-time-ns = <30>;
 	status = "okay";
+
+	rt5651: rt5651@1a {
+		compatible = "realtek,rt5651";
+		reg = <0x1a>;
+		clocks = <&cru SCLK_I2S_8CH_OUT>;
+		clock-names = "mclk";
+		hp-det-gpio = <&gpio4 RK_PC4 GPIO_ACTIVE_LOW>;
+		// spk-con-gpio = <&gpio0 RK_PB3 GPIO_ACTIVE_HIGH>;
+		#sound-dai-cells = <0>;
+	};
 };
 
 &i2c2 {
@@ -487,6 +522,16 @@
 };
 
 &i2c7 {
+	status = "okay";
+};
+
+&i2s2 {
+	status = "okay";
+};
+
+&i2s1 {
+	rockchip,playback-channels = <8>;
+	rockchip,capture-channels = <8>;
 	status = "okay";
 };
 
@@ -757,5 +802,11 @@
 };
 
 &vopl_mmu {
+	status = "okay";
+};
+
+&spdif {
+	i2c-scl-rising-time-ns = <450>;
+	i2c-scl-falling-time-ns = <15>;
 	status = "okay";
 };

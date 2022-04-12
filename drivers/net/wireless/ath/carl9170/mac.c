@@ -309,6 +309,7 @@ int carl9170_set_operating_mode(struct ar9170 *ar)
 	u32 rx_ctrl = AR9170_MAC_RX_CTRL_DEAGG |
 		      AR9170_MAC_RX_CTRL_SHORT_FILTER;
 	u32 sniffer = AR9170_MAC_SNIFFER_DEFAULTS;
+	u32 mac_ftf = AR9170_MAC_FTF_DEFAULTS;
 	int err = 0;
 
 	rcu_read_lock();
@@ -369,6 +370,9 @@ int carl9170_set_operating_mode(struct ar9170 *ar)
 
 	if (ar->sniffer_enabled) {
 		enc_mode |= AR9170_MAC_ENCRYPTION_RX_SOFTWARE;
+		mac_ftf = AR9170_MAC_FTF_MONITOR;
+		sniffer |= AR9170_MAC_SNIFFER_ENABLE_PROMISC;
+		mac_addr = NULL;
 	}
 
 	err = carl9170_set_mac_reg(ar, AR9170_MAC_REG_MAC_ADDR_L, mac_addr);
@@ -380,6 +384,7 @@ int carl9170_set_operating_mode(struct ar9170 *ar)
 		return err;
 
 	carl9170_regwrite_begin(ar);
+	carl9170_regwrite(AR9170_MAC_REG_FRAMETYPE_FILTER, mac_ftf);
 	carl9170_regwrite(AR9170_MAC_REG_SNIFFER, sniffer);
 	carl9170_regwrite(AR9170_MAC_REG_CAM_MODE, cam_mode);
 	carl9170_regwrite(AR9170_MAC_REG_ENCRYPTION, enc_mode);

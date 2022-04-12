@@ -9,6 +9,8 @@
  */
 
 #include <linux/delay.h>
+#include <linux/extcon.h>
+#include <linux/extcon-provider.h>
 #include <linux/mutex.h>
 #include <linux/module.h>
 #include <linux/property.h>
@@ -76,7 +78,9 @@ static int dp_altmode_notify(struct dp_altmode *dp)
 	if (dp->data.conf) {
 		state = get_count_order(DP_CONF_GET_PIN_ASSIGN(dp->data.conf));
 		conf = TYPEC_MODAL_STATE(state);
+		dp_altmode_update_extcon(dp, false);
 	} else {
+		dp_altmode_update_extcon(dp, true);
 		conf = TYPEC_STATE_USB;
 	}
 
@@ -152,6 +156,40 @@ static int dp_altmode_status_update(struct dp_altmode *dp)
 	return ret;
 }
 
+static void dp_altmode_update_extcon(struct dp_altmode *dp, bool disconnect) {
+	const struct device *dev = &dp->port->dev;
+	struct extcon_dev* edev = NULL;
+
+	while (dev) {
+		edev = extcon_find_edev_by_node(dev->of_node);
+		if(!IS_ERR(edev)) {
+			break;
+		}
+		dev = dev->parent;
+	}
+
+	if (IS_ERR_OR_NULL(edev)) {
+		return;
+	}
+
+	if (disconnect || !dp->data.conf) {
+		extcon_set_state_sync(edev, EXTCON_DISP_DP, false);
+	} else {
+		union extcon_property_value extcon_true = { .intval = true };
+		extcon_set_state(edev, EXTCON_DISP_DP, true);
+		if (DP_CONF_GET_PIN_ASSIGN(dp->data.conf) & DP_PIN_ASSIGN_MULTI_FUNC_MASK) {
+			extcon_set_state_sync(edev, EXTCON_USB_HOST, true);
+			extcon_set_property(edev, EXTCON_DISP_DP, EXTCON_PROP_USB_SS,
+						 extcon_true);
+		} else {
+			extcon_set_state_sync(edev, EXTCON_USB_HOST, false);
+		}
+		extcon_sync(edev, EXTCON_DISP_DP);
+		extcon_set_state_sync(edev, EXTCON_USB, false);
+	}
+
+}
+
 static int dp_altmode_configured(struct dp_altmode *dp)
 {
 	sysfs_notify(&dp->alt->dev.kobj, "displayport", "configuration");
@@ -221,6 +259,8 @@ static void dp_altmode_work(struct work_struct *work)
 	case DP_STATE_EXIT:
 		if (typec_altmode_exit(dp->alt))
 			dev_err(&dp->alt->dev, "Exit Mode Failed!\n");
+		else
+			dp_altmode_update_extcon(dp, true);
 		break;
 	default:
 		break;
@@ -532,8 +572,14 @@ int dp_altmode_probe(struct typec_altmode *alt)
 	if (!(DP_CAP_DFP_D_PIN_ASSIGN(port->vdo) &
 	      DP_CAP_UFP_D_PIN_ASSIGN(alt->vdo)) &&
 	    !(DP_CAP_UFP_D_PIN_ASSIGN(port->vdo) &
-	      DP_CAP_DFP_D_PIN_ASSIGN(alt->vdo)))
-		return -ENODEV;
+	      DP_CAP_DFP_D_PIN_ASSIGN(alt->vdo))) {
+            dev_err(&alt->dev, "No compatible pin configuration found:"\
+                    "%04lx -> %04lx, %04lx <- %04lx",
+                    DP_CAP_DFP_D_PIN_ASSIGN(port->vdo), DP_CAP_UFP_D_PIN_ASSIGN(alt->vdo),
+                    DP_CAP_UFP_D_PIN_ASSIGN(port->vdo), DP_CAP_DFP_D_PIN_ASSIGN(alt->vdo));
+            return -ENODEV;
+	}
+
 
 	ret = sysfs_create_group(&alt->dev.kobj, &dp_altmode_group);
 	if (ret)

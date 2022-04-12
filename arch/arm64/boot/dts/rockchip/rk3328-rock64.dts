@@ -48,17 +48,6 @@
 		vin-supply = <&vcc_sys>;
 	};
 
-	vcc_host1_5v: vcc_otg_5v: vcc-host1-5v-regulator {
-		compatible = "regulator-fixed";
-		gpio = <&gpio0 RK_PA2 GPIO_ACTIVE_LOW>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&usb20_host_drv>;
-		regulator-name = "vcc_host1_5v";
-		regulator-always-on;
-		regulator-boot-on;
-		vin-supply = <&vcc_sys>;
-	};
-
 	vcc_sys: vcc-sys {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc_sys";
@@ -143,6 +132,11 @@
 	vmmc-supply = <&vcc_io>;
 	vqmmc-supply = <&vcc18_emmc>;
 	status = "okay";
+};
+
+&gpu {
+	status = "okay";
+	mali-supply = <&vdd_logic>;
 };
 
 &gmac2io {
@@ -386,11 +380,33 @@
 	status = "okay";
 };
 
+&u3phy {
+	status = "okay";
+};
+
+&u3phy_utmi {
+	status = "okay";
+};
+
+&u3phy_pipe {
+	status = "okay";
+};
+
 &usb_host0_ehci {
 	status = "okay";
 };
 
 &usb_host0_ohci {
+	status = "okay";
+};
+
+&usbdrd3 {
+	dr_mode = "host";
+	status = "okay";
+};
+
+&usbdrd3 {
+	dr_mode = "host";
 	status = "okay";
 };
 

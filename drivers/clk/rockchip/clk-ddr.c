@@ -87,6 +87,134 @@ static const struct clk_ops rockchip_ddrclk_sip_ops = {
 	.get_parent = rockchip_ddrclk_get_parent,
 };
 
+/* See v4.4/include/dt-bindings/display/rk_fb.h */
+#define SCREEN_NULL			0
+#define SCREEN_HDMI			6
+
+static inline int rk_drm_get_lcdc_type(void)
+{
+	return SCREEN_NULL;
+}
+
+struct share_params {
+	u32 hz;
+	u32 lcdc_type;
+	u32 vop;
+	u32 vop_dclk_mode;
+	u32 sr_idle_en;
+	u32 addr_mcu_el3;
+	/*
+	 * 1: need to wait flag1
+	 * 0: never wait flag1
+	 */
+	u32 wait_flag1;
+	/*
+	 * 1: need to wait flag1
+	 * 0: never wait flag1
+	 */
+	u32 wait_flag0;
+	u32 complt_hwirq;
+	 /* if need, add parameter after */
+};
+
+struct rockchip_ddrclk_data {
+	u32 inited_flag;
+	void __iomem *share_memory;
+};
+
+static struct rockchip_ddrclk_data ddr_data;
+
+static void rockchip_ddrclk_data_init(void)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_smc(ROCKCHIP_SIP_SHARE_MEM,
+		      1, SHARE_PAGE_TYPE_DDR, 0,
+		      0, 0, 0, 0, &res);
+
+	if (!res.a0) {
+		ddr_data.share_memory = (void __iomem *)ioremap(res.a1, 1<<12);
+		ddr_data.inited_flag = 1;
+	}
+}
+
+static int rockchip_ddrclk_sip_set_rate_v2(struct clk_hw *hw,
+					   unsigned long drate,
+					   unsigned long prate)
+{
+	struct share_params *p;
+	struct arm_smccc_res res;
+
+	if (!ddr_data.inited_flag)
+		rockchip_ddrclk_data_init();
+
+	p = (struct share_params *)ddr_data.share_memory;
+
+	p->hz = drate;
+	p->lcdc_type = rk_drm_get_lcdc_type();
+	p->wait_flag1 = 1;
+	p->wait_flag0 = 1;
+
+	arm_smccc_smc(ROCKCHIP_SIP_DRAM_FREQ,
+		      SHARE_PAGE_TYPE_DDR, 0,
+		      ROCKCHIP_SIP_CONFIG_DRAM_SET_RATE,
+		      0, 0, 0, 0, &res);
+
+	if ((int)res.a1 == -6) {
+		pr_err("%s: timeout, drate = %lumhz\n", __func__, drate/1000000);
+		/* TODO: rockchip_dmcfreq_wait_complete(); */
+	}
+
+	return res.a0;
+}
+
+static unsigned long rockchip_ddrclk_sip_recalc_rate_v2
+			(struct clk_hw *hw, unsigned long parent_rate)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_smc(ROCKCHIP_SIP_DRAM_FREQ,
+		      SHARE_PAGE_TYPE_DDR, 0,
+		      ROCKCHIP_SIP_CONFIG_DRAM_GET_RATE,
+		      0, 0, 0, 0, &res);
+	if (!res.a0)
+		return res.a1;
+	else
+		return 0;
+}
+
+static long rockchip_ddrclk_sip_round_rate_v2(struct clk_hw *hw,
+					      unsigned long rate,
+					      unsigned long *prate)
+{
+	struct share_params *p;
+	struct arm_smccc_res res;
+
+	if (!ddr_data.inited_flag)
+		rockchip_ddrclk_data_init();
+
+	p = (struct share_params *)ddr_data.share_memory;
+
+	p->hz = rate;
+
+	arm_smccc_smc(ROCKCHIP_SIP_DRAM_FREQ,
+		      SHARE_PAGE_TYPE_DDR, 0,
+		      ROCKCHIP_SIP_CONFIG_DRAM_ROUND_RATE,
+		      0, 0, 0, 0, &res);
+
+	if (!res.a0)
+		return res.a1;
+	else
+		return 0;
+}
+
+static const struct clk_ops rockchip_ddrclk_sip_ops_v2 = {
+	.recalc_rate = rockchip_ddrclk_sip_recalc_rate_v2,
+	.set_rate = rockchip_ddrclk_sip_set_rate_v2,
+	.round_rate = rockchip_ddrclk_sip_round_rate_v2,
+	.get_parent = rockchip_ddrclk_get_parent,
+};
+
 struct clk *rockchip_clk_register_ddrclk(const char *name, int flags,
 					 const char *const *parent_names,
 					 u8 num_parents, int mux_offset,
@@ -113,6 +241,9 @@ struct clk *rockchip_clk_register_ddrclk(const char *name, int flags,
 	switch (ddr_flag) {
 	case ROCKCHIP_DDRCLK_SIP:
 		init.ops = &rockchip_ddrclk_sip_ops;
+		break;
+	case ROCKCHIP_DDRCLK_SIP_V2:
+		init.ops = &rockchip_ddrclk_sip_ops_v2;
 		break;
 	default:
 		pr_err("%s: unsupported ddrclk type %d\n", __func__, ddr_flag);

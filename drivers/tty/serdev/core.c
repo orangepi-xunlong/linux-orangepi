@@ -430,11 +430,22 @@ static void serdev_drv_remove(struct device *dev)
 	dev_pm_domain_detach(dev, true);
 }
 
+static void serdev_drv_shutdown(struct device *dev)
+{
+	const struct serdev_device_driver *sdrv;
+	if (dev->driver) {
+		sdrv = to_serdev_device_driver(dev->driver);
+		if (sdrv->shutdown)
+			sdrv->shutdown(to_serdev_device(dev));
+	}
+}
+
 static struct bus_type serdev_bus_type = {
 	.name		= "serial",
 	.match		= serdev_device_match,
 	.probe		= serdev_drv_probe,
 	.remove		= serdev_drv_remove,
+    .shutdown	= serdev_drv_shutdown,
 };
 
 /**

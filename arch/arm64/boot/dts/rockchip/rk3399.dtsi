@@ -9,6 +9,7 @@
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/pinctrl/rockchip.h>
 #include <dt-bindings/power/rk3399-power.h>
+#include <dt-bindings/suspend/rockchip-rk3399.h>
 #include <dt-bindings/thermal/thermal.h>
 
 / {
@@ -452,6 +453,7 @@
 			snps,dis_u2_susphy_quirk;
 			snps,dis-del-phy-power-chg-quirk;
 			snps,dis-tx-ipgap-linecheck-quirk;
+			snps,xhci-trb-ent-quirk;
 			power-domains = <&power RK3399_PD_USB3>;
 			status = "disabled";
 		};
@@ -488,6 +490,7 @@
 			snps,dis_u2_susphy_quirk;
 			snps,dis-del-phy-power-chg-quirk;
 			snps,dis-tx-ipgap-linecheck-quirk;
+			snps,xhci-trb-ent-quirk;
 			power-domains = <&power RK3399_PD_USB3>;
 			status = "disabled";
 		};
@@ -800,17 +803,17 @@
 
 			trips {
 				cpu_alert0: cpu_alert0 {
-					temperature = <70000>;
+					temperature = <85000>;
 					hysteresis = <2000>;
 					type = "passive";
 				};
 				cpu_alert1: cpu_alert1 {
-					temperature = <75000>;
+					temperature = <95000>;
 					hysteresis = <2000>;
 					type = "passive";
 				};
 				cpu_crit: cpu_crit {
-					temperature = <95000>;
+					temperature = <100000>;
 					hysteresis = <2000>;
 					type = "critical";
 				};
@@ -1338,12 +1341,25 @@
 		#iommu-cells = <0>;
 	};
 
+
+	iep: iep@ff670000 {
+		compatible = "rockchip,rk3399-iep", "rockchip,rk3228-iep";
+		reg = <0x0 0xff670000 0x0 0x800>;
+		interrupts = <GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH 0>;
+		interrupt-names = "iep";
+		clocks = <&cru ACLK_IEP>, <&cru HCLK_IEP>;
+		clock-names = "axi", "ahb";
+		power-domains = <&power RK3399_PD_IEP>;
+		iommus = <&iep_mmu>;
+	};
+
 	iep_mmu: iommu@ff670800 {
 		compatible = "rockchip,iommu";
 		reg = <0x0 0xff670800 0x0 0x40>;
 		interrupts = <GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH 0>;
 		clocks = <&cru ACLK_IEP>, <&cru HCLK_IEP>;
 		clock-names = "aclk", "iface";
+		power-domains = <&power RK3399_PD_IEP>;
 		#iommu-cells = <0>;
 		status = "disabled";
 	};
@@ -2434,25 +2450,25 @@
 		sdmmc {
 			sdmmc_bus1: sdmmc-bus1 {
 				rockchip,pins =
-					<4 RK_PB0 1 &pcfg_pull_up>;
+					<4 RK_PB0 1 &pcfg_pull_up_8ma>;
 			};
 
 			sdmmc_bus4: sdmmc-bus4 {
 				rockchip,pins =
-					<4 RK_PB0 1 &pcfg_pull_up>,
-					<4 RK_PB1 1 &pcfg_pull_up>,
-					<4 RK_PB2 1 &pcfg_pull_up>,
-					<4 RK_PB3 1 &pcfg_pull_up>;
+					<4 RK_PB0 1 &pcfg_pull_up_8ma>,
+					<4 RK_PB1 1 &pcfg_pull_up_8ma>,
+					<4 RK_PB2 1 &pcfg_pull_up_8ma>,
+					<4 RK_PB3 1 &pcfg_pull_up_8ma>;
 			};
 
 			sdmmc_clk: sdmmc-clk {
 				rockchip,pins =
-					<4 RK_PB4 1 &pcfg_pull_none>;
+					<4 RK_PB4 1 &pcfg_pull_none_12ma>;
 			};
 
 			sdmmc_cmd: sdmmc-cmd {
 				rockchip,pins =
-					<4 RK_PB5 1 &pcfg_pull_up>;
+					<4 RK_PB5 1 &pcfg_pull_up_8ma>;
 			};
 
 			sdmmc_cd: sdmmc-cd {
@@ -2462,7 +2478,7 @@
 
 			sdmmc_wp: sdmmc-wp {
 				rockchip,pins =
-					<0 RK_PB0 1 &pcfg_pull_up>;
+					<0 RK_PB0 1 &pcfg_pull_up_8ma>;
 			};
 		};
 
@@ -2802,5 +2818,28 @@
 			};
 		};
 
+	};
+
+	rockchip_suspend: rockchip-suspend {
+		compatible = "rockchip,pm-rk3399";
+		status = "disabled";
+		rockchip,sleep-debug-en = <0>;
+		rockchip,virtual-poweroff = <0>;
+		rockchip,sleep-mode-config = <
+			(0
+			| RKPM_SLP_ARMPD
+			| RKPM_SLP_PERILPPD
+			| RKPM_SLP_DDR_RET
+			| RKPM_SLP_PLLPD
+			| RKPM_SLP_OSC_DIS
+			| RKPM_SLP_CENTER_PD
+			| RKPM_SLP_AP_PWROFF
+			)
+		>;
+		rockchip,wakeup-config = <
+			(0
+			| RKPM_GPIO_WKUP_EN
+			)
+		>;
 	};
 };

@@ -5505,13 +5505,7 @@ static void stmmac_set_rx_mode(struct net_device *dev)
 static int stmmac_change_mtu(struct net_device *dev, int new_mtu)
 {
 	struct stmmac_priv *priv = netdev_priv(dev);
-	int txfifosz = priv->plat->tx_fifo_size;
 	const int mtu = new_mtu;
-
-	if (txfifosz == 0)
-		txfifosz = priv->dma_cap.tx_fifo_size;
-
-	txfifosz /= priv->plat->tx_queues_to_use;
 
 	if (netif_running(dev)) {
 		netdev_err(priv->dev, "must be stopped to change its MTU\n");
@@ -5522,12 +5516,6 @@ static int stmmac_change_mtu(struct net_device *dev, int new_mtu)
 		netdev_dbg(priv->dev, "Jumbo frames not supported for XDP\n");
 		return -EINVAL;
 	}
-
-	new_mtu = STMMAC_ALIGN(new_mtu);
-
-	/* If condition true, FIFO is too small or MTU too large */
-	if ((txfifosz < new_mtu) || (new_mtu > BUF_SIZE_16KiB))
-		return -EINVAL;
 
 	dev->mtu = mtu;
 

@@ -247,6 +247,13 @@ enum {
 	 */
 	HCI_QUIRK_NO_SUSPEND_NOTIFIER,
 
+	/* When this quirk is set, max_page for local extended features
+	 * is set to 1, even if controller reports higher number. Some
+	 * controllers (e.g. RTL8723CS) report more pages, but they
+	 * don't actually support features declared there.
+	 */
+	HCI_QUIRK_BROKEN_LOCAL_EXT_FTR_MAX_PAGE,
+
 	/*
 	 * When this quirk is set, LE tx power is not queried on startup
 	 * and the min/max tx power values default to HCI_TX_POWER_INVALID.
