@@ -45,15 +45,15 @@
 	leds {
 		compatible = "gpio-leds";
 
-		led-0 {
-			label = "orangepi:red:power";
-			gpios = <&r_pio 0 4 GPIO_ACTIVE_HIGH>; /* PL4 */
+		status {
+			label = "green-led";
+			gpios = <&r_pio 0 7 GPIO_ACTIVE_HIGH>; /* PL7 */
 			default-state = "on";
 		};
 
-		led-1 {
-			label = "orangepi:green:status";
-			gpios = <&r_pio 0 7 GPIO_ACTIVE_HIGH>; /* PL7 */
+		power {
+			label = "red-led";
+			gpios = <&r_pio 0 4 GPIO_ACTIVE_HIGH>; /* PL4 */
 		};
 	};
 
@@ -197,11 +197,14 @@
 };
 
 &mmc2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mmc2_pins>;
 	vmmc-supply = <&reg_cldo1>;
 	vqmmc-supply = <&reg_bldo2>;
-	cap-mmc-hw-reset;
-	non-removable;
 	bus-width = <8>;
+	non-removable;
+	cap-mmc-hw-reset;
+	mmc-hs200-1_8v;
 	status = "okay";
 };
 
@@ -280,8 +283,11 @@
 				regulator-name = "vcc-efuse-pcie-hdmi-pc";
 			};
 
-			bldo3 {
-				/* unused */
+			reg_bldo3: bldo3 {
+				regulator-always-on;
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+				regulator-name = "vcc-wifi-io-pm-pg";
 			};
 
 			bldo4 {
@@ -340,12 +346,32 @@
 	};
 };
 
+&pwm {
+	status = "okay";
+};
+
+&ac200_pwm_clk {
+	status = "okay";
+};
+
+&i2s3 {
+	status = "okay";
+};
+
+&i2c3 {
+	status = "okay";
+};
+
 &rtc {
 	clocks = <&ext_osc32k>;
 };
 
 &sound_hdmi {
 	status = "okay";
+};
+
+&sound_ac200 {
+        status = "okay";
 };
 
 /delete-node/ &spi0;
