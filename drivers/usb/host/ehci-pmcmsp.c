@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * PMC MSP EHCI (Host Controller Driver) for USB.
  *
  * (C) Copyright 2006-2010 PMC-Sierra Inc
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
- *
  */
 
 /* includes */
@@ -111,7 +107,7 @@ static int usb_hcd_msp_map_regs(struct mspusb_device *dev)
 	if (!request_mem_region(res->start, res_len, "mab regs"))
 		return -EBUSY;
 
-	dev->mab_regs = ioremap_nocache(res->start, res_len);
+	dev->mab_regs = ioremap(res->start, res_len);
 	if (dev->mab_regs == NULL) {
 		retval = -ENOMEM;
 		goto err1;
@@ -128,7 +124,7 @@ static int usb_hcd_msp_map_regs(struct mspusb_device *dev)
 		retval = -EBUSY;
 		goto err2;
 	}
-	dev->usbid_regs = ioremap_nocache(res->start, res_len);
+	dev->usbid_regs = ioremap(res->start, res_len);
 	if (dev->usbid_regs == NULL) {
 		retval = -ENOMEM;
 		goto err3;
@@ -182,7 +178,7 @@ int usb_hcd_msp_probe(const struct hc_driver *driver,
 		retval = -EBUSY;
 		goto err1;
 	}
-	hcd->regs = ioremap_nocache(hcd->rsrc_start, hcd->rsrc_len);
+	hcd->regs = ioremap(hcd->rsrc_start, hcd->rsrc_len);
 	if (!hcd->regs) {
 		pr_debug("ioremap failed");
 		retval = -ENOMEM;
@@ -254,7 +250,7 @@ static const struct hc_driver ehci_msp_hc_driver = {
 	 * generic hardware linkage
 	 */
 	.irq =			ehci_irq,
-	.flags =		HCD_MEMORY | HCD_USB2 | HCD_BH,
+	.flags =		HCD_MEMORY | HCD_DMA | HCD_USB2 | HCD_BH,
 
 	/*
 	 * basic lifecycle operations

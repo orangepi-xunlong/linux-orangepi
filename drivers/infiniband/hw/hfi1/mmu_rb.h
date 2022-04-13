@@ -1,4 +1,5 @@
 /*
+ * Copyright(c) 2020 Cornelis Networks, Inc.
  * Copyright(c) 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
@@ -54,6 +55,7 @@ struct mmu_rb_node {
 	unsigned long len;
 	unsigned long __last;
 	struct rb_node node;
+	struct mmu_rb_handler *handler;
 	struct list_head list;
 };
 
@@ -71,7 +73,19 @@ struct mmu_rb_ops {
 		     void *evict_arg, bool *stop);
 };
 
-int hfi1_mmu_rb_register(void *ops_arg, struct mm_struct *mm,
+struct mmu_rb_handler {
+	struct mmu_notifier mn;
+	struct rb_root_cached root;
+	void *ops_arg;
+	spinlock_t lock;        /* protect the RB tree */
+	struct mmu_rb_ops *ops;
+	struct list_head lru_list;
+	struct work_struct del_work;
+	struct list_head del_list;
+	struct workqueue_struct *wq;
+};
+
+int hfi1_mmu_rb_register(void *ops_arg,
 			 struct mmu_rb_ops *ops,
 			 struct workqueue_struct *wq,
 			 struct mmu_rb_handler **handler);
@@ -81,7 +95,8 @@ int hfi1_mmu_rb_insert(struct mmu_rb_handler *handler,
 void hfi1_mmu_rb_evict(struct mmu_rb_handler *handler, void *evict_arg);
 void hfi1_mmu_rb_remove(struct mmu_rb_handler *handler,
 			struct mmu_rb_node *mnode);
-struct mmu_rb_node *hfi1_mmu_rb_extract(struct mmu_rb_handler *handler,
-					unsigned long addr, unsigned long len);
+bool hfi1_mmu_rb_remove_unless_exact(struct mmu_rb_handler *handler,
+				     unsigned long addr, unsigned long len,
+				     struct mmu_rb_node **rb_node);
 
 #endif /* _HFI1_MMU_RB_H */

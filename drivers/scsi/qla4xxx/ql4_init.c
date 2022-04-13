@@ -1,8 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * QLogic iSCSI HBA Driver
  * Copyright (c)  2003-2013 QLogic Corporation
- *
- * See LICENSE.qla4xxx for copyright and licensing details.
  */
 
 #include <scsi/iscsi_if.h>
@@ -14,7 +13,6 @@
 static void ql4xxx_set_mac_number(struct scsi_qla_host *ha)
 {
 	uint32_t value;
-	uint8_t func_number;
 	unsigned long flags;
 
 	/* Get the function number */
@@ -22,7 +20,6 @@ static void ql4xxx_set_mac_number(struct scsi_qla_host *ha)
 	value = readw(&ha->reg->ctrl_status);
 	spin_unlock_irqrestore(&ha->hardware_lock, flags);
 
-	func_number = (uint8_t) ((value >> 4) & 0x30);
 	switch (value & ISP_CONTROL_FN_MASK) {
 	case ISP_CONTROL_FN0_SCSI:
 		ha->mac_index = 1;
@@ -161,7 +158,6 @@ int qla4xxx_get_sys_info(struct scsi_qla_host *ha)
 
 		goto exit_get_sys_info_no_free;
 	}
-	memset(sys_info, 0, sizeof(*sys_info));
 
 	/* Get flash sys info */
 	if (qla4xxx_get_flash(ha, sys_info_dma, FLASH_OFFSET_SYS_INFO,
@@ -389,7 +385,7 @@ void qla4xxx_alloc_fw_dump(struct scsi_qla_host *ha)
 		goto alloc_cleanup;
 
 	DEBUG2(ql4_printk(KERN_INFO, ha,
-			  "Minidump Tempalate Size = 0x%x KB\n",
+			  "Minidump Template Size = 0x%x KB\n",
 			  ha->fw_dump_tmplt_size));
 	DEBUG2(ql4_printk(KERN_INFO, ha,
 			  "Total Minidump size = 0x%x KB\n", ha->fw_dump_size));
@@ -668,6 +664,9 @@ void qla4xxx_pci_config(struct scsi_qla_host *ha)
 
 	pci_set_master(ha->pdev);
 	status = pci_set_mwi(ha->pdev);
+	if (status)
+		ql4_printk(KERN_WARNING, ha, "Failed to set MWI\n");
+
 	/*
 	 * We want to respect framework's setting of PCI configuration space
 	 * command register and also want to make sure that all bits of
@@ -767,12 +766,10 @@ int ql4xxx_lock_drvr_wait(struct scsi_qla_host *a)
 	while (drvr_wait) {
 		if (ql4xxx_lock_drvr(a) == 0) {
 			ssleep(QL4_LOCK_DRVR_SLEEP);
-			if (drvr_wait) {
-				DEBUG2(printk("scsi%ld: %s: Waiting for "
-					      "Global Init Semaphore(%d)...\n",
-					      a->host_no,
-					      __func__, drvr_wait));
-			}
+			DEBUG2(printk("scsi%ld: %s: Waiting for "
+				      "Global Init Semaphore(%d)...\n",
+				      a->host_no,
+				      __func__, drvr_wait));
 			drvr_wait -= QL4_LOCK_DRVR_SLEEP;
 		} else {
 			DEBUG2(printk("scsi%ld: %s: Global Init Semaphore "
@@ -948,6 +945,7 @@ void qla4xxx_free_ddb_index(struct scsi_qla_host *ha)
 /**
  * qla4xxx_initialize_adapter - initiailizes hba
  * @ha: Pointer to host adapter structure.
+ * @is_reset: Is this init path or reset path
  *
  * This routine parforms all of the steps necessary to initialize the adapter.
  *
@@ -1159,9 +1157,10 @@ int qla4xxx_flash_ddb_change(struct scsi_qla_host *ha, uint32_t fw_ddb_index,
 
 /**
  * qla4xxx_process_ddb_changed - process ddb state change
- * @ha - Pointer to host adapter structure.
- * @fw_ddb_index - Firmware's device database index
- * @state - Device state
+ * @ha: Pointer to host adapter structure.
+ * @fw_ddb_index: Firmware's device database index
+ * @state: Device state
+ * @conn_err: Unused
  *
  * This routine processes a Decive Database Changed AEN Event.
  **/
@@ -1170,7 +1169,6 @@ int qla4xxx_process_ddb_changed(struct scsi_qla_host *ha,
 				uint32_t state, uint32_t conn_err)
 {
 	struct ddb_entry *ddb_entry;
-	int status = QLA_ERROR;
 
 	/* check for out of range index */
 	if (fw_ddb_index >= MAX_DDB_ENTRIES)
@@ -1192,7 +1190,7 @@ int qla4xxx_process_ddb_changed(struct scsi_qla_host *ha,
 	ddb_entry->ddb_change(ha, fw_ddb_index, ddb_entry, state);
 
 exit_ddb_event:
-	return status;
+	return QLA_ERROR;
 }
 
 /**

@@ -40,6 +40,13 @@ halmac_read_hw_efuse_88xx(
 );
 
 static HALMAC_RET_STATUS
+halmac_eeprom_parser_88xx(
+	IN PHALMAC_ADAPTER pHalmac_adapter,
+	IN u8 *pPhysical_efuse_map,
+	OUT u8 *pLogical_efuse_map
+);
+
+static HALMAC_RET_STATUS
 halmac_read_logical_efuse_map_88xx(
 	IN PHALMAC_ADAPTER pHalmac_adapter,
 	IN u8 *pMap
@@ -1140,7 +1147,7 @@ halmac_func_write_efuse_88xx(
 	return HALMAC_RET_SUCCESS;
 }
 
-HALMAC_RET_STATUS
+static HALMAC_RET_STATUS
 halmac_eeprom_parser_88xx(
 	IN PHALMAC_ADAPTER pHalmac_adapter,
 	IN u8 *pPhysical_efuse_map,

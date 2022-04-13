@@ -83,8 +83,4 @@ u32 rtw_phydm_get_phy_cnt(_adapter *adapter, enum phy_cnt cnt);
 void rtw_phydm_iqk_trigger(_adapter *adapter);
 #endif
 
-#ifdef CONFIG_LPS_PWR_TRACKING
-void rtw_phydm_pwr_tracking_directly(_adapter *adapter);
-#endif
-
 #endif /* __HAL_DM_H__ */

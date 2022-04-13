@@ -50,10 +50,7 @@ static s32 dequeue_writeport(PADAPTER adapter)
 	}
 
 #ifdef CONFIG_CHECK_LEAVE_LPS
-	#ifdef CONFIG_LPS_CHK_BY_TP
-	if (!adapter_to_pwrctl(adapter)->lps_chk_by_tp)
-	#endif
-		traffic_check_for_leave_lps(adapter, _TRUE, pxmitbuf->agg_num);
+	traffic_check_for_leave_lps(adapter, _TRUE, pxmitbuf->agg_num);
 #endif
 
 	rtw_write_port(adapter, 0, pxmitbuf->len, (u8 *)pxmitbuf);
@@ -96,7 +93,7 @@ s32 rtl8822bs_xmit_buf_handler(PADAPTER adapter)
 
 	ret = _rtw_down_sema(&pxmitpriv->xmit_sema);
 	if (_FAIL == ret) {
-		RTW_ERR("%s: down SdioXmitBufSema fail!\n", __func__);
+		RTW_ERR("%s: down SdioXmitBufSema fail!\n", __FUNCTION__);
 		return _FAIL;
 	}
 
@@ -211,9 +208,9 @@ static s32 xmit_xmitframes(PADAPTER adapter, struct xmit_priv *pxmitpriv)
 			sta_plist = get_next(sta_plist);
 
 #ifdef DBG_XMIT_BUF
-			RTW_INFO("%s idx:%d hwxmit_pkt_num:%d ptxservq_pkt_num:%d\n", __func__, idx, phwxmit->accnt, ptxservq->qcnt);
+			RTW_INFO("%s idx:%d hwxmit_pkt_num:%d ptxservq_pkt_num:%d\n", __FUNCTION__, idx, phwxmit->accnt, ptxservq->qcnt);
 			RTW_INFO("%s free_xmit_extbuf_cnt=%d free_xmitbuf_cnt=%d free_xmitframe_cnt=%d\n",
-				__func__, pxmitpriv->free_xmit_extbuf_cnt, pxmitpriv->free_xmitbuf_cnt,
+				__FUNCTION__, pxmitpriv->free_xmit_extbuf_cnt, pxmitpriv->free_xmitbuf_cnt,
 				 pxmitpriv->free_xmitframe_cnt);
 #endif
 			pframe_queue = &ptxservq->sta_pending;
@@ -257,7 +254,7 @@ static s32 xmit_xmitframes(PADAPTER adapter, struct xmit_priv *pxmitpriv)
 					pxmitbuf = rtw_alloc_xmitbuf(pxmitpriv);
 					if (pxmitbuf == NULL) {
 #if 0
-						RTW_ERR("%s: xmit_buf is not enough!\n", __func__);
+						RTW_ERR("%s: xmit_buf is not enough!\n", __FUNCTION__);
 #endif
 						err = -2;
 #ifdef CONFIG_SDIO_TX_ENABLE_AVAL_INT
@@ -273,7 +270,7 @@ static s32 xmit_xmitframes(PADAPTER adapter, struct xmit_priv *pxmitpriv)
 				if (MLME_IS_AP(adapter) || MLME_IS_MESH(adapter)) {
 					if ((pxmitframe->attrib.psta->state & WIFI_SLEEP_STATE)
 					    && (pxmitframe->attrib.triggered == 0)) {
-						RTW_INFO("%s: one not triggered pkt in queue when this STA sleep, break and goto next sta\n", __func__);
+						RTW_INFO("%s: one not triggered pkt in queue when this STA sleep, break and goto next sta\n", __FUNCTION__);
 						break;
 					}
 				}
@@ -293,7 +290,7 @@ static s32 xmit_xmitframes(PADAPTER adapter, struct xmit_priv *pxmitpriv)
 
 				ret = rtw_xmitframe_coalesce(adapter, pxmitframe->pkt, pxmitframe);
 				if (ret == _FAIL) {
-					RTW_ERR("%s: coalesce FAIL!", __func__);
+					RTW_ERR("%s: coalesce FAIL!", __FUNCTION__);
 					/* Todo: error handler */
 				} else {
 					k++;
@@ -389,7 +386,7 @@ static s32 xmit_handler(PADAPTER adapter)
 wait:
 	ret = _rtw_down_sema(&pxmitpriv->SdioXmitSema);
 	if (_FAIL == ret) {
-		RTW_ERR("%s: down sema fail!\n", __func__);
+		RTW_ERR("%s: down sema fail!\n", __FUNCTION__);
 		return _FAIL;
 	}
 
@@ -423,11 +420,7 @@ next:
 #ifdef CONFIG_REDUCE_TX_CPU_LOADING
 			rtw_msleep_os(1);
 #else
-#ifdef RTW_XMIT_THREAD_HIGH_PRIORITY_AGG
-			rtw_usleep_os(50);
-#else
 			rtw_yield_os();
-#endif
 #endif
 		goto next;
 	}
@@ -441,13 +434,6 @@ thread_return rtl8822bs_xmit_thread(thread_context context)
 	PADAPTER adapter;
 	struct xmit_priv *pxmitpriv;
 	u8 thread_name[20] = "RTWHALXT";
-#ifdef RTW_XMIT_THREAD_HIGH_PRIORITY_AGG
-#ifdef PLATFORM_LINUX
-	struct sched_param param = { .sched_priority = 1 };
-
-	sched_setscheduler(current, SCHED_FIFO, &param);
-#endif /* PLATFORM_LINUX */
-#endif /* RTW_XMIT_THREAD_HIGH_PRIORITY_AGG */
 
 
 	ret = _SUCCESS;
@@ -589,7 +575,7 @@ s32 rtl8822bs_hal_xmit(PADAPTER adapter, struct xmit_frame *pxmitframe)
 	ret = rtl8822bs_hal_xmit_enqueue(adapter, pxmitframe);
 	_exit_critical_bh(&pxmitpriv->lock, &irql);
 	if (ret != _TRUE) {
-		RTW_INFO("%s: enqueue xmitframe FAIL!\n", __func__);
+		RTW_INFO("%s: enqueue xmitframe FAIL!\n", __FUNCTION__);
 		return _TRUE;
 	}
 

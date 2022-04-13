@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * chaoskey - driver for ChaosKey device from Altus Metrum.
  *
@@ -11,15 +12,6 @@
  * bit stream.
  *
  * Copyright © 2015 Keith Packard <keithp@keithp.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the GNU
- * General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -42,12 +34,10 @@ static int chaoskey_rng_read(struct hwrng *rng, void *data,
 	dev_err(&(usb_if)->dev, format, ## arg)
 
 /* Version Information */
-#define DRIVER_VERSION	"v0.1"
 #define DRIVER_AUTHOR	"Keith Packard, keithp@keithp.com"
 #define DRIVER_DESC	"Altus Metrum ChaosKey driver"
 #define DRIVER_SHORT	"chaoskey"
 
-MODULE_VERSION(DRIVER_VERSION);
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
@@ -108,6 +98,7 @@ static void chaoskey_free(struct chaoskey *dev)
 		usb_free_urb(dev->urb);
 		kfree(dev->name);
 		kfree(dev->buf);
+		usb_put_intf(dev->interface);
 		kfree(dev);
 	}
 }
@@ -117,28 +108,26 @@ static int chaoskey_probe(struct usb_interface *interface,
 {
 	struct usb_device *udev = interface_to_usbdev(interface);
 	struct usb_host_interface *altsetting = interface->cur_altsetting;
-	int i;
-	int in_ep = -1;
+	struct usb_endpoint_descriptor *epd;
+	int in_ep;
 	struct chaoskey *dev;
 	int result = -ENOMEM;
 	int size;
+	int res;
 
 	usb_dbg(interface, "probe %s-%s", udev->product, udev->serial);
 
 	/* Find the first bulk IN endpoint and its packet size */
-	for (i = 0; i < altsetting->desc.bNumEndpoints; i++) {
-		if (usb_endpoint_is_bulk_in(&altsetting->endpoint[i].desc)) {
-			in_ep = usb_endpoint_num(&altsetting->endpoint[i].desc);
-			size = usb_endpoint_maxp(&altsetting->endpoint[i].desc);
-			break;
-		}
+	res = usb_find_bulk_in_endpoint(altsetting, &epd);
+	if (res) {
+		usb_dbg(interface, "no IN endpoint found");
+		return res;
 	}
 
+	in_ep = usb_endpoint_num(epd);
+	size = usb_endpoint_maxp(epd);
+
 	/* Validate endpoint and size */
-	if (in_ep == -1) {
-		usb_dbg(interface, "no IN endpoint found");
-		return -ENODEV;
-	}
 	if (size <= 0) {
 		usb_dbg(interface, "invalid size (%d)", size);
 		return -ENODEV;
@@ -156,6 +145,8 @@ static int chaoskey_probe(struct usb_interface *interface,
 
 	if (dev == NULL)
 		goto out;
+
+	dev->interface = usb_get_intf(interface);
 
 	dev->buf = kmalloc(size, GFP_KERNEL);
 
@@ -180,25 +171,19 @@ static int chaoskey_probe(struct usb_interface *interface,
 	 */
 
 	if (udev->product && udev->serial) {
-		dev->name = kmalloc(strlen(udev->product) + 1 +
-				    strlen(udev->serial) + 1, GFP_KERNEL);
+		dev->name = kasprintf(GFP_KERNEL, "%s-%s", udev->product,
+				      udev->serial);
 		if (dev->name == NULL)
 			goto out;
-
-		strcpy(dev->name, udev->product);
-		strcat(dev->name, "-");
-		strcat(dev->name, udev->serial);
 	}
-
-	dev->interface = interface;
 
 	dev->in_ep = in_ep;
 
 	if (le16_to_cpu(udev->descriptor.idVendor) != ALEA_VENDOR_ID)
-		dev->reads_started = 1;
+		dev->reads_started = true;
 
 	dev->size = size;
-	dev->present = 1;
+	dev->present = true;
 
 	init_waitqueue_head(&dev->wait_q);
 
@@ -215,19 +200,7 @@ static int chaoskey_probe(struct usb_interface *interface,
 
 	dev->hwrng.name = dev->name ? dev->name : chaoskey_driver.name;
 	dev->hwrng.read = chaoskey_rng_read;
-
-	/* Set the 'quality' metric.  Quality is measured in units of
-	 * 1/1024's of a bit ("mills"). This should be set to 1024,
-	 * but there is a bug in the hwrng core which masks it with
-	 * 1023.
-	 *
-	 * The patch that has been merged to the crypto development
-	 * tree for that bug limits the value to 1024 at most, so by
-	 * setting this to 1024 + 1023, we get 1023 before the fix is
-	 * merged and 1024 afterwards. We'll patch this driver once
-	 * both bits of code are in the same tree.
-	 */
-	dev->hwrng.quality = 1024 + 1023;
+	dev->hwrng.quality = 1024;
 
 	dev->hwrng_registered = (hwrng_register(&dev->hwrng) == 0);
 	if (!dev->hwrng_registered)
@@ -263,7 +236,7 @@ static void chaoskey_disconnect(struct usb_interface *interface)
 	usb_set_intfdata(interface, NULL);
 	mutex_lock(&dev->lock);
 
-	dev->present = 0;
+	dev->present = false;
 	usb_poison_urb(dev->urb);
 
 	if (!dev->open) {
@@ -411,13 +384,17 @@ static int _chaoskey_fill(struct chaoskey *dev)
 		!dev->reading,
 		(started ? NAK_TIMEOUT : ALEA_FIRST_TIMEOUT) );
 
-	if (result < 0)
+	if (result < 0) {
+		usb_kill_urb(dev->urb);
 		goto out;
+	}
 
-	if (result == 0)
+	if (result == 0) {
 		result = -ETIMEDOUT;
-	else
+		usb_kill_urb(dev->urb);
+	} else {
 		result = dev->valid;
+	}
 out:
 	/* Let the device go back to sleep eventually */
 	usb_autopm_put_interface(dev->interface);
@@ -553,7 +530,21 @@ static int chaoskey_suspend(struct usb_interface *interface,
 
 static int chaoskey_resume(struct usb_interface *interface)
 {
+	struct chaoskey *dev;
+	struct usb_device *udev = interface_to_usbdev(interface);
+
 	usb_dbg(interface, "resume");
+	dev = usb_get_intfdata(interface);
+
+	/*
+	 * We may have lost power.
+	 * In that case the device that needs a long time
+	 * for the first requests needs an extended timeout
+	 * again
+	 */
+	if (le16_to_cpu(udev->descriptor.idVendor) == ALEA_VENDOR_ID)
+		dev->reads_started = false;
+
 	return 0;
 }
 #else

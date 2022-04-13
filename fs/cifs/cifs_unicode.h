@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * cifs_unicode:  Unicode kernel case support
  *
@@ -7,28 +8,12 @@
  *
  *   Copyright (c) International Business Machines  Corp., 2000,2009
  *
- *   This program is free software;  you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY;  without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
- *   the GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program;  if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- *
- *
  * Notes:
  *     These APIs are based on the C library functions.  The semantics
  *     should match the C functions but with expanded size operands.
  *
  *     The upper/lower functions are based on a table created by mkupr.
  *     This is a compressed table of upper and lower case conversion.
- *
  */
 #ifndef _CIFS_UNICODE_H
 #define _CIFS_UNICODE_H
@@ -116,11 +101,9 @@ char *cifs_strndup_from_utf16(const char *src, const int maxlen,
 extern int cifsConvertToUTF16(__le16 *target, const char *source, int maxlen,
 			      const struct nls_table *cp, int mapChars);
 extern int cifs_remap(struct cifs_sb_info *cifs_sb);
-#ifdef CONFIG_CIFS_SMB2
 extern __le16 *cifs_strndup_to_utf16(const char *src, const int maxlen,
 				     int *utf16_len, const struct nls_table *cp,
 				     int remap);
-#endif /* CONFIG_CIFS_SMB2 */
 #endif
 
 wchar_t cifs_toupper(wchar_t in);
@@ -131,10 +114,10 @@ wchar_t cifs_toupper(wchar_t in);
  * Returns:
  *     Address of the first string
  */
-static inline wchar_t *
-UniStrcat(wchar_t *ucs1, const wchar_t *ucs2)
+static inline __le16 *
+UniStrcat(__le16 *ucs1, const __le16 *ucs2)
 {
-	wchar_t *anchor = ucs1;	/* save a pointer to start of ucs1 */
+	__le16 *anchor = ucs1;	/* save a pointer to start of ucs1 */
 
 	while (*ucs1++) ;	/* To end of first string */
 	ucs1--;			/* Return to the null */

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /* arch/sparc64/kernel/ktlb.S: Kernel mapping TLB miss handling.
  *
  * Copyright (C) 1995, 1997, 2005, 2008 David S. Miller <davem@davemloft.net>
@@ -6,10 +7,10 @@
  * Copyright (C) 1996,98,99 Jakub Jelinek  (jj@sunsite.mff.cuni.cz)
  */
 
+#include <linux/pgtable.h>
 #include <asm/head.h>
 #include <asm/asi.h>
 #include <asm/page.h>
-#include <asm/pgtable.h>
 #include <asm/tsb.h>
 
 	.text

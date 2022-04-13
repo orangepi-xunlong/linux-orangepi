@@ -24,10 +24,10 @@
 #define	INVALID_RF_DATA					0xffffffff
 #define	INVALID_TXAGC_DATA				0xff
 
-#define	PSD_VAL_NUM			3
+#define	PSD_VAL_NUM			5
 #define	PSD_SMP_NUM			3
 #define	FREQ_PT_2G_NUM		14
-#define	FREQ_PT_5G_NUM		11
+#define	FREQ_PT_5G_NUM		10
 
 #define number_channel_interferecne		4
 

@@ -139,6 +139,7 @@ static int __intf_fill_store_callback(struct wcn_usb_ep *ep, void *data)
 void wcn_usb_ep_stop(struct wcn_usb_ep *ep)
 {
 	int ret;
+	unsigned long flags;
 
 	ret = ep_hold_intf(ep);
 	if (ret) {
@@ -147,9 +148,9 @@ void wcn_usb_ep_stop(struct wcn_usb_ep *ep)
 	}
 
 	/* the lock of kernel is Unreliable!! so we do it */
-	spin_lock_bh(&ep->submit_lock);
+	spin_lock_irqsave(&ep->submit_lock, flags);
 	usb_kill_anchored_urbs(&ep->submitted);
-	spin_unlock_bh(&ep->submit_lock);
+	spin_unlock_irqrestore(&ep->submit_lock, flags);
 
 	ep_release_intf(ep);
 }
@@ -636,6 +637,7 @@ int wcn_usb_packet_submit(struct wcn_usb_packet *packet,
 	int ret;
 	struct wcn_usb_ep *ep;
 	ssize_t buf_size;
+	unsigned long flags;
 
 	if (packet == NULL || callback == NULL || packet->ep == NULL)
 		return -EINVAL;
@@ -656,7 +658,7 @@ int wcn_usb_packet_submit(struct wcn_usb_packet *packet,
 		return -EIO;
 	}
 
-	spin_lock_bh(&packet->ep->submit_lock);
+	spin_lock_irqsave(&packet->ep->submit_lock, flags);
 	ep = packet->ep;
 	buf_size = packet->urb->transfer_buffer_length;
 
@@ -673,7 +675,7 @@ int wcn_usb_packet_submit(struct wcn_usb_packet *packet,
 			wcn_usb_err("%s send zlp error %d\n", __func__, ret);
 	}
 
-	spin_unlock_bh(&ep->submit_lock);
+	spin_unlock_irqrestore(&packet->ep->submit_lock, flags);
 	ep_release_intf(ep);
 
 	return ret;

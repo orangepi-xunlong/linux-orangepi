@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2002 - 2007 Jeff Dike (jdike@{addtoit,linux.intel}.com)
- * Licensed under the GPL
  */
 
 #include <linux/err.h>
@@ -10,13 +10,13 @@
 #include <linux/sched.h>
 #include <asm/current.h>
 #include <asm/page.h>
-#include <asm/pgtable.h>
 #include <kern_util.h>
 #include <os.h>
 
 pte_t *virt_to_pte(struct mm_struct *mm, unsigned long addr)
 {
 	pgd_t *pgd;
+	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
 
@@ -27,7 +27,11 @@ pte_t *virt_to_pte(struct mm_struct *mm, unsigned long addr)
 	if (!pgd_present(*pgd))
 		return NULL;
 
-	pud = pud_offset(pgd, addr);
+	p4d = p4d_offset(pgd, addr);
+	if (!p4d_present(*p4d))
+		return NULL;
+
+	pud = pud_offset(p4d, addr);
 	if (!pud_present(*pud))
 		return NULL;
 
@@ -59,30 +63,30 @@ static pte_t *maybe_map(unsigned long virt, int is_write)
 static int do_op_one_page(unsigned long addr, int len, int is_write,
 		 int (*op)(unsigned long addr, int len, void *arg), void *arg)
 {
-	jmp_buf buf;
 	struct page *page;
 	pte_t *pte;
-	int n, faulted;
+	int n;
 
 	pte = maybe_map(addr, is_write);
 	if (pte == NULL)
 		return -1;
 
 	page = pte_page(*pte);
+#ifdef CONFIG_64BIT
+	pagefault_disable();
+	addr = (unsigned long) page_address(page) +
+		(addr & ~PAGE_MASK);
+#else
 	addr = (unsigned long) kmap_atomic(page) +
 		(addr & ~PAGE_MASK);
+#endif
+	n = (*op)(addr, len, arg);
 
-	current->thread.fault_catcher = &buf;
-
-	faulted = UML_SETJMP(&buf);
-	if (faulted == 0)
-		n = (*op)(addr, len, arg);
-	else
-		n = -1;
-
-	current->thread.fault_catcher = NULL;
-
+#ifdef CONFIG_64BIT
+	pagefault_enable();
+#else
 	kunmap_atomic((void *)addr);
+#endif
 
 	return n;
 }
@@ -139,16 +143,16 @@ static int copy_chunk_from_user(unsigned long from, int len, void *arg)
 	return 0;
 }
 
-long __copy_from_user(void *to, const void __user *from, unsigned long n)
+unsigned long raw_copy_from_user(void *to, const void __user *from, unsigned long n)
 {
-	if (segment_eq(get_fs(), KERNEL_DS)) {
+	if (uaccess_kernel()) {
 		memcpy(to, (__force void*)from, n);
 		return 0;
 	}
 
 	return buffer_op((unsigned long) from, n, 0, copy_chunk_from_user, &to);
 }
-EXPORT_SYMBOL(__copy_from_user);
+EXPORT_SYMBOL(raw_copy_from_user);
 
 static int copy_chunk_to_user(unsigned long to, int len, void *arg)
 {
@@ -159,16 +163,16 @@ static int copy_chunk_to_user(unsigned long to, int len, void *arg)
 	return 0;
 }
 
-long __copy_to_user(void __user *to, const void *from, unsigned long n)
+unsigned long raw_copy_to_user(void __user *to, const void *from, unsigned long n)
 {
-	if (segment_eq(get_fs(), KERNEL_DS)) {
+	if (uaccess_kernel()) {
 		memcpy((__force void *) to, from, n);
 		return 0;
 	}
 
 	return buffer_op((unsigned long) to, n, 1, copy_chunk_to_user, &from);
 }
-EXPORT_SYMBOL(__copy_to_user);
+EXPORT_SYMBOL(raw_copy_to_user);
 
 static int strncpy_chunk_from_user(unsigned long from, int len, void *arg)
 {
@@ -189,7 +193,7 @@ long __strncpy_from_user(char *dst, const char __user *src, long count)
 	long n;
 	char *ptr = dst;
 
-	if (segment_eq(get_fs(), KERNEL_DS)) {
+	if (uaccess_kernel()) {
 		strncpy(dst, (__force void *) src, count);
 		return strnlen(dst, count);
 	}
@@ -210,7 +214,7 @@ static int clear_chunk(unsigned long addr, int len, void *unused)
 
 unsigned long __clear_user(void __user *mem, unsigned long len)
 {
-	if (segment_eq(get_fs(), KERNEL_DS)) {
+	if (uaccess_kernel()) {
 		memset((__force void*)mem, 0, len);
 		return 0;
 	}
@@ -235,7 +239,7 @@ long __strnlen_user(const void __user *str, long len)
 {
 	int count = 0, n;
 
-	if (segment_eq(get_fs(), KERNEL_DS))
+	if (uaccess_kernel())
 		return strnlen((__force char*)str, len) + 1;
 
 	n = buffer_op((unsigned long) str, len, 0, strnlen_chunk, &count);

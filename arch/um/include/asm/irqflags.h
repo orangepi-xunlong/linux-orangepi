@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __UM_IRQFLAGS_H
 #define __UM_IRQFLAGS_H
 
@@ -31,7 +32,6 @@ static inline void arch_local_irq_disable(void)
 }
 
 #define ARCH_IRQ_DISABLED	0
-#define ARCh_IRQ_ENABLED	(SIGIO|SIGVTALRM)
 
 #include <asm-generic/irqflags.h>
 

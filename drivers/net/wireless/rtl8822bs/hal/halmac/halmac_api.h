@@ -21,7 +21,7 @@
 #define HALMAC_MAJOR_VER        0x0001		/* major version, ver_1 for async_api */
 #define HALMAC_PROTOTYPE_VER    0x0004		/* For halmac_api num change or prototype change, increment prototype version */
 #define HALMAC_MINOR_VER        0x0003		/* else increment minor version */
-#define HALMAC_PATCH_VER        0x0014		/* patch version */
+#define HALMAC_PATCH_VER        0x0008		/* patch version */
 
 #define HALMAC_88XX_SUPPORT			(HALMAC_8821C_SUPPORT || HALMAC_8822B_SUPPORT || HALMAC_8822C_SUPPORT)
 #define HALMAC_88XX_V1_SUPPORT		HALMAC_8814B_SUPPORT

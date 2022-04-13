@@ -21,12 +21,11 @@
 #include <linux/i2c.h>
 #include <linux/clk.h>
 #include <linux/of_gpio.h>
-#include <linux/sunxi-gpio.h>
 #include <linux/of_device.h>
 #include <linux/of_platform.h>
 #include <linux/debugfs.h>
 #include <linux/slab.h>
-#include <linux/mfd/acx00-mfd.h>
+#include <linux/mfd/ac200.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -42,13 +41,14 @@
 #undef ACX00_DAPM_LINEOUT
 
 struct acx00_priv {
-	struct acx00 *acx00;	/* parent mfd device struct */
-	struct snd_soc_codec *codec;
+	struct ac200_dev *acx00;	/* parent mfd device struct */
+	struct snd_soc_component *component;
 	struct clk *clk;
 	unsigned int sample_rate;
 	unsigned int fmt;
 	unsigned int enable;
 	unsigned int spk_gpio;
+	unsigned int switch_gpio;
 	bool spk_gpio_used;
 	struct mutex mutex;
 	struct delayed_work spk_work;
@@ -96,7 +96,7 @@ static const struct snd_kcontrol_new acx00_codec_controls[] = {
 			I2S_MIXERL_GAIN_ADC, I2S_MIXERR_GAIN_ADC,
 			0x1, 0, i2s_mixer_adc_tlv),
 	SOC_DOUBLE_TLV("I2S Mixer DAC Volume", AC_I2S_MIXER_GAIN,
-			I2S_MIXERR_GAIN_DAC, I2S_MIXERR_GAIN_DAC,
+			I2S_MIXERL_GAIN_DAC, I2S_MIXERR_GAIN_DAC,
 			0x1, 0, i2s_mixer_dac_tlv),
 	SOC_DOUBLE_TLV("DAC Mixer ADC Volume", AC_DAC_MIXER_GAIN,
 			DAC_MIXERL_GAIN_ADC, DAC_MIXERR_GAIN_ADC,
@@ -111,7 +111,7 @@ static const struct snd_kcontrol_new acx00_codec_controls[] = {
 			0x7, 0, mic_out_tlv),
 	SOC_SINGLE_TLV("ADC Input Volume", AC_ADC_MIC_CTL,
 			ADC_GAIN, 0x07, 0, adc_input_tlv),
-	SOC_SINGLE_TLV("LINEOUT Volume", AC_LINEOUT_CTL,
+	SOC_SINGLE_TLV("Master Volume", AC_LINEOUT_CTL,
 			LINEOUT_VOL, 0x1f, 0, lineout_tlv),
 	SOC_SINGLE_TLV("MIC1 Boost Volume", AC_ADC_MIC_CTL,
 			MIC1_BOOST, 0x07, 0, mic_boost_tlv),
@@ -123,23 +123,23 @@ static const struct snd_kcontrol_new acx00_codec_controls[] = {
 static int acx00_playback_event(struct snd_soc_dapm_widget *w,
 				struct snd_kcontrol *k, int event)
 {
-	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
+	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
 
 	switch (event) {
 	case	SND_SOC_DAPM_POST_PMU:
-		snd_soc_update_bits(codec, AC_SYS_CLK_CTL,
+		snd_soc_component_update_bits(component, AC_SYS_CLK_CTL,
 				(0x1<<SYS_CLK_DAC), (0x1<<SYS_CLK_DAC));
-		snd_soc_update_bits(codec, AC_SYS_MOD_RST,
+		snd_soc_component_update_bits(component, AC_SYS_MOD_RST,
 				(0x1<<MOD_RST_DAC), (0x1<<MOD_RST_DAC));
-		snd_soc_update_bits(codec, AC_DAC_CTL,
+		snd_soc_component_update_bits(component, AC_DAC_CTL,
 				(0x1<<DAC_CTL_DAC_EN), (0x1<<DAC_CTL_DAC_EN));
 		break;
 	case	SND_SOC_DAPM_POST_PMD:
-		snd_soc_update_bits(codec, AC_SYS_CLK_CTL,
+		snd_soc_component_update_bits(component, AC_SYS_CLK_CTL,
 				(0x1<<SYS_CLK_DAC), (0x0<<SYS_CLK_DAC));
-		snd_soc_update_bits(codec, AC_SYS_MOD_RST,
+		snd_soc_component_update_bits(component, AC_SYS_MOD_RST,
 				(0x1<<MOD_RST_DAC), (0x0<<MOD_RST_DAC));
-		snd_soc_update_bits(codec, AC_DAC_CTL,
+		snd_soc_component_update_bits(component, AC_DAC_CTL,
 				(0x1<<DAC_CTL_DAC_EN), (0x0<<DAC_CTL_DAC_EN));
 		break;
 	default:
@@ -152,23 +152,23 @@ static int acx00_playback_event(struct snd_soc_dapm_widget *w,
 static int acx00_capture_event(struct snd_soc_dapm_widget *w,
 				struct snd_kcontrol *k, int event)
 {
-	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
+	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
 
 	switch (event) {
 	case	SND_SOC_DAPM_POST_PMU:
-		snd_soc_update_bits(codec, AC_SYS_CLK_CTL,
+		snd_soc_component_update_bits(component, AC_SYS_CLK_CTL,
 				(0x1<<SYS_CLK_ADC), (0x1<<SYS_CLK_ADC));
-		snd_soc_update_bits(codec, AC_SYS_MOD_RST,
+		snd_soc_component_update_bits(component, AC_SYS_MOD_RST,
 				(0x1<<MOD_RST_ADC), (0x1<<MOD_RST_ADC));
-		snd_soc_update_bits(codec, AC_ADC_CTL,
+		snd_soc_component_update_bits(component, AC_ADC_CTL,
 				(0x1<<ADC_EN), (0x1<<ADC_EN));
 		break;
 	case	SND_SOC_DAPM_POST_PMD:
-		snd_soc_update_bits(codec, AC_SYS_CLK_CTL,
+		snd_soc_component_update_bits(component, AC_SYS_CLK_CTL,
 				(0x1<<SYS_CLK_ADC), (0x0<<SYS_CLK_ADC));
-		snd_soc_update_bits(codec, AC_SYS_MOD_RST,
+		snd_soc_component_update_bits(component, AC_SYS_MOD_RST,
 				(0x1<<MOD_RST_ADC), (0x0<<MOD_RST_ADC));
-		snd_soc_update_bits(codec, AC_ADC_CTL,
+		snd_soc_component_update_bits(component, AC_ADC_CTL,
 				(0x1<<ADC_EN), (0x0<<ADC_EN));
 		break;
 	default:
@@ -201,21 +201,21 @@ static void acx00_spk_enable(struct work_struct *work)
 static int acx00_lineout_event(struct snd_soc_dapm_widget *w,
 				struct snd_kcontrol *k, int event)
 {
-	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(w->dapm);
-	struct acx00_priv *priv = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
+	struct acx00_priv *priv = snd_soc_component_get_drvdata(component);
 
 	switch (event) {
 	case	SND_SOC_DAPM_POST_PMU:
 		if (!priv->enable) {
-			snd_soc_update_bits(priv->codec, AC_LINEOUT_CTL,
+			snd_soc_component_update_bits(priv->component, AC_LINEOUT_CTL,
 					(1<<LINEL_SRC_EN), (1<<LINEL_SRC_EN));
-			snd_soc_update_bits(priv->codec, AC_LINEOUT_CTL,
+			snd_soc_component_update_bits(priv->component, AC_LINEOUT_CTL,
 					(1<<LINER_SRC_EN), (1<<LINER_SRC_EN));
 			msleep(100);
 			priv->enable = 1;
 		}
 #ifdef ACX00_DAPM_LINEOUT
-		snd_soc_update_bits(codec, AC_LINEOUT_CTL,
+		snd_soc_component_update_bits(component, AC_LINEOUT_CTL,
 				(1<<LINEOUT_EN), (1<<LINEOUT_EN));
 		mdelay(50);
 #endif
@@ -239,7 +239,7 @@ static int acx00_lineout_event(struct snd_soc_dapm_widget *w,
 			msleep(50);
 		}
 #ifdef ACX00_DAPM_LINEOUT
-		snd_soc_update_bits(codec, AC_LINEOUT_CTL,
+		snd_soc_component_update_bits(component, AC_LINEOUT_CTL,
 				(1<<LINEOUT_EN), (0<<LINEOUT_EN));
 #endif
 		break;
@@ -503,114 +503,139 @@ static const struct snd_soc_dapm_route acx00_codec_dapm_routes[] = {
 	{"MIC2 PGA", NULL, "MIC Bias"},
 };
 
-static void acx00_codec_txctrl_enable(struct snd_soc_codec *codec,
+static void acx00_codec_txctrl_enable(struct snd_soc_component *component,
 					int enable)
 {
 	pr_debug("Enter %s, enable %d\n", __func__, enable);
 	if (enable) {
-		snd_soc_update_bits(codec, AC_I2S_CTL,
+		snd_soc_component_update_bits(component, AC_I2S_CTL,
 					(1<<I2S_RX_EN), (1<<I2S_RX_EN));
 	} else {
-		snd_soc_update_bits(codec, AC_I2S_CTL,
+		snd_soc_component_update_bits(component, AC_I2S_CTL,
 					(1<<I2S_RX_EN), (0<<I2S_RX_EN));
 	}
 	pr_debug("End %s, enable %d\n", __func__, enable);
 }
 
-static void acx00_codec_rxctrl_enable(struct snd_soc_codec *codec,
+static void acx00_codec_rxctrl_enable(struct snd_soc_component *component,
 					int enable)
 {
 	pr_debug("Enter %s, enable %d\n", __func__, enable);
 	if (enable) {
-		snd_soc_update_bits(codec, AC_I2S_CTL,
+		snd_soc_component_update_bits(component, AC_I2S_CTL,
 					(1<<I2S_TX_EN), (1<<I2S_TX_EN));
 	} else {
-		snd_soc_update_bits(codec, AC_I2S_CTL,
+		snd_soc_component_update_bits(component, AC_I2S_CTL,
 					(1<<I2S_TX_EN), (0<<I2S_TX_EN));
 	}
 	pr_debug("End %s, enable %d\n", __func__, enable);
 }
 
-static void acx00_codec_init(struct snd_soc_codec *codec)
+int acx00_reg_read(struct ac200_dev *acx00, unsigned short reg)
 {
-	struct acx00_priv *priv = snd_soc_codec_get_drvdata(codec);
+        unsigned int val;
+        int ret;
+
+        ret = regmap_read(acx00->regmap, reg, &val);
+
+        if (ret < 0)
+                return ret;
+        else
+                return val;
+}
+
+int acx00_reg_write(struct ac200_dev *acx00, unsigned short reg, unsigned short val)
+{
+	return regmap_write(acx00->regmap, reg, val);
+}
+
+static void acx00_codec_init(struct snd_soc_component *component)
+{
+	struct acx00_priv *priv = snd_soc_component_get_drvdata(component);
+
+	acx00_reg_write(priv->acx00, 0x50, 0x82b1);
+	acx00_reg_write(priv->acx00, 0xc, 0xce01);
 
 	/* acx00_codec sysctl init */
 	acx00_reg_write(priv->acx00, 0x0010, 0x03);
 	acx00_reg_write(priv->acx00, 0x0012, 0x01);
+
 	/* The bit3 need to setup to 1 for bias current. */
-	snd_soc_update_bits(codec, AC_MICBIAS_CTL,
+	snd_soc_component_update_bits(component, AC_MICBIAS_CTL,
 			(0x1 << ADDA_BIAS_CUR), (0x1 << ADDA_BIAS_CUR));
 
 	/* enable the output & global enable bit */
-	snd_soc_update_bits(codec, AC_I2S_CTL,
+	snd_soc_component_update_bits(component, AC_I2S_CTL,
 			(1<<I2S_SDO0_EN), (1<<I2S_SDO0_EN));
-	snd_soc_update_bits(codec, AC_I2S_CTL, (1<<I2S_GEN), (1<<I2S_GEN));
+	snd_soc_component_update_bits(component, AC_I2S_CTL, (1<<I2S_GEN), (1<<I2S_GEN));
 
 	/* Default setting slot width as 32 bit for I2S */
-	snd_soc_update_bits(codec, AC_I2S_FMT0,
+	snd_soc_component_update_bits(component, AC_I2S_FMT0,
 			(7<<I2S_FMT_SLOT_WIDTH), (7<<I2S_FMT_SLOT_WIDTH));
 
 	/* default setting 0xA0A0 for ADC & DAC Volume */
-	snd_soc_write(codec, AC_I2S_DAC_VOL, ACX00_DEF_VOL);
-	snd_soc_write(codec, AC_I2S_ADC_VOL, ACX00_DEF_VOL);
+	snd_soc_component_write(component, AC_I2S_DAC_VOL, ACX00_DEF_VOL);
+	snd_soc_component_write(component, AC_I2S_ADC_VOL, ACX00_DEF_VOL);
 
 	/* Enable HPF for high pass filter */
-	snd_soc_update_bits(codec, AC_DAC_CTL,
+	snd_soc_component_update_bits(component, AC_DAC_CTL,
 			(1<<DAC_CTL_HPF_EN), (1<<DAC_CTL_HPF_EN));
 
 	/* LINEOUT ANTI POP & Click noise */
-	snd_soc_update_bits(codec, AC_LINEOUT_CTL,
+	snd_soc_component_update_bits(component, AC_LINEOUT_CTL,
 			(0x7<<LINE_ANTI_TIME), (0x3<<LINE_ANTI_TIME));
-	snd_soc_update_bits(codec, AC_LINEOUT_CTL,
+	snd_soc_component_update_bits(component, AC_LINEOUT_CTL,
 			(0x3<<LINE_SLOPE_SEL), (0x3<<LINE_SLOPE_SEL));
 
 	/* enable & setting adc convert delay time */
-	snd_soc_update_bits(codec, AC_ADC_CTL, (0x3<<ADC_DELAY_TIME),
+	snd_soc_component_update_bits(component, AC_ADC_CTL, (0x3<<ADC_DELAY_TIME),
 			(0x3<<ADC_DELAY_TIME));
-	snd_soc_update_bits(codec, AC_ADC_CTL, (1<<ADC_DELAY_EN),
+	snd_soc_component_update_bits(component, AC_ADC_CTL, (1<<ADC_DELAY_EN),
 			(1<<ADC_DELAY_EN));
 
-
 	if (priv->spk_gpio_used) {
-		snd_soc_update_bits(priv->codec, AC_LINEOUT_CTL,
+		snd_soc_component_update_bits(priv->component, AC_LINEOUT_CTL,
 					(1<<LINEL_SRC_EN), (1<<LINEL_SRC_EN));
-		snd_soc_update_bits(priv->codec, AC_LINEOUT_CTL,
+		snd_soc_component_update_bits(priv->component, AC_LINEOUT_CTL,
 					(1<<LINER_SRC_EN), (1<<LINER_SRC_EN));
 		priv->enable = 1;
 	}
 #ifndef ACX00_DAPM_LINEOUT
-	snd_soc_update_bits(codec, AC_LINEOUT_CTL, (1<<LINEOUT_EN),
+	snd_soc_component_update_bits(component, AC_LINEOUT_CTL, (1<<LINEOUT_EN),
 			(1<<LINEOUT_EN));
 #endif
+
+	snd_soc_component_update_bits(component, AC_LINEOUT_CTL, 0x1f, 0x0f);
+	snd_soc_component_write(component, AC_DAC_MIXER_SRC, 0x2200);
+	snd_soc_component_write(component, AC_OUT_MIXER_SRC, 0x0202);
 }
 
 static int acx00_codec_hw_params(struct snd_pcm_substream *substream,
 		struct snd_pcm_hw_params *params, struct snd_soc_dai *dai)
 {
-	struct snd_soc_codec *codec = dai->codec;
+	struct snd_soc_component *component = dai->component;
 	int i;
 
 	switch (params_format(params)) {
 	case SNDRV_PCM_FORMAT_S16_LE:
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 			(7<<I2S_FMT_SAMPLE), (3<<I2S_FMT_SAMPLE));
 		break;
 	case SNDRV_PCM_FORMAT_S24_LE:
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 			(7<<I2S_FMT_SAMPLE), (5<<I2S_FMT_SAMPLE));
 		break;
 	case SNDRV_PCM_FORMAT_S32_LE:
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 			(7<<I2S_FMT_SAMPLE), (7<<I2S_FMT_SAMPLE));
 		break;
 	default:
-		dev_err(codec->dev, "unrecognized format support\n");
+		dev_err(component->dev, "unrecognized format support\n");
 		break;
 	}
 	for (i = 0; i < ARRAY_SIZE(sample_rate_conv); i++) {
 		if (sample_rate_conv[i].samplerate == params_rate(params)) {
-			snd_soc_update_bits(codec, AC_SYS_SR_CTL,
+			snd_soc_component_update_bits(component, AC_SYS_SR_CTL,
 				(SYS_SR_MASK<<SYS_SR_BIT),
 				(sample_rate_conv[i].rate_bit<<SYS_SR_BIT));
 		}
@@ -629,131 +654,131 @@ static int acx00_codec_dai_set_fmt(struct snd_soc_dai *codec_dai,
 		unsigned int fmt)
 {
 	struct acx00_priv *priv = snd_soc_dai_get_drvdata(codec_dai);
-	struct snd_soc_codec *codec = priv->codec;
+	struct snd_soc_component *component = priv->component;
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
 	/* codec clk & FRM master */
 	case SND_SOC_DAIFMT_CBM_CFM:
-		snd_soc_update_bits(codec, AC_I2S_CLK,
+		snd_soc_component_update_bits(component, AC_I2S_CLK,
 				(0x1<<I2S_BCLK_OUT), (0x1<<I2S_BCLK_OUT));
-		snd_soc_update_bits(codec, AC_I2S_CLK,
+		snd_soc_component_update_bits(component, AC_I2S_CLK,
 				(0x1<<I2S_LRCK_OUT), (0x1<<I2S_LRCK_OUT));
 		break;
 	/* codec clk & FRM slave */
 	case SND_SOC_DAIFMT_CBS_CFS:
-		snd_soc_update_bits(codec, AC_I2S_CLK,
+		snd_soc_component_update_bits(component, AC_I2S_CLK,
 				(0x1<<I2S_BCLK_OUT), 0x0<<I2S_BCLK_OUT);
-		snd_soc_update_bits(codec, AC_I2S_CLK,
+		snd_soc_component_update_bits(component, AC_I2S_CLK,
 				(0x1<<I2S_LRCK_OUT), 0x0<<I2S_LRCK_OUT);
 		break;
 	}
 
 	switch (fmt & SND_SOC_DAIFMT_FORMAT_MASK) {
 	case SND_SOC_DAIFMT_I2S:
-		snd_soc_update_bits(codec, AC_I2S_CLK,
+		snd_soc_component_update_bits(component, AC_I2S_CLK,
 				(0x3FF<<I2S_LRCK_PERIOD),
 				(0x1F<<I2S_LRCK_PERIOD));
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 				(0x3<<I2S_FMT_MODE), (0x1<<I2S_FMT_MODE));
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 				(0x1<<I2S_FMT_TX_OFFSET),
 				(0x1<<I2S_FMT_TX_OFFSET));
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 				(0x1<<I2S_FMT_RX_OFFSET),
 				(0x1<<I2S_FMT_RX_OFFSET));
 		break;
 	case SND_SOC_DAIFMT_RIGHT_J:
-		snd_soc_update_bits(codec, AC_I2S_CLK,
+		snd_soc_component_update_bits(component, AC_I2S_CLK,
 				(0x3FF<<I2S_LRCK_PERIOD),
 				(0x1F<<I2S_LRCK_PERIOD));
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 				(0x3<<I2S_FMT_MODE), (0x2<<I2S_FMT_MODE));
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 				(0x1<<I2S_FMT_TX_OFFSET),
 				(0x0<<I2S_FMT_TX_OFFSET));
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 				(0x1<<I2S_FMT_TX_OFFSET),
 				(0x0<<I2S_FMT_RX_OFFSET));
 		break;
 	case SND_SOC_DAIFMT_LEFT_J:
-		snd_soc_update_bits(codec, AC_I2S_CLK,
+		snd_soc_component_update_bits(component, AC_I2S_CLK,
 				(0x3FF<<I2S_LRCK_PERIOD),
 				(0x1F<<I2S_LRCK_PERIOD));
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 				(0x3<<I2S_FMT_MODE), (0x1<<I2S_FMT_MODE));
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 				(0x1<<I2S_FMT_TX_OFFSET),
 				(0x0<<I2S_FMT_TX_OFFSET));
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 				(0x1<<I2S_FMT_RX_OFFSET),
 				(0x0<<I2S_FMT_RX_OFFSET));
 		break;
 	case SND_SOC_DAIFMT_DSP_A:
-		snd_soc_update_bits(codec, AC_I2S_CLK,
+		snd_soc_component_update_bits(component, AC_I2S_CLK,
 				(0x3FF<<I2S_LRCK_PERIOD),
 				(0x3F<<I2S_LRCK_PERIOD));
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 				(0x3<<I2S_FMT_MODE), (0x0<<I2S_FMT_MODE));
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 				(0x1<<I2S_FMT_TX_OFFSET),
 				(0x1<<I2S_FMT_TX_OFFSET));
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 				(0x1<<I2S_FMT_RX_OFFSET),
 				(0x1<<I2S_FMT_RX_OFFSET));
 		break;
 	case SND_SOC_DAIFMT_DSP_B:
-		snd_soc_update_bits(codec, AC_I2S_CLK,
+		snd_soc_component_update_bits(component, AC_I2S_CLK,
 				(0x3FF<<I2S_LRCK_PERIOD),
 				(0x3F<<I2S_LRCK_PERIOD));
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 				(0x3<<I2S_FMT_MODE), (0x0<<I2S_FMT_MODE));
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 				(0x1<<I2S_FMT_TX_OFFSET),
 				(0x0<<I2S_FMT_TX_OFFSET));
-		snd_soc_update_bits(codec, AC_I2S_FMT0,
+		snd_soc_component_update_bits(component, AC_I2S_FMT0,
 				(0x1<<I2S_FMT_RX_OFFSET),
 				(0x0<<I2S_FMT_RX_OFFSET));
 		break;
 	default:
-		dev_err(codec->dev, "format setting failed\n");
+		dev_err(component->dev, "format setting failed\n");
 		break;
 	}
 
 	switch (fmt & SND_SOC_DAIFMT_INV_MASK) {
 	case SND_SOC_DAIFMT_NB_NF:
-		snd_soc_update_bits(codec, AC_I2S_FMT1,
+		snd_soc_component_update_bits(component, AC_I2S_FMT1,
 				(0x1<<I2S_FMT_BCLK_POLAR),
 				(0x0<<I2S_FMT_BCLK_POLAR));
-		snd_soc_update_bits(codec, AC_I2S_FMT1,
+		snd_soc_component_update_bits(component, AC_I2S_FMT1,
 				(0x1<<I2S_FMT_LRCK_POLAR),
 				(0x0<<I2S_FMT_LRCK_POLAR));
 		break;
 	case SND_SOC_DAIFMT_NB_IF:
-		snd_soc_update_bits(codec, AC_I2S_FMT1,
+		snd_soc_component_update_bits(component, AC_I2S_FMT1,
 				(0x1<<I2S_FMT_BCLK_POLAR),
 				(0x0<<I2S_FMT_BCLK_POLAR));
-		snd_soc_update_bits(codec, AC_I2S_FMT1,
+		snd_soc_component_update_bits(component, AC_I2S_FMT1,
 				(0x1<<I2S_FMT_LRCK_POLAR),
 				(0x1<<I2S_FMT_LRCK_POLAR));
 		break;
 	case SND_SOC_DAIFMT_IB_NF:
-		snd_soc_update_bits(codec, AC_I2S_FMT1,
+		snd_soc_component_update_bits(component, AC_I2S_FMT1,
 				(0x1<<I2S_FMT_BCLK_POLAR),
 				(0x1<<I2S_FMT_BCLK_POLAR));
-		snd_soc_update_bits(codec, AC_I2S_FMT1,
+		snd_soc_component_update_bits(component, AC_I2S_FMT1,
 				(0x1<<I2S_FMT_LRCK_POLAR),
 				(0x0<<I2S_FMT_LRCK_POLAR));
 		break;
 	case SND_SOC_DAIFMT_IB_IF:
-		snd_soc_update_bits(codec, AC_I2S_FMT1,
+		snd_soc_component_update_bits(component, AC_I2S_FMT1,
 				(0x1<<I2S_FMT_BCLK_POLAR),
 				(0x1<<I2S_FMT_BCLK_POLAR));
-		snd_soc_update_bits(codec, AC_I2S_FMT1,
+		snd_soc_component_update_bits(component, AC_I2S_FMT1,
 				(0x1<<I2S_FMT_LRCK_POLAR),
 				(0x1<<I2S_FMT_LRCK_POLAR));
 		break;
 	default:
-		dev_err(codec->dev, "invert clk setting failed\n");
+		dev_err(component->dev, "invert clk setting failed\n");
 		return -EINVAL;
 	}
 	return 0;
@@ -763,7 +788,7 @@ static int acx00_codec_dai_set_clkdiv(struct snd_soc_dai *codec_dai,
 		int clk_id, int clk_div)
 {
 	struct acx00_priv *priv = snd_soc_dai_get_drvdata(codec_dai);
-	struct snd_soc_codec *codec = priv->codec;
+	struct snd_soc_component *component = priv->component;
 	unsigned int bclk_div;
 	/*
 	 * when PCM mode, setting as 64fs, when I2S mode as 32fs,
@@ -818,11 +843,11 @@ static int acx00_codec_dai_set_clkdiv(struct snd_soc_dai *codec_dai,
 		bclk_div = I2S_BCLK_DIV_15;
 		break;
 	default:
-		dev_err(codec->dev, "setting blck div failed\n");
+		dev_err(component->dev, "setting blck div failed\n");
 		break;
 	}
 
-	snd_soc_update_bits(codec, AC_I2S_CLK,
+	snd_soc_component_update_bits(component, AC_I2S_CLK,
 			(I2S_BCLK_DIV_MASK<<I2S_BLCK_DIV),
 			(bclk_div<<I2S_BLCK_DIV));
 	return 0;
@@ -841,59 +866,62 @@ MODULE_PARM_DESC(acx00_loop_en, "ACX00-Codec audio loopback debug(Y=enable, N=di
 static int acx00_codec_trigger(struct snd_pcm_substream *substream,
 		int cmd, struct snd_soc_dai *codec_dai)
 {
+	struct snd_soc_component *component = codec_dai->component;
 	return 0;
 }
 
 static int acx00_codec_prepare(struct snd_pcm_substream *substream,
 		struct snd_soc_dai *codec_dai)
 {
-	snd_soc_update_bits(codec_dai->codec, AC_SYS_CLK_CTL,
+	struct snd_soc_component *component = codec_dai->component;
+
+	snd_soc_component_update_bits(component, AC_SYS_CLK_CTL,
 			(0x1<<SYS_CLK_I2S), (0x1<<SYS_CLK_I2S));
-	snd_soc_update_bits(codec_dai->codec, AC_SYS_MOD_RST,
+	snd_soc_component_update_bits(component, AC_SYS_MOD_RST,
 			(0x1<<MOD_RST_I2S), (0x1<<MOD_RST_I2S));
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		if (acx00_loop_en)
-			snd_soc_update_bits(codec_dai->codec, AC_I2S_FMT0,
+			snd_soc_component_update_bits(component, AC_I2S_FMT0,
 				(0x1<<I2S_FMT_LOOP),
 				(0x1<<I2S_FMT_LOOP));
 		else
-			snd_soc_update_bits(codec_dai->codec, AC_I2S_FMT0,
+			snd_soc_component_update_bits(component, AC_I2S_FMT0,
 				(0x1<<I2S_FMT_LOOP),
 				(0x0<<I2S_FMT_LOOP));
-		acx00_codec_txctrl_enable(codec_dai->codec, 1);
+		acx00_codec_txctrl_enable(component, 1);
 	} else
-		acx00_codec_rxctrl_enable(codec_dai->codec, 1);
+		acx00_codec_rxctrl_enable(component, 1);
 	return 0;
 }
 
 static int acx00_codec_digital_mute(struct snd_soc_dai *codec_dai,
 				int mute)
 {
-	struct snd_soc_codec *codec = codec_dai->codec;
+	struct snd_soc_component *component = codec_dai->component;
 
 	if (mute)
-		snd_soc_write(codec, AC_I2S_DAC_VOL, 0);
+		snd_soc_component_write(component, AC_I2S_DAC_VOL, 0);
 	else
-		snd_soc_write(codec, AC_I2S_DAC_VOL, ACX00_DEF_VOL);
+		snd_soc_component_write(component, AC_I2S_DAC_VOL, ACX00_DEF_VOL);
 	return 0;
 }
 
 static void acx00_codec_shutdown(struct snd_pcm_substream *substream,
 				struct snd_soc_dai *dai)
 {
-	struct snd_soc_codec *codec = dai->codec;
+	struct snd_soc_component *component = dai->component;
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		acx00_codec_txctrl_enable(codec, 0);
+		acx00_codec_txctrl_enable(component, 0);
 	else
-		acx00_codec_rxctrl_enable(codec, 0);
+		acx00_codec_rxctrl_enable(component, 0);
 }
 
 static const struct snd_soc_dai_ops acx00_codec_dai_ops = {
 	.hw_params	= acx00_codec_hw_params,
 	.shutdown	= acx00_codec_shutdown,
-	.digital_mute	= acx00_codec_digital_mute,
+//	.digital_mute	= acx00_codec_digital_mute,
 	.set_sysclk	= acx00_codec_dai_set_sysclk,
 	.set_fmt	= acx00_codec_dai_set_fmt,
 	.set_clkdiv	= acx00_codec_dai_set_clkdiv,
@@ -915,6 +943,7 @@ static struct snd_soc_dai_driver acx00_codec_dai[] = {
 				| SNDRV_PCM_FMTBIT_S24_LE
 				| SNDRV_PCM_FMTBIT_S32_LE,
 		},
+
 		.capture = {
 			.stream_name = "Capture",
 			.channels_min = 1,
@@ -925,6 +954,7 @@ static struct snd_soc_dai_driver acx00_codec_dai[] = {
 				| SNDRV_PCM_FMTBIT_S24_LE
 				| SNDRV_PCM_FMTBIT_S32_LE,
 		},
+
 		.ops = &acx00_codec_dai_ops,
 	},
 };
@@ -934,59 +964,58 @@ static void acx00_codec_resume_work(struct work_struct *work)
 	struct acx00_priv *priv = container_of(work,
 			struct acx00_priv, resume_work.work);
 
-	acx00_codec_init(priv->codec);
+	acx00_codec_init(priv->component);
 }
 
-static int acx00_codec_probe(struct snd_soc_codec *codec)
+static int acx00_codec_probe(struct snd_soc_component *component)
 {
-	struct acx00_priv *priv = snd_soc_codec_get_drvdata(codec);
-	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
+	struct acx00_priv *priv = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
 	int ret = 0;
 
 	mutex_init(&priv->mutex);
 
-	priv->codec = codec;
-
+	priv->component = component;
+#if 0
 	/* Add virtual switch */
-	ret = snd_soc_add_codec_controls(codec, acx00_codec_controls,
+	ret = snd_soc_add_component_controls(component, acx00_codec_controls,
 					ARRAY_SIZE(acx00_codec_controls));
 	if (ret) {
 		pr_err("[audio-codec] Failed to register audio mode control, will continue without it.\n");
 	}
 	snd_soc_dapm_new_controls(dapm, acx00_codec_dapm_widgets, ARRAY_SIZE(acx00_codec_dapm_widgets));
 	snd_soc_dapm_add_routes(dapm, acx00_codec_dapm_routes, ARRAY_SIZE(acx00_codec_dapm_routes));
-
+#endif
 	/* using late_initcall to wait 120ms acx00-core to make chip reset */
-	acx00_codec_init(codec);
+	acx00_codec_init(component);
 	INIT_DELAYED_WORK(&priv->spk_work, acx00_spk_enable);
 	INIT_DELAYED_WORK(&priv->resume_work, acx00_codec_resume_work);
 	return 0;
 }
 
-static int acx00_codec_remove(struct snd_soc_codec *codec)
+static void acx00_codec_remove(struct snd_soc_component *component)
 {
-	struct acx00_priv *priv = snd_soc_codec_get_drvdata(codec);
+	struct acx00_priv *priv = snd_soc_component_get_drvdata(component);
 
 	cancel_delayed_work_sync(&priv->spk_work);
 	cancel_delayed_work_sync(&priv->resume_work);
-	return 0;
 }
 
-static unsigned int acx00_codec_read(struct snd_soc_codec *codec,
+static unsigned int acx00_codec_read(struct snd_soc_component *component,
 					unsigned int reg)
 {
 	unsigned int data;
-	struct acx00_priv *priv = snd_soc_codec_get_drvdata(codec);
+	struct acx00_priv *priv = snd_soc_component_get_drvdata(component);
 
 	/* Device I/O API */
 	data = acx00_reg_read(priv->acx00, reg);
 	return data;
 }
 
-static int acx00_codec_write(struct snd_soc_codec *codec,
+static int acx00_codec_write(struct snd_soc_component *component,
 			unsigned int reg, unsigned int value)
 {
-	struct acx00_priv *priv = snd_soc_codec_get_drvdata(codec);
+	struct acx00_priv *priv = snd_soc_component_get_drvdata(component);
 
 	return acx00_reg_write(priv->acx00, reg, value);
 }
@@ -995,16 +1024,17 @@ static int sunxi_gpio_iodisable(u32 gpio)
 {
 	char pin_name[8];
 	u32 config, ret;
-
+#if 0
 	sunxi_gpio_to_name(gpio, pin_name);
 	config = 7 << 16;
 	ret = pin_config_set(SUNXI_PINCTRL, pin_name, config);
+#endif
 	return ret;
 }
 
-static int acx00_codec_suspend(struct snd_soc_codec *codec)
+static int acx00_codec_suspend(struct snd_soc_component *component)
 {
-	struct acx00_priv *priv = snd_soc_codec_get_drvdata(codec);
+	struct acx00_priv *priv = snd_soc_component_get_drvdata(component);
 
 	pr_debug("Enter %s\n", __func__);
 
@@ -1021,11 +1051,11 @@ static int acx00_codec_suspend(struct snd_soc_codec *codec)
 	 * Pop & Click noise, then we should cut down the LINEOUT in this town.
 	 */
 	if (priv->enable) {
-		snd_soc_update_bits(codec, AC_LINEOUT_CTL,
+		snd_soc_component_update_bits(component, AC_LINEOUT_CTL,
 				(1<<LINEOUT_EN), (0<<LINEOUT_EN));
-		snd_soc_update_bits(priv->codec, AC_LINEOUT_CTL,
+		snd_soc_component_update_bits(priv->component, AC_LINEOUT_CTL,
 				(1<<LINEL_SRC_EN), (0<<LINEL_SRC_EN));
-		snd_soc_update_bits(priv->codec, AC_LINEOUT_CTL,
+		snd_soc_component_update_bits(priv->component, AC_LINEOUT_CTL,
 				(1<<LINER_SRC_EN), (0<<LINER_SRC_EN));
 		priv->enable = 0;
 	}
@@ -1035,14 +1065,14 @@ static int acx00_codec_suspend(struct snd_soc_codec *codec)
 	return 0;
 }
 
-static int acx00_codec_resume(struct snd_soc_codec *codec)
+static int acx00_codec_resume(struct snd_soc_component *component)
 {
-	struct acx00_priv *priv = snd_soc_codec_get_drvdata(codec);
+	struct acx00_priv *priv = snd_soc_component_get_drvdata(component);
 
 	pr_debug("Enter %s\n", __func__);
 
 	if (clk_prepare_enable(priv->clk)) {
-		dev_err(codec->dev, "codec resume clk failed\n");
+		dev_err(component->dev, "codec resume clk failed\n");
 		return -EBUSY;
 	}
 
@@ -1059,10 +1089,10 @@ static int acx00_codec_resume(struct snd_soc_codec *codec)
 }
 
 
-static int acx00_codec_set_bias_level(struct snd_soc_codec *codec,
+static int acx00_codec_set_bias_level(struct snd_soc_component *component,
 		enum snd_soc_bias_level level)
 {
-	codec->component.dapm.bias_level = level;
+	component->dapm.bias_level = level;
 	return 0;
 }
 
@@ -1112,7 +1142,7 @@ static ssize_t show_audio_reg(struct device *dev,
 
 	while (reg_labels[i].name != NULL) {
 		reg_val = acx00_reg_read(priv->acx00, reg_labels[i].value);
-		count += sprintf(buf + count, "%s 0x%x: 0x%04x\n",
+		count += sprintf(buf + count, "%s 0x%x: 0x%x\n",
 		reg_labels[i].name, (reg_labels[i].value), reg_val);
 		i++;
 	}
@@ -1183,15 +1213,21 @@ static struct attribute_group audio_debug_attr_group = {
 	.attrs  = audio_debug_attrs,
 };
 
-static struct snd_soc_codec_driver soc_codec_driver_acx00 = {
+static struct snd_soc_component_driver soc_codec_driver_acx00 = {
 	.probe			= acx00_codec_probe,
 	.remove			= acx00_codec_remove,
 	.suspend		= acx00_codec_suspend,
 	.resume			= acx00_codec_resume,
 	.read			= acx00_codec_read,
 	.write			= acx00_codec_write,
-	.ignore_pmdown_time	= 1,
+//	.ignore_pmdown_time	= 1,
 	.set_bias_level		= acx00_codec_set_bias_level,
+	.controls		= acx00_codec_controls,
+	.num_controls		= ARRAY_SIZE(acx00_codec_controls),
+	.dapm_widgets		= acx00_codec_dapm_widgets,
+	.num_dapm_widgets	= ARRAY_SIZE(acx00_codec_dapm_widgets),
+	.dapm_routes		= acx00_codec_dapm_routes,
+	.num_dapm_routes	= ARRAY_SIZE(acx00_codec_dapm_routes),
 };
 
 /* through acx00 is part of mfd devices, after the mfd */
@@ -1199,8 +1235,7 @@ static int acx00_codec_dev_probe(struct platform_device *pdev)
 {
 	struct acx00_priv *priv;
 	int ret;
-	struct device_node *np = of_find_compatible_node(NULL, NULL,
-				"allwinner,ac200_codec");
+	struct device_node *np = of_find_compatible_node(NULL, NULL, "allwinner,ac200_codec");
 
 	priv = devm_kzalloc(&pdev->dev, sizeof(struct acx00_priv), GFP_KERNEL);
 	if (!priv) {
@@ -1237,9 +1272,30 @@ static int acx00_codec_dev_probe(struct platform_device *pdev)
 		} else {
 			priv->spk_gpio_used = 0;
 		}
+
+		ret = of_get_named_gpio(np, "gpio-switch", 0);
+		if (ret >= 0) {
+			priv->switch_gpio = ret;
+			if (!gpio_is_valid(priv->switch_gpio)) {
+				dev_err(&pdev->dev, "gpio-switch is valid\n");
+				ret = -EINVAL;
+				goto err_devm_kfree;
+			} else {
+				ret = devm_gpio_request(&pdev->dev, priv->switch_gpio, "SWITCH");
+				if (ret) {
+					dev_err(&pdev->dev,
+						"failed request gpio-switch\n");
+					ret = -EBUSY;
+					goto err_devm_kfree;
+				} else {
+					gpio_direction_output(priv->switch_gpio, 1);
+					gpio_set_value(priv->switch_gpio, 1);
+				}
+			}
+		} 
 	}
 
-	ret = snd_soc_register_codec(&pdev->dev, &soc_codec_driver_acx00,
+	ret = snd_soc_register_component(&pdev->dev, &soc_codec_driver_acx00,
 			acx00_codec_dai, ARRAY_SIZE(acx00_codec_dai));
 
 	if (ret < 0)
@@ -1270,19 +1326,27 @@ static int acx00_codec_dev_remove(struct platform_device *pdev)
 	struct acx00_priv *priv = platform_get_drvdata(pdev);
 
 #ifndef ACX00_DAPM_LINEOUT
-	snd_soc_update_bits(priv->codec, AC_LINEOUT_CTL,
+	/*
+	snd_soc_component_update_bits(priv->component, AC_LINEOUT_CTL,
 			(1<<LINEOUT_EN), (0<<LINEOUT_EN));
+	*/
 #endif
-	snd_soc_unregister_codec(&pdev->dev);
+	snd_soc_unregister_component(&pdev->dev);
 	clk_disable_unprepare(priv->clk);
 	devm_kfree(&pdev->dev, priv);
 	return 0;
 }
 
+static const struct of_device_id acx00_codec_match[] = {
+	{ .compatible = "x-powers,ac200-codec" },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, acx00_codec_match);
+
 static struct platform_driver acx00_codec_driver = {
 	.driver = {
 		.name = "acx00-codec",
-		.owner = THIS_MODULE,
+		.of_match_table = acx00_codec_match,
 	},
 	.probe = acx00_codec_dev_probe,
 	.remove = acx00_codec_dev_remove,

@@ -387,10 +387,6 @@ ssize_t proc_set_best_channel(struct file *file, const char __user *buffer, size
 
 int proc_get_trx_info_debug(struct seq_file *m, void *v);
 
-#ifdef CONFIG_HUAWEI_PROC
-int proc_get_huawei_trx_info(struct seq_file *m, void *v);
-#endif
-
 int proc_get_rx_signal(struct seq_file *m, void *v);
 ssize_t proc_set_rx_signal(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
 int proc_get_hw_status(struct seq_file *m, void *v);
@@ -514,8 +510,7 @@ ssize_t proc_set_new_bcn_max(struct file *file, const char __user *buffer, size_
 
 #ifdef CONFIG_POWER_SAVING
 int proc_get_ps_info(struct seq_file *m, void *v);
-ssize_t proc_set_ps_info(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
-#ifdef CONFIG_WMMPS_STA
+#ifdef CONFIG_WMMPS_STA	
 int proc_get_wmmps_info(struct seq_file *m, void *v);
 ssize_t proc_set_wmmps_info(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
 #endif /* CONFIG_WMMPS_STA */
@@ -579,20 +574,6 @@ ssize_t proc_set_iqk(struct file *file, const char __user *buffer, size_t count,
 int proc_get_lck_info(struct seq_file *m, void *v);
 ssize_t proc_set_lck(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
 #endif /*CONFIG_DBG_RF_CAL*/
-
-#ifdef CONFIG_CTRL_TXSS_BY_TP
-ssize_t proc_set_txss_tp(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
-int proc_get_txss_tp(struct seq_file *m, void *v);
-#ifdef DBG_CTRL_TXSS
-ssize_t proc_set_txss_ctrl(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
-int proc_get_txss_ctrl(struct seq_file *m, void *v);
-#endif
-#endif
-
-#ifdef CONFIG_LPS_CHK_BY_TP
-ssize_t proc_set_lps_chk_tp(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data);
-int proc_get_lps_chk_tp(struct seq_file *m, void *v);
-#endif
 
 #define _drv_always_		1
 #define _drv_emerg_			2

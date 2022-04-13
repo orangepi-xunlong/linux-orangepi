@@ -70,6 +70,7 @@ bool rtw_ap_chbw_decision(_adapter *adapter, s16 req_ch, s8 req_bw, s8 req_offse
 void rtw_auto_ap_rx_msg_dump(_adapter *padapter, union recv_frame *precv_frame, u8 *ehdr_pos);
 extern void rtw_start_auto_ap(_adapter *adapter);
 #endif /* CONFIG_AUTO_AP_MODE */
+void rtw_ap_acdata_control(_adapter *padapter, u8 power_mode);
 
 void rtw_ap_parse_sta_capability(_adapter *adapter, struct sta_info *sta, u8 *cap);
 u16 rtw_ap_parse_sta_supported_rates(_adapter *adapter, struct sta_info *sta, u8 *tlv_ies, u16 tlv_ies_len);

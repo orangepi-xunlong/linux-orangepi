@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * TTY driver for MIPS EJTAG Fast Debug Channels.
  *
  * Copyright (C) 2007-2015 Imagination Technologies Ltd
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License. See the file COPYING in the main directory of this archive for more
- * details.
  */
 
 #include <linux/atomic.h>
@@ -246,6 +243,7 @@ done:
 		/* Fall back to a 3 byte encoding */
 		word.bytes = 3;
 		word.word &= 0x00ffffff;
+		fallthrough;
 	case 3:
 		/* 3 byte encoding */
 		word.word |= 0x82000000;
@@ -683,9 +681,9 @@ static irqreturn_t mips_ejtag_fdc_isr(int irq, void *dev_id)
  * It simply triggers the common FDC handler code and arranges for further
  * polling.
  */
-static void mips_ejtag_fdc_tty_timer(unsigned long opaque)
+static void mips_ejtag_fdc_tty_timer(struct timer_list *t)
 {
-	struct mips_ejtag_fdc_tty *priv = (void *)opaque;
+	struct mips_ejtag_fdc_tty *priv = from_timer(priv, t, poll_timer);
 
 	mips_ejtag_fdc_handle(priv);
 	if (!priv->removing)
@@ -901,7 +899,7 @@ static int mips_ejtag_fdc_tty_probe(struct mips_cdmm_device *dev)
 	atomic_set(&priv->xmit_total, 0);
 	raw_spin_lock_init(&priv->lock);
 
-	priv->reg = devm_ioremap_nocache(priv->dev, dev->res.start,
+	priv->reg = devm_ioremap(priv->dev, dev->res.start,
 					 resource_size(&dev->res));
 	if (!priv->reg) {
 		dev_err(priv->dev, "ioremap failed for resource %pR\n",
@@ -1002,8 +1000,8 @@ static int mips_ejtag_fdc_tty_probe(struct mips_cdmm_device *dev)
 		raw_spin_unlock_irq(&priv->lock);
 	} else {
 		/* If we didn't get an usable IRQ, poll instead */
-		setup_pinned_timer(&priv->poll_timer, mips_ejtag_fdc_tty_timer,
-			    (unsigned long)priv);
+		timer_setup(&priv->poll_timer, mips_ejtag_fdc_tty_timer,
+			    TIMER_PINNED);
 		priv->poll_timer.expires = jiffies + FDC_TTY_POLL;
 		/*
 		 * Always attach the timer to the right CPU. The channels are
@@ -1110,7 +1108,7 @@ out:
 	return ret;
 }
 
-static struct mips_cdmm_device_id mips_ejtag_fdc_tty_ids[] = {
+static const struct mips_cdmm_device_id mips_ejtag_fdc_tty_ids[] = {
 	{ .type = 0xfd },
 	{ }
 };

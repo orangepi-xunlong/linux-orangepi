@@ -1,15 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2015 Texas Instruments
  * Author: Jyri Sarha <jsarha@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
  */
 
 #include <linux/component.h>
 #include <linux/of_graph.h>
+
+#include <drm/drm_atomic_helper.h>
+#include <drm/drm_bridge.h>
+#include <drm/drm_of.h>
+#include <drm/drm_simple_kms_helper.h>
 
 #include "tilcdc_drv.h"
 #include "tilcdc_external.h"
@@ -27,106 +28,131 @@ static const struct tilcdc_panel_info panel_info_tda998x = {
 		.raster_order           = 0,
 };
 
-static int tilcdc_external_mode_valid(struct drm_connector *connector,
-				      struct drm_display_mode *mode)
+static const struct tilcdc_panel_info panel_info_default = {
+		.ac_bias                = 255,
+		.ac_bias_intrpt         = 0,
+		.dma_burst_sz           = 16,
+		.bpp                    = 16,
+		.fdd                    = 0x80,
+		.tft_alt_mode           = 0,
+		.sync_edge              = 0,
+		.sync_ctrl              = 1,
+		.raster_order           = 0,
+};
+
+static
+struct drm_connector *tilcdc_encoder_find_connector(struct drm_device *ddev,
+						    struct drm_encoder *encoder)
 {
-	struct tilcdc_drm_private *priv = connector->dev->dev_private;
-	int ret, i;
+	struct drm_connector *connector;
 
-	ret = tilcdc_crtc_mode_valid(priv->crtc, mode);
-	if (ret != MODE_OK)
-		return ret;
+	list_for_each_entry(connector, &ddev->mode_config.connector_list, head) {
+		if (drm_connector_has_possible_encoder(connector, encoder))
+			return connector;
+	}
 
-	for (i = 0; i < priv->num_connectors &&
-		     priv->connectors[i] != connector; i++)
-		;
+	dev_err(ddev->dev, "No connector found for %s encoder (id %d)\n",
+		encoder->name, encoder->base.id);
 
-	BUG_ON(priv->connectors[i] != connector);
-	BUG_ON(!priv->connector_funcs[i]);
-
-	/* If the connector has its own mode_valid call it. */
-	if (!IS_ERR(priv->connector_funcs[i]) &&
-	    priv->connector_funcs[i]->mode_valid)
-		return priv->connector_funcs[i]->mode_valid(connector, mode);
-
-	return MODE_OK;
+	return NULL;
 }
 
-static int tilcdc_add_external_encoder(struct drm_device *dev,
-				       struct drm_connector *connector)
+int tilcdc_add_component_encoder(struct drm_device *ddev)
 {
-	struct tilcdc_drm_private *priv = dev->dev_private;
-	struct drm_connector_helper_funcs *connector_funcs;
+	struct tilcdc_drm_private *priv = ddev->dev_private;
+	struct drm_encoder *encoder;
 
-	priv->connectors[priv->num_connectors] = connector;
-	priv->encoders[priv->num_encoders++] = connector->encoder;
+	list_for_each_entry(encoder, &ddev->mode_config.encoder_list, head)
+		if (encoder->possible_crtcs & (1 << priv->crtc->index))
+			break;
+
+	if (!encoder) {
+		dev_err(ddev->dev, "%s: No suitable encoder found\n", __func__);
+		return -ENODEV;
+	}
+
+	priv->external_connector =
+		tilcdc_encoder_find_connector(ddev, encoder);
+
+	if (!priv->external_connector)
+		return -ENODEV;
 
 	/* Only tda998x is supported at the moment. */
 	tilcdc_crtc_set_simulate_vesa_sync(priv->crtc, true);
 	tilcdc_crtc_set_panel_info(priv->crtc, &panel_info_tda998x);
 
-	connector_funcs = devm_kzalloc(dev->dev, sizeof(*connector_funcs),
-				       GFP_KERNEL);
-	if (!connector_funcs)
+	return 0;
+}
+
+static
+int tilcdc_attach_bridge(struct drm_device *ddev, struct drm_bridge *bridge)
+{
+	struct tilcdc_drm_private *priv = ddev->dev_private;
+	int ret;
+
+	priv->external_encoder->possible_crtcs = BIT(0);
+
+	ret = drm_bridge_attach(priv->external_encoder, bridge, NULL, 0);
+	if (ret) {
+		dev_err(ddev->dev, "drm_bridge_attach() failed %d\n", ret);
+		return ret;
+	}
+
+	tilcdc_crtc_set_panel_info(priv->crtc, &panel_info_default);
+
+	priv->external_connector =
+		tilcdc_encoder_find_connector(ddev, priv->external_encoder);
+	if (!priv->external_connector)
+		return -ENODEV;
+
+	return 0;
+}
+
+int tilcdc_attach_external_device(struct drm_device *ddev)
+{
+	struct tilcdc_drm_private *priv = ddev->dev_private;
+	struct drm_bridge *bridge;
+	struct drm_panel *panel;
+	int ret;
+
+	ret = drm_of_find_panel_or_bridge(ddev->dev->of_node, 0, 0,
+					  &panel, &bridge);
+	if (ret == -ENODEV)
+		return 0;
+	else if (ret)
+		return ret;
+
+	priv->external_encoder = devm_kzalloc(ddev->dev,
+					      sizeof(*priv->external_encoder),
+					      GFP_KERNEL);
+	if (!priv->external_encoder)
 		return -ENOMEM;
 
-	/* connector->helper_private contains always struct
-	 * connector_helper_funcs pointer. For tilcdc crtc to have a
-	 * say if a specific mode is Ok, we need to install our own
-	 * helper functions. In our helper functions we copy
-	 * everything else but use our own mode_valid() (above).
-	 */
-	if (connector->helper_private) {
-		priv->connector_funcs[priv->num_connectors] =
-			connector->helper_private;
-		*connector_funcs = *priv->connector_funcs[priv->num_connectors];
-	} else {
-		priv->connector_funcs[priv->num_connectors] = ERR_PTR(-ENOENT);
+	ret = drm_simple_encoder_init(ddev, priv->external_encoder,
+				      DRM_MODE_ENCODER_NONE);
+	if (ret) {
+		dev_err(ddev->dev, "drm_encoder_init() failed %d\n", ret);
+		return ret;
 	}
-	connector_funcs->mode_valid = tilcdc_external_mode_valid;
-	drm_connector_helper_add(connector, connector_funcs);
-	priv->num_connectors++;
 
-	dev_dbg(dev->dev, "External encoder '%s' connected\n",
-		connector->encoder->name);
-
-	return 0;
-}
-
-int tilcdc_add_external_encoders(struct drm_device *dev)
-{
-	struct tilcdc_drm_private *priv = dev->dev_private;
-	struct drm_connector *connector;
-	int num_internal_connectors = priv->num_connectors;
-
-	list_for_each_entry(connector, &dev->mode_config.connector_list, head) {
-		bool found = false;
-		int i, ret;
-
-		for (i = 0; i < num_internal_connectors; i++)
-			if (connector == priv->connectors[i])
-				found = true;
-		if (!found) {
-			ret = tilcdc_add_external_encoder(dev, connector);
-			if (ret)
-				return ret;
+	if (panel) {
+		bridge = devm_drm_panel_bridge_add_typed(ddev->dev, panel,
+							 DRM_MODE_CONNECTOR_DPI);
+		if (IS_ERR(bridge)) {
+			ret = PTR_ERR(bridge);
+			goto err_encoder_cleanup;
 		}
 	}
+
+	ret = tilcdc_attach_bridge(ddev, bridge);
+	if (ret)
+		goto err_encoder_cleanup;
+
 	return 0;
-}
 
-void tilcdc_remove_external_encoders(struct drm_device *dev)
-{
-	struct tilcdc_drm_private *priv = dev->dev_private;
-	int i;
-
-	/* Restore the original helper functions, if any. */
-	for (i = 0; i < priv->num_connectors; i++)
-		if (IS_ERR(priv->connector_funcs[i]))
-			drm_connector_helper_add(priv->connectors[i], NULL);
-		else if (priv->connector_funcs[i])
-			drm_connector_helper_add(priv->connectors[i],
-						 priv->connector_funcs[i]);
+err_encoder_cleanup:
+	drm_encoder_cleanup(priv->external_encoder);
+	return ret;
 }
 
 static int dev_match_of(struct device *dev, void *data)
@@ -138,37 +164,16 @@ int tilcdc_get_external_components(struct device *dev,
 				   struct component_match **match)
 {
 	struct device_node *node;
-	struct device_node *ep = NULL;
-	int count = 0;
 
-	/* Avoid error print by of_graph_get_next_endpoint() if there
-	 * is no ports present.
-	 */
-	node = of_get_child_by_name(dev->of_node, "ports");
-	if (!node)
-		node = of_get_child_by_name(dev->of_node, "port");
-	if (!node)
-		return 0;
-	of_node_put(node);
+	node = of_graph_get_remote_node(dev->of_node, 0, 0);
 
-	while ((ep = of_graph_get_next_endpoint(dev->of_node, ep))) {
-		node = of_graph_get_remote_port_parent(ep);
-		if (!node || !of_device_is_available(node)) {
-			of_node_put(node);
-			continue;
-		}
-
-		dev_dbg(dev, "Subdevice node '%s' found\n", node->name);
-		if (match)
-			component_match_add(dev, match, dev_match_of, node);
+	if (!of_device_is_compatible(node, "nxp,tda998x")) {
 		of_node_put(node);
-		count++;
+		return 0;
 	}
 
-	if (count > 1) {
-		dev_err(dev, "Only one external encoder is supported\n");
-		return -EINVAL;
-	}
-
-	return count;
+	if (match)
+		drm_of_component_match_add(dev, match, dev_match_of, node);
+	of_node_put(node);
+	return 1;
 }

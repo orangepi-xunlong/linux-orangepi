@@ -54,7 +54,7 @@
 #include <pcmcia/ciscode.h>
 #include <pcmcia/ds.h>
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/io.h>
 
 /*====================================================================*/
@@ -93,7 +93,7 @@ static irqreturn_t fjn_interrupt(int irq, void *dev_id);
 static void fjn_rx(struct net_device *dev);
 static void fjn_reset(struct net_device *dev);
 static void set_rx_mode(struct net_device *dev);
-static void fjn_tx_timeout(struct net_device *dev);
+static void fjn_tx_timeout(struct net_device *dev, unsigned int txqueue);
 static const struct ethtool_ops netdev_ethtool_ops;
 
 /*
@@ -225,7 +225,6 @@ static const struct net_device_ops fjn_netdev_ops = {
 	.ndo_tx_timeout 	= fjn_tx_timeout,
 	.ndo_set_config 	= fjn_config,
 	.ndo_set_rx_mode	= set_rx_mode,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -548,6 +547,11 @@ static int fmvj18x_get_hwinfo(struct pcmcia_device *link, u_char *node_id)
 	return -1;
 
     base = ioremap(link->resource[2]->start, resource_size(link->resource[2]));
+    if (!base) {
+	pcmcia_release_window(link, link->resource[2]);
+	return -1;
+    }
+
     pcmcia_map_mem_page(link, link->resource[2], 0);
 
     /*
@@ -770,7 +774,7 @@ static irqreturn_t fjn_interrupt(int dummy, void *dev_id)
 
 /*====================================================================*/
 
-static void fjn_tx_timeout(struct net_device *dev)
+static void fjn_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
     struct local_info *lp = netdev_priv(dev);
     unsigned int ioaddr = dev->base_addr;

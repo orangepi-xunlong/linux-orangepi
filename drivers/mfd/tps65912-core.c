@@ -1,7 +1,7 @@
 /*
  * Core functions for TI TPS65912x PMICs
  *
- * Copyright (C) 2015 Texas Instruments Incorporated - http://www.ti.com/
+ * Copyright (C) 2015 Texas Instruments Incorporated - https://www.ti.com/
  *	Andrew F. Davis <afd@ti.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -76,6 +76,23 @@ static struct regmap_irq_chip tps65912_irq_chip = {
 	.ack_base = TPS65912_INT_STS,
 	.init_ack_masked = true,
 };
+
+static const struct regmap_range tps65912_yes_ranges[] = {
+	regmap_reg_range(TPS65912_INT_STS, TPS65912_GPIO5),
+};
+
+static const struct regmap_access_table tps65912_volatile_table = {
+	.yes_ranges = tps65912_yes_ranges,
+	.n_yes_ranges = ARRAY_SIZE(tps65912_yes_ranges),
+};
+
+const struct regmap_config tps65912_regmap_config = {
+	.reg_bits = 8,
+	.val_bits = 8,
+	.cache_type = REGCACHE_RBTREE,
+	.volatile_table = &tps65912_volatile_table,
+};
+EXPORT_SYMBOL_GPL(tps65912_regmap_config);
 
 int tps65912_device_init(struct tps65912 *tps)
 {

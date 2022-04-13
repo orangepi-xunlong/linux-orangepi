@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	Sonix sn9c201 sn9c202 library
  *
  * Copyright (C) 2012 Jean-Francois Moine <http://moinejf.free.fr>
  *	Copyright (C) 2008-2009 microdia project <microdia@googlegroups.com>
  *	Copyright (C) 2009 Brian Johnson <brijohn@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -29,8 +16,7 @@
 
 #include <linux/dmi.h>
 
-MODULE_AUTHOR("Brian Johnson <brijohn@gmail.com>, "
-		"microdia project <microdia@googlegroups.com>");
+MODULE_AUTHOR("Brian Johnson <brijohn@gmail.com>, microdia project <microdia@googlegroups.com>");
 MODULE_DESCRIPTION("GSPCA/SN9C20X USB Camera Driver");
 MODULE_LICENSE("GPL");
 
@@ -135,6 +121,13 @@ static const struct dmi_system_id flip_dmi_table[] = {
 			DMI_MATCH(DMI_SYS_VENDOR, "MICRO-STAR INT'L CO.,LTD."),
 			DMI_MATCH(DMI_PRODUCT_NAME, "MS-1034"),
 			DMI_MATCH(DMI_PRODUCT_VERSION, "0341")
+		}
+	},
+	{
+		.ident = "MSI MS-1039",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "MICRO-STAR INT'L CO.,LTD."),
+			DMI_MATCH(DMI_PRODUCT_NAME, "MS-1039"),
 		}
 	},
 	{
@@ -923,6 +916,11 @@ static void reg_r(struct gspca_dev *gspca_dev, u16 reg, u16 length)
 	if (unlikely(result < 0 || result != length)) {
 		pr_err("Read register %02x failed %d\n", reg, result);
 		gspca_dev->usb_err = result;
+		/*
+		 * Make sure the buffer is zeroed to avoid uninitialized
+		 * values.
+		 */
+		memset(gspca_dev->usb_buf, 0, USB_BUF_SZ);
 	}
 }
 
@@ -1606,7 +1604,7 @@ static int sd_chip_info(struct gspca_dev *gspca_dev,
 	if (chip->match.addr > 1)
 		return -EINVAL;
 	if (chip->match.addr == 1)
-		strlcpy(chip->name, "sensor", sizeof(chip->name));
+		strscpy(chip->name, "sensor", sizeof(chip->name));
 	return 0;
 }
 #endif
@@ -1639,7 +1637,7 @@ static int sd_config(struct gspca_dev *gspca_dev,
 		break;
 	case SENSOR_HV7131R:
 		sd->i2c_intf = 0x81;			/* i2c 400 Kb/s */
-		/* fall thru */
+		fallthrough;
 	default:
 		cam->cam_mode = vga_mode;
 		cam->nmodes = ARRAY_SIZE(vga_mode);
@@ -1948,8 +1946,7 @@ static int sd_isoc_init(struct gspca_dev *gspca_dev)
 		intf = usb_ifnum_to_if(gspca_dev->dev, gspca_dev->iface);
 
 		if (intf->num_altsetting != 9) {
-			pr_warn("sn9c20x camera with unknown number of alt "
-				"settings (%d), please report!\n",
+			pr_warn("sn9c20x camera with unknown number of alt settings (%d), please report!\n",
 				intf->num_altsetting);
 			gspca_dev->alt = intf->num_altsetting;
 			return 0;
@@ -2159,7 +2156,7 @@ static void qual_upd(struct work_struct *work)
 
 	/* To protect gspca_dev->usb_buf and gspca_dev->usb_err */
 	mutex_lock(&gspca_dev->usb_lock);
-	PDEBUG(D_STREAM, "qual_upd %d%%", qual);
+	gspca_dbg(gspca_dev, D_STREAM, "qual_upd %d%%\n", qual);
 	gspca_dev->usb_err = 0;
 	set_quality(gspca_dev, qual);
 	mutex_unlock(&gspca_dev->usb_lock);

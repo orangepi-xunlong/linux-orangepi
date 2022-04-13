@@ -19,7 +19,7 @@
 
 #include "mp_precomp.h"
 #include "phydm_precomp.h"
-
+ 
 #ifdef PHYDM_SUPPORT_CCKPD
 
 void
@@ -36,20 +36,20 @@ phydm_write_cck_cca_th_new_cs_ratio(
 	PHYDM_DBG(p_dm, DBG_CCKPD, ("[New] pd_th=0x%x, cs_ratio=0x%x\n\n", cca_th, cca_th_aaa));
 
 	if (p_cckpd_t->cur_cck_cca_thres != cca_th) {
-
+		
 		p_cckpd_t->cur_cck_cca_thres = cca_th;
 		odm_set_bb_reg(p_dm, 0xa08, 0xf0000, cca_th);
 		p_cckpd_t->cck_fa_ma = CCK_FA_MA_RESET;
-
+		
 	}
 
 	if (p_cckpd_t->cck_cca_th_aaa != cca_th_aaa) {
-
+		
 		p_cckpd_t->cck_cca_th_aaa = cca_th_aaa;
 		odm_set_bb_reg(p_dm, 0xaa8, 0x1f0000, cca_th_aaa);
 		p_cckpd_t->cck_fa_ma = CCK_FA_MA_RESET;
 	}
-
+	
 }
 
 void
@@ -65,7 +65,7 @@ phydm_write_cck_cca_th(
 	PHYDM_DBG(p_dm, DBG_CCKPD, ("New cck_cca_th=((0x%x))\n\n", cca_th));
 
 	if (p_cckpd_t->cur_cck_cca_thres != cca_th) {
-
+		
 		odm_write_1byte(p_dm, ODM_REG(CCK_CCA, p_dm), cca_th);
 		p_cckpd_t->cck_fa_ma = CCK_FA_MA_RESET;
 	}
@@ -86,10 +86,10 @@ phydm_set_cckpd_val(
 		PHYDM_DBG(p_dm, ODM_COMP_API, ("[Error][CCKPD]Need val_len=2\n"));
 		return;
 	}
-
+	
 	/*val_buf[0]: 0xa0a*/
 	/*val_buf[1]: 0xaaa*/
-
+	
 	if (p_dm->support_ic_type & EXTEND_CCK_CCATH_AAA_IC) {
 		phydm_write_cck_cca_th_new_cs_ratio(p_dm, (u8)val_buf[0], (u8)val_buf[1]);
 	} else {
@@ -106,7 +106,7 @@ phydm_stop_cck_pd_th(
 	struct PHY_DM_STRUCT	*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
 
 	if (!(p_dm->support_ability & (ODM_BB_CCK_PD | ODM_BB_FA_CNT))) {
-
+		
 		PHYDM_DBG(p_dm, DBG_CCKPD, ("Not Support\n"));
 
 		#if (DM_ODM_SUPPORT_TYPE & (ODM_AP))
@@ -114,12 +114,12 @@ phydm_stop_cck_pd_th(
 		phydm_write_cck_cca_th(p_dm, 0x43);
 		#endif
 		#endif
-
+		
 		return true;
 	}
 
 	if (p_dm->pause_ability & ODM_BB_CCK_PD) {
-
+		
 		PHYDM_DBG(p_dm, DBG_CCKPD, ("Return: Pause CCKPD in LV=%d\n", p_dm->pause_lv_table.lv_cckpd));
 		return true;
 	}
@@ -130,7 +130,7 @@ phydm_stop_cck_pd_th(
 	#endif
 
 	return false;
-
+	
 }
 
 void
@@ -152,12 +152,12 @@ phydm_cckpd(
 		else if (p_dm->rssi_min > 35)
 			cur_cck_cca_th = 0xcd;
 		else if (p_dm->rssi_min > 20) {
-
+			
 			if (p_cckpd_t->cck_fa_ma > 500)
 				cur_cck_cca_th = 0xcd;
 			else if (p_cckpd_t->cck_fa_ma < 250)
 				cur_cck_cca_th = 0x83;
-
+			
 		} else {
 
 			if((p_dm->p_advance_ota & PHYDM_ASUS_OTA_SETTING) && (p_cckpd_t->cck_fa_ma > 200))
@@ -165,7 +165,7 @@ phydm_cckpd(
 			else
 				cur_cck_cca_th = 0x83;
 		}
-
+		
 #else	/*ODM_AP*/
 		if (p_dig_t->cur_ig_value > 0x32)
 			cur_cck_cca_th = 0xed;
@@ -173,12 +173,12 @@ phydm_cckpd(
 			cur_cck_cca_th = 0xdd;
 		else if (p_dig_t->cur_ig_value > 0x24)
 			cur_cck_cca_th = 0xcd;
-		else
+		else 
 			cur_cck_cca_th = 0x83;
-
+		
 #endif
 	} else {
-
+	
 		if (p_cckpd_t->cck_fa_ma > 1000)
 			cur_cck_cca_th = 0x83;
 		else if (p_cckpd_t->cck_fa_ma < 500)
@@ -208,7 +208,7 @@ phydm_cckpd_new_cs_ratio(
 	en_2rcca = (u8)(odm_get_bb_reg(p_dm, 0xa2c, BIT(18)) && odm_get_bb_reg(p_dm, 0xa2c, BIT(22)));
 
 	if (p_dm->is_linked) {
-
+		
 		if ((igi_curr > 0x38) && (p_dm->rssi_min > 32)) {
 			cs_ration = p_dig_t->aaa_default + AAA_BASE + AAA_STEP * 2;
 			cs_2r_offset = 5;
@@ -222,7 +222,7 @@ phydm_cckpd_new_cs_ratio(
 			cs_2r_offset = 3;
 			pd_th = 0xd;
 		} else if ((igi_curr <= 0x24) || (p_dm->rssi_min < 22)) {
-
+			
 			if (p_cckpd_t->cck_fa_ma > 1000) {
 				cs_ration = p_dig_t->aaa_default + AAA_STEP;
 				cs_2r_offset = 1;
@@ -237,7 +237,7 @@ phydm_cckpd_new_cs_ratio(
 			}
 		}
 	} else {
-
+	
 		if (p_cckpd_t->cck_fa_ma > 1000) {
 			cs_ration = p_dig_t->aaa_default + AAA_STEP;
 			cs_2r_offset = 1;
@@ -251,11 +251,11 @@ phydm_cckpd_new_cs_ratio(
 			pd_th = p_cckpd_t->cur_cck_cca_thres;
 		}
 	}
-
+	
 	if (en_2rcca)
 		cs_ration = (cs_ration >= cs_2r_offset) ? (cs_ration - cs_2r_offset) : 0;
 
-	PHYDM_DBG(p_dm, DBG_CCKPD,
+	PHYDM_DBG(p_dm, DBG_CCKPD, 
 	("[New] cs_ratio=0x%x, pd_th=0x%x\n", cs_ration, pd_th));
 
 	if (is_update) {
@@ -282,7 +282,7 @@ phydm_cck_pd_th(
 	#ifdef PHYDM_TDMA_DIG_SUPPORT
 	struct phydm_fa_acc_struct	*p_fa_acc_t = &p_dm->false_alm_cnt_acc;
 	#endif
-
+	
 	PHYDM_DBG(p_dm, DBG_CCKPD, ("%s ======>\n", __func__));
 
 	if (phydm_stop_cck_pd_th(p_dm) == true)
@@ -291,21 +291,21 @@ phydm_cck_pd_th(
 #ifdef PHYDM_TDMA_DIG_SUPPORT
 	cnt_cck_fail_tmp = (p_dm->original_dig_restore) ? (p_fa_t->cnt_cck_fail) : (p_fa_acc_t->cnt_cck_fail_1sec);
 #endif
-
+	
 	if (p_cckpd_t->cck_fa_ma == CCK_FA_MA_RESET)
 		p_cckpd_t->cck_fa_ma = cnt_cck_fail_tmp;
 	else {
 		p_cckpd_t->cck_fa_ma = ((p_cckpd_t->cck_fa_ma << 1) +
 									p_cckpd_t->cck_fa_ma + cnt_cck_fail_tmp) >> 2;
 	}
-
+	
 	PHYDM_DBG(p_dm, DBG_CCKPD, ("CCK FA=%d\n", p_cckpd_t->cck_fa_ma));
 
 	if (p_dm->support_ic_type & EXTEND_CCK_CCATH_AAA_IC)
 		phydm_cckpd_new_cs_ratio(p_dm);
 	else
 		phydm_cckpd(p_dm);
-
+	
 #endif
 }
 
@@ -327,7 +327,7 @@ odm_pause_cck_packet_detection(
 
 	if ((p_cckpd_t->pause_bitmap == 0) &&
 		(!(p_dm->support_ability & (ODM_BB_CCK_PD | ODM_BB_FA_CNT)))) {
-
+		
 		PHYDM_DBG(p_dm, DBG_CCKPD, ("Return: not support\n"));
 		return;
 	}
@@ -336,13 +336,13 @@ odm_pause_cck_packet_detection(
 		PHYDM_DBG(p_dm, DBG_CCKPD, ("Return: Wrong LV !\n"));
 		return;
 	}
-	PHYDM_DBG(p_dm, DBG_CCKPD, ("Set pause{Type, LV, val} = {%d, %d, 0x%x}\n",
+	PHYDM_DBG(p_dm, DBG_CCKPD, ("Set pause{Type, LV, val} = {%d, %d, 0x%x}\n", 
 		pause_type, pause_lv, cck_pd_th));
 
 	PHYDM_DBG(p_dm, DBG_CCKPD, ("pause LV=0x%x\n", p_cckpd_t->pause_bitmap));
 
 	for (i = 0; i < PHYDM_PAUSE_MAX_NUM; i ++) {
-		PHYDM_DBG(p_dm, DBG_CCKPD, ("pause val[%d]=0x%x\n",
+		PHYDM_DBG(p_dm, DBG_CCKPD, ("pause val[%d]=0x%x\n", 
 										i, p_cckpd_t->pause_cckpd_value[i]));
 	}
 
@@ -352,27 +352,27 @@ odm_pause_cck_packet_detection(
 	{
 		/* Disable CCK PD */
 		p_dm->support_ability &= ~ODM_BB_CCK_PD;
-
+		
 		PHYDM_DBG(p_dm, DBG_CCKPD, ("Pause CCK PD th\n"));
 
 		/* Backup original CCK PD threshold decided by CCK PD mechanism */
 		if (p_cckpd_t->pause_bitmap == 0) {
-
+			
 			p_cckpd_t->cckpd_bkp = p_cckpd_t->cur_cck_cca_thres;
-
-			PHYDM_DBG(p_dm, DBG_CCKPD, ("cckpd_bkp=0x%x\n",
+			
+			PHYDM_DBG(p_dm, DBG_CCKPD, ("cckpd_bkp=0x%x\n", 
 				p_cckpd_t->cckpd_bkp));
 		}
 
 		p_cckpd_t->pause_bitmap |= BIT(pause_lv); /* Update pause level */
-		p_cckpd_t->pause_cckpd_value[pause_lv] = cck_pd_th;
+		p_cckpd_t->pause_cckpd_value[pause_lv] = cck_pd_th; 
 
 		/* Write new CCK PD threshold */
 		if (BIT(pause_lv + 1) > p_cckpd_t->pause_bitmap) {
 
-			PHYDM_DBG(p_dm, DBG_CCKPD, ("> ori pause LV=0x%x\n",
+			PHYDM_DBG(p_dm, DBG_CCKPD, ("> ori pause LV=0x%x\n", 
 				p_cckpd_t->pause_bitmap));
-
+			
 			phydm_write_cck_cca_th(p_dm, cck_pd_th);
 		}
 		break;
@@ -381,22 +381,22 @@ odm_pause_cck_packet_detection(
 	{
 		/* check if the level is illegal or not */
 		if ((p_cckpd_t->pause_bitmap & (BIT(pause_lv))) != 0) {
-
+			
 			p_cckpd_t->pause_bitmap &= (~(BIT(pause_lv)));
 			p_cckpd_t->pause_cckpd_value[pause_lv] = 0;
 			PHYDM_DBG(p_dm, DBG_CCKPD, ("Resume CCK PD\n"));
 		} else {
-
+		
 			PHYDM_DBG(p_dm, DBG_CCKPD, ("Wrong resume LV\n"));
 			break;
 		}
 
 		/* Resume CCKPD */
 		if (p_cckpd_t->pause_bitmap == 0) {
-
-			PHYDM_DBG(p_dm, DBG_CCKPD,("Revert bkp_CCKPD=0x%x\n",
+			
+			PHYDM_DBG(p_dm, DBG_CCKPD,("Revert bkp_CCKPD=0x%x\n", 
 														p_cckpd_t->cckpd_bkp));
-
+			
 			phydm_write_cck_cca_th(p_dm, p_cckpd_t->cckpd_bkp);
 			p_dm->support_ability |= ODM_BB_CCK_PD;/* Enable CCKPD */
 			break;
@@ -423,11 +423,11 @@ odm_pause_cck_packet_detection(
 		break;
 	}
 
-	PHYDM_DBG(p_dm, DBG_CCKPD, ("New pause bitmap=0x%x\n",
+	PHYDM_DBG(p_dm, DBG_CCKPD, ("New pause bitmap=0x%x\n", 
 													p_cckpd_t->pause_bitmap));
-
+	
 	for (i = 0; i < PHYDM_PAUSE_MAX_NUM; i ++) {
-		PHYDM_DBG(p_dm, DBG_CCKPD, ("pause val[%d]=0x%x\n",
+		PHYDM_DBG(p_dm, DBG_CCKPD, ("pause val[%d]=0x%x\n", 
 										i, p_cckpd_t->pause_cckpd_value[i]));
 	}
 #endif
@@ -445,7 +445,7 @@ phydm_cck_pd_init(
 
 	p_cckpd_t->cur_cck_cca_thres = 0;
 	p_cckpd_t->cck_cca_th_aaa = 0;
-
+	
 	p_cckpd_t->pause_bitmap = 0;
 
 	if (p_dm->support_ic_type & EXTEND_CCK_CCATH_AAA_IC) {
@@ -457,7 +457,7 @@ phydm_cck_pd_init(
 		p_dig_t->a0a_default = (u8)odm_get_bb_reg(p_dm, 0xa08, 0xff0000);
 		p_cckpd_t->cur_cck_cca_thres = p_dig_t->a0a_default;
 	}
-
+	
 	odm_memory_set(p_dm, p_cckpd_t->pause_cckpd_value, 0, PHYDM_PAUSE_MAX_NUM);
 #endif
 }

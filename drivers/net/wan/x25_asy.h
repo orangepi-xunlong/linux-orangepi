@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_X25_ASY_H
 #define _LINUX_X25_ASY_H
 
@@ -34,7 +35,6 @@ struct x25_asy {
 #define SLF_INUSE	0		/* Channel in use               */
 #define SLF_ESCAPE	1               /* ESC received                 */
 #define SLF_ERROR	2               /* Parity, etc. error           */
-#define SLF_OUTWAIT	4		/* Waiting for output		*/
 };
 
 

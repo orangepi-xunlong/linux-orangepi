@@ -27,7 +27,7 @@ phydm_init_trx_antenna_setting(
 )
 {
 	struct PHY_DM_STRUCT	*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
-
+	
 	if (p_dm->support_ic_type & (ODM_RTL8814A)) {
 		u8	rx_ant = 0, tx_ant = 0;
 
@@ -173,10 +173,10 @@ phydm_config_cck_rx_path(
 	u8	cck_path[2] = {0};
 	u8	en_2R_path = 0;
 	u8	en_2R_mrc = 0;
-	u8	i = 0, j =0;
+	u8	i = 0, j =0; 
 	u8	num_enable_path = 0;
 	u8	cck_mrc_max_path = 2;
-
+	
 	for (i = 0; i < 4; i++) {
 		if (path & BIT(i)) { /*ex: PHYDM_ABCD*/
 			num_enable_path++;
@@ -196,13 +196,13 @@ phydm_config_cck_rx_path(
 		en_2R_path = 0;
 		en_2R_mrc = 0;
 	}
-
+		
 	odm_set_bb_reg(p_dm, 0xa04, (BIT(27) | BIT(26)), cck_path[0]);	/*CCK_1 input signal path*/
 	odm_set_bb_reg(p_dm, 0xa04, (BIT(25) | BIT(24)), cck_path[1]);	/*CCK_2 input signal path*/
 	odm_set_bb_reg(p_dm, 0xa74, BIT(8), path_div_select);	/*enable Rx path diversity*/
 	odm_set_bb_reg(p_dm, 0xa2c, BIT(18), en_2R_path);	/*enable 2R Rx path*/
 	odm_set_bb_reg(p_dm, 0xa2c, BIT(22), en_2R_mrc);	/*enable 2R MRC*/
-
+	
 #endif
 }
 
@@ -282,9 +282,9 @@ phydm_stop_3_wire(
 		} else {
 			odm_set_bb_reg(p_dm, 0x88c, 0xf00000, 0xf);	/* 3 wire Disable    88c[23:20]=0xf */
 		}
-
+		
 	} else {  /*if (set_type == PHYDM_REVERT)*/
-
+		
 		/*[Start 3-wires]*/
 		if (p_dm->support_ic_type & ODM_IC_11AC_SERIES) {
 			odm_set_bb_reg(p_dm, 0xc00, 0xf, 0x7);/*	hardware 3-wire on */
@@ -311,24 +311,24 @@ phydm_stop_ic_trx(
 		/*[Stop TRX]---------------------------------------------------------------------*/
 		if (phydm_set_bb_dbg_port(p_dm, BB_DBGPORT_PRIORITY_3, 0x0) == false) /*set debug port to 0x0*/
 			return PHYDM_SET_FAIL;
-
+		
 		for (i = 0; i<10000; i++) {
 			dbg_port_value = phydm_get_bb_dbg_port_value(p_dm);
 			if ((dbg_port_value & (BIT(17) | BIT(3))) == 0)	/* PHYTXON && CCA_all */ {
 				PHYDM_DBG(p_dm, ODM_COMP_API, ("PSD wait for ((%d)) times\n", i));
-
+				
 				trx_idle_success = true;
 				break;
 			}
 		}
 		phydm_release_bb_dbg_port(p_dm);
-
+		
 		if (trx_idle_success) {
 
 			p_api->tx_queue_bitmap = (u8)odm_get_bb_reg(p_dm, 0x520, 0xff0000);
-
+			
 			odm_set_bb_reg(p_dm, 0x520, 0xff0000, 0xff); /*pause all TX queue*/
-
+			
 			if (p_dm->support_ic_type & ODM_IC_11AC_SERIES) {
 				odm_set_bb_reg(p_dm, 0x808, BIT(28), 0); /*disable CCK block*/
 				odm_set_bb_reg(p_dm, 0x838, BIT(1), 1); /*disable OFDM RX CCA*/
@@ -339,17 +339,17 @@ phydm_stop_ic_trx(
 
 				p_api->rx_iqc_reg_1 = odm_get_bb_reg(p_dm, 0xc14, MASKDWORD);
 				p_api->rx_iqc_reg_2 = odm_get_bb_reg(p_dm, 0xc1c, MASKDWORD);
-
+				
 				odm_set_bb_reg(p_dm, 0xc14, MASKDWORD, 0x0); /* [ Set IQK Matrix = 0 ] equivalent to [ Turn off CCA] */
 				odm_set_bb_reg(p_dm, 0xc1c, MASKDWORD, 0x0);
 			}
-
+				
 		} else {
 			return PHYDM_SET_FAIL;
 		}
-
+		
 		return PHYDM_SET_SUCCESS;
-
+		
 	} else {  /*if (set_type == PHYDM_REVERT)*/
 
 		odm_set_bb_reg(p_dm, 0x520, 0xff0000, (u32)(p_api->tx_queue_bitmap)); /*Release all TX queue*/
@@ -360,14 +360,14 @@ phydm_stop_ic_trx(
 		} else {
 			/*TBD*/
 			odm_set_bb_reg(p_dm, 0x800, BIT(24), 1); /* enable whole CCK block */
-
+			
 			odm_set_bb_reg(p_dm, 0xc14, MASKDWORD, p_api->rx_iqc_reg_1); /* [ Set IQK Matrix = 0 ] equivalent to [ Turn off CCA] */
 			odm_set_bb_reg(p_dm, 0xc1c, MASKDWORD, p_api->rx_iqc_reg_2);
 		}
 
 		return PHYDM_SET_SUCCESS;
 	}
-
+	
 }
 
 void
@@ -906,11 +906,11 @@ phydm_stop_ck320(
 ) {
 	struct PHY_DM_STRUCT		*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
 	u32		reg_value = (enable == true) ? 1 : 0;
-
+	
 	if (p_dm->support_ic_type & ODM_IC_11AC_SERIES) {
 		odm_set_bb_reg(p_dm, 0x8b4, BIT(6), reg_value);
 		/**/
-	} else {
+	} else { 
 
 		if (p_dm->support_ic_type & ODM_IC_N_2SS) {	/*N-2SS*/
 			odm_set_bb_reg(p_dm, 0x87c, BIT(29), reg_value);
@@ -939,17 +939,17 @@ phydm_api_set_txagc(
 #if ((RTL8822B_SUPPORT == 1) || (RTL8821C_SUPPORT == 1))
 	if (p_dm->support_ic_type & (ODM_RTL8822B | ODM_RTL8821C)) {
 		if (is_single_rate) {
-
+			
 			#if (RTL8822B_SUPPORT == 1)
 			if (p_dm->support_ic_type == ODM_RTL8822B)
 				ret = phydm_write_txagc_1byte_8822b(p_dm, power_index, path, hw_rate);
 			#endif
-
+			
 			#if (RTL8821C_SUPPORT == 1)
 			if (p_dm->support_ic_type == ODM_RTL8821C)
 				ret = phydm_write_txagc_1byte_8821c(p_dm, power_index, path, hw_rate);
 			#endif
-
+			
 			#if (DM_ODM_SUPPORT_TYPE & ODM_AP)
 			set_current_tx_agc(p_dm->priv, path, hw_rate, (u8)power_index);
 			#endif
@@ -960,12 +960,12 @@ phydm_api_set_txagc(
 			if (p_dm->support_ic_type == ODM_RTL8822B)
 				ret = config_phydm_write_txagc_8822b(p_dm, power_index, path, hw_rate);
 			#endif
-
+			
 			#if (RTL8821C_SUPPORT == 1)
 			if (p_dm->support_ic_type == ODM_RTL8821C)
 				ret = config_phydm_write_txagc_8821c(p_dm, power_index, path, hw_rate);
 			#endif
-
+			
 			#if (DM_ODM_SUPPORT_TYPE & ODM_AP)
 			for (i = 0; i < 4; i++)
 				set_current_tx_agc(p_dm->priv, path, (hw_rate + i), (u8)power_index);
@@ -1020,7 +1020,7 @@ phydm_api_switch_bw_channel(
 	enum channel_width	bandwidth
 )
 {
-	struct PHY_DM_STRUCT		*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
+	struct PHY_DM_STRUCT		*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;	
 	boolean		ret = false;
 
 #if (RTL8822B_SUPPORT == 1)

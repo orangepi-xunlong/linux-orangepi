@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * IPv4 over IEEE 1394, per RFC 2734
  * IPv6 over IEEE 1394, per RFC 3146
@@ -219,7 +220,7 @@ static int fwnet_header_create(struct sk_buff *skb, struct net_device *net,
 {
 	struct fwnet_header *h;
 
-	h = (struct fwnet_header *)skb_push(skb, sizeof(*h));
+	h = skb_push(skb, sizeof(*h));
 	put_unaligned_be16(type, &h->h_proto);
 
 	if (net->flags & (IFF_LOOPBACK | IFF_NOARP)) {
@@ -249,7 +250,11 @@ static int fwnet_header_cache(const struct neighbour *neigh,
 	h = (struct fwnet_header *)((u8 *)hh->hh_data + HH_DATA_OFF(sizeof(*h)));
 	h->h_proto = type;
 	memcpy(h->h_dest, neigh->ha, net->addr_len);
-	hh->hh_len = FWNET_HLEN;
+
+	/* Pairs with the READ_ONCE() in neigh_resolve_output(),
+	 * neigh_hh_output() and neigh_update_hhs().
+	 */
+	smp_store_release(&hh->hh_len, FWNET_HLEN);
 
 	return 0;
 }
@@ -600,7 +605,7 @@ static int fwnet_incoming_packet(struct fwnet_device *dev, __be32 *buf, int len,
 			return -ENOMEM;
 		}
 		skb_reserve(skb, LL_RESERVED_SPACE(net));
-		memcpy(skb_put(skb, len), buf, len);
+		skb_put_data(skb, buf, len);
 
 		return fwnet_finish_incoming_packet(net, skb, source_node_id,
 						    is_broadcast, ether_type);
@@ -961,16 +966,14 @@ static int fwnet_send_packet(struct fwnet_packet_task *ptask)
 	tx_len = ptask->max_payload;
 	switch (fwnet_get_hdr_lf(&ptask->hdr)) {
 	case RFC2374_HDR_UNFRAG:
-		bufhdr = (struct rfc2734_header *)
-				skb_push(ptask->skb, RFC2374_UNFRAG_HDR_SIZE);
+		bufhdr = skb_push(ptask->skb, RFC2374_UNFRAG_HDR_SIZE);
 		put_unaligned_be32(ptask->hdr.w0, &bufhdr->w0);
 		break;
 
 	case RFC2374_HDR_FIRSTFRAG:
 	case RFC2374_HDR_INTFRAG:
 	case RFC2374_HDR_LASTFRAG:
-		bufhdr = (struct rfc2734_header *)
-				skb_push(ptask->skb, RFC2374_FRAG_HDR_SIZE);
+		bufhdr = skb_push(ptask->skb, RFC2374_FRAG_HDR_SIZE);
 		put_unaligned_be32(ptask->hdr.w0, &bufhdr->w0);
 		put_unaligned_be32(ptask->hdr.w1, &bufhdr->w1);
 		break;
@@ -1123,7 +1126,7 @@ static int fwnet_broadcast_start(struct fwnet_device *dev)
 	max_receive = 1U << (dev->card->max_receive + 1);
 	num_packets = (FWNET_ISO_PAGE_COUNT * PAGE_SIZE) / max_receive;
 
-	ptrptr = kmalloc(sizeof(void *) * num_packets, GFP_KERNEL);
+	ptrptr = kmalloc_array(num_packets, sizeof(void *), GFP_KERNEL);
 	if (!ptrptr) {
 		retval = -ENOMEM;
 		goto failed;
@@ -1368,15 +1371,6 @@ static netdev_tx_t fwnet_tx(struct sk_buff *skb, struct net_device *net)
 	return NETDEV_TX_OK;
 }
 
-static int fwnet_change_mtu(struct net_device *net, int new_mtu)
-{
-	if (new_mtu < 68)
-		return -EINVAL;
-
-	net->mtu = new_mtu;
-	return 0;
-}
-
 static const struct ethtool_ops fwnet_ethtool_ops = {
 	.get_link	= ethtool_op_get_link,
 };
@@ -1385,7 +1379,6 @@ static const struct net_device_ops fwnet_netdev_ops = {
 	.ndo_open       = fwnet_open,
 	.ndo_stop	= fwnet_stop,
 	.ndo_start_xmit = fwnet_tx,
-	.ndo_change_mtu = fwnet_change_mtu,
 };
 
 static void fwnet_init_dev(struct net_device *net)
@@ -1454,7 +1447,6 @@ static int fwnet_probe(struct fw_unit *unit,
 	struct net_device *net;
 	bool allocated_netdev = false;
 	struct fwnet_device *dev;
-	unsigned max_mtu;
 	int ret;
 	union fwnet_hwaddr *ha;
 
@@ -1494,12 +1486,13 @@ static int fwnet_probe(struct fw_unit *unit,
 	dev->local_fifo = dev->handler.offset;
 
 	/*
-	 * Use the RFC 2734 default 1500 octets or the maximum payload
-	 * as initial MTU
+	 * default MTU: RFC 2734 cl. 4, RFC 3146 cl. 4
+	 * maximum MTU: RFC 2734 cl. 4.2, fragment encapsulation header's
+	 *              maximum possible datagram_size + 1 = 0xfff + 1
 	 */
-	max_mtu = (1 << (card->max_receive + 1))
-		  - sizeof(struct rfc2734_header) - IEEE1394_GASP_HDR_SIZE;
-	net->mtu = min(1500U, max_mtu);
+	net->mtu = 1500U;
+	net->min_mtu = ETH_MIN_MTU;
+	net->max_mtu = 4096U;
 
 	/* Set our hardware address while we're at it */
 	ha = (union fwnet_hwaddr *)net->dev_addr;

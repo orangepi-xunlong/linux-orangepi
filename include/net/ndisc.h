@@ -1,5 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _NDISC_H
 #define _NDISC_H
+
+#include <net/ipv6_stubs.h>
 
 /*
  *	ICMP codes for neighbour discovery messages
@@ -31,11 +34,14 @@ enum {
 	ND_OPT_PREFIX_INFO = 3,		/* RFC2461 */
 	ND_OPT_REDIRECT_HDR = 4,	/* RFC2461 */
 	ND_OPT_MTU = 5,			/* RFC2461 */
+	ND_OPT_NONCE = 14,              /* RFC7527 */
 	__ND_OPT_ARRAY_MAX,
 	ND_OPT_ROUTE_INFO = 24,		/* RFC4191 */
 	ND_OPT_RDNSS = 25,		/* RFC5006 */
 	ND_OPT_DNSSL = 31,		/* RFC6106 */
 	ND_OPT_6CO = 34,		/* RFC6775 */
+	ND_OPT_CAPTIVE_PORTAL = 37,	/* RFC7710 */
+	ND_OPT_PREF64 = 38,		/* RFC8781 */
 	__ND_OPT_MAX
 };
 
@@ -75,12 +81,12 @@ extern struct neigh_table nd_tbl;
 struct nd_msg {
         struct icmp6hdr	icmph;
         struct in6_addr	target;
-	__u8		opt[0];
+	__u8		opt[];
 };
 
 struct rs_msg {
 	struct icmp6hdr	icmph;
-	__u8		opt[0];
+	__u8		opt[];
 };
 
 struct ra_msg {
@@ -93,7 +99,7 @@ struct rd_msg {
 	struct icmp6hdr icmph;
 	struct in6_addr	target;
 	struct in6_addr	dest;
-	__u8		opt[0];
+	__u8		opt[];
 };
 
 struct nd_opt_hdr {
@@ -121,6 +127,7 @@ struct ndisc_options {
 #define nd_opts_pi_end			nd_opt_array[__ND_OPT_PREFIX_INFO_END]
 #define nd_opts_rh			nd_opt_array[ND_OPT_REDIRECT_HDR]
 #define nd_opts_mtu			nd_opt_array[ND_OPT_MTU]
+#define nd_opts_nonce			nd_opt_array[ND_OPT_NONCE]
 #define nd_802154_opts_src_lladdr	nd_802154_opt_array[ND_OPT_SOURCE_LL_ADDR]
 #define nd_802154_opts_tgt_lladdr	nd_802154_opt_array[ND_OPT_TARGET_LL_ADDR]
 
@@ -376,17 +383,72 @@ static inline struct neighbour *__ipv6_neigh_lookup_noref(struct net_device *dev
 	return ___neigh_lookup_noref(&nd_tbl, neigh_key_eq128, ndisc_hashfn, pkey, dev);
 }
 
+static inline
+struct neighbour *__ipv6_neigh_lookup_noref_stub(struct net_device *dev,
+						 const void *pkey)
+{
+	return ___neigh_lookup_noref(ipv6_stub->nd_tbl, neigh_key_eq128,
+				     ndisc_hashfn, pkey, dev);
+}
+
 static inline struct neighbour *__ipv6_neigh_lookup(struct net_device *dev, const void *pkey)
 {
 	struct neighbour *n;
 
 	rcu_read_lock_bh();
 	n = __ipv6_neigh_lookup_noref(dev, pkey);
-	if (n && !atomic_inc_not_zero(&n->refcnt))
+	if (n && !refcount_inc_not_zero(&n->refcnt))
 		n = NULL;
 	rcu_read_unlock_bh();
 
 	return n;
+}
+
+static inline void __ipv6_confirm_neigh(struct net_device *dev,
+					const void *pkey)
+{
+	struct neighbour *n;
+
+	rcu_read_lock_bh();
+	n = __ipv6_neigh_lookup_noref(dev, pkey);
+	if (n) {
+		unsigned long now = jiffies;
+
+		/* avoid dirtying neighbour */
+		if (READ_ONCE(n->confirmed) != now)
+			WRITE_ONCE(n->confirmed, now);
+	}
+	rcu_read_unlock_bh();
+}
+
+static inline void __ipv6_confirm_neigh_stub(struct net_device *dev,
+					     const void *pkey)
+{
+	struct neighbour *n;
+
+	rcu_read_lock_bh();
+	n = __ipv6_neigh_lookup_noref_stub(dev, pkey);
+	if (n) {
+		unsigned long now = jiffies;
+
+		/* avoid dirtying neighbour */
+		if (READ_ONCE(n->confirmed) != now)
+			WRITE_ONCE(n->confirmed, now);
+	}
+	rcu_read_unlock_bh();
+}
+
+/* uses ipv6_stub and is meant for use outside of IPv6 core */
+static inline struct neighbour *ip_neigh_gw6(struct net_device *dev,
+					     const void *addr)
+{
+	struct neighbour *neigh;
+
+	neigh = __ipv6_neigh_lookup_noref_stub(dev, addr);
+	if (unlikely(!neigh))
+		neigh = __neigh_create(ipv6_stub->nd_tbl, addr, dev, false);
+
+	return neigh;
 }
 
 int ndisc_init(void);
@@ -398,7 +460,8 @@ void ndisc_cleanup(void);
 int ndisc_rcv(struct sk_buff *skb);
 
 void ndisc_send_ns(struct net_device *dev, const struct in6_addr *solicit,
-		   const struct in6_addr *daddr, const struct in6_addr *saddr);
+		   const struct in6_addr *daddr, const struct in6_addr *saddr,
+		   u64 nonce);
 
 void ndisc_send_rs(struct net_device *dev,
 		   const struct in6_addr *saddr, const struct in6_addr *daddr);
@@ -419,8 +482,10 @@ void ndisc_update(const struct net_device *dev, struct neighbour *neigh,
  *	IGMP
  */
 int igmp6_init(void);
+int igmp6_late_init(void);
 
 void igmp6_cleanup(void);
+void igmp6_late_cleanup(void);
 
 int igmp6_event_query(struct sk_buff *skb);
 
@@ -429,7 +494,7 @@ int igmp6_event_report(struct sk_buff *skb);
 
 #ifdef CONFIG_SYSCTL
 int ndisc_ifinfo_sysctl_change(struct ctl_table *ctl, int write,
-			       void __user *buffer, size_t *lenp, loff_t *ppos);
+			       void *buffer, size_t *lenp, loff_t *ppos);
 int ndisc_ifinfo_sysctl_strategy(struct ctl_table *ctl,
 				 void __user *oldval, size_t __user *oldlenp,
 				 void __user *newval, size_t newlen);

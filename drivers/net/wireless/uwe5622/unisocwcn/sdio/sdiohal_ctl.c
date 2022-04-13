@@ -55,6 +55,9 @@
 #define GNSS_DUMP_WIFI_RAM_ADDR	0x40580000
 #define GNSS_DUMP_DATA_SIZE	0x38000
 
+#include <linux/module.h>
+MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
+
 enum {
 	/* SDIO TX */
 	CHANNEL_TX_BASE = 0,
@@ -222,6 +225,7 @@ static int sdiohal_throughput_tx(void)
 static void sdiohal_throughput_tx_compute_time(void)
 {
 	static signed long long times_count;
+	struct timespec now;
 
 	if (tp_tx_flag != 1)
 		return;
@@ -229,13 +233,17 @@ static void sdiohal_throughput_tx_compute_time(void)
 	/* throughput test */
 	tp_tx_cnt++;
 	if (tp_tx_cnt % 500 == 0) {
-		do_gettimeofday(&tp_tx_stop_time);
+		getnstimeofday(&now);
+		tp_tx_stop_time.tv_sec = now.tv_sec;
+		tp_tx_stop_time.tv_usec = now.tv_nsec/1000;
 		times_count = timeval_to_ns(&tp_tx_stop_time) -
 			timeval_to_ns(&tp_tx_start_time);
 		sdiohal_info("tx->times(500c) is %lldns, tx %d, rx %d\n",
 			     times_count, tp_tx_cnt, rx_pop_cnt);
 		tp_tx_cnt = 0;
-		do_gettimeofday(&tp_tx_start_time);
+		getnstimeofday(&now);
+		tp_tx_start_time.tv_sec = now.tv_sec;
+		tp_tx_start_time.tv_usec = now.tv_nsec/1000;
 	}
 	sdiohal_throughput_tx();
 }
@@ -546,6 +554,7 @@ int at_list_rx_pop(int channel, struct mbuf_t *head,
 		   struct mbuf_t *tail, int num)
 {
 	static signed long long times_count;
+	struct timespec now;
 
 	sdiohal_debug("%s channel:%d head:%p tail:%p num:%d\n",
 		     __func__, channel, head, tail, num);
@@ -562,13 +571,17 @@ int at_list_rx_pop(int channel, struct mbuf_t *head,
 	/* throughput test */
 	tp_rx_cnt += num;
 	if (tp_rx_cnt / (500*64) == 1) {
-		do_gettimeofday(&tp_rx_stop_time);
+		getnstimeofday(&now);
+		tp_rx_stop_time.tv_sec = now.tv_sec;
+		tp_rx_stop_time.tv_usec = now.tv_nsec/1000;
 		times_count = timeval_to_ns(&tp_rx_stop_time)
 			- timeval_to_ns(&tp_rx_start_time);
 		sdiohal_info("rx->times(%dc) is %lldns, tx %d, rx %d\n",
 			     tp_rx_cnt, times_count, tp_tx_cnt, rx_pop_cnt);
 		tp_rx_cnt = 0;
-		do_gettimeofday(&tp_rx_start_time);
+		getnstimeofday(&now);
+		tp_rx_start_time.tv_sec = now.tv_sec;
+		tp_rx_start_time.tv_usec = now.tv_nsec/1000;
 	}
 	getnstimeofday(&tp_tm_begin);
 
@@ -824,6 +837,7 @@ static ssize_t at_cmd_write(struct file *filp,
 	long int long_data;
 	int ret;
 	unsigned char *send_buf = NULL;
+	struct timespec now;
 
 	if (count > SDIOHAL_WRITE_SIZE) {
 		sdiohal_err("%s write size > %d\n",
@@ -1045,7 +1059,7 @@ static ssize_t at_cmd_write(struct file *filp,
 
 	if (strncmp(cmd_buf + PUB_HEAD_RSV, "sdio_int", 8) == 0) {
 		unsigned long int int_bitmap;
-		unsigned int addr;
+		unsigned int addr = REG_TO_CP0_REQ0;
 
 		if (strncmp(cmd_buf + PUB_HEAD_RSV, "sdio_int_rx", 11) == 0)
 			sdiohal_test_int_init(SDIOHAL_INT_PWR_FUNC);
@@ -1116,7 +1130,9 @@ static ssize_t at_cmd_write(struct file *filp,
 			__func__, tp_tx_buf_cnt, tp_tx_buf_len);
 		tp_tx_flag = 1;
 		tp_tx_cnt = 0;
-		do_gettimeofday(&tp_tx_start_time);
+		getnstimeofday(&now);
+		tp_tx_start_time.tv_sec = now.tv_sec;
+		tp_tx_start_time.tv_usec = now.tv_nsec/1000;
 		if ((tp_tx_buf_cnt <= TP_TX_BUF_CNT) &&
 			(tp_tx_buf_len <= TP_TX_BUF_LEN)) {
 			sprdwcn_bus_chn_deinit(&at_tx_ops);

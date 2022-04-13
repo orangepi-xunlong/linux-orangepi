@@ -21,7 +21,7 @@
 #ifdef CUSTOMIZE_WIFI_CFG_PATH
 #define WIFI_BOARD_CFG_PATH CUSTOMIZE_WIFI_CFG_PATH
 #else
-#define WIFI_BOARD_CFG_PATH "/lib/firmware/"
+#define WIFI_BOARD_CFG_PATH "/lib/firmware"
 #endif
 
 #define CF_TAB(NAME, MEM_OFFSET, TYPE) \

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * STMicroelectronics gyroscopes driver
  *
@@ -5,7 +6,6 @@
  *
  * Denis Ciocca <denis.ciocca@st.com>
  * v. 1.0.0
- * Licensed under the GPL-2.
  */
 
 #ifndef ST_GYRO_H
@@ -19,6 +19,7 @@
 #define LSM330DL_GYRO_DEV_NAME		"lsm330dl_gyro"
 #define LSM330DLC_GYRO_DEV_NAME		"lsm330dlc_gyro"
 #define L3GD20_GYRO_DEV_NAME		"l3gd20"
+#define L3GD20H_GYRO_DEV_NAME		"l3gd20h"
 #define L3G4IS_GYRO_DEV_NAME		"l3g4is_ui"
 #define LSM330_GYRO_DEV_NAME		"lsm330_gyro"
 #define LSM9DS0_GYRO_DEV_NAME		"lsm9ds0_gyro"
@@ -27,10 +28,11 @@
  * struct st_sensors_platform_data - gyro platform data
  * @drdy_int_pin: DRDY on gyros is available only on INT2 pin.
  */
-static const struct st_sensors_platform_data gyro_pdata = {
+static __maybe_unused const struct st_sensors_platform_data gyro_pdata = {
 	.drdy_int_pin = 2,
 };
 
+const struct st_sensor_settings *st_gyro_get_settings(const char *name);
 int st_gyro_common_probe(struct iio_dev *indio_dev);
 void st_gyro_common_remove(struct iio_dev *indio_dev);
 

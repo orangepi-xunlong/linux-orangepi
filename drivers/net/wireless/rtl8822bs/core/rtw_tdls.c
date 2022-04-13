@@ -1006,7 +1006,7 @@ s32 rtw_tdls_do_ch_sw(_adapter *padapter, struct sta_info *ptdls_sta, u8 chnl_ty
 
 	/* set mac_id sleep before channel switch */
 	rtw_hal_macid_sleep(padapter, ptdls_sta->cmn.mac_id);
-
+	
 #ifdef CONFIG_TDLS_CH_SW_BY_DRV
 	set_channel_bwmode(padapter, channel, channel_offset, bwmode);
 	ret = _SUCCESS;
@@ -1108,17 +1108,17 @@ void rtw_tdls_process_wfd_ie(struct tdls_info *ptdlsinfo, u8 *ptr, u8 length)
 		u32	attr_contentlen = 0;
 		int	i;
 
-		RTW_INFO("[%s] WFD IE Found!!\n", __func__);
+		RTW_INFO("[%s] WFD IE Found!!\n", __FUNCTION__);
 		attr_content = rtw_get_wfd_attr_content(wfd_ie, wfd_ielen, WFD_ATTR_DEVICE_INFO, NULL, &attr_contentlen);
 		if (attr_content && attr_contentlen) {
 			ptdlsinfo->wfd_info->peer_rtsp_ctrlport = RTW_GET_BE16(attr_content + 2);
-			RTW_INFO("[%s] Peer PORT NUM = %d\n", __func__, ptdlsinfo->wfd_info->peer_rtsp_ctrlport);
+			RTW_INFO("[%s] Peer PORT NUM = %d\n", __FUNCTION__, ptdlsinfo->wfd_info->peer_rtsp_ctrlport);
 		}
 
 		attr_content = rtw_get_wfd_attr_content(wfd_ie, wfd_ielen, WFD_ATTR_LOCAL_IP_ADDR, NULL, &attr_contentlen);
 		if (attr_content && attr_contentlen) {
 			_rtw_memcpy(ptdlsinfo->wfd_info->peer_ip_address, (attr_content + 1), 4);
-			RTW_INFO("[%s] Peer IP = %02u.%02u.%02u.%02u\n", __func__,
+			RTW_INFO("[%s] Peer IP = %02u.%02u.%02u.%02u\n", __FUNCTION__,
 				ptdlsinfo->wfd_info->peer_ip_address[0], ptdlsinfo->wfd_info->peer_ip_address[1],
 				ptdlsinfo->wfd_info->peer_ip_address[2], ptdlsinfo->wfd_info->peer_ip_address[3]);
 		}
@@ -1137,7 +1137,7 @@ int issue_tunneled_probe_req(_adapter *padapter)
 	struct tdls_txmgmt txmgmt;
 	int ret = _FAIL;
 
-	RTW_INFO("[%s]\n", __func__);
+	RTW_INFO("[%s]\n", __FUNCTION__);
 
 	_rtw_memset(&txmgmt, 0x00, sizeof(struct tdls_txmgmt));
 	txmgmt.action_code = TUNNELED_PROBE_REQ;
@@ -1179,7 +1179,7 @@ int issue_tunneled_probe_rsp(_adapter *padapter, union recv_frame *precv_frame)
 	struct tdls_txmgmt txmgmt;
 	int ret = _FAIL;
 
-	RTW_INFO("[%s]\n", __func__);
+	RTW_INFO("[%s]\n", __FUNCTION__);
 
 	_rtw_memset(&txmgmt, 0x00, sizeof(struct tdls_txmgmt));
 	txmgmt.action_code = TUNNELED_PROBE_RSP;
@@ -1227,7 +1227,7 @@ int issue_tdls_setup_req(_adapter *padapter, struct tdls_txmgmt *ptxmgmt, int wa
 	/* Retry timer should be set at least 301 sec, using TPK_count counting 301 times. */
 	u32 timeout_interval = TDLS_TPK_RESEND_COUNT;
 
-	RTW_INFO("[TDLS] %s\n", __func__);
+	RTW_INFO("[TDLS] %s\n", __FUNCTION__);
 
 	if (rtw_tdls_is_setup_allowed(padapter) == _FALSE)
 		goto exit;
@@ -1250,7 +1250,7 @@ int issue_tdls_setup_req(_adapter *padapter, struct tdls_txmgmt *ptxmgmt, int wa
 	if (ptdls_sta == NULL) {
 		ptdls_sta = rtw_alloc_stainfo(pstapriv, ptxmgmt->peer);
 		if (ptdls_sta == NULL) {
-			RTW_INFO("[%s] rtw_alloc_stainfo fail\n", __func__);
+			RTW_INFO("[%s] rtw_alloc_stainfo fail\n", __FUNCTION__);
 			rtw_free_xmitbuf(pxmitpriv, pmgntframe->pxmitbuf);
 			rtw_free_xmitframe(pxmitpriv, pmgntframe);
 			goto exit;
@@ -1314,7 +1314,7 @@ int _issue_tdls_teardown(_adapter *padapter, struct tdls_txmgmt *ptxmgmt, u8 wai
 	_irqL irqL;
 	int ret = _FAIL;
 
-	RTW_INFO("[TDLS] %s\n", __func__);
+	RTW_INFO("[TDLS] %s\n", __FUNCTION__);
 
 	ptxmgmt->action_code = TDLS_TEARDOWN;
 	ptdls_sta = rtw_get_stainfo(pstapriv, ptxmgmt->peer);
@@ -1395,7 +1395,7 @@ int issue_tdls_dis_req(_adapter *padapter, struct tdls_txmgmt *ptxmgmt)
 	struct xmit_priv			*pxmitpriv = &(padapter->xmitpriv);
 	int ret = _FAIL;
 
-	RTW_INFO("[TDLS] %s\n", __func__);
+	RTW_INFO("[TDLS] %s\n", __FUNCTION__);
 
 	ptxmgmt->action_code = TDLS_DISCOVERY_REQUEST;
 	pmgntframe = alloc_mgtxmitframe(pxmitpriv);
@@ -1434,7 +1434,7 @@ int issue_tdls_setup_rsp(_adapter *padapter, struct tdls_txmgmt *ptxmgmt)
 	struct xmit_priv			*pxmitpriv = &(padapter->xmitpriv);
 	int ret = _FAIL;
 
-	RTW_INFO("[TDLS] %s\n", __func__);
+	RTW_INFO("[TDLS] %s\n", __FUNCTION__);
 
 	ptxmgmt->action_code = TDLS_SETUP_RESPONSE;
 	pmgntframe = alloc_mgtxmitframe(pxmitpriv);
@@ -1475,7 +1475,7 @@ int issue_tdls_setup_cfm(_adapter *padapter, struct tdls_txmgmt *ptxmgmt)
 	struct xmit_priv			*pxmitpriv = &(padapter->xmitpriv);
 	int ret = _FAIL;
 
-	RTW_INFO("[TDLS] %s\n", __func__);
+	RTW_INFO("[TDLS] %s\n", __FUNCTION__);
 
 	ptxmgmt->action_code = TDLS_SETUP_CONFIRM;
 	pmgntframe = alloc_mgtxmitframe(pxmitpriv);
@@ -1520,7 +1520,7 @@ int issue_tdls_dis_rsp(_adapter *padapter, struct tdls_txmgmt *ptxmgmt, u8 priva
 	struct mlme_ext_priv	*pmlmeext = &(padapter->mlmeextpriv);
 	int ret = _FAIL;
 
-	RTW_INFO("[TDLS] %s\n", __func__);
+	RTW_INFO("[TDLS] %s\n", __FUNCTION__);
 
 	pmgntframe = alloc_mgtxmitframe(pxmitpriv);
 	if (pmgntframe == NULL)
@@ -1572,7 +1572,7 @@ int issue_tdls_peer_traffic_rsp(_adapter *padapter, struct sta_info *ptdls_sta, 
 	struct xmit_priv	*pxmitpriv = &(padapter->xmitpriv);
 	int ret = _FAIL;
 
-	RTW_INFO("[TDLS] %s\n", __func__);
+	RTW_INFO("[TDLS] %s\n", __FUNCTION__);
 
 	ptxmgmt->action_code = TDLS_PEER_TRAFFIC_RESPONSE;
 
@@ -1616,7 +1616,7 @@ int issue_tdls_peer_traffic_indication(_adapter *padapter, struct sta_info *ptdl
 	struct tdls_txmgmt txmgmt;
 	int ret = _FAIL;
 
-	RTW_INFO("[TDLS] %s\n", __func__);
+	RTW_INFO("[TDLS] %s\n", __FUNCTION__);
 
 	_rtw_memset(&txmgmt, 0x00, sizeof(struct tdls_txmgmt));
 	txmgmt.action_code = TDLS_PEER_TRAFFIC_INDICATION;
@@ -1664,7 +1664,7 @@ int issue_tdls_ch_switch_req(_adapter *padapter, struct sta_info *ptdls_sta)
 	struct tdls_txmgmt txmgmt;
 	int ret = _FAIL;
 
-	RTW_INFO("[TDLS] %s\n", __func__);
+	RTW_INFO("[TDLS] %s\n", __FUNCTION__);
 
 	if (rtw_tdls_is_chsw_allowed(padapter) == _FALSE) {
 		RTW_INFO("[TDLS] Ignore %s since channel switch is not allowed\n", __func__);
@@ -1711,7 +1711,7 @@ int issue_tdls_ch_switch_rsp(_adapter *padapter, struct tdls_txmgmt *ptxmgmt, in
 	struct xmit_priv	*pxmitpriv = &(padapter->xmitpriv);
 	int ret = _FAIL;
 
-	RTW_INFO("[TDLS] %s\n", __func__);
+	RTW_INFO("[TDLS] %s\n", __FUNCTION__);
 
 	if (rtw_tdls_is_chsw_allowed(padapter) == _FALSE) {
 		RTW_INFO("[TDLS] Ignore %s since channel switch is not allowed\n", __func__);
@@ -2082,7 +2082,7 @@ int On_TDLS_Setup_Rsp(_adapter *padapter, union recv_frame *precv_frame, struct 
 	_rtw_memcpy(&status_code, ptr + 2, 2);
 
 	if (status_code != 0) {
-		RTW_INFO("[TDLS] %s status_code = %d, free_tdls_sta\n", __func__, status_code);
+		RTW_INFO("[TDLS] %s status_code = %d, free_tdls_sta\n", __FUNCTION__, status_code);
 		free_tdls_sta(padapter, ptdls_sta);
 		ret = _FAIL;
 		goto exit;
@@ -2180,7 +2180,7 @@ int On_TDLS_Setup_Rsp(_adapter *padapter, union recv_frame *precv_frame, struct 
 			if (rtw_tdls_is_driver_setup(padapter) == _TRUE) {
 				wpa_tdls_generate_tpk(padapter, ptdls_sta);
 				if (tdls_verify_mic(ptdls_sta->tpk.kck, 2, plinkid_ie, prsnie, ptimeout_ie, pftie) == _FAIL) {
-					RTW_INFO("[TDLS] %s tdls_verify_mic fail, free_tdls_sta\n", __func__);
+					RTW_INFO("[TDLS] %s tdls_verify_mic fail, free_tdls_sta\n", __FUNCTION__);
 					free_tdls_sta(padapter, ptdls_sta);
 					ret = _FAIL;
 					goto exit;
@@ -2251,7 +2251,7 @@ int On_TDLS_Setup_Cfm(_adapter *padapter, union recv_frame *precv_frame, struct 
 	_rtw_memcpy(&status_code, ptr + 2, 2);
 
 	if (status_code != 0) {
-		RTW_INFO("[%s] status_code = %d\n, free_tdls_sta", __func__, status_code);
+		RTW_INFO("[%s] status_code = %d\n, free_tdls_sta", __FUNCTION__, status_code);
 		free_tdls_sta(padapter, ptdls_sta);
 		ret = _FAIL;
 		goto exit;
@@ -2405,7 +2405,7 @@ int On_TDLS_Teardown(_adapter *padapter, union recv_frame *precv_frame, struct s
 	u8 reason;
 
 	reason = *(ptr + prx_pkt_attrib->hdrlen + prx_pkt_attrib->iv_len + LLC_HEADER_SIZE + ETH_TYPE_LEN + PAYLOAD_TYPE_LEN + 2);
-	RTW_INFO("[TDLS] %s Reason code(%d)\n", __func__, reason);
+	RTW_INFO("[TDLS] %s Reason code(%d)\n", __FUNCTION__, reason);
 
 	if (rtw_tdls_is_driver_setup(padapter))
 		rtw_tdls_cmd(padapter, ptdls_sta->cmn.mac_addr, TDLS_TEARDOWN_STA_LOCALLY);
@@ -2580,7 +2580,7 @@ sint On_TDLS_Ch_Switch_Req(_adapter *padapter, union recv_frame *precv_frame, st
 			ptdls_sta->ch_switch_timeout = (RTW_GET_LE16(pIE->data + 2) >= TDLS_CH_SWITCH_TIMEOUT * 1000) ?
 				RTW_GET_LE16(pIE->data + 2) : TDLS_CH_SWITCH_TIMEOUT * 1000;
 			RTW_INFO("[TDLS] %s ch_switch_time:%d, ch_switch_timeout:%d\n"
-				, __func__, RTW_GET_LE16(pIE->data), RTW_GET_LE16(pIE->data + 2));
+				, __FUNCTION__, RTW_GET_LE16(pIE->data), RTW_GET_LE16(pIE->data + 2));
 		default:
 			break;
 		}
@@ -2894,7 +2894,7 @@ void rtw_build_tdls_setup_rsp_ies(_adapter *padapter, struct xmit_frame *pxmitfr
 	pframe = rtw_tdls_set_status_code(pframe, pattrib, ptxmgmt);
 
 	if (ptxmgmt->status_code != 0) {
-		RTW_INFO("[%s] status_code:%04x\n", __func__, ptxmgmt->status_code);
+		RTW_INFO("[%s] status_code:%04x\n", __FUNCTION__, ptxmgmt->status_code);
 		return;
 	}
 
@@ -3293,7 +3293,7 @@ void _tdls_tpk_timer_hdl(void *FunctionContext)
 	/* Retry timer should set at least 301 sec. */
 	if (ptdls_sta->TPK_count >= (ptdls_sta->TDLS_PeerKey_Lifetime - 3)) {
 		RTW_INFO("[TDLS] %s, Re-Setup TDLS link with "MAC_FMT" since TPK lifetime expires!\n",
-			__func__, MAC_ARG(ptdls_sta->cmn.mac_addr));
+			__FUNCTION__, MAC_ARG(ptdls_sta->cmn.mac_addr));
 		ptdls_sta->TPK_count = 0;
 		_rtw_memcpy(txmgmt.peer, ptdls_sta->cmn.mac_addr, ETH_ALEN);
 		issue_tdls_setup_req(ptdls_sta->padapter, &txmgmt, _FALSE);

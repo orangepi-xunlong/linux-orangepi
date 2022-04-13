@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM net
 
@@ -57,7 +58,7 @@ TRACE_EVENT(net_dev_start_xmit,
 		__entry->gso_type = skb_shinfo(skb)->gso_type;
 	),
 
-	TP_printk("dev=%s queue_mapping=%u skbaddr=%pK vlan_tagged=%d vlan_proto=0x%04x vlan_tci=0x%04x protocol=0x%04x ip_summed=%d len=%u data_len=%u network_offset=%d transport_offset_valid=%d transport_offset=%d tx_flags=%d gso_size=%d gso_segs=%d gso_type=%#x",
+	TP_printk("dev=%s queue_mapping=%u skbaddr=%p vlan_tagged=%d vlan_proto=0x%04x vlan_tci=0x%04x protocol=0x%04x ip_summed=%d len=%u data_len=%u network_offset=%d transport_offset_valid=%d transport_offset=%d tx_flags=%d gso_size=%d gso_segs=%d gso_type=%#x",
 		  __get_str(name), __entry->queue_mapping, __entry->skbaddr,
 		  __entry->vlan_tagged, __entry->vlan_proto, __entry->vlan_tci,
 		  __entry->protocol, __entry->ip_summed, __entry->len,
@@ -90,8 +91,31 @@ TRACE_EVENT(net_dev_xmit,
 		__assign_str(name, dev->name);
 	),
 
-	TP_printk("dev=%s skbaddr=%pK len=%u rc=%d",
+	TP_printk("dev=%s skbaddr=%p len=%u rc=%d",
 		__get_str(name), __entry->skbaddr, __entry->len, __entry->rc)
+);
+
+TRACE_EVENT(net_dev_xmit_timeout,
+
+	TP_PROTO(struct net_device *dev,
+		 int queue_index),
+
+	TP_ARGS(dev, queue_index),
+
+	TP_STRUCT__entry(
+		__string(	name,		dev->name	)
+		__string(	driver,		netdev_drivername(dev))
+		__field(	int,		queue_index	)
+	),
+
+	TP_fast_assign(
+		__assign_str(name, dev->name);
+		__assign_str(driver, netdev_drivername(dev));
+		__entry->queue_index = queue_index;
+	),
+
+	TP_printk("dev=%s driver=%s queue=%d",
+		__get_str(name), __get_str(driver), __entry->queue_index)
 );
 
 DECLARE_EVENT_CLASS(net_dev_template,
@@ -112,7 +136,7 @@ DECLARE_EVENT_CLASS(net_dev_template,
 		__assign_str(name, skb->dev->name);
 	),
 
-	TP_printk("dev=%s skbaddr=%pK len=%u",
+	TP_printk("dev=%s skbaddr=%p len=%u",
 		__get_str(name), __entry->skbaddr, __entry->len)
 )
 
@@ -191,7 +215,7 @@ DECLARE_EVENT_CLASS(net_dev_rx_verbose_template,
 		__entry->gso_type = skb_shinfo(skb)->gso_type;
 	),
 
-	TP_printk("dev=%s napi_id=%#x queue_mapping=%u skbaddr=%pK vlan_tagged=%d vlan_proto=0x%04x vlan_tci=0x%04x protocol=0x%04x ip_summed=%d hash=0x%08x l4_hash=%d len=%u data_len=%u truesize=%u mac_header_valid=%d mac_header=%d nr_frags=%d gso_size=%d gso_type=%#x",
+	TP_printk("dev=%s napi_id=%#x queue_mapping=%u skbaddr=%p vlan_tagged=%d vlan_proto=0x%04x vlan_tci=0x%04x protocol=0x%04x ip_summed=%d hash=0x%08x l4_hash=%d len=%u data_len=%u truesize=%u mac_header_valid=%d mac_header=%d nr_frags=%d gso_size=%d gso_type=%#x",
 		  __get_str(name), __entry->napi_id, __entry->queue_mapping,
 		  __entry->skbaddr, __entry->vlan_tagged, __entry->vlan_proto,
 		  __entry->vlan_tci, __entry->protocol, __entry->ip_summed,
@@ -222,6 +246,13 @@ DEFINE_EVENT(net_dev_rx_verbose_template, netif_receive_skb_entry,
 	TP_ARGS(skb)
 );
 
+DEFINE_EVENT(net_dev_rx_verbose_template, netif_receive_skb_list_entry,
+
+	TP_PROTO(const struct sk_buff *skb),
+
+	TP_ARGS(skb)
+);
+
 DEFINE_EVENT(net_dev_rx_verbose_template, netif_rx_entry,
 
 	TP_PROTO(const struct sk_buff *skb),
@@ -234,6 +265,65 @@ DEFINE_EVENT(net_dev_rx_verbose_template, netif_rx_ni_entry,
 	TP_PROTO(const struct sk_buff *skb),
 
 	TP_ARGS(skb)
+);
+
+DECLARE_EVENT_CLASS(net_dev_rx_exit_template,
+
+	TP_PROTO(int ret),
+
+	TP_ARGS(ret),
+
+	TP_STRUCT__entry(
+		__field(int,	ret)
+	),
+
+	TP_fast_assign(
+		__entry->ret = ret;
+	),
+
+	TP_printk("ret=%d", __entry->ret)
+);
+
+DEFINE_EVENT(net_dev_rx_exit_template, napi_gro_frags_exit,
+
+	TP_PROTO(int ret),
+
+	TP_ARGS(ret)
+);
+
+DEFINE_EVENT(net_dev_rx_exit_template, napi_gro_receive_exit,
+
+	TP_PROTO(int ret),
+
+	TP_ARGS(ret)
+);
+
+DEFINE_EVENT(net_dev_rx_exit_template, netif_receive_skb_exit,
+
+	TP_PROTO(int ret),
+
+	TP_ARGS(ret)
+);
+
+DEFINE_EVENT(net_dev_rx_exit_template, netif_rx_exit,
+
+	TP_PROTO(int ret),
+
+	TP_ARGS(ret)
+);
+
+DEFINE_EVENT(net_dev_rx_exit_template, netif_rx_ni_exit,
+
+	TP_PROTO(int ret),
+
+	TP_ARGS(ret)
+);
+
+DEFINE_EVENT(net_dev_rx_exit_template, netif_receive_skb_list_exit,
+
+	TP_PROTO(int ret),
+
+	TP_ARGS(ret)
 );
 
 #endif /* _TRACE_NET_H */

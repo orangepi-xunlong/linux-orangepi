@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * driver: reading from and writing to system console on S/390 via SCLP
  *
@@ -13,7 +14,7 @@
 #include <linux/string.h>
 #include <linux/spinlock.h>
 #include <linux/ctype.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include "sclp.h"
 #include "sclp_rw.h"
@@ -333,24 +334,6 @@ sclp_chars_in_buffer(struct sclp_buffer *buffer)
 	if (buffer->current_line != NULL)
 		count += buffer->current_length;
 	return count;
-}
-
-/*
- * sets or provides some values that influence the drivers behaviour
- */
-void
-sclp_set_columns(struct sclp_buffer *buffer, unsigned short columns)
-{
-	buffer->columns = columns;
-	if (buffer->current_line != NULL &&
-	    buffer->current_length > buffer->columns)
-		sclp_finalize_mto(buffer);
-}
-
-void
-sclp_set_htab(struct sclp_buffer *buffer, unsigned short htab)
-{
-	buffer->htab = htab;
 }
 
 /*

@@ -88,11 +88,11 @@ void rtw_set_tx_chksum_offload(_pkt *pkt, struct pkt_attrib *pattrib)
 				udp->check = 0;
 #endif
 			} else {
-				RTW_INFO("%s-%d TCP CSUM offload Error!!\n", __func__, __LINE__);
+				RTW_INFO("%s-%d TCP CSUM offload Error!!\n", __FUNCTION__, __LINE__);
 				WARN_ON(1);     /* we need a WARN() */
 			}
 		} else { /* IP fragmentation case */
-			RTW_INFO("%s-%d nr_frags != 0, using skb_checksum_help(skb);!!\n", __func__, __LINE__);
+			RTW_INFO("%s-%d nr_frags != 0, using skb_checksum_help(skb);!!\n", __FUNCTION__, __LINE__);
 			skb_checksum_help(skb);
 		}
 	}
@@ -300,12 +300,12 @@ void rtw_os_xmit_schedule(_adapter *padapter)
 		tasklet_hi_schedule(&pxmitpriv->xmit_tasklet);
 
 	_exit_critical_bh(&pxmitpriv->lock, &irqL);
-
+	
 #if defined(CONFIG_PCI_HCI) && defined(CONFIG_XMIT_THREAD_MODE)
 	if (_rtw_queue_empty(&padapter->xmitpriv.pending_xmitbuf_queue) == _FALSE)
 		_rtw_up_sema(&padapter->xmitpriv.xmit_sema);
 #endif
-
+	
 
 #endif
 }
@@ -421,13 +421,13 @@ int rtw_mlcst2unicst(_adapter *padapter, struct sk_buff *skb)
 			res = rtw_xmit(padapter, &newskb);
 			if (res < 0) {
 				DBG_COUNTER(padapter->tx_logs.os_tx_m2u_entry_err_xmit);
-				RTW_INFO("%s()-%d: rtw_xmit() return error! res=%d\n", __func__, __LINE__, res);
+				RTW_INFO("%s()-%d: rtw_xmit() return error! res=%d\n", __FUNCTION__, __LINE__, res);
 				pxmitpriv->tx_drop++;
 				rtw_skb_free(newskb);
 			}
 		} else {
 			DBG_COUNTER(padapter->tx_logs.os_tx_m2u_entry_err_skb);
-			RTW_INFO("%s-%d: rtw_skb_copy() failed!\n", __func__, __LINE__);
+			RTW_INFO("%s-%d: rtw_skb_copy() failed!\n", __FUNCTION__, __LINE__);
 			pxmitpriv->tx_drop++;
 			/* rtw_skb_free(skb); */
 			return _FALSE;	/* Caller shall tx this multicast frame via normal way. */
@@ -463,7 +463,7 @@ int _rtw_xmit_entry(_pkt *pkt, _nic_hdl pnetdev)
 	if (rtw_if_up(padapter) == _FALSE) {
 		DBG_COUNTER(padapter->tx_logs.os_tx_err_up);
 		#ifdef DBG_TX_DROP_FRAME
-		RTW_INFO("DBG_TX_DROP_FRAME %s if_up fail\n", __func__);
+		RTW_INFO("DBG_TX_DROP_FRAME %s if_up fail\n", __FUNCTION__);
 		#endif
 		goto drop_packet;
 	}
@@ -496,7 +496,7 @@ int _rtw_xmit_entry(_pkt *pkt, _nic_hdl pnetdev)
 	res = rtw_xmit(padapter, &pkt);
 	if (res < 0) {
 		#ifdef DBG_TX_DROP_FRAME
-		RTW_INFO("DBG_TX_DROP_FRAME %s rtw_xmit fail\n", __func__);
+		RTW_INFO("DBG_TX_DROP_FRAME %s rtw_xmit fail\n", __FUNCTION__);
 		#endif
 		goto drop_packet;
 	}

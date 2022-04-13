@@ -1,18 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  n_tracesink.c - Trace data router and sink path through tty space.
  *
  *  Copyright (C) Intel 2011
- *
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2
- *  as published by the Free Software Foundation.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  *
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *
@@ -125,7 +115,9 @@ static void n_tracesink_close(struct tty_struct *tty)
  *	 -EINVAL
  */
 static ssize_t n_tracesink_read(struct tty_struct *tty, struct file *file,
-				unsigned char __user *buf, size_t nr) {
+				unsigned char *buf, size_t nr,
+				void **cookie, unsigned long offset)
+{
 	return -EINVAL;
 }
 

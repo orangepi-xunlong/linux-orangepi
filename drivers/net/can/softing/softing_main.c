@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2008-2010
  *
  * - Kurt Van Dijck, EIA Electronics
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the version 2 of the GNU General Public License
- * as published by the Free Software Foundation
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/module.h>
@@ -181,8 +170,8 @@ static int softing_handle_1(struct softing *card)
 		msg.can_dlc = CAN_ERR_DLC;
 		msg.data[1] = CAN_ERR_CRTL_RX_OVERFLOW;
 		/*
-		 * service to all busses, we don't know which it was applicable
-		 * but only service busses that are online
+		 * service to all buses, we don't know which it was applicable
+		 * but only service buses that are online
 		 */
 		for (j = 0; j < ARRAY_SIZE(card->net); ++j) {
 			netdev = card->net[j];
@@ -192,7 +181,7 @@ static int softing_handle_1(struct softing *card)
 				/* a dead bus has no overflows */
 				continue;
 			++netdev->stats.rx_over_errors;
-			softing_netdev_rx(netdev, &msg, ktime_set(0, 0));
+			softing_netdev_rx(netdev, &msg, 0);
 		}
 		/* prepare for other use */
 		memset(&msg, 0, sizeof(msg));
@@ -350,7 +339,7 @@ static irqreturn_t softing_irq_thread(int irq, void *dev_id)
 			continue;
 		priv = netdev_priv(netdev);
 		if (!canif_is_active(netdev))
-			/* it makes no sense to wake dead busses */
+			/* it makes no sense to wake dead buses */
 			continue;
 		if (priv->tx.pending >= TX_ECHO_SKB_MAX)
 			continue;
@@ -385,7 +374,7 @@ static irqreturn_t softing_irq_v1(int irq, void *dev_id)
 }
 
 /*
- * netdev/candev inter-operability
+ * netdev/candev interoperability
  */
 static int softing_netdev_open(struct net_device *ndev)
 {
@@ -393,8 +382,13 @@ static int softing_netdev_open(struct net_device *ndev)
 
 	/* check or determine and set bittime */
 	ret = open_candev(ndev);
-	if (!ret)
-		ret = softing_startstop(ndev, 1);
+	if (ret)
+		return ret;
+
+	ret = softing_startstop(ndev, 1);
+	if (ret < 0)
+		close_candev(ndev);
+
 	return ret;
 }
 
@@ -458,8 +452,9 @@ static void softing_card_shutdown(struct softing *card)
 {
 	int fw_up = 0;
 
-	if (mutex_lock_interruptible(&card->fw.lock))
+	if (mutex_lock_interruptible(&card->fw.lock)) {
 		/* return -ERESTARTSYS */;
+	}
 	fw_up = card->fw.up;
 	card->fw.up = 0;
 
@@ -601,8 +596,8 @@ static ssize_t store_output(struct device *dev, struct device_attribute *attr,
 	return count;
 }
 
-static const DEVICE_ATTR(chip, S_IRUGO, show_chip, NULL);
-static const DEVICE_ATTR(output, S_IRUGO | S_IWUSR, show_output, store_output);
+static const DEVICE_ATTR(chip, 0444, show_chip, NULL);
+static const DEVICE_ATTR(output, 0644, show_output, store_output);
 
 static const struct attribute *const netdev_sysfs_attrs[] = {
 	&dev_attr_chip.attr,
@@ -694,7 +689,7 @@ static void softing_netdev_cleanup(struct net_device *netdev)
 static ssize_t show_##name(struct device *dev, \
 		struct device_attribute *attr, char *buf) \
 { \
-	struct softing *card = platform_get_drvdata(to_platform_device(dev)); \
+	struct softing *card = dev_get_drvdata(dev); \
 	return sprintf(buf, "%u\n", card->member); \
 } \
 static DEVICE_ATTR(name, 0444, show_##name, NULL)
@@ -703,7 +698,7 @@ static DEVICE_ATTR(name, 0444, show_##name, NULL)
 static ssize_t show_##name(struct device *dev, \
 		struct device_attribute *attr, char *buf) \
 { \
-	struct softing *card = platform_get_drvdata(to_platform_device(dev)); \
+	struct softing *card = dev_get_drvdata(dev); \
 	return sprintf(buf, "%s\n", card->member); \
 } \
 static DEVICE_ATTR(name, 0444, show_##name, NULL)
@@ -788,7 +783,7 @@ static int softing_pdev_probe(struct platform_device *pdev)
 		goto platform_resource_failed;
 	card->dpram_phys = pres->start;
 	card->dpram_size = resource_size(pres);
-	card->dpram = ioremap_nocache(card->dpram_phys, card->dpram_size);
+	card->dpram = ioremap(card->dpram_phys, card->dpram_size);
 	if (!card->dpram) {
 		dev_alert(&card->pdev->dev, "dpram ioremap failed\n");
 		goto ioremap_failed;

@@ -20,6 +20,7 @@
 #define __MARLIN_H__
 
 #include <linux/types.h>
+#include <linux/notifier.h>
 
 #define FALSE								(0)
 #define TRUE								(1)
@@ -81,6 +82,11 @@ enum marlin_wake_host_en {
 	WL_WAKE_HOST
 };
 
+enum marlin_cp2_status {
+	MARLIN_CP2_STS_ASSERTED = 0,
+};
+
+enum wcn_hw_type wcn_get_hw_if_type(void);
 enum wcn_clock_type wcn_get_xtal_26m_clk_type(void);
 enum wcn_clock_mode wcn_get_xtal_26m_clk_mode(void);
 unsigned int marlin_get_wcn_chipid(void);
@@ -102,6 +108,7 @@ void marlin_schedule_download_wq(void);
 int open_power_ctl(void);
 bool marlin_get_download_status(void);
 void marlin_chip_en(bool enable, bool reset);
+void marlin_cp2_reset(void);
 int marlin_get_module_status(void);
 int marlin_get_module_status_changed(void);
 int wcn_get_module_status_changed(void);
@@ -112,4 +119,7 @@ int is_first_power_on(enum marlin_sub_sys subsys);
 int cali_ini_need_download(enum marlin_sub_sys subsys);
 const char *strno(int subsys);
 void mdbg_assert_interface(char *str);
+int marlin_reset_callback_register(u32 subsys, struct notifier_block *nb);
+void marlin_reset_callback_unregister(u32 subsys, struct notifier_block *nb);
+int marlin_reset_notify_call(enum marlin_cp2_status sts);
 #endif

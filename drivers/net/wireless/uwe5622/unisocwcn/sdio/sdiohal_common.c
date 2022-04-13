@@ -202,11 +202,7 @@ void sdiohal_lock_tx_ws(void)
 	if (atomic_read(&p_data->tx_wake_flag) > 1)
 		return;
 
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	__pm_stay_awake(&p_data->tx_wl.ws);
-#else
-	__pm_stay_awake(&p_data->tx_ws);
-#endif
+	__pm_stay_awake(p_data->tx_ws);
 }
 
 void sdiohal_unlock_tx_ws(void)
@@ -217,11 +213,7 @@ void sdiohal_unlock_tx_ws(void)
 	if (atomic_read(&p_data->tx_wake_flag))
 		return;
 
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	__pm_relax(&p_data->tx_wl.ws);
-#else
-	__pm_relax(&p_data->tx_ws);
-#endif
+	__pm_relax(p_data->tx_ws);
 }
 
 void sdiohal_lock_rx_ws(void)
@@ -233,11 +225,7 @@ void sdiohal_lock_rx_ws(void)
 		return;
 
 	atomic_set(&p_data->rx_wake_flag, 1);
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	__pm_stay_awake(&p_data->rx_wl.ws);
-#else
-	__pm_stay_awake(&p_data->rx_ws);
-#endif
+	__pm_stay_awake(p_data->rx_ws);
 }
 
 void sdiohal_unlock_rx_ws(void)
@@ -248,66 +236,45 @@ void sdiohal_unlock_rx_ws(void)
 		return;
 
 	atomic_set(&p_data->rx_wake_flag, 0);
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	__pm_relax(&p_data->rx_wl.ws);
-#else
-	__pm_relax(&p_data->rx_ws);
-#endif
+	__pm_relax(p_data->rx_ws);
 }
 
 void sdiohal_lock_scan_ws(void)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	__pm_stay_awake(&p_data->scan_wl.ws);
-#else
-	__pm_stay_awake(&p_data->scan_ws);
-#endif
+	__pm_stay_awake(p_data->scan_ws);
 }
 
 void sdiohal_unlock_scan_ws(void)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	__pm_relax(&p_data->scan_wl.ws);
-#else
-	__pm_relax(&p_data->scan_ws);
-#endif
+	__pm_relax(p_data->scan_ws);
 }
 
 void sdiohal_wakelock_init(void)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	wake_lock_init(&p_data->tx_wl, WAKE_LOCK_SUSPEND,
-		       "sdiohal_tx_wakelock");
-	wake_lock_init(&p_data->rx_wl, WAKE_LOCK_SUSPEND,
-		       "sdiohal_rx_wakelock");
-	wake_lock_init(&p_data->scan_wl, WAKE_LOCK_SUSPEND,
-		       "sdiohal_scan_wakelock");
-#else
-	wakeup_source_init(&p_data->tx_ws, "sdiohal_tx_wakelock");
-	wakeup_source_init(&p_data->rx_ws, "sdiohal_rx_wakelock");
-	wakeup_source_init(&p_data->scan_ws, "sdiohal_scan_wakelock");
-#endif
+	p_data->tx_ws = wakeup_source_create("sdiohal_tx_wakelock");
+	p_data->rx_ws = wakeup_source_create("sdiohal_rx_wakelock");
+	p_data->scan_ws = wakeup_source_create("sdiohal_scan_wakelock");
+	wakeup_source_add(p_data->tx_ws);
+	wakeup_source_add(p_data->rx_ws);
+	wakeup_source_add(p_data->scan_ws);
 }
 
 void sdiohal_wakelock_deinit(void)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	wake_lock_destroy(&p_data->tx_wl);
-	wake_lock_destroy(&p_data->rx_wl);
-	wake_lock_destroy(&p_data->scan_wl);
-#else
-	wakeup_source_trash(&p_data->tx_ws);
-	wakeup_source_trash(&p_data->rx_ws);
-	wakeup_source_trash(&p_data->scan_ws);
-#endif
+	wakeup_source_remove(p_data->tx_ws);
+	wakeup_source_remove(p_data->rx_ws);
+	wakeup_source_remove(p_data->scan_ws);
+	wakeup_source_destroy(p_data->tx_ws);
+	wakeup_source_destroy(p_data->rx_ws);
+	wakeup_source_destroy(p_data->scan_ws);
 }
 
 /* for callback */

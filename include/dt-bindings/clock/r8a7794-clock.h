@@ -1,11 +1,7 @@
-/*
+/* SPDX-License-Identifier: GPL-2.0+
+ *
  * Copyright (C) 2014 Renesas Electronics Corporation
  * Copyright 2013 Ideas On Board SPRL
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef __DT_BINDINGS_CLOCK_R8A7794_H__
@@ -64,6 +60,7 @@
 
 /* MSTP4 */
 #define R8A7794_CLK_IRQC		7
+#define R8A7794_CLK_INTC_SYS		8
 
 /* MSTP5 */
 #define R8A7794_CLK_AUDIO_DMAC0		2

@@ -23,8 +23,11 @@
 #include "woble.h"
 #include "tty.h"
 
+#define CMD_TIMEOUT 5000
 #define MAX_WAKE_DEVICE_MAX_NUM 36
 #define CONFIG_FILE_PATH "/data/misc/bluedroid/bt_config.conf"
+
+MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
 
 static struct hci_cmd_t hci_cmd;
 uint8_t device_count_db;
@@ -143,7 +146,7 @@ int mtty_bt_read_conf(void)
 	}
 
 	do {
-		read_len = kernel_read(bt_conf_fp, file_offset, p_buf, file_size);
+		read_len = kernel_read(bt_conf_fp, p_buf, file_size, &file_offset);
 		if (read_len > 0) {
 			buffer_len += read_len;
 			file_size -= read_len;
@@ -242,7 +245,10 @@ int hci_cmd_send_sync(unsigned short opcode, struct HC_BT_HDR *py,
 		pr_err("%s marlin_sdio_write fail", __func__);
 		return 0;
 	}
-	down(&hci_cmd.wait);
+
+	if (down_timeout(&hci_cmd.wait, msecs_to_jiffies(CMD_TIMEOUT))) {
+		pr_err("%s CMD_TIMEOUT for CMD: 0x%04X", __func__, opcode);
+	}
 	hci_cmd.opcode = 0;
 
 	return 0;

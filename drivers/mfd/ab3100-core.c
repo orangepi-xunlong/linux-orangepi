@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2007-2010 ST-Ericsson
- * License terms: GNU General Public License (GPL) version 2
  * Low-level core for exclusive access to the AB3100 IC on the I2C bus
  * and some basic chip-configuration.
  * Author: Linus Walleij <linus.walleij@stericsson.com>
@@ -12,7 +12,7 @@
 #include <linux/notifier.h>
 #include <linux/slab.h>
 #include <linux/err.h>
-#include <linux/module.h>
+#include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/device.h>
 #include <linux/interrupt.h>
@@ -498,7 +498,7 @@ static ssize_t ab3100_get_set_reg(struct file *file,
 	int i = 0;
 
 	/* Get userspace string and assure termination */
-	buf_size = min(count, (sizeof(buf)-1));
+	buf_size = min((ssize_t)count, (ssize_t)(sizeof(buf)-1));
 	if (copy_from_user(buf, user_buf, buf_size))
 		return -EFAULT;
 	buf[buf_size] = 0;
@@ -575,71 +575,30 @@ static const struct file_operations ab3100_get_set_reg_fops = {
 	.llseek = noop_llseek,
 };
 
-static struct dentry *ab3100_dir;
-static struct dentry *ab3100_reg_file;
 static struct ab3100_get_set_reg_priv ab3100_get_priv;
-static struct dentry *ab3100_get_reg_file;
 static struct ab3100_get_set_reg_priv ab3100_set_priv;
-static struct dentry *ab3100_set_reg_file;
 
 static void ab3100_setup_debugfs(struct ab3100 *ab3100)
 {
-	int err;
+	struct dentry *ab3100_dir;
 
 	ab3100_dir = debugfs_create_dir("ab3100", NULL);
-	if (!ab3100_dir)
-		goto exit_no_debugfs;
 
-	ab3100_reg_file = debugfs_create_file("registers",
-				S_IRUGO, ab3100_dir, ab3100,
-				&ab3100_registers_fops);
-	if (!ab3100_reg_file) {
-		err = -ENOMEM;
-		goto exit_destroy_dir;
-	}
+	debugfs_create_file("registers", S_IRUGO, ab3100_dir, ab3100,
+			    &ab3100_registers_fops);
 
 	ab3100_get_priv.ab3100 = ab3100;
 	ab3100_get_priv.mode = false;
-	ab3100_get_reg_file = debugfs_create_file("get_reg",
-				S_IWUSR, ab3100_dir, &ab3100_get_priv,
-				&ab3100_get_set_reg_fops);
-	if (!ab3100_get_reg_file) {
-		err = -ENOMEM;
-		goto exit_destroy_reg;
-	}
+	debugfs_create_file("get_reg", S_IWUSR, ab3100_dir, &ab3100_get_priv,
+			    &ab3100_get_set_reg_fops);
 
 	ab3100_set_priv.ab3100 = ab3100;
 	ab3100_set_priv.mode = true;
-	ab3100_set_reg_file = debugfs_create_file("set_reg",
-				S_IWUSR, ab3100_dir, &ab3100_set_priv,
-				&ab3100_get_set_reg_fops);
-	if (!ab3100_set_reg_file) {
-		err = -ENOMEM;
-		goto exit_destroy_get_reg;
-	}
-	return;
-
- exit_destroy_get_reg:
-	debugfs_remove(ab3100_get_reg_file);
- exit_destroy_reg:
-	debugfs_remove(ab3100_reg_file);
- exit_destroy_dir:
-	debugfs_remove(ab3100_dir);
- exit_no_debugfs:
-	return;
-}
-static inline void ab3100_remove_debugfs(void)
-{
-	debugfs_remove(ab3100_set_reg_file);
-	debugfs_remove(ab3100_get_reg_file);
-	debugfs_remove(ab3100_reg_file);
-	debugfs_remove(ab3100_dir);
+	debugfs_create_file("set_reg", S_IWUSR, ab3100_dir, &ab3100_set_priv,
+			    &ab3100_get_set_reg_fops);
 }
 #else
 static inline void ab3100_setup_debugfs(struct ab3100 *ab3100)
-{
-}
-static inline void ab3100_remove_debugfs(void)
 {
 }
 #endif
@@ -906,10 +865,10 @@ static int ab3100_probe(struct i2c_client *client,
 		 &ab3100->chip_name[0]);
 
 	/* Attach a second dummy i2c_client to the test register address */
-	ab3100->testreg_client = i2c_new_dummy(client->adapter,
+	ab3100->testreg_client = i2c_new_dummy_device(client->adapter,
 					       client->addr + 1);
-	if (!ab3100->testreg_client) {
-		err = -ENOMEM;
+	if (IS_ERR(ab3100->testreg_client)) {
+		err = PTR_ERR(ab3100->testreg_client);
 		goto exit_no_testreg_client;
 	}
 
@@ -949,45 +908,22 @@ static int ab3100_probe(struct i2c_client *client,
 	return err;
 }
 
-static int ab3100_remove(struct i2c_client *client)
-{
-	struct ab3100 *ab3100 = i2c_get_clientdata(client);
-
-	/* Unregister subdevices */
-	mfd_remove_devices(&client->dev);
-	ab3100_remove_debugfs();
-	i2c_unregister_device(ab3100->testreg_client);
-	return 0;
-}
-
 static const struct i2c_device_id ab3100_id[] = {
 	{ "ab3100", 0 },
 	{ }
 };
-MODULE_DEVICE_TABLE(i2c, ab3100_id);
 
 static struct i2c_driver ab3100_driver = {
 	.driver = {
-		.name	= "ab3100",
+		.name			= "ab3100",
+		.suppress_bind_attrs	= true,
 	},
 	.id_table	= ab3100_id,
 	.probe		= ab3100_probe,
-	.remove		= ab3100_remove,
 };
 
 static int __init ab3100_i2c_init(void)
 {
 	return i2c_add_driver(&ab3100_driver);
 }
-
-static void __exit ab3100_i2c_exit(void)
-{
-	i2c_del_driver(&ab3100_driver);
-}
-
 subsys_initcall(ab3100_i2c_init);
-module_exit(ab3100_i2c_exit);
-
-MODULE_AUTHOR("Linus Walleij <linus.walleij@stericsson.com>");
-MODULE_DESCRIPTION("AB3100 core driver");
-MODULE_LICENSE("GPL");

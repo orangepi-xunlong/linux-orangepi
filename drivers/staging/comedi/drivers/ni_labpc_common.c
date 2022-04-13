@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * comedi/drivers/ni_labpc_common.c
  *
  * Common support code for "ni_labpc", "ni_labpc_pci" and "ni_labpc_cs".
  *
  * Copyright (C) 2001-2003 Frank Mori Hess <fmhess@users.sourceforge.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -569,14 +560,13 @@ static int labpc_ai_cmdtest(struct comedi_device *dev,
 	/* make sure scan timing is not too fast */
 	if (cmd->scan_begin_src == TRIG_TIMER) {
 		if (cmd->convert_src == TRIG_TIMER) {
-			err |= comedi_check_trigger_arg_min(&cmd->
-							    scan_begin_arg,
-							    cmd->convert_arg *
-							    cmd->chanlist_len);
+			err |= comedi_check_trigger_arg_min(
+					&cmd->scan_begin_arg,
+					cmd->convert_arg * cmd->chanlist_len);
 		}
-		err |= comedi_check_trigger_arg_min(&cmd->scan_begin_arg,
-						    board->ai_speed *
-						    cmd->chanlist_len);
+		err |= comedi_check_trigger_arg_min(
+					&cmd->scan_begin_arg,
+					board->ai_speed * cmd->chanlist_len);
 	}
 
 	switch (cmd->stop_src) {
@@ -915,7 +905,9 @@ static int labpc_ao_insn_write(struct comedi_device *dev,
 {
 	const struct labpc_boardinfo *board = dev->board_ptr;
 	struct labpc_private *devpriv = dev->private;
-	int channel, range;
+	unsigned int channel;
+	unsigned int range;
+	unsigned int i;
 	unsigned long flags;
 
 	channel = CR_CHAN(insn->chanspec);
@@ -941,9 +933,10 @@ static int labpc_ao_insn_write(struct comedi_device *dev,
 		devpriv->write_byte(dev, devpriv->cmd6, CMD6_REG);
 	}
 	/* send data */
-	labpc_ao_write(dev, s, channel, data[0]);
+	for (i = 0; i < insn->n; i++)
+		labpc_ao_write(dev, s, channel, data[i]);
 
-	return 1;
+	return insn->n;
 }
 
 /* lowlevel write to eeprom/dac */
@@ -1365,6 +1358,6 @@ static void __exit labpc_common_exit(void)
 }
 module_exit(labpc_common_exit);
 
-MODULE_AUTHOR("Comedi http://www.comedi.org");
+MODULE_AUTHOR("Comedi https://www.comedi.org");
 MODULE_DESCRIPTION("Comedi helper for ni_labpc, ni_labpc_pci, ni_labpc_cs");
 MODULE_LICENSE("GPL");

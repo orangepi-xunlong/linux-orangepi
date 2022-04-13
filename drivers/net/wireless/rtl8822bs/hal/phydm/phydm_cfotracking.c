@@ -38,41 +38,41 @@ phydm_set_crystal_cap(
 	}
 	#if (RTL8812A_SUPPORT == 1)
 	else if (p_dm->support_ic_type & ODM_RTL8812) {
-
+	
 		/* write 0x2C[30:25] = 0x2C[24:19] = crystal_cap */
 		odm_set_bb_reg(p_dm, REG_MAC_PHY_CTRL, 0x7FF80000, (crystal_cap | (crystal_cap << 6)));
-
-	}
+		
+	} 
 	#endif
 	#if (RTL8703B_SUPPORT == 1) || (RTL8723B_SUPPORT == 1) || (RTL8192E_SUPPORT == 1) || (RTL8821A_SUPPORT == 1) || (RTL8723D_SUPPORT == 1)
 	else if ((p_dm->support_ic_type & (ODM_RTL8703B | ODM_RTL8723B | ODM_RTL8192E | ODM_RTL8821 | ODM_RTL8723D))) {
-
+	
 		/* 0x2C[23:18] = 0x2C[17:12] = crystal_cap */
 		odm_set_bb_reg(p_dm, REG_MAC_PHY_CTRL, 0x00FFF000, (crystal_cap | (crystal_cap << 6)));
-
+		
 	}
 	#endif
-	#if (RTL8814A_SUPPORT == 1)
+	#if (RTL8814A_SUPPORT == 1)	
 	else if (p_dm->support_ic_type & ODM_RTL8814A) {
-
+	
 		/* write 0x2C[26:21] = 0x2C[20:15] = crystal_cap */
 		odm_set_bb_reg(p_dm, REG_MAC_PHY_CTRL, 0x07FF8000, (crystal_cap | (crystal_cap << 6)));
-
+		
 	}
 	#endif
 	#if (RTL8822B_SUPPORT == 1) || (RTL8821C_SUPPORT == 1) || (RTL8197F_SUPPORT == 1)
 	else if (p_dm->support_ic_type & (ODM_RTL8822B | ODM_RTL8821C | ODM_RTL8197F)) {
-
+	
 		/* write 0x24[30:25] = 0x28[6:1] = crystal_cap */
 		odm_set_bb_reg(p_dm, REG_AFE_XTAL_CTRL, 0x7e000000, crystal_cap);
 		odm_set_bb_reg(p_dm, REG_AFE_PLL_CTRL, 0x7e, crystal_cap);
-
+		
 	}
 	#endif
 	#if (RTL8710B_SUPPORT == 1)
 	else if (p_dm->support_ic_type & (ODM_RTL8710B)) {
-
-		#if (DM_ODM_SUPPORT_TYPE & (ODM_WIN|ODM_CE))
+	
+		#if (DM_ODM_SUPPORT_TYPE & (ODM_WIN|ODM_CE))		
 		/* write 0x60[29:24] = 0x60[23:18] = crystal_cap */
 		HAL_SetSYSOnReg(p_dm->adapter, REG_SYS_XTAL_CTRL0, 0x3FFC0000, (crystal_cap | (crystal_cap << 6)));
 		#endif
@@ -284,12 +284,10 @@ odm_cfo_tracking(
 
 #ifdef ODM_CONFIG_BT_COEXIST
 		/* 4 1.5 BT case: Disable CFO tracking */
-		if ((*p_dm->p_channel >= 1) && (*p_dm->p_channel <= 14)) {
-			if (p_dm->bt_info_table.is_bt_enabled) {
-				p_cfo_track->is_adjust = false;
-				phydm_set_crystal_cap(p_dm, p_cfo_track->def_x_cap);
-				PHYDM_DBG(p_dm, DBG_CFO_TRK, ("odm_cfo_tracking(): Disable CFO tracking for BT!!\n"));
-			}
+		if (p_dm->bt_info_table.is_bt_enabled) {
+			p_cfo_track->is_adjust = false;
+			phydm_set_crystal_cap(p_dm, p_cfo_track->def_x_cap);
+			PHYDM_DBG(p_dm, DBG_CFO_TRK, ("odm_cfo_tracking(): Disable CFO tracking for BT!!\n"));
 		}
 #if 0
 		/* 4 1.6 Big jump */

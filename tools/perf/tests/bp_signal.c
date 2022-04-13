@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Inspired by breakpoint overflow test done by
  * Vince Weaver <vincent.weaver@maine.edu> for perf_event_tests
@@ -24,7 +25,8 @@
 
 #include "tests.h"
 #include "debug.h"
-#include "perf.h"
+#include "event.h"
+#include "perf-sys.h"
 #include "cloexec.h"
 
 static int fd1;
@@ -43,18 +45,13 @@ volatile long the_var;
 #if defined (__x86_64__)
 extern void __test_function(volatile long *ptr);
 asm (
+	".pushsection .text;"
 	".globl __test_function\n"
+	".type __test_function, @function;"
 	"__test_function:\n"
 	"incq (%rdi)\n"
-	"ret\n");
-#elif defined (__aarch64__)
-extern void __test_function(volatile long *ptr);
-asm (
-	".globl __test_function\n"
-	"__test_function:\n"
-	"str x30, [x0]\n"
-	"ret\n");
-
+	"ret\n"
+	".popsection\n");
 #else
 static void __test_function(volatile long *ptr)
 {
@@ -62,8 +59,7 @@ static void __test_function(volatile long *ptr)
 }
 #endif
 
-__attribute__ ((noinline))
-static int test_function(void)
+static noinline int test_function(void)
 {
 	__test_function(&the_var);
 	the_var++;
@@ -165,7 +161,7 @@ static long long bp_count(int fd)
 	return count;
 }
 
-int test__bp_signal(int subtest __maybe_unused)
+int test__bp_signal(struct test *test __maybe_unused, int subtest __maybe_unused)
 {
 	struct sigaction sa;
 	long long count1, count2, count3;
@@ -270,21 +266,48 @@ int test__bp_signal(int subtest __maybe_unused)
 		if (count1 == 11)
 			pr_debug("failed: RF EFLAG recursion issue detected\n");
 		else
-			pr_debug("failed: wrong count for bp1%lld\n", count1);
+			pr_debug("failed: wrong count for bp1: %lld, expected 1\n", count1);
 	}
 
 	if (overflows != 3)
-		pr_debug("failed: wrong overflow hit\n");
+		pr_debug("failed: wrong overflow (%d) hit, expected 3\n", overflows);
 
 	if (overflows_2 != 3)
-		pr_debug("failed: wrong overflow_2 hit\n");
+		pr_debug("failed: wrong overflow_2 (%d) hit, expected 3\n", overflows_2);
 
 	if (count2 != 3)
-		pr_debug("failed: wrong count for bp2\n");
+		pr_debug("failed: wrong count for bp2 (%lld), expected 3\n", count2);
 
 	if (count3 != 2)
-		pr_debug("failed: wrong count for bp3\n");
+		pr_debug("failed: wrong count for bp3 (%lld), expected 2\n", count3);
 
 	return count1 == 1 && overflows == 3 && count2 == 3 && overflows_2 == 3 && count3 == 2 ?
 		TEST_OK : TEST_FAIL;
+}
+
+bool test__bp_signal_is_supported(void)
+{
+	/*
+	 * PowerPC and S390 do not support creation of instruction
+	 * breakpoints using the perf_event interface.
+	 *
+	 * ARM requires explicit rounding down of the instruction
+	 * pointer in Thumb mode, and then requires the single-step
+	 * to be handled explicitly in the overflow handler to avoid
+	 * stepping into the SIGIO handler and getting stuck on the
+	 * breakpointed instruction.
+	 *
+	 * Since arm64 has the same issue with arm for the single-step
+	 * handling, this case also gets stuck on the breakpointed
+	 * instruction.
+	 *
+	 * Just disable the test for these architectures until these
+	 * issues are resolved.
+	 */
+#if defined(__powerpc__) || defined(__s390x__) || defined(__arm__) || \
+    defined(__aarch64__)
+	return false;
+#else
+	return true;
+#endif
 }

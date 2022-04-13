@@ -15,20 +15,21 @@ export CPPFLAGS_boot.lds += -P -C
 export KBUILD_AFLAGS += -mtext-section-literals
 
 boot-y		:= bootstrap.o
+targets		+= $(boot-y) boot.lds
 
 OBJS		:= $(addprefix $(obj)/,$(boot-y))
 
-$(obj)/Image.o: vmlinux.bin $(OBJS)
+$(obj)/Image.o: $(obj)/../vmlinux.bin $(OBJS)
 	$(Q)$(OBJCOPY) $(OBJCOPY_ARGS) -R .comment \
-		--add-section image=vmlinux.bin \
+		--add-section image=$< \
 		--set-section-flags image=contents,alloc,load,load,data \
 		$(OBJS) $@
 
 $(obj)/../Image.elf: $(obj)/Image.o $(obj)/boot.lds
-	$(Q)$(LD) $(LDFLAGS) $(LDFLAGS_vmlinux) \
+	$(Q)$(LD) $(KBUILD_LDFLAGS) \
 		-T $(obj)/boot.lds \
 		--build-id=none \
 		-o $@ $(obj)/Image.o
 	$(Q)$(kecho) '  Kernel: $@ is ready'
 
-zImage:	$(obj)/../Image.elf
+all Image: $(obj)/../Image.elf

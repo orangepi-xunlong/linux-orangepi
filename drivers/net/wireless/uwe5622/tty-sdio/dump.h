@@ -15,6 +15,14 @@
 #define __DUMP_H
 #include <linux/time.h>
 #include <linux/rtc.h>
+#ifndef timespec
+#define timespec timespec64
+#define timespec_to_ns timespec64_to_ns
+#define getnstimeofday ktime_get_real_ts64
+#define timeval __kernel_old_timeval
+#define rtc_time_to_tm rtc_time64_to_tm
+#define timeval_to_ns ktime_to_ns
+#endif
 
 #define BT_MAX_DUMP_FRAME_LEN 2
 #define BT_MAX_DUMP_DATA_LEN 20

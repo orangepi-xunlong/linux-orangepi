@@ -1,20 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /**
  * AES GCM routines supporting the Power 7+ Nest Accelerators driver
  *
  * Copyright (C) 2012 International Business Machines Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 only.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  * Author: Kent Yoder <yoder1@us.ibm.com>
  */
@@ -22,6 +10,7 @@
 #include <crypto/internal/aead.h>
 #include <crypto/aes.h>
 #include <crypto/algapi.h>
+#include <crypto/gcm.h>
 #include <crypto/scatterwalk.h>
 #include <linux/module.h>
 #include <linux/types.h>
@@ -177,8 +166,7 @@ static int nx_gca(struct nx_crypto_ctx  *nx_ctx,
 	return rc;
 }
 
-static int gmac(struct aead_request *req, struct blkcipher_desc *desc,
-		unsigned int assoclen)
+static int gmac(struct aead_request *req, const u8 *iv, unsigned int assoclen)
 {
 	int rc;
 	struct nx_crypto_ctx *nx_ctx =
@@ -201,7 +189,7 @@ static int gmac(struct aead_request *req, struct blkcipher_desc *desc,
 			   nx_ctx->ap->databytelen/NX_PAGE_SIZE);
 
 	/* Copy IV */
-	memcpy(csbcpb->cpb.aes_gcm.iv_or_cnt, desc->info, AES_BLOCK_SIZE);
+	memcpy(csbcpb->cpb.aes_gcm.iv_or_cnt, iv, AES_BLOCK_SIZE);
 
 	do {
 		/*
@@ -251,8 +239,7 @@ out:
 	return rc;
 }
 
-static int gcm_empty(struct aead_request *req, struct blkcipher_desc *desc,
-		     int enc)
+static int gcm_empty(struct aead_request *req, const u8 *iv, int enc)
 {
 	int rc;
 	struct nx_crypto_ctx *nx_ctx =
@@ -279,7 +266,7 @@ static int gcm_empty(struct aead_request *req, struct blkcipher_desc *desc,
 	len = AES_BLOCK_SIZE;
 
 	/* Encrypt the counter/IV */
-	in_sg = nx_build_sg_list(nx_ctx->in_sg, (u8 *) desc->info,
+	in_sg = nx_build_sg_list(nx_ctx->in_sg, (u8 *) iv,
 				 &len, nx_ctx->ap->sglen);
 
 	if (len != AES_BLOCK_SIZE)
@@ -296,7 +283,7 @@ static int gcm_empty(struct aead_request *req, struct blkcipher_desc *desc,
 	nx_ctx->op.outlen = (nx_ctx->out_sg - out_sg) * sizeof(struct nx_sg);
 
 	rc = nx_hcall_sync(nx_ctx, &nx_ctx->op,
-			   desc->flags & CRYPTO_TFM_REQ_MAY_SLEEP);
+			   req->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP);
 	if (rc)
 		goto out;
 	atomic_inc(&(nx_ctx->stats->aes_ops));
@@ -324,7 +311,6 @@ static int gcm_aes_nx_crypt(struct aead_request *req, int enc,
 		crypto_aead_ctx(crypto_aead_reqtfm(req));
 	struct nx_gcm_rctx *rctx = aead_request_ctx(req);
 	struct nx_csbcpb *csbcpb = nx_ctx->csbcpb;
-	struct blkcipher_desc desc;
 	unsigned int nbytes = req->cryptlen;
 	unsigned int processed = 0, to_process;
 	unsigned long irq_flags;
@@ -332,15 +318,14 @@ static int gcm_aes_nx_crypt(struct aead_request *req, int enc,
 
 	spin_lock_irqsave(&nx_ctx->lock, irq_flags);
 
-	desc.info = rctx->iv;
 	/* initialize the counter */
-	*(u32 *)(desc.info + NX_GCM_CTR_OFFSET) = 1;
+	*(u32 *)&rctx->iv[NX_GCM_CTR_OFFSET] = 1;
 
 	if (nbytes == 0) {
 		if (assoclen == 0)
-			rc = gcm_empty(req, &desc, enc);
+			rc = gcm_empty(req, rctx->iv, enc);
 		else
-			rc = gmac(req, &desc, assoclen);
+			rc = gmac(req, rctx->iv, assoclen);
 		if (rc)
 			goto out;
 		else
@@ -369,7 +354,7 @@ static int gcm_aes_nx_crypt(struct aead_request *req, int enc,
 		to_process = nbytes - processed;
 
 		csbcpb->cpb.aes_gcm.bit_length_data = nbytes * 8;
-		rc = nx_build_sg_lists(nx_ctx, &desc, req->dst,
+		rc = nx_build_sg_lists(nx_ctx, rctx->iv, req->dst,
 				       req->src, &to_process,
 				       processed + req->assoclen,
 				       csbcpb->cpb.aes_gcm.iv_or_cnt);
@@ -388,7 +373,7 @@ static int gcm_aes_nx_crypt(struct aead_request *req, int enc,
 		if (rc)
 			goto out;
 
-		memcpy(desc.info, csbcpb->cpb.aes_gcm.out_cnt, AES_BLOCK_SIZE);
+		memcpy(rctx->iv, csbcpb->cpb.aes_gcm.out_cnt, AES_BLOCK_SIZE);
 		memcpy(csbcpb->cpb.aes_gcm.in_pat_or_aad,
 			csbcpb->cpb.aes_gcm.out_pat_or_mac, AES_BLOCK_SIZE);
 		memcpy(csbcpb->cpb.aes_gcm.in_s0,
@@ -433,7 +418,7 @@ static int gcm_aes_nx_encrypt(struct aead_request *req)
 	struct nx_gcm_rctx *rctx = aead_request_ctx(req);
 	char *iv = rctx->iv;
 
-	memcpy(iv, req->iv, 12);
+	memcpy(iv, req->iv, GCM_AES_IV_SIZE);
 
 	return gcm_aes_nx_crypt(req, 1, req->assoclen);
 }
@@ -443,7 +428,7 @@ static int gcm_aes_nx_decrypt(struct aead_request *req)
 	struct nx_gcm_rctx *rctx = aead_request_ctx(req);
 	char *iv = rctx->iv;
 
-	memcpy(iv, req->iv, 12);
+	memcpy(iv, req->iv, GCM_AES_IV_SIZE);
 
 	return gcm_aes_nx_crypt(req, 0, req->assoclen);
 }
@@ -482,11 +467,6 @@ static int gcm4106_aes_nx_decrypt(struct aead_request *req)
 	return gcm_aes_nx_crypt(req, 0, req->assoclen - 8);
 }
 
-/* tell the block cipher walk routines that this is a stream cipher by
- * setting cra_blocksize to 1. Even using blkcipher_walk_virt_block
- * during encrypt/decrypt doesn't solve this problem, because it calls
- * blkcipher_walk_done under the covers, which doesn't use walk->blocksize,
- * but instead uses this tfm->blocksize. */
 struct aead_alg nx_gcm_aes_alg = {
 	.base = {
 		.cra_name        = "gcm(aes)",
@@ -498,7 +478,7 @@ struct aead_alg nx_gcm_aes_alg = {
 	},
 	.init        = nx_crypto_ctx_aes_gcm_init,
 	.exit        = nx_crypto_ctx_aead_exit,
-	.ivsize      = 12,
+	.ivsize      = GCM_AES_IV_SIZE,
 	.maxauthsize = AES_BLOCK_SIZE,
 	.setkey      = gcm_aes_nx_set_key,
 	.encrypt     = gcm_aes_nx_encrypt,
@@ -516,7 +496,7 @@ struct aead_alg nx_gcm4106_aes_alg = {
 	},
 	.init        = nx_crypto_ctx_aes_gcm_init,
 	.exit        = nx_crypto_ctx_aead_exit,
-	.ivsize      = 8,
+	.ivsize      = GCM_RFC4106_IV_SIZE,
 	.maxauthsize = AES_BLOCK_SIZE,
 	.setkey      = gcm4106_aes_nx_set_key,
 	.setauthsize = gcm4106_aes_nx_setauthsize,

@@ -2,6 +2,6 @@ config WCN_PCIE
 	tristate "PCIE Support"
 	depends on SC23XX
         default n
-	---help---
+	help
           Enable this module for Spreadtrum SC2355 chip pcie interface bus Support.
           Please insmod this module before any other WCN subsystems.

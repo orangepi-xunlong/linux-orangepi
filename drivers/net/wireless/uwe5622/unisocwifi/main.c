@@ -361,7 +361,7 @@ static struct net_device_stats *sprdwl_get_stats(struct net_device *ndev)
 	return &ndev->stats;
 }
 
-static void sprdwl_tx_timeout(struct net_device *ndev)
+static void sprdwl_tx_timeout(struct net_device *ndev, unsigned int val)
 {
 	wl_ndev_log(L_DBG, ndev, "%s\n", __func__);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 7, 0)
@@ -397,6 +397,7 @@ static void sprdwl_tx_timeout(struct net_device *ndev)
 #define CMD_BTCOEXMODE           "BTCOEXMODE"
 #define CMD_WLS_BATCHING         "WLS_BATCHING"
 #define CMD_SET_AP_WPS_P2P_IE    "SET_AP_WPS_P2P_IE"
+#define CMD_GTK_REKEY_OFFLOAD    "GTK_REKEY_OFFLOAD"
 
 static int sprdwl_priv_cmd(struct net_device *ndev, struct ifreq *ifr)
 {
@@ -661,6 +662,9 @@ static int sprdwl_priv_cmd(struct net_device *ndev, struct ifreq *ifr)
 			ret = 0;
 		else if (!strncasecmp(command, CMD_SET_AP_WPS_P2P_IE,
 					strlen(CMD_SET_AP_WPS_P2P_IE)))
+			ret = 0;
+		else if (!strncasecmp(command, CMD_GTK_REKEY_OFFLOAD,
+					strlen(CMD_GTK_REKEY_OFFLOAD)))
 			ret = 0;
 		else {
 			wl_ndev_log(L_ERR, ndev, "sprdbg: %s command(%s) not support\n", __func__, command);
@@ -1027,100 +1031,8 @@ static struct notifier_block sprdwl_inet6addr_cb = {
 	.notifier_call = sprdwl_inetaddr6_event
 };
 
-static int write_mac_addr(char *mac_file, u8 *addr)
-{
-	struct file *fp = 0;
-	mm_segment_t old_fs;
-	char buf[18];
-	loff_t pos = 0;
-	/*open file*/
-	fp = filp_open(mac_file, O_CREAT|O_RDWR, 777);
-	if (IS_ERR(fp)) {
-		 wl_err("can't create WIFI MAC file!\n");
-		 return -ENOENT;
-	 }
-	 /*format MAC address*/
-	 sprintf(buf, "%02x:%02x:%02x:%02x:%02x:%02x", addr[0], addr[1],
-		     addr[2], addr[3], addr[4], addr[5]);
-	 /*save old fs: should be USER_DS*/
-	 old_fs = get_fs();
-	 /*change it to KERNEL_DS*/
-	 set_fs(KERNEL_DS);
-	 /*write file*/
-	 vfs_write(fp, buf, sizeof(buf), &pos);
-	 /*close file*/
-	 filp_close(fp, NULL);
-	 /*restore to old fs*/
-	 set_fs(old_fs);
-
-	 return 0;
-}
-
-#ifdef CUSTOMIZE_WIFI_MAC_FILE
-#define WIFI_MAC_ADDR_PATH  CUSTOMIZE_WIFI_MAC_FILE
-#else
-#define WIFI_MAC_ADDR_PATH "/data/misc/wifi/wifimac.txt"
-#endif
-static int sprdwl_get_mac_from_file(struct sprdwl_vif *vif, u8 *addr)
-{
-	struct file *fp = 0;
-	u8 buf[64] = { 0 };
-	mm_segment_t fs;
-	loff_t *pos;
-	char tmp_mac_file[256] = {0};
-
-	snprintf(tmp_mac_file, 255, "%s.%s", WIFI_MAC_ADDR_PATH, "tmp");
-	fp = filp_open(WIFI_MAC_ADDR_PATH, O_RDONLY, 0);
-	if (IS_ERR(fp)) {
-		wl_err("WIFI MAC can't be found wifimac.txt!\n");
-		fp = filp_open(tmp_mac_file, O_RDONLY, 0);
-		if (IS_ERR(fp)) {
-			wl_err("WIFI MAC can't found in temp file!\n");
-			goto random_mac;
-		}
-	}
-
-	fs = get_fs();
-	set_fs(KERNEL_DS);
-
-	pos = &fp->f_pos;
-	vfs_read(fp, buf, sizeof(buf), pos);
-
-	filp_close(fp, NULL);
-	set_fs(fs);
-
-	str2mac(buf, addr);
-	if (!is_valid_ether_addr(addr)) {
-		wl_ndev_log(L_ERR, vif->ndev, "%s invalid MAC address (%pM)\n",
-				 __func__, addr);
-		return -EINVAL;
-	}
-	if (is_local_ether_addr(addr)) {
-		netdev_warn(vif->ndev, "%s Warning: Assigning a locally valid "
-				 "MAC address (%pM) to a device\n",
-				 __func__, addr);
-		netdev_warn(vif->ndev, "%s You should not set the 2nd rightmost "
-				"bit in the first byte of the MAC\n", __func__);
-		vif->local_mac_flag = 1;
-	} else
-		vif->local_mac_flag = 0;
-
-	return 0;
-random_mac:
-	random_ether_addr(addr);
-	wl_warn("%s use random MAC address\n",
-			__func__);
-	/* initialize MAC addr with specific OUI */
-	addr[0] = 0x40;
-	addr[1] = 0x45;
-	addr[2] = 0xda;
-	/*write random mac to WIFI FILE*/
-	write_mac_addr(tmp_mac_file, addr);
-	return 0;
-}
-
-#ifdef CONFIG_SUNXI_ADDR_MGT
-extern int get_wifi_custom_mac_address(char *addr_str);
+#if IS_ENABLED(CONFIG_SUNXI_ADDR_MGT)
+extern int get_custom_mac_address(int fmt, char *name, char *addr);
 #endif
 static void sprdwl_set_mac_addr(struct sprdwl_vif *vif, u8 *pending_addr,
 				u8 *addr)
@@ -1137,14 +1049,8 @@ static void sprdwl_set_mac_addr(struct sprdwl_vif *vif, u8 *pending_addr,
 	if (!addr) {
 		return;
 	}
-
-#ifdef CONFIG_SUNXI_ADDR_MGT
-	ret = get_wifi_custom_mac_address(addr_str);
-	if (ret != -1) {
-		sscanf(addr_str, "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
-				&custom_mac[0], &custom_mac[1], &custom_mac[2],
-				&custom_mac[3], &custom_mac[4], &custom_mac[5]);
-	}
+#if IS_ENABLED(CONFIG_SUNXI_ADDR_MGT)
+	get_custom_mac_address(1, "wifi", custom_mac);
 #endif
 
 	if (is_valid_ether_addr(custom_mac)) {
@@ -1157,7 +1063,7 @@ static void sprdwl_set_mac_addr(struct sprdwl_vif *vif, u8 *pending_addr,
 		ether_addr_copy(addr, priv->default_mac);
 		default_mac_valid = 1;
 	} else {
-		sprdwl_get_mac_from_file(vif, addr);
+		printk("no valid mac address!\n");
 	}
 
 	switch (type) {

@@ -127,7 +127,7 @@ int rtw_os_alloc_recvframe(_adapter *padapter, union recv_frame *precvframe, u8 
 		res = _FAIL;
 #else
 		if ((pattrib->mfrag == 1) && (pattrib->frag_num == 0)) {
-			RTW_INFO("%s: alloc_skb fail , drop frag frame\n", __func__);
+			RTW_INFO("%s: alloc_skb fail , drop frag frame\n", __FUNCTION__);
 			/* rtw_free_recvframe(precvframe, pfree_recv_queue); */
 			res = _FAIL;
 			goto exit_rtw_os_recv_resource_alloc;
@@ -144,7 +144,7 @@ int rtw_os_alloc_recvframe(_adapter *padapter, union recv_frame *precvframe, u8 
 			precvframe->u.hdr.rx_head = precvframe->u.hdr.rx_data = precvframe->u.hdr.rx_tail = pdata;
 			precvframe->u.hdr.rx_end =  pdata + alloc_sz;
 		} else {
-			RTW_INFO("%s: rtw_skb_clone fail\n", __func__);
+			RTW_INFO("%s: rtw_skb_clone fail\n", __FUNCTION__);
 			/* rtw_free_recvframe(precvframe, pfree_recv_queue); */
 			/*exit_rtw_os_recv_resource_alloc;*/
 			res = _FAIL;
@@ -305,7 +305,7 @@ _pkt *rtw_os_alloc_msdu_pkt(union recv_frame *prframe, u16 nSubframe_Length, u8 
 			sub_skb->len = nSubframe_Length;
 			skb_set_tail_pointer(sub_skb, nSubframe_Length);
 		} else {
-			RTW_INFO("%s(): rtw_skb_clone() Fail!!!\n", __func__);
+			RTW_INFO("%s(): rtw_skb_clone() Fail!!!\n", __FUNCTION__);
 			return NULL;
 		}
 	}

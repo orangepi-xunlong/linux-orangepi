@@ -100,20 +100,25 @@ endif
 
 #### add cflag ######
 ifeq ($(CONFIG_WCN_SDIO),y)
-ccflags-y += -DCONFIG_SDIOHAL
-ccflags-y += -DCONFIG_WCN_SLP
 ccflags-y += -DCONFIG_WCN_SDIO
+ccflags-y += -DCONFIG_WCN_SLP
 ccflags-y += -DCONFIG_WCN_SWD
 export CONFIG_WCN_SWD = y
+endif
+ifeq ($(CONFIG_WCN_PCIE),y)
+ccflags-y += -DCONFIG_WCN_PCIE
+endif
+ifeq ($(CONFIG_WCN_SIPC),y)
+ccflags-y += -DCONFIG_WCN_SIPC
+endif
+ifeq ($(CONFIG_WCN_USB),y)
+ccflags-y += -DCONFIG_WCN_USB
 endif
 ccflags-y += -DCONFIG_WCN_BOOT
 ccflags-y += -DCONFIG_WCN_UTILS
 
-ifeq ($(CONFIG_WCN_USB),y)
-ccflags-y += -DCONFIG_WCN_USB
-endif
-
 #### include path ######
+ccflags-y += -I$(src)/../tty-sdio
 ccflags-y += -I$(src)/include/
 ccflags-y += -I$(src)/platform/
 ccflags-y += -I$(src)/platform/rf/
@@ -313,7 +318,7 @@ ccflags-y += -DCONFIG_WL_WAKE_HOST_EN
 #ccflags-y += -DCONFIG_WCN_CHECK_MODULE_VENDOR
 #ifneq ($(TARGET_BUILD_VARIANT),user)
 ccflags-y += -DCONFIG_WCN_LOOPCHECK
-ccflags-y += -DCONFIG_CPLOG_DEBUG
+#ccflags-y += -DCONFIG_CPLOG_DEBUG
 #endif
 #ccflags-y += -DCONFIG_MEM_PD
 ccflags-y += -DCONFIG_SDIO_TX_ADMA_MODE
@@ -376,14 +381,6 @@ $(MODULE_NAME)-$(CONFIG_WCN_SDIO) += \
 		    sleep/slp_sdio.o \
 		    sleep/slp_test.o \
 		    platform/mem_pd_mgr.o
-
-# wcn module bind verify
-ifeq ($(CONFIG_AW_BIND_VERIFY),y)
-WCN_BSP_TOP := $(dir $(lastword $(MAKEFILE_LIST)))
-$(shell cp $(WCN_BSP_TOP)/platform/wcn_bind_verify.lib $(WCN_BSP_TOP)/platform/wcn_bind_verify.a)
-$(MODULE_NAME)-$(CONFIG_AW_BIND_VERIFY) += \
-		    platform/wcn_bind_verify.a
-endif
 
 KDIR ?= $(ANDROID_PRODUCT_OUT)/obj/KERNEL_OBJ
 ARCH ?= arm

@@ -35,8 +35,18 @@
 #include <linux/parser.h>
 #include <linux/magic.h>
 #include <linux/slab.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
+#include <linux/fs_context.h>
+#include <linux/fs_parser.h>
 #include "internal.h"
+
+struct ramfs_mount_opts {
+	umode_t mode;
+};
+
+struct ramfs_fs_info {
+	struct ramfs_mount_opts mount_opts;
+};
 
 #define RAMFS_DEFAULT_MODE	0755
 
@@ -149,78 +159,65 @@ static const struct inode_operations ramfs_dir_inode_operations = {
 	.rename		= simple_rename,
 };
 
+/*
+ * Display the mount options in /proc/mounts.
+ */
+static int ramfs_show_options(struct seq_file *m, struct dentry *root)
+{
+	struct ramfs_fs_info *fsi = root->d_sb->s_fs_info;
+
+	if (fsi->mount_opts.mode != RAMFS_DEFAULT_MODE)
+		seq_printf(m, ",mode=%o", fsi->mount_opts.mode);
+	return 0;
+}
+
 static const struct super_operations ramfs_ops = {
 	.statfs		= simple_statfs,
 	.drop_inode	= generic_delete_inode,
-	.show_options	= generic_show_options,
+	.show_options	= ramfs_show_options,
 };
 
-struct ramfs_mount_opts {
-	umode_t mode;
-};
-
-enum {
+enum ramfs_param {
 	Opt_mode,
-	Opt_err
 };
 
-static const match_table_t tokens = {
-	{Opt_mode, "mode=%o"},
-	{Opt_err, NULL}
+const struct fs_parameter_spec ramfs_fs_parameters[] = {
+	fsparam_u32oct("mode",	Opt_mode),
+	{}
 };
 
-struct ramfs_fs_info {
-	struct ramfs_mount_opts mount_opts;
-};
-
-static int ramfs_parse_options(char *data, struct ramfs_mount_opts *opts)
+static int ramfs_parse_param(struct fs_context *fc, struct fs_parameter *param)
 {
-	substring_t args[MAX_OPT_ARGS];
-	int option;
-	int token;
-	char *p;
+	struct fs_parse_result result;
+	struct ramfs_fs_info *fsi = fc->s_fs_info;
+	int opt;
 
-	opts->mode = RAMFS_DEFAULT_MODE;
-
-	while ((p = strsep(&data, ",")) != NULL) {
-		if (!*p)
-			continue;
-
-		token = match_token(p, tokens, args);
-		switch (token) {
-		case Opt_mode:
-			if (match_octal(&args[0], &option))
-				return -EINVAL;
-			opts->mode = option & S_IALLUGO;
-			break;
+	opt = fs_parse(fc, ramfs_fs_parameters, param, &result);
+	if (opt < 0) {
 		/*
 		 * We might like to report bad mount options here;
 		 * but traditionally ramfs has ignored all mount options,
 		 * and as it is used as a !CONFIG_SHMEM simple substitute
 		 * for tmpfs, better continue to ignore other mount options.
 		 */
-		}
+		if (opt == -ENOPARAM)
+			opt = 0;
+		return opt;
+	}
+
+	switch (opt) {
+	case Opt_mode:
+		fsi->mount_opts.mode = result.uint_32 & S_IALLUGO;
+		break;
 	}
 
 	return 0;
 }
 
-int ramfs_fill_super(struct super_block *sb, void *data, int silent)
+static int ramfs_fill_super(struct super_block *sb, struct fs_context *fc)
 {
-	struct ramfs_fs_info *fsi;
+	struct ramfs_fs_info *fsi = sb->s_fs_info;
 	struct inode *inode;
-	int err;
-
-	save_mount_options(sb, data);
-
-	fsi = kzalloc(sizeof(struct ramfs_fs_info), GFP_KERNEL);
-	sb->s_fs_info = fsi;
-	if (!fsi)
-		return -ENOMEM;
-
-	err = ramfs_parse_options(data, &fsi->mount_opts);
-	if (err)
-		return err;
 
 	sb->s_maxbytes		= MAX_LFS_FILESIZE;
 	sb->s_blocksize		= PAGE_SIZE;
@@ -237,10 +234,34 @@ int ramfs_fill_super(struct super_block *sb, void *data, int silent)
 	return 0;
 }
 
-struct dentry *ramfs_mount(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data)
+static int ramfs_get_tree(struct fs_context *fc)
 {
-	return mount_nodev(fs_type, flags, data, ramfs_fill_super);
+	return get_tree_nodev(fc, ramfs_fill_super);
+}
+
+static void ramfs_free_fc(struct fs_context *fc)
+{
+	kfree(fc->s_fs_info);
+}
+
+static const struct fs_context_operations ramfs_context_ops = {
+	.free		= ramfs_free_fc,
+	.parse_param	= ramfs_parse_param,
+	.get_tree	= ramfs_get_tree,
+};
+
+int ramfs_init_fs_context(struct fs_context *fc)
+{
+	struct ramfs_fs_info *fsi;
+
+	fsi = kzalloc(sizeof(*fsi), GFP_KERNEL);
+	if (!fsi)
+		return -ENOMEM;
+
+	fsi->mount_opts.mode = RAMFS_DEFAULT_MODE;
+	fc->s_fs_info = fsi;
+	fc->ops = &ramfs_context_ops;
+	return 0;
 }
 
 static void ramfs_kill_sb(struct super_block *sb)
@@ -251,17 +272,14 @@ static void ramfs_kill_sb(struct super_block *sb)
 
 static struct file_system_type ramfs_fs_type = {
 	.name		= "ramfs",
-	.mount		= ramfs_mount,
+	.init_fs_context = ramfs_init_fs_context,
+	.parameters	= ramfs_fs_parameters,
 	.kill_sb	= ramfs_kill_sb,
 	.fs_flags	= FS_USERNS_MOUNT,
 };
 
-int __init init_ramfs_fs(void)
+static int __init init_ramfs_fs(void)
 {
-	static unsigned long once;
-
-	if (test_and_set_bit(0, &once))
-		return 0;
 	return register_filesystem(&ramfs_fs_type);
 }
 fs_initcall(init_ramfs_fs);

@@ -53,7 +53,6 @@ extern int rockchip_wifi_set_carddetect(int val);
 #endif
 
 #ifdef CONFIG_AW_BOARD
-extern void sunxi_mmc_rescan_card(unsigned int ids);
 extern int sunxi_wlan_get_bus_index(void);
 extern int sunxi_wlan_get_oob_irq(void);
 extern int sunxi_wlan_get_oob_irq_flags(void);
@@ -1752,6 +1751,11 @@ int sdiohal_runtime_put(void)
 	if (!p_data)
 		return -ENODEV;
 
+	if (!WCN_CARD_EXIST(&p_data->xmit_cnt)) {
+		sdiohal_err("%s line %d not have card\n", __func__, __LINE__);
+		return -ENODEV;
+	}
+
 	if (p_data->irq_type == SDIOHAL_RX_INBAND_IRQ) {
 		sdio_claim_host(p_data->sdio_func[FUNC_1]);
 		sdio_release_irq(p_data->sdio_func[FUNC_1]);
@@ -1760,27 +1764,22 @@ int sdiohal_runtime_put(void)
 		(p_data->irq_num > 0))
 		disable_irq(p_data->irq_num);
 
-	if (WCN_CARD_EXIST(&p_data->xmit_cnt)) {
 #ifndef CONFIG_AML_BOARD
-		/* As for amlogic platform, NOT remove card
-		 * after chip power off. So won't probe again.
-		 */
-		atomic_set(&p_data->xmit_start, 0);
+	/* As for amlogic platform, NOT remove card
+	 * after chip power off. So won't probe again.
+	 */
+	atomic_set(&p_data->xmit_start, 0);
 #endif
+	xmit_cnt = atomic_read(&p_data->xmit_cnt);
+	while ((xmit_cnt > 0) &&
+		(xmit_cnt < SDIOHAL_REMOVE_CARD_VAL)) {
+		usleep_range(1000, 2000);
 		xmit_cnt = atomic_read(&p_data->xmit_cnt);
-		while ((xmit_cnt > 0) &&
-			(xmit_cnt < SDIOHAL_REMOVE_CARD_VAL)) {
-			usleep_range(1000, 2000);
-			xmit_cnt = atomic_read(&p_data->xmit_cnt);
-			sdiohal_info("%s wait xmit_cnt:%d\n",
-				     __func__, xmit_cnt);
-		}
-
-		sdiohal_info("%s wait xmit_cnt end\n", __func__);
-	} else {
-		sdiohal_err("%s line %d not have card\n", __func__, __LINE__);
-		return -ENODEV;
+		sdiohal_info("%s wait xmit_cnt:%d\n",
+			     __func__, xmit_cnt);
 	}
+
+	sdiohal_info("%s wait xmit_cnt end\n", __func__);
 
 	if (!p_data->pwrseq)
 		return 0;
@@ -1972,6 +1971,7 @@ static int sdiohal_probe(struct sdio_func *func,
 	if (scan_card_notify != NULL)
 		scan_card_notify();
 
+	device_disable_async_suspend(&func->dev);
 	sdiohal_debug("rescan callback:%p\n", scan_card_notify);
 	sdiohal_info("probe ok\n");
 
@@ -2066,7 +2066,9 @@ void sdiohal_remove_card(void)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 #ifdef CONFIG_AW_BOARD
-	int wlan_bus_index = sunxi_wlan_get_bus_index();
+//	int wlan_bus_index = sunxi_wlan_get_bus_index();
+	/* don't need to remove sdio card. */
+	return;
 #endif
 
 #ifdef CONFIG_AML_BOARD
@@ -2094,7 +2096,8 @@ void sdiohal_remove_card(void)
 #endif
 
 #ifdef CONFIG_AW_BOARD
-	sunxi_mmc_rescan_card(wlan_bus_index);
+//	sunxi_mmc_rescan_card(wlan_bus_index);
+	return;
 #endif
 
 	p_data->sdio_dev_host->card->state |= WCN_SDIO_CARD_REMOVED;
@@ -2119,7 +2122,7 @@ int sdiohal_scan_card(void)
 #ifdef CONFIG_AML_BOARD
 	struct sdio_func *func = p_data->sdio_func[FUNC_1];
 #endif
-#ifdef CONFIG_AW_BOARD
+#if 0
 	int wlan_bus_index;
 #endif
 
@@ -2194,7 +2197,7 @@ int sdiohal_scan_card(void)
 	rockchip_wifi_set_carddetect(1);
 #endif
 
-#ifdef CONFIG_AW_BOARD
+#if 0
 	wlan_bus_index = sunxi_wlan_get_bus_index();
 	if (wlan_bus_index < 0) {
 		ret = wlan_bus_index;
@@ -2216,11 +2219,13 @@ int sdiohal_scan_card(void)
 	if (wait_for_completion_timeout(&p_data->scan_done,
 		msecs_to_jiffies(2500)) == 0) {
 		sdiohal_unlock_scan_ws();
+		sdio_unregister_driver(&sdiohal_driver);
 		sdiohal_err("wait scan card time out\n");
 		return -ENODEV;
 	}
 	if (!p_data->sdio_dev_host) {
 		sdiohal_unlock_scan_ws();
+		sdio_unregister_driver(&sdiohal_driver);
 		sdiohal_err("sdio_dev_host is NULL!\n");
 		return -ENODEV;
 	}

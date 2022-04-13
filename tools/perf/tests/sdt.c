@@ -1,12 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <sys/epoll.h>
-#include <util/util.h>
-#include <util/evlist.h>
+#include <util/symbol.h>
 #include <linux/filter.h>
 #include "tests.h"
 #include "debug.h"
 #include "probe-file.h"
 #include "build-id.h"
+#include "util.h"
 
 /* To test SDT event, we need libelf support to scan elf binary */
 #if defined(HAVE_SDT_EVENT) && defined(HAVE_LIBELF_SUPPORT)
@@ -23,17 +28,17 @@ static int target_function(void)
 static int build_id_cache__add_file(const char *filename)
 {
 	char sbuild_id[SBUILD_ID_SIZE];
-	u8 build_id[BUILD_ID_SIZE];
+	struct build_id bid;
 	int err;
 
-	err = filename__read_build_id(filename, &build_id, sizeof(build_id));
+	err = filename__read_build_id(filename, &bid);
 	if (err < 0) {
 		pr_debug("Failed to read build id of %s\n", filename);
 		return err;
 	}
 
-	build_id__sprintf(build_id, sizeof(build_id), sbuild_id);
-	err = build_id_cache__add_s(sbuild_id, filename, false, false);
+	build_id__sprintf(&bid, sbuild_id);
+	err = build_id_cache__add_s(sbuild_id, filename, NULL, false, false);
 	if (err < 0)
 		pr_debug("Failed to add build id cache of %s\n", filename);
 	return err;
@@ -43,7 +48,7 @@ static char *get_self_path(void)
 {
 	char *buf = calloc(PATH_MAX, sizeof(char));
 
-	if (buf && readlink("/proc/self/exe", buf, PATH_MAX) < 0) {
+	if (buf && readlink("/proc/self/exe", buf, PATH_MAX - 1) < 0) {
 		pr_debug("Failed to get correct path of perf\n");
 		free(buf);
 		return NULL;
@@ -54,7 +59,7 @@ static char *get_self_path(void)
 static int search_cached_probe(const char *target,
 			       const char *group, const char *event)
 {
-	struct probe_cache *cache = probe_cache__new(target);
+	struct probe_cache *cache = probe_cache__new(target, NULL);
 	int ret = 0;
 
 	if (!cache) {
@@ -71,7 +76,7 @@ static int search_cached_probe(const char *target,
 	return ret;
 }
 
-int test__sdt_event(int subtests __maybe_unused)
+int test__sdt_event(struct test *test __maybe_unused, int subtests __maybe_unused)
 {
 	int ret = TEST_FAIL;
 	char __tempdir[] = "./test-buildid-XXXXXX";
@@ -83,6 +88,8 @@ int test__sdt_event(int subtests __maybe_unused)
 	}
 	/* Note that buildid_dir must be an absolute path */
 	tempdir = realpath(__tempdir, NULL);
+	if (tempdir == NULL)
+		goto error_rmdir;
 
 	/* At first, scan itself */
 	set_buildid_dir(tempdir);
@@ -100,14 +107,14 @@ int test__sdt_event(int subtests __maybe_unused)
 
 error_rmdir:
 	/* Cleanup temporary buildid dir */
-	rm_rf(tempdir);
+	rm_rf(__tempdir);
 error:
 	free(tempdir);
 	free(myself);
 	return ret;
 }
 #else
-int test__sdt_event(int subtests __maybe_unused)
+int test__sdt_event(struct test *test __maybe_unused, int subtests __maybe_unused)
 {
 	pr_debug("Skip SDT event test because SDT support is not compiled\n");
 	return TEST_SKIP;

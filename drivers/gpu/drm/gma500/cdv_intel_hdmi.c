@@ -27,15 +27,17 @@
  *	We should probably make this generic and share it with Medfield
  */
 
-#include <drm/drmP.h>
+#include <linux/pm_runtime.h>
+
 #include <drm/drm.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_edid.h>
-#include "psb_intel_drv.h"
-#include "psb_drv.h"
-#include "psb_intel_reg.h"
+#include <drm/drm_simple_kms_helper.h>
+
 #include "cdv_device.h"
-#include <linux/pm_runtime.h>
+#include "psb_drv.h"
+#include "psb_intel_drv.h"
+#include "psb_intel_reg.h"
 
 /* hdmi control bits */
 #define HDMI_NULL_PACKETS_DURING_VSYNC	(1 << 9)
@@ -216,14 +218,14 @@ static int cdv_hdmi_get_modes(struct drm_connector *connector)
 
 	edid = drm_get_edid(connector, &gma_encoder->i2c_bus->adapter);
 	if (edid) {
-		drm_mode_connector_update_edid_property(connector, edid);
+		drm_connector_update_edid_property(connector, edid);
 		ret = drm_add_edid_modes(connector, edid);
 		kfree(edid);
 	}
 	return ret;
 }
 
-static int cdv_hdmi_mode_valid(struct drm_connector *connector,
+static enum drm_mode_status cdv_hdmi_mode_valid(struct drm_connector *connector,
 				 struct drm_display_mode *mode)
 {
 	if (mode->clock > 165000)
@@ -310,8 +312,7 @@ void cdv_hdmi_init(struct drm_device *dev,
 			   &cdv_hdmi_connector_funcs,
 			   DRM_MODE_CONNECTOR_DVID);
 
-	drm_encoder_init(dev, encoder, &psb_intel_lvds_enc_funcs,
-			 DRM_MODE_ENCODER_TMDS, NULL);
+	drm_simple_encoder_init(dev, encoder, DRM_MODE_ENCODER_TMDS);
 
 	gma_connector_attach_encoder(gma_connector, gma_encoder);
 	gma_encoder->type = INTEL_OUTPUT_HDMI;

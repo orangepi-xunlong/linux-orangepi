@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef BCM63XX_REGS_H_
 #define BCM63XX_REGS_H_
 
@@ -710,7 +711,7 @@
 /* Broadcom 6345 ENET DMA definitions */
 #define ENETDMA_6345_CHANCFG_REG	(0x00)
 
-#define ENETDMA_6345_MAXBURST_REG	(0x40)
+#define ENETDMA_6345_MAXBURST_REG	(0x04)
 
 #define ENETDMA_6345_RSTART_REG		(0x08)
 
@@ -1366,8 +1367,8 @@
 #define MISC_STRAPBUS_6328_REG		0x240
 #define STRAPBUS_6328_FCVO_SHIFT	7
 #define STRAPBUS_6328_FCVO_MASK		(0x1f << STRAPBUS_6328_FCVO_SHIFT)
-#define STRAPBUS_6328_BOOT_SEL_SERIAL	(1 << 28)
-#define STRAPBUS_6328_BOOT_SEL_NAND	(0 << 28)
+#define STRAPBUS_6328_BOOT_SEL_SERIAL	(1 << 18)
+#define STRAPBUS_6328_BOOT_SEL_NAND	(0 << 18)
 
 /*************************************************************************
  * _REG relative to RSET_PCIE

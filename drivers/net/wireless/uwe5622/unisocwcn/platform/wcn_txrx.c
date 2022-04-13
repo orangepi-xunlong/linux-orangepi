@@ -149,7 +149,7 @@ static void mdbg_ring_rx_task(struct work_struct *work)
 	struct mdbg_ring_t *ring = NULL;
 	struct mbuf_t *mbuf_node;
 	int i;
-#ifdef CONFIG_SDIOHAL
+#ifdef CONFIG_WCN_SDIO
 	struct bus_puh_t *puh = NULL;
 #endif
 
@@ -175,7 +175,7 @@ static void mdbg_ring_rx_task(struct work_struct *work)
 
 	for (i = 0, mbuf_node = rx->head; i < rx->num; i++,
 		mbuf_node = mbuf_node->next) {
-#ifdef CONFIG_SDIOHAL
+#ifdef CONFIG_WCN_SDIO
 		rx->addr = mbuf_node->buf + PUB_HEAD_RSV;
 		puh = (struct bus_puh_t *)mbuf_node->buf;
 #ifdef CONFIG_WCND
@@ -226,17 +226,9 @@ long int mdbg_send(char *buf, long int len, unsigned int subtype)
 	long int sent_size = 0;
 
 	WCN_DEBUG("BYTE MODE");
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	__pm_stay_awake(&ring_dev->rw_wake_lock.ws);
-#else
-	__pm_stay_awake(&ring_dev->rw_wake_lock);
-#endif
+	__pm_stay_awake(ring_dev->rw_ws);
 	sent_size = mdbg_comm_write(buf, len, subtype);
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	__pm_relax(&ring_dev->rw_wake_lock.ws);
-#else
-	__pm_relax(&ring_dev->rw_wake_lock);
-#endif
+	__pm_relax(ring_dev->rw_ws);
 
 	return sent_size;
 }
@@ -309,12 +301,8 @@ int mdbg_ring_init(void)
 		return -MDBG_ERR_MALLOC_FAIL;
 	}
 
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	wake_lock_init(&ring_dev->rw_wake_lock, WAKE_LOCK_SUSPEND,
-		       "mdbg_wake_lock");
-#else
-	wakeup_source_init(&ring_dev->rw_wake_lock, "mdbg_wake_lock");
-#endif
+	ring_dev->rw_ws = wakeup_source_create("mdbg_wake_lock");
+	wakeup_source_add(ring_dev->rw_ws);
 	spin_lock_init(&ring_dev->rw_lock);
 	mutex_init(&ring_dev->mdbg_read_mutex);
 	INIT_LIST_HEAD(&ring_dev->rx_head);
@@ -340,11 +328,8 @@ void mdbg_ring_remove(void)
 		kfree(pos);
 	}
 	mutex_destroy(&ring_dev->mdbg_read_mutex);
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	wake_lock_destroy(&ring_dev->rw_wake_lock);
-#else
-	wakeup_source_trash(&ring_dev->rw_wake_lock);
-#endif
+	wakeup_source_remove(ring_dev->rw_ws);
+	wakeup_source_destroy(ring_dev->rw_ws);
 	mdbg_ring_destroy(ring_dev->ring);
 	mdbg_dev->ring_dev = NULL;
 	kfree(ring_dev);

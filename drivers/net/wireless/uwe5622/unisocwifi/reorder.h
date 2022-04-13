@@ -73,4 +73,6 @@ void wlan_ba_session_event(void *hw_intf,
 void peer_entry_delba(void *hw_intf, unsigned char sta_lut_index);
 void reset_pn(struct sprdwl_priv *priv, const u8 *mac_addr);
 
+void sprdwl_active_ba_node(struct sprdwl_rx_ba_entry *ba_entry,
+				  u8 sta_lut_index, u8 tid);
 #endif /* __SPRDWL_REORDER_H__ */

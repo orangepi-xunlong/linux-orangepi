@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright(c) 2015 - 2018 Realtek Corporation.
+ * Copyright(c) 2015 - 2017 Realtek Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -54,7 +54,7 @@ static u8 sdio_f0_read8(struct intf_hdl *pintfhdl, u32 addr)
 	ret = rtw_sdio_f0_read(d, addr, &val, 1);
 	if (_FAIL == ret)
 		RTW_ERR("%s: Read f0 register(0x%x) FAIL!\n",
-			__func__, addr);
+			__FUNCTION__, addr);
 
 	return val;
 }
@@ -207,7 +207,7 @@ static u32 sdio_write_port(struct intf_hdl *pintfhdl, u32 addr, u32 cnt, u8 *mem
 #if 0 /* who will call this when hardware not be initialized? */
 	if (!rtw_is_hw_init_completed(adapter)) {
 		RTW_INFO("%s [addr=0x%x cnt=%d] adapter->hw_init_completed == _FALSE\n",
-			 __func__, addr, cnt);
+			 __FUNCTION__, addr, cnt);
 		goto exit;
 	}
 #endif
@@ -276,7 +276,7 @@ static struct recv_buf *sd_recv_rxfifo(PADAPTER adapter, u32 size)
 	recvbuf = rtw_dequeue_recvbuf(&recvpriv->free_recv_buf_queue);
 	if (recvbuf == NULL) {
 #ifndef CONFIG_RECV_THREAD_MODE
-		RTW_WARN("%s:alloc recvbuf FAIL!\n", __func__);
+		RTW_WARN("%s:alloc recvbuf FAIL!\n", __FUNCTION__);
 #endif /* !CONFIG_RECV_THREAD_MODE */
 		return NULL;
 	}
@@ -284,7 +284,7 @@ static struct recv_buf *sd_recv_rxfifo(PADAPTER adapter, u32 size)
 	/* 2. alloc skb */
 	pkt = rtl8822bs_alloc_recvbuf_skb(recvbuf, bufsz);
 	if (!pkt) {
-		RTW_ERR("%s: alloc_skb fail! alloc=%d read=%d\n", __func__, bufsz, size);
+		RTW_ERR("%s: alloc_skb fail! alloc=%d read=%d\n", __FUNCTION__, bufsz, size);
 		rtw_enqueue_recvbuf(recvbuf, &recvpriv->free_recv_buf_queue);
 		return NULL;
 	}
@@ -293,7 +293,7 @@ static struct recv_buf *sd_recv_rxfifo(PADAPTER adapter, u32 size)
 	rbuf = skb_put(pkt, size);
 	ret = rtl8822bs_read_port(adapter_to_dvobj(adapter), bufsz, rbuf);
 	if (_FAIL == ret) {
-		RTW_ERR("%s: read port FAIL!\n", __func__);
+		RTW_ERR("%s: read port FAIL!\n", __FUNCTION__);
 		rtl8822bs_free_recvbuf_skb(recvbuf);
 		rtw_enqueue_recvbuf(recvbuf, &recvpriv->free_recv_buf_queue);
 		return NULL;
@@ -336,7 +336,7 @@ static u32 sdio_recv_and_drop(PADAPTER adapter, u32 size)
 
 	ret = rtl8822bs_read_port(adapter_to_dvobj(adapter), bufsz, rbuf);
 	if (_FAIL == ret)
-		RTW_ERR("%s: read port FAIL!\n", __func__);
+		RTW_ERR("%s: read port FAIL!\n", __FUNCTION__);
 
 	if (NULL != rbuf)
 		rtw_mfree(rbuf, bufsz);
@@ -384,20 +384,20 @@ void sd_int_dpc(PADAPTER adapter)
 		status = rtw_read32(adapter, addr);
 		rtw_write32(adapter, addr, status);
 
-		RTW_INFO("%s: SDIO_HISR_TXERR (0x%08x)\n", __func__, status);
+		RTW_INFO("%s: SDIO_HISR_TXERR (0x%08x)\n", __FUNCTION__, status);
 	}
 
 	if (phal->sdio_hisr & BIT_SDIO_TXBCNOK_8822B)
-		RTW_INFO("%s: SDIO_HISR_TXBCNOK\n", __func__);
+		RTW_INFO("%s: SDIO_HISR_TXBCNOK\n", __FUNCTION__);
 
 	if (phal->sdio_hisr & BIT_SDIO_TXBCNERR_8822B)
-		RTW_INFO("%s: SDIO_HISR_TXBCNERR\n", __func__);
+		RTW_INFO("%s: SDIO_HISR_TXBCNERR\n", __FUNCTION__);
 
 	if (phal->sdio_hisr & BIT_SDIO_RXFOVW_8822B)
-		RTW_INFO("%s: Rx Overflow\n", __func__);
+		RTW_INFO("%s: Rx Overflow\n", __FUNCTION__);
 
 	if (phal->sdio_hisr & BIT_SDIO_RXERR_8822B)
-		RTW_INFO("%s: Rx Error\n", __func__);
+		RTW_INFO("%s: Rx Error\n", __FUNCTION__);
 
 	if (phal->sdio_hisr & BIT_RX_REQUEST_8822B) {
 		struct recv_buf *precvbuf;
@@ -429,7 +429,7 @@ void sd_int_dpc(PADAPTER adapter)
 					continue;
 				}
 #else /* !CONFIG_RECV_THREAD_MODE */
-				RTW_WARN("%s: recv fail!(time=%d)\n", __func__, rx_fail_time);
+				RTW_WARN("%s: recv fail!(time=%d)\n", __FUNCTION__, rx_fail_time);
 				if (rx_fail_time >= 10)
 					break;
 #endif /* !CONFIG_RECV_THREAD_MODE */
@@ -440,14 +440,13 @@ void sd_int_dpc(PADAPTER adapter)
 		} while (1);
 
 		if (rx_fail_time == 10)
-			RTW_ERR("%s: exit because recv failed more than 10 times!\n", __func__);
+			RTW_ERR("%s: exit because recv failed more than 10 times!\n", __FUNCTION__);
 	}
 }
 
 void sd_int_hdl(PADAPTER adapter)
 {
 	PHAL_DATA_TYPE phal;
-	u8 pwr;
 
 
 	if (RTW_CANNOT_RUN(adapter))
@@ -455,9 +454,8 @@ void sd_int_hdl(PADAPTER adapter)
 
 	phal = GET_HAL_DATA(adapter);
 
-	rtw_hal_get_hwreg(adapter, HW_VAR_APFM_ON_MAC, &pwr);
-	if (pwr != _TRUE) {
-		RTW_WARN("%s: unexpected interrupt!\n", __func__);
+	if (!phal->sdio_himr) {
+		RTW_WARN("%s: unexpected interrupt!\n", __FUNCTION__);
 		return;
 	}
 
@@ -470,7 +468,7 @@ void sd_int_hdl(PADAPTER adapter)
 #if 0
 	else {
 		RTW_INFO("%s: HISR(0x%08x) and HIMR(0x%08x) no match!\n",
-			 __func__, phal->sdio_hisr, phal->sdio_himr);
+			 __FUNCTION__, phal->sdio_hisr, phal->sdio_himr);
 	}
 #endif
 }

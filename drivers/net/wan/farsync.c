@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *      FarSync WAN driver for Linux (2.6.x kernel version)
  *
@@ -5,11 +6,6 @@
  *
  *      Copyright (C) 2001-2004 FarSite Communications Ltd.
  *      www.farsite.co.uk
- *
- *      This program is free software; you can redistribute it and/or
- *      modify it under the terms of the GNU General Public License
- *      as published by the Free Software Foundation; either version
- *      2 of the License, or (at your option) any later version.
  *
  *      Author:      R.J.Dunlop    <bob.dunlop@farsite.co.uk>
  *      Maintainer:  Kevin Curtis  <kevin.curtis@farsite.co.uk>
@@ -30,7 +26,7 @@
 #include <linux/if.h>
 #include <linux/hdlc.h>
 #include <asm/io.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include "farsync.h"
 
@@ -128,7 +124,7 @@ module_param_array(fst_excluded_list, int, NULL, 0);
 /*      The Am186CH/CC processors support a SmartDMA mode using circular pools
  *      of buffer descriptors. The structure is almost identical to that used
  *      in the LANCE Ethernet controllers. Details available as PDF from the
- *      AMD web site: http://www.amd.com/products/epd/processors/\
+ *      AMD web site: https://www.amd.com/products/epd/processors/\
  *                    2.16bitcont/3.am186cxfa/a21914/21914.pdf
  */
 struct txdesc {			/* Transmit descriptor */
@@ -573,8 +569,8 @@ static void do_bottom_half_rx(struct fst_card_info *card);
 static void fst_process_tx_work_q(unsigned long work_q);
 static void fst_process_int_work_q(unsigned long work_q);
 
-static DECLARE_TASKLET(fst_tx_task, fst_process_tx_work_q, 0);
-static DECLARE_TASKLET(fst_int_task, fst_process_int_work_q, 0);
+static DECLARE_TASKLET_OLD(fst_tx_task, fst_process_tx_work_q);
+static DECLARE_TASKLET_OLD(fst_int_task, fst_process_int_work_q);
 
 static struct fst_card_info *fst_card_array[FST_MAX_CARDS];
 static spinlock_t fst_work_q_lock;
@@ -857,7 +853,7 @@ fst_rx_dma_complete(struct fst_card_info *card, struct fst_port_info *port,
 
 	dbg(DBG_TX, "fst_rx_dma_complete\n");
 	pi = port->index;
-	memcpy(skb_put(skb, len), card->rx_dma_handle_host, len);
+	skb_put_data(skb, card->rx_dma_handle_host, len);
 
 	/* Reset buffer descriptor */
 	FST_WRB(card, rxDescrRing[pi][rxp].bits, DMA_OWN);
@@ -2134,7 +2130,6 @@ static void
 fst_openport(struct fst_port_info *port)
 {
 	int signals;
-	int txq_length;
 
 	/* Only init things if card is actually running. This allows open to
 	 * succeed for downloads etc.
@@ -2161,7 +2156,6 @@ fst_openport(struct fst_port_info *port)
 		else
 			netif_carrier_off(port_to_dev(port));
 
-		txq_length = port->txqe - port->txqs;
 		port->txqe = 0;
 		port->txqs = 0;
 	}
@@ -2245,7 +2239,7 @@ fst_attach(struct net_device *dev, unsigned short encoding, unsigned short parit
 }
 
 static void
-fst_tx_timeout(struct net_device *dev)
+fst_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	struct fst_port_info *port;
 	struct fst_card_info *card;
@@ -2394,7 +2388,6 @@ fst_init_card(struct fst_card_info *card)
 static const struct net_device_ops fst_ops = {
 	.ndo_open       = fst_open,
 	.ndo_stop       = fst_close,
-	.ndo_change_mtu = hdlc_change_mtu,
 	.ndo_start_xmit = hdlc_start_xmit,
 	.ndo_do_ioctl   = fst_ioctl,
 	.ndo_tx_timeout = fst_tx_timeout,
@@ -2560,16 +2553,16 @@ fst_add_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		 * Allocate a dma buffer for transmit and receives
 		 */
 		card->rx_dma_handle_host =
-		    pci_alloc_consistent(card->device, FST_MAX_MTU,
-					 &card->rx_dma_handle_card);
+		    dma_alloc_coherent(&card->device->dev, FST_MAX_MTU,
+				       &card->rx_dma_handle_card, GFP_KERNEL);
 		if (card->rx_dma_handle_host == NULL) {
 			pr_err("Could not allocate rx dma buffer\n");
 			err = -ENOMEM;
 			goto rx_dma_fail;
 		}
 		card->tx_dma_handle_host =
-		    pci_alloc_consistent(card->device, FST_MAX_MTU,
-					 &card->tx_dma_handle_card);
+		    dma_alloc_coherent(&card->device->dev, FST_MAX_MTU,
+				       &card->tx_dma_handle_card, GFP_KERNEL);
 		if (card->tx_dma_handle_host == NULL) {
 			pr_err("Could not allocate tx dma buffer\n");
 			err = -ENOMEM;
@@ -2579,9 +2572,8 @@ fst_add_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	return 0;		/* Success */
 
 tx_dma_fail:
-	pci_free_consistent(card->device, FST_MAX_MTU,
-			    card->rx_dma_handle_host,
-			    card->rx_dma_handle_card);
+	dma_free_coherent(&card->device->dev, FST_MAX_MTU,
+			  card->rx_dma_handle_host, card->rx_dma_handle_card);
 rx_dma_fail:
 	fst_disable_intr(card);
 	for (i = 0 ; i < card->nports ; i++)
@@ -2632,23 +2624,21 @@ fst_remove_one(struct pci_dev *pdev)
 		/*
 		 * Free dma buffers
 		 */
-		pci_free_consistent(card->device, FST_MAX_MTU,
-				    card->rx_dma_handle_host,
-				    card->rx_dma_handle_card);
-		pci_free_consistent(card->device, FST_MAX_MTU,
-				    card->tx_dma_handle_host,
-				    card->tx_dma_handle_card);
+		dma_free_coherent(&card->device->dev, FST_MAX_MTU,
+				  card->rx_dma_handle_host,
+				  card->rx_dma_handle_card);
+		dma_free_coherent(&card->device->dev, FST_MAX_MTU,
+				  card->tx_dma_handle_host,
+				  card->tx_dma_handle_card);
 	}
 	fst_card_array[card->card_no] = NULL;
 }
 
 static struct pci_driver fst_driver = {
-        .name		= FST_NAME,
-        .id_table	= fst_pci_dev_id,
-        .probe		= fst_add_one,
-        .remove	= fst_remove_one,
-        .suspend	= NULL,
-        .resume	= NULL,
+	.name		= FST_NAME,
+	.id_table	= fst_pci_dev_id,
+	.probe		= fst_add_one,
+	.remove		= fst_remove_one,
 };
 
 static int __init

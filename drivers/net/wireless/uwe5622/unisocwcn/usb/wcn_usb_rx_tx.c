@@ -941,17 +941,23 @@ static int wcn_usb_poll_copy(int chn, int urbs)
 inline int wcn_usb_push_list_tx(int chn, struct mbuf_t *head,
 		struct mbuf_t *tail, int num)
 {
+	struct wcn_usb_ep *ep;
+
 	wcn_usb_print_mbuf(chn, head, num, __func__);
+
+	if (chn == 0)
+		ep = wcn_usb_store_get_epFRchn(23);
+	else
+		ep = wcn_usb_store_get_epFRchn(chn);
+
+	if (!ep || !ep->intf)
+		return -ENODEV;
 
 	if (chn == 0) {
 		struct urb *urb = usb_alloc_urb(0, GFP_KERNEL);
 		struct wcn_ctrl *dr;
 		unsigned int pipe;
-		struct wcn_usb_ep *ep = wcn_usb_store_get_epFRchn(23);
 		struct usb_device *udev;
-
-		if (!ep || !ep->intf)
-			return -ENODEV;
 
 		udev = ep->intf->udev;
 		dr = wcn_usb_kzalloc(sizeof(struct wcn_ctrl), GFP_KERNEL);
@@ -1170,6 +1176,7 @@ void wcn_usb_wait_channel_stop(int chn)
 	struct wcn_usb_work_data *work_data;
 	struct wcn_usb_ep *ep;
 	long time;
+	int i = 3;
 
 	work_data = wcn_usb_store_get_channel_info(chn);
 	if (!work_data)
@@ -1187,9 +1194,14 @@ STOP_AGAIN:
 #endif
 	time = wait_event_timeout(work_data->work_completion,
 			buf_list_is_full(chn), WCN_USB_TIMEOUT);
-	if (!time)
-		wcn_usb_err("%s wait work_completion timeout!\n", __func__);
-	if (!buf_list_is_full(chn))
+	if (!time) {
+		wcn_usb_err("%s chn:%d wait work_completion timeout!\n",
+			    __func__, chn);
+
+		if (--i <= 0 && !wcn_usb_state_get(error_happen))
+			return;
+	}
+	if (!buf_list_is_full(chn) && !wcn_usb_state_get(error_happen))
 		goto STOP_AGAIN;
 }
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 
 #include <linux/ceph/ceph_debug.h>
 
@@ -164,12 +165,12 @@ static int process_one_ticket(struct ceph_auth_client *ac,
 	void *dp, *dend;
 	int dlen;
 	char is_enc;
-	struct timespec validity;
+	struct timespec64 validity;
 	void *tp, *tpend;
 	void **ptp;
-	struct ceph_crypto_key new_session_key;
+	struct ceph_crypto_key new_session_key = { 0 };
 	struct ceph_buffer *new_ticket_blob;
-	unsigned long new_expires, new_renew_after;
+	time64_t new_expires, new_renew_after;
 	u64 new_secret_id;
 	int ret;
 
@@ -204,11 +205,11 @@ static int process_one_ticket(struct ceph_auth_client *ac,
 	if (ret)
 		goto out;
 
-	ceph_decode_timespec(&validity, dp);
+	ceph_decode_timespec64(&validity, dp);
 	dp += sizeof(struct ceph_timespec);
-	new_expires = get_seconds() + validity.tv_sec;
+	new_expires = ktime_get_real_seconds() + validity.tv_sec;
 	new_renew_after = new_expires - (validity.tv_sec / 4);
-	dout(" expires=%lu renew_after=%lu\n", new_expires,
+	dout(" expires=%llu renew_after=%llu\n", new_expires,
 	     new_renew_after);
 
 	/* ticket blob for service */
@@ -231,6 +232,9 @@ static int process_one_ticket(struct ceph_auth_client *ac,
 	dout(" ticket blob is %d bytes\n", dlen);
 	ceph_decode_need(ptp, tpend, 1 + sizeof(u64), bad);
 	blob_struct_v = ceph_decode_8(ptp);
+	if (blob_struct_v != 1)
+		goto bad;
+
 	new_secret_id = ceph_decode_64(ptp);
 	ret = ceph_decode_buffer(&new_ticket_blob, ptp, tpend);
 	if (ret)
@@ -250,13 +254,13 @@ static int process_one_ticket(struct ceph_auth_client *ac,
 	     type, ceph_entity_type_name(type), th->secret_id,
 	     (int)th->ticket_blob->vec.iov_len);
 	xi->have_keys |= th->service;
-
-out:
-	return ret;
+	return 0;
 
 bad:
 	ret = -EINVAL;
-	goto out;
+out:
+	ceph_crypto_key_destroy(&new_session_key);
+	return ret;
 }
 
 static int ceph_x_proc_ticket_reply(struct ceph_auth_client *ac,
@@ -433,13 +437,13 @@ static bool need_key(struct ceph_x_ticket_handler *th)
 	if (!th->have_key)
 		return true;
 
-	return get_seconds() >= th->renew_after;
+	return ktime_get_real_seconds() >= th->renew_after;
 }
 
 static bool have_key(struct ceph_x_ticket_handler *th)
 {
 	if (th->have_key) {
-		if (get_seconds() >= th->expires)
+		if (ktime_get_real_seconds() >= th->expires)
 			th->have_key = false;
 	}
 
@@ -804,7 +808,7 @@ static int calc_signature(struct ceph_x_authorizer *au, struct ceph_msg *msg,
 	void *enc_buf = au->enc_buf;
 	int ret;
 
-	if (!(msg->con->peer_features & CEPH_FEATURE_CEPHX_V2)) {
+	if (!CEPH_HAVE_FEATURE(msg->con->peer_features, CEPHX_V2)) {
 		struct {
 			__le32 len;
 			__le32 header_crc;
@@ -960,5 +964,3 @@ out_nomem:
 out:
 	return ret;
 }
-
-

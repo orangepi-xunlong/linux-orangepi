@@ -193,7 +193,6 @@ struct registry_priv {
 	u8	power_mgnt;
 	u8	ips_mode;
 	u8	lps_level;
-	u8	lps_chk_by_tp;
 	u8	smart_ps;
 #ifdef CONFIG_WMMPS_STA
 	u8	wmm_smart_ps;
@@ -702,7 +701,7 @@ struct rtw_traffic_statistics {
 	u64	tx_drop;
 	u64	cur_tx_bytes;
 	u64	last_tx_bytes;
-	u32	cur_tx_tp; /* Tx throughput in Mbps. */
+	u32	cur_tx_tp; /* Tx throughput in MBps. */
 
 	/* rx statistics */
 	u64	rx_bytes;
@@ -710,7 +709,7 @@ struct rtw_traffic_statistics {
 	u64	rx_drop;
 	u64	cur_rx_bytes;
 	u64	last_rx_bytes;
-	u32	cur_rx_tp; /* Rx throughput in Mbps. */
+	u32	cur_rx_tp; /* Rx throughput in MBps. */
 };
 
 #define SEC_CAP_CHK_BMC	BIT0
@@ -785,18 +784,6 @@ struct macid_ctl_t {
 	u32 rate_bmp1[MACID_NUM_SW_LIMIT];
 
 	struct sta_info *sta[MACID_NUM_SW_LIMIT]; /* corresponding stainfo when macid is not shared */
-
-	/* macid sleep registers */
-	u16 reg_sleep_m0;
-#if (MACID_NUM_SW_LIMIT > 32)
-	u16 reg_sleep_m1;
-#endif
-#if (MACID_NUM_SW_LIMIT > 64)
-	u16 reg_sleep_m2;
-#endif
-#if (MACID_NUM_SW_LIMIT > 96)
-	u16 reg_sleep_m3;
-#endif
 };
 
 /* used for rf_ctl_t.rate_bmp_cck_ofdm */
@@ -844,20 +831,12 @@ struct macid_ctl_t {
 #define TXPWR_LMT_HAS_OFDM_3T	BIT6
 #define TXPWR_LMT_HAS_OFDM_4T	BIT7
 
-#define OFFCHS_NONE			0
-#define OFFCHS_LEAVING_OP	1
-#define OFFCHS_LEAVE_OP		2
-#define OFFCHS_BACKING_OP	3
-
 struct rf_ctl_t {
 	const struct country_chplan *country_ent;
 	u8 ChannelPlan;
 	u8 max_chan_nums;
 	RT_CHANNEL_INFO channel_set[MAX_CHANNEL_NUM];
 	struct p2p_channels channel_list;
-
-	_mutex offch_mutex;
-	u8 offch_state;
 
 	/* used for debug or by tx power limit */
 	u16 rate_bmp_cck_ofdm;		/* 20MHz */
@@ -1053,7 +1032,7 @@ struct dvobj_priv {
 	_timer txbcn_timer;
 #endif
 	_timer dynamic_chk_timer; /* dynamic/periodic check timer */
-
+	
 #ifdef CONFIG_RTW_NAPI_DYNAMIC
 	u8 en_napi_dynamic;
 #endif /* CONFIG_RTW_NAPI_DYNAMIC */
@@ -1067,11 +1046,6 @@ struct dvobj_priv {
 	/*info for H2C-0x2C*/
 	struct dft_info dft;
 #endif
-
-#ifdef CONFIG_RTW_WIFI_HAL
-	u32 nodfs;
-#endif
-
 	/*-------- below is for SDIO INTERFACE --------*/
 
 #ifdef INTF_DATA
@@ -1194,15 +1168,6 @@ struct dvobj_priv {
 #ifdef CONFIG_MCC_MODE
 	struct mcc_obj_priv mcc_objpriv;
 #endif /*CONFIG_MCC_MODE */
-
-#ifdef CONFIG_RTW_TPT_MODE
-	u8 tpt_mode; /* RTK T/P Testing Mode, 0:default mode */
-	u32 edca_be_ul;
-	u32 edca_be_dl;
-#endif
-	/* also for RTK T/P Testing Mode */
-	u8 scan_deny;
-
 };
 
 #define DEV_STA_NUM(_dvobj)			MSTATE_STA_NUM(&((_dvobj)->iface_state))
@@ -1624,14 +1589,8 @@ struct _ADAPTER {
 #endif
 
 #define adapter_to_rfctl(adapter) dvobj_to_rfctl(adapter_to_dvobj((adapter)))
-#define adapter_to_macidctl(adapter) dvobj_to_macidctl(adapter_to_dvobj((adapter)))
 
 #define adapter_mac_addr(adapter) (adapter->mac_addr)
-#ifdef CONFIG_RTW_CFGVENDOR_RANDOM_MAC_OUI
-#define adapter_pno_mac_addr(adapter) \
-	((adapter_wdev_data(adapter))->pno_mac_addr)
-#endif
-
 #define adapter_to_chset(adapter) (adapter_to_rfctl((adapter))->channel_set)
 
 #define mlme_to_adapter(mlme) container_of((mlme), struct _ADAPTER, mlmepriv)

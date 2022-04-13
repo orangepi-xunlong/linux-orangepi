@@ -1,28 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Squashfs - a compressed read only filesystem for Linux
  *
  * Copyright (c) 2010 LG Electronics
  * Chan Jeong <chan.jeong@lge.com>
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2,
- * or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
  * lzo_wrapper.c
  */
 
 #include <linux/mutex.h>
-#include <linux/buffer_head.h>
+#include <linux/bio.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/lzo.h>
@@ -76,22 +63,51 @@ static void lzo_free(void *strm)
 
 
 static int lzo_uncompress(struct squashfs_sb_info *msblk, void *strm,
-	struct buffer_head **bh, int b, int offset, int length,
+	struct bio *bio, int offset, int length,
 	struct squashfs_page_actor *output)
 {
-	int res;
-	size_t out_len = output->length;
+	struct bvec_iter_all iter_all = {};
+	struct bio_vec *bvec = bvec_init_iter_all(&iter_all);
 	struct squashfs_lzo *stream = strm;
+	void *buff = stream->input, *data;
+	int bytes = length, res;
+	size_t out_len = output->length;
 
-	squashfs_bh_to_buf(bh, b, stream->input, offset, length,
-		msblk->devblksize);
+	while (bio_next_segment(bio, &iter_all)) {
+		int avail = min(bytes, ((int)bvec->bv_len) - offset);
+
+		data = page_address(bvec->bv_page) + bvec->bv_offset;
+		memcpy(buff, data + offset, avail);
+		buff += avail;
+		bytes -= avail;
+		offset = 0;
+	}
+
 	res = lzo1x_decompress_safe(stream->input, (size_t)length,
 					stream->output, &out_len);
 	if (res != LZO_E_OK)
-		return -EIO;
-	squashfs_buf_to_actor(stream->output, output, out_len);
+		goto failed;
 
-	return out_len;
+	res = bytes = (int)out_len;
+	data = squashfs_first_page(output);
+	buff = stream->output;
+	while (data) {
+		if (bytes <= PAGE_SIZE) {
+			memcpy(data, buff, bytes);
+			break;
+		} else {
+			memcpy(data, buff, PAGE_SIZE);
+			buff += PAGE_SIZE;
+			bytes -= PAGE_SIZE;
+			data = squashfs_next_page(output);
+		}
+	}
+	squashfs_finish_page(output);
+
+	return res;
+
+failed:
+	return -EIO;
 }
 
 const struct squashfs_decompressor squashfs_lzo_comp_ops = {

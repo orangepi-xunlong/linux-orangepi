@@ -1,13 +1,9 @@
-/* arch/arm/plat-samsung/include/plat/debug-macro.S
- *
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
  * Copyright 2005, 2007 Simtec Electronics
  *	http://armlinux.simtec.co.uk/
  *	Ben Dooks <ben@simtec.co.uk>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
-*/
+ */
 
 #include <linux/serial_s3c.h>
 
@@ -73,7 +69,10 @@ ARM_BE8(rev \rd, \rd)
 1002:		@ exit busyuart
 	.endm
 
-	.macro	waituart,rd,rx
+	.macro	waituartcts,rd,rx
+	.endm
+
+	.macro	waituarttxrdy,rd,rx
 		ldr	\rd, [\rx, # S3C2410_UFCON]
 ARM_BE8(rev \rd, \rd)
 		tst	\rd, #S3C2410_UFCON_FIFOMODE	@ fifo enabled?

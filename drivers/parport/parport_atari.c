@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Low-level parallel port routines for the Atari builtin port
  *
  * Author: Andreas Schwab <schwab@issan.informatik.uni-dortmund.de>
@@ -18,7 +19,7 @@
 #include <asm/irq.h>
 #include <asm/atariints.h>
 
-static struct parport *this_port = NULL;
+static struct parport *this_port;
 
 static unsigned char
 parport_atari_read_data(struct parport *p)
@@ -199,7 +200,7 @@ static int __init parport_atari_init(void)
 		}
 
 		this_port = p;
-		printk(KERN_INFO "%s: Atari built-in port using irq\n", p->name);
+		pr_info("%s: Atari built-in port using irq\n", p->name);
 		parport_announce_port (p);
 
 		return 0;

@@ -1,20 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (C) 2014, Samsung Electronics Co. Ltd. All Rights Reserved.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
  */
 
 #include <linux/iio/common/ssp_sensors.h>
 #include <linux/iio/iio.h>
+#include <linux/iio/buffer.h>
 #include <linux/iio/kfifo_buf.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
@@ -117,8 +108,6 @@ static int ssp_accel_probe(struct platform_device *pdev)
 	spd->type = SSP_ACCELEROMETER_SENSOR;
 
 	indio_dev->name = ssp_accel_device_name;
-	indio_dev->dev.parent = &pdev->dev;
-	indio_dev->dev.of_node = pdev->dev.of_node;
 	indio_dev->info = &ssp_accel_iio_info;
 	indio_dev->modes = INDIO_BUFFER_SOFTWARE;
 	indio_dev->channels = ssp_acc_channels;
@@ -135,7 +124,7 @@ static int ssp_accel_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, indio_dev);
 
-	ret = iio_device_register(indio_dev);
+	ret = devm_iio_device_register(&pdev->dev, indio_dev);
 	if (ret < 0)
 		return ret;
 
@@ -145,21 +134,11 @@ static int ssp_accel_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int ssp_accel_remove(struct platform_device *pdev)
-{
-	struct iio_dev *indio_dev = platform_get_drvdata(pdev);
-
-	iio_device_unregister(indio_dev);
-
-	return 0;
-}
-
 static struct platform_driver ssp_accel_driver = {
 	.driver = {
 		.name = SSP_ACCEL_NAME,
 	},
 	.probe = ssp_accel_probe,
-	.remove =  ssp_accel_remove,
 };
 
 module_platform_driver(ssp_accel_driver);

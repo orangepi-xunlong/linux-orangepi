@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * arch/arm/mach-ixp4xx/vulcan-setup.c
  *
@@ -15,10 +16,13 @@
 #include <linux/serial_8250.h>
 #include <linux/io.h>
 #include <linux/w1-gpio.h>
+#include <linux/gpio/machine.h>
 #include <linux/mtd/plat-ram.h>
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/flash.h>
+
+#include "irqs.h"
 
 static struct flash_platform_data vulcan_flash_data = {
 	.map_name	= "cfi_probe",
@@ -120,6 +124,22 @@ static struct platform_device vulcan_uart = {
 	.num_resources		= ARRAY_SIZE(vulcan_uart_resources),
 };
 
+static struct resource vulcan_npeb_resources[] = {
+	{
+		.start		= IXP4XX_EthB_BASE_PHYS,
+		.end		= IXP4XX_EthB_BASE_PHYS + 0x0fff,
+		.flags		= IORESOURCE_MEM,
+	},
+};
+
+static struct resource vulcan_npec_resources[] = {
+	{
+		.start		= IXP4XX_EthC_BASE_PHYS,
+		.end		= IXP4XX_EthC_BASE_PHYS + 0x0fff,
+		.flags		= IORESOURCE_MEM,
+	},
+};
+
 static struct eth_plat_info vulcan_plat_eth[] = {
 	[0] = {
 		.phy		= 0,
@@ -140,6 +160,8 @@ static struct platform_device vulcan_eth[] = {
 		.dev = {
 			.platform_data	= &vulcan_plat_eth[0],
 		},
+		.num_resources		= ARRAY_SIZE(vulcan_npeb_resources),
+		.resource		= vulcan_npeb_resources,
 	},
 	[1] = {
 		.name			= "ixp4xx_eth",
@@ -147,6 +169,8 @@ static struct platform_device vulcan_eth[] = {
 		.dev = {
 			.platform_data	= &vulcan_plat_eth[1],
 		},
+		.num_resources		= ARRAY_SIZE(vulcan_npec_resources),
+		.resource		= vulcan_npec_resources,
 	},
 };
 
@@ -161,9 +185,16 @@ static struct platform_device vulcan_max6369 = {
 	.num_resources		= 1,
 };
 
+static struct gpiod_lookup_table vulcan_w1_gpiod_table = {
+	.dev_id = "w1-gpio",
+	.table = {
+		GPIO_LOOKUP_IDX("IXP4XX_GPIO_CHIP", 14, NULL, 0,
+				GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN),
+	},
+};
+
 static struct w1_gpio_platform_data vulcan_w1_gpio_pdata = {
-	.pin			= 14,
-	.ext_pullup_enable_pin	= -EINVAL,
+	/* Intentionally left blank */
 };
 
 static struct platform_device vulcan_w1_gpio = {
@@ -232,6 +263,7 @@ static void __init vulcan_init(void)
 			  IXP4XX_EXP_BUS_WR_EN		|
 			  IXP4XX_EXP_BUS_BYTE_EN;
 
+	gpiod_add_lookup_table(&vulcan_w1_gpiod_table);
 	platform_add_devices(vulcan_devices, ARRAY_SIZE(vulcan_devices));
 }
 

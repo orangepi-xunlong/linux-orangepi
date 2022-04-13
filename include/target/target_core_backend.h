@@ -1,7 +1,21 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef TARGET_CORE_BACKEND_H
 #define TARGET_CORE_BACKEND_H
 
-#define TRANSPORT_FLAG_PASSTHROUGH		1
+#include <linux/types.h>
+#include <asm/unaligned.h>
+#include <target/target_core_base.h>
+
+#define TRANSPORT_FLAG_PASSTHROUGH		0x1
+/*
+ * ALUA commands, state checks and setup operations are handled by the
+ * backend module.
+ */
+#define TRANSPORT_FLAG_PASSTHROUGH_ALUA		0x2
+#define TRANSPORT_FLAG_PASSTHROUGH_PGR          0x4
+
+struct request_queue;
+struct scatterlist;
 
 struct target_backend_ops {
 	char name[16];
@@ -9,7 +23,8 @@ struct target_backend_ops {
 	char inquiry_rev[4];
 	struct module *owner;
 
-	u8 transport_flags;
+	u8 transport_flags_default;
+	u8 transport_flags_changeable;
 
 	int (*attach_hba)(struct se_hba *, u32);
 	void (*detach_hba)(struct se_hba *);
@@ -17,17 +32,16 @@ struct target_backend_ops {
 
 	struct se_device *(*alloc_device)(struct se_hba *, const char *);
 	int (*configure_device)(struct se_device *);
+	void (*destroy_device)(struct se_device *);
 	void (*free_device)(struct se_device *device);
 
 	ssize_t (*set_configfs_dev_params)(struct se_device *,
 					   const char *, ssize_t);
 	ssize_t (*show_configfs_dev_params)(struct se_device *, char *);
 
-	void (*transport_complete)(struct se_cmd *cmd,
-				   struct scatterlist *,
-				   unsigned char *);
-
 	sense_reason_t (*parse_cdb)(struct se_cmd *cmd);
+	void (*tmr_notify)(struct se_device *se_dev, enum tcm_tmreq_table,
+			   struct list_head *aborted_cmds);
 	u32 (*get_device_type)(struct se_device *);
 	sector_t (*get_blocks)(struct se_device *);
 	sector_t (*get_alignment_offset_lbas)(struct se_device *);
@@ -42,6 +56,7 @@ struct target_backend_ops {
 	void (*free_prot)(struct se_device *);
 
 	struct configfs_attribute **tb_dev_attrib_attrs;
+	struct configfs_attribute **tb_dev_action_attrs;
 };
 
 struct sbc_ops {
@@ -57,7 +72,10 @@ int	transport_backend_register(const struct target_backend_ops *);
 void	target_backend_unregister(const struct target_backend_ops *);
 
 void	target_complete_cmd(struct se_cmd *, u8);
+void	target_set_cmd_data_length(struct se_cmd *, int);
 void	target_complete_cmd_with_length(struct se_cmd *, u8, int);
+
+void	transport_copy_sense_to_cmd(struct se_cmd *, unsigned char *);
 
 sense_reason_t	spc_parse_cdb(struct se_cmd *cmd, unsigned int *size);
 sense_reason_t	spc_emulate_report_luns(struct se_cmd *cmd);
@@ -80,6 +98,7 @@ int	transport_set_vpd_ident(struct t10_vpd *, unsigned char *);
 
 extern struct configfs_attribute *sbc_attrib_attrs[];
 extern struct configfs_attribute *passthrough_attrib_attrs[];
+extern struct configfs_attribute *passthrough_pr_attrib_attrs[];
 
 /* core helpers also used by command snooping in pscsi */
 void	*transport_kmap_data_sg(struct se_cmd *);
@@ -96,5 +115,10 @@ bool target_sense_desc_format(struct se_device *dev);
 sector_t target_to_linux_sector(struct se_device *dev, sector_t lb);
 bool target_configure_unmap_from_queue(struct se_dev_attrib *attrib,
 				       struct request_queue *q);
+
+static inline bool target_dev_configured(struct se_device *se_dev)
+{
+	return !!(se_dev->dev_flags & DF_CONFIGURED);
+}
 
 #endif /* TARGET_CORE_BACKEND_H */

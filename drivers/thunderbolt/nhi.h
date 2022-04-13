@@ -1,114 +1,83 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Thunderbolt Cactus Ridge driver - NHI driver
+ * Thunderbolt driver - NHI driver
  *
  * Copyright (c) 2014 Andreas Noever <andreas.noever@gmail.com>
+ * Copyright (C) 2018, Intel Corporation
  */
 
 #ifndef DSL3510_H_
 #define DSL3510_H_
 
-#include <linux/mutex.h>
-#include <linux/workqueue.h>
+#include <linux/thunderbolt.h>
 
-/**
- * struct tb_nhi - thunderbolt native host interface
- */
-struct tb_nhi {
-	struct mutex lock; /*
-			    * Must be held during ring creation/destruction.
-			    * Is acquired by interrupt_work when dispatching
-			    * interrupts to individual rings.
-			    **/
-	struct pci_dev *pdev;
-	void __iomem *iobase;
-	struct tb_ring **tx_rings;
-	struct tb_ring **rx_rings;
-	struct work_struct interrupt_work;
-	u32 hop_count; /* Number of rings (end point hops) supported by NHI. */
+enum nhi_fw_mode {
+	NHI_FW_SAFE_MODE,
+	NHI_FW_AUTH_MODE,
+	NHI_FW_EP_MODE,
+	NHI_FW_CM_MODE,
 };
 
-/**
- * struct tb_ring - thunderbolt TX or RX ring associated with a NHI
- */
-struct tb_ring {
-	struct mutex lock; /* must be acquired after nhi->lock */
-	struct tb_nhi *nhi;
-	int size;
-	int hop;
-	int head; /* write next descriptor here */
-	int tail; /* complete next descriptor here */
-	struct ring_desc *descriptors;
-	dma_addr_t descriptors_dma;
-	struct list_head queue;
-	struct list_head in_flight;
-	struct work_struct work;
-	bool is_tx:1; /* rx otherwise */
-	bool running:1;
+enum nhi_mailbox_cmd {
+	NHI_MAILBOX_SAVE_DEVS = 0x05,
+	NHI_MAILBOX_DISCONNECT_PCIE_PATHS = 0x06,
+	NHI_MAILBOX_DRV_UNLOADS = 0x07,
+	NHI_MAILBOX_DISCONNECT_PA = 0x10,
+	NHI_MAILBOX_DISCONNECT_PB = 0x11,
+	NHI_MAILBOX_ALLOW_ALL_DEVS = 0x23,
 };
 
-struct ring_frame;
-typedef void (*ring_cb)(struct tb_ring*, struct ring_frame*, bool canceled);
+int nhi_mailbox_cmd(struct tb_nhi *nhi, enum nhi_mailbox_cmd cmd, u32 data);
+enum nhi_fw_mode nhi_mailbox_mode(struct tb_nhi *nhi);
 
 /**
- * struct ring_frame - for use with ring_rx/ring_tx
+ * struct tb_nhi_ops - NHI specific optional operations
+ * @init: NHI specific initialization
+ * @suspend_noirq: NHI specific suspend_noirq hook
+ * @resume_noirq: NHI specific resume_noirq hook
+ * @runtime_suspend: NHI specific runtime_suspend hook
+ * @runtime_resume: NHI specific runtime_resume hook
+ * @shutdown: NHI specific shutdown
  */
-struct ring_frame {
-	dma_addr_t buffer_phy;
-	ring_cb callback;
-	struct list_head list;
-	u32 size:12; /* TX: in, RX: out*/
-	u32 flags:12; /* RX: out */
-	u32 eof:4; /* TX:in, RX: out */
-	u32 sof:4; /* TX:in, RX: out */
+struct tb_nhi_ops {
+	int (*init)(struct tb_nhi *nhi);
+	int (*suspend_noirq)(struct tb_nhi *nhi, bool wakeup);
+	int (*resume_noirq)(struct tb_nhi *nhi);
+	int (*runtime_suspend)(struct tb_nhi *nhi);
+	int (*runtime_resume)(struct tb_nhi *nhi);
+	void (*shutdown)(struct tb_nhi *nhi);
 };
 
-#define TB_FRAME_SIZE 0x100    /* minimum size for ring_rx */
+extern const struct tb_nhi_ops icl_nhi_ops;
 
-struct tb_ring *ring_alloc_tx(struct tb_nhi *nhi, int hop, int size);
-struct tb_ring *ring_alloc_rx(struct tb_nhi *nhi, int hop, int size);
-void ring_start(struct tb_ring *ring);
-void ring_stop(struct tb_ring *ring);
-void ring_free(struct tb_ring *ring);
-
-int __ring_enqueue(struct tb_ring *ring, struct ring_frame *frame);
-
-/**
- * ring_rx() - enqueue a frame on an RX ring
- *
- * frame->buffer, frame->buffer_phy and frame->callback have to be set. The
- * buffer must contain at least TB_FRAME_SIZE bytes.
- *
- * frame->callback will be invoked with frame->size, frame->flags, frame->eof,
- * frame->sof set once the frame has been received.
- *
- * If ring_stop is called after the packet has been enqueued frame->callback
- * will be called with canceled set to true.
- *
- * Return: Returns ESHUTDOWN if ring_stop has been called. Zero otherwise.
+/*
+ * PCI IDs used in this driver from Win Ridge forward. There is no
+ * need for the PCI quirk anymore as we will use ICM also on Apple
+ * hardware.
  */
-static inline int ring_rx(struct tb_ring *ring, struct ring_frame *frame)
-{
-	WARN_ON(ring->is_tx);
-	return __ring_enqueue(ring, frame);
-}
+#define PCI_DEVICE_ID_INTEL_WIN_RIDGE_2C_NHI            0x157d
+#define PCI_DEVICE_ID_INTEL_WIN_RIDGE_2C_BRIDGE         0x157e
+#define PCI_DEVICE_ID_INTEL_ALPINE_RIDGE_LP_NHI		0x15bf
+#define PCI_DEVICE_ID_INTEL_ALPINE_RIDGE_LP_BRIDGE	0x15c0
+#define PCI_DEVICE_ID_INTEL_ALPINE_RIDGE_C_4C_NHI	0x15d2
+#define PCI_DEVICE_ID_INTEL_ALPINE_RIDGE_C_4C_BRIDGE	0x15d3
+#define PCI_DEVICE_ID_INTEL_ALPINE_RIDGE_C_2C_NHI	0x15d9
+#define PCI_DEVICE_ID_INTEL_ALPINE_RIDGE_C_2C_BRIDGE	0x15da
+#define PCI_DEVICE_ID_INTEL_ALPINE_RIDGE_LP_USBONLY_NHI	0x15dc
+#define PCI_DEVICE_ID_INTEL_ALPINE_RIDGE_USBONLY_NHI	0x15dd
+#define PCI_DEVICE_ID_INTEL_ALPINE_RIDGE_C_USBONLY_NHI	0x15de
+#define PCI_DEVICE_ID_INTEL_TITAN_RIDGE_2C_BRIDGE	0x15e7
+#define PCI_DEVICE_ID_INTEL_TITAN_RIDGE_2C_NHI		0x15e8
+#define PCI_DEVICE_ID_INTEL_TITAN_RIDGE_4C_BRIDGE	0x15ea
+#define PCI_DEVICE_ID_INTEL_TITAN_RIDGE_4C_NHI		0x15eb
+#define PCI_DEVICE_ID_INTEL_TITAN_RIDGE_DD_BRIDGE	0x15ef
+#define PCI_DEVICE_ID_INTEL_ICL_NHI1			0x8a0d
+#define PCI_DEVICE_ID_INTEL_ICL_NHI0			0x8a17
+#define PCI_DEVICE_ID_INTEL_TGL_NHI0			0x9a1b
+#define PCI_DEVICE_ID_INTEL_TGL_NHI1			0x9a1d
+#define PCI_DEVICE_ID_INTEL_TGL_H_NHI0			0x9a1f
+#define PCI_DEVICE_ID_INTEL_TGL_H_NHI1			0x9a21
 
-/**
- * ring_tx() - enqueue a frame on an TX ring
- *
- * frame->buffer, frame->buffer_phy, frame->callback, frame->size, frame->eof
- * and frame->sof have to be set.
- *
- * frame->callback will be invoked with once the frame has been transmitted.
- *
- * If ring_stop is called after the packet has been enqueued frame->callback
- * will be called with canceled set to true.
- *
- * Return: Returns ESHUTDOWN if ring_stop has been called. Zero otherwise.
- */
-static inline int ring_tx(struct tb_ring *ring, struct ring_frame *frame)
-{
-	WARN_ON(!ring->is_tx);
-	return __ring_enqueue(ring, frame);
-}
+#define PCI_CLASS_SERIAL_USB_USB4			0x0c0340
 
 #endif

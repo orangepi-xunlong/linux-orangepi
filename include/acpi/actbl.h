@@ -1,45 +1,11 @@
+/* SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0 */
 /******************************************************************************
  *
  * Name: actbl.h - Basic ACPI Table Definitions
  *
+ * Copyright (C) 2000 - 2020, Intel Corp.
+ *
  *****************************************************************************/
-
-/*
- * Copyright (C) 2000 - 2016, Intel Corp.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions, and the following disclaimer,
- *    without modification.
- * 2. Redistributions in binary form must reproduce at minimum a disclaimer
- *    substantially similar to the "NO WARRANTY" disclaimer below
- *    ("Disclaimer") and any redistribution must be conditioned upon
- *    including a substantially similar Disclaimer requirement for further
- *    binary redistribution.
- * 3. Neither the names of the above-listed copyright holders nor the names
- *    of any contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
- *
- * NO WARRANTY
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDERS OR CONTRIBUTORS BE LIABLE FOR SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
- * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGES.
- */
 
 #ifndef __ACTBL_H__
 #define __ACTBL_H__
@@ -72,6 +38,7 @@
 #define ACPI_SIG_XSDT           "XSDT"	/* Extended  System Description Table */
 #define ACPI_SIG_SSDT           "SSDT"	/* Secondary System Description Table */
 #define ACPI_RSDP_NAME          "RSDP"	/* Short name for RSDP, not signature */
+#define ACPI_OEM_NAME           "OEM"	/* Short name for OEM, not signature */
 
 /*
  * All tables and structures must be byte-packed to match the ACPI
@@ -99,14 +66,14 @@
  ******************************************************************************/
 
 struct acpi_table_header {
-	char signature[ACPI_NAME_SIZE];	/* ASCII table signature */
+	char signature[ACPI_NAMESEG_SIZE];	/* ASCII table signature */
 	u32 length;		/* Length of table in bytes, including this header */
 	u8 revision;		/* ACPI Specification minor version number */
 	u8 checksum;		/* To make sum of entire table == 0 */
 	char oem_id[ACPI_OEM_ID_SIZE];	/* ASCII OEM identification */
 	char oem_table_id[ACPI_OEM_TABLE_ID_SIZE];	/* ASCII OEM table identification */
 	u32 oem_revision;	/* OEM revision number */
-	char asl_compiler_id[ACPI_NAME_SIZE];	/* ASCII ASL compiler vendor ID */
+	char asl_compiler_id[ACPI_NAMESEG_SIZE];	/* ASCII ASL compiler vendor ID */
 	u32 asl_compiler_revision;	/* ASL compiler version */
 };
 
@@ -371,7 +338,22 @@ struct acpi_table_desc {
 	union acpi_name_union signature;
 	acpi_owner_id owner_id;
 	u8 flags;
+	u16 validation_count;
 };
+
+/*
+ * Maximum value of the validation_count field in struct acpi_table_desc.
+ * When reached, validation_count cannot be changed any more and the table will
+ * be permanently regarded as validated.
+ *
+ * This is to prevent situations in which unbalanced table get/put operations
+ * may cause premature table unmapping in the OS to happen.
+ *
+ * The maximum validation count can be defined to any value, but should be
+ * greater than the maximum number of OS early stage mapping slots to avoid
+ * leaking early stage table mappings to the late stage.
+ */
+#define ACPI_MAX_TABLE_VALIDATIONS          ACPI_UINT16_MAX
 
 /* Masks for Flags field above */
 
@@ -379,6 +361,7 @@ struct acpi_table_desc {
 #define ACPI_TABLE_ORIGIN_INTERNAL_PHYSICAL (1)	/* Physical address, internally mapped */
 #define ACPI_TABLE_ORIGIN_INTERNAL_VIRTUAL  (2)	/* Virtual address, internallly allocated */
 #define ACPI_TABLE_ORIGIN_MASK              (3)
+#define ACPI_TABLE_IS_VERIFIED              (4)
 #define ACPI_TABLE_IS_LOADED                (8)
 
 /*

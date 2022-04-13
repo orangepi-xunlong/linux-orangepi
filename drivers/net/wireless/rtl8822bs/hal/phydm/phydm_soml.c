@@ -38,7 +38,7 @@ phydm_dynamicsoftmletting(
 
 			if (true == p_dm->bsomlenabled) {
 				PHYDM_DBG(p_dm, ODM_COMP_API, ("PHYDM_DynamicSoftMLSetting(): SoML has been enable, skip dynamic SoML switch\n"));
-				return;
+				return; 		
 			}
 
 			ret_val = odm_get_bb_reg(p_dm, 0xf8c, MASKBYTE0);
@@ -91,7 +91,7 @@ phydm_soml_on_off(
 #if (DM_ODM_SUPPORT_TYPE == ODM_WIN)
 void
 phydm_adaptive_soml_callback(
-	struct phydm_timer_list		*p_timer
+	struct timer_list		*p_timer
 )
 {
 	struct _ADAPTER		*adapter = (struct _ADAPTER *)p_timer->Adapter;
@@ -292,7 +292,7 @@ phydm_adsl(
 
 	if (!(p_dm->support_ic_type & ODM_ADAPTIVE_SOML_SUPPORT_IC))
 		return;
-
+		
 	PHYDM_DBG(p_dm, DBG_ADPTV_SOML, ("rssi_min =%d\n", p_dm->rssi_min));
 	PHYDM_DBG(p_dm, DBG_ADPTV_SOML, ("soml_state_cnt =((%d))\n", p_dm_soml_table->soml_state_cnt));
 	/*Traning state: 0(alt) 1(ori) 2(alt) 3(ori)============================================================*/
@@ -339,7 +339,7 @@ phydm_adsl(
 			for (i = 0; i < rate_num; i++) {
 				rate_ss_shift = (i << 3);
 				PHYDM_DBG(p_dm, DBG_ADPTV_SOML, ("*num_ht_bytes_on  HT MCS[%d :%d ] = {%d, %d, %d, %d, %d, %d, %d, %d}\n",
-					  (rate_ss_shift),
+					  (rate_ss_shift), 
 					  (rate_ss_shift + 7),
 					  p_dm_soml_table->num_ht_bytes_on[rate_ss_shift + 0], p_dm_soml_table->num_ht_bytes_on[rate_ss_shift + 1],
 					  p_dm_soml_table->num_ht_bytes_on[rate_ss_shift + 2], p_dm_soml_table->num_ht_bytes_on[rate_ss_shift + 3],
@@ -585,7 +585,7 @@ phydm_init_soft_ml_setting(
 )
 {
 	struct PHY_DM_STRUCT		*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
-
+	
 #if (RTL8822B_SUPPORT == 1)
 	if (*(p_dm->p_mp_mode) == false) {
 		if (p_dm->support_ic_type & ODM_RTL8822B) {

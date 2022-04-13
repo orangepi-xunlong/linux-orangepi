@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/linkage.h>
 
 #define R0 0x00
@@ -36,7 +37,7 @@
 
 .text
 .type perf_regs_load,%function
-ENTRY(perf_regs_load)
+SYM_FUNC_START(perf_regs_load)
 	str r0, [r0, #R0]
 	str r1, [r0, #R1]
 	str r2, [r0, #R2]
@@ -55,4 +56,4 @@ ENTRY(perf_regs_load)
 	str lr, [r0, #PC]	// store pc as lr in order to skip the call
 	                        //  to this function
 	mov pc, lr
-ENDPROC(perf_regs_load)
+SYM_FUNC_END(perf_regs_load)

@@ -33,7 +33,9 @@ static struct genl_family sprdwl_nl_genl_family;
 static int sprdwl_get_flag(void)
 {
 	struct file *fp = NULL;
+#ifdef setfs
 	mm_segment_t fs;
+#endif
 	loff_t *pos;
 	int flag = 0;
 	char file_data[2];
@@ -44,14 +46,18 @@ static int sprdwl_get_flag(void)
 		wl_err("open file:%s failed\n", SPRDWL_PSM_PATH);
 		return PTR_ERR(fp);
 	}
+#ifdef setfs
 	fs = get_fs();
 	set_fs(KERNEL_DS);
+#endif
 
 	pos = &fp->f_pos;
-	vfs_read(fp, file_data, 1, pos);
+	kernel_read(fp, file_data, 1, pos);
 
 	filp_close(fp, NULL);
+#ifdef setfs
 	set_fs(fs);
+#endif
 
 	file_data[1] = 0;
 	if (kstrtoull(file_data, 10, &tmp)) {
@@ -269,12 +275,20 @@ static struct nla_policy sprdwl_genl_policy[SPRDWL_NL_ATTR_MAX + 1] = {
 static struct genl_ops sprdwl_nl_ops[] = {
 	{
 		.cmd = SPRDWL_NL_CMD_NPI,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+//		.policy = sprdwl_genl_policy,
+#else
 		.policy = sprdwl_genl_policy,
+#endif
 		.doit = sprdwl_nl_npi_handler,
 	},
 	{
 		.cmd = SPRDWL_NL_CMD_GET_INFO,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+//		.policy = sprdwl_genl_policy,
+#else
 		.policy = sprdwl_genl_policy,
+#endif
 		.doit = sprdwl_nl_get_info_handler,
 	}
 };
@@ -327,6 +341,7 @@ void sprdwl_init_npi(void)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
 	int ret = genl_register_family(&sprdwl_nl_genl_family);
+
 	if (ret)
 		wl_err("genl_register_family error: %d\n", ret);
 #else

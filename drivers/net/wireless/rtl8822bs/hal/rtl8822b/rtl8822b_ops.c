@@ -545,7 +545,7 @@ static void Hal_EfuseParsePABias(PADAPTER adapter)
 
 	ret = rtw_efuse_access(adapter, 0, 0x3D7, 2, data);
 	if (_FAIL == ret) {
-		RTW_ERR("%s: Fail to read PA Bias from eFuse!\n", __func__);
+		RTW_ERR("%s: Fail to read PA Bias from eFuse!\n", __FUNCTION__);
 		return;
 	}
 
@@ -609,7 +609,7 @@ u8 rtl8822b_read_efuse(PADAPTER adapter)
 #ifdef CONFIG_EFUSE_CONFIG_FILE
 	if (check_phy_efuse_tx_power_info_valid(adapter) == _FALSE) {
 		if (Hal_readPGDataFromConfigFile(adapter) != _SUCCESS)
-			RTW_WARN("%s: invalid phy efuse and read from file fail, will use driver default!!\n", __func__);
+			RTW_WARN("%s: invalid phy efuse and read from file fail, will use driver default!!\n", __FUNCTION__);
 	}
 #endif /* CONFIG_EFUSE_CONFIG_FILE */
 
@@ -831,7 +831,7 @@ static void xmit_status_check(PADAPTER p)
 
 	txdma_status = rtw_read32(p, REG_TXDMA_STATUS_8822B);
 	if (txdma_status != 0x00) {
-		RTW_INFO("%s REG_TXDMA_STATUS:0x%08x\n", __func__, txdma_status);
+		RTW_INFO("%s REG_TXDMA_STATUS:0x%08x\n", __FUNCTION__, txdma_status);
 		psrtpriv->tx_dma_status_cnt++;
 		psrtpriv->self_dect_case = 4;
 		rtw_hal_sreset_reset(p);
@@ -852,7 +852,7 @@ static void xmit_status_check(PADAPTER p)
 
 					ability = rtw_phydm_ability_get(p);
 
-					RTW_INFO("%s tx hang %s\n", __func__,
+					RTW_INFO("%s tx hang %s\n", __FUNCTION__,
 						(ability & ODM_BB_ADAPTIVITY) ? "ODM_BB_ADAPTIVITY" : "");
 
 					if (!(ability & ODM_BB_ADAPTIVITY)) {
@@ -915,7 +915,7 @@ static void linked_status_check(PADAPTER p)
 
 	rx_dma_status = rtw_read32(p, REG_RXDMA_STATUS_8822B);
 	if (rx_dma_status != 0x00) {
-		RTW_INFO("%s REG_RXDMA_STATUS:0x%08x\n", __func__, rx_dma_status);
+		RTW_INFO("%s REG_RXDMA_STATUS:0x%08x\n", __FUNCTION__, rx_dma_status);
 		psrtpriv->rx_dma_status_cnt++;
 		psrtpriv->self_dect_case = 5;
 #ifdef CONFIG_USB_HCI
@@ -925,9 +925,9 @@ static void linked_status_check(PADAPTER p)
 
 	if (psrtpriv->self_dect_fw) {
 		psrtpriv->self_dect_case = 3;
-#if defined(CONFIG_USB_HCI) || defined(CONFIG_PCI_HCI)
+#ifdef CONFIG_USB_HCI
 		rtw_hal_sreset_reset(p);
-#endif /* CONFIG_USB_HCI || CONFIG_PCI_HCI */
+#endif /* CONFIG_USB_HCI */
 	}
 
 #ifdef CONFIG_USB_HCI
@@ -1146,13 +1146,13 @@ static void set_opmode_port0(PADAPTER adapter, u8 mode)
 		rtw_write8(adapter, REG_CCK_CHECK_8822B, val8);
 
 #ifdef CONFIG_CONCURRENT_MODE
-		{
+		{	
 			/* Sync TSF from AP of STA interface to avoid tx bcn fail */
 			_adapter *iface;
 			struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
 			u8 i = 0;
 			u8 connect = _FALSE;
-
+			
 			for (i = 0; i < dvobj->iface_nums; i++) {
 				iface = dvobj->padapters[i];
 				if (!iface)
@@ -1356,7 +1356,7 @@ static void hw_var_set_bcn_func(PADAPTER adapter, u8 enable)
 		val8 |= BIT_EN_BCN_TRXRPT_V1_8822B;
 		rtw_write8(adapter, REG_FWHW_TXQ_CTRL_8822B, val8);
 
-
+		
 		switch (adapter->hw_port) {
 		case HW_PORT0:
 			val8 =  BIT_EN_BCN_FUNCTION_8822B | BIT_P0_EN_TXBCN_RPT_8822B;
@@ -1741,7 +1741,7 @@ static void hw_var_set_sec_dk_cfg(PADAPTER adapter, u8 enable)
 
 	rtw_write8(adapter, REG_SECCFG_8822B, reg_scr);
 
-	RTW_INFO("%s: [HW_VAR_SEC_DK_CFG] 0x%x=0x%08x\n", __func__,
+	RTW_INFO("%s: [HW_VAR_SEC_DK_CFG] 0x%x=0x%08x\n", __FUNCTION__,
 		 REG_SECCFG_8822B, rtw_read32(adapter, REG_SECCFG_8822B));
 }
 
@@ -2489,6 +2489,76 @@ u8 rtl8822b_sethwreg(PADAPTER adapter, u8 variable, u8 *val)
 /*
 	case HW_VAR_MACID_LINK:
 	case HW_VAR_MACID_NOLINK:
+		break;
+*/
+	case HW_VAR_MACID_SLEEP: {
+		u32 reg_macid_sleep;
+		u8 bit_shift;
+		u8 id = *(u8 *)val;
+
+		if (id < 32) {
+			reg_macid_sleep = REG_MACID_SLEEP_8822B;
+			bit_shift = id;
+		} else if (id < 64) {
+			reg_macid_sleep = REG_MACID_SLEEP1_8822B;
+			bit_shift = id - 32;
+		} else if (id < 96) {
+			reg_macid_sleep = REG_MACID_SLEEP2_8822B;
+			bit_shift = id - 64;
+		} else if (id < 128) {
+			reg_macid_sleep = REG_MACID_SLEEP3_8822B;
+			bit_shift = id - 96;
+		} else {
+			rtw_warn_on(1);
+			break;
+		}
+
+		val32 = rtw_read32(adapter, reg_macid_sleep);
+		RTW_INFO(FUNC_ADPT_FMT ": [HW_VAR_MACID_SLEEP] macid=%d, org reg_0x%03x=0x%08X\n",
+			FUNC_ADPT_ARG(adapter), id, reg_macid_sleep, val32);
+
+		if (val32 & BIT(bit_shift))
+			break;
+
+		val32 |= BIT(bit_shift);
+		rtw_write32(adapter, reg_macid_sleep, val32);
+	}
+	break;
+
+	case HW_VAR_MACID_WAKEUP: {
+		u32 reg_macid_sleep;
+		u8 bit_shift;
+		u8 id = *(u8 *)val;
+
+		if (id < 32) {
+			reg_macid_sleep = REG_MACID_SLEEP_8822B;
+			bit_shift = id;
+		} else if (id < 64) {
+			reg_macid_sleep = REG_MACID_SLEEP1_8822B;
+			bit_shift = id - 32;
+		} else if (id < 96) {
+			reg_macid_sleep = REG_MACID_SLEEP2_8822B;
+			bit_shift = id - 64;
+		} else if (id < 128) {
+			reg_macid_sleep = REG_MACID_SLEEP3_8822B;
+			bit_shift = id - 96;
+		} else {
+			rtw_warn_on(1);
+			break;
+		}
+
+		val32 = rtw_read32(adapter, reg_macid_sleep);
+		RTW_INFO(FUNC_ADPT_FMT ": [HW_VAR_MACID_WAKEUP] macid=%d, org reg_0x%03x=0x%08X\n",
+			FUNC_ADPT_ARG(adapter), id, reg_macid_sleep, val32);
+
+		if (!(val32 & BIT(bit_shift)))
+			break;
+
+		val32 &= ~BIT(bit_shift);
+		rtw_write32(adapter, reg_macid_sleep, val32);
+	}
+	break;
+/*
 	case HW_VAR_DUMP_MAC_QUEUE_INFO:
 	case HW_VAR_ASIX_IOT:
 #ifdef CONFIG_MBSSID_CAM
@@ -2787,13 +2857,7 @@ void rtl8822b_gethwreg(PADAPTER adapter, u8 variable, u8 *val)
 	case HW_VAR_PORT_SWITCH:
 	case HW_VAR_DO_IQK:
 	case HW_VAR_SET_REQ_FW_PS:
-		break;
-*/
 	case HW_VAR_FW_PS_STATE:
-		/* driver read REG_SYS_CFG5 - BIT_LPS_STATUS REG_1070[3] to get hw ps state */
-		*((u16 *)val) = rtw_read8(adapter, REG_SYS_CFG5_8822B);
-		break;
-/*
 	case HW_VAR_SOUNDING_ENTER:
 	case HW_VAR_SOUNDING_LEAVE:
 	case HW_VAR_SOUNDING_RATE:
@@ -2807,6 +2871,8 @@ void rtl8822b_gethwreg(PADAPTER adapter, u8 variable, u8 *val)
 	case HW_VAR_DL_RSVD_PAGE:
 	case HW_VAR_MACID_LINK:
 	case HW_VAR_MACID_NOLINK:
+	case HW_VAR_MACID_SLEEP:
+	case HW_VAR_MACID_WAKEUP:
 		break;
 */
 	case HW_VAR_DUMP_MAC_QUEUE_INFO:
@@ -2886,6 +2952,7 @@ u8 rtl8822b_sethaldefvar(PADAPTER adapter, HAL_DEF_VARIABLE variable, void *pval
 	case HAL_DEF_PCI_SUUPORT_L1_BACKDOOR:
 	case HAL_DEF_PCI_AMD_L1_SUPPORT:
 	case HAL_DEF_PCI_ASPM_OSC:
+	case HAL_DEF_MACID_SLEEP:
 	case HAL_DEF_DBG_DIS_PWT:
 	case HAL_DEF_EFUSE_USAGE:
 	case HAL_DEF_EFUSE_BYTES:
@@ -3041,6 +3108,12 @@ u8 rtl8822b_gethaldefvar(PADAPTER adapter, HAL_DEF_VARIABLE variable, void *pval
 	case HAL_DEF_PCI_SUUPORT_L1_BACKDOOR:
 	case HAL_DEF_PCI_AMD_L1_SUPPORT:
 	case HAL_DEF_PCI_ASPM_OSC:
+		break;
+*/
+	case HAL_DEF_MACID_SLEEP:
+		*(u8 *)pval = _TRUE; /* support macid sleep */
+		break;
+/*
 	case HAL_DEF_DBG_DIS_PWT:
 	case HAL_DEF_EFUSE_USAGE:
 	case HAL_DEF_EFUSE_BYTES:
@@ -3341,7 +3414,7 @@ void rtl8822b_fill_txdesc_mgnt_bf(struct xmit_frame *frame, u8 *desc)
 	/*SET_TX_DESC_MACID_8822B(desc, pattrib->mac_id);*/ /* ad-hoc mode */
 	/*SET_TX_DESC_G_ID_8822B(desc, 63);*/
 	/*
-	 * partial AID of 1st STA, at infrastructure mode, either SU or MU;
+	 * partial AID of 1st STA, at infrastructure mode, either SU or MU; 
 	 * MACID, at ad-hoc mode
 	 *
 	 * For WMAC to restore the received CSI report of STA1.
@@ -3412,7 +3485,7 @@ void rtl8822b_prepare_mp_txdesc(PADAPTER adapter, struct mp_priv *pmp_priv)
 		SET_TX_DESC_DATA_BW_8822B(desc, pmp_priv->bandwidth);
 	else {
 		RTW_ERR("%s: unknown bandwidth %d, use 20M\n",
-			 __func__, pmp_priv->bandwidth);
+			 __FUNCTION__, pmp_priv->bandwidth);
 		SET_TX_DESC_DATA_BW_8822B(desc, CHANNEL_WIDTH_20);
 	}
 
@@ -3573,34 +3646,28 @@ static void fill_default_txdesc(struct xmit_frame *pxmitframe, u8 *pbuf)
 
 		SET_TX_DESC_DATARATE_8822B(pbuf, MRateToHwRate(pattrib->rate));
 
-		SET_TX_DESC_RTY_LMT_EN_8822B(pbuf, 1);
-		if (pattrib->retry_ctrl == _TRUE)
-			SET_TX_DESC_RTS_DATA_RTY_LMT_8822B(pbuf, 6);
-		else
-			SET_TX_DESC_RTS_DATA_RTY_LMT_8822B(pbuf, 12);
-
 		rtl8822b_fill_txdesc_mgnt_bf(pxmitframe, pbuf);
 
 #ifdef CONFIG_XMIT_ACK
 		/* CCX-TXRPT ack for xmit mgmt frames. */
 		if (pxmitframe->ack_report) {
 #ifdef DBG_CCX
-			RTW_INFO("%s set spe_rpt\n", __func__);
+			RTW_INFO("%s set spe_rpt\n", __FUNCTION__);
 #endif
 			SET_TX_DESC_SPE_RPT_8822B(pbuf, 1);
 			SET_TX_DESC_SW_DEFINE_8822B(pbuf, (u8)(GET_PRIMARY_ADAPTER(adapter)->xmitpriv.seq_no));
 		}
 #endif /* CONFIG_XMIT_ACK */
 	} else if (pxmitframe->frame_tag == TXAGG_FRAMETAG)
-		RTW_INFO("%s: TXAGG_FRAMETAG\n", __func__);
+		RTW_INFO("%s: TXAGG_FRAMETAG\n", __FUNCTION__);
 #ifdef CONFIG_MP_INCLUDED
 	else if (pxmitframe->frame_tag == MP_FRAMETAG) {
-		RTW_DBG("%s: MP_FRAMETAG\n", __func__);
+		RTW_DBG("%s: MP_FRAMETAG\n", __FUNCTION__);
 		fill_txdesc_for_mp(adapter, pbuf);
 	}
 #endif
 	else {
-		RTW_INFO("%s: frame_tag=0x%x\n", __func__, pxmitframe->frame_tag);
+		RTW_INFO("%s: frame_tag=0x%x\n", __FUNCTION__, pxmitframe->frame_tag);
 
 		SET_TX_DESC_MACID_8822B(pbuf, pattrib->mac_id);
 		SET_TX_DESC_RATE_ID_8822B(pbuf, pattrib->raid);

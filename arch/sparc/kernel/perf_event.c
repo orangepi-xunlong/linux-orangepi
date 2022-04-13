@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* Performance event support for sparc64.
  *
  * Copyright (C) 2009, 2010 David S. Miller <davem@davemloft.net>
@@ -23,6 +24,7 @@
 #include <asm/cpudata.h>
 #include <linux/uaccess.h>
 #include <linux/atomic.h>
+#include <linux/sched/clock.h>
 #include <asm/nmi.h>
 #include <asm/pcr.h>
 #include <asm/cacheflush.h>
@@ -889,6 +891,10 @@ static int sparc_perf_event_set_period(struct perf_event *event,
 	s64 period = hwc->sample_period;
 	int ret = 0;
 
+	/* The period may have been changed by PERF_EVENT_IOC_PERIOD */
+	if (unlikely(period != hwc->last_period))
+		left = period - (hwc->last_period - left);
+
 	if (unlikely(left <= -period)) {
 		left = period;
 		local64_set(&hwc->period_left, left);
@@ -1350,7 +1356,7 @@ static int collect_events(struct perf_event *group, int max_count,
 		events[n] = group->hw.event_base;
 		current_idx[n++] = PIC_NO_INDEX;
 	}
-	list_for_each_entry(event, &group->sibling_list, group_entry) {
+	for_each_sibling_event(event, group) {
 		if (!is_software_event(event) &&
 		    event->state != PERF_EVENT_STATE_OFF) {
 			if (n >= max_count)
@@ -1611,6 +1617,8 @@ static int __kprobes perf_event_nmi_handler(struct notifier_block *self,
 	struct perf_sample_data data;
 	struct cpu_hw_events *cpuc;
 	struct pt_regs *regs;
+	u64 finish_clock;
+	u64 start_clock;
 	int i;
 
 	if (!atomic_read(&active_events))
@@ -1623,6 +1631,8 @@ static int __kprobes perf_event_nmi_handler(struct notifier_block *self,
 	default:
 		return NOTIFY_DONE;
 	}
+
+	start_clock = sched_clock();
 
 	regs = args->regs;
 
@@ -1661,6 +1671,10 @@ static int __kprobes perf_event_nmi_handler(struct notifier_block *self,
 		if (perf_event_overflow(event, &data, regs))
 			sparc_pmu_stop(event, 0);
 	}
+
+	finish_clock = sched_clock();
+
+	perf_sample_event_took(finish_clock - start_clock);
 
 	return NOTIFY_STOP;
 }
@@ -1757,9 +1771,11 @@ void perf_callchain_kernel(struct perf_callchain_entry_ctx *entry,
 		perf_callchain_store(entry, pc);
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 		if ((pc + 8UL) == (unsigned long) &return_to_handler) {
-			int index = current->curr_ret_stack;
-			if (current->ret_stack && index >= graph) {
-				pc = current->ret_stack[index - graph].ret;
+			struct ftrace_ret_stack *ret_stack;
+			ret_stack = ftrace_graph_get_ret_stack(current,
+							       graph);
+			if (ret_stack) {
+				pc = ret_stack->ret;
 				perf_callchain_store(entry, pc);
 				graph++;
 			}
@@ -1839,15 +1855,11 @@ perf_callchain_user(struct perf_callchain_entry_ctx *entry, struct pt_regs *regs
 {
 	u64 saved_fault_address = current_thread_info()->fault_address;
 	u8 saved_fault_code = get_thread_fault_code();
-	mm_segment_t old_fs;
 
 	perf_callchain_store(entry, regs->tpc);
 
 	if (!current->mm)
 		return;
-
-	old_fs = get_fs();
-	set_fs(USER_DS);
 
 	flushw_user();
 
@@ -1860,7 +1872,6 @@ perf_callchain_user(struct perf_callchain_entry_ctx *entry, struct pt_regs *regs
 
 	pagefault_enable();
 
-	set_fs(old_fs);
 	set_thread_fault_code(saved_fault_code);
 	current_thread_info()->fault_address = saved_fault_address;
 }

@@ -57,7 +57,7 @@ void do_iqk_8822b(
 {
 	struct PHY_DM_STRUCT	*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
 	struct _IQK_INFORMATION	*p_iqk_info = &p_dm->IQK_info;
-
+	
 	p_dm->rf_calibrate_info.thermal_value_iqk = thermal_value;
 	halrf_segment_iqk_trigger(p_dm, true, p_iqk_info->segment_iqk);
 }
@@ -346,7 +346,7 @@ _iqk_restore_rf_8822b(
 	/*0xdf[4]=0*/
 	_iqk_rf_set_check(p_dm, RF_PATH_A, 0xdf, RF_backup[0][RF_PATH_A] & (~BIT(4)));
 	_iqk_rf_set_check(p_dm, RF_PATH_B, 0xdf, RF_backup[0][RF_PATH_B] & (~BIT(4)));
-
+	
 	/*odm_set_rf_reg(p_dm, RF_PATH_A, 0xdf, RFREGOFFSETMASK, RF_backup[0][RF_PATH_A] & (~BIT(4)));*/
 	/*odm_set_rf_reg(p_dm, RF_PATH_B, 0xdf, RFREGOFFSETMASK, RF_backup[0][RF_PATH_B] & (~BIT(4)));*/
 
@@ -403,7 +403,7 @@ _iqk_backup_iqk_8822b(
 			p_iqk_info->LOK_IDAC[0][path] = odm_get_rf_reg(p_dm, (enum rf_path)path, 0x58, RFREGOFFSETMASK);
 		break;
 	case 2:	/*TXIQK backup*/
-	case 3: /*RXIQK backup*/
+	case 3: /*RXIQK backup*/	
 		phydm_get_iqk_cfir(p_dm, (step-2), path, false);
 		break;
 	}
@@ -420,7 +420,6 @@ _iqk_reload_iqk_setting_8822b(
 	u8 i, path, idx;
 	u16 iqk_apply[2] = {0xc94, 0xe94};
 	u32 tmp;
-	boolean report;
 
 	for (path = 0; path < 2; path++) {
 		if (reload_idx == 2) {
@@ -445,14 +444,10 @@ _iqk_reload_iqk_setting_8822b(
 				odm_write_4byte(p_dm, 0x1bd8,	((0xc0000000 >> idx) + 0x3) + (i * 4) + (p_iqk_info->IQK_CFIR_real[channel][path][idx][i] << 9));
 				odm_write_4byte(p_dm, 0x1bd8, ((0xc0000000 >> idx) + 0x1) + (i * 4) + (p_iqk_info->IQK_CFIR_imag[channel][path][idx][i] << 9));
 			}
-			if (idx == 0) {
-				report = ~(p_iqk_info->IQK_fail_report[channel][path][idx]);
-				odm_set_bb_reg(p_dm, iqk_apply[path], BIT(0), report);
-
-			} else {
-				report = ~(p_iqk_info->IQK_fail_report[channel][path][idx]);
-				odm_set_bb_reg(p_dm, iqk_apply[path], BIT(10), report);
-			}
+			if (idx == 0)
+				odm_set_bb_reg(p_dm, iqk_apply[path], BIT(0), !(p_iqk_info->IQK_fail_report[channel][path][idx]));
+			else
+				odm_set_bb_reg(p_dm, iqk_apply[path], BIT(10), !(p_iqk_info->IQK_fail_report[channel][path][idx]));
 		}
 		odm_set_bb_reg(p_dm, 0x1bd8, MASKDWORD, 0x0);
 		odm_set_bb_reg(p_dm, 0x1b0c, BIT(13) | BIT(12), 0x0);
@@ -984,7 +979,7 @@ _iqk_one_shot_8822b(
 	if (idx == TXIQK) {
 		if (fail)
 			odm_set_bb_reg(p_dm, iqk_apply[path], BIT(0), 0x0);
-		else
+		else	
 			_iqk_backup_iqk_8822b(p_dm, 0x2, path);
 	}
 
@@ -1391,9 +1386,9 @@ _phy_iq_calibrate_by_fw_8822b(
 )
 {
 	struct PHY_DM_STRUCT	*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
-	struct _IQK_INFORMATION	*p_iqk_info = &p_dm->IQK_info;
+	struct _IQK_INFORMATION	*p_iqk_info = &p_dm->IQK_info;	
 	enum hal_status		status = HAL_STATUS_FAILURE;
-
+	
 	if (*(p_dm->p_mp_mode))
 		clear = 0x1;
 //	else if (p_dm->is_linked)

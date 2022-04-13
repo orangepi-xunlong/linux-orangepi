@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Handle extern requests for shutdown, reboot and sysrq
  */
@@ -72,18 +73,15 @@ static int xen_suspend(void *data)
 	}
 
 	gnttab_suspend();
+	xen_manage_runstate_time(-1);
 	xen_arch_pre_suspend();
 
-	/*
-	 * This hypercall returns 1 if suspend was cancelled
-	 * or the domain was merely checkpointed, and 0 if it
-	 * is resuming in a new domain.
-	 */
 	si->cancelled = HYPERVISOR_suspend(xen_pv_domain()
                                            ? virt_to_gfn(xen_start_info)
                                            : 0);
 
 	xen_arch_post_suspend(si->cancelled);
+	xen_manage_runstate_time(si->cancelled ? 1 : 0);
 	gnttab_resume();
 
 	if (!si->cancelled) {
@@ -190,6 +188,7 @@ static void do_poweroff(void)
 {
 	switch (system_state) {
 	case SYSTEM_BOOTING:
+	case SYSTEM_SCHEDULING:
 		orderly_poweroff(true);
 		break;
 	case SYSTEM_RUNNING:
@@ -218,7 +217,7 @@ static struct shutdown_handler shutdown_handlers[] = {
 };
 
 static void shutdown_handler(struct xenbus_watch *watch,
-			     const char **vec, unsigned int len)
+			     const char *path, const char *token)
 {
 	char *str;
 	struct xenbus_transaction xbt;
@@ -266,8 +265,8 @@ static void shutdown_handler(struct xenbus_watch *watch,
 }
 
 #ifdef CONFIG_MAGIC_SYSRQ
-static void sysrq_handler(struct xenbus_watch *watch, const char **vec,
-			  unsigned int len)
+static void sysrq_handler(struct xenbus_watch *watch, const char *path,
+			  const char *token)
 {
 	char sysrq_key = '\0';
 	struct xenbus_transaction xbt;

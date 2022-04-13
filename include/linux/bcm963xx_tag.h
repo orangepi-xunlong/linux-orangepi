@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __LINUX_BCM963XX_TAG_H__
 #define __LINUX_BCM963XX_TAG_H__
 
@@ -83,7 +84,7 @@ struct bcm_tag {
 	char flash_layout_ver[FLASHLAYOUTVER_LEN];
 	/* 196-199: kernel+rootfs CRC32 */
 	__u32 fskernel_crc;
-	/* 200-215: Unused except on Alice Gate where is is information */
+	/* 200-215: Unused except on Alice Gate where it is information */
 	char information2[TAGINFO2_LEN];
 	/* 216-219: CRC32 of image less imagetag (kernel for Alice Gate) */
 	__u32 image_crc;

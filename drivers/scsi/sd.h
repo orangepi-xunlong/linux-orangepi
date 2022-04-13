@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _SCSI_DISK_H
 #define _SCSI_DISK_H
 
@@ -59,13 +60,37 @@ enum {
 	SD_LBP_DISABLE,		/* Discard disabled due to failed cmd */
 };
 
+enum {
+	SD_ZERO_WRITE = 0,	/* Use WRITE(10/16) command */
+	SD_ZERO_WS,		/* Use WRITE SAME(10/16) command */
+	SD_ZERO_WS16_UNMAP,	/* Use WRITE SAME(16) with UNMAP */
+	SD_ZERO_WS10_UNMAP,	/* Use WRITE SAME(10) with UNMAP */
+};
+
 struct scsi_disk {
 	struct scsi_driver *driver;	/* always &sd_template */
 	struct scsi_device *device;
 	struct device	dev;
 	struct gendisk	*disk;
+	struct opal_dev *opal_dev;
+#ifdef CONFIG_BLK_DEV_ZONED
+	u32		nr_zones;
+	u32		rev_nr_zones;
+	u32		zone_blocks;
+	u32		rev_zone_blocks;
+	u32		zones_optimal_open;
+	u32		zones_optimal_nonseq;
+	u32		zones_max_open;
+	u32		*zones_wp_offset;
+	spinlock_t	zones_wp_offset_lock;
+	u32		*rev_wp_offset;
+	struct mutex	rev_mutex;
+	struct work_struct zone_wp_offset_work;
+	char		*zone_wp_update_buf;
+#endif
 	atomic_t	openers;
 	sector_t	capacity;	/* size in logical blocks */
+	int		max_retries;
 	u32		max_xfer_blocks;
 	u32		opt_xfer_blocks;
 	u32		max_ws_blocks;
@@ -80,6 +105,7 @@ struct scsi_disk {
 	u8		write_prot;
 	u8		protection_type;/* Data Integrity Field */
 	u8		provisioning_mode;
+	u8		zeroing_mode;
 	unsigned	ATO : 1;	/* state of disk ATO bit */
 	unsigned	cache_override : 1; /* temp override of WCE,RCD */
 	unsigned	WCE : 1;	/* state of disk WCE bit */
@@ -94,6 +120,11 @@ struct scsi_disk {
 	unsigned	lbpvpd : 1;
 	unsigned	ws10 : 1;
 	unsigned	ws16 : 1;
+	unsigned	rc_basis: 2;
+	unsigned	zoned: 2;
+	unsigned	urswrz : 1;
+	unsigned	security : 1;
+	unsigned	ignore_medium_access_errors : 1;
 };
 #define to_scsi_disk(obj) container_of(obj,struct scsi_disk,dev)
 
@@ -110,7 +141,7 @@ static inline struct scsi_disk *scsi_disk(struct gendisk *disk)
 
 #define sd_first_printk(prefix, sdsk, fmt, a...)			\
 	do {								\
-		if ((sdkp)->first_scan)					\
+		if ((sdsk)->first_scan)					\
 			sd_printk(prefix, sdsk, fmt, ##a);		\
 	} while (0)
 
@@ -156,87 +187,88 @@ static inline unsigned int logical_to_bytes(struct scsi_device *sdev, sector_t b
 	return blocks * sdev->sector_size;
 }
 
-/*
- * Look up the DIX operation based on whether the command is read or
- * write and whether dix and dif are enabled.
- */
-static inline unsigned int sd_prot_op(bool write, bool dix, bool dif)
+static inline sector_t bytes_to_logical(struct scsi_device *sdev, unsigned int bytes)
 {
-	/* Lookup table: bit 2 (write), bit 1 (dix), bit 0 (dif) */
-	const unsigned int ops[] = {	/* wrt dix dif */
-		SCSI_PROT_NORMAL,	/*  0	0   0  */
-		SCSI_PROT_READ_STRIP,	/*  0	0   1  */
-		SCSI_PROT_READ_INSERT,	/*  0	1   0  */
-		SCSI_PROT_READ_PASS,	/*  0	1   1  */
-		SCSI_PROT_NORMAL,	/*  1	0   0  */
-		SCSI_PROT_WRITE_INSERT, /*  1	0   1  */
-		SCSI_PROT_WRITE_STRIP,	/*  1	1   0  */
-		SCSI_PROT_WRITE_PASS,	/*  1	1   1  */
-	};
-
-	return ops[write << 2 | dix << 1 | dif];
+	return bytes >> ilog2(sdev->sector_size);
 }
 
-/*
- * Returns a mask of the protection flags that are valid for a given DIX
- * operation.
- */
-static inline unsigned int sd_prot_flag_mask(unsigned int prot_op)
+static inline sector_t sectors_to_logical(struct scsi_device *sdev, sector_t sector)
 {
-	const unsigned int flag_mask[] = {
-		[SCSI_PROT_NORMAL]		= 0,
-
-		[SCSI_PROT_READ_STRIP]		= SCSI_PROT_TRANSFER_PI |
-						  SCSI_PROT_GUARD_CHECK |
-						  SCSI_PROT_REF_CHECK |
-						  SCSI_PROT_REF_INCREMENT,
-
-		[SCSI_PROT_READ_INSERT]		= SCSI_PROT_REF_INCREMENT |
-						  SCSI_PROT_IP_CHECKSUM,
-
-		[SCSI_PROT_READ_PASS]		= SCSI_PROT_TRANSFER_PI |
-						  SCSI_PROT_GUARD_CHECK |
-						  SCSI_PROT_REF_CHECK |
-						  SCSI_PROT_REF_INCREMENT |
-						  SCSI_PROT_IP_CHECKSUM,
-
-		[SCSI_PROT_WRITE_INSERT]	= SCSI_PROT_TRANSFER_PI |
-						  SCSI_PROT_REF_INCREMENT,
-
-		[SCSI_PROT_WRITE_STRIP]		= SCSI_PROT_GUARD_CHECK |
-						  SCSI_PROT_REF_CHECK |
-						  SCSI_PROT_REF_INCREMENT |
-						  SCSI_PROT_IP_CHECKSUM,
-
-		[SCSI_PROT_WRITE_PASS]		= SCSI_PROT_TRANSFER_PI |
-						  SCSI_PROT_GUARD_CHECK |
-						  SCSI_PROT_REF_CHECK |
-						  SCSI_PROT_REF_INCREMENT |
-						  SCSI_PROT_IP_CHECKSUM,
-	};
-
-	return flag_mask[prot_op];
+	return sector >> (ilog2(sdev->sector_size) - 9);
 }
 
 #ifdef CONFIG_BLK_DEV_INTEGRITY
 
 extern void sd_dif_config_host(struct scsi_disk *);
-extern void sd_dif_prepare(struct scsi_cmnd *scmd);
-extern void sd_dif_complete(struct scsi_cmnd *, unsigned int);
 
 #else /* CONFIG_BLK_DEV_INTEGRITY */
 
 static inline void sd_dif_config_host(struct scsi_disk *disk)
 {
 }
-static inline int sd_dif_prepare(struct scsi_cmnd *scmd)
+
+#endif /* CONFIG_BLK_DEV_INTEGRITY */
+
+static inline int sd_is_zoned(struct scsi_disk *sdkp)
+{
+	return sdkp->zoned == 1 || sdkp->device->type == TYPE_ZBC;
+}
+
+#ifdef CONFIG_BLK_DEV_ZONED
+
+void sd_zbc_release_disk(struct scsi_disk *sdkp);
+int sd_zbc_read_zones(struct scsi_disk *sdkp, unsigned char *buffer);
+int sd_zbc_revalidate_zones(struct scsi_disk *sdkp);
+blk_status_t sd_zbc_setup_zone_mgmt_cmnd(struct scsi_cmnd *cmd,
+					 unsigned char op, bool all);
+unsigned int sd_zbc_complete(struct scsi_cmnd *cmd, unsigned int good_bytes,
+			     struct scsi_sense_hdr *sshdr);
+int sd_zbc_report_zones(struct gendisk *disk, sector_t sector,
+		unsigned int nr_zones, report_zones_cb cb, void *data);
+
+blk_status_t sd_zbc_prepare_zone_append(struct scsi_cmnd *cmd, sector_t *lba,
+				        unsigned int nr_blocks);
+
+#else /* CONFIG_BLK_DEV_ZONED */
+
+static inline void sd_zbc_release_disk(struct scsi_disk *sdkp) {}
+
+static inline int sd_zbc_read_zones(struct scsi_disk *sdkp,
+				    unsigned char *buf)
 {
 	return 0;
 }
-static inline void sd_dif_complete(struct scsi_cmnd *cmd, unsigned int a)
+
+static inline int sd_zbc_revalidate_zones(struct scsi_disk *sdkp)
 {
+	return 0;
 }
 
-#endif /* CONFIG_BLK_DEV_INTEGRITY */
+static inline blk_status_t sd_zbc_setup_zone_mgmt_cmnd(struct scsi_cmnd *cmd,
+						       unsigned char op,
+						       bool all)
+{
+	return BLK_STS_TARGET;
+}
+
+static inline unsigned int sd_zbc_complete(struct scsi_cmnd *cmd,
+			unsigned int good_bytes, struct scsi_sense_hdr *sshdr)
+{
+	return good_bytes;
+}
+
+static inline blk_status_t sd_zbc_prepare_zone_append(struct scsi_cmnd *cmd,
+						      sector_t *lba,
+						      unsigned int nr_blocks)
+{
+	return BLK_STS_TARGET;
+}
+
+#define sd_zbc_report_zones NULL
+
+#endif /* CONFIG_BLK_DEV_ZONED */
+
+void sd_print_sense_hdr(struct scsi_disk *sdkp, struct scsi_sense_hdr *sshdr);
+void sd_print_result(const struct scsi_disk *sdkp, const char *msg, int result);
 
 #endif /* _SCSI_DISK_H */

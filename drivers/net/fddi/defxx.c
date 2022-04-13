@@ -228,7 +228,7 @@
 #define DRV_VERSION "v1.11"
 #define DRV_RELDATE "2014/07/01"
 
-static char version[] =
+static const char version[] =
 	DRV_NAME ": " DRV_VERSION " " DRV_RELDATE
 	"  Lawrence V. Stefani and others\n";
 
@@ -495,6 +495,25 @@ static const struct net_device_ops dfx_netdev_ops = {
 	.ndo_set_mac_address	= dfx_ctl_set_mac_address,
 };
 
+static void dfx_register_res_alloc_err(const char *print_name, bool mmio,
+				       bool eisa)
+{
+	pr_err("%s: Cannot use %s, no address set, aborting\n",
+	       print_name, mmio ? "MMIO" : "I/O");
+	pr_err("%s: Recompile driver with \"CONFIG_DEFXX_MMIO=%c\"\n",
+	       print_name, mmio ? 'n' : 'y');
+	if (eisa && mmio)
+		pr_err("%s: Or run ECU and set adapter's MMIO location\n",
+		       print_name);
+}
+
+static void dfx_register_res_err(const char *print_name, bool mmio,
+				 unsigned long start, unsigned long len)
+{
+	pr_err("%s: Cannot reserve %s resource 0x%lx @ 0x%lx, aborting\n",
+	       print_name, mmio ? "MMIO" : "I/O", len, start);
+}
+
 /*
  * ================
  * = dfx_register =
@@ -568,15 +587,12 @@ static int dfx_register(struct device *bdev)
 	dev_set_drvdata(bdev, dev);
 
 	dfx_get_bars(bdev, bar_start, bar_len);
-	if (dfx_bus_eisa && dfx_use_mmio && bar_start[0] == 0) {
-		pr_err("%s: Cannot use MMIO, no address set, aborting\n",
-		       print_name);
-		pr_err("%s: Run ECU and set adapter's MMIO location\n",
-		       print_name);
-		pr_err("%s: Or recompile driver with \"CONFIG_DEFXX_MMIO=n\""
-		       "\n", print_name);
+	if (bar_len[0] == 0 ||
+	    (dfx_bus_eisa && dfx_use_mmio && bar_start[0] == 0)) {
+		dfx_register_res_alloc_err(print_name, dfx_use_mmio,
+					   dfx_bus_eisa);
 		err = -ENXIO;
-		goto err_out;
+		goto err_out_disable;
 	}
 
 	if (dfx_use_mmio)
@@ -585,18 +601,16 @@ static int dfx_register(struct device *bdev)
 	else
 		region = request_region(bar_start[0], bar_len[0], print_name);
 	if (!region) {
-		pr_err("%s: Cannot reserve %s resource 0x%lx @ 0x%lx, "
-		       "aborting\n", dfx_use_mmio ? "MMIO" : "I/O", print_name,
-		       (long)bar_len[0], (long)bar_start[0]);
+		dfx_register_res_err(print_name, dfx_use_mmio,
+				     bar_start[0], bar_len[0]);
 		err = -EBUSY;
 		goto err_out_disable;
 	}
 	if (bar_start[1] != 0) {
 		region = request_region(bar_start[1], bar_len[1], print_name);
 		if (!region) {
-			pr_err("%s: Cannot reserve I/O resource "
-			       "0x%lx @ 0x%lx, aborting\n", print_name,
-			       (long)bar_len[1], (long)bar_start[1]);
+			dfx_register_res_err(print_name, 0,
+					     bar_start[1], bar_len[1]);
 			err = -EBUSY;
 			goto err_out_csr_region;
 		}
@@ -604,9 +618,8 @@ static int dfx_register(struct device *bdev)
 	if (bar_start[2] != 0) {
 		region = request_region(bar_start[2], bar_len[2], print_name);
 		if (!region) {
-			pr_err("%s: Cannot reserve I/O resource "
-			       "0x%lx @ 0x%lx, aborting\n", print_name,
-			       (long)bar_len[2], (long)bar_start[2]);
+			dfx_register_res_err(print_name, 0,
+					     bar_start[2], bar_len[2]);
 			err = -EBUSY;
 			goto err_out_bh_region;
 		}
@@ -614,7 +627,7 @@ static int dfx_register(struct device *bdev)
 
 	/* Set up I/O base address. */
 	if (dfx_use_mmio) {
-		bp->base.mem = ioremap_nocache(bar_start[0], bar_len[0]);
+		bp->base.mem = ioremap(bar_start[0], bar_len[0]);
 		if (!bp->base.mem) {
 			printk(KERN_ERR "%s: Cannot map MMIO\n", print_name);
 			err = -ENOMEM;
@@ -1139,9 +1152,9 @@ static int dfx_driver_init(struct net_device *dev, const char *print_name,
 #endif
 					sizeof(PI_CONSUMER_BLOCK) +
 					(PI_ALIGN_K_DESC_BLK - 1);
-	bp->kmalloced = top_v = dma_zalloc_coherent(bp->bus_dev, alloc_size,
-						    &bp->kmalloced_dma,
-						    GFP_ATOMIC);
+	bp->kmalloced = top_v = dma_alloc_coherent(bp->bus_dev, alloc_size,
+						   &bp->kmalloced_dma,
+						   GFP_ATOMIC);
 	if (top_v == NULL)
 		return DFX_K_FAILURE;
 
@@ -3512,7 +3525,7 @@ static int dfx_xmt_done(DFX_board_t *bp)
 				 bp->descr_block_virt->xmt_data[comp].long_1,
 				 p_xmt_drv_descr->p_skb->len,
 				 DMA_TO_DEVICE);
-		dev_kfree_skb_irq(p_xmt_drv_descr->p_skb);
+		dev_consume_skb_irq(p_xmt_drv_descr->p_skb);
 
 		/*
 		 * Move to start of next packet by updating completion index
@@ -3767,7 +3780,7 @@ static void dfx_pci_unregister(struct pci_dev *pdev)
 #endif /* CONFIG_PCI */
 
 #ifdef CONFIG_EISA
-static struct eisa_device_id dfx_eisa_table[] = {
+static const struct eisa_device_id dfx_eisa_table[] = {
         { "DEC3001", DEFEA_PROD_ID_1 },
         { "DEC3002", DEFEA_PROD_ID_2 },
         { "DEC3003", DEFEA_PROD_ID_3 },

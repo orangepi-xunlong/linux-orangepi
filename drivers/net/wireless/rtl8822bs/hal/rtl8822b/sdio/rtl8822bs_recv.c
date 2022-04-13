@@ -73,7 +73,7 @@ static _pkt *alloc_recvbuf_skb(struct recv_buf *recvbuf, u32 size)
 	size += alignsz;
 	skb = rtw_skb_alloc(size);
 	if (!skb) {
-		RTW_WARN("%s: alloc_skb fail! size=%d\n", __func__, size);
+		RTW_WARN("%s: alloc_skb fail! size=%d\n", __FUNCTION__, size);
 		return NULL;
 	}
 
@@ -115,11 +115,11 @@ _pkt *rtl8822bs_alloc_recvbuf_skb(struct recv_buf *recvbuf, u32 size)
 		return skb;
 	}
 
-	RTW_WARN("%s: skb not exist in recv_buf!\n", __func__);
+	RTW_WARN("%s: skb not exist in recv_buf!\n", __FUNCTION__);
 	size = MAX_RECVBUF_SZ;
 #else /* !CONFIG_SDIO_RX_COPY */
 	if (skb) {
-		RTW_WARN("%s: skb already exist in recv_buf!\n", __func__);
+		RTW_WARN("%s: skb already exist in recv_buf!\n", __FUNCTION__);
 		rtl8822bs_free_recvbuf_skb(recvbuf);
 	}
 #endif /* !CONFIG_SDIO_RX_COPY */
@@ -321,7 +321,7 @@ static _pkt *prepare_recvframe_pkt(struct recv_buf *recvbuf, union recv_frame *r
 
 	pkt = recvframe->u.hdr.pkt;
 	if (pkt) {
-		RTW_WARN("%s: recvframe pkt already exist!\n", __func__);
+		RTW_WARN("%s: recvframe pkt already exist!\n", __FUNCTION__);
 		return pkt;
 	}
 
@@ -375,7 +375,7 @@ static _pkt *prepare_recvframe_pkt(struct recv_buf *recvbuf, union recv_frame *r
 		skb_reserve(pkt, shift_sz);
 		_rtw_memcpy(skb_put(pkt, skb_len), data, skb_len);
 	} else if ((attrib->mfrag == 1) && (attrib->frag_num == 0)) {
-		RTW_ERR("%s: alloc_skb fail for first fragement\n", __func__);
+		RTW_ERR("%s: alloc_skb fail for first fragement\n", __FUNCTION__);
 		return NULL;
 	}
 #endif /* CONFIG_SDIO_RX_COPY */
@@ -383,7 +383,7 @@ static _pkt *prepare_recvframe_pkt(struct recv_buf *recvbuf, union recv_frame *r
 	if (!pkt) {
 		pkt = rtw_skb_clone(recvbuf->pskb);
 		if (!pkt) {
-			RTW_ERR("%s: rtw_skb_clone fail\n", __func__);
+			RTW_ERR("%s: rtw_skb_clone fail\n", __FUNCTION__);
 			return NULL;
 		}
 		pkt->data = data;
@@ -427,7 +427,7 @@ static u8 recvbuf_handler(struct recv_buf *recvbuf)
 	while (ptr < recvbuf->ptail) {
 		recvframe = rtw_alloc_recvframe(&recvpriv->free_recv_queue);
 		if (!recvframe) {
-			RTW_WARN("%s: no enough recv frame!\n", __func__);
+			RTW_WARN("%s: no enough recv frame!\n", __FUNCTION__);
 			ret = RTW_RFRAME_UNAVAIL;
 			break;
 		}
@@ -446,7 +446,7 @@ static u8 recvbuf_handler(struct recv_buf *recvbuf)
 		}
 		if (pkt_len == 0) {
 			RTW_WARN("%s: pkt len(%u) is too small, skip!\n",
-				 __func__, attrib->pkt_len);
+				 __FUNCTION__, attrib->pkt_len);
 			rtw_free_recvframe(recvframe, &recvpriv->free_recv_queue);
 			break;
 		}
@@ -456,7 +456,7 @@ static u8 recvbuf_handler(struct recv_buf *recvbuf)
 
 		if ((ptr + pkt_offset) > recvbuf->ptail) {
 			RTW_WARN("%s: next pkt len(%p,%d) exceed ptail(%p)!\n",
-				 __func__, ptr, pkt_offset, recvbuf->ptail);
+				 __FUNCTION__, ptr, pkt_offset, recvbuf->ptail);
 			rtw_free_recvframe(recvframe, &recvpriv->free_recv_queue);
 			break;
 		}
@@ -464,7 +464,7 @@ static u8 recvbuf_handler(struct recv_buf *recvbuf)
 		/* fix Hardware RX data error, drop whole recv_buffer */
 		if (!rtw_hal_rcr_check(p, BIT_ACRC32_8822B)
 		    && attrib->crc_err) {
-			RTW_WARN("%s: Received unexpected CRC error packet!!\n", __func__);
+			RTW_WARN("%s: Received unexpected CRC error packet!!\n", __FUNCTION__);
 			rtw_free_recvframe(recvframe, &recvpriv->free_recv_queue);
 			break;
 		}
@@ -480,7 +480,7 @@ static u8 recvbuf_handler(struct recv_buf *recvbuf)
 #endif /* CONFIG_MP_INCLUDED */
 			{
 				RTW_INFO("%s: crc_err=%d icv_err=%d, skip!\n",
-					__func__, attrib->crc_err, attrib->icv_err);
+					__FUNCTION__, attrib->crc_err, attrib->icv_err);
 			}
 			rtw_free_recvframe(recvframe, &recvpriv->free_recv_queue);
 		} else {
@@ -529,24 +529,18 @@ s32 rtl8822bs_recv_hdl(_adapter *adapter)
 			d->en_napi_dynamic = 0;
 	}
 #endif /* CONFIG_RTW_NAPI_DYNAMIC */
-
+	
 	do {
 		recvbuf = rtw_dequeue_recvbuf(&recvpriv->recv_buf_pending_queue);
 		if (NULL == recvbuf)
 			break;
 
 		c2h = GET_RX_DESC_C2H_8822B(recvbuf->pdata);
-		if (c2h) {
+		if (c2h)
 			rtl8822b_c2h_handler_no_io(adapter, recvbuf->pdata, recvbuf->len);
-		} else {
-			if (adapter_to_dvobj(adapter)->processing_dev_remove != _TRUE) {
-				ret = recvbuf_handler(recvbuf);
-			} else {
-				/* drop recv buffer */
-				RTW_PRINT("%s: drop recv buffer during dev remove!\n", __func__);
-				ret = _SUCCESS;
-			}
-		}
+		else
+			ret = recvbuf_handler(recvbuf);
+
 		if (_SUCCESS != ret) {
 			rtw_enqueue_recvbuf_to_head(recvbuf, &recvpriv->recv_buf_pending_queue);
 			break;

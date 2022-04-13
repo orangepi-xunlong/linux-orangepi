@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* sunqe.c: Sparc QuadEthernet 10baseT SBUS card driver.
  *          Once again I am out to prove that every ethernet
  *          controller out there can be most efficiently programmed
@@ -27,6 +28,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
+#include <linux/pgtable.h>
 
 #include <asm/io.h>
 #include <asm/dma.h>
@@ -35,7 +37,6 @@
 #include <asm/openprom.h>
 #include <asm/oplib.h>
 #include <asm/auxio.h>
-#include <asm/pgtable.h>
 #include <asm/irq.h>
 
 #include "sunqe.h"
@@ -543,7 +544,7 @@ static void qe_tx_reclaim(struct sunqe *qep)
 	qep->tx_old = elem;
 }
 
-static void qe_tx_timeout(struct net_device *dev)
+static void qe_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	struct sunqe *qep = netdev_priv(dev);
 	int tx_full;
@@ -569,7 +570,7 @@ out:
 }
 
 /* Get a packet queued to go onto the wire. */
-static int qe_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t qe_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct sunqe *qep = netdev_priv(dev);
 	struct sunqe_buffers *qbufs = qep->buffers;
@@ -824,7 +825,6 @@ static const struct net_device_ops qec_ops = {
 	.ndo_start_xmit		= qe_start_xmit,
 	.ndo_set_rx_mode	= qe_set_multicast,
 	.ndo_tx_timeout		= qe_tx_timeout,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };

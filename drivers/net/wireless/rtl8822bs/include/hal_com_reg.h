@@ -423,8 +423,6 @@
 #define REG_CTS2TO						0x0641
 #define REG_EIFS							0x0642
 
-/*REG_TCR*/
-#define BIT_PWRBIT_OW_EN BIT(7)
 
 /* RXERR_RPT */
 #define RXERR_TYPE_OFDM_PPDU			0

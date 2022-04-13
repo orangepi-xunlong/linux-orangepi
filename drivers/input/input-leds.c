@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * LED support for the input layer
  *
  * Copyright 2010-2015 Samuel Thibault <samuel.thibault@ens-lyon.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -98,8 +95,7 @@ static int input_leds_connect(struct input_handler *handler,
 	if (!num_leds)
 		return -ENXIO;
 
-	leds = kzalloc(sizeof(*leds) + num_leds * sizeof(*leds->leds),
-		       GFP_KERNEL);
+	leds = kzalloc(struct_size(leds, leds, num_leds), GFP_KERNEL);
 	if (!leds)
 		return -ENOMEM;
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /******************************************************************************
  * platform-pci.c
  *
@@ -8,20 +9,6 @@
  * Copyright (c) 2005, Intel Corporation.
  * Copyright (c) 2007, XenSource Inc.
  * Copyright (c) 2010, Citrix
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc., 59 Temple
- * Place - Suite 330, Boston, MA 02111-1307 USA.
- *
  */
 
 
@@ -67,7 +54,7 @@ static uint64_t get_callback_via(struct pci_dev *pdev)
 	pin = pdev->pin;
 
 	/* We don't know the GSI. Specify the PCI INTx line instead. */
-	return ((uint64_t)0x01 << 56) | /* PCI INTx identifier */
+	return ((uint64_t)0x01 << HVM_CALLBACK_VIA_TYPE_SHIFT) | /* PCI INTx identifier */
 		((uint64_t)pci_domain_nr(pdev->bus) << 32) |
 		((uint64_t)pdev->bus->number << 16) |
 		((uint64_t)(pdev->devfn & 0xff) << 8) |
@@ -87,14 +74,16 @@ static int xen_allocate_irq(struct pci_dev *pdev)
 			"xen-platform-pci", pdev);
 }
 
-static int platform_pci_resume(struct pci_dev *pdev)
+static int platform_pci_resume(struct device *dev)
 {
 	int err;
+
 	if (xen_have_vector_callback)
 		return 0;
+
 	err = xen_set_callback_via(callback_via);
 	if (err) {
-		dev_err(&pdev->dev, "platform_pci_resume failure!\n");
+		dev_err(dev, "platform_pci_resume failure!\n");
 		return err;
 	}
 	return 0;
@@ -137,7 +126,6 @@ static int platform_pci_probe(struct pci_dev *pdev,
 
 	platform_mmio = mmio_addr;
 	platform_mmiolen = mmio_len;
-
 	if (!xen_have_vector_callback) {
 		ret = xen_allocate_irq(pdev);
 		if (ret) {
@@ -161,7 +149,6 @@ static int platform_pci_probe(struct pci_dev *pdev,
 	ret = gnttab_init();
 	if (ret)
 		goto grant_out;
-	xenbus_probe(NULL);
 	return 0;
 grant_out:
 	gnttab_free_auto_xlat_frames();
@@ -174,23 +161,23 @@ pci_out:
 	return ret;
 }
 
-static struct pci_device_id platform_pci_tbl[] = {
+static const struct pci_device_id platform_pci_tbl[] = {
 	{PCI_VENDOR_ID_XEN, PCI_DEVICE_ID_XEN_PLATFORM,
 		PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
 	{0,}
+};
+
+static const struct dev_pm_ops platform_pm_ops = {
+	.resume_noirq =   platform_pci_resume,
 };
 
 static struct pci_driver platform_driver = {
 	.name =           DRV_NAME,
 	.probe =          platform_pci_probe,
 	.id_table =       platform_pci_tbl,
-#ifdef CONFIG_PM
-	.resume_early =   platform_pci_resume,
-#endif
+	.driver = {
+		.pm =     &platform_pm_ops,
+	},
 };
 
-static int __init platform_pci_init(void)
-{
-	return pci_register_driver(&platform_driver);
-}
-device_initcall(platform_pci_init);
+builtin_pci_driver(platform_driver);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Host AP (software wireless LAN access point) driver for
  * Intersil Prism2/2.5/3.
@@ -5,11 +6,6 @@
  * Copyright (c) 2001-2002, SSH Communications Security Corp and Jouni Malinen
  * <j@w1.fi>
  * Copyright (c) 2002-2005, Jouni Malinen <j@w1.fi>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation. See README and COPYING for
- * more details.
  *
  * FIX:
  * - there is currently no way of associating TX packets to correct wds device
@@ -32,7 +28,7 @@
 
 
 #include <asm/delay.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include <linux/slab.h>
 #include <linux/netdevice.h>
@@ -43,7 +39,7 @@
 #include <linux/delay.h>
 #include <linux/random.h>
 #include <linux/wait.h>
-#include <linux/sched.h>
+#include <linux/sched/signal.h>
 #include <linux/rtnetlink.h>
 #include <linux/wireless.h>
 #include <net/iw_handler.h>
@@ -130,7 +126,7 @@ static void prism2_check_sta_fw_version(local_info_t *local);
 
 #ifdef PRISM2_DOWNLOAD_SUPPORT
 /* hostap_download.c */
-static const struct file_operations prism2_download_aux_dump_proc_fops;
+static const struct proc_ops prism2_download_aux_dump_proc_ops;
 static u8 * prism2_read_pda(struct net_device *dev);
 static int prism2_download(local_info_t *local,
 			   struct prism2_download_param *param);
@@ -150,13 +146,6 @@ static int prism2_get_ram_size(local_info_t *local);
  * present */
 #define HFA384X_MAGIC 0x8A32
 #endif
-
-
-static u16 hfa384x_read_reg(struct net_device *dev, u16 reg)
-{
-	return HFA384X_INW(reg);
-}
-
 
 static void hfa384x_read_regs(struct net_device *dev,
 			      struct hfa384x_regs *regs)
@@ -190,7 +179,7 @@ static inline void __hostap_cmd_queue_free(local_info_t *local,
 		}
 	}
 
-	if (atomic_dec_and_test(&entry->usecnt) && entry->del_req)
+	if (refcount_dec_and_test(&entry->usecnt) && entry->del_req)
 		kfree(entry);
 }
 
@@ -228,7 +217,7 @@ static void prism2_clear_cmd_queue(local_info_t *local)
 	spin_lock_irqsave(&local->cmdlock, flags);
 	list_for_each_safe(ptr, n, &local->cmd_queue) {
 		entry = list_entry(ptr, struct hostap_cmd_queue, list);
-		atomic_inc(&entry->usecnt);
+		refcount_inc(&entry->usecnt);
 		printk(KERN_DEBUG "%s: removed pending cmd_queue entry "
 		       "(type=%d, cmd=0x%04x, param0=0x%04x)\n",
 		       local->dev->name, entry->type, entry->cmd,
@@ -331,12 +320,6 @@ static int hfa384x_cmd(struct net_device *dev, u16 cmd, u16 param0,
 	iface = netdev_priv(dev);
 	local = iface->local;
 
-	if (in_interrupt()) {
-		printk(KERN_DEBUG "%s: hfa384x_cmd called from interrupt "
-		       "context\n", dev->name);
-		return -1;
-	}
-
 	if (local->cmd_queue_len >= HOSTAP_CMD_QUEUE_MAX_LEN) {
 		printk(KERN_DEBUG "%s: hfa384x_cmd: cmd_queue full\n",
 		       dev->name);
@@ -350,7 +333,7 @@ static int hfa384x_cmd(struct net_device *dev, u16 cmd, u16 param0,
 	if (entry == NULL)
 		return -ENOMEM;
 
-	atomic_set(&entry->usecnt, 1);
+	refcount_set(&entry->usecnt, 1);
 	entry->type = CMD_SLEEP;
 	entry->cmd = cmd;
 	entry->param0 = param0;
@@ -516,7 +499,7 @@ static int hfa384x_cmd_callback(struct net_device *dev, u16 cmd, u16 param0,
 	if (entry == NULL)
 		return -ENOMEM;
 
-	atomic_set(&entry->usecnt, 1);
+	refcount_set(&entry->usecnt, 1);
 	entry->type = CMD_CALLBACK;
 	entry->cmd = cmd;
 	entry->param0 = param0;
@@ -666,7 +649,7 @@ static void prism2_cmd_ev(struct net_device *dev)
 	if (!list_empty(&local->cmd_queue)) {
 		entry = list_entry(local->cmd_queue.next,
 				   struct hostap_cmd_queue, list);
-		atomic_inc(&entry->usecnt);
+		refcount_inc(&entry->usecnt);
 		list_del_init(&entry->list);
 		local->cmd_queue_len--;
 
@@ -718,7 +701,7 @@ static void prism2_cmd_ev(struct net_device *dev)
 			entry = NULL;
 		}
 		if (entry)
-			atomic_inc(&entry->usecnt);
+			refcount_inc(&entry->usecnt);
 	}
 	spin_unlock(&local->cmdlock);
 
@@ -1571,12 +1554,6 @@ static void prism2_hw_reset(struct net_device *dev)
 	iface = netdev_priv(dev);
 	local = iface->local;
 
-	if (in_interrupt()) {
-		printk(KERN_DEBUG "%s: driver bug - prism2_hw_reset() called "
-		       "in interrupt context\n", dev->name);
-		return;
-	}
-
 	if (local->hw_downloading)
 		return;
 
@@ -1814,7 +1791,7 @@ static int prism2_tx_80211(struct sk_buff *skb, struct net_device *dev)
 	struct hfa384x_tx_frame txdesc;
 	struct hostap_skb_tx_data *meta;
 	int hdr_len, data_len, idx, res, ret = -1;
-	u16 tx_control, fc;
+	u16 tx_control;
 
 	iface = netdev_priv(dev);
 	local = iface->local;
@@ -1837,7 +1814,6 @@ static int prism2_tx_80211(struct sk_buff *skb, struct net_device *dev)
 	/* skb->data starts with txdesc->frame_control */
 	hdr_len = 24;
 	skb_copy_from_linear_data(skb, &txdesc.frame_control, hdr_len);
- 	fc = le16_to_cpu(txdesc.frame_control);
 	if (ieee80211_is_data(txdesc.frame_control) &&
 	    ieee80211_has_a4(txdesc.frame_control) &&
 	    skb->len >= 30) {
@@ -2005,7 +1981,7 @@ static void prism2_rx(local_info_t *local)
 		goto rx_dropped;
 	}
 	skb->dev = dev;
-	memcpy(skb_put(skb, hdr_len), &rxdesc, hdr_len);
+	skb_put_data(skb, &rxdesc, hdr_len);
 
 	if (len > 0)
 		res = hfa384x_from_bap(dev, BAP0, skb_put(skb, len), len);
@@ -2094,9 +2070,9 @@ static void hostap_rx_skb(local_info_t *local, struct sk_buff *skb)
 
 
 /* Called only as a tasklet (software IRQ) */
-static void hostap_rx_tasklet(unsigned long data)
+static void hostap_rx_tasklet(struct tasklet_struct *t)
 {
-	local_info_t *local = (local_info_t *) data;
+	local_info_t *local = from_tasklet(local, t, rx_tasklet);
 	struct sk_buff *skb;
 
 	while ((skb = skb_dequeue(&local->rx_list)) != NULL)
@@ -2209,9 +2185,9 @@ static void hostap_tx_callback(local_info_t *local,
 		return;
 	}
 
-	memcpy(skb_put(skb, hdrlen), (void *) &txdesc->frame_control, hdrlen);
+	skb_put_data(skb, (void *)&txdesc->frame_control, hdrlen);
 	if (payload)
-		memcpy(skb_put(skb, len), payload, len);
+		skb_put_data(skb, payload, len);
 
 	skb->dev = local->dev;
 	skb_reset_mac_header(skb);
@@ -2299,9 +2275,9 @@ static void prism2_tx_ev(local_info_t *local)
 
 
 /* Called only as a tasklet (software IRQ) */
-static void hostap_sta_tx_exc_tasklet(unsigned long data)
+static void hostap_sta_tx_exc_tasklet(struct tasklet_struct *t)
 {
-	local_info_t *local = (local_info_t *) data;
+	local_info_t *local = from_tasklet(local, t, sta_tx_exc_tasklet);
 	struct sk_buff *skb;
 
 	while ((skb = skb_dequeue(&local->sta_tx_exc_list)) != NULL) {
@@ -2362,8 +2338,7 @@ static void prism2_txexc(local_info_t *local)
 		struct sk_buff *skb;
 		skb = dev_alloc_skb(sizeof(txdesc));
 		if (skb) {
-			memcpy(skb_put(skb, sizeof(txdesc)), &txdesc,
-			       sizeof(txdesc));
+			skb_put_data(skb, &txdesc, sizeof(txdesc));
 			skb_queue_tail(&local->sta_tx_exc_list, skb);
 			tasklet_schedule(&local->sta_tx_exc_tasklet);
 		}
@@ -2402,9 +2377,9 @@ static void prism2_txexc(local_info_t *local)
 
 
 /* Called only as a tasklet (software IRQ) */
-static void hostap_info_tasklet(unsigned long data)
+static void hostap_info_tasklet(struct tasklet_struct *t)
 {
-	local_info_t *local = (local_info_t *) data;
+	local_info_t *local = from_tasklet(local, t, info_tasklet);
 	struct sk_buff *skb;
 
 	while ((skb = skb_dequeue(&local->info_list)) != NULL) {
@@ -2460,7 +2435,7 @@ static void prism2_info(local_info_t *local)
 		goto out;
 	}
 
-	memcpy(skb_put(skb, sizeof(info)), &info, sizeof(info));
+	skb_put_data(skb, &info, sizeof(info));
 	if (left > 0 && hfa384x_from_bap(dev, BAP0, skb_put(skb, left), left))
 	{
 		spin_unlock(&local->baplock);
@@ -2481,9 +2456,9 @@ static void prism2_info(local_info_t *local)
 
 
 /* Called only as a tasklet (software IRQ) */
-static void hostap_bap_tasklet(unsigned long data)
+static void hostap_bap_tasklet(struct tasklet_struct *t)
 {
-	local_info_t *local = (local_info_t *) data;
+	local_info_t *local = from_tasklet(local, t, bap_tasklet);
 	struct net_device *dev = local->dev;
 	u16 ev;
 	int frames = 30;
@@ -2795,9 +2770,9 @@ static void prism2_check_sta_fw_version(local_info_t *local)
 }
 
 
-static void hostap_passive_scan(unsigned long data)
+static void hostap_passive_scan(struct timer_list *t)
 {
-	local_info_t *local = (local_info_t *) data;
+	local_info_t *local = from_timer(local, t, passive_scan_timer);
 	struct net_device *dev = local->dev;
 	u16 chan;
 
@@ -2870,10 +2845,10 @@ static void handle_comms_qual_update(struct work_struct *work)
  * used to monitor that local->last_tick_timer is being updated. If not,
  * interrupt busy-loop is assumed and driver tries to recover by masking out
  * some events. */
-static void hostap_tick_timer(unsigned long data)
+static void hostap_tick_timer(struct timer_list *t)
 {
 	static unsigned long last_inquire = 0;
-	local_info_t *local = (local_info_t *) data;
+	local_info_t *local = from_timer(local, t, tick_timer);
 	local->last_tick_timer = jiffies;
 
 	/* Inquire CommTallies every 10 seconds to keep the statistics updated
@@ -2898,7 +2873,12 @@ static void hostap_tick_timer(unsigned long data)
 }
 
 
-#ifndef PRISM2_NO_PROCFS_DEBUG
+#if !defined(PRISM2_NO_PROCFS_DEBUG) && defined(CONFIG_PROC_FS)
+static u16 hfa384x_read_reg(struct net_device *dev, u16 reg)
+{
+	return HFA384X_INW(reg);
+}
+
 static int prism2_registers_proc_show(struct seq_file *m, void *v)
 {
 	local_info_t *local = m->private;
@@ -2952,21 +2932,7 @@ static int prism2_registers_proc_show(struct seq_file *m, void *v)
 
 	return 0;
 }
-
-static int prism2_registers_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, prism2_registers_proc_show, PDE_DATA(inode));
-}
-
-static const struct file_operations prism2_registers_proc_fops = {
-	.open		= prism2_registers_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-#endif /* PRISM2_NO_PROCFS_DEBUG */
-
+#endif
 
 struct set_tim_data {
 	struct list_head list;
@@ -3139,7 +3105,7 @@ prism2_init_local_data(struct prism2_helper_functions *funcs, int card_idx,
 	local->func->reset_port = prism2_reset_port;
 	local->func->schedule_reset = prism2_schedule_reset;
 #ifdef PRISM2_DOWNLOAD_SUPPORT
-	local->func->read_aux_fops = &prism2_download_aux_dump_proc_fops;
+	local->func->read_aux_proc_ops = &prism2_download_aux_dump_proc_ops;
 	local->func->download = prism2_download;
 #endif /* PRISM2_DOWNLOAD_SUPPORT */
 	local->func->tx = prism2_tx_80211;
@@ -3204,7 +3170,7 @@ prism2_init_local_data(struct prism2_helper_functions *funcs, int card_idx,
 	/* Initialize tasklets for handling hardware IRQ related operations
 	 * outside hw IRQ handler */
 #define HOSTAP_TASKLET_INIT(q, f, d) \
-do { memset((q), 0, sizeof(*(q))); (q)->func = (f); (q)->data = (d); } \
+do { memset((q), 0, sizeof(*(q))); (q)->func = (void(*)(unsigned long))(f); } \
 while (0)
 	HOSTAP_TASKLET_INIT(&local->bap_tasklet, hostap_bap_tasklet,
 			    (unsigned long) local);
@@ -3226,13 +3192,8 @@ while (0)
 
 	lib80211_crypt_info_init(&local->crypt_info, dev->name, &local->lock);
 
-	init_timer(&local->passive_scan_timer);
-	local->passive_scan_timer.data = (unsigned long) local;
-	local->passive_scan_timer.function = hostap_passive_scan;
-
-	init_timer(&local->tick_timer);
-	local->tick_timer.data = (unsigned long) local;
-	local->tick_timer.function = hostap_tick_timer;
+	timer_setup(&local->passive_scan_timer, hostap_passive_scan, 0);
+	timer_setup(&local->tick_timer, hostap_tick_timer, 0);
 	local->tick_timer.expires = jiffies + 2 * HZ;
 	add_timer(&local->tick_timer);
 
@@ -3285,8 +3246,8 @@ static int hostap_hw_ready(struct net_device *dev)
 		}
 		hostap_init_proc(local);
 #ifndef PRISM2_NO_PROCFS_DEBUG
-		proc_create_data("registers", 0, local->proc,
-				 &prism2_registers_proc_fops, local);
+		proc_create_single_data("registers", 0, local->proc,
+				 prism2_registers_proc_show, local);
 #endif /* PRISM2_NO_PROCFS_DEBUG */
 		hostap_init_ap_proc(local);
 		return 0;
@@ -3392,8 +3353,8 @@ static void prism2_free_local_data(struct net_device *dev)
 }
 
 
-#if (defined(PRISM2_PCI) && defined(CONFIG_PM)) || defined(PRISM2_PCCARD)
-static void prism2_suspend(struct net_device *dev)
+#if defined(PRISM2_PCI) || defined(PRISM2_PCCARD)
+static void __maybe_unused prism2_suspend(struct net_device *dev)
 {
 	struct hostap_interface *iface;
 	struct local_info *local;
@@ -3411,7 +3372,7 @@ static void prism2_suspend(struct net_device *dev)
 	/* Disable hardware and firmware */
 	prism2_hw_shutdown(dev, 0);
 }
-#endif /* (PRISM2_PCI && CONFIG_PM) || PRISM2_PCCARD */
+#endif /* PRISM2_PCI || PRISM2_PCCARD */
 
 
 /* These might at some point be compiled separately and used as separate

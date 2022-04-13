@@ -196,8 +196,8 @@ struct _RT_BEAMFORMING_INFO {
 	struct _RT_BEAMFORMER_ENTRY		beamformer_entry[BEAMFORMER_ENTRY_NUM];
 	struct _RT_BEAMFORM_STAINFO		beamform_sta_info;
 	u8					beamformee_cur_idx;
-	struct phydm_timer_list					beamforming_timer;
-	struct phydm_timer_list					mu_timer;
+	struct timer_list					beamforming_timer;
+	struct timer_list					mu_timer;
 	struct _RT_SOUNDING_INFO			sounding_info;
 	struct _RT_BEAMFORMING_OID_INFO	beamforming_oid_info;
 	struct _HAL_TXBF_INFO			txbf_info;
@@ -351,7 +351,7 @@ phydm_beamforming_watchdog(
 void
 beamforming_sw_timer_callback(
 #if (DM_ODM_SUPPORT_TYPE == ODM_WIN)
-	struct phydm_timer_list	  *p_timer
+	struct timer_list		*p_timer
 #elif (DM_ODM_SUPPORT_TYPE == ODM_CE)
 	void *function_context
 #endif

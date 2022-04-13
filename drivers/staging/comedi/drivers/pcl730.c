@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * comedi/drivers/pcl730.c
  * Driver for Advantech PCL-730 and clones
@@ -344,6 +345,6 @@ static struct comedi_driver pcl730_driver = {
 };
 module_comedi_driver(pcl730_driver);
 
-MODULE_AUTHOR("Comedi http://www.comedi.org");
+MODULE_AUTHOR("Comedi https://www.comedi.org");
 MODULE_DESCRIPTION("Comedi low-level driver");
 MODULE_LICENSE("GPL");

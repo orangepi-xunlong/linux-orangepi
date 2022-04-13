@@ -10174,7 +10174,7 @@ odm_read_and_config_mp_8822b_agc_tab(
 u32
 odm_get_version_mp_8822b_agc_tab(void)
 {
-		return 111;
+		return 107;
 }
 
 /******************************************************************************
@@ -11734,7 +11734,7 @@ odm_read_and_config_mp_8822b_phy_reg(
 u32
 odm_get_version_mp_8822b_phy_reg(void)
 {
-		return 111;
+		return 107;
 }
 
 /******************************************************************************

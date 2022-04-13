@@ -239,8 +239,10 @@ struct sched {
 	unsigned int	num;		/* num skbs in per port queues */
 	struct sched_port p[MAX_NPORTS];
 	struct tasklet_struct sched_tsk;/* tasklet used to run scheduler */
+	struct sge *sge;
 };
-static void restart_sched(unsigned long);
+
+static void restart_sched(struct tasklet_struct *t);
 
 
 /*
@@ -378,7 +380,8 @@ static int tx_sched_init(struct sge *sge)
 		return -ENOMEM;
 
 	pr_debug("tx_sched_init\n");
-	tasklet_init(&s->sched_tsk, restart_sched, (unsigned long) sge);
+	tasklet_setup(&s->sched_tsk, restart_sched);
+	s->sge = sge;
 	sge->tx_sched = s;
 
 	for (i = 0; i < MAX_NPORTS; i++) {
@@ -509,9 +512,8 @@ static void free_freelQ_buffers(struct pci_dev *pdev, struct freelQ *q)
 	while (q->credits--) {
 		struct freelQ_ce *ce = &q->centries[cidx];
 
-		pci_unmap_single(pdev, dma_unmap_addr(ce, dma_addr),
-				 dma_unmap_len(ce, dma_len),
-				 PCI_DMA_FROMDEVICE);
+		dma_unmap_single(&pdev->dev, dma_unmap_addr(ce, dma_addr),
+				 dma_unmap_len(ce, dma_len), DMA_FROM_DEVICE);
 		dev_kfree_skb(ce->skb);
 		ce->skb = NULL;
 		if (++cidx == q->size)
@@ -529,8 +531,8 @@ static void free_rx_resources(struct sge *sge)
 
 	if (sge->respQ.entries) {
 		size = sizeof(struct respQ_e) * sge->respQ.size;
-		pci_free_consistent(pdev, size, sge->respQ.entries,
-				    sge->respQ.dma_addr);
+		dma_free_coherent(&pdev->dev, size, sge->respQ.entries,
+				  sge->respQ.dma_addr);
 	}
 
 	for (i = 0; i < SGE_FREELQ_N; i++) {
@@ -542,8 +544,8 @@ static void free_rx_resources(struct sge *sge)
 		}
 		if (q->entries) {
 			size = sizeof(struct freelQ_e) * q->size;
-			pci_free_consistent(pdev, size, q->entries,
-					    q->dma_addr);
+			dma_free_coherent(&pdev->dev, size, q->entries,
+					  q->dma_addr);
 		}
 	}
 }
@@ -564,7 +566,8 @@ static int alloc_rx_resources(struct sge *sge, struct sge_params *p)
 		q->size = p->freelQ_size[i];
 		q->dma_offset = sge->rx_pkt_pad ? 0 : NET_IP_ALIGN;
 		size = sizeof(struct freelQ_e) * q->size;
-		q->entries = pci_alloc_consistent(pdev, size, &q->dma_addr);
+		q->entries = dma_alloc_coherent(&pdev->dev, size,
+						&q->dma_addr, GFP_KERNEL);
 		if (!q->entries)
 			goto err_no_mem;
 
@@ -585,8 +588,7 @@ static int alloc_rx_resources(struct sge *sge, struct sge_params *p)
 		sizeof(struct cpl_rx_data) +
 		sge->freelQ[!sge->jumbo_fl].dma_offset;
 
-		size = (16 * 1024) -
-		    SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
+	size = (16 * 1024) - SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
 
 	sge->freelQ[sge->jumbo_fl].rx_buffer_size = size;
 
@@ -602,7 +604,8 @@ static int alloc_rx_resources(struct sge *sge, struct sge_params *p)
 	sge->respQ.credits = 0;
 	size = sizeof(struct respQ_e) * sge->respQ.size;
 	sge->respQ.entries =
-		pci_alloc_consistent(pdev, size, &sge->respQ.dma_addr);
+		dma_alloc_coherent(&pdev->dev, size, &sge->respQ.dma_addr,
+				   GFP_KERNEL);
 	if (!sge->respQ.entries)
 		goto err_no_mem;
 	return 0;
@@ -625,9 +628,10 @@ static void free_cmdQ_buffers(struct sge *sge, struct cmdQ *q, unsigned int n)
 	ce = &q->centries[cidx];
 	while (n--) {
 		if (likely(dma_unmap_len(ce, dma_len))) {
-			pci_unmap_single(pdev, dma_unmap_addr(ce, dma_addr),
+			dma_unmap_single(&pdev->dev,
+					 dma_unmap_addr(ce, dma_addr),
 					 dma_unmap_len(ce, dma_len),
-					 PCI_DMA_TODEVICE);
+					 DMA_TO_DEVICE);
 			if (q->sop)
 				q->sop = 0;
 		}
@@ -664,8 +668,8 @@ static void free_tx_resources(struct sge *sge)
 		}
 		if (q->entries) {
 			size = sizeof(struct cmdQ_e) * q->size;
-			pci_free_consistent(pdev, size, q->entries,
-					    q->dma_addr);
+			dma_free_coherent(&pdev->dev, size, q->entries,
+					  q->dma_addr);
 		}
 	}
 }
@@ -690,7 +694,8 @@ static int alloc_tx_resources(struct sge *sge, struct sge_params *p)
 		q->stop_thres = 0;
 		spin_lock_init(&q->lock);
 		size = sizeof(struct cmdQ_e) * q->size;
-		q->entries = pci_alloc_consistent(pdev, size, &q->dma_addr);
+		q->entries = dma_alloc_coherent(&pdev->dev, size,
+						&q->dma_addr, GFP_KERNEL);
 		if (!q->entries)
 			goto err_no_mem;
 
@@ -838,8 +843,8 @@ static void refill_free_list(struct sge *sge, struct freelQ *q)
 			break;
 
 		skb_reserve(skb, q->dma_offset);
-		mapping = pci_map_single(pdev, skb->data, dma_len,
-					 PCI_DMA_FROMDEVICE);
+		mapping = dma_map_single(&pdev->dev, skb->data, dma_len,
+					 DMA_FROM_DEVICE);
 		skb_reserve(skb, sge->rx_pkt_pad);
 
 		ce->skb = skb;
@@ -1050,15 +1055,15 @@ static inline struct sk_buff *get_packet(struct adapter *adapter,
 			goto use_orig_buf;
 
 		skb_put(skb, len);
-		pci_dma_sync_single_for_cpu(pdev,
-					    dma_unmap_addr(ce, dma_addr),
-					    dma_unmap_len(ce, dma_len),
-					    PCI_DMA_FROMDEVICE);
+		dma_sync_single_for_cpu(&pdev->dev,
+					dma_unmap_addr(ce, dma_addr),
+					dma_unmap_len(ce, dma_len),
+					DMA_FROM_DEVICE);
 		skb_copy_from_linear_data(ce->skb, skb->data, len);
-		pci_dma_sync_single_for_device(pdev,
-					       dma_unmap_addr(ce, dma_addr),
-					       dma_unmap_len(ce, dma_len),
-					       PCI_DMA_FROMDEVICE);
+		dma_sync_single_for_device(&pdev->dev,
+					   dma_unmap_addr(ce, dma_addr),
+					   dma_unmap_len(ce, dma_len),
+					   DMA_FROM_DEVICE);
 		recycle_fl_buf(fl, fl->cidx);
 		return skb;
 	}
@@ -1069,8 +1074,8 @@ use_orig_buf:
 		return NULL;
 	}
 
-	pci_unmap_single(pdev, dma_unmap_addr(ce, dma_addr),
-			 dma_unmap_len(ce, dma_len), PCI_DMA_FROMDEVICE);
+	dma_unmap_single(&pdev->dev, dma_unmap_addr(ce, dma_addr),
+			 dma_unmap_len(ce, dma_len), DMA_FROM_DEVICE);
 	skb = ce->skb;
 	prefetch(skb->data);
 
@@ -1092,8 +1097,9 @@ static void unexpected_offload(struct adapter *adapter, struct freelQ *fl)
 	struct freelQ_ce *ce = &fl->centries[fl->cidx];
 	struct sk_buff *skb = ce->skb;
 
-	pci_dma_sync_single_for_cpu(adapter->pdev, dma_unmap_addr(ce, dma_addr),
-			    dma_unmap_len(ce, dma_len), PCI_DMA_FROMDEVICE);
+	dma_sync_single_for_cpu(&adapter->pdev->dev,
+				dma_unmap_addr(ce, dma_addr),
+				dma_unmap_len(ce, dma_len), DMA_FROM_DEVICE);
 	pr_err("%s: unexpected offload packet, cmd %u\n",
 	       adapter->name, *skb->data);
 	recycle_fl_buf(fl, fl->cidx);
@@ -1210,8 +1216,8 @@ static inline void write_tx_descs(struct adapter *adapter, struct sk_buff *skb,
 	e = e1 = &q->entries[pidx];
 	ce = &q->centries[pidx];
 
-	mapping = pci_map_single(adapter->pdev, skb->data,
-				 skb_headlen(skb), PCI_DMA_TODEVICE);
+	mapping = dma_map_single(&adapter->pdev->dev, skb->data,
+				 skb_headlen(skb), DMA_TO_DEVICE);
 
 	desc_mapping = mapping;
 	desc_len = skb_headlen(skb);
@@ -1302,9 +1308,10 @@ static inline void reclaim_completed_tx(struct sge *sge, struct cmdQ *q)
  * Called from tasklet. Checks the scheduler for any
  * pending skbs that can be sent.
  */
-static void restart_sched(unsigned long arg)
+static void restart_sched(struct tasklet_struct *t)
 {
-	struct sge *sge = (struct sge *) arg;
+	struct sched *s = from_tasklet(s, t, sched_tsk);
+	struct sge *sge = s->sge;
 	struct adapter *adapter = sge->adapter;
 	struct cmdQ *q = &sge->cmdQ[0];
 	struct sk_buff *skb;
@@ -1605,7 +1612,7 @@ int t1_poll(struct napi_struct *napi, int budget)
 	int work_done = process_responses(adapter, budget);
 
 	if (likely(work_done < budget)) {
-		napi_complete(napi);
+		napi_complete_done(napi, work_done);
 		writel(adapter->sge->respQ.cidx,
 		       adapter->regs + A_SG_SLEEPING);
 	}
@@ -1801,7 +1808,7 @@ netdev_tx_t t1_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		eth_type = skb_network_offset(skb) == ETH_HLEN ?
 			CPL_ETH_II : CPL_ETH_II_VLAN;
 
-		hdr = (struct cpl_tx_pkt_lso *)skb_push(skb, sizeof(*hdr));
+		hdr = skb_push(skb, sizeof(*hdr));
 		hdr->opcode = CPL_TX_PKT_LSO;
 		hdr->ip_csum_dis = hdr->l4_csum_dis = 0;
 		hdr->ip_hdr_words = ip_hdr(skb)->ihl;
@@ -1849,7 +1856,7 @@ netdev_tx_t t1_start_xmit(struct sk_buff *skb, struct net_device *dev)
 			}
 		}
 
-		cpl = (struct cpl_tx_pkt *)__skb_push(skb, sizeof(*cpl));
+		cpl = __skb_push(skb, sizeof(*cpl));
 		cpl->opcode = CPL_TX_PKT;
 		cpl->ip_csum_dis = 1;    /* SW calculates IP csum */
 		cpl->l4_csum_dis = skb->ip_summed == CHECKSUM_PARTIAL ? 0 : 1;
@@ -1882,10 +1889,10 @@ send:
 /*
  * Callback for the Tx buffer reclaim timer.  Runs with softirqs disabled.
  */
-static void sge_tx_reclaim_cb(unsigned long data)
+static void sge_tx_reclaim_cb(struct timer_list *t)
 {
 	int i;
-	struct sge *sge = (struct sge *)data;
+	struct sge *sge = from_timer(sge, t, tx_reclaim_timer);
 
 	for (i = 0; i < SGE_CMDQ_N; ++i) {
 		struct cmdQ *q = &sge->cmdQ[i];
@@ -1978,10 +1985,10 @@ void t1_sge_start(struct sge *sge)
 /*
  * Callback for the T2 ESPI 'stuck packet feature' workaorund
  */
-static void espibug_workaround_t204(unsigned long data)
+static void espibug_workaround_t204(struct timer_list *t)
 {
-	struct adapter *adapter = (struct adapter *)data;
-	struct sge *sge = adapter->sge;
+	struct sge *sge = from_timer(sge, t, espibug_timer);
+	struct adapter *adapter = sge->adapter;
 	unsigned int nports = adapter->params.nports;
 	u32 seop[MAX_NPORTS];
 
@@ -2021,10 +2028,10 @@ static void espibug_workaround_t204(unsigned long data)
 	mod_timer(&sge->espibug_timer, jiffies + sge->espibug_timeout);
 }
 
-static void espibug_workaround(unsigned long data)
+static void espibug_workaround(struct timer_list *t)
 {
-	struct adapter *adapter = (struct adapter *)data;
-	struct sge *sge = adapter->sge;
+	struct sge *sge = from_timer(sge, t, espibug_timer);
+	struct adapter *adapter = sge->adapter;
 
 	if (netif_running(adapter->port[0].dev)) {
 	        struct sk_buff *skb = sge->espibug_skb[0];
@@ -2075,19 +2082,15 @@ struct sge *t1_sge_create(struct adapter *adapter, struct sge_params *p)
 			goto nomem_port;
 	}
 
-	init_timer(&sge->tx_reclaim_timer);
-	sge->tx_reclaim_timer.data = (unsigned long)sge;
-	sge->tx_reclaim_timer.function = sge_tx_reclaim_cb;
+	timer_setup(&sge->tx_reclaim_timer, sge_tx_reclaim_cb, 0);
 
 	if (is_T2(sge->adapter)) {
-		init_timer(&sge->espibug_timer);
+		timer_setup(&sge->espibug_timer,
+			    adapter->params.nports > 1 ? espibug_workaround_t204 : espibug_workaround,
+			    0);
 
-		if (adapter->params.nports > 1) {
+		if (adapter->params.nports > 1)
 			tx_sched_init(sge);
-			sge->espibug_timer.function = espibug_workaround_t204;
-		} else
-			sge->espibug_timer.function = espibug_workaround;
-		sge->espibug_timer.data = (unsigned long)sge->adapter;
 
 		sge->espibug_timeout = 1;
 		/* for T204, every 10ms */

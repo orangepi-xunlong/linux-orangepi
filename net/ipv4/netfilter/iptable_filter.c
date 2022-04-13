@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * This is the 1999 rewrite of IP Firewalling, aiming for kernel 2.3.x.
  *
  * Copyright (C) 1999 Paul `Rusty' Russell & Michael J. Neuling
  * Copyright (C) 2000-2004 Netfilter Core Team <coreteam@netfilter.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/module.h>
@@ -38,12 +34,6 @@ static unsigned int
 iptable_filter_hook(void *priv, struct sk_buff *skb,
 		    const struct nf_hook_state *state)
 {
-	if (state->hook == NF_INET_LOCAL_OUT &&
-	    (skb->len < sizeof(struct iphdr) ||
-	     ip_hdrlen(skb) < sizeof(struct iphdr)))
-		/* root is playing with raw sockets. */
-		return NF_ACCEPT;
-
 	return ipt_do_table(skb, state, state->net->ipv4.iptable_filter);
 }
 
@@ -82,16 +72,24 @@ static int __net_init iptable_filter_net_init(struct net *net)
 	return 0;
 }
 
+static void __net_exit iptable_filter_net_pre_exit(struct net *net)
+{
+	if (net->ipv4.iptable_filter)
+		ipt_unregister_table_pre_exit(net, net->ipv4.iptable_filter,
+					      filter_ops);
+}
+
 static void __net_exit iptable_filter_net_exit(struct net *net)
 {
 	if (!net->ipv4.iptable_filter)
 		return;
-	ipt_unregister_table(net, net->ipv4.iptable_filter, filter_ops);
+	ipt_unregister_table_exit(net, net->ipv4.iptable_filter);
 	net->ipv4.iptable_filter = NULL;
 }
 
 static struct pernet_operations iptable_filter_net_ops = {
 	.init = iptable_filter_net_init,
+	.pre_exit = iptable_filter_net_pre_exit,
 	.exit = iptable_filter_net_exit,
 };
 

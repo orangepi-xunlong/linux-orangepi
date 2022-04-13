@@ -1,29 +1,29 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2015 Free Electrons
  * Copyright (C) 2015 NextThing Co
  *
  * Maxime Ripard <maxime.ripard@free-electrons.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
  */
 
 #include <linux/clk.h>
 #include <linux/component.h>
+#include <linux/module.h>
 #include <linux/of_address.h>
+#include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/reset.h>
 
-#include <drm/drmP.h>
 #include <drm/drm_atomic_helper.h>
-#include <drm/drm_crtc_helper.h>
+#include <drm/drm_of.h>
 #include <drm/drm_panel.h>
+#include <drm/drm_print.h>
+#include <drm/drm_probe_helper.h>
+#include <drm/drm_simple_kms_helper.h>
 
-#include "sun4i_backend.h"
+#include "sun4i_crtc.h"
 #include "sun4i_drv.h"
-#include "sun4i_tcon.h"
+#include "sunxi_engine.h"
 
 #define SUN4I_TVE_EN_REG		0x000
 #define SUN4I_TVE_EN_DAC_MAP_MASK		GENMASK(19, 4)
@@ -339,44 +339,32 @@ static void sun4i_tv_mode_to_drm_mode(const struct tv_mode *tv_mode,
 	mode->vtotal = mode->vsync_end  + tv_mode->vback_porch;
 }
 
-static int sun4i_tv_atomic_check(struct drm_encoder *encoder,
-				 struct drm_crtc_state *crtc_state,
-				 struct drm_connector_state *conn_state)
-{
-	return 0;
-}
-
 static void sun4i_tv_disable(struct drm_encoder *encoder)
 {
 	struct sun4i_tv *tv = drm_encoder_to_sun4i_tv(encoder);
-	struct sun4i_drv *drv = tv->drv;
-	struct sun4i_tcon *tcon = drv->tcon;
+	struct sun4i_crtc *crtc = drm_crtc_to_sun4i_crtc(encoder->crtc);
 
 	DRM_DEBUG_DRIVER("Disabling the TV Output\n");
-
-	sun4i_tcon_channel_disable(tcon, 1);
 
 	regmap_update_bits(tv->regs, SUN4I_TVE_EN_REG,
 			   SUN4I_TVE_EN_ENABLE,
 			   0);
-	sun4i_backend_disable_color_correction(drv->backend);
+
+	sunxi_engine_disable_color_correction(crtc->engine);
 }
 
 static void sun4i_tv_enable(struct drm_encoder *encoder)
 {
 	struct sun4i_tv *tv = drm_encoder_to_sun4i_tv(encoder);
-	struct sun4i_drv *drv = tv->drv;
-	struct sun4i_tcon *tcon = drv->tcon;
+	struct sun4i_crtc *crtc = drm_crtc_to_sun4i_crtc(encoder->crtc);
 
 	DRM_DEBUG_DRIVER("Enabling the TV Output\n");
 
-	sun4i_backend_apply_color_correction(drv->backend);
+	sunxi_engine_apply_color_correction(crtc->engine);
 
 	regmap_update_bits(tv->regs, SUN4I_TVE_EN_REG,
 			   SUN4I_TVE_EN_ENABLE,
 			   SUN4I_TVE_EN_ENABLE);
-
-	sun4i_tcon_channel_enable(tcon, 1);
 }
 
 static void sun4i_tv_mode_set(struct drm_encoder *encoder,
@@ -384,11 +372,7 @@ static void sun4i_tv_mode_set(struct drm_encoder *encoder,
 			      struct drm_display_mode *adjusted_mode)
 {
 	struct sun4i_tv *tv = drm_encoder_to_sun4i_tv(encoder);
-	struct sun4i_drv *drv = tv->drv;
-	struct sun4i_tcon *tcon = drv->tcon;
 	const struct tv_mode *tv_mode = sun4i_tv_find_tv_by_mode(mode);
-
-	sun4i_tcon1_mode_set(tcon, mode);
 
 	/* Enable and map the DAC to the output */
 	regmap_update_bits(tv->regs, SUN4I_TVE_EN_REG,
@@ -482,24 +466,12 @@ static void sun4i_tv_mode_set(struct drm_encoder *encoder,
 		      SUN4I_TVE_RESYNC_FIELD : 0));
 
 	regmap_write(tv->regs, SUN4I_TVE_SLAVE_REG, 0);
-
-	clk_set_rate(tcon->sclk1, mode->crtc_clock * 1000);
 }
 
-static struct drm_encoder_helper_funcs sun4i_tv_helper_funcs = {
-	.atomic_check	= sun4i_tv_atomic_check,
+static const struct drm_encoder_helper_funcs sun4i_tv_helper_funcs = {
 	.disable	= sun4i_tv_disable,
 	.enable		= sun4i_tv_enable,
 	.mode_set	= sun4i_tv_mode_set,
-};
-
-static void sun4i_tv_destroy(struct drm_encoder *encoder)
-{
-	drm_encoder_cleanup(encoder);
-}
-
-static struct drm_encoder_funcs sun4i_tv_funcs = {
-	.destroy	= sun4i_tv_destroy,
 };
 
 static int sun4i_tv_comp_get_modes(struct drm_connector *connector)
@@ -532,16 +504,10 @@ static int sun4i_tv_comp_mode_valid(struct drm_connector *connector,
 	return MODE_OK;
 }
 
-static struct drm_connector_helper_funcs sun4i_tv_comp_connector_helper_funcs = {
+static const struct drm_connector_helper_funcs sun4i_tv_comp_connector_helper_funcs = {
 	.get_modes	= sun4i_tv_comp_get_modes,
 	.mode_valid	= sun4i_tv_comp_mode_valid,
 };
-
-static enum drm_connector_status
-sun4i_tv_comp_connector_detect(struct drm_connector *connector, bool force)
-{
-	return connector_status_connected;
-}
 
 static void
 sun4i_tv_comp_connector_destroy(struct drm_connector *connector)
@@ -549,9 +515,7 @@ sun4i_tv_comp_connector_destroy(struct drm_connector *connector)
 	drm_connector_cleanup(connector);
 }
 
-static struct drm_connector_funcs sun4i_tv_comp_connector_funcs = {
-	.dpms			= drm_atomic_helper_connector_dpms,
-	.detect			= sun4i_tv_comp_connector_detect,
+static const struct drm_connector_funcs sun4i_tv_comp_connector_funcs = {
 	.fill_modes		= drm_helper_probe_single_connector_modes,
 	.destroy		= sun4i_tv_comp_connector_destroy,
 	.reset			= drm_atomic_helper_connector_reset,
@@ -559,7 +523,7 @@ static struct drm_connector_funcs sun4i_tv_comp_connector_funcs = {
 	.atomic_destroy_state	= drm_atomic_helper_connector_destroy_state,
 };
 
-static struct regmap_config sun4i_tv_regmap_config = {
+static const struct regmap_config sun4i_tv_regmap_config = {
 	.reg_bits	= 32,
 	.val_bits	= 32,
 	.reg_stride	= 4,
@@ -620,17 +584,19 @@ static int sun4i_tv_bind(struct device *dev, struct device *master,
 
 	drm_encoder_helper_add(&tv->encoder,
 			       &sun4i_tv_helper_funcs);
-	ret = drm_encoder_init(drm,
-			       &tv->encoder,
-			       &sun4i_tv_funcs,
-			       DRM_MODE_ENCODER_TVDAC,
-			       NULL);
+	ret = drm_simple_encoder_init(drm, &tv->encoder,
+				      DRM_MODE_ENCODER_TVDAC);
 	if (ret) {
 		dev_err(dev, "Couldn't initialise the TV encoder\n");
 		goto err_disable_clk;
 	}
 
-	tv->encoder.possible_crtcs = BIT(0);
+	tv->encoder.possible_crtcs = drm_of_find_possible_crtcs(drm,
+								dev->of_node);
+	if (!tv->encoder.possible_crtcs) {
+		ret = -EPROBE_DEFER;
+		goto err_disable_clk;
+	}
 
 	drm_connector_helper_add(&tv->connector,
 				 &sun4i_tv_comp_connector_helper_funcs);
@@ -644,7 +610,7 @@ static int sun4i_tv_bind(struct device *dev, struct device *master,
 	}
 	tv->connector.interlace_allowed = true;
 
-	drm_mode_connector_attach_encoder(&tv->connector, &tv->encoder);
+	drm_connector_attach_encoder(&tv->connector, &tv->encoder);
 
 	return 0;
 
@@ -667,7 +633,7 @@ static void sun4i_tv_unbind(struct device *dev, struct device *master,
 	clk_disable_unprepare(tv->clk);
 }
 
-static struct component_ops sun4i_tv_ops = {
+static const struct component_ops sun4i_tv_ops = {
 	.bind	= sun4i_tv_bind,
 	.unbind	= sun4i_tv_unbind,
 };

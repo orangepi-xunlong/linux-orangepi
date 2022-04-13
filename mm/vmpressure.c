@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Linux VM pressure
  *
@@ -6,10 +7,6 @@
  *
  * Based on ideas from Andrew Morton, David Rientjes, KOSAKI Motohiro,
  * Leonid Moiseichuk, Mel Gorman, Minchan Kim and Pekka Enberg.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
  */
 
 #include <linux/cgroup.h>
@@ -93,10 +90,23 @@ enum vmpressure_levels {
 	VMPRESSURE_NUM_LEVELS,
 };
 
+enum vmpressure_modes {
+	VMPRESSURE_NO_PASSTHROUGH = 0,
+	VMPRESSURE_HIERARCHY,
+	VMPRESSURE_LOCAL,
+	VMPRESSURE_NUM_MODES,
+};
+
 static const char * const vmpressure_str_levels[] = {
 	[VMPRESSURE_LOW] = "low",
 	[VMPRESSURE_MEDIUM] = "medium",
 	[VMPRESSURE_CRITICAL] = "critical",
+};
+
+static const char * const vmpressure_str_modes[] = {
+	[VMPRESSURE_NO_PASSTHROUGH] = "default",
+	[VMPRESSURE_HIERARCHY] = "hierarchy",
+	[VMPRESSURE_LOCAL] = "local",
 };
 
 static enum vmpressure_levels vmpressure_level(unsigned long pressure)
@@ -115,9 +125,9 @@ static enum vmpressure_levels vmpressure_calc_level(unsigned long scanned,
 	unsigned long pressure = 0;
 
 	/*
-	 * reclaimed can be greater than scanned in cases
-	 * like THP, where the scanned is 1 and reclaimed
-	 * could be 512
+	 * reclaimed can be greater than scanned for things such as reclaimed
+	 * slab pages. shrink_node() just adds reclaimed pages without a
+	 * related increment to scanned pages.
 	 */
 	if (reclaimed >= scanned)
 		goto out;
@@ -141,27 +151,31 @@ out:
 struct vmpressure_event {
 	struct eventfd_ctx *efd;
 	enum vmpressure_levels level;
+	enum vmpressure_modes mode;
 	struct list_head node;
 };
 
 static bool vmpressure_event(struct vmpressure *vmpr,
-			     enum vmpressure_levels level)
+			     const enum vmpressure_levels level,
+			     bool ancestor, bool signalled)
 {
 	struct vmpressure_event *ev;
-	bool signalled = false;
+	bool ret = false;
 
 	mutex_lock(&vmpr->events_lock);
-
 	list_for_each_entry(ev, &vmpr->events, node) {
-		if (level >= ev->level) {
-			eventfd_signal(ev->efd, 1);
-			signalled = true;
-		}
+		if (ancestor && ev->mode == VMPRESSURE_LOCAL)
+			continue;
+		if (signalled && ev->mode == VMPRESSURE_NO_PASSTHROUGH)
+			continue;
+		if (level < ev->level)
+			continue;
+		eventfd_signal(ev->efd, 1);
+		ret = true;
 	}
-
 	mutex_unlock(&vmpr->events_lock);
 
-	return signalled;
+	return ret;
 }
 
 static void vmpressure_work_fn(struct work_struct *work)
@@ -170,6 +184,8 @@ static void vmpressure_work_fn(struct work_struct *work)
 	unsigned long scanned;
 	unsigned long reclaimed;
 	enum vmpressure_levels level;
+	bool ancestor = false;
+	bool signalled = false;
 
 	spin_lock(&vmpr->sr_lock);
 	/*
@@ -194,12 +210,9 @@ static void vmpressure_work_fn(struct work_struct *work)
 	level = vmpressure_calc_level(scanned, reclaimed);
 
 	do {
-		if (vmpressure_event(vmpr, level))
-			break;
-		/*
-		 * If not handled, propagate the event upward into the
-		 * hierarchy.
-		 */
+		if (vmpressure_event(vmpr, level, ancestor, signalled))
+			signalled = true;
+		ancestor = true;
 	} while ((vmpr = vmpressure_parent(vmpr)));
 }
 
@@ -267,7 +280,7 @@ void vmpressure(gfp_t gfp, struct mem_cgroup *memcg, bool tree,
 		enum vmpressure_levels level;
 
 		/* For now, no users for root-level efficiency */
-		if (!memcg || memcg == root_mem_cgroup)
+		if (!memcg || mem_cgroup_is_root(memcg))
 			return;
 
 		spin_lock(&vmpr->sr_lock);
@@ -326,47 +339,74 @@ void vmpressure_prio(gfp_t gfp, struct mem_cgroup *memcg, int prio)
 	vmpressure(gfp, memcg, true, vmpressure_win, 0);
 }
 
+#define MAX_VMPRESSURE_ARGS_LEN	(strlen("critical") + strlen("hierarchy") + 2)
+
 /**
  * vmpressure_register_event() - Bind vmpressure notifications to an eventfd
  * @memcg:	memcg that is interested in vmpressure notifications
  * @eventfd:	eventfd context to link notifications with
- * @args:	event arguments (used to set up a pressure level threshold)
+ * @args:	event arguments (pressure level threshold, optional mode)
  *
  * This function associates eventfd context with the vmpressure
  * infrastructure, so that the notifications will be delivered to the
- * @eventfd. The @args parameter is a string that denotes pressure level
- * threshold (one of vmpressure_str_levels, i.e. "low", "medium", or
- * "critical").
+ * @eventfd. The @args parameter is a comma-delimited string that denotes a
+ * pressure level threshold (one of vmpressure_str_levels, i.e. "low", "medium",
+ * or "critical") and an optional mode (one of vmpressure_str_modes, i.e.
+ * "hierarchy" or "local").
  *
  * To be used as memcg event method.
+ *
+ * Return: 0 on success, -ENOMEM on memory failure or -EINVAL if @args could
+ * not be parsed.
  */
 int vmpressure_register_event(struct mem_cgroup *memcg,
 			      struct eventfd_ctx *eventfd, const char *args)
 {
 	struct vmpressure *vmpr = memcg_to_vmpressure(memcg);
 	struct vmpressure_event *ev;
-	int level;
+	enum vmpressure_modes mode = VMPRESSURE_NO_PASSTHROUGH;
+	enum vmpressure_levels level;
+	char *spec, *spec_orig;
+	char *token;
+	int ret = 0;
 
-	for (level = 0; level < VMPRESSURE_NUM_LEVELS; level++) {
-		if (!strcmp(vmpressure_str_levels[level], args))
-			break;
+	spec_orig = spec = kstrndup(args, MAX_VMPRESSURE_ARGS_LEN, GFP_KERNEL);
+	if (!spec)
+		return -ENOMEM;
+
+	/* Find required level */
+	token = strsep(&spec, ",");
+	ret = match_string(vmpressure_str_levels, VMPRESSURE_NUM_LEVELS, token);
+	if (ret < 0)
+		goto out;
+	level = ret;
+
+	/* Find optional mode */
+	token = strsep(&spec, ",");
+	if (token) {
+		ret = match_string(vmpressure_str_modes, VMPRESSURE_NUM_MODES, token);
+		if (ret < 0)
+			goto out;
+		mode = ret;
 	}
 
-	if (level >= VMPRESSURE_NUM_LEVELS)
-		return -EINVAL;
-
 	ev = kzalloc(sizeof(*ev), GFP_KERNEL);
-	if (!ev)
-		return -ENOMEM;
+	if (!ev) {
+		ret = -ENOMEM;
+		goto out;
+	}
 
 	ev->efd = eventfd;
 	ev->level = level;
+	ev->mode = mode;
 
 	mutex_lock(&vmpr->events_lock);
 	list_add(&ev->node, &vmpr->events);
 	mutex_unlock(&vmpr->events_lock);
-
-	return 0;
+	ret = 0;
+out:
+	kfree(spec_orig);
+	return ret;
 }
 
 /**

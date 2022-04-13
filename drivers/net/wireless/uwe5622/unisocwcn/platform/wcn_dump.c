@@ -418,7 +418,7 @@ struct wcn_dump_mem_reg s_wcn_dump_regs_5623[] = {
 	{1, 0x40834220, 0x138}, /* AON_CLK_RF regs */
 	{1, 0x40834000, 0x54}, /* AON_PRE_DIV_CLK regs */
 	{1, 0x40130000, 0x29C}, /* BTWF_AHB regs */
-#ifdef CONFIG_SDIOHAL
+#ifdef CONFIG_WCN_SDIO
 	{1, 0x40970000, 0x10000}, /* SDIO regs */
 #endif
 	/* WIFI regs */

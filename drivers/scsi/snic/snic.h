@@ -299,7 +299,6 @@ struct snic {
 
 	/* pci related */
 	struct pci_dev *pdev;
-	struct msix_entry msix_entry[SNIC_MSIX_INTR_MAX];
 	struct snic_msix_entry msix[SNIC_MSIX_INTR_MAX];
 
 	/* io related info */
@@ -400,7 +399,7 @@ void snic_handle_link_event(struct snic *);
 void snic_handle_link(struct work_struct *);
 
 int snic_queue_exch_ver_req(struct snic *);
-int snic_io_exch_ver_cmpl_handler(struct snic *, struct snic_fw_req *);
+void snic_io_exch_ver_cmpl_handler(struct snic *, struct snic_fw_req *);
 
 int snic_queue_wq_desc(struct snic *, void *os_buf, u16 len);
 

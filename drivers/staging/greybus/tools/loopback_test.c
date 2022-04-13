@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: BSD-3-Clause
 /*
  * Loopback test application
  *
  * Copyright 2015 Google Inc.
  * Copyright 2015 Linaro Ltd.
- *
- * Provided under the three clause BSD license found in the LICENSE file.
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -20,6 +19,7 @@
 #include <signal.h>
 
 #define MAX_NUM_DEVICES 10
+#define MAX_SYSFS_PREFIX 0x80
 #define MAX_SYSFS_PATH	0x200
 #define CSV_MAX_LINE	0x1000
 #define SYSFS_MAX_INT	0x20
@@ -68,7 +68,7 @@ struct loopback_results {
 };
 
 struct loopback_device {
-	char name[MAX_SYSFS_PATH];
+	char name[MAX_STR_LEN];
 	char sysfs_entry[MAX_SYSFS_PATH];
 	char debugfs_entry[MAX_SYSFS_PATH];
 	struct loopback_results results;
@@ -94,8 +94,8 @@ struct loopback_test {
 	int stop_all;
 	int poll_count;
 	char test_name[MAX_STR_LEN];
-	char sysfs_prefix[MAX_SYSFS_PATH];
-	char debugfs_prefix[MAX_SYSFS_PATH];
+	char sysfs_prefix[MAX_SYSFS_PREFIX];
+	char debugfs_prefix[MAX_SYSFS_PREFIX];
 	struct timespec poll_timeout;
 	struct loopback_device devices[MAX_NUM_DEVICES];
 	struct loopback_results aggregate_results;
@@ -168,7 +168,7 @@ GET_AVG(latency_avg);
 GET_AVG(apbridge_unipro_latency_avg);
 GET_AVG(gbphy_firmware_latency_avg);
 
-void abort()
+void abort(void)
 {
 	_exit(1);
 }
@@ -191,7 +191,7 @@ void usage(void)
 	"   -t     must be one of the test names - sink, transfer or ping\n"
 	"   -i     iteration count - the number of iterations to run the test over\n"
 	" Optional arguments\n"
-	"   -S     sysfs location - location for greybus 'endo' entires default /sys/bus/greybus/devices/\n"
+	"   -S     sysfs location - location for greybus 'endo' entries default /sys/bus/greybus/devices/\n"
 	"   -D     debugfs location - location for loopback debugfs entries default /sys/kernel/debug/gb_loopback/\n"
 	"   -s     size of data packet to send during test - defaults to zero\n"
 	"   -m     mask - a bit mask of connections to include example: -m 8 = 4th connection -m 9 = 1st and 4th connection etc\n"
@@ -413,17 +413,11 @@ static int get_results(struct loopback_test *t)
 	return 0;
 }
 
-void log_csv_error(int len, int err)
-{
-	fprintf(stderr, "unable to write %d bytes to csv %s\n", len,
-		strerror(err));
-}
-
 int format_output(struct loopback_test *t,
-			struct loopback_results *r,
-			const char *dev_name,
-			char *buf, int buf_len,
-			struct tm *tm)
+		  struct loopback_results *r,
+		  const char *dev_name,
+		  char *buf, int buf_len,
+		  struct tm *tm)
 {
 	int len = 0;
 
@@ -476,7 +470,7 @@ int format_output(struct loopback_test *t,
 			r->gbphy_firmware_latency_jitter);
 
 	} else {
-		len += snprintf(&buf[len], buf_len- len, ",%s,%s,%u,%u,%u",
+		len += snprintf(&buf[len], buf_len - len, ",%s,%s,%u,%u,%u",
 			t->test_name, dev_name, t->size, t->iteration_max,
 			r->error);
 
@@ -521,7 +515,6 @@ static int log_results(struct loopback_test *t)
 	int fd, i, len, ret;
 	struct tm tm;
 	time_t local_time;
-	mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
 	char file_name[MAX_SYSFS_PATH];
 	char data[CSV_MAX_LINE];
 
@@ -529,16 +522,16 @@ static int log_results(struct loopback_test *t)
 	tm = *localtime(&local_time);
 
 	/*
-	* file name will test_name_size_iteration_max.csv
-	* every time the same test with the same parameters is run we will then
-	* append to the same CSV with datestamp - representing each test
-	* dataset.
-	*/
+	 * file name will test_name_size_iteration_max.csv
+	 * every time the same test with the same parameters is run we will then
+	 * append to the same CSV with datestamp - representing each test
+	 * dataset.
+	 */
 	if (t->file_output && !t->porcelain) {
 		snprintf(file_name, sizeof(file_name), "%s_%d_%d.csv",
-			t->test_name, t->size, t->iteration_max);
+			 t->test_name, t->size, t->iteration_max);
 
-		fd = open(file_name, O_WRONLY | O_CREAT | O_APPEND, mode);
+		fd = open(file_name, O_WRONLY | O_CREAT | O_APPEND, 0644);
 		if (fd < 0) {
 			fprintf(stderr, "unable to open %s for appendation\n", file_name);
 			abort();
@@ -550,8 +543,8 @@ static int log_results(struct loopback_test *t)
 			continue;
 
 		len = format_output(t, &t->devices[i].results,
-					t->devices[i].name,
-					data, sizeof(data), &tm);
+				    t->devices[i].name,
+				    data, sizeof(data), &tm);
 		if (t->file_output && !t->porcelain) {
 			ret = write(fd, data, len);
 			if (ret == -1)
@@ -563,7 +556,7 @@ static int log_results(struct loopback_test *t)
 
 	if (t->aggregate_output) {
 		len = format_output(t, &t->aggregate_results, "aggregate",
-					data, sizeof(data), &tm);
+				    data, sizeof(data), &tm);
 		if (t->file_output && !t->porcelain) {
 			ret = write(fd, data, len);
 			if (ret == -1)
@@ -624,20 +617,19 @@ int find_loopback_devices(struct loopback_test *t)
 		snprintf(d->name, MAX_STR_LEN, "gb_loopback%u", dev_id);
 
 		snprintf(d->sysfs_entry, MAX_SYSFS_PATH, "%s%s/",
-			t->sysfs_prefix, d->name);
+			 t->sysfs_prefix, d->name);
 
 		snprintf(d->debugfs_entry, MAX_SYSFS_PATH, "%sraw_latency_%s",
-			t->debugfs_prefix, d->name);
+			 t->debugfs_prefix, d->name);
 
 		if (t->debug)
-			printf("add %s %s\n", d->sysfs_entry,
-				d->debugfs_entry);
+			printf("add %s %s\n", d->sysfs_entry, d->debugfs_entry);
 	}
 
 	ret = 0;
 done:
 	for (i = 0; i < n; i++)
-		free(namelist[n]);
+		free(namelist[i]);
 	free(namelist);
 baddir:
 	return ret;
@@ -646,7 +638,7 @@ baddir:
 static int open_poll_files(struct loopback_test *t)
 {
 	struct loopback_device *dev;
-	char buf[MAX_STR_LEN];
+	char buf[MAX_SYSFS_PATH + MAX_STR_LEN];
 	char dummy;
 	int fds_idx = 0;
 	int i;
@@ -664,7 +656,7 @@ static int open_poll_files(struct loopback_test *t)
 			goto err;
 		}
 		read(t->fds[fds_idx].fd, &dummy, 1);
-		t->fds[fds_idx].events = POLLERR|POLLPRI;
+		t->fds[fds_idx].events = POLLERR | POLLPRI;
 		t->fds[fds_idx].revents = 0;
 		fds_idx++;
 	}
@@ -675,7 +667,7 @@ static int open_poll_files(struct loopback_test *t)
 
 err:
 	for (i = 0; i < fds_idx; i++)
-		close(t->fds[fds_idx].fd);
+		close(t->fds[i].fd);
 
 	return -1;
 }
@@ -780,7 +772,8 @@ static void prepare_devices(struct loopback_test *t)
 {
 	int i;
 
-	/* Cancel any running tests on enabled devices. If
+	/*
+	 * Cancel any running tests on enabled devices. If
 	 * stop_all option is given, stop test on all devices.
 	 */
 	for (i = 0; i < t->device_count; i++)
@@ -803,16 +796,15 @@ static void prepare_devices(struct loopback_test *t)
 				t->iteration_max);
 
 		if (t->use_async) {
+			write_sysfs_val(t->devices[i].sysfs_entry, "async", 1);
 			write_sysfs_val(t->devices[i].sysfs_entry,
-				"async", 1);
+					"timeout", t->async_timeout);
 			write_sysfs_val(t->devices[i].sysfs_entry,
-				"timeout", t->async_timeout);
-			write_sysfs_val(t->devices[i].sysfs_entry,
-				"outstanding_operations_max",
-				t->async_outstanding_operations);
-		} else
-			write_sysfs_val(t->devices[i].sysfs_entry,
-				"async", 0);
+					"outstanding_operations_max",
+					t->async_outstanding_operations);
+		} else {
+			write_sysfs_val(t->devices[i].sysfs_entry, "async", 0);
+		}
 	}
 }
 
@@ -917,10 +909,10 @@ int main(int argc, char *argv[])
 			t.iteration_max = atoi(optarg);
 			break;
 		case 'S':
-			snprintf(t.sysfs_prefix, MAX_SYSFS_PATH, "%s", optarg);
+			snprintf(t.sysfs_prefix, MAX_SYSFS_PREFIX, "%s", optarg);
 			break;
 		case 'D':
-			snprintf(t.debugfs_prefix, MAX_SYSFS_PATH, "%s", optarg);
+			snprintf(t.debugfs_prefix, MAX_SYSFS_PREFIX, "%s", optarg);
 			break;
 		case 'm':
 			t.mask = atol(optarg);
@@ -971,10 +963,10 @@ int main(int argc, char *argv[])
 	}
 
 	if (!strcmp(t.sysfs_prefix, ""))
-		snprintf(t.sysfs_prefix, MAX_SYSFS_PATH, "%s", sysfs_prefix);
+		snprintf(t.sysfs_prefix, MAX_SYSFS_PREFIX, "%s", sysfs_prefix);
 
 	if (!strcmp(t.debugfs_prefix, ""))
-		snprintf(t.debugfs_prefix, MAX_SYSFS_PATH, "%s", debugfs_prefix);
+		snprintf(t.debugfs_prefix, MAX_SYSFS_PREFIX, "%s", debugfs_prefix);
 
 	ret = find_loopback_devices(&t);
 	if (ret)

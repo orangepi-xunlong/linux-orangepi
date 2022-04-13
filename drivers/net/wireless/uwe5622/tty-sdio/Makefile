@@ -2,6 +2,7 @@
 # ccflags-y += -DKERNEL_VERSION_414
 ccflags-y += -I$(srctree)/drivers/net/wireless/uwe5622/sprdwcn/include
 ccflags-y += -DOTT_UWE
+ccflags-y += -DWOBLE_FUN
 
 ifneq ($(UNISOC_BSP_INCLUDE),)
 ccflags-y += -I$(UNISOC_BSP_INCLUDE)

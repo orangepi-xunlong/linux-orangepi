@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/types.h>
 #include <linux/netdevice.h>
 #include <linux/interrupt.h>
@@ -60,23 +61,5 @@ void lmcEventLog(u32 EventNum, u32 arg2, u32 arg3)
   lmcEventLogIndex &= (LMC_EVENTLOGSIZE * LMC_EVENTLOGARGS) - 1;
 }
 #endif  /*  DEBUG  */
-
-void lmc_trace(struct net_device *dev, char *msg){
-#ifdef LMC_TRACE
-    unsigned long j = jiffies + 3; /* Wait for 50 ms */
-
-    if(in_interrupt()){
-        printk("%s: * %s\n", dev->name, msg);
-//        while(time_before(jiffies, j+10))
-//            ;
-    }
-    else {
-        printk("%s: %s\n", dev->name, msg);
-        while(time_before(jiffies, j))
-            schedule();
-    }
-#endif
-}
-
 
 /* --------------------------- end if_lmc_linux.c ------------------------ */

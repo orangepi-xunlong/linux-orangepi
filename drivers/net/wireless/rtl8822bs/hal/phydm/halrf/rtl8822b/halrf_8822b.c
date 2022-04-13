@@ -392,21 +392,6 @@ get_delta_swing_table_8822b(
 	}
 }
 
-void aac_check_8822b(struct PHY_DM_STRUCT *p_dm)
-{
-	struct _hal_rf_				*p_rf = &(p_dm->rf_table);
-	u32 temp;
-
-	if (!p_rf->aac_checked) {
-		ODM_RT_TRACE(p_dm, ODM_COMP_CALIBRATION, ODM_DBG_LOUD, ("[LCK]AAC check for 8822b\n"));
-		temp = odm_get_rf_reg(p_dm, RF_PATH_A, 0xc9, 0xf8);
-		if (temp < 4 || temp > 7) {
-			odm_set_rf_reg(p_dm, RF_PATH_A, 0xca, BIT(19), 0x0);
-			odm_set_rf_reg(p_dm, RF_PATH_A, 0xb2, 0x7c000, 0x6);
-		}
-		p_rf->aac_checked = true;
-	}
-}
 
 void
 _phy_lc_calibrate_8822b(

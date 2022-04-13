@@ -182,7 +182,6 @@
 	#define CONFIG_TCP_CSUM_OFFLOAD_RX
 
 	#define CONFIG_ADVANCE_OTA
-	#define CONFIG_BCN_RECV_TIME
 #endif /* CONFIG_RTL8822B */
 
 #ifdef CONFIG_RTL8821C
@@ -212,7 +211,6 @@
 	#endif /* RTW_IQK_FW_OFFLOAD */
 	#define CONFIG_AMPDU_PRETX_CD
 	/*#define DBG_PRE_TX_HANG*/
-	#define CONFIG_BCN_RECV_TIME
 #endif
 
 #endif /*__HAL_IC_CFG_H__*/

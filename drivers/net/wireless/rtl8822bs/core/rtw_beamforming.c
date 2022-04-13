@@ -48,7 +48,7 @@ static void _get_txvector_parameter(PADAPTER adapter, struct sta_info *sta, u8 *
 		aid = sta->cmn.aid;
 		bssid = adapter_mac_addr(adapter);
 		RTW_INFO("%s: AID=0x%x BSSID=" MAC_FMT "\n",
-			 __func__, sta->cmn.aid, MAC_ARG(bssid));
+			 __FUNCTION__, sta->cmn.aid, MAC_ARG(bssid));
 
 		/* AID[0:8] */
 		aid &= 0x1FF;
@@ -71,7 +71,7 @@ static void _get_txvector_parameter(PADAPTER adapter, struct sta_info *sta, u8 *
 	} else {
 		/* Addressed to AP */
 		bssid = sta->cmn.mac_addr;
-		RTW_INFO("%s: BSSID=" MAC_FMT "\n", __func__, MAC_ARG(bssid));
+		RTW_INFO("%s: BSSID=" MAC_FMT "\n", __FUNCTION__, MAC_ARG(bssid));
 
 		/* BSSID[39:47] */
 		*p_aid = (bssid[5] << 1) | (bssid[4] >> 7);
@@ -79,7 +79,7 @@ static void _get_txvector_parameter(PADAPTER adapter, struct sta_info *sta, u8 *
 	}
 
 	RTW_INFO("%s: GROUP_ID=0x%02x PARTIAL_AID=0x%04x\n",
-		 __func__, *g_id, *p_aid);
+		 __FUNCTION__, *g_id, *p_aid);
 }
 
 /*
@@ -183,20 +183,20 @@ static u8 _send_ht_ndpa_packet(PADAPTER adapter, u8 *ra, enum channel_width bw)
 	u8 aSifsTime = 0;
 
 
-	RTW_INFO("+%s: Send to " MAC_FMT "\n", __func__, MAC_ARG(ra));
+	RTW_INFO("+%s: Send to " MAC_FMT "\n", __FUNCTION__, MAC_ARG(ra));
 
 	pxmitpriv = &adapter->xmitpriv;
 	pmlmeext = &adapter->mlmeextpriv;
 	pmlmeinfo = &pmlmeext->mlmext_info;
 	bfee = rtw_bf_bfee_get_entry_by_addr(adapter, ra);
 	if (!bfee) {
-		RTW_ERR("%s: Cann't find beamformee entry!\n", __func__);
+		RTW_ERR("%s: Cann't find beamformee entry!\n", __FUNCTION__);
 		return _FALSE;
 	}
 
 	pmgntframe = alloc_mgtxmitframe(pxmitpriv);
 	if (!pmgntframe) {
-		RTW_ERR("%s: alloc mgnt frame fail!\n", __func__);
+		RTW_ERR("%s: alloc mgnt frame fail!\n", __FUNCTION__);
 		return _FALSE;
 	}
 
@@ -279,20 +279,20 @@ static u8 _send_vht_ndpa_packet(PADAPTER adapter, u8 *ra, u16 aid, enum channel_
 	u8 sequence = 0, aSifsTime = 0;
 
 
-	RTW_INFO("+%s: Send to " MAC_FMT "\n", __func__, MAC_ARG(ra));
+	RTW_INFO("+%s: Send to " MAC_FMT "\n", __FUNCTION__, MAC_ARG(ra));
 
 	pxmitpriv = &adapter->xmitpriv;
 	pmlmeext = &adapter->mlmeextpriv;
 	info = GET_BEAMFORM_INFO(adapter);
 	bfee = rtw_bf_bfee_get_entry_by_addr(adapter, ra);
 	if (!bfee) {
-		RTW_ERR("%s: Cann't find beamformee entry!\n", __func__);
+		RTW_ERR("%s: Cann't find beamformee entry!\n", __FUNCTION__);
 		return _FALSE;
 	}
 
 	pmgntframe = alloc_mgtxmitframe(pxmitpriv);
 	if (!pmgntframe) {
-		RTW_ERR("%s: alloc mgnt frame fail!\n", __func__);
+		RTW_ERR("%s: alloc mgnt frame fail!\n", __FUNCTION__);
 		return _FALSE;
 	}
 
@@ -388,7 +388,7 @@ static u8 _send_vht_mu_ndpa_packet(PADAPTER adapter, enum channel_width bw)
 	u8 i;
 
 
-	RTW_INFO("+%s\n", __func__);
+	RTW_INFO("+%s\n", __FUNCTION__);
 
 	pxmitpriv = &adapter->xmitpriv;
 	pmlmeext = &adapter->mlmeextpriv;
@@ -407,7 +407,7 @@ static u8 _send_vht_mu_ndpa_packet(PADAPTER adapter, enum channel_width bw)
 
 	pmgntframe = alloc_mgtxmitframe(pxmitpriv);
 	if (!pmgntframe) {
-		RTW_ERR("%s: alloc mgnt frame fail!\n", __func__);
+		RTW_ERR("%s: alloc mgnt frame fail!\n", __FUNCTION__);
 		return _FALSE;
 	}
 
@@ -494,13 +494,13 @@ static u8 _send_bf_report_poll(PADAPTER adapter, u8 *ra, u8 bFinalPoll)
 	u8 *pframe;
 
 
-	RTW_INFO("+%s: Send to " MAC_FMT "\n", __func__, MAC_ARG(ra));
+	RTW_INFO("+%s: Send to " MAC_FMT "\n", __FUNCTION__, MAC_ARG(ra));
 
 	pxmitpriv = &adapter->xmitpriv;
 
 	pmgntframe = alloc_mgtxmitframe(pxmitpriv);
 	if (!pmgntframe) {
-		RTW_ERR("%s: alloc mgnt frame fail!\n", __func__);
+		RTW_ERR("%s: alloc mgnt frame fail!\n", __FUNCTION__);
 		return _FALSE;
 	}
 
@@ -641,7 +641,7 @@ static int _sounding_get_list(PADAPTER adapter)
 			continue;
 
 		if (bfee->state != BEAMFORM_ENTRY_HW_STATE_ADDED) {
-			RTW_ERR("%s: Invalid BFee idx(%d) Hw state=%d\n", __func__, i, bfee->state);
+			RTW_ERR("%s: Invalid BFee idx(%d) Hw state=%d\n", __FUNCTION__, i, bfee->state);
 			not_ready++;
 			continue;
 		}
@@ -666,7 +666,7 @@ static int _sounding_get_list(PADAPTER adapter)
 		if (bfee->cap & BEAMFORMEE_CAP_VHT_MU) {
 			/* MU BFee */
 			if (mu_idx >= MAX_NUM_BEAMFORMEE_MU) {
-				RTW_ERR("%s: Too much MU bfee entry(Limit:%d)\n", __func__, MAX_NUM_BEAMFORMEE_MU);
+				RTW_ERR("%s: Too much MU bfee entry(Limit:%d)\n", __FUNCTION__, MAX_NUM_BEAMFORMEE_MU);
 				continue;
 			}
 
@@ -679,7 +679,7 @@ static int _sounding_get_list(PADAPTER adapter)
 		} else if (bfee->cap & (BEAMFORMEE_CAP_VHT_SU|BEAMFORMEE_CAP_HT_EXPLICIT)) {
 			/* SU BFee (HT/VHT) */
 			if (su_idx >= MAX_NUM_BEAMFORMEE_SU) {
-				RTW_ERR("%s: Too much SU bfee entry(Limit:%d)\n", __func__, MAX_NUM_BEAMFORMEE_SU);
+				RTW_ERR("%s: Too much SU bfee entry(Limit:%d)\n", __FUNCTION__, MAX_NUM_BEAMFORMEE_SU);
 				continue;
 			}
 
@@ -704,7 +704,7 @@ static int _sounding_get_list(PADAPTER adapter)
 			ret = -2;
 	}
 
-	RTW_INFO("-%s: There are %d SU and %d MU BFees in this sounding period\n", __func__, su_idx, mu_idx);
+	RTW_INFO("-%s: There are %d SU and %d MU BFees in this sounding period\n", __FUNCTION__, su_idx, mu_idx);
 
 	return ret;
 }
@@ -724,17 +724,17 @@ static void _sounding_handler(PADAPTER adapter)
 	info = GET_BEAMFORM_INFO(adapter);
 	sounding = &info->sounding_info;
 
-	RTW_DBG("+%s: state=%d\n", __func__, sounding->state);
+	RTW_DBG("+%s: state=%d\n", __FUNCTION__, sounding->state);
 	if ((sounding->state != SOUNDING_STATE_INIT)
 	    && (sounding->state != SOUNDING_STATE_SU_SOUNDDOWN)
 	    && (sounding->state != SOUNDING_STATE_MU_SOUNDDOWN)
 	    && (sounding->state != SOUNDING_STATE_SOUNDING_TIMEOUT)) {
-		RTW_WARN("%s: Invalid State(%d) and return!\n", __func__, sounding->state);
+		RTW_WARN("%s: Invalid State(%d) and return!\n", __FUNCTION__, sounding->state);
 		return;
 	}
 
 	if (sounding->state == SOUNDING_STATE_INIT) {
-		RTW_INFO("%s: Sounding start\n", __func__);
+		RTW_INFO("%s: Sounding start\n", __FUNCTION__);
 
 		/* Init Var */
 		_sounding_reset_vars(adapter);
@@ -744,25 +744,25 @@ static void _sounding_handler(PADAPTER adapter)
 		if (ret == -1) {
 			wait_cnt = 0;
 			sounding->state = SOUNDING_STATE_NONE;
-			RTW_ERR("%s: No BFees found, set to SOUNDING_STATE_NONE\n", __func__);
+			RTW_ERR("%s: No BFees found, set to SOUNDING_STATE_NONE\n", __FUNCTION__);
 			info->sounding_running--;
 			return;
 		}
 		if (ret == -2) {
-			RTW_WARN("%s: Temporarily cann't find BFee to sounding\n", __func__);
+			RTW_WARN("%s: Temporarily cann't find BFee to sounding\n", __FUNCTION__);
 			if (wait_cnt < 5) {
 				wait_cnt++;
 			} else {
 				wait_cnt = 0;
 				sounding->state = SOUNDING_STATE_NONE;
-				RTW_ERR("%s: Wait changing state timeout!! Set to SOUNDING_STATE_NONE\n", __func__);
+				RTW_ERR("%s: Wait changing state timeout!! Set to SOUNDING_STATE_NONE\n", __FUNCTION__);
 			}
 			info->sounding_running--;
 			return;
 		}
 		if (ret != 0) {
 			wait_cnt = 0;
-			RTW_ERR("%s: Unkown state(%d)!\n", __func__, ret);
+			RTW_ERR("%s: Unkown state(%d)!\n", __FUNCTION__, ret);
 			info->sounding_running--;
 			return;
 
@@ -771,7 +771,7 @@ static void _sounding_handler(PADAPTER adapter)
 		wait_cnt = 0;
 
 		if (check_fwstate(&adapter->mlmepriv, WIFI_SITE_MONITOR) == _TRUE) {
-			RTW_INFO("%s: Sounding abort! scanning APs...\n", __func__);
+			RTW_INFO("%s: Sounding abort! scanning APs...\n", __FUNCTION__);
 			info->sounding_running--;
 			return;
 		}
@@ -793,7 +793,7 @@ static void _sounding_handler(PADAPTER adapter)
 		sounding->su_bfee_curidx = su_idx;
 		/* Set to sounding start state */
 		sounding->state = SOUNDING_STATE_SU_START;
-		RTW_DBG("%s: Set to SOUNDING_STATE_SU_START\n", __func__);
+		RTW_DBG("%s: Set to SOUNDING_STATE_SU_START\n", __FUNCTION__);
 
 		bfee->sounding = _TRUE;
 		/* Reset sounding timeout flag for the new sounding */
@@ -823,7 +823,7 @@ static void _sounding_handler(PADAPTER adapter)
 		 * <tynli_note> Need to check the MU starting condition. 2015.12.15.
 		 */
 		sounding->state = SOUNDING_STATE_MU_START;
-		RTW_DBG("%s: Set to SOUNDING_STATE_MU_START\n", __func__);
+		RTW_DBG("%s: Set to SOUNDING_STATE_MU_START\n", __FUNCTION__);
 
 		/* Update MU BFee info */
 		for (i = 0; i < sounding->candidate_mu_bfee_cnt; i++) {
@@ -854,7 +854,7 @@ static void _sounding_handler(PADAPTER adapter)
 
 	info->sounding_running--;
 	sounding->state = SOUNDING_STATE_INIT;
-	RTW_INFO("%s: Sounding finished!\n", __func__);
+	RTW_INFO("%s: Sounding finished!\n", __FUNCTION__);
 	rtw_ps_deny_cancel(adapter, PS_DENY_BEAMFORMING);
 }
 
@@ -876,7 +876,7 @@ static void _sounding_force_stop(PADAPTER adapter)
 
 	info->sounding_running--;
 	sounding->state = SOUNDING_STATE_INIT;
-	RTW_INFO("%s: Sounding finished!\n", __func__);
+	RTW_INFO("%s: Sounding finished!\n", __FUNCTION__);
 	rtw_ps_deny_cancel(adapter, PS_DENY_BEAMFORMING);
 }
 
@@ -888,17 +888,17 @@ static void _sounding_timer_handler(void *FunctionContext)
 	static u8 delay = 0;
 
 
-	RTW_DBG("+%s\n", __func__);
+	RTW_DBG("+%s\n", __FUNCTION__);
 
 	adapter = (PADAPTER)FunctionContext;
 	info = GET_BEAMFORM_INFO(adapter);
 	sounding = &info->sounding_info;
 
 	if (SOUNDING_STATE_NONE == sounding->state) {
-		RTW_INFO("%s: Stop!\n", __func__);
+		RTW_INFO("%s: Stop!\n", __FUNCTION__);
 		if (info->sounding_running)
 			RTW_WARN("%s: souding_running=%d when thread stop!\n",
-				 __func__, info->sounding_running);
+				 __FUNCTION__, info->sounding_running);
 		return;
 	}
 
@@ -906,7 +906,7 @@ static void _sounding_timer_handler(void *FunctionContext)
 
 	if (!info->sounding_running) {
 		if (SOUNDING_STATE_INIT != sounding->state) {
-			RTW_WARN("%s: state(%d) != SOUNDING_STATE_INIT!!\n", __func__, sounding->state);
+			RTW_WARN("%s: state(%d) != SOUNDING_STATE_INIT!!\n", __FUNCTION__, sounding->state);
 			sounding->state = SOUNDING_STATE_INIT;
 		}
 		delay = 0;
@@ -916,9 +916,9 @@ static void _sounding_timer_handler(void *FunctionContext)
 		if (delay != 0xFF)
 			delay++;
 		RTW_WARN("%s: souding is still processing...(state:%d, running:%d, delay:%d)\n",
-			 __func__, sounding->state, info->sounding_running, delay);
+			 __FUNCTION__, sounding->state, info->sounding_running, delay);
 		if (delay > 3) {
-			RTW_WARN("%s: Stop sounding!!\n", __func__);
+			RTW_WARN("%s: Stop sounding!!\n", __FUNCTION__);
 			_sounding_force_stop(adapter);
 		}
 	}
@@ -932,7 +932,7 @@ static void _sounding_timeout_timer_handler(void *FunctionContext)
 	struct beamformee_entry *bfee;
 
 
-	RTW_WARN("+%s\n", __func__);
+	RTW_WARN("+%s\n", __FUNCTION__);
 
 	adapter = (PADAPTER)FunctionContext;
 	info = GET_BEAMFORM_INFO(adapter);
@@ -940,16 +940,16 @@ static void _sounding_timeout_timer_handler(void *FunctionContext)
 
 	if (SOUNDING_STATE_SU_START == sounding->state) {
 		sounding->state = SOUNDING_STATE_SOUNDING_TIMEOUT;
-		RTW_ERR("%s: Set to SU SOUNDING_STATE_SOUNDING_TIMEOUT\n", __func__);
+		RTW_ERR("%s: Set to SU SOUNDING_STATE_SOUNDING_TIMEOUT\n", __FUNCTION__);
 		/* SU BFee */
 		bfee = &info->bfee_entry[sounding->su_bfee_curidx];
 		bfee->bSoundingTimeout = _TRUE;
-		RTW_WARN("%s: The BFee entry[%d] is Sounding Timeout!\n", __func__, sounding->su_bfee_curidx);
+		RTW_WARN("%s: The BFee entry[%d] is Sounding Timeout!\n", __FUNCTION__, sounding->su_bfee_curidx);
 	} else if (SOUNDING_STATE_MU_START == sounding->state) {
 		sounding->state = SOUNDING_STATE_SOUNDING_TIMEOUT;
-		RTW_ERR("%s: Set to MU SOUNDING_STATE_SOUNDING_TIMEOUT\n", __func__);
+		RTW_ERR("%s: Set to MU SOUNDING_STATE_SOUNDING_TIMEOUT\n", __FUNCTION__);
 	} else {
-		RTW_WARN("%s: unexpected sounding state:0x%02x\n", __func__, sounding->state);
+		RTW_WARN("%s: unexpected sounding state:0x%02x\n", __FUNCTION__, sounding->state);
 		return;
 	}
 
@@ -1037,7 +1037,7 @@ static struct beamformer_entry *_bfer_add_entry(PADAPTER adapter,
 			}
 		}
 		RTW_INFO("%s: Add BFer entry beamformer_su_reg_maping=%#x, su_reg_index=%d\n",
-			 __func__, info->beamformer_su_reg_maping, bfer->su_reg_index);
+			 __FUNCTION__, info->beamformer_su_reg_maping, bfer->su_reg_index);
 	}
 
 	return bfer;
@@ -1242,7 +1242,7 @@ static struct beamformee_entry *_bfee_add_entry(PADAPTER adapter,
 					info->TargetSUBFee->bSuspendSUCap = _TRUE;
 					info->TargetSUBFee->bDeleteSounding = _TRUE;
 				} else {
-					RTW_ERR("%s: UNEXPECTED!! info->TargetSUBFee is NULL!", __func__);
+					RTW_ERR("%s: UNEXPECTED!! info->TargetSUBFee is NULL!", __FUNCTION__);
 				}
 				info->TargetSUBFee = NULL;
 				_rtw_memset(&info->TargetCSIInfo, 0, sizeof(struct _RT_CSI_INFO));
@@ -1259,7 +1259,7 @@ static struct beamformee_entry *_bfee_add_entry(PADAPTER adapter,
 			}
 		}
 		RTW_INFO("%s: Add BFee entry beamformee_mu_reg_maping=%#x, mu_reg_index=%d\n",
-			 __func__, info->beamformee_mu_reg_maping, bfee->mu_reg_index);
+			 __FUNCTION__, info->beamformee_mu_reg_maping, bfee->mu_reg_index);
 
 	} else if (TEST_FLAG(bf_cap, BEAMFORMEE_CAP_VHT_SU|BEAMFORMEE_CAP_HT_EXPLICIT)) {
 		info->beamformee_su_cnt += 1;
@@ -1284,7 +1284,7 @@ static struct beamformee_entry *_bfee_add_entry(PADAPTER adapter,
 			}
 		}
 		RTW_INFO("%s: Add BFee entry beamformee_su_reg_maping=%#x, su_reg_index=%d\n",
-			 __func__, info->beamformee_su_reg_maping, bfee->su_reg_index);
+			 __FUNCTION__, info->beamformee_su_reg_maping, bfee->su_reg_index);
 	}
 
 	return bfee;
@@ -1383,19 +1383,19 @@ static void _beamforming_enter(PADAPTER adapter, void *p)
 	sta = rtw_get_stainfo(&adapter->stapriv, sta_copy->cmn.mac_addr);
 	if (!sta) {
 		RTW_ERR("%s: Cann't find STA info for " MAC_FMT "\n",
-			__func__, MAC_ARG(sta_copy->cmn.mac_addr));
+			__FUNCTION__, MAC_ARG(sta_copy->cmn.mac_addr));
 		return;
 	}
 	if (sta != sta_copy) {
 		RTW_WARN("%s: Origin sta(fake)=%p realsta=%p for " MAC_FMT "\n",
-		__func__, sta_copy, sta, MAC_ARG(sta_copy->cmn.mac_addr));
+		__FUNCTION__, sta_copy, sta, MAC_ARG(sta_copy->cmn.mac_addr));
 	}
 
 	/* The current setting does not support Beaforming */
 	wireless_mode = sta->wireless_mode;
 	if ((is_supported_ht(wireless_mode) == _FALSE)
 	    && (is_supported_vht(wireless_mode) == _FALSE)) {
-		RTW_WARN("%s: Not support HT or VHT mode\n", __func__);
+		RTW_WARN("%s: Not support HT or VHT mode\n", __FUNCTION__);
 		return;
 	}
 
@@ -1426,13 +1426,13 @@ static void _beamforming_enter(PADAPTER adapter, void *p)
 		/* The other side is beamformer */
 		bfer = _bfer_add_entry(adapter, sta, sta_bf_cap, sounding_dim, comp_steering_num);
 		if (!bfer)
-			RTW_ERR("%s: Fail to allocate bfer entry!\n", __func__);
+			RTW_ERR("%s: Fail to allocate bfer entry!\n", __FUNCTION__);
 	}
 	if (sta_bf_cap & BEAMFORMEE_CAP) {
 		/* The other side is beamformee */
 		bfee = _bfee_add_entry(adapter, sta, sta_bf_cap, sounding_dim, comp_steering_num);
 		if (!bfee)
-			RTW_ERR("%s: Fail to allocate bfee entry!\n", __func__);
+			RTW_ERR("%s: Fail to allocate bfee entry!\n", __FUNCTION__);
 	}
 	if (!bfer && !bfee)
 		return;
@@ -1452,7 +1452,7 @@ static void _beamforming_enter(PADAPTER adapter, void *p)
 
 static void _beamforming_reset(PADAPTER adapter)
 {
-	RTW_ERR("%s: Not ready!!\n", __func__);
+	RTW_ERR("%s: Not ready!!\n", __FUNCTION__);
 }
 
 static void _beamforming_leave(PADAPTER adapter, u8 *ra)
@@ -1463,7 +1463,7 @@ static void _beamforming_leave(PADAPTER adapter, u8 *ra)
 	u8 bHwStateAddInit = _FALSE;
 
 
-	RTW_INFO("+%s\n", __func__);
+	RTW_INFO("+%s\n", __FUNCTION__);
 
 	info = GET_BEAMFORM_INFO(adapter);
 	bfer = _bfer_get_entry_by_addr(adapter, ra);
@@ -1471,7 +1471,7 @@ static void _beamforming_leave(PADAPTER adapter, u8 *ra)
 
 	if (!bfer && !bfee) {
 		RTW_WARN("%s: " MAC_FMT " is neither beamforming ee or er!!\n",
-			__func__, MAC_ARG(ra));
+			__FUNCTION__, MAC_ARG(ra));
 		return;
 	}
 
@@ -1490,7 +1490,7 @@ static void _beamforming_leave(PADAPTER adapter, u8 *ra)
 		_sounding_init(&info->sounding_info);
 	}
 
-	RTW_INFO("-%s\n", __func__);
+	RTW_INFO("-%s\n", __FUNCTION__);
 }
 
 static void _beamforming_sounding_down(PADAPTER adapter, u8 status)
@@ -1503,19 +1503,19 @@ static void _beamforming_sounding_down(PADAPTER adapter, u8 status)
 	info = GET_BEAMFORM_INFO(adapter);
 	sounding = &info->sounding_info;
 
-	RTW_INFO("+%s: sounding=%d, status=0x%02x\n", __func__, sounding->state, status);
+	RTW_INFO("+%s: sounding=%d, status=0x%02x\n", __FUNCTION__, sounding->state, status);
 
 	if (sounding->state == SOUNDING_STATE_MU_START) {
-		RTW_INFO("%s: MU sounding done\n", __func__);
+		RTW_INFO("%s: MU sounding done\n", __FUNCTION__);
 		sounding->state = SOUNDING_STATE_MU_SOUNDDOWN;
-		RTW_INFO("%s: Set to SOUNDING_STATE_MU_SOUNDDOWN\n", __func__);
+		RTW_INFO("%s: Set to SOUNDING_STATE_MU_SOUNDDOWN\n", __FUNCTION__);
 		info->SetHalSoundownOnDemandCnt++;
 		rtw_hal_set_hwreg(adapter, HW_VAR_SOUNDING_STATUS, &status);
 	} else if (sounding->state == SOUNDING_STATE_SU_START) {
-		RTW_INFO("%s: SU entry[%d] sounding down\n", __func__, sounding->su_bfee_curidx);
+		RTW_INFO("%s: SU entry[%d] sounding down\n", __FUNCTION__, sounding->su_bfee_curidx);
 		bfee = &info->bfee_entry[sounding->su_bfee_curidx];
 		sounding->state = SOUNDING_STATE_SU_SOUNDDOWN;
-		RTW_INFO("%s: Set to SOUNDING_STATE_SU_SOUNDDOWN\n", __func__);
+		RTW_INFO("%s: Set to SOUNDING_STATE_SU_SOUNDDOWN\n", __FUNCTION__);
 
 		/*
 		 * <tynli_note>
@@ -1524,7 +1524,7 @@ static void _beamforming_sounding_down(PADAPTER adapter, u8 status)
 		 *	2015.12.10
 		 */
 		if (_TRUE == bfee->bSoundingTimeout) {
-			RTW_WARN("%s: The entry[%d] is bSoundingTimeout!\n", __func__, sounding->su_bfee_curidx);
+			RTW_WARN("%s: The entry[%d] is bSoundingTimeout!\n", __FUNCTION__, sounding->su_bfee_curidx);
 			bfee->bSoundingTimeout = _FALSE;
 			return;
 		}
@@ -1535,19 +1535,19 @@ static void _beamforming_sounding_down(PADAPTER adapter, u8 status)
 			info->SetHalSoundownOnDemandCnt++;
 			rtw_hal_set_hwreg(adapter, HW_VAR_SOUNDING_STATUS, &status);
 		} else if (_TRUE == bfee->bDeleteSounding) {
-			RTW_WARN("%s: Delete entry[%d] sounding info!\n", __func__, sounding->su_bfee_curidx);
+			RTW_WARN("%s: Delete entry[%d] sounding info!\n", __FUNCTION__, sounding->su_bfee_curidx);
 			rtw_hal_set_hwreg(adapter, HW_VAR_SOUNDING_STATUS, &status);
 			bfee->bDeleteSounding = _FALSE;
 		} else {
 			bfee->LogStatusFailCnt++;
-			RTW_WARN("%s: LogStatusFailCnt=%d\n", __func__, bfee->LogStatusFailCnt);
+			RTW_WARN("%s: LogStatusFailCnt=%d\n", __FUNCTION__, bfee->LogStatusFailCnt);
 			if (bfee->LogStatusFailCnt > 30) {
-				RTW_ERR("%s: LogStatusFailCnt > 30, Stop SOUNDING!!\n", __func__);
+				RTW_ERR("%s: LogStatusFailCnt > 30, Stop SOUNDING!!\n", __FUNCTION__);
 				rtw_bf_cmd(adapter, BEAMFORMING_CTRL_LEAVE, bfee->mac_addr, ETH_ALEN, 1);
 			}
 		}
 	} else {
-		RTW_WARN("%s: unexpected sounding state:0x%02x\n", __func__, sounding->state);
+		RTW_WARN("%s: unexpected sounding state:0x%02x\n", __FUNCTION__, sounding->state);
 		return;
 	}
 
@@ -1564,7 +1564,7 @@ static void _c2h_snd_txbf(PADAPTER adapter, u8 *buf, u8 buf_len)
 	_cancel_timer_ex(&info->sounding_timeout_timer);
 
 	res = C2H_SND_TXBF_GET_SND_RESULT(buf) ? _TRUE : _FALSE;
-	RTW_INFO("+%s: %s\n", __func__, res==_TRUE?"Success":"Fail!");
+	RTW_INFO("+%s: %s\n", __FUNCTION__, res==_TRUE?"Success":"Fail!");
 
 	rtw_bf_cmd(adapter, BEAMFORMING_CTRL_END_PERIOD, &res, 1, 1);
 }
@@ -1597,7 +1597,7 @@ struct beamformee_entry *rtw_bf_bfee_get_entry_by_addr(PADAPTER adapter, u8 *ra)
 
 void rtw_bf_get_ndpa_packet(PADAPTER adapter, union recv_frame *precv_frame)
 {
-	RTW_DBG("+%s\n", __func__);
+	RTW_DBG("+%s\n", __FUNCTION__);
 }
 
 u32 rtw_bf_get_report_packet(PADAPTER adapter, union recv_frame *precv_frame)
@@ -1615,7 +1615,7 @@ u32 rtw_bf_get_report_packet(PADAPTER adapter, union recv_frame *precv_frame)
 	u16 CSIMatrixLen = 0;
 
 
-	RTW_INFO("+%s\n", __func__);
+	RTW_INFO("+%s\n", __FUNCTION__);
 
 	info = GET_BEAMFORM_INFO(adapter);
 	pframe = precv_frame->u.hdr.rx_data;
@@ -1680,7 +1680,7 @@ u32 rtw_bf_get_report_packet(PADAPTER adapter, union recv_frame *precv_frame)
 	}
 
 	RTW_INFO("%s: pkt type=%d-%d, Nc=%d, Nr=%d, CH_W=%d, Ng=%d, CodeBook=%d\n",
-		 __func__, category, action, Nc, Nr, CH_W, Ng, CodeBook);
+		 __FUNCTION__, category, action, Nc, Nr, CH_W, Ng, CodeBook);
 
 	return ret;
 }
@@ -1753,7 +1753,7 @@ void rtw_bf_get_vht_gid_mgnt_packet(PADAPTER adapter, union recv_frame *precv_fr
 	u8 *ta, *gid, *position;
 
 
-	RTW_DBG("+%s\n", __func__);
+	RTW_DBG("+%s\n", __FUNCTION__);
 
 	pframe = precv_frame->u.hdr.rx_data;
 
@@ -1946,7 +1946,7 @@ void rtw_bf_update_traffic(PADAPTER adapter)
 
 		sta = rtw_get_stainfo(&adapter->stapriv, bfee->mac_addr);
 		if (!sta) {
-			RTW_ERR("%s: Cann't find sta_info for " MAC_FMT "!\n", __func__, MAC_ARG(bfee->mac_addr));
+			RTW_ERR("%s: Cann't find sta_info for " MAC_FMT "!\n", __FUNCTION__, MAC_ARG(bfee->mac_addr));
 			continue;
 		}
 
@@ -1964,7 +1964,7 @@ void rtw_bf_update_traffic(PADAPTER adapter)
 			tp[i] = toMbps(tx_bytes, time);
 			tx_rate[i] = rtw_get_current_tx_rate(adapter, sta);
 			RTW_INFO("%s: BFee idx(%d), MadId(%d), TxTP=%lld bytes (%d Mbps), txrate=%d\n",
-				 __func__, i, bfee->mac_id, tx_bytes, tp[i], tx_rate[i]);
+				 __FUNCTION__, i, bfee->mac_id, tx_bytes, tp[i], tx_rate[i]);
 		}
 	}
 
@@ -1974,7 +1974,7 @@ void rtw_bf_update_traffic(PADAPTER adapter)
 		bfee = &info->bfee_entry[i];
 		if (_FALSE == bfee->used) {
 			if (sounding_idx & BIT(i))
-				RTW_WARN("%s: bfee(%d) not in used but need sounding?!\n", __func__, i);
+				RTW_WARN("%s: bfee(%d) not in used but need sounding?!\n", __FUNCTION__, i);
 			continue;
 		}
 
@@ -2625,7 +2625,7 @@ void	beamforming_end_fw(PADAPTER adapter)
 
 	rtw_hal_set_hwreg(adapter, HW_VAR_SOUNDING_FW_NDPA, (u8 *)&idx);
 
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 }
 
 BOOLEAN	beamforming_start_period(PADAPTER adapter)
@@ -2644,7 +2644,7 @@ BOOLEAN	beamforming_start_period(PADAPTER adapter)
 	else
 		ret = _FALSE;
 
-	RTW_INFO("%s Idx %d Mode %d BW %d Period %d\n", __func__,
+	RTW_INFO("%s Idx %d Mode %d BW %d Period %d\n", __FUNCTION__,
 		pSoundInfo->sound_idx, pSoundInfo->sound_mode, pSoundInfo->sound_bw, pSoundInfo->sound_period);
 
 	return ret;
@@ -2689,9 +2689,9 @@ void	beamforming_notify(PADAPTER adapter)
 				pBeamInfo->beamforming_state = BEAMFORMING_STATE_START;
 		}
 	} else
-		RTW_INFO("%s BeamformState %d\n", __func__, pBeamInfo->beamforming_state);
+		RTW_INFO("%s BeamformState %d\n", __FUNCTION__, pBeamInfo->beamforming_state);
 
-	RTW_INFO("%s BeamformState %d bSounding %d\n", __func__, pBeamInfo->beamforming_state, bSounding);
+	RTW_INFO("%s BeamformState %d bSounding %d\n", __FUNCTION__, pBeamInfo->beamforming_state, bSounding);
 }
 
 BOOLEAN	beamforming_init_entry(PADAPTER	adapter, struct sta_info *psta, u8 *idx)
@@ -2779,7 +2779,7 @@ BOOLEAN	beamforming_init_entry(PADAPTER	adapter, struct sta_info *psta, u8 *idx)
 		psta->cmn.bf_info.p_aid = pBeamformEntry->p_aid;
 		psta->cmn.bf_info.g_id = pBeamformEntry->g_id;
 
-		RTW_INFO("%s Idx %d\n", __func__, *idx);
+		RTW_INFO("%s Idx %d\n", __FUNCTION__, *idx);
 	} else
 		return _FALSE;
 
@@ -2794,7 +2794,7 @@ void	beamforming_deinit_entry(PADAPTER adapter, u8 *ra)
 	if (beamforming_remove_entry(pmlmepriv, ra, &idx) == _TRUE)
 		rtw_hal_set_hwreg(adapter, HW_VAR_SOUNDING_LEAVE, (u8 *)&idx);
 
-	RTW_INFO("%s Idx %d\n", __func__, idx);
+	RTW_INFO("%s Idx %d\n", __FUNCTION__, idx);
 }
 
 void	beamforming_reset(PADAPTER adapter)
@@ -2812,7 +2812,7 @@ void	beamforming_reset(PADAPTER adapter)
 		}
 	}
 
-	RTW_INFO("%s\n", __func__);
+	RTW_INFO("%s\n", __FUNCTION__);
 }
 
 void beamforming_sounding_fail(PADAPTER Adapter)
@@ -2836,10 +2836,10 @@ void	beamforming_check_sounding_success(PADAPTER Adapter, BOOLEAN status)
 		pEntry->LogStatusFailCnt = 0;
 	else {
 		pEntry->LogStatusFailCnt++;
-		RTW_INFO("%s LogStatusFailCnt %d\n", __func__, pEntry->LogStatusFailCnt);
+		RTW_INFO("%s LogStatusFailCnt %d\n", __FUNCTION__, pEntry->LogStatusFailCnt);
 	}
 	if (pEntry->LogStatusFailCnt > 20) {
-		RTW_INFO("%s LogStatusFailCnt > 20, Stop SOUNDING\n", __func__);
+		RTW_INFO("%s LogStatusFailCnt > 20, Stop SOUNDING\n", __FUNCTION__);
 		/* pEntry->bSound = _FALSE; */
 		/* rtw_hal_set_hwreg(Adapter, HW_VAR_SOUNDING_FW_NDPA, (u8 *)&pBeamInfo->beamforming_cur_idx); */
 		/* beamforming_deinit_entry(Adapter, pEntry->mac_addr); */
@@ -2854,7 +2854,7 @@ void	beamforming_enter(PADAPTER adapter, PVOID psta)
 	if (beamforming_init_entry(adapter, (struct sta_info *)psta, &idx))
 		rtw_hal_set_hwreg(adapter, HW_VAR_SOUNDING_ENTER, (u8 *)&idx);
 
-	/* RTW_INFO("%s Idx %d\n", __func__, idx); */
+	/* RTW_INFO("%s Idx %d\n", __FUNCTION__, idx); */
 }
 
 void	beamforming_leave(PADAPTER adapter, u8 *ra)
@@ -2940,7 +2940,7 @@ u32	rtw_beamforming_get_report_frame(PADAPTER	 Adapter, union recv_frame *precv_
 	else
 		return ret;
 
-	/*RTW_INFO("%s MacId %d offset=%d\n", __func__, pBeamformEntry->mac_id, offset);*/
+	/*RTW_INFO("%s MacId %d offset=%d\n", __FUNCTION__, pBeamformEntry->mac_id, offset);*/
 
 	if (_rtw_memcmp(pBeamformEntry->PreCsiReport + offset, pframe + offset, frame_len - offset) == _FALSE)
 		pBeamformEntry->DefaultCsiCnt = 0;

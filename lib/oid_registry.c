@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* ASN.1 Object identifier (OID) registry
  *
  * Copyright (C) 2012 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public Licence
- * as published by the Free Software Foundation; either version
- * 2 of the Licence, or (at your option) any later version.
  */
 
 #include <linux/module.h>
@@ -120,10 +116,10 @@ int sprint_oid(const void *data, size_t datasize, char *buffer, size_t bufsize)
 
 	n = *v++;
 	ret = count = snprintf(buffer, bufsize, "%u.%u", n / 40, n % 40);
+	if (count >= bufsize)
+		return -ENOBUFS;
 	buffer += count;
 	bufsize -= count;
-	if (bufsize == 0)
-		return -ENOBUFS;
 
 	while (v < end) {
 		num = 0;
@@ -141,10 +137,10 @@ int sprint_oid(const void *data, size_t datasize, char *buffer, size_t bufsize)
 			} while (n & 0x80);
 		}
 		ret += count = snprintf(buffer, bufsize, ".%lu", num);
+		if (count >= bufsize)
+			return -ENOBUFS;
 		buffer += count;
 		bufsize -= count;
-		if (bufsize == 0)
-			return -ENOBUFS;
 	}
 
 	return ret;

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __ASM_SH_IRQ_H
 #define __ASM_SH_IRQ_H
 
@@ -65,8 +66,5 @@ extern void irq_finish(unsigned int irq);
 #endif
 
 #include <asm-generic/irq.h>
-#ifdef CONFIG_CPU_SH5
-#include <cpu/irq.h>
-#endif
 
 #endif /* __ASM_SH_IRQ_H */

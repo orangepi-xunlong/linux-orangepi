@@ -450,11 +450,10 @@ skip_this_frame:
 
 	if (bp + length > lp->end_dma_buff) {
 		int semi_cnt = lp->end_dma_buff - bp;
-		memcpy(skb_put(skb, semi_cnt), bp, semi_cnt);
-		memcpy(skb_put(skb, length - semi_cnt), lp->dma_buff,
-		       length - semi_cnt);
+		skb_put_data(skb, bp, semi_cnt);
+		skb_put_data(skb, lp->dma_buff, length - semi_cnt);
 	} else {
-		memcpy(skb_put(skb, length), bp, length);
+		skb_put_data(skb, bp, length);
 	}
 	bp += (length + 3) & ~3;
 	if (bp >= lp->end_dma_buff)
@@ -1129,7 +1128,7 @@ net_get_stats(struct net_device *dev)
 	return &dev->stats;
 }
 
-static void net_timeout(struct net_device *dev)
+static void net_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	/* If we get here, some higher level has decided we are broken.
 	   There should really be a "kick me" function call instead. */
@@ -1266,7 +1265,6 @@ static const struct net_device_ops net_ops = {
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	.ndo_poll_controller	= net_poll_controller,
 #endif
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
 };
 
@@ -1705,12 +1703,12 @@ static int use_dma;			/* These generate unused var warnings if ALLOW_DMA = 0 */
 static int dma;
 static int dmasize = 16;		/* or 64 */
 
-module_param(io, int, 0);
-module_param(irq, int, 0);
+module_param_hw(io, int, ioport, 0);
+module_param_hw(irq, int, irq, 0);
 module_param(debug, int, 0);
 module_param_string(media, media, sizeof(media), 0);
 module_param(duplex, int, 0);
-module_param(dma , int, 0);
+module_param_hw(dma , int, dma, 0);
 module_param(dmasize , int, 0);
 module_param(use_dma , int, 0);
 MODULE_PARM_DESC(io, "cs89x0 I/O base address");
@@ -1846,15 +1844,11 @@ cleanup_module(void)
 static int __init cs89x0_platform_probe(struct platform_device *pdev)
 {
 	struct net_device *dev = alloc_etherdev(sizeof(struct net_local));
-	struct net_local *lp;
-	struct resource *mem_res;
 	void __iomem *virt_addr;
 	int err;
 
 	if (!dev)
 		return -ENOMEM;
-
-	lp = netdev_priv(dev);
 
 	dev->irq = platform_get_irq(pdev, 0);
 	if (dev->irq <= 0) {
@@ -1863,8 +1857,7 @@ static int __init cs89x0_platform_probe(struct platform_device *pdev)
 		goto free;
 	}
 
-	mem_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	virt_addr = devm_ioremap_resource(&pdev->dev, mem_res);
+	virt_addr = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(virt_addr)) {
 		err = PTR_ERR(virt_addr);
 		goto free;
@@ -1897,7 +1890,7 @@ static int cs89x0_platform_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct __maybe_unused of_device_id cs89x0_match[] = {
+static const struct of_device_id __maybe_unused cs89x0_match[] = {
 	{ .compatible = "cirrus,cs8900", },
 	{ .compatible = "cirrus,cs8920", },
 	{ },
@@ -1915,3 +1908,7 @@ static struct platform_driver cs89x0_driver = {
 module_platform_driver_probe(cs89x0_driver, cs89x0_platform_probe);
 
 #endif /* CONFIG_CS89x0_PLATFORM */
+
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("Crystal Semiconductor (Now Cirrus Logic) CS89[02]0 network driver");
+MODULE_AUTHOR("Russell Nelson <nelson@crynwr.com>");

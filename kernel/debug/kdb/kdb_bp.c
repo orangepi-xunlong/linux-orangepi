@@ -242,11 +242,11 @@ static void kdb_printbp(kdb_bp_t *bp, int i)
 	kdb_symbol_print(bp->bp_addr, NULL, KDB_SP_DEFAULT);
 
 	if (bp->bp_enabled)
-		kdb_printf("\n    is enabled");
+		kdb_printf("\n    is enabled ");
 	else
 		kdb_printf("\n    is disabled");
 
-	kdb_printf("\taddr at %016lx, hardtype=%d installed=%d\n",
+	kdb_printf("  addr at %016lx, hardtype=%d installed=%d\n",
 		   bp->bp_addr, bp->bp_type, bp->bp_installed);
 
 	kdb_printf("\n");
@@ -305,6 +305,15 @@ static int kdb_bp(int argc, const char **argv)
 		return diag;
 	if (!template.bp_addr)
 		return KDB_BADINT;
+
+	/*
+	 * This check is redundant (since the breakpoint machinery should
+	 * be doing the same check during kdb_bp_install) but gives the
+	 * user immediate feedback.
+	 */
+	diag = kgdb_validate_break_address(template.bp_addr);
+	if (diag)
+		return diag;
 
 	/*
 	 * Find an empty bp structure to allocate
@@ -412,7 +421,6 @@ static int kdb_bc(int argc, const char **argv)
 		 * assume that the breakpoint number is desired.
 		 */
 		if (addr < KDB_MAXBPT) {
-			bp = &kdb_breakpoints[addr];
 			lowbp = highbp = addr;
 			highbp++;
 		} else {

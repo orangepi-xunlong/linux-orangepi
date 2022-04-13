@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * ii_pci20kc.c
  * Driver for Intelligent Instruments PCI-20001C carrier board and modules.
@@ -518,6 +519,6 @@ static struct comedi_driver ii20k_driver = {
 };
 module_comedi_driver(ii20k_driver);
 
-MODULE_AUTHOR("Comedi http://www.comedi.org");
+MODULE_AUTHOR("Comedi https://www.comedi.org");
 MODULE_DESCRIPTION("Comedi driver for Intelligent Instruments PCI-20001C");
 MODULE_LICENSE("GPL");
