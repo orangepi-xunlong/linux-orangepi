@@ -103,6 +103,29 @@
 		};
 	};
 
+	ac200_sound: ac200-sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,format		= "i2s";
+		simple-audio-card,frame-master		= <&i2s3_master>;
+		simple-audio-card,bitclock-master	= <&i2s3_master>;
+		simple-audio-card,name = "allwinner,ac200-codec";
+		simple-audio-card,mclk-fs = <512>;
+		status = "disabled";
+
+		i2s3_master: simple-audio-card,cpu {
+			sound-dai = <&i2s3>;
+			system-clock-frequency = <22579200>;
+			dai-tdm-slot-num = <2>;
+			dai-tdm-slot-width = <32>;
+		};
+		simple-audio-card,codec {
+			sound-dai = <&ac200_codec>;
+			system-clock-frequency = <22579200>;
+			dai-tdm-slot-num = <2>;
+			dai-tdm-slot-width = <32>;
+		};
+	};
+
 	osc24M: osc24M_clk {
 		#clock-cells = <0>;
 		compatible = "fixed-clock";
@@ -186,7 +209,7 @@
 				clock-names = "bus",
 					      "mod";
 				resets = <&display_clocks RST_MIXER0>;
-				iommus = <&iommu 0>;
+				//iommus = <&iommu 0>;
 
 				ports {
 					#address-cells = <1>;
@@ -212,7 +235,7 @@
 			resets = <&ccu RST_BUS_VE>;
 			interrupts = <GIC_SPI 89 IRQ_TYPE_LEVEL_HIGH>;
 			allwinner,sram = <&ve_sram 1>;
-			iommus = <&iommu 3>;
+			//iommus = <&iommu 3>;
 		};
 
 		gpu: gpu@1800000 {

@@ -103,28 +103,6 @@
 		reset-gpios = <&r_pio 1 3 GPIO_ACTIVE_LOW>; /* PM3 */
 		post-power-on-delay-ms = <200>;
 	};
-
-	ac200-sound {
-		status = "okay";
-		compatible = "simple-audio-card";
-		simple-audio-card,format		= "i2s";
-		simple-audio-card,frame-master		= <&i2s3_master>;
-		simple-audio-card,bitclock-master	= <&i2s3_master>;
-		simple-audio-card,name = "allwinner,ac200-codec";
-		simple-audio-card,mclk-fs = <512>;
-		i2s3_master: simple-audio-card,cpu {
-			sound-dai = <&i2s3>;
-			system-clock-frequency = <22579200>;
-			dai-tdm-slot-num = <2>;
-			dai-tdm-slot-width = <32>;
-		};
-		simple-audio-card,codec {
-			sound-dai = <&ac200_codec>;
-			system-clock-frequency = <22579200>;
-			dai-tdm-slot-num = <2>;
-			dai-tdm-slot-width = <32>;
-		};
-	};
 };
 
 &cpu0 {
@@ -161,6 +139,10 @@
 };
 
 &i2s1 {
+	status = "okay";
+};
+
+&ac200_sound {
 	status = "okay";
 };
 
