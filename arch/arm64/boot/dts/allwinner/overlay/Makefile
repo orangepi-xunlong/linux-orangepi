@@ -54,6 +54,8 @@ dtbo-$(CONFIG_ARCH_SUNXI) += \
 	sun50i-h616-i2c2.dtbo \
 	sun50i-h616-i2c3.dtbo \
 	sun50i-h616-i2c4.dtbo \
+	sun50i-h616-pwm12.dtbo \
+	sun50i-h616-pwm34.dtbo \
 	sun50i-h616-spi-spidev.dtbo
 
 scr-$(CONFIG_ARCH_SUNXI) += \
