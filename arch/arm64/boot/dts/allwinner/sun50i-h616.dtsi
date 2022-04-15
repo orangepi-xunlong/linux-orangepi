@@ -423,7 +423,7 @@
 			};
 
 			spi1_cs_pin: spi1-cs-pin {
-				pins = "PH5";
+				pins = "PH9";
 				function = "spi1";
 			};
 
@@ -816,7 +816,7 @@
 			clock-names = "ahb", "mod";
 			resets = <&ccu RST_BUS_SPI1>;
 			pinctrl-names = "default";
-			pinctrl-0 = <&spi1_pins>;
+			pinctrl-0 = <&spi1_pins>, <&spi1_cs_pin>;
 			status = "disabled";
 			#address-cells = <1>;
 			#size-cells = <0>;

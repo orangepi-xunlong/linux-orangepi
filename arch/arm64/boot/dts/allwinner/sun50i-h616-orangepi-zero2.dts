@@ -383,9 +383,9 @@
 	status = "disabled";
 
 	spidev@1 {
-		compatible = "spidev";
+		compatible = "rohm,dh2228fv";
 		status = "disabled";
-		reg = <0>;
+		reg = <1>;
 		spi-max-frequency = <1000000>;
 	};
 };
