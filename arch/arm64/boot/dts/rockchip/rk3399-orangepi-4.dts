@@ -1212,17 +1212,8 @@
                                 remote-endpoint = <&ucam_out0a>;
                                 data-lanes = <1 2>;
                         };
-                };
-        };
-};
-
-&isp1 {
-        status = "okay";
-
-        ports {
-                port@0 {
-                        mipi_in_ucam1a: endpoint@0 {
-                                reg = <0>;
+                        mipi_in_ucam1a: endpoint@1 {
+                                reg = <1>;
                                 remote-endpoint = <&ucam_out1a>;
                                 data-lanes = <1 2>;
                         };
@@ -1231,10 +1222,6 @@
 };
 
 &mipi_dphy_rx0 {
-        status = "okay";
-};
-
-&mipi_dsi1 {
         status = "okay";
 };
 
