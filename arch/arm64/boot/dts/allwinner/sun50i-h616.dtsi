@@ -246,6 +246,53 @@
 			status = "okay";
 		};
 
+		pwm: pwm@300a000 {
+			compatible = "allwinner,sun50i-h616-pwm";
+			reg = <0x0300a000 0x400>;
+			clocks = <&osc24M>, <&ccu CLK_BUS_PWM>;
+			clock-names = "mod", "bus";
+			resets = <&ccu RST_BUS_PWM>;
+			pwm-number = <6>;
+			pwm-base = <0x0>;
+			sunxi-pwms = <&pwm0>, <&pwm1>, <&pwm2>, <&pwm3>, <&pwm4>, <&pwm5>;
+			#pwm-cells = <3>;
+			status = "disabled";
+		};
+
+		pwm0: pwm0@0300a000 {
+			compatible = "allwinner,sunxi-pwm0";
+		};
+
+		pwm1: pwm1@0300a000 {
+			compatible = "allwinner,sunxi-pwm1";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pwm1_pin>;
+		};
+
+		pwm2: pwm2@0300a000 {
+			compatible = "allwinner,sunxi-pwm2";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pwm2_pin>;
+		};
+
+		pwm3: pwm3@0300a000 {
+			compatible = "allwinner,sunxi-pwm3";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pwm3_pin>;
+		};
+
+		pwm4: pwm4@0300a000 {
+			compatible = "allwinner,sunxi-pwm4";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pwm4_pin>;
+		};
+
+		pwm5: pwm5@0300a000 {
+			compatible = "allwinner,sunxi-pwm5";
+			pinctrl-names = "default";
+			pinctrl-0 = <&pwm5_pin>;
+		};
+
 		pio: pinctrl@300b000 {
 			compatible = "allwinner,sun50i-h616-pinctrl";
 			reg = <0x0300b000 0x400>;
@@ -306,6 +353,31 @@
 			ir_rx_pin: ir-rx-pin {
 				pins = "PH10";
 				function = "ir_rx";
+			};
+
+			pwm1_pin: pwm1-pin {
+				pins = "PH3";
+				function = "pwm1";
+			};
+
+			pwm2_pin: pwm2-pin {
+				pins = "PH2";
+				function = "pwm2";
+			};
+
+			pwm3_pin: pwm3-pin {
+				pins = "PH0";
+				function = "pwm3";
+			};
+
+			pwm4_pin: pwm4-pin {
+				pins = "PH1";
+				function = "pwm4";
+			};
+
+			pwm5_pin: pwm5-pin {
+				pins = "PA12";
+				function = "pwm4";
 			};
 
 			mmc0_pins: mmc0-pins {
