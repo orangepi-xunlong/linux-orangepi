@@ -3792,8 +3792,11 @@ static int hci_init_sync(struct hci_dev *hdev)
 
 	err = hci_init3_sync(hdev);
 	if (err < 0)
+#if defined(CONFIG_RK_WIFI_DEVICE_UWE5621) || defined(CONFIG_AW_WIFI_DEVICE_UWE5622) || defined(CONFIG_RK_WIFI_DEVICE_UWE5622)
+               ;
+#else
 		return err;
-
+#endif
 	err = hci_init4_sync(hdev);
 	if (err < 0)
 		return err;
