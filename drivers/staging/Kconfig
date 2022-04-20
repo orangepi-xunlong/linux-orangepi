@@ -74,6 +74,8 @@ source "drivers/staging/clocking-wizard/Kconfig"
 
 source "drivers/staging/fbtft/Kconfig"
 
+source "drivers/staging/fusb30x/Kconfig"
+
 source "drivers/staging/most/Kconfig"
 
 source "drivers/staging/ks7010/Kconfig"
