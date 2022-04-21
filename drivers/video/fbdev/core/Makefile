@@ -26,3 +26,6 @@ obj-$(CONFIG_FB_SYS_IMAGEBLIT) += sysimgblt.o
 obj-$(CONFIG_FB_SYS_FOPS)      += fb_sys_fops.o
 obj-$(CONFIG_FB_SVGALIB)       += svgalib.o
 obj-$(CONFIG_FB_DDC)           += fb_ddc.o
+
+obj-$(CONFIG_BOOTSPLASH)       += bootsplash.o bootsplash_render.o \
+                                  bootsplash_load.o dummyblit.o
