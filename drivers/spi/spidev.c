@@ -21,8 +21,7 @@
 #include <linux/slab.h>
 #include <linux/compat.h>
 
-#include <linux/spi/spi.h>
-#include <linux/spi/spidev.h>
+#include <uapi/linux/spi/spidev.h>
 
 #include <linux/uaccess.h>
 
