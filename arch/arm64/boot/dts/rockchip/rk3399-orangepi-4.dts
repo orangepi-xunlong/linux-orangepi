@@ -18,6 +18,12 @@
 	model = "OrangePi 4";
 	compatible = "xunlong,orangepi-4", "rockchip,rk3399";
 
+	cpuinfo {
+	        compatible = "rockchip,cpuinfo";
+	        nvmem-cells = <&cpu_id>;
+	        nvmem-cell-names = "id";
+	};
+
 	chosen {
 		stdout-path = "serial2:1500000n8";
 	};
