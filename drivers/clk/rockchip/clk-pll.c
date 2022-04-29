@@ -70,8 +70,6 @@ struct rockchip_clk_pll {
 #define MIN_FOUTVCO_FREQ	(800 * MHZ)
 #define MAX_FOUTVCO_FREQ	(2000 * MHZ)
 
-static struct rockchip_pll_rate_table auto_table;
-
 int rockchip_pll_clk_adaptive_scaling(struct clk *clk, int sel)
 {
 	struct clk *parent = clk_get_parent(clk);
@@ -113,6 +111,9 @@ int rockchip_pll_clk_rate_to_scale(struct clk *clk, unsigned long rate)
 	return -EINVAL;
 }
 EXPORT_SYMBOL(rockchip_pll_clk_rate_to_scale);
+
+
+static struct rockchip_pll_rate_table auto_table;
 
 int rockchip_pll_clk_scale_to_rate(struct clk *clk, unsigned int scale)
 {

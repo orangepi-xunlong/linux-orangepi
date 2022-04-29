@@ -11,6 +11,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/pwm.h>
 #include <linux/time.h>
@@ -33,6 +34,8 @@ struct rockchip_pwm_chip {
 	struct pwm_chip chip;
 	struct clk *clk;
 	struct clk *pclk;
+	struct pinctrl *pinctrl;
+	struct pinctrl_state *active_state;
 	const struct rockchip_pwm_data *data;
 	void __iomem *base;
 };
@@ -216,6 +219,8 @@ static int rockchip_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 			goto out;
 	}
 
+	if (state->enabled)
+		ret = pinctrl_select_state(pc->pinctrl, pc->active_state);
 out:
 	clk_disable(pc->clk);
 	clk_disable(pc->pclk);
@@ -345,6 +350,18 @@ static int rockchip_pwm_probe(struct platform_device *pdev)
 	if (ret) {
 		dev_err(&pdev->dev, "Can't prepare enable APB clk: %d\n", ret);
 		goto err_clk;
+	}
+
+	pc->pinctrl = devm_pinctrl_get(&pdev->dev);
+	if (IS_ERR(pc->pinctrl)) {
+		dev_err(&pdev->dev, "Get pinctrl failed!\n");
+		return PTR_ERR(pc->pinctrl);
+	}
+
+	pc->active_state = pinctrl_lookup_state(pc->pinctrl, "active");
+	if (IS_ERR(pc->active_state)) {
+		dev_err(&pdev->dev, "No active pinctrl state\n");
+		return PTR_ERR(pc->active_state);
 	}
 
 	platform_set_drvdata(pdev, pc);
