@@ -23,6 +23,9 @@
 #include <linux/thermal.h>
 
 #include "cpufreq-dt.h"
+#ifdef CONFIG_ARCH_ROCKCHIP
+#include "rockchip-cpufreq.h"
+#endif
 
 struct private_data {
 	struct list_head node;
@@ -254,15 +257,10 @@ static int dt_cpufreq_early_init(struct device *dev, int cpu)
 	 * before updating priv->cpus. Otherwise, we will end up creating
 	 * duplicate OPPs for the CPUs.
 	 *
-	 * OPPs might be populated at runtime, don't fail for error here unless
-	 * it is -EPROBE_DEFER.
+	 * OPPs might be populated at runtime, don't check for error here.
 	 */
-	ret = dev_pm_opp_of_cpumask_add_table(priv->cpus);
-	if (!ret) {
+	if (!dev_pm_opp_of_cpumask_add_table(priv->cpus))
 		priv->have_static_opps = true;
-	} else if (ret == -EPROBE_DEFER) {
-		goto out;
-	}
 
 	/*
 	 * The OPP table must be initialized, statically or dynamically, by this
@@ -283,6 +281,10 @@ static int dt_cpufreq_early_init(struct device *dev, int cpu)
 				__func__, ret);
 	}
 
+#ifdef CONFIG_ARCH_ROCKCHIP
+	rockchip_cpufreq_adjust_power_scale(cpu_dev);
+#endif
+
 	ret = dev_pm_opp_init_cpufreq_table(cpu_dev, &priv->freq_table);
 	if (ret) {
 		dev_err(cpu_dev, "failed to init cpufreq table: %d\n", ret);
@@ -295,7 +297,8 @@ static int dt_cpufreq_early_init(struct device *dev, int cpu)
 out:
 	if (priv->have_static_opps)
 		dev_pm_opp_of_cpumask_remove_table(priv->cpus);
-	dev_pm_opp_put_regulators(priv->opp_table);
+	if (priv->opp_table)
+		dev_pm_opp_put_regulators(priv->opp_table);
 free_cpumask:
 	free_cpumask_var(priv->cpus);
 	return ret;
@@ -309,7 +312,8 @@ static void dt_cpufreq_release(void)
 		dev_pm_opp_free_cpufreq_table(priv->cpu_dev, &priv->freq_table);
 		if (priv->have_static_opps)
 			dev_pm_opp_of_cpumask_remove_table(priv->cpus);
-		dev_pm_opp_put_regulators(priv->opp_table);
+		if (priv->opp_table)
+			dev_pm_opp_put_regulators(priv->opp_table);
 		free_cpumask_var(priv->cpus);
 		list_del(&priv->node);
 	}
