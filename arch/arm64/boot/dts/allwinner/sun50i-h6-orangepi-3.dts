@@ -395,6 +395,30 @@
 	status = "okay";
 };
 
+&pwm {
+        status = "okay";
+};
+
+&ac200_pwm_clk {
+        status = "okay";
+};
+
+&i2s3 {
+        status = "okay";
+};
+
+&i2c3 {
+        status = "okay";
+};
+
 &r_ir {
+        status = "okay";
+};
+
+&rtc {
+        clocks = <&ext_osc32k>;
+};
+
+&ac200_sound {
         status = "okay";
 };

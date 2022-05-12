@@ -1488,4 +1488,12 @@ config SND_SOC_TPA6130A2
 	tristate "Texas Instruments TPA6130A2 headphone amplifier"
 	depends on I2C
 
+config SND_SOC_ACX00
+        tristate "ACX00 Codec"
+        select MFD_ACX00
+        default n
+        help
+                ACX00 now used as SUN50IW6 internal Codec, Connect Through I2S0.
+                Say Y or M if you want to add support internal audio codec.
+
 endmenu

@@ -224,6 +224,29 @@
 		};
 	};
 
+	ac200_sound: ac200-sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,format                = "i2s";
+		simple-audio-card,frame-master          = <&i2s3_master>;
+		simple-audio-card,bitclock-master       = <&i2s3_master>;
+		simple-audio-card,name = "allwinner,ac200-codec";
+		simple-audio-card,mclk-fs = <512>;
+		status = "disabled";
+
+		i2s3_master: simple-audio-card,cpu {
+			sound-dai = <&i2s3>;
+			system-clock-frequency = <22579200>;
+			dai-tdm-slot-num = <2>;
+			dai-tdm-slot-width = <32>;
+		};
+		simple-audio-card,codec {
+			sound-dai = <&ac200_codec>;
+			system-clock-frequency = <22579200>;
+			dai-tdm-slot-num = <2>;
+			dai-tdm-slot-width = <32>;
+		};
+	};
+
 	soc {
 		compatible = "simple-bus";
 		#address-cells = <1>;
@@ -602,6 +625,11 @@
 				pins = "PB19";
 				function = "pwm1";
 			};
+
+                        i2s3_pins: i2s3-pins {
+                                pins = "PB12", "PB13", "PB14", "PB15", "PB16";
+                                function = "i2s3";
+                        };
 		};
 
 		mmc0: mmc@4020000 {
@@ -785,11 +813,20 @@
 				compatible = "x-powers,ac200";
 				reg = <0x10>;
 				clocks = <&ac200_pwm_clk>;
+				interrupt-parent = <&pio>;
+				interrupts = <1 20 IRQ_TYPE_LEVEL_LOW>;
+				interrupt-controller;
+				#interrupt-cells = <1>;
 
 				ac200_ephy: phy {
 					compatible = "x-powers,ac200-ephy";
-					nvmem-cells = <&ephy_calib>;
-					nvmem-cell-names = "ephy_calib";
+					status = "disabled";
+				};
+
+				ac200_codec: codec {
+					#sound-dai-cells = <0>;
+					compatible = "x-powers,ac200-codec";
+					status = "okay";
 				};
 			};
 		};
@@ -840,6 +877,21 @@
 			resets = <&ccu RST_BUS_I2S1>;
 			dma-names = "tx";
 			allwinner,playback-channels = <8>;
+		};
+
+		i2s3: i2s@508f000 {
+			#sound-dai-cells = <0>;
+			compatible = "allwinner,sun50i-h6-i2s";
+			reg = <0x0508f000 0x1000>;
+			interrupts = <GIC_SPI 30 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ccu CLK_BUS_I2S3>, <&ccu CLK_I2S3>;
+			clock-names = "apb", "mod";
+			dmas = <&dma 6>, <&dma 6>;
+			resets = <&ccu RST_BUS_I2S3>;
+			dma-names = "rx", "tx";
+			pinctrl-names = "default";
+			pinctrl-0 = <&i2s3_pins>;
+			status = "disabled";
 		};
 
 		usb2otg: usb@5100000 {
