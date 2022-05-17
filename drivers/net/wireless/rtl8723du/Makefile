@@ -26,6 +26,10 @@ EXTRA_LDFLAGS += --strip-debug
 
 CONFIG_AUTOCFG_CP = n
 
+ifeq ("","$(wildcard MOK.der)")
+NO_SKIP_SIGN := y
+endif
+
 ########################## WIFI IC ############################
 CONFIG_MULTIDRV = n
 CONFIG_RTL8188E = n
@@ -2535,4 +2539,15 @@ clean:
 	rm -fr *.mod.c *.mod *.o .*.cmd *.ko *~
 	rm -fr .tmp_versions
 endif
+
+sign:
+ifeq ($(NO_SKIP_SIGN), y)
+	@openssl req -new -x509 -newkey rsa:2048 -keyout MOK.priv -outform DER -out MOK.der -nodes -days 36500 -subj "/CN=Custom MOK/"
+	@mokutil --import MOK.der
+else
+	echo "Skipping key creation"
+endif
+	@$(KSRC)/scripts/sign-file sha256 MOK.priv MOK.der 8723du.ko
+
+sign-install: all sign install
 
