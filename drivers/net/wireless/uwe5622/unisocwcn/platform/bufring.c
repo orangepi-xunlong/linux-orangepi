@@ -117,7 +117,6 @@ void mdbg_ring_destroy(struct mdbg_ring_t *ring)
 		}
 		MDBG_LOG("to free ring.");
 		kfree(ring);
-		ring = NULL;
 	}
 }
 
@@ -285,7 +284,7 @@ int mdbg_ring_write(struct mdbg_ring_t *ring, void *buf, unsigned int len)
 
 /* @timeout unit is ms */
 int mdbg_ring_write_timeout(struct mdbg_ring_t *ring, void *buf,
-			    unsigned int len, unsigned int timeout)
+				unsigned int len, unsigned int timeout)
 {
 	unsigned  int cnt = timeout / 20;
 

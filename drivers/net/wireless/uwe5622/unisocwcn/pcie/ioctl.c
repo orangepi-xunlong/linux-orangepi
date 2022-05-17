@@ -145,7 +145,7 @@ static int cmdline_args(char *cmdline, char *cmd, struct arg_t *args, int argc)
 			goto WEDONE;
 		}
 		while (*end != ' ' && *end != '\t' && *end != '\n'
-		       && *end != '\0')
+			   && *end != '\0')
 			end++;
 		if (*end == '\0')
 			DONE = 1;
@@ -168,8 +168,8 @@ static int cmdline_args(char *cmdline, char *cmd, struct arg_t *args, int argc)
 			}
 			while (isxdigit(*cp)) {
 				value = isdigit(*cp) ? (*cp - '0')
-				    : ((islower(*cp) ? toupper(*cp) : *cp) -
-				       'A' + 10);
+					: ((islower(*cp) ? toupper(*cp) : *cp) -
+					   'A' + 10);
 
 				result = result * base + value;
 				cp++;
@@ -229,7 +229,7 @@ static int pcie_cmd_proc(struct char_drv_info *dev, unsigned char *input,
 
 	/* IRAM */
 	pcicmd = (struct pcicmd *) (pcie_bar_vmem(priv, 0) +
-				    cp2_test_addr1 + cp2_test_addr2);
+					cp2_test_addr1 + cp2_test_addr2);
 
 	ret = cmdline_args(input, cmd, pcie_args, PCIE_ARG_MAX);
 	if (ret) {
@@ -247,7 +247,7 @@ static int pcie_cmd_proc(struct char_drv_info *dev, unsigned char *input,
 		value = args_value(PCIE_ARG_VALUE);
 		size = args_value(PCIE_ARG_SIZE);
 		PCIE_INFO("memwrite addr=0x%lx value=0x%lx size=%ld\n",
-		       addr, value, size);
+			   addr, value, size);
 		memcpy((char *)(addr), (char *)&value, 4);
 	} else if (!strcmp("init", cmd)) {
 		struct inbound_reg *ibreg =
@@ -291,7 +291,7 @@ static int pcie_cmd_proc(struct char_drv_info *dev, unsigned char *input,
 		size = args_value(PCIE_ARG_SIZE);
 		buf = pcie_bar_vmem(priv, bar) + offset;
 		PCIE_INFO("kernel bread bar=%d offset=0x%x size=0x%lx\n", bar,
-		       offset, size);
+			   offset, size);
 		replay->t = 1;
 		replay->l = size;
 		hwcopy(replay->v, buf, replay->l);
@@ -327,8 +327,8 @@ static int pcie_cmd_proc(struct char_drv_info *dev, unsigned char *input,
 				replay->t = 0;
 				replay->l = 128;
 				memcpy(replay->v,
-				       pcie_bar_vmem(priv, 0) + cp2_test_addr3 +
-				       cp2_test_addr4, 128);
+					   pcie_bar_vmem(priv, 0) + cp2_test_addr3 +
+					   cp2_test_addr4, 128);
 				sprintf(string, "ok\n");
 				replay->t = 0;
 				replay->l = strlen(string);
@@ -364,9 +364,9 @@ static int pcie_cmd_proc(struct char_drv_info *dev, unsigned char *input,
 			memcpy(buf + 0, (char *)(&i), 4);
 			memset(buf + 4, (char)i, size - 4);
 			memcpy(pcie_bar_vmem(priv, bar) + offset, buf,
-			       size);
+				   size);
 			memcpy(mem, pcie_bar_vmem(priv, bar) + offset,
-			       size);
+				   size);
 			if (memcmp(buf, mem, size)) {
 				sprintf(string, "inbound run %d err\n", i);
 				break;

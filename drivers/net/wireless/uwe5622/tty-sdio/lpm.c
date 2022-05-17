@@ -11,12 +11,14 @@
 #include <linux/seq_file.h>
 #include <linux/version.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0)
-#include "wakelock.h"
+//#include "wakelock.h"
+#include <marlin_platform.h>
 #else
+#include <marlin_platform.h>
 #include <linux/wakelock.h>
 #endif
 #include <linux/export.h>
-#include <marlin_platform.h>
+#include <linux/wakelock.h>
 
 #define VERSION         "marlin2 V0.1"
 #define PROC_DIR        "bluetooth/sleep"

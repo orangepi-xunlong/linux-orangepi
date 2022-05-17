@@ -26,7 +26,7 @@ static void sprdwl_tcp_ack_timeout(unsigned long data)
 	ack_info = (struct sprdwl_tcp_ack_info *)data;
 #endif
 	ack_m = container_of(ack_info, struct sprdwl_tcp_ack_manage,
-			     ack_info[ack_info->ack_info_num]);
+				 ack_info[ack_info->ack_info_num]);
 
 	write_seqlock_bh(&ack_info->seqlock);
 	msg = ack_info->msgbuf;
@@ -64,7 +64,7 @@ void sprdwl_tcp_ack_init(struct sprdwl_priv *priv)
 		timer_setup(&ack_info->timer, sprdwl_tcp_ack_timeout, 0);
 #else
 		setup_timer(&ack_info->timer, sprdwl_tcp_ack_timeout,
-			    (unsigned long)ack_info);
+				(unsigned long)ack_info);
 #endif
 	}
 
@@ -95,7 +95,7 @@ void sprdwl_tcp_ack_deinit(struct sprdwl_priv *priv)
 }
 
 static int sprdwl_tcp_check_quick_ack(unsigned char *buf,
-				      struct sprdwl_tcp_ack_msg *msg)
+					  struct sprdwl_tcp_ack_msg *msg)
 {
 	int ip_hdr_len;
 	unsigned char *temp;
@@ -240,10 +240,10 @@ static int sprdwl_tcp_ack_match(struct sprdwl_tcp_ack_manage *ack_m,
 
 			ack = &ack_info->ack_msg;
 			if (ack_info->busy &&
-			    ack->dest == ack_msg->dest &&
-			    ack->source == ack_msg->source &&
-			    ack->saddr == ack_msg->saddr &&
-			    ack->daddr == ack_msg->daddr)
+				ack->dest == ack_msg->dest &&
+				ack->source == ack_msg->source &&
+				ack->saddr == ack_msg->saddr &&
+				ack->daddr == ack_msg->daddr)
 				ret = i;
 		} while (read_seqretry(&ack_info->seqlock, start));
 	}
@@ -263,8 +263,8 @@ static void sprdwl_tcp_ack_update(struct sprdwl_tcp_ack_manage *ack_m)
 			ack_info = &ack_m->ack_info[i];
 			write_seqlock_bh(&ack_info->seqlock);
 			if (ack_info->busy &&
-			    time_after(jiffies, ack_info->last_time +
-				       ack_info->timeout)) {
+				time_after(jiffies, ack_info->last_time +
+					   ack_info->timeout)) {
 				ack_m->free_index = i;
 				ack_m->max_num--;
 				ack_info->busy = 0;
@@ -334,8 +334,8 @@ int sprdwl_tcp_ack_handle(struct sprdwl_msg_buf *new_msgbuf,
 		if (SPRDWL_U32_BEFORE(ack->seq, ack_msg->seq)) {
 			ack->seq = ack_msg->seq;
 			if (ack_info->psh_flag &&
-			    !SPRDWL_U32_BEFORE(ack_msg->seq,
-					       ack_info->psh_seq)) {
+				!SPRDWL_U32_BEFORE(ack_msg->seq,
+						   ack_info->psh_seq)) {
 				ack_info->psh_flag = 0;
 			}
 
@@ -349,7 +349,7 @@ int sprdwl_tcp_ack_handle(struct sprdwl_msg_buf *new_msgbuf,
 			ack_info->drop_cnt = atomic_read(&ack_m->max_drop_cnt);
 		} else {
 			wl_err("%s before abnormal ack: %d, %d\n",
-			       __func__, ack->seq, ack_msg->seq);
+				   __func__, ack->seq, ack_msg->seq);
 			drop_msg = new_msgbuf;
 			ret = 1;
 		}
@@ -360,7 +360,7 @@ int sprdwl_tcp_ack_handle(struct sprdwl_msg_buf *new_msgbuf,
 		}
 
 		if (ack_info->psh_flag &&
-		    !SPRDWL_U32_BEFORE(ack_msg->seq, ack_info->psh_seq)) {
+			!SPRDWL_U32_BEFORE(ack_msg->seq, ack_info->psh_seq)) {
 			ack_info->psh_flag = 0;
 			quick_ack = 1;
 		} else {
@@ -384,7 +384,7 @@ int sprdwl_tcp_ack_handle(struct sprdwl_msg_buf *new_msgbuf,
 		}
 	} else {
 		wl_err("%s before ack: %d, %d\n",
-		       __func__, ack->seq, ack_msg->seq);
+			   __func__, ack->seq, ack_msg->seq);
 		drop_msg = new_msgbuf;
 		ret = 1;
 	}
@@ -398,7 +398,7 @@ int sprdwl_tcp_ack_handle(struct sprdwl_msg_buf *new_msgbuf,
 }
 
 void sprdwl_filter_rx_tcp_ack(struct sprdwl_priv *priv,
-			      unsigned char *buf, unsigned plen)
+				  unsigned char *buf, unsigned plen)
 {
 	int index;
 	struct sprdwl_tcp_ack_msg ack_msg;
@@ -409,7 +409,7 @@ void sprdwl_filter_rx_tcp_ack(struct sprdwl_priv *priv,
 		return;
 
 	if ((plen > MAX_TCP_ACK) ||
-	    !sprdwl_tcp_check_quick_ack(buf, &ack_msg))
+		!sprdwl_tcp_check_quick_ack(buf, &ack_msg))
 		return;
 
 	index = sprdwl_tcp_ack_match(ack_m, &ack_msg);
@@ -424,8 +424,8 @@ void sprdwl_filter_rx_tcp_ack(struct sprdwl_priv *priv,
 
 /* return val: 0 for not filter, 1 for filter */
 int sprdwl_filter_send_tcp_ack(struct sprdwl_priv *priv,
-			       struct sprdwl_msg_buf *msgbuf,
-			       unsigned char *buf, unsigned int plen)
+				   struct sprdwl_msg_buf *msgbuf,
+				   unsigned char *buf, unsigned int plen)
 {
 	int ret = 0;
 	int index, drop;
@@ -494,7 +494,7 @@ out:
 }
 
 void sprdwl_move_tcpack_msg(struct sprdwl_priv *priv,
-			    struct sprdwl_msg_buf *msg)
+				struct sprdwl_msg_buf *msg)
 {
 	struct sprdwl_tcp_ack_info *ack_info;
 	struct sprdwl_tcp_ack_manage *ack_m = &priv->ack_m;

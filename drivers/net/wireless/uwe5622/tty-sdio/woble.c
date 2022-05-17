@@ -22,6 +22,8 @@
 #include <linux/string.h>
 #include "woble.h"
 #include "tty.h"
+#include "alignment/sitm.h"
+#include <marlin_platform.h>
 
 #define CMD_TIMEOUT 5000
 #define MAX_WAKE_DEVICE_MAX_NUM 36
@@ -222,7 +224,7 @@ int woble_data_recv(const unsigned char *buf, int count)
 int hci_cmd_send_sync(unsigned short opcode, struct HC_BT_HDR *py,
 		struct HC_BT_HDR *rsp)
 {
-	unsigned char msg_req[HCI_CMD_MAX_LEN], *p;
+	unsigned char msg_req[HCI_CMD_MAX_LEN + BYTE_ALIGNMENT] = {0}, *p;
 	int ret = 0;
 
 	p = msg_req;
@@ -237,7 +239,7 @@ int hci_cmd_send_sync(unsigned short opcode, struct HC_BT_HDR *py,
 	}
 
 	hci_cmd.opcode = opcode;
-	ret = marlin_sdio_write(msg_req, p - msg_req);
+	ret = marlin_sdio_write(msg_req, (p - msg_req) + (BYTE_ALIGNMENT - ((p - msg_req) % BYTE_ALIGNMENT)));
 	if (!ret) {
 		hci_cmd.opcode = 0;
 		pr_err("%s marlin_sdio_write fail", __func__);
@@ -246,6 +248,7 @@ int hci_cmd_send_sync(unsigned short opcode, struct HC_BT_HDR *py,
 
 	if (down_timeout(&hci_cmd.wait, msecs_to_jiffies(CMD_TIMEOUT))) {
 		pr_err("%s CMD_TIMEOUT for CMD: 0x%04X", __func__, opcode);
+		mdbg_assert_interface("hci cmd timeout");
 	}
 	hci_cmd.opcode = 0;
 

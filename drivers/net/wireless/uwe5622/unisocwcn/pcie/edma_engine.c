@@ -160,7 +160,7 @@ void *pcie_alloc_memory(int len)
 	memset(p, 0x56, len);
 	mpool_buffer += len;
 	PCIE_INFO("%s(%d) = {0x%p, 0x%p}\n", __func__, len, p,
-			    mpool_vir_to_phy((void *)p));
+				mpool_vir_to_phy((void *)p));
 
 	return p;
 }
@@ -175,7 +175,7 @@ static int create_queue(struct msg_q *q, int size, int num)
 	int ret;
 
 	PCIE_INFO("[+]%s(0x%p, %d, %d)\n", __func__,
-		     (void *)virt_to_phys((void *)(q)), size, num);
+			 (void *)virt_to_phys((void *)(q)), size, num);
 	q->mem = mpool_malloc(size * num);
 	if (q->mem == NULL) {
 		PCIE_INFO("%s malloc err\n", __func__);
@@ -260,21 +260,21 @@ static int edma_hw_next_dscr(int chn, int inout, struct desc **next)
 
 	if (inout == TX) {
 		local_chn_ptr_high.reg =
-		    edma->dma_chn_reg[chn].dma_dscr.chn_ptr_high.reg;
+			edma->dma_chn_reg[chn].dma_dscr.chn_ptr_high.reg;
 		SET_8_OF_40(hw_next,
 			(local_chn_ptr_high.bit.rf_chn_tx_next_dscr_ptr_high &
-			    (~(1 << 7))));
+				(~(1 << 7))));
 		SET_32_OF_40(hw_next,
 		edma->dma_chn_reg[chn].dma_dscr.rf_chn_tx_next_dscr_ptr_low);
 	} else {
 		for (i = 0; i < 5; i++) {
 			local_chn_ptr_high.reg =
-			    edma->dma_chn_reg[chn].dma_dscr.chn_ptr_high.reg;
+				edma->dma_chn_reg[chn].dma_dscr.chn_ptr_high.reg;
 			SET_8_OF_40(hw_next,
 			 (local_chn_ptr_high.bit.rf_chn_rx_next_dscr_ptr_high &
-				     (~(1 << 7))));
+					 (~(1 << 7))));
 			if (local_chn_ptr_high.bit
-			    .rf_chn_rx_next_dscr_ptr_high) {
+				.rf_chn_rx_next_dscr_ptr_high) {
 			}
 
 			ptr_l[0] = edma->dma_chn_reg[chn]
@@ -282,10 +282,10 @@ static int edma_hw_next_dscr(int chn, int inout, struct desc **next)
 			if ((ptr_l[0] == 0) || (ptr_l[0] == 0xFFFFFFFF)) {
 				udelay(1);
 				ptr_l[1] =
-				    edma->dma_chn_reg[chn].dma_dscr
+					edma->dma_chn_reg[chn].dma_dscr
 						.rf_chn_rx_next_dscr_ptr_low;
 				PCIE_INFO(
-				    "%s(%d,%d) err hw_next:0x%p, 0x%x, 0x%x\n",
+					"%s(%d,%d) err hw_next:0x%p, 0x%x, 0x%x\n",
 					__func__, chn, inout, hw_next,
 					ptr_l[0], ptr_l[1]);
 			} else {
@@ -414,18 +414,18 @@ static int edma_pop_link(int chn, struct desc *__head, struct desc *__tail,
 			PCIE_ERR("%s(0x%p, 0x%p) dscr=NULL, error\n",
 				 __func__, __head, __tail);
 			spin_unlock_irqrestore(edma->chn_sw[chn].dscr_ring.lock
-					       .irq_spinlock_p,
-					       edma->chn_sw[chn].dscr_ring.lock
-					       .flag);
+						   .irq_spinlock_p,
+						   edma->chn_sw[chn].dscr_ring.lock
+						   .flag);
 			return -1;
 		}
 		if (dscr_polling(dscr, 500000)) {
 			PCIE_ERR("%s(%d, 0x%p, 0x%p, 0x%p) polling err\n",
 				 __func__, chn, __head, __tail, dscr);
 			spin_unlock_irqrestore(edma->chn_sw[chn].dscr_ring.lock
-					       .irq_spinlock_p,
-					       edma->chn_sw[chn].dscr_ring.lock
-					       .flag);
+						   .irq_spinlock_p,
+						   edma->chn_sw[chn].dscr_ring.lock
+						   .flag);
 			return -1;
 		}
 
@@ -439,9 +439,9 @@ static int edma_pop_link(int chn, struct desc *__head, struct desc *__tail,
 		if (!mbuf) {
 			PCIE_ERR("%s line:%d err\n", __func__, __LINE__);
 			spin_unlock_irqrestore(edma->chn_sw[chn].dscr_ring.lock
-					       .irq_spinlock_p,
-					       edma->chn_sw[chn].dscr_ring.lock
-					       .flag);
+						   .irq_spinlock_p,
+						   edma->chn_sw[chn].dscr_ring.lock
+						   .flag);
 
 			return -1;
 		}
@@ -449,7 +449,7 @@ static int edma_pop_link(int chn, struct desc *__head, struct desc *__tail,
 
 		(*node)++;
 		edma->chn_sw[chn].dscr_ring.head =
-		    edma->chn_sw[chn].dscr_ring.head->next.p;
+			edma->chn_sw[chn].dscr_ring.head->next.p;
 		edma->chn_sw[chn].dscr_ring.free++;
 		dscr_zero(dscr);
 		if (COMPARE_40_BIT(dscr->next.p, __tail))
@@ -510,9 +510,9 @@ int edma_one_link_dscr_buf_bind(struct desc *dscr, unsigned char *dst,
 	dscr->chn_trans_len.bit.rf_chn_tx_intr = 0;
 
 	memcpy((unsigned char *)(&(dscr->rf_chn_data_src_addr_low)),
-	       (unsigned char *)(&tmp[0]), 4);
+		   (unsigned char *)(&tmp[0]), 4);
 	memcpy((unsigned char *)(&(dscr->rf_chn_data_dst_addr_low)),
-	       (unsigned char *)(&tmp[1]), 4);
+		   (unsigned char *)(&tmp[1]), 4);
 
 	dscr->chn_ptr_high.bit.rf_chn_src_data_addr_high = src__.h;
 	dscr->chn_ptr_high.bit.rf_chn_dst_data_addr_high = dst__.h;
@@ -520,14 +520,14 @@ int edma_one_link_dscr_buf_bind(struct desc *dscr, unsigned char *dst,
 
 	if (sizeof(unsigned long) == sizeof(unsigned int)) {
 		memcpy((unsigned char *)(&dscr->link.src),
-		       (unsigned char *)(&src), 4);
+			   (unsigned char *)(&src), 4);
 		memcpy((unsigned char *)(&dscr->buf.dst),
-		       (unsigned char *)(&dst), 4);
+			   (unsigned char *)(&dst), 4);
 	} else {
 		memcpy((unsigned char *)(&dscr->link.src),
-		       (unsigned char *)(&src), 8);
+			   (unsigned char *)(&src), 8);
 		memcpy((unsigned char *)(&dscr->buf.dst),
-		       (unsigned char *)(&dst), 8);
+			   (unsigned char *)(&dst), 8);
 	}
 
 	PCIE_INFO("[-]%s\n", __func__);
@@ -547,14 +547,14 @@ int edma_one_link_copy(int chn, struct desc *head, struct desc *tail, int num)
 
 	dma_cfg.reg = edma->dma_chn_reg[chn].dma_cfg.reg;
 	local_chn_ptr_high.reg =
-	    edma->dma_chn_reg[chn].dma_dscr.chn_ptr_high.reg;
+		edma->dma_chn_reg[chn].dma_dscr.chn_ptr_high.reg;
 	local_chn_ptr_high.bit.rf_chn_tx_next_dscr_ptr_high = GET_8_OF_40(head);
 	dma_cfg.bit.rf_chn_en = 1;
 
 	edma->dma_chn_reg[chn].dma_dscr.rf_chn_tx_next_dscr_ptr_low =
-	    GET_32_OF_40((unsigned char *)(head));
+		GET_32_OF_40((unsigned char *)(head));
 	edma->dma_chn_reg[chn].dma_dscr.chn_ptr_high.reg =
-	    local_chn_ptr_high.reg;
+		local_chn_ptr_high.reg;
 	edma->dma_chn_reg[chn].dma_cfg.reg = dma_cfg.reg;
 
 	edma_hw_tx_req(chn);
@@ -640,7 +640,7 @@ int edma_push_link(int chn, void *head, void *tail, int num)
 		dscr_zero(edma->chn_sw[chn].dscr_ring.tail);
 
 		dscr_link_mbuf(inout,
-				       edma->chn_sw[chn].dscr_ring.tail, mbuf);
+					   edma->chn_sw[chn].dscr_ring.tail, mbuf);
 
 		if ((edma->chn_sw[chn].interval) &&
 			((++j) == edma->chn_sw[chn].interval)) {
@@ -792,7 +792,7 @@ int edma_tx_complete_isr(int chn, int mode)
 		end = mpool_phy_to_vir(end);
 		if (start != end) {
 			edma_pop_link(chn, start, end, (void **)(&head),
-				      (void **)(&tail), &node);
+					  (void **)(&tail), &node);
 		}
 		if (edma->chn_sw[chn].wait == 0) {
 			if (node > 0)
@@ -838,7 +838,7 @@ static int edma_tx_pop_isr(int chn)
 	}
 	if (edma->chn_sw[chn].wait == 0) {
 		edma_pop_link(chn, start, end, (void **)(&head),
-			      (void **)(&tail), &node);
+				  (void **)(&tail), &node);
 		if (node > 0)
 			mchn_hw_pop_link(chn, head, tail, node);
 	}
@@ -860,8 +860,8 @@ static int edma_rx_push_isr(int chn)
 		end = mpool_phy_to_vir(end);
 		if (end != edma->chn_sw[chn].dscr_ring.head)
 			edma_pop_link(chn, edma->chn_sw[chn].dscr_ring.head,
-				      end, (void **)(&head), (void **)(&tail),
-				      &node);
+					  end, (void **)(&head), (void **)(&tail),
+					  &node);
 		if (node > 0)
 			mchn_hw_pop_link(chn, head, tail, node);
 	}
@@ -884,7 +884,7 @@ static int edma_rx_pop_isr(int chn)
 		return 0;
 
 	edma_pop_link(chn, edma->chn_sw[chn].dscr_ring.head, end,
-		      (void **)(&head), (void **)(&tail), &node);
+			  (void **)(&head), (void **)(&tail), &node);
 	if (node > 0)
 		mchn_hw_pop_link(chn, head, tail, node);
 	return 0;
@@ -908,9 +908,9 @@ static int hisrfunc(struct isr_msg_queue *msg)
 					edma_tx_pop_isr(chn);
 
 				if (dma_int.bit
-				    .rf_chn_tx_complete_int_mask_status)
+					.rf_chn_tx_complete_int_mask_status)
 					edma_tx_complete_isr(chn,
-							     TWO_LINK_MODE);
+								 TWO_LINK_MODE);
 			} else {
 				if (dma_int.bit.rf_chn_rx_pop_int_mask_status)
 					edma_rx_pop_isr(chn);
@@ -944,7 +944,7 @@ static int hisrfunc(struct isr_msg_queue *msg)
 		break;
 	default:
 		pcie_hexdump("isr unknown msg", (unsigned char *)(msg),
-			     sizeof(struct isr_msg_queue));
+				 sizeof(struct isr_msg_queue));
 		break;
 	}
 
@@ -957,7 +957,7 @@ int q_info(int debug)
 	struct msg_q *q = &(edma->isr_func.q);
 
 	PCIE_INFO("seq(%d,%d), line:%d, sem:%d\n", hisrfunc_last_msg,
-	       q->seq, hisrfunc_line, q->event.wait_sem.count);
+		   q->seq, hisrfunc_line, q->event.wait_sem.count);
 
 	hisrfunc_debug = debug;
 	set_wcnevent(&(edma->isr_func.q.event));
@@ -1181,8 +1181,8 @@ static int dscr_ring_init(struct dscr_ring *dscr_ring, int inout, int size,
 
 	if (!mem)
 		dscr_ring->mem =
-		    (unsigned char *)mpool_malloc(sizeof(struct desc) *
-						     (size + 1));
+			(unsigned char *)mpool_malloc(sizeof(struct desc) *
+							 (size + 1));
 	else
 		dscr_ring->mem = mem;
 	dscr_ring->size = size;
@@ -1199,14 +1199,14 @@ static int dscr_ring_init(struct dscr_ring *dscr_ring, int inout, int size,
 			tmp = GET_32_OF_40((unsigned char *)(&dscr[i + 1]));
 			memcpy((unsigned char *)(&dscr[i]
 				.rf_chn_tx_next_dscr_ptr_low),
-			       (unsigned char *)(&tmp), 4);
+				   (unsigned char *)(&tmp), 4);
 		} else {
 			dscr[i].chn_ptr_high.bit.rf_chn_rx_next_dscr_ptr_high =
-			    GET_8_OF_40(&dscr[i + 1]);
+				GET_8_OF_40(&dscr[i + 1]);
 			tmp = GET_32_OF_40((unsigned char *)(&dscr[i + 1]));
 			memcpy((unsigned char *)(&dscr[i]
 						.rf_chn_rx_next_dscr_ptr_low),
-			       (unsigned char *)(&tmp), 4);
+				   (unsigned char *)(&tmp), 4);
 		}
 		PCIE_INFO("dscr(0x%p-->0x%p)\n",
 			  mpool_vir_to_phy(&dscr[i]),
@@ -1215,18 +1215,18 @@ static int dscr_ring_init(struct dscr_ring *dscr_ring, int inout, int size,
 	}
 	if (inout == TX) {
 		dscr[i].chn_ptr_high.bit.rf_chn_tx_next_dscr_ptr_high =
-		    GET_8_OF_40(&dscr[0]);
+			GET_8_OF_40(&dscr[0]);
 		tmp = GET_32_OF_40((unsigned char *)(&dscr[0]));
 		memcpy((unsigned char *)(&dscr[i].rf_chn_tx_next_dscr_ptr_low),
-		       (unsigned char *)(&tmp), 4);
+			   (unsigned char *)(&tmp), 4);
 		dscr[0].chn_trans_len.bit.rf_chn_eof = 1;
 
 	} else {
 		dscr[i].chn_ptr_high.bit.rf_chn_rx_next_dscr_ptr_high =
-		    GET_8_OF_40(&dscr[0]);
+			GET_8_OF_40(&dscr[0]);
 		tmp = GET_32_OF_40((unsigned char *)(&dscr[0]));
 		memcpy((unsigned char *)(&dscr[i].rf_chn_rx_next_dscr_ptr_low),
-		       (unsigned char *)(&tmp), 4);
+			   (unsigned char *)(&tmp), 4);
 		dscr[0].chn_trans_len.bit.rf_chn_pause = 1;
 	}
 	PCIE_INFO("dscr(0x%p-->0x%p)\n",
@@ -1285,7 +1285,7 @@ int edma_chn_init(int chn, int mode, int inout, int max_trans)
 			dma_cfg.bit.rf_chn_req_mode = 1;
 			dma_cfg.bit.rf_chn_list_mode = TWO_LINK_MODE;
 			if (!inout)
-			    /* source data from CP */
+				/* source data from CP */
 				dma_cfg.bit.rf_chn_dir = 1;
 			else
 				/* source data from AP */
@@ -1294,7 +1294,7 @@ int edma_chn_init(int chn, int mode, int inout, int max_trans)
 		if (inout == TX) {
 			/* tx_list link point */
 			local_DSCR.rf_chn_tx_next_dscr_ptr_low =
-			    GET_32_OF_40((unsigned char *)(dscr_ring->head));
+				GET_32_OF_40((unsigned char *)(dscr_ring->head));
 			/* tx_list link point */
 			local_DSCR.chn_ptr_high.bit
 						.rf_chn_tx_next_dscr_ptr_high =
@@ -1304,7 +1304,7 @@ int edma_chn_init(int chn, int mode, int inout, int max_trans)
 			dma_int.bit.rf_chn_tx_complete_int_clr = 1;
 		} else {
 			local_DSCR.rf_chn_rx_next_dscr_ptr_low =
-			    GET_32_OF_40((unsigned char *)(dscr_ring->head));
+				GET_32_OF_40((unsigned char *)(dscr_ring->head));
 			local_DSCR.chn_ptr_high.bit
 						.rf_chn_rx_next_dscr_ptr_high =
 					GET_8_OF_40(dscr_ring->head);
@@ -1345,21 +1345,21 @@ int edma_chn_init(int chn, int mode, int inout, int max_trans)
 	case TWO_LINK_MODE:
 		if (inout) {
 			edma->dma_chn_reg[chn].dma_dscr
-					      .rf_chn_tx_next_dscr_ptr_low =
+						  .rf_chn_tx_next_dscr_ptr_low =
 					local_DSCR.rf_chn_tx_next_dscr_ptr_low;
 			edma->dma_chn_reg[chn].dma_dscr.chn_ptr_high.bit
 						.rf_chn_tx_next_dscr_ptr_high =
 									0x80;
 		} else {
 			edma->dma_chn_reg[chn].dma_dscr
-					      .rf_chn_rx_next_dscr_ptr_low =
+						  .rf_chn_rx_next_dscr_ptr_low =
 					local_DSCR.rf_chn_rx_next_dscr_ptr_low;
 			edma->dma_chn_reg[chn].dma_dscr.chn_ptr_high.bit
 						.rf_chn_rx_next_dscr_ptr_high =
 									0x80;
 		}
 		edma->dma_chn_reg[chn].dma_dscr.chn_ptr_high.reg =
-		    local_DSCR.chn_ptr_high.reg;
+			local_DSCR.chn_ptr_high.reg;
 
 		break;
 	default:
@@ -1391,7 +1391,7 @@ int edma_tp_count(int chn, void *head, void *tail, int num)
 		dt = time_sub_us(&start_time, &time);
 		if (dt >= 1000000) {
 			PCIE_INFO("edma-tp:%d/%d (byte/us)\n",
-			       bytecount, dt);
+				   bytecount, dt);
 			bytecount = 0;
 		}
 		mbuf = mbuf->next;

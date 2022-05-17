@@ -64,7 +64,7 @@ enum wcn_aon_chip_id wcn_get_aon_chip_id(void)
 			 * others for WCN_PIKE2_CHIP_AB
 			 */
 			return (version_id == 0) ?
-			       WCN_PIKE2_CHIP_AA : WCN_PIKE2_CHIP_AB;
+				   WCN_PIKE2_CHIP_AA : WCN_PIKE2_CHIP_AB;
 		}
 	}
 
@@ -74,7 +74,7 @@ EXPORT_SYMBOL_GPL(wcn_get_aon_chip_id);
 
 #define WCN_VMAP_RETRY_CNT (20)
 static void *wcn_mem_ram_vmap(phys_addr_t start, size_t size,
-			      int noncached, unsigned int *count)
+				  int noncached, unsigned int *count)
 {
 	struct page **pages;
 	phys_addr_t page_start;
@@ -134,13 +134,13 @@ void wcn_mem_ram_unmap(const void *mem, unsigned int count)
 }
 
 void *wcn_mem_ram_vmap_nocache(phys_addr_t start, size_t size,
-			       unsigned int *count)
+				   unsigned int *count)
 {
 	return wcn_mem_ram_vmap(start, size, 1, count);
 }
 
 int wcn_write_data_to_phy_addr(phys_addr_t phy_addr,
-			       void *src_data, u32 size)
+				   void *src_data, u32 size)
 {
 	int i;
 	char *virt_addr, *src;
@@ -199,7 +199,7 @@ u32 wcn_get_cp2_comm_rx_count(void)
 	phy_addr = s_wcn_device.btwf_device->base_addr +
 		   (phys_addr_t)&s_wssm_phy_offset_p->marlin.loopcheck_cnt;
 	wcn_read_data_from_phy_addr(phy_addr,
-				    &rx_count, sizeof(u32));
+					&rx_count, sizeof(u32));
 	WCN_INFO("cp2 comm rx count :%d\n", rx_count);
 
 	return rx_count;
@@ -220,13 +220,13 @@ int wcn_get_btwf_power_status(void)
 phys_addr_t wcn_get_btwf_init_status_addr(void)
 {
 	return s_wcn_device.btwf_device->base_addr +
-	       (phys_addr_t)&s_wssm_phy_offset_p->marlin.init_status;
+		   (phys_addr_t)&s_wssm_phy_offset_p->marlin.init_status;
 }
 
 phys_addr_t wcn_get_btwf_sleep_addr(void)
 {
 	return s_wcn_device.btwf_device->base_addr +
-	       (phys_addr_t)&s_wssm_phy_offset_p->cp2_sleep_status;
+		   (phys_addr_t)&s_wssm_phy_offset_p->cp2_sleep_status;
 }
 
 struct regmap *wcn_get_btwf_regmap(u32 regmap_type)
@@ -357,8 +357,8 @@ static void wcn_regmap_write_bit(struct wcn_device *ctrl,
 #endif
 
 void wcn_regmap_raw_write_bit(struct regmap *cur_regmap,
-				     u32 reg,
-				     unsigned int val)
+					 u32 reg,
+					 unsigned int val)
 {
 	int ret;
 	u32 val_tmp = val;
@@ -370,8 +370,8 @@ void wcn_regmap_raw_write_bit(struct regmap *cur_regmap,
 
 /* addr_offset:some REGs has twice group, one read and another write */
 void wcn_regmap_read(struct regmap *cur_regmap,
-			    u32 reg,
-			    unsigned int *val)
+				u32 reg,
+				unsigned int *val)
 {
 	(void)regmap_read(cur_regmap, reg, val);
 }
@@ -508,7 +508,7 @@ int wcn_power_enable_sys_domain(bool enable)
 		WCN_INFO("set WCN SYS TOP PD\n");
 	}
 	WCN_INFO("enable = %d, ret = %d, btwf_open=%d, gnss_open=%d\n",
-		     enable, ret, btwf_open, gnss_open);
+			 enable, ret, btwf_open, gnss_open);
 
 	return ret;
 }
@@ -534,15 +534,15 @@ void wcn_sys_soft_reset(void)
 		return;
 
 	if (s_wcn_device.btwf_device &&
-	    s_wcn_device.btwf_device->wcn_open_status)
+		s_wcn_device.btwf_device->wcn_open_status)
 		btwf_open = true;
 	if (s_wcn_device.gnss_device &&
-	    s_wcn_device.gnss_device->wcn_open_status)
+		s_wcn_device.gnss_device->wcn_open_status)
 		gnss_open = true;
 
 	if (!btwf_open && !gnss_open) {
 		if (wcn_platform_chip_type() ==
-		    WCN_PLATFORM_TYPE_PIKE2) {
+			WCN_PLATFORM_TYPE_PIKE2) {
 			bitmap = 1 << 7;
 		} else if (wcn_platform_chip_type() ==
 			   WCN_PLATFORM_TYPE_SHARKLE) {
@@ -559,7 +559,7 @@ void wcn_sys_soft_reset(void)
 					 offset, bitmap);
 		WCN_INFO("finish\n");
 		usleep_range(WCN_CP_SOFT_RST_MIN_TIME,
-			     WCN_CP_SOFT_RST_MAX_TIME);
+				 WCN_CP_SOFT_RST_MAX_TIME);
 	}
 }
 
@@ -625,15 +625,15 @@ void wcn_sys_soft_release(void)
 		return;
 
 	if (s_wcn_device.btwf_device &&
-	    s_wcn_device.btwf_device->wcn_open_status)
+		s_wcn_device.btwf_device->wcn_open_status)
 		btwf_open = true;
 	if (s_wcn_device.gnss_device &&
-	    s_wcn_device.gnss_device->wcn_open_status)
+		s_wcn_device.gnss_device->wcn_open_status)
 		gnss_open = true;
 
 	if (!btwf_open && !gnss_open) {
 		if (wcn_platform_chip_type() ==
-		    WCN_PLATFORM_TYPE_PIKE2) {
+			WCN_PLATFORM_TYPE_PIKE2) {
 			bitmap = 1 << 7;
 		} else if (wcn_platform_chip_type() ==
 			   WCN_PLATFORM_TYPE_SHARKLE) {
@@ -650,7 +650,7 @@ void wcn_sys_soft_release(void)
 					 offset, bitmap);
 		WCN_INFO("finish!\n");
 		usleep_range(WCN_CP_SOFT_RST_MIN_TIME,
-			     WCN_CP_SOFT_RST_MAX_TIME);
+				 WCN_CP_SOFT_RST_MAX_TIME);
 	}
 }
 
@@ -681,7 +681,7 @@ void wcn_power_set_vddcon(u32 value)
 {
 	if (s_wcn_device.vddwcn != NULL)
 		regulator_set_voltage(s_wcn_device.vddwcn,
-				      value, value);
+					  value, value);
 }
 
 /*
@@ -711,7 +711,7 @@ int wcn_power_enable_vddcon(bool enable)
 				WCN_PLATFORM_TYPE_SHARKLE)
 				wcn_sys_ctrl_26m(true);
 			if (wcn_platform_chip_type() ==
-			    WCN_PLATFORM_TYPE_SHARKL3)
+				WCN_PLATFORM_TYPE_SHARKL3)
 				wcn_clock_ctrl(true);
 		} else if (regulator_is_enabled(s_wcn_device.vddwcn)) {
 			ret = regulator_disable(s_wcn_device.vddwcn);
@@ -722,8 +722,8 @@ int wcn_power_enable_vddcon(bool enable)
 				wcn_sys_ctrl_26m(false);
 			}
 			if ((wcn_platform_chip_type() ==
-			    WCN_PLATFORM_TYPE_SHARKL3) &&
-			    (s_wcn_device.vddwcn_en_count == 0)) {
+				WCN_PLATFORM_TYPE_SHARKL3) &&
+				(s_wcn_device.vddwcn_en_count == 0)) {
 				wcn_clock_ctrl(false);
 			}
 		}
@@ -732,7 +732,7 @@ int wcn_power_enable_vddcon(bool enable)
 			 enable, s_wcn_device.vddwcn_en_count,
 			 ret, btwf_open, gnss_open);
 		if (s_wcn_device.vddwcn_en_count > 2 ||
-		    s_wcn_device.vddwcn_en_count < 0)
+			s_wcn_device.vddwcn_en_count < 0)
 			WCN_ERR("vddwcn_en_count=%d",
 				s_wcn_device.vddwcn_en_count);
 	}
@@ -748,7 +748,7 @@ void wcn_power_set_vddwifipa(u32 value)
 
 	if (btwf_device->vddwifipa != NULL)
 		regulator_set_voltage(btwf_device->vddwifipa,
-				      value, value);
+					  value, value);
 	WCN_INFO("value %d\n", value);
 }
 
