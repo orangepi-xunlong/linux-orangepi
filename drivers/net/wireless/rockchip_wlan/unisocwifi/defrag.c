@@ -26,11 +26,11 @@ static struct rx_defrag_node
 
 	list_for_each_entry(pos_node, &defrag_entry->list, list) {
 		if ((pos_node->desc.sta_lut_index ==
-		     msdu_desc->sta_lut_index) &&
-		    (pos_node->desc.tid == msdu_desc->tid)) {
+			 msdu_desc->sta_lut_index) &&
+			(pos_node->desc.tid == msdu_desc->tid)) {
 			if ((pos_node->desc.seq_num == msdu_desc->seq_num) &&
-			    ((pos_node->last_frag_num + 1) ==
-			     msdu_desc->frag_num)) {
+				((pos_node->last_frag_num + 1) ==
+				 msdu_desc->frag_num)) {
 				/* Node alive & fragment avail */
 				pos_node->last_frag_num = msdu_desc->frag_num;
 				wl_debug("%s: last_frag_num: %d\n",
@@ -65,7 +65,7 @@ static inline void __init_first_frag_node(struct rx_defrag_node *node,
 
 static struct rx_defrag_node
 *init_first_defrag_node(struct sprdwl_rx_defrag_entry *defrag_entry,
-		      struct rx_msdu_desc *msdu_desc)
+			  struct rx_msdu_desc *msdu_desc)
 {
 	struct rx_defrag_node *node = NULL, *pos_node = NULL;
 	bool ret = true;
@@ -73,20 +73,20 @@ static struct rx_defrag_node
 	/* Check whether this entry alive or this fragment avail */
 	list_for_each_entry(pos_node, &defrag_entry->list, list) {
 		if ((pos_node->desc.sta_lut_index ==
-		     msdu_desc->sta_lut_index) &&
-		    (pos_node->desc.tid == msdu_desc->tid)) {
+			 msdu_desc->sta_lut_index) &&
+			(pos_node->desc.tid == msdu_desc->tid)) {
 			if (!seqno_leq(msdu_desc->seq_num,
-				       pos_node->desc.seq_num)) {
+					   pos_node->desc.seq_num)) {
 				/* Replace this entry */
 				wl_err("%s: fragment replace: %d, %d\n",
-				       __func__, msdu_desc->seq_num,
-				       pos_node->desc.seq_num);
+					   __func__, msdu_desc->seq_num,
+					   pos_node->desc.seq_num);
 				node = pos_node;
 			} else {
 				/* fragment not avail */
 				wl_err("%s: fragment not avail: %d, %d\n",
-				       __func__, msdu_desc->seq_num,
-				       pos_node->desc.seq_num);
+					   __func__, msdu_desc->seq_num,
+					   pos_node->desc.seq_num);
 				ret = false;
 			}
 			break;
@@ -135,7 +135,7 @@ static struct rx_defrag_node
 
 static struct sk_buff
 *defrag_single_data_process(struct sprdwl_rx_defrag_entry *defrag_entry,
-			    struct sk_buff *pskb)
+				struct sk_buff *pskb)
 {
 	struct rx_defrag_node *node = NULL;
 	struct rx_msdu_desc *msdu_desc = (struct rx_msdu_desc *)pskb->data;
@@ -192,7 +192,7 @@ static struct sk_buff
 				wl_debug("%s: frag_len: %d, frag_offset: %d\n",
 					 __func__, frag_len, frag_offset);
 				memcpy((skb->data + offset),
-				       (pos_skb->data + frag_offset), frag_len);
+					   (pos_skb->data + frag_offset), frag_len);
 				offset += frag_len;
 
 				dev_kfree_skb(pos_skb);
@@ -204,7 +204,7 @@ exit:
 			/* Move this entry to tail */
 			if (!list_is_last(&node->list, &defrag_entry->list))
 				list_move_tail(&node->list,
-					       &defrag_entry->list);
+						   &defrag_entry->list);
 		}
 	} else {
 		dev_kfree_skb(pskb);
@@ -215,7 +215,7 @@ exit:
 
 struct sk_buff
 *defrag_data_process(struct sprdwl_rx_defrag_entry *defrag_entry,
-		     struct sk_buff *pskb)
+			 struct sk_buff *pskb)
 {
 	struct rx_msdu_desc *msdu_desc = (struct rx_msdu_desc *)pskb->data;
 	struct sk_buff *skb = NULL;

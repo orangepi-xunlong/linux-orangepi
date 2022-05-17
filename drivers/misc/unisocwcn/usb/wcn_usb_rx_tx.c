@@ -1196,7 +1196,7 @@ STOP_AGAIN:
 			buf_list_is_full(chn), WCN_USB_TIMEOUT);
 	if (!time) {
 		wcn_usb_err("%s chn:%d wait work_completion timeout!\n",
-			    __func__, chn);
+				__func__, chn);
 
 		if (--i <= 0 && !wcn_usb_state_get(error_happen))
 			return;
@@ -1297,10 +1297,10 @@ OUT:
 	if (rx_tx->num) {
 		channel_debug_packet_no_full(rx_tx->num);
 		if (wcn_usb_mbuf_list_destroy(rx_tx->channel,
-					      rx_tx->head, rx_tx->tail,
-					      rx_tx->num))
+						  rx_tx->head, rx_tx->tail,
+						  rx_tx->num))
 			wcn_usb_err("%s chn[%d] list_destroy error%d\n",
-				    __func__, rx_tx->channel, ret);
+					__func__, rx_tx->channel, ret);
 	}
 
 	return ret;
@@ -1401,7 +1401,7 @@ GET_RX_TX_HEAD:
 	list_splice_init(&work_data->rx_tx_head, &rx_tx_head);
 	if (work_data->report_num >= work_data->report_num_last)
 		work_data->transfer_remains += work_data->report_num -
-					       work_data->report_num_last;
+						   work_data->report_num_last;
 	else
 		work_data->transfer_remains +=
 			USHRT_MAX - work_data->report_num_last +
@@ -1623,7 +1623,7 @@ static void start_loop_check(void)
 	pipe = usb_sndbulkpipe(udev, endpoint->bEndpointAddress);
 	strncpy(buf, loop_check_cmd, strlen(loop_check_cmd));
 	usb_fill_bulk_urb(urb, udev, pipe, buf, strlen(loop_check_cmd) + 1,
-				     loop_check_callback, buf);
+					 loop_check_callback, buf);
 	if (usb_submit_urb(urb, GFP_KERNEL))
 		wcn_usb_err("%s start loopcheck error\n", __func__);
 }
@@ -1655,7 +1655,7 @@ static void wcn_usb_rx_apostle_callback(struct wcn_usb_packet *packet)
 			snprintf(log_info, 32, "wcn usb_interrupt_msg %d ",
 					interrupt_count);
 			print_hex_dump(KERN_ERR, log_info, 0, apostle->buf_size,
-				       1, apostle->buf, apostle->buf_size, 0);
+					   1, apostle->buf, apostle->buf_size, 0);
 		}
 
 		start_loop_check();

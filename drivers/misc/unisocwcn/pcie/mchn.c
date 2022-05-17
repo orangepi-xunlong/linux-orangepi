@@ -28,7 +28,7 @@ struct mchn_ops_t *mchn_ops(int channel)
 }
 
 int mbuf_link_alloc(int chn, struct mbuf_t **head, struct mbuf_t **tail,
-		    int *num)
+			int *num)
 {
 	int i;
 	struct mbuf_t *cur, *head__, *tail__ = NULL;
@@ -72,7 +72,7 @@ int mbuf_link_free(int chn, struct mbuf_t *head, struct mbuf_t *tail, int num)
 	struct buffer_pool *pool = &(mchn->chn_public[chn].pool);
 
 	if ((head == NULL) || (tail == NULL) || (num == 0) ||
-	    (tail->next != 0)) {
+		(tail->next != 0)) {
 		PCIE_ERR("%s@%d(%d, 0x%p, 0x%p, %d)err\n",
 			__func__, __LINE__, chn, head, tail, num);
 
@@ -97,13 +97,13 @@ int mbuf_pool_init(struct buffer_pool *pool, int size, int payload)
 	pool->payload = payload;
 	spin_lock_init(&(pool->lock));
 	pool->mem = kmalloc((sizeof(struct mbuf_t) + payload) * size,
-			     GFP_KERNEL);
+				 GFP_KERNEL);
 	PCIE_INFO("mbuf_pool->mem:0x%lx\n",
 		(unsigned long)virt_to_phys(pool->mem));
 	memset(pool->mem, 0x00, (sizeof(struct mbuf_t) + payload) * size);
 	pool->head = (struct mbuf_t *) (pool->mem);
 	for (i = 0, mbuf = (struct mbuf_t *) (pool->head);
-	     i < (size - 1); i++) {
+		 i < (size - 1); i++) {
 		mbuf->seq = i;
 		PCIE_INFO("%s mbuf[%d]:{0x%lx, 0x%lx}\n", __func__, i,
 			(unsigned long)mbuf,
@@ -131,7 +131,7 @@ int mbuf_pool_init(struct buffer_pool *pool, int size, int payload)
 int mbuf_pool_deinit(struct buffer_pool *pool)
 {
 	memset(pool->mem, 0x00, (sizeof(struct mbuf_t) +
-	       pool->payload) * pool->size);
+		   pool->payload) * pool->size);
 	kfree(pool->mem);
 
 	return 0;
@@ -210,7 +210,7 @@ int mchn_push_link(int chn, struct mbuf_t *head, struct mbuf_t *tail, int num)
 	struct mchn_info_t *mchn = mchn_info();
 
 	if ((chn >= 16) || (mchn->ops[chn] == NULL) || (head == NULL) ||
-	    (tail == NULL) || (num > mchn->ops[chn]->pool_size)) {
+		(tail == NULL) || (num > mchn->ops[chn]->pool_size)) {
 		WARN_ON(1);
 		return -1;
 	}
@@ -224,7 +224,7 @@ int mchn_push_link(int chn, struct mbuf_t *head, struct mbuf_t *tail, int num)
 						   (void *)tail, num);
 		else
 			ret = edma_push_link(chn, (void *)head,
-					     (void *)tail, num);
+						 (void *)tail, num);
 		break;
 	default:
 		break;
@@ -266,8 +266,8 @@ int mchn_init(struct mchn_ops_t *ops)
 
 	PCIE_INFO("[+]%s(%d, %d)\n", __func__, ops->channel, ops->hif_type);
 	if ((mchn->ops[ops->channel] != NULL) ||
-	     ((ops->hif_type != HW_TYPE_SDIO) &&
-	     (ops->hif_type != HW_TYPE_PCIE))) {
+		 ((ops->hif_type != HW_TYPE_SDIO) &&
+		 (ops->hif_type != HW_TYPE_PCIE))) {
 		PCIE_INFO("%s err, hif_type %d\n", __func__, ops->hif_type);
 		WARN_ON(1);
 
@@ -281,14 +281,14 @@ int mchn_init(struct mchn_ops_t *ops)
 		break;
 	case HW_TYPE_PCIE:
 		ret = edma_chn_init(ops->channel, 0, ops->inout,
-				    ops->pool_size);
+					ops->pool_size);
 		break;
 	default:
 		break;
 	}
 	if ((ret == 0) && (ops->pool_size > 0))
 		ret = mbuf_pool_init(&(mchn->chn_public[ops->channel].pool),
-				     ops->pool_size, 0);
+					 ops->pool_size, 0);
 	PCIE_INFO("[-]%s(%d)\n", __func__, ops->channel);
 
 	return ret;
@@ -302,8 +302,8 @@ int mchn_deinit(struct mchn_ops_t *ops)
 
 	PCIE_INFO("[+]%s(%d, %d)\n", __func__, ops->channel, ops->hif_type);
 	if ((mchn->ops[ops->channel] == NULL) ||
-	    ((ops->hif_type != HW_TYPE_SDIO) &&
-	    (ops->hif_type != HW_TYPE_PCIE))) {
+		((ops->hif_type != HW_TYPE_SDIO) &&
+		(ops->hif_type != HW_TYPE_PCIE))) {
 		PCIE_ERR("%s err\n", __func__);
 		return -1;
 	}

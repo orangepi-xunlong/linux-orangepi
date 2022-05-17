@@ -58,7 +58,7 @@ void sdio_wait_pub_int_done(void)
 
 		/* wait pub_int handle finish*/
 		while ((atomic_read(&flag_pub_int_done) == 0) &&
-		       (wait_cnt < 10)) {
+			   (wait_cnt < 10)) {
 			wait_cnt++;
 			SLP_MGR_INFO("wait pub_int_done:%d", wait_cnt);
 			usleep_range(1500, 3000);
@@ -104,11 +104,7 @@ int pub_int_handle_thread(void *data)
 		if (sdio_power_notify)
 			atomic_set(&flag_pub_int_done, 1);
 		else {
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-			__pm_relax(&sdio_int.pub_int_wakelock.ws);
-#else
-			__pm_relax(&(sdio_int.pub_int_ws));
-#endif
+			__pm_relax((sdio_int.pub_int_ws));
 		}
 
 		/* enable interrupt, balance with disable in pub_int_isr */
@@ -131,11 +127,7 @@ static irqreturn_t pub_int_isr(int irq, void *para)
 	if (sdio_power_notify)
 		atomic_set(&flag_pub_int_done, 0);
 	else {
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-		__pm_stay_awake(&sdio_int.pub_int_wakelock.ws);
-#else
-		__pm_stay_awake(&(sdio_int.pub_int_ws));
-#endif
+		__pm_stay_awake((sdio_int.pub_int_ws));
 	}
 
 	irq_cnt++;
@@ -322,12 +314,11 @@ int sdio_pub_int_init(int irq)
 	sdio_int.pub_int_sts0 = REG_PUB_INT_STS0;
 
 	atomic_set(&flag_pub_int_done, 1);
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	wake_lock_init(&sdio_int.pub_int_wakelock, WAKE_LOCK_SUSPEND,
-		       "pub_int_wakelock");
-#else
-	wakeup_source_init(&(sdio_int.pub_int_ws), "pub_int_ws");
-#endif
+
+	/*wakeup_source pointer*/
+	sdio_int.pub_int_ws = wakeup_source_create("pub_int_ws");
+	wakeup_source_add(sdio_int.pub_int_ws);
+
 	init_completion(&(sdio_int.pub_int_completion));
 
 	sdio_pub_int_register(irq);
@@ -356,11 +347,10 @@ int sdio_pub_int_deinit(void)
 	sdio_power_notify = FALSE;
 	disable_irq(sdio_int.pub_int_num);
 	free_irq(sdio_int.pub_int_num, NULL);
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	wake_lock_destroy(&sdio_int.pub_int_wakelock);
-#else
-	wakeup_source_trash(&(sdio_int.pub_int_ws));
-#endif
+
+	/*wakeup_source pointer*/
+	wakeup_source_remove(sdio_int.pub_int_ws);
+	wakeup_source_destroy(sdio_int.pub_int_ws);
 
 	SLP_MGR_INFO("%s ok!\n", __func__);
 

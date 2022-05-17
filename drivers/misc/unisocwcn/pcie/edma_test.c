@@ -96,7 +96,7 @@ static int lo_buf_alloc(int chn, int size, int num)
 }
 
 static int lo_tx_pop(int chn, struct mbuf_t *head, struct mbuf_t *tail,
-		     int num)
+			 int num)
 {
 	struct loopback *lo = &g_lo;
 	struct test_link *tx_link = &(lo->link[lo_index(chn)][TX_CHN]);
@@ -136,7 +136,7 @@ static int lo_push(int chn)
 }
 
 static int lo_rx_push(int chn, struct mbuf_t **head, struct mbuf_t **tail,
-		      int *num)
+			  int *num)
 {
 	int ret = mbuf_link_alloc(chn, head, tail, num);
 
@@ -144,7 +144,7 @@ static int lo_rx_push(int chn, struct mbuf_t **head, struct mbuf_t **tail,
 }
 
 static int lo_rx_pop(int chn, struct mbuf_t *head, struct mbuf_t *tail,
-		     int num)
+			 int num)
 {
 	int i, pos = 0;
 	unsigned char string[128];
@@ -173,9 +173,9 @@ static int lo_rx_pop(int chn, struct mbuf_t *head, struct mbuf_t *tail,
 			return -1;
 		}
 		pos = sprintf(string + pos, "lo(%d,%d){",
-			      tx_link->chn, rx_link->chn);
+				  tx_link->chn, rx_link->chn);
 		for (i = 0, tx_mbuf = tx_link->head, rx_mbuf = rx_link->head;
-		    i < tx_link->num; i++) {
+			i < tx_link->num; i++) {
 			if (memcmp(tx_mbuf->buf, rx_mbuf->buf, 1024) != 0) {
 				PCIE_ERR("%s line:%d err\n", __func__,
 					 __LINE__);
@@ -183,15 +183,15 @@ static int lo_rx_pop(int chn, struct mbuf_t *head, struct mbuf_t *tail,
 					;
 			}
 			pos += sprintf(string+pos, "%d ",
-				       *(int *)(tx_mbuf->buf));
+					   *(int *)(tx_mbuf->buf));
 			tx_mbuf = tx_mbuf->next;
 			rx_mbuf = rx_mbuf->next;
 		}
 		PCIE_INFO("%s}\n", string);
 		mbuf_link_free(rx_link->chn, rx_link->head, rx_link->tail,
-			       rx_link->num);
+				   rx_link->num);
 		mbuf_link_free(tx_link->chn, tx_link->head, tx_link->tail,
-			       tx_link->num);
+				   tx_link->num);
 
 		rx_link->num = 0;
 		rx_link->head = rx_link->tail = NULL;

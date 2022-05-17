@@ -166,7 +166,7 @@ static int mdbg_dump_data(unsigned int start_addr,
 		err = marlin_dump_read_usb(start_addr + count, buf, trans_size);
 #else
 		err = sprdwcn_bus_direct_read(start_addr + count, buf,
-					      trans_size);
+						  trans_size);
 #endif
 		if (err < 0) {
 			WCN_ERR("%s dump memory error:%d\n", __func__, err);
@@ -176,7 +176,7 @@ static int mdbg_dump_data(unsigned int start_addr,
 			prin_temp = 1;
 			for (i = 0; i < 5; i++)
 				WCN_ERR("mdbg *****buf[%d]:0x%x\n",
-				       i, buf[i]);
+					   i, buf[i]);
 		}
 		if (mdbg_dev->ring_dev->flag_smp == 1)
 			mdbg_write_smp_head(trans_size);
@@ -208,7 +208,7 @@ static int mdbg_dump_data(unsigned int start_addr,
 			&& (mdbg_dev->open_count != 0)) {
 			WCN_ERR("no space buf to write mem, sleep...\n");
 			wake_up_log_wait();
-		    msleep(20);
+			msleep(20);
 		}
 
 #ifdef CONFIG_WCND
@@ -1159,7 +1159,7 @@ static int check_wifi_power_domain_ison(void)
 						   &temp, 4);
 			temp = temp & (~WIFI_MAC_PWR_DOWN);
 			ret = sprdwcn_bus_reg_write(PD_WIFI_MAC_AON_CFG4,
-						    &temp, 4);
+							&temp, 4);
 			udelay(200);
 			/* PHY power on */
 			WCN_INFO("WIFI PHY start power on\n");
@@ -1167,7 +1167,7 @@ static int check_wifi_power_domain_ison(void)
 						   &temp, 4);
 			temp = temp & (~WIFI_PHY_PWR_DOWN);
 			ret = sprdwcn_bus_reg_write(PD_WIFI_PHY_AON_CFG4,
-						    &temp, 4);
+							&temp, 4);
 			/* retention */
 			WCN_INFO("WIFI retention start power on\n");
 			ret = sprdwcn_bus_reg_read(PD_WIFI_AON_CFG4, &temp, 4);
@@ -1182,14 +1182,14 @@ static int check_wifi_power_domain_ison(void)
 						   &temp, 4);
 			temp = temp & (~(1 << 1));
 			ret = sprdwcn_bus_reg_write(DUMP_WIFI_AON_MAC_ADDR,
-						    &temp, 4);
+							&temp, 4);
 			udelay(300);
 			/* WIFI_MAC_RTN_SLEEPPS_CTL [bit0] =0 */
 			ret = sprdwcn_bus_reg_read(WIFI_MAC_RTN_SLEEPPS_CTL,
 						   &temp, 4);
 			temp = temp & (~(1 << 0));
 			ret = sprdwcn_bus_reg_write(WIFI_MAC_RTN_SLEEPPS_CTL,
-						    &temp, 4);
+							&temp, 4);
 		}
 
 	}
@@ -1269,7 +1269,7 @@ int mdbg_dump_mem(void)
 	{
 		wcn_dump_array_size = ARRAY_SIZE(s_wcn_dump_regs_5621);
 		memcpy(s_wcn_dump_regs, s_wcn_dump_regs_5621,
-		       sizeof(s_wcn_dump_regs_5621));
+			   sizeof(s_wcn_dump_regs_5621));
 	}
 #endif
 
@@ -1280,7 +1280,7 @@ int mdbg_dump_mem(void)
 	{
 		wcn_dump_array_size = ARRAY_SIZE(s_wcn_dump_regs_5622);
 		memcpy(s_wcn_dump_regs, s_wcn_dump_regs_5622,
-		       sizeof(s_wcn_dump_regs_5622));
+			   sizeof(s_wcn_dump_regs_5622));
 	}
 #endif
 
@@ -1291,7 +1291,7 @@ int mdbg_dump_mem(void)
 	{
 		wcn_dump_array_size = ARRAY_SIZE(s_wcn_dump_regs_5623);
 		memcpy(s_wcn_dump_regs, s_wcn_dump_regs_5623,
-		       sizeof(s_wcn_dump_regs_5623));
+			   sizeof(s_wcn_dump_regs_5623));
 	}
 #endif
 
@@ -1350,7 +1350,7 @@ int mdbg_dump_mem(void)
 			return 0;
 		cp_dcache_clean_invalid_all();
 		count = mdbg_dump_data(CP_START_ADDR, NULL,
-				       FIRMWARE_MAX_SIZE, 0);
+					   FIRMWARE_MAX_SIZE, 0);
 
 		WCN_INFO("mdbg only dump ram %ld ok!\n", count);
 
@@ -1385,16 +1385,16 @@ int mdbg_dump_mem(void)
 	}
 	if (PRE_DIV_CLK_ADDR) {
 		count = mdbg_dump_data(PRE_DIV_CLK_ADDR,
-				       "start_dump_pre_div_clk_reg",
-				       PRE_DIV_CLK_SIZE,
-				       strlen("start_dump_pre_div_clk_reg"));
+					   "start_dump_pre_div_clk_reg",
+					   PRE_DIV_CLK_SIZE,
+					   strlen("start_dump_pre_div_clk_reg"));
 		WCN_INFO("mdbg dump predivclk %ld ok!\n", count);
 	}
 
 
 	count = mdbg_dump_data(DUMP_SDIO_ADDR, "start_dump_sdio_reg",
-			       DUMP_SDIO_ADDR_SIZE,
-			      strlen("start_dump_sdio_reg"));
+				   DUMP_SDIO_ADDR_SIZE,
+				  strlen("start_dump_sdio_reg"));
 	WCN_INFO("mdbg dump sdio %ld ok!\n", count);
 
 	/* for dump wifi reg */
@@ -1415,16 +1415,16 @@ int mdbg_dump_mem(void)
 
 	if (DUMP_WIFI_RTN_PD_MAC_ADDR)
 		count = mdbg_dump_data(DUMP_WIFI_RTN_PD_MAC_ADDR,
-				       "start_dump_wifi_RTN+PD_reg",
-				       DUMP_WIFI_RTN_PD_MAC_ADDR_SIZE,
-				       strlen("start_dump_wifi_RTN+PD_reg"));
+					   "start_dump_wifi_RTN+PD_reg",
+					   DUMP_WIFI_RTN_PD_MAC_ADDR_SIZE,
+					   strlen("start_dump_wifi_RTN+PD_reg"));
 
 #ifdef DUMP_WIFI_352K_RAM_ADDR_SIZE
 	if (DUMP_WIFI_352K_RAM_ADDR) {
 		count = mdbg_dump_data(DUMP_WIFI_352K_RAM_ADDR,
-				       "start_dump_wifi_352K_RAM_reg",
-				       DUMP_WIFI_352K_RAM_ADDR_SIZE,
-				       strlen("start_dump_wifi_352K_RAM_reg"));
+					   "start_dump_wifi_352K_RAM_reg",
+					   DUMP_WIFI_352K_RAM_ADDR_SIZE,
+					   strlen("start_dump_wifi_352K_RAM_reg"));
 		WCN_INFO("mdbg dump wifi %ld ok!\n", count);
 	}
 #endif
@@ -1433,16 +1433,16 @@ int mdbg_dump_mem(void)
 next:
 	if (DUMP_INTC_ADDR) {
 		count = mdbg_dump_data(DUMP_INTC_ADDR, "start_dump_intc_reg",
-			       DUMP_REG_SIZE,
-			       strlen("start_dump_intc_reg"));
+				   DUMP_REG_SIZE,
+				   strlen("start_dump_intc_reg"));
 		WCN_INFO("mdbg dump intc %ld ok!\n", count);
 	}
 
 	if (DUMP_SYSTIMER_ADDR) {
 		count = mdbg_dump_data(DUMP_SYSTIMER_ADDR,
 					"start_dump_systimer_reg",
-			       DUMP_REG_SIZE,
-			       strlen("start_dump_systimer_reg"));
+				   DUMP_REG_SIZE,
+				   strlen("start_dump_systimer_reg"));
 		WCN_INFO("mdbg dump systimer %ld ok!\n", count);
 	}
 
@@ -1522,72 +1522,72 @@ next:
 
 	if (BT_CMD_BUF_ADDR) {
 		count = mdbg_dump_data(BT_CMD_BUF_ADDR,
-				       "start_dump_bt_cmd_buf_reg",
-				       BT_CMD_BUF_SIZE,
-				       strlen("start_dump_bt_cmd_buf_reg"));
+					   "start_dump_bt_cmd_buf_reg",
+					   BT_CMD_BUF_SIZE,
+					   strlen("start_dump_bt_cmd_buf_reg"));
 		WCN_INFO("mdbg dump bt_cmd buf %ld ok!\n", count);
 	}
 	if (BT_EVENT_BUF_ADDR) {
 		count = mdbg_dump_data(BT_EVENT_BUF_ADDR,
-				       "start_dump_bt_event_buf_reg",
-				       BT_EVENT_BUF_SIZE,
-				       strlen("start_dump_bt_event_buf_reg"));
+					   "start_dump_bt_event_buf_reg",
+					   BT_EVENT_BUF_SIZE,
+					   strlen("start_dump_bt_event_buf_reg"));
 		WCN_INFO("mdbg dump btevent buf %ld ok!\n", count);
 	}
 	if (BT_LMP_TX_BUF_ADDR) {
 		count = mdbg_dump_data(BT_LMP_TX_BUF_ADDR,
-				       "start_dump_bt_lmp_tx_buf_reg",
-				       BT_LMP_TX_BUF_SIZE,
-				       strlen("start_dump_bt_lmp_tx_buf_reg"));
+					   "start_dump_bt_lmp_tx_buf_reg",
+					   BT_LMP_TX_BUF_SIZE,
+					   strlen("start_dump_bt_lmp_tx_buf_reg"));
 		WCN_INFO("mdbg dump bt_lmp_tx_buf %ld ok!\n", count);
 	}
 	if (BT_LMP_RX_BUF_ADDR) {
 		count = mdbg_dump_data(BT_LMP_RX_BUF_ADDR,
-				       "start_dump_bt_lmp_rx_buf_reg",
-				       BT_LMP_RX_BUF_SIZE,
-				       strlen("start_dump_bt_lmp_rx_buf_reg"));
+					   "start_dump_bt_lmp_rx_buf_reg",
+					   BT_LMP_RX_BUF_SIZE,
+					   strlen("start_dump_bt_lmp_rx_buf_reg"));
 		WCN_INFO("mdbg dump bt_lmp_rx_buf %ld ok!\n", count);
 	}
 	if (BT_ACL_TX_BUF_ADDR) {
 		count = mdbg_dump_data(BT_ACL_TX_BUF_ADDR,
-				       "start_dump_bt_acl_tx_buf_reg",
-				       BT_ACL_TX_BUF_SIZE,
-				       strlen("start_dump_bt_acl_tx_buf_reg"));
+					   "start_dump_bt_acl_tx_buf_reg",
+					   BT_ACL_TX_BUF_SIZE,
+					   strlen("start_dump_bt_acl_tx_buf_reg"));
 		WCN_INFO("mdbg dump bt_acl_tx_buf%ld ok!\n", count);
 	}
 	if (BT_ACL_RX_BUF_ADDR) {
 		count = mdbg_dump_data(BT_ACL_RX_BUF_ADDR,
-				       "start_dump_bt_acl_rx_buf_reg",
-				       BT_ACL_RX_BUF_SIZE,
-				       strlen("start_dump_bt_acl_rx_buf_reg"));
+					   "start_dump_bt_acl_rx_buf_reg",
+					   BT_ACL_RX_BUF_SIZE,
+					   strlen("start_dump_bt_acl_rx_buf_reg"));
 		WCN_INFO("mdbg dump bt_acl_rx_buf %ld ok!\n", count);
 	}
 	if (BT_SCO_TX_BUF_ADDR) {
 		count = mdbg_dump_data(BT_SCO_TX_BUF_ADDR,
-				       "start_dump_bt_sco_tx_buf_reg",
-				       BT_SCO_TX_BUF_SIZE,
-				       strlen("start_dump_bt_sco_tx_buf_reg"));
+					   "start_dump_bt_sco_tx_buf_reg",
+					   BT_SCO_TX_BUF_SIZE,
+					   strlen("start_dump_bt_sco_tx_buf_reg"));
 		WCN_INFO("mdbg dump bt_sco_tx_buf %ld ok!\n", count);
 	}
 	if (BT_SCO_RX_BUF_ADDR) {
 		count = mdbg_dump_data(BT_SCO_RX_BUF_ADDR,
-				       "start_dump_bt_sco_rx_buf_reg",
-				       BT_SCO_RX_BUF_SIZE,
-				       strlen("start_dump_bt_sco_rx_buf_reg"));
+					   "start_dump_bt_sco_rx_buf_reg",
+					   BT_SCO_RX_BUF_SIZE,
+					   strlen("start_dump_bt_sco_rx_buf_reg"));
 		WCN_INFO("mdbg dump bt_sco_rx_buf %ld ok!\n", count);
 	}
 	if (BT_BB_TX_BUF_ADDR) {
 		count = mdbg_dump_data(BT_BB_TX_BUF_ADDR,
-				       "start_dump_bt_bb_tx_buf_reg",
-				       BT_BB_TX_BUF_SIZE,
-				       strlen("start_dump_bt_bb_tx_buf_reg"));
+					   "start_dump_bt_bb_tx_buf_reg",
+					   BT_BB_TX_BUF_SIZE,
+					   strlen("start_dump_bt_bb_tx_buf_reg"));
 		WCN_INFO("mdbg dump bt_bb_tx_buf %ld ok!\n", count);
 	}
 	if (BT_BB_RX_BUF_ADDR) {
 		count = mdbg_dump_data(BT_BB_RX_BUF_ADDR,
-				       "start_dump_bt_bb_rx_buf_reg",
-				       BT_BB_RX_BUF_SIZE,
-				       strlen("start_dump_bt_bb_rx_buf_reg"));
+					   "start_dump_bt_bb_rx_buf_reg",
+					   BT_BB_RX_BUF_SIZE,
+					   strlen("start_dump_bt_bb_rx_buf_reg"));
 		WCN_INFO("mdbg dump bt_bb_rx_buf %ld ok!\n", count);
 	}
 

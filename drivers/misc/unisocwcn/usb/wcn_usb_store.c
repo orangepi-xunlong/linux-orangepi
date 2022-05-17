@@ -78,7 +78,7 @@ static struct wcn_usb_store_chn2ep *wcn_usb_store_get_chn2ep(int index)
 	/* May be we can call unlike */
 	if (index >= table_size) {
 		wcn_usb_err("%s index[%d] is invalid(table size %d)\n",
-			       __func__, index, table_size);
+				   __func__, index, table_size);
 		return NULL;
 	}
 

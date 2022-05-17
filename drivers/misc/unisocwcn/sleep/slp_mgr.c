@@ -74,11 +74,10 @@ int slp_mgr_wakeup(enum slp_subsys subsys)
 #if KERNEL_VERSION(3, 16, 75) > LINUX_VERSION_CODE
 	ktime_t time_cmp;
 #endif
-
 	mutex_lock(&(slp_mgr.wakeup_lock));
 	if (STAY_SLPING == (atomic_read(&(slp_mgr.cp2_state)))) {
 		ap_wakeup_cp();
-		time_end = ktime_add_ms(ktime_get(), 10);
+		time_end = ktime_add_ms(ktime_get(), 30);
 #ifndef CONFIG_CHECK_DRIVER_BY_CHIPID
 #ifdef CONFIG_UWE5623
 		/*select btwf_slp_status*/
@@ -112,7 +111,7 @@ int slp_mgr_wakeup(enum slp_subsys subsys)
 				unsigned int reg_val = 0;
 
 				sprdwcn_bus_reg_read(CP_WAKE_STATUS,
-						     &reg_val, 4);
+							 &reg_val, 4);
 				if ((reg_val & BIT(31)) == 0)
 #endif
 					break;
@@ -131,7 +130,7 @@ int slp_mgr_wakeup(enum slp_subsys subsys)
 					unsigned int reg_val = 0;
 
 					sprdwcn_bus_reg_read(CP_WAKE_STATUS,
-							     &reg_val, 4);
+								 &reg_val, 4);
 					if ((reg_val & BIT(31)) == 0)
 						break;
 				} else
@@ -143,7 +142,7 @@ try_timeout:
 			if (do_dump) {
 				atomic_set(&(slp_mgr.cp2_state), STAY_AWAKING);
 				SLP_MGR_INFO("wakeup fail, slp_sts-0x%x",
-					     slp_sts);
+						 slp_sts);
 				sdiohal_dump_aon_reg();
 				mutex_unlock(&(slp_mgr.wakeup_lock));
 				return -1;

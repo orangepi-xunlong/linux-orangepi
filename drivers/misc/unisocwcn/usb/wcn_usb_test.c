@@ -221,7 +221,7 @@ static ssize_t wcn_usb_channel_write(struct file *file, const char *buffer,
 		return -EIO;
 	}
 
-	wcn_usb_test_print("%s i[%d] mbuf_num[%d] byte[%ld]\n",
+	wcn_usb_test_print("%s i[%d] mbuf_num[%d] byte[%zd]\n",
 			__func__, i, mbuf_num, buf_offset);
 
 	*ppos += buf_offset;
@@ -255,7 +255,7 @@ int calculate_throughput(int channel_id, struct mbuf_t *head,
 
 
 	if (get_channel_dir(channel_id) &&
-	    (chnmg_find_channel(this_chnmg, channel_id)->status)) {
+		(chnmg_find_channel(this_chnmg, channel_id)->status)) {
 		mbuf_list_iter(head, num, mbuf, i) {
 			kfree(mbuf->buf);
 			mbuf->buf = NULL;
@@ -325,7 +325,7 @@ static int rx_pop_link(int channel_id, struct mbuf_t *head, struct mbuf_t *tail,
 
 typedef int (*channel_callback)(int, struct mbuf_t *, struct mbuf_t*, int);
 static struct channel *channel_init(int id, struct proc_dir_entry *dir,
-				    channel_callback pop_link)
+					channel_callback pop_link)
 {
 	struct channel *channel;
 
@@ -602,7 +602,7 @@ static int wcn_usb_test_tp(struct chnmg *chnmg, struct usb_test_cmd_desc *cmd)
 		return 0;
 
 	if (get_channel_dir(cmd->channel) &&
-	    !(chnmg_find_channel(this_chnmg, cmd->channel)->status)) {
+		!(chnmg_find_channel(this_chnmg, cmd->channel)->status)) {
 		ret = sprdwcn_bus_list_alloc(cmd->channel, &head, &tail, &num);
 		if (ret || !head || num != cmd->mbuf_num) {
 			sprdwcn_bus_list_free(cmd->channel, head, tail, num);
@@ -620,7 +620,7 @@ static int wcn_usb_test_tp(struct chnmg *chnmg, struct usb_test_cmd_desc *cmd)
 			mbuf->len = cmd->mbuf_len;
 		}
 		ret = sprdwcn_bus_push_list(cmd->channel, head, tail,
-					      cmd->mbuf_num);
+						  cmd->mbuf_num);
 		if (ret) {
 			mbuf_list_iter(head, num, mbuf, i)
 				kfree(mbuf->buf);
@@ -789,10 +789,10 @@ static int wcn_usb_test_command(struct chnmg *chnmg, char *buf, int buf_len)
 		return -ENOMEM;
 
 	ret = sscanf(buf+3, "%d %d %d %d",
-		     &test_cmd->channel,
-		     &test_cmd->command,
-		     &test_cmd->mbuf_num,
-		     &test_cmd->mbuf_len);
+			 &test_cmd->channel,
+			 &test_cmd->command,
+			 &test_cmd->mbuf_num,
+			 &test_cmd->mbuf_len);
 	if (ret < 0) {
 		ret = -EINVAL;
 		goto ERROR;

@@ -253,7 +253,7 @@ void ShowChannel(struct wiphy *pWiphy)
 
 			if (chan->flags & IEEE80211_CHAN_DISABLED) {
 				wl_info("disable channels[%d][%d]: ch%d (freq = %d) flags=0x%x\n",
-				    band_idx, ch_idx, chan->hw_value, chan->center_freq, chan->flags);
+					band_idx, ch_idx, chan->hw_value, chan->center_freq, chan->flags);
 				continue;
 			}
 
@@ -272,7 +272,7 @@ void ShowChannel(struct wiphy *pWiphy)
 }
 
 static bool freq_in_rule_band(const struct ieee80211_freq_range *freq_range,
-			      u32 freq_khz)
+				  u32 freq_khz)
 {
 #define ONE_GHZ_IN_KHZ	1000000
 	/*
@@ -290,7 +290,7 @@ static bool freq_in_rule_band(const struct ieee80211_freq_range *freq_range,
 #undef ONE_GHZ_IN_KHZ
 }
 static bool reg_does_bw_fit(const struct ieee80211_freq_range *freq_range,
-			    u32 center_freq_khz, u32 bw_khz)
+				u32 center_freq_khz, u32 bw_khz)
 {
 	u32 start_freq_khz, end_freq_khz;
 
@@ -298,7 +298,7 @@ static bool reg_does_bw_fit(const struct ieee80211_freq_range *freq_range,
 	end_freq_khz = center_freq_khz + (bw_khz/2);
 
 	if (start_freq_khz >= freq_range->start_freq_khz &&
-	    end_freq_khz <= freq_range->end_freq_khz)
+		end_freq_khz <= freq_range->end_freq_khz)
 		return true;
 
 	return false;

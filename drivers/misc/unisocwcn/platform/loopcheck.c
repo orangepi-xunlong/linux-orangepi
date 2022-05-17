@@ -40,12 +40,12 @@ int at_cmd_send(char *buf, unsigned int len)
 	memcpy(send_buf + PUB_HEAD_RSV, buf, len);
 
 	if (!sprdwcn_bus_list_alloc(mdbg_proc_ops[MDBG_AT_TX_OPS].channel,
-				    &head, &tail, &num)) {
+					&head, &tail, &num)) {
 		head->buf = send_buf;
 		head->len = len;
 		head->next = NULL;
 		sprdwcn_bus_push_list(mdbg_proc_ops[MDBG_AT_TX_OPS].channel,
-				      head, tail, num);
+					  head, tail, num);
 	}
 	return 0;
 }
@@ -63,7 +63,7 @@ static void loopcheck_work_queue(struct work_struct *work)
 	at_cmd_send(a, sizeof(a));
 
 	timeleft = wait_for_completion_timeout(&loopcheck.completion,
-					       (3 * HZ));
+						   (3 * HZ));
 	mutex_unlock(&atcmd_lock);
 	if (!test_bit(WCN_LOOPCHECK_OPEN, &loopcheck.status))
 		return;
@@ -196,7 +196,7 @@ void get_cp2_version(void)
 void start_loopcheck(void)
 {
 	if (!test_bit(WCN_LOOPCHECK_INIT, &loopcheck.status) ||
-	    test_and_set_bit(WCN_LOOPCHECK_OPEN, &loopcheck.status))
+		test_and_set_bit(WCN_LOOPCHECK_OPEN, &loopcheck.status))
 		return;
 	WCN_INFO("%s\n", __func__);
 	reinit_completion(&loopcheck.completion);
@@ -206,7 +206,7 @@ void start_loopcheck(void)
 void stop_loopcheck(void)
 {
 	if (!test_bit(WCN_LOOPCHECK_INIT, &loopcheck.status) ||
-	    !test_and_clear_bit(WCN_LOOPCHECK_OPEN, &loopcheck.status))
+		!test_and_clear_bit(WCN_LOOPCHECK_OPEN, &loopcheck.status))
 		return;
 	WCN_INFO("%s\n", __func__);
 	complete_all(&loopcheck.completion);

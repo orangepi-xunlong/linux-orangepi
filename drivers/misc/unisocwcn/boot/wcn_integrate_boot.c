@@ -147,7 +147,7 @@ static void marlin_save_cali_data(void)
 			   wifi.calibration_data +
 			   sizeof(struct wifi_config_t);
 		wcn_read_data_from_phy_addr(phy_addr, &wifi_data.cali_data,
-					    sizeof(struct wifi_cali_t));
+						sizeof(struct wifi_cali_t));
 		dump_cali_file(&wifi_data.cali_data);
 		WCN_INFO("finish\n");
 	}
@@ -319,7 +319,7 @@ static int wcn_load_firmware_img(struct wcn_device *wcn_dev,
 read_retry:
 #if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
 		read_len = kernel_read(file, (void *)wcn_image_buffer,
-				       size, &off);
+					   size, &off);
 #else
 		read_len = kernel_read(file, off, wcn_image_buffer, size);
 #endif
@@ -403,7 +403,7 @@ static int wcn_load_firmware_data(struct wcn_device *wcn_dev)
 	}
 
 	return wcn_load_firmware_img(wcn_dev, wcn_dev->firmware_path,
-				     wcn_dev->file_length);
+					 wcn_dev->file_length);
 }
 
 /*
@@ -449,8 +449,8 @@ static int wcn_download_image(struct wcn_device *wcn_dev)
 	} else {
 		WCN_INFO("image size = %d\n", (int)firmware->size);
 		if (wcn_write_data_to_phy_addr(wcn_dev->base_addr,
-					       (void *)firmware->data,
-					       firmware->size)) {
+						   (void *)firmware->data,
+						   firmware->size)) {
 			WCN_ERR("wcn_mem_ram_vmap_nocache fail\n");
 			release_firmware(firmware);
 			return -ENOMEM;
@@ -479,7 +479,7 @@ static int wcn_download_image_new(struct wcn_device *wcn_dev)
 		}
 		WCN_INFO("load config file:%s\n", file);
 		ret = wcn_load_firmware_img(wcn_dev, file,
-					    wcn_dev->file_length);
+						wcn_dev->file_length);
 
 		/* For gnss fix file path isn't fit with actual file type */
 		if (wcn_dev_is_gnss(wcn_dev) && (ret == 1)) {
@@ -490,7 +490,7 @@ static int wcn_download_image_new(struct wcn_device *wcn_dev)
 			gnss_file_path_set(file);
 			WCN_INFO("load config file:%s\n", file);
 			wcn_load_firmware_img(wcn_dev, file,
-					      wcn_dev->file_length);
+						  wcn_dev->file_length);
 		}
 		return 0;
 	}
@@ -528,9 +528,9 @@ static int wcn_wait_marlin_boot(struct wcn_device *wcn_dev)
 		   (phys_addr_t)&(s_wssm_phy_offset_p->
 		   marlin.init_status);
 	for (wait_count = 0; wait_count < MARLIN_WAIT_CP_INIT_COUNT;
-	     wait_count++) {
+		 wait_count++) {
 		wcn_read_data_from_phy_addr(phy_addr,
-					    &magic_value, sizeof(u32));
+						&magic_value, sizeof(u32));
 		if (magic_value == MARLIN_CP_INIT_READY_MAGIC)
 			break;
 
@@ -603,9 +603,9 @@ static void gnss_read_boot_flag(void)
 
 	phy_addr = wcn_get_gnss_base_addr() + GNSS_TEST_OFFSET;
 	for (wait_count = 0; wait_count < MARLIN_WAIT_CP_INIT_COUNT;
-	     wait_count++) {
+		 wait_count++) {
 		wcn_read_data_from_phy_addr(phy_addr,
-					    &magic_value, sizeof(u32));
+						&magic_value, sizeof(u32));
 		if (magic_value == GNSS_TEST_MAGIC)
 			break;
 
@@ -906,13 +906,13 @@ int start_integrate_wcn_truely(u32 subsys)
 	if (!is_marlin) {
 		if (subsys_bit & WCN_GNSS_MASK) {
 			strcpy(&wcn_dev->firmware_path_ext[0],
-			       WCN_GNSS_FILENAME);
+				   WCN_GNSS_FILENAME);
 			s_wcn_device.gnss_type = WCN_GNSS_TYPE_GL;
 			WCN_INFO("wcn gnss path=%s\n",
 				&wcn_dev->firmware_path_ext[0]);
 		} else {
 			strcpy(&wcn_dev->firmware_path_ext[0],
-			       WCN_GNSS_BD_FILENAME);
+				   WCN_GNSS_BD_FILENAME);
 			s_wcn_device.gnss_type = WCN_GNSS_TYPE_BD;
 			WCN_INFO("wcn bd path=%s\n",
 				&wcn_dev->firmware_path_ext[0]);
@@ -1017,7 +1017,7 @@ int start_integrate_wcn(u32 subsys)
 		WCN_INFO("first time, start gnss and btwf\n");
 
 		if (s_wcn_device.btwf_device &&
-		    (subsys == WCN_GNSS || subsys == WCN_GNSS_BD))
+			(subsys == WCN_GNSS || subsys == WCN_GNSS_BD))
 			stop_integrate_wcn_truely(btwf_subsys);
 		else {
 			mutex_unlock(&marlin_lock);
@@ -1042,8 +1042,8 @@ static int wcn_wait_wcn_deep_sleep(struct wcn_device *wcn_dev, int force_sleep)
 	u32 wait_sleep_count = 0;
 
 	for (wait_sleep_count = 0;
-	     wait_sleep_count < WCN_WAIT_SLEEP_MAX_COUNT;
-	     wait_sleep_count++) {
+		 wait_sleep_count < WCN_WAIT_SLEEP_MAX_COUNT;
+		 wait_sleep_count++) {
 		if (wcn_get_sleep_status(wcn_dev, force_sleep) == 0)
 			break;
 		msleep(20);
@@ -1104,7 +1104,7 @@ int stop_integrate_wcn_truely(u32 subsys)
 		wcn_marlin_power_enable_vddwifipa(false);
 		/* ASIC: disable vddcon, wifipa interval time > 1ms */
 		usleep_range(VDDWIFIPA_VDDCON_MIN_INTERVAL_TIME,
-			     VDDWIFIPA_VDDCON_MAX_INTERVAL_TIME);
+				 VDDWIFIPA_VDDCON_MAX_INTERVAL_TIME);
 	}
 	wcn_power_enable_vddcon(false);
 

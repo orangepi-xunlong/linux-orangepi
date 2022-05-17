@@ -168,7 +168,7 @@ static int sdiohal_throughput_tx_alloc(void)
 
 	for (i = 0; i < TP_TX_BUF_CNT; i++) {
 		tp_tx_buf[i] = kzalloc(TP_TX_BUF_LEN + PUB_HEAD_RSV,
-				       GFP_KERNEL);
+					   GFP_KERNEL);
 		if (!tp_tx_buf[i]) {
 			for (j = 0; j < i; j++) {
 				kfree(tp_tx_buf[j]);
@@ -189,7 +189,7 @@ static int sdiohal_throughput_tx(void)
 	int ret = 0;
 
 	if (!sprdwcn_bus_list_alloc(AT_TX_CHANNEL,
-				    &head, &tail, &tx_debug_num)) {
+					&head, &tail, &tx_debug_num)) {
 		if (tx_debug_num >= tp_tx_buf_cnt) {
 			/* linked list */
 			temp = head;
@@ -202,16 +202,16 @@ static int sdiohal_throughput_tx(void)
 					temp->next = NULL;
 			}
 			ret = sprdwcn_bus_push_list(AT_TX_CHANNEL,
-						    head, tail, tx_debug_num);
+							head, tail, tx_debug_num);
 			if (ret)
 				sdiohal_info("send_data_func failed!!!\n");
 			return 0;
 		}
 
 		sprdwcn_bus_list_free(AT_TX_CHANNEL, head, tail,
-				      tx_debug_num);
+					  tx_debug_num);
 		sdiohal_info("%s tx_debug_num=%d < %d\n",
-			     __func__, tx_debug_num, tp_tx_buf_cnt);
+				 __func__, tx_debug_num, tp_tx_buf_cnt);
 
 		return -ENOMEM;
 	}
@@ -233,7 +233,7 @@ static void sdiohal_throughput_tx_compute_time(void)
 		times_count = timeval_to_ns(&tp_tx_stop_time) -
 			timeval_to_ns(&tp_tx_start_time);
 		sdiohal_info("tx->times(500c) is %lldns, tx %d, rx %d\n",
-			     times_count, tp_tx_cnt, rx_pop_cnt);
+				 times_count, tp_tx_cnt, rx_pop_cnt);
 		tp_tx_cnt = 0;
 		do_gettimeofday(&tp_tx_start_time);
 	}
@@ -256,7 +256,7 @@ static int sdiohal_throughput_tx_thread(void *data)
 		tp_tx_buf_cnt = 1;
 		tp_tx_buf_len = 100;
 		for (i = 0; i < rx_pop_cnt_old;
-		     i = i + (TCP_TEST_1VS2 ? 2 : 1))
+			 i = i + (TCP_TEST_1VS2 ? 2 : 1))
 			sdiohal_throughput_tx_compute_time();
 	}
 
@@ -271,7 +271,7 @@ static void sdiohal_launch_tp_tx_thread(void)
 
 	tx_thread =
 		kthread_create(sdiohal_throughput_tx_thread,
-			       NULL, "sdiohal_tp_tx_thread");
+				   NULL, "sdiohal_tp_tx_thread");
 	if (tx_thread)
 		wake_up_process(tx_thread);
 	else
@@ -392,15 +392,15 @@ static void sdiohal_tx_send(int chn)
 			}
 
 			sdiohal_info("%s channel:%d num:%d\n",
-				     __func__, chn, num);
+					 __func__, chn, num);
 
 			ret = sprdwcn_bus_push_list(chn, head, tail, num);
 			if (ret)
 				sdiohal_err("send_data_func failed, num:%d\n",
-					    num);
+						num);
 		} else
 			sdiohal_info("%s alloced mbuf num=%d < 8\n",
-				     __func__,	num);
+					 __func__,	num);
 	}
 
 }
@@ -456,8 +456,8 @@ static void sdiohal_tx_test_init(void)
 		init_completion(&sdiohal_thread_info[chn].tx_completed);
 		tx_thread =
 			kthread_create(sdiohal_thread_info[chn].thread_func,
-				       NULL,
-				       sdiohal_thread_info[chn].thread_name);
+					   NULL,
+					   sdiohal_thread_info[chn].thread_name);
 		if (tx_thread)
 			wake_up_process(tx_thread);
 		else {
@@ -474,7 +474,7 @@ int sdiohal_rx_muti_channel_pop(int channel, struct mbuf_t *head,
 	int i;
 
 	sdiohal_info("%s channel:%d head:%p tail:%p num:%d\n",
-		     __func__, channel, head, tail, num);
+			 __func__, channel, head, tail, num);
 
 	for (i = 0; i < (head->len < 80 ? head->len:80); i++)
 		sdiohal_info("%s i%d 0x%x\n", __func__, i, head->buf[i]);
@@ -517,9 +517,9 @@ int at_list_tx_pop(int channel, struct mbuf_t *head,
 	int i;
 
 	sdiohal_debug("%s channel:%d head:%p tail:%p num:%d\n",
-		      __func__, channel, head, tail, num);
+			  __func__, channel, head, tail, num);
 	sdiohal_debug("%s len:%d buf:%s\n",
-		      __func__, head->len, head->buf + 4);
+			  __func__, head->len, head->buf + 4);
 
 	if (tp_tx_flag != 1) {
 		mbuf_node = head;
@@ -548,9 +548,9 @@ int at_list_rx_pop(int channel, struct mbuf_t *head,
 	static signed long long times_count;
 
 	sdiohal_debug("%s channel:%d head:%p tail:%p num:%d\n",
-		     __func__, channel, head, tail, num);
+			 __func__, channel, head, tail, num);
 	sdiohal_debug("%s len:%d buf:%s\n",
-		     __func__, head->len, head->buf + 4);
+			 __func__, head->len, head->buf + 4);
 
 	sprdwcn_bus_push_list(at_rx_ops.channel, head, tail, num);
 	rx_pop_cnt += num;
@@ -566,7 +566,7 @@ int at_list_rx_pop(int channel, struct mbuf_t *head,
 		times_count = timeval_to_ns(&tp_rx_stop_time)
 			- timeval_to_ns(&tp_rx_start_time);
 		sdiohal_info("rx->times(%dc) is %lldns, tx %d, rx %d\n",
-			     tp_rx_cnt, times_count, tp_tx_cnt, rx_pop_cnt);
+				 tp_rx_cnt, times_count, tp_tx_cnt, rx_pop_cnt);
 		tp_rx_cnt = 0;
 		do_gettimeofday(&tp_rx_start_time);
 	}
@@ -619,7 +619,7 @@ static char *sdiohal_firmware_data(unsigned long int imag_size)
 	file = filp_open(FIRMWARE_PATH, O_RDONLY, 0);
 	if (IS_ERR(file)) {
 		sdiohal_err("%s open file %s error\n",
-			    FIRMWARE_PATH, __func__);
+				FIRMWARE_PATH, __func__);
 		return NULL;
 	}
 	sdiohal_info("marlin %s open image file  successfully\n", __func__);
@@ -849,14 +849,14 @@ static ssize_t at_cmd_write(struct file *filp,
 
 		cmd_buf[SDIOHAL_WRITE_SIZE + PUB_HEAD_RSV - 1] = 0;
 		ret = kstrtol(&cmd_buf[PUB_HEAD_RSV + sizeof("readreg 0x") - 1],
-			      16, &reg_addr_read);
+				  16, &reg_addr_read);
 		reg_addr = reg_addr_read & 0xFFFFFFFF;
 		ret = sprdwcn_bus_reg_read(reg_addr, &reg_val, 4);
 		if (ret < 0)
 			sdiohal_err("%s read 0x%x error:%d\n",
-				    __func__, reg_addr, ret);
+					__func__, reg_addr, ret);
 		sdiohal_info("%s read reg_addr 0x%x=0x%x\n",
-			     __func__, reg_addr, reg_val);
+				 __func__, reg_addr, reg_val);
 		return count;
 	}
 
@@ -875,14 +875,14 @@ static ssize_t at_cmd_write(struct file *filp,
 		cmd_buf[SDIOHAL_WRITE_SIZE + PUB_HEAD_RSV - 1] = 0;
 		cmd_buf[PUB_HEAD_RSV + sizeof("readregblock 0x") + 7] = '\0';
 		ret = kstrtol(&cmd_buf[PUB_HEAD_RSV +
-			      sizeof("readregblock 0x") - 1], 16,
-			      &reg_addr_read);
+				  sizeof("readregblock 0x") - 1], 16,
+				  &reg_addr_read);
 		reg_addr = reg_addr_read & 0xFFFFFFFF;
 		ret = kstrtol(&cmd_buf[PUB_HEAD_RSV +
-			      sizeof("readregblock 0x") + 8], 10, &len);
+				  sizeof("readregblock 0x") + 8], 10, &len);
 
 		sdiohal_info("%s read reg_addr 0x%x: len:%ld\n",
-			     __func__, reg_addr, len);
+				 __func__, reg_addr, len);
 
 		if (len % 16)
 			line = len / 16 + 1;
@@ -902,7 +902,7 @@ static ssize_t at_cmd_write(struct file *filp,
 							   4);
 				if (ret < 0) {
 					sdiohal_err("%s read 0x%x error:%d\n",
-					    __func__, reg_addr, ret);
+						__func__, reg_addr, ret);
 					break;
 				}
 				pk[j * 4] = reg_val & 0xFF;
@@ -927,18 +927,18 @@ static ssize_t at_cmd_write(struct file *filp,
 		cmd_buf[SDIOHAL_WRITE_SIZE + PUB_HEAD_RSV - 1] = 0;
 		cmd_buf[PUB_HEAD_RSV + sizeof("writereg 0x00000000") - 1] = 0;
 		ret = kstrtol(&cmd_buf[PUB_HEAD_RSV + sizeof("writereg 0x") -
-			      1], 16, &reg_addr_read);
+				  1], 16, &reg_addr_read);
 		reg_addr = reg_addr_read & 0xFFFFFFFF;
 		ret = kstrtol(&cmd_buf[PUB_HEAD_RSV +
-			      sizeof("writereg 0x00000000 0x") - 1], 16,
-			      &reg_val_read);
+				  sizeof("writereg 0x00000000 0x") - 1], 16,
+				  &reg_val_read);
 		reg_val = reg_val_read & 0xFFFFFFFF;
 		ret = sprdwcn_bus_reg_write(reg_addr, &reg_val, 4);
 		if (ret < 0)
 			sdiohal_err("%s write 0x%x error:%d\n",
-				    __func__, reg_addr, ret);
+					__func__, reg_addr, ret);
 		sdiohal_info("%s write reg_addr 0x%x=0x%x\n",
-			     __func__, reg_addr, reg_val);
+				 __func__, reg_addr, reg_val);
 		return count;
 	}
 
@@ -964,7 +964,7 @@ static ssize_t at_cmd_write(struct file *filp,
 	if (strncmp(cmd_buf + PUB_HEAD_RSV, "switch_irq", 10) == 0) {
 		p_data->irq_type = SDIOHAL_RX_POLLING;
 		sdiohal_info("%s switch irq to [%d][rx polling]\n",
-			     __func__, p_data->irq_type);
+				 __func__, p_data->irq_type);
 		sdiohal_rx_up();
 
 		return count;
@@ -1003,11 +1003,11 @@ static ssize_t at_cmd_write(struct file *filp,
 		if (num < SDIO_CHN_TX_NUM) {
 			p_data->printlog_txchn = num;
 			sdiohal_info("%s printlog_txchn:%d\n", __func__,
-				     p_data->printlog_txchn);
+					 p_data->printlog_txchn);
 		} else if (num < SDIO_CHANNEL_NUM) {
 			p_data->printlog_rxchn = num;
 			sdiohal_info("%s printlog_rxchn:%d\n", __func__,
-				     p_data->printlog_rxchn);
+					 p_data->printlog_rxchn);
 		} else {
 			p_data->printlog_txchn = SDIO_CHANNEL_NUM;
 			p_data->printlog_rxchn = SDIO_CHANNEL_NUM;
@@ -1025,7 +1025,7 @@ static ssize_t at_cmd_write(struct file *filp,
 			10, &long_data);
 		p_data->printlog_txchn = (int)long_data;
 		sdiohal_info("%s printlog_txchn:%d\n", __func__,
-			     p_data->printlog_txchn);
+				 p_data->printlog_txchn);
 
 		return count;
 	}
@@ -1038,7 +1038,7 @@ static ssize_t at_cmd_write(struct file *filp,
 			10, &long_data);
 		p_data->printlog_rxchn = (int)long_data;
 		sdiohal_info("%s printlog_rxchn:%d\n", __func__,
-			     p_data->printlog_rxchn);
+				 p_data->printlog_rxchn);
 
 		return count;
 	}
@@ -1130,7 +1130,7 @@ static ssize_t at_cmd_write(struct file *filp,
 				sdiohal_throughput_tx();
 			} else {
 				sdiohal_err("%s kzalloc send buf fail\n",
-					    __func__);
+						__func__);
 				return -ENOMEM;
 			}
 		} else
@@ -1148,7 +1148,7 @@ static ssize_t at_cmd_write(struct file *filp,
 			send_buf = kzalloc(count + PUB_HEAD_RSV, GFP_KERNEL);
 			if (!send_buf) {
 				sdiohal_err("%s kzalloc send buf fail\n",
-					    __func__);
+						__func__);
 				return -ENOMEM;
 			}
 			memcpy(send_buf, cmd_buf, count + PUB_HEAD_RSV);
@@ -1228,7 +1228,7 @@ void sdiohal_debug_init(void)
 					 debug_root, NULL,
 					 entry_table[i].file_ops)) {
 			sdiohal_err("%s debugfs_create_file[%d] fail!!\n",
-				    __func__, i);
+					__func__, i);
 			debugfs_remove_recursive(debug_root);
 			return;
 		}

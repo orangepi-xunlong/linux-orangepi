@@ -23,7 +23,9 @@
 #include "cmdevt.h"
 #include "intf_ops.h"
 #include "work.h"
+#if defined(UWE5621_FTR)
 #include "wl_intf.h"
+#endif
 #include "rx_msg.h"
 #include "tcp_ack.h"
 #include "wl_core.h"
@@ -32,20 +34,33 @@
  * here just free the msg buf to the freelist
  */
 int sprdwl_send_data(struct sprdwl_vif *vif, struct sprdwl_msg_buf *msg,
-		     struct sk_buff *skb, u8 offset)
+			 struct sk_buff *skb, u8 offset)
 {
 	int ret;
 	int delta;
 	unsigned long align_addr;
 	unsigned char *buf = NULL;
+/*TODO temp for MARLIN2*/
+#ifndef UWE5621_FTR
+	struct sprdwl_data_hdr *hdr;
+#endif
 	struct sprdwl_intf *intf;
 	unsigned int plen = cpu_to_le16(skb->len);
 
 	intf = (struct sprdwl_intf *)vif->priv->hw_priv;
 	buf = skb->data;
-
+/*TODO temp for MARLIN2*/
+#ifndef UWE5621_FTR
+	skb_push(skb, sizeof(*hdr) + offset);
+	hdr = (struct sprdwl_data_hdr *)skb->data;
+	memset(hdr, 0, sizeof(*hdr));
+	hdr->common.type = SPRDWL_TYPE_DATA;
+	hdr->common.ctx_id = vif->ctx_id;
+	hdr->plen = cpu_to_le16(skb->len);
+#else
 	if (sprdwl_intf_fill_msdu_dscr(vif, skb, SPRDWL_TYPE_DATA, offset))
 		return -EPERM;
+#endif /* UWE5621_FTR */
 #ifdef OTT_UWE
 	skb_push(skb, 3);
 	if ((unsigned long)skb->data & 0x3) {
@@ -105,6 +120,10 @@ int sprdwl_send_cmd(struct sprdwl_priv *priv, struct sprdwl_msg_buf *msg)
 	ret = sprdwl_intf_tx(priv, msg);
 	if (ret) {
 		wl_err("%s TX cmd Err: %d\n", __func__, ret);
+		/* now cmd msg droped */
+#if !defined(UWE5621_FTR)
+		dev_kfree_skb(skb);
+#endif
 	}
 
 	return ret;
@@ -124,7 +143,7 @@ void sprdwl_rx_send_cmd_process(struct sprdwl_priv *priv, void *data, int len,
 		vif = ctx_id_to_vif(priv, ctx_id);
 		if (!vif) {
 			wl_err("%s cant't get vif from ctx_id%d\n",
-			       __func__, ctx_id);
+				   __func__, ctx_id);
 		} else {
 			misc_work = sprdwl_alloc_work(len);
 			if (!misc_work) {
@@ -165,14 +184,14 @@ void sprdwl_rx_skb_process(struct sprdwl_priv *priv, struct sk_buff *skb)
 	vif = ctx_id_to_vif(priv, msdu_desc->ctx_id);
 	if (!vif) {
 		wl_err("%s cannot get vif, ctx_id: %d\n",
-		       __func__, msdu_desc->ctx_id);
+			   __func__, msdu_desc->ctx_id);
 		goto err;
 	}
 
 	/* Sanity check for bug 846454 */
 	if (vif->ndev == NULL) {
 		wl_err("%s ndev is NULL, ctx_id = %d\n",
-		       __func__, msdu_desc->ctx_id);
+			   __func__, msdu_desc->ctx_id);
 		BUG_ON(1);
 	}
 
@@ -196,17 +215,17 @@ void sprdwl_rx_skb_process(struct sprdwl_priv *priv, struct sk_buff *skb)
 
 	/* FIXME: We would remove mode in furture, how to modify? */
 	if (((vif->mode == SPRDWL_MODE_AP) ||
-	     (vif->mode == SPRDWL_MODE_P2P_GO)) && msdu_desc->uc_w2w_flag) {
+		 (vif->mode == SPRDWL_MODE_P2P_GO)) && msdu_desc->uc_w2w_flag) {
 		skb->dev = ndev;
 		dev_queue_xmit(skb);
 	} else {
 		if (((vif->mode == SPRDWL_MODE_AP) ||
-		     (vif->mode == SPRDWL_MODE_P2P_GO)) &&
-		    msdu_desc->bc_mc_w2w_flag) {
+			 (vif->mode == SPRDWL_MODE_P2P_GO)) &&
+			msdu_desc->bc_mc_w2w_flag) {
 			struct ethhdr *eth = (struct ethhdr *)skb->data;
 
 			if (eth->h_proto != ETH_P_IP &&
-			    eth->h_proto != ETH_P_IPV6) {
+				eth->h_proto != ETH_P_IPV6) {
 				tx_skb = pskb_copy(skb, GFP_ATOMIC);
 				if (likely(tx_skb)) {
 					tx_skb->dev = ndev;
@@ -232,7 +251,7 @@ err:
 #endif
 }
 unsigned short sprdwl_rx_data_process(struct sprdwl_priv *priv,
-				      unsigned char *msg)
+					  unsigned char *msg)
 {
 	return 0;
 }
