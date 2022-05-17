@@ -73,7 +73,7 @@ void sprdwl_dfs_chan_sw_work_queue(struct work_struct *work)
 		container_of(work, struct delayed_work, work);
 	struct sprdwl_vif *vif =
 		container_of(delayed_work, struct sprdwl_vif,
-			     dfs_chan_sw_work);
+				 dfs_chan_sw_work);
 
 	cfg80211_ch_switch_notify(vif->ndev, &vif->dfs_chandef);
 }
@@ -88,7 +88,7 @@ void sprdwl_dfs_cac_work_queue(struct work_struct *work)
 		container_of(work, struct delayed_work, work);
 	struct sprdwl_vif *vif =
 		container_of(delayed_work, struct sprdwl_vif,
-			     dfs_cac_work);
+				 dfs_cac_work);
 
 	chandef = vif->dfs_chandef;
 	if (vif->wdev.cac_started) {
@@ -156,7 +156,7 @@ int sprdwl_cfg80211_channel_switch(struct wiphy *wiphy, struct net_device *ndev,
 
 	if (beacon->tail_len)
 		sprdwl_reset_beacon(vif->priv, vif->ctx_id,
-				    beacon->tail, beacon->tail_len);
+					beacon->tail, beacon->tail_len);
 
 	/*set mgmt ies*/
 	if (sprdwl_change_beacon(vif, beacon)) {
@@ -206,7 +206,7 @@ void sprdwl_abort_cac(struct sprdwl_vif *vif)
 
 /* Handler for radar detected event from FW.*/
 int sprdwl_11h_handle_radar_detected(struct sprdwl_vif *vif,
-				     u8 *data, u16 len)
+					 u8 *data, u16 len)
 {
 	struct sprdwl_radar_event *rdr_event;
 
@@ -215,7 +215,7 @@ int sprdwl_11h_handle_radar_detected(struct sprdwl_vif *vif,
 	wl_debug("radar detected; indicating kernel\n");
 	sprdwl_stop_radar_detection(vif, &vif->dfs_chandef);
 	cfg80211_radar_event(vif->priv->wiphy, &vif->dfs_chandef,
-			     GFP_KERNEL);
+				 GFP_KERNEL);
 	/*print radar detect reg & type*/
 	wl_debug("regdomain:%d,radar detection type:%d\n",
 		 rdr_event->reg_domain, rdr_event->det_type);

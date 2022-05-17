@@ -33,8 +33,8 @@ static void sdiohal_tx_retrybuf_left(unsigned int suc_pac_cnt)
 	}
 
 	sdiohal_debug("sdiohal_tx_retrybuf_left [%p] retry_len[%d]\n",
-		      p_data->send_buf.retry_buf,
-		      p_data->send_buf.retry_len);
+			  p_data->send_buf.retry_buf,
+			  p_data->send_buf.retry_len);
 }
 
 static int sdiohal_send_try(struct sdiohal_sendbuf_t *send_buf)
@@ -87,7 +87,7 @@ static int sdiohal_send(struct sdiohal_sendbuf_t *send_buf,
 }
 
 int sdiohal_tx_data_list_send(struct sdiohal_list_t *data_list,
-			      bool pop_flag)
+				  bool pop_flag)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 	struct mbuf_t *mbuf_node;
@@ -141,7 +141,7 @@ int sdiohal_tx_thread(void *data)
 	static int times_count;
 
 	param.sched_priority = SDIO_TX_TASK_PRIO;
-	sched_set_fifo_low(current);
+	sched_setscheduler(current, SCHED_FIFO, &param);
 
 	while (1) {
 		/* Wait the semaphore */
@@ -150,7 +150,7 @@ int sdiohal_tx_thread(void *data)
 			break;
 		if (!WCN_CARD_EXIST(&p_data->xmit_cnt)) {
 			sdiohal_err("%s line %d not have card\n",
-				    __func__, __LINE__);
+					__func__, __LINE__);
 			continue;
 		}
 

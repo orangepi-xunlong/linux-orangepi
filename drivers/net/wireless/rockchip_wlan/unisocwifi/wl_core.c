@@ -18,7 +18,6 @@
 #include <linux/platform_device.h>
 #include <linux/utsname.h>
 #include <linux/debugfs.h>
-#include <linux/kthread.h>
 #include <linux/version.h>
 #include <marlin_platform.h>
 #include <linux/of.h>
@@ -87,7 +86,7 @@ void adjust_qos_ratio(char *buf, unsigned char offset)
 	}
 
 	wl_err("vo ratio:%u, vi ratio:%u, be ratio:%u, wmmac_ratio:%u\n",
-	       vo_ratio, vi_ratio, be_ratio, wmmac_ratio);
+		   vo_ratio, vi_ratio, be_ratio, wmmac_ratio);
 }
 #endif
 unsigned int new_threshold;
@@ -148,10 +147,10 @@ void sprdwl_tdls_flow_flush(struct sprdwl_vif *vif, const u8 *peer, u8 oper)
 	if (oper == NL80211_TDLS_SETUP || oper == NL80211_TDLS_ENABLE_LINK) {
 		for (i = 0; i < MAX_TDLS_PEER; i++) {
 			if (ether_addr_equal(intf->tdls_flow_count[i].da,
-					     peer)) {
+						 peer)) {
 				memset(&intf->tdls_flow_count[i],
-				       0,
-				       sizeof(struct tdls_flow_count_para));
+					   0,
+					   sizeof(struct tdls_flow_count_para));
 				break;
 			}
 		}
@@ -173,7 +172,7 @@ void sprdwl_event_tdls_flow_count(struct sprdwl_vif *vif, u8 *data, u16 len)
 	}
 	for (i = 0; i < MAX_TDLS_PEER; i++) {
 		if (ether_addr_equal(intf->tdls_flow_count[i].da,
-				     peer_info->da)) {
+					 peer_info->da)) {
 			found = 1;
 			break;
 		}
@@ -185,8 +184,8 @@ void sprdwl_event_tdls_flow_count(struct sprdwl_vif *vif, u8 *data, u16 len)
 			return;
 		}
 		memset(&intf->tdls_flow_count[i],
-		       0,
-		       sizeof(struct tdls_flow_count_para));
+			   0,
+			   sizeof(struct tdls_flow_count_para));
 
 		for (i = 0; i < MAX_TDLS_PEER; i++) {
 			if (intf->tdls_flow_count[i].valid == 1)
@@ -220,7 +219,7 @@ void sprdwl_event_tdls_flow_count(struct sprdwl_vif *vif, u8 *data, u16 len)
 			peer_info->timer, peer_info->da);
 
 		kt = ktime_get();
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
 		intf->tdls_flow_count[i].start_mstime =
 			(u32)(div_u64(kt, NSEC_PER_MSEC));
 #else
@@ -247,7 +246,7 @@ void count_tdls_flow(struct sprdwl_vif *vif, u8 *data, u16 len)
 
 	for (i = 0; i < MAX_TDLS_PEER; i++) {
 		if ((intf->tdls_flow_count[i].valid == 1) &&
-		    (ether_addr_equal(data, intf->tdls_flow_count[i].da)))
+			(ether_addr_equal(data, intf->tdls_flow_count[i].da)))
 			goto count_it;
 	}
 	return;
@@ -256,7 +255,7 @@ count_it:
 	if (new_threshold != 0)
 		intf->tdls_flow_count[i].threshold = new_threshold;
 	kt = ktime_get();
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
 	msec = (u32)(div_u64(kt, NSEC_PER_MSEC));
 #else
 	msec = (u32)(div_u64(kt.tv64, NSEC_PER_MSEC));
@@ -272,28 +271,28 @@ count_it:
 		msec, elapsed_time, unit_time);
 
 	if ((intf->tdls_flow_count[i].data_len_counted == 0 &&
-	     len > (intf->tdls_flow_count[i].threshold * 1024)) ||
-	    (intf->tdls_flow_count[i].data_len_counted > 0 &&
-	    ((intf->tdls_flow_count[i].data_len_counted + len) >
-	     intf->tdls_flow_count[i].threshold * 1024 *
-	     ((unit_time == 0) ? 1 : unit_time)))) {
+		 len > (intf->tdls_flow_count[i].threshold * 1024)) ||
+		(intf->tdls_flow_count[i].data_len_counted > 0 &&
+		((intf->tdls_flow_count[i].data_len_counted + len) >
+		 intf->tdls_flow_count[i].threshold * 1024 *
+		 ((unit_time == 0) ? 1 : unit_time)))) {
 		ret = sprdwl_send_tdls_cmd(vif, vif->ctx_id,
 					   (u8 *)intf->tdls_flow_count[i].da,
 					   SPRDWL_TDLS_CMD_CONNECT);
 		memset(&intf->tdls_flow_count[i], 0,
-			       sizeof(struct tdls_flow_count_para));
+				   sizeof(struct tdls_flow_count_para));
 	} else {
 		if (intf->tdls_flow_count[i].data_len_counted == 0) {
 			intf->tdls_flow_count[i].start_mstime = msec;
 			intf->tdls_flow_count[i].data_len_counted += len;
 		}
 		if ((intf->tdls_flow_count[i].data_len_counted > 0) &&
-		    unit_time > 1) {
+			unit_time > 1) {
 			intf->tdls_flow_count[i].start_mstime = msec;
 			intf->tdls_flow_count[i].data_len_counted = len;
 		}
 		if ((intf->tdls_flow_count[i].data_len_counted > 0) &&
-		    unit_time <= 1) {
+			unit_time <= 1) {
 			intf->tdls_flow_count[i].data_len_counted += len;
 		}
 	}
@@ -307,8 +306,8 @@ count_it:
 
 #define SPRDWL_SDIO_DEBUG_BUFLEN 128
 static ssize_t sprdwl_intf_read_info(struct file *file,
-				     char __user *user_buf,
-				     size_t count, loff_t *ppos)
+					 char __user *user_buf,
+					 size_t count, loff_t *ppos)
 {
 	size_t ret = 0;
 	unsigned int buflen, len;
@@ -367,7 +366,7 @@ static ssize_t sprdwl_intf_write(struct file *file,
 	wl_debug("write info:%s\n", buf);
 	for (type = 0; type < debug_size; type++)
 		if (!strncmp(debuginfo[type].str, buf,
-			     strlen(debuginfo[type].str))) {
+				 strlen(debuginfo[type].str))) {
 			wl_err("write info:type %d\n", type);
 			debuginfo[type].func(buf, strlen(debuginfo[type].str));
 			break;
@@ -443,7 +442,7 @@ void sprdwl_debugfs(void *spdev, struct dentry *dir)
 
 	intf = (struct sprdwl_intf *)spdev;
 	debugfs_create_file("sprdwlinfo", S_IRUSR,
-			    dir, intf, &sprdwl_intf_debug_fops);
+				dir, intf, &sprdwl_intf_debug_fops);
 }
 
 static struct dentry *sprdwl_debug_root;
@@ -539,12 +538,20 @@ static struct notifier_block boost_notifier = {
 extern struct sprdwl_priv *g_sprdwl_priv;
 extern void sprdwl_cancel_scan(struct sprdwl_vif *vif);
 extern void sprdwl_cancel_sched_scan(struct sprdwl_vif *vif);
+extern void sprdwl_flush_all_txlist(struct sprdwl_tx_msg *sprdwl_tx_dev);
+extern int sprdwl_cmd_init(void);
+extern void sprdwl_cmd_deinit(void);
+extern void sprdwl_net_flowcontrl(struct sprdwl_priv *priv,
+			   enum sprdwl_mode mode, bool state);
+extern void sprdwl_reg_notify(struct wiphy *wiphy, struct regulatory_request *request);
+struct work_struct wifi_rst_begin;
+struct work_struct wifi_rst_down;
 struct completion wifi_reset_ready;
-extern void sprdwl_net_flowcontrl(struct sprdwl_priv *priv, enum sprdwl_mode mode, bool state);
 extern struct sprdwl_cmd g_sprdwl_cmd;
 
-static void sprdwl_wifi_reset(void)
+static void wifi_reset_wq(struct work_struct *work)
 {
+	struct sprdwl_vif *vif, *tmp_vif;
 	struct sprdwl_intf *intf = NULL;
 	struct sprdwl_tx_msg *tx_msg = NULL;
 	struct sprdwl_rx_if *rx_if = NULL;
@@ -553,38 +560,103 @@ static void sprdwl_wifi_reset(void)
 	tx_msg = (void *)intf->sprdwl_tx;
 	rx_if = (struct sprdwl_rx_if *)intf->sprdwl_rx;
 
+	reinit_completion(&wifi_reset_ready);
+
 	wl_err("cp2 reset begin..........\n");
 	g_sprdwl_priv->sync.scan_not_allowed = true;
 	g_sprdwl_priv->sync.cmd_not_allowed = true;
 	intf->cp_asserted = 1;
-	intf->exit = 1;
-	if (tx_msg->tx_thread) {
+	sprdwl_reorder_init(&rx_if->ba_entry);
+	sprdwl_net_flowcontrl(g_sprdwl_priv, SPRDWL_MODE_NONE, false);
+	if (tx_msg->tx_thread)
 		tx_up(tx_msg);
-		kthread_stop(tx_msg->tx_thread);
-		tx_msg->tx_thread = NULL;
+
+	sprdwl_flush_all_txlist(tx_msg);
+	flush_workqueue(rx_if->rx_queue);
+	list_for_each_entry_safe(vif, tmp_vif, &g_sprdwl_priv->vif_list, vif_node) {
+		g_sprdwl_priv->sync.fw_stat[vif->mode] =  g_sprdwl_priv->fw_stat[vif->mode];
+		g_sprdwl_priv->fw_stat[vif->mode] = SPRDWL_INTF_CLOSE;
+		sprdwl_report_disconnection(vif, true);
+		if (g_sprdwl_priv->scan_vif)
+			sprdwl_cancel_scan(g_sprdwl_priv->scan_vif);
+		if (g_sprdwl_priv->sched_scan_vif) {
+			sprdwl_sched_scan_done(g_sprdwl_priv->sched_scan_vif, true);
+			sprdwl_cancel_sched_scan(g_sprdwl_priv->sched_scan_vif);
+		}
 	}
 
+	sprdwl_vendor_deinit(g_sprdwl_priv->wiphy);
+	sprdwl_cmd_wake_upall();
+	sprdwl_tcp_ack_deinit(g_sprdwl_priv);
+	sprdwl_intf_deinit(intf);
+	// sprdwl_cmd_deinit();
+	complete(&wifi_reset_ready);
 	wl_err("cp2 reset finish..........\n");
+
 }
 
-static int wifi_exception_event(void)
+static void wifi_resume_wq(struct work_struct *work)
 {
-	char *envp[2];
-	envp[0] = "CP2-EXCEPTION-EVENT";
-	envp[1] = NULL;
-	kobject_uevent_env(&sprdwl_dev->kobj, KOBJ_CHANGE, envp);
-	return 0;
+	struct sprdwl_vif *vif, *tmp_vif;
+	struct sprdwl_intf *intf = NULL;
+	struct sprdwl_rx_if *rx_if = NULL;
+	wl_err("cp2 resume begin...............\n");
+
+	intf = (struct sprdwl_intf *)g_sprdwl_priv->hw_priv;
+	rx_if = (struct sprdwl_rx_if *)intf->sprdwl_rx;
+
+	wait_for_completion(&wifi_reset_ready);
+
+	sprdwl_intf_init(g_sprdwl_priv, intf);
+	// sprdwl_cmd_init();
+	wl_err("sprdwl cmd init finish.\n");
+	g_sprdwl_priv->sync.cmd_not_allowed = false;
+	intf->cp_asserted = 0;
+	sprdwl_net_flowcontrl(g_sprdwl_priv, SPRDWL_MODE_NONE, true);
+	sprdwl_reorder_init(&rx_if->ba_entry);
+	sprdwl_sync_version(g_sprdwl_priv);
+	sprdwl_download_ini(g_sprdwl_priv);
+	sprdwl_tcp_ack_init(g_sprdwl_priv);
+	sprdwl_get_fw_info(g_sprdwl_priv);
+	sprdwl_setup_wiphy(g_sprdwl_priv->wiphy, g_sprdwl_priv);
+	sprdwl_vendor_init(g_sprdwl_priv->wiphy);
+
+	sprdwl_reg_notify(g_sprdwl_priv->wiphy, &g_sprdwl_priv->sync.request);
+
+	list_for_each_entry_safe(vif, tmp_vif, &g_sprdwl_priv->vif_list, vif_node) {
+		if (SPRDWL_INTF_OPEN == g_sprdwl_priv->sync.fw_stat[vif->mode]) {
+			vif->mode = SPRDWL_MODE_NONE;
+			sprdwl_init_fw(vif);
+		}
+	}
+	g_sprdwl_priv->sync.scan_not_allowed = false;
+	wl_err("cp2 resume complete...............\n");
+}
+
+static void wifi_reset_init(void)
+{
+	INIT_WORK(&wifi_rst_begin, wifi_reset_wq);
+	INIT_WORK(&wifi_rst_down, wifi_resume_wq);
+	init_completion(&wifi_reset_ready);
+	return;
 }
 
 int wifi_reset_callback(struct notifier_block *nb, unsigned long event, void *v)
 {
-	sprdwl_wifi_reset();
-	wifi_exception_event();
+	wl_info("%s[%d]: %s %d\n", __func__, __LINE__, (char *)v, (int)event);
+	switch (event) {
+	case 1:
+		schedule_work(&wifi_rst_begin);
+		break;
+	case 0:
+		schedule_work(&wifi_rst_down);
+		break;
+	}
+
 	return NOTIFY_OK;
 }
-
 static struct notifier_block wifi_reset_notifier = {
-    .notifier_call = wifi_reset_callback,
+	.notifier_call = wifi_reset_callback,
 };
 #endif
 
@@ -596,6 +668,7 @@ static int sprdwl_probe(struct platform_device *pdev)
 	u8 i;
 
 #ifdef CP2_RESET_SUPPORT
+	wifi_reset_init();
 	marlin_reset_callback_register(MARLIN_WIFI, &wifi_reset_notifier);
 #endif
 
@@ -692,6 +765,7 @@ static int sprdwl_probe(struct platform_device *pdev)
 	return ret;
 
 err_core_init:
+	sprdwl_bus_deinit();
 	sprdwl_tx_deinit(intf);
 err_tx_init:
 	sprdwl_rx_deinit(intf);
@@ -717,6 +791,7 @@ static int sprdwl_remove(struct platform_device *pdev)
 	cpufreq_unregister_notifier(&boost_notifier, CPUFREQ_POLICY_NOTIFIER);
 	sprdwl_debugfs_deinit();
 	sprdwl_core_deinit(priv);
+	sprdwl_bus_deinit();
 	sprdwl_tx_deinit(intf);
 	sprdwl_rx_deinit(intf);
 	sprdwl_intf_deinit(intf);
@@ -762,8 +837,8 @@ static int __init unisoc_wlan_init(void)
 
 static void __exit unisoc_wlan_exit(void)
 {
-    platform_driver_unregister(&sprdwl_driver);
-    platform_device_del(unisoc_pdev);
+	platform_driver_unregister(&sprdwl_driver);
+	platform_device_del(unisoc_pdev);
 }
 
 module_init(unisoc_wlan_init);

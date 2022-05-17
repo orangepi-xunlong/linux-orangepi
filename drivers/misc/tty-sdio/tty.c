@@ -113,17 +113,6 @@ static ssize_t dumpmem_store(struct device *dev,
 
 static DEVICE_ATTR_WO(dumpmem);
 
-static struct attribute *bluetooth_attrs[] = {
-	&dev_attr_dumpmem.attr,
-	NULL,
-};
-
-static struct attribute_group bluetooth_group = {
-	.name = NULL,
-	.attrs = bluetooth_attrs,
-};
-
-#ifdef KERNEL_VERSION_414
 static ssize_t chipid_show(struct device *dev,
 	   struct device_attribute *attr, char *buf)
 {
@@ -144,8 +133,22 @@ static ssize_t chipid_show(struct device *dev,
 
 static DEVICE_ATTR_RO(chipid);
 
+static ssize_t ant_num_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int num = 2;
+
+	num = marlin_get_ant_num();
+	pr_err("%s: %d", __func__, num);
+
+	return sprintf(buf, "%d", num);
+}
+
+static DEVICE_ATTR_RO(ant_num);
+
 static struct attribute *bluetooth_attrs[] = {
+	&dev_attr_dumpmem.attr,
 	&dev_attr_chipid.attr,
+	&dev_attr_ant_num.attr,
 	NULL,
 };
 
@@ -153,7 +156,6 @@ static struct attribute_group bluetooth_group = {
 	.name = NULL,
 	.attrs = bluetooth_attrs,
 };
-#endif
 
 static void hex_dump(unsigned char *bin, size_t binsz)
 {
@@ -591,6 +593,7 @@ static inline void mtty_destroy_pdata(struct mtty_init_data **init)
 #endif
 }
 
+#ifdef WOBLE_FUN
 __attribute__((unused)) static int bt_tx_powerchange(int channel, int is_resume)
 {
 	unsigned long power_state = marlin_get_power_state();
@@ -607,6 +610,7 @@ __attribute__((unused)) static int bt_tx_powerchange(int channel, int is_resume)
 
 	return 0;
 }
+#endif
 
 struct mchn_ops_t bt_rx_ops = {
 	.channel = BT_RX_CHANNEL,
@@ -630,9 +634,10 @@ struct mchn_ops_t bt_tx_ops = {
 static int  mtty_probe(struct platform_device *pdev)
 {
 	struct mtty_init_data *pdata = (struct mtty_init_data *)
-					pdev->dev.platform_data;
+								pdev->dev.platform_data;
 	struct mtty_device *mtty;
 	int rval = 0;
+
 #ifdef OTT_UWE
 	static struct mtty_init_data mtty_driver_data = {
 		.name = "ttyBT",
@@ -677,7 +682,7 @@ static int  mtty_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&mtty->rx_head);
 	/*tasklet_init(&mtty->rx_task, mtty_rx_task, (unsigned long)mtty);*/
 	mtty->bt_rx_workqueue =
-	create_singlethread_workqueue("SPRDBT_RX_QUEUE");
+		create_singlethread_workqueue("SPRDBT_RX_QUEUE");
 	if (!mtty->bt_rx_workqueue) {
 		pr_err("%s SPRDBT_RX_QUEUE create failed", __func__);
 		return -ENOMEM;
@@ -687,7 +692,8 @@ static int  mtty_probe(struct platform_device *pdev)
 	mtty_dev = mtty;
 
 //#ifdef KERNEL_VERSION_414
-	if (sysfs_create_group(&pdev->dev.kobj, &bluetooth_group)) {
+	if (sysfs_create_group(&pdev->dev.kobj,
+			&bluetooth_group)) {
 		pr_err("%s failed to create bluetooth tty attributes.\n", __func__);
 	}
 //#endif
@@ -760,6 +766,7 @@ int marlin_sdio_write(const unsigned char *buf, int count)
 	return count;
 }
 
+#ifdef WOBLE_FUN
 __attribute__((unused)) static void  mtty_shutdown(struct platform_device *pdev)
 {
 	unsigned long int power_state = marlin_get_power_state();
@@ -771,6 +778,7 @@ __attribute__((unused)) static void  mtty_shutdown(struct platform_device *pdev)
 	}
 	return;
 }
+#endif
 
 static int  mtty_remove(struct platform_device *pdev)
 {

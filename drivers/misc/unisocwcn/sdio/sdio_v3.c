@@ -30,13 +30,13 @@ static void sdio_preexit(void)
 }
 
 static int sdio_buf_list_alloc(int chn, struct mbuf_t **head,
-			       struct mbuf_t **tail, int *num)
+				   struct mbuf_t **tail, int *num)
 {
 	return buf_list_alloc(chn, head, tail, num);
 }
 
 static int sdio_buf_list_free(int chn, struct mbuf_t *head,
-			      struct mbuf_t *tail, int num)
+				  struct mbuf_t *tail, int num)
 {
 	return buf_list_free(chn, head, tail, num);
 }
@@ -128,9 +128,9 @@ static void sdio_remove_card(void)
 static void sdiohal_cp_allow_sleep(enum slp_subsys subsys)
 {
 #ifdef CONFIG_WCN_SLP
-#ifdef CONFIG_CPLOG_DEBUG
-	sdiohal_info("%s entry\n", __func__);
-#endif
+//#ifdef CONFIG_CPLOG_DEBUG
+//	sdiohal_info("%s entry\n", __func__);
+//#endif
 	slp_mgr_drv_sleep(subsys, true);
 #endif
 }
@@ -138,9 +138,9 @@ static void sdiohal_cp_allow_sleep(enum slp_subsys subsys)
 static void sdiohal_cp_sleep_wakeup(enum slp_subsys subsys)
 {
 #ifdef CONFIG_WCN_SLP
-#ifdef CONFIG_CPLOG_DEBUG
-	sdiohal_info("%s entry\n", __func__);
-#endif
+//#ifdef CONFIG_CPLOG_DEBUG
+//	sdiohal_info("%s entry\n", __func__);
+//#endif
 	slp_mgr_drv_sleep(subsys, false);
 	slp_mgr_wakeup(subsys);
 #endif

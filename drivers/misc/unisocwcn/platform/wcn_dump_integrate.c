@@ -351,7 +351,7 @@ static int btwf_dump_mem(void)
 	mdbg_ring_reset(mdev_ring);
 	mdbg_atcmd_clean();
 	if (wcn_fill_dump_head_info(s_wcn_dump_regs,
-				    ARRAY_SIZE(s_wcn_dump_regs)))
+					ARRAY_SIZE(s_wcn_dump_regs)))
 		return -1;
 	mdbg_dump_share_memory(s_wcn_dump_regs);
 	mdbg_dump_iram(s_wcn_dump_regs);

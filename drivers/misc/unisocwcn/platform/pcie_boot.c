@@ -24,8 +24,6 @@
 #define FIRMWARE_PATH "/bin/wcnmodem.bin"
 #define FIRMWARE_SIZE_MAX 0xf0c00
 
-MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
-
 static char *load_firmware_data(int size)
 {
 	int read_len;

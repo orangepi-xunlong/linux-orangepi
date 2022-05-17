@@ -1,5 +1,6 @@
 #ifndef __SLP_SDIO_H__
 #define __SLP_SDIO_H__
+//#include <linux/wakelock.h>
 #include "sdio_int.h"
 #include "wcn_glb.h"
 

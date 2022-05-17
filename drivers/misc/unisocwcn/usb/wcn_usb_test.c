@@ -61,7 +61,7 @@ static int wcn_usb_channel_open(struct inode *inode, struct file *file)
 {
 	struct channel *channel;
 
-	channel = (struct channel *)PDE_DATA(inode);
+	channel = (struct channel *)pde_data(inode);
 
 	if (!channel)
 		return -EIO;
@@ -467,7 +467,7 @@ static int wcn_usb_chnmg_open(struct inode *inode, struct file *file)
 {
 	struct chnmg *chnmg;
 	/* get channel_list head */
-	chnmg = (struct chnmg *)PDE_DATA(inode);
+	chnmg = (struct chnmg *)pde_data(inode);
 
 	file->private_data = chnmg;
 	return 0;
@@ -916,7 +916,7 @@ static int print_level_open(struct inode *inode, struct file *file)
 {
 	struct chnmg *chnmg;
 	/* get channel_list head */
-	chnmg = (struct chnmg *)PDE_DATA(inode);
+	chnmg = (struct chnmg *)pde_data(inode);
 
 	file->private_data = chnmg;
 	return 0;

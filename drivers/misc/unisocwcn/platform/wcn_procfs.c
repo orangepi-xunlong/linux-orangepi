@@ -23,7 +23,7 @@
 #include <linux/seq_file.h>
 #include <linux/version.h>
 #include <linux/wait.h>
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
+#if KERNEL_VERSION(4, 11, 0) <= LINUX_VERSION_CODE
 #include <linux/sched/clock.h>
 #endif
 #include <wcn_bus.h>
@@ -38,7 +38,7 @@
 #include "marlin_platform.h"
 
 
-#define CONFIG_CP2_ASSERT       (0)
+#define CONFIG_CP2_ASSERT       (1)
 
 u32 wcn_print_level = WCN_DEBUG_OFF;
 
@@ -94,12 +94,12 @@ void mdbg_assert_interface(char *str)
 	stop_loopcheck();
 #endif
 
+#if (CONFIG_CP2_ASSERT)
 	memset(mdbg_proc->assert.buf, 0, MDBG_ASSERT_SIZE);
 	strncpy(mdbg_proc->assert.buf, str, len);
 	WCN_INFO("mdbg_assert_interface:%s\n",
 		(char *)(mdbg_proc->assert.buf));
 
-#if (CONFIG_CP2_ASSERT)
 	sprdwcn_bus_set_carddump_status(true);
 #ifndef CONFIG_WCND
 	/* wcn_hold_cpu(); */
@@ -113,9 +113,8 @@ void mdbg_assert_interface(char *str)
 #else
 	WCN_ERR("%s,%s reset & notify...\n", __func__, str);
 	marlin_reset_notify_call(MARLIN_CP2_STS_ASSERTED);
-	marlin_cp2_reset();
 	msleep(1000);
-	// marlin_reset_notify_call(MARLIN_CP2_STS_READY);
+	marlin_reset_notify_call(MARLIN_CP2_STS_READY);
 #endif
 
 }
@@ -142,6 +141,7 @@ int mdbg_assert_read(int channel, struct mbuf_t *head,
 		     struct mbuf_t *tail, int num)
 {
 	unsigned int data_length;
+#if (CONFIG_CP2_ASSERT)
 	data_length = mdbg_mbuf_get_datalength(head);
 	if (data_length > MDBG_ASSERT_SIZE) {
 		WCN_ERR("assert data len:%d,beyond max read:%d",
@@ -154,7 +154,6 @@ int mdbg_assert_read(int channel, struct mbuf_t *head,
 	mdbg_proc->assert.rcv_len = data_length;
 	WCN_INFO("mdbg_assert_read:%s,data length %d\n",
 		(char *)(mdbg_proc->assert.buf), data_length);
-#if (CONFIG_CP2_ASSERT)
 #ifndef CONFIG_WCND
 	sprdwcn_bus_set_carddump_status(true);
 	/* wcn_hold_cpu(); */
@@ -173,9 +172,8 @@ int mdbg_assert_read(int channel, struct mbuf_t *head,
 #endif
 		WCN_ERR("chip reset & notify every subsystem...\n");
 		marlin_reset_notify_call(MARLIN_CP2_STS_ASSERTED);
-		marlin_cp2_reset();
 		msleep(1000);
-		// marlin_reset_notify_call(MARLIN_CP2_STS_READY);
+		marlin_reset_notify_call(MARLIN_CP2_STS_READY);
 #endif
 	return 0;
 }
@@ -239,7 +237,7 @@ int mdbg_at_cmd_read(int channel, struct mbuf_t *head,
 	default:
 		memset(mdbg_proc->at_cmd.buf, 0, MDBG_AT_CMD_SIZE);
 		memcpy(mdbg_proc->at_cmd.buf, head->buf + PUB_HEAD_RSV,
-		       data_length);
+			   data_length);
 		mdbg_proc->at_cmd.rcv_len = data_length;
 		WCN_INFO("WCND at cmd read:%s\n",
 			(char *)(mdbg_proc->at_cmd.buf));
@@ -315,7 +313,7 @@ static int loopcheck_prepare_buf(int chn, struct mbuf_t **head,
 }
 
 static int at_cmd_prepare_buf(int chn, struct mbuf_t **head,
-			      struct mbuf_t **tail, int *num)
+				  struct mbuf_t **tail, int *num)
 {
 	int ret;
 
@@ -326,7 +324,7 @@ static int at_cmd_prepare_buf(int chn, struct mbuf_t **head,
 }
 
 static int assert_prepare_buf(int chn, struct mbuf_t **head,
-			      struct mbuf_t **tail, int *num)
+				  struct mbuf_t **tail, int *num)
 {
 	int ret;
 
@@ -420,13 +418,23 @@ static int mdbg_snap_shoot_seq_open(struct inode *inode, struct file *file)
 	return seq_open(file, &mdbg_snap_shoot_seq_ops);
 }
 
+#if KERNEL_VERSION(5, 6, 0) <= LINUX_VERSION_CODE
 static const struct proc_ops mdbg_snap_shoot_seq_fops = {
 	.proc_open = mdbg_snap_shoot_seq_open,
 	.proc_read = seq_read,
 	.proc_write = mdbg_snap_shoot_seq_write,
 	.proc_lseek = seq_lseek,
-	.proc_release = seq_release
+	.proc_release = seq_release,
 };
+#else
+static const struct file_operations mdbg_snap_shoot_seq_fops = {
+	.open = mdbg_snap_shoot_seq_open,
+	.read = seq_read,
+	.write = mdbg_snap_shoot_seq_write,
+	.llseek = seq_lseek,
+	.release = seq_release
+};
+#endif
 
 static int mdbg_proc_open(struct inode *inode, struct file *filp)
 {
@@ -752,6 +760,12 @@ static ssize_t mdbg_proc_write(struct file *filp,
 		return count;
 	}
 
+	if (strncmp(mdbg_proc->write_buf, "startgps", 7) == 0) {
+		start_marlin(MARLIN_GNSS);
+		return count;
+	}
+
+
 
 	/* unit of loglimitsize is MByte. */
 	if (strncmp(mdbg_proc->write_buf, "loglimitsize=",
@@ -1007,13 +1021,23 @@ static unsigned int mdbg_proc_poll(struct file *filp, poll_table *wait)
 	return mask;
 }
 
+#if KERNEL_VERSION(5, 6, 0) <= LINUX_VERSION_CODE
 static const struct proc_ops mdbg_proc_fops = {
-	.proc_open		= mdbg_proc_open,
-	.proc_release	= mdbg_proc_release,
-	.proc_read		= mdbg_proc_read,
-	.proc_write		= mdbg_proc_write,
-	.proc_poll		= mdbg_proc_poll,
+	.proc_open = mdbg_proc_open,
+	.proc_release = mdbg_proc_release,
+	.proc_read = mdbg_proc_read,
+	.proc_write = mdbg_proc_write,
+	.proc_poll = mdbg_proc_poll,
 };
+#else
+static const struct file_operations mdbg_proc_fops = {
+	.open		= mdbg_proc_open,
+	.release	= mdbg_proc_release,
+	.read		= mdbg_proc_read,
+	.write		= mdbg_proc_write,
+	.poll		= mdbg_proc_poll,
+};
+#endif
 
 int mdbg_memory_alloc(void)
 {

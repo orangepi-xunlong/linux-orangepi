@@ -82,7 +82,7 @@ static int wcn_usb_dopen(struct inode *inode, struct file *file)
 {
 	struct wcn_usb_ddata *data;
 
-	data = (struct wcn_usb_ddata *)PDE_DATA(inode);
+	data = (struct wcn_usb_ddata *)pde_data(inode);
 
 	if (!data)
 		return -EIO;

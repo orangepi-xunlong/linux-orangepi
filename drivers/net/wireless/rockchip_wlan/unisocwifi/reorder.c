@@ -49,7 +49,7 @@ set_ba_node_desc(struct rx_ba_node_desc *ba_node_desc,
 	ba_node_desc->win_size = win_size;
 	ba_node_desc->win_start = win_start;
 	ba_node_desc->win_limit = SEQNO_ADD(ba_node_desc->win_start,
-					    (ba_node_desc->win_size - 1));
+						(ba_node_desc->win_size - 1));
 	ba_node_desc->win_tail = SEQNO_SUB(ba_node_desc->win_start, 1);
 	ba_node_desc->index_mask = index_mask;
 	ba_node_desc->buff_cnt = 0;
@@ -70,7 +70,7 @@ static inline void set_ba_pkt_desc(struct rx_ba_pkt_desc *ba_pkt_desc,
 
 static inline void
 reorder_set_skb_list(struct sprdwl_rx_ba_entry *ba_entry,
-		     struct sk_buff *skb_head, struct sk_buff *skb_last)
+			 struct sk_buff *skb_head, struct sk_buff *skb_last)
 {
 	spin_lock_bh(&ba_entry->skb_list_lock);
 	if (!ba_entry->skb_head) {
@@ -114,16 +114,16 @@ static inline void mod_reorder_timer(struct rx_ba_node *ba_node)
 }
 
 static inline bool is_same_pn(struct rx_ba_pkt_desc *ba_pkt_desc,
-			      struct rx_msdu_desc *msdu_desc)
+				  struct rx_msdu_desc *msdu_desc)
 {
 	bool ret = true;
 	unsigned char cipher_type = 0;
 
 	cipher_type = ba_pkt_desc->cipher_type;
 	if ((cipher_type == SPRDWL_HW_TKIP) ||
-	    (cipher_type == SPRDWL_HW_CCMP)) {
+		(cipher_type == SPRDWL_HW_CCMP)) {
 		if ((ba_pkt_desc->pn_l != msdu_desc->pn_l) ||
-		    (ba_pkt_desc->pn_h != msdu_desc->pn_h))
+			(ba_pkt_desc->pn_h != msdu_desc->pn_h))
 			ret = false;
 	}
 
@@ -131,7 +131,7 @@ static inline bool is_same_pn(struct rx_ba_pkt_desc *ba_pkt_desc,
 }
 
 static inline bool replay_detection(struct rx_ba_pkt_desc *ba_pkt_desc,
-				    struct rx_ba_node_desc *ba_node_desc)
+					struct rx_ba_node_desc *ba_node_desc)
 {
 	bool ret = true;
 	unsigned int old_val_low = 0;
@@ -147,7 +147,7 @@ static inline bool replay_detection(struct rx_ba_pkt_desc *ba_pkt_desc,
 	 *	  HW do not support other cipher type now
 	 */
 	if ((cipher_type == SPRDWL_HW_TKIP) ||
-	    (cipher_type == SPRDWL_HW_CCMP)) {
+		(cipher_type == SPRDWL_HW_CCMP)) {
 		old_val_low = ba_node_desc->pn_l;
 		old_val_high = ba_node_desc->pn_h;
 		rx_val_low = ba_pkt_desc->pn_l;
@@ -156,13 +156,13 @@ static inline bool replay_detection(struct rx_ba_pkt_desc *ba_pkt_desc,
 		if ((1 == ba_node_desc->reset_pn) &&
 			(old_val_low >= rx_val_low) && (old_val_high >= rx_val_high)) {
 			wl_err("%s: clear reset_pn,old_val_low: %d, old_val_high: %d, rx_val_low: %d, rx_val_high: %d\n",
-			       __func__, old_val_low, old_val_high, rx_val_low, rx_val_high);
+				   __func__, old_val_low, old_val_high, rx_val_low, rx_val_high);
 			ba_node_desc->reset_pn = 0;
 			ba_node_desc->pn_l = rx_val_low;
 			ba_node_desc->pn_h = rx_val_high;
 		} else if (((old_val_high == rx_val_high) &&
-		     (old_val_low < rx_val_low)) ||
-		    (old_val_high < rx_val_high)) {
+			 (old_val_low < rx_val_low)) ||
+			(old_val_high < rx_val_high)) {
 			ba_node_desc->pn_l = rx_val_low;
 			ba_node_desc->pn_h = rx_val_high;
 		} else {
@@ -295,11 +295,11 @@ send_msdu_with_gap(struct sprdwl_rx_ba_entry *ba_entry,
 }
 
 static inline void between_seqlo_seqhi(struct sprdwl_rx_ba_entry *ba_entry,
-				       struct rx_ba_node_desc *ba_node_desc)
+					   struct rx_ba_node_desc *ba_node_desc)
 {
 	ba_node_desc->win_start = send_msdu_in_order(ba_entry, ba_node_desc);
 	ba_node_desc->win_limit = SEQNO_ADD(ba_node_desc->win_start,
-					    (ba_node_desc->win_size - 1));
+						(ba_node_desc->win_size - 1));
 }
 
 static inline void
@@ -315,12 +315,12 @@ greater_than_seqhi(struct sprdwl_rx_ba_entry *ba_entry,
 	ba_node_desc->win_start = pos_win_start;
 	ba_node_desc->win_start = send_msdu_in_order(ba_entry, ba_node_desc);
 	ba_node_desc->win_limit = SEQNO_ADD(ba_node_desc->win_start,
-					    (ba_node_desc->win_size - 1));
+						(ba_node_desc->win_size - 1));
 }
 
 static inline void bar_send_ba_buffer(struct sprdwl_rx_ba_entry *ba_entry,
-				      struct rx_ba_node_desc *ba_node_desc,
-				      unsigned short seq_num)
+					  struct rx_ba_node_desc *ba_node_desc,
+					  unsigned short seq_num)
 {
 	if (!seqno_leq(seq_num, ba_node_desc->win_start)) {
 		send_msdu_with_gap(ba_entry, ba_node_desc, seq_num);
@@ -335,7 +335,7 @@ static inline void bar_send_ba_buffer(struct sprdwl_rx_ba_entry *ba_entry,
 
 static inline int
 insert_msdu(struct rx_msdu_desc *msdu_desc, struct sk_buff *skb,
-	    struct rx_ba_node_desc *ba_node_desc)
+		struct rx_ba_node_desc *ba_node_desc)
 {
 	int ret = 0;
 	unsigned short seq_num = msdu_desc->seq_num;
@@ -347,7 +347,7 @@ insert_msdu(struct rx_msdu_desc *msdu_desc, struct sk_buff *skb,
 
 	if (insert->desc.msdu_num != 0) {
 		if ((insert->desc.seq == seq_num) && (insert->desc.last != 1) &&
-		    is_same_pn(&insert->desc, msdu_desc)) {
+			is_same_pn(&insert->desc, msdu_desc)) {
 			joint_msdu(insert, skb);
 			insert->desc.msdu_num++;
 			insert->desc.last = last_msdu_flag;
@@ -385,7 +385,7 @@ static int reorder_msdu(struct sprdwl_rx_ba_entry *ba_entry,
 			ba_node_desc->win_tail = seq_num;
 	} else {
 		wl_debug("%s: seq_num: %d is less than win_start: %d\n",
-		       __func__, seq_num, ba_node_desc->win_start);
+			   __func__, seq_num, ba_node_desc->win_start);
 	}
 
 	if (ret && skb) {
@@ -417,7 +417,7 @@ static void reorder_msdu_process(struct sprdwl_rx_ba_entry *ba_entry,
 
 		/* FIXME: Data come in sequence in default */
 		if ((seq_num == ba_node_desc->win_start) &&
-		    !ba_node_desc->buff_cnt && last_msdu_flag) {
+			!ba_node_desc->buff_cnt && last_msdu_flag) {
 			send_order_msdu(ba_entry, msdu_desc, skb, ba_node_desc);
 			goto out;
 		}
@@ -426,7 +426,7 @@ static void reorder_msdu_process(struct sprdwl_rx_ba_entry *ba_entry,
 		ret = reorder_msdu(ba_entry, msdu_desc, skb, ba_node);
 		if (!ret) {
 			if (last_msdu_flag &&
-			    (seq_num == ba_node_desc->win_start)) {
+				(seq_num == ba_node_desc->win_start)) {
 				between_seqlo_seqhi(ba_entry, ba_node_desc);
 				mod_reorder_timer(ba_node);
 			} else if (!timer_pending(&ba_node->reorder_timer) ||
@@ -440,8 +440,8 @@ static void reorder_msdu_process(struct sprdwl_rx_ba_entry *ba_entry,
 			ba_node->timeout_cnt = 0;
 		}
 	} else {
-		wl_err("%s: BA SESSION IS NO ACTIVE sta_lut_index: %d, tid: %d\n",
-		       __func__, msdu_desc->sta_lut_index, msdu_desc->tid);
+		//wl_err("%s: BA SESSION IS NO ACTIVE sta_lut_index: %d, tid: %d\n",
+		//	   __func__, msdu_desc->sta_lut_index, msdu_desc->tid);
 		reorder_set_skb_list(ba_entry, skb, skb);
 	}
 
@@ -472,13 +472,13 @@ static inline void init_ba_node(struct sprdwl_rx_ba_entry *ba_entry,
 }
 
 static inline bool is_same_ba(struct rx_ba_node *ba_node,
-			      unsigned char sta_lut_index, unsigned char tid)
+				  unsigned char sta_lut_index, unsigned char tid)
 {
 	bool ret = false;
 
 	if (ba_node) {
 		if ((ba_node->sta_lut_index == sta_lut_index) &&
-		    (ba_node->tid == tid))
+			(ba_node->tid == tid))
 			ret = true;
 	}
 
@@ -487,7 +487,7 @@ static inline bool is_same_ba(struct rx_ba_node *ba_node,
 
 static struct rx_ba_node
 *find_ba_node(struct sprdwl_rx_ba_entry *ba_entry,
-	      unsigned char sta_lut_index, unsigned char tid)
+		  unsigned char sta_lut_index, unsigned char tid)
 {
 	struct rx_ba_node *ba_node = NULL;
 
@@ -500,7 +500,7 @@ static struct rx_ba_node
 			if (!hlist_empty(head)) {
 				hlist_for_each_entry(ba_node, head, hlist) {
 					if (sta_lut_index ==
-					    ba_node->sta_lut_index) {
+						ba_node->sta_lut_index) {
 						ba_entry->current_ba_node =
 							ba_node;
 						break;
@@ -510,7 +510,7 @@ static struct rx_ba_node
 		}
 	} else {
 		wl_err("%s: TID is too large sta_lut_index: %d, tid: %d\n",
-		       __func__, sta_lut_index, tid);
+			   __func__, sta_lut_index, tid);
 	}
 
 	return ba_node;
@@ -569,16 +569,16 @@ void reset_pn(struct sprdwl_priv *priv, const u8 *mac_addr)
 			spin_lock_bh(&ba_node->ba_node_lock);
 			ba_node->rx_ba->reset_pn = 1;
 			wl_info("%s: set,lut=%d,tid=%d,pn_l=%d,pn_h=%d\n",
-			       __func__, lut_id, tid,
-			       ba_node->rx_ba->pn_l,
-			       ba_node->rx_ba->pn_h);
+				   __func__, lut_id, tid,
+				   ba_node->rx_ba->pn_l,
+				   ba_node->rx_ba->pn_h);
 			spin_unlock_bh(&ba_node->ba_node_lock);
 		}
 	}
 }
 
 struct sk_buff *reorder_data_process(struct sprdwl_rx_ba_entry *ba_entry,
-				     struct sk_buff *pskb)
+					 struct sk_buff *pskb)
 {
 	struct rx_ba_node *ba_node = NULL;
 	struct rx_msdu_desc *msdu_desc = NULL;
@@ -592,11 +592,11 @@ struct sk_buff *reorder_data_process(struct sprdwl_rx_ba_entry *ba_entry,
 
 		if (!msdu_desc->bc_mc_flag && msdu_desc->qos_flag) {
 			ba_node = find_ba_node(ba_entry,
-					       msdu_desc->sta_lut_index,
-					       msdu_desc->tid);
+						   msdu_desc->sta_lut_index,
+						   msdu_desc->tid);
 			if (ba_node)
 				reorder_msdu_process(ba_entry, msdu_desc,
-						     pskb, ba_node);
+							 pskb, ba_node);
 			else
 				reorder_set_skb_list(ba_entry, pskb, pskb);
 		} else {
@@ -612,13 +612,13 @@ struct sk_buff *reorder_data_process(struct sprdwl_rx_ba_entry *ba_entry,
 }
 
 static void wlan_filter_event(struct sprdwl_rx_ba_entry *ba_entry,
-			      struct sprdwl_event_ba *ba_event)
+				  struct sprdwl_event_ba *ba_event)
 {
 	struct rx_ba_node *ba_node = NULL;
 	struct rx_msdu_desc msdu_desc;
 
 	ba_node = find_ba_node(ba_entry,
-			       ba_event->sta_lut_index, ba_event->tid);
+				   ba_event->sta_lut_index, ba_event->tid);
 	if (ba_node) {
 		msdu_desc.last_msdu_of_mpdu = 1;
 		msdu_desc.seq_num = ba_event->msdu_param.seq_num;
@@ -631,17 +631,17 @@ static void wlan_filter_event(struct sprdwl_rx_ba_entry *ba_entry,
 }
 
 static void wlan_delba_event(struct sprdwl_rx_ba_entry *ba_entry,
-			     struct sprdwl_event_ba *ba_event)
+				 struct sprdwl_event_ba *ba_event)
 {
 	struct rx_ba_node *ba_node = NULL;
 	struct rx_ba_node_desc *ba_node_desc = NULL;
 
 	wl_info("enter %s\n", __func__);
 	ba_node = find_ba_node(ba_entry,
-			       ba_event->sta_lut_index, ba_event->tid);
+				   ba_event->sta_lut_index, ba_event->tid);
 	if (!ba_node) {
 		wl_err("%s: NOT FOUND sta_lut_index: %d, tid: %d\n",
-		       __func__, ba_event->sta_lut_index, ba_event->tid);
+			   __func__, ba_event->sta_lut_index, ba_event->tid);
 		return;
 	}
 
@@ -672,10 +672,10 @@ static void wlan_bar_event(struct sprdwl_rx_ba_entry *ba_entry,
 
 	wl_info("enter %s\n", __func__);
 	ba_node = find_ba_node(ba_entry,
-			       ba_event->sta_lut_index, ba_event->tid);
+				   ba_event->sta_lut_index, ba_event->tid);
 	if (!ba_node) {
 		wl_err("%s: NOT FOUND sta_lut_index: %d, tid: %d\n",
-		       __func__, ba_event->sta_lut_index, ba_event->tid);
+			   __func__, ba_event->sta_lut_index, ba_event->tid);
 		return;
 	}
 
@@ -683,7 +683,7 @@ static void wlan_bar_event(struct sprdwl_rx_ba_entry *ba_entry,
 	if (ba_node->active) {
 		ba_node_desc = ba_node->rx_ba;
 		if (!seqno_leq(ba_event->win_param.win_start,
-			       ba_node_desc->win_start)) {
+				   ba_node_desc->win_start)) {
 			bar_send_ba_buffer(ba_entry, ba_node_desc,
 					   ba_event->win_param.win_start);
 			mod_reorder_timer(ba_node);
@@ -696,7 +696,7 @@ static void wlan_bar_event(struct sprdwl_rx_ba_entry *ba_entry,
 			ba_node_desc->win_start, ba_node_desc->win_tail);
 	} else {
 		wl_err("%s: BA SESSION IS NO ACTIVE sta_lut_index: %d, tid: %d\n",
-		       __func__, ba_event->sta_lut_index, ba_event->tid);
+			   __func__, ba_event->sta_lut_index, ba_event->tid);
 	}
 	spin_unlock_bh(&ba_node->ba_node_lock);
 }
@@ -733,7 +733,7 @@ static void send_addba_rsp(struct sprdwl_rx_ba_entry *ba_entry,
 }
 
 static void send_delba(struct sprdwl_rx_ba_entry *ba_entry,
-		       unsigned short tid, unsigned char sta_lut_index)
+			   unsigned short tid, unsigned char sta_lut_index)
 {
 	struct sprdwl_cmd_ba delba;
 	struct sprdwl_intf *intf = NULL;
@@ -760,7 +760,7 @@ static void send_delba(struct sprdwl_rx_ba_entry *ba_entry,
 }
 
 static int wlan_addba_event(struct sprdwl_rx_ba_entry *ba_entry,
-			    struct sprdwl_event_ba *ba_event)
+				struct sprdwl_event_ba *ba_event)
 {
 	struct rx_ba_node *ba_node = NULL;
 	int ret = 0;
@@ -797,7 +797,7 @@ static int wlan_addba_event(struct sprdwl_rx_ba_entry *ba_entry,
 	} else {
 		/* Should never happen */
 		wl_err("%s: BA SESSION IS ACTIVE sta_lut_index: %d, tid: %d\n",
-		       __func__, sta_lut_index, tid);
+			   __func__, sta_lut_index, tid);
 		ret = -EINVAL;
 	}
 	spin_unlock_bh(&ba_node->ba_node_lock);
@@ -823,7 +823,7 @@ void wlan_ba_session_event(void *hw_intf,
 	case SPRDWL_ADDBA_REQ_EVENT:
 		ret = wlan_addba_event(ba_entry, ba_event);
 		send_addba_rsp(ba_entry, ba_event->tid,
-			       ba_event->sta_lut_index, ret);
+				   ba_event->sta_lut_index, ret);
 		break;
 	case SPRDWL_DELBA_EVENT:
 		wlan_delba_event(ba_entry, ba_event);
@@ -927,7 +927,7 @@ static void ba_reorder_timeout(unsigned long data)
 	debug_cnt_inc(REORDER_TIMEOUT_CNT);
 	spin_lock_bh(&ba_node->ba_node_lock);
 	if (ba_node->active && ba_node_desc->buff_cnt &&
-	    !timer_pending(&ba_node->reorder_timer)) {
+		!timer_pending(&ba_node->reorder_timer)) {
 		pos_seqno = get_first_seqno_in_buff(ba_node_desc);
 		send_msdu_with_gap(ba_entry, ba_node_desc, pos_seqno);
 		ba_node_desc->win_start = pos_seqno;
@@ -1009,8 +1009,8 @@ void sprdwl_active_ba_node(struct sprdwl_rx_ba_entry *ba_entry,
 
 	ba_node = find_ba_node(ba_entry, sta_lut_index, tid);
 	if (ba_node == NULL) {
-	    wl_err("BA node not found, tid = %d\n", tid);
-	    return;
+		wl_err("BA node not found, tid = %d\n", tid);
+		return;
 	}
 
 	spin_lock_bh(&ba_node->ba_node_lock);

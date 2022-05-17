@@ -1971,7 +1971,6 @@ static int sdiohal_probe(struct sdio_func *func,
 	if (scan_card_notify != NULL)
 		scan_card_notify();
 
-	device_disable_async_suspend(&func->dev);
 	sdiohal_debug("rescan callback:%p\n", scan_card_notify);
 	sdiohal_info("probe ok\n");
 

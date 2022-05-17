@@ -7,6 +7,7 @@
 #include <linux/kthread.h>
 #include <linux/module.h>
 #include <linux/spinlock.h>
+//#include <linux/wakelock.h>
 #include <wcn_bus.h>
 #include "sdio_int.h"
 #include "slp_mgr.h"
