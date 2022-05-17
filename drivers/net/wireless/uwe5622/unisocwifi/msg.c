@@ -17,7 +17,7 @@
 
 #include "sprdwl.h"
 #include "msg.h"
-
+#include "wcn_wrapper.h"
 /* static struct sprdwl_msg_list msg_list */
 
 int sprdwl_msg_init(int num, struct sprdwl_msg_list *list)
@@ -141,7 +141,7 @@ struct sprdwl_msg_buf *sprdwl_peek_msg_buf(struct sprdwl_msg_list *list)
 }
 
 void sprdwl_dequeue_msg_buf(struct sprdwl_msg_buf *msg_buf,
-			    struct sprdwl_msg_list *list)
+				struct sprdwl_msg_list *list)
 {
 	spin_lock_bh(&list->busylock);
 	list_del(&msg_buf->list);
@@ -169,6 +169,7 @@ struct sprdwl_msg_buf *sprdwl_get_msgbuf_by_data(void *data,
 	return find ? msg_buf : NULL;
 }
 
+#if defined(UWE5621_FTR)
 struct sprdwl_msg_buf *sprdwl_get_tail_msg_buf(struct sprdwl_msg_list *list)
 {
 	struct sprdwl_msg_buf *msg_buf = NULL;
@@ -180,4 +181,5 @@ struct sprdwl_msg_buf *sprdwl_get_tail_msg_buf(struct sprdwl_msg_list *list)
 	spin_unlock_bh(&list->busylock);
 	return msg_buf;
 }
+#endif
 

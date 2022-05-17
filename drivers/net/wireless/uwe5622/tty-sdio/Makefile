@@ -1,3 +1,7 @@
+ifneq ($(UNISOC_BSP_INCLUDE),)
+ccflags-y += -I$(UNISOC_BSP_INCLUDE)
+endif
+
 # ccflags-y += -DDEBUG
 # ccflags-y += -DKERNEL_VERSION_414
 ccflags-y += -I$(srctree)/drivers/net/wireless/uwe5622/sprdwcn/include
@@ -12,7 +16,7 @@ sprdbt_tty-objs := \
 	tty.o \
 	rfkill.o \
 	lpm.o \
-	woble.o\
+	woble.o \
 	alignment/sitm.o \
 	dump.o
 

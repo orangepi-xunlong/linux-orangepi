@@ -36,7 +36,7 @@ struct wcn_reg_ctl {
 };
 
 static ssize_t read_wcn_reg(struct file *file, char __user *user_buf,
-			     size_t count, loff_t *ppos)
+				 size_t count, loff_t *ppos)
 {
 	struct wcn_reg_ctl reg_rd;
 	int i;
@@ -52,7 +52,7 @@ static ssize_t read_wcn_reg(struct file *file, char __user *user_buf,
 	if (reg_rd.rw_extended == 0) {
 		for (i = 0; i < reg_rd.len; i++)
 		sprdwcn_bus_aon_readb(reg_rd.addr + i,
-				      (unsigned char *) &reg_rd.value[i]);
+					  (unsigned char *) &reg_rd.value[i]);
 	} else {
 		/* rw_extended reg */
 		switch (reg_rd.len) {
@@ -76,7 +76,7 @@ static ssize_t read_wcn_reg(struct file *file, char __user *user_buf,
 }
 
 static ssize_t write_wcn_reg(struct file *file, const char __user *user_buf,
-			      size_t count, loff_t *ppos)
+				  size_t count, loff_t *ppos)
 {
 	struct wcn_reg_ctl reg_wr;
 	int i;
@@ -91,7 +91,7 @@ static ssize_t write_wcn_reg(struct file *file, const char __user *user_buf,
 	if (reg_wr.rw_extended == 0) {
 		for (i = 0; i < reg_wr.len; i++)
 		sprdwcn_bus_aon_writeb(reg_wr.addr + i,
-				       (unsigned char)reg_wr.value[i]);
+					   (unsigned char)reg_wr.value[i]);
 	} else {
 		/* rw_extended reg */
 		switch (reg_wr.len) {

@@ -907,6 +907,7 @@ struct sprdwl_tlv_data {
 /* TLV type list */
 #define GET_INFO_TLV_TP_OTT	1
 #define NOTIFY_AP_VERSION	2
+#define NOTIFY_CREDIT_VIA_RX_DATA 5
 
 struct ap_version_tlv_elmt {
 #define NOTIFY_AP_VERSION_USER 0

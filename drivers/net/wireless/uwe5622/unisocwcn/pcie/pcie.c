@@ -108,9 +108,9 @@ int dmalloc(struct wcn_pcie_info *priv, struct dma_buf *dm, int size)
 	}
 
 	dm->vir =
-	    (unsigned long)dma_alloc_coherent(dev, size,
-					      (dma_addr_t *)(&(dm->phy)),
-					      GFP_DMA);
+		(unsigned long)dma_alloc_coherent(dev, size,
+						  (dma_addr_t *)(&(dm->phy)),
+						  GFP_DMA);
 	if (dm->vir == 0) {
 		PCIE_ERR("dma_alloc_coherent err\n");
 		return ERROR;
@@ -235,7 +235,7 @@ int pcie_config_read(struct wcn_pcie_info *priv, int offset, char *buf, int len)
 }
 
 int pcie_config_write(struct wcn_pcie_info *priv, int offset,
-		      char *buf, int len)
+			  char *buf, int len)
 {
 	int i, ret;
 
@@ -253,7 +253,7 @@ int pcie_config_write(struct wcn_pcie_info *priv, int offset,
 int sprd_pcie_bar_map(struct wcn_pcie_info *priv, int bar, unsigned int addr)
 {
 	struct inbound_reg *ibreg = (struct inbound_reg *) ibreg_base(priv,
-								      bar);
+									  bar);
 
 	if (!ibreg) {
 		PCIE_ERR("ibreg(%d) NULL\n", bar);
@@ -314,7 +314,7 @@ static int sprd_pcie_probe(struct pci_dev *pdev,
 		ret = pci_enable_msi_range(pdev, 1, priv->irq_num);
 #if 0
 		ret = pci_alloc_irq_vectors(pdev, 1, priv->irq_num,
-					    PCI_IRQ_MSI);
+						PCI_IRQ_MSI);
 #endif
 		if (ret > 0) {
 			PCIE_INFO("pci_enable_msi_range %d ok\n", ret);
@@ -356,11 +356,11 @@ static int sprd_pcie_probe(struct pci_dev *pdev,
 		priv->bar[i].mmio_flags = pci_resource_flags(pdev, i);
 		priv->bar[i].mmio_len = pci_resource_len(pdev, i);
 		priv->bar[i].mem =
-		    ioremap(priv->bar[i].mmio_start, priv->bar[i].mmio_len);
+			ioremap(priv->bar[i].mmio_start, priv->bar[i].mmio_len);
 		priv->bar[i].vmem = priv->bar[i].mem;
 		if (priv->bar[i].vmem == NULL) {
 			PCIE_ERR("%s:cannot remap mmio, aborting\n",
-			       pci_name(pdev));
+				   pci_name(pdev));
 			ret = -EIO;
 			goto err_out;
 		}
@@ -393,12 +393,12 @@ static int sprd_pcie_probe(struct pci_dev *pdev,
 	if (priv->msi_en == 1) {
 		for (i = 0; i < priv->irq_num; i++) {
 			ret =
-			    request_irq(priv->irq + i,
+				request_irq(priv->irq + i,
 					(irq_handler_t) (&sprd_pcie_msi_irq),
 					IRQF_SHARED, DRVER_NAME, (void *)priv);
 			if (ret) {
 				PCIE_ERR("%s request_irq(%d), error %d\n",
-				       __func__, priv->irq + i, ret);
+					   __func__, priv->irq + i, ret);
 				break;
 			}
 			PCIE_INFO("%s request_irq(%d) ok\n", __func__,
@@ -410,12 +410,12 @@ static int sprd_pcie_probe(struct pci_dev *pdev,
 	if (priv->msix_en == 1) {
 		for (i = 0; i < priv->irq_num; i++) {
 			ret =
-			    request_irq(priv->msix[i].vector,
+				request_irq(priv->msix[i].vector,
 					(irq_handler_t) (&sprd_pcie_msi_irq),
 					IRQF_SHARED, DRVER_NAME, (void *)priv);
 			if (ret) {
 				PCIE_ERR("%s request_irq(%d), error %d\n",
-				       __func__, priv->msix[i].vector, ret);
+					   __func__, priv->msix[i].vector, ret);
 				break;
 			}
 

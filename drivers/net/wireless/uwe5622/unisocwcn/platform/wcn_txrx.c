@@ -114,7 +114,7 @@ static long int mdbg_comm_write(char *buf,
 	str = strstr(send_buf + PUB_HEAD_RSV, SMP_HEAD_STR);
 	if (!str)
 		str = strstr(send_buf + PUB_HEAD_RSV + ARMLOG_HEAD,
-			     SMP_HEAD_STR);
+				 SMP_HEAD_STR);
 
 	if (str) {
 		int ret;
@@ -160,7 +160,7 @@ static void mdbg_ring_rx_task(struct work_struct *work)
 
 	spin_lock_bh(&ring_dev->rw_lock);
 	rx = list_first_entry_or_null(&ring_dev->rx_head,
-				      struct ring_rx_data, entry);
+					  struct ring_rx_data, entry);
 	if (rx) {
 		list_del(&rx->entry);
 	} else {
@@ -188,7 +188,7 @@ static void mdbg_ring_rx_task(struct work_struct *work)
 #endif
 	}
 	sprdwcn_bus_push_list(mdbg_ringc_ops.channel,
-			      rx->head, rx->tail, rx->num);
+				  rx->head, rx->tail, rx->num);
 	wake_up_log_wait();
 	kfree(rx);
 }
@@ -226,17 +226,10 @@ long int mdbg_send(char *buf, long int len, unsigned int subtype)
 	long int sent_size = 0;
 
 	WCN_DEBUG("BYTE MODE");
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	__pm_stay_awake(&ring_dev->rw_wake_lock.ws);
-#else
-	__pm_stay_awake(&ring_dev->rw_wake_lock);
-#endif
+
+	__pm_stay_awake(ring_dev->rw_wake_lock);
 	sent_size = mdbg_comm_write(buf, len, subtype);
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	__pm_relax(&ring_dev->rw_wake_lock.ws);
-#else
-	__pm_relax(&ring_dev->rw_wake_lock);
-#endif
+	__pm_relax(ring_dev->rw_wake_lock);
 
 	return sent_size;
 }
@@ -248,7 +241,7 @@ long int mdbg_receive(void *buf, long int len)
 }
 
 int mdbg_tx_cb(int channel, struct mbuf_t *head,
-	       struct mbuf_t *tail, int num)
+		   struct mbuf_t *tail, int num)
 {
 #ifndef CONFIG_WCN_PCIE
 	struct mbuf_t *mbuf_node;
@@ -309,12 +302,10 @@ int mdbg_ring_init(void)
 		return -MDBG_ERR_MALLOC_FAIL;
 	}
 
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	wake_lock_init(&ring_dev->rw_wake_lock, WAKE_LOCK_SUSPEND,
-		       "mdbg_wake_lock");
-#else
-	wakeup_source_init(&ring_dev->rw_wake_lock, "mdbg_wake_lock");
-#endif
+	/*wakeup_source pointer*/
+	ring_dev->rw_wake_lock = wakeup_source_create("mdbg_wake_lock");
+	wakeup_source_add(ring_dev->rw_wake_lock);
+
 	spin_lock_init(&ring_dev->rw_lock);
 	mutex_init(&ring_dev->mdbg_read_mutex);
 	INIT_LIST_HEAD(&ring_dev->rx_head);
@@ -340,11 +331,11 @@ void mdbg_ring_remove(void)
 		kfree(pos);
 	}
 	mutex_destroy(&ring_dev->mdbg_read_mutex);
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	wake_lock_destroy(&ring_dev->rw_wake_lock);
-#else
-	wakeup_source_trash(&ring_dev->rw_wake_lock);
-#endif
+
+	/*wakeup_source pointer*/
+	wakeup_source_remove(ring_dev->rw_wake_lock);
+	wakeup_source_destroy(ring_dev->rw_wake_lock);
+
 	mdbg_ring_destroy(ring_dev->ring);
 	mdbg_dev->ring_dev = NULL;
 	kfree(ring_dev);

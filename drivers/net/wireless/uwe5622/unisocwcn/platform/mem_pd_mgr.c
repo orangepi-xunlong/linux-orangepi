@@ -414,13 +414,13 @@ static int sdio_read_mem_from_cp(void)
 
 	MEM_PD_MGR_INFO("%s  read wifi/bt mem bin", __func__);
 	err = sprdwcn_bus_direct_read(mem_info_cp.wifi_begin_addr,
-				      mem_pd.wifi_mem, mem_info_cp.wifi_size);
+					  mem_pd.wifi_mem, mem_info_cp.wifi_size);
 	if (err < 0) {
 		pr_err("%s wifi save mem bin error:%d", __func__, err);
 		return err;
 	}
 	err = sprdwcn_bus_direct_read(mem_info_cp.bt_begin_addr,
-				      mem_pd.bt_mem, mem_info_cp.bt_size);
+					  mem_pd.bt_mem, mem_info_cp.bt_size);
 	if (err < 0) {
 		pr_err("%s bt save mem bin error:%d", __func__, err);
 		return err;
@@ -446,27 +446,27 @@ static int mem_pd_read_add_from_cp(void)
 				   &bt_begin, 4);
 	if (ret < 0) {
 		MEM_PD_MGR_ERR("%s mem_pd read  bt begin addr error:%d\n",
-			       __func__, ret);
+				   __func__, ret);
 		return ret;
 	}
 	ret = sprdwcn_bus_reg_read(SYNC_ADDR + BT_END_OFFSET_SYNC, &bt_end, 4);
 	if (ret < 0) {
 		MEM_PD_MGR_ERR("%s mem_pd read  bt end addr error:%d\n",
-			       __func__, ret);
+				   __func__, ret);
 		return ret;
 	}
 	ret = sprdwcn_bus_reg_read(SYNC_ADDR + WIFI_BEGIN_OFFSET_SYNC,
 				   &wifi_begin, 4);
 	if (ret < 0) {
 		MEM_PD_MGR_ERR("%s mem_pd read  wifi begin addr error:%d\n",
-			       __func__, ret);
+				   __func__, ret);
 		return ret;
 	}
 	ret = sprdwcn_bus_reg_read(SYNC_ADDR + WIFI_END_OFFSET_SYNC,
 				   &wifi_end, 4);
 	if (ret < 0) {
 		MEM_PD_MGR_ERR("%s mem_pd read  wifi end addr error:%d\n",
-			       __func__, ret);
+				   __func__, ret);
 		return ret;
 	}
 	mem_info_cp.chip_id = marlin_get_wcn_chipid();
@@ -592,8 +592,8 @@ int test_mem_clrear(int subsys)
 	switch (subsys) {
 	case MARLIN_WIFI:
 		err = sprdwcn_bus_direct_write(mem_info_cp.wifi_begin_addr,
-					       mem_pd.wifi_clear,
-					       mem_info_cp.wifi_size);
+						   mem_pd.wifi_clear,
+						   mem_info_cp.wifi_size);
 		if (err < 0) {
 			pr_err("%s wifi down bin error:%d", __func__, err);
 			return err;
@@ -601,8 +601,8 @@ int test_mem_clrear(int subsys)
 	break;
 	case MARLIN_BLUETOOTH:
 		err = sprdwcn_bus_direct_write(mem_info_cp.bt_begin_addr,
-					       mem_pd.bt_clear,
-					       mem_info_cp.bt_size);
+						   mem_pd.bt_clear,
+						   mem_info_cp.bt_size);
 		if (err < 0) {
 			pr_err("%s bt down mem bin error:%d", __func__, err);
 			return err;

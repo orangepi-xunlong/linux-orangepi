@@ -215,5 +215,7 @@ void sprdwl_dequeue_msg_buf(struct sprdwl_msg_buf *msg_buf,
 			    struct sprdwl_msg_list *list);
 struct sprdwl_msg_buf *sprdwl_get_msgbuf_by_data(void *data,
 						 struct sprdwl_msg_list *list);
+#if defined(UWE5621_FTR)
 struct sprdwl_msg_buf *sprdwl_get_tail_msg_buf(struct sprdwl_msg_list *list);
+#endif
 #endif

@@ -99,8 +99,8 @@ static int sdiohal_rx_list_parser(struct sdiohal_list_t *data_list,
 				(puh->len == 0)) {
 				sdiohal_rx_list_free(mbuf_node, mbuf_node, 1);
 				sdiohal_err("%s skip type[%d]sub[%d]len[%d]\n",
-					    __func__, puh->type, puh->subtype,
-					    puh->len);
+						__func__, puh->type, puh->subtype,
+						puh->len);
 				continue;
 			}
 			p_data->rx_packer_cnt++;
@@ -108,11 +108,11 @@ static int sdiohal_rx_list_parser(struct sdiohal_list_t *data_list,
 			sdiohal_data_list_assignment(mbuf_node, puh, channel);
 		} else {
 			sdiohal_debug("%s eof pac:%d,parse[%d]%s valid[%d]\n",
-				      __func__, puh->eof, parse_len,
-				      (parse_len < valid_len ? "<":">="),
-				      valid_len);
+					  __func__, puh->eof, parse_len,
+					  (parse_len < valid_len ? "<":">="),
+					  valid_len);
 			sdiohal_debug("%s type[%d]sub[%d]len[%d]\n", __func__,
-				      puh->type, puh->subtype, puh->len);
+					  puh->type, puh->subtype, puh->len);
 
 			sdiohal_rx_list_free(mbuf_node, mbuf_node, 1);
 		}
@@ -147,8 +147,8 @@ static int sdiohal_rx_buf_parser(char *data_buf, int valid_len)
 				(MAX_PAC_SIZE - SDIO_PUB_HEADER_SIZE)) ||
 				(puh->len == 0)) {
 				sdiohal_err("%s skip type[%d]sub[%d]len[%d]\n",
-					    __func__, puh->type, puh->subtype,
-					    puh->len);
+						__func__, puh->type, puh->subtype,
+						puh->len);
 				continue;
 			}
 			p_data->rx_packer_cnt++;
@@ -167,7 +167,7 @@ static int sdiohal_rx_buf_parser(char *data_buf, int valid_len)
 						SDIOHAL_DATA_LEVEL);
 
 			sdiohal_data_list_assignment(data_list->mbuf_head,
-						     puh, channel);
+							 puh, channel);
 			kfree(data_list);
 		}
 		/* pointer to next packet */
@@ -219,7 +219,7 @@ int sdiohal_rx_thread(void *data)
 			break;
 		if (!WCN_CARD_EXIST(&p_data->xmit_cnt)) {
 			sdiohal_err("%s line %d not have card\n",
-				    __func__, __LINE__);
+					__func__, __LINE__);
 			continue;
 		}
 
@@ -238,8 +238,8 @@ read_again:
 			/* read len is packet num */
 			mbuf_num = sdiohal_rx_adapt_get_pac_num();
 			sdiohal_debug("%s mbuf_num:%d adma_rx_enable:%d\n",
-				      __func__, mbuf_num,
-				      p_data->adma_rx_enable);
+					  __func__, mbuf_num,
+					  p_data->adma_rx_enable);
 
 			data_list = sdiohal_get_rx_mbuf_list(mbuf_num);
 			if (!data_list) {
@@ -249,20 +249,27 @@ read_again:
 			}
 			if (p_data->irq_type == SDIOHAL_RX_POLLING)
 				memset(p_data->dtbs_buf, 0x0,
-				       SDIOHAL_DTBS_BUF_SIZE);
+					   SDIOHAL_DTBS_BUF_SIZE);
 			ret = sdiohal_adma_pt_read(data_list);
 			if (ret != 0) {
 				sdiohal_err("adma read fail ret:%d\n", ret);
 				rx_dtbs = 0;
-				if (p_data->irq_type != SDIOHAL_RX_POLLING)
+				if (p_data->irq_type != SDIOHAL_RX_POLLING) {
+					sdiohal_rx_list_free(
+							data_list->mbuf_head,
+							data_list->mbuf_tail,
+							data_list->node_num);
+					kfree(data_list);
+					data_list = NULL;
 					goto submit_list;
+				}
 			}
 			rx_dtbs =  *((unsigned int *)(p_data->dtbs_buf
 				   + (SDIOHAL_DTBS_BUF_SIZE - 4)));
 			valid_len = *((unsigned int *)(p_data->dtbs_buf
-				    + (SDIOHAL_DTBS_BUF_SIZE - 8)));
+					+ (SDIOHAL_DTBS_BUF_SIZE - 8)));
 			sdiohal_debug("%s rx_pac_num:%d, valid len:%d\n",
-				      __func__, rx_dtbs, valid_len);
+					  __func__, rx_dtbs, valid_len);
 			sdiohal_rx_list_parser(data_list, valid_len);
 			kfree(data_list);
 			data_list = NULL;
@@ -272,20 +279,21 @@ read_again:
 			/* read len is packet data len */
 			read_len = sdiohal_rx_adapt_get();
 			sdiohal_debug("%s read_len:%d adma_rx_enable:%d\n",
-				      __func__, read_len,
-				      p_data->adma_rx_enable);
+					  __func__, read_len,
+					  p_data->adma_rx_enable);
 
-			rx_buf = sdiohal_get_rx_free_buf(&alloc_size);
+			/*get buf by readlen 1024 aligned */
+			rx_buf = sdiohal_get_rx_free_buf(&alloc_size, read_len);
 			if (!rx_buf) {
 				sdiohal_err("get_rx_free_buf fail, rlen=%d\n",
-					    read_len);
+						read_len);
 				msleep(100);
 				goto submit_list;
 			}
 			if (alloc_size < read_len) {
 				read_len = alloc_size;
 				sdiohal_debug("alloc_size=%d < read_len=%d\n",
-					      alloc_size, read_len);
+						  alloc_size, read_len);
 			}
 
 			ret = sdiohal_sdio_pt_read(rx_buf, read_len);
@@ -299,7 +307,7 @@ read_again:
 			valid_len =
 				*((unsigned int *)(rx_buf + (read_len - 8)));
 			sdiohal_debug("%s rx_dtbs:%d,valid len:%d\n",
-				      __func__, rx_dtbs, valid_len);
+					  __func__, rx_dtbs, valid_len);
 			sdiohal_rx_buf_parser(rx_buf, valid_len);
 		}
 

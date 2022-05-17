@@ -203,8 +203,8 @@ static u8 sprdwl_ftm_get_channel(struct wiphy *wiphy,
 		channel = chan->hw_value;
 	} else {
 		bss = cfg80211_get_bss(wiphy, NULL, mac_addr,
-				       NULL, 0, WLAN_CAPABILITY_ESS,
-				       WLAN_CAPABILITY_ESS);
+					   NULL, 0, WLAN_CAPABILITY_ESS,
+					   WLAN_CAPABILITY_ESS);
 		if (!bss) {
 			wl_err("Unable to find BSS\n");
 			return 0;
@@ -232,7 +232,7 @@ static int sprdwl_ftm_parse_meas_params(struct sprdwl_vif *vif,
 	}
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
 	rc = nla_parse_nested(tb, SPRDWL_VENDOR_ATTR_FTM_PARAM_MAX,
-			      attr, sprdwl_nl80211_ftm_meas_param_policy, NULL);
+				  attr, sprdwl_nl80211_ftm_meas_param_policy, NULL);
 #else
 	rc = nla_parse_nested(tb, SPRDWL_VENDOR_ATTR_FTM_PARAM_MAX,
 				attr, sprdwl_nl80211_ftm_meas_param_policy);
@@ -262,7 +262,7 @@ sprdwl_ftm_validate_meas_params(struct sprdwl_vif *vif,
 				struct sprdwl_ftm_meas_params *params)
 {
 	if (params->meas_per_burst > FTM_MAX_MEAS_PER_BURST ||
-	    params->num_of_bursts_exp != 0) {
+		params->num_of_bursts_exp != 0) {
 		wl_ndev_log(L_ERR, vif->ndev, "%s: invalid meas per burst\n", __func__);
 		return -EINVAL;
 	}
@@ -281,12 +281,12 @@ static int sprdwl_ftm_append_meas_params(struct sprdwl_priv *priv,
 	if (!nl_p)
 		goto out_put_failure;
 	if (nla_put_u8(msg, SPRDWL_VENDOR_ATTR_FTM_PARAM_MEAS_PER_BURST,
-		       params->meas_per_burst) ||
-	    nla_put_u8(msg, SPRDWL_VENDOR_ATTR_FTM_PARAM_NUM_BURSTS_EXP,
-		       params->num_of_bursts_exp) ||
-	    nla_put_u8(msg, SPRDWL_VENDOR_ATTR_FTM_PARAM_BURST_DURATION,
-		       params->burst_duration) ||
-	    nla_put_u16(msg, SPRDWL_VENDOR_ATTR_FTM_PARAM_BURST_PERIOD,
+			   params->meas_per_burst) ||
+		nla_put_u8(msg, SPRDWL_VENDOR_ATTR_FTM_PARAM_NUM_BURSTS_EXP,
+			   params->num_of_bursts_exp) ||
+		nla_put_u8(msg, SPRDWL_VENDOR_ATTR_FTM_PARAM_BURST_DURATION,
+			   params->burst_duration) ||
+		nla_put_u16(msg, SPRDWL_VENDOR_ATTR_FTM_PARAM_BURST_PERIOD,
 			params->burst_period))
 		goto out_put_failure;
 	nla_nest_end(msg, nl_p);
@@ -303,19 +303,19 @@ static int sprdwl_ftm_append_peer_meas_res(struct sprdwl_priv *priv,
 	int i;
 
 	if (nla_put(msg, SPRDWL_VENDOR_ATTR_FTM_PEER_RES_MAC_ADDR,
-		    ETH_ALEN, res->mac_addr) ||
-	    nla_put_u32(msg, SPRDWL_VENDOR_ATTR_FTM_PEER_RES_FLAGS,
+			ETH_ALEN, res->mac_addr) ||
+		nla_put_u32(msg, SPRDWL_VENDOR_ATTR_FTM_PEER_RES_FLAGS,
 			res->flags) ||
-	    nla_put_u8(msg, SPRDWL_VENDOR_ATTR_FTM_PEER_RES_STATUS,
-		       res->status))
+		nla_put_u8(msg, SPRDWL_VENDOR_ATTR_FTM_PEER_RES_STATUS,
+			   res->status))
 		goto out_put_failure;
 	if (res->status == SPRDWL_VENDOR_ATTR_FTM_PEER_RES_STATUS_FAILED &&
-	    nla_put_u8(msg,
-		       SPRDWL_VENDOR_ATTR_FTM_PEER_RES_VALUE_SECONDS,
-		       res->value_seconds))
+		nla_put_u8(msg,
+			   SPRDWL_VENDOR_ATTR_FTM_PEER_RES_VALUE_SECONDS,
+			   res->value_seconds))
 		goto out_put_failure;
 	if (res->has_params &&
-	    sprdwl_ftm_append_meas_params(priv, msg, &res->params))
+		sprdwl_ftm_append_meas_params(priv, msg, &res->params))
 		goto out_put_failure;
 	nl_mres = nla_nest_start(msg, SPRDWL_VENDOR_ATTR_FTM_PEER_RES_MEAS);
 	if (!nl_mres)
@@ -327,21 +327,21 @@ static int sprdwl_ftm_append_peer_meas_res(struct sprdwl_priv *priv,
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0)
 		if (nla_put_u64_64bit(msg, SPRDWL_VENDOR_ATTR_FTM_MEAS_T1,
 				res->meas[i].t1, 0) ||
-		    nla_put_u64_64bit(msg, SPRDWL_VENDOR_ATTR_FTM_MEAS_T2,
+			nla_put_u64_64bit(msg, SPRDWL_VENDOR_ATTR_FTM_MEAS_T2,
 				res->meas[i].t2, 0) ||
-		    nla_put_u64_64bit(msg, SPRDWL_VENDOR_ATTR_FTM_MEAS_T3,
+			nla_put_u64_64bit(msg, SPRDWL_VENDOR_ATTR_FTM_MEAS_T3,
 				res->meas[i].t3, 0) ||
-		    nla_put_u64_64bit(msg, SPRDWL_VENDOR_ATTR_FTM_MEAS_T4,
+			nla_put_u64_64bit(msg, SPRDWL_VENDOR_ATTR_FTM_MEAS_T4,
 				res->meas[i].t4, 0))
 			goto out_put_failure;
 #else
 		if (nla_put_u64(msg, SPRDWL_VENDOR_ATTR_FTM_MEAS_T1,
 				res->meas[i].t1) ||
-		    nla_put_u64(msg, SPRDWL_VENDOR_ATTR_FTM_MEAS_T2,
+			nla_put_u64(msg, SPRDWL_VENDOR_ATTR_FTM_MEAS_T2,
 				res->meas[i].t2) ||
-		    nla_put_u64(msg, SPRDWL_VENDOR_ATTR_FTM_MEAS_T3,
+			nla_put_u64(msg, SPRDWL_VENDOR_ATTR_FTM_MEAS_T3,
 				res->meas[i].t3) ||
-		    nla_put_u64(msg, SPRDWL_VENDOR_ATTR_FTM_MEAS_T4,
+			nla_put_u64(msg, SPRDWL_VENDOR_ATTR_FTM_MEAS_T4,
 				res->meas[i].t4))
 			goto out_put_failure;
 #endif
@@ -444,26 +444,26 @@ sprdwl_ftm_cfg80211_start_session(struct sprdwl_priv *priv,
 
 	for (i = 0; i < request->n_peers; i++) {
 		if (request->peers[i].flags &
-		    SPRDWL_VENDOR_ATTR_FTM_PEER_MEAS_FLAG_LCI)
+			SPRDWL_VENDOR_ATTR_FTM_PEER_MEAS_FLAG_LCI)
 			has_lci = true;
 		if (request->peers[i].flags &
-		    SPRDWL_VENDOR_ATTR_FTM_PEER_MEAS_FLAG_LCR)
+			SPRDWL_VENDOR_ATTR_FTM_PEER_MEAS_FLAG_LCR)
 			has_lcr = true;
 		max_meas = max(max_meas,
-			       request->peers[i].params.meas_per_burst);
+				   request->peers[i].params.meas_per_burst);
 	}
 
 	priv->ftm.ftm_res = kzalloc(sizeof(*priv->ftm.ftm_res) +
-		      max_meas * sizeof(struct sprdwl_ftm_peer_meas) +
-		      (has_lci ? FTM_MAX_LCI_LENGTH : 0) +
-		      (has_lcr ? FTM_MAX_LCR_LENGTH : 0), GFP_KERNEL);
+			  max_meas * sizeof(struct sprdwl_ftm_peer_meas) +
+			  (has_lci ? FTM_MAX_LCI_LENGTH : 0) +
+			  (has_lcr ? FTM_MAX_LCR_LENGTH : 0), GFP_KERNEL);
 	if (!priv->ftm.ftm_res) {
 		ret = -ENOMEM;
 		goto out;
 	}
 	ptr = (u8 *)priv->ftm.ftm_res;
 	ptr += sizeof(struct sprdwl_ftm_peer_meas_res) +
-	       max_meas * sizeof(struct sprdwl_ftm_peer_meas);
+		   max_meas * sizeof(struct sprdwl_ftm_peer_meas);
 	if (has_lci) {
 		priv->ftm.ftm_res->lci = ptr;
 		ptr += FTM_MAX_LCI_LENGTH;
@@ -490,13 +490,13 @@ sprdwl_ftm_cfg80211_start_session(struct sprdwl_priv *priv,
 						 request->peers[i].freq);
 		if (!channel) {
 			wl_err("%s: can't find FTM target at index %d\n",
-			       __func__, i);
+				   __func__, i);
 			ret = -EINVAL;
 			goto out_cmd;
 		}
 		cmd->dest_info[i].channel = channel - 1;
 		if (request->peers[i].flags &
-		    SPRDWL_VENDOR_ATTR_FTM_PEER_MEAS_FLAG_SECURE) {
+			SPRDWL_VENDOR_ATTR_FTM_PEER_MEAS_FLAG_SECURE) {
 			cmd->dest_info[i].flags |=
 				FTM_SESSION_START_FLAG_SECURED;
 			cmd->dest_info[i].initial_token =
@@ -506,15 +506,15 @@ sprdwl_ftm_cfg80211_start_session(struct sprdwl_priv *priv,
 				FTM_DEFAULT_INITIAL_TOKEN;
 		}
 		if (request->peers[i].flags &
-		    SPRDWL_VENDOR_ATTR_FTM_PEER_MEAS_FLAG_ASAP)
+			SPRDWL_VENDOR_ATTR_FTM_PEER_MEAS_FLAG_ASAP)
 			cmd->dest_info[i].flags |=
 				FTM_SESSION_START_FLAG_ASAP;
 		if (request->peers[i].flags &
-		    SPRDWL_VENDOR_ATTR_FTM_PEER_MEAS_FLAG_LCI)
+			SPRDWL_VENDOR_ATTR_FTM_PEER_MEAS_FLAG_LCI)
 			cmd->dest_info[i].flags |=
 				FTM_SESSION_START_FLAG_LCI_REQ;
 		if (request->peers[i].flags &
-		    SPRDWL_VENDOR_ATTR_FTM_PEER_MEAS_FLAG_LCR)
+			SPRDWL_VENDOR_ATTR_FTM_PEER_MEAS_FLAG_LCR)
 			cmd->dest_info[i].flags |=
 				FTM_SESSION_START_FLAG_LCR_REQ;
 		cmd->dest_info[i].num_of_ftm_per_burst =
@@ -595,13 +595,13 @@ sprdwl_ftm_session_ended(struct sprdwl_priv *priv, u32 status)
 	if (nla_put_u64_64bit(skb,
 				SPRDWL_VENDOR_ATTR_FTM_SESSION_COOKIE,
 				priv->ftm.session_cookie, 0) ||
-	    nla_put_u32(skb,
+		nla_put_u32(skb,
 			SPRDWL_VENDOR_ATTR_LOC_SESSION_STATUS, status)) {
 #else
 	if (nla_put_u64(skb,
 			SPRDWL_VENDOR_ATTR_FTM_SESSION_COOKIE,
 			priv->ftm.session_cookie) ||
-	    nla_put_u32(skb,
+		nla_put_u32(skb,
 			SPRDWL_VENDOR_ATTR_LOC_SESSION_STATUS, status)) {
 #endif
 		wl_err("%s: failed to fill session done event\n", __func__);
@@ -625,13 +625,13 @@ void sprdwl_ftm_event_per_dest_res(struct sprdwl_priv *priv,
 
 	if (!priv->ftm.session_started || !priv->ftm.ftm_res) {
 		wl_err("%s: Session not running, ignoring res event\n",
-		       __func__);
+			   __func__);
 		goto out;
 	}
 	if (priv->ftm.has_ftm_res &&
-	    !ether_addr_equal(res->dst_mac, priv->ftm.ftm_res->mac_addr)) {
+		!ether_addr_equal(res->dst_mac, priv->ftm.ftm_res->mac_addr)) {
 		wl_err("%s: previous peer not properly terminated\n",
-		       __func__);
+			   __func__);
 		sprdwl_ftm_send_peer_res(priv);
 	}
 
@@ -670,16 +670,16 @@ void sprdwl_ftm_event_per_dest_res(struct sprdwl_priv *priv,
 			break;
 		}
 		memcpy(&tmp, res->responder_ftm_res[i].t1,
-		       sizeof(res->responder_ftm_res[i].t1));
+			   sizeof(res->responder_ftm_res[i].t1));
 		priv->ftm.ftm_res->meas[index].t1 = le64_to_cpu(tmp);
 		memcpy(&tmp, res->responder_ftm_res[i].t2,
-		       sizeof(res->responder_ftm_res[i].t2));
+			   sizeof(res->responder_ftm_res[i].t2));
 		priv->ftm.ftm_res->meas[index].t2 = le64_to_cpu(tmp);
 		memcpy(&tmp, res->responder_ftm_res[i].t3,
-		       sizeof(res->responder_ftm_res[i].t3));
+			   sizeof(res->responder_ftm_res[i].t3));
 		priv->ftm.ftm_res->meas[index].t3 = le64_to_cpu(tmp);
 		memcpy(&tmp, res->responder_ftm_res[i].t4,
-		       sizeof(res->responder_ftm_res[i].t4));
+			   sizeof(res->responder_ftm_res[i].t4));
 		priv->ftm.ftm_res->meas[index].t4 = le64_to_cpu(tmp);
 		priv->ftm.ftm_res->n_meas++;
 	}
@@ -753,19 +753,19 @@ int sprdwl_ftm_get_capabilities(struct wiphy *wiphy,
 		return -ENOMEM;
 	attr = nla_nest_start(skb, SPRDWL_VENDOR_ATTR_LOC_CAPA);
 	if (!attr ||
-	    nla_put_u32(skb, SPRDWL_VENDOR_ATTR_LOC_CAPA_FLAGS,
+		nla_put_u32(skb, SPRDWL_VENDOR_ATTR_LOC_CAPA_FLAGS,
 			SPRDWL_VENDOR_ATTR_LOC_CAPA_FLAG_FTM_RESPONDER |
 			SPRDWL_VENDOR_ATTR_LOC_CAPA_FLAG_FTM_INITIATOR |
 			SPRDWL_VENDOR_ATTR_LOC_CAPA_FLAG_ASAP |
 			SPRDWL_VENDOR_ATTR_LOC_CAPA_FLAG_AOA) ||
-	    nla_put_u16(skb, SPRDWL_VENDOR_ATTR_FTM_CAPA_MAX_NUM_SESSIONS,
+		nla_put_u16(skb, SPRDWL_VENDOR_ATTR_FTM_CAPA_MAX_NUM_SESSIONS,
 			1) ||
-	    nla_put_u16(skb, SPRDWL_VENDOR_ATTR_FTM_CAPA_MAX_NUM_PEERS, 1) ||
-	    nla_put_u8(skb, SPRDWL_VENDOR_ATTR_FTM_CAPA_MAX_NUM_BURSTS_EXP,
-		       0) ||
-	    nla_put_u8(skb, SPRDWL_VENDOR_ATTR_FTM_CAPA_MAX_MEAS_PER_BURST,
-		       4) ||
-	    nla_put_u32(skb, SPRDWL_VENDOR_ATTR_AOA_CAPA_SUPPORTED_TYPES,
+		nla_put_u16(skb, SPRDWL_VENDOR_ATTR_FTM_CAPA_MAX_NUM_PEERS, 1) ||
+		nla_put_u8(skb, SPRDWL_VENDOR_ATTR_FTM_CAPA_MAX_NUM_BURSTS_EXP,
+			   0) ||
+		nla_put_u8(skb, SPRDWL_VENDOR_ATTR_FTM_CAPA_MAX_MEAS_PER_BURST,
+			   4) ||
+		nla_put_u32(skb, SPRDWL_VENDOR_ATTR_AOA_CAPA_SUPPORTED_TYPES,
 			BIT(SPRDWL_VENDOR_ATTR_AOA_TYPE_TOP_CIR_PHASE))) {
 		wl_ndev_log(L_ERR, vif->ndev,
 			   "%s: fail to fill capabilities\n", __func__);
@@ -778,8 +778,8 @@ int sprdwl_ftm_get_capabilities(struct wiphy *wiphy,
 }
 
 int sprdwl_ftm_start_session(struct wiphy *wiphy,
-			     struct wireless_dev *wdev,
-			     const void *data, int data_len)
+				 struct wireless_dev *wdev,
+				 const void *data, int data_len)
 {
 	struct sprdwl_priv *priv = wiphy_priv(wiphy);
 	struct sprdwl_vif *vif = netdev_priv(wdev->netdev);
@@ -790,7 +790,7 @@ int sprdwl_ftm_start_session(struct wiphy *wiphy,
 	int rc, n_peers = 0, index = 0, rem;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
 	rc = nla_parse(tb, SPRDWL_VENDOR_ATTR_LOC_MAX, data, data_len,
-		       sprdwl_nl80211_loc_policy, NULL);
+			   sprdwl_nl80211_loc_policy, NULL);
 #else
 	rc = nla_parse(tb, SPRDWL_VENDOR_ATTR_LOC_MAX, data, data_len,
 			sprdwl_nl80211_loc_policy);
@@ -812,7 +812,7 @@ int sprdwl_ftm_start_session(struct wiphy *wiphy,
 	}
 
 	nla_for_each_nested(peer, tb[SPRDWL_VENDOR_ATTR_FTM_MEAS_PEERS],
-			    rem)
+				rem)
 		n_peers++;
 
 	if (!n_peers) {
@@ -837,10 +837,10 @@ int sprdwl_ftm_start_session(struct wiphy *wiphy,
 		nla_get_u64(tb[SPRDWL_VENDOR_ATTR_FTM_SESSION_COOKIE]);
 	request->n_peers = n_peers;
 	nla_for_each_nested(peer, tb[SPRDWL_VENDOR_ATTR_FTM_MEAS_PEERS],
-			    rem) {
+				rem) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
 		rc = nla_parse_nested(tb2, SPRDWL_VENDOR_ATTR_FTM_PEER_MAX,
-				      peer, sprdwl_nl80211_ftm_peer_policy, NULL);
+					  peer, sprdwl_nl80211_ftm_peer_policy, NULL);
 #else
 		rc = nla_parse_nested(tb2, SPRDWL_VENDOR_ATTR_FTM_PEER_MAX,
 				peer, sprdwl_nl80211_ftm_peer_policy);
@@ -851,8 +851,8 @@ int sprdwl_ftm_start_session(struct wiphy *wiphy,
 			goto out;
 		}
 		if (!tb2[SPRDWL_VENDOR_ATTR_FTM_PEER_MAC_ADDR] ||
-		    nla_len(tb2[SPRDWL_VENDOR_ATTR_FTM_PEER_MAC_ADDR])
-			    != ETH_ALEN) {
+			nla_len(tb2[SPRDWL_VENDOR_ATTR_FTM_PEER_MAC_ADDR])
+				!= ETH_ALEN) {
 			wl_ndev_log(L_ERR, vif->ndev,
 				   "%s: peer MAC address missing or invalid\n",
 				   __func__);
@@ -860,8 +860,8 @@ int sprdwl_ftm_start_session(struct wiphy *wiphy,
 			goto out;
 		}
 		memcpy(request->peers[index].mac_addr,
-		       nla_data(tb2[SPRDWL_VENDOR_ATTR_FTM_PEER_MAC_ADDR]),
-		       ETH_ALEN);
+			   nla_data(tb2[SPRDWL_VENDOR_ATTR_FTM_PEER_MAC_ADDR]),
+			   ETH_ALEN);
 		if (tb2[SPRDWL_VENDOR_ATTR_FTM_PEER_FREQ])
 			request->peers[index].freq = nla_get_u32(
 				tb2[SPRDWL_VENDOR_ATTR_FTM_PEER_FREQ]);
@@ -890,8 +890,8 @@ out:
 }
 
 int sprdwl_ftm_abort_session(struct wiphy *wiphy,
-			     struct wireless_dev *wdev,
-			     const void *data, int len)
+				 struct wireless_dev *wdev,
+				 const void *data, int len)
 {
 	struct sprdwl_msg_buf *msg;
 	struct sprdwl_cmd_rtt *cmd;

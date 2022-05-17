@@ -221,12 +221,12 @@ static int wcn_sipc_sblk_write(u8 index, void *buf, int len)
 	ret = sblock_get(sipc_chn->dst, sipc_chn->chn, &blk, 0);
 	if (ret) {
 		WCN_ERR("[%s]:Failed to get free swcnblk(%d)!\n",
-		       sipc_chn_tostr(sipc_chn->chn, 0), ret);
+			   sipc_chn_tostr(sipc_chn->chn, 0), ret);
 		return -ENOMEM;
 	}
 	if (blk.length < len) {
 		WCN_ERR("[%s]:The size of swcnblk is so tiny!\n",
-		       sipc_chn_tostr(sipc_chn->chn, 0));
+			   sipc_chn_tostr(sipc_chn->chn, 0));
 		sblock_put(sipc_chn->dst, sipc_chn->chn, &blk);
 		return E_INVALIDPARA;
 	}
@@ -236,7 +236,7 @@ static int wcn_sipc_sblk_write(u8 index, void *buf, int len)
 	ret = sblock_send(sipc_chn->dst, sipc_chn->chn, &blk);
 	if (ret) {
 		WCN_ERR("[%s]:err:%d\n",
-		       sipc_chn_tostr(sipc_chn->chn, 0), ret);
+			   sipc_chn_tostr(sipc_chn->chn, 0), ret);
 		sblock_put(sipc_chn->dst, sipc_chn->chn, &blk);
 	}
 
@@ -250,7 +250,7 @@ static void wcn_sipc_sblk_recv(struct sipc_chn_info *sipc_chn)
 	struct sblock blk;
 
 	WCN_DEBUG("[%s]:recv sblock msg",
-		       sipc_chn_tostr(sipc_chn->chn, 0));
+			   sipc_chn_tostr(sipc_chn->chn, 0));
 
 	while (!sblock_receive(sipc_chn->dst, sipc_chn->chn, &blk, 0)) {
 		length = blk.length - SIPC_SBLOCK_HEAD_RESERV;
@@ -260,7 +260,7 @@ static void wcn_sipc_sblk_recv(struct sipc_chn_info *sipc_chn)
 		ret = sblock_release(sipc_chn->dst, sipc_chn->chn, &blk);
 		if (ret)
 			WCN_ERR("release swcnblk[%d] err:%d\n",
-			       sipc_chn->chn, ret);
+				   sipc_chn->chn, ret);
 	}
 }
 

@@ -203,7 +203,7 @@ static void wcn_config_ctrlreg(struct wcn_device *wcn_dev, u32 start, u32 end)
 					 utemp_val);
 		if (wcn_dev->ctrl_us_delay[i] >= 10)
 			usleep_range(wcn_dev->ctrl_us_delay[i],
-				     wcn_dev->ctrl_us_delay[i] + 40);
+					 wcn_dev->ctrl_us_delay[i] + 40);
 		else
 			udelay(wcn_dev->ctrl_us_delay[i]);
 		wcn_regmap_read(wcn_dev->rmap[type], reg_read, &val);
@@ -259,8 +259,8 @@ static int wcn_parse_dt(struct platform_device *pdev,
 
 	/* get the wcn chip name */
 	ret = of_property_read_string(np,
-				      "sprd,name",
-				      (const char **)&wcn_dev->name);
+					  "sprd,name",
+					  (const char **)&wcn_dev->name);
 
 	/* get apb reg handle */
 	wcn_dev->rmap[REGMAP_AON_APB] = syscon_regmap_lookup_by_phandle(np,
@@ -503,7 +503,7 @@ static int wcn_parse_dt(struct platform_device *pdev,
 	/* get vddwcn */
 	if (s_wcn_device.vddwcn == NULL) {
 		s_wcn_device.vddwcn = devm_regulator_get(&pdev->dev,
-						     "vddwcn");
+							 "vddwcn");
 		if (IS_ERR(s_wcn_device.vddwcn)) {
 			WCN_ERR("Get regulator of vddwcn error!\n");
 			return -EINVAL;
@@ -531,12 +531,12 @@ static int wcn_parse_dt(struct platform_device *pdev,
 			(u64)wcn_dev->base_addr, wcn_dev->maxsz);
 
 	ret = of_property_read_string(np, "sprd,file-name",
-				      (const char **)&wcn_dev->file_path);
+					  (const char **)&wcn_dev->file_path);
 	if (!ret)
 		WCN_INFO("firmware name:%s\n", wcn_dev->file_path);
 
 	ret = of_property_read_string(np, "sprd,file-name-ext",
-				      (const char **)&wcn_dev->file_path_ext);
+					  (const char **)&wcn_dev->file_path_ext);
 	if (!ret)
 		WCN_INFO("firmware name ext:%s\n", wcn_dev->file_path_ext);
 	/* get cp source file length */
@@ -572,8 +572,8 @@ static int wcn_platform_open(struct inode *inode, struct file *filp)
 }
 
 static ssize_t wcn_platform_read(struct file *filp,
-			       char __user *buf,
-			       size_t count, loff_t *ppos)
+				   char __user *buf,
+				   size_t count, loff_t *ppos)
 {
 	return 0;
 }
@@ -768,7 +768,7 @@ static int wcn_probe(struct platform_device *pdev)
 	if (first) {
 		/* Transceiver can't get into LP, so force deep sleep */
 		if ((wcn_platform_chip_type() == WCN_PLATFORM_TYPE_SHARKLE) ||
-		    (wcn_platform_chip_type() == WCN_PLATFORM_TYPE_SHARKL3)) {
+			(wcn_platform_chip_type() == WCN_PLATFORM_TYPE_SHARKL3)) {
 			wcn_sys_soft_release();
 			wcn_sys_deep_sleep_en();
 		}

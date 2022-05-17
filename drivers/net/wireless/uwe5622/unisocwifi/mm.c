@@ -30,7 +30,7 @@
 	SKB_DATA_ALIGN(SPRDWL_MAX_DATA_RXLEN + NET_SKB_PAD)
 
 void check_mh_buffer(struct device *dev, void *buffer, dma_addr_t pa,
-		     size_t size, enum dma_data_direction direction)
+			 size_t size, enum dma_data_direction direction)
 {
 #define MAX_RETRY_NUM 8
 	int retry = 0;
@@ -40,10 +40,10 @@ void check_mh_buffer(struct device *dev, void *buffer, dma_addr_t pa,
 
 		/* Check whether this buffer is ok to use */
 		while ((desc->data_write_done != 1) ||
-		       (retry < MAX_RETRY_NUM)) {
+			   (retry < MAX_RETRY_NUM)) {
 			wl_err("%s: hw still writing: 0x%lx, 0x%lx\n",
-			       __func__, (unsigned long)buffer,
-			       (unsigned long)pa);
+				   __func__, (unsigned long)buffer,
+				   (unsigned long)pa);
 			/* FIXME: Should we delay here? */
 			dma_sync_single_for_device(dev, pa, size, direction);
 			retry++;
@@ -53,8 +53,8 @@ void check_mh_buffer(struct device *dev, void *buffer, dma_addr_t pa,
 			buffer_ctrl.buffer_inuse) != 0) ||
 			(retry < MAX_RETRY_NUM)) {
 			wl_err("%s: hw still writing: 0x%lx, 0x%lx\n",
-			       __func__, (unsigned long)buffer,
-			       (unsigned long)pa);
+				   __func__, (unsigned long)buffer,
+				   (unsigned long)pa);
 			dma_sync_single_for_device(dev, pa, size, direction);
 			retry++;
 		}
@@ -64,12 +64,12 @@ void check_mh_buffer(struct device *dev, void *buffer, dma_addr_t pa,
 		/* TODO: How to deal with this situation? */
 		dma_sync_single_for_device(dev, pa, size, direction);
 		wl_err("%s: hw still writing: 0x%lx, 0x%lx\n",
-		       __func__, (unsigned long)buffer, (unsigned long)pa);
+			   __func__, (unsigned long)buffer, (unsigned long)pa);
 	}
 }
 
 unsigned long mm_virt_to_phys(struct device *dev, void *buffer, size_t size,
-			      enum dma_data_direction direction)
+				  enum dma_data_direction direction)
 {
 	dma_addr_t pa = 0;
 	unsigned long pcie_addr = 0;
@@ -82,7 +82,7 @@ unsigned long mm_virt_to_phys(struct device *dev, void *buffer, size_t size,
 }
 
 void *mm_phys_to_virt(struct device *dev, unsigned long pcie_addr, size_t size,
-		      enum dma_data_direction direction, bool is_mh)
+			  enum dma_data_direction direction, bool is_mh)
 {
 	dma_addr_t pa = 0;
 	void *buffer = NULL;
@@ -178,7 +178,7 @@ static inline int mm_do_addr_buf(struct sprdwl_mm *mm_entry)
 		/* FIXME: temporary solution, would TX supply API for us? */
 		/* TODO: How to do with tx fail? */
 		if ((if_tx_addr_trans(rx_if->intf, mm_entry->hdr,
-				      addr_trans_len) >= 0)) {
+					  addr_trans_len) >= 0)) {
 			mm_alloc_addr_buf(mm_entry);
 			if (unlikely(!mm_entry->addr_trans)) {
 				wl_err("%s: alloc addr buf fail!\n", __func__);
@@ -204,7 +204,7 @@ static int mm_w_addr_buf(struct sprdwl_mm *mm_entry, unsigned long pcie_addr)
 
 		/* NOTE: MH is little endian */
 		memcpy((void *)value->address[value->num],
-		       &pcie_addr, SPRDWL_PHYS_LEN);
+			   &pcie_addr, SPRDWL_PHYS_LEN);
 		value->num++;
 		/* do not care the result here */
 		mm_do_addr_buf(mm_entry);
@@ -231,14 +231,14 @@ static int mm_single_buffer_alloc(struct sprdwl_mm *mm_entry)
 		memcpy((void *)skb_end_pointer(skb), &skb, sizeof(skb));
 		/* transfer virt to phys */
 		pcie_addr = mm_virt_to_phys(&rx_if->intf->pdev->dev,
-					    skb->data, SPRDWL_MAX_DATA_RXLEN,
-					    DMA_FROM_DEVICE);
+						skb->data, SPRDWL_MAX_DATA_RXLEN,
+						DMA_FROM_DEVICE);
 
 		if (unlikely(!pcie_addr)) {
 			ret = mm_w_addr_buf(mm_entry, pcie_addr);
 			if (ret) {
 				wl_err("%s: write addr buf fail: %d\n",
-				       __func__, ret);
+					   __func__, ret);
 				dev_kfree_skb(skb);
 			} else {
 				/* queue skb */
@@ -260,7 +260,7 @@ int mm_buffer_alloc(struct sprdwl_mm *mm_entry, int need_num)
 		ret = mm_single_buffer_alloc(mm_entry);
 		if (ret) {
 			wl_err("%s: alloc num: %d, need num: %d, ret: %d\n",
-			       __func__, num, need_num, ret);
+				   __func__, num, need_num, ret);
 			break;
 		}
 	}
@@ -269,7 +269,7 @@ int mm_buffer_alloc(struct sprdwl_mm *mm_entry, int need_num)
 }
 
 static struct sk_buff *mm_single_buffer_unlink(struct sprdwl_mm *mm_entry,
-					       unsigned long pcie_addr)
+						   unsigned long pcie_addr)
 {
 	struct sprdwl_rx_if *rx_if =
 			container_of(mm_entry, struct sprdwl_rx_if, mm_entry);
@@ -287,11 +287,11 @@ static struct sk_buff *mm_single_buffer_unlink(struct sprdwl_mm *mm_entry,
 }
 
 static int mm_buffer_relink(struct sprdwl_mm *mm_entry,
-			    struct sprdwl_addr_trans_value *value,
-			    int total_len)
+				struct sprdwl_addr_trans_value *value,
+				int total_len)
 {
 	int num = 0;
-	unsigned long pcie_addr = 0;
+	uint64_t pcie_addr = 0;
 	struct sk_buff *skb = NULL;
 	int len = 0, ret = 0;
 
@@ -299,9 +299,9 @@ static int mm_buffer_relink(struct sprdwl_mm *mm_entry,
 		len += SPRDWL_PHYS_LEN;
 		if (unlikely(len > total_len)) {
 			wl_err("%s: total_len:%d < len:%d\n",
-			       __func__, total_len, len);
+				   __func__, total_len, len);
 			wl_err("%s: total %d pkts, relink %d pkts\n",
-			       __func__, value->num, num);
+				   __func__, value->num, num);
 			len = -EINVAL;
 			break;
 		}
@@ -327,11 +327,11 @@ static int mm_buffer_relink(struct sprdwl_mm *mm_entry,
 }
 
 static int mm_buffer_unlink(struct sprdwl_mm *mm_entry,
-			    struct sprdwl_addr_trans_value *value,
-			    int total_len)
+				struct sprdwl_addr_trans_value *value,
+				int total_len)
 {
 	int num = 0;
-	unsigned long pcie_addr = 0;
+	uint64_t pcie_addr = 0;
 	struct sk_buff *skb = NULL;
 	struct rx_msdu_desc *msdu_desc = NULL;
 	int len = 0;
@@ -343,9 +343,9 @@ static int mm_buffer_unlink(struct sprdwl_mm *mm_entry,
 		len += SPRDWL_PHYS_LEN;
 		if (unlikely(len > total_len)) {
 			wl_err("%s: total_len:%d < len:%d\n",
-			       __func__, total_len, len);
+				   __func__, total_len, len);
 			wl_err("%s: total %d pkts, unlink %d pkts\n",
-			       __func__, value->num, num);
+				   __func__, value->num, num);
 			len = -EINVAL;
 			break;
 		}
@@ -414,7 +414,7 @@ mm_compound_data_process(struct sprdwl_mm *mm_entry, void *compound_data,
 		len += ALIGN_8BYTE(msdu_len);
 		if (unlikely(len > total_len)) {
 			wl_err("%s: total_len:%d < len:%d, leave %d pkts\n",
-			       __func__, total_len, len, (num + 1));
+				   __func__, total_len, len, (num + 1));
 			break;
 		}
 
@@ -424,7 +424,7 @@ mm_compound_data_process(struct sprdwl_mm *mm_entry, void *compound_data,
 		skb = mm_data2skb_process(mm_entry, pos_data, msdu_len);
 		if (unlikely(!skb)) {
 			wl_err("%s: alloc skb fail, leave %d pkts\n",
-			       __func__, (num + 1));
+				   __func__, (num + 1));
 			break;
 		}
 
@@ -452,7 +452,7 @@ static void mm_normal_data_process(struct sprdwl_mm *mm_entry,
 
 	if (unlikely(len < sizeof(struct rx_msdu_desc))) {
 		wl_err("%s: data len is %d, too short\n",
-		       __func__, len);
+			   __func__, len);
 		free_data = true;
 	} else {
 		csum = get_sdio_data_csum((void *)rx_if->intf, data);
@@ -546,7 +546,7 @@ static int mm_single_event_process(struct sprdwl_mm *mm_entry,
 
 /* PCIE DATA EVENT */
 void mm_mh_data_event_process(struct sprdwl_mm *mm_entry, void *data,
-			      int len, int buffer_type)
+				  int len, int buffer_type)
 {
 	int offset = 0;
 	struct sprdwl_addr_hdr *hdr =
@@ -568,7 +568,7 @@ void mm_mh_data_event_process(struct sprdwl_mm *mm_entry, void *data,
 		offset = mm_single_event_process(mm_entry, value, remain_len);
 		if (offset < 0) {
 			wl_err("%s: do mh event fail: %d!\n",
-			       __func__, offset);
+				   __func__, offset);
 			break;
 		}
 	}
@@ -593,7 +593,7 @@ int sprdwl_mm_init(struct sprdwl_mm *mm_entry, void *intf)
 	mm_entry->hif_offset = ((struct sprdwl_intf *)intf)->hif_offset;
 
 	if (((struct sprdwl_intf *)intf)->priv->hw_type ==
-	    SPRDWL_HW_PCIE) {
+		SPRDWL_HW_PCIE) {
 		skb_queue_head_init(&mm_entry->buffer_list);
 
 		ret = mm_buffer_alloc(mm_entry, SPRDWL_MAX_MH_BUF);
@@ -607,7 +607,7 @@ int sprdwl_mm_init(struct sprdwl_mm *mm_entry, void *intf)
 int sprdwl_mm_deinit(struct sprdwl_mm *mm_entry, void *intf)
 {
 	if (((struct sprdwl_intf *)intf)->priv->hw_type ==
-	    SPRDWL_HW_PCIE) {
+		SPRDWL_HW_PCIE) {
 		/* NOTE: pclint says kfree(NULL) is safe */
 		kfree(mm_entry->hdr);
 		mm_entry->hdr = NULL;

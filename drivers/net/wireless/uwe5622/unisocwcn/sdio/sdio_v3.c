@@ -30,13 +30,13 @@ static void sdio_preexit(void)
 }
 
 static int sdio_buf_list_alloc(int chn, struct mbuf_t **head,
-			       struct mbuf_t **tail, int *num)
+				   struct mbuf_t **tail, int *num)
 {
 	return buf_list_alloc(chn, head, tail, num);
 }
 
 static int sdio_buf_list_free(int chn, struct mbuf_t *head,
-			      struct mbuf_t *tail, int num)
+				  struct mbuf_t *tail, int num)
 {
 	return buf_list_free(chn, head, tail, num);
 }

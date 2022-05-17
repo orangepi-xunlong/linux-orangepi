@@ -25,7 +25,7 @@ struct virtual_buf {
 #define virtual_to_head(x) ((char *)x - sizeof(unsigned char))
 
 static int mdbg_virtual_pop(int channel, struct mbuf_t *head,
-		     struct mbuf_t *tail, int num)
+			 struct mbuf_t *tail, int num)
 {
 	struct mbuf_t *mbuf;
 	int ret = 0;
@@ -381,7 +381,7 @@ static int wcn_print_async(void)
 	filp = filp_open(ehci_async_path, O_RDONLY, 0644);
 	if (IS_ERR(filp))
 		wcn_usb_err("%s open %s error no:%ld\n",
-			    __func__, ehci_async_path, PTR_ERR(filp));
+				__func__, ehci_async_path, PTR_ERR(filp));
 
 	memset(ehci_dbg_buf, 0x0, READ_SIZE);
 	ret = kernel_read(filp, 0, ehci_dbg_buf, READ_SIZE);
@@ -402,12 +402,12 @@ static int wcn_print_periodic(void)
 	filp = filp_open(ehci_periodic_path, O_RDONLY, 0644);
 	if (IS_ERR(filp))
 		wcn_usb_err("%s open %s error no:%ld\n",
-			    __func__, ehci_periodic_path, PTR_ERR(filp));
+				__func__, ehci_periodic_path, PTR_ERR(filp));
 
 	memset(ehci_dbg_buf, 0x0, READ_SIZE);
 	ret = kernel_read(filp, 0, ehci_dbg_buf, READ_SIZE);
 	wcn_usb_info("%s periodic read:%d\n%s\n\n", __func__, ret,
-		     ehci_dbg_buf);
+			 ehci_dbg_buf);
 
 	fput(filp);
 

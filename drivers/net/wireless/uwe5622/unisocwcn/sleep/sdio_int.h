@@ -2,9 +2,6 @@
 #define __SDIO_INT_H__
 #include <linux/device.h>
 #include <linux/version.h>
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-#include <linux/wakelock.h>
-#endif
 
 #define SLP_MGR_HEADER "[slp_mgr]"
 
@@ -105,11 +102,9 @@ struct sdio_int_t {
 	unsigned int pub_int_clr0;
 	unsigned int pub_int_sts0;
 	PUB_INT_ISR pub_int_cb[PUB_INT_MAX];
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	struct wake_lock pub_int_wakelock;
-#else
-	struct wakeup_source pub_int_ws;
-#endif
+	/*wakeup_source pointer*/
+	struct wakeup_source *pub_int_ws;
+
 	struct completion pub_int_completion;
 	unsigned int pub_int_num;
 	/* 1: power on, 0: power off */

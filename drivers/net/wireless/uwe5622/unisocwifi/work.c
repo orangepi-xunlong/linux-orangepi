@@ -44,7 +44,7 @@ static struct sprdwl_work *sprdwl_get_work(struct sprdwl_priv *priv)
 	spin_lock_bh(&priv->work_lock);
 	if (!list_empty(&priv->work_list)) {
 		sprdwl_work = list_first_entry(&priv->work_list,
-					       struct sprdwl_work, list);
+						   struct sprdwl_work, list);
 		list_del(&sprdwl_work->list);
 	}
 	spin_unlock_bh(&priv->work_lock);
@@ -76,21 +76,21 @@ static void sprdwl_do_work(struct work_struct *work)
 		case SPRDWL_WORK_REG_MGMT:
 			reg_mgmt = (struct sprdwl_reg_mgmt *)sprdwl_work->data;
 			sprdwl_register_frame(priv, vif->ctx_id,
-					      reg_mgmt->type,
-					      reg_mgmt->reg ? 1 : 0);
+						  reg_mgmt->type,
+						  reg_mgmt->reg ? 1 : 0);
 			break;
 		case SPRDWL_WORK_DEAUTH:
 		case SPRDWL_WORK_DISASSOC:
 			cfg80211_rx_unprot_mlme_mgmt(vif->ndev,
-						     sprdwl_work->data,
-						     sprdwl_work->len);
+							 sprdwl_work->data,
+							 sprdwl_work->len);
 			break;
 		case SPRDWL_WORK_MC_FILTER:
 			if (vif->mc_filter->mc_change)
 				sprdwl_set_mc_filter(priv, vif->ctx_id,
-						     vif->mc_filter->subtype,
-						     vif->mc_filter->mac_num,
-						     vif->mc_filter->mac_addr);
+							 vif->mc_filter->subtype,
+							 vif->mc_filter->mac_num,
+							 vif->mc_filter->mac_addr);
 			break;
 		case SPRDWL_WORK_NOTIFY_IP:
 			sprdwl_notify_ip(priv, vif->ctx_id, SPRDWL_IPV6,
@@ -99,10 +99,10 @@ static void sprdwl_do_work(struct work_struct *work)
 		case SPRDWL_WORK_BA_MGMT:
 			ba_data = (struct sprdwl_ba_event_data *)sprdwl_work->data;
 			sprdwl_send_ba_mgmt(priv, vif->ctx_id,
-					    &ba_data->addba_rsp,
-					    sizeof(ba_data->addba_rsp));
+						&ba_data->addba_rsp,
+						sizeof(ba_data->addba_rsp));
 			sprdwl_active_ba_node(ba_data->ba_entry, ba_data->sta_lut_index,
-					      ba_data->addba_rsp.tid);
+						  ba_data->addba_rsp.tid);
 			break;
 		case SPRDWL_WORK_ADDBA:
 			sprdwl_tx_send_addba(vif, sprdwl_work->data,
@@ -148,8 +148,8 @@ static void sprdwl_do_work(struct work_struct *work)
 			break;
 		case SPRDWL_WORK_VOWIFI_DATA_PROTECTION:
 			sprdwl_send_vowifi_data_prot(vif->priv, vif->ctx_id,
-						     sprdwl_work->data,
-						     sprdwl_work->len);
+							 sprdwl_work->data,
+							 sprdwl_work->len);
 			break;
 		default:
 			wl_ndev_log(L_DBG, vif->ndev, "Unknown delayed work: %d\n",
@@ -162,7 +162,7 @@ static void sprdwl_do_work(struct work_struct *work)
 }
 
 void sprdwl_queue_work(struct sprdwl_priv *priv,
-		       struct sprdwl_work *sprdwl_work)
+			   struct sprdwl_work *sprdwl_work)
 {
 	spin_lock_bh(&priv->work_lock);
 	list_add_tail(&sprdwl_work->list, &priv->work_list);
