@@ -31,8 +31,8 @@
 bool mh_ipv6_ext_hdr(unsigned char nexthdr)
 {
 	return (nexthdr == NEXTHDR_HOP) ||
-	       (nexthdr == NEXTHDR_ROUTING) ||
-	       (nexthdr == NEXTHDR_DEST);
+		   (nexthdr == NEXTHDR_ROUTING) ||
+		   (nexthdr == NEXTHDR_DEST);
 }
 
 int ipv6_csum(void *data, __wsum csum)
@@ -65,8 +65,8 @@ int ipv6_csum(void *data, __wsum csum)
 			 (msdu_desc->msdu_len - dataoff));
 
 		if (!csum_ipv6_magic(&ip6h->saddr, &ip6h->daddr,
-				     (msdu_desc->msdu_len - dataoff),
-				     nexthdr, csum)) {
+					 (msdu_desc->msdu_len - dataoff),
+					 nexthdr, csum)) {
 			ret = 1;
 		} else {
 			ret = -1;
@@ -300,20 +300,20 @@ static void sprdwl_rx_work_queue(struct work_struct *work)
 
 					r_buf = (unsigned char *)data;
 					sprdwl_intf_tx_data_fpga_test(intf,
-								      r_buf,
-								      len);
+									  r_buf,
+									  len);
 				}
 #else
 				if (msg->len > SPRDWL_MAX_DATA_RXLEN)
 					wl_err("err rx data too long:%d > %d\n",
-					       len, SPRDWL_MAX_DATA_RXLEN);
+						   len, SPRDWL_MAX_DATA_RXLEN);
 				sprdwl_rx_data_process(priv, data);
 #endif /* FPGA_LOOPBACK_TEST */
 				break;
 			case SPRDWL_TYPE_CMD:
 				if (msg->len > SPRDWL_MAX_CMD_RXLEN)
 					wl_err("err rx cmd too long:%d > %d\n",
-					       len, SPRDWL_MAX_CMD_RXLEN);
+						   len, SPRDWL_MAX_CMD_RXLEN);
 				sprdwl_rx_rsp_process(priv, data);
 				break;
 			case SPRDWL_TYPE_PKT_LOG:
@@ -324,7 +324,7 @@ static void sprdwl_rx_work_queue(struct work_struct *work)
 			case SPRDWL_TYPE_EVENT:
 				if (msg->len > SPRDWL_MAX_CMD_RXLEN)
 					wl_err("err rx event too long:%d > %d\n",
-					       len, SPRDWL_MAX_CMD_RXLEN);
+						   len, SPRDWL_MAX_CMD_RXLEN);
 				sprdwl_rx_event_process(priv, data);
 				break;
 			case SPRDWL_TYPE_DATA_SPECIAL:
@@ -333,7 +333,7 @@ static void sprdwl_rx_work_queue(struct work_struct *work)
 
 				if (msg->len > SPRDWL_MAX_DATA_RXLEN)
 					wl_err("err data trans too long:%d > %d\n",
-					       len, SPRDWL_MAX_CMD_RXLEN);
+						   len, SPRDWL_MAX_CMD_RXLEN);
 				sprdwl_rx_mh_data_process(rx_if, tran_data, len,
 							  msg->buffer_type);
 				tran_data = NULL;
@@ -346,7 +346,7 @@ static void sprdwl_rx_work_queue(struct work_struct *work)
 				}
 				if (msg->len > SPRDWL_MAX_CMD_RXLEN)
 					wl_err("err rx mh data too long:%d > %d\n",
-					       len, SPRDWL_MAX_DATA_RXLEN);
+						   len, SPRDWL_MAX_DATA_RXLEN);
 				sprdwl_rx_mh_addr_process(rx_if, tran_data, len,
 							  msg->buffer_type);
 				tran_data = NULL;
@@ -354,7 +354,7 @@ static void sprdwl_rx_work_queue(struct work_struct *work)
 				break;
 			default:
 				wl_err("rx unknown type:%d\n",
-				       SPRDWL_HEAD_GET_TYPE(data));
+					   SPRDWL_HEAD_GET_TYPE(data));
 				break;
 			}
 
@@ -370,7 +370,7 @@ static void sprdwl_rx_work_queue(struct work_struct *work)
 next:
 		/* TODO: Should we free mbuf one by one? */
 		sprdwl_free_rx_data(intf, msg->fifo_id, msg->tran_data,
-				    msg->data, msg->len);
+					msg->data, msg->len);
 		sprdwl_dequeue_msg_buf(msg, &rx_if->rx_list);
 	}
 }
@@ -495,7 +495,7 @@ static int sprdwl_netdev_poll_rx(struct napi_struct *napi, int budget)
 				print_len = 100;
 			else
 				print_len = ((struct sdiohal_puh *)
-					     tran_data)->len;
+						 tran_data)->len;
 			sprdwl_hex_dump("rx data",
 					(unsigned char *)data, print_len);
 
@@ -506,7 +506,7 @@ static int sprdwl_netdev_poll_rx(struct napi_struct *napi, int budget)
 			case SPRDWL_TYPE_DATA_SPECIAL:
 				if (msg->len > SPRDWL_MAX_DATA_RXLEN)
 					wl_err("err data trans too long:%d > %d\n",
-					       len, SPRDWL_MAX_CMD_RXLEN);
+						   len, SPRDWL_MAX_CMD_RXLEN);
 				sprdwl_rx_mh_data_process(rx_if, tran_data, len,
 							  msg->buffer_type);
 				tran_data = NULL;
@@ -515,7 +515,7 @@ static int sprdwl_netdev_poll_rx(struct napi_struct *napi, int budget)
 			case SPRDWL_TYPE_DATA_PCIE_ADDR:
 				if (msg->len > SPRDWL_MAX_CMD_RXLEN)
 					wl_err("err rx mh data too long:%d > %d\n",
-					       len, SPRDWL_MAX_DATA_RXLEN);
+						   len, SPRDWL_MAX_DATA_RXLEN);
 				sprdwl_rx_mh_addr_process(rx_if, tran_data, len,
 							  msg->buffer_type);
 				tran_data = NULL;
@@ -523,7 +523,7 @@ static int sprdwl_netdev_poll_rx(struct napi_struct *napi, int budget)
 				break;
 			default:
 				wl_err("rx unknown type:%d\n",
-				       SPRDWL_HEAD_GET_TYPE(data));
+					   SPRDWL_HEAD_GET_TYPE(data));
 				break;
 			}
 free:
@@ -539,7 +539,7 @@ free:
 next:
 		/* TODO: Should we free mbuf one by one? */
 		sprdwl_free_rx_data(intf, msg->fifo_id, msg->tran_data,
-				    msg->data, msg->len);
+					msg->data, msg->len);
 		sprdwl_dequeue_msg_buf(msg, &rx_if->rx_data_list);
 		quota--;
 	}
@@ -575,7 +575,7 @@ int sprdwl_rx_init(struct sprdwl_intf *intf)
 	ret = sprdwl_msg_init(SPRDWL_RX_MSG_NUM, &rx_if->rx_list);
 	if (ret) {
 		wl_err("%s tx_buf create failed: %d\n",
-		       __func__, ret);
+			   __func__, ret);
 		goto err_rx_list;
 	}
 
@@ -583,7 +583,7 @@ int sprdwl_rx_init(struct sprdwl_intf *intf)
 	ret = sprdwl_msg_init(SPRDWL_RX_MSG_NUM, &rx_if->rx_data_list);
 	if (ret) {
 		wl_err("%s tx_buf create failed: %d\n",
-		       __func__, ret);
+			   __func__, ret);
 		goto err_rx_data_list;
 	}
 #endif

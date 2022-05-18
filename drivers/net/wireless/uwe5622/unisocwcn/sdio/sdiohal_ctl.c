@@ -55,9 +55,6 @@
 #define GNSS_DUMP_WIFI_RAM_ADDR	0x40580000
 #define GNSS_DUMP_DATA_SIZE	0x38000
 
-#include <linux/module.h>
-MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
-
 enum {
 	/* SDIO TX */
 	CHANNEL_TX_BASE = 0,
@@ -225,7 +222,7 @@ static int sdiohal_throughput_tx(void)
 static void sdiohal_throughput_tx_compute_time(void)
 {
 	static signed long long times_count;
-	struct timespec now;
+	struct timespec64 now;
 
 	if (tp_tx_flag != 1)
 		return;
@@ -554,7 +551,7 @@ int at_list_rx_pop(int channel, struct mbuf_t *head,
 		   struct mbuf_t *tail, int num)
 {
 	static signed long long times_count;
-	struct timespec now;
+	struct timespec64 now;
 
 	sdiohal_debug("%s channel:%d head:%p tail:%p num:%d\n",
 		     __func__, channel, head, tail, num);
@@ -837,7 +834,7 @@ static ssize_t at_cmd_write(struct file *filp,
 	long int long_data;
 	int ret;
 	unsigned char *send_buf = NULL;
-	struct timespec now;
+	struct timespec64 now;
 
 	if (count > SDIOHAL_WRITE_SIZE) {
 		sdiohal_err("%s write size > %d\n",

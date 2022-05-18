@@ -113,17 +113,6 @@ static ssize_t dumpmem_store(struct device *dev,
 
 static DEVICE_ATTR_WO(dumpmem);
 
-static struct attribute *bluetooth_attrs[] = {
-	&dev_attr_dumpmem.attr,
-	NULL,
-};
-
-static struct attribute_group bluetooth_group = {
-	.name = NULL,
-	.attrs = bluetooth_attrs,
-};
-
-#ifdef KERNEL_VERSION_414
 static ssize_t chipid_show(struct device *dev,
 	   struct device_attribute *attr, char *buf)
 {
@@ -144,8 +133,22 @@ static ssize_t chipid_show(struct device *dev,
 
 static DEVICE_ATTR_RO(chipid);
 
+static ssize_t ant_num_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int num = 2;
+
+	num = marlin_get_ant_num();
+	pr_err("%s: %d", __func__, num);
+
+	return sprintf(buf, "%d", num);
+}
+
+static DEVICE_ATTR_RO(ant_num);
+
 static struct attribute *bluetooth_attrs[] = {
+	&dev_attr_dumpmem.attr,
 	&dev_attr_chipid.attr,
+	&dev_attr_ant_num.attr,
 	NULL,
 };
 
@@ -153,7 +156,6 @@ static struct attribute_group bluetooth_group = {
 	.name = NULL,
 	.attrs = bluetooth_attrs,
 };
-#endif
 
 static void hex_dump(unsigned char *bin, size_t binsz)
 {
@@ -629,47 +631,13 @@ struct mchn_ops_t bt_tx_ops = {
 #endif
 };
 
-static int bluetooth_reset(struct notifier_block *this, unsigned long ev, void *ptr)
-{
-#define RESET_BUFSIZE 5
-	int ret = 0;
-	int block_size = RESET_BUFSIZE;
-	unsigned char reset_buf[RESET_BUFSIZE] = {0x04, 0xff, 0x02, 0x57, 0xa5};
-
-	if (!ev) {
-		pr_info("%s:reset callback coming\n", __func__);
-		if (mtty_dev != NULL) {
-			if (!work_pending(&mtty_dev->bt_rx_work)) {
-				pr_info("%s tty_insert_flip_string", __func__);
-				while (ret < block_size) {
-					pr_info("%s before tty_insert_flip_string ret: %d, len: %d\n",
-							__func__, ret, RESET_BUFSIZE);
-					ret = tty_insert_flip_string(mtty_dev->port,
-							(unsigned char *)reset_buf,
-							RESET_BUFSIZE);   // -BT_SDIO_HEAD_LEN
-					pr_info("%s ret: %d, len: %d\n", __func__, ret, RESET_BUFSIZE);
-					if (ret)
-						tty_flip_buffer_push(mtty_dev->port);
-					block_size = block_size - ret;
-					ret = 0;
-				}
-			}
-		}
-		ret = NOTIFY_DONE;
-	}
-	return ret;
-}
-
-static struct notifier_block bluetooth_reset_block = {
-    .notifier_call = bluetooth_reset,
-};
-
 static int  mtty_probe(struct platform_device *pdev)
 {
 	struct mtty_init_data *pdata = (struct mtty_init_data *)
-					pdev->dev.platform_data;
+								pdev->dev.platform_data;
 	struct mtty_device *mtty;
 	int rval = 0;
+
 #ifdef OTT_UWE
 	static struct mtty_init_data mtty_driver_data = {
 		.name = "ttyBT",
@@ -714,7 +682,7 @@ static int  mtty_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&mtty->rx_head);
 	/*tasklet_init(&mtty->rx_task, mtty_rx_task, (unsigned long)mtty);*/
 	mtty->bt_rx_workqueue =
-	create_singlethread_workqueue("SPRDBT_RX_QUEUE");
+		create_singlethread_workqueue("SPRDBT_RX_QUEUE");
 	if (!mtty->bt_rx_workqueue) {
 		pr_err("%s SPRDBT_RX_QUEUE create failed", __func__);
 		return -ENOMEM;
@@ -724,7 +692,8 @@ static int  mtty_probe(struct platform_device *pdev)
 	mtty_dev = mtty;
 
 //#ifdef KERNEL_VERSION_414
-	if (sysfs_create_group(&pdev->dev.kobj, &bluetooth_group)) {
+	if (sysfs_create_group(&pdev->dev.kobj,
+			&bluetooth_group)) {
 		pr_err("%s failed to create bluetooth tty attributes.\n", __func__);
 	}
 //#endif
@@ -732,9 +701,6 @@ static int  mtty_probe(struct platform_device *pdev)
 	rfkill_bluetooth_init(pdev);
 	bluesleep_init();
 	woble_init();
-
-	marlin_reset_callback_register(MARLIN_BLUETOOTH, &bluetooth_reset_block);
-
 	sprdwcn_bus_chn_init(&bt_rx_ops);
 	sprdwcn_bus_chn_init(&bt_tx_ops);
 	sema_init(&sem_id, BT_TX_POOL_SIZE - 1);

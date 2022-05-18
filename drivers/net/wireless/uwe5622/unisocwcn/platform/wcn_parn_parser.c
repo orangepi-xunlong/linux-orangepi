@@ -48,9 +48,6 @@
 #define CONF_DELIMITERS " =\n\r\t"
 #define CONF_VALUES_DELIMITERS "=\n\r\t"
 #define CONF_MAX_LINE_LEN 255
-
-MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
-
 static const char *prefix = "fstab.s";
 static char fstab_name[128];
 static char fstab_dir[FSTAB_PATH_NUM][32] = {

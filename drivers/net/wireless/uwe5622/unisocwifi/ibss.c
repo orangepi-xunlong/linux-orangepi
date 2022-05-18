@@ -28,8 +28,8 @@
 
 /* cfg80211 */
 int sprdwl_cfg80211_join_ibss(struct wiphy *wiphy,
-				     struct net_device *ndev,
-				     struct cfg80211_ibss_params *params)
+					 struct net_device *ndev,
+					 struct cfg80211_ibss_params *params)
 {
 	int ret = 0;
 	struct ieee80211_channel *chan;
@@ -74,7 +74,7 @@ int sprdwl_cfg80211_join_ibss(struct wiphy *wiphy,
 
 	wl_ndev_log(L_INFO, ndev, "%s params->ssid=%s\n", __func__, params->ssid);
 	wl_ndev_log(L_INFO, ndev, "%s params->ssid_len=%d\n",
-		    __func__, params->ssid_len);
+			__func__, params->ssid_len);
 	join_params_size = sizeof(join_params);
 	memset(&join_params, 0, join_params_size);
 	memcpy(join_params.ssid, params->ssid, params->ssid_len);
@@ -88,9 +88,9 @@ int sprdwl_cfg80211_join_ibss(struct wiphy *wiphy,
 		memset(join_params.bssid, 0, ETH_ALEN);
 	}
 	wl_ndev_log(L_INFO, ndev, "%s join_params.ssid=%s\n",
-		    __func__, join_params.ssid);
+			__func__, join_params.ssid);
 	wl_ndev_log(L_INFO, ndev, "%s join_params.ssid_len=%d\n",
-		    __func__, join_params.ssid_len);
+			__func__, join_params.ssid_len);
 
 	/* attribute */
 	ret = sprdwl_set_ibss_attribute(vif->priv, vif->mode,
@@ -129,7 +129,7 @@ int sprdwl_cfg80211_join_ibss(struct wiphy *wiphy,
 #endif /* IBSS_RSN_SUPPORT */
 
 	ret = sprdwl_ibss_join(vif->priv, vif->mode,
-			       &join_params, join_params_size);
+				   &join_params, join_params_size);
 	if (ret) {
 		wl_ndev_log(L_ERR, ndev, "%s join failed (%d)\n", __func__, ret);
 		return ret;
@@ -144,7 +144,7 @@ int sprdwl_cfg80211_join_ibss(struct wiphy *wiphy,
 }
 
 int sprdwl_cfg80211_leave_ibss(struct wiphy *wiphy,
-				      struct net_device *ndev)
+					  struct net_device *ndev)
 {
 	struct sprdwl_vif *vif = netdev_priv(ndev);
 	enum sm_state old_state = vif->sm_state;

@@ -109,7 +109,7 @@ struct sprdwl_msg_buf *sprdwl_get_msg_buf(void *pdev,
 }
 
 static void sprdwl_dequeue_cmd_buf(struct sprdwl_msg_buf *msg_buf,
-				    struct sprdwl_msg_list *list)
+					struct sprdwl_msg_list *list)
 {
 	spin_lock_bh(&list->busylock);
 	list_del(&msg_buf->list);
@@ -295,10 +295,10 @@ void sprdwl_dequeue_data_list(struct mbuf_t *head, int num)
 		msg_pos = GET_MSG_BUF(mbuf_pos);
 		/*TODO, check msg_buf after pop link*/
 		if (msg_pos == NULL ||
-		    !virt_addr_valid(msg_pos) ||
-		    !virt_addr_valid(msg_pos->skb)) {
+			!virt_addr_valid(msg_pos) ||
+			!virt_addr_valid(msg_pos->skb)) {
 			wl_err("%s,%d, error! wrong sprdwl_msg_buf\n",
-			       __func__, __LINE__);
+				   __func__, __LINE__);
 			BUG_ON(1);
 		}
 		dev_kfree_skb(msg_pos->skb);
@@ -405,7 +405,7 @@ add_xmit_list_tail(struct sprdwl_tx_msg *tx_msg,
 	}
 	if (num != add_num)
 		wl_err("%s, %d, error! add_num:%d, num:%d\n",
-		       __func__, __LINE__, add_num, num);
+			   __func__, __LINE__, add_num, num);
 	INIT_LIST_HEAD(&temp_list);
 	list_cut_position(&temp_list,
 			  &p_list->head_list,
@@ -444,8 +444,8 @@ unsigned int queue_is_empty(struct sprdwl_tx_msg *tx_msg, enum sprdwl_mode mode)
 }
 
 void sprdwl_wake_net_ifneed(struct sprdwl_intf *dev,
-			    struct sprdwl_msg_list *list,
-			    enum sprdwl_mode mode)
+				struct sprdwl_msg_list *list,
+				enum sprdwl_mode mode)
 {
 	struct sprdwl_tx_msg *tx_msg = (struct sprdwl_tx_msg *)dev->sprdwl_tx;
 
@@ -496,7 +496,7 @@ static int sprdwl_tx_cmd(struct sprdwl_intf *intf, struct sprdwl_msg_list *list)
 		if (time_after(jiffies, msgbuf->timeout)) {
 			tx_msg->drop_cmd_cnt++;
 			wl_err("tx drop cmd msg,dropcnt:%lu\n",
-			       tx_msg->drop_cmd_cnt);
+				   tx_msg->drop_cmd_cnt);
 			kfree(msgbuf->tran_data);
 			msgbuf->tran_data = NULL;
 			sprdwl_dequeue_msg_buf(msgbuf, list);
@@ -531,8 +531,8 @@ void sprdwl_fc_add_share_credit(struct sprdwl_vif *vif)
 	for (i = 0; i < MAX_COLOR_BIT; i++) {
 		if (tx_msg->flow_ctrl[i].mode == vif->mode) {
 			wl_err("%s, %d, mode:%d closed, index:%d, share it\n",
-			       __func__, __LINE__,
-			       vif->mode, i);
+				   __func__, __LINE__,
+				   vif->mode, i);
 			tx_msg->flow_ctrl[i].mode = SPRDWL_MODE_NONE;
 			break;
 		}
@@ -606,8 +606,8 @@ int sprdwl_fc_get_shared_num(struct sprdwl_tx_msg *tx_msg, u8 num)
 }
 
 int sprdwl_fc_get_send_num(struct sprdwl_tx_msg *tx_msg,
-			     enum sprdwl_mode mode,
-			     int data_num)
+				 enum sprdwl_mode mode,
+				 int data_num)
 {
 	int excusive_flow_num = 0, shared_flow_num = 0;
 	int send_num = 0;
@@ -644,9 +644,9 @@ int sprdwl_fc_get_send_num(struct sprdwl_tx_msg *tx_msg,
 
 		if (send_num <= 0) {
 			wl_err("%s, %d, mode:%d, e_num:%d, s_num:%d, d_num:%d\n",
-			       __func__, __LINE__,
-			       (u8)mode, excusive_flow_num,
-			       shared_flow_num, data_num);
+				   __func__, __LINE__,
+				   (u8)mode, excusive_flow_num,
+				   shared_flow_num, data_num);
 			return -ENOMEM;
 		}
 		wl_debug("%s, %d, mode:%d, e_num:%d, s_num:%d, d_num:%d\n"
@@ -657,11 +657,11 @@ int sprdwl_fc_get_send_num(struct sprdwl_tx_msg *tx_msg,
 			tx_msg->color_num[2], tx_msg->color_num[3]);
 	} else {
 		wl_err("%s, %d, wrong mode:%d?\n",
-		       __func__, __LINE__,
-		       (u8)mode);
+			   __func__, __LINE__,
+			   (u8)mode);
 		for (i = 0; i < MAX_COLOR_BIT; i++)
 			wl_err("color[%d] assigned mode%d\n",
-			       i, (u8)tx_msg->flow_ctrl[i].mode);
+				   i, (u8)tx_msg->flow_ctrl[i].mode);
 		return -ENOMEM;
 	}
 
@@ -686,8 +686,8 @@ int sprdwl_fc_test_shared_num(struct sprdwl_tx_msg *tx_msg)
 }
 /*to check flow number, no flow number, no send*/
 int sprdwl_fc_test_send_num(struct sprdwl_tx_msg *tx_msg,
-			     enum sprdwl_mode mode,
-			     int data_num)
+				 enum sprdwl_mode mode,
+				 int data_num)
 {
 	int excusive_flow_num = 0, shared_flow_num = 0;
 	int send_num = 0;
@@ -720,11 +720,11 @@ int sprdwl_fc_test_send_num(struct sprdwl_tx_msg *tx_msg,
 			 shared_flow_num, data_num);
 	} else {
 		wl_err("%s, %d, wrong mode:%d?\n",
-		       __func__, __LINE__,
-		       (u8)mode);
+			   __func__, __LINE__,
+			   (u8)mode);
 		for (i = 0; i < MAX_COLOR_BIT; i++)
 			wl_err_ratelimited("color[%d] assigned mode%d\n",
-			       i, (u8)tx_msg->flow_ctrl[i].mode);
+				   i, (u8)tx_msg->flow_ctrl[i].mode);
 		return -ENOMEM;
 	}
 
@@ -782,8 +782,8 @@ void sprdwl_handle_tx_return(struct sprdwl_tx_msg *tx_msg,
 }
 
 int handle_tx_timeout(struct sprdwl_tx_msg *tx_msg,
-		      struct sprdwl_msg_list *msg_list,
-		      struct peer_list *p_list, int ac_index)
+			  struct sprdwl_msg_list *msg_list,
+			  struct peer_list *p_list, int ac_index)
 {
 	u8 mode;
 	char *pinfo;
@@ -853,7 +853,7 @@ int handle_tx_timeout(struct sprdwl_tx_msg *tx_msg,
 }
 
 static int sprdwl_handle_to_send_list(struct sprdwl_intf *intf,
-				      enum sprdwl_mode mode)
+					  enum sprdwl_mode mode)
 {
 	struct sprdwl_tx_msg *tx_msg = (struct sprdwl_tx_msg *)intf->sprdwl_tx;
 	struct list_head *to_send_list, tx_list_head;
@@ -876,8 +876,8 @@ static int sprdwl_handle_to_send_list(struct sprdwl_intf *intf,
 		credit = sprdwl_fc_get_send_num(tx_msg, mode, tosendnum);
 		if (credit < tosendnum)
 			wl_err("%s, %d,error! credit:%d,tosendnum:%d\n",
-			       __func__, __LINE__,
-			       credit, tosendnum);
+				   __func__, __LINE__,
+				   credit, tosendnum);
 		if (credit <= 0)
 			return -ENOMEM;
 		tx_msg->xmit_msg_list.mode = mode;
@@ -891,7 +891,7 @@ static int sprdwl_handle_to_send_list(struct sprdwl_intf *intf,
 		sprdwl_handle_tx_return(tx_msg, list, credit, ret);
 		if (0 != ret) {
 			wl_err("%s, %d: tx return err!\n",
-			       __func__, __LINE__);
+				   __func__, __LINE__);
 			tx_msg->xmit_msg_list.failcount++;
 			if (tx_msg->xmit_msg_list.failcount > 10) {
 				sprdwl_flush_tosendlist(tx_msg);
@@ -929,14 +929,14 @@ static int sprdwl_tx_eachmode_data(struct sprdwl_intf *intf,
 			p_list = &tx_list->q_list[i].p_list[j];
 			if (atomic_read(&p_list->l_num) > 0) {
 				if (0 != handle_tx_timeout(tx_msg,
-						       list,
-						       p_list,
-						       i))
+							   list,
+							   p_list,
+							   i))
 					wl_err("TID=%s%s%s%s, timeout!\n",
-					       (i == SPRDWL_AC_VO) ? "VO" : "",
-					       (i == SPRDWL_AC_VI) ? "VI" : "",
-					       (i == SPRDWL_AC_BE) ? "BE" : "",
-					       (i == SPRDWL_AC_BK) ? "BK" : "");
+						   (i == SPRDWL_AC_VO) ? "VO" : "",
+						   (i == SPRDWL_AC_VI) ? "VI" : "",
+						   (i == SPRDWL_AC_BE) ? "BE" : "",
+						   (i == SPRDWL_AC_BK) ? "BK" : "");
 				p_list_num[i][j] = atomic_read(&p_list->l_num);
 				/*wl_info("TID=%d,PEER=%d,l_num=%d\n",i,j,p_list_num[i][j]);*/
 				q_list_num[i] += p_list_num[i][j];
@@ -945,16 +945,16 @@ static int sprdwl_tx_eachmode_data(struct sprdwl_intf *intf,
 		total += q_list_num[i];
 		if (q_list_num[i] != 0)
 			wl_debug("TID%s%s%s%snum=%d, total=%d\n",
-			       (i == SPRDWL_AC_VO) ? "VO" : "",
-			       (i == SPRDWL_AC_VI) ? "VI" : "",
-			       (i == SPRDWL_AC_BE) ? "BE" : "",
-			       (i == SPRDWL_AC_BK) ? "BK" : "",
-			       q_list_num[i], total);
+				   (i == SPRDWL_AC_VO) ? "VO" : "",
+				   (i == SPRDWL_AC_VI) ? "VI" : "",
+				   (i == SPRDWL_AC_BE) ? "BE" : "",
+				   (i == SPRDWL_AC_BK) ? "BK" : "",
+				   q_list_num[i], total);
 	}
 	send_num = sprdwl_fc_test_send_num(tx_msg, mode, total);
 	if (total != 0 && send_num <= 0) {
 		wl_err("%s, %d: _fc_ no credit!\n",
-		       __func__, __LINE__);
+			   __func__, __LINE__);
 		return -ENOMEM;
 	}
 
@@ -1080,6 +1080,10 @@ int sprdwl_sdio_process_credit(void *pdev, void *data)
 
 	if (common->type == SPRDWL_TYPE_DATA_SPECIAL) {
 		int offset = (size_t)&((struct rx_msdu_desc *)0)->rsvd5;
+
+		if (intf->priv->hw_type == SPRDWL_HW_USB) {
+			return -2;
+		}
 
 		flow = data + offset;
 		goto out;
@@ -1368,9 +1372,9 @@ static int sprdwl_tx_work_queue(void *data)
 
 		/* if tx list, send wakeup firstly */
 		if (intf->fw_power_down == 1 &&
-		    (atomic_read(&tx_msg->tx_list_qos_pool.ref) > 0 ||
-		     !list_empty(&tx_msg->xmit_msg_list.to_send_list) ||
-		     !list_empty(&tx_msg->xmit_msg_list.to_free_list))) {
+			(atomic_read(&tx_msg->tx_list_qos_pool.ref) > 0 ||
+			 !list_empty(&tx_msg->xmit_msg_list.to_send_list) ||
+			 !list_empty(&tx_msg->xmit_msg_list.to_free_list))) {
 				struct sprdwl_vif *vif;
 
 				sprdwcn_bus_sleep_wakeup(WIFI);
@@ -1450,7 +1454,7 @@ int sprdwl_tx_init(struct sprdwl_intf *intf)
 	}
 
 	ret = sprdwl_msg_init(SPRDWL_TX_QOS_POOL_SIZE,
-			      &tx_msg->tx_list_qos_pool);
+				  &tx_msg->tx_list_qos_pool);
 	if (ret) {
 		wl_err("%s tx_list_qos_pool alloc failed\n", __func__);
 		goto err_tx_list_cmd;
@@ -1466,7 +1470,7 @@ int sprdwl_tx_init(struct sprdwl_intf *intf)
 
 	tx_msg->tx_thread =
 		kthread_create(sprdwl_tx_work_queue,
-			       (void *)tx_msg, "SPRDWL_TX_QUEUE");
+				   (void *)tx_msg, "SPRDWL_TX_QUEUE");
 	if (!tx_msg->tx_thread) {
 		wl_err("%s SPRDWL_TX_QUEUE create failed", __func__);
 		ret = -ENOMEM;
@@ -1527,7 +1531,7 @@ void sprdwl_tx_deinit(struct sprdwl_intf *intf)
 	*/
 	if (!list_empty(&tx_msg->tx_list_cmd.cmd_to_free))
 		wl_err("%s cmd not yet transmited, cmd_send:%d, cmd_poped:%d\n",
-		       __func__, tx_msg->cmd_send, tx_msg->cmd_poped);
+			   __func__, tx_msg->cmd_send, tx_msg->cmd_poped);
 
 	sprdwl_flush_all_txlist(tx_msg);
 
@@ -1697,7 +1701,7 @@ bool is_vowifi_pkt(struct sk_buff *skb, bool *b_cmd_path)
 	switch (dscp) {
 	case VOWIFI_IKE_DSCP:
 		if ((udphdr->dest == htons(VOWIFI_IKE_SIP_PORT)) ||
-		    (udphdr->dest == htons(VOWIFI_IKE_ONLY_PORT))) {
+			(udphdr->dest == htons(VOWIFI_IKE_ONLY_PORT))) {
 			ret = true;
 			(*b_cmd_path) = true;
 		}

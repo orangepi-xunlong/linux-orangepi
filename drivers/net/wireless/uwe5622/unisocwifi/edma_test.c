@@ -23,7 +23,7 @@
 
 extern struct sprdwl_intf_ops g_intf_ops;
 extern int if_tx_one(struct sprdwl_intf *intf, unsigned char *data,
-		     int len, int chn);
+			 int len, int chn);
 
 unsigned long loop;
 
@@ -69,7 +69,7 @@ void edma_transceive_test_deinit(void)
 	for (i = 0; i < PCIE_CHANNEL_PAIR; i++) {
 		if (!IS_ERR_OR_NULL(task_array[i])) {
 			wl_err(" %s, Destory thread, thread_num=%d,\n",
-			       __func__, i);
+				   __func__, i);
 			kthread_stop(task_array[i]);
 			task_array[i] = NULL;
 		}
@@ -120,8 +120,8 @@ int do_tx(int channel)
 
 #define SPRDWL_SDIO_DEBUG_BUFLEN 128
 static ssize_t pcie_read_info(struct file *file,
-			      char __user *user_buf,
-			      size_t count, loff_t *ppos)
+				  char __user *user_buf,
+				  size_t count, loff_t *ppos)
 {
 	size_t ret = 0;
 	unsigned int buflen, len;
@@ -181,14 +181,14 @@ void edma_transceive_test_run(int pairs)
 		chn_tx_fail[i] = 0;
 
 		task_array[i] = kthread_create(edma_transceive_test_exec,
-							    (unsigned long *)loop,
-							    "edma_transceive_%d", i);
+								(unsigned long *)loop,
+								"edma_transceive_%d", i);
 		chn_tx_dentry[i] = debugfs_create_file(tx_name[i], S_IRUSR, priv->debugfs, (unsigned long *)loop, &pcie_debug_fops);
 		loop++;
 		if (IS_ERR(task_array[i])) {
 			err = PTR_ERR(task_array[i]);
 			wl_err("%s, Fail, thread_num=%d,error_num=%d.",
-			       __func__, i, err);
+				   __func__, i, err);
 		} else {
 			wl_info(" %s, Start thread, thread_num=%d,\n",
 				__func__, i);
@@ -208,7 +208,7 @@ void edma_transceive_test_stop(void)
 	for (i = 0; i < PCIE_CHANNEL_PAIR; i++) {
 		if (!IS_ERR_OR_NULL(task_array[i])) {
 			wl_err(" %s, Stop thread, thread_num=%d,\n",
-			       __func__, i);
+				   __func__, i);
 			kthread_stop(task_array[i]);
 			task_array[i] = NULL;
 		}
@@ -335,7 +335,7 @@ void edma_transceive_test_trigger(char *cmd)
 
 	if (pairs <= 0 || pairs > PCIE_CHANNEL_PAIR) {
 		wl_err("%s, Invalid chn pairs(%ld), use default val(8)\n",
-		       __func__, pairs);
+			   __func__, pairs);
 		pairs = PCIE_CHANNEL_PAIR;
 	}
 
