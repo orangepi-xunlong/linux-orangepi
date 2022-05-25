@@ -21,6 +21,8 @@
 #include <sound/soc-dapm.h>
 #include <sound/tlv.h>
 #include <sound/jack.h>
+#include <linux/gpio/consumer.h>
+#include <linux/of_gpio.h>
 #include "es8316.h"
 
 /* In slave mode at single speed, the codec is documented as accepting 5
@@ -38,6 +40,8 @@ struct es8316_priv {
 	struct regmap *regmap;
 	struct snd_soc_component *component;
 	struct snd_soc_jack *jack;
+	struct gpio_desc *hp_gpio;
+	struct gpio_desc *spk_gpio;
 	int irq;
 	unsigned int sysclk;
 	unsigned int allowed_rates[NR_SUPPORTED_MCLK_LRCK_RATIOS];
@@ -577,63 +581,15 @@ static irqreturn_t es8316_irq(int irq, void *data)
 
 	mutex_lock(&es8316->lock);
 
-	regmap_read(es8316->regmap, ES8316_GPIO_FLAG, &flags);
-	if (flags == 0x00)
-		goto out; /* Powered-down / reset */
+	flags = gpiod_get_value(es8316->hp_gpio);
 
-	/* Catch spurious IRQ before set_jack is called */
-	if (!es8316->jack)
-		goto out;
-
-	if (es8316->jd_inverted)
-		flags ^= ES8316_GPIO_FLAG_HP_NOT_INSERTED;
-
-	dev_dbg(comp->dev, "gpio flags %#04x\n", flags);
-	if (flags & ES8316_GPIO_FLAG_HP_NOT_INSERTED) {
-		/* Jack removed, or spurious IRQ? */
-		if (es8316->jack->status & SND_JACK_MICROPHONE)
-			es8316_disable_micbias_for_mic_gnd_short_detect(comp);
-
-		if (es8316->jack->status & SND_JACK_HEADPHONE) {
-			snd_soc_jack_report(es8316->jack, 0,
-					    SND_JACK_HEADSET | SND_JACK_BTN_0);
-			dev_dbg(comp->dev, "jack unplugged\n");
-		}
-	} else if (!(es8316->jack->status & SND_JACK_HEADPHONE)) {
-		/* Jack inserted, determine type */
-		es8316_enable_micbias_for_mic_gnd_short_detect(comp);
-		regmap_read(es8316->regmap, ES8316_GPIO_FLAG, &flags);
-		if (es8316->jd_inverted)
-			flags ^= ES8316_GPIO_FLAG_HP_NOT_INSERTED;
-		dev_dbg(comp->dev, "gpio flags %#04x\n", flags);
-		if (flags & ES8316_GPIO_FLAG_HP_NOT_INSERTED) {
-			/* Jack unplugged underneath us */
-			es8316_disable_micbias_for_mic_gnd_short_detect(comp);
-		} else if (flags & ES8316_GPIO_FLAG_GM_NOT_SHORTED) {
-			/* Open, headset */
-			snd_soc_jack_report(es8316->jack,
-					    SND_JACK_HEADSET,
-					    SND_JACK_HEADSET);
-			/* Keep mic-gnd-short detection on for button press */
-		} else {
-			/* Shorted, headphones */
-			snd_soc_jack_report(es8316->jack,
-					    SND_JACK_HEADPHONE,
-					    SND_JACK_HEADSET);
-			/* No longer need mic-gnd-short detection */
-			es8316_disable_micbias_for_mic_gnd_short_detect(comp);
-		}
-	} else if (es8316->jack->status & SND_JACK_MICROPHONE) {
-		/* Interrupt while jack inserted, report button state */
-		if (flags & ES8316_GPIO_FLAG_GM_NOT_SHORTED) {
-			/* Open, button release */
-			snd_soc_jack_report(es8316->jack, 0, SND_JACK_BTN_0);
-		} else {
-			/* Short, button press */
-			snd_soc_jack_report(es8316->jack,
-					    SND_JACK_BTN_0,
-					    SND_JACK_BTN_0);
-		}
+	if (flags)
+	{
+		gpiod_set_value(es8316->spk_gpio, 0);
+	}
+	else
+	{
+		gpiod_set_value(es8316->spk_gpio, 1);
 	}
 
 out:
@@ -668,8 +624,8 @@ static void es8316_enable_jack_detect(struct snd_soc_component *component,
 	mutex_unlock(&es8316->lock);
 
 	/* Enable irq and sync initial jack state */
-	enable_irq(es8316->irq);
-	es8316_irq(es8316->irq, es8316);
+	//enable_irq(es8316->irq);
+	//es8316_irq(es8316->irq, es8316);
 }
 
 static void es8316_disable_jack_detect(struct snd_soc_component *component)
@@ -679,7 +635,7 @@ static void es8316_disable_jack_detect(struct snd_soc_component *component)
 	if (!es8316->jack)
 		return; /* Already disabled (or never enabled) */
 
-	disable_irq(es8316->irq);
+	//disable_irq(es8316->irq);
 
 	mutex_lock(&es8316->lock);
 
@@ -807,15 +763,30 @@ static int es8316_i2c_probe(struct i2c_client *i2c_client,
 	if (IS_ERR(es8316->regmap))
 		return PTR_ERR(es8316->regmap);
 
-	es8316->irq = i2c_client->irq;
 	mutex_init(&es8316->lock);
 
-	ret = devm_request_threaded_irq(dev, es8316->irq, NULL, es8316_irq,
-					IRQF_TRIGGER_HIGH | IRQF_ONESHOT | IRQF_NO_AUTOEN,
-					"es8316", es8316);
-	if (ret) {
-		dev_warn(dev, "Failed to get IRQ %d: %d\n", es8316->irq, ret);
-		es8316->irq = -ENXIO;
+	es8316->hp_gpio = devm_gpiod_get(dev, "hp", GPIOD_IN);
+	if (IS_ERR(es8316->hp_gpio)) {
+		dev_info(dev, "Can not read property hp_gpio\n");
+		//return PTR_ERR(es8316->hp_gpio);
+	} else {
+		es8316->irq = gpiod_to_irq(es8316->hp_gpio);
+		ret = devm_request_threaded_irq(dev, es8316->irq, NULL,
+		                                es8316_irq,
+		                                IRQF_TRIGGER_FALLING |
+		                                IRQF_TRIGGER_RISING |
+		                                IRQF_ONESHOT,
+		                                "es8316", es8316);
+
+		es8316->spk_gpio = devm_gpiod_get(dev, "spk", GPIOD_OUT_HIGH);
+		if (IS_ERR(es8316->spk_gpio))
+			return PTR_ERR(es8316->spk_gpio);
+
+		if (es8316->spk_gpio) {
+			dev_dbg(dev, "Release reset gpio\n");
+			gpiod_set_value_cansleep(es8316->spk_gpio, 1);
+			mdelay(2);
+		}
 	}
 
 	return devm_snd_soc_register_component(&i2c_client->dev,
