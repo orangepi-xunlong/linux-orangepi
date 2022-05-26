@@ -1060,10 +1060,6 @@
 	status = "okay";
 };
 
-&hdmi_in_vopl {
-	status = "disable";
-};
-
 &dp_in_vopb {
 	status = "disable";
 };

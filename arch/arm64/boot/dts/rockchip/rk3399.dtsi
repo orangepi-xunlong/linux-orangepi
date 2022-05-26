@@ -1718,11 +1718,6 @@
 				remote-endpoint = <&edp_in_vopl>;
 			};
 
-			vopl_out_hdmi: endpoint@2 {
-				reg = <2>;
-				remote-endpoint = <&hdmi_in_vopl>;
-			};
-
 			vopl_out_mipi1: endpoint@3 {
 				reg = <3>;
 				remote-endpoint = <&mipi1_in_vopl>;
@@ -1915,10 +1910,6 @@
 				hdmi_in_vopb: endpoint@0 {
 					reg = <0>;
 					remote-endpoint = <&vopb_out_hdmi>;
-				};
-				hdmi_in_vopl: endpoint@1 {
-					reg = <1>;
-					remote-endpoint = <&vopl_out_hdmi>;
 				};
 			};
 		};

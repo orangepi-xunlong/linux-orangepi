@@ -28,6 +28,10 @@ static bool debug_phys_addr;
 module_param(debug_phys_addr, bool, 0644);
 MODULE_PARM_DESC(debug_phys_addr, "add CEC_CAP_PHYS_ADDR if set");
 
+int cec_debounce_ms;
+module_param_named(debounce_ms, cec_debounce_ms, int, 0644);
+MODULE_PARM_DESC(debounce_ms, "debounce invalid phys addr");
+
 static dev_t cec_dev_t;
 
 /* Active devices */
@@ -176,6 +180,8 @@ static void cec_devnode_unregister(struct cec_adapter *adap)
 
 	mutex_unlock(&devnode->lock);
 
+	cancel_delayed_work_sync(&adap->debounce_work);
+
 	mutex_lock(&adap->lock);
 	__cec_s_phys_addr(adap, CEC_PHYS_ADDR_INVALID, false);
 	__cec_s_log_addrs(adap, NULL, false);
@@ -234,6 +240,17 @@ static const struct file_operations cec_error_inj_fops = {
 };
 #endif
 
+static void cec_s_phys_addr_debounce(struct work_struct *work)
+{
+	struct delayed_work *delayed_work = to_delayed_work(work);
+	struct cec_adapter *adap =
+		container_of(delayed_work, struct cec_adapter, debounce_work);
+
+	mutex_lock(&adap->lock);
+	__cec_s_phys_addr(adap, CEC_PHYS_ADDR_INVALID, false);
+	mutex_unlock(&adap->lock);
+}
+
 struct cec_adapter *cec_allocate_adapter(const struct cec_adap_ops *ops,
 					 void *priv, const char *name, u32 caps,
 					 u8 available_las)
@@ -271,6 +288,7 @@ struct cec_adapter *cec_allocate_adapter(const struct cec_adap_ops *ops,
 	INIT_LIST_HEAD(&adap->transmit_queue);
 	INIT_LIST_HEAD(&adap->wait_queue);
 	init_waitqueue_head(&adap->kthread_waitq);
+	INIT_DELAYED_WORK(&adap->debounce_work, cec_s_phys_addr_debounce);
 
 	/* adap->devnode initialization */
 	INIT_LIST_HEAD(&adap->devnode.fhs);

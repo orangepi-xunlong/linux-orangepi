@@ -103,10 +103,17 @@ struct vop_common {
 	struct vop_reg mmu_en;
 	struct vop_reg out_mode;
 	struct vop_reg standby;
+
+	struct vop_reg overlay_mode;
+	struct vop_reg dclk_ddr;
+	struct vop_reg dsp_data_swap;
+	struct vop_reg dsp_out_yuv;
+	struct vop_reg dsp_background;
 };
 
 struct vop_misc {
 	struct vop_reg global_regdone_en;
+	struct vop_reg win_channel[4];
 };
 
 struct vop_intr {
@@ -165,6 +172,7 @@ struct vop_win_phy {
 	struct vop_reg enable;
 	struct vop_reg gate;
 	struct vop_reg format;
+	struct vop_reg fmt_10;
 	struct vop_reg rb_swap;
 	struct vop_reg act_info;
 	struct vop_reg dsp_info;
@@ -196,6 +204,11 @@ struct vop_win_data {
 	enum drm_plane_type type;
 };
 
+struct vop_rect {
+	int width;
+	int height;
+};
+
 struct vop_data {
 	uint32_t version;
 	const struct vop_intr *intr;
@@ -208,6 +221,7 @@ struct vop_data {
 	const struct vop_win_data *win;
 	unsigned int win_size;
 	unsigned int lut_size;
+	struct vop_rect max_output;
 
 #define VOP_FEATURE_OUTPUT_RGB10	BIT(0)
 #define VOP_FEATURE_INTERNAL_RGB	BIT(1)
@@ -256,11 +270,12 @@ struct vop_data {
 /*
  * display output interface supported by rockchip lcdc
  */
-#define ROCKCHIP_OUT_MODE_P888	0
-#define ROCKCHIP_OUT_MODE_P666	1
-#define ROCKCHIP_OUT_MODE_P565	2
+#define ROCKCHIP_OUT_MODE_P888		0
+#define ROCKCHIP_OUT_MODE_P666		1
+#define ROCKCHIP_OUT_MODE_P565		2
+#define ROCKCHIP_OUT_MODE_YUV420	14
 /* for use special outface */
-#define ROCKCHIP_OUT_MODE_AAAA	15
+#define ROCKCHIP_OUT_MODE_AAAA		15
 
 /* output flags */
 #define ROCKCHIP_OUTPUT_DSI_DUAL	BIT(0)
