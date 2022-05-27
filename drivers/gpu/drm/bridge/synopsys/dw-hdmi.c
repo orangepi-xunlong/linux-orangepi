@@ -2856,6 +2856,9 @@ dw_hdmi_bridge_mode_valid(struct drm_bridge *bridge,
 	if (mode->flags & DRM_MODE_FLAG_DBLCLK)
 		return MODE_BAD;
 
+	if (mode->hdisplay == 832 && mode->vdisplay == 624)
+		return MODE_BAD;
+
 	if (pdata->ycbcr_420_allowed && drm_mode_is_420(info, mode) &&
 	    (info->color_formats & DRM_COLOR_FORMAT_YCBCR420))
 		clock /= 2;
