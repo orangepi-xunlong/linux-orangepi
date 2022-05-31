@@ -372,7 +372,7 @@ if [ "$ARCH" != "um" ]; then
 			# cross-compilation for a different host architecture.
 			(
 				cd $srctree
-				#make M=scripts clean
+				make M=scripts clean
 			)
 			deploy_kernel_headers $kernel_headers_dir
 			create_package $kernel_headers_packagename $kernel_headers_dir "headers"
