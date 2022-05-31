@@ -388,8 +388,10 @@ static void hci_setup_link_policy(struct hci_request *req)
 		link_policy |= HCI_LP_HOLD;
 	if (lmp_sniff_capable(hdev))
 		link_policy |= HCI_LP_SNIFF;
+#if !defined(CONFIG_AW_WIFI_DEVICE_UWE5622) && !defined(CONFIG_RK_WIFI_DEVICE_UWE5622)
 	if (lmp_park_capable(hdev))
 		link_policy |= HCI_LP_PARK;
+#endif
 
 	cp.policy = cpu_to_le16(link_policy);
 	hci_req_add(req, HCI_OP_WRITE_DEF_LINK_POLICY, sizeof(cp), &cp);
