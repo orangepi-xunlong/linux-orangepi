@@ -378,6 +378,12 @@ enum {
 	 */
 	HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE,
 
+	/*
+	 * Device declares that support Park link status, but it really
+	 * does not support it and fails to initialize
+	 */
+	HCI_QUIRK_BROKEN_PARK_LINK_STATUS,
+
 	__HCI_NUM_QUIRKS,
 };
 
