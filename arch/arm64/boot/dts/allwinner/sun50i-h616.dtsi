@@ -802,6 +802,8 @@
 			resets = <&ccu RST_BUS_SPI0>;
 			pinctrl-names = "default";
 			pinctrl-0 = <&spi0_pins>;
+			dmas = <&dma 22>, <&dma 22>;
+			dma-names = "rx", "tx";
 			status = "disabled";
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -817,6 +819,8 @@
 			resets = <&ccu RST_BUS_SPI1>;
 			pinctrl-names = "default";
 			pinctrl-0 = <&spi1_pins>, <&spi1_cs_pin>;
+			dmas = <&dma 23>, <&dma 23>;
+			dma-names = "rx", "tx";
 			status = "disabled";
 			#address-cells = <1>;
 			#size-cells = <0>;
