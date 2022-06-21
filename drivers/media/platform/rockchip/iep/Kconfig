@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0-only
+ 
+config VIDEO_ROCKCHIP_IEP
+	tristate "Rockchip Image Enhancement Processor"
+	depends on V4L_MEM2MEM_DRIVERS
+	depends on VIDEO_DEV
+	depends on ARCH_ROCKCHIP || COMPILE_TEST
+	select VIDEOBUF2_DMA_CONTIG
+	select V4L2_MEM2MEM_DEV
+	help
+	  This is a v4l2 driver for Rockchip Image Enhancement Processor (IEP)
+	  found in most Rockchip RK3xxx SoCs.
+	  Rockchip IEP supports various enhancement operations for RGB and YUV
+	  images. The driver currently implements YUV deinterlacing only.
+	  To compile this driver as a module, choose M here: the module
+	  will be called rockchip-iep

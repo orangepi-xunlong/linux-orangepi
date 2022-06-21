@@ -802,6 +802,7 @@ static int rkvdec_vp9_run(struct rkvdec_ctx *ctx)
 	struct rkvdec_dev *rkvdec = ctx->dev;
 	struct rkvdec_vp9_run run = { };
 	int ret;
+	u32 reg;
 
 	ret = rkvdec_vp9_run_preamble(ctx, &run);
 	if (ret) {
@@ -823,6 +824,13 @@ static int rkvdec_vp9_run(struct rkvdec_ctx *ctx)
 	writel(1, rkvdec->regs + RKVDEC_REG_PREF_CHR_CACHE_COMMAND);
 
 	writel(0xe, rkvdec->regs + RKVDEC_REG_STRMD_ERR_EN);
+
+	/* disable QOS for RK3328 - no effect on other SoCs */
+	reg = readl(rkvdec->regs + RKVDEC_QOS_CTRL);
+	reg |= 0xFFFF;
+	reg &= (~BIT(12));
+	writel(reg, rkvdec->regs + RKVDEC_QOS_CTRL);
+
 	/* Start decoding! */
 	writel(RKVDEC_INTERRUPT_DEC_E | RKVDEC_CONFIG_DEC_CLK_GATE_E |
 	       RKVDEC_TIMEOUT_E | RKVDEC_BUF_EMPTY_E,

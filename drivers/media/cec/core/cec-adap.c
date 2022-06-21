@@ -1624,8 +1624,15 @@ void cec_s_phys_addr(struct cec_adapter *adap, u16 phys_addr, bool block)
 	if (IS_ERR_OR_NULL(adap))
 		return;
 
+	cancel_delayed_work_sync(&adap->debounce_work);
+
 	mutex_lock(&adap->lock);
-	__cec_s_phys_addr(adap, phys_addr, block);
+	if (cec_debounce_ms > 0 && !block && phys_addr == CEC_PHYS_ADDR_INVALID &&
+	    adap->phys_addr != phys_addr)
+		schedule_delayed_work(&adap->debounce_work,
+				      msecs_to_jiffies(cec_debounce_ms));
+	else
+		__cec_s_phys_addr(adap, phys_addr, block);
 	mutex_unlock(&adap->lock);
 }
 EXPORT_SYMBOL_GPL(cec_s_phys_addr);

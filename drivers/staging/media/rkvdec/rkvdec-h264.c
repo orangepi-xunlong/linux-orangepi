@@ -672,8 +672,8 @@ static void assemble_hw_pps(struct rkvdec_ctx *ctx,
 		  LOG2_MAX_PIC_ORDER_CNT_LSB_MINUS4);
 	WRITE_PPS(!!(sps->flags & V4L2_H264_SPS_FLAG_DELTA_PIC_ORDER_ALWAYS_ZERO),
 		  DELTA_PIC_ORDER_ALWAYS_ZERO_FLAG);
-	WRITE_PPS(DIV_ROUND_UP(ctx->coded_fmt.fmt.pix_mp.width, 16), PIC_WIDTH_IN_MBS);
-	WRITE_PPS(DIV_ROUND_UP(ctx->coded_fmt.fmt.pix_mp.height, 16), PIC_HEIGHT_IN_MBS);
+	WRITE_PPS(sps->pic_width_in_mbs_minus1 + 1, PIC_WIDTH_IN_MBS);
+	WRITE_PPS(sps->pic_height_in_map_units_minus1 + 1, PIC_HEIGHT_IN_MBS);
 	WRITE_PPS(!!(sps->flags & V4L2_H264_SPS_FLAG_FRAME_MBS_ONLY),
 		  FRAME_MBS_ONLY_FLAG);
 	WRITE_PPS(!!(sps->flags & V4L2_H264_SPS_FLAG_MB_ADAPTIVE_FRAME_FIELD),
@@ -755,12 +755,16 @@ static void assemble_hw_rps(struct rkvdec_ctx *ctx,
 	const struct v4l2_ctrl_h264_sps *sps = run->sps;
 	struct rkvdec_h264_priv_tbl *priv_tbl = h264_ctx->priv_tbl.cpu;
 	u32 max_frame_num = 1 << (sps->log2_max_frame_num_minus4 + 4);
+	u8 *reflists[3] = { h264_ctx->reflists.p, h264_ctx->reflists.b0, h264_ctx->reflists.b1 };
 
 	u32 *hw_rps = priv_tbl->rps;
-	u32 i, j;
+	u32 i, j, k;
 	u16 *p = (u16 *)hw_rps;
 
 	memset(hw_rps, 0, sizeof(priv_tbl->rps));
+
+	if (!h264_ctx->reflists.num_valid)
+		return;
 
 	/*
 	 * Assign an invalid pic_num if DPB entry at that position is inactive.
@@ -773,7 +777,7 @@ static void assemble_hw_rps(struct rkvdec_ctx *ctx,
 			continue;
 
 		if (dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM ||
-		    dpb[i].frame_num < dec_params->frame_num) {
+		    dpb[i].frame_num <= dec_params->frame_num) {
 			p[i] = dpb[i].frame_num;
 			continue;
 		}
@@ -781,28 +785,69 @@ static void assemble_hw_rps(struct rkvdec_ctx *ctx,
 		p[i] = dpb[i].frame_num - max_frame_num;
 	}
 
-	for (j = 0; j < RKVDEC_NUM_REFLIST; j++) {
-		for (i = 0; i < h264_ctx->reflists.num_valid; i++) {
-			bool dpb_valid = run->ref_buf_idx[i] >= 0;
-			u8 idx = 0;
+	if (!(dec_params->flags & V4L2_H264_DECODE_PARAM_FLAG_FIELD_PIC)) {
+		for (j = 0; j < RKVDEC_NUM_REFLIST; j++) {
+			for (i = 0; i < h264_ctx->reflists.num_valid; i++) {
+				bool dpb_valid = run->ref_buf_idx[i] >= 0;
+				u8 idx = reflists[j][i];
 
-			switch (j) {
-			case 0:
-				idx = h264_ctx->reflists.p[i];
-				break;
-			case 1:
-				idx = h264_ctx->reflists.b0[i];
-				break;
-			case 2:
-				idx = h264_ctx->reflists.b1[i];
-				break;
+				if (idx >= ARRAY_SIZE(dec_params->dpb))
+					continue;
+
+				set_ps_field(hw_rps, DPB_INFO(i, j),
+					     idx | dpb_valid << 4);
 			}
+		}
+		return;
+	}
 
-			if (idx >= ARRAY_SIZE(dec_params->dpb))
-				continue;
+	for (j = 0; j < RKVDEC_NUM_REFLIST; j++) {
+		u8 a_parity =
+			(dec_params->flags & V4L2_H264_DECODE_PARAM_FLAG_BOTTOM_FIELD)
+			? V4L2_H264_BOTTOM_FIELD_REF : V4L2_H264_TOP_FIELD_REF;
+		u8 b_parity =
+			(dec_params->flags & V4L2_H264_DECODE_PARAM_FLAG_BOTTOM_FIELD)
+			? V4L2_H264_TOP_FIELD_REF : V4L2_H264_BOTTOM_FIELD_REF;
+		u32 flags = V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM;
+		i = 0;
 
-			set_ps_field(hw_rps, DPB_INFO(i, j),
-				     idx | dpb_valid << 4);
+		for (k = 0; k < 2; k++) {
+			u8 a = 0;
+			u8 b = 0;
+			u32 long_term = k ? V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM : 0;
+
+		while (a < h264_ctx->reflists.num_valid || b < h264_ctx->reflists.num_valid) {
+			for (; a < h264_ctx->reflists.num_valid; a++) {
+				u8 idx = reflists[j][a];
+				if (idx >= ARRAY_SIZE(dec_params->dpb))
+					continue;
+				if ((dpb[idx].fields & a_parity) == a_parity &&
+				    (dpb[idx].flags & flags) == long_term) {
+					set_ps_field(hw_rps, DPB_INFO(i, j),
+					             idx | (1 << 4));
+					set_ps_field(hw_rps, BOTTOM_FLAG(i, j),
+						a_parity == V4L2_H264_BOTTOM_FIELD_REF);
+					i++;
+					a++;
+					break;
+				}
+			}
+			for (; b < h264_ctx->reflists.num_valid; b++) {
+				u8 idx = reflists[j][b];
+				if (idx >= ARRAY_SIZE(dec_params->dpb))
+					continue;
+				if ((dpb[idx].fields & b_parity) == b_parity &&
+				    (dpb[idx].flags & flags) == long_term) {
+					set_ps_field(hw_rps, DPB_INFO(i, j),
+					             idx | (1 << 4));
+					set_ps_field(hw_rps, BOTTOM_FLAG(i, j),
+						b_parity == V4L2_H264_BOTTOM_FIELD_REF);
+					i++;
+					b++;
+					break;
+				}
+			}
+		}
 		}
 	}
 }
@@ -907,9 +952,9 @@ static void config_registers(struct rkvdec_ctx *ctx,
 	dma_addr_t rlc_addr;
 	dma_addr_t refer_addr;
 	u32 rlc_len;
-	u32 hor_virstride = 0;
-	u32 ver_virstride = 0;
-	u32 y_virstride = 0;
+	u32 hor_virstride;
+	u32 ver_virstride;
+	u32 y_virstride;
 	u32 yuv_virstride = 0;
 	u32 offset;
 	dma_addr_t dst_addr;
@@ -920,8 +965,8 @@ static void config_registers(struct rkvdec_ctx *ctx,
 
 	f = &ctx->decoded_fmt;
 	dst_fmt = &f->fmt.pix_mp;
-	hor_virstride = (sps->bit_depth_luma_minus8 + 8) * dst_fmt->width / 8;
-	ver_virstride = round_up(dst_fmt->height, 16);
+	hor_virstride = dst_fmt->plane_fmt[0].bytesperline;
+	ver_virstride = dst_fmt->height;
 	y_virstride = hor_virstride * ver_virstride;
 
 	if (sps->chroma_format_idc == 0)
@@ -990,10 +1035,6 @@ static void config_registers(struct rkvdec_ctx *ctx,
 				       rkvdec->regs + RKVDEC_REG_H264_BASE_REFER15);
 	}
 
-	/*
-	 * Since support frame mode only
-	 * top_field_order_cnt is the same as bottom_field_order_cnt
-	 */
 	reg = RKVDEC_CUR_POC(dec_params->top_field_order_cnt);
 	writel_relaxed(reg, rkvdec->regs + RKVDEC_REG_CUR_POC0);
 
@@ -1032,6 +1073,25 @@ static int rkvdec_h264_adjust_fmt(struct rkvdec_ctx *ctx,
 	if (!fmt->plane_fmt[0].sizeimage)
 		fmt->plane_fmt[0].sizeimage = fmt->width * fmt->height *
 					      RKVDEC_H264_MAX_DEPTH_IN_BYTES;
+	return 0;
+}
+
+static u32 rkvdec_h264_valid_fmt(struct rkvdec_ctx *ctx, struct v4l2_ctrl *ctrl)
+{
+	const struct v4l2_ctrl_h264_sps *sps = ctrl->p_new.p_h264_sps;
+
+	if (sps->bit_depth_luma_minus8 == 0) {
+		if (sps->chroma_format_idc == 2)
+			return V4L2_PIX_FMT_NV16;
+		else
+			return V4L2_PIX_FMT_NV12;
+	} else if (sps->bit_depth_luma_minus8 == 2) {
+		if (sps->chroma_format_idc == 2)
+			return V4L2_PIX_FMT_NV20;
+		else
+			return V4L2_PIX_FMT_NV15;
+	}
+
 	return 0;
 }
 
@@ -1139,6 +1199,7 @@ static int rkvdec_h264_run(struct rkvdec_ctx *ctx)
 
 const struct rkvdec_coded_fmt_ops rkvdec_h264_fmt_ops = {
 	.adjust_fmt = rkvdec_h264_adjust_fmt,
+	.valid_fmt = rkvdec_h264_valid_fmt,
 	.start = rkvdec_h264_start,
 	.stop = rkvdec_h264_stop,
 	.run = rkvdec_h264_run,

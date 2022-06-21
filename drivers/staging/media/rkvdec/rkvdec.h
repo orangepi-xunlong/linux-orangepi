@@ -11,16 +11,27 @@
 #ifndef RKVDEC_H_
 #define RKVDEC_H_
 
+#include <linux/clk.h>
 #include <linux/platform_device.h>
+#include <linux/reset.h>
 #include <linux/videodev2.h>
 #include <linux/wait.h>
-#include <linux/clk.h>
 
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
 #include <media/videobuf2-core.h>
 #include <media/videobuf2-dma-contig.h>
+
+#define RESET_NONE		0
+#define RESET_SOFT		BIT(0)
+#define RESET_HARD		BIT(1)
+
+#define RKVDEC_RESET_DELAY	5
+
+#define RKVDEC_CAPABILITY_H264	BIT(0)
+#define RKVDEC_CAPABILITY_HEVC	BIT(1)
+#define RKVDEC_CAPABILITY_VP9	BIT(2)
 
 struct rkvdec_ctx;
 
@@ -63,9 +74,14 @@ vb2_to_rkvdec_decoded_buf(struct vb2_buffer *buf)
 			    base.vb.vb2_buf);
 }
 
+struct rkvdec_variant {
+        unsigned int capabilities;
+};
+
 struct rkvdec_coded_fmt_ops {
 	int (*adjust_fmt)(struct rkvdec_ctx *ctx,
 			  struct v4l2_format *f);
+	u32 (*valid_fmt)(struct rkvdec_ctx *ctx, struct v4l2_ctrl *ctrl);
 	int (*start)(struct rkvdec_ctx *ctx);
 	void (*stop)(struct rkvdec_ctx *ctx);
 	int (*run)(struct rkvdec_ctx *ctx);
@@ -81,6 +97,7 @@ struct rkvdec_coded_fmt_desc {
 	const struct rkvdec_coded_fmt_ops *ops;
 	unsigned int num_decoded_fmts;
 	const u32 *decoded_fmts;
+	unsigned int capability;
 };
 
 struct rkvdec_dev {
@@ -93,12 +110,16 @@ struct rkvdec_dev {
 	void __iomem *regs;
 	struct mutex vdev_lock; /* serializes ioctls */
 	struct delayed_work watchdog_work;
+	struct reset_control *rstc;
+	u8 reset_mask;
+	unsigned int capabilities;
 };
 
 struct rkvdec_ctx {
 	struct v4l2_fh fh;
 	struct v4l2_format coded_fmt;
 	struct v4l2_format decoded_fmt;
+	u32 valid_fmt;
 	const struct rkvdec_coded_fmt_desc *coded_fmt_desc;
 	struct v4l2_ctrl_handler ctrl_hdl;
 	struct rkvdec_dev *dev;
@@ -120,6 +141,7 @@ void rkvdec_run_preamble(struct rkvdec_ctx *ctx, struct rkvdec_run *run);
 void rkvdec_run_postamble(struct rkvdec_ctx *ctx, struct rkvdec_run *run);
 
 extern const struct rkvdec_coded_fmt_ops rkvdec_h264_fmt_ops;
+extern const struct rkvdec_coded_fmt_ops rkvdec_hevc_fmt_ops;
 extern const struct rkvdec_coded_fmt_ops rkvdec_vp9_fmt_ops;
 
 #endif /* RKVDEC_H_ */

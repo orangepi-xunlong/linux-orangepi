@@ -2,5 +2,6 @@
 
 comment "Rockchip media platform drivers"
 
+source "drivers/media/platform/rockchip/iep/Kconfig"
 source "drivers/media/platform/rockchip/rga/Kconfig"
 source "drivers/media/platform/rockchip/rkisp1/Kconfig"

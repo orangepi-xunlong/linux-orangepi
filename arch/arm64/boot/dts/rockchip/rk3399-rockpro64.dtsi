@@ -289,8 +289,8 @@
 	snps,reset-gpio = <&gpio3 RK_PB7 GPIO_ACTIVE_LOW>;
 	snps,reset-active-low;
 	snps,reset-delays-us = <0 10000 50000>;
-	tx_delay = <0x28>;
-	rx_delay = <0x11>;
+	tx_delay = <0x23>;
+	rx_delay = <0x1e>;
 	status = "okay";
 };
 

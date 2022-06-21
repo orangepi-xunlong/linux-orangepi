@@ -1052,7 +1052,7 @@ int drm_gem_mmap_obj(struct drm_gem_object *obj, unsigned long obj_size,
 		ret = obj->funcs->mmap(obj, vma);
 		if (ret)
 			goto err_drm_gem_object_put;
-		WARN_ON(!(vma->vm_flags & VM_DONTEXPAND));
+		//WARN_ON(!(vma->vm_flags & VM_DONTEXPAND));
 	} else {
 		if (!vma->vm_ops) {
 			ret = -EINVAL;
