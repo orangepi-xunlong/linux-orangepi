@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-2.0-only
+if ARCH_IXP4XX
+
+menu "Intel IXP4xx Implementation Options"
+
+comment "IXP4xx Platforms"
+
+config MACH_IXP4XX_OF
+	bool
+	prompt "Device Tree IXP4xx boards"
+	default y
+	select ARM_APPENDED_DTB # Old Redboot bootloaders deployed
+	select I2C
+	select I2C_IOP3XX
+	select PCI
+	select USE_OF
+	help
+	  Say 'Y' here to support Device Tree-based IXP4xx platforms.
+
+endmenu
+
+endif
