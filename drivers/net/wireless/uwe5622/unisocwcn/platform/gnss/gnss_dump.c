@@ -18,7 +18,9 @@
 #endif
 #include <linux/kthread.h>
 #include <linux/printk.h>
+#ifdef CONFIG_WCN_SIPC
 #include <linux/sipc.h>
+#endif
 #include <linux/slab.h>
 #include <linux/syscalls.h>
 #include <linux/unistd.h>
@@ -47,7 +49,11 @@ struct gnss_mem_dump {
 
 /* dump cp firmware firstly, wait for next adding */
 static struct gnss_mem_dump gnss_marlin3_dump[] = {
+#ifndef CONFIG_CHECK_DRIVER_BY_CHIPID
 	{GNSS_CP_START_ADDR, GNSS_FIRMWARE_MAX_SIZE}, /* gnss firmware code */
+#else
+	{0, 0},
+#endif
 	{GNSS_DRAM_ADDR, GNSS_DRAM_SIZE}, /* gnss dram */
 	{GNSS_TE_MEM, GNSS_TE_MEM_SIZE}, /* gnss te mem */
 	{GNSS_BASE_AON_APB, GNSS_BASE_AON_APB_SIZE}, /* aon apb */
@@ -99,6 +105,20 @@ static char gnss_dump_level; /* 0: default, all, 1: only data, pmu, aon */
 
 #endif
 
+
+static int wcn_chmod(char *path, char *mode)
+{
+	int result = 0;
+	char cmd_path[] = "/usr/bin/chmod";
+	char *cmd_argv[] = {cmd_path, mode, path, NULL};
+	char *cmd_envp[] = {"HOME=/", "PATH=/sbin:/bin:/usr/bin", NULL};
+
+	result = call_usermodehelper(cmd_path, cmd_argv, cmd_envp,
+		UMH_WAIT_PROC);
+
+	return result;
+}
+
 static int gnss_creat_gnss_dump_file(void)
 {
 	gnss_dump_file = filp_open(GNSS_MEMDUMP_PATH,
@@ -109,7 +129,7 @@ static int gnss_creat_gnss_dump_file(void)
 			__func__, gnss_dump_file);
 		return -1;
 	}
-	if (sys_chmod(GNSS_MEMDUMP_PATH, 0666) != 0)
+	if (wcn_chmod(GNSS_MEMDUMP_PATH, "0666") != 0)
 		GNSSDUMP_ERR("%s chmod	error\n", __func__);
 
 	return 0;
@@ -441,7 +461,7 @@ static int gnss_ext_hold_cpu(void)
 	}
 	temp = GNSS_ARCH_EB_REG_BYPASS;
 	ret = sprdwcn_bus_reg_write(GNSS_ARCH_EB_REG + GNSS_SET_OFFSET,
-				    &temp, 4);
+					&temp, 4);
 	if (ret < 0)
 		GNSSDUMP_ERR("%s write bypass reg error:%d\n", __func__, ret);
 
@@ -501,11 +521,11 @@ static int gnss_ext_dump_mem(void)
 	int i = 0;
 
 	GNSSDUMP_INFO("%s entry\n", __func__);
-#ifdef CONFIG_CHECK_DRIVER_BY_CHIPID
+// #ifdef CONFIG_CHECK_DRIVER_BY_CHIPID
 	/*update the two address after get chip type*/
 	gnss_marlin3_dump[0].address = GNSS_CP_START_ADDR;
 	gnss_marlin3_dump[0].length = GNSS_FIRMWARE_MAX_SIZE;
-#endif
+// #endif
 	gnss_ext_hold_cpu();
 	ret = gnss_creat_gnss_dump_file();
 	if (ret == -1) {

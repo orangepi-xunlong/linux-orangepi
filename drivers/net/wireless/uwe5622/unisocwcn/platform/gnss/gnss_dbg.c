@@ -109,7 +109,6 @@ static void gnss_ring_destroy(struct gnss_ring_t *pring)
 		}
 		GNSS_DEBUG("to free pring.");
 		kfree(pring);
-		pring = NULL;
 	}
 }
 
@@ -165,8 +164,8 @@ static int gnss_ring_read(struct gnss_ring_t *pring, char *buf, int len)
 
 	if (!buf || !pring || !len) {
 		GNSS_ERR
-		    ("Ring Read Failed, Param Error!,buf=%p,pring=%p,len=%d",
-		     buf, pring, len);
+			("Ring Read Failed, Param Error!,buf=%p,pring=%p,len=%d",
+			 buf, pring, len);
 		return -GNSS_ERR_BAD_PARAM;
 	}
 	mutex_lock(pring->plock);
@@ -209,8 +208,8 @@ static int gnss_ring_write(struct gnss_ring_t *pring, char *buf, int len)
 
 	if (!pring || !buf || !len) {
 		GNSS_ERR
-		    ("Ring Write Failed, Param Error!,buf=%p,pring=%p,len=%d",
-		     buf, pring, len);
+			("Ring Write Failed, Param Error!,buf=%p,pring=%p,len=%d",
+			 buf, pring, len);
 		return -GNSS_ERR_BAD_PARAM;
 	}
 	pstart = gnss_ring_start(pring);
@@ -292,7 +291,7 @@ static ssize_t gnss_dbg_read(struct file *filp,
 }
 
 static ssize_t gnss_dbg_write(struct file *filp, const char __user *buf,
-			      size_t count, loff_t *pos)
+				  size_t count, loff_t *pos)
 {
 	ssize_t len = 0;
 
@@ -318,7 +317,7 @@ static struct miscdevice gnss_dbg_device = {
 };
 
 static ssize_t gnss_slog_read(struct file *filp, char __user *buf,
-			      size_t count, loff_t *pos)
+				  size_t count, loff_t *pos)
 {
 	ssize_t len = 0;
 
@@ -328,7 +327,7 @@ static ssize_t gnss_slog_read(struct file *filp, char __user *buf,
 }
 
 static ssize_t gnss_slog_write(struct file *filp, const char __user *buf,
-			       size_t count, loff_t *pos)
+				   size_t count, loff_t *pos)
 {
 	return 0;
 }
@@ -373,12 +372,12 @@ static struct miscdevice gnss_slog_device = {
 	.fops = &gnss_slog_fops,
 };
 
-static int __init gnss_module_init(void)
+int __init gnss_module_init(void)
 {
 	int ret;
 
 	gnss_rx_ring = gnss_ring_init(GNSS_RX_RING_SIZE,
-				      gnss_memcpy_rd, gnss_memcpy_wr);
+					  gnss_memcpy_rd, gnss_memcpy_wr);
 	if (!gnss_rx_ring) {
 		GNSS_ERR("Ring malloc error.");
 		return -GNSS_ERR_MALLOC_FAIL;
@@ -406,7 +405,7 @@ static int __init gnss_module_init(void)
 	return ret;
 }
 
-static void __exit gnss_module_exit(void)
+void __exit gnss_module_exit(void)
 {
 	gnss_ring_destroy(gnss_rx_ring);
 	gnss_device_destroy();
@@ -414,6 +413,8 @@ static void __exit gnss_module_exit(void)
 	misc_deregister(&gnss_slog_device);
 }
 
+#if (0)
 module_init(gnss_module_init);
 module_exit(gnss_module_exit);
 MODULE_LICENSE("GPL");
+#endif

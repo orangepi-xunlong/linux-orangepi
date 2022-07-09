@@ -28,7 +28,11 @@ inline struct sprdwl_msg_buf *sprdwl_intf_get_msg_buf(struct sprdwl_priv *priv,
 						      enum sprdwl_mode mode,
 						      u8 ctx_id)
 {
+#if defined(UWE5621_FTR)
 	return priv->if_ops->get_msg_buf(priv->hw_priv, type, mode, ctx_id);
+#else
+	return priv->if_ops->get_msg_buf(priv->hw_priv, type, mode);
+#endif
 }
 
 static inline void sprdwl_intf_free_msg_buf(struct sprdwl_priv *priv,
@@ -49,12 +53,20 @@ static inline int sprdwl_intf_tx(struct sprdwl_priv *priv,
 
 static inline void sprdwl_intf_force_exit(struct sprdwl_priv *priv)
 {
+#if defined(UWE5621_FTR)
 	priv->if_ops->force_exit(priv->hw_priv);
+#else
+	priv->if_ops->force_exit();
+#endif
 }
 
 static inline int sprdwl_intf_is_exit(struct sprdwl_priv *priv)
 {
+#if defined(UWE5621_FTR)
 	return priv->if_ops->is_exit(priv->hw_priv);
+#else
+	return priv->if_ops->is_exit();
+#endif
 }
 
 static inline int sprdwl_intf_suspend(struct sprdwl_priv *priv)
@@ -76,15 +88,25 @@ static inline int sprdwl_intf_resume(struct sprdwl_priv *priv)
 static inline void sprdwl_intf_debugfs(struct sprdwl_priv *priv,
 				       struct dentry *dir)
 {
+#if defined(UWE5621_FTR)
 	if (priv->if_ops->debugfs)
 		priv->if_ops->debugfs(priv->hw_priv, dir);
+#else
+	if (priv->if_ops->debugfs)
+		priv->if_ops->debugfs(dir);
+#endif /* UWE5621_FTR */
 }
 
 static inline void sprdwl_intf_tcp_drop_msg(struct sprdwl_priv *priv,
 					    struct sprdwl_msg_buf *msg)
 {
+#if defined(UWE5621_FTR)
 	if (priv->if_ops->tcp_drop_msg)
 		priv->if_ops->tcp_drop_msg(priv->hw_priv, msg);
+#else
+	if (priv->if_ops->tcp_drop_msg)
+		priv->if_ops->tcp_drop_msg(msg);
+#endif
 }
 
 static inline int sprdwl_get_ini_status(struct sprdwl_priv *priv)

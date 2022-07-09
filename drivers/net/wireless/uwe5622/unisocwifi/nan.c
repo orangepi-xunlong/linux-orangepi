@@ -43,7 +43,7 @@ int sprdwl_vendor_nan_cmds(struct wiphy *wiphy,
 
 	memcpy(msg->data, data, len);
 	ret = sprdwl_cmd_send_recv(vif->priv, msg,
-				    CMD_WAIT_TIMEOUT, rsp, &rsp_len);
+					CMD_WAIT_TIMEOUT, rsp, &rsp_len);
 
 	if (!ret && rsp_len)
 		sprdwl_event_nan(vif, rsp, rsp_len);

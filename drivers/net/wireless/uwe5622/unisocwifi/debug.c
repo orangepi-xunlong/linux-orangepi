@@ -175,12 +175,12 @@ void adjust_ts_cnt_debug(char *buf, unsigned char offset)
 		spin_unlock_bh(&debug_ctrl.debug_ctrl_lock);
 	} else {
 		memset(g_debug_ts, 0,
-		       (MAX_DEBUG_TS_INDEX *
+			   (MAX_DEBUG_TS_INDEX *
 			sizeof(struct debug_time_stamp)));
 		memset(g_debug_cnt, 0,
-		       (MAX_DEBUG_CNT_INDEX * sizeof(struct debug_cnt)));
+			   (MAX_DEBUG_CNT_INDEX * sizeof(struct debug_cnt)));
 		memset(g_debug_record, 0,
-		       (MAX_RECORD_NUM * sizeof(struct debug_record)));
+			   (MAX_RECORD_NUM * sizeof(struct debug_record)));
 		debug_ctrl.start = true;
 		spin_unlock_bh(&debug_ctrl.debug_ctrl_lock);
 	}

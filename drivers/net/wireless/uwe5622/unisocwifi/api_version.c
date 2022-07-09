@@ -407,7 +407,7 @@ void sprdwl_fill_drv_api_version(struct sprdwl_priv *priv,
 	/*fill CMD struct drv_api*/
 	drv_api->main_ver = priv->sync_api.main_drv;
 	for (count = 0; count < MAX_API &&
-	     count < sizeof(g_api_array) / sizeof(g_api_array[0]); count++) {
+		 count < sizeof(g_api_array) / sizeof(g_api_array[0]); count++) {
 		p = &g_api_array[count];
 		if (p->drv_version)
 			drv_api->api_map[count] =
@@ -439,7 +439,7 @@ void sprdwl_fill_fw_api_version(struct sprdwl_priv *priv,
 }
 
 int sprdwl_api_available_check(struct sprdwl_priv *priv,
-			       struct sprdwl_msg_buf *msg)
+				   struct sprdwl_msg_buf *msg)
 {
 	/*define tmp struct *p */
 	struct api_version_t *p = NULL;
@@ -449,7 +449,11 @@ int sprdwl_api_available_check(struct sprdwl_priv *priv,
 	u8 drv_ver = 0, fw_ver = 0;
 	u32 min_ver = 255;
 
+#if defined(UWE5621_FTR)
 	hdr = (struct sprdwl_cmd_hdr *)(msg->tran_data + priv->hw_offset);
+#else
+	hdr = (struct sprdwl_cmd_hdr *)msg->skb->data;
+#endif
 	cmd_id = hdr->cmd_id;
 	if (cmd_id == WIFI_CMD_SYNC_VERSION)
 		return 0;
@@ -460,17 +464,17 @@ int sprdwl_api_available_check(struct sprdwl_priv *priv,
 	min_ver = min(drv_ver, fw_ver);
 	if (min_ver) {
 		if ((min_ver == drv_ver) ||
-		    min_ver == priv->sync_api.compat) {
+			min_ver == priv->sync_api.compat) {
 			priv->sync_api.compat = DEFAULT_COMPAT;
 			return 0;
 		} else {
 			wl_err("CMD ID:%d,drv ver:%d, fw ver:%d,compat:%d\n",
-			       cmd_id, drv_ver, fw_ver, priv->sync_api.compat);
+				   cmd_id, drv_ver, fw_ver, priv->sync_api.compat);
 			return -1;
 		}
 	} else {
 		wl_err("CMD ID:%d,drv ver:%d, fw ver:%d drop it!!\n",
-		       cmd_id, drv_ver, fw_ver);
+			   cmd_id, drv_ver, fw_ver);
 		return -1;
 	}
 }

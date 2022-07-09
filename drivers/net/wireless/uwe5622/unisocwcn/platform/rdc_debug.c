@@ -31,8 +31,6 @@
 #define UNISOC_DBG_PATH_DEFAULT "/data/unisoc_dbg"
 #endif
 
-MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
-
 /* size of cp2 log files, default is 20M. */
 static unsigned int wcn_cp2_log_limit_size =
 	UNISOC_DBG_FILESIZE_DEFAULT * 1024 * 1024;
@@ -43,16 +41,14 @@ static unsigned int wcn_cp2_file_max_num = UNISOC_DBG_FILENUM_DEFAULT;
  */
 static unsigned int wcn_cp2_log_cover_old = 1;
 /* path of config file unisoc_cp2log_config.txt */
-#define WCN_DEBUG_CFG_MAX_PATH_NUM	3
+#define WCN_DEBUG_CFG_MAX_PATH_NUM	0
 static char *wcn_cp2_config_path[WCN_DEBUG_CFG_MAX_PATH_NUM] = {
-	"/etc/unisoc_cp2log_config.txt",
 	"/data/unisoc_cp2log_config.txt",
 	"/vendor/etc/wifi/unisoc_cp2log_config.txt"
 };
 /* path of cp2 log and mem files. */
-#define WCN_UNISOC_DBG_MAX_PATH_NUM	4
+#define WCN_UNISOC_DBG_MAX_PATH_NUM	0
 static char *wcn_unisoc_dbg_path[WCN_UNISOC_DBG_MAX_PATH_NUM] = {
-	"/etc",
 	UNISOC_DBG_PATH_DEFAULT,/* most of projects */
 	"/data",		/* amlogic s905w... */
 	"/mnt/UDISK"		/* allwinner r328... */

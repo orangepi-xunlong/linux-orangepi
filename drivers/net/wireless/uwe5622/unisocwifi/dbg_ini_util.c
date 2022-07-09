@@ -264,9 +264,9 @@ int sprdwl_dbg_new_beacon_tail(const u8 *beacon_tail, int tail_len, u8 *new_tail
 
 #define ERP_INFO_BARKER_PREAMBLE_MODE 4
 	if (chn <= 14) {
-	    *tail++ = WLAN_EID_ERP_INFO;
-	    *tail++ = 1;
-	    *tail++ = ERP_INFO_BARKER_PREAMBLE_MODE;
+		*tail++ = WLAN_EID_ERP_INFO;
+		*tail++ = 1;
+		*tail++ = ERP_INFO_BARKER_PREAMBLE_MODE;
 	}
 
 	while (tail_len > 2) {

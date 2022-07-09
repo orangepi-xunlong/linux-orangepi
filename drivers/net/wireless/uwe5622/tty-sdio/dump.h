@@ -45,6 +45,8 @@ typedef struct bt_host_data_dump {
 	bt_host_time rxtime_t[BT_MAX_DUMP_FRAME_LEN];
 } bt_host_data_dump;
 
+bt_host_data_dump *data_dump;
+
 void bt_host_data_save(const unsigned char *buf, int count, unsigned char data_inout);
 void bt_host_data_printf(void);
 

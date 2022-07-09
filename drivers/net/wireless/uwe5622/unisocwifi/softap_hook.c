@@ -76,7 +76,7 @@ static int sprdwl_get_softap_chan(u8 *path)
 }
 
 void sprdwl_hook_reset_channel(struct wiphy *wiphy,
-			       struct cfg80211_ap_settings *settings)
+				   struct cfg80211_ap_settings *settings)
 {
 	u8 *ie, *ds_param_ch;
 	int channel = 1;
@@ -95,8 +95,8 @@ void sprdwl_hook_reset_channel(struct wiphy *wiphy,
 
 	mgmt = (struct ieee80211_mgmt *)settings->beacon.head;
 	ie = (u8 *)cfg80211_find_ie(WLAN_EID_DS_PARAMS,
-				    &mgmt->u.beacon.variable[0],
-				    settings->beacon.head_len);
+					&mgmt->u.beacon.variable[0],
+					settings->beacon.head_len);
 	if (ie == NULL) {
 		wl_err("IE WLAN_EID_DS_PARAMS not found in beacon\n");
 		return;
@@ -105,8 +105,8 @@ void sprdwl_hook_reset_channel(struct wiphy *wiphy,
 	ds_param_ch = ie + 2;
 
 	ie = (u8 *)cfg80211_find_ie(WLAN_EID_HT_OPERATION,
-				    settings->beacon.tail,
-				    settings->beacon.tail_len);
+					settings->beacon.tail,
+					settings->beacon.tail_len);
 	if (ie == NULL) {
 		wl_err("IE WLAN_EID_HT_OPERATION not found in beacon\n");
 		return;
@@ -116,7 +116,7 @@ void sprdwl_hook_reset_channel(struct wiphy *wiphy,
 	oper = (struct ieee80211_ht_operation *)ie;
 
 	wl_info("%s done, reset channel %d -> %d\n", __func__,
-	       oper->primary_chan, channel);
+		   oper->primary_chan, channel);
 
 	*ds_param_ch = oper->primary_chan = channel;
 }

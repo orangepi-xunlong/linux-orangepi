@@ -299,4 +299,5 @@ void sprdwl_boost(void);
 void sprdwl_unboost(void);
 void adjust_txnum_level(char *buf, unsigned char offset);
 void adjust_rxnum_level(char *buf, unsigned char offset);
+void sprdwl_bus_deinit(void);
 #endif /* __SPRDWL_INTF_SDIO_SC2355_H__ */

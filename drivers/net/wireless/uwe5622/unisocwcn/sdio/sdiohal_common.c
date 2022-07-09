@@ -3,7 +3,7 @@
 #include "sdiohal.h"
 
 void sdiohal_print_list_data(int channel, struct sdiohal_list_t *data_list,
-			     const char *func, int loglevel)
+				 const char *func, int loglevel)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 	struct mbuf_t *node;
@@ -13,7 +13,7 @@ void sdiohal_print_list_data(int channel, struct sdiohal_list_t *data_list,
 
 	if (!data_list || !data_list->mbuf_head) {
 		sdiohal_err("%s, data_list:%p,data_list->mbuf_head:%p",
-			    __func__, data_list, data_list->mbuf_head);
+				__func__, data_list, data_list->mbuf_head);
 		WARN_ON(1);
 		return;
 	}
@@ -25,11 +25,11 @@ void sdiohal_print_list_data(int channel, struct sdiohal_list_t *data_list,
 			break;
 		print_len = node->len + SDIO_PUB_HEADER_SIZE;
 		if ((channel == p_data->printlog_txchn) ||
-		    (channel == p_data->printlog_rxchn)) {
+			(channel == p_data->printlog_rxchn)) {
 			print_hex_dump(KERN_WARNING, print_str,
-				       DUMP_PREFIX_NONE, 16, 1, node->buf,
-				       (print_len < SDIOHAL_PRINTF_LEN ?
-				       print_len : SDIOHAL_PRINTF_LEN), true);
+					   DUMP_PREFIX_NONE, 16, 1, node->buf,
+					   (print_len < SDIOHAL_PRINTF_LEN ?
+					   print_len : SDIOHAL_PRINTF_LEN), true);
 		} else {
 			sdiohal_pr_data(KERN_WARNING, print_str,
 					DUMP_PREFIX_NONE, 16, 1, node->buf,
@@ -41,8 +41,8 @@ void sdiohal_print_list_data(int channel, struct sdiohal_list_t *data_list,
 }
 
 void sdiohal_print_mbuf_data(int channel, struct mbuf_t *head,
-			     struct mbuf_t *tail, int num, const char *func,
-			     int loglevel)
+				 struct mbuf_t *tail, int num, const char *func,
+				 int loglevel)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 	struct mbuf_t *node;
@@ -63,11 +63,11 @@ void sdiohal_print_mbuf_data(int channel, struct mbuf_t *head,
 			break;
 		print_len = node->len + SDIO_PUB_HEADER_SIZE;
 		if ((channel == p_data->printlog_txchn) ||
-		    (channel == p_data->printlog_rxchn)) {
+			(channel == p_data->printlog_rxchn)) {
 			print_hex_dump(KERN_WARNING, print_str,
-				       DUMP_PREFIX_NONE, 16, 1, node->buf,
-				       (print_len < SDIOHAL_PRINTF_LEN ?
-				       print_len : SDIOHAL_PRINTF_LEN), true);
+					   DUMP_PREFIX_NONE, 16, 1, node->buf,
+					   (print_len < SDIOHAL_PRINTF_LEN ?
+					   print_len : SDIOHAL_PRINTF_LEN), true);
 		} else {
 			sdiohal_pr_data(KERN_WARNING, print_str,
 					DUMP_PREFIX_NONE, 16, 1, node->buf,
@@ -107,8 +107,8 @@ void sdiohal_list_check(struct sdiohal_list_t *data_list,
 }
 
 void sdiohal_mbuf_list_check(int channel, struct mbuf_t *head,
-			     struct mbuf_t *tail, int num,
-			     const char *func, bool dir, int loglevel)
+				 struct mbuf_t *tail, int num,
+				 const char *func, bool dir, int loglevel)
 {
 	struct mbuf_t *node;
 	int i;
@@ -242,38 +242,36 @@ void sdiohal_unlock_rx_ws(void)
 void sdiohal_lock_scan_ws(void)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
-
 	__pm_stay_awake(p_data->scan_ws);
 }
 
 void sdiohal_unlock_scan_ws(void)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
-
 	__pm_relax(p_data->scan_ws);
 }
 
 void sdiohal_wakelock_init(void)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
-
+	/*wakeup_source pointer*/
 	p_data->tx_ws = wakeup_source_create("sdiohal_tx_wakelock");
-	p_data->rx_ws = wakeup_source_create("sdiohal_rx_wakelock");
-	p_data->scan_ws = wakeup_source_create("sdiohal_scan_wakelock");
 	wakeup_source_add(p_data->tx_ws);
+	p_data->rx_ws = wakeup_source_create("sdiohal_rx_wakelock");
 	wakeup_source_add(p_data->rx_ws);
+	p_data->scan_ws = wakeup_source_create("sdiohal_scan_wakelock");
 	wakeup_source_add(p_data->scan_ws);
 }
 
 void sdiohal_wakelock_deinit(void)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
-
+	/*wakeup_source pointer*/
 	wakeup_source_remove(p_data->tx_ws);
-	wakeup_source_remove(p_data->rx_ws);
-	wakeup_source_remove(p_data->scan_ws);
 	wakeup_source_destroy(p_data->tx_ws);
+	wakeup_source_remove(p_data->rx_ws);
 	wakeup_source_destroy(p_data->rx_ws);
+	wakeup_source_remove(p_data->scan_ws);
 	wakeup_source_destroy(p_data->scan_ws);
 }
 
@@ -323,8 +321,8 @@ void sdiohal_cp_tx_sleep(enum slp_subsys subsys)
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 
 	sdiohal_debug("%s subsys:%d count:%d\n",
-		      __func__, subsys,
-		      atomic_read(&p_data->tx_wake_cp_count[subsys]));
+			  __func__, subsys,
+			  atomic_read(&p_data->tx_wake_cp_count[subsys]));
 
 	sdiohal_atomic_sub(1, &p_data->tx_wake_cp_count[subsys]);
 	if (atomic_read(&p_data->tx_wake_cp_count[subsys]))
@@ -338,8 +336,8 @@ void sdiohal_cp_tx_wakeup(enum slp_subsys subsys)
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 
 	sdiohal_debug("%s subsys:%d count:%d\n",
-		      __func__, subsys,
-		      atomic_read(&p_data->tx_wake_cp_count[subsys]));
+			  __func__, subsys,
+			  atomic_read(&p_data->tx_wake_cp_count[subsys]));
 
 	sdiohal_atomic_add(1, &p_data->tx_wake_cp_count[subsys]);
 	slp_mgr_drv_sleep(subsys, false);
@@ -351,8 +349,8 @@ void sdiohal_cp_rx_sleep(enum slp_subsys subsys)
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 
 	sdiohal_debug("%s subsys:%d count:%d\n",
-		      __func__, subsys,
-		      atomic_read(&p_data->rx_wake_cp_count[subsys]));
+			  __func__, subsys,
+			  atomic_read(&p_data->rx_wake_cp_count[subsys]));
 
 	sdiohal_atomic_sub(1, &p_data->rx_wake_cp_count[subsys]);
 	if (atomic_read(&p_data->rx_wake_cp_count[subsys]))
@@ -366,8 +364,8 @@ void sdiohal_cp_rx_wakeup(enum slp_subsys subsys)
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 
 	sdiohal_debug("%s subsys:%d count:%d\n",
-		      __func__, subsys,
-		      atomic_read(&p_data->rx_wake_cp_count[subsys]));
+			  __func__, subsys,
+			  atomic_read(&p_data->rx_wake_cp_count[subsys]));
 
 	sdiohal_atomic_add(1, &p_data->rx_wake_cp_count[subsys]);
 	slp_mgr_drv_sleep(subsys, false);
@@ -488,14 +486,14 @@ bool sdiohal_is_tx_list_empty(void)
 }
 
 int sdiohal_tx_packer(struct sdiohal_sendbuf_t *send_buf,
-		      struct sdiohal_list_t *data_list,
-		      struct mbuf_t *mbuf_node)
+			  struct sdiohal_list_t *data_list,
+			  struct mbuf_t *mbuf_node)
 {
 	if ((!send_buf) || (!data_list) || (!mbuf_node))
 		return -EINVAL;
 
 	memcpy(send_buf->buf + send_buf->used_len,
-	       mbuf_node->buf, mbuf_node->len + sizeof(struct sdio_puh_t));
+		   mbuf_node->buf, mbuf_node->len + sizeof(struct sdio_puh_t));
 
 	send_buf->used_len += sizeof(struct sdio_puh_t) +
 		SDIOHAL_ALIGN_4BYTE(mbuf_node->len);
@@ -510,14 +508,14 @@ int sdiohal_tx_set_eof(struct sdiohal_sendbuf_t *send_buf,
 		return -EINVAL;
 
 	memcpy((void *)(send_buf->buf + send_buf->used_len),
-	       (void *)eof_buf, sizeof(struct sdio_puh_t));
+		   (void *)eof_buf, sizeof(struct sdio_puh_t));
 	send_buf->used_len += sizeof(struct sdio_puh_t);
 
 	return 0;
 }
 
 static int sdiohal_tx_fill_puh(int channel, struct mbuf_t *head,
-			       struct mbuf_t *tail, int num)
+				   struct mbuf_t *tail, int num)
 {
 	struct sdio_puh_t *puh = NULL;
 	struct mbuf_t *mbuf_node;
@@ -531,7 +529,7 @@ static int sdiohal_tx_fill_puh(int channel, struct mbuf_t *head,
 	for (i = 0; i < num; i++, mbuf_node = mbuf_node->next) {
 		if (!mbuf_node) {
 			sdiohal_err("%s tx fill puh, mbuf ptr error:%p\n",
-				    __func__, mbuf_node);
+					__func__, mbuf_node);
 
 			return -EFAULT;
 		}
@@ -612,7 +610,7 @@ static int sdiohal_tx_pop_assignment(struct sdiohal_list_t *data_list)
 		mbuf_node = mbuf_next;
 		if (!mbuf_node) {
 			sdiohal_err("%s tx pop mbuf ptr error:%p\n",
-				    __func__, mbuf_node);
+					__func__, mbuf_node);
 
 			return -EFAULT;
 		}
@@ -622,7 +620,7 @@ static int sdiohal_tx_pop_assignment(struct sdiohal_list_t *data_list)
 			puh->type, puh->subtype);
 		if (channel >= SDIO_CHN_TX_NUM) {
 			sdiohal_err("%s tx pop channel error:%d\n",
-				    __func__, channel);
+					__func__, channel);
 			continue;
 		}
 
@@ -666,12 +664,12 @@ int sdiohal_tx_list_denq(struct sdiohal_list_t *data_list)
 
 		sdiohal_list_check(tx_list, __func__, SDIOHAL_WRITE);
 		channel = sdiohal_hwtype_to_channel(inout, tx_list->type,
-						    tx_list->subtype);
+							tx_list->subtype);
 		sdiohal_print_list_data(channel, tx_list, __func__,
 					SDIOHAL_NORMAL_LEVEL);
 		if (channel >= SDIO_CHN_TX_NUM) {
 			sdiohal_err("%s tx pop channel error:%d\n",
-				    __func__, channel);
+					__func__, channel);
 			continue;
 		}
 
@@ -690,11 +688,11 @@ int sdiohal_tx_list_denq(struct sdiohal_list_t *data_list)
 			p_data->chntx_denq_old.time =
 				p_data->chntx_denq_new.time;
 			memcpy(p_data->chntx_denq_old.data_bk,
-			       p_data->chntx_denq_new.data_bk,
-			       SDIOHAL_PRINTF_LEN);
+				   p_data->chntx_denq_new.data_bk,
+				   SDIOHAL_PRINTF_LEN);
 			memcpy(p_data->chntx_denq_new.data_bk,
-			       tx_list->mbuf_tail->buf,
-			       SDIOHAL_PRINTF_LEN);
+				   tx_list->mbuf_tail->buf,
+				   SDIOHAL_PRINTF_LEN);
 			p_data->chntx_denq_new.time =
 				(unsigned int)ktime_to_ms(ktime_get());
 		}
@@ -702,11 +700,11 @@ int sdiohal_tx_list_denq(struct sdiohal_list_t *data_list)
 
 		if (sdiohal_ops && sdiohal_ops->pop_link) {
 			sdiohal_ops->pop_link(channel, tx_list->mbuf_head,
-					      tx_list->mbuf_tail,
-					      tx_list->node_num);
+						  tx_list->mbuf_tail,
+						  tx_list->node_num);
 		} else
 			sdiohal_err("%s no tx ops channel:%d\n",
-				    __func__, channel);
+					__func__, channel);
 
 		tx_list->node_num = 0;
 		sdiohal_callback_unlock(&chn_callback[channel]);
@@ -751,12 +749,12 @@ int sdiohal_rx_list_dispatch(void)
 
 		sdiohal_list_check(rx_list, __func__, SDIOHAL_READ);
 		channel = sdiohal_hwtype_to_channel(inout, rx_list->type,
-						    rx_list->subtype);
+							rx_list->subtype);
 		sdiohal_print_list_data(channel, rx_list, __func__,
 					SDIOHAL_NORMAL_LEVEL);
 		if (channel >= SDIO_CHANNEL_NUM) {
 			sdiohal_err("%s rx pop channel error:%d\n",
-				    __func__, channel);
+					__func__, channel);
 			continue;
 		}
 
@@ -772,16 +770,16 @@ int sdiohal_rx_list_dispatch(void)
 
 #if SDIO_DUMP_CHANNEL_DATA
 		if ((channel == SDIO_DUMP_RX_CHANNEL_NUM) &&
-		    (rx_list->mbuf_tail->buf[SDIO_PUB_HEADER_SIZE + 1] <
-		     SDIO_DUMP_RX_WIFI_EVENT_MIN)) {
+			(rx_list->mbuf_tail->buf[SDIO_PUB_HEADER_SIZE + 1] <
+			 SDIO_DUMP_RX_WIFI_EVENT_MIN)) {
 			p_data->chnrx_dispatch_old.time =
 				p_data->chnrx_dispatch_new.time;
 			memcpy(p_data->chnrx_dispatch_old.data_bk,
-			       p_data->chnrx_dispatch_new.data_bk,
-			       SDIOHAL_PRINTF_LEN);
+				   p_data->chnrx_dispatch_new.data_bk,
+				   SDIOHAL_PRINTF_LEN);
 			memcpy(p_data->chnrx_dispatch_new.data_bk,
-			       rx_list->mbuf_tail->buf,
-			       SDIOHAL_PRINTF_LEN);
+				   rx_list->mbuf_tail->buf,
+				   SDIOHAL_PRINTF_LEN);
 			p_data->chnrx_dispatch_new.time =
 				(unsigned int)ktime_to_ms(ktime_get());
 		}
@@ -789,14 +787,14 @@ int sdiohal_rx_list_dispatch(void)
 
 		if (sdiohal_ops && sdiohal_ops->pop_link) {
 			sdiohal_ops->pop_link(channel, rx_list->mbuf_head,
-					      rx_list->mbuf_tail,
-					      rx_list->node_num);
+						  rx_list->mbuf_tail,
+						  rx_list->node_num);
 		} else {
 			sdiohal_err("%s no rx ops channel:%d\n",
-				    __func__, channel);
+					__func__, channel);
 			sdiohal_rx_list_free(rx_list->mbuf_head,
-					     rx_list->mbuf_tail,
-					     rx_list->node_num);
+						 rx_list->mbuf_tail,
+						 rx_list->node_num);
 		}
 		rx_list->node_num = 0;
 		sdiohal_callback_unlock(&chn_callback[channel]);
@@ -914,24 +912,33 @@ refill:
 #else
 		order = SDIOHAL_FRAG_PAGE_MAX_ORDER_32_BIT;
 #endif
+		/*GFP_KERNEL allow sleep, so not in interrupt; sdma changed,adma not*/
+		if (gfp_mask & GFP_KERNEL)
+			local_irq_restore(flags);
 		for (; ;) {
 			gfp_t gfp = gfp_mask;
 
 			if (order)
-				gfp |= __GFP_COMP | __GFP_NOWARN;
+				gfp |= __GFP_COMP;
 			/* alloc_pages will initialize count to 1. */
 			frag_ctl->frag.page = alloc_pages(gfp, order);
 			if (likely(frag_ctl->frag.page))
 				break;
-			if (--order < 0)
-				goto fail;
+			if (--order < 0) {
+				if (gfp_mask & GFP_KERNEL)
+					goto fail1;
+				else
+					goto fail;
+			}
 		}
+		if (gfp_mask & GFP_KERNEL)
+			local_irq_save(flags);
 		frag_ctl->frag.size = PAGE_SIZE << order;
 		if (frag_ctl->frag.size < fragsz) {
 			sdiohal_info("BITS_PER_LONG=%d,PAGE_SIZE=%ld,order=%d\n",
-				     BITS_PER_LONG, PAGE_SIZE, order);
+					 BITS_PER_LONG, PAGE_SIZE, order);
 			sdiohal_info("alloc 0x%x mem, need:0x%x\n",
-				     frag_ctl->frag.size, fragsz);
+					 frag_ctl->frag.size, fragsz);
 			if (ignore_alloc_fail) {
 				/* alloc fail, not put_page, fill frag size. */
 				*alloc_size = frag_ctl->frag.size;
@@ -1001,6 +1008,7 @@ refill:
 	return data;
 fail:
 	local_irq_restore(flags);
+fail1:
 	sdiohal_err("alloc mem fail\n");
 	return NULL;
 }
@@ -1020,7 +1028,7 @@ struct sdiohal_list_t *sdiohal_get_rx_mbuf_node(int num)
 
 	if (num > p_data->list_rx_buf.node_num) {
 		sdiohal_err("no rx mbuf node, need num:%d, list node num:%d\n",
-			    num, p_data->list_rx_buf.node_num);
+				num, p_data->list_rx_buf.node_num);
 		goto err;
 	}
 
@@ -1074,7 +1082,7 @@ struct sdiohal_list_t *sdiohal_get_rx_mbuf_list(int num)
 			0, NULL);
 		if (!mbuf_temp->buf) {
 			sdiohal_rx_list_free(idle_list->mbuf_head,
-					     idle_list->mbuf_tail, num);
+						 idle_list->mbuf_tail, num);
 			kfree(idle_list);
 			goto err;
 		}
@@ -1090,24 +1098,26 @@ err:
 }
 
 /* for normal dma idle buf */
-void *sdiohal_get_rx_free_buf(unsigned int *alloc_size)
+void *sdiohal_get_rx_free_buf(unsigned int *alloc_size, unsigned int read_len)
 {
 	void *p;
 	unsigned int fragsz;
 
-#if (BITS_PER_LONG > 32) || (PAGE_SIZE >= 65536)
-	fragsz = SDIOHAL_RX_RECVBUF_LEN;
+	/* fragsz need to be 1024 aligned */
+	fragsz = roundup(read_len, 1024);
 
-#else
-	fragsz = SDIOHAL_32_BIT_RX_RECVBUF_LEN;
-#endif
+/*
+ * GFP_ATOMIC is not sleep forever, requirement is high;
+ * GFP_KERNEL is nornal way, allow sleep;
+ *__GFP_COLD
+ */
 	p = sdiohal_alloc_frag(fragsz,
 #if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-			       GFP_ATOMIC,
+				   GFP_KERNEL,
 #else
-			       GFP_ATOMIC | __GFP_COLD,
+				   GFP_KERNEL,
 #endif
-			       1, alloc_size);
+				   1, alloc_size);
 
 	WARN_ON(((unsigned long int)p) % 64);
 
@@ -1170,7 +1180,7 @@ static void sdiohal_rx_buf_deinit(void)
 }
 
 int sdiohal_list_push(int channel, struct mbuf_t *head,
-		      struct mbuf_t *tail, int num)
+			  struct mbuf_t *tail, int num)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 	struct timespec tm_begin, tm_end;
@@ -1212,7 +1222,7 @@ int sdiohal_list_push(int channel, struct mbuf_t *head,
 	if (channel < SDIO_CHN_TX_NUM) {
 		if (!atomic_read(&p_data->flag_resume)) {
 			sdiohal_err("%s chn=%d, in suspend, can't send data\n",
-				    __func__, channel);
+					__func__, channel);
 			return -EFAULT;
 		}
 		sdiohal_print_mbuf_data(channel, head, tail, num,
@@ -1223,11 +1233,11 @@ int sdiohal_list_push(int channel, struct mbuf_t *head,
 			p_data->chntx_push_old.time =
 				p_data->chntx_push_new.time;
 			memcpy(p_data->chntx_push_old.data_bk,
-			       p_data->chntx_push_new.data_bk,
-			       SDIOHAL_PRINTF_LEN);
+				   p_data->chntx_push_new.data_bk,
+				   SDIOHAL_PRINTF_LEN);
 			memcpy(p_data->chntx_push_new.data_bk,
-			       tail->buf,
-			       SDIOHAL_PRINTF_LEN);
+				   tail->buf,
+				   SDIOHAL_PRINTF_LEN);
 			p_data->chntx_push_new.time =
 				(unsigned int)ktime_to_ms(ktime_get());
 		}
@@ -1258,7 +1268,7 @@ int sdiohal_list_push(int channel, struct mbuf_t *head,
  * not calling tx_pop callback when working in sdma mode.
  */
 int sdiohal_list_direct_write(int channel, struct mbuf_t *head,
-			      struct mbuf_t *tail, int num)
+				  struct mbuf_t *tail, int num)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 	struct sdiohal_list_t data_list;
@@ -1403,17 +1413,11 @@ static int sdiohal_dtbs_buf_init(void)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
 
-	p_data->dtbs_buf = sdiohal_alloc_frag(MAX_MBUF_SIZE,
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-					      GFP_ATOMIC,
-#else
-					      GFP_ATOMIC | __GFP_COLD,
-#endif
-					      0, NULL);
-	if (!p_data->dtbs_buf)
+	p_data->dtbs_buf = kzalloc(MAX_MBUF_SIZE, GFP_KERNEL);
+	if (!p_data->dtbs_buf) {
+		sdiohal_err("dtbs buf alloc fail\n");
 		return -ENOMEM;
-
-	WARN_ON(((unsigned long int)p_data->dtbs_buf) % 64);
+	}
 
 	return 0;
 }
@@ -1421,17 +1425,8 @@ static int sdiohal_dtbs_buf_init(void)
 static int sdiohal_dtbs_buf_deinit(void)
 {
 	struct sdiohal_data_t *p_data = sdiohal_get_data();
-	int order;
 
-	if (!p_data->dtbs_buf)
-		return -ENOMEM;
-
-#if (BITS_PER_LONG > 32) || (PAGE_SIZE >= 65536)
-	order = SDIOHAL_FRAG_PAGE_MAX_ORDER;
-#else
-	order = SDIOHAL_FRAG_PAGE_MAX_ORDER_32_BIT;
-#endif
-	free_pages((unsigned long)p_data->dtbs_buf, order);
+	kfree(p_data->dtbs_buf);
 	p_data->dtbs_buf = NULL;
 
 	return 0;

@@ -35,6 +35,7 @@
 #include <linux/dcache.h>
 #include <linux/udp.h>
 #include <linux/version.h>
+#include "wcn_wrapper.h"
 
 #include "cfg80211.h"
 #include "cmdevt.h"
@@ -175,6 +176,8 @@ struct wmm_params_element {
 struct sprdwl_wmmac_params {
 	struct wmm_ac_params ac[4];
 	struct timer_list wmmac_edcaf_timer;
+	struct timer_list wmmac_vo_timer;
+	struct timer_list wmmac_vi_timer;
 };
 #endif
 

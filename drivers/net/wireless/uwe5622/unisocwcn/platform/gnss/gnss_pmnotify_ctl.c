@@ -32,6 +32,7 @@
 #include <linux/timer.h>
 #include <linux/types.h>
 #include <linux/uaccess.h>
+// #include <linux/wakelock.h>
 #include <linux/wait.h>
 #include <marlin_platform.h>
 
@@ -49,6 +50,8 @@ struct sprd_gnss {
 
 static struct sprd_gnss gnss_dev;
 static int gnss_delay_cancel;
+
+extern bool gnss_delay_ctl(void);
 
 static int gnss_pmnotify_ctl_open(struct inode *inode, struct file *filp)
 {
@@ -117,7 +120,7 @@ static struct miscdevice gnss_pmnotify_ctl_device = {
 	.fops = &gnss_pmnotify_ctl_fops,
 };
 
-static int __init gnss_pmnotify_ctl_init(void)
+int __init gnss_pmnotify_ctl_init(void)
 {
 	int err = 0;
 
@@ -132,12 +135,14 @@ static int __init gnss_pmnotify_ctl_init(void)
 	return err;
 }
 
-static void __exit gnss_pmnotify_ctl_cleanup(void)
+void __exit gnss_pmnotify_ctl_cleanup(void)
 {
 	misc_deregister(&gnss_pmnotify_ctl_device);
 }
 
+#if (0)
 module_init(gnss_pmnotify_ctl_init);
 module_exit(gnss_pmnotify_ctl_cleanup);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("sprd gnss pmnotify ctl driver");
+#endif

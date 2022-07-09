@@ -19,7 +19,6 @@
 #include "wcn_gnss.h"
 #include "wcn_procfs.h"
 
-MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
 
 static struct mutex marlin_lock;
 static struct wifi_calibration wifi_data;

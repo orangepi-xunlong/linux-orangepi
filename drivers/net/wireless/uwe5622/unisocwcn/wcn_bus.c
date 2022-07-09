@@ -17,8 +17,6 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
-#include <linux/io.h>
-
 #include <wcn_bus.h>
 
 struct buffer_pool_t {
@@ -82,7 +80,7 @@ static int buf_pool_check(struct buffer_pool_t *pool)
 	struct mbuf_t *mbuf;
 
 	for (i = 0, mbuf = pool->head;
-	     i < pool->free; i++, mbuf = mbuf->next) {
+		 i < pool->free; i++, mbuf = mbuf->next) {
 		WARN_ON(!mbuf);
 		WARN_ON((char *)mbuf < pool->mem ||
 			(char *)mbuf > pool->mem + ((sizeof(struct mbuf_t)
@@ -106,13 +104,13 @@ static int buf_pool_init(struct buffer_pool_t *pool, int size, int payload)
 	pool->payload = payload;
 	spin_lock_init(&(pool->lock));
 	pool->mem = kzalloc((sizeof(struct mbuf_t) + payload) * size,
-			    GFP_KERNEL);
+				GFP_KERNEL);
 	if (!pool->mem)
 		return -ENOMEM;
 
 	pool->head = (struct mbuf_t *) (pool->mem);
 	for (i = 0, mbuf = (struct mbuf_t *)(pool->head);
-	     i < (size - 1); i++) {
+		 i < (size - 1); i++) {
 		mbuf->seq = i;
 		next = (struct mbuf_t *)((char *)mbuf +
 			sizeof(struct mbuf_t) + payload);
@@ -133,7 +131,7 @@ static int buf_pool_init(struct buffer_pool_t *pool, int size, int payload)
 static int buf_pool_deinit(struct buffer_pool_t *pool)
 {
 	memset(pool->mem, 0x00,
-	       (sizeof(struct mbuf_t) + pool->payload) * pool->size);
+		   (sizeof(struct mbuf_t) + pool->payload) * pool->size);
 	kfree(pool->mem);
 	pool->mem = NULL;
 
@@ -244,7 +242,7 @@ int bus_chn_init(struct mchn_ops_t *ops, int hif_type)
 	chn_inf->ops[ops->channel] = ops;
 	if (ops->pool_size > 0)
 		ret = buf_pool_init(&(chn_inf->pool[ops->channel]),
-				    ops->pool_size, 0);
+					ops->pool_size, 0);
 	mutex_unlock(&chn_inf->callback_lock[ops->channel]);
 
 	/* pr_info("[-]%s(%d)\n", __func__, ops->channel); */
