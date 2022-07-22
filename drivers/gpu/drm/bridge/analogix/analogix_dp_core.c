@@ -1774,6 +1774,13 @@ analogix_dp_probe(struct device *dev, struct analogix_dp_plat_data *plat_data)
 		return ERR_CAST(dp->hpd_gpiod);
 	}
 
+	dp->reset_gpiod = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_LOW);
+	if (IS_ERR(dp->reset_gpiod)) {
+		dev_err(dev, "error getting RESET GPIO: %ld\n",
+			PTR_ERR(dp->reset_gpiod));
+		return ERR_CAST(dp->reset_gpiod);
+	}
+
 	if (dp->hpd_gpiod) {
 		ret = devm_request_threaded_irq(dev,
 						gpiod_to_irq(dp->hpd_gpiod),
@@ -1787,6 +1794,12 @@ analogix_dp_probe(struct device *dev, struct analogix_dp_plat_data *plat_data)
 			dev_err(dev, "failed to request hpd IRQ: %d\n", ret);
 			return ERR_PTR(ret);
 		}
+	}
+
+	if(dp->reset_gpiod) {
+		gpiod_set_value_cansleep(dp->reset_gpiod, 1);
+		usleep_range(1000, 1500);
+		gpiod_set_value_cansleep(dp->reset_gpiod, 0);
 	}
 
 	dp->irq = platform_get_irq(pdev, 0);
