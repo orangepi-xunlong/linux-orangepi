@@ -19,16 +19,9 @@
         };
 
         fragment@2 {
-                target = <&cdn_dp>;
+                target = <&lcd_panel>;
                 __overlay__ {
-                        status = "disabled";
-                };
-        };
-
-        fragment@3 {
-                target = <&hdmi>;
-                __overlay__ {
-                        status = "disabled";
+			compatible = "innolux,sl101-pn27d1665";
                 };
         };
 };

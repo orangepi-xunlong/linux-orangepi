@@ -1,0 +1,36 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+        compatible = "rockchip,rk3399";
+        fragment@0 {
+                target = <&dsi1>;
+                __overlay__ {
+                        status = "okay";
+                };
+        };
+        fragment@1 {
+                target = <&gt9xx_1>;
+                __overlay__ {
+                        status = "okay";
+                };
+        };
+        fragment@6 {
+                target = <&cdn_dp>;
+                __overlay__ {
+                        status = "disabled";
+                };
+        };
+        fragment@7 {
+                target = <&hdmi>;
+                __overlay__ {
+                        status = "disabled";
+                };
+        };
+        fragment@8 {
+                target = <&lcd_panel1>;
+                __overlay__ {
+			compatible = "innolux,afj101-ba2131";
+                };
+        };
+};
