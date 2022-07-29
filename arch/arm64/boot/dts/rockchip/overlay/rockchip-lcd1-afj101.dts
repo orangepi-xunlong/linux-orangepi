@@ -17,4 +17,11 @@
                         status = "okay";
                 };
         };
+
+        fragment@2 {
+                target = <&lcd_panel>;
+                __overlay__ {
+			compatible = "innolux,afj101-ba2131";
+                };
+        };
 };

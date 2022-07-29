@@ -1253,7 +1253,7 @@
                 };
         };
 
-        panel@0 {
+        lcd_panel: panel@0 {
                 compatible = "innolux,sl101-pn27d1665";
                 reg = <0>;
                 backlight = <&pwm_bl>;

@@ -1,0 +1,27 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+        compatible = "rockchip,rk3399";
+
+        fragment@0 {
+                target = <&mipi_dsi>;
+                __overlay__ {
+                        status = "okay";
+                };
+        };
+
+        fragment@1 {
+                target = <&gt9xx>;
+                __overlay__ {
+                        status = "okay";
+                };
+        };
+
+        fragment@2 {
+                target = <&lcd_panel>;
+                __overlay__ {
+			compatible = "innolux,sl101-pn27d1665";
+                };
+        };
+};
