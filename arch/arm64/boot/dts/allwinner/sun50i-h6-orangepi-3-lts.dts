@@ -310,8 +310,8 @@
 
 			reg_dcdcd: dcdcd {
 				regulator-always-on;
-				regulator-min-microvolt = <960000>;
-				regulator-max-microvolt = <960000>;
+				regulator-min-microvolt = <980000>;
+				regulator-max-microvolt = <980000>;
 				regulator-name = "vdd-sys";
 			};
 
