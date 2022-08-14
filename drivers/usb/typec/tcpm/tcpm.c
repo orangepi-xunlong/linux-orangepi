@@ -1875,6 +1875,9 @@ static void tcpm_register_partner_altmodes(struct tcpm_port *port)
 		return;
 
 	for (i = 0; i < modep->altmodes; i++) {
+		typec_unregister_altmode(port->partner_altmode[i]);
+		port->partner_altmode[i] = NULL;
+
 		altmode = typec_partner_register_altmode(port->partner,
 						&modep->altmode_desc[i]);
 		if (IS_ERR(altmode)) {
