@@ -1056,7 +1056,7 @@
 &edp {
         status = "okay";
         hpd-gpios = <&gpio4 RK_PD6 GPIO_ACTIVE_HIGH>;
-        enable-gpios = <&gpio4 RK_PC1 GPIO_ACTIVE_HIGH>;
+        reset-gpios = <&gpio4 RK_PC1 GPIO_ACTIVE_HIGH>;
 };
 
 &hdmi_in_vopb {
