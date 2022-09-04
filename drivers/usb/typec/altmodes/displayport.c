@@ -182,10 +182,28 @@ static int dp_altmode_configure(struct dp_altmode *dp, u8 con)
 		/* Account for active cable capabilities */
 		if (dp->plug_prime)
 			pin_assign &= DP_CAP_UFP_D_PIN_ASSIGN(dp->plug_prime->vdo);
+
+		/*
+		 * The Display Port Alt mode standard is not publicly available,
+		 * so this is based on guesswork and real VDOs received from
+		 * receptacle based and plug based Type-C alt mode supporting
+		 * docks to make configuration work in practice:
+		 *
+		 * Plug (captive cable) based dock: port=c46 alt=c05
+		 * Recpetacle based dock: port=c46 alt=c0045
+		 *
+		pin_assign = DP_CAP_DFP_D_PIN_ASSIGN(dp->port->vdo);
+		pin_assign &= dp->alt->vdo & DP_CAP_RECEPTACLE ?
+			DP_CAP_UFP_D_PIN_ASSIGN(dp->alt->vdo) :
+			DP_CAP_DFP_D_PIN_ASSIGN(dp->alt->vdo);
+		 */
 		break;
 	default:
 		break;
 	}
+
+	dev_info(&dp->alt->dev, "con=%d pin_assign=%x (port=%x alt=%x)\n",
+		 (int)con, (unsigned)pin_assign, dp->port->vdo, dp->alt->vdo);
 
 	/* Determining the initial pin assignment. */
 	if (!DP_CONF_GET_PIN_ASSIGN(dp->data.conf)) {
@@ -821,14 +839,36 @@ int dp_altmode_probe(struct typec_altmode *alt)
 	struct typec_altmode *plug = typec_altmode_get_plug(alt, TYPEC_PLUG_SOP_P);
 	struct fwnode_handle *fwnode;
 	struct dp_altmode *dp;
+	u32 port_pins, alt_pins;
 
 	/* FIXME: Port can only be DFP_U. */
 
-	/* Make sure we have compatible pin configurations */
-	if (!(DP_CAP_PIN_ASSIGN_DFP_D(port->vdo) &
-	      DP_CAP_PIN_ASSIGN_UFP_D(alt->vdo)) &&
-	    !(DP_CAP_PIN_ASSIGN_UFP_D(port->vdo) &
-	      DP_CAP_PIN_ASSIGN_DFP_D(alt->vdo))) {
+	/*
+	 * When port is a receptacle DP_CAP_xFP_D_PIN_ASSIGN macros have the
+	 * regular meaning. When the port is a plug, the meaning is swapped.
+	 *
+	 * Check if we have any matching DFP_D<->UFP_D or UFP_D<->DFP_D pin assignment.
+	 */
+        port_pins = port->vdo & DP_CAP_RECEPTACLE ?
+		DP_CAP_DFP_D_PIN_ASSIGN(port->vdo) | DP_CAP_UFP_D_PIN_ASSIGN(port->vdo) << 8 :
+		DP_CAP_UFP_D_PIN_ASSIGN(port->vdo) | DP_CAP_DFP_D_PIN_ASSIGN(port->vdo) << 8;
+
+        alt_pins = alt->vdo & DP_CAP_RECEPTACLE ?
+		DP_CAP_UFP_D_PIN_ASSIGN(alt->vdo) | DP_CAP_DFP_D_PIN_ASSIGN(alt->vdo) << 8 :
+		DP_CAP_DFP_D_PIN_ASSIGN(alt->vdo) | DP_CAP_UFP_D_PIN_ASSIGN(alt->vdo) << 8;
+
+	/* Can't plug plug into a plug */
+	if (!(port->vdo & DP_CAP_RECEPTACLE) && !(alt->vdo & DP_CAP_RECEPTACLE)) {
+		dev_warn(&alt->dev, "Our Alt-DP VDO 0x%06x and peer port VDO 0x%06x are not compatible (both are reported as plugs!)\n",
+			 port->vdo, alt->vdo);
+		typec_altmode_put_plug(plug);
+		return -ENODEV;
+	}
+
+	/* Make sure we have compatiple pin configurations */
+	if (!(port_pins & alt_pins)) {
+		dev_warn(&alt->dev, "Our Alt-DP VDO 0x%06x and peer port VDO 0x%06x are not compatible (no shared pinconf %04x<->%04x (UUDD))\n",
+			 port->vdo, alt->vdo, port_pins, alt_pins);
 		typec_altmode_put_plug(plug);
 		return -ENODEV;
 	}
