@@ -71,7 +71,7 @@
 		regulator-name = "vcc-gmac-3v3";
 		regulator-min-microvolt = <3300000>;
 		regulator-max-microvolt = <3300000>;
-		startup-delay-us = <100000>;
+		startup-delay-us = <150000>;
 		gpio = <&pio 3 6 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
 	};
@@ -146,8 +146,8 @@
 	phy-mode = "rgmii-id";
 	phy-handle = <&ext_rgmii_phy>;
 	phy-supply = <&reg_gmac_3v3>;
-	allwinner,rx-delay-ps = <200>;
-	allwinner,tx-delay-ps = <300>;
+	allwinner,rx-delay-ps = <1500>;
+	allwinner,tx-delay-ps = <700>;
 	status = "okay";
 };
 
