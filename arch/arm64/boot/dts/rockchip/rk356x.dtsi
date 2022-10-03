@@ -374,6 +374,12 @@
 		};
 	};
 
+	mipi_csi2: mipi-csi2 {
+		compatible = "rockchip,rk3568-mipi-csi2";
+		rockchip,hw = <&mipi_csi2_hw>;
+		status = "disabled";
+	};
+
 	mpp_srv: mpp-srv {
 		compatible = "rockchip,mpp-service";
 		rockchip,taskqueue-count = <6>;
@@ -1574,8 +1580,8 @@
 		status = "disabled";
 	};
 
-	mipi_csi2: mipi-csi2@fdfb0000 {
-		compatible = "rockchip,rk3568-mipi-csi2";
+	mipi_csi2_hw: mipi-csi2-hw@fdfb0000 {
+		compatible = "rockchip,rk3568-mipi-csi2-hw";
 		reg = <0x0 0xfdfb0000 0x0 0x10000>;
 		reg-names = "csihost_regs";
 		interrupts = <GIC_SPI 8 IRQ_TYPE_LEVEL_HIGH>,
@@ -1585,7 +1591,7 @@
 		clock-names = "pclk_csi2host";
 		resets = <&cru SRST_P_CSI2HOST1>;
 		reset-names = "srst_csihost_p";
-		status = "disabled";
+		status = "okay";
 	};
 
 	rkcif: rkcif@fdfe0000 {
