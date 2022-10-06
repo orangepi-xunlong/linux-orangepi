@@ -107,10 +107,6 @@
 	status = "okay";
 };
 
-&ehci0 {
-	status = "okay";
-};
-
 &ehci1 {
 	status = "okay";
 };
@@ -173,10 +169,6 @@
 	bus-width = <4>;
 	non-removable;
 	mmc-ddr-1_8v;
-	status = "okay";
-};
-
-&ohci0 {
 	status = "okay";
 };
 
