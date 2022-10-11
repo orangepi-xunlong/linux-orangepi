@@ -215,7 +215,7 @@ static irqreturn_t as3935_trigger_handler(int irq, void *private)
 
 	st->buffer[0] = val & AS3935_DATA_MASK;
 	iio_push_to_buffers_with_timestamp(indio_dev, &st->buffer,
-					   iio_get_time_ns(indio_dev));
+					   pf->timestamp);
 err_read:
 	iio_trigger_notify_done(indio_dev->trig);
 
@@ -230,24 +230,18 @@ static void as3935_event_work(struct work_struct *work)
 {
 	struct as3935_state *st;
 	int val;
-	int ret;
 
 	st = container_of(work, struct as3935_state, work.work);
 
-	ret = as3935_read(st, AS3935_INT, &val);
-	if (ret) {
-		dev_warn(&st->spi->dev, "read error\n");
-		return;
-	}
-
+	as3935_read(st, AS3935_INT, &val);
 	val &= AS3935_INT_MASK;
 
 	switch (val) {
 	case AS3935_EVENT_INT:
-		iio_trigger_poll_chained(st->trig);
+		iio_trigger_poll(st->trig);
 		break;
 	case AS3935_NOISE_INT:
-		dev_warn(&st->spi->dev, "noise level is too high\n");
+		dev_warn(&st->spi->dev, "noise level is too high");
 		break;
 	}
 }
@@ -349,6 +343,7 @@ static int as3935_probe(struct spi_device *spi)
 
 	st = iio_priv(indio_dev);
 	st->spi = spi;
+	st->tune_cap = 0;
 
 	spi_set_drvdata(spi, indio_dev);
 	mutex_init(&st->lock);
@@ -470,3 +465,4 @@ module_spi_driver(as3935_driver);
 MODULE_AUTHOR("Matt Ranostay <mranostay@gmail.com>");
 MODULE_DESCRIPTION("AS3935 lightning sensor");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS("spi:as3935");

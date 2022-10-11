@@ -23,21 +23,22 @@
 
 #include <linux/err.h>
 #include <linux/module.h>
-#include <linux/mutex.h>
 
-#include <drm/drm_bridge.h>
+#include <drm/drm_crtc.h>
+
+#include "drm/drmP.h"
 
 /**
  * DOC: overview
  *
- * struct &drm_bridge represents a device that hangs on to an encoder. These are
- * handy when a regular &drm_encoder entity isn't enough to represent the entire
+ * drm_bridge represents a device that hangs on to an encoder. These are handy
+ * when a regular drm_encoder entity isn't enough to represent the entire
  * encoder chain.
  *
- * A bridge is always attached to a single &drm_encoder at a time, but can be
- * either connected to it directly, or through an intermediate bridge::
+ * A bridge is always associated to a single drm_encoder at a time, but can be
+ * either connected to it directly, or through an intermediate bridge:
  *
- *     encoder ---> bridge B ---> bridge A
+ * encoder ---> bridge B ---> bridge A
  *
  * Here, the output of the encoder feeds to bridge B, and that furthers feeds to
  * bridge A.
@@ -45,16 +46,11 @@
  * The driver using the bridge is responsible to make the associations between
  * the encoder and bridges. Once these links are made, the bridges will
  * participate along with encoder functions to perform mode_set/enable/disable
- * through the ops provided in &drm_bridge_funcs.
+ * through the ops provided in drm_bridge_funcs.
  *
  * drm_bridge, like drm_panel, aren't drm_mode_object entities like planes,
- * CRTCs, encoders or connectors and hence are not visible to userspace. They
- * just provide additional hooks to get the desired output at the end of the
- * encoder chain.
- *
- * Bridges can also be chained up using the next pointer in struct &drm_bridge.
- *
- * Both legacy CRTC helpers and the new atomic modeset helpers support bridges.
+ * crtcs, encoders or connectors. They just provide additional hooks to get the
+ * desired output at the end of the encoder chain.
  */
 
 static DEFINE_MUTEX(bridge_lock);
@@ -97,11 +93,11 @@ EXPORT_SYMBOL(drm_bridge_remove);
  * @dev: DRM device
  * @bridge: bridge control structure
  *
- * Called by a kms driver to link one of our encoder/bridge to the given
+ * called by a kms driver to link one of our encoder/bridge to the given
  * bridge.
  *
  * Note that setting up links between the bridge and our encoder/bridge
- * objects needs to be handled by the kms driver itself.
+ * objects needs to be handled by the kms driver itself
  *
  * RETURNS:
  * Zero on success, error code on failure
@@ -124,39 +120,36 @@ int drm_bridge_attach(struct drm_device *dev, struct drm_bridge *bridge)
 EXPORT_SYMBOL(drm_bridge_attach);
 
 /**
- * drm_bridge_detach - deassociate given bridge from its DRM device
- *
- * @bridge: bridge control structure
- *
- * Called by a kms driver to unlink the given bridge from its DRM device.
- *
- * Note that tearing down links between the bridge and our encoder/bridge
- * objects needs to be handled by the kms driver itself.
- */
-void drm_bridge_detach(struct drm_bridge *bridge)
-{
-	if (WARN_ON(!bridge))
-		return;
-
-	if (WARN_ON(!bridge->dev))
-		return;
-
-	if (bridge->funcs->detach)
-		bridge->funcs->detach(bridge);
-
-	bridge->dev = NULL;
-}
-EXPORT_SYMBOL(drm_bridge_detach);
-
-/**
  * DOC: bridge callbacks
  *
- * The &drm_bridge_funcs ops are populated by the bridge driver. The DRM
- * internals (atomic and CRTC helpers) use the helpers defined in drm_bridge.c
- * These helpers call a specific &drm_bridge_funcs op for all the bridges
+ * The drm_bridge_funcs ops are populated by the bridge driver. The drm
+ * internals(atomic and crtc helpers) use the helpers defined in drm_bridge.c
+ * These helpers call a specific drm_bridge_funcs op for all the bridges
  * during encoder configuration.
  *
- * For detailed specification of the bridge callbacks see &drm_bridge_funcs.
+ * When creating a bridge driver, one can implement drm_bridge_funcs op with
+ * the help of these rough rules:
+ *
+ * pre_enable: this contains things needed to be done for the bridge before
+ * its clock and timings are enabled by its source. For a bridge, its source
+ * is generally the encoder or bridge just before it in the encoder chain.
+ *
+ * enable: this contains things needed to be done for the bridge once its
+ * source is enabled. In other words, enable is called once the source is
+ * ready with clock and timing needed by the bridge.
+ *
+ * disable: this contains things needed to be done for the bridge assuming
+ * that its source is still enabled, i.e. clock and timings are still on.
+ *
+ * post_disable: this contains things needed to be done for the bridge once
+ * its source is disabled, i.e. once clocks and timings are off.
+ *
+ * mode_fixup: this should fixup the given mode for the bridge. It is called
+ * after the encoder's mode fixup. mode_fixup can also reject a mode completely
+ * if it's unsuitable for the hardware.
+ *
+ * mode_set: this sets up the mode for the bridge. It assumes that its source
+ * (an encoder or a bridge) has set the mode too.
  */
 
 /**
@@ -166,7 +159,7 @@ EXPORT_SYMBOL(drm_bridge_detach);
  * @mode: desired mode to be set for the bridge
  * @adjusted_mode: updated mode that works for this bridge
  *
- * Calls ->mode_fixup() &drm_bridge_funcs op for all the bridges in the
+ * Calls 'mode_fixup' drm_bridge_funcs op for all the bridges in the
  * encoder chain, starting from the first bridge to the last.
  *
  * Note: the bridge passed should be the one closest to the encoder
@@ -193,11 +186,11 @@ bool drm_bridge_mode_fixup(struct drm_bridge *bridge,
 EXPORT_SYMBOL(drm_bridge_mode_fixup);
 
 /**
- * drm_bridge_disable - calls ->disable() &drm_bridge_funcs op for all
+ * drm_bridge_disable - calls 'disable' drm_bridge_funcs op for all
  *			bridges in the encoder chain.
  * @bridge: bridge control structure
  *
- * Calls ->disable() &drm_bridge_funcs op for all the bridges in the encoder
+ * Calls 'disable' drm_bridge_funcs op for all the bridges in the encoder
  * chain, starting from the last bridge to the first. These are called before
  * calling the encoder's prepare op.
  *
@@ -216,11 +209,11 @@ void drm_bridge_disable(struct drm_bridge *bridge)
 EXPORT_SYMBOL(drm_bridge_disable);
 
 /**
- * drm_bridge_post_disable - calls ->post_disable() &drm_bridge_funcs op for
+ * drm_bridge_post_disable - calls 'post_disable' drm_bridge_funcs op for
  *			     all bridges in the encoder chain.
  * @bridge: bridge control structure
  *
- * Calls ->post_disable() &drm_bridge_funcs op for all the bridges in the
+ * Calls 'post_disable' drm_bridge_funcs op for all the bridges in the
  * encoder chain, starting from the first bridge to the last. These are called
  * after completing the encoder's prepare op.
  *
@@ -245,7 +238,7 @@ EXPORT_SYMBOL(drm_bridge_post_disable);
  * @mode: desired mode to be set for the bridge
  * @adjusted_mode: updated mode that works for this bridge
  *
- * Calls ->mode_set() &drm_bridge_funcs op for all the bridges in the
+ * Calls 'mode_set' drm_bridge_funcs op for all the bridges in the
  * encoder chain, starting from the first bridge to the last.
  *
  * Note: the bridge passed should be the one closest to the encoder
@@ -265,11 +258,11 @@ void drm_bridge_mode_set(struct drm_bridge *bridge,
 EXPORT_SYMBOL(drm_bridge_mode_set);
 
 /**
- * drm_bridge_pre_enable - calls ->pre_enable() &drm_bridge_funcs op for all
+ * drm_bridge_pre_enable - calls 'pre_enable' drm_bridge_funcs op for all
  *			   bridges in the encoder chain.
  * @bridge: bridge control structure
  *
- * Calls ->pre_enable() &drm_bridge_funcs op for all the bridges in the encoder
+ * Calls 'pre_enable' drm_bridge_funcs op for all the bridges in the encoder
  * chain, starting from the last bridge to the first. These are called
  * before calling the encoder's commit op.
  *
@@ -288,11 +281,11 @@ void drm_bridge_pre_enable(struct drm_bridge *bridge)
 EXPORT_SYMBOL(drm_bridge_pre_enable);
 
 /**
- * drm_bridge_enable - calls ->enable() &drm_bridge_funcs op for all bridges
+ * drm_bridge_enable - calls 'enable' drm_bridge_funcs op for all bridges
  *		       in the encoder chain.
  * @bridge: bridge control structure
  *
- * Calls ->enable() &drm_bridge_funcs op for all the bridges in the encoder
+ * Calls 'enable' drm_bridge_funcs op for all the bridges in the encoder
  * chain, starting from the first bridge to the last. These are called
  * after completing the encoder's commit op.
  *

@@ -20,10 +20,8 @@
 #include <linux/module.h>
 #include <linux/i2c.h>
 #include <linux/gpio.h>
-#include <linux/gpio/consumer.h>
 #include <linux/of_irq.h>
 #include <linux/of_gpio.h>
-#include <linux/acpi.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/nfc.h>
@@ -42,7 +40,11 @@
 
 #define ST_NCI_I2C_DRIVER_NAME "st_nci_i2c"
 
-#define ST_NCI_GPIO_NAME_RESET "reset"
+static struct i2c_device_id st_nci_i2c_id_table[] = {
+	{ST_NCI_DRIVER_NAME, 0},
+	{}
+};
+MODULE_DEVICE_TABLE(i2c, st_nci_i2c_id_table);
 
 struct st_nci_i2c_phy {
 	struct i2c_client *i2c_dev;
@@ -208,41 +210,7 @@ static struct nfc_phy_ops i2c_phy_ops = {
 	.disable = st_nci_i2c_disable,
 };
 
-static int st_nci_i2c_acpi_request_resources(struct i2c_client *client)
-{
-	struct st_nci_i2c_phy *phy = i2c_get_clientdata(client);
-	struct gpio_desc *gpiod_reset;
-	struct device *dev = &client->dev;
-	u8 tmp;
-
-	/* Get RESET GPIO from ACPI */
-	gpiod_reset = devm_gpiod_get_index(dev, ST_NCI_GPIO_NAME_RESET, 1,
-					   GPIOD_OUT_HIGH);
-	if (IS_ERR(gpiod_reset)) {
-		nfc_err(dev, "Unable to get RESET GPIO\n");
-		return -ENODEV;
-	}
-
-	phy->gpio_reset = desc_to_gpio(gpiod_reset);
-
-	phy->irq_polarity = irq_get_trigger_type(client->irq);
-
-	phy->se_status.is_ese_present = false;
-	phy->se_status.is_uicc_present = false;
-
-	if (device_property_present(dev, "ese-present")) {
-		device_property_read_u8(dev, "ese-present", &tmp);
-		phy->se_status.is_ese_present = tmp;
-	}
-
-	if (device_property_present(dev, "uicc-present")) {
-		device_property_read_u8(dev, "uicc-present", &tmp);
-		phy->se_status.is_uicc_present = tmp;
-	}
-
-	return 0;
-}
-
+#ifdef CONFIG_OF
 static int st_nci_i2c_of_request_resources(struct i2c_client *client)
 {
 	struct st_nci_i2c_phy *phy = i2c_get_clientdata(client);
@@ -264,7 +232,7 @@ static int st_nci_i2c_of_request_resources(struct i2c_client *client)
 
 	/* GPIO request and configuration */
 	r = devm_gpio_request_one(&client->dev, gpio,
-				GPIOF_OUT_INIT_HIGH, ST_NCI_GPIO_NAME_RESET);
+				GPIOF_OUT_INIT_HIGH, "clf_reset");
 	if (r) {
 		nfc_err(&client->dev, "Failed to request reset pin\n");
 		return r;
@@ -280,6 +248,12 @@ static int st_nci_i2c_of_request_resources(struct i2c_client *client)
 
 	return 0;
 }
+#else
+static int st_nci_i2c_of_request_resources(struct i2c_client *client)
+{
+	return -ENODEV;
+}
+#endif
 
 static int st_nci_i2c_request_resources(struct i2c_client *client)
 {
@@ -298,8 +272,7 @@ static int st_nci_i2c_request_resources(struct i2c_client *client)
 	phy->irq_polarity = pdata->irq_polarity;
 
 	r = devm_gpio_request_one(&client->dev,
-			phy->gpio_reset, GPIOF_OUT_INIT_HIGH,
-			ST_NCI_GPIO_NAME_RESET);
+			phy->gpio_reset, GPIOF_OUT_INIT_HIGH, "clf_reset");
 	if (r) {
 		pr_err("%s : reset gpio_request failed\n", __FILE__);
 		return r;
@@ -349,12 +322,6 @@ static int st_nci_i2c_probe(struct i2c_client *client,
 				"Cannot get platform resources\n");
 			return r;
 		}
-	} else if (ACPI_HANDLE(&client->dev)) {
-		r = st_nci_i2c_acpi_request_resources(client);
-		if (r) {
-			nfc_err(&client->dev, "Cannot get ACPI data\n");
-			return r;
-		}
 	} else {
 		nfc_err(&client->dev,
 			"st_nci platform resources not available\n");
@@ -391,19 +358,7 @@ static int st_nci_i2c_remove(struct i2c_client *client)
 	return 0;
 }
 
-static struct i2c_device_id st_nci_i2c_id_table[] = {
-	{ST_NCI_DRIVER_NAME, 0},
-	{}
-};
-MODULE_DEVICE_TABLE(i2c, st_nci_i2c_id_table);
-
-static const struct acpi_device_id st_nci_i2c_acpi_match[] = {
-	{"SMO2101"},
-	{"SMO2102"},
-	{}
-};
-MODULE_DEVICE_TABLE(acpi, st_nci_i2c_acpi_match);
-
+#ifdef CONFIG_OF
 static const struct of_device_id of_st_nci_i2c_match[] = {
 	{ .compatible = "st,st21nfcb-i2c", },
 	{ .compatible = "st,st21nfcb_i2c", },
@@ -411,17 +366,19 @@ static const struct of_device_id of_st_nci_i2c_match[] = {
 	{}
 };
 MODULE_DEVICE_TABLE(of, of_st_nci_i2c_match);
+#endif
 
 static struct i2c_driver st_nci_i2c_driver = {
 	.driver = {
+		.owner = THIS_MODULE,
 		.name = ST_NCI_I2C_DRIVER_NAME,
 		.of_match_table = of_match_ptr(of_st_nci_i2c_match),
-		.acpi_match_table = ACPI_PTR(st_nci_i2c_acpi_match),
 	},
 	.probe = st_nci_i2c_probe,
 	.id_table = st_nci_i2c_id_table,
 	.remove = st_nci_i2c_remove,
 };
+
 module_i2c_driver(st_nci_i2c_driver);
 
 MODULE_LICENSE("GPL");

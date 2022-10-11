@@ -76,8 +76,13 @@
 #include <linux/usb.h>
 #include <linux/usb/serial.h>
 
-static bool safe = true;
-static bool padded = IS_ENABLED(CONFIG_USB_SERIAL_SAFE_PADDED);
+
+#ifndef CONFIG_USB_SERIAL_SAFE_PADDED
+#define CONFIG_USB_SERIAL_SAFE_PADDED 0
+#endif
+
+static bool safe = 1;
+static bool padded = CONFIG_USB_SERIAL_SAFE_PADDED;
 
 #define DRIVER_AUTHOR "sl@lineo.com, tbr@lineo.com, Johan Hovold <jhovold@gmail.com>"
 #define DRIVER_DESC "USB Safe Encapsulated Serial"
@@ -278,7 +283,7 @@ static int safe_startup(struct usb_serial *serial)
 	case LINEO_SAFESERIAL_CRC:
 		break;
 	case LINEO_SAFESERIAL_CRC_PADDED:
-		padded = true;
+		padded = 1;
 		break;
 	default:
 		return -EINVAL;

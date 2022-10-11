@@ -51,14 +51,8 @@
 static DEFINE_MUTEX(deferred_probe_mutex);
 static LIST_HEAD(deferred_probe_pending_list);
 static LIST_HEAD(deferred_probe_active_list);
+static struct workqueue_struct *deferred_wq;
 static atomic_t deferred_trigger_count = ATOMIC_INIT(0);
-
-/*
- * In some cases, like suspend to RAM or hibernation, It might be reasonable
- * to prohibit probing of devices as it could be unsafe.
- * Once defer_all_probes is true all drivers probes will be forcibly deferred.
- */
-static bool defer_all_probes;
 
 /*
  * deferred_probe_work_func() - Retry probing devices in the active list.
@@ -174,31 +168,7 @@ static void driver_deferred_probe_trigger(void)
 	 * Kick the re-probe thread.  It may already be scheduled, but it is
 	 * safe to kick it again.
 	 */
-	schedule_work(&deferred_probe_work);
-}
-
-/**
- * device_block_probing() - Block/defere device's probes
- *
- *	It will disable probing of devices and defer their probes instead.
- */
-void device_block_probing(void)
-{
-	defer_all_probes = true;
-	/* sync with probes to avoid races. */
-	wait_for_device_probe();
-}
-
-/**
- * device_unblock_probing() - Unblock/enable device's probes
- *
- *	It will restore normal behavior and trigger re-probing of deferred
- * devices.
- */
-void device_unblock_probing(void)
-{
-	defer_all_probes = false;
-	driver_deferred_probe_trigger();
+	queue_work(deferred_wq, &deferred_probe_work);
 }
 
 /**
@@ -210,31 +180,21 @@ void device_unblock_probing(void)
  */
 static int deferred_probe_initcall(void)
 {
+	deferred_wq = create_singlethread_workqueue("deferwq");
+	if (WARN_ON(!deferred_wq))
+		return -ENOMEM;
+
 	driver_deferred_probe_enable = true;
 	driver_deferred_probe_trigger();
 	/* Sort as many dependencies as possible before exiting initcalls */
-	flush_work(&deferred_probe_work);
+	flush_workqueue(deferred_wq);
 	return 0;
 }
 late_initcall(deferred_probe_initcall);
 
-/**
- * device_is_bound() - Check if device is bound to a driver
- * @dev: device to check
- *
- * Returns true if passed device has already finished probing successfully
- * against a driver.
- *
- * This function must be called with the device lock held.
- */
-bool device_is_bound(struct device *dev)
-{
-	return dev->p && klist_node_attached(&dev->p->knode_driver);
-}
-
 static void driver_bound(struct device *dev)
 {
-	if (device_is_bound(dev)) {
+	if (klist_node_attached(&dev->p->knode_driver)) {
 		printk(KERN_WARNING "%s: device %s already bound\n",
 			__func__, kobject_name(&dev->kobj));
 		return;
@@ -310,57 +270,29 @@ int device_bind_driver(struct device *dev)
 	ret = driver_sysfs_add(dev);
 	if (!ret)
 		driver_bound(dev);
-	else if (dev->bus)
-		blocking_notifier_call_chain(&dev->bus->p->bus_notifier,
-					     BUS_NOTIFY_DRIVER_NOT_BOUND, dev);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(device_bind_driver);
-
-#ifdef CONFIG_SUNXI_BOOTEVENT
-#include "../misc/sunxi-bootevent/bootevent.h"
-#else
-#define TIME_LOG_START()
-#define TIME_LOG_END()
-#define bootevent_probe(ts, dev, drv, probe)
-#endif
 
 static atomic_t probe_count = ATOMIC_INIT(0);
 static DECLARE_WAIT_QUEUE_HEAD(probe_waitqueue);
 
 static int really_probe(struct device *dev, struct device_driver *drv)
 {
-	int ret = -EPROBE_DEFER;
+	int ret = 0;
 	int local_trigger_count = atomic_read(&deferred_trigger_count);
-#ifdef CONFIG_SUNXI_BOOTEVENT
-	unsigned long long ts = 0;
-#endif
-	bool test_remove = IS_ENABLED(CONFIG_DEBUG_TEST_DRIVER_REMOVE) &&
-			   !drv->suppress_bind_attrs;
-
-	if (defer_all_probes) {
-		/*
-		 * Value of defer_all_probes can be set only by
-		 * device_defer_all_probes_enable() which, in turn, will call
-		 * wait_for_device_probe() right after that to avoid any races.
-		 */
-		dev_dbg(dev, "Driver %s force probe deferral\n", drv->name);
-		driver_deferred_probe_add(dev);
-		return ret;
-	}
 
 	atomic_inc(&probe_count);
 	pr_debug("bus: '%s': %s: probing driver %s with device %s\n",
 		 drv->bus->name, __func__, drv->name, dev_name(dev));
 	WARN_ON(!list_empty(&dev->devres_head));
 
-re_probe:
 	dev->driver = drv;
 
 	/* If using pinctrl, bind pins now before probing */
 	ret = pinctrl_bind_pins(dev);
 	if (ret)
-		goto pinctrl_bind_failed;
+		goto probe_failed;
 
 	if (driver_sysfs_add(dev)) {
 		printk(KERN_ERR "%s: driver_sysfs_add(%s) failed\n",
@@ -375,38 +307,13 @@ re_probe:
 	}
 
 	if (dev->bus->probe) {
-		TIME_LOG_START();
 		ret = dev->bus->probe(dev);
-		TIME_LOG_END();
-		bootevent_probe(ts, dev, drv, (unsigned long)dev->bus->probe);
 		if (ret)
 			goto probe_failed;
 	} else if (drv->probe) {
-		TIME_LOG_START();
 		ret = drv->probe(dev);
-		TIME_LOG_END();
-		bootevent_probe(ts, dev, drv, (unsigned long)drv->probe);
 		if (ret)
 			goto probe_failed;
-	}
-
-	if (test_remove) {
-		test_remove = false;
-
-		if (dev->bus->remove)
-			dev->bus->remove(dev);
-		else if (drv->remove)
-			drv->remove(dev);
-
-		devres_release_all(dev);
-		driver_sysfs_remove(dev);
-		dev->driver = NULL;
-		dev_set_drvdata(dev, NULL);
-		if (dev->pm_domain && dev->pm_domain->dismiss)
-			dev->pm_domain->dismiss(dev);
-		pm_runtime_reinit(dev);
-
-		goto re_probe;
 	}
 
 	pinctrl_init_done(dev);
@@ -421,17 +328,12 @@ re_probe:
 	goto done;
 
 probe_failed:
-	if (dev->bus)
-		blocking_notifier_call_chain(&dev->bus->p->bus_notifier,
-					     BUS_NOTIFY_DRIVER_NOT_BOUND, dev);
-pinctrl_bind_failed:
 	devres_release_all(dev);
 	driver_sysfs_remove(dev);
 	dev->driver = NULL;
 	dev_set_drvdata(dev, NULL);
 	if (dev->pm_domain && dev->pm_domain->dismiss)
 		dev->pm_domain->dismiss(dev);
-	pm_runtime_reinit(dev);
 
 	switch (ret) {
 	case -EPROBE_DEFER:
@@ -478,6 +380,7 @@ int driver_probe_done(void)
 		return -EBUSY;
 	return 0;
 }
+EXPORT_SYMBOL(driver_probe_done);
 
 /**
  * wait_for_device_probe
@@ -485,9 +388,6 @@ int driver_probe_done(void)
  */
 void wait_for_device_probe(void)
 {
-	/* wait for the deferred probe workqueue to finish */
-	flush_work(&deferred_probe_work);
-
 	/* wait for the known devices to complete their probing */
 	wait_event(probe_waitqueue, atomic_read(&probe_count) == 0);
 	async_synchronize_full();
@@ -585,7 +485,6 @@ static int __device_attach_driver(struct device_driver *drv, void *_data)
 	struct device_attach_data *data = _data;
 	struct device *dev = data->dev;
 	bool async_allowed;
-	int ret;
 
 	/*
 	 * Check if device has already been claimed. This may
@@ -596,17 +495,8 @@ static int __device_attach_driver(struct device_driver *drv, void *_data)
 	if (dev->driver)
 		return -EBUSY;
 
-	ret = driver_match_device(drv, dev);
-	if (ret == 0) {
-		/* no match */
+	if (!driver_match_device(drv, dev))
 		return 0;
-	} else if (ret == -EPROBE_DEFER) {
-		dev_dbg(dev, "Device match requests probe deferral\n");
-		driver_deferred_probe_add(dev);
-	} else if (ret < 0) {
-		dev_dbg(dev, "Bus failed to match device: %d", ret);
-		return ret;
-	} /* ret > 0 means positive match */
 
 	async_allowed = driver_allows_async_probing(drv);
 
@@ -652,7 +542,7 @@ static int __device_attach(struct device *dev, bool allow_async)
 
 	device_lock(dev);
 	if (dev->driver) {
-		if (device_is_bound(dev)) {
+		if (klist_node_attached(&dev->p->knode_driver)) {
 			ret = 1;
 			goto out_unlock;
 		}
@@ -726,7 +616,6 @@ void device_initial_probe(struct device *dev)
 static int __driver_attach(struct device *dev, void *data)
 {
 	struct device_driver *drv = data;
-	int ret;
 
 	/*
 	 * Lock device and try to bind to it. We drop the error
@@ -738,17 +627,8 @@ static int __driver_attach(struct device *dev, void *data)
 	 * is an error.
 	 */
 
-	ret = driver_match_device(drv, dev);
-	if (ret == 0) {
-		/* no match */
+	if (!driver_match_device(drv, dev))
 		return 0;
-	} else if (ret == -EPROBE_DEFER) {
-		dev_dbg(dev, "Device match requests probe deferral\n");
-		driver_deferred_probe_add(dev);
-	} else if (ret < 0) {
-		dev_dbg(dev, "Bus failed to match device: %d", ret);
-		return ret;
-	} /* ret > 0 means positive match */
 
 	if (dev->parent)	/* Needed for USB */
 		device_lock(dev->parent);
@@ -810,7 +690,6 @@ static void __device_release_driver(struct device *dev)
 		dev_set_drvdata(dev, NULL);
 		if (dev->pm_domain && dev->pm_domain->dismiss)
 			dev->pm_domain->dismiss(dev);
-		pm_runtime_reinit(dev);
 
 		klist_remove(&dev->p->knode_driver);
 		device_pm_check_callbacks(dev);
@@ -818,6 +697,7 @@ static void __device_release_driver(struct device *dev)
 			blocking_notifier_call_chain(&dev->bus->p->bus_notifier,
 						     BUS_NOTIFY_UNBOUND_DRIVER,
 						     dev);
+
 	}
 }
 

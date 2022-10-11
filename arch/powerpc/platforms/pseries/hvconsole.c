@@ -31,7 +31,7 @@
 #include <asm/plpar_wrappers.h>
 
 /**
- * hvc_get_chars - retrieve characters from firmware for denoted vterm adapter
+ * hvc_get_chars - retrieve characters from firmware for denoted vterm adatper
  * @vtermno: The vtermno or unit_address of the adapter from which to fetch the
  *	data.
  * @buf: The character buffer into which to put the character data fetched from

@@ -185,7 +185,7 @@ static arch_spinlock_t mcpm_lock = __ARCH_SPIN_LOCK_UNLOCKED;
 
 static int mcpm_cpu_use_count[MAX_NR_CLUSTERS][MAX_CPUS_PER_CLUSTER];
 
-bool mcpm_cluster_unused(unsigned int cluster)
+static inline bool mcpm_cluster_unused(unsigned int cluster)
 {
 	int i, cnt;
 	for (i = 0, cnt = 0; i < MAX_CPUS_PER_CLUSTER; i++)
@@ -227,8 +227,6 @@ int mcpm_cpu_power_up(unsigned int cpu, unsigned int cluster)
 
 	if (cluster_is_down)
 		ret = platform_ops->cluster_powerup(cluster);
-	if (ret)
-		mcpm_cpu_use_count[cluster][cpu]--;
 	if (cpu_is_down && !ret)
 		ret = platform_ops->cpu_powerup(cpu, cluster);
 
@@ -238,7 +236,6 @@ int mcpm_cpu_power_up(unsigned int cpu, unsigned int cluster)
 }
 
 typedef void (*phys_reset_t)(unsigned long);
-extern void disable_cci_snoops(unsigned int cluster_id);
 
 void mcpm_cpu_power_down(void)
 {
@@ -272,7 +269,6 @@ void mcpm_cpu_power_down(void)
 		arch_spin_unlock(&mcpm_lock);
 		platform_ops->cluster_cache_disable();
 		__mcpm_outbound_leave_critical(cluster, CLUSTER_DOWN);
-		disable_cci_snoops(cluster);
 	} else {
 		if (cpu_going_down)
 			platform_ops->cpu_powerdown_prepare(cpu, cluster);

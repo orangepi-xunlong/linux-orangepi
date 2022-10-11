@@ -44,9 +44,6 @@ struct vfio_device_ops {
 	void	(*request)(void *device_data, unsigned int count);
 };
 
-extern struct iommu_group *vfio_iommu_group_get(struct device *dev);
-extern void vfio_iommu_group_put(struct iommu_group *group, struct device *dev);
-
 extern int vfio_add_group_dev(struct device *dev,
 			      const struct vfio_device_ops *ops,
 			      void *device_data);
@@ -93,17 +90,6 @@ extern bool vfio_external_group_match_file(struct vfio_group *group,
 extern int vfio_external_user_iommu_id(struct vfio_group *group);
 extern long vfio_external_check_extension(struct vfio_group *group,
 					  unsigned long arg);
-
-/*
- * Sub-module helpers
- */
-struct vfio_info_cap {
-	struct vfio_info_cap_header *buf;
-	size_t size;
-};
-extern struct vfio_info_cap_header *vfio_info_cap_add(
-		struct vfio_info_cap *caps, size_t size, u16 id, u16 version);
-extern void vfio_info_cap_shift(struct vfio_info_cap *caps, size_t offset);
 
 struct pci_dev;
 #ifdef CONFIG_EEH

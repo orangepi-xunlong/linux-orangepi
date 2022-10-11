@@ -127,7 +127,7 @@ static int usb_console_setup(struct console *co, char *options)
 	info->port = port;
 
 	++port->port.count;
-	if (!tty_port_initialized(&port->port)) {
+	if (!test_bit(ASYNCB_INITIALIZED, &port->port.flags)) {
 		if (serial->type->set_termios) {
 			/*
 			 * allocate a fake tty so the driver can initialize
@@ -143,12 +143,14 @@ static int usb_console_setup(struct console *co, char *options)
 			tty->driver = usb_serial_tty_driver;
 			tty->index = co->index;
 			init_ldsem(&tty->ldisc_sem);
-			spin_lock_init(&tty->files_lock);
 			INIT_LIST_HEAD(&tty->tty_files);
 			kref_get(&tty->driver->kref);
 			__module_get(tty->driver->owner);
 			tty->ops = &usb_console_fake_tty_ops;
-			tty_init_termios(tty);
+			if (tty_init_termios(tty)) {
+				retval = -ENOMEM;
+				goto put_tty;
+			}
 			tty_port_tty_set(&port->port, tty);
 		}
 
@@ -169,7 +171,7 @@ static int usb_console_setup(struct console *co, char *options)
 			tty_port_tty_set(&port->port, NULL);
 			tty_kref_put(tty);
 		}
-		tty_port_set_initialized(&port->port, 1);
+		set_bit(ASYNCB_INITIALIZED, &port->port.flags);
 	}
 	/* Now that any required fake tty operations are completed restore
 	 * the tty port count */
@@ -183,6 +185,7 @@ static int usb_console_setup(struct console *co, char *options)
 
  fail:
 	tty_port_tty_set(&port->port, NULL);
+ put_tty:
 	tty_kref_put(tty);
  reset_open_count:
 	port->port.count = 0;

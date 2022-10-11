@@ -33,11 +33,6 @@ typedef struct qspinlock {
 } arch_spinlock_t;
 
 /*
- * Initializier
- */
-#define	__ARCH_SPIN_LOCK_UNLOCKED	{ ATOMIC_INIT(0) }
-
-/*
  * Bitfields in the atomic value:
  *
  * When NR_CPUS < 16K

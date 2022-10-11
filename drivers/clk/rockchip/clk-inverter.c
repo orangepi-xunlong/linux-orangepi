@@ -90,7 +90,7 @@ struct clk *rockchip_clk_register_inverter(const char *name,
 
 	inv_clock = kmalloc(sizeof(*inv_clock), GFP_KERNEL);
 	if (!inv_clock)
-		return ERR_PTR(-ENOMEM);
+		return NULL;
 
 	init.name = name;
 	init.num_parents = num_parents;
@@ -106,7 +106,11 @@ struct clk *rockchip_clk_register_inverter(const char *name,
 
 	clk = clk_register(NULL, &inv_clock->hw);
 	if (IS_ERR(clk))
-		kfree(inv_clock);
+		goto err_free;
 
 	return clk;
+
+err_free:
+	kfree(inv_clock);
+	return NULL;
 }

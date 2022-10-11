@@ -135,7 +135,7 @@ struct fsnotify_group {
 	const struct fsnotify_ops *ops;	/* how this group handles things */
 
 	/* needed to send notification to userspace */
-	spinlock_t notification_lock;		/* protect the notification_list */
+	struct mutex notification_mutex;	/* protect the notification_list */
 	struct list_head notification_list;	/* list of event_holder this group needs to send to userspace */
 	wait_queue_head_t notification_waitq;	/* read() on the notification file blocks on this waitq */
 	unsigned int q_len;			/* events on the queue */
@@ -177,6 +177,7 @@ struct fsnotify_group {
 		struct fanotify_group_private_data {
 #ifdef CONFIG_FANOTIFY_ACCESS_PERMISSIONS
 			/* allows a group to block waiting for a userspace response */
+			spinlock_t access_lock;
 			struct list_head access_list;
 			wait_queue_head_t access_waitq;
 #endif /* CONFIG_FANOTIFY_ACCESS_PERMISSIONS */
@@ -266,8 +267,10 @@ static inline int fsnotify_inode_watches_children(struct inode *inode)
  * Update the dentry with a flag indicating the interest of its parent to receive
  * filesystem events when those events happens to this dentry->d_inode.
  */
-static inline void fsnotify_update_flags(struct dentry *dentry)
+static inline void __fsnotify_update_dcache_flags(struct dentry *dentry)
 {
+	struct dentry *parent;
+
 	assert_spin_locked(&dentry->d_lock);
 
 	/*
@@ -277,10 +280,24 @@ static inline void fsnotify_update_flags(struct dentry *dentry)
 	 * find our entry, so it will spin until we complete here, and update
 	 * us with the new state.
 	 */
-	if (fsnotify_inode_watches_children(dentry->d_parent->d_inode))
+	parent = dentry->d_parent;
+	if (parent->d_inode && fsnotify_inode_watches_children(parent->d_inode))
 		dentry->d_flags |= DCACHE_FSNOTIFY_PARENT_WATCHED;
 	else
 		dentry->d_flags &= ~DCACHE_FSNOTIFY_PARENT_WATCHED;
+}
+
+/*
+ * fsnotify_d_instantiate - instantiate a dentry for inode
+ */
+static inline void __fsnotify_d_instantiate(struct dentry *dentry, struct inode *inode)
+{
+	if (!inode)
+		return;
+
+	spin_lock(&dentry->d_lock);
+	__fsnotify_update_dcache_flags(dentry);
+	spin_unlock(&dentry->d_lock);
 }
 
 /* called from fsnotify listeners, such as fanotify or dnotify */
@@ -347,6 +364,8 @@ extern void fsnotify_clear_vfsmount_marks_by_group(struct fsnotify_group *group)
 extern void fsnotify_clear_inode_marks_by_group(struct fsnotify_group *group);
 /* run all the marks in a group, and clear all of the marks where mark->flags & flags is true*/
 extern void fsnotify_clear_marks_by_group_flags(struct fsnotify_group *group, unsigned int flags);
+/* run all the marks in a group, and flag them to be freed */
+extern void fsnotify_clear_marks_by_group(struct fsnotify_group *group);
 extern void fsnotify_get_mark(struct fsnotify_mark *mark);
 extern void fsnotify_put_mark(struct fsnotify_mark *mark);
 extern void fsnotify_unmount_inodes(struct super_block *sb);
@@ -374,7 +393,10 @@ static inline void __fsnotify_inode_delete(struct inode *inode)
 static inline void __fsnotify_vfsmount_delete(struct vfsmount *mnt)
 {}
 
-static inline void fsnotify_update_flags(struct dentry *dentry)
+static inline void __fsnotify_update_dcache_flags(struct dentry *dentry)
+{}
+
+static inline void __fsnotify_d_instantiate(struct dentry *dentry, struct inode *inode)
 {}
 
 static inline u32 fsnotify_get_cookie(void)

@@ -244,6 +244,8 @@ void snd_soc_jack_notifier_unregister(struct snd_soc_jack *jack,
 }
 EXPORT_SYMBOL_GPL(snd_soc_jack_notifier_unregister);
 
+extern int es8316_headset_detect(int jack_insert);
+
 #ifdef CONFIG_GPIOLIB
 /* gpio detect */
 static void snd_soc_jack_gpio_detect(struct snd_soc_jack_gpio *gpio)
@@ -265,6 +267,9 @@ static void snd_soc_jack_gpio_detect(struct snd_soc_jack_gpio *gpio)
 		report = gpio->jack_status_check(gpio->data);
 
 	snd_soc_jack_report(jack, report, gpio->report);
+
+	if (strcmp(jack->card->name, "rockchip-es8316c") == 0)
+		es8316_headset_detect(enable);
 }
 
 /* irq handler for gpio pin */

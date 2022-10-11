@@ -45,6 +45,7 @@
 /* USB external connector */
 #define EXTCON_USB		1
 #define EXTCON_USB_HOST		2
+#define EXTCON_USB_VBUS_EN	3
 
 /* Charging external connector */
 #define EXTCON_CHG_USB_SDP	5	/* Standard Downstream Port */
@@ -53,7 +54,6 @@
 #define EXTCON_CHG_USB_ACA	8	/* Accessory Charger Adapter */
 #define EXTCON_CHG_USB_FAST	9
 #define EXTCON_CHG_USB_SLOW	10
-#define EXTCON_CHG_WPT		11	/* Wireless Power Transfer */
 
 /* Jack external connector */
 #define EXTCON_JACK_MICROPHONE	20
@@ -71,10 +71,6 @@
 #define EXTCON_DISP_DVI		42	/* Digital Visual Interface */
 #define EXTCON_DISP_VGA		43	/* Video Graphics Array */
 #define EXTCON_DISP_DP		44	/* Display Port */
-#define EXTCON_DISP_HMD		45	/* Head-Mounted Display */
-#define EXTCON_DISP_CVBS	46
-#define EXTCON_DISP_TVD		47
-#define EXTCON_DISP_EDP		48
 
 /* Miscellaneous external connector */
 #define EXTCON_DOCK		60
@@ -136,20 +132,9 @@
 #define EXTCON_PROP_JACK_MAX		100
 #define EXTCON_PROP_JACK_CNT (EXTCON_PROP_JACK_MAX - EXTCON_PROP_JACK_MIN + 1)
 
-/*
- * Properties of EXTCON_TYPE_DISP.
- *
- * - EXTCON_PROP_DISP_HPD (Hot Plug Detect)
- * @type:       integer (intval)
- * @value:      0 (no hpd) or 1 (hpd)
- * @default:    0 (no hpd)
- *
- */
-#define EXTCON_PROP_DISP_HPD		150
-
 /* Properties of EXTCON_TYPE_DISP. */
 #define EXTCON_PROP_DISP_MIN		150
-#define EXTCON_PROP_DISP_MAX		151
+#define EXTCON_PROP_DISP_MAX		150
 #define EXTCON_PROP_DISP_CNT (EXTCON_PROP_DISP_MAX - EXTCON_PROP_DISP_MIN + 1)
 
 /*
@@ -252,6 +237,7 @@ extern int extcon_set_state(struct extcon_dev *edev, unsigned int id,
 				   bool cable_state);
 extern int extcon_set_state_sync(struct extcon_dev *edev, unsigned int id,
 				bool cable_state);
+
 /*
  * Synchronize the state and property data for a specific external connector.
  */

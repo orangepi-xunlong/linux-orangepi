@@ -22,11 +22,6 @@
 #define APIC_VERBOSE 1
 #define APIC_DEBUG   2
 
-/* Macros for apic_extnmi which controls external NMI masking */
-#define APIC_EXTNMI_BSP		0 /* Default */
-#define APIC_EXTNMI_ALL		1
-#define APIC_EXTNMI_NONE	2
-
 /*
  * Define the default level of output to be very little
  * This can be turned up by using apic=verbose for more
@@ -49,7 +44,7 @@ static inline void generic_apic_probe(void)
 
 #ifdef CONFIG_X86_LOCAL_APIC
 
-extern unsigned int apic_verbosity;
+extern int apic_verbosity;
 extern int local_apic_timer_c2_ok;
 
 extern int disable_apic;
@@ -135,7 +130,6 @@ extern void init_apic_mappings(void);
 void register_lapic_address(unsigned long address);
 extern void setup_boot_APIC_clock(void);
 extern void setup_secondary_APIC_clock(void);
-extern void lapic_update_tsc_freq(void);
 extern int APIC_init_uniprocessor(void);
 
 #ifdef CONFIG_X86_64
@@ -171,7 +165,6 @@ static inline void init_apic_mappings(void) { }
 static inline void disable_local_APIC(void) { }
 # define setup_boot_APIC_clock x86_init_noop
 # define setup_secondary_APIC_clock x86_init_noop
-static inline void lapic_update_tsc_freq(void) { }
 #endif /* !CONFIG_X86_LOCAL_APIC */
 
 #ifdef CONFIG_X86_X2APIC
@@ -241,10 +234,10 @@ extern void __init check_x2apic(void);
 extern void x2apic_setup(void);
 static inline int x2apic_enabled(void)
 {
-	return boot_cpu_has(X86_FEATURE_X2APIC) && apic_is_x2apic_enabled();
+	return cpu_has_x2apic && apic_is_x2apic_enabled();
 }
 
-#define x2apic_supported()	(boot_cpu_has(X86_FEATURE_X2APIC))
+#define x2apic_supported()	(cpu_has_x2apic)
 #else /* !CONFIG_X86_X2APIC */
 static inline void check_x2apic(void) { }
 static inline void x2apic_setup(void) { }
@@ -302,13 +295,13 @@ struct apic {
 
 	unsigned int (*get_apic_id)(unsigned long x);
 	unsigned long (*set_apic_id)(unsigned int id);
+	unsigned long apic_id_mask;
 
 	int (*cpu_mask_to_apicid_and)(const struct cpumask *cpumask,
 				      const struct cpumask *andmask,
 				      unsigned int *apicid);
 
 	/* ipi */
-	void (*send_IPI)(int cpu, int vector);
 	void (*send_IPI_mask)(const struct cpumask *mask, int vector);
 	void (*send_IPI_mask_allbutself)(const struct cpumask *mask,
 					 int vector);
@@ -650,8 +643,8 @@ static inline void entering_ack_irq(void)
 
 static inline void ipi_entering_ack_irq(void)
 {
-	irq_enter();
 	ack_APIC_irq();
+	irq_enter();
 }
 
 static inline void exiting_irq(void)
@@ -661,8 +654,9 @@ static inline void exiting_irq(void)
 
 static inline void exiting_ack_irq(void)
 {
-	ack_APIC_irq();
 	irq_exit();
+	/* Ack only at the end to avoid potential reentry */
+	ack_APIC_irq();
 }
 
 extern void ioapic_zap_locks(void);

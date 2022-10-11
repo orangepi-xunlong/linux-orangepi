@@ -25,7 +25,7 @@
  *
  */
 
-#include <linux/module.h>	/* try_module_get & module_put */
+#include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -45,10 +45,10 @@
 
 #define MY_NAME	"pci_hotplug"
 
-#define dbg(fmt, arg...) do { if (debug) printk(KERN_DEBUG "%s: %s: " fmt, MY_NAME, __func__, ## arg); } while (0)
-#define err(format, arg...) printk(KERN_ERR "%s: " format, MY_NAME, ## arg)
-#define info(format, arg...) printk(KERN_INFO "%s: " format, MY_NAME, ## arg)
-#define warn(format, arg...) printk(KERN_WARNING "%s: " format, MY_NAME, ## arg)
+#define dbg(fmt, arg...) do { if (debug) printk(KERN_DEBUG "%s: %s: " fmt , MY_NAME , __func__ , ## arg); } while (0)
+#define err(format, arg...) printk(KERN_ERR "%s: " format , MY_NAME , ## arg)
+#define info(format, arg...) printk(KERN_INFO "%s: " format , MY_NAME , ## arg)
+#define warn(format, arg...) printk(KERN_WARNING "%s: " format , MY_NAME , ## arg)
 
 
 /* local variables */
@@ -226,7 +226,7 @@ static ssize_t test_write_file(struct pci_slot *pci_slot, const char *buf,
 	u32 test;
 	int retval = 0;
 
-	ltest = simple_strtoul(buf, NULL, 10);
+	ltest = simple_strtoul (buf, NULL, 10);
 	test = (u32)(ltest & 0xffffffff);
 	dbg("test = %d\n", test);
 
@@ -396,8 +396,10 @@ static void fs_remove_slot(struct pci_slot *pci_slot)
 static struct hotplug_slot *get_slot_from_name(const char *name)
 {
 	struct hotplug_slot *slot;
+	struct list_head *tmp;
 
-	list_for_each_entry(slot, &pci_hotplug_slot_list, slot_list) {
+	list_for_each(tmp, &pci_hotplug_slot_list) {
+		slot = list_entry(tmp, struct hotplug_slot, slot_list);
 		if (strcmp(hotplug_slot_name(slot), name) == 0)
 			return slot;
 	}
@@ -455,8 +457,17 @@ int __pci_hp_register(struct hotplug_slot *slot, struct pci_bus *bus,
 	list_add(&slot->slot_list, &pci_hotplug_slot_list);
 
 	result = fs_add_slot(pci_slot);
+	if (result)
+		goto err_list_del;
+
 	kobject_uevent(&pci_slot->kobj, KOBJ_ADD);
 	dbg("Added slot %s to the list\n", name);
+	goto out;
+
+err_list_del:
+	list_del(&slot->slot_list);
+	pci_slot->hotplug = NULL;
+	pci_destroy_slot(pci_slot);
 out:
 	mutex_unlock(&pci_hp_mutex);
 	return result;
@@ -537,11 +548,17 @@ static int __init pci_hotplug_init(void)
 	info(DRIVER_DESC " version: " DRIVER_VERSION "\n");
 	return result;
 }
-device_initcall(pci_hotplug_init);
 
-/*
- * not really modular, but the easiest way to keep compat with existing
- * bootargs behaviour is to continue using module_param here.
- */
+static void __exit pci_hotplug_exit(void)
+{
+	cpci_hotplug_exit();
+}
+
+module_init(pci_hotplug_init);
+module_exit(pci_hotplug_exit);
+
+MODULE_AUTHOR(DRIVER_AUTHOR);
+MODULE_DESCRIPTION(DRIVER_DESC);
+MODULE_LICENSE("GPL");
 module_param(debug, bool, 0644);
 MODULE_PARM_DESC(debug, "Debugging mode enabled or not");

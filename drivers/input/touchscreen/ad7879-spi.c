@@ -34,7 +34,7 @@ static int ad7879_spi_xfer(struct spi_device *spi,
 	struct spi_transfer *xfers;
 	void *spi_data;
 	u16 *command;
-	u16 *_rx_buf = rx_buf; /* shut gcc up */
+	u16 *_rx_buf = _rx_buf; /* shut gcc up */
 	u8 idx;
 	int ret;
 

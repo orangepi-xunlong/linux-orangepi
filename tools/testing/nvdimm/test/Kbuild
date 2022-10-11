@@ -1,5 +1,5 @@
 ccflags-y := -I$(src)/../../../../drivers/nvdimm/
-ccflags-y += -I$(src)/../../../../drivers/acpi/nfit/
+ccflags-y += -I$(src)/../../../../drivers/acpi/
 
 obj-m += nfit_test.o
 obj-m += nfit_test_iomap.o

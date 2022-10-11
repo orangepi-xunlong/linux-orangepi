@@ -25,7 +25,7 @@
  */
 
 #include <drm/drmP.h>
-#include "nouveau_drv.h"
+#include "nouveau_drm.h"
 #include "nouveau_reg.h"
 #include "nouveau_encoder.h"
 #include "nouveau_connector.h"
@@ -192,6 +192,8 @@ static const struct drm_encoder_funcs nv04_tv_funcs = {
 
 static const struct drm_encoder_helper_funcs nv04_tv_helper_funcs = {
 	.dpms = nv04_tv_dpms,
+	.save = drm_i2c_encoder_save,
+	.restore = drm_i2c_encoder_restore,
 	.mode_fixup = drm_i2c_encoder_mode_fixup,
 	.prepare = nv04_tv_prepare,
 	.commit = nv04_tv_commit,
@@ -226,9 +228,6 @@ nv04_tv_create(struct drm_connector *connector, struct dcb_output *entry)
 	drm_encoder_init(dev, encoder, &nv04_tv_funcs, DRM_MODE_ENCODER_TVDAC,
 			 NULL);
 	drm_encoder_helper_add(encoder, &nv04_tv_helper_funcs);
-
-	nv_encoder->enc_save = drm_i2c_encoder_save;
-	nv_encoder->enc_restore = drm_i2c_encoder_restore;
 
 	encoder->possible_crtcs = entry->heads;
 	encoder->possible_clones = 0;

@@ -84,6 +84,15 @@ config CRYPTO_RNG_DEFAULT
 	tristate
 	select CRYPTO_DRBG_MENU
 
+config CRYPTO_PCOMP
+	tristate
+	select CRYPTO_PCOMP2
+	select CRYPTO_ALGAPI
+
+config CRYPTO_PCOMP2
+	tristate
+	select CRYPTO_ALGAPI2
+
 config CRYPTO_AKCIPHER2
 	tristate
 	select CRYPTO_ALGAPI2
@@ -93,36 +102,13 @@ config CRYPTO_AKCIPHER
 	select CRYPTO_AKCIPHER2
 	select CRYPTO_ALGAPI
 
-config CRYPTO_KPP2
-	tristate
-	select CRYPTO_ALGAPI2
-
-config CRYPTO_KPP
-	tristate
-	select CRYPTO_ALGAPI
-	select CRYPTO_KPP2
-
 config CRYPTO_RSA
 	tristate "RSA algorithm"
 	select CRYPTO_AKCIPHER
-	select CRYPTO_MANAGER
 	select MPILIB
 	select ASN1
 	help
 	  Generic implementation of the RSA public key algorithm.
-
-config CRYPTO_DH
-	tristate "Diffie-Hellman algorithm"
-	select CRYPTO_KPP
-	select MPILIB
-	help
-	  Generic implementation of the Diffie-Hellman algorithm.
-
-config CRYPTO_ECDH
-	tristate "ECDH algorithm"
-	select CRYPTO_KPP
-	help
-	  Generic implementation of the ECDH algorithm
 
 config CRYPTO_MANAGER
 	tristate "Cryptographic algorithm manager"
@@ -136,8 +122,8 @@ config CRYPTO_MANAGER2
 	select CRYPTO_AEAD2
 	select CRYPTO_HASH2
 	select CRYPTO_BLKCIPHER2
+	select CRYPTO_PCOMP2
 	select CRYPTO_AKCIPHER2
-	select CRYPTO_KPP2
 
 config CRYPTO_USER
 	tristate "Userspace cryptographic algorithm configuration"
@@ -241,9 +227,6 @@ config CRYPTO_GLUE_HELPER_X86
 	depends on X86
 	select CRYPTO_ALGAPI
 
-config CRYPTO_ENGINE
-	tristate
-
 comment "Authenticated Encryption with Associated Data"
 
 config CRYPTO_CCM
@@ -305,6 +288,24 @@ config CRYPTO_CBC
 	help
 	  CBC: Cipher Block Chaining mode
 	  This block cipher algorithm is required for IPSec.
+
+config CRYPTO_HEH
+	tristate "HEH support"
+	select CRYPTO_CMAC
+	select CRYPTO_ECB
+	select CRYPTO_GF128MUL
+	select CRYPTO_MANAGER
+	select CRYPTO_POLY_HASH_ARM64_CE if ARM64 && KERNEL_MODE_NEON
+	help
+	  HEH: Hash-Encrypt-Hash mode
+	  HEH is a proposed block cipher mode of operation which extends the
+	  strong pseudo-random permutation (SPRP) property of block ciphers to
+	  arbitrary-length input strings.  This provides a stronger notion of
+	  security than existing block cipher modes of operation (e.g. CBC, CTR,
+	  XTS), though it is usually less performant.  Applications include disk
+	  encryption and encryption of file names and contents.  Currently, this
+	  implementation only provides a symmetric cipher interface, so it can't
+	  yet be used as an AEAD.
 
 config CRYPTO_CTR
 	tristate "CTR support"
@@ -437,17 +438,6 @@ config CRYPTO_CRC32C_INTEL
 	  gain performance compared with software implementation.
 	  Module will be crc32c-intel.
 
-config CRYPT_CRC32C_VPMSUM
-	tristate "CRC32c CRC algorithm (powerpc64)"
-	depends on PPC64 && ALTIVEC
-	select CRYPTO_HASH
-	select CRC32
-	help
-	  CRC32c algorithm implemented using vector polynomial multiply-sum
-	  (vpmsum) instructions, introduced in POWER8. Enable on POWER8
-	  and newer processors for improved performance.
-
-
 config CRYPTO_CRC32C_SPARC64
 	tristate "CRC32c CRC algorithm (SPARC64)"
 	depends on SPARC64
@@ -500,13 +490,11 @@ config CRYPTO_CRCT10DIF_PCLMUL
 config CRYPTO_GHASH
 	tristate "GHASH digest algorithm"
 	select CRYPTO_GF128MUL
-	select CRYPTO_HASH
 	help
 	  GHASH is message digest algorithm for GCM (Galois/Counter Mode).
 
 config CRYPTO_POLY1305
 	tristate "Poly1305 authenticator algorithm"
-	select CRYPTO_HASH
 	help
 	  Poly1305 authenticator algorithm, RFC7539.
 
@@ -715,38 +703,6 @@ config CRYPTO_SHA1_MB
 	  lanes remain unfilled, a flush operation will be initiated to
 	  process the crypto jobs, adding a slight latency.
 
-config CRYPTO_SHA256_MB
-	tristate "SHA256 digest algorithm (x86_64 Multi-Buffer, Experimental)"
-	depends on X86 && 64BIT
-	select CRYPTO_SHA256
-	select CRYPTO_HASH
-	select CRYPTO_MCRYPTD
-	help
-	  SHA-256 secure hash standard (FIPS 180-1/DFIPS 180-2) implemented
-	  using multi-buffer technique.  This algorithm computes on
-	  multiple data lanes concurrently with SIMD instructions for
-	  better throughput.  It should not be enabled by default but
-	  used when there is significant amount of work to keep the keep
-	  the data lanes filled to get performance benefit.  If the data
-	  lanes remain unfilled, a flush operation will be initiated to
-	  process the crypto jobs, adding a slight latency.
-
-config CRYPTO_SHA512_MB
-        tristate "SHA512 digest algorithm (x86_64 Multi-Buffer, Experimental)"
-        depends on X86 && 64BIT
-        select CRYPTO_SHA512
-        select CRYPTO_HASH
-        select CRYPTO_MCRYPTD
-        help
-          SHA-512 secure hash standard (FIPS 180-1/DFIPS 180-2) implemented
-          using multi-buffer technique.  This algorithm computes on
-          multiple data lanes concurrently with SIMD instructions for
-          better throughput.  It should not be enabled by default but
-          used when there is significant amount of work to keep the keep
-          the data lanes filled to get performance benefit.  If the data
-          lanes remain unfilled, a flush operation will be initiated to
-          process the crypto jobs, adding a slight latency.
-
 config CRYPTO_SHA256
 	tristate "SHA224 and SHA256 digest algorithm"
 	select CRYPTO_HASH
@@ -815,16 +771,6 @@ config CRYPTO_SHA512_SPARC64
 	help
 	  SHA-512 secure hash standard (DFIPS 180-2) implemented
 	  using sparc64 crypto instructions, when available.
-
-config CRYPTO_SHA3
-	tristate "SHA3 digest algorithm"
-	select CRYPTO_HASH
-	help
-	  SHA-3 secure hash standard (DFIPS 202). It's based on
-	  cryptographic sponge function family called Keccak.
-
-	  References:
-	  http://keccak.noekeon.org/
 
 config CRYPTO_TGR192
 	tristate "Tiger digest algorithms"
@@ -1444,20 +1390,6 @@ config CRYPTO_SERPENT_AVX2_X86_64
 	  See also:
 	  <http://www.cl.cam.ac.uk/~rja14/serpent.html>
 
-config CRYPTO_SPECK
-	tristate "Speck cipher algorithm"
-	select CRYPTO_ALGAPI
-	help
-	  Speck is a lightweight block cipher that is tuned for optimal
-	  performance in software (rather than hardware).
-
-	  Speck may not be as secure as AES, and should only be used on systems
-	  where AES is not fast enough.
-
-	  See also: <https://eprint.iacr.org/2013/404.pdf>
-
-	  If unsure, say N.
-
 config CRYPTO_TEA
 	tristate "TEA, XTEA and XETA cipher algorithms"
 	select CRYPTO_ALGAPI
@@ -1590,6 +1522,15 @@ config CRYPTO_DEFLATE
 
 	  You will most probably want this if using IPSec.
 
+config CRYPTO_ZLIB
+	tristate "Zlib compression algorithm"
+	select CRYPTO_PCOMP
+	select ZLIB_INFLATE
+	select ZLIB_DEFLATE
+	select NLATTR
+	help
+	  This is the zlib algorithm.
+
 config CRYPTO_LZO
 	tristate "LZO compression algorithm"
 	select CRYPTO_ALGAPI
@@ -1621,6 +1562,15 @@ config CRYPTO_LZ4HC
 	select LZ4_DECOMPRESS
 	help
 	  This is the LZ4 high compression mode algorithm.
+
+config CRYPTO_ZSTD
+	tristate "Zstd compression algorithm"
+	select CRYPTO_ALGAPI
+	select CRYPTO_ACOMP2
+	select ZSTD_COMPRESS
+	select ZSTD_DECOMPRESS
+	help
+	  This is the zstd algorithm.
 
 comment "Random Number Generation"
 
@@ -1657,7 +1607,6 @@ config CRYPTO_DRBG_HASH
 config CRYPTO_DRBG_CTR
 	bool "Enable CTR DRBG"
 	select CRYPTO_AES
-	depends on CRYPTO_CTR
 	help
 	  Enable the CTR DRBG variant as defined in NIST SP800-90A.
 
@@ -1671,7 +1620,6 @@ endif	# if CRYPTO_DRBG_MENU
 
 config CRYPTO_JITTERENTROPY
 	tristate "Jitterentropy Non-Deterministic Random Number Generator"
-	select CRYPTO_RNG
 	help
 	  The Jitterentropy RNG is a noise that is intended
 	  to provide seed to another RNG. The RNG does not

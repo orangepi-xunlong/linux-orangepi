@@ -7,7 +7,6 @@
  * the Free Software Foundation.
  */
 
-#include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
 #include <linux/file.h>
@@ -17,40 +16,9 @@
 #include <linux/uaccess.h>
 #include <linux/sched.h>
 #include <linux/namei.h>
-#include <linux/fdtable.h>
-#include <linux/ratelimit.h>
 #include "overlayfs.h"
 
 #define OVL_COPY_UP_CHUNK_SIZE (1 << 20)
-
-static bool __read_mostly ovl_check_copy_up;
-module_param_named(check_copy_up, ovl_check_copy_up, bool,
-		   S_IWUSR | S_IRUGO);
-MODULE_PARM_DESC(ovl_check_copy_up,
-		 "Warn on copy-up when causing process also has a R/O fd open");
-
-static int ovl_check_fd(const void *data, struct file *f, unsigned int fd)
-{
-	const struct dentry *dentry = data;
-
-	if (f->f_inode == d_inode(dentry))
-		pr_warn_ratelimited("overlayfs: Warning: Copying up %pD, but open R/O on fd %u which will cease to be coherent [pid=%d %s]\n",
-				    f, fd, current->pid, current->comm);
-	return 0;
-}
-
-/*
- * Check the fds open by this process and warn if something like the following
- * scenario is about to occur:
- *
- *	fd1 = open("foo", O_RDONLY);
- *	fd2 = open("foo", O_RDWR);
- */
-static void ovl_do_check_copy_up(struct dentry *dentry)
-{
-	if (ovl_check_copy_up)
-		iterate_fd(current->files, 0, ovl_check_fd, dentry);
-}
 
 int ovl_copy_xattr(struct dentry *old, struct dentry *new)
 {
@@ -59,8 +27,8 @@ int ovl_copy_xattr(struct dentry *old, struct dentry *new)
 	int uninitialized_var(error);
 	size_t slen;
 
-	if (!(old->d_inode->i_opflags & IOP_XATTR) ||
-	    !(new->d_inode->i_opflags & IOP_XATTR))
+	if (!old->d_inode->i_op->getxattr ||
+	    !new->d_inode->i_op->getxattr)
 		return 0;
 
 	list_size = vfs_listxattr(old, NULL, 0);
@@ -115,13 +83,6 @@ retry:
 			goto retry;
 		}
 
-		error = security_inode_copy_up_xattr(name);
-		if (error < 0 && error != -EOPNOTSUPP)
-			break;
-		if (error == 1) {
-			error = 0;
-			continue; /* Discard */
-		}
 		error = vfs_setxattr(new, name, value, size, 0);
 		if (error)
 			break;
@@ -186,6 +147,40 @@ out_fput:
 	return error;
 }
 
+static char *ovl_read_symlink(struct dentry *realdentry)
+{
+	int res;
+	char *buf;
+	struct inode *inode = realdentry->d_inode;
+	mm_segment_t old_fs;
+
+	res = -EINVAL;
+	if (!inode->i_op->readlink)
+		goto err;
+
+	res = -ENOMEM;
+	buf = (char *) __get_free_page(GFP_KERNEL);
+	if (!buf)
+		goto err;
+
+	old_fs = get_fs();
+	set_fs(get_ds());
+	/* The cast to a user pointer is valid due to the set_fs() */
+	res = inode->i_op->readlink(realdentry,
+				    (char __user *)buf, PAGE_SIZE - 1);
+	set_fs(old_fs);
+	if (res < 0) {
+		free_page((unsigned long) buf);
+		goto err;
+	}
+	buf[res] = '\0';
+
+	return buf;
+
+err:
+	return ERR_PTR(res);
+}
+
 static int ovl_set_timestamps(struct dentry *upperdentry, struct kstat *stat)
 {
 	struct iattr attr = {
@@ -233,8 +228,6 @@ static int ovl_copy_up_locked(struct dentry *workdir, struct dentry *upperdir,
 	struct dentry *upper = NULL;
 	umode_t mode = stat->mode;
 	int err;
-	const struct cred *old_creds = NULL;
-	struct cred *new_creds = NULL;
 
 	newdentry = ovl_lookup_temp(workdir, dentry);
 	err = PTR_ERR(newdentry);
@@ -247,29 +240,15 @@ static int ovl_copy_up_locked(struct dentry *workdir, struct dentry *upperdir,
 	if (IS_ERR(upper))
 		goto out1;
 
-	err = security_inode_copy_up(dentry, &new_creds);
-	if (err < 0)
-		goto out2;
-
-	if (new_creds)
-		old_creds = override_creds(new_creds);
-
 	/* Can't properly set mode on creation because of the umask */
 	stat->mode &= S_IFMT;
 	err = ovl_create_real(wdir, newdentry, stat, link, NULL, true);
 	stat->mode = mode;
-
-	if (new_creds) {
-		revert_creds(old_creds);
-		put_cred(new_creds);
-	}
-
 	if (err)
 		goto out2;
 
 	if (S_ISREG(stat->mode)) {
 		struct path upperpath;
-
 		ovl_path_upper(dentry, &upperpath);
 		BUG_ON(upperpath.dentry != NULL);
 		upperpath.dentry = newdentry;
@@ -283,9 +262,9 @@ static int ovl_copy_up_locked(struct dentry *workdir, struct dentry *upperdir,
 	if (err)
 		goto out_cleanup;
 
-	inode_lock(newdentry->d_inode);
+	mutex_lock(&newdentry->d_inode->i_mutex);
 	err = ovl_set_attr(newdentry, stat);
-	inode_unlock(newdentry->d_inode);
+	mutex_unlock(&newdentry->d_inode->i_mutex);
 	if (err)
 		goto out_cleanup;
 
@@ -294,7 +273,6 @@ static int ovl_copy_up_locked(struct dentry *workdir, struct dentry *upperdir,
 		goto out_cleanup;
 
 	ovl_dentry_update(dentry, newdentry);
-	ovl_inode_update(d_inode(dentry), d_inode(newdentry));
 	newdentry = NULL;
 
 	/*
@@ -332,20 +310,17 @@ out_cleanup:
 int ovl_copy_up_one(struct dentry *parent, struct dentry *dentry,
 		    struct path *lowerpath, struct kstat *stat)
 {
-	DEFINE_DELAYED_CALL(done);
 	struct dentry *workdir = ovl_workdir(dentry);
 	int err;
 	struct kstat pstat;
 	struct path parentpath;
-	struct dentry *lowerdentry = lowerpath->dentry;
 	struct dentry *upperdir;
 	struct dentry *upperdentry;
-	const char *link = NULL;
+	const struct cred *old_cred;
+	char *link = NULL;
 
 	if (WARN_ON(!workdir))
 		return -EROFS;
-
-	ovl_do_check_copy_up(lowerdentry);
 
 	ovl_path_upper(parent, &parentpath);
 	upperdir = parentpath.dentry;
@@ -355,10 +330,12 @@ int ovl_copy_up_one(struct dentry *parent, struct dentry *dentry,
 		return err;
 
 	if (S_ISLNK(stat->mode)) {
-		link = vfs_get_link(lowerdentry, &done);
+		link = ovl_read_symlink(lowerpath->dentry);
 		if (IS_ERR(link))
 			return PTR_ERR(link);
 	}
+
+	old_cred = ovl_override_creds(dentry->d_sb);
 
 	err = -EIO;
 	if (lock_rename(workdir, upperdir) != NULL) {
@@ -380,16 +357,19 @@ int ovl_copy_up_one(struct dentry *parent, struct dentry *dentry,
 	}
 out_unlock:
 	unlock_rename(workdir, upperdir);
-	do_delayed_call(&done);
+	ovl_revert_creds(old_cred);
+
+	if (link)
+		free_page((unsigned long) link);
 
 	return err;
 }
 
 int ovl_copy_up(struct dentry *dentry)
 {
-	int err = 0;
-	const struct cred *old_cred = ovl_override_creds(dentry->d_sb);
+	int err;
 
+	err = 0;
 	while (!err) {
 		struct dentry *next;
 		struct dentry *parent;
@@ -421,7 +401,6 @@ int ovl_copy_up(struct dentry *dentry)
 		dput(parent);
 		dput(next);
 	}
-	revert_creds(old_cred);
 
 	return err;
 }

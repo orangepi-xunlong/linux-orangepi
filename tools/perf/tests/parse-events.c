@@ -12,6 +12,32 @@
 #define PERF_TP_SAMPLE_TYPE (PERF_SAMPLE_RAW | PERF_SAMPLE_TIME | \
 			     PERF_SAMPLE_CPU | PERF_SAMPLE_PERIOD)
 
+#if defined(__s390x__)
+/* Return true if kvm module is available and loaded. Test this
+ * and retun success when trace point kvm_s390_create_vm
+ * exists. Otherwise this test always fails.
+ */
+static bool kvm_s390_create_vm_valid(void)
+{
+	char *eventfile;
+	bool rc = false;
+
+	eventfile = get_events_file("kvm-s390");
+
+	if (eventfile) {
+		DIR *mydir = opendir(eventfile);
+
+		if (mydir) {
+			rc = true;
+			closedir(mydir);
+		}
+		put_events_file(eventfile);
+	}
+
+	return rc;
+}
+#endif
+
 static int test__checkevent_tracepoint(struct perf_evlist *evlist)
 {
 	struct perf_evsel *evsel = perf_evlist__first(evlist);
@@ -32,7 +58,7 @@ static int test__checkevent_tracepoint_multi(struct perf_evlist *evlist)
 	TEST_ASSERT_VAL("wrong number of entries", evlist->nr_entries > 1);
 	TEST_ASSERT_VAL("wrong number of groups", 0 == evlist->nr_groups);
 
-	evlist__for_each_entry(evlist, evsel) {
+	evlist__for_each(evlist, evsel) {
 		TEST_ASSERT_VAL("wrong type",
 			PERF_TYPE_TRACEPOINT == evsel->attr.type);
 		TEST_ASSERT_VAL("wrong sample_type",
@@ -207,7 +233,7 @@ test__checkevent_tracepoint_multi_modifier(struct perf_evlist *evlist)
 
 	TEST_ASSERT_VAL("wrong number of entries", evlist->nr_entries > 1);
 
-	evlist__for_each_entry(evlist, evsel) {
+	evlist__for_each(evlist, evsel) {
 		TEST_ASSERT_VAL("wrong exclude_user",
 				!evsel->attr.exclude_user);
 		TEST_ASSERT_VAL("wrong exclude_kernel",
@@ -1271,38 +1297,6 @@ static int test__checkevent_precise_max_modifier(struct perf_evlist *evlist)
 	return 0;
 }
 
-static int test__checkevent_config_symbol(struct perf_evlist *evlist)
-{
-	struct perf_evsel *evsel = perf_evlist__first(evlist);
-
-	TEST_ASSERT_VAL("wrong name setting", strcmp(evsel->name, "insn") == 0);
-	return 0;
-}
-
-static int test__checkevent_config_raw(struct perf_evlist *evlist)
-{
-	struct perf_evsel *evsel = perf_evlist__first(evlist);
-
-	TEST_ASSERT_VAL("wrong name setting", strcmp(evsel->name, "rawpmu") == 0);
-	return 0;
-}
-
-static int test__checkevent_config_num(struct perf_evlist *evlist)
-{
-	struct perf_evsel *evsel = perf_evlist__first(evlist);
-
-	TEST_ASSERT_VAL("wrong name setting", strcmp(evsel->name, "numpmu") == 0);
-	return 0;
-}
-
-static int test__checkevent_config_cache(struct perf_evlist *evlist)
-{
-	struct perf_evsel *evsel = perf_evlist__first(evlist);
-
-	TEST_ASSERT_VAL("wrong name setting", strcmp(evsel->name, "cachepmu") == 0);
-	return 0;
-}
-
 static int count_tracepoints(void)
 {
 	struct dirent *events_ent;
@@ -1593,6 +1587,7 @@ static struct evlist_test test__events[] = {
 	{
 		.name  = "kvm-s390:kvm_s390_create_vm",
 		.check = test__checkevent_tracepoint,
+		.valid = kvm_s390_create_vm_valid,
 		.id    = 100,
 	},
 #endif
@@ -1610,26 +1605,6 @@ static struct evlist_test test__events[] = {
 		.name  = "task-clock:P,cycles",
 		.check = test__checkevent_precise_max_modifier,
 		.id    = 47,
-	},
-	{
-		.name  = "instructions/name=insn/",
-		.check = test__checkevent_config_symbol,
-		.id    = 48,
-	},
-	{
-		.name  = "r1234/name=rawpmu/",
-		.check = test__checkevent_config_raw,
-		.id    = 49,
-	},
-	{
-		.name  = "4:0x6530160/name=numpmu/",
-		.check = test__checkevent_config_num,
-		.id    = 50,
-	},
-	{
-		.name  = "L1-dcache-misses/name=cachepmu/",
-		.check = test__checkevent_config_cache,
-		.id    = 51,
 	},
 };
 
@@ -1718,7 +1693,7 @@ static int test_term(struct terms_test *t)
 	}
 
 	ret = t->check(&terms);
-	parse_events_terms__purge(&terms);
+	parse_events__free_terms(&terms);
 
 	return ret;
 }
@@ -1782,8 +1757,8 @@ static int test_pmu_events(void)
 		struct evlist_test e;
 		char name[2 * NAME_MAX + 1 + 12 + 3];
 
-		/* Names containing . are special and cannot be used directly */
-		if (strchr(ent->d_name, '.'))
+		if (!strcmp(ent->d_name, ".") ||
+		    !strcmp(ent->d_name, ".."))
 			continue;
 
 		snprintf(name, sizeof(name), "cpu/event=%s/u", ent->d_name);
@@ -1815,7 +1790,7 @@ static void debug_warn(const char *warn, va_list params)
 	fprintf(stderr, " Warning: %s\n", msg);
 }
 
-int test__parse_events(int subtest __maybe_unused)
+int test__parse_events(void)
 {
 	int ret1, ret2 = 0;
 

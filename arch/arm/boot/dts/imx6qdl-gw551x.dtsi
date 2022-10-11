@@ -198,18 +198,6 @@
 	status = "okay";
 };
 
-&pwm2 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_pwm2>; /* MX6_DIO1 */
-	status = "disabled";
-};
-
-&pwm3 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_pwm3>; /* MX6_DIO2 */
-	status = "disabled";
-};
-
 &ssi1 {
 	status = "okay";
 };
@@ -237,12 +225,6 @@
 &usbh1 {
 	vbus-supply = <&reg_usb_h1_vbus>;
 	status = "okay";
-};
-
-&wdog1 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_wdog>;
-	fsl,ext-reset-output;
 };
 
 &iomuxc {
@@ -308,18 +290,6 @@
 			>;
 		};
 
-		pinctrl_pwm2: pwm2grp {
-			fsl,pins = <
-				MX6QDL_PAD_SD1_DAT2__PWM2_OUT		0x1b0b1
-			>;
-		};
-
-		pinctrl_pwm3: pwm3grp {
-			fsl,pins = <
-				MX6QDL_PAD_SD1_DAT1__PWM3_OUT		0x1b0b1
-			>;
-		};
-
 		pinctrl_uart2: uart2grp {
 			fsl,pins = <
 				MX6QDL_PAD_SD4_DAT7__UART2_TX_DATA	0x1b0b1
@@ -337,12 +307,6 @@
 		pinctrl_usbotg: usbotggrp {
 			fsl,pins = <
 				MX6QDL_PAD_GPIO_1__USB_OTG_ID		0x17059
-			>;
-		};
-
-		pinctrl_wdog: wdoggrp {
-			fsl,pins = <
-				MX6QDL_PAD_DISP0_DAT8__WDOG1_B		0x1b0b0
 			>;
 		};
 	};

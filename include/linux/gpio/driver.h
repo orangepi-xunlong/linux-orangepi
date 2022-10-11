@@ -1,42 +1,30 @@
 #ifndef __LINUX_GPIO_DRIVER_H
 #define __LINUX_GPIO_DRIVER_H
 
-#include <linux/device.h>
 #include <linux/types.h>
+#include <linux/module.h>
 #include <linux/irq.h>
 #include <linux/irqchip/chained_irq.h>
 #include <linux/irqdomain.h>
 #include <linux/lockdep.h>
 #include <linux/pinctrl/pinctrl.h>
 
+struct device;
 struct gpio_desc;
 struct of_phandle_args;
 struct device_node;
 struct seq_file;
-struct gpio_device;
-struct module;
 
 #ifdef CONFIG_GPIOLIB
 
 /**
- * enum single_ended_mode - mode for single ended operation
- * @LINE_MODE_PUSH_PULL: normal mode for a GPIO line, drive actively high/low
- * @LINE_MODE_OPEN_DRAIN: set line to be open drain
- * @LINE_MODE_OPEN_SOURCE: set line to be open source
- */
-enum single_ended_mode {
-	LINE_MODE_PUSH_PULL,
-	LINE_MODE_OPEN_DRAIN,
-	LINE_MODE_OPEN_SOURCE,
-};
-
-/**
  * struct gpio_chip - abstract a GPIO controller
- * @label: a functional name for the GPIO device, such as a part
- *	number or the name of the SoC IP-block implementing it.
- * @gpiodev: the internal state holder, opaque struct
+ * @label: for diagnostics
  * @parent: optional parent device providing the GPIOs
+ * @cdev: class device used by sysfs interface (may be NULL)
  * @owner: helps prevent removal of modules exporting active GPIOs
+ * @data: per-instance data assigned by the driver
+ * @list: links gpio_chips together for traversal
  * @request: optional hook for chip-specific activation, such as
  *	enabling module power and clock; may sleep
  * @free: optional hook for chip-specific deactivation, such as
@@ -45,19 +33,12 @@ enum single_ended_mode {
  *	(same as GPIOF_DIR_XXX), or negative error
  * @direction_input: configures signal "offset" as input, or returns error
  * @direction_output: configures signal "offset" as output, or returns error
- * @get: returns value for signal "offset", 0=low, 1=high, or negative error
+ * @get: returns value for signal "offset"; for output signals this
+ *	returns either the value actually sensed, or zero
  * @set: assigns output value for signal "offset"
  * @set_multiple: assigns output values for multiple signals defined by "mask"
  * @set_debounce: optional hook for setting debounce time for specified gpio in
- *	interrupt triggered gpio chips
- * @set_single_ended: optional hook for setting a line as open drain, open
- *	source, or non-single ended (restore from open drain/source to normal
- *	push-pull mode) this should be implemented if the hardware supports
- *	open drain or open source settings. The GPIOlib will otherwise try
- *	to emulate open drain/source by not actively driving lines high/low
- *	if a consumer request this. The driver may return -ENOTSUPP if e.g.
- *	it supports just open drain but not open source and is called
- *	with LINE_MODE_OPEN_SOURCE as mode argument.
+ *      interrupt triggered gpio chips
  * @to_irq: optional hook supporting non-static gpio_to_irq() mappings;
  *	implementation may not sleep
  * @dbg_show: optional routine to show contents in debugfs; default code
@@ -71,6 +52,7 @@ enum single_ended_mode {
  *	get rid of the static GPIO number space in the long run.
  * @ngpio: the number of GPIOs handled by this controller; the last GPIO
  *	handled is (base + ngpio - 1).
+ * @desc: array of ngpio descriptors. Private.
  * @names: if set, must be an array of strings to use as alternative
  *      names for the GPIOs in this chip. Any entry in the array
  *      may be NULL if there is no alias for the GPIO, however the
@@ -84,23 +66,6 @@ enum single_ended_mode {
  *	registers.
  * @irq_not_threaded: flag must be set if @can_sleep is set but the
  *	IRQs don't need to be threaded
- * @read_reg: reader function for generic GPIO
- * @write_reg: writer function for generic GPIO
- * @pin2mask: some generic GPIO controllers work with the big-endian bits
- *	notation, e.g. in a 8-bits register, GPIO7 is the least significant
- *	bit. This callback assigns the right bit mask.
- * @reg_dat: data (in) register for generic GPIO
- * @reg_set: output set register (out=high) for generic GPIO
- * @reg_clk: output clear register (out=low) for generic GPIO
- * @reg_dir: direction setting register for generic GPIO
- * @bgpio_bits: number of register bits used for a generic GPIO i.e.
- *	<register width> * 8
- * @bgpio_lock: used to lock chip->bgpio_data. Also, this is needed to keep
- *	shadowed and real data registers writes together.
- * @bgpio_data:	shadowed data register for generic GPIO to clear/set bits
- *	safely.
- * @bgpio_dir: shadowed direction register for generic GPIO to clear/set
- *	direction safely.
  * @irqchip: GPIO IRQ chip impl, provided by GPIO driver
  * @irqdomain: Interrupt translation domain; responsible for mapping
  *	between GPIO hwirq number and linux irq number
@@ -111,10 +76,6 @@ enum single_ended_mode {
  *	initialization, provided by GPIO driver
  * @irq_parent: GPIO IRQ chip parent/bank linux irq number,
  *	provided by GPIO driver
- * @irq_need_valid_mask: If set core allocates @irq_valid_mask with all
- *	bits set to one
- * @irq_valid_mask: If not %NULL holds bitmask of GPIOs which are valid to
- *	be included in IRQ domain of the chip
  * @lock_key: per GPIO IRQ chip lockdep class
  *
  * A gpio_chip can help platforms abstract various sources of GPIOs so
@@ -129,9 +90,11 @@ enum single_ended_mode {
  */
 struct gpio_chip {
 	const char		*label;
-	struct gpio_device	*gpiodev;
 	struct device		*parent;
+	struct device		*cdev;
 	struct module		*owner;
+	void			*data;
+	struct list_head        list;
 
 	int			(*request)(struct gpio_chip *chip,
 						unsigned offset);
@@ -153,9 +116,6 @@ struct gpio_chip {
 	int			(*set_debounce)(struct gpio_chip *chip,
 						unsigned offset,
 						unsigned debounce);
-	int			(*set_single_ended)(struct gpio_chip *chip,
-						unsigned offset,
-						enum single_ended_mode mode);
 
 	int			(*to_irq)(struct gpio_chip *chip,
 						unsigned offset);
@@ -164,23 +124,10 @@ struct gpio_chip {
 						struct gpio_chip *chip);
 	int			base;
 	u16			ngpio;
+	struct gpio_desc	*desc;
 	const char		*const *names;
 	bool			can_sleep;
 	bool			irq_not_threaded;
-
-#if IS_ENABLED(CONFIG_GPIO_GENERIC)
-	unsigned long (*read_reg)(void __iomem *reg);
-	void (*write_reg)(void __iomem *reg, unsigned long data);
-	unsigned long (*pin2mask)(struct gpio_chip *gc, unsigned int pin);
-	void __iomem *reg_dat;
-	void __iomem *reg_set;
-	void __iomem *reg_clr;
-	void __iomem *reg_dir;
-	int bgpio_bits;
-	spinlock_t bgpio_lock;
-	unsigned long bgpio_data;
-	unsigned long bgpio_dir;
-#endif
 
 #ifdef CONFIG_GPIOLIB_IRQCHIP
 	/*
@@ -193,8 +140,6 @@ struct gpio_chip {
 	irq_flow_handler_t	irq_handler;
 	unsigned int		irq_default_type;
 	int			irq_parent;
-	bool			irq_need_valid_mask;
-	unsigned long		*irq_valid_mask;
 	struct lock_class_key	*lock_key;
 #endif
 
@@ -207,6 +152,15 @@ struct gpio_chip {
 	int of_gpio_n_cells;
 	int (*of_xlate)(struct gpio_chip *gc,
 			const struct of_phandle_args *gpiospec, u32 *flags);
+#endif
+#ifdef CONFIG_PINCTRL
+	/*
+	 * If CONFIG_PINCTRL is enabled, then gpio controllers can optionally
+	 * describe the actual pin range which they serve in an SoC. This
+	 * information would be used by pinctrl subsystem to configure
+	 * corresponding pins for gpio usage.
+	 */
+	struct list_head pin_ranges;
 #endif
 };
 
@@ -230,38 +184,14 @@ extern struct gpio_chip *gpiochip_find(void *data,
 /* lock/unlock as IRQ */
 int gpiochip_lock_as_irq(struct gpio_chip *chip, unsigned int offset);
 void gpiochip_unlock_as_irq(struct gpio_chip *chip, unsigned int offset);
-bool gpiochip_line_is_irq(struct gpio_chip *chip, unsigned int offset);
-
-/* Line status inquiry for drivers */
-bool gpiochip_line_is_open_drain(struct gpio_chip *chip, unsigned int offset);
-bool gpiochip_line_is_open_source(struct gpio_chip *chip, unsigned int offset);
 
 /* get driver data */
-void *gpiochip_get_data(struct gpio_chip *chip);
+static inline void *gpiochip_get_data(struct gpio_chip *chip)
+{
+	return chip->data;
+}
 
 struct gpio_chip *gpiod_to_chip(const struct gpio_desc *desc);
-
-struct bgpio_pdata {
-	const char *label;
-	int base;
-	int ngpio;
-};
-
-#if IS_ENABLED(CONFIG_GPIO_GENERIC)
-
-int bgpio_init(struct gpio_chip *gc, struct device *dev,
-	       unsigned long sz, void __iomem *dat, void __iomem *set,
-	       void __iomem *clr, void __iomem *dirout, void __iomem *dirin,
-	       unsigned long flags);
-
-#define BGPIOF_BIG_ENDIAN		BIT(0)
-#define BGPIOF_UNREADABLE_REG_SET	BIT(1) /* reg_set is unreadable */
-#define BGPIOF_UNREADABLE_REG_DIR	BIT(2) /* reg_dir is unreadable */
-#define BGPIOF_BIG_ENDIAN_BYTE_ORDER	BIT(3)
-#define BGPIOF_READ_OUTPUT_REG_SET	BIT(4) /* reg_set stores output value */
-#define BGPIOF_NO_OUTPUT		BIT(5) /* only input */
-
-#endif
 
 #ifdef CONFIG_GPIOLIB_IRQCHIP
 

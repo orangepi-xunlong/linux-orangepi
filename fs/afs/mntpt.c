@@ -93,7 +93,7 @@ int afs_mntpt_check_symlink(struct afs_vnode *vnode, struct key *key)
 
 	kunmap(page);
 out_free:
-	put_page(page);
+	page_cache_release(page);
 out:
 	_leave(" = %d", ret);
 	return ret;
@@ -189,7 +189,7 @@ static struct vfsmount *afs_mntpt_do_automount(struct dentry *mntpt)
 		buf = kmap_atomic(page);
 		memcpy(devname, buf, size);
 		kunmap_atomic(buf);
-		put_page(page);
+		page_cache_release(page);
 		page = NULL;
 	}
 
@@ -202,7 +202,7 @@ static struct vfsmount *afs_mntpt_do_automount(struct dentry *mntpt)
 
 	/* try and do the mount */
 	_debug("--- attempting mount %s -o %s ---", devname, options);
-	mnt = vfs_submount(mntpt, &afs_fs_type, devname, options);
+	mnt = vfs_kern_mount(&afs_fs_type, 0, devname, options);
 	_debug("--- mount result %p ---", mnt);
 
 	free_page((unsigned long) devname);
@@ -211,7 +211,7 @@ static struct vfsmount *afs_mntpt_do_automount(struct dentry *mntpt)
 	return mnt;
 
 error:
-	put_page(page);
+	page_cache_release(page);
 error_no_page:
 	free_page((unsigned long) options);
 error_no_options:

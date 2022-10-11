@@ -19,7 +19,6 @@
 #include <linux/syscalls.h>
 #include <linux/utime.h>
 #include <linux/initramfs.h>
-#include <linux/file.h>
 
 static ssize_t __init xwrite(int fd, const char *p, size_t count)
 {
@@ -499,6 +498,11 @@ static char * __init unpack_to_rootfs(char *buf, unsigned long len)
 			error("junk in compressed archive");
 		if (state != Reset)
 			error("junk in compressed archive");
+		#ifdef CONFIG_ARCH_ROCKCHIP
+		else
+			break;
+		#endif
+
 		this_header = saved_offset + my_inptr;
 		buf += my_inptr;
 		len -= my_inptr;
@@ -520,6 +524,17 @@ static int __init retain_initrd_param(char *str)
 	return 1;
 }
 __setup("retain_initrd", retain_initrd_param);
+
+static int __initdata do_dump_initrd;
+
+static int __init dump_initrd_param(char *str)
+{
+	if (*str)
+		return 0;
+	do_dump_initrd = 1;
+	return 1;
+}
+__setup("dump_initrd", dump_initrd_param);
 
 extern char __initramfs_start[];
 extern unsigned long __initramfs_size;
@@ -638,6 +653,9 @@ static int __init populate_rootfs(void)
 		err = unpack_to_rootfs((char *)initrd_start,
 			initrd_end - initrd_start);
 		if (!err) {
+			if (do_dump_initrd)
+				goto dump;
+
 			free_initrd();
 			goto done;
 		} else {
@@ -646,6 +664,7 @@ static int __init populate_rootfs(void)
 		}
 		printk(KERN_INFO "rootfs image is not initramfs (%s)"
 				"; looks like an initrd\n", err);
+	dump:
 		fd = sys_open("/initrd.image",
 			      O_WRONLY|O_CREAT, 0700);
 		if (fd >= 0) {
@@ -668,7 +687,6 @@ static int __init populate_rootfs(void)
 			printk(KERN_EMERG "Initramfs unpacking failed: %s\n", err);
 		free_initrd();
 #endif
-		flush_delayed_fput();
 		/*
 		 * Try loading default modules from initramfs.  This gives
 		 * us a chance to load before device_initcalls.
@@ -677,4 +695,23 @@ static int __init populate_rootfs(void)
 	}
 	return 0;
 }
+
+#if IS_BUILTIN(CONFIG_INITRD_ASYNC)
+#include <linux/kthread.h>
+#include <linux/async.h>
+
+static void __init unpack_rootfs_async(void *unused, async_cookie_t cookie)
+{
+	populate_rootfs();
+}
+
+static int __init populate_rootfs_async(void)
+{
+	async_schedule(unpack_rootfs_async, NULL);
+	return 0;
+}
+
+pure_initcall(populate_rootfs_async);
+#else
 rootfs_initcall(populate_rootfs);
+#endif

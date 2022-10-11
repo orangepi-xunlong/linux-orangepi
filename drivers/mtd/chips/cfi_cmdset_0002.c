@@ -615,9 +615,11 @@ struct mtd_info *cfi_cmdset_0002(struct map_info *map, int primary)
 
 				for (i=0; i<cfi->cfiq->NumEraseRegions / 2; i++) {
 					int j = (cfi->cfiq->NumEraseRegions-1)-i;
+					__u32 swap;
 
-					swap(cfi->cfiq->EraseRegionInfo[i],
-					     cfi->cfiq->EraseRegionInfo[j]);
+					swap = cfi->cfiq->EraseRegionInfo[i];
+					cfi->cfiq->EraseRegionInfo[i] = cfi->cfiq->EraseRegionInfo[j];
+					cfi->cfiq->EraseRegionInfo[j] = swap;
 				}
 			}
 			/* Set the default CFI lock/unlock addresses */

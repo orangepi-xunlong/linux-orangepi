@@ -93,7 +93,7 @@ static struct raw_hashinfo raw_v4_hashinfo = {
 	.lock = __RW_LOCK_UNLOCKED(raw_v4_hashinfo.lock),
 };
 
-int raw_hash_sk(struct sock *sk)
+void raw_hash_sk(struct sock *sk)
 {
 	struct raw_hashinfo *h = sk->sk_prot->h.raw_hash;
 	struct hlist_head *head;
@@ -104,8 +104,6 @@ int raw_hash_sk(struct sock *sk)
 	sk_add_node(sk, head);
 	sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
 	write_unlock_bh(&h->lock);
-
-	return 0;
 }
 EXPORT_SYMBOL_GPL(raw_hash_sk);
 
@@ -169,6 +167,7 @@ static int icmp_filter(const struct sock *sk, const struct sk_buff *skb)
  */
 static int raw_v4_input(struct sk_buff *skb, const struct iphdr *iph, int hash)
 {
+	int dif = inet_iif(skb);
 	struct sock *sk;
 	struct hlist_head *head;
 	int delivered = 0;
@@ -181,8 +180,7 @@ static int raw_v4_input(struct sk_buff *skb, const struct iphdr *iph, int hash)
 
 	net = dev_net(skb->dev);
 	sk = __raw_v4_lookup(net, __sk_head(head), iph->protocol,
-			     iph->saddr, iph->daddr,
-			     skb->dev->ifindex);
+			     iph->saddr, iph->daddr, dif);
 
 	while (sk) {
 		delivered = 1;
@@ -197,7 +195,7 @@ static int raw_v4_input(struct sk_buff *skb, const struct iphdr *iph, int hash)
 		}
 		sk = __raw_v4_lookup(net, sk_next(sk), iph->protocol,
 				     iph->saddr, iph->daddr,
-				     skb->dev->ifindex);
+				     dif);
 	}
 out:
 	read_unlock(&raw_v4_hashinfo.lock);
@@ -339,8 +337,8 @@ int raw_rcv(struct sock *sk, struct sk_buff *skb)
 
 static int raw_send_hdrinc(struct sock *sk, struct flowi4 *fl4,
 			   struct msghdr *msg, size_t length,
-			   struct rtable **rtp, unsigned int flags,
-			   const struct sockcm_cookie *sockc)
+			   struct rtable **rtp,
+			   unsigned int flags)
 {
 	struct inet_sock *inet = inet_sk(sk);
 	struct net *net = sock_net(sk);
@@ -382,7 +380,7 @@ static int raw_send_hdrinc(struct sock *sk, struct flowi4 *fl4,
 
 	skb->ip_summed = CHECKSUM_NONE;
 
-	sock_tx_timestamp(sk, sockc->tsflags, &skb_shinfo(skb)->tx_flags);
+	sock_tx_timestamp(sk, &skb_shinfo(skb)->tx_flags);
 
 	skb->transport_header = skb->network_header;
 	err = -EFAULT;
@@ -548,7 +546,6 @@ static int raw_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 		daddr = inet->inet_daddr;
 	}
 
-	ipc.sockc.tsflags = sk->sk_tsflags;
 	ipc.addr = inet->inet_saddr;
 	ipc.opt = NULL;
 	ipc.tx_flags = 0;
@@ -557,7 +554,7 @@ static int raw_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	ipc.oif = sk->sk_bound_dev_if;
 
 	if (msg->msg_controllen) {
-		err = ip_cmsg_send(sk, msg, &ipc, false);
+		err = ip_cmsg_send(net, msg, &ipc, false);
 		if (unlikely(err)) {
 			kfree(ipc.opt);
 			goto out;
@@ -614,6 +611,12 @@ static int raw_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 			    (hdrincl ? FLOWI_FLAG_KNOWN_NH : 0),
 			   daddr, saddr, 0, 0, sk->sk_uid);
 
+	if (!saddr && ipc.oif) {
+		err = l3mdev_get_saddr(net, ipc.oif, &fl4);
+		if (err < 0)
+			goto done;
+	}
+
 	if (!hdrincl) {
 		rfv.msg = msg;
 		rfv.hlen = 0;
@@ -641,10 +644,10 @@ back_from_confirm:
 
 	if (hdrincl)
 		err = raw_send_hdrinc(sk, &fl4, msg, len,
-				      &rt, msg->msg_flags, &ipc.sockc);
+				      &rt, msg->msg_flags);
 
 	 else {
-		sock_tx_timestamp(sk, ipc.sockc.tsflags, &ipc.tx_flags);
+		sock_tx_timestamp(sk, &ipc.tx_flags);
 
 		if (!ipc.addr)
 			ipc.addr = fl4.daddr;
@@ -926,7 +929,7 @@ struct proto raw_prot = {
 	.close		   = raw_close,
 	.destroy	   = raw_destroy,
 	.connect	   = ip4_datagram_connect,
-	.disconnect	   = __udp_disconnect,
+	.disconnect	   = udp_disconnect,
 	.ioctl		   = raw_ioctl,
 	.init		   = raw_init,
 	.setsockopt	   = raw_setsockopt,

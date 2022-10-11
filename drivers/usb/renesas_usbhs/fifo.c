@@ -46,7 +46,7 @@ static int usbhsf_null_handle(struct usbhs_pkt *pkt, int *is_done)
 	return -EINVAL;
 }
 
-static const struct usbhs_pkt_handle usbhsf_null_handler = {
+static struct usbhs_pkt_handle usbhsf_null_handler = {
 	.prepare = usbhsf_null_handle,
 	.try_run = usbhsf_null_handle,
 };
@@ -438,12 +438,12 @@ static int usbhs_dcp_dir_switch_done(struct usbhs_pkt *pkt, int *is_done)
 	return 0;
 }
 
-const struct usbhs_pkt_handle usbhs_dcp_status_stage_in_handler = {
+struct usbhs_pkt_handle usbhs_dcp_status_stage_in_handler = {
 	.prepare = usbhs_dcp_dir_switch_to_write,
 	.try_run = usbhs_dcp_dir_switch_done,
 };
 
-const struct usbhs_pkt_handle usbhs_dcp_status_stage_out_handler = {
+struct usbhs_pkt_handle usbhs_dcp_status_stage_out_handler = {
 	.prepare = usbhs_dcp_dir_switch_to_read,
 	.try_run = usbhs_dcp_dir_switch_done,
 };
@@ -465,7 +465,7 @@ static int usbhsf_dcp_data_stage_try_push(struct usbhs_pkt *pkt, int *is_done)
 	return pkt->handler->prepare(pkt, is_done);
 }
 
-const struct usbhs_pkt_handle usbhs_dcp_data_stage_out_handler = {
+struct usbhs_pkt_handle usbhs_dcp_data_stage_out_handler = {
 	.prepare = usbhsf_dcp_data_stage_try_push,
 };
 
@@ -504,7 +504,7 @@ static int usbhsf_dcp_data_stage_prepare_pop(struct usbhs_pkt *pkt,
 	return pkt->handler->prepare(pkt, is_done);
 }
 
-const struct usbhs_pkt_handle usbhs_dcp_data_stage_in_handler = {
+struct usbhs_pkt_handle usbhs_dcp_data_stage_in_handler = {
 	.prepare = usbhsf_dcp_data_stage_prepare_pop,
 };
 
@@ -616,7 +616,7 @@ static int usbhsf_pio_prepare_push(struct usbhs_pkt *pkt, int *is_done)
 	return usbhsf_pio_try_push(pkt, is_done);
 }
 
-const struct usbhs_pkt_handle usbhs_fifo_pio_push_handler = {
+struct usbhs_pkt_handle usbhs_fifo_pio_push_handler = {
 	.prepare = usbhsf_pio_prepare_push,
 	.try_run = usbhsf_pio_try_push,
 };
@@ -746,7 +746,7 @@ usbhs_fifo_read_busy:
 	return ret;
 }
 
-const struct usbhs_pkt_handle usbhs_fifo_pio_pop_handler = {
+struct usbhs_pkt_handle usbhs_fifo_pio_pop_handler = {
 	.prepare = usbhsf_prepare_pop,
 	.try_run = usbhsf_pio_try_pop,
 };
@@ -763,7 +763,7 @@ static int usbhsf_ctrl_stage_end(struct usbhs_pkt *pkt, int *is_done)
 	return 0;
 }
 
-const struct usbhs_pkt_handle usbhs_ctrl_stage_end_handler = {
+struct usbhs_pkt_handle usbhs_ctrl_stage_end_handler = {
 	.prepare = usbhsf_ctrl_stage_end,
 	.try_run = usbhsf_ctrl_stage_end,
 };
@@ -814,16 +814,13 @@ static int __usbhsf_dma_map_ctrl(struct usbhs_pkt *pkt, int map)
 	struct usbhs_pipe *pipe = pkt->pipe;
 	struct usbhs_priv *priv = usbhs_pipe_to_priv(pipe);
 	struct usbhs_pipe_info *info = usbhs_priv_to_pipeinfo(priv);
-	struct usbhs_fifo *fifo = usbhs_pipe_to_fifo(pipe);
-	struct dma_chan *chan = usbhsf_dma_chan_get(fifo, pkt);
 
-	return info->dma_map_ctrl(chan->device->dev, pkt, map);
+	return info->dma_map_ctrl(pkt, map);
 }
 
 static void usbhsf_dma_complete(void *arg);
-static void xfer_work(struct work_struct *work)
+static void usbhsf_dma_xfer_preparing(struct usbhs_pkt *pkt)
 {
-	struct usbhs_pkt *pkt = container_of(work, struct usbhs_pkt, work);
 	struct usbhs_pipe *pipe = pkt->pipe;
 	struct usbhs_fifo *fifo;
 	struct usbhs_priv *priv = usbhs_pipe_to_priv(pipe);
@@ -831,12 +828,10 @@ static void xfer_work(struct work_struct *work)
 	struct dma_chan *chan;
 	struct device *dev = usbhs_priv_to_dev(priv);
 	enum dma_transfer_direction dir;
-	unsigned long flags;
 
-	usbhs_lock(priv, flags);
 	fifo = usbhs_pipe_to_fifo(pipe);
 	if (!fifo)
-		goto xfer_work_end;
+		return;
 
 	chan = usbhsf_dma_chan_get(fifo, pkt);
 	dir = usbhs_pipe_is_dir_in(pipe) ? DMA_DEV_TO_MEM : DMA_MEM_TO_DEV;
@@ -845,7 +840,7 @@ static void xfer_work(struct work_struct *work)
 					pkt->trans, dir,
 					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
 	if (!desc)
-		goto xfer_work_end;
+		return;
 
 	desc->callback		= usbhsf_dma_complete;
 	desc->callback_param	= pipe;
@@ -853,7 +848,7 @@ static void xfer_work(struct work_struct *work)
 	pkt->cookie = dmaengine_submit(desc);
 	if (pkt->cookie < 0) {
 		dev_err(dev, "Failed to submit dma descriptor\n");
-		goto xfer_work_end;
+		return;
 	}
 
 	dev_dbg(dev, "  %s %d (%d/ %d)\n",
@@ -864,8 +859,17 @@ static void xfer_work(struct work_struct *work)
 	dma_async_issue_pending(chan);
 	usbhsf_dma_start(pipe, fifo);
 	usbhs_pipe_enable(pipe);
+}
 
-xfer_work_end:
+static void xfer_work(struct work_struct *work)
+{
+	struct usbhs_pkt *pkt = container_of(work, struct usbhs_pkt, work);
+	struct usbhs_pipe *pipe = pkt->pipe;
+	struct usbhs_priv *priv = usbhs_pipe_to_priv(pipe);
+	unsigned long flags;
+
+	usbhs_lock(priv, flags);
+	usbhsf_dma_xfer_preparing(pkt);
 	usbhs_unlock(priv, flags);
 }
 
@@ -908,23 +912,28 @@ static int usbhsf_dma_prepare_push(struct usbhs_pkt *pkt, int *is_done)
 	if (!fifo)
 		goto usbhsf_pio_prepare_push;
 
-	ret = usbhsf_fifo_select(pipe, fifo, 0);
-	if (ret < 0)
+	if (usbhsf_dma_map(pkt) < 0)
 		goto usbhsf_pio_prepare_push;
 
-	if (usbhsf_dma_map(pkt) < 0)
-		goto usbhsf_pio_prepare_push_unselect;
+	ret = usbhsf_fifo_select(pipe, fifo, 0);
+	if (ret < 0)
+		goto usbhsf_pio_prepare_push_unmap;
 
 	pkt->trans = len;
 
 	usbhsf_tx_irq_ctrl(pipe, 0);
-	INIT_WORK(&pkt->work, xfer_work);
-	schedule_work(&pkt->work);
+	/* FIXME: Workaound for usb dmac that driver can be used in atomic */
+	if (usbhs_get_dparam(priv, has_usb_dmac)) {
+		usbhsf_dma_xfer_preparing(pkt);
+	} else {
+		INIT_WORK(&pkt->work, xfer_work);
+		schedule_work(&pkt->work);
+	}
 
 	return 0;
 
-usbhsf_pio_prepare_push_unselect:
-	usbhsf_fifo_unselect(pipe, fifo);
+usbhsf_pio_prepare_push_unmap:
+	usbhsf_dma_unmap(pkt);
 usbhsf_pio_prepare_push:
 	/*
 	 * change handler to PIO
@@ -963,7 +972,7 @@ static int usbhsf_dma_push_done(struct usbhs_pkt *pkt, int *is_done)
 	return 0;
 }
 
-const struct usbhs_pkt_handle usbhs_fifo_dma_push_handler = {
+struct usbhs_pkt_handle usbhs_fifo_dma_push_handler = {
 	.prepare	= usbhsf_dma_prepare_push,
 	.dma_done	= usbhsf_dma_push_done,
 };
@@ -1025,8 +1034,7 @@ static int usbhsf_dma_prepare_pop_with_usb_dmac(struct usbhs_pkt *pkt,
 
 	pkt->trans = pkt->length;
 
-	INIT_WORK(&pkt->work, xfer_work);
-	schedule_work(&pkt->work);
+	usbhsf_dma_xfer_preparing(pkt);
 
 	return 0;
 
@@ -1216,7 +1224,7 @@ static int usbhsf_dma_pop_done(struct usbhs_pkt *pkt, int *is_done)
 		return usbhsf_dma_pop_done_with_rx_irq(pkt, is_done);
 }
 
-const struct usbhs_pkt_handle usbhs_fifo_dma_pop_handler = {
+struct usbhs_pkt_handle usbhs_fifo_dma_pop_handler = {
 	.prepare	= usbhsf_dma_prepare_pop,
 	.try_run	= usbhsf_dma_try_pop,
 	.dma_done	= usbhsf_dma_pop_done

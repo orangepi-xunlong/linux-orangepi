@@ -205,6 +205,26 @@ extern struct trace_event_functions exit_syscall_print_funcs;
 	}								\
 	static inline long SYSC##name(__MAP(x,__SC_DECL,__VA_ARGS__))
 
+/*
+ * Called before coming back to user-mode. Returning to user-mode with an
+ * address limit different than USER_DS can allow to overwrite kernel memory.
+ */
+static inline void addr_limit_user_check(void)
+{
+#ifdef TIF_FSCHECK
+	if (!test_thread_flag(TIF_FSCHECK))
+		return;
+#endif
+
+	if (CHECK_DATA_CORRUPTION(!segment_eq(get_fs(), USER_DS),
+				  "Invalid address limit on user-mode return"))
+		force_sig(SIGKILL, current);
+
+#ifdef TIF_FSCHECK
+	clear_thread_flag(TIF_FSCHECK);
+#endif
+}
+
 asmlinkage long sys32_quotactl(unsigned int cmd, const char __user *special,
 			       qid_t id, void __user *addr);
 asmlinkage long sys_time(time_t __user *tloc);
@@ -371,10 +391,10 @@ asmlinkage long sys_rt_sigtimedwait(const sigset_t __user *uthese,
 				size_t sigsetsize);
 asmlinkage long sys_rt_tgsigqueueinfo(pid_t tgid, pid_t  pid, int sig,
 		siginfo_t __user *uinfo);
-asmlinkage long sys_kill(pid_t pid, int sig);
-asmlinkage long sys_tgkill(pid_t tgid, pid_t pid, int sig);
-asmlinkage long sys_tkill(pid_t pid, int sig);
-asmlinkage long sys_rt_sigqueueinfo(pid_t pid, int sig, siginfo_t __user *uinfo);
+asmlinkage long sys_kill(int pid, int sig);
+asmlinkage long sys_tgkill(int tgid, int pid, int sig);
+asmlinkage long sys_tkill(int pid, int sig);
+asmlinkage long sys_rt_sigqueueinfo(int pid, int sig, siginfo_t __user *uinfo);
 asmlinkage long sys_sgetmask(void);
 asmlinkage long sys_ssetmask(int newmask);
 asmlinkage long sys_signal(int sig, __sighandler_t handler);
@@ -575,14 +595,8 @@ asmlinkage long sys_pwrite64(unsigned int fd, const char __user *buf,
 			     size_t count, loff_t pos);
 asmlinkage long sys_preadv(unsigned long fd, const struct iovec __user *vec,
 			   unsigned long vlen, unsigned long pos_l, unsigned long pos_h);
-asmlinkage long sys_preadv2(unsigned long fd, const struct iovec __user *vec,
-			    unsigned long vlen, unsigned long pos_l, unsigned long pos_h,
-			    int flags);
 asmlinkage long sys_pwritev(unsigned long fd, const struct iovec __user *vec,
 			    unsigned long vlen, unsigned long pos_l, unsigned long pos_h);
-asmlinkage long sys_pwritev2(unsigned long fd, const struct iovec __user *vec,
-			    unsigned long vlen, unsigned long pos_l, unsigned long pos_h,
-			    int flags);
 asmlinkage long sys_getcwd(char __user *buf, unsigned long size);
 asmlinkage long sys_mkdir(const char __user *pathname, umode_t mode);
 asmlinkage long sys_chdir(const char __user *filename);
@@ -892,15 +906,7 @@ asmlinkage long sys_execveat(int dfd, const char __user *filename,
 			const char __user *const __user *envp, int flags);
 
 asmlinkage long sys_membarrier(int cmd, int flags);
-asmlinkage long sys_copy_file_range(int fd_in, loff_t __user *off_in,
-				    int fd_out, loff_t __user *off_out,
-				    size_t len, unsigned int flags);
 
 asmlinkage long sys_mlock2(unsigned long start, size_t len, int flags);
-
-asmlinkage long sys_pkey_mprotect(unsigned long start, size_t len,
-				  unsigned long prot, int pkey);
-asmlinkage long sys_pkey_alloc(unsigned long flags, unsigned long init_val);
-asmlinkage long sys_pkey_free(int pkey);
 
 #endif

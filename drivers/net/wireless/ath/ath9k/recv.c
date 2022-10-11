@@ -377,7 +377,7 @@ u32 ath_calcrxfilter(struct ath_softc *sc)
 	struct ath_common *common = ath9k_hw_common(sc->sc_ah);
 	u32 rfilt;
 
-	if (IS_ENABLED(CONFIG_ATH9K_TX99))
+	if (config_enabled(CONFIG_ATH9K_TX99))
 		return 0;
 
 	rfilt = ATH9K_RX_FILTER_UCAST | ATH9K_RX_FILTER_BCAST
@@ -423,9 +423,6 @@ u32 ath_calcrxfilter(struct ath_softc *sc)
 	if (AR_SREV_9550(sc->sc_ah) || AR_SREV_9531(sc->sc_ah) ||
 	    AR_SREV_9561(sc->sc_ah))
 		rfilt |= ATH9K_RX_FILTER_4ADDRESS;
-
-	if (AR_SREV_9462(sc->sc_ah) || AR_SREV_9565(sc->sc_ah))
-		rfilt |= ATH9K_RX_FILTER_CONTROL_WRAPPER;
 
 	if (ath9k_is_chanctx_enabled() &&
 	    test_bit(ATH_OP_SCANNING, &common->op_flags))

@@ -131,7 +131,7 @@ read_tsk_long(struct task_struct *child,
 {
 	int copied;
 
-	copied = access_process_vm(child, addr, res, sizeof(*res), FOLL_FORCE);
+	copied = access_process_vm(child, addr, res, sizeof(*res), 0);
 
 	return copied != sizeof(*res) ? -EIO : 0;
 }
@@ -142,7 +142,7 @@ read_tsk_short(struct task_struct *child,
 {
 	int copied;
 
-	copied = access_process_vm(child, addr, res, sizeof(*res), FOLL_FORCE);
+	copied = access_process_vm(child, addr, res, sizeof(*res), 0);
 
 	return copied != sizeof(*res) ? -EIO : 0;
 }
@@ -153,8 +153,7 @@ write_tsk_short(struct task_struct *child,
 {
 	int copied;
 
-	copied = access_process_vm(child, addr, &val, sizeof(val),
-			FOLL_FORCE | FOLL_WRITE);
+	copied = access_process_vm(child, addr, &val, sizeof(val), 1);
 
 	return copied != sizeof(val) ? -EIO : 0;
 }
@@ -165,8 +164,7 @@ write_tsk_long(struct task_struct *child,
 {
 	int copied;
 
-	copied = access_process_vm(child, addr, &val, sizeof(val),
-			FOLL_FORCE | FOLL_WRITE);
+	copied = access_process_vm(child, addr, &val, sizeof(val), 1);
 
 	return copied != sizeof(val) ? -EIO : 0;
 }

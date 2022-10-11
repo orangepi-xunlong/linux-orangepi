@@ -1253,7 +1253,7 @@ static void nsc_ircc_change_dongle_speed(int iobase, int speed, int dongle_id)
  */
 static __u8 nsc_ircc_change_speed(struct nsc_ircc_cb *self, __u32 speed)
 {
-	struct net_device *dev;
+	struct net_device *dev = self->netdev;
 	__u8 mcr = MCR_SIR;
 	int iobase; 
 	__u8 bank;
@@ -1263,7 +1263,6 @@ static __u8 nsc_ircc_change_speed(struct nsc_ircc_cb *self, __u32 speed)
 
 	IRDA_ASSERT(self != NULL, return 0;);
 
-	dev = self->netdev;
 	iobase = self->io.fir_base;
 
 	/* Update accounting for new speed */
@@ -1400,7 +1399,7 @@ static netdev_tx_t nsc_ircc_hard_xmit_sir(struct sk_buff *skb,
 				 * to make sure packets gets through the
 				 * proper xmit handler - Jean II */
 			}
-			netif_trans_update(dev);
+			dev->trans_start = jiffies;
 			spin_unlock_irqrestore(&self->lock, flags);
 			dev_kfree_skb(skb);
 			return NETDEV_TX_OK;
@@ -1425,7 +1424,7 @@ static netdev_tx_t nsc_ircc_hard_xmit_sir(struct sk_buff *skb,
 	/* Restore bank register */
 	outb(bank, iobase+BSR);
 
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 	spin_unlock_irqrestore(&self->lock, flags);
 
 	dev_kfree_skb(skb);
@@ -1471,7 +1470,7 @@ static netdev_tx_t nsc_ircc_hard_xmit_fir(struct sk_buff *skb,
 				 * the speed change has been done.
 				 * Jean II */
 			}
-			netif_trans_update(dev);
+			dev->trans_start = jiffies;
 			spin_unlock_irqrestore(&self->lock, flags);
 			dev_kfree_skb(skb);
 			return NETDEV_TX_OK;
@@ -1554,7 +1553,7 @@ static netdev_tx_t nsc_ircc_hard_xmit_fir(struct sk_buff *skb,
 	/* Restore bank register */
 	outb(bank, iobase+BSR);
 
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 	spin_unlock_irqrestore(&self->lock, flags);
 	dev_kfree_skb(skb);
 

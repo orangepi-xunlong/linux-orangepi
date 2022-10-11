@@ -53,6 +53,7 @@ struct sd {
 	struct v4l2_ctrl *jpegqual;
 
 	struct work_struct work;
+	struct workqueue_struct *work_thread;
 
 	u8 reg08;		/* webcam compression quality */
 
@@ -6825,7 +6826,8 @@ static int sd_start(struct gspca_dev *gspca_dev)
 		return gspca_dev->usb_err;
 
 	/* Start the transfer parameters update thread */
-	schedule_work(&sd->work);
+	sd->work_thread = create_singlethread_workqueue(KBUILD_MODNAME);
+	queue_work(sd->work_thread, &sd->work);
 
 	return 0;
 }
@@ -6836,9 +6838,12 @@ static void sd_stop0(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 
-	mutex_unlock(&gspca_dev->usb_lock);
-	flush_work(&sd->work);
-	mutex_lock(&gspca_dev->usb_lock);
+	if (sd->work_thread != NULL) {
+		mutex_unlock(&gspca_dev->usb_lock);
+		destroy_workqueue(sd->work_thread);
+		mutex_lock(&gspca_dev->usb_lock);
+		sd->work_thread = NULL;
+	}
 	if (!gspca_dev->present)
 		return;
 	send_unknown(gspca_dev, sd->sensor);

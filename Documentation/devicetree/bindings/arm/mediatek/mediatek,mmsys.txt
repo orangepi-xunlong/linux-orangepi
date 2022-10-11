@@ -5,8 +5,7 @@ The Mediatek mmsys controller provides various clocks to the system.
 
 Required Properties:
 
-- compatible: Should be one of:
-	- "mediatek,mt2701-mmsys", "syscon"
+- compatible: Should be:
 	- "mediatek,mt8173-mmsys", "syscon"
 - #clock-cells: Must be 1
 

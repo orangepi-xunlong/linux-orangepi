@@ -49,7 +49,7 @@ struct fakelb_phy {
 
 static int fakelb_hw_ed(struct ieee802154_hw *hw, u8 *level)
 {
-	BUG_ON(!level);
+	WARN_ON(!level);
 	*level = 0xbe;
 
 	return 0;
@@ -112,12 +112,6 @@ static void fakelb_hw_stop(struct ieee802154_hw *hw)
 	write_unlock_bh(&fakelb_ifup_phys_lock);
 }
 
-static int
-fakelb_set_promiscuous_mode(struct ieee802154_hw *hw, const bool on)
-{
-	return 0;
-}
-
 static const struct ieee802154_ops fakelb_ops = {
 	.owner = THIS_MODULE,
 	.xmit_async = fakelb_hw_xmit,
@@ -125,7 +119,6 @@ static const struct ieee802154_ops fakelb_ops = {
 	.set_channel = fakelb_hw_channel,
 	.start = fakelb_hw_start,
 	.stop = fakelb_hw_stop,
-	.set_promiscuous_mode = fakelb_set_promiscuous_mode,
 };
 
 /* Number of dummy devices to be set up by this module. */
@@ -181,7 +174,6 @@ static int fakelb_add_one(struct device *dev)
 	hw->phy->current_channel = 13;
 	phy->channel = hw->phy->current_channel;
 
-	hw->flags = IEEE802154_HW_PROMISCUOUS;
 	hw->parent = dev;
 
 	err = ieee802154_register_hw(hw);

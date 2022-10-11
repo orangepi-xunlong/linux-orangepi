@@ -23,7 +23,8 @@
 /* ARC Relocations (kernel Modules only) */
 #define  R_ARC_32		0x4
 #define  R_ARC_32_ME		0x1B
-#define  R_ARC_32_PCREL		0x31
+#define  R_ARC_S25H_PCREL	0x10
+#define  R_ARC_S25W_PCREL	0x11
 
 /*to set parameters in the core dumps */
 #define ELF_ARCH		EM_ARCOMPACT

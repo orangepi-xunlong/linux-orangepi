@@ -346,8 +346,8 @@ s32 ixgbe_identify_phy_generic(struct ixgbe_hw *hw)
 				return 0;
 			}
 		}
-		/* indicate no PHY found */
-		hw->phy.mdio.prtad = MDIO_PRTAD_NONE;
+		/* clear value if nothing found */
+		hw->phy.mdio.prtad = 0;
 		return IXGBE_ERR_PHY_ADDR_INVALID;
 	}
 	return 0;
@@ -2393,9 +2393,6 @@ s32 ixgbe_set_copper_phy_power(struct ixgbe_hw *hw, bool on)
 
 	/* Bail if we don't have copper phy */
 	if (hw->mac.ops.get_media_type(hw) != ixgbe_media_type_copper)
-		return 0;
-
-	if (!on && ixgbe_mng_present(hw))
 		return 0;
 
 	status = hw->phy.ops.read_reg(hw, IXGBE_MDIO_VENDOR_SPECIFIC_1_CONTROL,

@@ -866,7 +866,7 @@ void spufs_wbox_callback(struct spu *spu)
  * - end of the mapped area
  *
  * If the file is opened without O_NONBLOCK, we wait here until
- * space is available, but return when we have been able to
+ * space is availabyl, but return when we have been able to
  * write something.
  */
 static ssize_t spufs_wbox_write(struct file *file, const char __user *buf,
@@ -1799,9 +1799,9 @@ static int spufs_mfc_fsync(struct file *file, loff_t start, loff_t end, int data
 	struct inode *inode = file_inode(file);
 	int err = filemap_write_and_wait_range(inode->i_mapping, start, end);
 	if (!err) {
-		inode_lock(inode);
+		mutex_lock(&inode->i_mutex);
 		err = spufs_mfc_flush(file, NULL);
-		inode_unlock(inode);
+		mutex_unlock(&inode->i_mutex);
 	}
 	return err;
 }

@@ -112,6 +112,13 @@ static const struct drm_encoder_funcs mdp5_encoder_funcs = {
 	.destroy = mdp5_encoder_destroy,
 };
 
+static bool mdp5_encoder_mode_fixup(struct drm_encoder *encoder,
+		const struct drm_display_mode *mode,
+		struct drm_display_mode *adjusted_mode)
+{
+	return true;
+}
+
 static void mdp5_encoder_mode_set(struct drm_encoder *encoder,
 		struct drm_display_mode *mode,
 		struct drm_display_mode *adjusted_mode)
@@ -280,28 +287,11 @@ static void mdp5_encoder_enable(struct drm_encoder *encoder)
 }
 
 static const struct drm_encoder_helper_funcs mdp5_encoder_helper_funcs = {
+	.mode_fixup = mdp5_encoder_mode_fixup,
 	.mode_set = mdp5_encoder_mode_set,
 	.disable = mdp5_encoder_disable,
 	.enable = mdp5_encoder_enable,
 };
-
-int mdp5_encoder_get_linecount(struct drm_encoder *encoder)
-{
-	struct mdp5_encoder *mdp5_encoder = to_mdp5_encoder(encoder);
-	struct mdp5_kms *mdp5_kms = get_kms(encoder);
-	int intf = mdp5_encoder->intf.num;
-
-	return mdp5_read(mdp5_kms, REG_MDP5_INTF_LINE_COUNT(intf));
-}
-
-u32 mdp5_encoder_get_framecount(struct drm_encoder *encoder)
-{
-	struct mdp5_encoder *mdp5_encoder = to_mdp5_encoder(encoder);
-	struct mdp5_kms *mdp5_kms = get_kms(encoder);
-	int intf = mdp5_encoder->intf.num;
-
-	return mdp5_read(mdp5_kms, REG_MDP5_INTF_FRAME_COUNT(intf));
-}
 
 int mdp5_encoder_set_split_display(struct drm_encoder *encoder,
 					struct drm_encoder *slave_encoder)
@@ -322,18 +312,18 @@ int mdp5_encoder_set_split_display(struct drm_encoder *encoder,
 	 * to use the master's enable signal for the slave encoder.
 	 */
 	if (intf_num == 1)
-		data |= MDP5_SPLIT_DPL_LOWER_INTF2_TG_SYNC;
+		data |= MDP5_MDP_SPLIT_DPL_LOWER_INTF2_TG_SYNC;
 	else if (intf_num == 2)
-		data |= MDP5_SPLIT_DPL_LOWER_INTF1_TG_SYNC;
+		data |= MDP5_MDP_SPLIT_DPL_LOWER_INTF1_TG_SYNC;
 	else
 		return -EINVAL;
 
 	/* Make sure clocks are on when connectors calling this function. */
 	mdp5_enable(mdp5_kms);
 	/* Dumb Panel, Sync mode */
-	mdp5_write(mdp5_kms, REG_MDP5_SPLIT_DPL_UPPER, 0);
-	mdp5_write(mdp5_kms, REG_MDP5_SPLIT_DPL_LOWER, data);
-	mdp5_write(mdp5_kms, REG_MDP5_SPLIT_DPL_EN, 1);
+	mdp5_write(mdp5_kms, REG_MDP5_MDP_SPLIT_DPL_UPPER(0), 0);
+	mdp5_write(mdp5_kms, REG_MDP5_MDP_SPLIT_DPL_LOWER(0), data);
+	mdp5_write(mdp5_kms, REG_MDP5_MDP_SPLIT_DPL_EN(0), 1);
 
 	mdp5_ctl_pair(mdp5_encoder->ctl, mdp5_slave_enc->ctl, true);
 

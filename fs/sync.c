@@ -303,7 +303,7 @@ SYSCALL_DEFINE4(sync_file_range, int, fd, loff_t, offset, loff_t, nbytes,
 		goto out;
 
 	if (sizeof(pgoff_t) == 4) {
-		if (offset >= (0x100000000ULL << PAGE_SHIFT)) {
+		if (offset >= (0x100000000ULL << PAGE_CACHE_SHIFT)) {
 			/*
 			 * The range starts outside a 32 bit machine's
 			 * pagecache addressing capabilities.  Let it "succeed"
@@ -311,7 +311,7 @@ SYSCALL_DEFINE4(sync_file_range, int, fd, loff_t, offset, loff_t, nbytes,
 			ret = 0;
 			goto out;
 		}
-		if (endbyte >= (0x100000000ULL << PAGE_SHIFT)) {
+		if (endbyte >= (0x100000000ULL << PAGE_CACHE_SHIFT)) {
 			/*
 			 * Out to EOF
 			 */

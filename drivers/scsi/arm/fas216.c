@@ -98,7 +98,6 @@ static int level_mask = LOG_ERROR;
 
 module_param(level_mask, int, 0644);
 
-#ifndef MODULE
 static int __init fas216_log_setup(char *str)
 {
 	char *s;
@@ -139,7 +138,6 @@ static int __init fas216_log_setup(char *str)
 }
 
 __setup("fas216_logging=", fas216_log_setup);
-#endif
 
 static inline unsigned char fas216_readb(FAS216_Info *info, unsigned int reg)
 {

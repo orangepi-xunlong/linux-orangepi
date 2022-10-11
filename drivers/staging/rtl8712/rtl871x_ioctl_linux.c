@@ -137,7 +137,7 @@ static inline void handle_group_key(struct ieee_param *param,
 	}
 }
 
-static noinline_for_stack char *translate_scan(struct _adapter *padapter,
+static inline char *translate_scan(struct _adapter *padapter,
 				   struct iw_request_info *info,
 				   struct wlan_network *pnetwork,
 				   char *start, char *stop)
@@ -398,9 +398,12 @@ static int wpa_set_encryption(struct net_device *dev, struct ieee_param *param,
 			wep_key_idx = 0;
 		if (wep_key_len > 0) {
 			wep_key_len = wep_key_len <= 5 ? 5 : 13;
-			pwep = kzalloc(sizeof(*pwep), GFP_ATOMIC);
-			if (!pwep)
+			pwep = kmalloc((u32)(wep_key_len +
+				FIELD_OFFSET(struct NDIS_802_11_WEP,
+				KeyMaterial)), GFP_ATOMIC);
+			if (pwep == NULL)
 				return -ENOMEM;
+			memset(pwep, 0, sizeof(struct NDIS_802_11_WEP));
 			pwep->KeyLength = wep_key_len;
 			pwep->Length = wep_key_len +
 				 FIELD_OFFSET(struct NDIS_802_11_WEP,
@@ -1060,8 +1063,8 @@ static int r8711_wx_set_wap(struct net_device *dev,
 	while (1) {
 		if (end_of_queue_search(phead, pmlmepriv->pscanned))
 			break;
-		pnetwork = container_of(pmlmepriv->pscanned,
-					struct wlan_network, list);
+		pnetwork = LIST_CONTAINOR(pmlmepriv->pscanned,
+			   struct wlan_network, list);
 		pmlmepriv->pscanned = pmlmepriv->pscanned->next;
 		dst_bssid = pnetwork->network.MacAddress;
 		if (!memcmp(dst_bssid, temp->sa_data, ETH_ALEN)) {
@@ -1216,7 +1219,7 @@ static int r8711_wx_get_scan(struct net_device *dev,
 			ret = -E2BIG;
 			break;
 		}
-		pnetwork = container_of(plist, struct wlan_network, list);
+		pnetwork = LIST_CONTAINOR(plist, struct wlan_network, list);
 		ev = translate_scan(padapter, a, pnetwork, ev, stop);
 		plist = plist->next;
 	}
@@ -1271,8 +1274,8 @@ static int r8711_wx_set_essid(struct net_device *dev,
 		while (1) {
 			if (end_of_queue_search(phead, pmlmepriv->pscanned))
 				break;
-			pnetwork = container_of(pmlmepriv->pscanned,
-						struct wlan_network, list);
+			pnetwork = LIST_CONTAINOR(pmlmepriv->pscanned,
+				   struct wlan_network, list);
 			pmlmepriv->pscanned = pmlmepriv->pscanned->next;
 			dst_ssid = pnetwork->network.Ssid.Ssid;
 			if ((!memcmp(dst_ssid, src_ssid, ndis_ssid.SsidLength))
@@ -1793,7 +1796,7 @@ static int r871x_wx_set_enc_ext(struct net_device *dev,
 
 	param_len = sizeof(struct ieee_param) + pext->key_len;
 	param = kzalloc(param_len, GFP_ATOMIC);
-	if (!param)
+	if (param == NULL)
 		return -ENOMEM;
 	param->cmd = IEEE_CMD_SET_ENCRYPTION;
 	eth_broadcast_addr(param->sta_addr);
@@ -1961,7 +1964,7 @@ static int r871x_get_ap_info(struct net_device *dev,
 	struct list_head *plist, *phead;
 	unsigned char *pbuf;
 	u8 bssid[ETH_ALEN];
-	char data[33];
+	char data[32];
 
 	if (padapter->bDriverStopped || (pdata == NULL))
 		return -EINVAL;
@@ -1976,9 +1979,8 @@ static int r871x_get_ap_info(struct net_device *dev,
 	if (pdata->length >= 32) {
 		if (copy_from_user(data, pdata->pointer, 32))
 			return -EINVAL;
-		data[32] = 0;
 	} else {
-		return -EINVAL;
+		 return -EINVAL;
 	}
 	spin_lock_irqsave(&(pmlmepriv->scanned_queue.lock), irqL);
 	phead = &queue->queue;
@@ -1986,7 +1988,7 @@ static int r871x_get_ap_info(struct net_device *dev,
 	while (1) {
 		if (end_of_queue_search(phead, plist))
 			break;
-		pnetwork = container_of(plist, struct wlan_network, list);
+		pnetwork = LIST_CONTAINOR(plist, struct wlan_network, list);
 		if (!mac_pton(data, bssid)) {
 			netdev_info(dev, "r8712u: Invalid BSSID '%s'.\n",
 				    (u8 *)data);

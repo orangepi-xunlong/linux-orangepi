@@ -13,8 +13,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-#include <linux/gpio/driver.h>
-/* Needed for gpio_to_irq() */
 #include <linux/gpio.h>
 #include <linux/platform_device.h>
 #include <linux/mtd/mtd.h>
@@ -204,9 +202,9 @@ static struct i2c_board_info mx27ads_i2c_devices[] = {
 static void vgpio_set(struct gpio_chip *chip, unsigned offset, int value)
 {
 	if (value)
-		imx_writew(PBC_BCTRL1_LCDON, PBC_BCTRL1_SET_REG);
+		__raw_writew(PBC_BCTRL1_LCDON, PBC_BCTRL1_SET_REG);
 	else
-		imx_writew(PBC_BCTRL1_LCDON, PBC_BCTRL1_CLEAR_REG);
+		__raw_writew(PBC_BCTRL1_LCDON, PBC_BCTRL1_CLEAR_REG);
 }
 
 static int vgpio_dir_out(struct gpio_chip *chip, unsigned offset, int value)
@@ -245,7 +243,7 @@ static void __init mx27ads_regulator_init(void)
 	vchip->ngpio		= 1;
 	vchip->direction_output	= vgpio_dir_out;
 	vchip->set		= vgpio_set;
-	gpiochip_add_data(vchip, NULL);
+	gpiochip_add(vchip);
 
 	platform_device_register_data(NULL, "reg-fixed-voltage",
 				      PLATFORM_DEVID_AUTO,
@@ -352,27 +350,21 @@ static void __init mx27ads_board_init(void)
 	i2c_register_board_info(1, mx27ads_i2c_devices,
 				ARRAY_SIZE(mx27ads_i2c_devices));
 	imx27_add_imx_i2c(1, &mx27ads_i2c1_data);
-	imx27_add_imx_fb(&mx27ads_fb_data);
-
-	imx27_add_fec(NULL);
-	imx27_add_mxc_w1();
-}
-
-static void __init mx27ads_late_init(void)
-{
 	mx27ads_regulator_init();
-
+	imx27_add_imx_fb(&mx27ads_fb_data);
 	imx27_add_mxc_mmc(0, &sdhc1_pdata);
 	imx27_add_mxc_mmc(1, &sdhc2_pdata);
 
+	imx27_add_fec(NULL);
 	platform_add_devices(platform_devices, ARRAY_SIZE(platform_devices));
+	imx27_add_mxc_w1();
 }
 
 static void __init mx27ads_timer_init(void)
 {
 	unsigned long fref = 26000000;
 
-	if ((imx_readw(PBC_VERSION_REG) & CKIH_27MHZ_BIT_SET) == 0)
+	if ((__raw_readw(PBC_VERSION_REG) & CKIH_27MHZ_BIT_SET) == 0)
 		fref = 27000000;
 
 	mx27_clocks_init(fref);
@@ -401,6 +393,5 @@ MACHINE_START(MX27ADS, "Freescale i.MX27ADS")
 	.init_irq = mx27_init_irq,
 	.init_time	= mx27ads_timer_init,
 	.init_machine = mx27ads_board_init,
-	.init_late	= mx27ads_late_init,
 	.restart	= mxc_restart,
 MACHINE_END

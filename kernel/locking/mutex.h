@@ -17,20 +17,14 @@
 		__list_del((waiter)->list.prev, (waiter)->list.next)
 
 #ifdef CONFIG_MUTEX_SPIN_ON_OWNER
-/*
- * The mutex owner can get read and written to locklessly.
- * We should use WRITE_ONCE when writing the owner value to
- * avoid store tearing, otherwise, a thread could potentially
- * read a partially written and incomplete owner value.
- */
 static inline void mutex_set_owner(struct mutex *lock)
 {
-	WRITE_ONCE(lock->owner, current);
+	lock->owner = current;
 }
 
 static inline void mutex_clear_owner(struct mutex *lock)
 {
-	WRITE_ONCE(lock->owner, NULL);
+	lock->owner = NULL;
 }
 #else
 static inline void mutex_set_owner(struct mutex *lock)

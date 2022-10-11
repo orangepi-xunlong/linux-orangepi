@@ -20,7 +20,6 @@
 #include <linux/namei.h>
 #include <linux/security.h>
 #include <linux/slab.h>
-#include <linux/xattr.h>
 #include "internal.h"
 
 #define CACHEFILES_KEYBUF_SIZE 512
@@ -195,7 +194,6 @@ wait_for_old_object:
 		pr_err("\n");
 		pr_err("Error: Unexpected object collision\n");
 		cachefiles_printk_object(object, xobject);
-		BUG();
 	}
 	atomic_inc(&xobject->usage);
 	write_unlock(&cache->active_lock);
@@ -259,28 +257,6 @@ requeue:
 }
 
 /*
- * Mark an object as being inactive.
- */
-void cachefiles_mark_object_inactive(struct cachefiles_cache *cache,
-				     struct cachefiles_object *object,
-				     blkcnt_t i_blocks)
-{
-	write_lock(&cache->active_lock);
-	rb_erase(&object->active_node, &cache->active_nodes);
-	clear_bit(CACHEFILES_OBJECT_ACTIVE, &object->flags);
-	write_unlock(&cache->active_lock);
-
-	wake_up_bit(&object->flags, CACHEFILES_OBJECT_ACTIVE);
-
-	/* This object can now be culled, so we need to let the daemon know
-	 * that there is something it can remove if it needs to.
-	 */
-	atomic_long_add(i_blocks, &cache->b_released);
-	if (atomic_inc_return(&cache->f_released))
-		cachefiles_state_changed(cache);
-}
-
-/*
  * delete an object representation from the cache
  * - file backed objects are unlinked
  * - directory backed objects are stuffed into the graveyard for userspace to
@@ -318,7 +294,7 @@ static int cachefiles_bury_object(struct cachefiles_cache *cache,
 				cachefiles_mark_object_buried(cache, rep, why);
 		}
 
-		inode_unlock(d_inode(dir));
+		mutex_unlock(&d_inode(dir)->i_mutex);
 
 		if (ret == -EIO)
 			cachefiles_io_error(cache, "Unlink failed");
@@ -329,7 +305,7 @@ static int cachefiles_bury_object(struct cachefiles_cache *cache,
 
 	/* directories have to be moved to the graveyard */
 	_debug("move stale object to graveyard");
-	inode_unlock(d_inode(dir));
+	mutex_unlock(&d_inode(dir)->i_mutex);
 
 try_again:
 	/* first step is to make up a grave dentry in the graveyard */
@@ -341,7 +317,7 @@ try_again:
 	trap = lock_rename(cache->graveyard, dir);
 
 	/* do some checks before getting the grave dentry */
-	if (rep->d_parent != dir) {
+	if (rep->d_parent != dir || IS_DEADDIR(d_inode(rep))) {
 		/* the entry was probably culled when we dropped the parent dir
 		 * lock */
 		unlock_rename(cache->graveyard, dir);
@@ -446,13 +422,13 @@ int cachefiles_delete_object(struct cachefiles_cache *cache,
 
 	dir = dget_parent(object->dentry);
 
-	inode_lock_nested(d_inode(dir), I_MUTEX_PARENT);
+	mutex_lock_nested(&d_inode(dir)->i_mutex, I_MUTEX_PARENT);
 
 	if (test_bit(FSCACHE_OBJECT_KILLED_BY_CACHE, &object->fscache.flags)) {
 		/* object allocation for the same key preemptively deleted this
 		 * object's file so that it could create its own file */
 		_debug("object preemptively buried");
-		inode_unlock(d_inode(dir));
+		mutex_unlock(&d_inode(dir)->i_mutex);
 		ret = 0;
 	} else {
 		/* we need to check that our parent is _still_ our parent - it
@@ -465,7 +441,7 @@ int cachefiles_delete_object(struct cachefiles_cache *cache,
 			/* it got moved, presumably by cachefilesd culling it,
 			 * so it's no longer in the key path and we can ignore
 			 * it */
-			inode_unlock(d_inode(dir));
+			mutex_unlock(&d_inode(dir)->i_mutex);
 			ret = 0;
 		}
 	}
@@ -524,7 +500,7 @@ lookup_again:
 	/* search the current directory for the element name */
 	_debug("lookup '%s'", name);
 
-	inode_lock_nested(d_inode(dir), I_MUTEX_PARENT);
+	mutex_lock_nested(&d_inode(dir)->i_mutex, I_MUTEX_PARENT);
 
 	start = jiffies;
 	next = lookup_one_len(name, dir, nlen);
@@ -608,7 +584,7 @@ lookup_again:
 	/* process the next component */
 	if (key) {
 		_debug("advance");
-		inode_unlock(d_inode(dir));
+		mutex_unlock(&d_inode(dir)->i_mutex);
 		dput(dir);
 		dir = next;
 		next = NULL;
@@ -646,7 +622,7 @@ lookup_again:
 	/* note that we're now using this object */
 	ret = cachefiles_mark_object_active(cache, object);
 
-	inode_unlock(d_inode(dir));
+	mutex_unlock(&d_inode(dir)->i_mutex);
 	dput(dir);
 	dir = NULL;
 
@@ -707,8 +683,11 @@ mark_active_timed_out:
 
 check_error:
 	_debug("check error %d", ret);
-	cachefiles_mark_object_inactive(
-		cache, object, d_backing_inode(object->dentry)->i_blocks);
+	write_lock(&cache->active_lock);
+	rb_erase(&object->active_node, &cache->active_nodes);
+	clear_bit(CACHEFILES_OBJECT_ACTIVE, &object->flags);
+	wake_up_bit(&object->flags, CACHEFILES_OBJECT_ACTIVE);
+	write_unlock(&cache->active_lock);
 release_dentry:
 	dput(object->dentry);
 	object->dentry = NULL;
@@ -725,7 +704,7 @@ lookup_error:
 		cachefiles_io_error(cache, "Lookup failed");
 	next = NULL;
 error:
-	inode_unlock(d_inode(dir));
+	mutex_unlock(&d_inode(dir)->i_mutex);
 	dput(next);
 error_out2:
 	dput(dir);
@@ -749,7 +728,7 @@ struct dentry *cachefiles_get_directory(struct cachefiles_cache *cache,
 	_enter(",,%s", dirname);
 
 	/* search the current directory for the element name */
-	inode_lock(d_inode(dir));
+	mutex_lock(&d_inode(dir)->i_mutex);
 
 	start = jiffies;
 	subdir = lookup_one_len(dirname, dir, strlen(dirname));
@@ -788,7 +767,7 @@ struct dentry *cachefiles_get_directory(struct cachefiles_cache *cache,
 		       d_backing_inode(subdir)->i_ino);
 	}
 
-	inode_unlock(d_inode(dir));
+	mutex_unlock(&d_inode(dir)->i_mutex);
 
 	/* we need to make sure the subdir is a directory */
 	ASSERT(d_backing_inode(subdir));
@@ -800,11 +779,13 @@ struct dentry *cachefiles_get_directory(struct cachefiles_cache *cache,
 	}
 
 	ret = -EPERM;
-	if (!(d_backing_inode(subdir)->i_opflags & IOP_XATTR) ||
+	if (!d_backing_inode(subdir)->i_op->setxattr ||
+	    !d_backing_inode(subdir)->i_op->getxattr ||
 	    !d_backing_inode(subdir)->i_op->lookup ||
 	    !d_backing_inode(subdir)->i_op->mkdir ||
 	    !d_backing_inode(subdir)->i_op->create ||
-	    !d_backing_inode(subdir)->i_op->rename ||
+	    (!d_backing_inode(subdir)->i_op->rename &&
+	     !d_backing_inode(subdir)->i_op->rename2) ||
 	    !d_backing_inode(subdir)->i_op->rmdir ||
 	    !d_backing_inode(subdir)->i_op->unlink)
 		goto check_error;
@@ -818,19 +799,19 @@ check_error:
 	return ERR_PTR(ret);
 
 mkdir_error:
-	inode_unlock(d_inode(dir));
+	mutex_unlock(&d_inode(dir)->i_mutex);
 	dput(subdir);
 	pr_err("mkdir %s failed with error %d\n", dirname, ret);
 	return ERR_PTR(ret);
 
 lookup_error:
-	inode_unlock(d_inode(dir));
+	mutex_unlock(&d_inode(dir)->i_mutex);
 	ret = PTR_ERR(subdir);
 	pr_err("Lookup %s failed with error %d\n", dirname, ret);
 	return ERR_PTR(ret);
 
 nomem_d_alloc:
-	inode_unlock(d_inode(dir));
+	mutex_unlock(&d_inode(dir)->i_mutex);
 	_leave(" = -ENOMEM");
 	return ERR_PTR(-ENOMEM);
 }
@@ -855,7 +836,7 @@ static struct dentry *cachefiles_check_active(struct cachefiles_cache *cache,
 	//       dir, filename);
 
 	/* look up the victim */
-	inode_lock_nested(d_inode(dir), I_MUTEX_PARENT);
+	mutex_lock_nested(&d_inode(dir)->i_mutex, I_MUTEX_PARENT);
 
 	start = jiffies;
 	victim = lookup_one_len(filename, dir, strlen(filename));
@@ -870,7 +851,7 @@ static struct dentry *cachefiles_check_active(struct cachefiles_cache *cache,
 	 * at the netfs's request whilst the cull was in progress
 	 */
 	if (d_is_negative(victim)) {
-		inode_unlock(d_inode(dir));
+		mutex_unlock(&d_inode(dir)->i_mutex);
 		dput(victim);
 		_leave(" = -ENOENT [absent]");
 		return ERR_PTR(-ENOENT);
@@ -899,13 +880,13 @@ static struct dentry *cachefiles_check_active(struct cachefiles_cache *cache,
 
 object_in_use:
 	read_unlock(&cache->active_lock);
-	inode_unlock(d_inode(dir));
+	mutex_unlock(&d_inode(dir)->i_mutex);
 	dput(victim);
 	//_leave(" = -EBUSY [in use]");
 	return ERR_PTR(-EBUSY);
 
 lookup_error:
-	inode_unlock(d_inode(dir));
+	mutex_unlock(&d_inode(dir)->i_mutex);
 	ret = PTR_ERR(victim);
 	if (ret == -ENOENT) {
 		/* file or dir now absent - probably retired by netfs */
@@ -965,7 +946,7 @@ int cachefiles_cull(struct cachefiles_cache *cache, struct dentry *dir,
 	return 0;
 
 error_unlock:
-	inode_unlock(d_inode(dir));
+	mutex_unlock(&d_inode(dir)->i_mutex);
 error:
 	dput(victim);
 	if (ret == -ENOENT) {
@@ -1000,7 +981,7 @@ int cachefiles_check_in_use(struct cachefiles_cache *cache, struct dentry *dir,
 	if (IS_ERR(victim))
 		return PTR_ERR(victim);
 
-	inode_unlock(d_inode(dir));
+	mutex_unlock(&d_inode(dir)->i_mutex);
 	dput(victim);
 	//_leave(" = 0");
 	return 0;

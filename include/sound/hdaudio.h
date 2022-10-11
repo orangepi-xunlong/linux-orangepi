@@ -168,13 +168,11 @@ int snd_hdac_power_up(struct hdac_device *codec);
 int snd_hdac_power_down(struct hdac_device *codec);
 int snd_hdac_power_up_pm(struct hdac_device *codec);
 int snd_hdac_power_down_pm(struct hdac_device *codec);
-int snd_hdac_keep_power_up(struct hdac_device *codec);
 #else
 static inline int snd_hdac_power_up(struct hdac_device *codec) { return 0; }
 static inline int snd_hdac_power_down(struct hdac_device *codec) { return 0; }
 static inline int snd_hdac_power_up_pm(struct hdac_device *codec) { return 0; }
 static inline int snd_hdac_power_down_pm(struct hdac_device *codec) { return 0; }
-static inline int snd_hdac_keep_power_up(struct hdac_device *codec) { return 0; }
 #endif
 
 /*
@@ -245,12 +243,6 @@ struct hdac_rb {
 
 /*
  * HD-audio bus base driver
- *
- * @ppcap: pp capabilities pointer
- * @spbcap: SPIB capabilities pointer
- * @mlcap: MultiLink capabilities pointer
- * @gtscap: gts capabilities pointer
- * @drsmcap: dma resume capabilities pointer
  */
 struct hdac_bus {
 	struct device *dev;
@@ -261,12 +253,6 @@ struct hdac_bus {
 	unsigned long addr;
 	void __iomem *remap_addr;
 	int irq;
-
-	void __iomem *ppcap;
-	void __iomem *spbcap;
-	void __iomem *mlcap;
-	void __iomem *gtscap;
-	void __iomem *drsmcap;
 
 	/* codec linked list */
 	struct list_head codec_list;
@@ -347,7 +333,6 @@ static inline void snd_hdac_codec_link_down(struct hdac_device *codec)
 int snd_hdac_bus_send_cmd(struct hdac_bus *bus, unsigned int val);
 int snd_hdac_bus_get_response(struct hdac_bus *bus, unsigned int addr,
 			      unsigned int *res);
-int snd_hdac_bus_parse_capabilities(struct hdac_bus *bus);
 int snd_hdac_link_power(struct hdac_device *codec, bool enable);
 
 bool snd_hdac_bus_init_chip(struct hdac_bus *bus, bool full_reset);
@@ -358,7 +343,7 @@ void snd_hdac_bus_enter_link_reset(struct hdac_bus *bus);
 void snd_hdac_bus_exit_link_reset(struct hdac_bus *bus);
 
 void snd_hdac_bus_update_rirb(struct hdac_bus *bus);
-int snd_hdac_bus_handle_stream_irq(struct hdac_bus *bus, unsigned int status,
+void snd_hdac_bus_handle_stream_irq(struct hdac_bus *bus, unsigned int status,
 				    void (*ack)(struct hdac_bus *,
 						struct hdac_stream *));
 

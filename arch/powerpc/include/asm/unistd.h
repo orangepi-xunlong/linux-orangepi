@@ -12,13 +12,10 @@
 #include <uapi/asm/unistd.h>
 
 
-#define NR_syscalls		382
+#define __NR_syscalls		379
 
 #define __NR__exit __NR_exit
-
-#define __IGNORE_pkey_mprotect
-#define __IGNORE_pkey_alloc
-#define __IGNORE_pkey_free
+#define NR_syscalls	__NR_syscalls
 
 #ifndef __ASSEMBLY__
 

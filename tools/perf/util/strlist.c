@@ -126,11 +126,6 @@ static int strlist__parse_list_entry(struct strlist *slist, const char *s,
 			err = strlist__load(slist, subst);
 			goto out;
 		}
-
-		if (slist->file_only) {
-			err = -ENOENT;
-			goto out;
-		}
 	}
 
 	err = strlist__add(slist, s);
@@ -162,13 +157,11 @@ struct strlist *strlist__new(const char *list, const struct strlist_config *conf
 
 	if (slist != NULL) {
 		bool dupstr = true;
-		bool file_only = false;
 		const char *dirname = NULL;
 
 		if (config) {
 			dupstr = !config->dont_dupstr;
 			dirname = config->dirname;
-			file_only = config->file_only;
 		}
 
 		rblist__init(&slist->rblist);
@@ -177,7 +170,6 @@ struct strlist *strlist__new(const char *list, const struct strlist_config *conf
 		slist->rblist.node_delete = strlist__node_delete;
 
 		slist->dupstr	 = dupstr;
-		slist->file_only = file_only;
 
 		if (list && strlist__parse_list(slist, list, dirname) != 0)
 			goto out_error;

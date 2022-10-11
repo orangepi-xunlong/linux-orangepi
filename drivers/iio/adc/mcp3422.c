@@ -1,12 +1,11 @@
 /*
- * mcp3422.c - driver for the Microchip mcp3421/2/3/4/5/6/7/8 chip family
+ * mcp3422.c - driver for the Microchip mcp3422/3/4/6/7/8 chip family
  *
  * Copyright (C) 2013, Angelo Compagnucci
  * Author: Angelo Compagnucci <angelo.compagnucci@gmail.com>
  *
  * Datasheet: http://ww1.microchip.com/downloads/en/devicedoc/22088b.pdf
  *            http://ww1.microchip.com/downloads/en/DeviceDoc/22226a.pdf
- *            http://ww1.microchip.com/downloads/en/DeviceDoc/22072b.pdf
  *
  * This driver exports the value of analog input voltage to sysfs, the
  * voltage unit is nV.
@@ -61,9 +60,9 @@
 
 static const int mcp3422_scales[4][4] = {
 	{ 1000000, 500000, 250000, 125000 },
-	{ 250000,  125000, 62500,  31250  },
-	{ 62500,   31250,  15625,  7812   },
-	{ 15625,   7812,   3906,   1953   } };
+	{ 250000 , 125000, 62500 , 31250  },
+	{ 62500  , 31250 , 15625 , 7812   },
+	{ 15625  , 7812  , 3906  , 1953   } };
 
 /* Constant msleep times for data acquisitions */
 static const int mcp3422_read_times[4] = {
@@ -306,10 +305,6 @@ static const struct attribute_group mcp3422_attribute_group = {
 	.attrs = mcp3422_attributes,
 };
 
-static const struct iio_chan_spec mcp3421_channels[] = {
-	MCP3422_CHAN(0),
-};
-
 static const struct iio_chan_spec mcp3422_channels[] = {
 	MCP3422_CHAN(0),
 	MCP3422_CHAN(1),
@@ -339,7 +334,7 @@ static int mcp3422_probe(struct i2c_client *client,
 	u8 config;
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C))
-		return -EOPNOTSUPP;
+		return -ENODEV;
 
 	indio_dev = devm_iio_device_alloc(&client->dev, sizeof(*adc));
 	if (!indio_dev)
@@ -352,17 +347,11 @@ static int mcp3422_probe(struct i2c_client *client,
 	mutex_init(&adc->lock);
 
 	indio_dev->dev.parent = &client->dev;
-	indio_dev->dev.of_node = client->dev.of_node;
 	indio_dev->name = dev_name(&client->dev);
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->info = &mcp3422_info;
 
 	switch (adc->id) {
-	case 1:
-	case 5:
-		indio_dev->channels = mcp3421_channels;
-		indio_dev->num_channels = ARRAY_SIZE(mcp3421_channels);
-		break;
 	case 2:
 	case 3:
 	case 6:
@@ -394,11 +383,9 @@ static int mcp3422_probe(struct i2c_client *client,
 }
 
 static const struct i2c_device_id mcp3422_id[] = {
-	{ "mcp3421", 1 },
 	{ "mcp3422", 2 },
 	{ "mcp3423", 3 },
 	{ "mcp3424", 4 },
-	{ "mcp3425", 5 },
 	{ "mcp3426", 6 },
 	{ "mcp3427", 7 },
 	{ "mcp3428", 8 },
@@ -425,5 +412,5 @@ static struct i2c_driver mcp3422_driver = {
 module_i2c_driver(mcp3422_driver);
 
 MODULE_AUTHOR("Angelo Compagnucci <angelo.compagnucci@gmail.com>");
-MODULE_DESCRIPTION("Microchip mcp3421/2/3/4/5/6/7/8 driver");
+MODULE_DESCRIPTION("Microchip mcp3422/3/4/6/7/8 driver");
 MODULE_LICENSE("GPL v2");

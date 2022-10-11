@@ -1,11 +1,7 @@
 #include <linux/kernel.h>
 #include "cache.h"
-#include "config.h"
-#include <stdlib.h>
-#include <stdio.h>
 #include "color.h"
 #include <math.h>
-#include <unistd.h>
 
 int perf_use_color_default = -1;
 
@@ -28,7 +24,7 @@ int perf_config_colorbool(const char *var, const char *value, int stdout_is_tty)
  auto_color:
 	if (stdout_is_tty < 0)
 		stdout_is_tty = isatty(1);
-	if (stdout_is_tty || pager_in_use()) {
+	if (stdout_is_tty || (pager_in_use() && pager_use_color)) {
 		char *term = getenv("TERM");
 		if (term && strcmp(term, "dumb"))
 			return 1;
@@ -36,15 +32,14 @@ int perf_config_colorbool(const char *var, const char *value, int stdout_is_tty)
 	return 0;
 }
 
-int perf_color_default_config(const char *var, const char *value,
-			      void *cb __maybe_unused)
+int perf_color_default_config(const char *var, const char *value, void *cb)
 {
 	if (!strcmp(var, "color.ui")) {
 		perf_use_color_default = perf_config_colorbool(var, value, -1);
 		return 0;
 	}
 
-	return 0;
+	return perf_default_config(var, value, cb);
 }
 
 static int __color_vsnprintf(char *bf, size_t size, const char *color,

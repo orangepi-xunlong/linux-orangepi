@@ -381,23 +381,17 @@ static int pa12203001_probe(struct i2c_client *client,
 		return ret;
 
 	ret = pm_runtime_set_active(&client->dev);
-	if (ret < 0)
-		goto out_err;
+	if (ret < 0) {
+		pa12203001_power_chip(indio_dev, PA12203001_CHIP_DISABLE);
+		return ret;
+	}
 
 	pm_runtime_enable(&client->dev);
 	pm_runtime_set_autosuspend_delay(&client->dev,
 					 PA12203001_SLEEP_DELAY_MS);
 	pm_runtime_use_autosuspend(&client->dev);
 
-	ret = iio_device_register(indio_dev);
-	if (ret < 0)
-		goto out_err;
-
-	return 0;
-
-out_err:
-	pa12203001_power_chip(indio_dev, PA12203001_CHIP_DISABLE);
-	return ret;
+	return iio_device_register(indio_dev);
 }
 
 static int pa12203001_remove(struct i2c_client *client)

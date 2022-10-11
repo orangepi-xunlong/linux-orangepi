@@ -1892,6 +1892,7 @@ static struct sk_buff *ql_build_rx_skb(struct ql_adapter *qdev,
 			skb->len += length;
 			skb->data_len += length;
 			skb->truesize += length;
+			length -= length;
 			ql_update_mac_hdr_len(qdev, ib_mac_rsp,
 					      lbq_desc->p.pg_chunk.va,
 					      &hlen);
@@ -2387,26 +2388,20 @@ static int qlge_update_hw_vlan_features(struct net_device *ndev,
 	return status;
 }
 
-static netdev_features_t qlge_fix_features(struct net_device *ndev,
-	netdev_features_t features)
-{
-	int err;
-
-	/* Update the behavior of vlan accel in the adapter */
-	err = qlge_update_hw_vlan_features(ndev, features);
-	if (err)
-		return err;
-
-	return features;
-}
-
 static int qlge_set_features(struct net_device *ndev,
 	netdev_features_t features)
 {
 	netdev_features_t changed = ndev->features ^ features;
+	int err;
 
-	if (changed & NETIF_F_HW_VLAN_CTAG_RX)
+	if (changed & NETIF_F_HW_VLAN_CTAG_RX) {
+		/* Update the behavior of vlan accel in the adapter */
+		err = qlge_update_hw_vlan_features(ndev, features);
+		if (err)
+			return err;
+
 		qlge_vlan_mode(ndev, features);
+	}
 
 	return 0;
 }
@@ -4686,7 +4681,7 @@ static int ql_init_device(struct pci_dev *pdev, struct net_device *ndev,
 	/*
 	 * Set up the operating parameters.
 	 */
-	qdev->workqueue = alloc_ordered_workqueue(ndev->name, WQ_MEM_RECLAIM);
+	qdev->workqueue = create_singlethread_workqueue(ndev->name);
 	INIT_DELAYED_WORK(&qdev->asic_reset_work, ql_asic_reset_work);
 	INIT_DELAYED_WORK(&qdev->mpi_reset_work, ql_mpi_reset_work);
 	INIT_DELAYED_WORK(&qdev->mpi_work, ql_mpi_work);
@@ -4719,7 +4714,6 @@ static const struct net_device_ops qlge_netdev_ops = {
 	.ndo_set_mac_address	= qlge_set_mac_address,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_tx_timeout		= qlge_tx_timeout,
-	.ndo_fix_features	= qlge_fix_features,
 	.ndo_set_features	= qlge_set_features,
 	.ndo_vlan_rx_add_vid	= qlge_vlan_rx_add_vid,
 	.ndo_vlan_rx_kill_vid	= qlge_vlan_rx_kill_vid,
@@ -4845,6 +4839,7 @@ static void ql_eeh_close(struct net_device *ndev)
 	}
 
 	/* Disabling the timer */
+	del_timer_sync(&qdev->timer);
 	ql_cancel_all_work_sync(qdev);
 
 	for (i = 0; i < qdev->rss_ring_count; i++)
@@ -4871,7 +4866,6 @@ static pci_ers_result_t qlge_io_error_detected(struct pci_dev *pdev,
 		return PCI_ERS_RESULT_CAN_RECOVER;
 	case pci_channel_io_frozen:
 		netif_device_detach(ndev);
-		del_timer_sync(&qdev->timer);
 		if (netif_running(ndev))
 			ql_eeh_close(ndev);
 		pci_disable_device(pdev);
@@ -4879,7 +4873,6 @@ static pci_ers_result_t qlge_io_error_detected(struct pci_dev *pdev,
 	case pci_channel_io_perm_failure:
 		dev_err(&pdev->dev,
 			"%s: pci_channel_io_perm_failure.\n", __func__);
-		del_timer_sync(&qdev->timer);
 		ql_eeh_close(ndev);
 		set_bit(QL_EEH_FATAL, &qdev->flags);
 		return PCI_ERS_RESULT_DISCONNECT;

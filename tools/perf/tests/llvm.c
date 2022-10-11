@@ -5,7 +5,12 @@
 #include "llvm.h"
 #include "tests.h"
 #include "debug.h"
-#include "util.h"
+
+static int perf_config_cb(const char *var, const char *val,
+			  void *arg __maybe_unused)
+{
+	return perf_default_config(var, val, arg);
+}
 
 #ifdef HAVE_LIBBPF_SUPPORT
 static int test__bpf_parsing(void *obj_buf, size_t obj_buf_sz)
@@ -30,7 +35,6 @@ static int test__bpf_parsing(void *obj_buf __maybe_unused,
 static struct {
 	const char *source;
 	const char *desc;
-	bool should_load_fail;
 } bpf_source_table[__LLVM_TESTCASE_MAX] = {
 	[LLVM_TESTCASE_BASE] = {
 		.source = test_llvm__bpf_base_prog,
@@ -40,23 +44,14 @@ static struct {
 		.source = test_llvm__bpf_test_kbuild_prog,
 		.desc = "Test kbuild searching",
 	},
-	[LLVM_TESTCASE_BPF_PROLOGUE] = {
-		.source = test_llvm__bpf_test_prologue_prog,
-		.desc = "Compile source for BPF prologue generation test",
-	},
-	[LLVM_TESTCASE_BPF_RELOCATION] = {
-		.source = test_llvm__bpf_test_relocation,
-		.desc = "Compile source for BPF relocation test",
-		.should_load_fail = true,
-	},
 };
+
 
 int
 test_llvm__fetch_bpf_obj(void **p_obj_buf,
 			 size_t *p_obj_buf_sz,
 			 enum test_llvm__testcase idx,
-			 bool force,
-			 bool *should_load_fail)
+			 bool force)
 {
 	const char *source;
 	const char *desc;
@@ -69,8 +64,8 @@ test_llvm__fetch_bpf_obj(void **p_obj_buf,
 
 	source = bpf_source_table[idx].source;
 	desc = bpf_source_table[idx].desc;
-	if (should_load_fail)
-		*should_load_fail = bpf_source_table[idx].should_load_fail;
+
+	perf_config(perf_config_cb, NULL);
 
 	/*
 	 * Skip this test if user's .perfconfig doesn't set [llvm] section
@@ -132,40 +127,44 @@ out:
 	return ret;
 }
 
-int test__llvm(int subtest)
+int test__llvm(void)
 {
-	int ret;
-	void *obj_buf = NULL;
-	size_t obj_buf_sz = 0;
-	bool should_load_fail = false;
+	enum test_llvm__testcase i;
 
-	if ((subtest < 0) || (subtest >= __LLVM_TESTCASE_MAX))
-		return TEST_FAIL;
+	for (i = 0; i < __LLVM_TESTCASE_MAX; i++) {
+		int ret;
+		void *obj_buf = NULL;
+		size_t obj_buf_sz = 0;
 
-	ret = test_llvm__fetch_bpf_obj(&obj_buf, &obj_buf_sz,
-				       subtest, false, &should_load_fail);
+		ret = test_llvm__fetch_bpf_obj(&obj_buf, &obj_buf_sz,
+					       i, false);
 
-	if (ret == TEST_OK && !should_load_fail) {
-		ret = test__bpf_parsing(obj_buf, obj_buf_sz);
-		if (ret != TEST_OK) {
-			pr_debug("Failed to parse test case '%s'\n",
-				 bpf_source_table[subtest].desc);
+		if (ret == TEST_OK) {
+			ret = test__bpf_parsing(obj_buf, obj_buf_sz);
+			if (ret != TEST_OK)
+				pr_debug("Failed to parse test case '%s'\n",
+					 bpf_source_table[i].desc);
+		}
+		free(obj_buf);
+
+		switch (ret) {
+		case TEST_SKIP:
+			return TEST_SKIP;
+		case TEST_OK:
+			break;
+		default:
+			/*
+			 * Test 0 is the basic LLVM test. If test 0
+			 * fail, the basic LLVM support not functional
+			 * so the whole test should fail. If other test
+			 * case fail, it can be fixed by adjusting
+			 * config so don't report error.
+			 */
+			if (i == 0)
+				return TEST_FAIL;
+			else
+				return TEST_SKIP;
 		}
 	}
-	free(obj_buf);
-
-	return ret;
-}
-
-int test__llvm_subtest_get_nr(void)
-{
-	return __LLVM_TESTCASE_MAX;
-}
-
-const char *test__llvm_subtest_get_desc(int subtest)
-{
-	if ((subtest < 0) || (subtest >= __LLVM_TESTCASE_MAX))
-		return NULL;
-
-	return bpf_source_table[subtest].desc;
+	return TEST_OK;
 }

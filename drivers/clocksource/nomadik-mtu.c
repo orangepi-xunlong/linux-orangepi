@@ -193,11 +193,10 @@ static struct irqaction nmdk_timer_irq = {
 	.dev_id		= &nmdk_clkevt,
 };
 
-static int __init nmdk_timer_init(void __iomem *base, int irq,
+static void __init nmdk_timer_init(void __iomem *base, int irq,
 				   struct clk *pclk, struct clk *clk)
 {
 	unsigned long rate;
-	int ret;
 
 	mtu_base = base;
 
@@ -227,12 +226,10 @@ static int __init nmdk_timer_init(void __iomem *base, int irq,
 	/* Timer 0 is the free running clocksource */
 	nmdk_clksrc_reset();
 
-	ret = clocksource_mmio_init(mtu_base + MTU_VAL(0), "mtu_0",
-				    rate, 200, 32, clocksource_mmio_readl_down);
-	if (ret) {
-		pr_err("timer: failed to initialize clock source %s\n", "mtu_0");
-		return ret;
-	}
+	if (clocksource_mmio_init(mtu_base + MTU_VAL(0), "mtu_0",
+			rate, 200, 32, clocksource_mmio_readl_down))
+		pr_err("timer: failed to initialize clock source %s\n",
+		       "mtu_0");
 
 #ifdef CONFIG_CLKSRC_NOMADIK_MTU_SCHED_CLOCK
 	sched_clock_register(nomadik_read_sched_clock, 32, rate);
@@ -247,11 +244,9 @@ static int __init nmdk_timer_init(void __iomem *base, int irq,
 	mtu_delay_timer.read_current_timer = &nmdk_timer_read_current_timer;
 	mtu_delay_timer.freq = rate;
 	register_current_timer_delay(&mtu_delay_timer);
-
-	return 0;
 }
 
-static int __init nmdk_timer_of_init(struct device_node *node)
+static void __init nmdk_timer_of_init(struct device_node *node)
 {
 	struct clk *pclk;
 	struct clk *clk;
@@ -259,30 +254,22 @@ static int __init nmdk_timer_of_init(struct device_node *node)
 	int irq;
 
 	base = of_iomap(node, 0);
-	if (!base) {
-		pr_err("Can't remap registers");
-		return -ENXIO;
-	}
+	if (!base)
+		panic("Can't remap registers");
 
 	pclk = of_clk_get_by_name(node, "apb_pclk");
-	if (IS_ERR(pclk)) {
-		pr_err("could not get apb_pclk");
-		return PTR_ERR(pclk);
-	}
+	if (IS_ERR(pclk))
+		panic("could not get apb_pclk");
 
 	clk = of_clk_get_by_name(node, "timclk");
-	if (IS_ERR(clk)) {
-		pr_err("could not get timclk");
-		return PTR_ERR(clk);
-	}
+	if (IS_ERR(clk))
+		panic("could not get timclk");
 
 	irq = irq_of_parse_and_map(node, 0);
-	if (irq <= 0) {
-		pr_err("Can't parse IRQ");
-		return -EINVAL;
-	}
+	if (irq <= 0)
+		panic("Can't parse IRQ");
 
-	return nmdk_timer_init(base, irq, pclk, clk);
+	nmdk_timer_init(base, irq, pclk, clk);
 }
 CLOCKSOURCE_OF_DECLARE(nomadik_mtu, "st,nomadik-mtu",
 		       nmdk_timer_of_init);

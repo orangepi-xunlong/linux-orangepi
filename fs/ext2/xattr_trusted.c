@@ -8,28 +8,44 @@
 #include "ext2.h"
 #include "xattr.h"
 
-static bool
-ext2_xattr_trusted_list(struct dentry *dentry)
+static size_t
+ext2_xattr_trusted_list(const struct xattr_handler *handler,
+			struct dentry *dentry, char *list, size_t list_size,
+			const char *name, size_t name_len)
 {
-	return capable(CAP_SYS_ADMIN);
+	const int prefix_len = XATTR_TRUSTED_PREFIX_LEN;
+	const size_t total_len = prefix_len + name_len + 1;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return 0;
+
+	if (list && total_len <= list_size) {
+		memcpy(list, XATTR_TRUSTED_PREFIX, prefix_len);
+		memcpy(list+prefix_len, name, name_len);
+		list[prefix_len + name_len] = '\0';
+	}
+	return total_len;
 }
 
 static int
 ext2_xattr_trusted_get(const struct xattr_handler *handler,
-		       struct dentry *unused, struct inode *inode,
-		       const char *name, void *buffer, size_t size)
+		       struct dentry *dentry, const char *name,
+		       void *buffer, size_t size)
 {
-	return ext2_xattr_get(inode, EXT2_XATTR_INDEX_TRUSTED, name,
+	if (strcmp(name, "") == 0)
+		return -EINVAL;
+	return ext2_xattr_get(d_inode(dentry), EXT2_XATTR_INDEX_TRUSTED, name,
 			      buffer, size);
 }
 
 static int
 ext2_xattr_trusted_set(const struct xattr_handler *handler,
-		       struct dentry *unused, struct inode *inode,
-		       const char *name, const void *value,
-		       size_t size, int flags)
+		       struct dentry *dentry, const char *name,
+		       const void *value, size_t size, int flags)
 {
-	return ext2_xattr_set(inode, EXT2_XATTR_INDEX_TRUSTED, name,
+	if (strcmp(name, "") == 0)
+		return -EINVAL;
+	return ext2_xattr_set(d_inode(dentry), EXT2_XATTR_INDEX_TRUSTED, name,
 			      value, size, flags);
 }
 

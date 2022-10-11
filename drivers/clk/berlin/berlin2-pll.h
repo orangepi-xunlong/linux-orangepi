@@ -19,6 +19,8 @@
 #ifndef __BERLIN2_PLL_H
 #define __BERLIN2_PLL_H
 
+struct clk;
+
 struct berlin2_pll_map {
 	const u8 vcodiv[16];
 	u8 mult;
@@ -27,8 +29,9 @@ struct berlin2_pll_map {
 	u8 divsel_shift;
 };
 
-int berlin2_pll_register(const struct berlin2_pll_map *map,
-			 void __iomem *base, const char *name,
-			 const char *parent_name, unsigned long flags);
+struct clk * __init
+berlin2_pll_register(const struct berlin2_pll_map *map,
+		     void __iomem *base, const char *name,
+		     const char *parent_name, unsigned long flags);
 
 #endif /* __BERLIN2_PLL_H */

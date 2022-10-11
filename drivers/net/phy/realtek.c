@@ -102,19 +102,15 @@ static int rtl8211f_config_init(struct phy_device *phydev)
 	if (ret < 0)
 		return ret;
 
-	phy_write(phydev, RTL8211F_PAGE_SELECT, 0xd08);
-	reg = phy_read(phydev, 0x11);
-
-	/* enable TX-delay for rgmii-id and rgmii-txid, otherwise disable it */
-	if (phydev->interface == PHY_INTERFACE_MODE_RGMII_ID ||
-	    phydev->interface == PHY_INTERFACE_MODE_RGMII_TXID)
+	if (phydev->interface == PHY_INTERFACE_MODE_RGMII) {
+		/* enable TXDLY */
+		phy_write(phydev, RTL8211F_PAGE_SELECT, 0xd08);
+		reg = phy_read(phydev, 0x11);
 		reg |= RTL8211F_TX_DELAY;
-	else
-		reg &= ~RTL8211F_TX_DELAY;
-
-	phy_write(phydev, 0x11, reg);
-	/* restore to default page 0 */
-	phy_write(phydev, RTL8211F_PAGE_SELECT, 0x0);
+		phy_write(phydev, 0x11, reg);
+		/* restore to default page 0 */
+		phy_write(phydev, RTL8211F_PAGE_SELECT, 0x0);
+	}
 
 	return 0;
 }
@@ -128,6 +124,7 @@ static struct phy_driver realtek_drvs[] = {
 		.flags          = PHY_HAS_INTERRUPT,
 		.config_aneg    = &genphy_config_aneg,
 		.read_status    = &genphy_read_status,
+		.driver         = { .owner = THIS_MODULE,},
 	}, {
 		.phy_id		= 0x001cc912,
 		.name		= "RTL8211B Gigabit Ethernet",
@@ -138,6 +135,7 @@ static struct phy_driver realtek_drvs[] = {
 		.read_status	= &genphy_read_status,
 		.ack_interrupt	= &rtl821x_ack_interrupt,
 		.config_intr	= &rtl8211b_config_intr,
+		.driver		= { .owner = THIS_MODULE,},
 	}, {
 		.phy_id		= 0x001cc914,
 		.name		= "RTL8211DN Gigabit Ethernet",
@@ -150,6 +148,7 @@ static struct phy_driver realtek_drvs[] = {
 		.config_intr	= rtl8211e_config_intr,
 		.suspend	= genphy_suspend,
 		.resume		= genphy_resume,
+		.driver		= { .owner = THIS_MODULE,},
 	}, {
 		.phy_id		= 0x001cc915,
 		.name		= "RTL8211E Gigabit Ethernet",
@@ -162,6 +161,7 @@ static struct phy_driver realtek_drvs[] = {
 		.config_intr	= &rtl8211e_config_intr,
 		.suspend	= genphy_suspend,
 		.resume		= genphy_resume,
+		.driver		= { .owner = THIS_MODULE,},
 	}, {
 		.phy_id		= 0x001cc916,
 		.name		= "RTL8211F Gigabit Ethernet",
@@ -175,6 +175,7 @@ static struct phy_driver realtek_drvs[] = {
 		.config_intr	= &rtl8211f_config_intr,
 		.suspend	= genphy_suspend,
 		.resume		= genphy_resume,
+		.driver		= { .owner = THIS_MODULE },
 	},
 };
 

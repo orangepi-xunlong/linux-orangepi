@@ -9,9 +9,11 @@
  * warranty of any kind, whether express or implied.
  */
 
+#include <linux/gpio.h>
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/of_device.h>
+#include <linux/of_gpio.h>
 #include <linux/phy/phy.h>
 #include <linux/platform_device.h>
 #include <linux/reset.h>
@@ -193,6 +195,7 @@ static int phy_berlin_usb_probe(struct platform_device *pdev)
 		return PTR_ERR(phy);
 	}
 
+	platform_set_drvdata(pdev, priv);
 	phy_set_drvdata(phy, priv);
 
 	phy_provider =

@@ -34,12 +34,16 @@ struct posix_acl *jfs_get_acl(struct inode *inode, int type)
 	int size;
 	char *value = NULL;
 
+	acl = get_cached_acl(inode, type);
+	if (acl != ACL_NOT_CACHED)
+		return acl;
+
 	switch(type) {
 		case ACL_TYPE_ACCESS:
-			ea_name = XATTR_NAME_POSIX_ACL_ACCESS;
+			ea_name = POSIX_ACL_XATTR_ACCESS;
 			break;
 		case ACL_TYPE_DEFAULT:
-			ea_name = XATTR_NAME_POSIX_ACL_DEFAULT;
+			ea_name = POSIX_ACL_XATTR_DEFAULT;
 			break;
 		default:
 			return ERR_PTR(-EINVAL);
@@ -63,6 +67,8 @@ struct posix_acl *jfs_get_acl(struct inode *inode, int type)
 		acl = posix_acl_from_xattr(&init_user_ns, value, size);
 	}
 	kfree(value);
+	if (!IS_ERR(acl))
+		set_cached_acl(inode, type, acl);
 	return acl;
 }
 
@@ -76,10 +82,17 @@ static int __jfs_set_acl(tid_t tid, struct inode *inode, int type,
 
 	switch (type) {
 	case ACL_TYPE_ACCESS:
-		ea_name = XATTR_NAME_POSIX_ACL_ACCESS;
+		ea_name = POSIX_ACL_XATTR_ACCESS;
+		if (acl) {
+			rc = posix_acl_update_mode(inode, &inode->i_mode, &acl);
+			if (rc)
+				return rc;
+			inode->i_ctime = CURRENT_TIME;
+			mark_inode_dirty(inode);
+		}
 		break;
 	case ACL_TYPE_DEFAULT:
-		ea_name = XATTR_NAME_POSIX_ACL_DEFAULT;
+		ea_name = POSIX_ACL_XATTR_DEFAULT;
 		break;
 	default:
 		return -EINVAL;
@@ -111,17 +124,9 @@ int jfs_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 
 	tid = txBegin(inode->i_sb, 0);
 	mutex_lock(&JFS_IP(inode)->commit_mutex);
-	if (type == ACL_TYPE_ACCESS && acl) {
-		rc = posix_acl_update_mode(inode, &inode->i_mode, &acl);
-		if (rc)
-			goto end_tx;
-		inode->i_ctime = current_time(inode);
-		mark_inode_dirty(inode);
-	}
 	rc = __jfs_set_acl(tid, inode, type, acl);
 	if (!rc)
 		rc = txCommit(tid, 1, &inode, 0);
-end_tx:
 	txEnd(tid);
 	mutex_unlock(&JFS_IP(inode)->commit_mutex);
 	return rc;

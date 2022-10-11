@@ -40,19 +40,12 @@ struct read_info_sccb {
 	u8	fac85;			/* 85 */
 	u8	_pad_86[91 - 86];	/* 86-90 */
 	u8	flags;			/* 91 */
-	u8	_pad_92[99 - 92];	/* 92-98 */
-	u8	hamaxpow;		/* 99 */
+	u8	_pad_92[100 - 92];	/* 92-99 */
 	u32	rnsize2;		/* 100-103 */
 	u64	rnmax2;			/* 104-111 */
-	u8	_pad_112[116 - 112];	/* 112-115 */
-	u8	fac116;			/* 116 */
-	u8	fac117;			/* 117 */
-	u8	_pad_118;		/* 118 */
-	u8	fac119;			/* 119 */
+	u8	_pad_112[120 - 112];	/* 112-119 */
 	u16	hcpua;			/* 120-121 */
-	u8	_pad_122[124 - 122];	/* 122-123 */
-	u32	hmfai;			/* 124-127 */
-	u8	_pad_128[4096 - 128];	/* 128-4095 */
+	u8	_pad_122[4096 - 122];	/* 122-4095 */
 } __packed __aligned(PAGE_SIZE);
 
 static char sccb_early[PAGE_SIZE] __aligned(PAGE_SIZE) __initdata;
@@ -115,24 +108,12 @@ static void __init sclp_facilities_detect(struct read_info_sccb *sccb)
 	sclp.facilities = sccb->facilities;
 	sclp.has_sprp = !!(sccb->fac84 & 0x02);
 	sclp.has_core_type = !!(sccb->fac84 & 0x01);
-	sclp.has_gsls = !!(sccb->fac85 & 0x80);
-	sclp.has_64bscao = !!(sccb->fac116 & 0x80);
-	sclp.has_cmma = !!(sccb->fac116 & 0x40);
-	sclp.has_esca = !!(sccb->fac116 & 0x08);
-	sclp.has_pfmfi = !!(sccb->fac117 & 0x40);
-	sclp.has_ibs = !!(sccb->fac117 & 0x20);
-	sclp.has_hvs = !!(sccb->fac119 & 0x80);
 	if (sccb->fac85 & 0x02)
 		S390_lowcore.machine_flags |= MACHINE_FLAG_ESOP;
 	sclp.rnmax = sccb->rnmax ? sccb->rnmax : sccb->rnmax2;
 	sclp.rzm = sccb->rnsize ? sccb->rnsize : sccb->rnsize2;
 	sclp.rzm <<= 20;
 	sclp.ibc = sccb->ibc;
-
-	if (sccb->hamaxpow && sccb->hamaxpow < 64)
-		sclp.hamax = (1UL << sccb->hamaxpow) - 1;
-	else
-		sclp.hamax = U64_MAX;
 
 	if (!sccb->hcpua) {
 		if (MACHINE_IS_VM)
@@ -150,11 +131,6 @@ static void __init sclp_facilities_detect(struct read_info_sccb *sccb)
 			continue;
 		sclp.has_siif = cpue->siif;
 		sclp.has_sigpif = cpue->sigpif;
-		sclp.has_sief2 = cpue->sief2;
-		sclp.has_gpere = cpue->gpere;
-		sclp.has_ib = cpue->ib;
-		sclp.has_cei = cpue->cei;
-		sclp.has_skey = cpue->skey;
 		break;
 	}
 
@@ -167,8 +143,6 @@ static void __init sclp_facilities_detect(struct read_info_sccb *sccb)
 	sclp.mtid = (sccb->fac42 & 0x80) ? (sccb->fac42 & 31) : 0;
 	sclp.mtid_cp = (sccb->fac42 & 0x80) ? (sccb->fac43 & 31) : 0;
 	sclp.mtid_prev = (sccb->fac42 & 0x80) ? (sccb->fac66 & 31) : 0;
-
-	sclp.hmfai = sccb->hmfai;
 }
 
 /*

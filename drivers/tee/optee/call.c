@@ -22,7 +22,6 @@
 #include <linux/uaccess.h>
 #include "optee_private.h"
 #include "optee_smc.h"
-#include "optee_bench.h"
 
 struct optee_call_waiter {
 	struct list_head list_node;
@@ -147,13 +146,9 @@ u32 optee_do_call_with_arg(struct tee_context *ctx, phys_addr_t parg)
 	while (true) {
 		struct arm_smccc_res res;
 
-		optee_bm_timestamp();
-
 		optee->invoke_fn(param.a0, param.a1, param.a2, param.a3,
 				 param.a4, param.a5, param.a6, param.a7,
 				 &res);
-
-		optee_bm_timestamp();
 
 		if (res.a0 == OPTEE_SMC_RETURN_ETHREAD_LIMIT) {
 			/*

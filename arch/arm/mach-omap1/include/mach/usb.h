@@ -12,7 +12,7 @@
 
 void omap_otg_init(struct omap_usb_config *config);
 
-#if IS_ENABLED(CONFIG_USB)
+#if defined(CONFIG_USB) || defined(CONFIG_USB_MODULE)
 void omap1_usb_init(struct omap_usb_config *pdata);
 #else
 static inline void omap1_usb_init(struct omap_usb_config *pdata)

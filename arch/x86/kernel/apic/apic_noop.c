@@ -11,6 +11,7 @@
 
 #include <linux/threads.h>
 #include <linux/cpumask.h>
+#include <linux/module.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
 #include <linux/ctype.h>
@@ -29,7 +30,6 @@
 #include <asm/e820.h>
 
 static void noop_init_apic_ldr(void) { }
-static void noop_send_IPI(int cpu, int vector) { }
 static void noop_send_IPI_mask(const struct cpumask *cpumask, int vector) { }
 static void noop_send_IPI_mask_allbutself(const struct cpumask *cpumask, int vector) { }
 static void noop_send_IPI_allbutself(int vector) { }
@@ -99,16 +99,16 @@ static void noop_vector_allocation_domain(int cpu, struct cpumask *retmask,
 
 static u32 noop_apic_read(u32 reg)
 {
-	WARN_ON_ONCE(boot_cpu_has(X86_FEATURE_APIC) && !disable_apic);
+	WARN_ON_ONCE((cpu_has_apic && !disable_apic));
 	return 0;
 }
 
 static void noop_apic_write(u32 reg, u32 v)
 {
-	WARN_ON_ONCE(boot_cpu_has(X86_FEATURE_APIC) && !disable_apic);
+	WARN_ON_ONCE(cpu_has_apic && !disable_apic);
 }
 
-struct apic apic_noop __ro_after_init = {
+struct apic apic_noop = {
 	.name				= "noop",
 	.probe				= noop_probe,
 	.acpi_madt_oem_check		= NULL,
@@ -140,10 +140,10 @@ struct apic apic_noop __ro_after_init = {
 
 	.get_apic_id			= noop_get_apic_id,
 	.set_apic_id			= NULL,
+	.apic_id_mask			= 0x0F << 24,
 
 	.cpu_mask_to_apicid_and		= flat_cpu_mask_to_apicid_and,
 
-	.send_IPI			= noop_send_IPI,
 	.send_IPI_mask			= noop_send_IPI_mask,
 	.send_IPI_mask_allbutself	= noop_send_IPI_mask_allbutself,
 	.send_IPI_allbutself		= noop_send_IPI_allbutself,

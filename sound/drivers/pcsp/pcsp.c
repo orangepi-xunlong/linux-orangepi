@@ -14,7 +14,6 @@
 #include <linux/input.h>
 #include <linux/delay.h>
 #include <linux/bitops.h>
-#include <linux/mm.h>
 #include "pcsp_input.h"
 #include "pcsp.h"
 
@@ -149,11 +148,11 @@ static int alsa_card_pcsp_init(struct device *dev)
 		return err;
 	}
 
+#ifdef CONFIG_DEBUG_PAGEALLOC
 	/* Well, CONFIG_DEBUG_PAGEALLOC makes the sound horrible. Lets alert */
-	if (debug_pagealloc_enabled()) {
-		printk(KERN_WARNING "PCSP: CONFIG_DEBUG_PAGEALLOC is enabled, "
-		       "which may make the sound noisy.\n");
-	}
+	printk(KERN_WARNING "PCSP: CONFIG_DEBUG_PAGEALLOC is enabled, "
+	       "which may make the sound noisy.\n");
+#endif
 
 	return 0;
 }

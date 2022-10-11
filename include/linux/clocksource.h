@@ -15,7 +15,6 @@
 #include <linux/cache.h>
 #include <linux/timer.h>
 #include <linux/init.h>
-#include <linux/of.h>
 #include <asm/div64.h>
 #include <asm/io.h>
 
@@ -63,18 +62,12 @@ struct module;
  * @suspend:		suspend function for the clocksource, if necessary
  * @resume:		resume function for the clocksource, if necessary
  * @owner:		module reference, must be set by clocksource in modules
- *
- * Note: This struct is not used in hotpathes of the timekeeping code
- * because the timekeeper caches the hot path fields in its own data
- * structure, so no line cache alignment is required,
- *
- * The pointer to the clocksource itself is handed to the read
- * callback. If you need extra information there you can wrap struct
- * clocksource into your own struct. Depending on the amount of
- * information you need you should consider to cache line align that
- * structure.
  */
 struct clocksource {
+	/*
+	 * Hotpath data, fits in a single cache line when the
+	 * clocksource itself is cacheline aligned.
+	 */
 	cycle_t (*read)(struct clocksource *cs);
 	cycle_t mask;
 	u32 mult;
@@ -102,7 +95,7 @@ struct clocksource {
 	cycle_t wd_last;
 #endif
 	struct module *owner;
-};
+} ____cacheline_aligned;
 
 /*
  * Clock source flags bits::
@@ -119,23 +112,6 @@ struct clocksource {
 /* simplify initialization of mask field */
 #define CLOCKSOURCE_MASK(bits) GENMASK_ULL((bits) - 1, 0)
 
-static inline u32 clocksource_freq2mult(u32 freq, u32 shift_constant, u64 from)
-{
-	/*  freq = cyc/from
-	 *  mult/2^shift  = ns/cyc
-	 *  mult = ns/cyc * 2^shift
-	 *  mult = from/freq * 2^shift
-	 *  mult = from * 2^shift / freq
-	 *  mult = (from<<shift) / freq
-	 */
-	u64 tmp = ((u64)from) << shift_constant;
-
-	tmp += freq/2; /* round for do_div */
-	do_div(tmp, freq);
-
-	return (u32)tmp;
-}
-
 /**
  * clocksource_khz2mult - calculates mult from khz and shift
  * @khz:		Clocksource frequency in KHz
@@ -146,7 +122,19 @@ static inline u32 clocksource_freq2mult(u32 freq, u32 shift_constant, u64 from)
  */
 static inline u32 clocksource_khz2mult(u32 khz, u32 shift_constant)
 {
-	return clocksource_freq2mult(khz, shift_constant, NSEC_PER_MSEC);
+	/*  khz = cyc/(Million ns)
+	 *  mult/2^shift  = ns/cyc
+	 *  mult = ns/cyc * 2^shift
+	 *  mult = 1Million/khz * 2^shift
+	 *  mult = 1000000 * 2^shift / khz
+	 *  mult = (1000000<<shift) / khz
+	 */
+	u64 tmp = ((u64)1000000) << shift_constant;
+
+	tmp += khz/2; /* round for do_div */
+	do_div(tmp, khz);
+
+	return (u32)tmp;
 }
 
 /**
@@ -160,7 +148,19 @@ static inline u32 clocksource_khz2mult(u32 khz, u32 shift_constant)
  */
 static inline u32 clocksource_hz2mult(u32 hz, u32 shift_constant)
 {
-	return clocksource_freq2mult(hz, shift_constant, NSEC_PER_SEC);
+	/*  hz = cyc/(Billion ns)
+	 *  mult/2^shift  = ns/cyc
+	 *  mult = ns/cyc * 2^shift
+	 *  mult = 1Billion/hz * 2^shift
+	 *  mult = 1000000000 * 2^shift / hz
+	 *  mult = (1000000000<<shift) / hz
+	 */
+	u64 tmp = ((u64)1000000000) << shift_constant;
+
+	tmp += hz/2; /* round for do_div */
+	do_div(tmp, hz);
+
+	return (u32)tmp;
 }
 
 /**
@@ -244,7 +244,7 @@ extern int clocksource_mmio_init(void __iomem *, const char *,
 extern int clocksource_i8253_init(void);
 
 #define CLOCKSOURCE_OF_DECLARE(name, compat, fn) \
-	OF_DECLARE_1_RET(clksrc, name, compat, fn)
+	OF_DECLARE_1(clksrc, name, compat, fn)
 
 #ifdef CONFIG_CLKSRC_PROBE
 extern void clocksource_probe(void);

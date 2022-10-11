@@ -11,7 +11,7 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-#include <linux/gpio/driver.h>
+#include <linux/basic_mmio_gpio.h>
 #include <linux/gpio.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -41,7 +41,7 @@
 
 #include <mach/hardware.h>
 #include <mach/ams-delta-fiq.h>
-#include "camera.h"
+#include <mach/camera.h>
 #include <mach/usb.h>
 
 #include "iomap.h"
@@ -510,6 +510,9 @@ static void __init ams_delta_init(void)
 static void modem_pm(struct uart_port *port, unsigned int state, unsigned old)
 {
 	struct modem_private_data *priv = port->private_data;
+
+	if (!priv)
+		return;
 
 	if (IS_ERR(priv->regulator))
 		return;

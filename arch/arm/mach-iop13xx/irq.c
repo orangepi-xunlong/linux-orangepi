@@ -25,7 +25,7 @@
 #include <asm/irq.h>
 #include <mach/hardware.h>
 #include <mach/irqs.h>
-#include "msi.h"
+#include <mach/msi.h>
 
 /* INTCTL0 CP6 R0 Page 4
  */

@@ -135,6 +135,77 @@ int cipso_v4_rbm_strictvalid = 1;
  */
 
 /**
+ * cipso_v4_bitmap_walk - Walk a bitmap looking for a bit
+ * @bitmap: the bitmap
+ * @bitmap_len: length in bits
+ * @offset: starting offset
+ * @state: if non-zero, look for a set (1) bit else look for a cleared (0) bit
+ *
+ * Description:
+ * Starting at @offset, walk the bitmap from left to right until either the
+ * desired bit is found or we reach the end.  Return the bit offset, -1 if
+ * not found, or -2 if error.
+ */
+static int cipso_v4_bitmap_walk(const unsigned char *bitmap,
+				u32 bitmap_len,
+				u32 offset,
+				u8 state)
+{
+	u32 bit_spot;
+	u32 byte_offset;
+	unsigned char bitmask;
+	unsigned char byte;
+
+	/* gcc always rounds to zero when doing integer division */
+	byte_offset = offset / 8;
+	byte = bitmap[byte_offset];
+	bit_spot = offset;
+	bitmask = 0x80 >> (offset % 8);
+
+	while (bit_spot < bitmap_len) {
+		if ((state && (byte & bitmask) == bitmask) ||
+		    (state == 0 && (byte & bitmask) == 0))
+			return bit_spot;
+
+		if (++bit_spot >= bitmap_len)
+			return -1;
+		bitmask >>= 1;
+		if (bitmask == 0) {
+			byte = bitmap[++byte_offset];
+			bitmask = 0x80;
+		}
+	}
+
+	return -1;
+}
+
+/**
+ * cipso_v4_bitmap_setbit - Sets a single bit in a bitmap
+ * @bitmap: the bitmap
+ * @bit: the bit
+ * @state: if non-zero, set the bit (1) else clear the bit (0)
+ *
+ * Description:
+ * Set a single bit in the bitmask.  Returns zero on success, negative values
+ * on error.
+ */
+static void cipso_v4_bitmap_setbit(unsigned char *bitmap,
+				   u32 bit,
+				   u8 state)
+{
+	u32 byte_spot;
+	u8 bitmask;
+
+	/* gcc always rounds to zero when doing integer division */
+	byte_spot = bit / 8;
+	bitmask = 0x80 >> (bit % 8);
+	if (state)
+		bitmap[byte_spot] |= bitmask;
+	else
+		bitmap[byte_spot] &= ~bitmask;
+}
+
+/**
  * cipso_v4_cache_entry_free - Frees a cache entry
  * @entry: the entry to free
  *
@@ -667,7 +738,8 @@ static int cipso_v4_map_lvl_valid(const struct cipso_v4_doi *doi_def, u8 level)
 	case CIPSO_V4_MAP_PASS:
 		return 0;
 	case CIPSO_V4_MAP_TRANS:
-		if (doi_def->map.std->lvl.cipso[level] < CIPSO_V4_INV_LVL)
+		if ((level < doi_def->map.std->lvl.cipso_size) &&
+		    (doi_def->map.std->lvl.cipso[level] < CIPSO_V4_INV_LVL))
 			return 0;
 		break;
 	}
@@ -770,10 +842,10 @@ static int cipso_v4_map_cat_rbm_valid(const struct cipso_v4_doi *doi_def,
 		cipso_cat_size = doi_def->map.std->cat.cipso_size;
 		cipso_array = doi_def->map.std->cat.cipso;
 		for (;;) {
-			cat = netlbl_bitmap_walk(bitmap,
-						 bitmap_len_bits,
-						 cat + 1,
-						 1);
+			cat = cipso_v4_bitmap_walk(bitmap,
+						   bitmap_len_bits,
+						   cat + 1,
+						   1);
 			if (cat < 0)
 				break;
 			if (cat >= cipso_cat_size ||
@@ -839,7 +911,7 @@ static int cipso_v4_map_cat_rbm_hton(const struct cipso_v4_doi *doi_def,
 		}
 		if (net_spot >= net_clen_bits)
 			return -ENOSPC;
-		netlbl_bitmap_setbit(net_cat, net_spot, 1);
+		cipso_v4_bitmap_setbit(net_cat, net_spot, 1);
 
 		if (net_spot > net_spot_max)
 			net_spot_max = net_spot;
@@ -881,10 +953,10 @@ static int cipso_v4_map_cat_rbm_ntoh(const struct cipso_v4_doi *doi_def,
 	}
 
 	for (;;) {
-		net_spot = netlbl_bitmap_walk(net_cat,
-					      net_clen_bits,
-					      net_spot + 1,
-					      1);
+		net_spot = cipso_v4_bitmap_walk(net_cat,
+						net_clen_bits,
+						net_spot + 1,
+						1);
 		if (net_spot < 0) {
 			if (net_spot == -2)
 				return -EFAULT;
@@ -1512,7 +1584,7 @@ static int cipso_v4_parsetag_loc(const struct cipso_v4_doi *doi_def,
  *
  * Description:
  * Parse the packet's IP header looking for a CIPSO option.  Returns a pointer
- * to the start of the CIPSO option on success, NULL if one if not found.
+ * to the start of the CIPSO option on success, NULL if one is not found.
  *
  */
 unsigned char *cipso_v4_optptr(const struct sk_buff *skb)
@@ -1522,10 +1594,21 @@ unsigned char *cipso_v4_optptr(const struct sk_buff *skb)
 	int optlen;
 	int taglen;
 
-	for (optlen = iph->ihl*4 - sizeof(struct iphdr); optlen > 0; ) {
+	for (optlen = iph->ihl*4 - sizeof(struct iphdr); optlen > 1; ) {
+		switch (optptr[0]) {
+		case IPOPT_END:
+			return NULL;
+		case IPOPT_NOOP:
+			taglen = 1;
+			break;
+		default:
+			taglen = optptr[1];
+		}
+		if (!taglen || taglen > optlen)
+			return NULL;
 		if (optptr[0] == IPOPT_CIPSO)
 			return optptr;
-		taglen = optptr[1];
+
 		optlen -= taglen;
 		optptr += taglen;
 	}
@@ -1724,13 +1807,26 @@ validate_return:
  */
 void cipso_v4_error(struct sk_buff *skb, int error, u32 gateway)
 {
+	unsigned char optbuf[sizeof(struct ip_options) + 40];
+	struct ip_options *opt = (struct ip_options *)optbuf;
+
 	if (ip_hdr(skb)->protocol == IPPROTO_ICMP || error != -EACCES)
 		return;
 
+	/*
+	 * We might be called above the IP layer,
+	 * so we can not use icmp_send and IPCB here.
+	 */
+
+	memset(opt, 0, sizeof(struct ip_options));
+	opt->optlen = ip_hdr(skb)->ihl*4 - sizeof(struct iphdr);
+	if (__ip_options_compile(dev_net(skb->dev), opt, skb, NULL))
+		return;
+
 	if (gateway)
-		icmp_send(skb, ICMP_DEST_UNREACH, ICMP_NET_ANO, 0);
+		__icmp_send(skb, ICMP_DEST_UNREACH, ICMP_NET_ANO, 0, opt);
 	else
-		icmp_send(skb, ICMP_DEST_UNREACH, ICMP_HOST_ANO, 0);
+		__icmp_send(skb, ICMP_DEST_UNREACH, ICMP_HOST_ANO, 0, opt);
 }
 
 /**
@@ -1867,8 +1963,7 @@ int cipso_v4_sock_setattr(struct sock *sk,
 
 	sk_inet = inet_sk(sk);
 
-	old = rcu_dereference_protected(sk_inet->inet_opt,
-					lockdep_sock_is_held(sk));
+	old = rcu_dereference_protected(sk_inet->inet_opt, sock_owned_by_user(sk));
 	if (sk_inet->is_icsk) {
 		sk_conn = inet_csk(sk);
 		if (old)

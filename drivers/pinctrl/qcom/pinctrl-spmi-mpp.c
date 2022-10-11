@@ -14,7 +14,6 @@
 #include <linux/gpio.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_irq.h>
 #include <linux/pinctrl/pinconf-generic.h>
 #include <linux/pinctrl/pinconf.h>
 #include <linux/pinctrl/pinmux.h>
@@ -117,7 +116,6 @@
  * @output_enabled: Set to true if MPP output logic is enabled.
  * @input_enabled: Set to true if MPP input buffer logic is enabled.
  * @paired: Pin operates in paired mode
- * @has_pullup: Pin has support to configure pullup
  * @num_sources: Number of power-sources supported by this MPP.
  * @power_source: Current power-source used.
  * @amux_input: Set the source for analog input.
@@ -135,7 +133,6 @@ struct pmic_mpp_pad {
 	bool		output_enabled;
 	bool		input_enabled;
 	bool		paired;
-	bool		has_pullup;
 	unsigned int	num_sources;
 	unsigned int	power_source;
 	unsigned int	amux_input;
@@ -179,6 +176,11 @@ static const char *const pmic_mpp_groups[] = {
 
 static const char *const pmic_mpp_functions[] = {
 	"digital", "analog", "sink"
+};
+
+static inline struct pmic_mpp_state *to_mpp_state(struct gpio_chip *chip)
+{
+	return container_of(chip, struct pmic_mpp_state, chip);
 };
 
 static int pmic_mpp_read(struct pmic_mpp_state *state,
@@ -319,6 +321,8 @@ static int pmic_mpp_set_mux(struct pinctrl_dev *pctldev, unsigned function,
 	pad->function = function;
 
 	ret = pmic_mpp_write_mode_ctl(state, pad);
+	if (ret < 0)
+		return ret;
 
 	val = pad->is_enabled << PMIC_MPP_REG_MASTER_EN_SHIFT;
 
@@ -343,13 +347,12 @@ static int pmic_mpp_config_get(struct pinctrl_dev *pctldev,
 
 	switch (param) {
 	case PIN_CONFIG_BIAS_DISABLE:
-		arg = pad->pullup == PMIC_MPP_PULL_UP_OPEN;
+		if (pad->pullup != PMIC_MPP_PULL_UP_OPEN)
+			return -EINVAL;
+		arg = 1;
 		break;
 	case PIN_CONFIG_BIAS_PULL_UP:
 		switch (pad->pullup) {
-		case PMIC_MPP_PULL_UP_OPEN:
-			arg = 0;
-			break;
 		case PMIC_MPP_PULL_UP_0P6KOHM:
 			arg = 600;
 			break;
@@ -364,13 +367,17 @@ static int pmic_mpp_config_get(struct pinctrl_dev *pctldev,
 		}
 		break;
 	case PIN_CONFIG_BIAS_HIGH_IMPEDANCE:
-		arg = !pad->is_enabled;
+		if (pad->is_enabled)
+			return -EINVAL;
+		arg = 1;
 		break;
 	case PIN_CONFIG_POWER_SOURCE:
 		arg = pad->power_source;
 		break;
 	case PIN_CONFIG_INPUT_ENABLE:
-		arg = pad->input_enabled;
+		if (!pad->input_enabled)
+			return -EINVAL;
+		arg = 1;
 		break;
 	case PIN_CONFIG_OUTPUT:
 		arg = pad->out_value;
@@ -382,7 +389,9 @@ static int pmic_mpp_config_get(struct pinctrl_dev *pctldev,
 		arg = pad->amux_input;
 		break;
 	case PMIC_MPP_CONF_PAIRED:
-		arg = pad->paired;
+		if (!pad->paired)
+			return -EINVAL;
+		arg = 1;
 		break;
 	case PIN_CONFIG_DRIVE_STRENGTH:
 		arg = pad->drive_strength;
@@ -455,7 +464,7 @@ static int pmic_mpp_config_set(struct pinctrl_dev *pctldev, unsigned int pin,
 			pad->dtest = arg;
 			break;
 		case PIN_CONFIG_DRIVE_STRENGTH:
-			arg = pad->drive_strength;
+			pad->drive_strength = arg;
 			break;
 		case PMIC_MPP_CONF_AMUX_ROUTE:
 			if (arg >= PMIC_MPP_AMUX_ROUTE_ABUS4)
@@ -479,14 +488,11 @@ static int pmic_mpp_config_set(struct pinctrl_dev *pctldev, unsigned int pin,
 	if (ret < 0)
 		return ret;
 
-	if (pad->has_pullup) {
-		val = pad->pullup << PMIC_MPP_REG_PULL_SHIFT;
+	val = pad->pullup << PMIC_MPP_REG_PULL_SHIFT;
 
-		ret = pmic_mpp_write(state, pad, PMIC_MPP_REG_DIG_PULL_CTL,
-				     val);
-		if (ret < 0)
-			return ret;
-	}
+	ret = pmic_mpp_write(state, pad, PMIC_MPP_REG_DIG_PULL_CTL, val);
+	if (ret < 0)
+		return ret;
 
 	val = pad->amux_input & PMIC_MPP_REG_AIN_ROUTE_MASK;
 
@@ -499,6 +505,10 @@ static int pmic_mpp_config_set(struct pinctrl_dev *pctldev, unsigned int pin,
 		return ret;
 
 	ret = pmic_mpp_write_mode_ctl(state, pad);
+	if (ret < 0)
+		return ret;
+
+	ret = pmic_mpp_write(state, pad, PMIC_MPP_REG_SINK_CTL, pad->drive_strength);
 	if (ret < 0)
 		return ret;
 
@@ -539,8 +549,7 @@ static void pmic_mpp_config_dbg_show(struct pinctrl_dev *pctldev,
 		seq_printf(s, " %-7s", pmic_mpp_functions[pad->function]);
 		seq_printf(s, " vin-%d", pad->power_source);
 		seq_printf(s, " %d", pad->aout_level);
-		if (pad->has_pullup)
-			seq_printf(s, " %-8s", biases[pad->pullup]);
+		seq_printf(s, " %-8s", biases[pad->pullup]);
 		seq_printf(s, " %-4s", pad->out_value ? "high" : "low");
 		if (pad->dtest)
 			seq_printf(s, " dtest%d", pad->dtest);
@@ -558,7 +567,7 @@ static const struct pinconf_ops pmic_mpp_pinconf_ops = {
 
 static int pmic_mpp_direction_input(struct gpio_chip *chip, unsigned pin)
 {
-	struct pmic_mpp_state *state = gpiochip_get_data(chip);
+	struct pmic_mpp_state *state = to_mpp_state(chip);
 	unsigned long config;
 
 	config = pinconf_to_config_packed(PIN_CONFIG_INPUT_ENABLE, 1);
@@ -569,7 +578,7 @@ static int pmic_mpp_direction_input(struct gpio_chip *chip, unsigned pin)
 static int pmic_mpp_direction_output(struct gpio_chip *chip,
 				     unsigned pin, int val)
 {
-	struct pmic_mpp_state *state = gpiochip_get_data(chip);
+	struct pmic_mpp_state *state = to_mpp_state(chip);
 	unsigned long config;
 
 	config = pinconf_to_config_packed(PIN_CONFIG_OUTPUT, val);
@@ -579,7 +588,7 @@ static int pmic_mpp_direction_output(struct gpio_chip *chip,
 
 static int pmic_mpp_get(struct gpio_chip *chip, unsigned pin)
 {
-	struct pmic_mpp_state *state = gpiochip_get_data(chip);
+	struct pmic_mpp_state *state = to_mpp_state(chip);
 	struct pmic_mpp_pad *pad;
 	int ret;
 
@@ -593,12 +602,12 @@ static int pmic_mpp_get(struct gpio_chip *chip, unsigned pin)
 		pad->out_value = ret & PMIC_MPP_REG_RT_STS_VAL_MASK;
 	}
 
-	return !!pad->out_value;
+	return pad->out_value;
 }
 
 static void pmic_mpp_set(struct gpio_chip *chip, unsigned pin, int value)
 {
-	struct pmic_mpp_state *state = gpiochip_get_data(chip);
+	struct pmic_mpp_state *state = to_mpp_state(chip);
 	unsigned long config;
 
 	config = pinconf_to_config_packed(PIN_CONFIG_OUTPUT, value);
@@ -621,7 +630,7 @@ static int pmic_mpp_of_xlate(struct gpio_chip *chip,
 
 static int pmic_mpp_to_irq(struct gpio_chip *chip, unsigned pin)
 {
-	struct pmic_mpp_state *state = gpiochip_get_data(chip);
+	struct pmic_mpp_state *state = to_mpp_state(chip);
 	struct pmic_mpp_pad *pad;
 
 	pad = state->ctrl->desc->pins[pin].drv_data;
@@ -631,7 +640,7 @@ static int pmic_mpp_to_irq(struct gpio_chip *chip, unsigned pin)
 
 static void pmic_mpp_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 {
-	struct pmic_mpp_state *state = gpiochip_get_data(chip);
+	struct pmic_mpp_state *state = to_mpp_state(chip);
 	unsigned i;
 
 	for (i = 0; i < chip->ngpio; i++) {
@@ -754,16 +763,12 @@ static int pmic_mpp_populate(struct pmic_mpp_state *state,
 	pad->power_source = val >> PMIC_MPP_REG_VIN_SHIFT;
 	pad->power_source &= PMIC_MPP_REG_VIN_MASK;
 
-	if (subtype != PMIC_MPP_SUBTYPE_ULT_4CH_NO_ANA_OUT &&
-	    subtype != PMIC_MPP_SUBTYPE_ULT_4CH_NO_SINK) {
-		val = pmic_mpp_read(state, pad, PMIC_MPP_REG_DIG_PULL_CTL);
-		if (val < 0)
-			return val;
+	val = pmic_mpp_read(state, pad, PMIC_MPP_REG_DIG_PULL_CTL);
+	if (val < 0)
+		return val;
 
-		pad->pullup = val >> PMIC_MPP_REG_PULL_SHIFT;
-		pad->pullup &= PMIC_MPP_REG_PULL_MASK;
-		pad->has_pullup = true;
-	}
+	pad->pullup = val >> PMIC_MPP_REG_PULL_SHIFT;
+	pad->pullup &= PMIC_MPP_REG_PULL_MASK;
 
 	val = pmic_mpp_read(state, pad, PMIC_MPP_REG_AIN_CTL);
 	if (val < 0)
@@ -801,19 +806,17 @@ static int pmic_mpp_probe(struct platform_device *pdev)
 	struct pmic_mpp_pad *pad, *pads;
 	struct pmic_mpp_state *state;
 	int ret, npins, i;
-	u32 reg;
+	u32 res[2];
 
-	ret = of_property_read_u32(dev->of_node, "reg", &reg);
+	ret = of_property_read_u32_array(dev->of_node, "reg", res, 2);
 	if (ret < 0) {
-		dev_err(dev, "missing base address");
+		dev_err(dev, "missing base address and/or range");
 		return ret;
 	}
 
-	npins = platform_irq_count(pdev);
+	npins = res[1] / PMIC_MPP_ADDRESS_RANGE;
 	if (!npins)
 		return -EINVAL;
-	if (npins < 0)
-		return npins;
 
 	BUG_ON(npins > ARRAY_SIZE(pmic_mpp_groups));
 
@@ -862,7 +865,7 @@ static int pmic_mpp_probe(struct platform_device *pdev)
 		if (pad->irq < 0)
 			return pad->irq;
 
-		pad->base = reg + i * PMIC_MPP_ADDRESS_RANGE;
+		pad->base = res[0] + i * PMIC_MPP_ADDRESS_RANGE;
 
 		ret = pmic_mpp_populate(state, pad);
 		if (ret < 0)
@@ -877,14 +880,14 @@ static int pmic_mpp_probe(struct platform_device *pdev)
 	state->chip.of_gpio_n_cells = 2;
 	state->chip.can_sleep = false;
 
-	state->ctrl = devm_pinctrl_register(dev, pctrldesc, state);
+	state->ctrl = pinctrl_register(pctrldesc, dev, state);
 	if (IS_ERR(state->ctrl))
 		return PTR_ERR(state->ctrl);
 
-	ret = gpiochip_add_data(&state->chip, state);
+	ret = gpiochip_add(&state->chip);
 	if (ret) {
 		dev_err(state->dev, "can't add gpio chip\n");
-		return ret;
+		goto err_chip;
 	}
 
 	ret = gpiochip_add_pin_range(&state->chip, dev_name(dev), 0, 0, npins);
@@ -897,6 +900,8 @@ static int pmic_mpp_probe(struct platform_device *pdev)
 
 err_range:
 	gpiochip_remove(&state->chip);
+err_chip:
+	pinctrl_unregister(state->ctrl);
 	return ret;
 }
 
@@ -905,6 +910,7 @@ static int pmic_mpp_remove(struct platform_device *pdev)
 	struct pmic_mpp_state *state = platform_get_drvdata(pdev);
 
 	gpiochip_remove(&state->chip);
+	pinctrl_unregister(state->ctrl);
 	return 0;
 }
 
@@ -912,9 +918,7 @@ static const struct of_device_id pmic_mpp_of_match[] = {
 	{ .compatible = "qcom,pm8841-mpp" },	/* 4 MPP's */
 	{ .compatible = "qcom,pm8916-mpp" },	/* 4 MPP's */
 	{ .compatible = "qcom,pm8941-mpp" },	/* 8 MPP's */
-	{ .compatible = "qcom,pm8994-mpp" },	/* 8 MPP's */
 	{ .compatible = "qcom,pma8084-mpp" },	/* 8 MPP's */
-	{ .compatible = "qcom,spmi-mpp" },	/* Generic */
 	{ },
 };
 

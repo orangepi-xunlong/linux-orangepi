@@ -2431,6 +2431,7 @@ static int wm8994_set_dai_sysclk(struct snd_soc_dai *dai,
 			snd_soc_update_bits(codec, WM8994_POWER_MANAGEMENT_2,
 					    WM8994_OPCLK_ENA, 0);
 		}
+		break;
 
 	default:
 		return -EINVAL;
@@ -4439,7 +4440,7 @@ static struct regmap *wm8994_get_regmap(struct device *dev)
 	return control->regmap;
 }
 
-static const struct snd_soc_codec_driver soc_codec_dev_wm8994 = {
+static struct snd_soc_codec_driver soc_codec_dev_wm8994 = {
 	.probe =	wm8994_codec_probe,
 	.remove =	wm8994_codec_remove,
 	.suspend =	wm8994_codec_suspend,

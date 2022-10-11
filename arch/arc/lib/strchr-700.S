@@ -13,7 +13,7 @@
 
 #include <linux/linkage.h>
 
-ENTRY_CFI(strchr)
+ENTRY(strchr)
 	extb_s	r1,r1
 	asl	r5,r1,8
 	bmsk	r2,r0,1
@@ -130,4 +130,4 @@ ENTRY_CFI(strchr)
 	j_s.d	[blink]
 	mov.mi	r0,0
 #endif /* ENDIAN */
-END_CFI(strchr)
+END(strchr)

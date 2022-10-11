@@ -2178,7 +2178,7 @@ static int gbe_slave_open(struct gbe_intf *gbe_intf)
 			return -ENODEV;
 		}
 		dev_dbg(priv->dev, "phy found: id is: 0x%s\n",
-			phydev_name(slave->phy));
+			dev_name(&slave->phy->dev));
 		phy_start(slave->phy);
 		phy_read_status(slave->phy);
 	}
@@ -2681,7 +2681,7 @@ static void init_secondary_ports(struct gbe_priv *gbe_dev,
 			slave->phy = NULL;
 		} else {
 			dev_dbg(dev, "phy found: id is: 0x%s\n",
-				phydev_name(slave->phy));
+				dev_name(&slave->phy->dev));
 			phy_start(slave->phy);
 			phy_read_status(slave->phy);
 		}
@@ -3122,12 +3122,16 @@ static int gbe_probe(struct netcp_device *netcp_device, struct device *dev,
 
 	ret = netcp_txpipe_init(&gbe_dev->tx_pipe, netcp_device,
 				gbe_dev->dma_chan_name, gbe_dev->tx_queue_id);
-	if (ret)
+	if (ret) {
+		of_node_put(interfaces);
 		return ret;
+	}
 
 	ret = netcp_txpipe_open(&gbe_dev->tx_pipe);
-	if (ret)
+	if (ret) {
+		of_node_put(interfaces);
 		return ret;
+	}
 
 	/* Create network interfaces */
 	INIT_LIST_HEAD(&gbe_dev->gbe_intf_head);

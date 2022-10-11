@@ -1,8 +1,6 @@
 /* Moorestown PMIC GPIO (access through IPC) driver
  * Copyright (c) 2008 - 2009, Intel Corporation.
  *
- * Author: Alek Du <alek.du@intel.com>
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
@@ -23,6 +21,7 @@
 
 #define pr_fmt(fmt) "%s: " fmt, __func__
 
+#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
@@ -31,7 +30,7 @@
 #include <linux/ioport.h>
 #include <linux/init.h>
 #include <linux/io.h>
-#include <linux/gpio/driver.h>
+#include <linux/gpio.h>
 #include <asm/intel_scu_ipc.h>
 #include <linux/device.h>
 #include <linux/intel_pmic_gpio.h>
@@ -175,7 +174,7 @@ static int pmic_irq_type(struct irq_data *data, unsigned type)
 
 static int pmic_gpio_to_irq(struct gpio_chip *chip, unsigned offset)
 {
-	struct pmic_gpio *pg = gpiochip_get_data(chip);
+	struct pmic_gpio *pg = container_of(chip, struct pmic_gpio, chip);
 
 	return pg->irq_base + offset;
 }
@@ -280,7 +279,7 @@ static int platform_pmic_gpio_probe(struct platform_device *pdev)
 	mutex_init(&pg->buslock);
 
 	pg->chip.parent = dev;
-	retval = gpiochip_add_data(&pg->chip, pg);
+	retval = gpiochip_add(&pg->chip);
 	if (retval) {
 		pr_err("Can not add pmic gpio chip\n");
 		goto err;
@@ -323,4 +322,9 @@ static int __init platform_pmic_gpio_init(void)
 {
 	return platform_driver_register(&platform_pmic_gpio_driver);
 }
+
 subsys_initcall(platform_pmic_gpio_init);
+
+MODULE_AUTHOR("Alek Du <alek.du@intel.com>");
+MODULE_DESCRIPTION("Intel Moorestown PMIC GPIO driver");
+MODULE_LICENSE("GPL v2");

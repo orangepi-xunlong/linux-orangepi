@@ -20,6 +20,14 @@
 #include <linux/spi/spi.h>
 #include <linux/platform_device.h>
 
+#define FBTFT_NOP		0x00
+#define FBTFT_SWRESET	0x01
+#define FBTFT_RDDID		0x04
+#define FBTFT_RDDST		0x09
+#define FBTFT_CASET		0x2A
+#define FBTFT_RASET		0x2B
+#define FBTFT_RAMWR		0x2C
+
 #define FBTFT_ONBOARD_BACKLIGHT 2
 
 #define FBTFT_GPIO_NO_MATCH		0xFFFF
@@ -38,7 +46,7 @@
  */
 struct fbtft_gpio {
 	char name[FBTFT_GPIO_NAME_SIZE];
-	unsigned int gpio;
+	unsigned gpio;
 };
 
 struct fbtft_par;
@@ -79,7 +87,7 @@ struct fbtft_ops {
 	void (*reset)(struct fbtft_par *par);
 	void (*mkdirty)(struct fb_info *info, int from, int to);
 	void (*update_display)(struct fbtft_par *par,
-				unsigned int start_line, unsigned int end_line);
+				unsigned start_line, unsigned end_line);
 	int (*init_display)(struct fbtft_par *par);
 	int (*blank)(struct fbtft_par *par, bool on);
 
@@ -115,14 +123,14 @@ struct fbtft_ops {
  * This structure is not stored by FBTFT except for init_sequence.
  */
 struct fbtft_display {
-	unsigned int width;
-	unsigned int height;
-	unsigned int regwidth;
-	unsigned int buswidth;
-	unsigned int backlight;
+	unsigned width;
+	unsigned height;
+	unsigned regwidth;
+	unsigned buswidth;
+	unsigned backlight;
 	struct fbtft_ops fbtftops;
-	unsigned int bpp;
-	unsigned int fps;
+	unsigned bpp;
+	unsigned fps;
 	int txbuflen;
 	int *init_sequence;
 	char *gamma;
@@ -146,9 +154,9 @@ struct fbtft_display {
 struct fbtft_platform_data {
 	struct fbtft_display display;
 	const struct fbtft_gpio *gpios;
-	unsigned int rotate;
+	unsigned rotate;
 	bool bgr;
-	unsigned int fps;
+	unsigned fps;
 	int txbuflen;
 	u8 startbyte;
 	char *gamma;
@@ -216,8 +224,8 @@ struct fbtft_par {
 	u8 startbyte;
 	struct fbtft_ops fbtftops;
 	spinlock_t dirty_lock;
-	unsigned int dirty_lines_start;
-	unsigned int dirty_lines_end;
+	unsigned dirty_lines_start;
+	unsigned dirty_lines_end;
 	struct {
 		int reset;
 		int dc;

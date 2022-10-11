@@ -426,7 +426,7 @@
 
 	};
 
-	onewire {
+	onewire@0 {
 		compatible = "w1-gpio";
 		pinctrl-names = "default";
 		pinctrl-0 = <&w1_gpio_pins>;

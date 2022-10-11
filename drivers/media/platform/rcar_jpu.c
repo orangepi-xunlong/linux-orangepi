@@ -203,6 +203,7 @@
  * @irq: JPEG IP irq
  * @clk: JPEG IP clock
  * @dev: JPEG IP struct device
+ * @alloc_ctx: videobuf2 memory allocator's context
  * @ref_count: reference counter
  */
 struct jpu {
@@ -219,6 +220,7 @@ struct jpu {
 	unsigned int		irq;
 	struct clk		*clk;
 	struct device		*dev;
+	void			*alloc_ctx;
 	int			ref_count;
 };
 
@@ -1013,32 +1015,30 @@ error_free:
  * ============================================================================
  */
 static int jpu_queue_setup(struct vb2_queue *vq,
+			   const void *parg,
 			   unsigned int *nbuffers, unsigned int *nplanes,
-			   unsigned int sizes[], struct device *alloc_devs[])
+			   unsigned int sizes[], void *alloc_ctxs[])
 {
+	const struct v4l2_format *fmt = parg;
 	struct jpu_ctx *ctx = vb2_get_drv_priv(vq);
 	struct jpu_q_data *q_data;
 	unsigned int i;
 
 	q_data = jpu_get_q_data(ctx, vq->type);
 
-	if (*nplanes) {
-		if (*nplanes != q_data->format.num_planes)
-			return -EINVAL;
-
-		for (i = 0; i < *nplanes; i++) {
-			unsigned int q_size = q_data->format.plane_fmt[i].sizeimage;
-
-			if (sizes[i] < q_size)
-				return -EINVAL;
-		}
-		return 0;
-	}
-
 	*nplanes = q_data->format.num_planes;
 
-	for (i = 0; i < *nplanes; i++)
-		sizes[i] = q_data->format.plane_fmt[i].sizeimage;
+	for (i = 0; i < *nplanes; i++) {
+		unsigned int q_size = q_data->format.plane_fmt[i].sizeimage;
+		unsigned int f_size = fmt ?
+			fmt->fmt.pix_mp.plane_fmt[i].sizeimage : 0;
+
+		if (fmt && f_size < q_size)
+			return -EINVAL;
+
+		sizes[i] = fmt ? f_size : q_size;
+		alloc_ctxs[i] = ctx->jpu->alloc_ctx;
+	}
 
 	return 0;
 }
@@ -1183,7 +1183,7 @@ static void jpu_stop_streaming(struct vb2_queue *vq)
 	}
 }
 
-static const struct vb2_ops jpu_qops = {
+static struct vb2_ops jpu_qops = {
 	.queue_setup		= jpu_queue_setup,
 	.buf_prepare		= jpu_buf_prepare,
 	.buf_queue		= jpu_buf_queue,
@@ -1209,7 +1209,6 @@ static int jpu_queue_init(void *priv, struct vb2_queue *src_vq,
 	src_vq->mem_ops = &vb2_dma_contig_memops;
 	src_vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
 	src_vq->lock = &ctx->jpu->mutex;
-	src_vq->dev = ctx->jpu->v4l2_dev.dev;
 
 	ret = vb2_queue_init(src_vq);
 	if (ret)
@@ -1224,7 +1223,6 @@ static int jpu_queue_init(void *priv, struct vb2_queue *src_vq,
 	dst_vq->mem_ops = &vb2_dma_contig_memops;
 	dst_vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
 	dst_vq->lock = &ctx->jpu->mutex;
-	dst_vq->dev = ctx->jpu->v4l2_dev.dev;
 
 	return vb2_queue_init(dst_vq);
 }
@@ -1304,16 +1302,16 @@ static int jpu_release(struct file *file)
 	struct jpu *jpu = video_drvdata(file);
 	struct jpu_ctx *ctx = fh_to_ctx(file->private_data);
 
+	mutex_lock(&jpu->mutex);
+	if (--jpu->ref_count == 0)
+		clk_disable_unprepare(jpu->clk);
+	mutex_unlock(&jpu->mutex);
+
 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
 	v4l2_ctrl_handler_free(&ctx->ctrl_handler);
 	v4l2_fh_del(&ctx->fh);
 	v4l2_fh_exit(&ctx->fh);
 	kfree(ctx);
-
-	mutex_lock(&jpu->mutex);
-	if (--jpu->ref_count == 0)
-		clk_disable_unprepare(jpu->clk);
-	mutex_unlock(&jpu->mutex);
 
 	return 0;
 }
@@ -1564,9 +1562,12 @@ static irqreturn_t jpu_irq_handler(int irq, void *dev_id)
 		}
 
 		dst_buf->field = src_buf->field;
-		dst_buf->vb2_buf.timestamp = src_buf->vb2_buf.timestamp;
+		dst_buf->timestamp = src_buf->timestamp;
 		if (src_buf->flags & V4L2_BUF_FLAG_TIMECODE)
 			dst_buf->timecode = src_buf->timecode;
+		dst_buf->flags &= ~V4L2_BUF_FLAG_TSTAMP_SRC_MASK;
+		dst_buf->flags |= src_buf->flags &
+					V4L2_BUF_FLAG_TSTAMP_SRC_MASK;
 		dst_buf->flags = src_buf->flags &
 			(V4L2_BUF_FLAG_TIMECODE | V4L2_BUF_FLAG_KEYFRAME |
 			 V4L2_BUF_FLAG_PFRAME | V4L2_BUF_FLAG_BFRAME |
@@ -1612,7 +1613,6 @@ static const struct of_device_id jpu_dt_ids[] = {
 	{ .compatible = "renesas,jpu-r8a7791" }, /* M2-W */
 	{ .compatible = "renesas,jpu-r8a7792" }, /* V2H */
 	{ .compatible = "renesas,jpu-r8a7793" }, /* M2-N */
-	{ .compatible = "renesas,rcar-gen2-jpu" },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, jpu_dt_ids);
@@ -1675,6 +1675,13 @@ static int jpu_probe(struct platform_device *pdev)
 		goto device_register_rollback;
 	}
 
+	jpu->alloc_ctx = vb2_dma_contig_init_ctx(&pdev->dev);
+	if (IS_ERR(jpu->alloc_ctx)) {
+		v4l2_err(&jpu->v4l2_dev, "Failed to init memory allocator\n");
+		ret = PTR_ERR(jpu->alloc_ctx);
+		goto m2m_init_rollback;
+	}
+
 	/* fill in qantization and Huffman tables for encoder */
 	for (i = 0; i < JPU_MAX_QUALITY; i++)
 		jpu_generate_hdr(i, (unsigned char *)jpeg_hdrs[i]);
@@ -1691,7 +1698,7 @@ static int jpu_probe(struct platform_device *pdev)
 	ret = video_register_device(&jpu->vfd_encoder, VFL_TYPE_GRABBER, -1);
 	if (ret) {
 		v4l2_err(&jpu->v4l2_dev, "Failed to register video device\n");
-		goto m2m_init_rollback;
+		goto vb2_allocator_rollback;
 	}
 
 	video_set_drvdata(&jpu->vfd_encoder, jpu);
@@ -1724,6 +1731,9 @@ static int jpu_probe(struct platform_device *pdev)
 enc_vdev_register_rollback:
 	video_unregister_device(&jpu->vfd_encoder);
 
+vb2_allocator_rollback:
+	vb2_dma_contig_cleanup_ctx(jpu->alloc_ctx);
+
 m2m_init_rollback:
 	v4l2_m2m_release(jpu->m2m_dev);
 
@@ -1739,6 +1749,7 @@ static int jpu_remove(struct platform_device *pdev)
 
 	video_unregister_device(&jpu->vfd_decoder);
 	video_unregister_device(&jpu->vfd_encoder);
+	vb2_dma_contig_cleanup_ctx(jpu->alloc_ctx);
 	v4l2_m2m_release(jpu->m2m_dev);
 	v4l2_device_unregister(&jpu->v4l2_dev);
 

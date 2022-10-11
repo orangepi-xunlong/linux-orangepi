@@ -152,7 +152,7 @@ extern struct task_group root_task_group;
 
 #ifdef CONFIG_VIRT_CPU_ACCOUNTING_GEN
 # define INIT_VTIME(tsk)						\
-	.vtime_seqcount = SEQCNT_ZERO(tsk.vtime_seqcount),	\
+	.vtime_seqlock = __SEQLOCK_UNLOCKED(tsk.vtime_seqlock),	\
 	.vtime_snap = 0,				\
 	.vtime_snap_whence = VTIME_SYS,
 #else
@@ -186,9 +186,7 @@ extern struct task_group root_task_group;
 #endif
 
 #ifdef CONFIG_THREAD_INFO_IN_TASK
-# define INIT_TASK_TI(tsk)			\
-	.thread_info = INIT_THREAD_INFO(tsk),	\
-	.stack_refcount = ATOMIC_INIT(1),
+# define INIT_TASK_TI(tsk) .thread_info = INIT_THREAD_INFO(tsk),
 #else
 # define INIT_TASK_TI(tsk)
 #endif

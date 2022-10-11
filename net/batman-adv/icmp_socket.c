@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2016  B.A.T.M.A.N. contributors:
+/* Copyright (C) 2007-2015 B.A.T.M.A.N. contributors:
  *
  * Marek Lindner
  *
@@ -45,7 +45,6 @@
 #include <linux/wait.h>
 
 #include "hard-interface.h"
-#include "log.h"
 #include "originator.h"
 #include "packet.h"
 #include "send.h"
@@ -105,21 +104,25 @@ static int batadv_socket_open(struct inode *inode, struct file *file)
 
 static int batadv_socket_release(struct inode *inode, struct file *file)
 {
-	struct batadv_socket_client *client = file->private_data;
-	struct batadv_socket_packet *packet, *tmp;
+	struct batadv_socket_client *socket_client = file->private_data;
+	struct batadv_socket_packet *socket_packet;
+	struct list_head *list_pos, *list_pos_tmp;
 
-	spin_lock_bh(&client->lock);
+	spin_lock_bh(&socket_client->lock);
 
 	/* for all packets in the queue ... */
-	list_for_each_entry_safe(packet, tmp, &client->queue_list, list) {
-		list_del(&packet->list);
-		kfree(packet);
+	list_for_each_safe(list_pos, list_pos_tmp, &socket_client->queue_list) {
+		socket_packet = list_entry(list_pos,
+					   struct batadv_socket_packet, list);
+
+		list_del(list_pos);
+		kfree(socket_packet);
 	}
 
-	batadv_socket_client_hash[client->index] = NULL;
-	spin_unlock_bh(&client->lock);
+	batadv_socket_client_hash[socket_client->index] = NULL;
+	spin_unlock_bh(&socket_client->lock);
 
-	kfree(client);
+	kfree(socket_client);
 	module_put(THIS_MODULE);
 
 	return 0;
@@ -275,7 +278,7 @@ static ssize_t batadv_socket_write(struct file *file, const char __user *buff,
 
 	ether_addr_copy(icmp_header->orig, primary_if->net_dev->dev_addr);
 
-	batadv_send_unicast_skb(skb, neigh_node);
+	batadv_send_skb_packet(skb, neigh_node->if_incoming, neigh_node->addr);
 	goto out;
 
 dst_unreach:
@@ -285,11 +288,11 @@ free_skb:
 	kfree_skb(skb);
 out:
 	if (primary_if)
-		batadv_hardif_put(primary_if);
+		batadv_hardif_free_ref(primary_if);
 	if (neigh_node)
-		batadv_neigh_node_put(neigh_node);
+		batadv_neigh_node_free_ref(neigh_node);
 	if (orig_node)
-		batadv_orig_node_put(orig_node);
+		batadv_orig_node_free_ref(orig_node);
 	return len;
 }
 
@@ -334,7 +337,7 @@ err:
 }
 
 /**
- * batadv_socket_add_packet - schedule an icmp packet to be sent to
+ * batadv_socket_receive_packet - schedule an icmp packet to be sent to
  *  userspace on an icmp socket.
  * @socket_client: the socket this packet belongs to
  * @icmph: pointer to the header of the icmp packet

@@ -10,6 +10,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/kconfig.h>
 #include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -154,8 +155,10 @@ int hdpvr_alloc_buffers(struct hdpvr_device *dev, uint count)
 		buf->dev = dev;
 
 		urb = usb_alloc_urb(0, GFP_KERNEL);
-		if (!urb)
+		if (!urb) {
+			v4l2_err(&dev->v4l2_dev, "cannot allocate urb\n");
 			goto exit_urb;
+		}
 		buf->urb = urb;
 
 		mem = usb_alloc_coherent(dev->udev, dev->bulk_in_size, GFP_KERNEL,
@@ -313,7 +316,7 @@ static int hdpvr_start_streaming(struct hdpvr_device *dev)
 	dev->status = STATUS_STREAMING;
 
 	INIT_WORK(&dev->worker, hdpvr_transmit_buffers);
-	schedule_work(&dev->worker);
+	queue_work(dev->workqueue, &dev->worker);
 
 	v4l2_dbg(MSG_BUFFER, hdpvr_debug, &dev->v4l2_dev,
 			"streaming started\n");
@@ -347,7 +350,7 @@ static int hdpvr_stop_streaming(struct hdpvr_device *dev)
 	wake_up_interruptible(&dev->wait_buffer);
 	msleep(50);
 
-	flush_work(&dev->worker);
+	flush_workqueue(dev->workqueue);
 
 	mutex_lock(&dev->io_mutex);
 	/* kill the still outstanding urbs */
@@ -459,8 +462,10 @@ static ssize_t hdpvr_read(struct file *file, char __user *buffer, size_t count,
 			}
 
 			if (wait_event_interruptible(dev->wait_data,
-					      buf->status == BUFSTAT_READY))
-				return -ERESTARTSYS;
+					      buf->status == BUFSTAT_READY)) {
+				ret = -ERESTARTSYS;
+				goto err;
+			}
 		}
 
 		if (buf->status != BUFSTAT_READY)
@@ -637,7 +642,7 @@ static int vidioc_s_dv_timings(struct file *file, void *_fh,
 	if (dev->status != STATUS_IDLE)
 		return -EBUSY;
 	for (i = 0; i < ARRAY_SIZE(hdpvr_dv_timings); i++)
-		if (v4l2_match_dv_timings(timings, hdpvr_dv_timings + i, 0, false))
+		if (v4l2_match_dv_timings(timings, hdpvr_dv_timings + i, 0))
 			break;
 	if (i == ARRAY_SIZE(hdpvr_dv_timings))
 		return -EINVAL;
@@ -1120,7 +1125,7 @@ static void hdpvr_device_release(struct video_device *vdev)
 
 	hdpvr_delete(dev);
 	mutex_lock(&dev->io_mutex);
-	flush_work(&dev->worker);
+	destroy_workqueue(dev->workqueue);
 	mutex_unlock(&dev->io_mutex);
 
 	v4l2_device_unregister(&dev->v4l2_dev);

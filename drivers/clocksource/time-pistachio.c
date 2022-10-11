@@ -84,7 +84,7 @@ pistachio_clocksource_read_cycles(struct clocksource *cs)
 	counter = gpt_readl(pcs->base, TIMER_CURRENT_VALUE, 0);
 	raw_spin_unlock_irqrestore(&pcs->lock, flags);
 
-	return (cycle_t)~counter;
+	return ~(cycle_t)counter;
 }
 
 static u64 notrace pistachio_read_sched_clock(void)
@@ -148,7 +148,7 @@ static struct pistachio_clocksource pcs_gpt = {
 		},
 };
 
-static int __init pistachio_clksrc_of_init(struct device_node *node)
+static void __init pistachio_clksrc_of_init(struct device_node *node)
 {
 	struct clk *sys_clk, *fast_clk;
 	struct regmap *periph_regs;
@@ -158,61 +158,61 @@ static int __init pistachio_clksrc_of_init(struct device_node *node)
 	pcs_gpt.base = of_iomap(node, 0);
 	if (!pcs_gpt.base) {
 		pr_err("cannot iomap\n");
-		return -ENXIO;
+		return;
 	}
 
 	periph_regs = syscon_regmap_lookup_by_phandle(node, "img,cr-periph");
 	if (IS_ERR(periph_regs)) {
-		pr_err("cannot get peripheral regmap (%ld)\n",
+		pr_err("cannot get peripheral regmap (%lu)\n",
 		       PTR_ERR(periph_regs));
-		return PTR_ERR(periph_regs);
+		return;
 	}
 
 	/* Switch to using the fast counter clock */
 	ret = regmap_update_bits(periph_regs, PERIP_TIMER_CONTROL,
 				 0xf, 0x0);
 	if (ret)
-		return ret;
+		return;
 
 	sys_clk = of_clk_get_by_name(node, "sys");
 	if (IS_ERR(sys_clk)) {
-		pr_err("clock get failed (%ld)\n", PTR_ERR(sys_clk));
-		return PTR_ERR(sys_clk);
+		pr_err("clock get failed (%lu)\n", PTR_ERR(sys_clk));
+		return;
 	}
 
 	fast_clk = of_clk_get_by_name(node, "fast");
 	if (IS_ERR(fast_clk)) {
 		pr_err("clock get failed (%lu)\n", PTR_ERR(fast_clk));
-		return PTR_ERR(fast_clk);
+		return;
 	}
 
 	ret = clk_prepare_enable(sys_clk);
 	if (ret < 0) {
 		pr_err("failed to enable clock (%d)\n", ret);
-		return ret;
+		return;
 	}
 
 	ret = clk_prepare_enable(fast_clk);
 	if (ret < 0) {
 		pr_err("failed to enable clock (%d)\n", ret);
 		clk_disable_unprepare(sys_clk);
-		return ret;
+		return;
 	}
 
 	rate = clk_get_rate(fast_clk);
 
 	/* Disable irq's for clocksource usage */
-	gpt_writel(pcs_gpt.base, 0, TIMER_IRQ_MASK, 0);
-	gpt_writel(pcs_gpt.base, 0, TIMER_IRQ_MASK, 1);
-	gpt_writel(pcs_gpt.base, 0, TIMER_IRQ_MASK, 2);
-	gpt_writel(pcs_gpt.base, 0, TIMER_IRQ_MASK, 3);
+	gpt_writel(&pcs_gpt.base, 0, TIMER_IRQ_MASK, 0);
+	gpt_writel(&pcs_gpt.base, 0, TIMER_IRQ_MASK, 1);
+	gpt_writel(&pcs_gpt.base, 0, TIMER_IRQ_MASK, 2);
+	gpt_writel(&pcs_gpt.base, 0, TIMER_IRQ_MASK, 3);
 
 	/* Enable timer block */
 	writel(TIMER_ME_GLOBAL, pcs_gpt.base);
 
 	raw_spin_lock_init(&pcs_gpt.lock);
 	sched_clock_register(pistachio_read_sched_clock, 32, rate);
-	return clocksource_register_hz(&pcs_gpt.cs, rate);
+	clocksource_register_hz(&pcs_gpt.cs, rate);
 }
 CLOCKSOURCE_OF_DECLARE(pistachio_gptimer, "img,pistachio-gptimer",
 		       pistachio_clksrc_of_init);

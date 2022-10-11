@@ -1,7 +1,4 @@
 /*
- * Freescale i.MX23 pinctrl driver
- *
- * Author: Shawn Guo <shawn.guo@linaro.org>
  * Copyright 2012 Freescale Semiconductor, Inc.
  *
  * The code contained herein is licensed under the GNU General Public
@@ -13,6 +10,7 @@
  */
 
 #include <linux/init.h>
+#include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/pinctrl/pinctrl.h>
 #include "pinctrl-mxs.h"
@@ -278,14 +276,15 @@ static const struct of_device_id imx23_pinctrl_of_match[] = {
 	{ .compatible = "fsl,imx23-pinctrl", },
 	{ /* sentinel */ }
 };
+MODULE_DEVICE_TABLE(of, imx23_pinctrl_of_match);
 
 static struct platform_driver imx23_pinctrl_driver = {
 	.driver = {
 		.name = "imx23-pinctrl",
-		.suppress_bind_attrs = true,
 		.of_match_table = imx23_pinctrl_of_match,
 	},
 	.probe = imx23_pinctrl_probe,
+	.remove = mxs_pinctrl_remove,
 };
 
 static int __init imx23_pinctrl_init(void)
@@ -293,3 +292,13 @@ static int __init imx23_pinctrl_init(void)
 	return platform_driver_register(&imx23_pinctrl_driver);
 }
 postcore_initcall(imx23_pinctrl_init);
+
+static void __exit imx23_pinctrl_exit(void)
+{
+	platform_driver_unregister(&imx23_pinctrl_driver);
+}
+module_exit(imx23_pinctrl_exit);
+
+MODULE_AUTHOR("Shawn Guo <shawn.guo@linaro.org>");
+MODULE_DESCRIPTION("Freescale i.MX23 pinctrl driver");
+MODULE_LICENSE("GPL v2");

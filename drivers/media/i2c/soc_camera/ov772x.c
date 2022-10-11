@@ -24,7 +24,7 @@
 #include <linux/v4l2-mediabus.h>
 #include <linux/videodev2.h>
 
-#include <media/i2c/ov772x.h>
+#include <media/ov772x.h>
 #include <media/soc_camera.h>
 #include <media/v4l2-clk.h>
 #include <media/v4l2-ctrls.h>
@@ -834,7 +834,7 @@ static int ov772x_set_params(struct ov772x_priv *priv,
 	 * set COM8
 	 */
 	if (priv->band_filter) {
-		ret = ov772x_mask_set(client, COM8, BNDF_ON_OFF, 1);
+		ret = ov772x_mask_set(client, COM8, BNDF_ON_OFF, BNDF_ON_OFF);
 		if (!ret)
 			ret = ov772x_mask_set(client, BDBASE,
 					      0xff, 256 - priv->band_filter);
@@ -851,28 +851,29 @@ ov772x_set_fmt_error:
 	return ret;
 }
 
-static int ov772x_get_selection(struct v4l2_subdev *sd,
-		struct v4l2_subdev_pad_config *cfg,
-		struct v4l2_subdev_selection *sel)
+static int ov772x_g_crop(struct v4l2_subdev *sd, struct v4l2_crop *a)
 {
-	if (sel->which != V4L2_SUBDEV_FORMAT_ACTIVE)
-		return -EINVAL;
+	a->c.left	= 0;
+	a->c.top	= 0;
+	a->c.width	= VGA_WIDTH;
+	a->c.height	= VGA_HEIGHT;
+	a->type		= V4L2_BUF_TYPE_VIDEO_CAPTURE;
 
-	sel->r.left = 0;
-	sel->r.top = 0;
-	switch (sel->target) {
-	case V4L2_SEL_TGT_CROP_BOUNDS:
-	case V4L2_SEL_TGT_CROP_DEFAULT:
-		sel->r.width = OV772X_MAX_WIDTH;
-		sel->r.height = OV772X_MAX_HEIGHT;
-		return 0;
-	case V4L2_SEL_TGT_CROP:
-		sel->r.width = VGA_WIDTH;
-		sel->r.height = VGA_HEIGHT;
-		return 0;
-	default:
-		return -EINVAL;
-	}
+	return 0;
+}
+
+static int ov772x_cropcap(struct v4l2_subdev *sd, struct v4l2_cropcap *a)
+{
+	a->bounds.left			= 0;
+	a->bounds.top			= 0;
+	a->bounds.width			= OV772X_MAX_WIDTH;
+	a->bounds.height		= OV772X_MAX_HEIGHT;
+	a->defrect			= a->bounds;
+	a->type				= V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	a->pixelaspect.numerator	= 1;
+	a->pixelaspect.denominator	= 1;
+
+	return 0;
 }
 
 static int ov772x_get_fmt(struct v4l2_subdev *sd,
@@ -1029,12 +1030,13 @@ static int ov772x_g_mbus_config(struct v4l2_subdev *sd,
 
 static struct v4l2_subdev_video_ops ov772x_subdev_video_ops = {
 	.s_stream	= ov772x_s_stream,
+	.cropcap	= ov772x_cropcap,
+	.g_crop		= ov772x_g_crop,
 	.g_mbus_config	= ov772x_g_mbus_config,
 };
 
 static const struct v4l2_subdev_pad_ops ov772x_subdev_pad_ops = {
 	.enum_mbus_code = ov772x_enum_mbus_code,
-	.get_selection	= ov772x_get_selection,
 	.get_fmt	= ov772x_get_fmt,
 	.set_fmt	= ov772x_set_fmt,
 };

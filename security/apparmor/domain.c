@@ -346,7 +346,7 @@ int apparmor_bprm_set_creds(struct linux_binprm *bprm)
 		file_inode(bprm->file)->i_uid,
 		file_inode(bprm->file)->i_mode
 	};
-	const char *name = NULL, *info = NULL;
+	const char *name = NULL, *target = NULL, *info = NULL;
 	int error = 0;
 
 	if (bprm->cred_prepared)
@@ -399,7 +399,6 @@ int apparmor_bprm_set_creds(struct linux_binprm *bprm)
 	if (cxt->onexec) {
 		struct file_perms cp;
 		info = "change_profile onexec";
-		new_profile = aa_get_newest_profile(cxt->onexec);
 		if (!(perms.allow & AA_MAY_ONEXEC))
 			goto audit;
 
@@ -414,6 +413,7 @@ int apparmor_bprm_set_creds(struct linux_binprm *bprm)
 
 		if (!(cp.allow & AA_MAY_ONEXEC))
 			goto audit;
+		new_profile = aa_get_newest_profile(cxt->onexec);
 		goto apply;
 	}
 
@@ -433,7 +433,7 @@ int apparmor_bprm_set_creds(struct linux_binprm *bprm)
 				new_profile = aa_get_newest_profile(ns->unconfined);
 				info = "ux fallback";
 			} else {
-				error = -EACCES;
+				error = -ENOENT;
 				info = "profile not found";
 				/* remove MAY_EXEC to audit as failure */
 				perms.allow &= ~MAY_EXEC;
@@ -445,8 +445,10 @@ int apparmor_bprm_set_creds(struct linux_binprm *bprm)
 		if (!new_profile) {
 			error = -ENOMEM;
 			info = "could not create null profile";
-		} else
+		} else {
 			error = -EACCES;
+			target = new_profile->base.hname;
+		}
 		perms.xindex |= AA_X_UNSAFE;
 	} else
 		/* fail exec */
@@ -457,6 +459,7 @@ int apparmor_bprm_set_creds(struct linux_binprm *bprm)
 	 * fail the exec.
 	 */
 	if (bprm->unsafe & LSM_UNSAFE_NO_NEW_PRIVS) {
+		aa_put_profile(new_profile);
 		error = -EPERM;
 		goto cleanup;
 	}
@@ -471,8 +474,10 @@ int apparmor_bprm_set_creds(struct linux_binprm *bprm)
 
 	if (bprm->unsafe & (LSM_UNSAFE_PTRACE | LSM_UNSAFE_PTRACE_CAP)) {
 		error = may_change_ptraced_domain(new_profile);
-		if (error)
+		if (error) {
+			aa_put_profile(new_profile);
 			goto audit;
+		}
 	}
 
 	/* Determine if secure exec is needed.
@@ -493,6 +498,7 @@ int apparmor_bprm_set_creds(struct linux_binprm *bprm)
 		bprm->unsafe |= AA_SECURE_X_NEEDED;
 	}
 apply:
+	target = new_profile->base.hname;
 	/* when transitioning profiles clear unsafe personality bits */
 	bprm->per_clear |= PER_CLEAR_ON_SETID;
 
@@ -500,19 +506,15 @@ x_clear:
 	aa_put_profile(cxt->profile);
 	/* transfer new profile reference will be released when cxt is freed */
 	cxt->profile = new_profile;
-	new_profile = NULL;
 
 	/* clear out all temporary/transitional state from the context */
 	aa_clear_task_cxt_trans(cxt);
 
 audit:
 	error = aa_audit_file(profile, &perms, GFP_KERNEL, OP_EXEC, MAY_EXEC,
-			      name,
-			      new_profile ? new_profile->base.hname : NULL,
-			      cond.uid, info, error);
+			      name, target, cond.uid, info, error);
 
 cleanup:
-	aa_put_profile(new_profile);
 	aa_put_profile(profile);
 	kfree(buffer);
 

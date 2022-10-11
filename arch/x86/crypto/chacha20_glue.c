@@ -70,13 +70,14 @@ static int chacha20_simd(struct blkcipher_desc *desc, struct scatterlist *dst,
 	struct blkcipher_walk walk;
 	int err;
 
-	if (nbytes <= CHACHA20_BLOCK_SIZE || !may_use_simd())
+	if (!may_use_simd())
 		return crypto_chacha20_crypt(desc, dst, src, nbytes);
 
 	state = (u32 *)roundup((uintptr_t)state_buf, CHACHA20_STATE_ALIGN);
 
 	blkcipher_walk_init(&walk, dst, src, nbytes);
 	err = blkcipher_walk_virt_block(desc, &walk, CHACHA20_BLOCK_SIZE);
+	desc->flags &= ~CRYPTO_TFM_REQ_MAY_SLEEP;
 
 	crypto_chacha20_init(state, crypto_blkcipher_ctx(desc->tfm), walk.iv);
 
@@ -129,8 +130,7 @@ static int __init chacha20_simd_mod_init(void)
 		return -ENODEV;
 
 #ifdef CONFIG_AS_AVX2
-	chacha20_use_avx2 = boot_cpu_has(X86_FEATURE_AVX) &&
-			    boot_cpu_has(X86_FEATURE_AVX2) &&
+	chacha20_use_avx2 = cpu_has_avx && cpu_has_avx2 &&
 			    cpu_has_xfeatures(XFEATURE_MASK_SSE | XFEATURE_MASK_YMM, NULL);
 #endif
 	return crypto_register_alg(&alg);

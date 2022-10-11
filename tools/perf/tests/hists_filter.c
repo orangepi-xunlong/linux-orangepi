@@ -56,8 +56,13 @@ static int add_hist_entries(struct perf_evlist *evlist,
 	 * (perf [perf] main) will be collapsed to an existing entry
 	 * so total 9 entries will be in the tree.
 	 */
-	evlist__for_each_entry(evlist, evsel) {
+	evlist__for_each(evlist, evsel) {
 		for (i = 0; i < ARRAY_SIZE(fake_samples); i++) {
+			const union perf_event event = {
+				.header = {
+					.misc = PERF_RECORD_MISC_USER,
+				},
+			};
 			struct hist_entry_iter iter = {
 				.evsel = evsel,
 				.sample = &sample,
@@ -71,17 +76,17 @@ static int add_hist_entries(struct perf_evlist *evlist,
 			hists->dso_filter = NULL;
 			hists->symbol_filter_str = NULL;
 
-			sample.cpumode = PERF_RECORD_MISC_USER;
 			sample.pid = fake_samples[i].pid;
 			sample.tid = fake_samples[i].pid;
 			sample.ip = fake_samples[i].ip;
 
-			if (machine__resolve(machine, &al, &sample) < 0)
+			if (perf_event__preprocess_sample(&event, machine, &al,
+							  &sample) < 0)
 				goto out;
 
 			al.socket = fake_samples[i].socket;
 			if (hist_entry_iter__add(&iter, &al,
-						 sysctl_perf_event_max_stack, NULL) < 0) {
+						 PERF_MAX_STACK_DEPTH, NULL) < 0) {
 				addr_location__put(&al);
 				goto out;
 			}
@@ -99,7 +104,7 @@ out:
 	return TEST_FAIL;
 }
 
-int test__hists_filter(int subtest __maybe_unused)
+int test__hists_filter(void)
 {
 	int err = TEST_FAIL;
 	struct machines machines;
@@ -115,10 +120,9 @@ int test__hists_filter(int subtest __maybe_unused)
 	err = parse_events(evlist, "task-clock", NULL);
 	if (err)
 		goto out;
-	err = TEST_FAIL;
 
 	/* default sort order (comm,dso,sym) will be used */
-	if (setup_sorting(NULL) < 0)
+	if (setup_sorting() < 0)
 		goto out;
 
 	machines__init(&machines);
@@ -136,11 +140,11 @@ int test__hists_filter(int subtest __maybe_unused)
 	if (err < 0)
 		goto out;
 
-	evlist__for_each_entry(evlist, evsel) {
+	evlist__for_each(evlist, evsel) {
 		struct hists *hists = evsel__hists(evsel);
 
 		hists__collapse_resort(hists, NULL);
-		perf_evsel__output_resort(evsel, NULL);
+		hists__output_resort(hists, NULL);
 
 		if (verbose > 2) {
 			pr_info("Normal histogram\n");

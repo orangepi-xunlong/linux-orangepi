@@ -15,7 +15,7 @@
 #include <linux/slab.h>
 #include <linux/cputime.h>
 
-static DEFINE_SPINLOCK(cpufreq_stats_lock);
+static spinlock_t cpufreq_stats_lock;
 
 struct cpufreq_stats {
 	unsigned int total_trans;
@@ -52,9 +52,6 @@ static ssize_t show_time_in_state(struct cpufreq_policy *policy, char *buf)
 	ssize_t len = 0;
 	int i;
 
-	if (policy->fast_switch_enabled)
-		return 0;
-
 	cpufreq_stats_update(stats);
 	for (i = 0; i < stats->state_num; i++) {
 		len += sprintf(buf + len, "%u %llu\n", stats->freq_table[i],
@@ -70,9 +67,6 @@ static ssize_t show_trans_table(struct cpufreq_policy *policy, char *buf)
 	struct cpufreq_stats *stats = policy->stats;
 	ssize_t len = 0;
 	int i, j;
-
-	if (policy->fast_switch_enabled)
-		return 0;
 
 	len += snprintf(buf + len, PAGE_SIZE - len, "   From  :    To\n");
 	len += snprintf(buf + len, PAGE_SIZE - len, "         : ");
@@ -136,7 +130,7 @@ static int freq_table_get_index(struct cpufreq_stats *stats, unsigned int freq)
 	return -1;
 }
 
-void cpufreq_stats_free_table(struct cpufreq_policy *policy)
+static void __cpufreq_stats_free_table(struct cpufreq_policy *policy)
 {
 	struct cpufreq_stats *stats = policy->stats;
 
@@ -152,25 +146,39 @@ void cpufreq_stats_free_table(struct cpufreq_policy *policy)
 	policy->stats = NULL;
 }
 
-void cpufreq_stats_create_table(struct cpufreq_policy *policy)
+static void cpufreq_stats_free_table(unsigned int cpu)
+{
+	struct cpufreq_policy *policy;
+
+	policy = cpufreq_cpu_get(cpu);
+	if (!policy)
+		return;
+
+	__cpufreq_stats_free_table(policy);
+
+	cpufreq_cpu_put(policy);
+}
+
+static int __cpufreq_stats_create_table(struct cpufreq_policy *policy)
 {
 	unsigned int i = 0, count = 0, ret = -ENOMEM;
 	struct cpufreq_stats *stats;
 	unsigned int alloc_size;
+	unsigned int cpu = policy->cpu;
 	struct cpufreq_frequency_table *pos, *table;
 
 	/* We need cpufreq table for creating stats table */
-	table = policy->freq_table;
+	table = cpufreq_frequency_get_table(cpu);
 	if (unlikely(!table))
-		return;
+		return 0;
 
 	/* stats already initialized */
 	if (policy->stats)
-		return;
+		return -EEXIST;
 
 	stats = kzalloc(sizeof(*stats), GFP_KERNEL);
 	if (!stats)
-		return;
+		return -ENOMEM;
 
 	/* Find total allocation size */
 	cpufreq_for_each_valid_entry(pos, table)
@@ -207,32 +215,80 @@ void cpufreq_stats_create_table(struct cpufreq_policy *policy)
 	policy->stats = stats;
 	ret = sysfs_create_group(&policy->kobj, &stats_attr_group);
 	if (!ret)
-		return;
+		return 0;
 
 	/* We failed, release resources */
 	policy->stats = NULL;
 	kfree(stats->time_in_state);
 free_stat:
 	kfree(stats);
+
+	return ret;
 }
 
-void cpufreq_stats_record_transition(struct cpufreq_policy *policy,
-				     unsigned int new_freq)
+static void cpufreq_stats_create_table(unsigned int cpu)
 {
-	struct cpufreq_stats *stats = policy->stats;
+	struct cpufreq_policy *policy;
+
+	/*
+	 * "likely(!policy)" because normally cpufreq_stats will be registered
+	 * before cpufreq driver
+	 */
+	policy = cpufreq_cpu_get(cpu);
+	if (likely(!policy))
+		return;
+
+	__cpufreq_stats_create_table(policy);
+
+	cpufreq_cpu_put(policy);
+}
+
+static int cpufreq_stat_notifier_policy(struct notifier_block *nb,
+		unsigned long val, void *data)
+{
+	int ret = 0;
+	struct cpufreq_policy *policy = data;
+
+	if (val == CPUFREQ_CREATE_POLICY)
+		ret = __cpufreq_stats_create_table(policy);
+	else if (val == CPUFREQ_REMOVE_POLICY)
+		__cpufreq_stats_free_table(policy);
+
+	return ret;
+}
+
+static int cpufreq_stat_notifier_trans(struct notifier_block *nb,
+		unsigned long val, void *data)
+{
+	struct cpufreq_freqs *freq = data;
+	struct cpufreq_policy *policy = cpufreq_cpu_get(freq->cpu);
+	struct cpufreq_stats *stats;
 	int old_index, new_index;
 
-	if (!stats) {
-		pr_debug("%s: No stats found\n", __func__);
-		return;
+	if (!policy) {
+		pr_err("%s: No policy found\n", __func__);
+		return 0;
 	}
 
+	if (val != CPUFREQ_POSTCHANGE)
+		goto put_policy;
+
+	if (!policy->stats) {
+		pr_debug("%s: No stats found\n", __func__);
+		goto put_policy;
+	}
+
+	stats = policy->stats;
+
 	old_index = stats->last_index;
-	new_index = freq_table_get_index(stats, new_freq);
+	new_index = freq_table_get_index(stats, freq->new);
 
 	/* We can't do stats->time_in_state[-1]= .. */
-	if (old_index == -1 || new_index == -1 || old_index == new_index)
-		return;
+	if (old_index == -1 || new_index == -1)
+		goto put_policy;
+
+	if (old_index == new_index)
+		goto put_policy;
 
 	cpufreq_stats_update(stats);
 
@@ -241,4 +297,61 @@ void cpufreq_stats_record_transition(struct cpufreq_policy *policy,
 	stats->trans_table[old_index * stats->max_state + new_index]++;
 #endif
 	stats->total_trans++;
+
+put_policy:
+	cpufreq_cpu_put(policy);
+	return 0;
 }
+
+static struct notifier_block notifier_policy_block = {
+	.notifier_call = cpufreq_stat_notifier_policy
+};
+
+static struct notifier_block notifier_trans_block = {
+	.notifier_call = cpufreq_stat_notifier_trans
+};
+
+static int __init cpufreq_stats_init(void)
+{
+	int ret;
+	unsigned int cpu;
+
+	spin_lock_init(&cpufreq_stats_lock);
+	ret = cpufreq_register_notifier(&notifier_policy_block,
+				CPUFREQ_POLICY_NOTIFIER);
+	if (ret)
+		return ret;
+
+	for_each_online_cpu(cpu)
+		cpufreq_stats_create_table(cpu);
+
+	ret = cpufreq_register_notifier(&notifier_trans_block,
+				CPUFREQ_TRANSITION_NOTIFIER);
+	if (ret) {
+		cpufreq_unregister_notifier(&notifier_policy_block,
+				CPUFREQ_POLICY_NOTIFIER);
+		for_each_online_cpu(cpu)
+			cpufreq_stats_free_table(cpu);
+		return ret;
+	}
+
+	return 0;
+}
+static void __exit cpufreq_stats_exit(void)
+{
+	unsigned int cpu;
+
+	cpufreq_unregister_notifier(&notifier_policy_block,
+			CPUFREQ_POLICY_NOTIFIER);
+	cpufreq_unregister_notifier(&notifier_trans_block,
+			CPUFREQ_TRANSITION_NOTIFIER);
+	for_each_online_cpu(cpu)
+		cpufreq_stats_free_table(cpu);
+}
+
+MODULE_AUTHOR("Zou Nan hai <nanhai.zou@intel.com>");
+MODULE_DESCRIPTION("Export cpufreq stats via sysfs");
+MODULE_LICENSE("GPL");
+
+module_init(cpufreq_stats_init);
+module_exit(cpufreq_stats_exit);

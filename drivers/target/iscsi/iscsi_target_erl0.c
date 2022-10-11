@@ -784,7 +784,7 @@ static void iscsit_handle_time2retain_timeout(unsigned long data)
 	}
 
 	spin_unlock_bh(&se_tpg->session_lock);
-	iscsit_close_session(sess);
+	target_put_session(sess->se_sess);
 }
 
 void iscsit_start_time2retain_handler(struct iscsi_session *sess)

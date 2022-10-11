@@ -1,6 +1,6 @@
 /**************************************************************************
  *
- * Copyright © 2009-2016 VMware, Inc., Palo Alto, CA., USA
+ * Copyright © 2009-2015 VMware, Inc., Palo Alto, CA., USA
  * All Rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -43,12 +43,6 @@
 
 #define VMW_MIN_INITIAL_WIDTH 800
 #define VMW_MIN_INITIAL_HEIGHT 600
-
-#ifndef VMWGFX_GIT_VERSION
-#define VMWGFX_GIT_VERSION "Unknown"
-#endif
-
-#define VMWGFX_REPO "In Tree"
 
 
 /**
@@ -199,14 +193,9 @@ static const struct drm_ioctl_desc vmw_ioctls[] = {
 	VMW_IOCTL_DEF(VMW_PRESENT_READBACK,
 		      vmw_present_readback_ioctl,
 		      DRM_MASTER | DRM_AUTH),
-	/*
-	 * The permissions of the below ioctl are overridden in
-	 * vmw_generic_ioctl(). We require either
-	 * DRM_MASTER or capable(CAP_SYS_ADMIN).
-	 */
 	VMW_IOCTL_DEF(VMW_UPDATE_LAYOUT,
 		      vmw_kms_update_layout_ioctl,
-		      DRM_RENDER_ALLOW),
+		      DRM_MASTER),
 	VMW_IOCTL_DEF(VMW_CREATE_SHADER,
 		      vmw_shader_define_ioctl,
 		      DRM_AUTH | DRM_RENDER_ALLOW),
@@ -246,15 +235,15 @@ static int vmwgfx_pm_notifier(struct notifier_block *nb, unsigned long val,
 			      void *ptr);
 
 MODULE_PARM_DESC(enable_fbdev, "Enable vmwgfx fbdev");
-module_param_named(enable_fbdev, enable_fbdev, int, S_IRUSR | S_IWUSR);
+module_param_named(enable_fbdev, enable_fbdev, int, 0600);
 MODULE_PARM_DESC(force_dma_api, "Force using the DMA API for TTM pages");
-module_param_named(force_dma_api, vmw_force_iommu, int, S_IRUSR | S_IWUSR);
+module_param_named(force_dma_api, vmw_force_iommu, int, 0600);
 MODULE_PARM_DESC(restrict_iommu, "Try to limit IOMMU usage for TTM pages");
-module_param_named(restrict_iommu, vmw_restrict_iommu, int, S_IRUSR | S_IWUSR);
+module_param_named(restrict_iommu, vmw_restrict_iommu, int, 0600);
 MODULE_PARM_DESC(force_coherent, "Force coherent TTM pages");
-module_param_named(force_coherent, vmw_force_coherent, int, S_IRUSR | S_IWUSR);
+module_param_named(force_coherent, vmw_force_coherent, int, 0600);
 MODULE_PARM_DESC(restrict_dma_mask, "Restrict DMA mask to 44 bits with IOMMU");
-module_param_named(restrict_dma_mask, vmw_restrict_dma_mask, int, S_IRUSR | S_IWUSR);
+module_param_named(restrict_dma_mask, vmw_restrict_dma_mask, int, 0600);
 MODULE_PARM_DESC(assume_16bpp, "Assume 16-bpp when filtering modes");
 module_param_named(assume_16bpp, vmw_assume_16bpp, int, 0600);
 
@@ -340,7 +329,7 @@ static int vmw_dummy_query_bo_create(struct vmw_private *dev_priv)
 	if (unlikely(ret != 0))
 		return ret;
 
-	ret = ttm_bo_reserve(&vbo->base, false, true, NULL);
+	ret = ttm_bo_reserve(&vbo->base, false, true, false, NULL);
 	BUG_ON(ret != 0);
 	vmw_bo_pin_reserved(vbo, true);
 
@@ -605,13 +594,16 @@ out_fixup:
 static int vmw_dma_masks(struct vmw_private *dev_priv)
 {
 	struct drm_device *dev = dev_priv->dev;
+	int ret = 0;
 
-	if (intel_iommu_enabled &&
+	ret = dma_set_mask_and_coherent(dev->dev, DMA_BIT_MASK(64));
+	if (dev_priv->map_mode != vmw_dma_phys &&
 	    (sizeof(unsigned long) == 4 || vmw_restrict_dma_mask)) {
 		DRM_INFO("Restricting DMA addresses to 44 bits.\n");
-		return dma_set_mask(dev->dev, DMA_BIT_MASK(44));
+		return dma_set_mask_and_coherent(dev->dev, DMA_BIT_MASK(44));
 	}
-	return 0;
+
+	return ret;
 }
 #else
 static int vmw_dma_masks(struct vmw_private *dev_priv)
@@ -627,7 +619,6 @@ static int vmw_driver_load(struct drm_device *dev, unsigned long chipset)
 	uint32_t svga_id;
 	enum vmw_res_type i;
 	bool refuse_dma = false;
-	char host_log[100] = {0};
 
 	dev_priv = kzalloc(sizeof(*dev_priv), GFP_KERNEL);
 	if (unlikely(dev_priv == NULL)) {
@@ -643,7 +634,6 @@ static int vmw_driver_load(struct drm_device *dev, unsigned long chipset)
 	mutex_init(&dev_priv->cmdbuf_mutex);
 	mutex_init(&dev_priv->release_mutex);
 	mutex_init(&dev_priv->binding_mutex);
-	mutex_init(&dev_priv->global_kms_state_mutex);
 	rwlock_init(&dev_priv->resource_lock);
 	ttm_lock_init(&dev_priv->reservation_sem);
 	spin_lock_init(&dev_priv->hw_lock);
@@ -898,16 +888,6 @@ static int vmw_driver_load(struct drm_device *dev, unsigned long chipset)
 
 	DRM_INFO("DX: %s\n", dev_priv->has_dx ? "yes." : "no.");
 
-	snprintf(host_log, sizeof(host_log), "vmwgfx: %s-%s",
-		VMWGFX_REPO, VMWGFX_GIT_VERSION);
-	vmw_host_log(host_log);
-
-	memset(host_log, 0, sizeof(host_log));
-	snprintf(host_log, sizeof(host_log), "vmwgfx: Module Version: %d.%d.%d",
-		VMWGFX_DRIVER_MAJOR, VMWGFX_DRIVER_MINOR,
-		VMWGFX_DRIVER_PATCHLEVEL);
-	vmw_host_log(host_log);
-
 	if (dev_priv->enable_fb) {
 		vmw_fifo_resource_inc(dev_priv);
 		vmw_svga_enable(dev_priv);
@@ -1007,6 +987,15 @@ static int vmw_driver_unload(struct drm_device *dev)
 	return 0;
 }
 
+static void vmw_preclose(struct drm_device *dev,
+			 struct drm_file *file_priv)
+{
+	struct vmw_fpriv *vmw_fp = vmw_fpriv(file_priv);
+	struct vmw_private *dev_priv = vmw_priv(dev);
+
+	vmw_event_fence_fpriv_gone(dev_priv->fman, &vmw_fp->fence_events);
+}
+
 static void vmw_postclose(struct drm_device *dev,
 			 struct drm_file *file_priv)
 {
@@ -1037,6 +1026,7 @@ static int vmw_driver_open(struct drm_device *dev, struct drm_file *file_priv)
 	if (unlikely(vmw_fp == NULL))
 		return ret;
 
+	INIT_LIST_HEAD(&vmw_fp->fence_events);
 	vmw_fp->tfile = ttm_object_file_init(dev_priv->tdev, 10);
 	if (unlikely(vmw_fp->tfile == NULL))
 		goto out_no_tfile;
@@ -1058,14 +1048,15 @@ static struct vmw_master *vmw_master_check(struct drm_device *dev,
 	struct vmw_fpriv *vmw_fp = vmw_fpriv(file_priv);
 	struct vmw_master *vmaster;
 
-	if (!drm_is_primary_client(file_priv) || !(flags & DRM_AUTH))
+	if (file_priv->minor->type != DRM_MINOR_LEGACY ||
+	    !(flags & DRM_AUTH))
 		return NULL;
 
 	ret = mutex_lock_interruptible(&dev->master_mutex);
 	if (unlikely(ret != 0))
 		return ERR_PTR(-ERESTARTSYS);
 
-	if (drm_is_current_master(file_priv)) {
+	if (file_priv->is_master) {
 		mutex_unlock(&dev->master_mutex);
 		return NULL;
 	}
@@ -1130,10 +1121,6 @@ static long vmw_generic_ioctl(struct file *filp, unsigned int cmd,
 
 			return (long) vmw_execbuf_ioctl(dev, arg, file_priv,
 							_IOC_SIZE(cmd));
-		} else if (nr == DRM_COMMAND_BASE + DRM_VMW_UPDATE_LAYOUT) {
-			if (!drm_is_current_master(file_priv) &&
-			    !capable(CAP_SYS_ADMIN))
-				return -EACCES;
 		}
 
 		if (unlikely(ioctl->cmd != cmd))
@@ -1242,13 +1229,13 @@ static int vmw_master_set(struct drm_device *dev,
 	}
 
 	dev_priv->active_master = vmaster;
-	drm_sysfs_hotplug_event(dev);
 
 	return 0;
 }
 
 static void vmw_master_drop(struct drm_device *dev,
-			    struct drm_file *file_priv)
+			    struct drm_file *file_priv,
+			    bool from_release)
 {
 	struct vmw_private *dev_priv = vmw_priv(dev);
 	struct vmw_fpriv *vmw_fp = vmw_fpriv(file_priv);
@@ -1529,6 +1516,7 @@ static struct drm_driver driver = {
 	.master_set = vmw_master_set,
 	.master_drop = vmw_master_drop,
 	.open = vmw_driver_open,
+	.preclose = vmw_preclose,
 	.postclose = vmw_postclose,
 	.set_busid = drm_pci_set_busid,
 
@@ -1567,8 +1555,10 @@ static int __init vmwgfx_init(void)
 {
 	int ret;
 
+#ifdef CONFIG_VGA_CONSOLE
 	if (vgacon_text_force())
 		return -EINVAL;
+#endif
 
 	ret = drm_pci_init(&driver, &vmw_pci_driver);
 	if (ret)

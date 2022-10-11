@@ -28,7 +28,7 @@
 #include <linux/mutex.h>
 #include <linux/mfd/ucb1x00.h>
 #include <linux/pm.h>
-#include <linux/gpio/driver.h>
+#include <linux/gpio.h>
 
 static DEFINE_MUTEX(ucb1x00_mutex);
 static LIST_HEAD(ucb1x00_drivers);
@@ -109,7 +109,7 @@ unsigned int ucb1x00_io_read(struct ucb1x00 *ucb)
 
 static void ucb1x00_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 {
-	struct ucb1x00 *ucb = gpiochip_get_data(chip);
+	struct ucb1x00 *ucb = container_of(chip, struct ucb1x00, gpio);
 	unsigned long flags;
 
 	spin_lock_irqsave(&ucb->io_lock, flags);
@@ -126,19 +126,19 @@ static void ucb1x00_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 
 static int ucb1x00_gpio_get(struct gpio_chip *chip, unsigned offset)
 {
-	struct ucb1x00 *ucb = gpiochip_get_data(chip);
+	struct ucb1x00 *ucb = container_of(chip, struct ucb1x00, gpio);
 	unsigned val;
 
 	ucb1x00_enable(ucb);
 	val = ucb1x00_reg_read(ucb, UCB_IO_DATA);
 	ucb1x00_disable(ucb);
 
-	return !!(val & (1 << offset));
+	return val & (1 << offset);
 }
 
 static int ucb1x00_gpio_direction_input(struct gpio_chip *chip, unsigned offset)
 {
-	struct ucb1x00 *ucb = gpiochip_get_data(chip);
+	struct ucb1x00 *ucb = container_of(chip, struct ucb1x00, gpio);
 	unsigned long flags;
 
 	spin_lock_irqsave(&ucb->io_lock, flags);
@@ -154,7 +154,7 @@ static int ucb1x00_gpio_direction_input(struct gpio_chip *chip, unsigned offset)
 static int ucb1x00_gpio_direction_output(struct gpio_chip *chip, unsigned offset
 		, int value)
 {
-	struct ucb1x00 *ucb = gpiochip_get_data(chip);
+	struct ucb1x00 *ucb = container_of(chip, struct ucb1x00, gpio);
 	unsigned long flags;
 	unsigned old, mask = 1 << offset;
 
@@ -181,7 +181,7 @@ static int ucb1x00_gpio_direction_output(struct gpio_chip *chip, unsigned offset
 
 static int ucb1x00_to_irq(struct gpio_chip *chip, unsigned offset)
 {
-	struct ucb1x00 *ucb = gpiochip_get_data(chip);
+	struct ucb1x00 *ucb = container_of(chip, struct ucb1x00, gpio);
 
 	return ucb->irq_base > 0 ? ucb->irq_base + offset : -ENXIO;
 }
@@ -446,6 +446,10 @@ static int ucb1x00_detect_irq(struct ucb1x00 *ucb)
 	unsigned long mask;
 
 	mask = probe_irq_on();
+	if (!mask) {
+		probe_irq_off(mask);
+		return NO_IRQ;
+	}
 
 	/*
 	 * Enable the ADC interrupt.
@@ -537,7 +541,7 @@ static int ucb1x00_probe(struct mcp *mcp)
 	ucb1x00_enable(ucb);
 	ucb->irq = ucb1x00_detect_irq(ucb);
 	ucb1x00_disable(ucb);
-	if (!ucb->irq) {
+	if (ucb->irq == NO_IRQ) {
 		dev_err(&ucb->dev, "IRQ probe failed\n");
 		ret = -ENODEV;
 		goto err_no_irq;
@@ -575,7 +579,7 @@ static int ucb1x00_probe(struct mcp *mcp)
 		ucb->gpio.direction_input = ucb1x00_gpio_direction_input;
 		ucb->gpio.direction_output = ucb1x00_gpio_direction_output;
 		ucb->gpio.to_irq = ucb1x00_to_irq;
-		ret = gpiochip_add_data(&ucb->gpio, ucb);
+		ret = gpiochip_add(&ucb->gpio);
 		if (ret)
 			goto err_gpio_add;
 	} else

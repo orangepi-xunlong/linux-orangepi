@@ -64,11 +64,10 @@ struct r10conf {
 	int			pending_count;
 
 	spinlock_t		resync_lock;
-	atomic_t		nr_pending;
+	int			nr_pending;
 	int			nr_waiting;
 	int			nr_queued;
 	int			barrier;
-	int			array_freeze_pending;
 	sector_t		next_resync;
 	int			fullsync;  /* set to 1 if a full sync is needed,
 					    * (fresh device added).

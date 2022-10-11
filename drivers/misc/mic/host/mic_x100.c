@@ -450,29 +450,26 @@ mic_x100_load_firmware(struct mic_device *mdev, const char *buf)
 
 	rc = mic_x100_get_boot_addr(mdev);
 	if (rc)
-		return rc;
+		goto error;
 	/* load OS */
 	rc = request_firmware(&fw, mdev->cosm_dev->firmware, &mdev->pdev->dev);
 	if (rc < 0) {
 		dev_err(&mdev->pdev->dev,
 			"ramdisk request_firmware failed: %d %s\n",
 			rc, mdev->cosm_dev->firmware);
-		return rc;
+		goto error;
 	}
 	if (mdev->bootaddr > mdev->aper.len - fw->size) {
 		rc = -EINVAL;
 		dev_err(&mdev->pdev->dev, "%s %d rc %d bootaddr 0x%x\n",
 			__func__, __LINE__, rc, mdev->bootaddr);
+		release_firmware(fw);
 		goto error;
 	}
 	memcpy_toio(mdev->aper.va + mdev->bootaddr, fw->data, fw->size);
 	mdev->ops->write_spad(mdev, MIC_X100_FW_SIZE, fw->size);
-	if (!strcmp(mdev->cosm_dev->bootmode, "flash")) {
-		rc = -EINVAL;
-		dev_err(&mdev->pdev->dev, "%s %d rc %d\n",
-			__func__, __LINE__, rc);
-		goto error;
-	}
+	if (!strcmp(mdev->cosm_dev->bootmode, "flash"))
+		goto done;
 	/* load command line */
 	rc = mic_x100_load_command_line(mdev, fw);
 	if (rc) {
@@ -484,11 +481,9 @@ mic_x100_load_firmware(struct mic_device *mdev, const char *buf)
 	/* load ramdisk */
 	if (mdev->cosm_dev->ramdisk)
 		rc = mic_x100_load_ramdisk(mdev);
-
-	return rc;
-
 error:
-	release_firmware(fw);
+	dev_dbg(&mdev->pdev->dev, "%s %d rc %d\n", __func__, __LINE__, rc);
+done:
 	return rc;
 }
 

@@ -346,7 +346,7 @@ static void jsm_config_port(struct uart_port *port, int flags)
 	port->type = PORT_JSM;
 }
 
-static const struct uart_ops jsm_ops = {
+static struct uart_ops jsm_ops = {
 	.tx_empty	= jsm_tty_tx_empty,
 	.set_mctrl	= jsm_tty_set_mctrl,
 	.get_mctrl	= jsm_tty_get_mctrl,
@@ -529,6 +529,7 @@ void jsm_input(struct jsm_channel *ch)
 	int data_len;
 	unsigned long lock_flags;
 	int len = 0;
+	int n = 0;
 	int s = 0;
 	int i = 0;
 
@@ -568,7 +569,8 @@ void jsm_input(struct jsm_channel *ch)
 	 *If the device is not open, or CREAD is off, flush
 	 *input data and return immediately.
 	 */
-	if (!tp || !C_CREAD(tp)) {
+	if (!tp ||
+		!(tp->termios.c_cflag & CREAD) ) {
 
 		jsm_dbg(READ, &ch->ch_bd->pci_dev,
 			"input. dropping %d bytes on port %d...\n",
@@ -596,15 +598,16 @@ void jsm_input(struct jsm_channel *ch)
 	jsm_dbg(READ, &ch->ch_bd->pci_dev, "start 2\n");
 
 	len = tty_buffer_request_room(port, data_len);
+	n = len;
 
 	/*
-	 * len now contains the most amount of data we can copy,
+	 * n now contains the most amount of data we can copy,
 	 * bounded either by the flip buffer size or the amount
 	 * of data the card actually has pending...
 	 */
-	while (len) {
+	while (n) {
 		s = ((head >= tail) ? head : RQUEUESIZE) - tail;
-		s = min(s, len);
+		s = min(s, n);
 
 		if (s <= 0)
 			break;
@@ -635,7 +638,7 @@ void jsm_input(struct jsm_channel *ch)
 			tty_insert_flip_string(port, ch->ch_rqueue + tail, s);
 		}
 		tail += s;
-		len -= s;
+		n -= s;
 		/* Flip queue if needed */
 		tail &= rmask;
 	}

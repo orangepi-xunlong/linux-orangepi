@@ -186,4 +186,15 @@ static struct isa_driver snd_cs4231_driver = {
 	}
 };
 
-module_isa_driver(snd_cs4231_driver, SNDRV_CARDS);
+static int __init alsa_card_cs4231_init(void)
+{
+	return isa_register_driver(&snd_cs4231_driver, SNDRV_CARDS);
+}
+
+static void __exit alsa_card_cs4231_exit(void)
+{
+	isa_unregister_driver(&snd_cs4231_driver);
+}
+
+module_init(alsa_card_cs4231_init);
+module_exit(alsa_card_cs4231_exit);

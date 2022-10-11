@@ -7,7 +7,7 @@
  *
  * Copyright (C) 2008-2011 Gabor Juhos <juhosg@openwrt.org>
  * Copyright (C) 2008 Imre Kaloz <kaloz@openwrt.org>
- * Copyright (C) 2013 John Crispin <john@phrozen.org>
+ * Copyright (C) 2013 John Crispin <blogic@openwrt.org>
  */
 
 #include <linux/kernel.h>
@@ -81,7 +81,7 @@ static struct rt2880_pmx_func pcie_rst_grp[] = {
 };
 static struct rt2880_pmx_func nd_sd_grp[] = {
 	FUNC("nand", MT7620_GPIO_MODE_NAND, 45, 15),
-	FUNC("sd", MT7620_GPIO_MODE_SD, 45, 15)
+	FUNC("sd", MT7620_GPIO_MODE_SD, 47, 13)
 };
 
 static struct rt2880_pmx_group mt7620a_pinmux_data[] = {
@@ -175,8 +175,8 @@ static struct rt2880_pmx_func spi_cs1_grp_mt7628[] = {
 };
 
 static struct rt2880_pmx_func spis_grp_mt7628[] = {
-	FUNC("pwm_uart2", 3, 14, 4),
-	FUNC("utif", 2, 14, 4),
+	FUNC("pwm", 3, 14, 4),
+	FUNC("util", 2, 14, 4),
 	FUNC("gpio", 1, 14, 4),
 	FUNC("spis", 0, 14, 4),
 };
@@ -188,81 +188,11 @@ static struct rt2880_pmx_func gpio_grp_mt7628[] = {
 	FUNC("gpio", 0, 11, 1),
 };
 
-static struct rt2880_pmx_func p4led_kn_grp_mt7628[] = {
-	FUNC("jtag", 3, 30, 1),
-	FUNC("utif", 2, 30, 1),
-	FUNC("gpio", 1, 30, 1),
-	FUNC("p4led_kn", 0, 30, 1),
-};
-
-static struct rt2880_pmx_func p3led_kn_grp_mt7628[] = {
-	FUNC("jtag", 3, 31, 1),
-	FUNC("utif", 2, 31, 1),
-	FUNC("gpio", 1, 31, 1),
-	FUNC("p3led_kn", 0, 31, 1),
-};
-
-static struct rt2880_pmx_func p2led_kn_grp_mt7628[] = {
-	FUNC("jtag", 3, 32, 1),
-	FUNC("utif", 2, 32, 1),
-	FUNC("gpio", 1, 32, 1),
-	FUNC("p2led_kn", 0, 32, 1),
-};
-
-static struct rt2880_pmx_func p1led_kn_grp_mt7628[] = {
-	FUNC("jtag", 3, 33, 1),
-	FUNC("utif", 2, 33, 1),
-	FUNC("gpio", 1, 33, 1),
-	FUNC("p1led_kn", 0, 33, 1),
-};
-
-static struct rt2880_pmx_func p0led_kn_grp_mt7628[] = {
-	FUNC("jtag", 3, 34, 1),
-	FUNC("rsvd", 2, 34, 1),
-	FUNC("gpio", 1, 34, 1),
-	FUNC("p0led_kn", 0, 34, 1),
-};
-
 static struct rt2880_pmx_func wled_kn_grp_mt7628[] = {
 	FUNC("rsvd", 3, 35, 1),
 	FUNC("rsvd", 2, 35, 1),
 	FUNC("gpio", 1, 35, 1),
 	FUNC("wled_kn", 0, 35, 1),
-};
-
-static struct rt2880_pmx_func p4led_an_grp_mt7628[] = {
-	FUNC("jtag", 3, 39, 1),
-	FUNC("utif", 2, 39, 1),
-	FUNC("gpio", 1, 39, 1),
-	FUNC("p4led_an", 0, 39, 1),
-};
-
-static struct rt2880_pmx_func p3led_an_grp_mt7628[] = {
-	FUNC("jtag", 3, 40, 1),
-	FUNC("utif", 2, 40, 1),
-	FUNC("gpio", 1, 40, 1),
-	FUNC("p3led_an", 0, 40, 1),
-};
-
-static struct rt2880_pmx_func p2led_an_grp_mt7628[] = {
-	FUNC("jtag", 3, 41, 1),
-	FUNC("utif", 2, 41, 1),
-	FUNC("gpio", 1, 41, 1),
-	FUNC("p2led_an", 0, 41, 1),
-};
-
-static struct rt2880_pmx_func p1led_an_grp_mt7628[] = {
-	FUNC("jtag", 3, 42, 1),
-	FUNC("utif", 2, 42, 1),
-	FUNC("gpio", 1, 42, 1),
-	FUNC("p1led_an", 0, 42, 1),
-};
-
-static struct rt2880_pmx_func p0led_an_grp_mt7628[] = {
-	FUNC("jtag", 3, 43, 1),
-	FUNC("rsvd", 2, 43, 1),
-	FUNC("gpio", 1, 43, 1),
-	FUNC("p0led_an", 0, 43, 1),
 };
 
 static struct rt2880_pmx_func wled_an_grp_mt7628[] = {
@@ -274,17 +204,7 @@ static struct rt2880_pmx_func wled_an_grp_mt7628[] = {
 
 #define MT7628_GPIO_MODE_MASK		0x3
 
-#define MT7628_GPIO_MODE_P4LED_KN	58
-#define MT7628_GPIO_MODE_P3LED_KN	56
-#define MT7628_GPIO_MODE_P2LED_KN	54
-#define MT7628_GPIO_MODE_P1LED_KN	52
-#define MT7628_GPIO_MODE_P0LED_KN	50
 #define MT7628_GPIO_MODE_WLED_KN	48
-#define MT7628_GPIO_MODE_P4LED_AN	42
-#define MT7628_GPIO_MODE_P3LED_AN	40
-#define MT7628_GPIO_MODE_P2LED_AN	38
-#define MT7628_GPIO_MODE_P1LED_AN	36
-#define MT7628_GPIO_MODE_P0LED_AN	34
 #define MT7628_GPIO_MODE_WLED_AN	32
 #define MT7628_GPIO_MODE_PWM1		30
 #define MT7628_GPIO_MODE_PWM0		28
@@ -331,28 +251,8 @@ static struct rt2880_pmx_group mt7628an_pinmux_data[] = {
 				1, MT7628_GPIO_MODE_GPIO),
 	GRP_G("wled_an", wled_an_grp_mt7628, MT7628_GPIO_MODE_MASK,
 				1, MT7628_GPIO_MODE_WLED_AN),
-	GRP_G("p0led_an", p0led_an_grp_mt7628, MT7628_GPIO_MODE_MASK,
-				1, MT7628_GPIO_MODE_P0LED_AN),
-	GRP_G("p1led_an", p1led_an_grp_mt7628, MT7628_GPIO_MODE_MASK,
-				1, MT7628_GPIO_MODE_P1LED_AN),
-	GRP_G("p2led_an", p2led_an_grp_mt7628, MT7628_GPIO_MODE_MASK,
-				1, MT7628_GPIO_MODE_P2LED_AN),
-	GRP_G("p3led_an", p3led_an_grp_mt7628, MT7628_GPIO_MODE_MASK,
-				1, MT7628_GPIO_MODE_P3LED_AN),
-	GRP_G("p4led_an", p4led_an_grp_mt7628, MT7628_GPIO_MODE_MASK,
-				1, MT7628_GPIO_MODE_P4LED_AN),
 	GRP_G("wled_kn", wled_kn_grp_mt7628, MT7628_GPIO_MODE_MASK,
 				1, MT7628_GPIO_MODE_WLED_KN),
-	GRP_G("p0led_kn", p0led_kn_grp_mt7628, MT7628_GPIO_MODE_MASK,
-				1, MT7628_GPIO_MODE_P0LED_KN),
-	GRP_G("p1led_kn", p1led_kn_grp_mt7628, MT7628_GPIO_MODE_MASK,
-				1, MT7628_GPIO_MODE_P1LED_KN),
-	GRP_G("p2led_kn", p2led_kn_grp_mt7628, MT7628_GPIO_MODE_MASK,
-				1, MT7628_GPIO_MODE_P2LED_KN),
-	GRP_G("p3led_kn", p3led_kn_grp_mt7628, MT7628_GPIO_MODE_MASK,
-				1, MT7628_GPIO_MODE_P3LED_KN),
-	GRP_G("p4led_kn", p4led_kn_grp_mt7628, MT7628_GPIO_MODE_MASK,
-				1, MT7628_GPIO_MODE_P4LED_KN),
 	{ 0 }
 };
 
@@ -556,10 +456,7 @@ void __init ralink_clk_init(void)
 	ralink_clk_add("10000100.timer", periph_rate);
 	ralink_clk_add("10000120.watchdog", periph_rate);
 	ralink_clk_add("10000b00.spi", sys_rate);
-	ralink_clk_add("10000b40.spi", sys_rate);
 	ralink_clk_add("10000c00.uartlite", periph_rate);
-	ralink_clk_add("10000d00.uart1", periph_rate);
-	ralink_clk_add("10000e00.uart2", periph_rate);
 	ralink_clk_add("10180000.wmac", xtal_rate);
 
 	if (IS_ENABLED(CONFIG_USB) && !is_mt76x8()) {
@@ -675,20 +572,17 @@ void prom_soc_init(struct ralink_soc_info *soc_info)
 	}
 
 	snprintf(soc_info->sys_type, RAMIPS_SYS_TYPE_LEN,
-		"MediaTek %s ver:%u eco:%u",
+		"Ralink %s ver:%u eco:%u",
 		name,
 		(rev >> CHIP_REV_VER_SHIFT) & CHIP_REV_VER_MASK,
 		(rev & CHIP_REV_ECO_MASK));
 
 	cfg0 = __raw_readl(sysc + SYSC_REG_SYSTEM_CONFIG0);
-	if (is_mt76x8()) {
+	if (is_mt76x8())
 		dram_type = cfg0 & DRAM_TYPE_MT7628_MASK;
-	} else {
+	else
 		dram_type = (cfg0 >> SYSCFG0_DRAM_TYPE_SHIFT) &
 			    SYSCFG0_DRAM_TYPE_MASK;
-		if (dram_type == SYSCFG0_DRAM_TYPE_UNKNOWN)
-			dram_type = SYSCFG0_DRAM_TYPE_SDRAM;
-	}
 
 	soc_info->mem_base = MT7620_DRAM_BASE;
 	if (is_mt76x8())

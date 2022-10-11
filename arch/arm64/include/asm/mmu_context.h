@@ -28,17 +28,22 @@
 #include <asm-generic/mm_hooks.h>
 #include <asm/cputype.h>
 #include <asm/pgtable.h>
-#include <asm/sysreg.h>
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_PID_IN_CONTEXTIDR
 static inline void contextidr_thread_switch(struct task_struct *next)
 {
-	if (!IS_ENABLED(CONFIG_PID_IN_CONTEXTIDR))
-		return;
-
-	write_sysreg(task_pid_nr(next), contextidr_el1);
-	isb();
+	asm(
+	"	msr	contextidr_el1, %0\n"
+	"	isb"
+	:
+	: "r" (task_pid_nr(next)));
 }
+#else
+static inline void contextidr_thread_switch(struct task_struct *next)
+{
+}
+#endif
 
 /*
  * Set TTBR0 to empty_zero_page. No translations will be possible via TTBR0.
@@ -47,8 +52,11 @@ static inline void cpu_set_reserved_ttbr0(void)
 {
 	unsigned long ttbr = __pa_symbol(empty_zero_page);
 
-	write_sysreg(ttbr, ttbr0_el1);
-	isb();
+	asm(
+	"	msr	ttbr0_el1, %0			// set TTBR0\n"
+	"	isb"
+	:
+	: "r" (ttbr));
 }
 
 static inline void cpu_switch_mm(pgd_t *pgd, struct mm_struct *mm)
@@ -81,11 +89,13 @@ static inline void __cpu_set_tcr_t0sz(unsigned long t0sz)
 	if (!__cpu_uses_extended_idmap())
 		return;
 
-	tcr = read_sysreg(tcr_el1);
-	tcr &= ~TCR_T0SZ_MASK;
-	tcr |= t0sz << TCR_T0SZ_OFFSET;
-	write_sysreg(tcr, tcr_el1);
-	isb();
+	asm volatile (
+	"	mrs	%0, tcr_el1	;"
+	"	bfi	%0, %1, %2, %3	;"
+	"	msr	tcr_el1, %0	;"
+	"	isb"
+	: "=&r" (tcr)
+	: "r"(t0sz), "I"(TCR_T0SZ_OFFSET), "I"(TCR_TxSZ_WIDTH));
 }
 
 #define cpu_set_default_tcr_t0sz()	__cpu_set_tcr_t0sz(TCR_T0SZ(VA_BITS))
@@ -128,7 +138,7 @@ static inline void cpu_install_idmap(void)
  * Atomically replaces the active TTBR1_EL1 PGD with a new VA-compatible PGD,
  * avoiding the possibility of conflicting TLB entries being allocated.
  */
-static inline void __nocfi cpu_replace_ttbr1(pgd_t *pgd)
+static inline void cpu_replace_ttbr1(pgd_t *pgd)
 {
 	typedef void (ttbr_replace_func)(phys_addr_t);
 	extern ttbr_replace_func idmap_cpu_replace_ttbr1;
@@ -226,7 +236,6 @@ switch_mm(struct mm_struct *prev, struct mm_struct *next,
 #define deactivate_mm(tsk,mm)	do { } while (0)
 #define activate_mm(prev,next)	switch_mm(prev, next, current)
 
-void verify_cpu_asid_bits(void);
 void post_ttbr_update_workaround(void);
 
 #endif

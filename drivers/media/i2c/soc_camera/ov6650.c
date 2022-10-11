@@ -432,43 +432,25 @@ static int ov6650_s_power(struct v4l2_subdev *sd, int on)
 	return soc_camera_set_power(&client->dev, ssdd, priv->clk, on);
 }
 
-static int ov6650_get_selection(struct v4l2_subdev *sd,
-		struct v4l2_subdev_pad_config *cfg,
-		struct v4l2_subdev_selection *sel)
+static int ov6650_g_crop(struct v4l2_subdev *sd, struct v4l2_crop *a)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct ov6650 *priv = to_ov6650(client);
 
-	if (sel->which != V4L2_SUBDEV_FORMAT_ACTIVE)
-		return -EINVAL;
+	a->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	a->c = priv->rect;
 
-	switch (sel->target) {
-	case V4L2_SEL_TGT_CROP_BOUNDS:
-	case V4L2_SEL_TGT_CROP_DEFAULT:
-		sel->r.left = DEF_HSTRT << 1;
-		sel->r.top = DEF_VSTRT << 1;
-		sel->r.width = W_CIF;
-		sel->r.height = H_CIF;
-		return 0;
-	case V4L2_SEL_TGT_CROP:
-		sel->r = priv->rect;
-		return 0;
-	default:
-		return -EINVAL;
-	}
+	return 0;
 }
 
-static int ov6650_set_selection(struct v4l2_subdev *sd,
-		struct v4l2_subdev_pad_config *cfg,
-		struct v4l2_subdev_selection *sel)
+static int ov6650_s_crop(struct v4l2_subdev *sd, const struct v4l2_crop *a)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct ov6650 *priv = to_ov6650(client);
-	struct v4l2_rect rect = sel->r;
+	struct v4l2_rect rect = a->c;
 	int ret;
 
-	if (sel->which != V4L2_SUBDEV_FORMAT_ACTIVE ||
-	    sel->target != V4L2_SEL_TGT_CROP)
+	if (a->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
 		return -EINVAL;
 
 	rect.left   = ALIGN(rect.left,   2);
@@ -499,6 +481,22 @@ static int ov6650_set_selection(struct v4l2_subdev *sd,
 		priv->rect.height = rect.height;
 
 	return ret;
+}
+
+static int ov6650_cropcap(struct v4l2_subdev *sd, struct v4l2_cropcap *a)
+{
+	if (a->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
+		return -EINVAL;
+
+	a->bounds.left			= DEF_HSTRT << 1;
+	a->bounds.top			= DEF_VSTRT << 1;
+	a->bounds.width			= W_CIF;
+	a->bounds.height		= H_CIF;
+	a->defrect			= a->bounds;
+	a->pixelaspect.numerator	= 1;
+	a->pixelaspect.denominator	= 1;
+
+	return 0;
 }
 
 static int ov6650_get_fmt(struct v4l2_subdev *sd,
@@ -551,15 +549,16 @@ static int ov6650_s_fmt(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *mf)
 	struct soc_camera_sense *sense = icd->sense;
 	struct ov6650 *priv = to_ov6650(client);
 	bool half_scale = !is_unscaled_ok(mf->width, mf->height, &priv->rect);
-	struct v4l2_subdev_selection sel = {
-		.which = V4L2_SUBDEV_FORMAT_ACTIVE,
-		.target = V4L2_SEL_TGT_CROP,
-		.r.left = priv->rect.left + (priv->rect.width >> 1) -
-			(mf->width >> (1 - half_scale)),
-		.r.top = priv->rect.top + (priv->rect.height >> 1) -
-			(mf->height >> (1 - half_scale)),
-		.r.width = mf->width << half_scale,
-		.r.height = mf->height << half_scale,
+	struct v4l2_crop a = {
+		.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+		.c = {
+			.left	= priv->rect.left + (priv->rect.width >> 1) -
+					(mf->width >> (1 - half_scale)),
+			.top	= priv->rect.top + (priv->rect.height >> 1) -
+					(mf->height >> (1 - half_scale)),
+			.width	= mf->width << half_scale,
+			.height	= mf->height << half_scale,
+		},
 	};
 	u32 code = mf->code;
 	unsigned long mclk, pclk;
@@ -673,7 +672,7 @@ static int ov6650_s_fmt(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *mf)
 	dev_dbg(&client->dev, "pixel clock divider: %ld.%ld\n",
 			mclk / pclk, 10 * mclk % pclk / pclk);
 
-	ret = ov6650_set_selection(sd, NULL, &sel);
+	ret = ov6650_s_crop(sd, &a);
 	if (!ret)
 		ret = ov6650_reg_rmw(client, REG_COMA, coma_set, coma_mask);
 	if (!ret)
@@ -840,9 +839,18 @@ static int ov6650_video_probe(struct i2c_client *client)
 	u8		pidh, pidl, midh, midl;
 	int		ret;
 
+	priv->clk = v4l2_clk_get(&client->dev, NULL);
+	if (IS_ERR(priv->clk)) {
+		ret = PTR_ERR(priv->clk);
+		dev_err(&client->dev, "v4l2_clk request err: %d\n", ret);
+		return ret;
+	}
+
 	ret = ov6650_s_power(&priv->subdev, 1);
 	if (ret < 0)
-		return ret;
+		goto eclkput;
+
+	msleep(20);
 
 	/*
 	 * check and show product ID and manufacturer ID
@@ -877,6 +885,11 @@ static int ov6650_video_probe(struct i2c_client *client)
 
 done:
 	ov6650_s_power(&priv->subdev, 0);
+	if (!ret)
+		return 0;
+eclkput:
+	v4l2_clk_put(priv->clk);
+
 	return ret;
 }
 
@@ -944,6 +957,9 @@ static int ov6650_s_mbus_config(struct v4l2_subdev *sd,
 
 static struct v4l2_subdev_video_ops ov6650_video_ops = {
 	.s_stream	= ov6650_s_stream,
+	.cropcap	= ov6650_cropcap,
+	.g_crop		= ov6650_g_crop,
+	.s_crop		= ov6650_s_crop,
 	.g_parm		= ov6650_g_parm,
 	.s_parm		= ov6650_s_parm,
 	.g_mbus_config	= ov6650_g_mbus_config,
@@ -952,8 +968,6 @@ static struct v4l2_subdev_video_ops ov6650_video_ops = {
 
 static const struct v4l2_subdev_pad_ops ov6650_pad_ops = {
 	.enum_mbus_code = ov6650_enum_mbus_code,
-	.get_selection	= ov6650_get_selection,
-	.set_selection	= ov6650_set_selection,
 	.get_fmt	= ov6650_get_fmt,
 	.set_fmt	= ov6650_set_fmt,
 };
@@ -1033,18 +1047,9 @@ static int ov6650_probe(struct i2c_client *client,
 	priv->code	  = MEDIA_BUS_FMT_YUYV8_2X8;
 	priv->colorspace  = V4L2_COLORSPACE_JPEG;
 
-	priv->clk = v4l2_clk_get(&client->dev, NULL);
-	if (IS_ERR(priv->clk)) {
-		ret = PTR_ERR(priv->clk);
-		goto eclkget;
-	}
-
 	ret = ov6650_video_probe(client);
-	if (ret) {
-		v4l2_clk_put(priv->clk);
-eclkget:
+	if (ret)
 		v4l2_ctrl_handler_free(&priv->hdl);
-	}
 
 	return ret;
 }

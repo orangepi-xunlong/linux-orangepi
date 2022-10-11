@@ -303,7 +303,6 @@ static struct {
 	u32 hotkey_mask:1;
 	u32 hotkey_wlsw:1;
 	u32 hotkey_tablet:1;
-	u32 kbdlight:1;
 	u32 light:1;
 	u32 light_status:1;
 	u32 bright_acpimode:1;
@@ -2043,7 +2042,6 @@ static int hotkey_autosleep_ack;
 
 static u32 hotkey_orig_mask;		/* events the BIOS had enabled */
 static u32 hotkey_all_mask;		/* all events supported in fw */
-static u32 hotkey_adaptive_all_mask;	/* all adaptive events supported in fw */
 static u32 hotkey_reserved_mask;	/* events better left disabled */
 static u32 hotkey_driver_mask;		/* events needed by the driver */
 static u32 hotkey_user_mask;		/* events visible to userspace */
@@ -2743,17 +2741,6 @@ static ssize_t hotkey_all_mask_show(struct device *dev,
 
 static DEVICE_ATTR_RO(hotkey_all_mask);
 
-/* sysfs hotkey all_mask ----------------------------------------------- */
-static ssize_t hotkey_adaptive_all_mask_show(struct device *dev,
-			   struct device_attribute *attr,
-			   char *buf)
-{
-	return snprintf(buf, PAGE_SIZE, "0x%08x\n",
-			hotkey_adaptive_all_mask | hotkey_source_mask);
-}
-
-static DEVICE_ATTR_RO(hotkey_adaptive_all_mask);
-
 /* sysfs hotkey recommended_mask --------------------------------------- */
 static ssize_t hotkey_recommended_mask_show(struct device *dev,
 					    struct device_attribute *attr,
@@ -2997,7 +2984,6 @@ static struct attribute *hotkey_attributes[] __initdata = {
 	&dev_attr_wakeup_hotunplug_complete.attr,
 	&dev_attr_hotkey_mask.attr,
 	&dev_attr_hotkey_all_mask.attr,
-	&dev_attr_hotkey_adaptive_all_mask.attr,
 	&dev_attr_hotkey_recommended_mask.attr,
 #ifdef CONFIG_THINKPAD_ACPI_HOTKEY_POLL
 	&dev_attr_hotkey_source_mask.attr,
@@ -3334,6 +3320,20 @@ static int __init hotkey_init(struct ibm_init_struct *iibm)
 	if (!tp_features.hotkey)
 		return 1;
 
+	/*
+	 * Check if we have an adaptive keyboard, like on the
+	 * Lenovo Carbon X1 2014 (2nd Gen).
+	 */
+	if (acpi_evalf(hkey_handle, &hkeyv, "MHKV", "qd")) {
+		if ((hkeyv >> 8) == 2) {
+			tp_features.has_adaptive_kbd = true;
+			res = sysfs_create_group(&tpacpi_pdev->dev.kobj,
+					&adaptive_kbd_attr_group);
+			if (res)
+				goto err_exit;
+		}
+	}
+
 	quirks = tpacpi_check_quirks(tpacpi_hotkey_qtable,
 				     ARRAY_SIZE(tpacpi_hotkey_qtable));
 
@@ -3356,70 +3356,30 @@ static int __init hotkey_init(struct ibm_init_struct *iibm)
 	   A30, R30, R31, T20-22, X20-21, X22-24.  Detected by checking
 	   for HKEY interface version 0x100 */
 	if (acpi_evalf(hkey_handle, &hkeyv, "MHKV", "qd")) {
-		vdbg_printk(TPACPI_DBG_INIT | TPACPI_DBG_HKEY,
-			    "firmware HKEY interface version: 0x%x\n",
-			    hkeyv);
-
-		switch (hkeyv >> 8) {
-		case 1:
+		if ((hkeyv >> 8) != 1) {
+			pr_err("unknown version of the HKEY interface: 0x%x\n",
+			       hkeyv);
+			pr_err("please report this to %s\n", TPACPI_MAIL);
+		} else {
 			/*
 			 * MHKV 0x100 in A31, R40, R40e,
 			 * T4x, X31, and later
 			 */
+			vdbg_printk(TPACPI_DBG_INIT | TPACPI_DBG_HKEY,
+				"firmware HKEY interface version: 0x%x\n",
+				hkeyv);
 
 			/* Paranoia check AND init hotkey_all_mask */
 			if (!acpi_evalf(hkey_handle, &hotkey_all_mask,
 					"MHKA", "qd")) {
-				pr_err("missing MHKA handler, please report this to %s\n",
+				pr_err("missing MHKA handler, "
+				       "please report this to %s\n",
 				       TPACPI_MAIL);
 				/* Fallback: pre-init for FN+F3,F4,F12 */
 				hotkey_all_mask = 0x080cU;
 			} else {
 				tp_features.hotkey_mask = 1;
 			}
-			break;
-
-		case 2:
-			/*
-			 * MHKV 0x200 in X1, T460s, X260, T560, X1 Tablet (2016)
-			 */
-
-			/* Paranoia check AND init hotkey_all_mask */
-			if (!acpi_evalf(hkey_handle, &hotkey_all_mask,
-					"MHKA", "dd", 1)) {
-				pr_err("missing MHKA handler, please report this to %s\n",
-				       TPACPI_MAIL);
-				/* Fallback: pre-init for FN+F3,F4,F12 */
-				hotkey_all_mask = 0x080cU;
-			} else {
-				tp_features.hotkey_mask = 1;
-			}
-
-			/*
-			 * Check if we have an adaptive keyboard, like on the
-			 * Lenovo Carbon X1 2014 (2nd Gen).
-			 */
-			if (acpi_evalf(hkey_handle, &hotkey_adaptive_all_mask,
-				       "MHKA", "dd", 2)) {
-				if (hotkey_adaptive_all_mask != 0) {
-					tp_features.has_adaptive_kbd = true;
-					res = sysfs_create_group(
-						&tpacpi_pdev->dev.kobj,
-						&adaptive_kbd_attr_group);
-					if (res)
-						goto err_exit;
-				}
-			} else {
-				tp_features.has_adaptive_kbd = false;
-				hotkey_adaptive_all_mask = 0x0U;
-			}
-			break;
-
-		default:
-			pr_err("unknown version of the HKEY interface: 0x%x\n",
-			       hkeyv);
-			pr_err("please report this to %s\n", TPACPI_MAIL);
-			break;
 		}
 	}
 
@@ -5026,244 +4986,6 @@ static struct ibm_struct video_driver_data = {
 #endif /* CONFIG_THINKPAD_ACPI_VIDEO */
 
 /*************************************************************************
- * Keyboard backlight subdriver
- */
-
-static int kbdlight_set_level(int level)
-{
-	if (!hkey_handle)
-		return -ENXIO;
-
-	if (!acpi_evalf(hkey_handle, NULL, "MLCS", "dd", level))
-		return -EIO;
-
-	return 0;
-}
-
-static int kbdlight_set_level_and_update(int level);
-
-static int kbdlight_get_level(void)
-{
-	int status = 0;
-
-	if (!hkey_handle)
-		return -ENXIO;
-
-	if (!acpi_evalf(hkey_handle, &status, "MLCG", "dd", 0))
-		return -EIO;
-
-	if (status < 0)
-		return status;
-
-	return status & 0x3;
-}
-
-static bool kbdlight_is_supported(void)
-{
-	int status = 0;
-
-	if (!hkey_handle)
-		return false;
-
-	if (!acpi_has_method(hkey_handle, "MLCG")) {
-		vdbg_printk(TPACPI_DBG_INIT, "kbdlight MLCG is unavailable\n");
-		return false;
-	}
-
-	if (!acpi_evalf(hkey_handle, &status, "MLCG", "qdd", 0)) {
-		vdbg_printk(TPACPI_DBG_INIT, "kbdlight MLCG failed\n");
-		return false;
-	}
-
-	if (status < 0) {
-		vdbg_printk(TPACPI_DBG_INIT, "kbdlight MLCG err: %d\n", status);
-		return false;
-	}
-
-	vdbg_printk(TPACPI_DBG_INIT, "kbdlight MLCG returned 0x%x\n", status);
-	/*
-	 * Guessed test for keyboard backlight:
-	 *
-	 * Machines with backlight keyboard return:
-	 *   b010100000010000000XX - ThinkPad X1 Carbon 3rd
-	 *   b110100010010000000XX - ThinkPad x230
-	 *   b010100000010000000XX - ThinkPad x240
-	 *   b010100000010000000XX - ThinkPad W541
-	 * (XX is current backlight level)
-	 *
-	 * Machines without backlight keyboard return:
-	 *   b10100001000000000000 - ThinkPad x230
-	 *   b10110001000000000000 - ThinkPad E430
-	 *   b00000000000000000000 - ThinkPad E450
-	 *
-	 * Candidate BITs for detection test (XOR):
-	 *   b01000000001000000000
-	 *              ^
-	 */
-	return status & BIT(9);
-}
-
-static void kbdlight_set_worker(struct work_struct *work)
-{
-	struct tpacpi_led_classdev *data =
-			container_of(work, struct tpacpi_led_classdev, work);
-
-	if (likely(tpacpi_lifecycle == TPACPI_LIFE_RUNNING))
-		kbdlight_set_level_and_update(data->new_state);
-}
-
-static void kbdlight_sysfs_set(struct led_classdev *led_cdev,
-			enum led_brightness brightness)
-{
-	struct tpacpi_led_classdev *data =
-			container_of(led_cdev,
-				     struct tpacpi_led_classdev,
-				     led_classdev);
-	data->new_state = brightness;
-	queue_work(tpacpi_wq, &data->work);
-}
-
-static enum led_brightness kbdlight_sysfs_get(struct led_classdev *led_cdev)
-{
-	int level;
-
-	level = kbdlight_get_level();
-	if (level < 0)
-		return 0;
-
-	return level;
-}
-
-static struct tpacpi_led_classdev tpacpi_led_kbdlight = {
-	.led_classdev = {
-		.name		= "tpacpi::kbd_backlight",
-		.max_brightness	= 2,
-		.brightness_set	= &kbdlight_sysfs_set,
-		.brightness_get	= &kbdlight_sysfs_get,
-	}
-};
-
-static int __init kbdlight_init(struct ibm_init_struct *iibm)
-{
-	int rc;
-
-	vdbg_printk(TPACPI_DBG_INIT, "initializing kbdlight subdriver\n");
-
-	TPACPI_ACPIHANDLE_INIT(hkey);
-	INIT_WORK(&tpacpi_led_kbdlight.work, kbdlight_set_worker);
-
-	if (!kbdlight_is_supported()) {
-		tp_features.kbdlight = 0;
-		vdbg_printk(TPACPI_DBG_INIT, "kbdlight is unsupported\n");
-		return 1;
-	}
-
-	tp_features.kbdlight = 1;
-
-	rc = led_classdev_register(&tpacpi_pdev->dev,
-				   &tpacpi_led_kbdlight.led_classdev);
-	if (rc < 0) {
-		tp_features.kbdlight = 0;
-		return rc;
-	}
-
-	return 0;
-}
-
-static void kbdlight_exit(void)
-{
-	if (tp_features.kbdlight)
-		led_classdev_unregister(&tpacpi_led_kbdlight.led_classdev);
-	flush_workqueue(tpacpi_wq);
-}
-
-static int kbdlight_set_level_and_update(int level)
-{
-	int ret;
-	struct led_classdev *led_cdev;
-
-	ret = kbdlight_set_level(level);
-	led_cdev = &tpacpi_led_kbdlight.led_classdev;
-
-	if (ret == 0 && !(led_cdev->flags & LED_SUSPENDED))
-		led_cdev->brightness = level;
-
-	return ret;
-}
-
-static int kbdlight_read(struct seq_file *m)
-{
-	int level;
-
-	if (!tp_features.kbdlight) {
-		seq_printf(m, "status:\t\tnot supported\n");
-	} else {
-		level = kbdlight_get_level();
-		if (level < 0)
-			seq_printf(m, "status:\t\terror %d\n", level);
-		else
-			seq_printf(m, "status:\t\t%d\n", level);
-		seq_printf(m, "commands:\t0, 1, 2\n");
-	}
-
-	return 0;
-}
-
-static int kbdlight_write(char *buf)
-{
-	char *cmd;
-	int level = -1;
-
-	if (!tp_features.kbdlight)
-		return -ENODEV;
-
-	while ((cmd = next_cmd(&buf))) {
-		if (strlencmp(cmd, "0") == 0)
-			level = 0;
-		else if (strlencmp(cmd, "1") == 0)
-			level = 1;
-		else if (strlencmp(cmd, "2") == 0)
-			level = 2;
-		else
-			return -EINVAL;
-	}
-
-	if (level == -1)
-		return -EINVAL;
-
-	return kbdlight_set_level_and_update(level);
-}
-
-static void kbdlight_suspend(void)
-{
-	struct led_classdev *led_cdev;
-
-	if (!tp_features.kbdlight)
-		return;
-
-	led_cdev = &tpacpi_led_kbdlight.led_classdev;
-	led_update_brightness(led_cdev);
-	led_classdev_suspend(led_cdev);
-}
-
-static void kbdlight_resume(void)
-{
-	if (!tp_features.kbdlight)
-		return;
-
-	led_classdev_resume(&tpacpi_led_kbdlight.led_classdev);
-}
-
-static struct ibm_struct kbdlight_driver_data = {
-	.name = "kbdlight",
-	.read = kbdlight_read,
-	.write = kbdlight_write,
-	.suspend = kbdlight_suspend,
-	.resume = kbdlight_resume,
-	.exit = kbdlight_exit,
-};
-
-/*************************************************************************
  * Light (thinklight) subdriver
  */
 
@@ -6729,16 +6451,18 @@ static void __init tpacpi_detect_brightness_capabilities(void)
 	switch (b) {
 	case 16:
 		bright_maxlvl = 15;
+		pr_info("detected a 16-level brightness capable ThinkPad\n");
 		break;
 	case 8:
 	case 0:
 		bright_maxlvl = 7;
+		pr_info("detected a 8-level brightness capable ThinkPad\n");
 		break;
 	default:
+		pr_info("Unsupported brightness interface\n");
 		tp_features.bright_unkfw = 1;
 		bright_maxlvl = b - 1;
 	}
-	pr_debug("detected %u brightness levels\n", bright_maxlvl + 1);
 }
 
 static int __init brightness_init(struct ibm_init_struct *iibm)
@@ -8048,12 +7772,10 @@ static int fan_get_status_safe(u8 *status)
 		fan_update_desired_level(s);
 	mutex_unlock(&fan_mutex);
 
-	if (rc)
-		return rc;
 	if (status)
 		*status = s;
 
-	return 0;
+	return rc;
 }
 
 static int fan_get_speed(unsigned int *speed)
@@ -9485,10 +9207,6 @@ static struct ibm_init_struct ibms_init[] __initdata = {
 	},
 #endif
 	{
-		.init = kbdlight_init,
-		.data = &kbdlight_driver_data,
-	},
-	{
 		.init = light_init,
 		.data = &light_driver_data,
 	},
@@ -9526,7 +9244,7 @@ static struct ibm_init_struct ibms_init[] __initdata = {
 	},
 };
 
-static int __init set_ibm_param(const char *val, const struct kernel_param *kp)
+static int __init set_ibm_param(const char *val, struct kernel_param *kp)
 {
 	unsigned int i;
 	struct ibm_struct *ibm;

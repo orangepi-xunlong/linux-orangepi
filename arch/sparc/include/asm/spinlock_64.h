@@ -8,9 +8,6 @@
 
 #ifndef __ASSEMBLY__
 
-#include <asm/processor.h>
-#include <asm/barrier.h>
-
 /* To get debugging spinlocks which detect and catch
  * deadlock situations, set CONFIG_DEBUG_SPINLOCK
  * and rebuild your kernel.
@@ -26,10 +23,9 @@
 
 #define arch_spin_is_locked(lp)	((lp)->lock != 0)
 
-static inline void arch_spin_unlock_wait(arch_spinlock_t *lock)
-{
-	smp_cond_load_acquire(&lock->lock, !VAL);
-}
+#define arch_spin_unlock_wait(lp)	\
+	do {	rmb();			\
+	} while((lp)->lock)
 
 static inline void arch_spin_lock(arch_spinlock_t *lock)
 {
@@ -96,7 +92,7 @@ static inline void arch_spin_lock_flags(arch_spinlock_t *lock, unsigned long fla
 
 /* Multi-reader locks, these are much saner than the 32-bit Sparc ones... */
 
-static inline void arch_read_lock(arch_rwlock_t *lock)
+static void inline arch_read_lock(arch_rwlock_t *lock)
 {
 	unsigned long tmp1, tmp2;
 
@@ -119,7 +115,7 @@ static inline void arch_read_lock(arch_rwlock_t *lock)
 	: "memory");
 }
 
-static inline int arch_read_trylock(arch_rwlock_t *lock)
+static int inline arch_read_trylock(arch_rwlock_t *lock)
 {
 	int tmp1, tmp2;
 
@@ -140,7 +136,7 @@ static inline int arch_read_trylock(arch_rwlock_t *lock)
 	return tmp1;
 }
 
-static inline void arch_read_unlock(arch_rwlock_t *lock)
+static void inline arch_read_unlock(arch_rwlock_t *lock)
 {
 	unsigned long tmp1, tmp2;
 
@@ -156,7 +152,7 @@ static inline void arch_read_unlock(arch_rwlock_t *lock)
 	: "memory");
 }
 
-static inline void arch_write_lock(arch_rwlock_t *lock)
+static void inline arch_write_lock(arch_rwlock_t *lock)
 {
 	unsigned long mask, tmp1, tmp2;
 
@@ -181,7 +177,7 @@ static inline void arch_write_lock(arch_rwlock_t *lock)
 	: "memory");
 }
 
-static inline void arch_write_unlock(arch_rwlock_t *lock)
+static void inline arch_write_unlock(arch_rwlock_t *lock)
 {
 	__asm__ __volatile__(
 "	stw		%%g0, [%0]"
@@ -190,7 +186,7 @@ static inline void arch_write_unlock(arch_rwlock_t *lock)
 	: "memory");
 }
 
-static inline int arch_write_trylock(arch_rwlock_t *lock)
+static int inline arch_write_trylock(arch_rwlock_t *lock)
 {
 	unsigned long mask, tmp1, tmp2, result;
 

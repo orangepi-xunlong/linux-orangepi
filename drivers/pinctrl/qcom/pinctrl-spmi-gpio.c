@@ -14,7 +14,6 @@
 #include <linux/gpio.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_irq.h>
 #include <linux/pinctrl/pinconf-generic.h>
 #include <linux/pinctrl/pinconf.h>
 #include <linux/pinctrl/pinmux.h>
@@ -159,6 +158,11 @@ static const char *const pmic_gpio_functions[] = {
 	PMIC_GPIO_FUNC_DTEST3, PMIC_GPIO_FUNC_DTEST4,
 };
 
+static inline struct pmic_gpio_state *to_gpio_state(struct gpio_chip *chip)
+{
+	return container_of(chip, struct pmic_gpio_state, chip);
+};
+
 static int pmic_gpio_read(struct pmic_gpio_state *state,
 			  struct pmic_gpio_pad *pad, unsigned int addr)
 {
@@ -287,31 +291,47 @@ static int pmic_gpio_config_get(struct pinctrl_dev *pctldev,
 
 	switch (param) {
 	case PIN_CONFIG_DRIVE_PUSH_PULL:
-		arg = pad->buffer_type == PMIC_GPIO_OUT_BUF_CMOS;
+		if (pad->buffer_type != PMIC_GPIO_OUT_BUF_CMOS)
+			return -EINVAL;
+		arg = 1;
 		break;
 	case PIN_CONFIG_DRIVE_OPEN_DRAIN:
-		arg = pad->buffer_type == PMIC_GPIO_OUT_BUF_OPEN_DRAIN_NMOS;
+		if (pad->buffer_type != PMIC_GPIO_OUT_BUF_OPEN_DRAIN_NMOS)
+			return -EINVAL;
+		arg = 1;
 		break;
 	case PIN_CONFIG_DRIVE_OPEN_SOURCE:
-		arg = pad->buffer_type == PMIC_GPIO_OUT_BUF_OPEN_DRAIN_PMOS;
+		if (pad->buffer_type != PMIC_GPIO_OUT_BUF_OPEN_DRAIN_PMOS)
+			return -EINVAL;
+		arg = 1;
 		break;
 	case PIN_CONFIG_BIAS_PULL_DOWN:
-		arg = pad->pullup == PMIC_GPIO_PULL_DOWN;
+		if (pad->pullup != PMIC_GPIO_PULL_DOWN)
+			return -EINVAL;
+		arg = 1;
 		break;
 	case PIN_CONFIG_BIAS_DISABLE:
-		arg = pad->pullup = PMIC_GPIO_PULL_DISABLE;
+		if (pad->pullup != PMIC_GPIO_PULL_DISABLE)
+			return -EINVAL;
+		arg = 1;
 		break;
 	case PIN_CONFIG_BIAS_PULL_UP:
-		arg = pad->pullup == PMIC_GPIO_PULL_UP_30;
+		if (pad->pullup != PMIC_GPIO_PULL_UP_30)
+			return -EINVAL;
+		arg = 1;
 		break;
 	case PIN_CONFIG_BIAS_HIGH_IMPEDANCE:
-		arg = !pad->is_enabled;
+		if (pad->is_enabled)
+			return -EINVAL;
+		arg = 1;
 		break;
 	case PIN_CONFIG_POWER_SOURCE:
 		arg = pad->power_source;
 		break;
 	case PIN_CONFIG_INPUT_ENABLE:
-		arg = pad->input_enabled;
+		if (!pad->input_enabled)
+			return -EINVAL;
+		arg = 1;
 		break;
 	case PIN_CONFIG_OUTPUT:
 		arg = pad->out_value;
@@ -491,7 +511,7 @@ static const struct pinconf_ops pmic_gpio_pinconf_ops = {
 
 static int pmic_gpio_direction_input(struct gpio_chip *chip, unsigned pin)
 {
-	struct pmic_gpio_state *state = gpiochip_get_data(chip);
+	struct pmic_gpio_state *state = to_gpio_state(chip);
 	unsigned long config;
 
 	config = pinconf_to_config_packed(PIN_CONFIG_INPUT_ENABLE, 1);
@@ -502,7 +522,7 @@ static int pmic_gpio_direction_input(struct gpio_chip *chip, unsigned pin)
 static int pmic_gpio_direction_output(struct gpio_chip *chip,
 				      unsigned pin, int val)
 {
-	struct pmic_gpio_state *state = gpiochip_get_data(chip);
+	struct pmic_gpio_state *state = to_gpio_state(chip);
 	unsigned long config;
 
 	config = pinconf_to_config_packed(PIN_CONFIG_OUTPUT, val);
@@ -512,7 +532,7 @@ static int pmic_gpio_direction_output(struct gpio_chip *chip,
 
 static int pmic_gpio_get(struct gpio_chip *chip, unsigned pin)
 {
-	struct pmic_gpio_state *state = gpiochip_get_data(chip);
+	struct pmic_gpio_state *state = to_gpio_state(chip);
 	struct pmic_gpio_pad *pad;
 	int ret;
 
@@ -529,12 +549,12 @@ static int pmic_gpio_get(struct gpio_chip *chip, unsigned pin)
 		pad->out_value = ret & PMIC_MPP_REG_RT_STS_VAL_MASK;
 	}
 
-	return !!pad->out_value;
+	return pad->out_value;
 }
 
 static void pmic_gpio_set(struct gpio_chip *chip, unsigned pin, int value)
 {
-	struct pmic_gpio_state *state = gpiochip_get_data(chip);
+	struct pmic_gpio_state *state = to_gpio_state(chip);
 	unsigned long config;
 
 	config = pinconf_to_config_packed(PIN_CONFIG_OUTPUT, value);
@@ -557,7 +577,7 @@ static int pmic_gpio_of_xlate(struct gpio_chip *chip,
 
 static int pmic_gpio_to_irq(struct gpio_chip *chip, unsigned pin)
 {
-	struct pmic_gpio_state *state = gpiochip_get_data(chip);
+	struct pmic_gpio_state *state = to_gpio_state(chip);
 	struct pmic_gpio_pad *pad;
 
 	pad = state->ctrl->desc->pins[pin].drv_data;
@@ -567,7 +587,7 @@ static int pmic_gpio_to_irq(struct gpio_chip *chip, unsigned pin)
 
 static void pmic_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 {
-	struct pmic_gpio_state *state = gpiochip_get_data(chip);
+	struct pmic_gpio_state *state = to_gpio_state(chip);
 	unsigned i;
 
 	for (i = 0; i < chip->ngpio; i++) {
@@ -689,19 +709,18 @@ static int pmic_gpio_probe(struct platform_device *pdev)
 	struct pmic_gpio_pad *pad, *pads;
 	struct pmic_gpio_state *state;
 	int ret, npins, i;
-	u32 reg;
+	u32 res[2];
 
-	ret = of_property_read_u32(dev->of_node, "reg", &reg);
+	ret = of_property_read_u32_array(dev->of_node, "reg", res, 2);
 	if (ret < 0) {
-		dev_err(dev, "missing base address");
+		dev_err(dev, "missing base address and/or range");
 		return ret;
 	}
 
-	npins = platform_irq_count(pdev);
+	npins = res[1] / PMIC_GPIO_ADDRESS_RANGE;
+
 	if (!npins)
 		return -EINVAL;
-	if (npins < 0)
-		return npins;
 
 	BUG_ON(npins > ARRAY_SIZE(pmic_gpio_groups));
 
@@ -749,7 +768,7 @@ static int pmic_gpio_probe(struct platform_device *pdev)
 		if (pad->irq < 0)
 			return pad->irq;
 
-		pad->base = reg + i * PMIC_GPIO_ADDRESS_RANGE;
+		pad->base = res[0] + i * PMIC_GPIO_ADDRESS_RANGE;
 
 		ret = pmic_gpio_populate(state, pad);
 		if (ret < 0)
@@ -764,14 +783,14 @@ static int pmic_gpio_probe(struct platform_device *pdev)
 	state->chip.of_gpio_n_cells = 2;
 	state->chip.can_sleep = false;
 
-	state->ctrl = devm_pinctrl_register(dev, pctrldesc, state);
+	state->ctrl = pinctrl_register(pctrldesc, dev, state);
 	if (IS_ERR(state->ctrl))
 		return PTR_ERR(state->ctrl);
 
-	ret = gpiochip_add_data(&state->chip, state);
+	ret = gpiochip_add(&state->chip);
 	if (ret) {
 		dev_err(state->dev, "can't add gpio chip\n");
-		return ret;
+		goto err_chip;
 	}
 
 	ret = gpiochip_add_pin_range(&state->chip, dev_name(dev), 0, 0, npins);
@@ -784,6 +803,8 @@ static int pmic_gpio_probe(struct platform_device *pdev)
 
 err_range:
 	gpiochip_remove(&state->chip);
+err_chip:
+	pinctrl_unregister(state->ctrl);
 	return ret;
 }
 
@@ -792,15 +813,14 @@ static int pmic_gpio_remove(struct platform_device *pdev)
 	struct pmic_gpio_state *state = platform_get_drvdata(pdev);
 
 	gpiochip_remove(&state->chip);
+	pinctrl_unregister(state->ctrl);
 	return 0;
 }
 
 static const struct of_device_id pmic_gpio_of_match[] = {
 	{ .compatible = "qcom,pm8916-gpio" },	/* 4 GPIO's */
 	{ .compatible = "qcom,pm8941-gpio" },	/* 36 GPIO's */
-	{ .compatible = "qcom,pm8994-gpio" },	/* 22 GPIO's */
 	{ .compatible = "qcom,pma8084-gpio" },	/* 22 GPIO's */
-	{ .compatible = "qcom,spmi-gpio" }, /* Generic */
 	{ },
 };
 

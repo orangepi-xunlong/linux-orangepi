@@ -1,6 +1,3 @@
-/* For the CLR_() macros */
-#include <pthread.h>
-
 #include "evlist.h"
 #include "evsel.h"
 #include "thread_map.h"
@@ -19,7 +16,7 @@
  * Then it checks if the number of syscalls reported as perf events by
  * the kernel corresponds to the number of syscalls made.
  */
-int test__basic_mmap(int subtest __maybe_unused)
+int test__basic_mmap(void)
 {
 	int err = -1;
 	union perf_event *event;
@@ -52,7 +49,7 @@ int test__basic_mmap(int subtest __maybe_unused)
 	sched_setaffinity(0, sizeof(cpu_set), &cpu_set);
 	if (sched_setaffinity(0, sizeof(cpu_set), &cpu_set) < 0) {
 		pr_debug("sched_setaffinity() failed on CPU %d: %s ",
-			 cpus->map[0], str_error_r(errno, sbuf, sizeof(sbuf)));
+			 cpus->map[0], strerror_r(errno, sbuf, sizeof(sbuf)));
 		goto out_free_cpus;
 	}
 
@@ -82,7 +79,7 @@ int test__basic_mmap(int subtest __maybe_unused)
 		if (perf_evsel__open(evsels[i], cpus, threads) < 0) {
 			pr_debug("failed to open counter: %s, "
 				 "tweak /proc/sys/kernel/perf_event_paranoid?\n",
-				 str_error_r(errno, sbuf, sizeof(sbuf)));
+				 strerror_r(errno, sbuf, sizeof(sbuf)));
 			goto out_delete_evlist;
 		}
 
@@ -92,7 +89,7 @@ int test__basic_mmap(int subtest __maybe_unused)
 
 	if (perf_evlist__mmap(evlist, 128, true) < 0) {
 		pr_debug("failed to mmap events: %d (%s)\n", errno,
-			 str_error_r(errno, sbuf, sizeof(sbuf)));
+			 strerror_r(errno, sbuf, sizeof(sbuf)));
 		goto out_delete_evlist;
 	}
 
@@ -129,7 +126,7 @@ int test__basic_mmap(int subtest __maybe_unused)
 	}
 
 	err = 0;
-	evlist__for_each_entry(evlist, evsel) {
+	evlist__for_each(evlist, evsel) {
 		if (nr_events[evsel->idx] != expected_nr_events[evsel->idx]) {
 			pr_debug("expected %d %s events, got %d\n",
 				 expected_nr_events[evsel->idx],

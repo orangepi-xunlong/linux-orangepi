@@ -496,7 +496,7 @@ static int ts2020_read_signal_strength(struct dvb_frontend *fe,
 	return 0;
 }
 
-static const struct dvb_tuner_ops ts2020_tuner_ops = {
+static struct dvb_tuner_ops ts2020_tuner_ops = {
 	.info = {
 		.name = "TS2020",
 		.frequency_min = 950000,
@@ -711,10 +711,6 @@ static int ts2020_remove(struct i2c_client *client)
 	struct ts2020_priv *dev = i2c_get_clientdata(client);
 
 	dev_dbg(&client->dev, "\n");
-
-	/* stop statistics polling */
-	if (!dev->dont_poll)
-		cancel_delayed_work_sync(&dev->stat_work);
 
 	regmap_exit(dev->regmap);
 	kfree(dev);

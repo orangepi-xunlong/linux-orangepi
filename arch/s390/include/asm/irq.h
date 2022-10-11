@@ -7,8 +7,11 @@
 
 #define NR_IRQS_BASE	3
 
-#define NR_IRQS	NR_IRQS_BASE
-#define NR_IRQS_LEGACY NR_IRQS_BASE
+#ifdef CONFIG_PCI_NR_MSI
+# define NR_IRQS	(NR_IRQS_BASE + CONFIG_PCI_NR_MSI)
+#else
+# define NR_IRQS	NR_IRQS_BASE
+#endif
 
 /* External interruption codes */
 #define EXT_IRQ_INTERRUPT_KEY	0x0040

@@ -11,16 +11,16 @@ TRACE_EVENT(swiotlb_bounced,
 	TP_PROTO(struct device *dev,
 		 dma_addr_t dev_addr,
 		 size_t size,
-		 enum swiotlb_force swiotlb_force),
+		 int swiotlb_force),
 
 	TP_ARGS(dev, dev_addr, size, swiotlb_force),
 
 	TP_STRUCT__entry(
-		__string(	dev_name,	dev_name(dev)		)
-		__field(	u64,	dma_mask			)
-		__field(	dma_addr_t,	dev_addr		)
-		__field(	size_t,	size				)
-		__field(	enum swiotlb_force,	swiotlb_force	)
+		__string(	dev_name,	dev_name(dev)	)
+		__field(	u64,	dma_mask		)
+		__field(	dma_addr_t,	dev_addr	)
+		__field(	size_t,	size			)
+		__field(	int,	swiotlb_force		)
 	),
 
 	TP_fast_assign(
@@ -37,10 +37,7 @@ TRACE_EVENT(swiotlb_bounced,
 		__entry->dma_mask,
 		(unsigned long long)__entry->dev_addr,
 		__entry->size,
-		__print_symbolic(__entry->swiotlb_force,
-			{ SWIOTLB_NORMAL,	"NORMAL" },
-			{ SWIOTLB_FORCE,	"FORCE" },
-			{ SWIOTLB_NO_FORCE,	"NO_FORCE" }))
+		__entry->swiotlb_force ? "swiotlb_force" : "" )
 );
 
 #endif /*  _TRACE_SWIOTLB_H */

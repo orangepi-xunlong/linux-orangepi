@@ -66,11 +66,11 @@ void efx_nic_event_test_start(struct efx_channel *channel)
 	channel->efx->type->ev_test_generate(channel);
 }
 
-int efx_nic_irq_test_start(struct efx_nic *efx)
+void efx_nic_irq_test_start(struct efx_nic *efx)
 {
 	efx->last_irq_cpu = -1;
 	smp_wmb();
-	return efx->type->irq_test_generate(efx);
+	efx->type->irq_test_generate(efx);
 }
 
 /* Hook interrupt handler(s)

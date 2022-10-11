@@ -23,7 +23,6 @@
 #include <linux/poll.h>
 #include <linux/workqueue.h>
 #include <linux/kref.h>
-#include <linux/xattr.h>
 
 /** Max number of pages that can be used in a single read request */
 #define FUSE_MAX_PAGES_PER_REQ 32
@@ -36,6 +35,15 @@
 
 /** Number of dentries for each connection in the control filesystem */
 #define FUSE_CTL_NUM_DENTRIES 5
+
+/** If the FUSE_DEFAULT_PERMISSIONS flag is given, the filesystem
+    module will check permissions based on the file mode.  Otherwise no
+    permission checking is done in the kernel */
+#define FUSE_DEFAULT_PERMISSIONS (1 << 0)
+
+/** If the FUSE_ALLOW_OTHER flag is given, then not only the user
+    doing the mount will be allowed to access the filesystem */
+#define FUSE_ALLOW_OTHER         (1 << 1)
 
 /** Number of page pointers embedded in fuse_req */
 #define FUSE_REQ_INLINE_PAGES 1
@@ -102,9 +110,6 @@ struct fuse_inode {
 
 	/** Miscellaneous bits describing inode state */
 	unsigned long state;
-
-	/** Lock for serializing lookup and readdir for back compatibility*/
-	struct mutex mutex;
 };
 
 /** FUSE inode state bits */
@@ -247,11 +252,11 @@ struct fuse_io_priv {
 	size_t size;
 	__u64 offset;
 	bool write;
+	bool should_dirty;
 	int err;
 	struct kiocb *iocb;
 	struct file *file;
 	struct completion *done;
-	bool blocking;
 };
 
 #define FUSE_IO_PRIV_SYNC(f) \
@@ -464,6 +469,9 @@ struct fuse_conn {
 	/** The group id for this mount */
 	kgid_t group_id;
 
+	/** The fuse mount flags for this mount */
+	unsigned flags;
+
 	/** Maximum read size */
 	unsigned max_read;
 
@@ -535,12 +543,6 @@ struct fuse_conn {
 
 	/** write-back cache policy (default is write-through) */
 	unsigned writeback_cache:1;
-
-	/** allow parallel lookups and readdir (default is serialized) */
-	unsigned parallel_dirops:1;
-
-	/** handle fs handles killing suid/sgid/cap on write/chown/trunc */
-	unsigned handle_killpriv:1;
 
 	/*
 	 * The following bitfields are only for optimization purposes
@@ -616,18 +618,6 @@ struct fuse_conn {
 	/** Does the filesystem support asynchronous direct-IO submission? */
 	unsigned async_dio:1;
 
-	/** Is lseek not implemented by fs? */
-	unsigned no_lseek:1;
-
-	/** Does the filesystem support posix acls? */
-	unsigned posix_acl:1;
-
-	/** Check permissions based on the file mode or not? */
-	unsigned default_permissions:1;
-
-	/** Allow other than the mounter user to access the filesystem ? */
-	unsigned allow_other:1;
-
 	/** The number of requests waiting for completion */
 	atomic_t num_waiting;
 
@@ -695,7 +685,6 @@ static inline u64 get_node_id(struct inode *inode)
 extern const struct file_operations fuse_dev_operations;
 
 extern const struct dentry_operations fuse_dentry_operations;
-extern const struct dentry_operations fuse_root_dentry_operations;
 
 /**
  * Inode to nodeid comparison.
@@ -709,7 +698,7 @@ struct inode *fuse_iget(struct super_block *sb, u64 nodeid,
 			int generation, struct fuse_attr *attr,
 			u64 attr_valid, u64 attr_version);
 
-int fuse_lookup_name(struct super_block *sb, u64 nodeid, const struct qstr *name,
+int fuse_lookup_name(struct super_block *sb, u64 nodeid, struct qstr *name,
 		     struct fuse_entry_out *outarg, struct inode **inode);
 
 /**
@@ -857,6 +846,7 @@ void fuse_request_send_background_locked(struct fuse_conn *fc,
 
 /* Abort all requests */
 void fuse_abort_conn(struct fuse_conn *fc);
+void fuse_wait_aborted(struct fuse_conn *fc);
 
 /**
  * Invalidate inode attributes
@@ -906,8 +896,6 @@ int fuse_valid_type(int m);
 int fuse_allow_current_process(struct fuse_conn *fc);
 
 u64 fuse_lock_owner_id(struct fuse_conn *fc, fl_owner_t id);
-
-void fuse_update_ctime(struct inode *inode);
 
 int fuse_update_attributes(struct inode *inode, struct kstat *stat,
 			   struct file *file, bool *refreshed);
@@ -965,25 +953,9 @@ bool fuse_write_update_size(struct inode *inode, loff_t pos);
 int fuse_flush_times(struct inode *inode, struct fuse_file *ff);
 int fuse_write_inode(struct inode *inode, struct writeback_control *wbc);
 
-int fuse_do_setattr(struct dentry *dentry, struct iattr *attr,
+int fuse_do_setattr(struct inode *inode, struct iattr *attr,
 		    struct file *file);
 
 void fuse_set_initialized(struct fuse_conn *fc);
-
-void fuse_unlock_inode(struct inode *inode);
-void fuse_lock_inode(struct inode *inode);
-
-int fuse_setxattr(struct inode *inode, const char *name, const void *value,
-		  size_t size, int flags);
-ssize_t fuse_getxattr(struct inode *inode, const char *name, void *value,
-		      size_t size);
-ssize_t fuse_listxattr(struct dentry *entry, char *list, size_t size);
-int fuse_removexattr(struct inode *inode, const char *name);
-extern const struct xattr_handler *fuse_xattr_handlers[];
-extern const struct xattr_handler *fuse_acl_xattr_handlers[];
-
-struct posix_acl;
-struct posix_acl *fuse_get_acl(struct inode *inode, int type);
-int fuse_set_acl(struct inode *inode, struct posix_acl *acl, int type);
 
 #endif /* _FS_FUSE_I_H */

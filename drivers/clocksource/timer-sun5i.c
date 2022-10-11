@@ -323,42 +323,33 @@ err_free:
 	return ret;
 }
 
-static int __init sun5i_timer_init(struct device_node *node)
+static void __init sun5i_timer_init(struct device_node *node)
 {
 	struct reset_control *rstc;
 	void __iomem *timer_base;
 	struct clk *clk;
-	int irq, ret;
+	int irq;
 
 	timer_base = of_io_request_and_map(node, 0, of_node_full_name(node));
-	if (IS_ERR(timer_base)) {
-		pr_err("Can't map registers");
-		return PTR_ERR(timer_base);;
-	}
+	if (IS_ERR(timer_base))
+		panic("Can't map registers");
 
 	irq = irq_of_parse_and_map(node, 0);
-	if (irq <= 0) {
-		pr_err("Can't parse IRQ");
-		return -EINVAL;
-	}
+	if (irq <= 0)
+		panic("Can't parse IRQ");
 
 	clk = of_clk_get(node, 0);
-	if (IS_ERR(clk)) {
-		pr_err("Can't get timer clock");
-		return PTR_ERR(clk);
-	}
+	if (IS_ERR(clk))
+		panic("Can't get timer clock");
 
 	rstc = of_reset_control_get(node, NULL);
 	if (!IS_ERR(rstc))
 		reset_control_deassert(rstc);
 
-	ret = sun5i_setup_clocksource(node, timer_base, clk, irq);
-	if (ret)
-		return ret;
-
-	return sun5i_setup_clockevent(node, timer_base, clk, irq);
+	sun5i_setup_clocksource(node, timer_base, clk, irq);
+	sun5i_setup_clockevent(node, timer_base, clk, irq);
 }
 CLOCKSOURCE_OF_DECLARE(sun5i_a13, "allwinner,sun5i-a13-hstimer",
-			   sun5i_timer_init);
+		       sun5i_timer_init);
 CLOCKSOURCE_OF_DECLARE(sun7i_a20, "allwinner,sun7i-a20-hstimer",
-			   sun5i_timer_init);
+		       sun5i_timer_init);

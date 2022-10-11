@@ -33,8 +33,6 @@ General Public License for more details. */
    D. V. Henkel-Wallace (gumby@cygnus.com) Fete Bastille, 1992
 */
 
-#include <asm/export.h>
-
 /* These are predefined by new versions of GNU cpp.  */
 
 #ifndef __USER_LABEL_PREFIX__
@@ -108,4 +106,3 @@ SYM (__modsi3):
 	movel	d1, d0
 	rts
 
-	EXPORT_SYMBOL(__modsi3)

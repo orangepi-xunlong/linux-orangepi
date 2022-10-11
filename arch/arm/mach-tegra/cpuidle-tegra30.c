@@ -30,7 +30,6 @@
 #include <asm/smp_plat.h>
 #include <asm/suspend.h>
 
-#include "cpuidle.h"
 #include "pm.h"
 #include "sleep.h"
 

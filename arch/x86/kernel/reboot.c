@@ -1,6 +1,6 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/reboot.h>
 #include <linux/init.h>
 #include <linux/pm.h>
@@ -9,7 +9,6 @@
 #include <linux/sched.h>
 #include <linux/tboot.h>
 #include <linux/delay.h>
-#include <linux/frame.h>
 #include <acpi/reboot.h>
 #include <asm/io.h>
 #include <asm/apic.h>
@@ -54,19 +53,6 @@ bool port_cf9_safe = false;
  * Reboot options and system auto-detection code provided by
  * Dell Inc. so their systems "just work". :-)
  */
-
-/*
- * Some machines require the "reboot=a" commandline options
- */
-static int __init set_acpi_reboot(const struct dmi_system_id *d)
-{
-	if (reboot_type != BOOT_ACPI) {
-		reboot_type = BOOT_ACPI;
-		pr_info("%s series board detected. Selecting %s-method for reboots.\n",
-			d->ident, "ACPI");
-	}
-	return 0;
-}
 
 /*
  * Some machines require the "reboot=b" or "reboot=k"  commandline options,
@@ -128,7 +114,6 @@ void __noreturn machine_real_restart(unsigned int type)
 #ifdef CONFIG_APM_MODULE
 EXPORT_SYMBOL(machine_real_restart);
 #endif
-STACK_FRAME_NON_STANDARD(machine_real_restart);
 
 /*
  * Some Apple MacBook and MacBookPro's needs reboot=p to be able to reboot
@@ -227,22 +212,6 @@ static struct dmi_system_id __initdata reboot_dmi_table[] = {
 		.matches = {
 			DMI_MATCH(DMI_BOARD_VENDOR, "ASUSTeK Computer INC."),
 			DMI_MATCH(DMI_BOARD_NAME, "P4S800"),
-		},
-	},
-	{	/* Handle problems with rebooting on ASUS EeeBook X205TA */
-		.callback = set_acpi_reboot,
-		.ident = "ASUS EeeBook X205TA",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK COMPUTER INC."),
-			DMI_MATCH(DMI_PRODUCT_NAME, "X205TA"),
-		},
-	},
-	{	/* Handle problems with rebooting on ASUS EeeBook X205TAW */
-		.callback = set_acpi_reboot,
-		.ident = "ASUS EeeBook X205TAW",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK COMPUTER INC."),
-			DMI_MATCH(DMI_PRODUCT_NAME, "X205TAW"),
 		},
 	},
 
@@ -430,14 +399,6 @@ static struct dmi_system_id __initdata reboot_dmi_table[] = {
 			DMI_MATCH(DMI_PRODUCT_NAME, "Dell XPS710"),
 		},
 	},
-	{	/* Handle problems with rebooting on Dell Optiplex 7450 AIO */
-		.callback = set_acpi_reboot,
-		.ident = "Dell OptiPlex 7450 AIO",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
-			DMI_MATCH(DMI_PRODUCT_NAME, "OptiPlex 7450 AIO"),
-		},
-	},
 
 	/* Hewlett-Packard */
 	{	/* Handle problems with rebooting on HP laptops */
@@ -577,15 +538,6 @@ static void native_machine_emergency_restart(void)
 	/* Tell the BIOS if we want cold or warm reboot */
 	mode = reboot_mode == REBOOT_WARM ? 0x1234 : 0;
 	*((unsigned short *)__va(0x472)) = mode;
-
-	/*
-	 * If an EFI capsule has been registered with the firmware then
-	 * override the reboot= parameter.
-	 */
-	if (efi_capsule_pending(NULL)) {
-		pr_info("EFI capsule is pending, forcing EFI reboot.\n");
-		reboot_type = BOOT_EFI;
-	}
 
 	for (;;) {
 		/* Could also try the reset bit in the Hammer NB */
@@ -727,7 +679,7 @@ static void native_machine_power_off(void)
 	tboot_shutdown(TB_SHUTDOWN_HALT);
 }
 
-struct machine_ops machine_ops __ro_after_init = {
+struct machine_ops machine_ops = {
 	.power_off = native_machine_power_off,
 	.shutdown = native_machine_shutdown,
 	.emergency_restart = native_machine_emergency_restart,
@@ -771,15 +723,13 @@ void machine_crash_shutdown(struct pt_regs *regs)
 #endif
 
 
-/* This is the CPU performing the emergency shutdown work. */
-int crashing_cpu = -1;
-
 #if defined(CONFIG_SMP)
 
+/* This keeps a track of which one is crashing cpu. */
+static int crashing_cpu;
 static nmi_shootdown_cb shootdown_callback;
 
 static atomic_t waiting_for_crash_ipi;
-static int crash_ipi_issued;
 
 static int crash_nmi_callback(unsigned int val, struct pt_regs *regs)
 {
@@ -842,9 +792,6 @@ void nmi_shootdown_cpus(nmi_shootdown_cb callback)
 
 	smp_send_nmi_allbutself();
 
-	/* Kick CPUs looping in NMI context. */
-	WRITE_ONCE(crash_ipi_issued, 1);
-
 	msecs = 1000; /* Wait at most a second for the other cpus to stop */
 	while ((atomic_read(&waiting_for_crash_ipi) > 0) && msecs) {
 		mdelay(1);
@@ -853,35 +800,9 @@ void nmi_shootdown_cpus(nmi_shootdown_cb callback)
 
 	/* Leave the nmi callback set */
 }
-
-/*
- * Check if the crash dumping IPI got issued and if so, call its callback
- * directly. This function is used when we have already been in NMI handler.
- * It doesn't return.
- */
-void run_crash_ipi_callback(struct pt_regs *regs)
-{
-	if (crash_ipi_issued)
-		crash_nmi_callback(0, regs);
-}
-
-/* Override the weak function in kernel/panic.c */
-void nmi_panic_self_stop(struct pt_regs *regs)
-{
-	while (1) {
-		/* If no CPU is preparing crash dump, we simply loop here. */
-		run_crash_ipi_callback(regs);
-		cpu_relax();
-	}
-}
-
 #else /* !CONFIG_SMP */
 void nmi_shootdown_cpus(nmi_shootdown_cb callback)
 {
 	/* No other CPUs to shoot down */
-}
-
-void run_crash_ipi_callback(struct pt_regs *regs)
-{
 }
 #endif

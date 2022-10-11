@@ -6,7 +6,7 @@
  *
  * License 1: GPLv2
  *
- * Copyright (c) 2014-2016 Advanced Micro Devices, Inc.
+ * Copyright (c) 2014 Advanced Micro Devices, Inc.
  *
  * This file is free software; you may copy, redistribute and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -56,7 +56,7 @@
  *
  * License 2: Modified BSD
  *
- * Copyright (c) 2014-2016 Advanced Micro Devices, Inc.
+ * Copyright (c) 2014 Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -626,22 +626,10 @@ static irqreturn_t xgbe_an_isr(int irq, void *data)
 
 	netif_dbg(pdata, intr, pdata->netdev, "AN interrupt received\n");
 
-	/* Disable AN interrupts */
-	XMDIO_WRITE(pdata, MDIO_MMD_AN, MDIO_AN_INTMASK, 0);
+	/* Interrupt reason must be read and cleared outside of IRQ context */
+	disable_irq_nosync(pdata->an_irq);
 
-	/* Save the interrupt(s) that fired */
-	pdata->an_int = XMDIO_READ(pdata, MDIO_MMD_AN, MDIO_AN_INT);
-
-	if (pdata->an_int) {
-		/* Clear the interrupt(s) that fired and process them */
-		XMDIO_WRITE(pdata, MDIO_MMD_AN, MDIO_AN_INT, ~pdata->an_int);
-
-		queue_work(pdata->an_workqueue, &pdata->an_irq_work);
-	} else {
-		/* Enable AN interrupts */
-		XMDIO_WRITE(pdata, MDIO_MMD_AN, MDIO_AN_INTMASK,
-			    XGBE_AN_INT_MASK);
-	}
+	queue_work(pdata->an_workqueue, &pdata->an_irq_work);
 
 	return IRQ_HANDLED;
 }
@@ -685,25 +673,33 @@ static void xgbe_an_state_machine(struct work_struct *work)
 						   struct xgbe_prv_data,
 						   an_work);
 	enum xgbe_an cur_state = pdata->an_state;
+	unsigned int int_reg, int_mask;
 
 	mutex_lock(&pdata->an_mutex);
 
-	if (!pdata->an_int)
+	/* Read the interrupt */
+	int_reg = XMDIO_READ(pdata, MDIO_MMD_AN, MDIO_AN_INT);
+	if (!int_reg)
 		goto out;
 
 next_int:
-	if (pdata->an_int & XGBE_AN_PG_RCV) {
+	if (int_reg & XGBE_AN_PG_RCV) {
 		pdata->an_state = XGBE_AN_PAGE_RECEIVED;
-		pdata->an_int &= ~XGBE_AN_PG_RCV;
-	} else if (pdata->an_int & XGBE_AN_INC_LINK) {
+		int_mask = XGBE_AN_PG_RCV;
+	} else if (int_reg & XGBE_AN_INC_LINK) {
 		pdata->an_state = XGBE_AN_INCOMPAT_LINK;
-		pdata->an_int &= ~XGBE_AN_INC_LINK;
-	} else if (pdata->an_int & XGBE_AN_INT_CMPLT) {
+		int_mask = XGBE_AN_INC_LINK;
+	} else if (int_reg & XGBE_AN_INT_CMPLT) {
 		pdata->an_state = XGBE_AN_COMPLETE;
-		pdata->an_int &= ~XGBE_AN_INT_CMPLT;
+		int_mask = XGBE_AN_INT_CMPLT;
 	} else {
 		pdata->an_state = XGBE_AN_ERROR;
+		int_mask = 0;
 	}
+
+	/* Clear the interrupt to be processed */
+	int_reg &= ~int_mask;
+	XMDIO_WRITE(pdata, MDIO_MMD_AN, MDIO_AN_INT, int_reg);
 
 	pdata->an_result = pdata->an_state;
 
@@ -744,14 +740,14 @@ again:
 	}
 
 	if (pdata->an_state == XGBE_AN_NO_LINK) {
-		pdata->an_int = 0;
+		int_reg = 0;
 		XMDIO_WRITE(pdata, MDIO_MMD_AN, MDIO_AN_INT, 0);
 	} else if (pdata->an_state == XGBE_AN_ERROR) {
 		netdev_err(pdata->netdev,
 			   "error during auto-negotiation, state=%u\n",
 			   cur_state);
 
-		pdata->an_int = 0;
+		int_reg = 0;
 		XMDIO_WRITE(pdata, MDIO_MMD_AN, MDIO_AN_INT, 0);
 	}
 
@@ -769,12 +765,11 @@ again:
 	if (cur_state != pdata->an_state)
 		goto again;
 
-	if (pdata->an_int)
+	if (int_reg)
 		goto next_int;
 
 out:
-	/* Enable AN interrupts on the way out */
-	XMDIO_WRITE(pdata, MDIO_MMD_AN, MDIO_AN_INTMASK, XGBE_AN_INT_MASK);
+	enable_irq(pdata->an_irq);
 
 	mutex_unlock(&pdata->an_mutex);
 }

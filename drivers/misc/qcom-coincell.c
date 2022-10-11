@@ -94,8 +94,7 @@ static int qcom_coincell_probe(struct platform_device *pdev)
 {
 	struct device_node *node = pdev->dev.of_node;
 	struct qcom_coincell chgr;
-	u32 rset = 0;
-	u32 vset = 0;
+	u32 rset, vset;
 	bool enable;
 	int rc;
 

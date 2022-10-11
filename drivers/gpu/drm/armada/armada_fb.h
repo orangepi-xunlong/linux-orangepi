@@ -19,6 +19,6 @@ struct armada_framebuffer {
 #define drm_fb_obj(fb) drm_fb_to_armada_fb(fb)->obj
 
 struct armada_framebuffer *armada_framebuffer_create(struct drm_device *,
-	const struct drm_mode_fb_cmd2 *, struct armada_gem_object *);
+	struct drm_mode_fb_cmd2 *, struct armada_gem_object *);
 
 #endif

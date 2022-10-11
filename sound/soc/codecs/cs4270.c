@@ -617,14 +617,12 @@ static const struct snd_soc_codec_driver soc_codec_device_cs4270 = {
 	.suspend =		cs4270_soc_suspend,
 	.resume =		cs4270_soc_resume,
 
-	.component_driver = {
-		.controls =		cs4270_snd_controls,
-		.num_controls =		ARRAY_SIZE(cs4270_snd_controls),
-		.dapm_widgets =		cs4270_dapm_widgets,
-		.num_dapm_widgets =	ARRAY_SIZE(cs4270_dapm_widgets),
-		.dapm_routes =		cs4270_dapm_routes,
-		.num_dapm_routes =	ARRAY_SIZE(cs4270_dapm_routes),
-	},
+	.controls =		cs4270_snd_controls,
+	.num_controls =		ARRAY_SIZE(cs4270_snd_controls),
+	.dapm_widgets =		cs4270_dapm_widgets,
+	.num_dapm_widgets =	ARRAY_SIZE(cs4270_dapm_widgets),
+	.dapm_routes =		cs4270_dapm_routes,
+	.num_dapm_routes =	ARRAY_SIZE(cs4270_dapm_routes),
 };
 
 /*
@@ -643,6 +641,7 @@ static const struct regmap_config cs4270_regmap = {
 	.reg_defaults =		cs4270_reg_defaults,
 	.num_reg_defaults =	ARRAY_SIZE(cs4270_reg_defaults),
 	.cache_type =		REGCACHE_RBTREE,
+	.write_flag_mask =	CS4270_I2C_INCR,
 
 	.readable_reg =		cs4270_reg_is_readable,
 	.volatile_reg =		cs4270_reg_is_volatile,

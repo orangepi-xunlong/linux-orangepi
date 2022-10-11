@@ -29,7 +29,6 @@
 #include <subdev/timer.h>
 
 #include <nvif/class.h>
-#include <nvif/cl5070.h>
 #include <nvif/unpack.h>
 
 int
@@ -40,12 +39,12 @@ nv50_disp_root_scanoutpos(NV50_DISP_MTHD_V0)
 	const u32 blanks = nvkm_rd32(device, 0x610af4 + (head * 0x540));
 	const u32 total  = nvkm_rd32(device, 0x610afc + (head * 0x540));
 	union {
-		struct nv50_disp_scanoutpos_v0 v0;
+		struct nv04_disp_scanoutpos_v0 v0;
 	} *args = data;
-	int ret = -ENOSYS;
+	int ret;
 
 	nvif_ioctl(object, "disp scanoutpos size %d\n", size);
-	if (!(ret = nvif_unpack(ret, &data, &size, args->v0, 0, 0, false))) {
+	if (nvif_unpack(args->v0, 0, 0, false)) {
 		nvif_ioctl(object, "disp scanoutpos vers %d\n",
 			   args->v0.version);
 		args->v0.vblanke = (blanke & 0xffff0000) >> 16;
@@ -79,19 +78,19 @@ nv50_disp_root_mthd_(struct nvkm_object *object, u32 mthd, void *data, u32 size)
 	struct nvkm_output *outp = NULL;
 	struct nvkm_output *temp;
 	u16 type, mask = 0;
-	int head, ret = -ENOSYS;
+	int head, ret;
 
 	if (mthd != NV50_DISP_MTHD)
 		return -EINVAL;
 
 	nvif_ioctl(object, "disp mthd size %d\n", size);
-	if (!(ret = nvif_unpack(ret, &data, &size, args->v0, 0, 0, true))) {
+	if (nvif_unpack(args->v0, 0, 0, true)) {
 		nvif_ioctl(object, "disp mthd vers %d mthd %02x head %d\n",
 			   args->v0.version, args->v0.method, args->v0.head);
 		mthd = args->v0.method;
 		head = args->v0.head;
 	} else
-	if (!(ret = nvif_unpack(ret, &data, &size, args->v1, 1, 1, true))) {
+	if (nvif_unpack(args->v1, 1, 1, true)) {
 		nvif_ioctl(object, "disp mthd vers %d mthd %02x "
 				   "type %04x mask %04x\n",
 			   args->v1.version, args->v1.method,
@@ -144,9 +143,8 @@ nv50_disp_root_mthd_(struct nvkm_object *object, u32 mthd, void *data, u32 size)
 		union {
 			struct nv50_disp_sor_lvds_script_v0 v0;
 		} *args = data;
-		int ret = -ENOSYS;
 		nvif_ioctl(object, "disp sor lvds script size %d\n", size);
-		if (!(ret = nvif_unpack(ret, &data, &size, args->v0, 0, 0, false))) {
+		if (nvif_unpack(args->v0, 0, 0, false)) {
 			nvif_ioctl(object, "disp sor lvds script "
 					   "vers %d name %04x\n",
 				   args->v0.version, args->v0.script);
@@ -161,9 +159,8 @@ nv50_disp_root_mthd_(struct nvkm_object *object, u32 mthd, void *data, u32 size)
 		union {
 			struct nv50_disp_sor_dp_pwr_v0 v0;
 		} *args = data;
-		int ret = -ENOSYS;
 		nvif_ioctl(object, "disp sor dp pwr size %d\n", size);
-		if (!(ret = nvif_unpack(ret, &data, &size, args->v0, 0, 0, false))) {
+		if (nvif_unpack(args->v0, 0, 0, false)) {
 			nvif_ioctl(object, "disp sor dp pwr vers %d state %d\n",
 				   args->v0.version, args->v0.state);
 			if (args->v0.state == 0) {
@@ -207,8 +204,8 @@ nv50_disp_root_pioc_new_(const struct nvkm_oclass *oclass,
 {
 	const struct nv50_disp_pioc_oclass *sclass = oclass->priv;
 	struct nv50_disp_root *root = nv50_disp_root(oclass->parent);
-	return sclass->ctor(sclass->func, sclass->mthd, root, sclass->chid.ctrl,
-			    sclass->chid.user, oclass, data, size, pobject);
+	return sclass->ctor(sclass->func, sclass->mthd, root, sclass->chid,
+			    oclass, data, size, pobject);
 }
 
 static int

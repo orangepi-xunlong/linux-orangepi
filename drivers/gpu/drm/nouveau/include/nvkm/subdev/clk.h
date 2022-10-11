@@ -2,7 +2,6 @@
 #define __NVKM_CLK_H__
 #include <core/subdev.h>
 #include <core/notify.h>
-#include <subdev/pci.h>
 struct nvbios_pll;
 struct nvkm_pll_vals;
 
@@ -39,7 +38,7 @@ enum nv_clk_src {
 	nv_clk_src_hubk06,
 	nv_clk_src_hubk07,
 	nv_clk_src_copy,
-	nv_clk_src_pmu,
+	nv_clk_src_daemon,
 	nv_clk_src_disp,
 	nv_clk_src_vdec,
 
@@ -60,8 +59,6 @@ struct nvkm_pstate {
 	struct nvkm_cstate base;
 	u8 pstate;
 	u8 fanspeed;
-	enum nvkm_pcie_speed pcie_speed;
-	u8 pcie_width;
 };
 
 struct nvkm_domain {
@@ -121,5 +118,4 @@ int gt215_clk_new(struct nvkm_device *, int, struct nvkm_clk **);
 int gf100_clk_new(struct nvkm_device *, int, struct nvkm_clk **);
 int gk104_clk_new(struct nvkm_device *, int, struct nvkm_clk **);
 int gk20a_clk_new(struct nvkm_device *, int, struct nvkm_clk **);
-int gm20b_clk_new(struct nvkm_device *, int, struct nvkm_clk **);
 #endif

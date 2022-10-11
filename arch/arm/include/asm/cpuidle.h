@@ -2,7 +2,6 @@
 #define __ASM_ARM_CPUIDLE_H
 
 #include <asm/proc-fns.h>
-#include <linux/cpuidle.h>
 
 #ifdef CONFIG_CPU_IDLE
 extern int arm_cpuidle_simple_enter(struct cpuidle_device *dev,
@@ -37,7 +36,7 @@ struct cpuidle_ops {
 
 struct of_cpuidle_method {
 	const char *method;
-	const struct cpuidle_ops *ops;
+	struct cpuidle_ops *ops;
 };
 
 #define CPUIDLE_METHOD_OF_DECLARE(name, _method, _ops)			\

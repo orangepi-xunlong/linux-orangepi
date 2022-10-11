@@ -11,6 +11,11 @@
  * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
+ *
+ *
  ******************************************************************************/
 #define _HAL_INIT_C_
 
@@ -48,7 +53,7 @@ s32 iol_execute(struct adapter *padapter, u8 control)
 {
 	s32 status = _FAIL;
 	u8 reg_0x88 = 0;
-	unsigned long start = 0;
+	u32 start = 0, passing_time = 0;
 
 	control = control&0x0f;
 	reg_0x88 = usb_read8(padapter, REG_HMEBOX_E0);
@@ -56,8 +61,8 @@ s32 iol_execute(struct adapter *padapter, u8 control)
 
 	start = jiffies;
 	while ((reg_0x88 = usb_read8(padapter, REG_HMEBOX_E0)) & control &&
-	       jiffies_to_msecs(jiffies - start) < 1000) {
-		udelay(5);
+	       (passing_time = rtw_get_passing_time_ms(start)) < 1000) {
+		;
 	}
 
 	reg_0x88 = usb_read8(padapter, REG_HMEBOX_E0);
@@ -108,24 +113,28 @@ void _8051Reset88E(struct adapter *padapter)
 
 void rtl8188e_InitializeFirmwareVars(struct adapter *padapter)
 {
+	struct hal_data_8188e *pHalData = GET_HAL_DATA(padapter);
+
 	/*  Init Fw LPS related. */
 	padapter->pwrctrlpriv.bFwCurrentInPSMode = false;
 
 	/*  Init H2C counter. by tynli. 2009.12.09. */
-	padapter->HalData->LastHMEBoxNum = 0;
+	pHalData->LastHMEBoxNum = 0;
 }
 
-void rtw_hal_free_data(struct adapter *padapter)
+static void rtl8188e_free_hal_data(struct adapter *padapter)
 {
 	kfree(padapter->HalData);
 	padapter->HalData = NULL;
 }
 
-void rtw_hal_read_chip_version(struct adapter *padapter)
+static void ReadChipVersion8188E(struct adapter *padapter)
 {
 	u32				value32;
 	struct HAL_VERSION		ChipVersion;
-	struct hal_data_8188e *pHalData = padapter->HalData;
+	struct hal_data_8188e	*pHalData;
+
+	pHalData = GET_HAL_DATA(padapter);
 
 	value32 = usb_read32(padapter, REG_SYS_CFG);
 	ChipVersion.ChipType = ((value32 & RTL_ID) ? TEST_CHIP : NORMAL_CHIP);
@@ -135,13 +144,16 @@ void rtw_hal_read_chip_version(struct adapter *padapter)
 	dump_chip_info(ChipVersion);
 
 	pHalData->VersionID = ChipVersion;
+	pHalData->rf_type = RF_1T1R;
 	pHalData->NumTotalRFPath = 1;
+
+	MSG_88E("RF_Type is %x!!\n", pHalData->rf_type);
 }
 
-void rtw_hal_set_odm_var(struct adapter *Adapter, enum hal_odm_variable eVariable, void *pValue1, bool bSet)
+static void rtl8188e_SetHalODMVar(struct adapter *Adapter, enum hal_odm_variable eVariable, void *pValue1, bool bSet)
 {
-	struct odm_dm_struct *podmpriv = &Adapter->HalData->odmpriv;
-
+	struct hal_data_8188e	*pHalData = GET_HAL_DATA(Adapter);
+	struct odm_dm_struct *podmpriv = &pHalData->odmpriv;
 	switch (eVariable) {
 	case HAL_ODM_STA_INFO:
 		{
@@ -158,17 +170,17 @@ void rtw_hal_set_odm_var(struct adapter *Adapter, enum hal_odm_variable eVariabl
 		}
 		break;
 	case HAL_ODM_P2P_STATE:
-		podmpriv->bWIFI_Direct = bSet;
+			ODM_CmnInfoUpdate(podmpriv, ODM_CMNINFO_WIFI_DIRECT, bSet);
 		break;
 	case HAL_ODM_WIFI_DISPLAY_STATE:
-		podmpriv->bWIFI_Display = bSet;
+			ODM_CmnInfoUpdate(podmpriv, ODM_CMNINFO_WIFI_DISPLAY, bSet);
 		break;
 	default:
 		break;
 	}
 }
 
-void rtw_hal_notch_filter(struct adapter *adapter, bool enable)
+static void hal_notch_filter_8188e(struct adapter *adapter, bool enable)
 {
 	if (enable) {
 		DBG_88E("Enable notch filter\n");
@@ -177,6 +189,32 @@ void rtw_hal_notch_filter(struct adapter *adapter, bool enable)
 		DBG_88E("Disable notch filter\n");
 		usb_write8(adapter, rOFDM0_RxDSP+1, usb_read8(adapter, rOFDM0_RxDSP+1) & ~BIT(1));
 	}
+}
+void rtl8188e_set_hal_ops(struct hal_ops *pHalFunc)
+{
+	pHalFunc->free_hal_data = &rtl8188e_free_hal_data;
+
+	pHalFunc->dm_init = &rtl8188e_init_dm_priv;
+
+	pHalFunc->read_chip_version = &ReadChipVersion8188E;
+
+	pHalFunc->set_bwmode_handler = &phy_set_bw_mode;
+	pHalFunc->set_channel_handler = &phy_sw_chnl;
+
+	pHalFunc->hal_dm_watchdog = &rtl8188e_HalDmWatchDog;
+
+	pHalFunc->Add_RateATid = &rtl8188e_Add_RateATid;
+
+	pHalFunc->AntDivBeforeLinkHandler = &AntDivBeforeLink8188E;
+	pHalFunc->AntDivCompareHandler = &AntDivCompare8188E;
+	pHalFunc->read_rfreg = &phy_query_rf_reg;
+
+	pHalFunc->sreset_init_value = &sreset_init_value;
+	pHalFunc->sreset_get_wifi_status  = &sreset_get_wifi_status;
+
+	pHalFunc->SetHalODMVarHandler = &rtl8188e_SetHalODMVar;
+
+	pHalFunc->hal_notch_filter = &hal_notch_filter_8188e;
 }
 
 /*  */
@@ -204,7 +242,6 @@ static s32 _LLTWrite(struct adapter *padapter, u32 address, u32 data)
 			status = _FAIL;
 			break;
 		}
-		udelay(5);
 	} while (count++);
 
 	return status;
@@ -468,7 +505,7 @@ void Hal_ReadPowerSavingMode88E(struct adapter *padapter, u8 *hwinfo, bool AutoL
 
 void Hal_ReadTxPowerInfo88E(struct adapter *padapter, u8 *PROMContent, bool AutoLoadFail)
 {
-	struct hal_data_8188e *pHalData = padapter->HalData;
+	struct hal_data_8188e	*pHalData = GET_HAL_DATA(padapter);
 	struct txpowerinfo24g pwrInfo24G;
 	u8 rfPath, ch, group;
 	u8 bIn24G, TxCount;
@@ -520,7 +557,7 @@ void Hal_ReadTxPowerInfo88E(struct adapter *padapter, u8 *PROMContent, bool Auto
 
 void Hal_EfuseParseXtal_8188E(struct adapter *pAdapter, u8 *hwinfo, bool AutoLoadFail)
 {
-	struct hal_data_8188e *pHalData = pAdapter->HalData;
+	struct hal_data_8188e	*pHalData = GET_HAL_DATA(pAdapter);
 
 	if (!AutoLoadFail) {
 		pHalData->CrystalCap = hwinfo[EEPROM_XTAL_88E];
@@ -534,7 +571,7 @@ void Hal_EfuseParseXtal_8188E(struct adapter *pAdapter, u8 *hwinfo, bool AutoLoa
 
 void Hal_EfuseParseBoardType88E(struct adapter *pAdapter, u8 *hwinfo, bool AutoLoadFail)
 {
-	struct hal_data_8188e *pHalData = pAdapter->HalData;
+	struct hal_data_8188e *pHalData = GET_HAL_DATA(pAdapter);
 
 	if (!AutoLoadFail)
 		pHalData->BoardType = (hwinfo[EEPROM_RF_BOARD_OPTION_88E]
@@ -546,7 +583,7 @@ void Hal_EfuseParseBoardType88E(struct adapter *pAdapter, u8 *hwinfo, bool AutoL
 
 void Hal_EfuseParseEEPROMVer88E(struct adapter *padapter, u8 *hwinfo, bool AutoLoadFail)
 {
-	struct hal_data_8188e *pHalData = padapter->HalData;
+	struct hal_data_8188e *pHalData = GET_HAL_DATA(padapter);
 
 	if (!AutoLoadFail) {
 		pHalData->EEPROMVersion = hwinfo[EEPROM_VERSION_88E];
@@ -573,7 +610,7 @@ void rtl8188e_EfuseParseChnlPlan(struct adapter *padapter, u8 *hwinfo, bool Auto
 
 void Hal_EfuseParseCustomerID88E(struct adapter *padapter, u8 *hwinfo, bool AutoLoadFail)
 {
-	struct hal_data_8188e	*pHalData = padapter->HalData;
+	struct hal_data_8188e	*pHalData = GET_HAL_DATA(padapter);
 
 	if (!AutoLoadFail) {
 		pHalData->EEPROMCustomerID = hwinfo[EEPROM_CUSTOMERID_88E];
@@ -586,7 +623,7 @@ void Hal_EfuseParseCustomerID88E(struct adapter *padapter, u8 *hwinfo, bool Auto
 
 void Hal_ReadAntennaDiversity88E(struct adapter *pAdapter, u8 *PROMContent, bool AutoLoadFail)
 {
-	struct hal_data_8188e *pHalData = pAdapter->HalData;
+	struct hal_data_8188e	*pHalData = GET_HAL_DATA(pAdapter);
 	struct registry_priv	*registry_par = &pAdapter->registrypriv;
 
 	if (!AutoLoadFail) {
@@ -619,7 +656,7 @@ void Hal_ReadAntennaDiversity88E(struct adapter *pAdapter, u8 *PROMContent, bool
 
 void Hal_ReadThermalMeter_88E(struct adapter *Adapter, u8 *PROMContent, bool AutoloadFail)
 {
-	struct hal_data_8188e *pHalData = Adapter->HalData;
+	struct hal_data_8188e	*pHalData = GET_HAL_DATA(Adapter);
 
 	/*  ThermalMeter from EEPROM */
 	if (!AutoloadFail)

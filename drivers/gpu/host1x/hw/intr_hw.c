@@ -38,14 +38,14 @@ static void host1x_intr_syncpt_handle(struct host1x_syncpt *syncpt)
 	host1x_sync_writel(host, BIT_MASK(id),
 		HOST1X_SYNC_SYNCPT_THRESH_CPU0_INT_STATUS(BIT_WORD(id)));
 
-	schedule_work(&syncpt->intr.work);
+	queue_work(host->intr_wq, &syncpt->intr.work);
 }
 
 static irqreturn_t syncpt_thresh_isr(int irq, void *dev_id)
 {
 	struct host1x *host = dev_id;
 	unsigned long reg;
-	unsigned int i, id;
+	int i, id;
 
 	for (i = 0; i < DIV_ROUND_UP(host->info->nb_pts, 32); i++) {
 		reg = host1x_sync_readl(host,
@@ -62,7 +62,7 @@ static irqreturn_t syncpt_thresh_isr(int irq, void *dev_id)
 
 static void _host1x_intr_disable_all_syncpt_intrs(struct host1x *host)
 {
-	unsigned int i;
+	u32 i;
 
 	for (i = 0; i < DIV_ROUND_UP(host->info->nb_pts, 32); ++i) {
 		host1x_sync_writel(host, 0xffffffffu,
@@ -72,12 +72,10 @@ static void _host1x_intr_disable_all_syncpt_intrs(struct host1x *host)
 	}
 }
 
-static int
-_host1x_intr_init_host_sync(struct host1x *host, u32 cpm,
-			    void (*syncpt_thresh_work)(struct work_struct *))
+static int _host1x_intr_init_host_sync(struct host1x *host, u32 cpm,
+	void (*syncpt_thresh_work)(struct work_struct *))
 {
-	unsigned int i;
-	int err;
+	int i, err;
 
 	host1x_hw_intr_disable_all_syncpt_intrs(host);
 
@@ -87,7 +85,7 @@ _host1x_intr_init_host_sync(struct host1x *host, u32 cpm,
 	err = devm_request_irq(host->dev, host->intr_syncpt_irq,
 			       syncpt_thresh_isr, IRQF_SHARED,
 			       "host1x_syncpt", host);
-	if (err < 0) {
+	if (IS_ERR_VALUE(err)) {
 		WARN_ON(1);
 		return err;
 	}
@@ -108,21 +106,18 @@ _host1x_intr_init_host_sync(struct host1x *host, u32 cpm,
 }
 
 static void _host1x_intr_set_syncpt_threshold(struct host1x *host,
-					      unsigned int id,
-					      u32 thresh)
+	u32 id, u32 thresh)
 {
 	host1x_sync_writel(host, thresh, HOST1X_SYNC_SYNCPT_INT_THRESH(id));
 }
 
-static void _host1x_intr_enable_syncpt_intr(struct host1x *host,
-					    unsigned int id)
+static void _host1x_intr_enable_syncpt_intr(struct host1x *host, u32 id)
 {
 	host1x_sync_writel(host, BIT_MASK(id),
 		HOST1X_SYNC_SYNCPT_THRESH_INT_ENABLE_CPU0(BIT_WORD(id)));
 }
 
-static void _host1x_intr_disable_syncpt_intr(struct host1x *host,
-					     unsigned int id)
+static void _host1x_intr_disable_syncpt_intr(struct host1x *host, u32 id)
 {
 	host1x_sync_writel(host, BIT_MASK(id),
 		HOST1X_SYNC_SYNCPT_THRESH_INT_DISABLE(BIT_WORD(id)));
@@ -132,13 +127,8 @@ static void _host1x_intr_disable_syncpt_intr(struct host1x *host,
 
 static int _host1x_free_syncpt_irq(struct host1x *host)
 {
-	unsigned int i;
-
 	devm_free_irq(host->dev, host->intr_syncpt_irq, host);
-
-	for (i = 0; i < host->info->nb_pts; i++)
-		cancel_work_sync(&host->syncpt[i].intr.work);
-
+	flush_workqueue(host->intr_wq);
 	return 0;
 }
 

@@ -88,11 +88,8 @@ static inline __wsum
 csum_block_add(__wsum csum, __wsum csum2, int offset)
 {
 	u32 sum = (__force u32)csum2;
-
-	/* rotate sum to align it with a 16b boundary */
-	if (offset & 1)
-		sum = ror32(sum, 8);
-
+	if (offset&1)
+		sum = ((sum&0xFF00FF)<<8)+((sum>>8)&0xFF00FF);
 	return csum_add(csum, (__force __wsum)sum);
 }
 
@@ -105,7 +102,10 @@ csum_block_add_ext(__wsum csum, __wsum csum2, int offset, int len)
 static inline __wsum
 csum_block_sub(__wsum csum, __wsum csum2, int offset)
 {
-	return csum_block_add(csum, ~csum2, offset);
+	u32 sum = (__force u32)csum2;
+	if (offset&1)
+		sum = ((sum&0xFF00FF)<<8)+((sum>>8)&0xFF00FF);
+	return csum_sub(csum, (__force __wsum)sum);
 }
 
 static inline __wsum csum_unfold(__sum16 n)
@@ -119,11 +119,6 @@ static inline __wsum csum_partial_ext(const void *buff, int len, __wsum sum)
 }
 
 #define CSUM_MANGLED_0 ((__force __sum16)0xffff)
-
-static inline void csum_replace_by_diff(__sum16 *sum, __wsum diff)
-{
-	*sum = csum_fold(csum_add(diff, ~csum_unfold(*sum)));
-}
 
 static inline void csum_replace4(__sum16 *sum, __be32 from, __be32 to)
 {
@@ -170,8 +165,7 @@ static inline __wsum remcsum_adjust(void *ptr, __wsum csum,
 	csum = csum_sub(csum, csum_partial(ptr, start, 0));
 
 	/* Set derived checksum in packet */
-	delta = csum_sub((__force __wsum)csum_fold(csum),
-			 (__force __wsum)*psum);
+	delta = csum_sub(csum_fold(csum), *psum);
 	*psum = csum_fold(csum);
 
 	return delta;

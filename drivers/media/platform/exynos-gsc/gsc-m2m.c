@@ -86,7 +86,7 @@ void gsc_m2m_job_finish(struct gsc_ctx *ctx, int vb_state)
 	dst_vb = v4l2_m2m_dst_buf_remove(ctx->m2m_ctx);
 
 	if (src_vb && dst_vb) {
-		dst_vb->vb2_buf.timestamp = src_vb->vb2_buf.timestamp;
+		dst_vb->timestamp = src_vb->timestamp;
 		dst_vb->timecode = src_vb->timecode;
 		dst_vb->flags &= ~V4L2_BUF_FLAG_TSTAMP_SRC_MASK;
 		dst_vb->flags |=
@@ -125,7 +125,7 @@ static int gsc_get_bufs(struct gsc_ctx *ctx)
 	if (ret)
 		return ret;
 
-	dst_vb->vb2_buf.timestamp = src_vb->vb2_buf.timestamp;
+	dst_vb->timestamp = src_vb->timestamp;
 
 	return 0;
 }
@@ -212,8 +212,9 @@ put_device:
 }
 
 static int gsc_m2m_queue_setup(struct vb2_queue *vq,
+			const void *parg,
 			unsigned int *num_buffers, unsigned int *num_planes,
-			unsigned int sizes[], struct device *alloc_devs[])
+			unsigned int sizes[], void *allocators[])
 {
 	struct gsc_ctx *ctx = vb2_get_drv_priv(vq);
 	struct gsc_frame *frame;
@@ -227,8 +228,10 @@ static int gsc_m2m_queue_setup(struct vb2_queue *vq,
 		return -EINVAL;
 
 	*num_planes = frame->fmt->num_planes;
-	for (i = 0; i < frame->fmt->num_planes; i++)
+	for (i = 0; i < frame->fmt->num_planes; i++) {
 		sizes[i] = frame->payload[i];
+		allocators[i] = ctx->gsc_dev->alloc_ctx;
+	}
 	return 0;
 }
 
@@ -261,7 +264,7 @@ static void gsc_m2m_buf_queue(struct vb2_buffer *vb)
 		v4l2_m2m_buf_queue(ctx->m2m_ctx, vbuf);
 }
 
-static const struct vb2_ops gsc_m2m_qops = {
+static struct vb2_ops gsc_m2m_qops = {
 	.queue_setup	 = gsc_m2m_queue_setup,
 	.buf_prepare	 = gsc_m2m_buf_prepare,
 	.buf_queue	 = gsc_m2m_buf_queue,
@@ -277,10 +280,9 @@ static int gsc_m2m_querycap(struct file *file, void *fh,
 	struct gsc_ctx *ctx = fh_to_ctx(fh);
 	struct gsc_dev *gsc = ctx->gsc_dev;
 
-	strlcpy(cap->driver, GSC_MODULE_NAME, sizeof(cap->driver));
-	strlcpy(cap->card, GSC_MODULE_NAME " gscaler", sizeof(cap->card));
-	snprintf(cap->bus_info, sizeof(cap->bus_info), "platform:%s",
-		 dev_name(&gsc->pdev->dev));
+	strlcpy(cap->driver, gsc->pdev->name, sizeof(cap->driver));
+	strlcpy(cap->card, gsc->pdev->name, sizeof(cap->card));
+	strlcpy(cap->bus_info, "platform", sizeof(cap->bus_info));
 	cap->device_caps = V4L2_CAP_STREAMING | V4L2_CAP_VIDEO_M2M_MPLANE |
 		V4L2_CAP_VIDEO_CAPTURE_MPLANE |	V4L2_CAP_VIDEO_OUTPUT_MPLANE;
 
@@ -590,7 +592,6 @@ static int queue_init(void *priv, struct vb2_queue *src_vq,
 	src_vq->buf_struct_size = sizeof(struct v4l2_m2m_buffer);
 	src_vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
 	src_vq->lock = &ctx->gsc_dev->lock;
-	src_vq->dev = &ctx->gsc_dev->pdev->dev;
 
 	ret = vb2_queue_init(src_vq);
 	if (ret)
@@ -605,7 +606,6 @@ static int queue_init(void *priv, struct vb2_queue *src_vq,
 	dst_vq->buf_struct_size = sizeof(struct v4l2_m2m_buffer);
 	dst_vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
 	dst_vq->lock = &ctx->gsc_dev->lock;
-	dst_vq->dev = &ctx->gsc_dev->pdev->dev;
 
 	return vb2_queue_init(dst_vq);
 }
@@ -701,7 +701,7 @@ static unsigned int gsc_m2m_poll(struct file *file,
 {
 	struct gsc_ctx *ctx = fh_to_ctx(file->private_data);
 	struct gsc_dev *gsc = ctx->gsc_dev;
-	unsigned int ret;
+	int ret;
 
 	if (mutex_lock_interruptible(&gsc->lock))
 		return -ERESTARTSYS;

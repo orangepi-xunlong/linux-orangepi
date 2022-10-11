@@ -9,6 +9,7 @@
  * as published by the Free Software Foundation; version 2
  * of the License.
  */
+#include <linux/module.h>
 #include <asm/cacheflush.h>
 #include <asm/sections.h>
 #include <asm/asm.h>
@@ -73,3 +74,7 @@ int rodata_test(void)
 
 	return 0;
 }
+
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("Testcase for marking rodata as read-only");
+MODULE_AUTHOR("Arjan van de Ven <arjan@linux.intel.com>");

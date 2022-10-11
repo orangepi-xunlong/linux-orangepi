@@ -23,7 +23,7 @@
  */
 
 #include <linux/kthread.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 
@@ -60,17 +60,12 @@ EXPORT_SYMBOL_GPL(rcu_scheduler_active);
 
 /*
  * During boot, we forgive RCU lockdep issues.  After this function is
- * invoked, we start taking RCU lockdep issues seriously.  Note that unlike
- * Tree RCU, Tiny RCU transitions directly from RCU_SCHEDULER_INACTIVE
- * to RCU_SCHEDULER_RUNNING, skipping the RCU_SCHEDULER_INIT stage.
- * The reason for this is that Tiny RCU does not need kthreads, so does
- * not have to care about the fact that the scheduler is half-initialized
- * at a certain phase of the boot process.
+ * invoked, we start taking RCU lockdep issues seriously.
  */
 void __init rcu_scheduler_starting(void)
 {
 	WARN_ON(nr_context_switches() > 0);
-	rcu_scheduler_active = RCU_SCHEDULER_RUNNING;
+	rcu_scheduler_active = 1;
 }
 
 #endif /* #ifdef CONFIG_DEBUG_LOCK_ALLOC */
@@ -127,7 +122,18 @@ free_out:
 	debugfs_remove_recursive(rcudir);
 	return 1;
 }
-device_initcall(rcutiny_trace_init);
+
+static void __exit rcutiny_trace_cleanup(void)
+{
+	debugfs_remove_recursive(rcudir);
+}
+
+module_init(rcutiny_trace_init);
+module_exit(rcutiny_trace_cleanup);
+
+MODULE_AUTHOR("Paul E. McKenney");
+MODULE_DESCRIPTION("Read-Copy Update tracing for tiny implementation");
+MODULE_LICENSE("GPL");
 
 static void check_cpu_stall(struct rcu_ctrlblk *rcp)
 {

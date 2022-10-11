@@ -12,6 +12,16 @@
 		stdout-path = &uart0;
 	};
 
+	mbus {
+		pcie-controller {
+			status = "okay";
+
+			pcie@1,0 {
+				status = "okay";
+			};
+		};
+	};
+
 	ocp@f1000000 {
 		i2c@11000 {
 			status = "okay";
@@ -84,7 +94,7 @@
 &mdio {
 	status = "okay";
 
-	ethphy0: ethernet-phy@X {
+	ethphy0: ethernet-phy {
                 /* overwrite reg property in board file */
 	};
 };
@@ -94,12 +104,4 @@
 	ethernet0-port@0 {
 		phy-handle = <&ethphy0>;
 	};
-};
-
-&pciec {
-        status = "okay";
-};
-
-&pcie0 {
-	status = "okay";
 };

@@ -107,14 +107,10 @@ static int dsa_rcv(struct sk_buff *skb, struct net_device *dev,
 	 * Check that the source device exists and that the source
 	 * port is a registered DSA port.
 	 */
-	if (source_device >= DSA_MAX_SWITCHES)
+	if (source_device >= dst->pd->nr_chips)
 		goto out_drop;
-
 	ds = dst->ds[source_device];
-	if (!ds)
-		goto out_drop;
-
-	if (source_port >= DSA_MAX_PORTS || !ds->ports[source_port].netdev)
+	if (source_port >= DSA_MAX_PORTS || ds->ports[source_port] == NULL)
 		goto out_drop;
 
 	/*
@@ -163,7 +159,7 @@ static int dsa_rcv(struct sk_buff *skb, struct net_device *dev,
 			2 * ETH_ALEN);
 	}
 
-	skb->dev = ds->ports[source_port].netdev;
+	skb->dev = ds->ports[source_port];
 	skb_push(skb, ETH_HLEN);
 	skb->pkt_type = PACKET_HOST;
 	skb->protocol = eth_type_trans(skb, skb->dev);

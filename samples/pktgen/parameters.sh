@@ -14,13 +14,12 @@ function usage() {
     echo "  -b : (\$BURST)     HW level bursting of SKBs"
     echo "  -v : (\$VERBOSE)   verbose"
     echo "  -x : (\$DEBUG)     debug"
-    echo "  -6 : (\$IP6)       IPv6"
     echo ""
 }
 
 ##  --- Parse command line arguments / parameters ---
 ## echo "Commandline options:"
-while getopts "s:i:d:m:t:c:b:vxh6" option; do
+while getopts "s:i:d:m:t:c:b:vxh" option; do
     case $option in
         i) # interface
           export DEV=$OPTARG
@@ -60,10 +59,6 @@ while getopts "s:i:d:m:t:c:b:vxh6" option; do
           export DEBUG=yes
           info "Debug mode: DEBUG=$DEBUG"
           ;;
-	6)
-	  export IP6=6
-	  info "IP6: IP6=$IP6"
-	  ;;
         h|?|*)
           usage;
           err 2 "[ERROR] Unknown parameters!!!"

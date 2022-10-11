@@ -468,7 +468,7 @@ etrax_console_device(struct console* co, int *index)
 #endif
 }
 
-static struct console ser_console = {
+static struct console sercons = {
 	name : "ttyS",
 	write: console_write,
 	read : NULL,
@@ -480,7 +480,7 @@ static struct console ser_console = {
 	cflag : 0,
 	next : NULL
 };
-static struct console ser0_console = {
+static struct console sercons0 = {
 	name : "ttyS",
 	write: console_write,
 	read : NULL,
@@ -493,7 +493,7 @@ static struct console ser0_console = {
 	next : NULL
 };
 
-static struct console ser1_console = {
+static struct console sercons1 = {
 	name : "ttyS",
 	write: console_write,
 	read : NULL,
@@ -505,7 +505,7 @@ static struct console ser1_console = {
 	cflag : 0,
 	next : NULL
 };
-static struct console ser2_console = {
+static struct console sercons2 = {
 	name : "ttyS",
 	write: console_write,
 	read : NULL,
@@ -517,7 +517,7 @@ static struct console ser2_console = {
 	cflag : 0,
 	next : NULL
 };
-static struct console ser3_console = {
+static struct console sercons3 = {
 	name : "ttyS",
 	write: console_write,
 	read : NULL,
@@ -539,17 +539,17 @@ init_etrax_debug(void)
 	static int first = 1;
 
 	if (!first) {
-		unregister_console(&ser_console);
-		register_console(&ser0_console);
-		register_console(&ser1_console);
-		register_console(&ser2_console);
-		register_console(&ser3_console);
+		unregister_console(&sercons);
+		register_console(&sercons0);
+		register_console(&sercons1);
+		register_console(&sercons2);
+		register_console(&sercons3);
                 init_dummy_console();
 		return 0;
 	}
 
 	first = 0;
-	register_console(&ser_console);
+	register_console(&sercons);
 	start_port(port);
 #ifdef CONFIG_ETRAX_KGDB
 	start_port(kgdb_port);

@@ -22,6 +22,8 @@
 #include "host.h"
 #include "mmc_ops.h"
 
+#define MMC_OPS_TIMEOUT_MS	(10 * 60 * 1000) /* 10 minute timeout */
+
 static const u8 tuning_blk_pattern_4bit[] = {
 	0xff, 0x0f, 0xff, 0x00, 0xff, 0xcc, 0xc3, 0xcc,
 	0xc3, 0x3c, 0xcc, 0xff, 0xfe, 0xff, 0xfe, 0xef,
@@ -88,6 +90,7 @@ int mmc_send_status(struct mmc_card *card, u32 *status)
 
 static int _mmc_select_card(struct mmc_host *host, struct mmc_card *card)
 {
+	int err;
 	struct mmc_command cmd = {0};
 
 	BUG_ON(!host);
@@ -102,7 +105,11 @@ static int _mmc_select_card(struct mmc_host *host, struct mmc_card *card)
 		cmd.flags = MMC_RSP_NONE | MMC_CMD_AC;
 	}
 
-	return mmc_wait_for_cmd(host, &cmd, MMC_CMD_RETRIES);
+	err = mmc_wait_for_cmd(host, &cmd, MMC_CMD_RETRIES);
+	if (err)
+		return err;
+
+	return 0;
 }
 
 int mmc_select_card(struct mmc_card *card)
@@ -190,11 +197,7 @@ int mmc_send_op_cond(struct mmc_host *host, u32 ocr, u32 *rocr)
 		if (err)
 			break;
 
-		/* if we're just probing, do a single pass */
-		if (ocr == 0)
-			break;
-
-		/* otherwise wait until reset completes */
+		/* wait until reset completes */
 		if (mmc_host_is_spi(host)) {
 			if (!(cmd.resp[0] & R1_SPI_IDLE))
 				break;
@@ -206,6 +209,16 @@ int mmc_send_op_cond(struct mmc_host *host, u32 ocr, u32 *rocr)
 		err = -ETIMEDOUT;
 
 		mmc_delay(10);
+
+		/*
+		 * According to eMMC specification v5.1 section 6.4.3, we
+		 * should issue CMD1 repeatedly in the idle state until
+		 * the eMMC is ready. Otherwise some eMMC devices seem to enter
+		 * the inactive mode after mmc_init_card() issued CMD0 when
+		 * the eMMC device is busy.
+		 */
+		if (!ocr && !mmc_host_is_spi(host))
+			cmd.arg = cmd.resp[0] | BIT(30);
 	}
 
 	if (rocr && !mmc_host_is_spi(host))
@@ -237,6 +250,7 @@ int mmc_all_send_cid(struct mmc_host *host, u32 *cid)
 
 int mmc_set_relative_addr(struct mmc_card *card)
 {
+	int err;
 	struct mmc_command cmd = {0};
 
 	BUG_ON(!card);
@@ -246,7 +260,11 @@ int mmc_set_relative_addr(struct mmc_card *card)
 	cmd.arg = card->rca << 16;
 	cmd.flags = MMC_RSP_R1 | MMC_CMD_AC;
 
-	return mmc_wait_for_cmd(card->host, &cmd, MMC_CMD_RETRIES);
+	err = mmc_wait_for_cmd(card->host, &cmd, MMC_CMD_RETRIES);
+	if (err)
+		return err;
+
+	return 0;
 }
 
 static int
@@ -738,7 +756,7 @@ mmc_send_bus_test(struct mmc_card *card, struct mmc_host *host, u8 opcode,
 
 int mmc_bus_test(struct mmc_card *card, u8 bus_width)
 {
-	int width;
+	int err, width;
 
 	if (bus_width == MMC_BUS_WIDTH_8)
 		width = 8;
@@ -754,7 +772,8 @@ int mmc_bus_test(struct mmc_card *card, u8 bus_width)
 	 * is a problem.  This improves chances that the test will work.
 	 */
 	mmc_send_bus_test(card, card->host, MMC_BUS_TEST_W, width);
-	return mmc_send_bus_test(card, card->host, MMC_BUS_TEST_R, width);
+	err = mmc_send_bus_test(card, card->host, MMC_BUS_TEST_R, width);
+	return err;
 }
 
 int mmc_send_hpi_cmd(struct mmc_card *card, u32 *status)

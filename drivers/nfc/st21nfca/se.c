@@ -32,6 +32,8 @@
 #define ST21NFCA_EVT_CONNECTIVITY		0x10
 #define ST21NFCA_EVT_TRANSACTION		0x12
 
+#define ST21NFCA_ESE_HOST_ID			0xc0
+
 #define ST21NFCA_SE_TO_HOT_PLUG			1000
 /* Connectivity pipe only */
 #define ST21NFCA_SE_COUNT_PIPE_UICC		0x01
@@ -310,8 +312,7 @@ int st21nfca_connectivity_event_received(struct nfc_hci_dev *hdev, u8 host,
 
 	switch (event) {
 	case ST21NFCA_EVT_CONNECTIVITY:
-		r = nfc_se_connectivity(hdev->ndev, host);
-	break;
+		break;
 	case ST21NFCA_EVT_TRANSACTION:
 		/*
 		 * According to specification etsi 102 622
@@ -320,8 +321,15 @@ int st21nfca_connectivity_event_received(struct nfc_hci_dev *hdev, u8 host,
 		 * AID		81	5 to 16
 		 * PARAMETERS	82	0 to 255
 		 */
-		if (skb->len < NFC_MIN_AID_LENGTH + 2 &&
+		if (skb->len < NFC_MIN_AID_LENGTH + 2 ||
 		    skb->data[0] != NFC_EVT_TRANSACTION_AID_TAG)
+			return -EPROTO;
+
+		/*
+		 * Buffer should have enough space for at least
+		 * two tag fields + two length fields + aid_len (skb->data[1])
+		 */
+		if (skb->len < skb->data[1] + 4)
 			return -EPROTO;
 
 		transaction = (struct nfc_evt_transaction *)devm_kzalloc(dev,
@@ -330,18 +338,21 @@ int st21nfca_connectivity_event_received(struct nfc_hci_dev *hdev, u8 host,
 		transaction->aid_len = skb->data[1];
 		memcpy(transaction->aid, &skb->data[2],
 		       transaction->aid_len);
-
-		/* Check next byte is PARAMETERS tag (82) */
-		if (skb->data[transaction->aid_len + 2] !=
-		    NFC_EVT_TRANSACTION_PARAMS_TAG)
-			return -EPROTO;
-
 		transaction->params_len = skb->data[transaction->aid_len + 3];
+
+		/* Check next byte is PARAMETERS tag (82) and the length field */
+		if (skb->data[transaction->aid_len + 2] !=
+		    NFC_EVT_TRANSACTION_PARAMS_TAG ||
+		    skb->len < transaction->aid_len + transaction->params_len + 4) {
+			devm_kfree(dev, transaction);
+			return -EPROTO;
+		}
+
 		memcpy(transaction->params, skb->data +
 		       transaction->aid_len + 4, transaction->params_len);
 
 		r = nfc_se_transaction(hdev->ndev, host, transaction);
-	break;
+		break;
 	default:
 		nfc_err(&hdev->ndev->dev, "Unexpected event on connectivity gate\n");
 		return 1;

@@ -323,23 +323,23 @@ static void xtensa_pmu_read(struct perf_event *event)
 
 static int callchain_trace(struct stackframe *frame, void *data)
 {
-	struct perf_callchain_entry_ctx *entry = data;
+	struct perf_callchain_entry *entry = data;
 
 	perf_callchain_store(entry, frame->pc);
 	return 0;
 }
 
-void perf_callchain_kernel(struct perf_callchain_entry_ctx *entry,
+void perf_callchain_kernel(struct perf_callchain_entry *entry,
 			   struct pt_regs *regs)
 {
-	xtensa_backtrace_kernel(regs, entry->max_stack,
+	xtensa_backtrace_kernel(regs, PERF_MAX_STACK_DEPTH,
 				callchain_trace, NULL, entry);
 }
 
-void perf_callchain_user(struct perf_callchain_entry_ctx *entry,
+void perf_callchain_user(struct perf_callchain_entry *entry,
 			 struct pt_regs *regs)
 {
-	xtensa_backtrace_user(regs, entry->max_stack,
+	xtensa_backtrace_user(regs, PERF_MAX_STACK_DEPTH,
 			      callchain_trace, entry);
 }
 
@@ -404,7 +404,7 @@ static struct pmu xtensa_pmu = {
 	.read = xtensa_pmu_read,
 };
 
-static int xtensa_pmu_setup(int cpu)
+static void xtensa_pmu_setup(void)
 {
 	unsigned i;
 
@@ -413,7 +413,21 @@ static int xtensa_pmu_setup(int cpu)
 		set_er(0, XTENSA_PMU_PMCTRL(i));
 		set_er(get_er(XTENSA_PMU_PMSTAT(i)), XTENSA_PMU_PMSTAT(i));
 	}
-	return 0;
+}
+
+static int xtensa_pmu_notifier(struct notifier_block *self,
+			       unsigned long action, void *data)
+{
+	switch (action & ~CPU_TASKS_FROZEN) {
+	case CPU_STARTING:
+		xtensa_pmu_setup();
+		break;
+
+	default:
+		break;
+	}
+
+	return NOTIFY_OK;
 }
 
 static int __init xtensa_pmu_init(void)
@@ -421,13 +435,7 @@ static int __init xtensa_pmu_init(void)
 	int ret;
 	int irq = irq_create_mapping(NULL, XCHAL_PROFILING_INTERRUPT);
 
-	ret = cpuhp_setup_state(CPUHP_AP_PERF_XTENSA_STARTING,
-				"AP_PERF_XTENSA_STARTING", xtensa_pmu_setup,
-				NULL);
-	if (ret) {
-		pr_err("xtensa_pmu: failed to register CPU-hotplug.\n");
-		return ret;
-	}
+	perf_cpu_notifier(xtensa_pmu_notifier);
 #if XTENSA_FAKE_NMI
 	enable_irq(irq);
 #else

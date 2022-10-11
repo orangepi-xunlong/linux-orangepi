@@ -676,7 +676,7 @@ int nci_hci_connect_gate(struct nci_dev *ndev,
 	break;
 	default:
 		pipe = nci_hci_create_pipe(ndev, dest_host, dest_gate, &r);
-		if (pipe == NCI_HCI_INVALID_PIPE)
+		if (pipe < 0)
 			return r;
 		pipe_created = true;
 		break;

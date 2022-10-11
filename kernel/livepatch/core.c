@@ -28,9 +28,6 @@
 #include <linux/list.h>
 #include <linux/kallsyms.h>
 #include <linux/livepatch.h>
-#include <linux/elf.h>
-#include <linux/moduleloader.h>
-#include <asm/cacheflush.h>
 
 /**
  * struct klp_ops - structure for tracking registered ftrace ops structs
@@ -101,12 +98,12 @@ static void klp_find_object_module(struct klp_object *obj)
 	/*
 	 * We do not want to block removal of patched modules and therefore
 	 * we do not take a reference here. The patches are removed by
-	 * klp_module_going() instead.
+	 * a going module handler instead.
 	 */
 	mod = find_module(obj->name);
 	/*
-	 * Do not mess work of klp_module_coming() and klp_module_going().
-	 * Note that the patch might still be needed before klp_module_going()
+	 * Do not mess work of the module coming and going notifiers.
+	 * Note that the patch might still be needed before the going handler
 	 * is called. Module functions can be called even in the GOING state
 	 * until mod->exit() finishes. This is especially important for
 	 * patches that modify semantic of the functions.
@@ -138,8 +135,13 @@ struct klp_find_arg {
 	const char *objname;
 	const char *name;
 	unsigned long addr;
+	/*
+	 * If count == 0, the symbol was not found. If count == 1, a unique
+	 * match was found and addr is set.  If count > 1, there is
+	 * unresolvable ambiguity among "count" number of symbols with the same
+	 * name in the same object.
+	 */
 	unsigned long count;
-	unsigned long pos;
 };
 
 static int klp_find_callback(void *data, const char *name,
@@ -156,48 +158,37 @@ static int klp_find_callback(void *data, const char *name,
 	if (args->objname && strcmp(args->objname, mod->name))
 		return 0;
 
+	/*
+	 * args->addr might be overwritten if another match is found
+	 * but klp_find_object_symbol() handles this and only returns the
+	 * addr if count == 1.
+	 */
 	args->addr = addr;
 	args->count++;
-
-	/*
-	 * Finish the search when the symbol is found for the desired position
-	 * or the position is not defined for a non-unique symbol.
-	 */
-	if ((args->pos && (args->count == args->pos)) ||
-	    (!args->pos && (args->count > 1)))
-		return 1;
 
 	return 0;
 }
 
 static int klp_find_object_symbol(const char *objname, const char *name,
-				  unsigned long sympos, unsigned long *addr)
+				  unsigned long *addr)
 {
 	struct klp_find_arg args = {
 		.objname = objname,
 		.name = name,
 		.addr = 0,
-		.count = 0,
-		.pos = sympos,
+		.count = 0
 	};
 
 	mutex_lock(&module_mutex);
 	kallsyms_on_each_symbol(klp_find_callback, &args);
 	mutex_unlock(&module_mutex);
 
-	/*
-	 * Ensure an address was found. If sympos is 0, ensure symbol is unique;
-	 * otherwise ensure the symbol position count matches sympos.
-	 */
-	if (args.addr == 0)
+	if (args.count == 0)
 		pr_err("symbol '%s' not found in symbol table\n", name);
-	else if (args.count > 1 && sympos == 0) {
-		pr_err("unresolvable ambiguity for symbol '%s' in object '%s'\n",
-		       name, objname);
-	} else if (sympos != args.count && sympos > 0) {
-		pr_err("symbol position %lu for symbol '%s' in object '%s' not found\n",
-		       sympos, name, objname ? objname : "vmlinux");
-	} else {
+	else if (args.count > 1)
+		pr_err("unresolvable ambiguity (%lu matches) on symbol '%s' in object '%s'\n",
+		       args.count, name, objname);
+	else {
 		*addr = args.addr;
 		return 0;
 	}
@@ -206,109 +197,136 @@ static int klp_find_object_symbol(const char *objname, const char *name,
 	return -EINVAL;
 }
 
-static int klp_resolve_symbols(Elf_Shdr *relasec, struct module *pmod)
+struct klp_verify_args {
+	const char *name;
+	const unsigned long addr;
+};
+
+static int klp_verify_callback(void *data, const char *name,
+			       struct module *mod, unsigned long addr)
 {
-	int i, cnt, vmlinux, ret;
-	char objname[MODULE_NAME_LEN];
-	char symname[KSYM_NAME_LEN];
-	char *strtab = pmod->core_kallsyms.strtab;
-	Elf_Rela *relas;
-	Elf_Sym *sym;
-	unsigned long sympos, addr;
+	struct klp_verify_args *args = data;
 
-	/*
-	 * Since the field widths for objname and symname in the sscanf()
-	 * call are hard-coded and correspond to MODULE_NAME_LEN and
-	 * KSYM_NAME_LEN respectively, we must make sure that MODULE_NAME_LEN
-	 * and KSYM_NAME_LEN have the values we expect them to have.
-	 *
-	 * Because the value of MODULE_NAME_LEN can differ among architectures,
-	 * we use the smallest/strictest upper bound possible (56, based on
-	 * the current definition of MODULE_NAME_LEN) to prevent overflows.
-	 */
-	BUILD_BUG_ON(MODULE_NAME_LEN < 56 || KSYM_NAME_LEN != 128);
+	if (!mod &&
+	    !strcmp(args->name, name) &&
+	    args->addr == addr)
+		return 1;
 
-	relas = (Elf_Rela *) relasec->sh_addr;
-	/* For each rela in this klp relocation section */
-	for (i = 0; i < relasec->sh_size / sizeof(Elf_Rela); i++) {
-		sym = pmod->core_kallsyms.symtab + ELF_R_SYM(relas[i].r_info);
-		if (sym->st_shndx != SHN_LIVEPATCH) {
-			pr_err("symbol %s is not marked as a livepatch symbol",
-			       strtab + sym->st_name);
-			return -EINVAL;
-		}
+	return 0;
+}
 
-		/* Format: .klp.sym.objname.symname,sympos */
-		cnt = sscanf(strtab + sym->st_name,
-			     ".klp.sym.%55[^.].%127[^,],%lu",
-			     objname, symname, &sympos);
-		if (cnt != 3) {
-			pr_err("symbol %s has an incorrectly formatted name",
-			       strtab + sym->st_name);
-			return -EINVAL;
-		}
+static int klp_verify_vmlinux_symbol(const char *name, unsigned long addr)
+{
+	struct klp_verify_args args = {
+		.name = name,
+		.addr = addr,
+	};
+	int ret;
 
-		/* klp_find_object_symbol() treats a NULL objname as vmlinux */
-		vmlinux = !strcmp(objname, "vmlinux");
-		ret = klp_find_object_symbol(vmlinux ? NULL : objname,
-					     symname, sympos, &addr);
-		if (ret)
-			return ret;
+	mutex_lock(&module_mutex);
+	ret = kallsyms_on_each_symbol(klp_verify_callback, &args);
+	mutex_unlock(&module_mutex);
 
-		sym->st_value = addr;
+	if (!ret) {
+		pr_err("symbol '%s' not found at specified address 0x%016lx, kernel mismatch?\n",
+			name, addr);
+		return -EINVAL;
 	}
 
 	return 0;
 }
 
+static int klp_find_verify_func_addr(struct klp_object *obj,
+				     struct klp_func *func)
+{
+	int ret;
+
+#if defined(CONFIG_RANDOMIZE_BASE)
+	/* If KASLR has been enabled, adjust old_addr accordingly */
+	if (kaslr_enabled() && func->old_addr)
+		func->old_addr += kaslr_offset();
+#endif
+
+	if (!func->old_addr || klp_is_module(obj))
+		ret = klp_find_object_symbol(obj->name, func->old_name,
+					     &func->old_addr);
+	else
+		ret = klp_verify_vmlinux_symbol(func->old_name,
+						func->old_addr);
+
+	return ret;
+}
+
+/*
+ * external symbols are located outside the parent object (where the parent
+ * object is either vmlinux or the kmod being patched).
+ */
+static int klp_find_external_symbol(struct module *pmod, const char *name,
+				    unsigned long *addr)
+{
+	const struct kernel_symbol *sym;
+
+	/* first, check if it's an exported symbol */
+	preempt_disable();
+	sym = find_symbol(name, NULL, NULL, true, true);
+	if (sym) {
+		*addr = sym->value;
+		preempt_enable();
+		return 0;
+	}
+	preempt_enable();
+
+	/* otherwise check if it's in another .o within the patch module */
+	return klp_find_object_symbol(pmod->name, name, addr);
+}
+
 static int klp_write_object_relocations(struct module *pmod,
 					struct klp_object *obj)
 {
-	int i, cnt, ret = 0;
-	const char *objname, *secname;
-	char sec_objname[MODULE_NAME_LEN];
-	Elf_Shdr *sec;
+	int ret;
+	struct klp_reloc *reloc;
 
 	if (WARN_ON(!klp_is_object_loaded(obj)))
 		return -EINVAL;
 
-	objname = klp_is_module(obj) ? obj->name : "vmlinux";
+	if (WARN_ON(!obj->relocs))
+		return -EINVAL;
 
-	/* For each klp relocation section */
-	for (i = 1; i < pmod->klp_info->hdr.e_shnum; i++) {
-		sec = pmod->klp_info->sechdrs + i;
-		secname = pmod->klp_info->secstrings + sec->sh_name;
-		if (!(sec->sh_flags & SHF_RELA_LIVEPATCH))
-			continue;
+	for (reloc = obj->relocs; reloc->name; reloc++) {
+		if (!klp_is_module(obj)) {
 
-		/*
-		 * Format: .klp.rela.sec_objname.section_name
-		 * See comment in klp_resolve_symbols() for an explanation
-		 * of the selected field width value.
-		 */
-		cnt = sscanf(secname, ".klp.rela.%55[^.]", sec_objname);
-		if (cnt != 1) {
-			pr_err("section %s has an incorrectly formatted name",
-			       secname);
-			ret = -EINVAL;
-			break;
+#if defined(CONFIG_RANDOMIZE_BASE)
+			/* If KASLR has been enabled, adjust old value accordingly */
+			if (kaslr_enabled())
+				reloc->val += kaslr_offset();
+#endif
+			ret = klp_verify_vmlinux_symbol(reloc->name,
+							reloc->val);
+			if (ret)
+				return ret;
+		} else {
+			/* module, reloc->val needs to be discovered */
+			if (reloc->external)
+				ret = klp_find_external_symbol(pmod,
+							       reloc->name,
+							       &reloc->val);
+			else
+				ret = klp_find_object_symbol(obj->mod->name,
+							     reloc->name,
+							     &reloc->val);
+			if (ret)
+				return ret;
 		}
-
-		if (strcmp(objname, sec_objname))
-			continue;
-
-		ret = klp_resolve_symbols(sec, pmod);
-		if (ret)
-			break;
-
-		ret = apply_relocate_add(pmod->klp_info->sechdrs,
-					 pmod->core_kallsyms.strtab,
-					 pmod->klp_info->symndx, i, pmod);
-		if (ret)
-			break;
+		ret = klp_write_module_reloc(pmod, reloc->type, reloc->loc,
+					     reloc->val + reloc->addend);
+		if (ret) {
+			pr_err("relocation failed for symbol '%s' at 0x%016lx (%d)\n",
+			       reloc->name, reloc->val, ret);
+			return ret;
+		}
 	}
 
-	return ret;
+	return 0;
 }
 
 static void notrace klp_ftrace_handler(unsigned long ip,
@@ -332,19 +350,6 @@ unlock:
 	rcu_read_unlock();
 }
 
-/*
- * Convert a function address into the appropriate ftrace location.
- *
- * Usually this is just the address of the function, but on some architectures
- * it's more complicated so allow them to provide a custom behaviour.
- */
-#ifndef klp_get_ftrace_location
-static unsigned long klp_get_ftrace_location(unsigned long faddr)
-{
-	return faddr;
-}
-#endif
-
 static void klp_disable_func(struct klp_func *func)
 {
 	struct klp_ops *ops;
@@ -359,14 +364,8 @@ static void klp_disable_func(struct klp_func *func)
 		return;
 
 	if (list_is_singular(&ops->func_stack)) {
-		unsigned long ftrace_loc;
-
-		ftrace_loc = klp_get_ftrace_location(func->old_addr);
-		if (WARN_ON(!ftrace_loc))
-			return;
-
 		WARN_ON(unregister_ftrace_function(&ops->fops));
-		WARN_ON(ftrace_set_filter_ip(&ops->fops, ftrace_loc, 1, 0));
+		WARN_ON(ftrace_set_filter_ip(&ops->fops, func->old_addr, 1, 0));
 
 		list_del_rcu(&func->stack_node);
 		list_del(&ops->node);
@@ -391,15 +390,6 @@ static int klp_enable_func(struct klp_func *func)
 
 	ops = klp_find_ops(func->old_addr);
 	if (!ops) {
-		unsigned long ftrace_loc;
-
-		ftrace_loc = klp_get_ftrace_location(func->old_addr);
-		if (!ftrace_loc) {
-			pr_err("failed to find location for function '%s'\n",
-				func->old_name);
-			return -EINVAL;
-		}
-
 		ops = kzalloc(sizeof(*ops), GFP_KERNEL);
 		if (!ops)
 			return -ENOMEM;
@@ -414,7 +404,7 @@ static int klp_enable_func(struct klp_func *func)
 		INIT_LIST_HEAD(&ops->func_stack);
 		list_add_rcu(&func->stack_node, &ops->func_stack);
 
-		ret = ftrace_set_filter_ip(&ops->fops, ftrace_loc, 0, 0);
+		ret = ftrace_set_filter_ip(&ops->fops, func->old_addr, 0, 0);
 		if (ret) {
 			pr_err("failed to set ftrace filter for function '%s' (%d)\n",
 			       func->old_name, ret);
@@ -425,7 +415,7 @@ static int klp_enable_func(struct klp_func *func)
 		if (ret) {
 			pr_err("failed to register ftrace handler for function '%s' (%d)\n",
 			       func->old_name, ret);
-			ftrace_set_filter_ip(&ops->fops, ftrace_loc, 1, 0);
+			ftrace_set_filter_ip(&ops->fops, func->old_addr, 1, 0);
 			goto err;
 		}
 
@@ -545,6 +535,9 @@ static int __klp_enable_patch(struct klp_patch *patch)
 	    list_prev_entry(patch, list)->state == KLP_DISABLED)
 		return -EBUSY;
 
+	pr_notice_once("tainting kernel with TAINT_LIVEPATCH\n");
+	add_taint(TAINT_LIVEPATCH, LOCKDEP_STILL_OK);
+
 	pr_notice("enabling patch '%s'\n", patch->mod->name);
 
 	klp_for_each_object(patch, obj) {
@@ -600,7 +593,7 @@ EXPORT_SYMBOL_GPL(klp_enable_patch);
  * /sys/kernel/livepatch/<patch>
  * /sys/kernel/livepatch/<patch>/enabled
  * /sys/kernel/livepatch/<patch>/<object>
- * /sys/kernel/livepatch/<patch>/<object>/<function,sympos>
+ * /sys/kernel/livepatch/<patch>/<object>/<func>
  */
 
 static ssize_t enabled_store(struct kobject *kobj, struct kobj_attribute *attr,
@@ -742,26 +735,11 @@ static void klp_free_patch(struct klp_patch *patch)
 
 static int klp_init_func(struct klp_object *obj, struct klp_func *func)
 {
-	if (!func->old_name || !func->new_func)
-		return -EINVAL;
-
 	INIT_LIST_HEAD(&func->stack_node);
 	func->state = KLP_DISABLED;
 
-	/* The format for the sysfs directory is <function,sympos> where sympos
-	 * is the nth occurrence of this symbol in kallsyms for the patched
-	 * object. If the user selects 0 for old_sympos, then 1 will be used
-	 * since a unique symbol will be the first occurrence.
-	 */
 	return kobject_init_and_add(&func->kobj, &klp_ktype_func,
-				    &obj->kobj, "%s,%lu", func->old_name,
-				    func->old_sympos ? func->old_sympos : 1);
-}
-
-/* Arches may override this to finish any remaining arch-specific tasks */
-void __weak arch_klp_init_object_loaded(struct klp_patch *patch,
-					struct klp_object *obj)
-{
+				    &obj->kobj, "%s", func->old_name);
 }
 
 /* parts of the initialization that is done only when the object is loaded */
@@ -771,20 +749,14 @@ static int klp_init_object_loaded(struct klp_patch *patch,
 	struct klp_func *func;
 	int ret;
 
-	module_disable_ro(patch->mod);
-	ret = klp_write_object_relocations(patch->mod, obj);
-	if (ret) {
-		module_enable_ro(patch->mod, true);
-		return ret;
+	if (obj->relocs) {
+		ret = klp_write_object_relocations(patch->mod, obj);
+		if (ret)
+			return ret;
 	}
 
-	arch_klp_init_object_loaded(patch, obj);
-	module_enable_ro(patch->mod, true);
-
 	klp_for_each_func(obj, func) {
-		ret = klp_find_object_symbol(obj->name, func->old_name,
-					     func->old_sympos,
-					     &func->old_addr);
+		ret = klp_find_verify_func_addr(obj, func);
 		if (ret)
 			return ret;
 	}
@@ -914,17 +886,11 @@ int klp_register_patch(struct klp_patch *patch)
 {
 	int ret;
 
-	if (!patch || !patch->mod)
-		return -EINVAL;
-
-	if (!is_livepatch_module(patch->mod)) {
-		pr_err("module %s is not marked as a livepatch module",
-		       patch->mod->name);
-		return -EINVAL;
-	}
-
 	if (!klp_initialized())
 		return -ENODEV;
+
+	if (!patch || !patch->mod)
+		return -EINVAL;
 
 	/*
 	 * A reference is taken on the patch module to prevent it from being
@@ -944,49 +910,88 @@ int klp_register_patch(struct klp_patch *patch)
 }
 EXPORT_SYMBOL_GPL(klp_register_patch);
 
-int klp_module_coming(struct module *mod)
+static int klp_module_notify_coming(struct klp_patch *patch,
+				     struct klp_object *obj)
+{
+	struct module *pmod = patch->mod;
+	struct module *mod = obj->mod;
+	int ret;
+
+	ret = klp_init_object_loaded(patch, obj);
+	if (ret) {
+		pr_warn("failed to initialize patch '%s' for module '%s' (%d)\n",
+			pmod->name, mod->name, ret);
+		return ret;
+	}
+
+	if (patch->state == KLP_DISABLED)
+		return 0;
+
+	pr_notice("applying patch '%s' to loading module '%s'\n",
+		  pmod->name, mod->name);
+
+	ret = klp_enable_object(obj);
+	if (ret)
+		pr_warn("failed to apply patch '%s' to module '%s' (%d)\n",
+			pmod->name, mod->name, ret);
+	return ret;
+}
+
+static void klp_module_notify_going(struct klp_patch *patch,
+				    struct klp_object *obj)
+{
+	struct module *pmod = patch->mod;
+	struct module *mod = obj->mod;
+
+	if (patch->state == KLP_DISABLED)
+		goto disabled;
+
+	pr_notice("reverting patch '%s' on unloading module '%s'\n",
+		  pmod->name, mod->name);
+
+	klp_disable_object(obj);
+
+disabled:
+	klp_free_object_loaded(obj);
+}
+
+static int klp_module_notify(struct notifier_block *nb, unsigned long action,
+			     void *data)
 {
 	int ret;
+	struct module *mod = data;
 	struct klp_patch *patch;
 	struct klp_object *obj;
 
-	if (WARN_ON(mod->state != MODULE_STATE_COMING))
-		return -EINVAL;
+	if (action != MODULE_STATE_COMING && action != MODULE_STATE_GOING)
+		return 0;
 
 	mutex_lock(&klp_mutex);
+
 	/*
-	 * Each module has to know that klp_module_coming()
-	 * has been called. We never know what module will
-	 * get patched by a new patch.
+	 * Each module has to know that the notifier has been called.
+	 * We never know what module will get patched by a new patch.
 	 */
-	mod->klp_alive = true;
+	if (action == MODULE_STATE_COMING)
+		mod->klp_alive = true;
+	else /* MODULE_STATE_GOING */
+		mod->klp_alive = false;
 
 	list_for_each_entry(patch, &klp_patches, list) {
 		klp_for_each_object(patch, obj) {
 			if (!klp_is_module(obj) || strcmp(obj->name, mod->name))
 				continue;
 
-			obj->mod = mod;
-
-			ret = klp_init_object_loaded(patch, obj);
-			if (ret) {
-				pr_warn("failed to initialize patch '%s' for module '%s' (%d)\n",
-					patch->mod->name, obj->mod->name, ret);
-				goto err;
-			}
-
-			if (patch->state == KLP_DISABLED)
-				break;
-
-			pr_notice("applying patch '%s' to loading module '%s'\n",
-				  patch->mod->name, obj->mod->name);
-
-			ret = klp_enable_object(obj);
-			if (ret) {
-				pr_warn("failed to apply patch '%s' to module '%s' (%d)\n",
-					patch->mod->name, obj->mod->name, ret);
-				goto err;
-			}
+			if (action == MODULE_STATE_COMING) {
+				obj->mod = mod;
+				ret = klp_module_notify_coming(patch, obj);
+				if (ret) {
+					obj->mod = NULL;
+					pr_warn("patch '%s' is in an inconsistent state!\n",
+						patch->mod->name);
+				}
+			} else /* MODULE_STATE_GOING */
+				klp_module_notify_going(patch, obj);
 
 			break;
 		}
@@ -995,56 +1000,12 @@ int klp_module_coming(struct module *mod)
 	mutex_unlock(&klp_mutex);
 
 	return 0;
-
-err:
-	/*
-	 * If a patch is unsuccessfully applied, return
-	 * error to the module loader.
-	 */
-	pr_warn("patch '%s' failed for module '%s', refusing to load module '%s'\n",
-		patch->mod->name, obj->mod->name, obj->mod->name);
-	mod->klp_alive = false;
-	klp_free_object_loaded(obj);
-	mutex_unlock(&klp_mutex);
-
-	return ret;
 }
 
-void klp_module_going(struct module *mod)
-{
-	struct klp_patch *patch;
-	struct klp_object *obj;
-
-	if (WARN_ON(mod->state != MODULE_STATE_GOING &&
-		    mod->state != MODULE_STATE_COMING))
-		return;
-
-	mutex_lock(&klp_mutex);
-	/*
-	 * Each module has to know that klp_module_going()
-	 * has been called. We never know what module will
-	 * get patched by a new patch.
-	 */
-	mod->klp_alive = false;
-
-	list_for_each_entry(patch, &klp_patches, list) {
-		klp_for_each_object(patch, obj) {
-			if (!klp_is_module(obj) || strcmp(obj->name, mod->name))
-				continue;
-
-			if (patch->state != KLP_DISABLED) {
-				pr_notice("reverting patch '%s' on unloading module '%s'\n",
-					  patch->mod->name, obj->mod->name);
-				klp_disable_object(obj);
-			}
-
-			klp_free_object_loaded(obj);
-			break;
-		}
-	}
-
-	mutex_unlock(&klp_mutex);
-}
+static struct notifier_block klp_module_nb = {
+	.notifier_call = klp_module_notify,
+	.priority = INT_MIN+1, /* called late but before ftrace notifier */
+};
 
 static int __init klp_init(void)
 {
@@ -1056,11 +1017,21 @@ static int __init klp_init(void)
 		return -EINVAL;
 	}
 
+	ret = register_module_notifier(&klp_module_nb);
+	if (ret)
+		return ret;
+
 	klp_root_kobj = kobject_create_and_add("livepatch", kernel_kobj);
-	if (!klp_root_kobj)
-		return -ENOMEM;
+	if (!klp_root_kobj) {
+		ret = -ENOMEM;
+		goto unregister;
+	}
 
 	return 0;
+
+unregister:
+	unregister_module_notifier(&klp_module_nb);
+	return ret;
 }
 
 module_init(klp_init);

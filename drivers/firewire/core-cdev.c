@@ -221,7 +221,7 @@ struct inbound_phy_packet_event {
 #ifdef CONFIG_COMPAT
 static void __user *u64_to_uptr(u64 value)
 {
-	if (in_compat_syscall())
+	if (is_compat_task())
 		return compat_ptr(value);
 	else
 		return (void __user *)(unsigned long)value;
@@ -229,7 +229,7 @@ static void __user *u64_to_uptr(u64 value)
 
 static u64 uptr_to_u64(void __user *ptr)
 {
-	if (in_compat_syscall())
+	if (is_compat_task())
 		return ptr_to_compat(ptr);
 	else
 		return (u64)(unsigned long)ptr;

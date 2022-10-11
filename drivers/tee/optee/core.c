@@ -26,7 +26,6 @@
 #include <linux/tee_drv.h>
 #include <linux/types.h>
 #include <linux/uaccess.h>
-#include "optee_bench.h"
 #include "optee_private.h"
 #include "optee_smc.h"
 #include "shm_pool.h"
@@ -529,30 +528,6 @@ static optee_invoke_fn *get_invoke_func(struct device_node *np)
 	return ERR_PTR(-EINVAL);
 }
 
-int  optee_probe_drm_configure(unsigned long *drm_base,
-	size_t *drm_size, unsigned long  *tee_base)
-{
-	struct arm_smccc_res res;
-
-	optee_smccc_smc(OPTEE_SMC_GET_DRM_INFO, 0, 0, 0, 0, 0, 0, 0, &res);
-	if (res.a0  != OPTEE_SMC_RETURN_OK) {
-		printk("drm config service not available: %X", (uint32_t)res.a0);
-		return -EINVAL;
-	}
-
-	*drm_base = res.a1;
-	*drm_size = res.a2;
-	*tee_base = res.a3;
-
-	printk("drm_base=0x%x\n", (uint32_t)*drm_base);
-	printk("drm_size=0x%x\n", (uint32_t)*drm_size);
-	printk("tee_base=0x%x\n", (uint32_t)*tee_base);
-
-	return 0;
-}
-
-
-
 static struct optee *optee_probe(struct device_node *np)
 {
 	optee_invoke_fn *invoke_fn;
@@ -709,8 +684,6 @@ static int __init optee_driver_init(void)
 
 	optee_svc = optee;
 
-	optee_bm_enable();
-
 	return 0;
 }
 module_init(optee_driver_init);
@@ -722,8 +695,6 @@ static void __exit optee_driver_exit(void)
 	optee_svc = NULL;
 	if (optee)
 		optee_remove(optee);
-
-	optee_bm_disable();
 }
 module_exit(optee_driver_exit);
 

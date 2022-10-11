@@ -14,8 +14,7 @@
 
 #include <linux/debugfs.h>
 #include <linux/mm.h>
-#include <linux/init.h>
-#include <linux/sched.h>
+#include <linux/module.h>
 #include <linux/seq_file.h>
 
 #include <asm/pgtable.h>
@@ -73,9 +72,9 @@ static struct addr_marker address_markers[] = {
 	{ 0, "User Space" },
 #ifdef CONFIG_X86_64
 	{ 0x8000000000000000UL, "Kernel Space" },
-	{ 0/* PAGE_OFFSET */,   "Low Kernel Mapping" },
-	{ 0/* VMALLOC_START */, "vmalloc() Area" },
-	{ 0/* VMEMMAP_START */, "Vmemmap" },
+	{ PAGE_OFFSET,		"Low Kernel Mapping" },
+	{ VMALLOC_START,        "vmalloc() Area" },
+	{ VMEMMAP_START,        "Vmemmap" },
 # ifdef CONFIG_X86_ESPFIX64
 	{ ESPFIX_BASE_ADDR,	"ESPfix Area", 16 },
 # endif
@@ -359,19 +358,20 @@ static void walk_pud_level(struct seq_file *m, struct pg_state *st, pgd_t addr,
 #define pgd_none(a)  pud_none(__pud(pgd_val(a)))
 #endif
 
+#ifdef CONFIG_X86_64
 static inline bool is_hypervisor_range(int idx)
 {
-#ifdef CONFIG_X86_64
 	/*
 	 * ffff800000000000 - ffff87ffffffffff is reserved for
 	 * the hypervisor.
 	 */
-	return	(idx >= pgd_index(__PAGE_OFFSET) - 16) &&
-		(idx <  pgd_index(__PAGE_OFFSET));
-#else
-	return false;
-#endif
+	return paravirt_enabled() &&
+		(idx >= pgd_index(__PAGE_OFFSET) - 16) &&
+		(idx < pgd_index(__PAGE_OFFSET));
 }
+#else
+static inline bool is_hypervisor_range(int idx) { return false; }
+#endif
 
 static void ptdump_walk_pgd_level_core(struct seq_file *m, pgd_t *pgd,
 				       bool checkwx)
@@ -407,7 +407,6 @@ static void ptdump_walk_pgd_level_core(struct seq_file *m, pgd_t *pgd,
 		} else
 			note_page(m, &st, __pgprot(0), 1);
 
-		cond_resched();
 		start++;
 	}
 
@@ -427,25 +426,40 @@ void ptdump_walk_pgd_level(struct seq_file *m, pgd_t *pgd)
 {
 	ptdump_walk_pgd_level_core(m, pgd, false);
 }
-EXPORT_SYMBOL_GPL(ptdump_walk_pgd_level);
 
 void ptdump_walk_pgd_level_checkwx(void)
 {
 	ptdump_walk_pgd_level_core(NULL, NULL, true);
 }
 
-static int __init pt_dump_init(void)
+#ifdef CONFIG_X86_PTDUMP
+static int ptdump_show(struct seq_file *m, void *v)
 {
-	/*
-	 * Various markers are not compile-time constants, so assign them
-	 * here.
-	 */
-#ifdef CONFIG_X86_64
-	address_markers[LOW_KERNEL_NR].start_address = PAGE_OFFSET;
-	address_markers[VMALLOC_START_NR].start_address = VMALLOC_START;
-	address_markers[VMEMMAP_START_NR].start_address = VMEMMAP_START;
+	ptdump_walk_pgd_level(m, NULL);
+	return 0;
+}
+
+static int ptdump_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, ptdump_show, NULL);
+}
+
+static const struct file_operations ptdump_fops = {
+	.open		= ptdump_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
 #endif
+
+static int pt_dump_init(void)
+{
+#ifdef CONFIG_X86_PTDUMP
+	struct dentry *pe;
+#endif
+
 #ifdef CONFIG_X86_32
+	/* Not a compile-time constant on x86-32 */
 	address_markers[VMALLOC_START_NR].start_address = VMALLOC_START;
 	address_markers[VMALLOC_END_NR].start_address = VMALLOC_END;
 # ifdef CONFIG_HIGHMEM
@@ -454,6 +468,17 @@ static int __init pt_dump_init(void)
 	address_markers[FIXADDR_START_NR].start_address = FIXADDR_START;
 #endif
 
+#ifdef CONFIG_X86_PTDUMP
+	pe = debugfs_create_file("kernel_page_tables", 0600, NULL, NULL,
+				 &ptdump_fops);
+	if (!pe)
+		return -ENOMEM;
+#endif
+
 	return 0;
 }
+
 __initcall(pt_dump_init);
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Arjan van de Ven <arjan@linux.intel.com>");
+MODULE_DESCRIPTION("Kernel debugging helper that dumps pagetables");

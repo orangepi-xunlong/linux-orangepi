@@ -181,7 +181,7 @@ static netdev_tx_t irlan_eth_xmit(struct sk_buff *skb,
 		skb = new_skb;
 	}
 
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 
 	len = skb->len;
 	/* Now queue the packet in the transport layer */

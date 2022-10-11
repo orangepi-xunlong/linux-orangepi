@@ -23,7 +23,6 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
-#include <linux/compat.h>
 #include <sound/core.h>
 #include <sound/minors.h>
 #include <sound/initval.h>
@@ -188,11 +187,7 @@ odev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 }
 
 #ifdef CONFIG_COMPAT
-static long odev_ioctl_compat(struct file *file, unsigned int cmd,
-			      unsigned long arg)
-{
-	return odev_ioctl(file, cmd, (unsigned long)compat_ptr(arg));
-}
+#define odev_ioctl_compat	odev_ioctl
 #else
 #define odev_ioctl_compat	NULL
 #endif

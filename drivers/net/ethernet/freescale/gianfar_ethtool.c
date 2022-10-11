@@ -184,6 +184,40 @@ static void gfar_gdrvinfo(struct net_device *dev,
 	strlcpy(drvinfo->bus_info, "N/A", sizeof(drvinfo->bus_info));
 }
 
+
+static int gfar_ssettings(struct net_device *dev, struct ethtool_cmd *cmd)
+{
+	struct gfar_private *priv = netdev_priv(dev);
+	struct phy_device *phydev = priv->phydev;
+
+	if (NULL == phydev)
+		return -ENODEV;
+
+	return phy_ethtool_sset(phydev, cmd);
+}
+
+
+/* Return the current settings in the ethtool_cmd structure */
+static int gfar_gsettings(struct net_device *dev, struct ethtool_cmd *cmd)
+{
+	struct gfar_private *priv = netdev_priv(dev);
+	struct phy_device *phydev = priv->phydev;
+	struct gfar_priv_rx_q *rx_queue = NULL;
+	struct gfar_priv_tx_q *tx_queue = NULL;
+
+	if (NULL == phydev)
+		return -ENODEV;
+	tx_queue = priv->tx_queue[0];
+	rx_queue = priv->rx_queue[0];
+
+	/* etsec-1.7 and older versions have only one txic
+	 * and rxic regs although they support multiple queues */
+	cmd->maxtxpkt = get_icft_value(tx_queue->txic);
+	cmd->maxrxpkt = get_icft_value(rx_queue->rxic);
+
+	return phy_ethtool_gset(phydev, cmd);
+}
+
 /* Return the length of the register structure */
 static int gfar_reglen(struct net_device *dev)
 {
@@ -208,12 +242,10 @@ static void gfar_get_regs(struct net_device *dev, struct ethtool_regs *regs,
 static unsigned int gfar_usecs2ticks(struct gfar_private *priv,
 				     unsigned int usecs)
 {
-	struct net_device *ndev = priv->ndev;
-	struct phy_device *phydev = ndev->phydev;
 	unsigned int count;
 
 	/* The timer is different, depending on the interface speed */
-	switch (phydev->speed) {
+	switch (priv->phydev->speed) {
 	case SPEED_1000:
 		count = GFAR_GBIT_TIME;
 		break;
@@ -235,12 +267,10 @@ static unsigned int gfar_usecs2ticks(struct gfar_private *priv,
 static unsigned int gfar_ticks2usecs(struct gfar_private *priv,
 				     unsigned int ticks)
 {
-	struct net_device *ndev = priv->ndev;
-	struct phy_device *phydev = ndev->phydev;
 	unsigned int count;
 
 	/* The timer is different, depending on the interface speed */
-	switch (phydev->speed) {
+	switch (priv->phydev->speed) {
 	case SPEED_1000:
 		count = GFAR_GBIT_TIME;
 		break;
@@ -274,7 +304,7 @@ static int gfar_gcoalesce(struct net_device *dev,
 	if (!(priv->device_flags & FSL_GIANFAR_DEV_HAS_COALESCE))
 		return -EOPNOTSUPP;
 
-	if (!dev->phydev)
+	if (NULL == priv->phydev)
 		return -ENODEV;
 
 	rx_queue = priv->rx_queue[0];
@@ -335,7 +365,7 @@ static int gfar_scoalesce(struct net_device *dev,
 	if (!(priv->device_flags & FSL_GIANFAR_DEV_HAS_COALESCE))
 		return -EOPNOTSUPP;
 
-	if (!dev->phydev)
+	if (NULL == priv->phydev)
 		return -ENODEV;
 
 	/* Check the bounds of the values */
@@ -499,7 +529,7 @@ static int gfar_spauseparam(struct net_device *dev,
 			    struct ethtool_pauseparam *epause)
 {
 	struct gfar_private *priv = netdev_priv(dev);
-	struct phy_device *phydev = dev->phydev;
+	struct phy_device *phydev = priv->phydev;
 	struct gfar __iomem *regs = priv->gfargrp[0].regs;
 	u32 oldadv, newadv;
 
@@ -1535,6 +1565,8 @@ static int gfar_get_ts_info(struct net_device *dev,
 }
 
 const struct ethtool_ops gfar_ethtool_ops = {
+	.get_settings = gfar_gsettings,
+	.set_settings = gfar_ssettings,
 	.get_drvinfo = gfar_gdrvinfo,
 	.get_regs_len = gfar_reglen,
 	.get_regs = gfar_get_regs,
@@ -1557,6 +1589,4 @@ const struct ethtool_ops gfar_ethtool_ops = {
 	.set_rxnfc = gfar_set_nfc,
 	.get_rxnfc = gfar_get_nfc,
 	.get_ts_info = gfar_get_ts_info,
-	.get_link_ksettings = phy_ethtool_get_link_ksettings,
-	.set_link_ksettings = phy_ethtool_set_link_ksettings,
 };

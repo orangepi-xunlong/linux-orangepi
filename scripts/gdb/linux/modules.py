@@ -13,7 +13,7 @@
 
 import gdb
 
-from linux import cpus, utils, lists
+from linux import cpus, utils
 
 
 module_type = utils.CachedType("struct module")
@@ -21,14 +21,14 @@ module_type = utils.CachedType("struct module")
 
 def module_list():
     global module_type
-    modules = utils.gdb_eval_or_none("modules")
-    if modules is None:
-        return
-
     module_ptr_type = module_type.get_type().pointer()
+    modules = gdb.parse_and_eval("modules")
+    entry = modules['next']
+    end_of_list = modules.address
 
-    for module in lists.list_for_each_entry(modules, module_ptr_type, "list"):
-        yield module
+    while entry != end_of_list:
+        yield utils.container_of(entry, module_ptr_type, "list")
+        entry = entry['next']
 
 
 def find_module_by_name(name):
@@ -73,22 +73,23 @@ class LxLsmod(gdb.Command):
                 "        " if utils.get_long_type().sizeof == 8 else ""))
 
         for module in module_list():
-            layout = module['core_layout']
             gdb.write("{address} {name:<19} {size:>8}  {ref}".format(
-                address=str(layout['base']).split()[0],
+                address=str(module['module_core']).split()[0],
                 name=module['name'].string(),
-                size=str(layout['size']),
-                ref=str(module['refcnt']['counter'] - 1)))
+                size=str(module['core_size']),
+                ref=str(module['refcnt']['counter'])))
 
+            source_list = module['source_list']
             t = self._module_use_type.get_type().pointer()
+            entry = source_list['next']
             first = True
-            sources = module['source_list']
-            for use in lists.list_for_each_entry(sources, t, "source_list"):
+            while entry != source_list.address:
+                use = utils.container_of(entry, t, "source_list")
                 gdb.write("{separator}{name}".format(
                     separator=" " if first else ",",
                     name=use['source']['name'].string()))
                 first = False
-
+                entry = entry['next']
             gdb.write("\n")
 
 

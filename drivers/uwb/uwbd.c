@@ -279,6 +279,7 @@ static int uwbd(void *param)
 			HZ);
 		if (should_stop)
 			break;
+		try_to_freeze();
 
 		spin_lock_irqsave(&rc->uwbd.event_list_lock, flags);
 		if (!list_empty(&rc->uwbd.event_list)) {

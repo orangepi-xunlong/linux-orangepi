@@ -31,7 +31,6 @@
 #include <linux/cpu.h>
 #include <linux/notifier.h>
 #include <linux/topology.h>
-#include <linux/profile.h>
 
 #include <asm/ptrace.h>
 #include <linux/atomic.h>
@@ -54,8 +53,6 @@
 #include <asm/vdso.h>
 #include <asm/debug.h>
 #include <asm/kexec.h>
-#include <asm/asm-prototypes.h>
-#include <asm/cpu_has_feature.h>
 
 #ifdef DEBUG
 #include <asm/udbg.h>
@@ -209,7 +206,7 @@ int smp_request_message_ipi(int virq, int msg)
 
 #ifdef CONFIG_PPC_SMP_MUXED_IPI
 struct cpu_messages {
-	long messages;			/* current messages */
+	int messages;			/* current messages */
 	unsigned long data;		/* data for cause ipi */
 };
 static DEFINE_PER_CPU_SHARED_ALIGNED(struct cpu_messages, ipi_message);
@@ -221,7 +218,7 @@ void smp_muxed_ipi_set_data(int cpu, unsigned long data)
 	info->data = data;
 }
 
-void smp_muxed_ipi_set_message(int cpu, int msg)
+void smp_muxed_ipi_message_pass(int cpu, int msg)
 {
 	struct cpu_messages *info = &per_cpu(ipi_message, cpu);
 	char *message = (char *)&info->messages;
@@ -231,13 +228,6 @@ void smp_muxed_ipi_set_message(int cpu, int msg)
 	 */
 	smp_mb();
 	message[msg] = 1;
-}
-
-void smp_muxed_ipi_message_pass(int cpu, int msg)
-{
-	struct cpu_messages *info = &per_cpu(ipi_message, cpu);
-
-	smp_muxed_ipi_set_message(cpu, msg);
 	/*
 	 * cause_ipi functions are required to include a full barrier
 	 * before doing whatever causes the IPI.
@@ -246,31 +236,20 @@ void smp_muxed_ipi_message_pass(int cpu, int msg)
 }
 
 #ifdef __BIG_ENDIAN__
-#define IPI_MESSAGE(A) (1uL << ((BITS_PER_LONG - 8) - 8 * (A)))
+#define IPI_MESSAGE(A) (1 << (24 - 8 * (A)))
 #else
-#define IPI_MESSAGE(A) (1uL << (8 * (A)))
+#define IPI_MESSAGE(A) (1 << (8 * (A)))
 #endif
 
 irqreturn_t smp_ipi_demux(void)
 {
 	struct cpu_messages *info = this_cpu_ptr(&ipi_message);
-	unsigned long all;
+	unsigned int all;
 
 	mb();	/* order any irq clear */
 
 	do {
 		all = xchg(&info->messages, 0);
-#if defined(CONFIG_KVM_XICS) && defined(CONFIG_KVM_BOOK3S_HV_POSSIBLE)
-		/*
-		 * Must check for PPC_MSG_RM_HOST_ACTION messages
-		 * before PPC_MSG_CALL_FUNCTION messages because when
-		 * a VM is destroyed, we call kick_all_cpus_sync()
-		 * to ensure that any pending PPC_MSG_RM_HOST_ACTION
-		 * messages have completed before we free any VCPUs.
-		 */
-		if (all & IPI_MESSAGE(PPC_MSG_RM_HOST_ACTION))
-			kvmppc_xics_ipi_action();
-#endif
 		if (all & IPI_MESSAGE(PPC_MSG_CALL_FUNCTION))
 			generic_smp_call_function_interrupt();
 		if (all & IPI_MESSAGE(PPC_MSG_RESCHEDULE))
@@ -448,7 +427,7 @@ void generic_cpu_die(unsigned int cpu)
 
 	for (i = 0; i < 100; i++) {
 		smp_rmb();
-		if (is_cpu_dead(cpu))
+		if (per_cpu(cpu_state, cpu) == CPU_DEAD)
 			return;
 		msleep(100);
 	}
@@ -473,11 +452,6 @@ void generic_set_cpu_up(unsigned int cpu)
 int generic_check_cpu_restart(unsigned int cpu)
 {
 	return per_cpu(cpu_state, cpu) == CPU_UP_PREPARE;
-}
-
-int is_cpu_dead(unsigned int cpu)
-{
-	return per_cpu(cpu_state, cpu) == CPU_DEAD;
 }
 
 static bool secondaries_inhibited(void)
@@ -568,7 +542,7 @@ int __cpu_up(unsigned int cpu, struct task_struct *tidle)
 		smp_ops->give_timebase();
 
 	/* Wait until cpu puts itself in the online & active maps */
-	while (!cpu_online(cpu))
+	while (!cpu_online(cpu) || !cpu_active(cpu))
 		cpu_relax();
 
 	return 0;
@@ -596,7 +570,6 @@ out:
 	of_node_put(np);
 	return id;
 }
-EXPORT_SYMBOL_GPL(cpu_to_core_id);
 
 /* Helper routines for cpu to core mapping */
 int cpu_core_index_of_thread(int cpu)
@@ -754,7 +727,7 @@ void start_secondary(void *unused)
 
 	local_irq_enable();
 
-	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
+	cpu_startup_entry(CPUHP_ONLINE);
 
 	BUG();
 }
@@ -830,7 +803,7 @@ int __cpu_disable(void)
 
 	/* Update sibling maps */
 	base = cpu_first_thread_sibling(cpu);
-	for (i = 0; i < threads_per_core && base + i < nr_cpu_ids; i++) {
+	for (i = 0; i < threads_per_core; i++) {
 		cpumask_clear_cpu(cpu, cpu_sibling_mask(base + i));
 		cpumask_clear_cpu(base + i, cpu_sibling_mask(cpu));
 		cpumask_clear_cpu(cpu, cpu_core_mask(base + i));

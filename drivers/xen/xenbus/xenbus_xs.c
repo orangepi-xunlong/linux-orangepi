@@ -44,6 +44,7 @@
 #include <linux/fcntl.h>
 #include <linux/kthread.h>
 #include <linux/rwsem.h>
+#include <linux/module.h>
 #include <linux/mutex.h>
 #include <asm/xen/hypervisor.h>
 #include <xen/xenbus.h>
@@ -232,10 +233,10 @@ static void transaction_resume(void)
 void *xenbus_dev_request_and_reply(struct xsd_sockmsg *msg)
 {
 	void *ret;
-	enum xsd_sockmsg_type type = msg->type;
+	struct xsd_sockmsg req_msg = *msg;
 	int err;
 
-	if (type == XS_TRANSACTION_START)
+	if (req_msg.type == XS_TRANSACTION_START)
 		transaction_start();
 
 	mutex_lock(&xs_state.request_mutex);
@@ -250,7 +251,8 @@ void *xenbus_dev_request_and_reply(struct xsd_sockmsg *msg)
 	mutex_unlock(&xs_state.request_mutex);
 
 	if ((msg->type == XS_TRANSACTION_END) ||
-	    ((type == XS_TRANSACTION_START) && (msg->type == XS_ERROR)))
+	    ((req_msg.type == XS_TRANSACTION_START) &&
+	     (msg->type == XS_ERROR)))
 		transaction_end();
 
 	return ret;

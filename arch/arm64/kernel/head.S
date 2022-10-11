@@ -208,23 +208,13 @@ efi_header_end:
 
 	__INIT
 
-	/*
-	 * The following callee saved general purpose registers are used on the
-	 * primary lowlevel boot path:
-	 *
-	 *  Register   Scope                      Purpose
-	 *  x21        stext() .. start_kernel()  FDT pointer passed at boot in x0
-	 *  x23        stext() .. start_kernel()  physical misalignment/KASLR offset
-	 *  x28        __create_page_tables()     callee preserved temp register
-	 *  x19/x20    __primary_switch()         callee preserved temp registers
-	 */
 ENTRY(stext)
 	bl	preserve_boot_args
-	bl	el2_setup			// Drop to EL1, w0=cpu_boot_mode
-	adrp	x23, __PHYS_OFFSET
-	and	x23, x23, MIN_KIMG_ALIGN - 1	// KASLR offset, defaults to 0
+	bl	el2_setup			// Drop to EL1, w20=cpu_boot_mode
+	adrp	x24, __PHYS_OFFSET
+	and	x23, x24, MIN_KIMG_ALIGN - 1	// KASLR offset, defaults to 0
 	bl	set_cpu_boot_mode_flag
-	bl	__create_page_tables
+	bl	__create_page_tables		// x25=TTBR0, x26=TTBR1
 	/*
 	 * The following calls CPU setup code, see arch/arm64/mm/proc.S for
 	 * details.
@@ -232,7 +222,9 @@ ENTRY(stext)
 	 * the TCR will have been set.
 	 */
 	bl	__cpu_setup			// initialise processor
-	b	__primary_switch
+	adr_l	x27, __primary_switch		// address to jump to after
+						// MMU has been enabled
+	b	__enable_mmu
 ENDPROC(stext)
 
 /*
@@ -319,21 +311,23 @@ ENDPROC(preserve_boot_args)
  *     been enabled
  */
 __create_page_tables:
+	adrp	x25, idmap_pg_dir
+	adrp	x26, swapper_pg_dir
 	mov	x28, lr
 
 	/*
 	 * Invalidate the idmap and swapper page tables to avoid potential
 	 * dirty cache lines being evicted.
 	 */
-	adrp	x0, idmap_pg_dir
-	adrp	x1, swapper_pg_dir + SWAPPER_DIR_SIZE + RESERVED_TTBR0_SIZE
+	mov	x0, x25
+	add	x1, x26, #SWAPPER_DIR_SIZE + RESERVED_TTBR0_SIZE
 	bl	__inval_cache_range
 
 	/*
 	 * Clear the idmap and swapper page tables.
 	 */
-	adrp	x0, idmap_pg_dir
-	adrp	x6, swapper_pg_dir + SWAPPER_DIR_SIZE + RESERVED_TTBR0_SIZE
+	mov	x0, x25
+	add	x6, x26, #SWAPPER_DIR_SIZE + RESERVED_TTBR0_SIZE
 1:	stp	xzr, xzr, [x0], #16
 	stp	xzr, xzr, [x0], #16
 	stp	xzr, xzr, [x0], #16
@@ -346,7 +340,7 @@ __create_page_tables:
 	/*
 	 * Create the identity mapping.
 	 */
-	adrp	x0, idmap_pg_dir
+	mov	x0, x25				// idmap_pg_dir
 	adrp	x3, __idmap_text_start		// __pa(__idmap_text_start)
 
 #ifndef CONFIG_ARM64_VA_BITS_48
@@ -396,7 +390,7 @@ __create_page_tables:
 	/*
 	 * Map the kernel image (starting with PHYS_OFFSET).
 	 */
-	adrp	x0, swapper_pg_dir
+	mov	x0, x26				// swapper_pg_dir
 	mov_q	x5, KIMAGE_VADDR + TEXT_OFFSET	// compile time __va(_text)
 	add	x5, x5, x23			// add KASLR displacement
 	create_pgd_entry x0, x5, x3, x6
@@ -411,8 +405,8 @@ __create_page_tables:
 	 * accesses (MMU disabled), invalidate the idmap and swapper page
 	 * tables again to remove any speculatively loaded cache lines.
 	 */
-	adrp	x0, idmap_pg_dir
-	adrp	x1, swapper_pg_dir + SWAPPER_DIR_SIZE + RESERVED_TTBR0_SIZE
+	mov	x0, x25
+	add	x1, x26, #SWAPPER_DIR_SIZE + RESERVED_TTBR0_SIZE
 	dmb	sy
 	bl	__inval_cache_range
 
@@ -422,27 +416,14 @@ ENDPROC(__create_page_tables)
 
 /*
  * The following fragment of code is executed with the MMU enabled.
- *
- *   x0 = __PHYS_OFFSET
  */
+	.set	initial_sp, init_thread_union + THREAD_START_SP
 __primary_switched:
-	adrp	x4, init_thread_union
-	add	sp, x4, #THREAD_SIZE
-	adr_l	x5, init_task
-	msr	sp_el0, x5			// Save thread_info
+	mov	x28, lr				// preserve LR
 
 	adr_l	x8, vectors			// load VBAR_EL1 with virtual
 	msr	vbar_el1, x8			// vector table address
 	isb
-
-	stp	xzr, x30, [sp, #-16]!
-	mov	x29, sp
-
-	str_l	x21, __fdt_pointer, x5		// Save FDT pointer
-
-	ldr_l	x4, kimage_vaddr		// Save the offset between
-	sub	x4, x4, x0			// the kernel virtual and
-	str_l	x4, kimage_voffset, x5		// physical mappings
 
 	// Clear BSS
 	adr_l	x0, __bss_start
@@ -452,6 +433,25 @@ __primary_switched:
 	bl	__pi_memset
 	dsb	ishst				// Make zero page visible to PTW
 
+#ifdef CONFIG_THREAD_INFO_IN_TASK
+        adrp    x4, init_thread_union
+        add     sp, x4, #THREAD_SIZE
+        adr_l   x5, init_task
+        msr     sp_el0, x5                      // Save thread_info
+#else
+	adr_l	sp, initial_sp, x4
+	mov	x4, sp
+	and	x4, x4, #~(THREAD_SIZE - 1)
+	msr	sp_el0, x4			// Save thread_info
+#endif
+
+	str_l	x21, __fdt_pointer, x5		// Save FDT pointer
+
+	ldr_l	x4, kimage_vaddr		// Save the offset between
+	sub	x4, x4, x24			// the kernel virtual and
+	str_l	x4, kimage_voffset, x5		// physical mappings
+
+	mov	x29, #0
 #ifdef CONFIG_KASAN
 	bl	kasan_early_init
 #endif
@@ -463,8 +463,8 @@ __primary_switched:
 	bl	kaslr_early_init		// parse FDT for KASLR options
 	cbz	x0, 0f				// KASLR disabled? just proceed
 	orr	x23, x23, x0			// record KASLR offset
-	ldp	x29, x30, [sp], #16		// we must enable KASLR, return
-	ret					// to __primary_switch()
+	ret	x28				// we must enable KASLR, return
+						// to __enable_mmu()
 0:
 #endif
 	b	start_kernel
@@ -474,7 +474,7 @@ ENDPROC(__primary_switched)
  * end early head section, begin head code that is also used for
  * hotplug and needs to have the same protections as the text region
  */
-	.section ".idmap.text","awx"
+	.section ".idmap.text","ax"
 
 ENTRY(kimage_vaddr)
 	.quad		_text - TEXT_OFFSET
@@ -500,31 +500,13 @@ CPU_LE(	bic	x0, x0, #(1 << 25)	)	// Clear the EE bit for EL2
 CPU_BE(	orr	x0, x0, #(3 << 24)	)	// Set the EE and E0E bits for EL1
 CPU_LE(	bic	x0, x0, #(3 << 24)	)	// Clear the EE and E0E bits for EL1
 	msr	sctlr_el1, x0
-	mov	w0, #BOOT_CPU_MODE_EL1		// This cpu booted in EL1
+	mov	w20, #BOOT_CPU_MODE_EL1		// This cpu booted in EL1
 	isb
 	ret
 
-2:
-#ifdef CONFIG_ARM64_VHE
-	/*
-	 * Check for VHE being present. For the rest of the EL2 setup,
-	 * x2 being non-zero indicates that we do have VHE, and that the
-	 * kernel is intended to run at EL2.
-	 */
-	mrs	x2, id_aa64mmfr1_el1
-	ubfx	x2, x2, #8, #4
-#else
-	mov	x2, xzr
-#endif
-
 	/* Hyp configuration. */
-	mov	x0, #HCR_RW			// 64-bit EL1
-	cbz	x2, set_hcr
-	orr	x0, x0, #HCR_TGE		// Enable Host Extensions
-	orr	x0, x0, #HCR_E2H
-set_hcr:
+2:	mov_q	x0, HCR_HOST_NVHE_FLAGS
 	msr	hcr_el2, x0
-	isb
 
 	/* Generic timers. */
 	mrs	x0, cnthctl_el2
@@ -536,8 +518,7 @@ set_hcr:
 	/* GICv3 system register access */
 	mrs	x0, id_aa64pfr0_el1
 	ubfx	x0, x0, #24, #4
-	cmp	x0, #1
-	b.ne	3f
+	cbz	x0, 3f
 
 	mrs_s	x0, ICC_SRE_EL2
 	orr	x0, x0, #ICC_SRE_EL2_SRE	// Set ICC_SRE_EL2.SRE==1
@@ -557,15 +538,6 @@ set_hcr:
 	msr	vpidr_el2, x0
 	msr	vmpidr_el2, x1
 
-	/*
-	 * When VHE is not in use, early init of EL2 and EL1 needs to be
-	 * done here.
-	 * When VHE _is_ in use, EL1 will not be used in the host and
-	 * requires no configuration, and all non-hyp-specific EL2 setup
-	 * will be done via the _EL1 system register aliases in __cpu_setup.
-	 */
-	cbnz	x2, 1f
-
 	/* sctlr_el1 */
 	mov	x0, #0x0800			// Set/clear RES{1,0} bits
 CPU_BE(	movk	x0, #0x33d0, lsl #16	)	// Set EE and E0E on BE systems
@@ -575,7 +547,6 @@ CPU_LE(	movk	x0, #0x30d0, lsl #16	)	// Clear EE and E0E on LE systems
 	/* Coprocessor traps. */
 	mov	x0, #0x33ff
 	msr	cptr_el2, x0			// Disable copro. traps to EL2
-1:
 
 #ifdef CONFIG_COMPAT
 	msr	hstr_el2, xzr			// Disable CP15 traps to EL2
@@ -595,13 +566,6 @@ CPU_LE(	movk	x0, #0x30d0, lsl #16	)	// Clear EE and E0E on LE systems
 	/* Stage-2 translation */
 	msr	vttbr_el2, xzr
 
-	cbz	x2, install_el2_stub
-
-	mov	w0, #BOOT_CPU_MODE_EL2		// This CPU booted in EL2
-	isb
-	ret
-
-install_el2_stub:
 	/* Hypervisor stub */
 	adrp	x0, __hyp_stub_vectors
 	add	x0, x0, #:lo12:__hyp_stub_vectors
@@ -612,7 +576,7 @@ install_el2_stub:
 		      PSR_MODE_EL1h)
 	msr	spsr_el2, x0
 	msr	elr_el2, lr
-	mov	w0, #BOOT_CPU_MODE_EL2		// This CPU booted in EL2
+	mov	w20, #BOOT_CPU_MODE_EL2		// This CPU booted in EL2
 	eret
 ENDPROC(el2_setup)
 
@@ -622,10 +586,10 @@ ENDPROC(el2_setup)
  */
 set_cpu_boot_mode_flag:
 	adr_l	x1, __boot_cpu_mode
-	cmp	w0, #BOOT_CPU_MODE_EL2
+	cmp	w20, #BOOT_CPU_MODE_EL2
 	b.ne	1f
 	add	x1, x1, #4
-1:	str	w0, [x1]			// This CPU has booted in EL1
+1:	str	w20, [x1]			// This CPU has booted in EL1
 	dmb	sy
 	dc	ivac, x1			// Invalidate potentially stale cache line
 	ret
@@ -648,12 +612,6 @@ ENDPROC(set_cpu_boot_mode_flag)
 ENTRY(__boot_cpu_mode)
 	.long	BOOT_CPU_MODE_EL2
 	.long	BOOT_CPU_MODE_EL1
-/*
- * The booting CPU updates the failed status @__early_cpu_boot_status,
- * with MMU turned off.
- */
-ENTRY(__early_cpu_boot_status)
-	.long 	0
 
 	.popsection
 
@@ -662,7 +620,7 @@ ENTRY(__early_cpu_boot_status)
 	 * cores are held until we're ready for them to initialise.
 	 */
 ENTRY(secondary_holding_pen)
-	bl	el2_setup			// Drop to EL1, w0=cpu_boot_mode
+	bl	el2_setup			// Drop to EL1, w20=cpu_boot_mode
 	bl	set_cpu_boot_mode_flag
 	mrs	x0, mpidr_el1
 	mov_q	x1, MPIDR_HWID_BITMASK
@@ -689,22 +647,31 @@ secondary_startup:
 	/*
 	 * Common entry point for secondary CPUs.
 	 */
+	adrp	x25, idmap_pg_dir
+	adrp	x26, swapper_pg_dir
 	bl	__cpu_setup			// initialise processor
-	bl	__enable_mmu
-	ldr	x8, =__secondary_switched
-	br	x8
+
+	adr_l	x27, __secondary_switch		// address to jump to after enabling the MMU
+	b	__enable_mmu
 ENDPROC(secondary_startup)
 
 __secondary_switched:
 	adr_l	x5, vectors
 	msr	vbar_el1, x5
 	isb
-
+#ifdef CONFIG_THREAD_INFO_IN_TASK
 	adr_l	x0, secondary_data
 	ldr	x1, [x0, #CPU_BOOT_STACK]	// get secondary_data.stack
 	mov	sp, x1
 	ldr	x2, [x0, #CPU_BOOT_TASK]
 	msr	sp_el0, x2
+#else
+	adr_l	x0, secondary_data
+	ldr	x0, [x0, #CPU_BOOT_STACK]	// get secondary_data.stack
+	mov	sp, x0
+	and	x0, x0, #~(THREAD_SIZE - 1)
+	msr	sp_el0, x0			// save thread_info
+#endif
 	mov	x29, #0
 	b	secondary_start_kernel
 ENDPROC(__secondary_switched)
@@ -721,33 +688,37 @@ ENDPROC(__secondary_switched)
 
 	.macro	update_early_cpu_boot_status status, tmp1, tmp2
 	mov	\tmp2, #\status
-	adr_l	\tmp1, __early_cpu_boot_status
-	str	\tmp2, [\tmp1]
+	str_l	\tmp2, __early_cpu_boot_status, \tmp1
 	dmb	sy
 	dc	ivac, \tmp1			// Invalidate potentially stale cache line
 	.endm
+
+	.pushsection	.data..cacheline_aligned
+	.align	L1_CACHE_SHIFT
+ENTRY(__early_cpu_boot_status)
+	.long 	0
+	.popsection
 
 /*
  * Enable the MMU.
  *
  *  x0  = SCTLR_EL1 value for turning on the MMU.
+ *  x27 = *virtual* address to jump to upon completion
  *
- * Returns to the caller via x30/lr. This requires the caller to be covered
- * by the .idmap.text section.
+ * Other registers depend on the function called upon completion.
  *
  * Checks if the selected granule size is supported by the CPU.
  * If it isn't, park the CPU
  */
 ENTRY(__enable_mmu)
+	mrs	x18, sctlr_el1			// preserve old SCTLR_EL1 value
 	mrs	x1, ID_AA64MMFR0_EL1
 	ubfx	x2, x1, #ID_AA64MMFR0_TGRAN_SHIFT, 4
 	cmp	x2, #ID_AA64MMFR0_TGRAN_SUPPORTED
 	b.ne	__no_granule_support
 	update_early_cpu_boot_status 0, x1, x2
-	adrp	x1, idmap_pg_dir
-	adrp	x2, swapper_pg_dir
-	msr	ttbr0_el1, x1			// load TTBR0
-	msr	ttbr1_el1, x2			// load TTBR1
+	msr	ttbr0_el1, x25			// load TTBR0
+	msr	ttbr1_el1, x26			// load TTBR1
 	isb
 	msr	sctlr_el1, x0
 	isb
@@ -759,7 +730,29 @@ ENTRY(__enable_mmu)
 	ic	iallu
 	dsb	nsh
 	isb
-	ret
+#ifdef CONFIG_RANDOMIZE_BASE
+	mov	x19, x0				// preserve new SCTLR_EL1 value
+	blr	x27
+
+	/*
+	 * If we return here, we have a KASLR displacement in x23 which we need
+	 * to take into account by discarding the current kernel mapping and
+	 * creating a new one.
+	 */
+	msr	sctlr_el1, x18			// disable the MMU
+	isb
+	bl	__create_page_tables		// recreate kernel mapping
+
+	tlbi	vmalle1				// Remove any stale TLB entries
+	dsb	nsh
+
+	msr	sctlr_el1, x19			// re-enable the MMU
+	isb
+	ic	iallu				// flush instructions fetched
+	dsb	nsh				// via old mapping
+	isb
+#endif
+	br	x27
 ENDPROC(__enable_mmu)
 
 __no_granule_support:
@@ -768,11 +761,11 @@ __no_granule_support:
 1:
 	wfe
 	wfi
-	b	1b
+	b 1b
 ENDPROC(__no_granule_support)
 
+__primary_switch:
 #ifdef CONFIG_RELOCATABLE
-__relocate_kernel:
 	/*
 	 * Iterate over each entry in the relocation table, and apply the
 	 * relocations in place.
@@ -794,46 +787,14 @@ __relocate_kernel:
 	add	x13, x13, x23			// relocate
 	str	x13, [x11, x23]
 	b	0b
-1:	ret
-ENDPROC(__relocate_kernel)
-#endif
 
-__primary_switch:
-#ifdef CONFIG_RANDOMIZE_BASE
-	mov	x19, x0				// preserve new SCTLR_EL1 value
-	mrs	x20, sctlr_el1			// preserve old SCTLR_EL1 value
-#endif
-
-	bl	__enable_mmu
-#ifdef CONFIG_RELOCATABLE
-	bl	__relocate_kernel
-#ifdef CONFIG_RANDOMIZE_BASE
-	ldr	x8, =__primary_switched
-	adrp	x0, __PHYS_OFFSET
-	blr	x8
-
-	/*
-	 * If we return here, we have a KASLR displacement in x23 which we need
-	 * to take into account by discarding the current kernel mapping and
-	 * creating a new one.
-	 */
-	msr	sctlr_el1, x20			// disable the MMU
-	isb
-	bl	__create_page_tables		// recreate kernel mapping
-
-	tlbi	vmalle1				// Remove any stale TLB entries
-	dsb	nsh
-
-	msr	sctlr_el1, x19			// re-enable the MMU
-	isb
-	ic	iallu				// flush instructions fetched
-	dsb	nsh				// via old mapping
-	isb
-
-	bl	__relocate_kernel
-#endif
+1:
 #endif
 	ldr	x8, =__primary_switched
-	adrp	x0, __PHYS_OFFSET
 	br	x8
 ENDPROC(__primary_switch)
+
+__secondary_switch:
+	ldr	x8, =__secondary_switched
+	br	x8
+ENDPROC(__secondary_switch)

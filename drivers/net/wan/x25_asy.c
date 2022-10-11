@@ -571,10 +571,8 @@ static int x25_asy_open_tty(struct tty_struct *tty)
 
 	/* Perform the low-level X.25 async init */
 	err = x25_asy_open(sl->dev);
-	if (err) {
-		x25_asy_free(sl);
+	if (err)
 		return err;
-	}
 	/* Done.  We have linked the TTY line to a channel. */
 	return 0;
 }

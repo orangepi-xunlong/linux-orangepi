@@ -30,7 +30,7 @@ static struct nf_loginfo default_loginfo = {
 	.u = {
 		.log = {
 			.level	  = LOGLEVEL_NOTICE,
-			.logflags = NF_LOG_DEFAULT_MASK,
+			.logflags = NF_LOG_MASK,
 		},
 	},
 };
@@ -62,7 +62,7 @@ static void dump_arp_packet(struct nf_log_buf *m,
 	/* If it's for Ethernet and the lengths are OK, then log the ARP
 	 * payload.
 	 */
-	if (ah->ar_hrd != htons(ARPHRD_ETHER) ||
+	if (ah->ar_hrd != htons(1) ||
 	    ah->ar_hln != ETH_ALEN ||
 	    ah->ar_pln != sizeof(__be32))
 		return;
@@ -111,7 +111,8 @@ static struct nf_logger nf_arp_logger __read_mostly = {
 
 static int __net_init nf_log_arp_net_init(struct net *net)
 {
-	return nf_log_set(net, NFPROTO_ARP, &nf_arp_logger);
+	nf_log_set(net, NFPROTO_ARP, &nf_arp_logger);
+	return 0;
 }
 
 static void __net_exit nf_log_arp_net_exit(struct net *net)

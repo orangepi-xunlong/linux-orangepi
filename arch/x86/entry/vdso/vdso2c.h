@@ -22,9 +22,6 @@ static void BITSFUNC(go)(void *raw_addr, size_t raw_len,
 
 	ELF(Phdr) *pt = (ELF(Phdr) *)(raw_addr + GET_LE(&hdr->e_phoff));
 
-	if (GET_LE(&hdr->e_type) != ET_DYN)
-		fail("input is not a shared object\n");
-
 	/* Walk the segment table. */
 	for (i = 0; i < GET_LE(&hdr->e_phnum); i++) {
 		if (GET_LE(&pt[i].p_type) == PT_LOAD) {
@@ -51,9 +48,6 @@ static void BITSFUNC(go)(void *raw_addr, size_t raw_len,
 
 	if (stripped_len < load_size)
 		fail("stripped input is too short\n");
-
-	if (!dyn)
-		fail("input has no PT_DYNAMIC section -- your toolchain is buggy\n");
 
 	/* Walk the dynamic table */
 	for (i = 0; dyn + i < dyn_end &&
@@ -156,9 +150,16 @@ static void BITSFUNC(go)(void *raw_addr, size_t raw_len,
 	}
 	fprintf(outfile, "\n};\n\n");
 
+	fprintf(outfile, "static struct page *pages[%lu];\n\n",
+		mapping_size / 4096);
+
 	fprintf(outfile, "const struct vdso_image %s = {\n", name);
 	fprintf(outfile, "\t.data = raw_data,\n");
 	fprintf(outfile, "\t.size = %lu,\n", mapping_size);
+	fprintf(outfile, "\t.text_mapping = {\n");
+	fprintf(outfile, "\t\t.name = \"[vdso]\",\n");
+	fprintf(outfile, "\t\t.pages = pages,\n");
+	fprintf(outfile, "\t},\n");
 	if (alt_sec) {
 		fprintf(outfile, "\t.alt = %lu,\n",
 			(unsigned long)GET_LE(&alt_sec->sh_offset));

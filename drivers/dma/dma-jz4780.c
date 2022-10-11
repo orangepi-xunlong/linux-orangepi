@@ -324,10 +324,8 @@ static struct dma_async_tx_descriptor *jz4780_dma_prep_slave_sg(
 					      sg_dma_address(&sgl[i]),
 					      sg_dma_len(&sgl[i]),
 					      direction);
-		if (err < 0) {
-			jz4780_dma_desc_free(&jzchan->desc->vdesc);
+		if (err < 0)
 			return NULL;
-		}
 
 		desc->desc[i].dcm |= JZ_DMA_DCM_TIE;
 
@@ -370,10 +368,8 @@ static struct dma_async_tx_descriptor *jz4780_dma_prep_dma_cyclic(
 	for (i = 0; i < periods; i++) {
 		err = jz4780_dma_setup_hwdesc(jzchan, &desc->desc[i], buf_addr,
 					      period_len, direction);
-		if (err < 0) {
-			jz4780_dma_desc_free(&jzchan->desc->vdesc);
+		if (err < 0)
 			return NULL;
-		}
 
 		buf_addr += period_len;
 
@@ -400,7 +396,7 @@ static struct dma_async_tx_descriptor *jz4780_dma_prep_dma_cyclic(
 	return vchan_tx_prep(&jzchan->vchan, &desc->vdesc, flags);
 }
 
-static struct dma_async_tx_descriptor *jz4780_dma_prep_dma_memcpy(
+struct dma_async_tx_descriptor *jz4780_dma_prep_dma_memcpy(
 	struct dma_chan *chan, dma_addr_t dest, dma_addr_t src,
 	size_t len, unsigned long flags)
 {
@@ -753,6 +749,11 @@ static int jz4780_dma_probe(struct platform_device *pdev)
 	struct dma_device *dd;
 	struct resource *res;
 	int i, ret;
+
+	if (!dev->of_node) {
+		dev_err(dev, "This driver must be probed from devicetree\n");
+		return -EINVAL;
+	}
 
 	jzdma = devm_kzalloc(dev, sizeof(*jzdma), GFP_KERNEL);
 	if (!jzdma)

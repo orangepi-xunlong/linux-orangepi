@@ -1,5 +1,4 @@
 #include <api/fd/array.h>
-#include <poll.h>
 #include "util/debug.h"
 #include "tests/tests.h"
 
@@ -26,7 +25,7 @@ static int fdarray__fprintf_prefix(struct fdarray *fda, const char *prefix, FILE
 	return printed + fdarray__fprintf(fda, fp);
 }
 
-int test__fdarray__filter(int subtest __maybe_unused)
+int test__fdarray__filter(void)
 {
 	int nr_fds, expected_fd[2], fd, err = TEST_FAIL;
 	struct fdarray *fda = fdarray__new(5, 5);
@@ -37,7 +36,7 @@ int test__fdarray__filter(int subtest __maybe_unused)
 	}
 
 	fdarray__init_revents(fda, POLLIN);
-	nr_fds = fdarray__filter(fda, POLLHUP, NULL, NULL);
+	nr_fds = fdarray__filter(fda, POLLHUP, NULL);
 	if (nr_fds != fda->nr_alloc) {
 		pr_debug("\nfdarray__filter()=%d != %d shouldn't have filtered anything",
 			 nr_fds, fda->nr_alloc);
@@ -45,7 +44,7 @@ int test__fdarray__filter(int subtest __maybe_unused)
 	}
 
 	fdarray__init_revents(fda, POLLHUP);
-	nr_fds = fdarray__filter(fda, POLLHUP, NULL, NULL);
+	nr_fds = fdarray__filter(fda, POLLHUP, NULL);
 	if (nr_fds != 0) {
 		pr_debug("\nfdarray__filter()=%d != %d, should have filtered all fds",
 			 nr_fds, fda->nr_alloc);
@@ -58,7 +57,7 @@ int test__fdarray__filter(int subtest __maybe_unused)
 
 	pr_debug("\nfiltering all but fda->entries[2]:");
 	fdarray__fprintf_prefix(fda, "before", stderr);
-	nr_fds = fdarray__filter(fda, POLLHUP, NULL, NULL);
+	nr_fds = fdarray__filter(fda, POLLHUP, NULL);
 	fdarray__fprintf_prefix(fda, " after", stderr);
 	if (nr_fds != 1) {
 		pr_debug("\nfdarray__filter()=%d != 1, should have left just one event", nr_fds);
@@ -79,7 +78,7 @@ int test__fdarray__filter(int subtest __maybe_unused)
 
 	pr_debug("\nfiltering all but (fda->entries[0], fda->entries[3]):");
 	fdarray__fprintf_prefix(fda, "before", stderr);
-	nr_fds = fdarray__filter(fda, POLLHUP, NULL, NULL);
+	nr_fds = fdarray__filter(fda, POLLHUP, NULL);
 	fdarray__fprintf_prefix(fda, " after", stderr);
 	if (nr_fds != 2) {
 		pr_debug("\nfdarray__filter()=%d != 2, should have left just two events",
@@ -104,7 +103,7 @@ out:
 	return err;
 }
 
-int test__fdarray__add(int subtest __maybe_unused)
+int test__fdarray__add(void)
 {
 	int err = TEST_FAIL;
 	struct fdarray *fda = fdarray__new(2, 2);

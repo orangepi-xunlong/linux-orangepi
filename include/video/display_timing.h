@@ -28,7 +28,17 @@ enum display_flags {
 	DISPLAY_FLAGS_INTERLACED	= BIT(8),
 	DISPLAY_FLAGS_DOUBLESCAN	= BIT(9),
 	DISPLAY_FLAGS_DOUBLECLK		= BIT(10),
+	DISPLAY_FLAGS_SWAP_GB		= BIT(16),
+	DISPLAY_FLAGS_SWAP_RG		= BIT(17),
+	DISPLAY_FLAGS_SWAP_RB		= BIT(18),
+	DISPLAY_FLAGS_MIRROR_X		= BIT(19),
+	DISPLAY_FLAGS_MIRROR_Y		= BIT(20),
 };
+
+/* Panel Mirror control */
+#define DRM_MODE_FLAG_XMIRROR			(1 << 28)
+#define DRM_MODE_FLAG_YMIRROR			(1 << 29)
+#define DRM_MODE_FLAG_XYMIRROR			(DRM_MODE_FLAG_XMIRROR | DRM_MODE_FLAG_YMIRROR)
 
 /*
  * A single signal can be specified via a range of minimal and maximal values
@@ -71,6 +81,18 @@ struct display_timing {
 	struct timing_entry vsync_len;		/* ver. sync len */
 
 	enum display_flags flags;		/* display flags */
+#if defined(CONFIG_FB_ROCKCHIP)
+	u16 screen_type;			/*screen type*/
+	u16 refresh_mode;			/* 0: video mode 1: cmd mode */
+	u16 screen_widt;			/* screen physical size */
+	u16 screen_hight;
+	u16 lvds_format;			/*lvds data format for lvds screen*/
+	u16 face;				/*display output  interface format:24bit 18bit 16bit*/
+	u16 color_mode;				/* input color mode: RGB or YUV */
+	u32 *dsp_lut;
+	u32 *cabc_lut;
+	u32 *cabc_gamma_base;
+#endif
 };
 
 /*

@@ -35,6 +35,7 @@
 #include <linux/mtd/nand_ecc.h>
 #include <linux/gpio.h>
 #include <linux/of.h>
+#include <linux/of_mtd.h>
 #include <linux/of_gpio.h>
 #include <linux/mtd/lpc32xx_slc.h>
 
@@ -145,38 +146,13 @@
  * NAND ECC Layout for small page NAND devices
  * Note: For large and huge page devices, the default layouts are used
  */
-static int lpc32xx_ooblayout_ecc(struct mtd_info *mtd, int section,
-				 struct mtd_oob_region *oobregion)
-{
-	if (section)
-		return -ERANGE;
-
-	oobregion->length = 6;
-	oobregion->offset = 10;
-
-	return 0;
-}
-
-static int lpc32xx_ooblayout_free(struct mtd_info *mtd, int section,
-				  struct mtd_oob_region *oobregion)
-{
-	if (section > 1)
-		return -ERANGE;
-
-	if (!section) {
-		oobregion->offset = 0;
-		oobregion->length = 4;
-	} else {
-		oobregion->offset = 6;
-		oobregion->length = 4;
-	}
-
-	return 0;
-}
-
-static const struct mtd_ooblayout_ops lpc32xx_ooblayout_ops = {
-	.ecc = lpc32xx_ooblayout_ecc,
-	.free = lpc32xx_ooblayout_free,
+static struct nand_ecclayout lpc32xx_nand_oob_16 = {
+	.eccbytes = 6,
+	.eccpos = {10, 11, 12, 13, 14, 15},
+	.oobfree = {
+		{ .offset = 0, .length = 4 },
+		{ .offset = 6, .length = 4 },
+	},
 };
 
 static u8 bbt_pattern[] = {'B', 'b', 't', '0' };
@@ -218,6 +194,7 @@ struct lpc32xx_nand_cfg_slc {
 	uint32_t rwidth;
 	uint32_t rhold;
 	uint32_t rsetup;
+	bool use_bbt;
 	int wp_gpio;
 	struct mtd_partition *parts;
 	unsigned num_parts;
@@ -227,6 +204,7 @@ struct lpc32xx_nand_host {
 	struct nand_chip	nand_chip;
 	struct lpc32xx_slc_platform_data *pdata;
 	struct clk		*clk;
+	struct mtd_info		mtd;
 	void __iomem		*io_base;
 	struct lpc32xx_nand_cfg_slc *ncfg;
 
@@ -282,8 +260,8 @@ static void lpc32xx_nand_cmd_ctrl(struct mtd_info *mtd, int cmd,
 	unsigned int ctrl)
 {
 	uint32_t tmp;
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct lpc32xx_nand_host *host = chip->priv;
 
 	/* Does CE state need to be changed? */
 	tmp = readl(SLC_CFG(host->io_base));
@@ -306,8 +284,8 @@ static void lpc32xx_nand_cmd_ctrl(struct mtd_info *mtd, int cmd,
  */
 static int lpc32xx_nand_device_ready(struct mtd_info *mtd)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct lpc32xx_nand_host *host = chip->priv;
 	int rdy = 0;
 
 	if ((readl(SLC_STAT(host->io_base)) & SLCSTAT_NAND_READY) != 0)
@@ -361,8 +339,8 @@ static int lpc32xx_nand_ecc_calculate(struct mtd_info *mtd,
  */
 static uint8_t lpc32xx_nand_read_byte(struct mtd_info *mtd)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct lpc32xx_nand_host *host = chip->priv;
 
 	return (uint8_t)readl(SLC_DATA(host->io_base));
 }
@@ -372,8 +350,8 @@ static uint8_t lpc32xx_nand_read_byte(struct mtd_info *mtd)
  */
 static void lpc32xx_nand_read_buf(struct mtd_info *mtd, u_char *buf, int len)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct lpc32xx_nand_host *host = chip->priv;
 
 	/* Direct device read with no ECC */
 	while (len-- > 0)
@@ -385,8 +363,8 @@ static void lpc32xx_nand_read_buf(struct mtd_info *mtd, u_char *buf, int len)
  */
 static void lpc32xx_nand_write_buf(struct mtd_info *mtd, const uint8_t *buf, int len)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct lpc32xx_nand_host *host = chip->priv;
 
 	/* Direct device write with no ECC */
 	while (len-- > 0)
@@ -450,8 +428,8 @@ static void lpc32xx_dma_complete_func(void *completion)
 static int lpc32xx_xmit_dma(struct mtd_info *mtd, dma_addr_t dma,
 			    void *mem, int len, enum dma_transfer_direction dir)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct lpc32xx_nand_host *host = chip->priv;
 	struct dma_async_tx_descriptor *desc;
 	int flags = DMA_CTRL_ACK | DMA_PREP_INTERRUPT;
 	int res;
@@ -510,8 +488,8 @@ out1:
 static int lpc32xx_xfer(struct mtd_info *mtd, uint8_t *buf, int eccsubpages,
 			int read)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct lpc32xx_nand_host *host = chip->priv;
 	int i, status = 0;
 	unsigned long timeout;
 	int res;
@@ -626,9 +604,8 @@ static int lpc32xx_nand_read_page_syndrome(struct mtd_info *mtd,
 					   struct nand_chip *chip, uint8_t *buf,
 					   int oob_required, int page)
 {
-	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
-	struct mtd_oob_region oobregion = { };
-	int stat, i, status, error;
+	struct lpc32xx_nand_host *host = chip->priv;
+	int stat, i, status;
 	uint8_t *oobecc, tmpecc[LPC32XX_ECC_SAVE_SIZE];
 
 	/* Issue read command */
@@ -644,11 +621,7 @@ static int lpc32xx_nand_read_page_syndrome(struct mtd_info *mtd,
 	lpc32xx_slc_ecc_copy(tmpecc, (uint32_t *) host->ecc_buf, chip->ecc.steps);
 
 	/* Pointer to ECC data retrieved from NAND spare area */
-	error = mtd_ooblayout_ecc(mtd, 0, &oobregion);
-	if (error)
-		return error;
-
-	oobecc = chip->oob_poi + oobregion.offset;
+	oobecc = chip->oob_poi + chip->ecc.layout->eccpos[0];
 
 	for (i = 0; i < chip->ecc.steps; i++) {
 		stat = chip->ecc.correct(mtd, buf, oobecc,
@@ -693,9 +666,8 @@ static int lpc32xx_nand_write_page_syndrome(struct mtd_info *mtd,
 					    const uint8_t *buf,
 					    int oob_required, int page)
 {
-	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
-	struct mtd_oob_region oobregion = { };
-	uint8_t *pb;
+	struct lpc32xx_nand_host *host = chip->priv;
+	uint8_t *pb = chip->oob_poi + chip->ecc.layout->eccpos[0];
 	int error;
 
 	/* Write data, calculate ECC on outbound data */
@@ -707,11 +679,6 @@ static int lpc32xx_nand_write_page_syndrome(struct mtd_info *mtd,
 	 * The calculated ECC needs some manual work done to it before
 	 * committing it to NAND. Process the calculated ECC and place
 	 * the resultant values directly into the OOB buffer. */
-	error = mtd_ooblayout_ecc(mtd, 0, &oobregion);
-	if (error)
-		return error;
-
-	pb = chip->oob_poi + oobregion.offset;
 	lpc32xx_slc_ecc_copy(pb, (uint32_t *)host->ecc_buf, chip->ecc.steps);
 
 	/* Write ECC data to device */
@@ -736,7 +703,7 @@ static int lpc32xx_nand_write_page_raw_syndrome(struct mtd_info *mtd,
 
 static int lpc32xx_nand_dma_setup(struct lpc32xx_nand_host *host)
 {
-	struct mtd_info *mtd = nand_to_mtd(&host->nand_chip);
+	struct mtd_info *mtd = &host->mtd;
 	dma_cap_mask_t mask;
 
 	if (!host->pdata || !host->pdata->dma_filter) {
@@ -781,6 +748,7 @@ static struct lpc32xx_nand_cfg_slc *lpc32xx_parse_dt(struct device *dev)
 		return NULL;
 	}
 
+	ncfg->use_bbt = of_get_nand_on_flash_bbt(np);
 	ncfg->wp_gpio = of_get_named_gpio(np, "gpios", 0);
 
 	return ncfg;
@@ -795,6 +763,7 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 	struct mtd_info *mtd;
 	struct nand_chip *chip;
 	struct resource *rc;
+	struct mtd_part_parser_data ppdata = {};
 	int res;
 
 	rc = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -831,10 +800,10 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 
 	host->pdata = dev_get_platdata(&pdev->dev);
 
+	mtd = &host->mtd;
 	chip = &host->nand_chip;
-	mtd = nand_to_mtd(chip);
-	nand_set_controller_data(chip, host);
-	nand_set_flash_node(chip, pdev->dev.of_node);
+	chip->priv = host;
+	mtd->priv = chip;
 	mtd->owner = THIS_MODULE;
 	mtd->dev.parent = &pdev->dev;
 
@@ -908,22 +877,26 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 	 * custom BBT marker layout.
 	 */
 	if (mtd->writesize <= 512)
-		mtd_set_ooblayout(mtd, &lpc32xx_ooblayout_ops);
+		chip->ecc.layout = &lpc32xx_nand_oob_16;
 
 	/* These sizes remain the same regardless of page size */
 	chip->ecc.size = 256;
 	chip->ecc.bytes = LPC32XX_SLC_DEV_ECC_BYTES;
 	chip->ecc.prepad = chip->ecc.postpad = 0;
 
-	/*
-	 * Use a custom BBT marker setup for small page FLASH that
-	 * won't interfere with the ECC layout. Large and huge page
-	 * FLASH use the standard layout.
-	 */
-	if ((chip->bbt_options & NAND_BBT_USE_FLASH) &&
-	    mtd->writesize <= 512) {
-		chip->bbt_td = &bbt_smallpage_main_descr;
-		chip->bbt_md = &bbt_smallpage_mirror_descr;
+	/* Avoid extra scan if using BBT, setup BBT support */
+	if (host->ncfg->use_bbt) {
+		chip->bbt_options |= NAND_BBT_USE_FLASH;
+
+		/*
+		 * Use a custom BBT marker setup for small page FLASH that
+		 * won't interfere with the ECC layout. Large and huge page
+		 * FLASH use the standard layout.
+		 */
+		if (mtd->writesize <= 512) {
+			chip->bbt_td = &bbt_smallpage_main_descr;
+			chip->bbt_md = &bbt_smallpage_mirror_descr;
+		}
 	}
 
 	/*
@@ -935,8 +908,9 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 	}
 
 	mtd->name = "nxp_lpc3220_slc";
-	res = mtd_device_register(mtd, host->ncfg->parts,
-				  host->ncfg->num_parts);
+	ppdata.of_node = pdev->dev.of_node;
+	res = mtd_device_parse_register(mtd, NULL, &ppdata, host->ncfg->parts,
+					host->ncfg->num_parts);
 	if (!res)
 		return res;
 
@@ -959,7 +933,7 @@ static int lpc32xx_nand_remove(struct platform_device *pdev)
 {
 	uint32_t tmp;
 	struct lpc32xx_nand_host *host = platform_get_drvdata(pdev);
-	struct mtd_info *mtd = nand_to_mtd(&host->nand_chip);
+	struct mtd_info *mtd = &host->mtd;
 
 	nand_release(mtd);
 	dma_release_channel(host->dma_chan);

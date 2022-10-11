@@ -101,7 +101,7 @@ struct dio200_subdev_8255 {
 };
 
 struct dio200_subdev_intr {
-	spinlock_t spinlock;	/* protects the 'active' flag */
+	spinlock_t spinlock;
 	unsigned int ofs;
 	unsigned int valid_isns;
 	unsigned int enabled_isns;
@@ -221,7 +221,7 @@ static void dio200_start_intr(struct comedi_device *dev,
 	struct dio200_subdev_intr *subpriv = s->private;
 	struct comedi_cmd *cmd = &s->async->cmd;
 	unsigned int n;
-	unsigned int isn_bits;
+	unsigned isn_bits;
 
 	/* Determine interrupt sources to enable. */
 	isn_bits = 0;
@@ -284,9 +284,9 @@ static int dio200_handle_read_intr(struct comedi_device *dev,
 {
 	const struct dio200_board *board = dev->board_ptr;
 	struct dio200_subdev_intr *subpriv = s->private;
-	unsigned int triggered;
-	unsigned int intstat;
-	unsigned int cur_enabled;
+	unsigned triggered;
+	unsigned intstat;
+	unsigned cur_enabled;
 	unsigned long flags;
 
 	triggered = 0;
@@ -439,7 +439,7 @@ static int dio200_subdev_intr_cmd(struct comedi_device *dev,
 static int dio200_subdev_intr_init(struct comedi_device *dev,
 				   struct comedi_subdevice *s,
 				   unsigned int offset,
-				   unsigned int valid_isns)
+				   unsigned valid_isns)
 {
 	const struct dio200_board *board = dev->board_ptr;
 	struct dio200_subdev_intr *subpriv;

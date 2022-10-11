@@ -59,23 +59,18 @@ module_param(send_sigterm, int, 0444);
 MODULE_PARM_DESC(send_sigterm,
 	"Send sigterm to HSA process on unhandled exception (0 = disable, 1 = enable)");
 
-static int amdkfd_init_completed;
-
-int kgd2kfd_init(unsigned interface_version, const struct kgd2kfd_calls **g2f)
+bool kgd2kfd_init(unsigned interface_version, const struct kgd2kfd_calls **g2f)
 {
-	if (!amdkfd_init_completed)
-		return -EPROBE_DEFER;
-
 	/*
 	 * Only one interface version is supported,
 	 * no kfd/kgd version skew allowed.
 	 */
 	if (interface_version != KFD_INTERFACE_VERSION)
-		return -EINVAL;
+		return false;
 
 	*g2f = &kgd2kfd;
 
-	return 0;
+	return true;
 }
 EXPORT_SYMBOL(kgd2kfd_init);
 
@@ -116,8 +111,6 @@ static int __init kfd_module_init(void)
 
 	kfd_process_create_wq();
 
-	amdkfd_init_completed = 1;
-
 	dev_info(kfd_device, "Initialized module\n");
 
 	return 0;
@@ -132,8 +125,6 @@ err_pasid:
 
 static void __exit kfd_module_exit(void)
 {
-	amdkfd_init_completed = 0;
-
 	kfd_process_destroy_wq();
 	kfd_topology_shutdown();
 	kfd_chardev_exit();

@@ -67,16 +67,6 @@ static inline void fscrypt_restore_control_page(struct page *page)
 	return;
 }
 
-static inline void fscrypt_set_d_op(struct dentry *dentry)
-{
-	return;
-}
-
-static inline void fscrypt_set_encrypted_dentry(struct dentry *dentry)
-{
-	return;
-}
-
 /* policy.c */
 static inline int fscrypt_ioctl_set_policy(struct file *filp,
 					   const void __user *arg)
@@ -108,7 +98,8 @@ static inline int fscrypt_get_encryption_info(struct inode *inode)
 	return -EOPNOTSUPP;
 }
 
-static inline void fscrypt_put_encryption_info(struct inode *inode)
+static inline void fscrypt_put_encryption_info(struct inode *inode,
+					       struct fscrypt_info *ci)
 {
 	return;
 }
@@ -229,10 +220,9 @@ static inline int __fscrypt_encrypt_symlink(struct inode *inode,
 	return -EOPNOTSUPP;
 }
 
-static inline const char *fscrypt_get_symlink(struct inode *inode,
+static inline void *fscrypt_get_symlink(struct inode *inode,
 					      const void *caddr,
-					      unsigned int max_size,
-					      struct delayed_call *done)
+					      unsigned int max_size)
 {
 	return ERR_PTR(-EOPNOTSUPP);
 }

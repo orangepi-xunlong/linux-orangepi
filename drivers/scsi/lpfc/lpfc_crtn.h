@@ -1,7 +1,7 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2004-2016 Emulex.  All rights reserved.           *
+ * Copyright (C) 2004-2015 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
  * www.emulex.com                                                  *
  *                                                                 *
@@ -168,8 +168,9 @@ void lpfc_ct_unsol_event(struct lpfc_hba *, struct lpfc_sli_ring *,
 			 struct lpfc_iocbq *);
 int lpfc_ct_handle_unsol_abort(struct lpfc_hba *, struct hbq_dmabuf *);
 int lpfc_ns_cmd(struct lpfc_vport *, int, uint8_t, uint32_t);
-int lpfc_fdmi_cmd(struct lpfc_vport *, struct lpfc_nodelist *, int, uint32_t);
-void lpfc_fdmi_num_disc_check(struct lpfc_vport *);
+int lpfc_fdmi_cmd(struct lpfc_vport *, struct lpfc_nodelist *, int);
+void lpfc_fdmi_tmo(unsigned long);
+void lpfc_fdmi_timeout_handler(struct lpfc_vport *);
 void lpfc_delayed_disc_tmo(unsigned long);
 void lpfc_delayed_disc_timeout_handler(struct lpfc_vport *);
 
@@ -359,6 +360,9 @@ extern struct scsi_host_template lpfc_template_s3;
 extern struct scsi_host_template lpfc_vport_template;
 extern struct fc_function_template lpfc_transport_functions;
 extern struct fc_function_template lpfc_vport_transport_functions;
+extern int lpfc_sli_mode;
+extern int lpfc_enable_npiv;
+extern int lpfc_delay_discovery;
 
 int  lpfc_vport_symbolic_node_name(struct lpfc_vport *, char *, size_t);
 int  lpfc_vport_symbolic_port_name(struct lpfc_vport *, char *,	size_t);
@@ -489,7 +493,7 @@ struct lpfc_device_data *__lpfc_get_device_data(struct lpfc_hba *,
 					struct lpfc_name *,
 					struct lpfc_name *, uint64_t);
 bool lpfc_enable_oas_lun(struct lpfc_hba *, struct lpfc_name *,
-			 struct lpfc_name *, uint64_t, uint8_t);
+			 struct lpfc_name *, uint64_t);
 bool lpfc_disable_oas_lun(struct lpfc_hba *, struct lpfc_name *,
 			  struct lpfc_name *, uint64_t);
 bool lpfc_find_next_oas_lun(struct lpfc_hba *, struct lpfc_name *,

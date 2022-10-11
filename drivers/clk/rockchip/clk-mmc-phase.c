@@ -25,6 +25,8 @@ struct rockchip_mmc_clock {
 	void __iomem	*reg;
 	int		id;
 	int		shift;
+	int		cached_phase;
+	struct notifier_block clk_rate_change_nb;
 };
 
 #define to_mmc_clock(_hw) container_of(_hw, struct rockchip_mmc_clock, hw)
@@ -60,7 +62,7 @@ static int rockchip_mmc_get_phase(struct clk_hw *hw)
 
 	/* See the comment for rockchip_mmc_set_phase below */
 	if (!rate) {
-		pr_err("%s: invalid clk rate\n", __func__);
+		printk(KERN_DEBUG "%s: invalid clk rate\n", __func__);
 		return -EINVAL;
 	}
 
@@ -144,8 +146,7 @@ static int rockchip_mmc_set_phase(struct clk_hw *hw, int degrees)
 	raw_value = delay_num ? ROCKCHIP_MMC_DELAY_SEL : 0;
 	raw_value |= delay_num << ROCKCHIP_MMC_DELAYNUM_OFFSET;
 	raw_value |= nineties;
-	writel(HIWORD_UPDATE(raw_value, 0x07ff, mmc_clock->shift),
-	       mmc_clock->reg);
+	writel(HIWORD_UPDATE(raw_value, 0x07ff, mmc_clock->shift), mmc_clock->reg);
 
 	pr_debug("%s->set_phase(%d) delay_nums=%u reg[0x%p]=0x%03x actual_degrees=%d\n",
 		clk_hw_get_name(hw), degrees, delay_num,
@@ -162,6 +163,34 @@ static const struct clk_ops rockchip_mmc_clk_ops = {
 	.set_phase	= rockchip_mmc_set_phase,
 };
 
+#define to_rockchip_mmc_clock(x) \
+	container_of(x, struct rockchip_mmc_clock, clk_rate_change_nb)
+static int rockchip_mmc_clk_rate_notify(struct notifier_block *nb,
+					unsigned long event, void *data)
+{
+	struct rockchip_mmc_clock *mmc_clock = to_rockchip_mmc_clock(nb);
+	struct clk_notifier_data *ndata = data;
+
+	/*
+	 * rockchip_mmc_clk is mostly used by mmc controllers to sample
+	 * the intput data, which expects the fixed phase after the tuning
+	 * process. However if the clock rate is changed, the phase is stale
+	 * and may break the data sampling. So here we try to restore the phase
+	 * for that case.
+	 */
+	if (ndata->old_rate <= ndata->new_rate)
+		return NOTIFY_DONE;
+
+	if (event == PRE_RATE_CHANGE)
+		mmc_clock->cached_phase =
+			rockchip_mmc_get_phase(&mmc_clock->hw);
+	else if (mmc_clock->cached_phase != -EINVAL &&
+		 event == POST_RATE_CHANGE)
+		rockchip_mmc_set_phase(&mmc_clock->hw, mmc_clock->cached_phase);
+
+	return NOTIFY_DONE;
+}
+
 struct clk *rockchip_clk_register_mmc(const char *name,
 				const char *const *parent_names, u8 num_parents,
 				void __iomem *reg, int shift)
@@ -169,10 +198,11 @@ struct clk *rockchip_clk_register_mmc(const char *name,
 	struct clk_init_data init;
 	struct rockchip_mmc_clock *mmc_clock;
 	struct clk *clk;
+	int ret;
 
 	mmc_clock = kmalloc(sizeof(*mmc_clock), GFP_KERNEL);
 	if (!mmc_clock)
-		return ERR_PTR(-ENOMEM);
+		return NULL;
 
 	init.name = name;
 	init.flags = 0;
@@ -185,8 +215,21 @@ struct clk *rockchip_clk_register_mmc(const char *name,
 	mmc_clock->shift = shift;
 
 	clk = clk_register(NULL, &mmc_clock->hw);
-	if (IS_ERR(clk))
-		kfree(mmc_clock);
+	if (IS_ERR(clk)) {
+		ret = PTR_ERR(clk);
+		goto err_register;
+	}
+
+	mmc_clock->clk_rate_change_nb.notifier_call =
+				&rockchip_mmc_clk_rate_notify;
+	ret = clk_notifier_register(clk, &mmc_clock->clk_rate_change_nb);
+	if (ret)
+		goto err_notifier;
 
 	return clk;
+err_notifier:
+	clk_unregister(clk);
+err_register:
+	kfree(mmc_clock);
+	return ERR_PTR(ret);
 }

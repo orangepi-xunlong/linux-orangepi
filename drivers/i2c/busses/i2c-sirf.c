@@ -190,7 +190,9 @@ static void i2c_sirfsoc_set_address(struct sirfsoc_i2c *siic,
 
 	writel(regval, siic->base + SIRFSOC_I2C_CMD(siic->cmd_ptr++));
 
-	addr = i2c_8bit_addr_from_msg(msg);
+	addr = msg->addr << 1;	/* Generate address */
+	if (msg->flags & I2C_M_RD)
+		addr |= 1;
 
 	/* Reverse direction bit */
 	if (msg->flags & I2C_M_REV_DIR_ADDR)
@@ -387,8 +389,10 @@ static int i2c_sirfsoc_probe(struct platform_device *pdev)
 		writel(regval, siic->base + SIRFSOC_I2C_SDA_DELAY);
 
 	err = i2c_add_numbered_adapter(adap);
-	if (err < 0)
+	if (err < 0) {
+		dev_err(&pdev->dev, "Can't add new i2c adapter\n");
 		goto out;
+	}
 
 	clk_disable(clk);
 

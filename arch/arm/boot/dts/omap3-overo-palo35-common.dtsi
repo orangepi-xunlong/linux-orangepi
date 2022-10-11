@@ -37,17 +37,17 @@
 		pinctrl-0 = <&button_pins>;
 		#address-cells = <1>;
 		#size-cells = <0>;
-		button0 {
+		button0@23 {
 			label = "button0";
 			linux,code = <BTN_0>;
 			gpios = <&gpio1 23 GPIO_ACTIVE_LOW>;		/* gpio_23 */
-			wakeup-source;
+			gpio-key,wakeup;
 		};
-		button1 {
+		button1@14 {
 			label = "button1";
 			linux,code = <BTN_1>;
 			gpios = <&gpio1 14 GPIO_ACTIVE_LOW>;		/* gpio_14 */
-			wakeup-source;
+			gpio-key,wakeup;
 		};
 	};
 };

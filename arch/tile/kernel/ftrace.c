@@ -20,11 +20,20 @@
 #include <asm/cacheflush.h>
 #include <asm/ftrace.h>
 #include <asm/sections.h>
-#include <asm/insn.h>
 
 #include <arch/opcode.h>
 
 #ifdef CONFIG_DYNAMIC_FTRACE
+
+static inline tilegx_bundle_bits NOP(void)
+{
+	return create_UnaryOpcodeExtension_X0(FNOP_UNARY_OPCODE_X0) |
+		create_RRROpcodeExtension_X0(UNARY_RRR_0_OPCODE_X0) |
+		create_Opcode_X0(RRR_0_OPCODE_X0) |
+		create_UnaryOpcodeExtension_X1(NOP_UNARY_OPCODE_X1) |
+		create_RRROpcodeExtension_X1(UNARY_RRR_0_OPCODE_X1) |
+		create_Opcode_X1(RRR_0_OPCODE_X1);
+}
 
 static int machine_stopped __read_mostly;
 
@@ -108,7 +117,7 @@ static int ftrace_modify_code(unsigned long pc, unsigned long old,
 		return -EINVAL;
 
 	/* Operate on writable kernel text mapping. */
-	pc_wr = ktext_writable_addr(pc);
+	pc_wr = pc - MEM_SV_START + PAGE_OFFSET;
 
 	if (probe_kernel_write((void *)pc_wr, &new, MCOUNT_INSN_SIZE))
 		return -EPERM;
@@ -184,7 +193,7 @@ void prepare_ftrace_return(unsigned long *parent, unsigned long self_addr,
 	*parent = return_hooker;
 
 	err = ftrace_push_return_trace(old, self_addr, &trace.depth,
-				       frame_pointer, NULL);
+				       frame_pointer);
 	if (err == -EBUSY) {
 		*parent = old;
 		return;

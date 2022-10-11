@@ -15,6 +15,7 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/mm.h>
+#include <linux/sched.h>
 #include <linux/slab.h>
 #include <asm/sections.h>
 
@@ -207,11 +208,8 @@ static inline const char *check_heap_object(const void *ptr, unsigned long n,
 	 * Some architectures (arm64) return true for virt_addr_valid() on
 	 * vmalloced addresses. Work around this by checking for vmalloc
 	 * first.
-	 *
-	 * We also need to check for module addresses explicitly since we
-	 * may copy static data from modules to userspace
 	 */
-	if (is_vmalloc_or_module_addr(ptr))
+	if (is_vmalloc_addr(ptr))
 		return NULL;
 
 	if (!virt_addr_valid(ptr))

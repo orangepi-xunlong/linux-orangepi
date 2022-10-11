@@ -300,29 +300,37 @@ static int snd_p16v_pcm_open_capture(struct snd_pcm_substream *substream)
 static int snd_p16v_pcm_hw_params_playback(struct snd_pcm_substream *substream,
 				      struct snd_pcm_hw_params *hw_params)
 {
-	return snd_pcm_lib_malloc_pages(substream,
+	int result;
+	result = snd_pcm_lib_malloc_pages(substream,
 					params_buffer_bytes(hw_params));
+	return result;
 }
 
 /* hw_params callback */
 static int snd_p16v_pcm_hw_params_capture(struct snd_pcm_substream *substream,
 				      struct snd_pcm_hw_params *hw_params)
 {
-	return snd_pcm_lib_malloc_pages(substream,
+	int result;
+	result = snd_pcm_lib_malloc_pages(substream,
 					params_buffer_bytes(hw_params));
+	return result;
 }
 
 
 /* hw_free callback */
 static int snd_p16v_pcm_hw_free_playback(struct snd_pcm_substream *substream)
 {
-	return snd_pcm_lib_free_pages(substream);
+	int result;
+	result = snd_pcm_lib_free_pages(substream);
+	return result;
 }
 
 /* hw_free callback */
 static int snd_p16v_pcm_hw_free_capture(struct snd_pcm_substream *substream)
 {
-	return snd_pcm_lib_free_pages(substream);
+	int result;
+	result = snd_pcm_lib_free_pages(substream);
+	return result;
 }
 
 
@@ -593,7 +601,7 @@ snd_p16v_pcm_pointer_capture(struct snd_pcm_substream *substream)
 }
 
 /* operators */
-static const struct snd_pcm_ops snd_p16v_playback_front_ops = {
+static struct snd_pcm_ops snd_p16v_playback_front_ops = {
 	.open =        snd_p16v_pcm_open_playback_front,
 	.close =       snd_p16v_pcm_close_playback,
 	.ioctl =       snd_pcm_lib_ioctl,
@@ -604,7 +612,7 @@ static const struct snd_pcm_ops snd_p16v_playback_front_ops = {
 	.pointer =     snd_p16v_pcm_pointer_playback,
 };
 
-static const struct snd_pcm_ops snd_p16v_capture_ops = {
+static struct snd_pcm_ops snd_p16v_capture_ops = {
 	.open =        snd_p16v_pcm_open_capture,
 	.close =       snd_p16v_pcm_close_capture,
 	.ioctl =       snd_pcm_lib_ioctl,

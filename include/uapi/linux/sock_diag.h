@@ -4,7 +4,7 @@
 #include <linux/types.h>
 
 #define SOCK_DIAG_BY_FAMILY 20
-#define SOCK_DESTROY 21
+#define SOCK_DESTROY_BACKPORT 21
 
 struct sock_diag_req {
 	__u8	sdiag_family;
@@ -20,7 +20,6 @@ enum {
 	SK_MEMINFO_WMEM_QUEUED,
 	SK_MEMINFO_OPTMEM,
 	SK_MEMINFO_BACKLOG,
-	SK_MEMINFO_DROPS,
 
 	SK_MEMINFO_VARS,
 };

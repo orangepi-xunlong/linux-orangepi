@@ -6,8 +6,7 @@ outputs to the system.
 
 Required Properties:
 
-- compatible: Should be one of:
-	- "mediatek,mt2701-infracfg", "syscon"
+- compatible: Should be:
 	- "mediatek,mt8135-infracfg", "syscon"
 	- "mediatek,mt8173-infracfg", "syscon"
 - #clock-cells: Must be 1
@@ -19,7 +18,7 @@ The available clocks are defined in dt-bindings/clock/mt*-clk.h.
 Also it uses the common reset controller binding from
 Documentation/devicetree/bindings/reset/reset.txt.
 The available reset outputs are defined in
-dt-bindings/reset/mt*-resets.h
+dt-bindings/reset-controller/mt*-resets.h
 
 Example:
 

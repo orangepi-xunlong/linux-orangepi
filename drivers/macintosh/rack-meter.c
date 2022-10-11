@@ -154,8 +154,8 @@ static void rackmeter_do_pause(struct rackmeter *rm, int pause)
 		DBDMA_DO_STOP(rm->dma_regs);
 		return;
 	}
-	memset(rdma->buf1, 0, sizeof(rdma->buf1));
-	memset(rdma->buf2, 0, sizeof(rdma->buf2));
+	memset(rdma->buf1, 0, SAMPLE_COUNT & sizeof(u32));
+	memset(rdma->buf2, 0, SAMPLE_COUNT & sizeof(u32));
 
 	rm->dma_buf_v->mark = 0;
 
@@ -227,7 +227,6 @@ static void rackmeter_do_timer(struct work_struct *work)
 
 	total_idle_ticks = get_cpu_idle_time(cpu);
 	idle_ticks = (unsigned int) (total_idle_ticks - rcpu->prev_idle);
-	idle_ticks = min(idle_ticks, total_ticks);
 	rcpu->prev_idle = total_idle_ticks;
 
 	/* We do a very dumb calculation to update the LEDs for now,
@@ -427,7 +426,7 @@ static int rackmeter_probe(struct macio_dev* mdev,
 	rm->irq = macio_irq(mdev, 1);
 #else
 	rm->irq = irq_of_parse_and_map(i2s, 1);
-	if (!rm->irq ||
+	if (rm->irq == NO_IRQ ||
 	    of_address_to_resource(i2s, 0, &ri2s) ||
 	    of_address_to_resource(i2s, 1, &rdma)) {
 		printk(KERN_ERR
@@ -583,7 +582,6 @@ static struct of_device_id rackmeter_match[] = {
 	{ .name = "i2s" },
 	{ }
 };
-MODULE_DEVICE_TABLE(of, rackmeter_match);
 
 static struct macio_driver rackmeter_driver = {
 	.driver = {

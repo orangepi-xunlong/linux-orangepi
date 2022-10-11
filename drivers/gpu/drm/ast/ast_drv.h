@@ -261,6 +261,7 @@ struct ast_framebuffer {
 struct ast_fbdev {
 	struct drm_fb_helper helper;
 	struct ast_framebuffer afb;
+	struct list_head fbdev_list;
 	void *sysram;
 	int size;
 	struct ttm_bo_kmap_obj mapping;
@@ -313,7 +314,7 @@ extern void ast_mode_fini(struct drm_device *dev);
 
 int ast_framebuffer_init(struct drm_device *dev,
 			 struct ast_framebuffer *ast_fb,
-			 const struct drm_mode_fb_cmd2 *mode_cmd,
+			 struct drm_mode_fb_cmd2 *mode_cmd,
 			 struct drm_gem_object *obj);
 
 int ast_fbdev_init(struct drm_device *dev);
@@ -372,7 +373,7 @@ static inline int ast_bo_reserve(struct ast_bo *bo, bool no_wait)
 {
 	int ret;
 
-	ret = ttm_bo_reserve(&bo->bo, true, no_wait, NULL);
+	ret = ttm_bo_reserve(&bo->bo, true, no_wait, false, NULL);
 	if (ret) {
 		if (ret != -ERESTARTSYS && ret != -EBUSY)
 			DRM_ERROR("reserve failed %p\n", bo);

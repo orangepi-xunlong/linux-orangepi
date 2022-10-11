@@ -236,23 +236,9 @@ struct dasd_ccw_req {
 					 * stolen. Should not be combined with
 					 * DASD_CQR_FLAGS_USE_ERP
 					 */
-/*
- * The following flags are used to suppress output of certain errors.
- * These flags should only be used for format checks!
- */
-#define DASD_CQR_SUPPRESS_NRF	4	/* Suppress 'No Record Found' error */
-#define DASD_CQR_SUPPRESS_FP	5	/* Suppress 'File Protected' error*/
-#define DASD_CQR_SUPPRESS_IL	6	/* Suppress 'Incorrect Length' error */
 
 /* Signature for error recovery functions. */
 typedef struct dasd_ccw_req *(*dasd_erp_fn_t) (struct dasd_ccw_req *);
-
-/*
- * A single CQR can only contain a maximum of 255 CCWs. It is limited by
- * the locate record and locate record extended count value which can only hold
- * 1 Byte max.
- */
-#define DASD_CQR_MAX_CCW 255
 
 /*
  * Unique identifier for dasd device.
@@ -325,8 +311,7 @@ struct dasd_discipline {
 	 * Device operation functions. build_cp creates a ccw chain for
 	 * a block device request, start_io starts the request and
 	 * term_IO cancels it (e.g. in case of a timeout). format_device
-	 * formats the device and check_device_format compares the format of
-	 * a device with the expected format_data.
+	 * returns a ccw chain to be used to format the device.
 	 * handle_terminated_request allows to examine a cqr and prepare
 	 * it for retry.
 	 */
@@ -337,9 +322,7 @@ struct dasd_discipline {
 	int (*term_IO) (struct dasd_ccw_req *);
 	void (*handle_terminated_request) (struct dasd_ccw_req *);
 	int (*format_device) (struct dasd_device *,
-			      struct format_data_t *, int);
-	int (*check_device_format)(struct dasd_device *,
-				   struct format_check_t *, int);
+			      struct format_data_t *, int enable_pav);
 	int (*free_cp) (struct dasd_ccw_req *, struct request *);
 
 	/*
@@ -375,8 +358,6 @@ struct dasd_discipline {
 	int (*get_uid) (struct dasd_device *, struct dasd_uid *);
 	void (*kick_validate) (struct dasd_device *);
 	int (*check_attention)(struct dasd_device *, __u8);
-	int (*host_access_count)(struct dasd_device *);
-	int (*hosts_print)(struct dasd_device *, struct seq_file *);
 };
 
 extern struct dasd_discipline *dasd_diag_discipline_pointer;
@@ -457,7 +438,7 @@ struct dasd_device {
 	/* Device discipline stuff. */
 	struct dasd_discipline *discipline;
 	struct dasd_discipline *base_discipline;
-	void *private;
+	char *private;
 	struct dasd_path path_data;
 
 	/* Device state and target state. */
@@ -482,7 +463,6 @@ struct dasd_device {
 	struct work_struct restore_device;
 	struct work_struct reload_device;
 	struct work_struct kick_validate;
-	struct work_struct suc_work;
 	struct timer_list timer;
 
 	debug_info_t *debug_area;
@@ -499,7 +479,6 @@ struct dasd_device {
 	unsigned long blk_timeout;
 
 	struct dentry *debugfs_dentry;
-	struct dentry *hosts_dentry;
 	struct dasd_profile profile;
 };
 
@@ -556,7 +535,6 @@ struct dasd_attention_data {
 #define DASD_FLAG_SAFE_OFFLINE_RUNNING	11	/* safe offline running */
 #define DASD_FLAG_ABORTALL	12	/* Abort all noretry requests */
 #define DASD_FLAG_PATH_VERIFY	13	/* Path verification worker running */
-#define DASD_FLAG_SUC		14	/* unhandled summary unit check */
 
 #define DASD_SLEEPON_START_TAG	((void *) 1)
 #define DASD_SLEEPON_END_TAG	((void *) 2)
@@ -725,7 +703,6 @@ void dasd_block_clear_timer(struct dasd_block *);
 int  dasd_cancel_req(struct dasd_ccw_req *);
 int dasd_flush_device_queue(struct dasd_device *);
 int dasd_generic_probe (struct ccw_device *, struct dasd_discipline *);
-void dasd_generic_free_discipline(struct dasd_device *);
 void dasd_generic_remove (struct ccw_device *cdev);
 int dasd_generic_set_online(struct ccw_device *, struct dasd_discipline *);
 int dasd_generic_set_offline (struct ccw_device *cdev);

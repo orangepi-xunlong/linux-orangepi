@@ -288,7 +288,19 @@ static struct w1_family w1_family_2d = {
 	.fid = W1_EEPROM_DS2431,
 	.fops = &w1_f2d_fops,
 };
-module_w1_family(w1_family_2d);
+
+static int __init w1_f2d_init(void)
+{
+	return w1_register_family(&w1_family_2d);
+}
+
+static void __exit w1_f2d_fini(void)
+{
+	w1_unregister_family(&w1_family_2d);
+}
+
+module_init(w1_f2d_init);
+module_exit(w1_f2d_fini);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Bernhard Weirich <bernhard.weirich@riedel.net>");

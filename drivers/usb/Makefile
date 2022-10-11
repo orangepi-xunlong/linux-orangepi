@@ -13,7 +13,6 @@ obj-$(CONFIG_USB_ISP1760)	+= isp1760/
 
 obj-$(CONFIG_USB_MON)		+= mon/
 
-obj-$(CONFIG_USB_SUNXI_HCI)	+= host/
 obj-$(CONFIG_PCI)		+= host/
 obj-$(CONFIG_USB_EHCI_HCD)	+= host/
 obj-$(CONFIG_USB_ISP116X_HCD)	+= host/
@@ -27,7 +26,7 @@ obj-$(CONFIG_USB_U132_HCD)	+= host/
 obj-$(CONFIG_USB_R8A66597_HCD)	+= host/
 obj-$(CONFIG_USB_HWA_HCD)	+= host/
 obj-$(CONFIG_USB_IMX21_HCD)	+= host/
-obj-$(CONFIG_USB_FSL_USB2)	+= host/
+obj-$(CONFIG_USB_FSL_MPH_DR_OF)	+= host/
 obj-$(CONFIG_USB_FOTG210_HCD)	+= host/
 obj-$(CONFIG_USB_MAX3421_HCD)	+= host/
 
@@ -54,6 +53,8 @@ obj-$(CONFIG_EARLY_PRINTK_DBGP)	+= early/
 obj-$(CONFIG_USB_ATM)		+= atm/
 obj-$(CONFIG_USB_SPEEDTOUCH)	+= atm/
 
+obj-$(CONFIG_DWC_OTG_310)	+= dwc_otg_310/
+
 obj-$(CONFIG_USB_MUSB_HDRC)	+= musb/
 obj-$(CONFIG_USB_CHIPIDEA)	+= chipidea/
 obj-$(CONFIG_USB_RENESAS_USBHS)	+= renesas_usbhs/
@@ -62,4 +63,3 @@ obj-$(CONFIG_USB_GADGET)	+= gadget/
 obj-$(CONFIG_USB_COMMON)	+= common/
 
 obj-$(CONFIG_USBIP_CORE)	+= usbip/
-obj-$(CONFIG_USB_SUNXI_USB)     += sunxi_usb/

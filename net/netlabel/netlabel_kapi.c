@@ -37,14 +37,12 @@
 #include <net/ipv6.h>
 #include <net/netlabel.h>
 #include <net/cipso_ipv4.h>
-#include <net/calipso.h>
 #include <asm/bug.h>
 #include <linux/atomic.h>
 
 #include "netlabel_domainhash.h"
 #include "netlabel_unlabeled.h"
 #include "netlabel_cipso_v4.h"
-#include "netlabel_calipso.h"
 #include "netlabel_user.h"
 #include "netlabel_mgmt.h"
 #include "netlabel_addrlist.h"
@@ -74,17 +72,12 @@ int netlbl_cfg_map_del(const char *domain,
 		       struct netlbl_audit *audit_info)
 {
 	if (addr == NULL && mask == NULL) {
-		return netlbl_domhsh_remove(domain, family, audit_info);
+		return netlbl_domhsh_remove(domain, audit_info);
 	} else if (addr != NULL && mask != NULL) {
 		switch (family) {
 		case AF_INET:
 			return netlbl_domhsh_remove_af4(domain, addr, mask,
 							audit_info);
-#if IS_ENABLED(CONFIG_IPV6)
-		case AF_INET6:
-			return netlbl_domhsh_remove_af6(domain, addr, mask,
-							audit_info);
-#endif /* IPv6 */
 		default:
 			return -EPFNOSUPPORT;
 		}
@@ -126,7 +119,6 @@ int netlbl_cfg_unlbl_map_add(const char *domain,
 		if (entry->domain == NULL)
 			goto cfg_unlbl_map_add_failure;
 	}
-	entry->family = family;
 
 	if (addr == NULL && mask == NULL)
 		entry->def.type = NETLBL_NLTYPE_UNLABELED;
@@ -353,7 +345,6 @@ int netlbl_cfg_cipsov4_map_add(u32 doi,
 	entry = kzalloc(sizeof(*entry), GFP_ATOMIC);
 	if (entry == NULL)
 		goto out_entry;
-	entry->family = AF_INET;
 	if (domain != NULL) {
 		entry->domain = kstrdup(domain, GFP_ATOMIC);
 		if (entry->domain == NULL)
@@ -406,139 +397,6 @@ out_domain:
 out_entry:
 	cipso_v4_doi_putdef(doi_def);
 	return ret_val;
-}
-
-/**
- * netlbl_cfg_calipso_add - Add a new CALIPSO DOI definition
- * @doi_def: CALIPSO DOI definition
- * @audit_info: NetLabel audit information
- *
- * Description:
- * Add a new CALIPSO DOI definition as defined by @doi_def.  Returns zero on
- * success and negative values on failure.
- *
- */
-int netlbl_cfg_calipso_add(struct calipso_doi *doi_def,
-			   struct netlbl_audit *audit_info)
-{
-#if IS_ENABLED(CONFIG_IPV6)
-	return calipso_doi_add(doi_def, audit_info);
-#else /* IPv6 */
-	return -ENOSYS;
-#endif /* IPv6 */
-}
-
-/**
- * netlbl_cfg_calipso_del - Remove an existing CALIPSO DOI definition
- * @doi: CALIPSO DOI
- * @audit_info: NetLabel audit information
- *
- * Description:
- * Remove an existing CALIPSO DOI definition matching @doi.  Returns zero on
- * success and negative values on failure.
- *
- */
-void netlbl_cfg_calipso_del(u32 doi, struct netlbl_audit *audit_info)
-{
-#if IS_ENABLED(CONFIG_IPV6)
-	calipso_doi_remove(doi, audit_info);
-#endif /* IPv6 */
-}
-
-/**
- * netlbl_cfg_calipso_map_add - Add a new CALIPSO DOI mapping
- * @doi: the CALIPSO DOI
- * @domain: the domain mapping to add
- * @addr: IP address
- * @mask: IP address mask
- * @audit_info: NetLabel audit information
- *
- * Description:
- * Add a new NetLabel/LSM domain mapping for the given CALIPSO DOI to the
- * NetLabel subsystem.  A @domain value of NULL adds a new default domain
- * mapping.  Returns zero on success, negative values on failure.
- *
- */
-int netlbl_cfg_calipso_map_add(u32 doi,
-			       const char *domain,
-			       const struct in6_addr *addr,
-			       const struct in6_addr *mask,
-			       struct netlbl_audit *audit_info)
-{
-#if IS_ENABLED(CONFIG_IPV6)
-	int ret_val = -ENOMEM;
-	struct calipso_doi *doi_def;
-	struct netlbl_dom_map *entry;
-	struct netlbl_domaddr_map *addrmap = NULL;
-	struct netlbl_domaddr6_map *addrinfo = NULL;
-
-	doi_def = calipso_doi_getdef(doi);
-	if (doi_def == NULL)
-		return -ENOENT;
-
-	entry = kzalloc(sizeof(*entry), GFP_ATOMIC);
-	if (entry == NULL)
-		goto out_entry;
-	entry->family = AF_INET6;
-	if (domain != NULL) {
-		entry->domain = kstrdup(domain, GFP_ATOMIC);
-		if (entry->domain == NULL)
-			goto out_domain;
-	}
-
-	if (addr == NULL && mask == NULL) {
-		entry->def.calipso = doi_def;
-		entry->def.type = NETLBL_NLTYPE_CALIPSO;
-	} else if (addr != NULL && mask != NULL) {
-		addrmap = kzalloc(sizeof(*addrmap), GFP_ATOMIC);
-		if (addrmap == NULL)
-			goto out_addrmap;
-		INIT_LIST_HEAD(&addrmap->list4);
-		INIT_LIST_HEAD(&addrmap->list6);
-
-		addrinfo = kzalloc(sizeof(*addrinfo), GFP_ATOMIC);
-		if (addrinfo == NULL)
-			goto out_addrinfo;
-		addrinfo->def.calipso = doi_def;
-		addrinfo->def.type = NETLBL_NLTYPE_CALIPSO;
-		addrinfo->list.addr = *addr;
-		addrinfo->list.addr.s6_addr32[0] &= mask->s6_addr32[0];
-		addrinfo->list.addr.s6_addr32[1] &= mask->s6_addr32[1];
-		addrinfo->list.addr.s6_addr32[2] &= mask->s6_addr32[2];
-		addrinfo->list.addr.s6_addr32[3] &= mask->s6_addr32[3];
-		addrinfo->list.mask = *mask;
-		addrinfo->list.valid = 1;
-		ret_val = netlbl_af6list_add(&addrinfo->list, &addrmap->list6);
-		if (ret_val != 0)
-			goto cfg_calipso_map_add_failure;
-
-		entry->def.addrsel = addrmap;
-		entry->def.type = NETLBL_NLTYPE_ADDRSELECT;
-	} else {
-		ret_val = -EINVAL;
-		goto out_addrmap;
-	}
-
-	ret_val = netlbl_domhsh_add(entry, audit_info);
-	if (ret_val != 0)
-		goto cfg_calipso_map_add_failure;
-
-	return 0;
-
-cfg_calipso_map_add_failure:
-	kfree(addrinfo);
-out_addrinfo:
-	kfree(addrmap);
-out_addrmap:
-	kfree(entry->domain);
-out_domain:
-	kfree(entry);
-out_entry:
-	calipso_doi_putdef(doi_def);
-	return ret_val;
-#else /* IPv6 */
-	return -ENOSYS;
-#endif /* IPv6 */
 }
 
 /*
@@ -661,7 +519,6 @@ int netlbl_catmap_walk(struct netlbl_lsm_catmap *catmap, u32 offset)
 
 	return -ENOENT;
 }
-EXPORT_SYMBOL(netlbl_catmap_walk);
 
 /**
  * netlbl_catmap_walkrng - Find the end of a string of set bits
@@ -752,19 +609,20 @@ int netlbl_catmap_getlong(struct netlbl_lsm_catmap *catmap,
 		off = catmap->startbit;
 		*offset = off;
 	}
-	iter = _netlbl_catmap_getnode(&catmap, off, _CM_F_WALK, 0);
+	iter = _netlbl_catmap_getnode(&catmap, off, _CM_F_NONE, 0);
 	if (iter == NULL) {
 		*offset = (u32)-1;
 		return 0;
 	}
 
 	if (off < iter->startbit) {
-		*offset = iter->startbit;
-		off = 0;
+		off = iter->startbit;
+		*offset = off;
 	} else
 		off -= iter->startbit;
+
 	idx = off / NETLBL_CATMAP_MAPSIZE;
-	*bitmap = iter->bitmap[idx] >> (off % NETLBL_CATMAP_MAPSIZE);
+	*bitmap = iter->bitmap[idx] >> (off % NETLBL_CATMAP_SIZE);
 
 	return 0;
 }
@@ -797,7 +655,6 @@ int netlbl_catmap_setbit(struct netlbl_lsm_catmap **catmap,
 
 	return 0;
 }
-EXPORT_SYMBOL(netlbl_catmap_setbit);
 
 /**
  * netlbl_catmap_setrng - Set a range of bits in a LSM secattr catmap
@@ -820,7 +677,7 @@ int netlbl_catmap_setrng(struct netlbl_lsm_catmap **catmap,
 	u32 spot = start;
 
 	while (rc == 0 && spot <= end) {
-		if (((spot & (BITS_PER_LONG - 1)) == 0) &&
+		if (((spot & (BITS_PER_LONG - 1)) != 0) &&
 		    ((end - spot) > BITS_PER_LONG)) {
 			rc = netlbl_catmap_setlong(catmap,
 						   spot,
@@ -870,76 +727,6 @@ int netlbl_catmap_setlong(struct netlbl_lsm_catmap **catmap,
 	return 0;
 }
 
-/* Bitmap functions
- */
-
-/**
- * netlbl_bitmap_walk - Walk a bitmap looking for a bit
- * @bitmap: the bitmap
- * @bitmap_len: length in bits
- * @offset: starting offset
- * @state: if non-zero, look for a set (1) bit else look for a cleared (0) bit
- *
- * Description:
- * Starting at @offset, walk the bitmap from left to right until either the
- * desired bit is found or we reach the end.  Return the bit offset, -1 if
- * not found, or -2 if error.
- */
-int netlbl_bitmap_walk(const unsigned char *bitmap, u32 bitmap_len,
-		       u32 offset, u8 state)
-{
-	u32 bit_spot;
-	u32 byte_offset;
-	unsigned char bitmask;
-	unsigned char byte;
-
-	byte_offset = offset / 8;
-	byte = bitmap[byte_offset];
-	bit_spot = offset;
-	bitmask = 0x80 >> (offset % 8);
-
-	while (bit_spot < bitmap_len) {
-		if ((state && (byte & bitmask) == bitmask) ||
-		    (state == 0 && (byte & bitmask) == 0))
-			return bit_spot;
-
-		bit_spot++;
-		bitmask >>= 1;
-		if (bitmask == 0) {
-			byte = bitmap[++byte_offset];
-			bitmask = 0x80;
-		}
-	}
-
-	return -1;
-}
-EXPORT_SYMBOL(netlbl_bitmap_walk);
-
-/**
- * netlbl_bitmap_setbit - Sets a single bit in a bitmap
- * @bitmap: the bitmap
- * @bit: the bit
- * @state: if non-zero, set the bit (1) else clear the bit (0)
- *
- * Description:
- * Set a single bit in the bitmask.  Returns zero on success, negative values
- * on error.
- */
-void netlbl_bitmap_setbit(unsigned char *bitmap, u32 bit, u8 state)
-{
-	u32 byte_spot;
-	u8 bitmask;
-
-	/* gcc always rounds to zero when doing integer division */
-	byte_spot = bit / 8;
-	bitmask = 0x80 >> (bit % 8);
-	if (state)
-		bitmap[byte_spot] |= bitmask;
-	else
-		bitmap[byte_spot] &= ~bitmask;
-}
-EXPORT_SYMBOL(netlbl_bitmap_setbit);
-
 /*
  * LSM Functions
  */
@@ -987,7 +774,7 @@ int netlbl_sock_setattr(struct sock *sk,
 	struct netlbl_dom_map *dom_entry;
 
 	rcu_read_lock();
-	dom_entry = netlbl_domhsh_getentry(secattr->domain, family);
+	dom_entry = netlbl_domhsh_getentry(secattr->domain);
 	if (dom_entry == NULL) {
 		ret_val = -ENOENT;
 		goto socket_setattr_return;
@@ -1012,21 +799,9 @@ int netlbl_sock_setattr(struct sock *sk,
 		break;
 #if IS_ENABLED(CONFIG_IPV6)
 	case AF_INET6:
-		switch (dom_entry->def.type) {
-		case NETLBL_NLTYPE_ADDRSELECT:
-			ret_val = -EDESTADDRREQ;
-			break;
-		case NETLBL_NLTYPE_CALIPSO:
-			ret_val = calipso_sock_setattr(sk,
-						       dom_entry->def.calipso,
-						       secattr);
-			break;
-		case NETLBL_NLTYPE_UNLABELED:
-			ret_val = 0;
-			break;
-		default:
-			ret_val = -ENOENT;
-		}
+		/* since we don't support any IPv6 labeling protocols right
+		 * now we can optimize everything away until we do */
+		ret_val = 0;
 		break;
 #endif /* IPv6 */
 	default:
@@ -1053,11 +828,6 @@ void netlbl_sock_delattr(struct sock *sk)
 	case AF_INET:
 		cipso_v4_sock_delattr(sk);
 		break;
-#if IS_ENABLED(CONFIG_IPV6)
-	case AF_INET6:
-		calipso_sock_delattr(sk);
-		break;
-#endif /* IPv6 */
 	}
 }
 
@@ -1084,7 +854,7 @@ int netlbl_sock_getattr(struct sock *sk,
 		break;
 #if IS_ENABLED(CONFIG_IPV6)
 	case AF_INET6:
-		ret_val = calipso_sock_getattr(sk, secattr);
+		ret_val = -ENOMSG;
 		break;
 #endif /* IPv6 */
 	default:
@@ -1112,9 +882,6 @@ int netlbl_conn_setattr(struct sock *sk,
 {
 	int ret_val;
 	struct sockaddr_in *addr4;
-#if IS_ENABLED(CONFIG_IPV6)
-	struct sockaddr_in6 *addr6;
-#endif
 	struct netlbl_dommap_def *entry;
 
 	rcu_read_lock();
@@ -1135,7 +902,7 @@ int netlbl_conn_setattr(struct sock *sk,
 		case NETLBL_NLTYPE_UNLABELED:
 			/* just delete the protocols we support for right now
 			 * but we could remove other protocols if needed */
-			netlbl_sock_delattr(sk);
+			cipso_v4_sock_delattr(sk);
 			ret_val = 0;
 			break;
 		default:
@@ -1144,27 +911,9 @@ int netlbl_conn_setattr(struct sock *sk,
 		break;
 #if IS_ENABLED(CONFIG_IPV6)
 	case AF_INET6:
-		addr6 = (struct sockaddr_in6 *)addr;
-		entry = netlbl_domhsh_getentry_af6(secattr->domain,
-						   &addr6->sin6_addr);
-		if (entry == NULL) {
-			ret_val = -ENOENT;
-			goto conn_setattr_return;
-		}
-		switch (entry->type) {
-		case NETLBL_NLTYPE_CALIPSO:
-			ret_val = calipso_sock_setattr(sk,
-						       entry->calipso, secattr);
-			break;
-		case NETLBL_NLTYPE_UNLABELED:
-			/* just delete the protocols we support for right now
-			 * but we could remove other protocols if needed */
-			netlbl_sock_delattr(sk);
-			ret_val = 0;
-			break;
-		default:
-			ret_val = -ENOENT;
-		}
+		/* since we don't support any IPv6 labeling protocols right
+		 * now we can optimize everything away until we do */
+		ret_val = 0;
 		break;
 #endif /* IPv6 */
 	default:
@@ -1191,13 +940,12 @@ int netlbl_req_setattr(struct request_sock *req,
 {
 	int ret_val;
 	struct netlbl_dommap_def *entry;
-	struct inet_request_sock *ireq = inet_rsk(req);
 
 	rcu_read_lock();
 	switch (req->rsk_ops->family) {
 	case AF_INET:
 		entry = netlbl_domhsh_getentry_af4(secattr->domain,
-						   ireq->ir_rmt_addr);
+						   inet_rsk(req)->ir_rmt_addr);
 		if (entry == NULL) {
 			ret_val = -ENOENT;
 			goto req_setattr_return;
@@ -1208,7 +956,9 @@ int netlbl_req_setattr(struct request_sock *req,
 						       entry->cipso, secattr);
 			break;
 		case NETLBL_NLTYPE_UNLABELED:
-			netlbl_req_delattr(req);
+			/* just delete the protocols we support for right now
+			 * but we could remove other protocols if needed */
+			cipso_v4_req_delattr(req);
 			ret_val = 0;
 			break;
 		default:
@@ -1217,24 +967,9 @@ int netlbl_req_setattr(struct request_sock *req,
 		break;
 #if IS_ENABLED(CONFIG_IPV6)
 	case AF_INET6:
-		entry = netlbl_domhsh_getentry_af6(secattr->domain,
-						   &ireq->ir_v6_rmt_addr);
-		if (entry == NULL) {
-			ret_val = -ENOENT;
-			goto req_setattr_return;
-		}
-		switch (entry->type) {
-		case NETLBL_NLTYPE_CALIPSO:
-			ret_val = calipso_req_setattr(req,
-						      entry->calipso, secattr);
-			break;
-		case NETLBL_NLTYPE_UNLABELED:
-			netlbl_req_delattr(req);
-			ret_val = 0;
-			break;
-		default:
-			ret_val = -ENOENT;
-		}
+		/* since we don't support any IPv6 labeling protocols right
+		 * now we can optimize everything away until we do */
+		ret_val = 0;
 		break;
 #endif /* IPv6 */
 	default:
@@ -1260,11 +995,6 @@ void netlbl_req_delattr(struct request_sock *req)
 	case AF_INET:
 		cipso_v4_req_delattr(req);
 		break;
-#if IS_ENABLED(CONFIG_IPV6)
-	case AF_INET6:
-		calipso_req_delattr(req);
-		break;
-#endif /* IPv6 */
 	}
 }
 
@@ -1285,17 +1015,13 @@ int netlbl_skbuff_setattr(struct sk_buff *skb,
 {
 	int ret_val;
 	struct iphdr *hdr4;
-#if IS_ENABLED(CONFIG_IPV6)
-	struct ipv6hdr *hdr6;
-#endif
 	struct netlbl_dommap_def *entry;
 
 	rcu_read_lock();
 	switch (family) {
 	case AF_INET:
 		hdr4 = ip_hdr(skb);
-		entry = netlbl_domhsh_getentry_af4(secattr->domain,
-						   hdr4->daddr);
+		entry = netlbl_domhsh_getentry_af4(secattr->domain,hdr4->daddr);
 		if (entry == NULL) {
 			ret_val = -ENOENT;
 			goto skbuff_setattr_return;
@@ -1316,26 +1042,9 @@ int netlbl_skbuff_setattr(struct sk_buff *skb,
 		break;
 #if IS_ENABLED(CONFIG_IPV6)
 	case AF_INET6:
-		hdr6 = ipv6_hdr(skb);
-		entry = netlbl_domhsh_getentry_af6(secattr->domain,
-						   &hdr6->daddr);
-		if (entry == NULL) {
-			ret_val = -ENOENT;
-			goto skbuff_setattr_return;
-		}
-		switch (entry->type) {
-		case NETLBL_NLTYPE_CALIPSO:
-			ret_val = calipso_skbuff_setattr(skb, entry->calipso,
-							 secattr);
-			break;
-		case NETLBL_NLTYPE_UNLABELED:
-			/* just delete the protocols we support for right now
-			 * but we could remove other protocols if needed */
-			ret_val = calipso_skbuff_delattr(skb);
-			break;
-		default:
-			ret_val = -ENOENT;
-		}
+		/* since we don't support any IPv6 labeling protocols right
+		 * now we can optimize everything away until we do */
+		ret_val = 0;
 		break;
 #endif /* IPv6 */
 	default:
@@ -1374,9 +1083,6 @@ int netlbl_skbuff_getattr(const struct sk_buff *skb,
 		break;
 #if IS_ENABLED(CONFIG_IPV6)
 	case AF_INET6:
-		ptr = calipso_optptr(skb);
-		if (ptr && calipso_getattr(ptr, secattr) == 0)
-			return 0;
 		break;
 #endif /* IPv6 */
 	}
@@ -1387,7 +1093,6 @@ int netlbl_skbuff_getattr(const struct sk_buff *skb,
 /**
  * netlbl_skbuff_err - Handle a LSM error on a sk_buff
  * @skb: the packet
- * @family: the family
  * @error: the error code
  * @gateway: true if host is acting as a gateway, false otherwise
  *
@@ -1397,14 +1102,10 @@ int netlbl_skbuff_getattr(const struct sk_buff *skb,
  * according to the packet's labeling protocol.
  *
  */
-void netlbl_skbuff_err(struct sk_buff *skb, u16 family, int error, int gateway)
+void netlbl_skbuff_err(struct sk_buff *skb, int error, int gateway)
 {
-	switch (family) {
-	case AF_INET:
-		if (cipso_v4_optptr(skb))
-			cipso_v4_error(skb, error, gateway);
-		break;
-	}
+	if (cipso_v4_optptr(skb))
+		cipso_v4_error(skb, error, gateway);
 }
 
 /**
@@ -1419,15 +1120,11 @@ void netlbl_skbuff_err(struct sk_buff *skb, u16 family, int error, int gateway)
 void netlbl_cache_invalidate(void)
 {
 	cipso_v4_cache_invalidate();
-#if IS_ENABLED(CONFIG_IPV6)
-	calipso_cache_invalidate();
-#endif /* IPv6 */
 }
 
 /**
  * netlbl_cache_add - Add an entry to a NetLabel protocol cache
  * @skb: the packet
- * @family: the family
  * @secattr: the packet's security attributes
  *
  * Description:
@@ -1436,7 +1133,7 @@ void netlbl_cache_invalidate(void)
  * values on error.
  *
  */
-int netlbl_cache_add(const struct sk_buff *skb, u16 family,
+int netlbl_cache_add(const struct sk_buff *skb,
 		     const struct netlbl_lsm_secattr *secattr)
 {
 	unsigned char *ptr;
@@ -1444,20 +1141,10 @@ int netlbl_cache_add(const struct sk_buff *skb, u16 family,
 	if ((secattr->flags & NETLBL_SECATTR_CACHE) == 0)
 		return -ENOMSG;
 
-	switch (family) {
-	case AF_INET:
-		ptr = cipso_v4_optptr(skb);
-		if (ptr)
-			return cipso_v4_cache_add(ptr, secattr);
-		break;
-#if IS_ENABLED(CONFIG_IPV6)
-	case AF_INET6:
-		ptr = calipso_optptr(skb);
-		if (ptr)
-			return calipso_cache_add(ptr, secattr);
-		break;
-#endif /* IPv6 */
-	}
+	ptr = cipso_v4_optptr(skb);
+	if (ptr)
+		return cipso_v4_cache_add(ptr, secattr);
+
 	return -ENOMSG;
 }
 
@@ -1482,7 +1169,6 @@ struct audit_buffer *netlbl_audit_start(int type,
 {
 	return netlbl_audit_start_common(type, audit_info);
 }
-EXPORT_SYMBOL(netlbl_audit_start);
 
 /*
  * Setup Functions

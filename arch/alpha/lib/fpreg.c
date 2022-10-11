@@ -4,9 +4,6 @@
  * (C) Copyright 1998 Linus Torvalds
  */
 
-#include <linux/compiler.h>
-#include <linux/export.h>
-
 #if defined(CONFIG_ALPHA_EV6) || defined(CONFIG_ALPHA_EV67)
 #define STT(reg,val)  asm volatile ("ftoit $f"#reg",%0" : "=r"(val));
 #else
@@ -55,7 +52,6 @@ alpha_read_fp_reg (unsigned long reg)
 	}
 	return val;
 }
-EXPORT_SYMBOL(alpha_read_fp_reg);
 
 #if defined(CONFIG_ALPHA_EV6) || defined(CONFIG_ALPHA_EV67)
 #define LDT(reg,val)  asm volatile ("itoft %0,$f"#reg : : "r"(val));
@@ -101,7 +97,6 @@ alpha_write_fp_reg (unsigned long reg, unsigned long val)
 	      case 31: LDT(31, val); break;
 	}
 }
-EXPORT_SYMBOL(alpha_write_fp_reg);
 
 #if defined(CONFIG_ALPHA_EV6) || defined(CONFIG_ALPHA_EV67)
 #define STS(reg,val)  asm volatile ("ftois $f"#reg",%0" : "=r"(val));
@@ -151,7 +146,6 @@ alpha_read_fp_reg_s (unsigned long reg)
 	}
 	return val;
 }
-EXPORT_SYMBOL(alpha_read_fp_reg_s);
 
 #if defined(CONFIG_ALPHA_EV6) || defined(CONFIG_ALPHA_EV67)
 #define LDS(reg,val)  asm volatile ("itofs %0,$f"#reg : : "r"(val));
@@ -197,4 +191,3 @@ alpha_write_fp_reg_s (unsigned long reg, unsigned long val)
 	      case 31: LDS(31, val); break;
 	}
 }
-EXPORT_SYMBOL(alpha_write_fp_reg_s);

@@ -14,7 +14,7 @@
 #include "kirkwood-synology.dtsi"
 
 / {
-	model = "Synology DS112";
+	model = "Synology DS111";
 	compatible = "synology,ds111", "marvell,kirkwood";
 
 	memory {
@@ -44,10 +44,6 @@
 	status = "okay";
 };
 
-&pciec {
-        status = "okay";
-};
-
-&pcie1 {
+&pcie2 {
 	status = "okay";
 };

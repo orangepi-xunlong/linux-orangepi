@@ -306,7 +306,7 @@ static int pmcraid_change_queue_depth(struct scsi_device *scsi_dev, int depth)
  * Return Value
  *	 None
  */
-static void pmcraid_init_cmdblk(struct pmcraid_cmd *cmd, int index)
+void pmcraid_init_cmdblk(struct pmcraid_cmd *cmd, int index)
 {
 	struct pmcraid_ioarcb *ioarcb = &(cmd->ioa_cb->ioarcb);
 	dma_addr_t dma_addr = cmd->ioa_cb_bus_addr;
@@ -401,7 +401,7 @@ static struct pmcraid_cmd *pmcraid_get_free_cmd(
  * Return Value:
  *	nothing
  */
-static void pmcraid_return_cmd(struct pmcraid_cmd *cmd)
+void pmcraid_return_cmd(struct pmcraid_cmd *cmd)
 {
 	struct pmcraid_instance *pinstance = cmd->drv_inst;
 	unsigned long lock_flags;
@@ -1710,7 +1710,7 @@ static struct pmcraid_ioasc_error *pmcraid_get_error_info(u32 ioasc)
  * @ioasc: ioasc code
  * @cmd: pointer to command that resulted in 'ioasc'
  */
-static void pmcraid_ioasc_logger(u32 ioasc, struct pmcraid_cmd *cmd)
+void pmcraid_ioasc_logger(u32 ioasc, struct pmcraid_cmd *cmd)
 {
 	struct pmcraid_ioasc_error *error_info = pmcraid_get_error_info(ioasc);
 
@@ -3137,7 +3137,7 @@ static int pmcraid_eh_host_reset_handler(struct scsi_cmnd *scmd)
  *   returns pointer pmcraid_ioadl_desc, initialized to point to internal
  *   or external IOADLs
  */
-static struct pmcraid_ioadl_desc *
+struct pmcraid_ioadl_desc *
 pmcraid_init_ioadls(struct pmcraid_cmd *cmd, int sgcount)
 {
 	struct pmcraid_ioadl_desc *ioadl;

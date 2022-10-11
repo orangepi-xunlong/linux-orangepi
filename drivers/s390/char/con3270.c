@@ -405,7 +405,7 @@ con3270_deactivate(struct raw3270_view *view)
 	del_timer(&cp->timer);
 }
 
-static void
+static int
 con3270_irq(struct con3270 *cp, struct raw3270_request *rq, struct irb *irb)
 {
 	/* Handle ATTN. Schedule tasklet to read aid. */
@@ -423,6 +423,7 @@ con3270_irq(struct con3270 *cp, struct raw3270_request *rq, struct irb *irb)
 		cp->update_flags = CON_UPDATE_ALL;
 		con3270_set_timer(cp, 1);
 	}
+	return RAW3270_IO_DONE;
 }
 
 /* Console view to a 3270 device. */
@@ -610,8 +611,6 @@ con3270_init(void)
 		return PTR_ERR(rp);
 
 	condev = kzalloc(sizeof(struct con3270), GFP_KERNEL | GFP_DMA);
-	if (!condev)
-		return -ENOMEM;
 	condev->view.dev = rp;
 
 	condev->read = raw3270_request_alloc(0);
@@ -628,7 +627,7 @@ con3270_init(void)
 		     (void (*)(unsigned long)) con3270_read_tasklet,
 		     (unsigned long) condev->read);
 
-	raw3270_add_view(&condev->view, &con3270_fn, 1);
+	raw3270_add_view(&condev->view, &con3270_fn, 1, RAW3270_VIEW_LOCK_IRQ);
 
 	INIT_LIST_HEAD(&condev->freemem);
 	for (i = 0; i < CON3270_STRING_PAGES; i++) {

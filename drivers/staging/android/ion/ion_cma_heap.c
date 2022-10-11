@@ -20,6 +20,9 @@
 #include <linux/errno.h>
 #include <linux/err.h>
 #include <linux/dma-mapping.h>
+#ifdef CONFIG_RK_IOMMU
+#include <linux/rockchip-iovmm.h>
+#endif
 
 #include "ion.h"
 #include "ion_priv.h"
@@ -49,6 +52,12 @@ static int ion_cma_allocate(struct ion_heap *heap, struct ion_buffer *buffer,
 	struct device *dev = cma_heap->dev;
 	struct ion_cma_buffer_info *info;
 
+	if (buffer->flags & ION_FLAG_CACHED)
+		return -EINVAL;
+
+	if (align > PAGE_SIZE)
+		return -EINVAL;
+
 	info = kzalloc(sizeof(struct ion_cma_buffer_info), GFP_KERNEL);
 	if (!info)
 		return ION_CMA_ALLOCATE_FAILED;
@@ -70,7 +79,6 @@ static int ion_cma_allocate(struct ion_heap *heap, struct ion_buffer *buffer,
 		goto free_table;
 	/* keep this for memory release */
 	buffer->priv_virt = info;
-	buffer->sg_table = info->table;
 	return 0;
 
 free_table:
@@ -96,19 +104,45 @@ static void ion_cma_free(struct ion_buffer *buffer)
 	kfree(info);
 }
 
+/* return physical address in addr */
+static int ion_cma_phys(struct ion_heap *heap, struct ion_buffer *buffer,
+			ion_phys_addr_t *addr, size_t *len)
+{
+	struct ion_cma_heap *cma_heap = to_cma_heap(buffer->heap);
+	struct device *dev = cma_heap->dev;
+	struct ion_cma_buffer_info *info = buffer->priv_virt;
+
+	dev_dbg(dev, "Return buffer %p physical address %pa\n", buffer,
+		&info->handle);
+
+	*addr = info->handle;
+	*len = buffer->size;
+
+	return 0;
+}
+
+static struct sg_table *ion_cma_heap_map_dma(struct ion_heap *heap,
+					     struct ion_buffer *buffer)
+{
+	struct ion_cma_buffer_info *info = buffer->priv_virt;
+
+	return info->table;
+}
+
+static void ion_cma_heap_unmap_dma(struct ion_heap *heap,
+				   struct ion_buffer *buffer)
+{
+}
+
 static int ion_cma_mmap(struct ion_heap *mapper, struct ion_buffer *buffer,
 			struct vm_area_struct *vma)
 {
+	struct ion_cma_heap *cma_heap = to_cma_heap(buffer->heap);
+	struct device *dev = cma_heap->dev;
 	struct ion_cma_buffer_info *info = buffer->priv_virt;
-	/* we need cached map in most case, so donot use dma_mmap_coherent */
-	/*
-	 *return dma_mmap_coherent(dev, vma, info->cpu_addr, info->handle,
-	 *			 buffer->size);
-	*/
-	return remap_pfn_range(vma, vma->vm_start,
-			      __phys_to_pfn((u32)info->handle) + vma->vm_pgoff,
-			      vma->vm_end - vma->vm_start,
-			      vma->vm_page_prot);
+
+	return dma_mmap_coherent(dev, vma, info->cpu_addr, info->handle,
+				 buffer->size);
 }
 
 static void *ion_cma_map_kernel(struct ion_heap *heap,
@@ -120,44 +154,63 @@ static void *ion_cma_map_kernel(struct ion_heap *heap,
 }
 
 static void ion_cma_unmap_kernel(struct ion_heap *heap,
-				 struct ion_buffer *buffer)
+					struct ion_buffer *buffer)
 {
 }
 
-/* return physical address in addr */
-static int ion_cma_phys(struct ion_heap *heap, struct ion_buffer *buffer,
-			ion_phys_addr_t *addr, size_t *len)
+#ifdef CONFIG_RK_IOMMU
+static int ion_cma_map_iommu(struct ion_buffer *buffer,
+			     struct device *iommu_dev,
+			     struct ion_iommu_map *data,
+			     unsigned long iova_length,
+			     unsigned long flags)
 {
-	struct ion_cma_heap *cma_heap = to_cma_heap(buffer->heap);
-	struct device *dev = cma_heap->dev;
+	int ret = 0;
 	struct ion_cma_buffer_info *info = buffer->priv_virt;
 
-	dev_dbg(dev, "Return buffer %p physical address 0x%pa\n", buffer,
-		&info->handle);
+	data->iova_addr = rockchip_iovmm_map(iommu_dev,
+					  info->table->sgl,
+					  0,
+					  iova_length);
+	pr_debug("%s: map %pad -> %lx\n", __func__,
+		&info->table->sgl->dma_address,
+		data->iova_addr);
+	if (IS_ERR_VALUE(data->iova_addr)) {
+		pr_err("%s: failed: %lx\n", __func__, data->iova_addr);
+		ret = data->iova_addr;
+		goto out;
+	}
 
-	*addr = info->handle;
-	*len = buffer->size;
+	data->mapped_size = iova_length;
 
-	return 0;
+out:
+	return ret;
 }
+
+void ion_cma_unmap_iommu(struct device *iommu_dev, struct ion_iommu_map *data)
+{
+	pr_debug("%s: unmap %x@%lx\n",
+		 __func__,
+		 data->mapped_size,
+		 data->iova_addr);
+	rockchip_iovmm_unmap(iommu_dev, data->iova_addr);
+}
+#endif
 
 static struct ion_heap_ops ion_cma_ops = {
 	.allocate = ion_cma_allocate,
 	.free = ion_cma_free,
+	.map_dma = ion_cma_heap_map_dma,
+	.unmap_dma = ion_cma_heap_unmap_dma,
+	.phys = ion_cma_phys,
 	.map_user = ion_cma_mmap,
 	.map_kernel = ion_cma_map_kernel,
 	.unmap_kernel = ion_cma_unmap_kernel,
-	.phys = ion_cma_phys,
+#ifdef CONFIG_RK_IOMMU
+	.map_iommu = ion_cma_map_iommu,
+	.unmap_iommu = ion_cma_unmap_iommu,
+#endif
 };
-static int ion_cma_debug_show(struct ion_heap *heap,
-			struct seq_file *sq, void *para)
-{
-	if (!heap || !sq)
-		return (-EINVAL);
-	if (heap->type != ION_HEAP_TYPE_DMA)
-		return (-ENODEV);
-	return dma_contiguous_area_maps(sq);
-}
 
 struct ion_heap *ion_cma_heap_create(struct ion_platform_heap *data)
 {
@@ -175,7 +228,6 @@ struct ion_heap *ion_cma_heap_create(struct ion_platform_heap *data)
 	 */
 	cma_heap->dev = data->priv;
 	cma_heap->heap.type = ION_HEAP_TYPE_DMA;
-	cma_heap->heap.debug_show = ion_cma_debug_show;
 	return &cma_heap->heap;
 }
 

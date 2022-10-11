@@ -14,26 +14,35 @@ struct gro_cells {
 	struct gro_cell __percpu	*cells;
 };
 
-static inline int gro_cells_receive(struct gro_cells *gcells, struct sk_buff *skb)
+static inline void gro_cells_receive(struct gro_cells *gcells, struct sk_buff *skb)
 {
 	struct gro_cell *cell;
 	struct net_device *dev = skb->dev;
 
-	if (!gcells->cells || skb_cloned(skb) || !(dev->features & NETIF_F_GRO))
-		return netif_rx(skb);
+	rcu_read_lock();
+	if (unlikely(!(dev->flags & IFF_UP)))
+		goto drop;
+
+	if (!gcells->cells || skb_cloned(skb) || !(dev->features & NETIF_F_GRO)) {
+		netif_rx(skb);
+		goto unlock;
+	}
 
 	cell = this_cpu_ptr(gcells->cells);
 
 	if (skb_queue_len(&cell->napi_skbs) > netdev_max_backlog) {
+drop:
 		atomic_long_inc(&dev->rx_dropped);
 		kfree_skb(skb);
-		return NET_RX_DROP;
+		goto unlock;
 	}
 
 	__skb_queue_tail(&cell->napi_skbs, skb);
 	if (skb_queue_len(&cell->napi_skbs) == 1)
 		napi_schedule(&cell->napi);
-	return NET_RX_SUCCESS;
+
+unlock:
+	rcu_read_unlock();
 }
 
 /* called under BH context */
@@ -68,9 +77,6 @@ static inline int gro_cells_init(struct gro_cells *gcells, struct net_device *de
 		struct gro_cell *cell = per_cpu_ptr(gcells->cells, i);
 
 		__skb_queue_head_init(&cell->napi_skbs);
-
-		set_bit(NAPI_STATE_NO_BUSY_POLL, &cell->napi.state);
-
 		netif_napi_add(dev, &cell->napi, gro_cell_poll, 64);
 		napi_enable(&cell->napi);
 	}
@@ -86,6 +92,7 @@ static inline void gro_cells_destroy(struct gro_cells *gcells)
 	for_each_possible_cpu(i) {
 		struct gro_cell *cell = per_cpu_ptr(gcells->cells, i);
 
+		napi_disable(&cell->napi);
 		netif_napi_del(&cell->napi);
 		__skb_queue_purge(&cell->napi_skbs);
 	}

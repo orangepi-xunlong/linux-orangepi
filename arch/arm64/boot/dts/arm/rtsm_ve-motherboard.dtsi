@@ -55,7 +55,7 @@
 		};
 
 		iofpga@3,00000000 {
-			compatible = "simple-bus";
+			compatible = "arm,amba-bus", "simple-bus";
 			#address-cells = <1>;
 			#size-cells = <1>;
 			ranges = <0 3 0 0x200000>;
@@ -226,7 +226,7 @@
 			};
 		};
 
-		v2m_fixed_3v3: v2m-3v3 {
+		v2m_fixed_3v3: fixedregulator@0 {
 			compatible = "regulator-fixed";
 			regulator-name = "3V3";
 			regulator-min-microvolt = <3300000>;
@@ -238,7 +238,7 @@
 			compatible = "arm,vexpress,config-bus";
 			arm,vexpress,config-bridge = <&v2m_sysreg>;
 
-			v2m_oscclk1: oscclk1 {
+			v2m_oscclk1: osc@1 {
 				/* CLCD clock */
 				compatible = "arm,vexpress-osc";
 				arm,vexpress-sysreg,func = <1 1>;
@@ -247,27 +247,27 @@
 				clock-output-names = "v2m:oscclk1";
 			};
 
-			reset {
+			reset@0 {
 				compatible = "arm,vexpress-reset";
 				arm,vexpress-sysreg,func = <5 0>;
 			};
 
-			muxfpga {
+			muxfpga@0 {
 				compatible = "arm,vexpress-muxfpga";
 				arm,vexpress-sysreg,func = <7 0>;
 			};
 
-			shutdown {
+			shutdown@0 {
 				compatible = "arm,vexpress-shutdown";
 				arm,vexpress-sysreg,func = <8 0>;
 			};
 
-			reboot {
+			reboot@0 {
 				compatible = "arm,vexpress-reboot";
 				arm,vexpress-sysreg,func = <9 0>;
 			};
 
-			dvimode {
+			dvimode@0 {
 				compatible = "arm,vexpress-dvimode";
 				arm,vexpress-sysreg,func = <11 0>;
 			};

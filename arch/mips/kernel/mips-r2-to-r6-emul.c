@@ -83,7 +83,7 @@ static inline int mipsr6_emul(struct pt_regs *regs, u32 ir)
 				(s32)MIPSInst_SIMM(ir);
 		return 0;
 	case daddiu_op:
-		if (IS_ENABLED(CONFIG_32BIT))
+		if (config_enabled(CONFIG_32BIT))
 			break;
 
 		if (MIPSInst_RT(ir))
@@ -142,7 +142,7 @@ static inline int mipsr6_emul(struct pt_regs *regs, u32 ir)
 					      (u32)regs->regs[MIPSInst_RT(ir)]);
 			return 0;
 		case dsll_op:
-			if (IS_ENABLED(CONFIG_32BIT) || MIPSInst_RS(ir))
+			if (config_enabled(CONFIG_32BIT) || MIPSInst_RS(ir))
 				break;
 
 			if (MIPSInst_RD(ir))
@@ -151,7 +151,7 @@ static inline int mipsr6_emul(struct pt_regs *regs, u32 ir)
 						MIPSInst_FD(ir));
 			return 0;
 		case dsrl_op:
-			if (IS_ENABLED(CONFIG_32BIT) || MIPSInst_RS(ir))
+			if (config_enabled(CONFIG_32BIT) || MIPSInst_RS(ir))
 				break;
 
 			if (MIPSInst_RD(ir))
@@ -160,7 +160,7 @@ static inline int mipsr6_emul(struct pt_regs *regs, u32 ir)
 						MIPSInst_FD(ir));
 			return 0;
 		case daddu_op:
-			if (IS_ENABLED(CONFIG_32BIT) || MIPSInst_FD(ir))
+			if (config_enabled(CONFIG_32BIT) || MIPSInst_FD(ir))
 				break;
 
 			if (MIPSInst_RD(ir))
@@ -169,7 +169,7 @@ static inline int mipsr6_emul(struct pt_regs *regs, u32 ir)
 					(u64)regs->regs[MIPSInst_RT(ir)];
 			return 0;
 		case dsubu_op:
-			if (IS_ENABLED(CONFIG_32BIT) || MIPSInst_FD(ir))
+			if (config_enabled(CONFIG_32BIT) || MIPSInst_FD(ir))
 				break;
 
 			if (MIPSInst_RD(ir))
@@ -497,7 +497,7 @@ static int dmult_func(struct pt_regs *regs, u32 ir)
 	s64 res;
 	s64 rt, rs;
 
-	if (IS_ENABLED(CONFIG_32BIT))
+	if (config_enabled(CONFIG_32BIT))
 		return SIGILL;
 
 	rt = regs->regs[MIPSInst_RT(ir)];
@@ -529,7 +529,7 @@ static int dmultu_func(struct pt_regs *regs, u32 ir)
 	u64 res;
 	u64 rt, rs;
 
-	if (IS_ENABLED(CONFIG_32BIT))
+	if (config_enabled(CONFIG_32BIT))
 		return SIGILL;
 
 	rt = regs->regs[MIPSInst_RT(ir)];
@@ -560,7 +560,7 @@ static int ddiv_func(struct pt_regs *regs, u32 ir)
 {
 	s64 rt, rs;
 
-	if (IS_ENABLED(CONFIG_32BIT))
+	if (config_enabled(CONFIG_32BIT))
 		return SIGILL;
 
 	rt = regs->regs[MIPSInst_RT(ir)];
@@ -585,7 +585,7 @@ static int ddivu_func(struct pt_regs *regs, u32 ir)
 {
 	u64 rt, rs;
 
-	if (IS_ENABLED(CONFIG_32BIT))
+	if (config_enabled(CONFIG_32BIT))
 		return SIGILL;
 
 	rt = regs->regs[MIPSInst_RT(ir)];
@@ -824,7 +824,7 @@ static int dclz_func(struct pt_regs *regs, u32 ir)
 	u64 res;
 	u64 rs;
 
-	if (IS_ENABLED(CONFIG_32BIT))
+	if (config_enabled(CONFIG_32BIT))
 		return SIGILL;
 
 	if (!MIPSInst_RD(ir))
@@ -851,7 +851,7 @@ static int dclo_func(struct pt_regs *regs, u32 ir)
 	u64 res;
 	u64 rs;
 
-	if (IS_ENABLED(CONFIG_32BIT))
+	if (config_enabled(CONFIG_32BIT))
 		return SIGILL;
 
 	if (!MIPSInst_RD(ir))
@@ -1495,7 +1495,7 @@ fpu_emul:
 		break;
 
 	case ldl_op:
-		if (IS_ENABLED(CONFIG_32BIT)) {
+		if (config_enabled(CONFIG_32BIT)) {
 		    err = SIGILL;
 		    break;
 		}
@@ -1614,7 +1614,7 @@ fpu_emul:
 		break;
 
 	case ldr_op:
-		if (IS_ENABLED(CONFIG_32BIT)) {
+		if (config_enabled(CONFIG_32BIT)) {
 		    err = SIGILL;
 		    break;
 		}
@@ -1733,7 +1733,7 @@ fpu_emul:
 		break;
 
 	case sdl_op:
-		if (IS_ENABLED(CONFIG_32BIT)) {
+		if (config_enabled(CONFIG_32BIT)) {
 		    err = SIGILL;
 		    break;
 		}
@@ -1851,7 +1851,7 @@ fpu_emul:
 		break;
 
 	case sdr_op:
-		if (IS_ENABLED(CONFIG_32BIT)) {
+		if (config_enabled(CONFIG_32BIT)) {
 		    err = SIGILL;
 		    break;
 		}
@@ -2083,7 +2083,7 @@ fpu_emul:
 		break;
 
 	case lld_op:
-		if (IS_ENABLED(CONFIG_32BIT)) {
+		if (config_enabled(CONFIG_32BIT)) {
 		    err = SIGILL;
 		    break;
 		}
@@ -2144,7 +2144,7 @@ fpu_emul:
 		break;
 
 	case scd_op:
-		if (IS_ENABLED(CONFIG_32BIT)) {
+		if (config_enabled(CONFIG_32BIT)) {
 		    err = SIGILL;
 		    break;
 		}

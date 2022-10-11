@@ -34,9 +34,10 @@ import datetime
 #
 # ubuntu:
 #
-#	$ sudo apt-get install postgresql python-pyside.qtsql libqt4-sql-psql
+#	$ sudo apt-get install postgresql
 #	$ sudo su - postgres
-#	$ createuser -s <your user id here>
+#	$ createuser <your user id here>
+#	Shall the new role be a superuser? (y/n) y
 #
 # An example of using this script with Intel PT:
 #
@@ -204,14 +205,23 @@ from ctypes import *
 libpq = CDLL("libpq.so.5")
 PQconnectdb = libpq.PQconnectdb
 PQconnectdb.restype = c_void_p
+PQconnectdb.argtypes = [ c_char_p ]
 PQfinish = libpq.PQfinish
+PQfinish.argtypes = [ c_void_p ]
 PQstatus = libpq.PQstatus
+PQstatus.restype = c_int
+PQstatus.argtypes = [ c_void_p ]
 PQexec = libpq.PQexec
 PQexec.restype = c_void_p
+PQexec.argtypes = [ c_void_p, c_char_p ]
 PQresultStatus = libpq.PQresultStatus
+PQresultStatus.restype = c_int
+PQresultStatus.argtypes = [ c_void_p ]
 PQputCopyData = libpq.PQputCopyData
+PQputCopyData.restype = c_int
 PQputCopyData.argtypes = [ c_void_p, c_void_p, c_int ]
 PQputCopyEnd = libpq.PQputCopyEnd
+PQputCopyEnd.restype = c_int
 PQputCopyEnd.argtypes = [ c_void_p, c_void_p ]
 
 sys.path.append(os.environ['PERF_EXEC_PATH'] + \
@@ -223,14 +233,11 @@ sys.path.append(os.environ['PERF_EXEC_PATH'] + \
 
 perf_db_export_mode = True
 perf_db_export_calls = False
-perf_db_export_callchains = False
-
 
 def usage():
-	print >> sys.stderr, "Usage is: export-to-postgresql.py <database name> [<columns>] [<calls>] [<callchains>]"
+	print >> sys.stderr, "Usage is: export-to-postgresql.py <database name> [<columns>] [<calls>]"
 	print >> sys.stderr, "where:	columns		'all' or 'branches'"
-	print >> sys.stderr, "		calls		'calls' => create calls and call_paths table"
-	print >> sys.stderr, "		callchains	'callchains' => create call_paths table"
+	print >> sys.stderr, "		calls		'calls' => create calls table"
 	raise Exception("Too few arguments")
 
 if (len(sys.argv) < 2):
@@ -248,11 +255,9 @@ if columns not in ("all", "branches"):
 
 branches = (columns == "branches")
 
-for i in range(3,len(sys.argv)):
-	if (sys.argv[i] == "calls"):
+if (len(sys.argv) >= 4):
+	if (sys.argv[3] == "calls"):
 		perf_db_export_calls = True
-	elif (sys.argv[i] == "callchains"):
-		perf_db_export_callchains = True
 	else:
 		usage()
 
@@ -363,16 +368,14 @@ else:
 		'transaction	bigint,'
 		'data_src	bigint,'
 		'branch_type	integer,'
-		'in_tx		boolean,'
-		'call_path_id	bigint)')
+		'in_tx		boolean)')
 
-if perf_db_export_calls or perf_db_export_callchains:
+if perf_db_export_calls:
 	do_query(query, 'CREATE TABLE call_paths ('
 		'id		bigint		NOT NULL,'
 		'parent_id	bigint,'
 		'symbol_id	bigint,'
 		'ip		bigint)')
-if perf_db_export_calls:
 	do_query(query, 'CREATE TABLE calls ('
 		'id		bigint		NOT NULL,'
 		'thread_id	bigint,'
@@ -434,7 +437,7 @@ do_query(query, 'CREATE VIEW comm_threads_view AS '
 		'(SELECT tid FROM threads WHERE id = thread_id) AS tid'
 	' FROM comm_threads')
 
-if perf_db_export_calls or perf_db_export_callchains:
+if perf_db_export_calls:
 	do_query(query, 'CREATE VIEW call_paths_view AS '
 		'SELECT '
 			'c.id,'
@@ -450,7 +453,6 @@ if perf_db_export_calls or perf_db_export_callchains:
 			'(SELECT dso_id FROM symbols WHERE id = p.symbol_id) AS parent_dso_id,'
 			'(SELECT dso FROM symbols_view  WHERE id = p.symbol_id) AS parent_dso_short_name'
 		' FROM call_paths c INNER JOIN call_paths p ON p.id = c.parent_id')
-if perf_db_export_calls:
 	do_query(query, 'CREATE VIEW calls_view AS '
 		'SELECT '
 			'calls.id,'
@@ -548,9 +550,8 @@ dso_file		= open_output_file("dso_table.bin")
 symbol_file		= open_output_file("symbol_table.bin")
 branch_type_file	= open_output_file("branch_type_table.bin")
 sample_file		= open_output_file("sample_table.bin")
-if perf_db_export_calls or perf_db_export_callchains:
-	call_path_file		= open_output_file("call_path_table.bin")
 if perf_db_export_calls:
+	call_path_file		= open_output_file("call_path_table.bin")
 	call_file		= open_output_file("call_table.bin")
 
 def trace_begin():
@@ -562,8 +563,8 @@ def trace_begin():
 	comm_table(0, "unknown")
 	dso_table(0, 0, "unknown", "unknown", "")
 	symbol_table(0, 0, 0, 0, 0, "unknown")
-	sample_table(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-	if perf_db_export_calls or perf_db_export_callchains:
+	sample_table(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+	if perf_db_export_calls:
 		call_path_table(0, 0, 0, 0)
 
 unhandled_count = 0
@@ -579,9 +580,8 @@ def trace_end():
 	copy_output_file(symbol_file,		"symbols")
 	copy_output_file(branch_type_file,	"branch_types")
 	copy_output_file(sample_file,		"samples")
-	if perf_db_export_calls or perf_db_export_callchains:
-		copy_output_file(call_path_file,	"call_paths")
 	if perf_db_export_calls:
+		copy_output_file(call_path_file,	"call_paths")
 		copy_output_file(call_file,		"calls")
 
 	print datetime.datetime.today(), "Removing intermediate files..."
@@ -594,9 +594,8 @@ def trace_end():
 	remove_output_file(symbol_file)
 	remove_output_file(branch_type_file)
 	remove_output_file(sample_file)
-	if perf_db_export_calls or perf_db_export_callchains:
-		remove_output_file(call_path_file)
 	if perf_db_export_calls:
+		remove_output_file(call_path_file)
 		remove_output_file(call_file)
 	os.rmdir(output_dir_name)
 	print datetime.datetime.today(), "Adding primary keys"
@@ -609,9 +608,8 @@ def trace_end():
 	do_query(query, 'ALTER TABLE symbols         ADD PRIMARY KEY (id)')
 	do_query(query, 'ALTER TABLE branch_types    ADD PRIMARY KEY (id)')
 	do_query(query, 'ALTER TABLE samples         ADD PRIMARY KEY (id)')
-	if perf_db_export_calls or perf_db_export_callchains:
-		do_query(query, 'ALTER TABLE call_paths      ADD PRIMARY KEY (id)')
 	if perf_db_export_calls:
+		do_query(query, 'ALTER TABLE call_paths      ADD PRIMARY KEY (id)')
 		do_query(query, 'ALTER TABLE calls           ADD PRIMARY KEY (id)')
 
 	print datetime.datetime.today(), "Adding foreign keys"
@@ -634,11 +632,10 @@ def trace_end():
 					'ADD CONSTRAINT symbolfk   FOREIGN KEY (symbol_id)    REFERENCES symbols    (id),'
 					'ADD CONSTRAINT todsofk    FOREIGN KEY (to_dso_id)    REFERENCES dsos       (id),'
 					'ADD CONSTRAINT tosymbolfk FOREIGN KEY (to_symbol_id) REFERENCES symbols    (id)')
-	if perf_db_export_calls or perf_db_export_callchains:
+	if perf_db_export_calls:
 		do_query(query, 'ALTER TABLE call_paths '
 					'ADD CONSTRAINT parentfk    FOREIGN KEY (parent_id)    REFERENCES call_paths (id),'
 					'ADD CONSTRAINT symbolfk    FOREIGN KEY (symbol_id)    REFERENCES symbols    (id)')
-	if perf_db_export_calls:
 		do_query(query, 'ALTER TABLE calls '
 					'ADD CONSTRAINT threadfk    FOREIGN KEY (thread_id)    REFERENCES threads    (id),'
 					'ADD CONSTRAINT commfk      FOREIGN KEY (comm_id)      REFERENCES comms      (id),'
@@ -706,11 +703,11 @@ def branch_type_table(branch_type, name, *x):
 	value = struct.pack(fmt, 2, 4, branch_type, n, name)
 	branch_type_file.write(value)
 
-def sample_table(sample_id, evsel_id, machine_id, thread_id, comm_id, dso_id, symbol_id, sym_offset, ip, time, cpu, to_dso_id, to_symbol_id, to_sym_offset, to_ip, period, weight, transaction, data_src, branch_type, in_tx, call_path_id, *x):
+def sample_table(sample_id, evsel_id, machine_id, thread_id, comm_id, dso_id, symbol_id, sym_offset, ip, time, cpu, to_dso_id, to_symbol_id, to_sym_offset, to_ip, period, weight, transaction, data_src, branch_type, in_tx, *x):
 	if branches:
-		value = struct.pack("!hiqiqiqiqiqiqiqiqiqiqiiiqiqiqiqiiiBiq", 18, 8, sample_id, 8, evsel_id, 8, machine_id, 8, thread_id, 8, comm_id, 8, dso_id, 8, symbol_id, 8, sym_offset, 8, ip, 8, time, 4, cpu, 8, to_dso_id, 8, to_symbol_id, 8, to_sym_offset, 8, to_ip, 4, branch_type, 1, in_tx, 8, call_path_id)
+		value = struct.pack("!hiqiqiqiqiqiqiqiqiqiqiiiqiqiqiqiiiB", 17, 8, sample_id, 8, evsel_id, 8, machine_id, 8, thread_id, 8, comm_id, 8, dso_id, 8, symbol_id, 8, sym_offset, 8, ip, 8, time, 4, cpu, 8, to_dso_id, 8, to_symbol_id, 8, to_sym_offset, 8, to_ip, 4, branch_type, 1, in_tx)
 	else:
-		value = struct.pack("!hiqiqiqiqiqiqiqiqiqiqiiiqiqiqiqiqiqiqiqiiiBiq", 22, 8, sample_id, 8, evsel_id, 8, machine_id, 8, thread_id, 8, comm_id, 8, dso_id, 8, symbol_id, 8, sym_offset, 8, ip, 8, time, 4, cpu, 8, to_dso_id, 8, to_symbol_id, 8, to_sym_offset, 8, to_ip, 8, period, 8, weight, 8, transaction, 8, data_src, 4, branch_type, 1, in_tx, 8, call_path_id)
+		value = struct.pack("!hiqiqiqiqiqiqiqiqiqiqiiiqiqiqiqiqiqiqiqiiiB", 21, 8, sample_id, 8, evsel_id, 8, machine_id, 8, thread_id, 8, comm_id, 8, dso_id, 8, symbol_id, 8, sym_offset, 8, ip, 8, time, 4, cpu, 8, to_dso_id, 8, to_symbol_id, 8, to_sym_offset, 8, to_ip, 8, period, 8, weight, 8, transaction, 8, data_src, 4, branch_type, 1, in_tx)
 	sample_file.write(value)
 
 def call_path_table(cp_id, parent_id, symbol_id, ip, *x):

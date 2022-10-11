@@ -56,6 +56,9 @@
  */
 #define USB_QUIRK_LINEAR_FRAME_INTR_BINTERVAL	BIT(11)
 
+/* device can't support auto suspend function */
+#define USB_QUIRK_AUTO_SUSPEND			BIT(12)
+
 /* Device needs a pause after every control message. */
 #define USB_QUIRK_DELAY_CTRL_MSG		BIT(13)
 

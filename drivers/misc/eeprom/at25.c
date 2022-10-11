@@ -16,7 +16,6 @@
 #include <linux/device.h>
 #include <linux/sched.h>
 
-#include <linux/nvmem-provider.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/eeprom.h>
 #include <linux/property.h>
@@ -30,11 +29,11 @@
 
 struct at25_data {
 	struct spi_device	*spi;
+	struct memory_accessor	mem;
 	struct mutex		lock;
 	struct spi_eeprom	chip;
+	struct bin_attribute	bin;
 	unsigned		addrlen;
-	struct nvmem_config	nvmem_config;
-	struct nvmem_device	*nvmem;
 };
 
 #define	AT25_WREN	0x06		/* latch the write enable */
@@ -63,11 +62,14 @@ struct at25_data {
 
 #define	io_limit	PAGE_SIZE	/* bytes */
 
-static int at25_ee_read(void *priv, unsigned int offset,
-			void *val, size_t count)
+static ssize_t
+at25_ee_read(
+	struct at25_data	*at25,
+	char			*buf,
+	unsigned		offset,
+	size_t			count
+)
 {
-	struct at25_data *at25 = priv;
-	char *buf = val;
 	u8			command[EE_MAXADDRLEN + 1];
 	u8			*cp;
 	ssize_t			status;
@@ -75,12 +77,12 @@ static int at25_ee_read(void *priv, unsigned int offset,
 	struct spi_message	m;
 	u8			instr;
 
-	if (unlikely(offset >= at25->chip.byte_len))
-		return -EINVAL;
-	if ((offset + count) > at25->chip.byte_len)
-		count = at25->chip.byte_len - offset;
+	if (unlikely(offset >= at25->bin.size))
+		return 0;
+	if ((offset + count) > at25->bin.size)
+		count = at25->bin.size - offset;
 	if (unlikely(!count))
-		return -EINVAL;
+		return count;
 
 	cp = command;
 
@@ -121,27 +123,44 @@ static int at25_ee_read(void *priv, unsigned int offset,
 	 * this chip is clocked very slowly
 	 */
 	status = spi_sync(at25->spi, &m);
-	dev_dbg(&at25->spi->dev, "read %zu bytes at %d --> %zd\n",
-		count, offset, status);
+	dev_dbg(&at25->spi->dev,
+		"read %Zd bytes at %d --> %d\n",
+		count, offset, (int) status);
 
 	mutex_unlock(&at25->lock);
-	return status;
+	return status ? status : count;
 }
 
-static int at25_ee_write(void *priv, unsigned int off, void *val, size_t count)
+static ssize_t
+at25_bin_read(struct file *filp, struct kobject *kobj,
+	      struct bin_attribute *bin_attr,
+	      char *buf, loff_t off, size_t count)
 {
-	struct at25_data *at25 = priv;
-	const char *buf = val;
-	int			status = 0;
+	struct device		*dev;
+	struct at25_data	*at25;
+
+	dev = container_of(kobj, struct device, kobj);
+	at25 = dev_get_drvdata(dev);
+
+	return at25_ee_read(at25, buf, off, count);
+}
+
+
+static ssize_t
+at25_ee_write(struct at25_data *at25, const char *buf, loff_t off,
+	      size_t count)
+{
+	ssize_t			status = 0;
+	unsigned		written = 0;
 	unsigned		buf_size;
 	u8			*bounce;
 
-	if (unlikely(off >= at25->chip.byte_len))
+	if (unlikely(off >= at25->bin.size))
 		return -EFBIG;
-	if ((off + count) > at25->chip.byte_len)
-		count = at25->chip.byte_len - off;
+	if ((off + count) > at25->bin.size)
+		count = at25->bin.size - off;
 	if (unlikely(!count))
-		return -EINVAL;
+		return count;
 
 	/* Temp buffer starts with command and address */
 	buf_size = at25->chip.page_size;
@@ -166,7 +185,8 @@ static int at25_ee_write(void *priv, unsigned int off, void *val, size_t count)
 		*cp = AT25_WREN;
 		status = spi_write(at25->spi, cp, 1);
 		if (status < 0) {
-			dev_dbg(&at25->spi->dev, "WREN --> %d\n", status);
+			dev_dbg(&at25->spi->dev, "WREN --> %d\n",
+					(int) status);
 			break;
 		}
 
@@ -194,8 +214,9 @@ static int at25_ee_write(void *priv, unsigned int off, void *val, size_t count)
 		memcpy(cp, buf, segment);
 		status = spi_write(at25->spi, bounce,
 				segment + at25->addrlen + 1);
-		dev_dbg(&at25->spi->dev, "write %u bytes at %u --> %d\n",
-			segment, offset, status);
+		dev_dbg(&at25->spi->dev,
+				"write %u bytes at %u --> %d\n",
+				segment, offset, (int) status);
 		if (status < 0)
 			break;
 
@@ -222,7 +243,8 @@ static int at25_ee_write(void *priv, unsigned int off, void *val, size_t count)
 
 		if ((sr < 0) || (sr & AT25_SR_nRDY)) {
 			dev_err(&at25->spi->dev,
-				"write %u bytes offset %u, timeout after %u msecs\n",
+				"write %d bytes offset %d, "
+				"timeout after %u msecs\n",
 				segment, offset,
 				jiffies_to_msecs(jiffies -
 					(timeout - EE_TIMEOUT)));
@@ -233,13 +255,48 @@ static int at25_ee_write(void *priv, unsigned int off, void *val, size_t count)
 		off += segment;
 		buf += segment;
 		count -= segment;
+		written += segment;
 
 	} while (count > 0);
 
 	mutex_unlock(&at25->lock);
 
 	kfree(bounce);
-	return status;
+	return written ? written : status;
+}
+
+static ssize_t
+at25_bin_write(struct file *filp, struct kobject *kobj,
+	       struct bin_attribute *bin_attr,
+	       char *buf, loff_t off, size_t count)
+{
+	struct device		*dev;
+	struct at25_data	*at25;
+
+	dev = container_of(kobj, struct device, kobj);
+	at25 = dev_get_drvdata(dev);
+
+	return at25_ee_write(at25, buf, off, count);
+}
+
+/*-------------------------------------------------------------------------*/
+
+/* Let in-kernel code access the eeprom data. */
+
+static ssize_t at25_mem_read(struct memory_accessor *mem, char *buf,
+			 off_t offset, size_t count)
+{
+	struct at25_data *at25 = container_of(mem, struct at25_data, mem);
+
+	return at25_ee_read(at25, buf, offset, count);
+}
+
+static ssize_t at25_mem_write(struct memory_accessor *mem, const char *buf,
+			  off_t offset, size_t count)
+{
+	struct at25_data *at25 = container_of(mem, struct at25_data, mem);
+
+	return at25_ee_write(at25, buf, offset, count);
 }
 
 /*-------------------------------------------------------------------------*/
@@ -341,31 +398,44 @@ static int at25_probe(struct spi_device *spi)
 
 	mutex_init(&at25->lock);
 	at25->chip = chip;
-	at25->spi = spi;
+	at25->spi = spi_dev_get(spi);
 	spi_set_drvdata(spi, at25);
 	at25->addrlen = addrlen;
 
-	at25->nvmem_config.name = dev_name(&spi->dev);
-	at25->nvmem_config.dev = &spi->dev;
-	at25->nvmem_config.read_only = chip.flags & EE_READONLY;
-	at25->nvmem_config.root_only = true;
-	at25->nvmem_config.owner = THIS_MODULE;
-	at25->nvmem_config.compat = true;
-	at25->nvmem_config.base_dev = &spi->dev;
-	at25->nvmem_config.reg_read = at25_ee_read;
-	at25->nvmem_config.reg_write = at25_ee_write;
-	at25->nvmem_config.priv = at25;
-	at25->nvmem_config.stride = 4;
-	at25->nvmem_config.word_size = 1;
-	at25->nvmem_config.size = chip.byte_len;
+	/* Export the EEPROM bytes through sysfs, since that's convenient.
+	 * And maybe to other kernel code; it might hold a board's Ethernet
+	 * address, or board-specific calibration data generated on the
+	 * manufacturing floor.
+	 *
+	 * Default to root-only access to the data; EEPROMs often hold data
+	 * that's sensitive for read and/or write, like ethernet addresses,
+	 * security codes, board-specific manufacturing calibrations, etc.
+	 */
+	sysfs_bin_attr_init(&at25->bin);
+	at25->bin.attr.name = "eeprom";
+	at25->bin.attr.mode = S_IRUSR;
+	at25->bin.read = at25_bin_read;
+	at25->mem.read = at25_mem_read;
 
-	at25->nvmem = nvmem_register(&at25->nvmem_config);
-	if (IS_ERR(at25->nvmem))
-		return PTR_ERR(at25->nvmem);
+	at25->bin.size = at25->chip.byte_len;
+	if (!(chip.flags & EE_READONLY)) {
+		at25->bin.write = at25_bin_write;
+		at25->bin.attr.mode |= S_IWUSR;
+		at25->mem.write = at25_mem_write;
+	}
 
-	dev_info(&spi->dev, "%d %s %s eeprom%s, pagesize %u\n",
-		(chip.byte_len < 1024) ? chip.byte_len : (chip.byte_len / 1024),
-		(chip.byte_len < 1024) ? "Byte" : "KByte",
+	err = sysfs_create_bin_file(&spi->dev.kobj, &at25->bin);
+	if (err)
+		return err;
+
+	if (chip.setup)
+		chip.setup(&at25->mem, chip.context);
+
+	dev_info(&spi->dev, "%Zd %s %s eeprom%s, pagesize %u\n",
+		(at25->bin.size < 1024)
+			? at25->bin.size
+			: (at25->bin.size / 1024),
+		(at25->bin.size < 1024) ? "Byte" : "KByte",
 		at25->chip.name,
 		(chip.flags & EE_READONLY) ? " (readonly)" : "",
 		at25->chip.page_size);
@@ -377,8 +447,7 @@ static int at25_remove(struct spi_device *spi)
 	struct at25_data	*at25;
 
 	at25 = spi_get_drvdata(spi);
-	nvmem_unregister(at25->nvmem);
-
+	sysfs_remove_bin_file(&spi->dev.kobj, &at25->bin);
 	return 0;
 }
 

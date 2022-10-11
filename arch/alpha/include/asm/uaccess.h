@@ -396,12 +396,11 @@ copy_to_user(void __user *to, const void *from, long n)
 extern inline long
 copy_from_user(void *to, const void __user *from, long n)
 {
-	long res = n;
 	if (likely(__access_ok((unsigned long)from, n, get_fs())))
-		res = __copy_from_user_inatomic(to, from, n);
-	if (unlikely(res))
-		memset(to + (n - res), 0, res);
-	return res;
+		n = __copy_tofrom_user_nocheck(to, (__force void *)from, n);
+	else
+		memset(to, 0, n);
+	return n;
 }
 
 extern void __do_clear_user(void);
@@ -481,13 +480,7 @@ struct exception_table_entry
 	(pc) + (_fixup)->fixup.bits.nextinsn;			\
 })
 
-#define ARCH_HAS_RELATIVE_EXTABLE
-
-#define swap_ex_entry_fixup(a, b, tmp, delta)			\
-	do {							\
-		(a)->fixup.unit = (b)->fixup.unit;		\
-		(b)->fixup.unit = (tmp).fixup.unit;		\
-	} while (0)
-
+#define ARCH_HAS_SORT_EXTABLE
+#define ARCH_HAS_SEARCH_EXTABLE
 
 #endif /* __ALPHA_UACCESS_H */

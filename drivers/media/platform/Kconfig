@@ -38,7 +38,7 @@ config VIDEO_SH_VOU
 	depends on MEDIA_CAMERA_SUPPORT
 	depends on VIDEO_DEV && I2C && HAS_DMA
 	depends on ARCH_SHMOBILE || COMPILE_TEST
-	select VIDEOBUF2_DMA_CONTIG
+	select VIDEOBUF_DMA_CONTIG
 	help
 	  Support for the Video Output Unit (VOU) on SuperH SoCs.
 
@@ -53,6 +53,15 @@ config VIDEO_VIU
 
 	  Say Y here if you want to enable VIU device on MPC5121e Rev2+.
 	  In doubt, say N.
+
+config VIDEO_TIMBERDALE
+	tristate "Support for timberdale Video In/LogiWIN"
+	depends on VIDEO_V4L2 && I2C && VIDEO_V4L2_SUBDEV_API && HAS_DMA
+	depends on (MFD_TIMBERDALE && TIMB_DMA) || COMPILE_TEST
+	select VIDEO_ADV7180
+	select VIDEOBUF_DMA_CONTIG
+	---help---
+	  Add support for the Video In peripherial of the timberdale FPGA.
 
 config VIDEO_M32R_AR
 	tristate "AR devices"
@@ -79,9 +88,11 @@ config VIDEO_OMAP3
 	depends on VIDEO_V4L2 && I2C && VIDEO_V4L2_SUBDEV_API && ARCH_OMAP3
 	depends on HAS_DMA && OF
 	depends on OMAP_IOMMU
+	depends on BROKEN
 	select ARM_DMA_USE_IOMMU
 	select VIDEOBUF2_DMA_CONTIG
 	select MFD_SYSCON
+	select V4L2_FWNODE
 	---help---
 	  Driver for an OMAP 3 camera controller.
 
@@ -90,15 +101,6 @@ config VIDEO_OMAP3_DEBUG
 	depends on VIDEO_OMAP3
 	---help---
 	  Enable debug messages on OMAP 3 camera controller driver.
-
-config VIDEO_PXA27x
-	tristate "PXA27x Quick Capture Interface driver"
-	depends on VIDEO_DEV && VIDEO_V4L2 && HAS_DMA
-	depends on PXA27x || COMPILE_TEST
-	select VIDEOBUF2_DMA_SG
-	select SG_SPLIT
-	---help---
-	  This is a v4l2 driver for the PXA27x Quick Capture Interface
 
 config VIDEO_S3C_CAMIF
 	tristate "Samsung S3C24XX/S3C64XX SoC Camera Interface driver"
@@ -116,52 +118,12 @@ config VIDEO_S3C_CAMIF
 
 source "drivers/media/platform/soc_camera/Kconfig"
 source "drivers/media/platform/exynos4-is/Kconfig"
+source "drivers/media/platform/s5p-tv/Kconfig"
 source "drivers/media/platform/am437x/Kconfig"
 source "drivers/media/platform/xilinx/Kconfig"
-source "drivers/media/platform/rcar-vin/Kconfig"
-source "drivers/media/platform/atmel/Kconfig"
-
-
-config VIDEO_SUNXI_VIN
-	tristate "sunxi video input (camera csi/mipi isp vipp)driver"
-	default n
-
-if VIDEO_SUNXI_VIN
-source "drivers/media/platform/sunxi-vin/Kconfig"
-endif
-
-config VIDEO_SUNXI_VFE
-	tristate "sunxi video front end (camera and etc)driver"
-	default n
-
-if VIDEO_SUNXI_VFE
-source "drivers/media/platform/sunxi-vfe/Kconfig"
-endif
-
-config VIDEO_TI_CAL
-	tristate "TI CAL (Camera Adaptation Layer) driver"
-	depends on VIDEO_DEV && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
-	depends on SOC_DRA7XX || COMPILE_TEST
-	depends on HAS_DMA
-	select VIDEOBUF2_DMA_CONTIG
-	default n
-	---help---
-	  Support for the TI CAL (Camera Adaptation Layer) block
-	  found on DRA72X SoC.
-	  In TI Technical Reference Manual this module is referred as
-	  Camera Interface Subsystem (CAMSS).
-
-config VIDEO_SUNXI_TVD
-	tristate "sunxi tvd driver"
-    depends on ARCH_SUN8IW11 || ARCH_SUN8IW17
-    select VIDEOBUF2_DMA_CONTIG
-	default m
-
-config VIDEO_SUNXI_CAR_REVERSE
-	tristate "sunxi fast car reverse driver"
-	depends on ARCH_SUN8IW11 || ARCH_SUN8IW17
-	depends on VIDEO_SUNXI_TVD
-	default n
+source "drivers/media/platform/rk-isp10/Kconfig"
+source "drivers/media/platform/rockchip/cif/Kconfig"
+source "drivers/media/platform/rockchip/isp1/Kconfig"
 
 endif # V4L_PLATFORM_DRIVERS
 
@@ -190,36 +152,6 @@ config VIDEO_CODA
 	---help---
 	   Coda is a range of video codec IPs that supports
 	   H.264, MPEG-4, and other video formats.
-
-config VIDEO_MEDIATEK_VPU
-	tristate "Mediatek Video Processor Unit"
-	depends on VIDEO_DEV && VIDEO_V4L2 && HAS_DMA
-	depends on ARCH_MEDIATEK || COMPILE_TEST
-	---help---
-	    This driver provides downloading VPU firmware and
-	    communicating with VPU. This driver for hw video
-	    codec embedded in Mediatek's MT8173 SOCs. It is able
-	    to handle video decoding/encoding in a range of formats.
-
-	    To compile this driver as a module, choose M here: the
-	    module will be called mtk-vpu.
-
-config VIDEO_MEDIATEK_VCODEC
-	tristate "Mediatek Video Codec driver"
-	depends on MTK_IOMMU || COMPILE_TEST
-	depends on VIDEO_DEV && VIDEO_V4L2 && HAS_DMA
-	depends on ARCH_MEDIATEK || COMPILE_TEST
-	select VIDEOBUF2_DMA_CONTIG
-	select V4L2_MEM2MEM_DEV
-	select VIDEO_MEDIATEK_VPU
-	default n
-	---help---
-	    Mediatek video codec driver provides HW capability to
-	    encode and decode in a range of video formats
-	    This driver rely on VPU driver to communicate with VPU.
-
-	    To compile this driver as a module, choose M here: the
-	    module will be called mtk-vcodec
 
 config VIDEO_MEM2MEM_DEINTERLACE
 	tristate "Deinterlace support"
@@ -288,27 +220,12 @@ config VIDEO_SAMSUNG_EXYNOS_GSC
 config VIDEO_STI_BDISP
 	tristate "STMicroelectronics BDISP 2D blitter driver"
 	depends on VIDEO_DEV && VIDEO_V4L2
-	depends on HAS_DMA
 	depends on ARCH_STI || COMPILE_TEST
+	depends on HAVE_DMA_ATTRS
 	select VIDEOBUF2_DMA_CONTIG
 	select V4L2_MEM2MEM_DEV
 	help
 	  This v4l2 mem2mem driver is a 2D blitter for STMicroelectronics SoC.
-
-config VIDEO_STI_HVA
-	tristate "STMicroelectronics HVA multi-format video encoder V4L2 driver"
-	depends on VIDEO_DEV && VIDEO_V4L2
-	depends on HAS_DMA
-	depends on ARCH_STI || COMPILE_TEST
-	select VIDEOBUF2_DMA_CONTIG
-	select V4L2_MEM2MEM_DEV
-	help
-	  This V4L2 driver enables HVA (Hardware Video Accelerator) multi-format
-	  video encoder of STMicroelectronics SoC, allowing hardware encoding of
-	  raw uncompressed formats in various compressed video bitstreams format.
-
-	  To compile this driver as a module, choose M here:
-	  the module will be called st-hva.
 
 config VIDEO_SH_VEU
 	tristate "SuperH VEU mem2mem video processing driver"
@@ -322,7 +239,7 @@ config VIDEO_SH_VEU
 config VIDEO_RENESAS_JPU
 	tristate "Renesas JPEG Processing Unit"
 	depends on VIDEO_DEV && VIDEO_V4L2 && HAS_DMA
-	depends on ARCH_RENESAS || COMPILE_TEST
+	depends on ARCH_SHMOBILE || COMPILE_TEST
 	select VIDEOBUF2_DMA_CONTIG
 	select V4L2_MEM2MEM_DEV
 	---help---
@@ -331,30 +248,27 @@ config VIDEO_RENESAS_JPU
 	  To compile this driver as a module, choose M here: the module
 	  will be called rcar_jpu.
 
-config VIDEO_RENESAS_FCP
-	tristate "Renesas Frame Compression Processor"
-	depends on ARCH_RENESAS || COMPILE_TEST
-	depends on OF
-	---help---
-	  This is a driver for the Renesas Frame Compression Processor (FCP).
-	  The FCP is a companion module of video processing modules in the
-	  Renesas R-Car Gen3 SoCs. It handles memory access for the codec,
-	  VSP and FDP modules.
-
-	  To compile this driver as a module, choose M here: the module
-	  will be called rcar-fcp.
-
 config VIDEO_RENESAS_VSP1
 	tristate "Renesas VSP1 Video Processing Engine"
 	depends on VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API && HAS_DMA
-	depends on (ARCH_RENESAS && OF) || COMPILE_TEST
-	depends on (!ARM64 && !VIDEO_RENESAS_FCP) || VIDEO_RENESAS_FCP
+	depends on (ARCH_SHMOBILE && OF) || COMPILE_TEST
 	select VIDEOBUF2_DMA_CONTIG
 	---help---
 	  This is a V4L2 driver for the Renesas VSP1 video processing engine.
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called vsp1.
+
+config VIDEO_ROCKCHIP_RGA
+	tristate "Rockchip Raster 2d Grapphic Acceleration Unit"
+	depends on VIDEO_DEV && VIDEO_V4L2 && HAS_DMA
+	depends on ARCH_ROCKCHIP || COMPILE_TEST
+	select VIDEOBUF2_DMA_SG
+	select V4L2_MEM2MEM_DEV
+	default n
+	---help---
+	  This is a v4l2 driver for Rockchip SOC RGA2
+	  2d graphics accelerator.
 
 config VIDEO_TI_VPE
 	tristate "TI VPE (Video Processing Engine) driver"
@@ -367,6 +281,17 @@ config VIDEO_TI_VPE
 	---help---
 	  Support for the TI VPE(Video Processing Engine) block
 	  found on DRA7XX SoC.
+
+config VIDEO_ROCKCHIP_VPU
+	tristate "Rockchip ROCKCHIP VPU driver"
+	depends on VIDEO_DEV && VIDEO_V4L2
+	select VIDEOBUF2_DMA_CONTIG
+	default n
+	---help---
+	  Support for the VPU video codec found on Rockchip SoC.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called rockchip-vpu.
 
 config VIDEO_TI_VPE_DEBUG
 	bool "VPE debug messages"
@@ -405,3 +330,5 @@ menuconfig DVB_PLATFORM_DRIVERS
 if DVB_PLATFORM_DRIVERS
 source "drivers/media/platform/sti/c8sectpfe/Kconfig"
 endif #DVB_PLATFORM_DRIVERS
+
+source "drivers/media/platform/rockchip-tsp/Kconfig"

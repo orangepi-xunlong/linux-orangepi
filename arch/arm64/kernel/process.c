@@ -45,7 +45,9 @@
 #include <linux/personality.h>
 #include <linux/notifier.h>
 #include <trace/events/power.h>
+#ifdef CONFIG_THREAD_INFO_IN_TASK
 #include <linux/percpu.h>
+#endif
 
 #include <asm/alternative.h>
 #include <asm/compat.h>
@@ -147,6 +149,8 @@ void machine_restart(char *cmd)
 	local_irq_disable();
 	smp_send_stop();
 
+	do_kernel_i2c_restart(cmd);
+
 	/*
 	 * UpdateCapsule() depends on the system being reset via
 	 * ResetSystem().
@@ -180,7 +184,7 @@ static void show_data(unsigned long addr, int nbytes, const char *name)
 	 * don't attempt to dump non-kernel addresses or
 	 * values that are probably just small negative numbers
 	 */
-	if (addr < PAGE_OFFSET || addr > -256UL)
+	if (addr < VA_START || addr > -256UL)
 		return;
 
 	printk("\n%s: %#lx:\n", name, addr);
@@ -203,13 +207,13 @@ static void show_data(unsigned long addr, int nbytes, const char *name)
 		for (j = 0; j < 8; j++) {
 			u32	data;
 			if (probe_kernel_address(p, data)) {
-				pr_cont(" ********");
+				printk(" ********");
 			} else {
-				pr_cont(" %08x", data);
+				printk(" %08x", data);
 			}
 			++p;
 		}
-		pr_cont("\n");
+		printk("\n");
 	}
 }
 
@@ -252,19 +256,10 @@ void __show_regs(struct pt_regs *regs)
 	printk("pc : [<%016llx>] lr : [<%016llx>] pstate: %08llx\n",
 	       regs->pc, lr, regs->pstate);
 	printk("sp : %016llx\n", sp);
-
-	i = top_reg;
-
-	while (i >= 0) {
+	for (i = top_reg; i >= 0; i--) {
 		printk("x%-2d: %016llx ", i, regs->regs[i]);
-		i--;
-
-		if (i % 2 == 0) {
-			pr_cont("x%-2d: %016llx ", i, regs->regs[i]);
-			i--;
-		}
-
-		pr_cont("\n");
+		if (i % 2 == 0)
+			printk("\n");
 	}
 	if (!user_mode(regs))
 		show_extra_register_data(regs, 128);
@@ -279,7 +274,7 @@ void show_regs(struct pt_regs * regs)
 
 static void tls_thread_flush(void)
 {
-	write_sysreg(0, tpidr_el0);
+	asm ("msr tpidr_el0, xzr");
 
 	if (is_compat_task()) {
 		current->thread.tp_value = 0;
@@ -290,7 +285,7 @@ static void tls_thread_flush(void)
 		 * with a stale shadow state during context switch.
 		 */
 		barrier();
-		write_sysreg(0, tpidrro_el0);
+		asm ("msr tpidrro_el0, xzr");
 	}
 }
 
@@ -339,11 +334,14 @@ int copy_thread(unsigned long clone_flags, unsigned long stack_start,
 		 * Read the current TLS pointer from tpidr_el0 as it may be
 		 * out-of-sync with the saved value.
 		 */
-		*task_user_tls(p) = read_sysreg(tpidr_el0);
+		asm("mrs %0, tpidr_el0" : "=r" (*task_user_tls(p)));
 
 		if (stack_start) {
 			if (is_compat_thread(task_thread_info(p)))
 				childregs->compat_sp = stack_start;
+			/* 16-byte aligned stack mandatory on AArch64 */
+			else if (stack_start & 15)
+				return -EINVAL;
 			else
 				childregs->sp = stack_start;
 		}
@@ -358,7 +356,7 @@ int copy_thread(unsigned long clone_flags, unsigned long stack_start,
 		memset(childregs, 0, sizeof(struct pt_regs));
 		childregs->pstate = PSR_MODE_EL1h;
 		if (IS_ENABLED(CONFIG_ARM64_UAO) &&
-		    cpus_have_const_cap(ARM64_HAS_UAO))
+		    cpus_have_cap(ARM64_HAS_UAO))
 			childregs->pstate |= PSR_UAO_BIT;
 		p->thread.cpu_context.x19 = stack_start;
 		p->thread.cpu_context.x20 = stk_sz;
@@ -375,7 +373,7 @@ static void tls_thread_switch(struct task_struct *next)
 {
 	unsigned long tpidr;
 
-	tpidr = read_sysreg(tpidr_el0);
+	asm("mrs %0, tpidr_el0" : "=r" (tpidr));
 	*task_user_tls(current) = tpidr;
 
 	if (is_compat_thread(task_thread_info(next)))
@@ -397,6 +395,7 @@ void uao_thread_switch(struct task_struct *next)
 	}
 }
 
+#ifdef CONFIG_THREAD_INFO_IN_TASK
 /*
  * We store our current task in sp_el0, which is clobbered by userspace. Keep a
  * shadow copy so that we can restore this upon entry from userspace.
@@ -410,6 +409,7 @@ static void entry_task_switch(struct task_struct *next)
 {
 	__this_cpu_write(__entry_task, next);
 }
+#endif
 
 /*
  * Thread switching.
@@ -423,7 +423,9 @@ struct task_struct *__switch_to(struct task_struct *prev,
 	tls_thread_switch(next);
 	hw_breakpoint_thread_switch(next);
 	contextidr_thread_switch(next);
+#ifdef CONFIG_THREAD_INFO_IN_TASK
 	entry_task_switch(next);
+#endif
 	uao_thread_switch(next);
 
 	/*
@@ -479,10 +481,13 @@ unsigned long arch_align_stack(unsigned long sp)
 	return sp & ~0xf;
 }
 
+static unsigned long randomize_base(unsigned long base)
+{
+	unsigned long range_end = base + (STACK_RND_MASK << PAGE_SHIFT) + 1;
+	return randomize_range(base, range_end, 0) ? : base;
+}
+
 unsigned long arch_randomize_brk(struct mm_struct *mm)
 {
-	if (is_compat_task())
-		return randomize_page(mm->brk, 0x02000000);
-	else
-		return randomize_page(mm->brk, 0x40000000);
+	return randomize_base(mm->brk);
 }

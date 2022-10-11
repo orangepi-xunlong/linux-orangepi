@@ -14,7 +14,7 @@
  */
 
 #include <linux/err.h>
-#include <linux/gpio/driver.h>
+#include <linux/gpio.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/irq.h>
@@ -488,7 +488,7 @@ static struct pinctrl_desc wmt_desc = {
 
 static int wmt_gpio_get_direction(struct gpio_chip *chip, unsigned offset)
 {
-	struct wmt_pinctrl_data *data = gpiochip_get_data(chip);
+	struct wmt_pinctrl_data *data = dev_get_drvdata(chip->parent);
 	u32 bank = WMT_BANK_FROM_PIN(offset);
 	u32 bit = WMT_BIT_FROM_PIN(offset);
 	u32 reg_dir = data->banks[bank].reg_dir;
@@ -503,7 +503,7 @@ static int wmt_gpio_get_direction(struct gpio_chip *chip, unsigned offset)
 
 static int wmt_gpio_get_value(struct gpio_chip *chip, unsigned offset)
 {
-	struct wmt_pinctrl_data *data = gpiochip_get_data(chip);
+	struct wmt_pinctrl_data *data = dev_get_drvdata(chip->parent);
 	u32 bank = WMT_BANK_FROM_PIN(offset);
 	u32 bit = WMT_BIT_FROM_PIN(offset);
 	u32 reg_data_in = data->banks[bank].reg_data_in;
@@ -519,7 +519,7 @@ static int wmt_gpio_get_value(struct gpio_chip *chip, unsigned offset)
 static void wmt_gpio_set_value(struct gpio_chip *chip, unsigned offset,
 			       int val)
 {
-	struct wmt_pinctrl_data *data = gpiochip_get_data(chip);
+	struct wmt_pinctrl_data *data = dev_get_drvdata(chip->parent);
 	u32 bank = WMT_BANK_FROM_PIN(offset);
 	u32 bit = WMT_BIT_FROM_PIN(offset);
 	u32 reg_data_out = data->banks[bank].reg_data_out;
@@ -583,16 +583,16 @@ int wmt_pinctrl_probe(struct platform_device *pdev,
 
 	data->dev = &pdev->dev;
 
-	data->pctl_dev = devm_pinctrl_register(&pdev->dev, &wmt_desc, data);
+	data->pctl_dev = pinctrl_register(&wmt_desc, &pdev->dev, data);
 	if (IS_ERR(data->pctl_dev)) {
 		dev_err(&pdev->dev, "Failed to register pinctrl\n");
 		return PTR_ERR(data->pctl_dev);
 	}
 
-	err = gpiochip_add_data(&data->gpio_chip, data);
+	err = gpiochip_add(&data->gpio_chip);
 	if (err) {
 		dev_err(&pdev->dev, "could not add GPIO chip\n");
-		return err;
+		goto fail_gpio;
 	}
 
 	err = gpiochip_add_pin_range(&data->gpio_chip, dev_name(data->dev),
@@ -606,6 +606,8 @@ int wmt_pinctrl_probe(struct platform_device *pdev,
 
 fail_range:
 	gpiochip_remove(&data->gpio_chip);
+fail_gpio:
+	pinctrl_unregister(data->pctl_dev);
 	return err;
 }
 
@@ -614,6 +616,7 @@ int wmt_pinctrl_remove(struct platform_device *pdev)
 	struct wmt_pinctrl_data *data = platform_get_drvdata(pdev);
 
 	gpiochip_remove(&data->gpio_chip);
+	pinctrl_unregister(data->pctl_dev);
 
 	return 0;
 }

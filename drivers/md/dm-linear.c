@@ -147,36 +147,16 @@ int dm_linear_iterate_devices(struct dm_target *ti,
 }
 EXPORT_SYMBOL_GPL(dm_linear_iterate_devices);
 
-long dm_linear_direct_access(struct dm_target *ti, sector_t sector,
-				 void **kaddr, pfn_t *pfn, long size)
-{
-	struct linear_c *lc = ti->private;
-	struct block_device *bdev = lc->dev->bdev;
-	struct blk_dax_ctl dax = {
-		.sector = linear_map_sector(ti, sector),
-		.size = size,
-	};
-	long ret;
-
-	ret = bdev_direct_access(bdev, &dax);
-	*kaddr = dax.addr;
-	*pfn = dax.pfn;
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(dm_linear_direct_access);
-
 static struct target_type linear_target = {
 	.name   = "linear",
-	.version = {1, 3, 0},
+	.version = {1, 2, 1},
 	.module = THIS_MODULE,
 	.ctr    = dm_linear_ctr,
 	.dtr    = dm_linear_dtr,
 	.map    = dm_linear_map,
 	.status = dm_linear_status,
-	.prepare_ioctl = dm_linear_prepare_ioctl,
+	.prepare_ioctl  = dm_linear_prepare_ioctl,
 	.iterate_devices = dm_linear_iterate_devices,
-	.direct_access = dm_linear_direct_access,
 };
 
 int __init dm_linear_init(void)

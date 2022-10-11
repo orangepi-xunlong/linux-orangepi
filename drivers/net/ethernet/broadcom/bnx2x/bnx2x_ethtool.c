@@ -52,7 +52,7 @@ static const struct {
 	{ Q_STATS_OFFSET32(rx_skb_alloc_failed),
 					 4, "[%s]: rx_skb_alloc_discard" },
 	{ Q_STATS_OFFSET32(hw_csum_err), 4, "[%s]: rx_csum_offload_errors" },
-	{ Q_STATS_OFFSET32(driver_xoff), 4, "[%s]: tx_exhaustion_events" },
+
 	{ Q_STATS_OFFSET32(total_bytes_transmitted_hi),	8, "[%s]: tx_bytes" },
 /* 10 */{ Q_STATS_OFFSET32(total_unicast_packets_transmitted_hi),
 						8, "[%s]: tx_ucast_packets" },
@@ -74,115 +74,117 @@ static const struct {
 static const struct {
 	long offset;
 	int size;
-	bool is_port_stat;
+	u32 flags;
+#define STATS_FLAGS_PORT		1
+#define STATS_FLAGS_FUNC		2
+#define STATS_FLAGS_BOTH		(STATS_FLAGS_FUNC | STATS_FLAGS_PORT)
 	char string[ETH_GSTRING_LEN];
 } bnx2x_stats_arr[] = {
 /* 1 */	{ STATS_OFFSET32(total_bytes_received_hi),
-				8, false, "rx_bytes" },
+				8, STATS_FLAGS_BOTH, "rx_bytes" },
 	{ STATS_OFFSET32(error_bytes_received_hi),
-				8, false, "rx_error_bytes" },
+				8, STATS_FLAGS_BOTH, "rx_error_bytes" },
 	{ STATS_OFFSET32(total_unicast_packets_received_hi),
-				8, false, "rx_ucast_packets" },
+				8, STATS_FLAGS_BOTH, "rx_ucast_packets" },
 	{ STATS_OFFSET32(total_multicast_packets_received_hi),
-				8, false, "rx_mcast_packets" },
+				8, STATS_FLAGS_BOTH, "rx_mcast_packets" },
 	{ STATS_OFFSET32(total_broadcast_packets_received_hi),
-				8, false, "rx_bcast_packets" },
+				8, STATS_FLAGS_BOTH, "rx_bcast_packets" },
 	{ STATS_OFFSET32(rx_stat_dot3statsfcserrors_hi),
-				8, true, "rx_crc_errors" },
+				8, STATS_FLAGS_PORT, "rx_crc_errors" },
 	{ STATS_OFFSET32(rx_stat_dot3statsalignmenterrors_hi),
-				8, true, "rx_align_errors" },
+				8, STATS_FLAGS_PORT, "rx_align_errors" },
 	{ STATS_OFFSET32(rx_stat_etherstatsundersizepkts_hi),
-				8, true, "rx_undersize_packets" },
+				8, STATS_FLAGS_PORT, "rx_undersize_packets" },
 	{ STATS_OFFSET32(etherstatsoverrsizepkts_hi),
-				8, true, "rx_oversize_packets" },
+				8, STATS_FLAGS_PORT, "rx_oversize_packets" },
 /* 10 */{ STATS_OFFSET32(rx_stat_etherstatsfragments_hi),
-				8, true, "rx_fragments" },
+				8, STATS_FLAGS_PORT, "rx_fragments" },
 	{ STATS_OFFSET32(rx_stat_etherstatsjabbers_hi),
-				8, true, "rx_jabbers" },
+				8, STATS_FLAGS_PORT, "rx_jabbers" },
 	{ STATS_OFFSET32(no_buff_discard_hi),
-				8, false, "rx_discards" },
+				8, STATS_FLAGS_BOTH, "rx_discards" },
 	{ STATS_OFFSET32(mac_filter_discard),
-				4, true, "rx_filtered_packets" },
+				4, STATS_FLAGS_PORT, "rx_filtered_packets" },
 	{ STATS_OFFSET32(mf_tag_discard),
-				4, true, "rx_mf_tag_discard" },
+				4, STATS_FLAGS_PORT, "rx_mf_tag_discard" },
 	{ STATS_OFFSET32(pfc_frames_received_hi),
-				8, true, "pfc_frames_received" },
+				8, STATS_FLAGS_PORT, "pfc_frames_received" },
 	{ STATS_OFFSET32(pfc_frames_sent_hi),
-				8, true, "pfc_frames_sent" },
+				8, STATS_FLAGS_PORT, "pfc_frames_sent" },
 	{ STATS_OFFSET32(brb_drop_hi),
-				8, true, "rx_brb_discard" },
+				8, STATS_FLAGS_PORT, "rx_brb_discard" },
 	{ STATS_OFFSET32(brb_truncate_hi),
-				8, true, "rx_brb_truncate" },
+				8, STATS_FLAGS_PORT, "rx_brb_truncate" },
 	{ STATS_OFFSET32(pause_frames_received_hi),
-				8, true, "rx_pause_frames" },
+				8, STATS_FLAGS_PORT, "rx_pause_frames" },
 	{ STATS_OFFSET32(rx_stat_maccontrolframesreceived_hi),
-				8, true, "rx_mac_ctrl_frames" },
+				8, STATS_FLAGS_PORT, "rx_mac_ctrl_frames" },
 	{ STATS_OFFSET32(nig_timer_max),
-				4, true, "rx_constant_pause_events" },
+			4, STATS_FLAGS_PORT, "rx_constant_pause_events" },
 /* 20 */{ STATS_OFFSET32(rx_err_discard_pkt),
-				4, false, "rx_phy_ip_err_discards"},
+				4, STATS_FLAGS_BOTH, "rx_phy_ip_err_discards"},
 	{ STATS_OFFSET32(rx_skb_alloc_failed),
-				4, false, "rx_skb_alloc_discard" },
+				4, STATS_FLAGS_BOTH, "rx_skb_alloc_discard" },
 	{ STATS_OFFSET32(hw_csum_err),
-				4, false, "rx_csum_offload_errors" },
-	{ STATS_OFFSET32(driver_xoff),
-				4, false, "tx_exhaustion_events" },
+				4, STATS_FLAGS_BOTH, "rx_csum_offload_errors" },
+
 	{ STATS_OFFSET32(total_bytes_transmitted_hi),
-				8, false, "tx_bytes" },
+				8, STATS_FLAGS_BOTH, "tx_bytes" },
 	{ STATS_OFFSET32(tx_stat_ifhcoutbadoctets_hi),
-				8, true, "tx_error_bytes" },
+				8, STATS_FLAGS_PORT, "tx_error_bytes" },
 	{ STATS_OFFSET32(total_unicast_packets_transmitted_hi),
-				8, false, "tx_ucast_packets" },
+				8, STATS_FLAGS_BOTH, "tx_ucast_packets" },
 	{ STATS_OFFSET32(total_multicast_packets_transmitted_hi),
-				8, false, "tx_mcast_packets" },
+				8, STATS_FLAGS_BOTH, "tx_mcast_packets" },
 	{ STATS_OFFSET32(total_broadcast_packets_transmitted_hi),
-				8, false, "tx_bcast_packets" },
+				8, STATS_FLAGS_BOTH, "tx_bcast_packets" },
 	{ STATS_OFFSET32(tx_stat_dot3statsinternalmactransmiterrors_hi),
-				8, true, "tx_mac_errors" },
+				8, STATS_FLAGS_PORT, "tx_mac_errors" },
 	{ STATS_OFFSET32(rx_stat_dot3statscarriersenseerrors_hi),
-				8, true, "tx_carrier_errors" },
+				8, STATS_FLAGS_PORT, "tx_carrier_errors" },
 /* 30 */{ STATS_OFFSET32(tx_stat_dot3statssinglecollisionframes_hi),
-				8, true, "tx_single_collisions" },
+				8, STATS_FLAGS_PORT, "tx_single_collisions" },
 	{ STATS_OFFSET32(tx_stat_dot3statsmultiplecollisionframes_hi),
-				8, true, "tx_multi_collisions" },
+				8, STATS_FLAGS_PORT, "tx_multi_collisions" },
 	{ STATS_OFFSET32(tx_stat_dot3statsdeferredtransmissions_hi),
-				8, true, "tx_deferred" },
+				8, STATS_FLAGS_PORT, "tx_deferred" },
 	{ STATS_OFFSET32(tx_stat_dot3statsexcessivecollisions_hi),
-				8, true, "tx_excess_collisions" },
+				8, STATS_FLAGS_PORT, "tx_excess_collisions" },
 	{ STATS_OFFSET32(tx_stat_dot3statslatecollisions_hi),
-				8, true, "tx_late_collisions" },
+				8, STATS_FLAGS_PORT, "tx_late_collisions" },
 	{ STATS_OFFSET32(tx_stat_etherstatscollisions_hi),
-				8, true, "tx_total_collisions" },
+				8, STATS_FLAGS_PORT, "tx_total_collisions" },
 	{ STATS_OFFSET32(tx_stat_etherstatspkts64octets_hi),
-				8, true, "tx_64_byte_packets" },
+				8, STATS_FLAGS_PORT, "tx_64_byte_packets" },
 	{ STATS_OFFSET32(tx_stat_etherstatspkts65octetsto127octets_hi),
-				8, true, "tx_65_to_127_byte_packets" },
+			8, STATS_FLAGS_PORT, "tx_65_to_127_byte_packets" },
 	{ STATS_OFFSET32(tx_stat_etherstatspkts128octetsto255octets_hi),
-				8, true, "tx_128_to_255_byte_packets" },
+			8, STATS_FLAGS_PORT, "tx_128_to_255_byte_packets" },
 	{ STATS_OFFSET32(tx_stat_etherstatspkts256octetsto511octets_hi),
-				8, true, "tx_256_to_511_byte_packets" },
+			8, STATS_FLAGS_PORT, "tx_256_to_511_byte_packets" },
 /* 40 */{ STATS_OFFSET32(tx_stat_etherstatspkts512octetsto1023octets_hi),
-				8, true, "tx_512_to_1023_byte_packets" },
+			8, STATS_FLAGS_PORT, "tx_512_to_1023_byte_packets" },
 	{ STATS_OFFSET32(etherstatspkts1024octetsto1522octets_hi),
-				8, true, "tx_1024_to_1522_byte_packets" },
+			8, STATS_FLAGS_PORT, "tx_1024_to_1522_byte_packets" },
 	{ STATS_OFFSET32(etherstatspktsover1522octets_hi),
-				8, true, "tx_1523_to_9022_byte_packets" },
+			8, STATS_FLAGS_PORT, "tx_1523_to_9022_byte_packets" },
 	{ STATS_OFFSET32(pause_frames_sent_hi),
-				8, true, "tx_pause_frames" },
+				8, STATS_FLAGS_PORT, "tx_pause_frames" },
 	{ STATS_OFFSET32(total_tpa_aggregations_hi),
-				8, false, "tpa_aggregations" },
+			8, STATS_FLAGS_FUNC, "tpa_aggregations" },
 	{ STATS_OFFSET32(total_tpa_aggregated_frames_hi),
-				8, false, "tpa_aggregated_frames"},
+			8, STATS_FLAGS_FUNC, "tpa_aggregated_frames"},
 	{ STATS_OFFSET32(total_tpa_bytes_hi),
-				8, false, "tpa_bytes"},
+			8, STATS_FLAGS_FUNC, "tpa_bytes"},
 	{ STATS_OFFSET32(recoverable_error),
-				4, false, "recoverable_errors" },
+			4, STATS_FLAGS_FUNC, "recoverable_errors" },
 	{ STATS_OFFSET32(unrecoverable_error),
-				4, false, "unrecoverable_errors" },
+			4, STATS_FLAGS_FUNC, "unrecoverable_errors" },
 	{ STATS_OFFSET32(driver_filtered_tx_pkt),
-				4, false, "driver_filtered_tx_pkt" },
+			4, STATS_FLAGS_FUNC, "driver_filtered_tx_pkt" },
 	{ STATS_OFFSET32(eee_tx_lpi),
-				4, true, "Tx LPI entry count"}
+			4, STATS_FLAGS_PORT, "Tx LPI entry count"}
 };
 
 #define BNX2X_NUM_STATS		ARRAY_SIZE(bnx2x_stats_arr)
@@ -981,11 +983,6 @@ static void bnx2x_get_regs(struct net_device *dev,
 	memcpy(p, &dump_hdr, sizeof(struct dump_header));
 	p += dump_hdr.header_size + 1;
 
-	/* This isn't really an error, but since attention handling is going
-	 * to print the GRC timeouts using this macro, we use the same.
-	 */
-	BNX2X_ERR("Generating register dump. Might trigger harmless GRC timeouts\n");
-
 	/* Actually read the registers */
 	__bnx2x_get_regs(bp, p);
 
@@ -1562,7 +1559,8 @@ static int bnx2x_get_module_info(struct net_device *dev,
 	}
 
 	if (!sff8472_comp ||
-	    (diag_type & SFP_EEPROM_DIAG_ADDR_CHANGE_REQ)) {
+	    (diag_type & SFP_EEPROM_DIAG_ADDR_CHANGE_REQ) ||
+	    !(diag_type & SFP_EEPROM_DDM_IMPLEMENTED)) {
 		modinfo->type = ETH_MODULE_SFF_8079;
 		modinfo->eeprom_len = ETH_MODULE_SFF_8079_LEN;
 	} else {
@@ -1872,16 +1870,8 @@ static void bnx2x_get_ringparam(struct net_device *dev,
 
 	ering->rx_max_pending = MAX_RX_AVAIL;
 
-	/* If size isn't already set, we give an estimation of the number
-	 * of buffers we'll have. We're neglecting some possible conditions
-	 * [we couldn't know for certain at this point if number of queues
-	 * might shrink] but the number would be correct for the likely
-	 * scenario.
-	 */
 	if (bp->rx_ring_size)
 		ering->rx_pending = bp->rx_ring_size;
-	else if (BNX2X_NUM_RX_QUEUES(bp))
-		ering->rx_pending = MAX_RX_AVAIL / BNX2X_NUM_RX_QUEUES(bp);
 	else
 		ering->rx_pending = MAX_RX_AVAIL;
 
@@ -3076,8 +3066,12 @@ static void bnx2x_self_test(struct net_device *dev,
 	}
 }
 
-#define IS_PORT_STAT(i)		(bnx2x_stats_arr[i].is_port_stat)
-#define HIDE_PORT_STAT(bp)	IS_VF(bp)
+#define IS_PORT_STAT(i) \
+	((bnx2x_stats_arr[i].flags & STATS_FLAGS_BOTH) == STATS_FLAGS_PORT)
+#define IS_FUNC_STAT(i)		(bnx2x_stats_arr[i].flags & STATS_FLAGS_FUNC)
+#define HIDE_PORT_STAT(bp) \
+		((IS_MF(bp) && !(bp->msg_enable & BNX2X_MSG_STATS)) || \
+		 IS_VF(bp))
 
 /* ethtool statistics are displayed for all regular ethernet queues and the
  * fcoe L2 queue if not disabled
@@ -3101,7 +3095,7 @@ static int bnx2x_get_sset_count(struct net_device *dev, int stringset)
 			num_strings = 0;
 		if (HIDE_PORT_STAT(bp)) {
 			for (i = 0; i < BNX2X_NUM_STATS; i++)
-				if (!IS_PORT_STAT(i))
+				if (IS_FUNC_STAT(i))
 					num_strings++;
 		} else
 			num_strings += BNX2X_NUM_STATS;
@@ -3367,14 +3361,18 @@ static int bnx2x_set_rss_flags(struct bnx2x *bp, struct ethtool_rxnfc *info)
 			DP(BNX2X_MSG_ETHTOOL,
 			   "rss re-configured, UDP 4-tupple %s\n",
 			   udp_rss_requested ? "enabled" : "disabled");
-			return bnx2x_rss(bp, &bp->rss_conf_obj, false, true);
+			if (bp->state == BNX2X_STATE_OPEN)
+				return bnx2x_rss(bp, &bp->rss_conf_obj, false,
+						 true);
 		} else if ((info->flow_type == UDP_V6_FLOW) &&
 			   (bp->rss_conf_obj.udp_rss_v6 != udp_rss_requested)) {
 			bp->rss_conf_obj.udp_rss_v6 = udp_rss_requested;
 			DP(BNX2X_MSG_ETHTOOL,
 			   "rss re-configured, UDP 4-tupple %s\n",
 			   udp_rss_requested ? "enabled" : "disabled");
-			return bnx2x_rss(bp, &bp->rss_conf_obj, false, true);
+			if (bp->state == BNX2X_STATE_OPEN)
+				return bnx2x_rss(bp, &bp->rss_conf_obj, false,
+						 true);
 		}
 		return 0;
 
@@ -3488,7 +3486,10 @@ static int bnx2x_set_rxfh(struct net_device *dev, const u32 *indir,
 		bp->rss_conf_obj.ind_table[i] = indir[i] + bp->fp->cl_id;
 	}
 
-	return bnx2x_config_rss_eth(bp, false);
+	if (bp->state == BNX2X_STATE_OPEN)
+		return bnx2x_config_rss_eth(bp, false);
+
+	return 0;
 }
 
 /**

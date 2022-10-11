@@ -30,7 +30,6 @@
 #include <asm/smp_plat.h>
 #include <asm/suspend.h>
 
-#include "cpuidle.h"
 #include "flowctrl.h"
 #include "iomap.h"
 #include "irq.h"

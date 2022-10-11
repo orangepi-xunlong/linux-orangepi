@@ -365,19 +365,19 @@ static int ohci_pxa_of_init(struct platform_device *pdev)
 	if (!pdata)
 		return -ENOMEM;
 
-	if (of_property_read_bool(np, "marvell,enable-port1"))
+	if (of_get_property(np, "marvell,enable-port1", NULL))
 		pdata->flags |= ENABLE_PORT1;
-	if (of_property_read_bool(np, "marvell,enable-port2"))
+	if (of_get_property(np, "marvell,enable-port2", NULL))
 		pdata->flags |= ENABLE_PORT2;
-	if (of_property_read_bool(np, "marvell,enable-port3"))
+	if (of_get_property(np, "marvell,enable-port3", NULL))
 		pdata->flags |= ENABLE_PORT3;
-	if (of_property_read_bool(np, "marvell,port-sense-low"))
+	if (of_get_property(np, "marvell,port-sense-low", NULL))
 		pdata->flags |= POWER_SENSE_LOW;
-	if (of_property_read_bool(np, "marvell,power-control-low"))
+	if (of_get_property(np, "marvell,power-control-low", NULL))
 		pdata->flags |= POWER_CONTROL_LOW;
-	if (of_property_read_bool(np, "marvell,no-oc-protection"))
+	if (of_get_property(np, "marvell,no-oc-protection", NULL))
 		pdata->flags |= NO_OC_PROTECTION;
-	if (of_property_read_bool(np, "marvell,oc-mode-perport"))
+	if (of_get_property(np, "marvell,oc-mode-perport", NULL))
 		pdata->flags |= OC_MODE_PERPORT;
 	if (!of_property_read_u32(np, "marvell,power-on-delay", &tmp))
 		pdata->power_on_delay = tmp;
@@ -435,7 +435,7 @@ int usb_hcd_pxa27x_probe (const struct hc_driver *driver, struct platform_device
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
 		pr_err("no resource of IORESOURCE_IRQ");
-		return irq;
+		return -ENXIO;
 	}
 
 	usb_clk = devm_clk_get(&pdev->dev, NULL);

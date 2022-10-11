@@ -197,7 +197,9 @@ struct sdcardfs_mount_options {
 	bool multiuser;
 	bool gid_derivation;
 	bool default_normal;
+	bool unshared_obb;
 	unsigned int reserved_mb;
+	bool nocache;
 };
 
 struct sdcardfs_vfsmount_options {
@@ -519,13 +521,13 @@ static inline struct dentry *lock_parent(struct dentry *dentry)
 {
 	struct dentry *dir = dget_parent(dentry);
 
-	inode_lock_nested(d_inode(dir), I_MUTEX_PARENT);
+	mutex_lock_nested(&d_inode(dir)->i_mutex, I_MUTEX_PARENT);
 	return dir;
 }
 
 static inline void unlock_dir(struct dentry *dir)
 {
-	inode_unlock(d_inode(dir));
+	mutex_unlock(&d_inode(dir)->i_mutex);
 	dput(dir);
 }
 
@@ -554,16 +556,16 @@ static inline int prepare_dir(const char *path_s, uid_t uid, gid_t gid, mode_t m
 	attrs.ia_uid = make_kuid(&init_user_ns, uid);
 	attrs.ia_gid = make_kgid(&init_user_ns, gid);
 	attrs.ia_valid = ATTR_UID | ATTR_GID;
-	inode_lock(d_inode(dent));
+	mutex_lock(&d_inode(dent)->i_mutex);
 	notify_change2(parent.mnt, dent, &attrs, NULL);
-	inode_unlock(d_inode(dent));
+	mutex_unlock(&d_inode(dent)->i_mutex);
 
 out_dput:
 	dput(dent);
 
 out_unlock:
 	/* parent dentry locked by lookup_create */
-	inode_unlock(d_inode(parent.dentry));
+	mutex_unlock(&d_inode(parent.dentry)->i_mutex);
 	path_put(&parent);
 	return err;
 }

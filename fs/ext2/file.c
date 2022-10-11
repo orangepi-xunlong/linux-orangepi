@@ -22,59 +22,11 @@
 #include <linux/pagemap.h>
 #include <linux/dax.h>
 #include <linux/quotaops.h>
-#include <linux/iomap.h>
-#include <linux/uio.h>
 #include "ext2.h"
 #include "xattr.h"
 #include "acl.h"
 
 #ifdef CONFIG_FS_DAX
-static ssize_t ext2_dax_read_iter(struct kiocb *iocb, struct iov_iter *to)
-{
-	struct inode *inode = iocb->ki_filp->f_mapping->host;
-	ssize_t ret;
-
-	if (!iov_iter_count(to))
-		return 0; /* skip atime */
-
-	inode_lock_shared(inode);
-	ret = iomap_dax_rw(iocb, to, &ext2_iomap_ops);
-	inode_unlock_shared(inode);
-
-	file_accessed(iocb->ki_filp);
-	return ret;
-}
-
-static ssize_t ext2_dax_write_iter(struct kiocb *iocb, struct iov_iter *from)
-{
-	struct file *file = iocb->ki_filp;
-	struct inode *inode = file->f_mapping->host;
-	ssize_t ret;
-
-	inode_lock(inode);
-	ret = generic_write_checks(iocb, from);
-	if (ret <= 0)
-		goto out_unlock;
-	ret = file_remove_privs(file);
-	if (ret)
-		goto out_unlock;
-	ret = file_update_time(file);
-	if (ret)
-		goto out_unlock;
-
-	ret = iomap_dax_rw(iocb, from, &ext2_iomap_ops);
-	if (ret > 0 && iocb->ki_pos > i_size_read(inode)) {
-		i_size_write(inode, iocb->ki_pos);
-		mark_inode_dirty(inode);
-	}
-
-out_unlock:
-	inode_unlock(inode);
-	if (ret > 0)
-		ret = generic_write_sync(iocb, ret);
-	return ret;
-}
-
 /*
  * The lock ordering for ext2 DAX fault paths is:
  *
@@ -99,7 +51,7 @@ static int ext2_dax_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	}
 	down_read(&ei->dax_sem);
 
-	ret = iomap_dax_fault(vma, vmf, &ext2_iomap_ops);
+	ret = __dax_fault(vma, vmf, ext2_get_block, NULL);
 
 	up_read(&ei->dax_sem);
 	if (vmf->flags & FAULT_FLAG_WRITE)
@@ -120,11 +72,28 @@ static int ext2_dax_pmd_fault(struct vm_area_struct *vma, unsigned long addr,
 	}
 	down_read(&ei->dax_sem);
 
-	ret = dax_pmd_fault(vma, addr, pmd, flags, ext2_get_block);
+	ret = __dax_pmd_fault(vma, addr, pmd, flags, ext2_get_block, NULL);
 
 	up_read(&ei->dax_sem);
 	if (flags & FAULT_FLAG_WRITE)
 		sb_end_pagefault(inode->i_sb);
+	return ret;
+}
+
+static int ext2_dax_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
+{
+	struct inode *inode = file_inode(vma->vm_file);
+	struct ext2_inode_info *ei = EXT2_I(inode);
+	int ret;
+
+	sb_start_pagefault(inode->i_sb);
+	file_update_time(vma->vm_file);
+	down_read(&ei->dax_sem);
+
+	ret = __dax_mkwrite(vma, vmf, ext2_get_block, NULL);
+
+	up_read(&ei->dax_sem);
+	sb_end_pagefault(inode->i_sb);
 	return ret;
 }
 
@@ -133,8 +102,8 @@ static int ext2_dax_pfn_mkwrite(struct vm_area_struct *vma,
 {
 	struct inode *inode = file_inode(vma->vm_file);
 	struct ext2_inode_info *ei = EXT2_I(inode);
+	int ret = VM_FAULT_NOPAGE;
 	loff_t size;
-	int ret;
 
 	sb_start_pagefault(inode->i_sb);
 	file_update_time(vma->vm_file);
@@ -144,8 +113,6 @@ static int ext2_dax_pfn_mkwrite(struct vm_area_struct *vma,
 	size = (i_size_read(inode) + PAGE_SIZE - 1) >> PAGE_SHIFT;
 	if (vmf->pgoff >= size)
 		ret = VM_FAULT_SIGBUS;
-	else
-		ret = dax_pfn_mkwrite(vma, vmf);
 
 	up_read(&ei->dax_sem);
 	sb_end_pagefault(inode->i_sb);
@@ -155,7 +122,7 @@ static int ext2_dax_pfn_mkwrite(struct vm_area_struct *vma,
 static const struct vm_operations_struct ext2_dax_vm_ops = {
 	.fault		= ext2_dax_fault,
 	.pmd_fault	= ext2_dax_pmd_fault,
-	.page_mkwrite	= ext2_dax_fault,
+	.page_mkwrite	= ext2_dax_mkwrite,
 	.pfn_mkwrite	= ext2_dax_pfn_mkwrite,
 };
 
@@ -204,28 +171,14 @@ int ext2_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 	return ret;
 }
 
-static ssize_t ext2_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
-{
-#ifdef CONFIG_FS_DAX
-	if (IS_DAX(iocb->ki_filp->f_mapping->host))
-		return ext2_dax_read_iter(iocb, to);
-#endif
-	return generic_file_read_iter(iocb, to);
-}
-
-static ssize_t ext2_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
-{
-#ifdef CONFIG_FS_DAX
-	if (IS_DAX(iocb->ki_filp->f_mapping->host))
-		return ext2_dax_write_iter(iocb, from);
-#endif
-	return generic_file_write_iter(iocb, from);
-}
-
+/*
+ * We have mostly NULL's here: the current defaults are ok for
+ * the ext2 filesystem.
+ */
 const struct file_operations ext2_file_operations = {
 	.llseek		= generic_file_llseek,
-	.read_iter	= ext2_file_read_iter,
-	.write_iter	= ext2_file_write_iter,
+	.read_iter	= generic_file_read_iter,
+	.write_iter	= generic_file_write_iter,
 	.unlocked_ioctl = ext2_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= ext2_compat_ioctl,
@@ -234,14 +187,16 @@ const struct file_operations ext2_file_operations = {
 	.open		= dquot_file_open,
 	.release	= ext2_release_file,
 	.fsync		= ext2_fsync,
-	.get_unmapped_area = thp_get_unmapped_area,
 	.splice_read	= generic_file_splice_read,
 	.splice_write	= iter_file_splice_write,
 };
 
 const struct inode_operations ext2_file_inode_operations = {
 #ifdef CONFIG_EXT2_FS_XATTR
+	.setxattr	= generic_setxattr,
+	.getxattr	= generic_getxattr,
 	.listxattr	= ext2_listxattr,
+	.removexattr	= generic_removexattr,
 #endif
 	.setattr	= ext2_setattr,
 	.get_acl	= ext2_get_acl,

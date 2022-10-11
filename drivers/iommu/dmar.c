@@ -143,7 +143,7 @@ dmar_alloc_pci_notify_info(struct pci_dev *dev, unsigned long event)
 		for (tmp = dev; tmp; tmp = tmp->bus->self)
 			level++;
 
-	size = sizeof(*info) + level * sizeof(struct acpi_dmar_pci_path);
+	size = sizeof(*info) + level * sizeof(info->path[0]);
 	if (size <= sizeof(dmar_pci_notify_info_buf)) {
 		info = (struct dmar_pci_notify_info *)dmar_pci_notify_info_buf;
 	} else {
@@ -241,20 +241,8 @@ int dmar_insert_dev_scope(struct dmar_pci_notify_info *info,
 		if (!dmar_match_pci_path(info, scope->bus, path, level))
 			continue;
 
-		/*
-		 * We expect devices with endpoint scope to have normal PCI
-		 * headers, and devices with bridge scope to have bridge PCI
-		 * headers.  However PCI NTB devices may be listed in the
-		 * DMAR table with bridge scope, even though they have a
-		 * normal PCI header.  NTB devices are identified by class
-		 * "BRIDGE_OTHER" (0680h) - we don't declare a socpe mismatch
-		 * for this special case.
-		 */
-		if ((scope->entry_type == ACPI_DMAR_SCOPE_TYPE_ENDPOINT &&
-		     info->dev->hdr_type != PCI_HEADER_TYPE_NORMAL) ||
-		    (scope->entry_type == ACPI_DMAR_SCOPE_TYPE_BRIDGE &&
-		     (info->dev->hdr_type == PCI_HEADER_TYPE_NORMAL &&
-		      info->dev->class >> 8 != PCI_CLASS_BRIDGE_OTHER))) {
+		if ((scope->entry_type == ACPI_DMAR_SCOPE_TYPE_ENDPOINT) ^
+		    (info->dev->hdr_type == PCI_HEADER_TYPE_NORMAL)) {
 			pr_warn("Device scope type does not match for %s\n",
 				pci_name(info->dev));
 			return -EINVAL;
@@ -1078,18 +1066,12 @@ static int alloc_iommu(struct dmar_drhd_unit *drhd)
 
 	raw_spin_lock_init(&iommu->register_lock);
 
-	if (intel_iommu_enabled) {
+	drhd->iommu = iommu;
+
+	if (intel_iommu_enabled)
 		iommu->iommu_dev = iommu_device_create(NULL, iommu,
 						       intel_iommu_groups,
 						       "%s", iommu->name);
-
-		if (IS_ERR(iommu->iommu_dev)) {
-			err = PTR_ERR(iommu->iommu_dev);
-			goto err_unmap;
-		}
-	}
-
-	drhd->iommu = iommu;
 
 	return 0;
 
@@ -1169,6 +1151,8 @@ static int qi_check_fault(struct intel_iommu *iommu, int index)
 				(unsigned long long)qi->desc[index].high);
 			memcpy(&qi->desc[index], &qi->desc[wait_index],
 					sizeof(struct qi_desc));
+			__iommu_flush_cache(iommu, &qi->desc[index],
+					sizeof(struct qi_desc));
 			writel(DMA_FSTS_IQE, iommu->reg + DMAR_FSTS_REG);
 			return -EINVAL;
 		}
@@ -1242,6 +1226,9 @@ restart:
 	wait_desc.high = virt_to_phys(&qi->desc_status[wait_index]);
 
 	hw[wait_index] = wait_desc;
+
+	__iommu_flush_cache(iommu, &hw[index], sizeof(struct qi_desc));
+	__iommu_flush_cache(iommu, &hw[wait_index], sizeof(struct qi_desc));
 
 	qi->free_head = (qi->free_head + 2) % QI_LENGTH;
 	qi->free_cnt -= 2;
@@ -1328,8 +1315,8 @@ void qi_flush_iotlb(struct intel_iommu *iommu, u16 did, u64 addr,
 	qi_submit_sync(&desc, iommu);
 }
 
-void qi_flush_dev_iotlb(struct intel_iommu *iommu, u16 sid, u16 qdep,
-			u64 addr, unsigned mask)
+void qi_flush_dev_iotlb(struct intel_iommu *iommu, u16 sid, u16 pfsid,
+			u16 qdep, u64 addr, unsigned mask)
 {
 	struct qi_desc desc;
 
@@ -1344,7 +1331,7 @@ void qi_flush_dev_iotlb(struct intel_iommu *iommu, u16 sid, u16 qdep,
 		qdep = 0;
 
 	desc.low = QI_DEV_IOTLB_SID(sid) | QI_DEV_IOTLB_QDEP(qdep) |
-		   QI_DIOTLB_TYPE;
+		   QI_DIOTLB_TYPE | QI_DEV_IOTLB_PFSID(pfsid);
 
 	qi_submit_sync(&desc, iommu);
 }
@@ -1588,14 +1575,18 @@ static int dmar_fault_do_one(struct intel_iommu *iommu, int type,
 	reason = dmar_get_fault_reason(fault_reason, &fault_type);
 
 	if (fault_type == INTR_REMAP)
-		pr_err("[INTR-REMAP] Request device [%02x:%02x.%d] fault index %llx [fault reason %02d] %s\n",
-			source_id >> 8, PCI_SLOT(source_id & 0xFF),
+		pr_err("INTR-REMAP: Request device [[%02x:%02x.%d] "
+		       "fault index %llx\n"
+			"INTR-REMAP:[fault reason %02d] %s\n",
+			(source_id >> 8), PCI_SLOT(source_id & 0xFF),
 			PCI_FUNC(source_id & 0xFF), addr >> 48,
 			fault_reason, reason);
 	else
-		pr_err("[%s] Request device [%02x:%02x.%d] fault addr %llx [fault reason %02d] %s\n",
-		       type ? "DMA Read" : "DMA Write",
-		       source_id >> 8, PCI_SLOT(source_id & 0xFF),
+		pr_err("DMAR:[%s] Request device [%02x:%02x.%d] "
+		       "fault addr %llx \n"
+		       "DMAR:[fault reason %02d] %s\n",
+		       (type ? "DMA Read" : "DMA Write"),
+		       (source_id >> 8), PCI_SLOT(source_id & 0xFF),
 		       PCI_FUNC(source_id & 0xFF), addr, fault_reason, reason);
 	return 0;
 }
@@ -1607,17 +1598,10 @@ irqreturn_t dmar_fault(int irq, void *dev_id)
 	int reg, fault_index;
 	u32 fault_status;
 	unsigned long flag;
-	bool ratelimited;
-	static DEFINE_RATELIMIT_STATE(rs,
-				      DEFAULT_RATELIMIT_INTERVAL,
-				      DEFAULT_RATELIMIT_BURST);
-
-	/* Disable printing, simply clear the fault when ratelimited */
-	ratelimited = !__ratelimit(&rs);
 
 	raw_spin_lock_irqsave(&iommu->register_lock, flag);
 	fault_status = readl(iommu->reg + DMAR_FSTS_REG);
-	if (fault_status && !ratelimited)
+	if (fault_status)
 		pr_err("DRHD: handling fault status reg %x\n", fault_status);
 
 	/* TBD: ignore advanced fault log currently */
@@ -1639,28 +1623,24 @@ irqreturn_t dmar_fault(int irq, void *dev_id)
 		if (!(data & DMA_FRCD_F))
 			break;
 
-		if (!ratelimited) {
-			fault_reason = dma_frcd_fault_reason(data);
-			type = dma_frcd_type(data);
+		fault_reason = dma_frcd_fault_reason(data);
+		type = dma_frcd_type(data);
 
-			data = readl(iommu->reg + reg +
-				     fault_index * PRIMARY_FAULT_REG_LEN + 8);
-			source_id = dma_frcd_source_id(data);
+		data = readl(iommu->reg + reg +
+				fault_index * PRIMARY_FAULT_REG_LEN + 8);
+		source_id = dma_frcd_source_id(data);
 
-			guest_addr = dmar_readq(iommu->reg + reg +
-					fault_index * PRIMARY_FAULT_REG_LEN);
-			guest_addr = dma_frcd_page_addr(guest_addr);
-		}
-
+		guest_addr = dmar_readq(iommu->reg + reg +
+				fault_index * PRIMARY_FAULT_REG_LEN);
+		guest_addr = dma_frcd_page_addr(guest_addr);
 		/* clear the fault */
 		writel(DMA_FRCD_F, iommu->reg + reg +
 			fault_index * PRIMARY_FAULT_REG_LEN + 12);
 
 		raw_spin_unlock_irqrestore(&iommu->register_lock, flag);
 
-		if (!ratelimited)
-			dmar_fault_do_one(iommu, type, fault_reason,
-					  source_id, guest_addr);
+		dmar_fault_do_one(iommu, type, fault_reason,
+				source_id, guest_addr);
 
 		fault_index++;
 		if (fault_index >= cap_num_fault_regs(iommu->cap))

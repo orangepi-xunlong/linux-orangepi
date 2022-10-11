@@ -127,7 +127,7 @@ struct u300_gpio_confdata {
 }
 
 /* Initial configuration */
-static const struct u300_gpio_confdata __initconst
+static const struct __initconst u300_gpio_confdata
 bs335_gpio_config[U300_GPIO_NUM_PORTS][U300_GPIO_PINS_PER_PORT] = {
 	/* Port 0, pins 0-7 */
 	{
@@ -208,16 +208,25 @@ bs335_gpio_config[U300_GPIO_NUM_PORTS][U300_GPIO_PINS_PER_PORT] = {
 	}
 };
 
+/**
+ * to_u300_gpio() - get the pointer to u300_gpio
+ * @chip: the gpio chip member of the structure u300_gpio
+ */
+static inline struct u300_gpio *to_u300_gpio(struct gpio_chip *chip)
+{
+	return container_of(chip, struct u300_gpio, chip);
+}
+
 static int u300_gpio_get(struct gpio_chip *chip, unsigned offset)
 {
-	struct u300_gpio *gpio = gpiochip_get_data(chip);
+	struct u300_gpio *gpio = to_u300_gpio(chip);
 
-	return !!(readl(U300_PIN_REG(offset, dir)) & U300_PIN_BIT(offset));
+	return readl(U300_PIN_REG(offset, dir)) & U300_PIN_BIT(offset);
 }
 
 static void u300_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 {
-	struct u300_gpio *gpio = gpiochip_get_data(chip);
+	struct u300_gpio *gpio = to_u300_gpio(chip);
 	unsigned long flags;
 	u32 val;
 
@@ -234,7 +243,7 @@ static void u300_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 
 static int u300_gpio_direction_input(struct gpio_chip *chip, unsigned offset)
 {
-	struct u300_gpio *gpio = gpiochip_get_data(chip);
+	struct u300_gpio *gpio = to_u300_gpio(chip);
 	unsigned long flags;
 	u32 val;
 
@@ -250,7 +259,7 @@ static int u300_gpio_direction_input(struct gpio_chip *chip, unsigned offset)
 static int u300_gpio_direction_output(struct gpio_chip *chip, unsigned offset,
 				      int value)
 {
-	struct u300_gpio *gpio = gpiochip_get_data(chip);
+	struct u300_gpio *gpio = to_u300_gpio(chip);
 	unsigned long flags;
 	u32 oldmode;
 	u32 val;
@@ -281,7 +290,7 @@ int u300_gpio_config_get(struct gpio_chip *chip,
 			 unsigned offset,
 			 unsigned long *config)
 {
-	struct u300_gpio *gpio = gpiochip_get_data(chip);
+	struct u300_gpio *gpio = to_u300_gpio(chip);
 	enum pin_config_param param = (enum pin_config_param) *config;
 	bool biasmode;
 	u32 drmode;
@@ -339,7 +348,7 @@ int u300_gpio_config_get(struct gpio_chip *chip,
 int u300_gpio_config_set(struct gpio_chip *chip, unsigned offset,
 			 enum pin_config_param param)
 {
-	struct u300_gpio *gpio = gpiochip_get_data(chip);
+	struct u300_gpio *gpio = to_u300_gpio(chip);
 	unsigned long flags;
 	u32 val;
 
@@ -420,7 +429,7 @@ static void u300_toggle_trigger(struct u300_gpio *gpio, unsigned offset)
 static int u300_gpio_irq_type(struct irq_data *d, unsigned trigger)
 {
 	struct gpio_chip *chip = irq_data_get_irq_chip_data(d);
-	struct u300_gpio *gpio = gpiochip_get_data(chip);
+	struct u300_gpio *gpio = to_u300_gpio(chip);
 	struct u300_gpio_port *port = &gpio->ports[d->hwirq >> 3];
 	int offset = d->hwirq;
 	u32 val;
@@ -457,7 +466,7 @@ static int u300_gpio_irq_type(struct irq_data *d, unsigned trigger)
 static void u300_gpio_irq_enable(struct irq_data *d)
 {
 	struct gpio_chip *chip = irq_data_get_irq_chip_data(d);
-	struct u300_gpio *gpio = gpiochip_get_data(chip);
+	struct u300_gpio *gpio = to_u300_gpio(chip);
 	struct u300_gpio_port *port = &gpio->ports[d->hwirq >> 3];
 	int offset = d->hwirq;
 	u32 val;
@@ -474,7 +483,7 @@ static void u300_gpio_irq_enable(struct irq_data *d)
 static void u300_gpio_irq_disable(struct irq_data *d)
 {
 	struct gpio_chip *chip = irq_data_get_irq_chip_data(d);
-	struct u300_gpio *gpio = gpiochip_get_data(chip);
+	struct u300_gpio *gpio = to_u300_gpio(chip);
 	int offset = d->hwirq;
 	u32 val;
 	unsigned long flags;
@@ -497,7 +506,7 @@ static void u300_gpio_irq_handler(struct irq_desc *desc)
 	unsigned int irq = irq_desc_get_irq(desc);
 	struct irq_chip *parent_chip = irq_desc_get_chip(desc);
 	struct gpio_chip *chip = irq_desc_get_handler_data(desc);
-	struct u300_gpio *gpio = gpiochip_get_data(chip);
+	struct u300_gpio *gpio = to_u300_gpio(chip);
 	struct u300_gpio_port *port = &gpio->ports[irq - chip->base];
 	int pinoffset = port->number << 3; /* get the right stride */
 	unsigned long val;
@@ -675,7 +684,7 @@ static int __init u300_gpio_probe(struct platform_device *pdev)
 #ifdef CONFIG_OF_GPIO
 	gpio->chip.of_node = pdev->dev.of_node;
 #endif
-	err = gpiochip_add_data(&gpio->chip, gpio);
+	err = gpiochip_add(&gpio->chip);
 	if (err) {
 		dev_err(gpio->dev, "unable to add gpiochip: %d\n", err);
 		goto err_no_chip;

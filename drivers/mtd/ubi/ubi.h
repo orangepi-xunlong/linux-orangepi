@@ -49,19 +49,15 @@
 /* UBI name used for character devices, sysfs, etc */
 #define UBI_NAME_STR "ubi"
 
-struct ubi_device;
-
 /* Normal UBI messages */
-__printf(2, 3)
-void ubi_msg(const struct ubi_device *ubi, const char *fmt, ...);
-
+#define ubi_msg(ubi, fmt, ...) pr_notice(UBI_NAME_STR "%d: " fmt "\n", \
+					 ubi->ubi_num, ##__VA_ARGS__)
 /* UBI warning messages */
-__printf(2, 3)
-void ubi_warn(const struct ubi_device *ubi, const char *fmt, ...);
-
+#define ubi_warn(ubi, fmt, ...) pr_warn(UBI_NAME_STR "%d warning: %s: " fmt "\n", \
+					ubi->ubi_num, __func__, ##__VA_ARGS__)
 /* UBI error messages */
-__printf(2, 3)
-void ubi_err(const struct ubi_device *ubi, const char *fmt, ...);
+#define ubi_err(ubi, fmt, ...) pr_err(UBI_NAME_STR "%d error: %s: " fmt "\n", \
+				      ubi->ubi_num, __func__, ##__VA_ARGS__)
 
 /* Background thread name pattern */
 #define UBI_BGT_NAME_PATTERN "ubi_bgt%dd"
@@ -167,17 +163,6 @@ enum {
 };
 
 /**
- * struct ubi_vid_io_buf - VID buffer used to read/write VID info to/from the
- *			   flash.
- * @hdr: a pointer to the VID header stored in buffer
- * @buffer: underlying buffer
- */
-struct ubi_vid_io_buf {
-	struct ubi_vid_hdr *hdr;
-	void *buffer;
-};
-
-/**
  * struct ubi_wl_entry - wear-leveling entry.
  * @u.rb: link in the corresponding (free/used) RB-tree
  * @u.list: link in the protection queue
@@ -278,21 +263,6 @@ struct ubi_fm_pool {
 };
 
 /**
- * struct ubi_eba_leb_desc - EBA logical eraseblock descriptor
- * @lnum: the logical eraseblock number
- * @pnum: the physical eraseblock where the LEB can be found
- *
- * This structure is here to hide EBA's internal from other part of the
- * UBI implementation.
- *
- * One can query the position of a LEB by calling ubi_eba_get_ldesc().
- */
-struct ubi_eba_leb_desc {
-	int lnum;
-	int pnum;
-};
-
-/**
  * struct ubi_volume - UBI volume description data structure.
  * @dev: device object to make use of the the Linux device model
  * @cdev: character device object to create character device
@@ -370,7 +340,7 @@ struct ubi_volume {
 	long long upd_received;
 	void *upd_buf;
 
-	struct ubi_eba_table *eba_tbl;
+	int *eba_tbl;
 	unsigned int checked:1;
 	unsigned int corrupted:1;
 	unsigned int upd_marker:1;
@@ -750,8 +720,6 @@ struct ubi_ainf_volume {
  * @ec_sum: a temporary variable used when calculating @mean_ec
  * @ec_count: a temporary variable used when calculating @mean_ec
  * @aeb_slab_cache: slab cache for &struct ubi_ainf_peb objects
- * @ech: temporary EC header. Only available during scan
- * @vidh: temporary VID buffer. Only available during scan
  *
  * This data structure contains the result of attaching an MTD device and may
  * be used by other UBI sub-systems to build final UBI data structures, further
@@ -780,8 +748,6 @@ struct ubi_attach_info {
 	uint64_t ec_sum;
 	int ec_count;
 	struct kmem_cache *aeb_slab_cache;
-	struct ubi_ec_hdr *ech;
-	struct ubi_vid_io_buf *vidb;
 };
 
 /**
@@ -822,12 +788,8 @@ extern struct mutex ubi_devices_mutex;
 extern struct blocking_notifier_head ubi_notifiers;
 
 /* attach.c */
-struct ubi_ainf_peb *ubi_alloc_aeb(struct ubi_attach_info *ai, int pnum,
-				   int ec);
-void ubi_free_aeb(struct ubi_attach_info *ai, struct ubi_ainf_peb *aeb);
 int ubi_add_to_av(struct ubi_device *ubi, struct ubi_attach_info *ai, int pnum,
 		  int ec, const struct ubi_vid_hdr *vid_hdr, int bitflips);
-struct ubi_ainf_volume *ubi_add_av(struct ubi_attach_info *ai, int vol_id);
 struct ubi_ainf_volume *ubi_find_av(const struct ubi_attach_info *ai,
 				    int vol_id);
 void ubi_remove_av(struct ubi_attach_info *ai, struct ubi_ainf_volume *av);
@@ -869,21 +831,7 @@ void ubi_update_reserved(struct ubi_device *ubi);
 void ubi_calculate_reserved(struct ubi_device *ubi);
 int ubi_check_pattern(const void *buf, uint8_t patt, int size);
 
-static inline bool ubi_leb_valid(struct ubi_volume *vol, int lnum)
-{
-	return lnum >= 0 && lnum < vol->reserved_pebs;
-}
-
 /* eba.c */
-struct ubi_eba_table *ubi_eba_create_table(struct ubi_volume *vol,
-					   int nentries);
-void ubi_eba_destroy_table(struct ubi_eba_table *tbl);
-void ubi_eba_copy_table(struct ubi_volume *vol, struct ubi_eba_table *dst,
-			int nentries);
-void ubi_eba_replace_table(struct ubi_volume *vol, struct ubi_eba_table *tbl);
-void ubi_eba_get_ldesc(struct ubi_volume *vol, int lnum,
-		       struct ubi_eba_leb_desc *ldesc);
-bool ubi_eba_is_mapped(struct ubi_volume *vol, int lnum);
 int ubi_eba_unmap_leb(struct ubi_device *ubi, struct ubi_volume *vol,
 		      int lnum);
 int ubi_eba_read_leb(struct ubi_device *ubi, struct ubi_volume *vol, int lnum,
@@ -898,7 +846,7 @@ int ubi_eba_write_leb_st(struct ubi_device *ubi, struct ubi_volume *vol,
 int ubi_eba_atomic_leb_change(struct ubi_device *ubi, struct ubi_volume *vol,
 			      int lnum, const void *buf, int len);
 int ubi_eba_copy_leb(struct ubi_device *ubi, int from, int to,
-		     struct ubi_vid_io_buf *vidb);
+		     struct ubi_vid_hdr *vid_hdr);
 int ubi_eba_init(struct ubi_device *ubi, struct ubi_attach_info *ai);
 unsigned long long ubi_next_sqnum(struct ubi_device *ubi);
 int self_check_eba(struct ubi_device *ubi, struct ubi_attach_info *ai_fastmap,
@@ -933,9 +881,9 @@ int ubi_io_read_ec_hdr(struct ubi_device *ubi, int pnum,
 int ubi_io_write_ec_hdr(struct ubi_device *ubi, int pnum,
 			struct ubi_ec_hdr *ec_hdr);
 int ubi_io_read_vid_hdr(struct ubi_device *ubi, int pnum,
-			struct ubi_vid_io_buf *vidb, int verbose);
+			struct ubi_vid_hdr *vid_hdr, int verbose);
 int ubi_io_write_vid_hdr(struct ubi_device *ubi, int pnum,
-			 struct ubi_vid_io_buf *vidb);
+			 struct ubi_vid_hdr *vid_hdr);
 
 /* build.c */
 int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num,
@@ -1056,68 +1004,44 @@ static inline void ubi_move_aeb_to_list(struct ubi_ainf_volume *av,
 }
 
 /**
- * ubi_init_vid_buf - Initialize a VID buffer
- * @ubi: the UBI device
- * @vidb: the VID buffer to initialize
- * @buf: the underlying buffer
+ * ubi_zalloc_vid_hdr - allocate a volume identifier header object.
+ * @ubi: UBI device description object
+ * @gfp_flags: GFP flags to allocate with
+ *
+ * This function returns a pointer to the newly allocated and zero-filled
+ * volume identifier header object in case of success and %NULL in case of
+ * failure.
  */
-static inline void ubi_init_vid_buf(const struct ubi_device *ubi,
-				    struct ubi_vid_io_buf *vidb,
-				    void *buf)
+static inline struct ubi_vid_hdr *
+ubi_zalloc_vid_hdr(const struct ubi_device *ubi, gfp_t gfp_flags)
 {
-	if (buf)
-		memset(buf, 0, ubi->vid_hdr_alsize);
+	void *vid_hdr;
 
-	vidb->buffer = buf;
-	vidb->hdr = buf + ubi->vid_hdr_shift;
+	vid_hdr = kzalloc(ubi->vid_hdr_alsize, gfp_flags);
+	if (!vid_hdr)
+		return NULL;
+
+	/*
+	 * VID headers may be stored at un-aligned flash offsets, so we shift
+	 * the pointer.
+	 */
+	return vid_hdr + ubi->vid_hdr_shift;
 }
 
 /**
- * ubi_init_vid_buf - Allocate a VID buffer
- * @ubi: the UBI device
- * @gfp_flags: GFP flags to use for the allocation
+ * ubi_free_vid_hdr - free a volume identifier header object.
+ * @ubi: UBI device description object
+ * @vid_hdr: the object to free
  */
-static inline struct ubi_vid_io_buf *
-ubi_alloc_vid_buf(const struct ubi_device *ubi, gfp_t gfp_flags)
+static inline void ubi_free_vid_hdr(const struct ubi_device *ubi,
+				    struct ubi_vid_hdr *vid_hdr)
 {
-	struct ubi_vid_io_buf *vidb;
-	void *buf;
+	void *p = vid_hdr;
 
-	vidb = kzalloc(sizeof(*vidb), gfp_flags);
-	if (!vidb)
-		return NULL;
-
-	buf = kmalloc(ubi->vid_hdr_alsize, gfp_flags);
-	if (!buf) {
-		kfree(vidb);
-		return NULL;
-	}
-
-	ubi_init_vid_buf(ubi, vidb, buf);
-
-	return vidb;
-}
-
-/**
- * ubi_free_vid_buf - Free a VID buffer
- * @vidb: the VID buffer to free
- */
-static inline void ubi_free_vid_buf(struct ubi_vid_io_buf *vidb)
-{
-	if (!vidb)
+	if (!p)
 		return;
 
-	kfree(vidb->buffer);
-	kfree(vidb);
-}
-
-/**
- * ubi_get_vid_hdr - Get the VID header attached to a VID buffer
- * @vidb: VID buffer
- */
-static inline struct ubi_vid_hdr *ubi_get_vid_hdr(struct ubi_vid_io_buf *vidb)
-{
-	return vidb->hdr;
+	kfree(p - ubi->vid_hdr_shift);
 }
 
 /*

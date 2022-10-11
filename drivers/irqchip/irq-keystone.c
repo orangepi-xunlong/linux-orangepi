@@ -108,7 +108,7 @@ static irqreturn_t keystone_irq_handler(int irq, void *keystone_irq)
 			dev_dbg(kirq->dev, "dispatch bit %d, virq %d\n",
 				src, virq);
 			if (!virq)
-				dev_warn(kirq->dev, "spurious irq detected hwirq %d, virq %d\n",
+				dev_warn(kirq->dev, "sporious irq detected hwirq %d, virq %d\n",
 					 src, virq);
 			raw_spin_lock_irqsave(&kirq->wa_lock, wa_lock_flags);
 			generic_handle_irq(virq);

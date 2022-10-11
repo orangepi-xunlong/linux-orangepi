@@ -82,31 +82,30 @@ static void tcp_illinois_init(struct sock *sk)
 }
 
 /* Measure RTT for each ack. */
-static void tcp_illinois_acked(struct sock *sk, const struct ack_sample *sample)
+static void tcp_illinois_acked(struct sock *sk, u32 pkts_acked, s32 rtt)
 {
 	struct illinois *ca = inet_csk_ca(sk);
-	s32 rtt_us = sample->rtt_us;
 
-	ca->acked = sample->pkts_acked;
+	ca->acked = pkts_acked;
 
 	/* dup ack, no rtt sample */
-	if (rtt_us < 0)
+	if (rtt < 0)
 		return;
 
 	/* ignore bogus values, this prevents wraparound in alpha math */
-	if (rtt_us > RTT_MAX)
-		rtt_us = RTT_MAX;
+	if (rtt > RTT_MAX)
+		rtt = RTT_MAX;
 
 	/* keep track of minimum RTT seen so far */
-	if (ca->base_rtt > rtt_us)
-		ca->base_rtt = rtt_us;
+	if (ca->base_rtt > rtt)
+		ca->base_rtt = rtt;
 
 	/* and max */
-	if (ca->max_rtt < rtt_us)
-		ca->max_rtt = rtt_us;
+	if (ca->max_rtt < rtt)
+		ca->max_rtt = rtt;
 
 	++ca->cnt_rtt;
-	ca->sum_rtt += rtt_us;
+	ca->sum_rtt += rtt;
 }
 
 /* Maximum queuing delay */

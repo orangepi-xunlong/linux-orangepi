@@ -938,21 +938,25 @@
 				atmel,adc-res-names = "lowres", "highres";
 				atmel,adc-use-res = "highres";
 
-				trigger0 {
+				trigger@0 {
+					reg = <0>;
 					trigger-name = "timer-counter-0";
 					trigger-value = <0x1>;
 				};
-				trigger1 {
+				trigger@1 {
+					reg = <1>;
 					trigger-name = "timer-counter-1";
 					trigger-value = <0x3>;
 				};
 
-				trigger2 {
+				trigger@2 {
+					reg = <2>;
 					trigger-name = "timer-counter-2";
 					trigger-value = <0x5>;
 				};
 
-				trigger3 {
+				trigger@3 {
+					reg = <3>;
 					trigger-name = "external";
 					trigger-value = <0xd>;
 					trigger-external;
@@ -1003,7 +1007,7 @@
 			status = "disabled";
 		};
 
-		usb0: ohci@500000 {
+		usb0: ohci@00500000 {
 			compatible = "atmel,at91rm9200-ohci", "usb-ohci";
 			reg = <0x00500000 0x100000>;
 			interrupts = <20 IRQ_TYPE_LEVEL_HIGH 2>;
@@ -1013,7 +1017,7 @@
 		};
 	};
 
-	i2c-gpio-0 {
+	i2c@0 {
 		compatible = "i2c-gpio";
 		gpios = <&pioA 23 GPIO_ACTIVE_HIGH /* sda */
 			 &pioA 24 GPIO_ACTIVE_HIGH /* scl */

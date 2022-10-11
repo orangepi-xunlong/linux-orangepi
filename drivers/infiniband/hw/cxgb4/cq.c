@@ -33,15 +33,19 @@
 #include "iw_cxgb4.h"
 
 static int destroy_cq(struct c4iw_rdev *rdev, struct t4_cq *cq,
-		      struct c4iw_dev_ucontext *uctx, struct sk_buff *skb)
+		      struct c4iw_dev_ucontext *uctx)
 {
 	struct fw_ri_res_wr *res_wr;
 	struct fw_ri_res *res;
 	int wr_len;
 	struct c4iw_wr_wait wr_wait;
+	struct sk_buff *skb;
 	int ret;
 
 	wr_len = sizeof *res_wr + sizeof *res;
+	skb = alloc_skb(wr_len, GFP_KERNEL);
+	if (!skb)
+		return -ENOMEM;
 	set_wr_txq(skb, CPL_PRIORITY_CONTROL, 0);
 
 	res_wr = (struct fw_ri_res_wr *)__skb_put(skb, wr_len);
@@ -721,7 +725,6 @@ static int c4iw_poll_cq_one(struct c4iw_cq *chp, struct ib_wc *wc)
 		    CQE_OPCODE(&cqe) == FW_RI_SEND_WITH_SE_INV) {
 			wc->ex.invalidate_rkey = CQE_WRID_STAG(&cqe);
 			wc->wc_flags |= IB_WC_WITH_INVALIDATE;
-			c4iw_invalidate_mr(qhp->rhp, wc->ex.invalidate_rkey);
 		}
 	} else {
 		switch (CQE_OPCODE(&cqe)) {
@@ -741,17 +744,15 @@ static int c4iw_poll_cq_one(struct c4iw_cq *chp, struct ib_wc *wc)
 		case FW_RI_SEND_WITH_SE:
 			wc->opcode = IB_WC_SEND;
 			break;
+		case FW_RI_BIND_MW:
+			wc->opcode = IB_WC_BIND_MW;
+			break;
 
 		case FW_RI_LOCAL_INV:
 			wc->opcode = IB_WC_LOCAL_INV;
 			break;
 		case FW_RI_FAST_REGISTER:
 			wc->opcode = IB_WC_REG_MR;
-
-			/* Invalidate the MR if the fastreg failed */
-			if (CQE_STATUS(&cqe) != T4_ERR_SUCCESS)
-				c4iw_invalidate_mr(qhp->rhp,
-						   CQE_WRID_FR_STAG(&cqe));
 			break;
 		default:
 			printk(KERN_ERR MOD "Unexpected opcode %d "
@@ -817,15 +818,8 @@ static int c4iw_poll_cq_one(struct c4iw_cq *chp, struct ib_wc *wc)
 		}
 	}
 out:
-	if (wq) {
-		if (unlikely(qhp->attr.state != C4IW_QP_STATE_RTS)) {
-			if (t4_sq_empty(wq))
-				complete(&qhp->sq_drained);
-			if (t4_rq_empty(wq))
-				complete(&qhp->rq_drained);
-		}
+	if (wq)
 		spin_unlock(&qhp->lock);
-	}
 	return ret;
 }
 
@@ -865,9 +859,7 @@ int c4iw_destroy_cq(struct ib_cq *ib_cq)
 	ucontext = ib_cq->uobject ? to_c4iw_ucontext(ib_cq->uobject->context)
 				  : NULL;
 	destroy_cq(&chp->rhp->rdev, &chp->cq,
-		   ucontext ? &ucontext->uctx : &chp->cq.rdev->uctx,
-		   chp->destroy_skb);
-	chp->destroy_skb = NULL;
+		   ucontext ? &ucontext->uctx : &chp->cq.rdev->uctx);
 	kfree(chp);
 	return 0;
 }
@@ -883,7 +875,7 @@ struct ib_cq *c4iw_create_cq(struct ib_device *ibdev,
 	struct c4iw_cq *chp;
 	struct c4iw_create_cq_resp uresp;
 	struct c4iw_ucontext *ucontext = NULL;
-	int ret, wr_len;
+	int ret;
 	size_t memsize, hwentries;
 	struct c4iw_mm_entry *mm, *mm2;
 
@@ -899,13 +891,6 @@ struct ib_cq *c4iw_create_cq(struct ib_device *ibdev,
 	chp = kzalloc(sizeof(*chp), GFP_KERNEL);
 	if (!chp)
 		return ERR_PTR(-ENOMEM);
-
-	wr_len = sizeof(struct fw_ri_res_wr) + sizeof(struct fw_ri_res);
-	chp->destroy_skb = alloc_skb(wr_len, GFP_KERNEL);
-	if (!chp->destroy_skb) {
-		ret = -ENOMEM;
-		goto err1;
-	}
 
 	if (ib_context)
 		ucontext = to_c4iw_ucontext(ib_context);
@@ -947,7 +932,7 @@ struct ib_cq *c4iw_create_cq(struct ib_device *ibdev,
 	ret = create_cq(&rhp->rdev, &chp->cq,
 			ucontext ? &ucontext->uctx : &rhp->rdev.uctx);
 	if (ret)
-		goto err2;
+		goto err1;
 
 	chp->rhp = rhp;
 	chp->cq.size--;				/* status page */
@@ -958,15 +943,15 @@ struct ib_cq *c4iw_create_cq(struct ib_device *ibdev,
 	init_waitqueue_head(&chp->wait);
 	ret = insert_handle(rhp, &rhp->cqidr, chp, chp->cq.cqid);
 	if (ret)
-		goto err3;
+		goto err2;
 
 	if (ucontext) {
 		mm = kmalloc(sizeof *mm, GFP_KERNEL);
 		if (!mm)
-			goto err4;
+			goto err3;
 		mm2 = kmalloc(sizeof *mm2, GFP_KERNEL);
 		if (!mm2)
-			goto err5;
+			goto err4;
 
 		uresp.qid_mask = rhp->rdev.cqmask;
 		uresp.cqid = chp->cq.cqid;
@@ -981,7 +966,7 @@ struct ib_cq *c4iw_create_cq(struct ib_device *ibdev,
 		ret = ib_copy_to_udata(udata, &uresp,
 				       sizeof(uresp) - sizeof(uresp.reserved));
 		if (ret)
-			goto err6;
+			goto err5;
 
 		mm->key = uresp.key;
 		mm->addr = virt_to_phys(chp->cq.queue);
@@ -997,18 +982,15 @@ struct ib_cq *c4iw_create_cq(struct ib_device *ibdev,
 	     __func__, chp->cq.cqid, chp, chp->cq.size,
 	     chp->cq.memsize, (unsigned long long) chp->cq.dma_addr);
 	return &chp->ibcq;
-err6:
-	kfree(mm2);
 err5:
-	kfree(mm);
+	kfree(mm2);
 err4:
-	remove_handle(rhp, &rhp->cqidr, chp->cq.cqid);
+	kfree(mm);
 err3:
-	destroy_cq(&chp->rhp->rdev, &chp->cq,
-		   ucontext ? &ucontext->uctx : &rhp->rdev.uctx,
-		   chp->destroy_skb);
+	remove_handle(rhp, &rhp->cqidr, chp->cq.cqid);
 err2:
-	kfree_skb(chp->destroy_skb);
+	destroy_cq(&chp->rhp->rdev, &chp->cq,
+		   ucontext ? &ucontext->uctx : &rhp->rdev.uctx);
 err1:
 	kfree(chp);
 	return ERR_PTR(ret);
@@ -1022,15 +1004,15 @@ int c4iw_resize_cq(struct ib_cq *cq, int cqe, struct ib_udata *udata)
 int c4iw_arm_cq(struct ib_cq *ibcq, enum ib_cq_notify_flags flags)
 {
 	struct c4iw_cq *chp;
-	int ret = 0;
+	int ret;
 	unsigned long flag;
 
 	chp = to_c4iw_cq(ibcq);
 	spin_lock_irqsave(&chp->lock, flag);
-	t4_arm_cq(&chp->cq,
-		  (flags & IB_CQ_SOLICITED_MASK) == IB_CQ_SOLICITED);
-	if (flags & IB_CQ_REPORT_MISSED_EVENTS)
-		ret = t4_cq_notempty(&chp->cq);
+	ret = t4_arm_cq(&chp->cq,
+			(flags & IB_CQ_SOLICITED_MASK) == IB_CQ_SOLICITED);
 	spin_unlock_irqrestore(&chp->lock, flag);
+	if (ret && !(flags & IB_CQ_REPORT_MISSED_EVENTS))
+		ret = 0;
 	return ret;
 }

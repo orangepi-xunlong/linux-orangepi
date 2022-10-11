@@ -26,6 +26,7 @@
 #include <linux/io.h>
 #include <linux/slab.h>
 #include <linux/of_platform.h>
+#include <linux/platform_data/s3c-hsotg.h>
 
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
@@ -97,6 +98,23 @@ static inline bool using_dma(struct dwc2_hsotg *hsotg)
 }
 
 /**
+* dwc2_hsotg_read_frameno - read current frame number
+* @hsotg: The device instance
+*
+* Return the current frame number
+*/
+static u32 dwc2_hsotg_read_frameno(struct dwc2_hsotg *hsotg)
+{
+	u32 dsts;
+
+	dsts = dwc2_readl(hsotg->regs + DSTS);
+	dsts &= DSTS_SOFFN_MASK;
+	dsts >>= DSTS_SOFFN_SHIFT;
+
+	return dsts;
+}
+
+/**
  * dwc2_gadget_incr_frame_num - Increments the targeted frame number.
  * @hs_ep: The endpoint
  * @increment: The value to increment by
@@ -106,11 +124,14 @@ static inline bool using_dma(struct dwc2_hsotg *hsotg)
  */
 static inline void dwc2_gadget_incr_frame_num(struct dwc2_hsotg_ep *hs_ep)
 {
+	struct dwc2_hsotg *hsotg = hs_ep->parent;
+	u32 current_frame = dwc2_hsotg_read_frameno(hsotg);
+
 	hs_ep->target_frame += hs_ep->interval;
 	if (hs_ep->target_frame > DSTS_SOFFN_LIMIT) {
 		hs_ep->frame_overrun = 1;
 		hs_ep->target_frame &= DSTS_SOFFN_LIMIT;
-	} else {
+	} else if (current_frame <= hs_ep->target_frame) {
 		hs_ep->frame_overrun = 0;
 	}
 }
@@ -521,23 +542,6 @@ static unsigned get_ep_limit(struct dwc2_hsotg_ep *hs_ep)
 		maxsize = maxpkt * hs_ep->ep.maxpacket;
 
 	return maxsize;
-}
-
-/**
-* dwc2_hsotg_read_frameno - read current frame number
-* @hsotg: The device instance
-*
-* Return the current frame number
-*/
-static u32 dwc2_hsotg_read_frameno(struct dwc2_hsotg *hsotg)
-{
-	u32 dsts;
-
-	dsts = dwc2_readl(hsotg->regs + DSTS);
-	dsts &= DSTS_SOFFN_MASK;
-	dsts >>= DSTS_SOFFN_SHIFT;
-
-	return dsts;
 }
 
 /**
@@ -1099,10 +1103,8 @@ static int dwc2_hsotg_ep_sethalt(struct usb_ep *ep, int value, bool now);
  */
 static struct dwc2_hsotg_req *get_ep_head(struct dwc2_hsotg_ep *hs_ep)
 {
-	if (list_empty(&hs_ep->queue))
-		return NULL;
-
-	return list_first_entry(&hs_ep->queue, struct dwc2_hsotg_req, queue);
+	return list_first_entry_or_null(&hs_ep->queue, struct dwc2_hsotg_req,
+					queue);
 }
 
 /**
@@ -2521,7 +2523,7 @@ void dwc2_hsotg_core_init_disconnected(struct dwc2_hsotg *hsotg,
 	kill_all_requests(hsotg, hsotg->eps_out[0], -ECONNRESET);
 
 	if (!is_usb_reset)
-		if (dwc2_core_reset(hsotg))
+		if (dwc2_core_reset(hsotg, true))
 			return;
 
 	/*
@@ -2564,15 +2566,16 @@ void dwc2_hsotg_core_init_disconnected(struct dwc2_hsotg *hsotg,
 
 	dwc2_writel(intmsk, hsotg->regs + GINTMSK);
 
-	if (using_dma(hsotg))
-		dwc2_writel(GAHBCFG_GLBL_INTR_EN | GAHBCFG_DMA_EN |
-			    (GAHBCFG_HBSTLEN_INCR4 << GAHBCFG_HBSTLEN_SHIFT),
+	if (using_dma(hsotg)) {
+		val = hsotg->core_params->ahbcfg & ~GAHBCFG_CTRL_MASK;
+		dwc2_writel(GAHBCFG_GLBL_INTR_EN | GAHBCFG_DMA_EN | val,
 			    hsotg->regs + GAHBCFG);
-	else
+	} else {
 		dwc2_writel(((hsotg->dedicated_fifos) ?
 						(GAHBCFG_NP_TXF_EMP_LVL |
 						 GAHBCFG_P_TXF_EMP_LVL) : 0) |
 			    GAHBCFG_GLBL_INTR_EN, hsotg->regs + GAHBCFG);
+	}
 
 	/*
 	 * If INTknTXFEmpMsk is enabled, it's important to disable ep interrupts
@@ -2935,6 +2938,95 @@ irq_retry:
 	return IRQ_HANDLED;
 }
 
+static int dwc2_hsotg_wait_bit_set(struct dwc2_hsotg *hs_otg, u32 reg,
+				   u32 bit, u32 timeout)
+{
+	u32 i;
+
+	for (i = 0; i < timeout; i++) {
+		if (dwc2_readl(hs_otg->regs + reg) & bit)
+			return 0;
+		udelay(1);
+	}
+
+	return -ETIMEDOUT;
+}
+
+static void dwc2_hsotg_ep_stop_xfr(struct dwc2_hsotg *hsotg,
+				   struct dwc2_hsotg_ep *hs_ep)
+{
+	u32 epctrl_reg;
+	u32 epint_reg;
+
+	epctrl_reg = hs_ep->dir_in ? DIEPCTL(hs_ep->index) :
+		DOEPCTL(hs_ep->index);
+	epint_reg = hs_ep->dir_in ? DIEPINT(hs_ep->index) :
+		DOEPINT(hs_ep->index);
+
+	dev_dbg(hsotg->dev, "%s: stopping transfer on %s\n", __func__,
+		hs_ep->name);
+
+	if (hs_ep->dir_in) {
+		if (hsotg->dedicated_fifos || hs_ep->periodic) {
+			__orr32(hsotg->regs + epctrl_reg, DXEPCTL_SNAK);
+			/* Wait for Nak effect */
+			if (dwc2_hsotg_wait_bit_set(hsotg, epint_reg,
+						    DXEPINT_INEPNAKEFF, 100))
+				dev_warn(hsotg->dev,
+					 "%s: timeout DIEPINT.NAKEFF\n",
+					 __func__);
+		} else {
+			__orr32(hsotg->regs + DCTL, DCTL_SGNPINNAK);
+			/* Wait for Nak effect */
+			if (dwc2_hsotg_wait_bit_set(hsotg, GINTSTS,
+						    GINTSTS_GINNAKEFF, 100))
+				dev_warn(hsotg->dev,
+					 "%s: timeout GINTSTS.GINNAKEFF\n",
+					 __func__);
+		}
+	} else {
+		if (!(dwc2_readl(hsotg->regs + GINTSTS) & GINTSTS_GOUTNAKEFF))
+			__orr32(hsotg->regs + DCTL, DCTL_SGOUTNAK);
+
+		/* Wait for global nak to take effect */
+		if (dwc2_hsotg_wait_bit_set(hsotg, GINTSTS,
+					    GINTSTS_GOUTNAKEFF, 100))
+			dev_warn(hsotg->dev, "%s: timeout GINTSTS.GOUTNAKEFF\n",
+				 __func__);
+	}
+
+	/* Disable ep */
+	__orr32(hsotg->regs + epctrl_reg, DXEPCTL_EPDIS | DXEPCTL_SNAK);
+
+	/* Wait for ep to be disabled */
+	if (dwc2_hsotg_wait_bit_set(hsotg, epint_reg, DXEPINT_EPDISBLD, 100))
+		dev_warn(hsotg->dev,
+			 "%s: timeout DOEPCTL.EPDisable\n", __func__);
+
+	/* Clear EPDISBLD interrupt */
+	__orr32(hsotg->regs + epint_reg, DXEPINT_EPDISBLD);
+
+	if (hs_ep->dir_in) {
+		unsigned short fifo_index;
+
+		if (hsotg->dedicated_fifos || hs_ep->periodic)
+			fifo_index = hs_ep->fifo_index;
+		else
+			fifo_index = 0;
+
+		/* Flush TX FIFO */
+		dwc2_flush_tx_fifo(hsotg, fifo_index);
+
+		/* Clear Global In NP NAK in Shared FIFO for non periodic ep */
+		if (!hsotg->dedicated_fifos && !hs_ep->periodic)
+			__orr32(hsotg->regs + DCTL, DCTL_CGNPINNAK);
+
+	} else {
+		/* Remove global NAKs */
+		__orr32(hsotg->regs + DCTL, DCTL_CGOUTNAK);
+	}
+}
+
 /**
  * dwc2_hsotg_ep_enable - enable the given endpoint
  * @ep: The USB endpint to configure
@@ -3115,11 +3207,20 @@ static int dwc2_hsotg_ep_disable(struct usb_ep *ep)
 		return -EINVAL;
 	}
 
+	if (hsotg->op_state != OTG_STATE_B_PERIPHERAL) {
+		dev_err(hsotg->dev, "%s: called in host mode?\n", __func__);
+		return -EINVAL;
+	}
+
 	epctrl_reg = dir_in ? DIEPCTL(index) : DOEPCTL(index);
 
 	spin_lock_irqsave(&hsotg->lock, flags);
 
 	ctrl = dwc2_readl(hsotg->regs + epctrl_reg);
+
+	if (ctrl & DXEPCTL_EPENA)
+		dwc2_hsotg_ep_stop_xfr(hsotg, hs_ep);
+
 	ctrl &= ~DXEPCTL_EPENA;
 	ctrl &= ~DXEPCTL_USBACTEP;
 	ctrl |= DXEPCTL_SNAK;
@@ -3156,77 +3257,6 @@ static bool on_list(struct dwc2_hsotg_ep *ep, struct dwc2_hsotg_req *test)
 	}
 
 	return false;
-}
-
-static int dwc2_hsotg_wait_bit_set(struct dwc2_hsotg *hs_otg, u32 reg,
-							u32 bit, u32 timeout)
-{
-	u32 i;
-
-	for (i = 0; i < timeout; i++) {
-		if (dwc2_readl(hs_otg->regs + reg) & bit)
-			return 0;
-		udelay(1);
-	}
-
-	return -ETIMEDOUT;
-}
-
-static void dwc2_hsotg_ep_stop_xfr(struct dwc2_hsotg *hsotg,
-						struct dwc2_hsotg_ep *hs_ep)
-{
-	u32 epctrl_reg;
-	u32 epint_reg;
-
-	epctrl_reg = hs_ep->dir_in ? DIEPCTL(hs_ep->index) :
-		DOEPCTL(hs_ep->index);
-	epint_reg = hs_ep->dir_in ? DIEPINT(hs_ep->index) :
-		DOEPINT(hs_ep->index);
-
-	dev_dbg(hsotg->dev, "%s: stopping transfer on %s\n", __func__,
-			hs_ep->name);
-	if (hs_ep->dir_in) {
-		__orr32(hsotg->regs + epctrl_reg, DXEPCTL_SNAK);
-		/* Wait for Nak effect */
-		if (dwc2_hsotg_wait_bit_set(hsotg, epint_reg,
-						DXEPINT_INEPNAKEFF, 100))
-			dev_warn(hsotg->dev,
-				"%s: timeout DIEPINT.NAKEFF\n", __func__);
-	} else {
-		if (!(dwc2_readl(hsotg->regs + GINTSTS) & GINTSTS_GOUTNAKEFF))
-			__orr32(hsotg->regs + DCTL, DCTL_SGOUTNAK);
-
-		/* Wait for global nak to take effect */
-		if (dwc2_hsotg_wait_bit_set(hsotg, GINTSTS,
-						GINTSTS_GOUTNAKEFF, 100))
-			dev_warn(hsotg->dev,
-				"%s: timeout GINTSTS.GOUTNAKEFF\n", __func__);
-	}
-
-	/* Disable ep */
-	__orr32(hsotg->regs + epctrl_reg, DXEPCTL_EPDIS | DXEPCTL_SNAK);
-
-	/* Wait for ep to be disabled */
-	if (dwc2_hsotg_wait_bit_set(hsotg, epint_reg, DXEPINT_EPDISBLD, 100))
-		dev_warn(hsotg->dev,
-			"%s: timeout DOEPCTL.EPDisable\n", __func__);
-
-	if (hs_ep->dir_in) {
-		if (hsotg->dedicated_fifos) {
-			dwc2_writel(GRSTCTL_TXFNUM(hs_ep->fifo_index) |
-				GRSTCTL_TXFFLSH, hsotg->regs + GRSTCTL);
-			/* Wait for fifo flush */
-			if (dwc2_hsotg_wait_bit_set(hsotg, GRSTCTL,
-							GRSTCTL_TXFFLSH, 100))
-				dev_warn(hsotg->dev,
-					"%s: timeout flushing fifos\n",
-					__func__);
-		}
-		/* TODO: Flush shared tx fifo */
-	} else {
-		/* Remove global NAKs */
-		__bic32(hsotg->regs + DCTL, DCTL_SGOUTNAK);
-	}
 }
 
 /**
@@ -3461,6 +3491,24 @@ static int dwc2_hsotg_udc_start(struct usb_gadget *gadget,
 			goto err;
 	}
 
+	if (hsotg->dr_mode == USB_DR_MODE_OTG && dwc2_is_device_mode(hsotg)) {
+		struct platform_device *pdev = to_platform_device(hsotg->dev);
+
+		if (hsotg->uphy) {
+			ret = usb_phy_init(hsotg->uphy);
+		} else if (hsotg->plat && hsotg->plat->phy_init) {
+			ret = hsotg->plat->phy_init(pdev,
+						    hsotg->plat->phy_type);
+		} else {
+			ret = phy_power_on(hsotg->phy);
+			if (ret == 0)
+				ret = phy_init(hsotg->phy);
+		}
+
+		if (ret)
+			goto err;
+	}
+
 	if (!IS_ERR_OR_NULL(hsotg->uphy))
 		otg_set_peripheral(hsotg->uphy->otg, &hsotg->gadget);
 
@@ -3519,6 +3567,19 @@ static int dwc2_hsotg_udc_stop(struct usb_gadget *gadget)
 
 	if (hsotg->dr_mode == USB_DR_MODE_PERIPHERAL)
 		dwc2_lowlevel_hw_disable(hsotg);
+
+	if (hsotg->dr_mode == USB_DR_MODE_OTG && dwc2_is_device_mode(hsotg)) {
+		struct platform_device *pdev = to_platform_device(hsotg->dev);
+
+		if (hsotg->uphy) {
+			usb_phy_shutdown(hsotg->uphy);
+		} else if (hsotg->plat && hsotg->plat->phy_exit) {
+			hsotg->plat->phy_exit(pdev, hsotg->plat->phy_type);
+		} else {
+			phy_exit(hsotg->phy);
+			phy_power_off(hsotg->phy);
+		}
+	}
 
 	return 0;
 }
@@ -3948,9 +4009,11 @@ int dwc2_gadget_init(struct dwc2_hsotg *hsotg, int irq)
 	}
 
 	ret = usb_add_gadget_udc(dev, &hsotg->gadget);
-	if (ret)
+	if (ret) {
+		dwc2_hsotg_ep_free_request(&hsotg->eps_out[0]->ep,
+					   hsotg->ctrl_req);
 		return ret;
-
+	}
 	dwc2_hsotg_dump(hsotg);
 
 	return 0;
@@ -3963,6 +4026,7 @@ int dwc2_gadget_init(struct dwc2_hsotg *hsotg, int irq)
 int dwc2_hsotg_remove(struct dwc2_hsotg *hsotg)
 {
 	usb_del_gadget_udc(&hsotg->gadget);
+	dwc2_hsotg_ep_free_request(&hsotg->eps_out[0]->ep, hsotg->ctrl_req);
 
 	return 0;
 }

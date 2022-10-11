@@ -616,6 +616,7 @@ static u8 omap_w1_read_byte(void *_hdq)
 
 	hdq_disable_interrupt(hdq_data, OMAP_HDQ_CTRL_STATUS,
 			      ~OMAP_HDQ_CTRL_STATUS_INTERRUPTMASK);
+	hdq_data->hdq_usecount = 0;
 
 	/* Write followed by a read, release the module */
 	if (hdq_data->init_trans) {
@@ -783,6 +784,8 @@ static int omap_hdq_remove(struct platform_device *pdev)
 
 	/* remove module dependency */
 	pm_runtime_disable(&pdev->dev);
+
+	w1_remove_master_device(&omap_w1_master);
 
 	return 0;
 }

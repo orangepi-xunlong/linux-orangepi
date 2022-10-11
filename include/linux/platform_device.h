@@ -18,7 +18,6 @@
 #define PLATFORM_DEVID_AUTO	(-2)
 
 struct mfd_cell;
-struct property_entry;
 
 struct platform_device {
 	const char	*name;
@@ -52,7 +51,6 @@ extern void arch_setup_pdev_archdata(struct platform_device *);
 extern struct resource *platform_get_resource(struct platform_device *,
 					      unsigned int, unsigned int);
 extern int platform_get_irq(struct platform_device *, unsigned int);
-extern int platform_irq_count(struct platform_device *);
 extern struct resource *platform_get_resource_byname(struct platform_device *,
 						     unsigned int,
 						     const char *);
@@ -72,8 +70,6 @@ struct platform_device_info {
 		const void *data;
 		size_t size_data;
 		u64 dma_mask;
-
-		struct property_entry *properties;
 };
 extern struct platform_device *platform_device_register_full(
 		const struct platform_device_info *pdevinfo);
@@ -171,8 +167,6 @@ extern int platform_device_add_resources(struct platform_device *pdev,
 					 unsigned int num);
 extern int platform_device_add_data(struct platform_device *pdev,
 				    const void *data, size_t size);
-extern int platform_device_add_properties(struct platform_device *pdev,
-					  struct property_entry *properties);
 extern int platform_device_add(struct platform_device *pdev);
 extern void platform_device_del(struct platform_device *pdev);
 extern void platform_device_put(struct platform_device *pdev);

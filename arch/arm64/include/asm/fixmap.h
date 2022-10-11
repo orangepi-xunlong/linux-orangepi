@@ -20,7 +20,6 @@
 #include <linux/sizes.h>
 #include <asm/boot.h>
 #include <asm/page.h>
-#include <asm/pgtable-prot.h>
 
 /*
  * Here we define all the compile-time 'special' virtual
@@ -51,7 +50,6 @@ enum fixed_addresses {
 
 	FIX_EARLYCON_MEM_BASE,
 	FIX_TEXT_POKE0,
-
 #ifdef CONFIG_UNMAP_KERNEL_AT_EL0
 	FIX_ENTRY_TRAMP_DATA,
 	FIX_ENTRY_TRAMP_TEXT,

@@ -290,7 +290,7 @@ static int overwrite_test(void)
 
 	while (opno < max_overwrite) {
 
-		err = write_page(0);
+		err = rewrite_page(0);
 		if (err)
 			break;
 

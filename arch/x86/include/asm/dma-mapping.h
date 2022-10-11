@@ -9,6 +9,7 @@
 #include <linux/kmemcheck.h>
 #include <linux/scatterlist.h>
 #include <linux/dma-debug.h>
+#include <linux/dma-attrs.h>
 #include <asm/io.h>
 #include <asm/swiotlb.h>
 #include <linux/dma-contiguous.h>
@@ -45,13 +46,15 @@ bool arch_dma_alloc_attrs(struct device **dev, gfp_t *gfp);
 #define HAVE_ARCH_DMA_SUPPORTED 1
 extern int dma_supported(struct device *hwdev, u64 mask);
 
+#include <asm-generic/dma-mapping-common.h>
+
 extern void *dma_generic_alloc_coherent(struct device *dev, size_t size,
 					dma_addr_t *dma_addr, gfp_t flag,
-					unsigned long attrs);
+					struct dma_attrs *attrs);
 
 extern void dma_generic_free_coherent(struct device *dev, size_t size,
 				      void *vaddr, dma_addr_t dma_addr,
-				      unsigned long attrs);
+				      struct dma_attrs *attrs);
 
 #ifdef CONFIG_X86_DMA_REMAP /* Platform code defines bridge-specific code */
 extern bool dma_capable(struct device *dev, dma_addr_t addr, size_t size);

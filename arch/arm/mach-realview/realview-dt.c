@@ -11,6 +11,7 @@
 #include <linux/of_platform.h>
 #include <asm/mach/arch.h>
 #include <asm/hardware/cache-l2x0.h>
+#include "core.h"
 
 static const char *const realview_dt_platform_compat[] __initconst = {
 	"arm,realview-eb",

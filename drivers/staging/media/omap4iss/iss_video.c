@@ -11,7 +11,6 @@
  * (at your option) any later version.
  */
 
-#include <asm/cacheflush.h>
 #include <linux/clk.h>
 #include <linux/mm.h>
 #include <linux/pagemap.h>
@@ -19,10 +18,10 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/module.h>
-
 #include <media/v4l2-dev.h>
 #include <media/v4l2-ioctl.h>
-#include <media/v4l2-mc.h>
+
+#include <asm/cacheflush.h>
 
 #include "iss_video.h"
 #include "iss.h"
@@ -192,7 +191,8 @@ iss_video_remote_subdev(struct iss_video *video, u32 *pad)
 
 	remote = media_entity_remote_pad(&video->pad);
 
-	if (!remote || !is_media_entity_v4l2_subdev(remote->entity))
+	if (!remote ||
+	    media_entity_type(remote->entity) != MEDIA_ENT_T_V4L2_SUBDEV)
 		return NULL;
 
 	if (pad)
@@ -207,23 +207,17 @@ iss_video_far_end(struct iss_video *video)
 {
 	struct media_entity_graph graph;
 	struct media_entity *entity = &video->video.entity;
-	struct media_device *mdev = entity->graph_obj.mdev;
+	struct media_device *mdev = entity->parent;
 	struct iss_video *far_end = NULL;
 
 	mutex_lock(&mdev->graph_mutex);
-
-	if (media_entity_graph_walk_init(&graph, mdev)) {
-		mutex_unlock(&mdev->graph_mutex);
-		return NULL;
-	}
-
 	media_entity_graph_walk_start(&graph, entity);
 
 	while ((entity = media_entity_graph_walk_next(&graph))) {
 		if (entity == &video->video.entity)
 			continue;
 
-		if (!is_media_entity_v4l2_video_device(entity))
+		if (media_entity_type(entity) != MEDIA_ENT_T_DEVNODE)
 			continue;
 
 		far_end = to_iss_video(media_entity_to_video_device(entity));
@@ -234,9 +228,6 @@ iss_video_far_end(struct iss_video *video)
 	}
 
 	mutex_unlock(&mdev->graph_mutex);
-
-	media_entity_graph_walk_cleanup(&graph);
-
 	return far_end;
 }
 
@@ -297,8 +288,9 @@ iss_video_check_format(struct iss_video *video, struct iss_video_fh *vfh)
  */
 
 static int iss_video_queue_setup(struct vb2_queue *vq,
+				 const void *parg,
 				 unsigned int *count, unsigned int *num_planes,
-				 unsigned int sizes[], struct device *alloc_devs[])
+				 unsigned int sizes[], void *alloc_ctxs[])
 {
 	struct iss_video_fh *vfh = vb2_get_drv_priv(vq);
 	struct iss_video *video = vfh->video;
@@ -309,6 +301,8 @@ static int iss_video_queue_setup(struct vb2_queue *vq,
 	sizes[0] = vfh->format.fmt.pix.sizeimage;
 	if (sizes[0] == 0)
 		return -EINVAL;
+
+	alloc_ctxs[0] = video->alloc_ctx;
 
 	*count = min(*count, video->capture_mem / PAGE_ALIGN(sizes[0]));
 
@@ -441,7 +435,7 @@ struct iss_buffer *omap4iss_video_buffer_next(struct iss_video *video)
 	list_del(&buf->list);
 	spin_unlock_irqrestore(&video->qlock, flags);
 
-	buf->vb.vb2_buf.timestamp = ktime_get_ns();
+	v4l2_get_timestamp(&buf->vb.timestamp);
 
 	/* Do frame number propagation only if this is the output video node.
 	 * Frame number either comes from the CSI receivers or it gets
@@ -646,103 +640,6 @@ iss_video_try_format(struct file *file, void *fh, struct v4l2_format *format)
 }
 
 static int
-iss_video_get_selection(struct file *file, void *fh, struct v4l2_selection *sel)
-{
-	struct iss_video *video = video_drvdata(file);
-	struct v4l2_subdev_format format;
-	struct v4l2_subdev *subdev;
-	struct v4l2_subdev_selection sdsel = {
-		.which = V4L2_SUBDEV_FORMAT_ACTIVE,
-		.target = sel->target,
-	};
-	u32 pad;
-	int ret;
-
-	switch (sel->target) {
-	case V4L2_SEL_TGT_CROP:
-	case V4L2_SEL_TGT_CROP_BOUNDS:
-	case V4L2_SEL_TGT_CROP_DEFAULT:
-		if (video->type == V4L2_BUF_TYPE_VIDEO_OUTPUT)
-			return -EINVAL;
-		break;
-	case V4L2_SEL_TGT_COMPOSE:
-	case V4L2_SEL_TGT_COMPOSE_BOUNDS:
-	case V4L2_SEL_TGT_COMPOSE_DEFAULT:
-		if (video->type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
-			return -EINVAL;
-		break;
-	default:
-		return -EINVAL;
-	}
-	subdev = iss_video_remote_subdev(video, &pad);
-	if (subdev == NULL)
-		return -EINVAL;
-
-	/* Try the get selection operation first and fallback to get format if not
-	 * implemented.
-	 */
-	sdsel.pad = pad;
-	ret = v4l2_subdev_call(subdev, pad, get_selection, NULL, &sdsel);
-	if (!ret)
-		sel->r = sdsel.r;
-	if (ret != -ENOIOCTLCMD)
-		return ret;
-
-	format.pad = pad;
-	format.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-	ret = v4l2_subdev_call(subdev, pad, get_fmt, NULL, &format);
-	if (ret < 0)
-		return ret == -ENOIOCTLCMD ? -ENOTTY : ret;
-
-	sel->r.left = 0;
-	sel->r.top = 0;
-	sel->r.width = format.format.width;
-	sel->r.height = format.format.height;
-
-	return 0;
-}
-
-static int
-iss_video_set_selection(struct file *file, void *fh, struct v4l2_selection *sel)
-{
-	struct iss_video *video = video_drvdata(file);
-	struct v4l2_subdev *subdev;
-	struct v4l2_subdev_selection sdsel = {
-		.which = V4L2_SUBDEV_FORMAT_ACTIVE,
-		.target = sel->target,
-		.flags = sel->flags,
-		.r = sel->r,
-	};
-	u32 pad;
-	int ret;
-
-	switch (sel->target) {
-	case V4L2_SEL_TGT_CROP:
-		if (video->type == V4L2_BUF_TYPE_VIDEO_OUTPUT)
-			return -EINVAL;
-		break;
-	case V4L2_SEL_TGT_COMPOSE:
-		if (video->type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
-			return -EINVAL;
-		break;
-	default:
-		return -EINVAL;
-	}
-	subdev = iss_video_remote_subdev(video, &pad);
-	if (subdev == NULL)
-		return -EINVAL;
-
-	sdsel.pad = pad;
-	mutex_lock(&video->mutex);
-	ret = v4l2_subdev_call(subdev, pad, set_selection, NULL, &sdsel);
-	mutex_unlock(&video->mutex);
-	if (!ret)
-		sel->r = sdsel.r;
-
-	return ret == -ENOIOCTLCMD ? -ENOTTY : ret;
-}
-
-static int
 iss_video_get_param(struct file *file, void *fh, struct v4l2_streamparm *a)
 {
 	struct iss_video_fh *vfh = to_iss_video_fh(fh);
@@ -855,7 +752,7 @@ iss_video_streamon(struct file *file, void *fh, enum v4l2_buf_type type)
 	struct iss_video_fh *vfh = to_iss_video_fh(fh);
 	struct iss_video *video = video_drvdata(file);
 	struct media_entity_graph graph;
-	struct media_entity *entity = &video->video.entity;
+	struct media_entity *entity;
 	enum iss_pipeline_state state;
 	struct iss_pipeline *pipe;
 	struct iss_video *far_end;
@@ -870,30 +767,24 @@ iss_video_streamon(struct file *file, void *fh, enum v4l2_buf_type type)
 	/* Start streaming on the pipeline. No link touching an entity in the
 	 * pipeline can be activated or deactivated once streaming is started.
 	 */
-	pipe = entity->pipe
-	     ? to_iss_pipeline(entity) : &video->pipe;
+	pipe = video->video.entity.pipe
+	     ? to_iss_pipeline(&video->video.entity) : &video->pipe;
 	pipe->external = NULL;
 	pipe->external_rate = 0;
 	pipe->external_bpp = 0;
-
-	ret = media_entity_enum_init(&pipe->ent_enum, entity->graph_obj.mdev);
-	if (ret)
-		goto err_graph_walk_init;
-
-	ret = media_entity_graph_walk_init(&graph, entity->graph_obj.mdev);
-	if (ret)
-		goto err_graph_walk_init;
+	pipe->entities = 0;
 
 	if (video->iss->pdata->set_constraints)
 		video->iss->pdata->set_constraints(video->iss, true);
 
-	ret = media_entity_pipeline_start(entity, &pipe->pipe);
+	ret = media_entity_pipeline_start(&video->video.entity, &pipe->pipe);
 	if (ret < 0)
 		goto err_media_entity_pipeline_start;
 
+	entity = &video->video.entity;
 	media_entity_graph_walk_start(&graph, entity);
 	while ((entity = media_entity_graph_walk_next(&graph)))
-		media_entity_enum_set(&pipe->ent_enum, entity);
+		pipe->entities |= 1 << entity->id;
 
 	/* Verify that the currently configured format matches the output of
 	 * the connected subdev.
@@ -963,10 +854,7 @@ iss_video_streamon(struct file *file, void *fh, enum v4l2_buf_type type)
 		spin_unlock_irqrestore(&video->qlock, flags);
 	}
 
-	media_entity_graph_walk_cleanup(&graph);
-
 	mutex_unlock(&video->stream_lock);
-
 	return 0;
 
 err_omap4iss_set_stream:
@@ -978,13 +866,7 @@ err_media_entity_pipeline_start:
 		video->iss->pdata->set_constraints(video->iss, false);
 	video->queue = NULL;
 
-	media_entity_graph_walk_cleanup(&graph);
-
-err_graph_walk_init:
-	media_entity_enum_cleanup(&pipe->ent_enum);
-
 	mutex_unlock(&video->stream_lock);
-
 	return ret;
 }
 
@@ -1021,8 +903,6 @@ iss_video_streamoff(struct file *file, void *fh, enum v4l2_buf_type type)
 	omap4iss_pipeline_set_stream(pipe, ISS_PIPELINE_STREAM_STOPPED);
 	vb2_streamoff(&vfh->queue, type);
 	video->queue = NULL;
-
-	media_entity_enum_cleanup(&pipe->ent_enum);
 
 	if (video->iss->pdata->set_constraints)
 		video->iss->pdata->set_constraints(video->iss, false);
@@ -1068,8 +948,6 @@ static const struct v4l2_ioctl_ops iss_video_ioctl_ops = {
 	.vidioc_g_fmt_vid_out		= iss_video_get_format,
 	.vidioc_s_fmt_vid_out		= iss_video_set_format,
 	.vidioc_try_fmt_vid_out		= iss_video_try_format,
-	.vidioc_g_selection		= iss_video_get_selection,
-	.vidioc_s_selection		= iss_video_set_selection,
 	.vidioc_g_parm			= iss_video_get_param,
 	.vidioc_s_parm			= iss_video_set_param,
 	.vidioc_reqbufs			= iss_video_reqbufs,
@@ -1108,8 +986,15 @@ static int iss_video_open(struct file *file)
 		goto done;
 	}
 
-	ret = v4l2_pipeline_pm_use(&video->video.entity, 1);
+	ret = omap4iss_pipeline_pm_use(&video->video.entity, 1);
 	if (ret < 0) {
+		omap4iss_put(video->iss);
+		goto done;
+	}
+
+	video->alloc_ctx = vb2_dma_contig_init_ctx(video->iss->dev);
+	if (IS_ERR(video->alloc_ctx)) {
+		ret = PTR_ERR(video->alloc_ctx);
 		omap4iss_put(video->iss);
 		goto done;
 	}
@@ -1123,7 +1008,6 @@ static int iss_video_open(struct file *file)
 	q->mem_ops = &vb2_dma_contig_memops;
 	q->buf_struct_size = sizeof(struct iss_buffer);
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
-	q->dev = video->iss->dev;
 
 	ret = vb2_queue_init(q);
 	if (ret) {
@@ -1156,11 +1040,12 @@ static int iss_video_release(struct file *file)
 	/* Disable streaming and free the buffers queue resources. */
 	iss_video_streamoff(file, vfh, video->type);
 
-	v4l2_pipeline_pm_use(&video->video.entity, 0);
+	omap4iss_pipeline_pm_use(&video->video.entity, 0);
 
 	/* Release the videobuf2 queue */
 	vb2_queue_release(&handle->queue);
 
+	/* Release the file handle. */
 	v4l2_fh_del(vfh);
 	kfree(handle);
 	file->private_data = NULL;
@@ -1219,7 +1104,7 @@ int omap4iss_video_init(struct iss_video *video, const char *name)
 		return -EINVAL;
 	}
 
-	ret = media_entity_pads_init(&video->video.entity, 1, &video->pad);
+	ret = media_entity_init(&video->video.entity, 1, &video->pad, 0);
 	if (ret < 0)
 		return ret;
 

@@ -75,7 +75,7 @@ static void ppro_setup_ctrs(struct op_x86_model_spec const *model,
 	u64 val;
 	int i;
 
-	if (boot_cpu_has(X86_FEATURE_ARCH_PERFMON)) {
+	if (cpu_has_arch_perfmon) {
 		union cpuid10_eax eax;
 		eax.full = cpuid_eax(0xa);
 

@@ -126,7 +126,7 @@ out:
 	return skb;
 }
 
-static const struct genl_multicast_group dropmon_mcgrps[] = {
+static struct genl_multicast_group dropmon_mcgrps[] = {
 	{ .name = "events", },
 };
 
@@ -208,8 +208,7 @@ static void trace_kfree_skb_hit(void *ignore, struct sk_buff *skb, void *locatio
 	trace_drop_common(skb, location);
 }
 
-static void trace_napi_poll_hit(void *ignore, struct napi_struct *napi,
-				int work, int budget)
+static void trace_napi_poll_hit(void *ignore, struct napi_struct *napi)
 {
 	struct dm_hw_stat_delta *new_stat;
 

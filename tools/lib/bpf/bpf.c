@@ -4,19 +4,6 @@
  * Copyright (C) 2013-2015 Alexei Starovoitov <ast@kernel.org>
  * Copyright (C) 2015 Wang Nan <wangnan0@huawei.com>
  * Copyright (C) 2015 Huawei Inc.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation;
- * version 2.1 of the License (not later!)
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this program; if not,  see <http://www.gnu.org/licenses>
  */
 
 #include <stdlib.h>
@@ -27,8 +14,8 @@
 #include "bpf.h"
 
 /*
- * When building perf, unistd.h is overrided. __NR_bpf is
- * required to be defined explicitly.
+ * When building perf, unistd.h is override. Define __NR_bpf is
+ * required to be defined.
  */
 #ifndef __NR_bpf
 # if defined(__i386__)
@@ -95,18 +82,4 @@ int bpf_load_program(enum bpf_prog_type type, struct bpf_insn *insns,
 	attr.log_level = 1;
 	log_buf[0] = 0;
 	return sys_bpf(BPF_PROG_LOAD, &attr, sizeof(attr));
-}
-
-int bpf_map_update_elem(int fd, void *key, void *value,
-			u64 flags)
-{
-	union bpf_attr attr;
-
-	bzero(&attr, sizeof(attr));
-	attr.map_fd = fd;
-	attr.key = ptr_to_u64(key);
-	attr.value = ptr_to_u64(value);
-	attr.flags = flags;
-
-	return sys_bpf(BPF_MAP_UPDATE_ELEM, &attr, sizeof(attr));
 }

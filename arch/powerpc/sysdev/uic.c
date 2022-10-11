@@ -158,6 +158,7 @@ static int uic_set_irq_type(struct irq_data *d, unsigned int flow_type)
 
 	mtdcr(uic->dcrbase + UIC_PR, pr);
 	mtdcr(uic->dcrbase + UIC_TR, tr);
+	mtdcr(uic->dcrbase + UIC_SR, ~mask);
 
 	raw_spin_unlock_irqrestore(&uic->lock, flags);
 
@@ -319,7 +320,7 @@ void __init uic_init_tree(void)
 	}
 }
 
-/* Return an interrupt vector or 0 if no interrupt is pending. */
+/* Return an interrupt vector or NO_IRQ if no interrupt is pending. */
 unsigned int uic_get_irq(void)
 {
 	u32 msr;

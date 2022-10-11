@@ -44,7 +44,8 @@ static int process_events(union perf_event **events, size_t count)
 	for (i = 0; i < count && !err; i++)
 		err = process_event(&evlist, events[i]);
 
-	perf_evlist__delete(evlist);
+	if (evlist)
+		perf_evlist__delete(evlist);
 
 	return err;
 }
@@ -66,7 +67,7 @@ struct test_attr_event {
  *
  * Return: %0 on success, %-1 if the test fails.
  */
-int test__parse_no_sample_id_all(int subtest __maybe_unused)
+int test__parse_no_sample_id_all(void)
 {
 	int err;
 

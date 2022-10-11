@@ -41,20 +41,8 @@
 # include "test-dwarf.c"
 #undef main
 
-#define main main_test_dwarf_getlocations
-# include "test-dwarf_getlocations.c"
-#undef main
-
 #define main main_test_libelf_getphdrnum
 # include "test-libelf-getphdrnum.c"
-#undef main
-
-#define main main_test_libelf_gelf_getnote
-# include "test-libelf-gelf_getnote.c"
-#undef main
-
-#define main main_test_libelf_getshdrstrndx
-# include "test-libelf-getshdrstrndx.c"
 #undef main
 
 #define main main_test_libunwind
@@ -137,18 +125,6 @@
 # include "test-get_cpuid.c"
 #undef main
 
-#define main main_test_bpf
-# include "test-bpf.c"
-#undef main
-
-#define main main_test_libcrypto
-# include "test-libcrypto.c"
-#undef main
-
-#define main main_test_sdt
-# include "test-sdt.c"
-#undef main
-
 int main(int argc, char *argv[])
 {
 	main_test_libpython();
@@ -159,10 +135,7 @@ int main(int argc, char *argv[])
 	main_test_libelf_mmap();
 	main_test_glibc();
 	main_test_dwarf();
-	main_test_dwarf_getlocations();
 	main_test_libelf_getphdrnum();
-	main_test_libelf_gelf_getnote();
-	main_test_libelf_getshdrstrndx();
 	main_test_libunwind();
 	main_test_libaudit();
 	main_test_libslang();
@@ -180,9 +153,6 @@ int main(int argc, char *argv[])
 	main_test_pthread_attr_setaffinity_np();
 	main_test_lzma();
 	main_test_get_cpuid();
-	main_test_bpf();
-	main_test_libcrypto();
-	main_test_sdt();
 
 	return 0;
 }

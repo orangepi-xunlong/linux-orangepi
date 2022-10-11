@@ -7,10 +7,9 @@
  */
 /dts-v1/;
 
-/include/ "skeleton_hs.dtsi"
+/include/ "skeleton.dtsi"
 
 / {
-	model = "snps,nsim_hs";
 	compatible = "snps,nsim_hs";
 	#address-cells = <2>;
 	#size-cells = <2>;
@@ -36,15 +35,8 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 
-		/* only perip space at end of low mem accessible
-			 bus addr,   parent bus addr, size */
+		/* only perip space at end of low mem accessible */
 		ranges = <0x80000000 0x0 0x80000000 0x80000000>;
-
-		core_clk: core_clk {
-			#clock-cells = <0>;
-			compatible = "fixed-clock";
-			clock-frequency = <80000000>;
-		};
 
 		core_intc: core-interrupt-controller {
 			compatible = "snps,archs-intc";

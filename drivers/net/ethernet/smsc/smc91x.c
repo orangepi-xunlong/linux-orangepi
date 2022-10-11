@@ -619,7 +619,7 @@ static void smc_hardware_send_pkt(unsigned long data)
 	SMC_SET_MMU_CMD(lp, MC_ENQUEUE);
 	smc_special_unlock(&lp->lock, flags);
 
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 	dev->stats.tx_packets++;
 	dev->stats.tx_bytes += len;
 
@@ -1364,7 +1364,7 @@ static void smc_timeout(struct net_device *dev)
 		schedule_work(&lp->phy_configure);
 
 	/* We can accept TX packets again */
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 	netif_wake_queue(dev);
 }
 
@@ -2195,12 +2195,6 @@ static void smc_release_datacs(struct platform_device *pdev, struct net_device *
 	}
 }
 
-static const struct acpi_device_id smc91x_acpi_match[] = {
-	{ "LNRO0003", 0 },
-	{ }
-};
-MODULE_DEVICE_TABLE(acpi, smc91x_acpi_match);
-
 #if IS_BUILTIN(CONFIG_OF)
 static const struct of_device_id smc91x_match[] = {
 	{ .compatible = "smsc,lan91c94", },
@@ -2287,6 +2281,7 @@ static int smc_drv_probe(struct platform_device *pdev)
 #if IS_BUILTIN(CONFIG_OF)
 	match = of_match_device(of_match_ptr(smc91x_match), &pdev->dev);
 	if (match) {
+		struct device_node *np = pdev->dev.of_node;
 		u32 val;
 
 		/* Optional pwrdwn GPIO configured? */
@@ -2312,8 +2307,7 @@ static int smc_drv_probe(struct platform_device *pdev)
 			usleep_range(750, 1000);
 
 		/* Combination of IO widths supported, default to 16-bit */
-		if (!device_property_read_u32(&pdev->dev, "reg-io-width",
-					      &val)) {
+		if (!of_property_read_u32(np, "reg-io-width", &val)) {
 			if (val & 1)
 				lp->cfg.flags |= SMC91X_USE_8BIT;
 			if ((val == 0) || (val & 2))
@@ -2323,9 +2317,6 @@ static int smc_drv_probe(struct platform_device *pdev)
 		} else {
 			lp->cfg.flags |= SMC91X_USE_16BIT;
 		}
-		if (!device_property_read_u32(&pdev->dev, "reg-shift",
-					      &val))
-			lp->io_shift = val;
 	}
 #endif
 
@@ -2358,8 +2349,8 @@ static int smc_drv_probe(struct platform_device *pdev)
 	}
 
 	ndev->irq = platform_get_irq(pdev, 0);
-	if (ndev->irq < 0) {
-		ret = ndev->irq;
+	if (ndev->irq <= 0) {
+		ret = -ENODEV;
 		goto out_release_io;
 	}
 	/*
@@ -2494,8 +2485,7 @@ static struct platform_driver smc_driver = {
 	.driver		= {
 		.name	= CARDNAME,
 		.pm	= &smc_drv_pm_ops,
-		.of_match_table   = of_match_ptr(smc91x_match),
-		.acpi_match_table = smc91x_acpi_match,
+		.of_match_table = of_match_ptr(smc91x_match),
 	},
 };
 

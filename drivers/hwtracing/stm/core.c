@@ -15,7 +15,6 @@
  * as defined in MIPI STPv2 specification.
  */
 
-#include <linux/pm_runtime.h>
 #include <linux/uaccess.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -69,24 +68,9 @@ static ssize_t channels_show(struct device *dev,
 
 static DEVICE_ATTR_RO(channels);
 
-static ssize_t hw_override_show(struct device *dev,
-				struct device_attribute *attr,
-				char *buf)
-{
-	struct stm_device *stm = to_stm_device(dev);
-	int ret;
-
-	ret = sprintf(buf, "%u\n", stm->data->hw_override);
-
-	return ret;
-}
-
-static DEVICE_ATTR_RO(hw_override);
-
 static struct attribute *stm_attrs[] = {
 	&dev_attr_masters.attr,
 	&dev_attr_channels.attr,
-	&dev_attr_hw_override.attr,
 	NULL,
 };
 
@@ -226,8 +210,8 @@ stm_output_disclaim(struct stm_device *stm, struct stm_output *output)
 	bitmap_release_region(&master->chan_map[0], output->channel,
 			      ilog2(output->nr_chans));
 
-	output->nr_chans = 0;
 	master->nr_free += output->nr_chans;
+	output->nr_chans = 0;
 }
 
 /*
@@ -252,12 +236,15 @@ static int find_free_channels(unsigned long *bitmap, unsigned int start,
 			;
 		if (i == width)
 			return pos;
+
+		/* step over [pos..pos+i) to continue search */
+		pos += i;
 	}
 
 	return -1;
 }
 
-static int
+static unsigned int
 stm_find_master_chan(struct stm_device *stm, unsigned int width,
 		     unsigned int *mstart, unsigned int mend,
 		     unsigned int *cstart, unsigned int cend)
@@ -318,7 +305,7 @@ static int stm_output_assign(struct stm_device *stm, unsigned int width,
 		goto unlock;
 
 	ret = stm_find_master_chan(stm, width, &midx, mend, &cidx, cend);
-	if (ret < 0)
+	if (ret)
 		goto unlock;
 
 	output->master = midx;
@@ -362,7 +349,7 @@ static int stm_char_open(struct inode *inode, struct file *file)
 	struct stm_file *stmf;
 	struct device *dev;
 	unsigned int major = imajor(inode);
-	int err = -ENOMEM;
+	int err = -ENODEV;
 
 	dev = class_find_device(&stm_class, NULL, &major, major_match);
 	if (!dev)
@@ -370,9 +357,8 @@ static int stm_char_open(struct inode *inode, struct file *file)
 
 	stmf = kzalloc(sizeof(*stmf), GFP_KERNEL);
 	if (!stmf)
-		goto err_put_device;
+		return -ENOMEM;
 
-	err = -ENODEV;
 	stm_output_init(&stmf->output);
 	stmf->stm = to_stm_device(dev);
 
@@ -384,10 +370,9 @@ static int stm_char_open(struct inode *inode, struct file *file)
 	return nonseekable_open(inode, file);
 
 err_free:
-	kfree(stmf);
-err_put_device:
 	/* matches class_find_device() above */
 	put_device(dev);
+	kfree(stmf);
 
 	return err;
 }
@@ -395,19 +380,14 @@ err_put_device:
 static int stm_char_release(struct inode *inode, struct file *file)
 {
 	struct stm_file *stmf = file->private_data;
-	struct stm_device *stm = stmf->stm;
 
-	if (stm->data->unlink)
-		stm->data->unlink(stm->data, stmf->output.master,
-				  stmf->output.channel);
-
-	stm_output_free(stm, &stmf->output);
+	stm_output_free(stmf->stm, &stmf->output);
 
 	/*
 	 * matches the stm_char_open()'s
 	 * class_find_device() + try_module_get()
 	 */
-	stm_put_device(stm);
+	stm_put_device(stmf->stm);
 	kfree(stmf);
 
 	return 0;
@@ -428,8 +408,8 @@ static int stm_file_assign(struct stm_file *stmf, char *id, unsigned int width)
 	return ret;
 }
 
-static ssize_t stm_write(struct stm_data *data, unsigned int master,
-			  unsigned int channel, const char *buf, size_t count)
+static void stm_write(struct stm_data *data, unsigned int master,
+		      unsigned int channel, const char *buf, size_t count)
 {
 	unsigned int flags = STP_PACKET_TIMESTAMPED;
 	const unsigned char *p = buf, nil = 0;
@@ -441,14 +421,9 @@ static ssize_t stm_write(struct stm_data *data, unsigned int master,
 		sz = data->packet(data, master, channel, STP_PACKET_DATA, flags,
 				  sz, p);
 		flags = 0;
-
-		if (sz < 0)
-			break;
 	}
 
 	data->packet(data, master, channel, STP_PACKET_FLAG, 0, 0, &nil);
-
-	return pos;
 }
 
 static ssize_t stm_char_write(struct file *file, const char __user *buf,
@@ -486,39 +461,13 @@ static ssize_t stm_char_write(struct file *file, const char __user *buf,
 		return -EFAULT;
 	}
 
-	pm_runtime_get_sync(&stm->dev);
+	stm_write(stm->data, stmf->output.master, stmf->output.channel, kbuf,
+		  count);
 
-	count = stm_write(stm->data, stmf->output.master, stmf->output.channel,
-			  kbuf, count);
-
-	pm_runtime_mark_last_busy(&stm->dev);
-	pm_runtime_put_autosuspend(&stm->dev);
 	kfree(kbuf);
 
 	return count;
 }
-
-static void stm_mmap_open(struct vm_area_struct *vma)
-{
-	struct stm_file *stmf = vma->vm_file->private_data;
-	struct stm_device *stm = stmf->stm;
-
-	pm_runtime_get(&stm->dev);
-}
-
-static void stm_mmap_close(struct vm_area_struct *vma)
-{
-	struct stm_file *stmf = vma->vm_file->private_data;
-	struct stm_device *stm = stmf->stm;
-
-	pm_runtime_mark_last_busy(&stm->dev);
-	pm_runtime_put_autosuspend(&stm->dev);
-}
-
-static const struct vm_operations_struct stm_mmap_vmops = {
-	.open	= stm_mmap_open,
-	.close	= stm_mmap_close,
-};
 
 static int stm_char_mmap(struct file *file, struct vm_area_struct *vma)
 {
@@ -544,11 +493,8 @@ static int stm_char_mmap(struct file *file, struct vm_area_struct *vma)
 	if (!phys)
 		return -EINVAL;
 
-	pm_runtime_get_sync(&stm->dev);
-
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 	vma->vm_flags |= VM_IO | VM_DONTEXPAND | VM_DONTDUMP;
-	vma->vm_ops = &stm_mmap_vmops;
 	vm_iomap_memory(vma, phys, size);
 
 	return 0;
@@ -558,7 +504,7 @@ static int stm_char_policy_set_ioctl(struct stm_file *stmf, void __user *arg)
 {
 	struct stm_device *stm = stmf->stm;
 	struct stp_policy_id *id;
-	int ret = -EINVAL;
+	int ret = -EINVAL, wlimit = 1;
 	u32 size;
 
 	if (stmf->output.nr_chans)
@@ -586,13 +532,17 @@ static int stm_char_policy_set_ioctl(struct stm_file *stmf, void __user *arg)
 	if (id->__reserved_0 || id->__reserved_1)
 		goto err_free;
 
-	if (id->width < 1 ||
-	    id->width > PAGE_SIZE / stm->data->sw_mmiosz)
+	if (stm->data->sw_mmiosz)
+		wlimit = PAGE_SIZE / stm->data->sw_mmiosz;
+
+	if (id->width < 1 || id->width > wlimit)
 		goto err_free;
 
 	ret = stm_file_assign(stmf, id->id, id->width);
 	if (ret)
 		goto err_free;
+
+	ret = 0;
 
 	if (stm->data->link)
 		ret = stm->data->link(stm->data, stmf->output.master,
@@ -699,7 +649,7 @@ int stm_register_device(struct device *parent, struct stm_data *stm_data,
 	if (!stm_data->packet || !stm_data->sw_nchannels)
 		return -EINVAL;
 
-	nmasters = stm_data->sw_end - stm_data->sw_start + 1;
+	nmasters = stm_data->sw_end - stm_data->sw_start;
 	stm = vzalloc(sizeof(*stm) + nmasters * sizeof(void *));
 	if (!stm)
 		return -ENOMEM;
@@ -734,17 +684,6 @@ int stm_register_device(struct device *parent, struct stm_data *stm_data,
 	if (err)
 		goto err_device;
 
-	/*
-	 * Use delayed autosuspend to avoid bouncing back and forth
-	 * on recurring character device writes, with the initial
-	 * delay time of 2 seconds.
-	 */
-	pm_runtime_no_callbacks(&stm->dev);
-	pm_runtime_use_autosuspend(&stm->dev);
-	pm_runtime_set_autosuspend_delay(&stm->dev, 2000);
-	pm_runtime_set_suspended(&stm->dev);
-	pm_runtime_enable(&stm->dev);
-
 	return 0;
 
 err_device:
@@ -767,9 +706,6 @@ void stm_unregister_device(struct stm_data *stm_data)
 	struct stm_device *stm = stm_data->stm;
 	struct stm_source_device *src, *iter;
 	int i, ret;
-
-	pm_runtime_dont_use_autosuspend(&stm->dev);
-	pm_runtime_disable(&stm->dev);
 
 	mutex_lock(&stm->link_mutex);
 	list_for_each_entry_safe(src, iter, &stm->link_list, link_entry) {
@@ -794,7 +730,7 @@ void stm_unregister_device(struct stm_data *stm_data)
 		stp_policy_unbind(stm->policy);
 	mutex_unlock(&stm->policy_mutex);
 
-	for (i = stm->data->sw_start; i <= stm->data->sw_end; i++)
+	for (i = 0; i < stm->sw_nmasters; i++)
 		stp_master_free(stm, i);
 
 	device_unregister(&stm->dev);
@@ -925,8 +861,6 @@ static int __stm_source_link_drop(struct stm_source_device *src,
 
 	stm_output_free(link, &src->output);
 	list_del_init(&src->link_entry);
-	pm_runtime_mark_last_busy(&link->dev);
-	pm_runtime_put_autosuspend(&link->dev);
 	/* matches stm_find_device() from stm_source_link_store() */
 	stm_put_device(link);
 	rcu_assign_pointer(src->link, NULL);
@@ -935,18 +869,8 @@ unlock:
 	spin_unlock(&src->link_lock);
 	spin_unlock(&stm->link_lock);
 
-	/*
-	 * Call the unlink callbacks for both source and stm, when we know
-	 * that we have actually performed the unlinking.
-	 */
-	if (!ret) {
-		if (src->data->unlink)
-			src->data->unlink(src->data);
-
-		if (stm->data->unlink)
-			stm->data->unlink(stm->data, src->output.master,
-					  src->output.channel);
-	}
+	if (!ret && src->data->unlink)
+		src->data->unlink(src->data);
 
 	return ret;
 }
@@ -1020,11 +944,8 @@ static ssize_t stm_source_link_store(struct device *dev,
 	if (!link)
 		return -EINVAL;
 
-	pm_runtime_get(&link->dev);
-
 	err = stm_source_link_add(src, link);
 	if (err) {
-		pm_runtime_put_autosuspend(&link->dev);
 		/* matches the stm_find_device() above */
 		stm_put_device(link);
 	}
@@ -1085,9 +1006,6 @@ int stm_source_register_device(struct device *parent,
 	if (err)
 		goto err;
 
-	pm_runtime_no_callbacks(&src->dev);
-	pm_runtime_forbid(&src->dev);
-
 	err = device_add(&src->dev);
 	if (err)
 		goto err;
@@ -1141,9 +1059,9 @@ int stm_source_write(struct stm_source_data *data, unsigned int chan,
 
 	stm = srcu_dereference(src->link, &stm_source_srcu);
 	if (stm)
-		count = stm_write(stm->data, src->output.master,
-				  src->output.channel + chan,
-				  buf, count);
+		stm_write(stm->data, src->output.master,
+			  src->output.channel + chan,
+			  buf, count);
 	else
 		count = -ENODEV;
 

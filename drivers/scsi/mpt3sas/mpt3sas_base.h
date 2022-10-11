@@ -73,9 +73,9 @@
 #define MPT3SAS_DRIVER_NAME		"mpt3sas"
 #define MPT3SAS_AUTHOR "Avago Technologies <MPT-FusionLinux.pdl@avagotech.com>"
 #define MPT3SAS_DESCRIPTION	"LSI MPT Fusion SAS 3.0 Device Driver"
-#define MPT3SAS_DRIVER_VERSION		"13.100.00.00"
-#define MPT3SAS_MAJOR_VERSION		13
-#define MPT3SAS_MINOR_VERSION		100
+#define MPT3SAS_DRIVER_VERSION		"09.102.00.00"
+#define MPT3SAS_MAJOR_VERSION		9
+#define MPT3SAS_MINOR_VERSION		102
 #define MPT3SAS_BUILD_VERSION		0
 #define MPT3SAS_RELEASE_VERSION	00
 
@@ -90,7 +90,7 @@
 /*
  * Set MPT3SAS_SG_DEPTH value based on user input.
  */
-#define MPT_MAX_PHYS_SEGMENTS	SG_CHUNK_SIZE
+#define MPT_MAX_PHYS_SEGMENTS	SCSI_MAX_SG_SEGMENTS
 #define MPT_MIN_PHYS_SEGMENTS	16
 
 #ifdef CONFIG_SCSI_MPT3SAS_MAX_SGE
@@ -112,23 +112,20 @@
 #define MPT3SAS_SAS_QUEUE_DEPTH		254
 #define MPT3SAS_RAID_QUEUE_DEPTH	128
 
-#define MPT3SAS_RAID_MAX_SECTORS	8192
-
 #define MPT_NAME_LENGTH			32	/* generic length of strings */
 #define MPT_STRING_LENGTH		64
 
 #define MPT_MAX_CALLBACKS		32
 
+
+#define	 CAN_SLEEP			1
+#define  NO_SLEEP			0
+
 #define INTERNAL_CMDS_COUNT		10	/* reserved cmds */
-/* reserved for issuing internally framed scsi io cmds */
-#define INTERNAL_SCSIIO_CMDS_COUNT	3
 
 #define MPI3_HIM_MASK			0xFFFFFFFF /* mask every bit*/
 
 #define MPT3SAS_INVALID_DEVICE_HANDLE	0xFFFF
-
-#define MAX_CHAIN_ELEMT_SZ		16
-#define DEFAULT_NUM_FWCHAIN_ELEMTS	8
 
 /*
  * reset phases
@@ -402,7 +399,6 @@ struct MPT3SAS_DEVICE {
 	u8	configured_lun;
 	u8	block;
 	u8	tlr_snoop_check;
-	u8	ignore_delay_remove;
 	/*
 	 * Bug workaround for SATL handling: the mpt2/3sas firmware
 	 * doesn't return BUSY or TASK_SET_FULL for subsequent
@@ -486,7 +482,7 @@ struct _sas_device {
 	u8	pfa_led_on;
 	u8	pend_sas_rphy_add;
 	u8	enclosure_level;
-	u8	connector_name[5];
+	u8	connector_name[4];
 	struct kref refcount;
 };
 
@@ -694,25 +690,6 @@ struct _tr_list {
 	u16	state;
 };
 
-/**
- * struct _sc_list - delayed SAS_IO_UNIT_CONTROL message list
- * @handle: device handle
- */
-struct _sc_list {
-	struct list_head list;
-	u16     handle;
-};
-
-/**
- * struct _event_ack_list - delayed event acknowledgment list
- * @Event: Event ID
- * @EventContext: used to track the event uniquely
- */
-struct _event_ack_list {
-	struct list_head list;
-	u16     Event;
-	u32     EventContext;
-};
 
 /**
  * struct adapter_reply_queue - the reply queue struct
@@ -774,7 +751,7 @@ struct mpt3sas_facts {
 	u32			IOCCapabilities;
 	union mpi3_version_union	FWVersion;
 	u16			IOCRequestFrameSize;
-	u16			IOCMaxChainSegmentSize;
+	u16			Reserved3;
 	u16			MaxInitiators;
 	u16			MaxTargets;
 	u16			MaxSasExpanders;
@@ -800,6 +777,16 @@ struct mpt3sas_port_facts {
 struct reply_post_struct {
 	Mpi2ReplyDescriptorsUnion_t	*reply_post_free;
 	dma_addr_t			reply_post_free_dma;
+};
+
+/**
+ * enum mutex_type - task management mutex type
+ * @TM_MUTEX_OFF: mutex is not required becuase calling function is acquiring it
+ * @TM_MUTEX_ON: mutex is required
+ */
+enum mutex_type {
+	TM_MUTEX_OFF = 0,
+	TM_MUTEX_ON = 1,
 };
 
 typedef void (*MPT3SAS_FLUSH_RUNNING_CMDS)(struct MPT3SAS_ADAPTER *ioc);
@@ -911,8 +898,6 @@ typedef void (*MPT3SAS_FLUSH_RUNNING_CMDS)(struct MPT3SAS_ADAPTER *ioc);
  * @max_sges_in_chain_message: number sg elements per chain
  * @chains_needed_per_io: max chains per io
  * @chain_depth: total chains allocated
- * @chain_segment_sz: gives the max number of
- *			SGEs accommodate on single chain buffer
  * @hi_priority_smid:
  * @hi_priority:
  * @hi_priority_dma:
@@ -950,8 +935,6 @@ typedef void (*MPT3SAS_FLUSH_RUNNING_CMDS)(struct MPT3SAS_ADAPTER *ioc);
  * @replyPostRegisterIndex: index of next position in Reply Desc Post Queue
  * @delayed_tr_list: target reset link list
  * @delayed_tr_volume_list: volume target reset link list
- * @delayed_sc_list:
- * @delayed_event_ack_list:
  * @temp_sensors_count: flag to carry the number of temperature sensors
  * @pci_access_mutex: Mutex to synchronize ioctl,sysfs show path and
  *	pci resource handling. PCI resource freeing will lead to free
@@ -1120,7 +1103,6 @@ struct MPT3SAS_ADAPTER {
 	u16		max_sges_in_chain_message;
 	u16		chains_needed_per_io;
 	u32		chain_depth;
-	u16		chain_segment_sz;
 
 	/* hi-priority queue */
 	u16		hi_priority_smid;
@@ -1174,8 +1156,6 @@ struct MPT3SAS_ADAPTER {
 
 	struct list_head delayed_tr_list;
 	struct list_head delayed_tr_volume_list;
-	struct list_head delayed_sc_list;
-	struct list_head delayed_event_ack_list;
 	u8		temp_sensors_count;
 	struct mutex pci_access_mutex;
 
@@ -1227,15 +1207,14 @@ int mpt3sas_base_attach(struct MPT3SAS_ADAPTER *ioc);
 void mpt3sas_base_detach(struct MPT3SAS_ADAPTER *ioc);
 int mpt3sas_base_map_resources(struct MPT3SAS_ADAPTER *ioc);
 void mpt3sas_base_free_resources(struct MPT3SAS_ADAPTER *ioc);
-int mpt3sas_base_hard_reset_handler(struct MPT3SAS_ADAPTER *ioc,
+int mpt3sas_base_hard_reset_handler(struct MPT3SAS_ADAPTER *ioc, int sleep_flag,
 	enum reset_type type);
 
 void *mpt3sas_base_get_msg_frame(struct MPT3SAS_ADAPTER *ioc, u16 smid);
 void *mpt3sas_base_get_sense_buffer(struct MPT3SAS_ADAPTER *ioc, u16 smid);
 __le32 mpt3sas_base_get_sense_buffer_dma(struct MPT3SAS_ADAPTER *ioc,
 	u16 smid);
-
-void mpt3sas_base_sync_reply_irqs(struct MPT3SAS_ADAPTER *ioc);
+void mpt3sas_base_flush_reply_queues(struct MPT3SAS_ADAPTER *ioc);
 
 /* hi-priority queue */
 u16 mpt3sas_base_get_smid_hpr(struct MPT3SAS_ADAPTER *ioc, u8 cb_idx);
@@ -1289,18 +1268,12 @@ void mpt3sas_scsih_reset_handler(struct MPT3SAS_ADAPTER *ioc, int reset_phase);
 
 int mpt3sas_scsih_issue_tm(struct MPT3SAS_ADAPTER *ioc, u16 handle,
 	uint channel, uint id, uint lun, u8 type, u16 smid_task,
-	ulong timeout);
-int mpt3sas_scsih_issue_locked_tm(struct MPT3SAS_ADAPTER *ioc, u16 handle,
-	uint channel, uint id, uint lun, u8 type, u16 smid_task,
-	ulong timeout);
-
+	ulong timeout, enum mutex_type m_type);
 void mpt3sas_scsih_set_tm_flag(struct MPT3SAS_ADAPTER *ioc, u16 handle);
 void mpt3sas_scsih_clear_tm_flag(struct MPT3SAS_ADAPTER *ioc, u16 handle);
 void mpt3sas_expander_remove(struct MPT3SAS_ADAPTER *ioc, u64 sas_address);
 void mpt3sas_device_remove_by_sas_address(struct MPT3SAS_ADAPTER *ioc,
 	u64 sas_address);
-u8 mpt3sas_check_for_pending_internal_cmds(struct MPT3SAS_ADAPTER *ioc,
-	u16 smid);
 
 struct _sas_node *mpt3sas_scsih_expander_find_by_handle(
 	struct MPT3SAS_ADAPTER *ioc, u16 handle);

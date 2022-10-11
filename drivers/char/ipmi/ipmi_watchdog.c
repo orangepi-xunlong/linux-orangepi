@@ -1140,7 +1140,7 @@ ipmi_nmi(unsigned int val, struct pt_regs *regs)
 		   the timer.   So do so. */
 		pretimeout_since_last_heartbeat = 1;
 		if (atomic_inc_and_test(&preop_panic_excl))
-			nmi_panic(regs, PFX "pre-timeout");
+			panic(PFX "pre-timeout");
 	}
 
 	return NMI_HANDLED;

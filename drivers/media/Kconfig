@@ -2,6 +2,15 @@
 # Multimedia device configuration
 #
 
+config CEC_CORE
+	tristate
+
+config CEC_NOTIFIER
+	bool
+
+config CEC_PIN
+	bool
+
 menuconfig MEDIA_SUPPORT
 	tristate "Multimedia support"
 	depends on HAS_IOMEM
@@ -9,7 +18,7 @@ menuconfig MEDIA_SUPPORT
 	  If you want to use Webcams, Video grabber devices and/or TV devices
 	  enable this option and other options below.
 	  Additional info and docs are available on the web at
-	  <https://linuxtv.org>
+	  <http://linuxtv.org>
 
 if MEDIA_SUPPORT
 
@@ -51,7 +60,7 @@ config MEDIA_RADIO_SUPPORT
 	  Enable AM/FM radio support.
 
 	  Additional info and docs are available on the web at
-	  <https://linuxtv.org>
+	  <http://linuxtv.org>
 
 	  Say Y when you have a board with radio support.
 
@@ -80,8 +89,16 @@ config MEDIA_RC_SUPPORT
 
 	  Say Y when you have a TV or an IR device.
 
-config MEDIA_CEC_EDID
-	bool
+config MEDIA_CEC_SUPPORT
+       bool "HDMI CEC support"
+       ---help---
+         Enable support for HDMI CEC (Consumer Electronics Control),
+         which is an optional HDMI feature.
+
+         Say Y when you have an HDMI receiver, transmitter or a USB CEC
+         adapter that supports HDMI CEC.
+
+source "drivers/media/cec/Kconfig"
 
 #
 # Media controller
@@ -100,6 +117,7 @@ config MEDIA_CONTROLLER
 config MEDIA_CONTROLLER_DVB
 	bool "Enable Media controller for DVB (EXPERIMENTAL)"
 	depends on MEDIA_CONTROLLER
+	depends on BROKEN
 	---help---
 	  Enable the media controller API support for DVB.
 
@@ -219,6 +237,7 @@ source "drivers/media/i2c/Kconfig"
 source "drivers/media/spi/Kconfig"
 source "drivers/media/tuners/Kconfig"
 source "drivers/media/dvb-frontends/Kconfig"
-source "drivers/media/cedar-ve/Kconfig"
-source "drivers/media/cedar-vp9/Kconfig"
+source "drivers/media/video/rk_camsys/Kconfig"
+source "drivers/media/video/Kconfig"
+
 endif # MEDIA_SUPPORT

@@ -46,8 +46,8 @@ static unsigned core_vpe_count(unsigned core)
 	if (threads_disabled)
 		return 1;
 
-	if ((!IS_ENABLED(CONFIG_MIPS_MT_SMP) || !cpu_has_mipsmt)
-		&& (!IS_ENABLED(CONFIG_CPU_MIPSR6) || !cpu_has_vp))
+	if ((!config_enabled(CONFIG_MIPS_MT_SMP) || !cpu_has_mipsmt)
+		&& (!config_enabled(CONFIG_CPU_MIPSR6) || !cpu_has_vp))
 		return 1;
 
 	mips_cm_lock_other(core, 0);
@@ -140,9 +140,11 @@ static void __init cps_prepare_cpus(unsigned int max_cpus)
 
 	/* Warn the user if the CCA prevents multi-core */
 	ncores = mips_cm_numcores();
-	if (cca_unsuitable && ncores > 1) {
-		pr_warn("Using only one core due to unsuitable CCA 0x%x\n",
-			cca);
+	if ((cca_unsuitable || cpu_has_dc_aliases) && ncores > 1) {
+		pr_warn("Using only one core due to %s%s%s\n",
+			cca_unsuitable ? "unsuitable CCA" : "",
+			(cca_unsuitable && cpu_has_dc_aliases) ? " & " : "",
+			cpu_has_dc_aliases ? "dcache aliasing" : "");
 
 		for_each_present_cpu(c) {
 			if (cpu_data[c].core)
@@ -206,7 +208,7 @@ err_out:
 	}
 }
 
-static void boot_core(unsigned int core, unsigned int vpe_id)
+static void boot_core(unsigned core)
 {
 	u32 access, stat, seq_state;
 	unsigned timeout;
@@ -220,9 +222,6 @@ static void boot_core(unsigned int core, unsigned int vpe_id)
 	/* Ensure its coherency is disabled */
 	write_gcr_co_coherence(0);
 
-	/* Start it with the legacy memory map and exception base */
-	write_gcr_co_reset_ext_base(CM_GCR_RESET_EXT_BASE_UEB);
-
 	/* Ensure the core can access the GCRs */
 	access = read_gcr_access();
 	access |= 1 << (CM_GCR_ACCESS_ACCESSEN_SHF + core);
@@ -233,9 +232,8 @@ static void boot_core(unsigned int core, unsigned int vpe_id)
 		mips_cpc_lock_other(core);
 
 		if (mips_cm_revision() >= CM_REV_CM3) {
-			/* Run only the requested VP following the reset */
-			write_cpc_co_vp_stop(0xf);
-			write_cpc_co_vp_run(1 << vpe_id);
+			/* Run VP0 following the reset */
+			write_cpc_co_vp_run(0x1);
 
 			/*
 			 * Ensure that the VP_RUN register is written before the
@@ -307,7 +305,7 @@ static void cps_boot_secondary(int cpu, struct task_struct *idle)
 
 	if (!test_bit(core, core_power)) {
 		/* Boot a VPE on a powered down core */
-		boot_core(core, vpe_id);
+		boot_core(core);
 		goto out;
 	}
 
@@ -360,12 +358,8 @@ static void cps_init_secondary(void)
 		BUG_ON(ident != mips_cm_vp_id(smp_processor_id()));
 	}
 
-	if (cpu_has_veic)
-		clear_c0_status(ST0_IM);
-	else
-		change_c0_status(ST0_IM, STATUSF_IP2 | STATUSF_IP3 |
-					 STATUSF_IP4 | STATUSF_IP5 |
-					 STATUSF_IP6 | STATUSF_IP7);
+	change_c0_status(ST0_IM, STATUSF_IP2 | STATUSF_IP3 | STATUSF_IP4 |
+				 STATUSF_IP5 | STATUSF_IP6 | STATUSF_IP7);
 }
 
 static void cps_smp_finish(void)
@@ -398,7 +392,6 @@ static int cps_cpu_disable(void)
 	atomic_sub(1 << cpu_vpe_id(&current_cpu_data), &core_cfg->vpe_mask);
 	smp_mb__after_atomic();
 	set_cpu_online(cpu, false);
-	calculate_cpu_foreign_map();
 	cpumask_clear_cpu(cpu, &cpu_callin_map);
 
 	return 0;
@@ -485,6 +478,7 @@ static void cps_cpu_die(unsigned int cpu)
 {
 	unsigned core = cpu_data[cpu].core;
 	unsigned int vpe_id = cpu_vpe_id(&cpu_data[cpu]);
+	ktime_t fail_time;
 	unsigned stat;
 	int err;
 
@@ -512,6 +506,7 @@ static void cps_cpu_die(unsigned int cpu)
 		 * state, the latter happening when a JTAG probe is connected
 		 * in which case the CPC will refuse to power down the core.
 		 */
+		fail_time = ktime_add_ms(ktime_get(), 2000);
 		do {
 			mips_cm_lock_other(core, 0);
 			mips_cpc_lock_other(core);
@@ -519,9 +514,28 @@ static void cps_cpu_die(unsigned int cpu)
 			stat &= CPC_Cx_STAT_CONF_SEQSTATE_MSK;
 			mips_cpc_unlock_other();
 			mips_cm_unlock_other();
-		} while (stat != CPC_Cx_STAT_CONF_SEQSTATE_D0 &&
-			 stat != CPC_Cx_STAT_CONF_SEQSTATE_D2 &&
-			 stat != CPC_Cx_STAT_CONF_SEQSTATE_U2);
+
+			if (stat == CPC_Cx_STAT_CONF_SEQSTATE_D0 ||
+			    stat == CPC_Cx_STAT_CONF_SEQSTATE_D2 ||
+			    stat == CPC_Cx_STAT_CONF_SEQSTATE_U2)
+				break;
+
+			/*
+			 * The core ought to have powered down, but didn't &
+			 * now we don't really know what state it's in. It's
+			 * likely that its _pwr_up pin has been wired to logic
+			 * 1 & it powered back up as soon as we powered it
+			 * down...
+			 *
+			 * The best we can do is warn the user & continue in
+			 * the hope that the core is doing nothing harmful &
+			 * might behave properly if we online it later.
+			 */
+			if (WARN(ktime_after(ktime_get(), fail_time),
+				 "CPU%u hasn't powered down, seq. state %u\n",
+				 cpu, stat >> CPC_Cx_STAT_CONF_SEQSTATE_SHF))
+				break;
+		} while (1);
 
 		/* Indicate the core is powered off */
 		bitmap_clear(core_power, core, 1);
@@ -552,8 +566,8 @@ static struct plat_smp_ops cps_smp_ops = {
 	.boot_secondary		= cps_boot_secondary,
 	.init_secondary		= cps_init_secondary,
 	.smp_finish		= cps_smp_finish,
-	.send_ipi_single	= mips_smp_send_ipi_single,
-	.send_ipi_mask		= mips_smp_send_ipi_mask,
+	.send_ipi_single	= gic_send_ipi_single,
+	.send_ipi_mask		= gic_send_ipi_mask,
 #ifdef CONFIG_HOTPLUG_CPU
 	.cpu_disable		= cps_cpu_disable,
 	.cpu_die		= cps_cpu_die,

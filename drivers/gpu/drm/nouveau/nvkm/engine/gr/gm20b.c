@@ -32,17 +32,14 @@ gm20b_gr_init_gpc_mmu(struct gf100_gr *gr)
 	struct nvkm_device *device = gr->base.engine.subdev.device;
 	u32 val;
 
-	/* Bypass MMU check for non-secure boot */
-	if (!device->secboot) {
+	/* TODO this needs to be removed once secure boot works */
+	if (1) {
 		nvkm_wr32(device, 0x100ce4, 0xffffffff);
-
-		if (nvkm_rd32(device, 0x100ce4) != 0xffffffff)
-			nvdev_warn(device,
-			  "cannot bypass secure boot - expect failure soon!\n");
 	}
 
+	/* TODO update once secure boot works */
 	val = nvkm_rd32(device, 0x100c80);
-	val &= 0xf000187f;
+	val &= 0xf000087f;
 	nvkm_wr32(device, 0x418880, val);
 	nvkm_wr32(device, 0x418890, 0);
 	nvkm_wr32(device, 0x418894, 0);
@@ -64,11 +61,10 @@ gm20b_gr_set_hww_esr_report_mask(struct gf100_gr *gr)
 
 static const struct gf100_gr_func
 gm20b_gr = {
+	.dtor = gk20a_gr_dtor,
 	.init = gk20a_gr_init,
 	.init_gpc_mmu = gm20b_gr_init_gpc_mmu,
-	.init_rop_active_fbps = gk104_gr_init_rop_active_fbps,
 	.set_hww_esr_report_mask = gm20b_gr_set_hww_esr_report_mask,
-	.rops = gm200_gr_rops,
 	.ppc_nr = 1,
 	.grctx = &gm20b_grctx,
 	.sclass = {
@@ -83,5 +79,5 @@ gm20b_gr = {
 int
 gm20b_gr_new(struct nvkm_device *device, int index, struct nvkm_gr **pgr)
 {
-	return gm200_gr_new_(&gm20b_gr, device, index, pgr);
+	return gk20a_gr_new_(&gm20b_gr, device, index, pgr);
 }

@@ -67,15 +67,9 @@
 /* exported resources from IFWI */
 #define PLAT_RESOURCE_IPC_INDEX		0
 #define PLAT_RESOURCE_IPC_SIZE		0x1000
-#define PLAT_RESOURCE_GCR_OFFSET	0x1008
-#define PLAT_RESOURCE_GCR_SIZE		0x4
-#define PLAT_RESOURCE_BIOS_DATA_INDEX	1
-#define PLAT_RESOURCE_BIOS_IFACE_INDEX	2
-#define PLAT_RESOURCE_TELEM_SSRAM_INDEX	3
-#define PLAT_RESOURCE_ISP_DATA_INDEX	4
-#define PLAT_RESOURCE_ISP_IFACE_INDEX	5
-#define PLAT_RESOURCE_GTD_DATA_INDEX	6
-#define PLAT_RESOURCE_GTD_IFACE_INDEX	7
+#define PLAT_RESOURCE_GCR_SIZE		0x1000
+#define PLAT_RESOURCE_PUNIT_DATA_INDEX	1
+#define PLAT_RESOURCE_PUNIT_INTER_INDEX	2
 #define PLAT_RESOURCE_ACPI_IO_INDEX	0
 
 /*
@@ -85,17 +79,11 @@
  * platform device and to export resources for those functions.
  */
 #define TCO_DEVICE_NAME			"iTCO_wdt"
-#define SMI_EN_OFFSET			0x40
+#define SMI_EN_OFFSET			0x30
 #define SMI_EN_SIZE			4
 #define TCO_BASE_OFFSET			0x60
 #define TCO_REGS_SIZE			16
 #define PUNIT_DEVICE_NAME		"intel_punit_ipc"
-#define TELEMETRY_DEVICE_NAME		"intel_telemetry"
-#define TELEM_SSRAM_SIZE		240
-#define TELEM_PMC_SSRAM_OFFSET		0x1B00
-#define TELEM_PUNIT_SSRAM_OFFSET	0x1A00
-#define TCO_PMC_OFFSET			0x8
-#define TCO_PMC_SIZE			0x4
 
 static const int iTCO_version = 3;
 
@@ -117,15 +105,11 @@ static struct intel_pmc_ipc_dev {
 	int gcr_size;
 
 	/* punit */
+	resource_size_t punit_base;
+	int punit_size;
+	resource_size_t punit_base2;
+	int punit_size2;
 	struct platform_device *punit_dev;
-
-	/* Telemetry */
-	resource_size_t telem_pmc_ssram_base;
-	resource_size_t telem_punit_ssram_base;
-	int telem_pmc_ssram_size;
-	int telem_punit_ssram_size;
-	u8 telem_res_inval;
-	struct platform_device *telemetry_dev;
 } ipcdev;
 
 static char *ipc_err_sources[] = {
@@ -460,22 +444,9 @@ static const struct attribute_group intel_ipc_group = {
 	.attrs = intel_ipc_attrs,
 };
 
-static struct resource punit_res_array[] = {
-	/* Punit BIOS */
-	{
-		.flags = IORESOURCE_MEM,
-	},
-	{
-		.flags = IORESOURCE_MEM,
-	},
-	/* Punit ISP */
-	{
-		.flags = IORESOURCE_MEM,
-	},
-	{
-		.flags = IORESOURCE_MEM,
-	},
-	/* Punit GTD */
+#define PUNIT_RESOURCE_INTER		1
+static struct resource punit_res[] = {
+	/* Punit */
 	{
 		.flags = IORESOURCE_MEM,
 	},
@@ -504,54 +475,64 @@ static struct resource tco_res[] = {
 
 static struct itco_wdt_platform_data tco_info = {
 	.name = "Apollo Lake SoC",
-	.version = 5,
-};
-
-#define TELEMETRY_RESOURCE_PUNIT_SSRAM	0
-#define TELEMETRY_RESOURCE_PMC_SSRAM	1
-static struct resource telemetry_res[] = {
-	/*Telemetry*/
-	{
-		.flags = IORESOURCE_MEM,
-	},
-	{
-		.flags = IORESOURCE_MEM,
-	},
+	.version = 3,
 };
 
 static int ipc_create_punit_device(void)
 {
 	struct platform_device *pdev;
-	const struct platform_device_info pdevinfo = {
-		.parent = ipcdev.dev,
-		.name = PUNIT_DEVICE_NAME,
-		.id = -1,
-		.res = punit_res_array,
-		.num_res = ARRAY_SIZE(punit_res_array),
-		};
+	struct resource *res;
+	int ret;
 
-	pdev = platform_device_register_full(&pdevinfo);
-	if (IS_ERR(pdev))
-		return PTR_ERR(pdev);
+	pdev = platform_device_alloc(PUNIT_DEVICE_NAME, -1);
+	if (!pdev) {
+		dev_err(ipcdev.dev, "Failed to alloc punit platform device\n");
+		return -ENOMEM;
+	}
 
+	pdev->dev.parent = ipcdev.dev;
+
+	res = punit_res;
+	res->start = ipcdev.punit_base;
+	res->end = res->start + ipcdev.punit_size - 1;
+
+	res = punit_res + PUNIT_RESOURCE_INTER;
+	res->start = ipcdev.punit_base2;
+	res->end = res->start + ipcdev.punit_size2 - 1;
+
+	ret = platform_device_add_resources(pdev, punit_res,
+					    ARRAY_SIZE(punit_res));
+	if (ret) {
+		dev_err(ipcdev.dev, "Failed to add platform punit resources\n");
+		goto err;
+	}
+
+	ret = platform_device_add(pdev);
+	if (ret) {
+		dev_err(ipcdev.dev, "Failed to add punit platform device\n");
+		goto err;
+	}
 	ipcdev.punit_dev = pdev;
 
 	return 0;
+err:
+	platform_device_put(pdev);
+	return ret;
 }
 
 static int ipc_create_tco_device(void)
 {
 	struct platform_device *pdev;
 	struct resource *res;
-	const struct platform_device_info pdevinfo = {
-		.parent = ipcdev.dev,
-		.name = TCO_DEVICE_NAME,
-		.id = -1,
-		.res = tco_res,
-		.num_res = ARRAY_SIZE(tco_res),
-		.data = &tco_info,
-		.size_data = sizeof(tco_info),
-		};
+	int ret;
+
+	pdev = platform_device_alloc(TCO_DEVICE_NAME, -1);
+	if (!pdev) {
+		dev_err(ipcdev.dev, "Failed to alloc tco platform device\n");
+		return -ENOMEM;
+	}
+
+	pdev->dev.parent = ipcdev.dev;
 
 	res = tco_res + TCO_RESOURCE_ACPI_IO;
 	res->start = ipcdev.acpi_io_base + TCO_BASE_OFFSET;
@@ -562,79 +543,54 @@ static int ipc_create_tco_device(void)
 	res->end = res->start + SMI_EN_SIZE - 1;
 
 	res = tco_res + TCO_RESOURCE_GCR_MEM;
-	res->start = ipcdev.gcr_base + TCO_PMC_OFFSET;
-	res->end = res->start + TCO_PMC_SIZE - 1;
+	res->start = ipcdev.gcr_base;
+	res->end = res->start + ipcdev.gcr_size - 1;
 
-	pdev = platform_device_register_full(&pdevinfo);
-	if (IS_ERR(pdev))
-		return PTR_ERR(pdev);
+	ret = platform_device_add_resources(pdev, tco_res, ARRAY_SIZE(tco_res));
+	if (ret) {
+		dev_err(ipcdev.dev, "Failed to add tco platform resources\n");
+		goto err;
+	}
 
+	ret = platform_device_add_data(pdev, &tco_info, sizeof(tco_info));
+	if (ret) {
+		dev_err(ipcdev.dev, "Failed to add tco platform data\n");
+		goto err;
+	}
+
+	ret = platform_device_add(pdev);
+	if (ret) {
+		dev_err(ipcdev.dev, "Failed to add tco platform device\n");
+		goto err;
+	}
 	ipcdev.tco_dev = pdev;
 
 	return 0;
-}
-
-static int ipc_create_telemetry_device(void)
-{
-	struct platform_device *pdev;
-	struct resource *res;
-	const struct platform_device_info pdevinfo = {
-		.parent = ipcdev.dev,
-		.name = TELEMETRY_DEVICE_NAME,
-		.id = -1,
-		.res = telemetry_res,
-		.num_res = ARRAY_SIZE(telemetry_res),
-		};
-
-	res = telemetry_res + TELEMETRY_RESOURCE_PUNIT_SSRAM;
-	res->start = ipcdev.telem_punit_ssram_base;
-	res->end = res->start + ipcdev.telem_punit_ssram_size - 1;
-
-	res = telemetry_res + TELEMETRY_RESOURCE_PMC_SSRAM;
-	res->start = ipcdev.telem_pmc_ssram_base;
-	res->end = res->start + ipcdev.telem_pmc_ssram_size - 1;
-
-	pdev = platform_device_register_full(&pdevinfo);
-	if (IS_ERR(pdev))
-		return PTR_ERR(pdev);
-
-	ipcdev.telemetry_dev = pdev;
-
-	return 0;
+err:
+	platform_device_put(pdev);
+	return ret;
 }
 
 static int ipc_create_pmc_devices(void)
 {
 	int ret;
 
-	/* If we have ACPI based watchdog use that instead */
-	if (!acpi_has_watchdog()) {
-		ret = ipc_create_tco_device();
-		if (ret) {
-			dev_err(ipcdev.dev, "Failed to add tco platform device\n");
-			return ret;
-		}
+	ret = ipc_create_tco_device();
+	if (ret) {
+		dev_err(ipcdev.dev, "Failed to add tco platform device\n");
+		return ret;
 	}
-
 	ret = ipc_create_punit_device();
 	if (ret) {
 		dev_err(ipcdev.dev, "Failed to add punit platform device\n");
 		platform_device_unregister(ipcdev.tco_dev);
 	}
-
-	if (!ipcdev.telem_res_inval) {
-		ret = ipc_create_telemetry_device();
-		if (ret)
-			dev_warn(ipcdev.dev,
-				"Failed to add telemetry platform device\n");
-	}
-
 	return ret;
 }
 
 static int ipc_plat_get_res(struct platform_device *pdev)
 {
-	struct resource *res, *punit_res;
+	struct resource *res;
 	void __iomem *addr;
 	int size;
 
@@ -647,64 +603,32 @@ static int ipc_plat_get_res(struct platform_device *pdev)
 	size = resource_size(res);
 	ipcdev.acpi_io_base = res->start;
 	ipcdev.acpi_io_size = size;
-	dev_info(&pdev->dev, "io res: %pR\n", res);
+	dev_info(&pdev->dev, "io res: %llx %x\n",
+		 (long long)res->start, (int)resource_size(res));
 
-	punit_res = punit_res_array;
-	/* This is index 0 to cover BIOS data register */
 	res = platform_get_resource(pdev, IORESOURCE_MEM,
-				    PLAT_RESOURCE_BIOS_DATA_INDEX);
+				    PLAT_RESOURCE_PUNIT_DATA_INDEX);
 	if (!res) {
-		dev_err(&pdev->dev, "Failed to get res of punit BIOS data\n");
+		dev_err(&pdev->dev, "Failed to get punit resource\n");
 		return -ENXIO;
 	}
-	*punit_res = *res;
-	dev_info(&pdev->dev, "punit BIOS data res: %pR\n", res);
+	size = resource_size(res);
+	ipcdev.punit_base = res->start;
+	ipcdev.punit_size = size;
+	dev_info(&pdev->dev, "punit data res: %llx %x\n",
+		 (long long)res->start, (int)resource_size(res));
 
-	/* This is index 1 to cover BIOS interface register */
 	res = platform_get_resource(pdev, IORESOURCE_MEM,
-				    PLAT_RESOURCE_BIOS_IFACE_INDEX);
+				    PLAT_RESOURCE_PUNIT_INTER_INDEX);
 	if (!res) {
-		dev_err(&pdev->dev, "Failed to get res of punit BIOS iface\n");
+		dev_err(&pdev->dev, "Failed to get punit inter resource\n");
 		return -ENXIO;
 	}
-	*++punit_res = *res;
-	dev_info(&pdev->dev, "punit BIOS interface res: %pR\n", res);
-
-	/* This is index 2 to cover ISP data register, optional */
-	res = platform_get_resource(pdev, IORESOURCE_MEM,
-				    PLAT_RESOURCE_ISP_DATA_INDEX);
-	++punit_res;
-	if (res) {
-		*punit_res = *res;
-		dev_info(&pdev->dev, "punit ISP data res: %pR\n", res);
-	}
-
-	/* This is index 3 to cover ISP interface register, optional */
-	res = platform_get_resource(pdev, IORESOURCE_MEM,
-				    PLAT_RESOURCE_ISP_IFACE_INDEX);
-	++punit_res;
-	if (res) {
-		*punit_res = *res;
-		dev_info(&pdev->dev, "punit ISP interface res: %pR\n", res);
-	}
-
-	/* This is index 4 to cover GTD data register, optional */
-	res = platform_get_resource(pdev, IORESOURCE_MEM,
-				    PLAT_RESOURCE_GTD_DATA_INDEX);
-	++punit_res;
-	if (res) {
-		*punit_res = *res;
-		dev_info(&pdev->dev, "punit GTD data res: %pR\n", res);
-	}
-
-	/* This is index 5 to cover GTD interface register, optional */
-	res = platform_get_resource(pdev, IORESOURCE_MEM,
-				    PLAT_RESOURCE_GTD_IFACE_INDEX);
-	++punit_res;
-	if (res) {
-		*punit_res = *res;
-		dev_info(&pdev->dev, "punit GTD interface res: %pR\n", res);
-	}
+	size = resource_size(res);
+	ipcdev.punit_base2 = res->start;
+	ipcdev.punit_size2 = size;
+	dev_info(&pdev->dev, "punit interface res: %llx %x\n",
+		 (long long)res->start, (int)resource_size(res));
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM,
 				    PLAT_RESOURCE_IPC_INDEX);
@@ -725,25 +649,10 @@ static int ipc_plat_get_res(struct platform_device *pdev)
 	}
 	ipcdev.ipc_base = addr;
 
-	ipcdev.gcr_base = res->start + PLAT_RESOURCE_GCR_OFFSET;
+	ipcdev.gcr_base = res->start + size;
 	ipcdev.gcr_size = PLAT_RESOURCE_GCR_SIZE;
-	dev_info(&pdev->dev, "ipc res: %pR\n", res);
-
-	ipcdev.telem_res_inval = 0;
-	res = platform_get_resource(pdev, IORESOURCE_MEM,
-				    PLAT_RESOURCE_TELEM_SSRAM_INDEX);
-	if (!res) {
-		dev_err(&pdev->dev, "Failed to get telemetry ssram resource\n");
-		ipcdev.telem_res_inval = 1;
-	} else {
-		ipcdev.telem_punit_ssram_base = res->start +
-						TELEM_PUNIT_SSRAM_OFFSET;
-		ipcdev.telem_punit_ssram_size = TELEM_SSRAM_SIZE;
-		ipcdev.telem_pmc_ssram_base = res->start +
-						TELEM_PMC_SSRAM_OFFSET;
-		ipcdev.telem_pmc_ssram_size = TELEM_SSRAM_SIZE;
-		dev_info(&pdev->dev, "telemetry ssram res: %pR\n", res);
-	}
+	dev_info(&pdev->dev, "ipc res: %llx %x\n",
+		 (long long)res->start, (int)resource_size(res));
 
 	return 0;
 }
@@ -783,8 +692,7 @@ static int ipc_plat_probe(struct platform_device *pdev)
 		goto err_device;
 	}
 
-	if (request_irq(ipcdev.irq, ioc, IRQF_NO_SUSPEND,
-			"intel_pmc_ipc", &ipcdev)) {
+	if (request_irq(ipcdev.irq, ioc, 0, "intel_pmc_ipc", &ipcdev)) {
 		dev_err(&pdev->dev, "Failed to request irq\n");
 		ret = -EBUSY;
 		goto err_irq;
@@ -803,7 +711,6 @@ err_sys:
 err_irq:
 	platform_device_unregister(ipcdev.tco_dev);
 	platform_device_unregister(ipcdev.punit_dev);
-	platform_device_unregister(ipcdev.telemetry_dev);
 err_device:
 	iounmap(ipcdev.ipc_base);
 	res = platform_get_resource(pdev, IORESOURCE_MEM,
@@ -821,7 +728,6 @@ static int ipc_plat_remove(struct platform_device *pdev)
 	free_irq(ipcdev.irq, &ipcdev);
 	platform_device_unregister(ipcdev.tco_dev);
 	platform_device_unregister(ipcdev.punit_dev);
-	platform_device_unregister(ipcdev.telemetry_dev);
 	iounmap(ipcdev.ipc_base);
 	res = platform_get_resource(pdev, IORESOURCE_MEM,
 				    PLAT_RESOURCE_IPC_INDEX);

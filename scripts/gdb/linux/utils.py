@@ -87,24 +87,11 @@ def get_target_endianness():
     return target_endianness
 
 
-def read_memoryview(inf, start, length):
-    return memoryview(inf.read_memory(start, length))
-
-
 def read_u16(buffer):
-    value = [0, 0]
-
-    if type(buffer[0]) is str:
-        value[0] = ord(buffer[0])
-        value[1] = ord(buffer[1])
-    else:
-        value[0] = buffer[0]
-        value[1] = buffer[1]
-
     if get_target_endianness() == LITTLE_ENDIAN:
-        return value[0] + (value[1] << 8)
+        return ord(buffer[0]) + (ord(buffer[1]) << 8)
     else:
-        return value[1] + (value[0] << 8)
+        return ord(buffer[1]) + (ord(buffer[0]) << 8)
 
 
 def read_u32(buffer):
@@ -167,18 +154,3 @@ def get_gdbserver_type():
         if gdbserver_type is not None and hasattr(gdb, 'events'):
             gdb.events.exited.connect(exit_handler)
     return gdbserver_type
-
-
-def gdb_eval_or_none(expresssion):
-    try:
-        return gdb.parse_and_eval(expresssion)
-    except:
-        return None
-
-
-def dentry_name(d):
-    parent = d['d_parent']
-    if parent == d or parent == 0:
-        return ""
-    p = dentry_name(d['d_parent']) + "/"
-    return p + d['d_iname'].string()

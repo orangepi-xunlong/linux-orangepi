@@ -85,7 +85,8 @@ static void omap_encoder_mode_set(struct drm_encoder *encoder,
 	if (hdmi_mode && dssdev->driver->set_hdmi_infoframe) {
 		struct hdmi_avi_infoframe avi;
 
-		r = drm_hdmi_avi_infoframe_from_display_mode(&avi, adjusted_mode);
+		r = drm_hdmi_avi_infoframe_from_display_mode(&avi, adjusted_mode,
+							     false);
 		if (r == 0)
 			dssdev->driver->set_hdmi_infoframe(dssdev, &avi);
 	}
@@ -109,6 +110,8 @@ static int omap_encoder_update(struct drm_encoder *encoder,
 	struct omap_dss_device *dssdev = omap_encoder->dssdev;
 	struct omap_dss_driver *dssdrv = dssdev->driver;
 	int ret;
+
+	dssdev->src->manager = omap_dss_get_overlay_manager(channel);
 
 	if (dssdrv->check_timings) {
 		ret = dssdrv->check_timings(dssdev, timings);
@@ -139,16 +142,11 @@ static void omap_encoder_enable(struct drm_encoder *encoder)
 	struct omap_encoder *omap_encoder = to_omap_encoder(encoder);
 	struct omap_dss_device *dssdev = omap_encoder->dssdev;
 	struct omap_dss_driver *dssdrv = dssdev->driver;
-	int r;
 
 	omap_encoder_update(encoder, omap_crtc_channel(encoder->crtc),
 			    omap_crtc_timings(encoder->crtc));
 
-	r = dssdrv->enable(dssdev);
-	if (r)
-		dev_err(encoder->dev->dev,
-			"Failed to enable display '%s': %d\n",
-			dssdev->name, r);
+	dssdrv->enable(dssdev);
 }
 
 static int omap_encoder_atomic_check(struct drm_encoder *encoder,

@@ -1,10 +1,14 @@
-/*
- * Copyright 1997-1998 Transmeta Corporation -- All Rights Reserved
+/* -*- c -*- --------------------------------------------------------------- *
+ *
+ * linux/fs/autofs/init.c
+ *
+ *  Copyright 1997-1998 Transmeta Corporation -- All Rights Reserved
  *
  * This file is part of the Linux kernel and is made available under
  * the terms of the GNU General Public License, version 2, or at your
  * option, any later version, incorporated herein by reference.
- */
+ *
+ * ------------------------------------------------------------------------- */
 
 #include <linux/module.h>
 #include <linux/init.h>

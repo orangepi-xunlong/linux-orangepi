@@ -40,7 +40,8 @@ enum {
 
 static unsigned int show_channel_command(struct output *o, u32 val)
 {
-	unsigned int mask, subop;
+	unsigned mask;
+	unsigned subop;
 
 	switch (val >> 28) {
 	case HOST1X_OPCODE_SETCLASS:
@@ -50,10 +51,11 @@ static unsigned int show_channel_command(struct output *o, u32 val)
 					    val >> 6 & 0x3ff,
 					    val >> 16 & 0xfff, mask);
 			return hweight8(mask);
+		} else {
+			host1x_debug_output(o, "SETCL(class=%03x)\n",
+					    val >> 6 & 0x3ff);
+			return 0;
 		}
-
-		host1x_debug_output(o, "SETCL(class=%03x)\n", val >> 6 & 0x3ff);
-		return 0;
 
 	case HOST1X_OPCODE_INCR:
 		host1x_debug_output(o, "INCR(offset=%03x, [",
@@ -141,8 +143,7 @@ static void show_channel_gathers(struct output *o, struct host1x_cdma *cdma)
 	struct host1x_job *job;
 
 	list_for_each_entry(job, &cdma->sync_queue, list) {
-		unsigned int i;
-
+		int i;
 		host1x_debug_output(o, "\n%p: JOB, syncpt_id=%d, syncpt_val=%d, first_get=%08x, timeout=%d num_slots=%d, num_handles=%d\n",
 				    job, job->syncpt_id, job->syncpt_end,
 				    job->first_get, job->timeout,
@@ -189,7 +190,7 @@ static void host1x_debug_show_channel_cdma(struct host1x *host,
 	cbread = host1x_sync_readl(host, HOST1X_SYNC_CBREAD(ch->id));
 	cbstat = host1x_sync_readl(host, HOST1X_SYNC_CBSTAT(ch->id));
 
-	host1x_debug_output(o, "%u-%s: ", ch->id, dev_name(ch->dev));
+	host1x_debug_output(o, "%d-%s: ", ch->id, dev_name(ch->dev));
 
 	if (HOST1X_CHANNEL_DMACTRL_DMASTOP_V(dmactrl) ||
 	    !ch->cdma.push_buffer.mapped) {
@@ -199,13 +200,14 @@ static void host1x_debug_show_channel_cdma(struct host1x *host,
 
 	if (HOST1X_SYNC_CBSTAT_CBCLASS_V(cbstat) == HOST1X_CLASS_HOST1X &&
 	    HOST1X_SYNC_CBSTAT_CBOFFSET_V(cbstat) ==
-			HOST1X_UCLASS_WAIT_SYNCPT)
+	    HOST1X_UCLASS_WAIT_SYNCPT)
 		host1x_debug_output(o, "waiting on syncpt %d val %d\n",
 				    cbread >> 24, cbread & 0xffffff);
 	else if (HOST1X_SYNC_CBSTAT_CBCLASS_V(cbstat) ==
-				HOST1X_CLASS_HOST1X &&
-		 HOST1X_SYNC_CBSTAT_CBOFFSET_V(cbstat) ==
-				HOST1X_UCLASS_WAIT_SYNCPT_BASE) {
+	   HOST1X_CLASS_HOST1X &&
+	   HOST1X_SYNC_CBSTAT_CBOFFSET_V(cbstat) ==
+	   HOST1X_UCLASS_WAIT_SYNCPT_BASE) {
+
 		base = (cbread >> 16) & 0xff;
 		baseval =
 			host1x_sync_readl(host, HOST1X_SYNC_SYNCPT_BASE(base));
@@ -234,7 +236,7 @@ static void host1x_debug_show_channel_fifo(struct host1x *host,
 	u32 val, rd_ptr, wr_ptr, start, end;
 	unsigned int data_count = 0;
 
-	host1x_debug_output(o, "%u: fifo:\n", ch->id);
+	host1x_debug_output(o, "%d: fifo:\n", ch->id);
 
 	val = host1x_ch_readl(ch, HOST1X_CHANNEL_FIFOSTAT);
 	host1x_debug_output(o, "FIFOSTAT %08x\n", val);
@@ -288,22 +290,20 @@ static void host1x_debug_show_channel_fifo(struct host1x *host,
 
 static void host1x_debug_show_mlocks(struct host1x *host, struct output *o)
 {
-	unsigned int i;
+	int i;
 
 	host1x_debug_output(o, "---- mlocks ----\n");
-
 	for (i = 0; i < host1x_syncpt_nb_mlocks(host); i++) {
 		u32 owner =
 			host1x_sync_readl(host, HOST1X_SYNC_MLOCK_OWNER(i));
 		if (HOST1X_SYNC_MLOCK_OWNER_CH_OWNS_V(owner))
-			host1x_debug_output(o, "%u: locked by channel %u\n",
+			host1x_debug_output(o, "%d: locked by channel %d\n",
 				i, HOST1X_SYNC_MLOCK_OWNER_CHID_V(owner));
 		else if (HOST1X_SYNC_MLOCK_OWNER_CPU_OWNS_V(owner))
-			host1x_debug_output(o, "%u: locked by cpu\n", i);
+			host1x_debug_output(o, "%d: locked by cpu\n", i);
 		else
-			host1x_debug_output(o, "%u: unlocked\n", i);
+			host1x_debug_output(o, "%d: unlocked\n", i);
 	}
-
 	host1x_debug_output(o, "\n");
 }
 

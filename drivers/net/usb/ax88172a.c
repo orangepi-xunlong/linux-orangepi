@@ -81,7 +81,7 @@ static void ax88172a_adjust_link(struct net_device *netdev)
 	}
 
 	if (mode != priv->oldmode) {
-		asix_write_medium_mode(dev, mode, 0);
+		asix_write_medium_mode(dev, mode);
 		priv->oldmode = mode;
 		netdev_dbg(netdev, "speed %u duplex %d, setting mode to 0x%04x\n",
 			   phydev->speed, phydev->duplex, mode);
@@ -98,7 +98,7 @@ static void ax88172a_status(struct usbnet *dev, struct urb *urb)
 static int ax88172a_init_mdio(struct usbnet *dev)
 {
 	struct ax88172a_private *priv = dev->driver_priv;
-	int ret;
+	int ret, i;
 
 	priv->mdio = mdiobus_alloc();
 	if (!priv->mdio) {
@@ -114,15 +114,25 @@ static int ax88172a_init_mdio(struct usbnet *dev)
 	snprintf(priv->mdio->id, MII_BUS_ID_SIZE, "usb-%03d:%03d",
 		 dev->udev->bus->busnum, dev->udev->devnum);
 
+	priv->mdio->irq = kzalloc(sizeof(int) * PHY_MAX_ADDR, GFP_KERNEL);
+	if (!priv->mdio->irq) {
+		ret = -ENOMEM;
+		goto mfree;
+	}
+	for (i = 0; i < PHY_MAX_ADDR; i++)
+		priv->mdio->irq[i] = PHY_POLL;
+
 	ret = mdiobus_register(priv->mdio);
 	if (ret) {
 		netdev_err(dev->net, "Could not register MDIO bus\n");
-		goto mfree;
+		goto ifree;
 	}
 
 	netdev_info(dev->net, "registered mdio bus %s\n", priv->mdio->id);
 	return 0;
 
+ifree:
+	kfree(priv->mdio->irq);
 mfree:
 	mdiobus_free(priv->mdio);
 	return ret;
@@ -134,6 +144,7 @@ static void ax88172a_remove_mdio(struct usbnet *dev)
 
 	netdev_info(dev->net, "deregistering mdio bus %s\n", priv->mdio->id);
 	mdiobus_unregister(priv->mdio);
+	kfree(priv->mdio->irq);
 	mdiobus_free(priv->mdio);
 }
 
@@ -148,6 +159,24 @@ static const struct net_device_ops ax88172a_netdev_ops = {
 	.ndo_do_ioctl		= ax88172a_ioctl,
 	.ndo_set_rx_mode        = asix_set_multicast,
 };
+
+static int ax88172a_get_settings(struct net_device *net,
+				 struct ethtool_cmd *cmd)
+{
+	if (!net->phydev)
+		return -ENODEV;
+
+	return phy_ethtool_gset(net->phydev, cmd);
+}
+
+static int ax88172a_set_settings(struct net_device *net,
+				 struct ethtool_cmd *cmd)
+{
+	if (!net->phydev)
+		return -ENODEV;
+
+	return phy_ethtool_sset(net->phydev, cmd);
+}
 
 static int ax88172a_nway_reset(struct net_device *net)
 {
@@ -167,28 +196,27 @@ static const struct ethtool_ops ax88172a_ethtool_ops = {
 	.get_eeprom_len		= asix_get_eeprom_len,
 	.get_eeprom		= asix_get_eeprom,
 	.set_eeprom		= asix_set_eeprom,
+	.get_settings		= ax88172a_get_settings,
+	.set_settings		= ax88172a_set_settings,
 	.nway_reset		= ax88172a_nway_reset,
-	.get_link_ksettings	= phy_ethtool_get_link_ksettings,
-	.set_link_ksettings	= phy_ethtool_set_link_ksettings,
 };
 
 static int ax88172a_reset_phy(struct usbnet *dev, int embd_phy)
 {
 	int ret;
 
-	ret = asix_sw_reset(dev, AX_SWRESET_IPPD, 0);
+	ret = asix_sw_reset(dev, AX_SWRESET_IPPD);
 	if (ret < 0)
 		goto err;
 
 	msleep(150);
-	ret = asix_sw_reset(dev, AX_SWRESET_CLEAR, 0);
+	ret = asix_sw_reset(dev, AX_SWRESET_CLEAR);
 	if (ret < 0)
 		goto err;
 
 	msleep(150);
 
-	ret = asix_sw_reset(dev, embd_phy ? AX_SWRESET_IPRL : AX_SWRESET_IPPD,
-			    0);
+	ret = asix_sw_reset(dev, embd_phy ? AX_SWRESET_IPRL : AX_SWRESET_IPPD);
 	if (ret < 0)
 		goto err;
 
@@ -214,7 +242,7 @@ static int ax88172a_bind(struct usbnet *dev, struct usb_interface *intf)
 	dev->driver_priv = priv;
 
 	/* Get the MAC address */
-	ret = asix_read_cmd(dev, AX_CMD_READ_NODE_ID, 0, 0, ETH_ALEN, buf, 0);
+	ret = asix_read_cmd(dev, AX_CMD_READ_NODE_ID, 0, 0, ETH_ALEN, buf);
 	if (ret < 0) {
 		netdev_err(dev->net, "Failed to read MAC address: %d\n", ret);
 		goto free;
@@ -225,7 +253,7 @@ static int ax88172a_bind(struct usbnet *dev, struct usb_interface *intf)
 	dev->net->ethtool_ops = &ax88172a_ethtool_ops;
 
 	/* are we using the internal or the external phy? */
-	ret = asix_read_cmd(dev, AX_CMD_SW_PHY_STATUS, 0, 0, 1, buf, 0);
+	ret = asix_read_cmd(dev, AX_CMD_SW_PHY_STATUS, 0, 0, 1, buf);
 	if (ret < 0) {
 		netdev_err(dev->net, "Failed to read software interface selection register: %d\n",
 			   ret);
@@ -304,20 +332,20 @@ static int ax88172a_reset(struct usbnet *dev)
 	ax88172a_reset_phy(dev, priv->use_embdphy);
 
 	msleep(150);
-	rx_ctl = asix_read_rx_ctl(dev, 0);
+	rx_ctl = asix_read_rx_ctl(dev);
 	netdev_dbg(dev->net, "RX_CTL is 0x%04x after software reset\n", rx_ctl);
-	ret = asix_write_rx_ctl(dev, 0x0000, 0);
+	ret = asix_write_rx_ctl(dev, 0x0000);
 	if (ret < 0)
 		goto out;
 
-	rx_ctl = asix_read_rx_ctl(dev, 0);
+	rx_ctl = asix_read_rx_ctl(dev);
 	netdev_dbg(dev->net, "RX_CTL is 0x%04x setting to 0x0000\n", rx_ctl);
 
 	msleep(150);
 
 	ret = asix_write_cmd(dev, AX_CMD_WRITE_IPG0,
 			     AX88772_IPG0_DEFAULT | AX88772_IPG1_DEFAULT,
-			     AX88772_IPG2_DEFAULT, 0, NULL, 0);
+			     AX88772_IPG2_DEFAULT, 0, NULL);
 	if (ret < 0) {
 		netdev_err(dev->net, "Write IPG,IPG1,IPG2 failed: %d\n", ret);
 		goto out;
@@ -326,20 +354,20 @@ static int ax88172a_reset(struct usbnet *dev)
 	/* Rewrite MAC address */
 	memcpy(data->mac_addr, dev->net->dev_addr, ETH_ALEN);
 	ret = asix_write_cmd(dev, AX_CMD_WRITE_NODE_ID, 0, 0, ETH_ALEN,
-			     data->mac_addr, 0);
+			     data->mac_addr);
 	if (ret < 0)
 		goto out;
 
 	/* Set RX_CTL to default values with 2k buffer, and enable cactus */
-	ret = asix_write_rx_ctl(dev, AX_DEFAULT_RX_CTL, 0);
+	ret = asix_write_rx_ctl(dev, AX_DEFAULT_RX_CTL);
 	if (ret < 0)
 		goto out;
 
-	rx_ctl = asix_read_rx_ctl(dev, 0);
+	rx_ctl = asix_read_rx_ctl(dev);
 	netdev_dbg(dev->net, "RX_CTL is 0x%04x after all initializations\n",
 		   rx_ctl);
 
-	rx_ctl = asix_read_medium_status(dev, 0);
+	rx_ctl = asix_read_medium_status(dev);
 	netdev_dbg(dev->net, "Medium Status is 0x%04x after all initializations\n",
 		   rx_ctl);
 

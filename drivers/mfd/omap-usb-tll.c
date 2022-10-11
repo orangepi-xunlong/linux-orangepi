@@ -30,8 +30,6 @@
 #include <linux/platform_data/usb-omap.h>
 #include <linux/of.h>
 
-#include "omap-usb.h"
-
 #define USBTLL_DRIVER_NAME	"usbhs_tll"
 
 /* TLL Register Set */
@@ -131,12 +129,12 @@ static inline u32 usbtll_read(void __iomem *base, u32 reg)
 	return readl_relaxed(base + reg);
 }
 
-static inline void usbtll_writeb(void __iomem *base, u8 reg, u8 val)
+static inline void usbtll_writeb(void __iomem *base, u32 reg, u8 val)
 {
 	writeb_relaxed(val, base + reg);
 }
 
-static inline u8 usbtll_readb(void __iomem *base, u8 reg)
+static inline u8 usbtll_readb(void __iomem *base, u32 reg)
 {
 	return readb_relaxed(base + reg);
 }

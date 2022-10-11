@@ -611,7 +611,9 @@ static int cpwd_probe(struct platform_device *op)
 	}
 
 	if (p->broken) {
-		setup_timer(&cpwd_timer, cpwd_brokentimer, (unsigned long)p);
+		init_timer(&cpwd_timer);
+		cpwd_timer.function	= cpwd_brokentimer;
+		cpwd_timer.data		= (unsigned long) p;
 		cpwd_timer.expires	= WD_BTIMEOUT;
 
 		pr_info("PLD defect workaround enabled for model %s\n",

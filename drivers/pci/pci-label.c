@@ -16,7 +16,7 @@
  * the instance number and string from the type 41 record and exports
  * it to sysfs.
  *
- * Please see http://linux.dell.com/files/biosdevname/ for more
+ * Please see http://linux.dell.com/wiki/index.php/Oss/libnetdevname for more
  * information.
  */
 
@@ -77,7 +77,7 @@ static umode_t smbios_instance_string_exist(struct kobject *kobj,
 	struct device *dev;
 	struct pci_dev *pdev;
 
-	dev = kobj_to_dev(kobj);
+	dev = container_of(kobj, struct device, kobj);
 	pdev = to_pci_dev(dev);
 
 	return find_smbios_instance_string(pdev, NULL, SMBIOS_ATTR_NONE) ?
@@ -221,7 +221,7 @@ static umode_t acpi_index_string_exist(struct kobject *kobj,
 {
 	struct device *dev;
 
-	dev = kobj_to_dev(kobj);
+	dev = container_of(kobj, struct device, kobj);
 
 	if (device_has_dsm(dev))
 		return S_IRUGO;

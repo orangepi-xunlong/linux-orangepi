@@ -33,6 +33,7 @@ struct display_timing;
 
 /**
  * struct drm_panel_funcs - perform operations on a given panel
+ * @loader_protect: protect loader logo panel's power
  * @disable: disable panel (turn off back light, etc.)
  * @unprepare: turn off panel
  * @prepare: turn on panel and perform set up
@@ -66,6 +67,7 @@ struct display_timing;
  * the panel. This is the job of the .unprepare() function.
  */
 struct drm_panel_funcs {
+	int (*loader_protect)(struct drm_panel *panel, bool on);
 	int (*disable)(struct drm_panel *panel);
 	int (*unprepare)(struct drm_panel *panel);
 	int (*prepare)(struct drm_panel *panel);
@@ -75,14 +77,6 @@ struct drm_panel_funcs {
 			   struct display_timing *timings);
 };
 
-/**
- * struct drm_panel - DRM panel object
- * @drm: DRM device owning the panel
- * @connector: DRM connector that the panel is attached to
- * @dev: parent device of the panel
- * @funcs: operations that can be performed on the panel
- * @list: panel entry in registry
- */
 struct drm_panel {
 	struct drm_device *drm;
 	struct drm_connector *connector;
@@ -93,17 +87,6 @@ struct drm_panel {
 	struct list_head list;
 };
 
-/**
- * drm_disable_unprepare - power off a panel
- * @panel: DRM panel
- *
- * Calling this function will completely power off a panel (assert the panel's
- * reset, turn off power supplies, ...). After this function has completed, it
- * is usually no longer possible to communicate with the panel until another
- * call to drm_panel_prepare().
- *
- * Return: 0 on success or a negative error code on failure.
- */
 static inline int drm_panel_unprepare(struct drm_panel *panel)
 {
 	if (panel && panel->funcs && panel->funcs->unprepare)
@@ -112,16 +95,6 @@ static inline int drm_panel_unprepare(struct drm_panel *panel)
 	return panel ? -ENOSYS : -EINVAL;
 }
 
-/**
- * drm_panel_disable - disable a panel
- * @panel: DRM panel
- *
- * This will typically turn off the panel's backlight or disable the display
- * drivers. For smart panels it should still be possible to communicate with
- * the integrated circuitry via any command bus after this call.
- *
- * Return: 0 on success or a negative error code on failure.
- */
 static inline int drm_panel_disable(struct drm_panel *panel)
 {
 	if (panel && panel->funcs && panel->funcs->disable)
@@ -130,16 +103,14 @@ static inline int drm_panel_disable(struct drm_panel *panel)
 	return panel ? -ENOSYS : -EINVAL;
 }
 
-/**
- * drm_panel_prepare - power on a panel
- * @panel: DRM panel
- *
- * Calling this function will enable power and deassert any reset signals to
- * the panel. After this has completed it is possible to communicate with any
- * integrated circuitry via a command bus.
- *
- * Return: 0 on success or a negative error code on failure.
- */
+static inline int drm_panel_loader_protect(struct drm_panel *panel, bool on)
+{
+	if (panel && panel->funcs && panel->funcs->loader_protect)
+		return panel->funcs->loader_protect(panel, on);
+
+	return panel ? -ENOSYS : -EINVAL;
+}
+
 static inline int drm_panel_prepare(struct drm_panel *panel)
 {
 	if (panel && panel->funcs && panel->funcs->prepare)
@@ -148,16 +119,6 @@ static inline int drm_panel_prepare(struct drm_panel *panel)
 	return panel ? -ENOSYS : -EINVAL;
 }
 
-/**
- * drm_panel_enable - enable a panel
- * @panel: DRM panel
- *
- * Calling this function will cause the panel display drivers to be turned on
- * and the backlight to be enabled. Content will be visible on screen after
- * this call completes.
- *
- * Return: 0 on success or a negative error code on failure.
- */
 static inline int drm_panel_enable(struct drm_panel *panel)
 {
 	if (panel && panel->funcs && panel->funcs->enable)
@@ -166,16 +127,6 @@ static inline int drm_panel_enable(struct drm_panel *panel)
 	return panel ? -ENOSYS : -EINVAL;
 }
 
-/**
- * drm_panel_get_modes - probe the available display modes of a panel
- * @panel: DRM panel
- *
- * The modes probed from the panel are automatically added to the connector
- * that the panel is attached to.
- *
- * Return: The number of modes available from the panel on success or a
- * negative error code on failure.
- */
 static inline int drm_panel_get_modes(struct drm_panel *panel)
 {
 	if (panel && panel->funcs && panel->funcs->get_modes)
@@ -192,6 +143,10 @@ void drm_panel_remove(struct drm_panel *panel);
 int drm_panel_attach(struct drm_panel *panel, struct drm_connector *connector);
 int drm_panel_detach(struct drm_panel *panel);
 
+int rockchip_drm_crtc_send_mcu_cmd(struct drm_device *drm_dev,
+				   struct device_node *np_crtc,
+				   u32 type, u32 value);
+struct drm_panel *drm_find_panel_by_connector(struct drm_connector *connector);
 #ifdef CONFIG_OF
 struct drm_panel *of_drm_find_panel(struct device_node *np);
 #else

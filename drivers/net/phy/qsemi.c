@@ -122,6 +122,7 @@ static struct phy_driver qs6612_driver[] = { {
 	.read_status	= genphy_read_status,
 	.ack_interrupt	= qs6612_ack_interrupt,
 	.config_intr	= qs6612_config_intr,
+	.driver 	= { .owner = THIS_MODULE,},
 } };
 
 module_phy_driver(qs6612_driver);

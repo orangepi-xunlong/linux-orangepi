@@ -227,7 +227,6 @@ struct nbpf_device {
 	void __iomem *base;
 	struct clk *clk;
 	const struct nbpf_config *config;
-	unsigned int eirq;
 	struct nbpf_channel chan[];
 };
 
@@ -1102,7 +1101,8 @@ static void nbpf_chan_tasklet(unsigned long data)
 {
 	struct nbpf_channel *chan = (struct nbpf_channel *)data;
 	struct nbpf_desc *desc, *tmp;
-	struct dmaengine_desc_callback cb;
+	dma_async_tx_callback callback;
+	void *param;
 
 	while (!list_empty(&chan->done)) {
 		bool found = false, must_put, recycling = false;
@@ -1150,12 +1150,14 @@ static void nbpf_chan_tasklet(unsigned long data)
 			must_put = false;
 		}
 
-		dmaengine_desc_get_callback(&desc->async_tx, &cb);
+		callback = desc->async_tx.callback;
+		param = desc->async_tx.callback_param;
 
 		/* ack and callback completed descriptor */
 		spin_unlock_irq(&chan->lock);
 
-		dmaengine_desc_callback_invoke(&cb, NULL);
+		if (callback)
+			callback(param);
 
 		if (must_put)
 			nbpf_desc_put(desc);
@@ -1298,9 +1300,10 @@ static int nbpf_probe(struct platform_device *pdev)
 
 	nbpf = devm_kzalloc(dev, sizeof(*nbpf) + num_channels *
 			    sizeof(nbpf->chan[0]), GFP_KERNEL);
-	if (!nbpf)
+	if (!nbpf) {
+		dev_err(dev, "Memory allocation failed\n");
 		return -ENOMEM;
-
+	}
 	dma_dev = &nbpf->dma_dev;
 	dma_dev->dev = dev;
 
@@ -1373,7 +1376,6 @@ static int nbpf_probe(struct platform_device *pdev)
 			       IRQF_SHARED, "dma error", nbpf);
 	if (ret < 0)
 		return ret;
-	nbpf->eirq = eirq;
 
 	INIT_LIST_HEAD(&dma_dev->channels);
 
@@ -1445,17 +1447,6 @@ e_clk_off:
 static int nbpf_remove(struct platform_device *pdev)
 {
 	struct nbpf_device *nbpf = platform_get_drvdata(pdev);
-	int i;
-
-	devm_free_irq(&pdev->dev, nbpf->eirq, nbpf);
-
-	for (i = 0; i < nbpf->config->num_channels; i++) {
-		struct nbpf_channel *chan = nbpf->chan + i;
-
-		devm_free_irq(&pdev->dev, chan->irq, chan);
-
-		tasklet_kill(&chan->tasklet);
-	}
 
 	of_dma_controller_free(pdev->dev.of_node);
 	dma_async_device_unregister(&nbpf->dma_dev);

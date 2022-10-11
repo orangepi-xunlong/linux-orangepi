@@ -66,7 +66,7 @@ static void board_check_revision(void)
 		pr_err("Unknown board\n");
 }
 
-#if IS_ENABLED(CONFIG_USB_MUSB_TUSB6010)
+#if defined(CONFIG_USB_MUSB_TUSB6010) || defined(CONFIG_USB_MUSB_TUSB6010_MODULE)
 /*
  * Enable or disable power to TUSB6010. When enabling, turn on 3.3 V and
  * 1.5 V voltage regulators of PM companion chip. Companion chip will then
@@ -163,7 +163,8 @@ static struct spi_board_info n800_spi_board_info[] __initdata = {
 	},
 };
 
-#if defined(CONFIG_MENELAUS) && IS_ENABLED(CONFIG_MMC_OMAP)
+#if defined(CONFIG_MENELAUS) &&						\
+	(defined(CONFIG_MMC_OMAP) || defined(CONFIG_MMC_OMAP_MODULE))
 
 /*
  * On both N800 and N810, only the first of the two MMC controllers is in use.

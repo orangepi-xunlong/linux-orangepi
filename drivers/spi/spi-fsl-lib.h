@@ -23,14 +23,13 @@
 /* SPI/eSPI Controller driver's private data. */
 struct mpc8xxx_spi {
 	struct device *dev;
-	void __iomem *reg_base;
+	void *reg_base;
 
 	/* rx & tx bufs from the spi_transfer */
 	const void *tx;
 	void *rx;
 #if IS_ENABLED(CONFIG_SPI_FSL_ESPI)
 	int len;
-	u8 *local_buf;
 #endif
 
 	int subblock;

@@ -20,7 +20,6 @@
 
 #include <crypto/internal/geniv.h>
 #include <crypto/scatterwalk.h>
-#include <crypto/skcipher.h>
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -47,16 +46,13 @@ static int echainiv_encrypt(struct aead_request *req)
 	info = req->iv;
 
 	if (req->src != req->dst) {
-		SKCIPHER_REQUEST_ON_STACK(nreq, ctx->sknull);
+		struct blkcipher_desc desc = {
+			.tfm = ctx->null,
+		};
 
-		skcipher_request_set_tfm(nreq, ctx->sknull);
-		skcipher_request_set_callback(nreq, req->base.flags,
-					      NULL, NULL);
-		skcipher_request_set_crypt(nreq, req->src, req->dst,
-					   req->assoclen + req->cryptlen,
-					   NULL);
-
-		err = crypto_skcipher_encrypt(nreq);
+		err = crypto_blkcipher_encrypt(
+			&desc, req->dst, req->src,
+			req->assoclen + req->cryptlen);
 		if (err)
 			return err;
 	}

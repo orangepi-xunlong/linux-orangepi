@@ -114,7 +114,7 @@ static struct line6_pcm_properties toneport_pcm_properties = {
 	.rates = {
 			    .nrats = 1,
 			    .rats = &toneport_ratden},
-	.bytes_per_channel = 2
+	.bytes_per_frame = 4
 };
 
 static const struct {
@@ -177,7 +177,7 @@ static int snd_toneport_monitor_put(struct snd_kcontrol *kcontrol,
 	line6pcm->volume_monitor = ucontrol->value.integer.value[0];
 
 	if (line6pcm->volume_monitor > 0) {
-		err = line6_pcm_acquire(line6pcm, LINE6_STREAM_MONITOR, true);
+		err = line6_pcm_acquire(line6pcm, LINE6_STREAM_MONITOR);
 		if (err < 0) {
 			line6pcm->volume_monitor = 0;
 			line6_pcm_release(line6pcm, LINE6_STREAM_MONITOR);
@@ -246,7 +246,7 @@ static void toneport_start_pcm(unsigned long arg)
 	struct usb_line6_toneport *toneport = (struct usb_line6_toneport *)arg;
 	struct usb_line6 *line6 = &toneport->line6;
 
-	line6_pcm_acquire(line6->line6pcm, LINE6_STREAM_MONITOR, true);
+	line6_pcm_acquire(line6->line6pcm, LINE6_STREAM_MONITOR);
 }
 
 /* control definition */
@@ -365,15 +365,20 @@ static bool toneport_has_source_select(struct usb_line6_toneport *toneport)
 /*
 	Setup Toneport device.
 */
-static void toneport_setup(struct usb_line6_toneport *toneport)
+static int toneport_setup(struct usb_line6_toneport *toneport)
 {
-	int ticks;
+	int *ticks;
 	struct usb_line6 *line6 = &toneport->line6;
 	struct usb_device *usbdev = line6->usbdev;
 
+	ticks = kmalloc(sizeof(*ticks), GFP_KERNEL);
+	if (!ticks)
+		return -ENOMEM;
+
 	/* sync time on device with host: */
-	ticks = (int)get_seconds();
-	line6_write_data(line6, 0x80c6, &ticks, 4);
+	*ticks = (int)get_seconds();
+	line6_write_data(line6, 0x80c6, ticks, 4);
+	kfree(ticks);
 
 	/* enable device: */
 	toneport_send_cmd(usbdev, 0x0301, 0x0000);
@@ -388,6 +393,7 @@ static void toneport_setup(struct usb_line6_toneport *toneport)
 		toneport_update_led(toneport);
 
 	mod_timer(&toneport->timer, jiffies + TONEPORT_PCM_DELAY * HZ);
+	return 0;
 }
 
 /*
@@ -451,7 +457,9 @@ static int toneport_init(struct usb_line6 *line6,
 			return err;
 	}
 
-	toneport_setup(toneport);
+	err = toneport_setup(toneport);
+	if (err)
+		return err;
 
 	/* register audio system: */
 	return snd_card_register(line6->card);
@@ -463,7 +471,11 @@ static int toneport_init(struct usb_line6 *line6,
 */
 static int toneport_reset_resume(struct usb_interface *interface)
 {
-	toneport_setup(usb_get_intfdata(interface));
+	int err;
+
+	err = toneport_setup(usb_get_intfdata(interface));
+	if (err)
+		return err;
 	return line6_resume(interface);
 }
 #endif

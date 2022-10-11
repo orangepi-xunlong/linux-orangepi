@@ -53,21 +53,17 @@ struct ipv6_devconf {
 	__s32		mc_forwarding;
 #endif
 	__s32		disable_ipv6;
-	__s32		drop_unicast_in_l2_multicast;
 	__s32		accept_dad;
 	__s32		force_tllao;
 	__s32           ndisc_notify;
 	__s32		suppress_frag_ndisc;
 	__s32		accept_ra_mtu;
-	__s32		drop_unsolicited_na;
 	struct ipv6_stable_secret {
 		bool initialized;
 		struct in6_addr secret;
 	} stable_secret;
 	__s32		use_oif_addrs_only;
-	__s32		keep_addr_on_down;
-
-	struct ctl_table_header *sysctl_header;
+	void		*sysctl;
 };
 
 struct ipv6_params {
@@ -121,40 +117,14 @@ struct inet6_skb_parm {
 #define IP6SKB_ROUTERALERT	8
 #define IP6SKB_FRAGMENTED      16
 #define IP6SKB_HOPBYHOP        32
-#define IP6SKB_L3SLAVE         64
 };
-
-#if defined(CONFIG_NET_L3_MASTER_DEV)
-static inline bool ipv6_l3mdev_skb(__u16 flags)
-{
-	return flags & IP6SKB_L3SLAVE;
-}
-#else
-static inline bool ipv6_l3mdev_skb(__u16 flags)
-{
-	return false;
-}
-#endif
 
 #define IP6CB(skb)	((struct inet6_skb_parm*)((skb)->cb))
 #define IP6CBMTU(skb)	((struct ip6_mtuinfo *)((skb)->cb))
 
 static inline int inet6_iif(const struct sk_buff *skb)
 {
-	bool l3_slave = ipv6_l3mdev_skb(IP6CB(skb)->flags);
-
-	return l3_slave ? skb->skb_iif : IP6CB(skb)->iif;
-}
-
-/* can not be used in TCP layer after tcp_v6_fill_cb */
-static inline bool inet6_exact_dif_match(struct net *net, struct sk_buff *skb)
-{
-#if defined(CONFIG_NET_L3_MASTER_DEV)
-	if (!net->ipv4.sysctl_tcp_l3mdev_accept &&
-	    skb && ipv6_l3mdev_skb(IP6CB(skb)->flags))
-		return true;
-#endif
-	return false;
+	return IP6CB(skb)->iif;
 }
 
 struct tcp6_request_sock {
@@ -298,8 +268,6 @@ struct tcp6_timewait_sock {
 };
 
 #if IS_ENABLED(CONFIG_IPV6)
-bool ipv6_mod_enabled(void);
-
 static inline struct ipv6_pinfo *inet6_sk(const struct sock *__sk)
 {
 	return sk_fullsock(__sk) ? inet_sk(__sk)->pinet6 : NULL;
@@ -342,11 +310,6 @@ static inline int inet_v6_ipv6only(const struct sock *sk)
 #define __ipv6_only_sock(sk)	0
 #define ipv6_only_sock(sk)	0
 #define ipv6_sk_rxinfo(sk)	0
-
-static inline bool ipv6_mod_enabled(void)
-{
-	return false;
-}
 
 static inline struct ipv6_pinfo * inet6_sk(const struct sock *__sk)
 {

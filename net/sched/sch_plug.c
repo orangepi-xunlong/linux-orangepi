@@ -64,8 +64,6 @@ struct plug_sched_data {
 	 */
 	bool unplug_indefinite;
 
-	bool throttled;
-
 	/* Queue Limit in bytes */
 	u32 limit;
 
@@ -88,8 +86,7 @@ struct plug_sched_data {
 	u32 pkts_to_release;
 };
 
-static int plug_enqueue(struct sk_buff *skb, struct Qdisc *sch,
-			struct sk_buff **to_free)
+static int plug_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 {
 	struct plug_sched_data *q = qdisc_priv(sch);
 
@@ -99,14 +96,14 @@ static int plug_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 		return qdisc_enqueue_tail(skb, sch);
 	}
 
-	return qdisc_drop(skb, sch, to_free);
+	return qdisc_reshape_fail(skb, sch);
 }
 
 static struct sk_buff *plug_dequeue(struct Qdisc *sch)
 {
 	struct plug_sched_data *q = qdisc_priv(sch);
 
-	if (q->throttled)
+	if (qdisc_is_throttled(sch))
 		return NULL;
 
 	if (!q->unplug_indefinite) {
@@ -114,7 +111,7 @@ static struct sk_buff *plug_dequeue(struct Qdisc *sch)
 			/* No more packets to dequeue. Block the queue
 			 * and wait for the next release command.
 			 */
-			q->throttled = true;
+			qdisc_throttled(sch);
 			return NULL;
 		}
 		q->pkts_to_release--;
@@ -144,7 +141,7 @@ static int plug_init(struct Qdisc *sch, struct nlattr *opt)
 		q->limit = ctl->limit;
 	}
 
-	q->throttled = true;
+	qdisc_throttled(sch);
 	return 0;
 }
 
@@ -176,7 +173,7 @@ static int plug_change(struct Qdisc *sch, struct nlattr *opt)
 		q->pkts_last_epoch = q->pkts_current_epoch;
 		q->pkts_current_epoch = 0;
 		if (q->unplug_indefinite)
-			q->throttled = true;
+			qdisc_throttled(sch);
 		q->unplug_indefinite = false;
 		break;
 	case TCQ_PLUG_RELEASE_ONE:
@@ -185,7 +182,7 @@ static int plug_change(struct Qdisc *sch, struct nlattr *opt)
 		 */
 		q->pkts_to_release += q->pkts_last_epoch;
 		q->pkts_last_epoch = 0;
-		q->throttled = false;
+		qdisc_unthrottled(sch);
 		netif_schedule_queue(sch->dev_queue);
 		break;
 	case TCQ_PLUG_RELEASE_INDEFINITE:
@@ -193,7 +190,7 @@ static int plug_change(struct Qdisc *sch, struct nlattr *opt)
 		q->pkts_to_release = 0;
 		q->pkts_last_epoch = 0;
 		q->pkts_current_epoch = 0;
-		q->throttled = false;
+		qdisc_unthrottled(sch);
 		netif_schedule_queue(sch->dev_queue);
 		break;
 	case TCQ_PLUG_LIMIT:

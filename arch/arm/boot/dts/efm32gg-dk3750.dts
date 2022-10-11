@@ -16,8 +16,7 @@
 		bootargs = "console=ttyefm4,115200 init=/linuxrc ignore_loglevel ihash_entries=64 dhash_entries=64 earlyprintk uclinux.physaddr=0x8c400000 root=/dev/mtdblock0";
 	};
 
-	memory@88000000 {
-		device_type = "memory";
+	memory {
 		reg = <0x88000000 0x400000>;
 	};
 
@@ -75,7 +74,7 @@
 			status = "ok";
 		};
 
-		boardfpga: boardfpga@80000000 {
+		boardfpga: boardfpga {
 			compatible = "efm32board";
 			reg = <0x80000000 0x400>;
 			irq-gpios = <&gpio 64 1>;

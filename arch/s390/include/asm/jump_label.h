@@ -4,7 +4,6 @@
 #ifndef __ASSEMBLY__
 
 #include <linux/types.h>
-#include <linux/stringify.h>
 
 #define JUMP_LABEL_NOP_SIZE 6
 #define JUMP_LABEL_NOP_OFFSET 2

@@ -137,14 +137,6 @@
 				status = "disabled";
 			};
 
-			kpp: kpp@43fa8000 {
-				compatible = "fsl,imx35-kpp", "fsl,imx21-kpp";
-				reg = <0x43fa8000 0x4000>;
-				interrupts = <24>;
-				clocks = <&clks 56>;
-				status = "disabled";
-			};
-
 			iomuxc: iomuxc@43fac000 {
 				compatible = "fsl,imx35-iomuxc";
 				reg = <0x43fac000 0x4000>;
@@ -309,19 +301,11 @@
 				status = "disabled";
 			};
 
-			iim@53ff0000 {
-				compatible = "fsl,imx35-iim";
-				reg = <0x53ff0000 0x4000>;
-				interrupts = <19>;
-				clocks = <&clks 80>;
-			};
-
 			usbotg: usb@53ff4000 {
 				compatible = "fsl,imx35-usb", "fsl,imx27-usb";
 				reg = <0x53ff4000 0x0200>;
 				interrupts = <37>;
-				clocks = <&clks 9>, <&clks 73>, <&clks 28>;
-				clock-names = "ipg", "ahb", "per";
+				clocks = <&clks 73>;
 				fsl,usbmisc = <&usbmisc 0>;
 				fsl,usbphy = <&usbphy0>;
 				status = "disabled";
@@ -331,8 +315,7 @@
 				compatible = "fsl,imx35-usb", "fsl,imx27-usb";
 				reg = <0x53ff4400 0x0200>;
 				interrupts = <35>;
-				clocks = <&clks 9>, <&clks 73>, <&clks 28>;
-				clock-names = "ipg", "ahb", "per";
+				clocks = <&clks 73>;
 				fsl,usbmisc = <&usbmisc 1>;
 				fsl,usbphy = <&usbphy1>;
 				dr_mode = "host";
@@ -342,6 +325,8 @@
 			usbmisc: usbmisc@53ff4600 {
 				#index-cells = <1>;
 				compatible = "fsl,imx35-usbmisc";
+				clocks = <&clks 9>, <&clks 73>, <&clks 28>;
+				clock-names = "ipg", "ahb", "per";
 				reg = <0x53ff4600 0x00f>;
 			};
 		};

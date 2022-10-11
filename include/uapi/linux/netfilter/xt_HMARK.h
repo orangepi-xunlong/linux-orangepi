@@ -2,7 +2,6 @@
 #define XT_HMARK_H_
 
 #include <linux/types.h>
-#include <linux/netfilter.h>
 
 enum {
 	XT_HMARK_SADDR_MASK,

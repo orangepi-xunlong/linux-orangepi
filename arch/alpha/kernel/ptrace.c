@@ -157,16 +157,14 @@ put_reg(struct task_struct *task, unsigned long regno, unsigned long data)
 static inline int
 read_int(struct task_struct *task, unsigned long addr, int * data)
 {
-	int copied = access_process_vm(task, addr, data, sizeof(int),
-			FOLL_FORCE);
+	int copied = access_process_vm(task, addr, data, sizeof(int), 0);
 	return (copied == sizeof(int)) ? 0 : -EIO;
 }
 
 static inline int
 write_int(struct task_struct *task, unsigned long addr, int data)
 {
-	int copied = access_process_vm(task, addr, &data, sizeof(int),
-			FOLL_FORCE | FOLL_WRITE);
+	int copied = access_process_vm(task, addr, &data, sizeof(int), 1);
 	return (copied == sizeof(int)) ? 0 : -EIO;
 }
 
@@ -283,8 +281,7 @@ long arch_ptrace(struct task_struct *child, long request,
 	/* When I and D space are separate, these will need to be fixed.  */
 	case PTRACE_PEEKTEXT: /* read word at location addr. */
 	case PTRACE_PEEKDATA:
-		copied = ptrace_access_vm(child, addr, &tmp, sizeof(tmp),
-				FOLL_FORCE);
+		copied = access_process_vm(child, addr, &tmp, sizeof(tmp), 0);
 		ret = -EIO;
 		if (copied != sizeof(tmp))
 			break;

@@ -5,7 +5,7 @@
 
 static inline bool arch_irq_work_has_interrupt(void)
 {
-	return boot_cpu_has(X86_FEATURE_APIC);
+	return cpu_has_apic;
 }
 
 #endif /* _ASM_IRQ_WORK_H */

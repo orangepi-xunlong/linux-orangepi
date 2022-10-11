@@ -571,8 +571,12 @@ static int copy_erase_unit(partition_t *part, uint16_t srcunit,
 
 
     /* Update the maps and usage stats*/
-    swap(xfer->EraseCount, eun->EraseCount);
-    swap(xfer->Offset, eun->Offset);
+    i = xfer->EraseCount;
+    xfer->EraseCount = eun->EraseCount;
+    eun->EraseCount = i;
+    i = xfer->Offset;
+    xfer->Offset = eun->Offset;
+    eun->Offset = i;
     part->FreeTotal -= eun->Free;
     part->FreeTotal += free;
     eun->Free = free;

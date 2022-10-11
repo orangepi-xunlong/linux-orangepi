@@ -101,7 +101,7 @@ static void cxl_ack_ae(struct cxl_context *ctx)
 {
 	unsigned long flags;
 
-	cxl_ops->ack_irq(ctx, CXL_PSL_TFC_An_AE, 0);
+	cxl_ack_irq(ctx, CXL_PSL_TFC_An_AE, 0);
 
 	spin_lock_irqsave(&ctx->lock, flags);
 	ctx->pending_fault = true;
@@ -125,7 +125,7 @@ static int cxl_handle_segment_miss(struct cxl_context *ctx,
 	else {
 
 		mb(); /* Order seg table write to TFC MMIO write */
-		cxl_ops->ack_irq(ctx, CXL_PSL_TFC_An_R, 0);
+		cxl_ack_irq(ctx, CXL_PSL_TFC_An_R, 0);
 	}
 
 	return IRQ_HANDLED;
@@ -149,13 +149,11 @@ static void cxl_handle_page_fault(struct cxl_context *ctx,
 	 * update_mmu_cache() will not have loaded the hash since current->trap
 	 * is not a 0x400 or 0x300, so just call hash_page_mm() here.
 	 */
-	access = _PAGE_PRESENT | _PAGE_READ;
+	access = _PAGE_PRESENT;
 	if (dsisr & CXL_PSL_DSISR_An_S)
-		access |= _PAGE_WRITE;
-
-	access |= _PAGE_PRIVILEGED;
-	if ((!ctx->kernel) || (REGION_ID(dar) == USER_REGION_ID))
-		access &= ~_PAGE_PRIVILEGED;
+		access |= _PAGE_RW;
+	if ((!ctx->kernel) || ~(dar & (1ULL << 63)))
+		access |= _PAGE_USER;
 
 	if (dsisr & DSISR_NOHPTE)
 		inv_flags |= HPTE_NOHPTE_UPDATE;
@@ -165,7 +163,7 @@ static void cxl_handle_page_fault(struct cxl_context *ctx,
 	local_irq_restore(flags);
 
 	pr_devel("Page fault successfully handled for pe: %i!\n", ctx->pe);
-	cxl_ops->ack_irq(ctx, CXL_PSL_TFC_An_R, 0);
+	cxl_ack_irq(ctx, CXL_PSL_TFC_An_R, 0);
 }
 
 /*
@@ -256,17 +254,14 @@ void cxl_handle_fault(struct work_struct *fault_work)
 	u64 dar = ctx->dar;
 	struct mm_struct *mm = NULL;
 
-	if (cpu_has_feature(CPU_FTR_HVMODE)) {
-		if (cxl_p2n_read(ctx->afu, CXL_PSL_DSISR_An) != dsisr ||
-		    cxl_p2n_read(ctx->afu, CXL_PSL_DAR_An) != dar ||
-		    cxl_p2n_read(ctx->afu, CXL_PSL_PEHandle_An) != ctx->pe) {
-			/* Most likely explanation is harmless - a dedicated
-			 * process has detached and these were cleared by the
-			 * PSL purge, but warn about it just in case
-			 */
-			dev_notice(&ctx->afu->dev, "cxl_handle_fault: Translation fault regs changed\n");
-			return;
-		}
+	if (cxl_p2n_read(ctx->afu, CXL_PSL_DSISR_An) != dsisr ||
+	    cxl_p2n_read(ctx->afu, CXL_PSL_DAR_An) != dar ||
+	    cxl_p2n_read(ctx->afu, CXL_PSL_PEHandle_An) != ctx->pe) {
+		/* Most likely explanation is harmless - a dedicated process
+		 * has detached and these were cleared by the PSL purge, but
+		 * warn about it just in case */
+		dev_notice(&ctx->afu->dev, "cxl_handle_fault: Translation fault regs changed\n");
+		return;
 	}
 
 	/* Early return if the context is being / has been detached */

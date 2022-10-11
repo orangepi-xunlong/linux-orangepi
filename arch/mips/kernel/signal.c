@@ -165,7 +165,7 @@ static int save_msa_extcontext(void __user *buf)
 		 * should already have been done when handling scalar FP
 		 * context.
 		 */
-		BUG_ON(IS_ENABLED(CONFIG_EVA));
+		BUG_ON(config_enabled(CONFIG_EVA));
 
 		err = __put_user(read_msa_csr(), &msa->csr);
 		err |= _save_msa_all_upper(&msa->wr);
@@ -195,7 +195,7 @@ static int restore_msa_extcontext(void __user *buf, unsigned int size)
 	unsigned int csr;
 	int i, err;
 
-	if (!IS_ENABLED(CONFIG_CPU_HAS_MSA))
+	if (!config_enabled(CONFIG_CPU_HAS_MSA))
 		return SIGSYS;
 
 	if (size != sizeof(*msa))
@@ -215,7 +215,7 @@ static int restore_msa_extcontext(void __user *buf, unsigned int size)
 		 * scalar FP context, so FPU & MSA should have already been
 		 * disabled whilst handling scalar FP context.
 		 */
-		BUG_ON(IS_ENABLED(CONFIG_EVA));
+		BUG_ON(config_enabled(CONFIG_EVA));
 
 		write_msa_csr(csr);
 		err |= _restore_msa_all_upper(&msa->wr);
@@ -315,7 +315,7 @@ int protected_save_fp_context(void __user *sc)
 	 * EVA does not have userland equivalents of ldc1 or sdc1, so
 	 * save to the kernel FP context & copy that to userland below.
 	 */
-	if (IS_ENABLED(CONFIG_EVA))
+	if (config_enabled(CONFIG_EVA))
 		lose_fpu(1);
 
 	while (1) {
@@ -378,7 +378,7 @@ int protected_restore_fp_context(void __user *sc)
 	 * disable the FPU here such that the code below simply copies to
 	 * the kernel FP context.
 	 */
-	if (IS_ENABLED(CONFIG_EVA))
+	if (config_enabled(CONFIG_EVA))
 		lose_fpu(0);
 
 	while (1) {
@@ -801,7 +801,7 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 		regs->regs[0] = 0;		/* Don't deal with this again.	*/
 	}
 
-	if (sig_uses_siginfo(&ksig->ka, abi))
+	if (sig_uses_siginfo(&ksig->ka))
 		ret = abi->setup_rt_frame(vdso + abi->vdso->off_rt_sigreturn,
 					  ksig, regs, oldset);
 	else

@@ -53,10 +53,16 @@ module_param_named(disable_hugepages,
 MODULE_PARM_DESC(disable_hugepages,
 		 "Disable VFIO IOMMU support for IOMMU hugepages.");
 
+static unsigned int dma_entry_limit __read_mostly = U16_MAX;
+module_param_named(dma_entry_limit, dma_entry_limit, uint, 0644);
+MODULE_PARM_DESC(dma_entry_limit,
+		 "Maximum number of user DMA mappings per container (65535).");
+
 struct vfio_iommu {
 	struct list_head	domain_list;
 	struct mutex		lock;
 	struct rb_root		dma_list;
+	unsigned int		dma_avail;
 	bool			v2;
 	bool			nesting;
 };
@@ -132,7 +138,7 @@ static void vfio_unlink_dma(struct vfio_iommu *iommu, struct vfio_dma *old)
 
 static int vfio_lock_acct(long npage, bool *lock_cap)
 {
-	int ret;
+	int ret = 0;
 
 	if (!npage)
 		return 0;
@@ -140,24 +146,22 @@ static int vfio_lock_acct(long npage, bool *lock_cap)
 	if (!current->mm)
 		return -ESRCH; /* process exited */
 
-	ret = down_write_killable(&current->mm->mmap_sem);
-	if (!ret) {
-		if (npage > 0) {
-			if (lock_cap ? !*lock_cap : !capable(CAP_IPC_LOCK)) {
-				unsigned long limit;
+	down_write(&current->mm->mmap_sem);
+	if (npage > 0) {
+		if (lock_cap ? !*lock_cap : !capable(CAP_IPC_LOCK)) {
+			unsigned long limit;
 
-				limit = rlimit(RLIMIT_MEMLOCK) >> PAGE_SHIFT;
+			limit = rlimit(RLIMIT_MEMLOCK) >> PAGE_SHIFT;
 
-				if (current->mm->locked_vm + npage > limit)
-					ret = -ENOMEM;
-			}
+			if (current->mm->locked_vm + npage > limit)
+				ret = -ENOMEM;
 		}
-
-		if (!ret)
-			current->mm->locked_vm += npage;
-
-		up_write(&current->mm->mmap_sem);
 	}
+
+	if (!ret)
+		current->mm->locked_vm += npage;
+
+	up_write(&current->mm->mmap_sem);
 
 	return ret;
 }
@@ -384,6 +388,7 @@ static void vfio_remove_dma(struct vfio_iommu *iommu, struct vfio_dma *dma)
 	vfio_unmap_unpin(iommu, dma);
 	vfio_unlink_dma(iommu, dma);
 	kfree(dma);
+	iommu->dma_avail++;
 }
 
 static unsigned long vfio_pgsize_bitmap(struct vfio_iommu *iommu)
@@ -501,7 +506,7 @@ static int map_try_harder(struct vfio_domain *domain, dma_addr_t iova,
 			  unsigned long pfn, long npage, int prot)
 {
 	long i;
-	int ret = 0;
+	int ret;
 
 	for (i = 0; i < npage; i++, pfn++, iova += PAGE_SIZE) {
 		ret = iommu_map(domain->domain, iova,
@@ -584,12 +589,18 @@ static int vfio_dma_do_map(struct vfio_iommu *iommu,
 		return -EEXIST;
 	}
 
+	if (!iommu->dma_avail) {
+		mutex_unlock(&iommu->lock);
+		return -ENOSPC;
+	}
+
 	dma = kzalloc(sizeof(*dma), GFP_KERNEL);
 	if (!dma) {
 		mutex_unlock(&iommu->lock);
 		return -ENOMEM;
 	}
 
+	iommu->dma_avail--;
 	dma->iova = iova;
 	dma->vaddr = vaddr;
 	dma->prot = prot;
@@ -905,6 +916,7 @@ static void *vfio_iommu_type1_open(unsigned long arg)
 
 	INIT_LIST_HEAD(&iommu->domain_list);
 	iommu->dma_list = RB_ROOT;
+	iommu->dma_avail = dma_entry_limit;
 	mutex_init(&iommu->lock);
 
 	return iommu;
@@ -981,7 +993,7 @@ static long vfio_iommu_type1_ioctl(void *iommu_data,
 		if (info.argsz < minsz)
 			return -EINVAL;
 
-		info.flags = VFIO_IOMMU_INFO_PGSIZES;
+		info.flags = 0;
 
 		info.iova_pgsizes = vfio_pgsize_bitmap(iommu);
 

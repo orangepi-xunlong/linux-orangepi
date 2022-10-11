@@ -535,18 +535,61 @@ static void edac_mc_workq_function(struct work_struct *work_req)
 
 	mutex_lock(&mem_ctls_mutex);
 
-	if (mci->op_state != OP_RUNNING_POLL) {
+	/* if this control struct has movd to offline state, we are done */
+	if (mci->op_state == OP_OFFLINE) {
 		mutex_unlock(&mem_ctls_mutex);
 		return;
 	}
 
-	if (edac_mc_assert_error_check_and_clear())
+	/* Only poll controllers that are running polled and have a check */
+	if (edac_mc_assert_error_check_and_clear() && (mci->edac_check != NULL))
 		mci->edac_check(mci);
 
 	mutex_unlock(&mem_ctls_mutex);
 
-	/* Queue ourselves again. */
-	edac_queue_work(&mci->work, msecs_to_jiffies(edac_mc_get_poll_msec()));
+	/* Reschedule */
+	queue_delayed_work(edac_workqueue, &mci->work,
+			msecs_to_jiffies(edac_mc_get_poll_msec()));
+}
+
+/*
+ * edac_mc_workq_setup
+ *	initialize a workq item for this mci
+ *	passing in the new delay period in msec
+ *
+ *	locking model:
+ *
+ *		called with the mem_ctls_mutex held
+ */
+static void edac_mc_workq_setup(struct mem_ctl_info *mci, unsigned msec,
+				bool init)
+{
+	edac_dbg(0, "\n");
+
+	/* if this instance is not in the POLL state, then simply return */
+	if (mci->op_state != OP_RUNNING_POLL)
+		return;
+
+	if (init)
+		INIT_DELAYED_WORK(&mci->work, edac_mc_workq_function);
+
+	mod_delayed_work(edac_workqueue, &mci->work, msecs_to_jiffies(msec));
+}
+
+/*
+ * edac_mc_workq_teardown
+ *	stop the workq processing on this mci
+ *
+ *	locking model:
+ *
+ *		called WITHOUT lock held
+ */
+static void edac_mc_workq_teardown(struct mem_ctl_info *mci)
+{
+	mci->op_state = OP_OFFLINE;
+
+	cancel_delayed_work_sync(&mci->work);
+	flush_workqueue(edac_workqueue);
 }
 
 /*
@@ -565,9 +608,9 @@ void edac_mc_reset_delay_period(unsigned long value)
 	list_for_each(item, &mc_devices) {
 		mci = list_entry(item, struct mem_ctl_info, link);
 
-		if (mci->op_state == OP_RUNNING_POLL)
-			edac_mod_work(&mci->work, value);
+		edac_mc_workq_setup(mci, value, false);
 	}
+
 	mutex_unlock(&mem_ctls_mutex);
 }
 
@@ -733,12 +776,12 @@ int edac_mc_add_mc_with_groups(struct mem_ctl_info *mci,
 		goto fail1;
 	}
 
-	if (mci->edac_check) {
+	/* If there IS a check routine, then we are running POLLED */
+	if (mci->edac_check != NULL) {
+		/* This instance is NOW RUNNING */
 		mci->op_state = OP_RUNNING_POLL;
 
-		INIT_DELAYED_WORK(&mci->work, edac_mc_workq_function);
-		edac_queue_work(&mci->work, msecs_to_jiffies(edac_mc_get_poll_msec()));
-
+		edac_mc_workq_setup(mci, edac_mc_get_poll_msec(), true);
 	} else {
 		mci->op_state = OP_RUNNING_INTERRUPT;
 	}
@@ -785,16 +828,15 @@ struct mem_ctl_info *edac_mc_del_mc(struct device *dev)
 		return NULL;
 	}
 
-	/* mark MCI offline: */
-	mci->op_state = OP_OFFLINE;
-
 	if (!del_mc_from_global_list(mci))
 		edac_mc_owner = NULL;
-
 	mutex_unlock(&mem_ctls_mutex);
 
-	if (mci->edac_check)
-		edac_stop_work(&mci->work);
+	/* flush workq processes */
+	edac_mc_workq_teardown(mci);
+
+	/* marking MCI offline */
+	mci->op_state = OP_OFFLINE;
 
 	/* remove from sysfs */
 	edac_remove_sysfs_mci_device(mci);

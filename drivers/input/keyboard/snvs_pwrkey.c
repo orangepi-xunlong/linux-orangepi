@@ -111,9 +111,9 @@ static int imx_snvs_pwrkey_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	pdata->snvs = syscon_regmap_lookup_by_phandle(np, "regmap");
-	if (IS_ERR(pdata->snvs)) {
+	if (!pdata->snvs) {
 		dev_err(&pdev->dev, "Can't get snvs syscon\n");
-		return PTR_ERR(pdata->snvs);
+		return -ENODEV;
 	}
 
 	if (of_property_read_u32(np, "linux,keycode", &pdata->keycode)) {
@@ -156,6 +156,9 @@ static int imx_snvs_pwrkey_probe(struct platform_device *pdev)
 		return error;
 	}
 
+	pdata->input = input;
+	platform_set_drvdata(pdev, pdata);
+
 	error = devm_request_irq(&pdev->dev, pdata->irq,
 			       imx_snvs_pwrkey_interrupt,
 			       0, pdev->name, pdev);
@@ -168,18 +171,16 @@ static int imx_snvs_pwrkey_probe(struct platform_device *pdev)
 	error = input_register_device(input);
 	if (error < 0) {
 		dev_err(&pdev->dev, "failed to register input device\n");
+		input_free_device(input);
 		return error;
 	}
-
-	pdata->input = input;
-	platform_set_drvdata(pdev, pdata);
 
 	device_init_wakeup(&pdev->dev, pdata->wakeup);
 
 	return 0;
 }
 
-static int __maybe_unused imx_snvs_pwrkey_suspend(struct device *dev)
+static int imx_snvs_pwrkey_suspend(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct pwrkey_drv_data *pdata = platform_get_drvdata(pdev);
@@ -190,7 +191,7 @@ static int __maybe_unused imx_snvs_pwrkey_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused imx_snvs_pwrkey_resume(struct device *dev)
+static int imx_snvs_pwrkey_resume(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct pwrkey_drv_data *pdata = platform_get_drvdata(pdev);

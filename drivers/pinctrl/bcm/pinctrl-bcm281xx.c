@@ -1018,7 +1018,7 @@ static void bcm281xx_pinctrl_pin_dbg_show(struct pinctrl_dev *pctldev,
 	seq_printf(s, " %s", dev_name(pctldev->dev));
 }
 
-static const struct pinctrl_ops bcm281xx_pinctrl_ops = {
+static struct pinctrl_ops bcm281xx_pinctrl_ops = {
 	.get_groups_count = bcm281xx_pinctrl_get_groups_count,
 	.get_group_name = bcm281xx_pinctrl_get_group_name,
 	.get_group_pins = bcm281xx_pinctrl_get_group_pins,
@@ -1080,7 +1080,7 @@ static int bcm281xx_pinmux_set(struct pinctrl_dev *pctldev,
 	return rc;
 }
 
-static const struct pinmux_ops bcm281xx_pinctrl_pinmux_ops = {
+static struct pinmux_ops bcm281xx_pinctrl_pinmux_ops = {
 	.get_functions_count = bcm281xx_pinctrl_get_fcns_count,
 	.get_function_name = bcm281xx_pinctrl_get_fcn_name,
 	.get_function_groups = bcm281xx_pinctrl_get_fcn_groups,
@@ -1422,7 +1422,9 @@ static int __init bcm281xx_pinctrl_probe(struct platform_device *pdev)
 	bcm281xx_pinctrl_desc.pins = bcm281xx_pinctrl.pins;
 	bcm281xx_pinctrl_desc.npins = bcm281xx_pinctrl.npins;
 
-	pctl = devm_pinctrl_register(&pdev->dev, &bcm281xx_pinctrl_desc, pdata);
+	pctl = pinctrl_register(&bcm281xx_pinctrl_desc,
+				&pdev->dev,
+				pdata);
 	if (IS_ERR(pctl)) {
 		dev_err(&pdev->dev, "Failed to register pinctrl\n");
 		return PTR_ERR(pctl);

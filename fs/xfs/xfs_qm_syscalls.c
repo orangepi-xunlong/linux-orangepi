@@ -236,8 +236,10 @@ xfs_qm_scall_trunc_qfile(
 
 	xfs_ilock(ip, XFS_IOLOCK_EXCL);
 
-	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_itruncate, 0, 0, 0, &tp);
+	tp = xfs_trans_alloc(mp, XFS_TRANS_TRUNCATE_FILE);
+	error = xfs_trans_reserve(tp, &M_RES(mp)->tr_itruncate, 0, 0);
 	if (error) {
+		xfs_trans_cancel(tp);
 		xfs_iunlock(ip, XFS_IOLOCK_EXCL);
 		goto out_put;
 	}
@@ -402,7 +404,6 @@ xfs_qm_scall_setqlim(
 	struct xfs_disk_dquot	*ddq;
 	struct xfs_dquot	*dqp;
 	struct xfs_trans	*tp;
-	struct xfs_def_quota	*defq;
 	int			error;
 	xfs_qcnt_t		hard, soft;
 
@@ -430,13 +431,14 @@ xfs_qm_scall_setqlim(
 		ASSERT(error != -ENOENT);
 		goto out_unlock;
 	}
-
-	defq = xfs_get_defquota(dqp, q);
 	xfs_dqunlock(dqp);
 
-	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_qm_setqlim, 0, 0, 0, &tp);
-	if (error)
+	tp = xfs_trans_alloc(mp, XFS_TRANS_QM_SETQLIM);
+	error = xfs_trans_reserve(tp, &M_RES(mp)->tr_qm_setqlim, 0, 0);
+	if (error) {
+		xfs_trans_cancel(tp);
 		goto out_rele;
+	}
 
 	xfs_dqlock(dqp);
 	xfs_trans_dqjoin(tp, dqp);
@@ -456,8 +458,8 @@ xfs_qm_scall_setqlim(
 		ddq->d_blk_softlimit = cpu_to_be64(soft);
 		xfs_dquot_set_prealloc_limits(dqp);
 		if (id == 0) {
-			defq->bhardlimit = hard;
-			defq->bsoftlimit = soft;
+			q->qi_bhardlimit = hard;
+			q->qi_bsoftlimit = soft;
 		}
 	} else {
 		xfs_debug(mp, "blkhard %Ld < blksoft %Ld", hard, soft);
@@ -472,8 +474,8 @@ xfs_qm_scall_setqlim(
 		ddq->d_rtb_hardlimit = cpu_to_be64(hard);
 		ddq->d_rtb_softlimit = cpu_to_be64(soft);
 		if (id == 0) {
-			defq->rtbhardlimit = hard;
-			defq->rtbsoftlimit = soft;
+			q->qi_rtbhardlimit = hard;
+			q->qi_rtbsoftlimit = soft;
 		}
 	} else {
 		xfs_debug(mp, "rtbhard %Ld < rtbsoft %Ld", hard, soft);
@@ -489,8 +491,8 @@ xfs_qm_scall_setqlim(
 		ddq->d_ino_hardlimit = cpu_to_be64(hard);
 		ddq->d_ino_softlimit = cpu_to_be64(soft);
 		if (id == 0) {
-			defq->ihardlimit = hard;
-			defq->isoftlimit = soft;
+			q->qi_ihardlimit = hard;
+			q->qi_isoftlimit = soft;
 		}
 	} else {
 		xfs_debug(mp, "ihard %Ld < isoft %Ld", hard, soft);
@@ -564,9 +566,13 @@ xfs_qm_log_quotaoff_end(
 	int			error;
 	xfs_qoff_logitem_t	*qoffi;
 
-	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_qm_equotaoff, 0, 0, 0, &tp);
-	if (error)
+	tp = xfs_trans_alloc(mp, XFS_TRANS_QM_QUOTAOFF_END);
+
+	error = xfs_trans_reserve(tp, &M_RES(mp)->tr_qm_equotaoff, 0, 0);
+	if (error) {
+		xfs_trans_cancel(tp);
 		return error;
+	}
 
 	qoffi = xfs_trans_get_qoff_item(tp, startqoff,
 					flags & XFS_ALL_QUOTA_ACCT);
@@ -594,9 +600,12 @@ xfs_qm_log_quotaoff(
 
 	*qoffstartp = NULL;
 
-	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_qm_quotaoff, 0, 0, 0, &tp);
-	if (error)
+	tp = xfs_trans_alloc(mp, XFS_TRANS_QM_QUOTAOFF);
+	error = xfs_trans_reserve(tp, &M_RES(mp)->tr_qm_quotaoff, 0, 0);
+	if (error) {
+		xfs_trans_cancel(tp);
 		goto out;
+	}
 
 	qoffi = xfs_trans_get_qoff_item(tp, NULL, flags & XFS_ALL_QUOTA_ACCT);
 	xfs_trans_log_quotaoff_item(tp, qoffi);
@@ -626,10 +635,9 @@ out:
 int
 xfs_qm_scall_getquota(
 	struct xfs_mount	*mp,
-	xfs_dqid_t		*id,
+	xfs_dqid_t		id,
 	uint			type,
-	struct qc_dqblk		*dst,
-	uint			dqget_flags)
+	struct qc_dqblk		*dst)
 {
 	struct xfs_dquot	*dqp;
 	int			error;
@@ -639,7 +647,7 @@ xfs_qm_scall_getquota(
 	 * we aren't passing the XFS_QMOPT_DOALLOC flag. If it doesn't
 	 * exist, we'll get ENOENT back.
 	 */
-	error = xfs_qm_dqget(mp, NULL, *id, type, dqget_flags, &dqp);
+	error = xfs_qm_dqget(mp, NULL, id, type, 0, &dqp);
 	if (error)
 		return error;
 
@@ -651,9 +659,6 @@ xfs_qm_scall_getquota(
 		error = -ENOENT;
 		goto out_put;
 	}
-
-	/* Fill in the ID we actually read from disk */
-	*id = be32_to_cpu(dqp->q_core.d_id);
 
 	memset(dst, 0, sizeof(*dst));
 	dst->d_spc_hardlimit =
@@ -696,7 +701,7 @@ xfs_qm_scall_getquota(
 	if (((XFS_IS_UQUOTA_ENFORCED(mp) && type == XFS_DQ_USER) ||
 	     (XFS_IS_GQUOTA_ENFORCED(mp) && type == XFS_DQ_GROUP) ||
 	     (XFS_IS_PQUOTA_ENFORCED(mp) && type == XFS_DQ_PROJ)) &&
-	    *id != 0) {
+	    id != 0) {
 		if ((dst->d_space > dst->d_spc_softlimit) &&
 		    (dst->d_spc_softlimit > 0)) {
 			ASSERT(dst->d_spc_timer != 0);

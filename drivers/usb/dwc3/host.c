@@ -16,17 +16,17 @@
  */
 
 #include <linux/platform_device.h>
+#include <linux/usb/xhci_pdriver.h>
 
 #include "core.h"
 
 int dwc3_host_init(struct dwc3 *dwc)
 {
-	struct property_entry	props[3];
 	struct platform_device	*xhci;
+	struct usb_xhci_pdata	pdata;
 	int			ret, irq;
 	struct resource		*res;
 	struct platform_device	*dwc3_pdev = to_platform_device(dwc->dev);
-	int			prop_idx = 0;
 
 	irq = platform_get_irq_byname(dwc3_pdev, "host");
 	if (irq == -EPROBE_DEFER)
@@ -78,6 +78,7 @@ int dwc3_host_init(struct dwc3 *dwc)
 	xhci->dev.parent	= dwc->dev;
 	xhci->dev.dma_mask	= dwc->dev->dma_mask;
 	xhci->dev.dma_parms	= dwc->dev->dma_parms;
+	xhci->dev.archdata      = dwc->dev->archdata;
 
 	dwc->xhci = xhci;
 
@@ -88,29 +89,18 @@ int dwc3_host_init(struct dwc3 *dwc)
 		goto err1;
 	}
 
-	memset(props, 0, sizeof(struct property_entry) * ARRAY_SIZE(props));
+	memset(&pdata, 0, sizeof(pdata));
 
-	if (dwc->usb3_lpm_capable)
-		props[prop_idx++].name = "usb3-lpm-capable";
+	pdata.usb3_disable_autosuspend = dwc->dis_u3_autosuspend_quirk;
+	pdata.usb3_lpm_capable = dwc->usb3_lpm_capable;
+	pdata.xhci_slow_suspend = dwc->xhci_slow_suspend_quirk;
+	pdata.xhci_trb_ent = dwc->xhci_trb_ent_quirk;
+	pdata.usb3_warm_reset_on_resume = dwc->usb3_warm_reset_on_resume_quirk;
 
-	/**
-	 * WORKAROUND: dwc3 revisions <=3.00a have a limitation
-	 * where Port Disable command doesn't work.
-	 *
-	 * The suggested workaround is that we avoid Port Disable
-	 * completely.
-	 *
-	 * This following flag tells XHCI to do just that.
-	 */
-	if (dwc->revision <= DWC3_REVISION_300A)
-		props[prop_idx++].name = "quirk-broken-port-ped";
-
-	if (prop_idx) {
-		ret = platform_device_add_properties(xhci, props);
-		if (ret) {
-			dev_err(dwc->dev, "failed to add properties to xHCI\n");
-			goto err1;
-		}
+	ret = platform_device_add_data(xhci, &pdata, sizeof(pdata));
+	if (ret) {
+		dev_err(dwc->dev, "couldn't add platform data to xHCI device\n");
+		goto err1;
 	}
 
 	phy_create_lookup(dwc->usb2_generic_phy, "usb2-phy",

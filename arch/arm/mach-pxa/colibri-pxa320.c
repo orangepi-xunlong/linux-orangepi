@@ -23,13 +23,13 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/irq.h>
 
-#include "pxa320.h"
-#include "colibri.h"
+#include <mach/pxa320.h>
+#include <mach/colibri.h>
 #include <linux/platform_data/video-pxafb.h>
 #include <linux/platform_data/usb-ohci-pxa27x.h>
 #include <mach/audio.h>
-#include "pxa27x-udc.h"
-#include "udc.h"
+#include <mach/pxa27x-udc.h>
+#include <mach/udc.h>
 
 #include "generic.h"
 #include "devices.h"

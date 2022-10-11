@@ -671,7 +671,7 @@ static void ctcmpc_send_sweep_resp(struct channel *rch)
 
 	kfree(header);
 
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 	skb_queue_tail(&ch->sweep_queue, sweep_skb);
 
 	fsm_addtimer(&ch->sweep_timer, 100, CTC_EVENT_RSWEEP_TIMER, ch);

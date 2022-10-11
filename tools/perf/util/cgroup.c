@@ -1,6 +1,6 @@
 #include "util.h"
 #include "../perf.h"
-#include <subcmd/parse-options.h>
+#include "parse-options.h"
 #include "evsel.h"
 #include "cgroup.h"
 #include "evlist.h"
@@ -81,7 +81,7 @@ static int add_cgroup(struct perf_evlist *evlist, char *str)
 	/*
 	 * check if cgrp is already defined, if so we reuse it
 	 */
-	evlist__for_each_entry(evlist, counter) {
+	evlist__for_each(evlist, counter) {
 		cgrp = counter->cgrp;
 		if (!cgrp)
 			continue;
@@ -110,7 +110,7 @@ static int add_cgroup(struct perf_evlist *evlist, char *str)
 	 * if add cgroup N, then need to find event N
 	 */
 	n = 0;
-	evlist__for_each_entry(evlist, counter) {
+	evlist__for_each(evlist, counter) {
 		if (n == nr_cgroups)
 			goto found;
 		n++;

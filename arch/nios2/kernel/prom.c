@@ -104,7 +104,8 @@ static int __init early_init_dt_scan_serial(unsigned long node,
 		return 0;
 #endif
 
-	*addr64 = of_flat_dt_translate_address(node);
+	*addr64 = fdt_translate_address((const void *)initial_boot_params,
+		node);
 
 	return *addr64 == OF_BAD_ADDR ? 0 : 1;
 }

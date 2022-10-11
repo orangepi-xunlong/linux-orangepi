@@ -23,6 +23,7 @@
 
 
 struct au1550nd_ctx {
+	struct mtd_info info;
 	struct nand_chip chip;
 
 	int cs;
@@ -38,7 +39,7 @@ struct au1550nd_ctx {
  */
 static u_char au_read_byte(struct mtd_info *mtd)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	u_char ret = readb(this->IO_ADDR_R);
 	wmb(); /* drain writebuffer */
 	return ret;
@@ -53,7 +54,7 @@ static u_char au_read_byte(struct mtd_info *mtd)
  */
 static void au_write_byte(struct mtd_info *mtd, u_char byte)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	writeb(byte, this->IO_ADDR_W);
 	wmb(); /* drain writebuffer */
 }
@@ -66,7 +67,7 @@ static void au_write_byte(struct mtd_info *mtd, u_char byte)
  */
 static u_char au_read_byte16(struct mtd_info *mtd)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	u_char ret = (u_char) cpu_to_le16(readw(this->IO_ADDR_R));
 	wmb(); /* drain writebuffer */
 	return ret;
@@ -81,7 +82,7 @@ static u_char au_read_byte16(struct mtd_info *mtd)
  */
 static void au_write_byte16(struct mtd_info *mtd, u_char byte)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	writew(le16_to_cpu((u16) byte), this->IO_ADDR_W);
 	wmb(); /* drain writebuffer */
 }
@@ -94,7 +95,7 @@ static void au_write_byte16(struct mtd_info *mtd, u_char byte)
  */
 static u16 au_read_word(struct mtd_info *mtd)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	u16 ret = readw(this->IO_ADDR_R);
 	wmb(); /* drain writebuffer */
 	return ret;
@@ -111,7 +112,7 @@ static u16 au_read_word(struct mtd_info *mtd)
 static void au_write_buf(struct mtd_info *mtd, const u_char *buf, int len)
 {
 	int i;
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 
 	for (i = 0; i < len; i++) {
 		writeb(buf[i], this->IO_ADDR_W);
@@ -130,7 +131,7 @@ static void au_write_buf(struct mtd_info *mtd, const u_char *buf, int len)
 static void au_read_buf(struct mtd_info *mtd, u_char *buf, int len)
 {
 	int i;
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 
 	for (i = 0; i < len; i++) {
 		buf[i] = readb(this->IO_ADDR_R);
@@ -149,7 +150,7 @@ static void au_read_buf(struct mtd_info *mtd, u_char *buf, int len)
 static void au_write_buf16(struct mtd_info *mtd, const u_char *buf, int len)
 {
 	int i;
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	u16 *p = (u16 *) buf;
 	len >>= 1;
 
@@ -171,7 +172,7 @@ static void au_write_buf16(struct mtd_info *mtd, const u_char *buf, int len)
 static void au_read_buf16(struct mtd_info *mtd, u_char *buf, int len)
 {
 	int i;
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	u16 *p = (u16 *) buf;
 	len >>= 1;
 
@@ -196,9 +197,8 @@ static void au_read_buf16(struct mtd_info *mtd, u_char *buf, int len)
 
 static void au1550_hwcontrol(struct mtd_info *mtd, int cmd)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
-	struct au1550nd_ctx *ctx = container_of(this, struct au1550nd_ctx,
-						chip);
+	struct au1550nd_ctx *ctx = container_of(mtd, struct au1550nd_ctx, info);
+	struct nand_chip *this = mtd->priv;
 
 	switch (cmd) {
 
@@ -267,9 +267,8 @@ static void au1550_select_chip(struct mtd_info *mtd, int chip)
  */
 static void au1550_command(struct mtd_info *mtd, unsigned command, int column, int page_addr)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
-	struct au1550nd_ctx *ctx = container_of(this, struct au1550nd_ctx,
-						chip);
+	struct au1550nd_ctx *ctx = container_of(mtd, struct au1550nd_ctx, info);
+	struct nand_chip *this = mtd->priv;
 	int ce_override = 0, i;
 	unsigned long flags = 0;
 
@@ -406,7 +405,6 @@ static int au1550nd_probe(struct platform_device *pdev)
 	struct au1550nd_platdata *pd;
 	struct au1550nd_ctx *ctx;
 	struct nand_chip *this;
-	struct mtd_info *mtd;
 	struct resource *r;
 	int ret, cs;
 
@@ -440,8 +438,8 @@ static int au1550nd_probe(struct platform_device *pdev)
 	}
 
 	this = &ctx->chip;
-	mtd = nand_to_mtd(this);
-	mtd->dev.parent = &pdev->dev;
+	ctx->info.priv = this;
+	ctx->info.dev.parent = &pdev->dev;
 
 	/* figure out which CS# r->start belongs to */
 	cs = find_nand_cs(r->start);
@@ -459,7 +457,6 @@ static int au1550nd_probe(struct platform_device *pdev)
 	/* 30 us command delay time */
 	this->chip_delay = 30;
 	this->ecc.mode = NAND_ECC_SOFT;
-	this->ecc.algo = NAND_ECC_HAMMING;
 
 	if (pd->devwidth)
 		this->options |= NAND_BUSWIDTH_16;
@@ -470,13 +467,13 @@ static int au1550nd_probe(struct platform_device *pdev)
 	this->write_buf = (pd->devwidth) ? au_write_buf16 : au_write_buf;
 	this->read_buf = (pd->devwidth) ? au_read_buf16 : au_read_buf;
 
-	ret = nand_scan(mtd, 1);
+	ret = nand_scan(&ctx->info, 1);
 	if (ret) {
 		dev_err(&pdev->dev, "NAND scan failed with %d\n", ret);
 		goto out3;
 	}
 
-	mtd_device_register(mtd, pd->parts, pd->num_parts);
+	mtd_device_register(&ctx->info, pd->parts, pd->num_parts);
 
 	platform_set_drvdata(pdev, ctx);
 
@@ -496,7 +493,7 @@ static int au1550nd_remove(struct platform_device *pdev)
 	struct au1550nd_ctx *ctx = platform_get_drvdata(pdev);
 	struct resource *r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 
-	nand_release(nand_to_mtd(&ctx->chip));
+	nand_release(&ctx->info);
 	iounmap(ctx->base);
 	release_mem_region(r->start, 0x1000);
 	kfree(ctx);

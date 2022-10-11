@@ -204,7 +204,7 @@ out:
 
 	ti->num_flush_bios = 1;
 	ti->num_discard_bios = 1;
-	ti->per_io_data_size = sizeof(struct dm_delay_info);
+	ti->per_bio_data_size = sizeof(struct dm_delay_info);
 	ti->private = dc;
 	return 0;
 
@@ -222,7 +222,8 @@ static void delay_dtr(struct dm_target *ti)
 {
 	struct delay_c *dc = ti->private;
 
-	destroy_workqueue(dc->kdelayd_wq);
+	if (dc->kdelayd_wq)
+		destroy_workqueue(dc->kdelayd_wq);
 
 	dm_put_device(ti, dc->dev_read);
 

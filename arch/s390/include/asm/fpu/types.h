@@ -11,27 +11,15 @@
 #include <asm/sigcontext.h>
 
 struct fpu {
-	__u32 fpc;		/* Floating-point control */
-	void *regs;		/* Pointer to the current save area */
+	__u32 fpc;			/* Floating-point control */
 	union {
-		/* Floating-point register save area */
-		freg_t fprs[__NUM_FPRS];
-		/* Vector register save area */
-		__vector128 vxrs[__NUM_VXRS];
+		void *regs;
+		freg_t *fprs;		/* Floating-point register save area */
+		__vector128 *vxrs;	/* Vector register save area */
 	};
 };
 
 /* VX array structure for address operand constraints in inline assemblies */
 struct vx_array { __vector128 _[__NUM_VXRS]; };
-
-/* In-kernel FPU state structure */
-struct kernel_fpu {
-	u32	    mask;
-	u32	    fpc;
-	union {
-		freg_t fprs[__NUM_FPRS];
-		__vector128 vxrs[__NUM_VXRS];
-	};
-};
 
 #endif /* _ASM_S390_FPU_TYPES_H */

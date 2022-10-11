@@ -16,14 +16,12 @@
 
 struct device;
 struct resource;
-struct property_entry;
 
 struct intel_lpss_platform_info {
 	struct resource *mem;
 	int irq;
 	unsigned long clk_rate;
 	const char *clk_con_id;
-	struct property_entry *properties;
 };
 
 int intel_lpss_probe(struct device *dev,

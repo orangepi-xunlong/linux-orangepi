@@ -543,7 +543,7 @@ static void type_attribute_bounds_av(struct context *scontext,
 				     struct av_decision *avd)
 {
 	struct context lo_scontext;
-	struct context lo_tcontext, *tcontextp = tcontext;
+	struct context lo_tcontext;
 	struct av_decision lo_avd;
 	struct type_datum *source;
 	struct type_datum *target;
@@ -553,41 +553,67 @@ static void type_attribute_bounds_av(struct context *scontext,
 				    scontext->type - 1);
 	BUG_ON(!source);
 
-	if (!source->bounds)
-		return;
-
 	target = flex_array_get_ptr(policydb.type_val_to_struct_array,
 				    tcontext->type - 1);
 	BUG_ON(!target);
 
-	memset(&lo_avd, 0, sizeof(lo_avd));
+	if (source->bounds) {
+		memset(&lo_avd, 0, sizeof(lo_avd));
 
-	memcpy(&lo_scontext, scontext, sizeof(lo_scontext));
-	lo_scontext.type = source->bounds;
+		memcpy(&lo_scontext, scontext, sizeof(lo_scontext));
+		lo_scontext.type = source->bounds;
 
-	if (target->bounds) {
-		memcpy(&lo_tcontext, tcontext, sizeof(lo_tcontext));
-		lo_tcontext.type = target->bounds;
-		tcontextp = &lo_tcontext;
+		context_struct_compute_av(&lo_scontext,
+					  tcontext,
+					  tclass,
+					  &lo_avd,
+					  NULL);
+		if ((lo_avd.allowed & avd->allowed) == avd->allowed)
+			return;		/* no masked permission */
+		masked = ~lo_avd.allowed & avd->allowed;
 	}
 
-	context_struct_compute_av(&lo_scontext,
-				  tcontextp,
-				  tclass,
-				  &lo_avd,
-				  NULL);
+	if (target->bounds) {
+		memset(&lo_avd, 0, sizeof(lo_avd));
 
-	masked = ~lo_avd.allowed & avd->allowed;
+		memcpy(&lo_tcontext, tcontext, sizeof(lo_tcontext));
+		lo_tcontext.type = target->bounds;
 
-	if (likely(!masked))
-		return;		/* no masked permission */
+		context_struct_compute_av(scontext,
+					  &lo_tcontext,
+					  tclass,
+					  &lo_avd,
+					  NULL);
+		if ((lo_avd.allowed & avd->allowed) == avd->allowed)
+			return;		/* no masked permission */
+		masked = ~lo_avd.allowed & avd->allowed;
+	}
 
-	/* mask violated permissions */
-	avd->allowed &= ~masked;
+	if (source->bounds && target->bounds) {
+		memset(&lo_avd, 0, sizeof(lo_avd));
+		/*
+		 * lo_scontext and lo_tcontext are already
+		 * set up.
+		 */
 
-	/* audit masked permissions */
-	security_dump_masked_av(scontext, tcontext,
-				tclass, masked, "bounds");
+		context_struct_compute_av(&lo_scontext,
+					  &lo_tcontext,
+					  tclass,
+					  &lo_avd,
+					  NULL);
+		if ((lo_avd.allowed & avd->allowed) == avd->allowed)
+			return;		/* no masked permission */
+		masked = ~lo_avd.allowed & avd->allowed;
+	}
+
+	if (masked) {
+		/* mask violated permissions */
+		avd->allowed &= ~masked;
+
+		/* audit masked permissions */
+		security_dump_masked_av(scontext, tcontext,
+					tclass, masked, "bounds");
+	}
 }
 
 /*
@@ -752,8 +778,8 @@ out:
 	return -EPERM;
 }
 
-static int security_compute_validatetrans(u32 oldsid, u32 newsid, u32 tasksid,
-					  u16 orig_tclass, bool user)
+int security_validate_transition(u32 oldsid, u32 newsid, u32 tasksid,
+				 u16 orig_tclass)
 {
 	struct context *ocontext;
 	struct context *ncontext;
@@ -768,12 +794,11 @@ static int security_compute_validatetrans(u32 oldsid, u32 newsid, u32 tasksid,
 
 	read_lock(&policy_rwlock);
 
-	if (!user)
-		tclass = unmap_class(orig_tclass);
-	else
-		tclass = orig_tclass;
+	tclass = unmap_class(orig_tclass);
 
 	if (!tclass || tclass > policydb.p_classes.nprim) {
+		printk(KERN_ERR "SELinux: %s:  unrecognized class %d\n",
+			__func__, tclass);
 		rc = -EINVAL;
 		goto out;
 	}
@@ -807,13 +832,8 @@ static int security_compute_validatetrans(u32 oldsid, u32 newsid, u32 tasksid,
 	while (constraint) {
 		if (!constraint_expr_eval(ocontext, ncontext, tcontext,
 					  constraint->expr)) {
-			if (user)
-				rc = -EPERM;
-			else
-				rc = security_validtrans_handle_fail(ocontext,
-								     ncontext,
-								     tcontext,
-								     tclass);
+			rc = security_validtrans_handle_fail(ocontext, ncontext,
+							     tcontext, tclass);
 			goto out;
 		}
 		constraint = constraint->next;
@@ -822,20 +842,6 @@ static int security_compute_validatetrans(u32 oldsid, u32 newsid, u32 tasksid,
 out:
 	read_unlock(&policy_rwlock);
 	return rc;
-}
-
-int security_validate_transition_user(u32 oldsid, u32 newsid, u32 tasksid,
-					u16 tclass)
-{
-	return security_compute_validatetrans(oldsid, newsid, tasksid,
-						tclass, true);
-}
-
-int security_validate_transition(u32 oldsid, u32 newsid, u32 tasksid,
-				 u16 orig_tclass)
-{
-	return security_compute_validatetrans(oldsid, newsid, tasksid,
-						orig_tclass, false);
 }
 
 /*
@@ -2671,7 +2677,7 @@ out:
 	return rc;
 }
 
-int security_get_bool_value(int index)
+int security_get_bool_value(int bool)
 {
 	int rc;
 	int len;
@@ -2680,10 +2686,10 @@ int security_get_bool_value(int index)
 
 	rc = -EFAULT;
 	len = policydb.p_bools.nprim;
-	if (index >= len)
+	if (bool >= len)
 		goto out;
 
-	rc = policydb.bool_val_to_struct[index]->state;
+	rc = policydb.bool_val_to_struct[bool]->state;
 out:
 	read_unlock(&policy_rwlock);
 	return rc;

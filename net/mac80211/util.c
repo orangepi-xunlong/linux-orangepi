@@ -4,7 +4,7 @@
  * Copyright 2006-2007	Jiri Benc <jbenc@suse.cz>
  * Copyright 2007	Johannes Berg <johannes@sipsolutions.net>
  * Copyright 2013-2014  Intel Mobile Communications GmbH
- * Copyright (C) 2015-2016	Intel Deutschland GmbH
+ * Copyright (C) 2015	Intel Deutschland GmbH
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -59,7 +59,7 @@ void ieee80211_tx_set_protected(struct ieee80211_tx_data *tx)
 	}
 }
 
-int ieee80211_frame_duration(enum nl80211_band band, size_t len,
+int ieee80211_frame_duration(enum ieee80211_band band, size_t len,
 			     int rate, int erp, int short_preamble,
 			     int shift)
 {
@@ -77,7 +77,7 @@ int ieee80211_frame_duration(enum nl80211_band band, size_t len,
 	 * is assumed to be 0 otherwise.
 	 */
 
-	if (band == NL80211_BAND_5GHZ || erp) {
+	if (band == IEEE80211_BAND_5GHZ || erp) {
 		/*
 		 * OFDM:
 		 *
@@ -129,7 +129,7 @@ int ieee80211_frame_duration(enum nl80211_band band, size_t len,
 /* Exported duration function for driver use */
 __le16 ieee80211_generic_frame_duration(struct ieee80211_hw *hw,
 					struct ieee80211_vif *vif,
-					enum nl80211_band band,
+					enum ieee80211_band band,
 					size_t frame_len,
 					struct ieee80211_rate *rate)
 {
@@ -244,9 +244,6 @@ void ieee80211_propagate_queue_wake(struct ieee80211_local *local, int queue)
 	struct ieee80211_sub_if_data *sdata;
 	int n_acs = IEEE80211_NUM_ACS;
 
-	if (local->ops->wake_tx_queue)
-		return;
-
 	if (local->hw.queues < IEEE80211_NUM_ACS)
 		n_acs = 1;
 
@@ -262,6 +259,11 @@ void ieee80211_propagate_queue_wake(struct ieee80211_local *local, int queue)
 
 		for (ac = 0; ac < n_acs; ac++) {
 			int ac_queue = sdata->vif.hw_queue[ac];
+
+			if (local->ops->wake_tx_queue &&
+			    (atomic_read(&sdata->txqs_len[ac]) >
+			     local->hw.txq_ac_max_pending))
+				continue;
 
 			if (ac_queue == queue ||
 			    (sdata->vif.cab_queue == queue &&
@@ -286,13 +288,10 @@ static void __ieee80211_wake_queue(struct ieee80211_hw *hw, int queue,
 	if (!test_bit(reason, &local->queue_stop_reasons[queue]))
 		return;
 
-	if (!refcounted) {
+	if (!refcounted)
 		local->q_stop_reasons[queue][reason] = 0;
-	} else {
+	else
 		local->q_stop_reasons[queue][reason]--;
-		if (WARN_ON(local->q_stop_reasons[queue][reason] < 0))
-			local->q_stop_reasons[queue][reason] = 0;
-	}
 
 	if (local->q_stop_reasons[queue][reason] == 0)
 		__clear_bit(reason, &local->queue_stop_reasons[queue]);
@@ -348,9 +347,6 @@ static void __ieee80211_stop_queue(struct ieee80211_hw *hw, int queue,
 		local->q_stop_reasons[queue][reason]++;
 
 	if (__test_and_set_bit(reason, &local->queue_stop_reasons[queue]))
-		return;
-
-	if (local->ops->wake_tx_queue)
 		return;
 
 	if (local->hw.queues < IEEE80211_NUM_ACS)
@@ -598,7 +594,7 @@ static void __iterate_interfaces(struct ieee80211_local *local,
 	list_for_each_entry_rcu(sdata, &local->interfaces, list) {
 		switch (sdata->vif.type) {
 		case NL80211_IFTYPE_MONITOR:
-			if (!(sdata->u.mntr.flags & MONITOR_FLAG_ACTIVE))
+			if (!(sdata->u.mntr_flags & MONITOR_FLAG_ACTIVE))
 				continue;
 			break;
 		case NL80211_IFTYPE_AP_VLAN:
@@ -1130,7 +1126,7 @@ void ieee80211_set_wmm_default(struct ieee80211_sub_if_data *sdata,
 	rcu_read_lock();
 	chanctx_conf = rcu_dereference(sdata->vif.chanctx_conf);
 	use_11b = (chanctx_conf &&
-		   chanctx_conf->def.chan->band == NL80211_BAND_2GHZ) &&
+		   chanctx_conf->def.chan->band == IEEE80211_BAND_2GHZ) &&
 		 !(sdata->flags & IEEE80211_SDATA_OPERATING_GMODE);
 	rcu_read_unlock();
 
@@ -1209,8 +1205,7 @@ void ieee80211_set_wmm_default(struct ieee80211_sub_if_data *sdata,
 	}
 
 	if (sdata->vif.type != NL80211_IFTYPE_MONITOR &&
-	    sdata->vif.type != NL80211_IFTYPE_P2P_DEVICE &&
-	    sdata->vif.type != NL80211_IFTYPE_NAN) {
+	    sdata->vif.type != NL80211_IFTYPE_P2P_DEVICE) {
 		sdata->vif.bss_conf.qos = enable_qos;
 		if (bss_notify)
 			ieee80211_bss_info_change_notify(sdata,
@@ -1303,7 +1298,7 @@ void ieee80211_send_deauth_disassoc(struct ieee80211_sub_if_data *sdata,
 static int ieee80211_build_preq_ies_band(struct ieee80211_local *local,
 					 u8 *buffer, size_t buffer_len,
 					 const u8 *ie, size_t ie_len,
-					 enum nl80211_band band,
+					 enum ieee80211_band band,
 					 u32 rate_mask,
 					 struct cfg80211_chan_def *chandef,
 					 size_t *offset)
@@ -1377,7 +1372,7 @@ static int ieee80211_build_preq_ies_band(struct ieee80211_local *local,
 		pos += ext_rates_len;
 	}
 
-	if (chandef->chan && sband->band == NL80211_BAND_2GHZ) {
+	if (chandef->chan && sband->band == IEEE80211_BAND_2GHZ) {
 		if (end - pos < 3)
 			goto out_err;
 		*pos++ = WLAN_EID_DS_PARAMS;
@@ -1481,7 +1476,7 @@ int ieee80211_build_preq_ies(struct ieee80211_local *local, u8 *buffer,
 
 	memset(ie_desc, 0, sizeof(*ie_desc));
 
-	for (i = 0; i < NUM_NL80211_BANDS; i++) {
+	for (i = 0; i < IEEE80211_NUM_BANDS; i++) {
 		if (bands_used & BIT(i)) {
 			pos += ieee80211_build_preq_ies_band(local,
 							     buffer + pos,
@@ -1524,7 +1519,7 @@ struct sk_buff *ieee80211_build_probe_req(struct ieee80211_sub_if_data *sdata,
 	struct sk_buff *skb;
 	struct ieee80211_mgmt *mgmt;
 	int ies_len;
-	u32 rate_masks[NUM_NL80211_BANDS] = {};
+	u32 rate_masks[IEEE80211_NUM_BANDS] = {};
 	struct ieee80211_scan_ies dummy_ie_desc;
 
 	/*
@@ -1584,19 +1579,19 @@ void ieee80211_send_probe_req(struct ieee80211_sub_if_data *sdata,
 
 u32 ieee80211_sta_get_rates(struct ieee80211_sub_if_data *sdata,
 			    struct ieee802_11_elems *elems,
-			    enum nl80211_band band, u32 *basic_rates)
+			    enum ieee80211_band band, u32 *basic_rates)
 {
 	struct ieee80211_supported_band *sband;
 	size_t num_rates;
 	u32 supp_rates, rate_flags;
 	int i, j, shift;
-
 	sband = sdata->local->hw.wiphy->bands[band];
-	if (WARN_ON(!sband))
-		return 1;
 
 	rate_flags = ieee80211_chandef_rate_flags(&sdata->vif.bss_conf.chandef);
 	shift = ieee80211_vif_get_shift(&sdata->vif);
+
+	if (WARN_ON(!sband))
+		return 1;
 
 	num_rates = sband->n_bitrates;
 	supp_rates = 0;
@@ -1747,46 +1742,6 @@ static void ieee80211_reconfig_stations(struct ieee80211_sub_if_data *sdata)
 					      state + 1));
 	}
 	mutex_unlock(&local->sta_mtx);
-}
-
-static int ieee80211_reconfig_nan(struct ieee80211_sub_if_data *sdata)
-{
-	struct cfg80211_nan_func *func, **funcs;
-	int res, id, i = 0;
-
-	res = drv_start_nan(sdata->local, sdata,
-			    &sdata->u.nan.conf);
-	if (WARN_ON(res))
-		return res;
-
-	funcs = kzalloc((sdata->local->hw.max_nan_de_entries + 1) *
-			sizeof(*funcs), GFP_KERNEL);
-	if (!funcs)
-		return -ENOMEM;
-
-	/* Add all the functions:
-	 * This is a little bit ugly. We need to call a potentially sleeping
-	 * callback for each NAN function, so we can't hold the spinlock.
-	 */
-	spin_lock_bh(&sdata->u.nan.func_lock);
-
-	idr_for_each_entry(&sdata->u.nan.function_inst_ids, func, id)
-		funcs[i++] = func;
-
-	spin_unlock_bh(&sdata->u.nan.func_lock);
-
-	for (i = 0; funcs[i]; i++) {
-		res = drv_add_nan_func(sdata->local, sdata, funcs[i]);
-		if (WARN_ON(res))
-			ieee80211_nan_func_terminated(&sdata->vif,
-						      funcs[i]->instance_id,
-						      NL80211_NAN_FUNC_TERM_REASON_ERROR,
-						      GFP_KERNEL);
-	}
-
-	kfree(funcs);
-
-	return 0;
 }
 
 int ieee80211_reconfig(struct ieee80211_local *local)
@@ -1970,9 +1925,6 @@ int ieee80211_reconfig(struct ieee80211_local *local)
 			  BSS_CHANGED_IDLE |
 			  BSS_CHANGED_TXPOWER;
 
-		if (sdata->vif.mu_mimo_owner)
-			changed |= BSS_CHANGED_MU_GROUPS;
-
 		switch (sdata->vif.type) {
 		case NL80211_IFTYPE_STATION:
 			changed |= BSS_CHANGED_ASSOC |
@@ -2010,13 +1962,6 @@ int ieee80211_reconfig(struct ieee80211_local *local)
 				changed |= BSS_CHANGED_BEACON |
 					   BSS_CHANGED_BEACON_ENABLED;
 				ieee80211_bss_info_change_notify(sdata, changed);
-			}
-			break;
-		case NL80211_IFTYPE_NAN:
-			res = ieee80211_reconfig_nan(sdata);
-			if (res < 0) {
-				ieee80211_handle_reconfig_failure(local);
-				return res;
 			}
 			break;
 		case NL80211_IFTYPE_WDS:
@@ -2061,7 +2006,8 @@ int ieee80211_reconfig(struct ieee80211_local *local)
 		if (!sta->uploaded)
 			continue;
 
-		if (sta->sdata->vif.type != NL80211_IFTYPE_AP)
+		if (sta->sdata->vif.type != NL80211_IFTYPE_AP &&
+		    sta->sdata->vif.type != NL80211_IFTYPE_AP_VLAN)
 			continue;
 
 		for (state = IEEE80211_STA_NOTEXIST;
@@ -2095,26 +2041,16 @@ int ieee80211_reconfig(struct ieee80211_local *local)
 		 */
 		if (sched_scan_req->n_scan_plans > 1 ||
 		    __ieee80211_request_sched_scan_start(sched_scan_sdata,
-							 sched_scan_req)) {
-			RCU_INIT_POINTER(local->sched_scan_sdata, NULL);
-			RCU_INIT_POINTER(local->sched_scan_req, NULL);
+							 sched_scan_req))
 			sched_scan_stopped = true;
-		}
 	mutex_unlock(&local->mtx);
 
 	if (sched_scan_stopped)
 		cfg80211_sched_scan_stopped_rtnl(local->hw.wiphy);
 
  wake_up:
-	if (local->in_reconfig) {
-		local->in_reconfig = false;
-		barrier();
-
-		/* Restart deferred ROCs */
-		mutex_lock(&local->mtx);
-		ieee80211_start_next_roc(local);
-		mutex_unlock(&local->mtx);
-	}
+	local->in_reconfig = false;
+	barrier();
 
 	if (local->monitors == local->open_count && local->monitors > 0)
 		ieee80211_add_virtual_monitor(local);
@@ -2423,23 +2359,10 @@ u8 *ieee80211_ie_build_vht_oper(u8 *pos, struct ieee80211_sta_vht_cap *vht_cap,
 
 	switch (chandef->width) {
 	case NL80211_CHAN_WIDTH_160:
-		/*
-		 * Convert 160 MHz channel width to new style as interop
-		 * workaround.
-		 */
-		vht_oper->chan_width = IEEE80211_VHT_CHANWIDTH_80MHZ;
-		vht_oper->center_freq_seg2_idx = vht_oper->center_freq_seg1_idx;
-		if (chandef->chan->center_freq < chandef->center_freq1)
-			vht_oper->center_freq_seg1_idx -= 8;
-		else
-			vht_oper->center_freq_seg1_idx += 8;
+		vht_oper->chan_width = IEEE80211_VHT_CHANWIDTH_160MHZ;
 		break;
 	case NL80211_CHAN_WIDTH_80P80:
-		/*
-		 * Convert 80+80 MHz channel width to new style as interop
-		 * workaround.
-		 */
-		vht_oper->chan_width = IEEE80211_VHT_CHANWIDTH_80MHZ;
+		vht_oper->chan_width = IEEE80211_VHT_CHANWIDTH_80P80MHZ;
 		break;
 	case NL80211_CHAN_WIDTH_80:
 		vht_oper->chan_width = IEEE80211_VHT_CHANWIDTH_80MHZ;
@@ -2455,13 +2378,17 @@ u8 *ieee80211_ie_build_vht_oper(u8 *pos, struct ieee80211_sta_vht_cap *vht_cap,
 	return pos + sizeof(struct ieee80211_vht_operation);
 }
 
-bool ieee80211_chandef_ht_oper(const struct ieee80211_ht_operation *ht_oper,
-			       struct cfg80211_chan_def *chandef)
+void ieee80211_ht_oper_to_chandef(struct ieee80211_channel *control_chan,
+				  const struct ieee80211_ht_operation *ht_oper,
+				  struct cfg80211_chan_def *chandef)
 {
 	enum nl80211_channel_type channel_type;
 
-	if (!ht_oper)
-		return false;
+	if (!ht_oper) {
+		cfg80211_chandef_create(chandef, control_chan,
+					NL80211_CHAN_NO_HT);
+		return;
+	}
 
 	switch (ht_oper->ht_param & IEEE80211_HT_PARAM_CHA_SEC_OFFSET) {
 	case IEEE80211_HT_PARAM_CHA_SEC_NONE:
@@ -2475,66 +2402,42 @@ bool ieee80211_chandef_ht_oper(const struct ieee80211_ht_operation *ht_oper,
 		break;
 	default:
 		channel_type = NL80211_CHAN_NO_HT;
-		return false;
 	}
 
-	cfg80211_chandef_create(chandef, chandef->chan, channel_type);
-	return true;
+	cfg80211_chandef_create(chandef, control_chan, channel_type);
 }
 
-bool ieee80211_chandef_vht_oper(const struct ieee80211_vht_operation *oper,
-				struct cfg80211_chan_def *chandef)
+void ieee80211_vht_oper_to_chandef(struct ieee80211_channel *control_chan,
+				   const struct ieee80211_vht_operation *oper,
+				   struct cfg80211_chan_def *chandef)
 {
-	struct cfg80211_chan_def new = *chandef;
-	int cf1, cf2;
-
 	if (!oper)
-		return false;
+		return;
 
-	cf1 = ieee80211_channel_to_frequency(oper->center_freq_seg1_idx,
-					     chandef->chan->band);
-	cf2 = ieee80211_channel_to_frequency(oper->center_freq_seg2_idx,
-					     chandef->chan->band);
+	chandef->chan = control_chan;
 
 	switch (oper->chan_width) {
 	case IEEE80211_VHT_CHANWIDTH_USE_HT:
 		break;
 	case IEEE80211_VHT_CHANWIDTH_80MHZ:
-		new.width = NL80211_CHAN_WIDTH_80;
-		new.center_freq1 = cf1;
-		/* If needed, adjust based on the newer interop workaround. */
-		if (oper->center_freq_seg2_idx) {
-			unsigned int diff;
-
-			diff = abs(oper->center_freq_seg2_idx -
-				   oper->center_freq_seg1_idx);
-			if (diff == 8) {
-				new.width = NL80211_CHAN_WIDTH_160;
-				new.center_freq1 = cf2;
-			} else if (diff > 8) {
-				new.width = NL80211_CHAN_WIDTH_80P80;
-				new.center_freq2 = cf2;
-			}
-		}
+		chandef->width = NL80211_CHAN_WIDTH_80;
 		break;
 	case IEEE80211_VHT_CHANWIDTH_160MHZ:
-		new.width = NL80211_CHAN_WIDTH_160;
-		new.center_freq1 = cf1;
+		chandef->width = NL80211_CHAN_WIDTH_160;
 		break;
 	case IEEE80211_VHT_CHANWIDTH_80P80MHZ:
-		new.width = NL80211_CHAN_WIDTH_80P80;
-		new.center_freq1 = cf1;
-		new.center_freq2 = cf2;
+		chandef->width = NL80211_CHAN_WIDTH_80P80;
 		break;
 	default:
-		return false;
+		break;
 	}
 
-	if (!cfg80211_chandef_valid(&new))
-		return false;
-
-	*chandef = new;
-	return true;
+	chandef->center_freq1 =
+		ieee80211_channel_to_frequency(oper->center_freq_seg1_idx,
+					       control_chan->band);
+	chandef->center_freq2 =
+		ieee80211_channel_to_frequency(oper->center_freq_seg2_idx,
+					       control_chan->band);
 }
 
 int ieee80211_parse_bitrates(struct cfg80211_chan_def *chandef,
@@ -2569,7 +2472,7 @@ int ieee80211_parse_bitrates(struct cfg80211_chan_def *chandef,
 
 int ieee80211_add_srates_ie(struct ieee80211_sub_if_data *sdata,
 			    struct sk_buff *skb, bool need_basic,
-			    enum nl80211_band band)
+			    enum ieee80211_band band)
 {
 	struct ieee80211_local *local = sdata->local;
 	struct ieee80211_supported_band *sband;
@@ -2603,6 +2506,7 @@ int ieee80211_add_srates_ie(struct ieee80211_sub_if_data *sdata,
 
 		if (need_basic && basic_rates & BIT(i))
 			basic = 0x80;
+		rate = sband->bitrates[i].bitrate;
 		rate = DIV_ROUND_UP(sband->bitrates[i].bitrate,
 				    5 * (1 << shift));
 		*pos++ = basic | (u8) rate;
@@ -2613,7 +2517,7 @@ int ieee80211_add_srates_ie(struct ieee80211_sub_if_data *sdata,
 
 int ieee80211_add_ext_srates_ie(struct ieee80211_sub_if_data *sdata,
 				struct sk_buff *skb, bool need_basic,
-				enum nl80211_band band)
+				enum ieee80211_band band)
 {
 	struct ieee80211_local *local = sdata->local;
 	struct ieee80211_supported_band *sband;
@@ -2756,18 +2660,6 @@ u64 ieee80211_calculate_rx_timestamp(struct ieee80211_local *local,
 		sband = local->hw.wiphy->bands[status->band];
 		bitrate = sband->bitrates[status->rate_idx].bitrate;
 		ri.legacy = DIV_ROUND_UP(bitrate, (1 << shift));
-
-		if (status->flag & RX_FLAG_MACTIME_PLCP_START) {
-			/* TODO: handle HT/VHT preambles */
-			if (status->band == NL80211_BAND_5GHZ) {
-				ts += 20 << shift;
-				mpdu_offset += 2;
-			} else if (status->flag & RX_FLAG_SHORTPRE) {
-				ts += 96;
-			} else {
-				ts += 192;
-			}
-		}
 	}
 
 	rate = cfg80211_calculate_bitrate(&ri);
@@ -3436,23 +3328,21 @@ u8 *ieee80211_add_wmm_info_ie(u8 *buf, u8 qosinfo)
 	return buf;
 }
 
-void ieee80211_txq_get_depth(struct ieee80211_txq *txq,
-			     unsigned long *frame_cnt,
-			     unsigned long *byte_cnt)
+void ieee80211_init_tx_queue(struct ieee80211_sub_if_data *sdata,
+			     struct sta_info *sta,
+			     struct txq_info *txqi, int tid)
 {
-	struct txq_info *txqi = to_txq_info(txq);
-	u32 frag_cnt = 0, frag_bytes = 0;
-	struct sk_buff *skb;
+	skb_queue_head_init(&txqi->queue);
+	txqi->txq.vif = &sdata->vif;
 
-	skb_queue_walk(&txqi->frags, skb) {
-		frag_cnt++;
-		frag_bytes += skb->len;
+	if (sta) {
+		txqi->txq.sta = &sta->sta;
+		sta->sta.txq[tid] = &txqi->txq;
+		txqi->txq.tid = tid;
+		txqi->txq.ac = ieee802_1d_to_ac[tid & 7];
+	} else {
+		sdata->vif.txq = &txqi->txq;
+		txqi->txq.tid = 0;
+		txqi->txq.ac = IEEE80211_AC_BE;
 	}
-
-	if (frame_cnt)
-		*frame_cnt = txqi->tin.backlog_packets + frag_cnt;
-
-	if (byte_cnt)
-		*byte_cnt = txqi->tin.backlog_bytes + frag_bytes;
 }
-EXPORT_SYMBOL(ieee80211_txq_get_depth);

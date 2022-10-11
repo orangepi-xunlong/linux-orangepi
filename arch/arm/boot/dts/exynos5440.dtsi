@@ -10,13 +10,12 @@
 */
 
 #include <dt-bindings/clock/exynos5440.h>
+#include "skeleton.dtsi"
 
 / {
 	compatible = "samsung,exynos5440", "samsung,exynos5";
 
 	interrupt-parent = <&gic>;
-	#address-cells = <1>;
-	#size-cells = <1>;
 
 	aliases {
 		serial0 = &serial_0;
@@ -133,7 +132,7 @@
 		clock-names = "spi", "spi_busclk0";
 	};
 
-	pin_ctrl: pinctrl@E0000 {
+	pin_ctrl: pinctrl {
 		compatible = "samsung,exynos5440-pinctrl";
 		reg = <0xE0000 0x1000>;
 		interrupts = <0 37 0>, <0 38 0>, <0 39 0>, <0 40 0>,
@@ -201,12 +200,12 @@
 	amba {
 		#address-cells = <1>;
 		#size-cells = <1>;
-		compatible = "simple-bus";
+		compatible = "arm,amba-bus";
 		interrupt-parent = <&gic>;
 		ranges;
 	};
 
-	rtc@130000 {
+	rtc {
 		compatible = "samsung,s3c6410-rtc";
 		reg = <0x130000 0x1000>;
 		interrupts = <0 17 0>, <0 16 0>;

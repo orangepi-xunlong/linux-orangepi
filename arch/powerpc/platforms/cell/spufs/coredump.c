@@ -137,7 +137,6 @@ static int spufs_arch_write_note(struct spu_context *ctx, int i,
 	char *name;
 	char fullname[80], *buf;
 	struct elf_note en;
-	size_t skip;
 
 	buf = (void *)get_zeroed_page(GFP_KERNEL);
 	if (!buf)
@@ -172,8 +171,8 @@ static int spufs_arch_write_note(struct spu_context *ctx, int i,
 	if (rc < 0)
 		goto out;
 
-	skip = roundup(cprm->pos - total + sz, 4) - cprm->pos;
-	if (!dump_skip(cprm, skip))
+	if (!dump_skip(cprm,
+		       roundup(cprm->written - total + sz, 4) - cprm->written))
 		goto Eio;
 
 	rc = 0;

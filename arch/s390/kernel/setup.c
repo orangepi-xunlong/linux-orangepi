@@ -82,8 +82,6 @@ EXPORT_SYMBOL(console_irq);
 unsigned long elf_hwcap __read_mostly = 0;
 char elf_platform[ELF_PLATFORM_SIZE];
 
-unsigned long int_hwcap = 0;
-
 int __initdata memory_end_set;
 unsigned long __initdata memory_end;
 unsigned long __initdata max_physmem_end;
@@ -101,7 +99,7 @@ unsigned long MODULES_VADDR;
 unsigned long MODULES_END;
 
 /* An array with a pointer to the lowcore of every CPU. */
-struct lowcore *lowcore_ptr[NR_CPUS];
+struct _lowcore *lowcore_ptr[NR_CPUS];
 EXPORT_SYMBOL(lowcore_ptr);
 
 /*
@@ -132,14 +130,17 @@ __setup("condev=", condev_setup);
 
 static void __init set_preferred_console(void)
 {
-	if (CONSOLE_IS_3215 || CONSOLE_IS_SCLP)
+	if (MACHINE_IS_KVM) {
+		if (sclp.has_vt220)
+			add_preferred_console("ttyS", 1, NULL);
+		else if (sclp.has_linemode)
+			add_preferred_console("ttyS", 0, NULL);
+		else
+			add_preferred_console("hvc", 0, NULL);
+	} else if (CONSOLE_IS_3215 || CONSOLE_IS_SCLP)
 		add_preferred_console("ttyS", 0, NULL);
 	else if (CONSOLE_IS_3270)
 		add_preferred_console("tty3270", 0, NULL);
-	else if (CONSOLE_IS_VT220)
-		add_preferred_console("ttyS", 1, NULL);
-	else if (CONSOLE_IS_HVC)
-		add_preferred_console("hvc", 0, NULL);
 }
 
 static int __init conmode_setup(char *str)
@@ -205,13 +206,6 @@ static void __init conmode_default(void)
 			SET_CONSOLE_SCLP;
 #endif
 		}
-	} else if (MACHINE_IS_KVM) {
-		if (sclp.has_vt220 && IS_ENABLED(CONFIG_SCLP_VT220_CONSOLE))
-			SET_CONSOLE_VT220;
-		else if (sclp.has_linemode && IS_ENABLED(CONFIG_SCLP_CONSOLE))
-			SET_CONSOLE_SCLP;
-		else
-			SET_CONSOLE_HVC;
 	} else {
 #if defined(CONFIG_SCLP_CONSOLE) || defined(CONFIG_SCLP_VT220_CONSOLE)
 		SET_CONSOLE_SCLP;
@@ -295,33 +289,37 @@ static int __init parse_vmalloc(char *arg)
 }
 early_param("vmalloc", parse_vmalloc);
 
-void *restart_stack __section(.data);
+void *restart_stack __attribute__((__section__(".data")));
 
 static void __init setup_lowcore(void)
 {
-	struct lowcore *lc;
+	struct _lowcore *lc;
 
 	/*
 	 * Setup lowcore for boot cpu
 	 */
-	BUILD_BUG_ON(sizeof(struct lowcore) != LC_PAGES * 4096);
+	BUILD_BUG_ON(sizeof(struct _lowcore) != LC_PAGES * 4096);
 	lc = __alloc_bootmem_low(LC_PAGES * PAGE_SIZE, LC_PAGES * PAGE_SIZE, 0);
 	lc->restart_psw.mask = PSW_KERNEL_BITS;
-	lc->restart_psw.addr = (unsigned long) restart_int_handler;
+	lc->restart_psw.addr =
+		PSW_ADDR_AMODE | (unsigned long) restart_int_handler;
 	lc->external_new_psw.mask = PSW_KERNEL_BITS |
 		PSW_MASK_DAT | PSW_MASK_MCHECK;
-	lc->external_new_psw.addr = (unsigned long) ext_int_handler;
+	lc->external_new_psw.addr =
+		PSW_ADDR_AMODE | (unsigned long) ext_int_handler;
 	lc->svc_new_psw.mask = PSW_KERNEL_BITS |
 		PSW_MASK_DAT | PSW_MASK_IO | PSW_MASK_EXT | PSW_MASK_MCHECK;
-	lc->svc_new_psw.addr = (unsigned long) system_call;
+	lc->svc_new_psw.addr = PSW_ADDR_AMODE | (unsigned long) system_call;
 	lc->program_new_psw.mask = PSW_KERNEL_BITS |
 		PSW_MASK_DAT | PSW_MASK_MCHECK;
-	lc->program_new_psw.addr = (unsigned long) pgm_check_handler;
+	lc->program_new_psw.addr =
+		PSW_ADDR_AMODE | (unsigned long) pgm_check_handler;
 	lc->mcck_new_psw.mask = PSW_KERNEL_BITS;
-	lc->mcck_new_psw.addr = (unsigned long) mcck_int_handler;
+	lc->mcck_new_psw.addr =
+		PSW_ADDR_AMODE | (unsigned long) mcck_int_handler;
 	lc->io_new_psw.mask = PSW_KERNEL_BITS |
 		PSW_MASK_DAT | PSW_MASK_MCHECK;
-	lc->io_new_psw.addr = (unsigned long) io_int_handler;
+	lc->io_new_psw.addr = PSW_ADDR_AMODE | (unsigned long) io_int_handler;
 	lc->clock_comparator = -1ULL;
 	lc->kernel_stack = ((unsigned long) &init_thread_union)
 		+ THREAD_SIZE - STACK_FRAME_OVERHEAD - sizeof(struct pt_regs);
@@ -384,17 +382,17 @@ static void __init setup_lowcore(void)
 
 static struct resource code_resource = {
 	.name  = "Kernel code",
-	.flags = IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM,
+	.flags = IORESOURCE_BUSY | IORESOURCE_MEM,
 };
 
 static struct resource data_resource = {
 	.name = "Kernel data",
-	.flags = IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM,
+	.flags = IORESOURCE_BUSY | IORESOURCE_MEM,
 };
 
 static struct resource bss_resource = {
 	.name = "Kernel bss",
-	.flags = IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM,
+	.flags = IORESOURCE_BUSY | IORESOURCE_MEM,
 };
 
 static struct resource __initdata *standard_resources[] = {
@@ -418,7 +416,7 @@ static void __init setup_resources(void)
 
 	for_each_memblock(memory, reg) {
 		res = alloc_bootmem_low(sizeof(*res));
-		res->flags = IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM;
+		res->flags = IORESOURCE_BUSY | IORESOURCE_MEM;
 
 		res->name = "System RAM";
 		res->start = reg->base;
@@ -441,20 +439,6 @@ static void __init setup_resources(void)
 			}
 		}
 	}
-#ifdef CONFIG_CRASH_DUMP
-	/*
-	 * Re-add removed crash kernel memory as reserved memory. This makes
-	 * sure it will be mapped with the identity mapping and struct pages
-	 * will be created, so it can be resized later on.
-	 * However add it later since the crash kernel resource should not be
-	 * part of the System RAM resource.
-	 */
-	if (crashk_res.end) {
-		memblock_add_node(crashk_res.start, resource_size(&crashk_res), 0);
-		memblock_reserve(crashk_res.start, resource_size(&crashk_res));
-		insert_resource(&iomem_resource, &crashk_res);
-	}
-#endif
 }
 
 static void __init setup_memory_end(void)
@@ -625,6 +609,7 @@ static void __init reserve_crashkernel(void)
 		diag10_range(PFN_DOWN(crash_base), PFN_DOWN(crash_size));
 	crashk_res.start = crash_base;
 	crashk_res.end = crash_base + crash_size - 1;
+	insert_resource(&iomem_resource, &crashk_res);
 	memblock_remove(crash_base, crash_size);
 	pr_info("Reserving %lluMB of memory at %lluMB "
 		"for crashkernel (System RAM: %luMB)\n",
@@ -679,6 +664,15 @@ static void __init reserve_kernel(void)
 	memblock_reserve(0, (unsigned long)_ehead);
 	memblock_reserve((unsigned long)_stext, PFN_PHYS(start_pfn)
 			 - (unsigned long)_stext);
+#endif
+}
+
+static void __init reserve_elfcorehdr(void)
+{
+#ifdef CONFIG_CRASH_DUMP
+	if (is_kdump_kernel())
+		memblock_reserve(elfcorehdr_addr - OLDMEM_BASE,
+				 PAGE_ALIGN(elfcorehdr_size));
 #endif
 }
 
@@ -802,17 +796,9 @@ static int __init setup_hwcaps(void)
 		strcpy(elf_platform, "zEC12");
 		break;
 	case 0x2964:
-	case 0x2965:
 		strcpy(elf_platform, "z13");
 		break;
 	}
-
-	/*
-	 * Virtualization support HWCAP_INT_SIE is bit 0.
-	 */
-	if (sclp.has_sief2)
-		int_hwcap |= HWCAP_INT_SIE;
-
 	return 0;
 }
 arch_initcall(setup_hwcaps);
@@ -828,22 +814,6 @@ static void __init setup_randomness(void)
 	if (stsi(vmms, 3, 2, 2) == 0 && vmms->count)
 		add_device_randomness(&vmms->vm, sizeof(vmms->vm[0]) * vmms->count);
 	memblock_free((unsigned long) vmms, PAGE_SIZE);
-}
-
-/*
- * Find the correct size for the task_struct. This depends on
- * the size of the struct fpu at the end of the thread_struct
- * which is embedded in the task_struct.
- */
-static void __init setup_task_size(void)
-{
-	int task_size = sizeof(struct task_struct);
-
-	if (!MACHINE_HAS_VX) {
-		task_size -= sizeof(__vector128) * __NUM_VXRS;
-		task_size += sizeof(freg_t) * __NUM_FPRS;
-	}
-	arch_task_struct_size = task_size;
 }
 
 /*
@@ -863,6 +833,8 @@ void __init setup_arch(char **cmdline_p)
 		pr_info("Linux is running under KVM in 64-bit mode\n");
 	else if (MACHINE_IS_LPAR)
 		pr_info("Linux is running natively in 64-bit mode\n");
+	else
+		pr_info("Linux is running as a guest in 64-bit mode\n");
 
 	/* Have one command line that is parsed and saved in /proc/cmdline */
 	/* boot_command_line has been already set up in early.c */
@@ -880,20 +852,15 @@ void __init setup_arch(char **cmdline_p)
 		nospec_auto_detect();
 
 	parse_early_param();
-#ifdef CONFIG_CRASH_DUMP
-	/* Deactivate elfcorehdr= kernel parameter */
-	elfcorehdr_addr = ELFCORE_ADDR_MAX;
-#endif
-
 	os_info_init();
 	setup_ipl();
-	setup_task_size();
 
 	/* Do some memory reservations *before* memory is added to memblock */
 	reserve_memory_end();
 	reserve_oldmem();
 	reserve_kernel();
 	reserve_initrd();
+	reserve_elfcorehdr();
 	memblock_allow_resize();
 
 	/* Get information about *all* installed memory */
@@ -914,19 +881,16 @@ void __init setup_arch(char **cmdline_p)
 
 	check_initrd();
 	reserve_crashkernel();
-#ifdef CONFIG_CRASH_DUMP
 	/*
 	 * Be aware that smp_save_dump_cpus() triggers a system reset.
 	 * Therefore CPU and device initialization should be done afterwards.
 	 */
 	smp_save_dump_cpus();
-#endif
 
 	setup_resources();
 	setup_vmcoreinfo();
 	setup_lowcore();
 	smp_fill_possible_mask();
-	cpu_detect_mhz_feature();
         cpu_init();
 	numa_setup();
 

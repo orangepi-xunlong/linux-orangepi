@@ -13,7 +13,6 @@
 #include <linux/ctype.h>
 #include <linux/netdevice.h>
 #include <linux/kernel.h>
-#include <linux/uuid.h>
 #include <linux/slab.h>
 #include <linux/compat.h>
 
@@ -1118,8 +1117,9 @@ static ssize_t bin_uuid(struct file *file,
 
 	/* Only supports reads */
 	if (oldval && oldlen) {
-		char buf[UUID_STRING_LEN + 1];
-		uuid_be uuid;
+		char buf[40], *str = buf;
+		unsigned char uuid[16];
+		int i;
 
 		result = kernel_read(file, 0, buf, sizeof(buf) - 1);
 		if (result < 0)
@@ -1127,15 +1127,24 @@ static ssize_t bin_uuid(struct file *file,
 
 		buf[result] = '\0';
 
-		result = -EIO;
-		if (uuid_be_to_bin(buf, &uuid))
-			goto out;
+		/* Convert the uuid to from a string to binary */
+		for (i = 0; i < 16; i++) {
+			result = -EIO;
+			if (!isxdigit(str[0]) || !isxdigit(str[1]))
+				goto out;
+
+			uuid[i] = (hex_to_bin(str[0]) << 4) |
+					hex_to_bin(str[1]);
+			str += 2;
+			if (*str == '-')
+				str++;
+		}
 
 		if (oldlen > 16)
 			oldlen = 16;
 
 		result = -EFAULT;
-		if (copy_to_user(oldval, &uuid, oldlen))
+		if (copy_to_user(oldval, uuid, oldlen))
 			goto out;
 
 		copied = oldlen;

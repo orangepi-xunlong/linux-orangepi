@@ -311,8 +311,10 @@ static int lp5562_post_init_device(struct lp55xx_chip *chip)
 	return 0;
 }
 
-static int lp5562_led_brightness(struct lp55xx_led *led)
+static void lp5562_led_brightness_work(struct work_struct *work)
 {
+	struct lp55xx_led *led = container_of(work, struct lp55xx_led,
+					      brightness_work);
 	struct lp55xx_chip *chip = led->chip;
 	u8 addr[] = {
 		LP5562_REG_R_PWM,
@@ -320,13 +322,10 @@ static int lp5562_led_brightness(struct lp55xx_led *led)
 		LP5562_REG_B_PWM,
 		LP5562_REG_W_PWM,
 	};
-	int ret;
 
 	mutex_lock(&chip->lock);
-	ret = lp55xx_write(chip, addr[led->chan_nr], led->brightness);
+	lp55xx_write(chip, addr[led->chan_nr], led->brightness);
 	mutex_unlock(&chip->lock);
-
-	return ret;
 }
 
 static void lp5562_write_program_memory(struct lp55xx_chip *chip,
@@ -504,7 +503,7 @@ static struct lp55xx_device_config lp5562_cfg = {
 	},
 	.post_init_device   = lp5562_post_init_device,
 	.set_led_current    = lp5562_set_led_current,
-	.brightness_fn      = lp5562_led_brightness,
+	.brightness_work_fn = lp5562_led_brightness_work,
 	.run_engine         = lp5562_run_engine,
 	.firmware_cb        = lp5562_firmware_loaded,
 	.dev_attr_group     = &lp5562_group,

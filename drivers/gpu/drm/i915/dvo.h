@@ -32,8 +32,7 @@ struct intel_dvo_device {
 	const char *name;
 	int type;
 	/* DVOA/B/C output register */
-	i915_reg_t dvo_reg;
-	i915_reg_t dvo_srcdim_reg;
+	u32 dvo_reg;
 	/* GPIO register used for i2c bus to control this device */
 	u32 gpio;
 	int slave_addr;
@@ -129,11 +128,11 @@ struct intel_dvo_dev_ops {
 	void (*dump_regs)(struct intel_dvo_device *dvo);
 };
 
-extern const struct intel_dvo_dev_ops sil164_ops;
-extern const struct intel_dvo_dev_ops ch7xxx_ops;
-extern const struct intel_dvo_dev_ops ivch_ops;
-extern const struct intel_dvo_dev_ops tfp410_ops;
-extern const struct intel_dvo_dev_ops ch7017_ops;
-extern const struct intel_dvo_dev_ops ns2501_ops;
+extern struct intel_dvo_dev_ops sil164_ops;
+extern struct intel_dvo_dev_ops ch7xxx_ops;
+extern struct intel_dvo_dev_ops ivch_ops;
+extern struct intel_dvo_dev_ops tfp410_ops;
+extern struct intel_dvo_dev_ops ch7017_ops;
+extern struct intel_dvo_dev_ops ns2501_ops;
 
 #endif /* _INTEL_DVO_H */

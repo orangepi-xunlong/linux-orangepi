@@ -13,6 +13,8 @@
 #include <drm/drm_fb_helper.h>
 #include <drm/drm_crtc_helper.h>
 
+#include <linux/fb.h>
+
 #include "cirrus_drv.h"
 
 static void cirrus_dirty_update(struct cirrus_fbdev *afbdev,
@@ -133,7 +135,7 @@ static struct fb_ops cirrusfb_ops = {
 };
 
 static int cirrusfb_create_object(struct cirrus_fbdev *afbdev,
-			       const struct drm_mode_fb_cmd2 *mode_cmd,
+			       struct drm_mode_fb_cmd2 *mode_cmd,
 			       struct drm_gem_object **gobj_p)
 {
 	struct drm_device *dev = afbdev->helper.dev;

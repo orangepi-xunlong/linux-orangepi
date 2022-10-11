@@ -245,8 +245,11 @@ static int sudmac_chan_probe(struct sudmac_device *su_dev, int id, int irq,
 	int err;
 
 	sc = devm_kzalloc(&pdev->dev, sizeof(struct sudmac_chan), GFP_KERNEL);
-	if (!sc)
+	if (!sc) {
+		dev_err(sdev->dma_dev.dev,
+			"No free memory for allocating dma channels!\n");
 		return -ENOMEM;
+	}
 
 	schan = &sc->shdma_chan;
 	schan->max_xfer_len = 64 * 1024 * 1024 - 1;
@@ -346,8 +349,10 @@ static int sudmac_probe(struct platform_device *pdev)
 	err = -ENOMEM;
 	su_dev = devm_kzalloc(&pdev->dev, sizeof(struct sudmac_device),
 			      GFP_KERNEL);
-	if (!su_dev)
+	if (!su_dev) {
+		dev_err(&pdev->dev, "Not enough memory\n");
 		return err;
+	}
 
 	dma_dev = &su_dev->shdma_dev.dma_dev;
 

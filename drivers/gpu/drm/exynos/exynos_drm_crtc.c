@@ -68,33 +68,32 @@ static void exynos_crtc_atomic_begin(struct drm_crtc *crtc,
 				     struct drm_crtc_state *old_crtc_state)
 {
 	struct exynos_drm_crtc *exynos_crtc = to_exynos_crtc(crtc);
+	struct drm_plane *plane;
 
-	if (exynos_crtc->ops->atomic_begin)
-		exynos_crtc->ops->atomic_begin(exynos_crtc);
+	exynos_crtc->event = crtc->state->event;
+
+	drm_atomic_crtc_for_each_plane(plane, crtc) {
+		struct exynos_drm_plane *exynos_plane = to_exynos_plane(plane);
+
+		if (exynos_crtc->ops->atomic_begin)
+			exynos_crtc->ops->atomic_begin(exynos_crtc,
+							exynos_plane);
+	}
 }
 
 static void exynos_crtc_atomic_flush(struct drm_crtc *crtc,
 				     struct drm_crtc_state *old_crtc_state)
 {
 	struct exynos_drm_crtc *exynos_crtc = to_exynos_crtc(crtc);
-	struct drm_pending_vblank_event *event;
-	unsigned long flags;
+	struct drm_plane *plane;
 
-	if (exynos_crtc->ops->atomic_flush)
-		exynos_crtc->ops->atomic_flush(exynos_crtc);
+	drm_atomic_crtc_for_each_plane(plane, crtc) {
+		struct exynos_drm_plane *exynos_plane = to_exynos_plane(plane);
 
-	event = crtc->state->event;
-	if (event) {
-		crtc->state->event = NULL;
-
-		spin_lock_irqsave(&crtc->dev->event_lock, flags);
-		if (drm_crtc_vblank_get(crtc) == 0)
-			drm_crtc_arm_vblank_event(crtc, event);
-		else
-			drm_crtc_send_vblank_event(crtc, event);
-		spin_unlock_irqrestore(&crtc->dev->event_lock, flags);
+		if (exynos_crtc->ops->atomic_flush)
+			exynos_crtc->ops->atomic_flush(exynos_crtc,
+							exynos_plane);
 	}
-
 }
 
 static const struct drm_crtc_helper_funcs exynos_crtc_helper_funcs = {
@@ -147,6 +146,8 @@ struct exynos_drm_crtc *exynos_drm_crtc_create(struct drm_device *drm_dev,
 	exynos_crtc->ops = ops;
 	exynos_crtc->ctx = ctx;
 
+	init_waitqueue_head(&exynos_crtc->wait_update);
+
 	crtc = &exynos_crtc->base;
 
 	private->crtc[pipe] = crtc;
@@ -168,8 +169,9 @@ err_crtc:
 
 int exynos_drm_crtc_enable_vblank(struct drm_device *dev, unsigned int pipe)
 {
-	struct exynos_drm_crtc *exynos_crtc = exynos_drm_crtc_from_pipe(dev,
-									pipe);
+	struct exynos_drm_private *private = dev->dev_private;
+	struct exynos_drm_crtc *exynos_crtc =
+		to_exynos_crtc(private->crtc[pipe]);
 
 	if (exynos_crtc->ops->enable_vblank)
 		return exynos_crtc->ops->enable_vblank(exynos_crtc);
@@ -179,11 +181,61 @@ int exynos_drm_crtc_enable_vblank(struct drm_device *dev, unsigned int pipe)
 
 void exynos_drm_crtc_disable_vblank(struct drm_device *dev, unsigned int pipe)
 {
-	struct exynos_drm_crtc *exynos_crtc = exynos_drm_crtc_from_pipe(dev,
-									pipe);
+	struct exynos_drm_private *private = dev->dev_private;
+	struct exynos_drm_crtc *exynos_crtc =
+		to_exynos_crtc(private->crtc[pipe]);
 
 	if (exynos_crtc->ops->disable_vblank)
 		exynos_crtc->ops->disable_vblank(exynos_crtc);
+}
+
+void exynos_drm_crtc_wait_pending_update(struct exynos_drm_crtc *exynos_crtc)
+{
+	wait_event_timeout(exynos_crtc->wait_update,
+			   (atomic_read(&exynos_crtc->pending_update) == 0),
+			   msecs_to_jiffies(50));
+}
+
+void exynos_drm_crtc_finish_update(struct exynos_drm_crtc *exynos_crtc,
+				struct exynos_drm_plane *exynos_plane)
+{
+	struct drm_crtc *crtc = &exynos_crtc->base;
+	unsigned long flags;
+
+	exynos_plane->pending_fb = NULL;
+
+	if (atomic_dec_and_test(&exynos_crtc->pending_update))
+		wake_up(&exynos_crtc->wait_update);
+
+	spin_lock_irqsave(&crtc->dev->event_lock, flags);
+	if (exynos_crtc->event)
+		drm_crtc_send_vblank_event(crtc, exynos_crtc->event);
+
+	exynos_crtc->event = NULL;
+	spin_unlock_irqrestore(&crtc->dev->event_lock, flags);
+}
+
+void exynos_drm_crtc_complete_scanout(struct drm_framebuffer *fb)
+{
+	struct exynos_drm_crtc *exynos_crtc;
+	struct drm_device *dev = fb->dev;
+	struct drm_crtc *crtc;
+
+	/*
+	 * make sure that overlay data are updated to real hardware
+	 * for all encoders.
+	 */
+	list_for_each_entry(crtc, &dev->mode_config.crtc_list, head) {
+		exynos_crtc = to_exynos_crtc(crtc);
+
+		/*
+		 * wait for vblank interrupt
+		 * - this makes sure that overlay data are updated to
+		 *	real hardware.
+		 */
+		if (exynos_crtc->ops->wait_for_vblank)
+			exynos_crtc->ops->wait_for_vblank(exynos_crtc);
+	}
 }
 
 int exynos_drm_crtc_get_pipe_from_type(struct drm_device *drm_dev,
@@ -208,24 +260,4 @@ void exynos_drm_crtc_te_handler(struct drm_crtc *crtc)
 
 	if (exynos_crtc->ops->te_handler)
 		exynos_crtc->ops->te_handler(exynos_crtc);
-}
-
-void exynos_drm_crtc_cancel_page_flip(struct drm_crtc *crtc,
-					struct drm_file *file)
-{
-	struct drm_pending_vblank_event *e;
-	unsigned long flags;
-
-	spin_lock_irqsave(&crtc->dev->event_lock, flags);
-
-	e = crtc->state->event;
-	if (e && e->base.file_priv == file)
-		crtc->state->event = NULL;
-	else
-		e = NULL;
-
-	spin_unlock_irqrestore(&crtc->dev->event_lock, flags);
-
-	if (e)
-		drm_event_cancel_free(crtc->dev, &e->base);
 }

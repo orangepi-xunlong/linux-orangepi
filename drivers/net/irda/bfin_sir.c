@@ -531,7 +531,7 @@ static void bfin_sir_send_work(struct work_struct *work)
 	bfin_sir_dma_tx_chars(dev);
 #endif
 	bfin_sir_enable_tx(port);
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 }
 
 static int bfin_sir_hard_xmit(struct sk_buff *skb, struct net_device *dev)

@@ -31,7 +31,7 @@
 #include <linux/atmlec.h>
 
 /* Proxy LEC knows about bridging */
-#if IS_ENABLED(CONFIG_BRIDGE)
+#if defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE)
 #include "../bridge/br_private.h"
 
 static unsigned char bridge_ula_lec[] = { 0x01, 0x80, 0xc2, 0x00, 0x00 };
@@ -124,7 +124,7 @@ static unsigned char bus_mac[ETH_ALEN] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 /* Device structures */
 static struct net_device *dev_lec[MAX_LEC_ITF];
 
-#if IS_ENABLED(CONFIG_BRIDGE)
+#if defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE)
 static void lec_handle_bridge(struct sk_buff *skb, struct net_device *dev)
 {
 	char *buff;
@@ -158,7 +158,7 @@ static void lec_handle_bridge(struct sk_buff *skb, struct net_device *dev)
 		sk->sk_data_ready(sk);
 	}
 }
-#endif /* IS_ENABLED(CONFIG_BRIDGE) */
+#endif /* defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE) */
 
 /*
  * Open/initialize the netdevice. This is called (in the current kernel)
@@ -197,7 +197,7 @@ lec_send(struct atm_vcc *vcc, struct sk_buff *skb)
 static void lec_tx_timeout(struct net_device *dev)
 {
 	pr_info("%s\n", dev->name);
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 	netif_wake_queue(dev);
 }
 
@@ -225,7 +225,7 @@ static netdev_tx_t lec_start_xmit(struct sk_buff *skb,
 	pr_debug("skbuff head:%lx data:%lx tail:%lx end:%lx\n",
 		 (long)skb->head, (long)skb->data, (long)skb_tail_pointer(skb),
 		 (long)skb_end_pointer(skb));
-#if IS_ENABLED(CONFIG_BRIDGE)
+#if defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE)
 	if (memcmp(skb->data, bridge_ula_lec, sizeof(bridge_ula_lec)) == 0)
 		lec_handle_bridge(skb, dev);
 #endif
@@ -327,7 +327,7 @@ static netdev_tx_t lec_start_xmit(struct sk_buff *skb,
 out:
 	if (entry)
 		lec_arp_put(entry);
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 	return NETDEV_TX_OK;
 }
 
@@ -429,7 +429,7 @@ static int lec_atm_send(struct atm_vcc *vcc, struct sk_buff *skb)
 		    (unsigned short)(0xffff & mesg->content.normal.flag);
 		break;
 	case l_should_bridge:
-#if IS_ENABLED(CONFIG_BRIDGE)
+#if defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE)
 	{
 		pr_debug("%s: bridge zeppelin asks about %pM\n",
 			 dev->name, mesg->content.proxy.mac_addr);
@@ -455,7 +455,7 @@ static int lec_atm_send(struct atm_vcc *vcc, struct sk_buff *skb)
 			sk->sk_data_ready(sk);
 		}
 	}
-#endif /* IS_ENABLED(CONFIG_BRIDGE) */
+#endif /* defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE) */
 		break;
 	default:
 		pr_info("%s: Unknown message type %d\n", dev->name, mesg->type);
@@ -721,7 +721,10 @@ static int lec_vcc_attach(struct atm_vcc *vcc, void __user *arg)
 
 static int lec_mcast_attach(struct atm_vcc *vcc, int arg)
 {
-	if (arg < 0 || arg >= MAX_LEC_ITF || !dev_lec[arg])
+	if (arg < 0 || arg >= MAX_LEC_ITF)
+		return -EINVAL;
+	arg = array_index_nospec(arg, MAX_LEC_ITF);
+	if (!dev_lec[arg])
 		return -EINVAL;
 	vcc->proto_data = dev_lec[arg];
 	return lec_mcast_make(netdev_priv(dev_lec[arg]), vcc);
@@ -739,6 +742,7 @@ static int lecd_attach(struct atm_vcc *vcc, int arg)
 		i = arg;
 	if (arg >= MAX_LEC_ITF)
 		return -EINVAL;
+	i = array_index_nospec(arg, MAX_LEC_ITF);
 	if (!dev_lec[i]) {
 		int size;
 

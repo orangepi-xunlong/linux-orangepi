@@ -50,7 +50,8 @@ static struct nf_logger nf_bridge_logger __read_mostly = {
 
 static int __net_init nf_log_bridge_net_init(struct net *net)
 {
-	return nf_log_set(net, NFPROTO_BRIDGE, &nf_bridge_logger);
+	nf_log_set(net, NFPROTO_BRIDGE, &nf_bridge_logger);
+	return 0;
 }
 
 static void __net_exit nf_log_bridge_net_exit(struct net *net)

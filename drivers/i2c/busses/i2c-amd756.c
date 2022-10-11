@@ -378,8 +378,11 @@ static int amd756_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		 amd756_ioport);
 
 	error = i2c_add_adapter(&amd756_smbus);
-	if (error)
+	if (error) {
+		dev_err(&pdev->dev,
+			"Adapter registration failed, module not inserted\n");
 		goto out_err;
+	}
 
 	return 0;
 

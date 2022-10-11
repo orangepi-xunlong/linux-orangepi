@@ -103,19 +103,14 @@ static int tt3650_ci_msg(struct dvb_usb_device *d, u8 cmd, u8 *data,
 			 unsigned int write_len, unsigned int read_len)
 {
 	struct pctv452e_state *state = (struct pctv452e_state *)d->priv;
-	u8 *buf;
+	u8 buf[64];
 	u8 id;
 	unsigned int rlen;
 	int ret;
 
-	if (!data || (write_len > 64 - 4) || (read_len > 64 - 4)) {
-		err("%s: transfer data invalid", __func__);
-		return -EIO;
-	}
-
-	buf = kmalloc(64, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
+	BUG_ON(NULL == data && 0 != (write_len | read_len));
+	BUG_ON(write_len > 64 - 4);
+	BUG_ON(read_len > 64 - 4);
 
 	id = state->c++;
 
@@ -138,14 +133,12 @@ static int tt3650_ci_msg(struct dvb_usb_device *d, u8 cmd, u8 *data,
 
 	memcpy(data, buf + 4, read_len);
 
-	kfree(buf);
 	return 0;
 
 failed:
 	err("CI error %d; %02X %02X %02X -> %*ph.",
 	     ret, SYNC_BYTE_OUT, id, cmd, 3, buf);
 
-	kfree(buf);
 	return ret;
 }
 
@@ -412,13 +405,9 @@ static int pctv452e_i2c_msg(struct dvb_usb_device *d, u8 addr,
 				u8 *rcv_buf, u8 rcv_len)
 {
 	struct pctv452e_state *state = (struct pctv452e_state *)d->priv;
-	u8 *buf;
+	u8 buf[64];
 	u8 id;
 	int ret;
-
-	buf = kmalloc(64, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
 
 	id = state->c++;
 
@@ -454,15 +443,14 @@ static int pctv452e_i2c_msg(struct dvb_usb_device *d, u8 addr,
 
 	memcpy(rcv_buf, buf + 7, rcv_len);
 
-	kfree(buf);
 	return rcv_len;
 
 failed:
-	err("I2C error %d; %02X %02X  %02X %02X %02X -> %*ph",
+	err("I2C error %d; %02X %02X  %02X %02X %02X -> "
+	     "%02X %02X  %02X %02X %02X.",
 	     ret, SYNC_BYTE_OUT, id, addr << 1, snd_len, rcv_len,
-	     7, buf);
+	     buf[0], buf[1], buf[4], buf[5], buf[6]);
 
-	kfree(buf);
 	return ret;
 }
 
@@ -511,7 +499,8 @@ static u32 pctv452e_i2c_func(struct i2c_adapter *adapter)
 static int pctv452e_power_ctrl(struct dvb_usb_device *d, int i)
 {
 	struct pctv452e_state *state = (struct pctv452e_state *)d->priv;
-	u8 *b0, *rx;
+	u8 b0[] = { 0xaa, 0, PCTV_CMD_RESET, 1, 0 };
+	u8 rx[PCTV_ANSWER_LEN];
 	int ret;
 
 	info("%s: %d\n", __func__, i);
@@ -522,12 +511,6 @@ static int pctv452e_power_ctrl(struct dvb_usb_device *d, int i)
 	if (state->initialized)
 		return 0;
 
-	b0 = kmalloc(5 + PCTV_ANSWER_LEN, GFP_KERNEL);
-	if (!b0)
-		return -ENOMEM;
-
-	rx = b0 + 5;
-
 	/* hmm where shoud this should go? */
 	ret = usb_set_interface(d->udev, 0, ISOC_INTERFACE_ALTERNATIVE);
 	if (ret != 0)
@@ -535,44 +518,31 @@ static int pctv452e_power_ctrl(struct dvb_usb_device *d, int i)
 			__func__, ret);
 
 	/* this is a one-time initialization, dont know where to put */
-	b0[0] = 0xaa;
 	b0[1] = state->c++;
-	b0[2] = PCTV_CMD_RESET;
-	b0[3] = 1;
-	b0[4] = 0;
 	/* reset board */
-	ret = dvb_usb_generic_rw(d, b0, 5, rx, PCTV_ANSWER_LEN, 0);
+	ret = dvb_usb_generic_rw(d, b0, sizeof(b0), rx, PCTV_ANSWER_LEN, 0);
 	if (ret)
-		goto ret;
+		return ret;
 
 	b0[1] = state->c++;
 	b0[4] = 1;
 	/* reset board (again?) */
-	ret = dvb_usb_generic_rw(d, b0, 5, rx, PCTV_ANSWER_LEN, 0);
+	ret = dvb_usb_generic_rw(d, b0, sizeof(b0), rx, PCTV_ANSWER_LEN, 0);
 	if (ret)
-		goto ret;
+		return ret;
 
 	state->initialized = 1;
 
-ret:
-	kfree(b0);
-	return ret;
+	return 0;
 }
 
 static int pctv452e_rc_query(struct dvb_usb_device *d)
 {
 	struct pctv452e_state *state = (struct pctv452e_state *)d->priv;
-	u8 *b, *rx;
+	u8 b[CMD_BUFFER_SIZE];
+	u8 rx[PCTV_ANSWER_LEN];
 	int ret, i;
-	u8 id;
-
-	b = kmalloc(CMD_BUFFER_SIZE + PCTV_ANSWER_LEN, GFP_KERNEL);
-	if (!b)
-		return -ENOMEM;
-
-	rx = b + CMD_BUFFER_SIZE;
-
-	id = state->c++;
+	u8 id = state->c++;
 
 	/* prepare command header  */
 	b[0] = SYNC_BYTE_OUT;
@@ -583,7 +553,7 @@ static int pctv452e_rc_query(struct dvb_usb_device *d)
 	/* send ir request */
 	ret = dvb_usb_generic_rw(d, b, 4, rx, PCTV_ANSWER_LEN, 0);
 	if (ret != 0)
-		goto ret;
+		return ret;
 
 	if (debug > 3) {
 		info("%s: read: %2d: %*ph: ", __func__, ret, 3, rx);
@@ -600,14 +570,13 @@ static int pctv452e_rc_query(struct dvb_usb_device *d)
 			info("%s: cmd=0x%02x sys=0x%02x\n",
 				__func__, rx[6], rx[7]);
 
-		rc_keydown(d->rc_dev, RC_TYPE_RC5, state->last_rc_key, 0);
+		rc_keydown(d->rc_dev, RC_PROTO_RC5, state->last_rc_key, 0);
 	} else if (state->last_rc_key) {
 		rc_keyup(d->rc_dev);
 		state->last_rc_key = 0;
 	}
-ret:
-	kfree(b);
-	return ret;
+
+	return 0;
 }
 
 static int pctv452e_read_mac_address(struct dvb_usb_device *d, u8 mac[6])
@@ -958,7 +927,7 @@ static struct dvb_usb_device_properties pctv452e_properties = {
 
 	.rc.core = {
 		.rc_codes	= RC_MAP_DIB0700_RC5_TABLE,
-		.allowed_protos	= RC_BIT_RC5,
+		.allowed_protos	= RC_PROTO_BIT_RC5,
 		.rc_query	= pctv452e_rc_query,
 		.rc_interval	= 100,
 	},
@@ -1011,7 +980,7 @@ static struct dvb_usb_device_properties tt_connect_s2_3600_properties = {
 
 	.rc.core = {
 		.rc_codes	= RC_MAP_TT_1500,
-		.allowed_protos	= RC_BIT_RC5,
+		.allowed_protos	= RC_PROTO_BIT_RC5,
 		.rc_query	= pctv452e_rc_query,
 		.rc_interval	= 100,
 	},
@@ -1026,11 +995,11 @@ static struct dvb_usb_device_properties tt_connect_s2_3600_properties = {
 			/* parameter for the MPEG2-data transfer */
 			.stream = {
 				.type = USB_ISOC,
-				.count = 4,
+				.count = 7,
 				.endpoint = 0x02,
 				.u = {
 					.isoc = {
-						.framesperurb = 64,
+						.framesperurb = 4,
 						.framesize = 940,
 						.interval = 1
 					}

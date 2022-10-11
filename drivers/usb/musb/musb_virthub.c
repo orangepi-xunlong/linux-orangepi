@@ -55,7 +55,8 @@ void musb_host_finish_resume(struct work_struct *work)
 
 	power = musb_readb(musb->mregs, MUSB_POWER);
 	power &= ~MUSB_POWER_RESUME;
-	musb_dbg(musb, "root port resume stopped, power %02x", power);
+	dev_dbg(musb->controller, "root port resume stopped, power %02x\n",
+		power);
 	musb_writeb(musb->mregs, MUSB_POWER, power);
 
 	/*
@@ -107,7 +108,7 @@ int musb_port_suspend(struct musb *musb, bool do_suspend)
 			}
 		}
 
-		musb_dbg(musb, "Root port suspended, power %02x", power);
+		dev_dbg(musb->controller, "Root port suspended, power %02x\n", power);
 
 		musb->port1_status |= USB_PORT_STAT_SUSPEND;
 		switch (musb->xceiv->otg->state) {
@@ -126,7 +127,7 @@ int musb_port_suspend(struct musb *musb, bool do_suspend)
 			musb_platform_try_idle(musb, 0);
 			break;
 		default:
-			musb_dbg(musb, "bogus rh suspend? %s",
+			dev_dbg(musb->controller, "bogus rh suspend? %s\n",
 				usb_otg_state_string(musb->xceiv->otg->state));
 		}
 	} else if (power & MUSB_POWER_SUSPENDM) {
@@ -134,7 +135,7 @@ int musb_port_suspend(struct musb *musb, bool do_suspend)
 		power |= MUSB_POWER_RESUME;
 		musb_writeb(mbase, MUSB_POWER, power);
 
-		musb_dbg(musb, "Root port resuming, power %02x", power);
+		dev_dbg(musb->controller, "Root port resuming, power %02x\n", power);
 
 		/* later, GetPortStatus will stop RESUME signaling */
 		musb->port1_status |= MUSB_PORT_STAT_RESUME;
@@ -150,7 +151,7 @@ void musb_port_reset(struct musb *musb, bool do_reset)
 	void __iomem	*mbase = musb->mregs;
 
 	if (musb->xceiv->otg->state == OTG_STATE_B_IDLE) {
-		musb_dbg(musb, "HNP: Returning from HNP; no hub reset from b_idle");
+		dev_dbg(musb->controller, "HNP: Returning from HNP; no hub reset from b_idle\n");
 		musb->port1_status &= ~USB_PORT_STAT_RESET;
 		return;
 	}
@@ -198,7 +199,7 @@ void musb_port_reset(struct musb *musb, bool do_reset)
 		schedule_delayed_work(&musb->deassert_reset_work,
 				      msecs_to_jiffies(50));
 	} else {
-		musb_dbg(musb, "root port reset stopped");
+		dev_dbg(musb->controller, "root port reset stopped\n");
 		musb_platform_pre_root_reset_end(musb);
 		musb_writeb(mbase, MUSB_POWER,
 				power & ~MUSB_POWER_RESET);
@@ -206,7 +207,7 @@ void musb_port_reset(struct musb *musb, bool do_reset)
 
 		power = musb_readb(mbase, MUSB_POWER);
 		if (power & MUSB_POWER_HSMODE) {
-			musb_dbg(musb, "high-speed device connected");
+			dev_dbg(musb->controller, "high-speed device connected\n");
 			musb->port1_status |= USB_PORT_STAT_HIGH_SPEED;
 		}
 
@@ -246,11 +247,10 @@ void musb_root_disconnect(struct musb *musb)
 		musb->xceiv->otg->state = OTG_STATE_B_IDLE;
 		break;
 	default:
-		musb_dbg(musb, "host disconnect (%s)",
+		dev_dbg(musb->controller, "host disconnect (%s)\n",
 			usb_otg_state_string(musb->xceiv->otg->state));
 	}
 }
-EXPORT_SYMBOL_GPL(musb_root_disconnect);
 
 
 /*---------------------------------------------------------------------*/
@@ -296,7 +296,6 @@ int musb_hub_control(
 	u32		temp;
 	int		retval = 0;
 	unsigned long	flags;
-	bool		start_musb = false;
 
 	spin_lock_irqsave(&musb->lock, flags);
 
@@ -343,7 +342,7 @@ int musb_hub_control(
 		default:
 			goto error;
 		}
-		musb_dbg(musb, "clear feature %d", wValue);
+		dev_dbg(musb->controller, "clear feature %d\n", wValue);
 		musb->port1_status &= ~(1 << wValue);
 		break;
 	case GetHubDescriptor:
@@ -378,7 +377,8 @@ int musb_hub_control(
 				(__le32 *) buf);
 
 		/* port change status is more interesting */
-		musb_dbg(musb, "port status %08x", musb->port1_status);
+		dev_dbg(musb->controller, "port status %08x\n",
+				musb->port1_status);
 		break;
 	case SetPortFeature:
 		if ((wIndex & 0xff) != 1)
@@ -397,7 +397,7 @@ int musb_hub_control(
 			 * logic relating to VBUS power-up.
 			 */
 			if (!hcd->self.is_b_host && musb_has_gadget(musb))
-				start_musb = true;
+				musb_start(musb);
 			break;
 		case USB_PORT_FEAT_RESET:
 			musb_port_reset(musb, true);
@@ -448,7 +448,7 @@ int musb_hub_control(
 		default:
 			goto error;
 		}
-		musb_dbg(musb, "set feature %d", wValue);
+		dev_dbg(musb->controller, "set feature %d\n", wValue);
 		musb->port1_status |= 1 << wValue;
 		break;
 
@@ -458,9 +458,5 @@ error:
 		retval = -EPIPE;
 	}
 	spin_unlock_irqrestore(&musb->lock, flags);
-
-	if (start_musb)
-		musb_start(musb);
-
 	return retval;
 }

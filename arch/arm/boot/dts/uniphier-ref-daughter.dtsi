@@ -43,7 +43,7 @@
  */
 
 &i2c0 {
-	eeprom@50 {
+	eeprom {
 		compatible = "microchip,24lc128";
 		reg = <0x50>;
 	};

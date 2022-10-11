@@ -29,6 +29,8 @@ int udpv6_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int noblock,
 int __udpv6_queue_rcv_skb(struct sock *sk, struct sk_buff *skb);
 void udpv6_destroy_sock(struct sock *sk);
 
+void udp_v6_clear_sk(struct sock *sk, int size);
+
 #ifdef CONFIG_PROC_FS
 int udp6_seq_show(struct seq_file *seq, void *v);
 #endif

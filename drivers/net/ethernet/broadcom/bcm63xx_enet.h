@@ -290,6 +290,7 @@ struct bcm_enet_priv {
 
 	/* used when a phy is connected (phylib used) */
 	struct mii_bus *mii_bus;
+	struct phy_device *phydev;
 	int old_link;
 	int old_duplex;
 	int old_pause;

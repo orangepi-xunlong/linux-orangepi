@@ -1,7 +1,5 @@
 config ARCH_ALPINE
-	bool "Annapurna Labs Alpine platform"
-	depends on ARCH_MULTI_V7
-	select ALPINE_MSI
+	bool "Annapurna Labs Alpine platform" if ARCH_MULTI_V7
 	select ARM_AMBA
 	select ARM_GIC
 	select GENERIC_IRQ_CHIP

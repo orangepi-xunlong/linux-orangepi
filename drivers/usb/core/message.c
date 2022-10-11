@@ -12,7 +12,6 @@
 #include <linux/nls.h>
 #include <linux/device.h>
 #include <linux/scatterlist.h>
-#include <linux/usb/cdc.h>
 #include <linux/usb/quirks.h>
 #include <linux/usb/hcd.h>	/* for usbcore internals */
 #include <asm/byteorder.h>
@@ -307,10 +306,9 @@ static void sg_complete(struct urb *urb)
 		 */
 		spin_unlock(&io->lock);
 		for (i = 0, found = 0; i < io->entries; i++) {
-			if (!io->urbs[i])
+			if (!io->urbs[i] || !io->urbs[i]->dev)
 				continue;
 			if (found) {
-				usb_block_urb(io->urbs[i]);
 				retval = usb_unlink_urb(io->urbs[i]);
 				if (retval != -EINPROGRESS &&
 				    retval != -ENODEV &&
@@ -521,10 +519,12 @@ void usb_sg_wait(struct usb_sg_request *io)
 		int retval;
 
 		io->urbs[i]->dev = io->dev;
+		retval = usb_submit_urb(io->urbs[i], GFP_ATOMIC);
+
+		/* after we submit, let completions or cancellations fire;
+		 * we handshake using io->status.
+		 */
 		spin_unlock_irq(&io->lock);
-
-		retval = usb_submit_urb(io->urbs[i], GFP_NOIO);
-
 		switch (retval) {
 			/* maybe we retrying will recover */
 		case -ENXIO:	/* hc didn't queue this one */
@@ -582,28 +582,31 @@ EXPORT_SYMBOL_GPL(usb_sg_wait);
 void usb_sg_cancel(struct usb_sg_request *io)
 {
 	unsigned long flags;
-	int i, retval;
 
 	spin_lock_irqsave(&io->lock, flags);
-	if (io->status) {
-		spin_unlock_irqrestore(&io->lock, flags);
-		return;
+
+	/* shut everything down, if it didn't already */
+	if (!io->status) {
+		int i;
+
+		io->status = -ECONNRESET;
+		spin_unlock(&io->lock);
+		for (i = 0; i < io->entries; i++) {
+			int retval;
+
+			if (!io->urbs[i]->dev)
+				continue;
+			retval = usb_unlink_urb(io->urbs[i]);
+			if (retval != -EINPROGRESS
+					&& retval != -ENODEV
+					&& retval != -EBUSY
+					&& retval != -EIDRM)
+				dev_warn(&io->dev->dev, "%s, unlink --> %d\n",
+					__func__, retval);
+		}
+		spin_lock(&io->lock);
 	}
-	/* shut everything down */
-	io->status = -ECONNRESET;
 	spin_unlock_irqrestore(&io->lock, flags);
-
-	for (i = io->entries - 1; i >= 0; --i) {
-		usb_block_urb(io->urbs[i]);
-
-		retval = usb_unlink_urb(io->urbs[i]);
-		if (retval != -EINPROGRESS
-		    && retval != -ENODEV
-		    && retval != -EBUSY
-		    && retval != -EIDRM)
-			dev_warn(&io->dev->dev, "%s, unlink --> %d\n",
-				 __func__, retval);
-	}
 }
 EXPORT_SYMBOL_GPL(usb_sg_cancel);
 
@@ -817,9 +820,11 @@ int usb_string(struct usb_device *dev, int index, char *buf, size_t size)
 
 	if (dev->state == USB_STATE_SUSPENDED)
 		return -EHOSTUNREACH;
-	if (size <= 0 || !buf || !index)
+	if (size <= 0 || !buf)
 		return -EINVAL;
 	buf[0] = 0;
+	if (index <= 0 || index >= 256)
+		return -EINVAL;
 	tbuf = kmalloc(256, GFP_NOIO);
 	if (!tbuf)
 		return -ENOMEM;
@@ -1145,7 +1150,7 @@ void usb_disable_interface(struct usb_device *dev, struct usb_interface *intf,
  */
 void usb_disable_device(struct usb_device *dev, int skip_ep0)
 {
-	int i;
+	int i, j;
 	struct usb_hcd *hcd = bus_to_hcd(dev->bus);
 
 	/* getting rid of interfaces will disconnect
@@ -1170,6 +1175,27 @@ void usb_disable_device(struct usb_device *dev, int skip_ep0)
 			dev_dbg(&dev->dev, "unregistering interface %s\n",
 				dev_name(&interface->dev));
 			remove_intf_ep_devs(interface);
+
+			/*
+			 * Some special SoCs (e.g. rk322xh) USB 3.0 module
+			 * can't handle outstanding URBs by hardware when
+			 * when USB 3.0 device disconnect, so we need to
+			 * cancel all URBs pending on this device here.
+			 *
+			 * In addition, we just reuse the hub autosuspend
+			 * quirk but not add a new quirk for this issue.
+			 * Because it always occurs with autosuspend issue.
+			 */
+			if (hcd->self.root_hub->quirks &
+			    USB_QUIRK_AUTO_SUSPEND) {
+				for (j = skip_ep0; j < 16; ++j) {
+					usb_hcd_flush_endpoint(dev,
+							       dev->ep_out[j]);
+					usb_hcd_flush_endpoint(dev,
+							       dev->ep_in[j]);
+				}
+			}
+
 			device_del(&interface->dev);
 		}
 
@@ -1181,8 +1207,7 @@ void usb_disable_device(struct usb_device *dev, int skip_ep0)
 			dev->actconfig->interface[i] = NULL;
 		}
 
-		if (dev->usb2_hw_lpm_enabled == 1)
-			usb_set_usb2_hardware_lpm(dev, 0);
+		usb_disable_usb2_hardware_lpm(dev);
 		usb_unlocked_disable_lpm(dev);
 		usb_disable_ltm(dev);
 
@@ -1279,6 +1304,11 @@ void usb_enable_interface(struct usb_device *dev,
  * is submitted that needs that bandwidth.  Some other operating systems
  * allocate bandwidth early, when a configuration is chosen.
  *
+ * xHCI reserves bandwidth and configures the alternate setting in
+ * usb_hcd_alloc_bandwidth(). If it fails the original interface altsetting
+ * may be disabled. Drivers cannot rely on any particular alternate
+ * setting being in effect after a failure.
+ *
  * This call is synchronous, and may not be used in an interrupt context.
  * Also, drivers must not change altsettings while urbs are scheduled for
  * endpoints in that interface; all such urbs must first be completed
@@ -1314,6 +1344,12 @@ int usb_set_interface(struct usb_device *dev, int interface, int alternate)
 			 alternate);
 		return -EINVAL;
 	}
+	/*
+	 * usb3 hosts configure the interface in usb_hcd_alloc_bandwidth,
+	 * including freeing dropped endpoint ring buffers.
+	 * Make sure the interface endpoints are flushed before that
+	 */
+	usb_disable_interface(dev, iface, false);
 
 	/* Make sure we have enough bandwidth for this alternate interface.
 	 * Remove the current alt setting and add the new alt setting.
@@ -1764,14 +1800,17 @@ int usb_set_configuration(struct usb_device *dev, int configuration)
 		nintf = cp->desc.bNumInterfaces;
 		new_interfaces = kmalloc(nintf * sizeof(*new_interfaces),
 				GFP_NOIO);
-		if (!new_interfaces)
+		if (!new_interfaces) {
+			dev_err(&dev->dev, "Out of memory\n");
 			return -ENOMEM;
+		}
 
 		for (; n < nintf; ++n) {
 			new_interfaces[n] = kzalloc(
 					sizeof(struct usb_interface),
 					GFP_NOIO);
 			if (!new_interfaces[n]) {
+				dev_err(&dev->dev, "Out of memory\n");
 				ret = -ENOMEM;
 free_interfaces:
 				while (--n >= 0)
@@ -1863,12 +1902,7 @@ free_interfaces:
 		intf->dev.bus = &usb_bus_type;
 		intf->dev.type = &usb_if_device_type;
 		intf->dev.groups = usb_interface_groups;
-		/*
-		 * Please refer to usb_alloc_dev() to see why we set
-		 * dma_mask and dma_pfn_offset.
-		 */
 		intf->dev.dma_mask = dev->dev.dma_mask;
-		intf->dev.dma_pfn_offset = dev->dev.dma_pfn_offset;
 		INIT_WORK(&intf->reset_ws, __usb_queue_reset_device);
 		intf->minor = -1;
 		device_initialize(&intf->dev);
@@ -1879,10 +1913,6 @@ free_interfaces:
 		usb_get_dev(dev);
 	}
 	kfree(new_interfaces);
-
-#if defined(CONFIG_ARCH_SUN50IW6)
-	msleep(20);
-#endif
 
 	ret = usb_control_msg(dev, usb_sndctrlpipe(dev, 0),
 			      USB_REQ_SET_CONFIGURATION, 0, configuration, 0,
@@ -2034,159 +2064,3 @@ int usb_driver_set_configuration(struct usb_device *udev, int config)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(usb_driver_set_configuration);
-
-/**
- * cdc_parse_cdc_header - parse the extra headers present in CDC devices
- * @hdr: the place to put the results of the parsing
- * @intf: the interface for which parsing is requested
- * @buffer: pointer to the extra headers to be parsed
- * @buflen: length of the extra headers
- *
- * This evaluates the extra headers present in CDC devices which
- * bind the interfaces for data and control and provide details
- * about the capabilities of the device.
- *
- * Return: number of descriptors parsed or -EINVAL
- * if the header is contradictory beyond salvage
- */
-
-int cdc_parse_cdc_header(struct usb_cdc_parsed_header *hdr,
-				struct usb_interface *intf,
-				u8 *buffer,
-				int buflen)
-{
-	/* duplicates are ignored */
-	struct usb_cdc_union_desc *union_header = NULL;
-
-	/* duplicates are not tolerated */
-	struct usb_cdc_header_desc *header = NULL;
-	struct usb_cdc_ether_desc *ether = NULL;
-	struct usb_cdc_mdlm_detail_desc *detail = NULL;
-	struct usb_cdc_mdlm_desc *desc = NULL;
-
-	unsigned int elength;
-	int cnt = 0;
-
-	memset(hdr, 0x00, sizeof(struct usb_cdc_parsed_header));
-	hdr->phonet_magic_present = false;
-	while (buflen > 0) {
-		elength = buffer[0];
-		if (!elength) {
-			dev_err(&intf->dev, "skipping garbage byte\n");
-			elength = 1;
-			goto next_desc;
-		}
-		if ((buflen < elength) || (elength < 3)) {
-			dev_err(&intf->dev, "invalid descriptor buffer length\n");
-			break;
-		}
-		if (buffer[1] != USB_DT_CS_INTERFACE) {
-			dev_err(&intf->dev, "skipping garbage\n");
-			goto next_desc;
-		}
-
-		switch (buffer[2]) {
-		case USB_CDC_UNION_TYPE: /* we've found it */
-			if (elength < sizeof(struct usb_cdc_union_desc))
-				goto next_desc;
-			if (union_header) {
-				dev_err(&intf->dev, "More than one union descriptor, skipping ...\n");
-				goto next_desc;
-			}
-			union_header = (struct usb_cdc_union_desc *)buffer;
-			break;
-		case USB_CDC_COUNTRY_TYPE:
-			if (elength < sizeof(struct usb_cdc_country_functional_desc))
-				goto next_desc;
-			hdr->usb_cdc_country_functional_desc =
-				(struct usb_cdc_country_functional_desc *)buffer;
-			break;
-		case USB_CDC_HEADER_TYPE:
-			if (elength != sizeof(struct usb_cdc_header_desc))
-				goto next_desc;
-			if (header)
-				return -EINVAL;
-			header = (struct usb_cdc_header_desc *)buffer;
-			break;
-		case USB_CDC_ACM_TYPE:
-			if (elength < sizeof(struct usb_cdc_acm_descriptor))
-				goto next_desc;
-			hdr->usb_cdc_acm_descriptor =
-				(struct usb_cdc_acm_descriptor *)buffer;
-			break;
-		case USB_CDC_ETHERNET_TYPE:
-			if (elength != sizeof(struct usb_cdc_ether_desc))
-				goto next_desc;
-			if (ether)
-				return -EINVAL;
-			ether = (struct usb_cdc_ether_desc *)buffer;
-			break;
-		case USB_CDC_CALL_MANAGEMENT_TYPE:
-			if (elength < sizeof(struct usb_cdc_call_mgmt_descriptor))
-				goto next_desc;
-			hdr->usb_cdc_call_mgmt_descriptor =
-				(struct usb_cdc_call_mgmt_descriptor *)buffer;
-			break;
-		case USB_CDC_DMM_TYPE:
-			if (elength < sizeof(struct usb_cdc_dmm_desc))
-				goto next_desc;
-			hdr->usb_cdc_dmm_desc =
-				(struct usb_cdc_dmm_desc *)buffer;
-			break;
-		case USB_CDC_MDLM_TYPE:
-			if (elength < sizeof(struct usb_cdc_mdlm_desc *))
-				goto next_desc;
-			if (desc)
-				return -EINVAL;
-			desc = (struct usb_cdc_mdlm_desc *)buffer;
-			break;
-		case USB_CDC_MDLM_DETAIL_TYPE:
-			if (elength < sizeof(struct usb_cdc_mdlm_detail_desc *))
-				goto next_desc;
-			if (detail)
-				return -EINVAL;
-			detail = (struct usb_cdc_mdlm_detail_desc *)buffer;
-			break;
-		case USB_CDC_NCM_TYPE:
-			if (elength < sizeof(struct usb_cdc_ncm_desc))
-				goto next_desc;
-			hdr->usb_cdc_ncm_desc = (struct usb_cdc_ncm_desc *)buffer;
-			break;
-		case USB_CDC_MBIM_TYPE:
-			if (elength < sizeof(struct usb_cdc_mbim_desc))
-				goto next_desc;
-
-			hdr->usb_cdc_mbim_desc = (struct usb_cdc_mbim_desc *)buffer;
-			break;
-		case USB_CDC_MBIM_EXTENDED_TYPE:
-			if (elength < sizeof(struct usb_cdc_mbim_extended_desc))
-				break;
-			hdr->usb_cdc_mbim_extended_desc =
-				(struct usb_cdc_mbim_extended_desc *)buffer;
-			break;
-		case CDC_PHONET_MAGIC_NUMBER:
-			hdr->phonet_magic_present = true;
-			break;
-		default:
-			/*
-			 * there are LOTS more CDC descriptors that
-			 * could legitimately be found here.
-			 */
-			dev_dbg(&intf->dev, "Ignoring descriptor: type %02x, length %ud\n",
-					buffer[2], elength);
-			goto next_desc;
-		}
-		cnt++;
-next_desc:
-		buflen -= elength;
-		buffer += elength;
-	}
-	hdr->usb_cdc_union_desc = union_header;
-	hdr->usb_cdc_header_desc = header;
-	hdr->usb_cdc_mdlm_detail_desc = detail;
-	hdr->usb_cdc_mdlm_desc = desc;
-	hdr->usb_cdc_ether_desc = ether;
-	return cnt;
-}
-
-EXPORT_SYMBOL(cdc_parse_cdc_header);

@@ -26,32 +26,6 @@
 #include <net/lwtunnel.h>
 #include <net/rtnetlink.h>
 #include <net/ip6_fib.h>
-#include <net/nexthop.h>
-
-#ifdef CONFIG_MODULES
-
-static const char *lwtunnel_encap_str(enum lwtunnel_encap_types encap_type)
-{
-	/* Only lwt encaps implemented without using an interface for
-	 * the encap need to return a string here.
-	 */
-	switch (encap_type) {
-	case LWTUNNEL_ENCAP_MPLS:
-		return "MPLS";
-	case LWTUNNEL_ENCAP_ILA:
-		return "ILA";
-	case LWTUNNEL_ENCAP_IP6:
-	case LWTUNNEL_ENCAP_IP:
-	case LWTUNNEL_ENCAP_NONE:
-	case __LWTUNNEL_ENCAP_MAX:
-		/* should not have got here */
-		WARN_ON(1);
-		break;
-	}
-	return NULL;
-}
-
-#endif /* CONFIG_MODULES */
 
 struct lwtunnel_state *lwtunnel_state_alloc(int encap_len)
 {
@@ -65,15 +39,6 @@ EXPORT_SYMBOL(lwtunnel_state_alloc);
 
 static const struct lwtunnel_encap_ops __rcu *
 		lwtun_encaps[LWTUNNEL_ENCAP_MAX + 1] __read_mostly;
-
-void lwtstate_free(struct lwtunnel_state *lws)
-{
-	const struct lwtunnel_encap_ops *ops = lwtun_encaps[lws->type];
-
-	kfree(lws);
-	module_put(ops->owner);
-}
-EXPORT_SYMBOL(lwtstate_free);
 
 int lwtunnel_encap_add_ops(const struct lwtunnel_encap_ops *ops,
 			   unsigned int num)
@@ -120,77 +85,13 @@ int lwtunnel_build_state(struct net_device *dev, u16 encap_type,
 	ret = -EOPNOTSUPP;
 	rcu_read_lock();
 	ops = rcu_dereference(lwtun_encaps[encap_type]);
-	if (likely(ops && ops->build_state && try_module_get(ops->owner))) {
+	if (likely(ops && ops->build_state))
 		ret = ops->build_state(dev, encap, family, cfg, lws);
-		if (ret)
-			module_put(ops->owner);
-	}
 	rcu_read_unlock();
 
 	return ret;
 }
 EXPORT_SYMBOL(lwtunnel_build_state);
-
-int lwtunnel_valid_encap_type(u16 encap_type)
-{
-	const struct lwtunnel_encap_ops *ops;
-	int ret = -EINVAL;
-
-	if (encap_type == LWTUNNEL_ENCAP_NONE ||
-	    encap_type > LWTUNNEL_ENCAP_MAX)
-		return ret;
-
-	rcu_read_lock();
-	ops = rcu_dereference(lwtun_encaps[encap_type]);
-	rcu_read_unlock();
-#ifdef CONFIG_MODULES
-	if (!ops) {
-		const char *encap_type_str = lwtunnel_encap_str(encap_type);
-
-		if (encap_type_str) {
-			__rtnl_unlock();
-			request_module("rtnl-lwt-%s", encap_type_str);
-			rtnl_lock();
-
-			rcu_read_lock();
-			ops = rcu_dereference(lwtun_encaps[encap_type]);
-			rcu_read_unlock();
-		}
-	}
-#endif
-	return ops ? 0 : -EOPNOTSUPP;
-}
-EXPORT_SYMBOL(lwtunnel_valid_encap_type);
-
-int lwtunnel_valid_encap_type_attr(struct nlattr *attr, int remaining)
-{
-	struct rtnexthop *rtnh = (struct rtnexthop *)attr;
-	struct nlattr *nla_entype;
-	struct nlattr *attrs;
-	struct nlattr *nla;
-	u16 encap_type;
-	int attrlen;
-
-	while (rtnh_ok(rtnh, remaining)) {
-		attrlen = rtnh_attrlen(rtnh);
-		if (attrlen > 0) {
-			attrs = rtnh_attrs(rtnh);
-			nla = nla_find(attrs, attrlen, RTA_ENCAP);
-			nla_entype = nla_find(attrs, attrlen, RTA_ENCAP_TYPE);
-
-			if (nla_entype) {
-				encap_type = nla_get_u16(nla_entype);
-
-				if (lwtunnel_valid_encap_type(encap_type) != 0)
-					return -EOPNOTSUPP;
-			}
-		}
-		rtnh = rtnh_next(rtnh, &remaining);
-	}
-
-	return 0;
-}
-EXPORT_SYMBOL(lwtunnel_valid_encap_type_attr);
 
 int lwtunnel_fill_encap(struct sk_buff *skb, struct lwtunnel_state *lwtstate)
 {
@@ -312,41 +213,6 @@ drop:
 	return ret;
 }
 EXPORT_SYMBOL(lwtunnel_output);
-
-int lwtunnel_xmit(struct sk_buff *skb)
-{
-	struct dst_entry *dst = skb_dst(skb);
-	const struct lwtunnel_encap_ops *ops;
-	struct lwtunnel_state *lwtstate;
-	int ret = -EINVAL;
-
-	if (!dst)
-		goto drop;
-
-	lwtstate = dst->lwtstate;
-
-	if (lwtstate->type == LWTUNNEL_ENCAP_NONE ||
-	    lwtstate->type > LWTUNNEL_ENCAP_MAX)
-		return 0;
-
-	ret = -EOPNOTSUPP;
-	rcu_read_lock();
-	ops = rcu_dereference(lwtun_encaps[lwtstate->type]);
-	if (likely(ops && ops->xmit))
-		ret = ops->xmit(skb);
-	rcu_read_unlock();
-
-	if (ret == -EOPNOTSUPP)
-		goto drop;
-
-	return ret;
-
-drop:
-	kfree_skb(skb);
-
-	return ret;
-}
-EXPORT_SYMBOL(lwtunnel_xmit);
 
 int lwtunnel_input(struct sk_buff *skb)
 {

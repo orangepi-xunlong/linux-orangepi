@@ -27,6 +27,15 @@
 		stdout-path = &uart0;
 	};
 
+	mbus {
+		pcie-controller {
+			status = "okay";
+			pcie@1,0 {
+				status = "okay";
+			};
+		};
+	};
+
 	ocp@f1000000 {
 		serial@12000 {
 			status = "okay";
@@ -53,7 +62,7 @@
 	gpio_keys {
 		compatible = "gpio-keys";
 
-		power {
+		button@1{
 			label = "Power push button";
 			linux,code = <KEY_POWER>;
 			gpios = <&gpio1 0 GPIO_ACTIVE_HIGH>;
@@ -159,12 +168,4 @@
 	ethernet0-port@0 {
 		phy-handle = <&ethphy0>;
 	};
-};
-
-&pciec {
-        status = "okay";
-};
-
-&pcie0 {
-	status = "okay";
 };

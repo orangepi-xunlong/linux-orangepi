@@ -478,7 +478,7 @@ bool menu_is_visible(struct menu *menu)
 
 	if (menu->visibility) {
 		if (expr_calc_value(menu->visibility) == no)
-			return false;
+			return no;
 	}
 
 	sym = menu->sym;

@@ -631,7 +631,7 @@ int arch_validate_hwbkpt_settings(struct perf_event *bp)
 	info->address &= ~alignment_mask;
 	info->ctrl.len <<= offset;
 
-	if (is_default_overflow_handler(bp)) {
+	if (!bp->overflow_handler) {
 		/*
 		 * Mismatch breakpoints are required for single-stepping
 		 * breakpoints.
@@ -725,6 +725,20 @@ static void watchpoint_handler(unsigned long addr, unsigned int fsr,
 
 			/* Check if the watchpoint value matches. */
 			val = read_wb_reg(ARM_BASE_WVR + i);
+			/*
+			 * It seems Cortex-A12/A17 do not report report
+			 * watchpoint hit address that matches the watchpoint
+			 * set as ARM64.
+			 * Add this workaround for pass Android 8+ CTS
+			 * bionic ptrace watchpoint_imprecise.
+			 */
+			if (read_cpuid_part() == ARM_CPU_PART_CORTEX_A12) {
+				unsigned long dist;
+
+				dist = val > addr ? val - addr : addr - val;
+				if (dist > 8)
+					goto unlock;
+			} else
 			if (val != (addr & ~alignment_mask))
 				goto unlock;
 
@@ -754,7 +768,7 @@ static void watchpoint_handler(unsigned long addr, unsigned int fsr,
 		 * mismatch breakpoint so we can single-step over the
 		 * watchpoint trigger.
 		 */
-		if (is_default_overflow_handler(wp))
+		if (!wp->overflow_handler)
 			enable_single_step(wp, instruction_pointer(regs));
 
 unlock:

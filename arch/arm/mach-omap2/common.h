@@ -257,27 +257,30 @@ extern void gic_dist_enable(void);
 extern bool gic_dist_disabled(void);
 extern void gic_timer_retrigger(void);
 extern void omap_smc1(u32 fn, u32 arg);
-extern void omap4_sar_ram_init(void);
 extern void __iomem *omap4_get_sar_ram_base(void);
-extern void omap4_mpuss_early_init(void);
 extern void omap_do_wfi(void);
-
 
 #ifdef CONFIG_SMP
 /* Needed for secondary core boot */
+extern void omap4_secondary_startup(void);
+extern void omap4460_secondary_startup(void);
 extern u32 omap_modify_auxcoreboot0(u32 set_mask, u32 clear_mask);
 extern void omap_auxcoreboot_addr(u32 cpu_addr);
 extern u32 omap_read_auxcoreboot0(void);
 
 extern void omap4_cpu_die(unsigned int cpu);
-extern int omap4_cpu_kill(unsigned int cpu);
 
-extern const struct smp_operations omap4_smp_ops;
+extern struct smp_operations omap4_smp_ops;
+
+extern void omap5_secondary_startup(void);
+extern void omap5_secondary_hyp_startup(void);
 #endif
 
 #if defined(CONFIG_SMP) && defined(CONFIG_PM)
 extern int omap4_mpuss_init(void);
 extern int omap4_enter_lowpower(unsigned int cpu, unsigned int power_state);
+extern int omap4_finish_suspend(unsigned long cpu_state);
+extern void omap4_cpu_resume(void);
 extern int omap4_hotplug_cpu(unsigned int cpu, unsigned int power_state);
 #else
 static inline int omap4_enter_lowpower(unsigned int cpu,
@@ -298,41 +301,14 @@ static inline int omap4_mpuss_init(void)
 	return 0;
 }
 
-#endif
-
-#ifdef CONFIG_ARCH_OMAP4
-void omap4_secondary_startup(void);
-void omap4460_secondary_startup(void);
-int omap4_finish_suspend(unsigned long cpu_state);
-void omap4_cpu_resume(void);
-#else
-static inline void omap4_secondary_startup(void)
-{
-}
-
-static inline void omap4460_secondary_startup(void)
-{
-}
 static inline int omap4_finish_suspend(unsigned long cpu_state)
 {
 	return 0;
 }
+
 static inline void omap4_cpu_resume(void)
-{
-}
-#endif
+{}
 
-#if defined(CONFIG_SOC_OMAP5) || defined(CONFIG_SOC_DRA7XX)
-void omap5_secondary_startup(void);
-void omap5_secondary_hyp_startup(void);
-#else
-static inline void omap5_secondary_startup(void)
-{
-}
-
-static inline void omap5_secondary_hyp_startup(void)
-{
-}
 #endif
 
 void pdata_quirks_init(const struct of_device_id *);

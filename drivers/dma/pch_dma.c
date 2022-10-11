@@ -357,13 +357,14 @@ static void pdc_chain_complete(struct pch_dma_chan *pd_chan,
 			       struct pch_dma_desc *desc)
 {
 	struct dma_async_tx_descriptor *txd = &desc->txd;
-	struct dmaengine_desc_callback cb;
+	dma_async_tx_callback callback = txd->callback;
+	void *param = txd->callback_param;
 
-	dmaengine_desc_get_callback(txd, &cb);
 	list_splice_init(&desc->tx_list, &pd_chan->free_list);
 	list_move(&desc->desc_node, &pd_chan->free_list);
 
-	dmaengine_desc_callback_invoke(&cb, NULL);
+	if (callback)
+		callback(param);
 }
 
 static void pdc_complete_all(struct pch_dma_chan *pd_chan)

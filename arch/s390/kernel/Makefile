@@ -2,10 +2,6 @@
 # Makefile for the linux kernel.
 #
 
-KCOV_INSTRUMENT_early.o := n
-KCOV_INSTRUMENT_sclp.o := n
-KCOV_INSTRUMENT_als.o := n
-
 ifdef CONFIG_FUNCTION_TRACER
 # Don't trace early setup code and tracing code
 CFLAGS_REMOVE_early.o = $(CC_FLAGS_FTRACE)
@@ -33,31 +29,21 @@ CFLAGS_ptrace.o		+= -DUTS_MACHINE='"$(UTS_MACHINE)"'
 CFLAGS_sysinfo.o += -w
 
 #
-# Use -march=z900 for sclp.c and als.c to be able to print an error
-# message if the kernel is started on a machine which is too old
+# Use -march=z900 for sclp.c to be able to print an error message if
+# the kernel is started on a machine which is too old
 #
 CFLAGS_REMOVE_sclp.o = $(CC_FLAGS_FTRACE)
-CFLAGS_REMOVE_als.o = $(CC_FLAGS_FTRACE)
 ifneq ($(CC_FLAGS_MARCH),-march=z900)
-CFLAGS_REMOVE_sclp.o	+= $(CC_FLAGS_MARCH)
-CFLAGS_sclp.o		+= -march=z900
-CFLAGS_REMOVE_als.o	+= $(CC_FLAGS_MARCH)
-CFLAGS_REMOVE_als.o	+= $(CC_FLAGS_EXPOLINE)
-CFLAGS_als.o		+= -march=z900
-AFLAGS_REMOVE_head.o	+= $(CC_FLAGS_MARCH)
-AFLAGS_head.o		+= -march=z900
+CFLAGS_REMOVE_sclp.o += $(CC_FLAGS_MARCH)
+CFLAGS_sclp.o	+= -march=z900
 endif
 GCOV_PROFILE_sclp.o := n
-GCOV_PROFILE_als.o := n
-UBSAN_SANITIZE_als.o := n
-UBSAN_SANITIZE_early.o := n
-UBSAN_SANITIZE_sclp.o := n
 
 obj-y	:= traps.o time.o process.o base.o early.o setup.o idle.o vtime.o
 obj-y	+= processor.o sys_s390.o ptrace.o signal.o cpcmd.o ebcdic.o nmi.o
-obj-y	+= debug.o irq.o ipl.o dis.o diag.o sclp.o vdso.o als.o
+obj-y	+= debug.o irq.o ipl.o dis.o diag.o sclp.o vdso.o
 obj-y	+= sysinfo.o jump_label.o lgr.o os_info.o machine_kexec.o pgm_check.o
-obj-y	+= runtime_instr.o cache.o fpu.o dumpstack.o
+obj-y	+= runtime_instr.o cache.o dumpstack.o
 obj-y	+= entry.o reipl.o relocate_kernel.o alternative.o
 obj-y	+= nospec-branch.o
 
@@ -66,9 +52,9 @@ extra-y				+= head.o head64.o vmlinux.lds
 obj-$(CONFIG_SYSFS)		+= nospec-sysfs.o
 CFLAGS_REMOVE_nospec-branch.o	+= $(CC_FLAGS_EXPOLINE)
 
-obj-$(CONFIG_MODULES)		+= module.o
+obj-$(CONFIG_MODULES)		+= s390_ksyms.o module.o
 obj-$(CONFIG_SMP)		+= smp.o
-obj-$(CONFIG_SCHED_TOPOLOGY)	+= topology.o
+obj-$(CONFIG_SCHED_BOOK)	+= topology.o
 obj-$(CONFIG_HIBERNATION)	+= suspend.o swsusp.o
 obj-$(CONFIG_AUDIT)		+= audit.o
 compat-obj-$(CONFIG_AUDIT)	+= compat_audit.o

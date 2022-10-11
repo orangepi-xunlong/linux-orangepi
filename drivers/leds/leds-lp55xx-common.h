@@ -95,7 +95,7 @@ struct lp55xx_reg {
  * @enable             : Chip specific enable command
  * @max_channel        : Maximum number of channels
  * @post_init_device   : Chip specific initialization code
- * @brightness_fn      : Brightness function
+ * @brightness_work_fn : Brightness work function
  * @set_led_current    : LED current set function
  * @firmware_cb        : Call function when the firmware is loaded
  * @run_engine         : Run internal engine for pattern
@@ -110,7 +110,7 @@ struct lp55xx_device_config {
 	int (*post_init_device) (struct lp55xx_chip *chip);
 
 	/* access brightness register */
-	int (*brightness_fn)(struct lp55xx_led *led);
+	void (*brightness_work_fn)(struct work_struct *work);
 
 	/* current setting function */
 	void (*set_led_current) (struct lp55xx_led *led, u8 led_current);
@@ -164,6 +164,7 @@ struct lp55xx_chip {
  * @cdev            : LED class device
  * @led_current     : Current setting at each led channel
  * @max_current     : Maximun current at each led channel
+ * @brightness_work : Workqueue for brightness control
  * @brightness      : Brightness value
  * @chip            : The lp55xx chip data
  */
@@ -172,6 +173,7 @@ struct lp55xx_led {
 	struct led_classdev cdev;
 	u8 led_current;
 	u8 max_current;
+	struct work_struct brightness_work;
 	u8 brightness;
 	struct lp55xx_chip *chip;
 };

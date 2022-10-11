@@ -53,7 +53,6 @@ static LIST_HEAD(accel_table);
 static LIST_HEAD(vfs_table);
 static DEFINE_MUTEX(table_lock);
 static uint32_t num_devices;
-static u8 id_map[ADF_MAX_DEVICES];
 
 struct vf_id_map {
 	u32 bdf;
@@ -117,10 +116,8 @@ void adf_clean_vf_map(bool vf)
 	mutex_lock(&table_lock);
 	list_for_each_safe(ptr, tmp, &vfs_table) {
 		map = list_entry(ptr, struct vf_id_map, list);
-		if (map->bdf != -1) {
-			id_map[map->id] = 0;
+		if (map->bdf != -1)
 			num_devices--;
-		}
 
 		if (vf && map->bdf == -1)
 			continue;
@@ -156,19 +153,6 @@ void adf_devmgr_update_class_index(struct adf_hw_device_data *hw_data)
 	}
 }
 EXPORT_SYMBOL_GPL(adf_devmgr_update_class_index);
-
-static unsigned int adf_find_free_id(void)
-{
-	unsigned int i;
-
-	for (i = 0; i < ADF_MAX_DEVICES; i++) {
-		if (!id_map[i]) {
-			id_map[i] = 1;
-			return i;
-		}
-	}
-	return ADF_MAX_DEVICES + 1;
-}
 
 /**
  * adf_devmgr_add_dev() - Add accel_dev to the acceleration framework
@@ -210,12 +194,8 @@ int adf_devmgr_add_dev(struct adf_accel_dev *accel_dev,
 		}
 
 		list_add_tail(&accel_dev->list, &accel_table);
-		accel_dev->accel_id = adf_find_free_id();
-		if (accel_dev->accel_id > ADF_MAX_DEVICES) {
-			ret = -EFAULT;
-			goto unlock;
-		}
-		num_devices++;
+		accel_dev->accel_id = num_devices++;
+
 		map = kzalloc(sizeof(*map), GFP_KERNEL);
 		if (!map) {
 			ret = -ENOMEM;
@@ -256,13 +236,8 @@ int adf_devmgr_add_dev(struct adf_accel_dev *accel_dev,
 			ret = -ENOMEM;
 			goto unlock;
 		}
-		accel_dev->accel_id = adf_find_free_id();
-		if (accel_dev->accel_id > ADF_MAX_DEVICES) {
-			kfree(map);
-			ret = -EFAULT;
-			goto unlock;
-		}
-		num_devices++;
+
+		accel_dev->accel_id = num_devices++;
 		list_add_tail(&accel_dev->list, &accel_table);
 		map->bdf = adf_get_vf_num(accel_dev);
 		map->id = accel_dev->accel_id;
@@ -296,7 +271,6 @@ void adf_devmgr_rm_dev(struct adf_accel_dev *accel_dev,
 {
 	mutex_lock(&table_lock);
 	if (!accel_dev->is_vf || (accel_dev->is_vf && !pf)) {
-		id_map[accel_dev->accel_id] = 0;
 		num_devices--;
 	} else if (accel_dev->is_vf && pf) {
 		struct vf_id_map *map, *next;

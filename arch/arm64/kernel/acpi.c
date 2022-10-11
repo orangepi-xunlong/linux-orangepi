@@ -24,7 +24,6 @@
 #include <linux/memblock.h>
 #include <linux/of_fdt.h>
 #include <linux/smp.h>
-#include <linux/serial_core.h>
 
 #include <asm/cputype.h>
 #include <asm/cpu_ops.h>
@@ -43,7 +42,6 @@ int acpi_pci_disabled = 1;	/* skip ACPI PCI scan and IRQ initialization */
 EXPORT_SYMBOL(acpi_pci_disabled);
 
 static bool param_acpi_off __initdata;
-static bool param_acpi_on __initdata;
 static bool param_acpi_force __initdata;
 
 static int __init parse_acpi(char *arg)
@@ -54,8 +52,6 @@ static int __init parse_acpi(char *arg)
 	/* "acpi=off" disables both ACPI table parsing and interpreter */
 	if (strcmp(arg, "off") == 0)
 		param_acpi_off = true;
-	else if (strcmp(arg, "on") == 0) /* prefer ACPI over DT */
-		param_acpi_on = true;
 	else if (strcmp(arg, "force") == 0) /* force ACPI to be enabled */
 		param_acpi_force = true;
 	else
@@ -70,24 +66,12 @@ static int __init dt_scan_depth1_nodes(unsigned long node,
 				       void *data)
 {
 	/*
-	 * Ignore anything not directly under the root node; we'll
-	 * catch its parent instead.
+	 * Return 1 as soon as we encounter a node at depth 1 that is
+	 * not the /chosen node.
 	 */
-	if (depth != 1)
-		return 0;
-
-	if (strcmp(uname, "chosen") == 0)
-		return 0;
-
-	if (strcmp(uname, "hypervisor") == 0 &&
-	    of_flat_dt_is_compatible(node, "xen,xen"))
-		return 0;
-
-	/*
-	 * This node at depth 1 is neither a chosen node nor a xen node,
-	 * which we do not expect.
-	 */
-	return 1;
+	if (depth == 1 && (strcmp(uname, "chosen") != 0))
+		return 1;
+	return 0;
 }
 
 /*
@@ -157,10 +141,14 @@ static int __init acpi_fadt_sanity_check(void)
 	 */
 	if (table->revision < 5 ||
 	   (table->revision == 5 && fadt->minor_revision < 1)) {
-		pr_err("Unsupported FADT revision %d.%d, should be 5.1+\n",
+		pr_err(FW_BUG "Unsupported FADT revision %d.%d, should be 5.1+\n",
 		       table->revision, fadt->minor_revision);
-		ret = -EINVAL;
-		goto out;
+
+		if (!fadt->arm_boot_flags) {
+			ret = -EINVAL;
+			goto out;
+		}
+		pr_err("FADT has ARM boot flags set, assuming 5.1\n");
 	}
 
 	if (!(fadt->flags & ACPI_FADT_HW_REDUCED)) {
@@ -200,14 +188,12 @@ void __init acpi_boot_table_init(void)
 	/*
 	 * Enable ACPI instead of device tree unless
 	 * - ACPI has been disabled explicitly (acpi=off), or
-	 * - the device tree is not empty (it has more than just a /chosen node,
-	 *   and a /hypervisor node when running on Xen)
-	 *   and ACPI has not been [force] enabled (acpi=on|force)
+	 * - the device tree is not empty (it has more than just a /chosen node)
+	 *   and ACPI has not been force enabled (acpi=force)
 	 */
 	if (param_acpi_off ||
-	    (!param_acpi_on && !param_acpi_force &&
-	     of_scan_flat_dt(dt_scan_depth1_nodes, NULL)))
-		goto done;
+	    (!param_acpi_force && of_scan_flat_dt(dt_scan_depth1_nodes, NULL)))
+		return;
 
 	/*
 	 * ACPI is disabled at this point. Enable it in order to parse
@@ -226,14 +212,6 @@ void __init acpi_boot_table_init(void)
 		pr_err("Failed to init ACPI tables\n");
 		if (!param_acpi_force)
 			disable_acpi();
-	}
-
-done:
-	if (acpi_disabled) {
-		if (earlycon_init_is_deferred)
-			early_init_dt_scan_chosen_stdout();
-	} else {
-		parse_spcr(earlycon_init_is_deferred);
 	}
 }
 

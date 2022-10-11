@@ -234,16 +234,21 @@ static void output_pgtable_bits_defines(void)
 	pr_debug("\n");
 
 	pr_define("_PAGE_PRESENT_SHIFT %d\n", _PAGE_PRESENT_SHIFT);
-	pr_define("_PAGE_NO_READ_SHIFT %d\n", _PAGE_NO_READ_SHIFT);
+	pr_define("_PAGE_READ_SHIFT %d\n", _PAGE_READ_SHIFT);
 	pr_define("_PAGE_WRITE_SHIFT %d\n", _PAGE_WRITE_SHIFT);
 	pr_define("_PAGE_ACCESSED_SHIFT %d\n", _PAGE_ACCESSED_SHIFT);
 	pr_define("_PAGE_MODIFIED_SHIFT %d\n", _PAGE_MODIFIED_SHIFT);
 #ifdef CONFIG_MIPS_HUGE_TLB_SUPPORT
 	pr_define("_PAGE_HUGE_SHIFT %d\n", _PAGE_HUGE_SHIFT);
+	pr_define("_PAGE_SPLITTING_SHIFT %d\n", _PAGE_SPLITTING_SHIFT);
 #endif
+#if defined(CONFIG_CPU_MIPSR2) || defined(CONFIG_CPU_MIPSR6)
+	if (cpu_has_rixi) {
 #ifdef _PAGE_NO_EXEC_SHIFT
-	if (cpu_has_rixi)
 		pr_define("_PAGE_NO_EXEC_SHIFT %d\n", _PAGE_NO_EXEC_SHIFT);
+		pr_define("_PAGE_NO_READ_SHIFT %d\n", _PAGE_NO_READ_SHIFT);
+#endif
+	}
 #endif
 	pr_define("_PAGE_GLOBAL_SHIFT %d\n", _PAGE_GLOBAL_SHIFT);
 	pr_define("_PAGE_VALID_SHIFT %d\n", _PAGE_VALID_SHIFT);
@@ -280,12 +285,7 @@ static inline void dump_handler(const char *symbol, const u32 *handler, int coun
 #define C0_ENTRYLO1	3, 0
 #define C0_CONTEXT	4, 0
 #define C0_PAGEMASK	5, 0
-#define C0_PWBASE	5, 5
-#define C0_PWFIELD	5, 6
-#define C0_PWSIZE	5, 7
-#define C0_PWCTL	6, 6
 #define C0_BADVADDR	8, 0
-#define C0_PGD		9, 7
 #define C0_ENTRYHI	10, 0
 #define C0_EPC		14, 0
 #define C0_XCONTEXT	20, 0
@@ -631,11 +631,6 @@ static void build_tlb_write_entry(u32 **p, struct uasm_label **l,
 static __maybe_unused void build_convert_pte_to_entrylo(u32 **p,
 							unsigned int reg)
 {
-	if (_PAGE_GLOBAL_SHIFT == 0) {
-		/* pte_t is already in EntryLo format */
-		return;
-	}
-
 	if (cpu_has_rixi && _PAGE_NO_EXEC) {
 		if (fill_includes_sw_bits) {
 			UASM_i_ROTR(p, reg, reg, ilog2(_PAGE_GLOBAL));
@@ -831,10 +826,7 @@ build_get_pmde64(u32 **p, struct uasm_label **l, struct uasm_reloc **r,
 
 	if (pgd_reg != -1) {
 		/* pgd is in pgd_reg */
-		if (cpu_has_ldpte)
-			UASM_i_MFC0(p, ptr, C0_PWBASE);
-		else
-			UASM_i_MFC0(p, ptr, c0_kscratch(), pgd_reg);
+		UASM_i_MFC0(p, ptr, c0_kscratch(), pgd_reg);
 	} else {
 #if defined(CONFIG_MIPS_PGD_C0_CONTEXT)
 		/*
@@ -905,7 +897,7 @@ build_get_pgd_vmalloc64(u32 **p, struct uasm_label **l, struct uasm_reloc **r,
 		}
 	}
 	if (!did_vmalloc_branch) {
-		if (single_insn_swpd) {
+		if (uasm_in_compat_space_p(swpd) && !uasm_rel_lo(swpd)) {
 			uasm_il_b(p, r, label_vmalloc_done);
 			uasm_i_lui(p, ptr, uasm_rel_hi(swpd));
 		} else {
@@ -1033,40 +1025,39 @@ static void build_get_ptep(u32 **p, unsigned int tmp, unsigned int ptr)
 
 static void build_update_entries(u32 **p, unsigned int tmp, unsigned int ptep)
 {
-	int pte_off_even = 0;
-	int pte_off_odd = sizeof(pte_t);
+	/*
+	 * 64bit address support (36bit on a 32bit CPU) in a 32bit
+	 * Kernel is a special case. Only a few CPUs use it.
+	 */
+	if (config_enabled(CONFIG_PHYS_ADDR_T_64BIT) && !cpu_has_64bits) {
+		int pte_off_even = sizeof(pte_t) / 2;
+		int pte_off_odd = pte_off_even + sizeof(pte_t);
+#ifdef CONFIG_XPA
+		const int scratch = 1; /* Our extra working register */
 
-#if defined(CONFIG_CPU_MIPS32) && defined(CONFIG_PHYS_ADDR_T_64BIT)
-	/* The low 32 bits of EntryLo is stored in pte_high */
-	pte_off_even += offsetof(pte_t, pte_high);
-	pte_off_odd += offsetof(pte_t, pte_high);
+		uasm_i_addu(p, scratch, 0, ptep);
 #endif
-
-	if (IS_ENABLED(CONFIG_XPA)) {
 		uasm_i_lw(p, tmp, pte_off_even, ptep); /* even pte */
+		uasm_i_lw(p, ptep, pte_off_odd, ptep); /* odd pte */
 		UASM_i_ROTR(p, tmp, tmp, ilog2(_PAGE_GLOBAL));
+		UASM_i_ROTR(p, ptep, ptep, ilog2(_PAGE_GLOBAL));
 		UASM_i_MTC0(p, tmp, C0_ENTRYLO0);
-
-		if (cpu_has_xpa && !mips_xpa_disabled) {
-			uasm_i_lw(p, tmp, 0, ptep);
-			uasm_i_ext(p, tmp, tmp, 0, 24);
-			uasm_i_mthc0(p, tmp, C0_ENTRYLO0);
-		}
-
-		uasm_i_lw(p, tmp, pte_off_odd, ptep); /* odd pte */
-		UASM_i_ROTR(p, tmp, tmp, ilog2(_PAGE_GLOBAL));
-		UASM_i_MTC0(p, tmp, C0_ENTRYLO1);
-
-		if (cpu_has_xpa && !mips_xpa_disabled) {
-			uasm_i_lw(p, tmp, sizeof(pte_t), ptep);
-			uasm_i_ext(p, tmp, tmp, 0, 24);
-			uasm_i_mthc0(p, tmp, C0_ENTRYLO1);
-		}
+		UASM_i_MTC0(p, ptep, C0_ENTRYLO1);
+#ifdef CONFIG_XPA
+		uasm_i_lw(p, tmp, 0, scratch);
+		uasm_i_lw(p, ptep, sizeof(pte_t), scratch);
+		uasm_i_lui(p, scratch, 0xff);
+		uasm_i_ori(p, scratch, scratch, 0xffff);
+		uasm_i_and(p, tmp, scratch, tmp);
+		uasm_i_and(p, ptep, scratch, ptep);
+		uasm_i_mthc0(p, tmp, C0_ENTRYLO0);
+		uasm_i_mthc0(p, ptep, C0_ENTRYLO1);
+#endif
 		return;
 	}
 
-	UASM_i_LW(p, tmp, pte_off_even, ptep); /* get even pte */
-	UASM_i_LW(p, ptep, pte_off_odd, ptep); /* get odd pte */
+	UASM_i_LW(p, tmp, 0, ptep); /* get even pte */
+	UASM_i_LW(p, ptep, sizeof(pte_t), ptep); /* get odd pte */
 	if (r45k_bvahwbug())
 		build_tlb_probe_entry(p);
 	build_convert_pte_to_entrylo(p, tmp);
@@ -1448,108 +1439,6 @@ static void build_r4000_tlb_refill_handler(void)
 	dump_handler("r4000_tlb_refill", (u32 *)ebase, 64);
 }
 
-static void setup_pw(void)
-{
-	unsigned long pgd_i, pgd_w;
-#ifndef __PAGETABLE_PMD_FOLDED
-	unsigned long pmd_i, pmd_w;
-#endif
-	unsigned long pt_i, pt_w;
-	unsigned long pte_i, pte_w;
-#ifdef CONFIG_MIPS_HUGE_TLB_SUPPORT
-	unsigned long psn;
-
-	psn = ilog2(_PAGE_HUGE);     /* bit used to indicate huge page */
-#endif
-	pgd_i = PGDIR_SHIFT;  /* 1st level PGD */
-#ifndef __PAGETABLE_PMD_FOLDED
-	pgd_w = PGDIR_SHIFT - PMD_SHIFT + PGD_ORDER;
-
-	pmd_i = PMD_SHIFT;    /* 2nd level PMD */
-	pmd_w = PMD_SHIFT - PAGE_SHIFT;
-#else
-	pgd_w = PGDIR_SHIFT - PAGE_SHIFT + PGD_ORDER;
-#endif
-
-	pt_i  = PAGE_SHIFT;    /* 3rd level PTE */
-	pt_w  = PAGE_SHIFT - 3;
-
-	pte_i = ilog2(_PAGE_GLOBAL);
-	pte_w = 0;
-
-#ifndef __PAGETABLE_PMD_FOLDED
-	write_c0_pwfield(pgd_i << 24 | pmd_i << 12 | pt_i << 6 | pte_i);
-	write_c0_pwsize(1 << 30 | pgd_w << 24 | pmd_w << 12 | pt_w << 6 | pte_w);
-#else
-	write_c0_pwfield(pgd_i << 24 | pt_i << 6 | pte_i);
-	write_c0_pwsize(1 << 30 | pgd_w << 24 | pt_w << 6 | pte_w);
-#endif
-
-#ifdef CONFIG_MIPS_HUGE_TLB_SUPPORT
-	write_c0_pwctl(1 << 6 | psn);
-#endif
-	write_c0_kpgd(swapper_pg_dir);
-	kscratch_used_mask |= (1 << 7); /* KScratch6 is used for KPGD */
-}
-
-static void build_loongson3_tlb_refill_handler(void)
-{
-	u32 *p = tlb_handler;
-	struct uasm_label *l = labels;
-	struct uasm_reloc *r = relocs;
-
-	memset(labels, 0, sizeof(labels));
-	memset(relocs, 0, sizeof(relocs));
-	memset(tlb_handler, 0, sizeof(tlb_handler));
-
-	if (check_for_high_segbits) {
-		uasm_i_dmfc0(&p, K0, C0_BADVADDR);
-		uasm_i_dsrl_safe(&p, K1, K0, PGDIR_SHIFT + PGD_ORDER + PAGE_SHIFT - 3);
-		uasm_il_beqz(&p, &r, K1, label_vmalloc);
-		uasm_i_nop(&p);
-
-		uasm_il_bgez(&p, &r, K0, label_large_segbits_fault);
-		uasm_i_nop(&p);
-		uasm_l_vmalloc(&l, p);
-	}
-
-	uasm_i_dmfc0(&p, K1, C0_PGD);
-
-	uasm_i_lddir(&p, K0, K1, 3);  /* global page dir */
-#ifndef __PAGETABLE_PMD_FOLDED
-	uasm_i_lddir(&p, K1, K0, 1);  /* middle page dir */
-#endif
-	uasm_i_ldpte(&p, K1, 0);      /* even */
-	uasm_i_ldpte(&p, K1, 1);      /* odd */
-	uasm_i_tlbwr(&p);
-
-	/* restore page mask */
-	if (PM_DEFAULT_MASK >> 16) {
-		uasm_i_lui(&p, K0, PM_DEFAULT_MASK >> 16);
-		uasm_i_ori(&p, K0, K0, PM_DEFAULT_MASK & 0xffff);
-		uasm_i_mtc0(&p, K0, C0_PAGEMASK);
-	} else if (PM_DEFAULT_MASK) {
-		uasm_i_ori(&p, K0, 0, PM_DEFAULT_MASK);
-		uasm_i_mtc0(&p, K0, C0_PAGEMASK);
-	} else {
-		uasm_i_mtc0(&p, 0, C0_PAGEMASK);
-	}
-
-	uasm_i_eret(&p);
-
-	if (check_for_high_segbits) {
-		uasm_l_large_segbits_fault(&l, p);
-		UASM_i_LA(&p, K1, (unsigned long)tlb_do_page_fault_0);
-		uasm_i_jr(&p, K1);
-		uasm_i_nop(&p);
-	}
-
-	uasm_resolve_relocs(relocs, labels);
-	memcpy((void *)(ebase + 0x80), tlb_handler, 0x80);
-	local_flush_icache_range(ebase + 0x80, ebase + 0x100);
-	dump_handler("loongson3_tlb_refill", (u32 *)(ebase + 0x80), 32);
-}
-
 extern u32 handle_tlbl[], handle_tlbl_end[];
 extern u32 handle_tlbs[], handle_tlbs_end[];
 extern u32 handle_tlbm[], handle_tlbm_end[];
@@ -1597,10 +1486,7 @@ static void build_setup_pgd(void)
 	} else {
 		/* PGD in c0_KScratch */
 		uasm_i_jr(&p, 31);
-		if (cpu_has_ldpte)
-			UASM_i_MTC0(&p, a0, C0_PWBASE);
-		else
-			UASM_i_MTC0(&p, a0, c0_kscratch(), pgd_reg);
+		UASM_i_MTC0(&p, a0, c0_kscratch(), pgd_reg);
 	}
 #else
 #ifdef CONFIG_SMP
@@ -1655,19 +1541,19 @@ iPTE_LW(u32 **p, unsigned int pte, unsigned int ptr)
 
 static void
 iPTE_SW(u32 **p, struct uasm_reloc **r, unsigned int pte, unsigned int ptr,
-	unsigned int mode, unsigned int scratch)
+	unsigned int mode)
 {
+#ifdef CONFIG_PHYS_ADDR_T_64BIT
 	unsigned int hwmode = mode & (_PAGE_VALID | _PAGE_DIRTY);
-	unsigned int swmode = mode & ~hwmode;
 
-	if (IS_ENABLED(CONFIG_XPA) && !cpu_has_64bits) {
-		uasm_i_lui(p, scratch, swmode >> 16);
+	if (!cpu_has_64bits) {
+		const int scratch = 1; /* Our extra working register */
+
+		uasm_i_lui(p, scratch, (mode >> 16));
 		uasm_i_or(p, pte, pte, scratch);
-		BUG_ON(swmode & 0xffff);
-	} else {
-		uasm_i_ori(p, pte, pte, mode);
-	}
-
+	} else
+#endif
+	uasm_i_ori(p, pte, pte, mode);
 #ifdef CONFIG_SMP
 # ifdef CONFIG_PHYS_ADDR_T_64BIT
 	if (cpu_has_64bits)
@@ -1686,7 +1572,6 @@ iPTE_SW(u32 **p, struct uasm_reloc **r, unsigned int pte, unsigned int ptr,
 		/* no uasm_i_nop needed */
 		uasm_i_ll(p, pte, sizeof(pte_t) / 2, ptr);
 		uasm_i_ori(p, pte, pte, hwmode);
-		BUG_ON(hwmode & ~0xffff);
 		uasm_i_sc(p, pte, sizeof(pte_t) / 2, ptr);
 		uasm_il_beqz(p, r, pte, label_smp_pgtable_change);
 		/* no uasm_i_nop needed */
@@ -1708,7 +1593,6 @@ iPTE_SW(u32 **p, struct uasm_reloc **r, unsigned int pte, unsigned int ptr,
 	if (!cpu_has_64bits) {
 		uasm_i_lw(p, pte, sizeof(pte_t) / 2, ptr);
 		uasm_i_ori(p, pte, pte, hwmode);
-		BUG_ON(hwmode & ~0xffff);
 		uasm_i_sw(p, pte, sizeof(pte_t) / 2, ptr);
 		uasm_i_lw(p, pte, 0, ptr);
 	}
@@ -1749,8 +1633,9 @@ build_pte_present(u32 **p, struct uasm_reloc **r,
 			cur = t;
 		}
 		uasm_i_andi(p, t, cur,
-			(_PAGE_PRESENT | _PAGE_NO_READ) >> _PAGE_PRESENT_SHIFT);
-		uasm_i_xori(p, t, t, _PAGE_PRESENT >> _PAGE_PRESENT_SHIFT);
+			(_PAGE_PRESENT | _PAGE_READ) >> _PAGE_PRESENT_SHIFT);
+		uasm_i_xori(p, t, t,
+			(_PAGE_PRESENT | _PAGE_READ) >> _PAGE_PRESENT_SHIFT);
 		uasm_il_bnez(p, r, t, lid);
 		if (pte == t)
 			/* You lose the SMP race :-(*/
@@ -1761,11 +1646,11 @@ build_pte_present(u32 **p, struct uasm_reloc **r,
 /* Make PTE valid, store result in PTR. */
 static void
 build_make_valid(u32 **p, struct uasm_reloc **r, unsigned int pte,
-		 unsigned int ptr, unsigned int scratch)
+		 unsigned int ptr)
 {
 	unsigned int mode = _PAGE_VALID | _PAGE_ACCESSED;
 
-	iPTE_SW(p, r, pte, ptr, mode, scratch);
+	iPTE_SW(p, r, pte, ptr, mode);
 }
 
 /*
@@ -1801,12 +1686,12 @@ build_pte_writable(u32 **p, struct uasm_reloc **r,
  */
 static void
 build_make_write(u32 **p, struct uasm_reloc **r, unsigned int pte,
-		 unsigned int ptr, unsigned int scratch)
+		 unsigned int ptr)
 {
 	unsigned int mode = (_PAGE_ACCESSED | _PAGE_MODIFIED | _PAGE_VALID
 			     | _PAGE_DIRTY);
 
-	iPTE_SW(p, r, pte, ptr, mode, scratch);
+	iPTE_SW(p, r, pte, ptr, mode);
 }
 
 /*
@@ -1911,7 +1796,7 @@ static void build_r3000_tlb_load_handler(void)
 	build_r3000_tlbchange_handler_head(&p, K0, K1);
 	build_pte_present(&p, &r, K0, K1, -1, label_nopage_tlbl);
 	uasm_i_nop(&p); /* load delay */
-	build_make_valid(&p, &r, K0, K1, -1);
+	build_make_valid(&p, &r, K0, K1);
 	build_r3000_tlb_reload_write(&p, &l, &r, K0, K1);
 
 	uasm_l_nopage_tlbl(&l, p);
@@ -1942,7 +1827,7 @@ static void build_r3000_tlb_store_handler(void)
 	build_r3000_tlbchange_handler_head(&p, K0, K1);
 	build_pte_writable(&p, &r, K0, K1, -1, label_nopage_tlbs);
 	uasm_i_nop(&p); /* load delay */
-	build_make_write(&p, &r, K0, K1, -1);
+	build_make_write(&p, &r, K0, K1);
 	build_r3000_tlb_reload_write(&p, &l, &r, K0, K1);
 
 	uasm_l_nopage_tlbs(&l, p);
@@ -1973,7 +1858,7 @@ static void build_r3000_tlb_modify_handler(void)
 	build_r3000_tlbchange_handler_head(&p, K0, K1);
 	build_pte_modifiable(&p, &r, K0, K1,  -1, label_nopage_tlbm);
 	uasm_i_nop(&p); /* load delay */
-	build_make_write(&p, &r, K0, K1, -1);
+	build_make_write(&p, &r, K0, K1);
 	build_r3000_pte_reload_tlbwi(&p, K0, K1);
 
 	uasm_l_nopage_tlbm(&l, p);
@@ -2141,7 +2026,7 @@ static void build_r4000_tlb_load_handler(void)
 		}
 		uasm_l_tlbl_goaround1(&l, p);
 	}
-	build_make_valid(&p, &r, wr.r1, wr.r2, wr.r3);
+	build_make_valid(&p, &r, wr.r1, wr.r2);
 	build_r4000_tlbchange_handler_tail(&p, &l, &r, wr.r1, wr.r2);
 
 #ifdef CONFIG_MIPS_HUGE_TLB_SUPPORT
@@ -2255,7 +2140,7 @@ static void build_r4000_tlb_store_handler(void)
 	build_pte_writable(&p, &r, wr.r1, wr.r2, wr.r3, label_nopage_tlbs);
 	if (m4kc_tlbp_war())
 		build_tlb_probe_entry(&p);
-	build_make_write(&p, &r, wr.r1, wr.r2, wr.r3);
+	build_make_write(&p, &r, wr.r1, wr.r2);
 	build_r4000_tlbchange_handler_tail(&p, &l, &r, wr.r1, wr.r2);
 
 #ifdef CONFIG_MIPS_HUGE_TLB_SUPPORT
@@ -2311,7 +2196,7 @@ static void build_r4000_tlb_modify_handler(void)
 	if (m4kc_tlbp_war())
 		build_tlb_probe_entry(&p);
 	/* Present and writable bits set, set accessed and dirty bits. */
-	build_make_write(&p, &r, wr.r1, wr.r2, wr.r3);
+	build_make_write(&p, &r, wr.r1, wr.r2);
 	build_r4000_tlbchange_handler_tail(&p, &l, &r, wr.r1, wr.r2);
 
 #ifdef CONFIG_MIPS_HUGE_TLB_SUPPORT
@@ -2378,9 +2263,8 @@ static void print_htw_config(void)
 		(config & MIPS_PWFIELD_PTEI_MASK) >> MIPS_PWFIELD_PTEI_SHIFT);
 
 	config = read_c0_pwsize();
-	pr_debug("PWSize  (0x%0*lx): PS: 0x%lx  GDW: 0x%02lx  UDW: 0x%02lx  MDW: 0x%02lx  PTW: 0x%02lx  PTEW: 0x%02lx\n",
+	pr_debug("PWSize  (0x%0*lx): GDW: 0x%02lx  UDW: 0x%02lx  MDW: 0x%02lx  PTW: 0x%02lx  PTEW: 0x%02lx\n",
 		field, config,
-		(config & MIPS_PWSIZE_PS_MASK) >> MIPS_PWSIZE_PS_SHIFT,
 		(config & MIPS_PWSIZE_GDW_MASK) >> MIPS_PWSIZE_GDW_SHIFT,
 		(config & MIPS_PWSIZE_UDW_MASK) >> MIPS_PWSIZE_UDW_SHIFT,
 		(config & MIPS_PWSIZE_MDW_MASK) >> MIPS_PWSIZE_MDW_SHIFT,
@@ -2388,12 +2272,9 @@ static void print_htw_config(void)
 		(config & MIPS_PWSIZE_PTEW_MASK) >> MIPS_PWSIZE_PTEW_SHIFT);
 
 	pwctl = read_c0_pwctl();
-	pr_debug("PWCtl   (0x%x): PWEn: 0x%x  XK: 0x%x  XS: 0x%x  XU: 0x%x  DPH: 0x%x  HugePg: 0x%x  Psn: 0x%x\n",
+	pr_debug("PWCtl   (0x%x): PWEn: 0x%x  DPH: 0x%x  HugePg: 0x%x  Psn: 0x%x\n",
 		pwctl,
 		(pwctl & MIPS_PWCTL_PWEN_MASK) >> MIPS_PWCTL_PWEN_SHIFT,
-		(pwctl & MIPS_PWCTL_XK_MASK) >> MIPS_PWCTL_XK_SHIFT,
-		(pwctl & MIPS_PWCTL_XS_MASK) >> MIPS_PWCTL_XS_SHIFT,
-		(pwctl & MIPS_PWCTL_XU_MASK) >> MIPS_PWCTL_XU_SHIFT,
 		(pwctl & MIPS_PWCTL_DPH_MASK) >> MIPS_PWCTL_DPH_SHIFT,
 		(pwctl & MIPS_PWCTL_HUGEPG_MASK) >> MIPS_PWCTL_HUGEPG_SHIFT,
 		(pwctl & MIPS_PWCTL_PSN_MASK) >> MIPS_PWCTL_PSN_SHIFT);
@@ -2448,25 +2329,17 @@ static void config_htw_params(void)
 	if (CONFIG_PGTABLE_LEVELS >= 3)
 		pwsize |= ilog2(PTRS_PER_PMD) << MIPS_PWSIZE_MDW_SHIFT;
 
-	/* Set pointer size to size of directory pointers */
-	if (IS_ENABLED(CONFIG_64BIT))
-		pwsize |= MIPS_PWSIZE_PS_MASK;
-	/* PTEs may be multiple pointers long (e.g. with XPA) */
-	pwsize |= ((PTE_T_LOG2 - PGD_T_LOG2) << MIPS_PWSIZE_PTEW_SHIFT)
-			& MIPS_PWSIZE_PTEW_MASK;
+	/* If XPA has been enabled, PTEs are 64-bit in size. */
+	if (config_enabled(CONFIG_64BITS) || (read_c0_pagegrain() & PG_ELPA))
+		pwsize |= 1;
 
 	write_c0_pwsize(pwsize);
 
 	/* Make sure everything is set before we enable the HTW */
 	back_to_back_c0_hazard();
 
-	/*
-	 * Enable HTW (and only for XUSeg on 64-bit), and disable the rest of
-	 * the pwctl fields.
-	 */
+	/* Enable HTW and disable the rest of the pwctl fields */
 	config = 1 << MIPS_PWCTL_PWEN_SHIFT;
-	if (IS_ENABLED(CONFIG_64BIT))
-		config |= MIPS_PWCTL_XU_MASK;
 	write_c0_pwctl(config);
 	pr_info("Hardware Page Table Walker enabled\n");
 
@@ -2539,9 +2412,6 @@ void build_tlb_refill_handler(void)
 	 */
 	static int run_once = 0;
 
-	if (IS_ENABLED(CONFIG_XPA) && !cpu_has_rixi)
-		panic("Kernels supporting XPA currently require CPUs with RIXI");
-
 	output_pgtable_bits_defines();
 	check_pabits();
 
@@ -2585,18 +2455,13 @@ void build_tlb_refill_handler(void)
 		break;
 
 	default:
-		if (cpu_has_ldpte)
-			setup_pw();
-
 		if (!run_once) {
 			scratch_reg = allocate_kscratch();
 			build_setup_pgd();
 			build_r4000_tlb_load_handler();
 			build_r4000_tlb_store_handler();
 			build_r4000_tlb_modify_handler();
-			if (cpu_has_ldpte)
-				build_loongson3_tlb_refill_handler();
-			else if (!cpu_has_local_ebase)
+			if (!cpu_has_local_ebase)
 				build_r4000_tlb_refill_handler();
 			flush_tlb_handlers();
 			run_once++;

@@ -95,7 +95,8 @@ static int tv_probe(struct usb_interface *interface,
 	int retval;
 
 	dev = kzalloc(sizeof(struct trancevibrator), GFP_KERNEL);
-	if (!dev) {
+	if (dev == NULL) {
+		dev_err(&interface->dev, "Out of memory\n");
 		retval = -ENOMEM;
 		goto error;
 	}

@@ -1074,7 +1074,7 @@ static void pkt_gather_data(struct pktcdvd_device *pd, struct packet_data *pkt)
 			BUG();
 
 		atomic_inc(&pkt->io_wait);
-		bio_set_op_attrs(bio, REQ_OP_READ, 0);
+		bio->bi_rw = READ;
 		pkt_queue_bio(pd, bio);
 		frames_read++;
 	}
@@ -1157,7 +1157,7 @@ static int pkt_start_recovery(struct packet_data *pkt)
 
 	bio_reset(pkt->bio);
 	pkt->bio->bi_bdev = pd->bdev;
-	bio_set_op_attrs(pkt->bio, REQ_OP_WRITE, 0);
+	pkt->bio->bi_rw = REQ_WRITE;
 	pkt->bio->bi_iter.bi_sector = new_sector;
 	pkt->bio->bi_iter.bi_size = pkt->frames * CD_FRAMESIZE;
 	pkt->bio->bi_vcnt = pkt->frames;
@@ -1336,7 +1336,7 @@ static void pkt_start_write(struct pktcdvd_device *pd, struct packet_data *pkt)
 
 	/* Start the write request */
 	atomic_set(&pkt->io_wait, 1);
-	bio_set_op_attrs(pkt->w_bio, REQ_OP_WRITE, 0);
+	pkt->w_bio->bi_rw = WRITE;
 	pkt_queue_bio(pd, pkt->w_bio);
 }
 

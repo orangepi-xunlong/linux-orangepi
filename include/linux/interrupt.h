@@ -126,16 +126,6 @@ struct irqaction {
 
 extern irqreturn_t no_action(int cpl, void *dev_id);
 
-/*
- * If a (PCI) device interrupt is not connected we set dev->irq to
- * IRQ_NOTCONNECTED. This causes request_irq() to fail with -ENOTCONN, so we
- * can distingiush that case from other error returns.
- *
- * 0x80000000 is guaranteed to be outside the available range of interrupts
- * and easy to distinguish from other possible incorrect values.
- */
-#define IRQ_NOTCONNECTED	(1U << 31)
-
 extern int __must_check
 request_threaded_irq(unsigned int irq, irq_handler_t handler,
 		     irq_handler_t thread_fn,
@@ -206,7 +196,6 @@ extern void disable_irq(unsigned int irq);
 extern void disable_percpu_irq(unsigned int irq);
 extern void enable_irq(unsigned int irq);
 extern void enable_percpu_irq(unsigned int irq, unsigned int type);
-extern bool irq_percpu_is_enabled(unsigned int irq);
 extern void irq_wake_thread(unsigned int irq, void *dev_id);
 
 /* The following three functions are for the core kernel use only. */
@@ -279,9 +268,6 @@ extern int irq_set_affinity_hint(unsigned int irq, const struct cpumask *m);
 extern int
 irq_set_affinity_notifier(unsigned int irq, struct irq_affinity_notify *notify);
 
-struct cpumask *irq_create_affinity_masks(const struct cpumask *affinity, int nvec);
-int irq_calc_affinity_vectors(const struct cpumask *affinity, int maxvec);
-
 #else /* CONFIG_SMP */
 
 static inline int irq_set_affinity(unsigned int irq, const struct cpumask *m)
@@ -312,19 +298,6 @@ irq_set_affinity_notifier(unsigned int irq, struct irq_affinity_notify *notify)
 {
 	return 0;
 }
-
-static inline struct cpumask *
-irq_create_affinity_masks(const struct cpumask *affinity, int nvec)
-{
-	return NULL;
-}
-
-static inline int
-irq_calc_affinity_vectors(const struct cpumask *affinity, int maxvec)
-{
-	return maxvec;
-}
-
 #endif /* CONFIG_SMP */
 
 /*
@@ -440,7 +413,7 @@ enum
 	NET_TX_SOFTIRQ,
 	NET_RX_SOFTIRQ,
 	BLOCK_SOFTIRQ,
-	IRQ_POLL_SOFTIRQ,
+	BLOCK_IOPOLL_SOFTIRQ,
 	TASKLET_SOFTIRQ,
 	SCHED_SOFTIRQ,
 	HRTIMER_SOFTIRQ, /* Unused, but kept as tools rely on the

@@ -195,8 +195,6 @@ superio_exit(int ioreg)
 
 #define NUM_FAN		6
 
-#define TEMP_SOURCE_VIRTUAL	0x1f
-
 /* Common and NCT6775 specific data */
 
 /* Voltage min/max registers for nr=7..14 are in bank 5 */
@@ -698,7 +696,7 @@ static const u16 NCT6106_REG_TARGET[] = { 0x111, 0x121, 0x131 };
 static const u16 NCT6106_REG_WEIGHT_TEMP_SEL[] = { 0x168, 0x178, 0x188 };
 static const u16 NCT6106_REG_WEIGHT_TEMP_STEP[] = { 0x169, 0x179, 0x189 };
 static const u16 NCT6106_REG_WEIGHT_TEMP_STEP_TOL[] = { 0x16a, 0x17a, 0x18a };
-static const u16 NCT6106_REG_WEIGHT_DUTY_STEP[] = { 0x16b, 0x17b, 0x17c };
+static const u16 NCT6106_REG_WEIGHT_DUTY_STEP[] = { 0x16b, 0x17b, 0x18b };
 static const u16 NCT6106_REG_WEIGHT_TEMP_BASE[] = { 0x16c, 0x17c, 0x18c };
 static const u16 NCT6106_REG_WEIGHT_DUTY_BASE[] = { 0x16d, 0x17d, 0x18d };
 
@@ -1047,8 +1045,7 @@ struct sensor_template_group {
 };
 
 static struct attribute_group *
-nct6775_create_attr_group(struct device *dev,
-			  const struct sensor_template_group *tg,
+nct6775_create_attr_group(struct device *dev, struct sensor_template_group *tg,
 			  int repeat)
 {
 	struct attribute_group *group;
@@ -1830,7 +1827,7 @@ static struct sensor_device_template *nct6775_attributes_in_template[] = {
 	NULL
 };
 
-static const struct sensor_template_group nct6775_in_template_group = {
+static struct sensor_template_group nct6775_in_template_group = {
 	.templates = nct6775_attributes_in_template,
 	.is_visible = nct6775_in_is_visible,
 };
@@ -2049,7 +2046,7 @@ static struct sensor_device_template *nct6775_attributes_fan_template[] = {
 	NULL
 };
 
-static const struct sensor_template_group nct6775_fan_template_group = {
+static struct sensor_template_group nct6775_fan_template_group = {
 	.templates = nct6775_attributes_fan_template,
 	.is_visible = nct6775_fan_is_visible,
 	.base = 1,
@@ -2258,7 +2255,7 @@ static struct sensor_device_template *nct6775_attributes_temp_template[] = {
 	NULL
 };
 
-static const struct sensor_template_group nct6775_temp_template_group = {
+static struct sensor_template_group nct6775_temp_template_group = {
 	.templates = nct6775_attributes_temp_template,
 	.is_visible = nct6775_temp_is_visible,
 	.base = 1,
@@ -3120,7 +3117,7 @@ static struct sensor_device_template *nct6775_attributes_pwm_template[] = {
 	NULL
 };
 
-static const struct sensor_template_group nct6775_pwm_template_group = {
+static struct sensor_template_group nct6775_pwm_template_group = {
 	.templates = nct6775_attributes_pwm_template,
 	.is_visible = nct6775_pwm_is_visible,
 	.base = 1,
@@ -3481,6 +3478,7 @@ static int nct6775_probe(struct platform_device *pdev)
 		data->REG_FAN_TIME[0] = NCT6106_REG_FAN_STOP_TIME;
 		data->REG_FAN_TIME[1] = NCT6106_REG_FAN_STEP_UP_TIME;
 		data->REG_FAN_TIME[2] = NCT6106_REG_FAN_STEP_DOWN_TIME;
+		data->REG_TOLERANCE_H = NCT6106_REG_TOLERANCE_H;
 		data->REG_PWM[0] = NCT6106_REG_PWM;
 		data->REG_PWM[1] = NCT6106_REG_FAN_START_OUTPUT;
 		data->REG_PWM[2] = NCT6106_REG_FAN_STOP_OUTPUT;
@@ -3942,7 +3940,7 @@ static int nct6775_probe(struct platform_device *pdev)
 			continue;
 
 		src = nct6775_read_value(data, data->REG_TEMP_SEL[i]) & 0x1f;
-		if (!src)
+		if (!src || (mask & (1 << src)))
 			continue;
 
 		if (src >= data->temp_label_num ||
@@ -3954,16 +3952,7 @@ static int nct6775_probe(struct platform_device *pdev)
 			continue;
 		}
 
-		/*
-		 * For virtual temperature sources, the 'virtual' temperature
-		 * for each fan reflects a different temperature, and there
-		 * are no duplicates.
-		 */
-		if (src != TEMP_SOURCE_VIRTUAL) {
-			if (mask & (1 << src))
-				continue;
-			mask |= 1 << src;
-		}
+		mask |= 1 << src;
 
 		/* Use fixed index for SYSTIN(1), CPUTIN(2), AUXTIN(3) */
 		if (src <= data->temp_fixed_num) {
@@ -4243,11 +4232,11 @@ static int __init nct6775_find(int sioaddr, struct nct6775_sio_data *sio_data)
 	if (err)
 		return err;
 
-	val = (superio_inb(sioaddr, SIO_REG_DEVID) << 8) |
-		superio_inb(sioaddr, SIO_REG_DEVID + 1);
-	if (force_id && val != 0xffff)
+	if (force_id)
 		val = force_id;
-
+	else
+		val = (superio_inb(sioaddr, SIO_REG_DEVID) << 8)
+		    | superio_inb(sioaddr, SIO_REG_DEVID + 1);
 	switch (val & SIO_ID_MASK) {
 	case SIO_NCT6106_ID:
 		sio_data->kind = nct6106;

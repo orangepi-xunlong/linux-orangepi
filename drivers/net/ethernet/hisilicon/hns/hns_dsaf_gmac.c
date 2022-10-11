@@ -17,7 +17,7 @@ static const struct mac_stats_string g_gmac_stats_string[] = {
 	{"gmac_rx_octets_total_ok", MAC_STATS_FIELD_OFF(rx_good_bytes)},
 	{"gmac_rx_octets_bad", MAC_STATS_FIELD_OFF(rx_bad_bytes)},
 	{"gmac_rx_uc_pkts", MAC_STATS_FIELD_OFF(rx_uc_pkts)},
-	{"gmac_rx_mc_pkts", MAC_STATS_FIELD_OFF(rx_mc_pkts)},
+	{"gamc_rx_mc_pkts", MAC_STATS_FIELD_OFF(rx_mc_pkts)},
 	{"gmac_rx_bc_pkts", MAC_STATS_FIELD_OFF(rx_bc_pkts)},
 	{"gmac_rx_pkts_64octets", MAC_STATS_FIELD_OFF(rx_64bytes)},
 	{"gmac_rx_pkts_65to127", MAC_STATS_FIELD_OFF(rx_65to127)},
@@ -86,11 +86,12 @@ static void hns_gmac_disable(void *mac_drv, enum mac_commom_mode mode)
 		dsaf_set_dev_bit(drv, GMAC_PORT_EN_REG, GMAC_PORT_RX_EN_B, 0);
 }
 
-/* hns_gmac_get_en - get port enable
- * @mac_drv:mac device
- * @rx:rx enable
- * @tx:tx enable
- */
+/**
+*hns_gmac_get_en - get port enable
+*@mac_drv:mac device
+*@rx:rx enable
+*@tx:tx enable
+*/
 static void hns_gmac_get_en(void *mac_drv, u32 *rx, u32 *tx)
 {
 	struct mac_driver *drv = (struct mac_driver *)mac_drv;
@@ -109,7 +110,7 @@ static void hns_gmac_free(void *mac_drv)
 
 	u32 mac_id = drv->mac_id;
 
-	dsaf_dev->misc_op->ge_srst(dsaf_dev, mac_id, 0);
+	hns_dsaf_ge_srst_by_port(dsaf_dev, mac_id, 0);
 }
 
 static void hns_gmac_set_tx_auto_pause_frames(void *mac_drv, u16 newval)
@@ -289,24 +290,6 @@ static int hns_gmac_adjust_link(void *mac_drv, enum mac_speed speed,
 	return 0;
 }
 
-static void hns_gmac_set_uc_match(void *mac_drv, u16 en)
-{
-	struct mac_driver *drv = mac_drv;
-
-	dsaf_set_dev_bit(drv, GMAC_REC_FILT_CONTROL_REG,
-			 GMAC_UC_MATCH_EN_B, !en);
-	dsaf_set_dev_bit(drv, GMAC_STATION_ADDR_HIGH_2_REG,
-			 GMAC_ADDR_EN_B, !en);
-}
-
-static void hns_gmac_set_promisc(void *mac_drv, u8 en)
-{
-	struct mac_driver *drv = mac_drv;
-
-	if (drv->mac_cb->mac_type == HNAE_PORT_DEBUG)
-		hns_gmac_set_uc_match(mac_drv, en);
-}
-
 static void hns_gmac_init(void *mac_drv)
 {
 	u32 port;
@@ -316,14 +299,12 @@ static void hns_gmac_init(void *mac_drv)
 
 	port = drv->mac_id;
 
-	dsaf_dev->misc_op->ge_srst(dsaf_dev, port, 0);
+	hns_dsaf_ge_srst_by_port(dsaf_dev, port, 0);
 	mdelay(10);
-	dsaf_dev->misc_op->ge_srst(dsaf_dev, port, 1);
+	hns_dsaf_ge_srst_by_port(dsaf_dev, port, 1);
 	mdelay(10);
 	hns_gmac_disable(mac_drv, MAC_COMM_MODE_RX_AND_TX);
 	hns_gmac_tx_loop_pkt_dis(mac_drv);
-	if (drv->mac_cb->mac_type == HNAE_PORT_DEBUG)
-		hns_gmac_set_uc_match(mac_drv, 0);
 }
 
 void hns_gmac_update_stats(void *mac_drv)
@@ -421,17 +402,14 @@ static void hns_gmac_set_mac_addr(void *mac_drv, char *mac_addr)
 {
 	struct mac_driver *drv = (struct mac_driver *)mac_drv;
 
-	u32 high_val = mac_addr[1] | (mac_addr[0] << 8);
+	if (drv->mac_id >= DSAF_SERVICE_NW_NUM) {
+		u32 high_val = mac_addr[1] | (mac_addr[0] << 8);
 
-	u32 low_val = mac_addr[5] | (mac_addr[4] << 8)
-		| (mac_addr[3] << 16) | (mac_addr[2] << 24);
-
-	u32 val = dsaf_read_dev(drv, GMAC_STATION_ADDR_HIGH_2_REG);
-	u32 sta_addr_en = dsaf_get_bit(val, GMAC_ADDR_EN_B);
-
-	dsaf_write_dev(drv, GMAC_STATION_ADDR_LOW_2_REG, low_val);
-	dsaf_write_dev(drv, GMAC_STATION_ADDR_HIGH_2_REG,
-		       high_val | (sta_addr_en << GMAC_ADDR_EN_B));
+		u32 low_val = mac_addr[5] | (mac_addr[4] << 8)
+			| (mac_addr[3] << 16) | (mac_addr[2] << 24);
+		dsaf_write_dev(drv, GMAC_STATION_ADDR_LOW_2_REG, low_val);
+		dsaf_write_dev(drv, GMAC_STATION_ADDR_HIGH_2_REG, high_val);
+	}
 }
 
 static int hns_gmac_config_loopback(void *mac_drv, enum hnae_loop loop_mode,
@@ -663,8 +641,7 @@ static void hns_gmac_get_strings(u32 stringset, u8 *data)
 		return;
 
 	for (i = 0; i < ARRAY_SIZE(g_gmac_stats_string); i++) {
-		snprintf(buff, ETH_GSTRING_LEN, "%s",
-			 g_gmac_stats_string[i].desc);
+		snprintf(buff, ETH_GSTRING_LEN, g_gmac_stats_string[i].desc);
 		buff = buff + ETH_GSTRING_LEN;
 	}
 }
@@ -722,7 +699,6 @@ void *hns_gmac_config(struct hns_mac_cb *mac_cb, struct mac_params *mac_param)
 	mac_drv->get_sset_count = hns_gmac_get_sset_count;
 	mac_drv->get_strings = hns_gmac_get_strings;
 	mac_drv->update_stats = hns_gmac_update_stats;
-	mac_drv->set_promiscuous = hns_gmac_set_promisc;
 
 	return (void *)mac_drv;
 }

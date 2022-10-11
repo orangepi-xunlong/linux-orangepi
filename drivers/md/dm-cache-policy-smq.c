@@ -1359,11 +1359,6 @@ static void smq_clear_dirty(struct dm_cache_policy *p, dm_oblock_t oblock)
 	spin_unlock_irqrestore(&mq->lock, flags);
 }
 
-static unsigned random_level(dm_cblock_t cblock)
-{
-	return hash_32_generic(from_cblock(cblock), 9) & (NR_CACHE_LEVELS - 1);
-}
-
 static int smq_load_mapping(struct dm_cache_policy *p,
 			    dm_oblock_t oblock, dm_cblock_t cblock,
 			    uint32_t hint, bool hint_valid)
@@ -1374,21 +1369,47 @@ static int smq_load_mapping(struct dm_cache_policy *p,
 	e = alloc_particular_entry(&mq->cache_alloc, from_cblock(cblock));
 	e->oblock = oblock;
 	e->dirty = false;	/* this gets corrected in a minute */
-	e->level = hint_valid ? min(hint, NR_CACHE_LEVELS - 1) : random_level(cblock);
+	e->level = hint_valid ? min(hint, NR_CACHE_LEVELS - 1) : 1;
 	push(mq, e);
 
 	return 0;
 }
 
-static uint32_t smq_get_hint(struct dm_cache_policy *p, dm_cblock_t cblock)
+static int smq_save_hints(struct smq_policy *mq, struct queue *q,
+			  policy_walk_fn fn, void *context)
+{
+	int r;
+	unsigned level;
+	struct entry *e;
+
+	for (level = 0; level < q->nr_levels; level++)
+		for (e = l_head(q->es, q->qs + level); e; e = l_next(q->es, e)) {
+			if (!e->sentinel) {
+				r = fn(context, infer_cblock(mq, e),
+				       e->oblock, e->level);
+				if (r)
+					return r;
+			}
+		}
+
+	return 0;
+}
+
+static int smq_walk_mappings(struct dm_cache_policy *p, policy_walk_fn fn,
+			     void *context)
 {
 	struct smq_policy *mq = to_smq_policy(p);
-	struct entry *e = get_entry(&mq->cache_alloc, from_cblock(cblock));
+	int r = 0;
 
-	if (!e->allocated)
-		return 0;
+	/*
+	 * We don't need to lock here since this method is only called once
+	 * the IO has stopped.
+	 */
+	r = smq_save_hints(mq, &mq->clean, fn, context);
+	if (!r)
+		r = smq_save_hints(mq, &mq->dirty, fn, context);
 
-	return e->level;
+	return r;
 }
 
 static void __remove_mapping(struct smq_policy *mq, dm_oblock_t oblock)
@@ -1546,48 +1567,8 @@ static void smq_tick(struct dm_cache_policy *p, bool can_block)
 	spin_unlock_irqrestore(&mq->lock, flags);
 }
 
-/*
- * smq has no config values, but the old mq policy did.  To avoid breaking
- * software we continue to accept these configurables for the mq policy,
- * but they have no effect.
- */
-static int mq_set_config_value(struct dm_cache_policy *p,
-			       const char *key, const char *value)
-{
-	unsigned long tmp;
-
-	if (kstrtoul(value, 10, &tmp))
-		return -EINVAL;
-
-	if (!strcasecmp(key, "random_threshold") ||
-	    !strcasecmp(key, "sequential_threshold") ||
-	    !strcasecmp(key, "discard_promote_adjustment") ||
-	    !strcasecmp(key, "read_promote_adjustment") ||
-	    !strcasecmp(key, "write_promote_adjustment")) {
-		DMWARN("tunable '%s' no longer has any effect, mq policy is now an alias for smq", key);
-		return 0;
-	}
-
-	return -EINVAL;
-}
-
-static int mq_emit_config_values(struct dm_cache_policy *p, char *result,
-				 unsigned maxlen, ssize_t *sz_ptr)
-{
-	ssize_t sz = *sz_ptr;
-
-	DMEMIT("10 random_threshold 0 "
-	       "sequential_threshold 0 "
-	       "discard_promote_adjustment 0 "
-	       "read_promote_adjustment 0 "
-	       "write_promote_adjustment 0 ");
-
-	*sz_ptr = sz;
-	return 0;
-}
-
 /* Init the policy plugin interface function pointers. */
-static void init_policy_functions(struct smq_policy *mq, bool mimic_mq)
+static void init_policy_functions(struct smq_policy *mq)
 {
 	mq->policy.destroy = smq_destroy;
 	mq->policy.map = smq_map;
@@ -1595,18 +1576,13 @@ static void init_policy_functions(struct smq_policy *mq, bool mimic_mq)
 	mq->policy.set_dirty = smq_set_dirty;
 	mq->policy.clear_dirty = smq_clear_dirty;
 	mq->policy.load_mapping = smq_load_mapping;
-	mq->policy.get_hint = smq_get_hint;
+	mq->policy.walk_mappings = smq_walk_mappings;
 	mq->policy.remove_mapping = smq_remove_mapping;
 	mq->policy.remove_cblock = smq_remove_cblock;
 	mq->policy.writeback_work = smq_writeback_work;
 	mq->policy.force_mapping = smq_force_mapping;
 	mq->policy.residency = smq_residency;
 	mq->policy.tick = smq_tick;
-
-	if (mimic_mq) {
-		mq->policy.set_config_value = mq_set_config_value;
-		mq->policy.emit_config_values = mq_emit_config_values;
-	}
 }
 
 static bool too_many_hotspot_blocks(sector_t origin_size,
@@ -1630,10 +1606,9 @@ static void calc_hotspot_params(sector_t origin_size,
 		*hotspot_block_size /= 2u;
 }
 
-static struct dm_cache_policy *__smq_create(dm_cblock_t cache_size,
-					    sector_t origin_size,
-					    sector_t cache_block_size,
-					    bool mimic_mq)
+static struct dm_cache_policy *smq_create(dm_cblock_t cache_size,
+					  sector_t origin_size,
+					  sector_t cache_block_size)
 {
 	unsigned i;
 	unsigned nr_sentinels_per_queue = 2u * NR_CACHE_LEVELS;
@@ -1643,7 +1618,7 @@ static struct dm_cache_policy *__smq_create(dm_cblock_t cache_size,
 	if (!mq)
 		return NULL;
 
-	init_policy_functions(mq, mimic_mq);
+	init_policy_functions(mq);
 	mq->cache_size = cache_size;
 	mq->cache_block_size = cache_block_size;
 
@@ -1731,41 +1706,19 @@ bad_pool_init:
 	return NULL;
 }
 
-static struct dm_cache_policy *smq_create(dm_cblock_t cache_size,
-					  sector_t origin_size,
-					  sector_t cache_block_size)
-{
-	return __smq_create(cache_size, origin_size, cache_block_size, false);
-}
-
-static struct dm_cache_policy *mq_create(dm_cblock_t cache_size,
-					 sector_t origin_size,
-					 sector_t cache_block_size)
-{
-	return __smq_create(cache_size, origin_size, cache_block_size, true);
-}
-
 /*----------------------------------------------------------------*/
 
 static struct dm_cache_policy_type smq_policy_type = {
 	.name = "smq",
-	.version = {1, 5, 0},
+	.version = {1, 0, 0},
 	.hint_size = 4,
 	.owner = THIS_MODULE,
 	.create = smq_create
 };
 
-static struct dm_cache_policy_type mq_policy_type = {
-	.name = "mq",
-	.version = {1, 5, 0},
-	.hint_size = 4,
-	.owner = THIS_MODULE,
-	.create = mq_create,
-};
-
 static struct dm_cache_policy_type default_policy_type = {
 	.name = "default",
-	.version = {1, 5, 0},
+	.version = {1, 4, 0},
 	.hint_size = 4,
 	.owner = THIS_MODULE,
 	.create = smq_create,
@@ -1782,17 +1735,9 @@ static int __init smq_init(void)
 		return -ENOMEM;
 	}
 
-	r = dm_cache_policy_register(&mq_policy_type);
-	if (r) {
-		DMERR("register failed (as mq) %d", r);
-		dm_cache_policy_unregister(&smq_policy_type);
-		return -ENOMEM;
-	}
-
 	r = dm_cache_policy_register(&default_policy_type);
 	if (r) {
 		DMERR("register failed (as default) %d", r);
-		dm_cache_policy_unregister(&mq_policy_type);
 		dm_cache_policy_unregister(&smq_policy_type);
 		return -ENOMEM;
 	}
@@ -1803,7 +1748,6 @@ static int __init smq_init(void)
 static void __exit smq_exit(void)
 {
 	dm_cache_policy_unregister(&smq_policy_type);
-	dm_cache_policy_unregister(&mq_policy_type);
 	dm_cache_policy_unregister(&default_policy_type);
 }
 
@@ -1815,4 +1759,3 @@ MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("smq cache policy");
 
 MODULE_ALIAS("dm-cache-default");
-MODULE_ALIAS("dm-cache-mq");

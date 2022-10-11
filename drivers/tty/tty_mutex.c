@@ -10,10 +10,13 @@
  * Getting the big tty mutex.
  */
 
-void tty_lock(struct tty_struct *tty)
+void __lockfunc tty_lock(struct tty_struct *tty)
 {
-	if (WARN(tty->magic != TTY_MAGIC, "L Bad %p\n", tty))
+	if (tty->magic != TTY_MAGIC) {
+		pr_err("L Bad %p\n", tty);
+		WARN_ON(1);
 		return;
+	}
 	tty_kref_get(tty);
 	mutex_lock(&tty->legacy_mutex);
 }
@@ -32,22 +35,25 @@ int tty_lock_interruptible(struct tty_struct *tty)
 	return ret;
 }
 
-void tty_unlock(struct tty_struct *tty)
+void __lockfunc tty_unlock(struct tty_struct *tty)
 {
-	if (WARN(tty->magic != TTY_MAGIC, "U Bad %p\n", tty))
+	if (tty->magic != TTY_MAGIC) {
+		pr_err("U Bad %p\n", tty);
+		WARN_ON(1);
 		return;
+	}
 	mutex_unlock(&tty->legacy_mutex);
 	tty_kref_put(tty);
 }
 EXPORT_SYMBOL(tty_unlock);
 
-void tty_lock_slave(struct tty_struct *tty)
+void __lockfunc tty_lock_slave(struct tty_struct *tty)
 {
 	if (tty && tty != tty->link)
 		tty_lock(tty);
 }
 
-void tty_unlock_slave(struct tty_struct *tty)
+void __lockfunc tty_unlock_slave(struct tty_struct *tty)
 {
 	if (tty && tty != tty->link)
 		tty_unlock(tty);

@@ -46,9 +46,6 @@ static struct sk_buff *tcp6_gso_segment(struct sk_buff *skb,
 {
 	struct tcphdr *th;
 
-	if (!(skb_shinfo(skb)->gso_type & SKB_GSO_TCPV6))
-		return ERR_PTR(-EINVAL);
-
 	if (!pskb_may_pull(skb, sizeof(*th)))
 		return ERR_PTR(-EINVAL);
 

@@ -25,7 +25,7 @@
  * Byte threshold to limit memory consumption for flip buffers.
  * The actual memory limit is > 2x this amount.
  */
-#define TTYB_DEFAULT_MEM_LIMIT	65536
+#define TTYB_DEFAULT_MEM_LIMIT	(640 * 1024UL)
 
 /*
  * We default to dicing tty buffer allocations to this many characters
@@ -436,42 +436,27 @@ int tty_prepare_flip_string(struct tty_port *port, unsigned char **chars,
 }
 EXPORT_SYMBOL_GPL(tty_prepare_flip_string);
 
-/**
- *	tty_ldisc_receive_buf		-	forward data to line discipline
- *	@ld:	line discipline to process input
- *	@p:	char buffer
- *	@f:	TTY_* flags buffer
- *	@count:	number of bytes to process
- *
- *	Callers other than flush_to_ldisc() need to exclude the kworker
- *	from concurrent use of the line discipline, see paste_selection().
- *
- *	Returns the number of bytes processed
- */
-int tty_ldisc_receive_buf(struct tty_ldisc *ld, unsigned char *p,
-			  char *f, int count)
-{
-	if (ld->ops->receive_buf2)
-		count = ld->ops->receive_buf2(ld->tty, p, f, count);
-	else {
-		count = min_t(int, count, ld->tty->receive_room);
-		if (count && ld->ops->receive_buf)
-			ld->ops->receive_buf(ld->tty, p, f, count);
-	}
-	return count;
-}
-EXPORT_SYMBOL_GPL(tty_ldisc_receive_buf);
 
 static int
-receive_buf(struct tty_ldisc *ld, struct tty_buffer *head, int count)
+receive_buf(struct tty_struct *tty, struct tty_buffer *head, int count)
 {
+	struct tty_ldisc *disc = tty->ldisc;
 	unsigned char *p = char_buf_ptr(head, head->read);
 	char	      *f = NULL;
 
 	if (~head->flags & TTYB_NORMAL)
 		f = flag_buf_ptr(head, head->read);
 
-	return tty_ldisc_receive_buf(ld, p, f, count);
+	if (disc->ops->receive_buf2)
+		count = disc->ops->receive_buf2(tty, p, f, count);
+	else {
+		count = min_t(int, count, tty->receive_room);
+		if (count && disc->ops->receive_buf)
+			disc->ops->receive_buf(tty, p, f, count);
+	}
+	if (count > 0)
+		memset(p, 0, count);
+	return count;
 }
 
 /**
@@ -530,7 +515,7 @@ static void flush_to_ldisc(struct work_struct *work)
 			continue;
 		}
 
-		count = receive_buf(disc, head, count);
+		count = receive_buf(tty, head, count);
 		if (!count)
 			break;
 		head->read += count;

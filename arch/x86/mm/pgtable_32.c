@@ -8,6 +8,7 @@
 #include <linux/highmem.h>
 #include <linux/pagemap.h>
 #include <linux/spinlock.h>
+#include <linux/module.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -46,7 +47,7 @@ void set_pte_vaddr(unsigned long vaddr, pte_t pteval)
 		return;
 	}
 	pte = pte_offset_kernel(pmd, vaddr);
-	if (!pte_none(pteval))
+	if (pte_val(pteval))
 		set_pte_at(&init_mm, vaddr, pte, pteval);
 	else
 		pte_clear(&init_mm, vaddr, pte);

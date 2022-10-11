@@ -24,7 +24,11 @@
 # error Linux requires the Xtensa Windowed Registers Option.
 #endif
 
-#define ARCH_SLAB_MINALIGN	XCHAL_DATA_WIDTH
+/* Xtensa ABI requires stack alignment to be at least 16 */
+
+#define STACK_ALIGN (XCHAL_DATA_WIDTH > 16 ? XCHAL_DATA_WIDTH : 16)
+
+#define ARCH_SLAB_MINALIGN STACK_ALIGN
 
 /*
  * User space process size: 1 GB.
@@ -37,7 +41,7 @@
 #ifdef CONFIG_MMU
 #define TASK_SIZE	__XTENSA_UL_CONST(0x40000000)
 #else
-#define TASK_SIZE	__XTENSA_UL_CONST(0xffffffff)
+#define TASK_SIZE	(PLATFORM_DEFAULT_MEM_START + PLATFORM_DEFAULT_MEM_SIZE)
 #endif
 
 #define STACK_TOP	TASK_SIZE
@@ -78,20 +82,22 @@
 #define XTENSA_INTLEVEL_MASK(level) _XTENSA_INTLEVEL_MASK(level)
 #define _XTENSA_INTLEVEL_MASK(level) (XCHAL_INTLEVEL##level##_MASK)
 
-#define XTENSA_INTLEVEL_ANDBELOW_MASK(l) _XTENSA_INTLEVEL_ANDBELOW_MASK(l)
-#define _XTENSA_INTLEVEL_ANDBELOW_MASK(l) (XCHAL_INTLEVEL##l##_ANDBELOW_MASK)
+#define IS_POW2(v) (((v) & ((v) - 1)) == 0)
 
 #define PROFILING_INTLEVEL XTENSA_INT_LEVEL(XCHAL_PROFILING_INTERRUPT)
 
 /* LOCKLEVEL defines the interrupt level that masks all
  * general-purpose interrupts.
  */
-#if defined(CONFIG_XTENSA_FAKE_NMI) && defined(XCHAL_PROFILING_INTERRUPT)
-#define LOCKLEVEL (PROFILING_INTLEVEL - 1)
+#if defined(CONFIG_XTENSA_VARIANT_HAVE_PERF_EVENTS) && \
+	defined(XCHAL_PROFILING_INTERRUPT) && \
+	PROFILING_INTLEVEL == XCHAL_EXCM_LEVEL && \
+	XCHAL_EXCM_LEVEL > 1 && \
+	IS_POW2(XTENSA_INTLEVEL_MASK(PROFILING_INTLEVEL))
+#define LOCKLEVEL (XCHAL_EXCM_LEVEL - 1)
 #else
 #define LOCKLEVEL XCHAL_EXCM_LEVEL
 #endif
-
 #define TOPLEVEL XCHAL_EXCM_LEVEL
 #define XTENSA_FAKE_NMI (LOCKLEVEL < TOPLEVEL)
 
@@ -130,10 +136,11 @@ struct thread_struct {
 	unsigned long bad_vaddr; /* last user fault */
 	unsigned long bad_uaddr; /* last kernel fault accessing user space */
 	unsigned long error_code;
-#ifdef CONFIG_HAVE_HW_BREAKPOINT
-	struct perf_event *ptrace_bp[XCHAL_NUM_IBREAK];
-	struct perf_event *ptrace_wp[XCHAL_NUM_DBREAK];
-#endif
+
+	unsigned long ibreak[XCHAL_NUM_IBREAK];
+	unsigned long dbreaka[XCHAL_NUM_DBREAK];
+	unsigned long dbreakc[XCHAL_NUM_DBREAK];
+
 	/* Make structure 16 bytes aligned. */
 	int align[0] __attribute__ ((aligned(16)));
 };

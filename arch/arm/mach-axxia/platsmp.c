@@ -82,7 +82,7 @@ static void __init axxia_smp_prepare_cpus(unsigned int max_cpus)
 	}
 }
 
-static const struct smp_operations axxia_smp_ops __initconst = {
+static struct smp_operations axxia_smp_ops __initdata = {
 	.smp_prepare_cpus	= axxia_smp_prepare_cpus,
 	.smp_boot_secondary	= axxia_boot_secondary,
 };

@@ -361,6 +361,7 @@ ceph_parse_options(char *options, const char *dev_name,
 	opt->osd_keepalive_timeout = CEPH_OSD_KEEPALIVE_DEFAULT;
 	opt->mount_timeout = CEPH_MOUNT_TIMEOUT_DEFAULT;
 	opt->osd_idle_ttl = CEPH_OSD_IDLE_TTL_DEFAULT;
+	opt->monc_ping_timeout = CEPH_MONC_PING_TIMEOUT_DEFAULT;
 
 	/* get mon ip(s) */
 	/* ip1[:port1][,ip2[:port2]...] */
@@ -566,17 +567,11 @@ int ceph_print_client_options(struct seq_file *m, struct ceph_client *client)
 }
 EXPORT_SYMBOL(ceph_print_client_options);
 
-struct ceph_entity_addr *ceph_client_addr(struct ceph_client *client)
-{
-	return &client->msgr.inst.addr;
-}
-EXPORT_SYMBOL(ceph_client_addr);
-
-u64 ceph_client_gid(struct ceph_client *client)
+u64 ceph_client_id(struct ceph_client *client)
 {
 	return client->monc.auth->global_id;
 }
-EXPORT_SYMBOL(ceph_client_gid);
+EXPORT_SYMBOL(ceph_client_id);
 
 /*
  * create a fresh client instance
@@ -657,7 +652,7 @@ EXPORT_SYMBOL(ceph_destroy_client);
 /*
  * true if we have the mon map (and have thus joined the cluster)
  */
-static bool have_mon_and_osd_map(struct ceph_client *client)
+static int have_mon_and_osd_map(struct ceph_client *client)
 {
 	return client->monc.monmap && client->monc.monmap->epoch &&
 	       client->osdc.osdmap && client->osdc.osdmap->epoch;
@@ -690,10 +685,6 @@ int __ceph_open_session(struct ceph_client *client, unsigned long started)
 		if (client->auth_err < 0)
 			return client->auth_err;
 	}
-
-	pr_info("client%llu fsid %pU\n", ceph_client_gid(client),
-		&client->fsid);
-	ceph_debugfs_client_init(client);
 
 	return 0;
 }
@@ -754,8 +745,6 @@ out:
 static void __exit exit_ceph_lib(void)
 {
 	dout("exit_ceph_lib\n");
-	WARN_ON(!ceph_strings_empty());
-
 	ceph_osdc_cleanup();
 	ceph_msgr_exit();
 	ceph_crypto_shutdown();

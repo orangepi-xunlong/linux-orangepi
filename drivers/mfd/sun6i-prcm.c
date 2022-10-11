@@ -9,7 +9,7 @@
  */
 
 #include <linux/mfd/core.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/of.h>
 
 struct prcm_data {
@@ -170,4 +170,8 @@ static struct platform_driver sun6i_prcm_driver = {
 	},
 	.probe = sun6i_prcm_probe,
 };
-builtin_platform_driver(sun6i_prcm_driver);
+module_platform_driver(sun6i_prcm_driver);
+
+MODULE_AUTHOR("Boris BREZILLON <boris.brezillon@free-electrons.com>");
+MODULE_DESCRIPTION("Allwinner sun6i PRCM driver");
+MODULE_LICENSE("GPL v2");

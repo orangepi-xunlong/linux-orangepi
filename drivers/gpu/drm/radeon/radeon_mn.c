@@ -186,9 +186,7 @@ static struct radeon_mn *radeon_mn_get(struct radeon_device *rdev)
 	struct radeon_mn *rmn;
 	int r;
 
-	if (down_write_killable(&mm->mmap_sem))
-		return ERR_PTR(-EINTR);
-
+	down_write(&mm->mmap_sem);
 	mutex_lock(&rdev->mn_lock);
 
 	hash_for_each_possible(rdev->mn_hash, rmn, node, (unsigned long)mm)

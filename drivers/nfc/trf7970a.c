@@ -1048,10 +1048,6 @@ static int trf7970a_init(struct trf7970a *trf)
 	if (ret)
 		goto err_out;
 
-	ret = trf7970a_write(trf, TRF7970A_NFC_TARGET_LEVEL, 0);
-	if (ret)
-		goto err_out;
-
 	usleep_range(1000, 2000);
 
 	trf->chip_status_ctrl &= ~TRF7970A_CHIP_STATUS_RF_ON;
@@ -2143,7 +2139,7 @@ static int trf7970a_remove(struct spi_device *spi)
 #ifdef CONFIG_PM_SLEEP
 static int trf7970a_suspend(struct device *dev)
 {
-	struct spi_device *spi = to_spi_device(dev);
+	struct spi_device *spi = container_of(dev, struct spi_device, dev);
 	struct trf7970a *trf = spi_get_drvdata(spi);
 
 	dev_dbg(dev, "Suspend\n");
@@ -2159,7 +2155,7 @@ static int trf7970a_suspend(struct device *dev)
 
 static int trf7970a_resume(struct device *dev)
 {
-	struct spi_device *spi = to_spi_device(dev);
+	struct spi_device *spi = container_of(dev, struct spi_device, dev);
 	struct trf7970a *trf = spi_get_drvdata(spi);
 	int ret;
 
@@ -2178,7 +2174,7 @@ static int trf7970a_resume(struct device *dev)
 #ifdef CONFIG_PM
 static int trf7970a_pm_runtime_suspend(struct device *dev)
 {
-	struct spi_device *spi = to_spi_device(dev);
+	struct spi_device *spi = container_of(dev, struct spi_device, dev);
 	struct trf7970a *trf = spi_get_drvdata(spi);
 	int ret;
 
@@ -2195,7 +2191,7 @@ static int trf7970a_pm_runtime_suspend(struct device *dev)
 
 static int trf7970a_pm_runtime_resume(struct device *dev)
 {
-	struct spi_device *spi = to_spi_device(dev);
+	struct spi_device *spi = container_of(dev, struct spi_device, dev);
 	struct trf7970a *trf = spi_get_drvdata(spi);
 	int ret;
 

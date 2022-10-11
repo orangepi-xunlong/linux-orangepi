@@ -11,9 +11,10 @@
 #include <linux/threads.h>
 #include <linux/cpumask.h>
 #include <linux/string.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/ctype.h>
+#include <linux/init.h>
 #include <linux/hardirq.h>
 #include <linux/dmar.h>
 

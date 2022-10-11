@@ -90,8 +90,6 @@
 #include <linux/cache.h>
 #include <linux/percpu.h>
 #include <linux/hardirq.h>
-#include <linux/bootmem.h>
-#include <linux/pfn.h>
 #include <linux/mmzone.h>
 #include <linux/slab.h>
 #include <linux/thread_info.h>
@@ -124,7 +122,8 @@
 #define BYTES_PER_POINTER	sizeof(void *)
 
 /* GFP bitmask for kmemleak internal allocations */
-#define gfp_kmemleak_mask(gfp)	(((gfp) & (GFP_KERNEL | GFP_ATOMIC)) | \
+#define gfp_kmemleak_mask(gfp)	(((gfp) & (GFP_KERNEL | GFP_ATOMIC | \
+					   __GFP_NOACCOUNT)) | \
 				 __GFP_NORETRY | __GFP_NOMEMALLOC | \
 				 __GFP_NOWARN)
 
@@ -278,7 +277,7 @@ static void kmemleak_disable(void);
  * Print a warning and dump the stack trace.
  */
 #define kmemleak_warn(x...)	do {		\
-	pr_warn(x);				\
+	pr_warning(x);				\
 	dump_stack();				\
 	kmemleak_warning = 1;			\
 } while (0)
@@ -309,10 +308,8 @@ static void hex_dump_object(struct seq_file *seq,
 	len = min_t(size_t, object->size, HEX_MAX_LINES * HEX_ROW_SIZE);
 
 	seq_printf(seq, "  hex dump (first %zu bytes):\n", len);
-	kasan_disable_current();
 	seq_hex_dump(seq, "    ", DUMP_PREFIX_NONE, HEX_ROW_SIZE,
 		     HEX_GROUP_SIZE, ptr, len, HEX_ASCII);
-	kasan_enable_current();
 }
 
 /*
@@ -547,7 +544,7 @@ static struct kmemleak_object *create_object(unsigned long ptr, size_t size,
 
 	object = kmem_cache_alloc(object_cache, gfp_kmemleak_mask(gfp));
 	if (!object) {
-		pr_warn("Cannot allocate a kmemleak_object structure\n");
+		pr_warning("Cannot allocate a kmemleak_object structure\n");
 		kmemleak_disable();
 		return NULL;
 	}
@@ -569,7 +566,7 @@ static struct kmemleak_object *create_object(unsigned long ptr, size_t size,
 	if (in_irq()) {
 		object->pid = 0;
 		strncpy(object->comm, "hardirq", sizeof(object->comm));
-	} else if (in_softirq()) {
+	} else if (in_serving_softirq()) {
 		object->pid = 0;
 		strncpy(object->comm, "softirq", sizeof(object->comm));
 	} else {
@@ -767,7 +764,7 @@ static void add_scan_area(unsigned long ptr, size_t size, gfp_t gfp)
 
 	area = kmem_cache_alloc(scan_area_cache, gfp_kmemleak_mask(gfp));
 	if (!area) {
-		pr_warn("Cannot allocate a scan area\n");
+		pr_warning("Cannot allocate a scan area\n");
 		goto out;
 	}
 
@@ -1123,51 +1120,6 @@ void __ref kmemleak_no_scan(const void *ptr)
 }
 EXPORT_SYMBOL(kmemleak_no_scan);
 
-/**
- * kmemleak_alloc_phys - similar to kmemleak_alloc but taking a physical
- *			 address argument
- */
-void __ref kmemleak_alloc_phys(phys_addr_t phys, size_t size, int min_count,
-			       gfp_t gfp)
-{
-	if (!IS_ENABLED(CONFIG_HIGHMEM) || PHYS_PFN(phys) < max_low_pfn)
-		kmemleak_alloc(__va(phys), size, min_count, gfp);
-}
-EXPORT_SYMBOL(kmemleak_alloc_phys);
-
-/**
- * kmemleak_free_part_phys - similar to kmemleak_free_part but taking a
- *			     physical address argument
- */
-void __ref kmemleak_free_part_phys(phys_addr_t phys, size_t size)
-{
-	if (!IS_ENABLED(CONFIG_HIGHMEM) || PHYS_PFN(phys) < max_low_pfn)
-		kmemleak_free_part(__va(phys), size);
-}
-EXPORT_SYMBOL(kmemleak_free_part_phys);
-
-/**
- * kmemleak_not_leak_phys - similar to kmemleak_not_leak but taking a physical
- *			    address argument
- */
-void __ref kmemleak_not_leak_phys(phys_addr_t phys)
-{
-	if (!IS_ENABLED(CONFIG_HIGHMEM) || PHYS_PFN(phys) < max_low_pfn)
-		kmemleak_not_leak(__va(phys));
-}
-EXPORT_SYMBOL(kmemleak_not_leak_phys);
-
-/**
- * kmemleak_ignore_phys - similar to kmemleak_ignore but taking a physical
- *			  address argument
- */
-void __ref kmemleak_ignore_phys(phys_addr_t phys)
-{
-	if (!IS_ENABLED(CONFIG_HIGHMEM) || PHYS_PFN(phys) < max_low_pfn)
-		kmemleak_ignore(__va(phys));
-}
-EXPORT_SYMBOL(kmemleak_ignore_phys);
-
 /*
  * Update an object's checksum and return true if it was modified.
  */
@@ -1414,7 +1366,6 @@ static void kmemleak_scan(void)
 	/* data/bss scanning */
 	scan_large_block(_sdata, _edata);
 	scan_large_block(__bss_start, __bss_stop);
-	scan_large_block(__start_data_ro_after_init, __end_data_ro_after_init);
 
 #ifdef CONFIG_SMP
 	/* per-cpu sections scanning */
@@ -1456,11 +1407,8 @@ static void kmemleak_scan(void)
 
 		read_lock(&tasklist_lock);
 		do_each_thread(g, p) {
-			void *stack = try_get_task_stack(p);
-			if (stack) {
-				scan_block(stack, stack + THREAD_SIZE, NULL);
-				put_task_stack(p);
-			}
+			scan_block(task_stack_page(p), task_stack_page(p) +
+				   THREAD_SIZE, NULL);
 		} while_each_thread(g, p);
 		read_unlock(&tasklist_lock);
 	}
@@ -1538,10 +1486,8 @@ static int kmemleak_scan_thread(void *arg)
 	 * Wait before the first scan to allow the system to fully initialize.
 	 */
 	if (first_run) {
-		signed long timeout = msecs_to_jiffies(SECS_FIRST_SCAN * 1000);
 		first_run = 0;
-		while (timeout && !kthread_should_stop())
-			timeout = schedule_timeout_interruptible(timeout);
+		ssleep(SECS_FIRST_SCAN);
 	}
 
 	while (!kthread_should_stop()) {
@@ -1571,7 +1517,7 @@ static void start_scan_thread(void)
 		return;
 	scan_thread = kthread_run(kmemleak_scan_thread, NULL, "kmemleak");
 	if (IS_ERR(scan_thread)) {
-		pr_warn("Failed to create the scan thread\n");
+		pr_warning("Failed to create the scan thread\n");
 		scan_thread = NULL;
 	}
 }
@@ -1931,8 +1877,8 @@ void __init kmemleak_init(void)
 	scan_area_cache = KMEM_CACHE(kmemleak_scan_area, SLAB_NOLEAKTRACE);
 
 	if (crt_early_log > ARRAY_SIZE(early_log))
-		pr_warn("Early log buffer exceeded (%d), please increase DEBUG_KMEMLEAK_EARLY_LOG_SIZE\n",
-			crt_early_log);
+		pr_warning("Early log buffer exceeded (%d), please increase "
+			   "DEBUG_KMEMLEAK_EARLY_LOG_SIZE\n", crt_early_log);
 
 	/* the kernel is still in UP mode, so disabling the IRQs is enough */
 	local_irq_save(flags);
@@ -2017,7 +1963,7 @@ static int __init kmemleak_late_init(void)
 	dentry = debugfs_create_file("kmemleak", S_IRUGO, NULL, NULL,
 				     &kmemleak_fops);
 	if (!dentry)
-		pr_warn("Failed to create the debugfs kmemleak file\n");
+		pr_warning("Failed to create the debugfs kmemleak file\n");
 	mutex_lock(&scan_mutex);
 	start_scan_thread();
 	mutex_unlock(&scan_mutex);

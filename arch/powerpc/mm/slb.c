@@ -32,6 +32,7 @@ enum slb_index {
 };
 
 extern void slb_allocate_realmode(unsigned long ea);
+extern void slb_allocate_user(unsigned long ea);
 
 static void slb_allocate(unsigned long ea)
 {
@@ -227,7 +228,7 @@ void switch_slb(struct task_struct *tsk, struct mm_struct *mm)
 		asm volatile("slbie %0" : : "r" (slbie_data));
 
 	get_paca()->slb_cache_ptr = 0;
-	copy_mm_to_paca(&mm->context);
+	get_paca()->context = mm->context;
 
 	/*
 	 * preload some userspace segments into the SLB.

@@ -113,7 +113,7 @@ struct netcp_intf {
 #define	NETCP_PSDATA_LEN		KNAV_DMA_NUM_PS_WORDS
 struct netcp_packet {
 	struct sk_buff		*skb;
-	__le32			*epib;
+	u32			*epib;
 	u32			*psdata;
 	unsigned int		psdata_len;
 	struct netcp_intf	*netcp;

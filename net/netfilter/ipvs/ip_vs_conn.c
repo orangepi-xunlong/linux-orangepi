@@ -104,7 +104,6 @@ static inline void ct_write_unlock_bh(unsigned int key)
 	spin_unlock_bh(&__ip_vs_conntbl_lock_array[key&CT_LOCKARRAY_MASK].l);
 }
 
-static void ip_vs_conn_expire(unsigned long data);
 
 /*
  *	Returns hash value for IPVS connection entry
@@ -454,16 +453,10 @@ ip_vs_conn_out_get_proto(struct netns_ipvs *ipvs, int af,
 }
 EXPORT_SYMBOL_GPL(ip_vs_conn_out_get_proto);
 
-static void __ip_vs_conn_put_notimer(struct ip_vs_conn *cp)
-{
-	__ip_vs_conn_put(cp);
-	ip_vs_conn_expire((unsigned long)cp);
-}
-
 /*
  *      Put back the conn and restart its timer with its timeout
  */
-static void __ip_vs_conn_put_timer(struct ip_vs_conn *cp)
+void ip_vs_conn_put(struct ip_vs_conn *cp)
 {
 	unsigned long t = (cp->flags & IP_VS_CONN_F_ONE_PACKET) ?
 		0 : cp->timeout;
@@ -472,16 +465,6 @@ static void __ip_vs_conn_put_timer(struct ip_vs_conn *cp)
 	__ip_vs_conn_put(cp);
 }
 
-void ip_vs_conn_put(struct ip_vs_conn *cp)
-{
-	if ((cp->flags & IP_VS_CONN_F_ONE_PACKET) &&
-	    (atomic_read(&cp->refcnt) == 1) &&
-	    !timer_pending(&cp->timer))
-		/* expire connection immediately */
-		__ip_vs_conn_put_notimer(cp);
-	else
-		__ip_vs_conn_put_timer(cp);
-}
 
 /*
  *	Fill a no_client_port connection with a client port number
@@ -762,7 +745,7 @@ static int expire_quiescent_template(struct netns_ipvs *ipvs,
  *	If available, return 1, otherwise invalidate this connection
  *	template and return 0.
  */
-int ip_vs_check_template(struct ip_vs_conn *ct, struct ip_vs_dest *cdest)
+int ip_vs_check_template(struct ip_vs_conn *ct)
 {
 	struct ip_vs_dest *dest = ct->dest;
 	struct netns_ipvs *ipvs = ct->ipvs;
@@ -772,8 +755,7 @@ int ip_vs_check_template(struct ip_vs_conn *ct, struct ip_vs_dest *cdest)
 	 */
 	if ((dest == NULL) ||
 	    !(dest->flags & IP_VS_DEST_F_AVAILABLE) ||
-	    expire_quiescent_template(ipvs, dest) ||
-	    (cdest && (dest != cdest))) {
+	    expire_quiescent_template(ipvs, dest)) {
 		IP_VS_DBG_BUF(9, "check_template: dest not available for "
 			      "protocol %s s:%s:%d v:%s:%d "
 			      "-> d:%s:%d\n",
@@ -837,8 +819,7 @@ static void ip_vs_conn_expire(unsigned long data)
 		if (cp->control)
 			ip_vs_control_del(cp);
 
-		if ((cp->flags & IP_VS_CONN_F_NFCT) &&
-		    !(cp->flags & IP_VS_CONN_F_ONE_PACKET)) {
+		if (cp->flags & IP_VS_CONN_F_NFCT) {
 			/* Do not access conntracks during subsys cleanup
 			 * because nf_conntrack_find_get can not be used after
 			 * conntrack cleanup for the net.
@@ -853,10 +834,7 @@ static void ip_vs_conn_expire(unsigned long data)
 		ip_vs_unbind_dest(cp);
 		if (cp->flags & IP_VS_CONN_F_NO_CPORT)
 			atomic_dec(&ip_vs_conn_no_cport_cnt);
-		if (cp->flags & IP_VS_CONN_F_ONE_PACKET)
-			ip_vs_conn_rcu_free(&cp->rcu_head);
-		else
-			call_rcu(&cp->rcu_head, ip_vs_conn_rcu_free);
+		call_rcu(&cp->rcu_head, ip_vs_conn_rcu_free);
 		atomic_dec(&ipvs->conn_count);
 		return;
 	}
@@ -872,7 +850,7 @@ static void ip_vs_conn_expire(unsigned long data)
 	if (ipvs->sync_state & IP_VS_STATE_MASTER)
 		ip_vs_sync_conn(ipvs, cp, sysctl_sync_threshold(ipvs));
 
-	__ip_vs_conn_put_timer(cp);
+	ip_vs_conn_put(cp);
 }
 
 /* Modify timer, so that it expires as soon as possible.
@@ -1262,16 +1240,6 @@ static inline int todrop_entry(struct ip_vs_conn *cp)
 	return 1;
 }
 
-static inline bool ip_vs_conn_ops_mode(struct ip_vs_conn *cp)
-{
-	struct ip_vs_service *svc;
-
-	if (!cp->dest)
-		return false;
-	svc = rcu_dereference(cp->dest->svc);
-	return svc && (svc->flags & IP_VS_SVC_F_ONEPACKET);
-}
-
 /* Called from keventd and must protect itself from softirqs */
 void ip_vs_random_dropentry(struct netns_ipvs *ipvs)
 {
@@ -1286,16 +1254,11 @@ void ip_vs_random_dropentry(struct netns_ipvs *ipvs)
 		unsigned int hash = prandom_u32() & ip_vs_conn_tab_mask;
 
 		hlist_for_each_entry_rcu(cp, &ip_vs_conn_tab[hash], c_list) {
+			if (cp->flags & IP_VS_CONN_F_TEMPLATE)
+				/* connection template */
+				continue;
 			if (cp->ipvs != ipvs)
 				continue;
-			if (cp->flags & IP_VS_CONN_F_TEMPLATE) {
-				if (atomic_read(&cp->n_control) ||
-				    !ip_vs_conn_ops_mode(cp))
-					continue;
-				else
-					/* connection template of OPS */
-					goto try_drop;
-			}
 			if (cp->protocol == IPPROTO_TCP) {
 				switch(cp->state) {
 				case IP_VS_TCP_S_SYN_RECV:
@@ -1323,7 +1286,6 @@ void ip_vs_random_dropentry(struct netns_ipvs *ipvs)
 					continue;
 				}
 			} else {
-try_drop:
 				if (!todrop_entry(cp))
 					continue;
 			}

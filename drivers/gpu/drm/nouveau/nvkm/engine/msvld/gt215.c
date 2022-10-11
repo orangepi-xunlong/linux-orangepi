@@ -27,6 +27,7 @@
 
 static const struct nvkm_falcon_func
 gt215_msvld = {
+	.pmc_enable = 0x04008000,
 	.init = g98_msvld_init,
 	.sclass = {
 		{ -1, -1, GT212_MSVLD },

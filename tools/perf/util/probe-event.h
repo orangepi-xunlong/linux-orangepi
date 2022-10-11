@@ -12,7 +12,6 @@ struct probe_conf {
 	bool	show_location_range;
 	bool	force_add;
 	bool	no_inlines;
-	bool	cache;
 	int	max_probes;
 };
 extern struct probe_conf probe_conf;
@@ -85,7 +84,6 @@ struct perf_probe_event {
 	char			*group;	/* Group name */
 	struct perf_probe_point	point;	/* Probe point */
 	int			nargs;	/* Number of arguments */
-	bool			sdt;	/* SDT/cached event flag */
 	bool			uprobes;	/* Uprobe event flag */
 	char			*target;	/* Target binary */
 	struct perf_probe_arg	*args;	/* Arguments */
@@ -116,54 +114,52 @@ int init_probe_symbol_maps(bool user_only);
 void exit_probe_symbol_maps(void);
 
 /* Command string to events */
-int parse_perf_probe_command(const char *cmd, struct perf_probe_event *pev);
-int parse_probe_trace_command(const char *cmd, struct probe_trace_event *tev);
+extern int parse_perf_probe_command(const char *cmd,
+				    struct perf_probe_event *pev);
+extern int parse_probe_trace_command(const char *cmd,
+				     struct probe_trace_event *tev);
 
 /* Events to command string */
-char *synthesize_perf_probe_command(struct perf_probe_event *pev);
-char *synthesize_probe_trace_command(struct probe_trace_event *tev);
-char *synthesize_perf_probe_arg(struct perf_probe_arg *pa);
-char *synthesize_perf_probe_point(struct perf_probe_point *pp);
-
-int perf_probe_event__copy(struct perf_probe_event *dst,
-			   struct perf_probe_event *src);
-
-bool perf_probe_with_var(struct perf_probe_event *pev);
+extern char *synthesize_perf_probe_command(struct perf_probe_event *pev);
+extern char *synthesize_probe_trace_command(struct probe_trace_event *tev);
+extern int synthesize_perf_probe_arg(struct perf_probe_arg *pa, char *buf,
+				     size_t len);
 
 /* Check the perf_probe_event needs debuginfo */
-bool perf_probe_event_need_dwarf(struct perf_probe_event *pev);
+extern bool perf_probe_event_need_dwarf(struct perf_probe_event *pev);
 
 /* Release event contents */
-void clear_perf_probe_event(struct perf_probe_event *pev);
-void clear_probe_trace_event(struct probe_trace_event *tev);
+extern void clear_perf_probe_event(struct perf_probe_event *pev);
+extern void clear_probe_trace_event(struct probe_trace_event *tev);
 
 /* Command string to line-range */
-int parse_line_range_desc(const char *cmd, struct line_range *lr);
+extern int parse_line_range_desc(const char *cmd, struct line_range *lr);
 
 /* Release line range members */
-void line_range__clear(struct line_range *lr);
+extern void line_range__clear(struct line_range *lr);
 
 /* Initialize line range */
-int line_range__init(struct line_range *lr);
+extern int line_range__init(struct line_range *lr);
 
-int add_perf_probe_events(struct perf_probe_event *pevs, int npevs);
-int convert_perf_probe_events(struct perf_probe_event *pevs, int npevs);
-int apply_perf_probe_events(struct perf_probe_event *pevs, int npevs);
-int show_probe_trace_events(struct perf_probe_event *pevs, int npevs);
-void cleanup_perf_probe_events(struct perf_probe_event *pevs, int npevs);
-int del_perf_probe_events(struct strfilter *filter);
+extern int add_perf_probe_events(struct perf_probe_event *pevs, int npevs);
+extern int convert_perf_probe_events(struct perf_probe_event *pevs, int npevs);
+extern int apply_perf_probe_events(struct perf_probe_event *pevs, int npevs);
+extern void cleanup_perf_probe_events(struct perf_probe_event *pevs, int npevs);
+extern int del_perf_probe_events(struct strfilter *filter);
 
-int show_perf_probe_event(const char *group, const char *event,
-			  struct perf_probe_event *pev,
-			  const char *module, bool use_stdout);
-int show_perf_probe_events(struct strfilter *filter);
-int show_line_range(struct line_range *lr, const char *module, bool user);
-int show_available_vars(struct perf_probe_event *pevs, int npevs,
-			struct strfilter *filter);
-int show_available_funcs(const char *module, struct strfilter *filter, bool user);
+extern int show_perf_probe_event(const char *group, const char *event,
+				 struct perf_probe_event *pev,
+				 const char *module, bool use_stdout);
+extern int show_perf_probe_events(struct strfilter *filter);
+extern int show_line_range(struct line_range *lr, const char *module,
+			   bool user);
+extern int show_available_vars(struct perf_probe_event *pevs, int npevs,
+			       struct strfilter *filter);
+extern int show_available_funcs(const char *module, struct strfilter *filter,
+				bool user);
+bool arch__prefers_symtab(void);
 void arch__fix_tev_from_maps(struct perf_probe_event *pev,
-			     struct probe_trace_event *tev, struct map *map,
-			     struct symbol *sym);
+			     struct probe_trace_event *tev, struct map *map);
 
 /* If there is no space to write, returns -E2BIG. */
 int e_snprintf(char *str, size_t size, const char *format, ...)
@@ -174,10 +170,5 @@ int e_snprintf(char *str, size_t size, const char *format, ...)
 
 int copy_to_probe_trace_arg(struct probe_trace_arg *tvar,
 			    struct perf_probe_arg *pvar);
-
-struct map *get_target_map(const char *target, bool user);
-
-void arch__post_process_probe_trace_events(struct perf_probe_event *pev,
-					   int ntevs);
 
 #endif /*_PROBE_EVENT_H */

@@ -36,7 +36,6 @@
 #include <linux/highmem.h>
 #include <linux/io.h>
 #include <trace/events/cma.h>
-#include <linux/dma-contiguous.h>
 
 #include "cma.h"
 
@@ -101,8 +100,10 @@ static int __init cma_activate_area(struct cma *cma)
 
 	cma->bitmap = kzalloc(bitmap_size, GFP_KERNEL);
 
-	if (!cma->bitmap)
+	if (!cma->bitmap) {
+		cma->count = 0;
 		return -ENOMEM;
+	}
 
 	WARN_ON_ONCE(!pfn_valid(pfn));
 	zone = page_zone(pfn_to_page(pfn));
@@ -267,6 +268,12 @@ int __init cma_declare_contiguous(phys_addr_t base,
 	 */
 	alignment = max(alignment,  (phys_addr_t)PAGE_SIZE <<
 			  max_t(unsigned long, MAX_ORDER - 1, pageblock_order));
+	if (fixed && base & (alignment - 1)) {
+		ret = -EINVAL;
+		pr_err("Region at %pa must be aligned to %pa bytes\n",
+			&base, &alignment);
+		goto err;
+	}
 	base = ALIGN(base, alignment);
 	size = ALIGN(size, alignment);
 	limit &= ~(alignment - 1);
@@ -296,6 +303,13 @@ int __init cma_declare_contiguous(phys_addr_t base,
 	 */
 	if (limit == 0 || limit > memblock_end)
 		limit = memblock_end;
+
+	if (base + size > limit) {
+		ret = -EINVAL;
+		pr_err("Size (%pa) of region at %pa exceeds limit (%pa)\n",
+			&size, &base, &limit);
+		goto err;
+	}
 
 	/* Reserve memory */
 	if (fixed) {
@@ -334,18 +348,20 @@ int __init cma_declare_contiguous(phys_addr_t base,
 		 * kmemleak scans/reads tracked objects for pointers to other
 		 * objects but this address isn't mapped and accessible
 		 */
-		kmemleak_ignore_phys(addr);
+		kmemleak_ignore(phys_to_virt(addr));
 		base = addr;
 	}
 
 	ret = cma_init_reserved_mem(base, size, order_per_bit, res_cma);
 	if (ret)
-		goto err;
+		goto free_mem;
 
 	pr_info("Reserved %ld MiB at %pa\n", (unsigned long)size / SZ_1M,
 		&base);
 	return 0;
 
+free_mem:
+	memblock_free(base, size);
 err:
 	pr_err("Failed to reserve %ld MiB\n", (unsigned long)size / SZ_1M);
 	return ret;
@@ -382,9 +398,6 @@ struct page *cma_alloc(struct cma *cma, size_t count, unsigned int align)
 	offset = cma_bitmap_aligned_offset(cma, align);
 	bitmap_maxno = cma_bitmap_maxno(cma);
 	bitmap_count = cma_bitmap_pages_to_bits(cma, count);
-
-	if (bitmap_count > bitmap_maxno)
-		return NULL;
 
 	for (;;) {
 		mutex_lock(&cma->lock);
@@ -460,57 +473,3 @@ bool cma_release(struct cma *cma, const struct page *pages, unsigned int count)
 
 	return true;
 }
-
-#define MAPS_AREA_RANGE		((1U<<20)*20)
-#define MAPS_UNIT_BLOCK		0X100	/*  1MB /4KB =256  */
-#define MAPS_AREA_BLOCK		(MAPS_AREA_RANGE>>PAGE_SHIFT)
-
-int dma_contiguous_area_maps(struct seq_file *s)
-{
-	unsigned int i;
-	unsigned int active_bit = 0;
-	unsigned int free_bit = 0;
-	unsigned long base_offset = 0;
-	unsigned long end_offset = 0;
-
-	struct cma *cma = dev_get_cma_area(NULL);
-
-	if (!cma || !cma->count)
-		return (-EINVAL);
-
-	base_offset = cma->base_pfn << PAGE_SHIFT;
-	end_offset = (cma->base_pfn + cma->count) << PAGE_SHIFT;
-	seq_printf(s, "\n 0x%lx: ", base_offset);
-	for (i = 0; i < cma->count; i++) {
-		if (((i + 1) % MAPS_UNIT_BLOCK) == 0) {
-			if ((i + 1) % MAPS_AREA_BLOCK == 0) {
-				if (active_bit)
-					seq_printf(s, " %2x\n", active_bit - 1);
-				else
-					seq_printf(s, " %s\n", "00");
-				seq_printf(s, " 0x%lx: ",
-					base_offset + (i + 1) /
-					MAPS_AREA_BLOCK * MAPS_AREA_RANGE);
-			} else {
-				if (active_bit)
-					seq_printf(s, " %2x", active_bit - 1);
-				else
-					seq_printf(s, " %s", "00");
-			}
-			active_bit = 0;
-		}
-		if (test_bit(i, cma->bitmap))
-			active_bit++;
-		else
-			free_bit++;
-	}
-	seq_printf(s, "\n Cma area start:0x%lx end:0x%lx\n", base_offset,
-		   end_offset);
-	seq_printf(s, " Cma area Total:%uMB Free:%uKB ~= %uMB\n",
-		(unsigned int)(cma->count << PAGE_SHIFT) >> 20,
-		(free_bit << PAGE_SHIFT) / 1024,
-		(free_bit << PAGE_SHIFT) >> 20);
-	return 0;
-}
-EXPORT_SYMBOL(dma_contiguous_area_maps);
-

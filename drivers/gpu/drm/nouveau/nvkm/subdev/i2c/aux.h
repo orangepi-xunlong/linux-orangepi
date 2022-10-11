@@ -14,11 +14,13 @@ int nvkm_i2c_aux_ctor(const struct nvkm_i2c_aux_func *, struct nvkm_i2c_pad *,
 int nvkm_i2c_aux_new_(const struct nvkm_i2c_aux_func *, struct nvkm_i2c_pad *,
 		      int id, struct nvkm_i2c_aux **);
 void nvkm_i2c_aux_del(struct nvkm_i2c_aux **);
+void nvkm_i2c_aux_init(struct nvkm_i2c_aux *);
+void nvkm_i2c_aux_fini(struct nvkm_i2c_aux *);
 int nvkm_i2c_aux_xfer(struct nvkm_i2c_aux *, bool retry, u8 type,
 		      u32 addr, u8 *data, u8 size);
 
 int g94_i2c_aux_new(struct nvkm_i2c_pad *, int, u8, struct nvkm_i2c_aux **);
-int gm200_i2c_aux_new(struct nvkm_i2c_pad *, int, u8, struct nvkm_i2c_aux **);
+int gm204_i2c_aux_new(struct nvkm_i2c_pad *, int, u8, struct nvkm_i2c_aux **);
 
 #define AUX_MSG(b,l,f,a...) do {                                               \
 	struct nvkm_i2c_aux *_aux = (b);                                       \

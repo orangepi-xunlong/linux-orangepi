@@ -18,7 +18,6 @@ DECLARE_EVENT_CLASS(vb2_event_class,
 		__field(u32, index)
 		__field(u32, type)
 		__field(u32, bytesused)
-		__field(u64, timestamp)
 	),
 
 	TP_fast_assign(
@@ -29,16 +28,14 @@ DECLARE_EVENT_CLASS(vb2_event_class,
 		__entry->index = vb->index;
 		__entry->type = vb->type;
 		__entry->bytesused = vb->planes[0].bytesused;
-		__entry->timestamp = vb->timestamp;
 	),
 
 	TP_printk("owner = %p, queued = %u, owned_by_drv = %d, index = %u, "
-		  "type = %u, bytesused = %u, timestamp = %llu", __entry->owner,
+		  "type = %u, bytesused = %u", __entry->owner,
 		  __entry->queued_count,
 		  __entry->owned_by_drv_count,
 		  __entry->index, __entry->type,
-		  __entry->bytesused,
-		  __entry->timestamp
+		  __entry->bytesused
 	)
 )
 

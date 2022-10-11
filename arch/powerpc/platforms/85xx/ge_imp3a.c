@@ -47,8 +47,9 @@ void __init ge_imp3a_pic_init(void)
 	struct mpic *mpic;
 	struct device_node *np;
 	struct device_node *cascade_node = NULL;
+	unsigned long root = of_get_flat_dt_root();
 
-	if (of_machine_is_compatible("fsl,MPC8572DS-CAMP")) {
+	if (of_flat_dt_is_compatible(root, "fsl,MPC8572DS-CAMP")) {
 		mpic = mpic_alloc(NULL, 0,
 			MPIC_NO_RESET |
 			MPIC_BIG_ENDIAN |
@@ -197,7 +198,9 @@ static void ge_imp3a_show_cpuinfo(struct seq_file *m)
  */
 static int __init ge_imp3a_probe(void)
 {
-	return of_machine_is_compatible("ge,IMP3A");
+	unsigned long root = of_get_flat_dt_root();
+
+	return of_flat_dt_is_compatible(root, "ge,IMP3A");
 }
 
 machine_arch_initcall(ge_imp3a, mpc85xx_common_publish_devices);
@@ -215,6 +218,7 @@ define_machine(ge_imp3a) {
 	.pcibios_fixup_phb      = fsl_pcibios_fixup_phb,
 #endif
 	.get_irq		= mpic_get_irq,
+	.restart		= fsl_rstcr_restart,
 	.calibrate_decr		= generic_calibrate_decr,
 	.progress		= udbg_progress,
 };

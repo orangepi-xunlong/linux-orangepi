@@ -10,7 +10,7 @@
 
 #include <linux/spinlock.h>
 #include <linux/errno.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/bitops.h>
 #include <linux/io.h>
 #include <linux/of_device.h>
@@ -52,6 +52,9 @@
 #define ZEVIO_GPIO_INPUT			0x18
 #define ZEVIO_GPIO_INT_STICKY		0x20
 
+#define to_zevio_gpio(chip) container_of(to_of_mm_gpio_chip(chip), \
+				struct zevio_gpio, chip)
+
 /* Bit number of GPIO in its section */
 #define ZEVIO_GPIO_BIT(gpio) (gpio&7)
 
@@ -77,7 +80,7 @@ static inline void zevio_gpio_port_set(struct zevio_gpio *c, unsigned pin,
 /* Functions for struct gpio_chip */
 static int zevio_gpio_get(struct gpio_chip *chip, unsigned pin)
 {
-	struct zevio_gpio *controller = gpiochip_get_data(chip);
+	struct zevio_gpio *controller = to_zevio_gpio(chip);
 	u32 val, dir;
 
 	spin_lock(&controller->lock);
@@ -93,7 +96,7 @@ static int zevio_gpio_get(struct gpio_chip *chip, unsigned pin)
 
 static void zevio_gpio_set(struct gpio_chip *chip, unsigned pin, int value)
 {
-	struct zevio_gpio *controller = gpiochip_get_data(chip);
+	struct zevio_gpio *controller = to_zevio_gpio(chip);
 	u32 val;
 
 	spin_lock(&controller->lock);
@@ -109,7 +112,7 @@ static void zevio_gpio_set(struct gpio_chip *chip, unsigned pin, int value)
 
 static int zevio_gpio_direction_input(struct gpio_chip *chip, unsigned pin)
 {
-	struct zevio_gpio *controller = gpiochip_get_data(chip);
+	struct zevio_gpio *controller = to_zevio_gpio(chip);
 	u32 val;
 
 	spin_lock(&controller->lock);
@@ -126,7 +129,7 @@ static int zevio_gpio_direction_input(struct gpio_chip *chip, unsigned pin)
 static int zevio_gpio_direction_output(struct gpio_chip *chip,
 				       unsigned pin, int value)
 {
-	struct zevio_gpio *controller = gpiochip_get_data(chip);
+	struct zevio_gpio *controller = to_zevio_gpio(chip);
 	u32 val;
 
 	spin_lock(&controller->lock);
@@ -184,9 +187,7 @@ static int zevio_gpio_probe(struct platform_device *pdev)
 	controller->chip.gc = zevio_gpio_chip;
 	controller->chip.gc.parent = &pdev->dev;
 
-	status = of_mm_gpiochip_add_data(pdev->dev.of_node,
-					 &(controller->chip),
-					 controller);
+	status = of_mm_gpiochip_add(pdev->dev.of_node, &(controller->chip));
 	if (status) {
 		dev_err(&pdev->dev, "failed to add gpiochip: %d\n", status);
 		return status;
@@ -203,17 +204,32 @@ static int zevio_gpio_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static int zevio_gpio_remove(struct platform_device *pdev)
+{
+	struct zevio_gpio *controller = platform_get_drvdata(pdev);
+
+	of_mm_gpiochip_remove(&controller->chip);
+
+	return 0;
+}
+
 static const struct of_device_id zevio_gpio_of_match[] = {
 	{ .compatible = "lsi,zevio-gpio", },
 	{ },
 };
 
+MODULE_DEVICE_TABLE(of, zevio_gpio_of_match);
+
 static struct platform_driver zevio_gpio_driver = {
 	.driver		= {
 		.name	= "gpio-zevio",
 		.of_match_table = zevio_gpio_of_match,
-		.suppress_bind_attrs = true,
 	},
 	.probe		= zevio_gpio_probe,
+	.remove		= zevio_gpio_remove,
 };
-builtin_platform_driver(zevio_gpio_driver);
+module_platform_driver(zevio_gpio_driver);
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Fabian Vogt <fabian@ritter-vogt.de>");
+MODULE_DESCRIPTION("LSI ZEVIO SoC GPIO driver");

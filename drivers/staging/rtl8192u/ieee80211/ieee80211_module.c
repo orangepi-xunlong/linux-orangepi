@@ -177,6 +177,7 @@ struct net_device *alloc_ieee80211(int sizeof_priv)
 
 /* These function were added to load crypte module autoly */
 	ieee80211_tkip_null();
+	ieee80211_wep_null();
 	ieee80211_ccmp_null();
 
 	return dev;

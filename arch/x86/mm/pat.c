@@ -11,7 +11,7 @@
 #include <linux/bootmem.h>
 #include <linux/debugfs.h>
 #include <linux/kernel.h>
-#include <linux/pfn_t.h>
+#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
 #include <linux/fs.h>
@@ -157,7 +157,7 @@ enum {
 	PAT_WT = 4,		/* Write Through */
 	PAT_WP = 5,		/* Write Protected */
 	PAT_WB = 6,		/* Write Back (default) */
-	PAT_UC_MINUS = 7,	/* UC, but can be overridden by MTRR */
+	PAT_UC_MINUS = 7,	/* UC, but can be overriden by MTRR */
 };
 
 #define CM(c) (_PAGE_CACHE_MODE_ ## c)
@@ -626,7 +626,7 @@ int free_memtype(u64 start, u64 end)
 	entry = rbt_memtype_erase(start, end);
 	spin_unlock(&memtype_lock);
 
-	if (IS_ERR(entry)) {
+	if (!entry) {
 		pr_info("x86/PAT: %s:%d freeing invalid memtype [mem %#010Lx-%#010Lx]\n",
 			current->comm, current->pid, start, end - 1);
 		return -EINVAL;
@@ -937,10 +937,9 @@ int track_pfn_copy(struct vm_area_struct *vma)
 }
 
 /*
- * prot is passed in as a parameter for the new mapping. If the vma has
- * a linear pfn mapping for the entire range, or no vma is provided,
- * reserve the entire pfn + size range with single reserve_pfn_range
- * call.
+ * prot is passed in as a parameter for the new mapping. If the vma has a
+ * linear pfn mapping for the entire range reserve the entire vma range with
+ * single reserve_pfn_range call.
  */
 int track_pfn_remap(struct vm_area_struct *vma, pgprot_t *prot,
 		    unsigned long pfn, unsigned long addr, unsigned long size)
@@ -949,12 +948,11 @@ int track_pfn_remap(struct vm_area_struct *vma, pgprot_t *prot,
 	enum page_cache_mode pcm;
 
 	/* reserve the whole chunk starting from paddr */
-	if (!vma || (addr == vma->vm_start
-				&& size == (vma->vm_end - vma->vm_start))) {
+	if (addr == vma->vm_start && size == (vma->vm_end - vma->vm_start)) {
 		int ret;
 
 		ret = reserve_pfn_range(paddr, size, prot, 0);
-		if (ret == 0 && vma)
+		if (!ret)
 			vma->vm_flags |= VM_PAT;
 		return ret;
 	}
@@ -976,14 +974,14 @@ int track_pfn_remap(struct vm_area_struct *vma, pgprot_t *prot,
 			return -EINVAL;
 	}
 
-	*prot = __pgprot((pgprot_val(*prot) & (~_PAGE_CACHE_MASK)) |
+	*prot = __pgprot((pgprot_val(vma->vm_page_prot) & (~_PAGE_CACHE_MASK)) |
 			 cachemode2protval(pcm));
 
 	return 0;
 }
 
 int track_pfn_insert(struct vm_area_struct *vma, pgprot_t *prot,
-		     pfn_t pfn)
+		     unsigned long pfn)
 {
 	enum page_cache_mode pcm;
 
@@ -991,8 +989,8 @@ int track_pfn_insert(struct vm_area_struct *vma, pgprot_t *prot,
 		return 0;
 
 	/* Set prot based on lookup */
-	pcm = lookup_memtype(pfn_t_to_phys(pfn));
-	*prot = __pgprot((pgprot_val(*prot) & (~_PAGE_CACHE_MASK)) |
+	pcm = lookup_memtype((resource_size_t)pfn << PAGE_SHIFT);
+	*prot = __pgprot((pgprot_val(vma->vm_page_prot) & (~_PAGE_CACHE_MASK)) |
 			 cachemode2protval(pcm));
 
 	return 0;
@@ -1009,7 +1007,7 @@ void untrack_pfn(struct vm_area_struct *vma, unsigned long pfn,
 	resource_size_t paddr;
 	unsigned long prot;
 
-	if (vma && !(vma->vm_flags & VM_PAT))
+	if (!(vma->vm_flags & VM_PAT))
 		return;
 
 	/* free the chunk starting from pfn or the whole chunk */
@@ -1023,17 +1021,6 @@ void untrack_pfn(struct vm_area_struct *vma, unsigned long pfn,
 		size = vma->vm_end - vma->vm_start;
 	}
 	free_pfn_range(paddr, size);
-	if (vma)
-		vma->vm_flags &= ~VM_PAT;
-}
-
-/*
- * untrack_pfn_moved is called, while mremapping a pfnmap for a new region,
- * with the old vma after its pfnmap page table has been removed.  The new
- * vma has a new pfnmap to the same pfn & cache type with VM_PAT set.
- */
-void untrack_pfn_moved(struct vm_area_struct *vma)
-{
 	vma->vm_flags &= ~VM_PAT;
 }
 

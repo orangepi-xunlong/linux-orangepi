@@ -15,24 +15,6 @@ config GENERIC_PHY
 	  phy users can obtain reference to the PHY. All the users of this
 	  framework should select this config.
 
-config PHY_BCM_NS_USB2
-	tristate "Broadcom Northstar USB 2.0 PHY Driver"
-	depends on ARCH_BCM_IPROC || COMPILE_TEST
-	depends on HAS_IOMEM && OF
-	select GENERIC_PHY
-	help
-	  Enable this to support Broadcom USB 2.0 PHY connected to the USB
-	  controller on Northstar family.
-
-config PHY_BCM_NS_USB3
-	tristate "Broadcom Northstar USB 3.0 PHY Driver"
-	depends on ARCH_BCM_IPROC || COMPILE_TEST
-	depends on HAS_IOMEM && OF
-	select GENERIC_PHY
-	help
-	  Enable this to support Broadcom USB 3.0 PHY connected to the USB
-	  controller on Northstar family.
-
 config PHY_BERLIN_USB
 	tristate "Marvell Berlin USB PHY Driver"
 	depends on ARCH_BERLIN && RESET_CONTROLLER && HAS_IOMEM && OF
@@ -50,18 +32,8 @@ config PHY_BERLIN_SATA
 config ARMADA375_USBCLUSTER_PHY
 	def_bool y
 	depends on MACH_ARMADA_375 || COMPILE_TEST
-	depends on OF && HAS_IOMEM
+	depends on OF
 	select GENERIC_PHY
-
-config PHY_DA8XX_USB
-	tristate "TI DA8xx USB PHY Driver"
-	depends on ARCH_DAVINCI_DA8XX
-	select GENERIC_PHY
-	select MFD_SYSCON
-	help
-	  Enable this to support the USB PHY on DA8xx SoCs.
-
-	  This driver controls both the USB 1.1 PHY and the USB 2.0 PHY.
 
 config PHY_DM816X_USB
 	tristate "TI dm816x USB PHY driver"
@@ -141,18 +113,10 @@ config PHY_MIPHY365X
 
 config PHY_RCAR_GEN2
 	tristate "Renesas R-Car generation 2 USB PHY driver"
-	depends on ARCH_RENESAS
+	depends on ARCH_SHMOBILE
 	depends on GENERIC_PHY
 	help
 	  Support for USB PHY found on Renesas R-Car generation 2 SoCs.
-
-config PHY_RCAR_GEN3_USB2
-	tristate "Renesas R-Car generation 3 USB 2.0 PHY driver"
-	depends on ARCH_RENESAS
-	depends on EXTCON
-	select GENERIC_PHY
-	help
-	  Support for USB 2.0 PHY found on Renesas R-Car generation 3 SoCs.
 
 config OMAP_CONTROL_PHY
 	tristate "OMAP CONTROL PHY Driver"
@@ -248,18 +212,9 @@ config PHY_MT65XX_USB3
 	depends on ARCH_MEDIATEK && OF
 	select GENERIC_PHY
 	help
-	  Say 'Y' here to add support for Mediatek USB3.0 PHY driver,
-	  it supports multiple usb2.0 and usb3.0 ports.
-
-config PHY_HI6220_USB
-	tristate "hi6220 USB PHY support"
-	depends on (ARCH_HISI && ARM64) || COMPILE_TEST
-	select GENERIC_PHY
-	select MFD_SYSCON
-	help
-	  Enable this to support the HISILICON HI6220 USB PHY.
-
-	  To compile this driver as a module, choose M here.
+	  Say 'Y' here to add support for Mediatek USB3.0 PHY driver
+	  for mt65xx SoCs. it supports two usb2.0 ports and
+	  one usb3.0 port.
 
 config PHY_SUN4I_USB
 	tristate "Allwinner sunxi SoC USB PHY driver"
@@ -267,9 +222,7 @@ config PHY_SUN4I_USB
 	depends on RESET_CONTROLLER
 	depends on EXTCON
 	depends on POWER_SUPPLY
-	depends on USB_SUPPORT
 	select GENERIC_PHY
-	select USB_COMMON
 	help
 	  Enable this to support the transceiver that is part of Allwinner
 	  sunxi SoCs.
@@ -281,8 +234,7 @@ config PHY_SUN9I_USB
 	tristate "Allwinner sun9i SoC USB PHY driver"
 	depends on ARCH_SUNXI && HAS_IOMEM && OF
 	depends on RESET_CONTROLLER
-	depends on USB_SUPPORT
-	select USB_COMMON
+	depends on USB_COMMON
 	select GENERIC_PHY
 	help
 	  Enable this to support the transceiver that is part of Allwinner
@@ -362,52 +314,6 @@ config PHY_QCOM_IPQ806X_SATA
 	depends on OF
 	select GENERIC_PHY
 
-config PHY_ROCKCHIP_USB
-	tristate "Rockchip USB2 PHY Driver"
-	depends on ARCH_ROCKCHIP && OF
-	select GENERIC_PHY
-	help
-	  Enable this to support the Rockchip USB 2.0 PHY.
-
-config PHY_ROCKCHIP_INNO_USB2
-	tristate "Rockchip INNO USB2PHY Driver"
-	depends on (ARCH_ROCKCHIP || COMPILE_TEST) && OF
-	depends on COMMON_CLK
-	select GENERIC_PHY
-	help
-	  Support for Rockchip USB2.0 PHY with Innosilicon IP block.
-
-config PHY_ROCKCHIP_EMMC
-	tristate "Rockchip EMMC PHY Driver"
-	depends on ARCH_ROCKCHIP && OF
-	select GENERIC_PHY
-	help
-	  Enable this to support the Rockchip EMMC PHY.
-
-config PHY_ROCKCHIP_DP
-	tristate "Rockchip Display Port PHY Driver"
-	depends on ARCH_ROCKCHIP && OF
-	select GENERIC_PHY
-	help
-	  Enable this to support the Rockchip Display Port PHY.
-
-config PHY_ROCKCHIP_PCIE
-	tristate "Rockchip PCIe PHY Driver"
-	depends on (ARCH_ROCKCHIP && OF) || COMPILE_TEST
-	select GENERIC_PHY
-	select MFD_SYSCON
-	help
-	  Enable this to support the Rockchip PCIe PHY.
-
-config PHY_ROCKCHIP_TYPEC
-	tristate "Rockchip TYPEC PHY Driver"
-	depends on OF && (ARCH_ROCKCHIP || COMPILE_TEST)
-	select EXTCON
-	select GENERIC_PHY
-	select RESET_CONTROLLER
-	help
-	  Enable this to support the Rockchip USB TYPEC PHY.
-
 config PHY_ST_SPEAR1310_MIPHY
 	tristate "ST SPEAR1310-MIPHY driver"
 	select GENERIC_PHY
@@ -461,15 +367,14 @@ config PHY_TUSB1210
 	help
 	  Support for TI TUSB1210 USB ULPI PHY.
 
-config PHY_BRCM_SATA
-	tristate "Broadcom SATA PHY driver"
-	depends on ARCH_BRCMSTB || ARCH_BCM_IPROC || BMIPS_GENERIC || COMPILE_TEST
+config PHY_BRCMSTB_SATA
+	tristate "Broadcom STB SATA PHY driver"
+	depends on ARCH_BRCMSTB
 	depends on OF
 	select GENERIC_PHY
-	default ARCH_BCM_IPROC
 	help
-	  Enable this to support the Broadcom SATA PHY.
-	  If unsure, say N.
+	  Enable this to support the SATA3 PHY on 28nm Broadcom STB SoCs.
+	  Likely useful only with CONFIG_SATA_BRCMSTB enabled.
 
 config PHY_CYGNUS_PCIE
 	tristate "Broadcom Cygnus PCIe PHY driver"
@@ -480,14 +385,6 @@ config PHY_CYGNUS_PCIE
 	  Enable this to support the Broadcom Cygnus PCIe PHY.
 	  If unsure, say N.
 
-source "drivers/phy/tegra/Kconfig"
+source "drivers/phy/rockchip/Kconfig"
 
-config PHY_NS2_PCIE
-	tristate "Broadcom Northstar2 PCIe PHY driver"
-	depends on OF && MDIO_BUS_MUX_BCM_IPROC
-	select GENERIC_PHY
-	default ARCH_BCM_IPROC
-	help
-	  Enable this to support the Broadcom Northstar2 PCIe PHY.
-	  If unsure, say N.
 endmenu

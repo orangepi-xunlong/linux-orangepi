@@ -154,26 +154,6 @@ struct kvm_s390_skeys {
 	__u32 flags;
 	__u32 reserved[9];
 };
-
-struct kvm_hyperv_exit {
-#define KVM_EXIT_HYPERV_SYNIC          1
-#define KVM_EXIT_HYPERV_HCALL          2
-	__u32 type;
-	union {
-		struct {
-			__u32 msr;
-			__u64 control;
-			__u64 evt_page;
-			__u64 msg_page;
-		} synic;
-		struct {
-			__u64 input;
-			__u64 result;
-			__u64 params[2];
-		} hcall;
-	} u;
-};
-
 #define KVM_S390_GET_SKEYS_NONE   1
 #define KVM_S390_SKEYS_MAX        1048576
 
@@ -204,7 +184,6 @@ struct kvm_hyperv_exit {
 #define KVM_EXIT_SYSTEM_EVENT     24
 #define KVM_EXIT_S390_STSI        25
 #define KVM_EXIT_IOAPIC_EOI       26
-#define KVM_EXIT_HYPERV           27
 
 /* For KVM_EXIT_INTERNAL_ERROR */
 /* Emulate instruction failed. */
@@ -359,8 +338,6 @@ struct kvm_run {
 		struct {
 			__u8 vector;
 		} eoi;
-		/* KVM_EXIT_HYPERV */
-		struct kvm_hyperv_exit hyperv;
 		/* Fix the size of the union. */
 		char padding[256];
 	};
@@ -547,13 +524,7 @@ struct kvm_s390_pgm_info {
 	__u8 exc_access_id;
 	__u8 per_access_id;
 	__u8 op_access_id;
-#define KVM_S390_PGM_FLAGS_ILC_VALID	0x01
-#define KVM_S390_PGM_FLAGS_ILC_0	0x02
-#define KVM_S390_PGM_FLAGS_ILC_1	0x04
-#define KVM_S390_PGM_FLAGS_ILC_MASK	0x06
-#define KVM_S390_PGM_FLAGS_NO_REWIND	0x08
-	__u8 flags;
-	__u8 pad[2];
+	__u8 pad[3];
 };
 
 struct kvm_s390_prefix_info {
@@ -860,16 +831,6 @@ struct kvm_ppc_smmu_info {
 #define KVM_CAP_GUEST_DEBUG_HW_WPS 120
 #define KVM_CAP_SPLIT_IRQCHIP 121
 #define KVM_CAP_IOEVENTFD_ANY_LENGTH 122
-#define KVM_CAP_HYPERV_SYNIC 123
-#define KVM_CAP_S390_RI 124
-#define KVM_CAP_SPAPR_TCE_64 125
-#define KVM_CAP_ARM_PMU_V3 126
-#define KVM_CAP_VCPU_ATTRIBUTES 127
-#define KVM_CAP_MAX_VCPU_ID 128
-#define KVM_CAP_X2APIC_API 129
-#define KVM_CAP_S390_USER_INSTR0 130
-#define KVM_CAP_MSI_DEVID 131
-#define KVM_CAP_PPC_HTM 132
 #define KVM_CAP_S390_BPB 152
 
 #ifdef KVM_CAP_IRQ_ROUTING
@@ -883,10 +844,7 @@ struct kvm_irq_routing_msi {
 	__u32 address_lo;
 	__u32 address_hi;
 	__u32 data;
-	union {
-		__u32 pad;
-		__u32 devid;
-	};
+	__u32 pad;
 };
 
 struct kvm_irq_routing_s390_adapter {
@@ -897,16 +855,10 @@ struct kvm_irq_routing_s390_adapter {
 	__u32 adapter_id;
 };
 
-struct kvm_irq_routing_hv_sint {
-	__u32 vcpu;
-	__u32 sint;
-};
-
 /* gsi routing entry types */
 #define KVM_IRQ_ROUTING_IRQCHIP 1
 #define KVM_IRQ_ROUTING_MSI 2
 #define KVM_IRQ_ROUTING_S390_ADAPTER 3
-#define KVM_IRQ_ROUTING_HV_SINT 4
 
 struct kvm_irq_routing_entry {
 	__u32 gsi;
@@ -917,7 +869,6 @@ struct kvm_irq_routing_entry {
 		struct kvm_irq_routing_irqchip irqchip;
 		struct kvm_irq_routing_msi msi;
 		struct kvm_irq_routing_s390_adapter adapter;
-		struct kvm_irq_routing_hv_sint hv_sint;
 		__u32 pad[8];
 	} u;
 };
@@ -973,18 +924,11 @@ struct kvm_irqfd {
 	__u8  pad[16];
 };
 
-/* For KVM_CAP_ADJUST_CLOCK */
-
-/* Do not use 1, KVM_CHECK_EXTENSION returned it before we had flags.  */
-#define KVM_CLOCK_TSC_STABLE		2
-
 struct kvm_clock_data {
 	__u64 clock;
 	__u32 flags;
 	__u32 pad[9];
 };
-
-/* For KVM_CAP_SW_TLB */
 
 #define KVM_MMU_FSL_BOOKE_NOHV		0
 #define KVM_MMU_FSL_BOOKE_HV		1
@@ -1039,14 +983,12 @@ struct kvm_one_reg {
 	__u64 addr;
 };
 
-#define KVM_MSI_VALID_DEVID	(1U << 0)
 struct kvm_msi {
 	__u32 address_lo;
 	__u32 address_hi;
 	__u32 data;
 	__u32 flags;
-	__u32 devid;
-	__u8  pad[12];
+	__u8  pad[16];
 };
 
 struct kvm_arm_device_addr {
@@ -1091,8 +1033,6 @@ enum kvm_device_type {
 #define KVM_DEV_TYPE_FLIC		KVM_DEV_TYPE_FLIC
 	KVM_DEV_TYPE_ARM_VGIC_V3,
 #define KVM_DEV_TYPE_ARM_VGIC_V3	KVM_DEV_TYPE_ARM_VGIC_V3
-	KVM_DEV_TYPE_ARM_VGIC_ITS,
-#define KVM_DEV_TYPE_ARM_VGIC_ITS	KVM_DEV_TYPE_ARM_VGIC_ITS
 	KVM_DEV_TYPE_MAX,
 };
 
@@ -1177,8 +1117,6 @@ struct kvm_s390_ucas_mapping {
 /* Available with KVM_CAP_PPC_ALLOC_HTAB */
 #define KVM_PPC_ALLOCATE_HTAB	  _IOWR(KVMIO, 0xa7, __u32)
 #define KVM_CREATE_SPAPR_TCE	  _IOW(KVMIO,  0xa8, struct kvm_create_spapr_tce)
-#define KVM_CREATE_SPAPR_TCE_64	  _IOW(KVMIO,  0xa8, \
-				       struct kvm_create_spapr_tce_64)
 /* Available with KVM_CAP_RMA */
 #define KVM_ALLOCATE_RMA	  _IOR(KVMIO,  0xa9, struct kvm_allocate_rma)
 /* Available with KVM_CAP_PPC_HTAB_FD */
@@ -1331,8 +1269,5 @@ struct kvm_assigned_msix_entry {
 	__u16 entry; /* The index of entry in the MSI-X table */
 	__u16 padding[3];
 };
-
-#define KVM_X2APIC_API_USE_32BIT_IDS            (1ULL << 0)
-#define KVM_X2APIC_API_DISABLE_BROADCAST_QUIRK  (1ULL << 1)
 
 #endif /* __LINUX_KVM_H */

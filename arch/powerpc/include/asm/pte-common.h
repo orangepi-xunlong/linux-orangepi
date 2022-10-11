@@ -40,11 +40,6 @@
 #else
 #define _PAGE_RW 0
 #endif
-
-#ifndef _PAGE_PTE
-#define _PAGE_PTE 0
-#endif
-
 #ifndef _PMD_PRESENT_MASK
 #define _PMD_PRESENT_MASK	_PMD_PRESENT
 #endif
@@ -76,16 +71,6 @@
  */
 #ifndef __ASSEMBLY__
 extern unsigned long bad_call_to_PMD_PAGE_SIZE(void);
-
-/*
- * Don't just check for any non zero bits in __PAGE_USER, since for book3e
- * and PTE_64BIT, PAGE_KERNEL_X contains _PAGE_BAP_SR which is also in
- * _PAGE_USER.  Need to explicitly match _PAGE_BAP_UR bit in that case too.
- */
-static inline bool pte_user(pte_t pte)
-{
-	return (pte_val(pte) & _PAGE_USER) == _PAGE_USER;
-}
 #endif /* __ASSEMBLY__ */
 
 /* Location of the PFN in the PTE. Most 32-bit platforms use the same
@@ -96,7 +81,7 @@ static inline bool pte_user(pte_t pte)
 #define PTE_RPN_SHIFT	(PAGE_SHIFT)
 #endif
 
-/* The mask covered by the RPN must be a ULL on 32-bit platforms with
+/* The mask convered by the RPN must be a ULL on 32-bit platforms with
  * 64-bit PTEs
  */
 #if defined(CONFIG_PPC32) && defined(CONFIG_PTE_64BIT)
@@ -194,6 +179,13 @@ static inline bool pte_user(pte_t pte)
 /* Make modules code happy. We don't set RO yet */
 #define PAGE_KERNEL_EXEC	PAGE_KERNEL_X
 
+/*
+ * Don't just check for any non zero bits in __PAGE_USER, since for book3e
+ * and PTE_64BIT, PAGE_KERNEL_X contains _PAGE_BAP_SR which is also in
+ * _PAGE_USER.  Need to explicitly match _PAGE_BAP_UR bit in that case too.
+ */
+#define pte_user(val)		((val & _PAGE_USER) == _PAGE_USER)
+
 /* Advertise special mapping type for AGP */
 #define PAGE_AGP		(PAGE_KERNEL_NC)
 #define HAVE_PAGE_AGP
@@ -201,12 +193,3 @@ static inline bool pte_user(pte_t pte)
 /* Advertise support for _PAGE_SPECIAL */
 #define __HAVE_ARCH_PTE_SPECIAL
 
-#ifndef _PAGE_READ
-/* if not defined, we should not find _PAGE_WRITE too */
-#define _PAGE_READ 0
-#define _PAGE_WRITE _PAGE_RW
-#endif
-
-#ifndef H_PAGE_4K_PFN
-#define H_PAGE_4K_PFN 0
-#endif

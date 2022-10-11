@@ -363,8 +363,9 @@ static int ast_get_dram_info(struct drm_device *dev)
 static void ast_user_framebuffer_destroy(struct drm_framebuffer *fb)
 {
 	struct ast_framebuffer *ast_fb = to_ast_framebuffer(fb);
+	if (ast_fb->obj)
+		drm_gem_object_unreference_unlocked(ast_fb->obj);
 
-	drm_gem_object_unreference_unlocked(ast_fb->obj);
 	drm_framebuffer_cleanup(fb);
 	kfree(fb);
 }
@@ -376,7 +377,7 @@ static const struct drm_framebuffer_funcs ast_fb_funcs = {
 
 int ast_framebuffer_init(struct drm_device *dev,
 			 struct ast_framebuffer *ast_fb,
-			 const struct drm_mode_fb_cmd2 *mode_cmd,
+			 struct drm_mode_fb_cmd2 *mode_cmd,
 			 struct drm_gem_object *obj)
 {
 	int ret;
@@ -394,13 +395,13 @@ int ast_framebuffer_init(struct drm_device *dev,
 static struct drm_framebuffer *
 ast_user_framebuffer_create(struct drm_device *dev,
 	       struct drm_file *filp,
-	       const struct drm_mode_fb_cmd2 *mode_cmd)
+	       struct drm_mode_fb_cmd2 *mode_cmd)
 {
 	struct drm_gem_object *obj;
 	struct ast_framebuffer *ast_fb;
 	int ret;
 
-	obj = drm_gem_object_lookup(filp, mode_cmd->handles[0]);
+	obj = drm_gem_object_lookup(dev, filp, mode_cmd->handles[0]);
 	if (obj == NULL)
 		return ERR_PTR(-ENOENT);
 
@@ -556,7 +557,8 @@ int ast_driver_unload(struct drm_device *dev)
 	drm_mode_config_cleanup(dev);
 
 	ast_mm_fini(ast);
-	pci_iounmap(dev->pdev, ast->ioregs);
+	if (ast->ioregs != ast->regs + AST_IO_MM_OFFSET)
+		pci_iounmap(dev->pdev, ast->ioregs);
 	pci_iounmap(dev->pdev, ast->regs);
 	kfree(ast);
 	return 0;
@@ -643,7 +645,7 @@ ast_dumb_mmap_offset(struct drm_file *file,
 	struct drm_gem_object *obj;
 	struct ast_bo *bo;
 
-	obj = drm_gem_object_lookup(file, handle);
+	obj = drm_gem_object_lookup(dev, file, handle);
 	if (obj == NULL)
 		return -ENOENT;
 

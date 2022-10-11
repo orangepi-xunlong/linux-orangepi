@@ -11,7 +11,7 @@
  *	we have to worry about.
  */
 
-#include <linux/export.h>
+#include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/timex.h>
 #include <linux/preempt.h>
@@ -109,7 +109,7 @@ static void delay_mwaitx(unsigned long __loops)
 		 * Use cpu_tss as a cacheline-aligned, seldomly
 		 * accessed per-cpu variable as the monitor target.
 		 */
-		__monitorx(raw_cpu_ptr(&cpu_tss), 0, 0);
+		__monitorx(this_cpu_ptr(&cpu_tss), 0, 0);
 
 		/*
 		 * AMD, like Intel, supports the EAX hint and EAX=0xf

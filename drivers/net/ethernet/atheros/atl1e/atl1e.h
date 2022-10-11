@@ -442,6 +442,7 @@ struct atl1e_adapter {
 	u16 link_duplex;
 
 	spinlock_t mdio_lock;
+	spinlock_t tx_lock;
 	atomic_t irq_sem;
 
 	struct work_struct reset_task;

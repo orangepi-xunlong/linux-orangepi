@@ -306,9 +306,12 @@ static int m88ds3103_set_frontend(struct dvb_frontend *fe)
 	const struct m88ds3103_reg_val *init;
 	u8 u8tmp, u8tmp1 = 0, u8tmp2 = 0; /* silence compiler warning */
 	u8 buf[3];
-	u16 u16tmp;
-	u32 tuner_frequency_khz, target_mclk;
+	u16 u16tmp, divide_ratio = 0;
+	u32 tuner_frequency, target_mclk;
 	s32 s32tmp;
+	static const struct reg_sequence reset_buf[] = {
+		{0x07, 0x80}, {0x07, 0x00}
+	};
 
 	dev_dbg(&client->dev,
 		"delivery_system=%d modulation=%d frequency=%u symbol_rate=%d inversion=%d pilot=%d rolloff=%d\n",
@@ -321,11 +324,7 @@ static int m88ds3103_set_frontend(struct dvb_frontend *fe)
 	}
 
 	/* reset */
-	ret = regmap_write(dev->regmap, 0x07, 0x80);
-	if (ret)
-		goto err;
-
-	ret = regmap_write(dev->regmap, 0x07, 0x00);
+	ret = regmap_multi_reg_write(dev->regmap, reset_buf, 2);
 	if (ret)
 		goto err;
 
@@ -344,7 +343,7 @@ static int m88ds3103_set_frontend(struct dvb_frontend *fe)
 	}
 
 	if (fe->ops.tuner_ops.get_frequency) {
-		ret = fe->ops.tuner_ops.get_frequency(fe, &tuner_frequency_khz);
+		ret = fe->ops.tuner_ops.get_frequency(fe, &tuner_frequency);
 		if (ret)
 			goto err;
 	} else {
@@ -353,20 +352,20 @@ static int m88ds3103_set_frontend(struct dvb_frontend *fe)
 		 * actual frequency used. Carrier offset calculation is not
 		 * valid.
 		 */
-		tuner_frequency_khz = c->frequency;
+		tuner_frequency = c->frequency;
 	}
 
 	/* select M88RS6000 demod main mclk and ts mclk from tuner die. */
 	if (dev->chip_id == M88RS6000_CHIP_ID) {
 		if (c->symbol_rate > 45010000)
-			dev->mclk = 110250000;
+			dev->mclk_khz = 110250;
 		else
-			dev->mclk = 96000000;
+			dev->mclk_khz = 96000;
 
 		if (c->delivery_system == SYS_DVBS)
-			target_mclk = 96000000;
+			target_mclk = 96000;
 		else
-			target_mclk = 144000000;
+			target_mclk = 144000;
 
 		/* Enable demod clock path */
 		ret = regmap_write(dev->regmap, 0x06, 0x00);
@@ -375,7 +374,7 @@ static int m88ds3103_set_frontend(struct dvb_frontend *fe)
 		usleep_range(10000, 20000);
 	} else {
 	/* set M88DS3103 mclk and ts mclk. */
-		dev->mclk = 96000000;
+		dev->mclk_khz = 96000;
 
 		switch (dev->cfg->ts_mode) {
 		case M88DS3103_TS_SERIAL:
@@ -385,14 +384,14 @@ static int m88ds3103_set_frontend(struct dvb_frontend *fe)
 		case M88DS3103_TS_PARALLEL:
 		case M88DS3103_TS_CI:
 			if (c->delivery_system == SYS_DVBS)
-				target_mclk = 96000000;
+				target_mclk = 96000;
 			else {
 				if (c->symbol_rate < 18000000)
-					target_mclk = 96000000;
+					target_mclk = 96000;
 				else if (c->symbol_rate < 28000000)
-					target_mclk = 144000000;
+					target_mclk = 144000;
 				else
-					target_mclk = 192000000;
+					target_mclk = 192000;
 			}
 			break;
 		default:
@@ -402,15 +401,15 @@ static int m88ds3103_set_frontend(struct dvb_frontend *fe)
 		}
 
 		switch (target_mclk) {
-		case 96000000:
+		case 96000:
 			u8tmp1 = 0x02; /* 0b10 */
 			u8tmp2 = 0x01; /* 0b01 */
 			break;
-		case 144000000:
+		case 144000:
 			u8tmp1 = 0x00; /* 0b00 */
 			u8tmp2 = 0x01; /* 0b01 */
 			break;
-		case 192000000:
+		case 192000:
 			u8tmp1 = 0x03; /* 0b11 */
 			u8tmp2 = 0x00; /* 0b00 */
 			break;
@@ -464,8 +463,8 @@ static int m88ds3103_set_frontend(struct dvb_frontend *fe)
 	}
 
 	if (dev->chip_id == M88RS6000_CHIP_ID) {
-		if (c->delivery_system == SYS_DVBS2 &&
-		    c->symbol_rate <= 5000000) {
+		if ((c->delivery_system == SYS_DVBS2)
+			&& ((c->symbol_rate / 1000) <= 5000)) {
 			ret = regmap_write(dev->regmap, 0xc0, 0x04);
 			if (ret)
 				goto err;
@@ -522,25 +521,37 @@ static int m88ds3103_set_frontend(struct dvb_frontend *fe)
 		ret = m88ds3103_update_bits(dev, 0x29, 0x20, u8tmp1);
 		if (ret)
 			goto err;
-		u16tmp = 0;
-		u8tmp1 = 0x3f;
-		u8tmp2 = 0x3f;
+		u8tmp1 = 0;
+		u8tmp2 = 0;
 		break;
 	default:
-		u16tmp = DIV_ROUND_UP(target_mclk, dev->cfg->ts_clk);
-		u8tmp1 = u16tmp / 2 - 1;
-		u8tmp2 = DIV_ROUND_UP(u16tmp, 2) - 1;
+		if (dev->cfg->ts_clk) {
+			divide_ratio = DIV_ROUND_UP(target_mclk, dev->cfg->ts_clk);
+			u8tmp1 = divide_ratio / 2;
+			u8tmp2 = DIV_ROUND_UP(divide_ratio, 2);
+		}
 	}
 
-	dev_dbg(&client->dev, "target_mclk=%u ts_clk=%u ts_clk_divide_ratio=%u\n",
-		target_mclk, dev->cfg->ts_clk, u16tmp);
+	dev_dbg(&client->dev,
+		"target_mclk=%d ts_clk=%d divide_ratio=%d\n",
+		target_mclk, dev->cfg->ts_clk, divide_ratio);
 
+	u8tmp1--;
+	u8tmp2--;
 	/* u8tmp1[5:2] => fe[3:0], u8tmp1[1:0] => ea[7:6] */
+	u8tmp1 &= 0x3f;
 	/* u8tmp2[5:0] => ea[5:0] */
-	u8tmp = (u8tmp1 >> 2) & 0x0f;
-	ret = regmap_update_bits(dev->regmap, 0xfe, 0x0f, u8tmp);
+	u8tmp2 &= 0x3f;
+
+	ret = regmap_bulk_read(dev->regmap, 0xfe, &u8tmp, 1);
 	if (ret)
 		goto err;
+
+	u8tmp = ((u8tmp  & 0xf0) << 0) | u8tmp1 >> 2;
+	ret = regmap_write(dev->regmap, 0xfe, u8tmp);
+	if (ret)
+		goto err;
+
 	u8tmp = ((u8tmp1 & 0x03) << 6) | u8tmp2 >> 0;
 	ret = regmap_write(dev->regmap, 0xea, u8tmp);
 	if (ret)
@@ -569,7 +580,7 @@ static int m88ds3103_set_frontend(struct dvb_frontend *fe)
 	if (ret)
 		goto err;
 
-	u16tmp = DIV_ROUND_CLOSEST_ULL((u64)c->symbol_rate * 0x10000, dev->mclk);
+	u16tmp = DIV_ROUND_CLOSEST((c->symbol_rate / 1000) << 15, dev->mclk_khz / 2);
 	buf[0] = (u16tmp >> 0) & 0xff;
 	buf[1] = (u16tmp >> 8) & 0xff;
 	ret = regmap_bulk_write(dev->regmap, 0x61, buf, 2);
@@ -589,11 +600,13 @@ static int m88ds3103_set_frontend(struct dvb_frontend *fe)
 		goto err;
 
 	dev_dbg(&client->dev, "carrier offset=%d\n",
-		(tuner_frequency_khz - c->frequency));
+		(tuner_frequency - c->frequency));
 
-	/* Use 32-bit calc as there is no s64 version of DIV_ROUND_CLOSEST() */
-	s32tmp = 0x10000 * (tuner_frequency_khz - c->frequency);
-	s32tmp = DIV_ROUND_CLOSEST(s32tmp, dev->mclk / 1000);
+	s32tmp = 0x10000 * (tuner_frequency - c->frequency);
+	s32tmp = DIV_ROUND_CLOSEST(s32tmp, dev->mclk_khz);
+	if (s32tmp < 0)
+		s32tmp += 0x10000;
+
 	buf[0] = (s32tmp >> 0) & 0xff;
 	buf[1] = (s32tmp >> 8) & 0xff;
 	ret = regmap_bulk_write(dev->regmap, 0x5e, buf, 2);
@@ -621,10 +634,10 @@ static int m88ds3103_init(struct dvb_frontend *fe)
 	struct m88ds3103_dev *dev = fe->demodulator_priv;
 	struct i2c_client *client = dev->client;
 	struct dtv_frontend_properties *c = &fe->dtv_property_cache;
-	int ret, len, rem;
+	int ret, len, remaining;
 	unsigned int utmp;
-	const struct firmware *firmware;
-	const char *name;
+	const struct firmware *fw = NULL;
+	u8 *fw_file;
 
 	dev_dbg(&client->dev, "\n");
 
@@ -650,7 +663,7 @@ static int m88ds3103_init(struct dvb_frontend *fe)
 	dev_dbg(&client->dev, "firmware=%02x\n", utmp);
 
 	if (utmp)
-		goto warm;
+		goto skip_fw_download;
 
 	/* global reset, global diseqc reset, golbal fec reset */
 	ret = regmap_write(dev->regmap, 0x07, 0xe0);
@@ -665,47 +678,52 @@ static int m88ds3103_init(struct dvb_frontend *fe)
 		 m88ds3103_ops.info.name);
 
 	if (dev->chip_id == M88RS6000_CHIP_ID)
-		name = M88RS6000_FIRMWARE;
+		fw_file = M88RS6000_FIRMWARE;
 	else
-		name = M88DS3103_FIRMWARE;
+		fw_file = M88DS3103_FIRMWARE;
 	/* request the firmware, this will block and timeout */
-	ret = request_firmware(&firmware, name, &client->dev);
+	ret = request_firmware(&fw, fw_file, &client->dev);
 	if (ret) {
-		dev_err(&client->dev, "firmware file '%s' not found\n", name);
+		dev_err(&client->dev, "firmare file '%s' not found\n", fw_file);
 		goto err;
 	}
 
-	dev_info(&client->dev, "downloading firmware from file '%s'\n", name);
+	dev_info(&client->dev, "downloading firmware from file '%s'\n",
+		 fw_file);
 
 	ret = regmap_write(dev->regmap, 0xb2, 0x01);
 	if (ret)
-		goto err_release_firmware;
+		goto error_fw_release;
 
-	for (rem = firmware->size; rem > 0; rem -= (dev->cfg->i2c_wr_max - 1)) {
-		len = min(dev->cfg->i2c_wr_max - 1, rem);
+	for (remaining = fw->size; remaining > 0;
+			remaining -= (dev->cfg->i2c_wr_max - 1)) {
+		len = remaining;
+		if (len > (dev->cfg->i2c_wr_max - 1))
+			len = (dev->cfg->i2c_wr_max - 1);
+
 		ret = regmap_bulk_write(dev->regmap, 0xb0,
-					&firmware->data[firmware->size - rem],
-					len);
+				&fw->data[fw->size - remaining], len);
 		if (ret) {
-			dev_err(&client->dev, "firmware download failed %d\n",
+			dev_err(&client->dev, "firmware download failed=%d\n",
 				ret);
-			goto err_release_firmware;
+			goto error_fw_release;
 		}
 	}
 
 	ret = regmap_write(dev->regmap, 0xb2, 0x00);
 	if (ret)
-		goto err_release_firmware;
+		goto error_fw_release;
 
-	release_firmware(firmware);
+	release_firmware(fw);
+	fw = NULL;
 
 	ret = regmap_read(dev->regmap, 0xb9, &utmp);
 	if (ret)
 		goto err;
 
 	if (!utmp) {
-		ret = -EINVAL;
 		dev_info(&client->dev, "firmware did not run\n");
+		ret = -EFAULT;
 		goto err;
 	}
 
@@ -714,7 +732,7 @@ static int m88ds3103_init(struct dvb_frontend *fe)
 	dev_info(&client->dev, "firmware version: %X.%X\n",
 		 (utmp >> 4) & 0xf, (utmp >> 0 & 0xf));
 
-warm:
+skip_fw_download:
 	/* warm state */
 	dev->warm = true;
 
@@ -727,8 +745,8 @@ warm:
 	c->post_bit_count.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
 
 	return 0;
-err_release_firmware:
-	release_firmware(firmware);
+error_fw_release:
+	release_firmware(fw);
 err:
 	dev_dbg(&client->dev, "failed=%d\n", ret);
 	return ret;
@@ -772,11 +790,11 @@ err:
 	return ret;
 }
 
-static int m88ds3103_get_frontend(struct dvb_frontend *fe,
-				  struct dtv_frontend_properties *c)
+static int m88ds3103_get_frontend(struct dvb_frontend *fe)
 {
 	struct m88ds3103_dev *dev = fe->demodulator_priv;
 	struct i2c_client *client = dev->client;
+	struct dtv_frontend_properties *c = &fe->dtv_property_cache;
 	int ret;
 	u8 buf[3];
 
@@ -933,7 +951,8 @@ static int m88ds3103_get_frontend(struct dvb_frontend *fe,
 	if (ret)
 		goto err;
 
-	c->symbol_rate = DIV_ROUND_CLOSEST_ULL((u64)(buf[1] << 8 | buf[0] << 0) * dev->mclk, 0x10000);
+	c->symbol_rate = 1ull * ((buf[1] << 8) | (buf[0] << 0)) *
+			dev->mclk_khz * 1000 / 0x10000;
 
 	return 0;
 err:
@@ -1099,9 +1118,8 @@ static int m88ds3103_diseqc_send_master_cmd(struct dvb_frontend *fe,
 	#define SEND_MASTER_CMD_TIMEOUT 120
 	timeout = jiffies + msecs_to_jiffies(SEND_MASTER_CMD_TIMEOUT);
 
-	/* DiSEqC message period is 13.5 ms per byte */
-	utmp = diseqc_cmd->msg_len * 13500;
-	usleep_range(utmp - 4000, utmp);
+	/* DiSEqC message typical period is 54 ms */
+	usleep_range(50000, 54000);
 
 	for (utmp = 1; !time_after(jiffies, timeout) && utmp;) {
 		ret = regmap_read(dev->regmap, 0xa1, &utmp);
@@ -1232,9 +1250,9 @@ static void m88ds3103_release(struct dvb_frontend *fe)
 	i2c_unregister_device(client);
 }
 
-static int m88ds3103_select(struct i2c_mux_core *muxc, u32 chan)
+static int m88ds3103_select(struct i2c_adapter *adap, void *mux_priv, u32 chan)
 {
-	struct m88ds3103_dev *dev = i2c_mux_priv(muxc);
+	struct m88ds3103_dev *dev = mux_priv;
 	struct i2c_client *client = dev->client;
 	int ret;
 	struct i2c_msg msg = {
@@ -1356,7 +1374,7 @@ static struct i2c_adapter *m88ds3103_get_i2c_adapter(struct i2c_client *client)
 
 	dev_dbg(&client->dev, "\n");
 
-	return dev->muxc->adapter[0];
+	return dev->i2c_adapter;
 }
 
 static int m88ds3103_probe(struct i2c_client *client,
@@ -1377,7 +1395,7 @@ static int m88ds3103_probe(struct i2c_client *client,
 	dev->config.clock = pdata->clk;
 	dev->config.i2c_wr_max = pdata->i2c_wr_max;
 	dev->config.ts_mode = pdata->ts_mode;
-	dev->config.ts_clk = pdata->ts_clk * 1000;
+	dev->config.ts_clk = pdata->ts_clk;
 	dev->config.ts_clk_pol = pdata->ts_clk_pol;
 	dev->config.spec_inv = pdata->spec_inv;
 	dev->config.agc_inv = pdata->agc_inv;
@@ -1430,11 +1448,6 @@ static int m88ds3103_probe(struct i2c_client *client,
 		goto err_kfree;
 	}
 
-	if (!pdata->ts_clk) {
-		ret = -EINVAL;
-		goto err_kfree;
-	}
-
 	/* 0x29 register is defined differently for m88rs6000. */
 	/* set internal tuner address to 0x21 */
 	if (dev->chip_id == M88RS6000_CHIP_ID)
@@ -1456,16 +1469,13 @@ static int m88ds3103_probe(struct i2c_client *client,
 		goto err_kfree;
 
 	/* create mux i2c adapter for tuner */
-	dev->muxc = i2c_mux_alloc(client->adapter, &client->dev, 1, 0, 0,
-				  m88ds3103_select, NULL);
-	if (!dev->muxc) {
+	dev->i2c_adapter = i2c_add_mux_adapter(client->adapter, &client->dev,
+					       dev, 0, 0, 0, m88ds3103_select,
+					       NULL);
+	if (dev->i2c_adapter == NULL) {
 		ret = -ENOMEM;
 		goto err_kfree;
 	}
-	dev->muxc->priv = dev;
-	ret = i2c_mux_add_adapter(dev->muxc, 0, 0, 0);
-	if (ret)
-		goto err_kfree;
 
 	/* create dvb_frontend */
 	memcpy(&dev->fe.ops, &m88ds3103_ops, sizeof(struct dvb_frontend_ops));
@@ -1494,7 +1504,7 @@ static int m88ds3103_remove(struct i2c_client *client)
 
 	dev_dbg(&client->dev, "\n");
 
-	i2c_mux_del_adapters(dev->muxc);
+	i2c_del_mux_adapter(dev->i2c_adapter);
 
 	kfree(dev);
 	return 0;

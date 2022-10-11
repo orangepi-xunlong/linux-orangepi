@@ -26,11 +26,14 @@
 #include <linux/phy/phy.h>
 #include <linux/regmap.h>
 #include "sdhci-pltfm.h"
-#include <linux/of.h>
 
+#define SDHCI_ARASAN_CLK_CTRL_OFFSET	0x2c
 #define SDHCI_ARASAN_VENDOR_REGISTER	0x78
 
 #define VENDOR_ENHANCED_STROBE		BIT(0)
+#define CLK_CTRL_TIMEOUT_SHIFT		16
+#define CLK_CTRL_TIMEOUT_MASK		(0xf << CLK_CTRL_TIMEOUT_SHIFT)
+#define CLK_CTRL_TIMEOUT_MIN_EXP	13
 
 #define PHY_CLK_TOO_SLOW_HZ		400000
 
@@ -95,10 +98,6 @@ struct sdhci_arasan_data {
 
 	struct regmap	*soc_ctl_base;
 	const struct sdhci_arasan_soc_ctl_map *soc_ctl_map;
-	unsigned int	quirks; /* Arasan deviations from spec */
-
-/* Controller does not have CD wired and will not function normally without */
-#define SDHCI_ARASAN_QUIRK_FORCE_CDTEST	BIT(0)
 };
 
 static const struct sdhci_arasan_soc_ctl_map rk3399_soc_ctl_map = {
@@ -159,15 +158,15 @@ static int sdhci_arasan_syscon_write(struct sdhci_host *host,
 
 static unsigned int sdhci_arasan_get_timeout_clock(struct sdhci_host *host)
 {
+	u32 div;
 	unsigned long freq;
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 
-	/* SDHCI timeout clock is in kHz */
-	freq = DIV_ROUND_UP(clk_get_rate(pltfm_host->clk), 1000);
+	div = readl(host->ioaddr + SDHCI_ARASAN_CLK_CTRL_OFFSET);
+	div = (div & CLK_CTRL_TIMEOUT_MASK) >> CLK_CTRL_TIMEOUT_SHIFT;
 
-	/* or in MHz */
-	if (host->caps & SDHCI_TIMEOUT_CLK_UNIT)
-		freq = DIV_ROUND_UP(freq, 1000);
+	freq = clk_get_rate(pltfm_host->clk);
+	freq /= 1 << (CLK_CTRL_TIMEOUT_MIN_EXP + div);
 
 	return freq;
 }
@@ -246,21 +245,6 @@ static void sdhci_arasan_hs400_enhanced_strobe(struct mmc_host *mmc,
 	writel(vendor, host->ioaddr + SDHCI_ARASAN_VENDOR_REGISTER);
 }
 
-static void sdhci_arasan_reset(struct sdhci_host *host, u8 mask)
-{
-	u8 ctrl;
-	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
-	struct sdhci_arasan_data *sdhci_arasan = sdhci_pltfm_priv(pltfm_host);
-
-	sdhci_reset(host, mask);
-
-	if (sdhci_arasan->quirks & SDHCI_ARASAN_QUIRK_FORCE_CDTEST) {
-		ctrl = sdhci_readb(host, SDHCI_HOST_CONTROL);
-		ctrl |= SDHCI_CTRL_CDTEST_INS | SDHCI_CTRL_CDTEST_EN;
-		sdhci_writeb(host, ctrl, SDHCI_HOST_CONTROL);
-	}
-}
-
 static int sdhci_arasan_voltage_switch(struct mmc_host *mmc,
 				       struct mmc_ios *ios)
 {
@@ -288,7 +272,7 @@ static struct sdhci_ops sdhci_arasan_ops = {
 	.get_max_clock = sdhci_pltfm_clk_get_max_clock,
 	.get_timeout_clock = sdhci_arasan_get_timeout_clock,
 	.set_bus_width = sdhci_set_bus_width,
-	.reset = sdhci_arasan_reset,
+	.reset = sdhci_reset,
 	.set_uhs_signaling = sdhci_set_uhs_signaling,
 };
 
@@ -583,7 +567,6 @@ static int sdhci_arasan_probe(struct platform_device *pdev)
 	struct sdhci_host *host;
 	struct sdhci_pltfm_host *pltfm_host;
 	struct sdhci_arasan_data *sdhci_arasan;
-	struct device_node *np = pdev->dev.of_node;
 
 	host = sdhci_pltfm_init(pdev, &sdhci_arasan_pdata,
 				sizeof(*sdhci_arasan));
@@ -638,10 +621,6 @@ static int sdhci_arasan_probe(struct platform_device *pdev)
 	}
 
 	sdhci_get_of_property(pdev);
-
-	if (of_property_read_bool(np, "xlnx,fails-without-test-cd"))
-		sdhci_arasan->quirks |= SDHCI_ARASAN_QUIRK_FORCE_CDTEST;
-
 	pltfm_host->clk = clk_xin;
 
 	if (of_device_is_compatible(pdev->dev.of_node,
@@ -686,6 +665,8 @@ static int sdhci_arasan_probe(struct platform_device *pdev)
 	ret = sdhci_add_host(host);
 	if (ret)
 		goto err_add_host;
+
+	device_init_wakeup(&pdev->dev, 1);
 
 	return 0;
 

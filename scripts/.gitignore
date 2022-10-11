@@ -7,10 +7,11 @@ pnmtologo
 unifdef
 ihex2fw
 recordmcount
+resource_tool
+mkkrnlimg
 docproc
 check-lc_ctype
 sortextable
 asn1_compiler
 extract-cert
 sign-file
-insert-sys-cert

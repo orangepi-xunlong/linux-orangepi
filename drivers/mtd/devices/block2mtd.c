@@ -75,7 +75,7 @@ static int _block2mtd_erase(struct block2mtd_dev *dev, loff_t to, size_t len)
 				break;
 			}
 
-		put_page(page);
+		page_cache_release(page);
 		pages--;
 		index++;
 	}
@@ -124,7 +124,7 @@ static int block2mtd_read(struct mtd_info *mtd, loff_t from, size_t len,
 			return PTR_ERR(page);
 
 		memcpy(buf, page_address(page) + offset, cpylen);
-		put_page(page);
+		page_cache_release(page);
 
 		if (retlen)
 			*retlen += cpylen;
@@ -164,7 +164,7 @@ static int _block2mtd_write(struct block2mtd_dev *dev, const u_char *buf,
 			unlock_page(page);
 			balance_dirty_pages_ratelimited(mapping);
 		}
-		put_page(page);
+		page_cache_release(page);
 
 		if (retlen)
 			*retlen += cpylen;
@@ -431,7 +431,7 @@ static int block2mtd_setup2(const char *val)
 }
 
 
-static int block2mtd_setup(const char *val, const struct kernel_param *kp)
+static int block2mtd_setup(const char *val, struct kernel_param *kp)
 {
 #ifdef MODULE
 	return block2mtd_setup2(val);

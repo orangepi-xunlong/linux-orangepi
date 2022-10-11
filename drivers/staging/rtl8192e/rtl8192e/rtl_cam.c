@@ -107,9 +107,9 @@ void rtl92e_set_key(struct net_device *dev, u8 EntryNo, u8 KeyIndex,
 					    __func__);
 				return;
 			}
-			mutex_lock(&priv->rtllib->ips_mutex);
+			down(&priv->rtllib->ips_sem);
 			rtl92e_ips_leave(dev);
-			mutex_unlock(&priv->rtllib->ips_mutex);
+			up(&priv->rtllib->ips_sem);
 		}
 	}
 	priv->rtllib->is_set_key = true;

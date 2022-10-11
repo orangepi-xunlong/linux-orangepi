@@ -20,15 +20,10 @@
 #include <linux/types.h>
 #include <linux/init.h>
 #include <linux/pci.h>
-#include <linux/acpi.h>
 #include <linux/thermal.h>
-#include <linux/pm.h>
 
 /* Intel PCH thermal Device IDs */
-#define PCH_THERMAL_DID_HSW_1	0x9C24 /* Haswell PCH */
-#define PCH_THERMAL_DID_HSW_2	0x8C24 /* Haswell PCH */
 #define PCH_THERMAL_DID_WPT	0x9CA4 /* Wildcat Point */
-#define PCH_THERMAL_DID_SKL	0x9D31 /* Skylake PCH */
 
 /* Wildcat Point-LP  PCH Thermal registers */
 #define WPT_TEMP	0x0000	/* Temperature */
@@ -69,52 +64,7 @@ struct pch_thermal_device {
 	unsigned long crt_temp;
 	int hot_trip_id;
 	unsigned long hot_temp;
-	int psv_trip_id;
-	unsigned long psv_temp;
-	bool bios_enabled;
 };
-
-#ifdef CONFIG_ACPI
-
-/*
- * On some platforms, there is a companion ACPI device, which adds
- * passive trip temperature using _PSV method. There is no specific
- * passive temperature setting in MMIO interface of this PCI device.
- */
-static void pch_wpt_add_acpi_psv_trip(struct pch_thermal_device *ptd,
-				      int *nr_trips)
-{
-	struct acpi_device *adev;
-
-	ptd->psv_trip_id = -1;
-
-	adev = ACPI_COMPANION(&ptd->pdev->dev);
-	if (adev) {
-		unsigned long long r;
-		acpi_status status;
-
-		status = acpi_evaluate_integer(adev->handle, "_PSV", NULL,
-					       &r);
-		if (ACPI_SUCCESS(status)) {
-			unsigned long trip_temp;
-
-			trip_temp = DECI_KELVIN_TO_MILLICELSIUS(r);
-			if (trip_temp) {
-				ptd->psv_temp = trip_temp;
-				ptd->psv_trip_id = *nr_trips;
-				++(*nr_trips);
-			}
-		}
-	}
-}
-#else
-static void pch_wpt_add_acpi_psv_trip(struct pch_thermal_device *ptd,
-				      int *nr_trips)
-{
-	ptd->psv_trip_id = -1;
-
-}
-#endif
 
 static int pch_wpt_init(struct pch_thermal_device *ptd, int *nr_trips)
 {
@@ -124,10 +74,8 @@ static int pch_wpt_init(struct pch_thermal_device *ptd, int *nr_trips)
 	*nr_trips = 0;
 
 	/* Check if BIOS has already enabled thermal sensor */
-	if (WPT_TSS_TSDSS & readb(ptd->hw_base + WPT_TSS)) {
-		ptd->bios_enabled = true;
+	if (WPT_TSS_TSDSS & readb(ptd->hw_base + WPT_TSS))
 		goto read_trips;
-	}
 
 	tsel = readb(ptd->hw_base + WPT_TSEL);
 	/*
@@ -166,8 +114,6 @@ read_trips:
 		++(*nr_trips);
 	}
 
-	pch_wpt_add_acpi_psv_trip(ptd, nr_trips);
-
 	return 0;
 }
 
@@ -183,48 +129,16 @@ static int pch_wpt_get_temp(struct pch_thermal_device *ptd, int *temp)
 	return 0;
 }
 
-static int pch_wpt_suspend(struct pch_thermal_device *ptd)
-{
-	u8 tsel;
-
-	if (ptd->bios_enabled)
-		return 0;
-
-	tsel = readb(ptd->hw_base + WPT_TSEL);
-
-	writeb(tsel & 0xFE, ptd->hw_base + WPT_TSEL);
-
-	return 0;
-}
-
-static int pch_wpt_resume(struct pch_thermal_device *ptd)
-{
-	u8 tsel;
-
-	if (ptd->bios_enabled)
-		return 0;
-
-	tsel = readb(ptd->hw_base + WPT_TSEL);
-
-	writeb(tsel | WPT_TSEL_ETS, ptd->hw_base + WPT_TSEL);
-
-	return 0;
-}
-
 struct pch_dev_ops {
 	int (*hw_init)(struct pch_thermal_device *ptd, int *nr_trips);
 	int (*get_temp)(struct pch_thermal_device *ptd, int *temp);
-	int (*suspend)(struct pch_thermal_device *ptd);
-	int (*resume)(struct pch_thermal_device *ptd);
 };
 
 
 /* dev ops for Wildcat Point */
-static const struct pch_dev_ops pch_dev_ops_wpt = {
+static struct pch_dev_ops pch_dev_ops_wpt = {
 	.hw_init = pch_wpt_init,
 	.get_temp = pch_wpt_get_temp,
-	.suspend = pch_wpt_suspend,
-	.resume = pch_wpt_resume,
 };
 
 static int pch_thermal_get_temp(struct thermal_zone_device *tzd, int *temp)
@@ -243,8 +157,6 @@ static int pch_get_trip_type(struct thermal_zone_device *tzd, int trip,
 		*type = THERMAL_TRIP_CRITICAL;
 	else if (ptd->hot_trip_id == trip)
 		*type = THERMAL_TRIP_HOT;
-	else if (ptd->psv_trip_id == trip)
-		*type = THERMAL_TRIP_PASSIVE;
 	else
 		return -EINVAL;
 
@@ -259,8 +171,6 @@ static int pch_get_trip_temp(struct thermal_zone_device *tzd, int trip, int *tem
 		*temp = ptd->crt_temp;
 	else if (ptd->hot_trip_id == trip)
 		*temp = ptd->hot_temp;
-	else if (ptd->psv_trip_id == trip)
-		*temp = ptd->psv_temp;
 	else
 		return -EINVAL;
 
@@ -290,15 +200,6 @@ static int intel_pch_thermal_probe(struct pci_dev *pdev,
 	case PCH_THERMAL_DID_WPT:
 		ptd->ops = &pch_dev_ops_wpt;
 		dev_name = "pch_wildcat_point";
-		break;
-	case PCH_THERMAL_DID_SKL:
-		ptd->ops = &pch_dev_ops_wpt;
-		dev_name = "pch_skylake";
-		break;
-	case PCH_THERMAL_DID_HSW_1:
-	case PCH_THERMAL_DID_HSW_2:
-		ptd->ops = &pch_dev_ops_wpt;
-		dev_name = "pch_haswell";
 		break;
 	default:
 		dev_err(&pdev->dev, "unknown pch thermal device\n");
@@ -363,42 +264,17 @@ static void intel_pch_thermal_remove(struct pci_dev *pdev)
 	pci_disable_device(pdev);
 }
 
-static int intel_pch_thermal_suspend(struct device *device)
-{
-	struct pci_dev *pdev = to_pci_dev(device);
-	struct pch_thermal_device *ptd = pci_get_drvdata(pdev);
-
-	return ptd->ops->suspend(ptd);
-}
-
-static int intel_pch_thermal_resume(struct device *device)
-{
-	struct pci_dev *pdev = to_pci_dev(device);
-	struct pch_thermal_device *ptd = pci_get_drvdata(pdev);
-
-	return ptd->ops->resume(ptd);
-}
-
 static struct pci_device_id intel_pch_thermal_id[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCH_THERMAL_DID_WPT) },
-	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCH_THERMAL_DID_SKL) },
-	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCH_THERMAL_DID_HSW_1) },
-	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCH_THERMAL_DID_HSW_2) },
 	{ 0, },
 };
 MODULE_DEVICE_TABLE(pci, intel_pch_thermal_id);
-
-static const struct dev_pm_ops intel_pch_pm_ops = {
-	.suspend = intel_pch_thermal_suspend,
-	.resume = intel_pch_thermal_resume,
-};
 
 static struct pci_driver intel_pch_thermal_driver = {
 	.name		= "intel_pch_thermal",
 	.id_table	= intel_pch_thermal_id,
 	.probe		= intel_pch_thermal_probe,
 	.remove		= intel_pch_thermal_remove,
-	.driver.pm	= &intel_pch_pm_ops,
 };
 
 module_pci_driver(intel_pch_thermal_driver);

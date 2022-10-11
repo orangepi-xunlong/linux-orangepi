@@ -7,7 +7,6 @@
 #include <linux/linkage.h>
 #include <asm/ptrace.h>
 #include <asm/ftrace.h>
-#include <asm/export.h>
 #include <asm/nospec-branch.h>
 
 	.code64
@@ -18,10 +17,8 @@
 
 #ifdef CC_USING_FENTRY
 # define function_hook	__fentry__
-EXPORT_SYMBOL(__fentry__)
 #else
 # define function_hook	mcount
-EXPORT_SYMBOL(mcount)
 #endif
 
 /* All cases save the original rbp (8 bytes) */
@@ -171,14 +168,12 @@ GLOBAL(ftrace_call)
 	restore_mcount_regs
 
 	/*
-	 * The copied trampoline must call ftrace_epilogue as it
+	 * The copied trampoline must call ftrace_return as it
 	 * still may need to call the function graph tracer.
-	 *
-	 * The code up to this label is copied into trampolines so
-	 * think twice before adding any new code or changing the
-	 * layout here.
 	 */
-GLOBAL(ftrace_epilogue)
+GLOBAL(ftrace_caller_end)
+
+GLOBAL(ftrace_return)
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 GLOBAL(ftrace_graph_call)
@@ -250,14 +245,14 @@ GLOBAL(ftrace_regs_call)
 	popfq
 
 	/*
-	 * As this jmp to ftrace_epilogue can be a short jump
+	 * As this jmp to ftrace_return can be a short jump
 	 * it must not be copied into the trampoline.
 	 * The trampoline will add the code to jump
 	 * to the return.
 	 */
 GLOBAL(ftrace_regs_caller_end)
 
-	jmp ftrace_epilogue
+	jmp ftrace_return
 
 END(ftrace_regs_caller)
 

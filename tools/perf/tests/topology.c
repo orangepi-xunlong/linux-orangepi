@@ -42,6 +42,7 @@ static int session_write_header(char *path)
 
 	perf_header__set_feat(&session->header, HEADER_CPU_TOPOLOGY);
 	perf_header__set_feat(&session->header, HEADER_NRCPUS);
+	perf_header__set_feat(&session->header, HEADER_ARCH);
 
 	session->header.data_size += DATA_SIZE;
 
@@ -84,7 +85,7 @@ static int check_cpu_topology(char *path, struct cpu_map *map)
 	return 0;
 }
 
-int test_session_topology(int subtest __maybe_unused)
+int test_session_topology(void)
 {
 	char path[PATH_MAX];
 	struct cpu_map *map;

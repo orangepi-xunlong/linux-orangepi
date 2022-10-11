@@ -23,6 +23,7 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/device.h>
 #include <linux/gpio.h>
@@ -33,9 +34,14 @@ struct rc5t583_gpio {
 	struct rc5t583 *rc5t583;
 };
 
+static inline struct rc5t583_gpio *to_rc5t583_gpio(struct gpio_chip *chip)
+{
+	return container_of(chip, struct rc5t583_gpio, gpio_chip);
+}
+
 static int rc5t583_gpio_get(struct gpio_chip *gc, unsigned int offset)
 {
-	struct rc5t583_gpio *rc5t583_gpio = gpiochip_get_data(gc);
+	struct rc5t583_gpio *rc5t583_gpio = to_rc5t583_gpio(gc);
 	struct device *parent = rc5t583_gpio->rc5t583->dev;
 	uint8_t val = 0;
 	int ret;
@@ -49,7 +55,7 @@ static int rc5t583_gpio_get(struct gpio_chip *gc, unsigned int offset)
 
 static void rc5t583_gpio_set(struct gpio_chip *gc, unsigned int offset, int val)
 {
-	struct rc5t583_gpio *rc5t583_gpio = gpiochip_get_data(gc);
+	struct rc5t583_gpio *rc5t583_gpio = to_rc5t583_gpio(gc);
 	struct device *parent = rc5t583_gpio->rc5t583->dev;
 	if (val)
 		rc5t583_set_bits(parent, RC5T583_GPIO_IOOUT, BIT(offset));
@@ -59,7 +65,7 @@ static void rc5t583_gpio_set(struct gpio_chip *gc, unsigned int offset, int val)
 
 static int rc5t583_gpio_dir_input(struct gpio_chip *gc, unsigned int offset)
 {
-	struct rc5t583_gpio *rc5t583_gpio = gpiochip_get_data(gc);
+	struct rc5t583_gpio *rc5t583_gpio = to_rc5t583_gpio(gc);
 	struct device *parent = rc5t583_gpio->rc5t583->dev;
 	int ret;
 
@@ -74,7 +80,7 @@ static int rc5t583_gpio_dir_input(struct gpio_chip *gc, unsigned int offset)
 static int rc5t583_gpio_dir_output(struct gpio_chip *gc, unsigned offset,
 			int value)
 {
-	struct rc5t583_gpio *rc5t583_gpio = gpiochip_get_data(gc);
+	struct rc5t583_gpio *rc5t583_gpio = to_rc5t583_gpio(gc);
 	struct device *parent = rc5t583_gpio->rc5t583->dev;
 	int ret;
 
@@ -89,7 +95,7 @@ static int rc5t583_gpio_dir_output(struct gpio_chip *gc, unsigned offset,
 
 static int rc5t583_gpio_to_irq(struct gpio_chip *gc, unsigned offset)
 {
-	struct rc5t583_gpio *rc5t583_gpio = gpiochip_get_data(gc);
+	struct rc5t583_gpio *rc5t583_gpio = to_rc5t583_gpio(gc);
 
 	if (offset < RC5T583_MAX_GPIO)
 		return rc5t583_gpio->rc5t583->irq_base +
@@ -99,7 +105,7 @@ static int rc5t583_gpio_to_irq(struct gpio_chip *gc, unsigned offset)
 
 static void rc5t583_gpio_free(struct gpio_chip *gc, unsigned offset)
 {
-	struct rc5t583_gpio *rc5t583_gpio = gpiochip_get_data(gc);
+	struct rc5t583_gpio *rc5t583_gpio = to_rc5t583_gpio(gc);
 	struct device *parent = rc5t583_gpio->rc5t583->dev;
 
 	rc5t583_set_bits(parent, RC5T583_GPIO_PGSEL, BIT(offset));
@@ -135,8 +141,15 @@ static int rc5t583_gpio_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, rc5t583_gpio);
 
-	return devm_gpiochip_add_data(&pdev->dev, &rc5t583_gpio->gpio_chip,
-				      rc5t583_gpio);
+	return gpiochip_add(&rc5t583_gpio->gpio_chip);
+}
+
+static int rc5t583_gpio_remove(struct platform_device *pdev)
+{
+	struct rc5t583_gpio *rc5t583_gpio = platform_get_drvdata(pdev);
+
+	gpiochip_remove(&rc5t583_gpio->gpio_chip);
+	return 0;
 }
 
 static struct platform_driver rc5t583_gpio_driver = {
@@ -144,6 +157,7 @@ static struct platform_driver rc5t583_gpio_driver = {
 		.name    = "rc5t583-gpio",
 	},
 	.probe		= rc5t583_gpio_probe,
+	.remove		= rc5t583_gpio_remove,
 };
 
 static int __init rc5t583_gpio_init(void)
@@ -151,3 +165,14 @@ static int __init rc5t583_gpio_init(void)
 	return platform_driver_register(&rc5t583_gpio_driver);
 }
 subsys_initcall(rc5t583_gpio_init);
+
+static void __exit rc5t583_gpio_exit(void)
+{
+	platform_driver_unregister(&rc5t583_gpio_driver);
+}
+module_exit(rc5t583_gpio_exit);
+
+MODULE_AUTHOR("Laxman Dewangan <ldewangan@nvidia.com>");
+MODULE_DESCRIPTION("GPIO interface for RC5T583");
+MODULE_LICENSE("GPL v2");
+MODULE_ALIAS("platform:rc5t583-gpio");

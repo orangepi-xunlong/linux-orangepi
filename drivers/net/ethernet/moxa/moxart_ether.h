@@ -59,7 +59,6 @@
 #define TX_NEXT(N)		(((N) + 1) & (TX_DESC_NUM_MASK))
 #define TX_BUF_SIZE		1600
 #define TX_BUF_SIZE_MAX		(TX_DESC1_BUF_SIZE_MASK+1)
-#define TX_WAKE_THRESHOLD	16
 
 #define RX_DESC_NUM		64
 #define RX_DESC_NUM_MASK	(RX_DESC_NUM-1)
@@ -301,7 +300,7 @@ struct moxart_mac_priv_t {
 
 	dma_addr_t rx_base;
 	dma_addr_t rx_mapping[RX_DESC_NUM];
-	void *rx_desc_base;
+	void __iomem *rx_desc_base;
 	unsigned char *rx_buf_base;
 	unsigned char *rx_buf[RX_DESC_NUM];
 	unsigned int rx_head;
@@ -309,7 +308,7 @@ struct moxart_mac_priv_t {
 
 	dma_addr_t tx_base;
 	dma_addr_t tx_mapping[TX_DESC_NUM];
-	void *tx_desc_base;
+	void __iomem *tx_desc_base;
 	unsigned char *tx_buf_base;
 	unsigned char *tx_buf[RX_DESC_NUM];
 	unsigned int tx_head;

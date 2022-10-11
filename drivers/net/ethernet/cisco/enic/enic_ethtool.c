@@ -103,29 +103,25 @@ static void enic_intr_coal_set_rx(struct enic *enic, u32 timer)
 	}
 }
 
-static int enic_get_ksettings(struct net_device *netdev,
-			      struct ethtool_link_ksettings *ecmd)
+static int enic_get_settings(struct net_device *netdev,
+	struct ethtool_cmd *ecmd)
 {
 	struct enic *enic = netdev_priv(netdev);
-	struct ethtool_link_settings *base = &ecmd->base;
 
-	ethtool_link_ksettings_add_link_mode(ecmd, supported,
-					     10000baseT_Full);
-	ethtool_link_ksettings_add_link_mode(ecmd, supported, FIBRE);
-	ethtool_link_ksettings_add_link_mode(ecmd, advertising,
-					     10000baseT_Full);
-	ethtool_link_ksettings_add_link_mode(ecmd, advertising, FIBRE);
-	base->port = PORT_FIBRE;
+	ecmd->supported = (SUPPORTED_10000baseT_Full | SUPPORTED_FIBRE);
+	ecmd->advertising = (ADVERTISED_10000baseT_Full | ADVERTISED_FIBRE);
+	ecmd->port = PORT_FIBRE;
+	ecmd->transceiver = XCVR_EXTERNAL;
 
 	if (netif_carrier_ok(netdev)) {
-		base->speed = vnic_dev_port_speed(enic->vdev);
-		base->duplex = DUPLEX_FULL;
+		ethtool_cmd_speed_set(ecmd, vnic_dev_port_speed(enic->vdev));
+		ecmd->duplex = DUPLEX_FULL;
 	} else {
-		base->speed = SPEED_UNKNOWN;
-		base->duplex = DUPLEX_UNKNOWN;
+		ethtool_cmd_speed_set(ecmd, SPEED_UNKNOWN);
+		ecmd->duplex = DUPLEX_UNKNOWN;
 	}
 
-	base->autoneg = AUTONEG_DISABLE;
+	ecmd->autoneg = AUTONEG_DISABLE;
 
 	return 0;
 }
@@ -504,6 +500,7 @@ static int enic_set_rxfh(struct net_device *netdev, const u32 *indir,
 }
 
 static const struct ethtool_ops enic_ethtool_ops = {
+	.get_settings = enic_get_settings,
 	.get_drvinfo = enic_get_drvinfo,
 	.get_msglevel = enic_get_msglevel,
 	.set_msglevel = enic_set_msglevel,
@@ -519,7 +516,6 @@ static const struct ethtool_ops enic_ethtool_ops = {
 	.get_rxfh_key_size = enic_get_rxfh_key_size,
 	.get_rxfh = enic_get_rxfh,
 	.set_rxfh = enic_set_rxfh,
-	.get_link_ksettings = enic_get_ksettings,
 };
 
 void enic_set_ethtool_ops(struct net_device *netdev)

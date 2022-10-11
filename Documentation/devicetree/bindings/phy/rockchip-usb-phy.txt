@@ -5,6 +5,8 @@ Required properties:
      "rockchip,rk3066a-usb-phy"
      "rockchip,rk3188-usb-phy"
      "rockchip,rk3288-usb-phy"
+     "rockchip,rk336x-usb-phy"
+     "rockchip,rk3399-usb-phy"
  - #address-cells: should be 1
  - #size-cells: should be 0
 
@@ -26,10 +28,12 @@ required properties:
 Optional Properties:
 - clocks : phandle + clock specifier for the phy clocks
 - clock-names: string, clock name, must be "phyclk"
+- vbus_drv-gpio: pull gpio on/off to control vbus power supply.
 - #clock-cells: for users of the phy-pll, should be 0
 - reset-names: Only allow the following entries:
- - phy-reset
+- phy-reset
 - resets: Must contain an entry for each entry in reset-names.
+- vbus-supply: power-supply phandle for vbus power source
 
 Example:
 
@@ -42,6 +46,8 @@ grf: syscon@ff770000 {
 		compatible = "rockchip,rk3288-usb-phy";
 		#address-cells = <1>;
 		#size-cells = <0>;
+		resets = <&cru SRST_USBHOST1_PHY>;
+		reset-names = "phy-reset";
 
 		usbphy0: usb-phy0 {
 			#phy-cells = <0>;

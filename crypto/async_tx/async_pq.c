@@ -443,7 +443,7 @@ static int __init async_pq_init(void)
 
 static void __exit async_pq_exit(void)
 {
-	__free_page(pq_scribble_page);
+	put_page(pq_scribble_page);
 }
 
 module_init(async_pq_init);

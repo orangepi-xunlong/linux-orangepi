@@ -31,7 +31,6 @@
 #include <linux/jump_label.h>
 #include <linux/random.h>
 
-#include <asm/text-patching.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include <asm/setup.h>

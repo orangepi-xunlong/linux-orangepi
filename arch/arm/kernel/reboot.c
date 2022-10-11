@@ -51,7 +51,7 @@ static void __soft_restart(void *addr)
 	flush_cache_all();
 
 	/* Switch to the identity mapping. */
-	phys_reset = (phys_reset_t)virt_to_idmap(cpu_reset);
+	phys_reset = (phys_reset_t)(unsigned long)virt_to_idmap(cpu_reset);
 	phys_reset((unsigned long)addr);
 
 	/* Should never get here. */
@@ -105,6 +105,8 @@ void machine_halt(void)
 {
 	local_irq_disable();
 	smp_send_stop();
+
+	local_irq_disable();
 	while (1);
 }
 
@@ -164,6 +166,8 @@ void machine_restart(char *cmd)
 	local_irq_disable();
 	smp_send_stop();
 
+	do_kernel_i2c_restart(cmd);
+
 	/* Flush the console to make sure all the relevant messages make it
 	 * out to the console drivers */
 	arm_machine_flush_console();
@@ -178,5 +182,6 @@ void machine_restart(char *cmd)
 
 	/* Whoops - the platform was unable to reboot. Tell the user! */
 	printk("Reboot failed -- System halted\n");
+	local_irq_disable();
 	while (1);
 }

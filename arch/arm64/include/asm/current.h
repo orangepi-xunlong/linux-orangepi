@@ -7,6 +7,7 @@
 
 #ifndef __ASSEMBLY__
 
+#ifdef CONFIG_THREAD_INFO_IN_TASK
 struct task_struct;
 
 /*
@@ -21,8 +22,12 @@ static __always_inline struct task_struct *get_current(void)
 
 	return (struct task_struct *)sp_el0;
 }
-
 #define current get_current()
+#else
+#include <linux/thread_info.h>
+#define get_current() (current_thread_info()->task)
+#define current get_current()
+#endif
 
 #endif /* __ASSEMBLY__ */
 

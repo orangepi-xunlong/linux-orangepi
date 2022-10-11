@@ -32,7 +32,7 @@ struct s3c2410fb_info {
 	unsigned long		clk_rate;
 	unsigned int		palette_ready;
 
-#ifdef CONFIG_ARM_S3C24XX_CPUFREQ
+#ifdef CONFIG_CPU_FREQ
 	struct notifier_block	freq_transition;
 #endif
 

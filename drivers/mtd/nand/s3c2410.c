@@ -84,33 +84,11 @@
 
 /* new oob placement block for use with hardware ecc generation
  */
-static int s3c2410_ooblayout_ecc(struct mtd_info *mtd, int section,
-				 struct mtd_oob_region *oobregion)
-{
-	if (section)
-		return -ERANGE;
 
-	oobregion->offset = 0;
-	oobregion->length = 3;
-
-	return 0;
-}
-
-static int s3c2410_ooblayout_free(struct mtd_info *mtd, int section,
-				  struct mtd_oob_region *oobregion)
-{
-	if (section)
-		return -ERANGE;
-
-	oobregion->offset = 8;
-	oobregion->length = 8;
-
-	return 0;
-}
-
-static const struct mtd_ooblayout_ops s3c2410_ooblayout_ops = {
-	.ecc = s3c2410_ooblayout_ecc,
-	.free = s3c2410_ooblayout_free,
+static struct nand_ecclayout nand_hw_eccoob = {
+	.eccbytes = 3,
+	.eccpos = {0, 1, 2},
+	.oobfree = {{8, 8}}
 };
 
 /* controller and mtd information */
@@ -126,6 +104,7 @@ struct s3c2410_nand_info;
  * @scan_res: The result from calling nand_scan_ident().
 */
 struct s3c2410_nand_mtd {
+	struct mtd_info			mtd;
 	struct nand_chip		chip;
 	struct s3c2410_nand_set		*set;
 	struct s3c2410_nand_info	*info;
@@ -180,7 +159,7 @@ struct s3c2410_nand_info {
 
 	enum s3c_cpu_type		cpu_type;
 
-#ifdef CONFIG_ARM_S3C24XX_CPUFREQ
+#ifdef CONFIG_CPU_FREQ
 	struct notifier_block	freq_transition;
 #endif
 };
@@ -189,8 +168,7 @@ struct s3c2410_nand_info {
 
 static struct s3c2410_nand_mtd *s3c2410_nand_mtd_toours(struct mtd_info *mtd)
 {
-	return container_of(mtd_to_nand(mtd), struct s3c2410_nand_mtd,
-			    chip);
+	return container_of(mtd, struct s3c2410_nand_mtd, mtd);
 }
 
 static struct s3c2410_nand_info *s3c2410_nand_mtd_toinfo(struct mtd_info *mtd)
@@ -404,10 +382,10 @@ static void s3c2410_nand_select_chip(struct mtd_info *mtd, int chip)
 {
 	struct s3c2410_nand_info *info;
 	struct s3c2410_nand_mtd *nmtd;
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	unsigned long cur;
 
-	nmtd = nand_get_controller_data(this);
+	nmtd = this->priv;
 	info = nmtd->info;
 
 	if (chip != -1)
@@ -564,8 +542,7 @@ static int s3c2410_nand_correct_data(struct mtd_info *mtd, u_char *dat,
 	diff0 |= (diff1 << 8);
 	diff0 |= (diff2 << 16);
 
-	/* equal to "(diff0 & ~(1 << __ffs(diff0)))" */
-	if ((diff0 & (diff0 - 1)) == 0)
+	if ((diff0 & ~(1<<fls(diff0))) == 0)
 		return 1;
 
 	return -1;
@@ -657,7 +634,7 @@ static int s3c2440_nand_calculate_ecc(struct mtd_info *mtd, const u_char *dat,
 
 static void s3c2410_nand_read_buf(struct mtd_info *mtd, u_char *buf, int len)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	readsb(this->IO_ADDR_R, buf, len);
 }
 
@@ -679,7 +656,7 @@ static void s3c2440_nand_read_buf(struct mtd_info *mtd, u_char *buf, int len)
 static void s3c2410_nand_write_buf(struct mtd_info *mtd, const u_char *buf,
 				   int len)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
+	struct nand_chip *this = mtd->priv;
 	writesb(this->IO_ADDR_W, buf, len);
 }
 
@@ -701,7 +678,7 @@ static void s3c2440_nand_write_buf(struct mtd_info *mtd, const u_char *buf,
 
 /* cpufreq driver support */
 
-#ifdef CONFIG_ARM_S3C24XX_CPUFREQ
+#ifdef CONFIG_CPU_FREQ
 
 static int s3c2410_nand_cpufreq_transition(struct notifier_block *nb,
 					  unsigned long val, void *data)
@@ -768,7 +745,7 @@ static int s3c24xx_nand_remove(struct platform_device *pdev)
 
 		for (mtdno = 0; mtdno < info->mtd_count; mtdno++, ptr++) {
 			pr_debug("releasing mtd %d (%p)\n", mtdno, ptr);
-			nand_release(nand_to_mtd(&ptr->chip));
+			nand_release(&ptr->mtd);
 		}
 	}
 
@@ -785,11 +762,9 @@ static int s3c2410_nand_add_partition(struct s3c2410_nand_info *info,
 				      struct s3c2410_nand_set *set)
 {
 	if (set) {
-		struct mtd_info *mtdinfo = nand_to_mtd(&mtd->chip);
+		mtd->mtd.name = set->name;
 
-		mtdinfo->name = set->name;
-
-		return mtd_device_parse_register(mtdinfo, NULL, NULL,
+		return mtd_device_parse_register(&mtd->mtd, NULL, NULL,
 					 set->partitions, set->nr_partitions);
 	}
 
@@ -817,7 +792,7 @@ static void s3c2410_nand_init_chip(struct s3c2410_nand_info *info,
 	chip->read_buf     = s3c2410_nand_read_buf;
 	chip->select_chip  = s3c2410_nand_select_chip;
 	chip->chip_delay   = 50;
-	nand_set_controller_data(chip, nmtd);
+	chip->priv	   = nmtd;
 	chip->options	   = set->options;
 	chip->controller   = &info->controller;
 
@@ -856,6 +831,7 @@ static void s3c2410_nand_init_chip(struct s3c2410_nand_info *info,
 	chip->IO_ADDR_R = chip->IO_ADDR_W;
 
 	nmtd->info	   = info;
+	nmtd->mtd.priv	   = chip;
 	nmtd->set	   = set;
 
 #ifdef CONFIG_MTD_NAND_S3C2410_HWECC
@@ -882,8 +858,10 @@ static void s3c2410_nand_init_chip(struct s3c2410_nand_info *info,
 	}
 #else
 	chip->ecc.mode	    = NAND_ECC_SOFT;
-	chip->ecc.algo	= NAND_ECC_HAMMING;
 #endif
+
+	if (set->ecc_layout != NULL)
+		chip->ecc.layout = set->ecc_layout;
 
 	if (set->disable_ecc)
 		chip->ecc.mode	= NAND_ECC_NONE;
@@ -943,7 +921,7 @@ static void s3c2410_nand_update_chip(struct s3c2410_nand_info *info,
 	} else {
 		chip->ecc.size	    = 512;
 		chip->ecc.bytes	    = 3;
-		mtd_set_ooblayout(nand_to_mtd(chip), &s3c2410_ooblayout_ops);
+		chip->ecc.layout    = &nand_hw_eccoob;
 	}
 }
 
@@ -977,7 +955,8 @@ static int s3c24xx_nand_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, info);
 
-	nand_hw_control_init(&info->controller);
+	spin_lock_init(&info->controller.lock);
+	init_waitqueue_head(&info->controller.wq);
 
 	/* get the clock source and enable it */
 
@@ -1033,21 +1012,19 @@ static int s3c24xx_nand_probe(struct platform_device *pdev)
 	nmtd = info->mtds;
 
 	for (setno = 0; setno < nr_sets; setno++, nmtd++) {
-		struct mtd_info *mtd = nand_to_mtd(&nmtd->chip);
-
 		pr_debug("initialising set %d (%p, info %p)\n",
 			 setno, nmtd, info);
 
-		mtd->dev.parent = &pdev->dev;
+		nmtd->mtd.dev.parent = &pdev->dev;
 		s3c2410_nand_init_chip(info, nmtd, sets);
 
-		nmtd->scan_res = nand_scan_ident(mtd,
+		nmtd->scan_res = nand_scan_ident(&nmtd->mtd,
 						 (sets) ? sets->nr_chips : 1,
 						 NULL);
 
 		if (nmtd->scan_res == 0) {
 			s3c2410_nand_update_chip(info, nmtd);
-			nand_scan_tail(mtd);
+			nand_scan_tail(&nmtd->mtd);
 			s3c2410_nand_add_partition(info, nmtd, sets);
 		}
 

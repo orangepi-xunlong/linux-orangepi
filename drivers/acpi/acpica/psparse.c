@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2015, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -130,8 +130,8 @@ u16 acpi_ps_peek_opcode(struct acpi_parse_state * parser_state)
  ******************************************************************************/
 
 acpi_status
-acpi_ps_complete_this_op(struct acpi_walk_state *walk_state,
-			 union acpi_parse_object *op)
+acpi_ps_complete_this_op(struct acpi_walk_state * walk_state,
+			 union acpi_parse_object * op)
 {
 	union acpi_parse_object *prev;
 	union acpi_parse_object *next;
@@ -526,8 +526,8 @@ acpi_status acpi_ps_parse_aml(struct acpi_walk_state *walk_state)
 			}
 
 			/*
-			 * If the transfer to the new method method call worked
-			 *, a new walk state was created -- get it
+			 * If the transfer to the new method method call worked, a new walk
+			 * state was created -- get it
 			 */
 			walk_state = acpi_ds_get_current_walk_state(thread);
 			continue;
@@ -537,17 +537,15 @@ acpi_status acpi_ps_parse_aml(struct acpi_walk_state *walk_state)
 
 			/* Either the method parse or actual execution failed */
 
-			acpi_ex_exit_interpreter();
 			ACPI_ERROR_METHOD("Method parse/execution failed",
 					  walk_state->method_node, NULL,
 					  status);
-			acpi_ex_enter_interpreter();
 
 			/* Check for possible multi-thread reentrancy problem */
 
 			if ((status == AE_ALREADY_EXISTS) &&
-			    (!(walk_state->method_desc->method.info_flags &
-			       ACPI_METHOD_SERIALIZED))) {
+			    (!(walk_state->method_desc->method.
+			       info_flags & ACPI_METHOD_SERIALIZED))) {
 				/*
 				 * Method is not serialized and tried to create an object
 				 * twice. The probable cause is that the method cannot
@@ -573,9 +571,7 @@ acpi_status acpi_ps_parse_aml(struct acpi_walk_state *walk_state)
 		 * cleanup to do
 		 */
 		if (((walk_state->parse_flags & ACPI_PARSE_MODE_MASK) ==
-		     ACPI_PARSE_EXECUTE &&
-		     !(walk_state->parse_flags & ACPI_PARSE_MODULE_LEVEL)) ||
-		    (ACPI_FAILURE(status))) {
+		     ACPI_PARSE_EXECUTE) || (ACPI_FAILURE(status))) {
 			acpi_ds_terminate_control_method(walk_state->
 							 method_desc,
 							 walk_state);

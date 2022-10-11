@@ -1428,8 +1428,10 @@ int __init zcrypt_debug_init(void)
 void zcrypt_debug_exit(void)
 {
 	debugfs_remove(debugfs_root);
-	debug_unregister(zcrypt_dbf_common);
-	debug_unregister(zcrypt_dbf_devices);
+	if (zcrypt_dbf_common)
+		debug_unregister(zcrypt_dbf_common);
+	if (zcrypt_dbf_devices)
+		debug_unregister(zcrypt_dbf_devices);
 }
 
 /**

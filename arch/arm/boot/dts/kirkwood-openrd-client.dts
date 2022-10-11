@@ -20,9 +20,6 @@
 	compatible = "marvell,openrd-client", "marvell,openrd", "marvell,kirkwood-88f6281", "marvell,kirkwood";
 
 	ocp@f1000000 {
-		audio-controller@a0000 {
-			status = "okay";
-		};
 		i2c@11000 {
 			status = "okay";
 			clock-frequency = <400000>;
@@ -30,7 +27,6 @@
 			cs42l51: cs42l51@4a {
 				compatible = "cirrus,cs42l51";
 				reg = <0x4a>;
-				#sound-dai-cells = <0>;
 			};
 		};
 	};
@@ -41,7 +37,7 @@
 		simple-audio-card,mclk-fs = <256>;
 
 		simple-audio-card,cpu {
-			sound-dai = <&audio0 0>;
+			sound-dai = <&audio0>;
 		};
 
 		simple-audio-card,codec {

@@ -29,20 +29,10 @@
 static const struct pci_device_id nicvf_id_table[] = {
 	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_CAVIUM,
 			 PCI_DEVICE_ID_THUNDER_NIC_VF,
-			 PCI_VENDOR_ID_CAVIUM,
-			 PCI_SUBSYS_DEVID_88XX_NIC_VF) },
+			 PCI_VENDOR_ID_CAVIUM, 0xA134) },
 	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_CAVIUM,
 			 PCI_DEVICE_ID_THUNDER_PASS1_NIC_VF,
-			 PCI_VENDOR_ID_CAVIUM,
-			 PCI_SUBSYS_DEVID_88XX_PASS1_NIC_VF) },
-	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_CAVIUM,
-			 PCI_DEVICE_ID_THUNDER_NIC_VF,
-			 PCI_VENDOR_ID_CAVIUM,
-			 PCI_SUBSYS_DEVID_81XX_NIC_VF) },
-	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_CAVIUM,
-			 PCI_DEVICE_ID_THUNDER_NIC_VF,
-			 PCI_VENDOR_ID_CAVIUM,
-			 PCI_SUBSYS_DEVID_83XX_NIC_VF) },
+			 PCI_VENDOR_ID_CAVIUM, 0xA11E) },
 	{ 0, }  /* end of table */
 };
 
@@ -67,6 +57,25 @@ static inline u8 nicvf_netdev_qidx(struct nicvf *nic, u8 qidx)
 		return qidx + ((nic->sqs_id + 1) * MAX_CMP_QUEUES_PER_QS);
 	else
 		return qidx;
+}
+
+static inline void nicvf_set_rx_frame_cnt(struct nicvf *nic,
+					  struct sk_buff *skb)
+{
+	if (skb->len <= 64)
+		nic->drv_stats.rx_frames_64++;
+	else if (skb->len <= 127)
+		nic->drv_stats.rx_frames_127++;
+	else if (skb->len <= 255)
+		nic->drv_stats.rx_frames_255++;
+	else if (skb->len <= 511)
+		nic->drv_stats.rx_frames_511++;
+	else if (skb->len <= 1023)
+		nic->drv_stats.rx_frames_1023++;
+	else if (skb->len <= 1518)
+		nic->drv_stats.rx_frames_1518++;
+	else
+		nic->drv_stats.rx_frames_jumbo++;
 }
 
 /* The Cavium ThunderX network controller can *only* be found in SoCs
@@ -125,19 +134,15 @@ int nicvf_send_msg_to_pf(struct nicvf *nic, union nic_mbx *mbx)
 
 	/* Wait for previous message to be acked, timeout 2sec */
 	while (!nic->pf_acked) {
-		if (nic->pf_nacked) {
-			netdev_err(nic->netdev,
-				   "PF NACK to mbox msg 0x%02x from VF%d\n",
-				   (mbx->msg.msg & 0xFF), nic->vf_id);
+		if (nic->pf_nacked)
 			return -EINVAL;
-		}
 		msleep(sleep);
 		if (nic->pf_acked)
 			break;
 		timeout -= sleep;
 		if (!timeout) {
 			netdev_err(nic->netdev,
-				   "PF didn't ACK to mbox msg 0x%02x from VF%d\n",
+				   "PF didn't ack to mbox msg %d from VF%d\n",
 				   (mbx->msg.msg & 0xFF), nic->vf_id);
 			return -EBUSY;
 		}
@@ -347,7 +352,13 @@ static int nicvf_rss_init(struct nicvf *nic)
 
 	rss->enable = true;
 
-	netdev_rss_key_fill(rss->key, RSS_HASH_KEY_SIZE * sizeof(u64));
+	/* Using the HW reset value for now */
+	rss->key[0] = 0xFEED0BADFEED0BADULL;
+	rss->key[1] = 0xFEED0BADFEED0BADULL;
+	rss->key[2] = 0xFEED0BADFEED0BADULL;
+	rss->key[3] = 0xFEED0BADFEED0BADULL;
+	rss->key[4] = 0xFEED0BADFEED0BADULL;
+
 	nicvf_set_rss_key(nic);
 
 	rss->cfg = RSS_IP_HASH_ENA | RSS_TCP_HASH_ENA | RSS_UDP_HASH_ENA;
@@ -473,6 +484,9 @@ int nicvf_set_real_num_queues(struct net_device *netdev,
 static int nicvf_init_resources(struct nicvf *nic)
 {
 	int err;
+	union nic_mbx mbx = {};
+
+	mbx.msg.msg = NIC_MBOX_MSG_CFG_DONE;
 
 	/* Enable Qset */
 	nicvf_qset_config(nic, true);
@@ -485,19 +499,20 @@ static int nicvf_init_resources(struct nicvf *nic)
 		return err;
 	}
 
+	/* Send VF config done msg to PF */
+	nicvf_write_to_mbx(nic, &mbx);
+
 	return 0;
 }
 
 static void nicvf_snd_pkt_handler(struct net_device *netdev,
-				  struct cqe_send_t *cqe_tx,
-				  int cqe_type, int budget,
-				  unsigned int *tx_pkts, unsigned int *tx_bytes)
+				  struct cmp_queue *cq,
+				  struct cqe_send_t *cqe_tx, int cqe_type)
 {
 	struct sk_buff *skb = NULL;
 	struct nicvf *nic = netdev_priv(netdev);
 	struct snd_queue *sq;
 	struct sq_hdr_subdesc *hdr;
-	struct sq_hdr_subdesc *tso_sqe;
 
 	sq = &nic->qs->sq[cqe_tx->sq_idx];
 
@@ -510,28 +525,14 @@ static void nicvf_snd_pkt_handler(struct net_device *netdev,
 		   __func__, cqe_tx->sq_qs, cqe_tx->sq_idx,
 		   cqe_tx->sqe_ptr, hdr->subdesc_cnt);
 
-	nicvf_check_cqe_tx_errs(nic, cqe_tx);
+	nicvf_put_sq_desc(sq, hdr->subdesc_cnt + 1);
+	nicvf_check_cqe_tx_errs(nic, cq, cqe_tx);
 	skb = (struct sk_buff *)sq->skbuff[cqe_tx->sqe_ptr];
+	/* For TSO offloaded packets only one head SKB needs to be freed */
 	if (skb) {
-		/* Check for dummy descriptor used for HW TSO offload on 88xx */
-		if (hdr->dont_send) {
-			/* Get actual TSO descriptors and free them */
-			tso_sqe =
-			 (struct sq_hdr_subdesc *)GET_SQ_DESC(sq, hdr->rsvd2);
-			nicvf_put_sq_desc(sq, tso_sqe->subdesc_cnt + 1);
-		}
-		nicvf_put_sq_desc(sq, hdr->subdesc_cnt + 1);
 		prefetch(skb);
-		(*tx_pkts)++;
-		*tx_bytes += skb->len;
-		napi_consume_skb(skb, budget);
+		dev_consume_skb_any(skb);
 		sq->skbuff[cqe_tx->sqe_ptr] = (u64)NULL;
-	} else {
-		/* In case of SW TSO on 88xx, only last segment will have
-		 * a SKB attached, so just free SQEs here.
-		 */
-		if (!nic->hw_tso)
-			nicvf_put_sq_desc(sq, hdr->subdesc_cnt + 1);
 	}
 }
 
@@ -604,6 +605,8 @@ static void nicvf_rcv_pkt_handler(struct net_device *netdev,
 		return;
 	}
 
+	nicvf_set_rx_frame_cnt(nic, skb);
+
 	nicvf_set_rxhash(netdev, cqe_rx, skb);
 
 	skb_record_rx_queue(skb, rq_idx);
@@ -637,7 +640,6 @@ static int nicvf_cq_intr_handler(struct net_device *netdev, u8 cq_idx,
 	struct cmp_queue *cq = &qs->cq[cq_idx];
 	struct cqe_rx_t *cq_desc;
 	struct netdev_queue *txq;
-	unsigned int tx_pkts = 0, tx_bytes = 0;
 
 	spin_lock_bh(&cq->lock);
 loop:
@@ -675,9 +677,8 @@ loop:
 			work_done++;
 		break;
 		case CQE_TYPE_SEND:
-			nicvf_snd_pkt_handler(netdev,
-					      (void *)cq_desc, CQE_TYPE_SEND,
-					      budget, &tx_pkts, &tx_bytes);
+			nicvf_snd_pkt_handler(netdev, cq,
+					      (void *)cq_desc, CQE_TYPE_SEND);
 			tx_done++;
 		break;
 		case CQE_TYPE_INVALID:
@@ -706,13 +707,10 @@ done:
 		netdev = nic->pnicvf->netdev;
 		txq = netdev_get_tx_queue(netdev,
 					  nicvf_netdev_qidx(nic, cq_idx));
-		if (tx_pkts)
-			netdev_tx_completed_queue(txq, tx_pkts, tx_bytes);
-
 		nic = nic->pnicvf;
 		if (netif_tx_queue_stopped(txq) && netif_carrier_ok(netdev)) {
 			netif_tx_start_queue(txq);
-			this_cpu_inc(nic->drv_stats->txq_wake);
+			nic->drv_stats.txq_wake++;
 			if (netif_msg_tx_err(nic))
 				netdev_warn(netdev,
 					    "%s: Transmit queue wakeup SQ%d\n",
@@ -820,7 +818,7 @@ static irqreturn_t nicvf_intr_handler(int irq, void *cq_irq)
 	nicvf_disable_intr(nic, NICVF_INTR_CQ, qidx);
 
 	/* Schedule NAPI */
-	napi_schedule_irqoff(&cq_poll->napi);
+	napi_schedule(&cq_poll->napi);
 
 	/* Clear interrupt */
 	nicvf_clear_intr(nic, NICVF_INTR_CQ, qidx);
@@ -891,50 +889,22 @@ static void nicvf_disable_msix(struct nicvf *nic)
 	}
 }
 
-static void nicvf_set_irq_affinity(struct nicvf *nic)
-{
-	int vec, cpu;
-	int irqnum;
-
-	for (vec = 0; vec < nic->num_vec; vec++) {
-		if (!nic->irq_allocated[vec])
-			continue;
-
-		if (!zalloc_cpumask_var(&nic->affinity_mask[vec], GFP_KERNEL))
-			return;
-		 /* CQ interrupts */
-		if (vec < NICVF_INTR_ID_SQ)
-			/* Leave CPU0 for RBDR and other interrupts */
-			cpu = nicvf_netdev_qidx(nic, vec) + 1;
-		else
-			cpu = 0;
-
-		cpumask_set_cpu(cpumask_local_spread(cpu, nic->node),
-				nic->affinity_mask[vec]);
-		irqnum = nic->msix_entries[vec].vector;
-		irq_set_affinity_hint(irqnum, nic->affinity_mask[vec]);
-	}
-}
-
 static int nicvf_register_interrupts(struct nicvf *nic)
 {
 	int irq, ret = 0;
 	int vector;
 
 	for_each_cq_irq(irq)
-		sprintf(nic->irq_name[irq], "%s-rxtx-%d",
-			nic->pnicvf->netdev->name,
-			nicvf_netdev_qidx(nic, irq));
+		sprintf(nic->irq_name[irq], "NICVF%d CQ%d",
+			nic->vf_id, irq);
 
 	for_each_sq_irq(irq)
-		sprintf(nic->irq_name[irq], "%s-sq-%d",
-			nic->pnicvf->netdev->name,
-			nicvf_netdev_qidx(nic, irq - NICVF_INTR_ID_SQ));
+		sprintf(nic->irq_name[irq], "NICVF%d SQ%d",
+			nic->vf_id, irq - NICVF_INTR_ID_SQ);
 
 	for_each_rbdr_irq(irq)
-		sprintf(nic->irq_name[irq], "%s-rbdr-%d",
-			nic->pnicvf->netdev->name,
-			nic->sqs_mode ? (nic->sqs_id + 1) : 0);
+		sprintf(nic->irq_name[irq], "NICVF%d RBDR%d",
+			nic->vf_id, irq - NICVF_INTR_ID_RBDR);
 
 	/* Register CQ interrupts */
 	for (irq = 0; irq < nic->qs->cq_cnt; irq++) {
@@ -958,20 +928,14 @@ static int nicvf_register_interrupts(struct nicvf *nic)
 	}
 
 	/* Register QS error interrupt */
-	sprintf(nic->irq_name[NICVF_INTR_ID_QS_ERR], "%s-qset-err-%d",
-		nic->pnicvf->netdev->name,
-		nic->sqs_mode ? (nic->sqs_id + 1) : 0);
+	sprintf(nic->irq_name[NICVF_INTR_ID_QS_ERR],
+		"NICVF%d Qset error", nic->vf_id);
 	irq = NICVF_INTR_ID_QS_ERR;
 	ret = request_irq(nic->msix_entries[irq].vector,
 			  nicvf_qs_err_intr_handler,
 			  0, nic->irq_name[irq], nic);
-	if (ret)
-		goto err;
-
-	nic->irq_allocated[irq] = true;
-
-	/* Set IRQ affinities */
-	nicvf_set_irq_affinity(nic);
+	if (!ret)
+		nic->irq_allocated[irq] = true;
 
 err:
 	if (ret)
@@ -988,9 +952,6 @@ static void nicvf_unregister_interrupts(struct nicvf *nic)
 	for (irq = 0; irq < nic->num_vec; irq++) {
 		if (!nic->irq_allocated[irq])
 			continue;
-
-		irq_set_affinity_hint(nic->msix_entries[irq].vector, NULL);
-		free_cpumask_var(nic->affinity_mask[irq]);
 
 		if (irq < NICVF_INTR_ID_SQ)
 			free_irq(nic->msix_entries[irq].vector, nic->napi[irq]);
@@ -1056,7 +1017,7 @@ static netdev_tx_t nicvf_xmit(struct sk_buff *skb, struct net_device *netdev)
 
 	if (!netif_tx_queue_stopped(txq) && !nicvf_sq_append_skb(nic, skb)) {
 		netif_tx_stop_queue(txq);
-		this_cpu_inc(nic->drv_stats->txq_stop);
+		nic->drv_stats.txq_stop++;
 		if (netif_msg_tx_err(nic))
 			netdev_warn(netdev,
 				    "%s: Transmit ring full, stopping SQ%d\n",
@@ -1139,9 +1100,6 @@ int nicvf_stop(struct net_device *netdev)
 
 	netif_tx_disable(netdev);
 
-	for (qidx = 0; qidx < netdev->num_tx_queues; qidx++)
-		netdev_tx_reset_queue(netdev_get_tx_queue(netdev, qidx));
-
 	/* Free resources */
 	nicvf_config_data_transfer(nic, false);
 
@@ -1161,24 +1119,14 @@ int nicvf_stop(struct net_device *netdev)
 	return 0;
 }
 
-static int nicvf_update_hw_max_frs(struct nicvf *nic, int mtu)
-{
-	union nic_mbx mbx = {};
-
-	mbx.frs.msg = NIC_MBOX_MSG_SET_MAX_FRS;
-	mbx.frs.max_frs = mtu;
-	mbx.frs.vf_id = nic->vf_id;
-
-	return nicvf_send_msg_to_pf(nic, &mbx);
-}
-
 int nicvf_open(struct net_device *netdev)
 {
-	int cpu, err, qidx;
+	int err, qidx;
 	struct nicvf *nic = netdev_priv(netdev);
 	struct queue_set *qs = nic->qs;
 	struct nicvf_cq_poll *cq_poll = NULL;
-	union nic_mbx mbx = {};
+
+	nic->mtu = netdev->mtu;
 
 	netif_carrier_off(netdev);
 
@@ -1202,7 +1150,7 @@ int nicvf_open(struct net_device *netdev)
 	}
 
 	/* Check if we got MAC address from PF or else generate a radom MAC */
-	if (!nic->sqs_mode && is_zero_ether_addr(netdev->dev_addr)) {
+	if (is_zero_ether_addr(netdev->dev_addr)) {
 		eth_hw_addr_random(netdev);
 		nicvf_hw_set_mac_addr(nic, netdev);
 	}
@@ -1230,17 +1178,9 @@ int nicvf_open(struct net_device *netdev)
 	if (nic->sqs_mode)
 		nicvf_get_primary_vf_struct(nic);
 
-	/* Configure receive side scaling and MTU */
-	if (!nic->sqs_mode) {
+	/* Configure receive side scaling */
+	if (!nic->sqs_mode)
 		nicvf_rss_init(nic);
-		if (nicvf_update_hw_max_frs(nic, netdev->mtu))
-			goto cleanup;
-
-		/* Clear percpu stats */
-		for_each_possible_cpu(cpu)
-			memset(per_cpu_ptr(nic->drv_stats, cpu), 0,
-			       sizeof(struct nicvf_drv_stats));
-	}
 
 	err = nicvf_register_interrupts(nic);
 	if (err)
@@ -1266,9 +1206,8 @@ int nicvf_open(struct net_device *netdev)
 	for (qidx = 0; qidx < qs->rbdr_cnt; qidx++)
 		nicvf_enable_intr(nic, NICVF_INTR_RBDR, qidx);
 
-	/* Send VF config done msg to PF */
-	mbx.msg.msg = NIC_MBOX_MSG_CFG_DONE;
-	nicvf_write_to_mbx(nic, &mbx);
+	nic->drv_stats.txq_stop = 0;
+	nic->drv_stats.txq_wake = 0;
 
 	return 0;
 cleanup:
@@ -1288,6 +1227,17 @@ napi_del:
 	return err;
 }
 
+static int nicvf_update_hw_max_frs(struct nicvf *nic, int mtu)
+{
+	union nic_mbx mbx = {};
+
+	mbx.frs.msg = NIC_MBOX_MSG_SET_MAX_FRS;
+	mbx.frs.max_frs = mtu;
+	mbx.frs.vf_id = nic->vf_id;
+
+	return nicvf_send_msg_to_pf(nic, &mbx);
+}
+
 static int nicvf_change_mtu(struct net_device *netdev, int new_mtu)
 {
 	struct nicvf *nic = netdev_priv(netdev);
@@ -1298,13 +1248,10 @@ static int nicvf_change_mtu(struct net_device *netdev, int new_mtu)
 	if (new_mtu < NIC_HW_MIN_FRS)
 		return -EINVAL;
 
-	netdev->mtu = new_mtu;
-
-	if (!netif_running(netdev))
-		return 0;
-
 	if (nicvf_update_hw_max_frs(nic, new_mtu))
 		return -EINVAL;
+	netdev->mtu = new_mtu;
+	nic->mtu = new_mtu;
 
 	return 0;
 }
@@ -1362,10 +1309,9 @@ void nicvf_update_lmac_stats(struct nicvf *nic)
 
 void nicvf_update_stats(struct nicvf *nic)
 {
-	int qidx, cpu;
-	u64 tmp_stats = 0;
+	int qidx;
 	struct nicvf_hw_stats *stats = &nic->hw_stats;
-	struct nicvf_drv_stats *drv_stats;
+	struct nicvf_drv_stats *drv_stats = &nic->drv_stats;
 	struct queue_set *qs = nic->qs;
 
 #define GET_RX_STATS(reg) \
@@ -1388,33 +1334,21 @@ void nicvf_update_stats(struct nicvf *nic)
 	stats->rx_drop_l3_bcast = GET_RX_STATS(RX_DRP_L3BCAST);
 	stats->rx_drop_l3_mcast = GET_RX_STATS(RX_DRP_L3MCAST);
 
-	stats->tx_bytes = GET_TX_STATS(TX_OCTS);
-	stats->tx_ucast_frames = GET_TX_STATS(TX_UCAST);
-	stats->tx_bcast_frames = GET_TX_STATS(TX_BCAST);
-	stats->tx_mcast_frames = GET_TX_STATS(TX_MCAST);
+	stats->tx_bytes_ok = GET_TX_STATS(TX_OCTS);
+	stats->tx_ucast_frames_ok = GET_TX_STATS(TX_UCAST);
+	stats->tx_bcast_frames_ok = GET_TX_STATS(TX_BCAST);
+	stats->tx_mcast_frames_ok = GET_TX_STATS(TX_MCAST);
 	stats->tx_drops = GET_TX_STATS(TX_DROP);
 
-	/* On T88 pass 2.0, the dummy SQE added for TSO notification
-	 * via CQE has 'dont_send' set. Hence HW drops the pkt pointed
-	 * pointed by dummy SQE and results in tx_drops counter being
-	 * incremented. Subtracting it from tx_tso counter will give
-	 * exact tx_drops counter.
-	 */
-	if (nic->t88 && nic->hw_tso) {
-		for_each_possible_cpu(cpu) {
-			drv_stats = per_cpu_ptr(nic->drv_stats, cpu);
-			tmp_stats += drv_stats->tx_tso;
-		}
-		stats->tx_drops = tmp_stats - stats->tx_drops;
-	}
-	stats->tx_frames = stats->tx_ucast_frames +
-			   stats->tx_bcast_frames +
-			   stats->tx_mcast_frames;
-	stats->rx_frames = stats->rx_ucast_frames +
-			   stats->rx_bcast_frames +
-			   stats->rx_mcast_frames;
-	stats->rx_drops = stats->rx_drop_red +
-			  stats->rx_drop_overrun;
+	drv_stats->tx_frames_ok = stats->tx_ucast_frames_ok +
+				  stats->tx_bcast_frames_ok +
+				  stats->tx_mcast_frames_ok;
+	drv_stats->rx_frames_ok = stats->rx_ucast_frames +
+				  stats->rx_bcast_frames +
+				  stats->rx_mcast_frames;
+	drv_stats->rx_drops = stats->rx_drop_red +
+			      stats->rx_drop_overrun;
+	drv_stats->tx_drops = stats->tx_drops;
 
 	/* Update RQ and SQ stats */
 	for (qidx = 0; qidx < qs->rq_cnt; qidx++)
@@ -1428,17 +1362,18 @@ static struct rtnl_link_stats64 *nicvf_get_stats64(struct net_device *netdev,
 {
 	struct nicvf *nic = netdev_priv(netdev);
 	struct nicvf_hw_stats *hw_stats = &nic->hw_stats;
+	struct nicvf_drv_stats *drv_stats = &nic->drv_stats;
 
 	nicvf_update_stats(nic);
 
 	stats->rx_bytes = hw_stats->rx_bytes;
-	stats->rx_packets = hw_stats->rx_frames;
-	stats->rx_dropped = hw_stats->rx_drops;
+	stats->rx_packets = drv_stats->rx_frames_ok;
+	stats->rx_dropped = drv_stats->rx_drops;
 	stats->multicast = hw_stats->rx_mcast_frames;
 
-	stats->tx_bytes = hw_stats->tx_bytes;
-	stats->tx_packets = hw_stats->tx_frames;
-	stats->tx_dropped = hw_stats->tx_drops;
+	stats->tx_bytes = hw_stats->tx_bytes_ok;
+	stats->tx_packets = drv_stats->tx_frames_ok;
+	stats->tx_dropped = drv_stats->tx_drops;
 
 	return stats;
 }
@@ -1451,7 +1386,6 @@ static void nicvf_tx_timeout(struct net_device *dev)
 		netdev_warn(dev, "%s: Transmit timed out, resetting\n",
 			    dev->name);
 
-	this_cpu_inc(nic->drv_stats->tx_timeout);
 	schedule_work(&nic->reset_task);
 }
 
@@ -1466,7 +1400,7 @@ static void nicvf_reset_task(struct work_struct *work)
 
 	nicvf_stop(nic->netdev);
 	nicvf_open(nic->netdev);
-	netif_trans_update(nic->netdev);
+	nic->netdev->trans_start = jiffies;
 }
 
 static int nicvf_config_loopback(struct nicvf *nic,
@@ -1526,7 +1460,6 @@ static int nicvf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	struct net_device *netdev;
 	struct nicvf *nic;
 	int    err, qcount;
-	u16    sdevid;
 
 	err = pci_enable_device(pdev);
 	if (err) {
@@ -1552,13 +1485,14 @@ static int nicvf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto err_release_regions;
 	}
 
-	qcount = netif_get_num_default_rss_queues();
+	qcount = MAX_CMP_QUEUES_PER_QS;
 
 	/* Restrict multiqset support only for host bound VFs */
 	if (pdev->is_virtfn) {
 		/* Set max number of queues per VF */
-		qcount = min_t(int, num_online_cpus(),
-			       (MAX_SQS_PER_VF + 1) * MAX_CMP_QUEUES_PER_QS);
+		qcount = roundup(num_online_cpus(), MAX_CMP_QUEUES_PER_QS);
+		qcount = min(qcount,
+			     (MAX_SQS_PER_VF + 1) * MAX_CMP_QUEUES_PER_QS);
 	}
 
 	netdev = alloc_etherdev_mqs(sizeof(struct nicvf), qcount, qcount);
@@ -1576,22 +1510,11 @@ static int nicvf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	nic->pdev = pdev;
 	nic->pnicvf = nic;
 	nic->max_queues = qcount;
-	/* If no of CPUs are too low, there won't be any queues left
-	 * for XDP_TX, hence double it.
-	 */
-	if (!nic->t88)
-		nic->max_queues *= 2;
 
 	/* MAP VF's configuration registers */
 	nic->reg_base = pcim_iomap(pdev, PCI_CFG_REG_BAR_NUM, 0);
 	if (!nic->reg_base) {
 		dev_err(dev, "Cannot map config register space, aborting\n");
-		err = -ENOMEM;
-		goto err_free_netdev;
-	}
-
-	nic->drv_stats = netdev_alloc_pcpu_stats(struct nicvf_drv_stats);
-	if (!nic->drv_stats) {
 		err = -ENOMEM;
 		goto err_free_netdev;
 	}
@@ -1606,13 +1529,6 @@ static int nicvf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto err_free_netdev;
 
 	nicvf_send_vf_struct(nic);
-
-	if (!pass1_silicon(nic->pdev))
-		nic->hw_tso = true;
-
-	pci_read_config_word(nic->pdev, PCI_SUBSYSTEM_ID, &sdevid);
-	if (sdevid == 0xA134)
-		nic->t88 = true;
 
 	/* Check if this VF is in QS only mode */
 	if (nic->sqs_mode)
@@ -1654,8 +1570,6 @@ err_unregister_interrupts:
 	nicvf_unregister_interrupts(nic);
 err_free_netdev:
 	pci_set_drvdata(pdev, NULL);
-	if (nic->drv_stats)
-		free_percpu(nic->drv_stats);
 	free_netdev(netdev);
 err_release_regions:
 	pci_release_regions(pdev);
@@ -1683,8 +1597,6 @@ static void nicvf_remove(struct pci_dev *pdev)
 		unregister_netdev(pnetdev);
 	nicvf_unregister_interrupts(nic);
 	pci_set_drvdata(pdev, NULL);
-	if (nic->drv_stats)
-		free_percpu(nic->drv_stats);
 	free_netdev(netdev);
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);

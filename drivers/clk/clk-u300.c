@@ -689,7 +689,7 @@ static const struct clk_ops syscon_clk_ops = {
 	.set_rate = syscon_clk_set_rate,
 };
 
-static struct clk_hw * __init
+static struct clk * __init
 syscon_clk_register(struct device *dev, const char *name,
 		    const char *parent_name, unsigned long flags,
 		    bool hw_ctrld,
@@ -697,10 +697,9 @@ syscon_clk_register(struct device *dev, const char *name,
 		    void __iomem *en_reg, u8 en_bit,
 		    u16 clk_val)
 {
-	struct clk_hw *hw;
+	struct clk *clk;
 	struct clk_syscon *sclk;
 	struct clk_init_data init;
-	int ret;
 
 	sclk = kzalloc(sizeof(struct clk_syscon), GFP_KERNEL);
 	if (!sclk) {
@@ -723,14 +722,11 @@ syscon_clk_register(struct device *dev, const char *name,
 	sclk->en_bit = en_bit;
 	sclk->clk_val = clk_val;
 
-	hw = &sclk->hw;
-	ret = clk_hw_register(dev, hw);
-	if (ret) {
+	clk = clk_register(dev, &sclk->hw);
+	if (IS_ERR(clk))
 		kfree(sclk);
-		hw = ERR_PTR(ret);
-	}
 
-	return hw;
+	return clk;
 }
 
 #define U300_CLK_TYPE_SLOW 0
@@ -872,7 +868,7 @@ static struct u300_clock const u300_clk_lookup[] __initconst = {
 
 static void __init of_u300_syscon_clk_init(struct device_node *np)
 {
-	struct clk_hw *hw = ERR_PTR(-EINVAL);
+	struct clk *clk = ERR_PTR(-EINVAL);
 	const char *clk_name = np->name;
 	const char *parent_name;
 	void __iomem *res_reg;
@@ -915,15 +911,16 @@ static void __init of_u300_syscon_clk_init(struct device_node *np)
 		const struct u300_clock *u3clk = &u300_clk_lookup[i];
 
 		if (u3clk->type == clk_type && u3clk->id == clk_id)
-			hw = syscon_clk_register(NULL, clk_name, parent_name,
-						 0, u3clk->hw_ctrld,
-						 res_reg, u3clk->id,
-						 en_reg, u3clk->id,
-						 u3clk->clk_val);
+			clk = syscon_clk_register(NULL,
+						  clk_name, parent_name,
+						  0, u3clk->hw_ctrld,
+						  res_reg, u3clk->id,
+						  en_reg, u3clk->id,
+						  u3clk->clk_val);
 	}
 
-	if (!IS_ERR(hw)) {
-		of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
+	if (!IS_ERR(clk)) {
+		of_clk_add_provider(np, of_clk_src_simple_get, clk);
 
 		/*
 		 * Some few system clocks - device tree does not
@@ -931,11 +928,11 @@ static void __init of_u300_syscon_clk_init(struct device_node *np)
 		 * for now we add these three clocks here.
 		 */
 		if (clk_type == U300_CLK_TYPE_REST && clk_id == 5)
-			clk_hw_register_clkdev(hw, NULL, "pl172");
+			clk_register_clkdev(clk, NULL, "pl172");
 		if (clk_type == U300_CLK_TYPE_REST && clk_id == 9)
-			clk_hw_register_clkdev(hw, NULL, "semi");
+			clk_register_clkdev(clk, NULL, "semi");
 		if (clk_type == U300_CLK_TYPE_REST && clk_id == 12)
-			clk_hw_register_clkdev(hw, NULL, "intcon");
+			clk_register_clkdev(clk, NULL, "intcon");
 	}
 }
 
@@ -1114,14 +1111,13 @@ static const struct clk_ops mclk_ops = {
 	.set_rate = mclk_clk_set_rate,
 };
 
-static struct clk_hw * __init
+static struct clk * __init
 mclk_clk_register(struct device *dev, const char *name,
 		  const char *parent_name, bool is_mspro)
 {
-	struct clk_hw *hw;
+	struct clk *clk;
 	struct clk_mclk *mclk;
 	struct clk_init_data init;
-	int ret;
 
 	mclk = kzalloc(sizeof(struct clk_mclk), GFP_KERNEL);
 	if (!mclk) {
@@ -1137,26 +1133,23 @@ mclk_clk_register(struct device *dev, const char *name,
 	mclk->hw.init = &init;
 	mclk->is_mspro = is_mspro;
 
-	hw = &mclk->hw;
-	ret = clk_hw_register(dev, hw);
-	if (ret) {
+	clk = clk_register(dev, &mclk->hw);
+	if (IS_ERR(clk))
 		kfree(mclk);
-		hw = ERR_PTR(ret);
-	}
 
-	return hw;
+	return clk;
 }
 
 static void __init of_u300_syscon_mclk_init(struct device_node *np)
 {
-	struct clk_hw *hw;
+	struct clk *clk = ERR_PTR(-EINVAL);
 	const char *clk_name = np->name;
 	const char *parent_name;
 
 	parent_name = of_clk_get_parent_name(np, 0);
-	hw = mclk_clk_register(NULL, clk_name, parent_name, false);
-	if (!IS_ERR(hw))
-		of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
+	clk = mclk_clk_register(NULL, clk_name, parent_name, false);
+	if (!IS_ERR(clk))
+		of_clk_add_provider(np, of_clk_src_simple_get, clk);
 }
 
 static const struct of_device_id u300_clk_match[] __initconst = {

@@ -33,17 +33,13 @@ static const struct proc_ns_operations *ns_entries[] = {
 #endif
 };
 
-static const char *proc_ns_get_link(struct dentry *dentry,
-				    struct inode *inode,
-				    struct delayed_call *done)
+static const char *proc_ns_follow_link(struct dentry *dentry, void **cookie)
 {
+	struct inode *inode = d_inode(dentry);
 	const struct proc_ns_operations *ns_ops = PROC_I(inode)->ns_ops;
 	struct task_struct *task;
 	struct path ns_path;
 	void *error = ERR_PTR(-EACCES);
-
-	if (!dentry)
-		return ERR_PTR(-ECHILD);
 
 	task = get_proc_task(inode);
 	if (!task)
@@ -81,7 +77,7 @@ static int proc_ns_readlink(struct dentry *dentry, char __user *buffer, int bufl
 
 static const struct inode_operations proc_ns_link_inode_operations = {
 	.readlink	= proc_ns_readlink,
-	.get_link	= proc_ns_get_link,
+	.follow_link	= proc_ns_follow_link,
 	.setattr	= proc_setattr,
 };
 
@@ -139,8 +135,7 @@ out:
 
 const struct file_operations proc_ns_dir_operations = {
 	.read		= generic_read_dir,
-	.iterate_shared	= proc_ns_dir_readdir,
-	.llseek		= generic_file_llseek,
+	.iterate	= proc_ns_dir_readdir,
 };
 
 static struct dentry *proc_ns_dir_lookup(struct inode *dir,

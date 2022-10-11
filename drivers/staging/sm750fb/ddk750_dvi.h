@@ -55,5 +55,8 @@ int dviInit(
 	unsigned char pllFilterValue
 );
 
+unsigned short dviGetVendorID(void);
+unsigned short dviGetDeviceID(void);
+
 #endif
 

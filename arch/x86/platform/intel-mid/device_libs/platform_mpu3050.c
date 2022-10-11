@@ -1,5 +1,5 @@
 /*
- * platform_mpu3050.c: mpu3050 platform data initialization file
+ * platform_mpu3050.c: mpu3050 platform data initilization file
  *
  * (C) Copyright 2013 Intel Corporation
  * Author: Sathyanarayanan Kuppuswamy <sathyanarayanan.kuppuswamy@intel.com>

@@ -319,9 +319,6 @@ void __init omap3_prm_init_pm(bool has_uart4, bool has_iva)
 	if (has_uart4) {
 		en_uart4_mask = OMAP3630_EN_UART4_MASK;
 		grpsel_uart4_mask = OMAP3630_GRPSEL_UART4_MASK;
-	} else {
-		en_uart4_mask = 0;
-		grpsel_uart4_mask = 0;
 	}
 
 	/* Enable wakeups in PER */
@@ -433,7 +430,7 @@ static void omap3_prm_reconfigure_io_chain(void)
  * registers, and omap3xxx_prm_reconfigure_io_chain() must be called.
  * No return value.
  */
-static void __init omap3xxx_prm_enable_io_wakeup(void)
+static void omap3xxx_prm_enable_io_wakeup(void)
 {
 	if (prm_features & PRM_HAS_IO_WAKEUP)
 		omap2_prm_set_mod_reg_bits(OMAP3430_EN_IO_MASK, WKUP_MOD,

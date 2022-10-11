@@ -1,5 +1,5 @@
 /*
- * platform_lis331.c:  lis331 platform data initialization file
+ * platform_lis331.c:  lis331 platform data initilization file
  *
  * (C) Copyright 2013 Intel Corporation
  * Author: Sathyanarayanan Kuppuswamy <sathyanarayanan.kuppuswamy@intel.com>

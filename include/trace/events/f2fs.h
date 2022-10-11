@@ -16,7 +16,6 @@ TRACE_DEFINE_ENUM(META_FLUSH);
 TRACE_DEFINE_ENUM(INMEM);
 TRACE_DEFINE_ENUM(INMEM_DROP);
 TRACE_DEFINE_ENUM(INMEM_INVALIDATE);
-TRACE_DEFINE_ENUM(INMEM_REVOKE);
 TRACE_DEFINE_ENUM(IPU);
 TRACE_DEFINE_ENUM(OPU);
 TRACE_DEFINE_ENUM(CURSEG_HOT_DATA);
@@ -33,9 +32,10 @@ TRACE_DEFINE_ENUM(BG_GC);
 TRACE_DEFINE_ENUM(LFS);
 TRACE_DEFINE_ENUM(SSR);
 TRACE_DEFINE_ENUM(__REQ_RAHEAD);
+TRACE_DEFINE_ENUM(__REQ_WRITE);
 TRACE_DEFINE_ENUM(__REQ_SYNC);
 TRACE_DEFINE_ENUM(__REQ_NOIDLE);
-TRACE_DEFINE_ENUM(__REQ_PREFLUSH);
+TRACE_DEFINE_ENUM(__REQ_FLUSH);
 TRACE_DEFINE_ENUM(__REQ_FUA);
 TRACE_DEFINE_ENUM(__REQ_PRIO);
 TRACE_DEFINE_ENUM(__REQ_META);
@@ -59,29 +59,29 @@ TRACE_DEFINE_ENUM(CP_TRIMMED);
 		{ IPU,		"IN-PLACE" },				\
 		{ OPU,		"OUT-OF-PLACE" })
 
-#define F2FS_OP_FLAGS (REQ_RAHEAD | REQ_SYNC | REQ_META | REQ_PRIO |	\
-			REQ_PREFLUSH | REQ_FUA)
-#define F2FS_BIO_FLAG_MASK(t)	(t & F2FS_OP_FLAGS)
+#define F2FS_BIO_MASK(t)	(t & (READA | WRITE_FLUSH_FUA))
+#define F2FS_BIO_EXTRA_MASK(t)	(t & (REQ_META | REQ_PRIO))
 
-#define show_bio_type(op,op_flags)	show_bio_op(op),		\
-						show_bio_op_flags(op_flags)
+#define show_bio_type(op, op_flags)					\
+		show_bio_base((op|op_flags)), show_bio_extra((op|op_flags))
 
-#define show_bio_op(op)							\
-	__print_symbolic(op,						\
-		{ REQ_OP_READ,			"READ" },		\
-		{ REQ_OP_WRITE,			"WRITE" },		\
-		{ REQ_OP_DISCARD,		"DISCARD" },		\
-		{ REQ_OP_SECURE_ERASE,		"SECURE_ERASE" },	\
-		{ REQ_OP_WRITE_SAME,		"WRITE_SAME" })
+#define show_bio_base(type)						\
+	__print_symbolic(F2FS_BIO_MASK(type),				\
+		{ READ, 		"READ" },			\
+		{ READA, 		"READAHEAD" },			\
+		{ READ_SYNC, 		"READ_SYNC" },			\
+		{ WRITE, 		"WRITE" },			\
+		{ WRITE_SYNC, 		"WRITE_SYNC" },			\
+		{ WRITE_FLUSH,		"WRITE_FLUSH" },		\
+		{ WRITE_FUA, 		"WRITE_FUA" },			\
+		{ WRITE_FLUSH_FUA,	"WRITE_FLUSH_FUA" })
 
-#define show_bio_op_flags(flags)					\
-	__print_flags(F2FS_BIO_FLAG_MASK(flags), "|",			\
-		{ REQ_RAHEAD,		"R" },				\
-		{ REQ_SYNC,		"S" },				\
-		{ REQ_META,		"M" },				\
-		{ REQ_PRIO,		"P" },				\
-		{ REQ_PREFLUSH,		"PF" },				\
-		{ REQ_FUA,		"FUA" })
+#define show_bio_extra(type)						\
+	__print_symbolic(F2FS_BIO_EXTRA_MASK(type),			\
+		{ REQ_META, 		"(M)" },			\
+		{ REQ_PRIO, 		"(P)" },			\
+		{ REQ_META | REQ_PRIO,	"(MP)" },			\
+		{ 0, " \b" })
 
 #define show_block_temp(temp)						\
 	__print_symbolic(temp,						\
@@ -120,14 +120,13 @@ TRACE_DEFINE_ENUM(CP_TRIMMED);
 		{ GC_CB,	"Cost-Benefit" })
 
 #define show_cpreason(type)						\
-	__print_flags(type, "|",					\
+	__print_symbolic(type,						\
 		{ CP_UMOUNT,	"Umount" },				\
 		{ CP_FASTBOOT,	"Fastboot" },				\
 		{ CP_SYNC,	"Sync" },				\
 		{ CP_RECOVERY,	"Recovery" },				\
 		{ CP_DISCARD,	"Discard" },				\
-		{ CP_UMOUNT,	"Umount" },				\
-		{ CP_TRIMMED,	"Trimmed" })
+		{ CP_UMOUNT | CP_TRIMMED,	"Umount,Trimmed" })
 
 #define show_fsync_cpreason(type)					\
 	__print_symbolic(type,						\
@@ -142,6 +141,17 @@ TRACE_DEFINE_ENUM(CP_TRIMMED);
 		{ CP_SPEC_LOG_NUM,	"log type is 2" },		\
 		{ CP_RECOVER_DIR,	"dir needs recovery" })
 
+#define show_shutdown_mode(type)					\
+	__print_symbolic(type,						\
+		{ F2FS_GOING_DOWN_FULLSYNC,	"full sync" },		\
+		{ F2FS_GOING_DOWN_METASYNC,	"meta sync" },		\
+		{ F2FS_GOING_DOWN_NOSYNC,	"no sync" },		\
+		{ F2FS_GOING_DOWN_METAFLUSH,	"meta flush" },		\
+		{ F2FS_GOING_DOWN_NEED_FSCK,	"need fsck" })
+
+struct f2fs_sb_info;
+struct f2fs_io_info;
+struct extent_info;
 struct victim_sel_policy;
 struct f2fs_map_blocks;
 
@@ -526,6 +536,9 @@ TRACE_EVENT(f2fs_map_blocks,
 		__field(block_t,	m_lblk)
 		__field(block_t,	m_pblk)
 		__field(unsigned int,	m_len)
+		__field(unsigned int,	m_flags)
+		__field(int,	m_seg_type)
+		__field(bool,	m_may_create)
 		__field(int,	ret)
 	),
 
@@ -535,15 +548,22 @@ TRACE_EVENT(f2fs_map_blocks,
 		__entry->m_lblk		= map->m_lblk;
 		__entry->m_pblk		= map->m_pblk;
 		__entry->m_len		= map->m_len;
+		__entry->m_flags	= map->m_flags;
+		__entry->m_seg_type	= map->m_seg_type;
+		__entry->m_may_create	= map->m_may_create;
 		__entry->ret		= ret;
 	),
 
 	TP_printk("dev = (%d,%d), ino = %lu, file offset = %llu, "
-		"start blkaddr = 0x%llx, len = 0x%llx, err = %d",
+		"start blkaddr = 0x%llx, len = 0x%llx, flags = %u,"
+		"seg_type = %d, may_create = %d, err = %d",
 		show_dev_ino(__entry),
 		(unsigned long long)__entry->m_lblk,
 		(unsigned long long)__entry->m_pblk,
 		(unsigned long long)__entry->m_len,
+		__entry->m_flags,
+		__entry->m_seg_type,
+		__entry->m_may_create,
 		__entry->ret)
 );
 
@@ -697,7 +717,6 @@ TRACE_EVENT(f2fs_get_victim,
 		__field(int,	alloc_mode)
 		__field(int,	gc_mode)
 		__field(unsigned int,	victim)
-		__field(unsigned int,	cost)
 		__field(unsigned int,	ofs_unit)
 		__field(unsigned int,	pre_victim)
 		__field(unsigned int,	prefree)
@@ -711,23 +730,20 @@ TRACE_EVENT(f2fs_get_victim,
 		__entry->alloc_mode	= p->alloc_mode;
 		__entry->gc_mode	= p->gc_mode;
 		__entry->victim		= p->min_segno;
-		__entry->cost		= p->min_cost;
 		__entry->ofs_unit	= p->ofs_unit;
 		__entry->pre_victim	= pre_victim;
 		__entry->prefree	= prefree;
 		__entry->free		= free;
 	),
 
-	TP_printk("dev = (%d,%d), type = %s, policy = (%s, %s, %s), "
-		"victim = %u, cost = %u, ofs_unit = %u, "
-		"pre_victim_secno = %d, prefree = %u, free = %u",
+	TP_printk("dev = (%d,%d), type = %s, policy = (%s, %s, %s), victim = %u "
+		"ofs_unit = %u, pre_victim_secno = %d, prefree = %u, free = %u",
 		show_dev(__entry->dev),
 		show_data_type(__entry->type),
 		show_gc_type(__entry->gc_type),
 		show_alloc_mode(__entry->alloc_mode),
 		show_victim_policy(__entry->gc_mode),
 		__entry->victim,
-		__entry->cost,
 		__entry->ofs_unit,
 		(int)__entry->pre_victim,
 		__entry->prefree,
@@ -1029,13 +1045,13 @@ DECLARE_EVENT_CLASS(f2fs__bio,
 		__entry->dev		= sb->s_dev;
 		__entry->target		= bio->bi_bdev->bd_dev;
 		__entry->op		= bio_op(bio);
-		__entry->op_flags	= bio->bi_opf;
+		__entry->op_flags	= bio->bi_rw;
 		__entry->type		= type;
 		__entry->sector		= bio->bi_iter.bi_sector;
 		__entry->size		= bio->bi_iter.bi_size;
 	),
 
-	TP_printk("dev = (%d,%d)/(%d,%d), rw = %s(%s), %s, sector = %lld, size = %u",
+	TP_printk("dev = (%d,%d)/(%d,%d), rw = %s%s, %s, sector = %lld, size = %u",
 		show_dev(__entry->target),
 		show_dev(__entry->dev),
 		show_bio_type(__entry->op, __entry->op_flags),
@@ -1607,6 +1623,30 @@ DEFINE_EVENT(f2fs_sync_dirty_inodes, f2fs_sync_dirty_inodes_exit,
 	TP_PROTO(struct super_block *sb, int type, s64 count),
 
 	TP_ARGS(sb, type, count)
+);
+
+TRACE_EVENT(f2fs_shutdown,
+
+	TP_PROTO(struct f2fs_sb_info *sbi, unsigned int mode, int ret),
+
+	TP_ARGS(sbi, mode, ret),
+
+	TP_STRUCT__entry(
+		__field(dev_t,	dev)
+		__field(unsigned int, mode)
+		__field(int, ret)
+	),
+
+	TP_fast_assign(
+		__entry->dev = sbi->sb->s_dev;
+		__entry->mode = mode;
+		__entry->ret = ret;
+	),
+
+	TP_printk("dev = (%d,%d), mode: %s, ret:%d",
+		show_dev(__entry->dev),
+		show_shutdown_mode(__entry->mode),
+		__entry->ret)
 );
 
 #endif /* _TRACE_F2FS_H */

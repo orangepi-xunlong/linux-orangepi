@@ -99,67 +99,6 @@ static ssize_t target_core_item_version_show(struct config_item *item,
 
 CONFIGFS_ATTR_RO(target_core_item_, version);
 
-char db_root[DB_ROOT_LEN] = DB_ROOT_DEFAULT;
-static char db_root_stage[DB_ROOT_LEN];
-
-static ssize_t target_core_item_dbroot_show(struct config_item *item,
-					    char *page)
-{
-	return sprintf(page, "%s\n", db_root);
-}
-
-static ssize_t target_core_item_dbroot_store(struct config_item *item,
-					const char *page, size_t count)
-{
-	ssize_t read_bytes;
-	struct file *fp;
-
-	mutex_lock(&g_tf_lock);
-	if (!list_empty(&g_tf_list)) {
-		mutex_unlock(&g_tf_lock);
-		pr_err("db_root: cannot be changed: target drivers registered");
-		return -EINVAL;
-	}
-
-	if (count > (DB_ROOT_LEN - 1)) {
-		mutex_unlock(&g_tf_lock);
-		pr_err("db_root: count %d exceeds DB_ROOT_LEN-1: %u\n",
-		       (int)count, DB_ROOT_LEN - 1);
-		return -EINVAL;
-	}
-
-	read_bytes = snprintf(db_root_stage, DB_ROOT_LEN, "%s", page);
-	if (!read_bytes) {
-		mutex_unlock(&g_tf_lock);
-		return -EINVAL;
-	}
-	if (db_root_stage[read_bytes - 1] == '\n')
-		db_root_stage[read_bytes - 1] = '\0';
-
-	/* validate new db root before accepting it */
-	fp = filp_open(db_root_stage, O_RDONLY, 0);
-	if (IS_ERR(fp)) {
-		mutex_unlock(&g_tf_lock);
-		pr_err("db_root: cannot open: %s\n", db_root_stage);
-		return -EINVAL;
-	}
-	if (!S_ISDIR(fp->f_inode->i_mode)) {
-		filp_close(fp, 0);
-		mutex_unlock(&g_tf_lock);
-		pr_err("db_root: not a directory: %s\n", db_root_stage);
-		return -EINVAL;
-	}
-	filp_close(fp, 0);
-
-	strncpy(db_root, db_root_stage, read_bytes);
-
-	mutex_unlock(&g_tf_lock);
-
-	return read_bytes;
-}
-
-CONFIGFS_ATTR(target_core_item_, dbroot);
-
 static struct target_fabric_configfs *target_core_get_fabric(
 	const char *name)
 {
@@ -255,11 +194,13 @@ static struct config_group *target_core_register_fabric(
 	pr_debug("Target_Core_ConfigFS: REGISTER tfc_wwn_cit -> %p\n",
 			&tf->tf_wwn_cit);
 
-	config_group_init_type_name(&tf->tf_group, name, &tf->tf_wwn_cit);
+	tf->tf_group.default_groups = tf->tf_default_groups;
+	tf->tf_group.default_groups[0] = &tf->tf_disc_group;
+	tf->tf_group.default_groups[1] = NULL;
 
+	config_group_init_type_name(&tf->tf_group, name, &tf->tf_wwn_cit);
 	config_group_init_type_name(&tf->tf_disc_group, "discovery_auth",
 			&tf->tf_discovery_cit);
-	configfs_add_default_group(&tf->tf_disc_group, &tf->tf_group);
 
 	pr_debug("Target_Core_ConfigFS: REGISTER -> Allocated Fabric:"
 			" %s\n", tf->tf_group.cg_item.ci_name);
@@ -275,6 +216,9 @@ static void target_core_deregister_fabric(
 {
 	struct target_fabric_configfs *tf = container_of(
 		to_config_group(item), struct target_fabric_configfs, tf_group);
+	struct config_group *tf_group;
+	struct config_item *df_item;
+	int i;
 
 	pr_debug("Target_Core_ConfigFS: DEREGISTER -> Looking up %s in"
 		" tf list\n", config_item_name(item));
@@ -286,7 +230,12 @@ static void target_core_deregister_fabric(
 	pr_debug("Target_Core_ConfigFS: DEREGISTER -> Releasing ci"
 			" %s\n", config_item_name(item));
 
-	configfs_remove_default_groups(&tf->tf_group);
+	tf_group = &tf->tf_group;
+	for (i = 0; tf_group->default_groups[i]; i++) {
+		df_item = &tf_group->default_groups[i]->cg_item;
+		tf_group->default_groups[i] = NULL;
+		config_item_put(df_item);
+	}
 	config_item_put(item);
 }
 
@@ -300,7 +249,6 @@ static struct configfs_group_operations target_core_fabric_group_ops = {
  */
 static struct configfs_attribute *target_core_fabric_item_attrs[] = {
 	&target_core_item_attr_version,
-	&target_core_item_attr_dbroot,
 	NULL,
 };
 
@@ -330,7 +278,7 @@ EXPORT_SYMBOL(target_depend_item);
 
 void target_undepend_item(struct config_item *item)
 {
-	return configfs_undepend_item(item);
+	return configfs_undepend_item(&target_core_fabrics, item);
 }
 EXPORT_SYMBOL(target_undepend_item);
 
@@ -383,6 +331,14 @@ static int target_fabric_tf_ops_check(const struct target_core_fabric_ops *tfo)
 	}
 	if (!tfo->release_cmd) {
 		pr_err("Missing tfo->release_cmd()\n");
+		return -EINVAL;
+	}
+	if (!tfo->shutdown_session) {
+		pr_err("Missing tfo->shutdown_session()\n");
+		return -EINVAL;
+	}
+	if (!tfo->close_session) {
+		pr_err("Missing tfo->close_session()\n");
 		return -EINVAL;
 	}
 	if (!tfo->sess_get_index) {
@@ -543,7 +499,6 @@ DEF_CONFIGFS_ATTRIB_SHOW(max_unmap_lba_count);
 DEF_CONFIGFS_ATTRIB_SHOW(max_unmap_block_desc_count);
 DEF_CONFIGFS_ATTRIB_SHOW(unmap_granularity);
 DEF_CONFIGFS_ATTRIB_SHOW(unmap_granularity_alignment);
-DEF_CONFIGFS_ATTRIB_SHOW(unmap_zeroes_data);
 DEF_CONFIGFS_ATTRIB_SHOW(max_write_same_len);
 
 #define DEF_CONFIGFS_ATTRIB_STORE_U32(_name)				\
@@ -593,8 +548,7 @@ static ssize_t _name##_store(struct config_item *item, const char *page,\
 		size_t count)						\
 {									\
 	printk_once(KERN_WARNING					\
-		"ignoring deprecated %s attribute\n",			\
-		__stringify(_name));					\
+		"ignoring deprecated ##_name## attribute\n");	\
 	return count;							\
 }
 
@@ -912,39 +866,6 @@ static ssize_t emulate_rest_reord_store(struct config_item *item,
 	return count;
 }
 
-static ssize_t unmap_zeroes_data_store(struct config_item *item,
-		const char *page, size_t count)
-{
-	struct se_dev_attrib *da = to_attrib(item);
-	bool flag;
-	int ret;
-
-	ret = strtobool(page, &flag);
-	if (ret < 0)
-		return ret;
-
-	if (da->da_dev->export_count) {
-		pr_err("dev[%p]: Unable to change SE Device"
-		       " unmap_zeroes_data while export_count is %d\n",
-		       da->da_dev, da->da_dev->export_count);
-		return -EINVAL;
-	}
-	/*
-	 * We expect this value to be non-zero when generic Block Layer
-	 * Discard supported is detected iblock_configure_device().
-	 */
-	if (flag && !da->max_unmap_block_desc_count) {
-		pr_err("dev[%p]: Thin Provisioning LBPRZ will not be set"
-		       " because max_unmap_block_desc_count is zero\n",
-		       da->da_dev);
-		return -ENOSYS;
-	}
-	da->unmap_zeroes_data = flag;
-	pr_debug("dev[%p]: SE Device Thin Provisioning LBPRZ bit: %d\n",
-		 da->da_dev, flag);
-	return count;
-}
-
 /*
  * Note, this can only be called on unexported SE Device Object.
  */
@@ -1077,7 +998,6 @@ CONFIGFS_ATTR(, max_unmap_lba_count);
 CONFIGFS_ATTR(, max_unmap_block_desc_count);
 CONFIGFS_ATTR(, unmap_granularity);
 CONFIGFS_ATTR(, unmap_granularity_alignment);
-CONFIGFS_ATTR(, unmap_zeroes_data);
 CONFIGFS_ATTR(, max_write_same_len);
 
 /*
@@ -1114,7 +1034,6 @@ struct configfs_attribute *sbc_attrib_attrs[] = {
 	&attr_max_unmap_block_desc_count,
 	&attr_unmap_granularity,
 	&attr_unmap_granularity_alignment,
-	&attr_unmap_zeroes_data,
 	&attr_max_write_same_len,
 	NULL,
 };
@@ -2061,14 +1980,14 @@ static ssize_t target_dev_lba_map_store(struct config_item *item,
 	struct se_device *dev = to_device(item);
 	struct t10_alua_lba_map *lba_map = NULL;
 	struct list_head lba_list;
-	char *map_entries, *orig, *ptr;
+	char *map_entries, *ptr;
 	char state;
 	int pg_num = -1, pg;
 	int ret = 0, num = 0, pg_id, alua_state;
 	unsigned long start_lba = -1, end_lba = -1;
 	unsigned long segment_size = -1, segment_mult = -1;
 
-	orig = map_entries = kstrdup(page, GFP_KERNEL);
+	map_entries = kstrdup(page, GFP_KERNEL);
 	if (!map_entries)
 		return -ENOMEM;
 
@@ -2166,7 +2085,7 @@ out:
 	} else
 		core_alua_set_lba_map(dev, &lba_list,
 				      segment_size, segment_mult);
-	kfree(orig);
+	kfree(map_entries);
 	return count;
 }
 
@@ -2195,6 +2114,7 @@ static void target_core_dev_release(struct config_item *item)
 	struct se_device *dev =
 		container_of(dev_cg, struct se_device, dev_group);
 
+	kfree(dev_cg->default_groups);
 	target_free_device(dev);
 }
 
@@ -2862,6 +2782,8 @@ static struct config_group *target_core_make_subdev(
 	struct se_hba *hba = item_to_hba(hba_ci);
 	struct target_backend *tb = hba->backend;
 	struct se_device *dev;
+	struct config_group *dev_cg = NULL, *tg_pt_gp_cg = NULL;
+	struct config_group *dev_stat_grp = NULL;
 	int errno = -ENOMEM, ret;
 
 	ret = mutex_lock_interruptible(&hba->hba_access_mutex);
@@ -2872,52 +2794,73 @@ static struct config_group *target_core_make_subdev(
 	if (!dev)
 		goto out_unlock;
 
-	config_group_init_type_name(&dev->dev_group, name, &tb->tb_dev_cit);
+	dev_cg = &dev->dev_group;
 
+	dev_cg->default_groups = kmalloc(sizeof(struct config_group *) * 6,
+			GFP_KERNEL);
+	if (!dev_cg->default_groups)
+		goto out_free_device;
+
+	config_group_init_type_name(dev_cg, name, &tb->tb_dev_cit);
 	config_group_init_type_name(&dev->dev_attrib.da_group, "attrib",
 			&tb->tb_dev_attrib_cit);
-	configfs_add_default_group(&dev->dev_attrib.da_group, &dev->dev_group);
-
 	config_group_init_type_name(&dev->dev_pr_group, "pr",
 			&tb->tb_dev_pr_cit);
-	configfs_add_default_group(&dev->dev_pr_group, &dev->dev_group);
-
 	config_group_init_type_name(&dev->t10_wwn.t10_wwn_group, "wwn",
 			&tb->tb_dev_wwn_cit);
-	configfs_add_default_group(&dev->t10_wwn.t10_wwn_group,
-			&dev->dev_group);
-
 	config_group_init_type_name(&dev->t10_alua.alua_tg_pt_gps_group,
 			"alua", &tb->tb_dev_alua_tg_pt_gps_cit);
-	configfs_add_default_group(&dev->t10_alua.alua_tg_pt_gps_group,
-			&dev->dev_group);
-
 	config_group_init_type_name(&dev->dev_stat_grps.stat_group,
 			"statistics", &tb->tb_dev_stat_cit);
-	configfs_add_default_group(&dev->dev_stat_grps.stat_group,
-			&dev->dev_group);
 
+	dev_cg->default_groups[0] = &dev->dev_attrib.da_group;
+	dev_cg->default_groups[1] = &dev->dev_pr_group;
+	dev_cg->default_groups[2] = &dev->t10_wwn.t10_wwn_group;
+	dev_cg->default_groups[3] = &dev->t10_alua.alua_tg_pt_gps_group;
+	dev_cg->default_groups[4] = &dev->dev_stat_grps.stat_group;
+	dev_cg->default_groups[5] = NULL;
 	/*
 	 * Add core/$HBA/$DEV/alua/default_tg_pt_gp
 	 */
 	tg_pt_gp = core_alua_allocate_tg_pt_gp(dev, "default_tg_pt_gp", 1);
 	if (!tg_pt_gp)
-		goto out_free_device;
+		goto out_free_dev_cg_default_groups;
 	dev->t10_alua.default_tg_pt_gp = tg_pt_gp;
+
+	tg_pt_gp_cg = &dev->t10_alua.alua_tg_pt_gps_group;
+	tg_pt_gp_cg->default_groups = kmalloc(sizeof(struct config_group *) * 2,
+				GFP_KERNEL);
+	if (!tg_pt_gp_cg->default_groups) {
+		pr_err("Unable to allocate tg_pt_gp_cg->"
+				"default_groups\n");
+		goto out_free_tg_pt_gp;
+	}
 
 	config_group_init_type_name(&tg_pt_gp->tg_pt_gp_group,
 			"default_tg_pt_gp", &target_core_alua_tg_pt_gp_cit);
-	configfs_add_default_group(&tg_pt_gp->tg_pt_gp_group,
-			&dev->t10_alua.alua_tg_pt_gps_group);
-
+	tg_pt_gp_cg->default_groups[0] = &tg_pt_gp->tg_pt_gp_group;
+	tg_pt_gp_cg->default_groups[1] = NULL;
 	/*
 	 * Add core/$HBA/$DEV/statistics/ default groups
 	 */
+	dev_stat_grp = &dev->dev_stat_grps.stat_group;
+	dev_stat_grp->default_groups = kmalloc(sizeof(struct config_group *) * 4,
+				GFP_KERNEL);
+	if (!dev_stat_grp->default_groups) {
+		pr_err("Unable to allocate dev_stat_grp->default_groups\n");
+		goto out_free_tg_pt_gp_cg_default_groups;
+	}
 	target_stat_setup_dev_default_groups(dev);
 
 	mutex_unlock(&hba->hba_access_mutex);
-	return &dev->dev_group;
+	return dev_cg;
 
+out_free_tg_pt_gp_cg_default_groups:
+	kfree(tg_pt_gp_cg->default_groups);
+out_free_tg_pt_gp:
+	core_alua_free_tg_pt_gp(tg_pt_gp);
+out_free_dev_cg_default_groups:
+	kfree(dev_cg->default_groups);
 out_free_device:
 	target_free_device(dev);
 out_unlock:
@@ -2933,22 +2876,40 @@ static void target_core_drop_subdev(
 	struct se_device *dev =
 		container_of(dev_cg, struct se_device, dev_group);
 	struct se_hba *hba;
+	struct config_item *df_item;
+	struct config_group *tg_pt_gp_cg, *dev_stat_grp;
+	int i;
 
 	hba = item_to_hba(&dev->se_hba->hba_group.cg_item);
 
 	mutex_lock(&hba->hba_access_mutex);
 
-	configfs_remove_default_groups(&dev->dev_stat_grps.stat_group);
-	configfs_remove_default_groups(&dev->t10_alua.alua_tg_pt_gps_group);
+	dev_stat_grp = &dev->dev_stat_grps.stat_group;
+	for (i = 0; dev_stat_grp->default_groups[i]; i++) {
+		df_item = &dev_stat_grp->default_groups[i]->cg_item;
+		dev_stat_grp->default_groups[i] = NULL;
+		config_item_put(df_item);
+	}
+	kfree(dev_stat_grp->default_groups);
 
+	tg_pt_gp_cg = &dev->t10_alua.alua_tg_pt_gps_group;
+	for (i = 0; tg_pt_gp_cg->default_groups[i]; i++) {
+		df_item = &tg_pt_gp_cg->default_groups[i]->cg_item;
+		tg_pt_gp_cg->default_groups[i] = NULL;
+		config_item_put(df_item);
+	}
+	kfree(tg_pt_gp_cg->default_groups);
 	/*
 	 * core_alua_free_tg_pt_gp() is called from ->default_tg_pt_gp
 	 * directly from target_core_alua_tg_pt_gp_release().
 	 */
 	dev->t10_alua.default_tg_pt_gp = NULL;
 
-	configfs_remove_default_groups(dev_cg);
-
+	for (i = 0; dev_cg->default_groups[i]; i++) {
+		df_item = &dev_cg->default_groups[i]->cg_item;
+		dev_cg->default_groups[i] = NULL;
+		config_item_put(df_item);
+	}
 	/*
 	 * se_dev is released from target_core_dev_item_ops->release()
 	 */
@@ -3143,6 +3104,8 @@ void target_setup_backend_cits(struct target_backend *tb)
 
 static int __init target_core_init_configfs(void)
 {
+	struct config_group *target_cg, *hba_cg = NULL, *alua_cg = NULL;
+	struct config_group *lu_gp_cg = NULL;
 	struct configfs_subsystem *subsys = &target_core_fabrics;
 	struct t10_alua_lu_gp *lu_gp;
 	int ret;
@@ -3161,24 +3124,51 @@ static int __init target_core_init_configfs(void)
 	 * Create $CONFIGFS/target/core default group for HBA <-> Storage Object
 	 * and ALUA Logical Unit Group and Target Port Group infrastructure.
 	 */
-	config_group_init_type_name(&target_core_hbagroup, "core",
-			&target_core_cit);
-	configfs_add_default_group(&target_core_hbagroup, &subsys->su_group);
+	target_cg = &subsys->su_group;
+	target_cg->default_groups = kmalloc(sizeof(struct config_group *) * 2,
+				GFP_KERNEL);
+	if (!target_cg->default_groups) {
+		pr_err("Unable to allocate target_cg->default_groups\n");
+		ret = -ENOMEM;
+		goto out_global;
+	}
 
+	config_group_init_type_name(&target_core_hbagroup,
+			"core", &target_core_cit);
+	target_cg->default_groups[0] = &target_core_hbagroup;
+	target_cg->default_groups[1] = NULL;
 	/*
 	 * Create ALUA infrastructure under /sys/kernel/config/target/core/alua/
 	 */
-	config_group_init_type_name(&alua_group, "alua", &target_core_alua_cit);
-	configfs_add_default_group(&alua_group, &target_core_hbagroup);
-
+	hba_cg = &target_core_hbagroup;
+	hba_cg->default_groups = kmalloc(sizeof(struct config_group *) * 2,
+				GFP_KERNEL);
+	if (!hba_cg->default_groups) {
+		pr_err("Unable to allocate hba_cg->default_groups\n");
+		ret = -ENOMEM;
+		goto out_global;
+	}
+	config_group_init_type_name(&alua_group,
+			"alua", &target_core_alua_cit);
+	hba_cg->default_groups[0] = &alua_group;
+	hba_cg->default_groups[1] = NULL;
 	/*
 	 * Add ALUA Logical Unit Group and Target Port Group ConfigFS
 	 * groups under /sys/kernel/config/target/core/alua/
 	 */
-	config_group_init_type_name(&alua_lu_gps_group, "lu_gps",
-			&target_core_alua_lu_gps_cit);
-	configfs_add_default_group(&alua_lu_gps_group, &alua_group);
+	alua_cg = &alua_group;
+	alua_cg->default_groups = kmalloc(sizeof(struct config_group *) * 2,
+			GFP_KERNEL);
+	if (!alua_cg->default_groups) {
+		pr_err("Unable to allocate alua_cg->default_groups\n");
+		ret = -ENOMEM;
+		goto out_global;
+	}
 
+	config_group_init_type_name(&alua_lu_gps_group,
+			"lu_gps", &target_core_alua_lu_gps_cit);
+	alua_cg->default_groups[0] = &alua_lu_gps_group;
+	alua_cg->default_groups[1] = NULL;
 	/*
 	 * Add core/alua/lu_gps/default_lu_gp
 	 */
@@ -3188,12 +3178,20 @@ static int __init target_core_init_configfs(void)
 		goto out_global;
 	}
 
+	lu_gp_cg = &alua_lu_gps_group;
+	lu_gp_cg->default_groups = kmalloc(sizeof(struct config_group *) * 2,
+			GFP_KERNEL);
+	if (!lu_gp_cg->default_groups) {
+		pr_err("Unable to allocate lu_gp_cg->default_groups\n");
+		ret = -ENOMEM;
+		goto out_global;
+	}
+
 	config_group_init_type_name(&lu_gp->lu_gp_group, "default_lu_gp",
 				&target_core_alua_lu_gp_cit);
-	configfs_add_default_group(&lu_gp->lu_gp_group, &alua_lu_gps_group);
-
+	lu_gp_cg->default_groups[0] = &lu_gp->lu_gp_group;
+	lu_gp_cg->default_groups[1] = NULL;
 	default_lu_gp = lu_gp;
-
 	/*
 	 * Register the target_core_mod subsystem with configfs.
 	 */
@@ -3232,21 +3230,55 @@ out_global:
 		core_alua_free_lu_gp(default_lu_gp);
 		default_lu_gp = NULL;
 	}
+	if (lu_gp_cg)
+		kfree(lu_gp_cg->default_groups);
+	if (alua_cg)
+		kfree(alua_cg->default_groups);
+	if (hba_cg)
+		kfree(hba_cg->default_groups);
+	kfree(target_cg->default_groups);
 	release_se_kmem_caches();
 	return ret;
 }
 
 static void __exit target_core_exit_configfs(void)
 {
-	configfs_remove_default_groups(&alua_lu_gps_group);
-	configfs_remove_default_groups(&alua_group);
-	configfs_remove_default_groups(&target_core_hbagroup);
+	struct config_group *hba_cg, *alua_cg, *lu_gp_cg;
+	struct config_item *item;
+	int i;
 
+	lu_gp_cg = &alua_lu_gps_group;
+	for (i = 0; lu_gp_cg->default_groups[i]; i++) {
+		item = &lu_gp_cg->default_groups[i]->cg_item;
+		lu_gp_cg->default_groups[i] = NULL;
+		config_item_put(item);
+	}
+	kfree(lu_gp_cg->default_groups);
+	lu_gp_cg->default_groups = NULL;
+
+	alua_cg = &alua_group;
+	for (i = 0; alua_cg->default_groups[i]; i++) {
+		item = &alua_cg->default_groups[i]->cg_item;
+		alua_cg->default_groups[i] = NULL;
+		config_item_put(item);
+	}
+	kfree(alua_cg->default_groups);
+	alua_cg->default_groups = NULL;
+
+	hba_cg = &target_core_hbagroup;
+	for (i = 0; hba_cg->default_groups[i]; i++) {
+		item = &hba_cg->default_groups[i]->cg_item;
+		hba_cg->default_groups[i] = NULL;
+		config_item_put(item);
+	}
+	kfree(hba_cg->default_groups);
+	hba_cg->default_groups = NULL;
 	/*
 	 * We expect subsys->su_group.default_groups to be released
 	 * by configfs subsystem provider logic..
 	 */
 	configfs_unregister_subsystem(&target_core_fabrics);
+	kfree(target_core_fabrics.su_group.default_groups);
 
 	core_alua_free_lu_gp(default_lu_gp);
 	default_lu_gp = NULL;

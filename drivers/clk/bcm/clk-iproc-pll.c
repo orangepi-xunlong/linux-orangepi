@@ -25,12 +25,6 @@
 #define PLL_VCO_HIGH_SHIFT 19
 #define PLL_VCO_LOW_SHIFT  30
 
-/*
- * PLL MACRO_SELECT modes 0 to 5 choose pre-calculated PLL output frequencies
- * from a look-up table. Mode 7 allows user to manipulate PLL clock dividers
- */
-#define PLL_USER_MODE 7
-
 /* number of delay loops waiting for PLL to lock */
 #define LOCK_DELAY 100
 
@@ -89,7 +83,7 @@ struct iproc_pll {
 	const struct iproc_pll_vco_param *vco_param;
 	unsigned int num_vco_entries;
 
-	struct clk_hw_onecell_data *clk_data;
+	struct clk_onecell_data clk_data;
 	struct iproc_clk *clks;
 };
 
@@ -221,10 +215,7 @@ static void __pll_put_in_reset(struct iproc_pll *pll)
 	const struct iproc_pll_reset_ctrl *reset = &ctrl->reset;
 
 	val = readl(pll->control_base + reset->offset);
-	if (ctrl->flags & IPROC_CLK_PLL_RESET_ACTIVE_LOW)
-		val |= BIT(reset->reset_shift) | BIT(reset->p_reset_shift);
-	else
-		val &= ~(BIT(reset->reset_shift) | BIT(reset->p_reset_shift));
+	val &= ~(1 << reset->reset_shift | 1 << reset->p_reset_shift);
 	iproc_pll_write(pll, pll->control_base, reset->offset, val);
 }
 
@@ -245,10 +236,7 @@ static void __pll_bring_out_reset(struct iproc_pll *pll, unsigned int kp,
 	iproc_pll_write(pll, pll->control_base, dig_filter->offset, val);
 
 	val = readl(pll->control_base + reset->offset);
-	if (ctrl->flags & IPROC_CLK_PLL_RESET_ACTIVE_LOW)
-		val &= ~(BIT(reset->reset_shift) | BIT(reset->p_reset_shift));
-	else
-		val |= BIT(reset->reset_shift) | BIT(reset->p_reset_shift);
+	val |= 1 << reset->reset_shift | 1 << reset->p_reset_shift;
 	iproc_pll_write(pll, pll->control_base, reset->offset, val);
 }
 
@@ -303,16 +291,6 @@ static int pll_set_rate(struct iproc_clk *clk, unsigned int rate_index,
 
 	/* put PLL in reset */
 	__pll_put_in_reset(pll);
-
-	/* set PLL in user mode before modifying PLL controls */
-	if (ctrl->flags & IPROC_CLK_PLL_USER_MODE_ON) {
-		val = readl(pll->control_base + ctrl->macro_mode.offset);
-		val &= ~(bit_mask(ctrl->macro_mode.width) <<
-			ctrl->macro_mode.shift);
-		val |= PLL_USER_MODE << ctrl->macro_mode.shift;
-		iproc_pll_write(pll, pll->control_base,
-			ctrl->macro_mode.offset, val);
-	}
 
 	iproc_pll_write(pll, pll->control_base, ctrl->vco_ctrl.u_offset, 0);
 
@@ -527,10 +505,7 @@ static unsigned long iproc_clk_recalc_rate(struct clk_hw *hw,
 	if (mdiv == 0)
 		mdiv = 256;
 
-	if (ctrl->flags & IPROC_CLK_MCLK_DIV_BY_2)
-		clk->rate = parent_rate / (mdiv * 2);
-	else
-		clk->rate = parent_rate / mdiv;
+	clk->rate = parent_rate / mdiv;
 
 	return clk->rate;
 }
@@ -568,10 +543,7 @@ static int iproc_clk_set_rate(struct clk_hw *hw, unsigned long rate,
 	if (rate == 0 || parent_rate == 0)
 		return -EINVAL;
 
-	if (ctrl->flags & IPROC_CLK_MCLK_DIV_BY_2)
-		div = DIV_ROUND_UP(parent_rate, rate * 2);
-	else
-		div = DIV_ROUND_UP(parent_rate, rate);
+	div = DIV_ROUND_UP(parent_rate, rate);
 	if (div > 256)
 		return -EINVAL;
 
@@ -583,10 +555,7 @@ static int iproc_clk_set_rate(struct clk_hw *hw, unsigned long rate,
 		val |= div << ctrl->mdiv.shift;
 	}
 	iproc_pll_write(pll, pll->control_base, ctrl->mdiv.offset, val);
-	if (ctrl->flags & IPROC_CLK_MCLK_DIV_BY_2)
-		clk->rate = parent_rate / (div * 2);
-	else
-		clk->rate = parent_rate / div;
+	clk->rate = parent_rate / div;
 
 	return 0;
 }
@@ -625,6 +594,7 @@ void __init iproc_pll_clk_setup(struct device_node *node,
 				unsigned int num_clks)
 {
 	int i, ret;
+	struct clk *clk;
 	struct iproc_pll *pll;
 	struct iproc_clk *iclk;
 	struct clk_init_data init;
@@ -637,11 +607,11 @@ void __init iproc_pll_clk_setup(struct device_node *node,
 	if (WARN_ON(!pll))
 		return;
 
-	pll->clk_data = kzalloc(sizeof(*pll->clk_data->hws) * num_clks +
-				sizeof(*pll->clk_data), GFP_KERNEL);
-	if (WARN_ON(!pll->clk_data))
+	pll->clk_data.clk_num = num_clks;
+	pll->clk_data.clks = kcalloc(num_clks, sizeof(*pll->clk_data.clks),
+				     GFP_KERNEL);
+	if (WARN_ON(!pll->clk_data.clks))
 		goto err_clk_data;
-	pll->clk_data->num = num_clks;
 
 	pll->clks = kcalloc(num_clks, sizeof(*pll->clks), GFP_KERNEL);
 	if (WARN_ON(!pll->clks))
@@ -693,11 +663,11 @@ void __init iproc_pll_clk_setup(struct device_node *node,
 
 	iproc_pll_sw_cfg(pll);
 
-	ret = clk_hw_register(NULL, &iclk->hw);
-	if (WARN_ON(ret))
+	clk = clk_register(NULL, &iclk->hw);
+	if (WARN_ON(IS_ERR(clk)))
 		goto err_pll_register;
 
-	pll->clk_data->hws[0] = &iclk->hw;
+	pll->clk_data.clks[0] = clk;
 
 	/* now initialize and register all leaf clocks */
 	for (i = 1; i < num_clks; i++) {
@@ -723,23 +693,22 @@ void __init iproc_pll_clk_setup(struct device_node *node,
 		init.num_parents = (parent_name ? 1 : 0);
 		iclk->hw.init = &init;
 
-		ret = clk_hw_register(NULL, &iclk->hw);
-		if (WARN_ON(ret))
+		clk = clk_register(NULL, &iclk->hw);
+		if (WARN_ON(IS_ERR(clk)))
 			goto err_clk_register;
 
-		pll->clk_data->hws[i] = &iclk->hw;
+		pll->clk_data.clks[i] = clk;
 	}
 
-	ret = of_clk_add_hw_provider(node, of_clk_hw_onecell_get,
-				     pll->clk_data);
+	ret = of_clk_add_provider(node, of_clk_src_onecell_get, &pll->clk_data);
 	if (WARN_ON(ret))
 		goto err_clk_register;
 
 	return;
 
 err_clk_register:
-	while (--i >= 0)
-		clk_hw_unregister(pll->clk_data->hws[i]);
+	for (i = 0; i < num_clks; i++)
+		clk_unregister(pll->clk_data.clks[i]);
 
 err_pll_register:
 	if (pll->status_base != pll->control_base)
@@ -759,7 +728,7 @@ err_pll_iomap:
 	kfree(pll->clks);
 
 err_clks:
-	kfree(pll->clk_data);
+	kfree(pll->clk_data.clks);
 
 err_clk_data:
 	kfree(pll);

@@ -65,6 +65,8 @@ static inline int kbd_defleds(void)
 
 #define KBD_DEFLOCK 0
 
+#define KBD_LOCKSTATE_OFFSET 8
+
 /*
  * Handler Tables.
  */
@@ -121,6 +123,7 @@ static const int NR_TYPES = ARRAY_SIZE(max_vals);
 static struct input_handler kbd_handler;
 static DEFINE_SPINLOCK(kbd_event_lock);
 static DEFINE_SPINLOCK(led_lock);
+static DEFINE_SPINLOCK(func_buf_lock); /* guard 'func_buf'  and friends */
 static unsigned long key_down[BITS_TO_LONGS(KEY_CNT)];	/* keyboard key bitmap */
 static unsigned char shift_down[NR_SHIFT];		/* shift state counters.. */
 static bool dead_key_next;
@@ -132,6 +135,10 @@ static int shift_state = 0;
 
 static unsigned int ledstate = -1U;			/* undefined */
 static unsigned char ledioctl;
+static bool caps_as_controlllock;
+static bool task_caps_as_controlllock;
+
+static int saved_cur_kbd_console = -1;
 
 /*
  * Notifier list for console keyboard events
@@ -567,7 +574,7 @@ static void fn_scroll_forw(struct vc_data *vc)
 
 static void fn_scroll_back(struct vc_data *vc)
 {
-	scrollback(vc);
+	scrollback(vc, 0);
 }
 
 static void fn_show_mem(struct vc_data *vc)
@@ -979,7 +986,7 @@ static void kbd_led_trigger_activate(struct led_classdev *cdev)
 	}
 
 #define KBD_LOCKSTATE_TRIGGER(_led_bit, _name)		\
-	KBD_LED_TRIGGER((_led_bit) + 8, _name)
+	KBD_LED_TRIGGER((_led_bit) + KBD_LOCKSTATE_OFFSET, _name)
 
 static struct kbd_led_trigger kbd_led_triggers[] = {
 	KBD_LED_TRIGGER(VC_SCROLLOCK, "kbd-scrolllock"),
@@ -1003,6 +1010,18 @@ static void kbd_propagate_led_state(unsigned int old_state,
 	struct kbd_led_trigger *trigger;
 	unsigned int changed = old_state ^ new_state;
 	int i;
+
+	/*
+	 * special case where user space uses its own caps lock implementation
+	 * through ControlL_Lock.
+	 */
+	if (task_caps_as_controlllock) {
+		trigger = &kbd_led_triggers[VC_CAPSLOCK];
+		trigger->mask |= BIT(VC_CTRLLLOCK) << KBD_LOCKSTATE_OFFSET;
+	} else {
+		trigger = &kbd_led_triggers[VC_CAPSLOCK];
+		trigger->mask &= ~(BIT(VC_CTRLLLOCK) << KBD_LOCKSTATE_OFFSET);
+	}
 
 	for (i = 0; i < ARRAY_SIZE(kbd_led_triggers); i++) {
 		trigger = &kbd_led_triggers[i];
@@ -1044,9 +1063,9 @@ static int kbd_update_leds_helper(struct input_handle *handle, void *data)
 	unsigned int leds = *(unsigned int *)data;
 
 	if (test_bit(EV_LED, handle->dev->evbit)) {
-		input_inject_event(handle, EV_LED, LED_SCROLLL, !!(leds & 0x01));
-		input_inject_event(handle, EV_LED, LED_NUML,    !!(leds & 0x02));
-		input_inject_event(handle, EV_LED, LED_CAPSL,   !!(leds & 0x04));
+		input_inject_event(handle, EV_LED, LED_SCROLLL, !!(leds & BIT(VC_SCROLLOCK)));
+		input_inject_event(handle, EV_LED, LED_NUML,    !!(leds & BIT(VC_NUMLOCK)));
+		input_inject_event(handle, EV_LED, LED_CAPSL,   !!(leds & BIT(VC_CAPSLOCK)));
 		input_inject_event(handle, EV_SYN, SYN_REPORT, 0);
 	}
 
@@ -1188,7 +1207,8 @@ static void kbd_bh(unsigned long dummy)
 
 	spin_lock_irqsave(&led_lock, flags);
 	leds = getleds();
-	leds |= (unsigned int)kbd->lockstate << 8;
+	leds |= (unsigned int)kbd->lockstate << KBD_LOCKSTATE_OFFSET;
+	task_caps_as_controlllock = caps_as_controlllock;
 	spin_unlock_irqrestore(&led_lock, flags);
 
 	if (leds != ledstate) {
@@ -1456,6 +1476,12 @@ static void kbd_event(struct input_handle *handle, unsigned int event_type,
 {
 	/* We are called with interrupts disabled, just take the lock */
 	spin_lock(&kbd_event_lock);
+
+	/* reset the led state on console switch */
+	if (saved_cur_kbd_console != fg_console) {
+		ledstate = -1U;
+		saved_cur_kbd_console = fg_console;
+	}
 
 	if (event_type == EV_MSC && event_code == MSC_RAW && HW_RAW(handle->dev))
 		kbd_rawcode(value);
@@ -1939,6 +1965,18 @@ int vt_do_kdsk_ioctl(int cmd, struct kbentry __user *user_kbe, int perm,
 			spin_unlock_irqrestore(&kbd_event_lock, flags);
 			return -EPERM;
 		}
+
+		/*
+		 * See https://bugzilla.kernel.org/show_bug.cgi?id=7746#c24
+		 *
+		 * The kernel can't properly deal with all keymaps/capslock
+		 * interactions, so userspace (ckbcomp) may use ControlL_Lock
+		 * as a replacement for Caps_Lock.
+		 * It works but breaks the LED, so mark it there that we need
+		 * to forward proper Caps Lock LED on K_CTRLLLOCK.
+		 */
+		if (i == KEY_CAPSLOCK)
+			caps_as_controlllock = (v == K_CTRLLLOCK);
 		key_map[i] = U(v);
 		if (!s && (KTYP(ov) == KT_SHIFT || KTYP(v) == KT_SHIFT))
 			do_compute_shiftstate();
@@ -1959,11 +1997,12 @@ int vt_do_kdgkb_ioctl(int cmd, struct kbsentry __user *user_kdgkb, int perm)
 	char *p;
 	u_char *q;
 	u_char __user *up;
-	int sz;
+	int sz, fnw_sz;
 	int delta;
 	char *first_free, *fj, *fnw;
 	int i, j, k;
 	int ret;
+	unsigned long flags;
 
 	if (!capable(CAP_SYS_TTY_CONFIG))
 		perm = 0;
@@ -2006,7 +2045,14 @@ int vt_do_kdgkb_ioctl(int cmd, struct kbsentry __user *user_kdgkb, int perm)
 			goto reterr;
 		}
 
+		fnw = NULL;
+		fnw_sz = 0;
+		/* race aginst other writers */
+		again:
+		spin_lock_irqsave(&func_buf_lock, flags);
 		q = func_table[i];
+
+		/* fj pointer to next entry after 'q' */
 		first_free = funcbufptr + (funcbufsize - funcbufleft);
 		for (j = i+1; j < MAX_NR_FUNC && !func_table[j]; j++)
 			;
@@ -2014,10 +2060,12 @@ int vt_do_kdgkb_ioctl(int cmd, struct kbsentry __user *user_kdgkb, int perm)
 			fj = func_table[j];
 		else
 			fj = first_free;
-
+		/* buffer usage increase by new entry */
 		delta = (q ? -strlen(q) : 1) + strlen(kbs->kb_string);
+
 		if (delta <= funcbufleft) { 	/* it fits in current buf */
 		    if (j < MAX_NR_FUNC) {
+			/* make enough space for new entry at 'fj' */
 			memmove(fj + delta, fj, first_free - fj);
 			for (k = j; k < MAX_NR_FUNC; k++)
 			    if (func_table[k])
@@ -2030,20 +2078,28 @@ int vt_do_kdgkb_ioctl(int cmd, struct kbsentry __user *user_kdgkb, int perm)
 		    sz = 256;
 		    while (sz < funcbufsize - funcbufleft + delta)
 		      sz <<= 1;
-		    fnw = kmalloc(sz, GFP_KERNEL);
-		    if(!fnw) {
-		      ret = -ENOMEM;
-		      goto reterr;
+		    if (fnw_sz != sz) {
+		      spin_unlock_irqrestore(&func_buf_lock, flags);
+		      kfree(fnw);
+		      fnw = kmalloc(sz, GFP_KERNEL);
+		      fnw_sz = sz;
+		      if (!fnw) {
+			ret = -ENOMEM;
+			goto reterr;
+		      }
+		      goto again;
 		    }
 
 		    if (!q)
 		      func_table[i] = fj;
+		    /* copy data before insertion point to new location */
 		    if (fj > funcbufptr)
 			memmove(fnw, funcbufptr, fj - funcbufptr);
 		    for (k = 0; k < j; k++)
 		      if (func_table[k])
 			func_table[k] = fnw + (func_table[k] - funcbufptr);
 
+		    /* copy data after insertion point to new location */
 		    if (first_free > fj) {
 			memmove(fnw + (fj - funcbufptr) + delta, fj, first_free - fj);
 			for (k = j; k < MAX_NR_FUNC; k++)
@@ -2056,7 +2112,9 @@ int vt_do_kdgkb_ioctl(int cmd, struct kbsentry __user *user_kdgkb, int perm)
 		    funcbufleft = funcbufleft - delta + sz - funcbufsize;
 		    funcbufsize = sz;
 		}
+		/* finally insert item itself */
 		strcpy(func_table[i], kbs->kb_string);
+		spin_unlock_irqrestore(&func_buf_lock, flags);
 		break;
 	}
 	ret = 0;

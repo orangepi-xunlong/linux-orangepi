@@ -94,13 +94,10 @@ static ssize_t sth_stm_packet(struct stm_data *stm_data, unsigned int master,
 	case STP_PACKET_TRIG:
 		if (flags & STP_PACKET_TIMESTAMPED)
 			reg += 4;
-		writeb_relaxed(*payload, sth->base + reg);
+		iowrite8(*payload, sth->base + reg);
 		break;
 
 	case STP_PACKET_MERR:
-		if (size > 4)
-			size = 4;
-
 		sth_iowrite(&out->MERR, payload, size);
 		break;
 
@@ -110,8 +107,8 @@ static ssize_t sth_stm_packet(struct stm_data *stm_data, unsigned int master,
 		else
 			outp = (u64 __iomem *)&out->FLAG;
 
-		size = 0;
-		writeb_relaxed(0, outp);
+		size = 1;
+		sth_iowrite(outp, payload, size);
 		break;
 
 	case STP_PACKET_USER:
@@ -132,8 +129,6 @@ static ssize_t sth_stm_packet(struct stm_data *stm_data, unsigned int master,
 
 		sth_iowrite(outp, payload, size);
 		break;
-	default:
-		return -ENOTSUPP;
 	}
 
 	return size;

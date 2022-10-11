@@ -180,4 +180,4 @@ static int __init isa_bus_init(void)
 	return error;
 }
 
-postcore_initcall(isa_bus_init);
+device_initcall(isa_bus_init);

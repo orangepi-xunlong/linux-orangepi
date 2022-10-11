@@ -94,7 +94,6 @@
 #define H_SG_LIST	-72
 #define H_OP_MODE	-73
 #define H_COP_HW	-74
-#define H_STATE		-75
 #define H_UNSUPPORTED_FLAG_START	-256
 #define H_UNSUPPORTED_FLAG_END		-511
 #define H_MULTI_THREADS_ACTIVE	-9005
@@ -260,16 +259,11 @@
 #define H_DEL_CONN		0x288
 #define H_JOIN			0x298
 #define H_VASI_STATE            0x2A4
-#define H_VIOCTL		0x2A8
 #define H_ENABLE_CRQ		0x2B0
 #define H_GET_EM_PARMS		0x2B8
 #define H_SET_MPP		0x2D0
 #define H_GET_MPP		0x2D4
-#define H_REG_SUB_CRQ		0x2DC
 #define H_HOME_NODE_ASSOCIATIVITY 0x2EC
-#define H_FREE_SUB_CRQ		0x2E0
-#define H_SEND_SUB_CRQ		0x2E4
-#define H_SEND_SUB_CRQ_INDIRECT	0x2E8
 #define H_BEST_ENERGY		0x2F4
 #define H_XIRR_X		0x2FC
 #define H_RANDOM		0x300
@@ -277,21 +271,6 @@
 #define H_GET_MPP_X		0x314
 #define H_SET_MODE		0x31C
 #define MAX_HCALL_OPCODE	H_SET_MODE
-
-/* H_VIOCTL functions */
-#define H_GET_VIOA_DUMP_SIZE	0x01
-#define H_GET_VIOA_DUMP		0x02
-#define H_GET_ILLAN_NUM_VLAN_IDS 0x03
-#define H_GET_ILLAN_VLAN_ID_LIST 0x04
-#define H_GET_ILLAN_SWITCH_ID	0x05
-#define H_DISABLE_MIGRATION	0x06
-#define H_ENABLE_MIGRATION	0x07
-#define H_GET_PARTNER_INFO	0x08
-#define H_GET_PARTNER_WWPN_LIST	0x09
-#define H_DISABLE_ALL_VIO_INTS	0x0A
-#define H_DISABLE_VIO_INTERRUPT	0x0B
-#define H_ENABLE_VIO_INTERRUPT	0x0C
-
 
 /* Platform specific hcalls, used by KVM */
 #define H_RTAS			0xf000
@@ -316,10 +295,12 @@
 #define H_CPU_CHAR_BRANCH_HINTS_HONORED	(1ull << 58) // IBM bit 5
 #define H_CPU_CHAR_THREAD_RECONFIG_CTRL	(1ull << 57) // IBM bit 6
 #define H_CPU_CHAR_COUNT_CACHE_DISABLED	(1ull << 56) // IBM bit 7
+#define H_CPU_CHAR_BCCTR_FLUSH_ASSIST	(1ull << 54) // IBM bit 9
 
 #define H_CPU_BEHAV_FAVOUR_SECURITY	(1ull << 63) // IBM bit 0
 #define H_CPU_BEHAV_L1D_FLUSH_PR	(1ull << 62) // IBM bit 1
 #define H_CPU_BEHAV_BNDS_CHK_SPEC_BAR	(1ull << 61) // IBM bit 2
+#define H_CPU_BEHAV_FLUSH_COUNT_CACHE	(1ull << 58) // IBM bit 5
 
 #ifndef __ASSEMBLY__
 #include <linux/types.h>
@@ -447,6 +428,17 @@ static inline unsigned long cmo_get_page_size(void)
 {
 	return CMO_PageSize;
 }
+
+extern long pSeries_enable_reloc_on_exc(void);
+extern long pSeries_disable_reloc_on_exc(void);
+
+extern long pseries_big_endian_exceptions(void);
+
+#else
+
+#define pSeries_enable_reloc_on_exc()  do {} while (0)
+#define pSeries_disable_reloc_on_exc() do {} while (0)
+
 #endif /* CONFIG_PPC_PSERIES */
 
 struct h_cpu_char_result {

@@ -61,12 +61,12 @@ bool acpi_ata_match(acpi_handle handle);
 bool acpi_bay_match(acpi_handle handle);
 bool acpi_dock_match(acpi_handle handle);
 
-bool acpi_check_dsm(acpi_handle handle, const u8 *uuid, u64 rev, u64 funcs);
+bool acpi_check_dsm(acpi_handle handle, const u8 *uuid, int rev, u64 funcs);
 union acpi_object *acpi_evaluate_dsm(acpi_handle handle, const u8 *uuid,
-			u64 rev, u64 func, union acpi_object *argv4);
+			int rev, int func, union acpi_object *argv4);
 
 static inline union acpi_object *
-acpi_evaluate_dsm_typed(acpi_handle handle, const u8 *uuid, u64 rev, u64 func,
+acpi_evaluate_dsm_typed(acpi_handle handle, const u8 *uuid, int rev, int func,
 			union acpi_object *argv4, acpi_object_type type)
 {
 	union acpi_object *obj;
@@ -86,8 +86,6 @@ acpi_evaluate_dsm_typed(acpi_handle handle, const u8 *uuid, u64 rev, u64 func,
 	  .package.count = (cnt),			\
 	  .package.elements = (eles)			\
 	}
-
-bool acpi_dev_found(const char *hid);
 
 #ifdef CONFIG_ACPI
 
@@ -640,9 +638,7 @@ static inline bool acpi_device_can_wakeup(struct acpi_device *adev)
 
 static inline bool acpi_device_can_poweroff(struct acpi_device *adev)
 {
-	return adev->power.states[ACPI_STATE_D3_COLD].flags.valid ||
-		((acpi_gbl_FADT.header.revision < 6) &&
-		adev->power.states[ACPI_STATE_D3_HOT].flags.explicit_set);
+	return adev->power.states[ACPI_STATE_D3_COLD].flags.valid;
 }
 
 #else	/* CONFIG_ACPI */

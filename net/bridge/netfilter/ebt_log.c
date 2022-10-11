@@ -36,12 +36,14 @@ static int ebt_log_tg_check(const struct xt_tgchk_param *par)
 	return 0;
 }
 
-struct tcpudphdr {
+struct tcpudphdr
+{
 	__be16 src;
 	__be16 dst;
 };
 
-struct arppayload {
+struct arppayload
+{
 	unsigned char mac_src[ETH_ALEN];
 	unsigned char ip_src[4];
 	unsigned char mac_dst[ETH_ALEN];
@@ -91,7 +93,7 @@ ebt_log_packet(struct net *net, u_int8_t pf, unsigned int hooknum,
 	if (loginfo->type == NF_LOG_TYPE_LOG)
 		bitmask = loginfo->u.log.logflags;
 	else
-		bitmask = NF_LOG_DEFAULT_MASK;
+		bitmask = NF_LOG_MASK;
 
 	if ((bitmask & EBT_LOG_IP) && eth_hdr(skb)->h_proto ==
 	   htons(ETH_P_IP)) {
@@ -150,8 +152,7 @@ ebt_log_packet(struct net *net, u_int8_t pf, unsigned int hooknum,
 		       ntohs(ah->ar_op));
 
 		/* If it's for Ethernet and the lengths are OK,
-		 * then log the ARP payload
-		 */
+		 * then log the ARP payload */
 		if (ah->ar_hrd == htons(1) &&
 		    ah->ar_hln == ETH_ALEN &&
 		    ah->ar_pln == sizeof(__be32)) {

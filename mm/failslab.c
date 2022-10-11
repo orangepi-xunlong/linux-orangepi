@@ -1,7 +1,5 @@
 #include <linux/fault-inject.h>
 #include <linux/slab.h>
-#include <linux/mm.h>
-#include "slab.h"
 
 static struct {
 	struct fault_attr attr;
@@ -13,22 +11,18 @@ static struct {
 	.cache_filter = false,
 };
 
-bool should_failslab(struct kmem_cache *s, gfp_t gfpflags)
+bool should_failslab(size_t size, gfp_t gfpflags, unsigned long cache_flags)
 {
-	/* No fault-injection for bootstrap cache */
-	if (unlikely(s == kmem_cache))
-		return false;
-
 	if (gfpflags & __GFP_NOFAIL)
 		return false;
 
 	if (failslab.ignore_gfp_reclaim && (gfpflags & __GFP_RECLAIM))
 		return false;
 
-	if (failslab.cache_filter && !(s->flags & SLAB_FAILSLAB))
+	if (failslab.cache_filter && !(cache_flags & SLAB_FAILSLAB))
 		return false;
 
-	return should_fail(&failslab.attr, s->object_size);
+	return should_fail(&failslab.attr, size);
 }
 
 static int __init setup_failslab(char *str)

@@ -39,8 +39,7 @@ static int amdgpu_benchmark_do_move(struct amdgpu_device *adev, unsigned size,
 	start_jiffies = jiffies;
 	for (i = 0; i < n; i++) {
 		struct amdgpu_ring *ring = adev->mman.buffer_funcs_ring;
-		r = amdgpu_copy_buffer(ring, saddr, daddr, size, NULL, &fence,
-				       false);
+		r = amdgpu_copy_buffer(ring, saddr, daddr, size, NULL, &fence);
 		if (r)
 			goto exit_do_move;
 		r = fence_wait(fence, false);
@@ -142,7 +141,7 @@ out_cleanup:
 void amdgpu_benchmark(struct amdgpu_device *adev, int test_number)
 {
 	int i;
-	static const int common_modes[AMDGPU_BENCHMARK_COMMON_MODES_N] = {
+	int common_modes[AMDGPU_BENCHMARK_COMMON_MODES_N] = {
 		640 * 480 * 4,
 		720 * 480 * 4,
 		800 * 600 * 4,

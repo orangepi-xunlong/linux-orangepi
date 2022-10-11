@@ -33,8 +33,6 @@ enum dev_dma_attr {
 	DEV_DMA_COHERENT,
 };
 
-struct fwnode_handle *dev_fwnode(struct device *dev);
-
 bool device_property_present(struct device *dev, const char *propname);
 int device_property_read_u8_array(struct device *dev, const char *propname,
 				  u8 *val, size_t nval);
@@ -51,6 +49,9 @@ int device_property_read_string(struct device *dev, const char *propname,
 int device_property_match_string(struct device *dev,
 				 const char *propname, const char *string);
 
+struct fwnode_handle *dev_fwnode(struct device *dev);
+
+bool fwnode_device_is_available(struct fwnode_handle *fwnode);
 bool fwnode_property_present(struct fwnode_handle *fwnode, const char *propname);
 int fwnode_property_read_u8_array(struct fwnode_handle *fwnode,
 				  const char *propname, u8 *val,
@@ -71,6 +72,19 @@ int fwnode_property_read_string(struct fwnode_handle *fwnode,
 				const char *propname, const char **val);
 int fwnode_property_match_string(struct fwnode_handle *fwnode,
 				 const char *propname, const char *string);
+int fwnode_property_get_reference_args(struct fwnode_handle *fwnode,
+				       const char *prop, const char *nargs_prop,
+				       unsigned int nargs, unsigned int index,
+				       struct fwnode_reference_args *args);
+
+struct fwnode_handle *fwnode_get_parent(struct fwnode_handle *fwnode);
+struct fwnode_handle *fwnode_get_next_parent(struct fwnode_handle *fwnode);
+struct fwnode_handle *fwnode_get_next_child_node(struct fwnode_handle *fwnode,
+						 struct fwnode_handle *child);
+
+#define fwnode_for_each_child_node(fwnode, child)			\
+	for (child = fwnode_get_next_child_node(fwnode, NULL); child;	\
+	     child = fwnode_get_next_child_node(fwnode, child))
 
 struct fwnode_handle *device_get_next_child_node(struct device *dev,
 						 struct fwnode_handle *child);
@@ -79,9 +93,12 @@ struct fwnode_handle *device_get_next_child_node(struct device *dev,
 	for (child = device_get_next_child_node(dev, NULL); child;	\
 	     child = device_get_next_child_node(dev, child))
 
+struct fwnode_handle *fwnode_get_named_child_node(struct fwnode_handle *fwnode,
+						  const char *childname);
 struct fwnode_handle *device_get_named_child_node(struct device *dev,
 						  const char *childname);
 
+void fwnode_handle_get(struct fwnode_handle *fwnode);
 void fwnode_handle_put(struct fwnode_handle *fwnode);
 
 unsigned int device_get_child_node_count(struct device *dev);
@@ -180,72 +197,18 @@ struct property_entry {
 	};
 };
 
-/*
- * Note: the below four initializers for the anonymous union are carefully
- * crafted to avoid gcc-4.4.4's problems with initialization of anon unions
- * and structs.
+/**
+ * struct property_set - Collection of "built-in" device properties.
+ * @fwnode: Handle to be pointed to by the fwnode field of struct device.
+ * @properties: Array of properties terminated with a null entry.
  */
+struct property_set {
+	struct fwnode_handle fwnode;
+	struct property_entry *properties;
+};
 
-#define PROPERTY_ENTRY_INTEGER_ARRAY(_name_, _type_, _val_)	\
-(struct property_entry) {					\
-	.name = _name_,						\
-	.length = ARRAY_SIZE(_val_) * sizeof(_type_),		\
-	.is_array = true,					\
-	.is_string = false,					\
-	{ .pointer = { ._type_##_data = _val_ } },		\
-}
-
-#define PROPERTY_ENTRY_U8_ARRAY(_name_, _val_)			\
-	PROPERTY_ENTRY_INTEGER_ARRAY(_name_, u8, _val_)
-#define PROPERTY_ENTRY_U16_ARRAY(_name_, _val_)			\
-	PROPERTY_ENTRY_INTEGER_ARRAY(_name_, u16, _val_)
-#define PROPERTY_ENTRY_U32_ARRAY(_name_, _val_)			\
-	PROPERTY_ENTRY_INTEGER_ARRAY(_name_, u32, _val_)
-#define PROPERTY_ENTRY_U64_ARRAY(_name_, _val_)			\
-	PROPERTY_ENTRY_INTEGER_ARRAY(_name_, u64, _val_)
-
-#define PROPERTY_ENTRY_STRING_ARRAY(_name_, _val_)		\
-(struct property_entry) {					\
-	.name = _name_,						\
-	.length = ARRAY_SIZE(_val_) * sizeof(const char *),	\
-	.is_array = true,					\
-	.is_string = true,					\
-	{ .pointer = { .str = _val_ } },			\
-}
-
-#define PROPERTY_ENTRY_INTEGER(_name_, _type_, _val_)	\
-(struct property_entry) {				\
-	.name = _name_,					\
-	.length = sizeof(_type_),			\
-	.is_string = false,				\
-	{ .value = { ._type_##_data = _val_ } },	\
-}
-
-#define PROPERTY_ENTRY_U8(_name_, _val_)		\
-	PROPERTY_ENTRY_INTEGER(_name_, u8, _val_)
-#define PROPERTY_ENTRY_U16(_name_, _val_)		\
-	PROPERTY_ENTRY_INTEGER(_name_, u16, _val_)
-#define PROPERTY_ENTRY_U32(_name_, _val_)		\
-	PROPERTY_ENTRY_INTEGER(_name_, u32, _val_)
-#define PROPERTY_ENTRY_U64(_name_, _val_)		\
-	PROPERTY_ENTRY_INTEGER(_name_, u64, _val_)
-
-#define PROPERTY_ENTRY_STRING(_name_, _val_)		\
-(struct property_entry) {				\
-	.name = _name_,					\
-	.length = sizeof(_val_),			\
-	.is_string = true,				\
-	{ .value = { .str = _val_ } },			\
-}
-
-#define PROPERTY_ENTRY_BOOL(_name_)		\
-(struct property_entry) {			\
-	.name = _name_,				\
-}
-
-int device_add_properties(struct device *dev,
-			  struct property_entry *properties);
-void device_remove_properties(struct device *dev);
+int device_add_property_set(struct device *dev, const struct property_set *pset);
+void device_remove_property_set(struct device *dev);
 
 bool device_dma_supported(struct device *dev);
 
@@ -254,5 +217,21 @@ enum dev_dma_attr device_get_dma_attr(struct device *dev);
 int device_get_phy_mode(struct device *dev);
 
 void *device_get_mac_address(struct device *dev, char *addr, int alen);
+
+struct fwnode_handle *fwnode_graph_get_next_endpoint(
+	struct fwnode_handle *fwnode, struct fwnode_handle *prev);
+struct fwnode_handle *
+fwnode_graph_get_port_parent(struct fwnode_handle *fwnode);
+struct fwnode_handle *fwnode_graph_get_remote_port_parent(
+	struct fwnode_handle *fwnode);
+struct fwnode_handle *fwnode_graph_get_remote_port(
+	struct fwnode_handle *fwnode);
+struct fwnode_handle *fwnode_graph_get_remote_endpoint(
+	struct fwnode_handle *fwnode);
+struct fwnode_handle *fwnode_graph_get_remote_node(struct fwnode_handle *fwnode,
+						   u32 port, u32 endpoint);
+
+int fwnode_graph_parse_endpoint(struct fwnode_handle *fwnode,
+				struct fwnode_endpoint *endpoint);
 
 #endif /* _LINUX_PROPERTY_H_ */

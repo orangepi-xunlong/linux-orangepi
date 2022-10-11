@@ -39,11 +39,7 @@ uvc_send_response(struct uvc_device *uvc, struct uvc_request_data *data)
 	struct usb_request *req = uvc->control_req;
 
 	if (data->length < 0)
-#if IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
-		return 0;
-#else
 		return usb_ep_set_halt(cdev->gadget->ep0);
-#endif
 
 	req->length = min_t(unsigned int, uvc->event_length, data->length);
 	req->zero = data->length < uvc->event_length;
@@ -64,9 +60,7 @@ struct uvc_format
 };
 
 static struct uvc_format uvc_formats[] = {
-#if !IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
 	{ 16, V4L2_PIX_FMT_YUYV  },
-#endif
 	{ 0,  V4L2_PIX_FMT_MJPEG },
 };
 
@@ -213,11 +207,21 @@ uvc_v4l2_streamon(struct file *file, void *fh, enum v4l2_buf_type type)
 		return ret;
 
 	/*
-	 * Complete the alternate setting selection setup phase now that
-	 * userspace is ready to provide video frames.
+	 * Alt settings in an interface are supported only
+	 * for ISOC endpoints as there are different alt-
+	 * settings for zero-bandwidth and full-bandwidth
+	 * cases, but the same is not true for BULK endpoints,
+	 * as they have a single alt-setting.
 	 */
-	uvc_function_setup_continue(uvc);
-	uvc->state = UVC_STATE_STREAMING;
+	if (!usb_endpoint_xfer_bulk(video->ep->desc)) {
+		/*
+		 * Complete the alternate setting selection
+		 * setup phase now that userspace is ready
+		 * to provide video frames.
+		 */
+		uvc_function_setup_continue(uvc);
+		uvc->state = UVC_STATE_STREAMING;
+	}
 
 	return 0;
 }
@@ -304,25 +308,20 @@ uvc_v4l2_open(struct file *file)
 	handle->device = &uvc->video;
 	file->private_data = &handle->vfh;
 
-#if !IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
 	uvc_function_connect(uvc);
-#endif
 	return 0;
 }
 
 static int
 uvc_v4l2_release(struct file *file)
 {
-#if !IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
 	struct video_device *vdev = video_devdata(file);
 	struct uvc_device *uvc = video_get_drvdata(vdev);
-#endif
 	struct uvc_file_handle *handle = to_uvc_file_handle(file->private_data);
 	struct uvc_video *video = handle->device;
 
-#if !IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
 	uvc_function_disconnect(uvc);
-#endif
+
 	mutex_lock(&video->mutex);
 	uvcg_video_enable(video, 0);
 	uvcg_free_buffers(&video->queue);
@@ -371,6 +370,9 @@ struct v4l2_file_operations uvc_v4l2_fops = {
 	.open		= uvc_v4l2_open,
 	.release	= uvc_v4l2_release,
 	.unlocked_ioctl	= video_ioctl2,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl32	= video_ioctl2,
+#endif
 	.mmap		= uvc_v4l2_mmap,
 	.poll		= uvc_v4l2_poll,
 #ifndef CONFIG_MMU

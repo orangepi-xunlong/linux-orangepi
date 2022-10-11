@@ -217,7 +217,7 @@ static struct clk *crg11_get(struct of_phandle_args *clkspec, void *data)
 	init.name = clkp;
 	init.num_parents = 0;
 	init.ops = &crg_port_ops;
-	init.flags = 0;
+	init.flags = CLK_IS_ROOT;
 	crgclk->hw.init = &init;
 	crgclk->cntrlr = cntrlr;
 	crgclk->domain = domain;
@@ -327,11 +327,10 @@ static struct clk_ops clk_clc_ops = {
 	.set_rate = clc_set_rate,
 };
 
-static struct clk_hw *mb86s7x_clclk_register(struct device *cpu_dev)
+struct clk *mb86s7x_clclk_register(struct device *cpu_dev)
 {
 	struct clk_init_data init;
 	struct cl_clk *clc;
-	int ret;
 
 	clc = kzalloc(sizeof(*clc), GFP_KERNEL);
 	if (!clc)
@@ -342,20 +341,17 @@ static struct clk_hw *mb86s7x_clclk_register(struct device *cpu_dev)
 
 	init.name = dev_name(cpu_dev);
 	init.ops = &clk_clc_ops;
-	init.flags = CLK_GET_RATE_NOCACHE;
+	init.flags = CLK_IS_ROOT | CLK_GET_RATE_NOCACHE;
 	init.num_parents = 0;
 
-	ret = devm_clk_hw_register(cpu_dev, &clc->hw);
-	if (ret)
-		return ERR_PTR(ret);
-	return &clc->hw;
+	return devm_clk_register(cpu_dev, &clc->hw);
 }
 
 static int mb86s7x_clclk_of_init(void)
 {
 	int cpu, ret = -ENODEV;
 	struct device_node *np;
-	struct clk_hw *hw;
+	struct clk *clk;
 
 	np = of_find_compatible_node(NULL, NULL, "fujitsu,mb86s70-scb-1.0");
 	if (!np || !of_device_is_available(np))
@@ -369,12 +365,12 @@ static int mb86s7x_clclk_of_init(void)
 			continue;
 		}
 
-		hw = mb86s7x_clclk_register(cpu_dev);
-		if (IS_ERR(hw)) {
+		clk = mb86s7x_clclk_register(cpu_dev);
+		if (IS_ERR(clk)) {
 			pr_err("failed to register cpu%d clock\n", cpu);
 			continue;
 		}
-		if (clk_hw_register_clkdev(hw, NULL, dev_name(cpu_dev))) {
+		if (clk_register_clkdev(clk, NULL, dev_name(cpu_dev))) {
 			pr_err("failed to register cpu%d clock lookup\n", cpu);
 			continue;
 		}

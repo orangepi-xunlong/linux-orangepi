@@ -20,6 +20,8 @@
 #include <asm/hardware/cache-l2x0.h>
 #include <asm/suspend.h>
 
+#include <mach/map.h>
+
 #include "common.h"
 #include "smc.h"
 
@@ -41,9 +43,9 @@ static int exynos_do_idle(unsigned long mode)
 	case FW_DO_IDLE_AFTR:
 		if (read_cpuid_part() == ARM_CPU_PART_CORTEX_A9)
 			exynos_save_cp15();
-		writel_relaxed(virt_to_phys(exynos_cpu_resume_ns),
-			       sysram_ns_base_addr + 0x24);
-		writel_relaxed(EXYNOS_AFTR_MAGIC, sysram_ns_base_addr + 0x20);
+		__raw_writel(virt_to_phys(exynos_cpu_resume_ns),
+			     sysram_ns_base_addr + 0x24);
+		__raw_writel(EXYNOS_AFTR_MAGIC, sysram_ns_base_addr + 0x20);
 		if (soc_is_exynos3250()) {
 			flush_cache_all();
 			exynos_smc(SMC_CMD_SAVE, OP_TYPE_CORE,
@@ -97,7 +99,7 @@ static int exynos_set_cpu_boot_addr(int cpu, unsigned long boot_addr)
 	if (soc_is_exynos4412())
 		boot_reg += 4 * cpu;
 
-	writel_relaxed(boot_addr, boot_reg);
+	__raw_writel(boot_addr, boot_reg);
 	return 0;
 }
 
@@ -113,7 +115,7 @@ static int exynos_get_cpu_boot_addr(int cpu, unsigned long *boot_addr)
 	if (soc_is_exynos4412())
 		boot_reg += 4 * cpu;
 
-	*boot_addr = readl_relaxed(boot_reg);
+	*boot_addr = __raw_readl(boot_reg);
 	return 0;
 }
 
@@ -205,6 +207,7 @@ void __init exynos_firmware_init(void)
 		return;
 
 	addr = of_get_address(nd, 0, NULL, NULL);
+	of_node_put(nd);
 	if (!addr) {
 		pr_err("%s: No address specified.\n", __func__);
 		return;
@@ -234,20 +237,20 @@ void exynos_set_boot_flag(unsigned int cpu, unsigned int mode)
 {
 	unsigned int tmp;
 
-	tmp = readl_relaxed(REG_CPU_STATE_ADDR + cpu * 4);
+	tmp = __raw_readl(REG_CPU_STATE_ADDR + cpu * 4);
 
 	if (mode & BOOT_MODE_MASK)
 		tmp &= ~BOOT_MODE_MASK;
 
 	tmp |= mode;
-	writel_relaxed(tmp, REG_CPU_STATE_ADDR + cpu * 4);
+	__raw_writel(tmp, REG_CPU_STATE_ADDR + cpu * 4);
 }
 
 void exynos_clear_boot_flag(unsigned int cpu, unsigned int mode)
 {
 	unsigned int tmp;
 
-	tmp = readl_relaxed(REG_CPU_STATE_ADDR + cpu * 4);
+	tmp = __raw_readl(REG_CPU_STATE_ADDR + cpu * 4);
 	tmp &= ~mode;
-	writel_relaxed(tmp, REG_CPU_STATE_ADDR + cpu * 4);
+	__raw_writel(tmp, REG_CPU_STATE_ADDR + cpu * 4);
 }

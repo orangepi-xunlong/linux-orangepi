@@ -51,6 +51,7 @@
 #endif
 
 #ifdef CONFIG_PPC_PMAC
+#include <asm/pci-bridge.h>
 #include <asm/prom.h>
 #include <asm/machdep.h>
 #include <asm/pmac_feature.h>
@@ -225,7 +226,7 @@ static void gem_put_cell(struct gem *gp)
 
 static inline void gem_netif_stop(struct gem *gp)
 {
-	netif_trans_update(gp->dev);	/* prevent tx timeout */
+	gp->dev->trans_start = jiffies;	/* prevent tx timeout */
 	napi_disable(&gp->napi);
 	netif_tx_disable(gp->dev);
 }

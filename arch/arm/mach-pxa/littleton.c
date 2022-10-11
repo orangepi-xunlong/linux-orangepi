@@ -41,11 +41,11 @@
 #include <asm/mach/map.h>
 #include <asm/mach/irq.h>
 
-#include "pxa300.h"
+#include <mach/pxa300.h>
 #include <linux/platform_data/video-pxafb.h>
 #include <linux/platform_data/mmc-pxamci.h>
 #include <linux/platform_data/keypad-pxa27x.h>
-#include "littleton.h"
+#include <mach/littleton.h>
 #include <linux/platform_data/mtd-nand-pxa3xx.h>
 
 #include "generic.h"
@@ -183,7 +183,7 @@ static struct pxafb_mach_info littleton_lcd_info = {
 	.lcd_conn		= LCD_COLOR_TFT_16BPP,
 };
 
-static void littleton_init_lcd(void)
+static void __init littleton_init_lcd(void)
 {
 	pxa_set_fb_info(NULL, &littleton_lcd_info);
 }

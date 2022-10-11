@@ -188,8 +188,7 @@ int smiapp_read_no_quirk(struct smiapp_sensor *sensor, u32 reg, u32 *val)
 				   SMIAPP_QUIRK_FLAG_8BIT_READ_ONLY));
 }
 
-static int smiapp_read_quirk(struct smiapp_sensor *sensor, u32 reg, u32 *val,
-			     bool force8)
+int smiapp_read(struct smiapp_sensor *sensor, u32 reg, u32 *val)
 {
 	int rval;
 
@@ -200,20 +199,21 @@ static int smiapp_read_quirk(struct smiapp_sensor *sensor, u32 reg, u32 *val,
 	if (rval < 0)
 		return rval;
 
-	if (force8)
-		return __smiapp_read(sensor, reg, val, true);
-
 	return smiapp_read_no_quirk(sensor, reg, val);
-}
-
-int smiapp_read(struct smiapp_sensor *sensor, u32 reg, u32 *val)
-{
-	return smiapp_read_quirk(sensor, reg, val, false);
 }
 
 int smiapp_read_8only(struct smiapp_sensor *sensor, u32 reg, u32 *val)
 {
-	return smiapp_read_quirk(sensor, reg, val, true);
+	int rval;
+
+	*val = 0;
+	rval = smiapp_call_quirk(sensor, reg_access, false, &reg, val);
+	if (rval == -ENOIOCTLCMD)
+		return 0;
+	if (rval < 0)
+		return rval;
+
+	return __smiapp_read(sensor, reg, val, true);
 }
 
 int smiapp_write_no_quirk(struct smiapp_sensor *sensor, u32 reg, u32 val)

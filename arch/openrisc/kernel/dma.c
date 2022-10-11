@@ -22,6 +22,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/dma-debug.h>
 #include <linux/export.h>
+#include <linux/dma-attrs.h>
 
 #include <asm/cpuinfo.h>
 #include <asm/spr_defs.h>
@@ -82,7 +83,7 @@ page_clear_nocache(pte_t *pte, unsigned long addr,
 static void *
 or1k_dma_alloc(struct device *dev, size_t size,
 	       dma_addr_t *dma_handle, gfp_t gfp,
-	       unsigned long attrs)
+	       struct dma_attrs *attrs)
 {
 	unsigned long va;
 	void *page;
@@ -100,7 +101,7 @@ or1k_dma_alloc(struct device *dev, size_t size,
 
 	va = (unsigned long)page;
 
-	if ((attrs & DMA_ATTR_NON_CONSISTENT) == 0) {
+	if (!dma_get_attr(DMA_ATTR_NON_CONSISTENT, attrs)) {
 		/*
 		 * We need to iterate through the pages, clearing the dcache for
 		 * them and setting the cache-inhibit bit.
@@ -116,7 +117,7 @@ or1k_dma_alloc(struct device *dev, size_t size,
 
 static void
 or1k_dma_free(struct device *dev, size_t size, void *vaddr,
-	      dma_addr_t dma_handle, unsigned long attrs)
+	      dma_addr_t dma_handle, struct dma_attrs *attrs)
 {
 	unsigned long va = (unsigned long)vaddr;
 	struct mm_walk walk = {
@@ -124,7 +125,7 @@ or1k_dma_free(struct device *dev, size_t size, void *vaddr,
 		.mm = &init_mm
 	};
 
-	if ((attrs & DMA_ATTR_NON_CONSISTENT) == 0) {
+	if (!dma_get_attr(DMA_ATTR_NON_CONSISTENT, attrs)) {
 		/* walk_page_range shouldn't be able to fail here */
 		WARN_ON(walk_page_range(va, va + size, &walk));
 	}
@@ -136,7 +137,7 @@ static dma_addr_t
 or1k_map_page(struct device *dev, struct page *page,
 	      unsigned long offset, size_t size,
 	      enum dma_data_direction dir,
-	      unsigned long attrs)
+	      struct dma_attrs *attrs)
 {
 	unsigned long cl;
 	dma_addr_t addr = page_to_phys(page) + offset;
@@ -169,7 +170,7 @@ or1k_map_page(struct device *dev, struct page *page,
 static void
 or1k_unmap_page(struct device *dev, dma_addr_t dma_handle,
 		size_t size, enum dma_data_direction dir,
-		unsigned long attrs)
+		struct dma_attrs *attrs)
 {
 	/* Nothing special to do here... */
 }
@@ -177,14 +178,14 @@ or1k_unmap_page(struct device *dev, dma_addr_t dma_handle,
 static int
 or1k_map_sg(struct device *dev, struct scatterlist *sg,
 	    int nents, enum dma_data_direction dir,
-	    unsigned long attrs)
+	    struct dma_attrs *attrs)
 {
 	struct scatterlist *s;
 	int i;
 
 	for_each_sg(sg, s, nents, i) {
 		s->dma_address = or1k_map_page(dev, sg_page(s), s->offset,
-					       s->length, dir, 0);
+					       s->length, dir, NULL);
 	}
 
 	return nents;
@@ -193,13 +194,13 @@ or1k_map_sg(struct device *dev, struct scatterlist *sg,
 static void
 or1k_unmap_sg(struct device *dev, struct scatterlist *sg,
 	      int nents, enum dma_data_direction dir,
-	      unsigned long attrs)
+	      struct dma_attrs *attrs)
 {
 	struct scatterlist *s;
 	int i;
 
 	for_each_sg(sg, s, nents, i) {
-		or1k_unmap_page(dev, sg_dma_address(s), sg_dma_len(s), dir, 0);
+		or1k_unmap_page(dev, sg_dma_address(s), sg_dma_len(s), dir, NULL);
 	}
 }
 

@@ -58,17 +58,16 @@ struct bpf_jit {
 #define SEEN_FUNC	16	/* calls C functions */
 #define SEEN_TAIL_CALL	32	/* code uses tail calls */
 #define SEEN_SKB_CHANGE	64	/* code changes skb data */
-#define SEEN_REG_AX	128	/* code uses constant blinding */
 #define SEEN_STACK	(SEEN_FUNC | SEEN_MEM | SEEN_SKB)
 
 /*
  * s390 registers
  */
-#define REG_W0		(MAX_BPF_JIT_REG + 0)	/* Work register 1 (even) */
-#define REG_W1		(MAX_BPF_JIT_REG + 1)	/* Work register 2 (odd) */
-#define REG_SKB_DATA	(MAX_BPF_JIT_REG + 2)	/* SKB data register */
-#define REG_L		(MAX_BPF_JIT_REG + 3)	/* Literal pool register */
-#define REG_15		(MAX_BPF_JIT_REG + 4)	/* Register 15 */
+#define REG_W0		(__MAX_BPF_REG+0)	/* Work register 1 (even) */
+#define REG_W1		(__MAX_BPF_REG+1)	/* Work register 2 (odd) */
+#define REG_SKB_DATA	(__MAX_BPF_REG+2)	/* SKB data register */
+#define REG_L		(__MAX_BPF_REG+3)	/* Literal pool register */
+#define REG_15		(__MAX_BPF_REG+4)	/* Register 15 */
 #define REG_0		REG_W0			/* Register 0 */
 #define REG_1		REG_W1			/* Register 1 */
 #define REG_2		BPF_REG_1		/* Register 2 */
@@ -93,8 +92,6 @@ static const int reg2hex[] = {
 	[BPF_REG_9]	= 10,
 	/* BPF stack pointer */
 	[BPF_REG_FP]	= 13,
-	/* Register for blinding (shared with REG_SKB_DATA) */
-	[BPF_REG_AX]	= 12,
 	/* SKB data pointer */
 	[REG_SKB_DATA]	= 12,
 	/* Work registers for s390x backend */
@@ -405,7 +402,7 @@ static void save_restore_regs(struct bpf_jit *jit, int op)
 /*
  * For SKB access %b1 contains the SKB pointer. For "bpf_jit.S"
  * we store the SKB header length on the stack and the SKB data
- * pointer in REG_SKB_DATA if BPF_REG_AX is not used.
+ * pointer in REG_SKB_DATA.
  */
 static void emit_load_skb_data_hlen(struct bpf_jit *jit)
 {
@@ -417,10 +414,9 @@ static void emit_load_skb_data_hlen(struct bpf_jit *jit)
 		   offsetof(struct sk_buff, data_len));
 	/* stg %w1,ST_OFF_HLEN(%r0,%r15) */
 	EMIT6_DISP_LH(0xe3000000, 0x0024, REG_W1, REG_0, REG_15, STK_OFF_HLEN);
-	if (!(jit->seen & SEEN_REG_AX))
-		/* lg %skb_data,data_off(%b1) */
-		EMIT6_DISP_LH(0xe3000000, 0x0004, REG_SKB_DATA, REG_0,
-			      BPF_REG_1, offsetof(struct sk_buff, data));
+	/* lg %skb_data,data_off(%b1) */
+	EMIT6_DISP_LH(0xe3000000, 0x0004, REG_SKB_DATA, REG_0,
+		      BPF_REG_1, offsetof(struct sk_buff, data));
 }
 
 /*
@@ -429,7 +425,7 @@ static void emit_load_skb_data_hlen(struct bpf_jit *jit)
  * Save registers and create stack frame if necessary.
  * See stack frame layout desription in "bpf_jit.h"!
  */
-static void bpf_jit_prologue(struct bpf_jit *jit)
+static void bpf_jit_prologue(struct bpf_jit *jit, bool is_classic)
 {
 	if (jit->seen & SEEN_TAIL_CALL) {
 		/* xc STK_OFF_TCCNT(4,%r15),STK_OFF_TCCNT(%r15) */
@@ -469,6 +465,15 @@ static void bpf_jit_prologue(struct bpf_jit *jit)
 		/* stg %b1,ST_OFF_SKBP(%r0,%r15) */
 		EMIT6_DISP_LH(0xe3000000, 0x0024, BPF_REG_1, REG_0, REG_15,
 			      STK_OFF_SKBP);
+	/* Clear A (%b0) and X (%b7) registers for converted BPF programs */
+	if (is_classic) {
+		if (REG_SEEN(BPF_REG_A))
+			/* lghi %ba,0 */
+			EMIT4_IMM(0xa7090000, BPF_REG_A, 0);
+		if (REG_SEEN(BPF_REG_X))
+			/* lghi %bx,0 */
+			EMIT4_IMM(0xa7090000, BPF_REG_X, 0);
+	}
 }
 
 /*
@@ -517,11 +522,9 @@ static void bpf_jit_epilogue(struct bpf_jit *jit)
 			/* br %r1 */
 			_EMIT2(0x07f1);
 		} else {
-			/* larl %r1,.+14 */
-			EMIT6_PCREL_RILB(0xc0000000, REG_1, jit->prg + 14);
 			/* ex 0,S390_lowcore.br_r1_tampoline */
 			EMIT4_DISP(0x44000000, REG_0, REG_0,
-				   offsetof(struct lowcore, br_r1_trampoline));
+				   offsetof(struct _lowcore, br_r1_trampoline));
 			/* j . */
 			EMIT4_PCREL(0xa7f40000, 0);
 		}
@@ -545,8 +548,6 @@ static noinline int bpf_jit_insn(struct bpf_jit *jit, struct bpf_prog *fp, int i
 	s32 imm = insn->imm;
 	s16 off = insn->off;
 
-	if (dst_reg == BPF_REG_AX || src_reg == BPF_REG_AX)
-		jit->seen |= SEEN_REG_AX;
 	switch (insn->code) {
 	/*
 	 * BPF_MOV
@@ -1253,7 +1254,7 @@ call_fn:
 		/*
 		 * Implicit input:
 		 *  BPF_REG_6	 (R7) : skb pointer
-		 *  REG_SKB_DATA (R12): skb data pointer (if no BPF_REG_AX)
+		 *  REG_SKB_DATA (R12): skb data pointer
 		 *
 		 * Calculated input:
 		 *  BPF_REG_2	 (R3) : offset of byte(s) to fetch in skb
@@ -1274,11 +1275,6 @@ call_fn:
 			/* agfr %b2,%src (%src is s32 here) */
 			EMIT4(0xb9180000, BPF_REG_2, src_reg);
 
-		/* Reload REG_SKB_DATA if BPF_REG_AX is used */
-		if (jit->seen & SEEN_REG_AX)
-			/* lg %skb_data,data_off(%b6) */
-			EMIT6_DISP_LH(0xe3000000, 0x0004, REG_SKB_DATA, REG_0,
-				      BPF_REG_6, offsetof(struct sk_buff, data));
 		/* basr %b5,%w1 (%b5 is call saved) */
 		EMIT2(0x0d00, BPF_REG_5, REG_W1);
 
@@ -1306,7 +1302,7 @@ static int bpf_jit_prog(struct bpf_jit *jit, struct bpf_prog *fp)
 	jit->lit = jit->lit_start;
 	jit->prg = 0;
 
-	bpf_jit_prologue(jit);
+	bpf_jit_prologue(jit, bpf_prog_was_classic(fp));
 	for (i = 0; i < fp->len; i += insn_count) {
 		insn_count = bpf_jit_insn(jit, fp, i);
 		if (insn_count < 0)
@@ -1333,62 +1329,37 @@ void bpf_jit_compile(struct bpf_prog *fp)
 /*
  * Compile eBPF program "fp"
  */
-struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *fp)
+void bpf_int_jit_compile(struct bpf_prog *fp)
 {
-	struct bpf_prog *tmp, *orig_fp = fp;
 	struct bpf_binary_header *header;
-	bool tmp_blinded = false;
 	struct bpf_jit jit;
 	int pass;
 
 	if (!bpf_jit_enable)
-		return orig_fp;
-
-	tmp = bpf_jit_blind_constants(fp);
-	/*
-	 * If blinding was requested and we failed during blinding,
-	 * we must fall back to the interpreter.
-	 */
-	if (IS_ERR(tmp))
-		return orig_fp;
-	if (tmp != fp) {
-		tmp_blinded = true;
-		fp = tmp;
-	}
-
+		return;
 	memset(&jit, 0, sizeof(jit));
 	jit.addrs = kcalloc(fp->len + 1, sizeof(*jit.addrs), GFP_KERNEL);
-	if (jit.addrs == NULL) {
-		fp = orig_fp;
-		goto out;
-	}
+	if (jit.addrs == NULL)
+		return;
 	/*
 	 * Three initial passes:
 	 *   - 1/2: Determine clobbered registers
 	 *   - 3:   Calculate program size and addrs arrray
 	 */
 	for (pass = 1; pass <= 3; pass++) {
-		if (bpf_jit_prog(&jit, fp)) {
-			fp = orig_fp;
+		if (bpf_jit_prog(&jit, fp))
 			goto free_addrs;
-		}
 	}
 	/*
 	 * Final pass: Allocate and generate program
 	 */
-	if (jit.size >= BPF_SIZE_MAX) {
-		fp = orig_fp;
+	if (jit.size >= BPF_SIZE_MAX)
 		goto free_addrs;
-	}
 	header = bpf_jit_binary_alloc(jit.size, &jit.prg_buf, 2, jit_fill_hole);
-	if (!header) {
-		fp = orig_fp;
+	if (!header)
 		goto free_addrs;
-	}
-	if (bpf_jit_prog(&jit, fp)) {
-		fp = orig_fp;
+	if (bpf_jit_prog(&jit, fp))
 		goto free_addrs;
-	}
 	if (bpf_jit_enable > 1) {
 		bpf_jit_dump(fp->len, jit.size, pass, jit.prg_buf);
 		if (jit.prg_buf)
@@ -1401,11 +1372,6 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *fp)
 	}
 free_addrs:
 	kfree(jit.addrs);
-out:
-	if (tmp_blinded)
-		bpf_jit_prog_release_other(fp, fp == orig_fp ?
-					   tmp : orig_fp);
-	return fp;
 }
 
 /*

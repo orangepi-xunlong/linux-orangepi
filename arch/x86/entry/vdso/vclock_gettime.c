@@ -16,10 +16,8 @@
 #include <asm/vvar.h>
 #include <asm/unistd.h>
 #include <asm/msr.h>
-#include <asm/pvclock.h>
 #include <linux/math64.h>
 #include <linux/time.h>
-#include <linux/kernel.h>
 
 #define gtod (&VVAR(vsyscall_gtod_data))
 
@@ -34,11 +32,17 @@ extern u8 pvclock_page
 
 #ifndef BUILD_VDSO32
 
+#include <linux/kernel.h>
+#include <asm/vsyscall.h>
+#include <asm/fixmap.h>
+#include <asm/pvclock.h>
+
 notrace static long vdso_fallback_gettime(long clock, struct timespec *ts)
 {
 	long ret;
-	asm("syscall" : "=a" (ret) :
-	    "0" (__NR_clock_gettime), "D" (clock), "S" (ts) : "memory");
+	asm ("syscall" : "=a" (ret), "=m" (*ts) :
+	     "0" (__NR_clock_gettime), "D" (clock), "S" (ts) :
+	     "memory", "rcx", "r11");
 	return ret;
 }
 
@@ -46,47 +50,14 @@ notrace static long vdso_fallback_gtod(struct timeval *tv, struct timezone *tz)
 {
 	long ret;
 
-	asm("syscall" : "=a" (ret) :
-	    "0" (__NR_gettimeofday), "D" (tv), "S" (tz) : "memory");
+	asm ("syscall" : "=a" (ret), "=m" (*tv), "=m" (*tz) :
+	     "0" (__NR_gettimeofday), "D" (tv), "S" (tz) :
+	     "memory", "rcx", "r11");
 	return ret;
 }
-
-
-#else
-
-notrace static long vdso_fallback_gettime(long clock, struct timespec *ts)
-{
-	long ret;
-
-	asm(
-		"mov %%ebx, %%edx \n"
-		"mov %2, %%ebx \n"
-		"call __kernel_vsyscall \n"
-		"mov %%edx, %%ebx \n"
-		: "=a" (ret)
-		: "0" (__NR_clock_gettime), "g" (clock), "c" (ts)
-		: "memory", "edx");
-	return ret;
-}
-
-notrace static long vdso_fallback_gtod(struct timeval *tv, struct timezone *tz)
-{
-	long ret;
-
-	asm(
-		"mov %%ebx, %%edx \n"
-		"mov %2, %%ebx \n"
-		"call __kernel_vsyscall \n"
-		"mov %%edx, %%ebx \n"
-		: "=a" (ret)
-		: "0" (__NR_gettimeofday), "g" (tv), "c" (tz)
-		: "memory", "edx");
-	return ret;
-}
-
-#endif
 
 #ifdef CONFIG_PARAVIRT_CLOCK
+
 static notrace const struct pvclock_vsyscall_time_info *get_pvti0(void)
 {
 	return (const struct pvclock_vsyscall_time_info *)&pvclock_page;
@@ -96,8 +67,9 @@ static notrace cycle_t vread_pvclock(int *mode)
 {
 	const struct pvclock_vcpu_time_info *pvti = &get_pvti0()->pvti;
 	cycle_t ret;
-	u64 last;
-	u32 version;
+	u64 tsc, pvti_tsc;
+	u64 last, delta, pvti_system_time;
+	u32 version, pvti_tsc_to_system_mul, pvti_tsc_shift;
 
 	/*
 	 * Note: The kernel and hypervisor must guarantee that cpu ID
@@ -114,25 +86,39 @@ static notrace cycle_t vread_pvclock(int *mode)
 	 *
 	 * On Xen, we don't appear to have that guarantee, but Xen still
 	 * supplies a valid seqlock using the version field.
-	 *
+
 	 * We only do pvclock vdso timing at all if
 	 * PVCLOCK_TSC_STABLE_BIT is set, and we interpret that bit to
 	 * mean that all vCPUs have matching pvti and that the TSC is
 	 * synced, so we can just look at vCPU 0's pvti.
 	 */
 
+	if (unlikely(!(pvti->flags & PVCLOCK_TSC_STABLE_BIT))) {
+		*mode = VCLOCK_NONE;
+		return 0;
+	}
+
 	do {
-		version = pvclock_read_begin(pvti);
+		version = pvti->version;
 
-		if (unlikely(!(pvti->flags & PVCLOCK_TSC_STABLE_BIT))) {
-			*mode = VCLOCK_NONE;
-			return 0;
-		}
+		/* This is also a read barrier, so we'll read version first. */
+		tsc = rdtsc_ordered();
 
-		ret = __pvclock_read_cycles(pvti, rdtsc_ordered());
-	} while (pvclock_read_retry(pvti, version));
+		pvti_tsc_to_system_mul = pvti->tsc_to_system_mul;
+		pvti_tsc_shift = pvti->tsc_shift;
+		pvti_system_time = pvti->system_time;
+		pvti_tsc = pvti->tsc_timestamp;
 
-	/* refer to vread_tsc() comment for rationale */
+		/* Make sure that the version double-check is last. */
+		smp_rmb();
+	} while (unlikely((version & 1) || version != pvti->version));
+
+	delta = tsc - pvti_tsc;
+	ret = pvti_system_time +
+		pvclock_scale_delta(delta, pvti_tsc_to_system_mul,
+				    pvti_tsc_shift);
+
+	/* refer to tsc.c read_tsc() comment for rationale */
 	last = gtod->cycle_last;
 
 	if (likely(ret >= last))
@@ -140,6 +126,49 @@ static notrace cycle_t vread_pvclock(int *mode)
 
 	return last;
 }
+#endif
+
+#else
+
+notrace static long vdso_fallback_gettime(long clock, struct timespec *ts)
+{
+	long ret;
+
+	asm (
+		"mov %%ebx, %%edx \n"
+		"mov %[clock], %%ebx \n"
+		"call __kernel_vsyscall \n"
+		"mov %%edx, %%ebx \n"
+		: "=a" (ret), "=m" (*ts)
+		: "0" (__NR_clock_gettime), [clock] "g" (clock), "c" (ts)
+		: "memory", "edx");
+	return ret;
+}
+
+notrace static long vdso_fallback_gtod(struct timeval *tv, struct timezone *tz)
+{
+	long ret;
+
+	asm (
+		"mov %%ebx, %%edx \n"
+		"mov %[tv], %%ebx \n"
+		"call __kernel_vsyscall \n"
+		"mov %%edx, %%ebx \n"
+		: "=a" (ret), "=m" (*tv), "=m" (*tz)
+		: "0" (__NR_gettimeofday), [tv] "g" (tv), "c" (tz)
+		: "memory", "edx");
+	return ret;
+}
+
+#ifdef CONFIG_PARAVIRT_CLOCK
+
+static notrace cycle_t vread_pvclock(int *mode)
+{
+	*mode = VCLOCK_NONE;
+	return 0;
+}
+#endif
+
 #endif
 
 notrace static cycle_t vread_tsc(void)
@@ -152,7 +181,7 @@ notrace static cycle_t vread_tsc(void)
 
 	/*
 	 * GCC likes to generate cmov here, but this branch is extremely
-	 * predictable (it's just a function of time and the likely is
+	 * predictable (it's just a funciton of time and the likely is
 	 * very likely) and there's a data dependence, so force GCC
 	 * to generate a branch instead.  I don't barrier() because
 	 * we don't actually need a barrier, and if this function

@@ -99,7 +99,7 @@ module_param(mpt_channel_mapping, int, 0);
 MODULE_PARM_DESC(mpt_channel_mapping, " Mapping id's to channels (default=0)");
 
 static int mpt_debug_level;
-static int mpt_set_debug_level(const char *val, const struct kernel_param *kp);
+static int mpt_set_debug_level(const char *val, struct kernel_param *kp);
 module_param_call(mpt_debug_level, mpt_set_debug_level, param_get_int,
 		  &mpt_debug_level, 0600);
 MODULE_PARM_DESC(mpt_debug_level,
@@ -242,7 +242,7 @@ pci_enable_io_access(struct pci_dev *pdev)
 	pci_write_config_word(pdev, PCI_COMMAND, command_reg);
 }
 
-static int mpt_set_debug_level(const char *val, const struct kernel_param *kp)
+static int mpt_set_debug_level(const char *val, struct kernel_param *kp)
 {
 	int ret = param_set_int(val, kp);
 	MPT_ADAPTER *ioc;
@@ -1801,7 +1801,8 @@ mpt_attach(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	ioc->pcidev = pdev;
 	if (mpt_mapresources(ioc)) {
-		goto out_free_ioc;
+		kfree(ioc);
+		return r;
 	}
 
 	/*
@@ -1865,13 +1866,14 @@ mpt_attach(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	snprintf(ioc->reset_work_q_name, MPT_KOBJ_NAME_LEN,
 		 "mpt_poll_%d", ioc->id);
-	ioc->reset_work_q = alloc_workqueue(ioc->reset_work_q_name,
-					    WQ_MEM_RECLAIM, 0);
+	ioc->reset_work_q =
+		create_singlethread_workqueue(ioc->reset_work_q_name);
 	if (!ioc->reset_work_q) {
 		printk(MYIOC_s_ERR_FMT "Insufficient memory to add adapter!\n",
 		    ioc->name);
-		r = -ENOMEM;
-		goto out_unmap_resources;
+		pci_release_selected_regions(pdev, ioc->bars);
+		kfree(ioc);
+		return -ENOMEM;
 	}
 
 	dinitprintk(ioc, printk(MYIOC_s_INFO_FMT "facts @ %p, pfacts[0] @ %p\n",
@@ -1992,29 +1994,17 @@ mpt_attach(struct pci_dev *pdev, const struct pci_device_id *id)
 	INIT_LIST_HEAD(&ioc->fw_event_list);
 	spin_lock_init(&ioc->fw_event_lock);
 	snprintf(ioc->fw_event_q_name, MPT_KOBJ_NAME_LEN, "mpt/%d", ioc->id);
-	ioc->fw_event_q = alloc_workqueue(ioc->fw_event_q_name,
-					  WQ_MEM_RECLAIM, 0);
-	if (!ioc->fw_event_q) {
-		printk(MYIOC_s_ERR_FMT "Insufficient memory to add adapter!\n",
-		    ioc->name);
-		r = -ENOMEM;
-		goto out_remove_ioc;
-	}
+	ioc->fw_event_q = create_singlethread_workqueue(ioc->fw_event_q_name);
 
 	if ((r = mpt_do_ioc_recovery(ioc, MPT_HOSTEVENT_IOC_BRINGUP,
 	    CAN_SLEEP)) != 0){
 		printk(MYIOC_s_ERR_FMT "didn't initialize properly! (%d)\n",
 		    ioc->name, r);
 
-		destroy_workqueue(ioc->fw_event_q);
-		ioc->fw_event_q = NULL;
-
 		list_del(&ioc->list);
 		if (ioc->alt_ioc)
 			ioc->alt_ioc->alt_ioc = NULL;
 		iounmap(ioc->memmap);
-		if (pci_is_enabled(pdev))
-			pci_disable_device(pdev);
 		if (r != -5)
 			pci_release_selected_regions(pdev, ioc->bars);
 
@@ -2022,6 +2012,7 @@ mpt_attach(struct pci_dev *pdev, const struct pci_device_id *id)
 		ioc->reset_work_q = NULL;
 
 		kfree(ioc);
+		pci_set_drvdata(pdev, NULL);
 		return r;
 	}
 
@@ -2049,24 +2040,6 @@ mpt_attach(struct pci_dev *pdev, const struct pci_device_id *id)
 			msecs_to_jiffies(MPT_POLLING_INTERVAL));
 
 	return 0;
-
-out_remove_ioc:
-	list_del(&ioc->list);
-	if (ioc->alt_ioc)
-		ioc->alt_ioc->alt_ioc = NULL;
-
-	destroy_workqueue(ioc->reset_work_q);
-	ioc->reset_work_q = NULL;
-
-out_unmap_resources:
-	iounmap(ioc->memmap);
-	pci_disable_device(pdev);
-	pci_release_selected_regions(pdev, ioc->bars);
-
-out_free_ioc:
-	kfree(ioc);
-
-	return r;
 }
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
@@ -6256,7 +6229,7 @@ mpt_get_manufacturing_pg_0(MPT_ADAPTER *ioc)
 	memcpy(ioc->board_assembly, pbuf->BoardAssembly, sizeof(ioc->board_assembly));
 	memcpy(ioc->board_tracer, pbuf->BoardTracerNumber, sizeof(ioc->board_tracer));
 
-out:
+	out:
 
 	if (pbuf)
 		pci_free_consistent(ioc->pcidev, hdr.PageLength * 4, pbuf, buf_dma);

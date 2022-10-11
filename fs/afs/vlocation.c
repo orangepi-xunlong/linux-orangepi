@@ -595,8 +595,8 @@ static void afs_vlocation_reaper(struct work_struct *work)
  */
 int __init afs_vlocation_update_init(void)
 {
-	afs_vlocation_update_worker = alloc_workqueue("kafs_vlupdated",
-						      WQ_MEM_RECLAIM, 0);
+	afs_vlocation_update_worker =
+		create_singlethread_workqueue("kafs_vlupdated");
 	return afs_vlocation_update_worker ? 0 : -ENOMEM;
 }
 

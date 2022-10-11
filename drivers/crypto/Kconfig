@@ -159,19 +159,6 @@ config CRYPTO_GHASH_S390
 
 	  It is available as of z196.
 
-config CRYPTO_CRC32_S390
-	tristate "CRC-32 algorithms"
-	depends on S390
-	select CRYPTO_HASH
-	select CRC32
-	help
-	  Select this option if you want to use hardware accelerated
-	  implementations of CRC algorithms.  With this option, you
-	  can optimize the computation of CRC-32 (IEEE 802.3 Ethernet)
-	  and CRC-32C (Castagnoli).
-
-	  It is available with IBM z13 or later.
-
 config CRYPTO_DEV_MV_CESA
 	tristate "Marvell's Cryptographic Engine"
 	depends on PLAT_ORION
@@ -207,9 +194,6 @@ config CRYPTO_DEV_NIAGARA2
        select CRYPTO_DES
        select CRYPTO_BLKCIPHER
        select CRYPTO_HASH
-       select CRYPTO_MD5
-       select CRYPTO_SHA1
-       select CRYPTO_SHA256
        depends on SPARC64
        help
 	  Each core of a Niagara2 processor contains a Stream
@@ -292,14 +276,6 @@ config CRYPTO_DEV_PPC4XX
 	help
 	  This option allows you to have support for AMCC crypto acceleration.
 
-config HW_RANDOM_PPC4XX
-	bool "PowerPC 4xx generic true random number generator support"
-	depends on CRYPTO_DEV_PPC4XX && HW_RANDOM
-	default y
-	---help---
-	 This option provides the kernel-side support for the TRNG hardware
-	 found in the security function of some PowerPC 4xx SoCs.
-
 config CRYPTO_DEV_OMAP_SHAM
 	tristate "Support for OMAP MD5/SHA1/SHA2 hw accelerator"
 	depends on ARCH_OMAP2PLUS
@@ -317,25 +293,20 @@ config CRYPTO_DEV_OMAP_AES
 	depends on ARCH_OMAP2 || ARCH_OMAP3 || ARCH_OMAP2PLUS
 	select CRYPTO_AES
 	select CRYPTO_BLKCIPHER
-	select CRYPTO_ENGINE
-	select CRYPTO_CBC
-	select CRYPTO_ECB
-	select CRYPTO_CTR
 	help
 	  OMAP processors have AES module accelerator. Select this if you
 	  want to use the OMAP module for AES algorithms.
 
 config CRYPTO_DEV_OMAP_DES
-	tristate "Support for OMAP DES/3DES hw engine"
+	tristate "Support for OMAP DES3DES hw engine"
 	depends on ARCH_OMAP2PLUS
 	select CRYPTO_DES
 	select CRYPTO_BLKCIPHER
-	select CRYPTO_ENGINE
 	help
 	  OMAP processors have DES/3DES module accelerator. Select this if you
 	  want to use the OMAP module for DES and 3DES algorithms. Currently
-	  the ECB and CBC modes of operation are supported by the driver. Also
-	  accesses made on unaligned boundaries are supported.
+	  the ECB and CBC modes of operation supported by the driver. Also
+	  accesses made on unaligned boundaries are also supported.
 
 config CRYPTO_DEV_PICOXCELL
 	tristate "Support for picoXcell IPSEC and Layer2 crypto engines"
@@ -365,19 +336,9 @@ config CRYPTO_DEV_SAHARA
 	  This option enables support for the SAHARA HW crypto accelerator
 	  found in some Freescale i.MX chips.
 
-config CRYPTO_DEV_MXC_SCC
-	tristate "Support for Freescale Security Controller (SCC)"
-	depends on ARCH_MXC && OF
-	select CRYPTO_BLKCIPHER
-	select CRYPTO_DES
-	help
-	  This option enables support for the Security Controller (SCC)
-	  found in Freescale i.MX25 chips.
-
 config CRYPTO_DEV_S5P
 	tristate "Support for Samsung S5PV210/Exynos crypto accelerator"
-	depends on ARCH_S5PV210 || ARCH_EXYNOS || COMPILE_TEST
-	depends on HAS_IOMEM && HAS_DMA
+	depends on ARCH_S5PV210 || ARCH_EXYNOS
 	select CRYPTO_AES
 	select CRYPTO_BLKCIPHER
 	help
@@ -417,11 +378,10 @@ config CRYPTO_DEV_BFIN_CRC
 
 config CRYPTO_DEV_ATMEL_AES
 	tristate "Support for Atmel AES hw accelerator"
-	depends on HAS_DMA
-	depends on AT_XDMAC || AT_HDMAC || COMPILE_TEST
+	depends on ARCH_AT91
 	select CRYPTO_AES
-	select CRYPTO_AEAD
 	select CRYPTO_BLKCIPHER
+	select AT_HDMAC
 	help
 	  Some Atmel processors have AES hw accelerator.
 	  Select this if you want to use the Atmel module for
@@ -523,7 +483,7 @@ config CRYPTO_DEV_IMGTEC_HASH
 
 config CRYPTO_DEV_SUN4I_SS
 	tristate "Support for Allwinner Security System cryptographic accelerator"
-	depends on ARCH_SUNXI && !64BIT
+	depends on ARCH_SUNXI
 	select CRYPTO_MD5
 	select CRYPTO_SHA1
 	select CRYPTO_AES
@@ -538,22 +498,8 @@ config CRYPTO_DEV_SUN4I_SS
 	  To compile this driver as a module, choose M here: the module
 	  will be called sun4i-ss.
 
-config CRYPTO_DEV_SUNXI
-	tristate "Support for Allwinner Sunxi CryptoEngine"
-	depends on ARCH_SUNXI
-	select CRYPTO_MD5
-	select CRYPTO_SHA1
-	select CRYPTO_AES
-	select CRYPTO_DES
-	select CRYPTO_BLKCIPHER
-	help
-	  Allwinner Sunxi SoC have a crypto accelerator named
-	  CryptoEngine. It support some SoC of sun8i/sun50i series.
-	  Select this if you want to use it.
-
 config CRYPTO_DEV_ROCKCHIP
-	tristate "Rockchip's Cryptographic Engine driver"
-	depends on OF && ARCH_ROCKCHIP
+	tristate
 	select CRYPTO_AES
 	select CRYPTO_DES
 	select CRYPTO_MD5
@@ -562,11 +508,23 @@ config CRYPTO_DEV_ROCKCHIP
 	select CRYPTO_HASH
 	select CRYPTO_BLKCIPHER
 
+config CRYPTO_DEV_ROCKCHIP_V1
+	tristate "Rockchip's Cryptographic Engine V1 driver"
+	depends on OF && ARCH_ROCKCHIP
+	select CRYPTO_DEV_ROCKCHIP
 	help
 	  This driver interfaces with the hardware crypto accelerator.
 	  Supporting cbc/ecb chainmode, and aes/des/des3_ede cipher mode.
+	  It currently supports rk3288.
 
-source "drivers/crypto/chelsio/Kconfig"
-source "drivers/crypto/sunxi-emce/Kconfig"
+config CRYPTO_DEV_ROCKCHIP_V2
+	tristate "Rockchip's Cryptographic Engine V2 driver"
+	depends on OF && ARCH_ROCKCHIP
+	select CRYPTO_DEV_ROCKCHIP
+	help
+	  This driver interfaces with the hardware crypto accelerator.
+	  Supporting cbc/ecb chainmode, and aes/des/des3_ede cipher mode.
+	  Supporting aes-xts cipher mode.
+	  It currently supports px30.
 
 endif # CRYPTO_HW

@@ -22,6 +22,7 @@
 #define GCR_CL_COHERENCE_OFS	0x2008
 #define GCR_CL_ID_OFS		0x2028
 
+#define CPC_CL_VC_STOP_OFS	0x2020
 #define CPC_CL_VC_RUN_OFS	0x2028
 
 .extern mips_cm_base
@@ -361,7 +362,7 @@ LEAF(mips_cps_get_bootcfg)
 	END(mips_cps_get_bootcfg)
 
 LEAF(mips_cps_boot_vpes)
-	lw	ta2, COREBOOTCFG_VPEMASK(a0)
+	PTR_L	ta2, COREBOOTCFG_VPEMASK(a0)
 	PTR_L	ta3, COREBOOTCFG_VPECONFIG(a0)
 
 #if defined(CONFIG_CPU_MIPSR6)
@@ -376,8 +377,12 @@ LEAF(mips_cps_boot_vpes)
 	PTR_LI	t2, UNCAC_BASE
 	PTR_ADD	t1, t1, t2
 
-	/* Set VC_RUN to the VPE mask */
+	/* Start any other VPs that ought to be running */
 	PTR_S	ta2, CPC_CL_VC_RUN_OFS(t1)
+
+	/* Ensure this VP stops running if it shouldn't be */
+	not	ta2
+	PTR_S	ta2, CPC_CL_VC_STOP_OFS(t1)
 	ehb
 
 #elif defined(CONFIG_MIPS_MT)
@@ -441,21 +446,6 @@ LEAF(mips_cps_boot_vpes)
 	mfc0	t0, CP0_CONFIG
 	mttc0	t0, CP0_CONFIG
 
-	/*
-	 * Copy the EVA config from this VPE if the CPU supports it.
-	 * CONFIG3 must exist to be running MT startup - just read it.
-	 */
-	mfc0	t0, CP0_CONFIG, 3
-	and	t0, t0, MIPS_CONF3_SC
-	beqz	t0, 3f
-	 nop
-	mfc0    t0, CP0_SEGCTL0
-	mttc0	t0, CP0_SEGCTL0
-	mfc0    t0, CP0_SEGCTL1
-	mttc0	t0, CP0_SEGCTL1
-	mfc0    t0, CP0_SEGCTL2
-	mttc0	t0, CP0_SEGCTL2
-3:
 	/* Ensure no software interrupts are pending */
 	mttc0	zero, CP0_CAUSE
 	mttc0	zero, CP0_STATUS

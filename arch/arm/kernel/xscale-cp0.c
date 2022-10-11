@@ -15,9 +15,6 @@
 #include <linux/init.h>
 #include <linux/io.h>
 #include <asm/thread_notify.h>
-#include <asm/cputype.h>
-
-asm("	.arch armv5te\n");
 
 static inline void dsp_save_state(u32 *state)
 {
@@ -154,10 +151,6 @@ static int __init cpu_has_iwmmxt(void)
 static int __init xscale_cp0_init(void)
 {
 	u32 cp_access;
-
-	/* do not attempt to probe iwmmxt on non-xscale family CPUs */
-	if (!cpu_is_xscale_family())
-		return 0;
 
 	cp_access = xscale_cp_access_read() & ~3;
 	xscale_cp_access_write(cp_access | 1);

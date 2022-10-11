@@ -7,10 +7,6 @@
 #include <asm/asm-offsets.h>
 #include <asm/thread_info.h>
 
-#ifdef CONFIG_CPU_V7M
-#include <asm/v7m.h>
-#endif
-
 /*
  * vma_vm_mm - get mm pointer from vma pointer (vma->vm_mm)
  */
@@ -74,13 +70,7 @@
  * on ARMv7.
  */
 	.macro	dcache_line_size, reg, tmp
-#ifdef CONFIG_CPU_V7M
-	movw	\tmp, #:lower16:BASEADDR_V7M_SCB + V7M_SCB_CTR
-	movt	\tmp, #:upper16:BASEADDR_V7M_SCB + V7M_SCB_CTR
-	ldr     \tmp, [\tmp]
-#else
 	mrc	p15, 0, \tmp, c0, c0, 1		@ read ctr
-#endif
 	lsr	\tmp, \tmp, #16
 	and	\tmp, \tmp, #0xf		@ cache line size encoding
 	mov	\reg, #4			@ bytes per word
@@ -92,13 +82,7 @@
  * on ARMv7.
  */
 	.macro	icache_line_size, reg, tmp
-#ifdef CONFIG_CPU_V7M
-	movw	\tmp, #:lower16:BASEADDR_V7M_SCB + V7M_SCB_CTR
-	movt	\tmp, #:upper16:BASEADDR_V7M_SCB + V7M_SCB_CTR
-	ldr     \tmp, [\tmp]
-#else
 	mrc	p15, 0, \tmp, c0, c0, 1		@ read ctr
-#endif
 	and	\tmp, \tmp, #0xf		@ cache line size encoding
 	mov	\reg, #4			@ bytes per word
 	mov	\reg, \reg, lsl \tmp		@ actual cache line size

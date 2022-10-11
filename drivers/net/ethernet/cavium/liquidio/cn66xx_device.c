@@ -19,16 +19,26 @@
 * This file may also be available under a different license from Cavium.
 * Contact Cavium, Inc. for more information
 **********************************************************************/
+#include <linux/version.h>
+#include <linux/types.h>
+#include <linux/list.h>
+#include <linux/interrupt.h>
 #include <linux/pci.h>
+#include <linux/kthread.h>
 #include <linux/netdevice.h>
+#include "octeon_config.h"
 #include "liquidio_common.h"
 #include "octeon_droq.h"
 #include "octeon_iq.h"
 #include "response_manager.h"
 #include "octeon_device.h"
+#include "octeon_nic.h"
 #include "octeon_main.h"
+#include "octeon_network.h"
 #include "cn66xx_regs.h"
 #include "cn66xx_device.h"
+#include "liquidio_image.h"
+#include "octeon_mem_ops.h"
 
 int lio_cn6xxx_soft_reset(struct octeon_device *oct)
 {
@@ -48,7 +58,7 @@ int lio_cn6xxx_soft_reset(struct octeon_device *oct)
 	/* Wait for 10ms as Octeon resets. */
 	mdelay(100);
 
-	if (octeon_read_csr64(oct, CN6XXX_SLI_SCRATCH1)) {
+	if (octeon_read_csr64(oct, CN6XXX_SLI_SCRATCH1) == 0x1234ULL) {
 		dev_err(&oct->pci_dev->dev, "Soft reset failed\n");
 		return 1;
 	}
@@ -64,9 +74,9 @@ void lio_cn6xxx_enable_error_reporting(struct octeon_device *oct)
 	u32 val;
 
 	pci_read_config_dword(oct->pci_dev, CN6XXX_PCIE_DEVCTL, &val);
-	if (val & 0x000c0000) {
+	if (val & 0x000f0000) {
 		dev_err(&oct->pci_dev->dev, "PCI-E Link error detected: 0x%08x\n",
-			val & 0x000c0000);
+			val & 0x000f0000);
 	}
 
 	val |= 0xf;          /* Enable Link error reporting */
@@ -219,7 +229,7 @@ void lio_cn6xxx_setup_global_output_regs(struct octeon_device *oct)
 	/* / Select Packet count instead of bytes for SLI_PKTi_CNTS[CNT] */
 	octeon_write_csr(oct, CN6XXX_SLI_PKT_OUT_BMODE, 0);
 
-	/* Select ES, RO, NS setting from register for Output Queue Packet
+	/* / Select ES,RO,NS setting from register for Output Queue Packet
 	 * Address
 	 */
 	octeon_write_csr(oct, CN6XXX_SLI_PKT_DPADDR, 0xFFFFFFFF);
@@ -338,7 +348,7 @@ void lio_cn6xxx_setup_oq_regs(struct octeon_device *oct, u32 oq_no)
 	octeon_write_csr(oct, CN6XXX_SLI_PKT_CNT_INT_ENB, intr);
 }
 
-int lio_cn6xxx_enable_io_queues(struct octeon_device *oct)
+void lio_cn6xxx_enable_io_queues(struct octeon_device *oct)
 {
 	u32 mask;
 
@@ -353,14 +363,11 @@ int lio_cn6xxx_enable_io_queues(struct octeon_device *oct)
 	mask = octeon_read_csr(oct, CN6XXX_SLI_PKT_OUT_ENB);
 	mask |= oct->io_qmask.oq;
 	octeon_write_csr(oct, CN6XXX_SLI_PKT_OUT_ENB, mask);
-
-	return 0;
 }
 
 void lio_cn6xxx_disable_io_queues(struct octeon_device *oct)
 {
-	int i;
-	u32 mask, loop = HZ;
+	u32 mask, i, loop = HZ;
 	u32 d32;
 
 	/* Reset the Enable bits for Input Queues. */
@@ -369,7 +376,7 @@ void lio_cn6xxx_disable_io_queues(struct octeon_device *oct)
 	octeon_write_csr(oct, CN6XXX_SLI_PKT_INSTR_ENB, mask);
 
 	/* Wait until hardware indicates that the queues are out of reset. */
-	mask = (u32)oct->io_qmask.iq;
+	mask = oct->io_qmask.iq;
 	d32 = octeon_read_csr(oct, CN6XXX_SLI_PORT_IN_RST_IQ);
 	while (((d32 & mask) != mask) && loop--) {
 		d32 = octeon_read_csr(oct, CN6XXX_SLI_PORT_IN_RST_IQ);
@@ -377,8 +384,8 @@ void lio_cn6xxx_disable_io_queues(struct octeon_device *oct)
 	}
 
 	/* Reset the doorbell register for each Input queue. */
-	for (i = 0; i < MAX_OCTEON_INSTR_QUEUES(oct); i++) {
-		if (!(oct->io_qmask.iq & (1ULL << i)))
+	for (i = 0; i < MAX_OCTEON_INSTR_QUEUES; i++) {
+		if (!(oct->io_qmask.iq & (1UL << i)))
 			continue;
 		octeon_write_csr(oct, CN6XXX_SLI_IQ_DOORBELL(i), 0xFFFFFFFF);
 		d32 = octeon_read_csr(oct, CN6XXX_SLI_IQ_DOORBELL(i));
@@ -391,7 +398,7 @@ void lio_cn6xxx_disable_io_queues(struct octeon_device *oct)
 
 	/* Wait until hardware indicates that the queues are out of reset. */
 	loop = HZ;
-	mask = (u32)oct->io_qmask.oq;
+	mask = oct->io_qmask.oq;
 	d32 = octeon_read_csr(oct, CN6XXX_SLI_PORT_IN_RST_OQ);
 	while (((d32 & mask) != mask) && loop--) {
 		d32 = octeon_read_csr(oct, CN6XXX_SLI_PORT_IN_RST_OQ);
@@ -401,8 +408,8 @@ void lio_cn6xxx_disable_io_queues(struct octeon_device *oct)
 
 	/* Reset the doorbell register for each Output queue. */
 	/* for (i = 0; i < oct->num_oqs; i++) { */
-	for (i = 0; i < MAX_OCTEON_OUTPUT_QUEUES(oct); i++) {
-		if (!(oct->io_qmask.oq & (1ULL << i)))
+	for (i = 0; i < MAX_OCTEON_OUTPUT_QUEUES; i++) {
+		if (!(oct->io_qmask.oq & (1UL << i)))
 			continue;
 		octeon_write_csr(oct, CN6XXX_SLI_OQ_PKTS_CREDIT(i), 0xFFFFFFFF);
 		d32 = octeon_read_csr(oct, CN6XXX_SLI_OQ_PKTS_CREDIT(i));
@@ -418,6 +425,36 @@ void lio_cn6xxx_disable_io_queues(struct octeon_device *oct)
 	d32 = octeon_read_csr(oct, CN6XXX_SLI_PKT_TIME_INT);
 	if (d32)
 		octeon_write_csr(oct, CN6XXX_SLI_PKT_TIME_INT, d32);
+}
+
+void lio_cn6xxx_reinit_regs(struct octeon_device *oct)
+{
+	u32 i;
+
+	for (i = 0; i < MAX_OCTEON_INSTR_QUEUES; i++) {
+		if (!(oct->io_qmask.iq & (1UL << i)))
+			continue;
+		oct->fn_list.setup_iq_regs(oct, i);
+	}
+
+	for (i = 0; i < MAX_OCTEON_OUTPUT_QUEUES; i++) {
+		if (!(oct->io_qmask.oq & (1UL << i)))
+			continue;
+		oct->fn_list.setup_oq_regs(oct, i);
+	}
+
+	oct->fn_list.setup_device_regs(oct);
+
+	oct->fn_list.enable_interrupt(oct->chip);
+
+	oct->fn_list.enable_io_queues(oct);
+
+	/* for (i = 0; i < oct->num_oqs; i++) { */
+	for (i = 0; i < MAX_OCTEON_OUTPUT_QUEUES; i++) {
+		if (!(oct->io_qmask.oq & (1UL << i)))
+			continue;
+		writel(oct->droq[i]->max_count, oct->droq[i]->pkts_credit_reg);
+	}
 }
 
 void
@@ -458,7 +495,8 @@ u32 lio_cn6xxx_bar1_idx_read(struct octeon_device *oct, u32 idx)
 }
 
 u32
-lio_cn6xxx_update_read_index(struct octeon_instr_queue *iq)
+lio_cn6xxx_update_read_index(struct octeon_device *oct __attribute__((unused)),
+			     struct octeon_instr_queue *iq)
 {
 	u32 new_idx = readl(iq->inst_cnt_reg);
 
@@ -479,20 +517,18 @@ lio_cn6xxx_update_read_index(struct octeon_instr_queue *iq)
 	return new_idx;
 }
 
-void lio_cn6xxx_enable_interrupt(struct octeon_device *oct,
-				 u8 unused __attribute__((unused)))
+void lio_cn6xxx_enable_interrupt(void *chip)
 {
-	struct octeon_cn6xxx *cn6xxx = (struct octeon_cn6xxx *)oct->chip;
+	struct octeon_cn6xxx *cn6xxx = (struct octeon_cn6xxx *)chip;
 	u64 mask = cn6xxx->intr_mask64 | CN6XXX_INTR_DMA0_FORCE;
 
 	/* Enable Interrupt */
 	writeq(mask, cn6xxx->intr_enb_reg64);
 }
 
-void lio_cn6xxx_disable_interrupt(struct octeon_device *oct,
-				  u8 unused __attribute__((unused)))
+void lio_cn6xxx_disable_interrupt(void *chip)
 {
-	struct octeon_cn6xxx *cn6xxx = (struct octeon_cn6xxx *)oct->chip;
+	struct octeon_cn6xxx *cn6xxx = (struct octeon_cn6xxx *)chip;
 
 	/* Disable Interrupts */
 	writeq(0, cn6xxx->intr_enb_reg64);
@@ -511,18 +547,17 @@ static void lio_cn6xxx_get_pcie_qlmport(struct octeon_device *oct)
 	dev_dbg(&oct->pci_dev->dev, "Using PCIE Port %d\n", oct->pcie_port);
 }
 
-static void
+void
 lio_cn6xxx_process_pcie_error_intr(struct octeon_device *oct, u64 intr64)
 {
 	dev_err(&oct->pci_dev->dev, "Error Intr: 0x%016llx\n",
 		CVM_CAST64(intr64));
 }
 
-static int lio_cn6xxx_process_droq_intr_regs(struct octeon_device *oct)
+int lio_cn6xxx_process_droq_intr_regs(struct octeon_device *oct)
 {
 	struct octeon_droq *droq;
-	int oq_no;
-	u32 pkt_count, droq_time_mask, droq_mask, droq_int_enb;
+	u32 oq_no, pkt_count, droq_time_mask, droq_mask, droq_int_enb;
 	u32 droq_cnt_enb, droq_cnt_mask;
 
 	droq_cnt_enb = octeon_read_csr(oct, CN6XXX_SLI_PKT_CNT_INT_ENB);
@@ -538,12 +573,12 @@ static int lio_cn6xxx_process_droq_intr_regs(struct octeon_device *oct)
 	oct->droq_intr = 0;
 
 	/* for (oq_no = 0; oq_no < oct->num_oqs; oq_no++) { */
-	for (oq_no = 0; oq_no < MAX_OCTEON_OUTPUT_QUEUES(oct); oq_no++) {
-		if (!(droq_mask & (1ULL << oq_no)))
+	for (oq_no = 0; oq_no < MAX_OCTEON_OUTPUT_QUEUES; oq_no++) {
+		if (!(droq_mask & (1 << oq_no)))
 			continue;
 
 		droq = oct->droq[oq_no];
-		pkt_count = octeon_droq_check_hw_for_pkts(droq);
+		pkt_count = octeon_droq_check_hw_for_pkts(oct, droq);
 		if (pkt_count) {
 			oct->droq_intr |= (1ULL << oq_no);
 			if (droq->ops.poll_mode) {
@@ -688,6 +723,7 @@ int lio_setup_cn66xx_octeon_device(struct octeon_device *oct)
 
 	oct->fn_list.soft_reset = lio_cn6xxx_soft_reset;
 	oct->fn_list.setup_device_regs = lio_cn6xxx_setup_device_regs;
+	oct->fn_list.reinit_regs = lio_cn6xxx_reinit_regs;
 	oct->fn_list.update_iq_read_idx = lio_cn6xxx_update_read_index;
 
 	oct->fn_list.bar1_idx_setup = lio_cn6xxx_bar1_idx_setup;

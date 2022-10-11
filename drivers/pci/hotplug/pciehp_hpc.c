@@ -355,18 +355,6 @@ static int pciehp_link_enable(struct controller *ctrl)
 	return __pciehp_link_set(ctrl, true);
 }
 
-int pciehp_get_raw_indicator_status(struct hotplug_slot *hotplug_slot,
-				    u8 *status)
-{
-	struct slot *slot = hotplug_slot->private;
-	struct pci_dev *pdev = ctrl_dev(slot->ctrl);
-	u16 slot_ctrl;
-
-	pcie_capability_read_word(pdev, PCI_EXP_SLTCTL, &slot_ctrl);
-	*status = (slot_ctrl & (PCI_EXP_SLTCTL_AIC | PCI_EXP_SLTCTL_PIC)) >> 6;
-	return 0;
-}
-
 void pciehp_get_attention_status(struct slot *slot, u8 *status)
 {
 	struct controller *ctrl = slot->ctrl;
@@ -441,17 +429,6 @@ int pciehp_query_power_fault(struct slot *slot)
 
 	pcie_capability_read_word(pdev, PCI_EXP_SLTSTA, &slot_status);
 	return !!(slot_status & PCI_EXP_SLTSTA_PFD);
-}
-
-int pciehp_set_raw_indicator_status(struct hotplug_slot *hotplug_slot,
-				    u8 status)
-{
-	struct slot *slot = hotplug_slot->private;
-	struct controller *ctrl = slot->ctrl;
-
-	pcie_write_cmd_nowait(ctrl, status << 6,
-			      PCI_EXP_SLTCTL_AIC | PCI_EXP_SLTCTL_PIC);
-	return 0;
 }
 
 void pciehp_set_attention_status(struct slot *slot, u8 value)
@@ -558,54 +535,47 @@ void pciehp_power_off_slot(struct slot *slot)
 		 PCI_EXP_SLTCTL_PWR_OFF);
 }
 
-static irqreturn_t pciehp_isr(int irq, void *dev_id)
+static irqreturn_t pcie_isr(int irq, void *dev_id)
 {
 	struct controller *ctrl = (struct controller *)dev_id;
 	struct pci_dev *pdev = ctrl_dev(ctrl);
 	struct pci_bus *subordinate = pdev->subordinate;
 	struct pci_dev *dev;
 	struct slot *slot = ctrl->slot;
-	u16 status, events;
+	u16 detected, intr_loc;
 	u8 present;
 	bool link;
 
-	/* Interrupts cannot originate from a controller that's asleep */
-	if (pdev->current_state == PCI_D3cold)
-		return IRQ_NONE;
-
-	pcie_capability_read_word(pdev, PCI_EXP_SLTSTA, &status);
-	if (status == (u16) ~0) {
-		ctrl_info(ctrl, "%s: no response from device\n", __func__);
-		return IRQ_NONE;
-	}
-
 	/*
-	 * Slot Status contains plain status bits as well as event
-	 * notification bits; right now we only want the event bits.
+	 * In order to guarantee that all interrupt events are
+	 * serviced, we need to re-inspect Slot Status register after
+	 * clearing what is presumed to be the last pending interrupt.
 	 */
-	events = status & (PCI_EXP_SLTSTA_ABP | PCI_EXP_SLTSTA_PFD |
-			   PCI_EXP_SLTSTA_PDC | PCI_EXP_SLTSTA_CC |
-			   PCI_EXP_SLTSTA_DLLSC);
+	intr_loc = 0;
+	do {
+		pcie_capability_read_word(pdev, PCI_EXP_SLTSTA, &detected);
+		if (detected == (u16) ~0) {
+			ctrl_info(ctrl, "%s: no response from device\n",
+				  __func__);
+			return IRQ_HANDLED;
+		}
 
-	/*
-	 * If we've already reported a power fault, don't report it again
-	 * until we've done something to handle it.
-	 */
-	if (ctrl->power_fault_detected)
-		events &= ~PCI_EXP_SLTSTA_PFD;
+		detected &= (PCI_EXP_SLTSTA_ABP | PCI_EXP_SLTSTA_PFD |
+			     PCI_EXP_SLTSTA_PDC |
+			     PCI_EXP_SLTSTA_CC | PCI_EXP_SLTSTA_DLLSC);
+		detected &= ~intr_loc;
+		intr_loc |= detected;
+		if (!intr_loc)
+			return IRQ_NONE;
+		if (detected)
+			pcie_capability_write_word(pdev, PCI_EXP_SLTSTA,
+						   intr_loc);
+	} while (detected);
 
-	if (!events)
-		return IRQ_NONE;
-
-	/* Capture link status before clearing interrupts */
-	if (events & PCI_EXP_SLTSTA_DLLSC)
-		link = pciehp_check_link_active(ctrl);
-
-	pcie_capability_write_word(pdev, PCI_EXP_SLTSTA, events);
-	ctrl_dbg(ctrl, "pending interrupts %#06x from Slot Status\n", events);
+	ctrl_dbg(ctrl, "pending interrupts %#06x from Slot Status\n", intr_loc);
 
 	/* Check Command Complete Interrupt Pending */
-	if (events & PCI_EXP_SLTSTA_CC) {
+	if (intr_loc & PCI_EXP_SLTSTA_CC) {
 		ctrl->cmd_busy = 0;
 		smp_mb();
 		wake_up(&ctrl->queue);
@@ -615,62 +585,47 @@ static irqreturn_t pciehp_isr(int irq, void *dev_id)
 		list_for_each_entry(dev, &subordinate->devices, bus_list) {
 			if (dev->ignore_hotplug) {
 				ctrl_dbg(ctrl, "ignoring hotplug event %#06x (%s requested no hotplug)\n",
-					 events, pci_name(dev));
+					 intr_loc, pci_name(dev));
 				return IRQ_HANDLED;
 			}
 		}
 	}
 
+	if (!(intr_loc & ~PCI_EXP_SLTSTA_CC))
+		return IRQ_HANDLED;
+
 	/* Check Attention Button Pressed */
-	if (events & PCI_EXP_SLTSTA_ABP) {
-		ctrl_info(ctrl, "Slot(%s): Attention button pressed\n",
+	if (intr_loc & PCI_EXP_SLTSTA_ABP) {
+		ctrl_info(ctrl, "Button pressed on Slot(%s)\n",
 			  slot_name(slot));
 		pciehp_queue_interrupt_event(slot, INT_BUTTON_PRESS);
 	}
 
 	/* Check Presence Detect Changed */
-	if (events & PCI_EXP_SLTSTA_PDC) {
-		present = !!(status & PCI_EXP_SLTSTA_PDS);
-		ctrl_info(ctrl, "Slot(%s): Card %spresent\n", slot_name(slot),
-			  present ? "" : "not ");
+	if (intr_loc & PCI_EXP_SLTSTA_PDC) {
+		pciehp_get_adapter_status(slot, &present);
+		ctrl_info(ctrl, "Card %spresent on Slot(%s)\n",
+			  present ? "" : "not ", slot_name(slot));
 		pciehp_queue_interrupt_event(slot, present ? INT_PRESENCE_ON :
 					     INT_PRESENCE_OFF);
 	}
 
 	/* Check Power Fault Detected */
-	if ((events & PCI_EXP_SLTSTA_PFD) && !ctrl->power_fault_detected) {
+	if ((intr_loc & PCI_EXP_SLTSTA_PFD) && !ctrl->power_fault_detected) {
 		ctrl->power_fault_detected = 1;
-		ctrl_err(ctrl, "Slot(%s): Power fault\n", slot_name(slot));
+		ctrl_err(ctrl, "Power fault on slot %s\n", slot_name(slot));
 		pciehp_queue_interrupt_event(slot, INT_POWER_FAULT);
 	}
 
-	if (events & PCI_EXP_SLTSTA_DLLSC) {
-		ctrl_info(ctrl, "Slot(%s): Link %s\n", slot_name(slot),
-			  link ? "Up" : "Down");
+	if (intr_loc & PCI_EXP_SLTSTA_DLLSC) {
+		link = pciehp_check_link_active(ctrl);
+		ctrl_info(ctrl, "slot(%s): Link %s event\n",
+			  slot_name(slot), link ? "Up" : "Down");
 		pciehp_queue_interrupt_event(slot, link ? INT_LINK_UP :
 					     INT_LINK_DOWN);
 	}
 
 	return IRQ_HANDLED;
-}
-
-static irqreturn_t pcie_isr(int irq, void *dev_id)
-{
-	irqreturn_t rc, handled = IRQ_NONE;
-
-	/*
-	 * To guarantee that all interrupt events are serviced, we need to
-	 * re-inspect Slot Status register after clearing what is presumed
-	 * to be the last pending interrupt.
-	 */
-	do {
-		rc = pciehp_isr(irq, dev_id);
-		if (rc == IRQ_HANDLED)
-			handled = IRQ_HANDLED;
-	} while (rc == IRQ_HANDLED);
-
-	/* Return IRQ_HANDLED if we handled one or more events */
-	return handled;
 }
 
 static void pcie_enable_notification(struct controller *ctrl)
@@ -786,7 +741,7 @@ int pcie_init_notification(struct controller *ctrl)
 	return 0;
 }
 
-static void pcie_shutdown_notification(struct controller *ctrl)
+void pcie_shutdown_notification(struct controller *ctrl)
 {
 	if (ctrl->notification_enabled) {
 		pcie_disable_notification(ctrl);
@@ -821,7 +776,7 @@ abort:
 static void pcie_cleanup_slot(struct controller *ctrl)
 {
 	struct slot *slot = ctrl->slot;
-	cancel_delayed_work(&slot->work);
+
 	destroy_workqueue(slot->wq);
 	kfree(slot);
 }
@@ -856,10 +811,6 @@ struct controller *pcie_init(struct pcie_device *dev)
 	}
 	ctrl->pcie = dev;
 	pcie_capability_read_dword(pdev, PCI_EXP_SLTCAP, &slot_cap);
-
-	if (pdev->hotplug_user_indicators)
-		slot_cap &= ~(PCI_EXP_SLTCAP_AIP | PCI_EXP_SLTCAP_PIP);
-
 	ctrl->slot_cap = slot_cap;
 	mutex_init(&ctrl->ctrl_lock);
 	init_waitqueue_head(&ctrl->queue);
@@ -902,7 +853,6 @@ abort:
 
 void pciehp_release_ctrl(struct controller *ctrl)
 {
-	pcie_shutdown_notification(ctrl);
 	pcie_cleanup_slot(ctrl);
 	kfree(ctrl);
 }

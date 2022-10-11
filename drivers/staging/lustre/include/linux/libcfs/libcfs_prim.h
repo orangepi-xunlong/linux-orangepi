@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -36,31 +40,20 @@
 #ifndef __LIBCFS_PRIM_H__
 #define __LIBCFS_PRIM_H__
 
+void add_wait_queue_exclusive_head(wait_queue_head_t *, wait_queue_t *);
+
 /*
  * Memory
  */
-#if BITS_PER_LONG == 32
-/* limit to lowmem on 32-bit systems */
-#define NUM_CACHEPAGES \
-	min(totalram_pages, 1UL << (30 - PAGE_SHIFT) * 3 / 4)
-#else
-#define NUM_CACHEPAGES totalram_pages
+#ifndef memory_pressure_get
+#define memory_pressure_get() (0)
 #endif
-
-static inline unsigned int memory_pressure_get(void)
-{
-	return current->flags & PF_MEMALLOC;
-}
-
-static inline void memory_pressure_set(void)
-{
-	current->flags |= PF_MEMALLOC;
-}
-
-static inline void memory_pressure_clr(void)
-{
-	current->flags &= ~PF_MEMALLOC;
-}
+#ifndef memory_pressure_set
+#define memory_pressure_set() do {} while (0)
+#endif
+#ifndef memory_pressure_clr
+#define memory_pressure_clr() do {} while (0)
+#endif
 
 static inline int cfs_memory_pressure_get_and_set(void)
 {

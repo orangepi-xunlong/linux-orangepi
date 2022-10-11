@@ -61,7 +61,9 @@ static void ltq_mm_apply(struct ltq_mm *chip)
  */
 static void ltq_mm_set(struct gpio_chip *gc, unsigned offset, int value)
 {
-	struct ltq_mm *chip = gpiochip_get_data(gc);
+	struct of_mm_gpio_chip *mm_gc = to_of_mm_gpio_chip(gc);
+	struct ltq_mm *chip =
+		container_of(mm_gc, struct ltq_mm, mmchip);
 
 	if (value)
 		chip->shadow |= (1 << offset);
@@ -120,7 +122,7 @@ static int ltq_mm_probe(struct platform_device *pdev)
 	if (!of_property_read_u32(pdev->dev.of_node, "lantiq,shadow", &shadow))
 		chip->shadow = shadow;
 
-	return of_mm_gpiochip_add_data(pdev->dev.of_node, &chip->mmchip, chip);
+	return of_mm_gpiochip_add(pdev->dev.of_node, &chip->mmchip);
 }
 
 static int ltq_mm_remove(struct platform_device *pdev)

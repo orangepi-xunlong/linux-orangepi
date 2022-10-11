@@ -192,7 +192,7 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max_low,
 #ifdef CONFIG_HAVE_ARCH_PFN_VALID
 int pfn_valid(unsigned long pfn)
 {
-	return memblock_is_map_memory(__pfn_to_phys(pfn));
+	return memblock_is_memory(__pfn_to_phys(pfn));
 }
 EXPORT_SYMBOL(pfn_valid);
 #endif
@@ -433,9 +433,6 @@ static void __init free_highpages(void)
 		if (end <= max_low)
 			continue;
 
-		if (memblock_is_nomap(mem))
-			continue;
-
 		/* Truncate partial highmem entries */
 		if (start < max_low)
 			start = max_low;
@@ -572,9 +569,8 @@ void __init mem_init(void)
 	}
 }
 
-#ifdef CONFIG_DEBUG_RODATA
+#ifdef CONFIG_ARM_KERNMEM_PERMS
 struct section_perm {
-	const char *name;
 	unsigned long start;
 	unsigned long end;
 	pmdval_t mask;
@@ -582,13 +578,9 @@ struct section_perm {
 	pmdval_t clear;
 };
 
-/* First section-aligned location at or after __start_rodata. */
-extern char __start_rodata_section_aligned[];
-
 static struct section_perm nx_perms[] = {
 	/* Make pages tables, etc before _stext RW (set NX). */
 	{
-		.name	= "pre-text NX",
 		.start	= PAGE_OFFSET,
 		.end	= (unsigned long)_stext,
 		.mask	= ~PMD_SECT_XN,
@@ -596,26 +588,26 @@ static struct section_perm nx_perms[] = {
 	},
 	/* Make init RW (set NX). */
 	{
-		.name	= "init NX",
 		.start	= (unsigned long)__init_begin,
 		.end	= (unsigned long)_sdata,
 		.mask	= ~PMD_SECT_XN,
 		.prot	= PMD_SECT_XN,
 	},
+#ifdef CONFIG_DEBUG_RODATA
 	/* Make rodata NX (set RO in ro_perms below). */
 	{
-		.name	= "rodata NX",
-		.start  = (unsigned long)__start_rodata_section_aligned,
+		.start  = (unsigned long)__start_rodata,
 		.end    = (unsigned long)__init_begin,
 		.mask   = ~PMD_SECT_XN,
 		.prot   = PMD_SECT_XN,
 	},
+#endif
 };
 
+#ifdef CONFIG_DEBUG_RODATA
 static struct section_perm ro_perms[] = {
 	/* Make kernel code and rodata RX (set RO). */
 	{
-		.name	= "text/rodata RO",
 		.start  = (unsigned long)_stext,
 		.end    = (unsigned long)__init_begin,
 #ifdef CONFIG_ARM_LPAE
@@ -628,6 +620,7 @@ static struct section_perm ro_perms[] = {
 #endif
 	},
 };
+#endif
 
 /*
  * Updates section permissions only for the current mm (sections are
@@ -674,8 +667,8 @@ void set_section_perms(struct section_perm *perms, int n, bool set,
 	for (i = 0; i < n; i++) {
 		if (!IS_ALIGNED(perms[i].start, SECTION_SIZE) ||
 		    !IS_ALIGNED(perms[i].end, SECTION_SIZE)) {
-			pr_err("BUG: %s section %lx-%lx not aligned to %lx\n",
-				perms[i].name, perms[i].start, perms[i].end,
+			pr_err("BUG: section %lx-%lx not aligned to %lx\n",
+				perms[i].start, perms[i].end,
 				SECTION_SIZE);
 			continue;
 		}
@@ -716,32 +709,43 @@ void fix_kernmem_perms(void)
 	stop_machine(__fix_kernmem_perms, NULL, NULL);
 }
 
+#ifdef CONFIG_DEBUG_RODATA
 int __mark_rodata_ro(void *unused)
 {
 	update_sections_early(ro_perms, ARRAY_SIZE(ro_perms));
 	return 0;
 }
 
+static int kernel_set_to_readonly __read_mostly;
+
 void mark_rodata_ro(void)
 {
+	kernel_set_to_readonly = 1;
 	stop_machine(__mark_rodata_ro, NULL, NULL);
 }
 
 void set_kernel_text_rw(void)
 {
+	if (!kernel_set_to_readonly)
+		return;
+
 	set_section_perms(ro_perms, ARRAY_SIZE(ro_perms), false,
 				current->active_mm);
 }
 
 void set_kernel_text_ro(void)
 {
+	if (!kernel_set_to_readonly)
+		return;
+
 	set_section_perms(ro_perms, ARRAY_SIZE(ro_perms), true,
 				current->active_mm);
 }
+#endif /* CONFIG_DEBUG_RODATA */
 
 #else
 static inline void fix_kernmem_perms(void) { }
-#endif /* CONFIG_DEBUG_RODATA */
+#endif /* CONFIG_ARM_KERNMEM_PERMS */
 
 void free_tcmmem(void)
 {

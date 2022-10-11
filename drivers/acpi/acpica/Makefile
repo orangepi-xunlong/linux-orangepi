@@ -43,7 +43,6 @@ acpi-y +=		\
 	evxfregn.o
 
 acpi-y +=		\
-	exconcat.o	\
 	exconfig.o	\
 	exconvrt.o	\
 	excreate.o	\
@@ -51,7 +50,6 @@ acpi-y +=		\
 	exdump.o	\
 	exfield.o	\
 	exfldio.o	\
-	exmisc.o	\
 	exmutex.o	\
 	exnames.o	\
 	exoparg1.o	\
@@ -59,6 +57,7 @@ acpi-y +=		\
 	exoparg3.o	\
 	exoparg6.o	\
 	exprep.o	\
+	exmisc.o	\
 	exregion.o	\
 	exresnte.o	\
 	exresolv.o	\
@@ -67,7 +66,6 @@ acpi-y +=		\
 	exstoren.o	\
 	exstorob.o	\
 	exsystem.o	\
-	extrace.o	\
 	exutils.o
 
 acpi-y +=		\
@@ -150,7 +148,6 @@ acpi-y +=		\
 acpi-y +=		\
 	utaddress.o	\
 	utalloc.o	\
-	utascii.o	\
 	utbuffer.o	\
 	utcopy.o	\
 	utexcep.o	\
@@ -175,7 +172,6 @@ acpi-y +=		\
 	utresrc.o	\
 	utstate.o	\
 	utstring.o	\
-	utstrtoul64.o	\
 	utxface.o	\
 	utxfinit.o	\
 	utxferror.o	\
@@ -200,6 +196,7 @@ acpi-$(ACPI_FUTURE_USAGE) +=	\
 	dbfileio.o		\
 	dbtest.o		\
 	utcache.o		\
+	utfileio.o		\
 	utprint.o		\
 	uttrack.o		\
 	utuuid.o

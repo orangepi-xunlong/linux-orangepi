@@ -15,6 +15,8 @@
 #include <linux/rtc.h>
 #include <linux/platform_device.h>
 
+#include <asm/rtc.h>
+
 #include "proto.h"
 
 
@@ -79,7 +81,7 @@ init_rtc_epoch(void)
 static int
 alpha_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
-	mc146818_get_time(tm);
+	__get_rtc_time(tm);
 
 	/* Adjust for non-default epochs.  It's easier to depend on the
 	   generic __get_rtc_time and adjust the epoch here than create
@@ -110,7 +112,7 @@ alpha_rtc_set_time(struct device *dev, struct rtc_time *tm)
 		tm = &xtm;
 	}
 
-	return mc146818_set_time(tm);
+	return __set_rtc_time(tm);
 }
 
 static int

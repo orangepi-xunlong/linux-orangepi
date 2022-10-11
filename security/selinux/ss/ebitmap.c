@@ -165,7 +165,7 @@ int ebitmap_netlbl_import(struct ebitmap *ebmap,
 			e_iter = kzalloc(sizeof(*e_iter), GFP_ATOMIC);
 			if (e_iter == NULL)
 				goto netlbl_import_failure;
-			e_iter->startbit = offset - (offset % EBITMAP_SIZE);
+			e_iter->startbit = offset & ~(EBITMAP_SIZE - 1);
 			if (e_prev == NULL)
 				ebmap->node = e_iter;
 			else
@@ -373,9 +373,6 @@ int ebitmap_read(struct ebitmap *e, void *fp)
 		e->node = NULL;
 		goto ok;
 	}
-
-	if (e->highbit && !count)
-		goto bad;
 
 	for (i = 0; i < count; i++) {
 		rc = next_entry(&startbit, fp, sizeof(u32));

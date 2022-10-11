@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2015, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -158,7 +158,7 @@ const struct acpi_opcode_info *acpi_ps_get_opcode_info(u16 opcode)
  *
  ******************************************************************************/
 
-const char *acpi_ps_get_opcode_name(u16 opcode)
+char *acpi_ps_get_opcode_name(u16 opcode)
 {
 #if defined(ACPI_DISASSEMBLER) || defined (ACPI_DEBUG_OUTPUT)
 

@@ -14,15 +14,14 @@
 #include <asm/alternative-asm.h>
 #include <asm/asm.h>
 #include <asm/smap.h>
-#include <asm/export.h>
 
 /* Standard copy_to_user with segment limit checking */
 ENTRY(_copy_to_user)
-	mov PER_CPU_VAR(current_task), %rax
+	GET_THREAD_INFO(%rax)
 	movq %rdi,%rcx
 	addq %rdx,%rcx
 	jc bad_to_user
-	cmpq TASK_addr_limit(%rax),%rcx
+	cmpq TI_addr_limit(%rax),%rcx
 	ja bad_to_user
 	ALTERNATIVE_2 "jmp copy_user_generic_unrolled",		\
 		      "jmp copy_user_generic_string",		\
@@ -30,15 +29,14 @@ ENTRY(_copy_to_user)
 		      "jmp copy_user_enhanced_fast_string",	\
 		      X86_FEATURE_ERMS
 ENDPROC(_copy_to_user)
-EXPORT_SYMBOL(_copy_to_user)
 
 /* Standard copy_from_user with segment limit checking */
 ENTRY(_copy_from_user)
-	mov PER_CPU_VAR(current_task), %rax
+	GET_THREAD_INFO(%rax)
 	movq %rsi,%rcx
 	addq %rdx,%rcx
 	jc bad_from_user
-	cmpq TASK_addr_limit(%rax),%rcx
+	cmpq TI_addr_limit(%rax),%rcx
 	ja bad_from_user
 	ALTERNATIVE_2 "jmp copy_user_generic_unrolled",		\
 		      "jmp copy_user_generic_string",		\
@@ -46,8 +44,6 @@ ENTRY(_copy_from_user)
 		      "jmp copy_user_enhanced_fast_string",	\
 		      X86_FEATURE_ERMS
 ENDPROC(_copy_from_user)
-EXPORT_SYMBOL(_copy_from_user)
-
 
 	.section .fixup,"ax"
 	/* must zero dest */
@@ -160,7 +156,6 @@ ENTRY(copy_user_generic_unrolled)
 	_ASM_EXTABLE(21b,50b)
 	_ASM_EXTABLE(22b,50b)
 ENDPROC(copy_user_generic_unrolled)
-EXPORT_SYMBOL(copy_user_generic_unrolled)
 
 /* Some CPUs run faster using the string copy instructions.
  * This is also a lot simpler. Use them when possible.
@@ -206,7 +201,6 @@ ENTRY(copy_user_generic_string)
 	_ASM_EXTABLE(1b,11b)
 	_ASM_EXTABLE(3b,12b)
 ENDPROC(copy_user_generic_string)
-EXPORT_SYMBOL(copy_user_generic_string)
 
 /*
  * Some CPUs are adding enhanced REP MOVSB/STOSB instructions.
@@ -238,7 +232,6 @@ ENTRY(copy_user_enhanced_fast_string)
 
 	_ASM_EXTABLE(1b,12b)
 ENDPROC(copy_user_enhanced_fast_string)
-EXPORT_SYMBOL(copy_user_enhanced_fast_string)
 
 /*
  * copy_user_nocache - Uncached memory copy with exception handling
@@ -389,4 +382,3 @@ ENTRY(__copy_user_nocache)
 	_ASM_EXTABLE(40b,.L_fixup_1b_copy)
 	_ASM_EXTABLE(41b,.L_fixup_1b_copy)
 ENDPROC(__copy_user_nocache)
-EXPORT_SYMBOL(__copy_user_nocache)

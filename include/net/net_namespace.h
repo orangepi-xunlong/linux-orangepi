@@ -53,6 +53,7 @@ struct net {
 						 */
 	spinlock_t		rules_mod_lock;
 
+	u32			hash_mix;
 	atomic64_t		cookie_gen;
 
 	struct list_head	list;		/* list of network namespaces */
@@ -60,7 +61,6 @@ struct net {
 	struct list_head	exit_list;	/* Use only net_mutex */
 
 	struct user_namespace   *user_ns;	/* Owning user namespace */
-	struct ucounts		*ucounts;
 	spinlock_t		nsid_lock;
 	struct idr		netns_ids;
 
@@ -116,14 +116,12 @@ struct net {
 #endif
 #if IS_ENABLED(CONFIG_NF_DEFRAG_IPV6)
 	struct netns_nf_frag	nf_frag;
+	struct ctl_table_header *nf_frag_frags_hdr;
 #endif
 	struct sock		*nfnl;
 	struct sock		*nfnl_stash;
 #if IS_ENABLED(CONFIG_NETFILTER_NETLINK_ACCT)
 	struct list_head        nfnl_acct_list;
-#endif
-#if IS_ENABLED(CONFIG_NF_CT_NETLINK_TIMEOUT)
-	struct list_head	nfct_timeout_list;
 #endif
 #endif
 #ifdef CONFIG_WEXT_CORE
@@ -170,7 +168,7 @@ static inline struct net *copy_net_ns(unsigned long flags,
 extern struct list_head net_namespace_list;
 
 struct net *get_net_ns_by_pid(pid_t pid);
-struct net *get_net_ns_by_fd(int fd);
+struct net *get_net_ns_by_fd(int pid);
 
 #ifdef CONFIG_SYSCTL
 void ipx_register_sysctl(void);
@@ -286,7 +284,7 @@ static inline struct net *read_pnet(const possible_net_t *pnet)
 #define __net_initconst
 #else
 #define __net_init	__init
-#define __net_exit	__ref
+#define __net_exit	__exit_refok
 #define __net_initdata	__initdata
 #define __net_initconst	__initconst
 #endif

@@ -34,7 +34,7 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 
-#include "flash.h"
+#include <mach/flash.h>
 #include <mach/mux.h>
 #include <linux/omap-dma.h>
 #include <mach/tc.h>

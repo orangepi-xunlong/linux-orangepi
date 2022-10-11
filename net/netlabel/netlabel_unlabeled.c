@@ -116,11 +116,11 @@ struct netlbl_unlhsh_walk_arg {
 static DEFINE_SPINLOCK(netlbl_unlhsh_lock);
 #define netlbl_unlhsh_rcu_deref(p) \
 	rcu_dereference_check(p, lockdep_is_held(&netlbl_unlhsh_lock))
-static struct netlbl_unlhsh_tbl __rcu *netlbl_unlhsh;
-static struct netlbl_unlhsh_iface __rcu *netlbl_unlhsh_def;
+static struct netlbl_unlhsh_tbl *netlbl_unlhsh = NULL;
+static struct netlbl_unlhsh_iface *netlbl_unlhsh_def = NULL;
 
 /* Accept unlabeled packets flag */
-static u8 netlabel_unlabel_acceptflg;
+static u8 netlabel_unlabel_acceptflg = 0;
 
 /* NetLabel Generic NETLINK unlabeled family */
 static struct genl_family netlbl_unlabel_gnl_family = {
@@ -787,7 +787,8 @@ static int netlbl_unlabel_addrinfo_get(struct genl_info *info,
 {
 	u32 addr_len;
 
-	if (info->attrs[NLBL_UNLABEL_A_IPV4ADDR]) {
+	if (info->attrs[NLBL_UNLABEL_A_IPV4ADDR] &&
+	    info->attrs[NLBL_UNLABEL_A_IPV4MASK]) {
 		addr_len = nla_len(info->attrs[NLBL_UNLABEL_A_IPV4ADDR]);
 		if (addr_len != sizeof(struct in_addr) &&
 		    addr_len != nla_len(info->attrs[NLBL_UNLABEL_A_IPV4MASK]))
@@ -1547,7 +1548,6 @@ int __init netlbl_unlabel_defconf(void)
 	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
 	if (entry == NULL)
 		return -ENOMEM;
-	entry->family = AF_UNSPEC;
 	entry->def.type = NETLBL_NLTYPE_UNLABELED;
 	ret_val = netlbl_domhsh_add_default(entry, &audit_info);
 	if (ret_val != 0)

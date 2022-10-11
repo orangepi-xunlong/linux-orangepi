@@ -29,7 +29,7 @@ static void init_c3(struct cpuinfo_x86 *c)
 			rdmsr(MSR_VIA_FCR, lo, hi);
 			lo |= ACE_FCR;		/* enable ACE unit */
 			wrmsr(MSR_VIA_FCR, lo, hi);
-			pr_info("CPU: Enabled ACE h/w crypto\n");
+			printk(KERN_INFO "CPU: Enabled ACE h/w crypto\n");
 		}
 
 		/* enable RNG unit, if present and disabled */
@@ -37,7 +37,7 @@ static void init_c3(struct cpuinfo_x86 *c)
 			rdmsr(MSR_VIA_RNG, lo, hi);
 			lo |= RNG_ENABLE;	/* enable RNG unit */
 			wrmsr(MSR_VIA_RNG, lo, hi);
-			pr_info("CPU: Enabled h/w RNG\n");
+			printk(KERN_INFO "CPU: Enabled h/w RNG\n");
 		}
 
 		/* store Centaur Extended Feature Flags as
@@ -130,11 +130,11 @@ static void init_centaur(struct cpuinfo_x86 *c)
 			name = "C6";
 			fcr_set = ECX8|DSMC|EDCTLB|EMMX|ERETSTK;
 			fcr_clr = DPDC;
-			pr_notice("Disabling bugged TSC.\n");
+			printk(KERN_NOTICE "Disabling bugged TSC.\n");
 			clear_cpu_cap(c, X86_FEATURE_TSC);
 			break;
 		case 8:
-			switch (c->x86_stepping) {
+			switch (c->x86_mask) {
 			default:
 			name = "2";
 				break;
@@ -163,11 +163,11 @@ static void init_centaur(struct cpuinfo_x86 *c)
 		newlo = (lo|fcr_set) & (~fcr_clr);
 
 		if (newlo != lo) {
-			pr_info("Centaur FCR was 0x%X now 0x%X\n",
+			printk(KERN_INFO "Centaur FCR was 0x%X now 0x%X\n",
 				lo, newlo);
 			wrmsr(MSR_IDT_FCR1, newlo, hi);
 		} else {
-			pr_info("Centaur FCR is 0x%X\n", lo);
+			printk(KERN_INFO "Centaur FCR is 0x%X\n", lo);
 		}
 		/* Emulate MTRRs using Centaur's MCR. */
 		set_cpu_cap(c, X86_FEATURE_CENTAUR_MCR);
@@ -209,7 +209,7 @@ centaur_size_cache(struct cpuinfo_x86 *c, unsigned int size)
 	 *  - Note, it seems this may only be in engineering samples.
 	 */
 	if ((c->x86 == 6) && (c->x86_model == 9) &&
-				(c->x86_stepping == 1) && (size == 65))
+				(c->x86_mask == 1) && (size == 65))
 		size -= 1;
 	return size;
 }

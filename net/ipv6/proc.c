@@ -30,15 +30,9 @@
 #include <net/transp_v6.h>
 #include <net/ipv6.h>
 
-#define MAX4(a, b, c, d) \
-	max_t(u32, max_t(u32, a, b), max_t(u32, c, d))
-#define SNMP_MIB_MAX MAX4(UDP_MIB_MAX, TCP_MIB_MAX, \
-			IPSTATS_MIB_MAX, ICMP_MIB_MAX)
-
 static int sockstat6_seq_show(struct seq_file *seq, void *v)
 {
 	struct net *net = seq->private;
-	unsigned int frag_mem = ip6_frag_mem(net);
 
 	seq_printf(seq, "TCP6: inuse %d\n",
 		       sock_prot_inuse_get(net, &tcpv6_prot));
@@ -48,7 +42,9 @@ static int sockstat6_seq_show(struct seq_file *seq, void *v)
 			sock_prot_inuse_get(net, &udplitev6_prot));
 	seq_printf(seq, "RAW6: inuse %d\n",
 		       sock_prot_inuse_get(net, &rawv6_prot));
-	seq_printf(seq, "FRAG6: inuse %u memory %u\n", !!frag_mem, frag_mem);
+	seq_printf(seq, "FRAG6: inuse %u memory %lu\n",
+		   atomic_read(&net->ipv6.frags.rhashtable.nelems),
+		   frag_mem_limit(&net->ipv6.frags));
 	return 0;
 }
 
@@ -196,34 +192,25 @@ static void snmp6_seq_show_item(struct seq_file *seq, void __percpu *pcpumib,
 				atomic_long_t *smib,
 				const struct snmp_mib *itemlist)
 {
-	unsigned long buff[SNMP_MIB_MAX];
 	int i;
+	unsigned long val;
 
-	if (pcpumib) {
-		memset(buff, 0, sizeof(unsigned long) * SNMP_MIB_MAX);
-
-		snmp_get_cpu_field_batch(buff, itemlist, pcpumib);
-		for (i = 0; itemlist[i].name; i++)
-			seq_printf(seq, "%-32s\t%lu\n",
-				   itemlist[i].name, buff[i]);
-	} else {
-		for (i = 0; itemlist[i].name; i++)
-			seq_printf(seq, "%-32s\t%lu\n", itemlist[i].name,
-				   atomic_long_read(smib + itemlist[i].entry));
+	for (i = 0; itemlist[i].name; i++) {
+		val = pcpumib ?
+			snmp_fold_field(pcpumib, itemlist[i].entry) :
+			atomic_long_read(smib + itemlist[i].entry);
+		seq_printf(seq, "%-32s\t%lu\n", itemlist[i].name, val);
 	}
 }
 
 static void snmp6_seq_show_item64(struct seq_file *seq, void __percpu *mib,
 				  const struct snmp_mib *itemlist, size_t syncpoff)
 {
-	u64 buff64[SNMP_MIB_MAX];
 	int i;
 
-	memset(buff64, 0, sizeof(u64) * SNMP_MIB_MAX);
-
-	snmp_get_cpu_field64_batch(buff64, itemlist, mib, syncpoff);
 	for (i = 0; itemlist[i].name; i++)
-		seq_printf(seq, "%-32s\t%llu\n", itemlist[i].name, buff64[i]);
+		seq_printf(seq, "%-32s\t%llu\n", itemlist[i].name,
+			   snmp_fold_field64(mib, itemlist[i].entry, syncpoff));
 }
 
 static int snmp6_seq_show(struct seq_file *seq, void *v)

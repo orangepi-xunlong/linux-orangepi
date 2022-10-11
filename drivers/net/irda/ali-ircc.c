@@ -1427,7 +1427,7 @@ static netdev_tx_t ali_ircc_fir_hard_xmit(struct sk_buff *skb,
 		/* Check for empty frame */
 		if (!skb->len) {
 			ali_ircc_change_speed(self, speed); 
-			netif_trans_update(dev);
+			dev->trans_start = jiffies;
 			spin_unlock_irqrestore(&self->lock, flags);
 			dev_kfree_skb(skb);
 			return NETDEV_TX_OK;
@@ -1533,7 +1533,7 @@ static netdev_tx_t ali_ircc_fir_hard_xmit(struct sk_buff *skb,
 	/* Restore bank register */
 	switch_bank(iobase, BANK0);
 
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 	spin_unlock_irqrestore(&self->lock, flags);
 	dev_kfree_skb(skb);
 
@@ -1946,7 +1946,7 @@ static netdev_tx_t ali_ircc_sir_hard_xmit(struct sk_buff *skb,
 		/* Check for empty frame */
 		if (!skb->len) {
 			ali_ircc_change_speed(self, speed); 
-			netif_trans_update(dev);
+			dev->trans_start = jiffies;
 			spin_unlock_irqrestore(&self->lock, flags);
 			dev_kfree_skb(skb);
 			return NETDEV_TX_OK;
@@ -1966,7 +1966,7 @@ static netdev_tx_t ali_ircc_sir_hard_xmit(struct sk_buff *skb,
 	/* Turn on transmit finished interrupt. Will fire immediately!  */
 	outb(UART_IER_THRI, iobase+UART_IER); 
 
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 	spin_unlock_irqrestore(&self->lock, flags);
 
 	dev_kfree_skb(skb);

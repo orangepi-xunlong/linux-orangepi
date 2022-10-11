@@ -63,7 +63,6 @@ static struct usb_driver btusb_driver;
 #define BTUSB_REALTEK		0x20000
 #define BTUSB_BCM2045		0x40000
 #define BTUSB_IFNUM_2		0x80000
-#define BTUSB_CW6622		0x100000
 
 static const struct usb_device_id btusb_table[] = {
 	/* Generic Bluetooth USB device */
@@ -239,8 +238,6 @@ static const struct usb_device_id blacklist_table[] = {
 	{ USB_DEVICE(0x13d3, 0x3432), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x13d3, 0x3472), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x13d3, 0x3474), .driver_info = BTUSB_ATH3012 },
-	{ USB_DEVICE(0x13d3, 0x3487), .driver_info = BTUSB_ATH3012 },
-	{ USB_DEVICE(0x13d3, 0x3490), .driver_info = BTUSB_ATH3012 },
 
 	/* Atheros AR5BBU12 with sflash firmware */
 	{ USB_DEVICE(0x0489, 0xe02c), .driver_info = BTUSB_IGNORE },
@@ -251,11 +248,8 @@ static const struct usb_device_id blacklist_table[] = {
 
 	/* QCA ROME chipset */
 	{ USB_DEVICE(0x0cf3, 0xe007), .driver_info = BTUSB_QCA_ROME },
-	{ USB_DEVICE(0x0cf3, 0xe009), .driver_info = BTUSB_QCA_ROME },
 	{ USB_DEVICE(0x0cf3, 0xe300), .driver_info = BTUSB_QCA_ROME },
 	{ USB_DEVICE(0x0cf3, 0xe360), .driver_info = BTUSB_QCA_ROME },
-	{ USB_DEVICE(0x0489, 0xe092), .driver_info = BTUSB_QCA_ROME },
-	{ USB_DEVICE(0x04ca, 0x3011), .driver_info = BTUSB_QCA_ROME },
 
 	/* Broadcom BCM2035 */
 	{ USB_DEVICE(0x0a5c, 0x2009), .driver_info = BTUSB_BCM92035 },
@@ -295,8 +289,7 @@ static const struct usb_device_id blacklist_table[] = {
 	{ USB_DEVICE(0x0400, 0x080a), .driver_info = BTUSB_BROKEN_ISOC },
 
 	/* CONWISE Technology based adapters with buggy SCO support */
-	{ USB_DEVICE(0x0e5e, 0x6622),
-	  .driver_info = BTUSB_BROKEN_ISOC | BTUSB_CW6622},
+	{ USB_DEVICE(0x0e5e, 0x6622), .driver_info = BTUSB_BROKEN_ISOC },
 
 	/* Roper Class 1 Bluetooth Dongle (Silicon Wave based) */
 	{ USB_DEVICE(0x1310, 0x0001), .driver_info = BTUSB_SWAVE },
@@ -316,14 +309,12 @@ static const struct usb_device_id blacklist_table[] = {
 	/* Marvell Bluetooth devices */
 	{ USB_DEVICE(0x1286, 0x2044), .driver_info = BTUSB_MARVELL },
 	{ USB_DEVICE(0x1286, 0x2046), .driver_info = BTUSB_MARVELL },
-	{ USB_DEVICE(0x1286, 0x204e), .driver_info = BTUSB_MARVELL },
 
 	/* Intel Bluetooth devices */
 	{ USB_DEVICE(0x8087, 0x07da), .driver_info = BTUSB_CSR },
 	{ USB_DEVICE(0x8087, 0x07dc), .driver_info = BTUSB_INTEL },
 	{ USB_DEVICE(0x8087, 0x0a2a), .driver_info = BTUSB_INTEL },
 	{ USB_DEVICE(0x8087, 0x0a2b), .driver_info = BTUSB_INTEL_NEW },
-	{ USB_DEVICE(0x8087, 0x0aa7), .driver_info = BTUSB_INTEL },
 
 	/* Other Intel Bluetooth devices */
 	{ USB_VENDOR_AND_INTERFACE_INFO(0x8087, 0xe0, 0x01, 0x01),
@@ -349,6 +340,7 @@ static const struct usb_device_id blacklist_table[] = {
 	{ USB_DEVICE(0x7392, 0xa611), .driver_info = BTUSB_REALTEK },
 
 	/* Additional Realtek 8723DE Bluetooth devices */
+	{ USB_DEVICE(0x0bda, 0xb009), .driver_info = BTUSB_REALTEK },
 	{ USB_DEVICE(0x2ff8, 0xb011), .driver_info = BTUSB_REALTEK },
 
 	/* Additional Realtek 8821AE Bluetooth devices */
@@ -466,22 +458,22 @@ static int btusb_recv_intr(struct btusb_data *data, void *buffer, int count)
 				break;
 			}
 
-			hci_skb_pkt_type(skb) = HCI_EVENT_PKT;
-			hci_skb_expect(skb) = HCI_EVENT_HDR_SIZE;
+			bt_cb(skb)->pkt_type = HCI_EVENT_PKT;
+			bt_cb(skb)->expect = HCI_EVENT_HDR_SIZE;
 		}
 
-		len = min_t(uint, hci_skb_expect(skb), count);
+		len = min_t(uint, bt_cb(skb)->expect, count);
 		memcpy(skb_put(skb, len), buffer, len);
 
 		count -= len;
 		buffer += len;
-		hci_skb_expect(skb) -= len;
+		bt_cb(skb)->expect -= len;
 
 		if (skb->len == HCI_EVENT_HDR_SIZE) {
 			/* Complete event header */
-			hci_skb_expect(skb) = hci_event_hdr(skb)->plen;
+			bt_cb(skb)->expect = hci_event_hdr(skb)->plen;
 
-			if (skb_tailroom(skb) < hci_skb_expect(skb)) {
+			if (skb_tailroom(skb) < bt_cb(skb)->expect) {
 				kfree_skb(skb);
 				skb = NULL;
 
@@ -490,7 +482,7 @@ static int btusb_recv_intr(struct btusb_data *data, void *buffer, int count)
 			}
 		}
 
-		if (!hci_skb_expect(skb)) {
+		if (bt_cb(skb)->expect == 0) {
 			/* Complete frame */
 			data->recv_event(data->hdev, skb);
 			skb = NULL;
@@ -521,24 +513,24 @@ static int btusb_recv_bulk(struct btusb_data *data, void *buffer, int count)
 				break;
 			}
 
-			hci_skb_pkt_type(skb) = HCI_ACLDATA_PKT;
-			hci_skb_expect(skb) = HCI_ACL_HDR_SIZE;
+			bt_cb(skb)->pkt_type = HCI_ACLDATA_PKT;
+			bt_cb(skb)->expect = HCI_ACL_HDR_SIZE;
 		}
 
-		len = min_t(uint, hci_skb_expect(skb), count);
+		len = min_t(uint, bt_cb(skb)->expect, count);
 		memcpy(skb_put(skb, len), buffer, len);
 
 		count -= len;
 		buffer += len;
-		hci_skb_expect(skb) -= len;
+		bt_cb(skb)->expect -= len;
 
 		if (skb->len == HCI_ACL_HDR_SIZE) {
 			__le16 dlen = hci_acl_hdr(skb)->dlen;
 
 			/* Complete ACL header */
-			hci_skb_expect(skb) = __le16_to_cpu(dlen);
+			bt_cb(skb)->expect = __le16_to_cpu(dlen);
 
-			if (skb_tailroom(skb) < hci_skb_expect(skb)) {
+			if (skb_tailroom(skb) < bt_cb(skb)->expect) {
 				kfree_skb(skb);
 				skb = NULL;
 
@@ -547,7 +539,7 @@ static int btusb_recv_bulk(struct btusb_data *data, void *buffer, int count)
 			}
 		}
 
-		if (!hci_skb_expect(skb)) {
+		if (bt_cb(skb)->expect == 0) {
 			/* Complete frame */
 			hci_recv_frame(data->hdev, skb);
 			skb = NULL;
@@ -578,22 +570,22 @@ static int btusb_recv_isoc(struct btusb_data *data, void *buffer, int count)
 				break;
 			}
 
-			hci_skb_pkt_type(skb) = HCI_SCODATA_PKT;
-			hci_skb_expect(skb) = HCI_SCO_HDR_SIZE;
+			bt_cb(skb)->pkt_type = HCI_SCODATA_PKT;
+			bt_cb(skb)->expect = HCI_SCO_HDR_SIZE;
 		}
 
-		len = min_t(uint, hci_skb_expect(skb), count);
+		len = min_t(uint, bt_cb(skb)->expect, count);
 		memcpy(skb_put(skb, len), buffer, len);
 
 		count -= len;
 		buffer += len;
-		hci_skb_expect(skb) -= len;
+		bt_cb(skb)->expect -= len;
 
 		if (skb->len == HCI_SCO_HDR_SIZE) {
 			/* Complete SCO header */
-			hci_skb_expect(skb) = hci_sco_hdr(skb)->dlen;
+			bt_cb(skb)->expect = hci_sco_hdr(skb)->dlen;
 
-			if (skb_tailroom(skb) < hci_skb_expect(skb)) {
+			if (skb_tailroom(skb) < bt_cb(skb)->expect) {
 				kfree_skb(skb);
 				skb = NULL;
 
@@ -602,7 +594,7 @@ static int btusb_recv_isoc(struct btusb_data *data, void *buffer, int count)
 			}
 		}
 
-		if (!hci_skb_expect(skb)) {
+		if (bt_cb(skb)->expect == 0) {
 			/* Complete frame */
 			hci_recv_frame(data->hdev, skb);
 			skb = NULL;
@@ -1055,10 +1047,6 @@ static int btusb_open(struct hci_dev *hdev)
 
 	BT_DBG("%s", hdev->name);
 
-	err = usb_autopm_get_interface(data->intf);
-	if (err < 0)
-		return err;
-
 	/* Patching USB firmware files prior to starting any URBs of HCI path
 	 * It is more safe to use USB bulk channel for downloading USB patch
 	 */
@@ -1067,6 +1055,10 @@ static int btusb_open(struct hci_dev *hdev)
 		if (err < 0)
 			return err;
 	}
+
+	err = usb_autopm_get_interface(data->intf);
+	if (err < 0)
+		return err;
 
 	data->intf->needs_remote_wakeup = 1;
 
@@ -1286,7 +1278,7 @@ static int btusb_send_frame(struct hci_dev *hdev, struct sk_buff *skb)
 
 	BT_DBG("%s", hdev->name);
 
-	switch (hci_skb_pkt_type(skb)) {
+	switch (bt_cb(skb)->pkt_type) {
 	case HCI_COMMAND_PKT:
 		urb = alloc_ctrl_urb(hdev, skb);
 		if (IS_ERR(urb))
@@ -1671,8 +1663,13 @@ static int btusb_setup_intel(struct hci_dev *hdev)
 	struct sk_buff *skb;
 	const struct firmware *fw;
 	const u8 *fw_ptr;
-	int disable_patch, err;
-	struct intel_version ver;
+	int disable_patch;
+	struct intel_version *ver;
+
+	const u8 mfg_enable[] = { 0x01, 0x00 };
+	const u8 mfg_disable[] = { 0x00, 0x00 };
+	const u8 mfg_reset_deactivate[] = { 0x00, 0x01 };
+	const u8 mfg_reset_activate[] = { 0x00, 0x02 };
 
 	BT_DBG("%s", hdev->name);
 
@@ -1698,22 +1695,35 @@ static int btusb_setup_intel(struct hci_dev *hdev)
 	 * The returned information are hardware variant and revision plus
 	 * firmware variant, revision and build number.
 	 */
-	err = btintel_read_version(hdev, &ver);
-	if (err)
-		return err;
+	skb = __hci_cmd_sync(hdev, 0xfc05, 0, NULL, HCI_INIT_TIMEOUT);
+	if (IS_ERR(skb)) {
+		BT_ERR("%s reading Intel fw version command failed (%ld)",
+		       hdev->name, PTR_ERR(skb));
+		return PTR_ERR(skb);
+	}
+
+	if (skb->len != sizeof(*ver)) {
+		BT_ERR("%s Intel version event length mismatch", hdev->name);
+		kfree_skb(skb);
+		return -EIO;
+	}
+
+	ver = (struct intel_version *)skb->data;
 
 	BT_INFO("%s: read Intel version: %02x%02x%02x%02x%02x%02x%02x%02x%02x",
-		hdev->name, ver.hw_platform, ver.hw_variant, ver.hw_revision,
-		ver.fw_variant,  ver.fw_revision, ver.fw_build_num,
-		ver.fw_build_ww, ver.fw_build_yy, ver.fw_patch_num);
+		hdev->name, ver->hw_platform, ver->hw_variant,
+		ver->hw_revision, ver->fw_variant,  ver->fw_revision,
+		ver->fw_build_num, ver->fw_build_ww, ver->fw_build_yy,
+		ver->fw_patch_num);
 
 	/* fw_patch_num indicates the version of patch the device currently
 	 * have. If there is no patch data in the device, it is always 0x00.
 	 * So, if it is other than 0x00, no need to patch the device again.
 	 */
-	if (ver.fw_patch_num) {
+	if (ver->fw_patch_num) {
 		BT_INFO("%s: Intel device is already patched. patch num: %02x",
-			hdev->name, ver.fw_patch_num);
+			hdev->name, ver->fw_patch_num);
+		kfree_skb(skb);
 		goto complete;
 	}
 
@@ -1723,20 +1733,30 @@ static int btusb_setup_intel(struct hci_dev *hdev)
 	 * If no patch file is found, allow the device to operate without
 	 * a patch.
 	 */
-	fw = btusb_setup_intel_get_fw(hdev, &ver);
-	if (!fw)
+	fw = btusb_setup_intel_get_fw(hdev, ver);
+	if (!fw) {
+		kfree_skb(skb);
 		goto complete;
+	}
 	fw_ptr = fw->data;
 
-	/* Enable the manufacturer mode of the controller.
+	kfree_skb(skb);
+
+	/* This Intel specific command enables the manufacturer mode of the
+	 * controller.
+	 *
 	 * Only while this mode is enabled, the driver can download the
 	 * firmware patch data and configuration parameters.
 	 */
-	err = btintel_enter_mfg(hdev);
-	if (err) {
+	skb = __hci_cmd_sync(hdev, 0xfc11, 2, mfg_enable, HCI_INIT_TIMEOUT);
+	if (IS_ERR(skb)) {
+		BT_ERR("%s entering Intel manufacturer mode failed (%ld)",
+		       hdev->name, PTR_ERR(skb));
 		release_firmware(fw);
-		return err;
+		return PTR_ERR(skb);
 	}
+
+	kfree_skb(skb);
 
 	disable_patch = 1;
 
@@ -1777,9 +1797,14 @@ static int btusb_setup_intel(struct hci_dev *hdev)
 	/* Patching completed successfully and disable the manufacturer mode
 	 * with reset and activate the downloaded firmware patches.
 	 */
-	err = btintel_exit_mfg(hdev, true, true);
-	if (err)
-		return err;
+	skb = __hci_cmd_sync(hdev, 0xfc11, sizeof(mfg_reset_activate),
+			     mfg_reset_activate, HCI_INIT_TIMEOUT);
+	if (IS_ERR(skb)) {
+		BT_ERR("%s exiting Intel manufacturer mode failed (%ld)",
+		       hdev->name, PTR_ERR(skb));
+		return PTR_ERR(skb);
+	}
+	kfree_skb(skb);
 
 	BT_INFO("%s: Intel Bluetooth firmware patch completed and activated",
 		hdev->name);
@@ -1788,9 +1813,14 @@ static int btusb_setup_intel(struct hci_dev *hdev)
 
 exit_mfg_disable:
 	/* Disable the manufacturer mode without reset */
-	err = btintel_exit_mfg(hdev, false, false);
-	if (err)
-		return err;
+	skb = __hci_cmd_sync(hdev, 0xfc11, sizeof(mfg_disable), mfg_disable,
+			     HCI_INIT_TIMEOUT);
+	if (IS_ERR(skb)) {
+		BT_ERR("%s exiting Intel manufacturer mode failed (%ld)",
+		       hdev->name, PTR_ERR(skb));
+		return PTR_ERR(skb);
+	}
+	kfree_skb(skb);
 
 	BT_INFO("%s: Intel Bluetooth firmware patch completed", hdev->name);
 
@@ -1802,9 +1832,14 @@ exit_mfg_deactivate:
 	/* Patching failed. Disable the manufacturer mode with reset and
 	 * deactivate the downloaded firmware patches.
 	 */
-	err = btintel_exit_mfg(hdev, true, false);
-	if (err)
-		return err;
+	skb = __hci_cmd_sync(hdev, 0xfc11, sizeof(mfg_reset_deactivate),
+			     mfg_reset_deactivate, HCI_INIT_TIMEOUT);
+	if (IS_ERR(skb)) {
+		BT_ERR("%s exiting Intel manufacturer mode failed (%ld)",
+		       hdev->name, PTR_ERR(skb));
+		return PTR_ERR(skb);
+	}
+	kfree_skb(skb);
 
 	BT_INFO("%s: Intel Bluetooth firmware patch completed and deactivated",
 		hdev->name);
@@ -1839,7 +1874,7 @@ static int inject_cmd_complete(struct hci_dev *hdev, __u16 opcode)
 
 	*skb_put(skb, 1) = 0x00;
 
-	hci_skb_pkt_type(skb) = HCI_EVENT_PKT;
+	bt_cb(skb)->pkt_type = HCI_EVENT_PKT;
 
 	return hci_recv_frame(hdev, skb);
 }
@@ -1931,7 +1966,7 @@ static int btusb_send_frame_intel(struct hci_dev *hdev, struct sk_buff *skb)
 
 	BT_DBG("%s", hdev->name);
 
-	switch (hci_skb_pkt_type(skb)) {
+	switch (bt_cb(skb)->pkt_type) {
 	case HCI_COMMAND_PKT:
 		if (test_bit(BTUSB_BOOTLOADER, &data->flags)) {
 			struct hci_command_hdr *cmd = (void *)skb->data;
@@ -1991,7 +2026,7 @@ static int btusb_setup_intel_new(struct hci_dev *hdev)
 					  0x00, 0x08, 0x04, 0x00 };
 	struct btusb_data *data = hci_get_drvdata(hdev);
 	struct sk_buff *skb;
-	struct intel_version ver;
+	struct intel_version *ver;
 	struct intel_boot_params *params;
 	const struct firmware *fw;
 	const u8 *fw_ptr;
@@ -2009,16 +2044,28 @@ static int btusb_setup_intel_new(struct hci_dev *hdev)
 	 * is in bootloader mode or if it already has operational firmware
 	 * loaded.
 	 */
-	err = btintel_read_version(hdev, &ver);
-	if (err)
-		return err;
+	skb = __hci_cmd_sync(hdev, 0xfc05, 0, NULL, HCI_INIT_TIMEOUT);
+	if (IS_ERR(skb)) {
+		BT_ERR("%s: Reading Intel version information failed (%ld)",
+		       hdev->name, PTR_ERR(skb));
+		return PTR_ERR(skb);
+	}
+
+	if (skb->len != sizeof(*ver)) {
+		BT_ERR("%s: Intel version event size mismatch", hdev->name);
+		kfree_skb(skb);
+		return -EILSEQ;
+	}
+
+	ver = (struct intel_version *)skb->data;
 
 	/* The hardware platform number has a fixed value of 0x37 and
 	 * for now only accept this single value.
 	 */
-	if (ver.hw_platform != 0x37) {
+	if (ver->hw_platform != 0x37) {
 		BT_ERR("%s: Unsupported Intel hardware platform (%u)",
-		       hdev->name, ver.hw_platform);
+		       hdev->name, ver->hw_platform);
+		kfree_skb(skb);
 		return -EINVAL;
 	}
 
@@ -2028,13 +2075,14 @@ static int btusb_setup_intel_new(struct hci_dev *hdev)
 	 * This check has been put in place to ensure correct forward
 	 * compatibility options when newer hardware variants come along.
 	 */
-	if (ver.hw_variant != 0x0b && ver.hw_variant != 0x0c) {
+	if (ver->hw_variant != 0x0b && ver->hw_variant != 0x0c) {
 		BT_ERR("%s: Unsupported Intel hardware variant (%u)",
-		       hdev->name, ver.hw_variant);
+		       hdev->name, ver->hw_variant);
+		kfree_skb(skb);
 		return -EINVAL;
 	}
 
-	btintel_version_info(hdev, &ver);
+	btintel_version_info(hdev, ver);
 
 	/* The firmware variant determines if the device is in bootloader
 	 * mode or is running operational firmware. The value 0x06 identifies
@@ -2049,7 +2097,8 @@ static int btusb_setup_intel_new(struct hci_dev *hdev)
 	 * It is not possible to use the Secure Boot Parameters in this
 	 * case since that command is only available in bootloader mode.
 	 */
-	if (ver.fw_variant == 0x23) {
+	if (ver->fw_variant == 0x23) {
+		kfree_skb(skb);
 		clear_bit(BTUSB_BOOTLOADER, &data->flags);
 		btintel_check_bdaddr(hdev);
 		return 0;
@@ -2058,11 +2107,14 @@ static int btusb_setup_intel_new(struct hci_dev *hdev)
 	/* If the device is not in bootloader mode, then the only possible
 	 * choice is to return an error and abort the device initialization.
 	 */
-	if (ver.fw_variant != 0x06) {
+	if (ver->fw_variant != 0x06) {
 		BT_ERR("%s: Unsupported Intel firmware variant (%u)",
-		       hdev->name, ver.fw_variant);
+		       hdev->name, ver->fw_variant);
+		kfree_skb(skb);
 		return -ENODEV;
 	}
+
+	kfree_skb(skb);
 
 	/* Read the secure boot parameters to identify the operating
 	 * details of the bootloader.
@@ -2123,14 +2175,10 @@ static int btusb_setup_intel_new(struct hci_dev *hdev)
 	/* With this Intel bootloader only the hardware variant and device
 	 * revision information are used to select the right firmware.
 	 *
-	 * The firmware filename is ibt-<hw_variant>-<dev_revid>.sfi.
-	 *
-	 * Currently the supported hardware variants are:
-	 *   11 (0x0b) for iBT3.0 (LnP/SfP)
-	 *   12 (0x0c) for iBT3.5 (WsP)
+	 * Currently this bootloader support is limited to hardware variant
+	 * iBT 3.0 (LnP/SfP) which is identified by the value 11 (0x0b).
 	 */
-	snprintf(fwname, sizeof(fwname), "intel/ibt-%u-%u.sfi",
-		 le16_to_cpu(ver.hw_variant),
+	snprintf(fwname, sizeof(fwname), "intel/ibt-11-%u.sfi",
 		 le16_to_cpu(params->dev_revid));
 
 	err = request_firmware(&fw, fwname, &hdev->dev);
@@ -2146,8 +2194,7 @@ static int btusb_setup_intel_new(struct hci_dev *hdev)
 	/* Save the DDC file name for later use to apply once the firmware
 	 * downloading is done.
 	 */
-	snprintf(fwname, sizeof(fwname), "intel/ibt-%u-%u.ddc",
-		 le16_to_cpu(ver.hw_variant),
+	snprintf(fwname, sizeof(fwname), "intel/ibt-11-%u.ddc",
 		 le16_to_cpu(params->dev_revid));
 
 	kfree_skb(skb);
@@ -2238,8 +2285,9 @@ static int btusb_setup_intel_new(struct hci_dev *hdev)
 	err = wait_on_bit_timeout(&data->flags, BTUSB_DOWNLOADING,
 				  TASK_INTERRUPTIBLE,
 				  msecs_to_jiffies(5000));
-	if (err == -EINTR) {
+	if (err == 1) {
 		BT_ERR("%s: Firmware loading interrupted", hdev->name);
+		err = -EINTR;
 		goto done;
 	}
 
@@ -2291,7 +2339,7 @@ done:
 				  TASK_INTERRUPTIBLE,
 				  msecs_to_jiffies(1000));
 
-	if (err == -EINTR) {
+	if (err == 1) {
 		BT_ERR("%s: Device boot interrupted", hdev->name);
 		return -EINTR;
 	}
@@ -2849,7 +2897,7 @@ static int btusb_probe(struct usb_interface *intf,
 	if (id->driver_info & BTUSB_AMP)
 		hdev->dev_type = HCI_AMP;
 	else
-		hdev->dev_type = HCI_PRIMARY;
+		hdev->dev_type = HCI_BREDR;
 
 	data->hdev = hdev;
 
@@ -2860,9 +2908,6 @@ static int btusb_probe(struct usb_interface *intf,
 	hdev->flush  = btusb_flush;
 	hdev->send   = btusb_send_frame;
 	hdev->notify = btusb_notify;
-
-	if (id->driver_info & BTUSB_CW6622)
-		set_bit(HCI_QUIRK_BROKEN_STORED_LINK_KEY, &hdev->quirks);
 
 	if (id->driver_info & BTUSB_BCM2045)
 		set_bit(HCI_QUIRK_BROKEN_STORED_LINK_KEY, &hdev->quirks);

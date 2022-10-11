@@ -18,7 +18,6 @@
 #define MAX_KEY_SIZE			128
 #define MAX_BLOB_SIZE			512
 #define MAX_PCRINFO_SIZE		64
-#define MAX_DIGEST_SIZE			64
 
 struct trusted_key_payload {
 	struct rcu_head rcu;
@@ -37,10 +36,6 @@ struct trusted_key_options {
 	uint32_t pcrinfo_len;
 	unsigned char pcrinfo[MAX_PCRINFO_SIZE];
 	int pcrlock;
-	uint32_t hash;
-	uint32_t policydigest_len;
-	unsigned char policydigest[MAX_DIGEST_SIZE];
-	uint32_t policyhandle;
 };
 
 extern struct key_type key_type_trusted;

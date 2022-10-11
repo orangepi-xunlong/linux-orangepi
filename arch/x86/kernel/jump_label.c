@@ -13,7 +13,6 @@
 #include <linux/cpu.h>
 #include <asm/kprobes.h>
 #include <asm/alternative.h>
-#include <asm/text-patching.h>
 
 #ifdef HAVE_JUMP_LABEL
 

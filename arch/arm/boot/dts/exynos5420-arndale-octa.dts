@@ -11,19 +11,16 @@
 
 /dts-v1/;
 #include "exynos5420.dtsi"
-#include "exynos5420-cpus.dtsi"
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/clock/samsung,s2mps11.h>
-#include "exynos-mfc-reserved-memory.dtsi"
 
 / {
 	model = "Insignal Arndale Octa evaluation board based on EXYNOS5420";
 	compatible = "insignal,arndale-octa", "samsung,exynos5420", "samsung,exynos5";
 
-	memory@20000000 {
-		device_type = "memory";
+	memory {
 		reg = <0x20000000 0x80000000>;
 	};
 
@@ -50,17 +47,9 @@
 			label = "SW-TACT1";
 			gpios = <&gpx2 7 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_WAKEUP>;
-			wakeup-source;
+			gpio-key,wakeup;
 		};
 	};
-};
-
-&cpu0 {
-	cpu-supply = <&buck2_reg>;
-};
-
-&cpu4 {
-	cpu-supply = <&buck6_reg>;
 };
 
 &usbdrd_dwc3_1 {
@@ -71,21 +60,19 @@
 	status = "disabled";
 };
 
-&hdmi {
-	hpd-gpios = <&gpx3 7 GPIO_ACTIVE_HIGH>;
-	vdd_osc-supply = <&ldo7_reg>;
-	vdd_pll-supply = <&ldo6_reg>;
-	vdd-supply = <&ldo6_reg>;
-	ddc = <&i2c_2>;
-	status = "okay";
-};
-
 &hsi2c_4 {
 	status = "okay";
 
 	s2mps11_pmic@66 {
 		compatible = "samsung,s2mps11-pmic";
 		reg = <0x66>;
+		s2mps11,buck2-ramp-delay = <12>;
+		s2mps11,buck34-ramp-delay = <12>;
+		s2mps11,buck16-ramp-delay = <12>;
+		s2mps11,buck6-ramp-enable = <1>;
+		s2mps11,buck2-ramp-enable = <1>;
+		s2mps11,buck3-ramp-enable = <1>;
+		s2mps11,buck4-ramp-enable = <1>;
 
 		interrupt-parent = <&gpx3>;
 		interrupts = <2 IRQ_TYPE_EDGE_FALLING>;
@@ -110,6 +97,7 @@
 				regulator-name = "PVDD_APIO_1V8";
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
+				regulator-always-on;
 			};
 
 			ldo3_reg: LDO3 {
@@ -148,6 +136,7 @@
 				regulator-name = "PVDD_ABB_1V8";
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
+				regulator-always-on;
 			};
 
 			ldo9_reg: LDO9 {
@@ -357,8 +346,9 @@
 	};
 };
 
-&i2c_2 {
-	status = "okay";
+&mfc {
+	samsung,mfc-r = <0x43000000 0x800000>;
+	samsung,mfc-l = <0x51000000 0x800000>;
 };
 
 &mmc_0 {
@@ -392,9 +382,9 @@
 &pinctrl_0 {
 	s2mps11_irq: s2mps11-irq {
 		samsung,pins = "gpx3-2";
-		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
-		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
-		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
+		samsung,pin-function = <0xf>;
+		samsung,pin-pud = <0>;
+		samsung,pin-drv = <0>;
 	};
 };
 

@@ -14,7 +14,6 @@
 #define _CRYPTO_HASH_H
 
 #include <linux/crypto.h>
-#include <linux/string.h>
 
 struct crypto_ahash;
 
@@ -205,6 +204,7 @@ struct crypto_ahash {
 		      unsigned int keylen);
 
 	unsigned int reqsize;
+	bool has_setkey;
 	struct crypto_tfm base;
 };
 
@@ -257,28 +257,6 @@ static inline struct crypto_tfm *crypto_ahash_tfm(struct crypto_ahash *tfm)
 static inline void crypto_free_ahash(struct crypto_ahash *tfm)
 {
 	crypto_destroy_tfm(tfm, crypto_ahash_tfm(tfm));
-}
-
-/**
- * crypto_has_ahash() - Search for the availability of an ahash.
- * @alg_name: is the cra_name / name or cra_driver_name / driver name of the
- *	      ahash
- * @type: specifies the type of the ahash
- * @mask: specifies the mask for the ahash
- *
- * Return: true when the ahash is known to the kernel crypto API; false
- *	   otherwise
- */
-int crypto_has_ahash(const char *alg_name, u32 type, u32 mask);
-
-static inline const char *crypto_ahash_alg_name(struct crypto_ahash *tfm)
-{
-	return crypto_tfm_alg_name(crypto_ahash_tfm(tfm));
-}
-
-static inline const char *crypto_ahash_driver_name(struct crypto_ahash *tfm)
-{
-	return crypto_tfm_alg_driver_name(crypto_ahash_tfm(tfm));
 }
 
 static inline unsigned int crypto_ahash_alignmask(
@@ -398,6 +376,11 @@ static inline void *ahash_request_ctx(struct ahash_request *req)
 int crypto_ahash_setkey(struct crypto_ahash *tfm, const u8 *key,
 			unsigned int keylen);
 
+static inline bool crypto_ahash_has_setkey(struct crypto_ahash *tfm)
+{
+	return tfm->has_setkey;
+}
+
 /**
  * crypto_ahash_finup() - update and finalize message digest
  * @req: reference to the ahash_request handle that holds all information
@@ -469,12 +452,7 @@ static inline int crypto_ahash_export(struct ahash_request *req, void *out)
  */
 static inline int crypto_ahash_import(struct ahash_request *req, const void *in)
 {
-	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
-
-	if (crypto_ahash_get_flags(tfm) & CRYPTO_TFM_NEED_KEY)
-		return -ENOKEY;
-
-	return tfm->import(req, in);
+	return crypto_ahash_reqtfm(req)->import(req, in);
 }
 
 /**
@@ -491,12 +469,7 @@ static inline int crypto_ahash_import(struct ahash_request *req, const void *in)
  */
 static inline int crypto_ahash_init(struct ahash_request *req)
 {
-	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
-
-	if (crypto_ahash_get_flags(tfm) & CRYPTO_TFM_NEED_KEY)
-		return -ENOKEY;
-
-	return tfm->init(req);
+	return crypto_ahash_reqtfm(req)->init(req);
 }
 
 /**
@@ -551,7 +524,8 @@ static inline void ahash_request_set_tfm(struct ahash_request *req,
  * the allocation, the provided ahash handle
  * is registered in the request data structure.
  *
- * Return: allocated request handle in case of success, or NULL if out of memory
+ * Return: allocated request handle in case of success; IS_ERR() is true in case
+ *	   of an error, PTR_ERR() returns the error code.
  */
 static inline struct ahash_request *ahash_request_alloc(
 	struct crypto_ahash *tfm, gfp_t gfp)
@@ -574,12 +548,6 @@ static inline struct ahash_request *ahash_request_alloc(
 static inline void ahash_request_free(struct ahash_request *req)
 {
 	kzfree(req);
-}
-
-static inline void ahash_request_zero(struct ahash_request *req)
-{
-	memzero_explicit(req, sizeof(*req) +
-			      crypto_ahash_reqsize(crypto_ahash_reqtfm(req)));
 }
 
 static inline struct ahash_request *ahash_request_cast(
@@ -687,16 +655,6 @@ static inline struct crypto_tfm *crypto_shash_tfm(struct crypto_shash *tfm)
 static inline void crypto_free_shash(struct crypto_shash *tfm)
 {
 	crypto_destroy_tfm(tfm, crypto_shash_tfm(tfm));
-}
-
-static inline const char *crypto_shash_alg_name(struct crypto_shash *tfm)
-{
-	return crypto_tfm_alg_name(crypto_shash_tfm(tfm));
-}
-
-static inline const char *crypto_shash_driver_name(struct crypto_shash *tfm)
-{
-	return crypto_tfm_alg_driver_name(crypto_shash_tfm(tfm));
 }
 
 static inline unsigned int crypto_shash_alignmask(
@@ -849,12 +807,7 @@ static inline int crypto_shash_export(struct shash_desc *desc, void *out)
  */
 static inline int crypto_shash_import(struct shash_desc *desc, const void *in)
 {
-	struct crypto_shash *tfm = desc->tfm;
-
-	if (crypto_shash_get_flags(tfm) & CRYPTO_TFM_NEED_KEY)
-		return -ENOKEY;
-
-	return crypto_shash_alg(tfm)->import(desc, in);
+	return crypto_shash_alg(desc->tfm)->import(desc, in);
 }
 
 /**
@@ -870,12 +823,7 @@ static inline int crypto_shash_import(struct shash_desc *desc, const void *in)
  */
 static inline int crypto_shash_init(struct shash_desc *desc)
 {
-	struct crypto_shash *tfm = desc->tfm;
-
-	if (crypto_shash_get_flags(tfm) & CRYPTO_TFM_NEED_KEY)
-		return -ENOKEY;
-
-	return crypto_shash_alg(tfm)->init(desc);
+	return crypto_shash_alg(desc->tfm)->init(desc);
 }
 
 /**
@@ -923,11 +871,5 @@ int crypto_shash_final(struct shash_desc *desc, u8 *out);
  */
 int crypto_shash_finup(struct shash_desc *desc, const u8 *data,
 		       unsigned int len, u8 *out);
-
-static inline void shash_desc_zero(struct shash_desc *desc)
-{
-	memzero_explicit(desc,
-			 sizeof(*desc) + crypto_shash_descsize(desc->tfm));
-}
 
 #endif	/* _CRYPTO_HASH_H */

@@ -145,7 +145,7 @@ Table 1-1: Process specific entries in /proc
 		symbol the task is blocked in - or "0" if not blocked.
  pagemap	Page table
  stack		Report full stack trace, enable via CONFIG_STACKTRACE
- smaps		an extension based on maps, showing the memory consumption of
+ smaps		a extension based on maps, showing the memory consumption of
 		each mapping and flags associated with it
  numa_maps	an extension based on maps, showing the memory locality and
 		binding policy as well as mem usage (in pages) of each mapping.
@@ -170,9 +170,6 @@ read the file /proc/PID/status:
   VmLck:         0 kB
   VmHWM:       476 kB
   VmRSS:       476 kB
-  RssAnon:             352 kB
-  RssFile:             120 kB
-  RssShmem:              4 kB
   VmData:      156 kB
   VmStk:        88 kB
   VmExe:        68 kB
@@ -225,7 +222,6 @@ Table 1-2: Contents of the status files (as of 4.1)
  TracerPid                   PID of process tracing this process (0 if not)
  Uid                         Real, effective, saved set, and  file system UIDs
  Gid                         Real, effective, saved set, and  file system GIDs
- Umask                       file mode creation mask
  FDSize                      number of file descriptor slots currently allocated
  Groups                      supplementary group list
  NStgid                      descendant namespace thread group ID hierarchy
@@ -236,20 +232,14 @@ Table 1-2: Contents of the status files (as of 4.1)
  VmSize                      total program size
  VmLck                       locked memory size
  VmHWM                       peak resident set size ("high water mark")
- VmRSS                       size of memory portions. It contains the three
-                             following parts (VmRSS = RssAnon + RssFile + RssShmem)
- RssAnon                     size of resident anonymous memory
- RssFile                     size of resident file mappings
- RssShmem                    size of resident shmem memory (includes SysV shm,
-                             mapping of tmpfs and shared anonymous mappings)
- VmData                      size of private data segments
- VmStk                       size of stack segments
+ VmRSS                       size of memory portions
+ VmData                      size of data, stack, and text segments
+ VmStk                       size of data, stack, and text segments
  VmExe                       size of text segment
  VmLib                       size of shared library code
  VmPTE                       size of page table entries
  VmPMD                       size of second level page tables
- VmSwap                      amount of swap used by anonymous private data
-                             (shmem swap usage is not included)
+ VmSwap                      size of swap usage (the number of referred swapents)
  HugetlbPages                size of hugetlb memory portions
  Threads                     number of threads
  SigQ                        number of signals queued/max. number for queue
@@ -276,8 +266,7 @@ Table 1-3: Contents of the statm files (as of 2.6.8-rc3)
  Field    Content
  size     total program size (pages)		(same as VmSize in status)
  resident size of memory portions (pages)	(same as VmRSS in status)
- shared   number of pages that are shared	(i.e. backed by a file, same
-						as RssFile+RssShmem in status)
+ shared   number of pages that are shared	(i.e. backed by a file)
  trs      number of pages that are 'code'	(not including libs; broken,
 							includes data segment)
  lrs      number of pages of library		(always 0 on 2.6)
@@ -412,7 +401,6 @@ Private_Dirty:         0 kB
 Referenced:          892 kB
 Anonymous:             0 kB
 AnonHugePages:         0 kB
-ShmemPmdMapped:        0 kB
 Shared_Hugetlb:        0 kB
 Private_Hugetlb:       0 kB
 Swap:                  0 kB
@@ -442,16 +430,11 @@ accessed.
 a mapping associated with a file may contain anonymous pages: when MAP_PRIVATE
 and a page is modified, the file page is replaced by a private anonymous copy.
 "AnonHugePages" shows the ammount of memory backed by transparent hugepage.
-"ShmemPmdMapped" shows the ammount of shared (shmem/tmpfs) memory backed by
-huge pages.
 "Shared_Hugetlb" and "Private_Hugetlb" show the ammounts of memory backed by
 hugetlbfs page which is *not* counted in "RSS" or "PSS" field for historical
 reasons. And these are not included in {Shared,Private}_{Clean,Dirty} field.
 "Swap" shows how much would-be-anonymous memory is also used, but out on swap.
-For shmem mappings, "Swap" includes also the size of the mapped (and not
-replaced by copy-on-write) part of the underlying shmem object out on swap.
-"SwapPss" shows proportional swap share of this mapping. Unlike "Swap", this
-does not take into account swapped out page of underlying shmem objects.
+"SwapPss" shows proportional swap share of this mapping.
 "Locked" indicates whether the mapping is locked in memory or not.
 
 "VmFlags" field deserves a separate description. This member represents the kernel
@@ -487,25 +470,15 @@ manner. The codes are the following:
 
 Note that there is no guarantee that every flag and associated mnemonic will
 be present in all further kernel releases. Things get changed, the flags may
-be vanished or the reverse -- new added.
+be vanished or the reverse -- new added. Interpretation of their meaning
+might change in future as well. So each consumer of these flags has to
+follow each specific kernel version for the exact semantic.
 
 The "Name" field will only be present on a mapping that has been named by
 userspace, and will show the name passed in by userspace.
 
 This file is only present if the CONFIG_MMU kernel configuration option is
 enabled.
-
-Note: reading /proc/PID/maps or /proc/PID/smaps is inherently racy (consistent
-output can be achieved only in the single read call).
-This typically manifests when doing partial reads of these files while the
-memory map is being modified.  Despite the races, we do provide the following
-guarantees:
-
-1) The mapped addresses never go backwards, which implies no two
-   regions will ever overlap.
-2) If there is something at a given vaddr during the entirety of the
-   life of the smaps/maps walk, there will be some output for it.
-
 
 The /proc/PID/clear_refs is used to reset the PG_Referenced and ACCESSED/YOUNG
 bits on both physical and virtual pages associated with a process, and the
@@ -720,7 +693,7 @@ IRQ, you can set it by doing:
   > echo 1 > /proc/irq/10/smp_affinity
 
 This means that only the first CPU will handle the IRQ, but you can also echo
-5 which means that only the first and third CPU can handle the IRQ.
+5 which means that only the first and fourth CPU can handle the IRQ.
 
 The contents of each smp_affinity file is the same by default:
 
@@ -814,7 +787,7 @@ by migrate-type and finishes with details on how many page blocks of each
 type exist.
 
 If min_free_kbytes has been tuned correctly (recommendations made by hugeadm
-from libhugetlbfs https://github.com/libhugetlbfs/libhugetlbfs/), one can
+from libhugetlbfs http://sourceforge.net/projects/libhugetlbfs/), one can
 make an estimate of the likely number of huge pages that can be allocated
 at a given point in time. All the "Movable" blocks should be allocatable
 unless memory has been mlock()'d. Some of the Reclaimable blocks should
@@ -849,7 +822,6 @@ Dirty:             968 kB
 Writeback:           0 kB
 AnonPages:      861800 kB
 Mapped:         280372 kB
-Shmem:             644 kB
 Slab:           284364 kB
 SReclaimable:   159856 kB
 SUnreclaim:     124508 kB
@@ -863,9 +835,6 @@ VmallocTotal:   112216 kB
 VmallocUsed:       428 kB
 VmallocChunk:   111088 kB
 AnonHugePages:   49152 kB
-ShmemHugePages:      0 kB
-ShmemPmdMapped:      0 kB
-
 
     MemTotal: Total usable ram (i.e. physical ram minus a few reserved
               bits and the kernel binary code)
@@ -909,10 +878,6 @@ MemAvailable: An estimate of how much memory is available for starting new
    AnonPages: Non-file backed pages mapped into userspace page tables
 AnonHugePages: Non-file backed huge pages mapped into userspace page tables
       Mapped: files which have been mmaped, such as libraries
-       Shmem: Total memory used by shared memory (shmem) and tmpfs
-ShmemHugePages: Memory used by shared memory (shmem) and tmpfs allocated
-              with huge pages
-ShmemPmdMapped: Shared memory mapped into userspace with huge pages
         Slab: in-kernel data structures cache
 SReclaimable: Part of Slab, that might be reclaimed, such as caches
   SUnreclaim: Part of Slab, that cannot be reclaimed on memory pressure

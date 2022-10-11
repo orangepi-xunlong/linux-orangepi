@@ -1256,18 +1256,19 @@ bool __init kona_ccu_init(struct ccu_data *ccu)
 {
 	unsigned long flags;
 	unsigned int which;
+	struct clk **clks = ccu->clk_data.clks;
 	struct kona_clk *kona_clks = ccu->kona_clks;
 	bool success = true;
 
 	flags = ccu_lock(ccu);
 	__ccu_write_enable(ccu);
 
-	for (which = 0; which < ccu->clk_num; which++) {
-		struct kona_clk *bcm_clk = &kona_clks[which];
+	for (which = 0; which < ccu->clk_data.clk_num; which++) {
+		struct kona_clk *bcm_clk;
 
-		if (!bcm_clk->ccu)
+		if (!clks[which])
 			continue;
-
+		bcm_clk = &kona_clks[which];
 		success &= __kona_clk_init(bcm_clk);
 	}
 

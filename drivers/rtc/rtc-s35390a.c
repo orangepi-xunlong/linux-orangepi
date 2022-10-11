@@ -266,12 +266,12 @@ static int s35390a_set_alarm(struct i2c_client *client, struct rtc_wkalrm *alm)
 		alm->time.tm_min, alm->time.tm_hour, alm->time.tm_mday,
 		alm->time.tm_mon, alm->time.tm_year, alm->time.tm_wday);
 
-	/* disable interrupt (which deasserts the irq line) */
+	/* disable interrupt */
 	err = s35390a_set_reg(s35390a, S35390A_CMD_STATUS2, &sts, sizeof(sts));
 	if (err < 0)
 		return err;
 
-	/* clear pending interrupt (in STATUS1 only), if any */
+	/* clear pending interrupt, if any */
 	err = s35390a_get_reg(s35390a, S35390A_CMD_STATUS1, &sts, sizeof(sts));
 	if (err < 0)
 		return err;
@@ -315,6 +315,20 @@ static int s35390a_read_alarm(struct i2c_client *client, struct rtc_wkalrm *alm)
 	struct s35390a *s35390a = i2c_get_clientdata(client);
 	char buf[3], sts;
 	int i, err;
+
+	/*
+	 * initialize all members to -1 to signal the core that they are not
+	 * defined by the hardware.
+	 */
+	alm->time.tm_sec = -1;
+	alm->time.tm_min = -1;
+	alm->time.tm_hour = -1;
+	alm->time.tm_mday = -1;
+	alm->time.tm_mon = -1;
+	alm->time.tm_year = -1;
+	alm->time.tm_wday = -1;
+	alm->time.tm_yday = -1;
+	alm->time.tm_isdst = -1;
 
 	err = s35390a_get_reg(s35390a, S35390A_CMD_STATUS2, &sts, sizeof(sts));
 	if (err < 0)

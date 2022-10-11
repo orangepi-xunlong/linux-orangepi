@@ -64,8 +64,7 @@ struct atmel_pwm_chip {
 	void __iomem *base;
 
 	unsigned int updated_pwms;
-	/* ISR is cleared when read, ensure only one thread does that */
-	struct mutex isr_lock;
+	struct mutex isr_lock; /* ISR is cleared when read, ensure only one thread does that */
 
 	void (*config)(struct pwm_chip *chip, struct pwm_device *pwm,
 		       unsigned long dty, unsigned long prd);
@@ -272,16 +271,6 @@ static void atmel_pwm_disable(struct pwm_chip *chip, struct pwm_device *pwm)
 	mutex_unlock(&atmel_pwm->isr_lock);
 	atmel_pwm_writel(atmel_pwm, PWM_DIS, 1 << pwm->hwpwm);
 
-	/*
-	 * Wait for the PWM channel disable operation to be effective before
-	 * stopping the clock.
-	 */
-	timeout = jiffies + 2 * HZ;
-
-	while ((atmel_pwm_readl(atmel_pwm, PWM_SR) & (1 << pwm->hwpwm)) &&
-	       time_before(jiffies, timeout))
-		usleep_range(10, 100);
-
 	clk_disable(atmel_pwm->clk);
 }
 
@@ -335,14 +324,21 @@ MODULE_DEVICE_TABLE(of, atmel_pwm_dt_ids);
 static inline const struct atmel_pwm_data *
 atmel_pwm_get_driver_data(struct platform_device *pdev)
 {
-	const struct platform_device_id *id;
+	if (pdev->dev.of_node) {
+		const struct of_device_id *match;
 
-	if (pdev->dev.of_node)
-		return of_device_get_match_data(&pdev->dev);
+		match = of_match_device(atmel_pwm_dt_ids, &pdev->dev);
+		if (!match)
+			return NULL;
 
-	id = platform_get_device_id(pdev);
+		return match->data;
+	} else {
+		const struct platform_device_id *id;
 
-	return (struct atmel_pwm_data *)id->driver_data;
+		id = platform_get_device_id(pdev);
+
+		return (struct atmel_pwm_data *)id->driver_data;
+	}
 }
 
 static int atmel_pwm_probe(struct platform_device *pdev)

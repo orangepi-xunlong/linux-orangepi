@@ -791,7 +791,7 @@ static void bcm_enet_adjust_phy_link(struct net_device *dev)
 	int status_changed;
 
 	priv = netdev_priv(dev);
-	phydev = dev->phydev;
+	phydev = priv->phydev;
 	status_changed = 0;
 
 	if (priv->old_link != phydev->link) {
@@ -908,13 +908,13 @@ static int bcm_enet_open(struct net_device *dev)
 		else
 			phydev->advertising &= ~SUPPORTED_Pause;
 
-		phy_attached_info(phydev);
+		dev_info(kdev, "attached PHY at address %d [%s]\n",
+			 phydev->addr, phydev->drv->name);
 
 		priv->old_link = 0;
 		priv->old_duplex = -1;
 		priv->old_pause = -1;
-	} else {
-		phydev = NULL;
+		priv->phydev = phydev;
 	}
 
 	/* mask all interrupts and request them */
@@ -1086,8 +1086,8 @@ static int bcm_enet_open(struct net_device *dev)
 	enet_dmac_writel(priv, priv->dma_chan_int_mask,
 			 ENETDMAC_IRMASK, priv->tx_chan);
 
-	if (phydev)
-		phy_start(phydev);
+	if (priv->has_phy)
+		phy_start(priv->phydev);
 	else
 		bcm_enet_adjust_link(dev);
 
@@ -1129,8 +1129,7 @@ out_freeirq:
 	free_irq(dev->irq, dev);
 
 out_phy_disconnect:
-	if (phydev)
-		phy_disconnect(phydev);
+	phy_disconnect(priv->phydev);
 
 	return ret;
 }
@@ -1193,7 +1192,7 @@ static int bcm_enet_stop(struct net_device *dev)
 	netif_stop_queue(dev);
 	napi_disable(&priv->napi);
 	if (priv->has_phy)
-		phy_stop(dev->phydev);
+		phy_stop(priv->phydev);
 	del_timer_sync(&priv->rx_timeout);
 
 	/* mask all interrupts */
@@ -1237,8 +1236,10 @@ static int bcm_enet_stop(struct net_device *dev)
 	free_irq(dev->irq, dev);
 
 	/* release phy */
-	if (priv->has_phy)
-		phy_disconnect(dev->phydev);
+	if (priv->has_phy) {
+		phy_disconnect(priv->phydev);
+		priv->phydev = NULL;
+	}
 
 	return 0;
 }
@@ -1438,68 +1439,64 @@ static int bcm_enet_nway_reset(struct net_device *dev)
 
 	priv = netdev_priv(dev);
 	if (priv->has_phy) {
-		if (!dev->phydev)
+		if (!priv->phydev)
 			return -ENODEV;
-		return genphy_restart_aneg(dev->phydev);
+		return genphy_restart_aneg(priv->phydev);
 	}
 
 	return -EOPNOTSUPP;
 }
 
-static int bcm_enet_get_link_ksettings(struct net_device *dev,
-				       struct ethtool_link_ksettings *cmd)
+static int bcm_enet_get_settings(struct net_device *dev,
+				 struct ethtool_cmd *cmd)
 {
 	struct bcm_enet_priv *priv;
-	u32 supported, advertising;
 
 	priv = netdev_priv(dev);
 
+	cmd->maxrxpkt = 0;
+	cmd->maxtxpkt = 0;
+
 	if (priv->has_phy) {
-		if (!dev->phydev)
+		if (!priv->phydev)
 			return -ENODEV;
-		return phy_ethtool_ksettings_get(dev->phydev, cmd);
+		return phy_ethtool_gset(priv->phydev, cmd);
 	} else {
-		cmd->base.autoneg = 0;
-		cmd->base.speed = (priv->force_speed_100) ?
-			SPEED_100 : SPEED_10;
-		cmd->base.duplex = (priv->force_duplex_full) ?
+		cmd->autoneg = 0;
+		ethtool_cmd_speed_set(cmd, ((priv->force_speed_100)
+					    ? SPEED_100 : SPEED_10));
+		cmd->duplex = (priv->force_duplex_full) ?
 			DUPLEX_FULL : DUPLEX_HALF;
-		supported = ADVERTISED_10baseT_Half |
+		cmd->supported = ADVERTISED_10baseT_Half  |
 			ADVERTISED_10baseT_Full |
 			ADVERTISED_100baseT_Half |
 			ADVERTISED_100baseT_Full;
-		advertising = 0;
-		ethtool_convert_legacy_u32_to_link_mode(
-			cmd->link_modes.supported, supported);
-		ethtool_convert_legacy_u32_to_link_mode(
-			cmd->link_modes.advertising, advertising);
-		cmd->base.port = PORT_MII;
+		cmd->advertising = 0;
+		cmd->port = PORT_MII;
+		cmd->transceiver = XCVR_EXTERNAL;
 	}
 	return 0;
 }
 
-static int bcm_enet_set_link_ksettings(struct net_device *dev,
-				       const struct ethtool_link_ksettings *cmd)
+static int bcm_enet_set_settings(struct net_device *dev,
+				 struct ethtool_cmd *cmd)
 {
 	struct bcm_enet_priv *priv;
 
 	priv = netdev_priv(dev);
 	if (priv->has_phy) {
-		if (!dev->phydev)
+		if (!priv->phydev)
 			return -ENODEV;
-		return phy_ethtool_ksettings_set(dev->phydev, cmd);
+		return phy_ethtool_sset(priv->phydev, cmd);
 	} else {
 
-		if (cmd->base.autoneg ||
-		    (cmd->base.speed != SPEED_100 &&
-		     cmd->base.speed != SPEED_10) ||
-		    cmd->base.port != PORT_MII)
+		if (cmd->autoneg ||
+		    (cmd->speed != SPEED_100 && cmd->speed != SPEED_10) ||
+		    cmd->port != PORT_MII)
 			return -EINVAL;
 
-		priv->force_speed_100 =
-			(cmd->base.speed == SPEED_100) ? 1 : 0;
-		priv->force_duplex_full =
-			(cmd->base.duplex == DUPLEX_FULL) ? 1 : 0;
+		priv->force_speed_100 = (cmd->speed == SPEED_100) ? 1 : 0;
+		priv->force_duplex_full = (cmd->duplex == DUPLEX_FULL) ? 1 : 0;
 
 		if (netif_running(dev))
 			bcm_enet_adjust_link(dev);
@@ -1593,14 +1590,14 @@ static const struct ethtool_ops bcm_enet_ethtool_ops = {
 	.get_sset_count		= bcm_enet_get_sset_count,
 	.get_ethtool_stats      = bcm_enet_get_ethtool_stats,
 	.nway_reset		= bcm_enet_nway_reset,
+	.get_settings		= bcm_enet_get_settings,
+	.set_settings		= bcm_enet_set_settings,
 	.get_drvinfo		= bcm_enet_get_drvinfo,
 	.get_link		= ethtool_op_get_link,
 	.get_ringparam		= bcm_enet_get_ringparam,
 	.set_ringparam		= bcm_enet_set_ringparam,
 	.get_pauseparam		= bcm_enet_get_pauseparam,
 	.set_pauseparam		= bcm_enet_set_pauseparam,
-	.get_link_ksettings	= bcm_enet_get_link_ksettings,
-	.set_link_ksettings	= bcm_enet_set_link_ksettings,
 };
 
 static int bcm_enet_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
@@ -1609,9 +1606,9 @@ static int bcm_enet_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 
 	priv = netdev_priv(dev);
 	if (priv->has_phy) {
-		if (!dev->phydev)
+		if (!priv->phydev)
 			return -ENODEV;
-		return phy_mii_ioctl(dev->phydev, rq, cmd);
+		return phy_mii_ioctl(priv->phydev, rq, cmd);
 	} else {
 		struct mii_if_info mii;
 
@@ -1857,8 +1854,17 @@ static int bcm_enet_probe(struct platform_device *pdev)
 		 * if a slave is not present on hw */
 		bus->phy_mask = ~(1 << priv->phy_id);
 
+		bus->irq = devm_kzalloc(&pdev->dev, sizeof(int) * PHY_MAX_ADDR,
+					GFP_KERNEL);
+		if (!bus->irq) {
+			ret = -ENOMEM;
+			goto out_free_mdio;
+		}
+
 		if (priv->has_phy_interrupt)
 			bus->irq[priv->phy_id] = priv->phy_interrupt;
+		else
+			bus->irq[priv->phy_id] = PHY_POLL;
 
 		ret = mdiobus_register(bus);
 		if (ret) {
@@ -1868,7 +1874,7 @@ static int bcm_enet_probe(struct platform_device *pdev)
 	} else {
 
 		/* run platform code to initialize PHY device */
-		if (pd && pd->mii_config &&
+		if (pd->mii_config &&
 		    pd->mii_config(dev, 1, bcm_enet_mdio_read_mii,
 				   bcm_enet_mdio_write_mii)) {
 			dev_err(&pdev->dev, "unable to configure mdio bus\n");
@@ -2894,21 +2900,33 @@ struct platform_driver bcm63xx_enet_shared_driver = {
 	},
 };
 
-static struct platform_driver * const drivers[] = {
-	&bcm63xx_enet_shared_driver,
-	&bcm63xx_enet_driver,
-	&bcm63xx_enetsw_driver,
-};
-
 /* entry point */
 static int __init bcm_enet_init(void)
 {
-	return platform_register_drivers(drivers, ARRAY_SIZE(drivers));
+	int ret;
+
+	ret = platform_driver_register(&bcm63xx_enet_shared_driver);
+	if (ret)
+		return ret;
+
+	ret = platform_driver_register(&bcm63xx_enet_driver);
+	if (ret)
+		platform_driver_unregister(&bcm63xx_enet_shared_driver);
+
+	ret = platform_driver_register(&bcm63xx_enetsw_driver);
+	if (ret) {
+		platform_driver_unregister(&bcm63xx_enet_driver);
+		platform_driver_unregister(&bcm63xx_enet_shared_driver);
+	}
+
+	return ret;
 }
 
 static void __exit bcm_enet_exit(void)
 {
-	platform_unregister_drivers(drivers, ARRAY_SIZE(drivers));
+	platform_driver_unregister(&bcm63xx_enet_driver);
+	platform_driver_unregister(&bcm63xx_enetsw_driver);
+	platform_driver_unregister(&bcm63xx_enet_shared_driver);
 }
 
 

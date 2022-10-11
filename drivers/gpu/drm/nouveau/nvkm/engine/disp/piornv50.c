@@ -28,7 +28,7 @@
 #include <subdev/i2c.h>
 #include <subdev/timer.h>
 
-#include <nvif/cl5070.h>
+#include <nvif/class.h>
 #include <nvif/unpack.h>
 
 int
@@ -40,10 +40,10 @@ nv50_pior_power(NV50_DISP_MTHD_V1)
 		struct nv50_disp_pior_pwr_v0 v0;
 	} *args = data;
 	u32 ctrl, type;
-	int ret = -ENOSYS;
+	int ret;
 
 	nvif_ioctl(object, "disp pior pwr size %d\n", size);
-	if (!(ret = nvif_unpack(ret, &data, &size, args->v0, 0, 0, false))) {
+	if (nvif_unpack(args->v0, 0, 0, false)) {
 		nvif_ioctl(object, "disp pior pwr vers %d state %d type %x\n",
 			   args->v0.version, args->v0.state, args->v0.type);
 		if (args->v0.type > 0x0f)

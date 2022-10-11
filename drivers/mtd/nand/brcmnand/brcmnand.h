@@ -23,22 +23,19 @@ struct dev_pm_ops;
 struct brcmnand_soc {
 	bool (*ctlrdy_ack)(struct brcmnand_soc *soc);
 	void (*ctlrdy_set_enabled)(struct brcmnand_soc *soc, bool en);
-	void (*prepare_data_bus)(struct brcmnand_soc *soc, bool prepare,
-				 bool is_param);
+	void (*prepare_data_bus)(struct brcmnand_soc *soc, bool prepare);
 };
 
-static inline void brcmnand_soc_data_bus_prepare(struct brcmnand_soc *soc,
-						 bool is_param)
+static inline void brcmnand_soc_data_bus_prepare(struct brcmnand_soc *soc)
 {
 	if (soc && soc->prepare_data_bus)
-		soc->prepare_data_bus(soc, true, is_param);
+		soc->prepare_data_bus(soc, true);
 }
 
-static inline void brcmnand_soc_data_bus_unprepare(struct brcmnand_soc *soc,
-						   bool is_param)
+static inline void brcmnand_soc_data_bus_unprepare(struct brcmnand_soc *soc)
 {
 	if (soc && soc->prepare_data_bus)
-		soc->prepare_data_bus(soc, false, is_param);
+		soc->prepare_data_bus(soc, false);
 }
 
 static inline u32 brcmnand_readl(void __iomem *addr)

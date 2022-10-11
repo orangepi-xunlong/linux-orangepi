@@ -127,7 +127,9 @@ int show_interrupts(struct seq_file *p, void *v)
 			seq_printf(p, "CPU%d       ", cpu);
 		seq_putc(p, '\n');
 	}
-	if (index < NR_IRQS_BASE) {
+	if (index < NR_IRQS) {
+		if (index >= NR_IRQS_BASE)
+			goto out;
 		seq_printf(p, "%s: ", irqclass_main_desc[index].name);
 		irq = irqclass_main_desc[index].irq;
 		for_each_online_cpu(cpu)
@@ -135,9 +137,6 @@ int show_interrupts(struct seq_file *p, void *v)
 		seq_putc(p, '\n');
 		goto out;
 	}
-	if (index > NR_IRQS_BASE)
-		goto out;
-
 	for (index = 0; index < NR_ARCH_IRQS; index++) {
 		seq_printf(p, "%s: ", irqclass_sub_desc[index].name);
 		irq = irqclass_sub_desc[index].irq;
@@ -165,7 +164,8 @@ void do_softirq_own_stack(void)
 {
 	unsigned long old, new;
 
-	old = current_stack_pointer();
+	/* Get current stack pointer. */
+	asm volatile("la %0,0(15)" : "=a" (old));
 	/* Check against async. stack address range. */
 	new = S390_lowcore.async_stack;
 	if (((new - old) >> (PAGE_SHIFT + THREAD_ORDER)) != 0) {

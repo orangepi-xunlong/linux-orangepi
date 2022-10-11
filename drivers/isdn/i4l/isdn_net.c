@@ -1153,7 +1153,7 @@ static void isdn_net_tx_timeout(struct net_device *ndev)
 		 * ever called   --KG
 		 */
 	}
-	netif_trans_update(ndev);
+	ndev->trans_start = jiffies;
 	netif_wake_queue(ndev);
 }
 
@@ -1291,7 +1291,7 @@ isdn_net_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 			}
 		} else {
 			/* Device is connected to an ISDN channel */
-			netif_trans_update(ndev);
+			ndev->trans_start = jiffies;
 			if (!lp->dialstate) {
 				/* ISDN connection is established, try sending */
 				int ret;

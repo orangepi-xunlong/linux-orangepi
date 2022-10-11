@@ -262,14 +262,6 @@ static void pcrypt_free(struct aead_instance *inst)
 	kfree(inst);
 }
 
-static void pcrypt_free(struct aead_instance *inst)
-{
-	struct pcrypt_instance_ctx *ctx = aead_instance_ctx(inst);
-
-	crypto_drop_aead(&ctx->spawn);
-	kfree(inst);
-}
-
 static int pcrypt_init_instance(struct crypto_instance *inst,
 				struct crypto_alg *alg)
 {

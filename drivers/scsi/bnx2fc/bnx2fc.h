@@ -65,7 +65,7 @@
 #include "bnx2fc_constants.h"
 
 #define BNX2FC_NAME		"bnx2fc"
-#define BNX2FC_VERSION		"2.10.3"
+#define BNX2FC_VERSION		"2.9.6"
 
 #define PFX			"bnx2fc: "
 
@@ -262,7 +262,6 @@ struct bnx2fc_interface {
 	u8 vlan_enabled;
 	int vlan_id;
 	bool enabled;
-	u8 tm_timeout;
 };
 
 #define bnx2fc_from_ctlr(x)			\

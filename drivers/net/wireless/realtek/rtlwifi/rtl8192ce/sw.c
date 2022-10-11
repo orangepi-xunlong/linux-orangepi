@@ -96,7 +96,6 @@ int rtl92c_init_sw_vars(struct ieee80211_hw *hw)
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
 	struct rtl_pci *rtlpci = rtl_pcidev(rtl_pcipriv(hw));
 	struct rtl_hal *rtlhal = rtl_hal(rtl_priv(hw));
-	char *fw_name;
 
 	rtl8192ce_bt_reg_init(hw);
 
@@ -170,15 +169,13 @@ int rtl92c_init_sw_vars(struct ieee80211_hw *hw)
 	/* request fw */
 	if (IS_VENDOR_UMC_A_CUT(rtlhal->version) &&
 	    !IS_92C_SERIAL(rtlhal->version))
-		fw_name = "rtlwifi/rtl8192cfwU.bin";
+		rtlpriv->cfg->fw_name = "rtlwifi/rtl8192cfwU.bin";
 	else if (IS_81XXC_VENDOR_UMC_B_CUT(rtlhal->version))
-		fw_name = "rtlwifi/rtl8192cfwU_B.bin";
-	else
-		fw_name = "rtlwifi/rtl8192cfw.bin";
+		rtlpriv->cfg->fw_name = "rtlwifi/rtl8192cfwU_B.bin";
 
 	rtlpriv->max_fw_size = 0x4000;
-	pr_info("Using firmware %s\n", fw_name);
-	err = request_firmware_nowait(THIS_MODULE, 1, fw_name,
+	pr_info("Using firmware %s\n", rtlpriv->cfg->fw_name);
+	err = request_firmware_nowait(THIS_MODULE, 1, rtlpriv->cfg->fw_name,
 				      rtlpriv->io.dev, GFP_KERNEL, hw,
 				      rtl_fw_cb);
 	if (err) {
@@ -261,10 +258,11 @@ static struct rtl_mod_params rtl92ce_mod_params = {
 	.debug = DBG_EMERG,
 };
 
-static const struct rtl_hal_cfg rtl92ce_hal_cfg = {
+static struct rtl_hal_cfg rtl92ce_hal_cfg = {
 	.bar_id = 2,
 	.write_readback = true,
 	.name = "rtl92c_pci",
+	.fw_name = "rtlwifi/rtl8192cfw.bin",
 	.ops = &rtl8192ce_hal_ops,
 	.mod_params = &rtl92ce_mod_params,
 

@@ -33,7 +33,7 @@
 
 struct radeon_device;
 
-int radeon_kfd_init(void);
+bool radeon_kfd_init(void);
 void radeon_kfd_fini(void);
 
 void radeon_kfd_suspend(struct radeon_device *rdev);

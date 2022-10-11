@@ -840,9 +840,12 @@ static int dove_pinctrl_probe(struct platform_device *pdev)
 
 static int dove_pinctrl_remove(struct platform_device *pdev)
 {
+	int ret;
+
+	ret = mvebu_pinctrl_remove(pdev);
 	if (!IS_ERR(clk))
 		clk_disable_unprepare(clk);
-	return 0;
+	return ret;
 }
 
 static struct platform_driver dove_pinctrl_driver = {

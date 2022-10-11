@@ -1,7 +1,7 @@
 /*
  * net/tipc/bearer.h: Include file for TIPC bearer code
  *
- * Copyright (c) 1996-2006, 2013-2016, Ericsson AB
+ * Copyright (c) 1996-2006, 2013-2014, Ericsson AB
  * Copyright (c) 2005, 2010-2011, Wind River Systems
  * All rights reserved.
  *
@@ -43,6 +43,8 @@
 #include <net/genetlink.h>
 
 #define MAX_MEDIA	3
+#define MAX_NODES	4096
+#define WSIZE		32
 
 /* Identifiers associated with TIPC message header media address info
  * - address info field is 32 bytes long
@@ -62,6 +64,16 @@
 
 /* minimum bearer MTU */
 #define TIPC_MIN_BEARER_MTU	(MAX_H_SIZE + INT_H_SIZE)
+
+/**
+ * struct tipc_node_map - set of node identifiers
+ * @count: # of nodes in set
+ * @map: bitmap of node identifiers that are in the set
+ */
+struct tipc_node_map {
+	u32 count;
+	u32 map[MAX_NODES / WSIZE];
+};
 
 /**
  * struct tipc_media_addr - destination address used by TIPC bearers
@@ -95,11 +107,11 @@ struct tipc_bearer;
  */
 struct tipc_media {
 	int (*send_msg)(struct net *net, struct sk_buff *buf,
-			struct tipc_bearer *b,
+			struct tipc_bearer *b_ptr,
 			struct tipc_media_addr *dest);
-	int (*enable_media)(struct net *net, struct tipc_bearer *b,
+	int (*enable_media)(struct net *net, struct tipc_bearer *b_ptr,
 			    struct nlattr *attr[]);
-	void (*disable_media)(struct tipc_bearer *b);
+	void (*disable_media)(struct tipc_bearer *b_ptr);
 	int (*addr2str)(struct tipc_media_addr *addr,
 			char *strbuf,
 			int bufsz);
@@ -134,6 +146,7 @@ struct tipc_media {
  * @identity: array index of this bearer within TIPC bearer array
  * @link_req: ptr to (optional) structure making periodic link setup requests
  * @net_plane: network plane ('A' through 'H') currently associated with bearer
+ * @nodes: indicates which nodes in cluster can be reached through bearer
  *
  * Note: media-specific code is responsible for initialization of the fields
  * indicated below when a bearer is enabled; TIPC's generic bearer code takes
@@ -154,7 +167,8 @@ struct tipc_bearer {
 	u32 identity;
 	struct tipc_link_req *link_req;
 	char net_plane;
-	unsigned long up;
+	int node_cnt;
+	struct tipc_node_map nodes;
 };
 
 struct tipc_bearer_names {
@@ -166,7 +180,7 @@ struct tipc_bearer_names {
  * TIPC routines available to supported media types
  */
 
-void tipc_rcv(struct net *net, struct sk_buff *skb, struct tipc_bearer *b);
+void tipc_rcv(struct net *net, struct sk_buff *skb, struct tipc_bearer *b_ptr);
 
 /*
  * Routines made available to TIPC by supported media types
@@ -185,7 +199,6 @@ int tipc_nl_bearer_enable(struct sk_buff *skb, struct genl_info *info);
 int tipc_nl_bearer_dump(struct sk_buff *skb, struct netlink_callback *cb);
 int tipc_nl_bearer_get(struct sk_buff *skb, struct genl_info *info);
 int tipc_nl_bearer_set(struct sk_buff *skb, struct genl_info *info);
-int tipc_nl_bearer_add(struct sk_buff *skb, struct genl_info *info);
 
 int tipc_nl_media_dump(struct sk_buff *skb, struct netlink_callback *cb);
 int tipc_nl_media_get(struct sk_buff *skb, struct genl_info *info);
@@ -203,9 +216,7 @@ int tipc_l2_send_msg(struct net *net, struct sk_buff *buf,
 void tipc_bearer_add_dest(struct net *net, u32 bearer_id, u32 dest);
 void tipc_bearer_remove_dest(struct net *net, u32 bearer_id, u32 dest);
 struct tipc_bearer *tipc_bearer_find(struct net *net, const char *name);
-int tipc_bearer_get_name(struct net *net, char *name, u32 bearer_id);
 struct tipc_media *tipc_media_find(const char *name);
-void tipc_bearer_reset_all(struct net *net);
 int tipc_bearer_setup(void);
 void tipc_bearer_cleanup(void);
 void tipc_bearer_stop(struct net *net);

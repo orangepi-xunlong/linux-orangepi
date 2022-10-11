@@ -343,26 +343,16 @@ static const struct regmap_config at86rf230_regmap_spi_config = {
 };
 
 static void
-at86rf230_async_error_recover_complete(void *context)
-{
-	struct at86rf230_state_change *ctx = context;
-	struct at86rf230_local *lp = ctx->lp;
-
-	if (ctx->free)
-		kfree(ctx);
-
-	ieee802154_wake_queue(lp->hw);
-}
-
-static void
 at86rf230_async_error_recover(void *context)
 {
 	struct at86rf230_state_change *ctx = context;
 	struct at86rf230_local *lp = ctx->lp;
 
 	lp->is_tx = 0;
-	at86rf230_async_state_change(lp, ctx, STATE_RX_AACK_ON,
-				     at86rf230_async_error_recover_complete);
+	at86rf230_async_state_change(lp, ctx, STATE_RX_AACK_ON, NULL);
+	ieee802154_wake_queue(lp->hw);
+	if (ctx->free)
+		kfree(ctx);
 }
 
 static inline void
@@ -902,12 +892,14 @@ at86rf230_xmit_start(void *context)
 	struct at86rf230_local *lp = ctx->lp;
 
 	/* check if we change from off state */
-	if (lp->is_tx_from_off)
+	if (lp->is_tx_from_off) {
+		lp->is_tx_from_off = false;
 		at86rf230_async_state_change(lp, ctx, STATE_TX_ARET_ON,
 					     at86rf230_write_frame);
-	else
+	} else {
 		at86rf230_async_state_change(lp, ctx, STATE_TX_ON,
 					     at86rf230_xmit_tx_on);
+	}
 }
 
 static int
@@ -931,7 +923,6 @@ at86rf230_xmit(struct ieee802154_hw *hw, struct sk_buff *skb)
 		at86rf230_async_state_change(lp, ctx, STATE_TRX_OFF,
 					     at86rf230_xmit_start);
 	} else {
-		lp->is_tx_from_off = false;
 		at86rf230_xmit_start(ctx);
 	}
 
@@ -941,7 +932,7 @@ at86rf230_xmit(struct ieee802154_hw *hw, struct sk_buff *skb)
 static int
 at86rf230_ed(struct ieee802154_hw *hw, u8 *level)
 {
-	BUG_ON(!level);
+	WARN_ON(!level);
 	*level = 0xbe;
 	return 0;
 }
@@ -1117,8 +1108,7 @@ at86rf230_set_hw_addr_filt(struct ieee802154_hw *hw,
 	if (changed & IEEE802154_AFILT_SADDR_CHANGED) {
 		u16 addr = le16_to_cpu(filt->short_addr);
 
-		dev_vdbg(&lp->spi->dev,
-			 "at86rf230_set_hw_addr_filt called for saddr\n");
+		dev_vdbg(&lp->spi->dev, "%s called for saddr\n", __func__);
 		__at86rf230_write(lp, RG_SHORT_ADDR_0, addr);
 		__at86rf230_write(lp, RG_SHORT_ADDR_1, addr >> 8);
 	}
@@ -1126,8 +1116,7 @@ at86rf230_set_hw_addr_filt(struct ieee802154_hw *hw,
 	if (changed & IEEE802154_AFILT_PANID_CHANGED) {
 		u16 pan = le16_to_cpu(filt->pan_id);
 
-		dev_vdbg(&lp->spi->dev,
-			 "at86rf230_set_hw_addr_filt called for pan id\n");
+		dev_vdbg(&lp->spi->dev, "%s called for pan id\n", __func__);
 		__at86rf230_write(lp, RG_PAN_ID_0, pan);
 		__at86rf230_write(lp, RG_PAN_ID_1, pan >> 8);
 	}
@@ -1136,15 +1125,13 @@ at86rf230_set_hw_addr_filt(struct ieee802154_hw *hw,
 		u8 i, addr[8];
 
 		memcpy(addr, &filt->ieee_addr, 8);
-		dev_vdbg(&lp->spi->dev,
-			 "at86rf230_set_hw_addr_filt called for IEEE addr\n");
+		dev_vdbg(&lp->spi->dev, "%s called for IEEE addr\n", __func__);
 		for (i = 0; i < 8; i++)
 			__at86rf230_write(lp, RG_IEEE_ADDR_0 + i, addr[i]);
 	}
 
 	if (changed & IEEE802154_AFILT_PANC_CHANGED) {
-		dev_vdbg(&lp->spi->dev,
-			 "at86rf230_set_hw_addr_filt called for panc change\n");
+		dev_vdbg(&lp->spi->dev, "%s called for panc change\n", __func__);
 		if (filt->pan_coord)
 			at86rf230_write_subreg(lp, SR_AACK_I_AM_COORD, 1);
 		else
@@ -1248,7 +1235,6 @@ at86rf230_set_cca_mode(struct ieee802154_hw *hw,
 	return at86rf230_write_subreg(lp, SR_CCA_MODE, val);
 }
 
-
 static int
 at86rf230_set_cca_ed_level(struct ieee802154_hw *hw, s32 mbm)
 {
@@ -1340,7 +1326,7 @@ static struct at86rf2xx_chip_data at86rf233_data = {
 	.t_off_to_aack = 80,
 	.t_off_to_tx_on = 80,
 	.t_off_to_sleep = 35,
-	.t_sleep_to_off = 1000,
+	.t_sleep_to_off = 210,
 	.t_frame = 4096,
 	.t_p_ack = 545,
 	.rssi_base_val = -91,
@@ -1355,7 +1341,7 @@ static struct at86rf2xx_chip_data at86rf231_data = {
 	.t_off_to_aack = 110,
 	.t_off_to_tx_on = 110,
 	.t_off_to_sleep = 35,
-	.t_sleep_to_off = 1000,
+	.t_sleep_to_off = 380,
 	.t_frame = 4096,
 	.t_p_ack = 545,
 	.rssi_base_val = -91,
@@ -1370,7 +1356,7 @@ static struct at86rf2xx_chip_data at86rf212_data = {
 	.t_off_to_aack = 200,
 	.t_off_to_tx_on = 200,
 	.t_off_to_sleep = 35,
-	.t_sleep_to_off = 1000,
+	.t_sleep_to_off = 380,
 	.t_frame = 4096,
 	.t_p_ack = 545,
 	.rssi_base_val = -100,

@@ -19,7 +19,7 @@
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-image-sizes.h>
-#include <media/i2c/ov7670.h>
+#include <media/ov7670.h>
 #include <media/videobuf-dma-sg.h>
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
@@ -240,7 +240,7 @@ static int viacam_set_flip(struct via_camera *cam)
 	memset(&ctrl, 0, sizeof(ctrl));
 	ctrl.id = V4L2_CID_VFLIP;
 	ctrl.value = flip_image;
-	return v4l2_s_ctrl(NULL, cam->sensor->ctrl_handler, &ctrl);
+	return sensor_call(cam, core, s_ctrl, &ctrl);
 }
 
 /*

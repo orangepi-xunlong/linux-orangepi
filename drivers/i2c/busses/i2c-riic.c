@@ -403,8 +403,10 @@ static int riic_i2c_probe(struct platform_device *pdev)
 
 
 	ret = i2c_add_adapter(adap);
-	if (ret)
+	if (ret) {
+		dev_err(&pdev->dev, "failed to add adapter\n");
 		return ret;
+	}
 
 	platform_set_drvdata(pdev, riic);
 

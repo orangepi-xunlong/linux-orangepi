@@ -113,7 +113,7 @@ static ssize_t bin_attr_nvmem_read(struct file *filp, struct kobject *kobj,
 
 	rc = nvmem_reg_read(nvmem, pos, buf, count);
 
-	if (rc)
+	if (IS_ERR_VALUE(rc))
 		return rc;
 
 	return count;
@@ -147,7 +147,7 @@ static ssize_t bin_attr_nvmem_write(struct file *filp, struct kobject *kobj,
 
 	rc = nvmem_reg_write(nvmem, pos, buf, count);
 
-	if (rc)
+	if (IS_ERR_VALUE(rc))
 		return rc;
 
 	return count;
@@ -366,7 +366,7 @@ static int nvmem_add_cells(struct nvmem_device *nvmem,
 		}
 
 		rval = nvmem_cell_info_to_nvmem_cell(nvmem, &info[i], cells[i]);
-		if (rval) {
+		if (IS_ERR_VALUE(rval)) {
 			kfree(cells[i]);
 			goto err;
 		}
@@ -488,24 +488,21 @@ struct nvmem_device *nvmem_register(const struct nvmem_config *config)
 
 	rval = device_add(&nvmem->dev);
 	if (rval)
-		goto err_put_device;
+		goto out;
 
 	if (config->compat) {
 		rval = nvmem_setup_compat(nvmem, config);
 		if (rval)
-			goto err_device_del;
+			goto out;
 	}
 
 	if (config->cells)
 		nvmem_add_cells(nvmem, config);
 
 	return nvmem;
-
-err_device_del:
-	device_del(&nvmem->dev);
-err_put_device:
-	put_device(&nvmem->dev);
-
+out:
+	ida_simple_remove(&nvmem_ida, nvmem->id);
+	kfree(nvmem);
 	return ERR_PTR(rval);
 }
 EXPORT_SYMBOL_GPL(nvmem_register);
@@ -934,7 +931,7 @@ static inline void nvmem_shift_read_buffer_in_place(struct nvmem_cell *cell,
 						    void *buf)
 {
 	u8 *p, *b;
-	int i, bit_offset = cell->bit_offset;
+	int i, extra, bit_offset = cell->bit_offset;
 
 	p = b = buf;
 	if (bit_offset) {
@@ -949,11 +946,16 @@ static inline void nvmem_shift_read_buffer_in_place(struct nvmem_cell *cell,
 			p = b;
 			*b++ >>= bit_offset;
 		}
-
-		/* result fits in less bytes */
-		if (cell->bytes != DIV_ROUND_UP(cell->nbits, BITS_PER_BYTE))
-			*p-- = 0;
+	} else {
+		/* point to the msb */
+		p += cell->bytes - 1;
 	}
+
+	/* result fits in less bytes */
+	extra = cell->bytes - DIV_ROUND_UP(cell->nbits, BITS_PER_BYTE);
+	while (--extra >= 0)
+		*p-- = 0;
+
 	/* clear msb bits if any leftover in the last byte */
 	*p &= GENMASK((cell->nbits%BITS_PER_BYTE) - 1, 0);
 }
@@ -966,7 +968,7 @@ static int __nvmem_cell_read(struct nvmem_device *nvmem,
 
 	rc = nvmem_reg_read(nvmem, cell->offset, buf, cell->bytes);
 
-	if (rc)
+	if (IS_ERR_VALUE(rc))
 		return rc;
 
 	/* shift bits in-place */
@@ -1001,7 +1003,7 @@ void *nvmem_cell_read(struct nvmem_cell *cell, size_t *len)
 		return ERR_PTR(-ENOMEM);
 
 	rc = __nvmem_cell_read(nvmem, cell, buf, len);
-	if (rc) {
+	if (IS_ERR_VALUE(rc)) {
 		kfree(buf);
 		return ERR_PTR(rc);
 	}
@@ -1031,8 +1033,6 @@ static inline void *nvmem_cell_prepare_write_buffer(struct nvmem_cell *cell,
 
 		/* setup the first byte with lsb bits from nvmem */
 		rc = nvmem_reg_read(nvmem, cell->offset, &v, 1);
-		if (rc)
-			goto err;
 		*b++ |= GENMASK(bit_offset - 1, 0) & v;
 
 		/* setup rest of the byte if any */
@@ -1051,16 +1051,11 @@ static inline void *nvmem_cell_prepare_write_buffer(struct nvmem_cell *cell,
 		/* setup the last byte with msb bits from nvmem */
 		rc = nvmem_reg_read(nvmem,
 				    cell->offset + cell->bytes - 1, &v, 1);
-		if (rc)
-			goto err;
 		*p |= GENMASK(7, (nbits + bit_offset) % BITS_PER_BYTE) & v;
 
 	}
 
 	return buf;
-err:
-	kfree(buf);
-	return ERR_PTR(rc);
 }
 
 /**
@@ -1093,7 +1088,7 @@ int nvmem_cell_write(struct nvmem_cell *cell, void *buf, size_t len)
 	if (cell->bit_offset || cell->nbits)
 		kfree(buf);
 
-	if (rc)
+	if (IS_ERR_VALUE(rc))
 		return rc;
 
 	return len;
@@ -1121,11 +1116,11 @@ ssize_t nvmem_device_cell_read(struct nvmem_device *nvmem,
 		return -EINVAL;
 
 	rc = nvmem_cell_info_to_nvmem_cell(nvmem, info, &cell);
-	if (rc)
+	if (IS_ERR_VALUE(rc))
 		return rc;
 
 	rc = __nvmem_cell_read(nvmem, &cell, buf, &len);
-	if (rc)
+	if (IS_ERR_VALUE(rc))
 		return rc;
 
 	return len;
@@ -1151,7 +1146,7 @@ int nvmem_device_cell_write(struct nvmem_device *nvmem,
 		return -EINVAL;
 
 	rc = nvmem_cell_info_to_nvmem_cell(nvmem, info, &cell);
-	if (rc)
+	if (IS_ERR_VALUE(rc))
 		return rc;
 
 	return nvmem_cell_write(&cell, buf, cell.bytes);
@@ -1180,7 +1175,7 @@ int nvmem_device_read(struct nvmem_device *nvmem,
 
 	rc = nvmem_reg_read(nvmem, offset, buf, bytes);
 
-	if (rc)
+	if (IS_ERR_VALUE(rc))
 		return rc;
 
 	return bytes;
@@ -1208,7 +1203,7 @@ int nvmem_device_write(struct nvmem_device *nvmem,
 
 	rc = nvmem_reg_write(nvmem, offset, buf, bytes);
 
-	if (rc)
+	if (IS_ERR_VALUE(rc))
 		return rc;
 
 

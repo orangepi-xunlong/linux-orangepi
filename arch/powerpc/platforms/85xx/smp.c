@@ -2,7 +2,7 @@
  * Author: Andy Fleming <afleming@freescale.com>
  * 	   Kumar Gala <galak@kernel.crashing.org>
  *
- * Copyright 2006-2008, 2011-2012, 2015 Freescale Semiconductor Inc.
+ * Copyright 2006-2008, 2011-2012 Freescale Semiconductor Inc.
  *
  * This program is free software; you can redistribute  it and/or modify it
  * under  the terms of  the GNU General  Public License as published by the
@@ -15,6 +15,7 @@
 #include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/of.h>
+#include <linux/of_address.h>
 #include <linux/kexec.h>
 #include <linux/highmem.h>
 #include <linux/cpu.h>
@@ -28,7 +29,6 @@
 #include <asm/dbell.h>
 #include <asm/code-patching.h>
 #include <asm/cputhreads.h>
-#include <asm/fsl_pm.h>
 
 #include <sysdev/fsl_soc.h>
 #include <sysdev/mpic.h>
@@ -43,23 +43,35 @@ struct epapr_spin_table {
 	u32	pir;
 };
 
-#ifdef CONFIG_HOTPLUG_CPU
+static struct ccsr_guts __iomem *guts;
 static u64 timebase;
 static int tb_req;
 static int tb_valid;
+
+static void mpc85xx_timebase_freeze(int freeze)
+{
+	uint32_t mask;
+
+	mask = CCSR_GUTS_DEVDISR_TB0 | CCSR_GUTS_DEVDISR_TB1;
+	if (freeze)
+		setbits32(&guts->devdisr, mask);
+	else
+		clrbits32(&guts->devdisr, mask);
+
+	in_be32(&guts->devdisr);
+}
 
 static void mpc85xx_give_timebase(void)
 {
 	unsigned long flags;
 
 	local_irq_save(flags);
-	hard_irq_disable();
 
 	while (!tb_req)
 		barrier();
 	tb_req = 0;
 
-	qoriq_pm_ops->freeze_time_base(true);
+	mpc85xx_timebase_freeze(1);
 #ifdef CONFIG_PPC64
 	/*
 	 * e5500/e6500 have a workaround for erratum A-006958 in place
@@ -92,7 +104,7 @@ static void mpc85xx_give_timebase(void)
 	while (tb_valid)
 		barrier();
 
-	qoriq_pm_ops->freeze_time_base(false);
+	mpc85xx_timebase_freeze(0);
 
 	local_irq_restore(flags);
 }
@@ -102,7 +114,6 @@ static void mpc85xx_take_timebase(void)
 	unsigned long flags;
 
 	local_irq_save(flags);
-	hard_irq_disable();
 
 	tb_req = 1;
 	while (!tb_valid)
@@ -115,54 +126,36 @@ static void mpc85xx_take_timebase(void)
 	local_irq_restore(flags);
 }
 
+#ifdef CONFIG_HOTPLUG_CPU
 static void smp_85xx_mach_cpu_die(void)
 {
 	unsigned int cpu = smp_processor_id();
+	u32 tmp;
 
 	local_irq_disable();
-	hard_irq_disable();
-	/* mask all irqs to prevent cpu wakeup */
-	qoriq_pm_ops->irq_mask(cpu);
-
 	idle_task_exit();
+	generic_set_cpu_dead(cpu);
+	mb();
 
 	mtspr(SPRN_TCR, 0);
-	mtspr(SPRN_TSR, mfspr(SPRN_TSR));
 
-	generic_set_cpu_dead(cpu);
+	__flush_disable_L1();
+	tmp = (mfspr(SPRN_HID0) & ~(HID0_DOZE|HID0_SLEEP)) | HID0_NAP;
+	mtspr(SPRN_HID0, tmp);
+	isync();
 
-	cur_cpu_spec->cpu_down_flush();
-
-	qoriq_pm_ops->cpu_die(cpu);
+	/* Enter NAP mode. */
+	tmp = mfmsr();
+	tmp |= MSR_WE;
+	mb();
+	mtmsr(tmp);
+	isync();
 
 	while (1)
 		;
 }
-
-static void qoriq_cpu_kill(unsigned int cpu)
-{
-	int i;
-
-	for (i = 0; i < 500; i++) {
-		if (is_cpu_dead(cpu)) {
-#ifdef CONFIG_PPC64
-			paca[cpu].cpu_start = 0;
-#endif
-			return;
-		}
-		msleep(20);
-	}
-	pr_err("CPU%d didn't die...\n", cpu);
-}
 #endif
 
-/*
- * To keep it compatible with old boot program which uses
- * cache-inhibit spin table, we need to flush the cache
- * before accessing spin table to invalidate any staled data.
- * We also need to flush the cache after writing to spin
- * table to push data out.
- */
 static inline void flush_spin_table(void *spin_table)
 {
 	flush_dcache_range((ulong)spin_table,
@@ -180,28 +173,78 @@ static inline u32 read_spin_table_addr_l(void *spin_table)
 static void wake_hw_thread(void *info)
 {
 	void fsl_secondary_thread_init(void);
-	unsigned long inia;
-	int cpu = *(const int *)info;
+	unsigned long imsr, inia;
+	int nr = *(const int *)info;
 
+	imsr = MSR_KERNEL;
 	inia = *(unsigned long *)fsl_secondary_thread_init;
-	book3e_start_thread(cpu_thread_in_core(cpu), inia);
+
+	if (cpu_thread_in_core(nr) == 0) {
+		/* For when we boot on a secondary thread with kdump */
+		mttmr(TMRN_IMSR0, imsr);
+		mttmr(TMRN_INIA0, inia);
+		mtspr(SPRN_TENS, TEN_THREAD(0));
+	} else {
+		mttmr(TMRN_IMSR1, imsr);
+		mttmr(TMRN_INIA1, inia);
+		mtspr(SPRN_TENS, TEN_THREAD(1));
+	}
+
+	smp_generic_kick_cpu(nr);
 }
 #endif
 
-static int smp_85xx_start_cpu(int cpu)
+static int smp_85xx_kick_cpu(int nr)
 {
-	int ret = 0;
-	struct device_node *np;
-	const u64 *cpu_rel_addr;
 	unsigned long flags;
+	const u64 *cpu_rel_addr;
+	__iomem struct epapr_spin_table *spin_table;
+	struct device_node *np;
+	int hw_cpu = get_hard_smp_processor_id(nr);
 	int ioremappable;
-	int hw_cpu = get_hard_smp_processor_id(cpu);
-	struct epapr_spin_table __iomem *spin_table;
+	int ret = 0;
 
-	np = of_get_cpu_node(cpu, NULL);
+	WARN_ON(nr < 0 || nr >= NR_CPUS);
+	WARN_ON(hw_cpu < 0 || hw_cpu >= NR_CPUS);
+
+	pr_debug("smp_85xx_kick_cpu: kick CPU #%d\n", nr);
+
+#ifdef CONFIG_PPC64
+	/* Threads don't use the spin table */
+	if (cpu_thread_in_core(nr) != 0) {
+		int primary = cpu_first_thread_sibling(nr);
+
+		if (WARN_ON_ONCE(!cpu_has_feature(CPU_FTR_SMT)))
+			return -ENOENT;
+
+		if (cpu_thread_in_core(nr) != 1) {
+			pr_err("%s: cpu %d: invalid hw thread %d\n",
+			       __func__, nr, cpu_thread_in_core(nr));
+			return -ENOENT;
+		}
+
+		if (!cpu_online(primary)) {
+			pr_err("%s: cpu %d: primary %d not online\n",
+			       __func__, nr, primary);
+			return -ENOENT;
+		}
+
+		smp_call_function_single(primary, wake_hw_thread, &nr, 0);
+		return 0;
+	} else if (cpu_thread_in_core(boot_cpuid) != 0 &&
+		   cpu_first_thread_sibling(boot_cpuid) == nr) {
+		if (WARN_ON_ONCE(!cpu_has_feature(CPU_FTR_SMT)))
+			return -ENOENT;
+
+		smp_call_function_single(boot_cpuid, wake_hw_thread, &nr, 0);
+	}
+#endif
+
+	np = of_get_cpu_node(nr, NULL);
 	cpu_rel_addr = of_get_property(np, "cpu-release-addr", NULL);
-	if (!cpu_rel_addr) {
-		pr_err("No cpu-release-addr for cpu %d\n", cpu);
+
+	if (cpu_rel_addr == NULL) {
+		printk(KERN_ERR "No cpu-release-addr for cpu %d\n", nr);
 		return -ENOENT;
 	}
 
@@ -221,18 +264,28 @@ static int smp_85xx_start_cpu(int cpu)
 		spin_table = phys_to_virt(*cpu_rel_addr);
 
 	local_irq_save(flags);
-	hard_irq_disable();
+#ifdef CONFIG_PPC32
+#ifdef CONFIG_HOTPLUG_CPU
+	/* Corresponding to generic_set_cpu_dead() */
+	generic_set_cpu_up(nr);
 
-	if (qoriq_pm_ops)
-		qoriq_pm_ops->cpu_up_prepare(cpu);
+	if (system_state == SYSTEM_RUNNING) {
+		/*
+		 * To keep it compatible with old boot program which uses
+		 * cache-inhibit spin table, we need to flush the cache
+		 * before accessing spin table to invalidate any staled data.
+		 * We also need to flush the cache after writing to spin
+		 * table to push data out.
+		 */
+		flush_spin_table(spin_table);
+		out_be32(&spin_table->addr_l, 0);
+		flush_spin_table(spin_table);
 
-	/* if cpu is not spinning, reset it */
-	if (read_spin_table_addr_l(spin_table) != 1) {
 		/*
 		 * We don't set the BPTR register here since it already points
 		 * to the boot page properly.
 		 */
-		mpic_reset_core(cpu);
+		mpic_reset_core(nr);
 
 		/*
 		 * wait until core is ready...
@@ -242,104 +295,46 @@ static int smp_85xx_start_cpu(int cpu)
 		if (!spin_event_timeout(
 				read_spin_table_addr_l(spin_table) == 1,
 				10000, 100)) {
-			pr_err("timeout waiting for cpu %d to reset\n",
-				hw_cpu);
-			ret = -EAGAIN;
-			goto err;
+			pr_err("%s: timeout waiting for core %d to reset\n",
+							__func__, hw_cpu);
+			ret = -ENOENT;
+			goto out;
 		}
+
+		/*  clear the acknowledge status */
+		__secondary_hold_acknowledge = -1;
 	}
+#endif
+	flush_spin_table(spin_table);
+	out_be32(&spin_table->pir, hw_cpu);
+	out_be32(&spin_table->addr_l, __pa(__early_start));
+	flush_spin_table(spin_table);
+
+	/* Wait a bit for the CPU to ack. */
+	if (!spin_event_timeout(__secondary_hold_acknowledge == hw_cpu,
+					10000, 100)) {
+		pr_err("%s: timeout waiting for core %d to ack\n",
+						__func__, hw_cpu);
+		ret = -ENOENT;
+		goto out;
+	}
+out:
+#else
+	smp_generic_kick_cpu(nr);
 
 	flush_spin_table(spin_table);
 	out_be32(&spin_table->pir, hw_cpu);
-#ifdef CONFIG_PPC64
 	out_be64((u64 *)(&spin_table->addr_h),
 		__pa(ppc_function_entry(generic_secondary_smp_init)));
-#else
-	out_be32(&spin_table->addr_l, __pa(__early_start));
-#endif
 	flush_spin_table(spin_table);
-err:
+#endif
+
 	local_irq_restore(flags);
 
 	if (ioremappable)
 		iounmap(spin_table);
 
 	return ret;
-}
-
-static int smp_85xx_kick_cpu(int nr)
-{
-	int ret = 0;
-#ifdef CONFIG_PPC64
-	int primary = nr;
-#endif
-
-	WARN_ON(nr < 0 || nr >= num_possible_cpus());
-
-	pr_debug("kick CPU #%d\n", nr);
-
-#ifdef CONFIG_PPC64
-	if (threads_per_core == 2) {
-		if (WARN_ON_ONCE(!cpu_has_feature(CPU_FTR_SMT)))
-			return -ENOENT;
-
-		booting_thread_hwid = cpu_thread_in_core(nr);
-		primary = cpu_first_thread_sibling(nr);
-
-		if (qoriq_pm_ops)
-			qoriq_pm_ops->cpu_up_prepare(nr);
-
-		/*
-		 * If either thread in the core is online, use it to start
-		 * the other.
-		 */
-		if (cpu_online(primary)) {
-			smp_call_function_single(primary,
-					wake_hw_thread, &nr, 1);
-			goto done;
-		} else if (cpu_online(primary + 1)) {
-			smp_call_function_single(primary + 1,
-					wake_hw_thread, &nr, 1);
-			goto done;
-		}
-
-		/*
-		 * If getting here, it means both threads in the core are
-		 * offline. So start the primary thread, then it will start
-		 * the thread specified in booting_thread_hwid, the one
-		 * corresponding to nr.
-		 */
-
-	} else if (threads_per_core == 1) {
-		/*
-		 * If one core has only one thread, set booting_thread_hwid to
-		 * an invalid value.
-		 */
-		booting_thread_hwid = INVALID_THREAD_HWID;
-
-	} else if (threads_per_core > 2) {
-		pr_err("Do not support more than 2 threads per CPU.");
-		return -EINVAL;
-	}
-
-	ret = smp_85xx_start_cpu(primary);
-	if (ret)
-		return ret;
-
-done:
-	paca[nr].cpu_start = 1;
-	generic_set_cpu_up(nr);
-
-	return ret;
-#else
-	ret = smp_85xx_start_cpu(nr);
-	if (ret)
-		return ret;
-
-	generic_set_cpu_up(nr);
-
-	return ret;
-#endif
 }
 
 struct smp_ops_t smp_85xx_ops = {
@@ -364,7 +359,7 @@ void mpc85xx_smp_kexec_cpu_down(int crash_shutdown, int secondary)
 	local_irq_disable();
 
 	if (secondary) {
-		cur_cpu_spec->cpu_down_flush();
+		__flush_disable_L1();
 		atomic_inc(&kexec_down_cpus);
 		/* loop forever */
 		while (1);
@@ -472,6 +467,16 @@ static void smp_85xx_setup_cpu(int cpu_nr)
 	smp_85xx_basic_setup(cpu_nr);
 }
 
+static const struct of_device_id mpc85xx_smp_guts_ids[] = {
+	{ .compatible = "fsl,mpc8572-guts", },
+	{ .compatible = "fsl,p1020-guts", },
+	{ .compatible = "fsl,p1021-guts", },
+	{ .compatible = "fsl,p1022-guts", },
+	{ .compatible = "fsl,p1023-guts", },
+	{ .compatible = "fsl,p2020-guts", },
+	{},
+};
+
 void __init mpc85xx_smp_init(void)
 {
 	struct device_node *np;
@@ -495,21 +500,22 @@ void __init mpc85xx_smp_init(void)
 		smp_85xx_ops.probe = NULL;
 	}
 
-#ifdef CONFIG_HOTPLUG_CPU
-#ifdef CONFIG_FSL_CORENET_RCPM
-	fsl_rcpm_init();
-#endif
-
-#ifdef CONFIG_FSL_PMC
-	mpc85xx_setup_pmc();
-#endif
-	if (qoriq_pm_ops) {
+	np = of_find_matching_node(NULL, mpc85xx_smp_guts_ids);
+	if (np) {
+		guts = of_iomap(np, 0);
+		of_node_put(np);
+		if (!guts) {
+			pr_err("%s: Could not map guts node address\n",
+								__func__);
+			return;
+		}
 		smp_85xx_ops.give_timebase = mpc85xx_give_timebase;
 		smp_85xx_ops.take_timebase = mpc85xx_take_timebase;
+#ifdef CONFIG_HOTPLUG_CPU
 		ppc_md.cpu_die = smp_85xx_mach_cpu_die;
-		smp_85xx_ops.cpu_die = qoriq_cpu_kill;
-	}
 #endif
+	}
+
 	smp_ops = &smp_85xx_ops;
 
 #ifdef CONFIG_KEXEC

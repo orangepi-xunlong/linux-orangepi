@@ -62,7 +62,11 @@ static int msm_fbdev_mmap(struct fb_info *info, struct vm_area_struct *vma)
 	struct drm_fb_helper *helper = (struct drm_fb_helper *)info->par;
 	struct msm_fbdev *fbdev = to_msm_fbdev(helper);
 	struct drm_gem_object *drm_obj = fbdev->bo;
+	struct drm_device *dev = helper->dev;
 	int ret = 0;
+
+	if (drm_device_is_unplugged(dev))
+		return -ENODEV;
 
 	ret = drm_gem_mmap_obj(drm_obj, drm_obj->size, vma);
 	if (ret) {
@@ -117,7 +121,7 @@ static int msm_fbdev_create(struct drm_fb_helper *helper,
 		/* note: if fb creation failed, we can't rely on fb destroy
 		 * to unref the bo:
 		 */
-		drm_gem_object_unreference_unlocked(fbdev->bo);
+		drm_gem_object_unreference(fbdev->bo);
 		ret = PTR_ERR(fb);
 		goto fail;
 	}
@@ -158,11 +162,7 @@ static int msm_fbdev_create(struct drm_fb_helper *helper,
 
 	dev->mode_config.fb_base = paddr;
 
-	fbi->screen_base = msm_gem_get_vaddr_locked(fbdev->bo);
-	if (IS_ERR(fbi->screen_base)) {
-		ret = PTR_ERR(fbi->screen_base);
-		goto fail_unlock;
-	}
+	fbi->screen_base = msm_gem_vaddr_locked(fbdev->bo);
 	fbi->screen_size = fbdev->bo->size;
 	fbi->fix.smem_start = paddr;
 	fbi->fix.smem_len = fbdev->bo->size;
@@ -188,7 +188,21 @@ fail:
 	return ret;
 }
 
+static void msm_crtc_fb_gamma_set(struct drm_crtc *crtc,
+		u16 red, u16 green, u16 blue, int regno)
+{
+	DBG("fbdev: set gamma");
+}
+
+static void msm_crtc_fb_gamma_get(struct drm_crtc *crtc,
+		u16 *red, u16 *green, u16 *blue, int regno)
+{
+	DBG("fbdev: get gamma");
+}
+
 static const struct drm_fb_helper_funcs msm_fb_helper_funcs = {
+	.gamma_set = msm_crtc_fb_gamma_set,
+	.gamma_get = msm_crtc_fb_gamma_get,
 	.fb_probe = msm_fbdev_create,
 };
 
@@ -251,7 +265,6 @@ void msm_fbdev_free(struct drm_device *dev)
 
 	/* this will free the backing object */
 	if (fbdev->fb) {
-		msm_gem_put_vaddr(fbdev->bo);
 		drm_framebuffer_unregister_private(fbdev->fb);
 		drm_framebuffer_remove(fbdev->fb);
 	}

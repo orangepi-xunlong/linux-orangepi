@@ -82,6 +82,14 @@ SECTIONS
 
 	PERCPU_SECTION(L1_CACHE_BYTES)
 
+	/*
+	 * .exit.text is discard at runtime, not link time, to deal with
+	 * references from .debug_frame
+	 * It will be init freed, being inside [__init_start : __init_end]
+	 */
+	.exit.text : { EXIT_TEXT }
+	.exit.data : { EXIT_DATA }
+
 	. = ALIGN(PAGE_SIZE);
 	__init_end = .;
 
@@ -89,7 +97,6 @@ SECTIONS
 		_text = .;
 		TEXT_TEXT
 		SCHED_TEXT
-		CPUIDLE_TEXT
 		LOCK_TEXT
 		KPROBES_TEXT
 		*(.fixup)
@@ -113,13 +120,18 @@ SECTIONS
 
 #ifdef CONFIG_ARC_DW2_UNWIND
 	. = ALIGN(PAGE_SIZE);
-	.eh_frame  : {
+	.debug_frame  : {
 		__start_unwind = .;
-		*(.eh_frame)
+		*(.debug_frame)
 		__end_unwind = .;
 	}
-#else
+	/*
+	 * gcc 4.8 generates this for -fasynchonous-unwind-tables,
+	 * while we still use the .debug_frame based unwinder
+	 */
 	/DISCARD/ : {	*(.eh_frame) }
+#else
+	/DISCARD/ : {	*(.debug_frame) }
 #endif
 
 	NOTES
@@ -136,7 +148,7 @@ SECTIONS
 	}
 
 #ifndef CONFIG_DEBUG_INFO
-	/DISCARD/ : { *(.debug_frame) }
+	/* open-coded because we need .debug_frame seperately for unwinding */
 	/DISCARD/ : { *(.debug_aranges) }
 	/DISCARD/ : { *(.debug_pubnames) }
 	/DISCARD/ : { *(.debug_info) }

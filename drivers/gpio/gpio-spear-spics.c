@@ -12,7 +12,7 @@
 #include <linux/err.h>
 #include <linux/gpio.h>
 #include <linux/io.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/types.h>
@@ -62,7 +62,8 @@ static int spics_get_value(struct gpio_chip *chip, unsigned offset)
 
 static void spics_set_value(struct gpio_chip *chip, unsigned offset, int value)
 {
-	struct spear_spics *spics = gpiochip_get_data(chip);
+	struct spear_spics *spics = container_of(chip, struct spear_spics,
+			chip);
 	u32 tmp;
 
 	/* select chip select from register */
@@ -93,7 +94,8 @@ static int spics_direction_output(struct gpio_chip *chip, unsigned offset,
 
 static int spics_request(struct gpio_chip *chip, unsigned offset)
 {
-	struct spear_spics *spics = gpiochip_get_data(chip);
+	struct spear_spics *spics = container_of(chip, struct spear_spics,
+			chip);
 	u32 tmp;
 
 	if (!spics->use_count++) {
@@ -108,7 +110,8 @@ static int spics_request(struct gpio_chip *chip, unsigned offset)
 
 static void spics_free(struct gpio_chip *chip, unsigned offset)
 {
-	struct spear_spics *spics = gpiochip_get_data(chip);
+	struct spear_spics *spics = container_of(chip, struct spear_spics,
+			chip);
 	u32 tmp;
 
 	if (!--spics->use_count) {
@@ -165,7 +168,7 @@ static int spics_gpio_probe(struct platform_device *pdev)
 	spics->chip.owner = THIS_MODULE;
 	spics->last_off = -1;
 
-	ret = devm_gpiochip_add_data(&pdev->dev, &spics->chip, spics);
+	ret = gpiochip_add(&spics->chip);
 	if (ret) {
 		dev_err(&pdev->dev, "unable to add gpio chip\n");
 		return ret;
@@ -183,6 +186,7 @@ static const struct of_device_id spics_gpio_of_match[] = {
 	{ .compatible = "st,spear-spics-gpio" },
 	{}
 };
+MODULE_DEVICE_TABLE(of, spics_gpio_of_match);
 
 static struct platform_driver spics_gpio_driver = {
 	.probe = spics_gpio_probe,
@@ -197,3 +201,7 @@ static int __init spics_gpio_init(void)
 	return platform_driver_register(&spics_gpio_driver);
 }
 subsys_initcall(spics_gpio_init);
+
+MODULE_AUTHOR("Shiraz Hashim <shiraz.linux.kernel@gmail.com>");
+MODULE_DESCRIPTION("STMicroelectronics SPEAr SPI Chip Select Abstraction");
+MODULE_LICENSE("GPL");

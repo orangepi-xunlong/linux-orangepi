@@ -60,16 +60,13 @@ EXPORT_SYMBOL_GPL(snd_soc_params_to_bclk);
 
 static const struct snd_pcm_hardware dummy_dma_hardware = {
 	/* Random values to keep userspace happy when checking constraints */
-	.formats		= 0xffffffff,
 	.info			= SNDRV_PCM_INFO_INTERLEAVED |
 				  SNDRV_PCM_INFO_BLOCK_TRANSFER,
-	.channels_min       = 1,
-	.channels_max       = 16,
-	.buffer_bytes_max	= 1024*1024,
-	.period_bytes_min	= 256,
-	.period_bytes_max	= 256*1024,
+	.buffer_bytes_max	= 128*1024,
+	.period_bytes_min	= PAGE_SIZE,
+	.period_bytes_max	= PAGE_SIZE*2,
 	.periods_min		= 2,
-	.periods_max		= 8,
+	.periods_max		= 128,
 };
 
 static int dummy_dma_open(struct snd_pcm_substream *substream)
@@ -83,7 +80,7 @@ static int dummy_dma_open(struct snd_pcm_substream *substream)
 	return 0;
 }
 
-static const struct snd_pcm_ops dummy_dma_ops = {
+static struct snd_pcm_ops dummy_dma_ops = {
 	.open		= dummy_dma_open,
 	.ioctl		= snd_pcm_lib_ioctl,
 };

@@ -24,8 +24,6 @@
 
 #include <crypto/internal/hash.h>
 
-#define MODULE_NAME "crypto4xx"
-
 #define PPC460SX_SDR0_SRST                      0x201
 #define PPC405EX_SDR0_SRST                      0x200
 #define PPC460EX_SDR0_SRST                      0x201
@@ -74,7 +72,6 @@ struct crypto4xx_device {
 	char *name;
 	u64  ce_phy_address;
 	void __iomem *ce_base;
-	void __iomem *trng_base;
 
 	void *pdr;			/* base address of packet
 					descriptor ring */
@@ -109,7 +106,6 @@ struct crypto4xx_core_device {
 	struct device *device;
 	struct platform_device *ofdev;
 	struct crypto4xx_device *dev;
-	struct hwrng *trng;
 	u32 int_status;
 	u32 irq;
 	struct tasklet_struct tasklet;

@@ -11,6 +11,7 @@
 #include <linux/seq_file.h>
 #include <linux/debugfs.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/rbtree_augmented.h>
 #include <linux/sched.h>
 #include <linux/gfp.h>
@@ -97,13 +98,8 @@ static struct memtype *memtype_rb_lowest_match(struct rb_root *root,
 	return last_lower; /* Returns NULL if there is no overlap */
 }
 
-enum {
-	MEMTYPE_EXACT_MATCH	= 0,
-	MEMTYPE_END_MATCH	= 1
-};
-
-static struct memtype *memtype_rb_match(struct rb_root *root,
-				u64 start, u64 end, int match_type)
+static struct memtype *memtype_rb_exact_match(struct rb_root *root,
+				u64 start, u64 end)
 {
 	struct memtype *match;
 
@@ -111,12 +107,7 @@ static struct memtype *memtype_rb_match(struct rb_root *root,
 	while (match != NULL && match->start < end) {
 		struct rb_node *node;
 
-		if ((match_type == MEMTYPE_EXACT_MATCH) &&
-		    (match->start == start) && (match->end == end))
-			return match;
-
-		if ((match_type == MEMTYPE_END_MATCH) &&
-		    (match->start < start) && (match->end == end))
+		if (match->start == start && match->end == end)
 			return match;
 
 		node = rb_next(&match->rb);
@@ -126,7 +117,7 @@ static struct memtype *memtype_rb_match(struct rb_root *root,
 			match = NULL;
 	}
 
-	return NULL; /* Returns NULL if there is no match */
+	return NULL; /* Returns NULL if there is no exact match */
 }
 
 static int memtype_rb_check_conflict(struct rb_root *root,
@@ -219,42 +210,20 @@ struct memtype *rbt_memtype_erase(u64 start, u64 end)
 {
 	struct memtype *data;
 
-	/*
-	 * Since the memtype_rbroot tree allows overlapping ranges,
-	 * rbt_memtype_erase() checks with EXACT_MATCH first, i.e. free
-	 * a whole node for the munmap case.  If no such entry is found,
-	 * it then checks with END_MATCH, i.e. shrink the size of a node
-	 * from the end for the mremap case.
-	 */
-	data = memtype_rb_match(&memtype_rbroot, start, end,
-				MEMTYPE_EXACT_MATCH);
-	if (!data) {
-		data = memtype_rb_match(&memtype_rbroot, start, end,
-					MEMTYPE_END_MATCH);
-		if (!data)
-			return ERR_PTR(-EINVAL);
-	}
+	data = memtype_rb_exact_match(&memtype_rbroot, start, end);
+	if (!data)
+		goto out;
 
-	if (data->start == start) {
-		/* munmap: erase this node */
-		rb_erase_augmented(&data->rb, &memtype_rbroot,
-					&memtype_rb_augment_cb);
-	} else {
-		/* mremap: update the end value of this node */
-		rb_erase_augmented(&data->rb, &memtype_rbroot,
-					&memtype_rb_augment_cb);
-		data->end = start;
-		data->subtree_max_end = data->end;
-		memtype_rb_insert(&memtype_rbroot, data);
-		return NULL;
-	}
-
+	rb_erase_augmented(&data->rb, &memtype_rbroot, &memtype_rb_augment_cb);
+out:
 	return data;
 }
 
 struct memtype *rbt_memtype_lookup(u64 addr)
 {
-	return memtype_rb_lowest_match(&memtype_rbroot, addr, addr + PAGE_SIZE);
+	struct memtype *data;
+	data = memtype_rb_lowest_match(&memtype_rbroot, addr, addr + PAGE_SIZE);
+	return data;
 }
 
 #if defined(CONFIG_DEBUG_FS)

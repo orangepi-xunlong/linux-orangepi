@@ -13,7 +13,7 @@
 #include <linux/string.h>
 #include <linux/ctype.h>
 #include <linux/lockdep.h>
-#include <linux/extable.h>
+#include <linux/module.h>
 #include <linux/pfn.h>
 #include <linux/uaccess.h>
 #include <linux/kernel.h>
@@ -224,31 +224,11 @@ static noinline __init void detect_machine_type(void)
 	if (stsi(vmms, 3, 2, 2) || !vmms->count)
 		return;
 
-	/* Running under KVM? If not we assume z/VM */
+	/* Detect known hypervisors */
 	if (!memcmp(vmms->vm[0].cpi, "\xd2\xe5\xd4", 3))
 		S390_lowcore.machine_flags |= MACHINE_FLAG_KVM;
-	else
+	else if (!memcmp(vmms->vm[0].cpi, "\xa9\x61\xe5\xd4", 4))
 		S390_lowcore.machine_flags |= MACHINE_FLAG_VM;
-}
-
-static noinline __init void setup_arch_string(void)
-{
-	struct sysinfo_1_1_1 *mach = (struct sysinfo_1_1_1 *)&sysinfo_page;
-
-	if (stsi(mach, 1, 1, 1))
-		return;
-	EBCASC(mach->manufacturer, sizeof(mach->manufacturer));
-	EBCASC(mach->type, sizeof(mach->type));
-	EBCASC(mach->model, sizeof(mach->model));
-	EBCASC(mach->model_capacity, sizeof(mach->model_capacity));
-	dump_stack_set_arch_desc("%-16.16s %-4.4s %-16.16s %-16.16s (%s)",
-				 mach->manufacturer,
-				 mach->type,
-				 mach->model,
-				 mach->model_capacity,
-				 MACHINE_IS_LPAR ? "LPAR" :
-				 MACHINE_IS_VM ? "z/VM" :
-				 MACHINE_IS_KVM ? "KVM" : "unknown");
 }
 
 static __init void setup_topology(void)
@@ -272,14 +252,14 @@ static void early_pgm_check_handler(void)
 	unsigned long addr;
 
 	addr = S390_lowcore.program_old_psw.addr;
-	fixup = search_exception_tables(addr);
+	fixup = search_exception_tables(addr & PSW_ADDR_INSN);
 	if (!fixup)
 		disabled_wait(0);
 	/* Disable low address protection before storing into lowcore. */
 	__ctl_store(cr0, 0, 0);
 	cr0_new = cr0 & ~(1UL << 28);
 	__ctl_load(cr0_new, 0, 0);
-	S390_lowcore.program_old_psw.addr = extable_fixup(fixup);
+	S390_lowcore.program_old_psw.addr = extable_fixup(fixup)|PSW_ADDR_AMODE;
 	__ctl_load(cr0, 0, 0);
 }
 
@@ -288,9 +268,9 @@ static noinline __init void setup_lowcore_early(void)
 	psw_t psw;
 
 	psw.mask = PSW_MASK_BASE | PSW_DEFAULT_KEY | PSW_MASK_EA | PSW_MASK_BA;
-	psw.addr = (unsigned long) s390_base_ext_handler;
+	psw.addr = PSW_ADDR_AMODE | (unsigned long) s390_base_ext_handler;
 	S390_lowcore.external_new_psw = psw;
-	psw.addr = (unsigned long) s390_base_pgm_handler;
+	psw.addr = PSW_ADDR_AMODE | (unsigned long) s390_base_pgm_handler;
 	S390_lowcore.program_new_psw = psw;
 	s390_base_pgm_handler_fn = early_pgm_check_handler;
 }
@@ -361,26 +341,6 @@ static __init void detect_machine_facilities(void)
 		__ctl_set_bit(0, 17);
 	}
 }
-
-static inline void save_vector_registers(void)
-{
-#ifdef CONFIG_CRASH_DUMP
-	if (test_facility(129))
-		save_vx_regs(boot_cpu_vector_save_area);
-#endif
-}
-
-static int __init topology_setup(char *str)
-{
-	bool enabled;
-	int rc;
-
-	rc = kstrtobool(str, &enabled);
-	if (!rc && !enabled)
-		S390_lowcore.machine_flags &= ~MACHINE_FLAG_TOPOLOGY;
-	return rc;
-}
-early_param("topology", topology_setup);
 
 static int __init disable_vector_extension(char *str)
 {
@@ -486,20 +446,18 @@ void __init startup_init(void)
 	ipl_save_parameters();
 	rescue_initrd();
 	clear_bss_section();
-	ptff_init();
 	init_kernel_storage_key();
+	lockdep_init();
 	lockdep_off();
 	setup_lowcore_early();
 	setup_facility_list();
 	detect_machine_type();
-	setup_arch_string();
 	ipl_update_parameters();
 	setup_boot_command_line();
 	create_kernel_nss();
 	detect_diag9c();
 	detect_diag44();
 	detect_machine_facilities();
-	save_vector_registers();
 	setup_topology();
 	sclp_early_detect();
 	lockdep_on();

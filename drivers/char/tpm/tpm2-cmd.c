@@ -16,15 +16,10 @@
  */
 
 #include "tpm.h"
-#include <crypto/hash_info.h>
 #include <keys/trusted-type.h>
 
 enum tpm2_object_attributes {
-	TPM2_OA_USER_WITH_AUTH		= BIT(6),
-};
-
-enum tpm2_session_attributes {
-	TPM2_SA_CONTINUE_SESSION	= BIT(0),
+	TPM2_ATTR_USER_WITH_AUTH	= BIT(6),
 };
 
 struct tpm2_startup_in {
@@ -108,19 +103,6 @@ struct tpm2_cmd {
 	tpm_cmd_header		header;
 	union tpm2_cmd_params	params;
 } __packed;
-
-struct tpm2_hash {
-	unsigned int crypto_id;
-	unsigned int tpm_id;
-};
-
-static struct tpm2_hash tpm2_hash_map[] = {
-	{HASH_ALGO_SHA1, TPM2_ALG_SHA1},
-	{HASH_ALGO_SHA256, TPM2_ALG_SHA256},
-	{HASH_ALGO_SHA384, TPM2_ALG_SHA384},
-	{HASH_ALGO_SHA512, TPM2_ALG_SHA512},
-	{HASH_ALGO_SM3_256, TPM2_ALG_SM3_256},
-};
 
 /*
  * Array with one entry per ordinal defining the maximum amount
@@ -447,19 +429,7 @@ int tpm2_seal_trusted(struct tpm_chip *chip,
 {
 	unsigned int blob_len;
 	struct tpm_buf buf;
-	u32 hash;
-	int i;
 	int rc;
-
-	for (i = 0; i < ARRAY_SIZE(tpm2_hash_map); i++) {
-		if (options->hash == tpm2_hash_map[i].crypto_id) {
-			hash = tpm2_hash_map[i].tpm_id;
-			break;
-		}
-	}
-
-	if (i == ARRAY_SIZE(tpm2_hash_map))
-		return -EINVAL;
 
 	rc = tpm_buf_init(&buf, TPM2_ST_SESSIONS, TPM2_CC_CREATE);
 	if (rc)
@@ -482,22 +452,12 @@ int tpm2_seal_trusted(struct tpm_chip *chip,
 	tpm_buf_append_u8(&buf, payload->migratable);
 
 	/* public */
-	tpm_buf_append_u16(&buf, 14 + options->policydigest_len);
+	tpm_buf_append_u16(&buf, 14);
+
 	tpm_buf_append_u16(&buf, TPM2_ALG_KEYEDHASH);
-	tpm_buf_append_u16(&buf, hash);
-
-	/* policy */
-	if (options->policydigest_len) {
-		tpm_buf_append_u32(&buf, 0);
-		tpm_buf_append_u16(&buf, options->policydigest_len);
-		tpm_buf_append(&buf, options->policydigest,
-			       options->policydigest_len);
-	} else {
-		tpm_buf_append_u32(&buf, TPM2_OA_USER_WITH_AUTH);
-		tpm_buf_append_u16(&buf, 0);
-	}
-
-	/* public parameters */
+	tpm_buf_append_u16(&buf, TPM2_ALG_SHA256);
+	tpm_buf_append_u32(&buf, TPM2_ATTR_USER_WITH_AUTH);
+	tpm_buf_append_u16(&buf, 0); /* policy digest size */
 	tpm_buf_append_u16(&buf, TPM2_ALG_NULL);
 	tpm_buf_append_u16(&buf, 0);
 
@@ -528,12 +488,8 @@ int tpm2_seal_trusted(struct tpm_chip *chip,
 out:
 	tpm_buf_destroy(&buf);
 
-	if (rc > 0) {
-		if (tpm2_rc_value(rc) == TPM2_RC_HASH)
-			rc = -EINVAL;
-		else
-			rc = -EPERM;
-	}
+	if (rc > 0)
+		rc = -EPERM;
 
 	return rc;
 }
@@ -653,11 +609,9 @@ static int tpm2_unseal_cmd(struct tpm_chip *chip,
 		return rc;
 
 	tpm_buf_append_u32(&buf, blob_handle);
-	tpm2_buf_append_auth(&buf,
-			     options->policyhandle ?
-			     options->policyhandle : TPM2_RS_PW,
+	tpm2_buf_append_auth(&buf, TPM2_RS_PW,
 			     NULL /* nonce */, 0,
-			     TPM2_SA_CONTINUE_SESSION,
+			     0 /* session_attributes */,
 			     options->blobauth /* hmac */,
 			     TPM_DIGEST_SIZE);
 
@@ -742,7 +696,6 @@ ssize_t tpm2_get_tpm_pt(struct tpm_chip *chip, u32 property_id,  u32 *value,
 
 	return rc;
 }
-EXPORT_SYMBOL_GPL(tpm2_get_tpm_pt);
 
 #define TPM2_STARTUP_IN_SIZE \
 	(sizeof(struct tpm_input_header) + \
@@ -764,7 +717,7 @@ static const struct tpm_input_header tpm2_startup_header = {
  * returned it remarks a POSIX error code. If a positive number is returned
  * it remarks a TPM error.
  */
-static int tpm2_startup(struct tpm_chip *chip, u16 startup_type)
+int tpm2_startup(struct tpm_chip *chip, u16 startup_type)
 {
 	struct tpm2_cmd cmd;
 
@@ -774,6 +727,7 @@ static int tpm2_startup(struct tpm_chip *chip, u16 startup_type)
 	return tpm_transmit_cmd(chip, &cmd, sizeof(cmd), 0,
 				"attempting to start the TPM");
 }
+EXPORT_SYMBOL_GPL(tpm2_startup);
 
 #define TPM2_SHUTDOWN_IN_SIZE \
 	(sizeof(struct tpm_input_header) + \
@@ -808,6 +762,7 @@ void tpm2_shutdown(struct tpm_chip *chip, u16 shutdown_type)
 		dev_warn(&chip->dev, "transmit returned %d while stopping the TPM",
 			 rc);
 }
+EXPORT_SYMBOL_GPL(tpm2_shutdown);
 
 /*
  * tpm2_calc_ordinal_duration() - maximum duration for a command
@@ -827,7 +782,7 @@ unsigned long tpm2_calc_ordinal_duration(struct tpm_chip *chip, u32 ordinal)
 		index = tpm2_ordinal_duration[ordinal - TPM2_CC_FIRST];
 
 	if (index != TPM_UNDEFINED)
-		duration = chip->duration[index];
+		duration = chip->vendor.duration[index];
 
 	if (duration <= 0)
 		duration = 2 * 60 * HZ;
@@ -889,7 +844,7 @@ static int tpm2_start_selftest(struct tpm_chip *chip, bool full)
  * returned it remarks a POSIX error code. If a positive number is returned
  * it remarks a TPM error.
  */
-static int tpm2_do_selftest(struct tpm_chip *chip)
+int tpm2_do_selftest(struct tpm_chip *chip)
 {
 	int rc;
 	unsigned int loops;
@@ -929,6 +884,24 @@ static int tpm2_do_selftest(struct tpm_chip *chip)
 
 	return rc;
 }
+EXPORT_SYMBOL_GPL(tpm2_do_selftest);
+
+/**
+ * tpm2_gen_interrupt() - generate an interrupt
+ * @chip: TPM chip to use
+ *
+ * 0 is returned when the operation is successful. If a negative number is
+ * returned it remarks a POSIX error code. If a positive number is returned
+ * it remarks a TPM error.
+ */
+int tpm2_gen_interrupt(struct tpm_chip *chip)
+{
+	u32 dummy;
+
+	return tpm2_get_tpm_pt(chip, 0x100, &dummy,
+			       "attempting to generate an interrupt");
+}
+EXPORT_SYMBOL_GPL(tpm2_gen_interrupt);
 
 /**
  * tpm2_probe() - probe TPM 2.0
@@ -947,9 +920,11 @@ int tpm2_probe(struct tpm_chip *chip)
 	cmd.params.get_tpm_pt_in.property_id = cpu_to_be32(0x100);
 	cmd.params.get_tpm_pt_in.property_cnt = cpu_to_be32(1);
 
-	rc = tpm_transmit_cmd(chip, &cmd, sizeof(cmd),  0, NULL);
+	rc = tpm_transmit(chip, (const u8 *)&cmd, sizeof(cmd), 0);
 	if (rc <  0)
 		return rc;
+	else if (rc < TPM_HEADER_SIZE)
+		return -EFAULT;
 
 	if (be16_to_cpu(cmd.header.out.tag) == TPM2_ST_NO_SESSIONS)
 		chip->flags |= TPM_CHIP_FLAG_TPM2;
@@ -957,42 +932,3 @@ int tpm2_probe(struct tpm_chip *chip)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(tpm2_probe);
-
-/**
- * tpm2_auto_startup - Perform the standard automatic TPM initialization
- *                     sequence
- * @chip: TPM chip to use
- *
- * Returns 0 on success, < 0 in case of fatal error.
- */
-int tpm2_auto_startup(struct tpm_chip *chip)
-{
-	int rc;
-
-	rc = tpm_get_timeouts(chip);
-	if (rc)
-		goto out;
-
-	rc = tpm2_do_selftest(chip);
-	if (rc != 0 && rc != TPM2_RC_INITIALIZE) {
-		dev_err(&chip->dev, "TPM self test failed\n");
-		goto out;
-	}
-
-	if (rc == TPM2_RC_INITIALIZE) {
-		rc = tpm2_startup(chip, TPM2_SU_CLEAR);
-		if (rc)
-			goto out;
-
-		rc = tpm2_do_selftest(chip);
-		if (rc) {
-			dev_err(&chip->dev, "TPM self test failed\n");
-			goto out;
-		}
-	}
-
-out:
-	if (rc > 0)
-		rc = -ENODEV;
-	return rc;
-}

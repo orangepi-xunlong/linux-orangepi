@@ -61,7 +61,6 @@
  */
 #include <asm/asmmacro.h>
 #include <asm/page.h>
-#include <asm/export.h>
 
 #define PREFETCH_DIST	8		// McKinley sustains 16 outstanding L2 misses (8 ld, 8 st)
 
@@ -184,4 +183,3 @@ GLOBAL_ENTRY(copy_page)
 	mov pr = saved_pr, -1
 	br.ret.sptk.many rp
 END(copy_page)
-EXPORT_SYMBOL(copy_page)

@@ -172,6 +172,13 @@ static void handle_trap(int pid, struct uml_pt_regs *regs,
 	handle_syscall(regs);
 }
 
+int get_syscall(struct uml_pt_regs *regs)
+{
+	UPT_SYSCALL_NR(regs) = PT_SYSCALL_NR(regs->gp);
+
+	return UPT_SYSCALL_NR(regs);
+}
+
 extern char __syscall_stub_start[];
 
 static int userspace_tramp(void *stack)
@@ -578,6 +585,11 @@ int start_idle_thread(void *stack, jmp_buf *switch_buf)
 		fatal_sigsegv();
 	}
 	longjmp(*switch_buf, 1);
+
+	/* unreachable */
+	printk(UM_KERN_ERR "impossible long jump!");
+	fatal_sigsegv();
+	return 0;
 }
 
 void initial_thread_cb_skas(void (*proc)(void *), void *arg)

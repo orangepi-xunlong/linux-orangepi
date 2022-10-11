@@ -39,7 +39,11 @@
 #include <asm/pgtable.h>
 #include <asm/processor.h>
 #include <asm/traps.h>
-#include <asm/hw_breakpoint.h>
+
+#ifdef CONFIG_KGDB
+extern int gdb_enter;
+extern int return_from_debug_flag;
+#endif
 
 /*
  * Machine specific interrupt handlers
@@ -158,8 +162,6 @@ COPROCESSOR(7),
 
 DEFINE_PER_CPU(unsigned long, exc_table[EXC_TABLE_SIZE/4]);
 
-DEFINE_PER_CPU(struct debug_table, debug_table);
-
 void die(const char*, struct pt_regs*, long);
 
 static inline void
@@ -203,32 +205,6 @@ extern void do_IRQ(int, struct pt_regs *);
 
 #if XTENSA_FAKE_NMI
 
-#define IS_POW2(v) (((v) & ((v) - 1)) == 0)
-
-#if !(PROFILING_INTLEVEL == XCHAL_EXCM_LEVEL && \
-      IS_POW2(XTENSA_INTLEVEL_MASK(PROFILING_INTLEVEL)))
-#warning "Fake NMI is requested for PMM, but there are other IRQs at or above its level."
-#warning "Fake NMI will be used, but there will be a bugcheck if one of those IRQs fire."
-
-static inline void check_valid_nmi(void)
-{
-	unsigned intread = get_sr(interrupt);
-	unsigned intenable = get_sr(intenable);
-
-	BUG_ON(intread & intenable &
-	       ~(XTENSA_INTLEVEL_ANDBELOW_MASK(PROFILING_INTLEVEL) ^
-		 XTENSA_INTLEVEL_MASK(PROFILING_INTLEVEL) ^
-		 BIT(XCHAL_PROFILING_INTERRUPT)));
-}
-
-#else
-
-static inline void check_valid_nmi(void)
-{
-}
-
-#endif
-
 irqreturn_t xtensa_pmu_irq_handler(int irq, void *dev_id);
 
 DEFINE_PER_CPU(unsigned long, nmi_count);
@@ -243,7 +219,6 @@ void do_nmi(struct pt_regs *regs)
 	old_regs = set_irq_regs(regs);
 	nmi_enter();
 	++*this_cpu_ptr(&nmi_count);
-	check_valid_nmi();
 	xtensa_pmu_irq_handler(0, NULL);
 	nmi_exit();
 	set_irq_regs(old_regs);
@@ -339,22 +314,23 @@ do_unaligned_user (struct pt_regs *regs)
 }
 #endif
 
-/* Handle debug events.
- * When CONFIG_HAVE_HW_BREAKPOINT is on this handler is called with
- * preemption disabled to avoid rescheduling and keep mapping of hardware
- * breakpoint structures to debug registers intact, so that
- * DEBUGCAUSE.DBNUM could be used in case of data breakpoint hit.
- */
 void
 do_debug(struct pt_regs *regs)
 {
-#ifdef CONFIG_HAVE_HW_BREAKPOINT
-	int ret = check_hw_breakpoint(regs);
+#ifdef CONFIG_KGDB
+	/* If remote debugging is configured AND enabled, we give control to
+	 * kgdb.  Otherwise, we fall through, perhaps giving control to the
+	 * native debugger.
+	 */
 
-	preempt_enable();
-	if (ret == 0)
+	if (gdb_enter) {
+		extern void gdb_handle_exception(struct pt_regs *);
+		gdb_handle_exception(regs);
+		return_from_debug_flag = 1;
 		return;
+	}
 #endif
+
 	__die_if_kernel("Breakpoint in kernel", regs, SIGKILL);
 
 	/* If in user mode, send SIGTRAP signal to current process */
@@ -386,15 +362,6 @@ static void trap_init_excsave(void)
 {
 	unsigned long excsave1 = (unsigned long)this_cpu_ptr(exc_table);
 	__asm__ __volatile__("wsr  %0, excsave1\n" : : "a" (excsave1));
-}
-
-static void trap_init_debug(void)
-{
-	unsigned long debugsave = (unsigned long)this_cpu_ptr(&debug_table);
-
-	this_cpu_ptr(&debug_table)->debug_exception = debug_exception;
-	__asm__ __volatile__("wsr %0, excsave" __stringify(XCHAL_DEBUGLEVEL)
-			     :: "a"(debugsave));
 }
 
 /*
@@ -440,14 +407,12 @@ void __init trap_init(void)
 
 	/* Initialize EXCSAVE_1 to hold the address of the exception table. */
 	trap_init_excsave();
-	trap_init_debug();
 }
 
 #ifdef CONFIG_SMP
 void secondary_trap_init(void)
 {
 	trap_init_excsave();
-	trap_init_debug();
 }
 #endif
 
@@ -465,25 +430,26 @@ void show_regs(struct pt_regs * regs)
 
 	for (i = 0; i < 16; i++) {
 		if ((i % 8) == 0)
-			pr_info("a%02d:", i);
-		pr_cont(" %08lx", regs->areg[i]);
+			printk(KERN_INFO "a%02d:", i);
+		printk(KERN_CONT " %08lx", regs->areg[i]);
 	}
-	pr_cont("\n");
-	pr_info("pc: %08lx, ps: %08lx, depc: %08lx, excvaddr: %08lx\n",
-		regs->pc, regs->ps, regs->depc, regs->excvaddr);
-	pr_info("lbeg: %08lx, lend: %08lx lcount: %08lx, sar: %08lx\n",
-		regs->lbeg, regs->lend, regs->lcount, regs->sar);
+	printk(KERN_CONT "\n");
+
+	printk("pc: %08lx, ps: %08lx, depc: %08lx, excvaddr: %08lx\n",
+	       regs->pc, regs->ps, regs->depc, regs->excvaddr);
+	printk("lbeg: %08lx, lend: %08lx lcount: %08lx, sar: %08lx\n",
+	       regs->lbeg, regs->lend, regs->lcount, regs->sar);
 	if (user_mode(regs))
-		pr_cont("wb: %08lx, ws: %08lx, wmask: %08lx, syscall: %ld\n",
-			regs->windowbase, regs->windowstart, regs->wmask,
-			regs->syscall);
+		printk("wb: %08lx, ws: %08lx, wmask: %08lx, syscall: %ld\n",
+		       regs->windowbase, regs->windowstart, regs->wmask,
+		       regs->syscall);
 }
 
 static int show_trace_cb(struct stackframe *frame, void *data)
 {
 	if (kernel_text_address(frame->pc)) {
-		pr_cont(" [<%08lx>]", frame->pc);
-		print_symbol(" %s\n", frame->pc);
+		printk(" [<%08lx>] ", frame->pc);
+		print_symbol("%s\n", frame->pc);
 	}
 	return 0;
 }
@@ -493,12 +459,18 @@ void show_trace(struct task_struct *task, unsigned long *sp)
 	if (!sp)
 		sp = stack_pointer(task);
 
-	pr_info("Call Trace:\n");
-	walk_stackframe(sp, show_trace_cb, NULL);
-#ifndef CONFIG_KALLSYMS
-	pr_cont("\n");
+	printk("Call Trace:");
+#ifdef CONFIG_KALLSYMS
+	printk("\n");
 #endif
+	walk_stackframe(sp, show_trace_cb, NULL);
+	printk("\n");
 }
+
+/*
+ * This routine abuses get_user()/put_user() to reference pointers
+ * with at least a bit of error checking ...
+ */
 
 static int kstack_depth_to_print = 24;
 
@@ -511,16 +483,33 @@ void show_stack(struct task_struct *task, unsigned long *sp)
 		sp = stack_pointer(task);
 	stack = sp;
 
-	pr_info("Stack:\n");
+	printk("\nStack: ");
 
 	for (i = 0; i < kstack_depth_to_print; i++) {
 		if (kstack_end(sp))
 			break;
-		pr_cont(" %08lx", *sp++);
-		if (i % 8 == 7)
-			pr_cont("\n");
+		if (i && ((i % 8) == 0))
+			printk("\n       ");
+		printk("%08lx ", *sp++);
 	}
+	printk("\n");
 	show_trace(task, stack);
+}
+
+void show_code(unsigned int *pc)
+{
+	long i;
+
+	printk("\nCode:");
+
+	for(i = -3 ; i < 6 ; i++) {
+		unsigned long insn;
+		if (__get_user(insn, pc + i)) {
+			printk(" (Bad address in pc)\n");
+			break;
+		}
+		printk("%c%08lx%c",(i?' ':'<'),insn,(i?' ':'>'));
+	}
 }
 
 DEFINE_SPINLOCK(die_lock);
@@ -528,12 +517,18 @@ DEFINE_SPINLOCK(die_lock);
 void die(const char * str, struct pt_regs * regs, long err)
 {
 	static int die_counter;
+	int nl = 0;
 
 	console_verbose();
 	spin_lock_irq(&die_lock);
 
-	pr_info("%s: sig: %ld [#%d]%s\n", str, err, ++die_counter,
-		IS_ENABLED(CONFIG_PREEMPT) ? " PREEMPT" : "");
+	printk("%s: sig: %ld [#%d]\n", str, err, ++die_counter);
+#ifdef CONFIG_PREEMPT
+	printk("PREEMPT ");
+	nl = 1;
+#endif
+	if (nl)
+		printk("\n");
 	show_regs(regs);
 	if (!user_mode(regs))
 		show_stack(NULL, (unsigned long*)regs->areg[1]);

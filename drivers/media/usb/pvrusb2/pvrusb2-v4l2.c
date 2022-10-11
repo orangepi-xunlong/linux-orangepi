@@ -628,7 +628,6 @@ static int pvr2_g_ext_ctrls(struct file *file, void *priv,
 	struct pvr2_v4l2_fh *fh = file->private_data;
 	struct pvr2_hdw *hdw = fh->channel.mc_head->hdw;
 	struct v4l2_ext_control *ctrl;
-	struct pvr2_ctrl *cptr;
 	unsigned int idx;
 	int val;
 	int ret;
@@ -636,15 +635,8 @@ static int pvr2_g_ext_ctrls(struct file *file, void *priv,
 	ret = 0;
 	for (idx = 0; idx < ctls->count; idx++) {
 		ctrl = ctls->controls + idx;
-		cptr = pvr2_hdw_get_ctrl_v4l(hdw, ctrl->id);
-		if (cptr) {
-			if (ctls->which == V4L2_CTRL_WHICH_DEF_VAL)
-				pvr2_ctrl_get_def(cptr, &val);
-			else
-				ret = pvr2_ctrl_get_value(cptr, &val);
-		} else
-			ret = -EINVAL;
-
+		ret = pvr2_ctrl_get_value(
+				pvr2_hdw_get_ctrl_v4l(hdw, ctrl->id), &val);
 		if (ret) {
 			ctls->error_idx = idx;
 			return ret;
@@ -665,10 +657,6 @@ static int pvr2_s_ext_ctrls(struct file *file, void *priv,
 	struct v4l2_ext_control *ctrl;
 	unsigned int idx;
 	int ret;
-
-	/* Default value cannot be changed */
-	if (ctls->which == V4L2_CTRL_WHICH_DEF_VAL)
-		return -EINVAL;
 
 	ret = 0;
 	for (idx = 0; idx < ctls->count; idx++) {
@@ -719,85 +707,64 @@ static int pvr2_cropcap(struct file *file, void *priv, struct v4l2_cropcap *cap)
 	return ret;
 }
 
-static int pvr2_g_selection(struct file *file, void *priv,
-			    struct v4l2_selection *sel)
+static int pvr2_g_crop(struct file *file, void *priv, struct v4l2_crop *crop)
 {
 	struct pvr2_v4l2_fh *fh = file->private_data;
 	struct pvr2_hdw *hdw = fh->channel.mc_head->hdw;
-	struct v4l2_cropcap cap;
 	int val = 0;
 	int ret;
 
-	if (sel->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
+	if (crop->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
 		return -EINVAL;
-
-	cap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-
-	switch (sel->target) {
-	case V4L2_SEL_TGT_CROP:
-		ret = pvr2_ctrl_get_value(
-			  pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_CROPL), &val);
-		if (ret != 0)
-			return -EINVAL;
-		sel->r.left = val;
-		ret = pvr2_ctrl_get_value(
-			  pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_CROPT), &val);
-		if (ret != 0)
-			return -EINVAL;
-		sel->r.top = val;
-		ret = pvr2_ctrl_get_value(
-			  pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_CROPW), &val);
-		if (ret != 0)
-			return -EINVAL;
-		sel->r.width = val;
-		ret = pvr2_ctrl_get_value(
-			  pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_CROPH), &val);
-		if (ret != 0)
-			return -EINVAL;
-		sel->r.height = val;
-		break;
-	case V4L2_SEL_TGT_CROP_DEFAULT:
-		ret = pvr2_hdw_get_cropcap(hdw, &cap);
-		sel->r = cap.defrect;
-		break;
-	case V4L2_SEL_TGT_CROP_BOUNDS:
-		ret = pvr2_hdw_get_cropcap(hdw, &cap);
-		sel->r = cap.bounds;
-		break;
-	default:
+	ret = pvr2_ctrl_get_value(
+			pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_CROPL), &val);
+	if (ret != 0)
 		return -EINVAL;
-	}
-	return ret;
+	crop->c.left = val;
+	ret = pvr2_ctrl_get_value(
+			pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_CROPT), &val);
+	if (ret != 0)
+		return -EINVAL;
+	crop->c.top = val;
+	ret = pvr2_ctrl_get_value(
+			pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_CROPW), &val);
+	if (ret != 0)
+		return -EINVAL;
+	crop->c.width = val;
+	ret = pvr2_ctrl_get_value(
+			pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_CROPH), &val);
+	if (ret != 0)
+		return -EINVAL;
+	crop->c.height = val;
+	return 0;
 }
 
-static int pvr2_s_selection(struct file *file, void *priv,
-			    struct v4l2_selection *sel)
+static int pvr2_s_crop(struct file *file, void *priv, const struct v4l2_crop *crop)
 {
 	struct pvr2_v4l2_fh *fh = file->private_data;
 	struct pvr2_hdw *hdw = fh->channel.mc_head->hdw;
 	int ret;
 
-	if (sel->type != V4L2_BUF_TYPE_VIDEO_CAPTURE ||
-	    sel->target != V4L2_SEL_TGT_CROP)
+	if (crop->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
 		return -EINVAL;
 	ret = pvr2_ctrl_set_value(
 			pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_CROPL),
-			sel->r.left);
+			crop->c.left);
 	if (ret != 0)
 		return -EINVAL;
 	ret = pvr2_ctrl_set_value(
 			pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_CROPT),
-			sel->r.top);
+			crop->c.top);
 	if (ret != 0)
 		return -EINVAL;
 	ret = pvr2_ctrl_set_value(
 			pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_CROPW),
-			sel->r.width);
+			crop->c.width);
 	if (ret != 0)
 		return -EINVAL;
 	ret = pvr2_ctrl_set_value(
 			pvr2_hdw_get_ctrl_by_id(hdw, PVR2_CID_CROPH),
-			sel->r.height);
+			crop->c.height);
 	if (ret != 0)
 		return -EINVAL;
 	return 0;
@@ -819,8 +786,8 @@ static const struct v4l2_ioctl_ops pvr2_ioctl_ops = {
 	.vidioc_enumaudio		    = pvr2_enumaudio,
 	.vidioc_enum_input		    = pvr2_enum_input,
 	.vidioc_cropcap			    = pvr2_cropcap,
-	.vidioc_s_selection		    = pvr2_s_selection,
-	.vidioc_g_selection		    = pvr2_g_selection,
+	.vidioc_s_crop			    = pvr2_s_crop,
+	.vidioc_g_crop			    = pvr2_g_crop,
 	.vidioc_g_input			    = pvr2_g_input,
 	.vidioc_s_input			    = pvr2_s_input,
 	.vidioc_g_frequency		    = pvr2_g_frequency,

@@ -36,7 +36,6 @@
 #include <linux/dmapool.h>
 #include <linux/ratelimit.h>
 
-#include "rds_single_path.h"
 #include "rds.h"
 #include "ib.h"
 
@@ -201,7 +200,7 @@ void rds_ib_send_init_ring(struct rds_ib_connection *ic)
 
 		send->s_op = NULL;
 
-		send->s_wr.wr_id = i;
+		send->s_wr.wr_id = i | RDS_IB_SEND_OP;
 		send->s_wr.sg_list = send->s_sge;
 		send->s_wr.ex.imm_data = 0;
 
@@ -269,7 +268,9 @@ void rds_ib_send_cqe_handler(struct rds_ib_connection *ic, struct ib_wc *wc)
 
 	oldest = rds_ib_ring_oldest(&ic->i_send_ring);
 
-	completed = rds_ib_ring_completed(&ic->i_send_ring, wc->wr_id, oldest);
+	completed = rds_ib_ring_completed(&ic->i_send_ring,
+					  (wc->wr_id & ~RDS_IB_SEND_OP),
+					  oldest);
 
 	for (i = 0; i < completed; i++) {
 		send = &ic->i_sends[oldest];
@@ -985,9 +986,8 @@ out:
 	return ret;
 }
 
-void rds_ib_xmit_path_complete(struct rds_conn_path *cp)
+void rds_ib_xmit_complete(struct rds_connection *conn)
 {
-	struct rds_connection *conn = cp->cp_conn;
 	struct rds_ib_connection *ic = conn->c_transport_data;
 
 	/* We may have a pending ACK or window update we were unable

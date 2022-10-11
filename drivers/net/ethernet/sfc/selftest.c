@@ -135,19 +135,11 @@ static int efx_test_interrupts(struct efx_nic *efx,
 {
 	unsigned long timeout, wait;
 	int cpu;
-	int rc;
 
 	netif_dbg(efx, drv, efx->net_dev, "testing interrupts\n");
 	tests->interrupt = -1;
 
-	rc = efx_nic_irq_test_start(efx);
-	if (rc == -ENOTSUPP) {
-		netif_dbg(efx, drv, efx->net_dev,
-			  "direct interrupt testing not supported\n");
-		tests->interrupt = 0;
-		return 0;
-	}
-
+	efx_nic_irq_test_start(efx);
 	timeout = jiffies + IRQ_TIMEOUT;
 	wait = 1;
 

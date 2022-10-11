@@ -30,6 +30,7 @@
 #include <linux/clocksource.h>
 #include <linux/clockchips.h>
 #include <linux/delay.h>
+#include <asm/mach/time.h>
 
 #include <linux/of.h>
 #include <linux/of_address.h>
@@ -121,48 +122,38 @@ static struct irqaction irq = {
 	.dev_id  = &clockevent,
 };
 
-static int __init vt8500_timer_init(struct device_node *np)
+static void __init vt8500_timer_init(struct device_node *np)
 {
-	int timer_irq, ret;
+	int timer_irq;
 
 	regbase = of_iomap(np, 0);
 	if (!regbase) {
 		pr_err("%s: Missing iobase description in Device Tree\n",
 								__func__);
-		return -ENXIO;
+		return;
 	}
-
 	timer_irq = irq_of_parse_and_map(np, 0);
 	if (!timer_irq) {
 		pr_err("%s: Missing irq description in Device Tree\n",
 								__func__);
-		return -EINVAL;
+		return;
 	}
 
 	writel(1, regbase + TIMER_CTRL_VAL);
 	writel(0xf, regbase + TIMER_STATUS_VAL);
 	writel(~0, regbase + TIMER_MATCH_VAL);
 
-	ret = clocksource_register_hz(&clocksource, VT8500_TIMER_HZ);
-	if (ret) {
+	if (clocksource_register_hz(&clocksource, VT8500_TIMER_HZ))
 		pr_err("%s: vt8500_timer_init: clocksource_register failed for %s\n",
-		       __func__, clocksource.name);
-		return ret;
-	}
+					__func__, clocksource.name);
 
 	clockevent.cpumask = cpumask_of(0);
 
-	ret = setup_irq(timer_irq, &irq);
-	if (ret) {
+	if (setup_irq(timer_irq, &irq))
 		pr_err("%s: setup_irq failed for %s\n", __func__,
 							clockevent.name);
-		return ret;
-	}
-
 	clockevents_config_and_register(&clockevent, VT8500_TIMER_HZ,
 					MIN_OSCR_DELTA * 2, 0xf0000000);
-
-	return 0;
 }
 
 CLOCKSOURCE_OF_DECLARE(vt8500, "via,vt8500-timer", vt8500_timer_init);

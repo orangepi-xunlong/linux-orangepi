@@ -977,7 +977,7 @@ static int pcmcia_bus_uevent(struct device *dev, struct kobj_uevent_env *env)
 
 /************************ runtime PM support ***************************/
 
-static int pcmcia_dev_suspend(struct device *dev);
+static int pcmcia_dev_suspend(struct device *dev, pm_message_t state);
 static int pcmcia_dev_resume(struct device *dev);
 
 static int runtime_suspend(struct device *dev)
@@ -985,7 +985,7 @@ static int runtime_suspend(struct device *dev)
 	int rc;
 
 	device_lock(dev);
-	rc = pcmcia_dev_suspend(dev);
+	rc = pcmcia_dev_suspend(dev, PMSG_SUSPEND);
 	device_unlock(dev);
 	return rc;
 }
@@ -1135,7 +1135,7 @@ ATTRIBUTE_GROUPS(pcmcia_dev);
 
 /* PM support, also needed for reset */
 
-static int pcmcia_dev_suspend(struct device *dev)
+static int pcmcia_dev_suspend(struct device *dev, pm_message_t state)
 {
 	struct pcmcia_device *p_dev = to_pcmcia_dev(dev);
 	struct pcmcia_driver *p_drv = NULL;
@@ -1410,9 +1410,6 @@ static struct class_interface pcmcia_bus_interface __refdata = {
 	.remove_dev = &pcmcia_bus_remove_socket,
 };
 
-static const struct dev_pm_ops pcmcia_bus_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(pcmcia_dev_suspend, pcmcia_dev_resume)
-};
 
 struct bus_type pcmcia_bus_type = {
 	.name = "pcmcia",
@@ -1421,7 +1418,8 @@ struct bus_type pcmcia_bus_type = {
 	.dev_groups = pcmcia_dev_groups,
 	.probe = pcmcia_device_probe,
 	.remove = pcmcia_device_remove,
-	.pm = &pcmcia_bus_pm_ops,
+	.suspend = pcmcia_dev_suspend,
+	.resume = pcmcia_dev_resume,
 };
 
 

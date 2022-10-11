@@ -16,7 +16,6 @@
 #include <linux/cpu.h>
 #include <linux/console.h>
 #include <linux/memblock.h>
-#include <linux/export.h>
 
 #include <asm/io.h>
 #include <asm/prom.h>
@@ -37,8 +36,9 @@
 #include <asm/time.h>
 #include <asm/serial.h>
 #include <asm/udbg.h>
+#include <asm/mmu_context.h>
+#include <asm/epapr_hcalls.h>
 #include <asm/code-patching.h>
-#include <asm/cpu_has_feature.h>
 
 #define DBG(fmt...)
 
@@ -48,15 +48,10 @@ int boot_cpuid_phys;
 EXPORT_SYMBOL_GPL(boot_cpuid_phys);
 
 int smp_hw_index[NR_CPUS];
-EXPORT_SYMBOL(smp_hw_index);
 
 unsigned long ISA_DMA_THRESHOLD;
 unsigned int DMA_MODE_READ;
 unsigned int DMA_MODE_WRITE;
-
-EXPORT_SYMBOL(ISA_DMA_THRESHOLD);
-EXPORT_SYMBOL(DMA_MODE_READ);
-EXPORT_SYMBOL(DMA_MODE_WRITE);
 
 /*
  * These are used in binfmt_elf.c to put aux entries on the stack
@@ -67,7 +62,9 @@ int icache_bsize;
 int ucache_bsize;
 
 /*
- * We're called here very early in the boot.
+ * We're called here very early in the boot.  We determine the machine
+ * type and call the appropriate low-level setup functions.
+ *  -- Cort <cort@fsmlabs.com>
  *
  * Note that the kernel may be running at an address which is different
  * from the address that it was linked at, so we must use RELOC/PTRRELOC
@@ -76,6 +73,7 @@ int ucache_bsize;
 notrace unsigned long __init early_init(unsigned long dt_ptr)
 {
 	unsigned long offset = reloc_offset();
+	struct cpu_spec *spec;
 
 	/* First zero the BSS -- use memset_io, some platforms don't have
 	 * caches on yet */
@@ -86,28 +84,37 @@ notrace unsigned long __init early_init(unsigned long dt_ptr)
 	 * Identify the CPU type and fix up code sections
 	 * that depend on which cpu we have.
 	 */
-	identify_cpu(offset, mfspr(SPRN_PVR));
+	spec = identify_cpu(offset, mfspr(SPRN_PVR));
 
-	apply_feature_fixups();
+	do_feature_fixups(spec->cpu_features,
+			  PTRRELOC(&__start___ftr_fixup),
+			  PTRRELOC(&__stop___ftr_fixup));
+
+	do_feature_fixups(spec->mmu_features,
+			  PTRRELOC(&__start___mmu_ftr_fixup),
+			  PTRRELOC(&__stop___mmu_ftr_fixup));
+
+	do_lwsync_fixups(spec->cpu_features,
+			 PTRRELOC(&__start___lwsync_fixup),
+			 PTRRELOC(&__stop___lwsync_fixup));
+
+	do_final_fixups();
 
 	return KERNELBASE + offset;
 }
 
 
 /*
- * This is run before start_kernel(), the kernel has been relocated
- * and we are running with enough of the MMU enabled to have our
- * proper kernel virtual addresses
- *
- * We do the initial parsing of the flat device-tree and prepares
- * for the MMU to be fully initialized.
+ * Find out what kind of machine we're on and save any data we need
+ * from the early boot process (devtree is copied on pmac by prom_init()).
+ * This is called very early on the boot process, after a minimal
+ * MMU environment has been set up but before MMU_init is called.
  */
 extern unsigned int memset_nocache_branch; /* Insn to be replaced by NOP */
 
 notrace void __init machine_init(u64 dt_ptr)
 {
-	/* Configure static keys first, now that we're relocated. */
-	setup_feature_keys();
+	lockdep_init();
 
 	/* Enable early debugging if any specified (see udbg.h) */
 	udbg_early_init();
@@ -118,9 +125,27 @@ notrace void __init machine_init(u64 dt_ptr)
 	/* Do some early initialization based on the flat device tree */
 	early_init_devtree(__va(dt_ptr));
 
+	epapr_paravirt_early_init();
+
 	early_init_mmu();
 
+	probe_machine();
+
 	setup_kdump_trampoline();
+
+#ifdef CONFIG_6xx
+	if (cpu_has_feature(CPU_FTR_CAN_DOZE) ||
+	    cpu_has_feature(CPU_FTR_CAN_NAP))
+		ppc_md.power_save = ppc6xx_idle;
+#endif
+
+#ifdef CONFIG_E500
+	if (cpu_has_feature(CPU_FTR_CAN_DOZE) ||
+	    cpu_has_feature(CPU_FTR_CAN_NAP))
+		ppc_md.power_save = e500_idle;
+#endif
+	if (ppc_md.progress)
+		ppc_md.progress("id mach(): done", 0x200);
 }
 
 /* Checks "l2cr=xxxx" command-line option */
@@ -198,7 +223,7 @@ int __init ppc_init(void)
 
 arch_initcall(ppc_init);
 
-void __init irqstack_early_init(void)
+static void __init irqstack_early_init(void)
 {
 	unsigned int i;
 
@@ -213,7 +238,7 @@ void __init irqstack_early_init(void)
 }
 
 #if defined(CONFIG_BOOKE) || defined(CONFIG_40x)
-void __init exc_lvl_early_init(void)
+static void __init exc_lvl_early_init(void)
 {
 	unsigned int i, hw_cpu;
 
@@ -236,25 +261,33 @@ void __init exc_lvl_early_init(void)
 #endif
 	}
 }
+#else
+#define exc_lvl_early_init()
 #endif
 
-void __init setup_power_save(void)
+/* Warning, IO base is not yet inited */
+void __init setup_arch(char **cmdline_p)
 {
-#ifdef CONFIG_6xx
-	if (cpu_has_feature(CPU_FTR_CAN_DOZE) ||
-	    cpu_has_feature(CPU_FTR_CAN_NAP))
-		ppc_md.power_save = ppc6xx_idle;
-#endif
+	*cmdline_p = boot_command_line;
 
-#ifdef CONFIG_E500
-	if (cpu_has_feature(CPU_FTR_CAN_DOZE) ||
-	    cpu_has_feature(CPU_FTR_CAN_NAP))
-		ppc_md.power_save = e500_idle;
-#endif
-}
+	/* so udelay does something sensible, assume <= 1000 bogomips */
+	loops_per_jiffy = 500000000 / HZ;
 
-__init void initialize_cache_info(void)
-{
+	unflatten_device_tree();
+	check_for_initrd();
+
+	if (ppc_md.init_early)
+		ppc_md.init_early();
+
+	find_legacy_serial_ports();
+
+	smp_setup_cpu_maps();
+
+	/* Register early console */
+	register_early_udbg_console();
+
+	xmon_setup();
+
 	/*
 	 * Set cache line size based on type of cpu as a default.
 	 * Systems with OF can look in the properties on the cpu node(s)
@@ -265,4 +298,35 @@ __init void initialize_cache_info(void)
 	ucache_bsize = 0;
 	if (cpu_has_feature(CPU_FTR_UNIFIED_ID_CACHE))
 		ucache_bsize = icache_bsize = dcache_bsize;
+
+	if (ppc_md.panic)
+		setup_panic();
+
+	init_mm.start_code = (unsigned long)_stext;
+	init_mm.end_code = (unsigned long) _etext;
+	init_mm.end_data = (unsigned long) _edata;
+	init_mm.brk = klimit;
+
+	exc_lvl_early_init();
+
+	irqstack_early_init();
+
+	initmem_init();
+	if ( ppc_md.progress ) ppc_md.progress("setup_arch: initmem", 0x3eab);
+
+#ifdef CONFIG_DUMMY_CONSOLE
+	conswitchp = &dummy_con;
+#endif
+
+	if (ppc_md.setup_arch)
+		ppc_md.setup_arch();
+	if ( ppc_md.progress ) ppc_md.progress("arch: exit", 0x3eab);
+
+	setup_barrier_nospec();
+	setup_spectre_v2();
+
+	paging_init();
+
+	/* Initialize the MMU context management stuff */
+	mmu_context_init();
 }

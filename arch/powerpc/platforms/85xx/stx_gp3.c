@@ -93,7 +93,9 @@ machine_arch_initcall(stx_gp3, mpc85xx_common_publish_devices);
  */
 static int __init stx_gp3_probe(void)
 {
-	return of_machine_is_compatible("stx,gp3-8560");
+	unsigned long root = of_get_flat_dt_root();
+
+	return of_flat_dt_is_compatible(root, "stx,gp3-8560");
 }
 
 define_machine(stx_gp3) {
@@ -103,6 +105,7 @@ define_machine(stx_gp3) {
 	.init_IRQ		= stx_gp3_pic_init,
 	.show_cpuinfo		= stx_gp3_show_cpuinfo,
 	.get_irq		= mpic_get_irq,
+	.restart		= fsl_rstcr_restart,
 	.calibrate_decr		= generic_calibrate_decr,
 	.progress		= udbg_progress,
 };

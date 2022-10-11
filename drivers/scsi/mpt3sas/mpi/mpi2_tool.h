@@ -1,12 +1,12 @@
 /*
- * Copyright 2000-2014 Avago Technologies.  All rights reserved.
+ * Copyright (c) 2000-2014 LSI Corporation.
  *
  *
  *          Name:  mpi2_tool.h
  *         Title:  MPI diagnostic tool structures and definitions
  * Creation Date:  March 26, 2007
  *
- *   mpi2_tool.h Version:  02.00.13
+ *   mpi2_tool.h Version:  02.00.12
  *
  * Version History
  * ---------------
@@ -34,7 +34,6 @@
  *                     it uses MPI Chain SGE as well as MPI Simple SGE.
  * 08-19-13  02.00.11  Added MPI2_TOOLBOX_TEXT_DISPLAY_TOOL and related info.
  * 01-08-14  02.00.12  Added MPI2_TOOLBOX_CLEAN_BIT26_PRODUCT_SPECIFIC.
- * 11-18-14  02.00.13  Updated copyright information.
  * --------------------------------------------------------------------------
  */
 

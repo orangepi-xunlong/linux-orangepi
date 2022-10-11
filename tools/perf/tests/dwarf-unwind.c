@@ -11,7 +11,7 @@
 #include "thread.h"
 #include "callchain.h"
 
-#if defined (__x86_64__) || defined (__i386__) || defined (__powerpc__)
+#if defined (__x86_64__) || defined (__i386__)
 #include "arch-tests.h"
 #endif
 
@@ -20,10 +20,10 @@
 
 static int mmap_handler(struct perf_tool *tool __maybe_unused,
 			union perf_event *event,
-			struct perf_sample *sample,
+			struct perf_sample *sample __maybe_unused,
 			struct machine *machine)
 {
-	return machine__process_mmap2_event(machine, event, sample);
+	return machine__process_mmap2_event(machine, event, NULL);
 }
 
 static int init_live_machine(struct machine *machine)
@@ -51,12 +51,6 @@ static int unwind_entry(struct unwind_entry *entry, void *arg)
 		"krava_1",
 		"test__dwarf_unwind"
 	};
-	/*
-	 * The funcs[MAX_STACK] array index, based on the
-	 * callchain order setup.
-	 */
-	int idx = callchain_param.order == ORDER_CALLER ?
-		  MAX_STACK - *cnt - 1 : *cnt;
 
 	if (*cnt >= MAX_STACK) {
 		pr_debug("failed: crossed the max stack value %d\n", MAX_STACK);
@@ -69,10 +63,8 @@ static int unwind_entry(struct unwind_entry *entry, void *arg)
 		return -1;
 	}
 
-	(*cnt)++;
-	pr_debug("got: %s 0x%" PRIx64 ", expecting %s\n",
-		 symbol, entry->ip, funcs[idx]);
-	return strcmp((const char *) symbol, funcs[idx]);
+	pr_debug("got: %s 0x%" PRIx64 "\n", symbol, entry->ip);
+	return strcmp((const char *) symbol, funcs[(*cnt)++]);
 }
 
 __attribute__ ((noinline))
@@ -113,16 +105,8 @@ static int compare(void *p1, void *p2)
 	/* Any possible value should be 'thread' */
 	struct thread *thread = *(struct thread **)p1;
 
-	if (global_unwind_retval == -INT_MAX) {
-		/* Call unwinder twice for both callchain orders. */
-		callchain_param.order = ORDER_CALLER;
-
+	if (global_unwind_retval == -INT_MAX)
 		global_unwind_retval = unwind_thread(thread);
-		if (!global_unwind_retval) {
-			callchain_param.order = ORDER_CALLEE;
-			global_unwind_retval = unwind_thread(thread);
-		}
-	}
 
 	return p1 - p2;
 }
@@ -158,20 +142,18 @@ static int krava_1(struct thread *thread)
 	return krava_2(thread);
 }
 
-int test__dwarf_unwind(int subtest __maybe_unused)
+int test__dwarf_unwind(void)
 {
+	struct machines machines;
 	struct machine *machine;
 	struct thread *thread;
 	int err = -1;
 
-	machine = machine__new_host();
+	machines__init(&machines);
+
+	machine = machines__find(&machines, HOST_KERNEL_ID);
 	if (!machine) {
 		pr_err("Could not get machine\n");
-		return -1;
-	}
-
-	if (machine__create_kernel_maps(machine)) {
-		pr_err("Failed to create kernel maps\n");
 		return -1;
 	}
 
@@ -196,6 +178,7 @@ int test__dwarf_unwind(int subtest __maybe_unused)
 
  out:
 	machine__delete_threads(machine);
-	machine__delete(machine);
+	machine__exit(machine);
+	machines__exit(&machines);
 	return err;
 }

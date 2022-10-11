@@ -21,11 +21,13 @@
  * Or, point your browser to http://www.gnu.org/copyleft/gpl.html
  *
  *
- * the project's page is at https://linuxtv.org
+ * the project's page is at http://www.linuxtv.org
  */
 
 #ifndef _LNBP21_H
 #define _LNBP21_H
+
+#include <linux/kconfig.h>
 
 /* system register bits */
 /* [RO] 0=OK; 1=over current limit flag */

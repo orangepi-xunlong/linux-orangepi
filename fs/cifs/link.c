@@ -399,7 +399,7 @@ cifs_create_mf_symlink(unsigned int xid, struct cifs_tcon *tcon,
 	io_parms.offset = 0;
 	io_parms.length = CIFS_MF_SYMLINK_FILE_SIZE;
 
-	rc = CIFSSMBWrite(xid, &io_parms, pbytes_written, pbuf);
+	rc = CIFSSMBWrite(xid, &io_parms, pbytes_written, pbuf, NULL, 0);
 	CIFSSMBClose(xid, tcon, fid.netfid);
 	return rc;
 }
@@ -419,7 +419,7 @@ smb3_query_mf_symlink(unsigned int xid, struct cifs_tcon *tcon,
 	struct cifs_io_parms io_parms;
 	int buf_type = CIFS_NO_BUFFER;
 	__le16 *utf16_path;
-	__u8 oplock = SMB2_OPLOCK_LEVEL_II;
+	__u8 oplock = SMB2_OPLOCK_LEVEL_NONE;
 	struct smb2_file_all_info *pfile_info = NULL;
 
 	oparms.tcon = tcon;
@@ -481,7 +481,7 @@ smb3_create_mf_symlink(unsigned int xid, struct cifs_tcon *tcon,
 	struct cifs_io_parms io_parms;
 	int create_options = CREATE_NOT_DIR;
 	__le16 *utf16_path;
-	__u8 oplock = SMB2_OPLOCK_LEVEL_EXCLUSIVE;
+	__u8 oplock = SMB2_OPLOCK_LEVEL_NONE;
 	struct kvec iov[2];
 
 	if (backup_cred(cifs_sb))
@@ -627,9 +627,9 @@ cifs_hl_exit:
 }
 
 const char *
-cifs_get_link(struct dentry *direntry, struct inode *inode,
-	      struct delayed_call *done)
+cifs_follow_link(struct dentry *direntry, void **cookie)
 {
+	struct inode *inode = d_inode(direntry);
 	int rc = -ENOMEM;
 	unsigned int xid;
 	char *full_path = NULL;
@@ -638,9 +638,6 @@ cifs_get_link(struct dentry *direntry, struct inode *inode,
 	struct tcon_link *tlink = NULL;
 	struct cifs_tcon *tcon;
 	struct TCP_Server_Info *server;
-
-	if (!direntry)
-		return ERR_PTR(-ECHILD);
 
 	xid = get_xid();
 
@@ -681,8 +678,7 @@ cifs_get_link(struct dentry *direntry, struct inode *inode,
 		kfree(target_path);
 		return ERR_PTR(rc);
 	}
-	set_delayed_call(done, kfree_link, target_path);
-	return target_path;
+	return *cookie = target_path;
 }
 
 int

@@ -573,8 +573,7 @@ sba_io_pdir_entry(u64 *pdir_ptr, space_t sid, unsigned long vba,
 	pa = virt_to_phys(vba);
 	pa &= IOVP_MASK;
 
-	mtsp(sid,1);
-	asm("lci 0(%%sr1, %1), %0" : "=r" (ci) : "r" (vba));
+	asm("lci 0(%1), %0" : "=r" (ci) : "r" (vba));
 	pa |= (ci >> PAGE_SHIFT) & 0xff;  /* move CI (8 bits) into lowest byte */
 
 	pa |= SBA_PDIR_VALID_BIT;	/* set "valid" bit */
@@ -784,18 +783,8 @@ sba_map_single(struct device *dev, void *addr, size_t size,
 }
 
 
-static dma_addr_t
-sba_map_page(struct device *dev, struct page *page, unsigned long offset,
-		size_t size, enum dma_data_direction direction,
-		unsigned long attrs)
-{
-	return sba_map_single(dev, page_address(page) + offset, size,
-			direction);
-}
-
-
 /**
- * sba_unmap_page - unmap one IOVA and free resources
+ * sba_unmap_single - unmap one IOVA and free resources
  * @dev: instance of PCI owned by the driver that's asking.
  * @iova:  IOVA of driver buffer previously mapped.
  * @size:  number of bytes mapped in driver buffer.
@@ -804,8 +793,8 @@ sba_map_page(struct device *dev, struct page *page, unsigned long offset,
  * See Documentation/DMA-API-HOWTO.txt
  */
 static void
-sba_unmap_page(struct device *dev, dma_addr_t iova, size_t size,
-		enum dma_data_direction direction, unsigned long attrs)
+sba_unmap_single(struct device *dev, dma_addr_t iova, size_t size,
+		 enum dma_data_direction direction)
 {
 	struct ioc *ioc;
 #if DELAYED_RESOURCE_CNT > 0
@@ -876,15 +865,15 @@ sba_unmap_page(struct device *dev, dma_addr_t iova, size_t size,
 
 
 /**
- * sba_alloc - allocate/map shared mem for DMA
+ * sba_alloc_consistent - allocate/map shared mem for DMA
  * @hwdev: instance of PCI owned by the driver that's asking.
  * @size:  number of bytes mapped in driver buffer.
  * @dma_handle:  IOVA of new buffer.
  *
  * See Documentation/DMA-API-HOWTO.txt
  */
-static void *sba_alloc(struct device *hwdev, size_t size, dma_addr_t *dma_handle,
-		gfp_t gfp, unsigned long attrs)
+static void *sba_alloc_consistent(struct device *hwdev, size_t size,
+					dma_addr_t *dma_handle, gfp_t gfp)
 {
 	void *ret;
 
@@ -906,7 +895,7 @@ static void *sba_alloc(struct device *hwdev, size_t size, dma_addr_t *dma_handle
 
 
 /**
- * sba_free - free/unmap shared mem for DMA
+ * sba_free_consistent - free/unmap shared mem for DMA
  * @hwdev: instance of PCI owned by the driver that's asking.
  * @size:  number of bytes mapped in driver buffer.
  * @vaddr:  virtual address IOVA of "consistent" buffer.
@@ -915,10 +904,10 @@ static void *sba_alloc(struct device *hwdev, size_t size, dma_addr_t *dma_handle
  * See Documentation/DMA-API-HOWTO.txt
  */
 static void
-sba_free(struct device *hwdev, size_t size, void *vaddr,
-		    dma_addr_t dma_handle, unsigned long attrs)
+sba_free_consistent(struct device *hwdev, size_t size, void *vaddr,
+		    dma_addr_t dma_handle)
 {
-	sba_unmap_page(hwdev, dma_handle, size, 0, 0);
+	sba_unmap_single(hwdev, dma_handle, size, 0);
 	free_pages((unsigned long) vaddr, get_order(size));
 }
 
@@ -951,7 +940,7 @@ int dump_run_sg = 0;
  */
 static int
 sba_map_sg(struct device *dev, struct scatterlist *sglist, int nents,
-	   enum dma_data_direction direction, unsigned long attrs)
+	   enum dma_data_direction direction)
 {
 	struct ioc *ioc;
 	int coalesced, filled = 0;
@@ -1036,7 +1025,7 @@ sba_map_sg(struct device *dev, struct scatterlist *sglist, int nents,
  */
 static void 
 sba_unmap_sg(struct device *dev, struct scatterlist *sglist, int nents,
-	     enum dma_data_direction direction, unsigned long attrs)
+	     enum dma_data_direction direction)
 {
 	struct ioc *ioc;
 #ifdef ASSERT_PDIR_SANITY
@@ -1064,8 +1053,7 @@ sba_unmap_sg(struct device *dev, struct scatterlist *sglist, int nents,
 
 	while (sg_dma_len(sglist) && nents--) {
 
-		sba_unmap_page(dev, sg_dma_address(sglist), sg_dma_len(sglist),
-				direction, 0);
+		sba_unmap_single(dev, sg_dma_address(sglist), sg_dma_len(sglist), direction);
 #ifdef SBA_COLLECT_STATS
 		ioc->usg_pages += ((sg_dma_address(sglist) & ~IOVP_MASK) + sg_dma_len(sglist) + IOVP_SIZE - 1) >> PAGE_SHIFT;
 		ioc->usingle_calls--;	/* kluge since call is unmap_sg() */
@@ -1083,14 +1071,19 @@ sba_unmap_sg(struct device *dev, struct scatterlist *sglist, int nents,
 
 }
 
-static struct dma_map_ops sba_ops = {
+static struct hppa_dma_ops sba_ops = {
 	.dma_supported =	sba_dma_supported,
-	.alloc =		sba_alloc,
-	.free =			sba_free,
-	.map_page =		sba_map_page,
-	.unmap_page =		sba_unmap_page,
+	.alloc_consistent =	sba_alloc_consistent,
+	.alloc_noncoherent =	sba_alloc_consistent,
+	.free_consistent =	sba_free_consistent,
+	.map_single =		sba_map_single,
+	.unmap_single =		sba_unmap_single,
 	.map_sg =		sba_map_sg,
 	.unmap_sg =		sba_unmap_sg,
+	.dma_sync_single_for_cpu =	NULL,
+	.dma_sync_single_for_device =	NULL,
+	.dma_sync_sg_for_cpu =		NULL,
+	.dma_sync_sg_for_device =	NULL,
 };
 
 

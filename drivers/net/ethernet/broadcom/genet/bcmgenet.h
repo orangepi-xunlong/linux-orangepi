@@ -185,6 +185,9 @@ struct bcmgenet_mib_counters {
 #define UMAC_MAC1			0x010
 #define UMAC_MAX_FRAME_LEN		0x014
 
+#define UMAC_MODE			0x44
+#define  MODE_LINK_STATUS		(1 << 5)
+
 #define UMAC_EEE_CTRL			0x064
 #define  EN_LPI_RX_PAUSE		(1 << 0)
 #define  EN_LPI_TX_PFC			(1 << 1)
@@ -535,12 +538,6 @@ struct bcmgenet_hw_params {
 	u32		flags;
 };
 
-struct bcmgenet_skb_cb {
-	unsigned int bytes_sent;	/* bytes on the wire (no TSB) */
-};
-
-#define GENET_CB(skb)	((struct bcmgenet_skb_cb *)((skb)->cb))
-
 struct bcmgenet_tx_ring {
 	spinlock_t	lock;		/* ring lock */
 	struct napi_struct napi;	/* NAPI per tx queue */
@@ -623,12 +620,10 @@ struct bcmgenet_priv {
 	struct work_struct bcmgenet_irq_work;
 	int irq0;
 	int irq1;
+	unsigned int irq0_stat;
+	unsigned int irq1_stat;
 	int wol_irq;
 	bool wol_irq_disabled;
-
-	/* shared status */
-	spinlock_t lock;
-	unsigned int irq0_stat;
 
 	/* HW descriptors/checksum variables */
 	bool desc_64b_en;

@@ -93,9 +93,6 @@ struct regulator_linear_range {
  * @get_current_limit: Get the configured limit for a current-limited regulator.
  * @set_input_current_limit: Configure an input limit.
  *
- * @set_over_current_protection: Support capability of automatically shutting
- *                               down when detecting an over current event.
- *
  * @set_active_discharge: Set active discharge enable/disable of regulators.
  *
  * @set_mode: Set the configured operating mode for the regulator.
@@ -264,8 +261,6 @@ enum regulator_type {
  *
  * @vsel_reg: Register for selector when using regulator_regmap_X_voltage_
  * @vsel_mask: Mask for register bitfield used for selector
- * @csel_reg: Register for TPS65218 LS3 current regulator
- * @csel_mask: Mask for TPS65218 LS3 current regulator
  * @apply_reg: Register for initiate voltage change on the output when
  *                using regulator_set_voltage_sel_regmap
  * @apply_bit: Register bitfield used for initiate voltage change on the
@@ -303,7 +298,7 @@ struct regulator_desc {
 			    const struct regulator_desc *,
 			    struct regulator_config *);
 	int id;
-	unsigned int continuous_voltage_range:1;
+	bool continuous_voltage_range;
 	unsigned n_voltages;
 	const struct regulator_ops *ops;
 	int irq;
@@ -324,8 +319,6 @@ struct regulator_desc {
 
 	unsigned int vsel_reg;
 	unsigned int vsel_mask;
-	unsigned int csel_reg;
-	unsigned int csel_mask;
 	unsigned int apply_reg;
 	unsigned int apply_bit;
 	unsigned int enable_reg;
@@ -406,10 +399,6 @@ struct regulator_dev {
 	/* lists we own */
 	struct list_head consumer_list; /* consumers we supply */
 
-#if defined(CONFIG_AW_AXP)
-	struct list_head axp_enable_list; /* supply we enable */
-#endif
-
 	struct blocking_notifier_head notifier;
 	struct mutex mutex; /* consumer lock */
 	struct module *owner;
@@ -429,10 +418,9 @@ struct regulator_dev {
 	struct regulator_enable_gpio *ena_pin;
 	unsigned int ena_gpio_state:1;
 
-	unsigned int is_switch:1;
-
 	/* time when this regulator was disabled last time */
 	unsigned long last_off_jiffy;
+	struct regulator *debug_consumer;
 };
 
 struct regulator_dev *

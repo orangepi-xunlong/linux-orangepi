@@ -31,6 +31,16 @@
 		stdout-path = &uart0;
 	};
 
+	mbus {
+		pcie-controller {
+			status = "okay";
+
+			pcie@1,0 {
+				status = "okay";
+			};
+		};
+        };
+
 	ocp@f1000000 {
 		pin-controller@10000 {
 			pmx_usb_led: pmx-usb-led {
@@ -99,19 +109,19 @@
 		pinctrl-0 = <&pmx_keys>;
 		pinctrl-names = "default";
 
-		restart {
+		button@1 {
 			label = "SWR Button";
 			linux,code = <KEY_RESTART>;
 			gpios = <&gpio1 15 GPIO_ACTIVE_LOW>;
 		};
-		wps {
+		button@2 {
 			label = "WPS Button";
 			linux,code = <KEY_WPS_BUTTON>;
 			gpios = <&gpio1 14 GPIO_ACTIVE_LOW>;
 		};
 	};
 
-	dsa {
+	dsa@0 {
 		compatible = "marvell,dsa";
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -168,12 +178,4 @@
 		speed = <1000>;
 		duplex = <1>;
 	};
-};
-
-&pciec {
-        status = "okay";
-};
-
-&pcie0 {
-	status = "okay";
 };

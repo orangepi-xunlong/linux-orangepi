@@ -26,7 +26,7 @@
 #include "../../util/evlist.h"
 #include "../../util/evsel.h"
 #include "../../util/cpumap.h"
-#include <subcmd/parse-options.h>
+#include "../../util/parse-options.h"
 #include "../../util/parse-events.h"
 #include "../../util/pmu.h"
 #include "../../util/debug.h"
@@ -62,7 +62,6 @@ struct intel_pt_recording {
 	size_t				snapshot_ref_buf_size;
 	int				snapshot_ref_cnt;
 	struct intel_pt_snapshot_ref	*snapshot_refs;
-	size_t				priv_size;
 };
 
 static int intel_pt_parse_terms_with_default(struct list_head *formats,
@@ -90,7 +89,7 @@ static int intel_pt_parse_terms_with_default(struct list_head *formats,
 
 	*config = attr.config;
 out_free:
-	parse_events_terms__delete(terms);
+	parse_events__free_terms(terms);
 	return err;
 }
 
@@ -132,7 +131,7 @@ static int intel_pt_read_config(struct perf_pmu *intel_pt_pmu, const char *str,
 	if (!mask)
 		return -EINVAL;
 
-	evlist__for_each_entry(evlist, evsel) {
+	evlist__for_each(evlist, evsel) {
 		if (evsel->attr.type == intel_pt_pmu->type) {
 			*res = intel_pt_masked_bits(mask, evsel->attr.config);
 			return 0;
@@ -274,37 +273,11 @@ intel_pt_pmu_default_config(struct perf_pmu *intel_pt_pmu)
 	return attr;
 }
 
-static const char *intel_pt_find_filter(struct perf_evlist *evlist,
-					struct perf_pmu *intel_pt_pmu)
-{
-	struct perf_evsel *evsel;
-
-	evlist__for_each_entry(evlist, evsel) {
-		if (evsel->attr.type == intel_pt_pmu->type)
-			return evsel->filter;
-	}
-
-	return NULL;
-}
-
-static size_t intel_pt_filter_bytes(const char *filter)
-{
-	size_t len = filter ? strlen(filter) : 0;
-
-	return len ? roundup(len + 1, 8) : 0;
-}
-
 static size_t
-intel_pt_info_priv_size(struct auxtrace_record *itr, struct perf_evlist *evlist)
+intel_pt_info_priv_size(struct auxtrace_record *itr __maybe_unused,
+			struct perf_evlist *evlist __maybe_unused)
 {
-	struct intel_pt_recording *ptr =
-			container_of(itr, struct intel_pt_recording, itr);
-	const char *filter = intel_pt_find_filter(evlist, ptr->intel_pt_pmu);
-
-	ptr->priv_size = (INTEL_PT_AUXTRACE_PRIV_MAX * sizeof(u64)) +
-			 intel_pt_filter_bytes(filter);
-
-	return ptr->priv_size;
+	return INTEL_PT_AUXTRACE_PRIV_SIZE;
 }
 
 static void intel_pt_tsc_ctc_ratio(u32 *n, u32 *d)
@@ -329,13 +302,9 @@ static int intel_pt_info_fill(struct auxtrace_record *itr,
 	bool cap_user_time_zero = false, per_cpu_mmaps;
 	u64 tsc_bit, mtc_bit, mtc_freq_bits, cyc_bit, noretcomp_bit;
 	u32 tsc_ctc_ratio_n, tsc_ctc_ratio_d;
-	unsigned long max_non_turbo_ratio;
-	size_t filter_str_len;
-	const char *filter;
-	u64 *info;
 	int err;
 
-	if (priv_size != ptr->priv_size)
+	if (priv_size != INTEL_PT_AUXTRACE_PRIV_SIZE)
 		return -EINVAL;
 
 	intel_pt_parse_terms(&intel_pt_pmu->format, "tsc", &tsc_bit);
@@ -347,13 +316,6 @@ static int intel_pt_info_fill(struct auxtrace_record *itr,
 	intel_pt_parse_terms(&intel_pt_pmu->format, "cyc", &cyc_bit);
 
 	intel_pt_tsc_ctc_ratio(&tsc_ctc_ratio_n, &tsc_ctc_ratio_d);
-
-	if (perf_pmu__scan_file(intel_pt_pmu, "max_nonturbo_ratio",
-				"%lu", &max_non_turbo_ratio) != 1)
-		max_non_turbo_ratio = 0;
-
-	filter = intel_pt_find_filter(session->evlist, ptr->intel_pt_pmu);
-	filter_str_len = filter ? strlen(filter) : 0;
 
 	if (!session->evlist->nr_mmaps)
 		return -EINVAL;
@@ -389,17 +351,6 @@ static int intel_pt_info_fill(struct auxtrace_record *itr,
 	auxtrace_info->priv[INTEL_PT_TSC_CTC_N] = tsc_ctc_ratio_n;
 	auxtrace_info->priv[INTEL_PT_TSC_CTC_D] = tsc_ctc_ratio_d;
 	auxtrace_info->priv[INTEL_PT_CYC_BIT] = cyc_bit;
-	auxtrace_info->priv[INTEL_PT_MAX_NONTURBO_RATIO] = max_non_turbo_ratio;
-	auxtrace_info->priv[INTEL_PT_FILTER_STR_LEN] = filter_str_len;
-
-	info = &auxtrace_info->priv[INTEL_PT_FILTER_STR_LEN] + 1;
-
-	if (filter_str_len) {
-		size_t len = intel_pt_filter_bytes(filter);
-
-		strncpy((char *)info, filter, len);
-		info += len >> 3;
-	}
 
 	return 0;
 }
@@ -522,9 +473,20 @@ static int intel_pt_validate_config(struct perf_pmu *intel_pt_pmu,
 				    struct perf_evsel *evsel)
 {
 	int err;
+	char c;
 
 	if (!evsel)
 		return 0;
+
+	/*
+	 * If supported, force pass-through config term (pt=1) even if user
+	 * sets pt=0, which avoids senseless kernel errors.
+	 */
+	if (perf_pmu__scan_file(intel_pt_pmu, "format/pt", "%c", &c) == 1 &&
+	    !(evsel->attr.config & 1)) {
+		pr_warning("pt=0 doesn't make sense, forcing pt=1\n");
+		evsel->attr.config |= 1;
+	}
 
 	err = intel_pt_val_config_term(intel_pt_pmu, "caps/cycle_thresholds",
 				       "cyc_thresh", "caps/psb_cyc",
@@ -560,7 +522,7 @@ static int intel_pt_recording_options(struct auxtrace_record *itr,
 	ptr->evlist = evlist;
 	ptr->snapshot_mode = opts->auxtrace_snapshot_mode;
 
-	evlist__for_each_entry(evlist, evsel) {
+	evlist__for_each(evlist, evsel) {
 		if (evsel->attr.type == intel_pt_pmu->type) {
 			if (intel_pt_evsel) {
 				pr_err("There may be only one " INTEL_PT_PMU_NAME " event\n");
@@ -778,9 +740,9 @@ static int intel_pt_snapshot_start(struct auxtrace_record *itr)
 			container_of(itr, struct intel_pt_recording, itr);
 	struct perf_evsel *evsel;
 
-	evlist__for_each_entry(ptr->evlist, evsel) {
+	evlist__for_each(ptr->evlist, evsel) {
 		if (evsel->attr.type == ptr->intel_pt_pmu->type)
-			return perf_evsel__disable(evsel);
+			return perf_evlist__disable_event(ptr->evlist, evsel);
 	}
 	return -EINVAL;
 }
@@ -791,9 +753,9 @@ static int intel_pt_snapshot_finish(struct auxtrace_record *itr)
 			container_of(itr, struct intel_pt_recording, itr);
 	struct perf_evsel *evsel;
 
-	evlist__for_each_entry(ptr->evlist, evsel) {
+	evlist__for_each(ptr->evlist, evsel) {
 		if (evsel->attr.type == ptr->intel_pt_pmu->type)
-			return perf_evsel__enable(evsel);
+			return perf_evlist__enable_event(ptr->evlist, evsel);
 	}
 	return -EINVAL;
 }
@@ -1064,7 +1026,7 @@ static int intel_pt_read_finish(struct auxtrace_record *itr, int idx)
 			container_of(itr, struct intel_pt_recording, itr);
 	struct perf_evsel *evsel;
 
-	evlist__for_each_entry(ptr->evlist, evsel) {
+	evlist__for_each(ptr->evlist, evsel) {
 		if (evsel->attr.type == ptr->intel_pt_pmu->type)
 			return perf_evlist__enable_event_idx(ptr->evlist, evsel,
 							     idx);
@@ -1079,11 +1041,6 @@ struct auxtrace_record *intel_pt_recording_init(int *err)
 
 	if (!intel_pt_pmu)
 		return NULL;
-
-	if (setenv("JITDUMP_USE_ARCH_TIMESTAMP", "1", 1)) {
-		*err = -errno;
-		return NULL;
-	}
 
 	ptr = zalloc(sizeof(struct intel_pt_recording));
 	if (!ptr) {

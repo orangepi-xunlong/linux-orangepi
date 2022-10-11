@@ -60,8 +60,9 @@ struct sti_compositor_data {
  * @rst_aux: reset control of the aux path
  * @mixer: array of mixers
  * @vid: array of vids
- * @vtg: array of vtgs
- * @vtg_vblank_nb: array of callbacks for VTG VSYNC notification
+ * @vtg_main: vtg for main data path
+ * @vtg_aux: vtg for auxillary data path
+ * @vtg_vblank_nb: callback for VTG VSYNC notification
  */
 struct sti_compositor {
 	struct device *dev;
@@ -75,11 +76,9 @@ struct sti_compositor {
 	struct reset_control *rst_aux;
 	struct sti_mixer *mixer[STI_MAX_MIXER];
 	struct sti_vid *vid[STI_MAX_VID];
-	struct sti_vtg *vtg[STI_MAX_MIXER];
-	struct notifier_block vtg_vblank_nb[STI_MAX_MIXER];
+	struct sti_vtg *vtg_main;
+	struct sti_vtg *vtg_aux;
+	struct notifier_block vtg_vblank_nb;
 };
-
-int sti_compositor_debugfs_init(struct sti_compositor *compo,
-				struct drm_minor *minor);
 
 #endif

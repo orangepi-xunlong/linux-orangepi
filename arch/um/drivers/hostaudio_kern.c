@@ -105,9 +105,13 @@ static ssize_t hostaudio_write(struct file *file, const char __user *buffer,
 	printk(KERN_DEBUG "hostaudio: write called, count = %d\n", count);
 #endif
 
-	kbuf = memdup_user(buffer, count);
-	if (IS_ERR(kbuf))
-		return PTR_ERR(kbuf);
+	kbuf = kmalloc(count, GFP_KERNEL);
+	if (kbuf == NULL)
+		return -ENOMEM;
+
+	err = -EFAULT;
+	if (copy_from_user(kbuf, buffer, count))
+		goto out;
 
 	err = os_write_file(state->fd, kbuf, count);
 	if (err < 0)

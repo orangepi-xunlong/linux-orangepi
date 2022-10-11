@@ -287,7 +287,8 @@ void symsrc__destroy(struct symsrc *ss)
 
 int dso__synthesize_plt_symbols(struct dso *dso __maybe_unused,
 				struct symsrc *ss __maybe_unused,
-				struct map *map __maybe_unused)
+				struct map *map __maybe_unused,
+				symbol_filter_t filter __maybe_unused)
 {
 	return 0;
 }
@@ -333,6 +334,7 @@ enum dso_type dso__type_fd(int fd)
 int dso__load_sym(struct dso *dso, struct map *map __maybe_unused,
 		  struct symsrc *ss,
 		  struct symsrc *runtime_ss __maybe_unused,
+		  symbol_filter_t filter __maybe_unused,
 		  int kmodule __maybe_unused)
 {
 	unsigned char build_id[BUILD_ID_SIZE];
@@ -342,7 +344,7 @@ int dso__load_sym(struct dso *dso, struct map *map __maybe_unused,
 	if (ret >= 0)
 		dso->is_64_bit = ret;
 
-	if (filename__read_build_id(ss->name, build_id, BUILD_ID_SIZE) > 0) {
+	if ((!dso->has_build_id) && (filename__read_build_id(ss->name, build_id, BUILD_ID_SIZE) > 0)) {
 		dso__set_build_id(dso, build_id);
 	}
 	return 0;

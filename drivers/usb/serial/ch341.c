@@ -385,7 +385,7 @@ static void ch341_set_termios(struct tty_struct *tty,
 static void ch341_break_ctl(struct tty_struct *tty, int break_state)
 {
 	const uint16_t ch341_break_reg =
-			((uint16_t) CH341_REG_BREAK2 << 8) | CH341_REG_BREAK1;
+		CH341_REG_BREAK1 | ((uint16_t) CH341_REG_BREAK2 << 8);
 	struct usb_serial_port *port = tty->driver_data;
 	int r;
 	uint16_t reg_contents;
@@ -561,7 +561,7 @@ static int ch341_reset_resume(struct usb_serial *serial)
 	/* reconfigure ch341 serial port after bus-reset */
 	ch341_configure(serial->dev, priv);
 
-	if (tty_port_initialized(&port->port)) {
+	if (test_bit(ASYNCB_INITIALIZED, &port->port.flags)) {
 		ret = usb_submit_urb(port->interrupt_in_urb, GFP_NOIO);
 		if (ret) {
 			dev_err(&port->dev, "failed to submit interrupt urb: %d\n",

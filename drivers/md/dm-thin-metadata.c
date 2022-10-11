@@ -190,6 +190,12 @@ struct dm_pool_metadata {
 	sector_t data_block_size;
 
 	/*
+	 * We reserve a section of the metadata for commit overhead.
+	 * All reported space does *not* include this.
+	 */
+	dm_block_t metadata_reserve;
+
+	/*
 	 * Set if a transaction has to be aborted but the attempt to roll back
 	 * to the previous (good) transaction failed.  The only pool metadata
 	 * operation possible in this state is the closing of the device.
@@ -348,7 +354,7 @@ static void subtree_dec(void *context, const void *value)
 	memcpy(&root_le, value, sizeof(root_le));
 	root = le64_to_cpu(root_le);
 	if (dm_btree_del(info, root))
-		DMERR("btree delete failed");
+		DMERR("btree delete failed\n");
 }
 
 static int subtree_equal(void *context, const void *value1_le, const void *value2_le)
@@ -827,6 +833,20 @@ static int __commit_transaction(struct dm_pool_metadata *pmd)
 	return dm_tm_commit(pmd->tm, sblock);
 }
 
+static void __set_metadata_reserve(struct dm_pool_metadata *pmd)
+{
+	int r;
+	dm_block_t total;
+	dm_block_t max_blocks = 4096; /* 16M */
+
+	r = dm_sm_get_nr_blocks(pmd->metadata_sm, &total);
+	if (r) {
+		DMERR("could not get size of metadata device");
+		pmd->metadata_reserve = max_blocks;
+	} else
+		pmd->metadata_reserve = min(max_blocks, div_u64(total, 10));
+}
+
 struct dm_pool_metadata *dm_pool_metadata_open(struct block_device *bdev,
 					       sector_t data_block_size,
 					       bool format_device)
@@ -859,6 +879,8 @@ struct dm_pool_metadata *dm_pool_metadata_open(struct block_device *bdev,
 			DMWARN("%s: dm_pool_metadata_close() failed.", __func__);
 		return ERR_PTR(r);
 	}
+
+	__set_metadata_reserve(pmd);
 
 	return pmd;
 }
@@ -1399,21 +1421,8 @@ static bool __snapshotted_since(struct dm_thin_device *td, uint32_t time)
 	return td->snapshotted_time > time;
 }
 
-static void unpack_lookup_result(struct dm_thin_device *td, __le64 value,
-				 struct dm_thin_lookup_result *result)
-{
-	uint64_t block_time = 0;
-	dm_block_t exception_block;
-	uint32_t exception_time;
-
-	block_time = le64_to_cpu(value);
-	unpack_block_time(block_time, &exception_block, &exception_time);
-	result->block = exception_block;
-	result->shared = __snapshotted_since(td, exception_time);
-}
-
-static int __find_block(struct dm_thin_device *td, dm_block_t block,
-			int can_issue_io, struct dm_thin_lookup_result *result)
+int dm_thin_find_block(struct dm_thin_device *td, dm_block_t block,
+		       int can_issue_io, struct dm_thin_lookup_result *result)
 {
 	int r;
 	__le64 value;
@@ -1421,56 +1430,39 @@ static int __find_block(struct dm_thin_device *td, dm_block_t block,
 	dm_block_t keys[2] = { td->id, block };
 	struct dm_btree_info *info;
 
-	if (can_issue_io) {
-		info = &pmd->info;
-	} else
-		info = &pmd->nb_info;
-
-	r = dm_btree_lookup(info, pmd->root, keys, &value);
-	if (!r)
-		unpack_lookup_result(td, value, result);
-
-	return r;
-}
-
-int dm_thin_find_block(struct dm_thin_device *td, dm_block_t block,
-		       int can_issue_io, struct dm_thin_lookup_result *result)
-{
-	int r;
-	struct dm_pool_metadata *pmd = td->pmd;
-
 	down_read(&pmd->root_lock);
 	if (pmd->fail_io) {
 		up_read(&pmd->root_lock);
 		return -EINVAL;
 	}
 
-	r = __find_block(td, block, can_issue_io, result);
+	if (can_issue_io) {
+		info = &pmd->info;
+	} else
+		info = &pmd->nb_info;
+
+	r = dm_btree_lookup(info, pmd->root, keys, &value);
+	if (!r) {
+		uint64_t block_time = 0;
+		dm_block_t exception_block;
+		uint32_t exception_time;
+
+		block_time = le64_to_cpu(value);
+		unpack_block_time(block_time, &exception_block,
+				  &exception_time);
+		result->block = exception_block;
+		result->shared = __snapshotted_since(td, exception_time);
+	}
 
 	up_read(&pmd->root_lock);
 	return r;
 }
 
-static int __find_next_mapped_block(struct dm_thin_device *td, dm_block_t block,
-					  dm_block_t *vblock,
-					  struct dm_thin_lookup_result *result)
-{
-	int r;
-	__le64 value;
-	struct dm_pool_metadata *pmd = td->pmd;
-	dm_block_t keys[2] = { td->id, block };
-
-	r = dm_btree_lookup_next(&pmd->info, pmd->root, keys, vblock, &value);
-	if (!r)
-		unpack_lookup_result(td, value, result);
-
-	return r;
-}
-
-static int __find_mapped_range(struct dm_thin_device *td,
-			       dm_block_t begin, dm_block_t end,
-			       dm_block_t *thin_begin, dm_block_t *thin_end,
-			       dm_block_t *pool_begin, bool *maybe_shared)
+/* FIXME: write a more efficient one in btree */
+int dm_thin_find_mapped_range(struct dm_thin_device *td,
+			      dm_block_t begin, dm_block_t end,
+			      dm_block_t *thin_begin, dm_block_t *thin_end,
+			      dm_block_t *pool_begin, bool *maybe_shared)
 {
 	int r;
 	dm_block_t pool_end;
@@ -1479,11 +1471,21 @@ static int __find_mapped_range(struct dm_thin_device *td,
 	if (end < begin)
 		return -ENODATA;
 
-	r = __find_next_mapped_block(td, begin, &begin, &lookup);
-	if (r)
-		return r;
+	/*
+	 * Find first mapped block.
+	 */
+	while (begin < end) {
+		r = dm_thin_find_block(td, begin, true, &lookup);
+		if (r) {
+			if (r != -ENODATA)
+				return r;
+		} else
+			break;
 
-	if (begin >= end)
+		begin++;
+	}
+
+	if (begin == end)
 		return -ENODATA;
 
 	*thin_begin = begin;
@@ -1493,7 +1495,7 @@ static int __find_mapped_range(struct dm_thin_device *td,
 	begin++;
 	pool_end = *pool_begin + 1;
 	while (begin != end) {
-		r = __find_block(td, begin, true, &lookup);
+		r = dm_thin_find_block(td, begin, true, &lookup);
 		if (r) {
 			if (r == -ENODATA)
 				break;
@@ -1511,24 +1513,6 @@ static int __find_mapped_range(struct dm_thin_device *td,
 
 	*thin_end = begin;
 	return 0;
-}
-
-int dm_thin_find_mapped_range(struct dm_thin_device *td,
-			      dm_block_t begin, dm_block_t end,
-			      dm_block_t *thin_begin, dm_block_t *thin_end,
-			      dm_block_t *pool_begin, bool *maybe_shared)
-{
-	int r = -EINVAL;
-	struct dm_pool_metadata *pmd = td->pmd;
-
-	down_read(&pmd->root_lock);
-	if (!pmd->fail_io) {
-		r = __find_mapped_range(td, begin, end, thin_begin, thin_end,
-					pool_begin, maybe_shared);
-	}
-	up_read(&pmd->root_lock);
-
-	return r;
 }
 
 static int __insert(struct dm_thin_device *td, dm_block_t block,
@@ -1681,36 +1665,6 @@ int dm_pool_block_is_used(struct dm_pool_metadata *pmd, dm_block_t b, bool *resu
 	return r;
 }
 
-int dm_pool_inc_data_range(struct dm_pool_metadata *pmd, dm_block_t b, dm_block_t e)
-{
-	int r = 0;
-
-	down_write(&pmd->root_lock);
-	for (; b != e; b++) {
-		r = dm_sm_inc_block(pmd->data_sm, b);
-		if (r)
-			break;
-	}
-	up_write(&pmd->root_lock);
-
-	return r;
-}
-
-int dm_pool_dec_data_range(struct dm_pool_metadata *pmd, dm_block_t b, dm_block_t e)
-{
-	int r = 0;
-
-	down_write(&pmd->root_lock);
-	for (; b != e; b++) {
-		r = dm_sm_dec_block(pmd->data_sm, b);
-		if (r)
-			break;
-	}
-	up_write(&pmd->root_lock);
-
-	return r;
-}
-
 bool dm_thin_changed_this_transaction(struct dm_thin_device *td)
 {
 	int r;
@@ -1831,6 +1785,13 @@ int dm_pool_get_free_metadata_block_count(struct dm_pool_metadata *pmd,
 	down_read(&pmd->root_lock);
 	if (!pmd->fail_io)
 		r = dm_sm_get_nr_free(pmd->metadata_sm, result);
+
+	if (!r) {
+		if (*result < pmd->metadata_reserve)
+			*result = 0;
+		else
+			*result -= pmd->metadata_reserve;
+	}
 	up_read(&pmd->root_lock);
 
 	return r;
@@ -1943,8 +1904,11 @@ int dm_pool_resize_metadata_dev(struct dm_pool_metadata *pmd, dm_block_t new_cou
 	int r = -EINVAL;
 
 	down_write(&pmd->root_lock);
-	if (!pmd->fail_io)
+	if (!pmd->fail_io) {
 		r = __resize_space_map(pmd->metadata_sm, new_count);
+		if (!r)
+			__set_metadata_reserve(pmd);
+	}
 	up_write(&pmd->root_lock);
 
 	return r;

@@ -21,13 +21,6 @@
 
 long compat_ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
 
-#define COMPAT_ION_IOC_SUNXI_FLUSH_RANGE       5
-
-typedef struct {
-		compat_long_t   start;
-		compat_long_t   end;
-} compat_sunxi_cache_range;
-
 #else
 
 #define compat_ion_ioctl  NULL

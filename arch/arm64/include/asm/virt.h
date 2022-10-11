@@ -46,7 +46,6 @@
 
 #include <asm/ptrace.h>
 #include <asm/sections.h>
-#include <asm/sysreg.h>
 
 /*
  * __boot_cpu_mode records what mode CPUs were booted in.
@@ -77,7 +76,10 @@ static inline bool is_hyp_mode_mismatched(void)
 
 static inline bool is_kernel_in_hyp_mode(void)
 {
-	return read_sysreg(CurrentEL) == CurrentEL_EL2;
+	u64 el;
+
+	asm("mrs %0, CurrentEL" : "=r" (el));
+	return el == CurrentEL_EL2;
 }
 
 #ifdef CONFIG_ARM64_VHE

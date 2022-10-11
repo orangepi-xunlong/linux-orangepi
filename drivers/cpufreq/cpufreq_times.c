@@ -27,7 +27,7 @@
 
 #define UID_HASH_BITS 10
 
-static DECLARE_HASHTABLE(uid_hash_table, UID_HASH_BITS);
+DECLARE_HASHTABLE(uid_hash_table, UID_HASH_BITS);
 
 static DEFINE_SPINLOCK(task_time_in_state_lock); /* task->time_in_state */
 static DEFINE_SPINLOCK(uid_lock); /* uid_hash_table */
@@ -359,7 +359,7 @@ void cpufreq_times_create_policy(struct cpufreq_policy *policy)
 	if (all_freqs[policy->cpu])
 		return;
 
-	table = policy->freq_table;
+	table = cpufreq_frequency_get_table(policy->cpu);
 	if (!table)
 		return;
 

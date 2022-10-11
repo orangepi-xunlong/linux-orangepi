@@ -1,7 +1,9 @@
 Rockchip SuperSpeed DWC3 USB SoC controller
 
 Required properties:
-- compatible:	should contain "rockchip,rk3399-dwc3" for rk3399 SoC
+- compatible :	should be one of the listed compatibles:
+  - "rockchip,rk1808-dwc3": for rk1808 SoC;
+  - "rockchip,rk3399-dwc3": for rk3399 SoC;
 - clocks:	A list of phandle + clock-specifier pairs for the
 		clocks listed in clock-names
 - clock-names:	Should contain the following:
@@ -10,6 +12,10 @@ Required properties:
   "bus_clk"	Master/Core clock, have to be >= 62.5 MHz for SS
 		operation and >= 30MHz for HS operation
   "grf_clk"	Controller grf clk
+
+Optional properties:
+- needs-reset-on-resume: set if we want to reset the DWC3 controller
+			 upon PM resume.
 
 Required child node:
 A child node must exist to represent the core DWC3 IP block. The name of

@@ -250,8 +250,9 @@ void ath9k_hw_get_channel_centers(struct ath_hw *ah,
 /* Chip Revisions */
 /******************/
 
-static void ath9k_hw_read_revisions(struct ath_hw *ah)
+static bool ath9k_hw_read_revisions(struct ath_hw *ah)
 {
+	u32 srev;
 	u32 val;
 
 	if (ah->get_mac_revision)
@@ -267,25 +268,33 @@ static void ath9k_hw_read_revisions(struct ath_hw *ah)
 			val = REG_READ(ah, AR_SREV);
 			ah->hw_version.macRev = MS(val, AR_SREV_REVISION2);
 		}
-		return;
+		return true;
 	case AR9300_DEVID_AR9340:
 		ah->hw_version.macVersion = AR_SREV_VERSION_9340;
-		return;
+		return true;
 	case AR9300_DEVID_QCA955X:
 		ah->hw_version.macVersion = AR_SREV_VERSION_9550;
-		return;
+		return true;
 	case AR9300_DEVID_AR953X:
 		ah->hw_version.macVersion = AR_SREV_VERSION_9531;
-		return;
+		return true;
 	case AR9300_DEVID_QCA956X:
 		ah->hw_version.macVersion = AR_SREV_VERSION_9561;
-		return;
+		return true;
 	}
 
-	val = REG_READ(ah, AR_SREV) & AR_SREV_ID;
+	srev = REG_READ(ah, AR_SREV);
+
+	if (srev == -EIO) {
+		ath_err(ath9k_hw_common(ah),
+			"Failed to read SREV register");
+		return false;
+	}
+
+	val = srev & AR_SREV_ID;
 
 	if (val == 0xFF) {
-		val = REG_READ(ah, AR_SREV);
+		val = srev;
 		ah->hw_version.macVersion =
 			(val & AR_SREV_VERSION2) >> AR_SREV_TYPE2_S;
 		ah->hw_version.macRev = MS(val, AR_SREV_REVISION2);
@@ -304,6 +313,8 @@ static void ath9k_hw_read_revisions(struct ath_hw *ah)
 		if (ah->hw_version.macVersion == AR_SREV_VERSION_5416_PCIE)
 			ah->is_pciexpress = true;
 	}
+
+	return true;
 }
 
 /************************************/
@@ -454,7 +465,7 @@ static void ath9k_hw_init_defaults(struct ath_hw *ah)
 	if (AR_SREV_9100(ah))
 		ah->sta_id1_defaults |= AR_STA_ID1_AR9100_BA_FIX;
 
-	ah->slottime = 9;
+	ah->slottime = ATH9K_SLOT_TIME_9;
 	ah->globaltxtimeout = (u32) -1;
 	ah->power_mode = ATH9K_PM_UNDEFINED;
 	ah->htc_reset_init = true;
@@ -471,34 +482,33 @@ static void ath9k_hw_init_defaults(struct ath_hw *ah)
 		ah->tx_trig_level = (AR_FTRIG_512B >> AR_FTRIG_S);
 }
 
-static void ath9k_hw_init_macaddr(struct ath_hw *ah)
+static int ath9k_hw_init_macaddr(struct ath_hw *ah)
 {
 	struct ath_common *common = ath9k_hw_common(ah);
+	u32 sum;
 	int i;
 	u16 eeval;
 	static const u32 EEP_MAC[] = { EEP_MAC_LSW, EEP_MAC_MID, EEP_MAC_MSW };
 
-	/* MAC address may already be loaded via ath9k_platform_data */
-	if (is_valid_ether_addr(common->macaddr))
-		return;
-
+	sum = 0;
 	for (i = 0; i < 3; i++) {
 		eeval = ah->eep_ops->get_eeprom(ah, EEP_MAC[i]);
+		sum += eeval;
 		common->macaddr[2 * i] = eeval >> 8;
 		common->macaddr[2 * i + 1] = eeval & 0xff;
 	}
+	if (!is_valid_ether_addr(common->macaddr)) {
+		ath_err(common,
+			"eeprom contains invalid mac address: %pM\n",
+			common->macaddr);
 
-	if (is_valid_ether_addr(common->macaddr))
-		return;
+		random_ether_addr(common->macaddr);
+		ath_err(common,
+			"random mac address will be used: %pM\n",
+			common->macaddr);
+	}
 
-	ath_err(common, "eeprom contains invalid mac address: %pM\n",
-		common->macaddr);
-
-	random_ether_addr(common->macaddr);
-	ath_err(common, "random mac address will be used: %pM\n",
-		common->macaddr);
-
-	return;
+	return 0;
 }
 
 static int ath9k_hw_post_init(struct ath_hw *ah)
@@ -557,7 +567,10 @@ static int __ath9k_hw_init(struct ath_hw *ah)
 	struct ath_common *common = ath9k_hw_common(ah);
 	int r = 0;
 
-	ath9k_hw_read_revisions(ah);
+	if (!ath9k_hw_read_revisions(ah)) {
+		ath_err(common, "Could not read hardware revisions");
+		return -EOPNOTSUPP;
+	}
 
 	switch (ah->hw_version.macVersion) {
 	case AR_SREV_VERSION_5416_PCI:
@@ -637,7 +650,12 @@ static int __ath9k_hw_init(struct ath_hw *ah)
 	if (r)
 		return r;
 
-	ath9k_hw_init_macaddr(ah);
+	r = ath9k_hw_init_macaddr(ah);
+	if (r) {
+		ath_err(common, "Failed to initialize MAC address\n");
+		return r;
+	}
+
 	ath9k_hw_init_hang_checks(ah);
 
 	common->state = ATH_HW_INITIALIZED;
@@ -1364,16 +1382,6 @@ static bool ath9k_hw_set_reset(struct ath_hw *ah, int type)
 	if (ath9k_hw_mci_is_enabled(ah))
 		ar9003_mci_check_gpm_offset(ah);
 
-	/* DMA HALT added to resolve ar9300 and ar9580 bus error during
-	 * RTC_RC reg read
-	 */
-	if (AR_SREV_9300(ah) || AR_SREV_9580(ah)) {
-		REG_SET_BIT(ah, AR_CFG, AR_CFG_HALT_REQ);
-		ath9k_hw_wait(ah, AR_CFG, AR_CFG_HALT_ACK, AR_CFG_HALT_ACK,
-			      20 * AH_WAIT_TIMEOUT);
-		REG_CLR_BIT(ah, AR_CFG, AR_CFG_HALT_REQ);
-	}
-
 	REG_WRITE(ah, AR_RTC_RC, rst_flags);
 
 	REGWRITE_BUFFER_FLUSH(ah);
@@ -1578,10 +1586,8 @@ static void ath9k_hw_apply_gpio_override(struct ath_hw *ah)
 		if (!(gpio_mask & 1))
 			continue;
 
-		ath9k_hw_gpio_request_out(ah, i, NULL,
-					  AR_GPIO_OUTPUT_MUX_AS_OUTPUT);
+		ath9k_hw_cfg_output(ah, i, AR_GPIO_OUTPUT_MUX_AS_OUTPUT);
 		ath9k_hw_set_gpio(ah, i, !!(ah->gpio_val & BIT(i)));
-		ath9k_hw_gpio_free(ah, i);
 	}
 }
 
@@ -1832,9 +1838,8 @@ int ath9k_hw_reset(struct ath_hw *ah, struct ath9k_channel *chan,
 	u32 saveLedState;
 	u32 saveDefAntenna;
 	u32 macStaId1;
-	struct timespec tsf_ts;
-	u32 tsf_offset;
 	u64 tsf = 0;
+	s64 usec = 0;
 	int r;
 	bool start_mci_reset = false;
 	bool save_fullsleep = ah->chip_fullsleep;
@@ -1878,8 +1883,8 @@ int ath9k_hw_reset(struct ath_hw *ah, struct ath9k_channel *chan,
 	macStaId1 = REG_READ(ah, AR_STA_ID1) & AR_STA_ID1_BASE_RATE_11B;
 
 	/* Save TSF before chip reset, a cold reset clears it */
-	getrawmonotonic(&tsf_ts);
 	tsf = ath9k_hw_gettsf64(ah);
+	usec = ktime_to_us(ktime_get_raw());
 
 	saveLedState = REG_READ(ah, AR_CFG_LED) &
 		(AR_CFG_LED_ASSOC_CTL | AR_CFG_LED_MODE_SEL |
@@ -1912,8 +1917,8 @@ int ath9k_hw_reset(struct ath_hw *ah, struct ath9k_channel *chan,
 	}
 
 	/* Restore TSF */
-	tsf_offset = ath9k_hw_get_tsf_offset(&tsf_ts, NULL);
-	ath9k_hw_settsf64(ah, tsf + tsf_offset);
+	usec = ktime_to_us(ktime_get_raw()) - usec;
+	ath9k_hw_settsf64(ah, tsf + usec);
 
 	if (AR_SREV_9280_20_OR_LATER(ah))
 		REG_SET_BIT(ah, AR_GPIO_INPUT_EN_VAL, AR_GPIO_JTAG_DISABLE);
@@ -1933,11 +1938,12 @@ int ath9k_hw_reset(struct ath_hw *ah, struct ath9k_channel *chan,
 	/*
 	 * Some AR91xx SoC devices frequently fail to accept TSF writes
 	 * right after the chip reset. When that happens, write a new
-	 * value after the initvals have been applied.
+	 * value after the initvals have been applied, with an offset
+	 * based on measured time difference
 	 */
 	if (AR_SREV_9100(ah) && (ath9k_hw_gettsf64(ah) < tsf)) {
-		tsf_offset = ath9k_hw_get_tsf_offset(&tsf_ts, NULL);
-		ath9k_hw_settsf64(ah, tsf + tsf_offset);
+		tsf += 1500;
+		ath9k_hw_settsf64(ah, tsf);
 	}
 
 	ath9k_hw_init_mfp(ah);
@@ -1960,7 +1966,7 @@ int ath9k_hw_reset(struct ath_hw *ah, struct ath9k_channel *chan,
 	ath9k_hw_init_qos(ah);
 
 	if (ah->caps.hw_caps & ATH9K_HW_CAP_RFSILENT)
-		ath9k_hw_gpio_request_in(ah, ah->rfkill_gpio, "ath9k-rfkill");
+		ath9k_hw_cfg_gpio_input(ah, ah->rfkill_gpio);
 
 	ath9k_hw_init_global_settings(ah);
 
@@ -2311,10 +2317,10 @@ void ath9k_hw_set_sta_beacon_timers(struct ath_hw *ah,
 	else
 		nextTbtt = bs->bs_nexttbtt;
 
-	ath_dbg(common, BEACON, "next DTIM %u\n", bs->bs_nextdtim);
-	ath_dbg(common, BEACON, "next beacon %u\n", nextTbtt);
-	ath_dbg(common, BEACON, "beacon period %u\n", beaconintval);
-	ath_dbg(common, BEACON, "DTIM period %u\n", dtimperiod);
+	ath_dbg(common, BEACON, "next DTIM %d\n", bs->bs_nextdtim);
+	ath_dbg(common, BEACON, "next beacon %d\n", nextTbtt);
+	ath_dbg(common, BEACON, "beacon period %d\n", beaconintval);
+	ath_dbg(common, BEACON, "DTIM period %d\n", dtimperiod);
 
 	ENABLE_REGWRITE_BUFFER(ah);
 
@@ -2387,61 +2393,6 @@ static bool ath9k_hw_dfs_tested(struct ath_hw *ah)
 	}
 }
 
-static void ath9k_gpio_cap_init(struct ath_hw *ah)
-{
-	struct ath9k_hw_capabilities *pCap = &ah->caps;
-
-	if (AR_SREV_9271(ah)) {
-		pCap->num_gpio_pins = AR9271_NUM_GPIO;
-		pCap->gpio_mask = AR9271_GPIO_MASK;
-	} else if (AR_DEVID_7010(ah)) {
-		pCap->num_gpio_pins = AR7010_NUM_GPIO;
-		pCap->gpio_mask = AR7010_GPIO_MASK;
-	} else if (AR_SREV_9287(ah)) {
-		pCap->num_gpio_pins = AR9287_NUM_GPIO;
-		pCap->gpio_mask = AR9287_GPIO_MASK;
-	} else if (AR_SREV_9285(ah)) {
-		pCap->num_gpio_pins = AR9285_NUM_GPIO;
-		pCap->gpio_mask = AR9285_GPIO_MASK;
-	} else if (AR_SREV_9280(ah)) {
-		pCap->num_gpio_pins = AR9280_NUM_GPIO;
-		pCap->gpio_mask = AR9280_GPIO_MASK;
-	} else if (AR_SREV_9300(ah)) {
-		pCap->num_gpio_pins = AR9300_NUM_GPIO;
-		pCap->gpio_mask = AR9300_GPIO_MASK;
-	} else if (AR_SREV_9330(ah)) {
-		pCap->num_gpio_pins = AR9330_NUM_GPIO;
-		pCap->gpio_mask = AR9330_GPIO_MASK;
-	} else if (AR_SREV_9340(ah)) {
-		pCap->num_gpio_pins = AR9340_NUM_GPIO;
-		pCap->gpio_mask = AR9340_GPIO_MASK;
-	} else if (AR_SREV_9462(ah)) {
-		pCap->num_gpio_pins = AR9462_NUM_GPIO;
-		pCap->gpio_mask = AR9462_GPIO_MASK;
-	} else if (AR_SREV_9485(ah)) {
-		pCap->num_gpio_pins = AR9485_NUM_GPIO;
-		pCap->gpio_mask = AR9485_GPIO_MASK;
-	} else if (AR_SREV_9531(ah)) {
-		pCap->num_gpio_pins = AR9531_NUM_GPIO;
-		pCap->gpio_mask = AR9531_GPIO_MASK;
-	} else if (AR_SREV_9550(ah)) {
-		pCap->num_gpio_pins = AR9550_NUM_GPIO;
-		pCap->gpio_mask = AR9550_GPIO_MASK;
-	} else if (AR_SREV_9561(ah)) {
-		pCap->num_gpio_pins = AR9561_NUM_GPIO;
-		pCap->gpio_mask = AR9561_GPIO_MASK;
-	} else if (AR_SREV_9565(ah)) {
-		pCap->num_gpio_pins = AR9565_NUM_GPIO;
-		pCap->gpio_mask = AR9565_GPIO_MASK;
-	} else if (AR_SREV_9580(ah)) {
-		pCap->num_gpio_pins = AR9580_NUM_GPIO;
-		pCap->gpio_mask = AR9580_GPIO_MASK;
-	} else {
-		pCap->num_gpio_pins = AR_NUM_GPIO;
-		pCap->gpio_mask = AR_GPIO_MASK;
-	}
-}
-
 int ath9k_hw_fill_cap_info(struct ath_hw *ah)
 {
 	struct ath9k_hw_capabilities *pCap = &ah->caps;
@@ -2485,8 +2436,6 @@ int ath9k_hw_fill_cap_info(struct ath_hw *ah)
 		ath_err(common, "both bands are disabled\n");
 		return -EINVAL;
 	}
-
-	ath9k_gpio_cap_init(ah);
 
 	if (AR_SREV_9485(ah) ||
 	    AR_SREV_9285(ah) ||
@@ -2536,6 +2485,21 @@ int ath9k_hw_fill_cap_info(struct ath_hw *ah)
 		pCap->hw_caps |= ATH9K_HW_CAP_HT;
 	else
 		pCap->hw_caps &= ~ATH9K_HW_CAP_HT;
+
+	if (AR_SREV_9271(ah))
+		pCap->num_gpio_pins = AR9271_NUM_GPIO;
+	else if (AR_DEVID_7010(ah))
+		pCap->num_gpio_pins = AR7010_NUM_GPIO;
+	else if (AR_SREV_9300_20_OR_LATER(ah))
+		pCap->num_gpio_pins = AR9300_NUM_GPIO;
+	else if (AR_SREV_9287_11_OR_LATER(ah))
+		pCap->num_gpio_pins = AR9287_NUM_GPIO;
+	else if (AR_SREV_9285_12_OR_LATER(ah))
+		pCap->num_gpio_pins = AR9285_NUM_GPIO;
+	else if (AR_SREV_9280_20_OR_LATER(ah))
+		pCap->num_gpio_pins = AR928X_NUM_GPIO;
+	else
+		pCap->num_gpio_pins = AR_NUM_GPIO;
 
 	if (AR_SREV_9160_10_OR_LATER(ah) || AR_SREV_9100(ah))
 		pCap->rts_aggr_limit = ATH_AMPDU_LIMIT_MAX;
@@ -2656,7 +2620,8 @@ int ath9k_hw_fill_cap_info(struct ath_hw *ah)
 /* GPIO / RFKILL / Antennae */
 /****************************/
 
-static void ath9k_hw_gpio_cfg_output_mux(struct ath_hw *ah, u32 gpio, u32 type)
+static void ath9k_hw_gpio_cfg_output_mux(struct ath_hw *ah,
+					 u32 gpio, u32 type)
 {
 	int addr;
 	u32 gpio_shift, tmp;
@@ -2670,8 +2635,8 @@ static void ath9k_hw_gpio_cfg_output_mux(struct ath_hw *ah, u32 gpio, u32 type)
 
 	gpio_shift = (gpio % 6) * 5;
 
-	if (AR_SREV_9280_20_OR_LATER(ah) ||
-	    (addr != AR_GPIO_OUTPUT_MUX1)) {
+	if (AR_SREV_9280_20_OR_LATER(ah)
+	    || (addr != AR_GPIO_OUTPUT_MUX1)) {
 		REG_RMW(ah, addr, (type << gpio_shift),
 			(0x1f << gpio_shift));
 	} else {
@@ -2683,144 +2648,106 @@ static void ath9k_hw_gpio_cfg_output_mux(struct ath_hw *ah, u32 gpio, u32 type)
 	}
 }
 
-/* BSP should set the corresponding MUX register correctly.
- */
-static void ath9k_hw_gpio_cfg_soc(struct ath_hw *ah, u32 gpio, bool out,
-				  const char *label)
+void ath9k_hw_cfg_gpio_input(struct ath_hw *ah, u32 gpio)
 {
-	if (ah->caps.gpio_requested & BIT(gpio))
-		return;
+	u32 gpio_shift;
 
-	/* may be requested by BSP, free anyway */
-	gpio_free(gpio);
-
-	if (gpio_request_one(gpio, out ? GPIOF_OUT_INIT_LOW : GPIOF_IN, label))
-		return;
-
-	ah->caps.gpio_requested |= BIT(gpio);
-}
-
-static void ath9k_hw_gpio_cfg_wmac(struct ath_hw *ah, u32 gpio, bool out,
-				   u32 ah_signal_type)
-{
-	u32 gpio_set, gpio_shift = gpio;
+	BUG_ON(gpio >= ah->caps.num_gpio_pins);
 
 	if (AR_DEVID_7010(ah)) {
-		gpio_set = out ?
-			AR7010_GPIO_OE_AS_OUTPUT : AR7010_GPIO_OE_AS_INPUT;
-		REG_RMW(ah, AR7010_GPIO_OE, gpio_set << gpio_shift,
-			AR7010_GPIO_OE_MASK << gpio_shift);
-	} else if (AR_SREV_SOC(ah)) {
-		gpio_set = out ? 1 : 0;
-		REG_RMW(ah, AR_GPIO_OE_OUT, gpio_set << gpio_shift,
-			gpio_set << gpio_shift);
-	} else {
-		gpio_shift = gpio << 1;
-		gpio_set = out ?
-			AR_GPIO_OE_OUT_DRV_ALL : AR_GPIO_OE_OUT_DRV_NO;
-		REG_RMW(ah, AR_GPIO_OE_OUT, gpio_set << gpio_shift,
-			AR_GPIO_OE_OUT_DRV << gpio_shift);
-
-		if (out)
-			ath9k_hw_gpio_cfg_output_mux(ah, gpio, ah_signal_type);
-	}
-}
-
-static void ath9k_hw_gpio_request(struct ath_hw *ah, u32 gpio, bool out,
-				  const char *label, u32 ah_signal_type)
-{
-	WARN_ON(gpio >= ah->caps.num_gpio_pins);
-
-	if (BIT(gpio) & ah->caps.gpio_mask)
-		ath9k_hw_gpio_cfg_wmac(ah, gpio, out, ah_signal_type);
-	else if (AR_SREV_SOC(ah))
-		ath9k_hw_gpio_cfg_soc(ah, gpio, out, label);
-	else
-		WARN_ON(1);
-}
-
-void ath9k_hw_gpio_request_in(struct ath_hw *ah, u32 gpio, const char *label)
-{
-	ath9k_hw_gpio_request(ah, gpio, false, label, 0);
-}
-EXPORT_SYMBOL(ath9k_hw_gpio_request_in);
-
-void ath9k_hw_gpio_request_out(struct ath_hw *ah, u32 gpio, const char *label,
-			       u32 ah_signal_type)
-{
-	ath9k_hw_gpio_request(ah, gpio, true, label, ah_signal_type);
-}
-EXPORT_SYMBOL(ath9k_hw_gpio_request_out);
-
-void ath9k_hw_gpio_free(struct ath_hw *ah, u32 gpio)
-{
-	if (!AR_SREV_SOC(ah))
+		gpio_shift = gpio;
+		REG_RMW(ah, AR7010_GPIO_OE,
+			(AR7010_GPIO_OE_AS_INPUT << gpio_shift),
+			(AR7010_GPIO_OE_MASK << gpio_shift));
 		return;
-
-	WARN_ON(gpio >= ah->caps.num_gpio_pins);
-
-	if (ah->caps.gpio_requested & BIT(gpio)) {
-		gpio_free(gpio);
-		ah->caps.gpio_requested &= ~BIT(gpio);
 	}
+
+	gpio_shift = gpio << 1;
+	REG_RMW(ah,
+		AR_GPIO_OE_OUT,
+		(AR_GPIO_OE_OUT_DRV_NO << gpio_shift),
+		(AR_GPIO_OE_OUT_DRV << gpio_shift));
 }
-EXPORT_SYMBOL(ath9k_hw_gpio_free);
+EXPORT_SYMBOL(ath9k_hw_cfg_gpio_input);
 
 u32 ath9k_hw_gpio_get(struct ath_hw *ah, u32 gpio)
 {
-	u32 val = 0xffffffff;
-
 #define MS_REG_READ(x, y) \
-	(MS(REG_READ(ah, AR_GPIO_IN_OUT), x##_GPIO_IN_VAL) & BIT(y))
+	(MS(REG_READ(ah, AR_GPIO_IN_OUT), x##_GPIO_IN_VAL) & (AR_GPIO_BIT(y)))
 
-	WARN_ON(gpio >= ah->caps.num_gpio_pins);
+	if (gpio >= ah->caps.num_gpio_pins)
+		return 0xffffffff;
 
-	if (BIT(gpio) & ah->caps.gpio_mask) {
-		if (AR_SREV_9271(ah))
-			val = MS_REG_READ(AR9271, gpio);
-		else if (AR_SREV_9287(ah))
-			val = MS_REG_READ(AR9287, gpio);
-		else if (AR_SREV_9285(ah))
-			val = MS_REG_READ(AR9285, gpio);
-		else if (AR_SREV_9280(ah))
-			val = MS_REG_READ(AR928X, gpio);
-		else if (AR_DEVID_7010(ah))
-			val = REG_READ(ah, AR7010_GPIO_IN) & BIT(gpio);
-		else if (AR_SREV_9300_20_OR_LATER(ah))
-			val = REG_READ(ah, AR_GPIO_IN) & BIT(gpio);
-		else
-			val = MS_REG_READ(AR, gpio);
-	} else if (BIT(gpio) & ah->caps.gpio_requested) {
-		val = gpio_get_value(gpio) & BIT(gpio);
-	} else {
-		WARN_ON(1);
-	}
-
-	return !!val;
+	if (AR_DEVID_7010(ah)) {
+		u32 val;
+		val = REG_READ(ah, AR7010_GPIO_IN);
+		return (MS(val, AR7010_GPIO_IN_VAL) & AR_GPIO_BIT(gpio)) == 0;
+	} else if (AR_SREV_9300_20_OR_LATER(ah))
+		return (MS(REG_READ(ah, AR_GPIO_IN), AR9300_GPIO_IN_VAL) &
+			AR_GPIO_BIT(gpio)) != 0;
+	else if (AR_SREV_9271(ah))
+		return MS_REG_READ(AR9271, gpio) != 0;
+	else if (AR_SREV_9287_11_OR_LATER(ah))
+		return MS_REG_READ(AR9287, gpio) != 0;
+	else if (AR_SREV_9285_12_OR_LATER(ah))
+		return MS_REG_READ(AR9285, gpio) != 0;
+	else if (AR_SREV_9280_20_OR_LATER(ah))
+		return MS_REG_READ(AR928X, gpio) != 0;
+	else
+		return MS_REG_READ(AR, gpio) != 0;
 }
 EXPORT_SYMBOL(ath9k_hw_gpio_get);
 
+void ath9k_hw_cfg_output(struct ath_hw *ah, u32 gpio,
+			 u32 ah_signal_type)
+{
+	u32 gpio_shift;
+
+	if (AR_DEVID_7010(ah)) {
+		gpio_shift = gpio;
+		REG_RMW(ah, AR7010_GPIO_OE,
+			(AR7010_GPIO_OE_AS_OUTPUT << gpio_shift),
+			(AR7010_GPIO_OE_MASK << gpio_shift));
+		return;
+	}
+
+	ath9k_hw_gpio_cfg_output_mux(ah, gpio, ah_signal_type);
+	gpio_shift = 2 * gpio;
+	REG_RMW(ah,
+		AR_GPIO_OE_OUT,
+		(AR_GPIO_OE_OUT_DRV_ALL << gpio_shift),
+		(AR_GPIO_OE_OUT_DRV << gpio_shift));
+}
+EXPORT_SYMBOL(ath9k_hw_cfg_output);
+
 void ath9k_hw_set_gpio(struct ath_hw *ah, u32 gpio, u32 val)
 {
-	WARN_ON(gpio >= ah->caps.num_gpio_pins);
-
-	if (AR_DEVID_7010(ah) || AR_SREV_9271(ah))
-		val = !val;
-	else
-		val = !!val;
-
-	if (BIT(gpio) & ah->caps.gpio_mask) {
-		u32 out_addr = AR_DEVID_7010(ah) ?
-			AR7010_GPIO_OUT : AR_GPIO_IN_OUT;
-
-		REG_RMW(ah, out_addr, val << gpio, BIT(gpio));
-	} else if (BIT(gpio) & ah->caps.gpio_requested) {
-		gpio_set_value(gpio, val);
-	} else {
-		WARN_ON(1);
+	if (AR_DEVID_7010(ah)) {
+		val = val ? 0 : 1;
+		REG_RMW(ah, AR7010_GPIO_OUT, ((val&1) << gpio),
+			AR_GPIO_BIT(gpio));
+		return;
 	}
+
+	if (AR_SREV_9271(ah))
+		val = ~val;
+
+	if ((1 << gpio) & AR_GPIO_OE_OUT_MASK)
+		REG_RMW(ah, AR_GPIO_IN_OUT, ((val & 1) << gpio),
+			AR_GPIO_BIT(gpio));
+	else
+		gpio_set_value(gpio, val & 1);
 }
 EXPORT_SYMBOL(ath9k_hw_set_gpio);
+
+void ath9k_hw_request_gpio(struct ath_hw *ah, u32 gpio, const char *label)
+{
+	if (gpio >= ah->caps.num_gpio_pins)
+		return;
+
+	gpio_request_one(gpio, GPIOF_DIR_OUT | GPIOF_INIT_LOW, label);
+}
+EXPORT_SYMBOL(ath9k_hw_request_gpio);
 
 void ath9k_hw_setantenna(struct ath_hw *ah, u32 antenna)
 {
@@ -2851,6 +2778,9 @@ void ath9k_hw_setrxfilter(struct ath_hw *ah, u32 bits)
 	u32 phybits;
 
 	ENABLE_REGWRITE_BUFFER(ah);
+
+	if (AR_SREV_9462(ah) || AR_SREV_9565(ah))
+		bits |= ATH9K_RX_FILTER_CONTROL_WRAPPER;
 
 	REG_WRITE(ah, AR_RX_FILTER, bits);
 
@@ -2914,7 +2844,8 @@ void ath9k_hw_apply_txpower(struct ath_hw *ah, struct ath9k_channel *chan,
 {
 	struct ath_regulatory *reg = ath9k_hw_regulatory(ah);
 	struct ieee80211_channel *channel;
-	int chan_pwr, new_pwr;
+	int chan_pwr, new_pwr, max_gain;
+	int ant_gain, ant_reduction = 0;
 
 	if (!chan)
 		return;
@@ -2922,10 +2853,15 @@ void ath9k_hw_apply_txpower(struct ath_hw *ah, struct ath9k_channel *chan,
 	channel = chan->chan;
 	chan_pwr = min_t(int, channel->max_power * 2, MAX_RATE_POWER);
 	new_pwr = min_t(int, chan_pwr, reg->power_limit);
+	max_gain = chan_pwr - new_pwr + channel->max_antenna_gain * 2;
+
+	ant_gain = get_antenna_gain(ah, chan);
+	if (ant_gain > max_gain)
+		ant_reduction = ant_gain - max_gain;
 
 	ah->eep_ops->set_txpower(ah, chan,
 				 ath9k_regd_get_ctl(reg, chan),
-				 get_antenna_gain(ah, chan), new_pwr, test);
+				 ant_reduction, new_pwr, test);
 }
 
 void ath9k_hw_set_txpowerlimit(struct ath_hw *ah, u32 limit, bool test)

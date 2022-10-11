@@ -18,10 +18,11 @@
  *
  *  H. Peter Anvin <hpa@linux.intel.com>
  *
- * -----------------------------------------------------------------------
- *
- * Outputs a small assembly wrapper with the appropriate symbols defined.
- *
+ * ----------------------------------------------------------------------- */
+
+/*
+ * Compute the desired load offset from a compressed program; outputs
+ * a small assembly wrapper with the appropriate symbols defined.
  */
 
 #include <stdlib.h>
@@ -34,11 +35,14 @@ int main(int argc, char *argv[])
 {
 	uint32_t olen;
 	long ilen;
+	unsigned long offs;
+	unsigned long run_size;
 	FILE *f = NULL;
 	int retval = 1;
 
-	if (argc < 2) {
-		fprintf(stderr, "Usage: %s compressed_file\n", argv[0]);
+	if (argc < 3) {
+		fprintf(stderr, "Usage: %s compressed_file run_size\n",
+				argv[0]);
 		goto bail;
 	}
 
@@ -63,11 +67,29 @@ int main(int argc, char *argv[])
 	ilen = ftell(f);
 	olen = get_unaligned_le32(&olen);
 
+	/*
+	 * Now we have the input (compressed) and output (uncompressed)
+	 * sizes, compute the necessary decompression offset...
+	 */
+
+	offs = (olen > ilen) ? olen - ilen : 0;
+	offs += olen >> 12;	/* Add 8 bytes for each 32K block */
+	offs += 64*1024 + 128;	/* Add 64K + 128 bytes slack */
+	offs = (offs+4095) & ~4095; /* Round to a 4K boundary */
+	run_size = atoi(argv[2]);
+
 	printf(".section \".rodata..compressed\",\"a\",@progbits\n");
 	printf(".globl z_input_len\n");
 	printf("z_input_len = %lu\n", ilen);
 	printf(".globl z_output_len\n");
 	printf("z_output_len = %lu\n", (unsigned long)olen);
+	printf(".globl z_extract_offset\n");
+	printf("z_extract_offset = 0x%lx\n", offs);
+	/* z_extract_offset_negative allows simplification of head_32.S */
+	printf(".globl z_extract_offset_negative\n");
+	printf("z_extract_offset_negative = -0x%lx\n", offs);
+	printf(".globl z_run_size\n");
+	printf("z_run_size = %lu\n", run_size);
 
 	printf(".globl input_data, input_data_end\n");
 	printf("input_data:\n");

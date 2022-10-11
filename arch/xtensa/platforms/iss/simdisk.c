@@ -86,7 +86,6 @@ static void simdisk_transfer(struct simdisk *dev, unsigned long sector,
 		unsigned long io;
 
 		simc_lseek(dev->fd, offset, SEEK_SET);
-		READ_ONCE(*buffer);
 		if (write)
 			io = simc_write(dev->fd, buffer, nbytes);
 		else
@@ -228,12 +227,16 @@ static ssize_t proc_read_simdisk(struct file *file, char __user *buf,
 static ssize_t proc_write_simdisk(struct file *file, const char __user *buf,
 			size_t count, loff_t *ppos)
 {
-	char *tmp = memdup_user_nul(buf, count);
+	char *tmp = kmalloc(count + 1, GFP_KERNEL);
 	struct simdisk *dev = PDE_DATA(file_inode(file));
 	int err;
 
-	if (IS_ERR(tmp))
-		return PTR_ERR(tmp);
+	if (tmp == NULL)
+		return -ENOMEM;
+	if (copy_from_user(tmp, buf, count)) {
+		err = -EFAULT;
+		goto out_free;
+	}
 
 	err = simdisk_detach(dev);
 	if (err != 0)
@@ -241,6 +244,8 @@ static ssize_t proc_write_simdisk(struct file *file, const char __user *buf,
 
 	if (count > 0 && tmp[count - 1] == '\n')
 		tmp[count - 1] = 0;
+	else
+		tmp[count] = 0;
 
 	if (tmp[0])
 		err = simdisk_attach(dev, tmp);

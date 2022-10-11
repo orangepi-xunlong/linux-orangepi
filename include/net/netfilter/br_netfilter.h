@@ -15,12 +15,6 @@ static inline struct nf_bridge_info *nf_bridge_alloc(struct sk_buff *skb)
 
 void nf_bridge_update_protocol(struct sk_buff *skb);
 
-int br_nf_hook_thresh(unsigned int hook, struct net *net, struct sock *sk,
-		      struct sk_buff *skb, struct net_device *indev,
-		      struct net_device *outdev,
-		      int (*okfn)(struct net *, struct sock *,
-				  struct sk_buff *));
-
 static inline struct nf_bridge_info *
 nf_bridge_info_get(const struct sk_buff *skb)
 {
@@ -48,7 +42,6 @@ static inline struct rtable *bridge_parent_rtable(const struct net_device *dev)
 }
 
 struct net_device *setup_pre_routing(struct sk_buff *skb);
-void br_netfilter_enable(void);
 
 #if IS_ENABLED(CONFIG_IPV6)
 int br_validate_ipv6(struct net *net, struct sk_buff *skb);

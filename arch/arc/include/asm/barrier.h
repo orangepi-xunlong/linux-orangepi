@@ -30,7 +30,9 @@
 #define rmb()	asm volatile("dmb 1\n" : : : "memory")
 #define wmb()	asm volatile("dmb 2\n" : : : "memory")
 
-#elif !defined(CONFIG_ARC_PLAT_EZNPS)  /* CONFIG_ISA_ARCOMPACT */
+#endif
+
+#ifdef CONFIG_ISA_ARCOMPACT
 
 /*
  * ARCompact based cores (ARC700) only have SYNC instruction which is super
@@ -39,14 +41,6 @@
  */
 
 #define mb()	asm volatile("sync\n" : : : "memory")
-
-#else	/* CONFIG_ARC_PLAT_EZNPS */
-
-#include <plat/ctop.h>
-
-#define mb()	asm volatile (".word %0" : : "i"(CTOP_INST_SCHD_RW) : "memory")
-#define rmb()	asm volatile (".word %0" : : "i"(CTOP_INST_SCHD_RD) : "memory")
-
 #endif
 
 #include <asm-generic/barrier.h>

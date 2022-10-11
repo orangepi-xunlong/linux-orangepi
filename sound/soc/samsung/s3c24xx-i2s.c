@@ -23,6 +23,7 @@
 #include <sound/soc.h>
 #include <sound/pcm_params.h>
 
+#include <mach/dma.h>
 #include <mach/gpio-samsung.h>
 #include <plat/gpio-cfg.h>
 #include "regs-iis.h"
@@ -30,16 +31,16 @@
 #include "dma.h"
 #include "s3c24xx-i2s.h"
 
-#include <linux/platform_data/asoc-s3c.h>
-
-static struct snd_dmaengine_dai_dma_data s3c24xx_i2s_pcm_stereo_out = {
-	.chan_name	= "tx",
-	.addr_width	= 2,
+static struct s3c_dma_params s3c24xx_i2s_pcm_stereo_out = {
+	.slave		= (void *)(uintptr_t)DMACH_I2S_OUT,
+	.ch_name	= "tx",
+	.dma_size	= 2,
 };
 
-static struct snd_dmaengine_dai_dma_data s3c24xx_i2s_pcm_stereo_in = {
-	.chan_name	= "rx",
-	.addr_width	= 2,
+static struct s3c_dma_params s3c24xx_i2s_pcm_stereo_in = {
+	.slave		= (void *)(uintptr_t)DMACH_I2S_IN,
+	.ch_name	= "rx",
+	.dma_size	= 2,
 };
 
 struct s3c24xx_i2s_info {
@@ -360,8 +361,8 @@ static int s3c24xx_i2s_probe(struct snd_soc_dai *dai)
 {
 	pr_debug("Entered %s\n", __func__);
 
-	snd_soc_dai_init_dma_data(dai, &s3c24xx_i2s_pcm_stereo_out,
-					&s3c24xx_i2s_pcm_stereo_in);
+	samsung_asoc_init_dma_data(dai, &s3c24xx_i2s_pcm_stereo_out,
+		&s3c24xx_i2s_pcm_stereo_in);
 
 	s3c24xx_i2s.iis_clk = devm_clk_get(dai->dev, "iis");
 	if (IS_ERR(s3c24xx_i2s.iis_clk)) {
@@ -453,12 +454,6 @@ static int s3c24xx_iis_dev_probe(struct platform_device *pdev)
 {
 	int ret = 0;
 	struct resource *res;
-	struct s3c_audio_pdata *pdata = dev_get_platdata(&pdev->dev);
-
-	if (!pdata) {
-		dev_err(&pdev->dev, "missing platform data");
-		return -ENXIO;
-	}
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
@@ -469,23 +464,19 @@ static int s3c24xx_iis_dev_probe(struct platform_device *pdev)
 	if (IS_ERR(s3c24xx_i2s.regs))
 		return PTR_ERR(s3c24xx_i2s.regs);
 
-	s3c24xx_i2s_pcm_stereo_out.addr = res->start + S3C2410_IISFIFO;
-	s3c24xx_i2s_pcm_stereo_out.filter_data = pdata->dma_playback;
-	s3c24xx_i2s_pcm_stereo_in.addr = res->start + S3C2410_IISFIFO;
-	s3c24xx_i2s_pcm_stereo_in.filter_data = pdata->dma_capture;
-
-	ret = samsung_asoc_dma_platform_register(&pdev->dev,
-						 pdata->dma_filter,
-						 NULL, NULL);
-	if (ret) {
-		pr_err("failed to register the dma: %d\n", ret);
-		return ret;
-	}
+	s3c24xx_i2s_pcm_stereo_out.dma_addr = res->start + S3C2410_IISFIFO;
+	s3c24xx_i2s_pcm_stereo_in.dma_addr = res->start + S3C2410_IISFIFO;
 
 	ret = devm_snd_soc_register_component(&pdev->dev,
 			&s3c24xx_i2s_component, &s3c24xx_i2s_dai, 1);
-	if (ret)
+	if (ret) {
 		pr_err("failed to register the dai\n");
+		return ret;
+	}
+
+	ret = samsung_asoc_dma_platform_register(&pdev->dev);
+	if (ret)
+		pr_err("failed to register the dma: %d\n", ret);
 
 	return ret;
 }

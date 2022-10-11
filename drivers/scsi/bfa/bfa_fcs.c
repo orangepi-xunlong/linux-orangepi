@@ -1,10 +1,9 @@
 /*
- * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
- * Copyright (c) 2014- QLogic Corporation.
+ * Copyright (c) 2005-2010 Brocade Communications Systems, Inc.
  * All rights reserved
- * www.qlogic.com
+ * www.brocade.com
  *
- * Linux driver for QLogic BR-series Fibre Channel Host Bus Adapter.
+ * Linux driver for Brocade Fibre Channel Host Bus Adapter.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License (GPL) Version 2 as
@@ -832,23 +831,23 @@ bfa_fcs_fabric_psymb_init(struct bfa_fcs_fabric_s *fabric)
 	bfa_ioc_get_adapter_model(&fabric->fcs->bfa->ioc, model);
 
 	/* Model name/number */
-	strncpy((char *)&port_cfg->sym_name, model,
-		BFA_FCS_PORT_SYMBNAME_MODEL_SZ);
-	strncat((char *)&port_cfg->sym_name, BFA_FCS_PORT_SYMBNAME_SEPARATOR,
-		sizeof(BFA_FCS_PORT_SYMBNAME_SEPARATOR));
+	strlcpy(port_cfg->sym_name.symname, model,
+		BFA_SYMNAME_MAXLEN);
+	strlcat(port_cfg->sym_name.symname, BFA_FCS_PORT_SYMBNAME_SEPARATOR,
+		BFA_SYMNAME_MAXLEN);
 
 	/* Driver Version */
-	strncat((char *)&port_cfg->sym_name, (char *)driver_info->version,
-		BFA_FCS_PORT_SYMBNAME_VERSION_SZ);
-	strncat((char *)&port_cfg->sym_name, BFA_FCS_PORT_SYMBNAME_SEPARATOR,
-		sizeof(BFA_FCS_PORT_SYMBNAME_SEPARATOR));
+	strlcat(port_cfg->sym_name.symname, driver_info->version,
+		BFA_SYMNAME_MAXLEN);
+	strlcat(port_cfg->sym_name.symname, BFA_FCS_PORT_SYMBNAME_SEPARATOR,
+		BFA_SYMNAME_MAXLEN);
 
 	/* Host machine name */
-	strncat((char *)&port_cfg->sym_name,
-		(char *)driver_info->host_machine_name,
-		BFA_FCS_PORT_SYMBNAME_MACHINENAME_SZ);
-	strncat((char *)&port_cfg->sym_name, BFA_FCS_PORT_SYMBNAME_SEPARATOR,
-		sizeof(BFA_FCS_PORT_SYMBNAME_SEPARATOR));
+	strlcat(port_cfg->sym_name.symname,
+		driver_info->host_machine_name,
+		BFA_SYMNAME_MAXLEN);
+	strlcat(port_cfg->sym_name.symname, BFA_FCS_PORT_SYMBNAME_SEPARATOR,
+		BFA_SYMNAME_MAXLEN);
 
 	/*
 	 * Host OS Info :
@@ -856,24 +855,24 @@ bfa_fcs_fabric_psymb_init(struct bfa_fcs_fabric_s *fabric)
 	 * OS name string and instead copy the entire OS info string (64 bytes).
 	 */
 	if (driver_info->host_os_patch[0] == '\0') {
-		strncat((char *)&port_cfg->sym_name,
-			(char *)driver_info->host_os_name,
-			BFA_FCS_OS_STR_LEN);
-		strncat((char *)&port_cfg->sym_name,
+		strlcat(port_cfg->sym_name.symname,
+			driver_info->host_os_name,
+			BFA_SYMNAME_MAXLEN);
+		strlcat(port_cfg->sym_name.symname,
 			BFA_FCS_PORT_SYMBNAME_SEPARATOR,
-			sizeof(BFA_FCS_PORT_SYMBNAME_SEPARATOR));
+			BFA_SYMNAME_MAXLEN);
 	} else {
-		strncat((char *)&port_cfg->sym_name,
-			(char *)driver_info->host_os_name,
-			BFA_FCS_PORT_SYMBNAME_OSINFO_SZ);
-		strncat((char *)&port_cfg->sym_name,
+		strlcat(port_cfg->sym_name.symname,
+			driver_info->host_os_name,
+			BFA_SYMNAME_MAXLEN);
+		strlcat(port_cfg->sym_name.symname,
 			BFA_FCS_PORT_SYMBNAME_SEPARATOR,
-			sizeof(BFA_FCS_PORT_SYMBNAME_SEPARATOR));
+			BFA_SYMNAME_MAXLEN);
 
 		/* Append host OS Patch Info */
-		strncat((char *)&port_cfg->sym_name,
-			(char *)driver_info->host_os_patch,
-			BFA_FCS_PORT_SYMBNAME_OSPATCH_SZ);
+		strlcat(port_cfg->sym_name.symname,
+			driver_info->host_os_patch,
+			BFA_SYMNAME_MAXLEN);
 	}
 
 	/* null terminate */
@@ -893,26 +892,26 @@ bfa_fcs_fabric_nsymb_init(struct bfa_fcs_fabric_s *fabric)
 	bfa_ioc_get_adapter_model(&fabric->fcs->bfa->ioc, model);
 
 	/* Model name/number */
-	strncpy((char *)&port_cfg->node_sym_name, model,
-		BFA_FCS_PORT_SYMBNAME_MODEL_SZ);
-	strncat((char *)&port_cfg->node_sym_name,
+	strlcpy(port_cfg->node_sym_name.symname, model,
+		BFA_SYMNAME_MAXLEN);
+	strlcat(port_cfg->node_sym_name.symname,
 			BFA_FCS_PORT_SYMBNAME_SEPARATOR,
-			sizeof(BFA_FCS_PORT_SYMBNAME_SEPARATOR));
+			BFA_SYMNAME_MAXLEN);
 
 	/* Driver Version */
-	strncat((char *)&port_cfg->node_sym_name, (char *)driver_info->version,
-		BFA_FCS_PORT_SYMBNAME_VERSION_SZ);
-	strncat((char *)&port_cfg->node_sym_name,
+	strlcat(port_cfg->node_sym_name.symname, (char *)driver_info->version,
+		BFA_SYMNAME_MAXLEN);
+	strlcat(port_cfg->node_sym_name.symname,
 			BFA_FCS_PORT_SYMBNAME_SEPARATOR,
-			sizeof(BFA_FCS_PORT_SYMBNAME_SEPARATOR));
+			BFA_SYMNAME_MAXLEN);
 
 	/* Host machine name */
-	strncat((char *)&port_cfg->node_sym_name,
-		(char *)driver_info->host_machine_name,
-		BFA_FCS_PORT_SYMBNAME_MACHINENAME_SZ);
-	strncat((char *)&port_cfg->node_sym_name,
+	strlcat(port_cfg->node_sym_name.symname,
+		driver_info->host_machine_name,
+		BFA_SYMNAME_MAXLEN);
+	strlcat(port_cfg->node_sym_name.symname,
 			BFA_FCS_PORT_SYMBNAME_SEPARATOR,
-			sizeof(BFA_FCS_PORT_SYMBNAME_SEPARATOR));
+			BFA_SYMNAME_MAXLEN);
 
 	/* null terminate */
 	port_cfg->node_sym_name.symname[BFA_SYMNAME_MAXLEN - 1] = 0;

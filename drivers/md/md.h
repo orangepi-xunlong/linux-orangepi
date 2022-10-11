@@ -17,7 +17,6 @@
 
 #include <linux/blkdev.h>
 #include <linux/backing-dev.h>
-#include <linux/badblocks.h>
 #include <linux/kobject.h>
 #include <linux/list.h>
 #include <linux/mm.h>
@@ -28,6 +27,13 @@
 #include "md-cluster.h"
 
 #define MaxSector (~(sector_t)0)
+
+/* Bad block numbers are stored sorted in a single page.
+ * 64bits is used for each block or extent.
+ * 54 bits are sector number, 9 bits are extent size,
+ * 1 bit is an 'acknowledged' flag.
+ */
+#define MD_MAX_BADBLOCKS	(PAGE_SIZE/8)
 
 /*
  * MD's 'extended' device
@@ -99,7 +105,7 @@ struct md_rdev {
 	atomic_t	read_errors;	/* number of consecutive read errors that
 					 * we have tried to ignore.
 					 */
-	time64_t	last_read_error;	/* monotonic time since our
+	struct timespec last_read_error;	/* monotonic time since our
 						 * last read error
 						 */
 	atomic_t	corrected_errors; /* number of corrected read errors,
@@ -111,7 +117,22 @@ struct md_rdev {
 	struct kernfs_node *sysfs_state; /* handle for 'state'
 					   * sysfs entry */
 
-	struct badblocks badblocks;
+	struct badblocks {
+		int	count;		/* count of bad blocks */
+		int	unacked_exist;	/* there probably are unacknowledged
+					 * bad blocks.  This is only cleared
+					 * when a read discovers none
+					 */
+		int	shift;		/* shift from sectors to block size
+					 * a -ve shift means badblocks are
+					 * disabled.*/
+		u64	*page;		/* badblock list */
+		int	changed;
+		seqlock_t lock;
+
+		sector_t sector;
+		sector_t size;		/* in sectors */
+	} badblocks;
 };
 enum flag_bits {
 	Faulty,			/* device is known to have a fault */
@@ -162,19 +183,24 @@ enum flag_bits {
 				 * Usually, this device should be faster
 				 * than other devices in the array
 				 */
-	ClusterRemove,
-	RemoveSynchronized,	/* synchronize_rcu() was called after
-				 * this device was known to be faulty,
-				 * so it is safe to remove without
-				 * another synchronize_rcu() call.
-				 */
 };
 
+#define BB_LEN_MASK	(0x00000000000001FFULL)
+#define BB_OFFSET_MASK	(0x7FFFFFFFFFFFFE00ULL)
+#define BB_ACK_MASK	(0x8000000000000000ULL)
+#define BB_MAX_LEN	512
+#define BB_OFFSET(x)	(((x) & BB_OFFSET_MASK) >> 9)
+#define BB_LEN(x)	(((x) & BB_LEN_MASK) + 1)
+#define BB_ACK(x)	(!!((x) & BB_ACK_MASK))
+#define BB_MAKE(a, l, ack) (((a)<<9) | ((l)-1) | ((u64)(!!(ack)) << 63))
+
+extern int md_is_badblock(struct badblocks *bb, sector_t s, int sectors,
+			  sector_t *first_bad, int *bad_sectors);
 static inline int is_badblock(struct md_rdev *rdev, sector_t s, int sectors,
 			      sector_t *first_bad, int *bad_sectors)
 {
 	if (unlikely(rdev->badblocks.count)) {
-		int rv = badblocks_check(&rdev->badblocks, rdev->data_offset + s,
+		int rv = md_is_badblock(&rdev->badblocks, rdev->data_offset + s,
 					sectors,
 					first_bad, bad_sectors);
 		if (rv)
@@ -187,6 +213,8 @@ extern int rdev_set_badblocks(struct md_rdev *rdev, sector_t s, int sectors,
 			      int is_new);
 extern int rdev_clear_badblocks(struct md_rdev *rdev, sector_t s, int sectors,
 				int is_new);
+extern void md_ack_all_badblocks(struct badblocks *bb);
+
 struct md_cluster_info;
 
 struct mddev {
@@ -201,16 +229,11 @@ struct mddev {
 #define MD_CHANGE_PENDING 2	/* switch from 'clean' to 'active' in progress */
 #define MD_UPDATE_SB_FLAGS (1 | 2 | 4)	/* If these are set, md_update_sb needed */
 #define MD_ARRAY_FIRST_USE 3    /* First use of array, needs initialization */
-#define MD_CLOSING	4	/* If set, we are closing the array, do not open
-				 * it then */
+#define MD_STILL_CLOSED	4	/* If set, then array has not been opened since
+				 * md_ioctl checked on it.
+				 */
 #define MD_JOURNAL_CLEAN 5	/* A raid with journal is already clean */
 #define MD_HAS_JOURNAL	6	/* The raid array has journal feature set */
-#define MD_RELOAD_SB	7	/* Reload the superblock because another node
-				 * updated it.
-				 */
-#define MD_CLUSTER_RESYNC_LOCKED 8 /* cluster raid only, which means node
-				    * already took resync lock, need to
-				    * release the lock */
 
 	int				suspended;
 	atomic_t			active_io;
@@ -219,6 +242,8 @@ struct mddev {
 						       * are happening, so run/
 						       * takeover/stop are not safe
 						       */
+	int				ready; /* See when safe to pass
+						* IO requests down */
 	struct gendisk			*gendisk;
 
 	struct kobject			kobj;
@@ -235,7 +260,7 @@ struct mddev {
 							 * managed externally */
 	char				metadata_type[17]; /* externally set*/
 	int				chunk_sectors;
-	time64_t			ctime, utime;
+	time_t				ctime, utime;
 	int				level, layout;
 	char				clevel[16];
 	int				raid_disks;
@@ -431,7 +456,7 @@ struct mddev {
 
 	/* Generic flush handling.
 	 * The last to finish preflush schedules a worker to submit
-	 * the rest of the request (without the REQ_PREFLUSH flag).
+	 * the rest of the request (without the REQ_FLUSH flag).
 	 */
 	struct bio *flush_bio;
 	atomic_t flush_pending;
@@ -439,7 +464,6 @@ struct mddev {
 	struct work_struct event_work;	/* used by dm to report failure event */
 	void (*sync_super)(struct mddev *mddev, struct md_rdev *rdev);
 	struct md_cluster_info		*cluster_info;
-	unsigned int			good_device_nr;	/* good device num within cluster raid */
 };
 
 static inline int __must_check mddev_lock(struct mddev *mddev)
@@ -625,8 +649,7 @@ extern void md_super_write(struct mddev *mddev, struct md_rdev *rdev,
 			   sector_t sector, int size, struct page *page);
 extern void md_super_wait(struct mddev *mddev);
 extern int sync_page_io(struct md_rdev *rdev, sector_t sector, int size,
-			struct page *page, int op, int op_flags,
-			bool metadata_op);
+			struct page *page, int rw, bool metadata_op);
 extern void md_do_sync(struct md_thread *thread);
 extern void md_new_event(struct mddev *mddev);
 extern int md_allow_write(struct mddev *mddev);

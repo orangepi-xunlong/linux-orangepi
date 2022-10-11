@@ -45,8 +45,6 @@
 #include <linux/workqueue.h>
 #include <linux/interrupt.h>
 #include <linux/spinlock.h>
-#include <net/devlink.h>
-#include <linux/rwsem.h>
 
 #include <linux/mlx4/device.h>
 #include <linux/mlx4/driver.h>
@@ -145,10 +143,9 @@ enum mlx4_resource {
 	RES_MTT,
 	RES_MAC,
 	RES_VLAN,
-	RES_NPORT_ID,
+	RES_EQ,
 	RES_COUNTER,
 	RES_FS_RULE,
-	RES_EQ,
 	MLX4_NUM_OF_RESOURCE_TYPE
 };
 
@@ -484,7 +481,6 @@ struct mlx4_slave_state {
 	u8 init_port_mask;
 	bool active;
 	bool old_vlan_api;
-	bool vst_qinq_supported;
 	u8 function;
 	dma_addr_t vhcr_dma;
 	u16 mtu[MLX4_MAX_PORTS + 1];
@@ -510,7 +506,6 @@ struct mlx4_vport_state {
 	u64 mac;
 	u16 default_vlan;
 	u8  default_qos;
-	__be16 vlan_proto;
 	u32 tx_rate;
 	bool spoofchk;
 	u32 link_state;
@@ -542,8 +537,8 @@ struct slave_list {
 struct resource_allocator {
 	spinlock_t alloc_lock; /* protect quotas */
 	union {
-		int res_reserved;
-		int res_port_rsvd[MLX4_MAX_PORTS];
+		unsigned int res_reserved;
+		unsigned int res_port_rsvd[MLX4_MAX_PORTS];
 	};
 	union {
 		int res_free;
@@ -590,8 +585,6 @@ struct mlx4_mfunc_master_ctx {
 	struct mlx4_master_qp0_state qp0_state[MLX4_MAX_PORTS + 1];
 	int			init_port_ref[MLX4_MAX_PORTS + 1];
 	u16			max_mtu[MLX4_MAX_PORTS + 1];
-	u8			pptx;
-	u8			pprx;
 	int			disable_mcast_ref[MLX4_MAX_PORTS + 1];
 	struct mlx4_resource_tracker res_tracker;
 	struct workqueue_struct *comm_wq;
@@ -631,7 +624,6 @@ struct mlx4_cmd {
 	struct mutex		slave_cmd_mutex;
 	struct semaphore	poll_sem;
 	struct semaphore	event_sem;
-	struct rw_semaphore	switch_sem;
 	int			max_cmds;
 	spinlock_t		context_lock;
 	int			free_head;
@@ -660,7 +652,6 @@ struct mlx4_vf_immed_vlan_work {
 	u8                      qos_vport;
 	u16			vlan_id;
 	u16			orig_vlan_id;
-	__be16			vlan_proto;
 };
 
 
@@ -745,7 +736,6 @@ struct mlx4_catas_err {
 struct mlx4_mac_table {
 	__be64			entries[MLX4_MAX_MAC_NUM];
 	int			refs[MLX4_MAX_MAC_NUM];
-	bool			is_dup[MLX4_MAX_MAC_NUM];
 	struct mutex		mutex;
 	int			total;
 	int			max;
@@ -768,7 +758,6 @@ struct mlx4_roce_gid_table {
 struct mlx4_vlan_table {
 	__be32			entries[MLX4_MAX_VLAN_NUM];
 	int			refs[MLX4_MAX_VLAN_NUM];
-	int			is_dup[MLX4_MAX_VLAN_NUM];
 	struct mutex		mutex;
 	int			total;
 	int			max;
@@ -789,10 +778,7 @@ struct mlx4_set_port_general_context {
 	u16 reserved1;
 	u8 v_ignore_fcs;
 	u8 flags;
-	union {
-		u8 ignore_fcs;
-		u8 roce_mode;
-	};
+	u8 ignore_fcs;
 	u8 reserved2;
 	__be16 mtu;
 	u8 pptx;
@@ -837,7 +823,6 @@ struct mlx4_port_info {
 	struct mlx4_roce_gid_table gid_table;
 	int			base_qpn;
 	struct cpu_rmap		*rmap;
-	struct devlink_port	devlink_port;
 };
 
 struct mlx4_sense {
@@ -1241,10 +1226,6 @@ void mlx4_init_roce_gid_table(struct mlx4_dev *dev,
 			      struct mlx4_roce_gid_table *table);
 void __mlx4_unregister_vlan(struct mlx4_dev *dev, u8 port, u16 vlan);
 int __mlx4_register_vlan(struct mlx4_dev *dev, u8 port, u16 vlan, int *index);
-int mlx4_bond_vlan_table(struct mlx4_dev *dev);
-int mlx4_unbond_vlan_table(struct mlx4_dev *dev);
-int mlx4_bond_mac_table(struct mlx4_dev *dev);
-int mlx4_unbond_mac_table(struct mlx4_dev *dev);
 
 int mlx4_SET_PORT(struct mlx4_dev *dev, u8 port, int pkey_tbl_sz);
 /* resource tracker functions*/
@@ -1331,6 +1312,8 @@ int mlx4_SET_VLAN_FLTR_wrapper(struct mlx4_dev *dev, int slave,
 			       struct mlx4_cmd_info *cmd);
 int mlx4_common_set_vlan_fltr(struct mlx4_dev *dev, int function,
 				     int port, void *buf);
+int mlx4_common_dump_eth_stats(struct mlx4_dev *dev, int slave, u32 in_mod,
+				struct mlx4_cmd_mailbox *outbox);
 int mlx4_DUMP_ETH_STATS_wrapper(struct mlx4_dev *dev, int slave,
 				   struct mlx4_vhcr *vhcr,
 				   struct mlx4_cmd_mailbox *inbox,
@@ -1403,8 +1386,6 @@ int mlx4_get_slave_num_gids(struct mlx4_dev *dev, int slave, int port);
 int mlx4_get_vf_indx(struct mlx4_dev *dev, int slave);
 int mlx4_config_mad_demux(struct mlx4_dev *dev);
 int mlx4_do_bond(struct mlx4_dev *dev, bool enable);
-int mlx4_bond_fs_rules(struct mlx4_dev *dev);
-int mlx4_unbond_fs_rules(struct mlx4_dev *dev);
 
 enum mlx4_zone_flags {
 	MLX4_ZONE_ALLOW_ALLOC_FROM_LOWER_PRIO	= 1UL << 0,

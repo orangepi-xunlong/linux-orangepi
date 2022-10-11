@@ -68,8 +68,12 @@ static inline void invpcid_flush_all_nonglobals(void)
 struct tlb_state {
 	struct mm_struct *active_mm;
 	int state;
-	/* last user mm's ctx id */
-	u64 last_ctx_id;
+
+	/* Last user mm for optimizing IBPB */
+	union {
+		struct mm_struct	*last_user_mm;
+		unsigned long		last_user_mm_ibpb;
+	};
 
 	/*
 	 * Access to this CR4 shadow and to H/W CR4 is protected by
@@ -82,7 +86,7 @@ DECLARE_PER_CPU_SHARED_ALIGNED(struct tlb_state, cpu_tlbstate);
 /* Initialize cr4 shadow for this CPU. */
 static inline void cr4_init_shadow(void)
 {
-	this_cpu_write(cpu_tlbstate.cr4, __read_cr4());
+	this_cpu_write(cpu_tlbstate.cr4, __read_cr4_safe());
 }
 
 /* Set in this cpu's CR4. */
@@ -201,7 +205,7 @@ static inline void __native_flush_tlb_global(void)
 		 * Using INVPCID is considerably faster than a pair of writes
 		 * to CR4 sandwiched inside an IRQ flag save/restore.
 		 *
-		 * Note, this works with CR4.PCIDE=0 or 1.
+	 	 * Note, this works with CR4.PCIDE=0 or 1.
 		 */
 		invpcid_flush_all();
 		return;

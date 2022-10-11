@@ -216,7 +216,6 @@ struct smi_cfg_info {
 #define SMI_DVBSKY_S950         1
 #define SMI_DVBSKY_T9580        2
 #define SMI_DVBSKY_T982         3
-#define SMI_TECHNOTREND_S2_4200 4
 	int type;
 	char *name;
 #define SMI_TS_NULL             0
@@ -233,14 +232,13 @@ struct smi_cfg_info {
 #define DVBSKY_FE_SIT2          3
 	int fe_0;
 	int fe_1;
-	char *rc_map;
 };
 
 struct smi_rc {
 	struct smi_dev *dev;
 	struct rc_dev *rc_dev;
 	char input_phys[64];
-	char input_name[64];
+	char device_name[64];
 	struct work_struct work;
 	u8 irData[256];
 

@@ -2,6 +2,7 @@ if ARCH_STI
 
 config STI_RESET_SYSCFG
 	bool
+	select RESET_CONTROLLER
 
 config STIH415_RESET
 	bool

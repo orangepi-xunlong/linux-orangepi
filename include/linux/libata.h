@@ -46,8 +46,7 @@
 #ifdef CONFIG_ATA_NONSTANDARD
 #include <asm/libata-portmap.h>
 #else
-#define ATA_PRIMARY_IRQ(dev)	14
-#define ATA_SECONDARY_IRQ(dev)	15
+#include <asm-generic/libata-portmap.h>
 #endif
 
 /*
@@ -147,6 +146,13 @@ enum {
 	ATA_TFLAG_FUA		= (1 << 5), /* enable FUA */
 	ATA_TFLAG_POLLING	= (1 << 6), /* set nIEN to 1 and use polling */
 
+	/* protocol flags */
+	ATA_PROT_FLAG_PIO	= (1 << 0), /* is PIO */
+	ATA_PROT_FLAG_DMA	= (1 << 1), /* is DMA */
+	ATA_PROT_FLAG_DATA	= ATA_PROT_FLAG_PIO | ATA_PROT_FLAG_DMA,
+	ATA_PROT_FLAG_NCQ	= (1 << 2), /* is NCQ */
+	ATA_PROT_FLAG_ATAPI	= (1 << 3), /* is ATAPI */
+
 	/* struct ata_device stuff */
 	ATA_DFLAG_LBA		= (1 << 0), /* device supports LBA */
 	ATA_DFLAG_LBA48		= (1 << 1), /* device supports LBA48 */
@@ -174,8 +180,6 @@ enum {
 	ATA_DFLAG_DA		= (1 << 26), /* device supports Device Attention */
 	ATA_DFLAG_DEVSLP	= (1 << 27), /* device supports Device Sleep */
 	ATA_DFLAG_ACPI_DISABLED = (1 << 28), /* ACPI for the device is disabled */
-	ATA_DFLAG_D_SENSE	= (1 << 29), /* Descriptor sense requested */
-	ATA_DFLAG_ZAC		= (1 << 30), /* ZAC device */
 
 	ATA_DEV_UNKNOWN		= 0,	/* unknown device */
 	ATA_DEV_ATA		= 1,	/* ATA device */
@@ -187,8 +191,7 @@ enum {
 	ATA_DEV_SEMB		= 7,	/* SEMB */
 	ATA_DEV_SEMB_UNSUP	= 8,	/* SEMB (unsupported) */
 	ATA_DEV_ZAC		= 9,	/* ZAC device */
-	ATA_DEV_ZAC_UNSUP	= 10,	/* ZAC device (unsupported) */
-	ATA_DEV_NONE		= 11,	/* no device */
+	ATA_DEV_NONE		= 10,	/* no device */
 
 	/* struct ata_link flags */
 	ATA_LFLAG_NO_HRST	= (1 << 1), /* avoid hardreset */
@@ -202,7 +205,6 @@ enum {
 	ATA_LFLAG_NO_LPM	= (1 << 8), /* disable LPM on this link */
 	ATA_LFLAG_RST_ONCE	= (1 << 9), /* limit recovery to one reset */
 	ATA_LFLAG_CHANGED	= (1 << 10), /* LPM state changed on this link */
-	ATA_LFLAG_NO_DB_DELAY	= (1 << 11), /* no debounce delay on link resume */
 
 	/* struct ata_port flags */
 	ATA_FLAG_SLAVE_POSS	= (1 << 0), /* host supports slave dev */
@@ -524,7 +526,6 @@ enum ata_lpm_policy {
 enum ata_lpm_hints {
 	ATA_LPM_EMPTY		= (1 << 0), /* port empty/probing */
 	ATA_LPM_HIPM		= (1 << 1), /* may use HIPM */
-	ATA_LPM_WAKE_ONLY	= (1 << 2), /* only wake up link */
 };
 
 /* forward declarations */
@@ -725,13 +726,6 @@ struct ata_device {
 
 	/* NCQ send and receive log subcommand support */
 	u8			ncq_send_recv_cmds[ATA_LOG_NCQ_SEND_RECV_SIZE];
-	u8			ncq_non_data_cmds[ATA_LOG_NCQ_NON_DATA_SIZE];
-
-	/* ZAC zone configuration */
-	u32			zac_zoned_cap;
-	u32			zac_zones_optimal_open;
-	u32			zac_zones_optimal_nonseq;
-	u32			zac_zones_max_open;
 
 	/* error history */
 	int			spdn_cnt;
@@ -1034,29 +1028,58 @@ extern const unsigned long sata_deb_timing_long[];
 extern struct ata_port_operations ata_dummy_port_ops;
 extern const struct ata_port_info ata_dummy_port_info;
 
-static inline bool ata_is_atapi(u8 prot)
+/*
+ * protocol tests
+ */
+static inline unsigned int ata_prot_flags(u8 prot)
 {
-	return prot & ATA_PROT_FLAG_ATAPI;
+	switch (prot) {
+	case ATA_PROT_NODATA:
+		return 0;
+	case ATA_PROT_PIO:
+		return ATA_PROT_FLAG_PIO;
+	case ATA_PROT_DMA:
+		return ATA_PROT_FLAG_DMA;
+	case ATA_PROT_NCQ:
+		return ATA_PROT_FLAG_DMA | ATA_PROT_FLAG_NCQ;
+	case ATAPI_PROT_NODATA:
+		return ATA_PROT_FLAG_ATAPI;
+	case ATAPI_PROT_PIO:
+		return ATA_PROT_FLAG_ATAPI | ATA_PROT_FLAG_PIO;
+	case ATAPI_PROT_DMA:
+		return ATA_PROT_FLAG_ATAPI | ATA_PROT_FLAG_DMA;
+	}
+	return 0;
 }
 
-static inline bool ata_is_pio(u8 prot)
+static inline int ata_is_atapi(u8 prot)
 {
-	return prot & ATA_PROT_FLAG_PIO;
+	return ata_prot_flags(prot) & ATA_PROT_FLAG_ATAPI;
 }
 
-static inline bool ata_is_dma(u8 prot)
+static inline int ata_is_nodata(u8 prot)
 {
-	return prot & ATA_PROT_FLAG_DMA;
+	return !(ata_prot_flags(prot) & ATA_PROT_FLAG_DATA);
 }
 
-static inline bool ata_is_ncq(u8 prot)
+static inline int ata_is_pio(u8 prot)
 {
-	return prot & ATA_PROT_FLAG_NCQ;
+	return ata_prot_flags(prot) & ATA_PROT_FLAG_PIO;
 }
 
-static inline bool ata_is_data(u8 prot)
+static inline int ata_is_dma(u8 prot)
 {
-	return prot & (ATA_PROT_FLAG_PIO | ATA_PROT_FLAG_DMA);
+	return ata_prot_flags(prot) & ATA_PROT_FLAG_DMA;
+}
+
+static inline int ata_is_ncq(u8 prot)
+{
+	return ata_prot_flags(prot) & ATA_PROT_FLAG_NCQ;
+}
+
+static inline int ata_is_data(u8 prot)
+{
+	return ata_prot_flags(prot) & ATA_PROT_FLAG_DATA;
 }
 
 static inline int is_multi_taskfile(struct ata_taskfile *tf)
@@ -1373,7 +1396,7 @@ static inline bool sata_pmp_attached(struct ata_port *ap)
 	return ap->nr_pmp_links != 0;
 }
 
-static inline bool ata_is_host_link(const struct ata_link *link)
+static inline int ata_is_host_link(const struct ata_link *link)
 {
 	return link == &link->ap->link || link == link->ap->slave_link;
 }
@@ -1388,7 +1411,7 @@ static inline bool sata_pmp_attached(struct ata_port *ap)
 	return false;
 }
 
-static inline bool ata_is_host_link(const struct ata_link *link)
+static inline int ata_is_host_link(const struct ata_link *link)
 {
 	return 1;
 }
@@ -1499,8 +1522,7 @@ static inline unsigned int ata_class_enabled(unsigned int class)
 static inline unsigned int ata_class_disabled(unsigned int class)
 {
 	return class == ATA_DEV_ATA_UNSUP || class == ATA_DEV_ATAPI_UNSUP ||
-		class == ATA_DEV_PMP_UNSUP || class == ATA_DEV_SEMB_UNSUP ||
-		class == ATA_DEV_ZAC_UNSUP;
+		class == ATA_DEV_PMP_UNSUP || class == ATA_DEV_SEMB_UNSUP;
 }
 
 static inline unsigned int ata_class_absent(unsigned int class)
@@ -1616,26 +1638,6 @@ static inline bool ata_fpdma_dsm_supported(struct ata_device *dev)
 	return (dev->flags & ATA_DFLAG_NCQ_SEND_RECV) &&
 		(dev->ncq_send_recv_cmds[ATA_LOG_NCQ_SEND_RECV_DSM_OFFSET] &
 		 ATA_LOG_NCQ_SEND_RECV_DSM_TRIM);
-}
-
-static inline bool ata_fpdma_read_log_supported(struct ata_device *dev)
-{
-	return (dev->flags & ATA_DFLAG_NCQ_SEND_RECV) &&
-		(dev->ncq_send_recv_cmds[ATA_LOG_NCQ_SEND_RECV_RD_LOG_OFFSET] &
-		 ATA_LOG_NCQ_SEND_RECV_RD_LOG_SUPPORTED);
-}
-
-static inline bool ata_fpdma_zac_mgmt_in_supported(struct ata_device *dev)
-{
-	return (dev->flags & ATA_DFLAG_NCQ_SEND_RECV) &&
-		(dev->ncq_send_recv_cmds[ATA_LOG_NCQ_SEND_RECV_ZAC_MGMT_OFFSET] &
-		ATA_LOG_NCQ_SEND_RECV_ZAC_MGMT_IN_SUPPORTED);
-}
-
-static inline bool ata_fpdma_zac_mgmt_out_supported(struct ata_device *dev)
-{
-	return (dev->ncq_non_data_cmds[ATA_LOG_NCQ_NON_DATA_ZAC_MGMT_OFFSET] &
-		ATA_LOG_NCQ_NON_DATA_ZAC_MGMT_OUT);
 }
 
 static inline void ata_qc_set_polling(struct ata_queued_cmd *qc)

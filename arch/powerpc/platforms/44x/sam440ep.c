@@ -46,7 +46,9 @@ machine_device_initcall(sam440ep, sam440ep_device_probe);
 
 static int __init sam440ep_probe(void)
 {
-	if (!of_machine_is_compatible("acube,sam440ep"))
+	unsigned long root = of_get_flat_dt_root();
+
+	if (!of_flat_dt_is_compatible(root, "acube,sam440ep"))
 		return 0;
 
 	pci_set_flags(PCI_REASSIGN_ALL_RSRC);

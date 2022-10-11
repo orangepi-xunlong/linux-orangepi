@@ -123,12 +123,6 @@ TRACE_MAKE_SYSTEM_STR();
 	TRACE_EVENT(name, PARAMS(proto), PARAMS(args),			\
 		PARAMS(tstruct), PARAMS(assign), PARAMS(print))		\
 
-#undef TRACE_EVENT_FN_COND
-#define TRACE_EVENT_FN_COND(name, proto, args, cond, tstruct,	\
-		assign, print, reg, unreg)				\
-	TRACE_EVENT_CONDITION(name, PARAMS(proto), PARAMS(args), PARAMS(cond),		\
-		PARAMS(tstruct), PARAMS(assign), PARAMS(print))		\
-
 #undef TRACE_EVENT_FLAGS
 #define TRACE_EVENT_FLAGS(name, value)					\
 	__TRACE_EVENT_FLAGS(name, value)
@@ -256,7 +250,7 @@ TRACE_MAKE_SYSTEM_STR();
 		((__entry->__data_loc_##field >> 16) & 0xffff)
 
 #undef __get_str
-#define __get_str(field) ((char *)__get_dynamic_array(field))
+#define __get_str(field) (char *)__get_dynamic_array(field)
 
 #undef __get_bitmask
 #define __get_bitmask(field)						\
@@ -651,6 +645,9 @@ static inline notrace int trace_event_get_offsets_##call(		\
 
 #undef TP_fast_assign
 #define TP_fast_assign(args...) args
+
+#undef __perf_addr
+#define __perf_addr(a)	(a)
 
 #undef __perf_count
 #define __perf_count(c)	(c)

@@ -8,18 +8,6 @@
 #include <linux/thermal.h>
 #include <linux/tracepoint.h>
 
-TRACE_DEFINE_ENUM(THERMAL_TRIP_CRITICAL);
-TRACE_DEFINE_ENUM(THERMAL_TRIP_HOT);
-TRACE_DEFINE_ENUM(THERMAL_TRIP_PASSIVE);
-TRACE_DEFINE_ENUM(THERMAL_TRIP_ACTIVE);
-
-#define show_tzt_type(type)					\
-	__print_symbolic(type,					\
-			 { THERMAL_TRIP_CRITICAL, "CRITICAL"},	\
-			 { THERMAL_TRIP_HOT,      "HOT"},	\
-			 { THERMAL_TRIP_PASSIVE,  "PASSIVE"},	\
-			 { THERMAL_TRIP_ACTIVE,   "ACTIVE"})
-
 TRACE_EVENT(thermal_temperature,
 
 	TP_PROTO(struct thermal_zone_device *tz),
@@ -85,9 +73,45 @@ TRACE_EVENT(thermal_zone_trip,
 		__entry->trip_type = trip_type;
 	),
 
-	TP_printk("thermal_zone=%s id=%d trip=%d trip_type=%s",
+	TP_printk("thermal_zone=%s id=%d trip=%d trip_type=%d",
 		__get_str(thermal_zone), __entry->id, __entry->trip,
-		show_tzt_type(__entry->trip_type))
+		__entry->trip_type)
+);
+
+TRACE_EVENT(thermal_power_get_static_power,
+	TP_PROTO(u32 coefficient, s32 temp, u32 temp_scaling_factor, u32 volt,
+		 u32 volt_scaling_factor, u32 leakage, u32 ref_leakage,
+		 u32 static_power),
+
+	TP_ARGS(coefficient, temp, temp_scaling_factor, volt,
+		volt_scaling_factor, leakage, ref_leakage, static_power),
+
+	TP_STRUCT__entry(
+		__field(u32,	coefficient)
+		__field(s32,	temp)
+		__field(u32,	temp_scaling_factor)
+		__field(u32,	volt)
+		__field(u32,	volt_scaling_factor)
+		__field(u32,	leakage)
+		__field(u32,	ref_leakage)
+		__field(u32,	static_power)
+	),
+
+	TP_fast_assign(
+		__entry->coefficient = coefficient;
+		__entry->temp = temp;
+		__entry->temp_scaling_factor = temp_scaling_factor;
+		__entry->volt = volt;
+		__entry->volt_scaling_factor = volt_scaling_factor;
+		__entry->leakage = leakage;
+		__entry->ref_leakage = ref_leakage;
+		__entry->static_power = static_power;
+	),
+	TP_printk("c=%u t=%d ts=%u v=%u vs=%u lkg=%u ref_lkg=%u static_power=%u",
+		  __entry->coefficient, __entry->temp,
+		  __entry->temp_scaling_factor, __entry->volt,
+		  __entry->volt_scaling_factor, __entry->leakage,
+		  __entry->ref_leakage, __entry->static_power)
 );
 
 TRACE_EVENT(thermal_power_cpu_get_power,

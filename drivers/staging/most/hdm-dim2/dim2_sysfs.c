@@ -39,7 +39,7 @@ static struct attribute *bus_default_attrs[] = {
 	NULL,
 };
 
-static const struct attribute_group bus_attr_group = {
+static struct attribute_group bus_attr_group = {
 	.attrs = bus_default_attrs,
 };
 
@@ -63,6 +63,7 @@ static ssize_t bus_kobj_attr_show(struct kobject *kobj, struct attribute *attr,
 static ssize_t bus_kobj_attr_store(struct kobject *kobj, struct attribute *attr,
 				   const char *buf, size_t count)
 {
+	ssize_t ret;
 	struct medialb_bus *bus =
 		container_of(kobj, struct medialb_bus, kobj_group);
 	struct bus_attr *xattr = container_of(attr, struct bus_attr, attr);
@@ -70,7 +71,8 @@ static ssize_t bus_kobj_attr_store(struct kobject *kobj, struct attribute *attr,
 	if (!xattr->store)
 		return -EIO;
 
-	return xattr->store(bus, buf, count);
+	ret = xattr->store(bus, buf, count);
+	return ret;
 }
 
 static struct sysfs_ops const bus_kobj_sysfs_ops = {

@@ -196,7 +196,7 @@ static int mpic_msgr_probe(struct platform_device *dev)
 
 	/* IO map the message register block. */
 	of_address_to_resource(np, 0, &rsrc);
-	msgr_block_addr = ioremap(rsrc.start, rsrc.end - rsrc.start);
+	msgr_block_addr = ioremap(rsrc.start, resource_size(&rsrc));
 	if (!msgr_block_addr) {
 		dev_err(&dev->dev, "Failed to iomap MPIC message registers");
 		return -EFAULT;
@@ -238,7 +238,7 @@ static int mpic_msgr_probe(struct platform_device *dev)
 
 		if (receive_mask & (1 << i)) {
 			msgr->irq = irq_of_parse_and_map(np, irq_index);
-			if (!msgr->irq) {
+			if (msgr->irq == NO_IRQ) {
 				dev_err(&dev->dev,
 						"Missing interrupt specifier");
 				kfree(msgr);
@@ -246,7 +246,7 @@ static int mpic_msgr_probe(struct platform_device *dev)
 			}
 			irq_index += 1;
 		} else {
-			msgr->irq = 0;
+			msgr->irq = NO_IRQ;
 		}
 
 		mpic_msgrs[reg_number] = msgr;

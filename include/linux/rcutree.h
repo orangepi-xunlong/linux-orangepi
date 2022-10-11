@@ -37,7 +37,7 @@ void rcu_cpu_stall_reset(void);
 /*
  * Note a virtualization-based context switch.  This is simply a
  * wrapper around rcu_note_context_switch(), which allows TINY_RCU
- * to save a few bytes. The caller must have disabled interrupts.
+ * to save a few bytes.
  */
 static inline void rcu_virt_note_context_switch(int cpu)
 {
@@ -87,8 +87,6 @@ unsigned long rcu_batches_started_sched(void);
 unsigned long rcu_batches_completed(void);
 unsigned long rcu_batches_completed_bh(void);
 unsigned long rcu_batches_completed_sched(void);
-unsigned long rcu_exp_batches_completed(void);
-unsigned long rcu_exp_batches_completed_sched(void);
 void show_rcu_gp_kthreads(void);
 
 void rcu_force_quiescent_state(void);
@@ -99,8 +97,6 @@ void rcu_idle_enter(void);
 void rcu_idle_exit(void);
 void rcu_irq_enter(void);
 void rcu_irq_exit(void);
-void rcu_irq_enter_irqson(void);
-void rcu_irq_exit_irqson(void);
 
 void exit_rcu(void);
 
@@ -110,12 +106,5 @@ extern int rcu_scheduler_active __read_mostly;
 bool rcu_is_watching(void);
 
 void rcu_all_qs(void);
-
-/* RCUtree hotplug events */
-int rcutree_prepare_cpu(unsigned int cpu);
-int rcutree_online_cpu(unsigned int cpu);
-int rcutree_offline_cpu(unsigned int cpu);
-int rcutree_dead_cpu(unsigned int cpu);
-int rcutree_dying_cpu(unsigned int cpu);
 
 #endif /* __LINUX_RCUTREE_H */

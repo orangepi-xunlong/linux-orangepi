@@ -9,9 +9,7 @@
 
 #include <linux/delay.h>
 #include <linux/init.h>
-#include <linux/irqdomain.h>
 #include <linux/pci.h>
-#include <linux/msi.h>
 #include <linux/pci_hotplug.h>
 #include <linux/module.h>
 #include <linux/pci-aspm.h>
@@ -452,27 +450,6 @@ static int acpi_pci_set_power_state(struct pci_dev *dev, pci_power_t state)
 	return error;
 }
 
-static pci_power_t acpi_pci_get_power_state(struct pci_dev *dev)
-{
-	struct acpi_device *adev = ACPI_COMPANION(&dev->dev);
-	static const pci_power_t state_conv[] = {
-		[ACPI_STATE_D0]      = PCI_D0,
-		[ACPI_STATE_D1]      = PCI_D1,
-		[ACPI_STATE_D2]      = PCI_D2,
-		[ACPI_STATE_D3_HOT]  = PCI_D3hot,
-		[ACPI_STATE_D3_COLD] = PCI_D3cold,
-	};
-	int state;
-
-	if (!adev || !acpi_device_power_manageable(adev))
-		return PCI_UNKNOWN;
-
-	if (acpi_device_get_power(adev, &state) || state == ACPI_STATE_UNKNOWN)
-		return PCI_UNKNOWN;
-
-	return state_conv[state];
-}
-
 static bool acpi_pci_can_wakeup(struct pci_dev *dev)
 {
 	struct acpi_device *adev = ACPI_COMPANION(&dev->dev);
@@ -552,10 +529,9 @@ static bool acpi_pci_need_resume(struct pci_dev *dev)
 	return !!adev->power.flags.dsw_present;
 }
 
-static const struct pci_platform_pm_ops acpi_pci_platform_pm = {
+static struct pci_platform_pm_ops acpi_pci_platform_pm = {
 	.is_manageable = acpi_pci_power_manageable,
 	.set_state = acpi_pci_set_power_state,
-	.get_state = acpi_pci_get_power_state,
 	.choose_state = acpi_pci_choose_state,
 	.sleep_wake = acpi_pci_sleep_wake,
 	.run_wake = acpi_pci_run_wake,
@@ -567,7 +543,7 @@ void acpi_pci_add_bus(struct pci_bus *bus)
 	union acpi_object *obj;
 	struct pci_host_bridge *bridge;
 
-	if (acpi_pci_disabled || !bus->bridge)
+	if (acpi_pci_disabled || !bus->bridge || !ACPI_HANDLE(bus->bridge))
 		return;
 
 	acpi_pci_slot_enumerate(bus);
@@ -712,46 +688,6 @@ static struct acpi_bus_type acpi_pci_bus = {
 	.setup = pci_acpi_setup,
 	.cleanup = pci_acpi_cleanup,
 };
-
-
-static struct fwnode_handle *(*pci_msi_get_fwnode_cb)(struct device *dev);
-
-/**
- * pci_msi_register_fwnode_provider - Register callback to retrieve fwnode
- * @fn:       Callback matching a device to a fwnode that identifies a PCI
- *            MSI domain.
- *
- * This should be called by irqchip driver, which is the parent of
- * the MSI domain to provide callback interface to query fwnode.
- */
-void
-pci_msi_register_fwnode_provider(struct fwnode_handle *(*fn)(struct device *))
-{
-	pci_msi_get_fwnode_cb = fn;
-}
-
-/**
- * pci_host_bridge_acpi_msi_domain - Retrieve MSI domain of a PCI host bridge
- * @bus:      The PCI host bridge bus.
- *
- * This function uses the callback function registered by
- * pci_msi_register_fwnode_provider() to retrieve the irq_domain with
- * type DOMAIN_BUS_PCI_MSI of the specified host bridge bus.
- * This returns NULL on error or when the domain is not found.
- */
-struct irq_domain *pci_host_bridge_acpi_msi_domain(struct pci_bus *bus)
-{
-	struct fwnode_handle *fwnode;
-
-	if (!pci_msi_get_fwnode_cb)
-		return NULL;
-
-	fwnode = pci_msi_get_fwnode_cb(&bus->dev);
-	if (!fwnode)
-		return NULL;
-
-	return irq_find_matching_fwnode(fwnode, DOMAIN_BUS_PCI_MSI);
-}
 
 static int __init acpi_pci_init(void)
 {

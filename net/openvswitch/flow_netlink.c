@@ -261,7 +261,7 @@ size_t ovs_tun_key_attr_size(void)
 	/* Whenever adding new OVS_TUNNEL_KEY_ FIELDS, we should consider
 	 * updating this function.
 	 */
-	return    nla_total_size_64bit(8) /* OVS_TUNNEL_KEY_ATTR_ID */
+	return    nla_total_size(8)    /* OVS_TUNNEL_KEY_ATTR_ID */
 		+ nla_total_size(16)   /* OVS_TUNNEL_KEY_ATTR_IPV[46]_SRC */
 		+ nla_total_size(16)   /* OVS_TUNNEL_KEY_ATTR_IPV[46]_DST */
 		+ nla_total_size(1)    /* OVS_TUNNEL_KEY_ATTR_TOS */
@@ -409,7 +409,7 @@ static int __parse_flow_nlattrs(const struct nlattr *attr,
 			return -EINVAL;
 		}
 
-		if (!nz || !is_all_zero(nla_data(nla), expected_len)) {
+		if (!nz || !is_all_zero(nla_data(nla), nla_len(nla))) {
 			attrs |= 1 << type;
 			a[type] = nla;
 		}
@@ -649,8 +649,6 @@ static int ip_tun_from_nlattr(const struct nlattr *attr,
 			tun_flags |= TUNNEL_VXLAN_OPT;
 			opts_type = type;
 			break;
-		case OVS_TUNNEL_KEY_ATTR_PAD:
-			break;
 		default:
 			OVS_NLERR(log, "Unknown IP tunnel attribute %d",
 				  type);
@@ -722,8 +720,7 @@ static int __ip_tun_to_nlattr(struct sk_buff *skb,
 			      unsigned short tun_proto)
 {
 	if (output->tun_flags & TUNNEL_KEY &&
-	    nla_put_be64(skb, OVS_TUNNEL_KEY_ATTR_ID, output->tun_id,
-			 OVS_TUNNEL_KEY_ATTR_PAD))
+	    nla_put_be64(skb, OVS_TUNNEL_KEY_ATTR_ID, output->tun_id))
 		return -EMSGSIZE;
 	switch (tun_proto) {
 	case AF_INET:
@@ -808,167 +805,6 @@ int ovs_nla_put_tunnel_info(struct sk_buff *skb,
 				  ip_tunnel_info_opts(tun_info),
 				  tun_info->options_len,
 				  ip_tunnel_info_af(tun_info));
-}
-
-static int encode_vlan_from_nlattrs(struct sw_flow_match *match,
-				    const struct nlattr *a[],
-				    bool is_mask, bool inner)
-{
-	__be16 tci = 0;
-	__be16 tpid = 0;
-
-	if (a[OVS_KEY_ATTR_VLAN])
-		tci = nla_get_be16(a[OVS_KEY_ATTR_VLAN]);
-
-	if (a[OVS_KEY_ATTR_ETHERTYPE])
-		tpid = nla_get_be16(a[OVS_KEY_ATTR_ETHERTYPE]);
-
-	if (likely(!inner)) {
-		SW_FLOW_KEY_PUT(match, eth.vlan.tpid, tpid, is_mask);
-		SW_FLOW_KEY_PUT(match, eth.vlan.tci, tci, is_mask);
-	} else {
-		SW_FLOW_KEY_PUT(match, eth.cvlan.tpid, tpid, is_mask);
-		SW_FLOW_KEY_PUT(match, eth.cvlan.tci, tci, is_mask);
-	}
-	return 0;
-}
-
-static int validate_vlan_from_nlattrs(const struct sw_flow_match *match,
-				      u64 key_attrs, bool inner,
-				      const struct nlattr **a, bool log)
-{
-	__be16 tci = 0;
-
-	if (!((key_attrs & (1 << OVS_KEY_ATTR_ETHERNET)) &&
-	      (key_attrs & (1 << OVS_KEY_ATTR_ETHERTYPE)) &&
-	       eth_type_vlan(nla_get_be16(a[OVS_KEY_ATTR_ETHERTYPE])))) {
-		/* Not a VLAN. */
-		return 0;
-	}
-
-	if (!((key_attrs & (1 << OVS_KEY_ATTR_VLAN)) &&
-	      (key_attrs & (1 << OVS_KEY_ATTR_ENCAP)))) {
-		OVS_NLERR(log, "Invalid %s frame", (inner) ? "C-VLAN" : "VLAN");
-		return -EINVAL;
-	}
-
-	if (a[OVS_KEY_ATTR_VLAN])
-		tci = nla_get_be16(a[OVS_KEY_ATTR_VLAN]);
-
-	if (!(tci & htons(VLAN_TAG_PRESENT))) {
-		if (tci) {
-			OVS_NLERR(log, "%s TCI does not have VLAN_TAG_PRESENT bit set.",
-				  (inner) ? "C-VLAN" : "VLAN");
-			return -EINVAL;
-		} else if (nla_len(a[OVS_KEY_ATTR_ENCAP])) {
-			/* Corner case for truncated VLAN header. */
-			OVS_NLERR(log, "Truncated %s header has non-zero encap attribute.",
-				  (inner) ? "C-VLAN" : "VLAN");
-			return -EINVAL;
-		}
-	}
-
-	return 1;
-}
-
-static int validate_vlan_mask_from_nlattrs(const struct sw_flow_match *match,
-					   u64 key_attrs, bool inner,
-					   const struct nlattr **a, bool log)
-{
-	__be16 tci = 0;
-	__be16 tpid = 0;
-	bool encap_valid = !!(match->key->eth.vlan.tci &
-			      htons(VLAN_TAG_PRESENT));
-	bool i_encap_valid = !!(match->key->eth.cvlan.tci &
-				htons(VLAN_TAG_PRESENT));
-
-	if (!(key_attrs & (1 << OVS_KEY_ATTR_ENCAP))) {
-		/* Not a VLAN. */
-		return 0;
-	}
-
-	if ((!inner && !encap_valid) || (inner && !i_encap_valid)) {
-		OVS_NLERR(log, "Encap mask attribute is set for non-%s frame.",
-			  (inner) ? "C-VLAN" : "VLAN");
-		return -EINVAL;
-	}
-
-	if (a[OVS_KEY_ATTR_VLAN])
-		tci = nla_get_be16(a[OVS_KEY_ATTR_VLAN]);
-
-	if (a[OVS_KEY_ATTR_ETHERTYPE])
-		tpid = nla_get_be16(a[OVS_KEY_ATTR_ETHERTYPE]);
-
-	if (tpid != htons(0xffff)) {
-		OVS_NLERR(log, "Must have an exact match on %s TPID (mask=%x).",
-			  (inner) ? "C-VLAN" : "VLAN", ntohs(tpid));
-		return -EINVAL;
-	}
-	if (!(tci & htons(VLAN_TAG_PRESENT))) {
-		OVS_NLERR(log, "%s TCI mask does not have exact match for VLAN_TAG_PRESENT bit.",
-			  (inner) ? "C-VLAN" : "VLAN");
-		return -EINVAL;
-	}
-
-	return 1;
-}
-
-static int __parse_vlan_from_nlattrs(struct sw_flow_match *match,
-				     u64 *key_attrs, bool inner,
-				     const struct nlattr **a, bool is_mask,
-				     bool log)
-{
-	int err;
-	const struct nlattr *encap;
-
-	if (!is_mask)
-		err = validate_vlan_from_nlattrs(match, *key_attrs, inner,
-						 a, log);
-	else
-		err = validate_vlan_mask_from_nlattrs(match, *key_attrs, inner,
-						      a, log);
-	if (err <= 0)
-		return err;
-
-	err = encode_vlan_from_nlattrs(match, a, is_mask, inner);
-	if (err)
-		return err;
-
-	*key_attrs &= ~(1 << OVS_KEY_ATTR_ENCAP);
-	*key_attrs &= ~(1 << OVS_KEY_ATTR_VLAN);
-	*key_attrs &= ~(1 << OVS_KEY_ATTR_ETHERTYPE);
-
-	encap = a[OVS_KEY_ATTR_ENCAP];
-
-	if (!is_mask)
-		err = parse_flow_nlattrs(encap, a, key_attrs, log);
-	else
-		err = parse_flow_mask_nlattrs(encap, a, key_attrs, log);
-
-	return err;
-}
-
-static int parse_vlan_from_nlattrs(struct sw_flow_match *match,
-				   u64 *key_attrs, const struct nlattr **a,
-				   bool is_mask, bool log)
-{
-	int err;
-	bool encap_valid = false;
-
-	err = __parse_vlan_from_nlattrs(match, key_attrs, false, a,
-					is_mask, log);
-	if (err)
-		return err;
-
-	encap_valid = !!(match->key->eth.vlan.tci & htons(VLAN_TAG_PRESENT));
-	if (encap_valid) {
-		err = __parse_vlan_from_nlattrs(match, key_attrs, true, a,
-						is_mask, log);
-		if (err)
-			return err;
-	}
-
-	return 0;
 }
 
 static int metadata_from_nlattrs(struct net *net, struct sw_flow_match *match,
@@ -1086,11 +922,20 @@ static int ovs_key_from_nlattrs(struct net *net, struct sw_flow_match *match,
 	}
 
 	if (attrs & (1 << OVS_KEY_ATTR_VLAN)) {
-		/* VLAN attribute is always parsed before getting here since it
-		 * may occur multiple times.
-		 */
-		OVS_NLERR(log, "VLAN attribute unexpected.");
-		return -EINVAL;
+		__be16 tci;
+
+		tci = nla_get_be16(a[OVS_KEY_ATTR_VLAN]);
+		if (!(tci & htons(VLAN_TAG_PRESENT))) {
+			if (is_mask)
+				OVS_NLERR(log, "VLAN TCI mask does not have exact match for VLAN_TAG_PRESENT bit.");
+			else
+				OVS_NLERR(log, "VLAN TCI does not have VLAN_TAG_PRESENT bit set.");
+
+			return -EINVAL;
+		}
+
+		SW_FLOW_KEY_PUT(match, eth.tci, tci, is_mask);
+		attrs &= ~(1 << OVS_KEY_ATTR_VLAN);
 	}
 
 	if (attrs & (1 << OVS_KEY_ATTR_ETHERTYPE)) {
@@ -1333,18 +1178,49 @@ int ovs_nla_get_match(struct net *net, struct sw_flow_match *match,
 		      bool log)
 {
 	const struct nlattr *a[OVS_KEY_ATTR_MAX + 1];
+	const struct nlattr *encap;
 	struct nlattr *newmask = NULL;
 	u64 key_attrs = 0;
 	u64 mask_attrs = 0;
+	bool encap_valid = false;
 	int err;
 
 	err = parse_flow_nlattrs(nla_key, a, &key_attrs, log);
 	if (err)
 		return err;
 
-	err = parse_vlan_from_nlattrs(match, &key_attrs, a, false, log);
-	if (err)
-		return err;
+	if ((key_attrs & (1 << OVS_KEY_ATTR_ETHERNET)) &&
+	    (key_attrs & (1 << OVS_KEY_ATTR_ETHERTYPE)) &&
+	    (nla_get_be16(a[OVS_KEY_ATTR_ETHERTYPE]) == htons(ETH_P_8021Q))) {
+		__be16 tci;
+
+		if (!((key_attrs & (1 << OVS_KEY_ATTR_VLAN)) &&
+		      (key_attrs & (1 << OVS_KEY_ATTR_ENCAP)))) {
+			OVS_NLERR(log, "Invalid Vlan frame.");
+			return -EINVAL;
+		}
+
+		key_attrs &= ~(1 << OVS_KEY_ATTR_ETHERTYPE);
+		tci = nla_get_be16(a[OVS_KEY_ATTR_VLAN]);
+		encap = a[OVS_KEY_ATTR_ENCAP];
+		key_attrs &= ~(1 << OVS_KEY_ATTR_ENCAP);
+		encap_valid = true;
+
+		if (tci & htons(VLAN_TAG_PRESENT)) {
+			err = parse_flow_nlattrs(encap, a, &key_attrs, log);
+			if (err)
+				return err;
+		} else if (!tci) {
+			/* Corner case for truncated 802.1Q header. */
+			if (nla_len(encap)) {
+				OVS_NLERR(log, "Truncated 802.1Q header has non-zero encap attribute.");
+				return -EINVAL;
+			}
+		} else {
+			OVS_NLERR(log, "Encap attr is set for non-VLAN frame");
+			return  -EINVAL;
+		}
+	}
 
 	err = ovs_key_from_nlattrs(net, match, key_attrs, a, false, log);
 	if (err)
@@ -1385,12 +1261,46 @@ int ovs_nla_get_match(struct net *net, struct sw_flow_match *match,
 			goto free_newmask;
 
 		/* Always match on tci. */
-		SW_FLOW_KEY_PUT(match, eth.vlan.tci, htons(0xffff), true);
-		SW_FLOW_KEY_PUT(match, eth.cvlan.tci, htons(0xffff), true);
+		SW_FLOW_KEY_PUT(match, eth.tci, htons(0xffff), true);
 
-		err = parse_vlan_from_nlattrs(match, &mask_attrs, a, true, log);
-		if (err)
-			goto free_newmask;
+		if (mask_attrs & 1 << OVS_KEY_ATTR_ENCAP) {
+			__be16 eth_type = 0;
+			__be16 tci = 0;
+
+			if (!encap_valid) {
+				OVS_NLERR(log, "Encap mask attribute is set for non-VLAN frame.");
+				err = -EINVAL;
+				goto free_newmask;
+			}
+
+			mask_attrs &= ~(1 << OVS_KEY_ATTR_ENCAP);
+			if (a[OVS_KEY_ATTR_ETHERTYPE])
+				eth_type = nla_get_be16(a[OVS_KEY_ATTR_ETHERTYPE]);
+
+			if (eth_type == htons(0xffff)) {
+				mask_attrs &= ~(1 << OVS_KEY_ATTR_ETHERTYPE);
+				encap = a[OVS_KEY_ATTR_ENCAP];
+				err = parse_flow_mask_nlattrs(encap, a,
+							      &mask_attrs, log);
+				if (err)
+					goto free_newmask;
+			} else {
+				OVS_NLERR(log, "VLAN frames must have an exact match on the TPID (mask=%x).",
+					  ntohs(eth_type));
+				err = -EINVAL;
+				goto free_newmask;
+			}
+
+			if (a[OVS_KEY_ATTR_VLAN])
+				tci = nla_get_be16(a[OVS_KEY_ATTR_VLAN]);
+
+			if (!(tci & htons(VLAN_TAG_PRESENT))) {
+				OVS_NLERR(log, "VLAN tag present bit must have an exact match (tci_mask=%x).",
+					  ntohs(tci));
+				err = -EINVAL;
+				goto free_newmask;
+			}
+		}
 
 		err = ovs_key_from_nlattrs(net, match, mask_attrs, a, true,
 					   log);
@@ -1496,25 +1406,12 @@ int ovs_nla_get_flow_metadata(struct net *net, const struct nlattr *attr,
 	return metadata_from_nlattrs(net, &match, &attrs, a, false, log);
 }
 
-static int ovs_nla_put_vlan(struct sk_buff *skb, const struct vlan_head *vh,
-			    bool is_mask)
-{
-	__be16 eth_type = !is_mask ? vh->tpid : htons(0xffff);
-
-	if (nla_put_be16(skb, OVS_KEY_ATTR_ETHERTYPE, eth_type) ||
-	    nla_put_be16(skb, OVS_KEY_ATTR_VLAN, vh->tci))
-		return -EMSGSIZE;
-	return 0;
-}
-
 static int __ovs_nla_put_key(const struct sw_flow_key *swkey,
 			     const struct sw_flow_key *output, bool is_mask,
 			     struct sk_buff *skb)
 {
 	struct ovs_key_ethernet *eth_key;
-	struct nlattr *nla;
-	struct nlattr *encap = NULL;
-	struct nlattr *in_encap = NULL;
+	struct nlattr *nla, *encap;
 
 	if (nla_put_u32(skb, OVS_KEY_ATTR_RECIRC_ID, output->recirc_id))
 		goto nla_put_failure;
@@ -1563,21 +1460,17 @@ static int __ovs_nla_put_key(const struct sw_flow_key *swkey,
 	ether_addr_copy(eth_key->eth_src, output->eth.src);
 	ether_addr_copy(eth_key->eth_dst, output->eth.dst);
 
-	if (swkey->eth.vlan.tci || eth_type_vlan(swkey->eth.type)) {
-		if (ovs_nla_put_vlan(skb, &output->eth.vlan, is_mask))
+	if (swkey->eth.tci || swkey->eth.type == htons(ETH_P_8021Q)) {
+		__be16 eth_type;
+		eth_type = !is_mask ? htons(ETH_P_8021Q) : htons(0xffff);
+		if (nla_put_be16(skb, OVS_KEY_ATTR_ETHERTYPE, eth_type) ||
+		    nla_put_be16(skb, OVS_KEY_ATTR_VLAN, output->eth.tci))
 			goto nla_put_failure;
 		encap = nla_nest_start(skb, OVS_KEY_ATTR_ENCAP);
-		if (!swkey->eth.vlan.tci)
+		if (!swkey->eth.tci)
 			goto unencap;
-
-		if (swkey->eth.cvlan.tci || eth_type_vlan(swkey->eth.type)) {
-			if (ovs_nla_put_vlan(skb, &output->eth.cvlan, is_mask))
-				goto nla_put_failure;
-			in_encap = nla_nest_start(skb, OVS_KEY_ATTR_ENCAP);
-			if (!swkey->eth.cvlan.tci)
-				goto unencap;
-		}
-	}
+	} else
+		encap = NULL;
 
 	if (swkey->eth.type == htons(ETH_P_802_2)) {
 		/*
@@ -1595,14 +1488,6 @@ static int __ovs_nla_put_key(const struct sw_flow_key *swkey,
 
 	if (nla_put_be16(skb, OVS_KEY_ATTR_ETHERTYPE, output->eth.type))
 		goto nla_put_failure;
-
-	if (eth_type_vlan(swkey->eth.type)) {
-		/* There are 3 VLAN tags, we don't know anything about the rest
-		 * of the packet, so truncate here.
-		 */
-		WARN_ON_ONCE(!(encap && in_encap));
-		goto unencap;
-	}
 
 	if (swkey->eth.type == htons(ETH_P_IP)) {
 		struct ovs_key_ipv4 *ipv4_key;
@@ -1730,8 +1615,6 @@ static int __ovs_nla_put_key(const struct sw_flow_key *swkey,
 	}
 
 unencap:
-	if (in_encap)
-		nla_nest_end(skb, in_encap);
 	if (encap)
 		nla_nest_end(skb, encap);
 
@@ -1853,14 +1736,14 @@ static struct nlattr *reserve_sfa_size(struct sw_flow_actions **sfa,
 
 	struct sw_flow_actions *acts;
 	int new_acts_size;
-	int req_size = NLA_ALIGN(attr_len);
+	size_t req_size = NLA_ALIGN(attr_len);
 	int next_offset = offsetof(struct sw_flow_actions, actions) +
 					(*sfa)->actions_len;
 
 	if (req_size <= (ksize(*sfa) - next_offset))
 		goto out;
 
-	new_acts_size = ksize(*sfa) * 2;
+	new_acts_size = max(next_offset + req_size, ksize(*sfa) * 2);
 
 	if (new_acts_size > MAX_ACTIONS_BUFSIZE) {
 		if ((MAX_ACTIONS_BUFSIZE - next_offset) < req_size) {
@@ -1995,15 +1878,13 @@ static int validate_and_copy_sample(struct net *net, const struct nlattr *attr,
 
 void ovs_match_init(struct sw_flow_match *match,
 		    struct sw_flow_key *key,
-		    bool reset_key,
 		    struct sw_flow_mask *mask)
 {
 	memset(match, 0, sizeof(*match));
 	match->key = key;
 	match->mask = mask;
 
-	if (reset_key)
-		memset(key, 0, sizeof(*key));
+	memset(key, 0, sizeof(*key));
 
 	if (mask) {
 		memset(&mask->key, 0, sizeof(mask->key));
@@ -2050,7 +1931,7 @@ static int validate_and_copy_set_tun(const struct nlattr *attr,
 	struct nlattr *a;
 	int err = 0, start, opts_type;
 
-	ovs_match_init(&match, &key, true, NULL);
+	ovs_match_init(&match, &key, NULL);
 	opts_type = ip_tun_from_nlattr(nla_data(attr), &match, false, log);
 	if (opts_type < 0)
 		return opts_type;
@@ -2074,12 +1955,6 @@ static int validate_and_copy_set_tun(const struct nlattr *attr,
 	tun_dst = metadata_dst_alloc(key.tun_opts_len, GFP_KERNEL);
 	if (!tun_dst)
 		return -ENOMEM;
-
-	err = dst_cache_init(&tun_dst->u.tun_info.dst_cache, GFP_KERNEL);
-	if (err) {
-		dst_release((struct dst_entry *)tun_dst);
-		return err;
-	}
 
 	a = __add_action(sfa, OVS_KEY_ATTR_TUNNEL_INFO, NULL,
 			 sizeof(*ovs_tun), log);
@@ -2160,6 +2035,9 @@ static int validate_set(const struct nlattr *a,
 		break;
 
 	case OVS_KEY_ATTR_TUNNEL:
+		if (eth_p_mpls(eth_type))
+			return -EINVAL;
+
 		if (masked)
 			return -EINVAL; /* Masked tunnel set not supported. */
 
@@ -2344,7 +2222,6 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 			[OVS_ACTION_ATTR_SAMPLE] = (u32)-1,
 			[OVS_ACTION_ATTR_HASH] = sizeof(struct ovs_action_hash),
 			[OVS_ACTION_ATTR_CT] = (u32)-1,
-			[OVS_ACTION_ATTR_TRUNC] = sizeof(struct ovs_action_trunc),
 		};
 		const struct ovs_action_push_vlan *vlan;
 		int type = nla_type(a);
@@ -2371,14 +2248,6 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 				return -EINVAL;
 			break;
 
-		case OVS_ACTION_ATTR_TRUNC: {
-			const struct ovs_action_trunc *trunc = nla_data(a);
-
-			if (trunc->max_len < ETH_HLEN)
-				return -EINVAL;
-			break;
-		}
-
 		case OVS_ACTION_ATTR_HASH: {
 			const struct ovs_action_hash *act_hash = nla_data(a);
 
@@ -2398,7 +2267,7 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 
 		case OVS_ACTION_ATTR_PUSH_VLAN:
 			vlan = nla_data(a);
-			if (!eth_type_vlan(vlan->vlan_tpid))
+			if (vlan->vlan_tpid != htons(ETH_P_8021Q))
 				return -EINVAL;
 			if (!(vlan->vlan_tci & htons(VLAN_TAG_PRESENT)))
 				return -EINVAL;
@@ -2503,7 +2372,7 @@ int ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 
 	(*sfa)->orig_len = nla_len(attr);
 	err = __ovs_nla_copy_actions(net, attr, key, 0, sfa, key->eth.type,
-				     key->eth.vlan.tci, log);
+				     key->eth.tci, log);
 	if (err)
 		ovs_nla_free_flow_actions(*sfa);
 

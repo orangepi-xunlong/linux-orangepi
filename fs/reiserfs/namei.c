@@ -570,7 +570,7 @@ static int reiserfs_add_entry(struct reiserfs_transaction_handle *th,
 	}
 
 	dir->i_size += paste_size;
-	dir->i_mtime = dir->i_ctime = current_time(dir);
+	dir->i_mtime = dir->i_ctime = CURRENT_TIME_SEC;
 	if (!S_ISDIR(inode->i_mode) && visible)
 		/* reiserfs_mkdir or reiserfs_rename will do that by itself */
 		reiserfs_update_sd(th, dir);
@@ -960,7 +960,7 @@ static int reiserfs_rmdir(struct inode *dir, struct dentry *dentry)
 			       inode->i_nlink);
 
 	clear_nlink(inode);
-	inode->i_ctime = dir->i_ctime = dir->i_mtime = current_time(dir);
+	inode->i_ctime = dir->i_ctime = dir->i_mtime = CURRENT_TIME_SEC;
 	reiserfs_update_sd(&th, inode);
 
 	DEC_DIR_INODE_NLINK(dir)
@@ -1064,11 +1064,11 @@ static int reiserfs_unlink(struct inode *dir, struct dentry *dentry)
 		inc_nlink(inode);
 		goto end_unlink;
 	}
-	inode->i_ctime = current_time(inode);
+	inode->i_ctime = CURRENT_TIME_SEC;
 	reiserfs_update_sd(&th, inode);
 
 	dir->i_size -= (de.de_entrylen + DEH_SIZE);
-	dir->i_ctime = dir->i_mtime = current_time(dir);
+	dir->i_ctime = dir->i_mtime = CURRENT_TIME_SEC;
 	reiserfs_update_sd(&th, dir);
 
 	if (!savelink)
@@ -1167,7 +1167,6 @@ static int reiserfs_symlink(struct inode *parent_dir,
 	reiserfs_update_inode_transaction(parent_dir);
 
 	inode->i_op = &reiserfs_symlink_inode_operations;
-	inode_nohighmem(inode);
 	inode->i_mapping->a_ops = &reiserfs_address_space_operations;
 
 	retval = reiserfs_add_entry(&th, parent_dir, dentry->d_name.name,
@@ -1242,7 +1241,7 @@ static int reiserfs_link(struct dentry *old_dentry, struct inode *dir,
 		return err ? err : retval;
 	}
 
-	inode->i_ctime = current_time(inode);
+	inode->i_ctime = CURRENT_TIME_SEC;
 	reiserfs_update_sd(&th, inode);
 
 	ihold(inode);
@@ -1302,8 +1301,7 @@ static void set_ino_in_dir_entry(struct reiserfs_dir_entry *de,
  * get_empty_nodes or its clones
  */
 static int reiserfs_rename(struct inode *old_dir, struct dentry *old_dentry,
-			   struct inode *new_dir, struct dentry *new_dentry,
-			   unsigned int flags)
+			   struct inode *new_dir, struct dentry *new_dentry)
 {
 	int retval;
 	INITIALIZE_PATH(old_entry_path);
@@ -1317,9 +1315,6 @@ static int reiserfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 	umode_t old_inode_mode;
 	unsigned long savelink = 1;
 	struct timespec ctime;
-
-	if (flags & ~RENAME_NOREPLACE)
-		return -EINVAL;
 
 	/*
 	 * three balancings: (1) old name removal, (2) new name insertion
@@ -1567,7 +1562,7 @@ static int reiserfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 
 	mark_de_hidden(old_de.de_deh + old_de.de_entry_num);
 	journal_mark_dirty(&th, old_de.de_bh);
-	ctime = current_time(old_dir);
+	ctime = CURRENT_TIME_SEC;
 	old_dir->i_ctime = old_dir->i_mtime = ctime;
 	new_dir->i_ctime = new_dir->i_mtime = ctime;
 	/*
@@ -1650,7 +1645,10 @@ const struct inode_operations reiserfs_dir_inode_operations = {
 	.mknod = reiserfs_mknod,
 	.rename = reiserfs_rename,
 	.setattr = reiserfs_setattr,
+	.setxattr = generic_setxattr,
+	.getxattr = generic_getxattr,
 	.listxattr = reiserfs_listxattr,
+	.removexattr = generic_removexattr,
 	.permission = reiserfs_permission,
 	.get_acl = reiserfs_get_acl,
 	.set_acl = reiserfs_set_acl,
@@ -1662,9 +1660,13 @@ const struct inode_operations reiserfs_dir_inode_operations = {
  */
 const struct inode_operations reiserfs_symlink_inode_operations = {
 	.readlink = generic_readlink,
-	.get_link	= page_get_link,
+	.follow_link = page_follow_link_light,
+	.put_link = page_put_link,
 	.setattr = reiserfs_setattr,
+	.setxattr = generic_setxattr,
+	.getxattr = generic_getxattr,
 	.listxattr = reiserfs_listxattr,
+	.removexattr = generic_removexattr,
 	.permission = reiserfs_permission,
 };
 
@@ -1673,7 +1675,10 @@ const struct inode_operations reiserfs_symlink_inode_operations = {
  */
 const struct inode_operations reiserfs_special_inode_operations = {
 	.setattr = reiserfs_setattr,
+	.setxattr = generic_setxattr,
+	.getxattr = generic_getxattr,
 	.listxattr = reiserfs_listxattr,
+	.removexattr = generic_removexattr,
 	.permission = reiserfs_permission,
 	.get_acl = reiserfs_get_acl,
 	.set_acl = reiserfs_set_acl,

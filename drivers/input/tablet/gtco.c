@@ -78,6 +78,7 @@ Scott Hill shill@gtcocalcomp.com
 
 /* Max size of a single report */
 #define REPORT_MAX_SIZE       10
+#define MAX_COLLECTION_LEVELS  10
 
 
 /* Bitmask whether pen is in range */
@@ -104,6 +105,7 @@ MODULE_DEVICE_TABLE (usb, gtco_usbid_table);
 struct gtco {
 
 	struct input_dev  *inputdevice; /* input device struct pointer  */
+	struct usb_device *usbdev; /* the usb device for this device */
 	struct usb_interface *intf;	/* the usb interface for this device */
 	struct urb        *urbinfo;	 /* urb for incoming reports      */
 	dma_addr_t        buf_dma;  /* dma addr of the data buffer*/
@@ -223,8 +225,7 @@ static void parse_hid_report_descriptor(struct gtco *device, char * report,
 	char  maintype = 'x';
 	char  globtype[12];
 	int   indent = 0;
-	char  indentstr[10] = "";
-
+	char  indentstr[MAX_COLLECTION_LEVELS + 1] = { 0 };
 
 	dev_dbg(ddev, "======>>>>>>PARSE<<<<<<======\n");
 
@@ -350,6 +351,13 @@ static void parse_hid_report_descriptor(struct gtco *device, char * report,
 			case TAG_MAIN_COL_START:
 				maintype = 'S';
 
+				if (indent == MAX_COLLECTION_LEVELS) {
+					dev_err(ddev, "Collection level %d would exceed limit of %d\n",
+						indent + 1,
+						MAX_COLLECTION_LEVELS);
+					break;
+				}
+
 				if (data == 0) {
 					dev_dbg(ddev, "======>>>>>> Physical\n");
 					strcpy(globtype, "Physical");
@@ -369,8 +377,15 @@ static void parse_hid_report_descriptor(struct gtco *device, char * report,
 				break;
 
 			case TAG_MAIN_COL_END:
-				dev_dbg(ddev, "<<<<<<======\n");
 				maintype = 'E';
+
+				if (indent == 0) {
+					dev_err(ddev, "Collection level already at zero\n");
+					break;
+				}
+
+				dev_dbg(ddev, "<<<<<<======\n");
+
 				indent--;
 				for (x = 0; x < indent; x++)
 					indentstr[x] = '-';
@@ -542,7 +557,7 @@ static int gtco_input_open(struct input_dev *inputdev)
 {
 	struct gtco *device = input_get_drvdata(inputdev);
 
-	device->urbinfo->dev = interface_to_usbdev(device->intf);
+	device->urbinfo->dev = device->usbdev;
 	if (usb_submit_urb(device->urbinfo, GFP_KERNEL))
 		return -EIO;
 
@@ -826,7 +841,6 @@ static int gtco_probe(struct usb_interface *usbinterface,
 	int                     result = 0, retry;
 	int			error;
 	struct usb_endpoint_descriptor *endpoint;
-	struct usb_device	*udev = interface_to_usbdev(usbinterface);
 
 	/* Allocate memory for device structure */
 	gtco = kzalloc(sizeof(struct gtco), GFP_KERNEL);
@@ -841,10 +855,11 @@ static int gtco_probe(struct usb_interface *usbinterface,
 	gtco->inputdevice = input_dev;
 
 	/* Save interface information */
+	gtco->usbdev = interface_to_usbdev(usbinterface);
 	gtco->intf = usbinterface;
 
 	/* Allocate some data for incoming reports */
-	gtco->buffer = usb_alloc_coherent(udev, REPORT_MAX_SIZE,
+	gtco->buffer = usb_alloc_coherent(gtco->usbdev, REPORT_MAX_SIZE,
 					  GFP_KERNEL, &gtco->buf_dma);
 	if (!gtco->buffer) {
 		dev_err(&usbinterface->dev, "No more memory for us buffers\n");
@@ -909,8 +924,8 @@ static int gtco_probe(struct usb_interface *usbinterface,
 
 	/* Couple of tries to get reply */
 	for (retry = 0; retry < 3; retry++) {
-		result = usb_control_msg(udev,
-					 usb_rcvctrlpipe(udev, 0),
+		result = usb_control_msg(gtco->usbdev,
+					 usb_rcvctrlpipe(gtco->usbdev, 0),
 					 USB_REQ_GET_DESCRIPTOR,
 					 USB_RECIP_INTERFACE | USB_DIR_IN,
 					 REPORT_DEVICE_TYPE << 8,
@@ -938,7 +953,7 @@ static int gtco_probe(struct usb_interface *usbinterface,
 	}
 
 	/* Create a device file node */
-	usb_make_path(udev, gtco->usbpath, sizeof(gtco->usbpath));
+	usb_make_path(gtco->usbdev, gtco->usbpath, sizeof(gtco->usbpath));
 	strlcat(gtco->usbpath, "/input0", sizeof(gtco->usbpath));
 
 	/* Set Input device functions */
@@ -955,15 +970,15 @@ static int gtco_probe(struct usb_interface *usbinterface,
 	gtco_setup_caps(input_dev);
 
 	/* Set input device required ID information */
-	usb_to_input_id(udev, &input_dev->id);
+	usb_to_input_id(gtco->usbdev, &input_dev->id);
 	input_dev->dev.parent = &usbinterface->dev;
 
 	/* Setup the URB, it will be posted later on open of input device */
 	endpoint = &usbinterface->altsetting[0].endpoint[0].desc;
 
 	usb_fill_int_urb(gtco->urbinfo,
-			 udev,
-			 usb_rcvintpipe(udev,
+			 gtco->usbdev,
+			 usb_rcvintpipe(gtco->usbdev,
 					endpoint->bEndpointAddress),
 			 gtco->buffer,
 			 REPORT_MAX_SIZE,
@@ -987,7 +1002,7 @@ static int gtco_probe(struct usb_interface *usbinterface,
  err_free_urb:
 	usb_free_urb(gtco->urbinfo);
  err_free_buf:
-	usb_free_coherent(udev, REPORT_MAX_SIZE,
+	usb_free_coherent(gtco->usbdev, REPORT_MAX_SIZE,
 			  gtco->buffer, gtco->buf_dma);
  err_free_devs:
 	input_free_device(input_dev);
@@ -1004,14 +1019,13 @@ static void gtco_disconnect(struct usb_interface *interface)
 {
 	/* Grab private device ptr */
 	struct gtco *gtco = usb_get_intfdata(interface);
-	struct usb_device *udev = interface_to_usbdev(interface);
 
 	/* Now reverse all the registration stuff */
 	if (gtco) {
 		input_unregister_device(gtco->inputdevice);
 		usb_kill_urb(gtco->urbinfo);
 		usb_free_urb(gtco->urbinfo);
-		usb_free_coherent(udev, REPORT_MAX_SIZE,
+		usb_free_coherent(gtco->usbdev, REPORT_MAX_SIZE,
 				  gtco->buffer, gtco->buf_dma);
 		kfree(gtco);
 	}

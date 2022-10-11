@@ -211,8 +211,10 @@ static int sd_start(struct gspca_dev *gspca_dev)
 		packet_size =
 			le16_to_cpu(alt->endpoint[i].desc.wMaxPacketSize);
 		urb = usb_alloc_urb(SD_NPKT, GFP_KERNEL);
-		if (!urb)
+		if (!urb) {
+			pr_err("usb_alloc_urb failed\n");
 			return -ENOMEM;
+		}
 		gspca_dev->urb[n] = urb;
 		urb->transfer_buffer = usb_alloc_coherent(gspca_dev->dev,
 						packet_size * SD_NPKT,

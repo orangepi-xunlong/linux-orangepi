@@ -34,7 +34,7 @@ static struct fb_ops bochsfb_ops = {
 };
 
 static int bochsfb_create_object(struct bochs_device *bochs,
-				 const struct drm_mode_fb_cmd2 *mode_cmd,
+				 struct drm_mode_fb_cmd2 *mode_cmd,
 				 struct drm_gem_object **gobj_p)
 {
 	struct drm_device *dev = bochs->dev;
@@ -82,7 +82,7 @@ static int bochsfb_create(struct drm_fb_helper *helper,
 
 	bo = gem_to_bochs_bo(gobj);
 
-	ret = ttm_bo_reserve(&bo->bo, true, false, NULL);
+	ret = ttm_bo_reserve(&bo->bo, true, false, false, NULL);
 	if (ret)
 		return ret;
 
@@ -162,7 +162,22 @@ static int bochs_fbdev_destroy(struct bochs_device *bochs)
 	return 0;
 }
 
+void bochs_fb_gamma_set(struct drm_crtc *crtc, u16 red, u16 green,
+			u16 blue, int regno)
+{
+}
+
+void bochs_fb_gamma_get(struct drm_crtc *crtc, u16 *red, u16 *green,
+			u16 *blue, int regno)
+{
+	*red   = regno;
+	*green = regno;
+	*blue  = regno;
+}
+
 static const struct drm_fb_helper_funcs bochs_fb_helper_funcs = {
+	.gamma_set = bochs_fb_gamma_set,
+	.gamma_get = bochs_fb_gamma_get,
 	.fb_probe = bochsfb_create,
 };
 

@@ -305,6 +305,7 @@ static int si514_probe(struct i2c_client *client,
 {
 	struct clk_si514 *data;
 	struct clk_init_data init;
+	struct clk *clk;
 	int err;
 
 	data = devm_kzalloc(&client->dev, sizeof(*data), GFP_KERNEL);
@@ -312,7 +313,7 @@ static int si514_probe(struct i2c_client *client,
 		return -ENOMEM;
 
 	init.ops = &si514_clk_ops;
-	init.flags = 0;
+	init.flags = CLK_IS_ROOT;
 	init.num_parents = 0;
 	data->hw.init = &init;
 	data->i2c_client = client;
@@ -329,13 +330,13 @@ static int si514_probe(struct i2c_client *client,
 
 	i2c_set_clientdata(client, data);
 
-	err = devm_clk_hw_register(&client->dev, &data->hw);
-	if (err) {
+	clk = devm_clk_register(&client->dev, &data->hw);
+	if (IS_ERR(clk)) {
 		dev_err(&client->dev, "clock registration failed\n");
-		return err;
+		return PTR_ERR(clk);
 	}
-	err = of_clk_add_hw_provider(client->dev.of_node, of_clk_hw_simple_get,
-				     &data->hw);
+	err = of_clk_add_provider(client->dev.of_node, of_clk_src_simple_get,
+			clk);
 	if (err) {
 		dev_err(&client->dev, "unable to add clk provider\n");
 		return err;

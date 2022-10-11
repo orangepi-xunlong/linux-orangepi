@@ -109,6 +109,7 @@ static u32	audit_backlog_limit = 64;
 #define AUDIT_BACKLOG_WAIT_TIME (60 * HZ)
 static u32	audit_backlog_wait_time_master = AUDIT_BACKLOG_WAIT_TIME;
 static u32	audit_backlog_wait_time = AUDIT_BACKLOG_WAIT_TIME;
+static u32	audit_backlog_wait_overflow = 0;
 
 /* The identity of the user shutting down the audit system. */
 kuid_t		audit_sig_uid = INVALID_UID;
@@ -429,6 +430,7 @@ restart:
 					attempts, audit_pid);
 				set_current_state(TASK_INTERRUPTIBLE);
 				schedule();
+				__set_current_state(TASK_RUNNING);
 				goto restart;
 			}
 		}
@@ -506,7 +508,8 @@ static void flush_hold_queue(void)
 	 * if auditd just disappeared but we
 	 * dequeued an skb we need to drop ref
 	 */
-	consume_skb(skb);
+	if (skb)
+		consume_skb(skb);
 }
 
 static int kauditd_thread(void *dummy)
@@ -520,8 +523,7 @@ static int kauditd_thread(void *dummy)
 		skb = skb_dequeue(&audit_skb_queue);
 
 		if (skb) {
-			if (!audit_backlog_limit ||
-			    (skb_queue_len(&audit_skb_queue) <= audit_backlog_limit))
+			if (skb_queue_len(&audit_skb_queue) <= audit_backlog_limit)
 				wake_up(&audit_backlog_wait);
 			if (audit_pid)
 				kauditd_send_skb(skb);
@@ -809,16 +811,6 @@ static int audit_set_feature(struct sk_buff *skb)
 	return 0;
 }
 
-static int audit_replace(pid_t pid)
-{
-	struct sk_buff *skb = audit_make_reply(0, 0, AUDIT_REPLACE, 0, 0,
-					       &pid, sizeof(pid));
-
-	if (!skb)
-		return -ENOMEM;
-	return netlink_unicast(audit_sock, skb, audit_nlk_portid, 0);
-}
-
 static int audit_receive_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 {
 	u32			seq;
@@ -886,17 +878,9 @@ static int audit_receive_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 			 *       from the initial pid namespace, but something
 			 *       to keep in mind if this changes */
 			int new_pid = s.pid;
-			pid_t requesting_pid = task_tgid_vnr(current);
 
-			if ((!new_pid) && (requesting_pid != audit_pid)) {
-				audit_log_config_change("audit_pid", new_pid, audit_pid, 0);
+			if ((!new_pid) && (task_tgid_vnr(current) != audit_pid))
 				return -EACCES;
-			}
-			if (audit_pid && new_pid &&
-			    audit_replace(requesting_pid) != -ECONNREFUSED) {
-				audit_log_config_change("audit_pid", new_pid, audit_pid, 0);
-				return -EEXIST;
-			}
 			if (audit_enabled != AUDIT_OFF)
 				audit_log_config_change("audit_pid", new_pid, audit_pid, 1);
 			audit_pid = new_pid;
@@ -940,11 +924,11 @@ static int audit_receive_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 		if (!audit_enabled && msg_type != AUDIT_USER_AVC)
 			return 0;
 
-		err = audit_filter(msg_type, AUDIT_FILTER_USER);
+		err = audit_filter_user(msg_type);
 		if (err == 1) { /* match or error */
 			err = 0;
 			if (msg_type == AUDIT_USER_TTY) {
-				err = tty_audit_push();
+				err = tty_audit_push_current();
 				if (err)
 					break;
 			}
@@ -1054,19 +1038,20 @@ static int audit_receive_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 		break;
 	case AUDIT_TTY_GET: {
 		struct audit_tty_status s;
-		unsigned int t;
+		struct task_struct *tsk = current;
 
-		t = READ_ONCE(current->signal->audit_tty);
-		s.enabled = t & AUDIT_TTY_ENABLE;
-		s.log_passwd = !!(t & AUDIT_TTY_LOG_PASSWD);
+		spin_lock(&tsk->sighand->siglock);
+		s.enabled = tsk->signal->audit_tty;
+		s.log_passwd = tsk->signal->audit_tty_log_passwd;
+		spin_unlock(&tsk->sighand->siglock);
 
 		audit_send_reply(skb, seq, AUDIT_TTY_GET, 0, 0, &s, sizeof(s));
 		break;
 	}
 	case AUDIT_TTY_SET: {
 		struct audit_tty_status s, old;
+		struct task_struct *tsk = current;
 		struct audit_buffer	*ab;
-		unsigned int t;
 
 		memset(&s, 0, sizeof(s));
 		/* guard against past and future API changes */
@@ -1076,14 +1061,14 @@ static int audit_receive_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 		    (s.log_passwd != 0 && s.log_passwd != 1))
 			err = -EINVAL;
 
-		if (err)
-			t = READ_ONCE(current->signal->audit_tty);
-		else {
-			t = s.enabled | (-s.log_passwd & AUDIT_TTY_LOG_PASSWD);
-			t = xchg(&current->signal->audit_tty, t);
+		spin_lock(&tsk->sighand->siglock);
+		old.enabled = tsk->signal->audit_tty;
+		old.log_passwd = tsk->signal->audit_tty_log_passwd;
+		if (!err) {
+			tsk->signal->audit_tty = s.enabled;
+			tsk->signal->audit_tty_log_passwd = s.log_passwd;
 		}
-		old.enabled = t & AUDIT_TTY_ENABLE;
-		old.log_passwd = !!(t & AUDIT_TTY_LOG_PASSWD);
+		spin_unlock(&tsk->sighand->siglock);
 
 		audit_log_common_recv_msg(&ab, AUDIT_CONFIG_CHANGE);
 		audit_log_format(ab, " op=tty_set old-enabled=%d new-enabled=%d"
@@ -1254,7 +1239,9 @@ static void audit_buffer_free(struct audit_buffer *ab)
 	if (!ab)
 		return;
 
-	kfree_skb(ab->skb);
+	if (ab->skb)
+		kfree_skb(ab->skb);
+
 	spin_lock_irqsave(&audit_freelist_lock, flags);
 	if (audit_freelist_count > AUDIT_MAXFREE)
 		kfree(ab);
@@ -1347,14 +1334,15 @@ static inline void audit_get_stamp(struct audit_context *ctx,
 static long wait_for_auditd(long sleep_time)
 {
 	DECLARE_WAITQUEUE(wait, current);
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	add_wait_queue_exclusive(&audit_backlog_wait, &wait);
 
 	if (audit_backlog_limit &&
-	    skb_queue_len(&audit_skb_queue) > audit_backlog_limit) {
-		add_wait_queue_exclusive(&audit_backlog_wait, &wait);
-		set_current_state(TASK_UNINTERRUPTIBLE);
+	    skb_queue_len(&audit_skb_queue) > audit_backlog_limit)
 		sleep_time = schedule_timeout(sleep_time);
-		remove_wait_queue(&audit_backlog_wait, &wait);
-	}
+
+	__set_current_state(TASK_RUNNING);
+	remove_wait_queue(&audit_backlog_wait, &wait);
 
 	return sleep_time;
 }
@@ -1387,11 +1375,11 @@ struct audit_buffer *audit_log_start(struct audit_context *ctx, gfp_t gfp_mask,
 	if (audit_initialized != AUDIT_INITIALIZED)
 		return NULL;
 
-	if (unlikely(!audit_filter(type, AUDIT_FILTER_TYPE)))
+	if (unlikely(audit_filter_type(type)))
 		return NULL;
 
 	if (gfp_mask & __GFP_DIRECT_RECLAIM) {
-		if (audit_pid && audit_pid == current->tgid)
+		if (audit_pid && audit_pid == current->pid)
 			gfp_mask &= ~__GFP_DIRECT_RECLAIM;
 		else
 			reserve = 0;
@@ -1414,12 +1402,12 @@ struct audit_buffer *audit_log_start(struct audit_context *ctx, gfp_t gfp_mask,
 				skb_queue_len(&audit_skb_queue),
 				audit_backlog_limit);
 		audit_log_lost("backlog limit exceeded");
-		audit_backlog_wait_time = 0;
+		audit_backlog_wait_time = audit_backlog_wait_overflow;
 		wake_up(&audit_backlog_wait);
 		return NULL;
 	}
 
-	if (!reserve && !audit_backlog_wait_time)
+	if (!reserve)
 		audit_backlog_wait_time = audit_backlog_wait_time_master;
 
 	ab = audit_buffer_alloc(ctx, gfp_mask, type);
@@ -1741,7 +1729,7 @@ static inline int audit_copy_fcaps(struct audit_names *name,
 
 /* Copy inode data into an audit_names. */
 void audit_copy_inode(struct audit_names *name, const struct dentry *dentry,
-		      struct inode *inode)
+		      const struct inode *inode)
 {
 	name->ino   = inode->i_ino;
 	name->dev   = inode->i_sb->s_dev;
@@ -1889,23 +1877,6 @@ void audit_log_d_path_exe(struct audit_buffer *ab,
 	return;
 out_null:
 	audit_log_format(ab, " exe=(null)");
-}
-
-struct tty_struct *audit_get_tty(struct task_struct *tsk)
-{
-	struct tty_struct *tty = NULL;
-	unsigned long flags;
-
-	spin_lock_irqsave(&tsk->sighand->siglock, flags);
-	if (tsk->signal)
-		tty = tty_kref_get(tsk->signal->tty);
-	spin_unlock_irqrestore(&tsk->sighand->siglock, flags);
-	return tty;
-}
-
-void audit_put_tty(struct tty_struct *tty)
-{
-	tty_kref_put(tty);
 }
 
 void audit_log_task_info(struct audit_buffer *ab, struct task_struct *tsk)

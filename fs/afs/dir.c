@@ -38,13 +38,12 @@ static int afs_link(struct dentry *from, struct inode *dir,
 static int afs_symlink(struct inode *dir, struct dentry *dentry,
 		       const char *content);
 static int afs_rename(struct inode *old_dir, struct dentry *old_dentry,
-		      struct inode *new_dir, struct dentry *new_dentry,
-		      unsigned int flags);
+		      struct inode *new_dir, struct dentry *new_dentry);
 
 const struct file_operations afs_dir_file_operations = {
 	.open		= afs_dir_open,
 	.release	= afs_release,
-	.iterate_shared	= afs_readdir,
+	.iterate	= afs_readdir,
 	.lock		= afs_lock,
 	.llseek		= generic_file_llseek,
 };
@@ -129,7 +128,7 @@ struct afs_lookup_cookie {
 /*
  * check that a directory page is valid
  */
-static inline bool afs_dir_check_page(struct inode *dir, struct page *page)
+static inline void afs_dir_check_page(struct inode *dir, struct page *page)
 {
 	struct afs_dir_page *dbuf;
 	loff_t latter;
@@ -169,11 +168,11 @@ static inline bool afs_dir_check_page(struct inode *dir, struct page *page)
 	}
 
 	SetPageChecked(page);
-	return true;
+	return;
 
 error:
+	SetPageChecked(page);
 	SetPageError(page);
-	return false;
 }
 
 /*
@@ -182,7 +181,7 @@ error:
 static inline void afs_dir_put_page(struct page *page)
 {
 	kunmap(page);
-	put_page(page);
+	page_cache_release(page);
 }
 
 /*
@@ -197,10 +196,10 @@ static struct page *afs_dir_get_page(struct inode *dir, unsigned long index,
 	page = read_cache_page(dir->i_mapping, index, afs_page_filler, key);
 	if (!IS_ERR(page)) {
 		kmap(page);
-		if (unlikely(!PageChecked(page))) {
-			if (PageError(page) || !afs_dir_check_page(dir, page))
-				goto fail;
-		}
+		if (!PageChecked(page))
+			afs_dir_check_page(dir, page);
+		if (PageError(page))
+			goto fail;
 	}
 	return page;
 
@@ -1084,15 +1083,11 @@ error:
  * rename a file in an AFS filesystem and/or move it between directories
  */
 static int afs_rename(struct inode *old_dir, struct dentry *old_dentry,
-		      struct inode *new_dir, struct dentry *new_dentry,
-		      unsigned int flags)
+		      struct inode *new_dir, struct dentry *new_dentry)
 {
 	struct afs_vnode *orig_dvnode, *new_dvnode, *vnode;
 	struct key *key;
 	int ret;
-
-	if (flags)
-		return -EINVAL;
 
 	vnode = AFS_FS_I(d_inode(old_dentry));
 	orig_dvnode = AFS_FS_I(old_dir);

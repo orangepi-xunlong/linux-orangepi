@@ -19,12 +19,10 @@
 
 #include <linux/types.h>
 #include <linux/crypto.h>
-#include <linux/fs.h>
 #include <linux/security.h>
 #include <linux/hash.h>
 #include <linux/tpm.h>
 #include <linux/audit.h>
-#include <crypto/hash_info.h>
 
 #include "../integrity.h"
 
@@ -88,7 +86,6 @@ struct ima_template_desc {
 };
 
 struct ima_template_entry {
-	int pcr;
 	u8 digest[TPM_DIGEST_SIZE];	/* sha1 or md5 measurement hash */
 	struct ima_template_desc *template_desc; /* template descriptor */
 	u32 template_data_len;
@@ -109,8 +106,6 @@ int ima_add_template_entry(struct ima_template_entry *entry, int violation,
 			   const char *op, struct inode *inode,
 			   const unsigned char *filename);
 int ima_calc_file_hash(struct file *file, struct ima_digest_data *hash);
-int ima_calc_buffer_hash(const void *buf, loff_t len,
-			 struct ima_digest_data *hash);
 int ima_calc_field_array_hash(struct ima_field_data *field_data,
 			      struct ima_template_desc *desc, int num_fields,
 			      struct ima_digest_data *hash);
@@ -141,53 +136,36 @@ static inline unsigned long ima_hash_key(u8 *digest)
 	return hash_long(*digest, IMA_HASH_BITS);
 }
 
-enum ima_hooks {
-	FILE_CHECK = 1,
-	MMAP_CHECK,
-	BPRM_CHECK,
-	POST_SETATTR,
-	MODULE_CHECK,
-	FIRMWARE_CHECK,
-	KEXEC_KERNEL_CHECK,
-	KEXEC_INITRAMFS_CHECK,
-	POLICY_CHECK,
-	MAX_CHECK
-};
-
 /* LIM API function definitions */
-int ima_get_action(struct inode *inode, int mask,
-		   enum ima_hooks func, int *pcr);
-int ima_must_measure(struct inode *inode, int mask, enum ima_hooks func);
+int ima_get_action(struct inode *inode, int mask, int function);
+int ima_must_measure(struct inode *inode, int mask, int function);
 int ima_collect_measurement(struct integrity_iint_cache *iint,
-			    struct file *file, void *buf, loff_t size,
-			    enum hash_algo algo);
+			    struct file *file,
+			    struct evm_ima_xattr_data **xattr_value,
+			    int *xattr_len);
 void ima_store_measurement(struct integrity_iint_cache *iint, struct file *file,
 			   const unsigned char *filename,
 			   struct evm_ima_xattr_data *xattr_value,
-			   int xattr_len, int pcr);
+			   int xattr_len);
 void ima_audit_measurement(struct integrity_iint_cache *iint,
 			   const unsigned char *filename);
 int ima_alloc_init_template(struct ima_event_data *event_data,
 			    struct ima_template_entry **entry);
 int ima_store_template(struct ima_template_entry *entry, int violation,
-		       struct inode *inode,
-		       const unsigned char *filename, int pcr);
+		       struct inode *inode, const unsigned char *filename);
 void ima_free_template_entry(struct ima_template_entry *entry);
-const char *ima_d_path(const struct path *path, char **pathbuf, char *filename);
+const char *ima_d_path(struct path *path, char **pathbuf);
 
 /* IMA policy related functions */
+enum ima_hooks { FILE_CHECK = 1, MMAP_CHECK, BPRM_CHECK, MODULE_CHECK, FIRMWARE_CHECK, POST_SETATTR };
+
 int ima_match_policy(struct inode *inode, enum ima_hooks func, int mask,
-		     int flags, int *pcr);
+		     int flags);
 void ima_init_policy(void);
 void ima_update_policy(void);
 void ima_update_policy_flag(void);
 ssize_t ima_parse_add_rule(char *);
 void ima_delete_rules(void);
-int ima_check_policy(void);
-void *ima_policy_start(struct seq_file *m, loff_t *pos);
-void *ima_policy_next(struct seq_file *m, void *v, loff_t *pos);
-void ima_policy_stop(struct seq_file *m, void *v);
-int ima_policy_show(struct seq_file *m, void *v);
 
 /* Appraise integrity measurements */
 #define IMA_APPRAISE_ENFORCE	0x01
@@ -195,25 +173,23 @@ int ima_policy_show(struct seq_file *m, void *v);
 #define IMA_APPRAISE_LOG	0x04
 #define IMA_APPRAISE_MODULES	0x08
 #define IMA_APPRAISE_FIRMWARE	0x10
-#define IMA_APPRAISE_POLICY	0x20
 
 #ifdef CONFIG_IMA_APPRAISE
-int ima_appraise_measurement(enum ima_hooks func,
-			     struct integrity_iint_cache *iint,
+int ima_appraise_measurement(int func, struct integrity_iint_cache *iint,
 			     struct file *file, const unsigned char *filename,
 			     struct evm_ima_xattr_data *xattr_value,
 			     int xattr_len, int opened);
 int ima_must_appraise(struct inode *inode, int mask, enum ima_hooks func);
 void ima_update_xattr(struct integrity_iint_cache *iint, struct file *file);
 enum integrity_status ima_get_cache_status(struct integrity_iint_cache *iint,
-					   enum ima_hooks func);
-enum hash_algo ima_get_hash_algo(struct evm_ima_xattr_data *xattr_value,
-				 int xattr_len);
+					   int func);
+void ima_get_hash_algo(struct evm_ima_xattr_data *xattr_value, int xattr_len,
+		       struct ima_digest_data *hash);
 int ima_read_xattr(struct dentry *dentry,
 		   struct evm_ima_xattr_data **xattr_value);
 
 #else
-static inline int ima_appraise_measurement(enum ima_hooks func,
+static inline int ima_appraise_measurement(int func,
 					   struct integrity_iint_cache *iint,
 					   struct file *file,
 					   const unsigned char *filename,
@@ -235,16 +211,15 @@ static inline void ima_update_xattr(struct integrity_iint_cache *iint,
 }
 
 static inline enum integrity_status ima_get_cache_status(struct integrity_iint_cache
-							 *iint,
-							 enum ima_hooks func)
+							 *iint, int func)
 {
 	return INTEGRITY_UNKNOWN;
 }
 
-static inline enum hash_algo
-ima_get_hash_algo(struct evm_ima_xattr_data *xattr_value, int xattr_len)
+static inline void ima_get_hash_algo(struct evm_ima_xattr_data *xattr_value,
+				     int xattr_len,
+				     struct ima_digest_data *hash)
 {
-	return ima_hash_algo;
 }
 
 static inline int ima_read_xattr(struct dentry *dentry,
@@ -275,12 +250,17 @@ static inline int security_filter_rule_match(u32 secid, u32 field, u32 op,
 {
 	return -EINVAL;
 }
-#endif /* CONFIG_IMA_TRUSTED_KEYRING */
+#endif /* CONFIG_IMA_LSM_RULES */
 
-#ifdef	CONFIG_IMA_READ_POLICY
-#define	POLICY_FILE_FLAGS	(S_IWUSR | S_IRUSR)
+#ifdef CONFIG_IMA_TRUSTED_KEYRING
+static inline int ima_init_keyring(const unsigned int id)
+{
+	return integrity_init_keyring(id);
+}
 #else
-#define	POLICY_FILE_FLAGS	S_IWUSR
-#endif /* CONFIG_IMA_WRITE_POLICY */
-
-#endif /* __LINUX_IMA_H */
+static inline int ima_init_keyring(const unsigned int id)
+{
+	return 0;
+}
+#endif /* CONFIG_IMA_TRUSTED_KEYRING */
+#endif

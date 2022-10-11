@@ -140,13 +140,6 @@ struct dm_cache_metadata {
 	 * the device.
 	 */
 	bool fail_io:1;
-
-	/*
-	 * These structures are used when loading metadata.  They're too
-	 * big to put on the stack.
-	 */
-	struct dm_array_cursor mapping_cursor;
-	struct dm_array_cursor hint_cursor;
 };
 
 /*-------------------------------------------------------------------
@@ -344,7 +337,7 @@ static int __write_initial_superblock(struct dm_cache_metadata *cmd)
 	disk_super->version = cpu_to_le32(MAX_CACHE_VERSION);
 	memset(disk_super->policy_name, 0, sizeof(disk_super->policy_name));
 	memset(disk_super->policy_version, 0, sizeof(disk_super->policy_version));
-	disk_super->policy_hint_size = 0;
+	disk_super->policy_hint_size = cpu_to_le32(0);
 
 	__copy_sm_root(cmd, disk_super);
 
@@ -659,6 +652,7 @@ static int __commit_transaction(struct dm_cache_metadata *cmd,
 	disk_super->policy_version[0] = cpu_to_le32(cmd->policy_version[0]);
 	disk_super->policy_version[1] = cpu_to_le32(cmd->policy_version[1]);
 	disk_super->policy_version[2] = cpu_to_le32(cmd->policy_version[2]);
+	disk_super->policy_hint_size = cpu_to_le32(cmd->policy_hint_size);
 
 	disk_super->read_hits = cpu_to_le32(cmd->stats.read_hits);
 	disk_super->read_misses = cpu_to_le32(cmd->stats.read_misses);
@@ -1178,37 +1172,31 @@ static bool hints_array_available(struct dm_cache_metadata *cmd,
 		hints_array_initialized(cmd);
 }
 
-static int __load_mapping(struct dm_cache_metadata *cmd,
-			  uint64_t cb, bool hints_valid,
-			  struct dm_array_cursor *mapping_cursor,
-			  struct dm_array_cursor *hint_cursor,
-			  load_mapping_fn fn, void *context)
+static int __load_mapping(void *context, uint64_t cblock, void *leaf)
 {
 	int r = 0;
-
-	__le64 mapping;
-	__le32 hint = 0;
-
-	__le64 *mapping_value_le;
-	__le32 *hint_value_le;
-
+	bool dirty;
+	__le64 value;
+	__le32 hint_value = 0;
 	dm_oblock_t oblock;
 	unsigned flags;
+	struct thunk *thunk = context;
+	struct dm_cache_metadata *cmd = thunk->cmd;
 
-	dm_array_cursor_get_value(mapping_cursor, (void **) &mapping_value_le);
-	memcpy(&mapping, mapping_value_le, sizeof(mapping));
-	unpack_value(mapping, &oblock, &flags);
+	memcpy(&value, leaf, sizeof(value));
+	unpack_value(value, &oblock, &flags);
 
 	if (flags & M_VALID) {
-		if (hints_valid) {
-			dm_array_cursor_get_value(hint_cursor, (void **) &hint_value_le);
-			memcpy(&hint, hint_value_le, sizeof(hint));
+		if (thunk->hints_valid) {
+			r = dm_array_get_value(&cmd->hint_info, cmd->hint_root,
+					       cblock, &hint_value);
+			if (r && r != -ENODATA)
+				return r;
 		}
 
-		r = fn(context, oblock, to_cblock(cb), flags & M_DIRTY,
-		       le32_to_cpu(hint), hints_valid);
-		if (r)
-			DMERR("policy couldn't load cblock");
+		dirty = thunk->respect_dirty_flags ? (flags & M_DIRTY) : true;
+		r = thunk->fn(thunk->context, oblock, to_cblock(cblock),
+			      dirty, le32_to_cpu(hint_value), thunk->hints_valid);
 	}
 
 	return r;
@@ -1218,60 +1206,16 @@ static int __load_mappings(struct dm_cache_metadata *cmd,
 			   struct dm_cache_policy *policy,
 			   load_mapping_fn fn, void *context)
 {
-	int r;
-	uint64_t cb;
+	struct thunk thunk;
 
-	bool hints_valid = hints_array_available(cmd, policy);
+	thunk.fn = fn;
+	thunk.context = context;
 
-	if (from_cblock(cmd->cache_blocks) == 0)
-		/* Nothing to do */
-		return 0;
+	thunk.cmd = cmd;
+	thunk.respect_dirty_flags = cmd->clean_when_opened;
+	thunk.hints_valid = hints_array_available(cmd, policy);
 
-	r = dm_array_cursor_begin(&cmd->info, cmd->root, &cmd->mapping_cursor);
-	if (r)
-		return r;
-
-	if (hints_valid) {
-		r = dm_array_cursor_begin(&cmd->hint_info, cmd->hint_root, &cmd->hint_cursor);
-		if (r) {
-			dm_array_cursor_end(&cmd->mapping_cursor);
-			return r;
-		}
-	}
-
-	for (cb = 0; ; cb++) {
-		r = __load_mapping(cmd, cb, hints_valid,
-				   &cmd->mapping_cursor, &cmd->hint_cursor,
-				   fn, context);
-		if (r)
-			goto out;
-
-		/*
-		 * We need to break out before we move the cursors.
-		 */
-		if (cb >= (from_cblock(cmd->cache_blocks) - 1))
-			break;
-
-		r = dm_array_cursor_next(&cmd->mapping_cursor);
-		if (r) {
-			DMERR("dm_array_cursor_next for mapping failed");
-			goto out;
-		}
-
-		if (hints_valid) {
-			r = dm_array_cursor_next(&cmd->hint_cursor);
-			if (r) {
-				DMERR("dm_array_cursor_next for hint failed");
-				goto out;
-			}
-		}
-	}
-out:
-	dm_array_cursor_end(&cmd->mapping_cursor);
-	if (hints_valid)
-		dm_array_cursor_end(&cmd->hint_cursor);
-
-	return r;
+	return dm_array_walk(&cmd->info, cmd->root, __load_mapping, &thunk);
 }
 
 int dm_cache_load_mappings(struct dm_cache_metadata *cmd,
@@ -1429,24 +1373,10 @@ int dm_cache_get_metadata_dev_size(struct dm_cache_metadata *cmd,
 
 /*----------------------------------------------------------------*/
 
-static int get_hint(uint32_t index, void *value_le, void *context)
-{
-	uint32_t value;
-	struct dm_cache_policy *policy = context;
-
-	value = policy_get_hint(policy, to_cblock(index));
-	*((__le32 *) value_le) = cpu_to_le32(value);
-
-	return 0;
-}
-
-/*
- * It's quicker to always delete the hint array, and recreate with
- * dm_array_new().
- */
-static int write_hints(struct dm_cache_metadata *cmd, struct dm_cache_policy *policy)
+static int begin_hints(struct dm_cache_metadata *cmd, struct dm_cache_policy *policy)
 {
 	int r;
+	__le32 value;
 	size_t hint_size;
 	const char *policy_name = dm_cache_policy_get_name(policy);
 	const unsigned *policy_version = dm_cache_policy_get_version(policy);
@@ -1455,23 +1385,63 @@ static int write_hints(struct dm_cache_metadata *cmd, struct dm_cache_policy *po
 	    (strlen(policy_name) > sizeof(cmd->policy_name) - 1))
 		return -EINVAL;
 
-	strncpy(cmd->policy_name, policy_name, sizeof(cmd->policy_name));
-	memcpy(cmd->policy_version, policy_version, sizeof(cmd->policy_version));
+	if (!policy_unchanged(cmd, policy)) {
+		strncpy(cmd->policy_name, policy_name, sizeof(cmd->policy_name));
+		memcpy(cmd->policy_version, policy_version, sizeof(cmd->policy_version));
 
-	hint_size = dm_cache_policy_get_hint_size(policy);
-	if (!hint_size)
-		return 0; /* short-circuit hints initialization */
-	cmd->policy_hint_size = hint_size;
+		hint_size = dm_cache_policy_get_hint_size(policy);
+		if (!hint_size)
+			return 0; /* short-circuit hints initialization */
+		cmd->policy_hint_size = hint_size;
 
-	if (cmd->hint_root) {
-		r = dm_array_del(&cmd->hint_info, cmd->hint_root);
+		if (cmd->hint_root) {
+			r = dm_array_del(&cmd->hint_info, cmd->hint_root);
+			if (r)
+				return r;
+		}
+
+		r = dm_array_empty(&cmd->hint_info, &cmd->hint_root);
+		if (r)
+			return r;
+
+		value = cpu_to_le32(0);
+		__dm_bless_for_disk(&value);
+		r = dm_array_resize(&cmd->hint_info, cmd->hint_root, 0,
+				    from_cblock(cmd->cache_blocks),
+				    &value, &cmd->hint_root);
 		if (r)
 			return r;
 	}
 
-	return dm_array_new(&cmd->hint_info, &cmd->hint_root,
-			    from_cblock(cmd->cache_blocks),
-			    get_hint, policy);
+	return 0;
+}
+
+static int save_hint(void *context, dm_cblock_t cblock, dm_oblock_t oblock, uint32_t hint)
+{
+	struct dm_cache_metadata *cmd = context;
+	__le32 value = cpu_to_le32(hint);
+	int r;
+
+	__dm_bless_for_disk(&value);
+
+	r = dm_array_set_value(&cmd->hint_info, cmd->hint_root,
+			       from_cblock(cblock), &value, &cmd->hint_root);
+	cmd->changed = true;
+
+	return r;
+}
+
+static int write_hints(struct dm_cache_metadata *cmd, struct dm_cache_policy *policy)
+{
+	int r;
+
+	r = begin_hints(cmd, policy);
+	if (r) {
+		DMERR("begin_hints failed");
+		return r;
+	}
+
+	return policy_walk_mappings(policy, save_hint, cmd);
 }
 
 int dm_cache_write_hints(struct dm_cache_metadata *cmd, struct dm_cache_policy *policy)

@@ -24,14 +24,12 @@
 
 #define AIC31XX_STEREO_CLASS_D_BIT	0x1
 #define AIC31XX_MINIDSP_BIT		0x2
-#define DAC31XX_BIT			0x4
 
 enum aic31xx_type {
 	AIC3100	= 0,
 	AIC3110 = AIC31XX_STEREO_CLASS_D_BIT,
 	AIC3120 = AIC31XX_MINIDSP_BIT,
 	AIC3111 = (AIC31XX_STEREO_CLASS_D_BIT | AIC31XX_MINIDSP_BIT),
-	DAC3100 = DAC31XX_BIT,
 };
 
 struct aic31xx_pdata {
@@ -40,143 +38,141 @@ struct aic31xx_pdata {
 	int micbias_vg;
 };
 
-#define AIC31XX_REG(page, reg)	((page * 128) + reg)
-
 /* Page Control Register */
-#define AIC31XX_PAGECTL		AIC31XX_REG(0, 0)
+#define AIC31XX_PAGECTL				0x00
 
 /* Page 0 Registers */
 /* Software reset register */
-#define AIC31XX_RESET		AIC31XX_REG(0, 1)
+#define AIC31XX_RESET				0x01
 /* OT FLAG register */
-#define AIC31XX_OT_FLAG		AIC31XX_REG(0, 3)
+#define AIC31XX_OT_FLAG				0x03
 /* Clock clock Gen muxing, Multiplexers*/
-#define AIC31XX_CLKMUX		AIC31XX_REG(0, 4)
+#define AIC31XX_CLKMUX				0x04
 /* PLL P and R-VAL register */
-#define AIC31XX_PLLPR		AIC31XX_REG(0, 5)
+#define AIC31XX_PLLPR				0x05
 /* PLL J-VAL register */
-#define AIC31XX_PLLJ		AIC31XX_REG(0, 6)
+#define AIC31XX_PLLJ				0x06
 /* PLL D-VAL MSB register */
-#define AIC31XX_PLLDMSB		AIC31XX_REG(0, 7)
+#define AIC31XX_PLLDMSB				0x07
 /* PLL D-VAL LSB register */
-#define AIC31XX_PLLDLSB		AIC31XX_REG(0, 8)
+#define AIC31XX_PLLDLSB				0x08
 /* DAC NDAC_VAL register*/
-#define AIC31XX_NDAC		AIC31XX_REG(0, 11)
+#define AIC31XX_NDAC				0x0B
 /* DAC MDAC_VAL register */
-#define AIC31XX_MDAC		AIC31XX_REG(0, 12)
+#define AIC31XX_MDAC				0x0C
 /* DAC OSR setting register 1, MSB value */
-#define AIC31XX_DOSRMSB		AIC31XX_REG(0, 13)
+#define AIC31XX_DOSRMSB				0x0D
 /* DAC OSR setting register 2, LSB value */
-#define AIC31XX_DOSRLSB		AIC31XX_REG(0, 14)
-#define AIC31XX_MINI_DSP_INPOL	AIC31XX_REG(0, 16)
+#define AIC31XX_DOSRLSB				0x0E
+#define AIC31XX_MINI_DSP_INPOL			0x10
 /* Clock setting register 8, PLL */
-#define AIC31XX_NADC		AIC31XX_REG(0, 18)
+#define AIC31XX_NADC				0x12
 /* Clock setting register 9, PLL */
-#define AIC31XX_MADC		AIC31XX_REG(0, 19)
+#define AIC31XX_MADC				0x13
 /* ADC Oversampling (AOSR) Register */
-#define AIC31XX_AOSR		AIC31XX_REG(0, 20)
+#define AIC31XX_AOSR				0x14
 /* Clock setting register 9, Multiplexers */
-#define AIC31XX_CLKOUTMUX	AIC31XX_REG(0, 25)
+#define AIC31XX_CLKOUTMUX			0x19
 /* Clock setting register 10, CLOCKOUT M divider value */
-#define AIC31XX_CLKOUTMVAL	AIC31XX_REG(0, 26)
+#define AIC31XX_CLKOUTMVAL			0x1A
 /* Audio Interface Setting Register 1 */
-#define AIC31XX_IFACE1		AIC31XX_REG(0, 27)
+#define AIC31XX_IFACE1				0x1B
 /* Audio Data Slot Offset Programming */
-#define AIC31XX_DATA_OFFSET	AIC31XX_REG(0, 28)
+#define AIC31XX_DATA_OFFSET			0x1C
 /* Audio Interface Setting Register 2 */
-#define AIC31XX_IFACE2		AIC31XX_REG(0, 29)
+#define AIC31XX_IFACE2				0x1D
 /* Clock setting register 11, BCLK N Divider */
-#define AIC31XX_BCLKN		AIC31XX_REG(0, 30)
+#define AIC31XX_BCLKN				0x1E
 /* Audio Interface Setting Register 3, Secondary Audio Interface */
-#define AIC31XX_IFACESEC1	AIC31XX_REG(0, 31)
+#define AIC31XX_IFACESEC1			0x1F
 /* Audio Interface Setting Register 4 */
-#define AIC31XX_IFACESEC2	AIC31XX_REG(0, 32)
+#define AIC31XX_IFACESEC2			0x20
 /* Audio Interface Setting Register 5 */
-#define AIC31XX_IFACESEC3	AIC31XX_REG(0, 33)
+#define AIC31XX_IFACESEC3			0x21
 /* I2C Bus Condition */
-#define AIC31XX_I2C		AIC31XX_REG(0, 34)
+#define AIC31XX_I2C				0x22
 /* ADC FLAG */
-#define AIC31XX_ADCFLAG		AIC31XX_REG(0, 36)
+#define AIC31XX_ADCFLAG				0x24
 /* DAC Flag Registers */
-#define AIC31XX_DACFLAG1	AIC31XX_REG(0, 37)
-#define AIC31XX_DACFLAG2	AIC31XX_REG(0, 38)
+#define AIC31XX_DACFLAG1			0x25
+#define AIC31XX_DACFLAG2			0x26
 /* Sticky Interrupt flag (overflow) */
-#define AIC31XX_OFFLAG		AIC31XX_REG(0, 39)
+#define AIC31XX_OFFLAG				0x27
 /* Sticy DAC Interrupt flags */
-#define AIC31XX_INTRDACFLAG	AIC31XX_REG(0, 44)
+#define AIC31XX_INTRDACFLAG			0x2C
 /* Sticy ADC Interrupt flags */
-#define AIC31XX_INTRADCFLAG	AIC31XX_REG(0, 45)
+#define AIC31XX_INTRADCFLAG			0x2D
 /* DAC Interrupt flags 2 */
-#define AIC31XX_INTRDACFLAG2	AIC31XX_REG(0, 46)
+#define AIC31XX_INTRDACFLAG2			0x2E
 /* ADC Interrupt flags 2 */
-#define AIC31XX_INTRADCFLAG2	AIC31XX_REG(0, 47)
+#define AIC31XX_INTRADCFLAG2			0x2F
 /* INT1 interrupt control */
-#define AIC31XX_INT1CTRL	AIC31XX_REG(0, 48)
+#define AIC31XX_INT1CTRL			0x30
 /* INT2 interrupt control */
-#define AIC31XX_INT2CTRL	AIC31XX_REG(0, 49)
+#define AIC31XX_INT2CTRL			0x31
 /* GPIO1 control */
-#define AIC31XX_GPIO1		AIC31XX_REG(0, 51)
+#define AIC31XX_GPIO1				0x33
 
-#define AIC31XX_DACPRB		AIC31XX_REG(0, 60)
+#define AIC31XX_DACPRB				0x3C
 /* ADC Instruction Set Register */
-#define AIC31XX_ADCPRB		AIC31XX_REG(0, 61)
+#define AIC31XX_ADCPRB				0x3D
 /* DAC channel setup register */
-#define AIC31XX_DACSETUP	AIC31XX_REG(0, 63)
+#define AIC31XX_DACSETUP			0x3F
 /* DAC Mute and volume control register */
-#define AIC31XX_DACMUTE		AIC31XX_REG(0, 64)
+#define AIC31XX_DACMUTE				0x40
 /* Left DAC channel digital volume control */
-#define AIC31XX_LDACVOL		AIC31XX_REG(0, 65)
+#define AIC31XX_LDACVOL				0x41
 /* Right DAC channel digital volume control */
-#define AIC31XX_RDACVOL		AIC31XX_REG(0, 66)
+#define AIC31XX_RDACVOL				0x42
 /* Headset detection */
-#define AIC31XX_HSDETECT	AIC31XX_REG(0, 67)
+#define AIC31XX_HSDETECT			0x43
 /* ADC Digital Mic */
-#define AIC31XX_ADCSETUP	AIC31XX_REG(0, 81)
+#define AIC31XX_ADCSETUP			0x51
 /* ADC Digital Volume Control Fine Adjust */
-#define AIC31XX_ADCFGA		AIC31XX_REG(0, 82)
+#define AIC31XX_ADCFGA				0x52
 /* ADC Digital Volume Control Coarse Adjust */
-#define AIC31XX_ADCVOL		AIC31XX_REG(0, 83)
+#define AIC31XX_ADCVOL				0x53
 
 
 /* Page 1 Registers */
 /* Headphone drivers */
-#define AIC31XX_HPDRIVER	AIC31XX_REG(1, 31)
+#define AIC31XX_HPDRIVER			0x9F
 /* Class-D Speakear Amplifier */
-#define AIC31XX_SPKAMP		AIC31XX_REG(1, 32)
+#define AIC31XX_SPKAMP				0xA0
 /* HP Output Drivers POP Removal Settings */
-#define AIC31XX_HPPOP		AIC31XX_REG(1, 33)
+#define AIC31XX_HPPOP				0xA1
 /* Output Driver PGA Ramp-Down Period Control */
-#define AIC31XX_SPPGARAMP	AIC31XX_REG(1, 34)
+#define AIC31XX_SPPGARAMP			0xA2
 /* DAC_L and DAC_R Output Mixer Routing */
-#define AIC31XX_DACMIXERROUTE	AIC31XX_REG(1, 35)
+#define AIC31XX_DACMIXERROUTE			0xA3
 /* Left Analog Vol to HPL */
-#define AIC31XX_LANALOGHPL	AIC31XX_REG(1, 36)
+#define AIC31XX_LANALOGHPL			0xA4
 /* Right Analog Vol to HPR */
-#define AIC31XX_RANALOGHPR	AIC31XX_REG(1, 37)
+#define AIC31XX_RANALOGHPR			0xA5
 /* Left Analog Vol to SPL */
-#define AIC31XX_LANALOGSPL	AIC31XX_REG(1, 38)
+#define AIC31XX_LANALOGSPL			0xA6
 /* Right Analog Vol to SPR */
-#define AIC31XX_RANALOGSPR	AIC31XX_REG(1, 39)
+#define AIC31XX_RANALOGSPR			0xA7
 /* HPL Driver */
-#define AIC31XX_HPLGAIN		AIC31XX_REG(1, 40)
+#define AIC31XX_HPLGAIN				0xA8
 /* HPR Driver */
-#define AIC31XX_HPRGAIN		AIC31XX_REG(1, 41)
+#define AIC31XX_HPRGAIN				0xA9
 /* SPL Driver */
-#define AIC31XX_SPLGAIN		AIC31XX_REG(1, 42)
+#define AIC31XX_SPLGAIN				0xAA
 /* SPR Driver */
-#define AIC31XX_SPRGAIN		AIC31XX_REG(1, 43)
+#define AIC31XX_SPRGAIN				0xAB
 /* HP Driver Control */
-#define AIC31XX_HPCONTROL	AIC31XX_REG(1, 44)
+#define AIC31XX_HPCONTROL			0xAC
 /* MIC Bias Control */
-#define AIC31XX_MICBIAS		AIC31XX_REG(1, 46)
+#define AIC31XX_MICBIAS				0xAE
 /* MIC PGA*/
-#define AIC31XX_MICPGA		AIC31XX_REG(1, 47)
+#define AIC31XX_MICPGA				0xAF
 /* Delta-Sigma Mono ADC Channel Fine-Gain Input Selection for P-Terminal */
-#define AIC31XX_MICPGAPI	AIC31XX_REG(1, 48)
+#define AIC31XX_MICPGAPI			0xB0
 /* ADC Input Selection for M-Terminal */
-#define AIC31XX_MICPGAMI	AIC31XX_REG(1, 49)
+#define AIC31XX_MICPGAMI			0xB1
 /* Input CM Settings */
-#define AIC31XX_MICPGACM	AIC31XX_REG(1, 50)
+#define AIC31XX_MICPGACM			0xB2
 
 /* Bits, masks and shifts */
 

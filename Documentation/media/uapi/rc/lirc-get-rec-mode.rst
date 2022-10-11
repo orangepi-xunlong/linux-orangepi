@@ -34,9 +34,7 @@ Description
 ===========
 
 Get/set supported receive modes. Only :ref:`LIRC_MODE_MODE2 <lirc-mode-mode2>`
-and :ref:`LIRC_MODE_LIRCCODE <lirc-mode-lirccode>` are supported for IR
-receive.
-
+is supported for IR receive.
 
 Return Value
 ============

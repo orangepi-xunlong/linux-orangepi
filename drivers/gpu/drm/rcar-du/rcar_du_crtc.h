@@ -22,7 +22,6 @@
 #include <drm/drm_crtc.h>
 
 struct rcar_du_group;
-struct rcar_du_vsp;
 
 /**
  * struct rcar_du_crtc - the CRTC, representing a DU superposition processor
@@ -38,6 +37,7 @@ struct rcar_du_vsp;
  * @vblank_wait: wait queue used to signal vertical blanking
  * @vblank_count: number of vertical blanking interrupts to wait for
  * @outputs: bitmask of the outputs (enum rcar_du_output) driven by this CRTC
+ * @enabled: whether the CRTC is enabled, used to control system resume
  * @group: CRTC group this CRTC belongs to
  */
 struct rcar_du_crtc {
@@ -57,9 +57,9 @@ struct rcar_du_crtc {
 	unsigned int vblank_count;
 
 	unsigned int outputs;
+	bool enabled;
 
 	struct rcar_du_group *group;
-	struct rcar_du_vsp *vsp;
 };
 
 #define to_rcar_crtc(c)	container_of(c, struct rcar_du_crtc, crtc)

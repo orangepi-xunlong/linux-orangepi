@@ -10,6 +10,8 @@
 #include "common.h"
 
 unsigned int __mxc_cpu_type;
+EXPORT_SYMBOL(__mxc_cpu_type);
+
 static unsigned int imx_soc_revision;
 
 void mxc_set_cpu_type(unsigned int type)
@@ -43,20 +45,20 @@ void __init imx_set_aips(void __iomem *base)
  * Set all MPROTx to be non-bufferable, trusted for R/W,
  * not forced to user-mode.
  */
-	imx_writel(0x77777777, base + 0x0);
-	imx_writel(0x77777777, base + 0x4);
+	__raw_writel(0x77777777, base + 0x0);
+	__raw_writel(0x77777777, base + 0x4);
 
 /*
  * Set all OPACRx to be non-bufferable, to not require
  * supervisor privilege level for access, allow for
  * write access and untrusted master access.
  */
-	imx_writel(0x0, base + 0x40);
-	imx_writel(0x0, base + 0x44);
-	imx_writel(0x0, base + 0x48);
-	imx_writel(0x0, base + 0x4C);
-	reg = imx_readl(base + 0x50) & 0x00FFFFFF;
-	imx_writel(reg, base + 0x50);
+	__raw_writel(0x0, base + 0x40);
+	__raw_writel(0x0, base + 0x44);
+	__raw_writel(0x0, base + 0x48);
+	__raw_writel(0x0, base + 0x4C);
+	reg = __raw_readl(base + 0x50) & 0x00FFFFFF;
+	__raw_writel(reg, base + 0x50);
 }
 
 void __init imx_aips_allow_unprivileged_access(

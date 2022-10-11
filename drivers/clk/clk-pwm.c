@@ -61,6 +61,7 @@ static int clk_pwm_probe(struct platform_device *pdev)
 	struct pwm_device *pwm;
 	struct pwm_args pargs;
 	const char *clk_name;
+	struct clk *clk;
 	int ret;
 
 	clk_pwm = devm_kzalloc(&pdev->dev, sizeof(*clk_pwm), GFP_KERNEL);
@@ -101,16 +102,16 @@ static int clk_pwm_probe(struct platform_device *pdev)
 
 	init.name = clk_name;
 	init.ops = &clk_pwm_ops;
-	init.flags = CLK_IS_BASIC;
+	init.flags = CLK_IS_BASIC | CLK_IS_ROOT;
 	init.num_parents = 0;
 
 	clk_pwm->pwm = pwm;
 	clk_pwm->hw.init = &init;
-	ret = devm_clk_hw_register(&pdev->dev, &clk_pwm->hw);
-	if (ret)
-		return ret;
+	clk = devm_clk_register(&pdev->dev, &clk_pwm->hw);
+	if (IS_ERR(clk))
+		return PTR_ERR(clk);
 
-	return of_clk_add_hw_provider(node, of_clk_hw_simple_get, &clk_pwm->hw);
+	return of_clk_add_provider(node, of_clk_src_simple_get, clk);
 }
 
 static int clk_pwm_remove(struct platform_device *pdev)

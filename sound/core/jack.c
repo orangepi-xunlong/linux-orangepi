@@ -32,7 +32,6 @@ struct snd_jack_kctl {
 	unsigned int mask_bits; /* only masked status bits are reported via kctl */
 };
 
-#ifdef CONFIG_SND_JACK_INPUT_DEV
 static int jack_switch_types[SND_JACK_SWITCH_TYPES] = {
 	SW_HEADPHONE_INSERT,
 	SW_MICROPHONE_INSERT,
@@ -41,11 +40,9 @@ static int jack_switch_types[SND_JACK_SWITCH_TYPES] = {
 	SW_VIDEOOUT_INSERT,
 	SW_LINEIN_INSERT,
 };
-#endif /* CONFIG_SND_JACK_INPUT_DEV */
 
 static int snd_jack_dev_disconnect(struct snd_device *device)
 {
-#ifdef CONFIG_SND_JACK_INPUT_DEV
 	struct snd_jack *jack = device->device_data;
 
 	if (!jack->input_dev)
@@ -58,7 +55,6 @@ static int snd_jack_dev_disconnect(struct snd_device *device)
 	else
 		input_free_device(jack->input_dev);
 	jack->input_dev = NULL;
-#endif /* CONFIG_SND_JACK_INPUT_DEV */
 	return 0;
 }
 
@@ -83,7 +79,6 @@ static int snd_jack_dev_free(struct snd_device *device)
 	return 0;
 }
 
-#ifdef CONFIG_SND_JACK_INPUT_DEV
 static int snd_jack_dev_register(struct snd_device *device)
 {
 	struct snd_jack *jack = device->device_data;
@@ -121,7 +116,6 @@ static int snd_jack_dev_register(struct snd_device *device)
 
 	return err;
 }
-#endif /* CONFIG_SND_JACK_INPUT_DEV */
 
 static void snd_jack_kctl_private_free(struct snd_kcontrol *kctl)
 {
@@ -215,12 +209,11 @@ int snd_jack_new(struct snd_card *card, const char *id, int type,
 	struct snd_jack *jack;
 	struct snd_jack_kctl *jack_kctl = NULL;
 	int err;
+	int i;
 	static struct snd_device_ops ops = {
 		.dev_free = snd_jack_dev_free,
-#ifdef CONFIG_SND_JACK_INPUT_DEV
 		.dev_register = snd_jack_dev_register,
 		.dev_disconnect = snd_jack_dev_disconnect,
-#endif /* CONFIG_SND_JACK_INPUT_DEV */
 	};
 
 	if (initial_kctl) {
@@ -237,9 +230,6 @@ int snd_jack_new(struct snd_card *card, const char *id, int type,
 
 	/* don't creat input device for phantom jack */
 	if (!phantom_jack) {
-#ifdef CONFIG_SND_JACK_INPUT_DEV
-		int i;
-
 		jack->input_dev = input_allocate_device();
 		if (jack->input_dev == NULL) {
 			err = -ENOMEM;
@@ -255,7 +245,6 @@ int snd_jack_new(struct snd_card *card, const char *id, int type,
 				input_set_capability(jack->input_dev, EV_SW,
 						     jack_switch_types[i]);
 
-#endif /* CONFIG_SND_JACK_INPUT_DEV */
 	}
 
 	err = snd_device_new(card, SNDRV_DEV_JACK, jack, &ops);
@@ -273,16 +262,13 @@ int snd_jack_new(struct snd_card *card, const char *id, int type,
 	return 0;
 
 fail_input:
-#ifdef CONFIG_SND_JACK_INPUT_DEV
 	input_free_device(jack->input_dev);
-#endif
 	kfree(jack->id);
 	kfree(jack);
 	return err;
 }
 EXPORT_SYMBOL(snd_jack_new);
 
-#ifdef CONFIG_SND_JACK_INPUT_DEV
 /**
  * snd_jack_set_parent - Set the parent device for a jack
  *
@@ -340,10 +326,10 @@ int snd_jack_set_key(struct snd_jack *jack, enum snd_jack_types type,
 
 	jack->type |= type;
 	jack->key[key] = keytype;
+
 	return 0;
 }
 EXPORT_SYMBOL(snd_jack_set_key);
-#endif /* CONFIG_SND_JACK_INPUT_DEV */
 
 /**
  * snd_jack_report - Report the current status of a jack
@@ -354,9 +340,7 @@ EXPORT_SYMBOL(snd_jack_set_key);
 void snd_jack_report(struct snd_jack *jack, int status)
 {
 	struct snd_jack_kctl *jack_kctl;
-#ifdef CONFIG_SND_JACK_INPUT_DEV
 	int i;
-#endif
 
 	if (!jack)
 		return;
@@ -365,7 +349,6 @@ void snd_jack_report(struct snd_jack *jack, int status)
 		snd_kctl_jack_report(jack->card, jack_kctl->kctl,
 					    status & jack_kctl->mask_bits);
 
-#ifdef CONFIG_SND_JACK_INPUT_DEV
 	if (!jack->input_dev)
 		return;
 
@@ -386,6 +369,6 @@ void snd_jack_report(struct snd_jack *jack, int status)
 	}
 
 	input_sync(jack->input_dev);
-#endif /* CONFIG_SND_JACK_INPUT_DEV */
+
 }
 EXPORT_SYMBOL(snd_jack_report);

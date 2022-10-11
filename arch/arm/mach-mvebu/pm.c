@@ -23,7 +23,6 @@
 #include <asm/suspend.h>
 
 #include "coherency.h"
-#include "common.h"
 #include "pmsu.h"
 
 #define SDRAM_CONFIG_OFFS                  0x0

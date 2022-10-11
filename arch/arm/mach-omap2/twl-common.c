@@ -532,7 +532,8 @@ void __init omap4_pmic_get_config(struct twl4030_platform_data *pmic_data,
 }
 #endif /* CONFIG_ARCH_OMAP4 */
 
-#if IS_ENABLED(CONFIG_SND_OMAP_SOC_OMAP_TWL4030)
+#if defined(CONFIG_SND_OMAP_SOC_OMAP_TWL4030) || \
+	defined(CONFIG_SND_OMAP_SOC_OMAP_TWL4030_MODULE)
 #include <linux/platform_data/omap-twl4030.h>
 
 /* Commonly used configuration */

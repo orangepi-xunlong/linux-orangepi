@@ -61,7 +61,6 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&lcd_enable_h>;
 		regulator-name = "panel_regulator";
-		startup-delay-us = <100000>;
 		vin-supply = <&vcc33_sys>;
 	};
 
@@ -87,29 +86,6 @@
 		vin-supply = <&vcc33_sys>;
 		startup-delay-us = <15000>;
 	};
-};
-
-&backlight {
-	power-supply = <&backlight_regulator>;
-};
-
-&cpu_alert0 {
-	temperature = <65000>;
-};
-
-&cpu_alert1 {
-	temperature = <70000>;
-};
-
-&edp {
-	/delete-property/pinctrl-names;
-	/delete-property/pinctrl-0;
-
-	force-hpd;
-};
-
-&panel {
-	power-supply= <&panel_regulator>;
 };
 
 &rk808 {

@@ -28,11 +28,9 @@ struct machine {
 	pid_t		  pid;
 	u16		  id_hdr_size;
 	bool		  comm_exec;
-	bool		  kptr_restrict_warned;
 	char		  *root_dir;
 	struct rb_root	  threads;
 	pthread_rwlock_t  threads_lock;
-	unsigned int	  nr_threads;
 	struct list_head  dead_threads;
 	struct thread	  *last_match;
 	struct vdso_info  *vdso_info;
@@ -41,6 +39,7 @@ struct machine {
 	struct map_groups kmaps;
 	struct map	  *vmlinux_maps[MAP__NR_TYPES];
 	u64		  kernel_start;
+	symbol_filter_t	  symbol_filter;
 	pid_t		  *current_tid;
 	union { /* Tool specific area */
 		void	  *priv;
@@ -95,7 +94,7 @@ int machine__process_aux_event(struct machine *machine,
 			       union perf_event *event);
 int machine__process_itrace_start_event(struct machine *machine,
 					union perf_event *event);
-int machine__process_switch_event(struct machine *machine,
+int machine__process_switch_event(struct machine *machine __maybe_unused,
 				  union perf_event *event);
 int machine__process_mmap_event(struct machine *machine, union perf_event *event,
 				struct perf_sample *sample);
@@ -109,6 +108,7 @@ typedef void (*machine__process_t)(struct machine *machine, void *data);
 struct machines {
 	struct machine host;
 	struct rb_root guests;
+	symbol_filter_t symbol_filter;
 };
 
 void machines__init(struct machines *machines);
@@ -126,6 +126,8 @@ struct machine *machines__findnew(struct machines *machines, pid_t pid);
 void machines__set_id_hdr_size(struct machines *machines, u16 id_hdr_size);
 char *machine__mmap_name(struct machine *machine, char *bf, size_t size);
 
+void machines__set_symbol_filter(struct machines *machines,
+				 symbol_filter_t symbol_filter);
 void machines__set_comm_exec(struct machines *machines, bool comm_exec);
 
 struct machine *machine__new_host(void);
@@ -139,11 +141,7 @@ struct branch_info *sample__resolve_bstack(struct perf_sample *sample,
 					   struct addr_location *al);
 struct mem_info *sample__resolve_mem(struct perf_sample *sample,
 				     struct addr_location *al);
-
-struct callchain_cursor;
-
 int thread__resolve_callchain(struct thread *thread,
-			      struct callchain_cursor *cursor,
 			      struct perf_evsel *evsel,
 			      struct perf_sample *sample,
 			      struct symbol **parent,
@@ -174,44 +172,39 @@ size_t machine__fprintf(struct machine *machine, FILE *fp);
 static inline
 struct symbol *machine__find_kernel_symbol(struct machine *machine,
 					   enum map_type type, u64 addr,
-					   struct map **mapp)
+					   struct map **mapp,
+					   symbol_filter_t filter)
 {
-	return map_groups__find_symbol(&machine->kmaps, type, addr, mapp);
-}
-
-static inline
-struct symbol *machine__find_kernel_symbol_by_name(struct machine *machine,
-						   enum map_type type, const char *name,
-						   struct map **mapp)
-{
-	return map_groups__find_symbol_by_name(&machine->kmaps, type, name, mapp);
+	return map_groups__find_symbol(&machine->kmaps, type, addr,
+				       mapp, filter);
 }
 
 static inline
 struct symbol *machine__find_kernel_function(struct machine *machine, u64 addr,
-					     struct map **mapp)
+					     struct map **mapp,
+					     symbol_filter_t filter)
 {
 	return machine__find_kernel_symbol(machine, MAP__FUNCTION, addr,
-					   mapp);
+					   mapp, filter);
 }
 
 static inline
 struct symbol *machine__find_kernel_function_by_name(struct machine *machine,
 						     const char *name,
-						     struct map **mapp)
+						     struct map **mapp,
+						     symbol_filter_t filter)
 {
-	return map_groups__find_function_by_name(&machine->kmaps, name, mapp);
+	return map_groups__find_function_by_name(&machine->kmaps, name, mapp,
+						 filter);
 }
 
 struct map *machine__findnew_module_map(struct machine *machine, u64 start,
 					const char *filename);
-int arch__fix_module_text_start(u64 *start, const char *name);
 
-int __machine__load_kallsyms(struct machine *machine, const char *filename,
-			     enum map_type type, bool no_kcore);
 int machine__load_kallsyms(struct machine *machine, const char *filename,
-			   enum map_type type);
-int machine__load_vmlinux_path(struct machine *machine, enum map_type type);
+			   enum map_type type, symbol_filter_t filter);
+int machine__load_vmlinux_path(struct machine *machine, enum map_type type,
+			       symbol_filter_t filter);
 
 size_t machine__fprintf_dsos_buildid(struct machine *machine, FILE *fp,
 				     bool (skip)(struct dso *dso, int parm), int parm);

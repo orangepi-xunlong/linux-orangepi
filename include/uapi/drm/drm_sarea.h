@@ -32,11 +32,7 @@
 #ifndef _DRM_SAREA_H_
 #define _DRM_SAREA_H_
 
-#include "drm.h"
-
-#if defined(__cplusplus)
-extern "C" {
-#endif
+#include <drm/drm.h>
 
 /* SAREA area needs to be at least a page */
 #if defined(__alpha__)
@@ -85,10 +81,6 @@ struct drm_sarea {
 typedef struct drm_sarea_drawable drm_sarea_drawable_t;
 typedef struct drm_sarea_frame drm_sarea_frame_t;
 typedef struct drm_sarea drm_sarea_t;
-#endif
-
-#if defined(__cplusplus)
-}
 #endif
 
 #endif				/* _DRM_SAREA_H_ */

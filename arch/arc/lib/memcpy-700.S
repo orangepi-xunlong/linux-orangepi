@@ -8,7 +8,7 @@
 
 #include <linux/linkage.h>
 
-ENTRY_CFI(memcpy)
+ENTRY(memcpy)
 	or	r3,r0,r1
 	asl_s	r3,r3,30
 	mov_s	r5,r0
@@ -63,4 +63,4 @@ ENTRY_CFI(memcpy)
 .Lendbloop:
 	j_s.d	[blink]
 	stb	r12,[r5,0]
-END_CFI(memcpy)
+END(memcpy)

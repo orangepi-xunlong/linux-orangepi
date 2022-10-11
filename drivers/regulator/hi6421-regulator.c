@@ -477,8 +477,7 @@ static int hi6421_regulator_buck_set_mode(struct regulator_dev *rdev,
 	return 0;
 }
 
-static unsigned int
-hi6421_regulator_ldo_get_optimum_mode(struct regulator_dev *rdev,
+unsigned int hi6421_regulator_ldo_get_optimum_mode(struct regulator_dev *rdev,
 			int input_uV, int output_uV, int load_uA)
 {
 	struct hi6421_regulator_info *info = rdev_get_drvdata(rdev);

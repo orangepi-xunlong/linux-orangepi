@@ -311,17 +311,18 @@ extern unsigned long get_wchan(struct task_struct *p);
 #define cpu_relax()	barrier()
 #define cpu_relax_lowlatency() cpu_relax()
 
-/*
- * parisc_requires_coherency() is used to identify the combined VIPT/PIPT
- * cached CPUs which require a guarantee of coherency (no inequivalent aliases
- * with different data, whether clean or not) to operate
- */
+/* Used as a macro to identify the combined VIPT/PIPT cached
+ * CPUs which require a guarantee of coherency (no inequivalent
+ * aliases with different data, whether clean or not) to operate */
+static inline int parisc_requires_coherency(void)
+{
 #ifdef CONFIG_PA8X00
-extern int _parisc_requires_coherency;
-#define parisc_requires_coherency()	_parisc_requires_coherency
+	return (boot_cpu_data.cpu_type == mako) ||
+		(boot_cpu_data.cpu_type == mako2);
 #else
-#define parisc_requires_coherency()	(0)
+	return 0;
 #endif
+}
 
 #endif /* __ASSEMBLY__ */
 

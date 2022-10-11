@@ -90,6 +90,7 @@ struct msc_iter {
  * @reg_base:		register window base address
  * @thdev:		intel_th_device pointer
  * @win_list:		list of windows in multiblock mode
+ * @single_sgt:		single mode buffer
  * @nr_pages:		total number of pages allocated for this buffer
  * @single_sz:		amount of data in single mode
  * @single_wrap:	single mode wrap occurred
@@ -110,6 +111,7 @@ struct msc {
 	struct intel_th_device	*thdev;
 
 	struct list_head	win_list;
+	struct sg_table		single_sgt;
 	unsigned long		nr_pages;
 	unsigned long		single_sz;
 	unsigned int		single_wrap : 1;
@@ -122,6 +124,7 @@ struct msc {
 	atomic_t		mmap_count;
 	struct mutex		buf_mutex;
 
+	struct mutex		iter_mutex;
 	struct list_head	iter_list;
 
 	/* config */
@@ -256,37 +259,23 @@ static struct msc_iter *msc_iter_install(struct msc *msc)
 
 	iter = kzalloc(sizeof(*iter), GFP_KERNEL);
 	if (!iter)
-		return ERR_PTR(-ENOMEM);
-
-	mutex_lock(&msc->buf_mutex);
-
-	/*
-	 * Reading and tracing are mutually exclusive; if msc is
-	 * enabled, open() will fail; otherwise existing readers
-	 * will prevent enabling the msc and the rest of fops don't
-	 * need to worry about it.
-	 */
-	if (msc->enabled) {
-		kfree(iter);
-		iter = ERR_PTR(-EBUSY);
-		goto unlock;
-	}
+		return NULL;
 
 	msc_iter_init(iter);
 	iter->msc = msc;
 
+	mutex_lock(&msc->iter_mutex);
 	list_add_tail(&iter->entry, &msc->iter_list);
-unlock:
-	mutex_unlock(&msc->buf_mutex);
+	mutex_unlock(&msc->iter_mutex);
 
 	return iter;
 }
 
 static void msc_iter_remove(struct msc_iter *iter, struct msc *msc)
 {
-	mutex_lock(&msc->buf_mutex);
+	mutex_lock(&msc->iter_mutex);
 	list_del(&iter->entry);
-	mutex_unlock(&msc->buf_mutex);
+	mutex_unlock(&msc->iter_mutex);
 
 	kfree(iter);
 }
@@ -421,7 +410,7 @@ msc_buffer_iterate(struct msc_iter *iter, size_t size, void *data,
 		 * Second time (wrap_count==1), it's just like any other block,
 		 * containing data in the range of [MSC_BDESC..data_bytes].
 		 */
-		if (iter->block == iter->start_block && iter->wrap_count == 2) {
+		if (iter->block == iter->start_block && iter->wrap_count) {
 			tocopy = DATA_IN_PAGE - data_bytes;
 			src += data_bytes;
 		}
@@ -467,6 +456,7 @@ static void msc_buffer_clear_hw_header(struct msc *msc)
 {
 	struct msc_window *win;
 
+	mutex_lock(&msc->buf_mutex);
 	list_for_each_entry(win, &msc->win_list, entry) {
 		unsigned int blk;
 		size_t hw_sz = sizeof(struct msc_block_desc) -
@@ -478,6 +468,7 @@ static void msc_buffer_clear_hw_header(struct msc *msc)
 			memset(&bdesc->hw_tag, 0, hw_sz);
 		}
 	}
+	mutex_unlock(&msc->buf_mutex);
 }
 
 /**
@@ -485,14 +476,11 @@ static void msc_buffer_clear_hw_header(struct msc *msc)
  * @msc:	the MSC device to configure
  *
  * Program storage mode, wrapping, burst length and trace buffer address
- * into a given MSC. Then, enable tracing and set msc::enabled.
- * The latter is serialized on msc::buf_mutex, so make sure to hold it.
+ * into a given MSC. If msc::enabled is set, enable the trace, too.
  */
 static int msc_configure(struct msc *msc)
 {
 	u32 reg;
-
-	lockdep_assert_held(&msc->buf_mutex);
 
 	if (msc->mode > MSC_MODE_MULTI)
 		return -ENOTSUPP;
@@ -511,19 +499,21 @@ static int msc_configure(struct msc *msc)
 	reg = ioread32(msc->reg_base + REG_MSU_MSC0CTL);
 	reg &= ~(MSC_MODE | MSC_WRAPEN | MSC_EN | MSC_RD_HDR_OVRD);
 
-	reg |= MSC_EN;
 	reg |= msc->mode << __ffs(MSC_MODE);
 	reg |= msc->burst_len << __ffs(MSC_LEN);
-
+	/*if (msc->mode == MSC_MODE_MULTI)
+	  reg |= MSC_RD_HDR_OVRD; */
 	if (msc->wrap)
 		reg |= MSC_WRAPEN;
+	if (msc->enabled)
+		reg |= MSC_EN;
 
 	iowrite32(reg, msc->reg_base + REG_MSU_MSC0CTL);
 
-	msc->thdev->output.multiblock = msc->mode == MSC_MODE_MULTI;
-	intel_th_trace_enable(msc->thdev);
-	msc->enabled = 1;
-
+	if (msc->enabled) {
+		msc->thdev->output.multiblock = msc->mode == MSC_MODE_MULTI;
+		intel_th_trace_enable(msc->thdev);
+	}
 
 	return 0;
 }
@@ -533,14 +523,15 @@ static int msc_configure(struct msc *msc)
  * @msc:	MSC device to disable
  *
  * If @msc is enabled, disable tracing on the switch and then disable MSC
- * storage. Caller must hold msc::buf_mutex.
+ * storage.
  */
 static void msc_disable(struct msc *msc)
 {
 	unsigned long count;
 	u32 reg;
 
-	lockdep_assert_held(&msc->buf_mutex);
+	if (!msc->enabled)
+		return;
 
 	intel_th_trace_disable(msc->thdev);
 
@@ -580,35 +571,33 @@ static void msc_disable(struct msc *msc)
 static int intel_th_msc_activate(struct intel_th_device *thdev)
 {
 	struct msc *msc = dev_get_drvdata(&thdev->dev);
-	int ret = -EBUSY;
+	int ret = 0;
 
 	if (!atomic_inc_unless_negative(&msc->user_count))
 		return -ENODEV;
 
-	mutex_lock(&msc->buf_mutex);
+	mutex_lock(&msc->iter_mutex);
+	if (!list_empty(&msc->iter_list))
+		ret = -EBUSY;
+	mutex_unlock(&msc->iter_mutex);
 
-	/* if there are readers, refuse */
-	if (list_empty(&msc->iter_list))
-		ret = msc_configure(msc);
-
-	mutex_unlock(&msc->buf_mutex);
-
-	if (ret)
+	if (ret) {
 		atomic_dec(&msc->user_count);
+		return ret;
+	}
 
-	return ret;
+	msc->enabled = 1;
+
+	return msc_configure(msc);
 }
 
 static void intel_th_msc_deactivate(struct intel_th_device *thdev)
 {
 	struct msc *msc = dev_get_drvdata(&thdev->dev);
 
-	mutex_lock(&msc->buf_mutex);
-	if (msc->enabled) {
-		msc_disable(msc);
-		atomic_dec(&msc->user_count);
-	}
-	mutex_unlock(&msc->buf_mutex);
+	msc_disable(msc);
+
+	atomic_dec(&msc->user_count);
 }
 
 /**
@@ -623,22 +612,45 @@ static void intel_th_msc_deactivate(struct intel_th_device *thdev)
  */
 static int msc_buffer_contig_alloc(struct msc *msc, unsigned long size)
 {
+	unsigned long nr_pages = size >> PAGE_SHIFT;
 	unsigned int order = get_order(size);
 	struct page *page;
+	int ret;
 
 	if (!size)
 		return 0;
 
-	page = alloc_pages(GFP_KERNEL | __GFP_ZERO, order);
+	ret = sg_alloc_table(&msc->single_sgt, 1, GFP_KERNEL);
+	if (ret)
+		goto err_out;
+
+	ret = -ENOMEM;
+	page = alloc_pages(GFP_KERNEL | __GFP_ZERO | GFP_DMA32, order);
 	if (!page)
-		return -ENOMEM;
+		goto err_free_sgt;
 
 	split_page(page, order);
-	msc->nr_pages = size >> PAGE_SHIFT;
+	sg_set_buf(msc->single_sgt.sgl, page_address(page), size);
+
+	ret = dma_map_sg(msc_dev(msc)->parent->parent, msc->single_sgt.sgl, 1,
+			 DMA_FROM_DEVICE);
+	if (ret < 0)
+		goto err_free_pages;
+
+	msc->nr_pages = nr_pages;
 	msc->base = page_address(page);
-	msc->base_addr = page_to_phys(page);
+	msc->base_addr = sg_dma_address(msc->single_sgt.sgl);
 
 	return 0;
+
+err_free_pages:
+	__free_pages(page, order);
+
+err_free_sgt:
+	sg_free_table(&msc->single_sgt);
+
+err_out:
+	return ret;
 }
 
 /**
@@ -648,6 +660,10 @@ static int msc_buffer_contig_alloc(struct msc *msc, unsigned long size)
 static void msc_buffer_contig_free(struct msc *msc)
 {
 	unsigned long off;
+
+	dma_unmap_sg(msc_dev(msc)->parent->parent, msc->single_sgt.sgl,
+		     1, DMA_FROM_DEVICE);
+	sg_free_table(&msc->single_sgt);
 
 	for (off = 0; off < msc->nr_pages << PAGE_SHIFT; off += PAGE_SIZE) {
 		struct page *page = virt_to_page(msc->base + off);
@@ -1048,8 +1064,8 @@ static int intel_th_msc_open(struct inode *inode, struct file *file)
 		return -EPERM;
 
 	iter = msc_iter_install(msc);
-	if (IS_ERR(iter))
-		return PTR_ERR(iter);
+	if (!iter)
+		return -ENOMEM;
 
 	file->private_data = iter;
 
@@ -1114,17 +1130,23 @@ static ssize_t intel_th_msc_read(struct file *file, char __user *buf,
 	if (!atomic_inc_unless_negative(&msc->user_count))
 		return 0;
 
+	if (msc->enabled) {
+		ret = -EBUSY;
+		goto put_count;
+	}
+
 	if (msc->mode == MSC_MODE_SINGLE && !msc->single_wrap)
 		size = msc->single_sz;
 	else
 		size = msc->nr_pages << PAGE_SHIFT;
 
 	if (!size)
-		goto put_count;
+		return 0;
 
-	if (off >= size)
+	if (off >= size) {
+		len = 0;
 		goto put_count;
-
+	}
 	if (off + len >= size)
 		len = size - off;
 
@@ -1172,7 +1194,7 @@ static void msc_mmap_close(struct vm_area_struct *vma)
 	if (!atomic_dec_and_mutex_lock(&msc->mmap_count, &msc->buf_mutex))
 		return;
 
-	/* drop page _refcounts */
+	/* drop page _counts */
 	for (pg = 0; pg < msc->nr_pages; pg++) {
 		struct page *page = msc_buffer_get_page(msc, pg);
 
@@ -1253,7 +1275,6 @@ static const struct file_operations intel_th_msc_fops = {
 	.read		= intel_th_msc_read,
 	.mmap		= intel_th_msc_mmap,
 	.llseek		= no_llseek,
-	.owner		= THIS_MODULE,
 };
 
 static int intel_th_msc_init(struct msc *msc)
@@ -1263,6 +1284,8 @@ static int intel_th_msc_init(struct msc *msc)
 	msc->mode = MSC_MODE_MULTI;
 	mutex_init(&msc->buf_mutex);
 	INIT_LIST_HEAD(&msc->win_list);
+
+	mutex_init(&msc->iter_mutex);
 	INIT_LIST_HEAD(&msc->iter_list);
 
 	msc->burst_len =
@@ -1400,11 +1423,6 @@ nr_pages_store(struct device *dev, struct device_attribute *attr,
 	do {
 		end = memchr(p, ',', len);
 		s = kstrndup(p, end ? end - p : len, GFP_KERNEL);
-		if (!s) {
-			ret = -ENOMEM;
-			goto free_win;
-		}
-
 		ret = kstrtoul(s, 10, &val);
 		kfree(s);
 
@@ -1429,7 +1447,8 @@ nr_pages_store(struct device *dev, struct device_attribute *attr,
 		if (!end)
 			break;
 
-		len -= end - p;
+		/* consume the number and the following comma, hence +1 */
+		len -= end - p + 1;
 		p = end + 1;
 	} while (len);
 
@@ -1485,6 +1504,10 @@ static int intel_th_msc_probe(struct intel_th_device *thdev)
 	if (err)
 		return err;
 
+	err = sysfs_create_group(&dev->kobj, &msc_output_group);
+	if (err)
+		return err;
+
 	dev_set_drvdata(dev, msc);
 
 	return 0;
@@ -1492,18 +1515,7 @@ static int intel_th_msc_probe(struct intel_th_device *thdev)
 
 static void intel_th_msc_remove(struct intel_th_device *thdev)
 {
-	struct msc *msc = dev_get_drvdata(&thdev->dev);
-	int ret;
-
-	intel_th_msc_deactivate(thdev);
-
-	/*
-	 * Buffers should not be used at this point except if the
-	 * output character device is still open and the parent
-	 * device gets detached from its bus, which is a FIXME.
-	 */
-	ret = msc_buffer_free_unless_used(msc);
-	WARN_ON_ONCE(ret);
+	sysfs_remove_group(&thdev->dev.kobj, &msc_output_group);
 }
 
 static struct intel_th_driver intel_th_msc_driver = {
@@ -1512,7 +1524,6 @@ static struct intel_th_driver intel_th_msc_driver = {
 	.activate	= intel_th_msc_activate,
 	.deactivate	= intel_th_msc_deactivate,
 	.fops	= &intel_th_msc_fops,
-	.attr_group	= &msc_output_group,
 	.driver	= {
 		.name	= "msc",
 		.owner	= THIS_MODULE,

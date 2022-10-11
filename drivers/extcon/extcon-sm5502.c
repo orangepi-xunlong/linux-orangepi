@@ -95,7 +95,6 @@ static struct reg_data sm5502_reg_data[] = {
 static const unsigned int sm5502_extcon_cable[] = {
 	EXTCON_USB,
 	EXTCON_USB_HOST,
-	EXTCON_CHG_USB_SDP,
 	EXTCON_CHG_USB_DCP,
 	EXTCON_NONE,
 };
@@ -411,10 +410,7 @@ static int sm5502_muic_cable_handler(struct sm5502_muic_info *info,
 		return ret;
 
 	/* Change the state of external accessory */
-	extcon_set_state_sync(info->edev, id, attached);
-	if (id == EXTCON_USB)
-		extcon_set_state_sync(info->edev, EXTCON_CHG_USB_SDP,
-					attached);
+	extcon_set_cable_state_(info->edev, id, attached);
 
 	return 0;
 }
@@ -659,7 +655,7 @@ MODULE_DEVICE_TABLE(of, sm5502_dt_match);
 #ifdef CONFIG_PM_SLEEP
 static int sm5502_muic_suspend(struct device *dev)
 {
-	struct i2c_client *i2c = to_i2c_client(dev);
+	struct i2c_client *i2c = container_of(dev, struct i2c_client, dev);
 	struct sm5502_muic_info *info = i2c_get_clientdata(i2c);
 
 	enable_irq_wake(info->irq);
@@ -669,7 +665,7 @@ static int sm5502_muic_suspend(struct device *dev)
 
 static int sm5502_muic_resume(struct device *dev)
 {
-	struct i2c_client *i2c = to_i2c_client(dev);
+	struct i2c_client *i2c = container_of(dev, struct i2c_client, dev);
 	struct sm5502_muic_info *info = i2c_get_clientdata(i2c);
 
 	disable_irq_wake(info->irq);

@@ -271,6 +271,9 @@ void __init config_BSP(char *commandp, int size)
 
 #define NAND_FLASH_ADDRESS	(0xD0000000)
 
+int sys_clk_khz = 0;
+int sys_clk_mhz = 0;
+
 void wtm_init(void);
 void scm_init(void);
 void gpio_init(void);
@@ -283,8 +286,9 @@ int  get_sys_clock (void);
 
 asmlinkage void __init sysinit(void)
 {
-	clock_pll(0, 0);
-
+	sys_clk_khz = clock_pll(0, 0);
+	sys_clk_mhz = sys_clk_khz/1000;
+	
 	wtm_init();
 	scm_init();
 	gpio_init();

@@ -199,20 +199,20 @@ static const char * const wm8998_inmux_texts[] = {
 	"B",
 };
 
-static SOC_ENUM_SINGLE_DECL(wm8998_in1muxl_enum,
-			    ARIZONA_ADC_DIGITAL_VOLUME_1L,
-			    ARIZONA_IN1L_SRC_SHIFT,
-			    wm8998_inmux_texts);
+static const SOC_ENUM_SINGLE_DECL(wm8998_in1muxl_enum,
+				  ARIZONA_ADC_DIGITAL_VOLUME_1L,
+				  ARIZONA_IN1L_SRC_SHIFT,
+				  wm8998_inmux_texts);
 
-static SOC_ENUM_SINGLE_DECL(wm8998_in1muxr_enum,
-			    ARIZONA_ADC_DIGITAL_VOLUME_1R,
-			    ARIZONA_IN1R_SRC_SHIFT,
-			    wm8998_inmux_texts);
+static const SOC_ENUM_SINGLE_DECL(wm8998_in1muxr_enum,
+				  ARIZONA_ADC_DIGITAL_VOLUME_1R,
+				  ARIZONA_IN1R_SRC_SHIFT,
+				  wm8998_inmux_texts);
 
-static SOC_ENUM_SINGLE_DECL(wm8998_in2mux_enum,
-			    ARIZONA_ADC_DIGITAL_VOLUME_2L,
-			    ARIZONA_IN2L_SRC_SHIFT,
-			    wm8998_inmux_texts);
+static const SOC_ENUM_SINGLE_DECL(wm8998_in2mux_enum,
+				  ARIZONA_ADC_DIGITAL_VOLUME_2L,
+				  ARIZONA_IN2L_SRC_SHIFT,
+				  wm8998_inmux_texts);
 
 static const struct snd_kcontrol_new wm8998_in1mux[2] = {
 	SOC_DAPM_ENUM_EXT("IN1L Mux", wm8998_in1muxl_enum,
@@ -522,17 +522,17 @@ static const unsigned int wm8998_aec_loopback_values[] = {
 	0, 1, 2, 3, 4, 6, 7, 8, 9,
 };
 
-static SOC_VALUE_ENUM_SINGLE_DECL(wm8998_aec1_loopback,
-				  ARIZONA_DAC_AEC_CONTROL_1,
-				  ARIZONA_AEC_LOOPBACK_SRC_SHIFT, 0xf,
-				  wm8998_aec_loopback_texts,
-				  wm8998_aec_loopback_values);
+static const SOC_VALUE_ENUM_SINGLE_DECL(wm8998_aec1_loopback,
+					ARIZONA_DAC_AEC_CONTROL_1,
+					ARIZONA_AEC_LOOPBACK_SRC_SHIFT, 0xf,
+					wm8998_aec_loopback_texts,
+					wm8998_aec_loopback_values);
 
-static SOC_VALUE_ENUM_SINGLE_DECL(wm8998_aec2_loopback,
-				  ARIZONA_DAC_AEC_CONTROL_2,
-				  ARIZONA_AEC_LOOPBACK_SRC_SHIFT, 0xf,
-				  wm8998_aec_loopback_texts,
-				  wm8998_aec_loopback_values);
+static const SOC_VALUE_ENUM_SINGLE_DECL(wm8998_aec2_loopback,
+					ARIZONA_DAC_AEC_CONTROL_2,
+					ARIZONA_AEC_LOOPBACK_SRC_SHIFT, 0xf,
+					wm8998_aec_loopback_texts,
+					wm8998_aec_loopback_values);
 
 static const struct snd_kcontrol_new wm8998_aec_loopback_mux[] = {
 	SOC_DAPM_ENUM("AEC1 Loopback", wm8998_aec1_loopback),
@@ -966,16 +966,6 @@ static const struct snd_soc_dapm_route wm8998_dapm_routes[] = {
 	{ "IN2A", NULL, "SYSCLK" },
 	{ "IN2B", NULL, "SYSCLK" },
 
-	{ "ASRC1L", NULL, "SYSCLK" },
-	{ "ASRC1R", NULL, "SYSCLK" },
-	{ "ASRC2L", NULL, "SYSCLK" },
-	{ "ASRC2R", NULL, "SYSCLK" },
-
-	{ "ASRC1L", NULL, "ASYNCCLK" },
-	{ "ASRC1R", NULL, "ASYNCCLK" },
-	{ "ASRC2L", NULL, "ASYNCCLK" },
-	{ "ASRC2R", NULL, "ASYNCCLK" },
-
 	{ "SPD1", NULL, "SYSCLK" },
 	{ "SPD1", NULL, "SPD1TX1" },
 	{ "SPD1", NULL, "SPD1TX2" },
@@ -1176,12 +1166,11 @@ static const struct snd_soc_dapm_route wm8998_dapm_routes[] = {
 
 	{ "MICSUPP", NULL, "SYSCLK" },
 
-	{ "DRC1 Signal Activity", NULL, "SYSCLK" },
 	{ "DRC1 Signal Activity", NULL, "DRC1L" },
 	{ "DRC1 Signal Activity", NULL, "DRC1R" },
 };
 
-#define WM8998_RATES SNDRV_PCM_RATE_KNOT
+#define WM8998_RATES SNDRV_PCM_RATE_8000_192000
 
 #define WM8998_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S20_3LE |\
 			SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S32_LE)
@@ -1335,8 +1324,6 @@ static int wm8998_codec_remove(struct snd_soc_codec *codec)
 
 	priv->core.arizona->dapm = NULL;
 
-	arizona_free_spk(codec);
-
 	return 0;
 }
 
@@ -1361,7 +1348,7 @@ static struct regmap *wm8998_get_regmap(struct device *dev)
 	return priv->core.arizona->regmap;
 }
 
-static const struct snd_soc_codec_driver soc_codec_dev_wm8998 = {
+static struct snd_soc_codec_driver soc_codec_dev_wm8998 = {
 	.probe = wm8998_codec_probe,
 	.remove = wm8998_codec_remove,
 	.get_regmap = wm8998_get_regmap,
@@ -1371,14 +1358,12 @@ static const struct snd_soc_codec_driver soc_codec_dev_wm8998 = {
 	.set_sysclk = arizona_set_sysclk,
 	.set_pll = wm8998_set_fll,
 
-	.component_driver = {
-		.controls		= wm8998_snd_controls,
-		.num_controls		= ARRAY_SIZE(wm8998_snd_controls),
-		.dapm_widgets		= wm8998_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(wm8998_dapm_widgets),
-		.dapm_routes		= wm8998_dapm_routes,
-		.num_dapm_routes	= ARRAY_SIZE(wm8998_dapm_routes),
-	},
+	.controls = wm8998_snd_controls,
+	.num_controls = ARRAY_SIZE(wm8998_snd_controls),
+	.dapm_widgets = wm8998_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(wm8998_dapm_widgets),
+	.dapm_routes = wm8998_dapm_routes,
+	.num_dapm_routes = ARRAY_SIZE(wm8998_dapm_routes),
 };
 
 static int wm8998_probe(struct platform_device *pdev)

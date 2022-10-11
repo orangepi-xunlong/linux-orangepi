@@ -38,6 +38,9 @@
 #include <net/netlink.h>
 #include <net/genetlink.h>
 #include <linux/suspend.h>
+#ifdef CONFIG_ARCH_ROCKCHIP
+#include <soc/rockchip/rockchip_system_monitor.h>
+#endif
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/thermal.h>
@@ -520,17 +523,16 @@ exit:
 }
 EXPORT_SYMBOL_GPL(thermal_zone_get_temp);
 
-void thermal_zone_set_trips(struct thermal_zone_device *tz)
+static void thermal_zone_set_trips(struct thermal_zone_device *tz)
 {
 	int low = -INT_MAX;
 	int high = INT_MAX;
 	int trip_temp, hysteresis;
+	int temp = tz->temperature;
 	int i, ret;
 
-	mutex_lock(&tz->lock);
-
-	if (!tz->ops->set_trips || !tz->ops->get_trip_hyst)
-		goto exit;
+	if (!tz->ops->set_trips)
+		return;
 
 	for (i = 0; i < tz->trips; i++) {
 		int trip_low;
@@ -540,35 +542,27 @@ void thermal_zone_set_trips(struct thermal_zone_device *tz)
 
 		trip_low = trip_temp - hysteresis;
 
-		if (trip_low < tz->temperature && trip_low > low)
+		if (trip_low < temp && trip_low > low)
 			low = trip_low;
 
-		if (trip_temp > tz->temperature && trip_temp < high)
+		if (trip_temp > temp && trip_temp < high)
 			high = trip_temp;
 	}
 
 	/* No need to change trip points */
 	if (tz->prev_low_trip == low && tz->prev_high_trip == high)
-		goto exit;
+		return;
 
 	tz->prev_low_trip = low;
 	tz->prev_high_trip = high;
 
-	dev_dbg(&tz->device,
-		"new temperature boundaries: %d < x < %d\n", low, high);
+	dev_dbg(&tz->device, "new temperature boundaries: %d < x < %d\n",
+			low, high);
 
-	/*
-	 * Set a temperature window. When this window is left the driver
-	 * must inform the thermal core via thermal_zone_device_update.
-	 */
 	ret = tz->ops->set_trips(tz, low, high);
 	if (ret)
 		dev_err(&tz->device, "Failed to set trips: %d\n", ret);
-
-exit:
-	mutex_unlock(&tz->lock);
 }
-EXPORT_SYMBOL_GPL(thermal_zone_set_trips);
 
 static void update_temperature(struct thermal_zone_device *tz)
 {
@@ -607,8 +601,7 @@ static void thermal_zone_device_reset(struct thermal_zone_device *tz)
 		pos->initialized = false;
 }
 
-void thermal_zone_device_update(struct thermal_zone_device *tz,
-				enum thermal_notify_event event)
+void thermal_zone_device_update(struct thermal_zone_device *tz)
 {
 	int count;
 
@@ -622,8 +615,6 @@ void thermal_zone_device_update(struct thermal_zone_device *tz,
 
 	thermal_zone_set_trips(tz);
 
-	tz->notify_event = event;
-
 	for (count = 0; count < tz->trips; count++)
 		handle_thermal_trip(tz, count);
 }
@@ -634,7 +625,7 @@ static void thermal_zone_device_check(struct work_struct *work)
 	struct thermal_zone_device *tz = container_of(work, struct
 						      thermal_zone_device,
 						      poll_queue.work);
-	thermal_zone_device_update(tz, THERMAL_EVENT_UNSPECIFIED);
+	thermal_zone_device_update(tz);
 }
 
 /* sys I/F for thermal zone */
@@ -755,12 +746,11 @@ trip_point_temp_store(struct device *dev, struct device_attribute *attr,
 		return -EINVAL;
 
 	ret = tz->ops->set_trip_temp(tz, trip, temperature);
-	if (ret)
-		return ret;
 
-	thermal_zone_device_update(tz, THERMAL_EVENT_UNSPECIFIED);
+	if (!ret)
+		thermal_zone_set_trips(tz);
 
-	return count;
+	return ret ? ret : count;
 }
 
 static ssize_t
@@ -880,7 +870,7 @@ passive_store(struct device *dev, struct device_attribute *attr,
 
 	tz->forced_passive = state;
 
-	thermal_zone_device_update(tz, THERMAL_EVENT_UNSPECIFIED);
+	thermal_zone_device_update(tz);
 
 	return count;
 }
@@ -971,7 +961,7 @@ emul_temp_store(struct device *dev, struct device_attribute *attr,
 	}
 
 	if (!ret)
-		thermal_zone_device_update(tz, THERMAL_EVENT_UNSPECIFIED);
+		thermal_zone_device_update(tz);
 
 	return ret ? ret : count;
 }
@@ -1147,13 +1137,20 @@ int power_actor_set_power(struct thermal_cooling_device *cdev,
 		return -EINVAL;
 
 	ret = cdev->ops->power2state(cdev, instance->tz, power, &state);
+#ifdef CONFIG_ARCH_ROCKCHIP
+	if (ret)
+		state = THERMAL_CSTATE_INVALID;
+	rockchip_system_monitor_adjust_cdev_state(cdev,
+						  instance->tz->temperature,
+						  &state);
+	if (state == THERMAL_CSTATE_INVALID)
+		ret = -EINVAL;
+#endif
 	if (ret)
 		return ret;
 
 	instance->target = state;
-	mutex_lock(&cdev->lock);
 	cdev->updated = false;
-	mutex_unlock(&cdev->lock);
 	thermal_cdev_update(cdev);
 
 	return 0;
@@ -1567,8 +1564,7 @@ __thermal_cooling_device_register(struct device_node *np,
 	mutex_lock(&thermal_list_lock);
 	list_for_each_entry(pos, &thermal_tz_list, node)
 		if (atomic_cmpxchg(&pos->need_update, 1, 0))
-			thermal_zone_device_update(pos,
-						   THERMAL_EVENT_UNSPECIFIED);
+			thermal_zone_device_update(pos);
 	mutex_unlock(&thermal_list_lock);
 
 	return cdev;
@@ -1684,13 +1680,11 @@ void thermal_cdev_update(struct thermal_cooling_device *cdev)
 	struct thermal_instance *instance;
 	unsigned long target = 0;
 
-	mutex_lock(&cdev->lock);
 	/* cooling device is updated*/
-	if (cdev->updated) {
-		mutex_unlock(&cdev->lock);
+	if (cdev->updated)
 		return;
-	}
 
+	mutex_lock(&cdev->lock);
 	/* Make sure cdev enters the deepest cooling state */
 	list_for_each_entry(instance, &cdev->thermal_instances, cdev_node) {
 		dev_dbg(&cdev->device, "zone%d->target=%lu\n",
@@ -1700,9 +1694,9 @@ void thermal_cdev_update(struct thermal_cooling_device *cdev)
 		if (instance->target > target)
 			target = instance->target;
 	}
+	mutex_unlock(&cdev->lock);
 	cdev->ops->set_cur_state(cdev, target);
 	cdev->updated = true;
-	mutex_unlock(&cdev->lock);
 	trace_cdev_update(cdev, target);
 	dev_dbg(&cdev->device, "set to state %lu\n", target);
 }
@@ -1906,6 +1900,9 @@ struct thermal_zone_device *thermal_zone_device_register(const char *type,
 	tz->trips = trips;
 	tz->passive_delay = passive_delay;
 	tz->polling_delay = polling_delay;
+	tz->prev_low_trip = INT_MAX;
+	tz->prev_high_trip = -INT_MAX;
+
 	/* A new thermal zone needs to be updated anyway. */
 	atomic_set(&tz->need_update, 1);
 
@@ -2011,7 +2008,7 @@ struct thermal_zone_device *thermal_zone_device_register(const char *type,
 	thermal_zone_device_reset(tz);
 	/* Update the new thermal zone and mark it as already updated. */
 	if (atomic_cmpxchg(&tz->need_update, 1, 0))
-		thermal_zone_device_update(tz, THERMAL_EVENT_UNSPECIFIED);
+		thermal_zone_device_update(tz);
 
 	return tz;
 
@@ -2127,36 +2124,6 @@ exit:
 	return ref;
 }
 EXPORT_SYMBOL_GPL(thermal_zone_get_zone_by_name);
-
-/**
- * thermal_zone_get_slope - return the slope attribute of the thermal zone
- * @tz: thermal zone device with the slope attribute
- *
- * Return: If the thermal zone device has a slope attribute, return it, else
- * return 1.
- */
-int thermal_zone_get_slope(struct thermal_zone_device *tz)
-{
-	if (tz && tz->tzp)
-		return tz->tzp->slope;
-	return 1;
-}
-EXPORT_SYMBOL_GPL(thermal_zone_get_slope);
-
-/**
- * thermal_zone_get_offset - return the offset attribute of the thermal zone
- * @tz: thermal zone device with the offset attribute
- *
- * Return: If the thermal zone device has a offset attribute, return it, else
- * return 0.
- */
-int thermal_zone_get_offset(struct thermal_zone_device *tz)
-{
-	if (tz && tz->tzp)
-		return tz->tzp->offset;
-	return 0;
-}
-EXPORT_SYMBOL_GPL(thermal_zone_get_offset);
 
 #ifdef CONFIG_NET
 static const struct genl_multicast_group thermal_event_mcgrps[] = {
@@ -2298,8 +2265,7 @@ static int thermal_pm_notify(struct notifier_block *nb,
 		atomic_set(&in_suspend, 0);
 		list_for_each_entry(tz, &thermal_tz_list, node) {
 			thermal_zone_device_reset(tz);
-			thermal_zone_device_update(tz,
-						   THERMAL_EVENT_UNSPECIFIED);
+			thermal_zone_device_update(tz);
 		}
 		break;
 	default:

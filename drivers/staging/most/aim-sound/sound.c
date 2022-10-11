@@ -234,6 +234,7 @@ static int playback_thread(void *data)
 	while (!kthread_should_stop()) {
 		struct mbo *mbo = NULL;
 		bool period_elapsed = false;
+		int ret;
 
 		wait_event_interruptible(
 			channel->playback_waitq,
@@ -249,7 +250,10 @@ static int playback_thread(void *data)
 		else
 			memset(mbo->virt_address, 0, mbo->buffer_length);
 
-		most_submit_mbo(mbo);
+		ret = most_submit_mbo(mbo);
+		if (ret)
+			channel->is_stream_running = false;
+
 		if (period_elapsed)
 			snd_pcm_period_elapsed(channel->substream);
 	}
@@ -453,7 +457,7 @@ static snd_pcm_uframes_t pcm_pointer(struct snd_pcm_substream *substream)
 /**
  * Initialization of struct snd_pcm_ops
  */
-static const struct snd_pcm_ops pcm_ops = {
+static struct snd_pcm_ops pcm_ops = {
 	.open       = pcm_open,
 	.close      = pcm_close,
 	.ioctl      = snd_pcm_lib_ioctl,
@@ -607,8 +611,7 @@ static int audio_probe_channel(struct most_interface *iface, int channel_id,
 	channel->id = channel_id;
 	init_waitqueue_head(&channel->playback_waitq);
 
-	ret = audio_set_hw_params(&channel->pcm_hardware, pcm_format, cfg);
-	if (ret)
+	if (audio_set_hw_params(&channel->pcm_hardware, pcm_format, cfg))
 		goto err_free_card;
 
 	snprintf(card->driver, sizeof(card->driver), "%s", DRIVER_NAME);

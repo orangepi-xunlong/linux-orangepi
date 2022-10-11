@@ -57,7 +57,7 @@ static inline void xgmac_mac_disable(void __iomem *ioaddr)
 	writel(value, ioaddr + XGMAC_CONTROL);
 }
 
-static int vfio_platform_calxedaxgmac_reset(struct vfio_platform_device *vdev)
+int vfio_platform_calxedaxgmac_reset(struct vfio_platform_device *vdev)
 {
 	struct vfio_platform_region *reg = &vdev->regions[0];
 

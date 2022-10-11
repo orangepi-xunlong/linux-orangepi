@@ -18,7 +18,6 @@
 
 #include <linux/elf.h>
 #include <linux/fs.h>
-#include <linux/memblock.h>
 #include <linux/mm.h>
 #include <linux/mman.h>
 #include <linux/export.h>
@@ -96,6 +95,8 @@ void arch_pick_mmap_layout(struct mm_struct *mm)
 		mm->get_unmapped_area = arch_get_unmapped_area_topdown;
 	}
 }
+EXPORT_SYMBOL_GPL(arch_pick_mmap_layout);
+
 
 /*
  * You really shouldn't be using read() or write() on /dev/mem.  This might go
@@ -103,18 +104,12 @@ void arch_pick_mmap_layout(struct mm_struct *mm)
  */
 int valid_phys_addr_range(phys_addr_t addr, size_t size)
 {
-	/*
-	 * Check whether addr is covered by a memory region without the
-	 * MEMBLOCK_NOMAP attribute, and whether that region covers the
-	 * entire range. In theory, this could lead to false negatives
-	 * if the range is covered by distinct but adjacent memory regions
-	 * that only differ in other attributes. However, few of such
-	 * attributes have been defined, and it is debatable whether it
-	 * follows that /dev/mem read() calls should be able traverse
-	 * such boundaries.
-	 */
-	return memblock_is_region_memory(addr, size) &&
-	       memblock_is_map_memory(addr);
+	if (addr < PHYS_OFFSET)
+		return 0;
+	if (addr + size > __pa(high_memory - 1) + 1)
+		return 0;
+
+	return 1;
 }
 
 /*

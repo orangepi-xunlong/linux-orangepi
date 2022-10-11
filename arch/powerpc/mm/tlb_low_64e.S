@@ -69,6 +69,13 @@ END_FTR_SECTION_IFSET(CPU_FTR_EMB_HV)
 	std	r15,EX_TLB_R15(r12)
 	std	r10,EX_TLB_CR(r12)
 #ifdef CONFIG_PPC_FSL_BOOK3E
+START_BTB_FLUSH_SECTION
+	mfspr r11, SPRN_SRR1
+	andi. r10,r11,MSR_PR
+	beq 1f
+	BTB_FLUSH(r10)
+1:
+END_BTB_FLUSH_SECTION
 	std	r7,EX_TLB_R7(r12)
 #endif
 	TLB_MISS_PROLOG_STATS
@@ -895,7 +902,7 @@ ALT_MMU_FTR_SECTION_END_IFCLR(MMU_FTR_USE_PAIRED_MAS)
 BEGIN_MMU_FTR_SECTION
 virt_page_table_tlb_miss_done:
 
-	/* We have overridden MAS2:EPN but currently our primary TLB miss
+	/* We have overriden MAS2:EPN but currently our primary TLB miss
 	 * handler will always restore it so that should not be an issue,
 	 * if we ever optimize the primary handler to not write MAS2 on
 	 * some cases, we'll have to restore MAS2:EPN here based on the

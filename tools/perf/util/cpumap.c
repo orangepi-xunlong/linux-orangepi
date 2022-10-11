@@ -5,7 +5,6 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <linux/bitmap.h>
 #include "asm/bug.h"
 
 static int max_cpu_num;
@@ -129,7 +128,12 @@ struct cpu_map *cpu_map__new(const char *cpu_list)
 	if (!cpu_list)
 		return cpu_map__read_all_cpu_map();
 
-	if (!isdigit(*cpu_list))
+	/*
+	 * must handle the case of empty cpumap to cover
+	 * TOPOLOGY header for NUMA nodes with no CPU
+	 * ( e.g., because of CPU hotplug)
+	 */
+	if (!isdigit(*cpu_list) && *cpu_list != '\0')
 		goto out;
 
 	while (isdigit(*cpu_list)) {
@@ -176,72 +180,25 @@ struct cpu_map *cpu_map__new(const char *cpu_list)
 
 	if (nr_cpus > 0)
 		cpus = cpu_map__trim_new(nr_cpus, tmp_cpus);
-	else
+	else if (*cpu_list != '\0')
 		cpus = cpu_map__default_new();
+	else
+		cpus = cpu_map__dummy_new();
 invalid:
 	free(tmp_cpus);
 out:
 	return cpus;
 }
 
-static struct cpu_map *cpu_map__from_entries(struct cpu_map_entries *cpus)
-{
-	struct cpu_map *map;
-
-	map = cpu_map__empty_new(cpus->nr);
-	if (map) {
-		unsigned i;
-
-		for (i = 0; i < cpus->nr; i++) {
-			/*
-			 * Special treatment for -1, which is not real cpu number,
-			 * and we need to use (int) -1 to initialize map[i],
-			 * otherwise it would become 65535.
-			 */
-			if (cpus->cpu[i] == (u16) -1)
-				map->map[i] = -1;
-			else
-				map->map[i] = (int) cpus->cpu[i];
-		}
-	}
-
-	return map;
-}
-
-static struct cpu_map *cpu_map__from_mask(struct cpu_map_mask *mask)
-{
-	struct cpu_map *map;
-	int nr, nbits = mask->nr * mask->long_size * BITS_PER_BYTE;
-
-	nr = bitmap_weight(mask->mask, nbits);
-
-	map = cpu_map__empty_new(nr);
-	if (map) {
-		int cpu, i = 0;
-
-		for_each_set_bit(cpu, mask->mask, nbits)
-			map->map[i++] = cpu;
-	}
-	return map;
-
-}
-
-struct cpu_map *cpu_map__new_data(struct cpu_map_data *data)
-{
-	if (data->type == PERF_CPU_MAP__CPUS)
-		return cpu_map__from_entries((struct cpu_map_entries *)data->data);
-	else
-		return cpu_map__from_mask((struct cpu_map_mask *)data->data);
-}
-
 size_t cpu_map__fprintf(struct cpu_map *map, FILE *fp)
 {
-#define BUFSIZE 1024
-	char buf[BUFSIZE];
+	int i;
+	size_t printed = fprintf(fp, "%d cpu%s: ",
+				 map->nr, map->nr > 1 ? "s" : "");
+	for (i = 0; i < map->nr; ++i)
+		printed += fprintf(fp, "%s%d", i ? ", " : "", map->map[i]);
 
-	cpu_map__snprint(map, buf, sizeof(buf));
-	return fprintf(fp, "%s\n", buf);
-#undef BUFSIZE
+	return printed + fprintf(fp, "\n");
 }
 
 struct cpu_map *cpu_map__dummy_new(void)
@@ -585,69 +542,4 @@ int cpu__setup_cpunode_map(void)
 	}
 	closedir(dir1);
 	return 0;
-}
-
-bool cpu_map__has(struct cpu_map *cpus, int cpu)
-{
-	return cpu_map__idx(cpus, cpu) != -1;
-}
-
-int cpu_map__idx(struct cpu_map *cpus, int cpu)
-{
-	int i;
-
-	for (i = 0; i < cpus->nr; ++i) {
-		if (cpus->map[i] == cpu)
-			return i;
-	}
-
-	return -1;
-}
-
-int cpu_map__cpu(struct cpu_map *cpus, int idx)
-{
-	return cpus->map[idx];
-}
-
-size_t cpu_map__snprint(struct cpu_map *map, char *buf, size_t size)
-{
-	int i, cpu, start = -1;
-	bool first = true;
-	size_t ret = 0;
-
-#define COMMA first ? "" : ","
-
-	for (i = 0; i < map->nr + 1; i++) {
-		bool last = i == map->nr;
-
-		cpu = last ? INT_MAX : map->map[i];
-
-		if (start == -1) {
-			start = i;
-			if (last) {
-				ret += snprintf(buf + ret, size - ret,
-						"%s%d", COMMA,
-						map->map[i]);
-			}
-		} else if (((i - start) != (cpu - map->map[start])) || last) {
-			int end = i - 1;
-
-			if (start == end) {
-				ret += snprintf(buf + ret, size - ret,
-						"%s%d", COMMA,
-						map->map[start]);
-			} else {
-				ret += snprintf(buf + ret, size - ret,
-						"%s%d-%d", COMMA,
-						map->map[start], map->map[end]);
-			}
-			first = false;
-			start = i;
-		}
-	}
-
-#undef COMMA
-
-	pr_debug("cpumask list: %s\n", buf);
-	return ret;
 }

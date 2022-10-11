@@ -38,7 +38,7 @@
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
 #include <linux/usb/otg.h>
-#include <soc/fsl/qe/qe.h>
+#include <asm/qe.h>
 #include <asm/cpm.h>
 #include <asm/dma.h>
 #include <asm/reg.h>
@@ -421,8 +421,10 @@ static int qe_ep_rxbd_update(struct qe_ep *ep)
 	bd = ep->rxbase;
 
 	ep->rxframe = kmalloc(sizeof(*ep->rxframe), GFP_ATOMIC);
-	if (!ep->rxframe)
+	if (ep->rxframe == NULL) {
+		dev_err(ep->udc->dev, "malloc rxframe failed\n");
 		return -ENOMEM;
+	}
 
 	qe_frame_init(ep->rxframe);
 
@@ -433,7 +435,9 @@ static int qe_ep_rxbd_update(struct qe_ep *ep)
 
 	size = (ep->ep.maxpacket + USB_CRC_SIZE + 2) * (bdring_len + 1);
 	ep->rxbuffer = kzalloc(size, GFP_ATOMIC);
-	if (!ep->rxbuffer) {
+	if (ep->rxbuffer == NULL) {
+		dev_err(ep->udc->dev, "malloc rxbuffer failed,size=%d\n",
+				size);
 		kfree(ep->rxframe);
 		return -ENOMEM;
 	}
@@ -664,8 +668,10 @@ static int qe_ep_init(struct qe_udc *udc,
 
 	if ((ep->tm == USBP_TM_CTL) || (ep->dir == USB_DIR_IN)) {
 		ep->txframe = kmalloc(sizeof(*ep->txframe), GFP_ATOMIC);
-		if (!ep->txframe)
+		if (ep->txframe == NULL) {
+			dev_err(udc->dev, "malloc txframe failed\n");
 			goto en_done2;
+		}
 		qe_frame_init(ep->txframe);
 	}
 
@@ -2331,15 +2337,17 @@ static struct qe_udc *qe_udc_config(struct platform_device *ofdev)
 {
 	struct qe_udc *udc;
 	struct device_node *np = ofdev->dev.of_node;
-	unsigned long tmp_addr = 0;
+	unsigned int tmp_addr = 0;
 	struct usb_device_para __iomem *usbpram;
 	unsigned int i;
 	u64 size;
 	u32 offset;
 
 	udc = kzalloc(sizeof(*udc), GFP_KERNEL);
-	if (!udc)
+	if (udc == NULL) {
+		dev_err(&ofdev->dev, "malloc udc failed\n");
 		goto cleanup;
+	}
 
 	udc->dev = &ofdev->dev;
 

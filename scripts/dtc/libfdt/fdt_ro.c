@@ -60,7 +60,7 @@ static int _fdt_nodename_eq(const void *fdt, int offset,
 {
 	const char *p = fdt_offset_ptr(fdt, offset + FDT_TAGSIZE, len+1);
 
-	if (! p)
+	if (!p)
 		/* short match */
 		return 0;
 
@@ -86,6 +86,32 @@ static int _fdt_string_eq(const void *fdt, int stroffset,
 	const char *p = fdt_string(fdt, stroffset);
 
 	return (strlen(p) == len) && (memcmp(p, s, len) == 0);
+}
+
+uint32_t fdt_get_max_phandle(const void *fdt)
+{
+	uint32_t max_phandle = 0;
+	int offset;
+
+	for (offset = fdt_next_node(fdt, -1, NULL);;
+	     offset = fdt_next_node(fdt, offset, NULL)) {
+		uint32_t phandle;
+
+		if (offset == -FDT_ERR_NOTFOUND)
+			return max_phandle;
+
+		if (offset < 0)
+			return (uint32_t)-1;
+
+		phandle = fdt_get_phandle(fdt, offset);
+		if (phandle == (uint32_t)-1)
+			continue;
+
+		if (phandle > max_phandle)
+			max_phandle = phandle;
+	}
+
+	return 0;
 }
 
 int fdt_get_mem_rsv(const void *fdt, int n, uint64_t *address, uint64_t *size)
@@ -301,7 +327,7 @@ const void *fdt_getprop_namelen(const void *fdt, int nodeoffset,
 	const struct fdt_property *prop;
 
 	prop = fdt_get_property_namelen(fdt, nodeoffset, name, namelen, lenp);
-	if (! prop)
+	if (!prop)
 		return NULL;
 
 	return prop->data;
@@ -545,7 +571,7 @@ int fdt_stringlist_count(const void *fdt, int nodeoffset, const char *property)
 
 	list = fdt_getprop(fdt, nodeoffset, property, &length);
 	if (!list)
-		return -length;
+		return length;
 
 	end = list + length;
 
@@ -571,7 +597,7 @@ int fdt_stringlist_search(const void *fdt, int nodeoffset, const char *property,
 
 	list = fdt_getprop(fdt, nodeoffset, property, &length);
 	if (!list)
-		return -length;
+		return length;
 
 	len = strlen(string) + 1;
 	end = list + length;

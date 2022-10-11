@@ -24,6 +24,7 @@
 #ifndef _DRXD_H_
 #define _DRXD_H_
 
+#include <linux/kconfig.h>
 #include <linux/types.h>
 #include <linux/i2c.h>
 

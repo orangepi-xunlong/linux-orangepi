@@ -82,7 +82,7 @@ ENTRY(efi_pe_entry)
 
 	/* Relocate efi_config->call() */
 	leal	efi32_config(%esi), %eax
-	add	%esi, 32(%eax)
+	add	%esi, 88(%eax)
 	pushl	%eax
 
 	call	make_boot_params
@@ -108,7 +108,7 @@ ENTRY(efi32_stub_entry)
 
 	/* Relocate efi_config->call() */
 	leal	efi32_config(%esi), %eax
-	add	%esi, 32(%eax)
+	add	%esi, 88(%eax)
 	pushl	%eax
 2:
 	call	efi_main
@@ -176,9 +176,7 @@ preferred_addr:
 1:
 
 	/* Target address to relocate to for decompression */
-	movl    BP_init_size(%esi), %eax
-	subl    $_end, %eax
-	addl    %eax, %ebx
+	addl	$z_extract_offset, %ebx
 
 	/* Set up the stack */
 	leal	boot_stack_end(%ebx), %esp
@@ -235,28 +233,24 @@ relocated:
 2:
 
 /*
- * Do the extraction, and jump to the new kernel..
+ * Do the decompression, and jump to the new kernel..
  */
-				/* push arguments for extract_kernel: */
+				/* push arguments for decompress_kernel: */
+	pushl	$z_run_size	/* size of kernel with .bss and .brk */
 	pushl	$z_output_len	/* decompressed length, end of relocs */
-
-	movl    BP_init_size(%esi), %eax
-	subl    $_end, %eax
-	movl    %ebx, %ebp
-	subl    %eax, %ebp
+	leal	z_extract_offset_negative(%ebx), %ebp
 	pushl	%ebp		/* output address */
-
 	pushl	$z_input_len	/* input_len */
 	leal	input_data(%ebx), %eax
 	pushl	%eax		/* input_data */
 	leal	boot_heap(%ebx), %eax
 	pushl	%eax		/* heap area */
 	pushl	%esi		/* real mode pointer */
-	call	extract_kernel	/* returns kernel location in %eax */
-	addl	$24, %esp
+	call	decompress_kernel /* returns kernel location in %eax */
+	addl	$28, %esp
 
 /*
- * Jump to the extracted kernel.
+ * Jump to the decompressed kernel.
  */
 	xorl	%ebx, %ebx
 	jmp	*%eax
@@ -264,7 +258,7 @@ relocated:
 #ifdef CONFIG_EFI_STUB
 	.data
 efi32_config:
-	.fill 4,8,0
+	.fill 11,8,0
 	.long efi_call_phys
 	.long 0
 	.byte 0

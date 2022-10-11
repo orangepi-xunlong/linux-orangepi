@@ -80,15 +80,23 @@ static int lxt970_ack_interrupt(struct phy_device *phydev)
 
 static int lxt970_config_intr(struct phy_device *phydev)
 {
+	int err;
+
 	if (phydev->interrupts == PHY_INTERRUPT_ENABLED)
-		return phy_write(phydev, MII_LXT970_IER, MII_LXT970_IER_IEN);
+		err = phy_write(phydev, MII_LXT970_IER, MII_LXT970_IER_IEN);
 	else
-		return phy_write(phydev, MII_LXT970_IER, 0);
+		err = phy_write(phydev, MII_LXT970_IER, 0);
+
+	return err;
 }
 
 static int lxt970_config_init(struct phy_device *phydev)
 {
-	return phy_write(phydev, MII_LXT970_CONFIG, 0);
+	int err;
+
+	err = phy_write(phydev, MII_LXT970_CONFIG, 0);
+
+	return err;
 }
 
 
@@ -104,10 +112,14 @@ static int lxt971_ack_interrupt(struct phy_device *phydev)
 
 static int lxt971_config_intr(struct phy_device *phydev)
 {
+	int err;
+
 	if (phydev->interrupts == PHY_INTERRUPT_ENABLED)
-		return phy_write(phydev, MII_LXT971_IER, MII_LXT971_IER_IEN);
+		err = phy_write(phydev, MII_LXT971_IER, MII_LXT971_IER_IEN);
 	else
-		return phy_write(phydev, MII_LXT971_IER, 0);
+		err = phy_write(phydev, MII_LXT971_IER, 0);
+
+	return err;
 }
 
 /*
@@ -266,6 +278,7 @@ static struct phy_driver lxt97x_driver[] = {
 	.read_status	= genphy_read_status,
 	.ack_interrupt	= lxt970_ack_interrupt,
 	.config_intr	= lxt970_config_intr,
+	.driver		= { .owner = THIS_MODULE,},
 }, {
 	.phy_id		= 0x001378e0,
 	.name		= "LXT971",
@@ -276,6 +289,7 @@ static struct phy_driver lxt97x_driver[] = {
 	.read_status	= genphy_read_status,
 	.ack_interrupt	= lxt971_ack_interrupt,
 	.config_intr	= lxt971_config_intr,
+	.driver		= { .owner = THIS_MODULE,},
 }, {
 	.phy_id		= 0x00137a10,
 	.name		= "LXT973-A2",
@@ -285,6 +299,7 @@ static struct phy_driver lxt97x_driver[] = {
 	.probe		= lxt973_probe,
 	.config_aneg	= lxt973_config_aneg,
 	.read_status	= lxt973a2_read_status,
+	.driver		= { .owner = THIS_MODULE,},
 }, {
 	.phy_id		= 0x00137a10,
 	.name		= "LXT973",
@@ -294,6 +309,7 @@ static struct phy_driver lxt97x_driver[] = {
 	.probe		= lxt973_probe,
 	.config_aneg	= lxt973_config_aneg,
 	.read_status	= genphy_read_status,
+	.driver		= { .owner = THIS_MODULE,},
 } };
 
 module_phy_driver(lxt97x_driver);

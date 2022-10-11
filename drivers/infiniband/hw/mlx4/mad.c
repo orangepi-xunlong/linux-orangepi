@@ -40,7 +40,6 @@
 #include <linux/gfp.h>
 #include <rdma/ib_pma.h>
 
-#include <linux/mlx4/driver.h>
 #include "mlx4_ib.h"
 
 enum {
@@ -230,8 +229,6 @@ static void smp_snoop(struct ib_device *ibdev, u8 port_num, const struct ib_mad 
 	    mad->mad_hdr.method == IB_MGMT_METHOD_SET)
 		switch (mad->mad_hdr.attr_id) {
 		case IB_SMP_ATTR_PORT_INFO:
-			if (dev->dev->caps.flags & MLX4_DEV_CAP_FLAG_PORT_MNG_CHG_EV)
-				return;
 			pinfo = (struct ib_port_info *) ((struct ib_smp *) mad)->data;
 			lid = be16_to_cpu(pinfo->lid);
 
@@ -247,8 +244,6 @@ static void smp_snoop(struct ib_device *ibdev, u8 port_num, const struct ib_mad 
 			break;
 
 		case IB_SMP_ATTR_PKEY_TABLE:
-			if (dev->dev->caps.flags & MLX4_DEV_CAP_FLAG_PORT_MNG_CHG_EV)
-				return;
 			if (!mlx4_is_mfunc(dev->dev)) {
 				mlx4_ib_dispatch_event(dev, port_num,
 						       IB_EVENT_PKEY_CHANGE);
@@ -285,8 +280,6 @@ static void smp_snoop(struct ib_device *ibdev, u8 port_num, const struct ib_mad 
 			break;
 
 		case IB_SMP_ATTR_GUID_INFO:
-			if (dev->dev->caps.flags & MLX4_DEV_CAP_FLAG_PORT_MNG_CHG_EV)
-				return;
 			/* paravirtualized master's guid is guid 0 -- does not change */
 			if (!mlx4_is_master(dev->dev))
 				mlx4_ib_dispatch_event(dev, port_num,
@@ -299,26 +292,6 @@ static void smp_snoop(struct ib_device *ibdev, u8 port_num, const struct ib_mad 
 								    (u8 *)(&((struct ib_smp *)mad)->data));
 				mlx4_ib_notify_slaves_on_guid_change(dev, bn, port_num,
 								     (u8 *)(&((struct ib_smp *)mad)->data));
-			}
-			break;
-
-		case IB_SMP_ATTR_SL_TO_VL_TABLE:
-			/* cache sl to vl mapping changes for use in
-			 * filling QP1 LRH VL field when sending packets
-			 */
-			if (dev->dev->caps.flags & MLX4_DEV_CAP_FLAG_PORT_MNG_CHG_EV &&
-			    dev->dev->caps.flags2 & MLX4_DEV_CAP_FLAG2_SL_TO_VL_CHANGE_EVENT)
-				return;
-			if (!mlx4_is_slave(dev->dev)) {
-				union sl2vl_tbl_to_u64 sl2vl64;
-				int jj;
-
-				for (jj = 0; jj < 8; jj++) {
-					sl2vl64.sl8[jj] = ((struct ib_smp *)mad)->data[jj];
-					pr_debug("port %u, sl2vl[%d] = %02x\n",
-						 port_num, jj, sl2vl64.sl8[jj]);
-				}
-				atomic64_set(&dev->sl2vl[port_num - 1], sl2vl64.sl64);
 			}
 			break;
 
@@ -371,8 +344,7 @@ static void node_desc_override(struct ib_device *dev,
 	    mad->mad_hdr.method == IB_MGMT_METHOD_GET_RESP &&
 	    mad->mad_hdr.attr_id == IB_SMP_ATTR_NODE_DESC) {
 		spin_lock_irqsave(&to_mdev(dev)->sm_lock, flags);
-		memcpy(((struct ib_smp *) mad)->data, dev->node_desc,
-		       IB_DEVICE_NODE_DESC_MAX);
+		memcpy(((struct ib_smp *) mad)->data, dev->node_desc, 64);
 		spin_unlock_irqrestore(&to_mdev(dev)->sm_lock, flags);
 	}
 }
@@ -640,8 +612,8 @@ static int mlx4_ib_demux_mad(struct ib_device *ibdev, u8 port,
 			struct ib_mad *mad)
 {
 	struct mlx4_ib_dev *dev = to_mdev(ibdev);
-	int err, other_port;
-	int slave = -1;
+	int err;
+	int slave;
 	u8 *slave_id;
 	int is_eth = 0;
 
@@ -659,17 +631,7 @@ static int mlx4_ib_demux_mad(struct ib_device *ibdev, u8 port,
 			mlx4_ib_warn(ibdev, "RoCE mgmt class is not CM\n");
 			return -EINVAL;
 		}
-		err = mlx4_get_slave_from_roce_gid(dev->dev, port, grh->dgid.raw, &slave);
-		if (err && mlx4_is_mf_bonded(dev->dev)) {
-			other_port = (port == 1) ? 2 : 1;
-			err = mlx4_get_slave_from_roce_gid(dev->dev, other_port, grh->dgid.raw, &slave);
-			if (!err) {
-				port = other_port;
-				pr_debug("resolved slave %d from gid %pI6 wire port %d other %d\n",
-					 slave, grh->dgid.raw, port, other_port);
-			}
-		}
-		if (err) {
+		if (mlx4_get_slave_from_roce_gid(dev->dev, port, grh->dgid.raw, &slave)) {
 			mlx4_ib_warn(ibdev, "failed matching grh\n");
 			return -ENOENT;
 		}
@@ -702,18 +664,10 @@ static int mlx4_ib_demux_mad(struct ib_device *ibdev, u8 port,
 
 	/* If a grh is present, we demux according to it */
 	if (wc->wc_flags & IB_WC_GRH) {
-		if (grh->dgid.global.interface_id ==
-			cpu_to_be64(IB_SA_WELL_KNOWN_GUID) &&
-		    grh->dgid.global.subnet_prefix == cpu_to_be64(
-			atomic64_read(&dev->sriov.demux[port - 1].subnet_prefix))) {
-			slave = 0;
-		} else {
-			slave = mlx4_ib_find_real_gid(ibdev, port,
-						      grh->dgid.global.interface_id);
-			if (slave < 0) {
-				mlx4_ib_warn(ibdev, "failed matching grh\n");
-				return -ENOENT;
-			}
+		slave = mlx4_ib_find_real_gid(ibdev, port, grh->dgid.global.interface_id);
+		if (slave < 0) {
+			mlx4_ib_warn(ibdev, "failed matching grh\n");
+			return -ENOENT;
 		}
 	}
 	/* Class-specific handling */
@@ -840,7 +794,8 @@ static int ib_process_mad(struct ib_device *ibdev, int mad_flags, u8 port_num,
 		return IB_MAD_RESULT_FAILURE;
 
 	if (!out_mad->mad_hdr.status) {
-		smp_snoop(ibdev, port_num, in_mad, prev_lid);
+		if (!(to_mdev(ibdev)->dev->caps.flags & MLX4_DEV_CAP_FLAG_PORT_MNG_CHG_EV))
+			smp_snoop(ibdev, port_num, in_mad, prev_lid);
 		/* slaves get node desc from FW */
 		if (!mlx4_is_slave(to_mdev(ibdev)->dev))
 			node_desc_override(ibdev, out_mad);
@@ -857,48 +812,17 @@ static int ib_process_mad(struct ib_device *ibdev, int mad_flags, u8 port_num,
 	return IB_MAD_RESULT_SUCCESS | IB_MAD_RESULT_REPLY;
 }
 
-static void edit_counter(struct mlx4_counter *cnt, void *counters,
-			 __be16 attr_id)
+static void edit_counter(struct mlx4_counter *cnt,
+					struct ib_pma_portcounters *pma_cnt)
 {
-	switch (attr_id) {
-	case IB_PMA_PORT_COUNTERS:
-	{
-		struct ib_pma_portcounters *pma_cnt =
-			(struct ib_pma_portcounters *)counters;
-
-		ASSIGN_32BIT_COUNTER(pma_cnt->port_xmit_data,
-				     (be64_to_cpu(cnt->tx_bytes) >> 2));
-		ASSIGN_32BIT_COUNTER(pma_cnt->port_rcv_data,
-				     (be64_to_cpu(cnt->rx_bytes) >> 2));
-		ASSIGN_32BIT_COUNTER(pma_cnt->port_xmit_packets,
-				     be64_to_cpu(cnt->tx_frames));
-		ASSIGN_32BIT_COUNTER(pma_cnt->port_rcv_packets,
-				     be64_to_cpu(cnt->rx_frames));
-		break;
-	}
-	case IB_PMA_PORT_COUNTERS_EXT:
-	{
-		struct ib_pma_portcounters_ext *pma_cnt_ext =
-			(struct ib_pma_portcounters_ext *)counters;
-
-		pma_cnt_ext->port_xmit_data =
-			cpu_to_be64(be64_to_cpu(cnt->tx_bytes) >> 2);
-		pma_cnt_ext->port_rcv_data =
-			cpu_to_be64(be64_to_cpu(cnt->rx_bytes) >> 2);
-		pma_cnt_ext->port_xmit_packets = cnt->tx_frames;
-		pma_cnt_ext->port_rcv_packets = cnt->rx_frames;
-		break;
-	}
-	}
-}
-
-static int iboe_process_mad_port_info(void *out_mad)
-{
-	struct ib_class_port_info cpi = {};
-
-	cpi.capability_mask = IB_PMA_CLASS_CAP_EXT_WIDTH;
-	memcpy(out_mad, &cpi, sizeof(cpi));
-	return IB_MAD_RESULT_SUCCESS | IB_MAD_RESULT_REPLY;
+	ASSIGN_32BIT_COUNTER(pma_cnt->port_xmit_data,
+			     (be64_to_cpu(cnt->tx_bytes) >> 2));
+	ASSIGN_32BIT_COUNTER(pma_cnt->port_rcv_data,
+			     (be64_to_cpu(cnt->rx_bytes) >> 2));
+	ASSIGN_32BIT_COUNTER(pma_cnt->port_xmit_packets,
+			     be64_to_cpu(cnt->tx_frames));
+	ASSIGN_32BIT_COUNTER(pma_cnt->port_rcv_packets,
+			     be64_to_cpu(cnt->rx_frames));
 }
 
 static int iboe_process_mad(struct ib_device *ibdev, int mad_flags, u8 port_num,
@@ -912,9 +836,6 @@ static int iboe_process_mad(struct ib_device *ibdev, int mad_flags, u8 port_num,
 
 	if (in_mad->mad_hdr.mgmt_class != IB_MGMT_CLASS_PERF_MGMT)
 		return -EINVAL;
-
-	if (in_mad->mad_hdr.attr_id == IB_PMA_CLASS_PORT_INFO)
-		return iboe_process_mad_port_info((void *)(out_mad->data + 40));
 
 	memset(&counter_stats, 0, sizeof(counter_stats));
 	mutex_lock(&dev->counters_table[port_num - 1].mutex);
@@ -937,8 +858,7 @@ static int iboe_process_mad(struct ib_device *ibdev, int mad_flags, u8 port_num,
 		switch (counter_stats.counter_mode & 0xf) {
 		case 0:
 			edit_counter(&counter_stats,
-				     (void *)(out_mad->data + 40),
-				     in_mad->mad_hdr.attr_id);
+				     (void *)(out_mad->data + 40));
 			err = IB_MAD_RESULT_SUCCESS | IB_MAD_RESULT_REPLY;
 			break;
 		default:
@@ -969,10 +889,8 @@ int mlx4_ib_process_mad(struct ib_device *ibdev, int mad_flags, u8 port_num,
 	 */
 	if (link == IB_LINK_LAYER_INFINIBAND) {
 		if (mlx4_is_slave(dev->dev) &&
-		    (in_mad->mad_hdr.mgmt_class == IB_MGMT_CLASS_PERF_MGMT &&
-		     (in_mad->mad_hdr.attr_id == IB_PMA_PORT_COUNTERS ||
-		      in_mad->mad_hdr.attr_id == IB_PMA_PORT_COUNTERS_EXT ||
-		      in_mad->mad_hdr.attr_id == IB_PMA_CLASS_PORT_INFO)))
+		    in_mad->mad_hdr.mgmt_class == IB_MGMT_CLASS_PERF_MGMT &&
+		    in_mad->mad_hdr.attr_id == IB_PMA_PORT_COUNTERS)
 			return iboe_process_mad(ibdev, mad_flags, port_num, in_wc,
 						in_grh, in_mad, out_mad);
 
@@ -1070,23 +988,6 @@ static void handle_client_rereg_event(struct mlx4_ib_dev *dev, u8 port_num)
 			mlx4_gen_slaves_port_mgt_ev(dev->dev, port_num,
 						    MLX4_EQ_PORT_INFO_CLIENT_REREG_MASK);
 		}
-	}
-
-	/* Update the sl to vl table from inside client rereg
-	 * only if in secure-host mode (snooping is not possible)
-	 * and the sl-to-vl change event is not generated by FW.
-	 */
-	if (!mlx4_is_slave(dev->dev) &&
-	    dev->dev->flags & MLX4_FLAG_SECURE_HOST &&
-	    !(dev->dev->caps.flags2 & MLX4_DEV_CAP_FLAG2_SL_TO_VL_CHANGE_EVENT)) {
-		if (mlx4_is_master(dev->dev))
-			/* already in work queue from mlx4_ib_event queueing
-			 * mlx4_handle_port_mgmt_change_event, which calls
-			 * this procedure. Therefore, call sl2vl_update directly.
-			 */
-			mlx4_ib_sl2vl_update(dev, port_num);
-		else
-			mlx4_sched_ib_sl2vl_update_work(dev, port_num);
 	}
 	mlx4_ib_dispatch_event(dev, port_num, IB_EVENT_CLIENT_REREGISTER);
 }
@@ -1225,24 +1126,6 @@ void handle_port_mgmt_change_event(struct work_struct *work)
 			tbl_block = GET_BLK_PTR_FROM_EQE(eqe);
 			change_bitmap = GET_MASK_FROM_EQE(eqe);
 			handle_slaves_guid_change(dev, port, tbl_block, change_bitmap);
-		}
-		break;
-
-	case MLX4_DEV_PMC_SUBTYPE_SL_TO_VL_MAP:
-		/* cache sl to vl mapping changes for use in
-		 * filling QP1 LRH VL field when sending packets
-		 */
-		if (!mlx4_is_slave(dev->dev)) {
-			union sl2vl_tbl_to_u64 sl2vl64;
-			int jj;
-
-			for (jj = 0; jj < 8; jj++) {
-				sl2vl64.sl8[jj] =
-					eqe->event.port_mgmt_change.params.sl2vl_tbl_change_info.sl2vl_table[jj];
-				pr_debug("port %u, sl2vl[%d] = %02x\n",
-					 port, jj, sl2vl64.sl8[jj]);
-			}
-			atomic64_set(&dev->sl2vl[port - 1], sl2vl64.sl64);
 		}
 		break;
 	default:
@@ -1986,7 +1869,7 @@ static int create_pv_resources(struct ib_device *ibdev, int slave, int port,
 		goto err_buf;
 	}
 
-	ctx->pd = ib_alloc_pd(ctx->ib_dev, 0);
+	ctx->pd = ib_alloc_pd(ctx->ib_dev);
 	if (IS_ERR(ctx->pd)) {
 		ret = PTR_ERR(ctx->pd);
 		pr_err("Couldn't create tunnel PD (%d)\n", ret);
@@ -2159,7 +2042,7 @@ static int mlx4_ib_alloc_demux_ctx(struct mlx4_ib_dev *dev,
 	}
 
 	snprintf(name, sizeof name, "mlx4_ibt%d", port);
-	ctx->wq = alloc_ordered_workqueue(name, WQ_MEM_RECLAIM);
+	ctx->wq = create_singlethread_workqueue(name);
 	if (!ctx->wq) {
 		pr_err("Failed to create tunnelling WQ for port %d\n", port);
 		ret = -ENOMEM;
@@ -2167,7 +2050,7 @@ static int mlx4_ib_alloc_demux_ctx(struct mlx4_ib_dev *dev,
 	}
 
 	snprintf(name, sizeof name, "mlx4_ibud%d", port);
-	ctx->ud_wq = alloc_ordered_workqueue(name, WQ_MEM_RECLAIM);
+	ctx->ud_wq = create_singlethread_workqueue(name);
 	if (!ctx->ud_wq) {
 		pr_err("Failed to create up/down WQ for port %d\n", port);
 		ret = -ENOMEM;

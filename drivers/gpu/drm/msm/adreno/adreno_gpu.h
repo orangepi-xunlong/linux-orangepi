@@ -114,7 +114,6 @@ struct adreno_rev {
 
 struct adreno_gpu_funcs {
 	struct msm_gpu_funcs base;
-	int (*get_timestamp)(struct msm_gpu *gpu, uint64_t *value);
 };
 
 struct adreno_info {
@@ -229,16 +228,11 @@ static inline int adreno_is_a420(struct adreno_gpu *gpu)
 	return gpu->revn == 420;
 }
 
-static inline int adreno_is_a430(struct adreno_gpu *gpu)
-{
-       return gpu->revn == 430;
-}
-
 int adreno_get_param(struct msm_gpu *gpu, uint32_t param, uint64_t *value);
 int adreno_hw_init(struct msm_gpu *gpu);
 uint32_t adreno_last_fence(struct msm_gpu *gpu);
 void adreno_recover(struct msm_gpu *gpu);
-void adreno_submit(struct msm_gpu *gpu, struct msm_gem_submit *submit,
+int adreno_submit(struct msm_gpu *gpu, struct msm_gem_submit *submit,
 		struct msm_file_private *ctx);
 void adreno_flush(struct msm_gpu *gpu);
 void adreno_idle(struct msm_gpu *gpu);
@@ -310,8 +304,5 @@ static inline void adreno_gpu_write(struct adreno_gpu *gpu,
 	if(adreno_reg_check(gpu, offset_name))
 		gpu_write(&gpu->base, reg - 1, data);
 }
-
-struct msm_gpu *a3xx_gpu_init(struct drm_device *dev);
-struct msm_gpu *a4xx_gpu_init(struct drm_device *dev);
 
 #endif /* __ADRENO_GPU_H__ */

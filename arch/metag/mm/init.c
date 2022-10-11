@@ -390,6 +390,7 @@ void __init mem_init(void)
 
 	free_all_bootmem();
 	mem_init_print_info(NULL);
+	show_mem(0);
 }
 
 void free_initmem(void)

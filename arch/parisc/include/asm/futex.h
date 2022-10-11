@@ -35,45 +35,59 @@ static inline int
 arch_futex_atomic_op_inuser(int op, int oparg, int *oval, u32 __user *uaddr)
 {
 	unsigned long int flags;
-	int oldval, ret;
-	u32 tmp;
+	u32 val;
+	int oldval = 0, ret;
 
-	_futex_spin_lock_irqsave(uaddr, &flags);
 	pagefault_disable();
 
-	ret = -EFAULT;
-	if (unlikely(get_user(oldval, uaddr) != 0))
-		goto out_pagefault_enable;
-
-	ret = 0;
-	tmp = oldval;
+	_futex_spin_lock_irqsave(uaddr, &flags);
 
 	switch (op) {
 	case FUTEX_OP_SET:
-		tmp = oparg;
+		/* *(int *)UADDR2 = OPARG; */
+		ret = get_user(oldval, uaddr);
+		if (!ret)
+			ret = put_user(oparg, uaddr);
 		break;
 	case FUTEX_OP_ADD:
-		tmp += oparg;
+		/* *(int *)UADDR2 += OPARG; */
+		ret = get_user(oldval, uaddr);
+		if (!ret) {
+			val = oldval + oparg;
+			ret = put_user(val, uaddr);
+		}
 		break;
 	case FUTEX_OP_OR:
-		tmp |= oparg;
+		/* *(int *)UADDR2 |= OPARG; */
+		ret = get_user(oldval, uaddr);
+		if (!ret) {
+			val = oldval | oparg;
+			ret = put_user(val, uaddr);
+		}
 		break;
 	case FUTEX_OP_ANDN:
-		tmp &= ~oparg;
+		/* *(int *)UADDR2 &= ~OPARG; */
+		ret = get_user(oldval, uaddr);
+		if (!ret) {
+			val = oldval & ~oparg;
+			ret = put_user(val, uaddr);
+		}
 		break;
 	case FUTEX_OP_XOR:
-		tmp ^= oparg;
+		/* *(int *)UADDR2 ^= OPARG; */
+		ret = get_user(oldval, uaddr);
+		if (!ret) {
+			val = oldval ^ oparg;
+			ret = put_user(val, uaddr);
+		}
 		break;
 	default:
 		ret = -ENOSYS;
 	}
 
-	if (ret == 0 && unlikely(put_user(tmp, uaddr) != 0))
-		ret = -EFAULT;
-
-out_pagefault_enable:
-	pagefault_enable();
 	_futex_spin_unlock_irqrestore(uaddr, &flags);
+
+	pagefault_enable();
 
 	if (!ret)
 		*oval = oldval;
@@ -81,10 +95,12 @@ out_pagefault_enable:
 	return ret;
 }
 
+/* Non-atomic version */
 static inline int
 futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 			      u32 oldval, u32 newval)
 {
+	int ret;
 	u32 val;
 	unsigned long flags;
 
@@ -104,20 +120,17 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 	 */
 
 	_futex_spin_lock_irqsave(uaddr, &flags);
-	if (unlikely(get_user(val, uaddr) != 0)) {
-		_futex_spin_unlock_irqrestore(uaddr, &flags);
-		return -EFAULT;
-	}
 
-	if (val == oldval && unlikely(put_user(newval, uaddr) != 0)) {
-		_futex_spin_unlock_irqrestore(uaddr, &flags);
-		return -EFAULT;
-	}
+	ret = get_user(val, uaddr);
+
+	if (!ret && val == oldval)
+		ret = put_user(newval, uaddr);
 
 	*uval = val;
+
 	_futex_spin_unlock_irqrestore(uaddr, &flags);
 
-	return 0;
+	return ret;
 }
 
 #endif /*__KERNEL__*/

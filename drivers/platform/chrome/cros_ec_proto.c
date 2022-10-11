@@ -19,7 +19,6 @@
 #include <linux/device.h>
 #include <linux/module.h>
 #include <linux/slab.h>
-#include <asm/unaligned.h>
 
 #define EC_COMMAND_RETRIES	50
 
@@ -66,6 +65,17 @@ static int send_command(struct cros_ec_device *ec_dev,
 		xfer_fxn = ec_dev->pkt_xfer;
 	else
 		xfer_fxn = ec_dev->cmd_xfer;
+
+	if (!xfer_fxn) {
+		/*
+		 * This error can happen if a communication error happened and
+		 * the EC is trying to use protocol v2, on an underlying
+		 * communication mechanism that does not support v2.
+		 */
+		dev_err_once(ec_dev->dev,
+			     "missing EC transfer API, cannot send command\n");
+		return -EIO;
+	}
 
 	ret = (*xfer_fxn)(ec_dev, msg);
 	if (msg->result == EC_RES_IN_PROGRESS) {
@@ -237,44 +247,11 @@ static int cros_ec_host_command_proto_query_v2(struct cros_ec_device *ec_dev)
 	return ret;
 }
 
-static int cros_ec_get_host_command_version_mask(struct cros_ec_device *ec_dev,
-	u16 cmd, u32 *mask)
-{
-	struct ec_params_get_cmd_versions *pver;
-	struct ec_response_get_cmd_versions *rver;
-	struct cros_ec_command *msg;
-	int ret;
-
-	msg = kmalloc(sizeof(*msg) + max(sizeof(*rver), sizeof(*pver)),
-		      GFP_KERNEL);
-	if (!msg)
-		return -ENOMEM;
-
-	msg->version = 0;
-	msg->command = EC_CMD_GET_CMD_VERSIONS;
-	msg->insize = sizeof(*rver);
-	msg->outsize = sizeof(*pver);
-
-	pver = (struct ec_params_get_cmd_versions *)msg->data;
-	pver->cmd = cmd;
-
-	ret = cros_ec_cmd_xfer(ec_dev, msg);
-	if (ret > 0) {
-		rver = (struct ec_response_get_cmd_versions *)msg->data;
-		*mask = rver->version_mask;
-	}
-
-	kfree(msg);
-
-	return ret;
-}
-
 int cros_ec_query_all(struct cros_ec_device *ec_dev)
 {
 	struct device *dev = ec_dev->dev;
 	struct cros_ec_command *proto_msg;
 	struct ec_response_get_protocol_info *proto_info;
-	u32 ver_mask = 0;
 	int ret;
 
 	proto_msg = kzalloc(sizeof(*proto_msg) + sizeof(*proto_info),
@@ -334,8 +311,8 @@ int cros_ec_query_all(struct cros_ec_device *ec_dev)
 			ec_dev->max_response = EC_PROTO2_MAX_PARAM_SIZE;
 			ec_dev->max_passthru = 0;
 			ec_dev->pkt_xfer = NULL;
-			ec_dev->din_size = EC_PROTO2_MSG_BYTES;
-			ec_dev->dout_size = EC_PROTO2_MSG_BYTES;
+			ec_dev->din_size = EC_MSG_BYTES;
+			ec_dev->dout_size = EC_MSG_BYTES;
 		} else {
 			/*
 			 * It's possible for a test to occur too early when
@@ -363,15 +340,6 @@ int cros_ec_query_all(struct cros_ec_device *ec_dev)
 		ret = -ENOMEM;
 		goto exit;
 	}
-
-	/* Probe if MKBP event is supported */
-	ret = cros_ec_get_host_command_version_mask(ec_dev,
-						    EC_CMD_GET_NEXT_EVENT,
-						    &ver_mask);
-	if (ret < 0 || ver_mask == 0)
-		ec_dev->mkbp_event_supported = 0;
-	else
-		ec_dev->mkbp_event_supported = 1;
 
 exit:
 	kfree(proto_msg);
@@ -442,52 +410,3 @@ int cros_ec_cmd_xfer_status(struct cros_ec_device *ec_dev,
 	return ret;
 }
 EXPORT_SYMBOL(cros_ec_cmd_xfer_status);
-
-static int get_next_event(struct cros_ec_device *ec_dev)
-{
-	u8 buffer[sizeof(struct cros_ec_command) + sizeof(ec_dev->event_data)];
-	struct cros_ec_command *msg = (struct cros_ec_command *)&buffer;
-	int ret;
-
-	msg->version = 0;
-	msg->command = EC_CMD_GET_NEXT_EVENT;
-	msg->insize = sizeof(ec_dev->event_data);
-	msg->outsize = 0;
-
-	ret = cros_ec_cmd_xfer(ec_dev, msg);
-	if (ret > 0) {
-		ec_dev->event_size = ret - 1;
-		memcpy(&ec_dev->event_data, msg->data,
-		       sizeof(ec_dev->event_data));
-	}
-
-	return ret;
-}
-
-static int get_keyboard_state_event(struct cros_ec_device *ec_dev)
-{
-	u8 buffer[sizeof(struct cros_ec_command) +
-		  sizeof(ec_dev->event_data.data)];
-	struct cros_ec_command *msg = (struct cros_ec_command *)&buffer;
-
-	msg->version = 0;
-	msg->command = EC_CMD_MKBP_STATE;
-	msg->insize = sizeof(ec_dev->event_data.data);
-	msg->outsize = 0;
-
-	ec_dev->event_size = cros_ec_cmd_xfer(ec_dev, msg);
-	ec_dev->event_data.event_type = EC_MKBP_EVENT_KEY_MATRIX;
-	memcpy(&ec_dev->event_data.data, msg->data,
-	       sizeof(ec_dev->event_data.data));
-
-	return ec_dev->event_size;
-}
-
-int cros_ec_get_next_event(struct cros_ec_device *ec_dev)
-{
-	if (ec_dev->mkbp_event_supported)
-		return get_next_event(ec_dev);
-	else
-		return get_keyboard_state_event(ec_dev);
-}
-EXPORT_SYMBOL(cros_ec_get_next_event);

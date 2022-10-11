@@ -142,21 +142,6 @@ static __u32 uvc_try_frame_interval(struct uvc_frame *frame, __u32 interval)
 	return interval;
 }
 
-static __u32 uvc_v4l2_get_bytesperline(const struct uvc_format *format,
-	const struct uvc_frame *frame)
-{
-	switch (format->fcc) {
-	case V4L2_PIX_FMT_NV12:
-	case V4L2_PIX_FMT_YVU420:
-	case V4L2_PIX_FMT_YUV420:
-	case V4L2_PIX_FMT_M420:
-		return frame->wWidth;
-
-	default:
-		return format->bpp * frame->wWidth / 8;
-	}
-}
-
 static int uvc_v4l2_try_format(struct uvc_streaming *stream,
 	struct v4l2_format *fmt, struct uvc_streaming_control *probe,
 	struct uvc_format **uvc_format, struct uvc_frame **uvc_frame)
@@ -260,7 +245,7 @@ static int uvc_v4l2_try_format(struct uvc_streaming *stream,
 	fmt->fmt.pix.width = frame->wWidth;
 	fmt->fmt.pix.height = frame->wHeight;
 	fmt->fmt.pix.field = V4L2_FIELD_NONE;
-	fmt->fmt.pix.bytesperline = uvc_v4l2_get_bytesperline(format, frame);
+	fmt->fmt.pix.bytesperline = format->bpp * frame->wWidth / 8;
 	fmt->fmt.pix.sizeimage = probe->dwMaxVideoFrameSize;
 	fmt->fmt.pix.colorspace = format->colorspace;
 	fmt->fmt.pix.priv = 0;
@@ -297,7 +282,7 @@ static int uvc_v4l2_get_format(struct uvc_streaming *stream,
 	fmt->fmt.pix.width = frame->wWidth;
 	fmt->fmt.pix.height = frame->wHeight;
 	fmt->fmt.pix.field = V4L2_FIELD_NONE;
-	fmt->fmt.pix.bytesperline = uvc_v4l2_get_bytesperline(format, frame);
+	fmt->fmt.pix.bytesperline = format->bpp * frame->wWidth / 8;
 	fmt->fmt.pix.sizeimage = stream->ctrl.dwMaxVideoFrameSize;
 	fmt->fmt.pix.colorspace = format->colorspace;
 	fmt->fmt.pix.priv = 0;
@@ -325,25 +310,17 @@ static int uvc_v4l2_set_format(struct uvc_streaming *stream,
 	mutex_lock(&stream->mutex);
 
 	if (uvc_queue_allocated(&stream->queue)) {
-		/*
-		* There we do not care the queue that had been allocated
-		* by anyone.We just do nothing.
-		* ret = -EBUSY;
-		* goto done;
-		*/
+		ret = -EBUSY;
+		goto done;
 	}
 
 	stream->ctrl = probe;
 	stream->cur_format = format;
 	stream->cur_frame = frame;
 
+done:
 	mutex_unlock(&stream->mutex);
 	return ret;
-/*
-* done:
-*      mutex_unlock(&stream->mutex);
-*      return ret;
-*/
 }
 
 static int uvc_v4l2_get_streamparm(struct uvc_streaming *stream,
@@ -581,10 +558,6 @@ static int uvc_ioctl_querycap(struct file *file, void *fh,
 	usb_make_path(stream->dev->udev, cap->bus_info, sizeof(cap->bus_info));
 	cap->capabilities = V4L2_CAP_DEVICE_CAPS | V4L2_CAP_STREAMING
 			  | chain->caps;
-	if (stream->type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
-		cap->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING;
-	else
-		cap->device_caps = V4L2_CAP_VIDEO_OUTPUT | V4L2_CAP_STREAMING;
 
 	return 0;
 }
@@ -1006,22 +979,6 @@ static int uvc_ioctl_g_ext_ctrls(struct file *file, void *fh,
 	unsigned int i;
 	int ret;
 
-	if (ctrls->which == V4L2_CTRL_WHICH_DEF_VAL) {
-		for (i = 0; i < ctrls->count; ++ctrl, ++i) {
-			struct v4l2_queryctrl qc = { .id = ctrl->id };
-
-			ret = uvc_query_v4l2_ctrl(chain, &qc);
-			if (ret < 0) {
-				ctrls->error_idx = i;
-				return ret;
-			}
-
-			ctrl->value = qc.default_value;
-		}
-
-		return 0;
-	}
-
 	ret = uvc_ctrl_begin(chain);
 	if (ret < 0)
 		return ret;
@@ -1048,10 +1005,6 @@ static int uvc_ioctl_s_try_ext_ctrls(struct uvc_fh *handle,
 	struct uvc_video_chain *chain = handle->chain;
 	unsigned int i;
 	int ret;
-
-	/* Default value cannot be changed */
-	if (ctrls->which == V4L2_CTRL_WHICH_DEF_VAL)
-		return -EINVAL;
 
 	ret = uvc_ctrl_begin(chain);
 	if (ret < 0)
@@ -1297,6 +1250,8 @@ struct uvc_xu_control_mapping32 {
 static int uvc_v4l2_get_xu_mapping(struct uvc_xu_control_mapping *kp,
 			const struct uvc_xu_control_mapping32 __user *up)
 {
+	struct uvc_menu_info __user *umenus;
+	struct uvc_menu_info __user *kmenus;
 	compat_caddr_t p;
 
 	if (!access_ok(VERIFY_READ, up, sizeof(*up)) ||
@@ -1313,7 +1268,17 @@ static int uvc_v4l2_get_xu_mapping(struct uvc_xu_control_mapping *kp,
 
 	if (__get_user(p, &up->menu_info))
 		return -EFAULT;
-	kp->menu_info = compat_ptr(p);
+	umenus = compat_ptr(p);
+	if (!access_ok(VERIFY_READ, umenus, kp->menu_count * sizeof(*umenus)))
+		return -EFAULT;
+
+	kmenus = compat_alloc_user_space(kp->menu_count * sizeof(*kmenus));
+	if (kmenus == NULL)
+		return -EFAULT;
+	kp->menu_info = kmenus;
+
+	if (copy_in_user(kmenus, umenus, kp->menu_count * sizeof(*umenus)))
+		return -EFAULT;
 
 	return 0;
 }
@@ -1321,12 +1286,26 @@ static int uvc_v4l2_get_xu_mapping(struct uvc_xu_control_mapping *kp,
 static int uvc_v4l2_put_xu_mapping(const struct uvc_xu_control_mapping *kp,
 			struct uvc_xu_control_mapping32 __user *up)
 {
+	struct uvc_menu_info __user *umenus;
+	struct uvc_menu_info __user *kmenus = kp->menu_info;
+	compat_caddr_t p;
+
 	if (!access_ok(VERIFY_WRITE, up, sizeof(*up)) ||
 	    __copy_to_user(up, kp, offsetof(typeof(*up), menu_info)) ||
 	    __put_user(kp->menu_count, &up->menu_count))
 		return -EFAULT;
 
 	if (__clear_user(up->reserved, sizeof(up->reserved)))
+		return -EFAULT;
+
+	if (kp->menu_count == 0)
+		return 0;
+
+	if (get_user(p, &up->menu_info))
+		return -EFAULT;
+	umenus = compat_ptr(p);
+
+	if (copy_in_user(umenus, kmenus, kp->menu_count * sizeof(*umenus)))
 		return -EFAULT;
 
 	return 0;
@@ -1343,6 +1322,8 @@ struct uvc_xu_control_query32 {
 static int uvc_v4l2_get_xu_query(struct uvc_xu_control_query *kp,
 			const struct uvc_xu_control_query32 __user *up)
 {
+	u8 __user *udata;
+	u8 __user *kdata;
 	compat_caddr_t p;
 
 	if (!access_ok(VERIFY_READ, up, sizeof(*up)) ||
@@ -1356,7 +1337,17 @@ static int uvc_v4l2_get_xu_query(struct uvc_xu_control_query *kp,
 
 	if (__get_user(p, &up->data))
 		return -EFAULT;
-	kp->data = compat_ptr(p);
+	udata = compat_ptr(p);
+	if (!access_ok(VERIFY_READ, udata, kp->size))
+		return -EFAULT;
+
+	kdata = compat_alloc_user_space(kp->size);
+	if (kdata == NULL)
+		return -EFAULT;
+	kp->data = kdata;
+
+	if (copy_in_user(kdata, udata, kp->size))
+		return -EFAULT;
 
 	return 0;
 }
@@ -1364,8 +1355,24 @@ static int uvc_v4l2_get_xu_query(struct uvc_xu_control_query *kp,
 static int uvc_v4l2_put_xu_query(const struct uvc_xu_control_query *kp,
 			struct uvc_xu_control_query32 __user *up)
 {
+	u8 __user *udata;
+	u8 __user *kdata = kp->data;
+	compat_caddr_t p;
+
 	if (!access_ok(VERIFY_WRITE, up, sizeof(*up)) ||
 	    __copy_to_user(up, kp, offsetof(typeof(*up), data)))
+		return -EFAULT;
+
+	if (kp->size == 0)
+		return 0;
+
+	if (get_user(p, &up->data))
+		return -EFAULT;
+	udata = compat_ptr(p);
+	if (!access_ok(VERIFY_READ, udata, kp->size))
+		return -EFAULT;
+
+	if (copy_in_user(udata, kdata, kp->size))
 		return -EFAULT;
 
 	return 0;

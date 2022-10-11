@@ -279,7 +279,7 @@ static void print_name_offset(struct seq_file *m, unsigned long addr)
 
 static int tstats_show(struct seq_file *m, void *v)
 {
-	struct timespec64 period;
+	struct timespec period;
 	struct entry *entry;
 	unsigned long ms;
 	long events = 0;
@@ -295,11 +295,11 @@ static int tstats_show(struct seq_file *m, void *v)
 
 	time = ktime_sub(time_stop, time_start);
 
-	period = ktime_to_timespec64(time);
+	period = ktime_to_timespec(time);
 	ms = period.tv_nsec / 1000000;
 
 	seq_puts(m, "Timer Stats Version: v0.3\n");
-	seq_printf(m, "Sample period: %ld.%03ld s\n", (long)period.tv_sec, ms);
+	seq_printf(m, "Sample period: %ld.%03ld s\n", period.tv_sec, ms);
 	if (atomic_read(&overflow_count))
 		seq_printf(m, "Overflow: %d entries\n", atomic_read(&overflow_count));
 	seq_printf(m, "Collection: %s\n", timer_stats_active ? "active" : "inactive");
@@ -417,7 +417,7 @@ static int __init init_tstats_procfs(void)
 {
 	struct proc_dir_entry *pe;
 
-	pe = proc_create("timer_stats", 0644, NULL, &tstats_fops);
+	pe = proc_create("timer_stats", 0600, NULL, &tstats_fops);
 	if (!pe)
 		return -ENOMEM;
 	return 0;

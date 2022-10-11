@@ -25,7 +25,6 @@
 #include "btrfs_inode.h"
 #include "extent_io.h"
 #include "disk-io.h"
-#include "compression.h"
 
 static struct kmem_cache *btrfs_ordered_extent_cache;
 
@@ -67,8 +66,8 @@ static void ordered_data_tree_panic(struct inode *inode, int errno,
 					       u64 offset)
 {
 	struct btrfs_fs_info *fs_info = btrfs_sb(inode->i_sb);
-	btrfs_panic(fs_info, errno,
-		    "Inconsistency in ordered tree at offset %llu", offset);
+	btrfs_panic(fs_info, errno, "Inconsistency in ordered tree at offset "
+		    "%llu", offset);
 }
 
 /*
@@ -661,15 +660,14 @@ static void btrfs_run_ordered_extent_work(struct btrfs_work *work)
  * wait for all the ordered extents in a root.  This is done when balancing
  * space between drives.
  */
-int btrfs_wait_ordered_extents(struct btrfs_root *root, int nr,
-			       const u64 range_start, const u64 range_len)
+int btrfs_wait_ordered_extents(struct btrfs_root *root, int nr)
 {
-	LIST_HEAD(splice);
-	LIST_HEAD(skipped);
-	LIST_HEAD(works);
+	struct list_head splice, works;
 	struct btrfs_ordered_extent *ordered, *next;
 	int count = 0;
-	const u64 range_end = range_start + range_len;
+
+	INIT_LIST_HEAD(&splice);
+	INIT_LIST_HEAD(&works);
 
 	mutex_lock(&root->ordered_extent_mutex);
 	spin_lock(&root->ordered_extent_lock);
@@ -677,14 +675,6 @@ int btrfs_wait_ordered_extents(struct btrfs_root *root, int nr,
 	while (!list_empty(&splice) && nr) {
 		ordered = list_first_entry(&splice, struct btrfs_ordered_extent,
 					   root_extent_list);
-
-		if (range_end <= ordered->start ||
-		    ordered->start + ordered->disk_len <= range_start) {
-			list_move_tail(&ordered->root_extent_list, &skipped);
-			cond_resched_lock(&root->ordered_extent_lock);
-			continue;
-		}
-
 		list_move_tail(&ordered->root_extent_list,
 			       &root->ordered_extents);
 		atomic_inc(&ordered->refs);
@@ -703,7 +693,6 @@ int btrfs_wait_ordered_extents(struct btrfs_root *root, int nr,
 			nr--;
 		count++;
 	}
-	list_splice_tail(&skipped, &root->ordered_extents);
 	list_splice_tail(&splice, &root->ordered_extents);
 	spin_unlock(&root->ordered_extent_lock);
 
@@ -718,13 +707,11 @@ int btrfs_wait_ordered_extents(struct btrfs_root *root, int nr,
 	return count;
 }
 
-int btrfs_wait_ordered_roots(struct btrfs_fs_info *fs_info, int nr,
-			      const u64 range_start, const u64 range_len)
+void btrfs_wait_ordered_roots(struct btrfs_fs_info *fs_info, int nr)
 {
 	struct btrfs_root *root;
 	struct list_head splice;
 	int done;
-	int total_done = 0;
 
 	INIT_LIST_HEAD(&splice);
 
@@ -740,10 +727,8 @@ int btrfs_wait_ordered_roots(struct btrfs_fs_info *fs_info, int nr,
 			       &fs_info->ordered_roots);
 		spin_unlock(&fs_info->ordered_root_lock);
 
-		done = btrfs_wait_ordered_extents(root, nr,
-						  range_start, range_len);
+		done = btrfs_wait_ordered_extents(root, nr);
 		btrfs_put_fs_root(root);
-		total_done += done;
 
 		spin_lock(&fs_info->ordered_root_lock);
 		if (nr != -1) {
@@ -754,8 +739,6 @@ int btrfs_wait_ordered_roots(struct btrfs_fs_info *fs_info, int nr,
 	list_splice_tail(&splice, &fs_info->ordered_roots);
 	spin_unlock(&fs_info->ordered_root_lock);
 	mutex_unlock(&fs_info->ordered_operations_mutex);
-
-	return total_done;
 }
 
 /*
@@ -968,7 +951,6 @@ int btrfs_ordered_update_i_size(struct inode *inode, u64 offset,
 	struct rb_node *prev = NULL;
 	struct btrfs_ordered_extent *test;
 	int ret = 1;
-	u64 orig_offset = offset;
 
 	spin_lock_irq(&tree->lock);
 	if (ordered) {
@@ -984,7 +966,7 @@ int btrfs_ordered_update_i_size(struct inode *inode, u64 offset,
 
 	/* truncate file */
 	if (disk_i_size > i_size) {
-		BTRFS_I(inode)->disk_i_size = orig_offset;
+		BTRFS_I(inode)->disk_i_size = i_size;
 		ret = 0;
 		goto out;
 	}
@@ -1027,7 +1009,7 @@ int btrfs_ordered_update_i_size(struct inode *inode, u64 offset,
 	for (; node; node = rb_prev(node)) {
 		test = rb_entry(node, struct btrfs_ordered_extent, rb_node);
 
-		/* We treat this entry as if it doesn't exist */
+		/* We treat this entry as if it doesnt exist */
 		if (test_bit(BTRFS_ORDERED_UPDATED_ISIZE, &test->flags))
 			continue;
 		if (test->file_offset + test->len <= disk_i_size)
@@ -1122,7 +1104,7 @@ int __init ordered_data_init(void)
 {
 	btrfs_ordered_extent_cache = kmem_cache_create("btrfs_ordered_extent",
 				     sizeof(struct btrfs_ordered_extent), 0,
-				     SLAB_MEM_SPREAD,
+				     SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD,
 				     NULL);
 	if (!btrfs_ordered_extent_cache)
 		return -ENOMEM;
@@ -1132,5 +1114,6 @@ int __init ordered_data_init(void)
 
 void ordered_data_exit(void)
 {
-	kmem_cache_destroy(btrfs_ordered_extent_cache);
+	if (btrfs_ordered_extent_cache)
+		kmem_cache_destroy(btrfs_ordered_extent_cache);
 }

@@ -253,11 +253,11 @@ static const struct clk_ops pll_clk_ops = {
 	.recalc_rate = pll_clk_recalc_rate,
 };
 
-static struct clk_hw * __init
+static struct clk * __init
 pll_clk_register(struct device *dev, const char *name,
 		 const char *parent_name, u32 id)
 {
-	int ret;
+	struct clk *clk;
 	struct clk_pll *pll;
 	struct clk_init_data init;
 
@@ -281,13 +281,11 @@ pll_clk_register(struct device *dev, const char *name,
 
 	pr_debug("register PLL1 clock \"%s\"\n", name);
 
-	ret = clk_hw_register(dev, &pll->hw);
-	if (ret) {
+	clk = clk_register(dev, &pll->hw);
+	if (IS_ERR(clk))
 		kfree(pll);
-		return ERR_PTR(ret);
-	}
 
-	return &pll->hw;
+	return clk;
 }
 
 /*
@@ -347,11 +345,11 @@ static const struct clk_ops src_clk_ops = {
 	.recalc_rate = src_clk_recalc_rate,
 };
 
-static struct clk_hw * __init
+static struct clk * __init
 src_clk_register(struct device *dev, const char *name,
 		 const char *parent_name, u8 id)
 {
-	int ret;
+	struct clk *clk;
 	struct clk_src *sclk;
 	struct clk_init_data init;
 
@@ -378,13 +376,11 @@ src_clk_register(struct device *dev, const char *name,
 	pr_debug("register clock \"%s\" ID: %d group: %d bits: %08x\n",
 		 name, id, sclk->group1, sclk->clkbit);
 
-	ret = clk_hw_register(dev, &sclk->hw);
-	if (ret) {
+	clk = clk_register(dev, &sclk->hw);
+	if (IS_ERR(clk))
 		kfree(sclk);
-		return ERR_PTR(ret);
-	}
 
-	return &sclk->hw;
+	return clk;
 }
 
 #ifdef CONFIG_DEBUG_FS
@@ -512,7 +508,7 @@ device_initcall(nomadik_src_clk_init_debugfs);
 
 static void __init of_nomadik_pll_setup(struct device_node *np)
 {
-	struct clk_hw *hw;
+	struct clk *clk = ERR_PTR(-EINVAL);
 	const char *clk_name = np->name;
 	const char *parent_name;
 	u32 pll_id;
@@ -526,16 +522,16 @@ static void __init of_nomadik_pll_setup(struct device_node *np)
 		return;
 	}
 	parent_name = of_clk_get_parent_name(np, 0);
-	hw = pll_clk_register(NULL, clk_name, parent_name, pll_id);
-	if (!IS_ERR(hw))
-		of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
+	clk = pll_clk_register(NULL, clk_name, parent_name, pll_id);
+	if (!IS_ERR(clk))
+		of_clk_add_provider(np, of_clk_src_simple_get, clk);
 }
 CLK_OF_DECLARE(nomadik_pll_clk,
 	"st,nomadik-pll-clock", of_nomadik_pll_setup);
 
 static void __init of_nomadik_hclk_setup(struct device_node *np)
 {
-	struct clk_hw *hw;
+	struct clk *clk = ERR_PTR(-EINVAL);
 	const char *clk_name = np->name;
 	const char *parent_name;
 
@@ -546,20 +542,20 @@ static void __init of_nomadik_hclk_setup(struct device_node *np)
 	/*
 	 * The HCLK divides PLL1 with 1 (passthru), 2, 3 or 4.
 	 */
-	hw = clk_hw_register_divider(NULL, clk_name, parent_name,
+	clk = clk_register_divider(NULL, clk_name, parent_name,
 			   0, src_base + SRC_CR,
 			   13, 2,
 			   CLK_DIVIDER_ONE_BASED | CLK_DIVIDER_ALLOW_ZERO,
 			   &src_lock);
-	if (!IS_ERR(hw))
-		of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
+	if (!IS_ERR(clk))
+		of_clk_add_provider(np, of_clk_src_simple_get, clk);
 }
 CLK_OF_DECLARE(nomadik_hclk_clk,
 	"st,nomadik-hclk-clock", of_nomadik_hclk_setup);
 
 static void __init of_nomadik_src_clk_setup(struct device_node *np)
 {
-	struct clk_hw *hw;
+	struct clk *clk = ERR_PTR(-EINVAL);
 	const char *clk_name = np->name;
 	const char *parent_name;
 	u32 clk_id;
@@ -573,9 +569,9 @@ static void __init of_nomadik_src_clk_setup(struct device_node *np)
 		return;
 	}
 	parent_name = of_clk_get_parent_name(np, 0);
-	hw = src_clk_register(NULL, clk_name, parent_name, clk_id);
-	if (!IS_ERR(hw))
-		of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
+	clk = src_clk_register(NULL, clk_name, parent_name, clk_id);
+	if (!IS_ERR(clk))
+		of_clk_add_provider(np, of_clk_src_simple_get, clk);
 }
 CLK_OF_DECLARE(nomadik_src_clk,
 	"st,nomadik-src-clock", of_nomadik_src_clk_setup);

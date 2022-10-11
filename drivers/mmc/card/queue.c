@@ -20,9 +20,7 @@
 #include <linux/mmc/card.h>
 #include <linux/mmc/host.h>
 #include <linux/sched/rt.h>
-
 #include "queue.h"
-#include "block.h"
 
 #define MMC_QUEUE_BOUNCESZ	65536
 
@@ -36,8 +34,7 @@ static int mmc_prep_request(struct request_queue *q, struct request *req)
 	/*
 	 * We only like normal block requests and discards.
 	 */
-	if (req->cmd_type != REQ_TYPE_FS && req_op(req) != REQ_OP_DISCARD &&
-	    req_op(req) != REQ_OP_SECURE_ERASE) {
+	if (req->cmd_type != REQ_TYPE_FS && !(req->cmd_flags & REQ_DISCARD)) {
 		blk_dump_rq_flags(req, "MMC bad request");
 		return BLKPREP_KILL;
 	}
@@ -65,6 +62,7 @@ static int mmc_queue_thread(void *d)
 	down(&mq->thread_sem);
 	do {
 		struct request *req = NULL;
+		unsigned int cmd_flags = 0;
 
 		spin_lock_irq(q->queue_lock);
 		set_current_state(TASK_INTERRUPTIBLE);
@@ -73,10 +71,9 @@ static int mmc_queue_thread(void *d)
 		spin_unlock_irq(q->queue_lock);
 
 		if (req || mq->mqrq_prev->req) {
-			bool req_is_special = mmc_req_is_special(req);
-
 			set_current_state(TASK_RUNNING);
-			mmc_blk_issue_rq(mq, req);
+			cmd_flags = req ? req->cmd_flags : 0;
+			mq->issue_fn(mq, req);
 			cond_resched();
 			if (mq->flags & MMC_QUEUE_NEW_REQUEST) {
 				mq->flags &= ~MMC_QUEUE_NEW_REQUEST;
@@ -90,7 +87,7 @@ static int mmc_queue_thread(void *d)
 			 * has been finished. Do not assign it to previous
 			 * request.
 			 */
-			if (req_is_special)
+			if (cmd_flags & MMC_REQ_SPECIAL_MASK)
 				mq->mqrq_cur->req = NULL;
 
 			mq->mqrq_prev->brq.mrq.data = NULL;
@@ -182,7 +179,7 @@ static void mmc_queue_setup_discard(struct request_queue *q,
 	if (card->pref_erase > max_discard)
 		q->limits.discard_granularity = 0;
 	if (mmc_can_secure_erase_trim(card))
-		queue_flag_set_unlocked(QUEUE_FLAG_SECERASE, q);
+		queue_flag_set_unlocked(QUEUE_FLAG_SECDISCARD, q);
 }
 
 /**
@@ -482,11 +479,7 @@ static unsigned int mmc_queue_packed_map_sg(struct mmc_queue *mq,
 	}
 
 	list_for_each_entry(req, &packed->list, queuelist) {
-#if defined(CONFIG_DM_CRYPT) && defined(CONFIG_SUNXI_EMCE)
-		sg_len += sunxi_blk_rq_map_sg(mq->queue, req, __sg);
-#else
 		sg_len += blk_rq_map_sg(mq->queue, req, __sg);
-#endif
 		__sg = sg + (sg_len - 1);
 		sg_unmark_end(__sg++);
 	}
@@ -512,11 +505,7 @@ unsigned int mmc_queue_map_sg(struct mmc_queue *mq, struct mmc_queue_req *mqrq)
 			return mmc_queue_packed_map_sg(mq, mqrq->packed,
 						       mqrq->sg, cmd_type);
 		else
-#if defined(CONFIG_DM_CRYPT) && defined(CONFIG_SUNXI_EMCE)
-			return sunxi_blk_rq_map_sg(mq->queue, mqrq->req, mqrq->sg);
-#else
 			return blk_rq_map_sg(mq->queue, mqrq->req, mqrq->sg);
-#endif
 	}
 
 	BUG_ON(!mqrq->bounce_sg);
@@ -525,53 +514,7 @@ unsigned int mmc_queue_map_sg(struct mmc_queue *mq, struct mmc_queue_req *mqrq)
 		sg_len = mmc_queue_packed_map_sg(mq, mqrq->packed,
 						 mqrq->bounce_sg, cmd_type);
 	else
-#if defined(CONFIG_DM_CRYPT) && defined(CONFIG_SUNXI_EMCE)
-		sg_len = sunxi_blk_rq_map_sg(mq->queue, mqrq->req, mqrq->bounce_sg);
-#else
 		sg_len = blk_rq_map_sg(mq->queue, mqrq->req, mqrq->bounce_sg);
-#endif
-	mqrq->bounce_sg_len = sg_len;
-
-	buflen = 0;
-	for_each_sg(mqrq->bounce_sg, sg, sg_len, i)
-		buflen += sg->length;
-
-	sg_init_one(mqrq->sg, mqrq->bounce_buf, buflen);
-
-	return 1;
-}
-
-/*
- * Prepare the sunxi sd sg list(s) to be handed of to the host driver
- */
-unsigned int sd_mmc_queue_map_sg(struct mmc_queue *mq, struct mmc_queue_req *mqrq)
-{
-	unsigned int sg_len;
-	size_t buflen;
-	struct scatterlist *sg;
-	enum mmc_packed_type cmd_type;
-	int i;
-
-	cmd_type = mqrq->cmd_type;
-
-	if (!mqrq->bounce_buf) {
-		if (mmc_packed_cmd(cmd_type))
-			return mmc_queue_packed_map_sg(mq, mqrq->packed,
-						       mqrq->sg, cmd_type);
-		else {
-			return blk_rq_map_sg(mq->queue, mqrq->req, mqrq->sg);
-		}
-	}
-
-	BUG_ON(!mqrq->bounce_sg);
-
-	if (mmc_packed_cmd(cmd_type))
-		sg_len = mmc_queue_packed_map_sg(mq, mqrq->packed,
-						 mqrq->bounce_sg, cmd_type);
-	else {
-
-		sg_len = blk_rq_map_sg(mq->queue, mqrq->req, mqrq->bounce_sg);
-	}
 
 	mqrq->bounce_sg_len = sg_len;
 

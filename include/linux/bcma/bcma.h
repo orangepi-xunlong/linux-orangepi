@@ -4,7 +4,6 @@
 #include <linux/pci.h>
 #include <linux/mod_devicetable.h>
 
-#include <linux/bcma/bcma_driver_arm_c9.h>
 #include <linux/bcma/bcma_driver_chipcommon.h>
 #include <linux/bcma/bcma_driver_pci.h>
 #include <linux/bcma/bcma_driver_pcie2.h>
@@ -152,8 +151,6 @@ struct bcma_host_ops {
 #define BCMA_CORE_PCIE2			0x83C	/* PCI Express Gen2 */
 #define BCMA_CORE_USB30_DEV		0x83D
 #define BCMA_CORE_ARM_CR4		0x83E
-#define BCMA_CORE_GCI			0x840
-#define BCMA_CORE_CMEM			0x846	/* CNDS DDR2/3 memory controller */
 #define BCMA_CORE_ARM_CA7		0x847
 #define BCMA_CORE_SYS_MEM		0x849
 #define BCMA_CORE_DEFAULT		0xFFF
@@ -203,11 +200,7 @@ struct bcma_host_ops {
 #define  BCMA_PKG_ID_BCM4707	1
 #define  BCMA_PKG_ID_BCM4708	2
 #define  BCMA_PKG_ID_BCM4709	0
-#define BCMA_CHIP_ID_BCM47094	53030
 #define BCMA_CHIP_ID_BCM53018	53018
-#define BCMA_CHIP_ID_BCM53573	53573
-#define  BCMA_PKG_ID_BCM53573	0
-#define  BCMA_PKG_ID_BCM47189	1
 
 /* Board types (on PCI usually equals to the subsystem dev id) */
 /* BCM4313 */

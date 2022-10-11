@@ -37,7 +37,7 @@ static unsigned int mpls_encap_size(struct mpls_iptunnel_encap *en)
 	return en->labels * sizeof(struct mpls_shim_hdr);
 }
 
-static int mpls_xmit(struct sk_buff *skb)
+int mpls_output(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
 	struct mpls_iptunnel_encap *tun_encap_info;
 	struct mpls_shim_hdr *hdr;
@@ -90,11 +90,7 @@ static int mpls_xmit(struct sk_buff *skb)
 	if (skb_cow(skb, hh_len + new_header_size))
 		goto drop;
 
-	skb_set_inner_protocol(skb, skb->protocol);
-	skb_reset_inner_network_header(skb);
-
 	skb_push(skb, new_header_size);
-
 	skb_reset_network_header(skb);
 
 	skb->dev = out_dev;
@@ -119,7 +115,7 @@ static int mpls_xmit(struct sk_buff *skb)
 		net_dbg_ratelimited("%s: packet transmission failed: %d\n",
 				    __func__, err);
 
-	return LWTUNNEL_XMIT_DONE;
+	return 0;
 
 drop:
 	kfree_skb(skb);
@@ -157,8 +153,7 @@ static int mpls_build_state(struct net_device *dev, struct nlattr *nla,
 	if (ret)
 		goto errout;
 	newts->type = LWTUNNEL_ENCAP_MPLS;
-	newts->flags |= LWTUNNEL_STATE_XMIT_REDIRECT;
-	newts->headroom = mpls_encap_size(tun_encap_info);
+	newts->flags |= LWTUNNEL_STATE_OUTPUT_REDIRECT;
 
 	*ts = newts;
 
@@ -214,11 +209,10 @@ static int mpls_encap_cmp(struct lwtunnel_state *a, struct lwtunnel_state *b)
 
 static const struct lwtunnel_encap_ops mpls_iptun_ops = {
 	.build_state = mpls_build_state,
-	.xmit = mpls_xmit,
+	.output = mpls_output,
 	.fill_encap = mpls_fill_encap_info,
 	.get_encap_size = mpls_encap_nlsize,
 	.cmp_encap = mpls_encap_cmp,
-	.owner = THIS_MODULE,
 };
 
 static int __init mpls_iptunnel_init(void)
@@ -233,6 +227,5 @@ static void __exit mpls_iptunnel_exit(void)
 }
 module_exit(mpls_iptunnel_exit);
 
-MODULE_ALIAS_RTNL_LWT(MPLS);
 MODULE_DESCRIPTION("MultiProtocol Label Switching IP Tunnels");
 MODULE_LICENSE("GPL v2");

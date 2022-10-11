@@ -25,6 +25,7 @@
 *.elf
 *.bin
 *.tar
+*.gz
 *.bz2
 *.lzma
 *.xz
@@ -37,11 +38,14 @@ modules.builtin
 Module.symvers
 *.dwo
 *.su
-*.c.[012]*.*
 
 #
 # Top-level generic files
 #
+/boot.img
+/kernel.img
+/resource.img
+/zboot.img
 /tags
 /TAGS
 /linux
@@ -63,11 +67,10 @@ Module.symvers
 /tar-install/
 
 #
-# git files that we don't want to ignore even if they are dot-files
+# git files that we don't want to ignore even it they are dot-files
 #
 !.gitignore
 !.mailmap
-!.cocciconfig
 
 #
 # Generated include files
@@ -115,8 +118,5 @@ all.config
 # Kdevelop4
 *.kdev4
 
-# Do not track output folder.
-/output
-
-# ignore gator md5 data
-drivers/gator/gator_src_md5.h
+# fetched Android config fragments
+android/configs/android-*.cfg

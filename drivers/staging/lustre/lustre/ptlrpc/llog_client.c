@@ -15,7 +15,11 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.gnu.org/licenses/gpl-2.0.html
+ * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
  *
  * GPL HEADER END
  */
@@ -23,7 +27,7 @@
  * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2012, 2015, Intel Corporation.
+ * Copyright (c) 2012, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -71,8 +75,7 @@
 } while (0)
 
 /* This is a callback from the llog_* functions.
- * Assumes caller has already pushed us into the kernel context.
- */
+ * Assumes caller has already pushed us into the kernel context. */
 static int llog_client_open(const struct lu_env *env,
 			    struct llog_handle *lgh, struct llog_logid *logid,
 			    char *name, enum llog_open_param open_param)
@@ -90,7 +93,7 @@ static int llog_client_open(const struct lu_env *env,
 	LASSERT(lgh);
 
 	req = ptlrpc_request_alloc(imp, &RQF_LLOG_ORIGIN_HANDLE_CREATE);
-	if (!req) {
+	if (req == NULL) {
 		rc = -ENOMEM;
 		goto out;
 	}
@@ -127,7 +130,7 @@ static int llog_client_open(const struct lu_env *env,
 		goto out;
 
 	body = req_capsule_server_get(&req->rq_pill, &RMF_LLOGD_BODY);
-	if (!body) {
+	if (body == NULL) {
 		rc = -EFAULT;
 		goto out;
 	}
@@ -155,7 +158,7 @@ static int llog_client_next_block(const struct lu_env *env,
 	req = ptlrpc_request_alloc_pack(imp, &RQF_LLOG_ORIGIN_HANDLE_NEXT_BLOCK,
 					LUSTRE_LOG_VERSION,
 					LLOG_ORIGIN_HANDLE_NEXT_BLOCK);
-	if (!req) {
+	if (req == NULL) {
 		rc = -ENOMEM;
 		goto err_exit;
 	}
@@ -176,14 +179,14 @@ static int llog_client_next_block(const struct lu_env *env,
 		goto out;
 
 	body = req_capsule_server_get(&req->rq_pill, &RMF_LLOGD_BODY);
-	if (!body) {
+	if (body == NULL) {
 		rc = -EFAULT;
 		goto out;
 	}
 
 	/* The log records are swabbed as they are processed */
 	ptr = req_capsule_server_get(&req->rq_pill, &RMF_EADATA);
-	if (!ptr) {
+	if (ptr == NULL) {
 		rc = -EFAULT;
 		goto out;
 	}
@@ -213,7 +216,7 @@ static int llog_client_prev_block(const struct lu_env *env,
 	req = ptlrpc_request_alloc_pack(imp, &RQF_LLOG_ORIGIN_HANDLE_PREV_BLOCK,
 					LUSTRE_LOG_VERSION,
 					LLOG_ORIGIN_HANDLE_PREV_BLOCK);
-	if (!req) {
+	if (req == NULL) {
 		rc = -ENOMEM;
 		goto err_exit;
 	}
@@ -233,13 +236,13 @@ static int llog_client_prev_block(const struct lu_env *env,
 		goto out;
 
 	body = req_capsule_server_get(&req->rq_pill, &RMF_LLOGD_BODY);
-	if (!body) {
+	if (body == NULL) {
 		rc = -EFAULT;
 		goto out;
 	}
 
 	ptr = req_capsule_server_get(&req->rq_pill, &RMF_EADATA);
-	if (!ptr) {
+	if (ptr == NULL) {
 		rc = -EFAULT;
 		goto out;
 	}
@@ -266,7 +269,7 @@ static int llog_client_read_header(const struct lu_env *env,
 	req = ptlrpc_request_alloc_pack(imp, &RQF_LLOG_ORIGIN_HANDLE_READ_HEADER,
 					LUSTRE_LOG_VERSION,
 					LLOG_ORIGIN_HANDLE_READ_HEADER);
-	if (!req) {
+	if (req == NULL) {
 		rc = -ENOMEM;
 		goto err_exit;
 	}
@@ -282,7 +285,7 @@ static int llog_client_read_header(const struct lu_env *env,
 		goto out;
 
 	hdr = req_capsule_server_get(&req->rq_pill, &RMF_LLOG_LOG_HDR);
-	if (!hdr) {
+	if (hdr == NULL) {
 		rc = -EFAULT;
 		goto out;
 	}
@@ -313,9 +316,8 @@ static int llog_client_close(const struct lu_env *env,
 			     struct llog_handle *handle)
 {
 	/* this doesn't call LLOG_ORIGIN_HANDLE_CLOSE because
-	 *  the servers all close the file at the end of every
-	 * other LLOG_ RPC.
-	 */
+	   the servers all close the file at the end of every
+	   other LLOG_ RPC. */
 	return 0;
 }
 

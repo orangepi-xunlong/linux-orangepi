@@ -179,16 +179,6 @@ static inline struct kqid make_kqid_projid(kprojid_t projid)
 	return kqid;
 }
 
-/**
- *	qid_has_mapping - Report if a qid maps into a user namespace.
- *	@ns:  The user namespace to see if a value maps into.
- *	@qid: The kernel internal quota identifier to test.
- */
-static inline bool qid_has_mapping(struct user_namespace *ns, struct kqid qid)
-{
-	return from_kqid(ns, qid) != (qid_t) -1;
-}
-
 
 extern spinlock_t dq_data_lock;
 
@@ -210,8 +200,8 @@ struct mem_dqblk {
 	qsize_t dqb_ihardlimit;	/* absolute limit on allocated inodes */
 	qsize_t dqb_isoftlimit;	/* preferred inode limit */
 	qsize_t dqb_curinodes;	/* current # allocated inodes */
-	time64_t dqb_btime;	/* time limit for excessive disk use */
-	time64_t dqb_itime;	/* time limit for excessive inode use */
+	time_t dqb_btime;	/* time limit for excessive disk use */
+	time_t dqb_itime;	/* time limit for excessive inode use */
 };
 
 /*
@@ -316,7 +306,6 @@ struct quota_format_ops {
 	int (*read_dqblk)(struct dquot *dquot);		/* Read structure for one user */
 	int (*commit_dqblk)(struct dquot *dquot);	/* Write structure for one user */
 	int (*release_dqblk)(struct dquot *dquot);	/* Called when last reference to dquot is being dropped */
-	int (*get_next_id)(struct super_block *sb, struct kqid *qid);	/* Get next ID with existing structure in the quota file */
 };
 
 /* Operations working with dquots */
@@ -332,8 +321,6 @@ struct dquot_operations {
 	 * quota code only */
 	qsize_t *(*get_reserved_space) (struct inode *);
 	int (*get_projid) (struct inode *, kprojid_t *);/* Get project ID */
-	/* Get next ID with active quota structure */
-	int (*get_next_id) (struct super_block *sb, struct kqid *qid);
 };
 
 struct path;
@@ -438,8 +425,6 @@ struct quotactl_ops {
 	int (*quota_sync)(struct super_block *, int);
 	int (*set_info)(struct super_block *, int, struct qc_info *);
 	int (*get_dqblk)(struct super_block *, struct kqid, struct qc_dqblk *);
-	int (*get_nextdqblk)(struct super_block *, struct kqid *,
-			     struct qc_dqblk *);
 	int (*set_dqblk)(struct super_block *, struct kqid, struct qc_dqblk *);
 	int (*get_state)(struct super_block *, struct qc_state *);
 	int (*rm_xquota)(struct super_block *, unsigned int);

@@ -33,27 +33,28 @@ static int __init x86_rdrand_setup(char *s)
 __setup("nordrand", x86_rdrand_setup);
 
 /*
- * RDRAND has Built-In-Self-Test (BIST) that runs on every invocation.
- * Run the instruction a few times as a sanity check.
- * If it fails, it is simple to disable RDRAND here.
+ * Force a reseed cycle; we are architecturally guaranteed a reseed
+ * after no more than 512 128-bit chunks of random data.  This also
+ * acts as a test of the CPU capability.
  */
-#define SANITY_CHECK_LOOPS 8
+#define RESEED_LOOP ((512*128)/sizeof(unsigned long))
 
-#ifdef CONFIG_ARCH_RANDOM
 void x86_init_rdrand(struct cpuinfo_x86 *c)
 {
+#ifdef CONFIG_ARCH_RANDOM
 	unsigned long tmp;
-	int i;
+	int i, count, ok;
 
 	if (!cpu_has(c, X86_FEATURE_RDRAND))
-		return;
+		return;		/* Nothing to do */
 
-	for (i = 0; i < SANITY_CHECK_LOOPS; i++) {
-		if (!rdrand_long(&tmp)) {
-			clear_cpu_cap(c, X86_FEATURE_RDRAND);
-			pr_warn_once("rdrand: disabled\n");
-			return;
-		}
+	for (count = i = 0; i < RESEED_LOOP; i++) {
+		ok = rdrand_long(&tmp);
+		if (ok)
+			count++;
 	}
-}
+
+	if (count != RESEED_LOOP)
+		clear_cpu_cap(c, X86_FEATURE_RDRAND);
 #endif
+}

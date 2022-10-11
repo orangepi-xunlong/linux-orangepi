@@ -25,18 +25,9 @@ typedef struct {
 #endif
 
 	struct mutex lock;
-	void __user *vdso;			/* vdso base address */
-	const struct vdso_image *vdso_image;	/* vdso image in use */
+	void __user *vdso;
 
 	atomic_t perf_rdpmc_allowed;	/* nonzero if rdpmc is allowed */
-#ifdef CONFIG_X86_INTEL_MEMORY_PROTECTION_KEYS
-	/*
-	 * One bit per protection key says whether userspace can
-	 * use it or not.  protected by mmap_sem.
-	 */
-	u16 pkey_allocation_map;
-	s16 execute_only_pkey;
-#endif
 } mm_context_t;
 
 #define INIT_MM_CONTEXT(mm)						\

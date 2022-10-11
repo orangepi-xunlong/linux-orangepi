@@ -16,7 +16,6 @@ static inline int printk_get_level(const char *buffer)
 		switch (buffer[1]) {
 		case '0' ... '7':
 		case 'd':	/* KERN_DEFAULT */
-		case 'c':	/* KERN_CONT */
 			return buffer[1];
 		}
 	}
@@ -61,11 +60,6 @@ static inline void console_verbose(void)
 	if (console_loglevel)
 		console_loglevel = CONSOLE_LOGLEVEL_MOTORMOUTH;
 }
-
-/* strlen("ratelimit") + 1 */
-#define DEVKMSG_STR_MAX_SIZE 10
-extern char devkmsg_log_str[];
-struct ctl_table;
 
 struct va_format {
 	const char *fmt;
@@ -112,16 +106,13 @@ struct va_format {
 
 /*
  * Dummy printk for disabled debugging statements to use whilst maintaining
- * gcc's format checking.
+ * gcc's format and side-effect checking.
  */
-#define no_printk(fmt, ...)				\
-({							\
-	do {						\
-		if (0)					\
-			printk(fmt, ##__VA_ARGS__);	\
-	} while (0);					\
-	0;						\
-})
+static inline __printf(1, 2)
+int no_printk(const char *fmt, ...)
+{
+	return 0;
+}
 
 #ifdef CONFIG_EARLY_PRINTK
 extern asmlinkage __printf(1, 2)
@@ -131,19 +122,7 @@ static inline __printf(1, 2) __cold
 void early_printk(const char *s, ...) { }
 #endif
 
-#ifdef CONFIG_PRINTK_NMI
-extern void printk_nmi_init(void);
-extern void printk_nmi_enter(void);
-extern void printk_nmi_exit(void);
-extern void printk_nmi_flush(void);
-extern void printk_nmi_flush_on_panic(void);
-#else
-static inline void printk_nmi_init(void) { }
-static inline void printk_nmi_enter(void) { }
-static inline void printk_nmi_exit(void) { }
-static inline void printk_nmi_flush(void) { }
-static inline void printk_nmi_flush_on_panic(void) { }
-#endif /* PRINTK_NMI */
+typedef __printf(1, 0) int (*printk_func_t)(const char *fmt, va_list args);
 
 #ifdef CONFIG_PRINTK
 asmlinkage __printf(5, 0)
@@ -180,10 +159,6 @@ extern bool printk_timed_ratelimit(unsigned long *caller_jiffies,
 extern int printk_delay_msec;
 extern int dmesg_restrict;
 extern int kptr_restrict;
-
-extern int
-devkmsg_sysctl_set_loglvl(struct ctl_table *table, int write, void __user *buf,
-			  size_t *lenp, loff_t *ppos);
 
 extern void wake_up_klogd(void);
 
@@ -299,11 +274,10 @@ extern asmlinkage void dump_stack(void) __cold;
 	no_printk(KERN_DEBUG pr_fmt(fmt), ##__VA_ARGS__)
 #endif
 
+#include <linux/dynamic_debug.h>
 
 /* If you are writing a driver, please use dev_dbg instead */
 #if defined(CONFIG_DYNAMIC_DEBUG)
-#include <linux/dynamic_debug.h>
-
 /* dynamic_pr_debug() uses pr_fmt() internally so we don't need it here */
 #define pr_debug(fmt, ...) \
 	dynamic_pr_debug(fmt, ##__VA_ARGS__)
@@ -323,24 +297,20 @@ extern asmlinkage void dump_stack(void) __cold;
 #define printk_once(fmt, ...)					\
 ({								\
 	static bool __print_once __read_mostly;			\
-	bool __ret_print_once = !__print_once;			\
 								\
 	if (!__print_once) {					\
 		__print_once = true;				\
 		printk(fmt, ##__VA_ARGS__);			\
 	}							\
-	unlikely(__ret_print_once);				\
 })
 #define printk_deferred_once(fmt, ...)				\
 ({								\
 	static bool __print_once __read_mostly;			\
-	bool __ret_print_once = !__print_once;			\
 								\
 	if (!__print_once) {					\
 		__print_once = true;				\
 		printk_deferred(fmt, ##__VA_ARGS__);		\
 	}							\
-	unlikely(__ret_print_once);				\
 })
 #else
 #define printk_once(fmt, ...)					\

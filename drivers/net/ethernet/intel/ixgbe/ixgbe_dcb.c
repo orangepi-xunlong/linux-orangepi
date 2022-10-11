@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel 10 Gigabit PCI Express Linux driver
-  Copyright(c) 1999 - 2016 Intel Corporation.
+  Copyright(c) 1999 - 2014 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -139,11 +139,6 @@ s32 ixgbe_dcb_calculate_tc_credits(struct ixgbe_hw *hw,
 		/* Calculate credit refill ratio using multiplier */
 		credit_refill = min(link_percentage * min_multiplier,
 				    MAX_CREDIT_REFILL);
-
-		/* Refill at least minimum credit */
-		if (credit_refill < min_credit)
-			credit_refill = min_credit;
-
 		p->data_credits_refill = (u16)credit_refill;
 
 		/* Calculate maximum credit for the TC */
@@ -154,7 +149,7 @@ s32 ixgbe_dcb_calculate_tc_credits(struct ixgbe_hw *hw,
 		 * of a TC is too small, the maximum credit may not be
 		 * enough to send out a jumbo frame in data plane arbitration.
 		 */
-		if (credit_max < min_credit)
+		if (credit_max && (credit_max < min_credit))
 			credit_max = min_credit;
 
 		if (direction == DCB_TX_CONFIG) {
@@ -186,7 +181,7 @@ void ixgbe_dcb_unpack_pfc(struct ixgbe_dcb_config *cfg, u8 *pfc_en)
 
 	for (*pfc_en = 0, tc = 0; tc < MAX_TRAFFIC_CLASS; tc++) {
 		if (tc_config[tc].dcb_pfc != pfc_disabled)
-			*pfc_en |= BIT(tc);
+			*pfc_en |= 1 << tc;
 	}
 }
 
@@ -232,7 +227,7 @@ void ixgbe_dcb_unpack_prio(struct ixgbe_dcb_config *cfg, int direction,
 u8 ixgbe_dcb_get_tc_from_up(struct ixgbe_dcb_config *cfg, int direction, u8 up)
 {
 	struct tc_configuration *tc_config = &cfg->tc_config[0];
-	u8 prio_mask = BIT(up);
+	u8 prio_mask = 1 << up;
 	u8 tc = cfg->num_tcs.pg_tcs;
 
 	/* If tc is 0 then DCB is likely not enabled or supported */
@@ -293,7 +288,6 @@ s32 ixgbe_dcb_hw_config(struct ixgbe_hw *hw,
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
-	case ixgbe_mac_x550em_a:
 		return ixgbe_dcb_hw_config_82599(hw, pfc_en, refill, max,
 						 bwgid, ptype, prio_tc);
 	default:
@@ -312,7 +306,6 @@ s32 ixgbe_dcb_hw_pfc_config(struct ixgbe_hw *hw, u8 pfc_en, u8 *prio_tc)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
-	case ixgbe_mac_x550em_a:
 		return ixgbe_dcb_config_pfc_82599(hw, pfc_en, prio_tc);
 	default:
 		break;
@@ -370,7 +363,6 @@ s32 ixgbe_dcb_hw_ets_config(struct ixgbe_hw *hw,
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
-	case ixgbe_mac_x550em_a:
 		ixgbe_dcb_config_rx_arbiter_82599(hw, refill, max,
 						  bwg_id, prio_type, prio_tc);
 		ixgbe_dcb_config_tx_desc_arbiter_82599(hw, refill, max,
@@ -401,7 +393,6 @@ void ixgbe_dcb_read_rtrup2tc(struct ixgbe_hw *hw, u8 *map)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
-	case ixgbe_mac_x550em_a:
 		ixgbe_dcb_read_rtrup2tc_82599(hw, map);
 		break;
 	default:

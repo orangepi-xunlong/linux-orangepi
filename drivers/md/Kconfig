@@ -240,16 +240,6 @@ config DM_BUFIO
 	 as a cache, holding recently-read blocks in memory and performing
 	 delayed writes.
 
-config DM_DEBUG_BLOCK_STACK_TRACING
-       bool "Keep stack trace of persistent data block lock holders"
-       depends on STACKTRACE_SUPPORT && DM_BUFIO
-       select STACKTRACE
-       ---help---
-	 Enable this for messages that may help debug problems with the
-	 block manager locking used by thin provisioning and caching.
-
-	 If unsure, say N.
-
 config DM_BIO_PRISON
        tristate
        depends on BLK_DEV_DM
@@ -304,6 +294,16 @@ config DM_CACHE
          device.  Different 'policy' plugins can be used to change the
          algorithms used to select which blocks are promoted, demoted,
          cleaned etc.  It supports writeback and writethrough modes.
+
+config DM_CACHE_MQ
+       tristate "MQ Cache Policy (EXPERIMENTAL)"
+       depends on DM_CACHE
+       default y
+       ---help---
+         A cache policy that uses a multiqueue ordered by recent hit
+         count to select which blocks should be promoted and demoted.
+         This is meant to be a general purpose policy.  It prioritises
+         reads over writes.
 
 config DM_CACHE_SMQ
        tristate "Stochastic MQ Cache Policy (EXPERIMENTAL)"
@@ -459,21 +459,6 @@ config DM_VERITY
 
 	  If unsure, say N.
 
-config DM_VERITY_HASH_PREFETCH_MIN_SIZE_128
-	bool "Prefetch size 128"
-
-config DM_VERITY_HASH_PREFETCH_MIN_SIZE
-	int "Verity hash prefetch minimum size"
-	depends on DM_VERITY
-	range 1 4096
-	default 128 if DM_VERITY_HASH_PREFETCH_MIN_SIZE_128
-	default 1
-	---help---
-	  This sets minimum number of hash blocks to prefetch for dm-verity.
-	  For devices like eMMC, having larger prefetch size like 128 can improve
-	  performance with increased memory consumption for keeping more hashes
-	  in RAM.
-
 config DM_VERITY_FEC
 	bool "Verity forward error correction support"
 	depends on DM_VERITY
@@ -516,17 +501,27 @@ config DM_LOG_WRITES
 
 	  If unsure, say N.
 
+config DM_VERITY_AVB
+	tristate "Support AVB specific verity error behavior"
+	depends on DM_VERITY
+	---help---
+	  Enables Android Verified Boot platform-specific error
+	  behavior. In particular, it will modify the vbmeta partition
+	  specified on the kernel command-line when non-transient error
+	  occurs (followed by a panic).
+
+	  If unsure, say N.
+
 config DM_ANDROID_VERITY
 	bool "Android verity target support"
-	depends on BLK_DEV_DM=y
 	depends on DM_VERITY=y
 	depends on X509_CERTIFICATE_PARSER
 	depends on SYSTEM_TRUSTED_KEYRING
-	depends on CRYPTO_RSA
+	depends on PUBLIC_KEY_ALGO_RSA
 	depends on KEYS
 	depends on ASYMMETRIC_KEY_TYPE
 	depends on ASYMMETRIC_PUBLIC_KEY_SUBTYPE
-	select DM_VERITY_HASH_PREFETCH_MIN_SIZE_128
+	depends on MD_LINEAR=y
 	---help---
 	  This device-mapper target is virtually a VERITY target. This
 	  target is setup by reading the metadata contents piggybacked
@@ -537,8 +532,8 @@ config DM_ANDROID_VERITY
 
 config DM_ANDROID_VERITY_AT_MOST_ONCE_DEFAULT_ENABLED
 	bool "Verity will validate blocks at most once"
-	depends on DM_VERITY
-	---help---
+   depends on DM_VERITY
+   ---help---
 	  Default enables at_most_once option for dm-verity
 
 	  Verify data blocks only the first time they are read from the

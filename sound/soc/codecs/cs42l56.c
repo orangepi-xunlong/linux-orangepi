@@ -56,7 +56,7 @@ struct  cs42l56_private {
 	u8 iface;
 	u8 iface_fmt;
 	u8 iface_inv;
-#if IS_ENABLED(CONFIG_INPUT)
+#if defined(CONFIG_INPUT) || defined(CONFIG_INPUT_MODULE)
 	struct input_dev *beep;
 	struct work_struct beep_work;
 	int beep_rate;
@@ -1121,14 +1121,13 @@ static const struct snd_soc_codec_driver soc_codec_dev_cs42l56 = {
 	.set_bias_level = cs42l56_set_bias_level,
 	.suspend_bias_off = true,
 
-	.component_driver = {
-		.controls		= cs42l56_snd_controls,
-		.num_controls		= ARRAY_SIZE(cs42l56_snd_controls),
-		.dapm_widgets		= cs42l56_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(cs42l56_dapm_widgets),
-		.dapm_routes		= cs42l56_audio_map,
-		.num_dapm_routes	= ARRAY_SIZE(cs42l56_audio_map),
-	},
+	.dapm_widgets = cs42l56_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(cs42l56_dapm_widgets),
+	.dapm_routes = cs42l56_audio_map,
+	.num_dapm_routes = ARRAY_SIZE(cs42l56_audio_map),
+
+	.controls = cs42l56_snd_controls,
+	.num_controls = ARRAY_SIZE(cs42l56_snd_controls),
 };
 
 static const struct regmap_config cs42l56_regmap = {

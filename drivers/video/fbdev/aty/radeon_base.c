@@ -76,6 +76,7 @@
 
 #ifdef CONFIG_PPC
 
+#include <asm/pci-bridge.h>
 #include "../macmodes.h"
 
 #ifdef CONFIG_BOOTX_TEXT

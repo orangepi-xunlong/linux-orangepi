@@ -91,15 +91,13 @@ print "Have $nr_symbols symbols\n";
 
 die "Can't find system certificate list"
     unless (exists($symbols{"__cert_list_start"}) &&
-	    exists($symbols{"system_certificate_list_size"}));
+	    exists($symbols{"__cert_list_end"}));
 
 my $start = Math::BigInt->new($symbols{"__cert_list_start"});
-my $end;
-my $size;
-my $size_sym = Math::BigInt->new($symbols{"system_certificate_list_size"});
+my $end = Math::BigInt->new($symbols{"__cert_list_end"});
+my $size = $end - $start;
 
-open FD, "<$vmlinux" || die $vmlinux;
-binmode(FD);
+printf "Have %u bytes of certs at VMA 0x%x\n", $size, $start;
 
 my $s = undef;
 foreach my $sec (@sections) {
@@ -112,24 +110,11 @@ foreach my $sec (@sections) {
     next unless ($start >= $s_vma);
     next if ($start >= $s_vend);
 
-    die "Certificate list size was not found on the same section\n"
-	if ($size_sym < $s_vma || $size_sym > $s_vend);
-
-    die "Cert object in multiple sections: ", $s_name, " and ", $s->{name}, "\n"
-	if ($s);
-
-    my $size_off = $size_sym -$s_vma + $s_foff;
-    my $packed;
-    die $vmlinux if (!defined(sysseek(FD, $size_off, SEEK_SET)));
-    sysread(FD, $packed, 8);
-    $size = unpack 'L!', $packed;
-    $end = $start + $size;
-
-    printf "Have %u bytes of certs at VMA 0x%x\n", $size, $start;
-
     die "Cert object partially overflows section $s_name\n"
 	if ($end > $s_vend);
 
+    die "Cert object in multiple sections: ", $s_name, " and ", $s->{name}, "\n"
+	if ($s);
     $s = $sec;
 }
 
@@ -142,6 +127,8 @@ my $foff = $start - $s->{vma} + $s->{foff};
 
 printf "Certificate list at file offset 0x%x\n", $foff;
 
+open FD, "<$vmlinux" || die $vmlinux;
+binmode(FD);
 die $vmlinux if (!defined(sysseek(FD, $foff, SEEK_SET)));
 my $buf = "";
 my $len = sysread(FD, $buf, $size);

@@ -505,6 +505,10 @@ struct snd_usb_endpoint *snd_usb_add_endpoint(struct snd_usb_audio *chip,
 			ep->syncinterval = 3;
 
 		ep->syncmaxsize = le16_to_cpu(get_endpoint(alts, 1)->wMaxPacketSize);
+
+		if (chip->usb_id == USB_ID(0x0644, 0x8038) /* TEAC UD-H01 */ &&
+		    ep->syncmaxsize == 4)
+			ep->udh01_fb_quirk = 1;
 	}
 
 	list_add_tail(&ep->list, &chip->ep_list);
@@ -1167,16 +1171,15 @@ void snd_usb_handle_sync_urb(struct snd_usb_endpoint *ep,
 	if (f == 0)
 		return;
 
-	if (unlikely(sender->tenor_fb_quirk)) {
+	if (unlikely(sender->udh01_fb_quirk)) {
 		/*
-		 * Devices based on Tenor 8802 chipsets (TEAC UD-H01
-		 * and others) sometimes change the feedback value
+		 * The TEAC UD-H01 firmware sometimes changes the feedback value
 		 * by +/- 0x1.0000.
 		 */
 		if (f < ep->freqn - 0x8000)
-			f += 0xf000;
+			f += 0x10000;
 		else if (f > ep->freqn + 0x8000)
-			f -= 0xf000;
+			f -= 0x10000;
 	} else if (unlikely(ep->freqshift == INT_MIN)) {
 		/*
 		 * The first time we see a feedback value, determine its format

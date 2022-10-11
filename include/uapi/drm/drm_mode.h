@@ -27,11 +27,7 @@
 #ifndef _DRM_MODE_H
 #define _DRM_MODE_H
 
-#include "drm.h"
-
-#if defined(__cplusplus)
-extern "C" {
-#endif
+#include <linux/types.h>
 
 #define DRM_DISPLAY_INFO_LEN	32
 #define DRM_CONNECTOR_NAME_LEN	32
@@ -77,7 +73,26 @@ extern "C" {
 #define  DRM_MODE_FLAG_3D_TOP_AND_BOTTOM	(7<<14)
 #define  DRM_MODE_FLAG_3D_SIDE_BY_SIDE_HALF	(8<<14)
 
+/* Picture aspect ratio options */
+#define DRM_MODE_PICTURE_ASPECT_NONE		0
+#define DRM_MODE_PICTURE_ASPECT_4_3		1
+#define DRM_MODE_PICTURE_ASPECT_16_9		2
 
+/* Aspect ratio flag bitmask (4 bits 22:19) */
+#define DRM_MODE_FLAG_PIC_AR_MASK		(0x0F<<19)
+#define  DRM_MODE_FLAG_PIC_AR_NONE \
+			(DRM_MODE_PICTURE_ASPECT_NONE<<19)
+#define  DRM_MODE_FLAG_PIC_AR_4_3 \
+			(DRM_MODE_PICTURE_ASPECT_4_3<<19)
+#define  DRM_MODE_FLAG_PIC_AR_16_9 \
+			(DRM_MODE_PICTURE_ASPECT_16_9<<19)
+
+/* Panel Mirror control */
+#define DRM_MODE_FLAG_XMIRROR			(1 << 28)
+#define DRM_MODE_FLAG_YMIRROR			(1 << 29)
+#define DRM_MODE_FLAG_XYMIRROR			(DRM_MODE_FLAG_XMIRROR | DRM_MODE_FLAG_YMIRROR)
+
+#define DRM_MODE_FLAG_PPIXDATA			(1<<31)
 /* DPMS flags */
 /* bit compatible with the xorg definitions. */
 #define DRM_MODE_DPMS_ON	0
@@ -85,17 +100,17 @@ extern "C" {
 #define DRM_MODE_DPMS_SUSPEND	2
 #define DRM_MODE_DPMS_OFF	3
 
+/* Content Protection Flags */
+#define DRM_MODE_CONTENT_PROTECTION_UNDESIRED   0
+#define DRM_MODE_CONTENT_PROTECTION_DESIRED     1
+#define DRM_MODE_CONTENT_PROTECTION_ENABLED     2
+
 /* Scaling mode options */
 #define DRM_MODE_SCALE_NONE		0 /* Unmodified timing (display or
 					     software can still scale) */
 #define DRM_MODE_SCALE_FULLSCREEN	1 /* Full screen, ignore aspect */
 #define DRM_MODE_SCALE_CENTER		2 /* Centered, no scaling */
 #define DRM_MODE_SCALE_ASPECT		3 /* Full screen, preserve aspect */
-
-/* Picture aspect ratio options */
-#define DRM_MODE_PICTURE_ASPECT_NONE	0
-#define DRM_MODE_PICTURE_ASPECT_4_3	1
-#define DRM_MODE_PICTURE_ASPECT_16_9	2
 
 /* Dithering mode options */
 #define DRM_MODE_DITHERING_OFF	0
@@ -106,6 +121,11 @@ extern "C" {
 #define DRM_MODE_DIRTY_OFF      0
 #define DRM_MODE_DIRTY_ON       1
 #define DRM_MODE_DIRTY_ANNOTATE 2
+
+/* Content Protection Flags */
+#define DRM_MODE_CONTENT_PROTECTION_UNDESIRED	0
+#define DRM_MODE_CONTENT_PROTECTION_DESIRED     1
+#define DRM_MODE_CONTENT_PROTECTION_ENABLED     2
 
 struct drm_mode_modeinfo {
 	__u32 clock;
@@ -220,14 +240,16 @@ struct drm_mode_get_encoder {
 
 /* This is for connectors with multiple signal types. */
 /* Try to match DRM_MODE_CONNECTOR_X as closely as possible. */
-#define DRM_MODE_SUBCONNECTOR_Automatic	0
-#define DRM_MODE_SUBCONNECTOR_Unknown	0
-#define DRM_MODE_SUBCONNECTOR_DVID	3
-#define DRM_MODE_SUBCONNECTOR_DVIA	4
-#define DRM_MODE_SUBCONNECTOR_Composite	5
-#define DRM_MODE_SUBCONNECTOR_SVIDEO	6
-#define DRM_MODE_SUBCONNECTOR_Component	8
-#define DRM_MODE_SUBCONNECTOR_SCART	9
+enum drm_mode_subconnector {
+	DRM_MODE_SUBCONNECTOR_Automatic = 0,
+	DRM_MODE_SUBCONNECTOR_Unknown = 0,
+	DRM_MODE_SUBCONNECTOR_DVID = 3,
+	DRM_MODE_SUBCONNECTOR_DVIA = 4,
+	DRM_MODE_SUBCONNECTOR_Composite = 5,
+	DRM_MODE_SUBCONNECTOR_SVIDEO = 6,
+	DRM_MODE_SUBCONNECTOR_Component = 8,
+	DRM_MODE_SUBCONNECTOR_SCART = 9,
+};
 
 #define DRM_MODE_CONNECTOR_Unknown	0
 #define DRM_MODE_CONNECTOR_VGA		1
@@ -325,16 +347,6 @@ struct drm_mode_connector_set_property {
 	__u32 prop_id;
 	__u32 connector_id;
 };
-
-#define DRM_MODE_OBJECT_CRTC 0xcccccccc
-#define DRM_MODE_OBJECT_CONNECTOR 0xc0c0c0c0
-#define DRM_MODE_OBJECT_ENCODER 0xe0e0e0e0
-#define DRM_MODE_OBJECT_MODE 0xdededede
-#define DRM_MODE_OBJECT_PROPERTY 0xb0b0b0b0
-#define DRM_MODE_OBJECT_FB 0xfbfbfbfb
-#define DRM_MODE_OBJECT_BLOB 0xbbbbbbbb
-#define DRM_MODE_OBJECT_PLANE 0xeeeeeeee
-#define DRM_MODE_OBJECT_ANY 0
 
 struct drm_mode_obj_get_properties {
 	__u64 props_ptr;
@@ -518,15 +530,32 @@ struct drm_color_lut {
 	__u16 reserved;
 };
 
+enum supported_eotf_type {
+	TRADITIONAL_GAMMA_SDR = 0,
+	TRADITIONAL_GAMMA_HDR,
+	SMPTE_ST2084,
+	HLG,
+	FUTURE_EOTF
+};
+
+/* HDR Metadata */
+struct hdr_static_metadata {
+	uint16_t eotf;
+	uint16_t type;
+	uint16_t display_primaries_x[3];
+	uint16_t display_primaries_y[3];
+	uint16_t white_point_x;
+	uint16_t white_point_y;
+	uint16_t max_mastering_display_luminance;
+	uint16_t min_mastering_display_luminance;
+	uint16_t max_fall;
+	uint16_t max_cll;
+	uint16_t min_cll;
+};
+
 #define DRM_MODE_PAGE_FLIP_EVENT 0x01
 #define DRM_MODE_PAGE_FLIP_ASYNC 0x02
-#define DRM_MODE_PAGE_FLIP_TARGET_ABSOLUTE 0x4
-#define DRM_MODE_PAGE_FLIP_TARGET_RELATIVE 0x8
-#define DRM_MODE_PAGE_FLIP_TARGET (DRM_MODE_PAGE_FLIP_TARGET_ABSOLUTE | \
-				   DRM_MODE_PAGE_FLIP_TARGET_RELATIVE)
-#define DRM_MODE_PAGE_FLIP_FLAGS (DRM_MODE_PAGE_FLIP_EVENT | \
-				  DRM_MODE_PAGE_FLIP_ASYNC | \
-				  DRM_MODE_PAGE_FLIP_TARGET)
+#define DRM_MODE_PAGE_FLIP_FLAGS (DRM_MODE_PAGE_FLIP_EVENT|DRM_MODE_PAGE_FLIP_ASYNC)
 
 /*
  * Request a page flip on the specified crtc.
@@ -549,7 +578,8 @@ struct drm_color_lut {
  * 'as soon as possible', meaning that it not delay waiting for vblank.
  * This may cause tearing on the screen.
  *
- * The reserved field must be zero.
+ * The reserved field must be zero until we figure out something
+ * clever to use it for.
  */
 
 struct drm_mode_crtc_page_flip {
@@ -560,44 +590,16 @@ struct drm_mode_crtc_page_flip {
 	__u64 user_data;
 };
 
-/*
- * Request a page flip on the specified crtc.
- *
- * Same as struct drm_mode_crtc_page_flip, but supports new flags and
- * re-purposes the reserved field:
- *
- * The sequence field must be zero unless either of the
- * DRM_MODE_PAGE_FLIP_TARGET_ABSOLUTE/RELATIVE flags is specified. When
- * the ABSOLUTE flag is specified, the sequence field denotes the absolute
- * vblank sequence when the flip should take effect. When the RELATIVE
- * flag is specified, the sequence field denotes the relative (to the
- * current one when the ioctl is called) vblank sequence when the flip
- * should take effect. NOTE: DRM_IOCTL_WAIT_VBLANK must still be used to
- * make sure the vblank sequence before the target one has passed before
- * calling this ioctl. The purpose of the
- * DRM_MODE_PAGE_FLIP_TARGET_ABSOLUTE/RELATIVE flags is merely to clarify
- * the target for when code dealing with a page flip runs during a
- * vertical blank period.
- */
-
-struct drm_mode_crtc_page_flip_target {
-	__u32 crtc_id;
-	__u32 fb_id;
-	__u32 flags;
-	__u32 sequence;
-	__u64 user_data;
-};
-
 /* create a dumb scanout buffer */
 struct drm_mode_create_dumb {
-	__u32 height;
-	__u32 width;
-	__u32 bpp;
-	__u32 flags;
+	uint32_t height;
+	uint32_t width;
+	uint32_t bpp;
+	uint32_t flags;
 	/* handle, pitch, size will be returned */
-	__u32 handle;
-	__u32 pitch;
-	__u64 size;
+	uint32_t handle;
+	uint32_t pitch;
+	uint64_t size;
 };
 
 /* set up for mmap of a dumb scanout buffer */
@@ -614,7 +616,7 @@ struct drm_mode_map_dumb {
 };
 
 struct drm_mode_destroy_dumb {
-	__u32 handle;
+	uint32_t handle;
 };
 
 /* page-flip flags are valid, plus: */
@@ -659,9 +661,5 @@ struct drm_mode_create_blob {
 struct drm_mode_destroy_blob {
 	__u32 blob_id;
 };
-
-#if defined(__cplusplus)
-}
-#endif
 
 #endif

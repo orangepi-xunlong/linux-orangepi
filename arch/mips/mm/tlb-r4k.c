@@ -14,12 +14,11 @@
 #include <linux/smp.h>
 #include <linux/mm.h>
 #include <linux/hugetlb.h>
-#include <linux/export.h>
+#include <linux/module.h>
 
 #include <asm/cpu.h>
 #include <asm/cpu-type.h>
 #include <asm/bootinfo.h>
-#include <asm/hazards.h>
 #include <asm/mmu_context.h>
 #include <asm/pgtable.h>
 #include <asm/tlb.h>
@@ -28,28 +27,25 @@
 extern void build_tlb_refill_handler(void);
 
 /*
- * LOONGSON-2 has a 4 entry itlb which is a subset of jtlb, LOONGSON-3 has
- * a 4 entry itlb and a 4 entry dtlb which are subsets of jtlb. Unfortunately,
- * itlb/dtlb are not totally transparent to software.
+ * LOONGSON2/3 has a 4 entry itlb which is a subset of dtlb,
+ * unfortunately, itlb is not totally transparent to software.
  */
-static inline void flush_micro_tlb(void)
+static inline void flush_itlb(void)
 {
 	switch (current_cpu_type()) {
 	case CPU_LOONGSON2:
-		write_c0_diag(LOONGSON_DIAG_ITLB);
-		break;
 	case CPU_LOONGSON3:
-		write_c0_diag(LOONGSON_DIAG_ITLB | LOONGSON_DIAG_DTLB);
+		write_c0_diag(4);
 		break;
 	default:
 		break;
 	}
 }
 
-static inline void flush_micro_tlb_vm(struct vm_area_struct *vma)
+static inline void flush_itlb_vm(struct vm_area_struct *vma)
 {
 	if (vma->vm_flags & VM_EXEC)
-		flush_micro_tlb();
+		flush_itlb();
 }
 
 void local_flush_tlb_all(void)
@@ -65,13 +61,10 @@ void local_flush_tlb_all(void)
 	write_c0_entrylo0(0);
 	write_c0_entrylo1(0);
 
-	entry = num_wired_entries();
+	entry = read_c0_wired();
 
-	/*
-	 * Blast 'em all away.
-	 * If there are any wired entries, fall back to iterating
-	 */
-	if (cpu_has_tlbinv && !entry) {
+	/* Blast 'em all away. */
+	if (cpu_has_tlbinv) {
 		if (current_cpu_data.tlbsizevtlb) {
 			write_c0_index(0);
 			mtc0_tlbw_hazard();
@@ -99,7 +92,7 @@ void local_flush_tlb_all(void)
 	tlbw_use_hazard();
 	write_c0_entryhi(old_ctx);
 	htw_start();
-	flush_micro_tlb();
+	flush_itlb();
 	local_irq_restore(flags);
 }
 EXPORT_SYMBOL(local_flush_tlb_all);
@@ -165,7 +158,7 @@ void local_flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 		} else {
 			drop_mmu_context(mm, cpu);
 		}
-		flush_micro_tlb();
+		flush_itlb();
 		local_irq_restore(flags);
 	}
 }
@@ -211,7 +204,7 @@ void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
 	} else {
 		local_flush_tlb_all();
 	}
-	flush_micro_tlb();
+	flush_itlb();
 	local_irq_restore(flags);
 }
 
@@ -246,7 +239,7 @@ void local_flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
 	finish:
 		write_c0_entryhi(oldpid);
 		htw_start();
-		flush_micro_tlb_vm(vma);
+		flush_itlb_vm(vma);
 		local_irq_restore(flags);
 	}
 }
@@ -280,7 +273,7 @@ void local_flush_tlb_one(unsigned long page)
 	}
 	write_c0_entryhi(oldpid);
 	htw_start();
-	flush_micro_tlb();
+	flush_itlb();
 	local_irq_restore(flags);
 }
 
@@ -307,7 +300,7 @@ void __update_tlb(struct vm_area_struct * vma, unsigned long address, pte_t pte)
 	local_irq_save(flags);
 
 	htw_stop();
-	pid = read_c0_entryhi() & cpu_asid_mask(&current_cpu_data);
+	pid = read_c0_entryhi() & ASID_MASK;
 	address &= (PAGE_MASK << 1);
 	write_c0_entryhi(address | pid);
 	pgdp = pgd_offset(vma->vm_mm, address);
@@ -342,12 +335,10 @@ void __update_tlb(struct vm_area_struct * vma, unsigned long address, pte_t pte)
 #if defined(CONFIG_PHYS_ADDR_T_64BIT) && defined(CONFIG_CPU_MIPS32)
 #ifdef CONFIG_XPA
 		write_c0_entrylo0(pte_to_entrylo(ptep->pte_high));
-		if (cpu_has_xpa)
-			writex_c0_entrylo0(ptep->pte_low & _PFNX_MASK);
+		writex_c0_entrylo0(ptep->pte_low & _PFNX_MASK);
 		ptep++;
 		write_c0_entrylo1(pte_to_entrylo(ptep->pte_high));
-		if (cpu_has_xpa)
-			writex_c0_entrylo1(ptep->pte_low & _PFNX_MASK);
+		writex_c0_entrylo1(ptep->pte_low & _PFNX_MASK);
 #else
 		write_c0_entrylo0(ptep->pte_high);
 		ptep++;
@@ -365,7 +356,7 @@ void __update_tlb(struct vm_area_struct * vma, unsigned long address, pte_t pte)
 	}
 	tlbw_use_hazard();
 	htw_start();
-	flush_micro_tlb_vm(vma);
+	flush_itlb_vm(vma);
 	local_irq_restore(flags);
 }
 
@@ -385,7 +376,7 @@ void add_wired_entry(unsigned long entrylo0, unsigned long entrylo1,
 	old_ctx = read_c0_entryhi();
 	htw_stop();
 	old_pagemask = read_c0_pagemask();
-	wired = num_wired_entries();
+	wired = read_c0_wired();
 	write_c0_wired(wired + 1);
 	write_c0_index(wired);
 	tlbw_use_hazard();	/* What is the hazard here? */
@@ -408,20 +399,19 @@ void add_wired_entry(unsigned long entrylo0, unsigned long entrylo1,
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 
-int has_transparent_hugepage(void)
+int __init has_transparent_hugepage(void)
 {
-	static unsigned int mask = -1;
+	unsigned int mask;
+	unsigned long flags;
 
-	if (mask == -1) {	/* first call comes during __init */
-		unsigned long flags;
+	local_irq_save(flags);
+	write_c0_pagemask(PM_HUGE_MASK);
+	back_to_back_c0_hazard();
+	mask = read_c0_pagemask();
+	write_c0_pagemask(PM_DEFAULT_MASK);
 
-		local_irq_save(flags);
-		write_c0_pagemask(PM_HUGE_MASK);
-		back_to_back_c0_hazard();
-		mask = read_c0_pagemask();
-		write_c0_pagemask(PM_DEFAULT_MASK);
-		local_irq_restore(flags);
-	}
+	local_irq_restore(flags);
+
 	return mask == PM_HUGE_MASK;
 }
 
@@ -449,7 +439,7 @@ __init int add_temporary_entry(unsigned long entrylo0, unsigned long entrylo1,
 	htw_stop();
 	old_ctx = read_c0_entryhi();
 	old_pagemask = read_c0_pagemask();
-	wired = num_wired_entries();
+	wired = read_c0_wired();
 	if (--temp_tlb_entry < wired) {
 		printk(KERN_WARNING
 		       "No TLB space left for add_temporary_entry\n");
@@ -496,10 +486,6 @@ static void r4k_tlb_configure(void)
 	 *     be set to fixed-size pages.
 	 */
 	write_c0_pagemask(PM_DEFAULT_MASK);
-	back_to_back_c0_hazard();
-	if (read_c0_pagemask() != PM_DEFAULT_MASK)
-		panic("MMU doesn't support PAGE_SIZE=0x%lx", PAGE_SIZE);
-
 	write_c0_wired(0);
 	if (current_cpu_type() == CPU_R10000 ||
 	    current_cpu_type() == CPU_R12000 ||

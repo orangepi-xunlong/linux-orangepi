@@ -445,32 +445,32 @@ void divasa_unmap_pci_bar(void __iomem *bar)
 /*********************************************************
  ** I/O port access
  *********************************************************/
-inline byte inpp(void __iomem *addr)
+byte __inline__ inpp(void __iomem *addr)
 {
 	return (inb((unsigned long) addr));
 }
 
-inline word inppw(void __iomem *addr)
+word __inline__ inppw(void __iomem *addr)
 {
 	return (inw((unsigned long) addr));
 }
 
-inline void inppw_buffer(void __iomem *addr, void *P, int length)
+void __inline__ inppw_buffer(void __iomem *addr, void *P, int length)
 {
 	insw((unsigned long) addr, (word *) P, length >> 1);
 }
 
-inline void outppw_buffer(void __iomem *addr, void *P, int length)
+void __inline__ outppw_buffer(void __iomem *addr, void *P, int length)
 {
 	outsw((unsigned long) addr, (word *) P, length >> 1);
 }
 
-inline void outppw(void __iomem *addr, word w)
+void __inline__ outppw(void __iomem *addr, word w)
 {
 	outw(w, (unsigned long) addr);
 }
 
-inline void outpp(void __iomem *addr, word p)
+void __inline__ outpp(void __iomem *addr, word p)
 {
 	outb(p, (unsigned long) addr);
 }

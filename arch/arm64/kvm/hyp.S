@@ -46,6 +46,10 @@ alternative_if_not ARM64_HAS_VIRT_HOST_EXTN
 	hvc	#0
 	ldr     lr, [sp], #16
 	ret
-alternative_else_nop_endif
+alternative_else
 	b	__vhe_hyp_call
+	nop
+	nop
+	nop
+alternative_endif
 ENDPROC(__kvm_call_hyp)

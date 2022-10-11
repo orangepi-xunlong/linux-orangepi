@@ -170,6 +170,15 @@ static int wl1273_fm_set_volume(struct wl1273_core *core, unsigned int volume)
 	return 0;
 }
 
+static int wl1273_core_remove(struct i2c_client *client)
+{
+	dev_dbg(&client->dev, "%s\n", __func__);
+
+	mfd_remove_devices(&client->dev);
+
+	return 0;
+}
+
 static int wl1273_core_probe(struct i2c_client *client,
 				       const struct i2c_device_id *id)
 {
@@ -228,8 +237,8 @@ static int wl1273_core_probe(struct i2c_client *client,
 	dev_dbg(&client->dev, "%s: number of children: %d.\n",
 		__func__, children);
 
-	r = devm_mfd_add_devices(&client->dev, -1, core->cells,
-				 children, NULL, 0, NULL);
+	r = mfd_add_devices(&client->dev, -1, core->cells,
+			    children, NULL, 0, NULL);
 	if (r)
 		goto err;
 
@@ -249,6 +258,7 @@ static struct i2c_driver wl1273_core_driver = {
 	},
 	.probe = wl1273_core_probe,
 	.id_table = wl1273_driver_id_table,
+	.remove = wl1273_core_remove,
 };
 
 static int __init wl1273_core_init(void)

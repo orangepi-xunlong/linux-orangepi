@@ -1,4 +1,4 @@
-#include <media/drv-intf/saa7146_vv.h>
+#include <media/saa7146_vv.h>
 
 static int vbi_pixel_to_capture = 720 * 2;
 

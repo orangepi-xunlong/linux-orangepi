@@ -10,6 +10,8 @@
 
 #include <linux/errno.h>
 #include <linux/percpu.h>
+#include <linux/of.h>
+#include <linux/of_address.h>
 #include <linux/spinlock.h>
 
 #include <asm/mips-cm.h>
@@ -23,6 +25,17 @@ static DEFINE_PER_CPU_ALIGNED(unsigned long, cpc_core_lock_flags);
 
 phys_addr_t __weak mips_cpc_default_phys_base(void)
 {
+	struct device_node *cpc_node;
+	struct resource res;
+	int err;
+
+	cpc_node = of_find_compatible_node(of_root, NULL, "mti,mips-cpc");
+	if (cpc_node) {
+		err = of_address_to_resource(cpc_node, 0, &res);
+		if (!err)
+			return res.start;
+	}
+
 	return 0;
 }
 
@@ -61,7 +74,7 @@ static phys_addr_t mips_cpc_phys_base(void)
 int mips_cpc_probe(void)
 {
 	phys_addr_t addr;
-	unsigned int cpu;
+	unsigned cpu;
 
 	for_each_possible_cpu(cpu)
 		spin_lock_init(&per_cpu(cpc_core_lock, cpu));
@@ -79,12 +92,7 @@ int mips_cpc_probe(void)
 
 void mips_cpc_lock_other(unsigned int core)
 {
-	unsigned int curr_core;
-
-	if (mips_cm_revision() >= CM_REV_CM3)
-		/* Systems with CM >= 3 lock the CPC via mips_cm_lock_other */
-		return;
-
+	unsigned curr_core;
 	preempt_disable();
 	curr_core = current_cpu_data.core;
 	spin_lock_irqsave(&per_cpu(cpc_core_lock, curr_core),
@@ -100,13 +108,7 @@ void mips_cpc_lock_other(unsigned int core)
 
 void mips_cpc_unlock_other(void)
 {
-	unsigned int curr_core;
-
-	if (mips_cm_revision() >= CM_REV_CM3)
-		/* Systems with CM >= 3 lock the CPC via mips_cm_lock_other */
-		return;
-
-	curr_core = current_cpu_data.core;
+	unsigned curr_core = current_cpu_data.core;
 	spin_unlock_irqrestore(&per_cpu(cpc_core_lock, curr_core),
 			       per_cpu(cpc_core_lock_flags, curr_core));
 	preempt_enable();

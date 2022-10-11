@@ -54,6 +54,7 @@ struct sd {
 	u32 exposure;
 
 	struct work_struct work;
+	struct workqueue_struct *work_thread;
 
 	u32 pktsz;			/* (used by pkt_scan) */
 	u16 npkt;
@@ -2484,6 +2485,7 @@ static int sd_start(struct gspca_dev *gspca_dev)
 
 	sd->pktsz = sd->npkt = 0;
 	sd->nchg = sd->short_mark = 0;
+	sd->work_thread = create_singlethread_workqueue(MODULE_NAME);
 
 	return gspca_dev->usb_err;
 }
@@ -2567,9 +2569,12 @@ static void sd_stop0(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 
-	mutex_unlock(&gspca_dev->usb_lock);
-	flush_work(&sd->work);
-	mutex_lock(&gspca_dev->usb_lock);
+	if (sd->work_thread != NULL) {
+		mutex_unlock(&gspca_dev->usb_lock);
+		destroy_workqueue(sd->work_thread);
+		mutex_lock(&gspca_dev->usb_lock);
+		sd->work_thread = NULL;
+	}
 }
 
 static void do_autogain(struct gspca_dev *gspca_dev)
@@ -2780,7 +2785,7 @@ marker_found:
 				new_qual = QUALITY_MAX;
 			if (new_qual != sd->quality) {
 				sd->quality = new_qual;
-				schedule_work(&sd->work);
+				queue_work(sd->work_thread, &sd->work);
 			}
 		}
 	} else {

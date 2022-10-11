@@ -14,7 +14,7 @@
 #include <net/act_api.h>
 
 struct tcf_bpf {
-	struct tc_action	common;
+	struct tcf_common	common;
 	struct bpf_prog __rcu	*filter;
 	union {
 		u32		bpf_fd;
@@ -23,6 +23,7 @@ struct tcf_bpf {
 	struct sock_filter	*bpf_ops;
 	const char		*bpf_name;
 };
-#define to_bpf(a) ((struct tcf_bpf *)a)
+#define to_bpf(a) \
+	container_of(a->priv, struct tcf_bpf, common)
 
 #endif /* __NET_TC_BPF_H */

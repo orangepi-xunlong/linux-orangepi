@@ -18,41 +18,6 @@ config MFD_CS5535
 	  This is the core driver for CS5535/CS5536 MFD functions.  This is
           necessary for using the board's GPIO and MFGPT functionality.
 
-config MFD_ACX00
-	bool "Support Allwinnertech ACX00"
-	select MFD_CORE
-	select REGMAP_I2C
-	select REGMAP_IRQ
-	depends on I2C=y
-	default n
-	help
-	  Say yes here if you have ac100/ac200 chip on your board.
-	  .This driver provides core support for the ac100,ac200,
-	  in order to use the actual functionaltiy of the device
-	  other drivers must be enabled.
-
-config MFD_ALTERA_A10SR
-	bool "Altera Arria10 DevKit System Resource chip"
-	depends on ARCH_SOCFPGA && SPI_MASTER=y && OF
-	select REGMAP_SPI
-	select MFD_CORE
-	help
-	  Support for the Altera Arria10 DevKit MAX5 System Resource chip
-	  using the SPI interface. This driver provides common support for
-	  accessing the external gpio extender (LEDs & buttons) and
-	  power supply alarms (hwmon).
-
-config MFD_ACT8945A
-	tristate "Active-semi ACT8945A"
-	select MFD_CORE
-	select REGMAP_I2C
-	depends on I2C && OF
-	help
-	  Support for the ACT8945A PMIC from Active-semi. This device
-	  features three step-down DC/DC converters and four low-dropout
-	  linear regulators, along with a complete ActivePath battery
-	  charger.
-
 config MFD_AS3711
 	bool "AMS AS3711"
 	select MFD_CORE
@@ -63,7 +28,7 @@ config MFD_AS3711
 	  Support for the AS3711 PMIC from AMS
 
 config MFD_AS3722
-	tristate "ams AS3722 Power Management IC"
+	bool "ams AS3722 Power Management IC"
 	select MFD_CORE
 	select REGMAP_I2C
 	select REGMAP_IRQ
@@ -125,40 +90,15 @@ config MFD_BCM590XX
 	help
 	  Support for the BCM590xx PMUs from Broadcom
 
-config MFD_AC100
-	tristate "X-Powers AC100"
-	select MFD_CORE
-	depends on SUNXI_RSB
-	help
-	  If you say Y here you get support for the X-Powers AC100 audio codec
-	  IC.
-	  This driver include only the core APIs. You have to select individual
-	  components like codecs or RTC under the corresponding menus.
-
 config MFD_AXP20X
-	tristate
+	bool "X-Powers AXP20X"
 	select MFD_CORE
-	select REGMAP_IRQ
-
-config MFD_AXP20X_I2C
-	tristate "X-Powers AXP series PMICs with I2C"
-	select MFD_AXP20X
 	select REGMAP_I2C
-	depends on I2C
+	select REGMAP_IRQ
+	depends on I2C=y
 	help
-	  If you say Y here you get support for the X-Powers AXP series power
-	  management ICs (PMICs) controlled with I2C.
-	  This driver include only the core APIs. You have to select individual
-	  components like regulators or the PEK (Power Enable Key) under the
-	  corresponding menus.
-
-config MFD_AXP20X_RSB
-	tristate "X-Powers AXP series PMICs with RSB"
-	select MFD_AXP20X
-	depends on SUNXI_RSB
-	help
-	  If you say Y here you get support for the X-Powers AXP series power
-	  management ICs (PMICs) controlled with RSB.
+	  If you say Y here you get support for the X-Powers AXP202, AXP209 and
+	  AXP288 power management IC (PMIC).
 	  This driver include only the core APIs. You have to select individual
 	  components like regulators or the PEK (Power Enable Key) under the
 	  corresponding menus.
@@ -263,7 +203,7 @@ config MFD_DA9062
 	select MFD_CORE
 	select REGMAP_I2C
 	select REGMAP_IRQ
-	depends on I2C
+	depends on I2C=y
 	help
 	  Say yes here for support for the Dialog Semiconductor DA9062 PMIC.
 	  This includes the I2C driver and core APIs.
@@ -271,11 +211,11 @@ config MFD_DA9062
 	  of the device.
 
 config MFD_DA9063
-	tristate "Dialog Semiconductor DA9063 PMIC Support"
+	bool "Dialog Semiconductor DA9063 PMIC Support"
 	select MFD_CORE
 	select REGMAP_I2C
 	select REGMAP_IRQ
-	depends on I2C
+	depends on I2C=y
 	help
 	  Say yes here for support for the Dialog Semiconductor DA9063 PMIC.
 	  This includes the I2C driver and core APIs.
@@ -284,7 +224,7 @@ config MFD_DA9063
 
 config MFD_DA9150
 	tristate "Dialog Semiconductor DA9150 Charger Fuel-Gauge chip"
-	depends on I2C
+	depends on I2C=y
 	select MFD_CORE
 	select REGMAP_I2C
 	select REGMAP_IRQ
@@ -303,14 +243,6 @@ config MFD_DLN2
 	  DLN-2. Additional drivers such as I2C_DLN2, GPIO_DLN2,
 	  etc. must be enabled in order to use the functionality of
 	  the device.
-
-config MFD_EXYNOS_LPASS
-	tristate "Samsung Exynos SoC Low Power Audio Subsystem"
-	select MFD_CORE
-	select REGMAP_MMIO
-	help
-	  Select this option to enable support for Samsung Exynos Low Power
-	  Audio Subsystem.
 
 config MFD_MC13XXX
 	tristate
@@ -339,15 +271,6 @@ config MFD_MC13XXX_I2C
 	help
 	  Select this if your MC13xxx is connected via an I2C bus.
 
-config MFD_MX25_TSADC
-	tristate "Freescale i.MX25 integrated Touchscreen and ADC unit"
-	select REGMAP_MMIO
-	depends on (SOC_IMX25 && OF) || COMPILE_TEST
-	help
-	  Enable support for the integrated Touchscreen and ADC unit of the
-	  i.MX25 processors. They consist of a conversion queue for general
-	  purpose ADC and a queue for Touchscreens.
-
 config MFD_HI6421_PMIC
 	tristate "HiSilicon Hi6421 PMU/Codec IC"
 	depends on OF
@@ -361,15 +284,13 @@ config MFD_HI6421_PMIC
 	  menus in order to enable them.
 	  We communicate with the Hi6421 via memory-mapped I/O.
 
-config MFD_HI655X_PMIC
-	tristate "HiSilicon Hi655X series PMU/Codec IC"
-	depends on ARCH_HISI || COMPILE_TEST
-	depends on OF
-	select MFD_CORE
-	select REGMAP_MMIO
-	select REGMAP_IRQ
+config HTC_EGPIO
+	bool "HTC EGPIO support"
+	depends on GPIOLIB && ARM
 	help
-	  Select this option to enable Hisilicon hi655x series pmic driver.
+	    This driver supports the CPLD egpio chip present on
+	    several HTC phones.  It provides basic support for input
+	    pins, output pins, and irqs.
 
 config HTC_PASIC3
 	tristate "HTC PASIC3 LED/DS1WM chip support"
@@ -514,8 +435,6 @@ config MFD_KEMPLD
 		* COMe-cDC2 (microETXexpress-DC)
 		* COMe-cHL6
 		* COMe-cPC2 (microETXexpress-PC)
-		* COMe-cSL6
-		* COMe-mAL10
 		* COMe-mBT10
 		* COMe-mCT10
 		* COMe-mTT10 (nanoETXexpress-TT)
@@ -526,7 +445,7 @@ config MFD_KEMPLD
 
 config MFD_88PM800
 	tristate "Marvell 88PM800"
-	depends on I2C
+	depends on I2C=y
 	select REGMAP_I2C
 	select REGMAP_IRQ
 	select MFD_CORE
@@ -538,7 +457,7 @@ config MFD_88PM800
 
 config MFD_88PM805
 	tristate "Marvell 88PM805"
-	depends on I2C
+	depends on I2C=y
 	select REGMAP_I2C
 	select REGMAP_IRQ
 	select MFD_CORE
@@ -560,8 +479,8 @@ config MFD_88PM860X
 	  battery-charger under the corresponding menus.
 
 config MFD_MAX14577
-	tristate "Maxim Semiconductor MAX14577/77836 MUIC + Charger Support"
-	depends on I2C
+	bool "Maxim Semiconductor MAX14577/77836 MUIC + Charger Support"
+	depends on I2C=y
 	select MFD_CORE
 	select REGMAP_I2C
 	select REGMAP_IRQ
@@ -573,24 +492,9 @@ config MFD_MAX14577
 	  additional drivers must be enabled in order to use the functionality
 	  of the device.
 
-config MFD_MAX77620
-	bool "Maxim Semiconductor MAX77620 and MAX20024 PMIC Support"
-	depends on I2C=y
-	depends on OF
-	select MFD_CORE
-	select REGMAP_I2C
-	select REGMAP_IRQ
-	select IRQ_DOMAIN
-	help
-	  Say yes here to add support for Maxim Semiconductor MAX77620 and
-	  MAX20024 which are Power Management IC with General purpose pins,
-	  RTC, regulators, clock generator, watchdog etc. This driver
-	  provides common support for accessing the device; additional drivers
-	  must be enabled in order to use the functionality of the device.
-
 config MFD_MAX77686
-	tristate "Maxim Semiconductor MAX77686/802 PMIC Support"
-	depends on I2C
+	bool "Maxim Semiconductor MAX77686/802 PMIC Support"
+	depends on I2C=y
 	depends on OF
 	select MFD_CORE
 	select REGMAP_I2C
@@ -604,8 +508,8 @@ config MFD_MAX77686
 	  of the device.
 
 config MFD_MAX77693
-	tristate "Maxim Semiconductor MAX77693 PMIC Support"
-	depends on I2C
+	bool "Maxim Semiconductor MAX77693 PMIC Support"
+	depends on I2C=y
 	select MFD_CORE
 	select REGMAP_I2C
 	select REGMAP_IRQ
@@ -634,7 +538,7 @@ config MFD_MAX77843
 config MFD_MAX8907
 	tristate "Maxim Semiconductor MAX8907 PMIC Support"
 	select MFD_CORE
-	depends on I2C
+	depends on I2C=y
 	select REGMAP_I2C
 	select REGMAP_IRQ
 	help
@@ -839,7 +743,7 @@ config MFD_RTSX_PCI
 
 config MFD_RT5033
 	tristate "Richtek RT5033 Power Management IC"
-	depends on I2C
+	depends on I2C=y
 	select MFD_CORE
 	select REGMAP_I2C
 	select REGMAP_IRQ
@@ -874,28 +778,37 @@ config MFD_RC5T583
 	  Additional drivers must be enabled in order to use the
 	  different functionality of the device.
 
+config MFD_RK618
+	tristate "Rockchip RK618 MFD Driver"
+	depends on I2C
+	depends on OF
+	select MFD_CORE
+	select REGMAP_I2C
+	select REGMAP_IRQ
+	help
+	  if you say yes here you get support for the RK618 from Rockchip.
+
 config MFD_RK808
-	tristate "Rockchip RK808/RK818 Power Management Chip"
+	tristate "Rockchip RK808 Power Management chip"
 	depends on I2C && OF
 	select MFD_CORE
 	select REGMAP_I2C
 	select REGMAP_IRQ
 	help
-	  If you say yes here you get support for the RK808 and RK818
+	  If you say yes here you get support for the RK808
 	  Power Management chips.
 	  This driver provides common support for accessing the device
 	  through I2C interface. The device supports multiple sub-devices
 	  including interrupts, RTC, LDO & DCDC regulators, and onkey.
 
 config MFD_RN5T618
-	tristate "Ricoh RN5T567/618 PMIC"
+	tristate "Ricoh RN5T5618 PMIC"
 	depends on I2C
-	depends on OF
 	select MFD_CORE
 	select REGMAP_I2C
 	help
-	  Say yes here to add support for the Ricoh RN5T567 or R5T618 PMIC.
-	  This driver provides common support for accessing the device,
+	  Say yes here to add support for the Ricoh RN5T618 PMIC. This
+	  driver provides common support for accessing the device,
 	  additional drivers must be enabled in order to use the
 	  functionality of the device.
 
@@ -1203,19 +1116,6 @@ config TPS6507X
 	  This driver can also be built as a module.  If so, the module
 	  will be called tps6507x.
 
-config MFD_TPS65086
-	tristate "TI TPS65086 Power Management Integrated Chips (PMICs)"
-	select REGMAP
-	select REGMAP_IRQ
-	select REGMAP_I2C
-	depends on I2C
-	help
-	  If you say yes here you get support for the TPS65086 series of
-	  Power Management chips.
-	  This driver provides common support for accessing the device,
-	  additional drivers must be enabled in order to use the
-	  functionality of the device.
-
 config TPS65911_COMPARATOR
 	tristate
 
@@ -1237,7 +1137,6 @@ config MFD_TPS65217
 	depends on I2C
 	select MFD_CORE
 	select REGMAP_I2C
-	select IRQ_DOMAIN
 	help
 	  If you say yes here you get support for the TPS65217 series of
 	  Power Management / White LED chips.
@@ -1247,20 +1146,6 @@ config MFD_TPS65217
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called tps65217.
-
-config MFD_TI_LP873X
-	tristate "TI LP873X Power Management IC"
-	depends on I2C
-	select MFD_CORE
-	select REGMAP_I2C
-	help
-	  If you say yes here then you get support for the LP873X series of
-	  Power Management Integrated Circuits (PMIC).
-	  These include voltage regulators, thermal protection, configurable
-	  General Purpose Outputs (GPO) that are used in portable devices.
-
-	  This driver can also be built as a module. If so, the module
-	  will be called lp873x.
 
 config MFD_TPS65218
 	tristate "TI TPS65218 Power Management chips"
@@ -1306,25 +1191,27 @@ config MFD_TPS65910
 	  Power Management chips.
 
 config MFD_TPS65912
-	tristate
+	bool "TI TPS65912 Power Management chip"
+	depends on GPIOLIB
 	select MFD_CORE
-	select REGMAP
-	select REGMAP_IRQ
+	help
+	  If you say yes here you get support for the TPS65912 series of
+	  PM chips.
 
 config MFD_TPS65912_I2C
-	tristate "TI TPS65912 Power Management chip with I2C"
+	bool "TI TPS65912 Power Management chip with I2C"
+	select MFD_CORE
 	select MFD_TPS65912
-	select REGMAP_I2C
-	depends on I2C
+	depends on I2C=y && GPIOLIB
 	help
 	  If you say yes here you get support for the TPS65912 series of
 	  PM chips with I2C interface.
 
 config MFD_TPS65912_SPI
-	tristate "TI TPS65912 Power Management chip with SPI"
+	bool "TI TPS65912 Power Management chip with SPI"
+	select MFD_CORE
 	select MFD_TPS65912
-	select REGMAP_SPI
-	depends on SPI_MASTER
+	depends on SPI_MASTER && GPIOLIB
 	help
 	  If you say yes here you get support for the TPS65912 series of
 	  PM chips with SPI interface.
@@ -1493,28 +1380,24 @@ config MFD_ARIZONA
 	bool
 
 config MFD_ARIZONA_I2C
-	tristate "Cirrus Logic/Wolfson Microelectronics Arizona platform with I2C"
+	tristate "Wolfson Microelectronics Arizona platform with I2C"
 	select MFD_ARIZONA
+	select MFD_CORE
 	select REGMAP_I2C
 	depends on I2C
 	help
-	  Support for the Cirrus Logic/Wolfson Microelectronics Arizona platform
-	  audio SoC core functionality controlled via I2C.
+	  Support for the Wolfson Microelectronics Arizona platform audio SoC
+	  core functionality controlled via I2C.
 
 config MFD_ARIZONA_SPI
-	tristate "Cirrus Logic/Wolfson Microelectronics Arizona platform with SPI"
+	tristate "Wolfson Microelectronics Arizona platform with SPI"
 	select MFD_ARIZONA
+	select MFD_CORE
 	select REGMAP_SPI
 	depends on SPI_MASTER
 	help
-	  Support for the Cirrus Logic/Wolfson Microelectronics Arizona platform
-	  audio SoC core functionality controlled via SPI.
-
-config MFD_CS47L24
-	bool "Cirrus Logic CS47L24 and WM1831"
-	depends on MFD_ARIZONA
-	help
-	  Support for Cirrus Logic CS47L24 and WM1831 low power audio SoC
+	  Support for the Wolfson Microelectronics Arizona platform audio SoC
+	  core functionality controlled via I2C.
 
 config MFD_WM5102
 	bool "Wolfson Microelectronics WM5102"
@@ -1584,6 +1467,13 @@ config MFD_WM831X_SPI
 config MFD_WM8350
 	bool
 
+config MFD_RK1000
+	bool "RK1000 CORE module support"
+	select MFD_CORE
+	help
+	  if you say yes here you get support for the RK1000, with func as
+	  TVEncoder or CODEC.
+
 config MFD_WM8350_I2C
 	bool "Wolfson Microelectronics WM8350 with I2C"
 	select MFD_WM8350
@@ -1646,7 +1536,7 @@ endmenu
 
 config MFD_VEXPRESS_SYSREG
 	bool "Versatile Express System Registers"
-	depends on VEXPRESS_CONFIG && GPIOLIB && !ARCH_USES_GETTIMEOFFSET
+	depends on VEXPRESS_CONFIG && GPIOLIB
 	default y
 	select CLKSRC_MMIO
 	select GPIO_GENERIC_PLATFORM
@@ -1657,4 +1547,12 @@ config MFD_VEXPRESS_SYSREG
 	  on the ARM Ltd. Versatile Express board.
 
 endmenu
+
+config FUSB_30X
+	tristate "Fairchild fusb302 Support"
+	depends on I2C=y
+	help
+	  This option provides a driver for the Fairchild FUSB302.
+	  It support typec-pd functionality by controlled using I2C.
+
 endif

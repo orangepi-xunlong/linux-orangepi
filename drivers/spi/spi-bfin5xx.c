@@ -67,6 +67,8 @@ struct bfin_spi_master_data {
 	/* BFIN hookup */
 	struct bfin5xx_spi_master *master_info;
 
+	/* Driver message queue */
+	struct workqueue_struct *workqueue;
 	struct work_struct pump_messages;
 	spinlock_t lock;
 	struct list_head queue;
@@ -357,7 +359,7 @@ static void bfin_spi_giveback(struct bfin_spi_master_data *drv_data)
 	drv_data->cur_msg = NULL;
 	drv_data->cur_transfer = NULL;
 	drv_data->cur_chip = NULL;
-	schedule_work(&drv_data->pump_messages);
+	queue_work(drv_data->workqueue, &drv_data->pump_messages);
 	spin_unlock_irqrestore(&drv_data->lock, flags);
 
 	msg->state = NULL;
@@ -944,7 +946,7 @@ static int bfin_spi_transfer(struct spi_device *spi, struct spi_message *msg)
 	list_add_tail(&msg->queue, &drv_data->queue);
 
 	if (drv_data->running && !drv_data->busy)
-		schedule_work(&drv_data->pump_messages);
+		queue_work(drv_data->workqueue, &drv_data->pump_messages);
 
 	spin_unlock_irqrestore(&drv_data->lock, flags);
 
@@ -1175,7 +1177,12 @@ static int bfin_spi_init_queue(struct bfin_spi_master_data *drv_data)
 	tasklet_init(&drv_data->pump_transfers,
 		     bfin_spi_pump_transfers, (unsigned long)drv_data);
 
+	/* init messages workqueue */
 	INIT_WORK(&drv_data->pump_messages, bfin_spi_pump_messages);
+	drv_data->workqueue = create_singlethread_workqueue(
+				dev_name(drv_data->master->dev.parent));
+	if (drv_data->workqueue == NULL)
+		return -EBUSY;
 
 	return 0;
 }
@@ -1197,7 +1204,7 @@ static int bfin_spi_start_queue(struct bfin_spi_master_data *drv_data)
 	drv_data->cur_chip = NULL;
 	spin_unlock_irqrestore(&drv_data->lock, flags);
 
-	schedule_work(&drv_data->pump_messages);
+	queue_work(drv_data->workqueue, &drv_data->pump_messages);
 
 	return 0;
 }
@@ -1239,7 +1246,7 @@ static int bfin_spi_destroy_queue(struct bfin_spi_master_data *drv_data)
 	if (status != 0)
 		return status;
 
-	flush_work(&drv_data->pump_messages);
+	destroy_workqueue(drv_data->workqueue);
 
 	return 0;
 }

@@ -23,6 +23,7 @@
  * - BUS:    bus glue code, bus abstraction layer
  *
  * Compile Options
+ * - CONFIG_USB_CHIPIDEA_DEBUG: enable debug facilities
  * - STALL_IN:  non-empty bulk-in pipes cannot be halted
  *              if defined mass storage compliance succeeds but with warnings
  *              => case 4: Hi >  Dn
@@ -70,6 +71,7 @@
 #include "udc.h"
 #include "bits.h"
 #include "host.h"
+#include "debug.h"
 #include "otg.h"
 #include "otg_fsm.h"
 
@@ -654,43 +656,53 @@ static int ci_get_platdata(struct device *dev,
 	if (usb_get_maximum_speed(dev) == USB_SPEED_FULL)
 		platdata->flags |= CI_HDRC_FORCE_FULLSPEED;
 
-	of_property_read_u32(dev->of_node, "phy-clkgate-delay-us",
+	if (of_find_property(dev->of_node, "phy-clkgate-delay-us", NULL))
+		of_property_read_u32(dev->of_node, "phy-clkgate-delay-us",
 				     &platdata->phy_clkgate_delay_us);
 
 	platdata->itc_setting = 1;
+	if (of_find_property(dev->of_node, "itc-setting", NULL)) {
+		ret = of_property_read_u32(dev->of_node, "itc-setting",
+			&platdata->itc_setting);
+		if (ret) {
+			dev_err(dev,
+				"failed to get itc-setting\n");
+			return ret;
+		}
+	}
 
-	of_property_read_u32(dev->of_node, "itc-setting",
-					&platdata->itc_setting);
-
-	ret = of_property_read_u32(dev->of_node, "ahb-burst-config",
-				&platdata->ahb_burst_config);
-	if (!ret) {
+	if (of_find_property(dev->of_node, "ahb-burst-config", NULL)) {
+		ret = of_property_read_u32(dev->of_node, "ahb-burst-config",
+			&platdata->ahb_burst_config);
+		if (ret) {
+			dev_err(dev,
+				"failed to get ahb-burst-config\n");
+			return ret;
+		}
 		platdata->flags |= CI_HDRC_OVERRIDE_AHB_BURST;
-	} else if (ret != -EINVAL) {
-		dev_err(dev, "failed to get ahb-burst-config\n");
-		return ret;
 	}
 
-	ret = of_property_read_u32(dev->of_node, "tx-burst-size-dword",
-				&platdata->tx_burst_size);
-	if (!ret) {
+	if (of_find_property(dev->of_node, "tx-burst-size-dword", NULL)) {
+		ret = of_property_read_u32(dev->of_node, "tx-burst-size-dword",
+			&platdata->tx_burst_size);
+		if (ret) {
+			dev_err(dev,
+				"failed to get tx-burst-size-dword\n");
+			return ret;
+		}
 		platdata->flags |= CI_HDRC_OVERRIDE_TX_BURST;
-	} else if (ret != -EINVAL) {
-		dev_err(dev, "failed to get tx-burst-size-dword\n");
-		return ret;
 	}
 
-	ret = of_property_read_u32(dev->of_node, "rx-burst-size-dword",
-				&platdata->rx_burst_size);
-	if (!ret) {
+	if (of_find_property(dev->of_node, "rx-burst-size-dword", NULL)) {
+		ret = of_property_read_u32(dev->of_node, "rx-burst-size-dword",
+			&platdata->rx_burst_size);
+		if (ret) {
+			dev_err(dev,
+				"failed to get rx-burst-size-dword\n");
+			return ret;
+		}
 		platdata->flags |= CI_HDRC_OVERRIDE_RX_BURST;
-	} else if (ret != -EINVAL) {
-		dev_err(dev, "failed to get rx-burst-size-dword\n");
-		return ret;
 	}
-
-	if (of_find_property(dev->of_node, "non-zero-ttctrl-ttha", NULL))
-		platdata->flags |= CI_HDRC_SET_NON_ZERO_TTHA;
 
 	ext_id = ERR_PTR(-ENODEV);
 	ext_vbus = ERR_PTR(-ENODEV);
@@ -901,8 +913,15 @@ static int ci_hdrc_probe(struct platform_device *pdev)
 	} else if (ci->platdata->usb_phy) {
 		ci->usb_phy = ci->platdata->usb_phy;
 	} else {
+		ci->usb_phy = devm_usb_get_phy_by_phandle(dev->parent, "phys",
+							  0);
 		ci->phy = devm_phy_get(dev->parent, "usb-phy");
-		ci->usb_phy = devm_usb_get_phy(dev->parent, USB_PHY_TYPE_USB2);
+
+		/* Fallback to grabbing any registered USB2 PHY */
+		if (IS_ERR(ci->usb_phy) &&
+		    PTR_ERR(ci->usb_phy) != -EPROBE_DEFER)
+			ci->usb_phy = devm_usb_get_phy(dev->parent,
+						       USB_PHY_TYPE_USB2);
 
 		/* if both generic PHY and USB PHY layers aren't enabled */
 		if (PTR_ERR(ci->phy) == -ENOSYS &&

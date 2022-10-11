@@ -16,7 +16,6 @@
 
 #ifdef CONFIG_PPC64
 
-#include <linux/string.h>
 #include <asm/types.h>
 #include <asm/lppaca.h>
 #include <asm/mmu.h>
@@ -25,8 +24,6 @@
 #ifdef CONFIG_KVM_BOOK3S_64_HANDLER
 #include <asm/kvm_book3s_asm.h>
 #endif
-#include <asm/accounting.h>
-#include <asm/hmi.h>
 
 register struct paca_struct *local_paca asm("r13");
 
@@ -134,16 +131,7 @@ struct paca_struct {
 	struct tlb_core_data tcd;
 #endif /* CONFIG_PPC_BOOK3E */
 
-#ifdef CONFIG_PPC_BOOK3S
-	mm_context_id_t mm_ctx_id;
-#ifdef CONFIG_PPC_MM_SLICES
-	u64 mm_ctx_low_slices_psize;
-	unsigned char mm_ctx_high_slices_psize[SLICE_ARRAY_SIZE];
-#else
-	u16 mm_ctx_user_psize;
-	u16 mm_ctx_sllp;
-#endif
-#endif
+	mm_context_t context;
 
 	/*
 	 * then miscellaneous read-write fields
@@ -186,7 +174,13 @@ struct paca_struct {
 #endif
 
 	/* Stuff for accurate time accounting */
-	struct cpu_accounting_data accounting;
+	u64 user_time;			/* accumulated usermode TB ticks */
+	u64 system_time;		/* accumulated system TB ticks */
+	u64 user_time_scaled;		/* accumulated usermode SPURR ticks */
+	u64 starttime;			/* TB value snapshot */
+	u64 starttime_user;		/* TB value on exit to usermode */
+	u64 startspurr;			/* SPURR value snapshot */
+	u64 utime_sspurr;		/* ->user_time when ->startspurr set */
 	u64 stolen_time;		/* TB ticks taken by hypervisor */
 	u64 dtl_ridx;			/* read index in dispatch log */
 	struct dtl_entry *dtl_curr;	/* pointer corresponding to dtl_ridx */
@@ -197,13 +191,6 @@ struct paca_struct {
 	struct kvmppc_book3s_shadow_vcpu shadow_vcpu;
 #endif
 	struct kvmppc_host_state kvm_hstate;
-#ifdef CONFIG_KVM_BOOK3S_HV_POSSIBLE
-	/*
-	 * Bitmap for sibling subcore status. See kvm/book3s_hv_ras.c for
-	 * more details
-	 */
-	struct sibling_subcore_state *sibling_subcore_state;
-#endif
 #endif
 #ifdef CONFIG_PPC_BOOK3S_64
 	/*
@@ -215,23 +202,6 @@ struct paca_struct {
 	u64 l1d_flush_size;
 #endif
 };
-
-#ifdef CONFIG_PPC_BOOK3S
-static inline void copy_mm_to_paca(mm_context_t *context)
-{
-	get_paca()->mm_ctx_id = context->id;
-#ifdef CONFIG_PPC_MM_SLICES
-	get_paca()->mm_ctx_low_slices_psize = context->low_slices_psize;
-	memcpy(&get_paca()->mm_ctx_high_slices_psize,
-	       &context->high_slices_psize, SLICE_ARRAY_SIZE);
-#else
-	get_paca()->mm_ctx_user_psize = context->user_psize;
-	get_paca()->mm_ctx_sllp = context->sllp;
-#endif
-}
-#else
-static inline void copy_mm_to_paca(mm_context_t *context){}
-#endif
 
 extern struct paca_struct *paca;
 extern void initialise_paca(struct paca_struct *new_paca, int cpu);

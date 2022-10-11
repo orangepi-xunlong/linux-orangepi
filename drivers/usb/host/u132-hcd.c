@@ -73,7 +73,7 @@ MODULE_LICENSE("GPL");
 #define INT_MODULE_PARM(n, v) static int n = v;module_param(n, int, 0444)
 INT_MODULE_PARM(testing, 0);
 /* Some boards misreport power switching/overcurrent*/
-static bool distrust_firmware = true;
+static bool distrust_firmware = 1;
 module_param(distrust_firmware, bool, 0);
 MODULE_PARM_DESC(distrust_firmware, "true to distrust firmware power/overcurren"
 	"t setup");
@@ -1309,9 +1309,13 @@ static void u132_hcd_ring_work_scheduler(struct work_struct *work)
 		u132_ring_put_kref(u132, ring);
 		return;
 	} else if (ring->curr_endp) {
-		struct u132_endp *endp, *last_endp = ring->curr_endp;
+		struct u132_endp *last_endp = ring->curr_endp;
+		struct list_head *scan;
+		struct list_head *head = &last_endp->endp_ring;
 		unsigned long wakeup = 0;
-		list_for_each_entry(endp, &last_endp->endp_ring, endp_ring) {
+		list_for_each(scan, head) {
+			struct u132_endp *endp = list_entry(scan,
+				struct u132_endp, endp_ring);
 			if (endp->queue_next == endp->queue_last) {
 			} else if ((endp->delayed == 0)
 				|| time_after_eq(jiffies, endp->jiffies)) {
@@ -2389,12 +2393,14 @@ static int u132_urb_enqueue(struct usb_hcd *hcd, struct urb *urb,
 static int dequeue_from_overflow_chain(struct u132 *u132,
 	struct u132_endp *endp, struct urb *urb)
 {
-	struct u132_urbq *urbq;
-
-	list_for_each_entry(urbq, &endp->urb_more, urb_more) {
+	struct list_head *scan;
+	struct list_head *head = &endp->urb_more;
+	list_for_each(scan, head) {
+		struct u132_urbq *urbq = list_entry(scan, struct u132_urbq,
+			urb_more);
 		if (urbq->urb == urb) {
 			struct usb_hcd *hcd = u132_to_hcd(u132);
-			list_del(&urbq->urb_more);
+			list_del(scan);
 			endp->queue_size -= 1;
 			urb->error_count = 0;
 			usb_hcd_giveback_urb(hcd, urb, 0);
@@ -2559,7 +2565,7 @@ static int u132_get_frame(struct usb_hcd *hcd)
 	} else {
 		int frame = 0;
 		dev_err(&u132->platform_dev->dev, "TODO: u132_get_frame\n");
-		msleep(100);
+		mdelay(100);
 		return frame;
 	}
 }
@@ -3208,6 +3214,9 @@ static int __init u132_hcd_init(void)
 	printk(KERN_INFO "driver %s\n", hcd_name);
 	workqueue = create_singlethread_workqueue("u132");
 	retval = platform_driver_register(&u132_platform_driver);
+	if (retval)
+		destroy_workqueue(workqueue);
+
 	return retval;
 }
 

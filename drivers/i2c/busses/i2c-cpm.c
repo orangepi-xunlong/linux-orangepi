@@ -197,7 +197,9 @@ static void cpm_i2c_parse_message(struct i2c_adapter *adap,
 	tbdf = cpm->tbase + tx;
 	rbdf = cpm->rbase + rx;
 
-	addr = i2c_8bit_addr_from_msg(pmsg);
+	addr = pmsg->addr << 1;
+	if (pmsg->flags & I2C_M_RD)
+		addr |= 1;
 
 	tb = cpm->txbuf[tx];
 	rb = cpm->rxbuf[rx];
@@ -665,8 +667,10 @@ static int cpm_i2c_probe(struct platform_device *ofdev)
 	cpm->adap.nr = (data && len == 4) ? be32_to_cpup(data) : -1;
 	result = i2c_add_numbered_adapter(&cpm->adap);
 
-	if (result < 0)
+	if (result < 0) {
+		dev_err(&ofdev->dev, "Unable to register with I2C\n");
 		goto out_shut;
+	}
 
 	dev_dbg(&ofdev->dev, "hw routines for %s registered.\n",
 		cpm->adap.name);

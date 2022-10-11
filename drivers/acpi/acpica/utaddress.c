@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2015, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -77,6 +77,7 @@ acpi_ut_add_address_range(acpi_adr_space_type space_id,
 			  u32 length, struct acpi_namespace_node *region_node)
 {
 	struct acpi_address_range *range_info;
+	acpi_status status;
 
 	ACPI_FUNCTION_TRACE(ut_add_address_range);
 
@@ -96,6 +97,12 @@ acpi_ut_add_address_range(acpi_adr_space_type space_id,
 	range_info->end_address = (address + length - 1);
 	range_info->region_node = region_node;
 
+	status = acpi_ut_acquire_mutex(ACPI_MTX_NAMESPACE);
+	if (ACPI_FAILURE(status)) {
+		ACPI_FREE(range_info);
+		return_ACPI_STATUS(status);
+	}
+
 	range_info->next = acpi_gbl_address_range_list[space_id];
 	acpi_gbl_address_range_list[space_id] = range_info;
 
@@ -105,6 +112,7 @@ acpi_ut_add_address_range(acpi_adr_space_type space_id,
 			  ACPI_FORMAT_UINT64(address),
 			  ACPI_FORMAT_UINT64(range_info->end_address)));
 
+	(void)acpi_ut_release_mutex(ACPI_MTX_NAMESPACE);
 	return_ACPI_STATUS(AE_OK);
 }
 
@@ -231,9 +239,8 @@ acpi_ut_check_address_range(acpi_adr_space_type space_id,
 			overlap_count++;
 			if (warn) {	/* Optional warning message */
 				pathname =
-				    acpi_ns_get_normalized_pathname(range_info->
-								    region_node,
-								    TRUE);
+				    acpi_ns_get_external_pathname(range_info->
+								  region_node);
 
 				ACPI_WARNING((AE_INFO,
 					      "%s range 0x%8.8X%8.8X-0x%8.8X%8.8X conflicts with OpRegion 0x%8.8X%8.8X-0x%8.8X%8.8X (%s)",

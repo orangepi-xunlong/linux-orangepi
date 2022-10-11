@@ -34,10 +34,11 @@ Example nodes:
 
 	gpio_keys_polled {
 			compatible = "gpio-keys-polled";
+			#address-cells = <1>;
+			#size-cells = <0>;
 			poll-interval = <100>;
 			autorepeat;
-
-			button21 {
+			button@21 {
 				label = "GPIO Key UP";
 				linux,code = <103>;
 				gpios = <&gpio1 0 1>;

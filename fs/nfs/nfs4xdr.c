@@ -1761,7 +1761,7 @@ static void encode_exchange_id(struct xdr_stream *xdr,
 	int len = 0;
 
 	encode_op_hdr(xdr, OP_EXCHANGE_ID, decode_exchange_id_maxsz, hdr);
-	encode_nfs4_verifier(xdr, &args->verifier);
+	encode_nfs4_verifier(xdr, args->verifier);
 
 	encode_string(xdr, strlen(args->client->cl_owner_id),
 			args->client->cl_owner_id);
@@ -1850,7 +1850,7 @@ static void encode_create_session(struct xdr_stream *xdr,
 	*p++ = cpu_to_be32(RPC_AUTH_UNIX);			/* auth_sys */
 
 	/* authsys_parms rfc1831 */
-	*p++ = cpu_to_be32(ktime_to_ns(nn->boot_time));	/* stamp */
+	*p++ = cpu_to_be32(nn->boot_time.tv_nsec);	/* stamp */
 	p = xdr_encode_array(p, clnt->cl_nodename, clnt->cl_nodelen);
 	*p++ = cpu_to_be32(0);				/* UID */
 	*p++ = cpu_to_be32(0);				/* GID */
@@ -1985,14 +1985,9 @@ encode_layoutcommit(struct xdr_stream *xdr,
 	p = xdr_encode_hyper(p, args->lastbytewritten + 1);	/* length */
 	*p = cpu_to_be32(0); /* reclaim */
 	encode_nfs4_stateid(xdr, &args->stateid);
-	if (args->lastbytewritten != U64_MAX) {
-		p = reserve_space(xdr, 20);
-		*p++ = cpu_to_be32(1); /* newoffset = TRUE */
-		p = xdr_encode_hyper(p, args->lastbytewritten);
-	} else {
-		p = reserve_space(xdr, 12);
-		*p++ = cpu_to_be32(0); /* newoffset = FALSE */
-	}
+	p = reserve_space(xdr, 20);
+	*p++ = cpu_to_be32(1); /* newoffset = TRUE */
+	p = xdr_encode_hyper(p, args->lastbytewritten);
 	*p++ = cpu_to_be32(0); /* Never send time_modify_changed */
 	*p++ = cpu_to_be32(NFS_SERVER(args->inode)->pnfs_curr_ld->id);/* type */
 
@@ -4275,24 +4270,6 @@ static int decode_stateid(struct xdr_stream *xdr, nfs4_stateid *stateid)
 	return decode_opaque_fixed(xdr, stateid, NFS4_STATEID_SIZE);
 }
 
-static int decode_open_stateid(struct xdr_stream *xdr, nfs4_stateid *stateid)
-{
-	stateid->type = NFS4_OPEN_STATEID_TYPE;
-	return decode_stateid(xdr, stateid);
-}
-
-static int decode_lock_stateid(struct xdr_stream *xdr, nfs4_stateid *stateid)
-{
-	stateid->type = NFS4_LOCK_STATEID_TYPE;
-	return decode_stateid(xdr, stateid);
-}
-
-static int decode_delegation_stateid(struct xdr_stream *xdr, nfs4_stateid *stateid)
-{
-	stateid->type = NFS4_DELEGATION_STATEID_TYPE;
-	return decode_stateid(xdr, stateid);
-}
-
 static int decode_close(struct xdr_stream *xdr, struct nfs_closeres *res)
 {
 	int status;
@@ -4301,7 +4278,7 @@ static int decode_close(struct xdr_stream *xdr, struct nfs_closeres *res)
 	if (status != -EIO)
 		nfs_increment_open_seqid(status, res->seqid);
 	if (!status)
-		status = decode_open_stateid(xdr, &res->stateid);
+		status = decode_stateid(xdr, &res->stateid);
 	return status;
 }
 
@@ -4725,37 +4702,34 @@ static int decode_getfattr(struct xdr_stream *xdr, struct nfs_fattr *fattr,
 }
 
 /*
- * Decode potentially multiple layout types.
+ * Decode potentially multiple layout types. Currently we only support
+ * one layout driver per file system.
  */
-static int decode_pnfs_layout_types(struct xdr_stream *xdr,
-				    struct nfs_fsinfo *fsinfo)
+static int decode_first_pnfs_layout_type(struct xdr_stream *xdr,
+					 uint32_t *layouttype)
 {
 	__be32 *p;
-	uint32_t i;
+	int num;
 
 	p = xdr_inline_decode(xdr, 4);
 	if (unlikely(!p))
 		goto out_overflow;
-	fsinfo->nlayouttypes = be32_to_cpup(p);
+	num = be32_to_cpup(p);
 
 	/* pNFS is not supported by the underlying file system */
-	if (fsinfo->nlayouttypes == 0)
+	if (num == 0) {
+		*layouttype = 0;
 		return 0;
+	}
+	if (num > 1)
+		printk(KERN_INFO "NFS: %s: Warning: Multiple pNFS layout "
+			"drivers per filesystem not supported\n", __func__);
 
 	/* Decode and set first layout type, move xdr->p past unused types */
-	p = xdr_inline_decode(xdr, fsinfo->nlayouttypes * 4);
+	p = xdr_inline_decode(xdr, num * 4);
 	if (unlikely(!p))
 		goto out_overflow;
-
-	/* If we get too many, then just cap it at the max */
-	if (fsinfo->nlayouttypes > NFS_MAX_LAYOUT_TYPES) {
-		printk(KERN_INFO "NFS: %s: Warning: Too many (%u) pNFS layout types\n",
-			__func__, fsinfo->nlayouttypes);
-		fsinfo->nlayouttypes = NFS_MAX_LAYOUT_TYPES;
-	}
-
-	for(i = 0; i < fsinfo->nlayouttypes; ++i)
-		fsinfo->layouttype[i] = be32_to_cpup(p++);
+	*layouttype = be32_to_cpup(p);
 	return 0;
 out_overflow:
 	print_overflow_msg(__func__, xdr);
@@ -4767,7 +4741,7 @@ out_overflow:
  * Note we must ensure that layouttype is set in any non-error case.
  */
 static int decode_attr_pnfstype(struct xdr_stream *xdr, uint32_t *bitmap,
-				struct nfs_fsinfo *fsinfo)
+				uint32_t *layouttype)
 {
 	int status = 0;
 
@@ -4775,9 +4749,10 @@ static int decode_attr_pnfstype(struct xdr_stream *xdr, uint32_t *bitmap,
 	if (unlikely(bitmap[1] & (FATTR4_WORD1_FS_LAYOUT_TYPES - 1U)))
 		return -EIO;
 	if (bitmap[1] & FATTR4_WORD1_FS_LAYOUT_TYPES) {
-		status = decode_pnfs_layout_types(xdr, fsinfo);
+		status = decode_first_pnfs_layout_type(xdr, layouttype);
 		bitmap[1] &= ~FATTR4_WORD1_FS_LAYOUT_TYPES;
-	}
+	} else
+		*layouttype = 0;
 	return status;
 }
 
@@ -4858,7 +4833,7 @@ static int decode_fsinfo(struct xdr_stream *xdr, struct nfs_fsinfo *fsinfo)
 	status = decode_attr_time_delta(xdr, bitmap, &fsinfo->time_delta);
 	if (status != 0)
 		goto xdr_error;
-	status = decode_attr_pnfstype(xdr, bitmap, fsinfo);
+	status = decode_attr_pnfstype(xdr, bitmap, &fsinfo->layouttype);
 	if (status != 0)
 		goto xdr_error;
 
@@ -4962,7 +4937,7 @@ static int decode_lock(struct xdr_stream *xdr, struct nfs_lock_res *res)
 	if (status == -EIO)
 		goto out;
 	if (status == 0) {
-		status = decode_lock_stateid(xdr, &res->stateid);
+		status = decode_stateid(xdr, &res->stateid);
 		if (unlikely(status))
 			goto out;
 	} else if (status == -NFS4ERR_DENIED)
@@ -4991,7 +4966,7 @@ static int decode_locku(struct xdr_stream *xdr, struct nfs_locku_res *res)
 	if (status != -EIO)
 		nfs_increment_lock_seqid(status, res->seqid);
 	if (status == 0)
-		status = decode_lock_stateid(xdr, &res->stateid);
+		status = decode_stateid(xdr, &res->stateid);
 	return status;
 }
 
@@ -5026,7 +5001,7 @@ static int decode_space_limit(struct xdr_stream *xdr,
 		blocksize = be32_to_cpup(p);
 		maxsize = (uint64_t)nblocks * (uint64_t)blocksize;
 	}
-	maxsize >>= PAGE_SHIFT;
+	maxsize >>= PAGE_CACHE_SHIFT;
 	*pagemod_limit = min_t(u64, maxsize, ULONG_MAX);
 	return 0;
 out_overflow:
@@ -5041,7 +5016,7 @@ static int decode_rw_delegation(struct xdr_stream *xdr,
 	__be32 *p;
 	int status;
 
-	status = decode_delegation_stateid(xdr, &res->delegation);
+	status = decode_stateid(xdr, &res->delegation);
 	if (unlikely(status))
 		return status;
 	p = xdr_inline_decode(xdr, 4);
@@ -5121,7 +5096,7 @@ static int decode_open(struct xdr_stream *xdr, struct nfs_openres *res)
 	nfs_increment_open_seqid(status, res->seqid);
 	if (status)
 		return status;
-	status = decode_open_stateid(xdr, &res->stateid);
+	status = decode_stateid(xdr, &res->stateid);
 	if (unlikely(status))
 		return status;
 
@@ -5161,7 +5136,7 @@ static int decode_open_confirm(struct xdr_stream *xdr, struct nfs_open_confirmre
 	if (status != -EIO)
 		nfs_increment_open_seqid(status, res->seqid);
 	if (!status)
-		status = decode_open_stateid(xdr, &res->stateid);
+		status = decode_stateid(xdr, &res->stateid);
 	return status;
 }
 
@@ -5173,7 +5148,7 @@ static int decode_open_downgrade(struct xdr_stream *xdr, struct nfs_closeres *re
 	if (status != -EIO)
 		nfs_increment_open_seqid(status, res->seqid);
 	if (!status)
-		status = decode_open_stateid(xdr, &res->stateid);
+		status = decode_stateid(xdr, &res->stateid);
 	return status;
 }
 
@@ -5863,12 +5838,6 @@ out_overflow:
 }
 
 #if defined(CONFIG_NFS_V4_1)
-static int decode_layout_stateid(struct xdr_stream *xdr, nfs4_stateid *stateid)
-{
-	stateid->type = NFS4_LAYOUT_STATEID_TYPE;
-	return decode_stateid(xdr, stateid);
-}
-
 static int decode_getdeviceinfo(struct xdr_stream *xdr,
 				struct nfs4_getdeviceinfo_res *res)
 {
@@ -5950,7 +5919,7 @@ static int decode_layoutget(struct xdr_stream *xdr, struct rpc_rqst *req,
 	if (unlikely(!p))
 		goto out_overflow;
 	res->return_on_close = be32_to_cpup(p);
-	decode_layout_stateid(xdr, &res->stateid);
+	decode_stateid(xdr, &res->stateid);
 	p = xdr_inline_decode(xdr, 4);
 	if (unlikely(!p))
 		goto out_overflow;
@@ -6016,7 +5985,7 @@ static int decode_layoutreturn(struct xdr_stream *xdr,
 		goto out_overflow;
 	res->lrs_present = be32_to_cpup(p);
 	if (res->lrs_present)
-		status = decode_layout_stateid(xdr, &res->stateid);
+		status = decode_stateid(xdr, &res->stateid);
 	return status;
 out_overflow:
 	print_overflow_msg(__func__, xdr);
@@ -7546,7 +7515,6 @@ struct rpc_procinfo	nfs4_procedures[] = {
 	PROC(DEALLOCATE,	enc_deallocate,		dec_deallocate),
 	PROC(LAYOUTSTATS,	enc_layoutstats,	dec_layoutstats),
 	PROC(CLONE,		enc_clone,		dec_clone),
-	PROC(COPY,		enc_copy,		dec_copy),
 #endif /* CONFIG_NFS_V4_2 */
 };
 

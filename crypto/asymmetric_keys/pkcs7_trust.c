@@ -17,7 +17,7 @@
 #include <linux/asn1.h>
 #include <linux/key.h>
 #include <keys/asymmetric-type.h>
-#include <crypto/public_key.h>
+#include "public_key.h"
 #include "pkcs7_parser.h"
 
 /**
@@ -27,9 +27,10 @@ static int pkcs7_validate_trust_one(struct pkcs7_message *pkcs7,
 				    struct pkcs7_signed_info *sinfo,
 				    struct key *trust_keyring)
 {
-	struct public_key_signature *sig = sinfo->sig;
+	struct public_key_signature *sig = &sinfo->sig;
 	struct x509_certificate *x509, *last = NULL, *p;
 	struct key *key;
+	bool trusted;
 	int ret;
 
 	kenter(",%u,", sinfo->index);
@@ -41,8 +42,10 @@ static int pkcs7_validate_trust_one(struct pkcs7_message *pkcs7,
 
 	for (x509 = sinfo->signer; x509; x509 = x509->signer) {
 		if (x509->seen) {
-			if (x509->verified)
+			if (x509->verified) {
+				trusted = x509->trusted;
 				goto verified;
+			}
 			kleave(" = -ENOKEY [cached]");
 			return -ENOKEY;
 		}
@@ -51,8 +54,9 @@ static int pkcs7_validate_trust_one(struct pkcs7_message *pkcs7,
 		/* Look to see if this certificate is present in the trusted
 		 * keys.
 		 */
-		key = find_asymmetric_key(trust_keyring,
-					  x509->id, x509->skid, false);
+		key = x509_request_asymmetric_key(trust_keyring,
+						  x509->id, x509->skid,
+						  false);
 		if (!IS_ERR(key)) {
 			/* One of the X.509 certificates in the PKCS#7 message
 			 * is apparently the same as one we already trust.
@@ -76,17 +80,17 @@ static int pkcs7_validate_trust_one(struct pkcs7_message *pkcs7,
 
 		might_sleep();
 		last = x509;
-		sig = last->sig;
+		sig = &last->sig;
 	}
 
 	/* No match - see if the root certificate has a signer amongst the
 	 * trusted keys.
 	 */
-	if (last && (last->sig->auth_ids[0] || last->sig->auth_ids[1])) {
-		key = find_asymmetric_key(trust_keyring,
-					  last->sig->auth_ids[0],
-					  last->sig->auth_ids[1],
-					  false);
+	if (last && (last->akid_id || last->akid_skid)) {
+		key = x509_request_asymmetric_key(trust_keyring,
+						  last->akid_id,
+						  last->akid_skid,
+						  false);
 		if (!IS_ERR(key)) {
 			x509 = last;
 			pr_devel("sinfo %u: Root cert %u signer is key %x\n",
@@ -100,13 +104,14 @@ static int pkcs7_validate_trust_one(struct pkcs7_message *pkcs7,
 	/* As a last resort, see if we have a trusted public key that matches
 	 * the signed info directly.
 	 */
-	key = find_asymmetric_key(trust_keyring,
-				  sinfo->sig->auth_ids[0], NULL, false);
+	key = x509_request_asymmetric_key(trust_keyring,
+					  sinfo->signing_cert_id,
+					  NULL,
+					  false);
 	if (!IS_ERR(key)) {
 		pr_devel("sinfo %u: Direct signer is key %x\n",
 			 sinfo->index, key_serial(key));
 		x509 = NULL;
-		sig = sinfo->sig;
 		goto matched;
 	}
 	if (PTR_ERR(key) != -ENOKEY)
@@ -117,6 +122,7 @@ static int pkcs7_validate_trust_one(struct pkcs7_message *pkcs7,
 
 matched:
 	ret = verify_signature(key, sig);
+	trusted = test_bit(KEY_FLAG_TRUSTED, &key->flags);
 	key_put(key);
 	if (ret < 0) {
 		if (ret == -ENOMEM)
@@ -128,9 +134,12 @@ matched:
 verified:
 	if (x509) {
 		x509->verified = true;
-		for (p = sinfo->signer; p != x509; p = p->signer)
+		for (p = sinfo->signer; p != x509; p = p->signer) {
 			p->verified = true;
+			p->trusted = trusted;
+		}
 	}
+	sinfo->trusted = trusted;
 	kleave(" = 0");
 	return 0;
 }
@@ -139,6 +148,7 @@ verified:
  * pkcs7_validate_trust - Validate PKCS#7 trust chain
  * @pkcs7: The PKCS#7 certificate to validate
  * @trust_keyring: Signing certificates to use as starting points
+ * @_trusted: Set to true if trustworth, false otherwise
  *
  * Validate that the certificate chain inside the PKCS#7 message intersects
  * keys we already know and trust.
@@ -160,12 +170,15 @@ verified:
  * May also return -ENOMEM.
  */
 int pkcs7_validate_trust(struct pkcs7_message *pkcs7,
-			 struct key *trust_keyring)
+			 struct key *trust_keyring,
+			 bool *_trusted)
 {
 	struct pkcs7_signed_info *sinfo;
 	struct x509_certificate *p;
 	int cached_ret = -ENOKEY;
 	int ret;
+
+	*_trusted = false;
 
 	for (p = pkcs7->certs; p; p = p->next)
 		p->seen = false;
@@ -180,6 +193,7 @@ int pkcs7_validate_trust(struct pkcs7_message *pkcs7,
 				cached_ret = -ENOPKG;
 			continue;
 		case 0:
+			*_trusted |= sinfo->trusted;
 			cached_ret = 0;
 			continue;
 		default:

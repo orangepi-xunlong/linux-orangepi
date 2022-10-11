@@ -24,8 +24,7 @@
 
 static int load_em86(struct linux_binprm *bprm)
 {
-	const char *i_name, *i_arg;
-	char *interp;
+	char *interp, *i_name, *i_arg;
 	struct file * file;
 	int retval;
 	struct elfhdr	elf_ex;

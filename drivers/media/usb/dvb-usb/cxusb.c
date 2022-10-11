@@ -13,7 +13,7 @@
  *
  * TODO: Use the cx25840-driver for the analogue part
  *
- * Copyright (C) 2005 Patrick Boettcher (patrick.boettcher@posteo.de)
+ * Copyright (C) 2005 Patrick Boettcher (patrick.boettcher@desy.de)
  * Copyright (C) 2006 Michael Krufky (mkrufky@linuxtv.org)
  * Copyright (C) 2006, 2007 Chris Pascoe (c.pascoe@itee.uq.edu.au)
  *
@@ -45,6 +45,9 @@
 #include "si2168.h"
 #include "si2157.h"
 
+/* Max transfer size done by I2C transfer functions */
+#define MAX_XFER_SIZE  80
+
 /* debug */
 static int dvb_usb_cxusb_debug;
 module_param_named(debug, dvb_usb_cxusb_debug, int, 0644);
@@ -58,28 +61,23 @@ DVB_DEFINE_MOD_OPT_ADAPTER_NR(adapter_nr);
 static int cxusb_ctrl_msg(struct dvb_usb_device *d,
 			  u8 cmd, u8 *wbuf, int wlen, u8 *rbuf, int rlen)
 {
-	struct cxusb_state *st = d->priv;
-	int ret;
+	int wo = (rbuf == NULL || rlen == 0); /* write-only */
+	u8 sndbuf[MAX_XFER_SIZE];
 
-	if (1 + wlen > MAX_XFER_SIZE) {
-		warn("i2c wr: len=%d is too big!\n", wlen);
+	if (1 + wlen > sizeof(sndbuf)) {
+		warn("i2c wr: len=%d is too big!\n",
+		     wlen);
 		return -EOPNOTSUPP;
 	}
 
-	if (rlen > MAX_XFER_SIZE) {
-		warn("i2c rd: len=%d is too big!\n", rlen);
-		return -EOPNOTSUPP;
-	}
+	memset(sndbuf, 0, 1+wlen);
 
-	mutex_lock(&d->data_mutex);
-	st->data[0] = cmd;
-	memcpy(&st->data[1], wbuf, wlen);
-	ret = dvb_usb_generic_rw(d, st->data, 1 + wlen, st->data, rlen, 0);
-	if (!ret && rbuf && rlen)
-		memcpy(rbuf, st->data, rlen);
-
-	mutex_unlock(&d->data_mutex);
-	return ret;
+	sndbuf[0] = cmd;
+	memcpy(&sndbuf[1], wbuf, wlen);
+	if (wo)
+		return dvb_usb_generic_write(d, sndbuf, 1+wlen);
+	else
+		return dvb_usb_generic_rw(d, sndbuf, 1+wlen, rbuf, rlen, 0);
 }
 
 /* GPIO */
@@ -2318,7 +2316,7 @@ static struct usb_driver cxusb_driver = {
 
 module_usb_driver(cxusb_driver);
 
-MODULE_AUTHOR("Patrick Boettcher <patrick.boettcher@posteo.de>");
+MODULE_AUTHOR("Patrick Boettcher <patrick.boettcher@desy.de>");
 MODULE_AUTHOR("Michael Krufky <mkrufky@linuxtv.org>");
 MODULE_AUTHOR("Chris Pascoe <c.pascoe@itee.uq.edu.au>");
 MODULE_DESCRIPTION("Driver for Conexant USB2.0 hybrid reference design");

@@ -222,7 +222,7 @@ static struct platform_driver sdhci_f_sdh30_driver = {
 	.driver = {
 		.name = "f_sdh30",
 		.of_match_table = f_sdh30_dt_ids,
-		.pm	= &sdhci_pltfm_pmops,
+		.pm	= SDHCI_PLTFM_PMOPS,
 	},
 	.probe	= sdhci_f_sdh30_probe,
 	.remove	= sdhci_f_sdh30_remove,

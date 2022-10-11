@@ -11,8 +11,12 @@ This binding uses the common clock binding[1].
 
 Required properties:
 - compatible : shall be:
-  "st,quadfs"
-  "st,quadfs-pll"
+  "st,stih416-quadfs216",	"st,quadfs"
+  "st,stih416-quadfs432",	"st,quadfs"
+  "st,stih416-quadfs660-E",	"st,quadfs"
+  "st,stih416-quadfs660-F",	"st,quadfs"
+  "st,stih407-quadfs660-C",	"st,quadfs"
+  "st,stih407-quadfs660-D",	"st,quadfs"
 
 
 - #clock-cells : from common clock binding; shall be set to 1.
@@ -31,15 +35,14 @@ Required properties:
 
 Example:
 
-	clk_s_c0_quadfs: clk-s-c0-quadfs@9103000 {
-		#clock-cells = <1>;
-		compatible = "st,quadfs-pll";
-		reg = <0x9103000 0x1000>;
+	clockgen_e: clockgen-e@fd3208bc {
+                #clock-cells = <1>;
+                compatible = "st,stih416-quadfs660-E", "st,quadfs";
+                reg = <0xfd3208bc 0xB0>;
 
-		clocks = <&clk_sysin>;
-
-		clock-output-names = "clk-s-c0-fs0-ch0",
-				     "clk-s-c0-fs0-ch1",
-				     "clk-s-c0-fs0-ch2",
-				     "clk-s-c0-fs0-ch3";
-	};
+                clocks = <&clk_sysin>;
+                clock-output-names = "clk-m-pix-mdtp-0",
+				     "clk-m-pix-mdtp-1",
+				     "clk-m-pix-mdtp-2",
+				     "clk-m-mpelpc";
+        };

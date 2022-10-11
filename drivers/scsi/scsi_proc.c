@@ -251,8 +251,7 @@ static int scsi_add_single_device(uint host, uint channel, uint id, uint lun)
 	if (shost->transportt->user_scan)
 		error = shost->transportt->user_scan(shost, channel, id, lun);
 	else
-		error = scsi_scan_host_selected(shost, channel, id, lun,
-						SCSI_SCAN_MANUAL);
+		error = scsi_scan_host_selected(shost, channel, id, lun, 1);
 	scsi_host_put(shost);
 	return error;
 }

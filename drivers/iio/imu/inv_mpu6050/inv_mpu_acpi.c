@@ -56,7 +56,6 @@ static int asus_acpi_get_sensor_info(struct acpi_device *adev,
 	int i;
 	acpi_status status;
 	union acpi_object *cpm;
-	int ret;
 
 	status = acpi_evaluate_object(adev->handle, "CNF0", NULL, &buffer);
 	if (ACPI_FAILURE(status))
@@ -67,11 +66,11 @@ static int asus_acpi_get_sensor_info(struct acpi_device *adev,
 		union acpi_object *elem;
 		int j;
 
-		elem = &cpm->package.elements[i];
+		elem = &(cpm->package.elements[i]);
 		for (j = 0; j < elem->package.count; ++j) {
 			union acpi_object *sub_elem;
 
-			sub_elem = &elem->package.elements[j];
+			sub_elem = &(elem->package.elements[j]);
 			if (sub_elem->type == ACPI_TYPE_STRING)
 				strlcpy(info->type, sub_elem->string.pointer,
 					sizeof(info->type));
@@ -83,10 +82,10 @@ static int asus_acpi_get_sensor_info(struct acpi_device *adev,
 			}
 		}
 	}
-	ret = cpm->package.count;
+
 	kfree(buffer.pointer);
 
-	return ret;
+	return cpm->package.count;
 }
 
 static int acpi_i2c_check_resource(struct acpi_resource *ares, void *data)
@@ -140,23 +139,22 @@ static int inv_mpu_process_acpi_config(struct i2c_client *client,
 	return 0;
 }
 
-int inv_mpu_acpi_create_mux_client(struct i2c_client *client)
+int inv_mpu_acpi_create_mux_client(struct inv_mpu6050_state *st)
 {
-	struct inv_mpu6050_state *st = iio_priv(dev_get_drvdata(&client->dev));
 
 	st->mux_client = NULL;
-	if (ACPI_HANDLE(&client->dev)) {
+	if (ACPI_HANDLE(&st->client->dev)) {
 		struct i2c_board_info info;
 		struct acpi_device *adev;
 		int ret = -1;
 
-		adev = ACPI_COMPANION(&client->dev);
+		adev = ACPI_COMPANION(&st->client->dev);
 		memset(&info, 0, sizeof(info));
 
 		dmi_check_system(inv_mpu_dev_list);
 		switch (matched_product_name) {
 		case INV_MPU_ASUS_T100TA:
-			ret = asus_acpi_get_sensor_info(adev, client,
+			ret = asus_acpi_get_sensor_info(adev, st->client,
 							&info);
 			break;
 		/* Add more matched product processing here */
@@ -168,7 +166,7 @@ int inv_mpu_acpi_create_mux_client(struct i2c_client *client)
 			/* No matching DMI, so create device on INV6XX type */
 			unsigned short primary, secondary;
 
-			ret = inv_mpu_process_acpi_config(client, &primary,
+			ret = inv_mpu_process_acpi_config(st->client, &primary,
 							  &secondary);
 			if (!ret && secondary) {
 				char *name;
@@ -184,18 +182,17 @@ int inv_mpu_acpi_create_mux_client(struct i2c_client *client)
 			} else
 				return 0; /* no secondary addr, which is OK */
 		}
-		st->mux_client = i2c_new_device(st->muxc->adapter[0], &info);
+		st->mux_client = i2c_new_device(st->mux_adapter, &info);
 		if (!st->mux_client)
 			return -ENODEV;
+
 	}
 
 	return 0;
 }
 
-void inv_mpu_acpi_delete_mux_client(struct i2c_client *client)
+void inv_mpu_acpi_delete_mux_client(struct inv_mpu6050_state *st)
 {
-	struct inv_mpu6050_state *st = iio_priv(dev_get_drvdata(&client->dev));
-
 	if (st->mux_client)
 		i2c_unregister_device(st->mux_client);
 }
@@ -203,12 +200,12 @@ void inv_mpu_acpi_delete_mux_client(struct i2c_client *client)
 
 #include "inv_mpu_iio.h"
 
-int inv_mpu_acpi_create_mux_client(struct i2c_client *client)
+int inv_mpu_acpi_create_mux_client(struct inv_mpu6050_state *st)
 {
 	return 0;
 }
 
-void inv_mpu_acpi_delete_mux_client(struct i2c_client *client)
+void inv_mpu_acpi_delete_mux_client(struct inv_mpu6050_state *st)
 {
 }
 #endif

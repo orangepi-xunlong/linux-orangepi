@@ -58,7 +58,6 @@ static struct resource s3c64xx_iis0_resource[] = {
 
 static struct s3c_audio_pdata i2s0_pdata = {
 	.cfg_gpio = s3c64xx_i2s_cfg_gpio,
-	.dma_filter = pl08x_filter_id,
 	.dma_playback = DMACH_I2S0_OUT,
 	.dma_capture = DMACH_I2S0_IN,
 };
@@ -80,7 +79,6 @@ static struct resource s3c64xx_iis1_resource[] = {
 
 static struct s3c_audio_pdata i2s1_pdata = {
 	.cfg_gpio = s3c64xx_i2s_cfg_gpio,
-	.dma_filter = pl08x_filter_id,
 	.dma_playback = DMACH_I2S1_OUT,
 	.dma_capture = DMACH_I2S1_IN,
 };
@@ -102,7 +100,6 @@ static struct resource s3c64xx_iisv4_resource[] = {
 
 static struct s3c_audio_pdata i2sv4_pdata = {
 	.cfg_gpio = s3c64xx_i2s_cfg_gpio,
-	.dma_filter = pl08x_filter_id,
 	.dma_playback = DMACH_HSI_I2SV40_TX,
 	.dma_capture = DMACH_HSI_I2SV40_RX,
 	.type = {
@@ -153,7 +150,6 @@ static struct resource s3c64xx_pcm0_resource[] = {
 
 static struct s3c_audio_pdata s3c_pcm0_pdata = {
 	.cfg_gpio = s3c64xx_pcm_cfg_gpio,
-	.dma_filter = pl08x_filter_id,
 	.dma_capture = DMACH_PCM0_RX,
 	.dma_playback = DMACH_PCM0_TX,
 };
@@ -175,7 +171,6 @@ static struct resource s3c64xx_pcm1_resource[] = {
 
 static struct s3c_audio_pdata s3c_pcm1_pdata = {
 	.cfg_gpio = s3c64xx_pcm_cfg_gpio,
-	.dma_filter = pl08x_filter_id,
 	.dma_playback = DMACH_PCM1_TX,
 	.dma_capture = DMACH_PCM1_RX,
 };
@@ -210,7 +205,6 @@ static struct resource s3c64xx_ac97_resource[] = {
 
 static struct s3c_audio_pdata s3c_ac97_pdata = {
 	.dma_playback = DMACH_AC97_PCMOUT,
-	.dma_filter = pl08x_filter_id,
 	.dma_capture = DMACH_AC97_PCMIN,
 	.dma_capture_mic = DMACH_AC97_MICIN,
 };

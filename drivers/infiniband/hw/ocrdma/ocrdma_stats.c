@@ -64,11 +64,10 @@ static int ocrdma_add_stat(char *start, char *pcur,
 	return cpy_len;
 }
 
-bool ocrdma_alloc_stats_resources(struct ocrdma_dev *dev)
+static bool ocrdma_alloc_stats_mem(struct ocrdma_dev *dev)
 {
 	struct stats_mem *mem = &dev->stats_mem;
 
-	mutex_init(&dev->stats_lock);
 	/* Alloc mbox command mem*/
 	mem->size = max_t(u32, sizeof(struct ocrdma_rdma_stats_req),
 			sizeof(struct ocrdma_rdma_stats_resp));
@@ -92,14 +91,13 @@ bool ocrdma_alloc_stats_resources(struct ocrdma_dev *dev)
 	return true;
 }
 
-void ocrdma_release_stats_resources(struct ocrdma_dev *dev)
+static void ocrdma_release_stats_mem(struct ocrdma_dev *dev)
 {
 	struct stats_mem *mem = &dev->stats_mem;
 
 	if (mem->va)
 		dma_free_coherent(&dev->nic_info.pdev->dev, mem->size,
 				  mem->va, mem->pa);
-	mem->va = NULL;
 	kfree(mem->debugfs_mem);
 }
 
@@ -610,7 +608,7 @@ static char *ocrdma_driver_dbg_stats(struct ocrdma_dev *dev)
 static void ocrdma_update_stats(struct ocrdma_dev *dev)
 {
 	ulong now = jiffies, secs;
-	int status;
+	int status = 0;
 	struct ocrdma_rdma_stats_resp *rdma_stats =
 		      (struct ocrdma_rdma_stats_resp *)dev->stats_mem.va;
 	struct ocrdma_rsrc_stats *rsrc_stats = &rdma_stats->act_rsrc_stats;
@@ -641,11 +639,11 @@ static ssize_t ocrdma_dbgfs_ops_write(struct file *filp,
 {
 	char tmp_str[32];
 	long reset;
-	int status;
+	int status = 0;
 	struct ocrdma_stats *pstats = filp->private_data;
 	struct ocrdma_dev *dev = pstats->dev;
 
-	if (count > 32)
+	if (*ppos != 0 || count == 0 || count > sizeof(tmp_str))
 		goto err;
 
 	if (copy_from_user(tmp_str, buffer, count))
@@ -840,9 +838,15 @@ void ocrdma_add_port_stats(struct ocrdma_dev *dev)
 				&dev->reset_stats, &ocrdma_dbg_ops))
 		goto err;
 
+	/* Now create dma_mem for stats mbx command */
+	if (!ocrdma_alloc_stats_mem(dev))
+		goto err;
+
+	mutex_init(&dev->stats_lock);
 
 	return;
 err:
+	ocrdma_release_stats_mem(dev);
 	debugfs_remove_recursive(dev->dir);
 	dev->dir = NULL;
 }
@@ -851,7 +855,9 @@ void ocrdma_rem_port_stats(struct ocrdma_dev *dev)
 {
 	if (!dev->dir)
 		return;
-	debugfs_remove_recursive(dev->dir);
+	debugfs_remove(dev->dir);
+	mutex_destroy(&dev->stats_lock);
+	ocrdma_release_stats_mem(dev);
 }
 
 void ocrdma_init_debugfs(void)

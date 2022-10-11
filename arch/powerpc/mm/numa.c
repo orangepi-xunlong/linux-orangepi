@@ -581,22 +581,30 @@ static void verify_cpu_node_mapping(int cpu, int node)
 	}
 }
 
-/* Must run before sched domains notifier. */
-static int ppc_numa_cpu_prepare(unsigned int cpu)
+static int cpu_numa_callback(struct notifier_block *nfb, unsigned long action,
+			     void *hcpu)
 {
-	int nid;
+	unsigned long lcpu = (unsigned long)hcpu;
+	int ret = NOTIFY_DONE, nid;
 
-	nid = numa_setup_cpu(cpu);
-	verify_cpu_node_mapping(cpu, nid);
-	return 0;
-}
-
-static int ppc_numa_cpu_dead(unsigned int cpu)
-{
+	switch (action) {
+	case CPU_UP_PREPARE:
+	case CPU_UP_PREPARE_FROZEN:
+		nid = numa_setup_cpu(lcpu);
+		verify_cpu_node_mapping((int)lcpu, nid);
+		ret = NOTIFY_OK;
+		break;
 #ifdef CONFIG_HOTPLUG_CPU
-	unmap_cpu_from_node(cpu);
+	case CPU_DEAD:
+	case CPU_DEAD_FROZEN:
+	case CPU_UP_CANCELED:
+	case CPU_UP_CANCELED_FROZEN:
+		unmap_cpu_from_node(lcpu);
+		ret = NOTIFY_OK;
+		break;
 #endif
-	return 0;
+	}
+	return ret;
 }
 
 /*
@@ -845,7 +853,7 @@ void __init dump_numa_cpu_topology(void)
 		return;
 
 	for_each_online_node(node) {
-		pr_info("Node %d CPUs:", node);
+		printk(KERN_DEBUG "Node %d CPUs:", node);
 
 		count = 0;
 		/*
@@ -856,20 +864,59 @@ void __init dump_numa_cpu_topology(void)
 			if (cpumask_test_cpu(cpu,
 					node_to_cpumask_map[node])) {
 				if (count == 0)
-					pr_cont(" %u", cpu);
+					printk(" %u", cpu);
 				++count;
 			} else {
 				if (count > 1)
-					pr_cont("-%u", cpu - 1);
+					printk("-%u", cpu - 1);
 				count = 0;
 			}
 		}
 
 		if (count > 1)
-			pr_cont("-%u", nr_cpu_ids - 1);
-		pr_cont("\n");
+			printk("-%u", nr_cpu_ids - 1);
+		printk("\n");
 	}
 }
+
+static void __init dump_numa_memory_topology(void)
+{
+	unsigned int node;
+	unsigned int count;
+
+	if (min_common_depth == -1 || !numa_enabled)
+		return;
+
+	for_each_online_node(node) {
+		unsigned long i;
+
+		printk(KERN_DEBUG "Node %d Memory:", node);
+
+		count = 0;
+
+		for (i = 0; i < memblock_end_of_DRAM();
+		     i += (1 << SECTION_SIZE_BITS)) {
+			if (early_pfn_to_nid(i >> PAGE_SHIFT) == node) {
+				if (count == 0)
+					printk(" 0x%lx", i);
+				++count;
+			} else {
+				if (count > 0)
+					printk("-0x%lx", i);
+				count = 0;
+			}
+		}
+
+		if (count > 0)
+			printk("-0x%lx", i);
+		printk("\n");
+	}
+}
+
+static struct notifier_block ppc64_numa_nb = {
+	.notifier_call = cpu_numa_callback,
+	.priority = 1 /* Must run before sched domains notifier. */
+};
 
 /* Initialize NODE_DATA for a node on the local memory */
 static void __init setup_node_data(int nid, u64 start_pfn, u64 end_pfn)
@@ -939,6 +986,8 @@ void __init initmem_init(void)
 
 	if (parse_numa_properties())
 		setup_nonnuma();
+	else
+		dump_numa_memory_topology();
 
 	memblock_dump_all();
 
@@ -965,18 +1014,15 @@ void __init initmem_init(void)
 	setup_node_to_cpumask_map();
 
 	reset_numa_cpu_lookup_table();
-
+	register_cpu_notifier(&ppc64_numa_nb);
 	/*
 	 * We need the numa_cpu_lookup_table to be accurate for all CPUs,
 	 * even before we online them, so that we can use cpu_to_{node,mem}
 	 * early in boot, cf. smp_prepare_cpus().
-	 * _nocalls() + manual invocation is used because cpuhp is not yet
-	 * initialized for the boot CPU.
 	 */
-	cpuhp_setup_state_nocalls(CPUHP_POWER_NUMA_PREPARE, "POWER_NUMA_PREPARE",
-				  ppc_numa_cpu_prepare, ppc_numa_cpu_dead);
-	for_each_present_cpu(cpu)
-		numa_setup_cpu(cpu);
+	for_each_present_cpu(cpu) {
+		numa_setup_cpu((unsigned long)cpu);
+	}
 }
 
 static int __init early_numa(char *p)
@@ -1146,34 +1192,18 @@ int hot_add_scn_to_nid(unsigned long scn_addr)
 
 static u64 hot_add_drconf_memory_max(void)
 {
-	struct device_node *memory = NULL;
-	struct device_node *dn = NULL;
-	unsigned int drconf_cell_cnt = 0;
-	u64 lmb_size = 0;
+        struct device_node *memory = NULL;
+        unsigned int drconf_cell_cnt = 0;
+        u64 lmb_size = 0;
 	const __be32 *dm = NULL;
-	const __be64 *lrdr = NULL;
-	struct of_drconf_cell drmem;
 
-	dn = of_find_node_by_path("/rtas");
-	if (dn) {
-		lrdr = of_get_property(dn, "ibm,lrdr-capacity", NULL);
-		of_node_put(dn);
-		if (lrdr)
-			return be64_to_cpup(lrdr);
-	}
-
-	memory = of_find_node_by_path("/ibm,dynamic-reconfiguration-memory");
-	if (memory) {
-		drconf_cell_cnt = of_get_drconf_memory(memory, &dm);
-		lmb_size = of_get_lmb_size(memory);
-
-		/* Advance to the last cell, each cell has 6 32 bit integers */
-		dm += (drconf_cell_cnt - 1) * 6;
-		read_drconf_cell(&drmem, &dm);
-		of_node_put(memory);
-		return drmem.base_addr + lmb_size;
-	}
-	return 0;
+        memory = of_find_node_by_path("/ibm,dynamic-reconfiguration-memory");
+        if (memory) {
+                drconf_cell_cnt = of_get_drconf_memory(memory, &dm);
+                lmb_size = of_get_lmb_size(memory);
+                of_node_put(memory);
+        }
+        return lmb_size * drconf_cell_cnt;
 }
 
 /*
@@ -1289,7 +1319,7 @@ static long vphn_get_associativity(unsigned long cpu,
 
 	switch (rc) {
 	case H_FUNCTION:
-		printk(KERN_INFO
+		printk_once(KERN_INFO
 			"VPHN is not supported. Disabling polling...\n");
 		stop_topology_update();
 		break;
@@ -1581,6 +1611,9 @@ int start_topology_update(void)
 {
 	int rc = 0;
 
+	if (!topology_updates_enabled)
+		return 0;
+
 	if (firmware_has_feature(FW_FEATURE_PRRN)) {
 		if (!prrn_enabled) {
 			prrn_enabled = 1;
@@ -1609,6 +1642,9 @@ int start_topology_update(void)
 int stop_topology_update(void)
 {
 	int rc = 0;
+
+	if (!topology_updates_enabled)
+		return 0;
 
 	if (prrn_enabled) {
 		prrn_enabled = 0;
@@ -1655,11 +1691,13 @@ static ssize_t topology_write(struct file *file, const char __user *buf,
 
 	kbuf[read_len] = '\0';
 
-	if (!strncmp(kbuf, "on", 2))
+	if (!strncmp(kbuf, "on", 2)) {
+		topology_updates_enabled = true;
 		start_topology_update();
-	else if (!strncmp(kbuf, "off", 3))
+	} else if (!strncmp(kbuf, "off", 3)) {
 		stop_topology_update();
-	else
+		topology_updates_enabled = false;
+	} else
 		return -EINVAL;
 
 	return count;
@@ -1674,9 +1712,7 @@ static const struct file_operations topology_ops = {
 
 static int topology_update_init(void)
 {
-	/* Do not poll for changes if disabled at boot */
-	if (topology_updates_enabled)
-		start_topology_update();
+	start_topology_update();
 
 	if (!proc_create("powerpc/topology_updates", 0644, NULL, &topology_ops))
 		return -ENOMEM;

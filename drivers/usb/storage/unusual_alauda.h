@@ -1,5 +1,4 @@
-/*
- * Unusual Devices File for the Alauda-based card readers
+/* Unusual Devices File for the Alauda-based card readers
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the

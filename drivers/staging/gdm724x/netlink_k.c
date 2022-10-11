@@ -14,7 +14,6 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/export.h>
-#include <linux/mutex.h>
 #include <linux/etherdevice.h>
 #include <linux/netlink.h>
 #include <asm/byteorder.h>
@@ -22,7 +21,13 @@
 
 #include "netlink_k.h"
 
+#if defined(DEFINE_MUTEX)
 static DEFINE_MUTEX(netlink_mutex);
+#else
+static struct semaphore netlink_mutex;
+#define mutex_lock(x)		down(x)
+#define mutex_unlock(x)		up(x)
+#endif
 
 #define ND_MAX_GROUP		30
 #define ND_IFINDEX_LEN		sizeof(int)
@@ -83,13 +88,16 @@ static void netlink_rcv(struct sk_buff *skb)
 }
 
 struct sock *netlink_init(int unit,
-			  void (*cb)(struct net_device *dev, u16 type,
-				     void *msg, int len))
+	void (*cb)(struct net_device *dev, u16 type, void *msg, int len))
 {
 	struct sock *sock;
 	struct netlink_kernel_cfg cfg = {
 		.input  = netlink_rcv,
 	};
+
+#if !defined(DEFINE_MUTEX)
+	init_MUTEX(&netlink_mutex);
+#endif
 
 	sock = netlink_kernel_create(&init_net, unit, &cfg);
 
@@ -97,6 +105,11 @@ struct sock *netlink_init(int unit,
 		rcv_cb = cb;
 
 	return sock;
+}
+
+void netlink_exit(struct sock *sock)
+{
+	sock_release(sock->sk_socket);
 }
 
 int netlink_send(struct sock *sock, int group, u16 type, void *msg, int len)

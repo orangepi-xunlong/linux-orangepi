@@ -59,7 +59,6 @@ struct common_audit_data {
 #define LSM_AUDIT_DATA_INODE	9
 #define LSM_AUDIT_DATA_DENTRY	10
 #define LSM_AUDIT_DATA_IOCTL_OP	11
-#define LSM_AUDIT_DATA_FILE	12
 	union 	{
 		struct path path;
 		struct dentry *dentry;
@@ -76,7 +75,6 @@ struct common_audit_data {
 #endif
 		char *kmod_name;
 		struct lsm_ioctlop_audit *op;
-		struct file *file;
 	} u;
 	/* this union contains LSM specific data */
 	union {

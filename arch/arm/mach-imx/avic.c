@@ -55,20 +55,23 @@ static void __iomem *avic_base;
 static struct irq_domain *domain;
 
 #ifdef CONFIG_FIQ
-static int avic_set_irq_fiq(unsigned int hwirq, unsigned int type)
+static int avic_set_irq_fiq(unsigned int irq, unsigned int type)
 {
+	struct irq_data *d = irq_get_irq_data(irq);
 	unsigned int irqt;
 
-	if (hwirq >= AVIC_NUM_IRQS)
+	irq = d->hwirq;
+
+	if (irq >= AVIC_NUM_IRQS)
 		return -EINVAL;
 
-	if (hwirq < AVIC_NUM_IRQS / 2) {
-		irqt = imx_readl(avic_base + AVIC_INTTYPEL) & ~(1 << hwirq);
-		imx_writel(irqt | (!!type << hwirq), avic_base + AVIC_INTTYPEL);
+	if (irq < AVIC_NUM_IRQS / 2) {
+		irqt = __raw_readl(avic_base + AVIC_INTTYPEL) & ~(1 << irq);
+		__raw_writel(irqt | (!!type << irq), avic_base + AVIC_INTTYPEL);
 	} else {
-		hwirq -= AVIC_NUM_IRQS / 2;
-		irqt = imx_readl(avic_base + AVIC_INTTYPEH) & ~(1 << hwirq);
-		imx_writel(irqt | (!!type << hwirq), avic_base + AVIC_INTTYPEH);
+		irq -= AVIC_NUM_IRQS / 2;
+		irqt = __raw_readl(avic_base + AVIC_INTTYPEH) & ~(1 << irq);
+		__raw_writel(irqt | (!!type << irq), avic_base + AVIC_INTTYPEH);
 	}
 
 	return 0;
@@ -91,8 +94,8 @@ static void avic_irq_suspend(struct irq_data *d)
 	struct irq_chip_type *ct = gc->chip_types;
 	int idx = d->hwirq >> 5;
 
-	avic_saved_mask_reg[idx] = imx_readl(avic_base + ct->regs.mask);
-	imx_writel(gc->wake_active, avic_base + ct->regs.mask);
+	avic_saved_mask_reg[idx] = __raw_readl(avic_base + ct->regs.mask);
+	__raw_writel(gc->wake_active, avic_base + ct->regs.mask);
 }
 
 static void avic_irq_resume(struct irq_data *d)
@@ -101,7 +104,7 @@ static void avic_irq_resume(struct irq_data *d)
 	struct irq_chip_type *ct = gc->chip_types;
 	int idx = d->hwirq >> 5;
 
-	imx_writel(avic_saved_mask_reg[idx], avic_base + ct->regs.mask);
+	__raw_writel(avic_saved_mask_reg[idx], avic_base + ct->regs.mask);
 }
 
 #else
@@ -137,7 +140,7 @@ static void __exception_irq_entry avic_handle_irq(struct pt_regs *regs)
 	u32 nivector;
 
 	do {
-		nivector = imx_readl(avic_base + AVIC_NIVECSR) >> 16;
+		nivector = __raw_readl(avic_base + AVIC_NIVECSR) >> 16;
 		if (nivector == 0xffff)
 			break;
 
@@ -161,16 +164,16 @@ void __init mxc_init_irq(void __iomem *irqbase)
 	/* put the AVIC into the reset value with
 	 * all interrupts disabled
 	 */
-	imx_writel(0, avic_base + AVIC_INTCNTL);
-	imx_writel(0x1f, avic_base + AVIC_NIMASK);
+	__raw_writel(0, avic_base + AVIC_INTCNTL);
+	__raw_writel(0x1f, avic_base + AVIC_NIMASK);
 
 	/* disable all interrupts */
-	imx_writel(0, avic_base + AVIC_INTENABLEH);
-	imx_writel(0, avic_base + AVIC_INTENABLEL);
+	__raw_writel(0, avic_base + AVIC_INTENABLEH);
+	__raw_writel(0, avic_base + AVIC_INTENABLEL);
 
 	/* all IRQ no FIQ */
-	imx_writel(0, avic_base + AVIC_INTTYPEH);
-	imx_writel(0, avic_base + AVIC_INTTYPEL);
+	__raw_writel(0, avic_base + AVIC_INTTYPEH);
+	__raw_writel(0, avic_base + AVIC_INTTYPEL);
 
 	irq_base = irq_alloc_descs(-1, 0, AVIC_NUM_IRQS, numa_node_id());
 	WARN_ON(irq_base < 0);
@@ -185,7 +188,7 @@ void __init mxc_init_irq(void __iomem *irqbase)
 
 	/* Set default priority value (0) for all IRQ's */
 	for (i = 0; i < 8; i++)
-		imx_writel(0, avic_base + AVIC_NIPRIORITY(i));
+		__raw_writel(0, avic_base + AVIC_NIPRIORITY(i));
 
 	set_handle_irq(avic_handle_irq);
 

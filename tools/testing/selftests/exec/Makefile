@@ -18,8 +18,7 @@ execveat.denatured: execveat
 	$(CC) $(CFLAGS) -o $@ $^
 
 TEST_PROGS := execveat
-# Makefile is a run-time dependency, since it's accessed by the execveat test
-TEST_FILES := $(DEPS) Makefile
+TEST_FILES := $(DEPS)
 
 include ../lib.mk
 

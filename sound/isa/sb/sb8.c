@@ -111,6 +111,10 @@ static int snd_sb8_probe(struct device *pdev, unsigned int dev)
 
 	/* block the 0x388 port to avoid PnP conflicts */
 	acard->fm_res = request_region(0x388, 4, "SoundBlaster FM");
+	if (!acard->fm_res) {
+		err = -EBUSY;
+		goto _err;
+	}
 
 	if (port[dev] != SNDRV_AUTO_PORT) {
 		if ((err = snd_sbdsp_create(card, port[dev], irq[dev],
@@ -251,4 +255,15 @@ static struct isa_driver snd_sb8_driver = {
 	},
 };
 
-module_isa_driver(snd_sb8_driver, SNDRV_CARDS);
+static int __init alsa_card_sb8_init(void)
+{
+	return isa_register_driver(&snd_sb8_driver, SNDRV_CARDS);
+}
+
+static void __exit alsa_card_sb8_exit(void)
+{
+	isa_unregister_driver(&snd_sb8_driver);
+}
+
+module_init(alsa_card_sb8_init)
+module_exit(alsa_card_sb8_exit)

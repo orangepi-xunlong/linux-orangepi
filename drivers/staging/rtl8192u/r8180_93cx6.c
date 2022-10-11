@@ -23,11 +23,8 @@
 static void eprom_cs(struct net_device *dev, short bit)
 {
 	u8 cmdreg;
-	int err;
 
-	err = read_nic_byte_E(dev, EPROM_CMD, &cmdreg);
-	if (err)
-		return;
+	read_nic_byte_E(dev, EPROM_CMD, &cmdreg);
 	if (bit)
 		/* enable EPROM */
 		write_nic_byte_E(dev, EPROM_CMD, cmdreg | EPROM_CS_BIT);
@@ -43,11 +40,8 @@ static void eprom_cs(struct net_device *dev, short bit)
 static void eprom_ck_cycle(struct net_device *dev)
 {
 	u8 cmdreg;
-	int err;
 
-	err = read_nic_byte_E(dev, EPROM_CMD, &cmdreg);
-	if (err)
-		return;
+	read_nic_byte_E(dev, EPROM_CMD, &cmdreg);
 	write_nic_byte_E(dev, EPROM_CMD, cmdreg | EPROM_CK_BIT);
 	force_pci_posting(dev);
 	udelay(EPROM_DELAY);
@@ -62,11 +56,8 @@ static void eprom_ck_cycle(struct net_device *dev)
 static void eprom_w(struct net_device *dev, short bit)
 {
 	u8 cmdreg;
-	int err;
 
-	err = read_nic_byte_E(dev, EPROM_CMD, &cmdreg);
-	if (err)
-		return;
+	read_nic_byte_E(dev, EPROM_CMD, &cmdreg);
 	if (bit)
 		write_nic_byte_E(dev, EPROM_CMD, cmdreg | EPROM_W_BIT);
 	else
@@ -80,12 +71,8 @@ static void eprom_w(struct net_device *dev, short bit)
 static short eprom_r(struct net_device *dev)
 {
 	u8 bit;
-	int err;
 
-	err = read_nic_byte_E(dev, EPROM_CMD, &bit);
-	if (err)
-		return err;
-
+	read_nic_byte_E(dev, EPROM_CMD, &bit);
 	udelay(EPROM_DELAY);
 
 	if (bit & EPROM_R_BIT)
@@ -106,7 +93,7 @@ static void eprom_send_bits_string(struct net_device *dev, short b[], int len)
 }
 
 
-int eprom_read(struct net_device *dev, u32 addr)
+u32 eprom_read(struct net_device *dev, u32 addr)
 {
 	struct r8192_priv *priv = ieee80211_priv(dev);
 	short read_cmd[] = {1, 1, 0};
@@ -114,7 +101,6 @@ int eprom_read(struct net_device *dev, u32 addr)
 	int i;
 	int addr_len;
 	u32 ret;
-	int err;
 
 	ret = 0;
 	/* enable EPROM programming */
@@ -158,11 +144,7 @@ int eprom_read(struct net_device *dev, u32 addr)
 		 * and reading data. (eeprom outs a dummy 0)
 		 */
 		eprom_ck_cycle(dev);
-		err = eprom_r(dev);
-		if (err < 0)
-			return err;
-
-		ret |= err<<(15-i);
+		ret |= (eprom_r(dev)<<(15-i));
 	}
 
 	eprom_cs(dev, 0);

@@ -82,9 +82,9 @@ DVB_DEFINE_MOD_OPT_ADAPTER_NR(adapter_nr);
 
 /* ------------------------------------------------------------------ */
 
-static int queue_setup(struct vb2_queue *q,
+static int queue_setup(struct vb2_queue *q, const void *parg,
 			   unsigned int *num_buffers, unsigned int *num_planes,
-			   unsigned int sizes[], struct device *alloc_devs[])
+			   unsigned int sizes[], void *alloc_ctxs[])
 {
 	struct cx8802_dev *dev = q->drv_priv;
 
@@ -92,6 +92,7 @@ static int queue_setup(struct vb2_queue *q,
 	dev->ts_packet_size  = 188 * 4;
 	dev->ts_packet_count = dvb_buf_tscnt;
 	sizes[0] = dev->ts_packet_size * dev->ts_packet_count;
+	alloc_ctxs[0] = dev->alloc_ctx;
 	*num_buffers = dvb_buf_tscnt;
 	return 0;
 }
@@ -156,7 +157,7 @@ static void stop_streaming(struct vb2_queue *q)
 	spin_unlock_irqrestore(&dev->slock, flags);
 }
 
-static const struct vb2_ops dvb_qops = {
+static struct vb2_ops dvb_qops = {
 	.queue_setup    = queue_setup,
 	.buf_prepare  = buffer_prepare,
 	.buf_finish = buffer_finish,
@@ -1641,8 +1642,7 @@ static int dvb_register(struct cx8802_dev *dev)
 
 	/* register everything */
 	res = vb2_dvb_register_bus(&dev->frontends, THIS_MODULE, dev,
-				   &dev->pci->dev, NULL, adapter_nr,
-				   mfe_shared);
+		&dev->pci->dev, adapter_nr, mfe_shared);
 	if (res)
 		goto frontend_detach;
 	return res;
@@ -1792,7 +1792,6 @@ static int cx8802_dvb_probe(struct cx8802_driver *drv)
 		q->mem_ops = &vb2_dma_sg_memops;
 		q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 		q->lock = &core->lock;
-		q->dev = &dev->pci->dev;
 
 		err = vb2_queue_init(q);
 		if (err < 0)

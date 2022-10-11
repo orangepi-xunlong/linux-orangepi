@@ -31,8 +31,10 @@ static int nf_ct_ipv4_gather_frags(struct net *net, struct sk_buff *skb,
 	err = ip_defrag(net, skb, user);
 	local_bh_enable();
 
-	if (!err)
+	if (!err) {
+		ip_send_check(ip_hdr(skb));
 		skb->ignore_df = 1;
+	}
 
 	return err;
 }

@@ -533,8 +533,10 @@ void omap_prm_reset_system(void)
 
 	prm_ll_data->reset_system();
 
-	while (1)
+	while (1) {
 		cpu_relax();
+		wfe();
+	}
 }
 
 /**
@@ -664,13 +666,6 @@ static struct omap_prcm_init_data am3_prm_data __initdata = {
 };
 #endif
 
-#ifdef CONFIG_SOC_TI81XX
-static struct omap_prcm_init_data dm814_pllss_data __initdata = {
-	.index = TI_CLKM_PLLSS,
-	.init = am33xx_prm_init,
-};
-#endif
-
 #ifdef CONFIG_ARCH_OMAP4
 static struct omap_prcm_init_data omap4_prm_data __initdata = {
 	.index = TI_CLKM_PRM,
@@ -722,7 +717,6 @@ static const struct of_device_id omap_prcm_dt_match_table[] __initconst = {
 #endif
 #ifdef CONFIG_SOC_TI81XX
 	{ .compatible = "ti,dm814-prcm", .data = &am3_prm_data },
-	{ .compatible = "ti,dm814-pllss", .data = &dm814_pllss_data },
 	{ .compatible = "ti,dm816-prcm", .data = &am3_prm_data },
 #endif
 #ifdef CONFIG_ARCH_OMAP2

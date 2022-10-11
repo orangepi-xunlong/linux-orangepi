@@ -607,54 +607,20 @@ static const struct file_operations format2_fops;
 static const struct file_operations format3_fops;
 static const struct file_operations format4_fops;
 
-static int table_open1(struct inode *inode, struct file *file)
+static int table_open(struct inode *inode, struct file *file)
 {
 	struct seq_file *seq;
-	int ret;
+	int ret = -1;
 
-	ret = seq_open(file, &format1_seq_ops);
-	if (ret)
-		return ret;
+	if (file->f_op == &format1_fops)
+		ret = seq_open(file, &format1_seq_ops);
+	else if (file->f_op == &format2_fops)
+		ret = seq_open(file, &format2_seq_ops);
+	else if (file->f_op == &format3_fops)
+		ret = seq_open(file, &format3_seq_ops);
+	else if (file->f_op == &format4_fops)
+		ret = seq_open(file, &format4_seq_ops);
 
-	seq = file->private_data;
-	seq->private = inode->i_private; /* the dlm_ls */
-	return 0;
-}
-
-static int table_open2(struct inode *inode, struct file *file)
-{
-	struct seq_file *seq;
-	int ret;
-
-	ret = seq_open(file, &format2_seq_ops);
-	if (ret)
-		return ret;
-
-	seq = file->private_data;
-	seq->private = inode->i_private; /* the dlm_ls */
-	return 0;
-}
-
-static int table_open3(struct inode *inode, struct file *file)
-{
-	struct seq_file *seq;
-	int ret;
-
-	ret = seq_open(file, &format3_seq_ops);
-	if (ret)
-		return ret;
-
-	seq = file->private_data;
-	seq->private = inode->i_private; /* the dlm_ls */
-	return 0;
-}
-
-static int table_open4(struct inode *inode, struct file *file)
-{
-	struct seq_file *seq;
-	int ret;
-
-	ret = seq_open(file, &format4_seq_ops);
 	if (ret)
 		return ret;
 
@@ -665,7 +631,7 @@ static int table_open4(struct inode *inode, struct file *file)
 
 static const struct file_operations format1_fops = {
 	.owner   = THIS_MODULE,
-	.open    = table_open1,
+	.open    = table_open,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
 	.release = seq_release
@@ -673,7 +639,7 @@ static const struct file_operations format1_fops = {
 
 static const struct file_operations format2_fops = {
 	.owner   = THIS_MODULE,
-	.open    = table_open2,
+	.open    = table_open,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
 	.release = seq_release
@@ -681,7 +647,7 @@ static const struct file_operations format2_fops = {
 
 static const struct file_operations format3_fops = {
 	.owner   = THIS_MODULE,
-	.open    = table_open3,
+	.open    = table_open,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
 	.release = seq_release
@@ -689,7 +655,7 @@ static const struct file_operations format3_fops = {
 
 static const struct file_operations format4_fops = {
 	.owner   = THIS_MODULE,
-	.open    = table_open4,
+	.open    = table_open,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
 	.release = seq_release

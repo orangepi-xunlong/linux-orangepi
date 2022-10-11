@@ -15,6 +15,7 @@
 #include "mt7601u.h"
 #include "mac.h"
 #include <linux/etherdevice.h>
+#include <linux/version.h>
 
 static int mt7601u_start(struct ieee80211_hw *hw)
 {

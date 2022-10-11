@@ -22,7 +22,7 @@
 #ifdef FWTTY_PROFILING
 #define DISTRIBUTION_MAX_SIZE     8192
 #define DISTRIBUTION_MAX_INDEX    (ilog2(DISTRIBUTION_MAX_SIZE) + 1)
-static inline void fwtty_profile_data(unsigned int stat[], unsigned int val)
+static inline void fwtty_profile_data(unsigned stat[], unsigned val)
 {
 	int n = (val) ? min(ilog2(val) + 1, DISTRIBUTION_MAX_INDEX) : 0;
 	++stat[n];
@@ -78,7 +78,7 @@ struct fwtty_peer {
 	u64			guid;
 	int			generation;
 	int			node_id;
-	unsigned int		speed;
+	unsigned		speed;
 	int			max_payload;
 	u64			mgmt_addr;
 
@@ -160,17 +160,17 @@ struct fwserial_mgmt_pkt {
 #define VIRT_CABLE_PLUG_TIMEOUT		(60 * HZ)
 
 struct stats {
-	unsigned int	xchars;
-	unsigned int	dropped;
-	unsigned int	tx_stall;
-	unsigned int	fifo_errs;
-	unsigned int	sent;
-	unsigned int	lost;
-	unsigned int	throttled;
-	unsigned int	reads[DISTRIBUTION_MAX_INDEX + 1];
-	unsigned int	writes[DISTRIBUTION_MAX_INDEX + 1];
-	unsigned int	txns[DISTRIBUTION_MAX_INDEX + 1];
-	unsigned int	unthrottle[DISTRIBUTION_MAX_INDEX + 1];
+	unsigned	xchars;
+	unsigned	dropped;
+	unsigned	tx_stall;
+	unsigned	fifo_errs;
+	unsigned	sent;
+	unsigned	lost;
+	unsigned	throttled;
+	unsigned	reads[DISTRIBUTION_MAX_INDEX + 1];
+	unsigned	writes[DISTRIBUTION_MAX_INDEX + 1];
+	unsigned	txns[DISTRIBUTION_MAX_INDEX + 1];
+	unsigned	unthrottle[DISTRIBUTION_MAX_INDEX + 1];
 };
 
 struct fwconsole_ops {
@@ -237,7 +237,7 @@ struct fwconsole_ops {
 struct fwtty_port {
 	struct tty_port		   port;
 	struct device		   *device;
-	unsigned int		   index;
+	unsigned		   index;
 	struct fw_serial	   *serial;
 	struct fw_address_handler  rx_handler;
 
@@ -246,21 +246,21 @@ struct fwtty_port {
 
 	wait_queue_head_t	   wait_tx;
 	struct delayed_work	   emit_breaks;
-	unsigned int		   cps;
+	unsigned		   cps;
 	unsigned long		   break_last;
 
 	struct work_struct	   hangup;
 
-	unsigned int		   mstatus;
+	unsigned		   mstatus;
 
 	spinlock_t		   lock;
-	unsigned int		   mctrl;
+	unsigned		   mctrl;
 	struct delayed_work	   drain;
 	struct dma_fifo		   tx_fifo;
 	int			   max_payload;
-	unsigned int		   status_mask;
-	unsigned int		   ignore_mask;
-	unsigned int		   break_ctl:1,
+	unsigned		   status_mask;
+	unsigned		   ignore_mask;
+	unsigned		   break_ctl:1,
 				   write_only:1,
 				   overrun:1,
 				   loopback:1;
@@ -341,6 +341,17 @@ static const char loop_dev_name[] = "fwloop";
 
 extern struct tty_driver *fwtty_driver;
 
+struct fwtty_port *fwtty_port_get(unsigned index);
+void fwtty_port_put(struct fwtty_port *port);
+
+static inline void fwtty_bind_console(struct fwtty_port *port,
+				      struct fwconsole_ops *fwcon_ops,
+				      void *data)
+{
+	port->con_data = data;
+	port->fwcon_ops = fwcon_ops;
+}
+
 /*
  * Returns the max send async payload size in bytes based on the unit device
  * link speed. Self-limiting asynchronous bandwidth (via reducing the payload)
@@ -349,7 +360,7 @@ extern struct tty_driver *fwtty_driver;
  *	being used for isochronous traffic)
  *   2) isochronous arbitration always wins.
  */
-static inline int link_speed_to_max_payload(unsigned int speed)
+static inline int link_speed_to_max_payload(unsigned speed)
 {
 	/* Max async payload is 4096 - see IEEE 1394-2008 tables 6-4, 16-18 */
 	return min(512 << speed, 4096);

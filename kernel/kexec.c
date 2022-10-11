@@ -48,8 +48,7 @@ static int kimage_alloc_init(struct kimage **rimage, unsigned long entry,
 
 	if (kexec_on_panic) {
 		/* Verify we have a valid entry point */
-		if ((entry < phys_to_boot_phys(crashk_res.start)) ||
-		    (entry > phys_to_boot_phys(crashk_res.end)))
+		if ((entry < crashk_res.start) || (entry > crashk_res.end))
 			return -EADDRNOTAVAIL;
 	}
 
@@ -64,15 +63,15 @@ static int kimage_alloc_init(struct kimage **rimage, unsigned long entry,
 	if (ret)
 		goto out_free_image;
 
-	if (kexec_on_panic) {
-		/* Enable special crash kernel control page alloc policy. */
-		image->control_page = crashk_res.start;
-		image->type = KEXEC_TYPE_CRASH;
-	}
-
 	ret = sanity_check_segment_list(image);
 	if (ret)
 		goto out_free_image;
+
+	 /* Enable the special crash kernel control page allocation policy. */
+	if (kexec_on_panic) {
+		image->control_page = crashk_res.start;
+		image->type = KEXEC_TYPE_CRASH;
+	}
 
 	/*
 	 * Find a location for the control code buffer, and add it

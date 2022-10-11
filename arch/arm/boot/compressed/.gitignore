@@ -3,7 +3,11 @@ bswapsdi2.S
 font.c
 lib1funcs.S
 hyp-stub.S
-piggy_data
+piggy.gzip
+piggy.lzo
+piggy.lzma
+piggy.xzkern
+piggy.lz4
 vmlinux
 vmlinux.lds
 

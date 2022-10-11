@@ -103,7 +103,7 @@ int zpci_set_irq_ctrl(u16 ctl, char *unused, u8 isc)
 }
 
 /* PCI Load */
-static inline int ____pcilg(u64 *data, u64 req, u64 offset, u8 *status)
+static inline int __pcilg(u64 *data, u64 req, u64 offset, u8 *status)
 {
 	register u64 __req asm("2") = req;
 	register u64 __offset asm("3") = offset;
@@ -120,16 +120,6 @@ static inline int ____pcilg(u64 *data, u64 req, u64 offset, u8 *status)
 		:  "d" (__offset)
 		: "cc");
 	*status = __req >> 24 & 0xff;
-	*data = __data;
-	return cc;
-}
-
-static inline int __pcilg(u64 *data, u64 req, u64 offset, u8 *status)
-{
-	u64 __data;
-	int cc;
-
-	cc = ____pcilg(&__data, req, offset, status);
 	if (!cc)
 		*data = __data;
 

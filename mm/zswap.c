@@ -908,7 +908,7 @@ static int zswap_writeback_entry(struct zpool *pool, unsigned long handle)
 
 	case ZSWAP_SWAPCACHE_EXIST:
 		/* page is already in the swap cache, ignore for now */
-		put_page(page);
+		page_cache_release(page);
 		ret = -EEXIST;
 		goto fail;
 
@@ -936,7 +936,7 @@ static int zswap_writeback_entry(struct zpool *pool, unsigned long handle)
 
 	/* start writeback */
 	__swap_writepage(page, &wbc, end_swap_bio_write);
-	put_page(page);
+	page_cache_release(page);
 	zswap_written_back_pages++;
 
 	spin_lock(&tree->lock);
@@ -1015,6 +1015,15 @@ static int zswap_frontswap_store(unsigned type, pgoff_t offset,
 		zswap_pool_limit_hit++;
 		if (zswap_shrink()) {
 			zswap_reject_reclaim_fail++;
+			ret = -ENOMEM;
+			goto reject;
+		}
+
+		/* A second zswap_is_full() check after
+		 * zswap_shrink() to make sure it's now
+		 * under the max_pool_percent
+		 */
+		if (zswap_is_full()) {
 			ret = -ENOMEM;
 			goto reject;
 		}

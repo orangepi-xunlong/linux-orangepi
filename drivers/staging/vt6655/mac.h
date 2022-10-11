@@ -890,57 +890,57 @@ do {								\
 #define MACvSetRFLE_LatchBase(dwIoBase)                                 \
 	MACvWordRegBitsOn(dwIoBase, MAC_REG_SOFTPWRCTL, SOFTPWRCTL_RFLEOPT)
 
-bool MACbIsRegBitsOn(struct vnt_private *, unsigned char byRegOfs,
+bool MACbIsRegBitsOn(void __iomem *dwIoBase, unsigned char byRegOfs,
 		     unsigned char byTestBits);
-bool MACbIsRegBitsOff(struct vnt_private *, unsigned char byRegOfs,
+bool MACbIsRegBitsOff(void __iomem *dwIoBase, unsigned char byRegOfs,
 		      unsigned char byTestBits);
 
-bool MACbIsIntDisable(struct vnt_private *);
+bool MACbIsIntDisable(void __iomem *dwIoBase);
 
-void MACvSetShortRetryLimit(struct vnt_private *, unsigned char byRetryLimit);
+void MACvSetShortRetryLimit(void __iomem *dwIoBase, unsigned char byRetryLimit);
 
-void MACvSetLongRetryLimit(struct vnt_private *, unsigned char byRetryLimit);
-void MACvGetLongRetryLimit(struct vnt_private *,
+void MACvSetLongRetryLimit(void __iomem *dwIoBase, unsigned char byRetryLimit);
+void MACvGetLongRetryLimit(void __iomem *dwIoBase,
 			   unsigned char *pbyRetryLimit);
 
-void MACvSetLoopbackMode(struct vnt_private *, unsigned char byLoopbackMode);
+void MACvSetLoopbackMode(void __iomem *dwIoBase, unsigned char byLoopbackMode);
 
-void MACvSaveContext(struct vnt_private *, unsigned char *pbyCxtBuf);
-void MACvRestoreContext(struct vnt_private *, unsigned char *pbyCxtBuf);
+void MACvSaveContext(void __iomem *dwIoBase, unsigned char *pbyCxtBuf);
+void MACvRestoreContext(void __iomem *dwIoBase, unsigned char *pbyCxtBuf);
 
-bool MACbSoftwareReset(struct vnt_private *);
-bool MACbSafeSoftwareReset(struct vnt_private *);
-bool MACbSafeRxOff(struct vnt_private *);
-bool MACbSafeTxOff(struct vnt_private *);
-bool MACbSafeStop(struct vnt_private *);
-bool MACbShutdown(struct vnt_private *);
-void MACvInitialize(struct vnt_private *);
-void MACvSetCurrRx0DescAddr(struct vnt_private *,
-			    u32 curr_desc_addr);
-void MACvSetCurrRx1DescAddr(struct vnt_private *,
-			    u32 curr_desc_addr);
-void MACvSetCurrTXDescAddr(int iTxType, struct vnt_private *,
-			   u32 curr_desc_addr);
-void MACvSetCurrTx0DescAddrEx(struct vnt_private *,
-			      u32 curr_desc_addr);
-void MACvSetCurrAC0DescAddrEx(struct vnt_private *,
-			      u32 curr_desc_addr);
-void MACvSetCurrSyncDescAddrEx(struct vnt_private *,
-			       u32 curr_desc_addr);
-void MACvSetCurrATIMDescAddrEx(struct vnt_private *,
-			       u32 curr_desc_addr);
-void MACvTimer0MicroSDelay(struct vnt_private *, unsigned int uDelay);
-void MACvOneShotTimer1MicroSec(struct vnt_private *, unsigned int uDelayTime);
+bool MACbSoftwareReset(void __iomem *dwIoBase);
+bool MACbSafeSoftwareReset(void __iomem *dwIoBase);
+bool MACbSafeRxOff(void __iomem *dwIoBase);
+bool MACbSafeTxOff(void __iomem *dwIoBase);
+bool MACbSafeStop(void __iomem *dwIoBase);
+bool MACbShutdown(void __iomem *dwIoBase);
+void MACvInitialize(void __iomem *dwIoBase);
+void MACvSetCurrRx0DescAddr(void __iomem *dwIoBase,
+			    unsigned long dwCurrDescAddr);
+void MACvSetCurrRx1DescAddr(void __iomem *dwIoBase,
+			    unsigned long dwCurrDescAddr);
+void MACvSetCurrTXDescAddr(int iTxType, void __iomem *dwIoBase,
+			   unsigned long dwCurrDescAddr);
+void MACvSetCurrTx0DescAddrEx(void __iomem *dwIoBase,
+			      unsigned long dwCurrDescAddr);
+void MACvSetCurrAC0DescAddrEx(void __iomem *dwIoBase,
+			      unsigned long dwCurrDescAddr);
+void MACvSetCurrSyncDescAddrEx(void __iomem *dwIoBase,
+			       unsigned long dwCurrDescAddr);
+void MACvSetCurrATIMDescAddrEx(void __iomem *dwIoBase,
+			       unsigned long dwCurrDescAddr);
+void MACvTimer0MicroSDelay(void __iomem *dwIoBase, unsigned int uDelay);
+void MACvOneShotTimer1MicroSec(void __iomem *dwIoBase, unsigned int uDelayTime);
 
-void MACvSetMISCFifo(struct vnt_private *, unsigned short wOffset,
-		     u32 dwData);
+void MACvSetMISCFifo(void __iomem *dwIoBase, unsigned short wOffset,
+		     unsigned long dwData);
 
-bool MACbPSWakeup(struct vnt_private *);
+bool MACbPSWakeup(void __iomem *dwIoBase);
 
-void MACvSetKeyEntry(struct vnt_private *, unsigned short wKeyCtl,
+void MACvSetKeyEntry(void __iomem *dwIoBase, unsigned short wKeyCtl,
 		     unsigned int uEntryIdx, unsigned int uKeyIdx,
 		     unsigned char *pbyAddr, u32 *pdwKey,
 		     unsigned char byLocalID);
-void MACvDisableKeyEntry(struct vnt_private *, unsigned int uEntryIdx);
+void MACvDisableKeyEntry(void __iomem *dwIoBase, unsigned int uEntryIdx);
 
 #endif /* __MAC_H__ */

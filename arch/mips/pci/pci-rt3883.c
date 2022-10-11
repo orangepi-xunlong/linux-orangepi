@@ -16,6 +16,7 @@
 #include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
+#include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
 #include <linux/of_pci.h>
@@ -579,6 +580,7 @@ static const struct of_device_id rt3883_pci_ids[] = {
 	{ .compatible = "ralink,rt3883-pci" },
 	{},
 };
+MODULE_DEVICE_TABLE(of, rt3883_pci_ids);
 
 static struct platform_driver rt3883_pci_driver = {
 	.probe = rt3883_pci_probe,

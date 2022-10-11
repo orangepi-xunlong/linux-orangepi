@@ -1,5 +1,4 @@
 #include <linux/linkage.h>
-#include <asm/export.h>
 
 #include <asm/asm.h>
 
@@ -33,7 +32,6 @@ ENTRY(__sw_hweight32)
 	__ASM_SIZE(pop,) %__ASM_REG(dx)
 	ret
 ENDPROC(__sw_hweight32)
-EXPORT_SYMBOL(__sw_hweight32)
 
 ENTRY(__sw_hweight64)
 #ifdef CONFIG_X86_64
@@ -79,4 +77,3 @@ ENTRY(__sw_hweight64)
 	ret
 #endif
 ENDPROC(__sw_hweight64)
-EXPORT_SYMBOL(__sw_hweight64)

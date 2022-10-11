@@ -1,6 +1,3 @@
-/* For the CPU_* macros */
-#include <pthread.h>
-
 #include <api/fs/fs.h>
 #include <linux/err.h>
 #include "evsel.h"
@@ -10,7 +7,7 @@
 #include "debug.h"
 #include "stat.h"
 
-int test__openat_syscall_event_on_all_cpus(int subtest __maybe_unused)
+int test__openat_syscall_event_on_all_cpus(void)
 {
 	int err = -1, fd, cpu;
 	struct cpu_map *cpus;
@@ -38,13 +35,13 @@ int test__openat_syscall_event_on_all_cpus(int subtest __maybe_unused)
 	if (IS_ERR(evsel)) {
 		tracing_path__strerror_open_tp(errno, errbuf, sizeof(errbuf), "syscalls", "sys_enter_openat");
 		pr_debug("%s\n", errbuf);
-		goto out_thread_map_delete;
+		goto out_cpu_map_delete;
 	}
 
 	if (perf_evsel__open(evsel, cpus, threads) < 0) {
 		pr_debug("failed to open counter: %s, "
 			 "tweak /proc/sys/kernel/perf_event_paranoid?\n",
-			 str_error_r(errno, sbuf, sizeof(sbuf)));
+			 strerror_r(errno, sbuf, sizeof(sbuf)));
 		goto out_evsel_delete;
 	}
 
@@ -65,7 +62,7 @@ int test__openat_syscall_event_on_all_cpus(int subtest __maybe_unused)
 		if (sched_setaffinity(0, sizeof(cpu_set), &cpu_set) < 0) {
 			pr_debug("sched_setaffinity() failed on CPU %d: %s ",
 				 cpus->map[cpu],
-				 str_error_r(errno, sbuf, sizeof(sbuf)));
+				 strerror_r(errno, sbuf, sizeof(sbuf)));
 			goto out_close_fd;
 		}
 		for (i = 0; i < ncalls; ++i) {
@@ -76,7 +73,7 @@ int test__openat_syscall_event_on_all_cpus(int subtest __maybe_unused)
 	}
 
 	/*
-	 * Here we need to explicitly preallocate the counts, as if
+	 * Here we need to explicitely preallocate the counts, as if
 	 * we use the auto allocation it will allocate just for 1 cpu,
 	 * as we start by cpu 0.
 	 */
@@ -112,6 +109,8 @@ out_close_fd:
 	perf_evsel__close_fd(evsel, 1, threads->nr);
 out_evsel_delete:
 	perf_evsel__delete(evsel);
+out_cpu_map_delete:
+	cpu_map__put(cpus);
 out_thread_map_delete:
 	thread_map__put(threads);
 	return err;

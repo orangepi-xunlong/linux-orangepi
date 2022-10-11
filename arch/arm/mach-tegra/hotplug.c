@@ -17,7 +17,6 @@
 
 #include <asm/smp_plat.h>
 
-#include "common.h"
 #include "sleep.h"
 
 static void (*tegra_hotplug_shutdown)(void);

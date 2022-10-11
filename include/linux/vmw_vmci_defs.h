@@ -75,9 +75,18 @@ enum {
 
 /*
  * A single VMCI device has an upper limit of 128MB on the amount of
- * memory that can be used for queue pairs.
+ * memory that can be used for queue pairs. Since each queue pair
+ * consists of at least two pages, the memory limit also dictates the
+ * number of queue pairs a guest can create.
  */
 #define VMCI_MAX_GUEST_QP_MEMORY (128 * 1024 * 1024)
+#define VMCI_MAX_GUEST_QP_COUNT  (VMCI_MAX_GUEST_QP_MEMORY / PAGE_SIZE / 2)
+
+/*
+ * There can be at most PAGE_SIZE doorbells since there is one doorbell
+ * per byte in the doorbell bitmap page.
+ */
+#define VMCI_MAX_GUEST_DOORBELL_COUNT PAGE_SIZE
 
 /*
  * Queues with pre-mapped data pages must be small, so that we don't pin
@@ -734,41 +743,6 @@ static inline void *vmci_event_data_payload(struct vmci_event_data *ev_data)
 }
 
 /*
- * Helper to read a value from a head or tail pointer. For X86_32, the
- * pointer is treated as a 32bit value, since the pointer value
- * never exceeds a 32bit value in this case. Also, doing an
- * atomic64_read on X86_32 uniprocessor systems may be implemented
- * as a non locked cmpxchg8b, that may end up overwriting updates done
- * by the VMCI device to the memory location. On 32bit SMP, the lock
- * prefix will be used, so correctness isn't an issue, but using a
- * 64bit operation still adds unnecessary overhead.
- */
-static inline u64 vmci_q_read_pointer(atomic64_t *var)
-{
-#if defined(CONFIG_X86_32)
-	return atomic_read((atomic_t *)var);
-#else
-	return atomic64_read(var);
-#endif
-}
-
-/*
- * Helper to set the value of a head or tail pointer. For X86_32, the
- * pointer is treated as a 32bit value, since the pointer value
- * never exceeds a 32bit value in this case. On 32bit SMP, using a
- * locked cmpxchg8b adds unnecessary overhead.
- */
-static inline void vmci_q_set_pointer(atomic64_t *var,
-				      u64 new_val)
-{
-#if defined(CONFIG_X86_32)
-	return atomic_set((atomic_t *)var, (u32)new_val);
-#else
-	return atomic64_set(var, new_val);
-#endif
-}
-
-/*
  * Helper to add a given offset to a head or tail pointer. Wraps the
  * value of the pointer around the max size of the queue.
  */
@@ -776,14 +750,14 @@ static inline void vmci_qp_add_pointer(atomic64_t *var,
 				       size_t add,
 				       u64 size)
 {
-	u64 new_val = vmci_q_read_pointer(var);
+	u64 new_val = atomic64_read(var);
 
 	if (new_val >= size - add)
 		new_val -= size;
 
 	new_val += add;
 
-	vmci_q_set_pointer(var, new_val);
+	atomic64_set(var, new_val);
 }
 
 /*
@@ -793,7 +767,7 @@ static inline u64
 vmci_q_header_producer_tail(const struct vmci_queue_header *q_header)
 {
 	struct vmci_queue_header *qh = (struct vmci_queue_header *)q_header;
-	return vmci_q_read_pointer(&qh->producer_tail);
+	return atomic64_read(&qh->producer_tail);
 }
 
 /*
@@ -803,7 +777,7 @@ static inline u64
 vmci_q_header_consumer_head(const struct vmci_queue_header *q_header)
 {
 	struct vmci_queue_header *qh = (struct vmci_queue_header *)q_header;
-	return vmci_q_read_pointer(&qh->consumer_head);
+	return atomic64_read(&qh->consumer_head);
 }
 
 /*

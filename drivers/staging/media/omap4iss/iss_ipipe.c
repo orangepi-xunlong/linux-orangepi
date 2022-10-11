@@ -447,11 +447,8 @@ static int ipipe_link_setup(struct media_entity *entity,
 	struct iss_ipipe_device *ipipe = v4l2_get_subdevdata(sd);
 	struct iss_device *iss = to_iss_device(ipipe);
 
-	if (!is_media_entity_v4l2_subdev(remote->entity))
-		return -EINVAL;
-
-	switch (local->index) {
-	case IPIPE_PAD_SINK:
+	switch (local->index | media_entity_type(remote->entity)) {
+	case IPIPE_PAD_SINK | MEDIA_ENT_T_V4L2_SUBDEV:
 		/* Read from IPIPEIF. */
 		if (!(flags & MEDIA_LNK_FL_ENABLED)) {
 			ipipe->input = IPIPE_INPUT_NONE;
@@ -466,7 +463,7 @@ static int ipipe_link_setup(struct media_entity *entity,
 
 		break;
 
-	case IPIPE_PAD_SOURCE_VP:
+	case IPIPE_PAD_SOURCE_VP | MEDIA_ENT_T_V4L2_SUBDEV:
 		/* Send to RESIZER */
 		if (flags & MEDIA_LNK_FL_ENABLED) {
 			if (ipipe->output & ~IPIPE_OUTPUT_VP)
@@ -516,7 +513,7 @@ static int ipipe_init_entities(struct iss_ipipe_device *ipipe)
 	pads[IPIPE_PAD_SOURCE_VP].flags = MEDIA_PAD_FL_SOURCE;
 
 	me->ops = &ipipe_media_ops;
-	ret = media_entity_pads_init(me, IPIPE_PADS_NUM, pads);
+	ret = media_entity_init(me, IPIPE_PADS_NUM, pads, 0);
 	if (ret < 0)
 		return ret;
 

@@ -27,7 +27,6 @@
 #define PCAN_USBPRO_PRODUCT_ID		0x000d
 #define PCAN_USBPROFD_PRODUCT_ID	0x0011
 #define PCAN_USBFD_PRODUCT_ID		0x0012
-#define PCAN_USBX6_PRODUCT_ID		0x0014
 
 #define PCAN_USB_DRIVER_NAME		"peak_usb"
 
@@ -91,7 +90,6 @@ extern const struct peak_usb_adapter pcan_usb;
 extern const struct peak_usb_adapter pcan_usb_pro;
 extern const struct peak_usb_adapter pcan_usb_fd;
 extern const struct peak_usb_adapter pcan_usb_pro_fd;
-extern const struct peak_usb_adapter pcan_usb_x6;
 
 struct peak_time_ref {
 	struct timeval tv_host_0, tv_host;

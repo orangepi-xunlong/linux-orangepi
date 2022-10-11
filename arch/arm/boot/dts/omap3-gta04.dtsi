@@ -21,7 +21,7 @@
 		};
 	};
 
-	memory@80000000 {
+	memory {
 		device_type = "memory";
 		reg = <0x80000000 0x20000000>; /* 512 MB */
 	};
@@ -37,7 +37,7 @@
 			label = "aux";
 			linux,code = <169>;
 			gpios = <&gpio1 7 GPIO_ACTIVE_HIGH>;
-			wakeup-source;
+			gpio-key,wakeup;
 		};
 	};
 
@@ -100,28 +100,12 @@
 		};
 	};
 
-	backlight {
-		compatible = "pwm-backlight";
-		pwms = <&pwm11 0 12000000 0>;
-		pwm-names = "backlight";
-		brightness-levels = <0 11 20 30 40 50 60 70 80 90 100>;
-		default-brightness-level = <9>;	/* => 90 */
-		pinctrl-names = "default";
-		pinctrl-0 = <&backlight_pins>;
-	};
-
-	pwm11: dmtimer-pwm {
-		compatible = "ti,omap-dmtimer-pwm";
-		ti,timers = <&timer11>;
-		#pwm-cells = <3>;
-	};
-
 	hsusb2_phy: hsusb2_phy {
 		compatible = "usb-nop-xceiv";
 		reset-gpios = <&gpio6 14 GPIO_ACTIVE_LOW>;
 	};
 
-	tv0: connector {
+	tv0: connector@1 {
 		compatible = "svideo-connector";
 		label = "tv";
 
@@ -142,23 +126,18 @@
 
 			port@0 {
 				reg = <0>;
-				opa_in: endpoint {
+				opa_in: endpoint@0 {
 					remote-endpoint = <&venc_out>;
 				};
 			};
 
 			port@1 {
 				reg = <1>;
-				opa_out: endpoint {
+				opa_out: endpoint@0 {
 					remote-endpoint = <&tv_connector_in>;
 				};
 			};
 		};
-	};
-
-	wifi_pwrseq: wifi_pwrseq {
-		compatible = "mmc-pwrseq-simple";
-		reset-gpios = <&tca6507 0 GPIO_ACTIVE_LOW>;	/* W2CBW003 reset through tca6507 */
 	};
 };
 
@@ -211,12 +190,6 @@
 		>;
 	};
 
-	backlight_pins: backlight_pins_pimnux {
-		pinctrl-single,pins = <
-			OMAP3_CORE1_IOPAD(0x20ba, MUX_MODE3)		/* gpt11/gpio57 */
-		>;
-	};
-
 	dss_dpi_pins: pinmux_dss_dpi_pins {
                pinctrl-single,pins = <
 			OMAP3_CORE1_IOPAD(0x20d4, PIN_OUTPUT | MUX_MODE0)   /* dss_pclk.dss_pclk */
@@ -253,24 +226,6 @@
 	hdq_pins: hdq_pins {
 		pinctrl-single,pins = <
 			OMAP3_CORE1_IOPAD(0x21c6, PIN_INPUT_PULLUP | MUX_MODE0) /* i2c3_sda.hdq */
-		>;
-	};
-
-	bma180_pins: pinmux_bma180_pins {
-		pinctrl-single,pins = <
-			OMAP3_CORE1_IOPAD(0x213a, PIN_INPUT_PULLUP | MUX_MODE4) /* gpio115 */
-		>;
-	};
-
-	itg3200_pins: pinmux_itg3200_pins {
-		pinctrl-single,pins = <
-			OMAP3_CORE1_IOPAD(0x20b8, PIN_INPUT_PULLUP | MUX_MODE4) /* gpio56 */
-		>;
-	};
-
-	hmc5843_pins: pinmux_hmc5843_pins {
-		pinctrl-single,pins = <
-			OMAP3_CORE1_IOPAD(0x2134, PIN_INPUT_PULLUP | MUX_MODE4) /* gpio112 */
 		>;
 	};
 };
@@ -343,8 +298,6 @@
 	bma180@41 {
 		compatible = "bosch,bma180";
 		reg = <0x41>;
-		pinctrl-names = "default";
-		pintcrl-0 = <&bma180_pins>;
 		interrupt-parent = <&gpio4>;
 		interrupts = <19 IRQ_TYPE_LEVEL_HIGH>; /* GPIO_115 */
 	};
@@ -353,14 +306,12 @@
 	itg3200@68 {
 		compatible = "invensense,itg3200";
 		reg = <0x68>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&itg3200_pins>;
 		interrupt-parent = <&gpio2>;
-		interrupts = <24 IRQ_TYPE_EDGE_FALLING>; /* GPIO_56 */
+		interrupts = <24 0>; /* GPIO_56 */
 	};
 
-	/* leds + gpios */
-	tca6507: tca6507@45 {
+	/* leds */
+	tca6507@45 {
 		compatible = "ti,tca6507";
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -400,10 +351,6 @@
 	hmc5843@1e {
 		compatible = "honeywell,hmc5883l";
 		reg = <0x1e>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&hmc5843_pins>;
-		interrupt-parent = <&gpio4>;
-		interrupts = <16 IRQ_TYPE_EDGE_FALLING>;	/* gpio112 */
 	};
 
 	/* touchscreen */
@@ -414,12 +361,6 @@
 		interrupts = <0 IRQ_TYPE_EDGE_FALLING>; /* GPIO_160 */
 		gpios = <&gpio6 0 GPIO_ACTIVE_LOW>;
 		ti,x-plate-ohms = <600>;
-	};
-
-	/* RFID EEPROM */
-	m24lr64@50 {
-		compatible = "at,24c64";
-		reg = <0x50>;
 	};
 };
 
@@ -457,7 +398,6 @@
 	bus-width = <4>;
 	ti,non-removable;
 	cap-power-off-card;
-	mmc-pwrseq = <&wifi_pwrseq>;
 };
 
 &mmc3 {
@@ -552,11 +492,7 @@
 	ranges = <0 0 0x30000000 0x1000000>; /* CS0: 16MB for NAND */
 
 	nand@0,0 {
-		compatible = "ti,omap2-nand";
 		reg = <0 0 4>; /* CS0, offset 0, IO size 4 */
-		interrupt-parent = <&gpmc>;
-		interrupts = <0 IRQ_TYPE_NONE>, /* fifoevent */
-			     <1 IRQ_TYPE_NONE>;	/* termcount */
 		nand-bus-width = <16>;
 		ti,nand-ecc-opt = "bch8";
 

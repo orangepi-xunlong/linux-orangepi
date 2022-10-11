@@ -1764,7 +1764,7 @@ static void xtLog(struct jfs_log * log, struct tblock * tblk, struct lrd * lrd,
 		if (lwm == next)
 			goto out;
 		if (lwm > next) {
-			jfs_err("xtLog: lwm > next");
+			jfs_err("xtLog: lwm > next\n");
 			goto out;
 		}
 		tlck->flag |= tlckUPDATEMAP;
@@ -1798,8 +1798,8 @@ static void xtLog(struct jfs_log * log, struct tblock * tblk, struct lrd * lrd,
 			xadlock->xdlist = &p->xad[lwm];
 			tblk->xflag &= ~COMMIT_LAZY;
 		}
-		jfs_info("xtLog: alloc ip:0x%p mp:0x%p tlck:0x%p lwm:%d count:%d",
-			 tlck->ip, mp, tlck, lwm, xadlock->count);
+		jfs_info("xtLog: alloc ip:0x%p mp:0x%p tlck:0x%p lwm:%d "
+			 "count:%d", tlck->ip, mp, tlck, lwm, xadlock->count);
 
 		maplock->index = 1;
 
@@ -2025,7 +2025,8 @@ static void xtLog(struct jfs_log * log, struct tblock * tblk, struct lrd * lrd,
 			xadlock->count = next - lwm;
 			xadlock->xdlist = &p->xad[lwm];
 
-			jfs_info("xtLog: alloc ip:0x%p mp:0x%p count:%d lwm:%d next:%d",
+			jfs_info("xtLog: alloc ip:0x%p mp:0x%p count:%d "
+				 "lwm:%d next:%d",
 				 tlck->ip, mp, xadlock->count, lwm, next);
 			maplock->index++;
 			xadlock++;
@@ -2046,8 +2047,8 @@ static void xtLog(struct jfs_log * log, struct tblock * tblk, struct lrd * lrd,
 			pxdlock->count = 1;
 			pxdlock->pxd = pxd;
 
-			jfs_info("xtLog: truncate ip:0x%p mp:0x%p count:%d hwm:%d",
-				 ip, mp, pxdlock->count, hwm);
+			jfs_info("xtLog: truncate ip:0x%p mp:0x%p count:%d "
+				 "hwm:%d", ip, mp, pxdlock->count, hwm);
 			maplock->index++;
 			xadlock++;
 		}
@@ -2065,7 +2066,8 @@ static void xtLog(struct jfs_log * log, struct tblock * tblk, struct lrd * lrd,
 			xadlock->count = hwm - next + 1;
 			xadlock->xdlist = &p->xad[next];
 
-			jfs_info("xtLog: free ip:0x%p mp:0x%p count:%d next:%d hwm:%d",
+			jfs_info("xtLog: free ip:0x%p mp:0x%p count:%d "
+				 "next:%d hwm:%d",
 				 tlck->ip, mp, xadlock->count, next, hwm);
 			maplock->index++;
 		}
@@ -2521,7 +2523,8 @@ void txFreeMap(struct inode *ip,
 					xlen = lengthXAD(xad);
 					dbUpdatePMap(ipbmap, true, xaddr,
 						     (s64) xlen, tblk);
-					jfs_info("freePMap: xaddr:0x%lx xlen:%d",
+					jfs_info("freePMap: xaddr:0x%lx "
+						 "xlen:%d",
 						 (ulong) xaddr, xlen);
 				}
 			}
@@ -2811,7 +2814,7 @@ int jfs_lazycommit(void *arg)
 	if (!list_empty(&TxAnchor.unlock_queue))
 		jfs_err("jfs_lazycommit being killed w/pending transactions!");
 	else
-		jfs_info("jfs_lazycommit being killed");
+		jfs_info("jfs_lazycommit being killed\n");
 	return 0;
 }
 
@@ -2893,7 +2896,8 @@ restart:
 	 * on anon_list2.  Let's check.
 	 */
 	if (!list_empty(&TxAnchor.anon_list2)) {
-		list_splice_init(&TxAnchor.anon_list2, &TxAnchor.anon_list);
+		list_splice(&TxAnchor.anon_list2, &TxAnchor.anon_list);
+		INIT_LIST_HEAD(&TxAnchor.anon_list2);
 		goto restart;
 	}
 	TXN_UNLOCK();
@@ -3039,6 +3043,7 @@ static int jfs_txanchor_proc_open(struct inode *inode, struct file *file)
 }
 
 const struct file_operations jfs_txanchor_proc_fops = {
+	.owner		= THIS_MODULE,
 	.open		= jfs_txanchor_proc_open,
 	.read		= seq_read,
 	.llseek		= seq_lseek,
@@ -3079,6 +3084,7 @@ static int jfs_txstats_proc_open(struct inode *inode, struct file *file)
 }
 
 const struct file_operations jfs_txstats_proc_fops = {
+	.owner		= THIS_MODULE,
 	.open		= jfs_txstats_proc_open,
 	.read		= seq_read,
 	.llseek		= seq_lseek,

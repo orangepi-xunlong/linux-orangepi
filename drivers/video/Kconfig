@@ -8,12 +8,14 @@ menu "Graphics support"
 config HAVE_FB_ATMEL
 	bool
 
+config SH_MIPI_DSI
+	tristate
+	depends on (SUPERH || ARCH_SHMOBILE) && HAVE_CLK
+
 config SH_LCD_MIPI_DSI
 	bool
 
 source "drivers/char/agp/Kconfig"
-
-source "modules/gpu/Kconfig"
 
 source "drivers/gpu/vga/Kconfig"
 
@@ -22,11 +24,21 @@ source "drivers/gpu/ipu-v3/Kconfig"
 
 source "drivers/gpu/drm/Kconfig"
 
+source "drivers/gpu/rogue_m/Kconfig"
+
+source "drivers/gpu/arm/Kconfig"
+
 menu "Frame buffer Devices"
 source "drivers/video/fbdev/Kconfig"
 endmenu
 
 source "drivers/video/backlight/Kconfig"
+
+menu "Rockchip Misc Video driver"
+source "drivers/video/rockchip/Kconfig"
+endmenu
+
+source "drivers/video/adf/Kconfig"
 
 config VGASTATE
        tristate
@@ -36,6 +48,9 @@ config VIDEOMODE_HELPERS
 	bool
 
 config HDMI
+	bool
+
+config HDMI_NOTIFIERS
 	bool
 
 if VT

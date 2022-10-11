@@ -163,9 +163,9 @@ static int mlx4_en_get_profile(struct mlx4_en_dev *mdev)
 		params->udp_rss = 0;
 	}
 	for (i = 1; i <= MLX4_MAX_PORTS; i++) {
-		params->prof[i].rx_pause = !(pfcrx || pfctx);
+		params->prof[i].rx_pause = 1;
 		params->prof[i].rx_ppp = pfcrx;
-		params->prof[i].tx_pause = !(pfcrx || pfctx);
+		params->prof[i].tx_pause = 1;
 		params->prof[i].tx_ppp = pfctx;
 		params->prof[i].tx_ring_size = MLX4_EN_DEF_TX_RING_SIZE;
 		params->prof[i].rx_ring_size = MLX4_EN_DEF_RX_RING_SIZE;
@@ -382,7 +382,6 @@ static void mlx4_en_verify_params(void)
 static int __init mlx4_en_init(void)
 {
 	mlx4_en_verify_params();
-	mlx4_en_init_ptys2ethtool_map();
 
 	return mlx4_register_interface(&mlx4_en_interface);
 }

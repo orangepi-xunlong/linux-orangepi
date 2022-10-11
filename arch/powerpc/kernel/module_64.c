@@ -31,7 +31,6 @@
 #include <asm/code-patching.h>
 #include <linux/sort.h>
 #include <asm/setup.h>
-#include <asm/sections.h>
 
 /* FIXME: We don't do .init separately.  To do this, we'd need to have
    a separate r2 value in the init and core section, and stub between
@@ -41,7 +40,8 @@
    this, and makes other things simpler.  Anton?
    --RR.  */
 
-#ifdef PPC64_ELF_ABI_v2
+#if defined(_CALL_ELF) && _CALL_ELF == 2
+#define R2_STACK_OFFSET 24
 
 /* An address is simply the address of the function. */
 typedef unsigned long func_desc_t;
@@ -73,6 +73,7 @@ static unsigned int local_entry_offset(const Elf64_Sym *sym)
 	return PPC64_LOCAL_ENTRY_OFFSET(sym->st_other);
 }
 #else
+#define R2_STACK_OFFSET 40
 
 /* An address is address of the OPD entry, which contains address of fn. */
 typedef struct ppc64_opd_entry func_desc_t;
@@ -95,8 +96,6 @@ static unsigned int local_entry_offset(const Elf64_Sym *sym)
 }
 #endif
 
-#define STUB_MAGIC 0x73747562 /* stub */
-
 /* Like PPC32, we need little trampolines to do > 24-bit jumps (into
    the kernel itself).  But on PPC64, these need to be used for every
    jump, actually, to reset r2 (TOC+0x8000). */
@@ -106,8 +105,7 @@ struct ppc64_stub_entry
 	 * need 6 instructions on ABIv2 but we always allocate 7 so
 	 * so we don't have to modify the trampoline load instruction. */
 	u32 jump[7];
-	/* Used by ftrace to identify stubs */
-	u32 magic;
+	u32 unused;
 	/* Data for the above code */
 	func_desc_t funcdata;
 };
@@ -132,7 +130,7 @@ static u32 ppc64_stub_insns[] = {
 	/* Save current r2 value in magic place on the stack. */
 	0xf8410000|R2_STACK_OFFSET,	/* std     r2,R2_STACK_OFFSET(r1) */
 	0xe98b0020,			/* ld      r12,32(r11) */
-#ifdef PPC64_ELF_ABI_v1
+#if !defined(_CALL_ELF) || _CALL_ELF != 2
 	/* Set up new r2 from function descriptor */
 	0xe84b0028,			/* ld      r2,40(r11) */
 #endif
@@ -141,39 +139,70 @@ static u32 ppc64_stub_insns[] = {
 };
 
 #ifdef CONFIG_DYNAMIC_FTRACE
-int module_trampoline_target(struct module *mod, unsigned long addr,
+
+static u32 ppc64_stub_mask[] = {
+	0xffff0000,
+	0xffff0000,
+	0xffffffff,
+	0xffffffff,
+#if !defined(_CALL_ELF) || _CALL_ELF != 2
+	0xffffffff,
+#endif
+	0xffffffff,
+	0xffffffff
+};
+
+bool is_module_trampoline(u32 *p)
+{
+	unsigned int i;
+	u32 insns[ARRAY_SIZE(ppc64_stub_insns)];
+
+	BUILD_BUG_ON(sizeof(ppc64_stub_insns) != sizeof(ppc64_stub_mask));
+
+	if (probe_kernel_read(insns, p, sizeof(insns)))
+		return -EFAULT;
+
+	for (i = 0; i < ARRAY_SIZE(ppc64_stub_insns); i++) {
+		u32 insna = insns[i];
+		u32 insnb = ppc64_stub_insns[i];
+		u32 mask = ppc64_stub_mask[i];
+
+		if ((insna & mask) != (insnb & mask))
+			return false;
+	}
+
+	return true;
+}
+
+int module_trampoline_target(struct module *mod, u32 *trampoline,
 			     unsigned long *target)
 {
-	struct ppc64_stub_entry *stub;
-	func_desc_t funcdata;
-	u32 magic;
+	u32 buf[2];
+	u16 upper, lower;
+	long offset;
+	void *toc_entry;
 
-	if (!within_module_core(addr, mod)) {
-		pr_err("%s: stub %lx not in module %s\n", __func__, addr, mod->name);
+	if (probe_kernel_read(buf, trampoline, sizeof(buf)))
 		return -EFAULT;
-	}
 
-	stub = (struct ppc64_stub_entry *)addr;
+	upper = buf[0] & 0xffff;
+	lower = buf[1] & 0xffff;
 
-	if (probe_kernel_read(&magic, &stub->magic, sizeof(magic))) {
-		pr_err("%s: fault reading magic for stub %lx for %s\n", __func__, addr, mod->name);
+	/* perform the addis/addi, both signed */
+	offset = ((short)upper << 16) + (short)lower;
+
+	/*
+	 * Now get the address this trampoline jumps to. This
+	 * is always 32 bytes into our trampoline stub.
+	 */
+	toc_entry = (void *)mod->arch.toc + offset + 32;
+
+	if (probe_kernel_read(target, toc_entry, sizeof(*target)))
 		return -EFAULT;
-	}
-
-	if (magic != STUB_MAGIC) {
-		pr_err("%s: bad magic for stub %lx for %s\n", __func__, addr, mod->name);
-		return -EFAULT;
-	}
-
-	if (probe_kernel_read(&funcdata, &stub->funcdata, sizeof(funcdata))) {
-		pr_err("%s: fault reading funcdata for stub %lx for %s\n", __func__, addr, mod->name);
-                return -EFAULT;
-	}
-
-	*target = stub_func_addr(funcdata);
 
 	return 0;
 }
+
 #endif
 
 /* Count how many different 24-bit relocations (different symbol,
@@ -384,7 +413,7 @@ int module_frob_arch_sections(Elf64_Ehdr *hdr,
 /* r2 is the TOC pointer: it actually points 0x8000 into the TOC (this
    gives the value maximum span in an instruction which uses a signed
    offset) */
-static inline unsigned long my_r2(const Elf64_Shdr *sechdrs, struct module *me)
+static inline unsigned long my_r2(Elf64_Shdr *sechdrs, struct module *me)
 {
 	return sechdrs[me->arch.toc_section].sh_addr + 0x8000;
 }
@@ -397,7 +426,7 @@ static inline unsigned long my_r2(const Elf64_Shdr *sechdrs, struct module *me)
 #define PPC_HA(v) PPC_HI ((v) + 0x8000)
 
 /* Patch stub to reference function and correct r2 value. */
-static inline int create_stub(const Elf64_Shdr *sechdrs,
+static inline int create_stub(Elf64_Shdr *sechdrs,
 			      struct ppc64_stub_entry *entry,
 			      unsigned long addr,
 			      struct module *me)
@@ -418,14 +447,12 @@ static inline int create_stub(const Elf64_Shdr *sechdrs,
 	entry->jump[0] |= PPC_HA(reladdr);
 	entry->jump[1] |= PPC_LO(reladdr);
 	entry->funcdata = func_desc(addr);
-	entry->magic = STUB_MAGIC;
-
 	return 1;
 }
 
 /* Create stub to jump to function described in this OPD/ptr: we need the
    stub to set up the TOC ptr (r2) for the function. */
-static unsigned long stub_for_addr(const Elf64_Shdr *sechdrs,
+static unsigned long stub_for_addr(Elf64_Shdr *sechdrs,
 				   unsigned long addr,
 				   struct module *me)
 {
@@ -449,71 +476,17 @@ static unsigned long stub_for_addr(const Elf64_Shdr *sechdrs,
 	return (unsigned long)&stubs[i];
 }
 
-#ifdef CC_USING_MPROFILE_KERNEL
-static bool is_early_mcount_callsite(u32 *instruction)
-{
-	/*
-	 * Check if this is one of the -mprofile-kernel sequences.
-	 */
-	if (instruction[-1] == PPC_INST_STD_LR &&
-	    instruction[-2] == PPC_INST_MFLR)
-		return true;
-
-	if (instruction[-1] == PPC_INST_MFLR)
-		return true;
-
-	return false;
-}
-
-/*
- * In case of _mcount calls, do not save the current callee's TOC (in r2) into
- * the original caller's stack frame. If we did we would clobber the saved TOC
- * value of the original caller.
- */
-static void squash_toc_save_inst(const char *name, unsigned long addr)
-{
-	struct ppc64_stub_entry *stub = (struct ppc64_stub_entry *)addr;
-
-	/* Only for calls to _mcount */
-	if (strcmp("_mcount", name) != 0)
-		return;
-
-	stub->jump[2] = PPC_INST_NOP;
-}
-#else
-static void squash_toc_save_inst(const char *name, unsigned long addr) { }
-
-/* without -mprofile-kernel, mcount calls are never early */
-static bool is_early_mcount_callsite(u32 *instruction)
-{
-	return false;
-}
-#endif
-
 /* We expect a noop next: if it is, replace it with instruction to
    restore r2. */
 static int restore_r2(u32 *instruction, struct module *me)
 {
-	u32 *prev_insn = instruction - 1;
-
-	if (is_early_mcount_callsite(prev_insn))
-		return 1;
-
-	/*
-	 * Make sure the branch isn't a sibling call.  Sibling calls aren't
-	 * "link" branches and they don't return, so they don't need the r2
-	 * restore afterwards.
-	 */
-	if (!instr_is_relative_link_branch(*prev_insn))
-		return 1;
-
 	if (*instruction != PPC_INST_NOP) {
 		pr_err("%s: Expect noop after relocate, got %08x\n",
 		       me->name, *instruction);
 		return 0;
 	}
 	/* ld r2,R2_STACK_OFFSET(r1) */
-	*instruction = PPC_INST_LD_TOC;
+	*instruction = 0xe8410000 | R2_STACK_OFFSET;
 	return 1;
 }
 
@@ -638,8 +611,6 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 					return -ENOENT;
 				if (!restore_r2((u32 *)location + 1, me))
 					return -ENOEXEC;
-
-				squash_toc_save_inst(strtab + sym->st_name, value);
 			} else
 				value += local_entry_offset(sym);
 
@@ -722,84 +693,12 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 		}
 	}
 
-	return 0;
-}
-
 #ifdef CONFIG_DYNAMIC_FTRACE
-
-#ifdef CC_USING_MPROFILE_KERNEL
-
-#define PACATOC offsetof(struct paca_struct, kernel_toc)
-
-/*
- * For mprofile-kernel we use a special stub for ftrace_caller() because we
- * can't rely on r2 containing this module's TOC when we enter the stub.
- *
- * That can happen if the function calling us didn't need to use the toc. In
- * that case it won't have setup r2, and the r2 value will be either the
- * kernel's toc, or possibly another modules toc.
- *
- * To deal with that this stub uses the kernel toc, which is always accessible
- * via the paca (in r13). The target (ftrace_caller()) is responsible for
- * saving and restoring the toc before returning.
- */
-static unsigned long create_ftrace_stub(const Elf64_Shdr *sechdrs, struct module *me)
-{
-	struct ppc64_stub_entry *entry;
-	unsigned int i, num_stubs;
-	static u32 stub_insns[] = {
-		0xe98d0000 | PACATOC, 	/* ld      r12,PACATOC(r13)	*/
-		0x3d8c0000,		/* addis   r12,r12,<high>	*/
-		0x398c0000, 		/* addi    r12,r12,<low>	*/
-		0x7d8903a6, 		/* mtctr   r12			*/
-		0x4e800420, 		/* bctr				*/
-	};
-	long reladdr;
-
-	num_stubs = sechdrs[me->arch.stubs_section].sh_size / sizeof(*entry);
-
-	/* Find the next available stub entry */
-	entry = (void *)sechdrs[me->arch.stubs_section].sh_addr;
-	for (i = 0; i < num_stubs && stub_func_addr(entry->funcdata); i++, entry++);
-
-	if (i >= num_stubs) {
-		pr_err("%s: Unable to find a free slot for ftrace stub.\n", me->name);
-		return 0;
-	}
-
-	memcpy(entry->jump, stub_insns, sizeof(stub_insns));
-
-	/* Stub uses address relative to kernel toc (from the paca) */
-	reladdr = (unsigned long)ftrace_caller - kernel_toc_addr();
-	if (reladdr > 0x7FFFFFFF || reladdr < -(0x80000000L)) {
-		pr_err("%s: Address of ftrace_caller out of range of kernel_toc.\n", me->name);
-		return 0;
-	}
-
-	entry->jump[1] |= PPC_HA(reladdr);
-	entry->jump[2] |= PPC_LO(reladdr);
-
-	/* Eventhough we don't use funcdata in the stub, it's needed elsewhere. */
-	entry->funcdata = func_desc((unsigned long)ftrace_caller);
-	entry->magic = STUB_MAGIC;
-
-	return (unsigned long)entry;
-}
-#else
-static unsigned long create_ftrace_stub(const Elf64_Shdr *sechdrs, struct module *me)
-{
-	return stub_for_addr(sechdrs, (unsigned long)ftrace_caller, me);
-}
+	me->arch.toc = my_r2(sechdrs, me);
+	me->arch.tramp = stub_for_addr(sechdrs,
+				       (unsigned long)ftrace_caller,
+				       me);
 #endif
-
-int module_finalize_ftrace(struct module *mod, const Elf_Shdr *sechdrs)
-{
-	mod->arch.toc = my_r2(sechdrs, mod);
-	mod->arch.tramp = create_ftrace_stub(sechdrs, mod);
-
-	if (!mod->arch.tramp)
-		return -ENOENT;
 
 	return 0;
 }
-#endif

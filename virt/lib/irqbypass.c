@@ -89,9 +89,6 @@ int irq_bypass_register_producer(struct irq_bypass_producer *producer)
 	struct irq_bypass_producer *tmp;
 	struct irq_bypass_consumer *consumer;
 
-	if (!producer->token)
-		return -EINVAL;
-
 	might_sleep();
 
 	if (!try_module_get(THIS_MODULE))
@@ -139,9 +136,6 @@ void irq_bypass_unregister_producer(struct irq_bypass_producer *producer)
 	struct irq_bypass_producer *tmp;
 	struct irq_bypass_consumer *consumer;
 
-	if (!producer->token)
-		return;
-
 	might_sleep();
 
 	if (!try_module_get(THIS_MODULE))
@@ -183,8 +177,7 @@ int irq_bypass_register_consumer(struct irq_bypass_consumer *consumer)
 	struct irq_bypass_consumer *tmp;
 	struct irq_bypass_producer *producer;
 
-	if (!consumer->token ||
-	    !consumer->add_producer || !consumer->del_producer)
+	if (!consumer->add_producer || !consumer->del_producer)
 		return -EINVAL;
 
 	might_sleep();
@@ -233,9 +226,6 @@ void irq_bypass_unregister_consumer(struct irq_bypass_consumer *consumer)
 {
 	struct irq_bypass_consumer *tmp;
 	struct irq_bypass_producer *producer;
-
-	if (!consumer->token)
-		return;
 
 	might_sleep();
 

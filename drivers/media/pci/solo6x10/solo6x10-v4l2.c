@@ -225,7 +225,7 @@ finish_buf:
 		vb2_set_plane_payload(vb, 0,
 			solo_vlines(solo_dev) * solo_bytesperline(solo_dev));
 		vbuf->sequence = solo_dev->sequence++;
-		vb->timestamp = ktime_get_ns();
+		v4l2_get_timestamp(&vbuf->timestamp);
 	}
 
 	vb2_buffer_done(vb, error ? VB2_BUF_STATE_ERROR : VB2_BUF_STATE_DONE);
@@ -313,13 +313,14 @@ static void solo_stop_thread(struct solo_dev *solo_dev)
 	solo_dev->kthread = NULL;
 }
 
-static int solo_queue_setup(struct vb2_queue *q,
+static int solo_queue_setup(struct vb2_queue *q, const void *parg,
 			   unsigned int *num_buffers, unsigned int *num_planes,
-			   unsigned int sizes[], struct device *alloc_devs[])
+			   unsigned int sizes[], void *alloc_ctxs[])
 {
 	struct solo_dev *solo_dev = vb2_get_drv_priv(q);
 
 	sizes[0] = solo_image_size(solo_dev);
+	alloc_ctxs[0] = solo_dev->alloc_ctx;
 	*num_planes = 1;
 
 	if (*num_buffers < MIN_VID_BUFFERS)
@@ -396,24 +397,26 @@ static int solo_querycap(struct file *file, void  *priv,
 static int solo_enum_ext_input(struct solo_dev *solo_dev,
 			       struct v4l2_input *input)
 {
-	int ext = input->index - solo_dev->nr_chans;
-	unsigned int nup, first;
+	static const char * const dispnames_1[] = { "4UP" };
+	static const char * const dispnames_2[] = { "4UP-1", "4UP-2" };
+	static const char * const dispnames_5[] = {
+		"4UP-1", "4UP-2", "4UP-3", "4UP-4", "16UP"
+	};
+	const char * const *dispnames;
 
-	if (ext >= solo_dev->nr_ext)
+	if (input->index >= (solo_dev->nr_chans + solo_dev->nr_ext))
 		return -EINVAL;
 
-	nup   = (ext == 4) ? 16 : 4;
-	first = (ext & 3) << 2; /* first channel in the n-up */
-	snprintf(input->name, sizeof(input->name),
-		 "Multi %d-up (cameras %d-%d)",
-		 nup, first + 1, first + nup);
-	/* Possible outputs:
-	 *  Multi 4-up (cameras 1-4)
-	 *  Multi 4-up (cameras 5-8)
-	 *  Multi 4-up (cameras 9-12)
-	 *  Multi 4-up (cameras 13-16)
-	 *  Multi 16-up (cameras 1-16)
-	 */
+	if (solo_dev->nr_ext == 5)
+		dispnames = dispnames_5;
+	else if (solo_dev->nr_ext == 2)
+		dispnames = dispnames_2;
+	else
+		dispnames = dispnames_1;
+
+	snprintf(input->name, sizeof(input->name), "Multi %s",
+		 dispnames[input->index - solo_dev->nr_chans]);
+
 	return 0;
 }
 
@@ -689,10 +692,15 @@ int solo_v4l2_init(struct solo_dev *solo_dev, unsigned nr)
 	solo_dev->vidq.gfp_flags = __GFP_DMA32 | __GFP_KSWAPD_RECLAIM;
 	solo_dev->vidq.buf_struct_size = sizeof(struct solo_vb2_buf);
 	solo_dev->vidq.lock = &solo_dev->lock;
-	solo_dev->vidq.dev = &solo_dev->pdev->dev;
 	ret = vb2_queue_init(&solo_dev->vidq);
 	if (ret < 0)
 		goto fail;
+
+	solo_dev->alloc_ctx = vb2_dma_contig_init_ctx(&solo_dev->pdev->dev);
+	if (IS_ERR(solo_dev->alloc_ctx)) {
+		dev_err(&solo_dev->pdev->dev, "Can't allocate buffer context");
+		return PTR_ERR(solo_dev->alloc_ctx);
+	}
 
 	/* Cycle all the channels and clear */
 	for (i = 0; i < solo_dev->nr_chans; i++) {
@@ -721,6 +729,7 @@ int solo_v4l2_init(struct solo_dev *solo_dev, unsigned nr)
 
 fail:
 	video_device_release(solo_dev->vfd);
+	vb2_dma_contig_cleanup_ctx(solo_dev->alloc_ctx);
 	v4l2_ctrl_handler_free(&solo_dev->disp_hdl);
 	solo_dev->vfd = NULL;
 	return ret;
@@ -732,6 +741,7 @@ void solo_v4l2_exit(struct solo_dev *solo_dev)
 		return;
 
 	video_unregister_device(solo_dev->vfd);
+	vb2_dma_contig_cleanup_ctx(solo_dev->alloc_ctx);
 	v4l2_ctrl_handler_free(&solo_dev->disp_hdl);
 	solo_dev->vfd = NULL;
 }

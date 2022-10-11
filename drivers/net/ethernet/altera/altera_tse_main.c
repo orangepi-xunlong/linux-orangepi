@@ -131,6 +131,7 @@ static int altera_tse_mdio_create(struct net_device *dev, unsigned int id)
 {
 	struct altera_tse_private *priv = netdev_priv(dev);
 	int ret;
+	int i;
 	struct device_node *mdio_node = NULL;
 	struct mii_bus *mdio = NULL;
 	struct device_node *child_node = NULL;
@@ -160,6 +161,14 @@ static int altera_tse_mdio_create(struct net_device *dev, unsigned int id)
 	mdio->write = &altera_tse_mdio_write;
 	snprintf(mdio->id, MII_BUS_ID_SIZE, "%s-%u", mdio->name, id);
 
+	mdio->irq = kcalloc(PHY_MAX_ADDR, sizeof(int), GFP_KERNEL);
+	if (mdio->irq == NULL) {
+		ret = -ENOMEM;
+		goto out_free_mdio;
+	}
+	for (i = 0; i < PHY_MAX_ADDR; i++)
+		mdio->irq[i] = PHY_POLL;
+
 	mdio->priv = dev;
 	mdio->parent = priv->device;
 
@@ -167,7 +176,7 @@ static int altera_tse_mdio_create(struct net_device *dev, unsigned int id)
 	if (ret != 0) {
 		netdev_err(dev, "Cannot register MDIO bus %s\n",
 			   mdio->id);
-		goto out_free_mdio;
+		goto out_free_mdio_irq;
 	}
 
 	if (netif_msg_drv(priv))
@@ -175,6 +184,8 @@ static int altera_tse_mdio_create(struct net_device *dev, unsigned int id)
 
 	priv->mdio = mdio;
 	return 0;
+out_free_mdio_irq:
+	kfree(mdio->irq);
 out_free_mdio:
 	mdiobus_free(mdio);
 	mdio = NULL;
@@ -193,6 +204,7 @@ static void altera_tse_mdio_destroy(struct net_device *dev)
 			    priv->mdio->id);
 
 	mdiobus_unregister(priv->mdio);
+	kfree(priv->mdio->irq);
 	mdiobus_free(priv->mdio);
 	priv->mdio = NULL;
 }
@@ -400,6 +412,12 @@ static int tse_rx(struct altera_tse_private *priv, int limit)
 
 		skb_put(skb, pktlength);
 
+		/* make cache consistent with receive packet buffer */
+		dma_sync_single_for_cpu(priv->device,
+					priv->rx_ring[entry].dma_addr,
+					priv->rx_ring[entry].len,
+					DMA_FROM_DEVICE);
+
 		dma_unmap_single(priv->device, priv->rx_ring[entry].dma_addr,
 				 priv->rx_ring[entry].len, DMA_FROM_DEVICE);
 
@@ -463,6 +481,7 @@ static int tse_tx_complete(struct altera_tse_private *priv)
 
 	if (unlikely(netif_queue_stopped(priv->dev) &&
 		     tse_tx_avail(priv) > TSE_TX_THRESH(priv))) {
+		netif_tx_lock(priv->dev);
 		if (netif_queue_stopped(priv->dev) &&
 		    tse_tx_avail(priv) > TSE_TX_THRESH(priv)) {
 			if (netif_msg_tx_done(priv))
@@ -470,6 +489,7 @@ static int tse_tx_complete(struct altera_tse_private *priv)
 					   __func__);
 			netif_wake_queue(priv->dev);
 		}
+		netif_tx_unlock(priv->dev);
 	}
 
 	spin_unlock(&priv->tx_lock);
@@ -584,6 +604,10 @@ static int tse_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	buffer->dma_addr = dma_addr;
 	buffer->len = nopaged_len;
 
+	/* Push data out of the cache hierarchy into main memory */
+	dma_sync_single_for_device(priv->device, buffer->dma_addr,
+				   buffer->len, DMA_TO_DEVICE);
+
 	priv->dmaops->tx_buffer(priv, buffer);
 
 	skb_tx_timestamp(skb);
@@ -613,7 +637,7 @@ out:
 static void altera_tse_adjust_link(struct net_device *dev)
 {
 	struct altera_tse_private *priv = netdev_priv(dev);
-	struct phy_device *phydev = dev->phydev;
+	struct phy_device *phydev = priv->phydev;
 	int new_state = 0;
 
 	/* only change config if there is a link */
@@ -692,8 +716,10 @@ static struct phy_device *connect_local_phy(struct net_device *dev)
 
 		phydev = phy_connect(dev, phy_id_fmt, &altera_tse_adjust_link,
 				     priv->phy_iface);
-		if (IS_ERR(phydev))
+		if (IS_ERR(phydev)) {
 			netdev_err(dev, "Could not attach to PHY\n");
+			phydev = NULL;
+		}
 
 	} else {
 		int ret;
@@ -803,12 +829,9 @@ static int init_phy(struct net_device *dev)
 		phydev = of_phy_connect(dev, phynode,
 			&altera_tse_adjust_link, 0, priv->phy_iface);
 	}
-	of_node_put(phynode);
 
 	if (!phydev) {
 		netdev_err(dev, "Could not find the PHY\n");
-		if (fixed_link)
-			of_phy_deregister_fixed_link(priv->device->of_node);
 		return -ENODEV;
 	}
 
@@ -834,8 +857,9 @@ static int init_phy(struct net_device *dev)
 	}
 
 	netdev_dbg(dev, "attached to PHY %d UID 0x%08x Link = %d\n",
-		   phydev->mdio.addr, phydev->phy_id, phydev->link);
+		   phydev->addr, phydev->phy_id, phydev->link);
 
+	priv->phydev = phydev;
 	return 0;
 }
 
@@ -1162,8 +1186,8 @@ static int tse_open(struct net_device *dev)
 
 	spin_unlock_irqrestore(&priv->rxdma_irq_lock, flags);
 
-	if (dev->phydev)
-		phy_start(dev->phydev);
+	if (priv->phydev)
+		phy_start(priv->phydev);
 
 	napi_enable(&priv->napi);
 	netif_start_queue(dev);
@@ -1195,8 +1219,8 @@ static int tse_shutdown(struct net_device *dev)
 	unsigned long int flags;
 
 	/* Stop the PHY */
-	if (dev->phydev)
-		phy_stop(dev->phydev);
+	if (priv->phydev)
+		phy_stop(priv->phydev);
 
 	netif_stop_queue(dev);
 	napi_disable(&priv->napi);
@@ -1537,12 +1561,8 @@ static int altera_tse_remove(struct platform_device *pdev)
 	struct net_device *ndev = platform_get_drvdata(pdev);
 	struct altera_tse_private *priv = netdev_priv(ndev);
 
-	if (ndev->phydev) {
-		phy_disconnect(ndev->phydev);
-
-		if (of_phy_is_fixed_link(priv->device->of_node))
-			of_phy_deregister_fixed_link(priv->device->of_node);
-	}
+	if (priv->phydev)
+		phy_disconnect(priv->phydev);
 
 	platform_set_drvdata(pdev, NULL);
 	altera_tse_mdio_destroy(ndev);

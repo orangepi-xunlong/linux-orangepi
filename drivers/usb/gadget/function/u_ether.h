@@ -64,7 +64,6 @@ struct gether {
 	struct usb_ep			*out_ep;
 
 	bool				is_zlp_ok;
-	bool				no_skb_reserve;
 
 	u16				cdc_filter;
 
@@ -74,6 +73,9 @@ struct gether {
 	bool				is_fixed;
 	u32				fixed_out_len;
 	u32				fixed_in_len;
+	unsigned		ul_max_pkts_per_xfer;
+	unsigned		dl_max_pkts_per_xfer;
+	bool				multi_pkt_xfer;
 	bool				supports_multi_frame;
 	struct sk_buff			*(*wrap)(struct gether *port,
 						struct sk_buff *skb);

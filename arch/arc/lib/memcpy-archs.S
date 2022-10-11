@@ -40,7 +40,7 @@
 # define ZOLAND			0xF
 #endif
 
-ENTRY_CFI(memcpy)
+ENTRY(memcpy)
 	prefetch [r1]		; Prefetch the read location
 	prefetchw [r0]		; Prefetch the write location
 	mov.f	0, r2
@@ -233,4 +233,4 @@ ENTRY_CFI(memcpy)
 .Lcopybytewise_3:
 	j	[blink]
 
-END_CFI(memcpy)
+END(memcpy)

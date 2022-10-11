@@ -8,7 +8,6 @@
  *  Please send bug reports to: hjw@zvw.de
  */
 
-#include <linux/math64.h>
 #include "affs.h"
 
 /*
@@ -58,7 +57,7 @@ affs_insert_hash(struct inode *dir, struct buffer_head *bh)
 	mark_buffer_dirty_inode(dir_bh, dir);
 	affs_brelse(dir_bh);
 
-	dir->i_mtime = dir->i_ctime = current_time(dir);
+	dir->i_mtime = dir->i_ctime = CURRENT_TIME_SEC;
 	dir->i_version++;
 	mark_inode_dirty(dir);
 
@@ -112,7 +111,7 @@ affs_remove_hash(struct inode *dir, struct buffer_head *rem_bh)
 
 	affs_brelse(bh);
 
-	dir->i_mtime = dir->i_ctime = current_time(dir);
+	dir->i_mtime = dir->i_ctime = CURRENT_TIME_SEC;
 	dir->i_version++;
 	mark_inode_dirty(dir);
 
@@ -313,7 +312,7 @@ affs_remove_header(struct dentry *dentry)
 	else
 		clear_nlink(inode);
 	affs_unlock_link(inode);
-	inode->i_ctime = current_time(inode);
+	inode->i_ctime = CURRENT_TIME_SEC;
 	mark_inode_dirty(inode);
 
 done:
@@ -367,22 +366,22 @@ affs_fix_checksum(struct super_block *sb, struct buffer_head *bh)
 }
 
 void
-secs_to_datestamp(time64_t secs, struct affs_date *ds)
+secs_to_datestamp(time_t secs, struct affs_date *ds)
 {
 	u32	 days;
 	u32	 minute;
-	s32	 rem;
 
 	secs -= sys_tz.tz_minuteswest * 60 + ((8 * 365 + 2) * 24 * 60 * 60);
 	if (secs < 0)
 		secs = 0;
-	days    = div_s64_rem(secs, 86400, &rem);
-	minute  = rem / 60;
-	rem    -= minute * 60;
+	days    = secs / 86400;
+	secs   -= days * 86400;
+	minute  = secs / 60;
+	secs   -= minute * 60;
 
 	ds->days = cpu_to_be32(days);
 	ds->mins = cpu_to_be32(minute);
-	ds->ticks = cpu_to_be32(rem * 50);
+	ds->ticks = cpu_to_be32(secs * 50);
 }
 
 umode_t
@@ -472,7 +471,9 @@ affs_warning(struct super_block *sb, const char *function, const char *fmt, ...)
 bool
 affs_nofilenametruncate(const struct dentry *dentry)
 {
-	return affs_test_opt(AFFS_SB(dentry->d_sb)->s_flags, SF_NO_TRUNCATE);
+	struct inode *inode = d_inode(dentry);
+
+	return affs_test_opt(AFFS_SB(inode->i_sb)->s_flags, SF_NO_TRUNCATE);
 }
 
 /* Check if the name is valid for a affs object. */

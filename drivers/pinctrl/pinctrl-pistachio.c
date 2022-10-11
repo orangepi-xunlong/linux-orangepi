@@ -842,9 +842,14 @@ static inline void pctl_writel(struct pistachio_pinctrl *pctl, u32 val, u32 reg)
 	writel(val, pctl->base + reg);
 }
 
+static inline struct pistachio_gpio_bank *gc_to_bank(struct gpio_chip *gc)
+{
+	return container_of(gc, struct pistachio_gpio_bank, gpio_chip);
+}
+
 static inline struct pistachio_gpio_bank *irqd_to_bank(struct irq_data *d)
 {
-	return gpiochip_get_data(irq_data_get_irq_chip_data(d));
+	return gc_to_bank(irq_data_get_irq_chip_data(d));
 }
 
 static inline u32 gpio_readl(struct pistachio_gpio_bank *bank, u32 reg)
@@ -987,7 +992,7 @@ static int pistachio_pinmux_enable(struct pinctrl_dev *pctldev,
 
 	range = pinctrl_find_gpio_range_from_pin(pctl->pctldev, pg->pin);
 	if (range)
-		gpio_disable(gpiochip_get_data(range->gc), pg->pin - range->pin_base);
+		gpio_disable(gc_to_bank(range->gc), pg->pin - range->pin_base);
 
 	return 0;
 }
@@ -1168,14 +1173,14 @@ static struct pinctrl_desc pistachio_pinctrl_desc = {
 
 static int pistachio_gpio_get_direction(struct gpio_chip *chip, unsigned offset)
 {
-	struct pistachio_gpio_bank *bank = gpiochip_get_data(chip);
+	struct pistachio_gpio_bank *bank = gc_to_bank(chip);
 
 	return !(gpio_readl(bank, GPIO_OUTPUT_EN) & BIT(offset));
 }
 
 static int pistachio_gpio_get(struct gpio_chip *chip, unsigned offset)
 {
-	struct pistachio_gpio_bank *bank = gpiochip_get_data(chip);
+	struct pistachio_gpio_bank *bank = gc_to_bank(chip);
 	u32 reg;
 
 	if (gpio_readl(bank, GPIO_OUTPUT_EN) & BIT(offset))
@@ -1189,7 +1194,7 @@ static int pistachio_gpio_get(struct gpio_chip *chip, unsigned offset)
 static void pistachio_gpio_set(struct gpio_chip *chip, unsigned offset,
 			       int value)
 {
-	struct pistachio_gpio_bank *bank = gpiochip_get_data(chip);
+	struct pistachio_gpio_bank *bank = gc_to_bank(chip);
 
 	gpio_mask_writel(bank, GPIO_OUTPUT, offset, !!value);
 }
@@ -1197,7 +1202,7 @@ static void pistachio_gpio_set(struct gpio_chip *chip, unsigned offset,
 static int pistachio_gpio_direction_input(struct gpio_chip *chip,
 					  unsigned offset)
 {
-	struct pistachio_gpio_bank *bank = gpiochip_get_data(chip);
+	struct pistachio_gpio_bank *bank = gc_to_bank(chip);
 
 	gpio_mask_writel(bank, GPIO_OUTPUT_EN, offset, 0);
 	gpio_enable(bank, offset);
@@ -1208,7 +1213,7 @@ static int pistachio_gpio_direction_input(struct gpio_chip *chip,
 static int pistachio_gpio_direction_output(struct gpio_chip *chip,
 					   unsigned offset, int value)
 {
-	struct pistachio_gpio_bank *bank = gpiochip_get_data(chip);
+	struct pistachio_gpio_bank *bank = gc_to_bank(chip);
 
 	pistachio_gpio_set(chip, offset, value);
 	gpio_mask_writel(bank, GPIO_OUTPUT_EN, offset, 1);
@@ -1298,7 +1303,7 @@ static int pistachio_gpio_irq_set_type(struct irq_data *data, unsigned int type)
 static void pistachio_gpio_irq_handler(struct irq_desc *desc)
 {
 	struct gpio_chip *gc = irq_desc_get_handler_data(desc);
-	struct pistachio_gpio_bank *bank = gpiochip_get_data(gc);
+	struct pistachio_gpio_bank *bank = gc_to_bank(gc);
 	struct irq_chip *chip = irq_desc_get_chip(desc);
 	unsigned long pending;
 	unsigned int pin;
@@ -1368,6 +1373,7 @@ static int pistachio_gpio_register(struct pistachio_pinctrl *pctl)
 		if (!of_find_property(child, "gpio-controller", NULL)) {
 			dev_err(pctl->dev,
 				"No gpio-controller property for bank %u\n", i);
+			of_node_put(child);
 			ret = -ENODEV;
 			goto err;
 		}
@@ -1375,6 +1381,7 @@ static int pistachio_gpio_register(struct pistachio_pinctrl *pctl)
 		irq = irq_of_parse_and_map(child, 0);
 		if (irq < 0) {
 			dev_err(pctl->dev, "No IRQ for bank %u: %d\n", i, irq);
+			of_node_put(child);
 			ret = irq;
 			goto err;
 		}
@@ -1385,7 +1392,7 @@ static int pistachio_gpio_register(struct pistachio_pinctrl *pctl)
 
 		bank->gpio_chip.parent = pctl->dev;
 		bank->gpio_chip.of_node = child;
-		ret = gpiochip_add_data(&bank->gpio_chip, bank);
+		ret = gpiochip_add(&bank->gpio_chip);
 		if (ret < 0) {
 			dev_err(pctl->dev, "Failed to add GPIO chip %u: %d\n",
 				i, ret);
@@ -1432,6 +1439,7 @@ static int pistachio_pinctrl_probe(struct platform_device *pdev)
 {
 	struct pistachio_pinctrl *pctl;
 	struct resource *res;
+	int ret;
 
 	pctl = devm_kzalloc(&pdev->dev, sizeof(*pctl), GFP_KERNEL);
 	if (!pctl)
@@ -1456,14 +1464,20 @@ static int pistachio_pinctrl_probe(struct platform_device *pdev)
 	pistachio_pinctrl_desc.pins = pctl->pins;
 	pistachio_pinctrl_desc.npins = pctl->npins;
 
-	pctl->pctldev = devm_pinctrl_register(&pdev->dev, &pistachio_pinctrl_desc,
-					      pctl);
+	pctl->pctldev = pinctrl_register(&pistachio_pinctrl_desc, &pdev->dev,
+					 pctl);
 	if (IS_ERR(pctl->pctldev)) {
 		dev_err(&pdev->dev, "Failed to register pinctrl device\n");
 		return PTR_ERR(pctl->pctldev);
 	}
 
-	return pistachio_gpio_register(pctl);
+	ret = pistachio_gpio_register(pctl);
+	if (ret < 0) {
+		pinctrl_unregister(pctl->pctldev);
+		return ret;
+	}
+
+	return 0;
 }
 
 static struct platform_driver pistachio_pinctrl_driver = {

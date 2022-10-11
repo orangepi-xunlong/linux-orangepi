@@ -24,11 +24,7 @@
 #ifndef _VIA_DRM_H_
 #define _VIA_DRM_H_
 
-#include "drm.h"
-
-#if defined(__cplusplus)
-extern "C" {
-#endif
+#include <drm/drm.h>
 
 /* WARNING: These defines must be the same as what the Xserver uses.
  * if you change them, you must change the defines in the Xserver.
@@ -37,6 +33,9 @@ extern "C" {
 #ifndef _VIA_DEFINES_
 #define _VIA_DEFINES_
 
+#ifndef __KERNEL__
+#include "via_drmclient.h"
+#endif
 
 #define VIA_NR_SAREA_CLIPRECTS		8
 #define VIA_NR_XVMC_PORTS               10
@@ -274,9 +273,5 @@ typedef struct drm_via_dmablit {
 
 	drm_via_blitsync_t sync;
 } drm_via_dmablit_t;
-
-#if defined(__cplusplus)
-}
-#endif
 
 #endif				/* _VIA_DRM_H_ */

@@ -39,8 +39,9 @@ int fscrypt_file_open(struct inode *inode, struct file *filp)
 	dir = dget_parent(file_dentry(filp));
 	if (IS_ENCRYPTED(d_inode(dir)) &&
 	    !fscrypt_has_permitted_context(d_inode(dir), inode)) {
-		pr_warn_ratelimited("fscrypt: inconsistent encryption contexts: %lu/%lu",
-				    d_inode(dir)->i_ino, inode->i_ino);
+		fscrypt_warn(inode->i_sb,
+			     "inconsistent encryption contexts: %lu/%lu",
+			     d_inode(dir)->i_ino, inode->i_ino);
 		err = -EPERM;
 	}
 	dput(dir);
@@ -210,9 +211,8 @@ EXPORT_SYMBOL_GPL(__fscrypt_encrypt_symlink);
  *
  * Return: the presentable symlink target or an ERR_PTR()
  */
-const char *fscrypt_get_symlink(struct inode *inode, const void *caddr,
-				unsigned int max_size,
-				struct delayed_call *done)
+void *fscrypt_get_symlink(struct inode *inode, const void *caddr,
+				unsigned int max_size)
 {
 	const struct fscrypt_symlink_data *sd;
 	struct fscrypt_str cstr, pstr;
@@ -260,7 +260,6 @@ const char *fscrypt_get_symlink(struct inode *inode, const void *caddr,
 		goto err_kfree;
 
 	pstr.name[pstr.len] = '\0';
-	set_delayed_call(done, kfree_link, pstr.name);
 	return pstr.name;
 
 err_kfree:

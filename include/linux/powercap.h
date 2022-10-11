@@ -208,7 +208,7 @@ struct powercap_zone_constraint_ops {
 struct powercap_zone_constraint {
 	int id;
 	struct powercap_zone *power_zone;
-	const struct powercap_zone_constraint_ops *ops;
+	struct powercap_zone_constraint_ops *ops;
 };
 
 
@@ -309,7 +309,7 @@ struct powercap_zone *powercap_register_zone(
 			struct powercap_zone *parent,
 			const struct powercap_zone_ops *ops,
 			int nr_constraints,
-			const struct powercap_zone_constraint_ops *const_ops);
+			struct powercap_zone_constraint_ops *const_ops);
 
 /**
 * powercap_unregister_zone() - Unregister a zone device

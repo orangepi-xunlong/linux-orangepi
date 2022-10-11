@@ -1,5 +1,4 @@
-/*
- * Driver for Rio Karma
+/* Driver for Rio Karma
  *
  *   (c) 2006 Bob Copeland <me@bobcopeland.com>
  *   (c) 2006 Keith Bennett <keith@mcs.st-and.ac.uk>

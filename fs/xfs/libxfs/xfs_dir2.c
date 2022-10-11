@@ -21,7 +21,6 @@
 #include "xfs_log_format.h"
 #include "xfs_trans_resv.h"
 #include "xfs_mount.h"
-#include "xfs_defer.h"
 #include "xfs_da_format.h"
 #include "xfs_da_btree.h"
 #include "xfs_inode.h"
@@ -36,29 +35,21 @@
 struct xfs_name xfs_name_dotdot = { (unsigned char *)"..", 2, XFS_DIR3_FT_DIR };
 
 /*
- * Convert inode mode to directory entry filetype
+ * @mode, if set, indicates that the type field needs to be set up.
+ * This uses the transformation from file mode to DT_* as defined in linux/fs.h
+ * for file type specification. This will be propagated into the directory
+ * structure if appropriate for the given operation and filesystem config.
  */
-unsigned char xfs_mode_to_ftype(int mode)
-{
-	switch (mode & S_IFMT) {
-	case S_IFREG:
-		return XFS_DIR3_FT_REG_FILE;
-	case S_IFDIR:
-		return XFS_DIR3_FT_DIR;
-	case S_IFCHR:
-		return XFS_DIR3_FT_CHRDEV;
-	case S_IFBLK:
-		return XFS_DIR3_FT_BLKDEV;
-	case S_IFIFO:
-		return XFS_DIR3_FT_FIFO;
-	case S_IFSOCK:
-		return XFS_DIR3_FT_SOCK;
-	case S_IFLNK:
-		return XFS_DIR3_FT_SYMLINK;
-	default:
-		return XFS_DIR3_FT_UNKNOWN;
-	}
-}
+const unsigned char xfs_mode_to_ftype[S_IFMT >> S_SHIFT] = {
+	[0]			= XFS_DIR3_FT_UNKNOWN,
+	[S_IFREG >> S_SHIFT]    = XFS_DIR3_FT_REG_FILE,
+	[S_IFDIR >> S_SHIFT]    = XFS_DIR3_FT_DIR,
+	[S_IFCHR >> S_SHIFT]    = XFS_DIR3_FT_CHRDEV,
+	[S_IFBLK >> S_SHIFT]    = XFS_DIR3_FT_BLKDEV,
+	[S_IFIFO >> S_SHIFT]    = XFS_DIR3_FT_FIFO,
+	[S_IFSOCK >> S_SHIFT]   = XFS_DIR3_FT_SOCK,
+	[S_IFLNK >> S_SHIFT]    = XFS_DIR3_FT_SYMLINK,
+};
 
 /*
  * ASCII case-insensitive (ie. A-Z) support for directories that was
@@ -185,7 +176,7 @@ xfs_dir_isempty(
 {
 	xfs_dir2_sf_hdr_t	*sfp;
 
-	ASSERT(S_ISDIR(VFS_I(dp)->i_mode));
+	ASSERT(S_ISDIR(dp->i_d.di_mode));
 	if (dp->i_d.di_size == 0)	/* might happen during shutdown. */
 		return 1;
 	if (dp->i_d.di_size > XFS_IFORK_DSIZE(dp))
@@ -240,7 +231,7 @@ xfs_dir_init(
 	struct xfs_da_args *args;
 	int		error;
 
-	ASSERT(S_ISDIR(VFS_I(dp)->i_mode));
+	ASSERT(S_ISDIR(dp->i_d.di_mode));
 	error = xfs_dir_ino_validate(tp->t_mountp, pdp->i_ino);
 	if (error)
 		return error;
@@ -268,14 +259,14 @@ xfs_dir_createname(
 	struct xfs_name		*name,
 	xfs_ino_t		inum,		/* new entry inode number */
 	xfs_fsblock_t		*first,		/* bmap's firstblock */
-	struct xfs_defer_ops	*dfops,		/* bmap's freeblock list */
+	xfs_bmap_free_t		*flist,		/* bmap's freeblock list */
 	xfs_extlen_t		total)		/* bmap's total block count */
 {
 	struct xfs_da_args	*args;
 	int			rval;
 	int			v;		/* type-checking value */
 
-	ASSERT(S_ISDIR(VFS_I(dp)->i_mode));
+	ASSERT(S_ISDIR(dp->i_d.di_mode));
 	if (inum) {
 		rval = xfs_dir_ino_validate(tp->t_mountp, inum);
 		if (rval)
@@ -295,7 +286,7 @@ xfs_dir_createname(
 	args->inumber = inum;
 	args->dp = dp;
 	args->firstblock = first;
-	args->dfops = dfops;
+	args->flist = flist;
 	args->total = total;
 	args->whichfork = XFS_DATA_FORK;
 	args->trans = tp;
@@ -373,7 +364,7 @@ xfs_dir_lookup(
 	int		v;		/* type-checking value */
 	int		lock_mode;
 
-	ASSERT(S_ISDIR(VFS_I(dp)->i_mode));
+	ASSERT(S_ISDIR(dp->i_d.di_mode));
 	XFS_STATS_INC(dp->i_mount, xs_dir_lookup);
 
 	/*
@@ -445,14 +436,14 @@ xfs_dir_removename(
 	struct xfs_name	*name,
 	xfs_ino_t	ino,
 	xfs_fsblock_t	*first,		/* bmap's firstblock */
-	struct xfs_defer_ops	*dfops,		/* bmap's freeblock list */
+	xfs_bmap_free_t	*flist,		/* bmap's freeblock list */
 	xfs_extlen_t	total)		/* bmap's total block count */
 {
 	struct xfs_da_args *args;
 	int		rval;
 	int		v;		/* type-checking value */
 
-	ASSERT(S_ISDIR(VFS_I(dp)->i_mode));
+	ASSERT(S_ISDIR(dp->i_d.di_mode));
 	XFS_STATS_INC(dp->i_mount, xs_dir_remove);
 
 	args = kmem_zalloc(sizeof(*args), KM_SLEEP | KM_NOFS);
@@ -467,7 +458,7 @@ xfs_dir_removename(
 	args->inumber = ino;
 	args->dp = dp;
 	args->firstblock = first;
-	args->dfops = dfops;
+	args->flist = flist;
 	args->total = total;
 	args->whichfork = XFS_DATA_FORK;
 	args->trans = tp;
@@ -507,14 +498,14 @@ xfs_dir_replace(
 	struct xfs_name	*name,		/* name of entry to replace */
 	xfs_ino_t	inum,		/* new inode number */
 	xfs_fsblock_t	*first,		/* bmap's firstblock */
-	struct xfs_defer_ops	*dfops,		/* bmap's freeblock list */
+	xfs_bmap_free_t	*flist,		/* bmap's freeblock list */
 	xfs_extlen_t	total)		/* bmap's total block count */
 {
 	struct xfs_da_args *args;
 	int		rval;
 	int		v;		/* type-checking value */
 
-	ASSERT(S_ISDIR(VFS_I(dp)->i_mode));
+	ASSERT(S_ISDIR(dp->i_d.di_mode));
 
 	rval = xfs_dir_ino_validate(tp->t_mountp, inum);
 	if (rval)
@@ -532,7 +523,7 @@ xfs_dir_replace(
 	args->inumber = inum;
 	args->dp = dp;
 	args->firstblock = first;
-	args->dfops = dfops;
+	args->flist = flist;
 	args->total = total;
 	args->whichfork = XFS_DATA_FORK;
 	args->trans = tp;
@@ -639,8 +630,7 @@ xfs_dir2_isblock(
 	if ((rval = xfs_bmap_last_offset(args->dp, &last, XFS_DATA_FORK)))
 		return rval;
 	rval = XFS_FSB_TO_B(args->dp->i_mount, last) == args->geo->blksize;
-	if (rval != 0 && args->dp->i_d.di_size != args->geo->blksize)
-		return -EFSCORRUPTED;
+	ASSERT(rval == 0 || args->dp->i_d.di_size == args->geo->blksize);
 	*vp = rval;
 	return 0;
 }
@@ -690,7 +680,7 @@ xfs_dir2_shrink_inode(
 
 	/* Unmap the fsblock(s). */
 	error = xfs_bunmapi(tp, dp, da, args->geo->fsbcount, 0, 0,
-			    args->firstblock, args->dfops, &done);
+			    args->firstblock, args->flist, &done);
 	if (error) {
 		/*
 		 * ENOSPC actually can happen if we're in a removename with no

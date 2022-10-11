@@ -6,7 +6,6 @@
 #ifndef __sparc__
 #include <linux/serial.h>
 #endif
-#include <linux/serial_core.h>
 
 /*
  * this is cut&paste from 8250.h. Get rid of the structure, the definitions
@@ -17,7 +16,7 @@ struct old_serial_port {
 	unsigned int baud_base;
 	unsigned int port;
 	unsigned int irq;
-	upf_t flags; /* unused */
+	unsigned int flags; /* unused */
 };
 
 /* countdown values for serial timeouts in us */

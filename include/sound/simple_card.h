@@ -13,7 +13,16 @@
 #define __SIMPLE_CARD_H
 
 #include <sound/soc.h>
-#include <sound/simple_card_utils.h>
+
+struct asoc_simple_dai {
+	const char *name;
+	unsigned int sysclk;
+	int slots;
+	int slot_width;
+	unsigned int tx_slot_mask;
+	unsigned int rx_slot_mask;
+	struct clk *clk;
+};
 
 struct asoc_simple_card_info {
 	const char *name;
@@ -25,5 +34,7 @@ struct asoc_simple_card_info {
 	struct asoc_simple_dai cpu_dai;
 	struct asoc_simple_dai codec_dai;
 };
+
+struct snd_soc_jack *asoc_simple_card_get_hp_jack(void);
 
 #endif /* __SIMPLE_CARD_H */

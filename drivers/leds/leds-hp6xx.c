@@ -50,7 +50,7 @@ static struct led_classdev hp6xx_red_led = {
 
 static struct led_classdev hp6xx_green_led = {
 	.name			= "hp6xx:green",
-	.default_trigger	= "disk-activity",
+	.default_trigger	= "ide-disk",
 	.brightness_set		= hp6xxled_green_set,
 	.flags			= LED_CORE_SUSPENDRESUME,
 };

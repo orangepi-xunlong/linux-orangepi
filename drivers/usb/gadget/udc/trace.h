@@ -1,20 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /**
  * udc.c - Core UDC Framework
  *
  * Copyright (C) 2016 Intel Corporation
  * Author: Felipe Balbi <felipe.balbi@linux.intel.com>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2  of
- * the License as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #undef TRACE_SYSTEM
@@ -41,8 +30,6 @@ DECLARE_EVENT_CLASS(udc_log_gadget,
 		__field(unsigned, is_a_peripheral)
 		__field(unsigned, b_hnp_enable)
 		__field(unsigned, a_hnp_support)
-		__field(unsigned, hnp_polling_support)
-		__field(unsigned, host_request_flag)
 		__field(unsigned, quirk_ep_out_aligned_size)
 		__field(unsigned, quirk_altset_not_supp)
 		__field(unsigned, quirk_stall_not_supp)
@@ -62,8 +49,6 @@ DECLARE_EVENT_CLASS(udc_log_gadget,
 		__entry->is_a_peripheral = g->is_a_peripheral;
 		__entry->b_hnp_enable = g->b_hnp_enable;
 		__entry->a_hnp_support = g->a_hnp_support;
-		__entry->hnp_polling_support = g->hnp_polling_support;
-		__entry->host_request_flag = g->host_request_flag;
 		__entry->quirk_ep_out_aligned_size = g->quirk_ep_out_aligned_size;
 		__entry->quirk_altset_not_supp = g->quirk_altset_not_supp;
 		__entry->quirk_stall_not_supp = g->quirk_stall_not_supp;
@@ -73,15 +58,13 @@ DECLARE_EVENT_CLASS(udc_log_gadget,
 		__entry->connected = g->connected;
 		__entry->ret = ret;
 	),
-	TP_printk("speed %d/%d state %d %dmA [%s%s%s%s%s%s%s%s%s%s%s%s%s%s] --> %d",
+	TP_printk("speed %d/%d state %d %dmA [%s%s%s%s%s%s%s%s%s%s%s%s] --> %d",
 		__entry->speed, __entry->max_speed, __entry->state, __entry->mA,
 		__entry->sg_supported ? "sg:" : "",
 		__entry->is_otg ? "OTG:" : "",
 		__entry->is_a_peripheral ? "a_peripheral:" : "",
 		__entry->b_hnp_enable ? "b_hnp:" : "",
 		__entry->a_hnp_support ? "a_hnp:" : "",
-		__entry->hnp_polling_support ? "hnp_poll:" : "",
-		__entry->host_request_flag ? "hostreq:" : "",
 		__entry->quirk_ep_out_aligned_size ? "out_aligned:" : "",
 		__entry->quirk_altset_not_supp ? "no_altset:" : "",
 		__entry->quirk_stall_not_supp ? "no_stall:" : "",
@@ -236,6 +219,7 @@ DECLARE_EVENT_CLASS(udc_log_req,
 		__field(unsigned, short_not_ok)
 		__field(int, status)
 		__field(int, ret)
+		__field(struct usb_request *, req)
 	),
 	TP_fast_assign(
 		snprintf(__get_str(name), UDC_TRACE_STR_MAX, "%s", ep->name);
@@ -249,9 +233,10 @@ DECLARE_EVENT_CLASS(udc_log_req,
 		__entry->short_not_ok = req->short_not_ok;
 		__entry->status = req->status;
 		__entry->ret = ret;
+		__entry->req = req;
 	),
-	TP_printk("%s: length %d/%d sgs %d/%d stream %d %s%s%s status %d --> %d",
-		__get_str(name), __entry->actual, __entry->length,
+	TP_printk("%s: req %p length %d/%d sgs %d/%d stream %d %s%s%s status %d --> %d",
+		__get_str(name), __entry->req, __entry->actual, __entry->length,
 		__entry->num_mapped_sgs, __entry->num_sgs, __entry->stream_id,
 		__entry->zero ? "Z" : "z",
 		__entry->short_not_ok ? "S" : "s",

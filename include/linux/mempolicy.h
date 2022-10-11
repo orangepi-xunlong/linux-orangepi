@@ -122,7 +122,7 @@ struct sp_node {
 
 struct shared_policy {
 	struct rb_root root;
-	rwlock_t lock;
+	spinlock_t lock;
 };
 
 int vma_dup_policy(struct vm_area_struct *src, struct vm_area_struct *dst);
@@ -172,14 +172,14 @@ extern int mpol_parse_str(char *str, struct mempolicy **mpol);
 extern void mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol);
 
 /* Check if a vma is migratable */
-static inline bool vma_migratable(struct vm_area_struct *vma)
+static inline int vma_migratable(struct vm_area_struct *vma)
 {
 	if (vma->vm_flags & (VM_IO | VM_PFNMAP))
-		return false;
+		return 0;
 
 #ifndef CONFIG_ARCH_ENABLE_HUGEPAGE_MIGRATION
 	if (vma->vm_flags & VM_HUGETLB)
-		return false;
+		return 0;
 #endif
 
 	/*
@@ -190,12 +190,11 @@ static inline bool vma_migratable(struct vm_area_struct *vma)
 	if (vma->vm_file &&
 		gfp_zone(mapping_gfp_mask(vma->vm_file->f_mapping))
 								< policy_zone)
-			return false;
-	return true;
+			return 0;
+	return 1;
 }
 
 extern int mpol_misplaced(struct page *, struct vm_area_struct *, unsigned long);
-extern void mpol_put_task_policy(struct task_struct *);
 
 #else
 
@@ -227,12 +226,6 @@ static inline void mpol_shared_policy_init(struct shared_policy *sp,
 
 static inline void mpol_free_shared_policy(struct shared_policy *p)
 {
-}
-
-static inline struct mempolicy *
-mpol_shared_policy_lookup(struct shared_policy *sp, unsigned long idx)
-{
-	return NULL;
 }
 
 #define vma_policy(vma) NULL
@@ -298,8 +291,5 @@ static inline int mpol_misplaced(struct page *page, struct vm_area_struct *vma,
 	return -1; /* no node preference */
 }
 
-static inline void mpol_put_task_policy(struct task_struct *task)
-{
-}
 #endif /* CONFIG_NUMA */
 #endif

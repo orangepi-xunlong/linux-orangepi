@@ -70,6 +70,7 @@
 #include <linux/shmem_fs.h>
 #include <linux/slab.h>
 #include <linux/perf_event.h>
+#include <linux/file.h>
 #include <linux/ptrace.h>
 #include <linux/blkdev.h>
 #include <linux/elevator.h>
@@ -81,7 +82,6 @@
 #include <linux/proc_ns.h>
 #include <linux/io.h>
 #include <linux/kaiser.h>
-#include <linux/cache.h>
 
 #include <asm/io.h>
 #include <asm/bugs.h>
@@ -121,7 +121,6 @@ void (*__initdata late_time_init)(void);
 char __initdata boot_command_line[COMMAND_LINE_SIZE];
 /* Untouched saved command line (eg. for /proc) */
 char *saved_command_line;
-EXPORT_SYMBOL(saved_command_line);
 /* Command line for parameter parsing */
 static char *static_command_line;
 /* Command line for per-initcall parameter parsing */
@@ -163,10 +162,10 @@ static const char *panic_later, *panic_param;
 
 extern const struct obs_kernel_param __setup_start[], __setup_end[];
 
-static bool __init obsolete_checksetup(char *line)
+static int __init obsolete_checksetup(char *line)
 {
 	const struct obs_kernel_param *p;
-	bool had_early_param = false;
+	int had_early_param = 0;
 
 	p = __setup_start;
 	do {
@@ -178,13 +177,13 @@ static bool __init obsolete_checksetup(char *line)
 				 * Keep iterating, as we can have early
 				 * params and __setups of same names 8( */
 				if (line[n] == '\0' || line[n] == '=')
-					had_early_param = true;
+					had_early_param = 1;
 			} else if (!p->setup_func) {
 				pr_warn("Parameter %s is obsolete, ignored\n",
 					p->str);
-				return true;
+				return 1;
 			} else if (p->setup_func(line + n))
-				return true;
+				return 1;
 		}
 		p++;
 	} while (p < __setup_end);
@@ -382,11 +381,12 @@ static void __init setup_command_line(char *command_line)
 
 static __initdata DECLARE_COMPLETION(kthreadd_done);
 
-static noinline void __ref rest_init(void)
+static noinline void __init_refok rest_init(void)
 {
 	int pid;
 
 	rcu_scheduler_starting();
+	smpboot_thread_init();
 	/*
 	 * We need to spawn init first so that it obtains pid 1, however
 	 * the init task will end up wanting to create kthreads, which, if
@@ -450,6 +450,20 @@ void __init parse_early_param(void)
 	done = 1;
 }
 
+/*
+ *	Activate the first processor.
+ */
+
+static void __init boot_cpu_init(void)
+{
+	int cpu = smp_processor_id();
+	/* Mark the boot cpu "present", "online" etc for SMP and UP case */
+	set_cpu_online(cpu, true);
+	set_cpu_active(cpu, true);
+	set_cpu_present(cpu, true);
+	set_cpu_possible(cpu, true);
+}
+
 void __init __weak smp_setup_processor_id(void)
 {
 }
@@ -484,6 +498,11 @@ asmlinkage __visible void __init start_kernel(void)
 	char *command_line;
 	char *after_dashes;
 
+	/*
+	 * Need to run as early as possible, to initialize the
+	 * lockdep hash:
+	 */
+	lockdep_init();
 	set_task_stack_end_magic(&init_task);
 	smp_setup_processor_id();
 	debug_objects_early_init();
@@ -510,13 +529,30 @@ asmlinkage __visible void __init start_kernel(void)
 	setup_command_line(command_line);
 	setup_nr_cpu_ids();
 	setup_per_cpu_areas();
-	boot_cpu_state_init();
 	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks */
 
 	build_all_zonelists(NULL, NULL);
 	page_alloc_init();
 
+#ifdef CONFIG_ARCH_ROCKCHIP
+	{
+		const char *s = boot_command_line;
+		const char *e = &boot_command_line[strlen(boot_command_line)];
+		int n =
+		    pr_notice("Kernel command line: %s\n", boot_command_line);
+		n -= strlen("Kernel command line: ");
+		s += n;
+		/* command line maybe too long to print one time */
+		while (n > 0 && s < e) {
+			n = pr_cont("%s\n", s);
+			s += n;
+		}
+	}
+#else
 	pr_notice("Kernel command line: %s\n", boot_command_line);
+#endif
+	/* parameters may set static keys */
+	jump_label_init();
 	parse_early_param();
 	after_dashes = parse_args("Booting kernel",
 				  static_command_line, __start___param,
@@ -525,8 +561,6 @@ asmlinkage __visible void __init start_kernel(void)
 	if (!IS_ERR_OR_NULL(after_dashes))
 		parse_args("Setting init args", after_dashes, NULL, 0, -1, -1,
 			   NULL, set_init_arg);
-
-	jump_label_init();
 
 	/*
 	 * These use large bootmem allocations and must precede
@@ -572,7 +606,6 @@ asmlinkage __visible void __init start_kernel(void)
 	timekeeping_init();
 	time_init();
 	sched_clock_postinit();
-	printk_nmi_init();
 	perf_event_init();
 	profile_init();
 	call_function_init();
@@ -709,29 +742,24 @@ static int __init initcall_blacklist(char *str)
 
 static bool __init_or_module initcall_blacklisted(initcall_t fn)
 {
+	struct list_head *tmp;
 	struct blacklist_entry *entry;
-	char fn_name[KSYM_SYMBOL_LEN];
-	unsigned long addr;
+	char *fn_name;
 
-	if (list_empty(&blacklisted_initcalls))
+	fn_name = kasprintf(GFP_KERNEL, "%pf", fn);
+	if (!fn_name)
 		return false;
 
-	addr = (unsigned long) dereference_function_descriptor(fn);
-	sprint_symbol_no_offset(fn_name, addr);
-
-	/*
-	 * fn will be "function_name [module_name]" where [module_name] is not
-	 * displayed for built-in init functions.  Strip off the [module_name].
-	 */
-	strreplace(fn_name, ' ', '\0');
-
-	list_for_each_entry(entry, &blacklisted_initcalls, next) {
+	list_for_each(tmp, &blacklisted_initcalls) {
+		entry = list_entry(tmp, struct blacklist_entry, next);
 		if (!strcmp(fn_name, entry->buf)) {
 			pr_debug("initcall %s blacklisted\n", fn_name);
+			kfree(fn_name);
 			return true;
 		}
 	}
 
+	kfree(fn_name);
 	return false;
 }
 #else
@@ -766,32 +794,19 @@ static int __init_or_module do_one_initcall_debug(initcall_t fn)
 	return ret;
 }
 
-#ifdef CONFIG_SUNXI_BOOTEVENT
-#include "../drivers/misc/sunxi-bootevent/bootevent.h"
-#else
-#define TIME_LOG_START()
-#define TIME_LOG_END()
-#define bootevent_initcall(fn, ts)
-#endif
-
 int __init_or_module do_one_initcall(initcall_t fn)
 {
 	int count = preempt_count();
 	int ret;
 	char msgbuf[64];
-#ifdef CONFIG_SUNXI_BOOTEVENT
-	unsigned long long ts = 0;
-#endif
 
 	if (initcall_blacklisted(fn))
 		return -EPERM;
 
-	TIME_LOG_START();
 	if (initcall_debug)
 		ret = do_one_initcall_debug(fn);
 	else
 		ret = fn();
-	TIME_LOG_END();
 
 	msgbuf[0] = 0;
 
@@ -804,9 +819,7 @@ int __init_or_module do_one_initcall(initcall_t fn)
 		local_irq_enable();
 	}
 	WARN(msgbuf[0], "initcall %pF returned with %s\n", fn, msgbuf);
-	bootevent_initcall(fn, ts);
 
-	add_latent_entropy();
 	return ret;
 }
 
@@ -885,6 +898,7 @@ static void __init do_basic_setup(void)
 	do_ctors();
 	usermodehelper_enable();
 	do_initcalls();
+	random_int_secret_init();
 }
 
 static void __init do_pre_smp_initcalls(void)
@@ -930,16 +944,14 @@ static int try_to_run_init_process(const char *init_filename)
 
 static noinline void __init kernel_init_freeable(void);
 
-#if defined(CONFIG_DEBUG_RODATA) || defined(CONFIG_SET_MODULE_RONX)
-bool rodata_enabled __ro_after_init = true;
+#ifdef CONFIG_DEBUG_RODATA
+static bool rodata_enabled = true;
 static int __init set_debug_rodata(char *str)
 {
 	return strtobool(str, &rodata_enabled);
 }
 __setup("rodata=", set_debug_rodata);
-#endif
 
-#ifdef CONFIG_DEBUG_RODATA
 static void mark_readonly(void)
 {
 	if (rodata_enabled)
@@ -966,11 +978,7 @@ static int __ref kernel_init(void *unused)
 	system_state = SYSTEM_RUNNING;
 	numa_default_policy();
 
-	rcu_end_inkernel_boot();
-
-#ifdef CONFIG_SUNXI_BOOTEVENT
-	log_boot("Kernel_init_done");
-#endif
+	flush_delayed_fput();
 
 	if (ramdisk_execute_command) {
 		ret = run_init_process(ramdisk_execute_command);
@@ -1035,6 +1043,10 @@ static noinline void __init kernel_init_freeable(void)
 	page_alloc_init_late();
 
 	do_basic_setup();
+
+#if IS_BUILTIN(CONFIG_INITRD_ASYNC)
+	async_synchronize_full();
+#endif
 
 	/* Open the /dev/console on the rootfs, this should never fail */
 	if (sys_open((const char __user *) "/dev/console", O_RDWR, 0) < 0)

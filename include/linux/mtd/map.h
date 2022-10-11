@@ -137,9 +137,7 @@
 #endif
 
 #ifndef map_bankwidth
-#ifdef CONFIG_MTD
 #warning "No CONFIG_MTD_MAP_BANK_WIDTH_xx selected. No NOR chip support can work"
-#endif
 static inline int map_bankwidth(void *map)
 {
 	BUG();
@@ -235,11 +233,8 @@ struct map_info {
 	   If there is no cache to care about this can be set to NULL. */
 	void (*inval_cache)(struct map_info *, unsigned long, ssize_t);
 
-	/* This will be called with 1 as parameter when the first map user
-	 * needs VPP, and called with 0 when the last user exits. The map
-	 * core maintains a reference counter, and assumes that VPP is a
-	 * global resource applying to all mapped flash chips on the system.
-	 */
+	/* set_vpp() must handle being reentered -- enable, enable, disable
+	   must leave it enabled. */
 	void (*set_vpp)(struct map_info *, int);
 
 	unsigned long pfow_base;

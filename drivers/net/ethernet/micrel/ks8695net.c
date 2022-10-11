@@ -1354,7 +1354,6 @@ ks8695_probe(struct platform_device *pdev)
 	struct resource *rxirq_res, *txirq_res, *linkirq_res;
 	int ret = 0;
 	int buff_n;
-	bool inv_mac_addr = false;
 	u32 machigh, maclow;
 
 	/* Initialise a net_device */
@@ -1457,7 +1456,8 @@ ks8695_probe(struct platform_device *pdev)
 	ndev->dev_addr[5] = maclow & 0xFF;
 
 	if (!is_valid_ether_addr(ndev->dev_addr))
-		inv_mac_addr = true;
+		dev_warn(ksp->dev, "%s: Invalid ethernet MAC address. Please "
+			 "set using ifconfig\n", ndev->name);
 
 	/* In order to be efficient memory-wise, we allocate both
 	 * rings in one go.
@@ -1520,9 +1520,6 @@ ks8695_probe(struct platform_device *pdev)
 	ret = register_netdev(ndev);
 
 	if (ret == 0) {
-		if (inv_mac_addr)
-			dev_warn(ksp->dev, "%s: Invalid ethernet MAC address. Please set using ip\n",
-				 ndev->name);
 		dev_info(ksp->dev, "ks8695 ethernet (%s) MAC: %pM\n",
 			 ks8695_port_type(ksp), ndev->dev_addr);
 	} else {

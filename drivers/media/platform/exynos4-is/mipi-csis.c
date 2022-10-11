@@ -29,8 +29,8 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/videodev2.h>
-#include <media/drv-intf/exynos-fimc.h>
-#include <media/v4l2-of.h>
+#include <media/exynos-fimc.h>
+#include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
 
 #include "mipi-csis.h"
@@ -649,6 +649,23 @@ static int s5pcsis_log_status(struct v4l2_subdev *sd)
 	return 0;
 }
 
+static int s5pcsis_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
+{
+	struct v4l2_mbus_framefmt *format = v4l2_subdev_get_try_format(sd, fh->pad, 0);
+
+	format->colorspace = V4L2_COLORSPACE_JPEG;
+	format->code = s5pcsis_formats[0].code;
+	format->width = S5PCSIS_DEF_PIX_WIDTH;
+	format->height = S5PCSIS_DEF_PIX_HEIGHT;
+	format->field = V4L2_FIELD_NONE;
+
+	return 0;
+}
+
+static const struct v4l2_subdev_internal_ops s5pcsis_sd_internal_ops = {
+	.open = s5pcsis_open,
+};
+
 static struct v4l2_subdev_core_ops s5pcsis_core_ops = {
 	.s_power = s5pcsis_s_power,
 	.log_status = s5pcsis_log_status,
@@ -718,7 +735,7 @@ static int s5pcsis_parse_dt(struct platform_device *pdev,
 			    struct csis_state *state)
 {
 	struct device_node *node = pdev->dev.of_node;
-	struct v4l2_of_endpoint endpoint;
+	struct v4l2_fwnode_endpoint endpoint;
 	int ret;
 
 	if (of_property_read_u32(node, "clock-frequency",
@@ -735,15 +752,13 @@ static int s5pcsis_parse_dt(struct platform_device *pdev,
 		return -EINVAL;
 	}
 	/* Get port node and validate MIPI-CSI channel id. */
-	ret = v4l2_of_parse_endpoint(node, &endpoint);
+	ret = v4l2_fwnode_endpoint_parse(of_fwnode_handle(node), &endpoint);
 	if (ret)
 		goto err;
 
 	state->index = endpoint.base.port - FIMC_INPUT_MIPI_CSI2_0;
-	if (state->index >= CSIS_MAX_ENTITIES) {
-		ret = -ENXIO;
-		goto err;
-	}
+	if (state->index >= CSIS_MAX_ENTITIES)
+		return -ENXIO;
 
 	/* Get MIPI CSI-2 bus configration from the endpoint node. */
 	of_property_read_u32(node, "samsung,csis-hs-settle",
@@ -853,11 +868,10 @@ static int s5pcsis_probe(struct platform_device *pdev)
 	state->format.width = S5PCSIS_DEF_PIX_WIDTH;
 	state->format.height = S5PCSIS_DEF_PIX_HEIGHT;
 
-	state->sd.entity.function = MEDIA_ENT_F_IO_V4L;
 	state->pads[CSIS_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
 	state->pads[CSIS_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
-	ret = media_entity_pads_init(&state->sd.entity,
-				CSIS_PADS_NUM, state->pads);
+	ret = media_entity_init(&state->sd.entity,
+				CSIS_PADS_NUM, state->pads, 0);
 	if (ret < 0)
 		goto e_clkdis;
 

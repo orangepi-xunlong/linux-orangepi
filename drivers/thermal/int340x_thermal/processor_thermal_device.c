@@ -33,12 +33,6 @@
 /* Braswell thermal reporting device */
 #define PCI_DEVICE_ID_PROC_BSW_THERMAL	0x22DC
 
-/* Broxton thermal reporting device */
-#define PCI_DEVICE_ID_PROC_BXT0_THERMAL  0x0A8C
-#define PCI_DEVICE_ID_PROC_BXT1_THERMAL  0x1A8C
-#define PCI_DEVICE_ID_PROC_BXTX_THERMAL  0x4A8C
-#define PCI_DEVICE_ID_PROC_BXTP_THERMAL  0x5A8C
-
 struct power_config {
 	u32	index;
 	u32	min_uw;
@@ -198,32 +192,48 @@ static struct thermal_zone_device_ops proc_thermal_local_ops = {
 	.get_temp       = proc_thermal_get_zone_temp,
 };
 
-static int proc_thermal_read_ppcc(struct proc_thermal_device *proc_priv)
+static int proc_thermal_add(struct device *dev,
+			    struct proc_thermal_device **priv)
 {
-	int i;
+	struct proc_thermal_device *proc_priv;
+	struct acpi_device *adev;
 	acpi_status status;
 	struct acpi_buffer buf = { ACPI_ALLOCATE_BUFFER, NULL };
 	union acpi_object *elements, *ppcc;
 	union acpi_object *p;
-	int ret = 0;
+	unsigned long long tmp;
+	struct thermal_zone_device_ops *ops = NULL;
+	int i;
+	int ret;
 
-	status = acpi_evaluate_object(proc_priv->adev->handle, "PPCC",
-				      NULL, &buf);
+	adev = ACPI_COMPANION(dev);
+	if (!adev)
+		return -ENODEV;
+
+	status = acpi_evaluate_object(adev->handle, "PPCC", NULL, &buf);
 	if (ACPI_FAILURE(status))
 		return -ENODEV;
 
 	p = buf.pointer;
 	if (!p || (p->type != ACPI_TYPE_PACKAGE)) {
-		dev_err(proc_priv->dev, "Invalid PPCC data\n");
+		dev_err(dev, "Invalid PPCC data\n");
+		ret = -EFAULT;
+		goto free_buffer;
+	}
+	if (!p->package.count) {
+		dev_err(dev, "Invalid PPCC package size\n");
 		ret = -EFAULT;
 		goto free_buffer;
 	}
 
-	if (!p->package.count) {
-		dev_err(proc_priv->dev, "Invalid PPCC package size\n");
-		ret = -EFAULT;
+	proc_priv = devm_kzalloc(dev, sizeof(*proc_priv), GFP_KERNEL);
+	if (!proc_priv) {
+		ret = -ENOMEM;
 		goto free_buffer;
 	}
+
+	proc_priv->dev = dev;
+	proc_priv->adev = adev;
 
 	for (i = 0; i < min((int)p->package.count - 1, 2); ++i) {
 		elements = &(p->package.elements[i+1]);
@@ -241,63 +251,12 @@ static int proc_thermal_read_ppcc(struct proc_thermal_device *proc_priv)
 		proc_priv->power_limits[i].step_uw = ppcc[5].integer.value;
 	}
 
-free_buffer:
-	kfree(buf.pointer);
-
-	return ret;
-}
-
-#define PROC_POWER_CAPABILITY_CHANGED	0x83
-static void proc_thermal_notify(acpi_handle handle, u32 event, void *data)
-{
-	struct proc_thermal_device *proc_priv = data;
-
-	if (!proc_priv)
-		return;
-
-	switch (event) {
-	case PROC_POWER_CAPABILITY_CHANGED:
-		proc_thermal_read_ppcc(proc_priv);
-		int340x_thermal_zone_device_update(proc_priv->int340x_zone,
-				THERMAL_DEVICE_POWER_CAPABILITY_CHANGED);
-		break;
-	default:
-		dev_err(proc_priv->dev, "Unsupported event [0x%x]\n", event);
-		break;
-	}
-}
-
-
-static int proc_thermal_add(struct device *dev,
-			    struct proc_thermal_device **priv)
-{
-	struct proc_thermal_device *proc_priv;
-	struct acpi_device *adev;
-	acpi_status status;
-	unsigned long long tmp;
-	struct thermal_zone_device_ops *ops = NULL;
-	int ret;
-
-	adev = ACPI_COMPANION(dev);
-	if (!adev)
-		return -ENODEV;
-
-	proc_priv = devm_kzalloc(dev, sizeof(*proc_priv), GFP_KERNEL);
-	if (!proc_priv)
-		return -ENOMEM;
-
-	proc_priv->dev = dev;
-	proc_priv->adev = adev;
 	*priv = proc_priv;
 
-	ret = proc_thermal_read_ppcc(proc_priv);
-	if (!ret) {
-		ret = sysfs_create_group(&dev->kobj,
-					 &power_limit_attribute_group);
-
-	}
+	ret = sysfs_create_group(&dev->kobj,
+				 &power_limit_attribute_group);
 	if (ret)
-		return ret;
+		goto free_buffer;
 
 	status = acpi_evaluate_integer(adev->handle, "_TMP", NULL, &tmp);
 	if (ACPI_FAILURE(status)) {
@@ -309,32 +268,20 @@ static int proc_thermal_add(struct device *dev,
 
 	proc_priv->int340x_zone = int340x_thermal_zone_add(adev, ops);
 	if (IS_ERR(proc_priv->int340x_zone)) {
+		sysfs_remove_group(&proc_priv->dev->kobj,
+			   &power_limit_attribute_group);
 		ret = PTR_ERR(proc_priv->int340x_zone);
-		goto remove_group;
 	} else
 		ret = 0;
 
-	ret = acpi_install_notify_handler(adev->handle, ACPI_DEVICE_NOTIFY,
-					  proc_thermal_notify,
-					  (void *)proc_priv);
-	if (ret)
-		goto remove_zone;
-
-	return 0;
-
-remove_zone:
-	int340x_thermal_zone_remove(proc_priv->int340x_zone);
-remove_group:
-	sysfs_remove_group(&proc_priv->dev->kobj,
-			   &power_limit_attribute_group);
+free_buffer:
+	kfree(buf.pointer);
 
 	return ret;
 }
 
 static void proc_thermal_remove(struct proc_thermal_device *proc_priv)
 {
-	acpi_remove_notify_handler(proc_priv->adev->handle,
-				   ACPI_DEVICE_NOTIFY, proc_thermal_notify);
 	int340x_thermal_zone_remove(proc_priv->int340x_zone);
 	sysfs_remove_group(&proc_priv->dev->kobj,
 			   &power_limit_attribute_group);
@@ -416,7 +363,7 @@ static int  proc_thermal_pci_probe(struct pci_dev *pdev,
 		proc_priv->soc_dts = intel_soc_dts_iosf_init(
 					INTEL_SOC_DTS_INTERRUPT_MSI, 2, 0);
 
-		if (proc_priv->soc_dts && pdev->irq) {
+		if (!IS_ERR(proc_priv->soc_dts) && pdev->irq) {
 			ret = pci_enable_msi(pdev);
 			if (!ret) {
 				ret = request_threaded_irq(pdev->irq, NULL,
@@ -457,10 +404,6 @@ static const struct pci_device_id proc_thermal_pci_ids[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_PROC_HSB_THERMAL)},
 	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_PROC_SKL_THERMAL)},
 	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_PROC_BSW_THERMAL)},
-	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_PROC_BXT0_THERMAL)},
-	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_PROC_BXT1_THERMAL)},
-	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_PROC_BXTX_THERMAL)},
-	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_PROC_BXTP_THERMAL)},
 	{ 0, },
 };
 

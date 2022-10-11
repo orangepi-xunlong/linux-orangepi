@@ -114,7 +114,7 @@ static ssize_t show_label(struct device *dev, struct device_attribute *devattr,
 	return sprintf(buf, "%s\n", sdata->label);
 }
 
-static int __init get_logical_cpu(int hwcpu)
+static int get_logical_cpu(int hwcpu)
 {
 	int cpu;
 
@@ -125,9 +125,8 @@ static int __init get_logical_cpu(int hwcpu)
 	return -ENOENT;
 }
 
-static void __init make_sensor_label(struct device_node *np,
-				     struct sensor_data *sdata,
-				     const char *label)
+static void make_sensor_label(struct device_node *np,
+			      struct sensor_data *sdata, const char *label)
 {
 	u32 id;
 	size_t n;
@@ -143,11 +142,13 @@ static void __init make_sensor_label(struct device_node *np,
 		if (cpuid >= 0)
 			/*
 			 * The digital thermal sensors are associated
-			 * with a core.
+			 * with a core. Let's print out the range of
+			 * cpu ids corresponding to the hardware
+			 * threads of the core.
 			 */
 			n += snprintf(sdata->label + n,
-				      sizeof(sdata->label) - n, " %d",
-				      cpuid);
+				      sizeof(sdata->label) - n, " %d-%d",
+				      cpuid, cpuid + threads_per_core - 1);
 		else
 			n += snprintf(sdata->label + n,
 				      sizeof(sdata->label) - n, " phy%d", id);

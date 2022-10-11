@@ -19,7 +19,6 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
-#include <linux/irq.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <linux/platform_data/dwc3-omap.h>
@@ -250,7 +249,6 @@ static void dwc3_omap_set_mailbox(struct dwc3_omap *omap,
 		val = dwc3_omap_read_utmi_ctrl(omap);
 		val |= USBOTGSS_UTMI_OTG_CTRL_IDDIG;
 		dwc3_omap_write_utmi_ctrl(omap, val);
-		break;
 
 	case OMAP_DWC3_VBUS_OFF:
 		val = dwc3_omap_read_utmi_ctrl(omap);
@@ -478,8 +476,8 @@ static int dwc3_omap_probe(struct platform_device *pdev)
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
-		dev_err(dev, "missing IRQ resource\n");
-		return -EINVAL;
+		dev_err(dev, "missing IRQ resource: %d\n", irq);
+		return irq;
 	}
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -512,7 +510,7 @@ static int dwc3_omap_probe(struct platform_device *pdev)
 
 	/* check the DMA Status */
 	reg = dwc3_omap_readl(omap->base, USBOTGSS_SYSCONFIG);
-	irq_set_status_flags(omap->irq, IRQ_NOAUTOEN);
+
 	ret = devm_request_threaded_irq(dev, omap->irq, dwc3_omap_interrupt,
 					dwc3_omap_interrupt_thread, IRQF_SHARED,
 					"dwc3-omap", omap);
@@ -533,7 +531,7 @@ static int dwc3_omap_probe(struct platform_device *pdev)
 	}
 
 	dwc3_omap_enable_irqs(omap);
-	enable_irq(omap->irq);
+
 	return 0;
 
 err2:
@@ -554,7 +552,6 @@ static int dwc3_omap_remove(struct platform_device *pdev)
 	extcon_unregister_notifier(omap->edev, EXTCON_USB, &omap->vbus_nb);
 	extcon_unregister_notifier(omap->edev, EXTCON_USB_HOST, &omap->id_nb);
 	dwc3_omap_disable_irqs(omap);
-	disable_irq(omap->irq);
 	of_platform_depopulate(omap->dev);
 	pm_runtime_put_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
@@ -598,25 +595,9 @@ static int dwc3_omap_resume(struct device *dev)
 	return 0;
 }
 
-static void dwc3_omap_complete(struct device *dev)
-{
-	struct dwc3_omap	*omap = dev_get_drvdata(dev);
-
-	if (extcon_get_state(omap->edev, EXTCON_USB))
-		dwc3_omap_set_mailbox(omap, OMAP_DWC3_VBUS_VALID);
-	else
-		dwc3_omap_set_mailbox(omap, OMAP_DWC3_VBUS_OFF);
-
-	if (extcon_get_state(omap->edev, EXTCON_USB_HOST))
-		dwc3_omap_set_mailbox(omap, OMAP_DWC3_ID_GROUND);
-	else
-		dwc3_omap_set_mailbox(omap, OMAP_DWC3_ID_FLOAT);
-}
-
 static const struct dev_pm_ops dwc3_omap_dev_pm_ops = {
 
 	SET_SYSTEM_SLEEP_PM_OPS(dwc3_omap_suspend, dwc3_omap_resume)
-	.complete = dwc3_omap_complete,
 };
 
 #define DEV_PM_OPS	(&dwc3_omap_dev_pm_ops)

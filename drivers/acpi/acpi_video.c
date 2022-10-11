@@ -77,23 +77,16 @@ module_param(allow_duplicates, bool, 0644);
 static int disable_backlight_sysfs_if = -1;
 module_param(disable_backlight_sysfs_if, int, 0444);
 
-#define REPORT_OUTPUT_KEY_EVENTS		0x01
-#define REPORT_BRIGHTNESS_KEY_EVENTS		0x02
-static int report_key_events = -1;
-module_param(report_key_events, int, 0644);
-MODULE_PARM_DESC(report_key_events,
-	"0: none, 1: output changes, 2: brightness changes, 3: all");
-
 static bool device_id_scheme = false;
 module_param(device_id_scheme, bool, 0444);
 
-static int only_lcd = -1;
-module_param(only_lcd, int, 0444);
+static bool only_lcd = false;
+module_param(only_lcd, bool, 0444);
 
 static int register_count;
 static DEFINE_MUTEX(register_count_mutex);
-static DEFINE_MUTEX(video_list_lock);
-static LIST_HEAD(video_bus_head);
+static struct mutex video_list_lock;
+static struct list_head video_bus_head;
 static int acpi_video_bus_add(struct acpi_device *device);
 static int acpi_video_bus_remove(struct acpi_device *device);
 static void acpi_video_bus_notify(struct acpi_device *device, u32 event);
@@ -191,6 +184,19 @@ struct acpi_video_device_cap {
 	u8 _DDC:1;		/* Return the EDID for this device */
 };
 
+struct acpi_video_brightness_flags {
+	u8 _BCL_no_ac_battery_levels:1;	/* no AC/Battery levels in _BCL */
+	u8 _BCL_reversed:1;		/* _BCL package is in a reversed order */
+	u8 _BQC_use_index:1;		/* _BQC returns an index value */
+};
+
+struct acpi_video_device_brightness {
+	int curr;
+	int count;
+	int *levels;
+	struct acpi_video_brightness_flags flags;
+};
+
 struct acpi_video_device {
 	unsigned long device_id;
 	struct acpi_video_device_flags flags;
@@ -203,6 +209,13 @@ struct acpi_video_device {
 	struct acpi_video_device_brightness *brightness;
 	struct backlight_device *backlight;
 	struct thermal_cooling_device *cooling_dev;
+};
+
+static const char device_decode[][30] = {
+	"motherboard VGA device",
+	"PCI VGA device",
+	"AGP VGA device",
+	"UNKNOWN",
 };
 
 static void acpi_video_device_notify(acpi_handle handle, u32 event, void *data);
@@ -312,7 +325,7 @@ static const struct thermal_cooling_device_ops video_cooling_ops = {
  */
 
 static int
-acpi_video_device_lcd_query_levels(acpi_handle handle,
+acpi_video_device_lcd_query_levels(struct acpi_video_device *device,
 				   union acpi_object **levels)
 {
 	int status;
@@ -322,7 +335,7 @@ acpi_video_device_lcd_query_levels(acpi_handle handle,
 
 	*levels = NULL;
 
-	status = acpi_evaluate_object(handle, "_BCL", NULL, &buffer);
+	status = acpi_evaluate_object(device->dev->handle, "_BCL", NULL, &buffer);
 	if (!ACPI_SUCCESS(status))
 		return status;
 	obj = (union acpi_object *)buffer.pointer;
@@ -396,13 +409,6 @@ static int video_set_device_id_scheme(const struct dmi_system_id *d)
 static int video_enable_only_lcd(const struct dmi_system_id *d)
 {
 	only_lcd = true;
-	return 0;
-}
-
-static int video_set_report_key_events(const struct dmi_system_id *id)
-{
-	if (report_key_events == -1)
-		report_key_events = (uintptr_t)id->driver_data;
 	return 0;
 }
 
@@ -510,24 +516,6 @@ static struct dmi_system_id video_dmi_table[] = {
 	 .matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "FUJITSU SIEMENS"),
 		DMI_MATCH(DMI_PRODUCT_NAME, "ESPRIMO Mobile M9410"),
-		},
-	},
-	/*
-	 * Some machines report wrong key events on the acpi-bus, suppress
-	 * key event reporting on these.  Note this is only intended to work
-	 * around events which are plain wrong. In some cases we get double
-	 * events, in this case acpi-video is considered the canonical source
-	 * and the events from the other source should be filtered. E.g.
-	 * by calling acpi_video_handles_brightness_key_presses() from the
-	 * vendor acpi/wmi driver or by using /lib/udev/hwdb.d/60-keyboard.hwdb
-	 */
-	{
-	 .callback = video_set_report_key_events,
-	 .driver_data = (void *)((uintptr_t)REPORT_OUTPUT_KEY_EVENTS),
-	 .ident = "Dell Vostro V131",
-	 .matches = {
-		DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
-		DMI_MATCH(DMI_PRODUCT_NAME, "Vostro V131"),
 		},
 	},
 	{}
@@ -753,29 +741,36 @@ static int acpi_video_bqc_quirk(struct acpi_video_device *device,
 	return 0;
 }
 
-int acpi_video_get_levels(struct acpi_device *device,
-			  struct acpi_video_device_brightness **dev_br,
-			  int *pmax_level)
+
+/*
+ *  Arg:
+ *	device	: video output device (LCD, CRT, ..)
+ *
+ *  Return Value:
+ *	Maximum brightness level
+ *
+ *  Allocate and initialize device->brightness.
+ */
+
+static int
+acpi_video_init_brightness(struct acpi_video_device *device)
 {
 	union acpi_object *obj = NULL;
 	int i, max_level = 0, count = 0, level_ac_battery = 0;
+	unsigned long long level, level_old;
 	union acpi_object *o;
 	struct acpi_video_device_brightness *br = NULL;
-	int result = 0;
+	int result = -EINVAL;
 	u32 value;
 
-	if (!ACPI_SUCCESS(acpi_video_device_lcd_query_levels(device->handle,
-								&obj))) {
+	if (!ACPI_SUCCESS(acpi_video_device_lcd_query_levels(device, &obj))) {
 		ACPI_DEBUG_PRINT((ACPI_DB_INFO, "Could not query available "
 						"LCD brightness level\n"));
-		result = -ENODEV;
 		goto out;
 	}
 
-	if (obj->package.count < 2) {
-		result = -EINVAL;
+	if (obj->package.count < 2)
 		goto out;
-	}
 
 	br = kzalloc(sizeof(*br), GFP_KERNEL);
 	if (!br) {
@@ -841,40 +836,6 @@ int acpi_video_get_levels(struct acpi_device *device,
 			    "Found unordered _BCL package"));
 
 	br->count = count;
-	*dev_br = br;
-	if (pmax_level)
-		*pmax_level = max_level;
-
-out:
-	kfree(obj);
-	return result;
-out_free:
-	kfree(br);
-	goto out;
-}
-EXPORT_SYMBOL(acpi_video_get_levels);
-
-/*
- *  Arg:
- *	device	: video output device (LCD, CRT, ..)
- *
- *  Return Value:
- *	Maximum brightness level
- *
- *  Allocate and initialize device->brightness.
- */
-
-static int
-acpi_video_init_brightness(struct acpi_video_device *device)
-{
-	int i, max_level = 0;
-	unsigned long long level, level_old;
-	struct acpi_video_device_brightness *br = NULL;
-	int result = -EINVAL;
-
-	result = acpi_video_get_levels(device->dev, &br, &max_level);
-	if (result)
-		return result;
 	device->brightness = br;
 
 	/* _BQC uses INDEX while _BCL uses VALUE in some laptops */
@@ -917,13 +878,17 @@ set_level:
 		goto out_free_levels;
 
 	ACPI_DEBUG_PRINT((ACPI_DB_INFO,
-			  "found %d brightness levels\n", br->count - 2));
-	return 0;
+			  "found %d brightness levels\n", count - 2));
+	kfree(obj);
+	return result;
 
 out_free_levels:
 	kfree(br->levels);
+out_free:
 	kfree(br);
+out:
 	device->brightness = NULL;
+	kfree(obj);
 	return result;
 }
 
@@ -1536,7 +1501,7 @@ static void acpi_video_bus_notify(struct acpi_device *device, u32 event)
 		/* Something vetoed the keypress. */
 		keycode = 0;
 
-	if (keycode && (report_key_events & REPORT_OUTPUT_KEY_EVENTS)) {
+	if (keycode) {
 		input_report_key(input, keycode, 1);
 		input_sync(input);
 		input_report_key(input, keycode, 0);
@@ -1600,7 +1565,7 @@ static void acpi_video_device_notify(acpi_handle handle, u32 event, void *data)
 
 	acpi_notifier_call_chain(device, event, 0);
 
-	if (keycode && (report_key_events & REPORT_BRIGHTNESS_KEY_EVENTS)) {
+	if (keycode) {
 		input_report_key(input, keycode, 1);
 		input_sync(input);
 		input_report_key(input, keycode, 0);
@@ -1743,7 +1708,7 @@ static void acpi_video_run_bcl_for_osi(struct acpi_video_bus *video)
 
 	mutex_lock(&video->device_list_lock);
 	list_for_each_entry(dev, &video->video_device_list, entry) {
-		if (!acpi_video_device_lcd_query_levels(dev->dev->handle, &levels))
+		if (!acpi_video_device_lcd_query_levels(dev, &levels))
 			kfree(levels);
 	}
 	mutex_unlock(&video->device_list_lock);
@@ -2069,25 +2034,6 @@ static int __init intel_opregion_present(void)
 	return opregion;
 }
 
-static bool dmi_is_desktop(void)
-{
-	const char *chassis_type;
-
-	chassis_type = dmi_get_system_info(DMI_CHASSIS_TYPE);
-	if (!chassis_type)
-		return false;
-
-	if (!strcmp(chassis_type, "3") || /*  3: Desktop */
-	    !strcmp(chassis_type, "4") || /*  4: Low Profile Desktop */
-	    !strcmp(chassis_type, "5") || /*  5: Pizza Box */
-	    !strcmp(chassis_type, "6") || /*  6: Mini Tower */
-	    !strcmp(chassis_type, "7") || /*  7: Tower */
-	    !strcmp(chassis_type, "11"))  /* 11: Main Server Chassis */
-		return true;
-
-	return false;
-}
-
 int acpi_video_register(void)
 {
 	int ret = 0;
@@ -2101,19 +2047,8 @@ int acpi_video_register(void)
 		goto leave;
 	}
 
-	/*
-	 * We're seeing a lot of bogus backlight interfaces on newer machines
-	 * without a LCD such as desktops, servers and HDMI sticks. Checking
-	 * the lcd flag fixes this, so enable this on any machines which are
-	 * win8 ready (where we also prefer the native backlight driver, so
-	 * normally the acpi_video code should not register there anyways).
-	 */
-	if (only_lcd == -1) {
-		if (dmi_is_desktop() && acpi_osi_is_win8())
-			only_lcd = true;
-		else
-			only_lcd = false;
-	}
+	mutex_init(&video_list_lock);
+	INIT_LIST_HEAD(&video_bus_head);
 
 	dmi_check_system(video_dmi_table);
 
@@ -2157,19 +2092,6 @@ void acpi_video_unregister_backlight(void)
 	}
 	mutex_unlock(&register_count_mutex);
 }
-
-bool acpi_video_handles_brightness_key_presses(void)
-{
-	bool have_video_busses;
-
-	mutex_lock(&video_list_lock);
-	have_video_busses = !list_empty(&video_bus_head);
-	mutex_unlock(&video_list_lock);
-
-	return have_video_busses &&
-	       (report_key_events & REPORT_BRIGHTNESS_KEY_EVENTS);
-}
-EXPORT_SYMBOL(acpi_video_handles_brightness_key_presses);
 
 /*
  * This is kind of nasty. Hardware using Intel chipsets may require

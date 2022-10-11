@@ -270,6 +270,7 @@ static const struct {
 	{ 0x4103, "BCM4330B1"	},	/* 002.001.003 */
 	{ 0x410e, "BCM43341B0"	},	/* 002.001.014 */
 	{ 0x4406, "BCM4324B3"	},	/* 002.004.006 */
+	{ 0x6109, "BCM4335C0"	},	/* 003.001.009 */
 	{ 0x610c, "BCM4354"	},	/* 003.001.012 */
 	{ }
 };
@@ -467,7 +468,7 @@ int btbcm_setup_patchram(struct hci_dev *hdev)
 	err = request_firmware(&fw, fw_name, &hdev->dev);
 	if (err < 0) {
 		BT_INFO("%s: BCM: Patch %s not found", hdev->name, fw_name);
-		goto done;
+		return 0;
 	}
 
 	btbcm_patchram(hdev, fw);
@@ -501,7 +502,6 @@ int btbcm_setup_patchram(struct hci_dev *hdev)
 	BT_INFO("%s: %s", hdev->name, (char *)(skb->data + 1));
 	kfree_skb(skb);
 
-done:
 	btbcm_check_bdaddr(hdev);
 
 	set_bit(HCI_QUIRK_STRICT_DUPLICATE_FILTER, &hdev->quirks);

@@ -113,17 +113,6 @@
 #define DT2821_SUPCSR_XCLK		BIT(1)
 #define DT2821_SUPCSR_BDINIT		BIT(0)
 #define DT2821_TMRCTR_REG		0x0e
-#define DT2821_TMRCTR_PRESCALE(x)	(((x) & 0xf) << 8)
-#define DT2821_TMRCTR_DIVIDER(x)	((255 - ((x) & 0xff)) << 0)
-
-/* Pacer Clock */
-#define DT2821_OSC_BASE		250	/* 4 MHz (in nanoseconds) */
-#define DT2821_PRESCALE(x)	BIT(x)
-#define DT2821_PRESCALE_MAX	15
-#define DT2821_DIVIDER_MAX	255
-#define DT2821_OSC_MAX		(DT2821_OSC_BASE *			\
-				 DT2821_PRESCALE(DT2821_PRESCALE_MAX) *	\
-				 DT2821_DIVIDER_MAX)
 
 static const struct comedi_lrange range_dt282x_ai_lo_bipolar = {
 	4, {
@@ -376,33 +365,31 @@ static unsigned int dt282x_ns_to_timer(unsigned int *ns, unsigned int flags)
 {
 	unsigned int prescale, base, divider;
 
-	for (prescale = 0; prescale <= DT2821_PRESCALE_MAX; prescale++) {
-		if (prescale == 1)	/* 0 and 1 are both divide by 1 */
+	for (prescale = 0; prescale < 16; prescale++) {
+		if (prescale == 1)
 			continue;
-		base = DT2821_OSC_BASE * DT2821_PRESCALE(prescale);
+		base = 250 * (1 << prescale);
 		switch (flags & CMDF_ROUND_MASK) {
 		case CMDF_ROUND_NEAREST:
 		default:
-			divider = DIV_ROUND_CLOSEST(*ns, base);
+			divider = (*ns + base / 2) / base;
 			break;
 		case CMDF_ROUND_DOWN:
 			divider = (*ns) / base;
 			break;
 		case CMDF_ROUND_UP:
-			divider = DIV_ROUND_UP(*ns, base);
+			divider = (*ns + base - 1) / base;
 			break;
 		}
-		if (divider <= DT2821_DIVIDER_MAX)
-			break;
+		if (divider < 256) {
+			*ns = divider * base;
+			return (prescale << 8) | (255 - divider);
+		}
 	}
-	if (divider > DT2821_DIVIDER_MAX) {
-		prescale = DT2821_PRESCALE_MAX;
-		divider = DT2821_DIVIDER_MAX;
-		base = DT2821_OSC_BASE * DT2821_PRESCALE(prescale);
-	}
+	base = 250 * (1 << 15);
+	divider = 255;
 	*ns = divider * base;
-	return DT2821_TMRCTR_PRESCALE(prescale) |
-	       DT2821_TMRCTR_DIVIDER(divider);
+	return (15 << 8) | (255 - divider);
 }
 
 static void dt282x_munge(struct comedi_device *dev,
@@ -566,7 +553,8 @@ static irqreturn_t dt282x_interrupt(int irq, void *d)
 	}
 #endif
 	comedi_handle_events(dev, s);
-	comedi_handle_events(dev, s_ao);
+	if (s_ao)
+		comedi_handle_events(dev, s_ao);
 
 	return IRQ_RETVAL(handled);
 }
@@ -697,8 +685,13 @@ static int dt282x_ai_cmdtest(struct comedi_device *dev,
 	/* Step 3: check if arguments are trivially valid */
 
 	err |= comedi_check_trigger_arg_is(&cmd->start_arg, 0);
+
 	err |= comedi_check_trigger_arg_is(&cmd->scan_begin_arg, 0);
-	err |= comedi_check_trigger_arg_max(&cmd->convert_arg, DT2821_OSC_MAX);
+
+	err |= comedi_check_trigger_arg_min(&cmd->convert_arg, 4000);
+
+#define SLOWEST_TIMER	(250*(1<<15)*255)
+	err |= comedi_check_trigger_arg_max(&cmd->convert_arg, SLOWEST_TIMER);
 	err |= comedi_check_trigger_arg_min(&cmd->convert_arg, board->ai_speed);
 	err |= comedi_check_trigger_arg_is(&cmd->scan_end_arg,
 					   cmd->chanlist_len);
@@ -1093,6 +1086,20 @@ static int dt282x_initialize(struct comedi_device *dev)
 	return 0;
 }
 
+/*
+   options:
+   0	i/o base
+   1	irq
+   2	dma1
+   3	dma2
+   4	0=single ended, 1=differential
+   5	ai 0=straight binary, 1=2's comp
+   6	ao0 0=straight binary, 1=2's comp
+   7	ao1 0=straight binary, 1=2's comp
+   8	ai 0=±10 V, 1=0-10 V, 2=±5 V, 3=0-5 V
+   9	ao0 0=±10 V, 1=0-10 V, 2=±5 V, 3=0-5 V, 4=±2.5 V
+   10	ao1 0=±10 V, 1=0-10 V, 2=±5 V, 3=0-5 V, 4=±2.5 V
+ */
 static int dt282x_attach(struct comedi_device *dev, struct comedi_devconfig *it)
 {
 	const struct dt282x_board *board = dev->board_ptr;

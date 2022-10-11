@@ -85,7 +85,7 @@
 		display0 = &lcd0;
 	};
 
-	lcd0: display {
+	lcd0: display@0 {
 		compatible = "samsung,lte430wq-f0c", "panel-dpi";
 		label = "lcd";
 

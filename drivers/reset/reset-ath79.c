@@ -12,20 +12,15 @@
  * GNU General Public License for more details.
  */
 
-#include <linux/io.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/reset-controller.h>
-#include <linux/reboot.h>
 
 struct ath79_reset {
 	struct reset_controller_dev rcdev;
-	struct notifier_block restart_nb;
 	void __iomem *base;
 	spinlock_t lock;
 };
-
-#define FULL_CHIP_RESET 24
 
 static int ath79_reset_update(struct reset_controller_dev *rcdev,
 			unsigned long id, bool assert)
@@ -71,28 +66,16 @@ static int ath79_reset_status(struct reset_controller_dev *rcdev,
 	return !!(val & BIT(id));
 }
 
-static const struct reset_control_ops ath79_reset_ops = {
+static struct reset_control_ops ath79_reset_ops = {
 	.assert = ath79_reset_assert,
 	.deassert = ath79_reset_deassert,
 	.status = ath79_reset_status,
 };
 
-static int ath79_reset_restart_handler(struct notifier_block *nb,
-				unsigned long action, void *data)
-{
-	struct ath79_reset *ath79_reset =
-		container_of(nb, struct ath79_reset, restart_nb);
-
-	ath79_reset_assert(&ath79_reset->rcdev, FULL_CHIP_RESET);
-
-	return NOTIFY_DONE;
-}
-
 static int ath79_reset_probe(struct platform_device *pdev)
 {
 	struct ath79_reset *ath79_reset;
 	struct resource *res;
-	int err;
 
 	ath79_reset = devm_kzalloc(&pdev->dev,
 				sizeof(*ath79_reset), GFP_KERNEL);
@@ -113,25 +96,14 @@ static int ath79_reset_probe(struct platform_device *pdev)
 	ath79_reset->rcdev.of_reset_n_cells = 1;
 	ath79_reset->rcdev.nr_resets = 32;
 
-	err = devm_reset_controller_register(&pdev->dev, &ath79_reset->rcdev);
-	if (err)
-		return err;
-
-	ath79_reset->restart_nb.notifier_call = ath79_reset_restart_handler;
-	ath79_reset->restart_nb.priority = 128;
-
-	err = register_restart_handler(&ath79_reset->restart_nb);
-	if (err)
-		dev_warn(&pdev->dev, "Failed to register restart handler\n");
-
-	return 0;
+	return reset_controller_register(&ath79_reset->rcdev);
 }
 
 static int ath79_reset_remove(struct platform_device *pdev)
 {
 	struct ath79_reset *ath79_reset = platform_get_drvdata(pdev);
 
-	unregister_restart_handler(&ath79_reset->restart_nb);
+	reset_controller_unregister(&ath79_reset->rcdev);
 
 	return 0;
 }

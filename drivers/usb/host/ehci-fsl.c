@@ -35,7 +35,6 @@
 #include <linux/usb/otg.h>
 #include <linux/platform_device.h>
 #include <linux/fsl_devices.h>
-#include <linux/of_platform.h>
 
 #include "ehci.h"
 #include "ehci-fsl.h"
@@ -242,8 +241,7 @@ static int ehci_fsl_setup_phy(struct usb_hcd *hcd,
 	 * to portsc
 	 */
 	if (pdata->check_phy_clk_valid) {
-		if (!(ioread32be(non_ehci + FSL_SOC_USB_CTRL) &
-		    PHY_CLK_VALID)) {
+		if (!(in_be32(non_ehci + FSL_SOC_USB_CTRL) & PHY_CLK_VALID)) {
 			dev_warn(hcd->self.controller,
 				 "USB PHY clock invalid\n");
 			return -EINVAL;
@@ -275,11 +273,9 @@ static int ehci_fsl_usb_setup(struct ehci_hcd *ehci)
 
 		/* Setup Snooping for all the 4GB space */
 		/* SNOOP1 starts from 0x0, size 2G */
-		iowrite32be(0x0 | SNOOP_SIZE_2GB,
-			    non_ehci + FSL_SOC_USB_SNOOP1);
+		out_be32(non_ehci + FSL_SOC_USB_SNOOP1, 0x0 | SNOOP_SIZE_2GB);
 		/* SNOOP2 starts from 0x80000000, size 2G */
-		iowrite32be(0x80000000 | SNOOP_SIZE_2GB,
-			    non_ehci + FSL_SOC_USB_SNOOP2);
+		out_be32(non_ehci + FSL_SOC_USB_SNOOP2, 0x80000000 | SNOOP_SIZE_2GB);
 	}
 
 	/* Deal with USB erratum A-005275 */
@@ -313,13 +309,13 @@ static int ehci_fsl_usb_setup(struct ehci_hcd *ehci)
 
 	if (pdata->have_sysif_regs) {
 #ifdef CONFIG_FSL_SOC_BOOKE
-		iowrite32be(0x00000008, non_ehci + FSL_SOC_USB_PRICTRL);
-		iowrite32be(0x00000080, non_ehci + FSL_SOC_USB_AGECNTTHRSH);
+		out_be32(non_ehci + FSL_SOC_USB_PRICTRL, 0x00000008);
+		out_be32(non_ehci + FSL_SOC_USB_AGECNTTHRSH, 0x00000080);
 #else
-		iowrite32be(0x0000000c, non_ehci + FSL_SOC_USB_PRICTRL);
-		iowrite32be(0x00000040, non_ehci + FSL_SOC_USB_AGECNTTHRSH);
+		out_be32(non_ehci + FSL_SOC_USB_PRICTRL, 0x0000000c);
+		out_be32(non_ehci + FSL_SOC_USB_AGECNTTHRSH, 0x00000040);
 #endif
-		iowrite32be(0x00000001, non_ehci + FSL_SOC_USB_SICTRL);
+		out_be32(non_ehci + FSL_SOC_USB_SICTRL, 0x00000001);
 	}
 
 	return 0;
@@ -558,7 +554,7 @@ static int ehci_fsl_drv_suspend(struct device *dev)
 	if (!fsl_deep_sleep())
 		return 0;
 
-	ehci_fsl->usb_ctrl = ioread32be(non_ehci + FSL_SOC_USB_CTRL);
+	ehci_fsl->usb_ctrl = in_be32(non_ehci + FSL_SOC_USB_CTRL);
 	return 0;
 }
 
@@ -581,7 +577,7 @@ static int ehci_fsl_drv_resume(struct device *dev)
 	usb_root_hub_lost_power(hcd->self.root_hub);
 
 	/* Restore USB PHY settings and enable the controller. */
-	iowrite32be(ehci_fsl->usb_ctrl, non_ehci + FSL_SOC_USB_CTRL);
+	out_be32(non_ehci + FSL_SOC_USB_CTRL, ehci_fsl->usb_ctrl);
 
 	ehci_reset(ehci);
 	ehci_fsl_reinit(ehci);

@@ -12,8 +12,6 @@
 
 #include <drm/drmP.h>
 
-#include "sti_drv.h"
-
 /* registers offset */
 #define VTAC_CONFIG                     0x00
 #define VTAC_RX_FIFO_CONFIG             0x04

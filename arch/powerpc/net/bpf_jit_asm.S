@@ -10,7 +10,7 @@
  */
 
 #include <asm/ppc_asm.h>
-#include "bpf_jit32.h"
+#include "bpf_jit.h"
 
 /*
  * All of these routines are called directly from generated code,

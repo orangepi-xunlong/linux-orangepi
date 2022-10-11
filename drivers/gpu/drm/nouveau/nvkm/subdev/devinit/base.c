@@ -83,12 +83,6 @@ nvkm_devinit_preinit(struct nvkm_subdev *subdev)
 	if (init->func->preinit)
 		init->func->preinit(init);
 
-	/* Override the post flag during the first call if NvForcePost is set */
-	if (init->force_post) {
-		init->post = init->force_post;
-		init->force_post = false;
-	}
-
 	/* unlock the extended vga crtc regs */
 	nvkm_lockvgac(subdev->device, false);
 	return 0;
@@ -130,7 +124,7 @@ nvkm_devinit_ctor(const struct nvkm_devinit_func *func,
 		  struct nvkm_device *device, int index,
 		  struct nvkm_devinit *init)
 {
-	nvkm_subdev_ctor(&nvkm_devinit, device, index, &init->subdev);
+	nvkm_subdev_ctor(&nvkm_devinit, device, index, 0, &init->subdev);
 	init->func = func;
-	init->force_post = nvkm_boolopt(device->cfgopt, "NvForcePost", false);
+	init->post = nvkm_boolopt(device->cfgopt, "NvForcePost", false);
 }

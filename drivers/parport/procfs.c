@@ -617,5 +617,5 @@ static void __exit parport_default_proc_unregister (void)
 }
 #endif
 
-subsys_initcall(parport_default_proc_register)
+module_init(parport_default_proc_register)
 module_exit(parport_default_proc_unregister)

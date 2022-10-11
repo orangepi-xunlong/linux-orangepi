@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2015, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -106,31 +106,31 @@ void acpi_ut_dump_buffer(u8 *buffer, u32 count, u32 display, u32 base_offset)
 			default:	/* Default is BYTE display */
 
 				acpi_os_printf("%02X ",
-					       buffer[(acpi_size)i + j]);
+					       buffer[(acpi_size) i + j]);
 				break;
 
 			case DB_WORD_DISPLAY:
 
 				ACPI_MOVE_16_TO_32(&temp32,
-						   &buffer[(acpi_size)i + j]);
+						   &buffer[(acpi_size) i + j]);
 				acpi_os_printf("%04X ", temp32);
 				break;
 
 			case DB_DWORD_DISPLAY:
 
 				ACPI_MOVE_32_TO_32(&temp32,
-						   &buffer[(acpi_size)i + j]);
+						   &buffer[(acpi_size) i + j]);
 				acpi_os_printf("%08X ", temp32);
 				break;
 
 			case DB_QWORD_DISPLAY:
 
 				ACPI_MOVE_32_TO_32(&temp32,
-						   &buffer[(acpi_size)i + j]);
+						   &buffer[(acpi_size) i + j]);
 				acpi_os_printf("%08X", temp32);
 
 				ACPI_MOVE_32_TO_32(&temp32,
-						   &buffer[(acpi_size)i + j +
+						   &buffer[(acpi_size) i + j +
 							   4]);
 				acpi_os_printf("%08X ", temp32);
 				break;
@@ -158,7 +158,7 @@ void acpi_ut_dump_buffer(u8 *buffer, u32 count, u32 display, u32 base_offset)
 				acpi_os_printf("// ");
 			}
 
-			buf_char = buffer[(acpi_size)i + j];
+			buf_char = buffer[(acpi_size) i + j];
 			if (isprint(buf_char)) {
 				acpi_os_printf("%c", buf_char);
 			} else {
@@ -239,7 +239,8 @@ acpi_ut_dump_buffer_to_file(ACPI_FILE file,
 	u8 buf_char;
 
 	if (!buffer) {
-		fprintf(file, "Null Buffer Pointer in DumpBuffer!\n");
+		acpi_ut_file_printf(file,
+				    "Null Buffer Pointer in DumpBuffer!\n");
 		return;
 	}
 
@@ -253,7 +254,7 @@ acpi_ut_dump_buffer_to_file(ACPI_FILE file,
 
 		/* Print current offset */
 
-		fprintf(file, "%6.4X: ", (base_offset + i));
+		acpi_ut_file_printf(file, "%6.4X: ", (base_offset + i));
 
 		/* Print 16 hex chars */
 
@@ -262,7 +263,8 @@ acpi_ut_dump_buffer_to_file(ACPI_FILE file,
 
 				/* Dump fill spaces */
 
-				fprintf(file, "%*s", ((display * 2) + 1), " ");
+				acpi_ut_file_printf(file, "%*s",
+						    ((display * 2) + 1), " ");
 				j += display;
 				continue;
 			}
@@ -271,34 +273,34 @@ acpi_ut_dump_buffer_to_file(ACPI_FILE file,
 			case DB_BYTE_DISPLAY:
 			default:	/* Default is BYTE display */
 
-				fprintf(file, "%02X ",
-					buffer[(acpi_size)i + j]);
+				acpi_ut_file_printf(file, "%02X ",
+						    buffer[(acpi_size) i + j]);
 				break;
 
 			case DB_WORD_DISPLAY:
 
 				ACPI_MOVE_16_TO_32(&temp32,
-						   &buffer[(acpi_size)i + j]);
-				fprintf(file, "%04X ", temp32);
+						   &buffer[(acpi_size) i + j]);
+				acpi_ut_file_printf(file, "%04X ", temp32);
 				break;
 
 			case DB_DWORD_DISPLAY:
 
 				ACPI_MOVE_32_TO_32(&temp32,
-						   &buffer[(acpi_size)i + j]);
-				fprintf(file, "%08X ", temp32);
+						   &buffer[(acpi_size) i + j]);
+				acpi_ut_file_printf(file, "%08X ", temp32);
 				break;
 
 			case DB_QWORD_DISPLAY:
 
 				ACPI_MOVE_32_TO_32(&temp32,
-						   &buffer[(acpi_size)i + j]);
-				fprintf(file, "%08X", temp32);
+						   &buffer[(acpi_size) i + j]);
+				acpi_ut_file_printf(file, "%08X", temp32);
 
 				ACPI_MOVE_32_TO_32(&temp32,
-						   &buffer[(acpi_size)i + j +
+						   &buffer[(acpi_size) i + j +
 							   4]);
-				fprintf(file, "%08X ", temp32);
+				acpi_ut_file_printf(file, "%08X ", temp32);
 				break;
 			}
 
@@ -309,24 +311,24 @@ acpi_ut_dump_buffer_to_file(ACPI_FILE file,
 		 * Print the ASCII equivalent characters but watch out for the bad
 		 * unprintable ones (printable chars are 0x20 through 0x7E)
 		 */
-		fprintf(file, " ");
+		acpi_ut_file_printf(file, " ");
 		for (j = 0; j < 16; j++) {
 			if (i + j >= count) {
-				fprintf(file, "\n");
+				acpi_ut_file_printf(file, "\n");
 				return;
 			}
 
-			buf_char = buffer[(acpi_size)i + j];
+			buf_char = buffer[(acpi_size) i + j];
 			if (isprint(buf_char)) {
-				fprintf(file, "%c", buf_char);
+				acpi_ut_file_printf(file, "%c", buf_char);
 			} else {
-				fprintf(file, ".");
+				acpi_ut_file_printf(file, ".");
 			}
 		}
 
 		/* Done with that line. */
 
-		fprintf(file, "\n");
+		acpi_ut_file_printf(file, "\n");
 		i += 16;
 	}
 

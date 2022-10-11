@@ -130,5 +130,6 @@ int
 g84_cipher_new(struct nvkm_device *device, int index,
 	       struct nvkm_engine **pengine)
 {
-	return nvkm_engine_new_(&g84_cipher, device, index, true, pengine);
+	return nvkm_engine_new_(&g84_cipher, device, index,
+				0x00004000, true, pengine);
 }

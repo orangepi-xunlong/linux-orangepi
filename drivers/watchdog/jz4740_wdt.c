@@ -160,8 +160,10 @@ static int jz4740_wdt_probe(struct platform_device *pdev)
 
 	drvdata = devm_kzalloc(&pdev->dev, sizeof(struct jz4740_wdt_drvdata),
 			       GFP_KERNEL);
-	if (!drvdata)
+	if (!drvdata) {
+		dev_err(&pdev->dev, "Unable to alloacate watchdog device\n");
 		return -ENOMEM;
+	}
 
 	if (heartbeat < 1 || heartbeat > MAX_HEARTBEAT)
 		heartbeat = DEFAULT_HEARTBEAT;

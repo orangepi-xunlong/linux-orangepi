@@ -1,12 +1,12 @@
 /*
- *  Copyright 2000-2014 Avago Technologies.  All rights reserved.
+ *  Copyright (c) 2000-2014 LSI Corporation.
  *
  *
  *           Name:  mpi2_type.h
  *          Title:  MPI basic type definitions
  *  Creation Date:  August 16, 2006
  *
- *    mpi2_type.h Version:  02.00.01
+ *    mpi2_type.h Version:  02.00.00
  *
  *  Version History
  *  ---------------
@@ -14,7 +14,6 @@
  *  Date      Version   Description
  *  --------  --------  ------------------------------------------------------
  *  04-30-07  02.00.00  Corresponds to Fusion-MPT MPI Specification Rev A.
- *  11-18-14  02.00.01  Updated copyright information.
  *  --------------------------------------------------------------------------
  */
 

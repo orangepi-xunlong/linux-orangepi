@@ -27,7 +27,6 @@
 #include <asm/kexec.h>
 #include <asm/ptrace.h>
 #include <asm/mmu.h>
-#include <asm/export.h>
 
 	.text
 
@@ -67,7 +66,7 @@ PPC64_CACHES:
  *   flush all bytes from start through stop-1 inclusive
  */
 
-_GLOBAL_TOC(flush_icache_range)
+_KPROBE_TOC(flush_icache_range)
 BEGIN_FTR_SECTION
 	PURGE_PREFETCHED_INS
 	blr
@@ -110,9 +109,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_COHERENT_ICACHE)
 	bdnz	2b
 	isync
 	blr
-_ASM_NOKPROBE_SYMBOL(flush_icache_range)
-EXPORT_SYMBOL(flush_icache_range)
-
+	.previous .text
 /*
  * Like above, but only do the D-cache.
  *
@@ -142,7 +139,6 @@ _GLOBAL_TOC(flush_dcache_range)
 	bdnz	0b
 	sync
 	blr
-EXPORT_SYMBOL(flush_dcache_range)
 
 /*
  * Like above, but works on non-mapped physical addresses.
@@ -246,7 +242,6 @@ END_FTR_SECTION_IFSET(CPU_FTR_COHERENT_ICACHE)
 	blr
 
 _GLOBAL(__bswapdi2)
-EXPORT_SYMBOL(__bswapdi2)
 	srdi	r8,r3,32
 	rlwinm	r7,r3,8,0xffffffff
 	rlwimi	r7,r3,24,0,7
@@ -596,8 +591,7 @@ real_mode:	/* assume normal blr return */
 #endif
 
 /*
- * kexec_sequence(newstack, start, image, control, clear_all(),
-	          copy_with_mmu_off)
+ * kexec_sequence(newstack, start, image, control, clear_all())
  *
  * does the grungy work with stack switching and real mode switches
  * also does simple calls to other code
@@ -633,7 +627,7 @@ _GLOBAL(kexec_sequence)
 	mr	r29,r5			/* image (virt) */
 	mr	r28,r6			/* control, unused */
 	mr	r27,r7			/* clear_all() fn desc */
-	mr	r26,r8			/* copy_with_mmu_off */
+	mr	r26,r8			/* spare */
 	lhz	r25,PACAHWCPUID(r13)	/* get our phys cpu from paca */
 
 	/* disable interrupts, we are overwriting kernel data next */
@@ -645,24 +639,15 @@ _GLOBAL(kexec_sequence)
 	mtmsrd	r3,1
 #endif
 
-	/* We need to turn the MMU off unless we are in hash mode
-	 * under a hypervisor
-	 */
-	cmpdi	r26,0
-	beq	1f
-	bl	real_mode
-1:
 	/* copy dest pages, flush whole dest image */
 	mr	r3,r29
 	bl	kexec_copy_flush	/* (image) */
 
-	/* turn off mmu now if not done earlier */
-	cmpdi	r26,0
-	bne	1f
+	/* turn off mmu */
 	bl	real_mode
 
 	/* copy  0x100 bytes starting at start to 0 */
-1:	li	r3,0
+	li	r3,0
 	mr	r4,r30		/* start, aka phys mem offset */
 	li	r5,0x100
 	li	r6,0
@@ -674,17 +659,16 @@ _GLOBAL(kexec_sequence)
 	li	r6,1
 	stw	r6,kexec_flag-1b(5)
 
-	cmpdi	r27,0
-	beq	1f
-
+#ifndef CONFIG_PPC_BOOK3E
 	/* clear out hardware hash page table and tlb */
-#ifdef PPC64_ELF_ABI_v1
+#if !defined(_CALL_ELF) || _CALL_ELF != 2
 	ld	r12,0(r27)		/* deref function descriptor */
 #else
 	mr	r12,r27
 #endif
 	mtctr	r12
-	bctrl				/* mmu_hash_ops.hpte_clear_all(void); */
+	bctrl				/* ppc_md.hpte_clear_all(void); */
+#endif /* !CONFIG_PPC_BOOK3E */
 
 /*
  *   kexec image calling is:
@@ -711,7 +695,7 @@ _GLOBAL(kexec_sequence)
  *    are the boot cpu ?????
  *    other device tree differences (prop sizes, va vs pa, etc)...
  */
-1:	mr	r3,r25	# my phys cpu
+	mr	r3,r25	# my phys cpu
 	mr	r4,r30	# start, aka phys mem offset
 	mtlr	4
 	li	r5,0

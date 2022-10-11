@@ -169,6 +169,9 @@ union qos_tclas {
 	} TYPE2_8021Q;
 };
 
+#define IsACValid(ac)		((ac >= 0 && ac <= 7) ? true : false)
+
+
 union aci_aifsn {
 	u8	charData;
 

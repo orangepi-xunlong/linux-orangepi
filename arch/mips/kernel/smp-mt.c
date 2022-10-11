@@ -121,7 +121,7 @@ static void vsmp_send_ipi_single(int cpu, unsigned int action)
 
 #ifdef CONFIG_MIPS_GIC
 	if (gic_present) {
-		mips_smp_send_ipi_single(cpu, action);
+		gic_send_ipi_single(cpu, action);
 		return;
 	}
 #endif
@@ -289,3 +289,26 @@ struct plat_smp_ops vsmp_smp_ops = {
 	.prepare_cpus		= vsmp_prepare_cpus,
 };
 
+#ifdef CONFIG_PROC_FS
+static int proc_cpuinfo_chain_call(struct notifier_block *nfb,
+	unsigned long action_unused, void *data)
+{
+	struct proc_cpuinfo_notifier_args *pcn = data;
+	struct seq_file *m = pcn->m;
+	unsigned long n = pcn->n;
+
+	if (!cpu_has_mipsmt)
+		return NOTIFY_OK;
+
+	seq_printf(m, "VPE\t\t\t: %d\n", cpu_data[n].vpe_id);
+
+	return NOTIFY_OK;
+}
+
+static int __init proc_cpuinfo_notifier_init(void)
+{
+	return proc_cpuinfo_notifier(proc_cpuinfo_chain_call, 0);
+}
+
+subsys_initcall(proc_cpuinfo_notifier_init);
+#endif

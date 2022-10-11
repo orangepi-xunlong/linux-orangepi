@@ -10,7 +10,6 @@
 #include <linux/clk.h>
 #include <linux/debugfs.h>
 #include <linux/iommu.h>
-#include <linux/pm_runtime.h>
 #include <linux/reset.h>
 
 #include <soc/tegra/pmc.h>
@@ -435,7 +434,7 @@ static void tegra_plane_reset(struct drm_plane *plane)
 	struct tegra_plane_state *state;
 
 	if (plane->state)
-		__drm_atomic_helper_plane_destroy_state(plane->state);
+		__drm_atomic_helper_plane_destroy_state(plane, plane->state);
 
 	kfree(plane->state);
 	plane->state = NULL;
@@ -467,7 +466,7 @@ static struct drm_plane_state *tegra_plane_atomic_duplicate_state(struct drm_pla
 static void tegra_plane_atomic_destroy_state(struct drm_plane *plane,
 					     struct drm_plane_state *state)
 {
-	__drm_atomic_helper_plane_destroy_state(state);
+	__drm_atomic_helper_plane_destroy_state(plane, state);
 	kfree(state);
 }
 
@@ -479,6 +478,17 @@ static const struct drm_plane_funcs tegra_primary_plane_funcs = {
 	.atomic_duplicate_state = tegra_plane_atomic_duplicate_state,
 	.atomic_destroy_state = tegra_plane_atomic_destroy_state,
 };
+
+static int tegra_plane_prepare_fb(struct drm_plane *plane,
+				  const struct drm_plane_state *new_state)
+{
+	return 0;
+}
+
+static void tegra_plane_cleanup_fb(struct drm_plane *plane,
+				   const struct drm_plane_state *old_fb)
+{
+}
 
 static int tegra_plane_state_add(struct tegra_plane *plane,
 				 struct drm_plane_state *state)
@@ -580,14 +590,7 @@ static void tegra_plane_atomic_update(struct drm_plane *plane,
 		struct tegra_bo *bo = tegra_fb_get_plane(fb, i);
 
 		window.base[i] = bo->paddr + fb->offsets[i];
-
-		/*
-		 * Tegra uses a shared stride for UV planes. Framebuffers are
-		 * already checked for this in the tegra_plane_atomic_check()
-		 * function, so it's safe to ignore the V-plane pitch here.
-		 */
-		if (i < 2)
-			window.stride[i] = fb->pitches[i];
+		window.stride[i] = fb->pitches[i];
 	}
 
 	tegra_dc_setup_window(dc, p->index, &window);
@@ -620,6 +623,8 @@ static void tegra_plane_atomic_disable(struct drm_plane *plane,
 }
 
 static const struct drm_plane_helper_funcs tegra_primary_plane_helper_funcs = {
+	.prepare_fb = tegra_plane_prepare_fb,
+	.cleanup_fb = tegra_plane_cleanup_fb,
 	.atomic_check = tegra_plane_atomic_check,
 	.atomic_update = tegra_plane_atomic_update,
 	.atomic_disable = tegra_plane_atomic_disable,
@@ -790,6 +795,8 @@ static const struct drm_plane_funcs tegra_cursor_plane_funcs = {
 };
 
 static const struct drm_plane_helper_funcs tegra_cursor_plane_helper_funcs = {
+	.prepare_fb = tegra_plane_prepare_fb,
+	.cleanup_fb = tegra_plane_cleanup_fb,
 	.atomic_check = tegra_cursor_atomic_check,
 	.atomic_update = tegra_cursor_atomic_update,
 	.atomic_disable = tegra_cursor_atomic_disable,
@@ -858,6 +865,8 @@ static const uint32_t tegra_overlay_plane_formats[] = {
 };
 
 static const struct drm_plane_helper_funcs tegra_overlay_plane_helper_funcs = {
+	.prepare_fb = tegra_plane_prepare_fb,
+	.cleanup_fb = tegra_plane_cleanup_fb,
 	.atomic_check = tegra_plane_atomic_check,
 	.atomic_update = tegra_plane_atomic_update,
 	.atomic_disable = tegra_plane_atomic_disable,
@@ -979,6 +988,23 @@ static void tegra_dc_finish_page_flip(struct tegra_dc *dc)
 	spin_unlock_irqrestore(&drm->event_lock, flags);
 }
 
+void tegra_dc_cancel_page_flip(struct drm_crtc *crtc, struct drm_file *file)
+{
+	struct tegra_dc *dc = to_tegra_dc(crtc);
+	struct drm_device *drm = crtc->dev;
+	unsigned long flags;
+
+	spin_lock_irqsave(&drm->event_lock, flags);
+
+	if (dc->event && dc->event->base.file_priv == file) {
+		dc->event->base.destroy(&dc->event->base);
+		drm_crtc_vblank_put(crtc);
+		dc->event = NULL;
+	}
+
+	spin_unlock_irqrestore(&drm->event_lock, flags);
+}
+
 static void tegra_dc_destroy(struct drm_crtc *crtc)
 {
 	drm_crtc_cleanup(crtc);
@@ -989,7 +1015,7 @@ static void tegra_crtc_reset(struct drm_crtc *crtc)
 	struct tegra_dc_state *state;
 
 	if (crtc->state)
-		__drm_atomic_helper_crtc_destroy_state(crtc->state);
+		__drm_atomic_helper_crtc_destroy_state(crtc, crtc->state);
 
 	kfree(crtc->state);
 	crtc->state = NULL;
@@ -1025,7 +1051,7 @@ tegra_crtc_atomic_duplicate_state(struct drm_crtc *crtc)
 static void tegra_crtc_atomic_destroy_state(struct drm_crtc *crtc,
 					    struct drm_crtc_state *state)
 {
-	__drm_atomic_helper_crtc_destroy_state(state);
+	__drm_atomic_helper_crtc_destroy_state(crtc, state);
 	kfree(state);
 }
 
@@ -1207,8 +1233,6 @@ static void tegra_crtc_disable(struct drm_crtc *crtc)
 
 	tegra_dc_stats_reset(&dc->stats);
 	drm_crtc_vblank_off(crtc);
-
-	pm_runtime_put_sync(dc->dev);
 }
 
 static void tegra_crtc_enable(struct drm_crtc *crtc)
@@ -1218,48 +1242,6 @@ static void tegra_crtc_enable(struct drm_crtc *crtc)
 	struct tegra_dc *dc = to_tegra_dc(crtc);
 	u32 value;
 
-	pm_runtime_get_sync(dc->dev);
-
-	/* initialize display controller */
-	if (dc->syncpt) {
-		u32 syncpt = host1x_syncpt_id(dc->syncpt);
-
-		value = SYNCPT_CNTRL_NO_STALL;
-		tegra_dc_writel(dc, value, DC_CMD_GENERAL_INCR_SYNCPT_CNTRL);
-
-		value = SYNCPT_VSYNC_ENABLE | syncpt;
-		tegra_dc_writel(dc, value, DC_CMD_CONT_SYNCPT_VSYNC);
-	}
-
-	value = WIN_A_UF_INT | WIN_B_UF_INT | WIN_C_UF_INT |
-		WIN_A_OF_INT | WIN_B_OF_INT | WIN_C_OF_INT;
-	tegra_dc_writel(dc, value, DC_CMD_INT_TYPE);
-
-	value = WIN_A_UF_INT | WIN_B_UF_INT | WIN_C_UF_INT |
-		WIN_A_OF_INT | WIN_B_OF_INT | WIN_C_OF_INT;
-	tegra_dc_writel(dc, value, DC_CMD_INT_POLARITY);
-
-	/* initialize timer */
-	value = CURSOR_THRESHOLD(0) | WINDOW_A_THRESHOLD(0x20) |
-		WINDOW_B_THRESHOLD(0x20) | WINDOW_C_THRESHOLD(0x20);
-	tegra_dc_writel(dc, value, DC_DISP_DISP_MEM_HIGH_PRIORITY);
-
-	value = CURSOR_THRESHOLD(0) | WINDOW_A_THRESHOLD(1) |
-		WINDOW_B_THRESHOLD(1) | WINDOW_C_THRESHOLD(1);
-	tegra_dc_writel(dc, value, DC_DISP_DISP_MEM_HIGH_PRIORITY_TIMER);
-
-	value = VBLANK_INT | WIN_A_UF_INT | WIN_B_UF_INT | WIN_C_UF_INT |
-		WIN_A_OF_INT | WIN_B_OF_INT | WIN_C_OF_INT;
-	tegra_dc_writel(dc, value, DC_CMD_INT_ENABLE);
-
-	value = WIN_A_UF_INT | WIN_B_UF_INT | WIN_C_UF_INT |
-		WIN_A_OF_INT | WIN_B_OF_INT | WIN_C_OF_INT;
-	tegra_dc_writel(dc, value, DC_CMD_INT_MASK);
-
-	if (dc->soc->supports_border_color)
-		tegra_dc_writel(dc, 0, DC_DISP_BORDER_COLOR);
-
-	/* apply PLL and pixel clock changes */
 	tegra_dc_commit_state(dc, state);
 
 	/* program display mode */
@@ -1720,6 +1702,7 @@ static int tegra_dc_init(struct host1x_client *client)
 	struct tegra_drm *tegra = drm->dev_private;
 	struct drm_plane *primary = NULL;
 	struct drm_plane *cursor = NULL;
+	u32 value;
 	int err;
 
 	dc->syncpt = host1x_syncpt_request(dc->dev, flags);
@@ -1756,6 +1739,7 @@ static int tegra_dc_init(struct host1x_client *client)
 	if (err < 0)
 		goto cleanup;
 
+	drm_mode_crtc_set_gamma_size(&dc->base, 256);
 	drm_crtc_helper_add(&dc->base, &tegra_crtc_helper_funcs);
 
 	/*
@@ -1788,6 +1772,47 @@ static int tegra_dc_init(struct host1x_client *client)
 			err);
 		goto cleanup;
 	}
+
+	/* initialize display controller */
+	if (dc->syncpt) {
+		u32 syncpt = host1x_syncpt_id(dc->syncpt);
+
+		value = SYNCPT_CNTRL_NO_STALL;
+		tegra_dc_writel(dc, value, DC_CMD_GENERAL_INCR_SYNCPT_CNTRL);
+
+		value = SYNCPT_VSYNC_ENABLE | syncpt;
+		tegra_dc_writel(dc, value, DC_CMD_CONT_SYNCPT_VSYNC);
+	}
+
+	value = WIN_A_UF_INT | WIN_B_UF_INT | WIN_C_UF_INT |
+		WIN_A_OF_INT | WIN_B_OF_INT | WIN_C_OF_INT;
+	tegra_dc_writel(dc, value, DC_CMD_INT_TYPE);
+
+	value = WIN_A_UF_INT | WIN_B_UF_INT | WIN_C_UF_INT |
+		WIN_A_OF_INT | WIN_B_OF_INT | WIN_C_OF_INT;
+	tegra_dc_writel(dc, value, DC_CMD_INT_POLARITY);
+
+	/* initialize timer */
+	value = CURSOR_THRESHOLD(0) | WINDOW_A_THRESHOLD(0x20) |
+		WINDOW_B_THRESHOLD(0x20) | WINDOW_C_THRESHOLD(0x20);
+	tegra_dc_writel(dc, value, DC_DISP_DISP_MEM_HIGH_PRIORITY);
+
+	value = CURSOR_THRESHOLD(0) | WINDOW_A_THRESHOLD(1) |
+		WINDOW_B_THRESHOLD(1) | WINDOW_C_THRESHOLD(1);
+	tegra_dc_writel(dc, value, DC_DISP_DISP_MEM_HIGH_PRIORITY_TIMER);
+
+	value = VBLANK_INT | WIN_A_UF_INT | WIN_B_UF_INT | WIN_C_UF_INT |
+		WIN_A_OF_INT | WIN_B_OF_INT | WIN_C_OF_INT;
+	tegra_dc_writel(dc, value, DC_CMD_INT_ENABLE);
+
+	value = WIN_A_UF_INT | WIN_B_UF_INT | WIN_C_UF_INT |
+		WIN_A_OF_INT | WIN_B_OF_INT | WIN_C_OF_INT;
+	tegra_dc_writel(dc, value, DC_CMD_INT_MASK);
+
+	if (dc->soc->supports_border_color)
+		tegra_dc_writel(dc, 0, DC_DISP_BORDER_COLOR);
+
+	tegra_dc_stats_reset(&dc->stats);
 
 	return 0;
 
@@ -1930,10 +1955,8 @@ static int tegra_dc_parse_dt(struct tegra_dc *dc)
 		 * cases where only a single display controller is used.
 		 */
 		for_each_matching_node(np, tegra_dc_of_match) {
-			if (np == dc->dev->of_node) {
-				of_node_put(np);
+			if (np == dc->dev->of_node)
 				break;
-			}
 
 			value++;
 		}
@@ -1980,15 +2003,33 @@ static int tegra_dc_probe(struct platform_device *pdev)
 		return PTR_ERR(dc->rst);
 	}
 
-	reset_control_assert(dc->rst);
-
 	if (dc->soc->has_powergate) {
 		if (dc->pipe == 0)
 			dc->powergate = TEGRA_POWERGATE_DIS;
 		else
 			dc->powergate = TEGRA_POWERGATE_DISB;
 
-		tegra_powergate_power_off(dc->powergate);
+		err = tegra_powergate_sequence_power_up(dc->powergate, dc->clk,
+							dc->rst);
+		if (err < 0) {
+			dev_err(&pdev->dev, "failed to power partition: %d\n",
+				err);
+			return err;
+		}
+	} else {
+		err = clk_prepare_enable(dc->clk);
+		if (err < 0) {
+			dev_err(&pdev->dev, "failed to enable clock: %d\n",
+				err);
+			return err;
+		}
+
+		err = reset_control_deassert(dc->rst);
+		if (err < 0) {
+			dev_err(&pdev->dev, "failed to deassert reset: %d\n",
+				err);
+			return err;
+		}
 	}
 
 	regs = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -2002,18 +2043,15 @@ static int tegra_dc_probe(struct platform_device *pdev)
 		return -ENXIO;
 	}
 
+	INIT_LIST_HEAD(&dc->client.list);
+	dc->client.ops = &dc_client_ops;
+	dc->client.dev = &pdev->dev;
+
 	err = tegra_dc_rgb_probe(dc);
 	if (err < 0 && err != -ENODEV) {
 		dev_err(&pdev->dev, "failed to probe RGB output: %d\n", err);
 		return err;
 	}
-
-	platform_set_drvdata(pdev, dc);
-	pm_runtime_enable(&pdev->dev);
-
-	INIT_LIST_HEAD(&dc->client.list);
-	dc->client.ops = &dc_client_ops;
-	dc->client.dev = &pdev->dev;
 
 	err = host1x_client_register(&dc->client);
 	if (err < 0) {
@@ -2021,6 +2059,8 @@ static int tegra_dc_probe(struct platform_device *pdev)
 			err);
 		return err;
 	}
+
+	platform_set_drvdata(pdev, dc);
 
 	return 0;
 }
@@ -2043,22 +2083,7 @@ static int tegra_dc_remove(struct platform_device *pdev)
 		return err;
 	}
 
-	pm_runtime_disable(&pdev->dev);
-
-	return 0;
-}
-
-#ifdef CONFIG_PM
-static int tegra_dc_suspend(struct device *dev)
-{
-	struct tegra_dc *dc = dev_get_drvdata(dev);
-	int err;
-
-	err = reset_control_assert(dc->rst);
-	if (err < 0) {
-		dev_err(dev, "failed to assert reset: %d\n", err);
-		return err;
-	}
+	reset_control_assert(dc->rst);
 
 	if (dc->soc->has_powergate)
 		tegra_powergate_power_off(dc->powergate);
@@ -2068,45 +2093,10 @@ static int tegra_dc_suspend(struct device *dev)
 	return 0;
 }
 
-static int tegra_dc_resume(struct device *dev)
-{
-	struct tegra_dc *dc = dev_get_drvdata(dev);
-	int err;
-
-	if (dc->soc->has_powergate) {
-		err = tegra_powergate_sequence_power_up(dc->powergate, dc->clk,
-							dc->rst);
-		if (err < 0) {
-			dev_err(dev, "failed to power partition: %d\n", err);
-			return err;
-		}
-	} else {
-		err = clk_prepare_enable(dc->clk);
-		if (err < 0) {
-			dev_err(dev, "failed to enable clock: %d\n", err);
-			return err;
-		}
-
-		err = reset_control_deassert(dc->rst);
-		if (err < 0) {
-			dev_err(dev, "failed to deassert reset: %d\n", err);
-			return err;
-		}
-	}
-
-	return 0;
-}
-#endif
-
-static const struct dev_pm_ops tegra_dc_pm_ops = {
-	SET_RUNTIME_PM_OPS(tegra_dc_suspend, tegra_dc_resume, NULL)
-};
-
 struct platform_driver tegra_dc_driver = {
 	.driver = {
 		.name = "tegra-dc",
 		.of_match_table = tegra_dc_of_match,
-		.pm = &tegra_dc_pm_ops,
 	},
 	.probe = tegra_dc_probe,
 	.remove = tegra_dc_remove,

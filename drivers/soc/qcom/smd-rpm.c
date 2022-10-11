@@ -33,7 +33,6 @@
  */
 struct qcom_smd_rpm {
 	struct qcom_smd_channel *rpm_channel;
-	struct device *dev;
 
 	struct completion ack;
 	struct mutex lock;
@@ -150,14 +149,14 @@ out:
 }
 EXPORT_SYMBOL(qcom_rpm_smd_write);
 
-static int qcom_smd_rpm_callback(struct qcom_smd_channel *channel,
+static int qcom_smd_rpm_callback(struct qcom_smd_device *qsdev,
 				 const void *data,
 				 size_t count)
 {
 	const struct qcom_rpm_header *hdr = data;
 	size_t hdr_length = le32_to_cpu(hdr->length);
 	const struct qcom_rpm_message *msg;
-	struct qcom_smd_rpm *rpm = qcom_smd_get_drvdata(channel);
+	struct qcom_smd_rpm *rpm = dev_get_drvdata(&qsdev->dev);
 	const u8 *buf = data + sizeof(struct qcom_rpm_header);
 	const u8 *end = buf + hdr_length;
 	char msgbuf[32];
@@ -166,7 +165,7 @@ static int qcom_smd_rpm_callback(struct qcom_smd_channel *channel,
 
 	if (le32_to_cpu(hdr->service_type) != RPM_SERVICE_TYPE_REQUEST ||
 	    hdr_length < sizeof(struct qcom_rpm_message)) {
-		dev_err(rpm->dev, "invalid request\n");
+		dev_err(&qsdev->dev, "invalid request\n");
 		return 0;
 	}
 
@@ -207,9 +206,7 @@ static int qcom_smd_rpm_probe(struct qcom_smd_device *sdev)
 	mutex_init(&rpm->lock);
 	init_completion(&rpm->ack);
 
-	rpm->dev = &sdev->dev;
 	rpm->rpm_channel = sdev->channel;
-	qcom_smd_set_drvdata(sdev->channel, rpm);
 
 	dev_set_drvdata(&sdev->dev, rpm);
 
@@ -222,8 +219,6 @@ static void qcom_smd_rpm_remove(struct qcom_smd_device *sdev)
 }
 
 static const struct of_device_id qcom_smd_rpm_of_match[] = {
-	{ .compatible = "qcom,rpm-apq8084" },
-	{ .compatible = "qcom,rpm-msm8916" },
 	{ .compatible = "qcom,rpm-msm8974" },
 	{}
 };

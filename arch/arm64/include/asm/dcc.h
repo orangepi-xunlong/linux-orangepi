@@ -21,16 +21,21 @@
 #define __ASM_DCC_H
 
 #include <asm/barrier.h>
-#include <asm/sysreg.h>
 
 static inline u32 __dcc_getstatus(void)
 {
-	return read_sysreg(mdccsr_el0);
+	u32 ret;
+
+	asm volatile("mrs %0, mdccsr_el0" : "=r" (ret));
+
+	return ret;
 }
 
 static inline char __dcc_getchar(void)
 {
-	char c = read_sysreg(dbgdtrrx_el0);
+	char c;
+
+	asm volatile("mrs %0, dbgdtrrx_el0" : "=r" (c));
 	isb();
 
 	return c;
@@ -42,7 +47,8 @@ static inline void __dcc_putchar(char c)
 	 * The typecast is to make absolutely certain that 'c' is
 	 * zero-extended.
 	 */
-	write_sysreg((unsigned char)c, dbgdtrtx_el0);
+	asm volatile("msr dbgdtrtx_el0, %0"
+			: : "r" ((unsigned long)(unsigned char)c));
 	isb();
 }
 

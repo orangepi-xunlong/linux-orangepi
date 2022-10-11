@@ -27,7 +27,7 @@
 #include <linux/types.h>
 #include <linux/videodev2.h>
 
-#include <media/i2c/adv7183.h>
+#include <media/adv7183.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 
@@ -644,6 +644,7 @@ MODULE_DEVICE_TABLE(i2c, adv7183_id);
 
 static struct i2c_driver adv7183_driver = {
 	.driver = {
+		.owner  = THIS_MODULE,
 		.name   = "adv7183",
 	},
 	.probe          = adv7183_probe,

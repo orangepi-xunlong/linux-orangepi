@@ -275,7 +275,9 @@ static int sh_wdt_probe(struct platform_device *pdev)
 		return rc;
 	}
 
-	setup_timer(&wdt->timer, sh_wdt_ping, (unsigned long)wdt);
+	init_timer(&wdt->timer);
+	wdt->timer.function	= sh_wdt_ping;
+	wdt->timer.data		= (unsigned long)wdt;
 	wdt->timer.expires	= next_ping_period(clock_division_ratio);
 
 	dev_info(&pdev->dev, "initialized.\n");

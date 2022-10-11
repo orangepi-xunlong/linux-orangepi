@@ -78,11 +78,9 @@ static int toshiba_bluetooth_present(acpi_handle handle)
 	 */
 	result = acpi_evaluate_integer(handle, "_STA", NULL, &bt_present);
 	if (ACPI_FAILURE(result)) {
-		pr_err("ACPI call to query Bluetooth presence failed\n");
+		pr_err("ACPI call to query Bluetooth presence failed");
 		return -ENXIO;
-	}
-
-	if (!bt_present) {
+	} else if (!bt_present) {
 		pr_info("Bluetooth device not present\n");
 		return -ENODEV;
 	}

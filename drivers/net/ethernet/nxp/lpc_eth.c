@@ -425,6 +425,7 @@ struct netdata_local {
 	unsigned int		last_tx_idx;
 	unsigned int		num_used_tx_buffs;
 	struct mii_bus		*mii_bus;
+	struct phy_device	*phy_dev;
 	struct clk		*clk;
 	dma_addr_t		dma_buff_base_p;
 	void			*dma_buff_base_v;
@@ -473,6 +474,14 @@ static void __lpc_get_mac(struct netdata_local *pldat, u8 *mac)
 	tmp = readl(LPC_ENET_SA0(pldat->net_base));
 	mac[4] = tmp & 0xFF;
 	mac[5] = tmp >> 8;
+}
+
+static void __lpc_eth_clock_enable(struct netdata_local *pldat, bool enable)
+{
+	if (enable)
+		clk_prepare_enable(pldat->clk);
+	else
+		clk_disable_unprepare(pldat->clk);
 }
 
 static void __lpc_params_setup(struct netdata_local *pldat)
@@ -741,7 +750,7 @@ static int lpc_mdio_reset(struct mii_bus *bus)
 static void lpc_handle_link_change(struct net_device *ndev)
 {
 	struct netdata_local *pldat = netdev_priv(ndev);
-	struct phy_device *phydev = ndev->phydev;
+	struct phy_device *phydev = pldat->phy_dev;
 	unsigned long flags;
 
 	bool status_change = false;
@@ -788,7 +797,7 @@ static int lpc_mii_probe(struct net_device *ndev)
 		netdev_info(ndev, "using MII interface\n");
 	else
 		netdev_info(ndev, "using RMII interface\n");
-	phydev = phy_connect(ndev, phydev_name(phydev),
+	phydev = phy_connect(ndev, dev_name(&phydev->dev),
 			     &lpc_handle_link_change,
 			     lpc_phy_interface_mode(&pldat->pdev->dev));
 
@@ -805,15 +814,17 @@ static int lpc_mii_probe(struct net_device *ndev)
 	pldat->link = 0;
 	pldat->speed = 0;
 	pldat->duplex = -1;
+	pldat->phy_dev = phydev;
 
-	phy_attached_info(phydev);
-
+	netdev_info(ndev,
+		"attached PHY driver [%s] (mii_bus:phy_addr=%s, irq=%d)\n",
+		phydev->drv->name, dev_name(&phydev->dev), phydev->irq);
 	return 0;
 }
 
 static int lpc_mii_init(struct netdata_local *pldat)
 {
-	int err = -ENXIO;
+	int err = -ENXIO, i;
 
 	pldat->mii_bus = mdiobus_alloc();
 	if (!pldat->mii_bus) {
@@ -840,10 +851,19 @@ static int lpc_mii_init(struct netdata_local *pldat)
 	pldat->mii_bus->priv = pldat;
 	pldat->mii_bus->parent = &pldat->pdev->dev;
 
+	pldat->mii_bus->irq = kmalloc(sizeof(int) * PHY_MAX_ADDR, GFP_KERNEL);
+	if (!pldat->mii_bus->irq) {
+		err = -ENOMEM;
+		goto err_out_1;
+	}
+
+	for (i = 0; i < PHY_MAX_ADDR; i++)
+		pldat->mii_bus->irq[i] = PHY_POLL;
+
 	platform_set_drvdata(pldat->pdev, pldat->mii_bus);
 
 	if (mdiobus_register(pldat->mii_bus))
-		goto err_out_unregister_bus;
+		goto err_out_free_mdio_irq;
 
 	if (lpc_mii_probe(pldat->ndev) != 0)
 		goto err_out_unregister_bus;
@@ -852,6 +872,9 @@ static int lpc_mii_init(struct netdata_local *pldat)
 
 err_out_unregister_bus:
 	mdiobus_unregister(pldat->mii_bus);
+err_out_free_mdio_irq:
+	kfree(pldat->mii_bus->irq);
+err_out_1:
 	mdiobus_free(pldat->mii_bus);
 err_out:
 	return err;
@@ -1038,8 +1061,8 @@ static int lpc_eth_close(struct net_device *ndev)
 	napi_disable(&pldat->napi);
 	netif_stop_queue(ndev);
 
-	if (ndev->phydev)
-		phy_stop(ndev->phydev);
+	if (pldat->phy_dev)
+		phy_stop(pldat->phy_dev);
 
 	spin_lock_irqsave(&pldat->lock, flags);
 	__lpc_eth_reset(pldat);
@@ -1048,7 +1071,7 @@ static int lpc_eth_close(struct net_device *ndev)
 	writel(0, LPC_ENET_MAC2(pldat->net_base));
 	spin_unlock_irqrestore(&pldat->lock, flags);
 
-	clk_disable_unprepare(pldat->clk);
+	__lpc_eth_clock_enable(pldat, false);
 
 	return 0;
 }
@@ -1175,7 +1198,8 @@ static void lpc_eth_set_multicast_list(struct net_device *ndev)
 
 static int lpc_eth_ioctl(struct net_device *ndev, struct ifreq *req, int cmd)
 {
-	struct phy_device *phydev = ndev->phydev;
+	struct netdata_local *pldat = netdev_priv(ndev);
+	struct phy_device *phydev = pldat->phy_dev;
 
 	if (!netif_running(ndev))
 		return -EINVAL;
@@ -1189,24 +1213,21 @@ static int lpc_eth_ioctl(struct net_device *ndev, struct ifreq *req, int cmd)
 static int lpc_eth_open(struct net_device *ndev)
 {
 	struct netdata_local *pldat = netdev_priv(ndev);
-	int ret;
 
 	if (netif_msg_ifup(pldat))
 		dev_dbg(&pldat->pdev->dev, "enabling %s\n", ndev->name);
 
-	ret = clk_prepare_enable(pldat->clk);
-	if (ret)
-		return ret;
+	__lpc_eth_clock_enable(pldat, true);
 
 	/* Suspended PHY makes LPC ethernet core block, so resume now */
-	phy_resume(ndev->phydev);
+	phy_resume(pldat->phy_dev);
 
 	/* Reset and initialize */
 	__lpc_eth_reset(pldat);
 	__lpc_eth_init(pldat);
 
 	/* schedule a link state check */
-	phy_start(ndev->phydev);
+	phy_start(pldat->phy_dev);
 	netif_start_queue(ndev);
 	napi_enable(&pldat->napi);
 
@@ -1239,13 +1260,37 @@ static void lpc_eth_ethtool_setmsglevel(struct net_device *ndev, u32 level)
 	pldat->msg_enable = level;
 }
 
+static int lpc_eth_ethtool_getsettings(struct net_device *ndev,
+	struct ethtool_cmd *cmd)
+{
+	struct netdata_local *pldat = netdev_priv(ndev);
+	struct phy_device *phydev = pldat->phy_dev;
+
+	if (!phydev)
+		return -EOPNOTSUPP;
+
+	return phy_ethtool_gset(phydev, cmd);
+}
+
+static int lpc_eth_ethtool_setsettings(struct net_device *ndev,
+	struct ethtool_cmd *cmd)
+{
+	struct netdata_local *pldat = netdev_priv(ndev);
+	struct phy_device *phydev = pldat->phy_dev;
+
+	if (!phydev)
+		return -EOPNOTSUPP;
+
+	return phy_ethtool_sset(phydev, cmd);
+}
+
 static const struct ethtool_ops lpc_eth_ethtool_ops = {
 	.get_drvinfo	= lpc_eth_ethtool_getdrvinfo,
+	.get_settings	= lpc_eth_ethtool_getsettings,
+	.set_settings	= lpc_eth_ethtool_setsettings,
 	.get_msglevel	= lpc_eth_ethtool_getmsglevel,
 	.set_msglevel	= lpc_eth_ethtool_setmsglevel,
 	.get_link	= ethtool_op_get_link,
-	.get_link_ksettings = phy_ethtool_get_link_ksettings,
-	.set_link_ksettings = phy_ethtool_set_link_ksettings,
 };
 
 static const struct net_device_ops lpc_netdev_ops = {
@@ -1315,9 +1360,7 @@ static int lpc_eth_drv_probe(struct platform_device *pdev)
 	}
 
 	/* Enable network clock */
-	ret = clk_prepare_enable(pldat->clk);
-	if (ret)
-		goto err_out_clk_put;
+	__lpc_eth_clock_enable(pldat, true);
 
 	/* Map IO space */
 	pldat->net_base = ioremap(res->start, resource_size(res));
@@ -1430,7 +1473,7 @@ static int lpc_eth_drv_probe(struct platform_device *pdev)
 	netdev_info(ndev, "LPC mac at 0x%08x irq %d\n",
 	       res->start, ndev->irq);
 
-	phydev = ndev->phydev;
+	phydev = pldat->phy_dev;
 
 	device_init_wakeup(&pdev->dev, 1);
 	device_set_wakeup_enable(&pdev->dev, 0);
@@ -1451,7 +1494,6 @@ err_out_iounmap:
 	iounmap(pldat->net_base);
 err_out_disable_clocks:
 	clk_disable_unprepare(pldat->clk);
-err_out_clk_put:
 	clk_put(pldat->clk);
 err_out_free_dev:
 	free_netdev(ndev);

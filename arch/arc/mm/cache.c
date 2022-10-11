@@ -22,17 +22,15 @@
 #include <asm/setup.h>
 
 static int l2_line_sz;
-static int ioc_exists;
-int slc_enable = 1, ioc_enable = 0;
-unsigned long perip_base = ARC_UNCACHED_ADDR_SPACE; /* legacy value for boot */
-unsigned long perip_end = 0xFFFFFFFF; /* legacy value */
+int ioc_exists;
+volatile int slc_enable = 1, ioc_enable = 1;
 
 void (*_cache_line_loop_ic_fn)(phys_addr_t paddr, unsigned long vaddr,
 			       unsigned long sz, const int cacheop);
 
-void (*__dma_cache_wback_inv)(phys_addr_t start, unsigned long sz);
-void (*__dma_cache_inv)(phys_addr_t start, unsigned long sz);
-void (*__dma_cache_wback)(phys_addr_t start, unsigned long sz);
+void (*__dma_cache_wback_inv)(unsigned long start, unsigned long sz);
+void (*__dma_cache_inv)(unsigned long start, unsigned long sz);
+void (*__dma_cache_wback)(unsigned long start, unsigned long sz);
 
 char *arc_cache_mumbojumbo(int c, char *buf, int len)
 {
@@ -53,15 +51,18 @@ char *arc_cache_mumbojumbo(int c, char *buf, int len)
 	PR_CACHE(&cpuinfo_arc700[c].icache, CONFIG_ARC_HAS_ICACHE, "I-Cache");
 	PR_CACHE(&cpuinfo_arc700[c].dcache, CONFIG_ARC_HAS_DCACHE, "D-Cache");
 
+	if (!is_isa_arcv2())
+                return buf;
+
 	p = &cpuinfo_arc700[c].slc;
 	if (p->ver)
 		n += scnprintf(buf + n, len - n,
 			       "SLC\t\t: %uK, %uB Line%s\n",
 			       p->sz_k, p->line_len, IS_USED_RUN(slc_enable));
 
-	n += scnprintf(buf + n, len - n, "Peripherals\t: %#lx%s%s\n",
-		       perip_base,
-		       IS_AVAIL3(ioc_exists, ioc_enable, ", IO-Coherency "));
+	if (ioc_exists)
+		n += scnprintf(buf + n, len - n, "IOC\t\t:%s\n",
+				IS_DISABLED_RUN(ioc_enable));
 
 	return buf;
 }
@@ -92,15 +93,6 @@ static void read_decode_cache_bcr_arcv2(int cpu)
 #endif
 	} cbcr;
 
-	struct bcr_volatile {
-#ifdef CONFIG_CPU_BIG_ENDIAN
-		unsigned int start:4, limit:4, pad:22, order:1, disable:1;
-#else
-		unsigned int disable:1, order:1, pad:22, limit:4, start:4;
-#endif
-	} vol;
-
-
 	READ_BCR(ARC_REG_SLC_BCR, sbcr);
 	if (sbcr.ver) {
 		READ_BCR(ARC_REG_SLC_CFG, slc_cfg);
@@ -110,19 +102,8 @@ static void read_decode_cache_bcr_arcv2(int cpu)
 	}
 
 	READ_BCR(ARC_REG_CLUSTER_BCR, cbcr);
-	if (cbcr.c)
+	if (cbcr.c && ioc_enable)
 		ioc_exists = 1;
-	else
-		ioc_enable = 0;
-
-	/* HS 2.0 didn't have AUX_VOL */
-	if (cpuinfo_arc700[cpu].core.family > 0x51) {
-		READ_BCR(AUX_VOL, vol);
-		perip_base = vol.start << 28;
-		/* HS 3.0 has limit and strict-ordering fields */
-		if (cpuinfo_arc700[cpu].core.family > 0x52)
-			perip_end = (vol.limit << 28) - 1;
-	}
 }
 
 void read_decode_cache_bcr(void)
@@ -227,7 +208,7 @@ slc_chk:
  * ------------------
  * This ver of MMU supports variable page sizes (1k-16k): although Linux will
  * only support 8k (default), 16k and 4k.
- * However from hardware perspective, smaller page sizes aggravate aliasing
+ * However from hardware perspective, smaller page sizes aggrevate aliasing
  * meaning more vaddr bits needed to disambiguate the cache-line-op ;
  * the existing scheme of piggybacking won't work for certain configurations.
  * Two new registers IC_PTAG and DC_PTAG inttoduced.
@@ -314,7 +295,7 @@ void __cache_line_loop_v3(phys_addr_t paddr, unsigned long vaddr,
 
 	/*
 	 * This is technically for MMU v4, using the MMU v3 programming model
-	 * Special work for HS38 aliasing I-cache configuration with PAE40
+	 * Special work for HS38 aliasing I-cache configuratino with PAE40
 	 *   - upper 8 bits of paddr need to be written into PTAG_HI
 	 *   - (and needs to be written before the lower 32 bits)
 	 * Note that PTAG_HI is hoisted outside the line loop
@@ -645,11 +626,11 @@ void flush_dcache_page(struct page *page)
 	 */
 	if (!mapping_mapped(mapping)) {
 		clear_bit(PG_dc_clean, &page->flags);
-	} else if (page_mapcount(page)) {
+	} else if (page_mapped(page)) {
 
 		/* kernel reading from page with U-mapping */
 		phys_addr_t paddr = (unsigned long)page_address(page);
-		unsigned long vaddr = page->index << PAGE_SHIFT;
+		unsigned long vaddr = page->index << PAGE_CACHE_SHIFT;
 
 		if (addr_not_cache_congruent(paddr, vaddr))
 			__flush_dcache_page(paddr, vaddr);
@@ -661,38 +642,38 @@ EXPORT_SYMBOL(flush_dcache_page);
  * DMA ops for systems with L1 cache only
  * Make memory coherent with L1 cache by flushing/invalidating L1 lines
  */
-static void __dma_cache_wback_inv_l1(phys_addr_t start, unsigned long sz)
+static void __dma_cache_wback_inv_l1(unsigned long start, unsigned long sz)
 {
 	__dc_line_op_k(start, sz, OP_FLUSH_N_INV);
 }
 
-static void __dma_cache_inv_l1(phys_addr_t start, unsigned long sz)
+static void __dma_cache_inv_l1(unsigned long start, unsigned long sz)
 {
 	__dc_line_op_k(start, sz, OP_INV);
 }
 
-static void __dma_cache_wback_l1(phys_addr_t start, unsigned long sz)
+static void __dma_cache_wback_l1(unsigned long start, unsigned long sz)
 {
 	__dc_line_op_k(start, sz, OP_FLUSH);
 }
 
 /*
  * DMA ops for systems with both L1 and L2 caches, but without IOC
- * Both L1 and L2 lines need to be explicitly flushed/invalidated
+ * Both L1 and L2 lines need to be explicity flushed/invalidated
  */
-static void __dma_cache_wback_inv_slc(phys_addr_t start, unsigned long sz)
+static void __dma_cache_wback_inv_slc(unsigned long start, unsigned long sz)
 {
 	__dc_line_op_k(start, sz, OP_FLUSH_N_INV);
 	slc_op(start, sz, OP_FLUSH_N_INV);
 }
 
-static void __dma_cache_inv_slc(phys_addr_t start, unsigned long sz)
+static void __dma_cache_inv_slc(unsigned long start, unsigned long sz)
 {
 	__dc_line_op_k(start, sz, OP_INV);
 	slc_op(start, sz, OP_INV);
 }
 
-static void __dma_cache_wback_slc(phys_addr_t start, unsigned long sz)
+static void __dma_cache_wback_slc(unsigned long start, unsigned long sz)
 {
 	__dc_line_op_k(start, sz, OP_FLUSH);
 	slc_op(start, sz, OP_FLUSH);
@@ -703,26 +684,26 @@ static void __dma_cache_wback_slc(phys_addr_t start, unsigned long sz)
  * IOC hardware snoops all DMA traffic keeping the caches consistent with
  * memory - eliding need for any explicit cache maintenance of DMA buffers
  */
-static void __dma_cache_wback_inv_ioc(phys_addr_t start, unsigned long sz) {}
-static void __dma_cache_inv_ioc(phys_addr_t start, unsigned long sz) {}
-static void __dma_cache_wback_ioc(phys_addr_t start, unsigned long sz) {}
+static void __dma_cache_wback_inv_ioc(unsigned long start, unsigned long sz) {}
+static void __dma_cache_inv_ioc(unsigned long start, unsigned long sz) {}
+static void __dma_cache_wback_ioc(unsigned long start, unsigned long sz) {}
 
 /*
  * Exported DMA API
  */
-void dma_cache_wback_inv(phys_addr_t start, unsigned long sz)
+void dma_cache_wback_inv(unsigned long start, unsigned long sz)
 {
 	__dma_cache_wback_inv(start, sz);
 }
 EXPORT_SYMBOL(dma_cache_wback_inv);
 
-void dma_cache_inv(phys_addr_t start, unsigned long sz)
+void dma_cache_inv(unsigned long start, unsigned long sz)
 {
 	__dma_cache_inv(start, sz);
 }
 EXPORT_SYMBOL(dma_cache_inv);
 
-void dma_cache_wback(phys_addr_t start, unsigned long sz)
+void dma_cache_wback(unsigned long start, unsigned long sz)
 {
 	__dma_cache_wback(start, sz);
 }
@@ -840,7 +821,7 @@ void flush_cache_mm(struct mm_struct *mm)
 void flush_cache_page(struct vm_area_struct *vma, unsigned long u_vaddr,
 		      unsigned long pfn)
 {
-	unsigned int paddr = pfn << PAGE_SHIFT;
+	phys_addr_t paddr = pfn << PAGE_SHIFT;
 
 	u_vaddr &= PAGE_MASK;
 
@@ -860,8 +841,9 @@ void flush_anon_page(struct vm_area_struct *vma, struct page *page,
 		     unsigned long u_vaddr)
 {
 	/* TBD: do we really need to clear the kernel mapping */
-	__flush_dcache_page(page_address(page), u_vaddr);
-	__flush_dcache_page(page_address(page), page_address(page));
+	__flush_dcache_page((phys_addr_t)page_address(page), u_vaddr);
+	__flush_dcache_page((phys_addr_t)page_address(page),
+			    (phys_addr_t)page_address(page));
 
 }
 
@@ -885,7 +867,7 @@ void copy_user_highpage(struct page *to, struct page *from,
 	 * For !VIPT cache, all of this gets compiled out as
 	 * addr_not_cache_congruent() is 0
 	 */
-	if (page_mapcount(from) && addr_not_cache_congruent(kfrom, u_vaddr)) {
+	if (page_mapped(from) && addr_not_cache_congruent(kfrom, u_vaddr)) {
 		__flush_dcache_page((unsigned long)kfrom, u_vaddr);
 		clean_src_k_mappings = 1;
 	}
@@ -966,7 +948,7 @@ void arc_cache_init(void)
 			      ic->ver, CONFIG_ARC_MMU_VER);
 
 		/*
-		 * In MMU v4 (HS38x) the aliasing icache config uses IVIL/PTAG
+		 * In MMU v4 (HS38x) the alising icache config uses IVIL/PTAG
 		 * pair to provide vaddr/paddr respectively, just as in MMU v3
 		 */
 		if (is_isa_arcv2() && ic->alias)
@@ -1015,7 +997,7 @@ void arc_cache_init(void)
 			read_aux_reg(ARC_REG_SLC_CTRL) | SLC_CTRL_DISABLE);
 	}
 
-	if (is_isa_arcv2() && ioc_enable) {
+	if (is_isa_arcv2() && ioc_exists) {
 		/* IO coherency base - 0x8z */
 		write_aux_reg(ARC_REG_IO_COH_AP0_BASE, 0x80000);
 		/* IO coherency aperture size - 512Mb: 0x8z-0xAz */

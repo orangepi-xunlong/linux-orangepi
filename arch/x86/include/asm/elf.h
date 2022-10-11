@@ -176,7 +176,7 @@ static inline void elf_common_init(struct thread_struct *t,
 	regs->si = regs->di = regs->bp = 0;
 	regs->r8 = regs->r9 = regs->r10 = regs->r11 = 0;
 	regs->r12 = regs->r13 = regs->r14 = regs->r15 = 0;
-	t->fsbase = t->gsbase = 0;
+	t->fs = t->gs = 0;
 	t->fsindex = t->gsindex = 0;
 	t->ds = t->es = ds;
 }
@@ -258,7 +258,7 @@ extern int force_personality32;
    instruction set this CPU supports.  This could be done in user space,
    but it's not easy, and we've already done it here.  */
 
-#define ELF_HWCAP		(boot_cpu_data.x86_capability[CPUID_1_EDX])
+#define ELF_HWCAP		(boot_cpu_data.x86_capability[0])
 
 /* This yields a string that ld.so will use to load implementation
    specific libraries for optimization.  This is more specific in
@@ -346,8 +346,8 @@ extern int compat_arch_setup_additional_pages(struct linux_binprm *bprm,
  */
 static inline int mmap_is_ia32(void)
 {
-	return IS_ENABLED(CONFIG_X86_32) ||
-	       (IS_ENABLED(CONFIG_COMPAT) &&
+	return config_enabled(CONFIG_X86_32) ||
+	       (config_enabled(CONFIG_COMPAT) &&
 		test_thread_flag(TIF_ADDR32));
 }
 

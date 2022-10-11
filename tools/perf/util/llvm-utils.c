@@ -3,14 +3,11 @@
  * Copyright (C) 2015, Huawei Inc.
  */
 
-#include <errno.h>
-#include <limits.h>
 #include <stdio.h>
-#include <stdlib.h>
+#include "util.h"
 #include "debug.h"
 #include "llvm-utils.h"
-#include "config.h"
-#include "util.h"
+#include "cache.h"
 
 #define CLANG_BPF_CMD_DEFAULT_TEMPLATE				\
 		"$CLANG_EXEC -D__KERNEL__ -D__NR_CPUS__=$NR_CPUS "\
@@ -45,8 +42,6 @@ int perf_llvm_config(const char *var, const char *value)
 		llvm_param.kbuild_dir = strdup(value);
 	else if (!strcmp(var, "kbuild-opts"))
 		llvm_param.kbuild_opts = strdup(value);
-	else if (!strcmp(var, "dump-obj"))
-		llvm_param.dump_obj = !!perf_config_bool(var, value);
 	else
 		return -1;
 	llvm_param.user_set_param = true;
@@ -103,12 +98,11 @@ read_from_pipe(const char *cmd, void **p_buf, size_t *p_read_sz)
 	void *buf = NULL;
 	FILE *file = NULL;
 	size_t read_sz = 0, buf_sz = 0;
-	char serr[STRERR_BUFSIZE];
 
 	file = popen(cmd, "r");
 	if (!file) {
 		pr_err("ERROR: unable to popen cmd: %s\n",
-		       str_error_r(errno, serr, sizeof(serr)));
+		       strerror(errno));
 		return -EINVAL;
 	}
 
@@ -142,7 +136,7 @@ read_from_pipe(const char *cmd, void **p_buf, size_t *p_read_sz)
 
 	if (ferror(file)) {
 		pr_err("ERROR: error occurred when reading from pipe: %s\n",
-		       str_error_r(errno, serr, sizeof(serr)));
+		       strerror(errno));
 		err = -EIO;
 		goto errout;
 	}
@@ -260,16 +254,16 @@ static const char *kinc_fetch_script =
 "#!/usr/bin/env sh\n"
 "if ! test -d \"$KBUILD_DIR\"\n"
 "then\n"
-"	exit -1\n"
+"	exit 1\n"
 "fi\n"
 "if ! test -f \"$KBUILD_DIR/include/generated/autoconf.h\"\n"
 "then\n"
-"	exit -1\n"
+"	exit 1\n"
 "fi\n"
 "TMPDIR=`mktemp -d`\n"
 "if test -z \"$TMPDIR\"\n"
 "then\n"
-"    exit -1\n"
+"    exit 1\n"
 "fi\n"
 "cat << EOF > $TMPDIR/Makefile\n"
 "obj-y := dummy.o\n"
@@ -331,42 +325,6 @@ get_kbuild_opts(char **kbuild_dir, char **kbuild_include_opts)
 	pr_debug("include option is set to %s\n", *kbuild_include_opts);
 }
 
-static void
-dump_obj(const char *path, void *obj_buf, size_t size)
-{
-	char *obj_path = strdup(path);
-	FILE *fp;
-	char *p;
-
-	if (!obj_path) {
-		pr_warning("WARNING: No enough memory, skip object dumping\n");
-		return;
-	}
-
-	p = strrchr(obj_path, '.');
-	if (!p || (strcmp(p, ".c") != 0)) {
-		pr_warning("WARNING: invalid llvm source path: '%s', skip object dumping\n",
-			   obj_path);
-		goto out;
-	}
-
-	p[1] = 'o';
-	fp = fopen(obj_path, "wb");
-	if (!fp) {
-		pr_warning("WARNING: failed to open '%s': %s, skip object dumping\n",
-			   obj_path, strerror(errno));
-		goto out;
-	}
-
-	pr_info("LLVM: dumping %s\n", obj_path);
-	if (fwrite(obj_buf, size, 1, fp) != 1)
-		pr_warning("WARNING: failed to write to file '%s': %s, skip object dumping\n",
-			   obj_path, strerror(errno));
-	fclose(fp);
-out:
-	free(obj_path);
-}
-
 int llvm__compile_bpf(const char *path, void **p_obj_buf,
 		      size_t *p_obj_buf_sz)
 {
@@ -376,17 +334,9 @@ int llvm__compile_bpf(const char *path, void **p_obj_buf,
 	unsigned int kernel_version;
 	char linux_version_code_str[64];
 	const char *clang_opt = llvm_param.clang_opt;
-	char clang_path[PATH_MAX], abspath[PATH_MAX], nr_cpus_avail_str[64];
-	char serr[STRERR_BUFSIZE];
+	char clang_path[PATH_MAX], nr_cpus_avail_str[64];
 	char *kbuild_dir = NULL, *kbuild_include_opts = NULL;
 	const char *template = llvm_param.clang_bpf_cmd_template;
-
-	if (path[0] != '-' && realpath(path, abspath) == NULL) {
-		err = errno;
-		pr_err("ERROR: problems with path %s: %s\n",
-		       path, str_error_r(err, serr, sizeof(serr)));
-		return -err;
-	}
 
 	if (!template)
 		template = CLANG_BPF_CMD_DEFAULT_TEMPLATE;
@@ -412,7 +362,7 @@ int llvm__compile_bpf(const char *path, void **p_obj_buf,
 	if (nr_cpus_avail <= 0) {
 		pr_err(
 "WARNING:\tunable to get available CPUs in this system: %s\n"
-"        \tUse 128 instead.\n", str_error_r(errno, serr, sizeof(serr)));
+"        \tUse 128 instead.\n", strerror(errno));
 		nr_cpus_avail = 128;
 	}
 	snprintf(nr_cpus_avail_str, sizeof(nr_cpus_avail_str), "%d",
@@ -437,7 +387,8 @@ int llvm__compile_bpf(const char *path, void **p_obj_buf,
 	 * stdin to be source file (testing).
 	 */
 	force_set_env("CLANG_SOURCE",
-		      (path[0] == '-') ? path : abspath);
+		      (path[0] == '-') ? path :
+		      make_nonrelative_path(path));
 
 	pr_debug("llvm compiling command template: %s\n", template);
 	err = read_from_pipe(template, &obj_buf, &obj_buf_sz);
@@ -452,10 +403,6 @@ int llvm__compile_bpf(const char *path, void **p_obj_buf,
 
 	free(kbuild_dir);
 	free(kbuild_include_opts);
-
-	if (llvm_param.dump_obj)
-		dump_obj(path, obj_buf, obj_buf_sz);
-
 	if (!p_obj_buf)
 		free(obj_buf);
 	else

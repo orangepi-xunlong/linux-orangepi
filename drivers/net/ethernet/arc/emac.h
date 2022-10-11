@@ -134,6 +134,7 @@ struct arc_emac_priv {
 
 	/* Devices */
 	struct device *dev;
+	struct phy_device *phy_dev;
 	struct mii_bus *bus;
 	struct arc_emac_mdio_bus_data bus_data;
 

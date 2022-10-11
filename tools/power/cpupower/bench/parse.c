@@ -65,7 +65,7 @@ FILE *prepare_output(const char *dirname)
 {
 	FILE *output = NULL;
 	int len;
-	char *filename, *filename_tmp;
+	char *filename;
 	struct utsname sysdata;
 	DIR *dir;
 
@@ -81,22 +81,16 @@ FILE *prepare_output(const char *dirname)
 
 	len = strlen(dirname) + 30;
 	filename = malloc(sizeof(char) * len);
-	if (!filename) {
-		perror("malloc");
-		goto out_dir;
-	}
 
 	if (uname(&sysdata) == 0) {
 		len += strlen(sysdata.nodename) + strlen(sysdata.release);
-		filename_tmp = realloc(filename, sizeof(*filename) * len);
+		filename = realloc(filename, sizeof(char) * len);
 
-		if (filename_tmp == NULL) {
-			free(filename);
+		if (filename == NULL) {
 			perror("realloc");
-			goto out_dir;
+			return NULL;
 		}
 
-		filename = filename_tmp;
 		snprintf(filename, len - 1, "%s/benchmark_%s_%s_%li.log",
 			dirname, sysdata.nodename, sysdata.release, time(NULL));
 	} else {
@@ -110,16 +104,12 @@ FILE *prepare_output(const char *dirname)
 	if (output == NULL) {
 		perror("fopen");
 		fprintf(stderr, "error: unable to open logfile\n");
-		goto out;
 	}
 
 	fprintf(stdout, "Logfile: %s\n", filename);
 
-	fprintf(output, "#round load sleep performance powersave percentage\n");
-out:
 	free(filename);
-out_dir:
-	closedir(dir);
+	fprintf(output, "#round load sleep performance powersave percentage\n");
 	return output;
 }
 

@@ -280,7 +280,6 @@ struct usba_ep {
 	void __iomem				*ep_regs;
 	void __iomem				*dma_regs;
 	void __iomem				*fifo;
-	char					name[8];
 	struct usb_ep				ep;
 	struct usba_udc				*udc;
 
@@ -355,8 +354,6 @@ struct usba_udc {
 	struct dentry *debugfs_root;
 	struct dentry *debugfs_regs;
 #endif
-
-	struct regmap *pmc;
 };
 
 static inline struct usba_ep *to_usba_ep(struct usb_ep *ep)

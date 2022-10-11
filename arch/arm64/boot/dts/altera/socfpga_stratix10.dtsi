@@ -249,16 +249,16 @@
 
 		sysmgr: sysmgr@ffd12000 {
 			compatible = "altr,sys-mgr", "syscon";
-			reg = <0xffd12000 0x1000>;
+			reg = <0xffd12000 0x228>;
 		};
 
 		/* Local timer */
 		timer {
 			compatible = "arm,armv8-timer";
-			interrupts = <1 13 0xf08>,
-				     <1 14 0xf08>,
-				     <1 11 0xf08>,
-				     <1 10 0xf08>;
+			interrupts = <1 13 0xf01>,
+				     <1 14 0xf01>,
+				     <1 11 0xf01>,
+				     <1 10 0xf01>;
 		};
 
 		timer0: timer0@ffc03000 {

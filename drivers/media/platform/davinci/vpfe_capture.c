@@ -1610,53 +1610,38 @@ static int vpfe_cropcap(struct file *file, void *priv,
 
 	v4l2_dbg(1, debug, &vpfe_dev->v4l2_dev, "vpfe_cropcap\n");
 
-	if (crop->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
-		return -EINVAL;
-	/* If std_index is invalid, then just return (== 1:1 aspect) */
 	if (vpfe_dev->std_index >= ARRAY_SIZE(vpfe_standards))
-		return 0;
+		return -EINVAL;
 
+	memset(crop, 0, sizeof(struct v4l2_cropcap));
+	crop->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	crop->bounds.width = crop->defrect.width =
+		vpfe_standards[vpfe_dev->std_index].width;
+	crop->bounds.height = crop->defrect.height =
+		vpfe_standards[vpfe_dev->std_index].height;
 	crop->pixelaspect = vpfe_standards[vpfe_dev->std_index].pixelaspect;
 	return 0;
 }
 
-static int vpfe_g_selection(struct file *file, void *priv,
-			    struct v4l2_selection *sel)
+static int vpfe_g_crop(struct file *file, void *priv,
+			     struct v4l2_crop *crop)
 {
 	struct vpfe_device *vpfe_dev = video_drvdata(file);
 
-	v4l2_dbg(1, debug, &vpfe_dev->v4l2_dev, "vpfe_g_selection\n");
+	v4l2_dbg(1, debug, &vpfe_dev->v4l2_dev, "vpfe_g_crop\n");
 
-	if (sel->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
-		return -EINVAL;
-
-	switch (sel->target) {
-	case V4L2_SEL_TGT_CROP:
-		sel->r = vpfe_dev->crop;
-		break;
-	case V4L2_SEL_TGT_CROP_DEFAULT:
-	case V4L2_SEL_TGT_CROP_BOUNDS:
-		sel->r.width = vpfe_standards[vpfe_dev->std_index].width;
-		sel->r.height = vpfe_standards[vpfe_dev->std_index].height;
-		break;
-	default:
-		return -EINVAL;
-	}
+	crop->c = vpfe_dev->crop;
 	return 0;
 }
 
-static int vpfe_s_selection(struct file *file, void *priv,
-			    struct v4l2_selection *sel)
+static int vpfe_s_crop(struct file *file, void *priv,
+			     const struct v4l2_crop *crop)
 {
 	struct vpfe_device *vpfe_dev = video_drvdata(file);
-	struct v4l2_rect rect = sel->r;
+	struct v4l2_rect rect = crop->c;
 	int ret = 0;
 
-	v4l2_dbg(1, debug, &vpfe_dev->v4l2_dev, "vpfe_s_selection\n");
-
-	if (sel->type != V4L2_BUF_TYPE_VIDEO_CAPTURE ||
-	    sel->target != V4L2_SEL_TGT_CROP)
-		return -EINVAL;
+	v4l2_dbg(1, debug, &vpfe_dev->v4l2_dev, "vpfe_s_crop\n");
 
 	if (vpfe_dev->started) {
 		/* make sure streaming is not started */
@@ -1684,7 +1669,7 @@ static int vpfe_s_selection(struct file *file, void *priv,
 		vpfe_dev->std_info.active_pixels) ||
 	    (rect.top + rect.height >
 		vpfe_dev->std_info.active_lines)) {
-		v4l2_err(&vpfe_dev->v4l2_dev, "Error in S_SELECTION params\n");
+		v4l2_err(&vpfe_dev->v4l2_dev, "Error in S_CROP params\n");
 		ret = -EINVAL;
 		goto unlock_out;
 	}
@@ -1697,7 +1682,6 @@ static int vpfe_s_selection(struct file *file, void *priv,
 		vpfe_dev->fmt.fmt.pix.bytesperline *
 		vpfe_dev->fmt.fmt.pix.height;
 	vpfe_dev->crop = rect;
-	sel->r = rect;
 unlock_out:
 	mutex_unlock(&vpfe_dev->lock);
 	return ret;
@@ -1758,8 +1742,8 @@ static const struct v4l2_ioctl_ops vpfe_ioctl_ops = {
 	.vidioc_streamon	 = vpfe_streamon,
 	.vidioc_streamoff	 = vpfe_streamoff,
 	.vidioc_cropcap		 = vpfe_cropcap,
-	.vidioc_g_selection	 = vpfe_g_selection,
-	.vidioc_s_selection	 = vpfe_s_selection,
+	.vidioc_g_crop		 = vpfe_g_crop,
+	.vidioc_s_crop		 = vpfe_s_crop,
 	.vidioc_default		 = vpfe_param_handler,
 };
 

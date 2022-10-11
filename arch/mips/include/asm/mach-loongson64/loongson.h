@@ -14,6 +14,7 @@
 #include <linux/io.h>
 #include <linux/init.h>
 #include <linux/irq.h>
+#include <linux/kconfig.h>
 #include <boot_param.h>
 
 /* loongson internal northbridge initialization */

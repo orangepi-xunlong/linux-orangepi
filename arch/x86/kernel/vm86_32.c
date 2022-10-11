@@ -160,12 +160,11 @@ void save_v86_state(struct kernel_vm86_regs *regs, int retval)
 
 static void mark_screen_rdonly(struct mm_struct *mm)
 {
-	struct vm_area_struct *vma;
-	spinlock_t *ptl;
 	pgd_t *pgd;
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
+	spinlock_t *ptl;
 	int i;
 
 	down_write(&mm->mmap_sem);
@@ -176,11 +175,7 @@ static void mark_screen_rdonly(struct mm_struct *mm)
 	if (pud_none_or_clear_bad(pud))
 		goto out;
 	pmd = pmd_offset(pud, 0xA0000);
-
-	if (pmd_trans_huge(*pmd)) {
-		vma = find_vma(mm, 0xA0000);
-		split_huge_pmd(vma, pmd, 0xA0000);
-	}
+	split_huge_page_pmd_mm(mm, 0xA0000, pmd);
 	if (pmd_none_or_clear_bad(pmd))
 		goto out;
 	pte = pte_offset_map_lock(mm, pmd, 0xA0000, &ptl);
@@ -441,7 +436,10 @@ static inline unsigned long get_vflags(struct kernel_vm86_regs *regs)
 
 static inline int is_revectored(int nr, struct revectored_struct *bitmap)
 {
-	return test_bit(nr, bitmap->__map);
+	__asm__ __volatile__("btl %2,%1\n\tsbbl %0,%0"
+		:"=r" (nr)
+		:"m" (*bitmap), "r" (nr));
+	return nr;
 }
 
 #define val_byte(val, n) (((__u8 *)&val)[n])

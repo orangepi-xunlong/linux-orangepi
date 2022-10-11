@@ -344,6 +344,8 @@ static int __hw_perf_event_init(struct perf_event *event)
 		break;
 
 	case PERF_TYPE_HARDWARE:
+		if (is_sampling_event(event))	/* No sampling support */
+			return -ENOENT;
 		ev = attr->config;
 		/* Count user space (problem-state) only */
 		if (!attr->exclude_user && attr->exclude_kernel) {
@@ -383,7 +385,7 @@ static int __hw_perf_event_init(struct perf_event *event)
 
 	/* Validate the counter that is assigned to this event.
 	 * Because the counter facility can use numerous counters at the
-	 * same time without constraints, it is not necessary to explicitly
+	 * same time without constraints, it is not necessary to explicity
 	 * validate event groups (event->group_leader != event).
 	 */
 	err = validate_event(hwc);
@@ -649,8 +651,6 @@ static int cpumf_pmu_commit_txn(struct pmu *pmu)
 
 /* Performance monitoring unit for s390x */
 static struct pmu cpumf_pmu = {
-	.task_ctx_nr  = perf_sw_context,
-	.capabilities = PERF_PMU_CAP_NO_INTERRUPT,
 	.pmu_enable   = cpumf_pmu_enable,
 	.pmu_disable  = cpumf_pmu_disable,
 	.event_init   = cpumf_pmu_event_init,
@@ -664,22 +664,26 @@ static struct pmu cpumf_pmu = {
 	.cancel_txn   = cpumf_pmu_cancel_txn,
 };
 
-static int cpumf_pmf_setup(unsigned int cpu, int flags)
+static int cpumf_pmu_notifier(struct notifier_block *self, unsigned long action,
+			      void *hcpu)
 {
-	local_irq_disable();
-	setup_pmc_cpu(&flags);
-	local_irq_enable();
-	return 0;
-}
+	unsigned int cpu = (long) hcpu;
+	int flags;
 
-static int s390_pmu_online_cpu(unsigned int cpu)
-{
-	return cpumf_pmf_setup(cpu, PMC_INIT);
-}
+	switch (action & ~CPU_TASKS_FROZEN) {
+	case CPU_ONLINE:
+		flags = PMC_INIT;
+		smp_call_function_single(cpu, setup_pmc_cpu, &flags, 1);
+		break;
+	case CPU_DOWN_PREPARE:
+		flags = PMC_RELEASE;
+		smp_call_function_single(cpu, setup_pmc_cpu, &flags, 1);
+		break;
+	default:
+		break;
+	}
 
-static int s390_pmu_offline_cpu(unsigned int cpu)
-{
-	return cpumf_pmf_setup(cpu, PMC_RELEASE);
+	return NOTIFY_OK;
 }
 
 static int __init cpumf_pmu_init(void)
@@ -699,8 +703,14 @@ static int __init cpumf_pmu_init(void)
 	if (rc) {
 		pr_err("Registering for CPU-measurement alerts "
 		       "failed with rc=%i\n", rc);
-		return rc;
+		goto out;
 	}
+
+	/* The CPU measurement counter facility does not have overflow
+	 * interrupts to do sampling.  Sampling must be provided by
+	 * external means, for example, by timers.
+	 */
+	cpumf_pmu.capabilities |= PERF_PMU_CAP_NO_INTERRUPT;
 
 	cpumf_pmu.attr_groups = cpumf_cf_event_group();
 	rc = perf_pmu_register(&cpumf_pmu, "cpum_cf", PERF_TYPE_RAW);
@@ -708,10 +718,10 @@ static int __init cpumf_pmu_init(void)
 		pr_err("Registering the cpum_cf PMU failed with rc=%i\n", rc);
 		unregister_external_irq(EXT_IRQ_MEASURE_ALERT,
 					cpumf_measurement_alert);
-		return rc;
+		goto out;
 	}
-	return cpuhp_setup_state(CPUHP_AP_PERF_S390_CF_ONLINE,
-				 "AP_PERF_S390_CF_ONLINE",
-				 s390_pmu_online_cpu, s390_pmu_offline_cpu);
+	perf_cpu_notifier(cpumf_pmu_notifier);
+out:
+	return rc;
 }
 early_initcall(cpumf_pmu_init);

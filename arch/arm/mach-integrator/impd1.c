@@ -320,11 +320,11 @@ static struct impd1_device impd1_devs[] = {
 #define IMPD1_VALID_IRQS 0x00000bffU
 
 /*
- * As this module is bool, it is OK to have this as __ref() - no
+ * As this module is bool, it is OK to have this as __init_refok() - no
  * probe calls will be done after the initial system bootup, as devices
  * are discovered as part of the machine startup.
  */
-static int __ref impd1_probe(struct lm_device *dev)
+static int __init_refok impd1_probe(struct lm_device *dev)
 {
 	struct impd1_module *impd1;
 	int irq_base;
@@ -394,7 +394,11 @@ static int __ref impd1_probe(struct lm_device *dev)
 					      sizeof(*lookup) + 3 * sizeof(struct gpiod_lookup),
 					      GFP_KERNEL);
 			chipname = devm_kstrdup(&dev->dev, devname, GFP_KERNEL);
-			mmciname = kasprintf(GFP_KERNEL, "lm%x:00700", dev->id);
+			mmciname = devm_kasprintf(&dev->dev, GFP_KERNEL,
+						  "lm%x:00700", dev->id);
+			if (!lookup || !chipname || !mmciname)
+				return -ENOMEM;
+
 			lookup->dev_id = mmciname;
 			/*
 			 * Offsets on GPIO block 1:

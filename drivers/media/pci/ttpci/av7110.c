@@ -26,7 +26,7 @@
  * Or, point your browser to http://www.gnu.org/copyleft/gpl.html
  *
  *
- * the project's page is at https://linuxtv.org
+ * the project's page is at http://www.linuxtv.org/ 
  */
 
 
@@ -1358,7 +1358,7 @@ static int av7110_register(struct av7110 *av7110)
 
 #ifdef CONFIG_DVB_AV7110_OSD
 	dvb_register_device(&av7110->dvb_adapter, &av7110->osd_dev,
-			    &dvbdev_osd, av7110, DVB_DEVICE_OSD, 0);
+			    &dvbdev_osd, av7110, DVB_DEVICE_OSD);
 #endif
 
 	dvb_net_init(&av7110->dvb_adapter, &av7110->dvb_net, &dvbdemux->dmx);
@@ -1537,7 +1537,7 @@ static int get_firmware(struct av7110* av7110)
 			printk(KERN_ERR "dvb-ttpci: usually this should be in "
 			       "/usr/lib/hotplug/firmware or /lib/firmware\n");
 			printk(KERN_ERR "dvb-ttpci: and can be downloaded from"
-			       " https://linuxtv.org/download/dvb/firmware/\n");
+			       " http://www.linuxtv.org/download/dvb/firmware/\n");
 		} else
 			printk(KERN_ERR "dvb-ttpci: cannot request firmware"
 			       " (error %i)\n", ret);
@@ -1739,7 +1739,7 @@ static int alps_tdlb7_request_firmware(struct dvb_frontend* fe, const struct fir
 #endif
 }
 
-static const struct sp8870_config alps_tdlb7_config = {
+static struct sp8870_config alps_tdlb7_config = {
 
 	.demod_address = 0x71,
 	.request_firmware = alps_tdlb7_request_firmware,
@@ -2198,18 +2198,13 @@ static int frontend_init(struct av7110 *av7110)
 			break;
 
 		case 0x0001: // Hauppauge/TT Nexus-T premium rev1.X
-		{
-			struct dvb_frontend *fe;
-
 			// try ALPS TDLB7 first, then Grundig 29504-401
-			fe = dvb_attach(sp8870_attach, &alps_tdlb7_config, &av7110->i2c_adap);
-			if (fe) {
-				fe->ops.tuner_ops.set_params = alps_tdlb7_tuner_set_params;
-				av7110->fe = fe;
+			av7110->fe = dvb_attach(sp8870_attach, &alps_tdlb7_config, &av7110->i2c_adap);
+			if (av7110->fe) {
+				av7110->fe->ops.tuner_ops.set_params = alps_tdlb7_tuner_set_params;
 				break;
 			}
-		}
-		/* fall-thru */
+			/* fall-thru */
 
 		case 0x0008: // Hauppauge/TT DVB-T
 			// Grundig 29504-401
@@ -2319,7 +2314,7 @@ static int frontend_init(struct av7110 *av7110)
 /* Budgetpatch note:
  * Original hardware design by Roberto Deza:
  * There is a DVB_Wiki at
- * https://linuxtv.org
+ * http://www.linuxtv.org/
  *
  * New software triggering design by Emard that works on
  * original Roberto Deza's hardware:

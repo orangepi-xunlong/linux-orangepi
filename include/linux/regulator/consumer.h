@@ -140,6 +140,8 @@ struct regulator;
  *
  * @supply:   The name of the supply.  Initialised by the user before
  *            using the bulk regulator APIs.
+ * @optional: The supply should be considered optional. Initialised by the user
+ *            before using the bulk regulator APIs.
  * @consumer: The regulator consumer for the supply.  This will be managed
  *            by the bulk API.
  *
@@ -149,6 +151,7 @@ struct regulator;
  */
 struct regulator_bulk_data {
 	const char *supply;
+	bool optional;
 	struct regulator *consumer;
 
 	/* private: Internal use */
@@ -221,6 +224,7 @@ int regulator_bulk_force_disable(int num_consumers,
 void regulator_bulk_free(int num_consumers,
 			 struct regulator_bulk_data *consumers);
 
+int regulator_can_change_voltage(struct regulator *regulator);
 int regulator_count_voltages(struct regulator *regulator);
 int regulator_list_voltage(struct regulator *regulator, unsigned selector);
 int regulator_is_supported_voltage(struct regulator *regulator,
@@ -261,19 +265,6 @@ void devm_regulator_unregister_notifier(struct regulator *regulator,
 /* driver data - core doesn't touch */
 void *regulator_get_drvdata(struct regulator *regulator);
 void regulator_set_drvdata(struct regulator *regulator, void *data);
-
-#if defined(CONFIG_AW_AXP)
-extern int axp_get_ldo_name(const char *supply_name, char *ldo_name);
-extern int axp_get_enable_id_count(const char *ldo_name);
-extern int axp_get_enable_id(const char *ldo_name, u32 count, char *enable_id);
-extern int axp_check_enable_id(const char *ldo_name, const char *enalbe_id);
-extern int axp_check_ldo_alwayson(const char *ldo_name);
-extern int axp_set_ldo_alwayson(const char *ldo_name, u32 value);
-extern int axp_regulator_dump(void);
-extern unsigned int axp_regulator_debug;
-extern int axp_mem_save(void);
-extern void axp_mem_restore(void);
-#endif
 
 #else
 
@@ -443,6 +434,11 @@ static inline int regulator_bulk_force_disable(int num_consumers,
 static inline void regulator_bulk_free(int num_consumers,
 				       struct regulator_bulk_data *consumers)
 {
+}
+
+static inline int regulator_can_change_voltage(struct regulator *regulator)
+{
+	return 0;
 }
 
 static inline int regulator_set_voltage(struct regulator *regulator,

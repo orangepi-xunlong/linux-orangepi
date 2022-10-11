@@ -1,6 +1,7 @@
 #ifndef SI21XX_H
 #define SI21XX_H
 
+#include <linux/kconfig.h>
 #include <linux/dvb/frontend.h>
 #include "dvb_frontend.h"
 

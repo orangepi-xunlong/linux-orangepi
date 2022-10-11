@@ -13,7 +13,11 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * Written by Koji Sato.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ * Written by Koji Sato <koji@osrg.net>.
  */
 
 #ifndef _NILFS_BTREE_H
@@ -22,7 +26,7 @@
 #include <linux/types.h>
 #include <linux/buffer_head.h>
 #include <linux/list.h>
-#include <linux/nilfs2_ondisk.h>	/* nilfs_btree_node */
+#include <linux/nilfs2_fs.h>
 #include "btnode.h"
 #include "bmap.h"
 

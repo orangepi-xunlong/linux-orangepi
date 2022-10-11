@@ -22,10 +22,10 @@
 };
 
 /* FIXME: need to set up USB_CTRL registers first */
-&ehci {
+&ehci0 {
 	status = "disabled";
 };
 
-&ohci {
+&ohci0 {
 	status = "disabled";
 };

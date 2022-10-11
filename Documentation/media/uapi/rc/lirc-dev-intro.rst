@@ -17,8 +17,7 @@ Example dmesg output upon a driver registering w/LIRC:
 .. code-block:: none
 
     $ dmesg |grep lirc_dev
-    lirc_dev: IR Remote Control driver registered, major 248
-    rc rc0: lirc_dev: driver ir-lirc-codec (mceusb) registered at minor = 0
+    rc rc0: lirc_dev: driver mceusb registered at minor = 0, raw IR receiver, raw IR transmitter
 
 What you should see for a chardev:
 
@@ -26,6 +25,8 @@ What you should see for a chardev:
 
     $ ls -l /dev/lirc*
     crw-rw---- 1 root root 248, 0 Jul 2 22:20 /dev/lirc0
+
+.. _lirc_modes:
 
 **********
 LIRC modes
@@ -38,25 +39,47 @@ on the following table.
 
 ``LIRC_MODE_MODE2``
 
-    The driver returns a sequence of pulse and space codes to userspace.
+    The driver returns a sequence of pulse and space codes to userspace,
+    as a series of u32 values.
 
     This mode is used only for IR receive.
 
-.. _lirc-mode-lirccode:
+    The upper 8 bits determine the packet type, and the lower 24 bits
+    the payload. Use ``LIRC_VALUE()`` macro to get the payload, and
+    the macro ``LIRC_MODE2()`` will give you the type, which
+    is one of:
 
-``LIRC_MODE_LIRCCODE``
+    ``LIRC_MODE2_PULSE``
 
-    The IR signal is decoded internally by the receiver. The LIRC interface
-    returns the scancode as an integer value. This is the usual mode used
-    by several TV media cards.
+        Signifies the presence of IR in microseconds.
 
-    This mode is used only for IR receive.
+    ``LIRC_MODE2_SPACE``
+
+        Signifies absence of IR in microseconds.
+
+    ``LIRC_MODE2_FREQUENCY``
+
+        If measurement of the carrier frequency was enabled with
+        :ref:`lirc_set_measure_carrier_mode` then this packet gives you
+        the carrier frequency in Hertz.
+
+    ``LIRC_MODE2_TIMEOUT``
+
+        If timeout reports are enabled with
+        :ref:`lirc_set_rec_timeout_reports`, when the timeout set with
+        :ref:`lirc_set_rec_timeout` expires due to no IR being detected,
+        this packet will be sent, with the number of microseconds with
+        no IR.
 
 .. _lirc-mode-pulse:
 
 ``LIRC_MODE_PULSE``
 
-    On puse mode, a sequence of pulse/space integer values are written to the
-    lirc device using :Ref:`lirc-write`.
+    In pulse mode, a sequence of pulse/space integer values are written to the
+    lirc device using :ref:`lirc-write`.
+
+    The values are alternating pulse and space lengths, in microseconds. The
+    first and last entry must be a pulse, so there must be an odd number
+    of entries.
 
     This mode is used only for IR send.

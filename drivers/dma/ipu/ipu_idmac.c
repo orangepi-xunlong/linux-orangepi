@@ -1160,10 +1160,11 @@ static irqreturn_t idmac_interrupt(int irq, void *dev_id)
 	struct scatterlist **sg, *sgnext, *sgnew = NULL;
 	/* Next transfer descriptor */
 	struct idmac_tx_desc *desc, *descnew;
+	dma_async_tx_callback callback;
+	void *callback_param;
 	bool done = false;
 	u32 ready0, ready1, curbuf, err;
 	unsigned long flags;
-	struct dmaengine_desc_callback cb;
 
 	/* IDMAC has cleared the respective BUFx_RDY bit, we manage the buffer */
 
@@ -1277,12 +1278,12 @@ static irqreturn_t idmac_interrupt(int irq, void *dev_id)
 
 	if (likely(sgnew) &&
 	    ipu_submit_buffer(ichan, descnew, sgnew, ichan->active_buffer) < 0) {
-		dmaengine_desc_get_callback(&descnew->txd, &cb);
-
+		callback = descnew->txd.callback;
+		callback_param = descnew->txd.callback_param;
 		list_del_init(&descnew->list);
 		spin_unlock(&ichan->lock);
-
-		dmaengine_desc_callback_invoke(&cb, NULL);
+		if (callback)
+			callback(callback_param);
 		spin_lock(&ichan->lock);
 	}
 
@@ -1291,12 +1292,13 @@ static irqreturn_t idmac_interrupt(int irq, void *dev_id)
 	if (done)
 		dma_cookie_complete(&desc->txd);
 
-	dmaengine_desc_get_callback(&desc->txd, &cb);
+	callback = desc->txd.callback;
+	callback_param = desc->txd.callback_param;
 
 	spin_unlock(&ichan->lock);
 
-	if (done && (desc->txd.flags & DMA_PREP_INTERRUPT))
-		dmaengine_desc_callback_invoke(&cb, NULL);
+	if (done && (desc->txd.flags & DMA_PREP_INTERRUPT) && callback)
+		callback(callback_param);
 
 	return IRQ_HANDLED;
 }

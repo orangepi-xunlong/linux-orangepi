@@ -71,10 +71,20 @@ xfs_dir2_sf_getdents(
 	struct xfs_da_geometry	*geo = args->geo;
 
 	ASSERT(dp->i_df.if_flags & XFS_IFINLINE);
+	/*
+	 * Give up if the directory is way too short.
+	 */
+	if (dp->i_d.di_size < offsetof(xfs_dir2_sf_hdr_t, parent)) {
+		ASSERT(XFS_FORCED_SHUTDOWN(dp->i_mount));
+		return -EIO;
+	}
+
 	ASSERT(dp->i_df.if_bytes == dp->i_d.di_size);
 	ASSERT(dp->i_df.if_u1.if_data != NULL);
 
 	sfp = (xfs_dir2_sf_hdr_t *)dp->i_df.if_u1.if_data;
+
+	ASSERT(dp->i_d.di_size >= xfs_dir2_sf_hdr_size(sfp->i8count));
 
 	/*
 	 * If the block number in the offset is out of range, we're done.
@@ -263,11 +273,10 @@ xfs_dir2_leaf_readbuf(
 	size_t			bufsize,
 	struct xfs_dir2_leaf_map_info *mip,
 	xfs_dir2_off_t		*curoff,
-	struct xfs_buf		**bpp,
-	bool			trim_map)
+	struct xfs_buf		**bpp)
 {
 	struct xfs_inode	*dp = args->dp;
-	struct xfs_buf		*bp = NULL;
+	struct xfs_buf		*bp = *bpp;
 	struct xfs_bmbt_irec	*map = mip->map;
 	struct blk_plug		plug;
 	int			error = 0;
@@ -277,10 +286,13 @@ xfs_dir2_leaf_readbuf(
 	struct xfs_da_geometry	*geo = args->geo;
 
 	/*
-	 * If the caller just finished processing a buffer, it will tell us
-	 * we need to trim that block out of the mapping now it is done.
+	 * If we have a buffer, we need to release it and
+	 * take it out of the mapping.
 	 */
-	if (trim_map) {
+
+	if (bp) {
+		xfs_trans_brelse(NULL, bp);
+		bp = NULL;
 		mip->map_blocks -= geo->fsbcount;
 		/*
 		 * Loop to get rid of the extents for the
@@ -528,17 +540,10 @@ xfs_dir2_leaf_getdents(
 		 */
 		if (!bp || ptr >= (char *)bp->b_addr + geo->blksize) {
 			int	lock_mode;
-			bool	trim_map = false;
-
-			if (bp) {
-				xfs_trans_brelse(NULL, bp);
-				bp = NULL;
-				trim_map = true;
-			}
 
 			lock_mode = xfs_ilock_data_map_shared(dp);
 			error = xfs_dir2_leaf_readbuf(args, bufsize, map_info,
-						      &curoff, &bp, trim_map);
+						      &curoff, &bp);
 			xfs_iunlock(dp, lock_mode);
 			if (error || !map_info->map_valid)
 				break;
@@ -667,7 +672,7 @@ xfs_readdir(
 	if (XFS_FORCED_SHUTDOWN(dp->i_mount))
 		return -EIO;
 
-	ASSERT(S_ISDIR(VFS_I(dp)->i_mode));
+	ASSERT(S_ISDIR(dp->i_d.di_mode));
 	XFS_STATS_INC(dp->i_mount, xs_dir_getdents);
 
 	args.dp = dp;

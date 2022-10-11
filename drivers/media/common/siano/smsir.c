@@ -41,10 +41,10 @@ void sms_ir_event(struct smscore_device_t *coredev, const char *buf, int len)
 	const s32 *samples = (const void *)buf;
 
 	for (i = 0; i < len >> 2; i++) {
-		DEFINE_IR_RAW_EVENT(ev);
-
-		ev.duration = abs(samples[i]) * 1000; /* Convert to ns */
-		ev.pulse = (samples[i] > 0) ? false : true;
+		struct ir_raw_event ev = {
+			.duration = abs(samples[i]) * 1000, /* Convert to ns */
+			.pulse = (samples[i] > 0) ? false : true
+		};
 
 		ir_raw_event_store(coredev->ir.dev, &ev);
 	}
@@ -58,7 +58,7 @@ int sms_ir_init(struct smscore_device_t *coredev)
 	struct rc_dev *dev;
 
 	pr_debug("Allocating rc device\n");
-	dev = rc_allocate_device();
+	dev = rc_allocate_device(RC_DRIVER_IR_RAW);
 	if (!dev)
 		return -ENOMEM;
 
@@ -73,7 +73,7 @@ int sms_ir_init(struct smscore_device_t *coredev)
 	strlcpy(coredev->ir.phys, coredev->devpath, sizeof(coredev->ir.phys));
 	strlcat(coredev->ir.phys, "/ir0", sizeof(coredev->ir.phys));
 
-	dev->input_name = coredev->ir.name;
+	dev->device_name = coredev->ir.name;
 	dev->input_phys = coredev->ir.phys;
 	dev->dev.parent = coredev->device;
 
@@ -86,13 +86,12 @@ int sms_ir_init(struct smscore_device_t *coredev)
 #endif
 
 	dev->priv = coredev;
-	dev->driver_type = RC_DRIVER_IR_RAW;
-	dev->allowed_protocols = RC_BIT_ALL;
+	dev->allowed_protocols = RC_PROTO_BIT_ALL_IR_DECODER;
 	dev->map_name = sms_get_board(board_id)->rc_codes;
 	dev->driver_name = MODULE_NAME;
 
 	pr_debug("Input device (IR) %s is set for key events\n",
-		 dev->input_name);
+		 dev->device_name);
 
 	err = rc_register_device(dev);
 	if (err < 0) {

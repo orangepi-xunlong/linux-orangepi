@@ -185,6 +185,9 @@ config CRC8
 	  when they need to do cyclic redundancy check according CRC8
 	  algorithm. Module will be called crc8.
 
+config XXHASH
+	tristate
+
 config AUDIT_GENERIC
 	bool
 	depends on AUDIT && !AUDIT_ARCH
@@ -237,6 +240,14 @@ config LZ4HC_COMPRESS
 	tristate
 
 config LZ4_DECOMPRESS
+	tristate
+
+config ZSTD_COMPRESS
+	select XXHASH
+	tristate
+
+config ZSTD_DECOMPRESS
+	select XXHASH
 	tristate
 
 source "lib/xz/Kconfig"
@@ -362,9 +373,6 @@ config INTERVAL_TREE
 
 	  for more information.
 
-config RADIX_TREE_MULTIORDER
-	bool
-
 config ASSOCIATIVE_ARRAY
 	bool
 	help
@@ -457,6 +465,9 @@ config NLATTR
 config GENERIC_ATOMIC64
        bool
 
+config ARCH_HAS_ATOMIC64_DEC_IF_POSITIVE
+	def_bool y if GENERIC_ATOMIC64
+
 config LRU_CACHE
 	tristate
 
@@ -476,11 +487,6 @@ config DDR
 	  particularly the AC timing parameters and addressing
 	  information. This data is useful for drivers handling
 	  DDR SDRAM controllers.
-
-config IRQ_POLL
-	bool "IRQ polling library"
-	help
-	  Helper library to poll interrupt mitigation using polling.
 
 config MPILIB
 	tristate
@@ -519,16 +525,9 @@ source "lib/fonts/Kconfig"
 config SG_SPLIT
 	def_bool n
 	help
-	 Provides a helper to split scatterlists into chunks, each chunk being
-	 a scatterlist. This should be selected by a driver or an API which
-	 whishes to split a scatterlist amongst multiple DMA channels.
-
-config SG_POOL
-	def_bool n
-	help
-	 Provides a helper to allocate chained scatterlists. This should be
-	 selected by a driver or an API which whishes to allocate chained
-	 scatterlist.
+	 Provides a heler to split scatterlists into chunks, each chunk being a
+	 scatterlist. This should be selected by a driver or an API which
+	 whishes to split a scatterlist amongst multiple DMA channel.
 
 #
 # sg chaining option
@@ -546,8 +545,5 @@ config ARCH_HAS_MMIO_FLUSH
 config STACKDEPOT
 	bool
 	select STACKTRACE
-
-config SBITMAP
-	bool
 
 endmenu

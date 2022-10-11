@@ -79,9 +79,9 @@ static int find_deepest_state(struct cpuidle_driver *drv,
 			      bool freeze)
 {
 	unsigned int latency_req = 0;
-	int i, ret = 0;
+	int i, ret = -ENXIO;
 
-	for (i = 1; i < drv->state_count; i++) {
+	for (i = 0; i < drv->state_count; i++) {
 		struct cpuidle_state *s = &drv->states[i];
 		struct cpuidle_state_usage *su = &dev->states_usage[i];
 
@@ -153,67 +153,13 @@ int cpuidle_enter_freeze(struct cpuidle_driver *drv, struct cpuidle_device *dev)
 	 * be frozen safely.
 	 */
 	index = find_deepest_state(drv, dev, UINT_MAX, 0, true);
-	if (index > 0)
+	if (index >= 0)
 		enter_freeze_proper(drv, dev, index);
 
 	return index;
 }
 #endif /* CONFIG_SUSPEND */
 
-#ifdef CONFIG_ARM_SUNXI_CPUIDLE_TIMESTAMP
-static inline u64 arch_counter_get_cntpct(void)
-{
-	u64 cval;
-
-	isb();
-	asm volatile("mrrc p15, 0, %Q0, %R0, c14" : "=r" (cval));
-	return cval;
-}
-
-/*
- * 0xc0020800~0xc0021000 is reserved in dts,
- * just follow standby space.
- * this space is used to record the timestamps
- * of each stage in cpuidle. each cpu occupy
- * 48 bytes.
- */
-#define CPUIDLE_TIMESTAMPS_BASE  (phys_to_virt((const volatile void *)0x40020800))
-#define DIV24(x)  (((x) * 85) >> 11)
-
-typedef struct cpuidle_timestamps {
-	/* Linux record when cpuidle enter */
-	u64 cpux_idle_enter_time;
-	/* optee record before wfi */
-	u64 cpux_idle_finish_time;
-	/* cpus record when core down */
-	u64 cpux_core_down_time;
-	/* cpus record when gicout */
-	u64 cpus_wake_up_time;
-	/* optee record when core up */
-	u64 cpux_start_wake_time;
-	/* Linux record when cpuidle exit */
-	u64 cpux_wakeup_finish_time;
-} cpuidle_timestamps_t;
-
-#define software_core_close_time(cpu)  \
-	(cpuidle_time[cpu].cpux_idle_finish_time -\
-		cpuidle_time[cpu].cpux_idle_enter_time)
-#define hardware_core_close_time(cpu)  \
-	(cpuidle_time[cpu].cpux_core_down_time -\
-		cpuidle_time[cpu].cpux_idle_finish_time)
-
-#define software_core_open_time(cpu)  \
-	(cpuidle_time[cpu].cpux_wakeup_finish_time -\
-		cpuidle_time[cpu].cpux_start_wake_time)
-#define hardware_core_open_time(cpu)  \
-	(cpuidle_time[cpu].cpux_start_wake_time -\
-		cpuidle_time[cpu].cpus_wake_up_time)
-
-#define resident_core_down_time(cpu)  \
-	(cpuidle_time[cpu].cpux_wakeup_finish_time -\
-		cpuidle_time[cpu].cpux_idle_enter_time)
-
-#endif
 /**
  * cpuidle_enter_state - enter the state and update stats
  * @dev: cpuidle device for this cpu
@@ -229,11 +175,7 @@ int cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_driver *drv,
 	bool broadcast = !!(target_state->flags & CPUIDLE_FLAG_TIMER_STOP);
 	ktime_t time_start, time_end;
 	s64 diff;
-#ifdef CONFIG_ARM_SUNXI_CPUIDLE_TIMESTAMP
-	int cpu = smp_processor_id();
-	cpuidle_timestamps_t *cpuidle_time =
-		(cpuidle_timestamps_t *)CPUIDLE_TIMESTAMPS_BASE;
-#endif
+
 	/*
 	 * Tell the time framework to switch to a broadcast timer because our
 	 * local timer will be shut down.  If a local timer is used from another
@@ -254,30 +196,13 @@ int cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_driver *drv,
 	sched_idle_set_state(target_state, index);
 
 	trace_cpu_idle_rcuidle(index, dev->cpu);
-	time_start = ns_to_ktime(local_clock());
-	stop_critical_timings();
+	time_start = ktime_get();
 
-#ifdef CONFIG_ARM_SUNXI_CPUIDLE_TIMESTAMP
-	if ((index > 0) && (cpu != 0))
-		cpuidle_time[cpu].cpux_idle_enter_time =
-			arch_counter_get_cntpct();
-#endif
+	stop_critical_timings();
 	entered_state = target_state->enter(dev, drv, index);
-#ifdef CONFIG_ARM_SUNXI_CPUIDLE_TIMESTAMP
-	if ((index > 0) && (cpu != 0) && (cpu == smp_processor_id())) {
-		cpuidle_time[cpu].cpux_wakeup_finish_time =
-			arch_counter_get_cntpct();
-		pr_err("c%d, es:%lld, eh:%lld, xh:%lld, xs:%lld, r:%lld\n", cpu,
-		DIV24(software_core_close_time(cpu)),
-		DIV24(hardware_core_close_time(cpu)),
-		DIV24(hardware_core_open_time(cpu)),
-		DIV24(software_core_open_time(cpu)),
-		DIV24(resident_core_down_time(cpu)));
-	}
-#endif
 	start_critical_timings();
 
-	time_end = ns_to_ktime(local_clock());
+	time_end = ktime_get();
 	trace_cpu_idle_rcuidle(PWR_EVENT_EXIT, dev->cpu);
 
 	/* The cpu is no longer idle or about to enter idle. */
@@ -293,7 +218,7 @@ int cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_driver *drv,
 	if (!cpuidle_state_is_coupled(drv, index))
 		local_irq_enable();
 
-	diff = ktime_us_delta(time_end, time_start);
+	diff = ktime_to_us(ktime_sub(time_end, time_start));
 	if (diff > INT_MAX)
 		diff = INT_MAX;
 
@@ -319,7 +244,7 @@ int cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_driver *drv,
  * @drv: the cpuidle driver
  * @dev: the cpuidle device
  *
- * Returns the index of the idle state.  The return value must not be negative.
+ * Returns the index of the idle state.
  */
 int cpuidle_select(struct cpuidle_driver *drv, struct cpuidle_device *dev)
 {

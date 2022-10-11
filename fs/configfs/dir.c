@@ -58,15 +58,13 @@ static void configfs_d_iput(struct dentry * dentry,
 	if (sd) {
 		/* Coordinate with configfs_readdir */
 		spin_lock(&configfs_dirent_lock);
-		/* Coordinate with configfs_attach_attr where will increase
-		 * sd->s_count and update sd->s_dentry to new allocated one.
-		 * Only set sd->dentry to null when this dentry is the only
-		 * sd owner.
-		 * If not do so, configfs_d_iput may run just after
-		 * configfs_attach_attr and set sd->s_dentry to null
-		 * even it's still in use.
+		/*
+		 * Set sd->s_dentry to null only when this dentry is the one
+		 * that is going to be killed.  Otherwise configfs_d_iput may
+		 * run just after configfs_attach_attr and set sd->s_dentry to
+		 * NULL even it's still in use.
 		 */
-		if (atomic_read(&sd->s_count) <= 2)
+		if (sd->s_dentry == dentry)
 			sd->s_dentry = NULL;
 
 		spin_unlock(&configfs_dirent_lock);
@@ -255,12 +253,6 @@ static void configfs_init_file(struct inode * inode)
 	inode->i_fop = &configfs_file_operations;
 }
 
-static void configfs_init_bin_file(struct inode *inode)
-{
-	inode->i_size = 0;
-	inode->i_fop = &configfs_bin_file_operations;
-}
-
 static void init_symlink(struct inode * inode)
 {
 	inode->i_op = &configfs_symlink_inode_operations;
@@ -429,12 +421,15 @@ static int configfs_attach_attr(struct configfs_dirent * sd, struct dentry * den
 	spin_unlock(&configfs_dirent_lock);
 
 	error = configfs_create(dentry, (attr->ca_mode & S_IALLUGO) | S_IFREG,
-				(sd->s_type & CONFIGFS_ITEM_BIN_ATTR) ?
-					configfs_init_bin_file :
-					configfs_init_file);
-	if (error)
+				configfs_init_file);
+	if (error) {
 		configfs_put(sd);
-	return error;
+		return error;
+	}
+
+	d_rehash(dentry);
+
+	return 0;
 }
 
 static struct dentry * configfs_lookup(struct inode *dir,
@@ -494,7 +489,7 @@ out:
  * If there is an error, the caller will reset the flags via
  * configfs_detach_rollback().
  */
-static int configfs_detach_prep(struct dentry *dentry, struct dentry **wait)
+static int configfs_detach_prep(struct dentry *dentry, struct mutex **wait_mutex)
 {
 	struct configfs_dirent *parent_sd = dentry->d_fsdata;
 	struct configfs_dirent *sd;
@@ -515,8 +510,8 @@ static int configfs_detach_prep(struct dentry *dentry, struct dentry **wait)
 		if (sd->s_type & CONFIGFS_USET_DEFAULT) {
 			/* Abort if racing with mkdir() */
 			if (sd->s_type & CONFIGFS_USET_IN_MKDIR) {
-				if (wait)
-					*wait= dget(sd->s_dentry);
+				if (wait_mutex)
+					*wait_mutex = &d_inode(sd->s_dentry)->i_mutex;
 				return -EAGAIN;
 			}
 
@@ -524,7 +519,7 @@ static int configfs_detach_prep(struct dentry *dentry, struct dentry **wait)
 			 * Yup, recursive.  If there's a problem, blame
 			 * deep nesting of default_groups
 			 */
-			ret = configfs_detach_prep(sd->s_dentry, wait);
+			ret = configfs_detach_prep(sd->s_dentry, wait_mutex);
 			if (!ret)
 				continue;
 		} else
@@ -586,7 +581,6 @@ static int populate_attrs(struct config_item *item)
 {
 	struct config_item_type *t = item->ci_type;
 	struct configfs_attribute *attr;
-	struct configfs_bin_attribute *bin_attr;
 	int error = 0;
 	int i;
 
@@ -595,13 +589,6 @@ static int populate_attrs(struct config_item *item)
 	if (t->ct_attrs) {
 		for (i = 0; (attr = t->ct_attrs[i]) != NULL; i++) {
 			if ((error = configfs_create_file(item, attr)))
-				break;
-		}
-	}
-	if (t->ct_bin_attrs) {
-		for (i = 0; (bin_attr = t->ct_bin_attrs[i]) != NULL; i++) {
-			error = configfs_create_bin_file(item, bin_attr);
-			if (error)
 				break;
 		}
 	}
@@ -635,13 +622,13 @@ static void detach_groups(struct config_group *group)
 
 		child = sd->s_dentry;
 
-		inode_lock(d_inode(child));
+		mutex_lock(&d_inode(child)->i_mutex);
 
 		configfs_detach_group(sd->s_element);
 		d_inode(child)->i_flags |= S_DEAD;
 		dont_mount(child);
 
-		inode_unlock(d_inode(child));
+		mutex_unlock(&d_inode(child)->i_mutex);
 
 		d_delete(child);
 		dput(child);
@@ -696,28 +683,22 @@ static int populate_groups(struct config_group *group)
 {
 	struct config_group *new_group;
 	int ret = 0;
+	int i;
 
-	list_for_each_entry(new_group, &group->default_groups, group_entry) {
-		ret = create_default_group(group, new_group);
-		if (ret) {
-			detach_groups(group);
-			break;
+	if (group->default_groups) {
+		for (i = 0; group->default_groups[i]; i++) {
+			new_group = group->default_groups[i];
+
+			ret = create_default_group(group, new_group);
+			if (ret) {
+				detach_groups(group);
+				break;
+			}
 		}
 	}
 
 	return ret;
 }
-
-void configfs_remove_default_groups(struct config_group *group)
-{
-	struct config_group *g, *n;
-
-	list_for_each_entry_safe(g, n, &group->default_groups, group_entry) {
-		list_del(&g->group_entry);
-		config_item_put(&g->cg_item);
-	}
-}
-EXPORT_SYMBOL(configfs_remove_default_groups);
 
 /*
  * All of link_obj/unlink_obj/link_group/unlink_group require that
@@ -767,10 +748,15 @@ static void link_obj(struct config_item *parent_item, struct config_item *item)
 
 static void unlink_group(struct config_group *group)
 {
+	int i;
 	struct config_group *new_group;
 
-	list_for_each_entry(new_group, &group->default_groups, group_entry)
-		unlink_group(new_group);
+	if (group->default_groups) {
+		for (i = 0; group->default_groups[i]; i++) {
+			new_group = group->default_groups[i];
+			unlink_group(new_group);
+		}
+	}
 
 	group->cg_subsys = NULL;
 	unlink_obj(&group->cg_item);
@@ -778,6 +764,7 @@ static void unlink_group(struct config_group *group)
 
 static void link_group(struct config_group *parent_group, struct config_group *group)
 {
+	int i;
 	struct config_group *new_group;
 	struct configfs_subsystem *subsys = NULL; /* gcc is a turd */
 
@@ -791,8 +778,12 @@ static void link_group(struct config_group *parent_group, struct config_group *g
 		BUG();
 	group->cg_subsys = subsys;
 
-	list_for_each_entry(new_group, &group->default_groups, group_entry)
-		link_group(group, new_group);
+	if (group->default_groups) {
+		for (i = 0; group->default_groups[i]; i++) {
+			new_group = group->default_groups[i];
+			link_group(group, new_group);
+		}
+	}
 }
 
 /*
@@ -825,11 +816,11 @@ static int configfs_attach_item(struct config_item *parent_item,
 			 * the VFS may already have hit and used them. Thus,
 			 * we must lock them as rmdir() would.
 			 */
-			inode_lock(d_inode(dentry));
+			mutex_lock(&d_inode(dentry)->i_mutex);
 			configfs_remove_dir(item);
 			d_inode(dentry)->i_flags |= S_DEAD;
 			dont_mount(dentry);
-			inode_unlock(d_inode(dentry));
+			mutex_unlock(&d_inode(dentry)->i_mutex);
 			d_delete(dentry);
 		}
 	}
@@ -865,7 +856,7 @@ static int configfs_attach_group(struct config_item *parent_item,
 		 * We must also lock the inode to remove it safely in case of
 		 * error, as rmdir() would.
 		 */
-		inode_lock_nested(d_inode(dentry), I_MUTEX_CHILD);
+		mutex_lock_nested(&d_inode(dentry)->i_mutex, I_MUTEX_CHILD);
 		configfs_adjust_dir_dirent_depth_before_populate(sd);
 		ret = populate_groups(to_config_group(item));
 		if (ret) {
@@ -874,7 +865,7 @@ static int configfs_attach_group(struct config_item *parent_item,
 			dont_mount(dentry);
 		}
 		configfs_adjust_dir_dirent_depth_after_populate(sd);
-		inode_unlock(d_inode(dentry));
+		mutex_unlock(&d_inode(dentry)->i_mutex);
 		if (ret)
 			d_delete(dentry);
 	}
@@ -1061,55 +1052,11 @@ out:
 	return ret;
 }
 
-static int configfs_do_depend_item(struct dentry *subsys_dentry,
-				   struct config_item *target)
-{
-	struct configfs_dirent *p;
-	int ret;
-
-	spin_lock(&configfs_dirent_lock);
-	/* Scan the tree, return 0 if found */
-	ret = configfs_depend_prep(subsys_dentry, target);
-	if (ret)
-		goto out_unlock_dirent_lock;
-
-	/*
-	 * We are sure that the item is not about to be removed by rmdir(), and
-	 * not in the middle of attachment by mkdir().
-	 */
-	p = target->ci_dentry->d_fsdata;
-	p->s_dependent_count += 1;
-
-out_unlock_dirent_lock:
-	spin_unlock(&configfs_dirent_lock);
-
-	return ret;
-}
-
-static inline struct configfs_dirent *
-configfs_find_subsys_dentry(struct configfs_dirent *root_sd,
-			    struct config_item *subsys_item)
-{
-	struct configfs_dirent *p;
-	struct configfs_dirent *ret = NULL;
-
-	list_for_each_entry(p, &root_sd->s_children, s_sibling) {
-		if (p->s_type & CONFIGFS_DIR &&
-		    p->s_element == subsys_item) {
-			ret = p;
-			break;
-		}
-	}
-
-	return ret;
-}
-
-
 int configfs_depend_item(struct configfs_subsystem *subsys,
 			 struct config_item *target)
 {
 	int ret;
-	struct configfs_dirent *subsys_sd;
+	struct configfs_dirent *p, *root_sd, *subsys_sd = NULL;
 	struct config_item *s_item = &subsys->su_group.cg_item;
 	struct dentry *root;
 
@@ -1126,19 +1073,43 @@ int configfs_depend_item(struct configfs_subsystem *subsys,
 	 * subsystem is really registered, and so we need to lock out
 	 * configfs_[un]register_subsystem().
 	 */
-	inode_lock(d_inode(root));
+	mutex_lock(&d_inode(root)->i_mutex);
 
-	subsys_sd = configfs_find_subsys_dentry(root->d_fsdata, s_item);
+	root_sd = root->d_fsdata;
+
+	list_for_each_entry(p, &root_sd->s_children, s_sibling) {
+		if (p->s_type & CONFIGFS_DIR) {
+			if (p->s_element == s_item) {
+				subsys_sd = p;
+				break;
+			}
+		}
+	}
+
 	if (!subsys_sd) {
 		ret = -ENOENT;
 		goto out_unlock_fs;
 	}
 
 	/* Ok, now we can trust subsys/s_item */
-	ret = configfs_do_depend_item(subsys_sd->s_dentry, target);
 
+	spin_lock(&configfs_dirent_lock);
+	/* Scan the tree, return 0 if found */
+	ret = configfs_depend_prep(subsys_sd->s_dentry, target);
+	if (ret)
+		goto out_unlock_dirent_lock;
+
+	/*
+	 * We are sure that the item is not about to be removed by rmdir(), and
+	 * not in the middle of attachment by mkdir().
+	 */
+	p = target->ci_dentry->d_fsdata;
+	p->s_dependent_count += 1;
+
+out_unlock_dirent_lock:
+	spin_unlock(&configfs_dirent_lock);
 out_unlock_fs:
-	inode_unlock(d_inode(root));
+	mutex_unlock(&d_inode(root)->i_mutex);
 
 	/*
 	 * If we succeeded, the fs is pinned via other methods.  If not,
@@ -1155,7 +1126,8 @@ EXPORT_SYMBOL(configfs_depend_item);
  * configfs_depend_item() because we know that that the client driver is
  * pinned, thus the subsystem is pinned, and therefore configfs is pinned.
  */
-void configfs_undepend_item(struct config_item *target)
+void configfs_undepend_item(struct configfs_subsystem *subsys,
+			    struct config_item *target)
 {
 	struct configfs_dirent *sd;
 
@@ -1177,79 +1149,6 @@ void configfs_undepend_item(struct config_item *target)
 	spin_unlock(&configfs_dirent_lock);
 }
 EXPORT_SYMBOL(configfs_undepend_item);
-
-/*
- * caller_subsys is a caller's subsystem not target's. This is used to
- * determine if we should lock root and check subsys or not. When we are
- * in the same subsystem as our target there is no need to do locking as
- * we know that subsys is valid and is not unregistered during this function
- * as we are called from callback of one of his children and VFS holds a lock
- * on some inode. Otherwise we have to lock our root to  ensure that target's
- * subsystem it is not unregistered during this function.
- */
-int configfs_depend_item_unlocked(struct configfs_subsystem *caller_subsys,
-				  struct config_item *target)
-{
-	struct configfs_subsystem *target_subsys;
-	struct config_group *root, *parent;
-	struct configfs_dirent *subsys_sd;
-	int ret = -ENOENT;
-
-	/* Disallow this function for configfs root */
-	if (configfs_is_root(target))
-		return -EINVAL;
-
-	parent = target->ci_group;
-	/*
-	 * This may happen when someone is trying to depend root
-	 * directory of some subsystem
-	 */
-	if (configfs_is_root(&parent->cg_item)) {
-		target_subsys = to_configfs_subsystem(to_config_group(target));
-		root = parent;
-	} else {
-		target_subsys = parent->cg_subsys;
-		/* Find a cofnigfs root as we may need it for locking */
-		for (root = parent; !configfs_is_root(&root->cg_item);
-		     root = root->cg_item.ci_group)
-			;
-	}
-
-	if (target_subsys != caller_subsys) {
-		/*
-		 * We are in other configfs subsystem, so we have to do
-		 * additional locking to prevent other subsystem from being
-		 * unregistered
-		 */
-		inode_lock(d_inode(root->cg_item.ci_dentry));
-
-		/*
-		 * As we are trying to depend item from other subsystem
-		 * we have to check if this subsystem is still registered
-		 */
-		subsys_sd = configfs_find_subsys_dentry(
-				root->cg_item.ci_dentry->d_fsdata,
-				&target_subsys->su_group.cg_item);
-		if (!subsys_sd)
-			goto out_root_unlock;
-	} else {
-		subsys_sd = target_subsys->su_group.cg_item.ci_dentry->d_fsdata;
-	}
-
-	/* Now we can execute core of depend item */
-	ret = configfs_do_depend_item(subsys_sd->s_dentry, target);
-
-	if (target_subsys != caller_subsys)
-out_root_unlock:
-		/*
-		 * We were called from subsystem other than our target so we
-		 * took some locks so now it's time to release them
-		 */
-		inode_unlock(d_inode(root->cg_item.ci_dentry));
-
-	return ret;
-}
-EXPORT_SYMBOL(configfs_depend_item_unlocked);
 
 static int configfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
@@ -1458,7 +1357,7 @@ static int configfs_rmdir(struct inode *dir, struct dentry *dentry)
 	 * the new link is temporarily attached
 	 */
 	do {
-		struct dentry *wait;
+		struct mutex *wait_mutex;
 
 		mutex_lock(&configfs_symlink_mutex);
 		spin_lock(&configfs_dirent_lock);
@@ -1469,7 +1368,7 @@ static int configfs_rmdir(struct inode *dir, struct dentry *dentry)
 		 */
 		ret = sd->s_dependent_count ? -EBUSY : 0;
 		if (!ret) {
-			ret = configfs_detach_prep(dentry, &wait);
+			ret = configfs_detach_prep(dentry, &wait_mutex);
 			if (ret)
 				configfs_detach_rollback(dentry);
 		}
@@ -1483,9 +1382,8 @@ static int configfs_rmdir(struct inode *dir, struct dentry *dentry)
 			}
 
 			/* Wait until the racing operation terminates */
-			inode_lock(d_inode(wait));
-			inode_unlock(d_inode(wait));
-			dput(wait);
+			mutex_lock(wait_mutex);
+			mutex_unlock(wait_mutex);
 		}
 	} while (ret == -EAGAIN);
 
@@ -1553,7 +1451,7 @@ int configfs_rename_dir(struct config_item * item, const char *new_name)
 	down_write(&configfs_rename_sem);
 	parent = item->parent->dentry;
 
-	inode_lock(d_inode(parent));
+	mutex_lock(&d_inode(parent)->i_mutex);
 
 	new_dentry = lookup_one_len(new_name, parent, strlen(new_name));
 	if (!IS_ERR(new_dentry)) {
@@ -1569,7 +1467,7 @@ int configfs_rename_dir(struct config_item * item, const char *new_name)
 			error = -EEXIST;
 		dput(new_dentry);
 	}
-	inode_unlock(d_inode(parent));
+	mutex_unlock(&d_inode(parent)->i_mutex);
 	up_write(&configfs_rename_sem);
 
 	return error;
@@ -1582,7 +1480,7 @@ static int configfs_dir_open(struct inode *inode, struct file *file)
 	struct configfs_dirent * parent_sd = dentry->d_fsdata;
 	int err;
 
-	inode_lock(d_inode(dentry));
+	mutex_lock(&d_inode(dentry)->i_mutex);
 	/*
 	 * Fake invisibility if dir belongs to a group/default groups hierarchy
 	 * being attached
@@ -1595,7 +1493,7 @@ static int configfs_dir_open(struct inode *inode, struct file *file)
 		else
 			err = 0;
 	}
-	inode_unlock(d_inode(dentry));
+	mutex_unlock(&d_inode(dentry)->i_mutex);
 
 	return err;
 }
@@ -1605,11 +1503,11 @@ static int configfs_dir_close(struct inode *inode, struct file *file)
 	struct dentry * dentry = file->f_path.dentry;
 	struct configfs_dirent * cursor = file->private_data;
 
-	inode_lock(d_inode(dentry));
+	mutex_lock(&d_inode(dentry)->i_mutex);
 	spin_lock(&configfs_dirent_lock);
 	list_del_init(&cursor->s_sibling);
 	spin_unlock(&configfs_dirent_lock);
-	inode_unlock(d_inode(dentry));
+	mutex_unlock(&d_inode(dentry)->i_mutex);
 
 	release_configfs_dirent(cursor);
 
@@ -1633,9 +1531,11 @@ static int configfs_readdir(struct file *file, struct dir_context *ctx)
 
 	if (!dir_emit_dots(file, ctx))
 		return 0;
-	spin_lock(&configfs_dirent_lock);
-	if (ctx->pos == 2)
+	if (ctx->pos == 2) {
+		spin_lock(&configfs_dirent_lock);
 		list_move(q, &parent_sd->s_children);
+		spin_unlock(&configfs_dirent_lock);
+	}
 	for (p = q->next; p != &parent_sd->s_children; p = p->next) {
 		struct configfs_dirent *next;
 		const char *name;
@@ -1645,6 +1545,9 @@ static int configfs_readdir(struct file *file, struct dir_context *ctx)
 		next = list_entry(p, struct configfs_dirent, s_sibling);
 		if (!next->s_element)
 			continue;
+
+		name = configfs_get_name(next);
+		len = strlen(name);
 
 		/*
 		 * We'll have a dentry and an inode for
@@ -1659,6 +1562,7 @@ static int configfs_readdir(struct file *file, struct dir_context *ctx)
 		 * they close it.  Beyond that, we don't
 		 * care.
 		 */
+		spin_lock(&configfs_dirent_lock);
 		dentry = next->s_dentry;
 		if (dentry)
 			inode = d_inode(dentry);
@@ -1668,18 +1572,15 @@ static int configfs_readdir(struct file *file, struct dir_context *ctx)
 		if (!inode)
 			ino = iunique(sb, 2);
 
-		name = configfs_get_name(next);
-		len = strlen(name);
-
 		if (!dir_emit(ctx, name, len, ino, dt_type(next)))
 			return 0;
 
 		spin_lock(&configfs_dirent_lock);
 		list_move(q, p);
+		spin_unlock(&configfs_dirent_lock);
 		p = q;
 		ctx->pos++;
 	}
-	spin_unlock(&configfs_dirent_lock);
 	return 0;
 }
 
@@ -1687,6 +1588,7 @@ static loff_t configfs_dir_lseek(struct file *file, loff_t offset, int whence)
 {
 	struct dentry * dentry = file->f_path.dentry;
 
+	mutex_lock(&d_inode(dentry)->i_mutex);
 	switch (whence) {
 		case 1:
 			offset += file->f_pos;
@@ -1694,6 +1596,7 @@ static loff_t configfs_dir_lseek(struct file *file, loff_t offset, int whence)
 			if (offset >= 0)
 				break;
 		default:
+			mutex_unlock(&d_inode(dentry)->i_mutex);
 			return -EINVAL;
 	}
 	if (offset != file->f_pos) {
@@ -1719,6 +1622,7 @@ static loff_t configfs_dir_lseek(struct file *file, loff_t offset, int whence)
 			spin_unlock(&configfs_dirent_lock);
 		}
 	}
+	mutex_unlock(&d_inode(dentry)->i_mutex);
 	return offset;
 }
 
@@ -1727,7 +1631,7 @@ const struct file_operations configfs_dir_operations = {
 	.release	= configfs_dir_close,
 	.llseek		= configfs_dir_lseek,
 	.read		= generic_read_dir,
-	.iterate_shared	= configfs_readdir,
+	.iterate	= configfs_readdir,
 };
 
 /**
@@ -1753,14 +1657,14 @@ int configfs_register_group(struct config_group *parent_group,
 
 	parent = parent_group->cg_item.ci_dentry;
 
-	inode_lock_nested(d_inode(parent), I_MUTEX_PARENT);
+	mutex_lock_nested(&d_inode(parent)->i_mutex, I_MUTEX_PARENT);
 	ret = create_default_group(parent_group, group);
 	if (!ret) {
 		spin_lock(&configfs_dirent_lock);
 		configfs_dir_set_ready(group->cg_item.ci_dentry->d_fsdata);
 		spin_unlock(&configfs_dirent_lock);
 	}
-	inode_unlock(d_inode(parent));
+	mutex_unlock(&d_inode(parent)->i_mutex);
 	return ret;
 }
 EXPORT_SYMBOL(configfs_register_group);
@@ -1777,7 +1681,7 @@ void configfs_unregister_group(struct config_group *group)
 	struct dentry *dentry = group->cg_item.ci_dentry;
 	struct dentry *parent = group->cg_item.ci_parent->ci_dentry;
 
-	inode_lock_nested(d_inode(parent), I_MUTEX_PARENT);
+	mutex_lock_nested(&d_inode(parent)->i_mutex, I_MUTEX_PARENT);
 	spin_lock(&configfs_dirent_lock);
 	configfs_detach_prep(dentry, NULL);
 	spin_unlock(&configfs_dirent_lock);
@@ -1786,7 +1690,7 @@ void configfs_unregister_group(struct config_group *group)
 	d_inode(dentry)->i_flags |= S_DEAD;
 	dont_mount(dentry);
 	d_delete(dentry);
-	inode_unlock(d_inode(parent));
+	mutex_unlock(&d_inode(parent)->i_mutex);
 
 	dput(dentry);
 
@@ -1858,7 +1762,7 @@ int configfs_register_subsystem(struct configfs_subsystem *subsys)
 	sd = root->d_fsdata;
 	link_group(to_config_group(sd->s_element), group);
 
-	inode_lock_nested(d_inode(root), I_MUTEX_PARENT);
+	mutex_lock_nested(&d_inode(root)->i_mutex, I_MUTEX_PARENT);
 
 	err = -ENOMEM;
 	dentry = d_alloc_name(root, group->cg_item.ci_name);
@@ -1878,7 +1782,7 @@ int configfs_register_subsystem(struct configfs_subsystem *subsys)
 		}
 	}
 
-	inode_unlock(d_inode(root));
+	mutex_unlock(&d_inode(root)->i_mutex);
 
 	if (err) {
 		unlink_group(group);
@@ -1899,9 +1803,9 @@ void configfs_unregister_subsystem(struct configfs_subsystem *subsys)
 		return;
 	}
 
-	inode_lock_nested(d_inode(root),
+	mutex_lock_nested(&d_inode(root)->i_mutex,
 			  I_MUTEX_PARENT);
-	inode_lock_nested(d_inode(dentry), I_MUTEX_CHILD);
+	mutex_lock_nested(&d_inode(dentry)->i_mutex, I_MUTEX_CHILD);
 	mutex_lock(&configfs_symlink_mutex);
 	spin_lock(&configfs_dirent_lock);
 	if (configfs_detach_prep(dentry, NULL)) {
@@ -1912,11 +1816,11 @@ void configfs_unregister_subsystem(struct configfs_subsystem *subsys)
 	configfs_detach_group(&group->cg_item);
 	d_inode(dentry)->i_flags |= S_DEAD;
 	dont_mount(dentry);
-	inode_unlock(d_inode(dentry));
+	mutex_unlock(&d_inode(dentry)->i_mutex);
 
 	d_delete(dentry);
 
-	inode_unlock(d_inode(root));
+	mutex_unlock(&d_inode(root)->i_mutex);
 
 	dput(dentry);
 

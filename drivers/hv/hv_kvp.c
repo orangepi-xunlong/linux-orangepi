@@ -88,6 +88,7 @@ static DECLARE_WORK(kvp_sendkey_work, kvp_send_key);
 static const char kvp_devname[] = "vmbus/hv_kvp";
 static u8 *recv_buffer;
 static struct hvutil_transport *hvt;
+static struct completion release_event;
 /*
  * Register the kernel component with the user-level daemon.
  * As part of this registration, pass the LIC version number.
@@ -100,17 +101,6 @@ static void kvp_poll_wrapper(void *channel)
 	/* Transaction is finished, reset the state here to avoid races. */
 	kvp_transaction.state = HVUTIL_READY;
 	hv_kvp_onchannelcallback(channel);
-}
-
-static void kvp_register_done(void)
-{
-	/*
-	 * If we're still negotiating with the host cancel the timeout
-	 * work to not poll the channel twice.
-	 */
-	pr_debug("KVP: userspace daemon registered\n");
-	cancel_delayed_work_sync(&kvp_host_handshake_work);
-	hv_poll_channel(kvp_transaction.recv_channel, kvp_poll_wrapper);
 }
 
 static void
@@ -127,8 +117,7 @@ kvp_register(int reg_value)
 		kvp_msg->kvp_hdr.operation = reg_value;
 		strcpy(version, HV_DRV_VERSION);
 
-		hvutil_transport_send(hvt, kvp_msg, sizeof(*kvp_msg),
-				      kvp_register_done);
+		hvutil_transport_send(hvt, kvp_msg, sizeof(*kvp_msg));
 		kfree(kvp_msg);
 	}
 }
@@ -170,9 +159,16 @@ static int kvp_handle_handshake(struct hv_kvp_msg *msg)
 	/*
 	 * We have a compatible daemon; complete the handshake.
 	 */
-	pr_debug("KVP: userspace daemon ver. %d connected\n",
-		 msg->kvp_hdr.operation);
+	pr_debug("KVP: userspace daemon ver. %d registered\n",
+		 KVP_OP_REGISTER);
 	kvp_register(dm_reg_value);
+
+	/*
+	 * If we're still negotiating with the host cancel the timeout
+	 * work to not poll the channel twice.
+	 */
+	cancel_delayed_work_sync(&kvp_host_handshake_work);
+	hv_poll_channel(kvp_transaction.recv_channel, kvp_poll_wrapper);
 
 	return 0;
 }
@@ -460,7 +456,7 @@ kvp_send_key(struct work_struct *dummy)
 	}
 
 	kvp_transaction.state = HVUTIL_USERSPACE_REQ;
-	rc = hvutil_transport_send(hvt, message, sizeof(*message), NULL);
+	rc = hvutil_transport_send(hvt, message, sizeof(*message));
 	if (rc) {
 		pr_debug("KVP: failed to communicate to the daemon: %d\n", rc);
 		if (cancel_delayed_work_sync(&kvp_timeout_work)) {
@@ -616,21 +612,22 @@ void hv_kvp_onchannelcallback(void *context)
 		     NEGO_IN_PROGRESS,
 		     NEGO_FINISHED} host_negotiatied = NEGO_NOT_STARTED;
 
-	if (host_negotiatied == NEGO_NOT_STARTED &&
-	    kvp_transaction.state < HVUTIL_READY) {
+	if (kvp_transaction.state < HVUTIL_READY) {
 		/*
 		 * If userspace daemon is not connected and host is asking
 		 * us to negotiate we need to delay to not lose messages.
 		 * This is important for Failover IP setting.
 		 */
-		host_negotiatied = NEGO_IN_PROGRESS;
-		schedule_delayed_work(&kvp_host_handshake_work,
+		if (host_negotiatied == NEGO_NOT_STARTED) {
+			host_negotiatied = NEGO_IN_PROGRESS;
+			schedule_delayed_work(&kvp_host_handshake_work,
 				      HV_UTIL_NEGO_TIMEOUT * HZ);
+		}
 		return;
 	}
 	if (kvp_transaction.state > HVUTIL_READY)
 		return;
-
+recheck:
 	vmbus_recvpacket(channel, recv_buffer, PAGE_SIZE * 4, &recvlen,
 			 &requestid);
 
@@ -707,6 +704,8 @@ void hv_kvp_onchannelcallback(void *context)
 				       VM_PKT_DATA_INBAND, 0);
 
 		host_negotiatied = NEGO_FINISHED;
+
+		goto recheck;
 	}
 
 }
@@ -716,6 +715,7 @@ static void kvp_on_reset(void)
 	if (cancel_delayed_work_sync(&kvp_timeout_work))
 		kvp_respond_to_host(NULL, HV_E_FAIL);
 	kvp_transaction.state = HVUTIL_DEVICE_INIT;
+	complete(&release_event);
 }
 
 int
@@ -724,6 +724,7 @@ hv_kvp_init(struct hv_util_service *srv)
 	recv_buffer = srv->recv_buffer;
 	kvp_transaction.recv_channel = srv->channel;
 
+	init_completion(&release_event);
 	/*
 	 * When this driver loads, the user level daemon that
 	 * processes the host requests may not yet be running.
@@ -747,4 +748,5 @@ void hv_kvp_deinit(void)
 	cancel_delayed_work_sync(&kvp_timeout_work);
 	cancel_work_sync(&kvp_sendkey_work);
 	hvutil_transport_destroy(hvt);
+	wait_for_completion(&release_event);
 }

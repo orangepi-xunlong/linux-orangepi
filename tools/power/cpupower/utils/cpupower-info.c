@@ -12,6 +12,7 @@
 #include <string.h>
 #include <getopt.h>
 
+#include <cpufreq.h>
 #include "helpers/helpers.h"
 #include "helpers/sysfs.h"
 
@@ -82,15 +83,11 @@ int cmd_info(int argc, char **argv)
 	for (cpu = bitmask_first(cpus_chosen);
 	     cpu <= bitmask_last(cpus_chosen); cpu++) {
 
-		if (!bitmask_isbitset(cpus_chosen, cpu))
+		if (!bitmask_isbitset(cpus_chosen, cpu) ||
+		    cpufreq_cpu_exists(cpu))
 			continue;
 
 		printf(_("analyzing CPU %d:\n"), cpu);
-
-		if (sysfs_is_cpu_online(cpu) != 1){
-			printf(_(" *is offline\n"));
-			continue;
-		}
 
 		if (params.perf_bias) {
 			ret = msr_intel_get_perf_bias(cpu);

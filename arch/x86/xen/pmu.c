@@ -11,7 +11,7 @@
 #include "pmu.h"
 
 /* x86_pmu.handle_irq definition */
-#include "../events/perf_event.h"
+#include "../kernel/cpu/perf_event.h"
 
 #define XENPMU_IRQ_PROCESSING    1
 struct xenpmu {
@@ -477,7 +477,7 @@ static void xen_convert_regs(const struct xen_pmu_regs *xen_regs,
 irqreturn_t xen_pmu_irq_handler(int irq, void *dev_id)
 {
 	int err, ret = IRQ_NONE;
-	struct pt_regs regs;
+	struct pt_regs regs = {0};
 	const struct xen_pmu_data *xenpmu_data = get_xenpmu_data();
 	uint8_t xenpmu_flags = get_xenpmu_flags();
 
@@ -547,11 +547,8 @@ void xen_pmu_init(int cpu)
 	return;
 
 fail:
-	if (err == -EOPNOTSUPP || err == -ENOSYS)
-		pr_info_once("VPMU disabled by hypervisor.\n");
-	else
-		pr_info_once("Could not initialize VPMU for cpu %d, error %d\n",
-			cpu, err);
+	pr_warn_once("Could not initialize VPMU for cpu %d, error %d\n",
+		cpu, err);
 	free_pages((unsigned long)xenpmu_data, 0);
 }
 

@@ -14,7 +14,6 @@
 #include <linux/amba/pl08x.h>
 #include <linux/of.h>
 
-#include <plat/cpu.h>
 #include <mach/irqs.h>
 #include <mach/map.h>
 
@@ -231,9 +230,6 @@ static AMBA_AHB_DEVICE(s3c64xx_dma1, "dma-pl080s.1", 0,
 
 static int __init s3c64xx_pl080_init(void)
 {
-	if (!soc_is_s3c64xx())
-		return 0;
-
 	/* Set all DMA configuration to be DMA, not SDMA */
 	writel(0xffffff, S3C64XX_SDMA_SEL);
 

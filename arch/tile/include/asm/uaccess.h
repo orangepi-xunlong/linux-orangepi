@@ -416,13 +416,14 @@ _copy_from_user(void *to, const void __user *from, unsigned long n)
 	return n;
 }
 
-extern void __compiletime_error("usercopy buffer size is too small")
-__bad_copy_user(void);
-
-static inline void copy_user_overflow(int size, unsigned long count)
-{
-	WARN(1, "Buffer overflow detected (%d < %lu)!\n", size, count);
-}
+#ifdef CONFIG_DEBUG_STRICT_USER_COPY_CHECKS
+/*
+ * There are still unprovable places in the generic code as of 2.6.34, so this
+ * option is not really compatible with -Werror, which is more useful in
+ * general.
+ */
+extern void copy_from_user_overflow(void)
+	__compiletime_warning("copy_from_user() size is not provably correct");
 
 static inline unsigned long __must_check copy_from_user(void *to,
 					  const void __user *from,
@@ -432,13 +433,14 @@ static inline unsigned long __must_check copy_from_user(void *to,
 
 	if (likely(sz == -1 || sz >= n))
 		n = _copy_from_user(to, from, n);
-	else if (!__builtin_constant_p(n))
-		copy_user_overflow(sz, n);
 	else
-		__bad_copy_user();
+		copy_from_user_overflow();
 
 	return n;
 }
+#else
+#define copy_from_user _copy_from_user
+#endif
 
 #ifdef __tilegx__
 /**

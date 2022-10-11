@@ -967,7 +967,8 @@ static void iface_stat_create(struct net_device *net_dev,
 		for (ifa = in_dev->ifa_list; ifa; ifa = ifa->ifa_next) {
 			IF_DEBUG("qtaguid: iface_stat: create(%s): "
 				 "ifa=%p ifa_label=%s\n",
-				 ifname, ifa, ifa->ifa_label);
+				 ifname, ifa,
+				 ifa->ifa_label);
 			if (!strcmp(ifname, ifa->ifa_label))
 				break;
 		}
@@ -1603,6 +1604,14 @@ static struct sock *qtaguid_find_sk(const struct sk_buff *skb,
 	if (sk) {
 		MT_DEBUG("qtaguid[%d]: %p->sk_proto=%u->sk_state=%d\n",
 			 par->hooknum, sk, sk->sk_protocol, sk->sk_state);
+		/*
+		 * When in TCP_TIME_WAIT the sk is not a "struct sock" but
+		 * "struct inet_timewait_sock" which is missing fields.
+		 */
+		if (!sk_fullsock(sk) || sk->sk_state  == TCP_TIME_WAIT) {
+			sock_gen_put(sk);
+			sk = NULL;
+		}
 	}
 	return sk;
 }
@@ -1684,25 +1693,10 @@ static bool qtaguid_mt(const struct sk_buff *skb, struct xt_action_param *par)
 		 */
 		sk = qtaguid_find_sk(skb, par);
 		/*
-		 * TCP_NEW_SYN_RECV are not "struct sock" but "struct request_sock"
-		 * where we can get a pointer to a full socket to retrieve uid/gid.
-		 * When in TCP_TIME_WAIT, sk is a struct inet_timewait_sock
-		 * which is missing fields and does not contain any reference
-		 * to a full socket, so just ignore the socket.
+		 * If we got the socket from the find_sk(), we will need to put
+		 * it back, as nf_tproxy_get_sock_v4() got it.
 		 */
-		if (sk && sk->sk_state == TCP_NEW_SYN_RECV) {
-			sock_gen_put(sk);
-			sk = sk_to_full_sk(sk);
-		} else if (sk && (!sk_fullsock(sk) || sk->sk_state == TCP_TIME_WAIT)) {
-			sock_gen_put(sk);
-			sk = NULL;
-		} else {
-			/*
-			 * If we got the socket from the find_sk(), we will need to put
-			 * it back, as nf_tproxy_get_sock_v4() got it.
-			 */
-			got_sock = sk;
-		}
+		got_sock = sk;
 		if (sk)
 			atomic64_inc(&qtu_events.match_found_sk_in_ct);
 		else

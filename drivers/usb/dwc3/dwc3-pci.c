@@ -82,7 +82,7 @@ static int dwc3_pci_quirks(struct pci_dev *pdev, struct platform_device *dwc3)
 		int ret;
 
 		struct property_entry properties[] = {
-			PROPERTY_ENTRY_STRING("dr_mode", "peripheral"),
+			PROPERTY_ENTRY_STRING("dr-mode", "peripheral"),
 			{ }
 		};
 
@@ -245,15 +245,6 @@ static int dwc3_pci_runtime_suspend(struct device *dev)
 	return -EBUSY;
 }
 
-static int dwc3_pci_runtime_resume(struct device *dev)
-{
-	struct platform_device *dwc3 = dev_get_drvdata(dev);
-
-	return pm_runtime_get(&dwc3->dev);
-}
-#endif /* CONFIG_PM */
-
-#ifdef CONFIG_PM_SLEEP
 static int dwc3_pci_pm_dummy(struct device *dev)
 {
 	/*
@@ -266,11 +257,11 @@ static int dwc3_pci_pm_dummy(struct device *dev)
 	 */
 	return 0;
 }
-#endif /* CONFIG_PM_SLEEP */
+#endif /* CONFIG_PM */
 
 static struct dev_pm_ops dwc3_pci_dev_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(dwc3_pci_pm_dummy, dwc3_pci_pm_dummy)
-	SET_RUNTIME_PM_OPS(dwc3_pci_runtime_suspend, dwc3_pci_runtime_resume,
+	SET_RUNTIME_PM_OPS(dwc3_pci_runtime_suspend, dwc3_pci_pm_dummy,
 		NULL)
 };
 

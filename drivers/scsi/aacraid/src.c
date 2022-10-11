@@ -135,8 +135,7 @@ static irqreturn_t aac_src_intr_message(int irq, void *dev_id)
 
 	if (mode & AAC_INT_MODE_AIF) {
 		/* handle AIF */
-		if (dev->aif_thread && dev->fsa_dev)
-			aac_intr_normal(dev, 0, 2, 0, NULL);
+		aac_intr_normal(dev, 0, 2, 0, NULL);
 		if (dev->msi_enabled)
 			aac_src_access_devreg(dev, AAC_CLEAR_AIF_BIT);
 		mode = 0;
@@ -445,7 +444,7 @@ err_out:
 	return -1;
 
 err_blink:
-	return (status > 16) & 0xFF;
+	return (status >> 16) & 0xFF;
 }
 
 /**
@@ -626,7 +625,7 @@ static int aac_src_restart_adapter(struct aac_dev *dev, int bled)
  *	@dev: Adapter
  *	@comm: communications method
  */
-static int aac_src_select_comm(struct aac_dev *dev, int comm)
+int aac_src_select_comm(struct aac_dev *dev, int comm)
 {
 	switch (comm) {
 	case AAC_COMM_MESSAGE:

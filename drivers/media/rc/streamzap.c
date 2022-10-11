@@ -34,7 +34,6 @@
 #include <linux/device.h>
 #include <linux/module.h>
 #include <linux/slab.h>
-#include <linux/ktime.h>
 #include <linux/usb.h>
 #include <linux/usb/input.h>
 #include <media/rc-core.h>
@@ -97,8 +96,8 @@ struct streamzap_ir {
 	/* sum of signal lengths received since signal start */
 	unsigned long		sum;
 	/* start time of signal; necessary for gap tracking */
-	ktime_t			signal_last;
-	ktime_t			signal_start;
+	struct timeval		signal_last;
+	struct timeval		signal_start;
 	bool			timeout_enabled;
 
 	char			name[128];
@@ -134,21 +133,23 @@ static void sz_push(struct streamzap_ir *sz, struct ir_raw_event rawir)
 static void sz_push_full_pulse(struct streamzap_ir *sz,
 			       unsigned char value)
 {
-	DEFINE_IR_RAW_EVENT(rawir);
+	struct ir_raw_event rawir = {};
 
 	if (sz->idle) {
-		int delta;
+		long deltv;
 
 		sz->signal_last = sz->signal_start;
-		sz->signal_start = ktime_get_real();
+		do_gettimeofday(&sz->signal_start);
 
-		delta = ktime_us_delta(sz->signal_start, sz->signal_last);
+		deltv = sz->signal_start.tv_sec - sz->signal_last.tv_sec;
 		rawir.pulse = false;
-		if (delta > (15 * USEC_PER_SEC)) {
+		if (deltv > 15) {
 			/* really long time */
 			rawir.duration = IR_MAX_DURATION;
 		} else {
-			rawir.duration = delta;
+			rawir.duration = (int)(deltv * 1000000 +
+				sz->signal_start.tv_usec -
+				sz->signal_last.tv_usec);
 			rawir.duration -= sz->sum;
 			rawir.duration = US_TO_NS(rawir.duration);
 			rawir.duration = (rawir.duration > IR_MAX_DURATION) ?
@@ -179,7 +180,7 @@ static void sz_push_half_pulse(struct streamzap_ir *sz,
 static void sz_push_full_space(struct streamzap_ir *sz,
 			       unsigned char value)
 {
-	DEFINE_IR_RAW_EVENT(rawir);
+	struct ir_raw_event rawir = {};
 
 	rawir.pulse = false;
 	rawir.duration = ((int) value) * SZ_RESOLUTION;
@@ -253,10 +254,10 @@ static void streamzap_callback(struct urb *urb)
 			break;
 		case FullSpace:
 			if (sz->buf_in[i] == SZ_TIMEOUT) {
-				DEFINE_IR_RAW_EVENT(rawir);
-
-				rawir.pulse = false;
-				rawir.duration = sz->rdev->timeout;
+				struct ir_raw_event rawir = {
+					.pulse = false,
+					.duration = sz->rdev->timeout
+				};
 				sz->idle = true;
 				if (sz->timeout_enabled)
 					sz_push(sz, rawir);
@@ -291,26 +292,24 @@ static struct rc_dev *streamzap_init_rc_dev(struct streamzap_ir *sz)
 	struct device *dev = sz->dev;
 	int ret;
 
-	rdev = rc_allocate_device();
+	rdev = rc_allocate_device(RC_DRIVER_IR_RAW);
 	if (!rdev) {
 		dev_err(dev, "remote dev allocation failed\n");
 		goto out;
 	}
 
-	snprintf(sz->name, sizeof(sz->name), "Streamzap PC Remote Infrared "
-		 "Receiver (%04x:%04x)",
+	snprintf(sz->name, sizeof(sz->name), "Streamzap PC Remote Infrared Receiver (%04x:%04x)",
 		 le16_to_cpu(sz->usbdev->descriptor.idVendor),
 		 le16_to_cpu(sz->usbdev->descriptor.idProduct));
 	usb_make_path(sz->usbdev, sz->phys, sizeof(sz->phys));
 	strlcat(sz->phys, "/input0", sizeof(sz->phys));
 
-	rdev->input_name = sz->name;
+	rdev->device_name = sz->name;
 	rdev->input_phys = sz->phys;
 	usb_to_input_id(sz->usbdev, &rdev->input_id);
 	rdev->dev.parent = dev;
 	rdev->priv = sz;
-	rdev->driver_type = RC_DRIVER_IR_RAW;
-	rdev->allowed_protocols = RC_BIT_ALL;
+	rdev->allowed_protocols = RC_PROTO_BIT_ALL_IR_DECODER;
 	rdev->driver_name = DRIVER_NAME;
 	rdev->map_name = RC_MAP_STREAMZAP;
 
@@ -364,15 +363,15 @@ static int streamzap_probe(struct usb_interface *intf,
 
 	sz->endpoint = &(iface_host->endpoint[0].desc);
 	if (!usb_endpoint_dir_in(sz->endpoint)) {
-		dev_err(&intf->dev, "%s: endpoint doesn't match input device "
-			"02%02x\n", __func__, sz->endpoint->bEndpointAddress);
+		dev_err(&intf->dev, "%s: endpoint doesn't match input device 02%02x\n",
+			__func__, sz->endpoint->bEndpointAddress);
 		retval = -ENODEV;
 		goto free_sz;
 	}
 
 	if (!usb_endpoint_xfer_int(sz->endpoint)) {
-		dev_err(&intf->dev, "%s: endpoint attributes don't match xfer "
-			"02%02x\n", __func__, sz->endpoint->bmAttributes);
+		dev_err(&intf->dev, "%s: endpoint attributes don't match xfer 02%02x\n",
+			__func__, sz->endpoint->bmAttributes);
 		retval = -ENODEV;
 		goto free_sz;
 	}
@@ -427,7 +426,7 @@ static int streamzap_probe(struct usb_interface *intf,
 	sz->max_timeout = US_TO_NS(SZ_TIMEOUT * SZ_RESOLUTION);
 	#endif
 
-	sz->signal_start = ktime_get_real();
+	do_gettimeofday(&sz->signal_start);
 
 	/* Complete final initialisations */
 	usb_fill_int_urb(sz->urb_in, usbdev, pipe, sz->buf_in,
@@ -499,7 +498,7 @@ static int streamzap_resume(struct usb_interface *intf)
 	struct streamzap_ir *sz = usb_get_intfdata(intf);
 
 	if (usb_submit_urb(sz->urb_in, GFP_ATOMIC)) {
-		dev_err(sz->dev, "Error submitting urb\n");
+		dev_err(sz->dev, "Error sumbiting urb\n");
 		return -EIO;
 	}
 

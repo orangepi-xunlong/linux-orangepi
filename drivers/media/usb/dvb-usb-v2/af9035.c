@@ -49,7 +49,6 @@ static int af9035_ctrl_msg(struct dvb_usb_device *d, struct usb_req *req)
 #define CHECKSUM_LEN 2
 #define USB_TIMEOUT 2000
 	struct state *state = d_to_priv(d);
-	struct usb_interface *intf = d->intf;
 	int ret, wlen, rlen;
 	u16 checksum, tmp_checksum;
 
@@ -58,8 +57,8 @@ static int af9035_ctrl_msg(struct dvb_usb_device *d, struct usb_req *req)
 	/* buffer overflow check */
 	if (req->wlen > (BUF_LEN - REQ_HDR_LEN - CHECKSUM_LEN) ||
 			req->rlen > (BUF_LEN - ACK_HDR_LEN - CHECKSUM_LEN)) {
-		dev_err(&intf->dev, "too much data wlen=%d rlen=%d\n",
-			req->wlen, req->rlen);
+		dev_err(&d->udev->dev, "%s: too much data wlen=%d rlen=%d\n",
+				KBUILD_MODNAME, req->wlen, req->rlen);
 		ret = -EINVAL;
 		goto exit;
 	}
@@ -95,8 +94,10 @@ static int af9035_ctrl_msg(struct dvb_usb_device *d, struct usb_req *req)
 	checksum = af9035_checksum(state->buf, rlen - 2);
 	tmp_checksum = (state->buf[rlen - 2] << 8) | state->buf[rlen - 1];
 	if (tmp_checksum != checksum) {
-		dev_err(&intf->dev, "command=%02x checksum mismatch (%04x != %04x)\n",
-			req->cmd, tmp_checksum, checksum);
+		dev_err(&d->udev->dev,
+				"%s: command=%02x checksum mismatch (%04x != %04x)\n",
+				KBUILD_MODNAME, req->cmd, tmp_checksum,
+				checksum);
 		ret = -EIO;
 		goto exit;
 	}
@@ -109,8 +110,8 @@ static int af9035_ctrl_msg(struct dvb_usb_device *d, struct usb_req *req)
 			goto exit;
 		}
 
-		dev_dbg(&intf->dev, "command=%02x failed fw error=%d\n",
-			req->cmd, state->buf[2]);
+		dev_dbg(&d->udev->dev, "%s: command=%02x failed fw error=%d\n",
+				__func__, req->cmd, state->buf[2]);
 		ret = -EIO;
 		goto exit;
 	}
@@ -121,20 +122,20 @@ static int af9035_ctrl_msg(struct dvb_usb_device *d, struct usb_req *req)
 exit:
 	mutex_unlock(&d->usb_mutex);
 	if (ret < 0)
-		dev_dbg(&intf->dev, "failed=%d\n", ret);
+		dev_dbg(&d->udev->dev, "%s: failed=%d\n", __func__, ret);
 	return ret;
 }
 
 /* write multiple registers */
 static int af9035_wr_regs(struct dvb_usb_device *d, u32 reg, u8 *val, int len)
 {
-	struct usb_interface *intf = d->intf;
 	u8 wbuf[MAX_XFER_SIZE];
 	u8 mbox = (reg >> 16) & 0xff;
 	struct usb_req req = { CMD_MEM_WR, mbox, 6 + len, wbuf, 0, NULL };
 
 	if (6 + len > sizeof(wbuf)) {
-		dev_warn(&intf->dev, "i2c wr: len=%d is too big!\n", len);
+		dev_warn(&d->udev->dev, "%s: i2c wr: len=%d is too big!\n",
+			 KBUILD_MODNAME, len);
 		return -EOPNOTSUPP;
 	}
 
@@ -197,7 +198,6 @@ static int af9035_add_i2c_dev(struct dvb_usb_device *d, const char *type,
 {
 	int ret, num;
 	struct state *state = d_to_priv(d);
-	struct usb_interface *intf = d->intf;
 	struct i2c_client *client;
 	struct i2c_board_info board_info = {
 		.addr = addr,
@@ -212,10 +212,11 @@ static int af9035_add_i2c_dev(struct dvb_usb_device *d, const char *type,
 			break;
 	}
 
-	dev_dbg(&intf->dev, "num=%d\n", num);
+	dev_dbg(&d->udev->dev, "%s: num=%d\n", __func__, num);
 
 	if (num == AF9035_I2C_CLIENT_MAX) {
-		dev_err(&intf->dev, "I2C client out of index\n");
+		dev_err(&d->udev->dev, "%s: I2C client out of index\n",
+				KBUILD_MODNAME);
 		ret = -ENODEV;
 		goto err;
 	}
@@ -239,7 +240,7 @@ static int af9035_add_i2c_dev(struct dvb_usb_device *d, const char *type,
 	state->i2c_client[num] = client;
 	return 0;
 err:
-	dev_dbg(&intf->dev, "failed=%d\n", ret);
+	dev_dbg(&d->udev->dev, "%s: failed=%d\n", __func__, ret);
 	return ret;
 }
 
@@ -247,7 +248,6 @@ static void af9035_del_i2c_dev(struct dvb_usb_device *d)
 {
 	int num;
 	struct state *state = d_to_priv(d);
-	struct usb_interface *intf = d->intf;
 	struct i2c_client *client;
 
 	/* find last used client */
@@ -257,10 +257,11 @@ static void af9035_del_i2c_dev(struct dvb_usb_device *d)
 			break;
 	}
 
-	dev_dbg(&intf->dev, "num=%d\n", num);
+	dev_dbg(&d->udev->dev, "%s: num=%d\n", __func__, num);
 
 	if (num == -1) {
-		dev_err(&intf->dev, "I2C client out of index\n");
+		dev_err(&d->udev->dev, "%s: I2C client out of index\n",
+				KBUILD_MODNAME);
 		goto err;
 	}
 
@@ -275,7 +276,7 @@ static void af9035_del_i2c_dev(struct dvb_usb_device *d)
 	state->i2c_client[num] = NULL;
 	return;
 err:
-	dev_dbg(&intf->dev, "failed\n");
+	dev_dbg(&d->udev->dev, "%s: failed\n", __func__);
 }
 
 static int af9035_i2c_master_xfer(struct i2c_adapter *adap,
@@ -347,9 +348,6 @@ static int af9035_i2c_master_xfer(struct i2c_adapter *adap,
 
 			ret = af9035_rd_regs(d, reg, &msg[1].buf[0],
 					msg[1].len);
-		} else if (state->no_read) {
-			memset(msg[1].buf, 0, msg[1].len);
-			ret = 0;
 		} else {
 			/* I2C write + read */
 			u8 buf[MAX_XFER_SIZE];
@@ -369,25 +367,10 @@ static int af9035_i2c_master_xfer(struct i2c_adapter *adap,
 				memcpy(&buf[3], msg[0].buf, msg[0].len);
 			} else {
 				buf[1] = msg[0].addr << 1;
+				buf[2] = 0x00; /* reg addr len */
 				buf[3] = 0x00; /* reg addr MSB */
 				buf[4] = 0x00; /* reg addr LSB */
-
-				/* Keep prev behavior for write req len > 2*/
-				if (msg[0].len > 2) {
-					buf[2] = 0x00; /* reg addr len */
-					memcpy(&buf[5], msg[0].buf, msg[0].len);
-
-				/* Use reg addr fields if write req len <= 2 */
-				} else {
-					req.wlen = 5;
-					buf[2] = msg[0].len;
-					if (msg[0].len == 2) {
-						buf[3] = msg[0].buf[0];
-						buf[4] = msg[0].buf[1];
-					} else if (msg[0].len == 1) {
-						buf[4] = msg[0].buf[0];
-					}
-				}
+				memcpy(&buf[5], msg[0].buf, msg[0].len);
 			}
 			ret = af9035_ctrl_msg(d, &req);
 		}
@@ -406,8 +389,10 @@ static int af9035_i2c_master_xfer(struct i2c_adapter *adap,
 			    msg[0].addr == (state->af9033_i2c_addr[1] >> 1))
 				reg |= 0x100000;
 
-			ret = af9035_wr_regs(d, reg, &msg[0].buf[3],
-					msg[0].len - 3);
+			ret = (msg[0].len >= 3) ? af9035_wr_regs(d, reg,
+							         &msg[0].buf[3],
+							         msg[0].len - 3)
+					        : -EOPNOTSUPP;
 		} else {
 			/* I2C write */
 			u8 buf[MAX_XFER_SIZE];
@@ -438,9 +423,6 @@ static int af9035_i2c_master_xfer(struct i2c_adapter *adap,
 		if (msg[0].len > 40) {
 			/* TODO: correct limits > 40 */
 			ret = -EOPNOTSUPP;
-		} else if (state->no_read) {
-			memset(msg[0].buf, 0, msg[0].len);
-			ret = 0;
 		} else {
 			/* I2C read */
 			u8 buf[5];
@@ -495,9 +477,7 @@ static struct i2c_algorithm af9035_i2c_algo = {
 static int af9035_identify_state(struct dvb_usb_device *d, const char **name)
 {
 	struct state *state = d_to_priv(d);
-	struct usb_interface *intf = d->intf;
-	int ret, ts_mode_invalid;
-	u8 tmp;
+	int ret;
 	u8 wbuf[1] = { 1 };
 	u8 rbuf[4];
 	struct usb_req req = { CMD_FW_QUERYINFO, 0, sizeof(wbuf), wbuf,
@@ -514,8 +494,10 @@ static int af9035_identify_state(struct dvb_usb_device *d, const char **name)
 	if (ret < 0)
 		goto err;
 
-	dev_info(&intf->dev, "prechip_version=%02x chip_version=%02x chip_type=%04x\n",
-		 state->prechip_version, state->chip_version, state->chip_type);
+	dev_info(&d->udev->dev,
+			"%s: prechip_version=%02x chip_version=%02x chip_type=%04x\n",
+			KBUILD_MODNAME, state->prechip_version,
+			state->chip_version, state->chip_type);
 
 	if (state->chip_type == 0x9135) {
 		if (state->chip_version == 0x02)
@@ -531,41 +513,11 @@ static int af9035_identify_state(struct dvb_usb_device *d, const char **name)
 		state->eeprom_addr = EEPROM_BASE_AF9035;
 	}
 
-
-	/* check for dual tuner mode */
-	ret = af9035_rd_reg(d, state->eeprom_addr + EEPROM_TS_MODE, &tmp);
-	if (ret < 0)
-		goto err;
-
-	ts_mode_invalid = 0;
-	switch (tmp) {
-	case 0:
-		break;
-	case 1:
-	case 3:
-		state->dual_mode = true;
-		break;
-	case 5:
-		if (state->chip_type != 0x9135 && state->chip_type != 0x9306)
-			state->dual_mode = true;	/* AF9035 */
-		else
-			ts_mode_invalid = 1;
-		break;
-	default:
-		ts_mode_invalid = 1;
-	}
-
-	dev_dbg(&intf->dev, "ts mode=%d dual mode=%d\n", tmp, state->dual_mode);
-
-	if (ts_mode_invalid)
-		dev_info(&intf->dev, "ts mode=%d not supported, defaulting to single tuner mode!", tmp);
-
-
 	ret = af9035_ctrl_msg(d, &req);
 	if (ret < 0)
 		goto err;
 
-	dev_dbg(&intf->dev, "reply=%*ph\n", 4, rbuf);
+	dev_dbg(&d->udev->dev, "%s: reply=%*ph\n", __func__, 4, rbuf);
 	if (rbuf[0] || rbuf[1] || rbuf[2] || rbuf[3])
 		ret = WARM;
 	else
@@ -574,7 +526,7 @@ static int af9035_identify_state(struct dvb_usb_device *d, const char **name)
 	return ret;
 
 err:
-	dev_dbg(&intf->dev, "failed=%d\n", ret);
+	dev_dbg(&d->udev->dev, "%s: failed=%d\n", __func__, ret);
 
 	return ret;
 }
@@ -582,7 +534,6 @@ err:
 static int af9035_download_firmware_old(struct dvb_usb_device *d,
 		const struct firmware *fw)
 {
-	struct usb_interface *intf = d->intf;
 	int ret, i, j, len;
 	u8 wbuf[1];
 	struct usb_req req = { 0, 0, 0, NULL, 0, NULL };
@@ -613,12 +564,14 @@ static int af9035_download_firmware_old(struct dvb_usb_device *d,
 		hdr_checksum = fw->data[fw->size - i + 5] << 8;
 		hdr_checksum |= fw->data[fw->size - i + 6] << 0;
 
-		dev_dbg(&intf->dev, "core=%d addr=%04x data_len=%d checksum=%04x\n",
-			hdr_core, hdr_addr, hdr_data_len, hdr_checksum);
+		dev_dbg(&d->udev->dev,
+				"%s: core=%d addr=%04x data_len=%d checksum=%04x\n",
+				__func__, hdr_core, hdr_addr, hdr_data_len,
+				hdr_checksum);
 
 		if (((hdr_core != 1) && (hdr_core != 2)) ||
 				(hdr_data_len > i)) {
-			dev_dbg(&intf->dev, "bad firmware\n");
+			dev_dbg(&d->udev->dev, "%s: bad firmware\n", __func__);
 			break;
 		}
 
@@ -649,17 +602,18 @@ static int af9035_download_firmware_old(struct dvb_usb_device *d,
 
 		i -= hdr_data_len + HDR_SIZE;
 
-		dev_dbg(&intf->dev, "data uploaded=%zu\n", fw->size - i);
+		dev_dbg(&d->udev->dev, "%s: data uploaded=%zu\n",
+				__func__, fw->size - i);
 	}
 
 	/* print warn if firmware is bad, continue and see what happens */
 	if (i)
-		dev_warn(&intf->dev, "bad firmware\n");
+		dev_warn(&d->udev->dev, "%s: bad firmware\n", KBUILD_MODNAME);
 
 	return 0;
 
 err:
-	dev_dbg(&intf->dev, "failed=%d\n", ret);
+	dev_dbg(&d->udev->dev, "%s: failed=%d\n", __func__, ret);
 
 	return ret;
 }
@@ -667,7 +621,6 @@ err:
 static int af9035_download_firmware_new(struct dvb_usb_device *d,
 		const struct firmware *fw)
 {
-	struct usb_interface *intf = d->intf;
 	int ret, i, i_prev;
 	struct usb_req req_fw_dl = { CMD_FW_SCATTER_WR, 0, 0, NULL, 0, NULL };
 	#define HDR_SIZE 7
@@ -697,14 +650,15 @@ static int af9035_download_firmware_new(struct dvb_usb_device *d,
 			if (ret < 0)
 				goto err;
 
-			dev_dbg(&intf->dev, "data uploaded=%d\n", i);
+			dev_dbg(&d->udev->dev, "%s: data uploaded=%d\n",
+					__func__, i);
 		}
 	}
 
 	return 0;
 
 err:
-	dev_dbg(&intf->dev, "failed=%d\n", ret);
+	dev_dbg(&d->udev->dev, "%s: failed=%d\n", __func__, ret);
 
 	return ret;
 }
@@ -712,7 +666,6 @@ err:
 static int af9035_download_firmware(struct dvb_usb_device *d,
 		const struct firmware *fw)
 {
-	struct usb_interface *intf = d->intf;
 	struct state *state = d_to_priv(d);
 	int ret;
 	u8 wbuf[1];
@@ -721,7 +674,7 @@ static int af9035_download_firmware(struct dvb_usb_device *d,
 	struct usb_req req = { 0, 0, 0, NULL, 0, NULL };
 	struct usb_req req_fw_ver = { CMD_FW_QUERYINFO, 0, 1, wbuf, 4, rbuf };
 
-	dev_dbg(&intf->dev, "\n");
+	dev_dbg(&d->udev->dev, "%s:\n", __func__);
 
 	/*
 	 * In case of dual tuner configuration we need to do some extra
@@ -729,7 +682,11 @@ static int af9035_download_firmware(struct dvb_usb_device *d,
 	 * which is done by master demod.
 	 * Master feeds also clock and controls power via GPIO.
 	 */
-	if (state->dual_mode) {
+	ret = af9035_rd_reg(d, state->eeprom_addr + EEPROM_TS_MODE, &tmp);
+	if (ret < 0)
+		goto err;
+
+	if (tmp == 1 || tmp == 3) {
 		/* configure gpioh1, reset & power slave demod */
 		ret = af9035_wr_reg_mask(d, 0x00d8b0, 0x01, 0x01);
 		if (ret < 0)
@@ -797,25 +754,25 @@ static int af9035_download_firmware(struct dvb_usb_device *d,
 		goto err;
 
 	if (!(rbuf[0] || rbuf[1] || rbuf[2] || rbuf[3])) {
-		dev_err(&intf->dev, "firmware did not run\n");
+		dev_err(&d->udev->dev, "%s: firmware did not run\n",
+				KBUILD_MODNAME);
 		ret = -ENODEV;
 		goto err;
 	}
 
-	dev_info(&intf->dev, "firmware version=%d.%d.%d.%d",
-		 rbuf[0], rbuf[1], rbuf[2], rbuf[3]);
+	dev_info(&d->udev->dev, "%s: firmware version=%d.%d.%d.%d",
+			KBUILD_MODNAME, rbuf[0], rbuf[1], rbuf[2], rbuf[3]);
 
 	return 0;
 
 err:
-	dev_dbg(&intf->dev, "failed=%d\n", ret);
+	dev_dbg(&d->udev->dev, "%s: failed=%d\n", __func__, ret);
 
 	return ret;
 }
 
 static int af9035_read_config(struct dvb_usb_device *d)
 {
-	struct usb_interface *intf = d->intf;
 	struct state *state = d_to_priv(d);
 	int ret, i;
 	u8 tmp;
@@ -850,7 +807,7 @@ static int af9035_read_config(struct dvb_usb_device *d)
 			goto err;
 
 		if (tmp == 0x00) {
-			dev_dbg(&intf->dev, "no eeprom\n");
+			dev_dbg(&d->udev->dev, "%s: no eeprom\n", __func__);
 			goto skip_eeprom;
 		}
 	} else if (state->chip_type == 0x9306) {
@@ -861,6 +818,18 @@ static int af9035_read_config(struct dvb_usb_device *d)
 		return 0;
 	}
 
+
+
+	/* check if there is dual tuners */
+	ret = af9035_rd_reg(d, state->eeprom_addr + EEPROM_TS_MODE, &tmp);
+	if (ret < 0)
+		goto err;
+
+	if (tmp == 1 || tmp == 3)
+		state->dual_mode = true;
+
+	dev_dbg(&d->udev->dev, "%s: ts mode=%d dual mode=%d\n", __func__,
+			tmp, state->dual_mode);
 
 	if (state->dual_mode) {
 		/* read 2nd demodulator I2C address */
@@ -873,7 +842,8 @@ static int af9035_read_config(struct dvb_usb_device *d)
 		if (tmp)
 			state->af9033_i2c_addr[1] = tmp;
 
-		dev_dbg(&intf->dev, "2nd demod I2C addr=%02x\n", tmp);
+		dev_dbg(&d->udev->dev, "%s: 2nd demod I2C addr=%02x\n",
+				__func__, tmp);
 	}
 
 	addr = state->eeprom_addr;
@@ -884,7 +854,8 @@ static int af9035_read_config(struct dvb_usb_device *d)
 		if (ret < 0)
 			goto err;
 
-		dev_dbg(&intf->dev, "[%d]tuner=%02x\n", i, tmp);
+		dev_dbg(&d->udev->dev, "%s: [%d]tuner=%02x\n",
+				__func__, i, tmp);
 
 		/* tuner sanity check */
 		if (state->chip_type == 0x9135) {
@@ -913,8 +884,10 @@ static int af9035_read_config(struct dvb_usb_device *d)
 		}
 
 		if (state->af9033_config[i].tuner != tmp) {
-			dev_info(&intf->dev, "[%d] overriding tuner from %02x to %02x\n",
-				 i, tmp, state->af9033_config[i].tuner);
+			dev_info(&d->udev->dev,
+					"%s: [%d] overriding tuner from %02x to %02x\n",
+					KBUILD_MODNAME, i, tmp,
+					state->af9033_config[i].tuner);
 		}
 
 		switch (state->af9033_config[i].tuner) {
@@ -934,8 +907,9 @@ static int af9035_read_config(struct dvb_usb_device *d)
 		case AF9033_TUNER_IT9135_62:
 			break;
 		default:
-			dev_warn(&intf->dev, "tuner id=%02x not supported, please report!",
-				 tmp);
+			dev_warn(&d->udev->dev,
+					"%s: tuner id=%02x not supported, please report!",
+					KBUILD_MODNAME, tmp);
 		}
 
 		/* disable dual mode if driver does not support it */
@@ -952,7 +926,9 @@ static int af9035_read_config(struct dvb_usb_device *d)
 				break;
 			default:
 				state->dual_mode = false;
-				dev_info(&intf->dev, "driver does not support 2nd tuner and will disable it");
+				dev_info(&d->udev->dev,
+						"%s: driver does not support 2nd tuner and will disable it",
+						KBUILD_MODNAME);
 		}
 
 		/* tuner IF frequency */
@@ -968,7 +944,7 @@ static int af9035_read_config(struct dvb_usb_device *d)
 
 		tmp16 |= tmp << 8;
 
-		dev_dbg(&intf->dev, "[%d]IF=%d\n", i, tmp16);
+		dev_dbg(&d->udev->dev, "%s: [%d]IF=%d\n", __func__, i, tmp16);
 
 		addr += 0x10; /* shift for the 2nd tuner params */
 	}
@@ -988,24 +964,10 @@ skip_eeprom:
 			state->af9033_config[i].clock = clock_lut_af9035[tmp];
 	}
 
-	state->no_read = false;
-	/* Some MXL5007T devices cannot properly handle tuner I2C read ops. */
-	if (state->af9033_config[0].tuner == AF9033_TUNER_MXL5007T &&
-		le16_to_cpu(d->udev->descriptor.idVendor) == USB_VID_AVERMEDIA)
-
-		switch (le16_to_cpu(d->udev->descriptor.idProduct)) {
-		case USB_PID_AVERMEDIA_A867:
-		case USB_PID_AVERMEDIA_TWINSTAR:
-			dev_info(&intf->dev,
-				 "Device may have issues with I2C read operations. Enabling fix.\n");
-			state->no_read = true;
-			break;
-		}
-
 	return 0;
 
 err:
-	dev_dbg(&intf->dev, "failed=%d\n", ret);
+	dev_dbg(&d->udev->dev, "%s: failed=%d\n", __func__, ret);
 
 	return ret;
 }
@@ -1013,11 +975,10 @@ err:
 static int af9035_tua9001_tuner_callback(struct dvb_usb_device *d,
 		int cmd, int arg)
 {
-	struct usb_interface *intf = d->intf;
 	int ret;
 	u8 val;
 
-	dev_dbg(&intf->dev, "cmd=%d arg=%d\n", cmd, arg);
+	dev_dbg(&d->udev->dev, "%s: cmd=%d arg=%d\n", __func__, cmd, arg);
 
 	/*
 	 * CEN     always enabled by hardware wiring
@@ -1051,7 +1012,7 @@ static int af9035_tua9001_tuner_callback(struct dvb_usb_device *d,
 	return 0;
 
 err:
-	dev_dbg(&intf->dev, "failed=%d\n", ret);
+	dev_dbg(&d->udev->dev, "%s: failed=%d\n", __func__, ret);
 
 	return ret;
 }
@@ -1060,7 +1021,6 @@ err:
 static int af9035_fc0011_tuner_callback(struct dvb_usb_device *d,
 		int cmd, int arg)
 {
-	struct usb_interface *intf = d->intf;
 	int ret;
 
 	switch (cmd) {
@@ -1118,7 +1078,7 @@ static int af9035_fc0011_tuner_callback(struct dvb_usb_device *d,
 	return 0;
 
 err:
-	dev_dbg(&intf->dev, "failed=%d\n", ret);
+	dev_dbg(&d->udev->dev, "%s: failed=%d\n", __func__, ret);
 
 	return ret;
 }
@@ -1144,10 +1104,9 @@ static int af9035_frontend_callback(void *adapter_priv, int component,
 {
 	struct i2c_adapter *adap = adapter_priv;
 	struct dvb_usb_device *d = i2c_get_adapdata(adap);
-	struct usb_interface *intf = d->intf;
 
-	dev_dbg(&intf->dev, "component=%d cmd=%d arg=%d\n",
-		component, cmd, arg);
+	dev_dbg(&d->udev->dev, "%s: component=%d cmd=%d arg=%d\n",
+			__func__, component, cmd, arg);
 
 	switch (component) {
 	case DVB_FRONTEND_COMPONENT_TUNER:
@@ -1170,10 +1129,9 @@ static int af9035_frontend_attach(struct dvb_usb_adapter *adap)
 {
 	struct state *state = adap_to_priv(adap);
 	struct dvb_usb_device *d = adap_to_d(adap);
-	struct usb_interface *intf = d->intf;
 	int ret;
 
-	dev_dbg(&intf->dev, "adap->id=%d\n", adap->id);
+	dev_dbg(&d->udev->dev, "%s: adap->id=%d\n", __func__, adap->id);
 
 	if (!state->af9033_config[adap->id].tuner) {
 		/* unsupported tuner */
@@ -1200,7 +1158,7 @@ static int af9035_frontend_attach(struct dvb_usb_adapter *adap)
 	return 0;
 
 err:
-	dev_dbg(&intf->dev, "failed=%d\n", ret);
+	dev_dbg(&d->udev->dev, "%s: failed=%d\n", __func__, ret);
 
 	return ret;
 }
@@ -1209,12 +1167,11 @@ static int it930x_frontend_attach(struct dvb_usb_adapter *adap)
 {
 	struct state *state = adap_to_priv(adap);
 	struct dvb_usb_device *d = adap_to_d(adap);
-	struct usb_interface *intf = d->intf;
 	int ret;
 	struct si2168_config si2168_config;
 	struct i2c_adapter *adapter;
 
-	dev_dbg(&intf->dev, "adap->id=%d\n", adap->id);
+	dev_dbg(&d->udev->dev, "adap->id=%d\n", adap->id);
 
 	memset(&si2168_config, 0, sizeof(si2168_config));
 	si2168_config.i2c_adapter = &adapter;
@@ -1237,7 +1194,7 @@ static int it930x_frontend_attach(struct dvb_usb_adapter *adap)
 	return 0;
 
 err:
-	dev_dbg(&intf->dev, "failed=%d\n", ret);
+	dev_dbg(&d->udev->dev, "%s: failed=%d\n", __func__, ret);
 
 	return ret;
 }
@@ -1246,10 +1203,9 @@ static int af9035_frontend_detach(struct dvb_usb_adapter *adap)
 {
 	struct state *state = adap_to_priv(adap);
 	struct dvb_usb_device *d = adap_to_d(adap);
-	struct usb_interface *intf = d->intf;
 	int demod2;
 
-	dev_dbg(&intf->dev, "adap->id=%d\n", adap->id);
+	dev_dbg(&d->udev->dev, "%s: adap->id=%d\n", __func__, adap->id);
 
 	/*
 	 * For dual tuner devices we have to resolve 2nd demod client, as there
@@ -1325,13 +1281,12 @@ static int af9035_tuner_attach(struct dvb_usb_adapter *adap)
 {
 	struct state *state = adap_to_priv(adap);
 	struct dvb_usb_device *d = adap_to_d(adap);
-	struct usb_interface *intf = d->intf;
 	int ret;
 	struct dvb_frontend *fe;
 	struct i2c_msg msg[1];
 	u8 tuner_addr;
 
-	dev_dbg(&intf->dev, "adap->id=%d\n", adap->id);
+	dev_dbg(&d->udev->dev, "%s: adap->id=%d\n", __func__, adap->id);
 
 	/*
 	 * XXX: Hack used in that function: we abuse unused I2C address bit [7]
@@ -1569,7 +1524,7 @@ static int af9035_tuner_attach(struct dvb_usb_adapter *adap)
 	return 0;
 
 err:
-	dev_dbg(&intf->dev, "failed=%d\n", ret);
+	dev_dbg(&d->udev->dev, "%s: failed=%d\n", __func__, ret);
 
 	return ret;
 }
@@ -1578,11 +1533,10 @@ static int it930x_tuner_attach(struct dvb_usb_adapter *adap)
 {
 	struct state *state = adap_to_priv(adap);
 	struct dvb_usb_device *d = adap_to_d(adap);
-	struct usb_interface *intf = d->intf;
 	int ret;
 	struct si2157_config si2157_config;
 
-	dev_dbg(&intf->dev, "adap->id=%d\n", adap->id);
+	dev_dbg(&d->udev->dev, "%s: adap->id=%d\n", __func__, adap->id);
 
 	/* I2C master bus 2 clock speed 300k */
 	ret = af9035_wr_reg(d, 0x00f6a7, 0x07);
@@ -1638,7 +1592,7 @@ static int it930x_tuner_attach(struct dvb_usb_adapter *adap)
 	return 0;
 
 err:
-	dev_dbg(&intf->dev, "failed=%d\n", ret);
+	dev_dbg(&d->udev->dev, "%s: failed=%d\n", __func__, ret);
 
 	return ret;
 }
@@ -1648,9 +1602,8 @@ static int it930x_tuner_detach(struct dvb_usb_adapter *adap)
 {
 	struct state *state = adap_to_priv(adap);
 	struct dvb_usb_device *d = adap_to_d(adap);
-	struct usb_interface *intf = d->intf;
 
-	dev_dbg(&intf->dev, "adap->id=%d\n", adap->id);
+	dev_dbg(&d->udev->dev, "adap->id=%d\n", adap->id);
 
 	if (adap->id == 1) {
 		if (state->i2c_client[3])
@@ -1668,9 +1621,8 @@ static int af9035_tuner_detach(struct dvb_usb_adapter *adap)
 {
 	struct state *state = adap_to_priv(adap);
 	struct dvb_usb_device *d = adap_to_d(adap);
-	struct usb_interface *intf = d->intf;
 
-	dev_dbg(&intf->dev, "adap->id=%d\n", adap->id);
+	dev_dbg(&d->udev->dev, "%s: adap->id=%d\n", __func__, adap->id);
 
 	switch (state->af9033_config[adap->id].tuner) {
 	case AF9033_TUNER_TUA9001:
@@ -1696,7 +1648,6 @@ static int af9035_tuner_detach(struct dvb_usb_adapter *adap)
 static int af9035_init(struct dvb_usb_device *d)
 {
 	struct state *state = d_to_priv(d);
-	struct usb_interface *intf = d->intf;
 	int ret, i;
 	u16 frame_size = (d->udev->speed == USB_SPEED_FULL ? 5 : 87) * 188 / 4;
 	u8 packet_size = (d->udev->speed == USB_SPEED_FULL ? 64 : 512) / 4;
@@ -1721,8 +1672,9 @@ static int af9035_init(struct dvb_usb_device *d)
 		{ 0x80f9a4, 0x00, 0x01 },
 	};
 
-	dev_dbg(&intf->dev, "USB speed=%d frame_size=%04x packet_size=%02x\n",
-		d->udev->speed, frame_size, packet_size);
+	dev_dbg(&d->udev->dev,
+			"%s: USB speed=%d frame_size=%04x packet_size=%02x\n",
+			__func__, d->udev->speed, frame_size, packet_size);
 
 	/* init endpoints */
 	for (i = 0; i < ARRAY_SIZE(tab); i++) {
@@ -1735,7 +1687,7 @@ static int af9035_init(struct dvb_usb_device *d)
 	return 0;
 
 err:
-	dev_dbg(&intf->dev, "failed=%d\n", ret);
+	dev_dbg(&d->udev->dev, "%s: failed=%d\n", __func__, ret);
 
 	return ret;
 }
@@ -1743,7 +1695,6 @@ err:
 static int it930x_init(struct dvb_usb_device *d)
 {
 	struct state *state = d_to_priv(d);
-	struct usb_interface *intf = d->intf;
 	int ret, i;
 	u16 frame_size = (d->udev->speed == USB_SPEED_FULL ? 5 : 816) * 188 / 4;
 	u8 packet_size = (d->udev->speed == USB_SPEED_FULL ? 64 : 512) / 4;
@@ -1803,8 +1754,9 @@ static int it930x_init(struct dvb_usb_device *d)
 		{ 0x00da5a, 0x1f, 0xff }, /* ts_fail_ignore */
 	};
 
-	dev_dbg(&intf->dev, "USB speed=%d frame_size=%04x packet_size=%02x\n",
-		d->udev->speed, frame_size, packet_size);
+	dev_dbg(&d->udev->dev,
+			"%s: USB speed=%d frame_size=%04x packet_size=%02x\n",
+			__func__, d->udev->speed, frame_size, packet_size);
 
 	/* init endpoints */
 	for (i = 0; i < ARRAY_SIZE(tab); i++) {
@@ -1817,7 +1769,7 @@ static int it930x_init(struct dvb_usb_device *d)
 
 	return 0;
 err:
-	dev_dbg(&intf->dev, "failed=%d\n", ret);
+	dev_dbg(&d->udev->dev, "%s: failed=%d\n", __func__, ret);
 
 	return ret;
 }
@@ -1826,9 +1778,8 @@ err:
 #if IS_ENABLED(CONFIG_RC_CORE)
 static int af9035_rc_query(struct dvb_usb_device *d)
 {
-	struct usb_interface *intf = d->intf;
 	int ret;
-	enum rc_type proto;
+	enum rc_proto proto;
 	u32 key;
 	u8 buf[4];
 	struct usb_req req = { CMD_IR_GET, 0, 0, NULL, 4, buf };
@@ -1843,27 +1794,27 @@ static int af9035_rc_query(struct dvb_usb_device *d)
 		if ((buf[0] + buf[1]) == 0xff) {
 			/* NEC standard 16bit */
 			key = RC_SCANCODE_NEC(buf[0], buf[2]);
-			proto = RC_TYPE_NEC;
+			proto = RC_PROTO_NEC;
 		} else {
 			/* NEC extended 24bit */
 			key = RC_SCANCODE_NECX(buf[0] << 8 | buf[1], buf[2]);
-			proto = RC_TYPE_NECX;
+			proto = RC_PROTO_NECX;
 		}
 	} else {
 		/* NEC full code 32bit */
 		key = RC_SCANCODE_NEC32(buf[0] << 24 | buf[1] << 16 |
 					buf[2] << 8  | buf[3]);
-		proto = RC_TYPE_NEC32;
+		proto = RC_PROTO_NEC32;
 	}
 
-	dev_dbg(&intf->dev, "%*ph\n", 4, buf);
+	dev_dbg(&d->udev->dev, "%s: %*ph\n", __func__, 4, buf);
 
 	rc_keydown(d->rc_dev, proto, key, 0);
 
 	return 0;
 
 err:
-	dev_dbg(&intf->dev, "failed=%d\n", ret);
+	dev_dbg(&d->udev->dev, "%s: failed=%d\n", __func__, ret);
 
 	return ret;
 }
@@ -1871,7 +1822,6 @@ err:
 static int af9035_get_rc_config(struct dvb_usb_device *d, struct dvb_usb_rc *rc)
 {
 	struct state *state = d_to_priv(d);
-	struct usb_interface *intf = d->intf;
 	int ret;
 	u8 tmp;
 
@@ -1879,7 +1829,7 @@ static int af9035_get_rc_config(struct dvb_usb_device *d, struct dvb_usb_rc *rc)
 	if (ret < 0)
 		goto err;
 
-	dev_dbg(&intf->dev, "ir_mode=%02x\n", tmp);
+	dev_dbg(&d->udev->dev, "%s: ir_mode=%02x\n", __func__, tmp);
 
 	/* don't activate rc if in HID mode or if not available */
 	if (tmp == 5) {
@@ -1888,16 +1838,16 @@ static int af9035_get_rc_config(struct dvb_usb_device *d, struct dvb_usb_rc *rc)
 		if (ret < 0)
 			goto err;
 
-		dev_dbg(&intf->dev, "ir_type=%02x\n", tmp);
+		dev_dbg(&d->udev->dev, "%s: ir_type=%02x\n", __func__, tmp);
 
 		switch (tmp) {
 		case 0: /* NEC */
 		default:
-			rc->allowed_protos = RC_BIT_NEC | RC_BIT_NECX |
-								RC_BIT_NEC32;
+			rc->allowed_protos = RC_PROTO_BIT_NEC |
+					RC_PROTO_BIT_NECX | RC_PROTO_BIT_NEC32;
 			break;
 		case 1: /* RC6 */
-			rc->allowed_protos = RC_BIT_RC6_MCE;
+			rc->allowed_protos = RC_PROTO_BIT_RC6_MCE;
 			break;
 		}
 
@@ -1912,7 +1862,7 @@ static int af9035_get_rc_config(struct dvb_usb_device *d, struct dvb_usb_rc *rc)
 	return 0;
 
 err:
-	dev_dbg(&intf->dev, "failed=%d\n", ret);
+	dev_dbg(&d->udev->dev, "%s: failed=%d\n", __func__, ret);
 
 	return ret;
 }
@@ -1924,9 +1874,8 @@ static int af9035_get_stream_config(struct dvb_frontend *fe, u8 *ts_type,
 		struct usb_data_stream_properties *stream)
 {
 	struct dvb_usb_device *d = fe_to_d(fe);
-	struct usb_interface *intf = d->intf;
 
-	dev_dbg(&intf->dev, "adap=%d\n", fe_to_adap(fe)->id);
+	dev_dbg(&d->udev->dev, "%s: adap=%d\n", __func__, fe_to_adap(fe)->id);
 
 	if (d->udev->speed == USB_SPEED_FULL)
 		stream->u.bulk.buffersize = 5 * 188;
@@ -1978,7 +1927,7 @@ static int af9035_probe(struct usb_interface *intf,
 	if ((le16_to_cpu(udev->descriptor.idVendor) == USB_VID_TERRATEC) &&
 			(le16_to_cpu(udev->descriptor.idProduct) == 0x0099)) {
 		if (!strcmp("Afatech", manufacturer)) {
-			dev_dbg(&udev->dev, "rejecting device\n");
+			dev_dbg(&udev->dev, "%s: rejecting device\n", __func__);
 			return -ENODEV;
 		}
 	}
@@ -2111,8 +2060,6 @@ static const struct usb_device_id af9035_id_table[] = {
 		&af9035_props, "Avermedia A835B(3835)", RC_MAP_IT913X_V2) },
 	{ DVB_USB_DEVICE(USB_VID_AVERMEDIA, USB_PID_AVERMEDIA_A835B_4835,
 		&af9035_props, "Avermedia A835B(4835)",	RC_MAP_IT913X_V2) },
-	{ DVB_USB_DEVICE(USB_VID_AVERMEDIA, USB_PID_AVERMEDIA_TD110,
-		&af9035_props, "Avermedia AverTV Volar HD 2 (TD110)", RC_MAP_AVERMEDIA_RM_KS) },
 	{ DVB_USB_DEVICE(USB_VID_AVERMEDIA, USB_PID_AVERMEDIA_H335,
 		&af9035_props, "Avermedia H335", RC_MAP_IT913X_V2) },
 	{ DVB_USB_DEVICE(USB_VID_KWORLD_2, USB_PID_KWORLD_UB499_2T_T09,

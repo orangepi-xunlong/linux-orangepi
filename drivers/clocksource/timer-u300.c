@@ -359,37 +359,27 @@ static struct delay_timer u300_delay_timer;
 /*
  * This sets up the system timers, clock source and clock event.
  */
-static int __init u300_timer_init_of(struct device_node *np)
+static void __init u300_timer_init_of(struct device_node *np)
 {
 	unsigned int irq;
 	struct clk *clk;
 	unsigned long rate;
-	int ret;
 
 	u300_timer_base = of_iomap(np, 0);
-	if (!u300_timer_base) {
-		pr_err("could not ioremap system timer\n");
-		return -ENXIO;
-	}
+	if (!u300_timer_base)
+		panic("could not ioremap system timer\n");
 
 	/* Get the IRQ for the GP1 timer */
 	irq = irq_of_parse_and_map(np, 2);
-	if (!irq) {
-		pr_err("no IRQ for system timer\n");
-		return -EINVAL;
-	}
+	if (!irq)
+		panic("no IRQ for system timer\n");
 
 	pr_info("U300 GP1 timer @ base: %p, IRQ: %u\n", u300_timer_base, irq);
 
 	/* Clock the interrupt controller */
 	clk = of_clk_get(np, 0);
-	if (IS_ERR(clk))
-		return PTR_ERR(clk);
-
-	ret = clk_prepare_enable(clk);
-	if (ret)
-		return ret;
-
+	BUG_ON(IS_ERR(clk));
+	clk_prepare_enable(clk);
 	rate = clk_get_rate(clk);
 
 	u300_clockevent_data.ticks_per_jiffy = DIV_ROUND_CLOSEST(rate, HZ);
@@ -420,9 +410,7 @@ static int __init u300_timer_init_of(struct device_node *np)
 		u300_timer_base + U300_TIMER_APP_RGPT1);
 
 	/* Set up the IRQ handler */
-	ret = setup_irq(irq, &u300_timer_irq);
-	if (ret)
-		return ret;
+	setup_irq(irq, &u300_timer_irq);
 
 	/* Reset the General Purpose timer 2 */
 	writel(U300_TIMER_APP_RGPT2_TIMER_RESET,
@@ -440,12 +428,9 @@ static int __init u300_timer_init_of(struct device_node *np)
 		u300_timer_base + U300_TIMER_APP_EGPT2);
 
 	/* Use general purpose timer 2 as clock source */
-	ret = clocksource_mmio_init(u300_timer_base + U300_TIMER_APP_GPT2CC,
-				    "GPT2", rate, 300, 32, clocksource_mmio_readl_up);
-	if (ret) {
+	if (clocksource_mmio_init(u300_timer_base + U300_TIMER_APP_GPT2CC,
+			"GPT2", rate, 300, 32, clocksource_mmio_readl_up))
 		pr_err("timer: failed to initialize U300 clock source\n");
-		return ret;
-	}
 
 	/* Configure and register the clockevent */
 	clockevents_config_and_register(&u300_clockevent_data.cevd, rate,
@@ -455,7 +440,6 @@ static int __init u300_timer_init_of(struct device_node *np)
 	 * TODO: init and register the rest of the timers too, they can be
 	 * used by hrtimers!
 	 */
-	return 0;
 }
 
 CLOCKSOURCE_OF_DECLARE(u300_timer, "stericsson,u300-apptimer",

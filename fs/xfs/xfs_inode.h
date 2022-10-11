@@ -27,7 +27,7 @@
 struct xfs_dinode;
 struct xfs_inode;
 struct xfs_buf;
-struct xfs_defer_ops;
+struct xfs_bmap_free;
 struct xfs_bmbt_irec;
 struct xfs_inode_log_item;
 struct xfs_mount;
@@ -47,7 +47,6 @@ typedef struct xfs_inode {
 
 	/* Extent information. */
 	xfs_ifork_t		*i_afp;		/* attribute fork pointer */
-	xfs_ifork_t		*i_cowfp;	/* copy on write extents */
 	xfs_ifork_t		i_df;		/* data fork */
 
 	/* operations vectors */
@@ -64,10 +63,7 @@ typedef struct xfs_inode {
 	unsigned long		i_flags;	/* see defined flags below */
 	unsigned int		i_delayed_blks;	/* count of delay alloc blks */
 
-	struct xfs_icdinode	i_d;		/* most of ondisk inode */
-
-	xfs_extnum_t		i_cnextents;	/* # of extents in cow fork */
-	unsigned int		i_cformat;	/* format of cow fork */
+	xfs_icdinode_t		i_d;		/* most of ondisk inode */
 
 	/* VFS inode */
 	struct inode		i_vnode;	/* embedded VFS inode */
@@ -92,7 +88,7 @@ static inline struct inode *VFS_I(struct xfs_inode *ip)
  */
 static inline xfs_fsize_t XFS_ISIZE(struct xfs_inode *ip)
 {
-	if (S_ISREG(VFS_I(ip)->i_mode))
+	if (S_ISREG(ip->i_d.di_mode))
 		return i_size_read(VFS_I(ip));
 	return ip->i_d.di_size;
 }
@@ -206,11 +202,6 @@ xfs_get_initial_prid(struct xfs_inode *dp)
 	return XFS_PROJID_DEFAULT;
 }
 
-static inline bool xfs_is_reflink_inode(struct xfs_inode *ip)
-{
-	return ip->i_d.di_flags2 & XFS_DIFLAG2_REFLINK;
-}
-
 /*
  * In-core inode flags.
  */
@@ -226,13 +217,6 @@ static inline bool xfs_is_reflink_inode(struct xfs_inode *ip)
 #define __XFS_IPINNED_BIT	8	 /* wakeup key for zero pin count */
 #define XFS_IPINNED		(1 << __XFS_IPINNED_BIT)
 #define XFS_IDONTCACHE		(1 << 9) /* don't cache the inode long term */
-#define XFS_IEOFBLOCKS		(1 << 10)/* has the preallocblocks tag set */
-/*
- * If this unlinked inode is in the middle of recovery, don't let drop_inode
- * truncate and free the inode.  This can happen if we iget the inode during
- * log recovery to replay a bmap operation on the inode.
- */
-#define XFS_IRECOVERY		(1 << 11)
 
 /*
  * Per-lifetime flags need to be reset when re-using a reclaimable inode during
@@ -246,11 +230,6 @@ static inline bool xfs_is_reflink_inode(struct xfs_inode *ip)
 /*
  * Synchronize processes attempting to flush the in-core inode back to disk.
  */
-
-static inline int xfs_isiflocked(struct xfs_inode *ip)
-{
-	return xfs_iflags_test(ip, XFS_IFLOCK);
-}
 
 extern void __xfs_iflock(struct xfs_inode *ip);
 
@@ -267,10 +246,14 @@ static inline void xfs_iflock(struct xfs_inode *ip)
 
 static inline void xfs_ifunlock(struct xfs_inode *ip)
 {
-	ASSERT(xfs_isiflocked(ip));
 	xfs_iflags_clear(ip, XFS_IFLOCK);
 	smp_mb();
 	wake_up_bit(&ip->i_flags, __XFS_IFLOCK_BIT);
+}
+
+static inline int xfs_isiflocked(struct xfs_inode *ip)
+{
+	return xfs_iflags_test(ip, XFS_IFLOCK);
 }
 
 /*
@@ -387,7 +370,7 @@ static inline void xfs_ifunlock(struct xfs_inode *ip)
  */
 #define XFS_INHERIT_GID(pip)	\
 	(((pip)->i_mount->m_flags & XFS_MOUNT_GRPID) || \
-	 (VFS_I(pip)->i_mode & S_ISGID))
+	 ((pip)->i_d.di_mode & S_ISGID))
 
 int		xfs_release(struct xfs_inode *ip);
 void		xfs_inactive(struct xfs_inode *ip);
@@ -413,26 +396,34 @@ void		xfs_ilock_demote(xfs_inode_t *, uint);
 int		xfs_isilocked(xfs_inode_t *, uint);
 uint		xfs_ilock_data_map_shared(struct xfs_inode *);
 uint		xfs_ilock_attr_map_shared(struct xfs_inode *);
+int		xfs_ialloc(struct xfs_trans *, xfs_inode_t *, umode_t,
+			   xfs_nlink_t, xfs_dev_t, prid_t, int,
+			   struct xfs_buf **, xfs_inode_t **);
 
 uint		xfs_ip2xflags(struct xfs_inode *);
+uint		xfs_dic2xflags(struct xfs_dinode *);
 int		xfs_ifree(struct xfs_trans *, xfs_inode_t *,
-			   struct xfs_defer_ops *);
+			   struct xfs_bmap_free *);
 int		xfs_itruncate_extents(struct xfs_trans **, struct xfs_inode *,
 				      int, xfs_fsize_t);
+int		xfs_iunlink(struct xfs_trans *, xfs_inode_t *);
+
 void		xfs_iext_realloc(xfs_inode_t *, int, int);
 
 void		xfs_iunpin_wait(xfs_inode_t *);
 #define xfs_ipincount(ip)	((unsigned int) atomic_read(&ip->i_pincount))
 
 int		xfs_iflush(struct xfs_inode *, struct xfs_buf **);
+void		xfs_lock_inodes(xfs_inode_t **, int, uint);
 void		xfs_lock_two_inodes(xfs_inode_t *, xfs_inode_t *, uint);
 
 xfs_extlen_t	xfs_get_extsz_hint(struct xfs_inode *ip);
-xfs_extlen_t	xfs_get_cowextsz_hint(struct xfs_inode *ip);
 
 int		xfs_dir_ialloc(struct xfs_trans **, struct xfs_inode *, umode_t,
 			       xfs_nlink_t, xfs_dev_t, prid_t, int,
 			       struct xfs_inode **, int *);
+int		xfs_droplink(struct xfs_trans *, struct xfs_inode *);
+int		xfs_bumplink(struct xfs_trans *, struct xfs_inode *);
 
 /* from xfs_file.c */
 enum xfs_prealloc_flags {
@@ -446,16 +437,10 @@ int	xfs_update_prealloc_flags(struct xfs_inode *ip,
 				  enum xfs_prealloc_flags flags);
 int	xfs_zero_eof(struct xfs_inode *ip, xfs_off_t offset,
 		     xfs_fsize_t isize, bool *did_zeroing);
-int	xfs_zero_range(struct xfs_inode *ip, xfs_off_t pos, xfs_off_t count,
-		bool *did_zero);
-loff_t	__xfs_seek_hole_data(struct inode *inode, loff_t start,
-			     loff_t eof, int whence);
+int	xfs_iozero(struct xfs_inode *ip, loff_t pos, size_t count);
 
 
 /* from xfs_iops.c */
-extern void xfs_setup_inode(struct xfs_inode *ip);
-extern void xfs_setup_iops(struct xfs_inode *ip);
-
 /*
  * When setting up a newly allocated inode, we need to call
  * xfs_finish_inode_setup() once the inode is fully instantiated at
@@ -463,6 +448,7 @@ extern void xfs_setup_iops(struct xfs_inode *ip);
  * before we've completed instantiation. Otherwise we can do it
  * the moment the inode lookup is complete.
  */
+extern void xfs_setup_inode(struct xfs_inode *ip);
 static inline void xfs_finish_inode_setup(struct xfs_inode *ip)
 {
 	xfs_iflags_clear(ip, XFS_INEW);
@@ -474,7 +460,6 @@ static inline void xfs_finish_inode_setup(struct xfs_inode *ip)
 static inline void xfs_setup_existing_inode(struct xfs_inode *ip)
 {
 	xfs_setup_inode(ip);
-	xfs_setup_iops(ip);
 	xfs_finish_inode_setup(ip);
 }
 
@@ -493,7 +478,14 @@ do { \
 
 extern struct kmem_zone	*xfs_inode_zone;
 
-/* The default CoW extent size hint. */
-#define XFS_DEFAULT_COWEXTSZ_HINT 32
+/*
+ * Flags for read/write calls
+ */
+#define XFS_IO_ISDIRECT	0x00001		/* bypass page cache */
+#define XFS_IO_INVIS	0x00002		/* don't update inode timestamps */
+
+#define XFS_IO_FLAGS \
+	{ XFS_IO_ISDIRECT,	"DIRECT" }, \
+	{ XFS_IO_INVIS,		"INVIS"}
 
 #endif	/* __XFS_INODE_H__ */

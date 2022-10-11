@@ -44,7 +44,6 @@ struct cs42xx8_priv {
 
 	bool slave_mode;
 	unsigned long sysclk;
-	u32 tx_channels;
 };
 
 /* -127.5dB to 0dB with step of 0.5dB */
@@ -258,9 +257,6 @@ static int cs42xx8_hw_params(struct snd_pcm_substream *substream,
 	u32 ratio = cs42xx8->sysclk / params_rate(params);
 	u32 i, fm, val, mask;
 
-	if (tx)
-		cs42xx8->tx_channels = params_channels(params);
-
 	for (i = 0; i < ARRAY_SIZE(cs42xx8_ratios); i++) {
 		if (cs42xx8_ratios[i].ratio == ratio)
 			break;
@@ -287,11 +283,9 @@ static int cs42xx8_digital_mute(struct snd_soc_dai *dai, int mute)
 {
 	struct snd_soc_codec *codec = dai->codec;
 	struct cs42xx8_priv *cs42xx8 = snd_soc_codec_get_drvdata(codec);
-	u8 dac_unmute = cs42xx8->tx_channels ?
-		        ~((0x1 << cs42xx8->tx_channels) - 1) : 0;
 
-	regmap_write(cs42xx8->regmap, CS42XX8_DACMUTE,
-		     mute ? CS42XX8_DACMUTE_ALL : dac_unmute);
+	regmap_update_bits(cs42xx8->regmap, CS42XX8_DACMUTE,
+			   CS42XX8_DACMUTE_ALL, mute ? CS42XX8_DACMUTE_ALL : 0);
 
 	return 0;
 }
@@ -411,14 +405,12 @@ static const struct snd_soc_codec_driver cs42xx8_driver = {
 	.probe = cs42xx8_codec_probe,
 	.idle_bias_off = true,
 
-	.component_driver = {
-		.controls		= cs42xx8_snd_controls,
-		.num_controls		= ARRAY_SIZE(cs42xx8_snd_controls),
-		.dapm_widgets		= cs42xx8_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(cs42xx8_dapm_widgets),
-		.dapm_routes		= cs42xx8_dapm_routes,
-		.num_dapm_routes	= ARRAY_SIZE(cs42xx8_dapm_routes),
-	},
+	.controls = cs42xx8_snd_controls,
+	.num_controls = ARRAY_SIZE(cs42xx8_snd_controls),
+	.dapm_widgets = cs42xx8_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(cs42xx8_dapm_widgets),
+	.dapm_routes = cs42xx8_dapm_routes,
+	.num_dapm_routes = ARRAY_SIZE(cs42xx8_dapm_routes),
 };
 
 const struct cs42xx8_driver_data cs42448_data = {
@@ -569,6 +561,7 @@ static int cs42xx8_runtime_resume(struct device *dev)
 	msleep(5);
 
 	regcache_cache_only(cs42xx8->regmap, false);
+	regcache_mark_dirty(cs42xx8->regmap);
 
 	ret = regcache_sync(cs42xx8->regmap);
 	if (ret) {

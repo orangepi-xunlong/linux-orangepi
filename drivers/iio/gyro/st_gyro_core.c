@@ -185,12 +185,6 @@ static const struct st_sensor_settings st_gyro_sensors_settings[] = {
 		.drdy_irq = {
 			.addr = ST_GYRO_1_DRDY_IRQ_ADDR,
 			.mask_int2 = ST_GYRO_1_DRDY_IRQ_INT2_MASK,
-			/*
-			 * The sensor has IHL (active low) and open
-			 * drain settings, but only for INT1 and not
-			 * for the DRDY line on INT2.
-			 */
-			.addr_stat_drdy = ST_SENSORS_DEFAULT_STAT_ADDR,
 		},
 		.multi_read_bit = ST_GYRO_1_MULTIREAD_BIT,
 		.bootime = 2,
@@ -204,7 +198,6 @@ static const struct st_sensor_settings st_gyro_sensors_settings[] = {
 			[2] = LSM330DLC_GYRO_DEV_NAME,
 			[3] = L3G4IS_GYRO_DEV_NAME,
 			[4] = LSM330_GYRO_DEV_NAME,
-			[5] = LSM9DS0_GYRO_DEV_NAME,
 		},
 		.ch = (struct iio_chan_spec *)st_gyro_16bit_channels,
 		.odr = {
@@ -255,12 +248,6 @@ static const struct st_sensor_settings st_gyro_sensors_settings[] = {
 		.drdy_irq = {
 			.addr = ST_GYRO_2_DRDY_IRQ_ADDR,
 			.mask_int2 = ST_GYRO_2_DRDY_IRQ_INT2_MASK,
-			/*
-			 * The sensor has IHL (active low) and open
-			 * drain settings, but only for INT1 and not
-			 * for the DRDY line on INT2.
-			 */
-			.addr_stat_drdy = ST_SENSORS_DEFAULT_STAT_ADDR,
 		},
 		.multi_read_bit = ST_GYRO_2_MULTIREAD_BIT,
 		.bootime = 2,
@@ -320,12 +307,6 @@ static const struct st_sensor_settings st_gyro_sensors_settings[] = {
 		.drdy_irq = {
 			.addr = ST_GYRO_3_DRDY_IRQ_ADDR,
 			.mask_int2 = ST_GYRO_3_DRDY_IRQ_INT2_MASK,
-			/*
-			 * The sensor has IHL (active low) and open
-			 * drain settings, but only for INT1 and not
-			 * for the DRDY line on INT2.
-			 */
-			.addr_stat_drdy = ST_SENSORS_DEFAULT_STAT_ADDR,
 		},
 		.multi_read_bit = ST_GYRO_3_MULTIREAD_BIT,
 		.bootime = 2,
@@ -409,7 +390,6 @@ static const struct iio_info gyro_info = {
 static const struct iio_trigger_ops st_gyro_trigger_ops = {
 	.owner = THIS_MODULE,
 	.set_trigger_state = ST_GYRO_TRIGGER_SET_STATE,
-	.validate_device = st_sensors_validate_device,
 };
 #define ST_GYRO_TRIGGER_OPS (&st_gyro_trigger_ops)
 #else
@@ -426,15 +406,13 @@ int st_gyro_common_probe(struct iio_dev *indio_dev)
 	indio_dev->info = &gyro_info;
 	mutex_init(&gdata->tb.buf_lock);
 
-	err = st_sensors_power_enable(indio_dev);
-	if (err)
-		return err;
+	st_sensors_power_enable(indio_dev);
 
 	err = st_sensors_check_device_support(indio_dev,
 					ARRAY_SIZE(st_gyro_sensors_settings),
 					st_gyro_sensors_settings);
 	if (err < 0)
-		goto st_gyro_power_off;
+		return err;
 
 	gdata->num_data_channels = ST_GYRO_NUMBER_DATA_CHANNELS;
 	gdata->multiread_bit = gdata->sensor_settings->multi_read_bit;
@@ -448,11 +426,11 @@ int st_gyro_common_probe(struct iio_dev *indio_dev)
 	err = st_sensors_init_sensor(indio_dev,
 				(struct st_sensors_platform_data *)&gyro_pdata);
 	if (err < 0)
-		goto st_gyro_power_off;
+		return err;
 
 	err = st_gyro_allocate_ring(indio_dev);
 	if (err < 0)
-		goto st_gyro_power_off;
+		return err;
 
 	if (irq > 0) {
 		err = st_sensors_allocate_trigger(indio_dev,
@@ -475,8 +453,6 @@ st_gyro_device_register_error:
 		st_sensors_deallocate_trigger(indio_dev);
 st_gyro_probe_trigger_error:
 	st_gyro_deallocate_ring(indio_dev);
-st_gyro_power_off:
-	st_sensors_power_disable(indio_dev);
 
 	return err;
 }

@@ -69,7 +69,7 @@ static struct sk_buff *named_prepare_buf(struct net *net, u32 type, u32 size,
 					 u32 dest)
 {
 	struct tipc_net *tn = net_generic(net, tipc_net_id);
-	struct sk_buff *buf = tipc_buf_acquire(INT_H_SIZE + size, GFP_ATOMIC);
+	struct sk_buff *buf = tipc_buf_acquire(INT_H_SIZE + size);
 	struct tipc_msg *msg;
 
 	if (buf != NULL) {
@@ -79,6 +79,31 @@ static struct sk_buff *named_prepare_buf(struct net *net, u32 type, u32 size,
 		msg_set_size(msg, INT_H_SIZE + size);
 	}
 	return buf;
+}
+
+void named_cluster_distribute(struct net *net, struct sk_buff *skb)
+{
+	struct tipc_net *tn = net_generic(net, tipc_net_id);
+	struct sk_buff *oskb;
+	struct tipc_node *node;
+	u32 dnode;
+
+	rcu_read_lock();
+	list_for_each_entry_rcu(node, &tn->node_list, list) {
+		dnode = node->addr;
+		if (in_own_node(net, dnode))
+			continue;
+		if (!tipc_node_is_up(node))
+			continue;
+		oskb = pskb_copy(skb, GFP_ATOMIC);
+		if (!oskb)
+			break;
+		msg_set_destnode(buf_msg(oskb), dnode);
+		tipc_node_xmit_skb(net, oskb, dnode, 0);
+	}
+	rcu_read_unlock();
+
+	kfree_skb(skb);
 }
 
 /**
@@ -156,7 +181,6 @@ static void named_distribute(struct net *net, struct sk_buff_head *list,
 				pr_warn("Bulk publication failure\n");
 				return;
 			}
-			msg_set_bc_ack_invalid(buf_msg(skb), true);
 			item = (struct distr_item *)msg_data(buf_msg(skb));
 		}
 
@@ -199,6 +223,42 @@ void tipc_named_node_up(struct net *net, u32 dnode)
 	tipc_node_xmit(net, &head, dnode, 0);
 }
 
+static void tipc_publ_subscribe(struct net *net, struct publication *publ,
+				u32 addr)
+{
+	struct tipc_node *node;
+
+	if (in_own_node(net, addr))
+		return;
+
+	node = tipc_node_find(net, addr);
+	if (!node) {
+		pr_warn("Node subscription rejected, unknown node 0x%x\n",
+			addr);
+		return;
+	}
+
+	tipc_node_lock(node);
+	list_add_tail(&publ->nodesub_list, &node->publ_list);
+	tipc_node_unlock(node);
+	tipc_node_put(node);
+}
+
+static void tipc_publ_unsubscribe(struct net *net, struct publication *publ,
+				  u32 addr)
+{
+	struct tipc_node *node;
+
+	node = tipc_node_find(net, addr);
+	if (!node)
+		return;
+
+	tipc_node_lock(node);
+	list_del_init(&publ->nodesub_list);
+	tipc_node_unlock(node);
+	tipc_node_put(node);
+}
+
 /**
  * tipc_publ_purge - remove publication associated with a failed node
  *
@@ -214,7 +274,7 @@ static void tipc_publ_purge(struct net *net, struct publication *publ, u32 addr)
 	p = tipc_nametbl_remove_publ(net, publ->type, publ->lower,
 				     publ->node, publ->ref, publ->key);
 	if (p)
-		tipc_node_unsubscribe(net, &p->nodesub_list, addr);
+		tipc_publ_unsubscribe(net, p, addr);
 	spin_unlock_bh(&tn->nametbl_lock);
 
 	if (p != publ) {
@@ -227,31 +287,12 @@ static void tipc_publ_purge(struct net *net, struct publication *publ, u32 addr)
 	kfree_rcu(p, rcu);
 }
 
-/**
- * tipc_dist_queue_purge - remove deferred updates from a node that went down
- */
-static void tipc_dist_queue_purge(struct net *net, u32 addr)
-{
-	struct tipc_net *tn = net_generic(net, tipc_net_id);
-	struct distr_queue_item *e, *tmp;
-
-	spin_lock_bh(&tn->nametbl_lock);
-	list_for_each_entry_safe(e, tmp, &tn->dist_queue, next) {
-		if (e->node != addr)
-			continue;
-		list_del(&e->next);
-		kfree(e);
-	}
-	spin_unlock_bh(&tn->nametbl_lock);
-}
-
 void tipc_publ_notify(struct net *net, struct list_head *nsub_list, u32 addr)
 {
 	struct publication *publ, *tmp;
 
 	list_for_each_entry_safe(publ, tmp, nsub_list, nodesub_list)
 		tipc_publ_purge(net, publ, addr);
-	tipc_dist_queue_purge(net, addr);
 }
 
 /**
@@ -273,7 +314,7 @@ static bool tipc_update_nametbl(struct net *net, struct distr_item *i,
 						TIPC_CLUSTER_SCOPE, node,
 						ntohl(i->ref), ntohl(i->key));
 		if (publ) {
-			tipc_node_subscribe(net, &publ->nodesub_list, node);
+			tipc_publ_subscribe(net, publ, node);
 			return true;
 		}
 	} else if (dtype == WITHDRAWAL) {
@@ -282,7 +323,7 @@ static bool tipc_update_nametbl(struct net *net, struct distr_item *i,
 						node, ntohl(i->ref),
 						ntohl(i->key));
 		if (publ) {
-			tipc_node_unsubscribe(net, &publ->nodesub_list, node);
+			tipc_publ_unsubscribe(net, publ, node);
 			kfree_rcu(publ, rcu);
 			return true;
 		}

@@ -45,7 +45,7 @@ struct skcipher_ctx {
 	struct af_alg_completion completion;
 
 	atomic_t inflight;
-	size_t used;
+	unsigned used;
 
 	unsigned int len;
 	bool more;
@@ -90,7 +90,7 @@ static void skcipher_free_async_sgls(struct skcipher_async_req *sreq)
 		struct page *page = sg_page(sg);
 
 		/* some SGs may not have a page mapped */
-		if (page && page_ref_count(page))
+		if (page && atomic_read(&page->_count))
 			put_page(page);
 	}
 
@@ -154,7 +154,7 @@ static int skcipher_alloc_sgl(struct sock *sk)
 	return 0;
 }
 
-static void skcipher_pull_sgl(struct sock *sk, size_t used, int put)
+static void skcipher_pull_sgl(struct sock *sk, int used, int put)
 {
 	struct alg_sock *ask = alg_sk(sk);
 	struct skcipher_ctx *ctx = ask->private;
@@ -168,7 +168,7 @@ static void skcipher_pull_sgl(struct sock *sk, size_t used, int put)
 		sg = sgl->sg;
 
 		for (i = 0; i < sgl->cur; i++) {
-			size_t plen = min_t(size_t, used, sg[i].length);
+			int plen = min_t(int, used, sg[i].length);
 
 			if (!sg_page(sg + i))
 				continue;
@@ -239,7 +239,7 @@ static void skcipher_wmem_wakeup(struct sock *sk)
 
 	rcu_read_lock();
 	wq = rcu_dereference(sk->sk_wq);
-	if (skwq_has_sleeper(wq))
+	if (wq_has_sleeper(wq))
 		wake_up_interruptible_sync_poll(&wq->wait, POLLIN |
 							   POLLRDNORM |
 							   POLLRDBAND);
@@ -289,7 +289,7 @@ static void skcipher_data_wakeup(struct sock *sk)
 
 	rcu_read_lock();
 	wq = rcu_dereference(sk->sk_wq);
-	if (skwq_has_sleeper(wq))
+	if (wq_has_sleeper(wq))
 		wake_up_interruptible_sync_poll(&wq->wait, POLLOUT |
 							   POLLRDNORM |
 							   POLLRDBAND);
@@ -352,7 +352,7 @@ static int skcipher_sendmsg(struct socket *sock, struct msghdr *msg,
 	while (size) {
 		struct scatterlist *sg;
 		unsigned long len = size;
-		size_t plen;
+		int plen;
 
 		if (ctx->merge) {
 			sgl = list_entry(ctx->tsgl.prev,
@@ -395,7 +395,7 @@ static int skcipher_sendmsg(struct socket *sock, struct msghdr *msg,
 			sg_unmark_end(sg + sgl->cur - 1);
 		do {
 			i = sgl->cur;
-			plen = min_t(size_t, len, PAGE_SIZE);
+			plen = min_t(int, len, PAGE_SIZE);
 
 			sg_assign_page(sg + i, alloc_page(GFP_KERNEL));
 			err = -ENOMEM;
@@ -808,8 +808,8 @@ static int skcipher_sendmsg_nokey(struct socket *sock, struct msghdr *msg,
 	int err;
 
 	err = skcipher_check_key(sock);
-	/*if (err)
-		return err;*/ /*ce2.0 dh/rsa/ecc have no single key to set*/
+	if (err)
+		return err;
 
 	return skcipher_sendmsg(sock, msg, size);
 }
@@ -820,8 +820,8 @@ static ssize_t skcipher_sendpage_nokey(struct socket *sock, struct page *page,
 	int err;
 
 	err = skcipher_check_key(sock);
-	/*if (err)
-		return err;*/ /*ce2.0 dh/rsa/ecc have no single key to set*/
+	if (err)
+		return err;
 
 	return skcipher_sendpage(sock, page, offset, size, flags);
 }
@@ -832,8 +832,8 @@ static int skcipher_recvmsg_nokey(struct socket *sock, struct msghdr *msg,
 	int err;
 
 	err = skcipher_check_key(sock);
-	/*if (err)
-		return err;*/ /*ce2.0 dh/rsa/ecc have no single key to set*/
+	if (err)
+		return err;
 
 	return skcipher_recvmsg(sock, msg, ignored, flags);
 }

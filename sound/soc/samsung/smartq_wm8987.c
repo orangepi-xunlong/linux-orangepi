@@ -13,11 +13,14 @@
  *
  */
 
-#include <linux/gpio/consumer.h>
+#include <linux/gpio.h>
 #include <linux/module.h>
 
 #include <sound/soc.h>
 #include <sound/jack.h>
+
+#include <mach/gpio-samsung.h>
+#include <asm/mach-types.h>
 
 #include "i2s.h"
 #include "../codecs/wm8750.h"
@@ -93,7 +96,7 @@ static struct snd_soc_jack_pin smartq_jack_pins[] = {
 
 static struct snd_soc_jack_gpio smartq_jack_gpios[] = {
 	{
-		.gpio		= -1,
+		.gpio		= S3C64XX_GPL(12),
 		.name		= "headphone detect",
 		.report		= SND_JACK_HEADPHONE,
 		.debounce_time	= 200,
@@ -110,9 +113,7 @@ static int smartq_speaker_event(struct snd_soc_dapm_widget *w,
 				struct snd_kcontrol *k,
 				int event)
 {
-	struct gpio_desc *gpio = snd_soc_card_get_drvdata(&snd_soc_smartq);
-
-	gpiod_set_value(gpio, SND_SOC_DAPM_EVENT_OFF(event));
+	gpio_set_value(S3C64XX_GPK(12), SND_SOC_DAPM_EVENT_OFF(event));
 
 	return 0;
 }
@@ -198,39 +199,62 @@ static struct snd_soc_card snd_soc_smartq = {
 	.num_controls = ARRAY_SIZE(wm8987_smartq_controls),
 };
 
-static int smartq_probe(struct platform_device *pdev)
+static struct platform_device *smartq_snd_device;
+
+static int __init smartq_init(void)
 {
-	struct gpio_desc *gpio;
 	int ret;
 
-	platform_set_drvdata(pdev, &snd_soc_smartq);
+	if (!machine_is_smartq7() && !machine_is_smartq5()) {
+		pr_info("Only SmartQ is supported by this ASoC driver\n");
+		return -ENODEV;
+	}
+
+	smartq_snd_device = platform_device_alloc("soc-audio", -1);
+	if (!smartq_snd_device)
+		return -ENOMEM;
+
+	platform_set_drvdata(smartq_snd_device, &snd_soc_smartq);
+
+	ret = platform_device_add(smartq_snd_device);
+	if (ret) {
+		platform_device_put(smartq_snd_device);
+		return ret;
+	}
 
 	/* Initialise GPIOs used by amplifiers */
-	gpio = devm_gpiod_get(&pdev->dev, "amplifiers shutdown",
-			      GPIOD_OUT_HIGH);
-	if (IS_ERR(gpio)) {
-		dev_err(&pdev->dev, "Failed to register GPK12\n");
-		ret = PTR_ERR(gpio);
-		goto out;
+	ret = gpio_request(S3C64XX_GPK(12), "amplifiers shutdown");
+	if (ret) {
+		dev_err(&smartq_snd_device->dev, "Failed to register GPK12\n");
+		goto err_unregister_device;
 	}
-	snd_soc_card_set_drvdata(&snd_soc_smartq, gpio);
 
-	ret = devm_snd_soc_register_card(&pdev->dev, &snd_soc_smartq);
-	if (ret)
-		dev_err(&pdev->dev, "Failed to register card\n");
+	/* Disable amplifiers */
+	ret = gpio_direction_output(S3C64XX_GPK(12), 1);
+	if (ret) {
+		dev_err(&smartq_snd_device->dev, "Failed to configure GPK12\n");
+		goto err_free_gpio_amp_shut;
+	}
 
-out:
+	return 0;
+
+err_free_gpio_amp_shut:
+	gpio_free(S3C64XX_GPK(12));
+err_unregister_device:
+	platform_device_unregister(smartq_snd_device);
+
 	return ret;
 }
 
-static struct platform_driver smartq_driver = {
-	.driver = {
-		.name = "smartq-audio",
-	},
-	.probe = smartq_probe,
-};
+static void __exit smartq_exit(void)
+{
+	gpio_free(S3C64XX_GPK(12));
 
-module_platform_driver(smartq_driver);
+	platform_device_unregister(smartq_snd_device);
+}
+
+module_init(smartq_init);
+module_exit(smartq_exit);
 
 /* Module information */
 MODULE_AUTHOR("Maurus Cuelenaere <mcuelenaere@gmail.com>");

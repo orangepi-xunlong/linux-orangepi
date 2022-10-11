@@ -65,7 +65,9 @@ struct phy_8x16 {
 	void __iomem			*regs;
 	struct clk			*core_clk;
 	struct clk			*iface_clk;
-	struct regulator_bulk_data	regulator[3];
+	struct regulator		*v3p3;
+	struct regulator		*v1p8;
+	struct regulator		*vdd;
 
 	struct reset_control		*phy_reset;
 
@@ -75,6 +77,51 @@ struct phy_8x16 {
 	struct gpio_desc		*switch_gpio;
 	struct notifier_block		reboot_notify;
 };
+
+static int phy_8x16_regulators_enable(struct phy_8x16 *qphy)
+{
+	int ret;
+
+	ret = regulator_set_voltage(qphy->vdd, HSPHY_VDD_MIN, HSPHY_VDD_MAX);
+	if (ret)
+		return ret;
+
+	ret = regulator_enable(qphy->vdd);
+	if (ret)
+		return ret;
+
+	ret = regulator_set_voltage(qphy->v3p3, HSPHY_3P3_MIN, HSPHY_3P3_MAX);
+	if (ret)
+		goto off_vdd;
+
+	ret = regulator_enable(qphy->v3p3);
+	if (ret)
+		goto off_vdd;
+
+	ret = regulator_set_voltage(qphy->v1p8, HSPHY_1P8_MIN, HSPHY_1P8_MAX);
+	if (ret)
+		goto off_3p3;
+
+	ret = regulator_enable(qphy->v1p8);
+	if (ret)
+		goto off_3p3;
+
+	return 0;
+
+off_3p3:
+	regulator_disable(qphy->v3p3);
+off_vdd:
+	regulator_disable(qphy->vdd);
+
+	return ret;
+}
+
+static void phy_8x16_regulators_disable(struct phy_8x16 *qphy)
+{
+	regulator_disable(qphy->v1p8);
+	regulator_disable(qphy->v3p3);
+	regulator_disable(qphy->vdd);
+}
 
 static int phy_8x16_notify_connect(struct usb_phy *phy,
 				   enum usb_device_speed speed)
@@ -214,6 +261,7 @@ static void phy_8x16_shutdown(struct usb_phy *phy)
 
 static int phy_8x16_read_devicetree(struct phy_8x16 *qphy)
 {
+	struct regulator_bulk_data regs[3];
 	struct device *dev = qphy->phy.dev;
 	int ret;
 
@@ -225,14 +273,17 @@ static int phy_8x16_read_devicetree(struct phy_8x16 *qphy)
 	if (IS_ERR(qphy->iface_clk))
 		return PTR_ERR(qphy->iface_clk);
 
-	qphy->regulator[0].supply = "v3p3";
-	qphy->regulator[1].supply = "v1p8";
-	qphy->regulator[2].supply = "vddcx";
+	regs[0].supply = "v3p3";
+	regs[1].supply = "v1p8";
+	regs[2].supply = "vddcx";
 
-	ret = devm_regulator_bulk_get(dev, ARRAY_SIZE(qphy->regulator),
-				      qphy->regulator);
+	ret = devm_regulator_bulk_get(dev, ARRAY_SIZE(regs), regs);
 	if (ret)
 		return ret;
+
+	qphy->v3p3 = regs[0].consumer;
+	qphy->v1p8 = regs[1].consumer;
+	qphy->vdd  = regs[2].consumer;
 
 	qphy->phy_reset = devm_reset_control_get(dev, "phy");
 	if (IS_ERR(qphy->phy_reset))
@@ -240,7 +291,10 @@ static int phy_8x16_read_devicetree(struct phy_8x16 *qphy)
 
 	qphy->switch_gpio = devm_gpiod_get_optional(dev, "switch",
 						   GPIOD_OUT_LOW);
-	return PTR_ERR_OR_ZERO(qphy->switch_gpio);
+	if (IS_ERR(qphy->switch_gpio))
+		return PTR_ERR(qphy->switch_gpio);
+
+	return 0;
 }
 
 static int phy_8x16_reboot_notify(struct notifier_block *this,
@@ -310,9 +364,8 @@ static int phy_8x16_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto off_core;
 
-	ret = regulator_bulk_enable(ARRAY_SIZE(qphy->regulator),
-				    qphy->regulator);
-	if (WARN_ON(ret))
+	ret = phy_8x16_regulators_enable(qphy);
+	if (0 && ret)
 		goto off_clks;
 
 	qphy->vbus_notify.notifier_call = phy_8x16_vbus_notify;
@@ -334,7 +387,7 @@ off_extcon:
 	extcon_unregister_notifier(qphy->vbus_edev, EXTCON_USB,
 				   &qphy->vbus_notify);
 off_power:
-	regulator_bulk_disable(ARRAY_SIZE(qphy->regulator), qphy->regulator);
+	phy_8x16_regulators_disable(qphy);
 off_clks:
 	clk_disable_unprepare(qphy->iface_clk);
 off_core:
@@ -360,7 +413,7 @@ static int phy_8x16_remove(struct platform_device *pdev)
 
 	clk_disable_unprepare(qphy->iface_clk);
 	clk_disable_unprepare(qphy->core_clk);
-	regulator_bulk_disable(ARRAY_SIZE(qphy->regulator), qphy->regulator);
+	phy_8x16_regulators_disable(qphy);
 	return 0;
 }
 
