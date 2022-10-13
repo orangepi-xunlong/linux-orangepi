@@ -410,6 +410,9 @@ struct rockchip_pin_ctrl {
 	int	(*schmitt_calc_reg)(struct rockchip_pin_bank *bank,
 				    int pin_num, struct regmap **regmap,
 				    int *reg, u8 *bit);
+	int	(*slew_rate_calc_reg)(struct rockchip_pin_bank *bank,
+				      int pin_num, struct regmap **regmap,
+				      int *reg, u8 *bit);
 };
 
 struct rockchip_pin_config {
