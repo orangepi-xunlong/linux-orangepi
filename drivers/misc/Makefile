@@ -61,3 +61,9 @@ obj-$(CONFIG_CXL_BASE)		+= cxl/
 obj-$(CONFIG_UID_SYS_STATS) += uid_sys_stats.o
 obj-$(CONFIG_MEMORY_STATE_TIME) += memory_state_time.o
 obj-$(CONFIG_USB_CAM_GPIO)	+= usb_cam_gpio.o
+
+obj-$(CONFIG_RK_WIFI_DEVICE_UWE5622) += unisocwcn/
+obj-$(CONFIG_TTY_OVERY_SDIO)   += tty-sdio/
+UNISOCWCN_DIR := $(shell cd $(srctree)/drivers/misc/unisocwcn/ && /bin/pwd)
+UNISOC_BSP_INCLUDE := $(UNISOCWCN_DIR)/include
+export UNISOC_BSP_INCLUDE

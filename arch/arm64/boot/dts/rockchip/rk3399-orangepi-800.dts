@@ -258,21 +258,21 @@
 		status = "okay";
 
 		power {
-			gpios = <&gpio1 1 GPIO_ACTIVE_HIGH>;
+			gpios = <&gpio1 RK_PA1 GPIO_ACTIVE_HIGH>;
 			label = "power_led";
 			linux,default-trigger = "none";
 			default-state = "on";
 			retain-state-suspended;
 		};
 		num {
-			gpios = <&gpio1 0 GPIO_ACTIVE_HIGH>;
+			gpios = <&gpio4 RK_PD5 GPIO_ACTIVE_HIGH>;
 			label = "num_led";
 			linux,default-trigger = "kbd-numlock";
 			default-state = "off";
 			retain-state-suspended;
 		};
 		caps {
-			gpios = <&gpio1 2 GPIO_ACTIVE_HIGH>;
+			gpios = <&gpio3 RK_PD4 GPIO_ACTIVE_HIGH>;
 			label = "caps_led";
 			linux,default-trigger = "kbd-capslock";
 			default-state = "off";
@@ -296,48 +296,30 @@
 		reset-gpios = <&gpio0 10 GPIO_ACTIVE_LOW>; /* GPIO0_B2 */
 	};
 
+	sprd-wlan {
+		compatible = "sprd,uwe5622-wifi";
+		status = "okay";
+	};
+
 	unisoc_uwe_bsp: uwe-bsp {
 		compatible = "unisoc,uwe_bsp";
-		unisoc,btwf-file-name = "/lib/firmware/wcnmodem.bin";
-		adma-tx;
-		adma-rx;
+		wl-reg-on = <&gpio0 RK_PB2 GPIO_ACTIVE_HIGH>;
+		bt-reg-on = <&gpio0 RK_PB1 GPIO_ACTIVE_HIGH>;
+		wl-wake-host-gpio = <&gpio0 RK_PA3 GPIO_ACTIVE_HIGH>;
+		bt-wake-host-gpio = <&gpio0 RK_PA4 GPIO_ACTIVE_HIGH>;
+		sdio-ext-int-gpio = <&gpio3 RK_PD6 GPIO_ACTIVE_HIGH>;
+		unisoc,btwf-file-name = "/etc/firmware/wcnmodem.bin";
 		data-irq;
+		blksz-512;
 		keep-power-on;
-		status = "disabled";
+		status = "okay";
 	};
 
 	sprd-mtty {
 		compatible = "sprd,mtty";
 		sprd,name = "ttyBT";
-		status = "disabled";
+		status = "okay";
 	};
-#if 0
-	rk_wlan: wireless-wlan {
-		compatible = "wlan-platdata";
-		rockchip,grf = <&grf>;
-		//wifi_chip_type = "ap6255";
-		//sdio_vref = <1800>;
-		WIFI,host_wake_irq = <&gpio0 3 GPIO_ACTIVE_HIGH>; /* GPIO0_a3 */
-		status = "disabled";
-	};
-
-	rk_bluetooth: wireless-bluetooth {
-		compatible = "bluetooth-platdata";
-		clocks = <&rk808 1>;
-		clock-names = "ext_clock";
-		//wifi-bt-power-toggle;
-		uart_rts_gpios = <&gpio2 19 GPIO_ACTIVE_LOW>; /* GPIO2_C3 */
-		pinctrl-names = "default", "rts_gpio";
-		pinctrl-0 = <&uart0_rts>;
-		pinctrl-1 = <&uart0_gpios>;
-		//BT,power_gpio  = <&gpio3 19 GPIO_ACTIVE_HIGH>; /* GPIOx_xx */
-		BT,reset_gpio    = <&gpio0 9 GPIO_ACTIVE_HIGH>; /* GPIO0_B1 */
-		BT,wake_gpio     = <&gpio2 26 GPIO_ACTIVE_HIGH>; /* GPIO2_D2 */
-		BT,wake_host_irq = <&gpio0 4 GPIO_ACTIVE_HIGH>; /* GPIO0_A4 */
-		status = "disabled";
-	};
-#endif
-
 };
 
 &cpu_l0 {
@@ -865,8 +847,7 @@
 };
 
 &sdio0 {
-	clock-frequency = <50000000>;
-	clock-freq-min-max = <200000 50000000>;
+	max-frequency = <150000000>;
 	supports-sdio;
 	bus-width = <4>;
 	disable-wp;
@@ -1061,6 +1042,8 @@
 
 &i2s0 {
         status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2s0_2ch_bus>;
         rockchip,i2s-broken-burst-len;
         rockchip,playback-channels = <8>;
         rockchip,capture-channels = <8>;
