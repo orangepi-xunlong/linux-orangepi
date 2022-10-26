@@ -253,6 +253,11 @@ config MDIO_BCM_UNIMAC
 	  controllers as well as some Broadcom Ethernet switches such as the
 	  Starfighter 2 switches.
 
+config MOTORCOMM_PHY
+        tristate "Motorcomm PHYs"
+        help
+          Supports the YT8010, YT8510, YT8511, YT8512 PHYs.
+
 config MDIO_BCM_IPROC
 	tristate "Broadcom iProc MDIO bus controller"
 	depends on ARCH_BCM_IPROC || COMPILE_TEST

@@ -131,8 +131,6 @@ static int phy_disable_eee(struct phy_device *phydev);
 #define DP_83848_PHY_ID   0x20005c90
 #define RTL_8211F_PHY_ID  0x001cc916
 
-
-
 /**
  * stmmac_verify_args - verify the driver parameters.
  * Description: it checks the driver parameters and set a default in case of
@@ -1806,6 +1804,8 @@ static int stmmac_open(struct net_device *dev)
 	struct stmmac_priv *priv = netdev_priv(dev);
 	int ret;
 
+	stmmac_check_ether_addr(priv);
+
 	if (priv->pcs != STMMAC_PCS_RGMII && priv->pcs != STMMAC_PCS_TBI &&
 	    priv->pcs != STMMAC_PCS_RTBI) {
 		ret = stmmac_init_phy(dev);
@@ -3073,8 +3073,6 @@ int stmmac_dvr_probe(struct device *device,
 	if (ret)
 		goto error_hw_init;
 
-	stmmac_check_ether_addr(priv);
-
 	ndev->netdev_ops = &stmmac_netdev_ops;
 
 	ndev->hw_features = NETIF_F_SG | NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM |
@@ -3129,20 +3127,22 @@ int stmmac_dvr_probe(struct device *device,
 		}
 	}
 
-/* register the PHY board fixup */
-ret = phy_register_fixup_for_uid(RTL_8211E_PHY_ID, 0xffffffff, phy_rtl8211e_led_fixup);
-if (ret)
-	pr_warn("Cannot register PHY board fixup.\n");
-ret = phy_register_fixup_for_uid(RTL_8201F_PHY_ID, 0xffffffff, phy_rtl8201f_led_fixup);
-if (ret)
-	pr_warn("Cannot register PHY board fixup.\n");
-ret = phy_register_fixup_for_uid(DP_83848_PHY_ID, 0xffffffff, phy_dp83848_led_fixup);
-if (ret)
-	pr_warn("Cannot register PHY board fixup.\n");
-ret = phy_register_fixup_for_uid(RTL_8211F_PHY_ID, 0xffffffff, phy_rtl8211f_led_fixup);
-if (ret)
-	pr_warn("Cannot register PHY board fixup.\n");
+	/* register the PHY board fixup */
+	ret = phy_register_fixup_for_uid(RTL_8211E_PHY_ID, 0xffffffff, phy_rtl8211e_led_fixup);
+	if (ret)
+		pr_warn("Cannot register PHY board fixup.\n");
+	ret = phy_register_fixup_for_uid(RTL_8201F_PHY_ID, 0xffffffff, phy_rtl8201f_led_fixup);
+	if (ret)
+		pr_warn("Cannot register PHY board fixup.\n");
+	ret = phy_register_fixup_for_uid(DP_83848_PHY_ID, 0xffffffff, phy_dp83848_led_fixup);
+	if (ret)
+		pr_warn("Cannot register PHY board fixup.\n");
+	ret = phy_register_fixup_for_uid(RTL_8211F_PHY_ID, 0xffffffff, phy_rtl8211f_led_fixup);
+	if (ret)
+		pr_warn("Cannot register PHY board fixup.\n");
+
 	ret = register_netdev(ndev);
+
 	if (ret) {
 		netdev_err(priv->dev, "%s: ERROR %i registering the device\n",
 			   __func__, ret);
