@@ -1,22 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Driver for Gravis UltraSound Extreme soundcards
  *  Copyright (c) by Jaroslav Kysela <perex@perex.cz>
- *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 #include <linux/init.h>
@@ -66,21 +51,21 @@ module_param_array(id, charp, NULL, 0444);
 MODULE_PARM_DESC(id, "ID string for " CRD_NAME " soundcard.");
 module_param_array(enable, bool, NULL, 0444);
 MODULE_PARM_DESC(enable, "Enable " CRD_NAME " soundcard.");
-module_param_array(port, long, NULL, 0444);
+module_param_hw_array(port, long, ioport, NULL, 0444);
 MODULE_PARM_DESC(port, "Port # for " CRD_NAME " driver.");
-module_param_array(gf1_port, long, NULL, 0444);
+module_param_hw_array(gf1_port, long, ioport, NULL, 0444);
 MODULE_PARM_DESC(gf1_port, "GF1 port # for " CRD_NAME " driver (optional).");
-module_param_array(mpu_port, long, NULL, 0444);
+module_param_hw_array(mpu_port, long, ioport, NULL, 0444);
 MODULE_PARM_DESC(mpu_port, "MPU-401 port # for " CRD_NAME " driver.");
-module_param_array(irq, int, NULL, 0444);
+module_param_hw_array(irq, int, irq, NULL, 0444);
 MODULE_PARM_DESC(irq, "IRQ # for " CRD_NAME " driver.");
-module_param_array(mpu_irq, int, NULL, 0444);
+module_param_hw_array(mpu_irq, int, irq, NULL, 0444);
 MODULE_PARM_DESC(mpu_irq, "MPU-401 IRQ # for " CRD_NAME " driver.");
-module_param_array(gf1_irq, int, NULL, 0444);
+module_param_hw_array(gf1_irq, int, irq, NULL, 0444);
 MODULE_PARM_DESC(gf1_irq, "GF1 IRQ # for " CRD_NAME " driver.");
-module_param_array(dma8, int, NULL, 0444);
+module_param_hw_array(dma8, int, dma, NULL, 0444);
 MODULE_PARM_DESC(dma8, "8-bit DMA # for " CRD_NAME " driver.");
-module_param_array(dma1, int, NULL, 0444);
+module_param_hw_array(dma1, int, dma, NULL, 0444);
 MODULE_PARM_DESC(dma1, "GF1 DMA # for " CRD_NAME " driver.");
 module_param_array(joystick_dac, int, NULL, 0444);
 MODULE_PARM_DESC(joystick_dac, "Joystick DAC level 0.59V-4.52V or 0.389V-2.98V for " CRD_NAME " driver.");
@@ -98,9 +83,9 @@ static int snd_gusextreme_es1688_create(struct snd_card *card,
 					struct snd_es1688 *chip,
 					struct device *dev, unsigned int n)
 {
-	static long possible_ports[] = {0x220, 0x240, 0x260};
-	static int possible_irqs[] = {5, 9, 10, 7, -1};
-	static int possible_dmas[] = {1, 3, 0, -1};
+	static const long possible_ports[] = {0x220, 0x240, 0x260};
+	static const int possible_irqs[] = {5, 9, 10, 7, -1};
+	static const int possible_dmas[] = {1, 3, 0, -1};
 
 	int i, error;
 
@@ -137,8 +122,8 @@ static int snd_gusextreme_gus_card_create(struct snd_card *card,
 					  struct device *dev, unsigned int n,
 					  struct snd_gus_card **rgus)
 {
-	static int possible_irqs[] = {11, 12, 15, 9, 5, 7, 3, -1};
-	static int possible_dmas[] = {5, 6, 7, 3, 1, -1};
+	static const int possible_irqs[] = {11, 12, 15, 9, 5, 7, 3, -1};
+	static const int possible_dmas[] = {5, 6, 7, 3, 1, -1};
 
 	if (gf1_irq[n] == SNDRV_AUTO_IRQ) {
 		gf1_irq[n] = snd_legacy_find_free_irq(possible_irqs);

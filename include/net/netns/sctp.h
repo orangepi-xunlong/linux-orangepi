@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __NETNS_SCTP_H__
 #define __NETNS_SCTP_H__
 
@@ -88,12 +89,26 @@ struct netns_sctp {
 	 */
 	int pf_retrans;
 
+	/* Primary.Switchover.Max.Retrans sysctl value
+	 * taken from:
+	 * https://tools.ietf.org/html/rfc7829
+	 */
+	int ps_retrans;
+
 	/*
 	 * Disable Potentially-Failed feature, the feature is enabled by default
 	 * pf_enable	-  0  : disable pf
 	 *		- >0  : enable pf
 	 */
 	int pf_enable;
+
+	/*
+	 * Disable Potentially-Failed state exposure, ignored by default
+	 * pf_expose	-  0  : compatible with old applications (by default)
+	 *		-  1  : disable pf state exposure
+	 *		-  2  : enable  pf state exposure
+	 */
+	int pf_expose;
 
 	/*
 	 * Policy for preforming sctp/socket accounting
@@ -118,8 +133,17 @@ struct netns_sctp {
 	/* Flag to indicate if PR-SCTP is enabled. */
 	int prsctp_enable;
 
-	/* Flag to idicate if SCTP-AUTH is enabled */
+	/* Flag to indicate if PR-CONFIG is enabled. */
+	int reconf_enable;
+
+	/* Flag to indicate if SCTP-AUTH is enabled */
 	int auth_enable;
+
+	/* Flag to indicate if stream interleave is enabled */
+	int intl_enable;
+
+	/* Flag to indicate if ecn is enabled */
+	int ecn_enable;
 
 	/*
 	 * Policy to control SCTP IPv4 address scoping

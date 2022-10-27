@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *  include/linux/eventfd.h
  *
@@ -10,6 +11,9 @@
 
 #include <linux/fcntl.h>
 #include <linux/wait.h>
+#include <linux/err.h>
+#include <linux/percpu-defs.h>
+#include <linux/percpu.h>
 
 /*
  * CAREFUL: Check include/uapi/asm-generic/fcntl.h when defining
@@ -22,23 +26,34 @@
 #define EFD_CLOEXEC O_CLOEXEC
 #define EFD_NONBLOCK O_NONBLOCK
 
-#define EFD_SHARED_FCNTL_FLAGS (O_CLOEXEC | O_NONBLOCK)
-#define EFD_FLAGS_SET (EFD_SHARED_FCNTL_FLAGS | EFD_SEMAPHORE)
+/*
+ * We intentionally use the value of O_NOFOLLOW for EFD_ZERO_ON_WAKE
+ * because O_NOFOLLOW would have no meaning with an eventfd.
+ */
+#define EFD_ZERO_ON_WAKE O_NOFOLLOW
 
+#define EFD_SHARED_FCNTL_FLAGS (O_CLOEXEC | O_NONBLOCK)
+#define EFD_FLAGS_SET (EFD_SHARED_FCNTL_FLAGS | EFD_SEMAPHORE | EFD_ZERO_ON_WAKE)
+
+struct eventfd_ctx;
 struct file;
 
 #ifdef CONFIG_EVENTFD
 
-struct file *eventfd_file_create(unsigned int count, int flags);
-struct eventfd_ctx *eventfd_ctx_get(struct eventfd_ctx *ctx);
 void eventfd_ctx_put(struct eventfd_ctx *ctx);
 struct file *eventfd_fget(int fd);
 struct eventfd_ctx *eventfd_ctx_fdget(int fd);
 struct eventfd_ctx *eventfd_ctx_fileget(struct file *file);
 __u64 eventfd_signal(struct eventfd_ctx *ctx, __u64 n);
-ssize_t eventfd_ctx_read(struct eventfd_ctx *ctx, int no_wait, __u64 *cnt);
-int eventfd_ctx_remove_wait_queue(struct eventfd_ctx *ctx, wait_queue_t *wait,
+int eventfd_ctx_remove_wait_queue(struct eventfd_ctx *ctx, wait_queue_entry_t *wait,
 				  __u64 *cnt);
+
+DECLARE_PER_CPU(int, eventfd_wake_count);
+
+static inline bool eventfd_signal_count(void)
+{
+	return this_cpu_read(eventfd_wake_count);
+}
 
 #else /* CONFIG_EVENTFD */
 
@@ -46,10 +61,6 @@ int eventfd_ctx_remove_wait_queue(struct eventfd_ctx *ctx, wait_queue_t *wait,
  * Ugly ugly ugly error layer to support modules that uses eventfd but
  * pretend to work in !CONFIG_EVENTFD configurations. Namely, AIO.
  */
-static inline struct file *eventfd_file_create(unsigned int count, int flags)
-{
-	return ERR_PTR(-ENOSYS);
-}
 
 static inline struct eventfd_ctx *eventfd_ctx_fdget(int fd)
 {
@@ -66,16 +77,15 @@ static inline void eventfd_ctx_put(struct eventfd_ctx *ctx)
 
 }
 
-static inline ssize_t eventfd_ctx_read(struct eventfd_ctx *ctx, int no_wait,
-				       __u64 *cnt)
+static inline int eventfd_ctx_remove_wait_queue(struct eventfd_ctx *ctx,
+						wait_queue_entry_t *wait, __u64 *cnt)
 {
 	return -ENOSYS;
 }
 
-static inline int eventfd_ctx_remove_wait_queue(struct eventfd_ctx *ctx,
-						wait_queue_t *wait, __u64 *cnt)
+static inline bool eventfd_signal_count(void)
 {
-	return -ENOSYS;
+	return false;
 }
 
 #endif

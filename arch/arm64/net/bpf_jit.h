@@ -1,19 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * BPF JIT compiler for ARM64
  *
  * Copyright (C) 2014-2016 Zi Shen Lim <zlim.lnx@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 #ifndef _BPF_JIT_H
 #define _BPF_JIT_H
@@ -44,8 +33,12 @@
 #define A64_COND_NE	AARCH64_INSN_COND_NE /* != */
 #define A64_COND_CS	AARCH64_INSN_COND_CS /* unsigned >= */
 #define A64_COND_HI	AARCH64_INSN_COND_HI /* unsigned > */
+#define A64_COND_LS	AARCH64_INSN_COND_LS /* unsigned <= */
+#define A64_COND_CC	AARCH64_INSN_COND_CC /* unsigned < */
 #define A64_COND_GE	AARCH64_INSN_COND_GE /* signed >= */
 #define A64_COND_GT	AARCH64_INSN_COND_GT /* signed > */
+#define A64_COND_LE	AARCH64_INSN_COND_LE /* signed <= */
+#define A64_COND_LT	AARCH64_INSN_COND_LT /* signed < */
 #define A64_B_(cond, imm19) A64_COND_BRANCH(cond, (imm19) << 2)
 
 /* Unconditional branch (immediate) */
@@ -83,6 +76,23 @@
 /* Rt = Rn[0]; Rt2 = Rn[8]; Rn += 16; */
 #define A64_POP(Rt, Rt2, Rn)  A64_LS_PAIR(Rt, Rt2, Rn, 16, LOAD, POST_INDEX)
 
+/* Load/store exclusive */
+#define A64_SIZE(sf) \
+	((sf) ? AARCH64_INSN_SIZE_64 : AARCH64_INSN_SIZE_32)
+#define A64_LSX(sf, Rt, Rn, Rs, type) \
+	aarch64_insn_gen_load_store_ex(Rt, Rn, Rs, A64_SIZE(sf), \
+				       AARCH64_INSN_LDST_##type)
+/* Rt = [Rn]; (atomic) */
+#define A64_LDXR(sf, Rt, Rn) \
+	A64_LSX(sf, Rt, Rn, A64_ZR, LOAD_EX)
+/* [Rn] = Rt; (atomic) Rs = [state] */
+#define A64_STXR(sf, Rt, Rn, Rs) \
+	A64_LSX(sf, Rt, Rn, Rs, STORE_EX)
+
+/* LSE atomics */
+#define A64_STADD(sf, Rn, Rs) \
+	aarch64_insn_gen_stadd(Rn, Rs, A64_SIZE(sf))
+
 /* Add/subtract (immediate) */
 #define A64_ADDSUB_IMM(sf, Rd, Rn, imm12, type) \
 	aarch64_insn_gen_add_sub_imm(Rd, Rn, imm12, \
@@ -90,6 +100,14 @@
 /* Rd = Rn OP imm12 */
 #define A64_ADD_I(sf, Rd, Rn, imm12) A64_ADDSUB_IMM(sf, Rd, Rn, imm12, ADD)
 #define A64_SUB_I(sf, Rd, Rn, imm12) A64_ADDSUB_IMM(sf, Rd, Rn, imm12, SUB)
+#define A64_ADDS_I(sf, Rd, Rn, imm12) \
+	A64_ADDSUB_IMM(sf, Rd, Rn, imm12, ADD_SETFLAGS)
+#define A64_SUBS_I(sf, Rd, Rn, imm12) \
+	A64_ADDSUB_IMM(sf, Rd, Rn, imm12, SUB_SETFLAGS)
+/* Rn + imm12; set condition flags */
+#define A64_CMN_I(sf, Rn, imm12) A64_ADDS_I(sf, A64_ZR, Rn, imm12)
+/* Rn - imm12; set condition flags */
+#define A64_CMP_I(sf, Rn, imm12) A64_SUBS_I(sf, A64_ZR, Rn, imm12)
 /* Rd = Rn */
 #define A64_MOV(sf, Rd, Rn) A64_ADD_I(sf, Rd, Rn, 0)
 
@@ -161,6 +179,9 @@
 /* Rd = Ra + Rn * Rm */
 #define A64_MADD(sf, Rd, Ra, Rn, Rm) aarch64_insn_gen_data3(Rd, Ra, Rn, Rm, \
 	A64_VARIANT(sf), AARCH64_INSN_DATA3_MADD)
+/* Rd = Ra - Rn * Rm */
+#define A64_MSUB(sf, Rd, Ra, Rn, Rm) aarch64_insn_gen_data3(Rd, Ra, Rn, Rm, \
+	A64_VARIANT(sf), AARCH64_INSN_DATA3_MSUB)
 /* Rd = Rn * Rm */
 #define A64_MUL(sf, Rd, Rn, Rm) A64_MADD(sf, Rd, A64_ZR, Rn, Rm)
 
@@ -175,5 +196,27 @@
 #define A64_ANDS(sf, Rd, Rn, Rm) A64_LOGIC_SREG(sf, Rd, Rn, Rm, AND_SETFLAGS)
 /* Rn & Rm; set condition flags */
 #define A64_TST(sf, Rn, Rm) A64_ANDS(sf, A64_ZR, Rn, Rm)
+
+/* Logical (immediate) */
+#define A64_LOGIC_IMM(sf, Rd, Rn, imm, type) ({ \
+	u64 imm64 = (sf) ? (u64)imm : (u64)(u32)imm; \
+	aarch64_insn_gen_logical_immediate(AARCH64_INSN_LOGIC_##type, \
+		A64_VARIANT(sf), Rn, Rd, imm64); \
+})
+/* Rd = Rn OP imm */
+#define A64_AND_I(sf, Rd, Rn, imm) A64_LOGIC_IMM(sf, Rd, Rn, imm, AND)
+#define A64_ORR_I(sf, Rd, Rn, imm) A64_LOGIC_IMM(sf, Rd, Rn, imm, ORR)
+#define A64_EOR_I(sf, Rd, Rn, imm) A64_LOGIC_IMM(sf, Rd, Rn, imm, EOR)
+#define A64_ANDS_I(sf, Rd, Rn, imm) A64_LOGIC_IMM(sf, Rd, Rn, imm, AND_SETFLAGS)
+/* Rn & imm; set condition flags */
+#define A64_TST_I(sf, Rn, imm) A64_ANDS_I(sf, A64_ZR, Rn, imm)
+
+/* HINTs */
+#define A64_HINT(x) aarch64_insn_gen_hint(x)
+
+/* BTI */
+#define A64_BTI_C  A64_HINT(AARCH64_INSN_HINT_BTIC)
+#define A64_BTI_J  A64_HINT(AARCH64_INSN_HINT_BTIJ)
+#define A64_BTI_JC A64_HINT(AARCH64_INSN_HINT_BTIJC)
 
 #endif /* _BPF_JIT_H */

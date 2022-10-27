@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Virtual DMA channel support for DMAengine
  *
  * Copyright (C) 2012 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #ifndef VIRT_DMA_H
 #define VIRT_DMA_H
@@ -17,6 +14,7 @@
 
 struct virt_dma_desc {
 	struct dma_async_tx_descriptor tx;
+	struct dmaengine_result tx_result;
 	/* protected by vc.lock */
 	struct list_head node;
 };
@@ -33,6 +31,7 @@ struct virt_dma_chan {
 	struct list_head desc_submitted;
 	struct list_head desc_issued;
 	struct list_head desc_completed;
+	struct list_head desc_terminated;
 
 	struct virt_dma_desc *cyclic;
 };
@@ -63,6 +62,9 @@ static inline struct dma_async_tx_descriptor *vchan_tx_prep(struct virt_dma_chan
 	vd->tx.flags = tx_flags;
 	vd->tx.tx_submit = vchan_tx_submit;
 	vd->tx.desc_free = vchan_tx_desc_free;
+
+	vd->tx_result.result = DMA_TRANS_NOERROR;
+	vd->tx_result.residue = 0;
 
 	spin_lock_irqsave(&vc->lock, flags);
 	list_add_tail(&vd->node, &vc->desc_allocated);
@@ -104,6 +106,25 @@ static inline void vchan_cookie_complete(struct virt_dma_desc *vd)
 }
 
 /**
+ * vchan_vdesc_fini - Free or reuse a descriptor
+ * @vd: virtual descriptor to free/reuse
+ */
+static inline void vchan_vdesc_fini(struct virt_dma_desc *vd)
+{
+	struct virt_dma_chan *vc = to_virt_chan(vd->tx.chan);
+
+	if (dmaengine_desc_test_reuse(&vd->tx)) {
+		unsigned long flags;
+
+		spin_lock_irqsave(&vc->lock, flags);
+		list_add(&vd->node, &vc->desc_allocated);
+		spin_unlock_irqrestore(&vc->lock, flags);
+	} else {
+		vc->desc_free(vd);
+	}
+}
+
+/**
  * vchan_cyclic_callback - report the completion of a period
  * @vd: virtual descriptor
  */
@@ -113,6 +134,22 @@ static inline void vchan_cyclic_callback(struct virt_dma_desc *vd)
 
 	vc->cyclic = vd;
 	tasklet_schedule(&vc->task);
+}
+
+/**
+ * vchan_terminate_vdesc - Disable pending cyclic callback
+ * @vd: virtual descriptor to be terminated
+ *
+ * vc.lock must be held by caller
+ */
+static inline void vchan_terminate_vdesc(struct virt_dma_desc *vd)
+{
+	struct virt_dma_chan *vc = to_virt_chan(vd->tx.chan);
+
+	list_add_tail(&vd->node, &vc->desc_terminated);
+
+	if (vc->cyclic == vd)
+		vc->cyclic = NULL;
 }
 
 /**
@@ -144,6 +181,7 @@ static inline void vchan_get_all_descriptors(struct virt_dma_chan *vc,
 	list_splice_tail_init(&vc->desc_submitted, head);
 	list_splice_tail_init(&vc->desc_issued, head);
 	list_splice_tail_init(&vc->desc_completed, head);
+	list_splice_tail_init(&vc->desc_terminated, head);
 }
 
 static inline void vchan_free_chan_resources(struct virt_dma_chan *vc)
@@ -168,10 +206,22 @@ static inline void vchan_free_chan_resources(struct virt_dma_chan *vc)
  * Makes sure that all scheduled or active callbacks have finished running. For
  * proper operation the caller has to ensure that no new callbacks are scheduled
  * after the invocation of this function started.
+ * Free up the terminated cyclic descriptor to prevent memory leakage.
  */
 static inline void vchan_synchronize(struct virt_dma_chan *vc)
 {
+	LIST_HEAD(head);
+	unsigned long flags;
+
 	tasklet_kill(&vc->task);
+
+	spin_lock_irqsave(&vc->lock, flags);
+
+	list_splice_tail_init(&vc->desc_terminated, &head);
+
+	spin_unlock_irqrestore(&vc->lock, flags);
+
+	vchan_dma_desc_free_list(vc, &head);
 }
 
 #endif

@@ -1,8 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2016 Facebook
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of version 2 of the GNU General Public
- * License as published by the Free Software Foundation.
  */
 #include <linux/unistd.h>
 #include <linux/bpf.h>
@@ -13,7 +10,7 @@
 #include <string.h>
 #include <errno.h>
 
-#include "libbpf.h"
+#include <bpf/bpf.h>
 
 static void usage(void)
 {
@@ -60,9 +57,9 @@ int main(int argc, char **argv)
 	}
 
 	/* bpf_tunnel_key.remote_ipv4 expects host byte orders */
-	ret = bpf_update_elem(array_fd, &array_key, &ifindex, 0);
+	ret = bpf_map_update_elem(array_fd, &array_key, &ifindex, 0);
 	if (ret) {
-		perror("bpf_update_elem");
+		perror("bpf_map_update_elem");
 		goto out;
 	}
 

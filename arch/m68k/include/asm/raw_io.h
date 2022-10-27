@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * linux/include/asm-m68k/raw_io.h
  *
@@ -11,20 +12,6 @@
 #ifdef __KERNEL__
 
 #include <asm/byteorder.h>
-
-
-/* Values for nocacheflag and cmode */
-#define IOMAP_FULL_CACHING		0
-#define IOMAP_NOCACHE_SER		1
-#define IOMAP_NOCACHE_NONSER		2
-#define IOMAP_WRITETHROUGH		3
-
-extern void iounmap(void __iomem *addr);
-
-extern void __iomem *__ioremap(unsigned long physaddr, unsigned long size,
-		       int cacheflag);
-extern void __iounmap(void *addr, unsigned long size);
-
 
 /* ++roman: The assignments to temp. vars avoid that gcc sometimes generates
  * two accesses to memory, which may be undesirable for some devices.
@@ -93,14 +80,14 @@ extern void __iounmap(void *addr, unsigned long size);
 	({ u16 __v = le16_to_cpu(*(__force volatile u16 *) (addr)); __v; })
 
 #define rom_out_8(addr, b)	\
-	({u8 __w, __v = (b);  u32 _addr = ((u32) (addr)); \
+	({u8 __maybe_unused __w, __v = (b);  u32 _addr = ((u32) (addr)); \
 	__w = ((*(__force volatile u8 *)  ((_addr | 0x10000) + (__v<<1)))); })
 #define rom_out_be16(addr, w)	\
-	({u16 __w, __v = (w); u32 _addr = ((u32) (addr)); \
+	({u16 __maybe_unused __w, __v = (w); u32 _addr = ((u32) (addr)); \
 	__w = ((*(__force volatile u16 *) ((_addr & 0xFFFF0000UL) + ((__v & 0xFF)<<1)))); \
 	__w = ((*(__force volatile u16 *) ((_addr | 0x10000) + ((__v >> 8)<<1)))); })
 #define rom_out_le16(addr, w)	\
-	({u16 __w, __v = (w); u32 _addr = ((u32) (addr)); \
+	({u16 __maybe_unused __w, __v = (w); u32 _addr = ((u32) (addr)); \
 	__w = ((*(__force volatile u16 *) ((_addr & 0xFFFF0000UL) + ((__v >> 8)<<1)))); \
 	__w = ((*(__force volatile u16 *) ((_addr | 0x10000) + ((__v & 0xFF)<<1)))); })
 
@@ -120,12 +107,43 @@ static inline void raw_insb(volatile u8 __iomem *port, u8 *buf, unsigned int len
 }
 
 static inline void raw_outsb(volatile u8 __iomem *port, const u8 *buf,
-			     unsigned int len)
+			     unsigned int nr)
 {
-	unsigned int i;
+	unsigned int tmp;
 
-        for (i = 0; i < len; i++)
-		out_8(port, *buf++);
+	if (nr & 15) {
+		tmp = (nr & 15) - 1;
+		asm volatile (
+			"1: moveb %0@+,%2@; dbra %1,1b"
+			: "=a" (buf), "=d" (tmp)
+			: "a" (port), "0" (buf),
+			  "1" (tmp));
+	}
+	if (nr >> 4) {
+		tmp = (nr >> 4) - 1;
+		asm volatile (
+			"1: "
+			"moveb %0@+,%2@; "
+			"moveb %0@+,%2@; "
+			"moveb %0@+,%2@; "
+			"moveb %0@+,%2@; "
+			"moveb %0@+,%2@; "
+			"moveb %0@+,%2@; "
+			"moveb %0@+,%2@; "
+			"moveb %0@+,%2@; "
+			"moveb %0@+,%2@; "
+			"moveb %0@+,%2@; "
+			"moveb %0@+,%2@; "
+			"moveb %0@+,%2@; "
+			"moveb %0@+,%2@; "
+			"moveb %0@+,%2@; "
+			"moveb %0@+,%2@; "
+			"moveb %0@+,%2@; "
+			"dbra %1,1b"
+			: "=a" (buf), "=d" (tmp)
+			: "a" (port), "0" (buf),
+			  "1" (tmp));
+	}
 }
 
 static inline void raw_insw(volatile u16 __iomem *port, u16 *buf, unsigned int nr)

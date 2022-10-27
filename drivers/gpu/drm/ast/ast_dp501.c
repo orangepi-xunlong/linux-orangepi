@@ -1,19 +1,31 @@
+// SPDX-License-Identifier: GPL-2.0
 
+#include <linux/delay.h>
 #include <linux/firmware.h>
-#include <drm/drmP.h>
+#include <linux/module.h>
+
 #include "ast_drv.h"
+
 MODULE_FIRMWARE("ast_dp501_fw.bin");
 
-int ast_load_dp501_microcode(struct drm_device *dev)
+static void ast_release_firmware(void *data)
 {
-	struct ast_private *ast = dev->dev_private;
-	static char *fw_name = "ast_dp501_fw.bin";
-	int err;
-	err = request_firmware(&ast->dp501_fw, fw_name, dev->dev);
-	if (err)
-		return err;
+	struct ast_private *ast = data;
 
-	return 0;
+	release_firmware(ast->dp501_fw);
+	ast->dp501_fw = NULL;
+}
+
+static int ast_load_dp501_microcode(struct drm_device *dev)
+{
+	struct ast_private *ast = to_ast_private(dev);
+	int ret;
+
+	ret = request_firmware(&ast->dp501_fw, "ast_dp501_fw.bin", dev->dev);
+	if (ret)
+		return ret;
+
+	return devm_add_action_or_reset(dev->dev, ast_release_firmware, ast);
 }
 
 static void send_ack(struct ast_private *ast)
@@ -94,7 +106,7 @@ static bool wait_fw_ready(struct ast_private *ast)
 
 static bool ast_write_cmd(struct drm_device *dev, u8 data)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_private *ast = to_ast_private(dev);
 	int retry = 0;
 	if (wait_nack(ast)) {
 		send_nack(ast);
@@ -116,7 +128,7 @@ static bool ast_write_cmd(struct drm_device *dev, u8 data)
 
 static bool ast_write_data(struct drm_device *dev, u8 data)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_private *ast = to_ast_private(dev);
 
 	if (wait_nack(ast)) {
 		send_nack(ast);
@@ -134,7 +146,7 @@ static bool ast_write_data(struct drm_device *dev, u8 data)
 #if 0
 static bool ast_read_data(struct drm_device *dev, u8 *data)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_private *ast = to_ast_private(dev);
 	u8 tmp;
 
 	*data = 0;
@@ -173,7 +185,7 @@ static u32 get_fw_base(struct ast_private *ast)
 
 bool ast_backup_fw(struct drm_device *dev, u8 *addr, u32 size)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_private *ast = to_ast_private(dev);
 	u32 i, data;
 	u32 boot_address;
 
@@ -187,9 +199,9 @@ bool ast_backup_fw(struct drm_device *dev, u8 *addr, u32 size)
 	return false;
 }
 
-bool ast_launch_m68k(struct drm_device *dev)
+static bool ast_launch_m68k(struct drm_device *dev)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_private *ast = to_ast_private(dev);
 	u32 i, data, len = 0;
 	u32 boot_address;
 	u8 *fw_addr = NULL;
@@ -201,7 +213,11 @@ bool ast_launch_m68k(struct drm_device *dev)
 		if (ast->dp501_fw_addr) {
 			fw_addr = ast->dp501_fw_addr;
 			len = 32*1024;
-		} else if (ast->dp501_fw) {
+		} else {
+			if (!ast->dp501_fw &&
+			    ast_load_dp501_microcode(dev) < 0)
+				return false;
+
 			fw_addr = (u8 *)ast->dp501_fw->data;
 			len = ast->dp501_fw->size;
 		}
@@ -252,7 +268,7 @@ bool ast_launch_m68k(struct drm_device *dev)
 
 u8 ast_get_dp501_max_clk(struct drm_device *dev)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_private *ast = to_ast_private(dev);
 	u32 boot_address, offset, data;
 	u8 linkcap[4], linkrate, linklanes, maxclk = 0xff;
 
@@ -280,7 +296,7 @@ u8 ast_get_dp501_max_clk(struct drm_device *dev)
 
 bool ast_dp501_read_edid(struct drm_device *dev, u8 *ediddata)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_private *ast = to_ast_private(dev);
 	u32 i, boot_address, offset, data;
 
 	boot_address = get_fw_base(ast);
@@ -309,7 +325,7 @@ bool ast_dp501_read_edid(struct drm_device *dev, u8 *ediddata)
 
 static bool ast_init_dvo(struct drm_device *dev)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_private *ast = to_ast_private(dev);
 	u8 jreg;
 	u32 data;
 	ast_write32(ast, 0xf004, 0x1e6e0000);
@@ -382,7 +398,7 @@ static bool ast_init_dvo(struct drm_device *dev)
 
 static void ast_init_analog(struct drm_device *dev)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_private *ast = to_ast_private(dev);
 	u32 data;
 
 	/*
@@ -409,7 +425,7 @@ static void ast_init_analog(struct drm_device *dev)
 
 void ast_init_3rdtx(struct drm_device *dev)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_private *ast = to_ast_private(dev);
 	u8 jreg;
 
 	if (ast->chip == AST2300 || ast->chip == AST2400) {

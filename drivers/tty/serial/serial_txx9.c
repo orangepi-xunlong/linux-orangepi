@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Derived from many drivers using generic_serial interface,
  * especially serial_tx3912.c by Steven J. Hill and r39xx_serial.c
@@ -8,16 +9,8 @@
  *  Copyright (C) 2001 Steven J. Hill (sjhill@realitydiluted.com)
  *  Copyright (C) 2000-2002 Toshiba Corporation
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  *  Serial driver for TX3927/TX4927/TX4925/TX4938 internal SIO controller
  */
-
-#if defined(CONFIG_SERIAL_TXX9_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
-#define SUPPORT_SYSRQ
-#endif
 
 #include <linux/module.h>
 #include <linux/ioport.h>
@@ -251,7 +244,6 @@ static void serial_txx9_initialize(struct uart_port *port)
 	sio_out(up, TXX9_SIFCR, TXX9_SIFCR_SWRST);
 	/* TX4925 BUG WORKAROUND.  Accessing SIOC register
 	 * immediately after soft reset causes bus error. */
-	mmiowb();
 	udelay(1);
 	while ((sio_in(up, TXX9_SIFCR) & TXX9_SIFCR_SWRST) && --tmout)
 		udelay(1);
@@ -845,7 +837,7 @@ serial_txx9_type(struct uart_port *port)
 	return "txx9";
 }
 
-static struct uart_ops serial_txx9_pops = {
+static const struct uart_ops serial_txx9_pops = {
 	.tx_empty	= serial_txx9_tx_empty,
 	.set_mctrl	= serial_txx9_set_mctrl,
 	.get_mctrl	= serial_txx9_get_mctrl,
@@ -1099,6 +1091,7 @@ static int serial_txx9_probe(struct platform_device *dev)
 		port.flags	= p->flags;
 		port.mapbase	= p->mapbase;
 		port.dev	= &dev->dev;
+		port.has_sysrq	= IS_ENABLED(CONFIG_SERIAL_TXX9_CONSOLE);
 		ret = serial_txx9_register_port(&port);
 		if (ret < 0) {
 			dev_err(&dev->dev, "unable to register port at index %d "
@@ -1287,6 +1280,9 @@ static int __init serial_txx9_init(void)
 
 #ifdef ENABLE_SERIAL_TXX9_PCI
 	ret = pci_register_driver(&serial_txx9_pci_driver);
+	if (ret) {
+		platform_driver_unregister(&serial_txx9_plat_driver);
+	}
 #endif
 	if (ret == 0)
 		goto out;

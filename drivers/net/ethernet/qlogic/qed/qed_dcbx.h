@@ -1,9 +1,7 @@
+/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-3-Clause) */
 /* QLogic qed NIC Driver
- * Copyright (c) 2015 QLogic Corporation
- *
- * This software is available under the terms of the GNU General Public License
- * (GPL) Version 2, available from the file COPYING in the main directory of
- * this source tree.
+ * Copyright (c) 2015-2017  QLogic Corporation
+ * Copyright (c) 2019-2020 Marvell International Ltd.
  */
 
 #ifndef _QED_DCBX_H
@@ -28,12 +26,12 @@ enum qed_mib_read_type {
 
 struct qed_dcbx_app_data {
 	bool enable;		/* DCB enabled */
-	bool update;		/* Update indication */
+	u8 update;		/* Update indication */
 	u8 priority;		/* Priority */
 	u8 tc;			/* Traffic Class */
+	bool dont_add_vlan0;	/* Do not insert a vlan tag with id 0 */
 };
 
-#ifdef CONFIG_DCB
 #define QED_DCBX_VERSION_DISABLED       0
 #define QED_DCBX_VERSION_IEEE           1
 #define QED_DCBX_VERSION_CEE            2
@@ -49,7 +47,6 @@ struct qed_dcbx_set {
 	struct qed_dcbx_admin_params config;
 	u32 ver_num;
 };
-#endif
 
 struct qed_dcbx_results {
 	bool dcbx_enabled;
@@ -63,9 +60,6 @@ struct qed_dcbx_app_metadata {
 	enum qed_pci_personality personality;
 };
 
-#define QED_MFW_GET_FIELD(name, field) \
-	(((name) & (field ## _MASK)) >> (field ## _SHIFT))
-
 struct qed_dcbx_info {
 	struct lldp_status_params_s lldp_remote[LLDP_MAX_LLDP_AGENTS];
 	struct lldp_config_params_s lldp_local[LLDP_MAX_LLDP_AGENTS];
@@ -73,9 +67,8 @@ struct qed_dcbx_info {
 	struct qed_dcbx_results results;
 	struct dcbx_mib operational;
 	struct dcbx_mib remote;
-#ifdef CONFIG_DCB
 	struct qed_dcbx_set set;
-#endif
+	struct qed_dcbx_get get;
 	u8 dcbx_cap;
 };
 
@@ -87,6 +80,8 @@ struct qed_dcbx_mib_meta_data {
 	size_t size;
 	u32 addr;
 };
+
+extern const struct qed_eth_dcbnl_ops qed_dcbnl_ops_pass;
 
 #ifdef CONFIG_DCB
 int qed_dcbx_get_config_params(struct qed_hwfn *, struct qed_dcbx_set *);
@@ -101,8 +96,11 @@ qed_dcbx_mib_update_event(struct qed_hwfn *,
 			  struct qed_ptt *, enum qed_mib_read_type);
 
 int qed_dcbx_info_alloc(struct qed_hwfn *p_hwfn);
-void qed_dcbx_info_free(struct qed_hwfn *, struct qed_dcbx_info *);
+void qed_dcbx_info_free(struct qed_hwfn *p_hwfn);
 void qed_dcbx_set_pf_update_params(struct qed_dcbx_results *p_src,
 				   struct pf_update_ramrod_data *p_dest);
 
+#define QED_DCBX_DEFAULT_TC	0
+
+u8 qed_dcbx_get_priority_tc(struct qed_hwfn *p_hwfn, u8 pri);
 #endif

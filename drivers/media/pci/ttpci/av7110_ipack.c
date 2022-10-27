@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include "dvb_filter.h"
 #include "av7110_ipack.h"
 #include <linux/string.h>	/* for memcpy() */
@@ -23,7 +24,7 @@ void av7110_ipack_reset(struct ipack *p)
 int av7110_ipack_init(struct ipack *p, int size,
 		      void (*func)(u8 *buf, int size, void *priv))
 {
-	if (!(p->buf = vmalloc(size*sizeof(u8)))) {
+	if (!(p->buf = vmalloc(size))) {
 		printk(KERN_WARNING "Couldn't allocate memory for ipack\n");
 		return -ENOMEM;
 	}
@@ -181,7 +182,7 @@ int av7110_ipack_instant_repack (const u8 *buf, int count, struct ipack *p)
 			case DSM_CC_STREAM  :
 			case ISO13522_STREAM:
 				p->done = 1;
-				/* fall through */
+				fallthrough;
 			case PRIVATE_STREAM1:
 			case VIDEO_STREAM_S ... VIDEO_STREAM_E:
 			case AUDIO_STREAM_S ... AUDIO_STREAM_E:

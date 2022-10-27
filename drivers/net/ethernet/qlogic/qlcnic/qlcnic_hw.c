@@ -1,8 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * QLogic qlcnic NIC Driver
  * Copyright (c) 2009-2013 QLogic Corporation
- *
- * See LICENSE.qlcnic for copyright and licensing details.
  */
 
 #include <linux/slab.h>
@@ -274,13 +273,6 @@ static const unsigned crb_hub_agt[64] = {
 	0,
 	QLCNIC_HW_CRB_HUB_AGT_ADR_PGNC,
 	0,
-};
-
-static const u32 msi_tgt_status[8] = {
-	ISR_INT_TARGET_STATUS, ISR_INT_TARGET_STATUS_F1,
-	ISR_INT_TARGET_STATUS_F2, ISR_INT_TARGET_STATUS_F3,
-	ISR_INT_TARGET_STATUS_F4, ISR_INT_TARGET_STATUS_F5,
-	ISR_INT_TARGET_STATUS_F6, ISR_INT_TARGET_STATUS_F7
 };
 
 /*  PCI Windowing for DDR regions.  */
@@ -1024,12 +1016,6 @@ int qlcnic_change_mtu(struct net_device *netdev, int mtu)
 	struct qlcnic_adapter *adapter = netdev_priv(netdev);
 	int rc = 0;
 
-	if (mtu < P3P_MIN_MTU || mtu > P3P_MAX_MTU) {
-		dev_err(&adapter->netdev->dev, "%d bytes < mtu < %d bytes"
-			" not supported\n", P3P_MAX_MTU, P3P_MIN_MTU);
-		return -EINVAL;
-	}
-
 	rc = qlcnic_fw_cmd_set_mtu(adapter, mtu);
 
 	if (!rc)
@@ -1662,7 +1648,6 @@ int qlcnic_82xx_shutdown(struct pci_dev *pdev)
 {
 	struct qlcnic_adapter *adapter = pci_get_drvdata(pdev);
 	struct net_device *netdev = adapter->netdev;
-	int retval;
 
 	netif_device_detach(netdev);
 
@@ -1675,14 +1660,8 @@ int qlcnic_82xx_shutdown(struct pci_dev *pdev)
 
 	clear_bit(__QLCNIC_RESETTING, &adapter->state);
 
-	retval = pci_save_state(pdev);
-	if (retval)
-		return retval;
-
-	if (qlcnic_wol_supported(adapter)) {
-		pci_enable_wake(pdev, PCI_D3cold, 1);
-		pci_enable_wake(pdev, PCI_D3hot, 1);
-	}
+	if (qlcnic_wol_supported(adapter))
+		device_wakeup_enable(&pdev->dev);
 
 	return 0;
 }

@@ -1,10 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* -*- linux-c -*- ------------------------------------------------------- *
  *
  *   Copyright (C) 1991, 1992 Linus Torvalds
  *   Copyright 2007-2008 rPath, Inc. - All Rights Reserved
- *
- *   This file is part of the Linux kernel, and is made available under
- *   the terms of the GNU General Public License version 2.
  *
  * ----------------------------------------------------------------------- */
 
@@ -84,12 +82,6 @@ int validate_cpu(void)
 		       cpu_name(req_level));
 		printf("but only detected an %s CPU.\n",
 		       cpu_name(cpu_level));
-		return -1;
-	}
-
-	if (CONFIG_X86_MINIMUM_CPU_FAMILY <= 4 && !IS_ENABLED(CONFIG_M486) &&
-	    !has_eflag(X86_EFLAGS_ID)) {
-		printf("This kernel requires a CPU with the CPUID instruction.  Build with CONFIG_M486=y to run on this CPU.\n");
 		return -1;
 	}
 

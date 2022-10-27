@@ -1,19 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) 2016, Fuzhou Rockchip Electronics Co., Ltd
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/device.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
+#include <linux/kobject.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/reboot.h>
-#include "reboot-mode.h"
+#include <linux/reboot-mode.h>
+#include <linux/sysfs.h>
 
 #define PREFIX "mode-"
 
@@ -23,14 +21,24 @@ struct mode_info {
 	struct list_head list;
 };
 
-static unsigned int get_reboot_mode_magic(struct reboot_mode_driver *reboot,
-					  const char *cmd)
+static const char *boot_mode = "coldboot";
+
+static ssize_t boot_mode_show(struct kobject *kobj, struct kobj_attribute *attr,
+			      char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%s\n", boot_mode);
+}
+
+static struct kobj_attribute kobj_boot_mode = __ATTR_RO(boot_mode);
+
+static int get_reboot_mode_magic(struct reboot_mode_driver *reboot,
+				 const char *cmd)
 {
 	const char *normal = "normal";
 	int magic = 0;
 	struct mode_info *info;
 
-	if (!cmd)
+	if (!cmd || !cmd[0])
 		cmd = normal;
 
 	list_for_each_entry(info, &reboot->head, list) {
@@ -43,18 +51,54 @@ static unsigned int get_reboot_mode_magic(struct reboot_mode_driver *reboot,
 	return magic;
 }
 
+static void reboot_mode_write(struct reboot_mode_driver *reboot,
+			      const void *cmd)
+{
+	int magic;
+
+	magic = get_reboot_mode_magic(reboot, cmd);
+	if (!magic)
+		magic = get_reboot_mode_magic(reboot, NULL);
+	if (magic)
+		reboot->write(reboot, magic);
+}
+
 static int reboot_mode_notify(struct notifier_block *this,
 			      unsigned long mode, void *cmd)
 {
 	struct reboot_mode_driver *reboot;
-	unsigned int magic;
 
 	reboot = container_of(this, struct reboot_mode_driver, reboot_notifier);
-	magic = get_reboot_mode_magic(reboot, cmd);
-	if (magic)
-		reboot->write(reboot, magic);
+	reboot_mode_write(reboot, cmd);
 
 	return NOTIFY_DONE;
+}
+
+static int reboot_mode_panic_notify(struct notifier_block *this,
+				      unsigned long ev, void *ptr)
+{
+	struct reboot_mode_driver *reboot;
+	const char *cmd = "panic";
+
+	reboot = container_of(this, struct reboot_mode_driver, panic_notifier);
+	reboot_mode_write(reboot, cmd);
+
+	return NOTIFY_DONE;
+}
+
+static int boot_mode_parse(struct reboot_mode_driver *reboot)
+{
+	struct mode_info *info;
+	unsigned int magic = reboot->read(reboot);
+
+	list_for_each_entry(info, &reboot->head, list) {
+		if (info->magic == magic) {
+			boot_mode = info->mode;
+			break;
+		}
+	}
+
+	return 0;
 }
 
 /**
@@ -105,10 +149,16 @@ int reboot_mode_register(struct reboot_mode_driver *reboot)
 		list_add_tail(&info->list, &reboot->head);
 	}
 
+	boot_mode_parse(reboot);
 	reboot->reboot_notifier.notifier_call = reboot_mode_notify;
+	reboot->panic_notifier.notifier_call = reboot_mode_panic_notify;
 	register_reboot_notifier(&reboot->reboot_notifier);
+	register_pre_restart_handler(&reboot->reboot_notifier);
+	atomic_notifier_chain_register(&panic_notifier_list,
+				       &reboot->panic_notifier);
+	ret = sysfs_create_file(kernel_kobj, &kobj_boot_mode.attr);
 
-	return 0;
+	return ret;
 
 error:
 	list_for_each_entry(info, &reboot->head, list)
@@ -194,6 +244,6 @@ void devm_reboot_mode_unregister(struct device *dev,
 }
 EXPORT_SYMBOL_GPL(devm_reboot_mode_unregister);
 
-MODULE_AUTHOR("Andy Yan <andy.yan@rock-chips.com");
+MODULE_AUTHOR("Andy Yan <andy.yan@rock-chips.com>");
 MODULE_DESCRIPTION("System reboot mode core library");
 MODULE_LICENSE("GPL v2");

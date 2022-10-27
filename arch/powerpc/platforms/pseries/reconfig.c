@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * pSeries_reconfig.c - support for dynamic reconfiguration (including PCI
  * Hotplug and Dynamic Logical Partitioning on RPA platforms).
  *
  * Copyright (C) 2005 Nathan Lynch
  * Copyright (C) 2005 IBM Corporation
- *
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License version
- *	2 as published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -19,7 +15,7 @@
 
 #include <asm/prom.h>
 #include <asm/machdep.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/mmu.h>
 
 #include "of_helpers.h"
@@ -33,7 +29,7 @@ static int pSeries_reconfig_add_node(const char *path, struct property *proplist
 	if (!np)
 		goto out_err;
 
-	np->full_name = kstrdup(path, GFP_KERNEL);
+	np->full_name = kstrdup(kbasename(path), GFP_KERNEL);
 	if (!np->full_name)
 		goto out_err;
 
@@ -362,20 +358,13 @@ static int do_update_property(char *buf, size_t bufsize)
 static ssize_t ofdt_write(struct file *file, const char __user *buf, size_t count,
 			  loff_t *off)
 {
-	int rv = 0;
+	int rv;
 	char *kbuf;
 	char *tmp;
 
-	if (!(kbuf = kmalloc(count + 1, GFP_KERNEL))) {
-		rv = -ENOMEM;
-		goto out;
-	}
-	if (copy_from_user(kbuf, buf, count)) {
-		rv = -EFAULT;
-		goto out;
-	}
-
-	kbuf[count] = '\0';
+	kbuf = memdup_user_nul(buf, count);
+	if (IS_ERR(kbuf))
+		return PTR_ERR(kbuf);
 
 	tmp = strchr(kbuf, ' ');
 	if (!tmp) {
@@ -402,9 +391,9 @@ out:
 	return rv ? rv : count;
 }
 
-static const struct file_operations ofdt_fops = {
-	.write = ofdt_write,
-	.llseek = noop_llseek,
+static const struct proc_ops ofdt_proc_ops = {
+	.proc_write	= ofdt_write,
+	.proc_lseek	= noop_llseek,
 };
 
 /* create /proc/powerpc/ofdt write-only by root */
@@ -412,7 +401,7 @@ static int proc_ppc64_create_ofdt(void)
 {
 	struct proc_dir_entry *ent;
 
-	ent = proc_create("powerpc/ofdt", S_IWUSR, NULL, &ofdt_fops);
+	ent = proc_create("powerpc/ofdt", 0200, NULL, &ofdt_proc_ops);
 	if (ent)
 		proc_set_size(ent, 0);
 

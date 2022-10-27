@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * INET		An implementation of the TCP/IP protocol suite for the LINUX
  *		operating system.  INET is implemented using the  BSD Socket
@@ -9,11 +10,6 @@
  *
  * Authors:	Ross Biro
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  */
 #ifndef _ICMP_H
 #define	_ICMP_H
@@ -47,8 +43,18 @@ static inline void icmp_send(struct sk_buff *skb_in, int type, int code, __be32 
 	__icmp_send(skb_in, type, code, info, &IPCB(skb_in)->opt);
 }
 
+#if IS_ENABLED(CONFIG_NF_NAT)
+void icmp_ndo_send(struct sk_buff *skb_in, int type, int code, __be32 info);
+#else
+static inline void icmp_ndo_send(struct sk_buff *skb_in, int type, int code, __be32 info)
+{
+	struct ip_options opts = { 0 };
+	__icmp_send(skb_in, type, code, info, &opts);
+}
+#endif
+
 int icmp_rcv(struct sk_buff *skb);
-void icmp_err(struct sk_buff *skb, u32 info);
+int icmp_err(struct sk_buff *skb, u32 info);
 int icmp_init(void);
 void icmp_out_count(struct net *net, unsigned char type);
 

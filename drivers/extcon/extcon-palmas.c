@@ -1,23 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Palmas USB transceiver driver
  *
- * Copyright (C) 2013 Texas Instruments Incorporated - http://www.ti.com
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
+ * Copyright (C) 2013 Texas Instruments Incorporated - https://www.ti.com
  * Author: Graeme Gregory <gg@slimlogic.co.uk>
  * Author: Kishon Vijay Abraham I <kishon@ti.com>
- *
  * Based on twl6030_usb.c
- *
  * Author: Hema HK <hemahk@ti.com>
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -62,7 +51,7 @@ static irqreturn_t palmas_vbus_irq_handler(int irq, void *_palmas_usb)
 		if (palmas_usb->linkstat != PALMAS_USB_STATE_VBUS) {
 			palmas_usb->linkstat = PALMAS_USB_STATE_VBUS;
 			extcon_set_state_sync(edev, EXTCON_USB, true);
-			dev_info(palmas_usb->dev, "USB cable is attached\n");
+			dev_dbg(palmas_usb->dev, "USB cable is attached\n");
 		} else {
 			dev_dbg(palmas_usb->dev,
 				"Spurious connect event detected\n");
@@ -71,7 +60,7 @@ static irqreturn_t palmas_vbus_irq_handler(int irq, void *_palmas_usb)
 		if (palmas_usb->linkstat == PALMAS_USB_STATE_VBUS) {
 			palmas_usb->linkstat = PALMAS_USB_STATE_DISCONNECT;
 			extcon_set_state_sync(edev, EXTCON_USB, false);
-			dev_info(palmas_usb->dev, "USB cable is detached\n");
+			dev_dbg(palmas_usb->dev, "USB cable is detached\n");
 		} else {
 			dev_dbg(palmas_usb->dev,
 				"Spurious disconnect event detected\n");
@@ -99,7 +88,7 @@ static irqreturn_t palmas_id_irq_handler(int irq, void *_palmas_usb)
 			PALMAS_USB_ID_INT_EN_HI_CLR_ID_GND);
 		palmas_usb->linkstat = PALMAS_USB_STATE_ID;
 		extcon_set_state_sync(edev, EXTCON_USB_HOST, true);
-		dev_info(palmas_usb->dev, "USB-HOST cable is attached\n");
+		dev_dbg(palmas_usb->dev, "USB-HOST cable is attached\n");
 	} else if ((set & PALMAS_USB_ID_INT_SRC_ID_FLOAT) &&
 				(id_src & PALMAS_USB_ID_INT_SRC_ID_FLOAT)) {
 		palmas_write(palmas_usb->palmas, PALMAS_USB_OTG_BASE,
@@ -107,17 +96,17 @@ static irqreturn_t palmas_id_irq_handler(int irq, void *_palmas_usb)
 			PALMAS_USB_ID_INT_EN_HI_CLR_ID_FLOAT);
 		palmas_usb->linkstat = PALMAS_USB_STATE_DISCONNECT;
 		extcon_set_state_sync(edev, EXTCON_USB_HOST, false);
-		dev_info(palmas_usb->dev, "USB-HOST cable is detached\n");
+		dev_dbg(palmas_usb->dev, "USB-HOST cable is detached\n");
 	} else if ((palmas_usb->linkstat == PALMAS_USB_STATE_ID) &&
 				(!(set & PALMAS_USB_ID_INT_SRC_ID_GND))) {
 		palmas_usb->linkstat = PALMAS_USB_STATE_DISCONNECT;
 		extcon_set_state_sync(edev, EXTCON_USB_HOST, false);
-		dev_info(palmas_usb->dev, "USB-HOST cable is detached\n");
+		dev_dbg(palmas_usb->dev, "USB-HOST cable is detached\n");
 	} else if ((palmas_usb->linkstat == PALMAS_USB_STATE_DISCONNECT) &&
 				(id_src & PALMAS_USB_ID_INT_SRC_ID_GND)) {
 		palmas_usb->linkstat = PALMAS_USB_STATE_ID;
 		extcon_set_state_sync(edev, EXTCON_USB_HOST, true);
-		dev_info(palmas_usb->dev, " USB-HOST cable is attached\n");
+		dev_dbg(palmas_usb->dev, " USB-HOST cable is attached\n");
 	}
 
 	return IRQ_HANDLED;
@@ -138,10 +127,10 @@ static void palmas_gpio_id_detect(struct work_struct *work)
 
 	if (id) {
 		extcon_set_state_sync(edev, EXTCON_USB_HOST, false);
-		dev_info(palmas_usb->dev, "USB-HOST cable is detached\n");
+		dev_dbg(palmas_usb->dev, "USB-HOST cable is detached\n");
 	} else {
 		extcon_set_state_sync(edev, EXTCON_USB_HOST, true);
-		dev_info(palmas_usb->dev, "USB-HOST cable is attached\n");
+		dev_dbg(palmas_usb->dev, "USB-HOST cable is attached\n");
 	}
 }
 
@@ -216,17 +205,15 @@ static int palmas_usb_probe(struct platform_device *pdev)
 
 	palmas_usb->id_gpiod = devm_gpiod_get_optional(&pdev->dev, "id",
 							GPIOD_IN);
-	if (IS_ERR(palmas_usb->id_gpiod)) {
-		dev_err(&pdev->dev, "failed to get id gpio\n");
-		return PTR_ERR(palmas_usb->id_gpiod);
-	}
+	if (IS_ERR(palmas_usb->id_gpiod))
+		return dev_err_probe(&pdev->dev, PTR_ERR(palmas_usb->id_gpiod),
+				     "failed to get id gpio\n");
 
 	palmas_usb->vbus_gpiod = devm_gpiod_get_optional(&pdev->dev, "vbus",
 							GPIOD_IN);
-	if (IS_ERR(palmas_usb->vbus_gpiod)) {
-		dev_err(&pdev->dev, "failed to get vbus gpio\n");
-		return PTR_ERR(palmas_usb->vbus_gpiod);
-	}
+	if (IS_ERR(palmas_usb->vbus_gpiod))
+		return dev_err_probe(&pdev->dev, PTR_ERR(palmas_usb->vbus_gpiod),
+				     "failed to get id gpio\n");
 
 	if (palmas_usb->enable_id_detection && palmas_usb->id_gpiod) {
 		palmas_usb->enable_id_detection = false;
@@ -413,6 +400,12 @@ static int palmas_usb_resume(struct device *dev)
 		if (palmas_usb->enable_gpio_id_detection)
 			disable_irq_wake(palmas_usb->gpio_id_irq);
 	}
+
+	/* check if GPIO states changed while suspend/resume */
+	if (palmas_usb->enable_gpio_vbus_detection)
+		palmas_vbus_irq_handler(palmas_usb->gpio_vbus_irq, palmas_usb);
+	palmas_gpio_id_detect(&palmas_usb->wq_detectid.work);
+
 	return 0;
 };
 #endif

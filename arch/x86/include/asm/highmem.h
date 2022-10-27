@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * highmem.h: virtual kernel memory mappings for high memory
  *
@@ -57,15 +58,6 @@ extern unsigned long highstart_pfn, highend_pfn;
 #define PKMAP_NR(virt)  ((virt-PKMAP_BASE) >> PAGE_SHIFT)
 #define PKMAP_ADDR(nr)  (PKMAP_BASE + ((nr) << PAGE_SHIFT))
 
-extern void *kmap_high(struct page *page);
-extern void kunmap_high(struct page *page);
-
-void *kmap(struct page *page);
-void kunmap(struct page *page);
-
-void *kmap_atomic_prot(struct page *page, pgprot_t prot);
-void *kmap_atomic(struct page *page);
-void __kunmap_atomic(void *kvaddr);
 void *kmap_atomic_pfn(unsigned long pfn);
 void *kmap_atomic_prot_pfn(unsigned long pfn, pgprot_t prot);
 

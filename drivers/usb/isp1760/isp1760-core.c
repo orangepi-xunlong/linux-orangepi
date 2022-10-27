@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Driver for the NXP ISP1760 chip
  *
@@ -7,10 +8,6 @@
  * Contacts:
  *	Sebastian Siewior <bigeasy@linutronix.de>
  *	Laurent Pinchart <laurent.pinchart@ideasonboard.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
  */
 
 #include <linux/delay.h>
@@ -34,7 +31,7 @@ static void isp1760_init_core(struct isp1760_device *isp)
 	/* Low-level chip reset */
 	if (isp->rst_gpio) {
 		gpiod_set_value_cansleep(isp->rst_gpio, 1);
-		mdelay(50);
+		msleep(50);
 		gpiod_set_value_cansleep(isp->rst_gpio, 0);
 	}
 
@@ -122,9 +119,6 @@ int isp1760_register(struct resource *mem, int irq, unsigned long irqflags,
 	if ((!IS_ENABLED(CONFIG_USB_ISP1760_HCD) || usb_disabled()) &&
 	    (!IS_ENABLED(CONFIG_USB_ISP1761_UDC) || udc_disabled))
 		return -ENODEV;
-
-	/* prevent usb-core allocating DMA pages */
-	dev->dma_mask = NULL;
 
 	isp = devm_kzalloc(dev, sizeof(*isp), GFP_KERNEL);
 	if (!isp)

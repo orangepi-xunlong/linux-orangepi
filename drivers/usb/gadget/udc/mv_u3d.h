@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2011 Marvell International Ltd. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
  */
 
 #ifndef __MV_U3D_H
@@ -141,7 +138,7 @@ struct mv_u3d_op_regs {
 	u32	doorbell;	/* doorbell register */
 };
 
-/* control enpoint enable registers */
+/* control endpoint enable registers */
 struct epxcr {
 	u32	epxoutcr0;	/* ep out control 0 register */
 	u32	epxoutcr1;	/* ep out control 1 register */

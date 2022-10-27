@@ -1,5 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_POWERPC_PGTABLE_RADIX_H
 #define _ASM_POWERPC_PGTABLE_RADIX_H
+
+#include <asm/asm-const.h>
 
 #ifndef __ASSEMBLY__
 #include <asm/cmpxchg.h>
@@ -27,8 +30,11 @@
 /* Don't have anything in the reserved bits and leaf bits */
 #define RADIX_PMD_BAD_BITS		0x60000000000000e0UL
 #define RADIX_PUD_BAD_BITS		0x60000000000000e0UL
-#define RADIX_PGD_BAD_BITS		0x60000000000000e0UL
+#define RADIX_P4D_BAD_BITS		0x60000000000000e0UL
 
+#define RADIX_PMD_SHIFT		(PAGE_SHIFT + RADIX_PTE_INDEX_SIZE)
+#define RADIX_PUD_SHIFT		(RADIX_PMD_SHIFT + RADIX_PMD_INDEX_SIZE)
+#define RADIX_PGD_SHIFT		(RADIX_PUD_SHIFT + RADIX_PUD_INDEX_SIZE)
 /*
  * Size of EA range mapped by our pagetables.
  */
@@ -66,19 +72,17 @@
  * |                              |
  * |                              |
  * |                              |
- * +------------------------------+  Kernel IO map end (0xc010000000000000)
+ * +------------------------------+  Kernel vmemmap end (0xc010000000000000)
  * |                              |
+ * |           512TB		  |
  * |                              |
- * |      1/2 of virtual map      |
+ * +------------------------------+  Kernel IO map end/vmemap start
  * |                              |
+ * |           512TB		  |
  * |                              |
- * +------------------------------+  Kernel IO map start
+ * +------------------------------+  Kernel vmap end/ IO map start
  * |                              |
- * |      1/4 of virtual map      |
- * |                              |
- * +------------------------------+  Kernel vmemap start
- * |                              |
- * |     1/4 of virtual map       |
+ * |           512TB		  |
  * |                              |
  * +------------------------------+  Kernel virt start (0xc008000000000000)
  * |                              |
@@ -87,22 +91,40 @@
  * +------------------------------+  Kernel linear (0xc.....)
  */
 
-#define RADIX_KERN_VIRT_START ASM_CONST(0xc008000000000000)
-#define RADIX_KERN_VIRT_SIZE  ASM_CONST(0x0008000000000000)
 
 /*
- * The vmalloc space starts at the beginning of that region, and
- * occupies a quarter of it on radix config.
- * (we keep a quarter for the virtual memmap)
+ * If we store section details in page->flags we can't increase the MAX_PHYSMEM_BITS
+ * if we increase SECTIONS_WIDTH we will not store node details in page->flags and
+ * page_to_nid does a page->section->node lookup
+ * Hence only increase for VMEMMAP. Further depending on SPARSEMEM_EXTREME reduce
+ * memory requirements with large number of sections.
+ * 51 bits is the max physical real address on POWER9
  */
-#define RADIX_VMALLOC_START	RADIX_KERN_VIRT_START
-#define RADIX_VMALLOC_SIZE	(RADIX_KERN_VIRT_SIZE >> 2)
-#define RADIX_VMALLOC_END	(RADIX_VMALLOC_START + RADIX_VMALLOC_SIZE)
+
+#if defined(CONFIG_SPARSEMEM_VMEMMAP) && defined(CONFIG_SPARSEMEM_EXTREME)
+#define R_MAX_PHYSMEM_BITS	51
+#else
+#define R_MAX_PHYSMEM_BITS	46
+#endif
+
+#define RADIX_KERN_VIRT_START	ASM_CONST(0xc008000000000000)
 /*
- * Defines the address of the vmemap area, in its own region on
- * hash table CPUs.
+ * 49 =  MAX_EA_BITS_PER_CONTEXT (hash specific). To make sure we pick
+ * the same value as hash.
  */
-#define RADIX_VMEMMAP_BASE		(RADIX_VMALLOC_END)
+#define RADIX_KERN_MAP_SIZE	(1UL << 49)
+
+#define RADIX_VMALLOC_START	RADIX_KERN_VIRT_START
+#define RADIX_VMALLOC_SIZE	RADIX_KERN_MAP_SIZE
+#define RADIX_VMALLOC_END	(RADIX_VMALLOC_START + RADIX_VMALLOC_SIZE)
+
+#define RADIX_KERN_IO_START	RADIX_VMALLOC_END
+#define RADIX_KERN_IO_SIZE	RADIX_KERN_MAP_SIZE
+#define RADIX_KERN_IO_END	(RADIX_KERN_IO_START + RADIX_KERN_IO_SIZE)
+
+#define RADIX_VMEMMAP_START	RADIX_KERN_IO_END
+#define RADIX_VMEMMAP_SIZE	RADIX_KERN_MAP_SIZE
+#define RADIX_VMEMMAP_END	(RADIX_VMEMMAP_START + RADIX_VMEMMAP_SIZE)
 
 #ifndef __ASSEMBLY__
 #define RADIX_PTE_TABLE_SIZE	(sizeof(pte_t) << RADIX_PTE_INDEX_SIZE)
@@ -110,22 +132,36 @@
 #define RADIX_PUD_TABLE_SIZE	(sizeof(pud_t) << RADIX_PUD_INDEX_SIZE)
 #define RADIX_PGD_TABLE_SIZE	(sizeof(pgd_t) << RADIX_PGD_INDEX_SIZE)
 
+#ifdef CONFIG_STRICT_KERNEL_RWX
+extern void radix__mark_rodata_ro(void);
+extern void radix__mark_initmem_nx(void);
+#endif
+
+extern void radix__ptep_set_access_flags(struct vm_area_struct *vma, pte_t *ptep,
+					 pte_t entry, unsigned long address,
+					 int psize);
+
+extern void radix__ptep_modify_prot_commit(struct vm_area_struct *vma,
+					   unsigned long addr, pte_t *ptep,
+					   pte_t old_pte, pte_t pte);
+
 static inline unsigned long __radix_pte_update(pte_t *ptep, unsigned long clr,
 					       unsigned long set)
 {
-	pte_t pte;
-	unsigned long old_pte, new_pte;
+	__be64 old_be, tmp_be;
 
-	do {
-		pte = READ_ONCE(*ptep);
-		old_pte = pte_val(pte);
-		new_pte = (old_pte | set) & ~clr;
+	__asm__ __volatile__(
+	"1:	ldarx	%0,0,%3		# pte_update\n"
+	"	andc	%1,%0,%5	\n"
+	"	or	%1,%1,%4	\n"
+	"	stdcx.	%1,0,%3		\n"
+	"	bne-	1b"
+	: "=&r" (old_be), "=&r" (tmp_be), "=m" (*ptep)
+	: "r" (ptep), "r" (cpu_to_be64(set)), "r" (cpu_to_be64(clr))
+	: "cc" );
 
-	} while (!pte_xchg(ptep, __pte(old_pte), __pte(new_pte)));
-
-	return old_pte;
+	return be64_to_cpu(old_be);
 }
-
 
 static inline unsigned long radix__pte_update(struct mm_struct *mm,
 					unsigned long addr,
@@ -135,65 +171,26 @@ static inline unsigned long radix__pte_update(struct mm_struct *mm,
 {
 	unsigned long old_pte;
 
-	if (cpu_has_feature(CPU_FTR_POWER9_DD1)) {
-
-		unsigned long new_pte;
-
-		old_pte = __radix_pte_update(ptep, ~0, 0);
-		asm volatile("ptesync" : : : "memory");
-		/*
-		 * new value of pte
-		 */
-		new_pte = (old_pte | set) & ~clr;
-
-		/*
-		 * For now let's do heavy pid flush
-		 * radix__flush_tlb_page_psize(mm, addr, mmu_virtual_psize);
-		 */
-		radix__flush_tlb_mm(mm);
-
-		__radix_pte_update(ptep, 0, new_pte);
-	} else
-		old_pte = __radix_pte_update(ptep, clr, set);
-	asm volatile("ptesync" : : : "memory");
+	old_pte = __radix_pte_update(ptep, clr, set);
 	if (!huge)
 		assert_pte_locked(mm, addr);
 
 	return old_pte;
 }
 
-/*
- * Set the dirty and/or accessed bits atomically in a linux PTE, this
- * function doesn't need to invalidate tlb.
- */
-static inline void radix__ptep_set_access_flags(struct mm_struct *mm,
-						pte_t *ptep, pte_t entry)
+static inline pte_t radix__ptep_get_and_clear_full(struct mm_struct *mm,
+						   unsigned long addr,
+						   pte_t *ptep, int full)
 {
+	unsigned long old_pte;
 
-	unsigned long set = pte_val(entry) & (_PAGE_DIRTY | _PAGE_ACCESSED |
-					      _PAGE_RW | _PAGE_EXEC);
-
-	if (cpu_has_feature(CPU_FTR_POWER9_DD1)) {
-
-		unsigned long old_pte, new_pte;
-
-		old_pte = __radix_pte_update(ptep, ~0, 0);
-		asm volatile("ptesync" : : : "memory");
-		/*
-		 * new value of pte
-		 */
-		new_pte = old_pte | set;
-
-		/*
-		 * For now let's do heavy pid flush
-		 * radix__flush_tlb_page_psize(mm, addr, mmu_virtual_psize);
-		 */
-		radix__flush_tlb_mm(mm);
-
-		__radix_pte_update(ptep, 0, new_pte);
+	if (full) {
+		old_pte = pte_val(*ptep);
+		*ptep = __pte(0);
 	} else
-		__radix_pte_update(ptep, 0, set);
-	asm volatile("ptesync" : : : "memory");
+		old_pte = radix__pte_update(mm, addr, ptep, ~0ul, 0, 0);
+
+	return __pte(old_pte);
 }
 
 static inline int radix__pte_same(pte_t pte_a, pte_t pte_b)
@@ -210,7 +207,26 @@ static inline void radix__set_pte_at(struct mm_struct *mm, unsigned long addr,
 				 pte_t *ptep, pte_t pte, int percpu)
 {
 	*ptep = pte;
-	asm volatile("ptesync" : : : "memory");
+
+	/*
+	 * The architecture suggests a ptesync after setting the pte, which
+	 * orders the store that updates the pte with subsequent page table
+	 * walk accesses which may load the pte. Without this it may be
+	 * possible for a subsequent access to result in spurious fault.
+	 *
+	 * This is not necessary for correctness, because a spurious fault
+	 * is tolerated by the page fault handler, and this store will
+	 * eventually be seen. In testing, there was no noticable increase
+	 * in user faults on POWER9. Avoiding ptesync here is a significant
+	 * win for things like fork. If a future microarchitecture benefits
+	 * from ptesync, it should probably go into update_mmu_cache, rather
+	 * than set_pte_at (which is used to set ptes unrelated to faults).
+	 *
+	 * Spurious faults from the kernel memory are not tolerated, so there
+	 * is a ptesync in flush_cache_vmap, and __map_kernel_page() follows
+	 * the pte update sequence from ISA Book III 6.10 Translation Table
+	 * Update Synchronization Requirements.
+	 */
 }
 
 static inline int radix__pmd_bad(pmd_t pmd)
@@ -229,27 +245,21 @@ static inline int radix__pud_bad(pud_t pud)
 }
 
 
-static inline int radix__pgd_bad(pgd_t pgd)
+static inline int radix__p4d_bad(p4d_t p4d)
 {
-	return !!(pgd_val(pgd) & RADIX_PGD_BAD_BITS);
+	return !!(p4d_val(p4d) & RADIX_P4D_BAD_BITS);
 }
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 
 static inline int radix__pmd_trans_huge(pmd_t pmd)
 {
-	return !!(pmd_val(pmd) & _PAGE_PTE);
+	return (pmd_val(pmd) & (_PAGE_PTE | _PAGE_DEVMAP)) == _PAGE_PTE;
 }
 
 static inline pmd_t radix__pmd_mkhuge(pmd_t pmd)
 {
 	return __pmd(pmd_val(pmd) | _PAGE_PTE);
-}
-static inline void radix__pmdp_huge_split_prepare(struct vm_area_struct *vma,
-					    unsigned long address, pmd_t *pmdp)
-{
-	/* Nothing to do for radix. */
-	return;
 }
 
 extern unsigned long radix__pmd_hugepage_update(struct mm_struct *mm, unsigned long addr,
@@ -262,8 +272,19 @@ extern void radix__pgtable_trans_huge_deposit(struct mm_struct *mm, pmd_t *pmdp,
 extern pgtable_t radix__pgtable_trans_huge_withdraw(struct mm_struct *mm, pmd_t *pmdp);
 extern pmd_t radix__pmdp_huge_get_and_clear(struct mm_struct *mm,
 				      unsigned long addr, pmd_t *pmdp);
-extern int radix__has_transparent_hugepage(void);
+static inline int radix__has_transparent_hugepage(void)
+{
+	/* For radix 2M at PMD level means thp */
+	if (mmu_psize_defs[MMU_PAGE_2M].shift == PMD_SHIFT)
+		return 1;
+	return 0;
+}
 #endif
+
+static inline pmd_t radix__pmd_mkdevmap(pmd_t pmd)
+{
+	return __pmd(pmd_val(pmd) | (_PAGE_PTE | _PAGE_DEVMAP));
+}
 
 extern int __meminit radix__vmemmap_create_mapping(unsigned long start,
 					     unsigned long page_size,
@@ -279,19 +300,21 @@ static inline unsigned long radix__get_tree_size(void)
 	unsigned long rts_field;
 	/*
 	 * We support 52 bits, hence:
-	 *  DD1    52-28 = 24, 0b11000
-	 *  Others 52-31 = 21, 0b10101
+	 * bits 52 - 31 = 21, 0b10101
 	 * RTS encoding details
 	 * bits 0 - 3 of rts -> bits 6 - 8 unsigned long
 	 * bits 4 - 5 of rts -> bits 62 - 63 of unsigned long
 	 */
-	if (cpu_has_feature(CPU_FTR_POWER9_DD1))
-		rts_field = (0x3UL << 61);
-	else {
-		rts_field = (0x5UL << 5); /* 6 - 8 bits */
-		rts_field |= (0x2UL << 61);
-	}
+	rts_field = (0x5UL << 5); /* 6 - 8 bits */
+	rts_field |= (0x2UL << 61);
+
 	return rts_field;
 }
+
+#ifdef CONFIG_MEMORY_HOTPLUG
+int radix__create_section_mapping(unsigned long start, unsigned long end,
+				  int nid, pgprot_t prot);
+int radix__remove_section_mapping(unsigned long start, unsigned long end);
+#endif /* CONFIG_MEMORY_HOTPLUG */
 #endif /* __ASSEMBLY__ */
 #endif

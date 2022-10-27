@@ -1,17 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2013 NVIDIA CORPORATION.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/clk.h>
@@ -161,7 +150,31 @@ static int clk_composite_set_rate_and_parent(struct clk_hw *hw,
 	const struct clk_ops *mux_ops = composite->mux_ops;
 	struct clk_hw *rate_hw = composite->rate_hw;
 	struct clk_hw *mux_hw = composite->mux_hw;
+	struct clk_hw *brother_hw = composite->brother_hw;
 	unsigned long temp_rate;
+
+	if (brother_hw) {
+		struct clk_composite *bcomposite = to_clk_composite(brother_hw);
+		const struct clk_ops *brate_ops = bcomposite->rate_ops;
+		struct clk_hw *brate_hw = bcomposite->rate_hw;
+		struct clk_hw *parent_hw = clk_hw_get_parent(brother_hw);
+		struct clk_hw *new_parent_hw = clk_hw_get_parent(hw);
+
+		__clk_hw_set_clk(brate_hw, brother_hw);
+
+		temp_rate = brate_ops->recalc_rate(brate_hw, parent_rate);
+		if (temp_rate > rate)
+			brate_ops->set_rate(brate_hw, rate, parent_rate);
+		if (clk_hw_is_prepared(brother_hw)) {
+			clk_prepare_enable(new_parent_hw->clk);
+			clk_enable(brother_hw->clk);
+		}
+		clk_hw_reparent(brother_hw, new_parent_hw);
+		if (clk_hw_is_prepared(brother_hw)) {
+			clk_disable(brother_hw->clk);
+			clk_disable_unprepare(parent_hw->clk);
+		}
+	}
 
 	__clk_hw_set_clk(rate_hw, hw);
 	__clk_hw_set_clk(mux_hw, hw);
@@ -211,15 +224,16 @@ static void clk_composite_disable(struct clk_hw *hw)
 	gate_ops->disable(gate_hw);
 }
 
-struct clk_hw *clk_hw_register_composite(struct device *dev, const char *name,
-			const char * const *parent_names, int num_parents,
+static struct clk_hw *__clk_hw_register_composite(struct device *dev,
+			const char *name, const char * const *parent_names,
+			const struct clk_parent_data *pdata, int num_parents,
 			struct clk_hw *mux_hw, const struct clk_ops *mux_ops,
 			struct clk_hw *rate_hw, const struct clk_ops *rate_ops,
 			struct clk_hw *gate_hw, const struct clk_ops *gate_ops,
 			unsigned long flags)
 {
 	struct clk_hw *hw;
-	struct clk_init_data init;
+	struct clk_init_data init = {};
 	struct clk_composite *composite;
 	struct clk_ops *clk_composite_ops;
 	int ret;
@@ -229,8 +243,11 @@ struct clk_hw *clk_hw_register_composite(struct device *dev, const char *name,
 		return ERR_PTR(-ENOMEM);
 
 	init.name = name;
-	init.flags = flags | CLK_IS_BASIC;
-	init.parent_names = parent_names;
+	init.flags = flags;
+	if (parent_names)
+		init.parent_names = parent_names;
+	else
+		init.parent_data = pdata;
 	init.num_parents = num_parents;
 	hw = &composite->hw;
 
@@ -324,6 +341,35 @@ err:
 	return hw;
 }
 
+struct clk_hw *clk_hw_register_composite(struct device *dev, const char *name,
+			const char * const *parent_names, int num_parents,
+			struct clk_hw *mux_hw, const struct clk_ops *mux_ops,
+			struct clk_hw *rate_hw, const struct clk_ops *rate_ops,
+			struct clk_hw *gate_hw, const struct clk_ops *gate_ops,
+			unsigned long flags)
+{
+	return __clk_hw_register_composite(dev, name, parent_names, NULL,
+					   num_parents, mux_hw, mux_ops,
+					   rate_hw, rate_ops, gate_hw,
+					   gate_ops, flags);
+}
+EXPORT_SYMBOL_GPL(clk_hw_register_composite);
+
+struct clk_hw *clk_hw_register_composite_pdata(struct device *dev,
+			const char *name,
+			const struct clk_parent_data *parent_data,
+			int num_parents,
+			struct clk_hw *mux_hw, const struct clk_ops *mux_ops,
+			struct clk_hw *rate_hw, const struct clk_ops *rate_ops,
+			struct clk_hw *gate_hw, const struct clk_ops *gate_ops,
+			unsigned long flags)
+{
+	return __clk_hw_register_composite(dev, name, NULL, parent_data,
+					   num_parents, mux_hw, mux_ops,
+					   rate_hw, rate_ops, gate_hw,
+					   gate_ops, flags);
+}
+
 struct clk *clk_register_composite(struct device *dev, const char *name,
 			const char * const *parent_names, int num_parents,
 			struct clk_hw *mux_hw, const struct clk_ops *mux_ops,
@@ -336,6 +382,25 @@ struct clk *clk_register_composite(struct device *dev, const char *name,
 	hw = clk_hw_register_composite(dev, name, parent_names, num_parents,
 			mux_hw, mux_ops, rate_hw, rate_ops, gate_hw, gate_ops,
 			flags);
+	if (IS_ERR(hw))
+		return ERR_CAST(hw);
+	return hw->clk;
+}
+EXPORT_SYMBOL_GPL(clk_register_composite);
+
+struct clk *clk_register_composite_pdata(struct device *dev, const char *name,
+			const struct clk_parent_data *parent_data,
+			int num_parents,
+			struct clk_hw *mux_hw, const struct clk_ops *mux_ops,
+			struct clk_hw *rate_hw, const struct clk_ops *rate_ops,
+			struct clk_hw *gate_hw, const struct clk_ops *gate_ops,
+			unsigned long flags)
+{
+	struct clk_hw *hw;
+
+	hw = clk_hw_register_composite_pdata(dev, name, parent_data,
+			num_parents, mux_hw, mux_ops, rate_hw, rate_ops,
+			gate_hw, gate_ops, flags);
 	if (IS_ERR(hw))
 		return ERR_CAST(hw);
 	return hw->clk;
@@ -355,3 +420,14 @@ void clk_unregister_composite(struct clk *clk)
 	clk_unregister(clk);
 	kfree(composite);
 }
+
+void clk_hw_unregister_composite(struct clk_hw *hw)
+{
+	struct clk_composite *composite;
+
+	composite = to_clk_composite(hw);
+
+	clk_hw_unregister(hw);
+	kfree(composite);
+}
+EXPORT_SYMBOL_GPL(clk_hw_unregister_composite);

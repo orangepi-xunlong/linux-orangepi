@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * "security" table
  *
@@ -10,10 +11,6 @@
  * Copyright (C) 1999 Paul `Rusty' Russell & Michael J. Neuling
  * Copyright (C) 2000-2004 Netfilter Core Team <coreteam <at> netfilter.org>
  * Copyright (C) 2008 Red Hat, Inc., James Morris <jmorris <at> redhat.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/module.h>
 #include <linux/netfilter_ipv4/ip_tables.h>
@@ -43,12 +40,6 @@ static unsigned int
 iptable_security_hook(void *priv, struct sk_buff *skb,
 		      const struct nf_hook_state *state)
 {
-	if (state->hook == NF_INET_LOCAL_OUT &&
-	    (skb->len < sizeof(struct iphdr) ||
-	     ip_hdrlen(skb) < sizeof(struct iphdr)))
-		/* Somebody is playing with raw sockets. */
-		return NF_ACCEPT;
-
 	return ipt_do_table(skb, state, state->net->ipv4.iptable_security);
 }
 
@@ -71,16 +62,23 @@ static int __net_init iptable_security_table_init(struct net *net)
 	return ret;
 }
 
+static void __net_exit iptable_security_net_pre_exit(struct net *net)
+{
+	if (net->ipv4.iptable_security)
+		ipt_unregister_table_pre_exit(net, net->ipv4.iptable_security,
+					      sectbl_ops);
+}
+
 static void __net_exit iptable_security_net_exit(struct net *net)
 {
 	if (!net->ipv4.iptable_security)
 		return;
-
-	ipt_unregister_table(net, net->ipv4.iptable_security, sectbl_ops);
+	ipt_unregister_table_exit(net, net->ipv4.iptable_security);
 	net->ipv4.iptable_security = NULL;
 }
 
 static struct pernet_operations iptable_security_net_ops = {
+	.pre_exit = iptable_security_net_pre_exit,
 	.exit = iptable_security_net_exit,
 };
 

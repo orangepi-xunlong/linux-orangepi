@@ -1,14 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * MFD core driver for Ricoh RN5T618 PMIC
  *
  * Copyright (C) 2014 Beniamino Galvani <b.galvani@gmail.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef __LINUX_MFD_RN5T618_H
@@ -58,10 +52,13 @@
 #define RN5T618_DC3CTL2			0x31
 #define RN5T618_DC4CTL			0x32
 #define RN5T618_DC4CTL2			0x33
+#define RN5T618_DC5CTL			0x34
+#define RN5T618_DC5CTL2			0x35
 #define RN5T618_DC1DAC			0x36
 #define RN5T618_DC2DAC			0x37
 #define RN5T618_DC3DAC			0x38
 #define RN5T618_DC4DAC			0x39
+#define RN5T618_DC5DAC			0x3a
 #define RN5T618_DC1DAC_SLP		0x3b
 #define RN5T618_DC2DAC_SLP		0x3c
 #define RN5T618_DC3DAC_SLP		0x3d
@@ -77,6 +74,11 @@
 #define RN5T618_LDO3DAC			0x4e
 #define RN5T618_LDO4DAC			0x4f
 #define RN5T618_LDO5DAC			0x50
+#define RN5T618_LDO6DAC			0x51
+#define RN5T618_LDO7DAC			0x52
+#define RN5T618_LDO8DAC			0x53
+#define RN5T618_LDO9DAC			0x54
+#define RN5T618_LDO10DAC		0x55
 #define RN5T618_LDORTCDAC		0x56
 #define RN5T618_LDORTC2DAC		0x57
 #define RN5T618_LDO1DAC_SLP		0x58
@@ -137,6 +139,17 @@
 #define RN5T618_INTPOL			0x9c
 #define RN5T618_INTEN			0x9d
 #define RN5T618_INTMON			0x9e
+
+#define RN5T618_RTC_SECONDS     0xA0
+#define RN5T618_RTC_MDAY        0xA4
+#define RN5T618_RTC_MONTH       0xA5
+#define RN5T618_RTC_YEAR        0xA6
+#define RN5T618_RTC_ADJUST      0xA7
+#define RN5T618_RTC_ALARM_Y_SEC 0xA8
+#define RN5T618_RTC_DAL_MONTH   0xAC
+#define RN5T618_RTC_CTRL1       0xAE
+#define RN5T618_RTC_CTRL2       0xAF
+
 #define RN5T618_PREVINDAC		0xb0
 #define RN5T618_BATDAC			0xb1
 #define RN5T618_CHGCTL1			0xb3
@@ -218,11 +231,17 @@ enum {
 	RN5T618_DCDC2,
 	RN5T618_DCDC3,
 	RN5T618_DCDC4,
+	RN5T618_DCDC5,
 	RN5T618_LDO1,
 	RN5T618_LDO2,
 	RN5T618_LDO3,
 	RN5T618_LDO4,
 	RN5T618_LDO5,
+	RN5T618_LDO6,
+	RN5T618_LDO7,
+	RN5T618_LDO8,
+	RN5T618_LDO9,
+	RN5T618_LDO10,
 	RN5T618_LDORTC1,
 	RN5T618_LDORTC2,
 	RN5T618_REG_NUM,
@@ -231,11 +250,27 @@ enum {
 enum {
 	RN5T567 = 0,
 	RN5T618,
+	RC5T619,
+};
+
+/* RN5T618 IRQ definitions */
+enum {
+	RN5T618_IRQ_SYS = 0,
+	RN5T618_IRQ_DCDC,
+	RN5T618_IRQ_RTC,
+	RN5T618_IRQ_ADC,
+	RN5T618_IRQ_GPIO,
+	RN5T618_IRQ_CHG,
+	RN5T618_NR_IRQS,
 };
 
 struct rn5t618 {
 	struct regmap *regmap;
+	struct device *dev;
 	long variant;
+
+	int irq;
+	struct regmap_irq_chip_data *irq_data;
 };
 
 #endif /* __LINUX_MFD_RN5T618_H */

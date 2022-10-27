@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
   /*
      Driver for Philips tda10086 DVBS Demodulator
 
      (c) 2006 Andrew de Quincey
 
-     This program is free software; you can redistribute it and/or modify
-     it under the terms of the GNU General Public License as published by
-     the Free Software Foundation; either version 2 of the License, or
-     (at your option) any later version.
-
-     This program is distributed in the hope that it will be useful,
-     but WITHOUT ANY WARRANTY; without even the implied warranty of
-     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-
-     GNU General Public License for more details.
-
-     You should have received a copy of the GNU General Public License
-     along with this program; if not, write to the Free Software
-     Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
    */
 
@@ -27,10 +14,10 @@
 #include <linux/string.h>
 #include <linux/slab.h>
 
-#include "dvb_frontend.h"
+#include <media/dvb_frontend.h>
 #include "tda10086.h"
 
-#define SACLK 96000000
+#define SACLK 96000000U
 
 struct tda10086_state {
 	struct i2c_adapter* i2c;
@@ -310,34 +297,34 @@ static int tda10086_set_symbol_rate(struct tda10086_state *state,
 	dprintk ("%s %i\n", __func__, symbol_rate);
 
 	/* setup the decimation and anti-aliasing filters.. */
-	if (symbol_rate < (u32) (SACLK * 0.0137)) {
+	if (symbol_rate < SACLK / 10000 * 137) {
 		dfn=4;
 		afs=1;
-	} else if (symbol_rate < (u32) (SACLK * 0.0208)) {
+	} else if (symbol_rate < SACLK / 10000 * 208) {
 		dfn=4;
 		afs=0;
-	} else if (symbol_rate < (u32) (SACLK * 0.0270)) {
+	} else if (symbol_rate < SACLK / 10000 * 270) {
 		dfn=3;
 		afs=1;
-	} else if (symbol_rate < (u32) (SACLK * 0.0416)) {
+	} else if (symbol_rate < SACLK / 10000 * 416) {
 		dfn=3;
 		afs=0;
-	} else if (symbol_rate < (u32) (SACLK * 0.0550)) {
+	} else if (symbol_rate < SACLK / 10000 * 550) {
 		dfn=2;
 		afs=1;
-	} else if (symbol_rate < (u32) (SACLK * 0.0833)) {
+	} else if (symbol_rate < SACLK / 10000 * 833) {
 		dfn=2;
 		afs=0;
-	} else if (symbol_rate < (u32) (SACLK * 0.1100)) {
+	} else if (symbol_rate < SACLK / 10000 * 1100) {
 		dfn=1;
 		afs=1;
-	} else if (symbol_rate < (u32) (SACLK * 0.1666)) {
+	} else if (symbol_rate < SACLK / 10000 * 1666) {
 		dfn=1;
 		afs=0;
-	} else if (symbol_rate < (u32) (SACLK * 0.2200)) {
+	} else if (symbol_rate < SACLK / 10000 * 2200) {
 		dfn=0;
 		afs=1;
-	} else if (symbol_rate < (u32) (SACLK * 0.3333)) {
+	} else if (symbol_rate < SACLK / 10000 * 3333) {
 		dfn=0;
 		afs=0;
 	} else {
@@ -437,7 +424,7 @@ static int tda10086_set_frontend(struct dvb_frontend *fe)
 			fe->ops.i2c_gate_ctrl(fe, 0);
 	}
 
-	/* calcluate the frequency offset (in *Hz* not kHz) */
+	/* calculate the frequency offset (in *Hz* not kHz) */
 	freqoff = fe_params->frequency - freq;
 	freqoff = ((1<<16) * freqoff) / (SACLK/1000);
 	tda10086_write_byte(state, 0x3d, 0x80 | ((freqoff >> 8) & 0x7f));
@@ -706,13 +693,13 @@ static void tda10086_release(struct dvb_frontend* fe)
 	kfree(state);
 }
 
-static struct dvb_frontend_ops tda10086_ops = {
+static const struct dvb_frontend_ops tda10086_ops = {
 	.delsys = { SYS_DVBS },
 	.info = {
 		.name     = "Philips TDA10086 DVB-S",
-		.frequency_min    = 950000,
-		.frequency_max    = 2150000,
-		.frequency_stepsize = 125,     /* kHz for QPSK frontends */
+		.frequency_min_hz      =  950 * MHz,
+		.frequency_max_hz      = 2150 * MHz,
+		.frequency_stepsize_hz =  125 * kHz,
 		.symbol_rate_min  = 1000000,
 		.symbol_rate_max  = 45000000,
 		.caps = FE_CAN_INVERSION_AUTO |

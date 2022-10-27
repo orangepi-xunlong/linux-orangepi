@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 	.file	"reg_u_sub.S"
 /*---------------------------------------------------------------------------+
  |  reg_u_sub.S                                                              |
@@ -32,7 +33,7 @@
 #include "control_w.h"
 
 .text
-ENTRY(FPU_u_sub)
+SYM_FUNC_START(FPU_u_sub)
 	pushl	%ebp
 	movl	%esp,%ebp
 	pushl	%esi
@@ -270,3 +271,4 @@ L_exit:
 	popl	%esi
 	leave
 	ret
+SYM_FUNC_END(FPU_u_sub)

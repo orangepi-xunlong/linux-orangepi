@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __LINUX_SPI_CORGI_LCD_H
 #define __LINUX_SPI_CORGI_LCD_H
 
@@ -9,9 +10,6 @@ struct corgi_lcd_platform_data {
 	int	max_intensity;
 	int	default_intensity;
 	int	limit_mask;
-
-	int	gpio_backlight_on;	/* -1 if n/a */
-	int	gpio_backlight_cont;	/* -1 if n/a */
 
 	void (*notify)(int intensity);
 	void (*kick_battery)(void);

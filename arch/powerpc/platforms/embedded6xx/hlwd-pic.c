@@ -1,15 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * arch/powerpc/platforms/embedded6xx/hlwd-pic.c
  *
  * Nintendo Wii "Hollywood" interrupt controller support.
  * Copyright (C) 2009 The GameCube Linux Team
  * Copyright (C) 2009 Albert Herranz
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
  */
 #define DRV_MODULE_NAME "hlwd-pic"
 #define pr_fmt(fmt) DRV_MODULE_NAME ": " fmt
@@ -160,7 +155,7 @@ static void __hlwd_quiesce(void __iomem *io_base)
 	out_be32(io_base + HW_BROADWAY_ICR, 0xffffffff);
 }
 
-struct irq_domain *hlwd_pic_init(struct device_node *np)
+static struct irq_domain *hlwd_pic_init(struct device_node *np)
 {
 	struct irq_domain *irq_domain;
 	struct resource res;

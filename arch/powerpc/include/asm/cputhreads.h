@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_POWERPC_CPUTHREADS_H
 #define _ASM_POWERPC_CPUTHREADS_H
 
@@ -27,6 +28,7 @@ extern cpumask_t threads_core_mask;
 #define threads_per_core	1
 #define threads_per_subcore	1
 #define threads_shift		0
+#define has_big_cores		0
 #define threads_core_mask	(*get_cpu_mask(0))
 #endif
 

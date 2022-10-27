@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AD7787/AD7788/AD7789/AD7790/AD7791 SPI ADC driver
  *
  * Copyright 2012 Analog Devices Inc.
  *  Author: Lars-Peter Clausen <lars@metafoo.de>
- *
- * Licensed under the GPL-2.
  */
 
 #include <linux/interrupt.h>
@@ -65,25 +64,73 @@
 #define AD7791_MODE_SEL_MASK		(0x3 << 6)
 #define AD7791_MODE_SEL(x)		((x) << 6)
 
+#define __AD7991_CHANNEL(_si, _channel1, _channel2, _address, _bits, \
+	_storagebits, _shift, _extend_name, _type, _mask_all) \
+	{ \
+		.type = (_type), \
+		.differential = (_channel2 == -1 ? 0 : 1), \
+		.indexed = 1, \
+		.channel = (_channel1), \
+		.channel2 = (_channel2), \
+		.address = (_address), \
+		.extend_name = (_extend_name), \
+		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) | \
+			BIT(IIO_CHAN_INFO_OFFSET), \
+		.info_mask_shared_by_type = BIT(IIO_CHAN_INFO_SCALE), \
+		.info_mask_shared_by_all = _mask_all, \
+		.scan_index = (_si), \
+		.scan_type = { \
+			.sign = 'u', \
+			.realbits = (_bits), \
+			.storagebits = (_storagebits), \
+			.shift = (_shift), \
+			.endianness = IIO_BE, \
+		}, \
+	}
+
+#define AD7991_SHORTED_CHANNEL(_si, _channel, _address, _bits, \
+	_storagebits, _shift) \
+	__AD7991_CHANNEL(_si, _channel, _channel, _address, _bits, \
+		_storagebits, _shift, "shorted", IIO_VOLTAGE, \
+		BIT(IIO_CHAN_INFO_SAMP_FREQ))
+
+#define AD7991_CHANNEL(_si, _channel, _address, _bits, \
+	_storagebits, _shift) \
+	__AD7991_CHANNEL(_si, _channel, -1, _address, _bits, \
+		_storagebits, _shift, NULL, IIO_VOLTAGE, \
+		 BIT(IIO_CHAN_INFO_SAMP_FREQ))
+
+#define AD7991_DIFF_CHANNEL(_si, _channel1, _channel2, _address, _bits, \
+	_storagebits, _shift) \
+	__AD7991_CHANNEL(_si, _channel1, _channel2, _address, _bits, \
+		_storagebits, _shift, NULL, IIO_VOLTAGE, \
+		BIT(IIO_CHAN_INFO_SAMP_FREQ))
+
+#define AD7991_SUPPLY_CHANNEL(_si, _channel, _address, _bits, _storagebits, \
+	_shift) \
+	__AD7991_CHANNEL(_si, _channel, -1, _address, _bits, \
+		_storagebits, _shift, "supply", IIO_VOLTAGE, \
+		BIT(IIO_CHAN_INFO_SAMP_FREQ))
+
 #define DECLARE_AD7787_CHANNELS(name, bits, storagebits) \
 const struct iio_chan_spec name[] = { \
-	AD_SD_DIFF_CHANNEL(0, 0, 0, AD7791_CH_AIN1P_AIN1N, \
+	AD7991_DIFF_CHANNEL(0, 0, 0, AD7791_CH_AIN1P_AIN1N, \
 		(bits), (storagebits), 0), \
-	AD_SD_CHANNEL(1, 1, AD7791_CH_AIN2, (bits), (storagebits), 0), \
-	AD_SD_SHORTED_CHANNEL(2, 0, AD7791_CH_AIN1N_AIN1N, \
+	AD7991_CHANNEL(1, 1, AD7791_CH_AIN2, (bits), (storagebits), 0), \
+	AD7991_SHORTED_CHANNEL(2, 0, AD7791_CH_AIN1N_AIN1N, \
 		(bits), (storagebits), 0), \
-	AD_SD_SUPPLY_CHANNEL(3, 2, AD7791_CH_AVDD_MONITOR,  \
+	AD7991_SUPPLY_CHANNEL(3, 2, AD7791_CH_AVDD_MONITOR,  \
 		(bits), (storagebits), 0), \
 	IIO_CHAN_SOFT_TIMESTAMP(4), \
 }
 
 #define DECLARE_AD7791_CHANNELS(name, bits, storagebits) \
 const struct iio_chan_spec name[] = { \
-	AD_SD_DIFF_CHANNEL(0, 0, 0, AD7791_CH_AIN1P_AIN1N, \
+	AD7991_DIFF_CHANNEL(0, 0, 0, AD7791_CH_AIN1P_AIN1N, \
 		(bits), (storagebits), 0), \
-	AD_SD_SHORTED_CHANNEL(1, 0, AD7791_CH_AIN1N_AIN1N, \
+	AD7991_SHORTED_CHANNEL(1, 0, AD7791_CH_AIN1N_AIN1N, \
 		(bits), (storagebits), 0), \
-	AD_SD_SUPPLY_CHANNEL(2, 1, AD7791_CH_AVDD_MONITOR, \
+	AD7991_SUPPLY_CHANNEL(2, 1, AD7791_CH_AVDD_MONITOR, \
 		(bits), (storagebits), 0), \
 	IIO_CHAN_SOFT_TIMESTAMP(3), \
 }
@@ -153,6 +200,17 @@ struct ad7791_state {
 	const struct ad7791_chip_info *info;
 };
 
+static const int ad7791_sample_freq_avail[8][2] = {
+	[AD7791_FILTER_RATE_120] =  { 120, 0 },
+	[AD7791_FILTER_RATE_100] =  { 100, 0 },
+	[AD7791_FILTER_RATE_33_3] = { 33,  300000 },
+	[AD7791_FILTER_RATE_20] =   { 20,  0 },
+	[AD7791_FILTER_RATE_16_6] = { 16,  600000 },
+	[AD7791_FILTER_RATE_16_7] = { 16,  700000 },
+	[AD7791_FILTER_RATE_13_3] = { 13,  300000 },
+	[AD7791_FILTER_RATE_9_5] =  { 9,   500000 },
+};
+
 static struct ad7791_state *ad_sigma_delta_to_ad7791(struct ad_sigma_delta *sd)
 {
 	return container_of(sd, struct ad7791_state, sd);
@@ -195,6 +253,7 @@ static const struct ad_sigma_delta_info ad7791_sigma_delta_info = {
 	.has_registers = true,
 	.addr_shift = 4,
 	.read_mask = BIT(3),
+	.irq_flags = IRQF_TRIGGER_LOW,
 };
 
 static int ad7791_read_raw(struct iio_dev *indio_dev,
@@ -202,6 +261,7 @@ static int ad7791_read_raw(struct iio_dev *indio_dev,
 {
 	struct ad7791_state *st = iio_priv(indio_dev);
 	bool unipolar = !!(st->mode & AD7791_MODE_UNIPOLAR);
+	unsigned int rate;
 
 	switch (info) {
 	case IIO_CHAN_INFO_RAW:
@@ -239,65 +299,56 @@ static int ad7791_read_raw(struct iio_dev *indio_dev,
 			*val2 = chan->scan_type.realbits - 1;
 
 		return IIO_VAL_FRACTIONAL_LOG2;
+	case IIO_CHAN_INFO_SAMP_FREQ:
+		rate = st->filter & AD7791_FILTER_RATE_MASK;
+		*val = ad7791_sample_freq_avail[rate][0];
+		*val2 = ad7791_sample_freq_avail[rate][1];
+		return IIO_VAL_INT_PLUS_MICRO;
 	}
 
 	return -EINVAL;
 }
 
-static const char * const ad7791_sample_freq_avail[] = {
-	[AD7791_FILTER_RATE_120] = "120",
-	[AD7791_FILTER_RATE_100] = "100",
-	[AD7791_FILTER_RATE_33_3] = "33.3",
-	[AD7791_FILTER_RATE_20] = "20",
-	[AD7791_FILTER_RATE_16_6] = "16.6",
-	[AD7791_FILTER_RATE_16_7] = "16.7",
-	[AD7791_FILTER_RATE_13_3] = "13.3",
-	[AD7791_FILTER_RATE_9_5] = "9.5",
-};
-
-static ssize_t ad7791_read_frequency(struct device *dev,
-	struct device_attribute *attr, char *buf)
+static int ad7791_write_raw(struct iio_dev *indio_dev,
+	struct iio_chan_spec const *chan, int val, int val2, long mask)
 {
-	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
 	struct ad7791_state *st = iio_priv(indio_dev);
-	unsigned int rate = st->filter & AD7791_FILTER_RATE_MASK;
-
-	return sprintf(buf, "%s\n", ad7791_sample_freq_avail[rate]);
-}
-
-static ssize_t ad7791_write_frequency(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t len)
-{
-	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
-	struct ad7791_state *st = iio_priv(indio_dev);
-	int i, ret;
-
-	for (i = 0; i < ARRAY_SIZE(ad7791_sample_freq_avail); i++)
-		if (sysfs_streq(ad7791_sample_freq_avail[i], buf))
-			break;
-	if (i == ARRAY_SIZE(ad7791_sample_freq_avail))
-		return -EINVAL;
+	int ret, i;
 
 	ret = iio_device_claim_direct_mode(indio_dev);
 	if (ret)
 		return ret;
-	st->filter &= ~AD7791_FILTER_RATE_MASK;
-	st->filter |= i;
-	ad_sd_write_reg(&st->sd, AD7791_REG_FILTER, sizeof(st->filter),
-			st->filter);
+
+	switch (mask) {
+	case IIO_CHAN_INFO_SAMP_FREQ:
+		for (i = 0; i < ARRAY_SIZE(ad7791_sample_freq_avail); i++) {
+			if (ad7791_sample_freq_avail[i][0] == val &&
+			    ad7791_sample_freq_avail[i][1] == val2)
+				break;
+		}
+
+		if (i == ARRAY_SIZE(ad7791_sample_freq_avail)) {
+			ret = -EINVAL;
+			break;
+		}
+
+		st->filter &= ~AD7791_FILTER_RATE_MASK;
+		st->filter |= i;
+		ad_sd_write_reg(&st->sd, AD7791_REG_FILTER,
+				sizeof(st->filter),
+				st->filter);
+		break;
+	default:
+		ret = -EINVAL;
+	}
+
 	iio_device_release_direct_mode(indio_dev);
-
-	return len;
+	return ret;
 }
-
-static IIO_DEV_ATTR_SAMP_FREQ(S_IWUSR | S_IRUGO,
-		ad7791_read_frequency,
-		ad7791_write_frequency);
 
 static IIO_CONST_ATTR_SAMP_FREQ_AVAIL("120 100 33.3 20 16.7 16.6 13.3 9.5");
 
 static struct attribute *ad7791_attributes[] = {
-	&iio_dev_attr_sampling_frequency.dev_attr.attr,
 	&iio_const_attr_sampling_frequency_available.dev_attr.attr,
 	NULL
 };
@@ -308,15 +359,15 @@ static const struct attribute_group ad7791_attribute_group = {
 
 static const struct iio_info ad7791_info = {
 	.read_raw = &ad7791_read_raw,
+	.write_raw = &ad7791_write_raw,
 	.attrs = &ad7791_attribute_group,
 	.validate_trigger = ad_sd_validate_trigger,
-	.driver_module = THIS_MODULE,
 };
 
 static const struct iio_info ad7791_no_filter_info = {
 	.read_raw = &ad7791_read_raw,
+	.write_raw = &ad7791_write_raw,
 	.validate_trigger = ad_sd_validate_trigger,
-	.driver_module = THIS_MODULE,
 };
 
 static int ad7791_setup(struct ad7791_state *st,
@@ -374,8 +425,6 @@ static int ad7791_probe(struct spi_device *spi)
 
 	spi_set_drvdata(spi, indio_dev);
 
-	indio_dev->dev.parent = &spi->dev;
-	indio_dev->dev.of_node = spi->dev.of_node;
 	indio_dev->name = spi_get_device_id(spi)->name;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels = st->info->channels;
@@ -441,5 +490,5 @@ static struct spi_driver ad7791_driver = {
 module_spi_driver(ad7791_driver);
 
 MODULE_AUTHOR("Lars-Peter Clausen <lars@metafoo.de>");
-MODULE_DESCRIPTION("Analog Device AD7787/AD7788/AD7789/AD7790/AD7791 ADC driver");
+MODULE_DESCRIPTION("Analog Devices AD7787/AD7788/AD7789/AD7790/AD7791 ADC driver");
 MODULE_LICENSE("GPL v2");

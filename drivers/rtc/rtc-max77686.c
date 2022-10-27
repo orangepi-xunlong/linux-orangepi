@@ -1,16 +1,10 @@
-/*
- * RTC driver for Maxim MAX77686 and MAX77802
- *
- * Copyright (C) 2012 Samsung Electronics Co.Ltd
- *
- *  based on rtc-max8997.c
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// RTC driver for Maxim MAX77686 and MAX77802
+//
+// Copyright (C) 2012 Samsung Electronics Co.Ltd
+//
+//  based on rtc-max8997.c
 
 #include <linux/i2c.h>
 #include <linux/slab.h>
@@ -84,6 +78,8 @@ struct max77686_rtc_driver_data {
 	int			alarm_pending_status_reg;
 	/* RTC IRQ CHIP for regmap */
 	const struct regmap_irq_chip *rtc_irq_chip;
+	/* regmap configuration for the chip */
+	const struct regmap_config *regmap_config;
 };
 
 struct max77686_rtc_info {
@@ -188,6 +184,11 @@ static const struct regmap_irq_chip max77686_rtc_irq_chip = {
 	.num_irqs	= ARRAY_SIZE(max77686_rtc_irqs),
 };
 
+static const struct regmap_config max77686_rtc_regmap_config = {
+	.reg_bits = 8,
+	.val_bits = 8,
+};
+
 static const struct max77686_rtc_driver_data max77686_drv_data = {
 	.delay = 16000,
 	.mask  = 0x7f,
@@ -197,6 +198,13 @@ static const struct max77686_rtc_driver_data max77686_drv_data = {
 	.alarm_pending_status_reg = MAX77686_REG_STATUS2,
 	.rtc_i2c_addr = MAX77686_I2C_ADDR_RTC,
 	.rtc_irq_chip = &max77686_rtc_irq_chip,
+	.regmap_config = &max77686_rtc_regmap_config,
+};
+
+static const struct regmap_config max77620_rtc_regmap_config = {
+	.reg_bits = 8,
+	.val_bits = 8,
+	.use_single_write = true,
 };
 
 static const struct max77686_rtc_driver_data max77620_drv_data = {
@@ -208,6 +216,7 @@ static const struct max77686_rtc_driver_data max77620_drv_data = {
 	.alarm_pending_status_reg = MAX77686_INVALID_REG,
 	.rtc_i2c_addr = MAX77620_I2C_ADDR_RTC,
 	.rtc_irq_chip = &max77686_rtc_irq_chip,
+	.regmap_config = &max77620_rtc_regmap_config,
 };
 
 static const unsigned int max77802_map[REG_RTC_END] = {
@@ -363,8 +372,6 @@ static int max77686_rtc_read_time(struct device *dev, struct rtc_time *tm)
 	}
 
 	max77686_rtc_data_to_tm(data, tm, info);
-
-	ret = rtc_valid_tm(tm);
 
 out:
 	mutex_unlock(&info->lock);
@@ -666,11 +673,6 @@ static int max77686_rtc_init_reg(struct max77686_rtc_info *info)
 	return ret;
 }
 
-static const struct regmap_config max77686_rtc_regmap_config = {
-	.reg_bits = 8,
-	.val_bits = 8,
-};
-
 static int max77686_init_rtc_regmap(struct max77686_rtc_info *info)
 {
 	struct device *parent = info->dev->parent;
@@ -681,11 +683,8 @@ static int max77686_init_rtc_regmap(struct max77686_rtc_info *info)
 		struct platform_device *pdev = to_platform_device(info->dev);
 
 		info->rtc_irq = platform_get_irq(pdev, 0);
-		if (info->rtc_irq < 0) {
-			dev_err(info->dev, "Failed to get rtc interrupts: %d\n",
-				info->rtc_irq);
+		if (info->rtc_irq < 0)
 			return info->rtc_irq;
-		}
 	} else {
 		info->rtc_irq =  parent_i2c->irq;
 	}
@@ -701,19 +700,19 @@ static int max77686_init_rtc_regmap(struct max77686_rtc_info *info)
 		goto add_rtc_irq;
 	}
 
-	info->rtc = i2c_new_dummy(parent_i2c->adapter,
-				  info->drv_data->rtc_i2c_addr);
-	if (!info->rtc) {
+	info->rtc = devm_i2c_new_dummy_device(info->dev, parent_i2c->adapter,
+					      info->drv_data->rtc_i2c_addr);
+	if (IS_ERR(info->rtc)) {
 		dev_err(info->dev, "Failed to allocate I2C device for RTC\n");
-		return -ENODEV;
+		return PTR_ERR(info->rtc);
 	}
 
 	info->rtc_regmap = devm_regmap_init_i2c(info->rtc,
-						&max77686_rtc_regmap_config);
+						info->drv_data->regmap_config);
 	if (IS_ERR(info->rtc_regmap)) {
 		ret = PTR_ERR(info->rtc_regmap);
 		dev_err(info->dev, "Failed to allocate RTC regmap: %d\n", ret);
-		goto err_unregister_i2c;
+		return ret;
 	}
 
 add_rtc_irq:
@@ -723,15 +722,10 @@ add_rtc_irq:
 				  &info->rtc_irq_data);
 	if (ret < 0) {
 		dev_err(info->dev, "Failed to add RTC irq chip: %d\n", ret);
-		goto err_unregister_i2c;
+		return ret;
 	}
 
 	return 0;
-
-err_unregister_i2c:
-	if (info->rtc)
-		i2c_unregister_device(info->rtc);
-	return ret;
 }
 
 static int max77686_rtc_probe(struct platform_device *pdev)
@@ -794,8 +788,6 @@ static int max77686_rtc_probe(struct platform_device *pdev)
 
 err_rtc:
 	regmap_del_irq_chip(info->rtc_irq, info->rtc_irq_data);
-	if (info->rtc)
-		i2c_unregister_device(info->rtc);
 
 	return ret;
 }
@@ -806,8 +798,6 @@ static int max77686_rtc_remove(struct platform_device *pdev)
 
 	free_irq(info->virq, info);
 	regmap_del_irq_chip(info->rtc_irq, info->rtc_irq_data);
-	if (info->rtc)
-		i2c_unregister_device(info->rtc);
 
 	return 0;
 }
@@ -815,17 +805,36 @@ static int max77686_rtc_remove(struct platform_device *pdev)
 #ifdef CONFIG_PM_SLEEP
 static int max77686_rtc_suspend(struct device *dev)
 {
+	struct max77686_rtc_info *info = dev_get_drvdata(dev);
+	int ret = 0;
+
 	if (device_may_wakeup(dev)) {
 		struct max77686_rtc_info *info = dev_get_drvdata(dev);
 
-		return enable_irq_wake(info->virq);
+		ret = enable_irq_wake(info->virq);
 	}
 
-	return 0;
+	/*
+	 * If the main IRQ (not virtual) is the parent IRQ, then it must be
+	 * disabled during suspend because if it happens while suspended it
+	 * will be handled before resuming I2C.
+	 *
+	 * Since Main IRQ is shared, all its users should disable it to be sure
+	 * it won't fire while one of them is still suspended.
+	 */
+	if (!info->drv_data->rtc_irq_from_platform)
+		disable_irq(info->rtc_irq);
+
+	return ret;
 }
 
 static int max77686_rtc_resume(struct device *dev)
 {
+	struct max77686_rtc_info *info = dev_get_drvdata(dev);
+
+	if (!info->drv_data->rtc_irq_from_platform)
+		enable_irq(info->rtc_irq);
+
 	if (device_may_wakeup(dev)) {
 		struct max77686_rtc_info *info = dev_get_drvdata(dev);
 

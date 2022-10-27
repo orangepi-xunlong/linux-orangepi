@@ -4,7 +4,9 @@ The Atmel PIO4 controller is used to select the function of a pin and to
 configure it.
 
 Required properties:
-- compatible: "atmel,sama5d2-pinctrl".
+- compatible:
+	"atmel,sama5d2-pinctrl"
+	"microchip,sama7g5-pinctrl"
 - reg: base address and length of the PIO controller.
 - interrupts: interrupt outputs from the controller, one for each bank.
 - interrupt-controller: mark the device node as an interrupt controller.
@@ -36,6 +38,8 @@ Optional properties:
 - GENERIC_PINCONFIG: generic pinconfig options to use, bias-disable,
 bias-pull-down, bias-pull-up, drive-open-drain, input-schmitt-enable,
 input-debounce, output-low, output-high.
+- atmel,drive-strength: 0 or 1 for low drive, 2 for medium drive and 3 for
+high drive. The default value is low drive.
 
 Example:
 
@@ -66,6 +70,7 @@ Example:
 			pinmux = <PIN_PB0>,
 				 <PIN_PB5>;
 			bias-pull-up;
+			atmel,drive-strength = <ATMEL_PIO_DRVSTR_ME>;
 		};
 
 		pinctrl_sdmmc1_default: sdmmc1_default {

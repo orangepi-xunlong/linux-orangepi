@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * IBM eServer Hypervisor Virtual Console Server Device Driver
  * Copyright (C) 2003, 2004 IBM Corp.
  *  Ryan S. Arnold (rsa@us.ibm.com)
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  *
  * Author(s) :  Ryan S. Arnold <rsa@us.ibm.com>
  *
@@ -60,7 +47,7 @@
  * using the 2.6 Linux kernel kref construct.
  *
  * For direction on installation and usage of this driver please reference
- * Documentation/powerpc/hvcs.txt.
+ * Documentation/powerpc/hvcs.rst.
  */
 
 #include <linux/device.h>
@@ -81,7 +68,7 @@
 #include <linux/tty_flip.h>
 #include <asm/hvconsole.h>
 #include <asm/hvcserver.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/vio.h>
 
 /*
@@ -189,7 +176,7 @@ MODULE_VERSION(HVCS_DRIVER_VERSION);
  * that will cause echoing or we'll go into recursive loop echoing chars back
  * and forth with the console drivers.
  */
-static struct ktermios hvcs_tty_termios = {
+static const struct ktermios hvcs_tty_termios = {
 	.c_iflag = IGNBRK | IGNPAR,
 	.c_oflag = OPOST,
 	.c_cflag = B38400 | CS8 | CREAD | HUPCL,
@@ -209,8 +196,6 @@ module_param(hvcs_parm_num_devs, int, 0);
 
 static const char hvcs_driver_name[] = "hvcs";
 static const char hvcs_device_node[] = "hvcs";
-static const char hvcs_driver_string[]
-	= "IBM hvcs (Hypervisor Virtual Console Server) Driver";
 
 /* Status of partner info rescan triggered via sysfs. */
 static int hvcs_rescan_status;
@@ -484,13 +469,13 @@ static struct attribute_group hvcs_attr_group = {
 	.attrs = hvcs_attrs,
 };
 
-static ssize_t hvcs_rescan_show(struct device_driver *ddp, char *buf)
+static ssize_t rescan_show(struct device_driver *ddp, char *buf)
 {
 	/* A 1 means it is updating, a 0 means it is done updating */
 	return snprintf(buf, PAGE_SIZE, "%d\n", hvcs_rescan_status);
 }
 
-static ssize_t hvcs_rescan_store(struct device_driver *ddp, const char * buf,
+static ssize_t rescan_store(struct device_driver *ddp, const char * buf,
 		size_t count)
 {
 	if ((simple_strtol(buf, NULL, 0) != 1)
@@ -505,8 +490,7 @@ static ssize_t hvcs_rescan_store(struct device_driver *ddp, const char * buf,
 	return count;
 }
 
-static DRIVER_ATTR(rescan,
-	S_IRUGO | S_IWUSR, hvcs_rescan_show, hvcs_rescan_store);
+static DRIVER_ATTR_RW(rescan);
 
 static void hvcs_kick(void)
 {
@@ -676,7 +660,7 @@ static int khvcsd(void *unused)
 	return 0;
 }
 
-static struct vio_device_id hvcs_driver_table[] = {
+static const struct vio_device_id hvcs_driver_table[] = {
 	{"serial-server", "hvterm2"},
 	{ "", "" }
 };
@@ -885,8 +869,8 @@ static void hvcs_set_pi(struct hvcs_partner_info *pi, struct hvcs_struct *hvcsd)
 	hvcsd->p_partition_ID  = pi->partition_ID;
 
 	/* copy the null-term char too */
-	strlcpy(&hvcsd->p_location_code[0],
-			&pi->location_code[0], sizeof(hvcsd->p_location_code));
+	strlcpy(hvcsd->p_location_code, pi->location_code,
+		sizeof(hvcsd->p_location_code));
 }
 
 /*
@@ -1232,18 +1216,10 @@ static void hvcs_close(struct tty_struct *tty, struct file *filp)
 
 		tty_wait_until_sent(tty, HVCS_CLOSE_WAIT);
 
-		/*
-		 * This line is important because it tells hvcs_open that this
-		 * device needs to be re-configured the next time hvcs_open is
-		 * called.
-		 */
-		tty->driver_data = NULL;
-
 		free_irq(irq, hvcsd);
 		return;
 	} else if (hvcsd->port.count < 0) {
-		printk(KERN_ERR "HVCS: vty-server@%X open_count: %d"
-				" is missmanaged.\n",
+		printk(KERN_ERR "HVCS: vty-server@%X open_count: %d is mismanaged.\n",
 		hvcsd->vdev->unit_address, hvcsd->port.count);
 	}
 
@@ -1253,6 +1229,13 @@ static void hvcs_close(struct tty_struct *tty, struct file *filp)
 static void hvcs_cleanup(struct tty_struct * tty)
 {
 	struct hvcs_struct *hvcsd = tty->driver_data;
+
+	/*
+	 * This line is important because it tells hvcs_open that this
+	 * device needs to be re-configured the next time hvcs_open is
+	 * called.
+	 */
+	tty->driver_data = NULL;
 
 	tty_port_put(&hvcsd->port);
 }
@@ -1456,7 +1439,8 @@ static int hvcs_alloc_index_list(int n)
 {
 	int i;
 
-	hvcs_index_list = kmalloc(n * sizeof(hvcs_index_count),GFP_KERNEL);
+	hvcs_index_list = kmalloc_array(n, sizeof(hvcs_index_count),
+					GFP_KERNEL);
 	if (!hvcs_index_list)
 		return -ENOMEM;
 	hvcs_index_count = n;
@@ -1575,7 +1559,7 @@ static int __init hvcs_module_init(void)
 	 */
 	rc = driver_create_file(&(hvcs_vio_driver.driver), &driver_attr_rescan);
 	if (rc)
-		pr_warning("HVCS: Failed to create rescan file (err %d)\n", rc);
+		pr_warn("HVCS: Failed to create rescan file (err %d)\n", rc);
 
 	return 0;
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  cht_bsw_rt5672.c - ASoc Machine driver for Intel Cherryview-based platforms
  *                     Cherrytrail and Braswell, with RT5672 codec.
@@ -5,32 +6,32 @@
  *  Copyright (C) 2014 Intel Corp
  *  Author: Subhransu S. Prusty <subhransu.s.prusty@intel.com>
  *          Mengdong Lin <mengdong.lin@intel.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; version 2 of the License.
- *
- *  This program is distributed in the hope that it will be useful, but
- *  WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  General Public License for more details.
  */
 
+#include <linux/gpio/consumer.h>
+#include <linux/input.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
+#include <linux/clk.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/jack.h>
+#include <sound/soc-acpi.h>
 #include "../../codecs/rt5670.h"
 #include "../atom/sst-atom-controls.h"
+
 
 /* The platform clock #3 outputs 19.2Mhz clock to codec as I2S MCLK */
 #define CHT_PLAT_CLK_3_HZ	19200000
 #define CHT_CODEC_DAI	"rt5670-aif1"
 
-static struct snd_soc_jack cht_bsw_headset;
+struct cht_mc_private {
+	struct snd_soc_jack headset;
+	char codec_name[SND_ACPI_I2C_ID_LEN];
+	struct clk *mclk;
+};
 
 /* Headset jack detection DAPM pins */
 static struct snd_soc_jack_pin cht_bsw_headset_pins[] = {
@@ -44,33 +45,31 @@ static struct snd_soc_jack_pin cht_bsw_headset_pins[] = {
 	},
 };
 
-static inline struct snd_soc_dai *cht_get_codec_dai(struct snd_soc_card *card)
-{
-	struct snd_soc_pcm_runtime *rtd;
-
-	list_for_each_entry(rtd, &card->rtd_list, list) {
-		if (!strncmp(rtd->codec_dai->name, CHT_CODEC_DAI,
-			     strlen(CHT_CODEC_DAI)))
-			return rtd->codec_dai;
-	}
-	return NULL;
-}
-
 static int platform_clock_control(struct snd_soc_dapm_widget *w,
 		struct snd_kcontrol *k, int  event)
 {
 	struct snd_soc_dapm_context *dapm = w->dapm;
 	struct snd_soc_card *card = dapm->card;
 	struct snd_soc_dai *codec_dai;
+	struct cht_mc_private *ctx = snd_soc_card_get_drvdata(card);
 	int ret;
 
-	codec_dai = cht_get_codec_dai(card);
+	codec_dai = snd_soc_card_get_codec_dai(card, CHT_CODEC_DAI);
 	if (!codec_dai) {
 		dev_err(card->dev, "Codec dai not found; Unable to set platform clock\n");
 		return -EIO;
 	}
 
 	if (SND_SOC_DAPM_EVENT_ON(event)) {
+		if (ctx->mclk) {
+			ret = clk_prepare_enable(ctx->mclk);
+			if (ret < 0) {
+				dev_err(card->dev,
+					"could not configure MCLK state");
+				return ret;
+			}
+		}
+
 		/* set codec PLL source to the 19.2MHz platform clock (MCLK) */
 		ret = snd_soc_dai_set_pll(codec_dai, 0, RT5670_PLL1_S_MCLK,
 				CHT_PLAT_CLK_3_HZ, 48000 * 512);
@@ -94,6 +93,9 @@ static int platform_clock_control(struct snd_soc_dapm_widget *w,
 		 */
 		snd_soc_dai_set_sysclk(codec_dai, RT5670_SCLK_S_RCCLK,
 				       48000 * 512, SND_SOC_CLOCK_IN);
+
+		if (ctx->mclk)
+			clk_disable_unprepare(ctx->mclk);
 	}
 	return 0;
 }
@@ -141,8 +143,8 @@ static const struct snd_kcontrol_new cht_mc_controls[] = {
 static int cht_aif1_hw_params(struct snd_pcm_substream *substream,
 					struct snd_pcm_hw_params *params)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
 	int ret;
 
 	/* set codec PLL source to the 19.2MHz platform clock (MCLK) */
@@ -164,25 +166,29 @@ static int cht_aif1_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+static const struct acpi_gpio_params headset_gpios = { 0, 0, false };
+
+static const struct acpi_gpio_mapping cht_rt5672_gpios[] = {
+	{ "headset-gpios", &headset_gpios, 1 },
+	{},
+};
+
 static int cht_codec_init(struct snd_soc_pcm_runtime *runtime)
 {
 	int ret;
-	struct snd_soc_dai *codec_dai = runtime->codec_dai;
-	struct snd_soc_codec *codec = codec_dai->codec;
+	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(runtime, 0);
+	struct snd_soc_component *component = codec_dai->component;
+	struct cht_mc_private *ctx = snd_soc_card_get_drvdata(runtime->card);
 
-	/* TDM 4 slots 24 bit, set Rx & Tx bitmask to 4 active slots */
-	ret = snd_soc_dai_set_tdm_slot(codec_dai, 0xF, 0xF, 4, 24);
-	if (ret < 0) {
-		dev_err(runtime->dev, "can't set codec TDM slot %d\n", ret);
-		return ret;
-	}
+	if (devm_acpi_dev_add_driver_gpios(component->dev, cht_rt5672_gpios))
+		dev_warn(runtime->dev, "Unable to add GPIO mapping table\n");
 
 	/* Select codec ASRC clock source to track I2S1 clock, because codec
 	 * is in slave mode and 100fs I2S format (BCLK = 100 * LRCLK) cannot
 	 * be supported by RT5672. Otherwise, ASRC will be disabled and cause
 	 * noise.
 	 */
-	rt5670_sel_asrc_clk_src(codec,
+	rt5670_sel_asrc_clk_src(component,
 				RT5670_DA_STEREO_FILTER
 				| RT5670_DA_MONO_L_FILTER
 				| RT5670_DA_MONO_R_FILTER
@@ -192,13 +198,41 @@ static int cht_codec_init(struct snd_soc_pcm_runtime *runtime)
 				RT5670_CLK_SEL_I2S1_ASRC);
 
         ret = snd_soc_card_jack_new(runtime->card, "Headset",
-                SND_JACK_HEADSET | SND_JACK_BTN_0 |
-                SND_JACK_BTN_1 | SND_JACK_BTN_2, &cht_bsw_headset,
-                cht_bsw_headset_pins, ARRAY_SIZE(cht_bsw_headset_pins));
+				    SND_JACK_HEADSET | SND_JACK_BTN_0 |
+				    SND_JACK_BTN_1 | SND_JACK_BTN_2,
+				    &ctx->headset,
+				    cht_bsw_headset_pins,
+				    ARRAY_SIZE(cht_bsw_headset_pins));
         if (ret)
                 return ret;
 
-	rt5670_set_jack_detect(codec, &cht_bsw_headset);
+	snd_jack_set_key(ctx->headset.jack, SND_JACK_BTN_0, KEY_PLAYPAUSE);
+	snd_jack_set_key(ctx->headset.jack, SND_JACK_BTN_1, KEY_VOLUMEUP);
+	snd_jack_set_key(ctx->headset.jack, SND_JACK_BTN_2, KEY_VOLUMEDOWN);
+
+	rt5670_set_jack_detect(component, &ctx->headset);
+	if (ctx->mclk) {
+		/*
+		 * The firmware might enable the clock at
+		 * boot (this information may or may not
+		 * be reflected in the enable clock register).
+		 * To change the rate we must disable the clock
+		 * first to cover these cases. Due to common
+		 * clock framework restrictions that do not allow
+		 * to disable a clock that has not been enabled,
+		 * we need to enable the clock first.
+		 */
+		ret = clk_prepare_enable(ctx->mclk);
+		if (!ret)
+			clk_disable_unprepare(ctx->mclk);
+
+		ret = clk_set_rate(ctx->mclk, CHT_PLAT_CLK_3_HZ);
+
+		if (ret) {
+			dev_err(runtime->dev, "unable to set MCLK rate\n");
+			return ret;
+		}
+	}
 	return 0;
 }
 
@@ -209,6 +243,7 @@ static int cht_codec_fixup(struct snd_soc_pcm_runtime *rtd,
 			SNDRV_PCM_HW_PARAM_RATE);
 	struct snd_interval *channels = hw_param_interval(params,
 						SNDRV_PCM_HW_PARAM_CHANNELS);
+	int ret;
 
 	/* The DSP will covert the FE rate to 48k, stereo, 24bits */
 	rate->min = rate->max = 48000;
@@ -216,6 +251,29 @@ static int cht_codec_fixup(struct snd_soc_pcm_runtime *rtd,
 
 	/* set SSP2 to 24-bit */
 	params_set_format(params, SNDRV_PCM_FORMAT_S24_LE);
+
+	/*
+	 * The default mode for the cpu-dai is TDM 4 slot. The default mode
+	 * for the codec-dai is I2S. So we need to either set the cpu-dai to
+	 * I2S mode to match the codec-dai, or set the codec-dai to TDM 4 slot
+	 * (or program both to yet another mode).
+	 * One board, the Lenovo Miix 2 10, uses not 1 but 2 codecs connected
+	 * to SSP2. The second piggy-backed, output-only codec is inside the
+	 * keyboard-dock (which has extra speakers). Unlike the main rt5672
+	 * codec, we cannot configure this codec, it is hard coded to use
+	 * 2 channel 24 bit I2S. For this to work we must use I2S mode on this
+	 * board. Since we only support 2 channels anyways, there is no need
+	 * for TDM on any cht-bsw-rt5672 designs. So we use I2S 2ch everywhere.
+	 */
+	ret = snd_soc_dai_set_fmt(asoc_rtd_to_cpu(rtd, 0),
+				  SND_SOC_DAIFMT_I2S     |
+				  SND_SOC_DAIFMT_NB_NF   |
+				  SND_SOC_DAIFMT_CBS_CFS);
+	if (ret < 0) {
+		dev_err(rtd->dev, "can't set format to I2S, err %d\n", ret);
+		return ret;
+	}
+
 	return 0;
 }
 
@@ -225,79 +283,81 @@ static int cht_aif1_startup(struct snd_pcm_substream *substream)
 			SNDRV_PCM_HW_PARAM_RATE, 48000);
 }
 
-static struct snd_soc_ops cht_aif1_ops = {
+static const struct snd_soc_ops cht_aif1_ops = {
 	.startup = cht_aif1_startup,
 };
 
-static struct snd_soc_ops cht_be_ssp2_ops = {
+static const struct snd_soc_ops cht_be_ssp2_ops = {
 	.hw_params = cht_aif1_hw_params,
 };
+
+SND_SOC_DAILINK_DEF(dummy,
+	DAILINK_COMP_ARRAY(COMP_DUMMY()));
+
+SND_SOC_DAILINK_DEF(media,
+	DAILINK_COMP_ARRAY(COMP_CPU("media-cpu-dai")));
+
+SND_SOC_DAILINK_DEF(deepbuffer,
+	DAILINK_COMP_ARRAY(COMP_CPU("deepbuffer-cpu-dai")));
+
+SND_SOC_DAILINK_DEF(ssp2_port,
+	DAILINK_COMP_ARRAY(COMP_CPU("ssp2-port")));
+SND_SOC_DAILINK_DEF(ssp2_codec,
+	DAILINK_COMP_ARRAY(COMP_CODEC("i2c-10EC5670:00",
+				      "rt5670-aif1")));
+
+SND_SOC_DAILINK_DEF(platform,
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("sst-mfld-platform")));
 
 static struct snd_soc_dai_link cht_dailink[] = {
 	/* Front End DAI links */
 	[MERR_DPCM_AUDIO] = {
 		.name = "Audio Port",
 		.stream_name = "Audio",
-		.cpu_dai_name = "media-cpu-dai",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.platform_name = "sst-mfld-platform",
 		.nonatomic = true,
 		.dynamic = 1,
 		.dpcm_playback = 1,
 		.dpcm_capture = 1,
 		.ops = &cht_aif1_ops,
+		SND_SOC_DAILINK_REG(media, dummy, platform),
 	},
 	[MERR_DPCM_DEEP_BUFFER] = {
 		.name = "Deep-Buffer Audio Port",
 		.stream_name = "Deep-Buffer Audio",
-		.cpu_dai_name = "deepbuffer-cpu-dai",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.platform_name = "sst-mfld-platform",
 		.nonatomic = true,
 		.dynamic = 1,
 		.dpcm_playback = 1,
 		.ops = &cht_aif1_ops,
-	},
-	[MERR_DPCM_COMPR] = {
-		.name = "Compressed Port",
-		.stream_name = "Compress",
-		.cpu_dai_name = "compress-cpu-dai",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.platform_name = "sst-mfld-platform",
+		SND_SOC_DAILINK_REG(deepbuffer, dummy, platform),
 	},
 
 	/* Back End DAI links */
 	{
 		/* SSP2 - Codec */
 		.name = "SSP2-Codec",
-		.id = 1,
-		.cpu_dai_name = "ssp2-port",
-		.platform_name = "sst-mfld-platform",
+		.id = 0,
 		.no_pcm = 1,
 		.nonatomic = true,
-		.codec_dai_name = "rt5670-aif1",
-		.codec_name = "i2c-10EC5670:00",
-		.dai_fmt = SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_IB_NF
-					| SND_SOC_DAIFMT_CBS_CFS,
 		.init = cht_codec_init,
 		.be_hw_params_fixup = cht_codec_fixup,
 		.dpcm_playback = 1,
 		.dpcm_capture = 1,
 		.ops = &cht_be_ssp2_ops,
+		SND_SOC_DAILINK_REG(ssp2_port, ssp2_codec, platform),
 	},
 };
 
 static int cht_suspend_pre(struct snd_soc_card *card)
 {
-	struct snd_soc_codec *codec;
+	struct snd_soc_component *component;
+	struct cht_mc_private *ctx = snd_soc_card_get_drvdata(card);
 
-	list_for_each_entry(codec, &card->codec_dev_list, card_list) {
-		if (!strcmp(codec->component.name, "i2c-10EC5670:00")) {
-			dev_dbg(codec->dev, "disabling jack detect before going to suspend.\n");
-			rt5670_jack_suspend(codec);
+	for_each_card_components(card, component) {
+		if (!strncmp(component->name,
+			     ctx->codec_name, sizeof(ctx->codec_name))) {
+
+			dev_dbg(component->dev, "disabling jack detect before going to suspend.\n");
+			rt5670_jack_suspend(component);
 			break;
 		}
 	}
@@ -306,12 +366,15 @@ static int cht_suspend_pre(struct snd_soc_card *card)
 
 static int cht_resume_post(struct snd_soc_card *card)
 {
-	struct snd_soc_codec *codec;
+	struct snd_soc_component *component;
+	struct cht_mc_private *ctx = snd_soc_card_get_drvdata(card);
 
-	list_for_each_entry(codec, &card->codec_dev_list, card_list) {
-		if (!strcmp(codec->component.name, "i2c-10EC5670:00")) {
-			dev_dbg(codec->dev, "enabling jack detect for resume.\n");
-			rt5670_jack_resume(codec);
+	for_each_card_components(card, component) {
+		if (!strncmp(component->name,
+			     ctx->codec_name, sizeof(ctx->codec_name))) {
+
+			dev_dbg(component->dev, "enabling jack detect for resume.\n");
+			rt5670_jack_resume(component);
 			break;
 		}
 	}
@@ -319,9 +382,19 @@ static int cht_resume_post(struct snd_soc_card *card)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_BAYTRAIL)
+/* use space before codec name to simplify card ID, and simplify driver name */
+#define CARD_NAME "bytcht rt5672" /* card name will be 'sof-bytcht rt5672' */
+#define DRIVER_NAME "SOF"
+#else
+#define CARD_NAME "cht-bsw-rt5672"
+#define DRIVER_NAME NULL /* card name will be used for driver name */
+#endif
+
 /* SoC card */
 static struct snd_soc_card snd_soc_card_cht = {
-	.name = "cherrytrailcraudio",
+	.name = CARD_NAME,
+	.driver_name = DRIVER_NAME,
 	.owner = THIS_MODULE,
 	.dai_link = cht_dailink,
 	.num_links = ARRAY_SIZE(cht_dailink),
@@ -335,12 +408,57 @@ static struct snd_soc_card snd_soc_card_cht = {
 	.resume_post = cht_resume_post,
 };
 
+#define RT5672_I2C_DEFAULT	"i2c-10EC5670:00"
+
 static int snd_cht_mc_probe(struct platform_device *pdev)
 {
 	int ret_val = 0;
+	struct cht_mc_private *drv;
+	struct snd_soc_acpi_mach *mach = pdev->dev.platform_data;
+	const char *platform_name;
+	struct acpi_device *adev;
+	int i;
+
+	drv = devm_kzalloc(&pdev->dev, sizeof(*drv), GFP_KERNEL);
+	if (!drv)
+		return -ENOMEM;
+
+	strcpy(drv->codec_name, RT5672_I2C_DEFAULT);
+
+	/* fixup codec name based on HID */
+	adev = acpi_dev_get_first_match_dev(mach->id, NULL, -1);
+	if (adev) {
+		snprintf(drv->codec_name, sizeof(drv->codec_name),
+			 "i2c-%s", acpi_dev_name(adev));
+		put_device(&adev->dev);
+		for (i = 0; i < ARRAY_SIZE(cht_dailink); i++) {
+			if (!strcmp(cht_dailink[i].codecs->name,
+				    RT5672_I2C_DEFAULT)) {
+				cht_dailink[i].codecs->name = drv->codec_name;
+				break;
+			}
+		}
+	}
+
+	/* override plaform name, if required */
+	snd_soc_card_cht.dev = &pdev->dev;
+	platform_name = mach->mach_params.platform;
+
+	ret_val = snd_soc_fixup_dai_links_platform_name(&snd_soc_card_cht,
+							platform_name);
+	if (ret_val)
+		return ret_val;
+
+	drv->mclk = devm_clk_get(&pdev->dev, "pmc_plt_clk_3");
+	if (IS_ERR(drv->mclk)) {
+		dev_err(&pdev->dev,
+			"Failed to get MCLK from pmc_plt_clk_3: %ld\n",
+			PTR_ERR(drv->mclk));
+		return PTR_ERR(drv->mclk);
+	}
+	snd_soc_card_set_drvdata(&snd_soc_card_cht, drv);
 
 	/* register the soc card */
-	snd_soc_card_cht.dev = &pdev->dev;
 	ret_val = devm_snd_soc_register_card(&pdev->dev, &snd_soc_card_cht);
 	if (ret_val) {
 		dev_err(&pdev->dev,
@@ -354,6 +472,9 @@ static int snd_cht_mc_probe(struct platform_device *pdev)
 static struct platform_driver snd_cht_mc_driver = {
 	.driver = {
 		.name = "cht-bsw-rt5672",
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_BAYTRAIL)
+		.pm = &snd_soc_pm_ops,
+#endif
 	},
 	.probe = snd_cht_mc_probe,
 };

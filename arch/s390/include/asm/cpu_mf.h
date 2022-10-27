@@ -1,13 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * CPU-measurement facilities
  *
- *  Copyright IBM Corp. 2012
+ *  Copyright IBM Corp. 2012, 2018
  *  Author(s): Hendrik Brueckner <brueckner@linux.vnet.ibm.com>
  *	       Jan Glauber <jang@linux.vnet.ibm.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License (version 2 only)
- * as published by the Free Software Foundation.
  */
 #ifndef _ASM_S390_CPU_MF_H
 #define _ASM_S390_CPU_MF_H
@@ -15,27 +12,33 @@
 #include <linux/errno.h>
 #include <asm/facility.h>
 
+asm(".include \"asm/cpu_mf-insn.h\"\n");
+
 #define CPU_MF_INT_SF_IAE	(1 << 31)	/* invalid entry address */
 #define CPU_MF_INT_SF_ISE	(1 << 30)	/* incorrect SDBT entry */
 #define CPU_MF_INT_SF_PRA	(1 << 29)	/* program request alert */
 #define CPU_MF_INT_SF_SACA	(1 << 23)	/* sampler auth. change alert */
 #define CPU_MF_INT_SF_LSDA	(1 << 22)	/* loss of sample data alert */
+#define CPU_MF_INT_CF_MTDA	(1 << 15)	/* loss of MT ctr. data alert */
 #define CPU_MF_INT_CF_CACA	(1 <<  7)	/* counter auth. change alert */
 #define CPU_MF_INT_CF_LCDA	(1 <<  6)	/* loss of counter data alert */
-#define CPU_MF_INT_CF_MASK	(CPU_MF_INT_CF_CACA|CPU_MF_INT_CF_LCDA)
+#define CPU_MF_INT_CF_MASK	(CPU_MF_INT_CF_MTDA|CPU_MF_INT_CF_CACA| \
+				 CPU_MF_INT_CF_LCDA)
 #define CPU_MF_INT_SF_MASK	(CPU_MF_INT_SF_IAE|CPU_MF_INT_SF_ISE|	\
 				 CPU_MF_INT_SF_PRA|CPU_MF_INT_SF_SACA|	\
 				 CPU_MF_INT_SF_LSDA)
 
+#define CPU_MF_SF_RIBM_NOTAV	0x1		/* Sampling unavailable */
+
 /* CPU measurement facility support */
 static inline int cpum_cf_avail(void)
 {
-	return MACHINE_HAS_LPP && test_facility(67);
+	return test_facility(40) && test_facility(67);
 }
 
 static inline int cpum_sf_avail(void)
 {
-	return MACHINE_HAS_LPP && test_facility(68);
+	return test_facility(40) && test_facility(68);
 }
 
 
@@ -68,8 +71,9 @@ struct hws_qsi_info_block {	    /* Bit(s) */
 	unsigned long max_sampl_rate; /* 16-23: maximum sampling interval*/
 	unsigned long tear;	    /* 24-31: TEAR contents		 */
 	unsigned long dear;	    /* 32-39: DEAR contents		 */
-	unsigned int rsvrd0;	    /* 40-43: reserved			 */
-	unsigned int cpu_speed;     /* 44-47: CPU speed 		 */
+	unsigned int rsvrd0:24;	    /* 40-42: reserved			 */
+	unsigned int ribm:8;	    /* 43: Reserved by IBM		 */
+	unsigned int cpu_speed;     /* 44-47: CPU speed			 */
 	unsigned long long rsvrd1;  /* 48-55: reserved			 */
 	unsigned long long rsvrd2;  /* 56-63: reserved			 */
 } __packed;
@@ -88,10 +92,10 @@ struct hws_lsctl_request_block {
 	unsigned long tear;	    /* 16-23: TEAR contents		 */
 	unsigned long dear;	    /* 24-31: DEAR contents		 */
 	/* 32-63:							 */
-	unsigned long rsvrd1;	    /* reserved 			 */
-	unsigned long rsvrd2;	    /* reserved 			 */
-	unsigned long rsvrd3;	    /* reserved 			 */
-	unsigned long rsvrd4;	    /* reserved 			 */
+	unsigned long rsvrd1;	    /* reserved				 */
+	unsigned long rsvrd2;	    /* reserved				 */
+	unsigned long rsvrd3;	    /* reserved				 */
+	unsigned long rsvrd4;	    /* reserved				 */
 } __packed;
 
 struct hws_basic_entry {
@@ -104,7 +108,8 @@ struct hws_basic_entry {
 	unsigned int P:1;	    /* 28 PSW Problem state		 */
 	unsigned int AS:2;	    /* 29-30 PSW address-space control	 */
 	unsigned int I:1;	    /* 31 entry valid or invalid	 */
-	unsigned int:16;
+	unsigned int CL:2;	    /* 32-33 Configuration Level	 */
+	unsigned int:14;
 	unsigned int prim_asn:16;   /* primary ASN			 */
 	unsigned long long ia;	    /* Instruction Address		 */
 	unsigned long long gpp;     /* Guest Program Parameter		 */
@@ -139,9 +144,21 @@ struct hws_trailer_entry {
 	unsigned char timestamp[16];	 /* 16 - 31 timestamp		      */
 	unsigned long long reserved1;	 /* 32 -Reserved		      */
 	unsigned long long reserved2;	 /*				      */
-	unsigned long long progusage1;	 /* 48 - reserved for programming use */
-	unsigned long long progusage2;	 /*				      */
+	union {				 /* 48 - reserved for programming use */
+		struct {
+			unsigned int clock_base:1; /* in progusage2 */
+			unsigned long long progusage1:63;
+			unsigned long long progusage2;
+		};
+		unsigned long long progusage[2];
+	};
 } __packed;
+
+/* Load program parameter */
+static inline void lpp(void *pp)
+{
+	asm volatile(".insn s,0xb2800000,0(%0)\n":: "a" (pp) : "memory");
+}
 
 /* Query counter information */
 static inline int qctri(struct cpumf_ctr_info *info)
@@ -166,14 +183,14 @@ static inline int lcctl(u64 ctl)
 		"	.insn	s,0xb2840000,%1\n"
 		"	ipm	%0\n"
 		"	srl	%0,28\n"
-		: "=d" (cc) : "m" (ctl) : "cc");
+		: "=d" (cc) : "Q" (ctl) : "cc");
 	return cc;
 }
 
 /* Extract CPU counter */
 static inline int __ecctr(u64 ctr, u64 *content)
 {
-	register u64 _content asm("4") = 0;
+	u64 _content;
 	int cc;
 
 	asm volatile (
@@ -197,35 +214,41 @@ static inline int ecctr(u64 ctr, u64 *val)
 	return cc;
 }
 
-/* Store CPU counter multiple for the MT utilization counter set */
-static inline int stcctm5(u64 num, u64 *val)
+/* Store CPU counter multiple for a particular counter set */
+enum stcctm_ctr_set {
+	EXTENDED = 0,
+	BASIC = 1,
+	PROBLEM_STATE = 2,
+	CRYPTO_ACTIVITY = 3,
+	MT_DIAG = 5,
+	MT_DIAG_CLEARING = 9,	/* clears loss-of-MT-ctr-data alert */
+};
+
+static __always_inline int stcctm(enum stcctm_ctr_set set, u64 range, u64 *dest)
 {
-	typedef struct { u64 _[num]; } addrtype;
 	int cc;
 
 	asm volatile (
-		"	.insn	rsy,0xeb0000000017,%2,5,%1\n"
+		"	STCCTM	%2,%3,%1\n"
 		"	ipm	%0\n"
 		"	srl	%0,28\n"
-		: "=d" (cc), "=Q" (*(addrtype *) val)  : "d" (num) : "cc");
+		: "=d" (cc)
+		: "Q" (*dest), "d" (range), "i" (set)
+		: "cc", "memory");
 	return cc;
 }
 
 /* Query sampling information */
 static inline int qsi(struct hws_qsi_info_block *info)
 {
-	int cc;
-	cc = 1;
+	int cc = 1;
 
 	asm volatile(
-		"0:	.insn	s,0xb2860000,0(%1)\n"
+		"0:	.insn	s,0xb2860000,%1\n"
 		"1:	lhi	%0,0\n"
 		"2:\n"
 		EX_TABLE(0b, 2b) EX_TABLE(1b, 2b)
-		: "=d" (cc), "+a" (info)
-		: "m" (*info)
-		: "cc", "memory");
-
+		: "+d" (cc), "+Q" (*info));
 	return cc ? -EINVAL : 0;
 }
 
@@ -290,7 +313,7 @@ static inline unsigned long *trailer_entry_ptr(unsigned long v)
 	return (unsigned long *) ret;
 }
 
-/* Return if the entry in the sample data block table (sdbt)
+/* Return true if the entry in the sample data block table (sdbt)
  * is a link to the next sdbt */
 static inline int is_link_entry(unsigned long *s)
 {

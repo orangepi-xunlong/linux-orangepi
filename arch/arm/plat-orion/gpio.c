@@ -442,6 +442,7 @@ static void orion_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 
 	struct orion_gpio_chip *ochip = gpiochip_get_data(chip);
 	u32 out, io_conf, blink, in_pol, data_in, cause, edg_msk, lvl_msk;
+	const char *label;
 	int i;
 
 	out	= readl_relaxed(GPIO_OUT(ochip));
@@ -453,14 +454,9 @@ static void orion_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 	edg_msk	= readl_relaxed(GPIO_EDGE_MASK(ochip));
 	lvl_msk	= readl_relaxed(GPIO_LEVEL_MASK(ochip));
 
-	for (i = 0; i < chip->ngpio; i++) {
-		const char *label;
+	for_each_requested_gpio(chip, i, label) {
 		u32 msk;
 		bool is_out;
-
-		label = gpiochip_is_requested(chip, i);
-		if (!label)
-			continue;
 
 		msk = 1 << i;
 		is_out = !(io_conf & msk);
@@ -478,13 +474,13 @@ static void orion_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 			   (data_in ^ in_pol) & msk  ? "hi" : "lo",
 			   in_pol & msk ? "lo" : "hi");
 		if (!((edg_msk | lvl_msk) & msk)) {
-			seq_printf(s, " disabled\n");
+			seq_puts(s, " disabled\n");
 			continue;
 		}
 		if (edg_msk & msk)
-			seq_printf(s, " edge ");
+			seq_puts(s, " edge ");
 		if (lvl_msk & msk)
-			seq_printf(s, " level");
+			seq_puts(s, " level");
 		seq_printf(s, " (%s)\n", cause & msk ? "pending" : "clear  ");
 	}
 }

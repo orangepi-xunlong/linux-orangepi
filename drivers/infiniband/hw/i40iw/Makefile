@@ -1,4 +1,4 @@
-ccflags-y :=  -Idrivers/net/ethernet/intel/i40e
+# SPDX-License-Identifier: GPL-2.0
 
 obj-$(CONFIG_INFINIBAND_I40IW) += i40iw.o
 

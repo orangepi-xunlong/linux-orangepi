@@ -1,16 +1,21 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __LINUX_PAGE_OWNER_H
 #define __LINUX_PAGE_OWNER_H
 
 #include <linux/jump_label.h>
 
 #ifdef CONFIG_PAGE_OWNER
+extern bool page_owner_enabled;
 extern struct static_key_false page_owner_inited;
 extern struct page_ext_operations page_owner_ops;
 
+extern struct page_owner *get_page_owner(struct page_ext *page_ext);
+extern depot_stack_handle_t get_page_owner_handle(struct page_ext *page_ext,
+					unsigned long pfn);
 extern void __reset_page_owner(struct page *page, unsigned int order);
 extern void __set_page_owner(struct page *page,
 			unsigned int order, gfp_t gfp_mask);
-extern void __split_page_owner(struct page *page, unsigned int order);
+extern void __split_page_owner(struct page *page, unsigned int nr);
 extern void __copy_page_owner(struct page *oldpage, struct page *newpage);
 extern void __set_page_owner_migrate_reason(struct page *page, int reason);
 extern void __dump_page_owner(struct page *page);
@@ -30,10 +35,10 @@ static inline void set_page_owner(struct page *page,
 		__set_page_owner(page, order, gfp_mask);
 }
 
-static inline void split_page_owner(struct page *page, unsigned int order)
+static inline void split_page_owner(struct page *page, unsigned int nr)
 {
 	if (static_branch_unlikely(&page_owner_inited))
-		__split_page_owner(page, order);
+		__split_page_owner(page, nr);
 }
 static inline void copy_page_owner(struct page *oldpage, struct page *newpage)
 {

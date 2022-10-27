@@ -1,0 +1,13 @@
+modules.builtin
+modules.order
+Module.symvers
+
+*.a
+*.cmd
+*.di
+*.ko
+*.mod.c
+*.o
+*.o.d
+
+.tmp_versions/

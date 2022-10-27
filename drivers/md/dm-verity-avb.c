@@ -18,8 +18,8 @@ static char avb_invalidate_on_error[4];
 
 static void invalidate_vbmeta_endio(struct bio *bio)
 {
-	if (bio->bi_error)
-		DMERR("invalidate_vbmeta_endio: error %d", bio->bi_error);
+	if (bio->bi_status)
+		DMERR("invalidate_vbmeta_endio: error %d", bio->bi_status);
 	complete(bio->bi_private);
 }
 
@@ -32,8 +32,8 @@ static int invalidate_vbmeta_submit(struct bio *bio,
 
 	bio->bi_private = &wait;
 	bio->bi_end_io = invalidate_vbmeta_endio;
-	bio->bi_bdev = bdev;
-	bio_set_op_attrs(bio, op, REQ_SYNC | REQ_NOIDLE);
+	bio_set_dev(bio, bdev);
+	bio_set_op_attrs(bio, op, REQ_SYNC);
 
 	bio->bi_iter.bi_sector = 0;
 	if (access_last_sector) {

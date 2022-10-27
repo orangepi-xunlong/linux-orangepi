@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/types.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -8,7 +9,6 @@
 #include <linux/module.h>
 
 #include <asm/page.h>
-#include <asm/pgtable.h>
 #include <asm/amigaints.h>
 #include <asm/amigahw.h>
 
@@ -171,23 +171,6 @@ static void dma_stop(struct Scsi_Host *instance, struct scsi_cmnd *SCpnt,
 	}
 }
 
-static int gvp11_bus_reset(struct scsi_cmnd *cmd)
-{
-	struct Scsi_Host *instance = cmd->device->host;
-
-	/* FIXME perform bus-specific reset */
-
-	/* FIXME 2: shouldn't we no-op this function (return
-	   FAILED), and fall back to host reset function,
-	   wd33c93_host_reset ? */
-
-	spin_lock_irq(instance->host_lock);
-	wd33c93_host_reset(cmd);
-	spin_unlock_irq(instance->host_lock);
-
-	return SUCCESS;
-}
-
 static struct scsi_host_template gvp11_scsi_template = {
 	.module			= THIS_MODULE,
 	.name			= "GVP Series II SCSI",
@@ -196,13 +179,12 @@ static struct scsi_host_template gvp11_scsi_template = {
 	.proc_name		= "GVP11",
 	.queuecommand		= wd33c93_queuecommand,
 	.eh_abort_handler	= wd33c93_abort,
-	.eh_bus_reset_handler	= gvp11_bus_reset,
 	.eh_host_reset_handler	= wd33c93_host_reset,
 	.can_queue		= CAN_QUEUE,
 	.this_id		= 7,
 	.sg_tablesize		= SG_ALL,
 	.cmd_per_lun		= CMD_PER_LUN,
-	.use_clustering		= DISABLE_CLUSTERING
+	.dma_boundary		= PAGE_SIZE - 1,
 };
 
 static int check_wd33c93(struct gvp11_scsiregs *regs)

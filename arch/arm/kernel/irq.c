@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/arch/arm/kernel/irq.c
  *
@@ -8,10 +9,6 @@
  *  Dynamic Tick Timer written by Tony Lindgren <tony@atomide.com> and
  *  Tuukka Tikkanen <tuukka.tikkanen@elektrobit.com>.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  *  This file contains the code used by various IRQ handling routines:
  *  asking for different IRQ's should be done through these routines
  *  instead of just grabbing them. Thus setups with different IRQ numbers
@@ -21,7 +18,6 @@
  *  IRQ's are in fact implemented a bit like signal handlers for the kernel.
  *  Naturally it's not a 1:1 relation, but there are similarities.
  */
-#include <linux/kernel_stat.h>
 #include <linux/signal.h>
 #include <linux/ioport.h>
 #include <linux/interrupt.h>
@@ -100,16 +96,6 @@ void __init init_IRQ(void)
 
 	uniphier_cache_init();
 }
-
-#ifdef CONFIG_MULTI_IRQ_HANDLER
-void __init set_handle_irq(void (*handle_irq)(struct pt_regs *))
-{
-	if (handle_arch_irq)
-		return;
-
-	handle_arch_irq = handle_irq;
-}
-#endif
 
 #ifdef CONFIG_SPARSE_IRQ
 int __init arch_probe_nr_irqs(void)

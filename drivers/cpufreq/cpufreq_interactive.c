@@ -20,17 +20,23 @@
 #include <linux/cpu.h>
 #include <linux/cpumask.h>
 #include <linux/cpufreq.h>
+#ifdef CONFIG_ARCH_ROCKCHIP
+#include <linux/input.h>
+#endif
 #include <linux/irq_work.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/rwsem.h>
-#include <linux/sched.h>
+#include <linux/sched/cpufreq.h>
 #include <linux/sched/rt.h>
+#include <linux/sched/task.h>
 #include <linux/tick.h>
 #include <linux/time.h>
 #include <linux/timer.h>
 #include <linux/kthread.h>
 #include <linux/slab.h>
+#include <uapi/linux/sched/types.h>
+#include <linux/sched/clock.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/cpufreq_interactive.h>
@@ -82,11 +88,19 @@ struct interactive_tunables {
 	int nabove_hispeed_delay;
 
 	/* Non-zero means indefinite speed boost active */
-	unsigned int boost;
+	int boost;
 	/* Duration of a boot pulse in usecs */
-	unsigned int boostpulse_duration;
+	int boostpulse_duration;
 	/* End time of boost pulse in ktime converted to usecs */
 	u64 boostpulse_endtime;
+#ifdef CONFIG_ARCH_ROCKCHIP
+	/* Frequency to which a touch boost takes the cpus to */
+	unsigned long touchboost_freq;
+	/* Duration of a touchboost pulse in usecs */
+	int touchboostpulse_duration_val;
+	/* End time of touchboost pulse in ktime converted to usecs */
+	u64 touchboostpulse_endtime;
+#endif
 	bool boosted;
 
 	/*
@@ -112,6 +126,7 @@ struct interactive_cpu {
 	struct interactive_policy *ipolicy;
 
 	struct irq_work irq_work;
+	struct irq_work boost_irq_work;
 	u64 last_sample_time;
 	unsigned long next_sample_jiffies;
 	bool work_in_progress;
@@ -133,6 +148,10 @@ struct interactive_cpu {
 	u64 loc_floor_val_time; /* per-cpu floor_validate_time */
 	u64 pol_hispeed_val_time; /* policy hispeed_validate_time */
 	u64 loc_hispeed_val_time; /* per-cpu hispeed_validate_time */
+	int cpu;
+	unsigned int task_boost_freq;
+	unsigned long task_boost_util;
+	u64 task_boos_endtime;
 };
 
 static DEFINE_PER_CPU(struct interactive_cpu, interactive_cpu);
@@ -158,6 +177,9 @@ static unsigned int default_above_hispeed_delay[] = {
 
 static struct interactive_tunables *global_tunables;
 static DEFINE_MUTEX(global_tunables_lock);
+#ifdef CONFIG_ARCH_ROCKCHIP
+static struct interactive_tunables backup_tunables[2];
+#endif
 
 static inline void update_slack_delay(struct interactive_tunables *tunables)
 {
@@ -170,7 +192,7 @@ static bool timer_slack_required(struct interactive_cpu *icpu)
 	struct interactive_policy *ipolicy = icpu->ipolicy;
 	struct interactive_tunables *tunables = ipolicy->tunables;
 
-	if (tunables->timer_slack < 0)
+	if (tunables->timer_slack == 0)
 		return false;
 
 	if (icpu->target_freq > ipolicy->policy->min)
@@ -374,7 +396,7 @@ static void eval_target_freq(struct interactive_cpu *icpu)
 	cputime_speedadj = icpu->cputime_speedadj;
 	spin_unlock_irqrestore(&icpu->load_lock, flags);
 
-	if (WARN_ON_ONCE(!delta_time))
+	if (!delta_time)
 		return;
 
 	spin_lock_irqsave(&icpu->target_freq_lock, flags);
@@ -400,6 +422,15 @@ static void eval_target_freq(struct interactive_cpu *icpu)
 			new_freq = tunables->hispeed_freq;
 	}
 
+#ifdef CONFIG_ARCH_ROCKCHIP
+	if (now < tunables->touchboostpulse_endtime &&
+	    new_freq < tunables->touchboost_freq) {
+		new_freq = tunables->touchboost_freq;
+	}
+	if ((now < icpu->task_boos_endtime) && (new_freq < icpu->task_boost_freq)) {
+		new_freq = icpu->task_boost_freq;
+	}
+#endif
 	if (policy->cur >= tunables->hispeed_freq &&
 	    new_freq > policy->cur &&
 	    now - icpu->pol_hispeed_val_time < freq_to_above_hispeed_delay(tunables, policy->cur)) {
@@ -471,11 +502,11 @@ static void cpufreq_interactive_update(struct interactive_cpu *icpu)
 	slack_timer_resched(icpu, smp_processor_id(), true);
 }
 
-#ifndef CONFIG_ARCH_SUN8IW15P1
 static void cpufreq_interactive_idle_end(void)
 {
 	struct interactive_cpu *icpu = &per_cpu(interactive_cpu,
 						smp_processor_id());
+	unsigned long sampling_rate;
 
 	if (!down_read_trylock(&icpu->enable_sem))
 		return;
@@ -485,13 +516,16 @@ static void cpufreq_interactive_idle_end(void)
 		 * We haven't sampled load for more than sampling_rate time, do
 		 * it right now.
 		 */
-		if (time_after_eq(jiffies, icpu->next_sample_jiffies))
+		if (time_after_eq(jiffies, icpu->next_sample_jiffies)) {
+			sampling_rate = icpu->ipolicy->tunables->sampling_rate;
+			icpu->last_sample_time = local_clock();
+			icpu->next_sample_jiffies = usecs_to_jiffies(sampling_rate) + jiffies;
 			cpufreq_interactive_update(icpu);
+		}
 	}
 
 	up_read(&icpu->enable_sem);
 }
-#endif
 
 static void cpufreq_interactive_get_policy_info(struct cpufreq_policy *policy,
 						unsigned int *pmax_freq,
@@ -685,7 +719,7 @@ static unsigned int *get_tokenized_data(const char *buf, int *num_tokens)
 
 	cp = buf;
 	while (i < ntokens) {
-		if (kstrtouint(cp, 0, &tokenized_data[i++]) < 0)
+		if (sscanf(cp, "%u", &tokenized_data[i++]) != 1)
 			goto err_kfree;
 
 		cp = strpbrk(cp, " :");
@@ -1016,10 +1050,9 @@ static struct kobj_type interactive_tunables_ktype = {
 static int cpufreq_interactive_idle_notifier(struct notifier_block *nb,
 					     unsigned long val, void *data)
 {
-#ifndef CONFIG_ARCH_SUN8IW15P1
 	if (val == IDLE_END)
 		cpufreq_interactive_idle_end();
-#endif
+
 	return 0;
 }
 
@@ -1073,7 +1106,7 @@ static void update_util_handler(struct update_util_data *data, u64 time,
 				    jiffies;
 
 	icpu->work_in_progress = true;
-	irq_work_queue(&icpu->irq_work);
+	irq_work_queue_on(&icpu->irq_work, icpu->cpu);
 }
 
 static void gov_set_update_util(struct interactive_policy *ipolicy)
@@ -1105,7 +1138,11 @@ static inline void gov_clear_update_util(struct cpufreq_policy *policy)
 static void icpu_cancel_work(struct interactive_cpu *icpu)
 {
 	irq_work_sync(&icpu->irq_work);
+#ifdef CONFIG_ARCH_ROCKCHIP
+	irq_work_sync(&icpu->boost_irq_work);
+#endif
 	icpu->work_in_progress = false;
+	del_timer_sync(&icpu->slack_timer);
 }
 
 static struct interactive_policy *
@@ -1152,6 +1189,260 @@ static void interactive_tunables_free(struct interactive_tunables *tunables)
 
 	kfree(tunables);
 }
+
+#ifdef CONFIG_ARCH_ROCKCHIP
+static void cpufreq_interactive_input_event(struct input_handle *handle,
+					    unsigned int type,
+					    unsigned int code,
+					    int value)
+{
+	u64 now, endtime;
+	int i;
+	int anyboost = 0;
+	unsigned long flags[2];
+	struct interactive_cpu *pcpu;
+	struct interactive_tunables *tunables;
+
+	if (type != EV_ABS && type != EV_KEY && type != EV_REL)
+		return;
+
+	trace_cpufreq_interactive_boost("touch");
+	spin_lock_irqsave(&speedchange_cpumask_lock, flags[0]);
+
+	now = ktime_to_us(ktime_get());
+	for_each_online_cpu(i) {
+		pcpu = &per_cpu(interactive_cpu, i);
+		if (!down_read_trylock(&pcpu->enable_sem))
+			continue;
+
+		if (!pcpu->ipolicy) {
+			up_read(&pcpu->enable_sem);
+			continue;
+		}
+
+		tunables = pcpu->ipolicy->tunables;
+		if (!tunables) {
+			up_read(&pcpu->enable_sem);
+			continue;
+		}
+
+		endtime = now + tunables->touchboostpulse_duration_val;
+		if (endtime < (tunables->touchboostpulse_endtime +
+			       10 * USEC_PER_MSEC)) {
+			up_read(&pcpu->enable_sem);
+			continue;
+		}
+		tunables->touchboostpulse_endtime = endtime;
+
+		spin_lock_irqsave(&pcpu->target_freq_lock, flags[1]);
+		if (pcpu->target_freq < tunables->touchboost_freq) {
+			pcpu->target_freq = tunables->touchboost_freq;
+			cpumask_set_cpu(i, &speedchange_cpumask);
+			pcpu->loc_hispeed_val_time =
+					ktime_to_us(ktime_get());
+			anyboost = 1;
+		}
+
+		pcpu->floor_freq = tunables->touchboost_freq;
+		pcpu->loc_floor_val_time = ktime_to_us(ktime_get());
+
+		spin_unlock_irqrestore(&pcpu->target_freq_lock, flags[1]);
+
+		up_read(&pcpu->enable_sem);
+	}
+
+	spin_unlock_irqrestore(&speedchange_cpumask_lock, flags[0]);
+
+	if (anyboost)
+		wake_up_process(speedchange_task);
+}
+
+static int cpufreq_interactive_input_connect(struct input_handler *handler,
+					     struct input_dev *dev,
+					     const struct input_device_id *id)
+{
+	struct input_handle *handle;
+	int error;
+
+	handle = kzalloc(sizeof(*handle), GFP_KERNEL);
+	if (!handle)
+		return -ENOMEM;
+
+	handle->dev = dev;
+	handle->handler = handler;
+	handle->name = "cpufreq";
+
+	error = input_register_handle(handle);
+	if (error)
+		goto err2;
+
+	error = input_open_device(handle);
+	if (error)
+		goto err1;
+
+	return 0;
+err1:
+	input_unregister_handle(handle);
+err2:
+	kfree(handle);
+	return error;
+}
+
+static void cpufreq_interactive_input_disconnect(struct input_handle *handle)
+{
+	input_close_device(handle);
+	input_unregister_handle(handle);
+	kfree(handle);
+}
+
+static const struct input_device_id cpufreq_interactive_ids[] = {
+	{
+		.flags = INPUT_DEVICE_ID_MATCH_EVBIT |
+			INPUT_DEVICE_ID_MATCH_ABSBIT,
+		.evbit = { BIT_MASK(EV_ABS) },
+		.absbit = { [BIT_WORD(ABS_MT_POSITION_X)] =
+			BIT_MASK(ABS_MT_POSITION_X) |
+			BIT_MASK(ABS_MT_POSITION_Y) },
+	},
+	{
+		.flags = INPUT_DEVICE_ID_MATCH_KEYBIT |
+			INPUT_DEVICE_ID_MATCH_ABSBIT,
+		.keybit = { [BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH) },
+		.absbit = { [BIT_WORD(ABS_X)] =
+			BIT_MASK(ABS_X) | BIT_MASK(ABS_Y) },
+	},
+	{
+		.flags = INPUT_DEVICE_ID_MATCH_EVBIT,
+		.evbit = { BIT_MASK(EV_KEY) },
+	},
+	{/* A mouse like device, at least one button,two relative axes */
+		.flags = INPUT_DEVICE_ID_MATCH_EVBIT |
+				INPUT_DEVICE_ID_MATCH_KEYBIT |
+				INPUT_DEVICE_ID_MATCH_RELBIT,
+		.evbit = { BIT_MASK(EV_KEY) | BIT_MASK(EV_REL) },
+		.keybit = { [BIT_WORD(BTN_LEFT)] = BIT_MASK(BTN_LEFT) },
+		.relbit = { BIT_MASK(REL_X) | BIT_MASK(REL_Y) },
+	},
+	{/* A separate scrollwheel */
+		.flags = INPUT_DEVICE_ID_MATCH_EVBIT |
+				INPUT_DEVICE_ID_MATCH_RELBIT,
+		.evbit = { BIT_MASK(EV_KEY) | BIT_MASK(EV_REL) },
+		.relbit = { BIT_MASK(REL_WHEEL) },
+	},
+	{ },
+};
+
+static struct input_handler cpufreq_interactive_input_handler = {
+	.event		= cpufreq_interactive_input_event,
+	.connect	= cpufreq_interactive_input_connect,
+	.disconnect	= cpufreq_interactive_input_disconnect,
+	.name		= "cpufreq_interactive",
+	.id_table	= cpufreq_interactive_ids,
+};
+
+static void rockchip_cpufreq_policy_init(struct interactive_policy *ipolicy)
+{
+	struct interactive_tunables *tunables = ipolicy->tunables;
+	struct gov_attr_set attr_set;
+	int index;
+
+	tunables->min_sample_time = 40 * USEC_PER_MSEC;
+	tunables->boostpulse_duration = 40 * USEC_PER_MSEC;
+	if (ipolicy->policy->cpu == 0) {
+		tunables->hispeed_freq = 1008000;
+		tunables->touchboostpulse_duration_val = 500 * USEC_PER_MSEC;
+		tunables->touchboost_freq = 1200000;
+	} else {
+		tunables->hispeed_freq = 816000;
+	}
+
+	index = (ipolicy->policy->cpu == 0) ? 0 : 1;
+	if (!backup_tunables[index].sampling_rate) {
+		backup_tunables[index] = *tunables;
+	} else {
+		attr_set = tunables->attr_set;
+		*tunables = backup_tunables[index];
+		tunables->attr_set = attr_set;
+	}
+}
+
+static unsigned int get_freq_for_util(struct cpufreq_policy *policy, unsigned long util)
+{
+	struct cpufreq_frequency_table *pos;
+	unsigned long max_cap, cur_cap;
+	unsigned int freq = 0;
+
+	max_cap = arch_scale_cpu_capacity(NULL, policy->cpu);
+	cpufreq_for_each_valid_entry(pos, policy->freq_table) {
+		freq = pos->frequency;
+
+		cur_cap = max_cap * freq / policy->max;
+		if (cur_cap > util)
+			break;
+	}
+
+	return freq;
+}
+
+static void task_boost_irq_work(struct irq_work *irq_work)
+{
+	struct interactive_cpu *pcpu;
+	struct interactive_policy *ipolicy;
+	unsigned long flags[2];
+	u64 now, prev_boos_endtime;
+	unsigned int boost_freq;
+
+	pcpu = container_of(irq_work, struct interactive_cpu, boost_irq_work);
+	if (!down_read_trylock(&pcpu->enable_sem))
+		return;
+
+	ipolicy = pcpu->ipolicy;
+	if (!ipolicy)
+		goto out;
+
+	if (ipolicy->policy->cur == ipolicy->policy->max)
+		goto out;
+
+	now = ktime_to_us(ktime_get());
+	prev_boos_endtime = pcpu->task_boos_endtime;;
+	pcpu->task_boos_endtime = now + ipolicy->tunables->sampling_rate;
+	boost_freq = get_freq_for_util(ipolicy->policy, pcpu->task_boost_util);
+	if ((now < prev_boos_endtime) && (boost_freq <= pcpu->task_boost_freq))
+		goto out;
+	pcpu->task_boost_freq = boost_freq;
+
+	spin_lock_irqsave(&speedchange_cpumask_lock, flags[0]);
+	spin_lock_irqsave(&pcpu->target_freq_lock, flags[1]);
+	if (pcpu->target_freq < pcpu->task_boost_freq) {
+		pcpu->target_freq = pcpu->task_boost_freq;
+		cpumask_set_cpu(pcpu->cpu, &speedchange_cpumask);
+		wake_up_process(speedchange_task);
+	}
+	spin_unlock_irqrestore(&pcpu->target_freq_lock, flags[1]);
+	spin_unlock_irqrestore(&speedchange_cpumask_lock, flags[0]);
+
+out:
+	up_read(&pcpu->enable_sem);
+}
+
+extern unsigned long capacity_curr_of(int cpu);
+
+void cpufreq_task_boost(int cpu, unsigned long util)
+{
+	struct interactive_cpu *pcpu = &per_cpu(interactive_cpu, cpu);
+	unsigned long cap, min_util;
+
+	if (!speedchange_task)
+		return;
+
+	min_util = util + (util >> 2);
+	cap = capacity_curr_of(cpu);
+	if (min_util > cap) {
+		pcpu->task_boost_util = min_util;
+		irq_work_queue(&pcpu->boost_irq_work);
+	}
+}
+#endif
 
 int cpufreq_interactive_init(struct cpufreq_policy *policy)
 {
@@ -1207,6 +1498,9 @@ int cpufreq_interactive_init(struct cpufreq_policy *policy)
 
 	policy->governor_data = ipolicy;
 
+#ifdef CONFIG_ARCH_ROCKCHIP
+	rockchip_cpufreq_policy_init(ipolicy);
+#endif
 	ret = kobject_init_and_add(&tunables->attr_set.kobj,
 				   &interactive_tunables_ktype,
 				   get_governor_parent_kobj(policy), "%s",
@@ -1219,6 +1513,9 @@ int cpufreq_interactive_init(struct cpufreq_policy *policy)
 		idle_notifier_register(&cpufreq_interactive_idle_nb);
 		cpufreq_register_notifier(&cpufreq_notifier_block,
 					  CPUFREQ_TRANSITION_NOTIFIER);
+#ifdef CONFIG_ARCH_ROCKCHIP
+		ret = input_register_handler(&cpufreq_interactive_input_handler);
+#endif
 	}
 
  out:
@@ -1251,12 +1548,22 @@ void cpufreq_interactive_exit(struct cpufreq_policy *policy)
 		cpufreq_unregister_notifier(&cpufreq_notifier_block,
 					    CPUFREQ_TRANSITION_NOTIFIER);
 		idle_notifier_unregister(&cpufreq_interactive_idle_nb);
+#ifdef CONFIG_ARCH_ROCKCHIP
+		input_unregister_handler(&cpufreq_interactive_input_handler);
+#endif
 	}
 
 	count = gov_attr_set_put(&tunables->attr_set, &ipolicy->tunables_hook);
 	policy->governor_data = NULL;
-	if (!count)
+	if (!count) {
+#ifdef CONFIG_ARCH_ROCKCHIP
+		if (policy->cpu == 0)
+			backup_tunables[0] = *tunables;
+		else
+			backup_tunables[1] = *tunables;
+#endif
 		interactive_tunables_free(tunables);
+	}
 
 	mutex_unlock(&global_tunables_lock);
 
@@ -1278,6 +1585,7 @@ int cpufreq_interactive_start(struct cpufreq_policy *policy)
 		icpu->loc_floor_val_time = icpu->pol_floor_val_time;
 		icpu->pol_hispeed_val_time = icpu->pol_floor_val_time;
 		icpu->loc_hispeed_val_time = icpu->pol_floor_val_time;
+		icpu->cpu = cpu;
 
 		down_write(&icpu->enable_sem);
 		icpu->ipolicy = ipolicy;
@@ -1300,10 +1608,8 @@ void cpufreq_interactive_stop(struct cpufreq_policy *policy)
 	for_each_cpu(cpu, policy->cpus) {
 		icpu = &per_cpu(interactive_cpu, cpu);
 
-		icpu_cancel_work(icpu);
-
 		down_write(&icpu->enable_sem);
-		del_timer_sync(&icpu->slack_timer);
+		icpu_cancel_work(icpu);
 		icpu->ipolicy = NULL;
 		up_write(&icpu->enable_sem);
 	}
@@ -1334,7 +1640,6 @@ void cpufreq_interactive_limits(struct cpufreq_policy *policy)
 static struct interactive_governor interactive_gov = {
 	.gov = {
 		.name			= "interactive",
-		.max_transition_latency	= TRANSITION_LATENCY_LIMIT,
 		.owner			= THIS_MODULE,
 		.init			= cpufreq_interactive_init,
 		.exit			= cpufreq_interactive_exit,
@@ -1344,7 +1649,7 @@ static struct interactive_governor interactive_gov = {
 	}
 };
 
-static void cpufreq_interactive_nop_timer(unsigned long data)
+static void cpufreq_interactive_nop_timer(struct timer_list *t)
 {
 	/*
 	 * The purpose of slack-timer is to wake up the CPU from IDLE, in order
@@ -1365,13 +1670,16 @@ static int __init cpufreq_interactive_gov_init(void)
 		icpu = &per_cpu(interactive_cpu, cpu);
 
 		init_irq_work(&icpu->irq_work, irq_work);
+#ifdef CONFIG_ARCH_ROCKCHIP
+		init_irq_work(&icpu->boost_irq_work, task_boost_irq_work);
+#endif
 		spin_lock_init(&icpu->load_lock);
 		spin_lock_init(&icpu->target_freq_lock);
 		init_rwsem(&icpu->enable_sem);
 
 		/* Initialize per-cpu slack-timer */
-		init_timer_pinned(&icpu->slack_timer);
-		icpu->slack_timer.function = cpufreq_interactive_nop_timer;
+		timer_setup(&icpu->slack_timer, cpufreq_interactive_nop_timer,
+			    TIMER_PINNED);
 	}
 
 	spin_lock_init(&speedchange_cpumask_lock);

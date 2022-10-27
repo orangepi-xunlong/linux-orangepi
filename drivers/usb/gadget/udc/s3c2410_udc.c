@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * linux/drivers/usb/gadget/s3c2410_udc.c
  *
@@ -5,11 +6,6 @@
  *
  * Copyright (C) 2004-2007 Herbert Pötzl - Arnaud Patard
  *	Additional cleanups by Ben Dooks <ben-linux@fluff.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #define pr_fmt(fmt) "s3c2410_udc: " fmt
@@ -40,18 +36,13 @@
 #include <asm/byteorder.h>
 #include <asm/irq.h>
 #include <asm/unaligned.h>
-#include <mach/irqs.h>
 
-#include <mach/hardware.h>
-
-#include <plat/regs-udc.h>
 #include <linux/platform_data/usb-s3c2410_udc.h>
 
-
 #include "s3c2410_udc.h"
+#include "s3c2410_udc_regs.h"
 
 #define DRIVER_DESC	"S3C2410 USB Device Controller Gadget"
-#define DRIVER_VERSION	"29 Apr 2007"
 #define DRIVER_AUTHOR	"Herbert Pötzl <herbert@13thfloor.at>, " \
 			"Arnaud Patard <arnaud.patard@rtp-net.org>"
 
@@ -62,8 +53,7 @@ static struct s3c2410_udc	*the_controller;
 static struct clk		*udc_clock;
 static struct clk		*usb_bus_clock;
 static void __iomem		*base_addr;
-static u64			rsrc_start;
-static u64			rsrc_len;
+static int			irq_usbd;
 static struct dentry		*s3c2410_udc_debugfs_root;
 
 static inline u32 udc_read(u32 reg)
@@ -124,7 +114,7 @@ static void dprintk(int level, const char *fmt, ...)
 }
 #endif
 
-static int s3c2410_udc_debugfs_seq_show(struct seq_file *m, void *p)
+static int s3c2410_udc_debugfs_show(struct seq_file *m, void *p)
 {
 	u32 addr_reg, pwr_reg, ep_int_reg, usb_int_reg;
 	u32 ep_int_en_reg, usb_int_en_reg, ep0_csr;
@@ -173,20 +163,7 @@ static int s3c2410_udc_debugfs_seq_show(struct seq_file *m, void *p)
 
 	return 0;
 }
-
-static int s3c2410_udc_debugfs_fops_open(struct inode *inode,
-					 struct file *file)
-{
-	return single_open(file, s3c2410_udc_debugfs_seq_show, NULL);
-}
-
-static const struct file_operations s3c2410_udc_debugfs_fops = {
-	.open		= s3c2410_udc_debugfs_fops_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-	.owner		= THIS_MODULE,
-};
+DEFINE_SHOW_ATTRIBUTE(s3c2410_udc_debugfs);
 
 /* io macros */
 
@@ -269,10 +246,6 @@ static void s3c2410_udc_done(struct s3c2410_ep *ep,
 static void s3c2410_udc_nuke(struct s3c2410_udc *udc,
 		struct s3c2410_ep *ep, int status)
 {
-	/* Sanity check */
-	if (&ep->queue == NULL)
-		return;
-
 	while (!list_empty(&ep->queue)) {
 		struct s3c2410_request *req;
 		req = list_entry(ep->queue.next, struct s3c2410_request,
@@ -330,6 +303,7 @@ static int s3c2410_udc_write_fifo(struct s3c2410_ep *ep,
 	switch (idx) {
 	default:
 		idx = 0;
+		fallthrough;
 	case 0:
 		fifo_reg = S3C2410_UDC_EP0_FIFO_REG;
 		break;
@@ -434,6 +408,7 @@ static int s3c2410_udc_read_fifo(struct s3c2410_ep *ep,
 	switch (idx) {
 	default:
 		idx = 0;
+		fallthrough;
 	case 0:
 		fifo_reg = S3C2410_UDC_EP0_FIFO_REG;
 		break;
@@ -855,8 +830,6 @@ static void s3c2410_udc_handle_ep(struct s3c2410_ep *ep)
 	}
 }
 
-#include <mach/regs-irq.h>
-
 /*
  *	s3c2410_udc_irq - interrupt handler
  */
@@ -997,7 +970,7 @@ static irqreturn_t s3c2410_udc_irq(int dummy, void *_dev)
 		}
 	}
 
-	dprintk(DEBUG_VERBOSE, "irq: %d s3c2410_udc_done.\n", IRQ_USBD);
+	dprintk(DEBUG_VERBOSE, "irq: %d s3c2410_udc_done.\n", irq_usbd);
 
 	/* Restore old index */
 	udc_write(idx, S3C2410_UDC_INDEX_REG);
@@ -1047,10 +1020,10 @@ static int s3c2410_udc_ep_enable(struct usb_ep *_ep,
 	if (!dev->driver || dev->gadget.speed == USB_SPEED_UNKNOWN)
 		return -ESHUTDOWN;
 
-	max = usb_endpoint_maxp(desc) & 0x1fff;
+	max = usb_endpoint_maxp(desc);
 
 	local_irq_save(flags);
-	_ep->maxpacket = max & 0x7ff;
+	_ep->maxpacket = max;
 	ep->ep.desc = desc;
 	ep->halted = 0;
 	ep->bEndpointAddress = desc->bEndpointAddress;
@@ -1290,7 +1263,6 @@ static int s3c2410_udc_queue(struct usb_ep *_ep, struct usb_request *_req,
 static int s3c2410_udc_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 {
 	struct s3c2410_ep	*ep = to_s3c2410_ep(_ep);
-	struct s3c2410_udc	*udc;
 	int			retval = -EINVAL;
 	unsigned long		flags;
 	struct s3c2410_request	*req = NULL;
@@ -1302,8 +1274,6 @@ static int s3c2410_udc_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 
 	if (!_ep || !_req)
 		return retval;
-
-	udc = to_s3c2410_udc(ep->gadget);
 
 	local_irq_save(flags);
 
@@ -1780,7 +1750,8 @@ static int s3c2410_udc_probe(struct platform_device *pdev)
 	udc_clock = clk_get(NULL, "usb-device");
 	if (IS_ERR(udc_clock)) {
 		dev_err(dev, "failed to get udc clock source\n");
-		return PTR_ERR(udc_clock);
+		retval = PTR_ERR(udc_clock);
+		goto err_usb_bus_clk;
 	}
 
 	clk_prepare_enable(udc_clock);
@@ -1800,16 +1771,10 @@ static int s3c2410_udc_probe(struct platform_device *pdev)
 	spin_lock_init(&udc->lock);
 	udc_info = dev_get_platdata(&pdev->dev);
 
-	rsrc_start = S3C2410_PA_USBDEV;
-	rsrc_len   = S3C24XX_SZ_USBDEV;
-
-	if (!request_mem_region(rsrc_start, rsrc_len, gadget_name))
-		return -EBUSY;
-
-	base_addr = ioremap(rsrc_start, rsrc_len);
-	if (!base_addr) {
-		retval = -ENOMEM;
-		goto err_mem;
+	base_addr = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(base_addr)) {
+		retval = PTR_ERR(base_addr);
+		goto err_udc_clk;
 	}
 
 	the_controller = udc;
@@ -1818,17 +1783,19 @@ static int s3c2410_udc_probe(struct platform_device *pdev)
 	s3c2410_udc_disable(udc);
 	s3c2410_udc_reinit(udc);
 
+	irq_usbd = platform_get_irq(pdev, 0);
+
 	/* irq setup after old hardware state is cleaned up */
-	retval = request_irq(IRQ_USBD, s3c2410_udc_irq,
+	retval = request_irq(irq_usbd, s3c2410_udc_irq,
 			     0, gadget_name, udc);
 
 	if (retval != 0) {
-		dev_err(dev, "cannot get irq %i, err %d\n", IRQ_USBD, retval);
+		dev_err(dev, "cannot get irq %i, err %d\n", irq_usbd, retval);
 		retval = -EBUSY;
-		goto err_map;
+		goto err_udc_clk;
 	}
 
-	dev_dbg(dev, "got irq %i\n", IRQ_USBD);
+	dev_dbg(dev, "got irq %i\n", irq_usbd);
 
 	if (udc_info && udc_info->vbus_pin > 0) {
 		retval = gpio_request(udc_info->vbus_pin, "udc vbus");
@@ -1876,13 +1843,9 @@ static int s3c2410_udc_probe(struct platform_device *pdev)
 	if (retval)
 		goto err_add_udc;
 
-	if (s3c2410_udc_debugfs_root) {
-		udc->regs_info = debugfs_create_file("registers", S_IRUGO,
-				s3c2410_udc_debugfs_root,
-				udc, &s3c2410_udc_debugfs_fops);
-		if (!udc->regs_info)
-			dev_warn(dev, "debugfs file creation failed\n");
-	}
+	udc->regs_info = debugfs_create_file("registers", S_IRUGO,
+					     s3c2410_udc_debugfs_root, udc,
+					     &s3c2410_udc_debugfs_fops);
 
 	dev_dbg(dev, "probe ok\n");
 
@@ -1899,11 +1862,15 @@ err_gpio_claim:
 	if (udc_info && udc_info->vbus_pin > 0)
 		gpio_free(udc_info->vbus_pin);
 err_int:
-	free_irq(IRQ_USBD, udc);
-err_map:
-	iounmap(base_addr);
-err_mem:
-	release_mem_region(rsrc_start, rsrc_len);
+	free_irq(irq_usbd, udc);
+err_udc_clk:
+	clk_disable_unprepare(udc_clock);
+	clk_put(udc_clock);
+	udc_clock = NULL;
+err_usb_bus_clk:
+	clk_disable_unprepare(usb_bus_clock);
+	clk_put(usb_bus_clock);
+	usb_bus_clock = NULL;
 
 	return retval;
 }
@@ -1933,10 +1900,7 @@ static int s3c2410_udc_remove(struct platform_device *pdev)
 		free_irq(irq, udc);
 	}
 
-	free_irq(IRQ_USBD, udc);
-
-	iounmap(base_addr);
-	release_mem_region(rsrc_start, rsrc_len);
+	free_irq(irq_usbd, udc);
 
 	if (!IS_ERR(udc_clock) && udc_clock != NULL) {
 		clk_disable_unprepare(udc_clock);
@@ -1996,14 +1960,10 @@ static int __init udc_init(void)
 {
 	int retval;
 
-	dprintk(DEBUG_NORMAL, "%s: version %s\n", gadget_name, DRIVER_VERSION);
+	dprintk(DEBUG_NORMAL, "%s\n", gadget_name);
 
-	s3c2410_udc_debugfs_root = debugfs_create_dir(gadget_name, NULL);
-	if (IS_ERR(s3c2410_udc_debugfs_root)) {
-		pr_err("%s: debugfs dir creation failed %ld\n",
-			gadget_name, PTR_ERR(s3c2410_udc_debugfs_root));
-		s3c2410_udc_debugfs_root = NULL;
-	}
+	s3c2410_udc_debugfs_root = debugfs_create_dir(gadget_name,
+						      usb_debug_root);
 
 	retval = platform_driver_register(&udc_driver_24x0);
 	if (retval)
@@ -2019,7 +1979,7 @@ err:
 static void __exit udc_exit(void)
 {
 	platform_driver_unregister(&udc_driver_24x0);
-	debugfs_remove(s3c2410_udc_debugfs_root);
+	debugfs_remove_recursive(s3c2410_udc_debugfs_root);
 }
 
 module_init(udc_init);
@@ -2027,5 +1987,4 @@ module_exit(udc_exit);
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
-MODULE_VERSION(DRIVER_VERSION);
 MODULE_LICENSE("GPL");

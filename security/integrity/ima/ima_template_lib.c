@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2013 Politecnico di Torino, Italy
- *                    TORSEC group -- http://security.polito.it
+ *                    TORSEC group -- https://security.polito.it
  *
  * Author: Roberto Sassu <roberto.sassu@polito.it>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation, version 2 of the
- * License.
  *
  * File: ima_template_lib.c
  *      Library of supported template fields.
@@ -81,6 +77,7 @@ static void ima_show_template_data_ascii(struct seq_file *m,
 		/* skip ':' and '\0' */
 		buf_ptr += 2;
 		buflen -= buf_ptr - field_data->data;
+		fallthrough;
 	case DATA_FMT_DIGEST:
 	case DATA_FMT_HEX:
 		if (!buflen)
@@ -103,8 +100,11 @@ static void ima_show_template_data_binary(struct seq_file *m,
 	u32 len = (show == IMA_SHOW_BINARY_OLD_STRING_FMT) ?
 	    strlen(field_data->data) : field_data->len;
 
-	if (show != IMA_SHOW_BINARY_NO_FIELD_LEN)
-		ima_putc(m, &len, sizeof(len));
+	if (show != IMA_SHOW_BINARY_NO_FIELD_LEN) {
+		u32 field_len = !ima_canonical_fmt ? len : cpu_to_le32(len);
+
+		ima_putc(m, &field_len, sizeof(field_len));
+	}
 
 	if (!len)
 		return;
@@ -156,7 +156,75 @@ void ima_show_template_sig(struct seq_file *m, enum ima_show_type show,
 	ima_show_template_field_data(m, show, DATA_FMT_HEX, field_data);
 }
 
-static int ima_eventdigest_init_common(u8 *digest, u32 digestsize, u8 hash_algo,
+void ima_show_template_buf(struct seq_file *m, enum ima_show_type show,
+			   struct ima_field_data *field_data)
+{
+	ima_show_template_field_data(m, show, DATA_FMT_HEX, field_data);
+}
+
+/**
+ * ima_parse_buf() - Parses lengths and data from an input buffer
+ * @bufstartp:       Buffer start address.
+ * @bufendp:         Buffer end address.
+ * @bufcurp:         Pointer to remaining (non-parsed) data.
+ * @maxfields:       Length of fields array.
+ * @fields:          Array containing lengths and pointers of parsed data.
+ * @curfields:       Number of array items containing parsed data.
+ * @len_mask:        Bitmap (if bit is set, data length should not be parsed).
+ * @enforce_mask:    Check if curfields == maxfields and/or bufcurp == bufendp.
+ * @bufname:         String identifier of the input buffer.
+ *
+ * Return: 0 on success, -EINVAL on error.
+ */
+int ima_parse_buf(void *bufstartp, void *bufendp, void **bufcurp,
+		  int maxfields, struct ima_field_data *fields, int *curfields,
+		  unsigned long *len_mask, int enforce_mask, char *bufname)
+{
+	void *bufp = bufstartp;
+	int i;
+
+	for (i = 0; i < maxfields; i++) {
+		if (len_mask == NULL || !test_bit(i, len_mask)) {
+			if (bufp > (bufendp - sizeof(u32)))
+				break;
+
+			fields[i].len = *(u32 *)bufp;
+			if (ima_canonical_fmt)
+				fields[i].len = le32_to_cpu(fields[i].len);
+
+			bufp += sizeof(u32);
+		}
+
+		if (bufp > (bufendp - fields[i].len))
+			break;
+
+		fields[i].data = bufp;
+		bufp += fields[i].len;
+	}
+
+	if ((enforce_mask & ENFORCE_FIELDS) && i != maxfields) {
+		pr_err("%s: nr of fields mismatch: expected: %d, current: %d\n",
+		       bufname, maxfields, i);
+		return -EINVAL;
+	}
+
+	if ((enforce_mask & ENFORCE_BUFEND) && bufp != bufendp) {
+		pr_err("%s: buf end mismatch: expected: %p, current: %p\n",
+		       bufname, bufendp, bufp);
+		return -EINVAL;
+	}
+
+	if (curfields)
+		*curfields = i;
+
+	if (bufcurp)
+		*bufcurp = bufp;
+
+	return 0;
+}
+
+static int ima_eventdigest_init_common(const u8 *digest, u32 digestsize,
+				       u8 hash_algo,
 				       struct ima_field_data *field_data)
 {
 	/*
@@ -218,6 +286,24 @@ int ima_eventdigest_init(struct ima_event_data *event_data,
 		goto out;
 	}
 
+	if ((const char *)event_data->filename == boot_aggregate_name) {
+		if (ima_tpm_chip) {
+			hash.hdr.algo = HASH_ALGO_SHA1;
+			result = ima_calc_boot_aggregate(&hash.hdr);
+
+			/* algo can change depending on available PCR banks */
+			if (!result && hash.hdr.algo != HASH_ALGO_SHA1)
+				result = -EINVAL;
+
+			if (result < 0)
+				memset(&hash, 0, sizeof(hash));
+		}
+
+		cur_digest = hash.hdr.digest;
+		cur_digestsize = hash_digest_size[HASH_ALGO_SHA1];
+		goto out;
+	}
+
 	if (!event_data->file)	/* missing info to re-calculate the digest */
 		return -EINVAL;
 
@@ -255,6 +341,41 @@ int ima_eventdigest_ng_init(struct ima_event_data *event_data,
 
 	hash_algo = event_data->iint->ima_hash->algo;
 out:
+	return ima_eventdigest_init_common(cur_digest, cur_digestsize,
+					   hash_algo, field_data);
+}
+
+/*
+ * This function writes the digest of the file which is expected to match the
+ * digest contained in the file's appended signature.
+ */
+int ima_eventdigest_modsig_init(struct ima_event_data *event_data,
+				struct ima_field_data *field_data)
+{
+	enum hash_algo hash_algo;
+	const u8 *cur_digest;
+	u32 cur_digestsize;
+
+	if (!event_data->modsig)
+		return 0;
+
+	if (event_data->violation) {
+		/* Recording a violation. */
+		hash_algo = HASH_ALGO_SHA1;
+		cur_digest = NULL;
+		cur_digestsize = 0;
+	} else {
+		int rc;
+
+		rc = ima_get_modsig_digest(event_data->modsig, &hash_algo,
+					   &cur_digest, &cur_digestsize);
+		if (rc)
+			return rc;
+		else if (hash_algo == HASH_ALGO__LAST || cur_digestsize == 0)
+			/* There was some error collecting the digest. */
+			return -EINVAL;
+	}
+
 	return ima_eventdigest_init_common(cur_digest, cur_digestsize,
 					   hash_algo, field_data);
 }
@@ -314,16 +435,52 @@ int ima_eventname_ng_init(struct ima_event_data *event_data,
 int ima_eventsig_init(struct ima_event_data *event_data,
 		      struct ima_field_data *field_data)
 {
-	enum data_formats fmt = DATA_FMT_HEX;
 	struct evm_ima_xattr_data *xattr_value = event_data->xattr_value;
-	int xattr_len = event_data->xattr_len;
-	int rc = 0;
 
 	if ((!xattr_value) || (xattr_value->type != EVM_IMA_XATTR_DIGSIG))
-		goto out;
+		return 0;
 
-	rc = ima_write_template_field_data(xattr_value, xattr_len, fmt,
-					   field_data);
-out:
-	return rc;
+	return ima_write_template_field_data(xattr_value, event_data->xattr_len,
+					     DATA_FMT_HEX, field_data);
+}
+
+/*
+ *  ima_eventbuf_init - include the buffer(kexec-cmldine) as part of the
+ *  template data.
+ */
+int ima_eventbuf_init(struct ima_event_data *event_data,
+		      struct ima_field_data *field_data)
+{
+	if ((!event_data->buf) || (event_data->buf_len == 0))
+		return 0;
+
+	return ima_write_template_field_data(event_data->buf,
+					     event_data->buf_len, DATA_FMT_HEX,
+					     field_data);
+}
+
+/*
+ *  ima_eventmodsig_init - include the appended file signature as part of the
+ *  template data
+ */
+int ima_eventmodsig_init(struct ima_event_data *event_data,
+			 struct ima_field_data *field_data)
+{
+	const void *data;
+	u32 data_len;
+	int rc;
+
+	if (!event_data->modsig)
+		return 0;
+
+	/*
+	 * modsig is a runtime structure containing pointers. Get its raw data
+	 * instead.
+	 */
+	rc = ima_get_raw_modsig(event_data->modsig, &data, &data_len);
+	if (rc)
+		return rc;
+
+	return ima_write_template_field_data(data, data_len, DATA_FMT_HEX,
+					     field_data);
 }

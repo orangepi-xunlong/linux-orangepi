@@ -21,13 +21,12 @@
 #include <linux/ptrace.h>
 #include <linux/mtd/physmap.h>
 #include <linux/platform_device.h>
-#include <asm/bootinfo.h>
+#include <linux/platform_data/txx9/ndfmc.h>
 #include <asm/reboot.h>
 #include <asm/traps.h>
 #include <asm/txx9irq.h>
 #include <asm/txx9tmr.h>
 #include <asm/txx9/generic.h>
-#include <asm/txx9/ndfmc.h>
 #include <asm/txx9/dmac.h>
 #include <asm/txx9/tx4939.h>
 
@@ -93,22 +92,6 @@ static void __init tx4939_be_init(void)
 static struct resource tx4939_sdram_resource[4];
 static struct resource tx4939_sram_resource;
 #define TX4939_SRAM_SIZE 0x800
-
-void __init tx4939_add_memory_regions(void)
-{
-	int i;
-	unsigned long start, size;
-	u64 win;
-
-	for (i = 0; i < 4; i++) {
-		if (!((__u32)____raw_readq(&tx4939_ddrcptr->winen) & (1 << i)))
-			continue;
-		win = ____raw_readq(&tx4939_ddrcptr->win[i]);
-		start = (unsigned long)(win >> 48);
-		size = (((unsigned long)(win >> 32) & 0xffff) + 1) - start;
-		add_memory_region(start << 20, size << 20, BOOT_MEM_RAM);
-	}
-}
 
 void __init tx4939_setup(void)
 {
@@ -221,8 +204,8 @@ void __init tx4939_setup(void)
 		(txx9_master_clock + 500000) / 1000000,
 		(txx9_gbus_clock + 500000) / 1000000,
 		(__u32)____raw_readq(&tx4939_ccfgptr->crir),
-		(unsigned long long)____raw_readq(&tx4939_ccfgptr->ccfg),
-		(unsigned long long)____raw_readq(&tx4939_ccfgptr->pcfg));
+		____raw_readq(&tx4939_ccfgptr->ccfg),
+		____raw_readq(&tx4939_ccfgptr->pcfg));
 
 	pr_info("%s DDRC -- EN:%08x", txx9_pcode_str,
 		(__u32)____raw_readq(&tx4939_ddrcptr->winen));
@@ -230,7 +213,7 @@ void __init tx4939_setup(void)
 		__u64 win = ____raw_readq(&tx4939_ddrcptr->win[i]);
 		if (!((__u32)____raw_readq(&tx4939_ddrcptr->winen) & (1 << i)))
 			continue;	/* disabled */
-		printk(KERN_CONT " #%d:%016llx", i, (unsigned long long)win);
+		pr_cont(" #%d:%016llx", i, win);
 		tx4939_sdram_resource[i].name = "DDR SDRAM";
 		tx4939_sdram_resource[i].start =
 			(unsigned long)(win >> 48) << 20;
@@ -240,7 +223,7 @@ void __init tx4939_setup(void)
 		tx4939_sdram_resource[i].flags = IORESOURCE_MEM;
 		request_resource(&iomem_resource, &tx4939_sdram_resource[i]);
 	}
-	printk(KERN_CONT "\n");
+	pr_cont("\n");
 
 	/* SRAM */
 	if (____raw_readq(&tx4939_sramcptr->cr) & 1) {

@@ -138,7 +138,7 @@ struct lowpan_dev {
 	struct lowpan_iphc_ctx_table ctx;
 
 	/* must be last */
-	u8 priv[0] __aligned(sizeof(void *));
+	u8 priv[] __aligned(sizeof(void *));
 };
 
 struct lowpan_802154_neigh {
@@ -196,6 +196,21 @@ static inline void lowpan_iphc_uncompress_eui64_lladdr(struct in6_addr *ipaddr,
 	 * is done according RFC2464
 	 */
 	ipaddr->s6_addr[8] ^= 0x02;
+}
+
+static inline void lowpan_iphc_uncompress_eui48_lladdr(struct in6_addr *ipaddr,
+						       const void *lladdr)
+{
+	/* fe:80::XXXX:XXff:feXX:XXXX
+	 *        \_________________/
+	 *              hwaddr
+	 */
+	ipaddr->s6_addr[0] = 0xFE;
+	ipaddr->s6_addr[1] = 0x80;
+	memcpy(&ipaddr->s6_addr[8], lladdr, 3);
+	ipaddr->s6_addr[11] = 0xFF;
+	ipaddr->s6_addr[12] = 0xFE;
+	memcpy(&ipaddr->s6_addr[13], lladdr + 3, 3);
 }
 
 #ifdef DEBUG

@@ -1,13 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 /* Qualcomm Technologies, Inc. EMAC Gigabit Ethernet Driver */
@@ -50,29 +42,13 @@
 #define DMAR_DLY_CNT_DEF				    15
 #define DMAW_DLY_CNT_DEF				     4
 
-#define IMR_NORMAL_MASK         (\
-		ISR_ERROR       |\
-		ISR_GPHY_LINK   |\
-		ISR_TX_PKT      |\
-		GPHY_WAKEUP_INT)
-
-#define IMR_EXTENDED_MASK       (\
-		SW_MAN_INT      |\
-		ISR_OVER        |\
-		ISR_ERROR       |\
-		ISR_GPHY_LINK   |\
-		ISR_TX_PKT      |\
-		GPHY_WAKEUP_INT)
+#define IMR_NORMAL_MASK		(ISR_ERROR | ISR_OVER | ISR_TX_PKT)
 
 #define ISR_TX_PKT      (\
 	TX_PKT_INT      |\
 	TX_PKT_INT1     |\
 	TX_PKT_INT2     |\
 	TX_PKT_INT3)
-
-#define ISR_GPHY_LINK        (\
-	GPHY_LINK_UP_INT     |\
-	GPHY_LINK_DOWN_INT)
 
 #define ISR_OVER        (\
 	RFD0_UR_INT     |\
@@ -129,7 +105,7 @@ static int emac_napi_rtx(struct napi_struct *napi, int budget)
 	emac_mac_rx_process(adpt, rx_q, &work_done, budget);
 
 	if (work_done < budget) {
-		napi_complete(napi);
+		napi_complete_done(napi, work_done);
 
 		irq->mask |= rx_q->intr;
 		writel(irq->mask, adpt->base + EMAC_INT_MASK);
@@ -139,14 +115,15 @@ static int emac_napi_rtx(struct napi_struct *napi, int budget)
 }
 
 /* Transmit the packet */
-static int emac_start_xmit(struct sk_buff *skb, struct net_device *netdev)
+static netdev_tx_t emac_start_xmit(struct sk_buff *skb,
+				   struct net_device *netdev)
 {
 	struct emac_adapter *adpt = netdev_priv(netdev);
 
 	return emac_mac_tx_buf_send(adpt, &adpt->tx_q, skb);
 }
 
-irqreturn_t emac_isr(int _irq, void *data)
+static irqreturn_t emac_isr(int _irq, void *data)
 {
 	struct emac_irq *irq = data;
 	struct emac_adapter *adpt =
@@ -164,9 +141,8 @@ irqreturn_t emac_isr(int _irq, void *data)
 		goto exit;
 
 	if (status & ISR_ERROR) {
-		netif_warn(adpt,  intr, adpt->netdev,
-			   "warning: error irq status 0x%lx\n",
-			   status & ISR_ERROR);
+		net_err_ratelimited("%s: error interrupt 0x%lx\n",
+				    adpt->netdev->name, status & ISR_ERROR);
 		/* reset MAC */
 		schedule_work(&adpt->work_thread);
 	}
@@ -185,11 +161,8 @@ irqreturn_t emac_isr(int _irq, void *data)
 		emac_mac_tx_process(adpt, &adpt->tx_q);
 
 	if (status & ISR_OVER)
-		net_warn_ratelimited("warning: TX/RX overflow\n");
-
-	/* link event */
-	if (status & ISR_GPHY_LINK)
-		phy_mac_interrupt(adpt->phydev, !!(status & GPHY_LINK_UP_INT));
+		net_warn_ratelimited("%s: TX/RX overflow interrupt\n",
+				     adpt->netdev->name);
 
 exit:
 	/* enable the interrupt */
@@ -239,18 +212,11 @@ static void emac_rx_mode_set(struct net_device *netdev)
 /* Change the Maximum Transfer Unit (MTU) */
 static int emac_change_mtu(struct net_device *netdev, int new_mtu)
 {
-	unsigned int max_frame = new_mtu + ETH_HLEN + ETH_FCS_LEN + VLAN_HLEN;
 	struct emac_adapter *adpt = netdev_priv(netdev);
 
-	if ((max_frame < EMAC_MIN_ETH_FRAME_SIZE) ||
-	    (max_frame > EMAC_MAX_ETH_FRAME_SIZE)) {
-		netdev_err(adpt->netdev, "error: invalid MTU setting\n");
-		return -EINVAL;
-	}
-
-	netif_info(adpt, hw, adpt->netdev,
-		   "changing MTU from %d to %d\n", netdev->mtu,
-		   new_mtu);
+	netif_dbg(adpt, hw, adpt->netdev,
+		  "changing MTU from %d to %d\n", netdev->mtu,
+		  new_mtu);
 	netdev->mtu = new_mtu;
 
 	if (netif_running(netdev))
@@ -263,22 +229,37 @@ static int emac_change_mtu(struct net_device *netdev, int new_mtu)
 static int emac_open(struct net_device *netdev)
 {
 	struct emac_adapter *adpt = netdev_priv(netdev);
+	struct emac_irq	*irq = &adpt->irq;
 	int ret;
+
+	ret = request_irq(irq->irq, emac_isr, 0, "emac-core0", irq);
+	if (ret) {
+		netdev_err(adpt->netdev, "could not request emac-core0 irq\n");
+		return ret;
+	}
 
 	/* allocate rx/tx dma buffer & descriptors */
 	ret = emac_mac_rx_tx_rings_alloc_all(adpt);
 	if (ret) {
 		netdev_err(adpt->netdev, "error allocating rx/tx rings\n");
+		free_irq(irq->irq, irq);
+		return ret;
+	}
+
+	ret = emac_sgmii_open(adpt);
+	if (ret) {
+		emac_mac_rx_tx_rings_free_all(adpt);
+		free_irq(irq->irq, irq);
 		return ret;
 	}
 
 	ret = emac_mac_up(adpt);
 	if (ret) {
 		emac_mac_rx_tx_rings_free_all(adpt);
+		free_irq(irq->irq, irq);
+		emac_sgmii_close(adpt);
 		return ret;
 	}
-
-	emac_mac_start(adpt);
 
 	return 0;
 }
@@ -290,8 +271,11 @@ static int emac_close(struct net_device *netdev)
 
 	mutex_lock(&adpt->reset_lock);
 
+	emac_sgmii_close(adpt);
 	emac_mac_down(adpt);
 	emac_mac_rx_tx_rings_free_all(adpt);
+
+	free_irq(adpt->irq.irq, &adpt->irq);
 
 	mutex_unlock(&adpt->reset_lock);
 
@@ -299,64 +283,64 @@ static int emac_close(struct net_device *netdev)
 }
 
 /* Respond to a TX hang */
-static void emac_tx_timeout(struct net_device *netdev)
+static void emac_tx_timeout(struct net_device *netdev, unsigned int txqueue)
 {
 	struct emac_adapter *adpt = netdev_priv(netdev);
 
 	schedule_work(&adpt->work_thread);
 }
 
-/* IOCTL support for the interface */
-static int emac_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd)
+/**
+ * emac_update_hw_stats - read the EMAC stat registers
+ * @adpt: pointer to adapter struct
+ *
+ * Reads the stats registers and write the values to adpt->stats.
+ *
+ * adpt->stats.lock must be held while calling this function,
+ * and while reading from adpt->stats.
+ */
+void emac_update_hw_stats(struct emac_adapter *adpt)
 {
-	if (!netif_running(netdev))
-		return -EINVAL;
-
-	if (!netdev->phydev)
-		return -ENODEV;
-
-	return phy_mii_ioctl(netdev->phydev, ifr, cmd);
-}
-
-/* Provide network statistics info for the interface */
-static struct rtnl_link_stats64 *emac_get_stats64(struct net_device *netdev,
-						  struct rtnl_link_stats64 *net_stats)
-{
-	struct emac_adapter *adpt = netdev_priv(netdev);
-	unsigned int addr = REG_MAC_RX_STATUS_BIN;
 	struct emac_stats *stats = &adpt->stats;
 	u64 *stats_itr = &adpt->stats.rx_ok;
-	u32 val;
+	void __iomem *base = adpt->base;
+	unsigned int addr;
 
-	spin_lock(&stats->lock);
-
+	addr = REG_MAC_RX_STATUS_BIN;
 	while (addr <= REG_MAC_RX_STATUS_END) {
-		val = readl_relaxed(adpt->base + addr);
-		*stats_itr += val;
+		*stats_itr += readl_relaxed(base + addr);
 		stats_itr++;
 		addr += sizeof(u32);
 	}
 
 	/* additional rx status */
-	val = readl_relaxed(adpt->base + EMAC_RXMAC_STATC_REG23);
-	adpt->stats.rx_crc_align += val;
-	val = readl_relaxed(adpt->base + EMAC_RXMAC_STATC_REG24);
-	adpt->stats.rx_jabbers += val;
+	stats->rx_crc_align += readl_relaxed(base + EMAC_RXMAC_STATC_REG23);
+	stats->rx_jabbers += readl_relaxed(base + EMAC_RXMAC_STATC_REG24);
 
 	/* update tx status */
 	addr = REG_MAC_TX_STATUS_BIN;
-	stats_itr = &adpt->stats.tx_ok;
+	stats_itr = &stats->tx_ok;
 
 	while (addr <= REG_MAC_TX_STATUS_END) {
-		val = readl_relaxed(adpt->base + addr);
-		*stats_itr += val;
-		++stats_itr;
+		*stats_itr += readl_relaxed(base + addr);
+		stats_itr++;
 		addr += sizeof(u32);
 	}
 
 	/* additional tx status */
-	val = readl_relaxed(adpt->base + EMAC_TXMAC_STATC_REG25);
-	adpt->stats.tx_col += val;
+	stats->tx_col += readl_relaxed(base + EMAC_TXMAC_STATC_REG25);
+}
+
+/* Provide network statistics info for the interface */
+static void emac_get_stats64(struct net_device *netdev,
+			     struct rtnl_link_stats64 *net_stats)
+{
+	struct emac_adapter *adpt = netdev_priv(netdev);
+	struct emac_stats *stats = &adpt->stats;
+
+	spin_lock(&stats->lock);
+
+	emac_update_hw_stats(adpt);
 
 	/* return parsed statistics */
 	net_stats->rx_packets = stats->rx_ok;
@@ -384,8 +368,6 @@ static struct rtnl_link_stats64 *emac_get_stats64(struct net_device *netdev,
 	net_stats->tx_window_errors = stats->tx_late_col;
 
 	spin_unlock(&stats->lock);
-
-	return net_stats;
 }
 
 static const struct net_device_ops emac_netdev_ops = {
@@ -395,7 +377,7 @@ static const struct net_device_ops emac_netdev_ops = {
 	.ndo_start_xmit		= emac_start_xmit,
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_change_mtu		= emac_change_mtu,
-	.ndo_do_ioctl		= emac_ioctl,
+	.ndo_do_ioctl		= phy_do_ioctl_running,
 	.ndo_tx_timeout		= emac_tx_timeout,
 	.ndo_get_stats64	= emac_get_stats64,
 	.ndo_set_features       = emac_set_features,
@@ -415,6 +397,10 @@ static void emac_work_thread(struct work_struct *work)
 static void emac_init_adapter(struct emac_adapter *adpt)
 {
 	u32 reg;
+
+	adpt->rrd_size = EMAC_RRD_SIZE;
+	adpt->tpd_size = EMAC_TPD_SIZE;
+	adpt->rfd_size = EMAC_RFD_SIZE;
 
 	/* descriptors */
 	adpt->tx_desc_cnt = EMAC_DEF_TX_DESCS;
@@ -436,6 +422,12 @@ static void emac_init_adapter(struct emac_adapter *adpt)
 
 	/* others */
 	adpt->preamble = EMAC_PREAMBLE_DEF;
+
+	/* default to automatic flow control */
+	adpt->automatic = true;
+
+	/* Disable single-pause-frame mode by default */
+	adpt->single_pause_mode = false;
 }
 
 /* Get the clock */
@@ -467,6 +459,12 @@ static int emac_clks_phase1_init(struct platform_device *pdev,
 {
 	int ret;
 
+	/* On ACPI platforms, clocks are controlled by firmware and/or
+	 * ACPI, not by drivers.
+	 */
+	if (has_acpi_companion(&pdev->dev))
+		return 0;
+
 	ret = emac_clks_get(pdev, adpt);
 	if (ret)
 		return ret;
@@ -477,13 +475,24 @@ static int emac_clks_phase1_init(struct platform_device *pdev,
 
 	ret = clk_prepare_enable(adpt->clk[EMAC_CLK_CFG_AHB]);
 	if (ret)
-		return ret;
+		goto disable_clk_axi;
 
 	ret = clk_set_rate(adpt->clk[EMAC_CLK_HIGH_SPEED], 19200000);
 	if (ret)
-		return ret;
+		goto disable_clk_cfg_ahb;
 
-	return clk_prepare_enable(adpt->clk[EMAC_CLK_HIGH_SPEED]);
+	ret = clk_prepare_enable(adpt->clk[EMAC_CLK_HIGH_SPEED]);
+	if (ret)
+		goto disable_clk_cfg_ahb;
+
+	return 0;
+
+disable_clk_cfg_ahb:
+	clk_disable_unprepare(adpt->clk[EMAC_CLK_CFG_AHB]);
+disable_clk_axi:
+	clk_disable_unprepare(adpt->clk[EMAC_CLK_AXI]);
+
+	return ret;
 }
 
 /* Enable clocks; needs emac_clks_phase1_init to be called before */
@@ -491,6 +500,9 @@ static int emac_clks_phase2_init(struct platform_device *pdev,
 				 struct emac_adapter *adpt)
 {
 	int ret;
+
+	if (has_acpi_companion(&pdev->dev))
+		return 0;
 
 	ret = clk_set_rate(adpt->clk[EMAC_CLK_TX], 125000000);
 	if (ret)
@@ -533,7 +545,6 @@ static int emac_probe_resources(struct platform_device *pdev,
 				struct emac_adapter *adpt)
 {
 	struct net_device *netdev = adpt->netdev;
-	struct resource *res;
 	char maddr[ETH_ALEN];
 	int ret = 0;
 
@@ -545,22 +556,17 @@ static int emac_probe_resources(struct platform_device *pdev,
 
 	/* Core 0 interrupt */
 	ret = platform_get_irq(pdev, 0);
-	if (ret < 0) {
-		dev_err(&pdev->dev,
-			"error: missing core0 irq resource (error=%i)\n", ret);
+	if (ret < 0)
 		return ret;
-	}
 	adpt->irq.irq = ret;
 
 	/* base register address */
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	adpt->base = devm_ioremap_resource(&pdev->dev, res);
+	adpt->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(adpt->base))
 		return PTR_ERR(adpt->base);
 
 	/* CSR register address */
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-	adpt->csr = devm_ioremap_resource(&pdev->dev, res);
+	adpt->csr = devm_platform_ioremap_resource(pdev, 1);
 	if (IS_ERR(adpt->csr))
 		return PTR_ERR(adpt->csr);
 
@@ -591,25 +597,19 @@ static int emac_probe(struct platform_device *pdev)
 {
 	struct net_device *netdev;
 	struct emac_adapter *adpt;
-	struct emac_phy *phy;
+	struct emac_sgmii *phy;
 	u16 devid, revid;
 	u32 reg;
 	int ret;
 
-	/* The EMAC itself is capable of 64-bit DMA, so try that first. */
-	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
+	/* The TPD buffer address is limited to:
+	 * 1. PTP:	45bits. (Driver doesn't support yet.)
+	 * 2. NON-PTP:	46bits.
+	 */
+	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(46));
 	if (ret) {
-		/* Some platforms may restrict the EMAC's address bus to less
-		 * then the size of DDR. In this case, we need to try a
-		 * smaller mask.  We could try every possible smaller mask,
-		 * but that's overkill.  Instead, just fall to 32-bit, which
-		 * should always work.
-		 */
-		ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
-		if (ret) {
-			dev_err(&pdev->dev, "could not set DMA mask\n");
-			return ret;
-		}
+		dev_err(&pdev->dev, "could not set DMA mask\n");
+		return ret;
 	}
 
 	netdev = alloc_etherdev(sizeof(struct emac_adapter));
@@ -618,12 +618,14 @@ static int emac_probe(struct platform_device *pdev)
 
 	dev_set_drvdata(&pdev->dev, netdev);
 	SET_NETDEV_DEV(netdev, &pdev->dev);
+	emac_set_ethtool_ops(netdev);
 
 	adpt = netdev_priv(netdev);
 	adpt->netdev = netdev;
 	adpt->msg_enable = EMAC_MSG_DEFAULT;
 
 	phy = &adpt->phy;
+	atomic_set(&phy->decode_error_count, 0);
 
 	mutex_init(&adpt->reset_lock);
 	spin_lock_init(&adpt->stats.lock);
@@ -643,10 +645,6 @@ static int emac_probe(struct platform_device *pdev)
 
 	netdev->watchdog_timeo = EMAC_WATCHDOG_TIME;
 	netdev->irq = adpt->irq.irq;
-
-	adpt->rrd_size = EMAC_RRD_SIZE;
-	adpt->tpd_size = EMAC_TPD_SIZE;
-	adpt->rfd_size = EMAC_RFD_SIZE;
 
 	netdev->netdev_ops = &emac_netdev_ops;
 
@@ -669,8 +667,6 @@ static int emac_probe(struct platform_device *pdev)
 		goto err_undo_mdiobus;
 	}
 
-	emac_mac_reset(adpt);
-
 	/* set hw features */
 	netdev->features = NETIF_F_SG | NETIF_F_HW_CSUM | NETIF_F_RXCSUM |
 			NETIF_F_TSO | NETIF_F_TSO6 | NETIF_F_HW_VLAN_CTAG_RX |
@@ -679,6 +675,12 @@ static int emac_probe(struct platform_device *pdev)
 
 	netdev->vlan_features |= NETIF_F_SG | NETIF_F_HW_CSUM |
 				 NETIF_F_TSO | NETIF_F_TSO6;
+
+	/* MTU range: 46 - 9194 */
+	netdev->min_mtu = EMAC_MIN_ETH_FRAME_SIZE -
+			  (ETH_HLEN + ETH_FCS_LEN + VLAN_HLEN);
+	netdev->max_mtu = EMAC_MAX_ETH_FRAME_SIZE -
+			  (ETH_HLEN + ETH_FCS_LEN + VLAN_HLEN);
 
 	INIT_WORK(&adpt->work_thread, emac_work_thread);
 
@@ -711,8 +713,7 @@ static int emac_probe(struct platform_device *pdev)
 err_undo_napi:
 	netif_napi_del(&adpt->rx_q.napi);
 err_undo_mdiobus:
-	if (!has_acpi_companion(&pdev->dev))
-		put_device(&adpt->phydev->mdio.dev);
+	put_device(&adpt->phydev->mdio.dev);
 	mdiobus_unregister(adpt->mii_bus);
 err_undo_clocks:
 	emac_clks_teardown(adpt);
@@ -732,8 +733,7 @@ static int emac_remove(struct platform_device *pdev)
 
 	emac_clks_teardown(adpt);
 
-	if (!has_acpi_companion(&pdev->dev))
-		put_device(&adpt->phydev->mdio.dev);
+	put_device(&adpt->phydev->mdio.dev);
 	mdiobus_unregister(adpt->mii_bus);
 	free_netdev(netdev);
 
@@ -744,6 +744,20 @@ static int emac_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static void emac_shutdown(struct platform_device *pdev)
+{
+	struct net_device *netdev = dev_get_drvdata(&pdev->dev);
+	struct emac_adapter *adpt = netdev_priv(netdev);
+
+	if (netdev->flags & IFF_UP) {
+		/* Closing the SGMII turns off its interrupts */
+		emac_sgmii_close(adpt);
+
+		/* Resetting the MAC turns off all DMA and its interrupts */
+		emac_mac_reset(adpt);
+	}
+}
+
 static struct platform_driver emac_platform_driver = {
 	.probe	= emac_probe,
 	.remove	= emac_remove,
@@ -752,6 +766,7 @@ static struct platform_driver emac_platform_driver = {
 		.of_match_table = emac_dt_match,
 		.acpi_match_table = ACPI_PTR(emac_acpi_match),
 	},
+	.shutdown = emac_shutdown,
 };
 
 module_platform_driver(emac_platform_driver);

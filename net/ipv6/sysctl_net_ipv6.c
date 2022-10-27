@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * sysctl_net_ipv6.c: sysctl interface to net IPV6 subsystem.
  *
@@ -15,14 +16,30 @@
 #include <net/ipv6.h>
 #include <net/addrconf.h>
 #include <net/inet_frag.h>
+#include <net/netevent.h>
 #ifdef CONFIG_NETLABEL
 #include <net/calipso.h>
 #endif
 
-static int one = 1;
+static int two = 2;
+static int flowlabel_reflect_max = 0x7;
 static int auto_flowlabels_min;
 static int auto_flowlabels_max = IP6_AUTO_FLOW_LABEL_MAX;
 
+static int proc_rt6_multipath_hash_policy(struct ctl_table *table, int write,
+					  void *buffer, size_t *lenp, loff_t *ppos)
+{
+	struct net *net;
+	int ret;
+
+	net = container_of(table->data, struct net,
+			   ipv6.sysctl.multipath_hash_policy);
+	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+	if (write && ret == 0)
+		call_netevent_notifiers(NETEVENT_IPV6_MPATH_HASH_UPDATE, net);
+
+	return ret;
+}
 
 static struct ctl_table ipv6_table_template[] = {
 	{
@@ -90,6 +107,59 @@ static struct ctl_table ipv6_table_template[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
 	},
+	{
+		.procname	= "flowlabel_reflect",
+		.data		= &init_net.ipv6.sysctl.flowlabel_reflect,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= &flowlabel_reflect_max,
+	},
+	{
+		.procname	= "max_dst_opts_number",
+		.data		= &init_net.ipv6.sysctl.max_dst_opts_cnt,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "max_hbh_opts_number",
+		.data		= &init_net.ipv6.sysctl.max_hbh_opts_cnt,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "max_dst_opts_length",
+		.data		= &init_net.ipv6.sysctl.max_dst_opts_len,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "max_hbh_length",
+		.data		= &init_net.ipv6.sysctl.max_hbh_opts_len,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "fib_multipath_hash_policy",
+		.data		= &init_net.ipv6.sysctl.multipath_hash_policy,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler   = proc_rt6_multipath_hash_policy,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= &two,
+	},
+	{
+		.procname	= "seg6_flowlabel",
+		.data		= &init_net.ipv6.sysctl.seg6_flowlabel,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
 	{ }
 };
 
@@ -107,7 +177,7 @@ static struct ctl_table ipv6_rotable[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &one
+		.extra1		= SYSCTL_ONE
 	},
 #ifdef CONFIG_NETLABEL
 	{
@@ -133,22 +203,16 @@ static int __net_init ipv6_sysctl_net_init(struct net *net)
 	struct ctl_table *ipv6_table;
 	struct ctl_table *ipv6_route_table;
 	struct ctl_table *ipv6_icmp_table;
-	int err;
+	int err, i;
 
 	err = -ENOMEM;
 	ipv6_table = kmemdup(ipv6_table_template, sizeof(ipv6_table_template),
 			     GFP_KERNEL);
 	if (!ipv6_table)
 		goto out;
-	ipv6_table[0].data = &net->ipv6.sysctl.bindv6only;
-	ipv6_table[1].data = &net->ipv6.sysctl.anycast_src_echo_reply;
-	ipv6_table[2].data = &net->ipv6.sysctl.flowlabel_consistency;
-	ipv6_table[3].data = &net->ipv6.sysctl.auto_flowlabels;
-	ipv6_table[4].data = &net->ipv6.sysctl.fwmark_reflect;
-	ipv6_table[5].data = &net->ipv6.sysctl.idgen_retries;
-	ipv6_table[6].data = &net->ipv6.sysctl.idgen_delay;
-	ipv6_table[7].data = &net->ipv6.sysctl.flowlabel_state_ranges;
-	ipv6_table[8].data = &net->ipv6.sysctl.ip_nonlocal_bind;
+	/* Update the variables to point into the current struct net */
+	for (i = 0; i < ARRAY_SIZE(ipv6_table_template) - 1; i++)
+		ipv6_table[i].data += (void *)net - (void *)&init_net;
 
 	ipv6_route_table = ipv6_route_sysctl_init(net);
 	if (!ipv6_route_table)

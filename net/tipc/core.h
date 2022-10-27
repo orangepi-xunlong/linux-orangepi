@@ -1,7 +1,7 @@
 /*
  * net/tipc/core.h: Include file for TIPC global declarations
  *
- * Copyright (c) 2005-2006, 2013 Ericsson AB
+ * Copyright (c) 2005-2006, 2013-2018 Ericsson AB
  * Copyright (c) 2005-2007, 2010-2013, Wind River Systems
  * All rights reserved.
  *
@@ -49,7 +49,6 @@
 #include <linux/uaccess.h>
 #include <linux/interrupt.h>
 #include <linux/atomic.h>
-#include <asm/hardirq.h>
 #include <linux/netdevice.h>
 #include <linux/in.h>
 #include <linux/list.h>
@@ -59,29 +58,53 @@
 #include <linux/etherdevice.h>
 #include <net/netns/generic.h>
 #include <linux/rhashtable.h>
+#include <net/genetlink.h>
+#include <net/netns/hash.h>
+
+#ifdef pr_fmt
+#undef pr_fmt
+#endif
+
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 struct tipc_node;
 struct tipc_bearer;
 struct tipc_bc_base;
 struct tipc_link;
 struct tipc_name_table;
-struct tipc_server;
+struct tipc_topsrv;
 struct tipc_monitor;
+#ifdef CONFIG_TIPC_CRYPTO
+struct tipc_crypto;
+#endif
 
 #define TIPC_MOD_VER "2.0.0"
 
 #define NODE_HTABLE_SIZE       512
 #define MAX_BEARERS	         3
 #define TIPC_DEF_MON_THRESHOLD  32
+#define NODE_ID_LEN             16
+#define NODE_ID_STR_LEN        (NODE_ID_LEN * 2 + 1)
 
-extern int tipc_net_id __read_mostly;
+extern unsigned int tipc_net_id __read_mostly;
 extern int sysctl_tipc_rmem[3] __read_mostly;
 extern int sysctl_tipc_named_timeout __read_mostly;
 
+struct tipc_net_work {
+	struct work_struct work;
+	struct net *net;
+	u32 addr;
+};
+
 struct tipc_net {
-	u32 own_addr;
+	u8  node_id[NODE_ID_LEN];
+	u32 node_addr;
+	u32 trial_addr;
+	unsigned long addr_trial_end;
+	char node_id_string[NODE_ID_STR_LEN];
 	int net_id;
 	int random;
+	bool legacy_addr_format;
 
 	/* Node table and node list */
 	spinlock_t node_list_lock;
@@ -113,8 +136,23 @@ struct tipc_net {
 	struct list_head dist_queue;
 
 	/* Topology subscription server */
-	struct tipc_server *topsrv;
+	struct tipc_topsrv *topsrv;
 	atomic_t subscription_count;
+
+	/* Cluster capabilities */
+	u16 capabilities;
+
+	/* Tracing of node internal messages */
+	struct packet_type loopback_pt;
+
+#ifdef CONFIG_TIPC_CRYPTO
+	/* TX crypto handler */
+	struct tipc_crypto *crypto_tx;
+#endif
+	/* Work item for net finalize */
+	struct tipc_net_work final_work;
+	/* The numbers of work queues in schedule */
+	atomic_t wq_count;
 };
 
 static inline struct tipc_net *tipc_net(struct net *net)
@@ -130,6 +168,16 @@ static inline int tipc_netid(struct net *net)
 static inline struct list_head *tipc_nodes(struct net *net)
 {
 	return &tipc_net(net)->node_list;
+}
+
+static inline struct name_table *tipc_name_table(struct net *net)
+{
+	return tipc_net(net)->nametbl;
+}
+
+static inline struct tipc_topsrv *tipc_topsrv(struct net *net)
+{
+	return tipc_net(net)->topsrv;
 }
 
 static inline unsigned int tipc_hashfn(u32 addr)
@@ -160,6 +208,11 @@ static inline int less(u16 left, u16 right)
 static inline int in_range(u16 val, u16 min, u16 max)
 {
 	return !less(val, min) && !more(val, max);
+}
+
+static inline u32 tipc_net_hash_mixes(struct net *net, int tn_rand)
+{
+	return net_hash_mix(&init_net) ^ net_hash_mix(net) ^ tn_rand;
 }
 
 #ifdef CONFIG_SYSCTL

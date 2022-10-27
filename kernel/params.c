@@ -1,19 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Helpers for initial module or kernel cmdline parsing
    Copyright (C) 2001 Rusty Russell.
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
 #include <linux/kernel.h>
 #include <linux/string.h>
@@ -24,6 +12,7 @@
 #include <linux/err.h>
 #include <linux/slab.h>
 #include <linux/ctype.h>
+#include <linux/security.h>
 
 #ifdef CONFIG_SYSFS
 /* Protects all built-in parameters, modules use their own param_lock */
@@ -108,13 +97,19 @@ bool parameq(const char *a, const char *b)
 	return parameqn(a, b, strlen(a)+1);
 }
 
-static void param_check_unsafe(const struct kernel_param *kp)
+static bool param_check_unsafe(const struct kernel_param *kp)
 {
+	if (kp->flags & KERNEL_PARAM_FL_HWPARAM &&
+	    security_locked_down(LOCKDOWN_MODULE_PARAMETERS))
+		return false;
+
 	if (kp->flags & KERNEL_PARAM_FL_UNSAFE) {
-		pr_warn("Setting dangerous option %s - tainting kernel\n",
-			kp->name);
+		pr_notice("Setting dangerous option %s - tainting kernel\n",
+			  kp->name);
 		add_taint(TAINT_USER, LOCKDEP_STILL_OK);
 	}
+
+	return true;
 }
 
 static int parse_one(char *param,
@@ -144,8 +139,10 @@ static int parse_one(char *param,
 			pr_debug("handling %s with %p\n", param,
 				params[i].ops->set);
 			kernel_param_lock(params[i].mod);
-			param_check_unsafe(&params[i]);
-			err = params[i].ops->set(val, &params[i]);
+			if (param_check_unsafe(&params[i]))
+				err = params[i].ops->set(val, &params[i]);
+			else
+				err = -EPERM;
 			kernel_param_unlock(params[i].mod);
 			return err;
 		}
@@ -158,58 +155,6 @@ static int parse_one(char *param,
 
 	pr_debug("Unknown argument '%s'\n", param);
 	return -ENOENT;
-}
-
-/* You can use " around spaces, but can't escape ". */
-/* Hyphens and underscores equivalent in parameter names. */
-static char *next_arg(char *args, char **param, char **val)
-{
-	unsigned int i, equals = 0;
-	int in_quote = 0, quoted = 0;
-	char *next;
-
-	if (*args == '"') {
-		args++;
-		in_quote = 1;
-		quoted = 1;
-	}
-
-	for (i = 0; args[i]; i++) {
-		if (isspace(args[i]) && !in_quote)
-			break;
-		if (equals == 0) {
-			if (args[i] == '=')
-				equals = i;
-		}
-		if (args[i] == '"')
-			in_quote = !in_quote;
-	}
-
-	*param = args;
-	if (!equals)
-		*val = NULL;
-	else {
-		args[equals] = '\0';
-		*val = args + equals + 1;
-
-		/* Don't include quotes in value. */
-		if (**val == '"') {
-			(*val)++;
-			if (args[i-1] == '"')
-				args[i-1] = '\0';
-		}
-	}
-	if (quoted && args[i-1] == '"')
-		args[i-1] = '\0';
-
-	if (args[i]) {
-		args[i] = '\0';
-		next = args + i + 1;
-	} else
-		next = args + i;
-
-	/* Chew up trailing spaces. */
-	return skip_spaces(next);
 }
 
 /* Args looks like "foo=bar,bar2 baz=fuz wiz". */
@@ -276,7 +221,7 @@ char *parse_args(const char *doing,
 	}								\
 	int param_get_##name(char *buffer, const struct kernel_param *kp) \
 	{								\
-		return scnprintf(buffer, PAGE_SIZE, format,		\
+		return scnprintf(buffer, PAGE_SIZE, format "\n",	\
 				*((type *)kp->arg));			\
 	}								\
 	const struct kernel_param_ops param_ops_##name = {			\
@@ -288,14 +233,15 @@ char *parse_args(const char *doing,
 	EXPORT_SYMBOL(param_ops_##name)
 
 
-STANDARD_PARAM_DEF(byte, unsigned char, "%hhu", kstrtou8);
-STANDARD_PARAM_DEF(short, short, "%hi", kstrtos16);
-STANDARD_PARAM_DEF(ushort, unsigned short, "%hu", kstrtou16);
-STANDARD_PARAM_DEF(int, int, "%i", kstrtoint);
-STANDARD_PARAM_DEF(uint, unsigned int, "%u", kstrtouint);
-STANDARD_PARAM_DEF(long, long, "%li", kstrtol);
-STANDARD_PARAM_DEF(ulong, unsigned long, "%lu", kstrtoul);
-STANDARD_PARAM_DEF(ullong, unsigned long long, "%llu", kstrtoull);
+STANDARD_PARAM_DEF(byte,	unsigned char,		"%hhu",		kstrtou8);
+STANDARD_PARAM_DEF(short,	short,			"%hi",		kstrtos16);
+STANDARD_PARAM_DEF(ushort,	unsigned short,		"%hu",		kstrtou16);
+STANDARD_PARAM_DEF(int,		int,			"%i",		kstrtoint);
+STANDARD_PARAM_DEF(uint,	unsigned int,		"%u",		kstrtouint);
+STANDARD_PARAM_DEF(long,	long,			"%li",		kstrtol);
+STANDARD_PARAM_DEF(ulong,	unsigned long,		"%lu",		kstrtoul);
+STANDARD_PARAM_DEF(ullong,	unsigned long long,	"%llu",		kstrtoull);
+STANDARD_PARAM_DEF(hexint,	unsigned int,		"%#08x", 	kstrtouint);
 
 int param_set_charp(const char *val, const struct kernel_param *kp)
 {
@@ -322,7 +268,7 @@ EXPORT_SYMBOL(param_set_charp);
 
 int param_get_charp(char *buffer, const struct kernel_param *kp)
 {
-	return scnprintf(buffer, PAGE_SIZE, "%s", *((char **)kp->arg));
+	return scnprintf(buffer, PAGE_SIZE, "%s\n", *((char **)kp->arg));
 }
 EXPORT_SYMBOL(param_get_charp);
 
@@ -353,7 +299,7 @@ EXPORT_SYMBOL(param_set_bool);
 int param_get_bool(char *buffer, const struct kernel_param *kp)
 {
 	/* Y and N chosen as being relatively non-coder friendly */
-	return sprintf(buffer, "%c", *(bool *)kp->arg ? 'Y' : 'N');
+	return sprintf(buffer, "%c\n", *(bool *)kp->arg ? 'Y' : 'N');
 }
 EXPORT_SYMBOL(param_get_bool);
 
@@ -412,7 +358,7 @@ EXPORT_SYMBOL(param_set_invbool);
 
 int param_get_invbool(char *buffer, const struct kernel_param *kp)
 {
-	return sprintf(buffer, "%c", (*(bool *)kp->arg) ? 'N' : 'Y');
+	return sprintf(buffer, "%c\n", (*(bool *)kp->arg) ? 'N' : 'Y');
 }
 EXPORT_SYMBOL(param_get_invbool);
 
@@ -512,8 +458,9 @@ static int param_array_get(char *buffer, const struct kernel_param *kp)
 	struct kernel_param p = *kp;
 
 	for (i = off = 0; i < (arr->num ? *arr->num : arr->max); i++) {
+		/* Replace \n with comma */
 		if (i)
-			buffer[off++] = ',';
+			buffer[off - 1] = ',';
 		p.arg = arr->elem + arr->elemsize * i;
 		check_kparam_locked(p.mod);
 		ret = arr->ops->get(buffer + off, &p);
@@ -559,7 +506,7 @@ EXPORT_SYMBOL(param_set_copystring);
 int param_get_string(char *buffer, const struct kernel_param *kp)
 {
 	const struct kparam_string *kps = kp->str;
-	return strlcpy(buffer, kps->string, kps->maxlen);
+	return scnprintf(buffer, PAGE_SIZE, "%s\n", kps->string);
 }
 EXPORT_SYMBOL(param_get_string);
 
@@ -583,7 +530,7 @@ struct module_param_attrs
 {
 	unsigned int num;
 	struct attribute_group grp;
-	struct param_attribute attrs[0];
+	struct param_attribute attrs[];
 };
 
 #ifdef CONFIG_SYSFS
@@ -601,10 +548,6 @@ static ssize_t param_attr_show(struct module_attribute *mattr,
 	kernel_param_lock(mk->mod);
 	count = attribute->param->ops->get(buf, attribute->param);
 	kernel_param_unlock(mk->mod);
-	if (count > 0) {
-		strcat(buf, "\n");
-		++count;
-	}
 	return count;
 }
 
@@ -620,8 +563,10 @@ static ssize_t param_attr_store(struct module_attribute *mattr,
 		return -EPERM;
 
 	kernel_param_lock(mk->mod);
-	param_check_unsafe(attribute->param);
-	err = attribute->param->ops->set(buf, attribute->param);
+	if (param_check_unsafe(attribute->param))
+		err = attribute->param->ops->set(buf, attribute->param);
+	else
+		err = -EPERM;
 	kernel_param_unlock(mk->mod);
 	if (!err)
 		return len;
@@ -652,7 +597,7 @@ EXPORT_SYMBOL(kernel_param_unlock);
 /*
  * add_sysfs_param - add a parameter to sysfs
  * @mk: struct module_kobject
- * @kparam: the actual parameter definition to add to sysfs
+ * @kp: the actual parameter definition to add to sysfs
  * @name: name of parameter
  *
  * Create a kobject if for a (per-module) parameter if mp NULL, and

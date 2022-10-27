@@ -1,22 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Driver for C-Media's CMI8330 and CMI8329 soundcards.
  *  Copyright (c) by George Talusan <gstalusan@uwaterloo.ca>
  *    http://www.undergrad.math.uwaterloo.ca/~gstalusa
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 /*
@@ -95,27 +81,27 @@ module_param_array(isapnp, bool, NULL, 0444);
 MODULE_PARM_DESC(isapnp, "PnP detection for specified soundcard.");
 #endif
 
-module_param_array(sbport, long, NULL, 0444);
+module_param_hw_array(sbport, long, ioport, NULL, 0444);
 MODULE_PARM_DESC(sbport, "Port # for CMI8330/CMI8329 SB driver.");
-module_param_array(sbirq, int, NULL, 0444);
+module_param_hw_array(sbirq, int, irq, NULL, 0444);
 MODULE_PARM_DESC(sbirq, "IRQ # for CMI8330/CMI8329 SB driver.");
-module_param_array(sbdma8, int, NULL, 0444);
+module_param_hw_array(sbdma8, int, dma, NULL, 0444);
 MODULE_PARM_DESC(sbdma8, "DMA8 for CMI8330/CMI8329 SB driver.");
-module_param_array(sbdma16, int, NULL, 0444);
+module_param_hw_array(sbdma16, int, dma, NULL, 0444);
 MODULE_PARM_DESC(sbdma16, "DMA16 for CMI8330/CMI8329 SB driver.");
 
-module_param_array(wssport, long, NULL, 0444);
+module_param_hw_array(wssport, long, ioport, NULL, 0444);
 MODULE_PARM_DESC(wssport, "Port # for CMI8330/CMI8329 WSS driver.");
-module_param_array(wssirq, int, NULL, 0444);
+module_param_hw_array(wssirq, int, irq, NULL, 0444);
 MODULE_PARM_DESC(wssirq, "IRQ # for CMI8330/CMI8329 WSS driver.");
-module_param_array(wssdma, int, NULL, 0444);
+module_param_hw_array(wssdma, int, dma, NULL, 0444);
 MODULE_PARM_DESC(wssdma, "DMA for CMI8330/CMI8329 WSS driver.");
 
-module_param_array(fmport, long, NULL, 0444);
+module_param_hw_array(fmport, long, ioport, NULL, 0444);
 MODULE_PARM_DESC(fmport, "FM port # for CMI8330/CMI8329 driver.");
-module_param_array(mpuport, long, NULL, 0444);
+module_param_hw_array(mpuport, long, ioport, NULL, 0444);
 MODULE_PARM_DESC(mpuport, "MPU-401 port # for CMI8330/CMI8329 driver.");
-module_param_array(mpuirq, int, NULL, 0444);
+module_param_hw_array(mpuirq, int, irq, NULL, 0444);
 MODULE_PARM_DESC(mpuirq, "IRQ # for CMI8330/CMI8329 MPU-401 port.");
 #ifdef CONFIG_PNP
 static int isa_registered;
@@ -134,7 +120,7 @@ static int pnp_registered;
 #define CMI8330_LINGAIN   25
 #define CMI8330_CDINGAIN  26
 
-static unsigned char snd_cmi8330_image[((CMI8330_CDINGAIN)-16) + 1] =
+static const unsigned char snd_cmi8330_image[((CMI8330_CDINGAIN)-16) + 1] =
 {
 	0x40,			/* 16 - recording mux (SB-mixer-enabled) */
 #ifdef ENABLE_SB_MIXER
@@ -182,7 +168,7 @@ struct snd_cmi8330 {
 
 #ifdef CONFIG_PNP
 
-static struct pnp_card_device_id snd_cmi8330_pnpids[] = {
+static const struct pnp_card_device_id snd_cmi8330_pnpids[] = {
 	{ .id = "CMI0001", .devs = { { "@X@0001" }, { "@@@0001" }, { "@H@0001" }, { "A@@0001" } } },
 	{ .id = "CMI0001", .devs = { { "@@@0001" }, { "@X@0001" }, { "@H@0001" } } },
 	{ .id = "" }
@@ -193,7 +179,7 @@ MODULE_DEVICE_TABLE(pnp_card, snd_cmi8330_pnpids);
 #endif
 
 
-static struct snd_kcontrol_new snd_cmi8330_controls[] = {
+static const struct snd_kcontrol_new snd_cmi8330_controls[] = {
 WSS_DOUBLE("Master Playback Volume", 0,
 		CMI8330_MASTVOL, CMI8330_MASTVOL, 4, 0, 15, 0),
 WSS_SINGLE("Loud Playback Switch", 0,
@@ -249,7 +235,7 @@ WSS_SINGLE(SNDRV_CTL_NAME_IEC958("Input ", PLAYBACK, SWITCH), 0,
 };
 
 #ifdef ENABLE_SB_MIXER
-static struct sbmix_elem cmi8330_sb_mixers[] = {
+static const struct sbmix_elem cmi8330_sb_mixers[] = {
 SB_DOUBLE("SB Master Playback Volume", SB_DSP4_MASTER_DEV, (SB_DSP4_MASTER_DEV + 1), 3, 3, 31),
 SB_DOUBLE("Tone Control - Bass", SB_DSP4_BASS_DEV, (SB_DSP4_BASS_DEV + 1), 4, 4, 15),
 SB_DOUBLE("Tone Control - Treble", SB_DSP4_TREBLE_DEV, (SB_DSP4_TREBLE_DEV + 1), 4, 4, 15),
@@ -267,7 +253,7 @@ SB_DOUBLE("SB Playback Volume", SB_DSP4_OGAIN_DEV, (SB_DSP4_OGAIN_DEV + 1), 6, 6
 SB_SINGLE("SB Mic Auto Gain", SB_DSP4_MIC_AGC, 0, 1),
 };
 
-static unsigned char cmi8330_sb_init_values[][2] = {
+static const unsigned char cmi8330_sb_init_values[][2] = {
 	{ SB_DSP4_MASTER_DEV + 0, 0 },
 	{ SB_DSP4_MASTER_DEV + 1, 0 },
 	{ SB_DSP4_PCM_DEV + 0, 0 },
@@ -442,7 +428,7 @@ static int snd_cmi8330_pcm(struct snd_card *card, struct snd_cmi8330 *chip)
 	struct snd_pcm *pcm;
 	const struct snd_pcm_ops *ops;
 	int err;
-	static snd_pcm_open_callback_t cmi_open_callbacks[2] = {
+	static const snd_pcm_open_callback_t cmi_open_callbacks[2] = {
 		snd_cmi8330_playback_open,
 		snd_cmi8330_capture_open
 	};
@@ -469,9 +455,8 @@ static int snd_cmi8330_pcm(struct snd_card *card, struct snd_cmi8330 *chip)
 	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK, &chip->streams[SNDRV_PCM_STREAM_PLAYBACK].ops);
 	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_CAPTURE, &chip->streams[SNDRV_PCM_STREAM_CAPTURE].ops);
 
-	snd_pcm_lib_preallocate_pages_for_all(pcm, SNDRV_DMA_TYPE_DEV,
-					      snd_dma_isa_data(),
-					      64*1024, 128*1024);
+	snd_pcm_set_managed_buffer_all(pcm, SNDRV_DMA_TYPE_DEV,
+				       card->dev, 64*1024, 128*1024);
 	chip->pcm = pcm;
 
 	return 0;
@@ -484,7 +469,6 @@ static int snd_cmi8330_suspend(struct snd_card *card)
 	struct snd_cmi8330 *acard = card->private_data;
 
 	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
-	snd_pcm_suspend_all(acard->pcm);
 	acard->wss->suspend(acard->wss);
 	snd_sbmixer_suspend(acard->sb);
 	return 0;

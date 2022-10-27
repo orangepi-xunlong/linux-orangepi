@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * linux/arch/alpha/kernel/sys_marvel.c
  *
@@ -17,7 +18,6 @@
 #include <asm/irq.h>
 #include <asm/mmu_context.h>
 #include <asm/io.h>
-#include <asm/pgtable.h>
 #include <asm/core_marvel.h>
 #include <asm/hwrpb.h>
 #include <asm/tlbflush.h>
@@ -115,11 +115,11 @@ io7_enable_irq(struct irq_data *d)
 		return;
 	}
 
-	spin_lock(&io7->irq_lock);
+	raw_spin_lock(&io7->irq_lock);
 	*ctl |= 1UL << 24;
 	mb();
 	*ctl;
-	spin_unlock(&io7->irq_lock);
+	raw_spin_unlock(&io7->irq_lock);
 }
 
 static void
@@ -136,11 +136,11 @@ io7_disable_irq(struct irq_data *d)
 		return;
 	}
 
-	spin_lock(&io7->irq_lock);
+	raw_spin_lock(&io7->irq_lock);
 	*ctl &= ~(1UL << 24);
 	mb();
 	*ctl;
-	spin_unlock(&io7->irq_lock);
+	raw_spin_unlock(&io7->irq_lock);
 }
 
 static void
@@ -263,7 +263,7 @@ init_io7_irqs(struct io7 *io7,
 	 */
 	printk("  Interrupts reported to CPU at PE %u\n", boot_cpuid);
 
-	spin_lock(&io7->irq_lock);
+	raw_spin_lock(&io7->irq_lock);
 
 	/* set up the error irqs */
 	io7_redirect_irq(io7, &io7->csrs->HLT_CTL.csr, boot_cpuid);
@@ -295,7 +295,7 @@ init_io7_irqs(struct io7 *io7,
 	for (i = 0; i < 16; ++i)
 		init_one_io7_msi(io7, i, boot_cpuid);
 
-	spin_unlock(&io7->irq_lock);
+	raw_spin_unlock(&io7->irq_lock);
 }
 
 static void __init
@@ -396,7 +396,7 @@ marvel_init_pci(void)
 static void __init
 marvel_init_rtc(void)
 {
-	init_rtc_irq();
+	init_rtc_irq(NULL);
 }
 
 static void

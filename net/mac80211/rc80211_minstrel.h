@@ -1,9 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2008 Felix Fietkau <nbd@openwrt.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef __RC_MINSTREL_H
@@ -14,12 +11,27 @@
 #define SAMPLE_COLUMNS	10	/* number of columns in sample table */
 
 /* scaled fraction values */
-#define MINSTREL_SCALE  16
+#define MINSTREL_SCALE  12
 #define MINSTREL_FRAC(val, div) (((val) << MINSTREL_SCALE) / div)
 #define MINSTREL_TRUNC(val) ((val) >> MINSTREL_SCALE)
 
 /* number of highest throughput rates to consider*/
 #define MAX_THR_RATES 4
+
+/*
+ * Coefficients for moving average with noise filter (period=16),
+ * scaled by 10 bits
+ *
+ * a1 = exp(-pi * sqrt(2) / period)
+ * coeff2 = 2 * a1 * cos(sqrt(2) * 2 * pi / period)
+ * coeff3 = -sqr(a1)
+ * coeff1 = 1 - coeff2 - coeff3
+ */
+#define MINSTREL_AVG_COEFF1		(MINSTREL_FRAC(1, 1) - \
+					 MINSTREL_AVG_COEFF2 - \
+					 MINSTREL_AVG_COEFF3)
+#define MINSTREL_AVG_COEFF2		0x00001499
+#define MINSTREL_AVG_COEFF3		-0x0000092e
 
 /*
  * Perform EWMA (Exponentially Weighted Moving Average) calculation
@@ -35,22 +47,35 @@ minstrel_ewma(int old, int new, int weight)
 	return old + incr;
 }
 
-/*
- * Perform EWMSD (Exponentially Weighted Moving Standard Deviation) calculation
- */
-static inline int
-minstrel_ewmsd(int old_ewmsd, int cur_prob, int prob_ewma, int weight)
+static inline int minstrel_filter_avg_add(u16 *prev_1, u16 *prev_2, s32 in)
 {
-	int diff, incr, tmp_var;
+	s32 out_1 = *prev_1;
+	s32 out_2 = *prev_2;
+	s32 val;
 
-	/* calculate exponential weighted moving variance */
-	diff = MINSTREL_TRUNC((cur_prob - prob_ewma) * 1000000);
-	incr = (EWMA_DIV - weight) * diff / EWMA_DIV;
-	tmp_var = old_ewmsd * old_ewmsd;
-	tmp_var = weight * (tmp_var + diff * incr / 1000000) / EWMA_DIV;
+	if (!in)
+		in += 1;
 
-	/* return standard deviation */
-	return (u16) int_sqrt(tmp_var);
+	if (!out_1) {
+		val = out_1 = in;
+		goto out;
+	}
+
+	val = MINSTREL_AVG_COEFF1 * in;
+	val += MINSTREL_AVG_COEFF2 * out_1;
+	val += MINSTREL_AVG_COEFF3 * out_2;
+	val >>= MINSTREL_SCALE;
+
+	if (val > 1 << MINSTREL_SCALE)
+		val = 1 << MINSTREL_SCALE;
+	if (val < 0)
+		val = 1;
+
+out:
+	*prev_2 = out_1;
+	*prev_1 = val;
+
+	return val;
 }
 
 struct minstrel_rate_stats {
@@ -59,15 +84,11 @@ struct minstrel_rate_stats {
 	u16 success, last_success;
 
 	/* total attempts/success counters */
-	u64 att_hist, succ_hist;
+	u32 att_hist, succ_hist;
 
-	/* statistis of packet delivery probability
-	 *  cur_prob  - current prob within last update intervall
-	 *  prob_ewma - exponential weighted moving average of prob
-	 *  prob_ewmsd - exp. weighted moving standard deviation of prob */
-	unsigned int cur_prob;
-	unsigned int prob_ewma;
-	u16 prob_ewmsd;
+	/* prob_avg - moving average of prob */
+	u16 prob_avg;
+	u16 prob_avg_1;
 
 	/* maximum retry counts */
 	u8 retry_count;
@@ -105,7 +126,6 @@ struct minstrel_sta_info {
 	u8 max_prob_rate;
 	unsigned int total_packets;
 	unsigned int sample_packets;
-	int sample_deferred;
 
 	unsigned int sample_row;
 	unsigned int sample_column;
@@ -116,16 +136,13 @@ struct minstrel_sta_info {
 
 	/* sampling table */
 	u8 *sample_table;
-
-#ifdef CONFIG_MAC80211_DEBUGFS
-	struct dentry *dbg_stats;
-	struct dentry *dbg_stats_csv;
-#endif
 };
 
 struct minstrel_priv {
 	struct ieee80211_hw *hw;
 	bool has_mrr;
+	bool new_avg;
+	u32 sample_switch;
 	unsigned int cw_min;
 	unsigned int cw_max;
 	unsigned int max_retry;
@@ -144,7 +161,6 @@ struct minstrel_priv {
 	 *   - setting will be applied on next update
 	 */
 	u32 fixed_rate_idx;
-	struct dentry *dbg_fixed_rate;
 #endif
 };
 
@@ -155,16 +171,14 @@ struct minstrel_debugfs_info {
 
 extern const struct rate_control_ops mac80211_minstrel;
 void minstrel_add_sta_debugfs(void *priv, void *priv_sta, struct dentry *dir);
-void minstrel_remove_sta_debugfs(void *priv, void *priv_sta);
 
 /* Recalculate success probabilities and counters for a given rate using EWMA */
-void minstrel_calc_rate_stats(struct minstrel_rate_stats *mrs);
-int minstrel_get_tp_avg(struct minstrel_rate *mr, int prob_ewma);
+void minstrel_calc_rate_stats(struct minstrel_priv *mp,
+			      struct minstrel_rate_stats *mrs);
+int minstrel_get_tp_avg(struct minstrel_rate *mr, int prob_avg);
 
 /* debugfs */
 int minstrel_stats_open(struct inode *inode, struct file *file);
 int minstrel_stats_csv_open(struct inode *inode, struct file *file);
-ssize_t minstrel_stats_read(struct file *file, char __user *buf, size_t len, loff_t *ppos);
-int minstrel_stats_release(struct inode *inode, struct file *file);
 
 #endif

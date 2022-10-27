@@ -27,6 +27,7 @@
 #include <linux/module.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
+#include <linux/sched/signal.h>
 
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
@@ -65,6 +66,8 @@ struct sco_pinfo {
 	bdaddr_t	dst;
 	__u32		flags;
 	__u16		setting;
+	__u8		cmsg_mask;
+	__u32		wbs_pkt_len;
 	struct sco_conn	*conn;
 };
 
@@ -72,9 +75,9 @@ struct sco_pinfo {
 #define SCO_CONN_TIMEOUT	(HZ * 40)
 #define SCO_DISCONN_TIMEOUT	(HZ * 2)
 
-static void sco_sock_timeout(unsigned long arg)
+static void sco_sock_timeout(struct timer_list *t)
 {
-	struct sock *sk = (struct sock *)arg;
+	struct sock *sk = from_timer(sk, t, sk_timer);
 
 	BT_DBG("sock %p state %d", sk, sk->sk_state);
 
@@ -192,7 +195,7 @@ static void __sco_chan_add(struct sco_conn *conn, struct sock *sk,
 	conn->sk = sk;
 
 	if (parent)
-		bt_accept_enqueue(parent, sk);
+		bt_accept_enqueue(parent, sk, true);
 }
 
 static int sco_chan_add(struct sco_conn *conn, struct sock *sk,
@@ -264,6 +267,8 @@ static int sco_connect(struct sock *sk)
 		sk->sk_state = BT_CONNECT;
 		sco_sock_set_timer(sk, sk->sk_sndtimeo);
 	}
+
+	sco_pi(sk)->wbs_pkt_len = hdev->wbs_pkt_len;
 
 done:
 	hci_dev_unlock(hdev);
@@ -448,6 +453,15 @@ static void sco_sock_close(struct sock *sk)
 	sco_sock_kill(sk);
 }
 
+static void sco_skb_put_cmsg(struct sk_buff *skb, struct msghdr *msg,
+			     struct sock *sk)
+{
+	if (sco_pi(sk)->cmsg_mask & SCO_CMSG_PKT_STATUS)
+		put_cmsg(msg, SOL_BLUETOOTH, BT_SCM_PKT_STATUS,
+			 sizeof(bt_cb(skb)->sco.pkt_status),
+			 &bt_cb(skb)->sco.pkt_status);
+}
+
 static void sco_sock_init(struct sock *sk, struct sock *parent)
 {
 	BT_DBG("sk %p", sk);
@@ -456,6 +470,8 @@ static void sco_sock_init(struct sock *sk, struct sock *parent)
 		sk->sk_type = parent->sk_type;
 		bt_sk(sk)->flags = bt_sk(parent)->flags;
 		security_sk_clone(parent, sk);
+	} else {
+		bt_sk(sk)->skb_put_cmsg = sco_skb_put_cmsg;
 	}
 }
 
@@ -487,7 +503,7 @@ static struct sock *sco_sock_alloc(struct net *net, struct socket *sock,
 
 	sco_pi(sk)->setting = BT_VOICE_CVSD_16BIT;
 
-	setup_timer(&sk->sk_timer, sco_sock_timeout, (unsigned long)sk);
+	timer_setup(&sk->sk_timer, sco_sock_timeout, 0);
 
 	bt_sock_link(&sco_sk_list, sk);
 	return sk;
@@ -522,13 +538,11 @@ static int sco_sock_bind(struct socket *sock, struct sockaddr *addr,
 	struct sock *sk = sock->sk;
 	int err = 0;
 
+	if (!addr || addr_len < sizeof(struct sockaddr_sco) ||
+	    addr->sa_family != AF_BLUETOOTH)
+		return -EINVAL;
+
 	BT_DBG("sk %p %pMR", sk, &sa->sco_bdaddr);
-
-	if (!addr || addr->sa_family != AF_BLUETOOTH)
-		return -EINVAL;
-
-	if (addr_len < sizeof(struct sockaddr_sco))
-		return -EINVAL;
 
 	lock_sock(sk);
 
@@ -627,7 +641,7 @@ done:
 }
 
 static int sco_sock_accept(struct socket *sock, struct socket *newsock,
-			   int flags)
+			   int flags, bool kern)
 {
 	DEFINE_WAIT_FUNC(wait, woken_wake_function);
 	struct sock *sk = sock->sk, *ch;
@@ -682,7 +696,7 @@ done:
 }
 
 static int sco_sock_getname(struct socket *sock, struct sockaddr *addr,
-			    int *len, int peer)
+			    int peer)
 {
 	struct sockaddr_sco *sa = (struct sockaddr_sco *) addr;
 	struct sock *sk = sock->sk;
@@ -690,14 +704,13 @@ static int sco_sock_getname(struct socket *sock, struct sockaddr *addr,
 	BT_DBG("sock %p, sk %p", sock, sk);
 
 	addr->sa_family = AF_BLUETOOTH;
-	*len = sizeof(struct sockaddr_sco);
 
 	if (peer)
 		bacpy(&sa->sco_bdaddr, &sco_pi(sk)->dst);
 	else
 		bacpy(&sa->sco_bdaddr, &sco_pi(sk)->src);
 
-	return 0;
+	return sizeof(struct sockaddr_sco);
 }
 
 static int sco_sock_sendmsg(struct socket *sock, struct msghdr *msg,
@@ -793,7 +806,7 @@ static int sco_sock_recvmsg(struct socket *sock, struct msghdr *msg,
 }
 
 static int sco_sock_setsockopt(struct socket *sock, int level, int optname,
-			       char __user *optval, unsigned int optlen)
+			       sockptr_t optval, unsigned int optlen)
 {
 	struct sock *sk = sock->sk;
 	int len, err = 0;
@@ -812,7 +825,7 @@ static int sco_sock_setsockopt(struct socket *sock, int level, int optname,
 			break;
 		}
 
-		if (get_user(opt, (u32 __user *) optval)) {
+		if (copy_from_sockptr(&opt, optval, sizeof(u32))) {
 			err = -EFAULT;
 			break;
 		}
@@ -833,7 +846,7 @@ static int sco_sock_setsockopt(struct socket *sock, int level, int optname,
 		voice.setting = sco_pi(sk)->setting;
 
 		len = min_t(unsigned int, sizeof(voice), optlen);
-		if (copy_from_user((char *)&voice, optval, len)) {
+		if (copy_from_sockptr(&voice, optval, len)) {
 			err = -EFAULT;
 			break;
 		}
@@ -846,6 +859,18 @@ static int sco_sock_setsockopt(struct socket *sock, int level, int optname,
 		}
 
 		sco_pi(sk)->setting = voice.setting;
+		break;
+
+	case BT_PKT_STATUS:
+		if (copy_from_sockptr(&opt, optval, sizeof(u32))) {
+			err = -EFAULT;
+			break;
+		}
+
+		if (opt)
+			sco_pi(sk)->cmsg_mask |= SCO_CMSG_PKT_STATUS;
+		else
+			sco_pi(sk)->cmsg_mask &= SCO_CMSG_PKT_STATUS;
 		break;
 
 	default:
@@ -924,6 +949,8 @@ static int sco_sock_getsockopt(struct socket *sock, int level, int optname,
 	struct sock *sk = sock->sk;
 	int len, err = 0;
 	struct bt_voice voice;
+	u32 phys;
+	int pkt_status;
 
 	BT_DBG("sk %p", sk);
 
@@ -956,6 +983,36 @@ static int sco_sock_getsockopt(struct socket *sock, int level, int optname,
 		if (copy_to_user(optval, (char *)&voice, len))
 			err = -EFAULT;
 
+		break;
+
+	case BT_PHY:
+		if (sk->sk_state != BT_CONNECTED) {
+			err = -ENOTCONN;
+			break;
+		}
+
+		phys = hci_conn_get_phy(sco_pi(sk)->conn->hcon);
+
+		if (put_user(phys, (u32 __user *) optval))
+			err = -EFAULT;
+		break;
+
+	case BT_PKT_STATUS:
+		pkt_status = (sco_pi(sk)->cmsg_mask & SCO_CMSG_PKT_STATUS);
+
+		if (put_user(pkt_status, (int __user *)optval))
+			err = -EFAULT;
+		break;
+
+	case BT_SNDMTU:
+	case BT_RCVMTU:
+		if (sk->sk_state != BT_CONNECTED) {
+			err = -ENOTCONN;
+			break;
+		}
+
+		if (put_user(sco_pi(sk)->wbs_pkt_len, (u32 __user *)optval))
+			err = -EFAULT;
 		break;
 
 	default:
@@ -1175,17 +1232,7 @@ static int sco_debugfs_show(struct seq_file *f, void *p)
 	return 0;
 }
 
-static int sco_debugfs_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, sco_debugfs_show, inode->i_private);
-}
-
-static const struct file_operations sco_debugfs_fops = {
-	.open		= sco_debugfs_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+DEFINE_SHOW_ATTRIBUTE(sco_debugfs);
 
 static struct dentry *sco_debugfs;
 
@@ -1202,6 +1249,7 @@ static const struct proto_ops sco_sock_ops = {
 	.recvmsg	= sco_sock_recvmsg,
 	.poll		= bt_sock_poll,
 	.ioctl		= bt_sock_ioctl,
+	.gettstamp	= sock_gettstamp,
 	.mmap		= sock_no_mmap,
 	.socketpair	= sock_no_socketpair,
 	.shutdown	= sco_sock_shutdown,

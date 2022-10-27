@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-2.0
+config VIDEO_ROCKCHIP_ISPP
+	tristate "Rockchip Image Signal Post-Processing Unit driver"
+	depends on VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	depends on ARCH_ROCKCHIP || COMPILE_TEST
+	select VIDEOBUF2_DMA_CONTIG
+	select VIDEOBUF2_VMALLOC
+	select VIDEOBUF2_DMA_SG
+	default n
+	help
+	  Support for ISPP on the rockchip SoC.
+
+config VIDEO_ROCKCHIP_ISPP_FEC
+	bool "Rockchip Image Signal FEC Processing helper"
+	depends on VIDEO_ROCKCHIP_ISPP
+	select V4L2_MEM2MEM_DEV
+	default n
+	help
+	  Say y if enable fec independent.

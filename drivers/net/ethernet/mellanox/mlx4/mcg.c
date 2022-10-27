@@ -162,7 +162,7 @@ static int new_steering_entry(struct mlx4_dev *dev, u8 port,
 		return -EINVAL;
 
 	s_steer = &mlx4_priv(dev)->steer[port - 1];
-	new_entry = kzalloc(sizeof *new_entry, GFP_KERNEL);
+	new_entry = kzalloc(sizeof(*new_entry), GFP_KERNEL);
 	if (!new_entry)
 		return -ENOMEM;
 
@@ -175,7 +175,7 @@ static int new_steering_entry(struct mlx4_dev *dev, u8 port,
 	 */
 	pqp = get_promisc_qp(dev, port, steer, qpn);
 	if (pqp) {
-		dqp = kmalloc(sizeof *dqp, GFP_KERNEL);
+		dqp = kmalloc(sizeof(*dqp), GFP_KERNEL);
 		if (!dqp) {
 			err = -ENOMEM;
 			goto out_alloc;
@@ -274,7 +274,7 @@ static int existing_steering_entry(struct mlx4_dev *dev, u8 port,
 	}
 
 	/* add the qp as a duplicate on this index */
-	dqp = kmalloc(sizeof *dqp, GFP_KERNEL);
+	dqp = kmalloc(sizeof(*dqp), GFP_KERNEL);
 	if (!dqp)
 		return -ENOMEM;
 	dqp->qpn = qpn;
@@ -443,7 +443,7 @@ static int add_promisc_qp(struct mlx4_dev *dev, u8 port,
 		goto out_mutex;
 	}
 
-	pqp = kmalloc(sizeof *pqp, GFP_KERNEL);
+	pqp = kmalloc(sizeof(*pqp), GFP_KERNEL);
 	if (!pqp) {
 		err = -ENOMEM;
 		goto out_mutex;
@@ -514,7 +514,7 @@ static int add_promisc_qp(struct mlx4_dev *dev, u8 port,
 	/* add the new qpn to list of promisc qps */
 	list_add_tail(&pqp->list, &s_steer->promisc_qps[steer]);
 	/* now need to add all the promisc qps to default entry */
-	memset(mgm, 0, sizeof *mgm);
+	memset(mgm, 0, sizeof(*mgm));
 	members_count = 0;
 	list_for_each_entry(dqp, &s_steer->promisc_qps[steer], list) {
 		if (members_count == dev->caps.num_qp_per_mgm) {
@@ -906,59 +906,59 @@ static void mlx4_err_rule(struct mlx4_dev *dev, char *str,
 	int len = 0;
 
 	mlx4_err(dev, "%s", str);
-	len += snprintf(buf + len, BUF_SIZE - len,
-			"port = %d prio = 0x%x qp = 0x%x ",
-			rule->port, rule->priority, rule->qpn);
+	len += scnprintf(buf + len, BUF_SIZE - len,
+			 "port = %d prio = 0x%x qp = 0x%x ",
+			 rule->port, rule->priority, rule->qpn);
 
 	list_for_each_entry(cur, &rule->list, list) {
 		switch (cur->id) {
 		case MLX4_NET_TRANS_RULE_ID_ETH:
-			len += snprintf(buf + len, BUF_SIZE - len,
-					"dmac = %pM ", &cur->eth.dst_mac);
+			len += scnprintf(buf + len, BUF_SIZE - len,
+					 "dmac = %pM ", &cur->eth.dst_mac);
 			if (cur->eth.ether_type)
-				len += snprintf(buf + len, BUF_SIZE - len,
-						"ethertype = 0x%x ",
-						be16_to_cpu(cur->eth.ether_type));
+				len += scnprintf(buf + len, BUF_SIZE - len,
+						 "ethertype = 0x%x ",
+						 be16_to_cpu(cur->eth.ether_type));
 			if (cur->eth.vlan_id)
-				len += snprintf(buf + len, BUF_SIZE - len,
-						"vlan-id = %d ",
-						be16_to_cpu(cur->eth.vlan_id));
+				len += scnprintf(buf + len, BUF_SIZE - len,
+						 "vlan-id = %d ",
+						 be16_to_cpu(cur->eth.vlan_id));
 			break;
 
 		case MLX4_NET_TRANS_RULE_ID_IPV4:
 			if (cur->ipv4.src_ip)
-				len += snprintf(buf + len, BUF_SIZE - len,
-						"src-ip = %pI4 ",
-						&cur->ipv4.src_ip);
+				len += scnprintf(buf + len, BUF_SIZE - len,
+						 "src-ip = %pI4 ",
+						 &cur->ipv4.src_ip);
 			if (cur->ipv4.dst_ip)
-				len += snprintf(buf + len, BUF_SIZE - len,
-						"dst-ip = %pI4 ",
-						&cur->ipv4.dst_ip);
+				len += scnprintf(buf + len, BUF_SIZE - len,
+						 "dst-ip = %pI4 ",
+						 &cur->ipv4.dst_ip);
 			break;
 
 		case MLX4_NET_TRANS_RULE_ID_TCP:
 		case MLX4_NET_TRANS_RULE_ID_UDP:
 			if (cur->tcp_udp.src_port)
-				len += snprintf(buf + len, BUF_SIZE - len,
-						"src-port = %d ",
-						be16_to_cpu(cur->tcp_udp.src_port));
+				len += scnprintf(buf + len, BUF_SIZE - len,
+						 "src-port = %d ",
+						 be16_to_cpu(cur->tcp_udp.src_port));
 			if (cur->tcp_udp.dst_port)
-				len += snprintf(buf + len, BUF_SIZE - len,
-						"dst-port = %d ",
-						be16_to_cpu(cur->tcp_udp.dst_port));
+				len += scnprintf(buf + len, BUF_SIZE - len,
+						 "dst-port = %d ",
+						 be16_to_cpu(cur->tcp_udp.dst_port));
 			break;
 
 		case MLX4_NET_TRANS_RULE_ID_IB:
-			len += snprintf(buf + len, BUF_SIZE - len,
-					"dst-gid = %pI6\n", cur->ib.dst_gid);
-			len += snprintf(buf + len, BUF_SIZE - len,
-					"dst-gid-mask = %pI6\n",
-					cur->ib.dst_gid_msk);
+			len += scnprintf(buf + len, BUF_SIZE - len,
+					 "dst-gid = %pI6\n", cur->ib.dst_gid);
+			len += scnprintf(buf + len, BUF_SIZE - len,
+					 "dst-gid-mask = %pI6\n",
+					 cur->ib.dst_gid_msk);
 			break;
 
 		case MLX4_NET_TRANS_RULE_ID_VXLAN:
-			len += snprintf(buf + len, BUF_SIZE - len,
-					"VNID = %d ", be32_to_cpu(cur->vxlan.vni));
+			len += scnprintf(buf + len, BUF_SIZE - len,
+					 "VNID = %d ", be32_to_cpu(cur->vxlan.vni));
 			break;
 		case MLX4_NET_TRANS_RULE_ID_IPV6:
 			break;
@@ -967,7 +967,7 @@ static void mlx4_err_rule(struct mlx4_dev *dev, char *str,
 			break;
 		}
 	}
-	len += snprintf(buf + len, BUF_SIZE - len, "\n");
+	len += scnprintf(buf + len, BUF_SIZE - len, "\n");
 	mlx4_err(dev, "%s", buf);
 
 	if (len >= BUF_SIZE)
@@ -1144,7 +1144,7 @@ int mlx4_qp_attach_common(struct mlx4_dev *dev, struct mlx4_qp *qp, u8 gid[16],
 		index += dev->caps.num_mgms;
 
 		new_entry = 1;
-		memset(mgm, 0, sizeof *mgm);
+		memset(mgm, 0, sizeof(*mgm));
 		memcpy(mgm->gid, gid, 16);
 	}
 
@@ -1412,6 +1412,7 @@ int mlx4_multicast_attach(struct mlx4_dev *dev, struct mlx4_qp *qp, u8 gid[16],
 	case MLX4_STEERING_MODE_A0:
 		if (prot == MLX4_PROT_ETH)
 			return 0;
+		fallthrough;
 
 	case MLX4_STEERING_MODE_B0:
 		if (prot == MLX4_PROT_ETH)
@@ -1441,6 +1442,7 @@ int mlx4_multicast_detach(struct mlx4_dev *dev, struct mlx4_qp *qp, u8 gid[16],
 	case MLX4_STEERING_MODE_A0:
 		if (prot == MLX4_PROT_ETH)
 			return 0;
+		fallthrough;
 
 	case MLX4_STEERING_MODE_B0:
 		if (prot == MLX4_PROT_ETH)
@@ -1490,7 +1492,7 @@ int mlx4_flow_steer_promisc_add(struct mlx4_dev *dev, u8 port,
 	rule.port = port;
 	rule.qpn = qpn;
 	INIT_LIST_HEAD(&rule.list);
-	mlx4_err(dev, "going promisc on %x\n", port);
+	mlx4_info(dev, "going promisc on %x\n", port);
 
 	return  mlx4_flow_attach(dev, &rule, regid_p);
 }

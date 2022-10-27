@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Directory notifications for Linux.
  *
@@ -5,22 +6,14 @@
  *
  * Copyright (C) 2009 Eric Paris <Red Hat Inc>
  * dnotify was largly rewritten to use the new fsnotify infrastructure
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 #include <linux/fs.h>
 #include <linux/module.h>
 #include <linux/sched.h>
+#include <linux/sched/signal.h>
 #include <linux/dnotify.h>
 #include <linux/init.h>
+#include <linux/security.h>
 #include <linux/spinlock.h>
 #include <linux/slab.h>
 #include <linux/fdtable.h>
@@ -52,7 +45,7 @@ struct dnotify_mark {
  */
 static void dnotify_recalc_inode_mask(struct fsnotify_mark *fsn_mark)
 {
-	__u32 new_mask, old_mask;
+	__u32 new_mask = 0;
 	struct dnotify_struct *dn;
 	struct dnotify_mark *dn_mark  = container_of(fsn_mark,
 						     struct dnotify_mark,
@@ -60,17 +53,13 @@ static void dnotify_recalc_inode_mask(struct fsnotify_mark *fsn_mark)
 
 	assert_spin_locked(&fsn_mark->lock);
 
-	old_mask = fsn_mark->mask;
-	new_mask = 0;
 	for (dn = dn_mark->dn; dn != NULL; dn = dn->dn_next)
 		new_mask |= (dn->dn_mask & ~FS_DN_MULTISHOT);
-	fsnotify_set_mark_mask_locked(fsn_mark, new_mask);
-
-	if (old_mask == new_mask)
+	if (fsn_mark->mask == new_mask)
 		return;
+	fsn_mark->mask = new_mask;
 
-	if (fsn_mark->inode)
-		fsnotify_recalc_inode_mask(fsn_mark->inode);
+	fsnotify_recalc_mask(fsn_mark->connector);
 }
 
 /*
@@ -81,12 +70,9 @@ static void dnotify_recalc_inode_mask(struct fsnotify_mark *fsn_mark)
  * destroy the dnotify struct if it was not registered to receive multiple
  * events.
  */
-static int dnotify_handle_event(struct fsnotify_group *group,
-				struct inode *inode,
-				struct fsnotify_mark *inode_mark,
-				struct fsnotify_mark *vfsmount_mark,
-				u32 mask, void *data, int data_type,
-				const unsigned char *file_name, u32 cookie)
+static int dnotify_handle_event(struct fsnotify_mark *inode_mark, u32 mask,
+				struct inode *inode, struct inode *dir,
+				const struct qstr *name, u32 cookie)
 {
 	struct dnotify_mark *dn_mark;
 	struct dnotify_struct *dn;
@@ -95,10 +81,8 @@ static int dnotify_handle_event(struct fsnotify_group *group,
 	__u32 test_mask = mask & ~FS_EVENT_ON_CHILD;
 
 	/* not a dir, dnotify doesn't care */
-	if (!S_ISDIR(inode->i_mode))
+	if (!dir && !(mask & FS_ISDIR))
 		return 0;
-
-	BUG_ON(vfsmount_mark);
 
 	dn_mark = container_of(inode_mark, struct dnotify_mark, fsn_mark);
 
@@ -136,8 +120,9 @@ static void dnotify_free_mark(struct fsnotify_mark *fsn_mark)
 	kmem_cache_free(dnotify_mark_cache, dn_mark);
 }
 
-static struct fsnotify_ops dnotify_fsnotify_ops = {
-	.handle_event = dnotify_handle_event,
+static const struct fsnotify_ops dnotify_fsnotify_ops = {
+	.handle_inode_event = dnotify_handle_event,
+	.free_mark = dnotify_free_mark,
 };
 
 /*
@@ -160,7 +145,7 @@ void dnotify_flush(struct file *filp, fl_owner_t id)
 	if (!S_ISDIR(inode->i_mode))
 		return;
 
-	fsn_mark = fsnotify_find_inode_mark(dnotify_group, inode);
+	fsn_mark = fsnotify_find_mark(&inode->i_fsnotify_marks, dnotify_group);
 	if (!fsn_mark)
 		return;
 	dn_mark = container_of(fsn_mark, struct dnotify_mark, fsn_mark);
@@ -289,6 +274,17 @@ int fcntl_dirnotify(int fd, struct file *filp, unsigned long arg)
 		goto out_err;
 	}
 
+	/*
+	 * convert the userspace DN_* "arg" to the internal FS_*
+	 * defined in fsnotify
+	 */
+	mask = convert_arg(arg);
+
+	error = security_path_notify(&filp->f_path, mask,
+			FSNOTIFY_OBJ_TYPE_INODE);
+	if (error)
+		goto out_err;
+
 	/* expect most fcntl to add new rather than augment old */
 	dn = kmem_cache_alloc(dnotify_struct_cache, GFP_KERNEL);
 	if (!dn) {
@@ -303,12 +299,9 @@ int fcntl_dirnotify(int fd, struct file *filp, unsigned long arg)
 		goto out_err;
 	}
 
-	/* convert the userspace DN_* "arg" to the internal FS_* defines in fsnotify */
-	mask = convert_arg(arg);
-
 	/* set up the new_fsn_mark and new_dn_mark */
 	new_fsn_mark = &new_dn_mark->fsn_mark;
-	fsnotify_init_mark(new_fsn_mark, dnotify_free_mark);
+	fsnotify_init_mark(new_fsn_mark, dnotify_group);
 	new_fsn_mark->mask = mask;
 	new_dn_mark->dn = NULL;
 
@@ -316,13 +309,16 @@ int fcntl_dirnotify(int fd, struct file *filp, unsigned long arg)
 	mutex_lock(&dnotify_group->mark_mutex);
 
 	/* add the new_fsn_mark or find an old one. */
-	fsn_mark = fsnotify_find_inode_mark(dnotify_group, inode);
+	fsn_mark = fsnotify_find_mark(&inode->i_fsnotify_marks, dnotify_group);
 	if (fsn_mark) {
 		dn_mark = container_of(fsn_mark, struct dnotify_mark, fsn_mark);
 		spin_lock(&fsn_mark->lock);
 	} else {
-		fsnotify_add_mark_locked(new_fsn_mark, dnotify_group, inode,
-					 NULL, 0);
+		error = fsnotify_add_inode_mark_locked(new_fsn_mark, inode, 0);
+		if (error) {
+			mutex_unlock(&dnotify_group->mark_mutex);
+			goto out_err;
+		}
 		spin_lock(&new_fsn_mark->lock);
 		fsn_mark = new_fsn_mark;
 		dn_mark = new_dn_mark;
@@ -348,10 +344,11 @@ int fcntl_dirnotify(int fd, struct file *filp, unsigned long arg)
 		 */
 		if (dn_mark == new_dn_mark)
 			destroy = 1;
+		error = 0;
 		goto out;
 	}
 
-	__f_setown(filp, task_pid(current), PIDTYPE_PID, 0);
+	__f_setown(filp, task_pid(current), PIDTYPE_TGID, 0);
 
 	error = attach_dn(dn, dn_mark, id, fd, filp, mask);
 	/* !error means that we attached the dn to the dn_mark, so don't free it */
@@ -382,8 +379,9 @@ out_err:
 
 static int __init dnotify_init(void)
 {
-	dnotify_struct_cache = KMEM_CACHE(dnotify_struct, SLAB_PANIC);
-	dnotify_mark_cache = KMEM_CACHE(dnotify_mark, SLAB_PANIC);
+	dnotify_struct_cache = KMEM_CACHE(dnotify_struct,
+					  SLAB_PANIC|SLAB_ACCOUNT);
+	dnotify_mark_cache = KMEM_CACHE(dnotify_mark, SLAB_PANIC|SLAB_ACCOUNT);
 
 	dnotify_group = fsnotify_alloc_group(&dnotify_fsnotify_ops);
 	if (IS_ERR(dnotify_group))

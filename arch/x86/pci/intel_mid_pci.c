@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Intel MID PCI support
  *   Copyright (c) 2008 Intel Corporation
@@ -32,6 +33,7 @@
 #include <asm/hw_irq.h>
 #include <asm/io_apic.h>
 #include <asm/intel-mid.h>
+#include <asm/acpi.h>
 
 #define PCIE_CAP_OFFSET	0x100
 
@@ -215,16 +217,23 @@ static int intel_mid_pci_irq_enable(struct pci_dev *dev)
 	struct irq_alloc_info info;
 	int polarity;
 	int ret;
+	u8 gsi;
 
 	if (dev->irq_managed && dev->irq > 0)
 		return 0;
+
+	ret = pci_read_config_byte(dev, PCI_INTERRUPT_LINE, &gsi);
+	if (ret < 0) {
+		dev_warn(&dev->dev, "Failed to read interrupt line: %d\n", ret);
+		return ret;
+	}
 
 	switch (intel_mid_identify_cpu()) {
 	case INTEL_MID_CPU_CHIP_TANGIER:
 		polarity = IOAPIC_POL_HIGH;
 
 		/* Special treatment for IRQ0 */
-		if (dev->irq == 0) {
+		if (gsi == 0) {
 			/*
 			 * Skip HS UART common registers device since it has
 			 * IRQ0 assigned and not used by the kernel.
@@ -253,10 +262,11 @@ static int intel_mid_pci_irq_enable(struct pci_dev *dev)
 	 * MRST only have IOAPIC, the PCI irq lines are 1:1 mapped to
 	 * IOAPIC RTE entries, so we just enable RTE for the device.
 	 */
-	ret = mp_map_gsi_to_irq(dev->irq, IOAPIC_MAP_ALLOC, &info);
+	ret = mp_map_gsi_to_irq(gsi, IOAPIC_MAP_ALLOC, &info);
 	if (ret < 0)
 		return ret;
 
+	dev->irq = ret;
 	dev->irq_managed = 1;
 
 	return 0;
@@ -271,7 +281,7 @@ static void intel_mid_pci_irq_disable(struct pci_dev *dev)
 	}
 }
 
-static struct pci_ops intel_mid_pci_ops = {
+static const struct pci_ops intel_mid_pci_ops __initconst = {
 	.read = pci_read,
 	.write = pci_write,
 };
@@ -291,6 +301,7 @@ int __init intel_mid_pci_init(void)
 	pci_root_ops = intel_mid_pci_ops;
 	pci_soc_mode = 1;
 	/* Continue with standard init */
+	acpi_noirq_set();
 	return 1;
 }
 
@@ -312,7 +323,7 @@ static void pci_d3delay_fixup(struct pci_dev *dev)
 	 */
 	if (type1_access_ok(dev->bus->number, dev->devfn, PCI_DEVICE_ID))
 		return;
-	dev->d3_delay = 0;
+	dev->d3hot_delay = 0;
 }
 DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, PCI_ANY_ID, pci_d3delay_fixup);
 
@@ -372,7 +383,7 @@ static void pci_fixed_bar_fixup(struct pci_dev *dev)
 	    PCI_DEVFN(2, 2) == dev->devfn)
 		return;
 
-	for (i = 0; i < PCI_ROM_RESOURCE; i++) {
+	for (i = 0; i < PCI_STD_NUM_BARS; i++) {
 		pci_read_config_dword(dev, offset + 8 + (i * 4), &size);
 		dev->resource[i].end = dev->resource[i].start + size - 1;
 		dev->resource[i].flags |= IORESOURCE_PCI_FIXED;

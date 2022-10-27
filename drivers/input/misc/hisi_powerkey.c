@@ -75,9 +75,9 @@ static int hi65xx_powerkey_probe(struct platform_device *pdev)
 	struct input_dev *input;
 	int irq, i, error;
 
-	input = devm_input_allocate_device(&pdev->dev);
+	input = devm_input_allocate_device(dev);
 	if (!input) {
-		dev_err(&pdev->dev, "failed to allocate input device\n");
+		dev_err(dev, "failed to allocate input device\n");
 		return -ENOMEM;
 	}
 
@@ -90,12 +90,8 @@ static int hi65xx_powerkey_probe(struct platform_device *pdev)
 	for (i = 0; i < ARRAY_SIZE(hi65xx_irq_info); i++) {
 
 		irq = platform_get_irq_byname(pdev, hi65xx_irq_info[i].name);
-		if (irq < 0) {
-			error = irq;
-			dev_err(dev, "couldn't get irq %s: %d\n",
-				hi65xx_irq_info[i].name, error);
-			return error;
-		}
+		if (irq < 0)
+			return irq;
 
 		error = devm_request_any_context_irq(dev, irq,
 						     hi65xx_irq_info[i].handler,
@@ -111,19 +107,11 @@ static int hi65xx_powerkey_probe(struct platform_device *pdev)
 
 	error = input_register_device(input);
 	if (error) {
-		dev_err(&pdev->dev, "failed to register input device: %d\n",
-			error);
+		dev_err(dev, "failed to register input device: %d\n", error);
 		return error;
 	}
 
-	device_init_wakeup(&pdev->dev, 1);
-
-	return 0;
-}
-
-static int hi65xx_powerkey_remove(struct platform_device *pdev)
-{
-	device_init_wakeup(&pdev->dev, 0);
+	device_init_wakeup(dev, 1);
 
 	return 0;
 }
@@ -133,7 +121,6 @@ static struct platform_driver hi65xx_powerkey_driver = {
 		.name = "hi65xx-powerkey",
 	},
 	.probe = hi65xx_powerkey_probe,
-	.remove  = hi65xx_powerkey_remove,
 };
 module_platform_driver(hi65xx_powerkey_driver);
 

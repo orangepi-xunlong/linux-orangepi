@@ -1,8 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * QLogic iSCSI HBA Driver
  * Copyright (c)  2003-2013 QLogic Corporation
- *
- * See LICENSE.qla4xxx for copyright and licensing details.
  */
 
 #include "ql4_def.h"
@@ -582,7 +581,7 @@ exit_prq_error:
 /**
  * qla4_83xx_loopback_in_progress: Is loopback in progress?
  * @ha: Pointer to host adapter structure.
- * @ret: 1 = loopback in progress, 0 = loopback not in progress
+ * returns: 1 = loopback in progress, 0 = loopback not in progress
  **/
 static int qla4_83xx_loopback_in_progress(struct scsi_qla_host *ha)
 {
@@ -651,7 +650,7 @@ static void qla4xxx_default_router_changed(struct scsi_qla_host *ha,
 /**
  * qla4xxx_isr_decode_mailbox - decodes mailbox status
  * @ha: Pointer to host adapter structure.
- * @mailbox_status: Mailbox status.
+ * @mbox_status: Mailbox status.
  *
  * This routine decodes the mailbox status during the ISR.
  * Hardware_lock locked upon entry. runs in interrupt context.
@@ -1044,6 +1043,7 @@ void qla4_83xx_interrupt_service_routine(struct scsi_qla_host *ha,
 /**
  * qla4_82xx_interrupt_service_routine - isr
  * @ha: pointer to host adapter structure.
+ * @intr_status: Local interrupt status/type.
  *
  * This is the main interrupt service routine.
  * hardware_lock locked upon entry. runs in interrupt context.
@@ -1069,6 +1069,7 @@ void qla4_82xx_interrupt_service_routine(struct scsi_qla_host *ha,
 /**
  * qla4xxx_interrupt_service_routine - isr
  * @ha: pointer to host adapter structure.
+ * @intr_status: Local interrupt status/type.
  *
  * This is the main interrupt service routine.
  * hardware_lock locked upon entry. runs in interrupt context.
@@ -1107,7 +1108,7 @@ static void qla4_82xx_spurious_interrupt(struct scsi_qla_host *ha,
 	DEBUG2(ql4_printk(KERN_INFO, ha, "Spurious Interrupt\n"));
 	if (is_qla8022(ha)) {
 		writel(0, &ha->qla4_82xx_reg->host_int);
-		if (test_bit(AF_INTx_ENABLED, &ha->flags))
+		if (!ha->pdev->msi_enabled && !ha->pdev->msix_enabled)
 			qla4_82xx_wr_32(ha, ha->nx_legacy_intr.tgt_mask_reg,
 			    0xfbff);
 	}
@@ -1564,19 +1565,18 @@ int qla4xxx_request_irqs(struct scsi_qla_host *ha)
 
 try_msi:
 	/* Trying MSI */
-	ret = pci_enable_msi(ha->pdev);
-	if (!ret) {
+	ret = pci_alloc_irq_vectors(ha->pdev, 1, 1, PCI_IRQ_MSI);
+	if (ret > 0) {
 		ret = request_irq(ha->pdev->irq, qla4_8xxx_msi_handler,
 			0, DRIVER_NAME, ha);
 		if (!ret) {
 			DEBUG2(ql4_printk(KERN_INFO, ha, "MSI: Enabled.\n"));
-			set_bit(AF_MSI_ENABLED, &ha->flags);
 			goto irq_attached;
 		} else {
 			ql4_printk(KERN_WARNING, ha,
 			    "MSI: Failed to reserve interrupt %d "
 			    "already in use.\n", ha->pdev->irq);
-			pci_disable_msi(ha->pdev);
+			pci_free_irq_vectors(ha->pdev);
 		}
 	}
 
@@ -1592,7 +1592,6 @@ try_intx:
 	    IRQF_SHARED, DRIVER_NAME, ha);
 	if (!ret) {
 		DEBUG2(ql4_printk(KERN_INFO, ha, "INTx: Enabled.\n"));
-		set_bit(AF_INTx_ENABLED, &ha->flags);
 		goto irq_attached;
 
 	} else {
@@ -1614,14 +1613,11 @@ irq_not_attached:
 
 void qla4xxx_free_irqs(struct scsi_qla_host *ha)
 {
-	if (test_and_clear_bit(AF_IRQ_ATTACHED, &ha->flags)) {
-		if (test_bit(AF_MSIX_ENABLED, &ha->flags)) {
-			qla4_8xxx_disable_msix(ha);
-		} else if (test_and_clear_bit(AF_MSI_ENABLED, &ha->flags)) {
-			free_irq(ha->pdev->irq, ha);
-			pci_disable_msi(ha->pdev);
-		} else if (test_and_clear_bit(AF_INTx_ENABLED, &ha->flags)) {
-			free_irq(ha->pdev->irq, ha);
-		}
-	}
+	if (!test_and_clear_bit(AF_IRQ_ATTACHED, &ha->flags))
+		return;
+
+	if (ha->pdev->msix_enabled)
+		free_irq(pci_irq_vector(ha->pdev, 1), ha);
+	free_irq(pci_irq_vector(ha->pdev, 0), ha);
+	pci_free_irq_vectors(ha->pdev);
 }

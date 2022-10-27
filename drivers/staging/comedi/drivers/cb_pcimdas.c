@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * comedi/drivers/cb_pcimdas.c
  * Comedi driver for Computer Boards PCIM-DAS1602/16 and PCIe-DAS1602/16
  *
  * COMEDI - Linux Control and Measurement Device Interface
  * Copyright (C) 2000 David A. Schleef <ds@schleef.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 /*
@@ -37,8 +28,8 @@
  * No interrupts, multi channel or FIFO AI,
  * although the card looks like it could support this.
  *
- * http://www.mccdaq.com/PDFs/Manuals/pcim-das1602-16.pdf
- * http://www.mccdaq.com/PDFs/Manuals/pcie-das1602-16.pdf
+ * https://www.mccdaq.com/PDFs/Manuals/pcim-das1602-16.pdf
+ * https://www.mccdaq.com/PDFs/Manuals/pcie-das1602-16.pdf
  */
 
 #include <linux/module.h>
@@ -261,9 +252,9 @@ static int cb_pcimdas_di_insn_bits(struct comedi_device *dev,
 }
 
 static int cb_pcimdas_do_insn_bits(struct comedi_device *dev,
-				    struct comedi_subdevice *s,
-				    struct comedi_insn *insn,
-				    unsigned int *data)
+				   struct comedi_subdevice *s,
+				   struct comedi_insn *insn,
+				   unsigned int *data)
 {
 	struct cb_pcimdas_private *devpriv = dev->private;
 
@@ -479,6 +470,6 @@ static struct pci_driver cb_pcimdas_pci_driver = {
 };
 module_comedi_pci_driver(cb_pcimdas_driver, cb_pcimdas_pci_driver);
 
-MODULE_AUTHOR("Comedi http://www.comedi.org");
+MODULE_AUTHOR("Comedi https://www.comedi.org");
 MODULE_DESCRIPTION("Comedi driver for PCIM-DAS1602/16 and PCIe-DAS1602/16");
 MODULE_LICENSE("GPL");
