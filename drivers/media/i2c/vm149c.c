@@ -10,6 +10,7 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <linux/rk_vcm_head.h>
+#include <linux/compat.h>
 
 #define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x0)
 #define VM149C_NAME			"vm149c"
@@ -36,8 +37,8 @@ struct vm149c_device {
 	unsigned int step_mode;
 	unsigned int vcm_movefull_t;
 
-	struct timeval start_move_tv;
-	struct timeval end_move_tv;
+	struct __kernel_old_timeval start_move_tv;
+	struct __kernel_old_timeval end_move_tv;
 	unsigned long move_ms;
 
 	u32 module_index;
@@ -251,7 +252,7 @@ static int vm149c_set_ctrl(struct v4l2_ctrl *ctrl)
 		dev_dbg(&client->dev, "dest_pos %d, move_ms %ld\n",
 				dest_pos, dev_vcm->move_ms);
 
-		dev_vcm->start_move_tv = ns_to_timeval(ktime_get_ns());
+		dev_vcm->start_move_tv = ns_to_kernel_old_timeval(ktime_get_ns());
 		mv_us = dev_vcm->start_move_tv.tv_usec +
 				dev_vcm->move_ms * 1000;
 		if (mv_us >= 1000000) {
@@ -543,8 +544,8 @@ static int vm149c_probe(struct i2c_client *client,
 	vm149c_update_vcm_cfg(vm149c_dev);
 	vm149c_dev->move_ms       = 0;
 	vm149c_dev->current_related_pos = VCMDRV_MAX_LOG;
-	vm149c_dev->start_move_tv = ns_to_timeval(ktime_get_ns());
-	vm149c_dev->end_move_tv = ns_to_timeval(ktime_get_ns());
+	vm149c_dev->start_move_tv = ns_to_kernel_old_timeval(ktime_get_ns());
+	vm149c_dev->end_move_tv = ns_to_kernel_old_timeval(ktime_get_ns());
 	if ((vm149c_dev->step_mode & 0x0c) != 0) {
 		vm149c_dev->vcm_movefull_t =
 			64 * (1 << (vm149c_dev->step_mode & 0x03)) * 1024 /

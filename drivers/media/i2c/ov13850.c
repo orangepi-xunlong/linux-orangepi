@@ -645,17 +645,6 @@ static const struct regval ov13850_4224x3136_regs[] = {
 
 static const struct ov13850_mode supported_modes[] = {
 	{
-		.width = 2112,
-		.height = 1568,
-		.max_fps = {
-			.numerator = 10000,
-			.denominator = 300000,
-		},
-		.exp_def = 0x0600,
-		.hts_def = 0x12c0,
-		.vts_def = 0x0680,
-		.reg_list = ov13850_2112x1568_regs,
-	},{
 		.width = 4224,
 		.height = 3136,
 		.max_fps = {
@@ -666,6 +655,17 @@ static const struct ov13850_mode supported_modes[] = {
 		.hts_def = 0x12c0,
 		.vts_def = 0x0d00,
 		.reg_list = ov13850_4224x3136_regs,
+	},{
+		.width = 2112,
+		.height = 1568,
+		.max_fps = {
+			.numerator = 10000,
+			.denominator = 300000,
+		},
+		.exp_def = 0x0600,
+		.hts_def = 0x12c0,
+		.vts_def = 0x0680,
+		.reg_list = ov13850_2112x1568_regs,
 	},
 };
 

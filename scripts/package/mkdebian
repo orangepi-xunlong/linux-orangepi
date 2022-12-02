@@ -94,15 +94,17 @@ else
 	packageversion=$version-$revision
 fi
 sourcename=$KDEB_SOURCENAME
+packagename=linux-image-$BRANCH$LOCALVERSION
+kernel_headers_packagename=linux-headers-$BRANCH$LOCALVERSION
+dtb_packagename=linux-dtb-$BRANCH$LOCALVERSION
+dbg_packagename=$packagename-dbg
+debarch=
+image_name=
+set_debarch
 
 if [ "$ARCH" = "um" ] ; then
-	packagename=user-mode-linux
-else
-	packagename=linux-image
+	packagename=user-mode-linux-$version
 fi
-
-debarch=
-set_debarch
 
 email=${DEBEMAIL-$EMAIL}
 
@@ -174,15 +176,27 @@ Source: $sourcename
 Section: kernel
 Priority: optional
 Maintainer: $maintainer
-Rules-Requires-Root: no
 Build-Depends: bc, rsync, kmod, cpio, bison, flex | flex:native $extra_build_depends
 Homepage: https://www.kernel.org/
 
-Package: $packagename-$version
+Package: $packagename
 Architecture: $debarch
 Description: Linux kernel, version $version
  This package contains the Linux kernel, modules and corresponding other
  files, version: $version.
+
+Package: $dtb_packagename
+Architecture: $debarch
+Description: Linux DTB, version $version
+ This package contains device blobs from the Linux kernel, version $version
+
+Package: $kernel_headers_packagename
+Architecture: $debarch
+Depends: make, gcc, libc6-dev, bison, flex, libssl-dev
+Description: Linux kernel headers for $version on $debarch
+ This package provides kernel header files for $version on $debarch
+ .
+ This is useful for people who need to build external modules
 
 Package: linux-libc-dev
 Section: devel
@@ -194,22 +208,10 @@ Description: Linux support headers for userspace development
 Multi-Arch: same
 EOF
 
-if is_enabled CONFIG_MODULES; then
-cat <<EOF >> debian/control
-
-Package: linux-headers-$version
-Architecture: $debarch
-Description: Linux kernel headers for $version on $debarch
- This package provides kernel header files for $version on $debarch
- .
- This is useful for people who need to build external modules
-EOF
-fi
-
 if is_enabled CONFIG_DEBUG_INFO; then
 cat <<EOF >> debian/control
 
-Package: linux-image-$version-dbg
+Package: $dbg_packagename
 Section: debug
 Architecture: $debarch
 Description: Linux kernel debugging symbols for $version
@@ -223,15 +225,11 @@ cat <<EOF > debian/rules
 
 srctree ?= .
 
-build-indep:
-build-arch:
+build:
 	\$(MAKE) KERNELRELEASE=${version} ARCH=${ARCH} \
 	KBUILD_BUILD_VERSION=${revision} -f \$(srctree)/Makefile
 
-build: build-arch
-
-binary-indep:
-binary-arch: build-arch
+binary-arch:
 	\$(MAKE) KERNELRELEASE=${version} ARCH=${ARCH} \
 	KBUILD_BUILD_VERSION=${revision} -f \$(srctree)/Makefile intdeb-pkg
 
