@@ -1,16 +1,15 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Greybus Firmware Management Header
  *
  * Copyright 2016 Google Inc.
  * Copyright 2016 Linaro Ltd.
- *
- * Released under the GPLv2 only.
  */
 
 #ifndef __FIRMWARE_H
 #define __FIRMWARE_H
 
-#include "greybus.h"
+#include <linux/greybus.h>
 
 #define FW_NAME_PREFIX	"gmp_"
 

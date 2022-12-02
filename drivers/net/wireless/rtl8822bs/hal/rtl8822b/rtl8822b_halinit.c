@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright(c) 2015 - 2018 Realtek Corporation.
+ * Copyright(c) 2015 - 2017 Realtek Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -49,12 +49,6 @@ void rtl8822b_init_hal_spec(PADAPTER adapter)
 			    ;
 
 	hal_spec->hci_type = 0;
-
-	rtw_macid_ctl_init_sleep_reg(adapter_to_macidctl(adapter)
-		, REG_MACID_SLEEP_8822B
-		, REG_MACID_SLEEP1_8822B
-		, REG_MACID_SLEEP2_8822B
-		, REG_MACID_SLEEP3_8822B);
 }
 
 u32 rtl8822b_power_on(PADAPTER adapter)
@@ -75,7 +69,7 @@ u32 rtl8822b_power_on(PADAPTER adapter)
 
 	err = rtw_halmac_poweron(d);
 	if (err) {
-		RTW_ERR("%s: Power ON Fail!!\n", __func__);
+		RTW_ERR("%s: Power ON Fail!!\n", __FUNCTION__);
 		ret = _FAIL;
 		goto out;
 	}
@@ -101,16 +95,16 @@ void rtl8822b_power_off(PADAPTER adapter)
 	if (bMacPwrCtrlOn == _FALSE)
 		goto out;
 
+	err = rtw_halmac_poweroff(d);
+	if (err) {
+		RTW_ERR("%s: Power OFF Fail!!\n", __FUNCTION__);
+		goto out;
+	}
+
 	bMacPwrCtrlOn = _FALSE;
 	rtw_hal_set_hwreg(adapter, HW_VAR_APFM_ON_MAC, &bMacPwrCtrlOn);
 
 	GET_HAL_DATA(adapter)->bFWReady = _FALSE;
-
-	err = rtw_halmac_poweroff(d);
-	if (err) {
-		RTW_ERR("%s: Power OFF Fail!!\n", __func__);
-		goto out;
-	}
 
 out:
 	return;
@@ -132,12 +126,12 @@ u8 rtl8822b_hal_init(PADAPTER adapter)
 #ifdef CONFIG_FILE_FWIMG
 	rtw_get_phy_file_path(adapter, MAC_FILE_FW_NIC);
 	if (rtw_is_file_readable(rtw_phy_para_file_path) == _TRUE) {
-		RTW_INFO("%s acquire FW from file:%s\n", __func__, rtw_phy_para_file_path);
+		RTW_INFO("%s acquire FW from file:%s\n", __FUNCTION__, rtw_phy_para_file_path);
 		fw_bin = _TRUE;
 	} else
 #endif /* CONFIG_FILE_FWIMG */
 	{
-		RTW_INFO("%s fw source from array\n", __func__);
+		RTW_INFO("%s fw source from array\n", __FUNCTION__);
 		fw_bin = _FALSE;
 	}
 
@@ -149,13 +143,13 @@ u8 rtl8822b_hal_init(PADAPTER adapter)
 		err = rtw_halmac_init_hal_fw(d, array_mp_8822b_fw_nic, array_length_mp_8822b_fw_nic);
 
 	if (err) {
-		RTW_ERR("%s Download Firmware from %s failed\n", __func__, (fw_bin) ? "file" : "array");
+		RTW_ERR("%s Download Firmware from %s failed\n", __FUNCTION__, (fw_bin) ? "file" : "array");
 		return _FALSE;
 	}
 
+	
 
-
-	RTW_INFO("%s Download Firmware from %s success\n", __func__, (fw_bin) ? "file" : "array");
+	RTW_INFO("%s Download Firmware from %s success\n", __FUNCTION__, (fw_bin) ? "file" : "array");
 	RTW_INFO("%s FW Version:%d SubVersion:%d FW size:%d\n", "NIC",
 		hal->firmware_version, hal->firmware_sub_version, hal->firmware_size);
 
@@ -177,11 +171,11 @@ u8 rtl8822b_mac_verify(PADAPTER adapter)
 
 	err = rtw_halmac_self_verify(d);
 	if (err) {
-		RTW_INFO("%s fail\n", __func__);
+		RTW_INFO("%s fail\n", __FUNCTION__);
 		return _FALSE;
 	}
 
-	RTW_INFO("%s successful\n", __func__);
+	RTW_INFO("%s successful\n", __FUNCTION__);
 	return _TRUE;
 }
 
@@ -208,8 +202,8 @@ void rtl8822b_init_misc(PADAPTER adapter)
 		struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
 		PADAPTER iface = NULL;
 
-		RTW_INFO("%s: under only 5G for A/B cut\n", __func__);
-		RTW_INFO("%s: not support HT/VHT RX STBC for A/B cut\n", __func__);
+		RTW_INFO("%s: under only 5G for A/B cut\n", __FUNCTION__);
+		RTW_INFO("%s: not support HT/VHT RX STBC for A/B cut\n", __FUNCTION__);
 
 		for (i = 0; i < dvobj->iface_nums; i++) {
 			iface = dvobj->padapters[i];
@@ -254,13 +248,13 @@ void rtl8822b_init_misc(PADAPTER adapter)
 	ctrl = rtw_read32(adapter, REG_FWHW_TXQ_CTRL_8822B);
 	ctrl_new = ctrl;
 	RTW_PRINT("%s: default 0x%x = 0x%08x\n",
-		  __func__, REG_FWHW_TXQ_CTRL_8822B, ctrl);
+		  __FUNCTION__, REG_FWHW_TXQ_CTRL_8822B, ctrl);
 	RTW_PRINT("%s: default AMPDU agg with retry and new: %s\n",
-		  __func__, ctrl&BIT_EN_RTY_BK_8822B?"false":"true");
+		  __FUNCTION__, ctrl&BIT_EN_RTY_BK_8822B?"false":"true");
 	if (ctrl & BIT_EN_RTY_BK_8822B) {
 		ctrl_new &= ~BIT_EN_RTY_BK_8822B;
 		RTW_PRINT("%s: Enable AMPDU agg with retry and new!\n",
-			  __func__);
+			  __FUNCTION__);
 	}
 	/* 0x423[2] */
 #define BIT_EN_RTY_BK_COD_8822B	BIT(2)
@@ -270,15 +264,10 @@ void rtl8822b_init_misc(PADAPTER adapter)
 		rtw_write32(adapter, REG_FWHW_TXQ_CTRL_8822B, ctrl_new);
 		ctrl = rtw_read32(adapter, REG_FWHW_TXQ_CTRL_8822B);
 		RTW_PRINT("%s: final 0x%x = 0x%08x (read back:0x%08x)\n",
-			  __func__, REG_FWHW_TXQ_CTRL_8822B,
+			  __FUNCTION__, REG_FWHW_TXQ_CTRL_8822B,
 			  ctrl_new, ctrl);
 	}
 #endif /* RTW_AMPDU_AGG_RETRY_NEW */
-
-#ifdef CONFIG_LPS_PWR_TRACKING
-	rtl8822b_set_fw_thermal_rpt_cmd(adapter, _TRUE, hal->eeprom_thermal_meter + THERMAL_DIFF_TH);
-#endif
-
 }
 
 u32 rtl8822b_init(PADAPTER adapter)

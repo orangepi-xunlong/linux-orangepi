@@ -59,6 +59,20 @@ struct fiq_debugger_pdata {
 
 	void (*force_irq)(struct platform_device *pdev, unsigned int irq);
 	void (*force_irq_ack)(struct platform_device *pdev, unsigned int irq);
+
+#ifdef CONFIG_RK_CONSOLE_THREAD
+	void (*console_write)(struct platform_device *pdev, const char *s,
+			      unsigned int count);
+#endif
+#ifdef CONFIG_FIQ_DEBUGGER_TRUST_ZONE
+	void (*switch_cpu)(struct platform_device *pdev, u32 cpu);
+	void (*enable_debug)(struct platform_device *pdev, bool val);
+#endif
 };
+
+#ifdef CONFIG_FIQ_GLUE
+void gic_set_irq_secure(struct irq_data *d);
+void gic_set_irq_priority(struct irq_data *d, u8 pri);
+#endif
 
 #endif

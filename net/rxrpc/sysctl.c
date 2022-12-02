@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* sysctls for configuring RxRPC operating parameters
  *
  * Copyright (C) 2014 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public Licence
- * as published by the Free Software Foundation; either version
- * 2 of the Licence, or (at your option) any later version.
  */
 
 #include <linux/sysctl.h>
@@ -15,97 +11,76 @@
 #include "ar-internal.h"
 
 static struct ctl_table_header *rxrpc_sysctl_reg_table;
-static const unsigned int zero = 0;
-static const unsigned int one = 1;
 static const unsigned int four = 4;
 static const unsigned int thirtytwo = 32;
 static const unsigned int n_65535 = 65535;
 static const unsigned int n_max_acks = RXRPC_RXTX_BUFF_SIZE - 1;
+static const unsigned long one_jiffy = 1;
+static const unsigned long max_jiffies = MAX_JIFFY_OFFSET;
 
 /*
  * RxRPC operating parameters.
  *
- * See Documentation/networking/rxrpc.txt and the variable definitions for more
+ * See Documentation/networking/rxrpc.rst and the variable definitions for more
  * information on the individual parameters.
  */
 static struct ctl_table rxrpc_sysctl_table[] = {
-	/* Values measured in milliseconds */
+	/* Values measured in milliseconds but used in jiffies */
 	{
 		.procname	= "req_ack_delay",
 		.data		= &rxrpc_requested_ack_delay,
-		.maxlen		= sizeof(unsigned int),
+		.maxlen		= sizeof(unsigned long),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-		.extra1		= (void *)&zero,
+		.proc_handler	= proc_doulongvec_ms_jiffies_minmax,
+		.extra1		= (void *)&one_jiffy,
+		.extra2		= (void *)&max_jiffies,
 	},
 	{
 		.procname	= "soft_ack_delay",
 		.data		= &rxrpc_soft_ack_delay,
-		.maxlen		= sizeof(unsigned int),
+		.maxlen		= sizeof(unsigned long),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-		.extra1		= (void *)&one,
+		.proc_handler	= proc_doulongvec_ms_jiffies_minmax,
+		.extra1		= (void *)&one_jiffy,
+		.extra2		= (void *)&max_jiffies,
 	},
 	{
 		.procname	= "idle_ack_delay",
 		.data		= &rxrpc_idle_ack_delay,
-		.maxlen		= sizeof(unsigned int),
+		.maxlen		= sizeof(unsigned long),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-		.extra1		= (void *)&one,
-	},
-	{
-		.procname	= "resend_timeout",
-		.data		= &rxrpc_resend_timeout,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-		.extra1		= (void *)&one,
+		.proc_handler	= proc_doulongvec_ms_jiffies_minmax,
+		.extra1		= (void *)&one_jiffy,
+		.extra2		= (void *)&max_jiffies,
 	},
 	{
 		.procname	= "idle_conn_expiry",
 		.data		= &rxrpc_conn_idle_client_expiry,
-		.maxlen		= sizeof(unsigned int),
+		.maxlen		= sizeof(unsigned long),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec_ms_jiffies,
-		.extra1		= (void *)&one,
+		.proc_handler	= proc_doulongvec_ms_jiffies_minmax,
+		.extra1		= (void *)&one_jiffy,
+		.extra2		= (void *)&max_jiffies,
 	},
 	{
 		.procname	= "idle_conn_fast_expiry",
 		.data		= &rxrpc_conn_idle_client_fast_expiry,
-		.maxlen		= sizeof(unsigned int),
+		.maxlen		= sizeof(unsigned long),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec_ms_jiffies,
-		.extra1		= (void *)&one,
-	},
-
-	/* Values measured in seconds but used in jiffies */
-	{
-		.procname	= "max_call_lifetime",
-		.data		= &rxrpc_max_call_lifetime,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-		.extra1		= (void *)&one,
+		.proc_handler	= proc_doulongvec_ms_jiffies_minmax,
+		.extra1		= (void *)&one_jiffy,
+		.extra2		= (void *)&max_jiffies,
 	},
 
 	/* Non-time values */
-	{
-		.procname	= "max_client_conns",
-		.data		= &rxrpc_max_client_connections,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= (void *)&rxrpc_reap_client_connections,
-	},
 	{
 		.procname	= "reap_client_conns",
 		.data		= &rxrpc_reap_client_connections,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= (void *)&one,
-		.extra2		= (void *)&rxrpc_max_client_connections,
+		.extra1		= (void *)SYSCTL_ONE,
+		.extra2		= (void *)&n_65535,
 	},
 	{
 		.procname	= "max_backlog",
@@ -122,7 +97,7 @@ static struct ctl_table rxrpc_sysctl_table[] = {
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= (void *)&one,
+		.extra1		= (void *)SYSCTL_ONE,
 		.extra2		= (void *)&n_max_acks,
 	},
 	{
@@ -131,7 +106,7 @@ static struct ctl_table rxrpc_sysctl_table[] = {
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= (void *)&one,
+		.extra1		= (void *)SYSCTL_ONE,
 		.extra2		= (void *)&n_65535,
 	},
 	{
@@ -140,7 +115,7 @@ static struct ctl_table rxrpc_sysctl_table[] = {
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= (void *)&one,
+		.extra1		= (void *)SYSCTL_ONE,
 		.extra2		= (void *)&four,
 	},
 

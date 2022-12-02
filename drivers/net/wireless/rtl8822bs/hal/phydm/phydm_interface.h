@@ -340,14 +340,22 @@ ODM_sleep_us(u32	us);
 void
 odm_set_timer(
 	struct PHY_DM_STRUCT		*p_dm,
-	struct phydm_timer_list		*p_timer,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0))
+	struct legacy_timer_emu		*p_timer,
+#else
+	struct timer_list		*p_timer,
+#endif
 	u32			ms_delay
 );
 
 void
 odm_initialize_timer(
 	struct PHY_DM_STRUCT			*p_dm,
-	struct phydm_timer_list			*p_timer,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0))
+	struct legacy_timer_emu		*p_timer,
+#else
+	struct timer_list		*p_timer,
+#endif
 	void	*call_back_func,
 	void				*p_context,
 	const char			*sz_id
@@ -356,13 +364,21 @@ odm_initialize_timer(
 void
 odm_cancel_timer(
 	struct PHY_DM_STRUCT		*p_dm,
-	struct phydm_timer_list		*p_timer
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0))
+	struct legacy_timer_emu		*p_timer
+#else
+	struct timer_list		*p_timer
+#endif
 );
 
 void
 odm_release_timer(
 	struct PHY_DM_STRUCT		*p_dm,
-	struct phydm_timer_list		*p_timer
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0))
+	struct legacy_timer_emu		*p_timer
+#else
+	struct timer_list		*p_timer
+#endif
 );
 
 /*ODM FW relative API.*/

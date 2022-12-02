@@ -14,7 +14,6 @@
  */
 
 #include <linux/atomic.h>
-#include <linux/cpufreq_times.h>
 #include <linux/err.h>
 #include <linux/hashtable.h>
 #include <linux/init.h>
@@ -24,7 +23,7 @@
 #include <linux/proc_fs.h>
 #include <linux/profile.h>
 #include <linux/rtmutex.h>
-#include <linux/sched.h>
+#include <linux/sched/cputime.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
@@ -66,10 +65,10 @@ struct task_entry {
 
 struct uid_entry {
 	uid_t uid;
-	cputime_t utime;
-	cputime_t stime;
-	cputime_t active_utime;
-	cputime_t active_stime;
+	u64 utime;
+	u64 stime;
+	u64 active_utime;
+	u64 active_stime;
 	int state;
 	struct io_stats io[UID_STATE_SIZE];
 	struct hlist_node hash;
@@ -126,7 +125,7 @@ static void get_full_task_comm(struct task_entry *task_entry,
 	int i = 0, offset = 0, len = 0;
 	/* save one byte for terminating null character */
 	int unused_len = MAX_TASK_COMM_LEN - TASK_COMM_LEN - 1;
-	char buf[unused_len];
+	char buf[MAX_TASK_COMM_LEN - TASK_COMM_LEN - 1];
 	struct mm_struct *mm = task->mm;
 
 	/* fill the first TASK_COMM_LEN bytes with thread name */
@@ -137,7 +136,7 @@ static void get_full_task_comm(struct task_entry *task_entry,
 
 	/* next the executable file name */
 	if (mm) {
-		down_read(&mm->mmap_sem);
+		mmap_write_lock(mm);
 		if (mm->exe_file) {
 			char *pathname = d_path(&mm->exe_file->f_path, buf,
 					unused_len);
@@ -150,7 +149,7 @@ static void get_full_task_comm(struct task_entry *task_entry,
 				unused_len--;
 			}
 		}
-		up_read(&mm->mmap_sem);
+		mmap_write_unlock(mm);
 	}
 	unused_len -= len;
 
@@ -334,8 +333,8 @@ static int uid_cputime_show(struct seq_file *m, void *v)
 	struct uid_entry *uid_entry = NULL;
 	struct task_struct *task, *temp;
 	struct user_namespace *user_ns = current_user_ns();
-	cputime_t utime;
-	cputime_t stime;
+	u64 utime;
+	u64 stime;
 	unsigned long bkt;
 	uid_t uid;
 
@@ -358,22 +357,22 @@ static int uid_cputime_show(struct seq_file *m, void *v)
 				__func__, uid);
 			return -ENOMEM;
 		}
-		task_cputime_adjusted(task, &utime, &stime);
-		uid_entry->active_utime += utime;
-		uid_entry->active_stime += stime;
+		/* avoid double accounting of dying threads */
+		if (!(task->flags & PF_EXITING)) {
+			task_cputime_adjusted(task, &utime, &stime);
+			uid_entry->active_utime += utime;
+			uid_entry->active_stime += stime;
+		}
 	} while_each_thread(temp, task);
 	rcu_read_unlock();
 
 	hash_for_each(hash_table, bkt, uid_entry, hash) {
-		cputime_t total_utime = uid_entry->utime +
+		u64 total_utime = uid_entry->utime +
 							uid_entry->active_utime;
-		cputime_t total_stime = uid_entry->stime +
+		u64 total_stime = uid_entry->stime +
 							uid_entry->active_stime;
 		seq_printf(m, "%d: %llu %llu\n", uid_entry->uid,
-			(unsigned long long)jiffies_to_msecs(
-				cputime_to_jiffies(total_utime)) * USEC_PER_MSEC,
-			(unsigned long long)jiffies_to_msecs(
-				cputime_to_jiffies(total_stime)) * USEC_PER_MSEC);
+			ktime_to_us(total_utime), ktime_to_us(total_stime));
 	}
 
 	rt_mutex_unlock(&uid_lock);
@@ -385,11 +384,11 @@ static int uid_cputime_open(struct inode *inode, struct file *file)
 	return single_open(file, uid_cputime_show, PDE_DATA(inode));
 }
 
-static const struct file_operations uid_cputime_fops = {
-	.open		= uid_cputime_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
+static const struct proc_ops uid_cputime_fops = {
+	.proc_open	= uid_cputime_open,
+	.proc_read	= seq_read,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
 };
 
 static int uid_remove_open(struct inode *inode, struct file *file)
@@ -424,9 +423,6 @@ static ssize_t uid_remove_write(struct file *file,
 		return -EINVAL;
 	}
 
-	/* Also remove uids from /proc/uid_time_in_state */
-	cpufreq_task_times_remove_uids(uid_start, uid_end);
-
 	rt_mutex_lock(&uid_lock);
 
 	for (; uid_start <= uid_end; uid_start++) {
@@ -444,10 +440,10 @@ static ssize_t uid_remove_write(struct file *file,
 	return count;
 }
 
-static const struct file_operations uid_remove_fops = {
-	.open		= uid_remove_open,
-	.release	= single_release,
-	.write		= uid_remove_write,
+static const struct proc_ops uid_remove_fops = {
+	.proc_open	= uid_remove_open,
+	.proc_release	= single_release,
+	.proc_write	= uid_remove_write,
 };
 
 
@@ -455,6 +451,10 @@ static void add_uid_io_stats(struct uid_entry *uid_entry,
 			struct task_struct *task, int slot)
 {
 	struct io_stats *io_slot = &uid_entry->io[slot];
+
+	/* avoid double accounting of dying threads */
+	if (slot != UID_STATE_DEAD_TASKS && (task->flags & PF_EXITING))
+		return;
 
 	io_slot->read_bytes += task->ioac.read_bytes;
 	io_slot->write_bytes += compute_write_bytes(task);
@@ -559,11 +559,11 @@ static int uid_io_open(struct inode *inode, struct file *file)
 	return single_open(file, uid_io_show, PDE_DATA(inode));
 }
 
-static const struct file_operations uid_io_fops = {
-	.open		= uid_io_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
+static const struct proc_ops uid_io_fops = {
+	.proc_open	= uid_io_open,
+	.proc_read	= seq_read,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
 };
 
 static int uid_procstat_open(struct inode *inode, struct file *file)
@@ -616,10 +616,10 @@ static ssize_t uid_procstat_write(struct file *file,
 	return count;
 }
 
-static const struct file_operations uid_procstat_fops = {
-	.open		= uid_procstat_open,
-	.release	= single_release,
-	.write		= uid_procstat_write,
+static const struct proc_ops uid_procstat_fops = {
+	.proc_open	= uid_procstat_open,
+	.proc_release	= single_release,
+	.proc_write	= uid_procstat_write,
 };
 
 static int process_notifier(struct notifier_block *self,
@@ -627,7 +627,7 @@ static int process_notifier(struct notifier_block *self,
 {
 	struct task_struct *task = v;
 	struct uid_entry *uid_entry;
-	cputime_t utime, stime;
+	u64 utime, stime;
 	uid_t uid;
 
 	if (!task)

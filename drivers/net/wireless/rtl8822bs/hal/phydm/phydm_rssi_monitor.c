@@ -19,7 +19,7 @@
 
 #include "mp_precomp.h"
 #include "phydm_precomp.h"
-
+ 
 #ifdef PHYDM_SUPPORT_RSSI_MONITOR
 
 #ifdef PHYDM_3RD_REFORM_RSSI_MONOTOR
@@ -44,7 +44,7 @@ phydm_rssi_monitor_h2c(
 		PHYDM_DBG(p_dm, DBG_RSSI_MNTR, ("[Warning] %s invalid sta_info\n", __func__));
 		return;
 	}
-
+	
 	PHYDM_DBG(p_dm, DBG_RSSI_MNTR, ("%s ======>\n", __func__));
 	PHYDM_DBG(p_dm, DBG_RSSI_MNTR, ("MACID=%d\n", p_sta->mac_id));
 
@@ -80,7 +80,7 @@ phydm_rssi_monitor_h2c(
 	if (p_dm->support_ic_type == ODM_RTL8188E)
 		odm_ra_set_rssi_8188e(p_dm, (u8)(p_sta->mac_id & 0xFF), p_sta->rssi_stat.rssi & 0x7F);
 	else
-	#endif
+	#endif 
 	{
 		odm_fill_h2c_cmd(p_dm, ODM_H2C_RSSI_REPORT, H2C_MAX_LENGTH, h2c_val);
 	}
@@ -369,7 +369,7 @@ odm_rssi_monitor_check_mp(
 
 			odm_fill_h2c_cmd(p_dm, ODM_H2C_RSSI_REPORT, cmdlen, h2c_parameter);
 		}
-
+	
 	} else
 		PlatformEFIOWrite1Byte(adapter, 0x4fe, (u8)p_hal_data->UndecoratedSmoothedPWDB);
 

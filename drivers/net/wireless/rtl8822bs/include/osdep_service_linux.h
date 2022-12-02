@@ -160,13 +160,15 @@ typedef	spinlock_t	_lock;
 #else
 	typedef struct semaphore	_mutex;
 #endif
-struct rtw_timer_list {
-	struct timer_list timer;
-	void (*function)(void *);
-	void *arg;
-};
-
-typedef struct rtw_timer_list _timer;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0))
+ 	typedef struct legacy_timer_emu {
+ 		struct timer_list t;
+ 		void (*function)(unsigned long);
+ 		unsigned long data;
+ 	} _timer;
+#else
+typedef struct timer_list _timer;
+#endif
 typedef struct completion _completion;
 
 struct	__queue	{
@@ -298,43 +300,42 @@ __inline static void rtw_list_delete(_list *plist)
 	list_del_init(plist);
 }
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0))
-static inline void timer_hdl(struct timer_list *in_timer)
-#else
-static inline void timer_hdl(unsigned long cntx)
-#endif
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0))
+static void legacy_timer_emu_func(struct timer_list *t)
 {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0))
-	_timer *ptimer = from_timer(ptimer, in_timer, timer);
-#else
-	_timer *ptimer = (_timer *)cntx;
-#endif
-	ptimer->function(ptimer->arg);
+	struct legacy_timer_emu *lt = from_timer(lt, t, t);
+	lt->function(lt->data);
 }
+#endif
 
 __inline static void _init_timer(_timer *ptimer, _nic_hdl nic_hdl, void *pfunc, void *cntx)
 {
-	ptimer->function = pfunc;
-	ptimer->arg = cntx;
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0))
-	timer_setup(&ptimer->timer, timer_hdl, 0);
-#else
 	/* setup_timer(ptimer, pfunc,(u32)cntx);	 */
-	ptimer->timer.function = timer_hdl;
-	ptimer->timer.data = (unsigned long)ptimer;
-	init_timer(&ptimer->timer);
+	ptimer->function = pfunc;
+	ptimer->data = (unsigned long)cntx;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0))
+ 	timer_setup(&ptimer->t, legacy_timer_emu_func, 0);
+#else
+ 	init_timer(ptimer);
 #endif
 }
 
 __inline static void _set_timer(_timer *ptimer, u32 delay_time)
 {
-	mod_timer(&ptimer->timer , (jiffies + (delay_time * HZ / 1000)));
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0))
+ 	mod_timer(&ptimer->t, (jiffies+(delay_time*HZ/1000)));
+#else
+ 	mod_timer(ptimer, (jiffies+(delay_time*HZ/1000)));
+#endif
 }
 
 __inline static void _cancel_timer(_timer *ptimer, u8 *bcancelled)
 {
-	*bcancelled = del_timer_sync(&ptimer->timer) == 1 ? 1 : 0;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0))
+ 	del_timer_sync(&ptimer->t);
+#else
+ 	del_timer_sync(ptimer);
+#endif
 }
 
 static inline void _init_workitem(_workitem *pwork, void *pfunc, void *cntx)

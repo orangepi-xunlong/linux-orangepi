@@ -1,9 +1,4 @@
-dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3368-evb-act8846.dtb
-dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3368-geekbox.dtb
-dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3368-orion-r68-meta.dtb
-dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3368-r88.dtb
-dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3399-evb.dtb
+# SPDX-License-Identifier: GPL-2.0
+dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588s-orangepi-5.dtb
 
-always		:= $(dtb-y)
-subdir-y	:= $(dts-dirs)
-clean-files	:= *.dtb
+subdir-y := $(dts-dirs) overlay

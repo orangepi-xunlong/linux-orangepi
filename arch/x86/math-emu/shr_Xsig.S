@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 	.file	"shr_Xsig.S"
 /*---------------------------------------------------------------------------+
  |  shr_Xsig.S                                                               |
@@ -21,7 +22,7 @@
 #include "fpu_emu.h"
 
 .text
-ENTRY(shr_Xsig)
+SYM_FUNC_START(shr_Xsig)
 	push	%ebp
 	movl	%esp,%ebp
 	pushl	%esi
@@ -85,3 +86,4 @@ L_more_than_95:
 	popl	%esi
 	leave
 	ret
+SYM_FUNC_END(shr_Xsig)

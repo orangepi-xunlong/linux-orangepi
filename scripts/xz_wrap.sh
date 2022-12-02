@@ -9,6 +9,8 @@
 # You can do whatever you want with this file.
 #
 
+. include/config/auto.conf
+
 BCJ=
 LZMA2OPTS=
 
@@ -20,4 +22,8 @@ case $SRCARCH in
 	sparc)          BCJ=--sparc ;;
 esac
 
-exec xz --check=crc32 $BCJ --lzma2=$LZMA2OPTS,dict=32MiB
+if [ -n "${CONFIG_THUMB2_KERNEL}" ]; then
+	BCJ=--armthumb
+fi
+
+exec $XZ --check=crc32 $BCJ --lzma2=$LZMA2OPTS,dict=32MiB

@@ -24,7 +24,7 @@ halmac_read_indirect_cmd52_sdio_88xx(
 	IN PHALMAC_ADAPTER pHalmac_adapter,
 	IN u16 halmac_offset
 );
-
+ 
 /*only for halmac_read_indirect_sdio_88xx !!, Soar 20171206*/
 static u32
 halmac_read_indirect_cmd53_sdio_88xx(
@@ -648,7 +648,7 @@ halmac_read_indirect_sdio_88xx(
 
 	PLATFORM_MUTEX_UNLOCK(pDriver_adapter, &(pHalmac_adapter->sdio_indirect_mutex));
 
-	return value32.dword;
+	return value32.dword;	
 }
 
 #endif /* HALMAC_88XX_SUPPORT */

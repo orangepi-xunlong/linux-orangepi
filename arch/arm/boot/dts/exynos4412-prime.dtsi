@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Samsung's Exynos4412 Prime SoC device tree source
  *
  * Copyright (c) 2016 Samsung Electronics Co., Ltd.
  *		http://www.samsung.com
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 /*
@@ -20,12 +17,12 @@
 };
 
 &cpu0_opp_table {
-	opp@1600000000 {
+	opp-1600000000 {
 		opp-hz = /bits/ 64 <1600000000>;
 		opp-microvolt = <1350000>;
 		clock-latency-ns = <200000>;
 	};
-	opp@1704000000 {
+	opp-1704000000 {
 		opp-hz = /bits/ 64 <1704000000>;
 		opp-microvolt = <1350000>;
 		clock-latency-ns = <200000>;
@@ -33,9 +30,18 @@
 };
 
 &cooling_map0 {
-	cooling-device = <&cpu0 9 9>;
+	cooling-device = <&cpu0 9 9>, <&cpu1 9 9>,
+			 <&cpu2 9 9>, <&cpu3 9 9>;
 };
 
 &cooling_map1 {
-	cooling-device = <&cpu0 15 15>;
+	cooling-device = <&cpu0 15 15>, <&cpu1 15 15>,
+			 <&cpu2 15 15>, <&cpu3 15 15>;
+};
+
+&gpu_opp_table {
+	opp-533000000 {
+		opp-hz = /bits/ 64 <533000000>;
+		opp-microvolt = <1075000>;
+	};
 };

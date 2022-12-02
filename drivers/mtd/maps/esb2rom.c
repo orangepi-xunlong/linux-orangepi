@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * esb2rom.c
  *
@@ -248,7 +249,7 @@ static int __init esb2rom_init_one(struct pci_dev *pdev,
 	}
 
 	/* Map the firmware hub into my address space. */
-	window->virt = ioremap_nocache(window->phys, window->size);
+	window->virt = ioremap(window->phys, window->size);
 	if (!window->virt) {
 		printk(KERN_ERR MOD_NAME ": ioremap(%08lx, %08lx) failed\n",
 			window->phys, window->size);
@@ -384,7 +385,7 @@ static void esb2rom_remove_one(struct pci_dev *pdev)
 	esb2rom_cleanup(window);
 }
 
-static struct pci_device_id esb2rom_pci_tbl[] = {
+static const struct pci_device_id esb2rom_pci_tbl[] = {
 	{ PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82801BA_0,
 	  PCI_ANY_ID, PCI_ANY_ID, },
 	{ PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82801CA_0,
@@ -414,7 +415,7 @@ static struct pci_driver esb2rom_driver = {
 static int __init init_esb2rom(void)
 {
 	struct pci_dev *pdev;
-	struct pci_device_id *id;
+	const struct pci_device_id *id;
 	int retVal;
 
 	pdev = NULL;

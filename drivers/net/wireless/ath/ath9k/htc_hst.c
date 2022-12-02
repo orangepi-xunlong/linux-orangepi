@@ -26,11 +26,11 @@ static int htc_issue_send(struct htc_target *target, struct sk_buff* skb,
 	struct htc_endpoint *endpoint = &target->endpoint[epid];
 	int status;
 
-	hdr = (struct htc_frame_hdr *)
-		skb_push(skb, sizeof(struct htc_frame_hdr));
+	hdr = skb_push(skb, sizeof(struct htc_frame_hdr));
 	hdr->endpoint_id = epid;
 	hdr->flags = flags;
 	hdr->payload_len = cpu_to_be16(len);
+	memset(hdr->control, 0, sizeof(hdr->control));
 
 	status = target->hif->send(target->hif_dev, endpoint->ul_pipeid, skb);
 
@@ -114,6 +114,9 @@ static void htc_process_conn_rsp(struct htc_target *target,
 
 	if (svc_rspmsg->status == HTC_SERVICE_SUCCESS) {
 		epid = svc_rspmsg->endpoint_id;
+		if (epid < 0 || epid >= ENDPOINT_MAX)
+			return;
+
 		service_id = be16_to_cpu(svc_rspmsg->service_id);
 		max_msglen = be16_to_cpu(svc_rspmsg->max_msg_len);
 		endpoint = &target->endpoint[epid];
@@ -156,8 +159,7 @@ static int htc_config_pipe_credits(struct htc_target *target)
 	}
 	skb_reserve(skb, sizeof(struct htc_frame_hdr));
 
-	cp_msg = (struct htc_config_pipe_msg *)
-		skb_put(skb, sizeof(struct htc_config_pipe_msg));
+	cp_msg = skb_put(skb, sizeof(struct htc_config_pipe_msg));
 
 	cp_msg->message_id = cpu_to_be16(HTC_MSG_CONFIG_PIPE_ID);
 	cp_msg->pipe_id = USB_WLAN_TX_PIPE;
@@ -195,8 +197,7 @@ static int htc_setup_complete(struct htc_target *target)
 	}
 	skb_reserve(skb, sizeof(struct htc_frame_hdr));
 
-	comp_msg = (struct htc_comp_msg *)
-		skb_put(skb, sizeof(struct htc_comp_msg));
+	comp_msg = skb_put(skb, sizeof(struct htc_comp_msg));
 	comp_msg->msg_id = cpu_to_be16(HTC_MSG_SETUP_COMPLETE_ID);
 
 	target->htc_flags |= HTC_OP_START_WAIT;
@@ -244,8 +245,8 @@ int htc_connect_service(struct htc_target *target,
 	/* Find an available endpoint */
 	endpoint = get_next_avail_ep(target->endpoint);
 	if (!endpoint) {
-		dev_err(target->dev, "Endpoint is not available for"
-			"service %d\n", service_connreq->service_id);
+		dev_err(target->dev, "Endpoint is not available for service %d\n",
+			service_connreq->service_id);
 		return -EINVAL;
 	}
 
@@ -265,13 +266,16 @@ int htc_connect_service(struct htc_target *target,
 
 	skb_reserve(skb, sizeof(struct htc_frame_hdr));
 
-	conn_msg = (struct htc_conn_svc_msg *)
-			skb_put(skb, sizeof(struct htc_conn_svc_msg));
+	conn_msg = skb_put(skb, sizeof(struct htc_conn_svc_msg));
 	conn_msg->service_id = cpu_to_be16(service_connreq->service_id);
 	conn_msg->msg_id = cpu_to_be16(HTC_MSG_CONNECT_SERVICE_ID);
 	conn_msg->con_flags = cpu_to_be16(service_connreq->con_flags);
 	conn_msg->dl_pipeid = endpoint->dl_pipeid;
 	conn_msg->ul_pipeid = endpoint->ul_pipeid;
+
+	/* To prevent infoleak */
+	conn_msg->svc_meta_len = 0;
+	conn_msg->pad = 0;
 
 	ret = htc_issue_send(target, skb, skb->len, 0, ENDPOINT0);
 	if (ret)
@@ -340,6 +344,8 @@ void ath9k_htc_txcompletion_cb(struct htc_target *htc_handle,
 
 	if (skb) {
 		htc_hdr = (struct htc_frame_hdr *) skb->data;
+		if (htc_hdr->endpoint_id >= ARRAY_SIZE(htc_handle->endpoint))
+			goto ret;
 		endpoint = &htc_handle->endpoint[htc_hdr->endpoint_id];
 		skb_pull(skb, sizeof(struct htc_frame_hdr));
 
@@ -382,7 +388,7 @@ static void ath9k_htc_fw_panic_report(struct htc_target *htc_handle,
 		break;
 		}
 	default:
-		dev_err(htc_handle->dev, "ath: uknown panic pattern!\n");
+		dev_err(htc_handle->dev, "ath: unknown panic pattern!\n");
 		break;
 	}
 }

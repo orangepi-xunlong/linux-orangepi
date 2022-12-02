@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *    HMC Drive FTP Services
  *
@@ -136,7 +137,7 @@ static int hmcdrv_ftp_parse(char *cmd, struct hmcdrv_ftp_cmdspec *ftp)
 			while ((*cmd != '\0') && !iscntrl(*cmd))
 				++cmd;
 			ftp->fname = start;
-			/* fall through */
+			fallthrough;
 		default:
 			*cmd = '\0';
 			break;

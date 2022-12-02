@@ -107,7 +107,7 @@ halmac_cfg_bw_88xx(
 	IN HALMAC_BW bw
 );
 
-HALMAC_RET_STATUS
+VOID
 halmac_enable_bb_rf_88xx(
 	IN PHALMAC_ADAPTER pHalmac_adapter,
 	IN u8 enable

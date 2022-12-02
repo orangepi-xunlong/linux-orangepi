@@ -1,36 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB
 /*
  * Copyright (c) 2016 Mellanox Technologies Ltd. All rights reserved.
  * Copyright (c) 2015 System Fabric Works, Inc. All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * OpenIB.org BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *	- Redistributions of source code must retain the above
- *	  copyright notice, this list of conditions and the following
- *	  disclaimer.
- *
- *	- Redistributions in binary form must reproduce the above
- *	  copyright notice, this list of conditions and the following
- *	  disclaimer in the documentation and/or other materials
- *	  provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
  */
 
+#include <linux/vmalloc.h>
 #include "rxe.h"
 #include "rxe_loc.h"
 #include "rxe_queue.h"
@@ -98,8 +72,8 @@ err1:
 }
 
 int rxe_srq_from_init(struct rxe_dev *rxe, struct rxe_srq *srq,
-		      struct ib_srq_init_attr *init,
-		      struct ib_ucontext *context, struct ib_udata *udata)
+		      struct ib_srq_init_attr *init, struct ib_udata *udata,
+		      struct rxe_create_srq_resp __user *uresp)
 {
 	int err;
 	int srq_wqe_size;
@@ -126,55 +100,43 @@ int rxe_srq_from_init(struct rxe_dev *rxe, struct rxe_srq *srq,
 
 	srq->rq.queue = q;
 
-	err = do_mmap_info(rxe, udata, false, context, q->buf,
+	err = do_mmap_info(rxe, uresp ? &uresp->mi : NULL, udata, q->buf,
 			   q->buf_size, &q->ip);
-	if (err)
+	if (err) {
+		vfree(q->buf);
+		kfree(q);
 		return err;
-
-	if (udata && udata->outlen >= sizeof(struct mminfo) + sizeof(u32)) {
-		if (copy_to_user(udata->outbuf + sizeof(struct mminfo),
-				 &srq->srq_num, sizeof(u32)))
-			return -EFAULT;
 	}
+
+	if (uresp) {
+		if (copy_to_user(&uresp->srq_num, &srq->srq_num,
+				 sizeof(uresp->srq_num))) {
+			rxe_queue_cleanup(q);
+			return -EFAULT;
+		}
+	}
+
 	return 0;
 }
 
 int rxe_srq_from_attr(struct rxe_dev *rxe, struct rxe_srq *srq,
 		      struct ib_srq_attr *attr, enum ib_srq_attr_mask mask,
-		      struct ib_udata *udata)
+		      struct rxe_modify_srq_cmd *ucmd, struct ib_udata *udata)
 {
 	int err;
 	struct rxe_queue *q = srq->rq.queue;
-	struct mminfo mi = { .offset = 1, .size = 0};
+	struct mminfo __user *mi = NULL;
 
 	if (mask & IB_SRQ_MAX_WR) {
-		/* Check that we can write the mminfo struct to user space */
-		if (udata && udata->inlen >= sizeof(__u64)) {
-			__u64 mi_addr;
+		/*
+		 * This is completely screwed up, the response is supposed to
+		 * be in the outbuf not like this.
+		 */
+		mi = u64_to_user_ptr(ucmd->mmap_info_addr);
 
-			/* Get address of user space mminfo struct */
-			err = ib_copy_from_udata(&mi_addr, udata,
-						 sizeof(mi_addr));
-			if (err)
-				goto err1;
-
-			udata->outbuf = (void __user *)(unsigned long)mi_addr;
-			udata->outlen = sizeof(mi);
-
-			if (!access_ok(VERIFY_WRITE,
-				       (void __user *)udata->outbuf,
-					udata->outlen)) {
-				err = -EFAULT;
-				goto err1;
-			}
-		}
-
-		err = rxe_queue_resize(q, (unsigned int *)&attr->max_wr,
-				       rcv_wqe_size(srq->rq.max_sge),
-				       srq->rq.queue->ip ?
-						srq->rq.queue->ip->context :
-						NULL,
-				       udata, &srq->rq.producer_lock,
+		err = rxe_queue_resize(q, &attr->max_wr,
+				       rcv_wqe_size(srq->rq.max_sge), udata, mi,
+				       &srq->rq.producer_lock,
 				       &srq->rq.consumer_lock);
 		if (err)
 			goto err2;
@@ -188,6 +150,5 @@ int rxe_srq_from_attr(struct rxe_dev *rxe, struct rxe_srq *srq,
 err2:
 	rxe_queue_cleanup(q);
 	srq->rq.queue = NULL;
-err1:
 	return err;
 }

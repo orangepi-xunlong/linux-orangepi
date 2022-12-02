@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Glue code for the ISP1760 driver and bus
  * Currently there is support for
@@ -21,11 +22,11 @@
 #include "isp1760-core.h"
 #include "isp1760-regs.h"
 
-#ifdef CONFIG_PCI
+#ifdef CONFIG_USB_PCI
 #include <linux/pci.h>
 #endif
 
-#ifdef CONFIG_PCI
+#ifdef CONFIG_USB_PCI
 static int isp1761_pci_init(struct pci_dev *dev)
 {
 	resource_size_t mem_start;
@@ -49,7 +50,7 @@ static int isp1761_pci_init(struct pci_dev *dev)
 	}
 
 	/* map available memory */
-	iobase = ioremap_nocache(mem_start, mem_length);
+	iobase = ioremap(mem_start, mem_length);
 	if (!iobase) {
 		printk(KERN_ERR "Error ioremap failed\n");
 		release_mem_region(mem_start, mem_length);
@@ -100,7 +101,7 @@ static int isp1761_pci_init(struct pci_dev *dev)
 		return -EBUSY;
 	}
 
-	iobase = ioremap_nocache(mem_start, mem_length);
+	iobase = ioremap(mem_start, mem_length);
 	if (!iobase) {
 		printk(KERN_ERR "ioremap #1\n");
 		release_mem_region(mem_start, mem_length);
@@ -138,7 +139,6 @@ static int isp1761_pci_probe(struct pci_dev *dev,
 
 	pci_set_master(dev);
 
-	dev->dev.dma_mask = NULL;
 	ret = isp1760_register(&dev->resource[3], dev->irq, 0, &dev->dev,
 			       devflags);
 	if (ret < 0)
@@ -197,7 +197,7 @@ static int isp1760_plat_probe(struct platform_device *pdev)
 
 	irq_res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	if (!irq_res) {
-		pr_warning("isp1760: IRQ resource not available\n");
+		pr_warn("isp1760: IRQ resource not available\n");
 		return -ENODEV;
 	}
 	irqflags = irq_res->flags & IRQF_TRIGGER_MASK;
@@ -286,7 +286,7 @@ static int __init isp1760_init(void)
 	ret = platform_driver_register(&isp1760_plat_driver);
 	if (!ret)
 		any_ret = 0;
-#ifdef CONFIG_PCI
+#ifdef CONFIG_USB_PCI
 	ret = pci_register_driver(&isp1761_pci_driver);
 	if (!ret)
 		any_ret = 0;
@@ -301,7 +301,7 @@ module_init(isp1760_init);
 static void __exit isp1760_exit(void)
 {
 	platform_driver_unregister(&isp1760_plat_driver);
-#ifdef CONFIG_PCI
+#ifdef CONFIG_USB_PCI
 	pci_unregister_driver(&isp1761_pci_driver);
 #endif
 	isp1760_deinit_kmem_cache();

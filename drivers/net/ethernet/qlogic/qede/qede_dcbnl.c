@@ -1,10 +1,8 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-3-Clause)
 /* QLogic qede NIC Driver
-* Copyright (c) 2015 QLogic Corporation
-*
-* This software is available under the terms of the GNU General Public License
-* (GPL) Version 2, available from the file COPYING in the main directory of
-* this source tree.
-*/
+ * Copyright (c) 2015 QLogic Corporation
+ * Copyright (c) 2019-2020 Marvell International Ltd.
+ */
 
 #include <linux/types.h>
 #include <linux/netdevice.h>
@@ -281,6 +279,11 @@ static int qede_dcbnl_ieee_setapp(struct net_device *netdev,
 				  struct dcb_app *app)
 {
 	struct qede_dev *edev = netdev_priv(netdev);
+	int err;
+
+	err = dcb_ieee_setapp(netdev, app);
+	if (err)
+		return err;
 
 	return edev->ops->dcb->ieee_setapp(edev->cdev, app);
 }
@@ -308,7 +311,6 @@ static const struct dcbnl_rtnl_ops qede_dcbnl_ops = {
 	.ieee_setets = qede_dcbnl_ieee_setets,
 	.ieee_getapp = qede_dcbnl_ieee_getapp,
 	.ieee_setapp = qede_dcbnl_ieee_setapp,
-	.getdcbx = qede_dcbnl_getdcbx,
 	.ieee_peer_getpfc = qede_dcbnl_ieee_peer_getpfc,
 	.ieee_peer_getets = qede_dcbnl_ieee_peer_getets,
 	.getstate = qede_dcbnl_getstate,

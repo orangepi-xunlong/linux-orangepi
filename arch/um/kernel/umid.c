@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2001 - 2007 Jeff Dike (jdike@{addtoit,linux.intel}.com)
- * Licensed under the GPL
  */
 
 #include <asm/errno.h>
@@ -16,14 +16,14 @@ static int __init set_umid_arg(char *name, int *add)
 	int err;
 
 	if (umid_inited) {
-		printf("umid already set\n");
+		os_warn("umid already set\n");
 		return 0;
 	}
 
 	*add = 0;
 	err = set_umid(name);
 	if (err == -EEXIST)
-		printf("umid '%s' already in use\n", name);
+		os_warn("umid '%s' already in use\n", name);
 	else if (!err)
 		umid_inited = 1;
 

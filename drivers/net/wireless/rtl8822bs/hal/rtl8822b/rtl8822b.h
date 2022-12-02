@@ -102,11 +102,6 @@ void rtl8822b_fw_update_beacon_cmd(PADAPTER);
 void rtl8822b_c2h_handler(PADAPTER, u8 *pbuf, u16 length);
 void rtl8822b_c2h_handler_no_io(PADAPTER, u8 *pbuf, u16 length);
 
-#ifdef CONFIG_LPS_PWR_TRACKING
-void rtl8822b_set_fw_thermal_rpt_cmd(_adapter *adapter, u8 enable, u8 thermal_value);
-void rtw_lps_pwr_tracking(_adapter *adapter, u8 thermal_value);
-#endif
-
 #ifdef CONFIG_BT_COEXIST
 void rtl8822b_download_BTCoex_AP_mode_rsvd_page(PADAPTER);
 #endif /* CONFIG_BT_COEXIST */

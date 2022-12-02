@@ -6,14 +6,13 @@ the optional generation of IIO events on rising/falling light threshold changes
 requires the use of interrupts. Without interrupts, only the simple reading
 of the current light value is supported through the IIO API.
 
-http://www.ti.com/product/opt3001
+https://www.ti.com/product/opt3001
 
 Required properties:
   - compatible: should be "ti,opt3001"
   - reg: the I2C address of the sensor
 
 Optional properties:
-  - interrupt-parent: should be the phandle for the interrupt controller
   - interrupts: interrupt mapping for GPIO IRQ (configure for falling edge)
 
 Example:

@@ -1,8 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * QLogic iSCSI HBA Driver
  * Copyright (c)  2003-2013 QLogic Corporation
- *
- * See LICENSE.qla4xxx for copyright and licensing details.
  */
 
 #ifndef __QLA4x_GBL_H
@@ -134,7 +133,6 @@ int qla4_8xxx_get_flash_info(struct scsi_qla_host *ha);
 void qla4_82xx_enable_intrs(struct scsi_qla_host *ha);
 void qla4_82xx_disable_intrs(struct scsi_qla_host *ha);
 int qla4_8xxx_enable_msix(struct scsi_qla_host *ha);
-void qla4_8xxx_disable_msix(struct scsi_qla_host *ha);
 irqreturn_t qla4_8xxx_msi_handler(int irq, void *dev_id);
 irqreturn_t qla4_8xxx_default_intr_handler(int irq, void *dev_id);
 irqreturn_t qla4_8xxx_msix_rsp_q(int irq, void *dev_id);

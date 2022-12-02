@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/isofs/dir.c
  *
@@ -45,7 +46,7 @@ int isofs_name_translate(struct iso_directory_record *de, char *new, struct inod
 	return i;
 }
 
-/* Acorn extensions written by Matthew Wilcox <willy@bofh.ai> 1998 */
+/* Acorn extensions written by Matthew Wilcox <willy@infradead.org> 1998 */
 int get_acorn_filename(struct iso_directory_record *de,
 			    char *retname, struct inode *inode)
 {
@@ -151,6 +152,7 @@ static int do_isofs_readdir(struct inode *inode, struct file *file,
 			printk(KERN_NOTICE "iso9660: Corrupted directory entry"
 			       " in block %lu of inode %lu\n", block,
 			       inode->i_ino);
+			brelse(bh);
 			return -EIO;
 		}
 

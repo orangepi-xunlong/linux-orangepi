@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0+ WITH Linux-syscall-note */
 #ifndef _ASM_POWERPC_STAT_H
 #define _ASM_POWERPC_STAT_H
 /*
@@ -39,7 +40,7 @@ struct stat {
 	uid_t		st_uid;
 	gid_t		st_gid;
 	unsigned long	st_rdev;
-	off_t		st_size;
+	long		st_size;
 	unsigned long	st_blksize;
 	unsigned long	st_blocks;
 	unsigned long	st_atime;

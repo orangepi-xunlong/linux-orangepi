@@ -740,7 +740,7 @@ static ssize_t cyapa_show_suspend_scanrate(struct device *dev,
 					   char *buf)
 {
 	struct cyapa *cyapa = dev_get_drvdata(dev);
-	u8 pwr_cmd = cyapa->suspend_power_mode;
+	u8 pwr_cmd;
 	u16 sleep_time;
 	int len;
 	int error;
@@ -832,8 +832,8 @@ static int cyapa_prepare_wakeup_controls(struct cyapa *cyapa)
 	int error;
 
 	if (device_can_wakeup(dev)) {
-		error = sysfs_merge_group(&client->dev.kobj,
-					&cyapa_power_wakeup_group);
+		error = sysfs_merge_group(&dev->kobj,
+					  &cyapa_power_wakeup_group);
 		if (error) {
 			dev_err(dev, "failed to add power wakeup group: %d\n",
 				error);
@@ -1238,13 +1238,6 @@ static const struct attribute_group cyapa_sysfs_group = {
 	.attrs = cyapa_sysfs_entries,
 };
 
-static void cyapa_remove_sysfs_group(void *data)
-{
-	struct cyapa *cyapa = data;
-
-	sysfs_remove_group(&cyapa->client->dev.kobj, &cyapa_sysfs_group);
-}
-
 static void cyapa_disable_regulator(void *data)
 {
 	struct cyapa *cyapa = data;
@@ -1312,16 +1305,9 @@ static int cyapa_probe(struct i2c_client *client,
 		return error;
 	}
 
-	error = sysfs_create_group(&client->dev.kobj, &cyapa_sysfs_group);
+	error = devm_device_add_group(dev, &cyapa_sysfs_group);
 	if (error) {
 		dev_err(dev, "failed to create sysfs entries: %d\n", error);
-		return error;
-	}
-
-	error = devm_add_action(dev, cyapa_remove_sysfs_group, cyapa);
-	if (error) {
-		cyapa_remove_sysfs_group(cyapa);
-		dev_err(dev, "failed to add sysfs cleanup action: %d\n", error);
 		return error;
 	}
 

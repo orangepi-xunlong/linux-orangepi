@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LINUX_TASK_WORK_H
 #define _LINUX_TASK_WORK_H
 
@@ -12,7 +13,15 @@ init_task_work(struct callback_head *twork, task_work_func_t func)
 	twork->func = func;
 }
 
-int task_work_add(struct task_struct *task, struct callback_head *twork, bool);
+enum task_work_notify_mode {
+	TWA_NONE,
+	TWA_RESUME,
+	TWA_SIGNAL,
+};
+
+int task_work_add(struct task_struct *task, struct callback_head *twork,
+			enum task_work_notify_mode mode);
+
 struct callback_head *task_work_cancel(struct task_struct *, task_work_func_t);
 void task_work_run(void);
 

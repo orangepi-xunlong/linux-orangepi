@@ -306,8 +306,8 @@ static const struct map_t rtl8821a_pg_txpwr_def_info =
 static const struct map_t rtl8821c_pg_txpwr_def_info =
 	MAP_ENT(0xB8, 1, 0xFF
 		, MAPSEG_ARRAY_ENT(0x10, 54,
-			0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x02, 0xFF, 0xFF, 0xFF, 0xFF,
-			0xFF, 0xFF, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28,
+			0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x02, 0xFF, 0xFF, 0xFF, 0xFF, 
+			0xFF, 0xFF, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 
 			0x02, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xEC, 0xFF, 0xFF, 0xFF, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D,
 			0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x02)
 	);
@@ -693,7 +693,7 @@ u16 hal_load_pg_txpwr_info_path_2g(
 		rtw_warn_on(1);
 	}
 
-exit:
+exit:	
 	return offset;
 }
 
@@ -721,7 +721,7 @@ u16 hal_load_pg_txpwr_info_path_5g(
 		offset += PG_TXPWR_1PATH_BYTE_NUM_5G;
 		goto exit;
 	}
-
+	
 #ifdef CONFIG_IEEE80211_BAND_5GHZ
 	if (DBG_PG_TXPWR_READ)
 		RTW_INFO("%s[%c] eaddr:0x%03x\n", __func__, rf_path_char(path), offset);
@@ -784,7 +784,7 @@ u16 hal_load_pg_txpwr_info_path_5g(
 			}
 			offset++;
 		}
-	}
+	}	
 
 	/* OFDM diff 2T ~ 3T */
 	if (HAL_SPEC_CHK_RF_PATH_5G(hal_spec, path) && HAL_SPEC_CHK_TX_CNT(hal_spec, 1)) {
@@ -2263,10 +2263,7 @@ PHY_GetTxPowerIndexBase(
 				}
 			}
 			if (i >= CENTER_CH_5G_80M_NUM) {
-			#ifdef CONFIG_MP_INCLUDED
-				if (rtw_mp_mode_check(pAdapter) == _FALSE)
-			#endif
-					rtw_warn_on(1);
+				rtw_warn_on(1);
 				txPower = 0;
 				goto exit;
 			}
@@ -2580,7 +2577,7 @@ PHY_GetRateIndexOfTxPowerByRate(
 		index = 83;
 		break;
 	default:
-		RTW_INFO("Invalid rate 0x%x in %s\n", Rate, __func__);
+		RTW_INFO("Invalid rate 0x%x in %s\n", Rate, __FUNCTION__);
 		break;
 	};
 
@@ -2646,15 +2643,15 @@ PHY_SetTxPowerByRate(
 	u8	rateIndex = PHY_GetRateIndexOfTxPowerByRate(Rate);
 
 	if (Band != BAND_ON_2_4G && Band != BAND_ON_5G) {
-		RTW_INFO("Invalid band %d in %s\n", Band, __func__);
+		RTW_INFO("Invalid band %d in %s\n", Band, __FUNCTION__);
 		return;
 	}
 	if (RFPath > RF_PATH_D) {
-		RTW_INFO("Invalid RfPath %d in %s\n", RFPath, __func__);
+		RTW_INFO("Invalid RfPath %d in %s\n", RFPath, __FUNCTION__);
 		return;
 	}
 	if (rateIndex >= TX_PWR_BY_RATE_NUM_RATE) {
-		RTW_INFO("Invalid RateIndex %d in %s\n", rateIndex, __func__);
+		RTW_INFO("Invalid RateIndex %d in %s\n", rateIndex, __FUNCTION__);
 		return;
 	}
 
@@ -3789,7 +3786,7 @@ void dump_tx_power_ext_info(void *sel, _adapter *adapter)
 	if (regsty->target_tx_pwr_valid == _TRUE)
 		RTW_PRINT_SEL(sel, "target_tx_power: from registry\n");
 	else if (phy_is_tx_power_by_rate_needed(adapter))
-		RTW_PRINT_SEL(sel, "target_tx_power: from power by rate\n");
+		RTW_PRINT_SEL(sel, "target_tx_power: from power by rate\n"); 
 	else
 		RTW_PRINT_SEL(sel, "target_tx_power: unavailable\n");
 
@@ -3966,7 +3963,7 @@ phy_ConfigMACWithParaFile(
 					_rtw_memcpy(pHalData->mac_reg, pHalData->para_file_buf, rlen);
 					pHalData->mac_reg_len = rlen;
 				} else
-					RTW_INFO("%s mac_reg alloc fail !\n", __func__);
+					RTW_INFO("%s mac_reg alloc fail !\n", __FUNCTION__);
 			}
 		}
 	} else {
@@ -3974,7 +3971,7 @@ phy_ConfigMACWithParaFile(
 			_rtw_memcpy(pHalData->para_file_buf, pHalData->mac_reg, pHalData->mac_reg_len);
 			rtStatus = _SUCCESS;
 		} else
-			RTW_INFO("%s(): Critical Error !!!\n", __func__);
+			RTW_INFO("%s(): Critical Error !!!\n", __FUNCTION__);
 	}
 
 	if (rtStatus == _SUCCESS) {
@@ -3996,7 +3993,7 @@ phy_ConfigMACWithParaFile(
 			}
 		}
 	} else
-		RTW_INFO("%s(): No File %s, Load from HWImg Array!\n", __func__, pFileName);
+		RTW_INFO("%s(): No File %s, Load from HWImg Array!\n", __FUNCTION__, pFileName);
 
 	return rtStatus;
 }
@@ -4054,7 +4051,7 @@ phy_ConfigBBWithParaFile(
 						break;
 					}
 				} else
-					RTW_INFO("%s(): ConfigType %d  alloc fail !\n", __func__, ConfigType);
+					RTW_INFO("%s(): ConfigType %d  alloc fail !\n", __FUNCTION__, ConfigType);
 			}
 		}
 	} else {
@@ -4062,7 +4059,7 @@ phy_ConfigBBWithParaFile(
 			_rtw_memcpy(pHalData->para_file_buf, pBuf, *pBufLen);
 			rtStatus = _SUCCESS;
 		} else
-			RTW_INFO("%s(): Critical Error !!!\n", __func__);
+			RTW_INFO("%s(): Critical Error !!!\n", __FUNCTION__);
 	}
 
 	if (rtStatus == _SUCCESS) {
@@ -4107,7 +4104,7 @@ phy_ConfigBBWithParaFile(
 			}
 		}
 	} else
-		RTW_INFO("%s(): No File %s, Load from HWImg Array!\n", __func__, pFileName);
+		RTW_INFO("%s(): No File %s, Load from HWImg Array!\n", __FUNCTION__, pFileName);
 
 	return rtStatus;
 }
@@ -4431,7 +4428,7 @@ phy_ConfigBBWithPgParaFile(
 					_rtw_memcpy(pHalData->bb_phy_reg_pg, pHalData->para_file_buf, rlen);
 					pHalData->bb_phy_reg_pg_len = rlen;
 				} else
-					RTW_INFO("%s bb_phy_reg_pg alloc fail !\n", __func__);
+					RTW_INFO("%s bb_phy_reg_pg alloc fail !\n", __FUNCTION__);
 			}
 		}
 	} else {
@@ -4439,14 +4436,14 @@ phy_ConfigBBWithPgParaFile(
 			_rtw_memcpy(pHalData->para_file_buf, pHalData->bb_phy_reg_pg, pHalData->bb_phy_reg_pg_len);
 			rtStatus = _SUCCESS;
 		} else
-			RTW_INFO("%s(): Critical Error !!!\n", __func__);
+			RTW_INFO("%s(): Critical Error !!!\n", __FUNCTION__);
 	}
 
 	if (rtStatus == _SUCCESS) {
 		/* RTW_INFO("phy_ConfigBBWithPgParaFile(): read %s ok\n", pFileName); */
 		phy_ParseBBPgParaFile(Adapter, pHalData->para_file_buf);
 	} else
-		RTW_INFO("%s(): No File %s, Load from HWImg Array!\n", __func__, pFileName);
+		RTW_INFO("%s(): No File %s, Load from HWImg Array!\n", __FUNCTION__, pFileName);
 
 	return rtStatus;
 }
@@ -4480,7 +4477,7 @@ phy_ConfigBBWithMpParaFile(
 					_rtw_memcpy(pHalData->bb_phy_reg_mp, pHalData->para_file_buf, rlen);
 					pHalData->bb_phy_reg_mp_len = rlen;
 				} else
-					RTW_INFO("%s bb_phy_reg_mp alloc fail !\n", __func__);
+					RTW_INFO("%s bb_phy_reg_mp alloc fail !\n", __FUNCTION__);
 			}
 		}
 	} else {
@@ -4488,7 +4485,7 @@ phy_ConfigBBWithMpParaFile(
 			_rtw_memcpy(pHalData->para_file_buf, pHalData->bb_phy_reg_mp, pHalData->bb_phy_reg_mp_len);
 			rtStatus = _SUCCESS;
 		} else
-			RTW_INFO("%s(): Critical Error !!!\n", __func__);
+			RTW_INFO("%s(): Critical Error !!!\n", __FUNCTION__);
 	}
 
 	if (rtStatus == _SUCCESS) {
@@ -4532,7 +4529,7 @@ phy_ConfigBBWithMpParaFile(
 			}
 		}
 	} else
-		RTW_INFO("%s(): No File %s, Load from HWImg Array!\n", __func__, pFileName);
+		RTW_INFO("%s(): No File %s, Load from HWImg Array!\n", __FUNCTION__, pFileName);
 
 	return rtStatus;
 }
@@ -4596,7 +4593,7 @@ PHY_ConfigRFWithParaFile(
 						break;
 					}
 				} else
-					RTW_INFO("%s(): eRFPath=%d  alloc fail !\n", __func__, eRFPath);
+					RTW_INFO("%s(): eRFPath=%d  alloc fail !\n", __FUNCTION__, eRFPath);
 			}
 		}
 	} else {
@@ -4604,11 +4601,11 @@ PHY_ConfigRFWithParaFile(
 			_rtw_memcpy(pHalData->para_file_buf, pBuf, *pBufLen);
 			rtStatus = _SUCCESS;
 		} else
-			RTW_INFO("%s(): Critical Error !!!\n", __func__);
+			RTW_INFO("%s(): Critical Error !!!\n", __FUNCTION__);
 	}
 
 	if (rtStatus == _SUCCESS) {
-		/* RTW_INFO("%s(): read %s successfully\n", __func__, pFileName); */
+		/* RTW_INFO("%s(): read %s successfully\n", __FUNCTION__, pFileName); */
 
 		ptmp = pHalData->para_file_buf;
 		for (szLine = GetLineFromBuffer(ptmp); szLine != NULL; szLine = GetLineFromBuffer(ptmp)) {
@@ -4658,7 +4655,7 @@ PHY_ConfigRFWithParaFile(
 			}
 		}
 	} else
-		RTW_INFO("%s(): No File %s, Load from HWImg Array!\n", __func__, pFileName);
+		RTW_INFO("%s(): No File %s, Load from HWImg Array!\n", __FUNCTION__, pFileName);
 
 	return rtStatus;
 }
@@ -4783,7 +4780,7 @@ PHY_ConfigRFWithTxPwrTrackParaFile(
 					_rtw_memcpy(pHalData->rf_tx_pwr_track, pHalData->para_file_buf, rlen);
 					pHalData->rf_tx_pwr_track_len = rlen;
 				} else
-					RTW_INFO("%s rf_tx_pwr_track alloc fail !\n", __func__);
+					RTW_INFO("%s rf_tx_pwr_track alloc fail !\n", __FUNCTION__);
 			}
 		}
 	} else {
@@ -4791,11 +4788,11 @@ PHY_ConfigRFWithTxPwrTrackParaFile(
 			_rtw_memcpy(pHalData->para_file_buf, pHalData->rf_tx_pwr_track, pHalData->rf_tx_pwr_track_len);
 			rtStatus = _SUCCESS;
 		} else
-			RTW_INFO("%s(): Critical Error !!!\n", __func__);
+			RTW_INFO("%s(): Critical Error !!!\n", __FUNCTION__);
 	}
 
 	if (rtStatus == _SUCCESS) {
-		/* RTW_INFO("%s(): read %s successfully\n", __func__, pFileName); */
+		/* RTW_INFO("%s(): read %s successfully\n", __FUNCTION__, pFileName); */
 
 		ptmp = pHalData->para_file_buf;
 		for (szLine = GetLineFromBuffer(ptmp); szLine != NULL; szLine = GetLineFromBuffer(ptmp)) {
@@ -4828,7 +4825,7 @@ PHY_ConfigRFWithTxPwrTrackParaFile(
 			}
 		}
 	} else
-		RTW_INFO("%s(): No File %s, Load from HWImg Array!\n", __func__, pFileName);
+		RTW_INFO("%s(): No File %s, Load from HWImg Array!\n", __FUNCTION__, pFileName);
 #if 0
 	for (i = 0; i < DELTA_SWINGIDX_SIZE; ++i) {
 		RTW_INFO("pRFCalibrateInfo->delta_swing_table_idx_2ga_p[%d] = %d\n", i, pRFCalibrateInfo->delta_swing_table_idx_2ga_p[i]);
@@ -5313,7 +5310,7 @@ PHY_ConfigRFWithPowerLimitTableParaFile(
 					_rtw_memcpy(pHalData->rf_tx_pwr_lmt, pHalData->para_file_buf, rlen);
 					pHalData->rf_tx_pwr_lmt_len = rlen;
 				} else
-					RTW_INFO("%s rf_tx_pwr_lmt alloc fail !\n", __func__);
+					RTW_INFO("%s rf_tx_pwr_lmt alloc fail !\n", __FUNCTION__);
 			}
 		}
 	} else {
@@ -5321,14 +5318,14 @@ PHY_ConfigRFWithPowerLimitTableParaFile(
 			_rtw_memcpy(pHalData->para_file_buf, pHalData->rf_tx_pwr_lmt, pHalData->rf_tx_pwr_lmt_len);
 			rtStatus = _SUCCESS;
 		} else
-			RTW_INFO("%s(): Critical Error !!!\n", __func__);
+			RTW_INFO("%s(): Critical Error !!!\n", __FUNCTION__);
 	}
 
 	if (rtStatus == _SUCCESS) {
-		/* RTW_INFO("%s(): read %s ok\n", __func__, pFileName); */
+		/* RTW_INFO("%s(): read %s ok\n", __FUNCTION__, pFileName); */
 		rtStatus = phy_ParsePowerLimitTableFile(Adapter, pHalData->para_file_buf);
 	} else
-		RTW_INFO("%s(): No File %s, Load from HWImg Array!\n", __func__, pFileName);
+		RTW_INFO("%s(): No File %s, Load from HWImg Array!\n", __FUNCTION__, pFileName);
 
 	return rtStatus;
 }

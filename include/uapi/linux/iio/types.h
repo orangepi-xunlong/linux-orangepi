@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /* industrial I/O data types needed both in and out of kernel
  *
  * Copyright (c) 2008 Jonathan Cameron
@@ -40,6 +41,22 @@ enum iio_chan_type {
 	IIO_PH,
 	IIO_UVINDEX,
 	IIO_ELECTRICALCONDUCTIVITY,
+	IIO_COUNT,
+	IIO_INDEX,
+	IIO_GRAVITY,
+	IIO_POSITIONRELATIVE,
+	IIO_PHASE,
+	IIO_MASSCONCENTRATION,
+#ifdef CONFIG_NO_GKI
+	IIO_SIGN_MOTION,
+	IIO_STEP_DETECTOR,
+	IIO_STEP_COUNTER,
+	IIO_TILT,
+	IIO_TAP,
+	IIO_TAP_TAP,
+	IIO_WRIST_TILT_GESTURE,
+	IIO_GESTURE,
+#endif
 };
 
 enum iio_modifier {
@@ -80,6 +97,14 @@ enum iio_modifier {
 	IIO_MOD_CO2,
 	IIO_MOD_VOC,
 	IIO_MOD_LIGHT_UV,
+	IIO_MOD_LIGHT_DUV,
+	IIO_MOD_PM1,
+	IIO_MOD_PM2P5,
+	IIO_MOD_PM4,
+	IIO_MOD_PM10,
+	IIO_MOD_ETHANOL,
+	IIO_MOD_H2,
+	IIO_MOD_O2,
 };
 
 enum iio_event_type {
@@ -89,12 +114,19 @@ enum iio_event_type {
 	IIO_EV_TYPE_THRESH_ADAPTIVE,
 	IIO_EV_TYPE_MAG_ADAPTIVE,
 	IIO_EV_TYPE_CHANGE,
+#ifdef CONFIG_NO_GKI
+	IIO_EV_TYPE_FIFO_FLUSH,
+#endif
 };
 
 enum iio_event_direction {
 	IIO_EV_DIR_EITHER,
 	IIO_EV_DIR_RISING,
 	IIO_EV_DIR_FALLING,
+#ifdef CONFIG_NO_GKI
+	IIO_EV_DIR_FIFO_EMPTY,
+	IIO_EV_DIR_FIFO_DATA,
+#endif
 	IIO_EV_DIR_NONE,
 };
 

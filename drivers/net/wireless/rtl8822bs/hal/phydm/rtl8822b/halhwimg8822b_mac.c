@@ -295,7 +295,7 @@ odm_read_and_config_mp_8822b_mac_reg(
 u32
 odm_get_version_mp_8822b_mac_reg(void)
 {
-		return 111;
+		return 107;
 }
 
 #endif /* end of HWIMG_SUPPORT*/

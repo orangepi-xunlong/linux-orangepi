@@ -378,6 +378,4 @@
 #define CONFIG_IPS
 #endif
 #endif
-#define CONFIG_RTW_TPT_MODE
-
 #endif /* __DRV_CONF_H__ */

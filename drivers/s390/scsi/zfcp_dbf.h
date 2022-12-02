@@ -1,8 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * zfcp device driver
  * debug feature declarations
  *
- * Copyright IBM Corp. 2008, 2017
+ * Copyright IBM Corp. 2008, 2020
  */
 
 #ifndef ZFCP_DBF_H
@@ -15,6 +16,7 @@
 
 #define ZFCP_DBF_TAG_LEN       7
 
+#define ZFCP_DBF_INVALID_WWPN	0x0000000000000000ull
 #define ZFCP_DBF_INVALID_LUN	0xFFFFFFFFFFFFFFFFull
 
 enum zfcp_dbf_pseudo_erp_act_type {
@@ -41,7 +43,8 @@ struct zfcp_dbf_rec_trigger {
  * @fsf_req_id: request id for fsf requests
  * @rec_status: status of the fsf request
  * @rec_step: current step of the recovery action
- * rec_count: recovery counter
+ * @rec_action: ERP action type
+ * @rec_count: recoveries including retries for particular @rec_action
  */
 struct zfcp_dbf_rec_running {
 	u64 fsf_req_id;
@@ -71,6 +74,7 @@ enum zfcp_dbf_rec_id {
  * @adapter_status: current status of the adapter
  * @port_status: current status of the port
  * @lun_status: current status of the lun
+ * @u: record type specific data
  * @u.trig: structure zfcp_dbf_rec_trigger
  * @u.run: structure zfcp_dbf_rec_running
  */
@@ -125,6 +129,8 @@ struct zfcp_dbf_san {
  * @prot_status_qual: protocol status qualifier
  * @fsf_status: fsf status
  * @fsf_status_qual: fsf status qualifier
+ * @port_handle: handle for port
+ * @lun_handle: handle for LUN
  */
 struct zfcp_dbf_hba_res {
 	u64 req_issued;
@@ -153,16 +159,38 @@ struct zfcp_dbf_hba_uss {
 } __packed;
 
 /**
+ * struct zfcp_dbf_hba_fces - trace record for FC Endpoint Security
+ * @req_issued: timestamp when request was issued
+ * @fsf_status: fsf status
+ * @port_handle: handle for port
+ * @wwpn: remote FC port WWPN
+ * @fc_security_old: old FC Endpoint Security
+ * @fc_security_new: new FC Endpoint Security
+ *
+ */
+struct zfcp_dbf_hba_fces {
+	u64 req_issued;
+	u32 fsf_status;
+	u32 port_handle;
+	u64 wwpn;
+	u32 fc_security_old;
+	u32 fc_security_new;
+} __packed;
+
+/**
  * enum zfcp_dbf_hba_id - HBA trace record identifier
  * @ZFCP_DBF_HBA_RES: response trace record
  * @ZFCP_DBF_HBA_USS: unsolicited status trace record
  * @ZFCP_DBF_HBA_BIT: bit error trace record
+ * @ZFCP_DBF_HBA_BASIC: basic adapter event, only trace tag, no other data
+ * @ZFCP_DBF_HBA_FCES: FC Endpoint Security trace record
  */
 enum zfcp_dbf_hba_id {
 	ZFCP_DBF_HBA_RES	= 1,
 	ZFCP_DBF_HBA_USS	= 2,
 	ZFCP_DBF_HBA_BIT	= 3,
 	ZFCP_DBF_HBA_BASIC	= 4,
+	ZFCP_DBF_HBA_FCES	= 5,
 };
 
 /**
@@ -175,6 +203,10 @@ enum zfcp_dbf_hba_id {
  * @fsf_seq_no: fsf sequence number
  * @pl_len: length of payload stored as zfcp_dbf_pay
  * @u: record type specific data
+ * @u.res:  data for fsf responses
+ * @u.uss:  data for unsolicited status buffer
+ * @u.be:   data for bit error unsolicited status buffer
+ * @u.fces: data for FC Endpoint Security
  */
 struct zfcp_dbf_hba {
 	u8 id;
@@ -188,6 +220,7 @@ struct zfcp_dbf_hba {
 		struct zfcp_dbf_hba_res res;
 		struct zfcp_dbf_hba_uss uss;
 		struct fsf_bit_error_payload be;
+		struct zfcp_dbf_hba_fces fces;
 	} u;
 } __packed;
 
@@ -208,12 +241,12 @@ enum zfcp_dbf_scsi_id {
  * @scsi_result: scsi result
  * @scsi_retries: current retry number of scsi request
  * @scsi_allowed: allowed retries
- * @fcp_rsp_info: FCP response info
+ * @fcp_rsp_info: FCP response info code
  * @scsi_opcode: scsi opcode
  * @fsf_req_id: request id of fsf request
  * @host_scribble: LLD specific data attached to SCSI request
- * @pl_len: length of paload stored as zfcp_dbf_pay
- * @fsf_rsp: response for fsf request
+ * @pl_len: length of payload stored as zfcp_dbf_pay
+ * @fcp_rsp: response for FCP request
  * @scsi_lun_64_hi: scsi device logical unit number, high part of 64 bit
  */
 struct zfcp_dbf_scsi {
@@ -301,7 +334,7 @@ bool zfcp_dbf_hba_fsf_resp_suppress(struct zfcp_fsf_req *req)
 
 	if (qtcb->prefix.qtcb_type != FSF_IO_COMMAND)
 		return false; /* not an FCP response */
-	fcp_rsp = (struct fcp_resp *)&qtcb->bottom.io.fcp_rsp;
+	fcp_rsp = &qtcb->bottom.io.fcp_rsp.iu.resp;
 	rsp_flags = fcp_rsp->fr_flags;
 	fr_status = fcp_rsp->fr_status;
 	return (fsf_stat == FSF_FCP_RSP_AVAILABLE) &&
@@ -338,8 +371,8 @@ void zfcp_dbf_hba_fsf_response(struct zfcp_fsf_req *req)
 				      zfcp_dbf_hba_fsf_resp_suppress(req)
 				      ? 5 : 1, req);
 
-	} else if ((req->fsf_command == FSF_QTCB_OPEN_PORT_WITH_DID) ||
-		   (req->fsf_command == FSF_QTCB_OPEN_LUN)) {
+	} else if ((qtcb->header.fsf_command == FSF_QTCB_OPEN_PORT_WITH_DID) ||
+		   (qtcb->header.fsf_command == FSF_QTCB_OPEN_LUN)) {
 		zfcp_dbf_hba_fsf_resp("fs_open", 4, req);
 
 	} else if (qtcb->header.log_length) {
@@ -358,7 +391,7 @@ void _zfcp_dbf_scsi(char *tag, int level, struct scsi_cmnd *scmd,
 					scmd->device->host->hostdata[0];
 
 	if (debug_level_enabled(adapter->dbf->scsi, level))
-		zfcp_dbf_scsi(tag, level, scmd, req);
+		zfcp_dbf_scsi_common(tag, level, scmd->device, scmd, req);
 }
 
 /**
@@ -401,16 +434,23 @@ void zfcp_dbf_scsi_abort(char *tag, struct scsi_cmnd *scmd,
 }
 
 /**
- * zfcp_dbf_scsi_devreset - trace event for Logical Unit or Target Reset
- * @tag: tag indicating success or failure of reset operation
- * @scmnd: SCSI command which caused this error recovery
- * @flag: indicates type of reset (Target Reset, Logical Unit Reset)
+ * zfcp_dbf_scsi_devreset() - Trace event for Logical Unit or Target Reset.
+ * @tag: Tag indicating success or failure of reset operation.
+ * @sdev: Pointer to SCSI device as context for this event.
+ * @flag: Indicates type of reset (Target Reset, Logical Unit Reset).
+ * @fsf_req: Pointer to FSF request representing the TMF, or NULL.
  */
 static inline
-void zfcp_dbf_scsi_devreset(char *tag, struct scsi_cmnd *scmnd, u8 flag,
+void zfcp_dbf_scsi_devreset(char *tag, struct scsi_device *sdev, u8 flag,
 			    struct zfcp_fsf_req *fsf_req)
 {
+	struct zfcp_adapter *adapter = (struct zfcp_adapter *)
+					sdev->host->hostdata[0];
 	char tmp_tag[ZFCP_DBF_TAG_LEN];
+	static int const level = 1;
+
+	if (unlikely(!debug_level_enabled(adapter->dbf->scsi, level)))
+		return;
 
 	if (flag == FCP_TMF_TGT_RESET)
 		memcpy(tmp_tag, "tr_", 3);
@@ -418,7 +458,7 @@ void zfcp_dbf_scsi_devreset(char *tag, struct scsi_cmnd *scmnd, u8 flag,
 		memcpy(tmp_tag, "lr_", 3);
 
 	memcpy(&tmp_tag[3], tag, 4);
-	_zfcp_dbf_scsi(tmp_tag, 1, scmnd, fsf_req);
+	zfcp_dbf_scsi_common(tmp_tag, level, sdev, NULL, fsf_req);
 }
 
 /**

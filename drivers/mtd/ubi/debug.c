@@ -1,19 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) International Business Machines Corp., 2006
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
- * the GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  *
  * Author: Artem Bityutskiy (Битюцкий Артём)
  */
@@ -22,6 +9,7 @@
 #include <linux/debugfs.h>
 #include <linux/uaccess.h>
 #include <linux/module.h>
+#include <linux/seq_file.h>
 
 
 /**
@@ -119,6 +107,7 @@ void ubi_dump_vol_info(const struct ubi_volume *vol)
 	pr_err("\tlast_eb_bytes   %d\n", vol->last_eb_bytes);
 	pr_err("\tcorrupted       %d\n", vol->corrupted);
 	pr_err("\tupd_marker      %d\n", vol->upd_marker);
+	pr_err("\tskip_check      %d\n", vol->skip_check);
 
 	if (vol->name_len <= UBI_VOL_NAME_MAX &&
 	    strnlen(vol->name, vol->name_len + 1) == vol->name_len) {
@@ -386,13 +375,122 @@ out:
 	return count;
 }
 
-/* File operations for all UBI debugfs files */
+/* File operations for all UBI debugfs files except
+ * detailed_erase_block_info
+ */
 static const struct file_operations dfs_fops = {
 	.read   = dfs_file_read,
 	.write  = dfs_file_write,
 	.open	= simple_open,
 	.llseek = no_llseek,
 	.owner  = THIS_MODULE,
+};
+
+/* As long as the position is less then that total number of erase blocks,
+ * we still have more to print.
+ */
+static void *eraseblk_count_seq_start(struct seq_file *s, loff_t *pos)
+{
+	struct ubi_device *ubi = s->private;
+
+	if (*pos < ubi->peb_count)
+		return pos;
+
+	return NULL;
+}
+
+/* Since we are using the position as the iterator, we just need to check if we
+ * are done and increment the position.
+ */
+static void *eraseblk_count_seq_next(struct seq_file *s, void *v, loff_t *pos)
+{
+	struct ubi_device *ubi = s->private;
+
+	(*pos)++;
+
+	if (*pos < ubi->peb_count)
+		return pos;
+
+	return NULL;
+}
+
+static void eraseblk_count_seq_stop(struct seq_file *s, void *v)
+{
+}
+
+static int eraseblk_count_seq_show(struct seq_file *s, void *iter)
+{
+	struct ubi_device *ubi = s->private;
+	struct ubi_wl_entry *wl;
+	int *block_number = iter;
+	int erase_count = -1;
+	int err;
+
+	/* If this is the start, print a header */
+	if (*block_number == 0)
+		seq_puts(s, "physical_block_number\terase_count\n");
+
+	err = ubi_io_is_bad(ubi, *block_number);
+	if (err)
+		return err;
+
+	spin_lock(&ubi->wl_lock);
+
+	wl = ubi->lookuptbl[*block_number];
+	if (wl)
+		erase_count = wl->ec;
+
+	spin_unlock(&ubi->wl_lock);
+
+	if (erase_count < 0)
+		return 0;
+
+	seq_printf(s, "%-22d\t%-11d\n", *block_number, erase_count);
+
+	return 0;
+}
+
+static const struct seq_operations eraseblk_count_seq_ops = {
+	.start = eraseblk_count_seq_start,
+	.next = eraseblk_count_seq_next,
+	.stop = eraseblk_count_seq_stop,
+	.show = eraseblk_count_seq_show
+};
+
+static int eraseblk_count_open(struct inode *inode, struct file *f)
+{
+	struct seq_file *s;
+	int err;
+
+	err = seq_open(f, &eraseblk_count_seq_ops);
+	if (err)
+		return err;
+
+	s = f->private_data;
+	s->private = ubi_get_device((unsigned long)inode->i_private);
+
+	if (!s->private)
+		return -ENODEV;
+	else
+		return 0;
+}
+
+static int eraseblk_count_release(struct inode *inode, struct file *f)
+{
+	struct seq_file *s = f->private_data;
+	struct ubi_device *ubi = s->private;
+
+	ubi_put_device(ubi);
+
+	return seq_release(inode, f);
+}
+
+static const struct file_operations eraseblk_count_fops = {
+	.owner = THIS_MODULE,
+	.open = eraseblk_count_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = eraseblk_count_release,
 };
 
 /**
@@ -404,11 +502,9 @@ static const struct file_operations dfs_fops = {
  */
 int ubi_debugfs_init_dev(struct ubi_device *ubi)
 {
-	int err, n;
 	unsigned long ubi_num = ubi->ubi_num;
-	const char *fname;
-	struct dentry *dent;
 	struct ubi_debug_info *d = &ubi->dbg;
+	int n;
 
 	if (!IS_ENABLED(CONFIG_DEBUG_FS))
 		return 0;
@@ -417,89 +513,52 @@ int ubi_debugfs_init_dev(struct ubi_device *ubi)
 		     ubi->ubi_num);
 	if (n == UBI_DFS_DIR_LEN) {
 		/* The array size is too small */
-		fname = UBI_DFS_DIR_NAME;
-		dent = ERR_PTR(-EINVAL);
-		goto out;
+		return -EINVAL;
 	}
 
-	fname = d->dfs_dir_name;
-	dent = debugfs_create_dir(fname, dfs_rootdir);
-	if (IS_ERR_OR_NULL(dent))
-		goto out;
-	d->dfs_dir = dent;
+	d->dfs_dir = debugfs_create_dir(d->dfs_dir_name, dfs_rootdir);
 
-	fname = "chk_gen";
-	dent = debugfs_create_file(fname, S_IWUSR, d->dfs_dir, (void *)ubi_num,
-				   &dfs_fops);
-	if (IS_ERR_OR_NULL(dent))
-		goto out_remove;
-	d->dfs_chk_gen = dent;
+	d->dfs_chk_gen = debugfs_create_file("chk_gen", S_IWUSR, d->dfs_dir,
+					     (void *)ubi_num, &dfs_fops);
 
-	fname = "chk_io";
-	dent = debugfs_create_file(fname, S_IWUSR, d->dfs_dir, (void *)ubi_num,
-				   &dfs_fops);
-	if (IS_ERR_OR_NULL(dent))
-		goto out_remove;
-	d->dfs_chk_io = dent;
+	d->dfs_chk_io = debugfs_create_file("chk_io", S_IWUSR, d->dfs_dir,
+					    (void *)ubi_num, &dfs_fops);
 
-	fname = "chk_fastmap";
-	dent = debugfs_create_file(fname, S_IWUSR, d->dfs_dir, (void *)ubi_num,
-				   &dfs_fops);
-	if (IS_ERR_OR_NULL(dent))
-		goto out_remove;
-	d->dfs_chk_fastmap = dent;
+	d->dfs_chk_fastmap = debugfs_create_file("chk_fastmap", S_IWUSR,
+						 d->dfs_dir, (void *)ubi_num,
+						 &dfs_fops);
 
-	fname = "tst_disable_bgt";
-	dent = debugfs_create_file(fname, S_IWUSR, d->dfs_dir, (void *)ubi_num,
-				   &dfs_fops);
-	if (IS_ERR_OR_NULL(dent))
-		goto out_remove;
-	d->dfs_disable_bgt = dent;
+	d->dfs_disable_bgt = debugfs_create_file("tst_disable_bgt", S_IWUSR,
+						 d->dfs_dir, (void *)ubi_num,
+						 &dfs_fops);
 
-	fname = "tst_emulate_bitflips";
-	dent = debugfs_create_file(fname, S_IWUSR, d->dfs_dir, (void *)ubi_num,
-				   &dfs_fops);
-	if (IS_ERR_OR_NULL(dent))
-		goto out_remove;
-	d->dfs_emulate_bitflips = dent;
+	d->dfs_emulate_bitflips = debugfs_create_file("tst_emulate_bitflips",
+						      S_IWUSR, d->dfs_dir,
+						      (void *)ubi_num,
+						      &dfs_fops);
 
-	fname = "tst_emulate_io_failures";
-	dent = debugfs_create_file(fname, S_IWUSR, d->dfs_dir, (void *)ubi_num,
-				   &dfs_fops);
-	if (IS_ERR_OR_NULL(dent))
-		goto out_remove;
-	d->dfs_emulate_io_failures = dent;
+	d->dfs_emulate_io_failures = debugfs_create_file("tst_emulate_io_failures",
+							 S_IWUSR, d->dfs_dir,
+							 (void *)ubi_num,
+							 &dfs_fops);
 
-	fname = "tst_emulate_power_cut";
-	dent = debugfs_create_file(fname, S_IWUSR, d->dfs_dir, (void *)ubi_num,
-				   &dfs_fops);
-	if (IS_ERR_OR_NULL(dent))
-		goto out_remove;
-	d->dfs_emulate_power_cut = dent;
+	d->dfs_emulate_power_cut = debugfs_create_file("tst_emulate_power_cut",
+						       S_IWUSR, d->dfs_dir,
+						       (void *)ubi_num,
+						       &dfs_fops);
 
-	fname = "tst_emulate_power_cut_min";
-	dent = debugfs_create_file(fname, S_IWUSR, d->dfs_dir, (void *)ubi_num,
-				   &dfs_fops);
-	if (IS_ERR_OR_NULL(dent))
-		goto out_remove;
-	d->dfs_power_cut_min = dent;
+	d->dfs_power_cut_min = debugfs_create_file("tst_emulate_power_cut_min",
+						   S_IWUSR, d->dfs_dir,
+						   (void *)ubi_num, &dfs_fops);
 
-	fname = "tst_emulate_power_cut_max";
-	dent = debugfs_create_file(fname, S_IWUSR, d->dfs_dir, (void *)ubi_num,
-				   &dfs_fops);
-	if (IS_ERR_OR_NULL(dent))
-		goto out_remove;
-	d->dfs_power_cut_max = dent;
+	d->dfs_power_cut_max = debugfs_create_file("tst_emulate_power_cut_max",
+						   S_IWUSR, d->dfs_dir,
+						   (void *)ubi_num, &dfs_fops);
+
+	debugfs_create_file("detailed_erase_block_info", S_IRUSR, d->dfs_dir,
+			    (void *)ubi_num, &eraseblk_count_fops);
 
 	return 0;
-
-out_remove:
-	debugfs_remove_recursive(d->dfs_dir);
-out:
-	err = dent ? PTR_ERR(dent) : -ENODEV;
-	ubi_err(ubi, "cannot create \"%s\" debugfs file or directory, error %d\n",
-		fname, err);
-	return err;
 }
 
 /**

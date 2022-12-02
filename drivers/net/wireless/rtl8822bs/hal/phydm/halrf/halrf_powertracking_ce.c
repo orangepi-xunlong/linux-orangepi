@@ -723,39 +723,6 @@ odm_txpowertracking_check_ce(
 }
 
 void
-odm_txpowertracking_direct_ce(
-	void	*p_dm_void
-)
-{
-	struct PHY_DM_STRUCT		*p_dm = (struct PHY_DM_STRUCT *)p_dm_void;
-	struct _hal_rf_				*p_rf = &(p_dm->rf_table);
-#if (DM_ODM_SUPPORT_TYPE == ODM_CE)
-	struct _ADAPTER	*adapter = p_dm->adapter;
-
-	if (!(p_rf->rf_supportability & HAL_RF_TX_PWR_TRACK))
-		return;
-
-	if (IS_HARDWARE_TYPE_8188E(adapter) || IS_HARDWARE_TYPE_8188F(adapter) || IS_HARDWARE_TYPE_8192E(adapter)
-		|| IS_HARDWARE_TYPE_8723B(adapter) || IS_HARDWARE_TYPE_JAGUAR(adapter) || IS_HARDWARE_TYPE_8814A(adapter)
-		|| IS_HARDWARE_TYPE_8703B(adapter) || IS_HARDWARE_TYPE_8723D(adapter) || IS_HARDWARE_TYPE_8822B(adapter)
-		|| IS_HARDWARE_TYPE_8821C(adapter)  || (p_dm->support_ic_type == ODM_RTL8710B)
-		 )/* JJ ADD 20161014 */
-		odm_set_rf_reg(p_dm, RF_PATH_A, RF_T_METER_NEW, (BIT(17) | BIT(16)), 0x03);
-	else
-		odm_set_rf_reg(p_dm, RF_PATH_A, RF_T_METER_OLD, RFREGOFFSETMASK, 0x60);
-
-
-#if (DM_ODM_SUPPORT_TYPE == ODM_CE) && defined(DM_ODM_CE_MAC80211)
-	odm_txpowertracking_callback_thermal_meter(p_dm);
-#else
-	odm_txpowertracking_callback_thermal_meter(adapter);
-#endif
-#endif
-
-}
-
-
-void
 odm_txpowertracking_check_mp(
 	void	*p_dm_void
 )

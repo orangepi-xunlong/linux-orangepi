@@ -1108,7 +1108,8 @@ static void nForceUpdateArbitrationSettings
     unsigned      pixelDepth,
     unsigned     *burst,
     unsigned     *lwm,
-    RIVA_HW_INST *chip
+    RIVA_HW_INST *chip,
+    struct pci_dev *pdev
 )
 {
     nv10_fifo_info fifo_data;
@@ -1116,8 +1117,9 @@ static void nForceUpdateArbitrationSettings
     unsigned int M, N, P, pll, MClk, NVClk;
     unsigned int uMClkPostDiv;
     struct pci_dev *dev;
+    int domain = pci_domain_nr(pdev->bus);
 
-    dev = pci_get_bus_and_slot(0, 3);
+    dev = pci_get_domain_bus_and_slot(domain, 0, 3);
     pci_read_config_dword(dev, 0x6C, &uMClkPostDiv);
     pci_dev_put(dev);
     uMClkPostDiv = (uMClkPostDiv >> 8) & 0xf;
@@ -1132,7 +1134,7 @@ static void nForceUpdateArbitrationSettings
     sim_data.enable_video   = 0;
     sim_data.enable_mp      = 0;
 
-    dev = pci_get_bus_and_slot(0, 1);
+    dev = pci_get_domain_bus_and_slot(domain, 0, 1);
     pci_read_config_dword(dev, 0x7C, &sim_data.memory_type);
     pci_dev_put(dev);
     sim_data.memory_type    = (sim_data.memory_type >> 12) & 1;
@@ -1234,6 +1236,7 @@ int CalcStateExt
 (
     RIVA_HW_INST  *chip,
     RIVA_HW_STATE *state,
+    struct pci_dev *pdev,
     int            bpp,
     int            width,
     int            hDisplaySize,
@@ -1242,8 +1245,7 @@ int CalcStateExt
 )
 {
     int pixelDepth;
-    int uninitialized_var(VClk),uninitialized_var(m),
-        uninitialized_var(n),	uninitialized_var(p);
+    int VClk, m, n, p;
 
     /*
      * Save mode parameters.
@@ -1300,7 +1302,7 @@ int CalcStateExt
                                           pixelDepth * 8,
                                          &(state->arbitration0),
                                          &(state->arbitration1),
-                                          chip);
+                                          chip, pdev);
             } else {
                 nv10UpdateArbitrationSettings(VClk, 
                                           pixelDepth * 8, 
@@ -1340,24 +1342,6 @@ int CalcStateExt
 /*
  * Load fixed function state and pre-calculated/stored state.
  */
-#if 0
-#define LOAD_FIXED_STATE(tbl,dev)                                       \
-    for (i = 0; i < sizeof(tbl##Table##dev)/8; i++)                 \
-        chip->dev[tbl##Table##dev[i][0]] = tbl##Table##dev[i][1]
-#define LOAD_FIXED_STATE_8BPP(tbl,dev)                                  \
-    for (i = 0; i < sizeof(tbl##Table##dev##_8BPP)/8; i++)            \
-        chip->dev[tbl##Table##dev##_8BPP[i][0]] = tbl##Table##dev##_8BPP[i][1]
-#define LOAD_FIXED_STATE_15BPP(tbl,dev)                                 \
-    for (i = 0; i < sizeof(tbl##Table##dev##_15BPP)/8; i++)           \
-        chip->dev[tbl##Table##dev##_15BPP[i][0]] = tbl##Table##dev##_15BPP[i][1]
-#define LOAD_FIXED_STATE_16BPP(tbl,dev)                                 \
-    for (i = 0; i < sizeof(tbl##Table##dev##_16BPP)/8; i++)           \
-        chip->dev[tbl##Table##dev##_16BPP[i][0]] = tbl##Table##dev##_16BPP[i][1]
-#define LOAD_FIXED_STATE_32BPP(tbl,dev)                                 \
-    for (i = 0; i < sizeof(tbl##Table##dev##_32BPP)/8; i++)           \
-        chip->dev[tbl##Table##dev##_32BPP[i][0]] = tbl##Table##dev##_32BPP[i][1]
-#endif
-
 #define LOAD_FIXED_STATE(tbl,dev)                                       \
     for (i = 0; i < sizeof(tbl##Table##dev)/8; i++)                 \
         NV_WR32(&chip->dev[tbl##Table##dev[i][0]], 0, tbl##Table##dev[i][1])
@@ -2102,10 +2086,12 @@ static void nv4GetConfig
 static void nv10GetConfig
 (
     RIVA_HW_INST *chip,
+    struct pci_dev *pdev,
     unsigned int chipset
 )
 {
     struct pci_dev* dev;
+    int domain = pci_domain_nr(pdev->bus);
     u32 amt;
 
 #ifdef __BIG_ENDIAN
@@ -2118,12 +2104,12 @@ static void nv10GetConfig
      * Fill in chip configuration.
      */
     if(chipset == NV_CHIP_IGEFORCE2) {
-        dev = pci_get_bus_and_slot(0, 1);
+        dev = pci_get_domain_bus_and_slot(domain, 0, 1);
         pci_read_config_dword(dev, 0x7C, &amt);
         pci_dev_put(dev);
         chip->RamAmountKBytes = (((amt >> 6) & 31) + 1) * 1024;
     } else if(chipset == NV_CHIP_0x01F0) {
-        dev = pci_get_bus_and_slot(0, 1);
+        dev = pci_get_domain_bus_and_slot(domain, 0, 1);
         pci_read_config_dword(dev, 0x84, &amt);
         pci_dev_put(dev);
         chip->RamAmountKBytes = (((amt >> 4) & 127) + 1) * 1024;
@@ -2224,6 +2210,7 @@ static void nv10GetConfig
 int RivaGetConfig
 (
     RIVA_HW_INST *chip,
+    struct pci_dev *pdev,
     unsigned int chipset
 )
 {
@@ -2245,7 +2232,7 @@ int RivaGetConfig
         case NV_ARCH_10:
         case NV_ARCH_20:
         case NV_ARCH_30:
-            nv10GetConfig(chip, chipset);
+            nv10GetConfig(chip, pdev, chipset);
             break;
         default:
             return (-1);

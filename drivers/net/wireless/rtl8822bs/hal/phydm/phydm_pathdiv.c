@@ -649,7 +649,7 @@ phydm_path_diversity_init(
 
 void
 odm_path_div_chk_ant_switch_callback(
-	struct phydm_timer_list		*p_timer
+	struct timer_list		*p_timer
 )
 {
 }
@@ -663,7 +663,7 @@ odm_path_div_chk_ant_switch_workitem_callback(
 
 void
 odm_cck_tx_path_diversity_callback(
-	struct phydm_timer_list		*p_timer
+	struct timer_list		*p_timer
 )
 {
 }

@@ -17,6 +17,11 @@
 #define _OSDEP_SERVICE_C_
 
 #include <drv_types.h>
+#include <linux/kthread.h>
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 17, 0))
+#define kthread_complete_and_exit(comp, code) complete_and_exit(comp, code)
+#endif
 
 #define RT_TAG	'1178'
 
@@ -27,6 +32,7 @@ atomic_t _malloc_size = ATOMIC_INIT(0);
 #endif
 #endif /* DBG_MEMORY_LEAK */
 
+MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
 
 #if defined(PLATFORM_LINUX)
 /*
@@ -249,7 +255,7 @@ struct sk_buff *dev_alloc_skb(unsigned int size)
 	skb->tail = (unsigned char *)data;
 	skb->end = (unsigned char *)data + size;
 	skb->len = 0;
-	/* printf("%s()-%d: skb=%p, skb->head = %p\n", __func__, __LINE__, skb, skb->head); */
+	/* printf("%s()-%d: skb=%p, skb->head = %p\n", __FUNCTION__, __LINE__, skb, skb->head); */
 
 out:
 	return skb;
@@ -262,10 +268,10 @@ nodata:
 
 void dev_kfree_skb_any(struct sk_buff *skb)
 {
-	/* printf("%s()-%d: skb->head = %p\n", __func__, __LINE__, skb->head); */
+	/* printf("%s()-%d: skb->head = %p\n", __FUNCTION__, __LINE__, skb->head); */
 	if (skb->head)
 		_rtw_mfree(skb->head, 0);
-	/* printf("%s()-%d: skb = %p\n", __func__, __LINE__, skb); */
+	/* printf("%s()-%d: skb = %p\n", __FUNCTION__, __LINE__, skb); */
 	if (skb)
 		_rtw_mfree((u8 *)skb, 0);
 }
@@ -574,7 +580,7 @@ inline u8 *dbg_rtw_vmalloc(u32 sz, const enum mstat_f flags, const char *func, c
 	u8  *p;
 
 	if (match_mstat_sniff_rules(flags, sz))
-		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%d)\n", func, line, __func__, (sz));
+		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%d)\n", func, line, __FUNCTION__, (sz));
 
 	p = _rtw_vmalloc((sz));
 
@@ -592,7 +598,7 @@ inline u8 *dbg_rtw_zvmalloc(u32 sz, const enum mstat_f flags, const char *func, 
 	u8 *p;
 
 	if (match_mstat_sniff_rules(flags, sz))
-		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%d)\n", func, line, __func__, (sz));
+		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%d)\n", func, line, __FUNCTION__, (sz));
 
 	p = _rtw_zvmalloc((sz));
 
@@ -609,7 +615,7 @@ inline void dbg_rtw_vmfree(u8 *pbuf, u32 sz, const enum mstat_f flags, const cha
 {
 
 	if (match_mstat_sniff_rules(flags, sz))
-		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%d)\n", func, line, __func__, (sz));
+		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%d)\n", func, line, __FUNCTION__, (sz));
 
 	_rtw_vmfree((pbuf), (sz));
 
@@ -625,7 +631,7 @@ inline u8 *dbg_rtw_malloc(u32 sz, const enum mstat_f flags, const char *func, co
 	u8 *p;
 
 	if (match_mstat_sniff_rules(flags, sz))
-		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%d)\n", func, line, __func__, (sz));
+		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%d)\n", func, line, __FUNCTION__, (sz));
 
 	p = _rtw_malloc((sz));
 
@@ -643,7 +649,7 @@ inline u8 *dbg_rtw_zmalloc(u32 sz, const enum mstat_f flags, const char *func, c
 	u8 *p;
 
 	if (match_mstat_sniff_rules(flags, sz))
-		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%d)\n", func, line, __func__, (sz));
+		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%d)\n", func, line, __FUNCTION__, (sz));
 
 	p = _rtw_zmalloc((sz));
 
@@ -659,7 +665,7 @@ inline u8 *dbg_rtw_zmalloc(u32 sz, const enum mstat_f flags, const char *func, c
 inline void dbg_rtw_mfree(u8 *pbuf, u32 sz, const enum mstat_f flags, const char *func, const int line)
 {
 	if (match_mstat_sniff_rules(flags, sz))
-		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%d)\n", func, line, __func__, (sz));
+		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%d)\n", func, line, __FUNCTION__, (sz));
 
 	_rtw_mfree((pbuf), (sz));
 
@@ -681,7 +687,7 @@ inline struct sk_buff *dbg_rtw_skb_alloc(unsigned int size, const enum mstat_f f
 		truesize = skb->truesize;
 
 	if (!skb || truesize < size || match_mstat_sniff_rules(flags, truesize))
-		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%d), skb:%p, truesize=%u\n", func, line, __func__, size, skb, truesize);
+		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%d), skb:%p, truesize=%u\n", func, line, __FUNCTION__, size, skb, truesize);
 
 	rtw_mstat_update(
 		flags
@@ -697,7 +703,7 @@ inline void dbg_rtw_skb_free(struct sk_buff *skb, const enum mstat_f flags, cons
 	unsigned int truesize = skb->truesize;
 
 	if (match_mstat_sniff_rules(flags, truesize))
-		RTW_INFO("DBG_MEM_ALLOC %s:%d %s, truesize=%u\n", func, line, __func__, truesize);
+		RTW_INFO("DBG_MEM_ALLOC %s:%d %s, truesize=%u\n", func, line, __FUNCTION__, truesize);
 
 	_rtw_skb_free(skb);
 
@@ -719,7 +725,7 @@ inline struct sk_buff *dbg_rtw_skb_copy(const struct sk_buff *skb, const enum ms
 		cp_truesize = skb_cp->truesize;
 
 	if (!skb_cp || cp_truesize < truesize || match_mstat_sniff_rules(flags, cp_truesize))
-		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%u), skb_cp:%p, cp_truesize=%u\n", func, line, __func__, truesize, skb_cp, cp_truesize);
+		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%u), skb_cp:%p, cp_truesize=%u\n", func, line, __FUNCTION__, truesize, skb_cp, cp_truesize);
 
 	rtw_mstat_update(
 		flags
@@ -741,7 +747,7 @@ inline struct sk_buff *dbg_rtw_skb_clone(struct sk_buff *skb, const enum mstat_f
 		cl_truesize = skb_cl->truesize;
 
 	if (!skb_cl || cl_truesize < truesize || match_mstat_sniff_rules(flags, cl_truesize))
-		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%u), skb_cl:%p, cl_truesize=%u\n", func, line, __func__, truesize, skb_cl, cl_truesize);
+		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%u), skb_cl:%p, cl_truesize=%u\n", func, line, __FUNCTION__, truesize, skb_cl, cl_truesize);
 
 	rtw_mstat_update(
 		flags
@@ -758,7 +764,7 @@ inline int dbg_rtw_netif_rx(_nic_hdl ndev, struct sk_buff *skb, const enum mstat
 	unsigned int truesize = skb->truesize;
 
 	if (match_mstat_sniff_rules(flags, truesize))
-		RTW_INFO("DBG_MEM_ALLOC %s:%d %s, truesize=%u\n", func, line, __func__, truesize);
+		RTW_INFO("DBG_MEM_ALLOC %s:%d %s, truesize=%u\n", func, line, __FUNCTION__, truesize);
 
 	ret = _rtw_netif_rx(ndev, skb);
 
@@ -778,7 +784,7 @@ inline int dbg_rtw_netif_receive_skb(_nic_hdl ndev, struct sk_buff *skb, const e
 	unsigned int truesize = skb->truesize;
 
 	if (match_mstat_sniff_rules(flags, truesize))
-		RTW_INFO("DBG_MEM_ALLOC %s:%d %s, truesize=%u\n", func, line, __func__, truesize);
+		RTW_INFO("DBG_MEM_ALLOC %s:%d %s, truesize=%u\n", func, line, __FUNCTION__, truesize);
 
 	ret = _rtw_netif_receive_skb(ndev, skb);
 
@@ -798,7 +804,7 @@ inline gro_result_t dbg_rtw_napi_gro_receive(struct napi_struct *napi, struct sk
 	unsigned int truesize = skb->truesize;
 
 	if (match_mstat_sniff_rules(flags, truesize))
-		RTW_INFO("DBG_MEM_ALLOC %s:%d %s, truesize=%u\n", func, line, __func__, truesize);
+		RTW_INFO("DBG_MEM_ALLOC %s:%d %s, truesize=%u\n", func, line, __FUNCTION__, truesize);
 
 	ret = _rtw_napi_gro_receive(napi, skb);
 
@@ -827,7 +833,7 @@ inline void *dbg_rtw_usb_buffer_alloc(struct usb_device *dev, size_t size, dma_a
 	void *p;
 
 	if (match_mstat_sniff_rules(flags, size))
-		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%zu)\n", func, line, __func__, size);
+		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%zu)\n", func, line, __FUNCTION__, size);
 
 	p = _rtw_usb_buffer_alloc(dev, size, dma);
 
@@ -844,7 +850,7 @@ inline void dbg_rtw_usb_buffer_free(struct usb_device *dev, size_t size, void *a
 {
 
 	if (match_mstat_sniff_rules(flags, size))
-		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%zu)\n", func, line, __func__, size);
+		RTW_INFO("DBG_MEM_ALLOC %s:%d %s(%zu)\n", func, line, __FUNCTION__, size);
 
 	_rtw_usb_buffer_free(dev, size, addr, dma);
 
@@ -864,7 +870,7 @@ void *rtw_malloc2d(int h, int w, size_t size)
 
 	void **a = (void **) rtw_zmalloc(h * sizeof(void *) + h * w * size);
 	if (a == NULL) {
-		RTW_INFO("%s: alloc memory fail!\n", __func__);
+		RTW_INFO("%s: alloc memory fail!\n", __FUNCTION__);
 		return NULL;
 	}
 
@@ -1210,7 +1216,7 @@ u32 _rtw_down_sema(_sema *sema)
 inline void thread_exit(_completion *comp)
 {
 #ifdef PLATFORM_LINUX
-	complete_and_exit(comp, 0);
+	kthread_complete_and_exit(comp, 0);
 #endif
 
 #ifdef PLATFORM_FREEBSD
@@ -1335,14 +1341,14 @@ void rtw_mtx_lock(_lock *plock)
 	if (prtw_lock)
 		mtx_lock(&prtw_lock->glock);
 	else
-		printf("%s prtw_lock==NULL", __func__);
+		printf("%s prtw_lock==NULL", __FUNCTION__);
 }
 void rtw_mtx_unlock(_lock *plock)
 {
 	if (prtw_lock)
 		mtx_unlock(&prtw_lock->glock);
 	else
-		printf("%s prtw_lock==NULL", __func__);
+		printf("%s prtw_lock==NULL", __FUNCTION__);
 
 }
 #endif /* PLATFORM_FREEBSD */
@@ -1599,13 +1605,13 @@ void _rtw_mdelay_os(int ms, const char *func, const int line)
 {
 #if 0
 	if (ms > 10)
-		RTW_INFO("%s:%d %s(%d)\n", func, line, __func__, ms);
+		RTW_INFO("%s:%d %s(%d)\n", func, line, __FUNCTION__, ms);
 	rtw_msleep_os(ms);
 	return;
 #endif
 
 
-	RTW_INFO("%s:%d %s(%d)\n", func, line, __func__, ms);
+	RTW_INFO("%s:%d %s(%d)\n", func, line, __FUNCTION__, ms);
 
 #if defined(PLATFORM_LINUX)
 
@@ -1624,14 +1630,14 @@ void _rtw_udelay_os(int us, const char *func, const int line)
 
 #if 0
 	if (us > 1000) {
-		RTW_INFO("%s:%d %s(%d)\n", func, line, __func__, us);
+		RTW_INFO("%s:%d %s(%d)\n", func, line, __FUNCTION__, us);
 		rtw_usleep_os(us);
 		return;
 	}
 #endif
 
 
-	RTW_INFO("%s:%d %s(%d)\n", func, line, __func__, us);
+	RTW_INFO("%s:%d %s(%d)\n", func, line, __FUNCTION__, us);
 
 
 #if defined(PLATFORM_LINUX)
@@ -1782,7 +1788,7 @@ inline void rtw_lock_suspend(void)
 #endif
 
 #if  defined(CONFIG_WAKELOCK) || defined(CONFIG_ANDROID_POWER)
-	/* RTW_INFO("####%s: suspend_lock_count:%d####\n", __func__, rtw_suspend_lock.stat.count); */
+	/* RTW_INFO("####%s: suspend_lock_count:%d####\n", __FUNCTION__, rtw_suspend_lock.stat.count); */
 #endif
 }
 
@@ -1795,7 +1801,7 @@ inline void rtw_unlock_suspend(void)
 #endif
 
 #if  defined(CONFIG_WAKELOCK) || defined(CONFIG_ANDROID_POWER)
-	/* RTW_INFO("####%s: suspend_lock_count:%d####\n", __func__, rtw_suspend_lock.stat.count); */
+	/* RTW_INFO("####%s: suspend_lock_count:%d####\n", __FUNCTION__, rtw_suspend_lock.stat.count); */
 #endif
 }
 
@@ -1808,7 +1814,7 @@ inline void rtw_resume_lock_suspend(void)
 #endif
 
 #if  defined(CONFIG_WAKELOCK) || defined(CONFIG_ANDROID_POWER)
-	/* RTW_INFO("####%s: suspend_lock_count:%d####\n", __func__, rtw_suspend_lock.stat.count); */
+	/* RTW_INFO("####%s: suspend_lock_count:%d####\n", __FUNCTION__, rtw_suspend_lock.stat.count); */
 #endif
 }
 
@@ -1821,7 +1827,7 @@ inline void rtw_resume_unlock_suspend(void)
 #endif
 
 #if  defined(CONFIG_WAKELOCK) || defined(CONFIG_ANDROID_POWER)
-	/* RTW_INFO("####%s: suspend_lock_count:%d####\n", __func__, rtw_suspend_lock.stat.count); */
+	/* RTW_INFO("####%s: suspend_lock_count:%d####\n", __FUNCTION__, rtw_suspend_lock.stat.count); */
 #endif
 }
 
@@ -2036,11 +2042,11 @@ static int readFile(struct file *fp, char *buf, int len)
 
 	while (sum < len) {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0))
-		rlen = kernel_read(fp, buf + sum, len - sum, &fp->f_pos);
+ 		rlen = kernel_read(fp, buf+sum, len-sum, &fp->f_pos);
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0))
-		rlen = __vfs_read(fp, buf + sum, len - sum, &fp->f_pos);
+ 		rlen = __vfs_read(fp, buf+sum, len-sum, &fp->f_pos);
 #else
-		rlen = fp->f_op->read(fp, buf + sum, len - sum, &fp->f_pos);
+		rlen = fp->f_op->read(fp, buf+sum, len-sum, &fp->f_pos);
 #endif
 		if (rlen > 0)
 			sum += rlen;
@@ -2085,15 +2091,23 @@ static int isFileReadable(const char *path, u32 *sz)
 {
 	struct file *fp;
 	int ret = 0;
+#ifdef set_fs
 	mm_segment_t oldfs;
+#endif
 	char buf;
 
 	fp = filp_open(path, O_RDONLY, 0);
 	if (IS_ERR(fp))
 		ret = PTR_ERR(fp);
 	else {
+		#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0))
 		oldfs = get_fs();
+		#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0))
+		set_fs(KERNEL_DS);
+		#else
 		set_fs(get_ds());
+		#endif
+		#endif
 
 		if (1 != readFile(fp, &buf, 1))
 			ret = PTR_ERR(fp);
@@ -2105,8 +2119,9 @@ static int isFileReadable(const char *path, u32 *sz)
 			*sz = i_size_read(fp->f_dentry->d_inode);
 			#endif
 		}
-
+#ifdef set_fs
 		set_fs(oldfs);
+#endif
 		filp_close(fp, NULL);
 	}
 	return ret;
@@ -2122,26 +2137,30 @@ static int isFileReadable(const char *path, u32 *sz)
 static int retriveFromFile(const char *path, u8 *buf, u32 sz)
 {
 	int ret = -1;
+#ifdef set_fs
 	mm_segment_t oldfs;
+#endif
 	struct file *fp;
 
 	if (path && buf) {
 		ret = openFile(&fp, path, O_RDONLY, 0);
 		if (0 == ret) {
-			RTW_INFO("%s openFile path:%s fp=%p\n", __func__, path , fp);
-
+			RTW_INFO("%s openFile path:%s fp=%p\n", __FUNCTION__, path , fp);
+#ifdef set_fs
 			oldfs = get_fs();
-			set_fs(get_ds());
-			ret = readFile(fp, buf, sz);
+			set_fs(KERNEL_DS);
 			set_fs(oldfs);
+#else
+			ret = readFile(fp, buf, sz);
+#endif
 			closeFile(fp);
 
-			RTW_INFO("%s readFile, ret:%d\n", __func__, ret);
+			RTW_INFO("%s readFile, ret:%d\n", __FUNCTION__, ret);
 
 		} else
-			RTW_INFO("%s openFile path:%s Fail, ret:%d\n", __func__, path, ret);
+			RTW_INFO("%s openFile path:%s Fail, ret:%d\n", __FUNCTION__, path, ret);
 	} else {
-		RTW_INFO("%s NULL pointer\n", __func__);
+		RTW_INFO("%s NULL pointer\n", __FUNCTION__);
 		ret =  -EINVAL;
 	}
 	return ret;
@@ -2163,20 +2182,22 @@ static int storeToFile(const char *path, u8 *buf, u32 sz)
 	if (path && buf) {
 		ret = openFile(&fp, path, O_CREAT | O_WRONLY, 0666);
 		if (0 == ret) {
-			RTW_INFO("%s openFile path:%s fp=%p\n", __func__, path , fp);
-
+			RTW_INFO("%s openFile path:%s fp=%p\n", __FUNCTION__, path , fp);
+#ifdef set_fs
 			oldfs = get_fs();
-			set_fs(get_ds());
 			ret = writeFile(fp, buf, sz);
 			set_fs(oldfs);
+#else
+			ret = writeFile(fp, buf, sz);
+#endif
 			closeFile(fp);
 
-			RTW_INFO("%s writeFile, ret:%d\n", __func__, ret);
+			RTW_INFO("%s writeFile, ret:%d\n", __FUNCTION__, ret);
 
 		} else
-			RTW_INFO("%s openFile path:%s Fail, ret:%d\n", __func__, path, ret);
+			RTW_INFO("%s openFile path:%s Fail, ret:%d\n", __FUNCTION__, path, ret);
 	} else {
-		RTW_INFO("%s NULL pointer\n", __func__);
+		RTW_INFO("%s NULL pointer\n", __FUNCTION__);
 		ret =  -EINVAL;
 	}
 	return ret;
@@ -2697,7 +2718,7 @@ int map_readN(const struct map_t *map, u16 offset, u16 len, u8 *buf)
 			else
 				c_len = seg->sa + seg->len - offset;
 		}
-
+			
 		_rtw_memcpy(c_dst, c_src, c_len);
 	}
 

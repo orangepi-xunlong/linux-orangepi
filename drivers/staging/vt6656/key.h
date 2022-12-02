@@ -1,17 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * Copyright (c) 1996, 2003 VIA Networking Technologies, Inc.
  * All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  *
  * File: key.h
  *
@@ -35,17 +25,18 @@
 #define KEY_CTL_TKIP        0x02
 #define KEY_CTL_CCMP        0x03
 
-#define VNT_KEY_DEFAULTKEY	0x1
-#define VNT_KEY_GROUP_ADDRESS	0x2
-#define VNT_KEY_ALLGROUP	0x4
-#define VNT_KEY_GROUP		0x40
-#define VNT_KEY_PAIRWISE	0x00
-#define VNT_KEY_ONFLY		0x8000
 #define VNT_KEY_ONFLY_ALL	0x4000
+#define VNT_KEY_ONFLY		0x8000
+#define VNT_KEY_ALLGROUP	0x04
+#define VNT_KEY_GROUP		0x40
+#define VNT_KEY_PAIRWISE	VNT_KEY_ONFLY
+#define VNT_KEY_GROUP_ADDRESS	(VNT_KEY_ALLGROUP | VNT_KEY_GROUP)
+#define VNT_KEY_DEFAULTKEY	(VNT_KEY_GROUP_ADDRESS | VNT_KEY_ONFLY |\
+				VNT_KEY_ONFLY_ALL)
 
-int vnt_key_init_table(struct vnt_private *);
+int vnt_key_init_table(struct vnt_private *priv);
 
 int vnt_set_keys(struct ieee80211_hw *hw, struct ieee80211_sta *sta,
-	struct ieee80211_vif *vif, struct ieee80211_key_conf *key);
+		 struct ieee80211_vif *vif, struct ieee80211_key_conf *key);
 
 #endif /* __KEY_H__ */

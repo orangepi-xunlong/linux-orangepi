@@ -769,7 +769,7 @@ void BlinkHandler(PLED_SDIO	pLed)
 	_adapter		*padapter = pLed->padapter;
 	struct led_priv	*ledpriv = &(padapter->ledpriv);
 
-	/* RTW_INFO("%s (%s:%d)\n",__func__, current->comm, current->pid); */
+	/* RTW_INFO("%s (%s:%d)\n",__FUNCTION__, current->comm, current->pid); */
 	if (RTW_CANNOT_RUN(padapter) || (!rtw_is_hw_init_completed(padapter))) {
 		RTW_INFO("%s bDriverStopped:%s, bSurpriseRemoved:%s\n"
 			 , __func__
@@ -824,7 +824,7 @@ void BlinkTimerCallback(void *data)
 	PLED_SDIO	 pLed = (PLED_SDIO)data;
 	_adapter		*padapter = pLed->padapter;
 
-	/* RTW_INFO("%s\n", __func__); */
+	/* RTW_INFO("%s\n", __FUNCTION__); */
 
 	if (RTW_CANNOT_RUN(padapter) || (!rtw_is_hw_init_completed(padapter))) {
 		/*RTW_INFO("%s bDriverStopped:%s, bSurpriseRemoved:%s\n"

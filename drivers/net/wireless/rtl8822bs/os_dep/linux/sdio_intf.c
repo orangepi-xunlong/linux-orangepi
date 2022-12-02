@@ -962,7 +962,7 @@ static void rtw_dev_remove(struct sdio_func *func)
 }
 static void rtw_dev_shutdown(struct device *dev)
 {
-	RTW_PRINT("+%s\n", __func__);
+	RTW_PRINT("+%s\n", __FUNCTION__);
 	rtw_dev_remove(dev_to_sdio_func(dev));
 }
 
@@ -1032,7 +1032,7 @@ int rtw_resume_process(_adapter *padapter)
 
 	if (pwrpriv->bInSuspend == _FALSE) {
 		pdbgpriv->dbg_resume_error_cnt++;
-		RTW_INFO("%s bInSuspend = %d\n", __func__, pwrpriv->bInSuspend);
+		RTW_INFO("%s bInSuspend = %d\n", __FUNCTION__, pwrpriv->bInSuspend);
 		return -1;
 	}
 
@@ -1049,7 +1049,7 @@ static int rtw_sdio_resume(struct device *dev)
 	int ret = 0;
 	struct debug_priv *pdbgpriv = &psdpriv->drv_dbg;
 
-	RTW_INFO("==> %s (%s:%d)\n", __func__, current->comm, current->pid);
+	RTW_INFO("==> %s (%s:%d)\n", __FUNCTION__, current->comm, current->pid);
 
 	pdbgpriv->dbg_resume_cnt++;
 
@@ -1077,7 +1077,7 @@ static int rtw_sdio_resume(struct device *dev)
 #endif
 	}
 	pmlmeext->last_scan_time = rtw_get_current_time();
-	RTW_INFO("<========  %s return %d\n", __func__, ret);
+	RTW_INFO("<========  %s return %d\n", __FUNCTION__, ret);
 	return ret;
 
 }
@@ -1098,7 +1098,7 @@ static int __init rtw_drv_entry(void)
 
 	ret = platform_wifi_power_on();
 	if (ret) {
-		RTW_INFO("%s: power on failed!!(%d)\n", __func__, ret);
+		RTW_INFO("%s: power on failed!!(%d)\n", __FUNCTION__, ret);
 		ret = -1;
 		goto exit;
 	}
@@ -1116,7 +1116,7 @@ static int __init rtw_drv_entry(void)
 		rtw_drv_proc_deinit();
 		rtw_ndev_notifier_unregister();
 		rtw_inetaddr_notifier_unregister();
-		RTW_INFO("%s: register driver failed!!(%d)\n", __func__, ret);
+		RTW_INFO("%s: register driver failed!!(%d)\n", __FUNCTION__, ret);
 		goto poweroff;
 	}
 

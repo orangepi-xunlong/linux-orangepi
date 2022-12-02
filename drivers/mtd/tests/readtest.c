@@ -1,18 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2006-2008 Nokia Corporation
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; see the file COPYING. If not, write to the Free Software
- * Foundation, 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  *
  * Check MTD device read.
  *
@@ -34,6 +22,11 @@
 static int dev = -EINVAL;
 module_param(dev, int, S_IRUGO);
 MODULE_PARM_DESC(dev, "MTD device number to use");
+
+static unsigned int cycles_count = 1;
+module_param(cycles_count, uint, S_IRUGO);
+MODULE_PARM_DESC(cycles_count, "how many erase cycles to do "
+			       "(infinite by default)");
 
 static struct mtd_info *mtd;
 static unsigned char *iobuf;
@@ -179,22 +172,25 @@ static int __init mtd_readtest_init(void)
 
 	/* Read all eraseblocks 1 page at a time */
 	pr_info("testing page read\n");
-	for (i = 0; i < ebcnt; ++i) {
-		int ret;
+	while (cycles_count--) {
+		pr_info("Number of remaining cycles %d\n", cycles_count);
+		for (i = 0; i < ebcnt; ++i) {
+			int ret;
 
-		if (bbt[i])
-			continue;
-		ret = read_eraseblock_by_page(i);
-		if (ret) {
-			dump_eraseblock(i);
-			if (!err)
+			if (bbt[i])
+				continue;
+			ret = read_eraseblock_by_page(i);
+			if (ret) {
+				dump_eraseblock(i);
+				if (!err)
+					err = ret;
+			}
+
+			ret = mtdtest_relax();
+			if (ret) {
 				err = ret;
-		}
-
-		ret = mtdtest_relax();
-		if (ret) {
-			err = ret;
-			goto out;
+				goto out;
+			}
 		}
 	}
 

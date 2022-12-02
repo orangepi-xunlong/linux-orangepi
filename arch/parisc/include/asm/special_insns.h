@@ -1,5 +1,34 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __PARISC_SPECIAL_INSNS_H
 #define __PARISC_SPECIAL_INSNS_H
+
+#define lpa(va)	({					\
+	unsigned long pa;				\
+	__asm__ __volatile__(				\
+		"copy %%r0,%0\n"			\
+		"8:\tlpa %%r0(%1),%0\n"			\
+		"9:\n"					\
+		ASM_EXCEPTIONTABLE_ENTRY(8b, 9b)	\
+		: "=&r" (pa)				\
+		: "r" (va)				\
+		: "memory"				\
+	);						\
+	pa;						\
+})
+
+#define lpa_user(va)	({				\
+	unsigned long pa;				\
+	__asm__ __volatile__(				\
+		"copy %%r0,%0\n"			\
+		"8:\tlpa %%r0(%%sr3,%1),%0\n"		\
+		"9:\n"					\
+		ASM_EXCEPTIONTABLE_ENTRY(8b, 9b)	\
+		: "=&r" (pa)				\
+		: "r" (va)				\
+		: "memory"				\
+	);						\
+	pa;						\
+})
 
 #define mfctl(reg)	({		\
 	unsigned long cr;		\

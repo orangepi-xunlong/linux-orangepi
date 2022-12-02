@@ -311,11 +311,6 @@ odm_txpowertracking_check_ce(
 	void		*p_dm_void
 );
 
-void
-odm_txpowertracking_direct_ce(
-	void	*p_dm_void
-);
-
 #if (DM_ODM_SUPPORT_TYPE & (ODM_WIN))
 
 void

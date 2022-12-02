@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * mcfclk.h -- coldfire specific clock structure
  */
@@ -28,6 +29,8 @@ extern struct clk_ops clk_ops0;
 #ifdef MCFPM_PPMCR1
 extern struct clk_ops clk_ops1;
 #endif /* MCFPM_PPMCR1 */
+
+extern struct clk_ops clk_ops2;
 
 #define DEFINE_CLK(clk_bank, clk_name, clk_slot, clk_rate) \
 static struct clk __clk_##clk_bank##_##clk_slot = { \

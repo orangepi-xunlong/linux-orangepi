@@ -32,9 +32,6 @@
 #define IEEE80211W_WRONG_KEY	0x1
 #define IEEE80211W_NO_KEY		0x2
 
-#define CCMPH_2_PN(ch)	((ch) & 0x000000000000ffff) \
-			| (((ch) & 0xffffffff00000000) >> 16)
-
 #define is_wep_enc(alg) (((alg) == _WEP40_) || ((alg) == _WEP104_))
 
 const char *security_type_str(u8 value);
@@ -154,7 +151,6 @@ struct security_priv {
 	unsigned int wpa2_group_cipher;
 	unsigned int wpa_pairwise_cipher;
 	unsigned int wpa2_pairwise_cipher;
-	u8 mfp_opt;
 #endif
 #ifdef CONFIG_CONCURRENT_MODE
 	u8	dot118021x_bmc_cam_id;
@@ -244,13 +240,7 @@ struct security_priv {
 #endif /* DBG_SW_SEC_CNT */
 };
 
-#ifdef CONFIG_IEEE80211W
-#define SEC_IS_BIP_KEY_INSTALLED(sec) ((sec)->binstallBIPkey)
-#else
-#define SEC_IS_BIP_KEY_INSTALLED(sec) _FALSE
-#endif
-
-struct sha256_state {
+struct sha256_state_rtk {
 	u64 length;
 	u32 state[8], curlen;
 	u8 buf[64];
@@ -445,7 +435,7 @@ static const unsigned long K[64] = {
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 #endif
 #ifdef CONFIG_IEEE80211W
-int omac1_aes_128(const u8 *key, const u8 *data, size_t data_len, u8 *mac);
+int omac1_aes_128(u8 *key, u8 *data, size_t data_len, u8 *mac);
 #endif /* CONFIG_IEEE80211W */
 void rtw_secmicsetkey(struct mic_data *pmicdata, u8 *key);
 void rtw_secmicappendbyte(struct mic_data *pmicdata, u8 b);
@@ -468,9 +458,8 @@ u32 rtw_aes_decrypt(_adapter *padapter, u8  *precvframe);
 u32 rtw_tkip_decrypt(_adapter *padapter, u8  *precvframe);
 void rtw_wep_decrypt(_adapter *padapter, u8  *precvframe);
 #ifdef CONFIG_IEEE80211W
-u32	rtw_BIP_verify(_adapter *padapter, u8 *whdr_pos, sint flen
-	, const u8 *key, u16 id, u64* ipn);
-#endif
+u32	rtw_BIP_verify(_adapter *padapter, u8 *precvframe);
+#endif /* CONFIG_IEEE80211W */
 #ifdef CONFIG_TDLS
 void wpa_tdls_generate_tpk(_adapter *padapter, PVOID sta);
 int wpa_tdls_ftie_mic(u8 *kck, u8 trans_seq,

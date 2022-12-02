@@ -400,9 +400,8 @@ typedef struct hal_com_data {
 	u8	bDumpRxPkt;
 	u8	bDumpTxPkt;
 	u8	bDisableTXPowerTraining;
-	u8	dis_turboedca; /* 1: disable turboedca,
-						  2: disable turboedca and setting EDCA parameter based on the input parameter*/
-	u32 edca_param_mode;
+	u8	dis_turboedca;
+
 
 	/****** EEPROM setting.******/
 	u8	bautoload_fail_flag;
@@ -752,7 +751,7 @@ typedef struct hal_com_data {
 	struct hal_iqk_reg_backup iqk_reg_backup[MAX_IQK_INFO_BACKUP_CHNL_NUM];
 
 #ifdef RTW_HALMAC
-	u16 drv_rsvd_page_number;
+	u8 drv_rsvd_page_number;
 #endif
 
 #ifdef CONFIG_BEAMFORMING

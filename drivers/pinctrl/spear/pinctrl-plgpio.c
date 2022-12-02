@@ -13,7 +13,7 @@
 #include <linux/err.h>
 #include <linux/gpio/driver.h>
 #include <linux/io.h>
-#include <linux/module.h>
+#include <linux/init.h>
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/pinctrl/consumer.h>
@@ -204,7 +204,7 @@ static int plgpio_request(struct gpio_chip *chip, unsigned offset)
 	if (offset >= chip->ngpio)
 		return -EINVAL;
 
-	ret = pinctrl_request_gpio(gpio);
+	ret = pinctrl_gpio_request(gpio);
 	if (ret)
 		return ret;
 
@@ -242,7 +242,7 @@ err1:
 	if (!IS_ERR(plgpio->clk))
 		clk_disable(plgpio->clk);
 err0:
-	pinctrl_free_gpio(gpio);
+	pinctrl_gpio_free(gpio);
 	return ret;
 }
 
@@ -273,7 +273,7 @@ disable_clk:
 	if (!IS_ERR(plgpio->clk))
 		clk_disable(plgpio->clk);
 
-	pinctrl_free_gpio(gpio);
+	pinctrl_gpio_free(gpio);
 }
 
 /* PLGPIO IRQ */
@@ -401,7 +401,7 @@ static void plgpio_irq_handler(struct irq_desc *desc)
 			/* get correct irq line number */
 			pin = i * MAX_GPIO_PER_REG + pin;
 			generic_handle_irq(
-				irq_find_mapping(gc->irqdomain, pin));
+				irq_find_mapping(gc->irq.domain, pin));
 		}
 	}
 	chained_irq_exit(irqchip, desc);
@@ -515,17 +515,13 @@ end:
 static int plgpio_probe(struct platform_device *pdev)
 {
 	struct plgpio *plgpio;
-	struct resource *res;
 	int ret, irq;
 
 	plgpio = devm_kzalloc(&pdev->dev, sizeof(*plgpio), GFP_KERNEL);
-	if (!plgpio) {
-		dev_err(&pdev->dev, "memory allocation fail\n");
+	if (!plgpio)
 		return -ENOMEM;
-	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	plgpio->base = devm_ioremap_resource(&pdev->dev, res);
+	plgpio->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(plgpio->base))
 		return PTR_ERR(plgpio->base);
 
@@ -540,14 +536,12 @@ static int plgpio_probe(struct platform_device *pdev)
 		dev_warn(&pdev->dev, "clk_get() failed, work without it\n");
 
 #ifdef CONFIG_PM_SLEEP
-	plgpio->csave_regs = devm_kzalloc(&pdev->dev,
-			sizeof(*plgpio->csave_regs) *
+	plgpio->csave_regs = devm_kcalloc(&pdev->dev,
 			DIV_ROUND_UP(plgpio->chip.ngpio, MAX_GPIO_PER_REG),
+			sizeof(*plgpio->csave_regs),
 			GFP_KERNEL);
-	if (!plgpio->csave_regs) {
-		dev_err(&pdev->dev, "csave registers memory allocation fail\n");
+	if (!plgpio->csave_regs)
 		return -ENOMEM;
-	}
 #endif
 
 	platform_set_drvdata(pdev, plgpio);
@@ -573,40 +567,35 @@ static int plgpio_probe(struct platform_device *pdev)
 		}
 	}
 
+	irq = platform_get_irq(pdev, 0);
+	if (irq > 0) {
+		struct gpio_irq_chip *girq;
+
+		girq = &plgpio->chip.irq;
+		girq->chip = &plgpio_irqchip;
+		girq->parent_handler = plgpio_irq_handler;
+		girq->num_parents = 1;
+		girq->parents = devm_kcalloc(&pdev->dev, 1,
+					     sizeof(*girq->parents),
+					     GFP_KERNEL);
+		if (!girq->parents)
+			return -ENOMEM;
+		girq->parents[0] = irq;
+		girq->default_type = IRQ_TYPE_NONE;
+		girq->handler = handle_simple_irq;
+		dev_info(&pdev->dev, "PLGPIO registering with IRQs\n");
+	} else {
+		dev_info(&pdev->dev, "PLGPIO registering without IRQs\n");
+	}
+
 	ret = gpiochip_add_data(&plgpio->chip, plgpio);
 	if (ret) {
 		dev_err(&pdev->dev, "unable to add gpio chip\n");
 		goto unprepare_clk;
 	}
 
-	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_info(&pdev->dev, "PLGPIO registered without IRQs\n");
-		return 0;
-	}
-
-	ret = gpiochip_irqchip_add(&plgpio->chip,
-				   &plgpio_irqchip,
-				   0,
-				   handle_simple_irq,
-				   IRQ_TYPE_NONE);
-	if (ret) {
-		dev_err(&pdev->dev, "failed to add irqchip to gpiochip\n");
-		goto remove_gpiochip;
-	}
-
-	gpiochip_set_chained_irqchip(&plgpio->chip,
-				     &plgpio_irqchip,
-				     irq,
-				     plgpio_irq_handler);
-
-	dev_info(&pdev->dev, "PLGPIO registered with IRQs\n");
-
 	return 0;
 
-remove_gpiochip:
-	dev_info(&pdev->dev, "Remove gpiochip\n");
-	gpiochip_remove(&plgpio->chip);
 unprepare_clk:
 	if (!IS_ERR(plgpio->clk))
 		clk_unprepare(plgpio->clk);
@@ -705,7 +694,6 @@ static const struct of_device_id plgpio_of_match[] = {
 	{ .compatible = "st,spear-plgpio" },
 	{}
 };
-MODULE_DEVICE_TABLE(of, plgpio_of_match);
 
 static struct platform_driver plgpio_driver = {
 	.probe = plgpio_probe,
@@ -721,7 +709,3 @@ static int __init plgpio_init(void)
 	return platform_driver_register(&plgpio_driver);
 }
 subsys_initcall(plgpio_init);
-
-MODULE_AUTHOR("Viresh Kumar <viresh.kumar@linaro.org>");
-MODULE_DESCRIPTION("STMicroelectronics SPEAr PLGPIO driver");
-MODULE_LICENSE("GPL");

@@ -631,7 +631,6 @@ struct ieee80211_snap_hdr {
 #define WLAN_REASON_CLASS3_FRAME_FROM_NONASSOC_STA 7
 #define WLAN_REASON_DISASSOC_STA_HAS_LEFT 8
 #define WLAN_REASON_STA_REQ_ASSOC_WITHOUT_AUTH 9
-#define WLAN_REASON_SA_QUERY_TIMEOUT 65532
 #define WLAN_REASON_ACTIVE_ROAM 65533
 #define WLAN_REASON_JOIN_WRONG_CHANNEL       65534
 #define WLAN_REASON_EXPIRATION_CHK 65535
@@ -1545,26 +1544,11 @@ enum rtw_ieee80211_category {
 	RTW_WLAN_CATEGORY_WNM = 10,
 	RTW_WLAN_CATEGORY_UNPROTECTED_WNM = 11, /* add for CONFIG_IEEE80211W, none 11w also can use */
 	RTW_WLAN_CATEGORY_TDLS = 12,
-	RTW_WLAN_CATEGORY_MESH = 13,
-	RTW_WLAN_CATEGORY_MULTIHOP = 14,
-	RTW_WLAN_CATEGORY_SELF_PROTECTED = 15,
+	RTW_WLAN_CATEGORY_SELF_PROTECTED = 15, /* add for CONFIG_IEEE80211W, none 11w also can use */
 	RTW_WLAN_CATEGORY_WMM = 17,
 	RTW_WLAN_CATEGORY_VHT = 21,
 	RTW_WLAN_CATEGORY_P2P = 0x7f,/* P2P action frames */
 };
-
-#define CATEGORY_IS_GROUP_PRIVACY(cat) \
-	(cat == RTW_WLAN_CATEGORY_MESH || cat == RTW_WLAN_CATEGORY_MULTIHOP)
-
-#define CATEGORY_IS_NON_ROBUST(cat) \
-	(cat == RTW_WLAN_CATEGORY_PUBLIC \
-	|| cat == RTW_WLAN_CATEGORY_HT \
-	|| cat == RTW_WLAN_CATEGORY_UNPROTECTED_WNM \
-	|| cat == RTW_WLAN_CATEGORY_SELF_PROTECTED \
-	|| cat == RTW_WLAN_CATEGORY_VHT \
-	|| cat == RTW_WLAN_CATEGORY_P2P)
-
-#define CATEGORY_IS_ROBUST(cat) !CATEGORY_IS_NON_ROBUST(cat)
 
 /* SPECTRUM_MGMT action code */
 enum rtw_ieee80211_spectrum_mgmt_actioncode {
@@ -1845,35 +1829,13 @@ int rtw_ies_remove_ie(u8 *ies, uint *ies_len, uint offset, u8 eid, u8 *oui, u8 o
 
 void rtw_set_supported_rate(u8 *SupportedRates, uint mode) ;
 
-#define GET_RSN_CAP_MFP_OPTION(cap)	LE_BITS_TO_2BYTE(((u8 *)(cap)), 6, 2)
-
-#define MFP_NO			0
-#define MFP_INVALID		1
-#define MFP_OPTIONAL	2
-#define MFP_REQUIRED	3
-
-struct rsne_info {
-	u8 *gcs;
-	u16 pcs_cnt;
-	u8 *pcs_list;
-	u16 akm_cnt;
-	u8 *akm_list;
-	u8 *cap;
-	u16 pmkid_cnt;
-	u8 *pmkid_list;
-	u8 *gmcs;
-
-	u8 err;
-};
-int rtw_rsne_info_parse(const u8 *ie, uint ie_len, struct rsne_info *info);
-
 unsigned char *rtw_get_wpa_ie(unsigned char *pie, int *wpa_ie_len, int limit);
 unsigned char *rtw_get_wpa2_ie(unsigned char *pie, int *rsn_ie_len, int limit);
 int rtw_get_wpa_cipher_suite(u8 *s);
 int rtw_get_wpa2_cipher_suite(u8 *s);
 int rtw_get_wapi_ie(u8 *in_ie, uint in_len, u8 *wapi_ie, u16 *wapi_len);
 int rtw_parse_wpa_ie(u8 *wpa_ie, int wpa_ie_len, int *group_cipher, int *pairwise_cipher, int *is_8021x);
-int rtw_parse_wpa2_ie(u8 *wpa_ie, int wpa_ie_len, int *group_cipher, int *pairwise_cipher, int *is_8021x, u8 *mfp_opt);
+int rtw_parse_wpa2_ie(u8 *wpa_ie, int wpa_ie_len, int *group_cipher, int *pairwise_cipher, int *is_8021x);
 
 int rtw_get_sec_ie(u8 *in_ie, uint in_len, u8 *rsn_ie, u16 *rsn_len, u8 *wpa_ie, u16 *wpa_len);
 

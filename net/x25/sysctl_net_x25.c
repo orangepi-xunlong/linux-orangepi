@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* -*- linux-c -*-
  * sysctl_net_x25.c: sysctl interface to net X.25 subsystem.
  *
@@ -70,7 +71,7 @@ static struct ctl_table x25_table[] = {
 		.mode = 	0644,
 		.proc_handler = proc_dointvec,
 	},
-	{ 0, },
+	{ },
 };
 
 int __init x25_register_sysctl(void)

@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0
 /* sunbmac.c: Driver for Sparc BigMAC 100baseT ethernet adapters.
  *
  * Copyright (C) 1997, 1998, 1999, 2003, 2008 David S. Miller (davem@davemloft.net)
  */
 
 #include <linux/module.h>
+#include <linux/pgtable.h>
 
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -33,7 +35,6 @@
 #include <asm/io.h>
 #include <asm/openprom.h>
 #include <asm/oplib.h>
-#include <asm/pgtable.h>
 
 #include "sunbmac.h"
 
@@ -169,7 +170,7 @@ static void bigmac_stop(struct bigmac *bp)
 
 static void bigmac_get_counters(struct bigmac *bp, void __iomem *bregs)
 {
-	struct net_device_stats *stats = &bp->enet_stats;
+	struct net_device_stats *stats = &bp->dev->stats;
 
 	stats->rx_crc_errors += sbus_readl(bregs + BMAC_RCRCECTR);
 	sbus_writel(0, bregs + BMAC_RCRCECTR);
@@ -208,13 +209,13 @@ static void bigmac_clean_rings(struct bigmac *bp)
 	}
 }
 
-static void bigmac_init_rings(struct bigmac *bp, int from_irq)
+static void bigmac_init_rings(struct bigmac *bp, bool non_blocking)
 {
 	struct bmac_init_block *bb = bp->bmac_block;
 	int i;
 	gfp_t gfp_flags = GFP_KERNEL;
 
-	if (from_irq || in_interrupt())
+	if (non_blocking)
 		gfp_flags = GFP_ATOMIC;
 
 	bp->rx_new = bp->rx_old = bp->tx_new = bp->tx_old = 0;
@@ -488,7 +489,7 @@ static void bigmac_tcvr_init(struct bigmac *bp)
 	}
 }
 
-static int bigmac_init_hw(struct bigmac *, int);
+static int bigmac_init_hw(struct bigmac *, bool);
 
 static int try_next_permutation(struct bigmac *bp, void __iomem *tregs)
 {
@@ -523,9 +524,9 @@ static int try_next_permutation(struct bigmac *bp, void __iomem *tregs)
 	return -1;
 }
 
-static void bigmac_timer(unsigned long data)
+static void bigmac_timer(struct timer_list *t)
 {
-	struct bigmac *bp = (struct bigmac *) data;
+	struct bigmac *bp = from_timer(bp, t, bigmac_timer);
 	void __iomem *tregs = bp->tregs;
 	int restart_timer = 0;
 
@@ -548,7 +549,7 @@ static void bigmac_timer(unsigned long data)
 				if (ret == -1) {
 					printk(KERN_ERR "%s: Link down, cable problem?\n",
 					       bp->dev->name);
-					ret = bigmac_init_hw(bp, 0);
+					ret = bigmac_init_hw(bp, true);
 					if (ret) {
 						printk(KERN_ERR "%s: Error, cannot re-init the "
 						       "BigMAC.\n", bp->dev->name);
@@ -613,12 +614,10 @@ static void bigmac_begin_auto_negotiation(struct bigmac *bp)
 	bp->timer_state = ltrywait;
 	bp->timer_ticks = 0;
 	bp->bigmac_timer.expires = jiffies + (12 * HZ) / 10;
-	bp->bigmac_timer.data = (unsigned long) bp;
-	bp->bigmac_timer.function = bigmac_timer;
 	add_timer(&bp->bigmac_timer);
 }
 
-static int bigmac_init_hw(struct bigmac *bp, int from_irq)
+static int bigmac_init_hw(struct bigmac *bp, bool non_blocking)
 {
 	void __iomem *gregs        = bp->gregs;
 	void __iomem *cregs        = bp->creg;
@@ -636,7 +635,7 @@ static int bigmac_init_hw(struct bigmac *bp, int from_irq)
 	qec_init(bp);
 
 	/* Alloc and reset the tx/rx descriptor chains. */
-	bigmac_init_rings(bp, from_irq);
+	bigmac_init_rings(bp, non_blocking);
 
 	/* Initialize the PHY. */
 	bigmac_tcvr_init(bp);
@@ -750,7 +749,7 @@ static void bigmac_is_medium_rare(struct bigmac *bp, u32 qec_status, u32 bmac_st
 	}
 
 	printk(" RESET\n");
-	bigmac_init_hw(bp, 1);
+	bigmac_init_hw(bp, true);
 }
 
 /* BigMAC transmit complete service routines. */
@@ -774,15 +773,15 @@ static void bigmac_tx(struct bigmac *bp)
 		if (this->tx_flags & TXD_OWN)
 			break;
 		skb = bp->tx_skbs[elem];
-		bp->enet_stats.tx_packets++;
-		bp->enet_stats.tx_bytes += skb->len;
+		dev->stats.tx_packets++;
+		dev->stats.tx_bytes += skb->len;
 		dma_unmap_single(&bp->bigmac_op->dev,
 				 this->tx_addr, skb->len,
 				 DMA_TO_DEVICE);
 
 		DTX(("skb(%p) ", skb));
 		bp->tx_skbs[elem] = NULL;
-		dev_kfree_skb_irq(skb);
+		dev_consume_skb_irq(skb);
 
 		elem = NEXT_TX(elem);
 	}
@@ -811,12 +810,12 @@ static void bigmac_rx(struct bigmac *bp)
 
 		/* Check for errors. */
 		if (len < ETH_ZLEN) {
-			bp->enet_stats.rx_errors++;
-			bp->enet_stats.rx_length_errors++;
+			bp->dev->stats.rx_errors++;
+			bp->dev->stats.rx_length_errors++;
 
 	drop_it:
 			/* Return it to the BigMAC. */
-			bp->enet_stats.rx_dropped++;
+			bp->dev->stats.rx_dropped++;
 			this->rx_flags =
 				(RXD_OWN | ((RX_BUF_ALLOC_SIZE - 34) & RXD_LENGTH));
 			goto next;
@@ -875,8 +874,8 @@ static void bigmac_rx(struct bigmac *bp)
 		/* No checksums done by the BigMAC ;-( */
 		skb->protocol = eth_type_trans(skb, bp->dev);
 		netif_rx(skb);
-		bp->enet_stats.rx_packets++;
-		bp->enet_stats.rx_bytes += len;
+		bp->dev->stats.rx_packets++;
+		bp->dev->stats.rx_bytes += len;
 	next:
 		elem = NEXT_RX(elem);
 		this = &rxbase[elem];
@@ -921,8 +920,8 @@ static int bigmac_open(struct net_device *dev)
 		printk(KERN_ERR "BIGMAC: Can't order irq %d to go.\n", dev->irq);
 		return ret;
 	}
-	init_timer(&bp->bigmac_timer);
-	ret = bigmac_init_hw(bp, 0);
+	timer_setup(&bp->bigmac_timer, bigmac_timer, 0);
+	ret = bigmac_init_hw(bp, false);
 	if (ret)
 		free_irq(dev->irq, bp);
 	return ret;
@@ -942,16 +941,17 @@ static int bigmac_close(struct net_device *dev)
 	return 0;
 }
 
-static void bigmac_tx_timeout(struct net_device *dev)
+static void bigmac_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	struct bigmac *bp = netdev_priv(dev);
 
-	bigmac_init_hw(bp, 0);
+	bigmac_init_hw(bp, true);
 	netif_wake_queue(dev);
 }
 
 /* Put a packet on the wire. */
-static int bigmac_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t
+bigmac_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct bigmac *bp = netdev_priv(dev);
 	int len, entry;
@@ -987,7 +987,7 @@ static struct net_device_stats *bigmac_get_stats(struct net_device *dev)
 	struct bigmac *bp = netdev_priv(dev);
 
 	bigmac_get_counters(bp, bp->bregs);
-	return &bp->enet_stats;
+	return &dev->stats;
 }
 
 static void bigmac_set_multicast(struct net_device *dev)
@@ -1065,7 +1065,6 @@ static const struct net_device_ops bigmac_ops = {
 	.ndo_get_stats		= bigmac_get_stats,
 	.ndo_set_rx_mode	= bigmac_set_multicast,
 	.ndo_tx_timeout		= bigmac_tx_timeout,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -1173,7 +1172,7 @@ static int bigmac_ether_init(struct platform_device *op,
 					      "board-version", 1);
 
 	/* Init auto-negotiation timer state. */
-	init_timer(&bp->bigmac_timer);
+	timer_setup(&bp->bigmac_timer, bigmac_timer, 0);
 	bp->timer_state = asleep;
 	bp->timer_ticks = 0;
 

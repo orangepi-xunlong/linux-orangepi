@@ -7,8 +7,6 @@
  * License version 2. This program is licensed "as is" without any
  * warranty of any kind, whether express or implied.
  */
-#include <mach/iop32x.h>
-
 	.macro get_irqnr_preamble, base, tmp
 	mrc	p15, 0, \tmp, c15, c1, 0
 	orr	\tmp, \tmp, #(1 << 6)
@@ -22,7 +20,7 @@
 	mrc     p6, 0, \irqstat, c8, c0, 0	@ Read IINTSRC
 	cmp     \irqstat, #0
 	clzne   \irqnr, \irqstat
-	rsbne   \irqnr, \irqnr, #31
+	rsbne   \irqnr, \irqnr, #32
 	.endm
 
 	.macro arch_ret_to_user, tmp1, tmp2

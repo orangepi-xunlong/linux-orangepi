@@ -24,6 +24,8 @@
 #ifndef _I915_PVINFO_H_
 #define _I915_PVINFO_H_
 
+#include <linux/types.h>
+
 /* The MMIO offset of the shared info between guest and host emulator */
 #define VGT_PVINFO_PAGE	0x78000
 #define VGT_PVINFO_SIZE	0x1000
@@ -49,12 +51,20 @@ enum vgt_g2v_type {
 	VGT_G2V_MAX,
 };
 
+/*
+ * VGT capabilities type
+ */
+#define VGT_CAPS_FULL_PPGTT		BIT(2)
+#define VGT_CAPS_HWSP_EMULATION		BIT(3)
+#define VGT_CAPS_HUGE_GTT		BIT(4)
+
 struct vgt_if {
 	u64 magic;		/* VGT_MAGIC */
 	u16 version_major;
 	u16 version_minor;
 	u32 vgt_id;		/* ID of vGT instance */
-	u32 rsv1[12];		/* pad to offset 0x40 */
+	u32 vgt_caps;		/* VGT capabilities */
+	u32 rsv1[11];		/* pad to offset 0x40 */
 	/*
 	 *  Data structure to describe the balooning info of resources.
 	 *  Each VM can only have one portion of continuous area for now.
@@ -86,7 +96,10 @@ struct vgt_if {
 	u32 rsv5[4];
 
 	u32 g2v_notify;
-	u32 rsv6[7];
+	u32 rsv6[5];
+
+	u32 cursor_x_hot;
+	u32 cursor_y_hot;
 
 	struct {
 		u32 lo;
@@ -99,8 +112,9 @@ struct vgt_if {
 	u32  rsv7[0x200 - 24];    /* pad to one page */
 } __packed;
 
-#define vgtif_reg(x) \
-	_MMIO((VGT_PVINFO_PAGE + offsetof(struct vgt_if, x)))
+#define vgtif_offset(x) (offsetof(struct vgt_if, x))
+
+#define vgtif_reg(x) _MMIO(VGT_PVINFO_PAGE + vgtif_offset(x))
 
 /* vGPU display status to be used by the host side */
 #define VGT_DRV_DISPLAY_NOT_READY 0

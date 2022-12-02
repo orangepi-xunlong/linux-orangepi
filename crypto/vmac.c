@@ -36,6 +36,7 @@
 #include <linux/scatterlist.h>
 #include <asm/byteorder.h>
 #include <crypto/scatterwalk.h>
+#include <crypto/internal/cipher.h>
 #include <crypto/internal/hash.h>
 
 /*
@@ -45,6 +46,7 @@
 #define VMAC_KEY_SIZE	128/* Must be 128, 192 or 256			*/
 #define VMAC_KEY_LEN	(VMAC_KEY_SIZE/8)
 #define VMAC_NHBYTES	128/* Must 2^i for any 3 < i < 13 Standard = 128*/
+#define VMAC_NONCEBYTES	16
 
 /* per-transform (per-key) context */
 struct vmac_tfm_ctx {
@@ -63,6 +65,11 @@ struct vmac_desc_ctx {
 	unsigned int partial_size;	/* size of the partial block */
 	bool first_block_processed;
 	u64 polytmp[2*VMAC_TAG_LEN/64];	/* running total of L2-hash */
+	union {
+		u8 bytes[VMAC_NONCEBYTES];
+		__be64 pads[VMAC_NONCEBYTES / 8];
+	} nonce;
+	unsigned int nonce_size; /* nonce bytes filled so far */
 };
 
 /*
@@ -429,10 +436,8 @@ static int vmac_setkey(struct crypto_shash *tfm,
 	unsigned int i;
 	int err;
 
-	if (keylen != VMAC_KEY_LEN) {
-		crypto_shash_set_flags(tfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
+	if (keylen != VMAC_KEY_LEN)
 		return -EINVAL;
-	}
 
 	err = crypto_cipher_setkey(tctx->cipher, key, keylen);
 	if (err)
@@ -480,6 +485,7 @@ static int vmac_init(struct shash_desc *desc)
 	dctx->partial_size = 0;
 	dctx->first_block_processed = false;
 	memcpy(dctx->polytmp, tctx->polykey, sizeof(dctx->polytmp));
+	dctx->nonce_size = 0;
 	return 0;
 }
 
@@ -488,6 +494,15 @@ static int vmac_update(struct shash_desc *desc, const u8 *p, unsigned int len)
 	const struct vmac_tfm_ctx *tctx = crypto_shash_ctx(desc->tfm);
 	struct vmac_desc_ctx *dctx = shash_desc_ctx(desc);
 	unsigned int n;
+
+	/* Nonce is passed as first VMAC_NONCEBYTES bytes of data */
+	if (dctx->nonce_size < VMAC_NONCEBYTES) {
+		n = min(len, VMAC_NONCEBYTES - dctx->nonce_size);
+		memcpy(&dctx->nonce.bytes[dctx->nonce_size], p, n);
+		dctx->nonce_size += n;
+		p += n;
+		len -= n;
+	}
 
 	if (dctx->partial_size) {
 		n = min(len, VMAC_NHBYTES - dctx->partial_size);
@@ -548,33 +563,41 @@ static int vmac_final(struct shash_desc *desc, u8 *out)
 {
 	const struct vmac_tfm_ctx *tctx = crypto_shash_ctx(desc->tfm);
 	struct vmac_desc_ctx *dctx = shash_desc_ctx(desc);
-	static const u8 nonce[16] = {}; /* TODO: this is insecure */
-	union {
-		u8 bytes[16];
-		__be64 pads[2];
-	} block;
 	int index;
 	u64 hash, pad;
+
+	if (dctx->nonce_size != VMAC_NONCEBYTES)
+		return -EINVAL;
+
+	/*
+	 * The VMAC specification requires a nonce at least 1 bit shorter than
+	 * the block cipher's block length, so we actually only accept a 127-bit
+	 * nonce.  We define the unused bit to be the first one and require that
+	 * it be 0, so the needed prepending of a 0 bit is implicit.
+	 */
+	if (dctx->nonce.bytes[0] & 0x80)
+		return -EINVAL;
 
 	/* Finish calculating the VHASH of the message */
 	hash = vhash_final(tctx, dctx);
 
 	/* Generate pseudorandom pad by encrypting the nonce */
-	memcpy(&block, nonce, 16);
-	index = block.bytes[15] & 1;
-	block.bytes[15] &= ~1;
-	crypto_cipher_encrypt_one(tctx->cipher, block.bytes, block.bytes);
-	pad = be64_to_cpu(block.pads[index]);
+	BUILD_BUG_ON(VMAC_NONCEBYTES != 2 * (VMAC_TAG_LEN / 8));
+	index = dctx->nonce.bytes[VMAC_NONCEBYTES - 1] & 1;
+	dctx->nonce.bytes[VMAC_NONCEBYTES - 1] &= ~1;
+	crypto_cipher_encrypt_one(tctx->cipher, dctx->nonce.bytes,
+				  dctx->nonce.bytes);
+	pad = be64_to_cpu(dctx->nonce.pads[index]);
 
 	/* The VMAC is the sum of VHASH and the pseudorandom pad */
-	put_unaligned_le64(hash + pad, out);
+	put_unaligned_be64(hash + pad, out);
 	return 0;
 }
 
 static int vmac_init_tfm(struct crypto_tfm *tfm)
 {
 	struct crypto_instance *inst = crypto_tfm_alg_instance(tfm);
-	struct crypto_spawn *spawn = crypto_instance_ctx(inst);
+	struct crypto_cipher_spawn *spawn = crypto_instance_ctx(inst);
 	struct vmac_tfm_ctx *tctx = crypto_tfm_ctx(tfm);
 	struct crypto_cipher *cipher;
 
@@ -596,32 +619,33 @@ static void vmac_exit_tfm(struct crypto_tfm *tfm)
 static int vmac_create(struct crypto_template *tmpl, struct rtattr **tb)
 {
 	struct shash_instance *inst;
+	struct crypto_cipher_spawn *spawn;
 	struct crypto_alg *alg;
+	u32 mask;
 	int err;
 
-	err = crypto_check_attr_type(tb, CRYPTO_ALG_TYPE_SHASH);
+	err = crypto_check_attr_type(tb, CRYPTO_ALG_TYPE_SHASH, &mask);
 	if (err)
 		return err;
 
-	alg = crypto_get_attr_alg(tb, CRYPTO_ALG_TYPE_CIPHER,
-			CRYPTO_ALG_TYPE_MASK);
-	if (IS_ERR(alg))
-		return PTR_ERR(alg);
+	inst = kzalloc(sizeof(*inst) + sizeof(*spawn), GFP_KERNEL);
+	if (!inst)
+		return -ENOMEM;
+	spawn = shash_instance_ctx(inst);
+
+	err = crypto_grab_cipher(spawn, shash_crypto_instance(inst),
+				 crypto_attr_alg_name(tb[1]), 0, mask);
+	if (err)
+		goto err_free_inst;
+	alg = crypto_spawn_cipher_alg(spawn);
 
 	err = -EINVAL;
-	if (alg->cra_blocksize != 16)
-		goto out_put_alg;
+	if (alg->cra_blocksize != VMAC_NONCEBYTES)
+		goto err_free_inst;
 
-	inst = shash_alloc_instance("vmac", alg);
-	err = PTR_ERR(inst);
-	if (IS_ERR(inst))
-		goto out_put_alg;
-
-	err = crypto_init_spawn(shash_instance_ctx(inst), alg,
-			shash_crypto_instance(inst),
-			CRYPTO_ALG_TYPE_MASK);
+	err = crypto_inst_setname(shash_crypto_instance(inst), tmpl->name, alg);
 	if (err)
-		goto out_free_inst;
+		goto err_free_inst;
 
 	inst->alg.base.cra_priority = alg->cra_priority;
 	inst->alg.base.cra_blocksize = alg->cra_blocksize;
@@ -638,37 +662,36 @@ static int vmac_create(struct crypto_template *tmpl, struct rtattr **tb)
 	inst->alg.final = vmac_final;
 	inst->alg.setkey = vmac_setkey;
 
+	inst->free = shash_free_singlespawn_instance;
+
 	err = shash_register_instance(tmpl, inst);
 	if (err) {
-out_free_inst:
-		shash_free_instance(shash_crypto_instance(inst));
+err_free_inst:
+		shash_free_singlespawn_instance(inst);
 	}
-
-out_put_alg:
-	crypto_mod_put(alg);
 	return err;
 }
 
-static struct crypto_template vmac_tmpl = {
-	.name = "vmac",
+static struct crypto_template vmac64_tmpl = {
+	.name = "vmac64",
 	.create = vmac_create,
-	.free = shash_free_instance,
 	.module = THIS_MODULE,
 };
 
 static int __init vmac_module_init(void)
 {
-	return crypto_register_template(&vmac_tmpl);
+	return crypto_register_template(&vmac64_tmpl);
 }
 
 static void __exit vmac_module_exit(void)
 {
-	crypto_unregister_template(&vmac_tmpl);
+	crypto_unregister_template(&vmac64_tmpl);
 }
 
-module_init(vmac_module_init);
+subsys_initcall(vmac_module_init);
 module_exit(vmac_module_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("VMAC hash algorithm");
-MODULE_ALIAS_CRYPTO("vmac");
+MODULE_ALIAS_CRYPTO("vmac64");
+MODULE_IMPORT_NS(CRYPTO_INTERNAL);

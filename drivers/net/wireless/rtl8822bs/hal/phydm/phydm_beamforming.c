@@ -46,7 +46,7 @@ phydm_sta_info_init(
 
 	p_entry->ht_beamform_cap = p_ht_info->HtBeamformCap;
 	p_entry->vht_beamform_cap = p_vht_info->VhtBeamformCap;
-
+	
 	/*IBSS, AP mode*/
 	if (sta_idx != 0) {
 		p_entry->aid = p_cmn_sta->aid;
@@ -1611,7 +1611,7 @@ beamforming_timer_callback(
 void
 beamforming_sw_timer_callback(
 #if (DM_ODM_SUPPORT_TYPE == ODM_WIN)
-	struct phydm_timer_list		*p_timer
+	struct timer_list		*p_timer
 #elif (DM_ODM_SUPPORT_TYPE == ODM_CE)
 	void *function_context
 #endif
@@ -1647,7 +1647,7 @@ phydm_beamforming_init(
 	#if (DM_ODM_SUPPORT_TYPE == ODM_WIN)
 	struct _ADAPTER		*adapter = p_dm->adapter;
 	HAL_DATA_TYPE	*p_hal_data = GET_HAL_DATA(adapter);
-
+	
 	#ifdef BEAMFORMING_VERSION_1
 	if (p_hal_data->beamforming_version != BEAMFORMING_VERSION_1) {
 		return;

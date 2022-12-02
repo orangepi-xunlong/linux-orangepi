@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * This is the infamous ld script for the 64 bits vdso
  * library
@@ -149,6 +150,7 @@ VERSION
 		__kernel_get_tbfreq;
 		__kernel_sync_dicache;
 		__kernel_sync_dicache_p5;
+		__kernel_start_sigtramp_rt64;
 		__kernel_sigtramp_rt64;
 		__kernel_getcpu;
 		__kernel_time;

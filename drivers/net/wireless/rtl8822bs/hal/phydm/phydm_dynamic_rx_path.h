@@ -30,7 +30,7 @@ struct drp_rtl8822b_struct {
 	enum bb_path	path_judge;
 	u16	path_a_cck_fa;
 	u16	path_b_cck_fa;
-
+	
 };
 #endif
 
@@ -74,7 +74,7 @@ struct _DYNAMIC_RX_PATH_ {
 	RT_WORK_ITEM	phydm_dynamic_rx_path_workitem;
 #endif
 #endif
-	struct phydm_timer_list		phydm_dynamic_rx_path_timer;
+	struct timer_list		phydm_dynamic_rx_path_timer;
 
 };
 
@@ -95,7 +95,7 @@ phydm_dynamic_rx_path(
 #if (DM_ODM_SUPPORT_TYPE == ODM_WIN)
 void
 phydm_dynamic_rx_path_callback(
-	struct phydm_timer_list		*p_timer
+	struct timer_list		*p_timer
 );
 
 void

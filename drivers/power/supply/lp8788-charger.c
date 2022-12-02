@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TI LP8788 MFD - battery charger driver
  *
  * Copyright 2012 Texas Instruments
  *
  * Author: Milo(Woogyom) Kim <milo.kim@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/err.h>
@@ -384,9 +380,6 @@ static int lp8788_update_charger_params(struct platform_device *pdev,
 	for (i = 0; i < pdata->num_chg_params; i++) {
 		param = pdata->chg_params + i;
 
-		if (!param)
-			continue;
-
 		if (lp8788_is_valid_charger_register(param->addr)) {
 			ret = lp8788_write_byte(lp, param->addr, param->val);
 			if (ret)
@@ -412,30 +405,6 @@ static const struct power_supply_desc lp8788_psy_battery_desc = {
 	.num_properties	= ARRAY_SIZE(lp8788_battery_prop),
 	.get_property	= lp8788_battery_get_property,
 };
-
-static int lp8788_psy_register(struct platform_device *pdev,
-				struct lp8788_charger *pchg)
-{
-	struct power_supply_config charger_cfg = {};
-
-	charger_cfg.supplied_to = battery_supplied_to;
-	charger_cfg.num_supplicants = ARRAY_SIZE(battery_supplied_to);
-
-	pchg->charger = power_supply_register(&pdev->dev,
-					      &lp8788_psy_charger_desc,
-					      &charger_cfg);
-	if (IS_ERR(pchg->charger))
-		return -EPERM;
-
-	pchg->battery = power_supply_register(&pdev->dev,
-					      &lp8788_psy_battery_desc, NULL);
-	if (IS_ERR(pchg->battery)) {
-		power_supply_unregister(pchg->charger);
-		return -EPERM;
-	}
-
-	return 0;
-}
 
 static void lp8788_psy_unregister(struct lp8788_charger *pchg)
 {
@@ -532,7 +501,7 @@ static int lp8788_set_irqs(struct platform_device *pdev,
 
 		ret = request_threaded_irq(virq, NULL,
 					lp8788_charger_irq_thread,
-					0, name, pchg);
+					IRQF_ONESHOT, name, pchg);
 		if (ret)
 			break;
 	}
@@ -603,25 +572,12 @@ static void lp8788_setup_adc_channel(struct device *dev,
 		return;
 
 	/* ADC channel for battery voltage */
-	chan = iio_channel_get(dev, pdata->adc_vbatt);
+	chan = devm_iio_channel_get(dev, pdata->adc_vbatt);
 	pchg->chan[LP8788_VBATT] = IS_ERR(chan) ? NULL : chan;
 
 	/* ADC channel for battery temperature */
-	chan = iio_channel_get(dev, pdata->adc_batt_temp);
+	chan = devm_iio_channel_get(dev, pdata->adc_batt_temp);
 	pchg->chan[LP8788_BATT_TEMP] = IS_ERR(chan) ? NULL : chan;
-}
-
-static void lp8788_release_adc_channel(struct lp8788_charger *pchg)
-{
-	int i;
-
-	for (i = 0; i < LP8788_NUM_CHG_ADC; i++) {
-		if (!pchg->chan[i])
-			continue;
-
-		iio_channel_release(pchg->chan[i]);
-		pchg->chan[i] = NULL;
-	}
 }
 
 static ssize_t lp8788_show_charger_status(struct device *dev,
@@ -629,7 +585,7 @@ static ssize_t lp8788_show_charger_status(struct device *dev,
 {
 	struct lp8788_charger *pchg = dev_get_drvdata(dev);
 	enum lp8788_charging_state state;
-	char *desc[LP8788_MAX_CHG_STATE] = {
+	static const char * const desc[LP8788_MAX_CHG_STATE] = {
 		[LP8788_OFF] = "CHARGER OFF",
 		[LP8788_WARM_UP] = "WARM UP",
 		[LP8788_LOW_INPUT] = "LOW INPUT STATE",
@@ -653,8 +609,10 @@ static ssize_t lp8788_show_eoc_time(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
 	struct lp8788_charger *pchg = dev_get_drvdata(dev);
-	char *stime[] = { "400ms", "5min", "10min", "15min",
-			"20min", "25min", "30min", "No timeout" };
+	static const char * const stime[] = {
+		"400ms", "5min", "10min", "15min",
+		"20min", "25min", "30min", "No timeout"
+	};
 	u8 val;
 
 	lp8788_read_byte(pchg->lp, LP8788_CHG_EOC, &val);
@@ -668,9 +626,13 @@ static ssize_t lp8788_show_eoc_level(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
 	struct lp8788_charger *pchg = dev_get_drvdata(dev);
-	char *abs_level[] = { "25mA", "49mA", "75mA", "98mA" };
-	char *relative_level[] = { "5%", "10%", "15%", "20%" };
-	char *level;
+	static const char * const abs_level[] = {
+			"25mA", "49mA", "75mA", "98mA"
+	};
+	static const char * const relative_level[] = {
+			"5%", "10%", "15%", "20%"
+	};
+	const char *level;
 	u8 val;
 	u8 mode;
 
@@ -687,16 +649,39 @@ static DEVICE_ATTR(charger_status, S_IRUSR, lp8788_show_charger_status, NULL);
 static DEVICE_ATTR(eoc_time, S_IRUSR, lp8788_show_eoc_time, NULL);
 static DEVICE_ATTR(eoc_level, S_IRUSR, lp8788_show_eoc_level, NULL);
 
-static struct attribute *lp8788_charger_attr[] = {
+static struct attribute *lp8788_charger_sysfs_attrs[] = {
 	&dev_attr_charger_status.attr,
 	&dev_attr_eoc_time.attr,
 	&dev_attr_eoc_level.attr,
 	NULL,
 };
 
-static const struct attribute_group lp8788_attr_group = {
-	.attrs = lp8788_charger_attr,
-};
+ATTRIBUTE_GROUPS(lp8788_charger_sysfs);
+
+static int lp8788_psy_register(struct platform_device *pdev,
+				struct lp8788_charger *pchg)
+{
+	struct power_supply_config charger_cfg = {};
+
+	charger_cfg.attr_grp = lp8788_charger_sysfs_groups;
+	charger_cfg.supplied_to = battery_supplied_to;
+	charger_cfg.num_supplicants = ARRAY_SIZE(battery_supplied_to);
+
+	pchg->charger = power_supply_register(&pdev->dev,
+					      &lp8788_psy_charger_desc,
+					      &charger_cfg);
+	if (IS_ERR(pchg->charger))
+		return -EPERM;
+
+	pchg->battery = power_supply_register(&pdev->dev,
+					      &lp8788_psy_battery_desc, NULL);
+	if (IS_ERR(pchg->battery)) {
+		power_supply_unregister(pchg->charger);
+		return -EPERM;
+	}
+
+	return 0;
+}
 
 static int lp8788_charger_probe(struct platform_device *pdev)
 {
@@ -723,12 +708,6 @@ static int lp8788_charger_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	ret = sysfs_create_group(&pdev->dev.kobj, &lp8788_attr_group);
-	if (ret) {
-		lp8788_psy_unregister(pchg);
-		return ret;
-	}
-
 	ret = lp8788_irq_register(pdev, pchg);
 	if (ret)
 		dev_warn(dev, "failed to register charger irq: %d\n", ret);
@@ -742,9 +721,7 @@ static int lp8788_charger_remove(struct platform_device *pdev)
 
 	flush_work(&pchg->charger_work);
 	lp8788_irq_unregister(pdev, pchg);
-	sysfs_remove_group(&pdev->dev.kobj, &lp8788_attr_group);
 	lp8788_psy_unregister(pchg);
-	lp8788_release_adc_channel(pchg);
 
 	return 0;
 }

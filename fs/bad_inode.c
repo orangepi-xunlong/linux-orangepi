@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/bad_inode.c
  *
@@ -14,6 +15,7 @@
 #include <linux/time.h>
 #include <linux/namei.h>
 #include <linux/poll.h>
+#include <linux/fiemap.h>
 
 static int bad_file_open(struct inode *inode, struct file *filp)
 {
@@ -89,8 +91,8 @@ static int bad_inode_permission(struct inode *inode, int mask)
 	return -EIO;
 }
 
-static int bad_inode_getattr(struct vfsmount *mnt, struct dentry *dentry,
-			struct kstat *stat)
+static int bad_inode_getattr(const struct path *path, struct kstat *stat,
+			     u32 request_mask, unsigned int query_flags)
 {
 	return -EIO;
 }
@@ -125,7 +127,7 @@ static int bad_inode_fiemap(struct inode *inode,
 	return -EIO;
 }
 
-static int bad_inode_update_time(struct inode *inode, struct timespec *time,
+static int bad_inode_update_time(struct inode *inode, struct timespec64 *time,
 				 int flags)
 {
 	return -EIO;
@@ -133,7 +135,7 @@ static int bad_inode_update_time(struct inode *inode, struct timespec *time,
 
 static int bad_inode_atomic_open(struct inode *inode, struct dentry *dentry,
 				 struct file *file, unsigned int open_flag,
-				 umode_t create_mode, int *opened)
+				 umode_t create_mode)
 {
 	return -EIO;
 }
@@ -205,7 +207,7 @@ void make_bad_inode(struct inode *inode)
 	inode->i_opflags &= ~IOP_XATTR;
 	inode->i_fop = &bad_file_ops;	
 }
-EXPORT_SYMBOL(make_bad_inode);
+EXPORT_SYMBOL_NS(make_bad_inode, ANDROID_GKI_VFS_EXPORT_ONLY);
 
 /*
  * This tests whether an inode has been flagged as bad. The test uses
@@ -225,7 +227,7 @@ bool is_bad_inode(struct inode *inode)
 	return (inode->i_op == &bad_inode_ops);	
 }
 
-EXPORT_SYMBOL(is_bad_inode);
+EXPORT_SYMBOL_NS(is_bad_inode, ANDROID_GKI_VFS_EXPORT_ONLY);
 
 /**
  * iget_failed - Mark an under-construction inode as dead and release it

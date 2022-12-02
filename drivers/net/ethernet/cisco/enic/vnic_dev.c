@@ -193,9 +193,10 @@ int vnic_dev_alloc_desc_ring(struct vnic_dev *vdev, struct vnic_dev_ring *ring,
 {
 	vnic_dev_desc_ring_size(ring, desc_count, desc_size);
 
-	ring->descs_unaligned = pci_alloc_consistent(vdev->pdev,
-		ring->size_unaligned,
-		&ring->base_addr_unaligned);
+	ring->descs_unaligned = dma_alloc_coherent(&vdev->pdev->dev,
+						   ring->size_unaligned,
+						   &ring->base_addr_unaligned,
+						   GFP_KERNEL);
 
 	if (!ring->descs_unaligned) {
 		vdev_err(vdev, "Failed to allocate ring (size=%d), aborting\n",
@@ -218,10 +219,9 @@ int vnic_dev_alloc_desc_ring(struct vnic_dev *vdev, struct vnic_dev_ring *ring,
 void vnic_dev_free_desc_ring(struct vnic_dev *vdev, struct vnic_dev_ring *ring)
 {
 	if (ring->descs) {
-		pci_free_consistent(vdev->pdev,
-			ring->size_unaligned,
-			ring->descs_unaligned,
-			ring->base_addr_unaligned);
+		dma_free_coherent(&vdev->pdev->dev, ring->size_unaligned,
+				  ring->descs_unaligned,
+				  ring->base_addr_unaligned);
 		ring->descs = NULL;
 	}
 }
@@ -402,8 +402,8 @@ static int vnic_dev_init_devcmd2(struct vnic_dev *vdev)
 	fetch_index = ioread32(&vdev->devcmd2->wq.ctrl->fetch_index);
 	if (fetch_index == 0xFFFFFFFF) { /* check for hardware gone  */
 		vdev_err(vdev, "Fatal error in devcmd2 init - hardware surprise removal\n");
-
-		return -ENODEV;
+		err = -ENODEV;
+		goto err_free_wq;
 	}
 
 	enic_wq_init_start(&vdev->devcmd2->wq, 0, fetch_index, fetch_index, 0,
@@ -414,7 +414,7 @@ static int vnic_dev_init_devcmd2(struct vnic_dev *vdev)
 	err = vnic_dev_alloc_desc_ring(vdev, &vdev->devcmd2->results_ring,
 				       DEVCMD2_RING_SIZE, DEVCMD2_DESC_SIZE);
 	if (err)
-		goto err_free_wq;
+		goto err_disable_wq;
 
 	vdev->devcmd2->result = vdev->devcmd2->results_ring.descs;
 	vdev->devcmd2->cmd_ring = vdev->devcmd2->wq.ring.descs;
@@ -433,8 +433,9 @@ static int vnic_dev_init_devcmd2(struct vnic_dev *vdev)
 
 err_free_desc_ring:
 	vnic_dev_free_desc_ring(vdev, &vdev->devcmd2->results_ring);
-err_free_wq:
+err_disable_wq:
 	vnic_wq_disable(&vdev->devcmd2->wq);
+err_free_wq:
 	vnic_wq_free(&vdev->devcmd2->wq);
 err_free_devcmd2:
 	kfree(vdev->devcmd2);
@@ -550,9 +551,9 @@ int vnic_dev_fw_info(struct vnic_dev *vdev,
 	int err = 0;
 
 	if (!vdev->fw_info) {
-		vdev->fw_info = pci_zalloc_consistent(vdev->pdev,
-						      sizeof(struct vnic_devcmd_fw_info),
-						      &vdev->fw_info_pa);
+		vdev->fw_info = dma_alloc_coherent(&vdev->pdev->dev,
+						   sizeof(struct vnic_devcmd_fw_info),
+						   &vdev->fw_info_pa, GFP_ATOMIC);
 		if (!vdev->fw_info)
 			return -ENOMEM;
 
@@ -602,8 +603,9 @@ int vnic_dev_stats_dump(struct vnic_dev *vdev, struct vnic_stats **stats)
 	int wait = 1000;
 
 	if (!vdev->stats) {
-		vdev->stats = pci_alloc_consistent(vdev->pdev,
-			sizeof(struct vnic_stats), &vdev->stats_pa);
+		vdev->stats = dma_alloc_coherent(&vdev->pdev->dev,
+						 sizeof(struct vnic_stats),
+						 &vdev->stats_pa, GFP_ATOMIC);
 		if (!vdev->stats)
 			return -ENOMEM;
 	}
@@ -851,9 +853,9 @@ int vnic_dev_notify_set(struct vnic_dev *vdev, u16 intr)
 		return -EINVAL;
 	}
 
-	notify_addr = pci_alloc_consistent(vdev->pdev,
-			sizeof(struct vnic_devcmd_notify),
-			&notify_pa);
+	notify_addr = dma_alloc_coherent(&vdev->pdev->dev,
+					 sizeof(struct vnic_devcmd_notify),
+					 &notify_pa, GFP_ATOMIC);
 	if (!notify_addr)
 		return -ENOMEM;
 
@@ -881,10 +883,9 @@ static int vnic_dev_notify_unsetcmd(struct vnic_dev *vdev)
 int vnic_dev_notify_unset(struct vnic_dev *vdev)
 {
 	if (vdev->notify) {
-		pci_free_consistent(vdev->pdev,
-			sizeof(struct vnic_devcmd_notify),
-			vdev->notify,
-			vdev->notify_pa);
+		dma_free_coherent(&vdev->pdev->dev,
+				  sizeof(struct vnic_devcmd_notify),
+				  vdev->notify, vdev->notify_pa);
 	}
 
 	return vnic_dev_notify_unsetcmd(vdev);
@@ -1045,18 +1046,17 @@ void vnic_dev_unregister(struct vnic_dev *vdev)
 {
 	if (vdev) {
 		if (vdev->notify)
-			pci_free_consistent(vdev->pdev,
-				sizeof(struct vnic_devcmd_notify),
-				vdev->notify,
-				vdev->notify_pa);
+			dma_free_coherent(&vdev->pdev->dev,
+					  sizeof(struct vnic_devcmd_notify),
+					  vdev->notify, vdev->notify_pa);
 		if (vdev->stats)
-			pci_free_consistent(vdev->pdev,
-				sizeof(struct vnic_stats),
-				vdev->stats, vdev->stats_pa);
+			dma_free_coherent(&vdev->pdev->dev,
+					  sizeof(struct vnic_stats),
+					  vdev->stats, vdev->stats_pa);
 		if (vdev->fw_info)
-			pci_free_consistent(vdev->pdev,
-				sizeof(struct vnic_devcmd_fw_info),
-				vdev->fw_info, vdev->fw_info_pa);
+			dma_free_coherent(&vdev->pdev->dev,
+					  sizeof(struct vnic_devcmd_fw_info),
+					  vdev->fw_info, vdev->fw_info_pa);
 		if (vdev->devcmd2)
 			vnic_dev_deinit_devcmd2(vdev);
 
@@ -1070,7 +1070,7 @@ struct vnic_dev *vnic_dev_register(struct vnic_dev *vdev,
 	unsigned int num_bars)
 {
 	if (!vdev) {
-		vdev = kzalloc(sizeof(struct vnic_dev), GFP_ATOMIC);
+		vdev = kzalloc(sizeof(struct vnic_dev), GFP_KERNEL);
 		if (!vdev)
 			return NULL;
 	}
@@ -1126,7 +1126,7 @@ int vnic_dev_init_prov2(struct vnic_dev *vdev, u8 *buf, u32 len)
 	void *prov_buf;
 	int ret;
 
-	prov_buf = pci_alloc_consistent(vdev->pdev, len, &prov_pa);
+	prov_buf = dma_alloc_coherent(&vdev->pdev->dev, len, &prov_pa, GFP_ATOMIC);
 	if (!prov_buf)
 		return -ENOMEM;
 
@@ -1136,7 +1136,7 @@ int vnic_dev_init_prov2(struct vnic_dev *vdev, u8 *buf, u32 len)
 
 	ret = vnic_dev_cmd(vdev, CMD_INIT_PROV_INFO2, &a0, &a1, wait);
 
-	pci_free_consistent(vdev->pdev, len, prov_buf, prov_pa);
+	dma_free_coherent(&vdev->pdev->dev, len, prov_buf, prov_pa);
 
 	return ret;
 }
@@ -1216,7 +1216,8 @@ int vnic_dev_classifier(struct vnic_dev *vdev, u8 cmd, u16 *entry,
 		tlv_size = sizeof(struct filter) +
 			   sizeof(struct filter_action) +
 			   2 * sizeof(struct filter_tlv);
-		tlv_va = pci_alloc_consistent(vdev->pdev, tlv_size, &tlv_pa);
+		tlv_va = dma_alloc_coherent(&vdev->pdev->dev, tlv_size,
+					    &tlv_pa, GFP_ATOMIC);
 		if (!tlv_va)
 			return -ENOMEM;
 		tlv = tlv_va;
@@ -1239,11 +1240,65 @@ int vnic_dev_classifier(struct vnic_dev *vdev, u8 cmd, u16 *entry,
 
 		ret = vnic_dev_cmd(vdev, CMD_ADD_FILTER, &a0, &a1, wait);
 		*entry = (u16)a0;
-		pci_free_consistent(vdev->pdev, tlv_size, tlv_va, tlv_pa);
+		dma_free_coherent(&vdev->pdev->dev, tlv_size, tlv_va, tlv_pa);
 	} else if (cmd == CLSF_DEL) {
 		a0 = *entry;
 		ret = vnic_dev_cmd(vdev, CMD_DEL_FILTER, &a0, &a1, wait);
 	}
 
 	return ret;
+}
+
+int vnic_dev_overlay_offload_ctrl(struct vnic_dev *vdev, u8 overlay, u8 config)
+{
+	u64 a0 = overlay;
+	u64 a1 = config;
+	int wait = 1000;
+
+	return vnic_dev_cmd(vdev, CMD_OVERLAY_OFFLOAD_CTRL, &a0, &a1, wait);
+}
+
+int vnic_dev_overlay_offload_cfg(struct vnic_dev *vdev, u8 overlay,
+				 u16 vxlan_udp_port_number)
+{
+	u64 a1 = vxlan_udp_port_number;
+	u64 a0 = overlay;
+	int wait = 1000;
+
+	return vnic_dev_cmd(vdev, CMD_OVERLAY_OFFLOAD_CFG, &a0, &a1, wait);
+}
+
+int vnic_dev_get_supported_feature_ver(struct vnic_dev *vdev, u8 feature,
+				       u64 *supported_versions, u64 *a1)
+{
+	u64 a0 = feature;
+	int wait = 1000;
+	int ret;
+
+	ret = vnic_dev_cmd(vdev, CMD_GET_SUPP_FEATURE_VER, &a0, a1, wait);
+	if (!ret)
+		*supported_versions = a0;
+
+	return ret;
+}
+
+int vnic_dev_capable_rss_hash_type(struct vnic_dev *vdev, u8 *rss_hash_type)
+{
+	u64 a0 = CMD_NIC_CFG, a1 = 0;
+	int wait = 1000;
+	int err;
+
+	err = vnic_dev_cmd(vdev, CMD_CAPABILITY, &a0, &a1, wait);
+	/* rss_hash_type is valid only when a0 is 1. Adapter which does not
+	 * support CMD_CAPABILITY for rss_hash_type has a0 = 0
+	 */
+	if (err || (a0 != 1))
+		return -EOPNOTSUPP;
+
+	a1 = (a1 >> NIC_CFG_RSS_HASH_TYPE_SHIFT) &
+	     NIC_CFG_RSS_HASH_TYPE_MASK_FIELD;
+
+	*rss_hash_type = (u8)a1;
+
+	return 0;
 }

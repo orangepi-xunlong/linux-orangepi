@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Written by Kanoj Sarcar (kanoj@sgi.com) Aug 99
  *
@@ -43,6 +44,11 @@ u64 memory_hotplug_max(void);
 #endif /* CONFIG_NEED_MULTIPLE_NODES */
 #ifdef CONFIG_FA_DUMP
 #define __HAVE_ARCH_RESERVED_KERNEL_PAGES
+#endif
+
+#ifdef CONFIG_MEMORY_HOTPLUG
+extern int create_section_mapping(unsigned long start, unsigned long end,
+				  int nid, pgprot_t prot);
 #endif
 
 #endif /* __KERNEL__ */

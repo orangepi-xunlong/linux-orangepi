@@ -839,7 +839,7 @@ phydm_rx_phy_status92c_series_parsing(
 	is_cck_rate = (p_pktinfo->data_rate <= ODM_RATE11M) ? true : false;
 	p_dm->rate_ss = phydm_rate_to_num_ss(p_dm, p_pktinfo->data_rate);
 	p_pktinfo->rate_ss = p_dm->rate_ss;
-
+	
 	if (p_pktinfo->is_to_self)
 		p_dm->curr_station_id = p_pktinfo->station_id;
 
@@ -924,10 +924,10 @@ phydm_rx_phy_status92c_series_parsing(
 		p_phy_info->bt_rx_rssi_percentage = PWDB_ALL;
 		p_phy_info->recv_signal_power = rx_pwr_all;
 #endif
-
+		
 		/* (3) Get Signal Quality (EVM) */
-
-
+		
+		
 		{
 			u8	SQ;
 #if (DM_ODM_SUPPORT_TYPE == ODM_WIN)
@@ -1020,7 +1020,7 @@ phydm_rx_phy_status92c_series_parsing(
 			/* do nothing */
 		} else if (p_dm->iot_table.win_patch_id == RT_CID_819X_ACER) {
 			/* do nothing */
-		} else
+		} else 
 #endif
 		{
 			/* (3)EVM of HT rate */
@@ -1040,7 +1040,7 @@ phydm_rx_phy_status92c_series_parsing(
 
 				if (i == RF_PATH_A) /* Fill value in RFD, Get the first spatial stream only */
 					p_phy_info->signal_quality = (u8)(EVM & 0xff);
-
+				
 				p_phy_info->rx_mimo_signal_quality[i] = (u8)(EVM & 0xff);
 
 				if (p_phy_sta_rpt->stream_rxevm[i] < 0)
@@ -1314,7 +1314,7 @@ phydm_rx_phy_status_jaguar_series_parsing(
 #if (DM_ODM_SUPPORT_TYPE == ODM_WIN)
 			if (p_dm->iot_table.win_patch_id == RT_CID_819X_LENOVO)
 				SQ = phydm_sq_patch_rt_cid_819x_lenovo(p_dm, is_cck_rate, PWDB_ALL, 0, 0);
-			else
+			else 
 #endif
 			if (p_phy_info->rx_pwdb_all > 40 && !p_dm->is_in_hct_test)
 				SQ = 100;
@@ -1432,7 +1432,7 @@ phydm_rx_phy_status_jaguar_series_parsing(
 #if (DM_ODM_SUPPORT_TYPE == ODM_WIN)
 		if (p_dm->iot_table.win_patch_id == RT_CID_819X_LENOVO) {
 			/*do nothing*/
-		} else
+		} else 
 #endif
 		{
 			/*(4)EVM of OFDM rate*/

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0
 comment "Machine Types"
 
 if M68KCLASSIC
@@ -15,16 +16,21 @@ config ATARI
 	bool "Atari support"
 	depends on MMU
 	select MMU_MOTOROLA if MMU
+	select HAVE_ARCH_NVRAM_OPS
 	help
 	  This option enables support for the 68000-based Atari series of
 	  computers (including the TT, Falcon and Medusa). If you plan to use
 	  this kernel on an Atari, say Y here and browse the material
 	  available in <file:Documentation/m68k>; otherwise say N.
 
+config ATARI_KBD_CORE
+	bool
+
 config MAC
 	bool "Macintosh support"
 	depends on MMU
 	select MMU_MOTOROLA if MMU
+	select HAVE_ARCH_NVRAM_OPS
 	help
 	  This option enables support for the Apple Macintosh series of
 	  computers (yes, there is experimental support now, at least for part
@@ -123,6 +129,7 @@ config SUN3
 	depends on MMU
 	depends on !MMU_MOTOROLA
 	select MMU_SUN3 if MMU
+	select NO_DMA
 	select M68020
 	help
 	  This option enables support for the Sun 3 series of workstations
@@ -184,6 +191,7 @@ config INIT_LCD
 config MEMORY_RESERVE
 	int "Memory reservation (MiB)"
 	depends on (UCSIMM || UCDIMM)
+	default 0
 	help
 	  Reserve certain memory regions on 68x328 based boards.
 
@@ -259,6 +267,18 @@ config M5407C3
 	help
 	  Support for the Motorola M5407C3 board.
 
+config AMCORE
+	bool "Sysam AMCORE board support"
+	depends on M5307
+	help
+	  Support for the Sysam AMCORE open-hardware generic board.
+
+config STMARK2
+	bool "Sysam stmark2 board support"
+	depends on M5441x
+	help
+	  Support for the Sysam stmark2 open-hardware generic board.
+
 config FIREBEE
 	bool "FireBee board support"
 	depends on M547x
@@ -304,7 +324,6 @@ config UBOOT
 	help
 	  If you say Y here kernel will try to collect command
 	  line parameters from the initial u-boot stack.
-	default n
 
 config 4KSTACKS
 	bool "Use 4Kb for kernel stacks instead of 8Kb"
@@ -382,7 +401,6 @@ comment "ROM configuration"
 
 config ROM
 	bool "Specify ROM linker regions"
-	default n
 	help
 	  Define a ROM region for the linker script. This creates a kernel
 	  that can be stored in flash, with possibly the text, and data
@@ -424,7 +442,7 @@ config ROMSIZE
 
 choice
 	prompt "Kernel executes from"
-	---help---
+	help
 	  Choose the memory type that the kernel will be running in.
 
 config RAMKERNEL

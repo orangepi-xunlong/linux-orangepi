@@ -57,15 +57,15 @@ struct smt_ant_honbo {
 	u32	pkt_rssi_sum[8][SUPPORT_BEAM_PATTERN_NUM];
 	u32	pkt_rssi_cnt[8][SUPPORT_BEAM_PATTERN_NUM];
 	#endif
-
+	
 	u32	fast_training_beam_num;/*current training beam_set index*/
 	u32	pre_fast_training_beam_num;/*pre training beam_set index*/
 	u32	rfu_codeword_total_bit_num; /* total bit number of RFU protocol*/
 	u32	rfu_each_ant_bit_num; /* bit number of RFU protocol for each ant*/
 	u8	per_beam_training_pkt_num;
 	u8	decision_holding_period;
-
-
+	
+	
 	u32	pre_codeword;
 	boolean	force_update_beam_en;
 	u32	beacon_counter;
@@ -88,16 +88,16 @@ struct smt_ant_honbo {
 	u32	beam_set_rssi_avg_sum[SUPPORT_BEAM_SET_PATTERN_NUM];			/*RSSI_sum of avg(pathA,pathB) for each beam-set)*/
 	u32	beam_path_rssi_sum[SUPPORT_BEAM_SET_PATTERN_NUM][MAX_PATH_NUM_8822B];/*RSSI_sum of each path for each beam-set)*/
 
-	u8	beam_set_avg_evm_2ss_pre[SUPPORT_BEAM_SET_PATTERN_NUM];
+	u8	beam_set_avg_evm_2ss_pre[SUPPORT_BEAM_SET_PATTERN_NUM];	
 	u32	beam_path_evm_2ss_sum[SUPPORT_BEAM_SET_PATTERN_NUM][MAX_PATH_NUM_8822B];/*2SS evm_sum of each path for each beam-set)*/
 	u32	beam_path_evm_2ss_cnt[SUPPORT_BEAM_SET_PATTERN_NUM];
 
 	u8	beam_set_avg_evm_1ss_pre[SUPPORT_BEAM_SET_PATTERN_NUM];
 	u32	beam_path_evm_1ss_sum[SUPPORT_BEAM_SET_PATTERN_NUM];/*1SS evm_sum of each path for each beam-set)*/
 	u32	beam_path_evm_1ss_cnt[SUPPORT_BEAM_SET_PATTERN_NUM];
-
+	
 	u32	statistic_pkt_cnt[SUPPORT_BEAM_SET_PATTERN_NUM];				/*statistic_pkt_cnt for SmtAnt make decision*/
-
+	
 	u8	total_beam_set_num;	/*number of  beam set can be switched*/
 	u8	total_beam_set_num_2g;/*number of  beam set can be switched in 2G*/
 	u8	total_beam_set_num_5g;/*number of  beam set can be switched in 5G*/
@@ -106,7 +106,7 @@ struct smt_ant_honbo {
 	u8	rfu_codeword_table_5g[SUPPORT_BEAM_SET_PATTERN_NUM][MAX_PATH_NUM_8822B]; /*5G beam truth table*/
 	u8	rx_idle_beam_set_idx;	/*the filanl decsion result*/
 	#endif
-
+	
 
 };
 #endif /*#if (defined(CONFIG_HL_SMART_ANTENNA))*/
@@ -197,7 +197,7 @@ phydm_process_rssi_for_hb_smtant_type2(
 	void		*p_dm_void,
 	void		*p_phy_info_void,
 	void		*p_pkt_info_void,
-	u8		rssi_avg
+	u8		rssi_avg	
 );
 
 #endif/*#if (defined(CONFIG_HL_SMART_ANTENNA_TYPE2))*/

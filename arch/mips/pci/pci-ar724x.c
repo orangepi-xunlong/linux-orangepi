@@ -1,24 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Atheros AR724X PCI host controller driver
  *
  *  Copyright (C) 2011 René Bolldorf <xsecute@googlemail.com>
  *  Copyright (C) 2009-2011 Gabor Juhos <juhosg@openwrt.org>
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License version 2 as published
- *  by the Free Software Foundation.
  */
 
 #include <linux/irq.h>
 #include <linux/pci.h>
 #include <linux/init.h>
+#include <linux/delay.h>
 #include <linux/platform_device.h>
 #include <asm/mach-ath79/ath79.h>
 #include <asm/mach-ath79/ar71xx_regs.h>
 
+#define AR724X_PCI_REG_APP		0x00
 #define AR724X_PCI_REG_RESET		0x18
 #define AR724X_PCI_REG_INT_STATUS	0x4c
 #define AR724X_PCI_REG_INT_MASK		0x50
+
+#define AR724X_PCI_APP_LTSSM_ENABLE	BIT(0)
 
 #define AR724X_PCI_RESET_LINK_UP	BIT(0)
 
@@ -325,6 +326,37 @@ static void ar724x_pci_irq_init(struct ar724x_pci_controller *apc,
 					 apc);
 }
 
+static void ar724x_pci_hw_init(struct ar724x_pci_controller *apc)
+{
+	u32 ppl, app;
+	int wait = 0;
+
+	/* deassert PCIe host controller and PCIe PHY reset */
+	ath79_device_reset_clear(AR724X_RESET_PCIE);
+	ath79_device_reset_clear(AR724X_RESET_PCIE_PHY);
+
+	/* remove the reset of the PCIE PLL */
+	ppl = ath79_pll_rr(AR724X_PLL_REG_PCIE_CONFIG);
+	ppl &= ~AR724X_PLL_REG_PCIE_CONFIG_PPL_RESET;
+	ath79_pll_wr(AR724X_PLL_REG_PCIE_CONFIG, ppl);
+
+	/* deassert bypass for the PCIE PLL */
+	ppl = ath79_pll_rr(AR724X_PLL_REG_PCIE_CONFIG);
+	ppl &= ~AR724X_PLL_REG_PCIE_CONFIG_PPL_BYPASS;
+	ath79_pll_wr(AR724X_PLL_REG_PCIE_CONFIG, ppl);
+
+	/* set PCIE Application Control to ready */
+	app = __raw_readl(apc->ctrl_base + AR724X_PCI_REG_APP);
+	app |= AR724X_PCI_APP_LTSSM_ENABLE;
+	__raw_writel(app, apc->ctrl_base + AR724X_PCI_REG_APP);
+
+	/* wait up to 100ms for PHY link up */
+	do {
+		mdelay(10);
+		wait++;
+	} while (wait < 10 && !ar724x_pci_check_link(apc));
+}
+
 static int ar724x_pci_probe(struct platform_device *pdev)
 {
 	struct ar724x_pci_controller *apc;
@@ -340,18 +372,15 @@ static int ar724x_pci_probe(struct platform_device *pdev)
 	if (!apc)
 		return -ENOMEM;
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "ctrl_base");
-	apc->ctrl_base = devm_ioremap_resource(&pdev->dev, res);
+	apc->ctrl_base = devm_platform_ioremap_resource_byname(pdev, "ctrl_base");
 	if (IS_ERR(apc->ctrl_base))
 		return PTR_ERR(apc->ctrl_base);
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "cfg_base");
-	apc->devcfg_base = devm_ioremap_resource(&pdev->dev, res);
+	apc->devcfg_base = devm_platform_ioremap_resource_byname(pdev, "cfg_base");
 	if (IS_ERR(apc->devcfg_base))
 		return PTR_ERR(apc->devcfg_base);
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "crp_base");
-	apc->crp_base = devm_ioremap_resource(&pdev->dev, res);
+	apc->crp_base = devm_platform_ioremap_resource_byname(pdev, "crp_base");
 	if (IS_ERR(apc->crp_base))
 		return PTR_ERR(apc->crp_base);
 
@@ -382,6 +411,13 @@ static int ar724x_pci_probe(struct platform_device *pdev)
 	apc->pci_controller.pci_ops = &ar724x_pci_ops;
 	apc->pci_controller.io_resource = &apc->io_res;
 	apc->pci_controller.mem_resource = &apc->mem_res;
+
+	/*
+	 * Do the full PCIE Root Complex Initialization Sequence if the PCIe
+	 * host controller is in reset.
+	 */
+	if (ath79_reset_rr(AR724X_RESET_REG_RESET_MODULE) & AR724X_RESET_PCIE)
+		ar724x_pci_hw_init(apc);
 
 	apc->link_up = ar724x_pci_check_link(apc);
 	if (!apc->link_up)

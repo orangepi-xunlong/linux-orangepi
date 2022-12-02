@@ -59,7 +59,11 @@ struct adaptive_soml {
 	RT_WORK_ITEM	phydm_adaptive_soml_workitem;
 #endif
 #endif
-	struct phydm_timer_list		phydm_adaptive_soml_timer;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0))
+	struct legacy_timer_emu		phydm_adaptive_soml_timer;
+#else
+	struct timer_list		phydm_adaptive_soml_timer;
+#endif
 };
 
 void
@@ -71,7 +75,7 @@ phydm_soml_on_off(
 #if (DM_ODM_SUPPORT_TYPE == ODM_WIN)
 void
 phydm_adaptive_soml_callback(
-	struct phydm_timer_list		*p_timer
+	struct timer_list		*p_timer
 );
 
 void

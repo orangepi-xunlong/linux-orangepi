@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /****************************************************************************/
 
 /*
  *	mcf.c -- Freescale ColdFire UART driver
  *
  *	(C) Copyright 2003-2007, Greg Ungerer <gerg@uclinux.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 /****************************************************************************/
@@ -636,6 +632,7 @@ static int mcf_probe(struct platform_device *pdev)
 		port->ops = &mcf_uart_ops;
 		port->flags = UPF_BOOT_AUTOCONF;
 		port->rs485_config = mcf_config_rs485;
+		port->has_sysrq = IS_ENABLED(CONFIG_SERIAL_MCF_CONSOLE);
 
 		uart_add_one_port(&mcf_driver, port);
 	}

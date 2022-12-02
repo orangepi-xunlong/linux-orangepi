@@ -29,6 +29,6 @@
  *   You do not need to fill up the version.h anymore,
  *   only the maintenance supervisor fills it before formal release.
  */
-#define	RELEASE_DATE_8822B		20180713
+#define	RELEASE_DATE_8822B		20180523
 #define	COMMIT_BY_8822B			"BB_Colin"
-#define	RELEASE_VERSION_8822B	111
+#define	RELEASE_VERSION_8822B	107

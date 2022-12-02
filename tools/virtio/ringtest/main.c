@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2016 Red Hat, Inc.
  * Author: Michael S. Tsirkin <mst@redhat.com>
- * This work is licensed under the terms of the GNU GPL, version 2.
  *
  * Command line processing and common functions for ring benchmarking.
  */
@@ -20,6 +20,7 @@
 int runcycles = 10000000;
 int max_outstanding = INT_MAX;
 int batch = 1;
+int param = 0;
 
 bool do_sleep = false;
 bool do_relax = false;
@@ -86,7 +87,7 @@ void set_affinity(const char *arg)
 	cpu = strtol(arg, &endptr, 0);
 	assert(!*endptr);
 
-	assert(cpu >= 0 || cpu < CPU_SETSIZE);
+	assert(cpu >= 0 && cpu < CPU_SETSIZE);
 
 	self = pthread_self();
 	CPU_ZERO(&cpuset);
@@ -247,6 +248,11 @@ static const struct option longopts[] = {
 		.val = 'b',
 	},
 	{
+		.name = "param",
+		.has_arg = required_argument,
+		.val = 'p',
+	},
+	{
 		.name = "sleep",
 		.has_arg = no_argument,
 		.val = 's',
@@ -274,6 +280,7 @@ static void help(void)
 		" [--run-cycles C (default: %d)]"
 		" [--batch b]"
 		" [--outstanding o]"
+		" [--param p]"
 		" [--sleep]"
 		" [--relax]"
 		" [--exit]"
@@ -327,6 +334,12 @@ int main(int argc, char **argv)
 			assert(!*endptr);
 			assert(c > 0 && c < INT_MAX);
 			max_outstanding = c;
+			break;
+		case 'p':
+			c = strtol(optarg, &endptr, 0);
+			assert(!*endptr);
+			assert(c > 0 && c < INT_MAX);
+			param = c;
 			break;
 		case 'b':
 			c = strtol(optarg, &endptr, 0);

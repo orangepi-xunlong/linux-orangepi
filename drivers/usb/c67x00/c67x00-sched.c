@@ -1,24 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * c67x00-sched.c: Cypress C67X00 USB Host Controller Driver - TD scheduling
  *
  * Copyright (C) 2006-2008 Barco N.V.
  *    Derived from the Cypress cy7c67200/300 ezusb linux driver and
  *    based on multiple host controller drivers inside the linux kernel.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
- * MA  02110-1301  USA.
  */
 
 #include <linux/kthread.h>
@@ -37,7 +23,7 @@
 
 /* -------------------------------------------------------------------------- */
 
-/**
+/*
  * struct c67x00_ep_data: Host endpoint data structure
  */
 struct c67x00_ep_data {
@@ -48,7 +34,7 @@ struct c67x00_ep_data {
 	u16 next_frame;		/* For int/isoc transactions */
 };
 
-/**
+/*
  * struct c67x00_td
  *
  * Hardware parts are little endiannes, SW in CPU endianess.
@@ -144,7 +130,7 @@ struct c67x00_urb_priv {
 
 /* -------------------------------------------------------------------------- */
 
-/**
+/*
  * dbg_td - Dump the contents of the TD
  */
 static void dbg_td(struct c67x00_hcd *c67x00, struct c67x00_td *td, char *msg)
@@ -175,7 +161,7 @@ static inline u16 c67x00_get_current_frame_number(struct c67x00_hcd *c67x00)
 	return c67x00_ll_husb_get_frame(c67x00->sie) & HOST_FRAME_MASK;
 }
 
-/**
+/*
  * frame_add
  * Software wraparound for framenumbers.
  */
@@ -184,7 +170,7 @@ static inline u16 frame_add(u16 a, u16 b)
 	return (a + b) & HOST_FRAME_MASK;
 }
 
-/**
+/*
  * frame_after - is frame a after frame b
  */
 static inline int frame_after(u16 a, u16 b)
@@ -193,7 +179,7 @@ static inline int frame_after(u16 a, u16 b)
 	    (HOST_FRAME_MASK / 2);
 }
 
-/**
+/*
  * frame_after_eq - is frame a after or equal to frame b
  */
 static inline int frame_after_eq(u16 a, u16 b)
@@ -204,7 +190,7 @@ static inline int frame_after_eq(u16 a, u16 b)
 
 /* -------------------------------------------------------------------------- */
 
-/**
+/*
  * c67x00_release_urb - remove link from all tds to this urb
  * Disconnects the urb from it's tds, so that it can be given back.
  * pre: urb->hcpriv != NULL
@@ -500,7 +486,7 @@ c67x00_giveback_urb(struct c67x00_hcd *c67x00, struct urb *urb, int status)
 	c67x00_release_urb(c67x00, urb);
 	usb_hcd_unlink_urb_from_ep(c67x00_hcd_to_hcd(c67x00), urb);
 	spin_unlock(&c67x00->lock);
-	usb_hcd_giveback_urb(c67x00_hcd_to_hcd(c67x00), urb, urbp->status);
+	usb_hcd_giveback_urb(c67x00_hcd_to_hcd(c67x00), urb, status);
 	spin_lock(&c67x00->lock);
 }
 
@@ -571,7 +557,7 @@ static int c67x00_claim_frame_bw(struct c67x00_hcd *c67x00, struct urb *urb,
 
 /* -------------------------------------------------------------------------- */
 
-/**
+/*
  * td_addr and buf_addr must be word aligned
  */
 static int c67x00_create_td(struct c67x00_hcd *c67x00, struct urb *urb,
@@ -699,7 +685,7 @@ static int c67x00_add_data_urb(struct c67x00_hcd *c67x00, struct urb *urb)
 	return 0;
 }
 
-/**
+/*
  * return 0 in case more bandwidth is available, else errorcode
  */
 static int c67x00_add_ctrl_urb(struct c67x00_hcd *c67x00, struct urb *urb)
@@ -724,7 +710,8 @@ static int c67x00_add_ctrl_urb(struct c67x00_hcd *c67x00, struct urb *urb)
 			if (ret)
 				return ret;
 			break;
-		}		/* else fallthrough */
+		}
+		fallthrough;
 	case STATUS_STAGE:
 		pid = !usb_pipeout(urb->pipe) ? USB_PID_OUT : USB_PID_IN;
 		ret = c67x00_create_td(c67x00, urb, NULL, 0, pid, 1,
@@ -836,7 +823,7 @@ static void c67x00_fill_frame(struct c67x00_hcd *c67x00)
 
 /* -------------------------------------------------------------------------- */
 
-/**
+/*
  * Get TD from C67X00
  */
 static inline void
@@ -966,13 +953,11 @@ static void c67x00_handle_successful_td(struct c67x00_hcd *c67x00,
 static void c67x00_handle_isoc(struct c67x00_hcd *c67x00, struct c67x00_td *td)
 {
 	struct urb *urb = td->urb;
-	struct c67x00_urb_priv *urbp;
 	int cnt;
 
 	if (!urb)
 		return;
 
-	urbp = urb->hcpriv;
 	cnt = td->privdata;
 
 	if (td->status & TD_ERROR_MASK)
@@ -986,7 +971,7 @@ static void c67x00_handle_isoc(struct c67x00_hcd *c67x00, struct c67x00_td *td)
 
 /* -------------------------------------------------------------------------- */
 
-/**
+/*
  * c67x00_check_td_list - handle tds which have been processed by the c67x00
  * pre: current_td == 0
  */
@@ -1061,7 +1046,7 @@ static inline int c67x00_all_tds_processed(struct c67x00_hcd *c67x00)
 	return !c67x00_ll_husb_get_current_td(c67x00->sie);
 }
 
-/**
+/*
  * Send td to C67X00
  */
 static void c67x00_send_td(struct c67x00_hcd *c67x00, struct c67x00_td *td)
@@ -1097,7 +1082,7 @@ static void c67x00_send_frame(struct c67x00_hcd *c67x00)
 
 /* -------------------------------------------------------------------------- */
 
-/**
+/*
  * c67x00_do_work - Schedulers state machine
  */
 static void c67x00_do_work(struct c67x00_hcd *c67x00)
@@ -1138,9 +1123,9 @@ static void c67x00_do_work(struct c67x00_hcd *c67x00)
 
 /* -------------------------------------------------------------------------- */
 
-static void c67x00_sched_tasklet(unsigned long __c67x00)
+static void c67x00_sched_tasklet(struct tasklet_struct *t)
 {
-	struct c67x00_hcd *c67x00 = (struct c67x00_hcd *)__c67x00;
+	struct c67x00_hcd *c67x00 = from_tasklet(c67x00, t, tasklet);
 	c67x00_do_work(c67x00);
 }
 
@@ -1151,8 +1136,7 @@ void c67x00_sched_kick(struct c67x00_hcd *c67x00)
 
 int c67x00_sched_start_scheduler(struct c67x00_hcd *c67x00)
 {
-	tasklet_init(&c67x00->tasklet, c67x00_sched_tasklet,
-		     (unsigned long)c67x00);
+	tasklet_setup(&c67x00->tasklet, c67x00_sched_tasklet);
 	return 0;
 }
 

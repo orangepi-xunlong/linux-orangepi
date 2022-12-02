@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ENTRY_H
 #define _ENTRY_H
 
@@ -8,7 +9,6 @@
 #include <asm/idle.h>
 
 extern void *restart_stack;
-extern unsigned long suspend_zero_pages;
 
 void system_call(void);
 void pgm_check_handler(void);
@@ -16,13 +16,15 @@ void ext_int_handler(void);
 void io_int_handler(void);
 void mcck_int_handler(void);
 void restart_int_handler(void);
-void restart_call_handler(void);
 
 asmlinkage long do_syscall_trace_enter(struct pt_regs *regs);
 asmlinkage void do_syscall_trace_exit(struct pt_regs *regs);
 
 void do_protection_exception(struct pt_regs *regs);
 void do_dat_exception(struct pt_regs *regs);
+void do_secure_storage_access(struct pt_regs *regs);
+void do_non_secure_storage_access(struct pt_regs *regs);
+void do_secure_storage_violation(struct pt_regs *regs);
 
 void addressing_exception(struct pt_regs *regs);
 void data_exception(struct pt_regs *regs);
@@ -44,6 +46,7 @@ void specification_exception(struct pt_regs *regs);
 void transaction_exception(struct pt_regs *regs);
 void translation_exception(struct pt_regs *regs);
 void vector_exception(struct pt_regs *regs);
+void monitor_event_exception(struct pt_regs *regs);
 
 void do_per_trap(struct pt_regs *regs);
 void do_report_trap(struct pt_regs *regs, int si_signo, int si_code, char *str);
@@ -61,9 +64,7 @@ void __init startup_init(void);
 void die(struct pt_regs *regs, const char *str);
 int setup_profiling_timer(unsigned int multiplier);
 void __init time_init(void);
-int pfn_is_nosave(unsigned long);
-void s390_early_resume(void);
-unsigned long prepare_ftrace_return(unsigned long parent, unsigned long ip);
+unsigned long prepare_ftrace_return(unsigned long parent, unsigned long sp, unsigned long ip);
 
 struct s390_mmap_arg_struct;
 struct fadvise64_64_args;
@@ -74,11 +75,19 @@ long sys_sigreturn(void);
 
 long sys_s390_personality(unsigned int personality);
 long sys_s390_runtime_instr(int command, int signum);
+long sys_s390_guarded_storage(int command, struct gs_cb __user *);
 long sys_s390_pci_mmio_write(unsigned long, const void __user *, size_t);
 long sys_s390_pci_mmio_read(unsigned long, void __user *, size_t);
+long sys_s390_sthyi(unsigned long function_code, void __user *buffer, u64 __user *return_code, unsigned long flags);
 
 DECLARE_PER_CPU(u64, mt_cycles[8]);
 
-void verify_facilities(void);
+void gs_load_bc_cb(struct pt_regs *regs);
+void set_fs_fixup(void);
+
+unsigned long stack_alloc(void);
+void stack_free(unsigned long stack);
+
+extern char kprobes_insn_page[];
 
 #endif /* _ENTRY_H */

@@ -624,16 +624,7 @@ struct rtw_ndp_info {
 	u8 remote_ipv6_addr[16]; /* Just respond IP */
 	u8 target_ipv6_addr[16]; /* target IP */
 };
-#define REMOTE_INFO_CTRL_SET_VALD_EN(target, _value) \
-	SET_BITS_TO_LE_4BYTE(target + 0, 0, 8, _value)
-#define REMOTE_INFO_CTRL_SET_PTK_EN(target, _value) \
-	SET_BITS_TO_LE_4BYTE(target + 1, 0, 1, _value)
-#define REMOTE_INFO_CTRL_SET_GTK_EN(target, _value) \
-	SET_BITS_TO_LE_4BYTE(target + 1, 1, 1, _value)
-#define REMOTE_INFO_CTRL_SET_GTK_IDX(target, _value) \
-	SET_BITS_TO_LE_4BYTE(target + 2, 0, 8, _value)
-#endif /*CONFIG_WOWLAN*/
-
+#endif
 void rtw_dump_phy_cap(void *sel, _adapter *adapter);
 void rtw_dump_rsvd_page(void *sel, _adapter *adapter, u8 page_offset, u8 page_num);
 #ifdef CONFIG_SUPPORT_FIFO_DUMP

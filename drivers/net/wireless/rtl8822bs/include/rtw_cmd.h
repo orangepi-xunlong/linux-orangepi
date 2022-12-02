@@ -253,9 +253,6 @@ enum rtw_drvextra_cmd_id {
 	RSON_SCAN_WK_CID,
 #endif
 	MGNT_TX_WK_CID,
-#ifdef CONFIG_CTRL_TXSS_BY_TP
-	TXSS_WK_CID,
-#endif
 	MAX_WK_CID
 };
 
@@ -1040,7 +1037,7 @@ extern u8 rtw_addbareq_cmd(_adapter *padapter, u8 tid, u8 *addr);
 extern u8 rtw_addbarsp_cmd(_adapter *padapter, u8 *addr, u16 tid, u8 status, u8 size, u16 start_seq);
 /* add for CONFIG_IEEE80211W, none 11w also can use */
 extern u8 rtw_reset_securitypriv_cmd(_adapter *padapter);
-extern u8 rtw_free_assoc_resources_cmd(_adapter *padapter, u8 lock_scanned_queue, int flags);
+extern u8 rtw_free_assoc_resources_cmd(_adapter *padapter);
 extern u8 rtw_dynamic_chk_wk_cmd(_adapter *adapter);
 
 u8 rtw_lps_ctrl_wk_cmd(_adapter *padapter, u8 lps_ctrl_type, u8 enqueue);
@@ -1112,21 +1109,6 @@ u8 rtw_run_in_thread_cmd(PADAPTER padapter, void (*func)(void *), void *context)
 u8 session_tracker_chk_cmd(_adapter *adapter, struct sta_info *sta);
 u8 session_tracker_add_cmd(_adapter *adapter, struct sta_info *sta, u8 *local_naddr, u8 *local_port, u8 *remote_naddr, u8 *remote_port);
 u8 session_tracker_del_cmd(_adapter *adapter, struct sta_info *sta, u8 *local_naddr, u8 *local_port, u8 *remote_naddr, u8 *remote_port);
-
-#ifdef CONFIG_CTRL_TXSS_BY_TP
-struct txss_cmd_parm {
-	struct sta_info *sta;
-	u8 tx_1ss;
-};
-
-void rtw_ctrl_txss_update_mimo_type(_adapter *adapter, struct sta_info *sta);
-u8 rtw_ctrl_txss(_adapter *adapter, struct sta_info *sta, u8 tx_1ss);
-void rtw_ctrl_tx_ss_by_tp(_adapter *adapter, u8 from_timer);
-
-#ifdef DBG_CTRL_TXSS
-void dbg_ctrl_txss(_adapter *adapter, u8 tx_1ss);
-#endif
-#endif
 
 u8 rtw_drvextra_cmd_hdl(_adapter *padapter, unsigned char *pbuf);
 

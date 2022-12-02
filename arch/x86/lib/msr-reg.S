@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/linkage.h>
 #include <linux/errno.h>
 #include <asm/asm.h>
@@ -11,7 +12,7 @@
  *
  */
 .macro op_safe_regs op
-ENTRY(\op\()_safe_regs)
+SYM_FUNC_START(\op\()_safe_regs)
 	pushq %rbx
 	pushq %r12
 	movq	%rdi, %r10	/* Save pointer */
@@ -40,13 +41,13 @@ ENTRY(\op\()_safe_regs)
 	jmp     2b
 
 	_ASM_EXTABLE(1b, 3b)
-ENDPROC(\op\()_safe_regs)
+SYM_FUNC_END(\op\()_safe_regs)
 .endm
 
 #else /* X86_32 */
 
 .macro op_safe_regs op
-ENTRY(\op\()_safe_regs)
+SYM_FUNC_START(\op\()_safe_regs)
 	pushl %ebx
 	pushl %ebp
 	pushl %esi
@@ -82,7 +83,7 @@ ENTRY(\op\()_safe_regs)
 	jmp     2b
 
 	_ASM_EXTABLE(1b, 3b)
-ENDPROC(\op\()_safe_regs)
+SYM_FUNC_END(\op\()_safe_regs)
 .endm
 
 #endif

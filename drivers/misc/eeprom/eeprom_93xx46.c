@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for 93xx46 EEPROMs
  *
  * (C) 2011 DENX Software Engineering, Anatolij Gustschin <agust@denx.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/delay.h>
@@ -38,6 +35,10 @@ static const struct eeprom_93xx46_devtype_data atmel_at93c46d_data = {
 		  EEPROM_93XX46_QUIRK_INSTRUCTION_LENGTH,
 };
 
+static const struct eeprom_93xx46_devtype_data microchip_93lc46b_data = {
+	.quirks = EEPROM_93XX46_QUIRK_EXTRA_READ_CYCLE,
+};
+
 struct eeprom_93xx46_dev {
 	struct spi_device *spi;
 	struct eeprom_93xx46_platform_data *pdata;
@@ -56,6 +57,11 @@ static inline bool has_quirk_single_word_read(struct eeprom_93xx46_dev *edev)
 static inline bool has_quirk_instruction_length(struct eeprom_93xx46_dev *edev)
 {
 	return edev->pdata->quirks & EEPROM_93XX46_QUIRK_INSTRUCTION_LENGTH;
+}
+
+static inline bool has_quirk_extra_read_cycle(struct eeprom_93xx46_dev *edev)
+{
+	return edev->pdata->quirks & EEPROM_93XX46_QUIRK_EXTRA_READ_CYCLE;
 }
 
 static int eeprom_93xx46_read(void *priv, unsigned int off,
@@ -98,6 +104,11 @@ static int eeprom_93xx46_read(void *priv, unsigned int off,
 
 		dev_dbg(&edev->spi->dev, "read cmd 0x%x, %d Hz\n",
 			cmd_addr, edev->spi->max_speed_hz);
+
+		if (has_quirk_extra_read_cycle(edev)) {
+			cmd_addr <<= 1;
+			bits += 1;
+		}
 
 		spi_message_init(&m);
 
@@ -366,6 +377,7 @@ static void select_deassert(void *context)
 static const struct of_device_id eeprom_93xx46_of_table[] = {
 	{ .compatible = "eeprom-93xx46", },
 	{ .compatible = "atmel,at93c46d", .data = &atmel_at93c46d_data, },
+	{ .compatible = "microchip,93lc46b", .data = &microchip_93lc46b_data, },
 	{}
 };
 MODULE_DEVICE_TABLE(of, eeprom_93xx46_of_table);
@@ -377,8 +389,6 @@ static int eeprom_93xx46_probe_dt(struct spi_device *spi)
 	struct device_node *np = spi->dev.of_node;
 	struct eeprom_93xx46_platform_data *pd;
 	u32 tmp;
-	int gpio;
-	enum of_gpio_flags of_flags;
 	int ret;
 
 	pd = devm_kzalloc(&spi->dev, sizeof(*pd), GFP_KERNEL);
@@ -403,22 +413,14 @@ static int eeprom_93xx46_probe_dt(struct spi_device *spi)
 	if (of_property_read_bool(np, "read-only"))
 		pd->flags |= EE_READONLY;
 
-	gpio = of_get_named_gpio_flags(np, "select-gpios", 0, &of_flags);
-	if (gpio_is_valid(gpio)) {
-		unsigned long flags =
-			of_flags == OF_GPIO_ACTIVE_LOW ? GPIOF_ACTIVE_LOW : 0;
+	pd->select = devm_gpiod_get_optional(&spi->dev, "select",
+					     GPIOD_OUT_LOW);
+	if (IS_ERR(pd->select))
+		return PTR_ERR(pd->select);
 
-		ret = devm_gpio_request_one(&spi->dev, gpio, flags,
-					    "eeprom_93xx46_select");
-		if (ret)
-			return ret;
-
-		pd->select = gpio_to_desc(gpio);
-		pd->prepare = select_assert;
-		pd->finish = select_deassert;
-
-		gpiod_direction_output(pd->select, 0);
-	}
+	pd->prepare = select_assert;
+	pd->finish = select_deassert;
+	gpiod_direction_output(pd->select, 0);
 
 	if (of_id->data) {
 		const struct eeprom_93xx46_devtype_data *data = of_id->data;
@@ -449,7 +451,7 @@ static int eeprom_93xx46_probe(struct spi_device *spi)
 		return -ENODEV;
 	}
 
-	edev = kzalloc(sizeof(*edev), GFP_KERNEL);
+	edev = devm_kzalloc(&spi->dev, sizeof(*edev), GFP_KERNEL);
 	if (!edev)
 		return -ENOMEM;
 
@@ -459,8 +461,7 @@ static int eeprom_93xx46_probe(struct spi_device *spi)
 		edev->addrlen = 6;
 	else {
 		dev_err(&spi->dev, "unspecified address type\n");
-		err = -EINVAL;
-		goto fail;
+		return -EINVAL;
 	}
 
 	mutex_init(&edev->lock);
@@ -469,6 +470,7 @@ static int eeprom_93xx46_probe(struct spi_device *spi)
 	edev->pdata = pd;
 
 	edev->size = 128;
+	edev->nvmem_config.type = NVMEM_TYPE_EEPROM;
 	edev->nvmem_config.name = dev_name(&spi->dev);
 	edev->nvmem_config.dev = &spi->dev;
 	edev->nvmem_config.read_only = pd->flags & EE_READONLY;
@@ -483,11 +485,9 @@ static int eeprom_93xx46_probe(struct spi_device *spi)
 	edev->nvmem_config.word_size = 1;
 	edev->nvmem_config.size = edev->size;
 
-	edev->nvmem = nvmem_register(&edev->nvmem_config);
-	if (IS_ERR(edev->nvmem)) {
-		err = PTR_ERR(edev->nvmem);
-		goto fail;
-	}
+	edev->nvmem = devm_nvmem_register(&spi->dev, &edev->nvmem_config);
+	if (IS_ERR(edev->nvmem))
+		return PTR_ERR(edev->nvmem);
 
 	dev_info(&spi->dev, "%d-bit eeprom %s\n",
 		(pd->flags & EE_ADDR8) ? 8 : 16,
@@ -500,21 +500,15 @@ static int eeprom_93xx46_probe(struct spi_device *spi)
 
 	spi_set_drvdata(spi, edev);
 	return 0;
-fail:
-	kfree(edev);
-	return err;
 }
 
 static int eeprom_93xx46_remove(struct spi_device *spi)
 {
 	struct eeprom_93xx46_dev *edev = spi_get_drvdata(spi);
 
-	nvmem_unregister(edev->nvmem);
-
 	if (!(edev->pdata->flags & EE_READONLY))
 		device_remove_file(&spi->dev, &dev_attr_erase);
 
-	kfree(edev);
 	return 0;
 }
 
@@ -533,3 +527,4 @@ MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Driver for 93xx46 EEPROMs");
 MODULE_AUTHOR("Anatolij Gustschin <agust@denx.de>");
 MODULE_ALIAS("spi:93xx46");
+MODULE_ALIAS("spi:eeprom-93xx46");

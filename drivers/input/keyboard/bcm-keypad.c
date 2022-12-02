@@ -213,7 +213,7 @@ static int bcm_kp_matrix_key_parse_dt(struct bcm_kp *kp)
 	/* Initialize the KPCR Keypad Configuration Register */
 	kp->kpcr = KPCR_STATUSFILTERENABLE | KPCR_COLFILTERENABLE;
 
-	error = matrix_keypad_parse_of_params(dev, &kp->n_rows, &kp->n_cols);
+	error = matrix_keypad_parse_properties(dev, &kp->n_rows, &kp->n_cols);
 	if (error) {
 		dev_err(dev, "failed to parse kp params\n");
 		return error;
@@ -352,8 +352,6 @@ static int bcm_kp_probe(struct platform_device *pdev)
 
 	kp->input_dev = input_dev;
 
-	platform_set_drvdata(pdev, kp);
-
 	error = bcm_kp_matrix_key_parse_dt(kp);
 	if (error)
 		return error;
@@ -415,10 +413,8 @@ static int bcm_kp_probe(struct platform_device *pdev)
 	bcm_kp_stop(kp);
 
 	kp->irq = platform_get_irq(pdev, 0);
-	if (kp->irq < 0) {
-		dev_err(&pdev->dev, "no IRQ specified\n");
+	if (kp->irq < 0)
 		return -EINVAL;
-	}
 
 	error = devm_request_threaded_irq(&pdev->dev, kp->irq,
 					  NULL, bcm_kp_isr_thread,
