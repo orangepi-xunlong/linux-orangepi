@@ -395,3 +395,13 @@
 &isp1_mmu {
 	status = "okay";
 };
+
+&sata0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&sata_reset>;
+	status = "disabled";
+};
+
+&pcie2x1l2 {
+	status = "okay";
+};
