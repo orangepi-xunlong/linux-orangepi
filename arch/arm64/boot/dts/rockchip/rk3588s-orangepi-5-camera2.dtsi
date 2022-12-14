@@ -15,9 +15,15 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 
-			mipi_in_ucam1: endpoint@1 {
-				reg = <1>;
+			mipi_in_cam0: endpoint@0 {
+				reg = <0>;
 				remote-endpoint = <&ov13850_out>;
+				data-lanes = <1 2>;
+			};
+
+			mipi_in_cam1: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&ov13855_out>;
 				data-lanes = <1 2>;
 			};
 		};
@@ -67,7 +73,43 @@
 		lens-focus = <&vm149c_p2>;
 		port {
 			ov13850_out: endpoint {
-				remote-endpoint = <&mipi_in_ucam1>;
+				remote-endpoint = <&mipi_in_cam0>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
+
+	dw9714_p2: dw9714-p2@c {
+		compatible = "dongwoon,dw9714";
+		status = "disabled";
+		reg = <0x0c>;
+		rockchip,camera-module-index = <0>;
+		rockchip,vcm-start-current = <10>;
+		rockchip,vcm-rated-current = <85>;
+		rockchip,vcm-step-mode = <5>;
+		rockchip,camera-module-facing = "back";
+	};
+
+	ov13855_2: ov13855-2@36 {
+		compatible = "ovti,ov13855";
+		status = "disabled";
+		reg = <0x36>;
+		clocks = <&cru CLK_MIPI_CAMARAOUT_M4>;
+		clock-names = "xvclk";
+		power-domains = <&power RK3588_PD_VI>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&mipim0_camera4_clk>;
+		rockchip,grf = <&sys_grf>;
+		reset-gpios = <&gpio1 RK_PB2 GPIO_ACTIVE_HIGH>;
+		pwdn-gpios = <&gpio3 RK_PC1 GPIO_ACTIVE_HIGH>;
+		rockchip,camera-module-index = <0>;
+		rockchip,camera-module-facing = "back";
+		rockchip,camera-module-name = "CMK-OT2016-FV1";
+		rockchip,camera-module-lens-name = "default";
+		lens-focus = <&dw9714_p2>;
+		port {
+			ov13855_out: endpoint {
+				remote-endpoint = <&mipi_in_cam1>;
 				data-lanes = <1 2>;
 			};
 		};
