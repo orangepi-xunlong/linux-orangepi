@@ -18,7 +18,7 @@
 #include <linux/pcs/pcs-xpcs.h>
 #include <linux/module.h>
 #if IS_ENABLED(CONFIG_VLAN_8021Q)
-#define STMMAC_VLAN_TAG_USED
+//#define STMMAC_VLAN_TAG_USED
 #include <linux/if_vlan.h>
 #endif
 
