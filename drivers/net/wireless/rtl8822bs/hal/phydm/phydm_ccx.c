@@ -687,14 +687,16 @@ phydm_get_nhm_result(
 	/* sum all nhm_result */
 	ccx_info->nhm_result_total = 0;
 	for (i = 0; i <= 11; i++)
+	{
 		ccx_info->nhm_result_total += ccx_info->nhm_result[i];
+	}
 
-		PHYDM_DBG(p_dm, DBG_ENV_MNTR,
-		("NHM_result=(H->L)[%d %d %d %d (igi) %d %d %d %d %d %d %d %d]\n",
-			ccx_info->nhm_result[11], ccx_info->nhm_result[10], ccx_info->nhm_result[9],
-			ccx_info->nhm_result[8], ccx_info->nhm_result[7], ccx_info->nhm_result[6],
-			ccx_info->nhm_result[5], ccx_info->nhm_result[4], ccx_info->nhm_result[3],
-			ccx_info->nhm_result[2], ccx_info->nhm_result[1], ccx_info->nhm_result[0]));
+	PHYDM_DBG(p_dm, DBG_ENV_MNTR,
+	("NHM_result=(H->L)[%d %d %d %d (igi) %d %d %d %d %d %d %d %d]\n",
+		ccx_info->nhm_result[11], ccx_info->nhm_result[10], ccx_info->nhm_result[9],
+		ccx_info->nhm_result[8], ccx_info->nhm_result[7], ccx_info->nhm_result[6],
+		ccx_info->nhm_result[5], ccx_info->nhm_result[4], ccx_info->nhm_result[3],
+		ccx_info->nhm_result[2], ccx_info->nhm_result[1], ccx_info->nhm_result[0]));
 }
 
 boolean
