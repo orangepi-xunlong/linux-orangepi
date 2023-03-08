@@ -430,7 +430,7 @@ no_pmu:
 	dev_pm_opp_put(opp);
 
 	data->profile = (struct devfreq_dev_profile) {
-		.polling_ms	= 200,
+		.polling_ms	= 50,
 		.target		= rk3399_dmcfreq_target,
 		.get_dev_status	= rk3399_dmcfreq_get_dev_status,
 		.get_cur_freq	= rk3399_dmcfreq_get_cur_freq,
