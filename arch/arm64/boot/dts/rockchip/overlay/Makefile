@@ -69,10 +69,26 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-spi4-m1-cs0-cs1-spidev.dtbo \
 	rk3588-spi4-m2-cs0-spidev.dtbo \
 	rk3588-disable-led.dtbo \
-	rk3588-opi5plus-disable-leds.dtbo
+	rk3588-opi5plus-disable-leds.dtbo \
+	rk356x-edp.dtbo \
+	rk356x-opi3b-edp.dtbo \
+	rk356x-i2c2-m1.dtbo \
+	rk356x-i2c3-m0.dtbo \
+	rk356x-i2c4-m0.dtbo \
+	rk356x-raspi-7inch-touchscreen.dtbo \
+	rk356x-raspi-7inch-touchscreen-dsi0.dtbo \
+	rk356x-spi3-m0-cs0-spidev.dtbo \
+	rk356x-uart3-m0.dtbo \
+	rk356x-uart7-m2.dtbo \
+	rk356x-uart9-m2.dtbo \
+	rk356x-pwm11-m1.dtbo \
+	rk356x-pwm7.dtbo \
+	rk356x-ov5647-c1.dtbo \
+	rk356x-ov5647-c2.dtbo
 
 scr-$(CONFIG_ARCH_ROCKCHIP) += \
-	rk3588-fixup.scr
+	rk3588-fixup.scr \
+	rk356x-fixup.scr
 
 dtbotxt-$(CONFIG_ARCH_ROCKCHIP) += \
 	README.rockchip-overlays
