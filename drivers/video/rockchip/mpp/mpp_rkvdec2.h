@@ -195,8 +195,6 @@ struct rkvdec2_dev {
 	unsigned long volt;
 	unsigned long core_rate_hz;
 	unsigned long core_last_rate_hz;
-	struct ipa_power_model_data *model_data;
-	struct thermal_cooling_device *devfreq_cooling;
 	struct monitor_dev_info *mdev_info;
 #endif
 

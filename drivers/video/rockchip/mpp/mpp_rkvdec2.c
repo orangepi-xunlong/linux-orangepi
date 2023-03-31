@@ -17,8 +17,6 @@
 
 #include "hack/mpp_rkvdec2_hack_rk3568.c"
 
-#include <linux/devfreq_cooling.h>
-#include <soc/rockchip/rockchip_ipa.h>
 #include <soc/rockchip/rockchip_dmc.h>
 #include <soc/rockchip/rockchip_opp_select.h>
 #include <soc/rockchip/rockchip_system_monitor.h>
@@ -787,6 +785,7 @@ static struct devfreq_dev_profile rkvdec2_devfreq_profile = {
 	.target	= rkvdec2_devfreq_target,
 	.get_dev_status	= rkvdec2_devfreq_get_dev_status,
 	.get_cur_freq = rkvdec2_devfreq_get_cur_freq,
+	.is_cooling_device = true,
 };
 
 static int devfreq_vdec2_ondemand_func(struct devfreq *df, unsigned long *freq)
@@ -813,22 +812,6 @@ static struct devfreq_governor devfreq_vdec2_ondemand = {
 	.event_handler = devfreq_vdec2_ondemand_handler,
 };
 
-static unsigned long rkvdec2_get_static_power(struct devfreq *devfreq,
-					      unsigned long voltage)
-{
-	struct rkvdec2_dev *dec = devfreq->data;
-
-	if (!dec->model_data)
-		return 0;
-	else
-		return rockchip_ipa_get_static_power(dec->model_data,
-						     voltage);
-}
-
-static struct devfreq_cooling_power vdec2_cooling_power_data = {
-	.get_static_power = rkvdec2_get_static_power,
-};
-
 static struct monitor_dev_profile vdec2_mdevp = {
 	.type = MONITOR_TPYE_DEV,
 	.low_temp_adjust = rockchip_monitor_dev_low_temp_adjust,
@@ -839,7 +822,6 @@ static int rkvdec2_devfreq_init(struct mpp_dev *mpp)
 {
 	struct rkvdec2_dev *dec = to_rkvdec2_dev(mpp);
 	struct clk *clk_core = dec->core_clk_info.clk;
-	struct devfreq_cooling_power *vdec2_dcp = &vdec2_cooling_power_data;
 	int ret = 0;
 
 	if (!clk_core)
@@ -884,28 +866,6 @@ static int rkvdec2_devfreq_init(struct mpp_dev *mpp)
 
 	devfreq_register_opp_notifier(mpp->dev, dec->devfreq);
 
-	of_property_read_u32(mpp->dev->of_node, "dynamic-power-coefficient",
-			     (u32 *)&vdec2_dcp->dyn_power_coeff);
-	dec->model_data = rockchip_ipa_power_model_init(mpp->dev,
-							"vdec_leakage");
-	if (IS_ERR_OR_NULL(dec->model_data)) {
-		dec->model_data = NULL;
-		dev_err(mpp->dev, "failed to initialize power model\n");
-	} else if (dec->model_data->dynamic_coefficient) {
-		vdec2_dcp->dyn_power_coeff =
-			dec->model_data->dynamic_coefficient;
-	}
-	if (!vdec2_dcp->dyn_power_coeff) {
-		dev_err(mpp->dev, "failed to get dynamic-coefficient\n");
-		goto out;
-	}
-
-	dec->devfreq_cooling =
-		of_devfreq_cooling_register_power(mpp->dev->of_node,
-						  dec->devfreq, vdec2_dcp);
-	if (IS_ERR_OR_NULL(dec->devfreq_cooling))
-		dev_err(mpp->dev, "failed to register cooling device\n");
-
 	vdec2_mdevp.data = dec->devfreq;
 	dec->mdev_info = rockchip_system_monitor_register(mpp->dev, &vdec2_mdevp);
 	if (IS_ERR(dec->mdev_info)) {
@@ -913,7 +873,6 @@ static int rkvdec2_devfreq_init(struct mpp_dev *mpp)
 		dec->mdev_info = NULL;
 	}
 
-out:
 	return 0;
 
 devfreq_err:
