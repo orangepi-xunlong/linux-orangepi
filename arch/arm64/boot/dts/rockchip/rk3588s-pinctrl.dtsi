@@ -1981,7 +1981,7 @@
 				/* pmic_int_l */
 				<0 RK_PA7 0 &pcfg_pull_up>,
 				/* pmic_sleep1 */
-				<0 RK_PA2 1 &pcfg_pull_none>,
+				<0 RK_PA2 1 &pcfg_pull_down>,
 				/* pmic_sleep2 */
 				<0 RK_PA3 1 &pcfg_pull_none>,
 				/* pmic_sleep3 */
