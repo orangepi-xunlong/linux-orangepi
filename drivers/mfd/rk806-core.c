@@ -520,6 +520,7 @@ static void rk806_irq_init(struct rk806 *rk806)
 static int rk806_pinctrl_init(struct rk806 *rk806)
 {
 	struct device *dev = rk806->dev;
+	int ret;
 
 	rk806->pins = devm_kzalloc(dev,
 				   sizeof(struct rk806_pin_info),
@@ -539,6 +540,11 @@ static int rk806_pinctrl_init(struct rk806 *rk806)
 
 	if (IS_ERR(rk806->pins->default_st))
 		dev_err(dev, "no default pinctrl state\n");
+	else {
+		ret = pinctrl_select_state(rk806->pins->p, rk806->pins->default_st);
+		if (ret < 0)
+			dev_err(dev, "could not set pins\n");
+	}
 
 	rk806->pins->power_off = pinctrl_lookup_state(rk806->pins->p,
 						      "pmic-power-off");
