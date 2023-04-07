@@ -3854,13 +3854,6 @@ static void dw_dp_unregister_audio_driver(void *data)
 	}
 }
 
-static void dw_dp_aux_unregister(void *data)
-{
-	struct dw_dp *dp = data;
-
-	drm_dp_aux_unregister(&dp->aux);
-}
-
 static int dw_dp_bind(struct device *dev, struct device *master, void *data)
 {
 	struct dw_dp *dp = dev_get_drvdata(dev);
@@ -3868,6 +3861,14 @@ static int dw_dp_bind(struct device *dev, struct device *master, void *data)
 	struct drm_encoder *encoder = &dp->encoder;
 	struct drm_bridge *bridge = &dp->bridge;
 	int ret;
+
+	dp->aux.dev = dev;
+	dp->aux.drm_dev = drm_dev;
+	dp->aux.name = dev_name(dev);
+	dp->aux.transfer = dw_dp_aux_transfer;
+	ret = drm_dp_aux_register(&dp->aux);
+	if (ret)
+		return ret;
 
 	if (!dp->left) {
 		drm_simple_encoder_init(drm_dev, encoder, DRM_MODE_ENCODER_TMDS);
@@ -3879,7 +3880,7 @@ static int dw_dp_bind(struct device *dev, struct device *master, void *data)
 		ret = drm_bridge_attach(encoder, bridge, NULL, 0);
 		if (ret) {
 			dev_err(dev, "failed to attach bridge: %d\n", ret);
-			return ret;
+			goto error_unregister_aux;
 		}
 	}
 
@@ -3892,7 +3893,7 @@ static int dw_dp_bind(struct device *dev, struct device *master, void *data)
 		ret = drm_bridge_attach(encoder, &secondary->bridge, last_bridge,
 					DRM_BRIDGE_ATTACH_NO_CONNECTOR);
 		if (ret)
-			return ret;
+			goto error_unregister_aux;
 	}
 
 	pm_runtime_enable(dp->dev);
@@ -3903,11 +3904,17 @@ static int dw_dp_bind(struct device *dev, struct device *master, void *data)
 		enable_irq(dp->hpd_irq);
 
 	return 0;
+
+error_unregister_aux:
+	drm_dp_aux_unregister(&dp->aux);
+	return ret;
 }
 
 static void dw_dp_unbind(struct device *dev, struct device *master, void *data)
 {
 	struct dw_dp *dp = dev_get_drvdata(dev);
+
+	drm_dp_aux_unregister(&dp->aux);
 
 	if (dp->hpd_gpio)
 		disable_irq(dp->hpd_irq);
@@ -4124,17 +4131,6 @@ static int dw_dp_probe(struct platform_device *pdev)
 		return ret;
 
 	ret = devm_add_action_or_reset(dev, dw_dp_unregister_audio_driver, dp);
-	if (ret)
-		return ret;
-
-	dp->aux.dev = dev;
-	dp->aux.name = dev_name(dev);
-	dp->aux.transfer = dw_dp_aux_transfer;
-	ret = drm_dp_aux_register(&dp->aux);
-	if (ret)
-		return ret;
-
-	ret = devm_add_action_or_reset(dev, dw_dp_aux_unregister, dp);
 	if (ret)
 		return ret;
 
