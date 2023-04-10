@@ -33,6 +33,13 @@ config SND_SOC_ROCKCHIP_I2S_TDM
 	  interface between the AHB bus and the I2S bus, and support up to a
 	  maximum of 8 channels each for playback and recording.
 
+config SND_SOC_ROCKCHIP_I2S_TDM_MULTI_LANES
+	bool "Rockchip TDM Multi Lanes"
+	depends on SND_SOC_ROCKCHIP_I2S_TDM
+	help
+	  Say Y or M if you want to add support for TDM Multi Lanes
+	  based on I2S_TDM controller.
+
 config SND_SOC_ROCKCHIP_MULTI_DAIS
 	tristate "Rockchip Multi-DAIS Device Driver"
 	depends on HAVE_CLK && SND_SOC_ROCKCHIP
