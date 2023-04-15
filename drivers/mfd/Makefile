@@ -170,6 +170,10 @@ max8925-objs			:= max8925-core.o max8925-i2c.o
 obj-$(CONFIG_MFD_MAX8925)	+= max8925.o
 obj-$(CONFIG_MFD_MAX8997)	+= max8997.o max8997-irq.o
 obj-$(CONFIG_MFD_MAX8998)	+= max8998.o max8998-irq.o
+obj-$(CONFIG_MFD_MAX96745)	+= max96745.o
+obj-$(CONFIG_MFD_MAX96752F)	+= max96752f.o
+obj-$(CONFIG_MFD_MAX96755F)	+= max96755f.o
+obj-$(CONFIG_MFD_MAX96776)	+= max96776.o
 
 obj-$(CONFIG_MFD_MP2629)	+= mp2629.o
 
@@ -219,7 +223,15 @@ obj-$(CONFIG_MFD_INTEL_PMC_BXT)	+= intel_pmc_bxt.o
 obj-$(CONFIG_MFD_PALMAS)	+= palmas.o
 obj-$(CONFIG_MFD_VIPERBOARD)    += viperboard.o
 obj-$(CONFIG_MFD_RC5T583)	+= rc5t583.o rc5t583-irq.o
+obj-$(CONFIG_MFD_RK618)		+= rk618.o
+obj-$(CONFIG_MFD_RK628)		+= rk628.o
+obj-$(CONFIG_MFD_RK630)		+= rk630.o
+obj-$(CONFIG_MFD_RK630_I2C)	+= rk630-i2c.o
+obj-$(CONFIG_MFD_RK630_SPI)	+= rk630-spi.o
+obj-$(CONFIG_MFD_RK806)		+= rk806-core.o
+obj-$(CONFIG_MFD_RK806_SPI)	+= rk806-spi.o
 obj-$(CONFIG_MFD_RK808)		+= rk808.o
+obj-$(CONFIG_MFD_RK1000)	+= rk1000-core.o
 obj-$(CONFIG_MFD_RN5T618)	+= rn5t618.o
 obj-$(CONFIG_MFD_SEC_CORE)	+= sec-core.o sec-irq.o
 obj-$(CONFIG_MFD_SYSCON)	+= syscon.o

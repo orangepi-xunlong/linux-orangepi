@@ -10,6 +10,7 @@
 #include <linux/of_address.h>
 #include <linux/mmc/slot-gpio.h>
 #include <linux/pm_runtime.h>
+#include <linux/rockchip/cpu.h>
 #include <linux/slab.h>
 
 #include "dw_mmc.h"
@@ -22,6 +23,9 @@ struct dw_mci_rockchip_priv_data {
 	struct clk		*sample_clk;
 	int			default_sample_phase;
 	int			num_phases;
+	bool			use_v2_tuning;
+	int			last_degree;
+	u32			f_min;
 };
 
 static void dw_mci_rk3288_set_ios(struct dw_mci *host, struct mmc_ios *ios)
@@ -43,6 +47,11 @@ static void dw_mci_rk3288_set_ios(struct dw_mci *host, struct mmc_ios *ios)
 	 * Note: div can only be 0 or 1, but div must be set to 1 for eMMC
 	 * DDR52 8-bit mode.
 	 */
+	if (ios->clock < priv->f_min) {
+		ios->clock = priv->f_min;
+		host->slot->clock = ios->clock;
+	}
+
 	if (ios->bus_width == MMC_BUS_WIDTH_8 &&
 	    ios->timing == MMC_TIMING_MMC_DDR52)
 		cclkin = 2 * ios->clock * RK3288_CLKGEN_DIV;
@@ -61,7 +70,7 @@ static void dw_mci_rk3288_set_ios(struct dw_mci *host, struct mmc_ios *ios)
 	}
 
 	/* Make sure we use phases which we can enumerate with */
-	if (!IS_ERR(priv->sample_clk))
+	if (!IS_ERR(priv->sample_clk) && ios->timing <= MMC_TIMING_SD_HS)
 		clk_set_phase(priv->sample_clk, priv->default_sample_phase);
 
 	/*
@@ -132,6 +141,49 @@ static void dw_mci_rk3288_set_ios(struct dw_mci *host, struct mmc_ios *ios)
 #define TUNING_ITERATION_TO_PHASE(i, num_phases) \
 		(DIV_ROUND_UP((i) * 360, num_phases))
 
+static int dw_mci_v2_execute_tuning(struct dw_mci_slot *slot, u32 opcode)
+{
+	struct dw_mci *host = slot->host;
+	struct dw_mci_rockchip_priv_data *priv = host->priv;
+	struct mmc_host *mmc = slot->mmc;
+	u32 degrees[4] = {0, 90, 180, 270}, degree;
+	int i;
+	static bool inherit = true;
+
+	if (inherit) {
+		inherit = false;
+		i = clk_get_phase(priv->sample_clk) / 90;
+		degree = degrees[i];
+		goto done;
+	}
+
+	/*
+	 * v2 only support 4 degrees in theory.
+	 * First we inherit sample phases from firmware, which should
+	 * be able work fine, at least in the first place.
+	 * If retune is needed, we search forward to pick the last
+	 * one phase from degree list and loop around until we get one.
+	 * It's impossible all 4 fixed phase won't be able to work.
+	 */
+	for (i = 0; i < ARRAY_SIZE(degrees); i++) {
+		degree = degrees[i] + priv->last_degree;
+		degree = degree % 360;
+		clk_set_phase(priv->sample_clk, degree);
+		if (!mmc_send_tuning(mmc, opcode, NULL))
+			break;
+	}
+
+	if (i == ARRAY_SIZE(degrees)) {
+		dev_warn(host->dev, "All phases bad!");
+		return -EIO;
+	}
+
+done:
+	dev_info(host->dev, "Successfully tuned phase to %d\n", degrees[i]);
+	priv->last_degree = degree;
+	return 0;
+}
+
 static int dw_mci_rk3288_execute_tuning(struct dw_mci_slot *slot, u32 opcode)
 {
 	struct dw_mci *host = slot->host;
@@ -148,11 +200,18 @@ static int dw_mci_rk3288_execute_tuning(struct dw_mci_slot *slot, u32 opcode)
 	unsigned int range_count = 0;
 	int longest_range_len = -1;
 	int longest_range = -1;
-	int middle_phase;
+	int middle_phase, real_middle_phase;
 
 	if (IS_ERR(priv->sample_clk)) {
 		dev_err(host->dev, "Tuning clock (sample_clk) not defined.\n");
 		return -EIO;
+	}
+
+	if (priv->use_v2_tuning) {
+		ret = dw_mci_v2_execute_tuning(slot, opcode);
+		if (!ret)
+			return 0;
+		/* Otherwise we continue using fine tuning */
 	}
 
 	ranges = kmalloc_array(priv->num_phases / 2 + 1,
@@ -162,6 +221,9 @@ static int dw_mci_rk3288_execute_tuning(struct dw_mci_slot *slot, u32 opcode)
 
 	/* Try each phase and extract good ranges */
 	for (i = 0; i < priv->num_phases; ) {
+		/* Cannot guarantee any phases larger than 270 would work well */
+		if (TUNING_ITERATION_TO_PHASE(i, priv->num_phases) > 270)
+			break;
 		clk_set_phase(priv->sample_clk,
 			      TUNING_ITERATION_TO_PHASE(i, priv->num_phases));
 
@@ -246,12 +308,30 @@ static int dw_mci_rk3288_execute_tuning(struct dw_mci_slot *slot, u32 opcode)
 
 	middle_phase = ranges[longest_range].start + longest_range_len / 2;
 	middle_phase %= priv->num_phases;
-	dev_info(host->dev, "Successfully tuned phase to %d\n",
-		 TUNING_ITERATION_TO_PHASE(middle_phase, priv->num_phases));
+	real_middle_phase = TUNING_ITERATION_TO_PHASE(middle_phase, priv->num_phases);
 
-	clk_set_phase(priv->sample_clk,
-		      TUNING_ITERATION_TO_PHASE(middle_phase,
-						priv->num_phases));
+	/*
+	 * Since we cut out 270 ~ 360, the original algorithm
+	 * still rolling ranges before and after 270 together
+	 * in some corner cases, we should adjust it to avoid
+	 * using any middle phase located between 270 and 360.
+	 * By calculatiion, it happends due to the bad phases
+	 * lay between 90 ~ 180. So others are all fine to chose.
+	 * Pick 270 is a better choice in those cases. In case of
+	 * bad phases exceed 180, the middle phase of rollback
+	 * would be bigger than 315, so we chose 360.
+	 */
+	if (real_middle_phase > 270) {
+		if (real_middle_phase < 315)
+			real_middle_phase = 270;
+		else
+			real_middle_phase = 360;
+	}
+
+	dev_info(host->dev, "Successfully tuned phase to %d\n",
+		 real_middle_phase);
+
+	clk_set_phase(priv->sample_clk, real_middle_phase);
 
 free:
 	kfree(ranges);
@@ -267,6 +347,17 @@ static int dw_mci_rk3288_parse_dt(struct dw_mci *host)
 	if (!priv)
 		return -ENOMEM;
 
+	/*
+	 * RK356X SoCs only support 375KHz for ID mode, so any clk request
+	 * that less than 1.6MHz(2 * 400KHz * RK3288_CLKGEN_DIV) should be
+	 * wrapped  into 375KHz
+	 */
+	if (of_device_is_compatible(host->dev->of_node,
+				    "rockchip,rk3568-dw-mshc"))
+		priv->f_min = 375000;
+	else
+		priv->f_min = 100000;
+
 	if (of_property_read_u32(np, "rockchip,desired-num-phases",
 					&priv->num_phases))
 		priv->num_phases = 360;
@@ -274,6 +365,9 @@ static int dw_mci_rk3288_parse_dt(struct dw_mci *host)
 	if (of_property_read_u32(np, "rockchip,default-sample-phase",
 					&priv->default_sample_phase))
 		priv->default_sample_phase = 0;
+
+	if (of_property_read_bool(np, "rockchip,use-v2-tuning"))
+		priv->use_v2_tuning = true;
 
 	priv->drv_clk = devm_clk_get(host->dev, "ciu-drive");
 	if (IS_ERR(priv->drv_clk))
@@ -297,6 +391,20 @@ static int dw_mci_rockchip_init(struct dw_mci *host)
 				    "rockchip,rk3288-dw-mshc"))
 		host->bus_hz /= RK3288_CLKGEN_DIV;
 
+	if (of_device_is_compatible(host->dev->of_node,
+				    "rockchip,rv1106-dw-mshc") &&
+	    rockchip_get_cpu_version() == 0 &&
+	    !strcmp(dev_name(host->dev), "ffaa0000.mmc")) {
+		if (device_property_read_bool(host->dev, "no-sd")) {
+			dev_err(host->dev, "Invalid usage, should be SD card only\n");
+			return -EINVAL;
+		}
+
+		host->is_rv1106_sd = true;
+		dev_info(host->dev, "is rv1106 sd\n");
+	}
+
+	host->need_xfer_timer = true;
 	return 0;
 }
 
@@ -335,28 +443,43 @@ static int dw_mci_rockchip_probe(struct platform_device *pdev)
 	const struct dw_mci_drv_data *drv_data;
 	const struct of_device_id *match;
 	int ret;
+	bool use_rpm = true;
 
 	if (!pdev->dev.of_node)
 		return -ENODEV;
 
+	if (!device_property_read_bool(&pdev->dev, "non-removable") &&
+	    !device_property_read_bool(&pdev->dev, "cd-gpios"))
+		use_rpm = false;
+
 	match = of_match_node(dw_mci_rockchip_match, pdev->dev.of_node);
 	drv_data = match->data;
 
+	/*
+	 * increase rpm usage count in order to make
+	 * pm_runtime_force_resume calls rpm resume callback
+	 */
 	pm_runtime_get_noresume(&pdev->dev);
 	pm_runtime_set_active(&pdev->dev);
-	pm_runtime_enable(&pdev->dev);
-	pm_runtime_set_autosuspend_delay(&pdev->dev, 50);
-	pm_runtime_use_autosuspend(&pdev->dev);
+
+	if (use_rpm) {
+		pm_runtime_enable(&pdev->dev);
+		pm_runtime_set_autosuspend_delay(&pdev->dev, 50);
+		pm_runtime_use_autosuspend(&pdev->dev);
+	}
 
 	ret = dw_mci_pltfm_register(pdev, drv_data);
 	if (ret) {
-		pm_runtime_disable(&pdev->dev);
-		pm_runtime_set_suspended(&pdev->dev);
+		if (use_rpm) {
+			pm_runtime_disable(&pdev->dev);
+			pm_runtime_set_suspended(&pdev->dev);
+		}
 		pm_runtime_put_noidle(&pdev->dev);
 		return ret;
 	}
 
-	pm_runtime_put_autosuspend(&pdev->dev);
+	if (use_rpm)
+		pm_runtime_put_autosuspend(&pdev->dev);
 
 	return 0;
 }

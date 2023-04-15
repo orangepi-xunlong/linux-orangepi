@@ -5,6 +5,12 @@
 
 menu "Misc devices"
 
+config RK803
+	tristate "RK803"
+	default n
+	help
+	  Driver for RK803 which is used for driving porjector and IR flood LED.
+
 config SENSORS_LIS3LV02D
 	tristate
 	depends on INPUT
@@ -447,6 +453,21 @@ config XILINX_SDFEC
 config MISC_RTSX
 	tristate
 	default MISC_RTSX_PCI || MISC_RTSX_USB
+
+config UID_SYS_STATS
+	bool "Per-UID statistics"
+	depends on PROFILING && TASK_XACCT && TASK_IO_ACCOUNTING
+	help
+	  Per UID based cpu time statistics exported to /proc/uid_cputime
+	  Per UID based io statistics exported to /proc/uid_io
+	  Per UID based procstat control in /proc/uid_procstat
+
+config UID_SYS_STATS_DEBUG
+	bool "Per-TASK statistics"
+	depends on UID_SYS_STATS
+	default n
+	help
+	  Per TASK based io statistics exported to /proc/uid_io
 
 config PVPANIC
 	tristate "pvpanic device support"

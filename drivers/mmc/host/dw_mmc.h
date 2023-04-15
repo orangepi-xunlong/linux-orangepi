@@ -230,6 +230,9 @@ struct dw_mci {
 	struct timer_list       cmd11_timer;
 	struct timer_list       cto_timer;
 	struct timer_list       dto_timer;
+	bool			need_xfer_timer;
+	struct timer_list       xfer_timer;
+	bool			is_rv1106_sd;
 };
 
 /* DMA ops for Internal/External DMAC interface */

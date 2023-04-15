@@ -127,6 +127,27 @@ config BATTERY_CW2015
 	  This driver can also be built as a module. If so, the module will be
 	  called cw2015_battery.
 
+config BATTERY_CW2017
+	tristate "CW2017 Battery driver"
+	depends on I2C
+	select REGMAP_I2C
+	help
+	  Say Y here to enable support for the cellwise cw2017
+	  battery fuel gauge (used in the Pinebook Pro & others)
+
+	  This driver can also be built as a module. If so, the module will be
+	  called cw2017_battery.
+
+config BATTERY_CW221X
+	tristate "CW221x Battery driver"
+	depends on I2C
+	select REGMAP_I2C
+	help
+	  Say Y hereto enable support for the cellwise cw221x
+	  battery fuel gauge (used in the Pinebook Pro & others)
+	  This driver can also be built as a module. If so, the module will be
+	  called cw221x_battery.
+
 config BATTERY_DS2760
 	tristate "DS2760 battery driver (HP iPAQ & others)"
 	depends on W1
@@ -507,12 +528,37 @@ config CHARGER_MANAGER
 	  runtime and in suspend-to-RAM by waking up the system periodically
 	  with help of suspend_again support.
 
+config ROCKCHIP_CHARGER_MANAGER
+	tristate "Battery charger manager for multiple chargers"
+	select EXTCON
+	help
+	  Say Y to enable charger manager support, which allows multiple
+	  chargers attached to a battery and multiple batteries attached to a
+	  system. The charger manager also can monitor charging status in
+	  runtime and in suspend-to-RAM by waking up the system periodically
+	  with help of suspend_again support.
+
 config CHARGER_LT3651
 	tristate "Analog Devices LT3651 charger"
 	depends on GPIOLIB
 	help
 	  Say Y to include support for the Analog Devices (Linear Technology)
 	  LT3651 battery charger which reports its status via GPIO lines.
+
+config CHARGER_SC8551
+	tristate "SC8551 battery charger pump driver"
+	depends on I2C
+	select REGMAP_I2C
+	help
+	  Say Y to enable support for the SC8551 battery pump charger.
+
+config CHARGER_SC89890
+	tristate "SC89890 battery charger driver"
+	depends on I2C
+	depends on GPIOLIB || COMPILE_TEST
+	select REGMAP_I2C
+	help
+	  Say Y to enable support for the SC89890 battery charger.
 
 config CHARGER_MAX14577
 	tristate "Maxim MAX14577/77836 battery charger driver"
@@ -628,6 +674,12 @@ config CHARGER_BQ2515X
 	  functions for wearable devices, namely a charger, an output voltage
 	  rail, ADC for battery and system monitoring, and push-button
 	  controller.
+
+config CHARGER_BQ25700
+	tristate "TI BQ25700 battery charger driver"
+	depends on REGMAP_I2C
+	help
+	  Say Y to enable support for the TI BQ25700 battery charger.
 
 config CHARGER_BQ25890
 	tristate "TI BQ25890 battery charger driver"
@@ -775,5 +827,50 @@ config RN5T618_POWER
 	  Say Y here to have support for RN5T618 PMIC family fuel gauge and charger.
 	  This driver can also be built as a module. If so, the module will be
 	  called rn5t618_power.
+
+config BATTERY_RK816
+	tristate "RK816 Battery driver"
+	depends on MFD_RK808
+	help
+	  If you say yes here you will get support for the battery of RK816 PMIC.
+	  This driver can give support for Rk816 Battery Charge Interface.
+
+config BATTERY_RK817
+	tristate "RK817 Battery driver"
+	depends on MFD_RK808
+	help
+	  If you say yes here you will get support for the battery of RK817 PMIC.
+	  This driver can give support for Rk817 Battery Interface.
+
+config CHARGER_RK817
+	tristate "RK817 Charger driver"
+	depends on MFD_RK808
+	help
+	  If you say yes here you will get support for the charger of RK817 PMIC.
+	  This driver can give support for Rk817 Charger Interface.
+
+config BATTERY_RK818
+	tristate "RK818 Battery driver"
+	depends on MFD_RK808
+	default n
+	help
+	  If you say yes here you will get support for the battery of RK818 PMIC.
+	  This driver can give support for Rk818 Battery Charge Interface.
+
+config CHARGER_RK818
+	tristate "RK818 Charger driver"
+	depends on MFD_RK808
+	default n
+	help
+	  If you say yes here you will get support for the charger of RK818 PMIC.
+	  This driver can give support for Rk818 Charger Interface.
+
+config CHARGER_SGM41542
+	tristate "SGM41542 charger driver"
+	depends on I2C
+	depends on GPIOLIB || COMPILE_TEST
+	select REGMAP_I2C
+	help
+	  Say Y to enable support for the SGM41542 battery charger.
 
 endif # POWER_SUPPLY

@@ -18,6 +18,8 @@
 #include <linux/mmc/mmc.h>
 #include <linux/mmc/sd.h>
 
+#include <trace/hooks/mmc_core.h>
+
 #include "core.h"
 #include "card.h"
 #include "host.h"
@@ -462,6 +464,8 @@ static void sd_update_bus_speed_mode(struct mmc_card *card)
 		    SD_MODE_UHS_SDR12)) {
 			card->sd_bus_speed = UHS_SDR12_BUS_SPEED;
 	}
+
+	trace_android_vh_sd_update_bus_speed_mode(card);
 }
 
 static int sd_set_bus_speed_mode(struct mmc_card *card, u8 *status)
@@ -1237,6 +1241,49 @@ out:
 	return err;
 }
 
+static int _mmc_sd_shutdown(struct mmc_host *host)
+{
+	int err = 0;
+
+	if (WARN_ON(!host) || WARN_ON(!host->card))
+		return 0;
+
+	mmc_claim_host(host);
+
+	if (mmc_card_suspended(host->card))
+		goto out;
+
+	if (!mmc_host_is_spi(host))
+		err = mmc_deselect_cards(host);
+
+	if (!err) {
+		mmc_power_off(host);
+		mmc_card_set_suspended(host->card);
+	}
+
+	host->ios.signal_voltage = MMC_SIGNAL_VOLTAGE_330;
+	host->ios.vdd = fls(host->ocr_avail) - 1;
+	mmc_regulator_set_vqmmc(host, &host->ios);
+	pr_info("Set signal voltage to initial state\n");
+
+out:
+	mmc_release_host(host);
+	return err;
+}
+
+static int mmc_sd_shutdown(struct mmc_host *host)
+{
+	int err;
+
+	err = _mmc_sd_shutdown(host);
+	if (!err) {
+		pm_runtime_disable(&host->card->dev);
+		pm_runtime_set_suspended(&host->card->dev);
+	}
+
+	return err;
+}
+
 /*
  * Callback for suspend
  */
@@ -1331,7 +1378,7 @@ static const struct mmc_bus_ops mmc_sd_ops = {
 	.suspend = mmc_sd_suspend,
 	.resume = mmc_sd_resume,
 	.alive = mmc_sd_alive,
-	.shutdown = mmc_sd_suspend,
+	.shutdown = mmc_sd_shutdown,
 	.hw_reset = mmc_sd_hw_reset,
 };
 
@@ -1404,6 +1451,8 @@ err:
 
 	pr_err("%s: error %d whilst initialising SD card\n",
 		mmc_hostname(host), err);
+
+	trace_android_vh_mmc_attach_sd(host, ocr, err);
 
 	return err;
 }

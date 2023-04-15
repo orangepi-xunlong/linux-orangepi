@@ -207,13 +207,18 @@ config PINCTRL_OXNAS
 	select MFD_SYSCON
 
 config PINCTRL_ROCKCHIP
-	bool
+	tristate "Rockchip gpio and pinctrl driver"
+	depends on ARCH_ROCKCHIP || COMPILE_TEST
 	depends on OF
+	select GPIOLIB
 	select PINMUX
 	select GENERIC_PINCONF
 	select GENERIC_IRQ_CHIP
 	select MFD_SYSCON
 	select OF_GPIO
+	default ARCH_ROCKCHIP
+	help
+          This support pinctrl and gpio driver for Rockchip SoCs.
 
 config PINCTRL_SINGLE
 	tristate "One-register-per-pin type device tree based pinctrl driver"
@@ -305,6 +310,37 @@ config PINCTRL_MAX77620
 	  function in alternate mode. This driver also configure push-pull,
 	  open drain, FPS slots etc.
 
+config PINCTRL_MAX96745
+	tristate "MAX96745 Pincontrol support"
+	depends on MFD_MAX96745 && OF
+	select PINMUX
+	select GENERIC_PINMUX_FUNCTIONS
+	select GENERIC_PINCTRL_GROUPS
+	select GENERIC_PINCONF
+	help
+	  Say Yes here to enable Pin control support for Maxim MAX96745.
+
+config PINCTRL_MAX96752F
+	tristate "MAX96752F Pincontrol support"
+	depends on MFD_MAX96752F && OF
+	select PINMUX
+	select PINCONF
+	select GENERIC_PINMUX_FUNCTIONS
+	select GENERIC_PINCTRL_GROUPS
+	select GENERIC_PINCONF
+	help
+	  Say Yes here to enable Pin control support for Maxim MAX96752F.
+
+config PINCTRL_MAX96755F
+	tristate "MAX96755F Pincontrol support"
+	depends on MFD_MAX96755F && OF
+	select PINMUX
+	select GENERIC_PINMUX_FUNCTIONS
+	select GENERIC_PINCTRL_GROUPS
+	select GENERIC_PINCONF
+	help
+	  Say Yes here to enable Pin control support for Maxim MAX96755F.
+
 config PINCTRL_PALMAS
 	tristate "Pinctrl driver for the PALMAS Series MFD devices"
 	depends on OF && MFD_PALMAS
@@ -353,6 +389,16 @@ config PINCTRL_INGENIC
 	select GPIOLIB_IRQCHIP
 	select REGMAP_MMIO
 
+config PINCTRL_RK628
+	tristate "Pinctrl and GPIO driver for RK628 PMIC"
+	depends on MFD_RK628
+	select GPIOLIB
+	select PINMUX
+	select GENERIC_PINCONF
+	select REGMAP_IRQ
+	help
+	  This selects the pinctrl driver for RK628.
+
 config PINCTRL_RK805
 	tristate "Pinctrl and GPIO driver for RK805 PMIC"
 	depends on MFD_RK808
@@ -361,6 +407,15 @@ config PINCTRL_RK805
 	select GENERIC_PINCONF
 	help
 	  This selects the pinctrl driver for RK805.
+
+config PINCTRL_RK806
+	tristate "Pinctrl and GPIO driver for RK806 PMIC"
+	depends on MFD_RK806
+	select GPIOLIB
+	select PINMUX
+	select GENERIC_PINCONF
+	help
+	  This selects the pinctrl driver for RK806
 
 config PINCTRL_OCELOT
 	bool "Pinctrl driver for the Microsemi Ocelot and Jaguar2 SoCs"

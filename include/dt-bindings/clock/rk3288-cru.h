@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+/* SPDX-License-Identifier: (GPL-2.0+ OR MIT) */
 /*
  * Copyright (c) 2014 MundoReader S.L.
  * Author: Heiko Stuebner <heiko@sntech.de>
@@ -161,6 +161,10 @@
 #define PCLK_EFUSE256		369
 #define PCLK_EFUSE1024		370
 #define PCLK_ISP_IN		371
+#define PCLK_VIP		372
+#define PCLK_VIP_IN		373
+#define PCLK_PD_ALIVE		374
+#define PCLK_PD_PMU		375
 
 /* hclk gates */
 #define HCLK_GPS		448

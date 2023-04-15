@@ -420,6 +420,12 @@ static void dwc3_drd_update(struct dwc3 *dwc)
 		id = extcon_get_state(dwc->edev, EXTCON_USB_HOST);
 		if (id < 0)
 			id = 0;
+
+#if defined(CONFIG_ARCH_ROCKCHIP) && defined(CONFIG_NO_GKI)
+		if (extcon_get_state(dwc->edev, EXTCON_USB))
+			dwc->desired_role_sw_mode = USB_DR_MODE_PERIPHERAL;
+#endif
+
 		dwc3_set_mode(dwc, id ?
 			      DWC3_GCTL_PRTCAP_HOST :
 			      DWC3_GCTL_PRTCAP_DEVICE);
@@ -431,6 +437,15 @@ static int dwc3_drd_notifier(struct notifier_block *nb,
 {
 	struct dwc3 *dwc = container_of(nb, struct dwc3, edev_nb);
 
+#if defined(CONFIG_ARCH_ROCKCHIP) && defined(CONFIG_NO_GKI)
+	if (extcon_get_state(dwc->edev, EXTCON_USB))
+		dwc->desired_role_sw_mode = USB_DR_MODE_PERIPHERAL;
+	else if (extcon_get_state(dwc->edev, EXTCON_USB_HOST))
+		dwc->desired_role_sw_mode = USB_DR_MODE_HOST;
+	else
+		dwc->desired_role_sw_mode = USB_DR_MODE_UNKNOWN;
+#endif
+
 	dwc3_set_mode(dwc, event ?
 		      DWC3_GCTL_PRTCAP_HOST :
 		      DWC3_GCTL_PRTCAP_DEVICE);
@@ -441,8 +456,8 @@ static int dwc3_drd_notifier(struct notifier_block *nb,
 static struct extcon_dev *dwc3_get_extcon(struct dwc3 *dwc)
 {
 	struct device *dev = dwc->dev;
-	struct device_node *np_phy, *np_conn;
-	struct extcon_dev *edev;
+	struct device_node *np_phy;
+	struct extcon_dev *edev = NULL;
 	const char *name;
 
 	if (device_property_read_bool(dev, "extcon"))
@@ -462,15 +477,22 @@ static struct extcon_dev *dwc3_get_extcon(struct dwc3 *dwc)
 		return edev;
 	}
 
+	/*
+	 * Try to get an extcon device from the USB PHY controller's "port"
+	 * node. Check if it has the "port" node first, to avoid printing the
+	 * error message from underlying code, as it's a valid case: extcon
+	 * device (and "port" node) may be missing in case of "usb-role-switch"
+	 * or OTG mode.
+	 */
 	np_phy = of_parse_phandle(dev->of_node, "phys", 0);
-	np_conn = of_graph_get_remote_node(np_phy, -1, -1);
+	if (of_graph_is_present(np_phy)) {
+		struct device_node *np_conn;
 
-	if (np_conn)
-		edev = extcon_find_edev_by_node(np_conn);
-	else
-		edev = NULL;
-
-	of_node_put(np_conn);
+		np_conn = of_graph_get_remote_node(np_phy, -1, -1);
+		if (np_conn)
+			edev = extcon_find_edev_by_node(np_conn);
+		of_node_put(np_conn);
+	}
 	of_node_put(np_phy);
 
 	return edev;
@@ -483,6 +505,11 @@ static int dwc3_usb_role_switch_set(struct usb_role_switch *sw,
 {
 	struct dwc3 *dwc = usb_role_switch_get_drvdata(sw);
 	u32 mode;
+
+#if defined(CONFIG_ARCH_ROCKCHIP) && defined(CONFIG_NO_GKI)
+	dwc->desired_role_sw_mode = role;
+	phy_set_mode_ext(dwc->usb2_generic_phy, PHY_MODE_USB_OTG, role);
+#endif
 
 	switch (role) {
 	case USB_ROLE_HOST:

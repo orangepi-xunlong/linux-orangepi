@@ -32,7 +32,9 @@ EXPORT_SYMBOL(cad_pid);
 #define DEFAULT_REBOOT_MODE
 #endif
 enum reboot_mode reboot_mode DEFAULT_REBOOT_MODE;
+EXPORT_SYMBOL_GPL(reboot_mode);
 enum reboot_mode panic_reboot_mode = REBOOT_UNDEFINED;
+EXPORT_SYMBOL_GPL(panic_reboot_mode);
 
 /*
  * This variable is used privately to keep track of whether or not
@@ -214,6 +216,27 @@ void do_kernel_restart(char *cmd)
 {
 	atomic_notifier_call_chain(&restart_handler_list, reboot_mode, cmd);
 }
+
+#ifdef CONFIG_NO_GKI
+static ATOMIC_NOTIFIER_HEAD(pre_restart_handler_list);
+
+int register_pre_restart_handler(struct notifier_block *nb)
+{
+	return atomic_notifier_chain_register(&pre_restart_handler_list, nb);
+}
+EXPORT_SYMBOL(register_pre_restart_handler);
+
+int unregister_pre_restart_handler(struct notifier_block *nb)
+{
+	return atomic_notifier_chain_unregister(&pre_restart_handler_list, nb);
+}
+EXPORT_SYMBOL(unregister_pre_restart_handler);
+
+void do_kernel_pre_restart(char *cmd)
+{
+	atomic_notifier_call_chain(&pre_restart_handler_list, reboot_mode, cmd);
+}
+#endif
 
 void migrate_to_reboot_cpu(void)
 {

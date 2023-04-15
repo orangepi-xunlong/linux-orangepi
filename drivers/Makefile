@@ -189,3 +189,7 @@ obj-$(CONFIG_GNSS)		+= gnss/
 obj-$(CONFIG_INTERCONNECT)	+= interconnect/
 obj-$(CONFIG_COUNTER)		+= counter/
 obj-$(CONFIG_MOST)		+= most/
+obj-$(CONFIG_RK_FLASH)		+= rkflash/
+obj-$(CONFIG_RK_HEADSET)	+= headset_observe/
+obj-$(CONFIG_RK_NAND)		+= rk_nand/
+obj-$(CONFIG_ROCKCHIP_RKNPU)	+= rknpu/

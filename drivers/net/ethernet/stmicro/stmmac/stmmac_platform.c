@@ -463,6 +463,9 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 
 	of_property_read_u32(np, "rx-fifo-depth", &plat->rx_fifo_size);
 
+	of_property_read_u32(np, "tx-dma-size", &plat->dma_tx_size);
+	of_property_read_u32(np, "rx-dma-size", &plat->dma_rx_size);
+
 	plat->force_sf_dma_mode =
 		of_property_read_bool(np, "snps,force_sf_dma_mode");
 
@@ -587,7 +590,7 @@ stmmac_probe_config_dt(struct platform_device *pdev, u8 *mac)
 		clk_prepare_enable(plat->stmmac_clk);
 	}
 
-	plat->pclk = devm_clk_get(&pdev->dev, "pclk");
+	plat->pclk = devm_clk_get(&pdev->dev, "pclk_mac");
 	if (IS_ERR(plat->pclk)) {
 		if (PTR_ERR(plat->pclk) == -EPROBE_DEFER)
 			goto error_pclk_get;

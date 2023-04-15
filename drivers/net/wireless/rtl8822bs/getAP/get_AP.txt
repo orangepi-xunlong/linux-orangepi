@@ -1,0 +1,16 @@
+sudo /etc/init.d/networking restart
+sudo vi /etc/NetworkManager/NetworkManager.conf
+sudo /etc/init.d/network-manager restart
+
+
+sudo service isc-dhcp-server restart
+sudo echo 1 > /proc/sys/net/ipv4/ip_forward
+sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+sudo ifconfig wlan0 192.168.43.1 netmask 255.255.255.0
+sudo hostapd ~/hostapd-2g.conf
+
+
+/etc/NetworkManager/NetworkManager.conf
+/proc/sys/net/ipv4/ip_forward
+/etc/default/isc-dhcp-server
+/etc/dhcp/dhcpd.conf

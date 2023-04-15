@@ -9,13 +9,15 @@
 
 #include <linux/err.h>
 #include <linux/of.h>
+#include <linux/of_address.h>
 #include <linux/slab.h>
 #include <linux/stat.h>
 #include <linux/pm_runtime.h>
-
+#include <linux/mm.h>
 #include <linux/mmc/host.h>
 #include <linux/mmc/card.h>
 #include <linux/mmc/mmc.h>
+#include <linux/resource.h>
 
 #include "core.h"
 #include "card.h"
@@ -65,6 +67,7 @@ static const unsigned int taac_mant[] = {
 /*
  * Given the decoded CSD structure, decode the raw CID to our CID structure.
  */
+#ifndef CONFIG_ROCKCHIP_THUNDER_BOOT
 static int mmc_decode_cid(struct mmc_card *card)
 {
 	u32 *resp = card->raw_cid;
@@ -116,6 +119,7 @@ static int mmc_decode_cid(struct mmc_card *card)
 
 	return 0;
 }
+#endif
 
 static void mmc_set_erase_size(struct mmc_card *card)
 {
@@ -662,14 +666,74 @@ out:
 	return err;
 }
 
+#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
+static void *mmc_tb_map_ecsd(phys_addr_t start, size_t len)
+{
+	int i;
+	void *vaddr;
+	pgprot_t pgprot = PAGE_KERNEL;
+	phys_addr_t phys;
+	int npages = PAGE_ALIGN(len) / PAGE_SIZE;
+	struct page **p = vmalloc(sizeof(struct page *) * npages);
+
+	if (!p)
+		return NULL;
+
+	phys = start;
+	for (i = 0; i < npages; i++) {
+		p[i] = phys_to_page(phys);
+		phys += PAGE_SIZE;
+	}
+
+	vaddr = vmap(p, npages, VM_MAP, pgprot);
+	vfree(p);
+
+	return vaddr;
+}
+#endif
+
 static int mmc_read_ext_csd(struct mmc_card *card)
 {
 	u8 *ext_csd;
 	int err;
-
+#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
+	void *ecsd;
+	bool valid_ecsd = false;
+	bool valid_reserved = false;
+	struct device_node *mem;
+	struct resource reg;
+	struct device *dev = card->host->parent;
+#endif
 	if (!mmc_can_ext_csd(card))
 		return 0;
 
+#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
+	mem = of_parse_phandle(dev->of_node, "memory-region-ecsd", 0);
+	if (mem) {
+		err = of_address_to_resource(mem, 0, &reg);
+		if (err < 0) {
+			dev_err(dev, "fail to get resource\n");
+			goto get_ecsd;
+		}
+		valid_reserved = true;
+
+		ecsd = mmc_tb_map_ecsd(reg.start, resource_size(&reg));
+		if (!ecsd)
+			goto get_ecsd;
+
+		if (readl(ecsd + SZ_512) == 0x55aa55aa) {
+			ext_csd = ecsd;
+			valid_ecsd = true;
+			goto decode;
+		} else {
+			dev_dbg(dev, "invalid ecsd tag!");
+		}
+	} else {
+		dev_info(dev, "not find \"memory-region\" property\n");
+	}
+
+get_ecsd:
+#endif
 	err = mmc_get_ext_csd(card, &ext_csd);
 	if (err) {
 		/* If the host or the card can't do the switch,
@@ -694,12 +758,26 @@ static int mmc_read_ext_csd(struct mmc_card *card)
 
 		return err;
 	}
-
+#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
+decode:
+#endif
 	err = mmc_decode_ext_csd(card, ext_csd);
+#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
+	if (!valid_ecsd)
+		kfree(ext_csd);
+	else
+		vunmap(ecsd);
+	if (valid_reserved)
+		free_reserved_area(phys_to_virt(reg.start),
+				   phys_to_virt(reg.start) + resource_size(&reg),
+				   -1, "memory-region-ecsd");
+#else
 	kfree(ext_csd);
+#endif
 	return err;
 }
 
+#ifndef CONFIG_ROCKCHIP_THUNDER_BOOT
 static int mmc_compare_ext_csds(struct mmc_card *card, unsigned bus_width)
 {
 	u8 *bw_ext_csd;
@@ -772,6 +850,7 @@ static int mmc_compare_ext_csds(struct mmc_card *card, unsigned bus_width)
 	kfree(bw_ext_csd);
 	return err;
 }
+#endif
 
 MMC_DEV_ATTR(cid, "%08x%08x%08x%08x\n", card->raw_cid[0], card->raw_cid[1],
 	card->raw_cid[2], card->raw_cid[3]);
@@ -972,7 +1051,7 @@ static int mmc_select_powerclass(struct mmc_card *card)
 /*
  * Set the bus speed for the selected speed mode.
  */
-static void mmc_set_bus_speed(struct mmc_card *card)
+void mmc_set_bus_speed(struct mmc_card *card)
 {
 	unsigned int max_dtr = (unsigned int)-1;
 
@@ -992,7 +1071,7 @@ static void mmc_set_bus_speed(struct mmc_card *card)
  * If the bus width is changed successfully, return the selected width value.
  * Zero is returned instead of error value if the wide width is not supported.
  */
-static int mmc_select_bus_width(struct mmc_card *card)
+int mmc_select_bus_width(struct mmc_card *card)
 {
 	static unsigned ext_csd_bits[] = {
 		EXT_CSD_BUS_WIDTH_8,
@@ -1041,11 +1120,12 @@ static int mmc_select_bus_width(struct mmc_card *card)
 		 * compare ext_csd previously read in 1 bit mode
 		 * against ext_csd at new bus width
 		 */
+#ifndef CONFIG_ROCKCHIP_THUNDER_BOOT
 		if (!(host->caps & MMC_CAP_BUS_WIDTH_TEST))
 			err = mmc_compare_ext_csds(card, bus_width);
 		else
 			err = mmc_bus_test(card, bus_width);
-
+#endif
 		if (!err) {
 			err = bus_width;
 			break;
@@ -1057,11 +1137,12 @@ static int mmc_select_bus_width(struct mmc_card *card)
 
 	return err;
 }
+EXPORT_SYMBOL_GPL(mmc_select_bus_width);
 
 /*
  * Switch to the high-speed mode
  */
-static int mmc_select_hs(struct mmc_card *card)
+int mmc_select_hs(struct mmc_card *card)
 {
 	int err;
 
@@ -1075,11 +1156,12 @@ static int mmc_select_hs(struct mmc_card *card)
 
 	return err;
 }
+EXPORT_SYMBOL_GPL(mmc_select_hs);
 
 /*
  * Activate wide bus and DDR if supported.
  */
-static int mmc_select_hs_ddr(struct mmc_card *card)
+int mmc_select_hs_ddr(struct mmc_card *card)
 {
 	struct mmc_host *host = card->host;
 	u32 bus_width, ext_csd_bits;
@@ -1148,8 +1230,9 @@ static int mmc_select_hs_ddr(struct mmc_card *card)
 
 	return err;
 }
+EXPORT_SYMBOL_GPL(mmc_select_hs_ddr);
 
-static int mmc_select_hs400(struct mmc_card *card)
+int mmc_select_hs400(struct mmc_card *card)
 {
 	struct mmc_host *host = card->host;
 	unsigned int max_dtr;
@@ -1235,6 +1318,7 @@ out_err:
 	       __func__, err);
 	return err;
 }
+EXPORT_SYMBOL_GPL(mmc_select_hs400);
 
 int mmc_hs200_to_hs400(struct mmc_card *card)
 {
@@ -1379,11 +1463,12 @@ static int mmc_select_hs400es(struct mmc_card *card)
 	}
 
 	mmc_set_timing(host, MMC_TIMING_MMC_HS);
+	/* Set clock immediately after changing timing */
+	mmc_set_clock(host, card->ext_csd.hs_max_dtr);
+
 	err = mmc_switch_status(card, true);
 	if (err)
 		goto out_err;
-
-	mmc_set_clock(host, card->ext_csd.hs_max_dtr);
 
 	/* Switch card to DDR with strobe bit */
 	val = EXT_CSD_DDR_BUS_WIDTH_8 | EXT_CSD_BUS_WIDTH_STROBE;
@@ -1505,7 +1590,7 @@ err:
 /*
  * Activate High Speed, HS200 or HS400ES mode if supported.
  */
-static int mmc_select_timing(struct mmc_card *card)
+int mmc_select_timing(struct mmc_card *card)
 {
 	int err = 0;
 
@@ -1530,12 +1615,13 @@ bus_speed:
 	mmc_set_bus_speed(card);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(mmc_select_timing);
 
 /*
  * Execute tuning sequence to seek the proper bus operating
  * conditions for HS200 and HS400, which sends CMD21 to the device.
  */
-static int mmc_hs200_tuning(struct mmc_card *card)
+int mmc_hs200_tuning(struct mmc_card *card)
 {
 	struct mmc_host *host = card->host;
 
@@ -1550,6 +1636,7 @@ static int mmc_hs200_tuning(struct mmc_card *card)
 
 	return mmc_execute_tuning(card);
 }
+EXPORT_SYMBOL_GPL(mmc_hs200_tuning);
 
 /*
  * Handle the detection and initialisation of a card.
@@ -1578,7 +1665,9 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 	 * respond.
 	 * mmc_go_idle is needed for eMMC that are asleep
 	 */
+#ifndef CONFIG_ROCKCHIP_THUNDER_BOOT
 	mmc_go_idle(host);
+#endif
 
 	/* The extra bit indicates that we support high capacity */
 	err = mmc_send_op_cond(host, ocr | (1 << 30), &rocr);
@@ -1623,7 +1712,9 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 		card->ocr = ocr;
 		card->type = MMC_TYPE_MMC;
 		card->rca = 1;
+#ifndef CONFIG_ROCKCHIP_THUNDER_BOOT
 		memcpy(card->raw_cid, cid, sizeof(card->raw_cid));
+#endif
 	}
 
 	/*
@@ -1654,9 +1745,11 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 		err = mmc_decode_csd(card);
 		if (err)
 			goto free_card;
+#ifndef CONFIG_ROCKCHIP_THUNDER_BOOT
 		err = mmc_decode_cid(card);
 		if (err)
 			goto free_card;
+#endif
 	}
 
 	/*
@@ -1799,6 +1892,7 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 	/*
 	 * Enable HPI feature (if supported)
 	 */
+#ifndef CONFIG_ROCKCHIP_THUNDER_BOOT
 	if (card->ext_csd.hpi) {
 		err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
 				EXT_CSD_HPI_MGMT, 1,
@@ -1814,7 +1908,7 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 			card->ext_csd.hpi_en = 1;
 		}
 	}
-
+#endif
 	/*
 	 * If cache size is higher than 0, this indicates the existence of cache
 	 * and it can be turned on. Note that some eMMCs from Micron has been
@@ -2095,14 +2189,29 @@ static int mmc_suspend(struct mmc_host *host)
 static int _mmc_resume(struct mmc_host *host)
 {
 	int err = 0;
+	int i;
 
 	mmc_claim_host(host);
 
 	if (!mmc_card_suspended(host->card))
 		goto out;
 
-	mmc_power_up(host, host->card->ocr);
-	err = mmc_init_card(host, host->card->ocr, host->card);
+	/*
+	 * Let's try to fallback the host->f_init
+	 * if failing to init mmc card after resume.
+	 */
+	for (i = 0; i < ARRAY_SIZE(freqs); i++) {
+		if (host->f_init < max(freqs[i], host->f_min))
+			continue;
+		else
+			host->f_init = max(freqs[i], host->f_min);
+
+		mmc_power_up(host, host->card->ocr);
+		err = mmc_init_card(host, host->card->ocr, host->card);
+		if (!err)
+			break;
+	}
+
 	mmc_card_clr_suspended(host->card);
 
 out:

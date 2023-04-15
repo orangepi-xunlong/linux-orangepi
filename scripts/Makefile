@@ -9,6 +9,7 @@ CRYPTO_CFLAGS = $(shell pkg-config --cflags libcrypto 2> /dev/null)
 hostprogs-always-$(CONFIG_BUILD_BIN2C)			+= bin2c
 hostprogs-always-$(CONFIG_KALLSYMS)			+= kallsyms
 hostprogs-always-$(BUILD_C_RECORDMCOUNT)		+= recordmcount
+hostprogs-always-$(CONFIG_ARCH_ROCKCHIP)		+= resource_tool
 hostprogs-always-$(CONFIG_BUILDTIME_TABLE_SORT)		+= sorttable
 hostprogs-always-$(CONFIG_ASN1)				+= asn1_compiler
 hostprogs-always-$(CONFIG_MODULE_SIG_FORMAT)		+= sign-file
@@ -21,8 +22,7 @@ HOSTCFLAGS_asn1_compiler.o = -I$(srctree)/include
 HOSTCFLAGS_sign-file.o = $(CRYPTO_CFLAGS)
 HOSTLDLIBS_sign-file = $(CRYPTO_LIBS)
 HOSTCFLAGS_extract-cert.o = $(CRYPTO_CFLAGS)
-HOSTLDLIBS_extract-cert = $(CRYPTO_LIBS)
-
+HOSTLDLIBS_extract-cert = $(CRYPTO_LIBS) -lcrypto -lpthread
 ifdef CONFIG_UNWINDER_ORC
 ifeq ($(ARCH),x86_64)
 ARCH := x86

@@ -19,6 +19,7 @@
 #include "block.h"
 #include "core.h"
 #include "card.h"
+#include "crypto.h"
 #include "host.h"
 
 #define MMC_DMA_MAP_MERGE_SEGMENTS	512
@@ -70,6 +71,7 @@ enum mmc_issue_type mmc_issue_type(struct mmc_queue *mq, struct request *req)
 
 	return MMC_ISSUE_SYNC;
 }
+EXPORT_SYMBOL_GPL(mmc_issue_type);
 
 static void __mmc_cqe_recovery_notifier(struct mmc_queue *mq)
 {
@@ -407,6 +409,8 @@ static void mmc_setup_queue(struct mmc_queue *mq, struct mmc_card *card)
 	mutex_init(&mq->complete_lock);
 
 	init_waitqueue_head(&mq->wait);
+
+	mmc_crypto_setup_queue(mq->queue, host);
 }
 
 static inline bool mmc_merge_capable(struct mmc_host *host)
@@ -415,7 +419,11 @@ static inline bool mmc_merge_capable(struct mmc_host *host)
 }
 
 /* Set queue depth to get a reasonable value for q->nr_requests */
+#ifdef CONFIG_MMC_QUEUE_DEPTH
+#define MMC_QUEUE_DEPTH CONFIG_MMC_QUEUE_DEPTH
+#else
 #define MMC_QUEUE_DEPTH 64
+#endif
 
 /**
  * mmc_init_queue - initialise a queue structure.

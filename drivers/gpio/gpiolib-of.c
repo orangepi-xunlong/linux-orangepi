@@ -1041,7 +1041,6 @@ void of_gpiochip_remove(struct gpio_chip *chip)
 {
 	of_node_put(chip->of_node);
 }
-
 #ifdef CONFIG_GPIO_SYSFS
 
 static struct of_device_id gpio_export_ids[] = {
@@ -1110,3 +1109,13 @@ static struct platform_driver gpio_export_driver = {
 module_platform_driver(gpio_export_driver);
 
 #endif
+void of_gpio_dev_init(struct gpio_chip *gc, struct gpio_device *gdev)
+{
+	/* If the gpiochip has an assigned OF node this takes precedence */
+	if (gc->of_node)
+		gdev->dev.of_node = gc->of_node;
+	else
+		gc->of_node = gdev->dev.of_node;
+	if (gdev->dev.of_node)
+		gdev->dev.fwnode = of_fwnode_handle(gdev->dev.of_node);
+}

@@ -114,7 +114,9 @@ struct switch_dev {
 	/* NB: either alias or netdev must be set */
 	const char *alias;
 	struct net_device *netdev;
-
+	struct device	*dev;
+		int		index;
+	int		state;
 	unsigned int ports;
 	unsigned int vlans;
 	unsigned int cpu_port;
@@ -134,6 +136,8 @@ struct switch_dev {
 #ifdef CONFIG_SWCONFIG_LEDS
 	struct switch_led_trigger *led_trigger;
 #endif
+	ssize_t	(*print_name)(struct switch_dev *sdev, char *buf);
+	ssize_t	(*print_state)(struct switch_dev *sdev, char *buf);
 };
 
 struct switch_port {
@@ -171,9 +175,25 @@ struct switch_attr {
 	int id;
 	int ofs;
 	int max;
+	unsigned 	gpio;
+
+	/* if NULL, switch_dev.name will be printed */
+	const char *name_on;
+	const char *name_off;
+	/* if NULL, "0" or "1" will be printed */
+	const char *state_on;
+	const char *state_off;
 };
 
+extern int switch_dev_register(struct switch_dev *sdev);
+extern void switch_dev_unregister(struct switch_dev *sdev);
 int switch_generic_set_link(struct switch_dev *dev, int port,
 			    struct switch_port_link *link);
 
+static inline int switch_get_state(struct switch_dev *sdev)
+{
+	return sdev->state;
+}
+
+extern void switch_set_state(struct switch_dev *sdev, int state);
 #endif /* _LINUX_SWITCH_H */

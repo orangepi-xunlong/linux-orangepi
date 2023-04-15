@@ -14,6 +14,11 @@
 	interrupt-parent = <&gic>;
 
 	aliases {
+		ethernet0 = &gmac;
+		gpio0 = &gpio0;
+		gpio1 = &gpio1;
+		gpio2 = &gpio2;
+		gpio3 = &gpio3;
 		serial0 = &uart0;
 		serial1 = &uart1;
 		serial2 = &uart2;
@@ -157,6 +162,8 @@
 		clocks = <&cru SCLK_I2S1>, <&cru HCLK_I2S1_8CH>;
 		dmas = <&pdma 14>, <&pdma 15>;
 		dma-names = "tx", "rx";
+		resets = <&cru SRST_I2S1>;
+		reset-names = "reset-m";
 		pinctrl-names = "default";
 		pinctrl-0 = <&i2s1_bus>;
 		status = "disabled";
@@ -170,6 +177,8 @@
 		clocks = <&cru SCLK_I2S0>, <&cru HCLK_I2S0_8CH>;
 		dmas = <&pdma 11>, <&pdma 12>;
 		dma-names = "tx", "rx";
+		resets = <&cru SRST_I2S0>;
+		reset-names = "reset-m";
 		status = "disabled";
 	};
 
@@ -194,6 +203,8 @@
 		clocks = <&cru SCLK_I2S2>, <&cru HCLK_I2S2_2CH>;
 		dmas = <&pdma 0>, <&pdma 1>;
 		dma-names = "tx", "rx";
+		resets = <&cru SRST_I2S2>;
+		reset-names = "reset-m";
 		status = "disabled";
 	};
 
@@ -398,7 +409,7 @@
 		#pwm-cells = <3>;
 		clocks = <&cru PCLK_PWM>;
 		clock-names = "pwm";
-		pinctrl-names = "default";
+		pinctrl-names = "active";
 		pinctrl-0 = <&pwm0_pin>;
 		status = "disabled";
 	};
@@ -409,7 +420,7 @@
 		#pwm-cells = <3>;
 		clocks = <&cru PCLK_PWM>;
 		clock-names = "pwm";
-		pinctrl-names = "default";
+		pinctrl-names = "active";
 		pinctrl-0 = <&pwm1_pin>;
 		status = "disabled";
 	};
@@ -420,7 +431,7 @@
 		#pwm-cells = <3>;
 		clocks = <&cru PCLK_PWM>;
 		clock-names = "pwm";
-		pinctrl-names = "default";
+		pinctrl-names = "active";
 		pinctrl-0 = <&pwm2_pin>;
 		status = "disabled";
 	};
@@ -431,7 +442,7 @@
 		#pwm-cells = <2>;
 		clocks = <&cru PCLK_PWM>;
 		clock-names = "pwm";
-		pinctrl-names = "default";
+		pinctrl-names = "active";
 		pinctrl-0 = <&pwm3_pin>;
 		status = "disabled";
 	};
@@ -520,10 +531,9 @@
 		assigned-clock-rates = <32768>;
 		resets = <&cru SRST_TSADC>;
 		reset-names = "tsadc-apb";
-		pinctrl-names = "init", "default", "sleep";
+		pinctrl-names = "gpio", "otpout";
 		pinctrl-0 = <&otp_pin>;
 		pinctrl-1 = <&otp_out>;
-		pinctrl-2 = <&otp_pin>;
 		#thermal-sensor-cells = <1>;
 		rockchip,hw-tshut-temp = <95000>;
 		status = "disabled";
@@ -827,6 +837,7 @@
 			compatible = "rockchip,gpio-bank";
 			reg = <0x11110000 0x100>;
 			interrupts = <GIC_SPI 51 IRQ_TYPE_LEVEL_HIGH>;
+			clock-names = "bus";
 			clocks = <&cru PCLK_GPIO0>;
 
 			gpio-controller;
@@ -840,6 +851,7 @@
 			compatible = "rockchip,gpio-bank";
 			reg = <0x11120000 0x100>;
 			interrupts = <GIC_SPI 52 IRQ_TYPE_LEVEL_HIGH>;
+			clock-names = "bus";
 			clocks = <&cru PCLK_GPIO1>;
 
 			gpio-controller;
@@ -853,6 +865,7 @@
 			compatible = "rockchip,gpio-bank";
 			reg = <0x11130000 0x100>;
 			interrupts = <GIC_SPI 53 IRQ_TYPE_LEVEL_HIGH>;
+			clock-names = "bus";
 			clocks = <&cru PCLK_GPIO2>;
 
 			gpio-controller;
@@ -866,6 +879,7 @@
 			compatible = "rockchip,gpio-bank";
 			reg = <0x11140000 0x100>;
 			interrupts = <GIC_SPI 54 IRQ_TYPE_LEVEL_HIGH>;
+			clock-names = "bus";
 			clocks = <&cru PCLK_GPIO3>;
 
 			gpio-controller;
@@ -1081,11 +1095,19 @@
 			pwm0_pin: pwm0-pin {
 				rockchip,pins = <3 RK_PC5 1 &pcfg_pull_none>;
 			};
+
+			pwm0_pin_pull_down: pwm0-pin-pull-down {
+				rockchip,pins = <3 RK_PC5 1 &pcfg_pull_down>;
+			};
 		};
 
 		pwm1 {
 			pwm1_pin: pwm1-pin {
 				rockchip,pins = <0 RK_PD6 2 &pcfg_pull_none>;
+			};
+
+			pwm1_pin_pull_down: pwm1-pin-pull-down {
+				rockchip,pins = <0 RK_PD6 2 &pcfg_pull_down>;
 			};
 		};
 
@@ -1093,11 +1115,19 @@
 			pwm2_pin: pwm2-pin {
 				rockchip,pins = <1 RK_PB4 2 &pcfg_pull_none>;
 			};
+
+			pwm2_pin_pull_down: pwm2-pin-pull-down {
+				rockchip,pins = <1 RK_PB4 2 &pcfg_pull_down>;
+			};
 		};
 
 		pwm3 {
 			pwm3_pin: pwm3-pin {
 				rockchip,pins = <1 RK_PB3 2 &pcfg_pull_none>;
+			};
+
+			pwm3_pin_pull_down: pwm3-pin-pull-down {
+				rockchip,pins = <1 RK_PB3 2 &pcfg_pull_down>;
 			};
 		};
 

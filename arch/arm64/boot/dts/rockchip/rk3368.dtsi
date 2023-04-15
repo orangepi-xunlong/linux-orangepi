@@ -19,6 +19,10 @@
 
 	aliases {
 		ethernet0 = &gmac;
+		gpio0 = &gpio0;
+		gpio1 = &gpio1;
+		gpio2 = &gpio2;
+		gpio3 = &gpio3;
 		i2c0 = &i2c0;
 		i2c1 = &i2c1;
 		i2c2 = &i2c2;
@@ -562,7 +566,7 @@
 		compatible = "rockchip,rk3368-pwm", "rockchip,rk3288-pwm";
 		reg = <0x0 0xff680000 0x0 0x10>;
 		#pwm-cells = <3>;
-		pinctrl-names = "default";
+		pinctrl-names = "active";
 		pinctrl-0 = <&pwm0_pin>;
 		clocks = <&cru PCLK_PWM1>;
 		clock-names = "pwm";
@@ -573,7 +577,7 @@
 		compatible = "rockchip,rk3368-pwm", "rockchip,rk3288-pwm";
 		reg = <0x0 0xff680010 0x0 0x10>;
 		#pwm-cells = <3>;
-		pinctrl-names = "default";
+		pinctrl-names = "active";
 		pinctrl-0 = <&pwm1_pin>;
 		clocks = <&cru PCLK_PWM1>;
 		clock-names = "pwm";
@@ -593,7 +597,7 @@
 		compatible = "rockchip,rk3368-pwm", "rockchip,rk3288-pwm";
 		reg = <0x0 0xff680030 0x0 0x10>;
 		#pwm-cells = <3>;
-		pinctrl-names = "default";
+		pinctrl-names = "active";
 		pinctrl-0 = <&pwm3_pin>;
 		clocks = <&cru PCLK_PWM1>;
 		clock-names = "pwm";
@@ -1009,17 +1013,33 @@
 			pwm0_pin: pwm0-pin {
 				rockchip,pins = <3 RK_PB0 2 &pcfg_pull_none>;
 			};
+
+			pwm0_pin_pull_down: pwm0-pin-pull-down {
+				rockchip,pins = <3 RK_PB0 2 &pcfg_pull_down>;
+			};
+
+			vop_pwm_pin: vop-pwm {
+				rockchip,pins = <3 RK_PB0 3 &pcfg_pull_none>;
+			};
 		};
 
 		pwm1 {
 			pwm1_pin: pwm1-pin {
 				rockchip,pins = <0 RK_PB0 2 &pcfg_pull_none>;
 			};
+
+			pwm1_pin_pull_down: pwm1-pin-pull-down {
+				rockchip,pins = <0 RK_PB0 2 &pcfg_pull_down>;
+			};
 		};
 
 		pwm3 {
 			pwm3_pin: pwm3-pin {
-				rockchip,pins = <3 RK_PD5 3 &pcfg_pull_none>;
+				rockchip,pins = <3 RK_PD6 3 &pcfg_pull_none>;
+			};
+
+			pwm3_pin_pull_down: pwm3-pin-pull-down {
+				rockchip,pins = <3 RK_PD6 3 &pcfg_pull_down>;
 			};
 		};
 

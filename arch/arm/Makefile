@@ -152,6 +152,11 @@ textofs-$(CONFIG_ARCH_MSM8X60) := 0x00208000
 textofs-$(CONFIG_ARCH_MSM8960) := 0x00208000
 textofs-$(CONFIG_ARCH_MESON) := 0x00208000
 textofs-$(CONFIG_ARCH_AXXIA) := 0x00308000
+textofs-$(CONFIG_CPU_RK3308) := 0x00058000
+ifeq ($(CONFIG_ROCKCHIP_THUNDER_BOOT),y)
+textofs-$(CONFIG_CPU_RV1106) := 0x00208000
+textofs-$(CONFIG_CPU_RV1126) := 0x00608000
+endif
 
 # Machine directory name.  This list is sorted alphanumerically
 # by CONFIG_* macro name.
@@ -206,7 +211,9 @@ machine-$(CONFIG_ARCH_QCOM)		+= qcom
 machine-$(CONFIG_ARCH_RDA)		+= rda
 machine-$(CONFIG_ARCH_REALTEK)		+= realtek
 machine-$(CONFIG_ARCH_REALVIEW)		+= realview
+ifndef CONFIG_ARM_PSCI
 machine-$(CONFIG_ARCH_ROCKCHIP)		+= rockchip
+endif
 machine-$(CONFIG_ARCH_RPC)		+= rpc
 machine-$(CONFIG_PLAT_SAMSUNG)		+= s3c
 machine-$(CONFIG_ARCH_S5PV210)		+= s5pv210
@@ -313,6 +320,7 @@ archprepare:
 bzImage: zImage
 
 BOOT_TARGETS	= zImage Image xipImage bootpImage uImage
+BOOT_TARGETS	+= Image.gz Image.lz4
 INSTALL_TARGETS	= zinstall uinstall install
 
 PHONY += bzImage $(BOOT_TARGETS) $(INSTALL_TARGETS)
@@ -356,3 +364,16 @@ define archhelp
   echo  '                  install to $$(INSTALL_PATH) and run lilo'
   echo  '  vdso_install  - Install unstripped vdso.so to $$(INSTALL_MOD_PATH)/vdso'
 endef
+
+MAKE_MODULES ?= y
+
+%.img:
+ifeq ("$(CONFIG_MODULES)$(MAKE_MODULES)$(srctree)","yy$(objtree)")
+	$(Q)$(MAKE) $*.dtb zImage Image.gz modules
+else
+	$(Q)$(MAKE) $*.dtb zImage Image.gz
+endif
+	$(Q)$(srctree)/scripts/mkimg --dtb $*.dtb
+
+CLEAN_DIRS += out
+CLEAN_FILES += boot.img kernel.img resource.img zboot.img
