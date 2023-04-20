@@ -379,3 +379,8 @@
 &usbhost_dwc3_0 {
 	status = "okay";
 };
+
+&leds_gpio {
+	rockchip,pins =
+		<1 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
+};
