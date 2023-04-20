@@ -23,6 +23,7 @@
 #include <net/switchdev.h>
 #include <trace/events/bridge.h>
 #include "br_private.h"
+#include "br_private_offload.h"
 
 static const struct rhashtable_params br_fdb_rht_params = {
 	.head_offset = offsetof(struct net_bridge_fdb_entry, rhnode),
@@ -513,6 +514,8 @@ static struct net_bridge_fdb_entry *fdb_create(struct net_bridge *br,
 		fdb->key.vlan_id = vid;
 		fdb->flags = flags;
 		fdb->updated = fdb->used = jiffies;
+		INIT_HLIST_HEAD(&fdb->offload_in);
+		INIT_HLIST_HEAD(&fdb->offload_out);
 		if (rhashtable_lookup_insert_fast(&br->fdb_hash_tbl,
 						  &fdb->rhnode,
 						  br_fdb_rht_params)) {
@@ -602,6 +605,7 @@ void br_fdb_update(struct net_bridge *br, struct net_bridge_port *source,
 			/* fastpath: update of existing entry */
 			if (unlikely(source != fdb->dst &&
 				     !test_bit(BR_FDB_STICKY, &fdb->flags))) {
+				br_switchdev_fdb_notify(br, fdb, RTM_DELNEIGH);
 				fdb->dst = source;
 				fdb_modified = true;
 				/* Take over HW learned entry */
@@ -733,8 +737,10 @@ static void fdb_notify(struct net_bridge *br,
 	struct sk_buff *skb;
 	int err = -ENOBUFS;
 
+	br_offload_fdb_update(fdb);
+
 	if (swdev_notify)
-		br_switchdev_fdb_notify(fdb, type);
+		br_switchdev_fdb_notify(br, fdb, type);
 
 	skb = nlmsg_new(fdb_nlmsg_size(), GFP_ATOMIC);
 	if (skb == NULL)

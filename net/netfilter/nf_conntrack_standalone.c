@@ -9,6 +9,7 @@
 #include <linux/percpu.h>
 #include <linux/netdevice.h>
 #include <linux/security.h>
+#include <linux/inet.h>
 #include <net/net_namespace.h>
 #ifdef CONFIG_SYSCTL
 #include <linux/sysctl.h>
@@ -457,6 +458,56 @@ static int ct_cpu_seq_show(struct seq_file *seq, void *v)
 	return 0;
 }
 
+struct kill_request {
+	u16 family;
+	union nf_inet_addr addr;
+};
+
+static int kill_matching(struct nf_conn *i, void *data)
+{
+	struct kill_request *kr = data;
+	struct nf_conntrack_tuple *t1 = &i->tuplehash[IP_CT_DIR_ORIGINAL].tuple;
+	struct nf_conntrack_tuple *t2 = &i->tuplehash[IP_CT_DIR_REPLY].tuple;
+
+	if (!kr->family)
+		return 1;
+
+	if (t1->src.l3num != kr->family)
+		return 0;
+
+	return (nf_inet_addr_cmp(&kr->addr, &t1->src.u3) ||
+	        nf_inet_addr_cmp(&kr->addr, &t1->dst.u3) ||
+	        nf_inet_addr_cmp(&kr->addr, &t2->src.u3) ||
+	        nf_inet_addr_cmp(&kr->addr, &t2->dst.u3));
+}
+
+static int ct_file_write(struct file *file, char *buf, size_t count)
+{
+	struct seq_file *seq = file->private_data;
+	struct net *net = seq_file_net(seq);
+	struct kill_request kr = { };
+
+	if (count == 0)
+		return 0;
+
+	if (count >= INET6_ADDRSTRLEN)
+		count = INET6_ADDRSTRLEN - 1;
+
+	if (strnchr(buf, count, ':')) {
+		kr.family = AF_INET6;
+		if (!in6_pton(buf, count, (void *)&kr.addr, '\n', NULL))
+			return -EINVAL;
+	} else if (strnchr(buf, count, '.')) {
+		kr.family = AF_INET;
+		if (!in4_pton(buf, count, (void *)&kr.addr, '\n', NULL))
+			return -EINVAL;
+	}
+
+	nf_ct_iterate_cleanup_net(net, kill_matching, &kr, 0, 0);
+
+	return 0;
+}
+
 static const struct seq_operations ct_cpu_seq_ops = {
 	.start	= ct_cpu_seq_start,
 	.next	= ct_cpu_seq_next,
@@ -470,8 +521,9 @@ static int nf_conntrack_standalone_init_proc(struct net *net)
 	kuid_t root_uid;
 	kgid_t root_gid;
 
-	pde = proc_create_net("nf_conntrack", 0440, net->proc_net, &ct_seq_ops,
-			sizeof(struct ct_iter_state));
+	pde = proc_create_net_data_write("nf_conntrack", 0440, net->proc_net,
+					 &ct_seq_ops, &ct_file_write,
+					 sizeof(struct ct_iter_state), NULL);
 	if (!pde)
 		goto out_nf_conntrack;
 
@@ -567,11 +619,17 @@ enum nf_ct_sysctl_index {
 	NF_SYSCTL_CT_PROTO_TIMEOUT_TCP_CLOSE,
 	NF_SYSCTL_CT_PROTO_TIMEOUT_TCP_RETRANS,
 	NF_SYSCTL_CT_PROTO_TIMEOUT_TCP_UNACK,
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+	NF_SYSCTL_CT_PROTO_TIMEOUT_TCP_OFFLOAD,
+#endif
 	NF_SYSCTL_CT_PROTO_TCP_LOOSE,
 	NF_SYSCTL_CT_PROTO_TCP_LIBERAL,
 	NF_SYSCTL_CT_PROTO_TCP_MAX_RETRANS,
 	NF_SYSCTL_CT_PROTO_TIMEOUT_UDP,
 	NF_SYSCTL_CT_PROTO_TIMEOUT_UDP_STREAM,
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+	NF_SYSCTL_CT_PROTO_TIMEOUT_UDP_OFFLOAD,
+#endif
 	NF_SYSCTL_CT_PROTO_TIMEOUT_ICMP,
 	NF_SYSCTL_CT_PROTO_TIMEOUT_ICMPV6,
 #ifdef CONFIG_NF_CT_PROTO_SCTP
@@ -758,6 +816,14 @@ static struct ctl_table nf_ct_sysctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_jiffies,
 	},
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+	[NF_SYSCTL_CT_PROTO_TIMEOUT_TCP_OFFLOAD] = {
+		.procname	= "nf_flowtable_tcp_timeout",
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_jiffies,
+	},
+#endif
 	[NF_SYSCTL_CT_PROTO_TCP_LOOSE] = {
 		.procname	= "nf_conntrack_tcp_loose",
 		.maxlen		= sizeof(int),
@@ -792,6 +858,14 @@ static struct ctl_table nf_ct_sysctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_jiffies,
 	},
+#if IS_ENABLED(CONFIG_NFT_FLOW_OFFLOAD)
+	[NF_SYSCTL_CT_PROTO_TIMEOUT_UDP_OFFLOAD] = {
+		.procname	= "nf_flowtable_udp_timeout",
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_jiffies,
+	},
+#endif
 	[NF_SYSCTL_CT_PROTO_TIMEOUT_ICMP] = {
 		.procname	= "nf_conntrack_icmp_timeout",
 		.maxlen		= sizeof(unsigned int),
@@ -967,6 +1041,11 @@ static void nf_conntrack_standalone_init_tcp_sysctl(struct net *net,
 	XASSIGN(LIBERAL, &tn->tcp_be_liberal);
 	XASSIGN(MAX_RETRANS, &tn->tcp_max_retrans);
 #undef XASSIGN
+
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+	table[NF_SYSCTL_CT_PROTO_TIMEOUT_TCP_OFFLOAD].data = &tn->offload_timeout;
+#endif
+
 }
 
 static void nf_conntrack_standalone_init_sctp_sysctl(struct net *net,
@@ -1054,6 +1133,9 @@ static int nf_conntrack_standalone_init_sysctl(struct net *net)
 	table[NF_SYSCTL_CT_PROTO_TIMEOUT_ICMPV6].data = &nf_icmpv6_pernet(net)->timeout;
 	table[NF_SYSCTL_CT_PROTO_TIMEOUT_UDP].data = &un->timeouts[UDP_CT_UNREPLIED];
 	table[NF_SYSCTL_CT_PROTO_TIMEOUT_UDP_STREAM].data = &un->timeouts[UDP_CT_REPLIED];
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+	table[NF_SYSCTL_CT_PROTO_TIMEOUT_UDP_OFFLOAD].data = &un->offload_timeout;
+#endif
 
 	nf_conntrack_standalone_init_tcp_sysctl(net, table);
 	nf_conntrack_standalone_init_sctp_sysctl(net, table);

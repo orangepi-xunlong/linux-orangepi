@@ -76,6 +76,6 @@ extern int deregister_mtd_blktrans(struct mtd_blktrans_ops *tr);
 extern int add_mtd_blktrans_dev(struct mtd_blktrans_dev *dev);
 extern int del_mtd_blktrans_dev(struct mtd_blktrans_dev *dev);
 extern int mtd_blktrans_cease_background(struct mtd_blktrans_dev *dev);
-
+extern void register_mtd_blktrans_devs(void);
 
 #endif /* __MTD_TRANS_H__ */

@@ -18,6 +18,7 @@
 #include <linux/sched/signal.h>
 
 #include "br_private.h"
+#include "br_private_offload.h"
 
 #define to_bridge(cd)	((struct net_bridge *)netdev_priv(to_net_dev(cd)))
 
@@ -842,6 +843,38 @@ static ssize_t vlan_stats_per_port_store(struct device *d,
 static DEVICE_ATTR_RW(vlan_stats_per_port);
 #endif
 
+static ssize_t offload_cache_size_show(struct device *d,
+				       struct device_attribute *attr,
+				       char *buf)
+{
+	struct net_bridge *br = to_bridge(d);
+	return sprintf(buf, "%u\n", br->offload_cache_size);
+}
+
+static ssize_t offload_cache_size_store(struct device *d,
+					struct device_attribute *attr,
+					const char *buf, size_t len)
+{
+	return store_bridge_parm(d, buf, len, br_offload_set_cache_size);
+}
+static DEVICE_ATTR_RW(offload_cache_size);
+
+static ssize_t offload_cache_reserved_show(struct device *d,
+				       struct device_attribute *attr,
+				       char *buf)
+{
+	struct net_bridge *br = to_bridge(d);
+	return sprintf(buf, "%u\n", br->offload_cache_reserved);
+}
+
+static ssize_t offload_cache_reserved_store(struct device *d,
+					struct device_attribute *attr,
+					const char *buf, size_t len)
+{
+	return store_bridge_parm(d, buf, len, br_offload_set_cache_reserved);
+}
+static DEVICE_ATTR_RW(offload_cache_reserved);
+
 static struct attribute *bridge_attrs[] = {
 	&dev_attr_forward_delay.attr,
 	&dev_attr_hello_time.attr,
@@ -896,6 +929,8 @@ static struct attribute *bridge_attrs[] = {
 	&dev_attr_vlan_stats_enabled.attr,
 	&dev_attr_vlan_stats_per_port.attr,
 #endif
+	&dev_attr_offload_cache_size.attr,
+	&dev_attr_offload_cache_reserved.attr,
 	NULL
 };
 

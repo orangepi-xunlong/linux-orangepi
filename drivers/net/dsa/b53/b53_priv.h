@@ -123,7 +123,6 @@ struct b53_device {
 	/* used ports mask */
 	u16 enabled_ports;
 	unsigned int imp_port;
-	unsigned int cpu_port;
 
 	/* connect specific data */
 	u8 current_page;
@@ -186,11 +185,7 @@ static inline int is531x5(struct b53_device *dev)
 
 static inline int is63xx(struct b53_device *dev)
 {
-#ifdef CONFIG_BCM63XX
 	return dev->chip_id == BCM63XX_DEVICE_ID;
-#else
-	return 0;
-#endif
 }
 
 static inline int is5301x(struct b53_device *dev)

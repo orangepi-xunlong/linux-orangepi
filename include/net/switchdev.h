@@ -224,6 +224,7 @@ struct switchdev_notifier_fdb_info {
 	const unsigned char *addr;
 	u16 vid;
 	u8 added_by_user:1,
+	   local:1,
 	   offloaded:1;
 };
 

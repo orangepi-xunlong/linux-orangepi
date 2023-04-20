@@ -929,6 +929,18 @@ config LEDS_ACER_A500
 	  This option enables support for the Power Button LED of
 	  Acer Iconia Tab A500.
 
+source "drivers/leds/blink/Kconfig"
+
+config LEDS_UBNT_LEDBAR
+	tristate "LED support for Ubiquiti UniFi 6 LR"
+	depends on LEDS_CLASS && I2C && OF
+	help
+	  This option enables support for the Ubiquiti LEDBAR
+	  LED driver.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called leds-ubnt-ledbar.
+
 comment "LED Triggers"
 source "drivers/leds/trigger/Kconfig"
 

@@ -58,6 +58,7 @@ static struct addr_range percpu_range = {
 static struct sym_entry **table;
 static unsigned int table_size, table_cnt;
 static int all_symbols;
+static int uncompressed;
 static int absolute_percpu;
 static int base_relative;
 
@@ -486,6 +487,9 @@ static void write_src(void)
 
 	free(markers);
 
+	if (uncompressed)
+		return;
+
 	output_label("kallsyms_token_table");
 	off = 0;
 	for (i = 0; i < 256; i++) {
@@ -536,6 +540,9 @@ static unsigned char *find_token(unsigned char *str, int len,
 				 const unsigned char *token)
 {
 	int i;
+
+	if (uncompressed)
+		return NULL;
 
 	for (i = 0; i < len - 1; i++) {
 		if (str[i] == token[0] && str[i+1] == token[1])
@@ -608,6 +615,9 @@ static int find_best_token(void)
 static void optimize_result(void)
 {
 	int i, best;
+
+	if (uncompressed)
+		return;
 
 	/* using the '\0' symbol last allows compress_symbols to use standard
 	 * fast string functions */
@@ -773,6 +783,8 @@ int main(int argc, char **argv)
 				absolute_percpu = 1;
 			else if (strcmp(argv[i], "--base-relative") == 0)
 				base_relative = 1;
+			else if (strcmp(argv[i], "--uncompressed") == 0)
+				uncompressed = 1;
 			else
 				usage();
 		}

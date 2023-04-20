@@ -215,6 +215,8 @@ static int conf_sym(struct menu *menu)
 				break;
 			continue;
 		case 0:
+			if (!sym_has_value(sym) && !tty_stdio && getenv("FAIL_ON_UNCONFIGURED"))
+				exit(1);
 			newval = oldval;
 			break;
 		case '?':

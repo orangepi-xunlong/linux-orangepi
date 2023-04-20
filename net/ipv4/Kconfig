@@ -315,7 +315,7 @@ config NET_IPVTI
 	  on top.
 
 config NET_UDP_TUNNEL
-	tristate
+	tristate "IP: UDP tunneling support"
 	select NET_IP_TUNNEL
 	default n
 
@@ -414,6 +414,7 @@ config INET_TUNNEL
 
 config INET_DIAG
 	tristate "INET: socket monitoring interface"
+	select SOCK_DIAG
 	default y
 	help
 	  Support for INET (TCP, DCCP, etc) socket monitoring interface used by

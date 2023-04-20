@@ -22,6 +22,7 @@
 #include <linux/rculist.h>
 #include "br_private.h"
 #include "br_private_tunnel.h"
+#include "br_private_offload.h"
 
 static int
 br_netif_receive_skb(struct net *net, struct sock *sk, struct sk_buff *skb)
@@ -162,6 +163,7 @@ int br_handle_frame_finish(struct net *net, struct sock *sk, struct sk_buff *skb
 			dst->used = now;
 		br_forward(dst->dst, skb, local_rcv, false);
 	} else {
+		br_offload_skb_disable(skb);
 		if (!mcast_hit)
 			br_flood(br, skb, pkt_type, local_rcv, false);
 		else
@@ -195,6 +197,9 @@ static void __br_handle_local_finish(struct sk_buff *skb)
 /* note: already called with rcu_read_lock */
 static int br_handle_local_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
+	struct net_bridge_port *p = br_port_get_rcu(skb->dev);
+
+	if (p->state != BR_STATE_DISABLED)
 	__br_handle_local_finish(skb);
 
 	/* return 1 to signal the okfn() was called so it's ok to use the skb */
@@ -277,6 +282,9 @@ static rx_handler_result_t br_handle_frame(struct sk_buff **pskb)
 	memset(skb->cb, 0, sizeof(struct br_input_skb_cb));
 
 	p = br_port_get_rcu(skb->dev);
+	if (br_offload_input(p, skb))
+		return RX_HANDLER_CONSUMED;
+
 	if (p->flags & BR_VLAN_TUNNEL) {
 		if (br_handle_ingress_vlan_tunnel(skb, p,
 						  nbp_vlan_group_rcu(p)))
@@ -302,6 +310,8 @@ static rx_handler_result_t br_handle_frame(struct sk_buff **pskb)
 		fwd_mask |= p->group_fwd_mask;
 		switch (dest[5]) {
 		case 0x00:	/* Bridge Group Address */
+			if (p->flags & BR_BPDU_FILTER)
+				goto drop;
 			/* If STP is turned off,
 			   then must forward to keep loop detection */
 			if (p->br->stp_enabled == BR_NO_STP ||
@@ -348,6 +358,17 @@ static rx_handler_result_t br_handle_frame(struct sk_buff **pskb)
 
 forward:
 	switch (p->state) {
+	case BR_STATE_DISABLED:
+		if (ether_addr_equal(p->br->dev->dev_addr, dest))
+			skb->pkt_type = PACKET_HOST;
+
+		if (NF_HOOK(NFPROTO_BRIDGE, NF_BR_PRE_ROUTING,
+			dev_net(skb->dev), NULL, skb, skb->dev, NULL,
+			br_handle_local_finish) == 1) {
+			return RX_HANDLER_PASS;
+		}
+		break;
+
 	case BR_STATE_FORWARDING:
 	case BR_STATE_LEARNING:
 		if (ether_addr_equal(p->br->dev->dev_addr, dest))

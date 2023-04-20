@@ -10,6 +10,10 @@
 #include <linux/vmalloc.h>
 #include <linux/blktrace_api.h>
 #include <linux/raid/detect.h>
+#ifdef CONFIG_FIT_PARTITION
+#include <linux/root_dev.h>
+#endif
+
 #include "check.h"
 
 static int (*check_part[])(struct parsed_partitions *) = {
@@ -45,6 +49,9 @@ static int (*check_part[])(struct parsed_partitions *) = {
 #endif
 #ifdef CONFIG_EFI_PARTITION
 	efi_partition,		/* this must come before msdos */
+#endif
+#ifdef CONFIG_FIT_PARTITION
+	fit_partition,
 #endif
 #ifdef CONFIG_SGI_PARTITION
 	sgi_partition,
@@ -693,6 +700,14 @@ static bool blk_add_partition(struct gendisk *disk, struct block_device *bdev,
 	if (IS_BUILTIN(CONFIG_BLK_DEV_MD) &&
 	    (state->parts[p].flags & ADDPART_FLAG_RAID))
 		md_autodetect_dev(part_to_dev(part)->devt);
+
+#ifdef CONFIG_FIT_PARTITION
+	if ((state->parts[p].flags & ADDPART_FLAG_ROOTDEV) && ROOT_DEV == 0)
+		ROOT_DEV = part_to_dev(part)->devt;
+
+	if (state->parts[p].flags & ADDPART_FLAG_READONLY)
+		part->policy = true;
+#endif
 
 	return true;
 }

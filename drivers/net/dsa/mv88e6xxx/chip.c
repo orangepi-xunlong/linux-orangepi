@@ -1451,7 +1451,7 @@ static void mv88e6xxx_port_fast_age(struct dsa_switch *ds, int port)
 
 static int mv88e6xxx_vtu_setup(struct mv88e6xxx_chip *chip)
 {
-	if (!chip->info->max_vid)
+	if (!mv88e6xxx_max_vid(chip))
 		return 0;
 
 	return mv88e6xxx_g1_vtu_flush(chip);
@@ -1493,7 +1493,7 @@ int mv88e6xxx_fid_map(struct mv88e6xxx_chip *chip, unsigned long *fid_bitmap)
 	}
 
 	/* Set every FID bit used by the VLAN entries */
-	vlan.vid = chip->info->max_vid;
+	vlan.vid = mv88e6xxx_max_vid(chip);
 	vlan.valid = false;
 
 	do {
@@ -1505,7 +1505,7 @@ int mv88e6xxx_fid_map(struct mv88e6xxx_chip *chip, unsigned long *fid_bitmap)
 			break;
 
 		set_bit(vlan.fid, fid_bitmap);
-	} while (vlan.vid < chip->info->max_vid);
+	} while (vlan.vid < mv88e6xxx_max_vid(chip));
 
 	return 0;
 }
@@ -1596,7 +1596,7 @@ static int mv88e6xxx_port_vlan_filtering(struct dsa_switch *ds, int port,
 	int err;
 
 	if (switchdev_trans_ph_prepare(trans))
-		return chip->info->max_vid ? 0 : -EOPNOTSUPP;
+		return mv88e6xxx_max_vid(chip) ? 0 : -EOPNOTSUPP;
 
 	mv88e6xxx_reg_lock(chip);
 	err = mv88e6xxx_port_set_8021q_mode(chip, port, mode);
@@ -1612,7 +1612,7 @@ mv88e6xxx_port_vlan_prepare(struct dsa_switch *ds, int port,
 	struct mv88e6xxx_chip *chip = ds->priv;
 	int err;
 
-	if (!chip->info->max_vid)
+	if (!mv88e6xxx_max_vid(chip))
 		return -EOPNOTSUPP;
 
 	/* If the requested port doesn't belong to the same bridge as the VLAN
@@ -1986,7 +1986,7 @@ static void mv88e6xxx_port_vlan_add(struct dsa_switch *ds, int port,
 	u8 member;
 	u16 vid;
 
-	if (!chip->info->max_vid)
+	if (!mv88e6xxx_max_vid(chip))
 		return;
 
 	if (dsa_is_dsa_port(ds, port) || dsa_is_cpu_port(ds, port))
@@ -2064,7 +2064,7 @@ static int mv88e6xxx_port_vlan_del(struct dsa_switch *ds, int port,
 	u16 pvid, vid;
 	int err = 0;
 
-	if (!chip->info->max_vid)
+	if (!mv88e6xxx_max_vid(chip))
 		return -EOPNOTSUPP;
 
 	mv88e6xxx_reg_lock(chip);
@@ -2097,6 +2097,7 @@ static int mv88e6xxx_port_fdb_add(struct dsa_switch *ds, int port,
 	struct mv88e6xxx_chip *chip = ds->priv;
 	int err;
 
+	vid = vid ? : 1;
 	mv88e6xxx_reg_lock(chip);
 	err = mv88e6xxx_port_db_load_purge(chip, port, addr, vid,
 					   MV88E6XXX_G1_ATU_DATA_STATE_UC_STATIC);
@@ -2111,6 +2112,7 @@ static int mv88e6xxx_port_fdb_del(struct dsa_switch *ds, int port,
 	struct mv88e6xxx_chip *chip = ds->priv;
 	int err;
 
+	vid = vid ? : 1;
 	mv88e6xxx_reg_lock(chip);
 	err = mv88e6xxx_port_db_load_purge(chip, port, addr, vid, 0);
 	mv88e6xxx_reg_unlock(chip);
@@ -2170,7 +2172,7 @@ static int mv88e6xxx_port_db_dump(struct mv88e6xxx_chip *chip, int port,
 		return err;
 
 	/* Dump VLANs' Filtering Information Databases */
-	vlan.vid = chip->info->max_vid;
+	vlan.vid = mv88e6xxx_max_vid(chip);
 	vlan.valid = false;
 
 	do {
@@ -2185,7 +2187,7 @@ static int mv88e6xxx_port_db_dump(struct mv88e6xxx_chip *chip, int port,
 						 cb, data);
 		if (err)
 			return err;
-	} while (vlan.vid < chip->info->max_vid);
+	} while (vlan.vid < mv88e6xxx_max_vid(chip));
 
 	return err;
 }
@@ -2657,6 +2659,9 @@ static int mv88e6xxx_setup_port(struct mv88e6xxx_chip *chip, int port)
 	if (dsa_is_cpu_port(ds, port))
 		reg = 0;
 
+	/* Disable ATU member violation interrupt */
+	reg |= MV88E6XXX_PORT_ASSOC_VECTOR_IGNORE_WRONG;
+
 	err = mv88e6xxx_port_write(chip, port, MV88E6XXX_PORT_ASSOC_VECTOR,
 				   reg);
 	if (err)
@@ -2869,6 +2874,7 @@ static int mv88e6xxx_setup(struct dsa_switch *ds)
 
 	chip->ds = ds;
 	ds->slave_mii_bus = mv88e6xxx_default_mdio_bus(chip);
+	ds->configure_vlan_while_not_filtering = true;
 
 	mv88e6xxx_reg_lock(chip);
 
@@ -5436,6 +5442,7 @@ static int mv88e6xxx_register_switch(struct mv88e6xxx_chip *chip)
 	ds->ops = &mv88e6xxx_switch_ops;
 	ds->ageing_time_min = chip->info->age_time_coeff;
 	ds->ageing_time_max = chip->info->age_time_coeff * U8_MAX;
+	ds->assisted_learning_on_cpu_port = true;
 
 	dev_set_drvdata(dev, ds);
 

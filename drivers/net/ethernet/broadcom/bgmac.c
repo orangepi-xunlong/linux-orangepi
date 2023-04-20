@@ -12,6 +12,7 @@
 #include <linux/bcma/bcma.h>
 #include <linux/etherdevice.h>
 #include <linux/interrupt.h>
+#include <linux/platform_data/b53.h>
 #include <linux/bcm47xx_nvram.h>
 #include <linux/phy.h>
 #include <linux/phy_fixed.h>
@@ -1408,6 +1409,17 @@ static const struct ethtool_ops bgmac_ethtool_ops = {
 	.set_link_ksettings     = phy_ethtool_set_link_ksettings,
 };
 
+static struct b53_platform_data bgmac_b53_pdata = {
+};
+
+static struct platform_device bgmac_b53_dev = {
+	.name		= "b53-srab-switch",
+	.id		= -1,
+	.dev		= {
+		.platform_data = &bgmac_b53_pdata,
+	},
+};
+
 /**************************************************
  * MII
  **************************************************/
@@ -1542,6 +1554,14 @@ int bgmac_enet_probe(struct bgmac *bgmac)
 	/* Omit FCS from max MTU size */
 	net_dev->max_mtu = BGMAC_RX_MAX_FRAME_SIZE - ETH_FCS_LEN;
 
+	if ((bgmac->feature_flags & BGMAC_FEAT_SRAB) && !bgmac_b53_pdata.regs) {
+		bgmac_b53_pdata.regs = ioremap(0x18007000, 0x1000);
+
+		err = platform_device_register(&bgmac_b53_dev);
+		if (!err)
+			bgmac->b53_device = &bgmac_b53_dev;
+	}
+
 	err = register_netdev(bgmac->net_dev);
 	if (err) {
 		dev_err(bgmac->dev, "Cannot register net device\n");
@@ -1564,6 +1584,10 @@ EXPORT_SYMBOL_GPL(bgmac_enet_probe);
 
 void bgmac_enet_remove(struct bgmac *bgmac)
 {
+	if (bgmac->b53_device)
+		platform_device_unregister(&bgmac_b53_dev);
+	bgmac->b53_device = NULL;
+
 	unregister_netdev(bgmac->net_dev);
 	phy_disconnect(bgmac->net_dev->phydev);
 	netif_napi_del(&bgmac->napi);

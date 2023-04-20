@@ -114,6 +114,7 @@
 #include <linux/memcontrol.h>
 #include <linux/prefetch.h>
 #include <linux/compat.h>
+#include <linux/cookie.h>
 
 #include <linux/uaccess.h>
 
@@ -141,6 +142,7 @@
 
 static DEFINE_MUTEX(proto_list_mutex);
 static LIST_HEAD(proto_list);
+DEFINE_COOKIE(sock_cookie);
 
 static void sock_inuse_add(struct net *net, int val);
 
@@ -525,6 +527,18 @@ discard_and_relse:
 	goto out;
 }
 EXPORT_SYMBOL(__sk_receive_skb);
+
+u64 __sock_gen_cookie(struct sock *sk)
+{
+	while (1) {
+		u64 res = atomic64_read(&sk->sk_cookie);
+
+		if (res)
+			return res;
+		res = gen_cookie_next(&sock_cookie);
+		atomic64_cmpxchg(&sk->sk_cookie, 0, res);
+	}
+}
 
 struct dst_entry *__sk_dst_check(struct sock *sk, u32 cookie)
 {
@@ -1834,9 +1848,11 @@ static void __sk_free(struct sock *sk)
 	if (likely(sk->sk_net_refcnt))
 		sock_inuse_add(sock_net(sk), -1);
 
+#ifdef CONFIG_SOCK_DIAG
 	if (unlikely(sk->sk_net_refcnt && sock_diag_has_destroy_listeners(sk)))
 		sock_diag_broadcast_destroy(sk);
 	else
+#endif
 		sk_destruct(sk);
 }
 
@@ -3683,6 +3699,8 @@ static __net_initdata struct pernet_operations proto_net_ops = {
 
 static int __init proto_init(void)
 {
+	if (IS_ENABLED(CONFIG_PROC_STRIPPED))
+		return 0;
 	return register_pernet_subsys(&proto_net_ops);
 }
 

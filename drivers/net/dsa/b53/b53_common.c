@@ -349,7 +349,7 @@ static void b53_set_forwarding(struct b53_device *dev, int enable)
 	b53_write8(dev, B53_CTRL_PAGE, B53_IP_MULTICAST_CTRL, mgmt);
 }
 
-static void b53_enable_vlan(struct b53_device *dev, bool enable,
+static void b53_enable_vlan(struct b53_device *dev, int port, bool enable,
 			    bool enable_filtering)
 {
 	u8 mgmt, vc0, vc1, vc4 = 0, vc5;
@@ -431,6 +431,9 @@ static void b53_enable_vlan(struct b53_device *dev, bool enable,
 	b53_write8(dev, B53_CTRL_PAGE, B53_SWITCH_MODE, mgmt);
 
 	dev->vlan_enabled = enable;
+
+	dev_dbg(dev->dev, "Port %d VLAN enabled: %d, filtering: %d\n",
+		port, enable, enable_filtering);
 }
 
 static int b53_set_jumbo(struct b53_device *dev, bool enable, bool allow_10_100)
@@ -690,6 +693,13 @@ static u16 b53_default_pvid(struct b53_device *dev)
 		return 0;
 }
 
+static bool b53_vlan_port_needs_forced_tagged(struct dsa_switch *ds, int port)
+{
+	struct b53_device *dev = ds->priv;
+
+	return dev->tag_protocol == DSA_TAG_PROTO_NONE && dsa_is_cpu_port(ds, port);
+}
+
 int b53_configure_vlan(struct dsa_switch *ds)
 {
 	struct b53_device *dev = ds->priv;
@@ -708,11 +718,22 @@ int b53_configure_vlan(struct dsa_switch *ds)
 		b53_do_vlan_op(dev, VTA_CMD_CLEAR);
 	}
 
-	b53_enable_vlan(dev, dev->vlan_enabled, ds->vlan_filtering);
+	b53_enable_vlan(dev, -1, dev->vlan_enabled, ds->vlan_filtering);
 
-	b53_for_each_port(dev, i)
+	/* Create an untagged VLAN entry for the default PVID in case
+	 * CONFIG_VLAN_8021Q is disabled and there are no calls to
+	 * dsa_slave_vlan_rx_add_vid() to create the default VLAN
+	 * entry. Do this only when the tagging protocol is not
+	 * DSA_TAG_PROTO_NONE
+	 */
+	b53_for_each_port(dev, i) {
+		v = &dev->vlans[def_vid];
+		v->members |= BIT(i);
+		if (!b53_vlan_port_needs_forced_tagged(ds, i))
+			v->untag = v->members;
 		b53_write16(dev, B53_VLAN_PAGE,
 			    B53_VLAN_PORT_DEF_TAG(i), def_vid);
+	}
 
 	/* Upon initial call we have not set-up any VLANs, but upon
 	 * system resume, we need to restore all VLAN entries.
@@ -1046,6 +1067,11 @@ static int b53_setup(struct dsa_switch *ds)
 	unsigned int port;
 	int ret;
 
+	/* Request bridge PVID untagged when DSA_TAG_PROTO_NONE is set
+	 * which forces the CPU port to be tagged in all VLANs.
+	 */
+	ds->untag_bridge_pvid = dev->tag_protocol == DSA_TAG_PROTO_NONE;
+
 	ret = b53_reset_switch(dev);
 	if (ret) {
 		dev_err(ds->dev, "failed to reset switch\n");
@@ -1161,7 +1187,7 @@ static void b53_adjust_link(struct dsa_switch *ds, int port,
 		return;
 
 	/* Enable flow control on BCM5301x's CPU port */
-	if (is5301x(dev) && port == dev->cpu_port)
+	if (is5301x(dev) && dsa_is_cpu_port(ds, port))
 		tx_pause = rx_pause = true;
 
 	if (phydev->pause) {
@@ -1229,12 +1255,6 @@ static void b53_adjust_link(struct dsa_switch *ds, int port,
 					"Failed to enable reverse MII mode\n");
 				return;
 			}
-		}
-	} else if (is5301x(dev)) {
-		if (port != dev->cpu_port) {
-			b53_force_port_config(dev, dev->cpu_port, 2000,
-					      DUPLEX_FULL, true, true);
-			b53_force_link(dev, dev->cpu_port, 1);
 		}
 	}
 
@@ -1390,7 +1410,7 @@ int b53_vlan_filtering(struct dsa_switch *ds, int port, bool vlan_filtering,
 	if (switchdev_trans_ph_prepare(trans))
 		return 0;
 
-	b53_enable_vlan(dev, dev->vlan_enabled, vlan_filtering);
+	b53_enable_vlan(dev, port, dev->vlan_enabled, vlan_filtering);
 
 	return 0;
 }
@@ -1415,12 +1435,12 @@ int b53_vlan_prepare(struct dsa_switch *ds, int port,
 	if (vlan->vid_end >= dev->num_vlans)
 		return -ERANGE;
 
-	b53_enable_vlan(dev, true, ds->vlan_filtering);
+	b53_enable_vlan(dev, port, true, ds->vlan_filtering);
 
 	return 0;
 }
 EXPORT_SYMBOL(b53_vlan_prepare);
-
+ 
 void b53_vlan_add(struct dsa_switch *ds, int port,
 		  const struct switchdev_obj_port_vlan *vlan)
 {
@@ -1439,7 +1459,7 @@ void b53_vlan_add(struct dsa_switch *ds, int port,
 			untagged = true;
 
 		vl->members |= BIT(port);
-		if (untagged && !dsa_is_cpu_port(ds, port))
+		if (untagged && !b53_vlan_port_needs_forced_tagged(ds, port))
 			vl->untag |= BIT(port);
 		else
 			vl->untag &= ~BIT(port);
@@ -1477,7 +1497,7 @@ int b53_vlan_del(struct dsa_switch *ds, int port,
 		if (pvid == vid)
 			pvid = b53_default_pvid(dev);
 
-		if (untagged && !dsa_is_cpu_port(ds, port))
+		if (untagged && !b53_vlan_port_needs_forced_tagged(ds, port))
 			vl->untag &= ~(BIT(port));
 
 		b53_set_vlan_entry(dev, vid, vl);
@@ -2021,12 +2041,14 @@ enum dsa_tag_protocol b53_get_tag_protocol(struct dsa_switch *ds, int port,
 {
 	struct b53_device *dev = ds->priv;
 
-	/* Older models (5325, 5365) support a different tag format that we do
-	 * not support in net/dsa/tag_brcm.c yet.
-	 */
-	if (is5325(dev) || is5365(dev) ||
-	    !b53_can_enable_brcm_tags(ds, port, mprot)) {
+	if (!b53_can_enable_brcm_tags(ds, port, mprot)) {
 		dev->tag_protocol = DSA_TAG_PROTO_NONE;
+		goto out;
+	}
+
+	/* Older models require a different 6 byte tag */
+	if (is5325(dev) || is5365(dev) || is63xx(dev)) {
+		dev->tag_protocol = DSA_TAG_PROTO_BRCM_LEGACY;
 		goto out;
 	}
 
@@ -2260,33 +2282,30 @@ static const struct b53_chip_data b53_switch_chips[] = {
 		.chip_id = BCM5325_DEVICE_ID,
 		.dev_name = "BCM5325",
 		.vlans = 16,
-		.enabled_ports = 0x1f,
+		.enabled_ports = 0x3f,
 		.arl_bins = 2,
 		.arl_buckets = 1024,
 		.imp_port = 5,
-		.cpu_port = B53_CPU_PORT_25,
 		.duplex_reg = B53_DUPLEX_STAT_FE,
 	},
 	{
 		.chip_id = BCM5365_DEVICE_ID,
 		.dev_name = "BCM5365",
 		.vlans = 256,
-		.enabled_ports = 0x1f,
+		.enabled_ports = 0x3f,
 		.arl_bins = 2,
 		.arl_buckets = 1024,
 		.imp_port = 5,
-		.cpu_port = B53_CPU_PORT_25,
 		.duplex_reg = B53_DUPLEX_STAT_FE,
 	},
 	{
 		.chip_id = BCM5389_DEVICE_ID,
 		.dev_name = "BCM5389",
 		.vlans = 4096,
-		.enabled_ports = 0x1f,
+		.enabled_ports = 0x11f,
 		.arl_bins = 4,
 		.arl_buckets = 1024,
 		.imp_port = 8,
-		.cpu_port = B53_CPU_PORT,
 		.vta_regs = B53_VTA_REGS,
 		.duplex_reg = B53_DUPLEX_STAT_GE,
 		.jumbo_pm_reg = B53_JUMBO_PORT_MASK,
@@ -2296,11 +2315,10 @@ static const struct b53_chip_data b53_switch_chips[] = {
 		.chip_id = BCM5395_DEVICE_ID,
 		.dev_name = "BCM5395",
 		.vlans = 4096,
-		.enabled_ports = 0x1f,
+		.enabled_ports = 0x11f,
 		.arl_bins = 4,
 		.arl_buckets = 1024,
 		.imp_port = 8,
-		.cpu_port = B53_CPU_PORT,
 		.vta_regs = B53_VTA_REGS,
 		.duplex_reg = B53_DUPLEX_STAT_GE,
 		.jumbo_pm_reg = B53_JUMBO_PORT_MASK,
@@ -2310,11 +2328,10 @@ static const struct b53_chip_data b53_switch_chips[] = {
 		.chip_id = BCM5397_DEVICE_ID,
 		.dev_name = "BCM5397",
 		.vlans = 4096,
-		.enabled_ports = 0x1f,
+		.enabled_ports = 0x11f,
 		.arl_bins = 4,
 		.arl_buckets = 1024,
 		.imp_port = 8,
-		.cpu_port = B53_CPU_PORT,
 		.vta_regs = B53_VTA_REGS_9798,
 		.duplex_reg = B53_DUPLEX_STAT_GE,
 		.jumbo_pm_reg = B53_JUMBO_PORT_MASK,
@@ -2324,11 +2341,10 @@ static const struct b53_chip_data b53_switch_chips[] = {
 		.chip_id = BCM5398_DEVICE_ID,
 		.dev_name = "BCM5398",
 		.vlans = 4096,
-		.enabled_ports = 0x7f,
+		.enabled_ports = 0x17f,
 		.arl_bins = 4,
 		.arl_buckets = 1024,
 		.imp_port = 8,
-		.cpu_port = B53_CPU_PORT,
 		.vta_regs = B53_VTA_REGS_9798,
 		.duplex_reg = B53_DUPLEX_STAT_GE,
 		.jumbo_pm_reg = B53_JUMBO_PORT_MASK,
@@ -2338,12 +2354,11 @@ static const struct b53_chip_data b53_switch_chips[] = {
 		.chip_id = BCM53115_DEVICE_ID,
 		.dev_name = "BCM53115",
 		.vlans = 4096,
-		.enabled_ports = 0x1f,
+		.enabled_ports = 0x11f,
 		.arl_bins = 4,
 		.arl_buckets = 1024,
 		.vta_regs = B53_VTA_REGS,
 		.imp_port = 8,
-		.cpu_port = B53_CPU_PORT,
 		.duplex_reg = B53_DUPLEX_STAT_GE,
 		.jumbo_pm_reg = B53_JUMBO_PORT_MASK,
 		.jumbo_size_reg = B53_JUMBO_MAX_SIZE,
@@ -2352,11 +2367,10 @@ static const struct b53_chip_data b53_switch_chips[] = {
 		.chip_id = BCM53125_DEVICE_ID,
 		.dev_name = "BCM53125",
 		.vlans = 4096,
-		.enabled_ports = 0xff,
+		.enabled_ports = 0x1ff,
 		.arl_bins = 4,
 		.arl_buckets = 1024,
 		.imp_port = 8,
-		.cpu_port = B53_CPU_PORT,
 		.vta_regs = B53_VTA_REGS,
 		.duplex_reg = B53_DUPLEX_STAT_GE,
 		.jumbo_pm_reg = B53_JUMBO_PORT_MASK,
@@ -2370,7 +2384,6 @@ static const struct b53_chip_data b53_switch_chips[] = {
 		.arl_bins = 4,
 		.arl_buckets = 1024,
 		.imp_port = 8,
-		.cpu_port = B53_CPU_PORT,
 		.vta_regs = B53_VTA_REGS,
 		.duplex_reg = B53_DUPLEX_STAT_GE,
 		.jumbo_pm_reg = B53_JUMBO_PORT_MASK,
@@ -2384,7 +2397,6 @@ static const struct b53_chip_data b53_switch_chips[] = {
 		.arl_bins = 4,
 		.arl_buckets = 1024,
 		.imp_port = 8,
-		.cpu_port = B53_CPU_PORT,
 		.vta_regs = B53_VTA_REGS_63XX,
 		.duplex_reg = B53_DUPLEX_STAT_63XX,
 		.jumbo_pm_reg = B53_JUMBO_PORT_MASK_63XX,
@@ -2394,11 +2406,10 @@ static const struct b53_chip_data b53_switch_chips[] = {
 		.chip_id = BCM53010_DEVICE_ID,
 		.dev_name = "BCM53010",
 		.vlans = 4096,
-		.enabled_ports = 0x1f,
+		.enabled_ports = 0x1bf,
 		.arl_bins = 4,
 		.arl_buckets = 1024,
 		.imp_port = 8,
-		.cpu_port = B53_CPU_PORT_25, /* TODO: auto detect */
 		.vta_regs = B53_VTA_REGS,
 		.duplex_reg = B53_DUPLEX_STAT_GE,
 		.jumbo_pm_reg = B53_JUMBO_PORT_MASK,
@@ -2412,7 +2423,6 @@ static const struct b53_chip_data b53_switch_chips[] = {
 		.arl_bins = 4,
 		.arl_buckets = 1024,
 		.imp_port = 8,
-		.cpu_port = B53_CPU_PORT_25, /* TODO: auto detect */
 		.vta_regs = B53_VTA_REGS,
 		.duplex_reg = B53_DUPLEX_STAT_GE,
 		.jumbo_pm_reg = B53_JUMBO_PORT_MASK,
@@ -2426,7 +2436,6 @@ static const struct b53_chip_data b53_switch_chips[] = {
 		.arl_bins = 4,
 		.arl_buckets = 1024,
 		.imp_port = 8,
-		.cpu_port = B53_CPU_PORT_25, /* TODO: auto detect */
 		.vta_regs = B53_VTA_REGS,
 		.duplex_reg = B53_DUPLEX_STAT_GE,
 		.jumbo_pm_reg = B53_JUMBO_PORT_MASK,
@@ -2436,11 +2445,10 @@ static const struct b53_chip_data b53_switch_chips[] = {
 		.chip_id = BCM53018_DEVICE_ID,
 		.dev_name = "BCM53018",
 		.vlans = 4096,
-		.enabled_ports = 0x1f,
+		.enabled_ports = 0x1bf,
 		.arl_bins = 4,
 		.arl_buckets = 1024,
 		.imp_port = 8,
-		.cpu_port = B53_CPU_PORT_25, /* TODO: auto detect */
 		.vta_regs = B53_VTA_REGS,
 		.duplex_reg = B53_DUPLEX_STAT_GE,
 		.jumbo_pm_reg = B53_JUMBO_PORT_MASK,
@@ -2450,11 +2458,10 @@ static const struct b53_chip_data b53_switch_chips[] = {
 		.chip_id = BCM53019_DEVICE_ID,
 		.dev_name = "BCM53019",
 		.vlans = 4096,
-		.enabled_ports = 0x1f,
+		.enabled_ports = 0x1bf,
 		.arl_bins = 4,
 		.arl_buckets = 1024,
 		.imp_port = 8,
-		.cpu_port = B53_CPU_PORT_25, /* TODO: auto detect */
 		.vta_regs = B53_VTA_REGS,
 		.duplex_reg = B53_DUPLEX_STAT_GE,
 		.jumbo_pm_reg = B53_JUMBO_PORT_MASK,
@@ -2468,7 +2475,6 @@ static const struct b53_chip_data b53_switch_chips[] = {
 		.arl_bins = 4,
 		.arl_buckets = 1024,
 		.imp_port = 8,
-		.cpu_port = B53_CPU_PORT,
 		.vta_regs = B53_VTA_REGS,
 		.duplex_reg = B53_DUPLEX_STAT_GE,
 		.jumbo_pm_reg = B53_JUMBO_PORT_MASK,
@@ -2482,7 +2488,6 @@ static const struct b53_chip_data b53_switch_chips[] = {
 		.arl_bins = 4,
 		.arl_buckets = 1024,
 		.imp_port = 8,
-		.cpu_port = B53_CPU_PORT,
 		.vta_regs = B53_VTA_REGS,
 		.duplex_reg = B53_DUPLEX_STAT_GE,
 		.jumbo_pm_reg = B53_JUMBO_PORT_MASK,
@@ -2496,7 +2501,6 @@ static const struct b53_chip_data b53_switch_chips[] = {
 		.arl_bins = 4,
 		.arl_buckets = 1024,
 		.imp_port = 8,
-		.cpu_port = B53_CPU_PORT,
 		.vta_regs = B53_VTA_REGS,
 		.duplex_reg = B53_DUPLEX_STAT_GE,
 		.jumbo_pm_reg = B53_JUMBO_PORT_MASK,
@@ -2510,7 +2514,6 @@ static const struct b53_chip_data b53_switch_chips[] = {
 		.arl_bins = 4,
 		.arl_buckets = 256,
 		.imp_port = 8,
-		.cpu_port = B53_CPU_PORT,
 		.vta_regs = B53_VTA_REGS,
 		.duplex_reg = B53_DUPLEX_STAT_GE,
 		.jumbo_pm_reg = B53_JUMBO_PORT_MASK,
@@ -2536,7 +2539,6 @@ static int b53_switch_init(struct b53_device *dev)
 			dev->vta_regs[2] = chip->vta_regs[2];
 			dev->jumbo_pm_reg = chip->jumbo_pm_reg;
 			dev->imp_port = chip->imp_port;
-			dev->cpu_port = chip->cpu_port;
 			dev->num_vlans = chip->vlans;
 			dev->num_arl_bins = chip->arl_bins;
 			dev->num_arl_buckets = chip->arl_buckets;
@@ -2568,16 +2570,8 @@ static int b53_switch_init(struct b53_device *dev)
 			break;
 #endif
 		}
-	} else if (dev->chip_id == BCM53115_DEVICE_ID) {
-		u64 strap_value;
-
-		b53_read48(dev, B53_STAT_PAGE, B53_STRAP_VALUE, &strap_value);
-		/* use second IMP port if GMII is enabled */
-		if (strap_value & SV_GMII_CTRL_115)
-			dev->cpu_port = 5;
 	}
 
-	dev->enabled_ports |= BIT(dev->cpu_port);
 	dev->num_ports = fls(dev->enabled_ports);
 
 	dev->ds->num_ports = min_t(unsigned int, dev->num_ports, DSA_MAX_PORTS);
@@ -2639,7 +2633,6 @@ struct b53_device *b53_switch_alloc(struct device *base,
 	dev->ops = ops;
 	ds->ops = &b53_switch_ops;
 	ds->configure_vlan_while_not_filtering = true;
-	ds->untag_bridge_pvid = true;
 	dev->vlan_enabled = ds->configure_vlan_while_not_filtering;
 	/* Let DSA handle the case were multiple bridges span the same switch
 	 * device and different VLAN awareness settings are requested, which

@@ -28,6 +28,7 @@ config UNIX_SCM
 config UNIX_DIAG
 	tristate "UNIX: socket monitoring interface"
 	depends on UNIX
+	select SOCK_DIAG
 	default n
 	help
 	  Support for UNIX socket monitoring interface used by the ss tool.

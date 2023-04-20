@@ -1075,6 +1075,8 @@ static u8 spi_nor_convert_3to4_erase(u8 opcode)
 
 static bool spi_nor_has_uniform_erase(const struct spi_nor *nor)
 {
+	if (IS_ENABLED(CONFIG_MTD_SPI_NOR_USE_VARIABLE_ERASE))
+		return false;
 	return !!nor->params->erase_map.uniform_erase_type;
 }
 
@@ -2026,6 +2028,7 @@ static const struct spi_nor_manufacturer *manufacturers[] = {
 	&spi_nor_winbond,
 	&spi_nor_xilinx,
 	&spi_nor_xmc,
+	&spi_nor_xtx,
 };
 
 static const struct flash_info *
@@ -2560,6 +2563,7 @@ static int spi_nor_select_erase(struct spi_nor *nor)
 {
 	struct spi_nor_erase_map *map = &nor->params->erase_map;
 	const struct spi_nor_erase_type *erase = NULL;
+	const struct spi_nor_erase_type *erase_minor = NULL;
 	struct mtd_info *mtd = &nor->mtd;
 	u32 wanted_size = nor->info->sector_size;
 	int i;
@@ -2592,8 +2596,9 @@ static int spi_nor_select_erase(struct spi_nor *nor)
 	 */
 	for (i = SNOR_ERASE_TYPE_MAX - 1; i >= 0; i--) {
 		if (map->erase_type[i].size) {
-			erase = &map->erase_type[i];
-			break;
+			if (!erase)
+				erase = &map->erase_type[i];
+			erase_minor = &map->erase_type[i];
 		}
 	}
 
@@ -2601,6 +2606,9 @@ static int spi_nor_select_erase(struct spi_nor *nor)
 		return -EINVAL;
 
 	mtd->erasesize = erase->size;
+	if (IS_ENABLED(CONFIG_MTD_SPI_NOR_USE_VARIABLE_ERASE) &&
+			erase_minor && erase_minor->size < erase->size)
+		mtd->erasesize_minor = erase_minor->size;
 	return 0;
 }
 
@@ -2786,6 +2794,21 @@ static void spi_nor_info_init_params(struct spi_nor *nor)
 	 */
 	erase_mask = 0;
 	i = 0;
+#ifdef CONFIG_MTD_SPI_NOR_USE_4K_SECTORS
+	if ((info->flags & SECT_4K_PMC) && (params->size <=
+		   CONFIG_MTD_SPI_NOR_USE_4K_SECTORS_LIMIT * 1024)) {
+		erase_mask |= BIT(i);
+		spi_nor_set_erase_type(&map->erase_type[i], 4096u,
+				       SPINOR_OP_BE_4K_PMC);
+		i++;
+	} else if ((info->flags & SECT_4K) && (params->size <=
+	    CONFIG_MTD_SPI_NOR_USE_4K_SECTORS_LIMIT * 1024)) {
+		erase_mask |= BIT(i);
+		spi_nor_set_erase_type(&map->erase_type[i], 4096u,
+				       SPINOR_OP_BE_4K);
+		i++;
+	}
+#else
 	if (info->flags & SECT_4K_PMC) {
 		erase_mask |= BIT(i);
 		spi_nor_set_erase_type(&map->erase_type[i], 4096u,
@@ -2797,6 +2820,7 @@ static void spi_nor_info_init_params(struct spi_nor *nor)
 				       SPINOR_OP_BE_4K);
 		i++;
 	}
+#endif
 	erase_mask |= BIT(i);
 	spi_nor_set_erase_type(&map->erase_type[i], info->sector_size,
 			       SPINOR_OP_SE);

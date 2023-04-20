@@ -16,6 +16,7 @@
 #include <linux/if_vlan.h>
 #include <linux/netfilter_bridge.h>
 #include "br_private.h"
+#include "br_private_offload.h"
 
 /* Don't forward packets to originating port or forwarding disabled */
 static inline int should_deliver(const struct net_bridge_port *p,
@@ -32,6 +33,8 @@ static inline int should_deliver(const struct net_bridge_port *p,
 
 int br_dev_queue_push_xmit(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
+	br_offload_output(skb);
+
 	skb_push(skb, ETH_HLEN);
 	if (!is_skb_forwardable(skb->dev, skb))
 		goto drop;
@@ -191,6 +194,7 @@ out:
 void br_flood(struct net_bridge *br, struct sk_buff *skb,
 	      enum br_pkt_type pkt_type, bool local_rcv, bool local_orig)
 {
+	const unsigned char *dest = eth_hdr(skb)->h_dest;
 	struct net_bridge_port *prev = NULL;
 	struct net_bridge_port *p;
 
@@ -205,6 +209,10 @@ void br_flood(struct net_bridge *br, struct sk_buff *skb,
 			break;
 		case BR_PKT_MULTICAST:
 			if (!(p->flags & BR_MCAST_FLOOD) && skb->dev != br->dev)
+				continue;
+			if ((p->flags & BR_BPDU_FILTER) &&
+			    unlikely(is_link_local_ether_addr(dest) &&
+				     dest[5] == 0))
 				continue;
 			break;
 		case BR_PKT_BROADCAST:

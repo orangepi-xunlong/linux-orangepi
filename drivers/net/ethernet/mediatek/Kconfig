@@ -7,9 +7,14 @@ config NET_VENDOR_MEDIATEK
 
 if NET_VENDOR_MEDIATEK
 
+config NET_MEDIATEK_SOC_WED
+	depends on ARCH_MEDIATEK || COMPILE_TEST
+	def_bool NET_MEDIATEK_SOC != n
+
 config NET_MEDIATEK_SOC
 	tristate "MediaTek SoC Gigabit Ethernet support"
 	select PHYLINK
+	select DIMLIB
 	help
 	  This driver supports the gigabit ethernet MACs in the
 	  MediaTek SoC family.

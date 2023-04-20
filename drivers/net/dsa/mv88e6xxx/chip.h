@@ -246,6 +246,7 @@ enum mv88e6xxx_region_id {
 	MV88E6XXX_REGION_GLOBAL1 = 0,
 	MV88E6XXX_REGION_GLOBAL2,
 	MV88E6XXX_REGION_ATU,
+	MV88E6XXX_REGION_VTU,
 
 	_MV88E6XXX_REGION_MAX,
 };
@@ -671,6 +672,11 @@ static inline unsigned int mv88e6xxx_num_macs(struct  mv88e6xxx_chip *chip)
 static inline unsigned int mv88e6xxx_num_ports(struct mv88e6xxx_chip *chip)
 {
 	return chip->info->num_ports;
+}
+
+static inline unsigned int mv88e6xxx_max_vid(struct mv88e6xxx_chip *chip)
+{
+	return chip->info->max_vid;
 }
 
 static inline u16 mv88e6xxx_port_mask(struct mv88e6xxx_chip *chip)

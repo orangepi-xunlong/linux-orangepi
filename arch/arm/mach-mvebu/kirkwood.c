@@ -14,6 +14,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/mbus.h>
+#include <linux/if_ether.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_net.h>
@@ -84,6 +85,7 @@ static void __init kirkwood_dt_eth_fixup(void)
 		struct device_node *pnp = of_get_parent(np);
 		struct clk *clk;
 		struct property *pmac;
+		u8 tmpmac[ETH_ALEN];
 		void __iomem *io;
 		u8 *macaddr;
 		u32 reg;
@@ -93,7 +95,7 @@ static void __init kirkwood_dt_eth_fixup(void)
 
 		/* skip disabled nodes or nodes with valid MAC address*/
 		if (!of_device_is_available(pnp) ||
-		    !IS_ERR(of_get_mac_address(np)))
+		    !of_get_mac_address(np, tmpmac))
 			goto eth_fixup_skip;
 
 		clk = of_clk_get(pnp, 0);

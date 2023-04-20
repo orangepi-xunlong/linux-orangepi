@@ -28,9 +28,11 @@
 #include <linux/leds.h>
 #include <linux/debugfs.h>
 #include <linux/nvmem-provider.h>
+#include <linux/root_dev.h>
 
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
+#include <linux/mtd/blktrans.h>
 
 #include "mtdcore.h"
 
@@ -162,6 +164,15 @@ static ssize_t mtd_erasesize_show(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "%lu\n", (unsigned long)mtd->erasesize);
 }
 static DEVICE_ATTR(erasesize, S_IRUGO, mtd_erasesize_show, NULL);
+
+static ssize_t mtd_erasesize_minor_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct mtd_info *mtd = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%lu\n", (unsigned long)mtd->erasesize_minor);
+}
+static DEVICE_ATTR(erasesize_minor, S_IRUGO, mtd_erasesize_minor_show, NULL);
 
 static ssize_t mtd_writesize_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
@@ -312,6 +323,7 @@ static struct attribute *mtd_attrs[] = {
 	&dev_attr_flags.attr,
 	&dev_attr_size.attr,
 	&dev_attr_erasesize.attr,
+	&dev_attr_erasesize_minor.attr,
 	&dev_attr_writesize.attr,
 	&dev_attr_subpagesize.attr,
 	&dev_attr_oobsize.attr,
@@ -531,6 +543,7 @@ static int mtd_nvmem_reg_read(void *priv, unsigned int offset,
 
 static int mtd_nvmem_add(struct mtd_info *mtd)
 {
+	struct device_node *node = mtd_get_of_node(mtd);
 	struct nvmem_config config = {};
 
 	config.id = -1;
@@ -543,7 +556,7 @@ static int mtd_nvmem_add(struct mtd_info *mtd)
 	config.stride = 1;
 	config.read_only = true;
 	config.root_only = true;
-	config.no_of_node = true;
+	config.no_of_node = !of_device_is_compatible(node, "nvmem-cells");
 	config.priv = mtd;
 
 	mtd->nvmem = nvmem_register(&config);
@@ -558,6 +571,60 @@ static int mtd_nvmem_add(struct mtd_info *mtd)
 	}
 
 	return 0;
+}
+
+static void mtd_check_of_node(struct mtd_info *mtd)
+{
+	struct device_node *partitions, *parent_dn, *mtd_dn = NULL;
+	const char *pname, *prefix = "partition-";
+	int plen, mtd_name_len, offset, prefix_len;
+
+	/* Check if MTD already has a device node */
+	if (mtd_get_of_node(mtd))
+		return;
+
+	if (!mtd_is_partition(mtd))
+		return;
+
+	parent_dn = of_node_get(mtd_get_of_node(mtd->parent));
+	if (!parent_dn)
+		return;
+
+	if (mtd_is_partition(mtd->parent))
+		partitions = of_node_get(parent_dn);
+	else
+		partitions = of_get_child_by_name(parent_dn, "partitions");
+	if (!partitions)
+		goto exit_parent;
+
+	prefix_len = strlen(prefix);
+	mtd_name_len = strlen(mtd->name);
+
+	/* Search if a partition is defined with the same name */
+	for_each_child_of_node(partitions, mtd_dn) {
+		/* Skip partition with no/wrong prefix */
+		if (!of_node_name_prefix(mtd_dn, prefix))
+			continue;
+
+		/* Label have priority. Check that first */
+		if (!of_property_read_string(mtd_dn, "label", &pname)) {
+			offset = 0;
+		} else {
+			pname = mtd_dn->name;
+			offset = prefix_len;
+		}
+
+		plen = strlen(pname) - offset;
+		if (plen == mtd_name_len &&
+		    !strncmp(mtd->name, pname + offset, plen)) {
+			mtd_set_of_node(mtd, mtd_dn);
+			break;
+		}
+	}
+
+	of_node_put(partitions);
+exit_parent:
+	of_node_put(parent_dn);
 }
 
 /**
@@ -665,6 +732,7 @@ int add_mtd_device(struct mtd_info *mtd)
 	mtd->dev.devt = MTD_DEVT(i);
 	dev_set_name(&mtd->dev, "mtd%d", i);
 	dev_set_drvdata(&mtd->dev, mtd);
+	mtd_check_of_node(mtd);
 	of_node_get(mtd_get_of_node(mtd));
 	error = device_register(&mtd->dev);
 	if (error)
@@ -687,6 +755,24 @@ int add_mtd_device(struct mtd_info *mtd)
 		not->add(mtd);
 
 	mutex_unlock(&mtd_table_mutex);
+
+	if (of_find_property(mtd_get_of_node(mtd), "linux,rootfs", NULL) ||
+	    (IS_ENABLED(CONFIG_MTD_ROOTFS_ROOT_DEV) && !strcmp(mtd->name, "rootfs") && ROOT_DEV == 0)) {
+		unsigned int index = mtd->index;
+
+#ifdef CONFIG_FIT_PARTITION
+		index <<= 2;
+#endif
+
+		if (IS_BUILTIN(CONFIG_MTD)) {
+			pr_info("mtd: setting mtd%d (%s) as root device\n", index, mtd->name);
+			ROOT_DEV = MKDEV(MTD_BLOCK_MAJOR, index);
+		} else {
+			pr_warn("mtd: can't set mtd%d (%s) as root device - mtd must be builtin\n",
+				index, mtd->name);
+		}
+	}
+
 	/* We _know_ we aren't being removed, because
 	   our caller is still holding us here. So none
 	   of this try_ nonsense, and no bitching about it
@@ -850,6 +936,8 @@ int mtd_device_parse_register(struct mtd_info *mtd, const char * const *types,
 		register_reboot_notifier(&mtd->reboot_notifier);
 	}
 
+	register_mtd_blktrans_devs();
+
 out:
 	if (ret && device_is_registered(&mtd->dev))
 		del_mtd_device(mtd);
@@ -1008,6 +1096,34 @@ int __get_mtd_device(struct mtd_info *mtd)
 EXPORT_SYMBOL_GPL(__get_mtd_device);
 
 /**
+ * of_get_mtd_device_by_node - obtain an MTD device associated with a given node
+ *
+ * @np: device tree node
+ */
+struct mtd_info *of_get_mtd_device_by_node(struct device_node *np)
+{
+	struct mtd_info *mtd = NULL;
+	struct mtd_info *tmp;
+	int err;
+
+	mutex_lock(&mtd_table_mutex);
+
+	err = -EPROBE_DEFER;
+	mtd_for_each_device(tmp) {
+		if (mtd_get_of_node(tmp) == np) {
+			mtd = tmp;
+			err = __get_mtd_device(mtd);
+			break;
+		}
+	}
+
+	mutex_unlock(&mtd_table_mutex);
+
+	return err ? ERR_PTR(err) : mtd;
+}
+EXPORT_SYMBOL_GPL(of_get_mtd_device_by_node);
+
+/**
  *	get_mtd_device_nm - obtain a validated handle for an MTD device by
  *	device name
  *	@name: MTD device name to open
@@ -1044,6 +1160,44 @@ out_unlock:
 	return ERR_PTR(err);
 }
 EXPORT_SYMBOL_GPL(get_mtd_device_nm);
+
+/**
+ *	get_mtd_device_by_node - obtain a validated handle for an MTD device
+ *	by of_node
+ *	@of_node: OF node of MTD device to open
+ *
+ *	This function returns MTD device description structure in case of
+ *	success and an error code in case of failure.
+ */
+struct mtd_info *get_mtd_device_by_node(const struct device_node *of_node)
+{
+	int err = -ENODEV;
+	struct mtd_info *mtd = NULL, *other;
+
+	mutex_lock(&mtd_table_mutex);
+
+	mtd_for_each_device(other) {
+		if (of_node == other->dev.of_node) {
+			mtd = other;
+			break;
+		}
+	}
+
+	if (!mtd)
+		goto out_unlock;
+
+	err = __get_mtd_device(mtd);
+	if (err)
+		goto out_unlock;
+
+	mutex_unlock(&mtd_table_mutex);
+	return mtd;
+
+out_unlock:
+	mutex_unlock(&mtd_table_mutex);
+	return ERR_PTR(err);
+}
+EXPORT_SYMBOL_GPL(get_mtd_device_by_node);
 
 void put_mtd_device(struct mtd_info *mtd)
 {

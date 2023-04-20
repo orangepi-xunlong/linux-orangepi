@@ -7,9 +7,13 @@
 #define __MT7530_H
 
 #define MT7530_NUM_PORTS		7
+#define MT7530_NUM_PHYS			5
 #define MT7530_CPU_PORT			6
 #define MT7530_NUM_FDB_RECORDS		2048
 #define MT7530_ALL_MEMBERS		0xff
+
+#define MTK_HDR_LEN	4
+#define MT7530_MAX_MTU	(15 * 1024 - ETH_HLEN - ETH_FCS_LEN - MTK_HDR_LEN)
 
 enum mt753x_id {
 	ID_MT7530 = 0,
@@ -158,6 +162,19 @@ enum mt7530_vlan_egress_attr {
 	MT7530_VLAN_EGRESS_STACK = 3,
 };
 
+/* Register for address age control */
+#define MT7530_AAC			0xa0
+/* Disable ageing */
+#define  AGE_DIS			BIT(20)
+/* Age count */
+#define  AGE_CNT_MASK			GENMASK(19, 12)
+#define  AGE_CNT_MAX			0xff
+#define  AGE_CNT(x)			(AGE_CNT_MASK & ((x) << 12))
+/* Age unit */
+#define  AGE_UNIT_MASK			GENMASK(11, 0)
+#define  AGE_UNIT_MAX			0xfff
+#define  AGE_UNIT(x)			(AGE_UNIT_MASK & (x))
+
 /* Register for port STP state control */
 #define MT7530_SSP_P(x)			(0x2000 + ((x) * 0x100))
 #define  FID_PST(x)			((x) & 0x3)
@@ -240,6 +257,8 @@ enum mt7530_vlan_port_attr {
 #define  PMCR_RX_EN			BIT(13)
 #define  PMCR_BACKOFF_EN		BIT(9)
 #define  PMCR_BACKPR_EN			BIT(8)
+#define  PMCR_FORCE_EEE1G		BIT(7)
+#define  PMCR_FORCE_EEE100		BIT(6)
 #define  PMCR_TX_FC_EN			BIT(5)
 #define  PMCR_RX_FC_EN			BIT(4)
 #define  PMCR_FORCE_SPEED_1000		BIT(3)
@@ -264,7 +283,8 @@ enum mt7530_vlan_port_attr {
 #define  PMCR_LINK_SETTINGS_MASK	(PMCR_TX_EN | PMCR_FORCE_SPEED_1000 | \
 					 PMCR_RX_EN | PMCR_FORCE_SPEED_100 | \
 					 PMCR_TX_FC_EN | PMCR_RX_FC_EN | \
-					 PMCR_FORCE_FDX | PMCR_FORCE_LNK)
+					 PMCR_FORCE_FDX | PMCR_FORCE_LNK | \
+					 PMCR_FORCE_EEE1G | PMCR_FORCE_EEE100)
 #define  PMCR_CPU_PORT_SETTING(id)	(PMCR_FORCE_MODE_ID((id)) | \
 					 PMCR_IFG_XMIT(1) | PMCR_MAC_MODE | \
 					 PMCR_BACKOFF_EN | PMCR_BACKPR_EN | \
@@ -272,6 +292,15 @@ enum mt7530_vlan_port_attr {
 					 PMCR_TX_FC_EN | PMCR_RX_FC_EN | \
 					 PMCR_FORCE_SPEED_1000 | \
 					 PMCR_FORCE_FDX | PMCR_FORCE_LNK)
+
+#define MT7530_PMEEECR_P(x)		(0x3004 + (x) * 0x100)
+#define  WAKEUP_TIME_1000(x)		(((x) & 0xFF) << 24)
+#define  WAKEUP_TIME_100(x)		(((x) & 0xFF) << 16)
+#define  LPI_THRESH_MASK		GENMASK(15, 4)
+#define  LPI_THRESH_SHT			4
+#define  SET_LPI_THRESH(x)		(((x) << LPI_THRESH_SHT) & LPI_THRESH_MASK)
+#define  GET_LPI_THRESH(x)		(((x) & LPI_THRESH_MASK) >> LPI_THRESH_SHT)
+#define  LPI_MODE_EN			BIT(0)
 
 #define MT7530_PMSR_P(x)		(0x3008 + (x) * 0x100)
 #define  PMSR_EEE1G			BIT(7)
@@ -288,6 +317,15 @@ enum mt7530_vlan_port_attr {
 /* Register for port debug count */
 #define MT7531_DBG_CNT(x)		(0x3018 + (x) * 0x100)
 #define  MT7531_DIS_CLR			BIT(31)
+
+#define MT7530_GMACCR			0x30e0
+#define  MAX_RX_JUMBO(x)		((x) << 2)
+#define  MAX_RX_JUMBO_MASK		GENMASK(5, 2)
+#define  MAX_RX_PKT_LEN_MASK		GENMASK(1, 0)
+#define  MAX_RX_PKT_LEN_1522		0x0
+#define  MAX_RX_PKT_LEN_1536		0x1
+#define  MAX_RX_PKT_LEN_1552		0x2
+#define  MAX_RX_PKT_LEN_JUMBO		0x3
 
 /* Register for MIB */
 #define MT7530_PORT_MIB_COUNTER(x)	(0x4000 + (x) * 0x100)
@@ -354,6 +392,12 @@ enum mt7531_sgmii_force_duplex {
 #define  SYS_CTRL_PHY_RST		BIT(2)
 #define  SYS_CTRL_SW_RST		BIT(1)
 #define  SYS_CTRL_REG_RST		BIT(0)
+
+/* Register for system interrupt */
+#define MT7530_SYS_INT_EN		0x7008
+
+/* Register for system interrupt status */
+#define MT7530_SYS_INT_STS		0x700c
 
 /* Register for PHY Indirect Access Control */
 #define MT7531_PHY_IAC			0x701C
@@ -529,6 +573,26 @@ enum mt7531_clk_skew {
 #define  MT7531_GPIO12_RG_RXD3_MASK	GENMASK(19, 16)
 #define  MT7531_EXT_P_MDIO_12		(2 << 16)
 
+/* Registers for LED GPIO control (MT7530 only)
+ * All registers follow this pattern:
+ * [ 2: 0]  port 0
+ * [ 6: 4]  port 1
+ * [10: 8]  port 2
+ * [14:12]  port 3
+ * [18:16]  port 4
+ */
+
+/* LED enable, 0: Disable, 1: Enable (Default) */
+#define MT7530_LED_EN			0x7d00
+/* LED mode, 0: GPIO mode, 1: PHY mode (Default) */
+#define MT7530_LED_IO_MODE		0x7d04
+/* GPIO direction, 0: Input, 1: Output */
+#define MT7530_LED_GPIO_DIR		0x7d10
+/* GPIO output enable, 0: Disable, 1: Enable */
+#define MT7530_LED_GPIO_OE		0x7d14
+/* GPIO value, 0: Low, 1: High */
+#define MT7530_LED_GPIO_DATA		0x7d18
+
 #define MT7530_CREV			0x7ffc
 #define  CHIP_NAME_SHIFT		16
 #define  MT7530_ID			0x7530
@@ -656,6 +720,8 @@ static const char *p5_intf_modes(unsigned int p5_interface)
 	}
 }
 
+struct mt7530_priv;
+
 /* struct mt753x_info -	This is the main data structure for holding the specific
  *			part for each supported device
  * @sw_setup:		Holding the handler to a device initialization
@@ -680,8 +746,8 @@ struct mt753x_info {
 	enum mt753x_id id;
 
 	int (*sw_setup)(struct dsa_switch *ds);
-	int (*phy_read)(struct dsa_switch *ds, int port, int regnum);
-	int (*phy_write)(struct dsa_switch *ds, int port, int regnum, u16 val);
+	int (*phy_read)(struct mt7530_priv *priv, int port, int regnum);
+	int (*phy_write)(struct mt7530_priv *priv, int port, int regnum, u16 val);
 	int (*pad_setup)(struct dsa_switch *ds, phy_interface_t interface);
 	int (*cpu_port_config)(struct dsa_switch *ds, int port);
 	bool (*phy_mode_supported)(struct dsa_switch *ds, int port,
@@ -715,6 +781,10 @@ struct mt753x_info {
  *			registers
  * @p6_interface	Holding the current port 6 interface
  * @p5_intf_sel:	Holding the current port 5 interface select
+ *
+ * @irq:		IRQ number of the switch
+ * @irq_domain:		IRQ domain of the switch irq_chip
+ * @irq_enable:		IRQ enable bits, synced to SYS_INT_EN
  */
 struct mt7530_priv {
 	struct device		*dev;
@@ -736,6 +806,9 @@ struct mt7530_priv {
 	struct mt7530_port	ports[MT7530_NUM_PORTS];
 	/* protect among processes for registers access*/
 	struct mutex reg_mutex;
+	int irq;
+	struct irq_domain *irq_domain;
+	u32 irq_enable;
 };
 
 struct mt7530_hw_vlan_entry {

@@ -27,6 +27,9 @@ struct nf_tcp_net {
 	int tcp_loose;
 	int tcp_be_liberal;
 	int tcp_max_retrans;
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+	unsigned int offload_timeout;
+#endif
 };
 
 enum udp_conntrack {
@@ -37,6 +40,9 @@ enum udp_conntrack {
 
 struct nf_udp_net {
 	unsigned int timeouts[UDP_CT_MAX];
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+	unsigned int offload_timeout;
+#endif
 };
 
 struct nf_icmp_net {

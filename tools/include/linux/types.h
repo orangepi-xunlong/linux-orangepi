@@ -7,8 +7,12 @@
 #include <stdint.h>
 
 #define __SANE_USERSPACE_TYPES__	/* For PPC64, to get LL64 types */
+#ifndef __linux__
+#include <tools/linux_types.h>
+#else
 #include <asm/types.h>
 #include <asm/posix_types.h>
+#endif
 
 struct page;
 struct kmem_cache;

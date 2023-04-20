@@ -49,7 +49,6 @@ config MIPS
 	select HAVE_ARCH_TRACEHOOK
 	select HAVE_ARCH_TRANSPARENT_HUGEPAGE if CPU_SUPPORTS_HUGEPAGES
 	select HAVE_ASM_MODVERSIONS
-	select HAVE_CBPF_JIT if !64BIT && !CPU_MICROMIPS
 	select HAVE_CONTEXT_TRACKING
 	select HAVE_TIF_NOHZ
 	select HAVE_C_RECORDMCOUNT
@@ -57,7 +56,10 @@ config MIPS
 	select HAVE_DEBUG_STACKOVERFLOW
 	select HAVE_DMA_CONTIGUOUS
 	select HAVE_DYNAMIC_FTRACE
-	select HAVE_EBPF_JIT if 64BIT && !CPU_MICROMIPS && TARGET_ISA_REV >= 2
+	select HAVE_EBPF_JIT if !CPU_MICROMIPS && \
+				!CPU_DADDI_WORKAROUNDS && \
+				!CPU_R4000_WORKAROUNDS && \
+				!CPU_R4400_WORKAROUNDS
 	select HAVE_EXIT_THREAD
 	select HAVE_FAST_GUP
 	select HAVE_FTRACE_MCOUNT_RECORD
@@ -1083,9 +1085,6 @@ config FW_ARC
 config ARCH_MAY_HAVE_PC_FDC
 	bool
 
-config BOOT_RAW
-	bool
-
 config CEVT_BCM1480
 	bool
 
@@ -1170,6 +1169,10 @@ config MIPS_MSC
 
 config SYNC_R4K
 	bool
+
+config IMAGE_CMDLINE_HACK
+	bool "OpenWrt specific image command line hack"
+	default n
 
 config NO_IOPORT_MAP
 	def_bool n
@@ -2086,7 +2089,7 @@ config CPU_MIPS32
 config CPU_MIPS64
 	bool
 	default y if CPU_MIPS64_R1 || CPU_MIPS64_R2 || CPU_MIPS64_R5 || \
-		     CPU_MIPS64_R6
+		     CPU_MIPS64_R6 || CPU_LOONGSON64 || CPU_CAVIUM_OCTEON
 
 #
 # These indicate the revision of the architecture
@@ -3179,6 +3182,18 @@ choice
 		depends on CMDLINE_BOOL
 		bool "Extend builtin kernel arguments with bootloader arguments"
 endchoice
+
+config BOOT_RAW
+	bool "Enable the kernel to be executed from the load address"
+	default n
+	help
+	 Allow the kernel to be executed from the load address for
+	 bootloaders which cannot read the ELF format. This places
+	 a jump to start_kernel at the load address.
+
+	 If unsure, say N.
+
+
 
 endmenu
 

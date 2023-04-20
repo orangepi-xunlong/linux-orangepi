@@ -9,6 +9,7 @@
  */
 
 #include <linux/mtd/super.h>
+#include <linux/mtd/blktrans.h>
 #include <linux/namei.h>
 #include <linux/export.h>
 #include <linux/ctype.h>
@@ -121,7 +122,8 @@ int get_tree_mtd(struct fs_context *fc,
 {
 #ifdef CONFIG_BLOCK
 	struct block_device *bdev;
-	int ret, major;
+	struct mtd_blktrans_dev *blktrans_dev;
+	int ret, major, part_bits;
 #endif
 	int mtdnr;
 
@@ -169,21 +171,38 @@ int get_tree_mtd(struct fs_context *fc,
 	/* try the old way - the hack where we allowed users to mount
 	 * /dev/mtdblock$(n) but didn't actually _use_ the blockdev
 	 */
-	bdev = lookup_bdev(fc->source);
+	bdev = blkdev_get_by_path(fc->source, FMODE_READ, NULL);
 	if (IS_ERR(bdev)) {
 		ret = PTR_ERR(bdev);
 		errorf(fc, "MTD: Couldn't look up '%s': %d", fc->source, ret);
 		return ret;
 	}
-	pr_debug("MTDSB: lookup_bdev() returned 0\n");
+	pr_debug("MTDSB: blkdev_get_by_path() returned 0\n");
 
 	major = MAJOR(bdev->bd_dev);
-	mtdnr = MINOR(bdev->bd_dev);
-	bdput(bdev);
 
-	if (major == MTD_BLOCK_MAJOR)
+	if (major == MTD_BLOCK_MAJOR) {
+		if (!bdev->bd_disk) {
+			blkdev_put(bdev, FMODE_READ);
+			BUG();
+			return -EINVAL;
+		}
+
+		blktrans_dev = (struct mtd_blktrans_dev *)(bdev->bd_disk->private_data);
+		if (!blktrans_dev || !blktrans_dev->tr) {
+			blkdev_put(bdev, FMODE_READ);
+			BUG();
+			return -EINVAL;
+		}
+		mtdnr = blktrans_dev->devnum;
+		part_bits = blktrans_dev->tr->part_bits;
+		blkdev_put(bdev, FMODE_READ);
+		if (MINOR(bdev->bd_dev) != (mtdnr << part_bits))
+			return -EINVAL;
+
 		return mtd_get_sb_by_nr(fc, mtdnr, fill_super);
-
+	}
+	blkdev_put(bdev, FMODE_READ);
 #endif /* CONFIG_BLOCK */
 
 	if (!(fc->sb_flags & SB_SILENT))

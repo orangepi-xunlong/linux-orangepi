@@ -143,6 +143,18 @@ u32 eth_get_headlen(const struct net_device *dev, void *data, unsigned int len)
 }
 EXPORT_SYMBOL(eth_get_headlen);
 
+static inline bool
+eth_check_local_mask(const void *addr1, const void *addr2, const void *mask)
+{
+	const u16 *a1 = addr1;
+	const u16 *a2 = addr2;
+	const u16 *m = mask;
+
+	return (((a1[0] ^ a2[0]) & ~m[0]) |
+		((a1[1] ^ a2[1]) & ~m[1]) |
+		((a1[2] ^ a2[2]) & ~m[2]));
+}
+
 /**
  * eth_type_trans - determine the packet's protocol ID.
  * @skb: received socket data
@@ -159,6 +171,12 @@ __be16 eth_type_trans(struct sk_buff *skb, struct net_device *dev)
 	const struct ethhdr *eth;
 
 	skb->dev = dev;
+
+#ifdef CONFIG_ETHERNET_PACKET_MANGLE
+	if (dev->eth_mangle_rx)
+		dev->eth_mangle_rx(dev, skb);
+#endif
+
 	skb_reset_mac_header(skb);
 
 	eth = (struct ethhdr *)skb->data;
@@ -174,6 +192,10 @@ __be16 eth_type_trans(struct sk_buff *skb, struct net_device *dev)
 		} else {
 			skb->pkt_type = PACKET_OTHERHOST;
 		}
+
+		if (eth_check_local_mask(eth->h_dest, dev->dev_addr,
+					 dev->local_addr_mask))
+			skb->gro_skip = 1;
 	}
 
 	/*
@@ -506,13 +528,14 @@ unsigned char * __weak arch_get_platform_mac_address(void)
 
 int eth_platform_get_mac_address(struct device *dev, u8 *mac_addr)
 {
-	const unsigned char *addr = NULL;
+	unsigned char *addr;
+	int ret;
 
-	if (dev->of_node)
-		addr = of_get_mac_address(dev->of_node);
-	if (IS_ERR_OR_NULL(addr))
-		addr = arch_get_platform_mac_address();
+	ret = of_get_mac_address(dev->of_node, mac_addr);
+	if (!ret)
+		return 0;
 
+	addr = arch_get_platform_mac_address();
 	if (!addr)
 		return -ENODEV;
 

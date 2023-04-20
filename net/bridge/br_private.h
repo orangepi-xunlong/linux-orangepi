@@ -207,7 +207,13 @@ struct net_bridge_fdb_entry {
 	unsigned long			updated ____cacheline_aligned_in_smp;
 	unsigned long			used;
 
-	struct rcu_head			rcu;
+	union {
+		struct {
+			struct hlist_head		offload_in;
+			struct hlist_head		offload_out;
+		};
+		struct rcu_head			rcu;
+	};
 };
 
 #define MDB_PG_FLAGS_PERMANENT	BIT(0)
@@ -280,6 +286,12 @@ struct net_bridge_mdb_entry {
 	struct rcu_head			rcu;
 };
 
+struct net_bridge_port_offload {
+	struct rhashtable		rht;
+	struct work_struct		gc_work;
+	bool				enabled;
+};
+
 struct net_bridge_port {
 	struct net_bridge		*br;
 	struct net_device		*dev;
@@ -337,6 +349,7 @@ struct net_bridge_port {
 	u16				backup_redirected_cnt;
 
 	struct bridge_stp_xstats	stp_xstats;
+	struct net_bridge_port_offload	offload;
 };
 
 #define kobj_to_brport(obj)	container_of(obj, struct net_bridge_port, kobj)
@@ -475,6 +488,9 @@ struct net_bridge {
 	struct kobject			*ifobj;
 	u32				auto_cnt;
 
+	u32				offload_cache_size;
+	u32				offload_cache_reserved;
+
 #ifdef CONFIG_NET_SWITCHDEV
 	int offload_fwd_mark;
 #endif
@@ -501,6 +517,10 @@ struct br_input_skb_cb {
 #ifdef CONFIG_NETFILTER_FAMILY_BRIDGE
 	u8 br_netfilter_broute:1;
 #endif
+	u8 offload:1;
+	u8 input_vlan_present:1;
+	u16 input_vlan_tag;
+	int input_ifindex;
 
 #ifdef CONFIG_NET_SWITCHDEV
 	int offload_fwd_mark;
@@ -1093,6 +1113,13 @@ void br_vlan_notify(const struct net_bridge *br,
 bool br_vlan_can_enter_range(const struct net_bridge_vlan *v_curr,
 			     const struct net_bridge_vlan *range_end);
 
+void br_vlan_fill_forward_path_pvid(struct net_bridge *br,
+				    struct net_device_path_ctx *ctx,
+				    struct net_device_path *path);
+int br_vlan_fill_forward_path_mode(struct net_bridge *br,
+				   struct net_bridge_port *dst,
+				   struct net_device_path *path);
+
 static inline struct net_bridge_vlan_group *br_vlan_group(
 					const struct net_bridge *br)
 {
@@ -1247,6 +1274,19 @@ static inline int __br_vlan_filter_toggle(struct net_bridge *br,
 
 static inline int nbp_get_num_vlan_infos(struct net_bridge_port *p,
 					 u32 filter_mask)
+{
+	return 0;
+}
+
+static inline void br_vlan_fill_forward_path_pvid(struct net_bridge *br,
+						  struct net_device_path_ctx *ctx,
+						  struct net_device_path *path)
+{
+}
+
+static inline int br_vlan_fill_forward_path_mode(struct net_bridge *br,
+						 struct net_bridge_port *dst,
+						 struct net_device_path *path)
 {
 	return 0;
 }
@@ -1505,8 +1545,8 @@ bool nbp_switchdev_allowed_egress(const struct net_bridge_port *p,
 int br_switchdev_set_port_flag(struct net_bridge_port *p,
 			       unsigned long flags,
 			       unsigned long mask);
-void br_switchdev_fdb_notify(const struct net_bridge_fdb_entry *fdb,
-			     int type);
+void br_switchdev_fdb_notify(struct net_bridge *br,
+			     const struct net_bridge_fdb_entry *fdb, int type);
 int br_switchdev_port_vlan_add(struct net_device *dev, u16 vid, u16 flags,
 			       struct netlink_ext_ack *extack);
 int br_switchdev_port_vlan_del(struct net_device *dev, u16 vid);
@@ -1552,7 +1592,8 @@ static inline int br_switchdev_port_vlan_del(struct net_device *dev, u16 vid)
 }
 
 static inline void
-br_switchdev_fdb_notify(const struct net_bridge_fdb_entry *fdb, int type)
+br_switchdev_fdb_notify(struct net_bridge *br,
+			const struct net_bridge_fdb_entry *fdb, int type)
 {
 }
 

@@ -241,8 +241,10 @@ void bcma_prepare_core(struct bcma_bus *bus, struct bcma_device *core)
 	core->dev.bus = &bcma_bus_type;
 	dev_set_name(&core->dev, "bcma%d:%d", bus->num, core->core_index);
 	core->dev.parent = bus->dev;
-	if (bus->dev)
+	if (bus->dev) {
 		bcma_of_fill_device(bus->dev, core);
+		dma_coerce_mask_and_coherent(&core->dev, bus->dev->coherent_dma_mask);
+	}
 
 	switch (bus->hosttype) {
 	case BCMA_HOSTTYPE_PCI:

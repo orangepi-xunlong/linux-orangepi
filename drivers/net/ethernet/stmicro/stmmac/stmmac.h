@@ -25,7 +25,7 @@
 
 struct stmmac_resources {
 	void __iomem *addr;
-	const char *mac;
+	u8 mac[ETH_ALEN];
 	int wol_irq;
 	int lpi_irq;
 	int irq;

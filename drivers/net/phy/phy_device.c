@@ -1651,6 +1651,9 @@ void phy_detach(struct phy_device *phydev)
 	struct module *ndev_owner = NULL;
 	struct mii_bus *bus;
 
+	if (phydev->drv && phydev->drv->detach)
+		phydev->drv->detach(phydev);
+
 	if (phydev->sysfs_links) {
 		if (dev)
 			sysfs_remove_link(&dev->dev.kobj, "phydev");

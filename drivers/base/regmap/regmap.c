@@ -9,6 +9,7 @@
 #include <linux/device.h>
 #include <linux/slab.h>
 #include <linux/export.h>
+#include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/err.h>
 #include <linux/property.h>
@@ -842,6 +843,7 @@ struct regmap *__regmap_init(struct device *dev,
 	if (!bus) {
 		map->reg_read  = config->reg_read;
 		map->reg_write = config->reg_write;
+		map->reg_update_bits = config->reg_update_bits;
 
 		map->defer_caching = false;
 		goto skip_format_initialization;
@@ -3297,3 +3299,5 @@ static int __init regmap_initcall(void)
 	return 0;
 }
 postcore_initcall(regmap_initcall);
+
+MODULE_LICENSE("GPL");

@@ -1419,4 +1419,5 @@ static void __exit dma_buf_deinit(void)
 	dma_buf_uninit_debugfs();
 	kern_unmount(dma_buf_mnt);
 }
-__exitcall(dma_buf_deinit);
+module_exit(dma_buf_deinit);
+MODULE_LICENSE("GPL");

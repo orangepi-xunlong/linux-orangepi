@@ -1,4 +1,6 @@
+#ifdef __linux__
 #define  _XOPEN_SOURCE 500	/* needed for nftw() */
+#endif
 #define  _GNU_SOURCE		/* needed for asprintf() */
 
 /* Parse event JSON files */
@@ -35,6 +37,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
+#include <strings.h>
 #include <ctype.h>
 #include <unistd.h>
 #include <stdarg.h>

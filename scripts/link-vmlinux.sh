@@ -186,6 +186,10 @@ kallsyms()
 		kallsymopt="${kallsymopt} --base-relative"
 	fi
 
+	if [ -n "${CONFIG_KALLSYMS_UNCOMPRESSED}" ]; then
+		kallsymopt="${kallsymopt} --uncompressed"
+	fi
+
 	info KSYMS ${2}
 	${NM} -n ${1} | scripts/kallsyms ${kallsymopt} > ${2}
 }

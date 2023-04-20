@@ -104,22 +104,11 @@ static int dsa_switch_bridge_join(struct dsa_switch *ds,
 	return 0;
 }
 
-static int dsa_switch_bridge_leave(struct dsa_switch *ds,
-				   struct dsa_notifier_bridge_info *info)
+static int dsa_switch_sync_vlan_filtering(struct dsa_switch *ds,
+					  struct dsa_notifier_bridge_info *info)
 {
 	bool unset_vlan_filtering = br_vlan_enabled(info->br);
-	struct dsa_switch_tree *dst = ds->dst;
 	int err, i;
-
-	if (dst->index == info->tree_index && ds->index == info->sw_index &&
-	    ds->ops->port_bridge_leave)
-		ds->ops->port_bridge_leave(ds, info->port, info->br);
-
-	if ((dst->index != info->tree_index || ds->index != info->sw_index) &&
-	    ds->ops->crosschip_bridge_leave)
-		ds->ops->crosschip_bridge_leave(ds, info->tree_index,
-						info->sw_index, info->port,
-						info->br);
 
 	/* If the bridge was vlan_filtering, the bridge core doesn't trigger an
 	 * event for changing vlan_filtering setting upon slave ports leaving
@@ -153,6 +142,32 @@ static int dsa_switch_bridge_leave(struct dsa_switch *ds,
 		if (err && err != EOPNOTSUPP)
 			return err;
 	}
+
+	return 0;
+}
+
+static int dsa_switch_bridge_leave(struct dsa_switch *ds,
+				   struct dsa_notifier_bridge_info *info)
+{
+	struct dsa_switch_tree *dst = ds->dst;
+	int err;
+
+	if (dst->index == info->tree_index && ds->index == info->sw_index &&
+	    ds->ops->port_bridge_leave)
+		ds->ops->port_bridge_leave(ds, info->port, info->br);
+
+	if ((dst->index != info->tree_index || ds->index != info->sw_index) &&
+	    ds->ops->crosschip_bridge_leave)
+		ds->ops->crosschip_bridge_leave(ds, info->tree_index,
+						info->sw_index, info->port,
+						info->br);
+
+	if (dst->index == info->tree_index && ds->index == info->sw_index) {
+		err = dsa_switch_sync_vlan_filtering(ds, info);
+		if (err)
+			return err;
+	}
+
 	return 0;
 }
 
