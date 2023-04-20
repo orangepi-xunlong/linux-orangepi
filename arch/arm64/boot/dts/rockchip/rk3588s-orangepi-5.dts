@@ -422,3 +422,11 @@
 	rockchip,skip-scan-in-resume;
 	status = "okay";
 };
+
+&wireless_wlan {
+	status = "okay";
+};
+
+&wireless_bluetooth {
+	status = "okay";
+};
