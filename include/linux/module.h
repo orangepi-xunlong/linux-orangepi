@@ -135,15 +135,15 @@ extern void cleanup_module(void);
 	{ return initfn; }					\
 	int init_module(void) __copy(initfn) 			\
 		__attribute__((alias(#initfn)));		\
-	__CFI_ADDRESSABLE(init_module)
+	__CFI_ADDRESSABLE(init_module, __initdata);
 
 /* This is only required if you want to be unloadable. */
 #define module_exit(exitfn)					\
 	static inline exitcall_t __maybe_unused __exittest(void)		\
 	{ return exitfn; }					\
-	void cleanup_module(void) __copy(exitfn) 		\
-		__attribute__((alias(#exitfn))); 		\
-	__CFI_ADDRESSABLE(cleanup_module)
+	void cleanup_module(void) __copy(exitfn)		\
+		__attribute__((alias(#exitfn)));		\
+	__CFI_ADDRESSABLE(cleanup_module, __exitdata);
 
 #endif
 

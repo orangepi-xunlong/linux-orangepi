@@ -17,8 +17,8 @@ extern void __cfi_check(uint64_t id, void *ptr, void *diag);
  * Force the compiler to generate a CFI jump table entry for a function
  * and store the jump table address to __cfi_jt_<function>.
  */
-#define __CFI_ADDRESSABLE(fn) \
-	const void* __cfi_jt_ ## fn __visible = (void *)&fn;
+#define __CFI_ADDRESSABLE(fn, __attr) \
+	const void *__cfi_jt_ ## fn __visible __attr = (void *)&fn
 
 #ifdef CONFIG_CFI_CLANG_SHADOW
 
@@ -34,7 +34,7 @@ static inline void cfi_module_remove(struct module *mod, unsigned long base_addr
 
 #else /* !CONFIG_CFI_CLANG */
 
-#define __CFI_ADDRESSABLE(fn)
+#define __CFI_ADDRESSABLE(fn, __attr)
 
 #endif /* CONFIG_CFI_CLANG */
 
