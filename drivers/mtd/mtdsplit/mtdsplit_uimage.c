@@ -137,11 +137,17 @@ static int __mtdsplit_parse_uimage(struct mtd_info *master,
 	u32 header_offset = 0;
 	u32 part_magic = 0;
 	enum mtdsplit_part_type type;
+	struct device_node *np;
 
 	nr_parts = 2;
 	parts = kzalloc(nr_parts * sizeof(*parts), GFP_KERNEL);
 	if (!parts)
 		return -ENOMEM;
+
+	np = mtd_get_of_node(master);
+	if (!np || (!of_device_is_compatible(np, "denx,uimage")	\
+		 && !of_device_is_compatible(np, "openwrt,uimage")))
+		return -1;
 
 	uimage_parse_dt(master, &extralen, &ih_magic, &ih_type, &header_offset, &part_magic);
 	buflen = sizeof(struct uimage_header) + header_offset;
