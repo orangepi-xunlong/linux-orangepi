@@ -381,7 +381,7 @@
 			};
 
 			firmware@240000 {
-				//compatible = "denx,uimage";
+				compatible = "denx,uimage";
 				label = "firmware";
 				reg = <0x240000 0xdc0000>;
 			};
