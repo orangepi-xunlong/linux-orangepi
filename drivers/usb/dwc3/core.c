@@ -951,6 +951,7 @@ static int dwc3_phy_power_on(struct dwc3 *dwc)
 			goto err_power_off_usb3_phy;
 	}
 
+	dwc->usb3_phy_powered = true;
 	return 0;
 
 err_power_off_usb3_phy:
@@ -971,8 +972,10 @@ static void dwc3_phy_power_off(struct dwc3 *dwc)
 {
 	int i;
 
-	for (i = 0; i < dwc->num_usb3_ports; i++)
-		phy_power_off(dwc->usb3_generic_phy[i]);
+	if (dwc->usb3_phy_powered)
+		for (i = 0; i < dwc->num_usb3_ports; i++)
+			phy_power_off(dwc->usb3_generic_phy[i]);
+	dwc->usb3_phy_powered = false;
 
 	for (i = 0; i < dwc->num_usb2_ports; i++)
 		phy_power_off(dwc->usb2_generic_phy[i]);

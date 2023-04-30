@@ -1241,6 +1241,8 @@ struct dwc3 {
 	u8			num_usb2_ports;
 	u8			num_usb3_ports;
 
+	bool			usb3_phy_powered;
+
 	bool			phys_ready;
 
 	struct ulpi		*ulpi;
