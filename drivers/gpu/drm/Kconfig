@@ -10,10 +10,10 @@ menuconfig DRM
 	depends on (AGP || AGP=n) && !EMULATED_CMPXCHG && HAS_DMA
 	select DRM_NOMODESET
 	select DRM_PANEL_ORIENTATION_QUIRKS
-	select HDMI
+	select HDMI if !ROCKCHIP_MINI_KERNEL
 	select FB_CMDLINE
 	select I2C
-	select I2C_ALGOBIT
+	select I2C_ALGOBIT if !ROCKCHIP_MINI_KERNEL
 	select DMA_SHARED_BUFFER
 	select SYNC_FILE
 # gallium uses SYS_kcmp for os_same_file_description() to de-duplicate
@@ -32,6 +32,18 @@ config DRM_MIPI_DBI
 	tristate
 	depends on DRM
 	select DRM_KMS_HELPER
+
+config DRM_EDID
+	bool "EDID function for DRM"
+	depends on DRM
+	select HDMI
+	default y if !ROCKCHIP_MINI_KERNEL
+	help
+	  DRM EDID read and parse function.
+
+config DRM_IGNORE_IOTCL_PERMIT
+	bool "Ignore drm ioctl permission"
+	depends on DRM && ANDROID && NO_GKI
 
 config DRM_MIPI_DSI
 	bool

@@ -43,6 +43,11 @@ struct dw8250_data {
 	struct work_struct	clk_work;
 	struct reset_control	*rst;
 
+#ifdef CONFIG_ARCH_ROCKCHIP
+	int			irq;
+	int			irq_wake;
+	int			enable_wakeup;
+#endif
 	unsigned int		skip_autocfg:1;
 	unsigned int		uart_16550_compatible:1;
 };

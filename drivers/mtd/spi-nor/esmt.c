@@ -19,6 +19,19 @@ static const struct flash_info esmt_nor_parts[] = {
 	{ "f25l64qa", INFO(0x8c4117, 0, 64 * 1024, 128)
 		FLAGS(SPI_NOR_HAS_LOCK)
 		NO_SFDP_FLAGS(SECT_4K) },
+	{ "en25qh128", INFO(0x1c7018, 0, 64 * 1024, 256)
+		NO_SFDP_FLAGS(SECT_4K) },
+	{ "en25s64", INFO(0x1c3817, 0, 64 * 1024, 128)
+		NO_SFDP_FLAGS(SECT_4K) },
+	{ "en25qh256a", INFO(0x1c7019, 0, 64 * 1024, 512)
+		NO_SFDP_FLAGS(SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ)
+		FIXUP_FLAGS(SPI_NOR_4B_OPCODES) },
+	{ "en25qx256a", INFO(0x1c7119, 0, 64 * 1024, 512)
+		NO_SFDP_FLAGS(SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ)
+		FIXUP_FLAGS(SPI_NOR_4B_OPCODES) },
+	{ "en25qx128a", INFO(0x1c7118, 0, 64 * 1024, 256)
+		NO_SFDP_FLAGS(SECT_4K | SPI_NOR_DUAL_READ |
+			      SPI_NOR_QUAD_READ) },
 };
 
 const struct spi_nor_manufacturer spi_nor_esmt = {

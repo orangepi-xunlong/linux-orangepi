@@ -1,5 +1,14 @@
 # SPDX-License-Identifier: MIT
 
+config DRM_DP
+	bool "DRM DisplayPort support"
+	depends on DRM
+	depends on DRM_KMS_HELPER
+	default y if DRM_ANALOGIX_DP
+	default y if !ROCKCHIP_MINI_KERNEL
+	help
+	  Choose this option to support DP interface.
+
 config DRM_DP_AUX_BUS
 	tristate
 	depends on DRM

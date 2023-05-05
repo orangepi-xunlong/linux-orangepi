@@ -14,6 +14,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/usb.h>
+#include <linux/usb/quirks.h>
 #include <linux/videodev2.h>
 #include <linux/vmalloc.h>
 #include <linux/wait.h>
@@ -2194,7 +2195,11 @@ static int uvc_probe(struct usb_interface *intf,
 	}
 
 	uvc_dbg(dev, PROBE, "UVC device initialized\n");
-	usb_enable_autosuspend(udev);
+	if (udev->quirks & USB_QUIRK_AUTO_SUSPEND ||
+	    udev->parent->quirks & USB_QUIRK_AUTO_SUSPEND)
+		dev_info(&dev->udev->dev, "auto-suspend is blacklisted for this device\n");
+	else
+		usb_enable_autosuspend(udev);
 	return 0;
 
 error:

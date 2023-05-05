@@ -372,6 +372,14 @@ config TOUCHSCREEN_EXC3000
 	  To compile this driver as a module, choose M here: the
 	  module will be called exc3000.
 
+config TOUCHSCREEN_FTS
+	tristate "Focaltech Touchscreen"
+	depends on I2C
+	default n
+	help
+	  Say Y here if you have Focaltech touch panel.
+	  If unsure, say N.
+
 config TOUCHSCREEN_FUJITSU
 	tristate "Fujitsu serial touchscreen"
 	select SERIO
@@ -399,6 +407,24 @@ config TOUCHSCREEN_GOODIX
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called goodix.
+
+config TOUCHSCREEN_GSL3673
+	tristate "gsl3673 touchpad driver"
+	help
+	  gsl3673 touchpad driver
+
+config TOUCHSCREEN_GSL3673_800X1280
+	tristate "gsl3673 800x1280 touchpad driver"
+	help
+	  gsl3673 touchpad driver
+
+config TOUCHSCREEN_GSLX680_PAD
+	tristate "gslX680 touchpad driver for pad"
+	help
+	  gslX680 touchpad driver for pad
+
+config TOUCHSCREEN_GT1X
+	tristate "GT1X touchscreens support"
 
 config TOUCHSCREEN_HIDEEP
 	tristate "HiDeep Touch IC"
@@ -520,6 +546,10 @@ config TOUCHSCREEN_ELAN
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called elants_i2c.
+
+config TOUCHSCREEN_ELAN5515
+	tristate "Elan5515 touchscreen"
+	depends on I2C
 
 config TOUCHSCREEN_ELO
 	tristate "Elo serial touchscreens"

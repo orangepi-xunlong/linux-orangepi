@@ -241,6 +241,9 @@ struct dw_mci {
 	struct fault_attr	fail_data_crc;
 	struct hrtimer		fault_timer;
 #endif
+	bool			need_xfer_timer;
+	struct timer_list       xfer_timer;
+	bool			is_rv1106_sd;
 };
 
 /* DMA ops for Internal/External DMAC interface */

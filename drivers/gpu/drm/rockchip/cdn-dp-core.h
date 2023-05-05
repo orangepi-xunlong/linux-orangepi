@@ -54,8 +54,6 @@ struct cdn_firmware_header {
 
 struct cdn_dp_port {
 	struct cdn_dp_device *dp;
-	struct notifier_block event_nb;
-	struct extcon_dev *extcon;
 	struct phy *phy;
 	u8 lanes;
 	bool phy_enabled;
@@ -69,7 +67,7 @@ struct cdn_dp_device {
 	struct rockchip_encoder encoder;
 	struct drm_display_mode mode;
 	struct platform_device *audio_pdev;
-	struct work_struct event_work;
+	struct delayed_work event_work;
 	struct edid *edid;
 
 	struct mutex lock;

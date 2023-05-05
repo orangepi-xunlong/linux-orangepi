@@ -218,6 +218,18 @@ config NVMEM_RAVE_SP_EEPROM
 	help
 	  Say y here to enable Rave SP EEPROM support.
 
+config NVMEM_RK628_EFUSE
+	tristate "RK628 eFuse Support"
+	depends on ARCH_ROCKCHIP || COMPILE_TEST
+	depends on HAS_IOMEM
+	depends on MFD_RK628
+	help
+	  This is a simple drive to dump specified values of Rk628 SoC
+	  from eFuse, such as cpu-leakage.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called nvmem_rk628_efuse.
+
 config NVMEM_RMEM
 	tristate "Reserved Memory Based Driver Support"
 	depends on HAS_IOMEM

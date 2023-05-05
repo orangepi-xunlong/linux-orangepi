@@ -264,6 +264,11 @@ config SLAB_FREELIST_HARDENED
 	  sanity-checking than others. This option is most effective with
 	  CONFIG_SLUB.
 
+config SLUB_SYSFS
+	bool "Enable SLUB sysfs interface"
+	depends on SLUB && SYSFS
+	default y
+
 config SLUB_STATS
 	default n
 	bool "Enable SLUB performance statistics"
@@ -834,6 +839,15 @@ config CMA
 
 	  If unsure, say "n".
 
+config CMA_INACTIVE
+	bool "CMA not active to system"
+	depends on CMA
+	help
+	  This forbids the CMA to active its pages to system memory, to keep
+	  page from CMA never be borrowed by system.
+
+	  If unsure, say "n".
+
 config CMA_DEBUG
 	bool "CMA debug messages (DEVELOPMENT)"
 	depends on DEBUG_KERNEL && CMA
@@ -848,6 +862,13 @@ config CMA_DEBUGFS
 	depends on CMA && DEBUG_FS
 	help
 	  Turns on the DebugFS interface for CMA.
+
+config CMA_DEBUGFS_BITMAP_HEX
+	bool "CMA debugfs add bitmap_hex node"
+	depends on CMA_DEBUGFS
+	help
+	  Turns on the bitmap_hex node under DEBUGFS, shows the bitmap in hex
+	  format.
 
 config CMA_SYSFS
 	bool "CMA information through sysfs interface"

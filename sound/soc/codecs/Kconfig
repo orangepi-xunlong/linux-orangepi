@@ -97,12 +97,17 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_DA732X
 	imply SND_SOC_DA9055
 	imply SND_SOC_DMIC
+	imply SND_SOC_DUMMY_CODEC
 	imply SND_SOC_ES8316
+	imply SND_SOC_ES8323
 	imply SND_SOC_ES8326
 	imply SND_SOC_ES8328_SPI
 	imply SND_SOC_ES8328_I2C
+	imply SND_SOC_ES8396
 	imply SND_SOC_ES7134
+	imply SND_SOC_ES7202
 	imply SND_SOC_ES7241
+	imply SND_SOC_ES7243E
 	imply SND_SOC_GTM601
 	imply SND_SOC_HDAC_HDMI
 	imply SND_SOC_HDAC_HDA
@@ -164,7 +169,13 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_PCM5102A
 	imply SND_SOC_PCM512x_I2C
 	imply SND_SOC_PCM512x_SPI
+	imply SND_SOC_RK1000
+	imply SND_SOC_RK312X
+	imply SND_SOC_RK3228
+	imply SND_SOC_RK3308
 	imply SND_SOC_RK3328
+	imply SND_SOC_RK3528
+	imply SND_SOC_RK730
 	imply SND_SOC_RK817
 	imply SND_SOC_RT274
 	imply SND_SOC_RT286
@@ -200,6 +211,7 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_RT1308_SDW
 	imply SND_SOC_RT1316_SDW
 	imply SND_SOC_RT9120
+	imply SND_SOC_RV1106
 	imply SND_SOC_SDW_MOCKUP
 	imply SND_SOC_SGTL5000
 	imply SND_SOC_SI476X
@@ -912,6 +924,9 @@ config SND_SOC_DMIC
 	  Enable support for the Generic Digital Microphone CODEC.
 	  Select this if your sound card has DMICs.
 
+config SND_SOC_DUMMY_CODEC
+	tristate "Dummy CODEC"
+
 config SND_SOC_HDMI_CODEC
 	tristate
 	select SND_PCM_ELD
@@ -921,11 +936,44 @@ config SND_SOC_HDMI_CODEC
 config SND_SOC_ES7134
 	tristate "Everest Semi ES7134 CODEC"
 
+config SND_SOC_ES7202
+	tristate "Everest Semi ES7202 PDM 2CH ADC"
+
+config SND_SOC_ES7202_MIC_MAX_CHANNELS
+	int "the maximum channels of es7202's microphone"
+	depends on SND_SOC_ES7202
+	default 2
+	range 2 16
+	help
+	  Should be one of MIC_CHN_* of sound/soc/codecs/es7202.h.
+
+config SND_SOC_ES7202_I2C_BUS
+	int "i2c bus number"
+	depends on SND_SOC_ES7202
+	default 1
+	help
+	  Used to hard code an i2c bus number.
+
+config SND_SOC_ES7210
+	tristate "Everest Semi ES7210 CODEC"
+	depends on I2C
+
 config SND_SOC_ES7241
 	tristate "Everest Semi ES7241 CODEC"
 
+config SND_SOC_ES7243E
+	tristate "Everest Semi ES724E 2CH ADC"
+
+config SND_SOC_ES8311
+	tristate "Everest Semi ES8311 CODEC"
+	depends on I2C
+
 config SND_SOC_ES8316
 	tristate "Everest Semi ES8316 CODEC"
+	depends on I2C
+
+config SND_SOC_ES8323
+	tristate "Everest Semi ES8323 CODEC"
 	depends on I2C
 
 config SND_SOC_ES8326
@@ -944,6 +992,10 @@ config SND_SOC_ES8328_SPI
 	tristate "Everest Semi ES8328 CODEC (SPI)"
 	depends on SPI_MASTER
 	select SND_SOC_ES8328
+
+config SND_SOC_ES8396
+	tristate "Everest Semi ES8396 CODEC"
+	depends on I2C
 
 config SND_SOC_GTM601
 	tristate 'GTM601 UMTS modem audio codec'
@@ -1204,13 +1256,43 @@ config SND_SOC_PCM512x_SPI
 	select SND_SOC_PCM512x
 	select REGMAP_SPI
 
+config SND_SOC_RK1000
+	tristate "Rockchip RK1000 CODEC"
+	depends on MFD_RK1000
+
+config SND_SOC_RK312X
+	select REGMAP_MMIO
+	tristate "Rockchip RK312X CODEC"
+
+config SND_SOC_RK3228
+	select REGMAP_MMIO
+	tristate "Rockchip RK3228 CODEC"
+
+config SND_SOC_RK3308
+	select REGMAP_MMIO
+	tristate "Rockchip RK3308 CODEC"
+
 config SND_SOC_RK3328
 	tristate "Rockchip RK3328 audio CODEC"
 	select REGMAP_MMIO
 
+config SND_SOC_RK3528
+	tristate "Rockchip RK3528 audio CODEC"
+	select REGMAP_MMIO
+
+config SND_SOC_RK730
+	tristate "Rockchip RK730 CODEC"
+	select REGMAP_I2C
+
 config SND_SOC_RK817
 	tristate "Rockchip RK817 audio CODEC"
 	depends on MFD_RK808 || COMPILE_TEST
+
+config SND_SOC_RK_CODEC_DIGITAL
+	tristate "Rockchip Codec Digital Interface"
+
+config SND_SOC_RK_DSM
+	tristate "Rockchip Delta-sigma Digital Converter Interface"
 
 config SND_SOC_RL6231
 	tristate
@@ -1340,7 +1422,7 @@ config SND_SOC_RT5645
 	depends on I2C
 
 config SND_SOC_RT5651
-	tristate
+	tristate "Realtek ALC5651 CODEC"
 	depends on I2C
 
 config SND_SOC_RT5659
@@ -1441,6 +1523,10 @@ config SND_SOC_RT9120
 	help
 	  Enable support for Richtek RT9120 20W, stereo, inductor-less,
 	  high-efficiency Class-D audio amplifier.
+
+config SND_SOC_RV1106
+	tristate "Rockchip RV1106 CODEC"
+	select REGMAP_MMIO
 
 config SND_SOC_SDW_MOCKUP
 	tristate "SoundWire mockup codec"
@@ -2162,4 +2248,6 @@ config SND_SOC_LPASS_TX_MACRO
 	select SND_SOC_LPASS_MACRO_COMMON
 	tristate "Qualcomm TX Macro in LPASS(Low Power Audio SubSystem)"
 
+source "sound/soc/codecs/aw87xxx/Kconfig"
+source "sound/soc/codecs/aw883xx/Kconfig"
 endmenu

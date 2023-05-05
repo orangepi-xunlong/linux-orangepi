@@ -6,6 +6,7 @@
 /kallsyms
 /module.lds
 /recordmcount
+/resource_tool
 /sign-file
 /sorttable
 /unifdef

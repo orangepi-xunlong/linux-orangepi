@@ -388,6 +388,7 @@ int stmmac_mdio_reset(struct mii_bus *bus)
 #endif
 	return 0;
 }
+EXPORT_SYMBOL(stmmac_mdio_reset);
 
 int stmmac_xpcs_setup(struct mii_bus *bus)
 {

@@ -14,8 +14,9 @@
 // Controlling CPU stall warnings, including delay calculation.
 
 /* panic() on RCU Stall sysctl. */
-int sysctl_panic_on_rcu_stall __read_mostly;
+int sysctl_panic_on_rcu_stall __read_mostly = CONFIG_BOOTPARAM_RCU_STALL_PANIC_VALUE;
 int sysctl_max_rcu_stall_to_panic __read_mostly;
+ATOMIC_NOTIFIER_HEAD(rcu_stall_notifier_list);
 
 #ifdef CONFIG_PROVE_RCU
 #define RCU_STALL_DELAY_DELTA		(5 * HZ)
@@ -616,6 +617,8 @@ static void print_other_cpu_stall(unsigned long gp_seq, unsigned long gps)
 
 	rcu_check_gp_kthread_expired_fqs_timer();
 	rcu_check_gp_kthread_starvation();
+
+	atomic_notifier_call_chain(&rcu_stall_notifier_list, 0, NULL);
 
 	panic_on_rcu_stall();
 

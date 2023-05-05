@@ -22,8 +22,16 @@
 #include <linux/sched/task_stack.h>
 #include <linux/spi/flash.h>
 #include <linux/mtd/spi-nor.h>
+#include <linux/miscdevice.h>
+
+#include <uapi/linux/spi_nor_misc.h>
 
 #include "core.h"
+
+struct spi_nor_misc_dev {
+	struct miscdevice dev;
+	struct spi_nor *nor;
+};
 
 /* Define max times to check status register before we give up. */
 
@@ -685,6 +693,53 @@ int spi_nor_global_block_unlock(struct spi_nor *nor)
 }
 
 /**
+ * spi_nor_wait_till_ready_with_timeout_and_msleep() - Service routine to read the
+ * Status Register until ready with msleep, or timeout occurs.
+ * @nor:		pointer to "struct spi_nor".
+ * @timeout_jiffies:	jiffies to wait until timeout.
+ *
+ * Return: 0 on success, -errno otherwise.
+ */
+static int spi_nor_wait_till_ready_with_timeout_and_msleep(struct spi_nor *nor,
+							   unsigned long timeout_jiffies)
+{
+	unsigned long deadline;
+	int timeout = 0, ret;
+
+	deadline = jiffies + timeout_jiffies;
+
+	while (!timeout) {
+		if (time_after_eq(jiffies, deadline))
+			timeout = 1;
+
+		ret = spi_nor_ready(nor);
+		if (ret < 0)
+			return ret;
+		if (ret)
+			return 0;
+
+		msleep(10);
+	}
+
+	dev_dbg(nor->dev, "flash operation timed out\n");
+
+	return -ETIMEDOUT;
+}
+
+/**
+ * spi_nor_wait_till_ready_with_msleep() - Wait for a predefined amount of time for the
+ * flash to be ready with msleep, or timeout occurs.
+ * @nor:	pointer to "struct spi_nor".
+ *
+ * Return: 0 on success, -errno otherwise.
+ */
+int spi_nor_wait_till_ready_with_msleep(struct spi_nor *nor)
+{
+	return spi_nor_wait_till_ready_with_timeout_and_msleep(nor,
+							       DEFAULT_READY_WAIT_JIFFIES);
+}
+
+/**
  * spi_nor_write_sr() - Write the Status Register.
  * @nor:	pointer to 'struct spi_nor'.
  * @sr:		pointer to DMA-able buffer to write to the Status Register.
@@ -821,6 +876,45 @@ static int spi_nor_write_16bit_sr_and_check(struct spi_nor *nor, u8 sr1)
 	}
 
 	return 0;
+}
+
+/**
+ * spi_nor_write_cr() - Write the Configure Register.
+ * @nor:	pointer to 'struct spi_nor'.
+ * @sr:		pointer to DMA-able buffer to write to the Status Register.
+ * @len:	number of bytes to write to the Status Register.
+ *
+ * Return: 0 on success, -errno otherwise.
+ */
+static int spi_nor_write_8bit_cr(struct spi_nor *nor, u8 cr)
+{
+	int ret;
+	u8 *sr_cr = nor->bouncebuf;
+
+	ret = spi_nor_write_enable(nor);
+	if (ret)
+		return ret;
+
+	sr_cr[0] = cr;
+
+	if (nor->spimem) {
+		struct spi_mem_op op =
+			SPI_MEM_OP(SPI_MEM_OP_CMD(SPINOR_OP_WRCR, 1),
+				   SPI_MEM_OP_NO_ADDR,
+				   SPI_MEM_OP_NO_DUMMY,
+				   SPI_MEM_OP_DATA_OUT(1, sr_cr, 1));
+
+		ret = spi_mem_exec_op(nor->spimem, &op);
+	} else {
+		ret = nor->controller_ops->write_reg(nor, SPINOR_OP_WRCR, sr_cr, 1);
+	}
+
+	if (ret) {
+		dev_dbg(nor->dev, "error %d writing SR\n", ret);
+		return ret;
+	}
+
+	return spi_nor_wait_till_ready(nor);
 }
 
 /**
@@ -1406,7 +1500,7 @@ static int spi_nor_erase_multi_sectors(struct spi_nor *nor, u64 addr, u32 len)
 			if (ret)
 				goto destroy_erase_cmd_list;
 
-			ret = spi_nor_wait_till_ready(nor);
+			ret = spi_nor_wait_till_ready_with_msleep(nor);
 			if (ret)
 				goto destroy_erase_cmd_list;
 
@@ -1492,7 +1586,7 @@ static int spi_nor_erase(struct mtd_info *mtd, struct erase_info *instr)
 			if (ret)
 				goto erase_err;
 
-			ret = spi_nor_wait_till_ready(nor);
+			ret = spi_nor_wait_till_ready_with_msleep(nor);
 			if (ret)
 				goto erase_err;
 
@@ -1615,24 +1709,73 @@ int spi_nor_sr2_bit7_quad_enable(struct spi_nor *nor)
 	return 0;
 }
 
+/**
+ * spi_nor_sr2_bit2_quad_enable() - set QE bit in Status Register 2.
+ * @nor:	pointer to a 'struct spi_nor'
+ *
+ * Set the Quad Enable (QE) bit in the Status Register 2.
+ *
+ * Return: 0 on success, -errno otherwise.
+ */
+int spi_nor_sr2_bit2_quad_enable(struct spi_nor *nor)
+{
+	u8 *cr = nor->bouncebuf;
+	int ret;
+	u8 cr_written;
+
+	/* Check current Quad Enable bit value. */
+	ret = spi_nor_read_cr(nor, cr);
+	if (ret)
+		return ret;
+	if (*cr & SR2_QUAD_EN_BIT2)
+		return 0;
+
+	/* Update the Quad Enable bit. */
+	*cr |= SR2_QUAD_EN_BIT2;
+
+	ret = spi_nor_write_8bit_cr(nor, *cr);
+	if (ret)
+		return ret;
+
+	cr_written = *cr;
+
+	/* Read back and check it. */
+	ret = spi_nor_read_cr(nor, cr);
+	if (ret)
+		return ret;
+
+	if (*cr != cr_written) {
+		dev_dbg(nor->dev, "CR: Read back test failed\n");
+		return -EIO;
+	}
+
+	return 0;
+}
+
 static const struct spi_nor_manufacturer *manufacturers[] = {
 	&spi_nor_atmel,
+	&spi_nor_boya,
 	&spi_nor_catalyst,
+	&spi_nor_dosilicon,
 	&spi_nor_eon,
 	&spi_nor_esmt,
 	&spi_nor_everspin,
+	&spi_nor_fmsh,
 	&spi_nor_fujitsu,
 	&spi_nor_gigadevice,
+	&spi_nor_normem,
 	&spi_nor_intel,
 	&spi_nor_issi,
 	&spi_nor_macronix,
 	&spi_nor_micron,
+	&spi_nor_puya,
 	&spi_nor_st,
 	&spi_nor_spansion,
 	&spi_nor_sst,
 	&spi_nor_winbond,
 	&spi_nor_xilinx,
 	&spi_nor_xmc,
+	&spi_nor_xtx,
 };
 
 static const struct flash_info *spi_nor_match_id(struct spi_nor *nor,
@@ -2929,6 +3072,10 @@ static void spi_nor_set_mtd_info(struct spi_nor *nor)
 	mtd->dev.parent = dev;
 	if (!mtd->name)
 		mtd->name = dev_name(dev);
+
+	if (IS_ENABLED(CONFIG_SPI_ROCKCHIP_SFC))
+		mtd->name = "sfc_nor";
+
 	mtd->type = MTD_NORFLASH;
 	mtd->flags = MTD_CAP_NORFLASH;
 	if (nor->info->flags & SPI_NOR_NO_ERASE)
@@ -3012,8 +3159,8 @@ int spi_nor_scan(struct spi_nor *nor, const char *name,
 	/* No mtd_info fields should be used up to this point. */
 	spi_nor_set_mtd_info(nor);
 
-	dev_info(dev, "%s (%lld Kbytes)\n", info->name,
-			(long long)mtd->size >> 10);
+	dev_info(dev, "%s (%lld Kbytes) read_data x%d\n", info->name,
+			(long long)mtd->size >> 10, spi_nor_get_protocol_data_nbits(nor->read_proto));
 
 	dev_dbg(dev,
 		"mtd .name = %s, .size = 0x%llx (%lldMiB), "
@@ -3095,6 +3242,78 @@ static int spi_nor_create_write_dirmap(struct spi_nor *nor)
 	return PTR_ERR_OR_ZERO(nor->dirmap.wdesc);
 }
 
+static int spi_nor_misc_open(struct inode *inode, struct file *file)
+{
+	struct miscdevice *miscdev = file->private_data;
+	struct spi_nor_misc_dev *nor_dev;
+
+	nor_dev = container_of(miscdev, struct spi_nor_misc_dev, dev);
+	file->private_data = nor_dev->nor;
+
+	return 0;
+}
+
+static long spi_nor_misc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	struct spi_nor *nor = (struct spi_nor *)file->private_data;
+	struct nor_flash_user_info info;
+	void __user *uarg = (void __user *)arg;
+	int i, ret;
+
+	switch (cmd) {
+	case NOR_GET_FLASH_INFO:
+		for (i = 0; i < SPI_NOR_MAX_ID_LEN; i++)
+			info.id[i] = nor->info->id[i];
+
+		ret = copy_to_user(uarg, &info, sizeof(info));
+		if (ret) {
+			dev_err(nor->dev, "failed to get elbi data\n");
+			return -EFAULT;
+		}
+		break;
+	default:
+		break;
+	}
+	return 0;
+}
+
+static const struct file_operations spi_nor_misc_ops = {
+	.owner = THIS_MODULE,
+	.open = spi_nor_misc_open,
+	.unlocked_ioctl = spi_nor_misc_ioctl,
+};
+
+static int spi_nor_add_misc(struct spi_nor *nor)
+{
+	int ret;
+	struct spi_nor_misc_dev *nor_dev;
+	char name[24];
+
+	nor_dev = devm_kzalloc(nor->dev, sizeof(struct spi_nor_misc_dev),
+				GFP_KERNEL);
+	if (!nor_dev)
+		return -ENOMEM;
+
+	nor_dev->dev.minor = MISC_DYNAMIC_MINOR;
+	snprintf(name, sizeof(name), "%s%s", "nor_misc_", dev_name(nor->dev));
+	nor_dev->dev.name = devm_kstrdup(nor->dev, name, GFP_KERNEL);
+	nor_dev->dev.fops = &spi_nor_misc_ops;
+	nor_dev->dev.parent = nor->dev;
+
+	ret = misc_register(&nor_dev->dev);
+	if (ret) {
+		dev_err(nor->dev, "failed to register misc device.\n");
+		return ret;
+	}
+
+	nor_dev->nor = nor;
+	nor->misc_dev = &nor_dev->dev;
+
+	dev_info(nor->dev, "register misc device\n");
+
+	return 0;
+}
+
 static int spi_nor_probe(struct spi_mem *spimem)
 {
 	struct spi_device *spi = spimem->spi;
@@ -3166,6 +3385,9 @@ static int spi_nor_probe(struct spi_mem *spimem)
 	if (ret)
 		return ret;
 
+	if (IS_ENABLED(CONFIG_MTD_SPI_NOR_MISC))
+		spi_nor_add_misc(nor);
+
 	return mtd_device_register(&nor->mtd, data ? data->parts : NULL,
 				   data ? data->nr_parts : 0);
 }
@@ -3175,6 +3397,9 @@ static int spi_nor_remove(struct spi_mem *spimem)
 	struct spi_nor *nor = spi_mem_get_drvdata(spimem);
 
 	spi_nor_restore(nor);
+
+	if (IS_ENABLED(CONFIG_MTD_SPI_NOR_MISC) && nor->misc_dev)
+		misc_deregister(nor->misc_dev);
 
 	/* Clean up MTD stuff. */
 	return mtd_device_unregister(&nor->mtd);

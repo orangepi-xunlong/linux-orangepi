@@ -533,6 +533,14 @@ LZ4		= lz4c
 XZ		= xz
 ZSTD		= zstd
 
+# Use the wrapper for the compiler. This wrapper scans for new
+# warnings and causes the build to stop upon encountering them.
+ifeq ($(CC),$(CROSS_COMPILE)gcc)
+ifneq ($(wildcard $(srctree)/scripts/gcc-wrapper.py),)
+CC		= $(abspath $(srctree)/scripts/gcc-wrapper.py) $(CROSS_COMPILE)gcc
+endif
+endif
+
 PAHOLE_FLAGS	= $(shell PAHOLE=$(PAHOLE) $(srctree)/scripts/pahole-flags.sh)
 
 CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \

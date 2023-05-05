@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+/* SPDX-License-Identifier: (GPL-2.0+ OR MIT) */
 /*
  * Copyright (c) 2017 Rockchip Electronics Co. Ltd.
  * Author: Elaine <zhangqing@rock-chips.com>
@@ -66,6 +66,7 @@
 #define SCLK_CIF_OUT		152
 #define SCLK_SFC		153
 #define SCLK_USB480M		154
+#define SCLK_HSADC_TSP		155
 
 /* dclk gates */
 #define DCLK_VOP		190
@@ -116,8 +117,10 @@
 #define PCLK_GMAC		367
 #define PCLK_PMU_PRE		368
 #define PCLK_SIM_CARD		369
+#define PCLK_MIPIPHY		370
 
 /* hclk gates */
+#define HCLK_SFC		439
 #define HCLK_SPDIF		440
 #define HCLK_GPS		441
 #define HCLK_USBHOST		442

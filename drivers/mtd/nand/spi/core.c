@@ -13,6 +13,7 @@
 #include <linux/jiffies.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/mtd/bbt_store.h>
 #include <linux/mtd/spinand.h>
 #include <linux/of.h>
 #include <linux/slab.h>
@@ -792,6 +793,9 @@ static int spinand_mtd_block_markbad(struct mtd_info *mtd, loff_t offs)
 	ret = nanddev_markbad(nand, &pos);
 	mutex_unlock(&spinand->lock);
 
+	if (IS_ENABLED(CONFIG_MTD_NAND_BBT_USING_FLASH))
+		nanddev_bbt_in_flash_update(nand);
+
 	return ret;
 }
 
@@ -938,11 +942,23 @@ static const struct nand_ops spinand_ops = {
 
 static const struct spinand_manufacturer *spinand_manufacturers[] = {
 	&ato_spinand_manufacturer,
+	&biwin_spinand_manufacturer,
+	&dosilicon_spinand_manufacturer,
+	&esmt_spinand_manufacturer,
+	&etron_spinand_manufacturer,
+	&fmsh_spinand_manufacturer,
+	&foresee_spinand_manufacturer,
 	&gigadevice_spinand_manufacturer,
+	&gsto_spinand_manufacturer,
+	&hyf_spinand_manufacturer,
+	&jsc_spinand_manufacturer,
 	&macronix_spinand_manufacturer,
 	&micron_spinand_manufacturer,
 	&paragon_spinand_manufacturer,
+	&silicongo_spinand_manufacturer,
+	&skyhigh_spinand_manufacturer,
 	&toshiba_spinand_manufacturer,
+	&unim_spinand_manufacturer,
 	&winbond_spinand_manufacturer,
 	&xtx_spinand_manufacturer,
 };
@@ -1193,6 +1209,22 @@ static int spinand_init_flash(struct spinand_device *spinand)
 	return ret;
 }
 
+/**
+ * spinand_mtd_suspend - [MTD Interface] Suspend the spinand flash
+ * @mtd: MTD device structure
+ *
+ * Returns 0 for success or negative error code otherwise.
+ */
+static int spinand_mtd_suspend(struct mtd_info *mtd)
+{
+	struct spinand_device *spinand = mtd_to_spinand(mtd);
+	int ret = 0;
+
+	mutex_lock(&spinand->lock);
+
+	return ret;
+}
+
 static void spinand_mtd_resume(struct mtd_info *mtd)
 {
 	struct spinand_device *spinand = mtd_to_spinand(mtd);
@@ -1207,6 +1239,18 @@ static void spinand_mtd_resume(struct mtd_info *mtd)
 		return;
 
 	spinand_ecc_enable(spinand, false);
+
+	mutex_unlock(&spinand->lock);
+}
+
+/**
+ * spinand_mtd_shutdown - [MTD Interface] Finish the current spinand operation and
+ *                 prevent further operations
+ * @mtd: MTD device structure
+ */
+static void spinand_mtd_shutdown(struct mtd_info *mtd)
+{
+	spinand_mtd_suspend(mtd);
 }
 
 static int spinand_init(struct spinand_device *spinand)
@@ -1272,6 +1316,8 @@ static int spinand_init(struct spinand_device *spinand)
 	mtd->_erase = spinand_mtd_erase;
 	mtd->_max_bad_blocks = nanddev_mtd_max_bad_blocks;
 	mtd->_resume = spinand_mtd_resume;
+	mtd->_suspend = spinand_mtd_suspend;
+	mtd->_reboot = spinand_mtd_shutdown;
 
 	if (nand->ecc.engine) {
 		ret = mtd_ooblayout_count_freebytes(mtd);
@@ -1292,6 +1338,11 @@ static int spinand_init(struct spinand_device *spinand)
 			ret);
 		goto err_cleanup_ecc_engine;
 	}
+	if (IS_ENABLED(CONFIG_SPI_ROCKCHIP_SFC))
+		mtd->name = "spi-nand0";
+
+	if (IS_ENABLED(CONFIG_MTD_NAND_BBT_USING_FLASH))
+		nanddev_scan_bbt_in_flash(nand);
 
 	return 0;
 

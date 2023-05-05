@@ -185,8 +185,10 @@
 
 enum rockchip_pinctrl_type {
 	PX30,
+	RV1106,
 	RV1108,
 	RV1126,
+	RK1808,
 	RK2928,
 	RK3066B,
 	RK3128,
@@ -195,6 +197,8 @@ enum rockchip_pinctrl_type {
 	RK3308,
 	RK3368,
 	RK3399,
+	RK3528,
+	RK3562,
 	RK3568,
 	RK3588,
 };
@@ -256,6 +260,7 @@ enum rockchip_pin_drv_type {
 	DRV_TYPE_IO_1V8_ONLY,
 	DRV_TYPE_IO_1V8_3V0_AUTO,
 	DRV_TYPE_IO_3V3_ONLY,
+	DRV_TYPE_IO_SMIC,
 	DRV_TYPE_MAX
 };
 
@@ -398,14 +403,17 @@ struct rockchip_pin_ctrl {
 	u32				niomux_routes;
 
 	int	(*pull_calc_reg)(struct rockchip_pin_bank *bank,
-				    int pin_num, struct regmap **regmap,
-				    int *reg, u8 *bit);
+				 int pin_num, struct regmap **regmap,
+				 int *reg, u8 *bit);
 	int	(*drv_calc_reg)(struct rockchip_pin_bank *bank,
-				    int pin_num, struct regmap **regmap,
-				    int *reg, u8 *bit);
+				int pin_num, struct regmap **regmap,
+				int *reg, u8 *bit);
 	int	(*schmitt_calc_reg)(struct rockchip_pin_bank *bank,
 				    int pin_num, struct regmap **regmap,
 				    int *reg, u8 *bit);
+	int	(*slew_rate_calc_reg)(struct rockchip_pin_bank *bank,
+				      int pin_num, struct regmap **regmap,
+				      int *reg, u8 *bit);
 };
 
 struct rockchip_pin_config {
@@ -463,5 +471,20 @@ struct rockchip_pinctrl {
 	struct rockchip_pmx_func	*functions;
 	unsigned int			nfunctions;
 };
+
+#if IS_ENABLED(CONFIG_PINCTRL_ROCKCHIP)
+int rk_iomux_set(int bank, int pin, int mux);
+int rk_iomux_get(int bank, int pin, int *mux);
+#else
+static inline int rk_iomux_set(int bank, int pin, int mux)
+{
+	return -EINVAL;
+}
+
+static inline int rk_iomux_get(int bank, int pin, int *mux)
+{
+	return -EINVAL;
+}
+#endif
 
 #endif

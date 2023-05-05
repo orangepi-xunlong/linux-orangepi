@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 /*
- * Copyright (c) 2021 Rockchip Electronics Co., Ltd.
+ * Copyright (c) 2020 Rockchip Electronics Co., Ltd.
  */
 
 #include <dt-bindings/pinctrl/rockchip.h>
@@ -3109,12 +3109,11 @@
 		};
 	};
 
-	tsadc {
+	gpio-func {
 		/omit-if-no-ref/
-		tsadc_pin: tsadc-pin {
+		tsadc_gpio_func: tsadc-gpio-func {
 			rockchip,pins =
-				/* tsadc_pin */
-				<0 RK_PA1 0 &pcfg_pull_none>;
+				<0 RK_PA1 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
 };

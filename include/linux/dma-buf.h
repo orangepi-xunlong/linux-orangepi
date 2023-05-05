@@ -287,6 +287,20 @@ struct dma_buf_ops {
 	void (*vunmap)(struct dma_buf *dmabuf, struct iosys_map *map);
 };
 
+#ifdef CONFIG_DMABUF_CACHE
+/**
+ * dma_buf_destructor - dma-buf destructor function
+ * @dmabuf:	[in]	pointer to dma-buf
+ * @dtor_data:	[in]	destructor data associated with this buffer
+ *
+ * The dma-buf destructor which is called when the dma-buf is freed.
+ *
+ * If the destructor returns an error the dma-buf's exporter release function
+ * won't be called.
+ */
+typedef int (*dma_buf_destructor)(struct dma_buf *dmabuf, void *dtor_data);
+#endif
+
 /**
  * struct dma_buf - shared buffer object
  *
@@ -454,6 +468,11 @@ struct dma_buf {
 		struct kobject kobj;
 		struct dma_buf *dmabuf;
 	} *sysfs_entry;
+#endif
+#ifdef CONFIG_DMABUF_CACHE
+	dma_buf_destructor dtor;
+	void *dtor_data;
+	struct mutex cache_lock;
 #endif
 };
 
@@ -632,4 +651,30 @@ int dma_buf_mmap(struct dma_buf *, struct vm_area_struct *,
 		 unsigned long);
 int dma_buf_vmap(struct dma_buf *dmabuf, struct iosys_map *map);
 void dma_buf_vunmap(struct dma_buf *dmabuf, struct iosys_map *map);
+#ifdef CONFIG_DMABUF_CACHE
+/**
+ * dma_buf_set_destructor - set the dma-buf's destructor
+ * @dmabuf:		[in]	pointer to dma-buf
+ * @dma_buf_destructor	[in]	the destructor function
+ * @dtor_data:		[in]	destructor data associated with this buffer
+ */
+static inline void dma_buf_set_destructor(struct dma_buf *dmabuf,
+					  dma_buf_destructor dtor,
+					  void *dtor_data)
+{
+	dmabuf->dtor = dtor;
+	dmabuf->dtor_data = dtor_data;
+}
+#endif
+
+#if IS_ENABLED(CONFIG_RK_DMABUF_DEBUG)
+void dma_buf_reset_peak_size(void);
+size_t dma_buf_get_peak_size(void);
+size_t dma_buf_get_total_size(void);
+#else
+static inline void dma_buf_reset_peak_size(void) {}
+static inline size_t dma_buf_get_peak_size(void) { return 0; }
+static inline size_t dma_buf_get_total_size(void) { return 0; }
+#endif
+
 #endif /* __DMA_BUF_H__ */

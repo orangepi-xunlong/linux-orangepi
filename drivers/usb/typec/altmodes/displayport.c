@@ -68,6 +68,8 @@ struct dp_altmode {
 	struct fwnode_handle *connector_fwnode;
 };
 
+static u8 get_current_pin_assignments(struct dp_altmode *dp);
+
 static int dp_altmode_notify(struct dp_altmode *dp)
 {
 	unsigned long conf;
@@ -93,14 +95,10 @@ static int dp_altmode_configure(struct dp_altmode *dp, u8 con)
 		return 0;
 	case DP_STATUS_CON_DFP_D:
 		conf |= DP_CONF_UFP_U_AS_DFP_D;
-		pin_assign = DP_CAP_UFP_D_PIN_ASSIGN(dp->alt->vdo) &
-			     DP_CAP_DFP_D_PIN_ASSIGN(dp->port->vdo);
 		break;
 	case DP_STATUS_CON_UFP_D:
 	case DP_STATUS_CON_BOTH: /* NOTE: First acting as DP source */
 		conf |= DP_CONF_UFP_U_AS_UFP_D;
-		pin_assign = DP_CAP_PIN_ASSIGN_UFP_D(dp->alt->vdo) &
-				 DP_CAP_PIN_ASSIGN_DFP_D(dp->port->vdo);
 		break;
 	default:
 		break;
@@ -108,6 +106,8 @@ static int dp_altmode_configure(struct dp_altmode *dp, u8 con)
 
 	/* Determining the initial pin assignment. */
 	if (!DP_CONF_GET_PIN_ASSIGN(dp->data.conf)) {
+		pin_assign = get_current_pin_assignments(dp);;
+
 		/* Is USB together with DP preferred */
 		if (dp->data.status & DP_STATUS_PREFER_MULTI_FUNC &&
 		    pin_assign & DP_PIN_ASSIGN_MULTI_FUNC_MASK)
@@ -118,6 +118,13 @@ static int dp_altmode_configure(struct dp_altmode *dp, u8 con)
 			if (pin_assign & BIT(DP_PIN_ASSIGN_C))
 				pin_assign = BIT(DP_PIN_ASSIGN_C);
 		}
+
+		/*
+		 * DFP_U never selects Pin Assignment E when Pin Assignment C
+		 * and possibly Pin Assignment D are offered by the UFP_U.
+		 */
+		if (pin_assign & (BIT(DP_PIN_ASSIGN_C) | BIT(DP_PIN_ASSIGN_D)))
+			pin_assign &= ~BIT(DP_PIN_ASSIGN_E);
 
 		if (!pin_assign)
 			return -EINVAL;
