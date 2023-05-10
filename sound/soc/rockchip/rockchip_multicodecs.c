@@ -295,7 +295,19 @@ static int mc_spk_event(struct snd_soc_dapm_widget *w,
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
-		gpiod_set_value_cansleep(mc_data->spk_ctl_gpio, 1);
+		gpiod_set_value(mc_data->spk_ctl_gpio, 1);
+		udelay(1);
+		gpiod_set_value(mc_data->spk_ctl_gpio, 0);
+		udelay(1);
+		gpiod_set_value(mc_data->spk_ctl_gpio, 1);
+		udelay(1);
+		gpiod_set_value(mc_data->spk_ctl_gpio, 0);
+		udelay(1);
+		gpiod_set_value(mc_data->spk_ctl_gpio, 1);
+		udelay(1);
+		gpiod_set_value(mc_data->spk_ctl_gpio, 0);
+		udelay(1);
+		gpiod_set_value(mc_data->spk_ctl_gpio, 1);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
 		gpiod_set_value_cansleep(mc_data->spk_ctl_gpio, 0);

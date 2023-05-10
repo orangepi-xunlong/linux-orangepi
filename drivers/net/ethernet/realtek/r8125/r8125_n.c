@@ -90,6 +90,8 @@
 #include <linux/seq_file.h>
 #endif
 
+/* #include <asm/system_info.h> */
+
 #define FIRMWARE_8125A_3	"rtl_nic/rtl8125a-3.fw"
 #define FIRMWARE_8125B_2	"rtl_nic/rtl8125b-2.fw"
 
@@ -183,6 +185,7 @@ static int rx_copybreak = 0;
 static int use_dac = 1;
 static int timer_count = 0x2600;
 static int timer_count_v2 = (0x2600 / 0x100);
+/* static int dev_num = 0; */
 
 static struct {
         u32 msg_enable;
@@ -10924,6 +10927,32 @@ rtl8125_hw_address_set(struct net_device *dev, u8 mac_addr[MAC_ADDR_LEN])
 #endif //LINUX_VERSION_CODE >= KERNEL_VERSION(5,17,0)
 }
 
+/*
+ * Create an ethernet address from the system serial number.
+ */
+/*
+static int __init ethernet_addr(char *addr)
+{
+        unsigned int serial;
+
+        if (system_serial_low == 0 && system_serial_high == 0)
+                return -ENODEV;
+
+        serial = system_serial_low | system_serial_high;
+
+        addr[0] = 0;
+        addr[1] = 0;
+        addr[2] = 0xa4;
+        addr[3] = 0x10 + (serial >> 24);
+        addr[4] = serial >> 16;
+        addr[5] = (serial >> 8) + dev_num;
+
+        dev_num++;
+
+        return 0;
+}
+*/
+
 static int
 rtl8125_get_mac_address(struct net_device *dev)
 {
@@ -10943,6 +10972,8 @@ rtl8125_get_mac_address(struct net_device *dev)
                 *(u32*)&mac_addr[0] = RTL_R32(tp, BACKUP_ADDR0_8125);
                 *(u16*)&mac_addr[4] = RTL_R16(tp, BACKUP_ADDR1_8125);
         }
+
+        /* ethernet_addr(mac_addr); */
 
         if (!is_valid_ether_addr(mac_addr)) {
                 netif_err(tp, probe, dev, "Invalid ether addr %pM\n",

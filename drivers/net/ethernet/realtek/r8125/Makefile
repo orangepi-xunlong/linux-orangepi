@@ -50,7 +50,7 @@ ENABLE_USE_FIRMWARE_FILE = n
 DISABLE_PM_SUPPORT = n
 DISABLE_MULTI_MSIX_VECTOR = n
 
-obj-m := r8125.o
+obj-$(CONFIG_R8125) := r8125.o
 r8125-objs := r8125_n.o rtl_eeprom.o rtltool.o
 
 ifeq ($(CONFIG_SOC_LAN), y)

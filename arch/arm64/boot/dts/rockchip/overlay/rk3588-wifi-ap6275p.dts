@@ -13,6 +13,7 @@
 		target = <&wireless_wlan>;
 		__overlay__ {
 			status = "okay";
+			wifi_chip_type = "ap6275p";
 		};
 	};
 };
