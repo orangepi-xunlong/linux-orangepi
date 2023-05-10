@@ -2174,8 +2174,8 @@ static void iwl_mvm_cfg_he_sta(struct iwl_mvm *mvm,
 		 * If nss < MAX: we can set zeros in other streams
 		 */
 		if (nss > MAX_HE_SUPP_NSS) {
-			IWL_INFO(mvm, "Got NSS = %d - trimming to %d\n", nss,
-				 MAX_HE_SUPP_NSS);
+			//IWL_INFO(mvm, "Got NSS = %d - trimming to %d\n", nss,
+			//	 MAX_HE_SUPP_NSS);
 			nss = MAX_HE_SUPP_NSS;
 		}
 

@@ -3,17 +3,23 @@
 
 / {
 	fragment@0 {
-		target = <&wireless_bluetooth>;
+		target = <&dsi1>;
 		__overlay__ {
 			status = "okay";
 		};
 	};
 
 	fragment@1 {
-		target = <&wireless_wlan>;
+		target = <&dsi1_panel>;
 		__overlay__ {
 			status = "okay";
-			wifi_chip_type = "ap6275p";
+		};
+	};
+
+	fragment@2 {
+		target = <&dsi1_in_vp3>;
+		__overlay__ {
+			status = "okay";
 		};
 	};
 };

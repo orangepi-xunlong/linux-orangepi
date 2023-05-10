@@ -12,8 +12,8 @@
 	fragment@1 {
 		target = <&wireless_wlan>;
 		__overlay__ {
+			wifi_chip_type = "pcie";
 			status = "okay";
-			wifi_chip_type = "ap6275p";
 		};
 	};
 };

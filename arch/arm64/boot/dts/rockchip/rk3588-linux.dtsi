@@ -6,8 +6,8 @@
 
 / {
 	aliases {
-		mmc0 = &sdhci;
-		mmc1 = &sdmmc;
+		mmc0 = &sdmmc;
+		mmc1 = &sdhci;
 		mmc2 = &sdio;
 	};
 

@@ -3,12 +3,11 @@
 
 / {
 	fragment@0 {
-		target = <&pwm14>;
+		target = <&pwm15>;
 
 		__overlay__ {
 			status = "okay";
-			pinctrl-names = "active";
-			pinctrl-0 = <&pwm14m1_pins>;
+			pinctrl-0 = <&pwm15m1_pins>;
 		};
 	};
 };

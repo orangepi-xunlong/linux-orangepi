@@ -3,12 +3,12 @@
 
 / {
 	fragment@0 {
-		target = <&pwm14>;
+		target = <&i2c6>;
 
 		__overlay__ {
 			status = "okay";
-			pinctrl-names = "active";
-			pinctrl-0 = <&pwm14m1_pins>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&i2c6m4_xfer>;
 		};
 	};
 };
