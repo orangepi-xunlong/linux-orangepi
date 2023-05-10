@@ -3413,11 +3413,5 @@
 			rockchip,pins =
 				<0 RK_PA1 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
-
-		/omit-if-no-ref/
-		leds_gpio: leds-gpio {
-			rockchip,pins =
-				<0 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
-		};
 	};
 };

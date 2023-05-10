@@ -3,21 +3,21 @@
 
 / {
 	fragment@0 {
-		target = <&dsi1>;
+		target = <&dsi0>;
 		__overlay__ {
 			status = "okay";
 		};
 	};
 
 	fragment@1 {
-		target = <&dsi1_panel>;
+		target = <&dsi0_panel>;
 		__overlay__ {
 			status = "okay";
 		};
 	};
 
 	fragment@2 {
-		target = <&dsi1_in_vp3>;
+		target = <&dsi0_in_vp2>;
 		__overlay__ {
 			status = "okay";
 		};
