@@ -70,6 +70,12 @@ config FB_TFT_ILI9481
 	help
 	  Generic Framebuffer support for ILI9481
 
+config FB_TFT_ST7796
+	tristate "FB driver for the ST7796 LCD Controller"
+	depends on FB_TFT
+	help
+	  Generic Framebuffer support for ST7796
+
 config FB_TFT_ILI9486
 	tristate "FB driver for the ILI9486 LCD Controller"
 	help
