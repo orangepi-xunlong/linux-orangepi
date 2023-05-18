@@ -1179,6 +1179,9 @@ static int yt8531_config_init(struct phy_device *phydev)
 	ytphy_write_ext(phydev, 0xa00e, 0x2070);
 	ytphy_write_ext(phydev, 0xa00f, 0x7e);
 
+	/* rxc_dly_en */
+	ytphy_write_ext(phydev, 0xa001, 0x8040);
+
 	return 0;
 }
 
