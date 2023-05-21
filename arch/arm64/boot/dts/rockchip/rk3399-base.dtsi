@@ -2651,6 +2651,11 @@
 				rockchip,pins =
 					<0 RK_PA4 1 &pcfg_pull_up>;
 			};
+
+			sdmmc_pwr: sdmmc-pwr {
+				rockchip,pins =
+					<0 RK_PA1 1 &pcfg_pull_up>;
+			};
 		};
 
 		sdmmc {
