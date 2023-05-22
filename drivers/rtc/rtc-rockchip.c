@@ -763,7 +763,7 @@ static int rockchip_rtc_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&rtc->trim_work, rockchip_rtc_compensation_delay_work);
 	queue_delayed_work(system_long_wq, &rtc->trim_work, 3000);
 
-	return rtc_register_device(rtc->rtc);
+	return devm_rtc_register_device(rtc->rtc);
 }
 
 static struct platform_driver rockchip_rtc_driver = {
