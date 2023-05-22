@@ -107,8 +107,8 @@ struct rockchip_udphy {
 	struct regmap *udphygrf;
 	struct regmap *usbgrf;
 	struct regmap *vogrf;
-	struct typec_switch *sw;
-	struct typec_mux *mux;
+	struct typec_switch_dev *sw;
+	struct typec_mux_dev *mux;
 	struct mutex mutex; /* mutex to protect access to individual PHYs */
 
 	/* clocks and rests */
@@ -583,7 +583,7 @@ static int upphy_set_typec_default_mapping(struct rockchip_udphy *udphy)
 	return 0;
 }
 
-static int udphy_orien_sw_set(struct typec_switch *sw,
+static int udphy_orien_sw_set(struct typec_switch_dev *sw,
 			      enum typec_orientation orien)
 {
 	struct rockchip_udphy *udphy = typec_switch_get_drvdata(sw);
@@ -1065,7 +1065,7 @@ static const struct phy_ops rockchip_u3phy_ops = {
 	.owner		= THIS_MODULE,
 };
 
-static int usbdp_typec_mux_set(struct typec_mux *mux,
+static int usbdp_typec_mux_set(struct typec_mux_dev *mux,
 			       struct typec_mux_state *state)
 {
 	struct rockchip_udphy *udphy = typec_mux_get_drvdata(mux);
