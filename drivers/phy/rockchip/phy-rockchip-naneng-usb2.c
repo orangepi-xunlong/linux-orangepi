@@ -745,7 +745,7 @@ static enum hrtimer_restart rv1126_wait_timer_fn(struct hrtimer *t)
 	case CALIBRATION_DONE:
 		/* enable tx swing calibrate */
 		writel(0x4d, rphy->base + 0x20);
-		/* fall through */
+		fallthrough;
 	default:
 		ret = HRTIMER_NORESTART;
 		break;
