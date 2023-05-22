@@ -293,4 +293,14 @@ int drm_edid_override_reset(struct drm_connector *connector);
 static inline void drm_mode_fixup_1366x768(struct drm_display_mode *mode)
 {
 }
+
+static inline int drm_edid_override_set(struct drm_connector *connector, const void *edid, size_t size)
+{
+	return 0;
+}
+
+static inline int drm_edid_override_reset(struct drm_connector *connector)
+{
+	return 0;
+}
 #endif

@@ -9,7 +9,7 @@ drm-y       :=	drm_aperture.o drm_auth.o drm_cache.o \
 		drm_file.o drm_gem.o drm_ioctl.o \
 		drm_drv.o \
 		drm_sysfs.o drm_mm.o \
-		drm_crtc.o drm_fourcc.o drm_modes.o drm_edid.o drm_displayid.o \
+		drm_crtc.o drm_fourcc.o drm_modes.o drm_displayid.o \
 		drm_trace_points.o drm_prime.o \
 		drm_vma_manager.o \
 		drm_modeset_lock.o drm_atomic.o drm_bridge.o \
@@ -20,6 +20,7 @@ drm-y       :=	drm_aperture.o drm_auth.o drm_cache.o \
 		drm_syncobj.o drm_lease.o drm_writeback.o drm_client.o \
 		drm_client_modeset.o drm_atomic_uapi.o \
 		drm_managed.o drm_vblank_work.o
+drm-$(CONFIG_DRM_EDID) += drm_edid.o
 drm-$(CONFIG_DRM_LEGACY) += drm_agpsupport.o drm_bufs.o drm_context.o drm_dma.o \
 			    drm_hashtab.o drm_irq.o drm_legacy_misc.o drm_lock.o \
 			    drm_memory.o drm_scatter.o drm_vm.o
