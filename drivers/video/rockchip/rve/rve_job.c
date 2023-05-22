@@ -691,7 +691,7 @@ int rve_job_commit(struct rve_internal_ctx_t *ctx)
 			}
 
 			/* close input fence fd */
-			ksys_close(ctx->in_fence_fd);
+			close_fd(ctx->in_fence_fd);
 
 			ret = dma_fence_get_status(in_fence);
 			/* ret = 1: fence has been signaled */
