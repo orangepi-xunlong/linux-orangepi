@@ -118,7 +118,7 @@ static int rk_dmabuf_sgt_show(struct seq_file *s, void *v)
 	seq_printf(s, "%16s %-16s %-16s %14s %8s\n\n",
 		   "DMABUF", "NAME", "EXPORT", "SIZE:KiB", "SGLIST");
 
-	return get_each_dmabuf(rk_dmabuf_cb, s);
+	return dma_buf_get_each(rk_dmabuf_cb, s);
 }
 
 static int rk_dmabuf_dev_show(struct seq_file *s, void *v)
@@ -126,7 +126,7 @@ static int rk_dmabuf_dev_show(struct seq_file *s, void *v)
 	seq_printf(s, "%16s %-16s %-16s %14s %8s\n\n",
 		   "DMABUF", "NAME", "EXPORT", "SIZE:KiB", "AttachedDevices");
 
-	return get_each_dmabuf(rk_dmabuf_cb3, s);
+	return dma_buf_get_each(rk_dmabuf_cb3, s);
 }
 
 static int rk_dmabuf_size_show(struct seq_file *s, void *v)

@@ -276,7 +276,7 @@ config RK_DMABUF_PROCFS
 	depends on PROC_FS
 	help
 	  Turns on this to create a procfs debug interface for dma-buf, support
-	  get information from db_list by get_each_dmabuf.
+	  get information from db_list by dma_buf_get_each.
 
 	  If unsure, say "N".
 
