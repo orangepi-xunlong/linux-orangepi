@@ -1463,11 +1463,12 @@ static long elan_iap_ioctl( struct file *filp, unsigned int cmd, unsigned long a
 	case IOCTL_I2C_INT:
 		put_user(gpio_get_value(ts->hw_info.intr_gpio), ip);
 		break;
-		case IOCTL_USER_HANDLE_IRQ:
-			ts->user_handle_irq = 1;
-			break;
-		case IOCTL_KERN_HANDLE_IRQ:
-			ts->user_handle_irq = 0;
+	case IOCTL_USER_HANDLE_IRQ:
+		ts->user_handle_irq = 1;
+		break;
+	case IOCTL_KERN_HANDLE_IRQ:
+		ts->user_handle_irq = 0;
+		break;
 	default:
 		break;
 	}
