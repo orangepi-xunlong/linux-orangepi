@@ -249,15 +249,14 @@ static int rockchip_vad_setup(struct rockchip_vad *vad)
 static struct rockchip_vad *substream_get_drvdata(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *codec_dai;
 	struct rockchip_vad *vad = NULL;
 	unsigned int i;
 
 	if (!rtd)
 		return NULL;
 
-	for (i = 0; i < rtd->num_codecs; i++) {
-		struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, i);
-
+	for_each_rtd_codec_dais(rtd, i, codec_dai) {
 		if (strstr(codec_dai->name, "vad"))
 			vad = snd_soc_component_get_drvdata(codec_dai->component);
 	}
