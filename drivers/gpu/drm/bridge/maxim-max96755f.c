@@ -466,10 +466,12 @@ static int max96755f_link_parse(struct max96755f_bridge *ser)
 	switch (nr) {
 	case 2:
 		ser->split_mode = true;
+		break;
 	case 1:
 		break;
 	default:
 		ret = -EINVAL;
+		break;
 	}
 
 	return ret;
