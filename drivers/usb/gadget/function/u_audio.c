@@ -1284,6 +1284,7 @@ static void g_audio_work(struct work_struct *data)
 			uac_event[0] = "USB_STATE=SET_AUDIO_CLK";
 			snprintf(str, sizeof(str), "PPM=%d", audio->params.ppm);
 			uac_event[1] = str;
+			break;
 		default:
 			break;
 		}
