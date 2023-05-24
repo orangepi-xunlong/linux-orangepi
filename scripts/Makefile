@@ -15,6 +15,7 @@ hostprogs-always-$(CONFIG_RUST)				+= generate_rust_target
 
 generate_rust_target-rust := y
 
+HOSTCFLAGS_resource_tool.o += -Wno-declaration-after-statement
 HOSTCFLAGS_sorttable.o = -I$(srctree)/tools/include
 HOSTLDLIBS_sorttable = -lpthread
 HOSTCFLAGS_asn1_compiler.o = -I$(srctree)/include
