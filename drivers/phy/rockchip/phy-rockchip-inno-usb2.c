@@ -886,8 +886,10 @@ static int rockchip_usb2phy_power_on(struct phy *phy)
 		goto unlock;
 
 	ret = property_enable(base, &rport->port_cfg->phy_sus, false);
-	if (ret)
-		goto disable_clks;
+	if (ret) {
+		clk_disable_unprepare(rphy->clk480m);
+		goto unlock;
+	}
 
 	/*
 	 * For rk3588, it needs to reset phy when exit from
@@ -900,17 +902,16 @@ static int rockchip_usb2phy_power_on(struct phy *phy)
 	if (rport->port_id == USB2PHY_PORT_OTG &&
 	    of_device_is_compatible(rphy->dev->of_node, "rockchip,rk3588-usb2phy")) {
 		ret = rockchip_usb2phy_reset(rphy);
-		if (ret)
-			goto disable_clks;
+		if (ret) {
+			clk_disable_unprepare(rphy->clk480m);
+			goto unlock;
+		}
 	}
 
 	/* waiting for the utmi_clk to become stable */
 	usleep_range(1500, 2000);
 
 	rport->suspended = false;
-
-disable_clks:
-	clk_disable_unprepare(rphy->clk480m);
 
 unlock:
 	mutex_unlock(&rport->mutex);
