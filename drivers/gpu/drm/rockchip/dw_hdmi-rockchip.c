@@ -1489,12 +1489,20 @@ static int rockchip_hdmi_parse_dt(struct rockchip_hdmi *hdmi)
 	}
 
 	hdmi->avdd_0v9 = devm_regulator_get_optional(hdmi->dev, "avdd-0v9");
-	if (IS_ERR(hdmi->avdd_0v9))
-		return PTR_ERR(hdmi->avdd_0v9);
+	if (IS_ERR(hdmi->avdd_0v9)) {
+		if (PTR_ERR(hdmi->avdd_0v9) != -ENODEV)
+			return dev_err_probe(hdmi->dev, PTR_ERR(hdmi->avdd_0v9),
+					     "failed to get regulator: avdd-0v9\n");
+		hdmi->avdd_0v9 = NULL;
+	}
 
 	hdmi->avdd_1v8 = devm_regulator_get_optional(hdmi->dev, "avdd-1v8");
-	if (IS_ERR(hdmi->avdd_1v8))
-		return PTR_ERR(hdmi->avdd_1v8);
+	if (IS_ERR(hdmi->avdd_1v8)) {
+		if (PTR_ERR(hdmi->avdd_1v8) != -ENODEV)
+			return dev_err_probe(hdmi->dev, PTR_ERR(hdmi->avdd_1v8),
+					     "failed to get regulator: avdd-1v8\n");
+		hdmi->avdd_1v8 = NULL;
+	}
 
 	hdmi->skip_check_420_mode =
 		of_property_read_bool(np, "skip-check-420-mode");
